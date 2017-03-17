@@ -40,8 +40,8 @@ LLVMMetadataRef LLVMDIBuilderCreateCompileUnit(LLVMDIBuilderRef Dref,
                                                int Optimized, const char *Flags,
                                                unsigned RuntimeVersion) {
   DIBuilder *D = unwrap(Dref);
-  return wrap(D->createCompileUnit(Lang, File, Dir, Producer, Optimized, Flags,
-                                   RuntimeVersion));
+  return wrap(D->createCompileUnit(Lang, D->createFile(File, Dir), Producer,
+                                   Optimized, Flags, RuntimeVersion));
 }
 
 LLVMMetadataRef LLVMDIBuilderCreateFile(LLVMDIBuilderRef Dref, const char *File,
@@ -119,7 +119,8 @@ LLVMMetadataRef LLVMDIBuilderCreatePointerType(LLVMDIBuilderRef Dref,
                                                const char *Name) {
   DIBuilder *D = unwrap(Dref);
   return wrap(D->createPointerType(unwrap<DIType>(PointeeType), SizeInBits,
-                                   AlignInBits, Name));
+                                   AlignInBits, /* DWARFAddressSpace */ None,
+                                   Name));
 }
 
 LLVMMetadataRef

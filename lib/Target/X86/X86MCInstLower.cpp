@@ -16,6 +16,7 @@
 #include "X86RegisterInfo.h"
 #include "X86ShuffleDecodeConstantPool.h"
 #include "InstPrinter/X86ATTInstPrinter.h"
+#include "InstPrinter/X86InstComments.h"
 #include "MCTargetDesc/X86BaseInfo.h"
 #include "Utils/X86ShuffleDecode.h"
 #include "llvm/ADT/Optional.h"
@@ -214,6 +215,7 @@ MCOperand X86MCInstLower::LowerSymbolOperand(const MachineOperand &MO,
   case X86II::MO_GOT:       RefKind = MCSymbolRefExpr::VK_GOT; break;
   case X86II::MO_GOTOFF:    RefKind = MCSymbolRefExpr::VK_GOTOFF; break;
   case X86II::MO_PLT:       RefKind = MCSymbolRefExpr::VK_PLT; break;
+  case X86II::MO_ABS8:      RefKind = MCSymbolRefExpr::VK_X86_ABS8; break;
   case X86II::MO_PIC_BASE_OFFSET:
   case X86II::MO_DARWIN_NONLAZY_PIC_BASE:
     Expr = MCSymbolRefExpr::create(Sym, Ctx);
@@ -356,7 +358,7 @@ X86MCInstLower::LowerMachineOperand(const MachineInstr *MI,
                                     const MachineOperand &MO) const {
   switch (MO.getType()) {
   default:
-    MI->dump();
+    MI->print(errs());
     llvm_unreachable("unknown operand type");
   case MachineOperand::MO_Register:
     // Ignore all implicit register operands.
@@ -892,30 +894,47 @@ void X86AsmPrinter::LowerSTATEPOINT(const MachineInstr &MI,
   SM.recordStatepoint(MI);
 }
 
-void X86AsmPrinter::LowerFAULTING_LOAD_OP(const MachineInstr &MI,
-                                       X86MCInstLower &MCIL) {
-  // FAULTING_LOAD_OP <def>, <MBB handler>, <load opcode>, <load operands>
+void X86AsmPrinter::LowerFAULTING_OP(const MachineInstr &FaultingMI,
+                                     X86MCInstLower &MCIL) {
+  // FAULTING_LOAD_OP <def>, <faltinf type>, <MBB handler>,
+  //                  <opcode>, <operands>
 
-  unsigned LoadDefRegister = MI.getOperand(0).getReg();
-  MCSymbol *HandlerLabel = MI.getOperand(1).getMBB()->getSymbol();
-  unsigned LoadOpcode = MI.getOperand(2).getImm();
-  unsigned LoadOperandsBeginIdx = 3;
+  unsigned DefRegister = FaultingMI.getOperand(0).getReg();
+  FaultMaps::FaultKind FK =
+      static_cast<FaultMaps::FaultKind>(FaultingMI.getOperand(1).getImm());
+  MCSymbol *HandlerLabel = FaultingMI.getOperand(2).getMBB()->getSymbol();
+  unsigned Opcode = FaultingMI.getOperand(3).getImm();
+  unsigned OperandsBeginIdx = 4;
 
-  FM.recordFaultingOp(FaultMaps::FaultingLoad, HandlerLabel);
+  assert(FK < FaultMaps::FaultKindMax && "Invalid Faulting Kind!");
+  FM.recordFaultingOp(FK, HandlerLabel);
 
-  MCInst LoadMI;
-  LoadMI.setOpcode(LoadOpcode);
+  MCInst MI;
+  MI.setOpcode(Opcode);
 
-  if (LoadDefRegister != X86::NoRegister)
-    LoadMI.addOperand(MCOperand::createReg(LoadDefRegister));
+  if (DefRegister != X86::NoRegister)
+    MI.addOperand(MCOperand::createReg(DefRegister));
 
-  for (auto I = MI.operands_begin() + LoadOperandsBeginIdx,
-            E = MI.operands_end();
+  for (auto I = FaultingMI.operands_begin() + OperandsBeginIdx,
+            E = FaultingMI.operands_end();
        I != E; ++I)
-    if (auto MaybeOperand = MCIL.LowerMachineOperand(&MI, *I))
-      LoadMI.addOperand(MaybeOperand.getValue());
+    if (auto MaybeOperand = MCIL.LowerMachineOperand(&FaultingMI, *I))
+      MI.addOperand(MaybeOperand.getValue());
 
-  OutStreamer->EmitInstruction(LoadMI, getSubtargetInfo());
+  OutStreamer->EmitInstruction(MI, getSubtargetInfo());
+}
+
+void X86AsmPrinter::LowerFENTRY_CALL(const MachineInstr &MI,
+                                     X86MCInstLower &MCIL) {
+  bool Is64Bits = Subtarget->is64Bit();
+  MCContext &Ctx = OutStreamer->getContext();
+  MCSymbol *fentry = Ctx.getOrCreateSymbol("__fentry__");
+  const MCSymbolRefExpr *Op =
+      MCSymbolRefExpr::create(fentry, MCSymbolRefExpr::VK_None, Ctx);
+
+  EmitAndCountInstruction(
+      MCInstBuilder(Is64Bits ? X86::CALL64pcrel32 : X86::CALLpcrel32)
+          .addExpr(Op));
 }
 
 void X86AsmPrinter::LowerPATCHABLE_OP(const MachineInstr &MI,
@@ -1114,56 +1133,6 @@ void X86AsmPrinter::LowerPATCHABLE_TAIL_CALL(const MachineInstr &MI, X86MCInstLo
   OutStreamer->EmitInstruction(TC, getSubtargetInfo());
 }
 
-void X86AsmPrinter::EmitXRayTable() {
-  if (Sleds.empty())
-    return;
-  
-  auto PrevSection = OutStreamer->getCurrentSectionOnly();
-  auto Fn = MF->getFunction();
-  MCSection *Section = nullptr;
-  if (Subtarget->isTargetELF()) {
-    if (Fn->hasComdat()) {
-      Section = OutContext.getELFSection("xray_instr_map", ELF::SHT_PROGBITS,
-                                         ELF::SHF_ALLOC | ELF::SHF_GROUP, 0,
-                                         Fn->getComdat()->getName());
-    } else {
-      Section = OutContext.getELFSection("xray_instr_map", ELF::SHT_PROGBITS,
-                                         ELF::SHF_ALLOC);
-    }
-  } else if (Subtarget->isTargetMachO()) {
-    Section = OutContext.getMachOSection("__DATA", "xray_instr_map", 0,
-                                         SectionKind::getReadOnlyWithRel());
-  } else {
-    llvm_unreachable("Unsupported target");
-  }
-
-  // Before we switch over, we force a reference to a label inside the
-  // xray_instr_map section. Since EmitXRayTable() is always called just
-  // before the function's end, we assume that this is happening after the
-  // last return instruction.
-  //
-  // We then align the reference to 16 byte boundaries, which we determined
-  // experimentally to be beneficial to avoid causing decoder stalls.
-  MCSymbol *Tmp = OutContext.createTempSymbol("xray_synthetic_", true);
-  OutStreamer->EmitCodeAlignment(16);
-  OutStreamer->EmitSymbolValue(Tmp, 8, false);
-  OutStreamer->SwitchSection(Section);
-  OutStreamer->EmitLabel(Tmp);
-  for (const auto &Sled : Sleds) {
-    OutStreamer->EmitSymbolValue(Sled.Sled, 8);
-    OutStreamer->EmitSymbolValue(CurrentFnSym, 8);
-    auto Kind = static_cast<uint8_t>(Sled.Kind);
-    OutStreamer->EmitBytes(
-        StringRef(reinterpret_cast<const char *>(&Kind), 1));
-    OutStreamer->EmitBytes(
-        StringRef(reinterpret_cast<const char *>(&Sled.AlwaysInstrument), 1));
-    OutStreamer->EmitZeros(14);
-  }
-  OutStreamer->SwitchSection(PrevSection);
-
-  Sleds.clear();
-}
-
 // Returns instruction preceding MBBI in MachineFunction.
 // If MBBI is the first instruction of the first basic block, returns null.
 static MachineBasicBlock::const_iterator
@@ -1289,6 +1258,13 @@ static std::string getShuffleComment(const MachineInstr *MI,
 void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
   X86MCInstLower MCInstLowering(*MF, *this);
   const X86RegisterInfo *RI = MF->getSubtarget<X86Subtarget>().getRegisterInfo();
+
+  // Add a comment about EVEX-2-VEX compression for AVX-512 instrs that
+  // are compressed from EVEX encoding to VEX encoding.
+  if (TM.Options.MCOptions.ShowMCEncoding) {
+    if (MI->getAsmPrinterFlags() & AC_EVEX_2_VEX)
+      OutStreamer->AddComment("EVEX TO VEX Compression ", false);
+  }
 
   switch (MI->getOpcode()) {
   case TargetOpcode::DBG_VALUE:
@@ -1416,8 +1392,11 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
   case TargetOpcode::STATEPOINT:
     return LowerSTATEPOINT(*MI, MCInstLowering);
 
-  case TargetOpcode::FAULTING_LOAD_OP:
-    return LowerFAULTING_LOAD_OP(*MI, MCInstLowering);
+  case TargetOpcode::FAULTING_OP:
+    return LowerFAULTING_OP(*MI, MCInstLowering);
+
+  case TargetOpcode::FENTRY_CALL:
+    return LowerFENTRY_CALL(*MI, MCInstLowering);
 
   case TargetOpcode::PATCHABLE_OP:
     return LowerPATCHABLE_OP(*MI, MCInstLowering);
@@ -1628,8 +1607,8 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
   case X86::VPERMIL2PDrm:
   case X86::VPERMIL2PSrm:
-  case X86::VPERMIL2PDrmY:
-  case X86::VPERMIL2PSrmY: {
+  case X86::VPERMIL2PDYrm:
+  case X86::VPERMIL2PSYrm: {
     if (!OutStreamer->isVerboseAsm())
       break;
     assert(MI->getNumOperands() >= 8 &&
@@ -1642,8 +1621,8 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
     unsigned ElSize;
     switch (MI->getOpcode()) {
     default: llvm_unreachable("Invalid opcode");
-    case X86::VPERMIL2PSrm: case X86::VPERMIL2PSrmY: ElSize = 32; break;
-    case X86::VPERMIL2PDrm: case X86::VPERMIL2PDrmY: ElSize = 64; break;
+    case X86::VPERMIL2PSrm: case X86::VPERMIL2PSYrm: ElSize = 32; break;
+    case X86::VPERMIL2PDrm: case X86::VPERMIL2PDYrm: ElSize = 64; break;
     }
 
     const MachineOperand &MaskOp = MI->getOperand(6);

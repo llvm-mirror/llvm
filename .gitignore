@@ -21,6 +21,9 @@
 #OS X specific files.
 .DS_store
 
+# Nested build directory
+/build
+
 #==============================================================================#
 # Explicit files to ignore (only matches one).
 #==============================================================================#
@@ -58,6 +61,8 @@ tools/lld
 tools/llgo
 # Polly, which is tracked independently.
 tools/polly
+# avrlit, which is tracked independently.
+tools/avrlit
 # Sphinx build tree, if building in-source dir.
 docs/_build
 # VSCode config files.

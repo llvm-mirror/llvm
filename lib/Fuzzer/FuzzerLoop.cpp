@@ -14,8 +14,8 @@
 #include "FuzzerIO.h"
 #include "FuzzerMutate.h"
 #include "FuzzerRandom.h"
+#include "FuzzerShmem.h"
 #include "FuzzerTracePC.h"
-
 #include <algorithm>
 #include <cstring>
 #include <memory>
@@ -43,6 +43,8 @@ static const size_t kMaxUnitSizeToPrint = 256;
 
 thread_local bool Fuzzer::IsMyThread;
 
+SharedMemoryRegion SMR;
+
 static void MissingExternalApiFunction(const char *FnName) {
   Printf("ERROR: %s is not defined. Exiting.\n"
          "Did you use -fsanitize-coverage=... to build your code?\n",
@@ -58,57 +60,6 @@ static void MissingExternalApiFunction(const char *FnName) {
 
 // Only one Fuzzer per process.
 static Fuzzer *F;
-
-void Fuzzer::ResetEdgeCoverage() {
-  CHECK_EXTERNAL_FUNCTION(__sanitizer_reset_coverage);
-  EF->__sanitizer_reset_coverage();
-}
-
-void Fuzzer::ResetCounters() {
-  if (Options.UseCounters)
-    EF->__sanitizer_update_counter_bitset_and_clear_counters(0);
-}
-
-void Fuzzer::PrepareCounters(Fuzzer::Coverage *C) {
-  if (Options.UseCounters) {
-    size_t NumCounters = EF->__sanitizer_get_number_of_counters();
-    C->CounterBitmap.resize(NumCounters);
-  }
-}
-
-// Records data to a maximum coverage tracker. Returns true if additional
-// coverage was discovered.
-bool Fuzzer::RecordMaxCoverage(Fuzzer::Coverage *C) {
-  bool Res = false;
-
-  uint64_t NewBlockCoverage = EF->__sanitizer_get_total_unique_coverage();
-  if (NewBlockCoverage > C->BlockCoverage) {
-    Res = true;
-    C->BlockCoverage = NewBlockCoverage;
-  }
-
-  if (Options.UseIndirCalls &&
-      EF->__sanitizer_get_total_unique_caller_callee_pairs) {
-    uint64_t NewCallerCalleeCoverage =
-        EF->__sanitizer_get_total_unique_caller_callee_pairs();
-    if (NewCallerCalleeCoverage > C->CallerCalleeCoverage) {
-      Res = true;
-      C->CallerCalleeCoverage = NewCallerCalleeCoverage;
-    }
-  }
-
-  if (Options.UseCounters) {
-    uint64_t CounterDelta =
-        EF->__sanitizer_update_counter_bitset_and_clear_counters(
-            C->CounterBitmap.data());
-    if (CounterDelta > 0) {
-      Res = true;
-      C->CounterBitmapBits += CounterDelta;
-    }
-  }
-
-  return Res;
-}
 
 // Leak detection is expensive, so we first check if there were more mallocs
 // than frees (using the sanitizer malloc hooks) and only then try to call lsan.
@@ -138,6 +89,7 @@ struct MallocFreeTracer {
 
 static MallocFreeTracer AllocTracer;
 
+ATTRIBUTE_NO_SANITIZE_MEMORY
 void MallocHook(const volatile void *ptr, size_t size) {
   size_t N = AllocTracer.Mallocs++;
   F->HandleMalloc(size);
@@ -147,6 +99,8 @@ void MallocHook(const volatile void *ptr, size_t size) {
       EF->__sanitizer_print_stack_trace();
   }
 }
+
+ATTRIBUTE_NO_SANITIZE_MEMORY
 void FreeHook(const volatile void *ptr) {
   size_t N = AllocTracer.Frees++;
   if (int TraceLevel = AllocTracer.TraceLevel) {
@@ -264,8 +218,13 @@ void Fuzzer::StaticInterruptCallback() {
   F->InterruptCallback();
 }
 
+void Fuzzer::StaticFileSizeExceedCallback() {
+  Printf("==%lu== ERROR: libFuzzer: file size exceeded\n", GetPid());
+  exit(1);
+}
+
 void Fuzzer::CrashCallback() {
-  Printf("==%d== ERROR: libFuzzer: deadly signal\n", GetPid());
+  Printf("==%lu== ERROR: libFuzzer: deadly signal\n", GetPid());
   if (EF->__sanitizer_print_stack_trace)
     EF->__sanitizer_print_stack_trace();
   Printf("NOTE: libFuzzer has rudimentary signal handlers.\n"
@@ -278,7 +237,7 @@ void Fuzzer::CrashCallback() {
 }
 
 void Fuzzer::InterruptCallback() {
-  Printf("==%d== libFuzzer: run interrupted; exiting\n", GetPid());
+  Printf("==%lu== libFuzzer: run interrupted; exiting\n", GetPid());
   PrintFinalStats();
   _Exit(0);  // Stop right now, don't perform any at-exit actions.
 }
@@ -286,8 +245,11 @@ void Fuzzer::InterruptCallback() {
 NO_SANITIZE_MEMORY
 void Fuzzer::AlarmCallback() {
   assert(Options.UnitTimeoutSec > 0);
+  // In Windows Alarm callback is executed by a different thread.
+#if !LIBFUZZER_WINDOWS
   if (!InFuzzingThread()) return;
-  if (!CurrentUnitSize)
+#endif
+  if (!RunningCB)
     return; // We have not started running units yet.
   size_t Seconds =
       duration_cast<seconds>(system_clock::now() - UnitStartTime).count();
@@ -300,7 +262,7 @@ void Fuzzer::AlarmCallback() {
     Printf("       and the timeout value is %d (use -timeout=N to change)\n",
            Options.UnitTimeoutSec);
     DumpCurrentUnit("timeout-");
-    Printf("==%d== ERROR: libFuzzer: timeout after %d seconds\n", GetPid(),
+    Printf("==%lu== ERROR: libFuzzer: timeout after %d seconds\n", GetPid(),
            Seconds);
     if (EF->__sanitizer_print_stack_trace)
       EF->__sanitizer_print_stack_trace();
@@ -312,7 +274,7 @@ void Fuzzer::AlarmCallback() {
 
 void Fuzzer::RssLimitCallback() {
   Printf(
-      "==%d== ERROR: libFuzzer: out-of-memory (used: %zdMb; limit: %zdMb)\n",
+      "==%lu== ERROR: libFuzzer: out-of-memory (used: %zdMb; limit: %zdMb)\n",
       GetPid(), GetPeakRSSMb(), Options.RssLimitMb);
   Printf("   To change the out-of-memory limit use -rss_limit_mb=<N>\n\n");
   if (EF->__sanitizer_print_memory_profile)
@@ -341,8 +303,6 @@ void Fuzzer::PrintStats(const char *Where, const char *End, size_t Units) {
   Printf("#%zd\t%s", TotalNumberOfRuns, Where);
   if (MaxCoverage.BlockCoverage)
     Printf(" cov: %zd", MaxCoverage.BlockCoverage);
-  if (size_t N = MaxCoverage.VPMap.GetNumBitsSinceLastMerge())
-    Printf(" vp: %zd", N);
   if (size_t N = TPC.GetTotalPCCoverage())
     Printf(" cov: %zd", N);
   if (auto TB = MaxCoverage.CounterBitmapBits)
@@ -373,6 +333,8 @@ void Fuzzer::PrintStats(const char *Where, const char *End, size_t Units) {
 void Fuzzer::PrintFinalStats() {
   if (Options.PrintCoverage)
     TPC.PrintCoverage();
+  if (Options.DumpCoverage)
+    TPC.DumpCoverage();
   if (Options.PrintCorpusStats)
     Corpus.PrintStats();
   if (!Options.PrintFinalStats) return;
@@ -447,7 +409,7 @@ void Fuzzer::RereadOutputCorpus(size_t MaxSize) {
 }
 
 void Fuzzer::ShuffleCorpus(UnitVector *V) {
-  std::random_shuffle(V->begin(), V->end(), MD.GetRand());
+  std::shuffle(V->begin(), V->end(), MD.GetRand());
   if (Options.PreferSmall)
     std::stable_sort(V->begin(), V->end(), [](const Unit &A, const Unit &B) {
       return A.size() < B.size();
@@ -493,13 +455,6 @@ size_t Fuzzer::RunOne(const uint8_t *Data, size_t Size) {
       }))
     Res = NumFeatures;
 
-  if (!TPC.UsingTracePcGuard()) {
-    if (TPC.UpdateValueProfileMap(&MaxCoverage.VPMap))
-      Res = 1;
-    if (!Res && RecordMaxCoverage(&MaxCoverage))
-      Res = 1;
-  }
-
   auto TimeOfUnit =
       duration_cast<seconds>(UnitStopTime - UnitStartTime).count();
   if (!(TotalNumberOfRuns & (TotalNumberOfRuns - 1)) &&
@@ -522,6 +477,8 @@ size_t Fuzzer::GetCurrentUnitInFuzzingThead(const uint8_t **Data) const {
 
 void Fuzzer::ExecuteCallback(const uint8_t *Data, size_t Size) {
   assert(InFuzzingThread());
+  if (SMR.IsClient())
+    SMR.WriteByteArray(Data, Size);
   // We copy the contents of Unit into a separate heap buffer
   // so that we reliably find buffer overflows in it.
   uint8_t *DataCopy = new uint8_t[Size];
@@ -531,9 +488,10 @@ void Fuzzer::ExecuteCallback(const uint8_t *Data, size_t Size) {
   CurrentUnitSize = Size;
   AllocTracer.Start(Options.TraceMalloc);
   UnitStartTime = system_clock::now();
-  ResetCounters();  // Reset coverage right before the callback.
   TPC.ResetMaps();
+  RunningCB = true;
   int Res = CB(DataCopy, Size);
+  RunningCB = false;
   UnitStopTime = system_clock::now();
   (void)Res;
   assert(Res == 0);
@@ -638,7 +596,8 @@ void Fuzzer::Merge(const std::vector<std::string> &Corpora) {
 
   assert(MaxInputLen > 0);
   UnitVector Initial, Extra;
-  ReadDirToVectorOfUnits(Corpora[0].c_str(), &Initial, nullptr, MaxInputLen, true);
+  ReadDirToVectorOfUnits(Corpora[0].c_str(), &Initial, nullptr, MaxInputLen,
+                         true);
   for (auto &C : ExtraCorpora)
     ReadDirToVectorOfUnits(C.c_str(), &Extra, nullptr, MaxInputLen, true);
 
@@ -695,6 +654,19 @@ void Fuzzer::TryDetectingAMemoryLeak(const uint8_t *Data, size_t Size,
   }
 }
 
+static size_t ComputeMutationLen(size_t MaxInputSize, size_t MaxMutationLen,
+                                 Random &Rand) {
+  assert(MaxInputSize <= MaxMutationLen);
+  if (MaxInputSize == MaxMutationLen) return MaxMutationLen;
+  size_t Result = MaxInputSize;
+  size_t R = Rand.Rand();
+  if ((R % (1U << 7)) == 0)
+    Result++;
+  if ((R % (1U << 15)) == 0)
+    Result += 10 + Result / 2;
+  return Min(Result, MaxMutationLen);
+}
+
 void Fuzzer::MutateAndTestOne() {
   MD.StartMutationSequence();
 
@@ -708,13 +680,19 @@ void Fuzzer::MutateAndTestOne() {
 
   assert(MaxMutationLen > 0);
 
+  size_t CurrentMaxMutationLen =
+      Options.ExperimentalLenControl
+          ? ComputeMutationLen(Corpus.MaxInputSize(), MaxMutationLen,
+                               MD.GetRand())
+          : MaxMutationLen;
+
   for (int i = 0; i < Options.MutateDepth; i++) {
     if (TotalNumberOfRuns >= Options.MaxNumberOfRuns)
       break;
     size_t NewSize = 0;
-    NewSize = MD.Mutate(CurrentUnitData, Size, MaxMutationLen);
+    NewSize = MD.Mutate(CurrentUnitData, Size, CurrentMaxMutationLen);
     assert(NewSize > 0 && "Mutator returned empty unit");
-    assert(NewSize <= MaxMutationLen && "Mutator return overisized unit");
+    assert(NewSize <= CurrentMaxMutationLen && "Mutator return overisized unit");
     Size = NewSize;
     if (i == 0)
       StartTraceRecording();
@@ -732,12 +710,11 @@ void Fuzzer::MutateAndTestOne() {
 }
 
 void Fuzzer::ResetCoverage() {
-  ResetEdgeCoverage();
   MaxCoverage.Reset();
-  PrepareCounters(&MaxCoverage);
 }
 
 void Fuzzer::Loop() {
+  TPC.InitializePrintNewPCs();
   system_clock::time_point LastCorpusReload = system_clock::now();
   if (Options.DoCrossOver)
     MD.SetCorpus(&Corpus);
@@ -760,7 +737,7 @@ void Fuzzer::Loop() {
 }
 
 void Fuzzer::MinimizeCrashLoop(const Unit &U) {
-  if (U.size() <= 2) return;
+  if (U.size() <= 1) return;
   while (!TimedOut() && TotalNumberOfRuns < Options.MaxNumberOfRuns) {
     MD.StartMutationSequence();
     memcpy(CurrentUnitData, U.data(), U.size());
@@ -774,6 +751,29 @@ void Fuzzer::MinimizeCrashLoop(const Unit &U) {
   }
 }
 
+void Fuzzer::AnnounceOutput(const uint8_t *Data, size_t Size) {
+  if (SMR.IsServer()) {
+    SMR.WriteByteArray(Data, Size);
+  } else if (SMR.IsClient()) {
+    SMR.PostClient();
+    SMR.WaitServer();
+    size_t OtherSize = SMR.ReadByteArraySize();
+    uint8_t *OtherData = SMR.GetByteArray();
+    if (Size != OtherSize || memcmp(Data, OtherData, Size) != 0) {
+      size_t i = 0;
+      for (i = 0; i < Min(Size, OtherSize); i++)
+        if (Data[i] != OtherData[i])
+          break;
+      Printf("==%lu== ERROR: libFuzzer: equivalence-mismatch. Sizes: %zd %zd; "
+             "offset %zd\n", GetPid(), Size, OtherSize, i);
+      DumpCurrentUnit("mismatch-");
+      Printf("SUMMARY: libFuzzer: equivalence-mismatch\n");
+      PrintFinalStats();
+      _Exit(Options.ErrorExitCode);
+    }
+  }
+}
+
 } // namespace fuzzer
 
 extern "C" {
@@ -781,5 +781,11 @@ extern "C" {
 size_t LLVMFuzzerMutate(uint8_t *Data, size_t Size, size_t MaxSize) {
   assert(fuzzer::F);
   return fuzzer::F->GetMD().DefaultMutate(Data, Size, MaxSize);
+}
+
+// Experimental
+void LLVMFuzzerAnnounceOutput(const uint8_t *Data, size_t Size) {
+  assert(fuzzer::F);
+  fuzzer::F->AnnounceOutput(Data, Size);
 }
 }  // extern "C"

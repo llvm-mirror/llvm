@@ -135,13 +135,13 @@ static bool hasMemoryWrite(Instruction *I, const TargetLibraryInfo &TLI) {
   if (auto CS = CallSite(I)) {
     if (Function *F = CS.getCalledFunction()) {
       StringRef FnName = F->getName();
-      if (TLI.has(LibFunc::strcpy) && FnName == TLI.getName(LibFunc::strcpy))
+      if (TLI.has(LibFunc_strcpy) && FnName == TLI.getName(LibFunc_strcpy))
         return true;
-      if (TLI.has(LibFunc::strncpy) && FnName == TLI.getName(LibFunc::strncpy))
+      if (TLI.has(LibFunc_strncpy) && FnName == TLI.getName(LibFunc_strncpy))
         return true;
-      if (TLI.has(LibFunc::strcat) && FnName == TLI.getName(LibFunc::strcat))
+      if (TLI.has(LibFunc_strcat) && FnName == TLI.getName(LibFunc_strcat))
         return true;
-      if (TLI.has(LibFunc::strncat) && FnName == TLI.getName(LibFunc::strncat))
+      if (TLI.has(LibFunc_strncat) && FnName == TLI.getName(LibFunc_strncat))
         return true;
     }
   }
@@ -551,7 +551,7 @@ static bool memoryIsNotModifiedBetween(Instruction *FirstI,
       Instruction *I = &*BI;
       if (I->mayWriteToMemory() && I != SecondI) {
         auto Res = AA->getModRefInfo(I, MemLoc);
-        if (Res != MRI_NoModRef)
+        if (Res & MRI_Mod)
           return false;
       }
     }
@@ -1186,8 +1186,9 @@ PreservedAnalyses DSEPass::run(Function &F, FunctionAnalysisManager &AM) {
 
   if (!eliminateDeadStores(F, AA, MD, DT, TLI))
     return PreservedAnalyses::all();
+
   PreservedAnalyses PA;
-  PA.preserve<DominatorTreeAnalysis>();
+  PA.preserveSet<CFGAnalyses>();
   PA.preserve<GlobalsAA>();
   PA.preserve<MemoryDependenceAnalysis>();
   return PA;

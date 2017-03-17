@@ -31,13 +31,13 @@
 #include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/LoopAccessAnalysis.h"
 #include "llvm/Analysis/LoopInfo.h"
-#include "llvm/Analysis/LoopPassManager.h"
 #include "llvm/Analysis/OptimizationDiagnosticInfo.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Transforms/Scalar/LoopPassManager.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
@@ -73,11 +73,10 @@ static cl::opt<unsigned> PragmaDistributeSCEVCheckThreshold(
         "The maximum number of SCEV checks allowed for Loop "
         "Distribution for loop marked with #pragma loop distribute(enable)"));
 
-// Note that the initial value for this depends on whether the pass is invoked
-// directly or from the optimization pipeline.
 static cl::opt<bool> EnableLoopDistribute(
     "enable-loop-distribute", cl::Hidden,
-    cl::desc("Enable the new, experimental LoopDistribution Pass"));
+    cl::desc("Enable the new, experimental LoopDistribution Pass"),
+    cl::init(false));
 
 STATISTIC(NumLoopsDistributed, "Number of loops distributed");
 
@@ -606,11 +605,13 @@ public:
     DEBUG(dbgs() << "\nLDist: In \"" << L->getHeader()->getParent()->getName()
                  << "\" checking " << *L << "\n");
 
-    BasicBlock *PH = L->getLoopPreheader();
-    if (!PH)
-      return fail("NoHeader", "no preheader");
     if (!L->getExitBlock())
       return fail("MultipleExitBlocks", "multiple exit blocks");
+    if (!L->isLoopSimplifyForm())
+      return fail("NotLoopSimplifyForm",
+                  "loop is not in loop-simplify form");
+
+    BasicBlock *PH = L->getLoopPreheader();
 
     // LAA will check that we only have a single exiting block.
     LAI = &GetLAA(*L);
@@ -811,29 +812,29 @@ private:
       const RuntimePointerChecking *RtPtrChecking) {
     SmallVector<RuntimePointerChecking::PointerCheck, 4> Checks;
 
-    std::copy_if(AllChecks.begin(), AllChecks.end(), std::back_inserter(Checks),
-                 [&](const RuntimePointerChecking::PointerCheck &Check) {
-                   for (unsigned PtrIdx1 : Check.first->Members)
-                     for (unsigned PtrIdx2 : Check.second->Members)
-                       // Only include this check if there is a pair of pointers
-                       // that require checking and the pointers fall into
-                       // separate partitions.
-                       //
-                       // (Note that we already know at this point that the two
-                       // pointer groups need checking but it doesn't follow
-                       // that each pair of pointers within the two groups need
-                       // checking as well.
-                       //
-                       // In other words we don't want to include a check just
-                       // because there is a pair of pointers between the two
-                       // pointer groups that require checks and a different
-                       // pair whose pointers fall into different partitions.)
-                       if (RtPtrChecking->needsChecking(PtrIdx1, PtrIdx2) &&
-                           !RuntimePointerChecking::arePointersInSamePartition(
-                               PtrToPartition, PtrIdx1, PtrIdx2))
-                         return true;
-                   return false;
-                 });
+    copy_if(AllChecks, std::back_inserter(Checks),
+            [&](const RuntimePointerChecking::PointerCheck &Check) {
+              for (unsigned PtrIdx1 : Check.first->Members)
+                for (unsigned PtrIdx2 : Check.second->Members)
+                  // Only include this check if there is a pair of pointers
+                  // that require checking and the pointers fall into
+                  // separate partitions.
+                  //
+                  // (Note that we already know at this point that the two
+                  // pointer groups need checking but it doesn't follow
+                  // that each pair of pointers within the two groups need
+                  // checking as well.
+                  //
+                  // In other words we don't want to include a check just
+                  // because there is a pair of pointers between the two
+                  // pointer groups that require checks and a different
+                  // pair whose pointers fall into different partitions.)
+                  if (RtPtrChecking->needsChecking(PtrIdx1, PtrIdx2) &&
+                      !RuntimePointerChecking::arePointersInSamePartition(
+                          PtrToPartition, PtrIdx1, PtrIdx2))
+                    return true;
+              return false;
+            });
 
     return Checks;
   }
@@ -873,8 +874,7 @@ private:
 /// Shared implementation between new and old PMs.
 static bool runImpl(Function &F, LoopInfo *LI, DominatorTree *DT,
                     ScalarEvolution *SE, OptimizationRemarkEmitter *ORE,
-                    std::function<const LoopAccessInfo &(Loop &)> &GetLAA,
-                    bool ProcessAllLoops) {
+                    std::function<const LoopAccessInfo &(Loop &)> &GetLAA) {
   // Build up a worklist of inner-loops to vectorize. This is necessary as the
   // act of distributing a loop creates new loops and can invalidate iterators
   // across the loops.
@@ -893,7 +893,7 @@ static bool runImpl(Function &F, LoopInfo *LI, DominatorTree *DT,
 
     // If distribution was forced for the specific loop to be
     // enabled/disabled, follow that.  Otherwise use the global flag.
-    if (LDL.isForced().getValueOr(ProcessAllLoops))
+    if (LDL.isForced().getValueOr(EnableLoopDistribute))
       Changed |= LDL.processLoop(GetLAA);
   }
 
@@ -904,15 +904,8 @@ static bool runImpl(Function &F, LoopInfo *LI, DominatorTree *DT,
 /// \brief The pass class.
 class LoopDistributeLegacy : public FunctionPass {
 public:
-  /// \p ProcessAllLoopsByDefault specifies whether loop distribution should be
-  /// performed by default.  Pass -enable-loop-distribute={0,1} overrides this
-  /// default.  We use this to keep LoopDistribution off by default when invoked
-  /// from the optimization pipeline but on when invoked explicitly from opt.
-  LoopDistributeLegacy(bool ProcessAllLoopsByDefault = true)
-      : FunctionPass(ID), ProcessAllLoops(ProcessAllLoopsByDefault) {
+  LoopDistributeLegacy() : FunctionPass(ID) {
     // The default is set by the caller.
-    if (EnableLoopDistribute.getNumOccurrences() > 0)
-      ProcessAllLoops = EnableLoopDistribute;
     initializeLoopDistributeLegacyPass(*PassRegistry::getPassRegistry());
   }
 
@@ -928,7 +921,7 @@ public:
     std::function<const LoopAccessInfo &(Loop &)> GetLAA =
         [&](Loop &L) -> const LoopAccessInfo & { return LAA->getInfo(&L); };
 
-    return runImpl(F, LI, DT, SE, ORE, GetLAA, ProcessAllLoops);
+    return runImpl(F, LI, DT, SE, ORE, GetLAA);
   }
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
@@ -943,35 +936,31 @@ public:
   }
 
   static char ID;
-
-private:
-  /// \brief Whether distribution should be on in this function.  The per-loop
-  /// pragma can override this.
-  bool ProcessAllLoops;
 };
 } // anonymous namespace
 
 PreservedAnalyses LoopDistributePass::run(Function &F,
                                           FunctionAnalysisManager &AM) {
-  // FIXME: This does not currently match the behavior from the old PM.
-  // ProcessAllLoops with the old PM defaults to true when invoked from opt and
-  // false when invoked from the optimization pipeline.
-  bool ProcessAllLoops = false;
-  if (EnableLoopDistribute.getNumOccurrences() > 0)
-    ProcessAllLoops = EnableLoopDistribute;
-
   auto &LI = AM.getResult<LoopAnalysis>(F);
   auto &DT = AM.getResult<DominatorTreeAnalysis>(F);
   auto &SE = AM.getResult<ScalarEvolutionAnalysis>(F);
   auto &ORE = AM.getResult<OptimizationRemarkEmitterAnalysis>(F);
 
+  // We don't directly need these analyses but they're required for loop
+  // analyses so provide them below.
+  auto &AA = AM.getResult<AAManager>(F);
+  auto &AC = AM.getResult<AssumptionAnalysis>(F);
+  auto &TTI = AM.getResult<TargetIRAnalysis>(F);
+  auto &TLI = AM.getResult<TargetLibraryAnalysis>(F);
+
   auto &LAM = AM.getResult<LoopAnalysisManagerFunctionProxy>(F).getManager();
   std::function<const LoopAccessInfo &(Loop &)> GetLAA =
       [&](Loop &L) -> const LoopAccessInfo & {
-    return LAM.getResult<LoopAccessAnalysis>(L);
+    LoopStandardAnalysisResults AR = {AA, AC, DT, LI, SE, TLI, TTI};
+    return LAM.getResult<LoopAccessAnalysis>(L, AR);
   };
 
-  bool Changed = runImpl(F, &LI, &DT, &SE, &ORE, GetLAA, ProcessAllLoops);
+  bool Changed = runImpl(F, &LI, &DT, &SE, &ORE, GetLAA);
   if (!Changed)
     return PreservedAnalyses::all();
   PreservedAnalyses PA;
@@ -994,7 +983,5 @@ INITIALIZE_PASS_DEPENDENCY(OptimizationRemarkEmitterWrapperPass)
 INITIALIZE_PASS_END(LoopDistributeLegacy, LDIST_NAME, ldist_name, false, false)
 
 namespace llvm {
-FunctionPass *createLoopDistributePass(bool ProcessAllLoopsByDefault) {
-  return new LoopDistributeLegacy(ProcessAllLoopsByDefault);
-}
+FunctionPass *createLoopDistributePass() { return new LoopDistributeLegacy(); }
 }

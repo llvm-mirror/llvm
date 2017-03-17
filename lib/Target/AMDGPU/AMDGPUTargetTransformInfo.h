@@ -32,6 +32,7 @@ class AMDGPUTTIImpl final : public BasicTTIImplBase<AMDGPUTTIImpl> {
 
   const AMDGPUSubtarget *ST;
   const AMDGPUTargetLowering *TLI;
+  bool IsGraphicsShader;
 
   const AMDGPUSubtarget *getST() const { return ST; }
   const AMDGPUTargetLowering *getTLI() const { return TLI; }
@@ -62,7 +63,8 @@ public:
   explicit AMDGPUTTIImpl(const AMDGPUTargetMachine *TM, const Function &F)
     : BaseT(TM, F.getParent()->getDataLayout()),
       ST(TM->getSubtargetImpl(F)),
-      TLI(ST->getTargetLowering()) {}
+      TLI(ST->getTargetLowering()),
+      IsGraphicsShader(AMDGPU::isShader(F.getCallingConv())) {}
 
   bool hasBranchDivergence() { return true; }
 
@@ -76,6 +78,17 @@ public:
   unsigned getNumberOfRegisters(bool Vector);
   unsigned getRegisterBitWidth(bool Vector);
   unsigned getLoadStoreVecRegBitWidth(unsigned AddrSpace) const;
+
+  bool isLegalToVectorizeMemChain(unsigned ChainSizeInBytes,
+                                  unsigned Alignment,
+                                  unsigned AddrSpace) const;
+  bool isLegalToVectorizeLoadChain(unsigned ChainSizeInBytes,
+                                   unsigned Alignment,
+                                   unsigned AddrSpace) const;
+  bool isLegalToVectorizeStoreChain(unsigned ChainSizeInBytes,
+                                    unsigned Alignment,
+                                    unsigned AddrSpace) const;
+
   unsigned getMaxInterleaveFactor(unsigned VF);
 
   int getArithmeticInstrCost(
@@ -83,12 +96,22 @@ public:
     TTI::OperandValueKind Opd1Info = TTI::OK_AnyValue,
     TTI::OperandValueKind Opd2Info = TTI::OK_AnyValue,
     TTI::OperandValueProperties Opd1PropInfo = TTI::OP_None,
-    TTI::OperandValueProperties Opd2PropInfo = TTI::OP_None);
+    TTI::OperandValueProperties Opd2PropInfo = TTI::OP_None,
+    ArrayRef<const Value *> Args = ArrayRef<const Value *>());
 
   unsigned getCFInstrCost(unsigned Opcode);
 
   int getVectorInstrCost(unsigned Opcode, Type *ValTy, unsigned Index);
   bool isSourceOfDivergence(const Value *V) const;
+
+  unsigned getFlatAddressSpace() const {
+    // Don't bother running InferAddressSpaces pass on graphics shaders which
+    // don't use flat addressing.
+    if (IsGraphicsShader)
+      return -1;
+    return ST->hasFlatAddressSpace() ?
+      AMDGPUAS::FLAT_ADDRESS : AMDGPUAS::UNKNOWN_ADDRESS_SPACE;
+  }
 
   unsigned getVectorSplitCost() { return 0; }
 };

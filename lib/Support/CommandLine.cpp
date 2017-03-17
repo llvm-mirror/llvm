@@ -45,6 +45,17 @@ using namespace cl;
 
 #define DEBUG_TYPE "commandline"
 
+#if LLVM_ENABLE_ABI_BREAKING_CHECKS
+namespace llvm {
+// If LLVM_ENABLE_ABI_BREAKING_CHECKS is set the flag -mllvm -reverse-iterate
+// can be used to toggle forward/reverse iteration of unordered containers.
+// This will help uncover differences in codegen caused due to undefined
+// iteration order.
+static cl::opt<bool, true> ReverseIteration("reverse-iterate",
+  cl::location(ReverseIterate<bool>::value));
+}
+#endif
+
 //===----------------------------------------------------------------------===//
 // Template instantiations and anchors.
 //
@@ -362,6 +373,7 @@ void Option::removeArgument() { GlobalParser->removeOption(this); }
 void Option::setArgStr(StringRef S) {
   if (FullyInitialized)
     GlobalParser->updateArgStr(this, S);
+  assert((S.empty() || S[0] != '-') && "Option can't start with '-");
   ArgStr = S;
 }
 
@@ -1392,8 +1404,8 @@ static StringRef getValueStr(const Option &O, StringRef DefaultMsg) {
 // Return the width of the option tag for printing...
 size_t alias::getOptionWidth() const { return ArgStr.size() + 6; }
 
-static void printHelpStr(StringRef HelpStr, size_t Indent,
-                         size_t FirstLineIndentedBy) {
+void Option::printHelpStr(StringRef HelpStr, size_t Indent,
+                                 size_t FirstLineIndentedBy) {
   std::pair<StringRef, StringRef> Split = HelpStr.split('\n');
   outs().indent(Indent - FirstLineIndentedBy) << " - " << Split.first << "\n";
   while (!Split.second.empty()) {
@@ -1436,7 +1448,7 @@ void basic_parser_impl::printOptionInfo(const Option &O,
   if (!ValName.empty())
     outs() << "=<" << getValueStr(O, ValName) << '>';
 
-  printHelpStr(O.HelpStr, GlobalWidth, getOptionWidth(O));
+  Option::printHelpStr(O.HelpStr, GlobalWidth, getOptionWidth(O));
 }
 
 void basic_parser_impl::printOptionName(const Option &O,
@@ -1575,7 +1587,7 @@ void generic_parser_base::printOptionInfo(const Option &O,
                                           size_t GlobalWidth) const {
   if (O.hasArgStr()) {
     outs() << "  -" << O.ArgStr;
-    printHelpStr(O.HelpStr, GlobalWidth, O.ArgStr.size() + 6);
+    Option::printHelpStr(O.HelpStr, GlobalWidth, O.ArgStr.size() + 6);
 
     for (unsigned i = 0, e = getNumOptions(); i != e; ++i) {
       size_t NumSpaces = GlobalWidth - getOption(i).size() - 8;
@@ -1588,7 +1600,7 @@ void generic_parser_base::printOptionInfo(const Option &O,
     for (unsigned i = 0, e = getNumOptions(); i != e; ++i) {
       auto Option = getOption(i);
       outs() << "    -" << Option;
-      printHelpStr(getDescription(i), GlobalWidth, Option.size() + 8);
+      Option::printHelpStr(getDescription(i), GlobalWidth, Option.size() + 8);
     }
   }
 }

@@ -8,6 +8,7 @@
 //===----------------------------------------------------------------------===//
 // Util functions.
 //===----------------------------------------------------------------------===//
+
 #ifndef LLVM_FUZZER_UTIL_H
 #define LLVM_FUZZER_UTIL_H
 
@@ -38,24 +39,16 @@ void PrintPC(const char *SymbolizedFMT, const char *FallbackFMT, uintptr_t PC);
 
 std::string DescribePC(const char *SymbolizedFMT, uintptr_t PC);
 
-int NumberOfCpuCores();
+unsigned NumberOfCpuCores();
 
 bool ExecuteCommandAndReadOutput(const std::string &Command, std::string *Out);
 
 // Platform specific functions.
-void SetTimer(int Seconds);
-
-void SetSigSegvHandler();
-void SetSigBusHandler();
-void SetSigAbrtHandler();
-void SetSigIllHandler();
-void SetSigFpeHandler();
-void SetSigIntHandler();
-void SetSigTermHandler();
+void SetSignalHandler(const FuzzingOptions& Options);
 
 void SleepSeconds(int Seconds);
 
-int GetPid();
+unsigned long GetPid();
 
 size_t GetPeakRSSMb();
 
@@ -66,5 +59,18 @@ FILE *OpenProcessPipe(const char *Command, const char *Mode);
 const void *SearchMemory(const void *haystack, size_t haystacklen,
                          const void *needle, size_t needlelen);
 
+std::string CloneArgsWithoutX(const std::vector<std::string> &Args,
+                              const char *X1, const char *X2);
+
+inline std::string CloneArgsWithoutX(const std::vector<std::string> &Args,
+                                     const char *X) {
+  return CloneArgsWithoutX(Args, X, X);
+}
+
+std::string DisassembleCmd(const std::string &FileName);
+
+std::string SearchRegexCmd(const std::string &Regex);
+
 }  // namespace fuzzer
+
 #endif  // LLVM_FUZZER_UTIL_H

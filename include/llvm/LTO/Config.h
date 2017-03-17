@@ -17,6 +17,7 @@
 
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/Support/CodeGen.h"
+#include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
 
 #include <functional>
@@ -33,13 +34,15 @@ namespace lto {
 /// LTO configuration. A linker can configure LTO by setting fields in this data
 /// structure and passing it to the lto::LTO constructor.
 struct Config {
+  // Note: when adding fields here, consider whether they need to be added to
+  // computeCacheKey in LTO.cpp.
   std::string CPU;
-  std::string Features;
   TargetOptions Options;
   std::vector<std::string> MAttrs;
   Reloc::Model RelocModel = Reloc::PIC_;
   CodeModel::Model CodeModel = CodeModel::Default;
   CodeGenOpt::Level CGOptLevel = CodeGenOpt::Default;
+  TargetMachine::CodeGenFileType CGFileType = TargetMachine::CGFT_ObjectFile;
   unsigned OptLevel = 2;
   bool DisableVerify = false;
 
@@ -63,6 +66,15 @@ struct Config {
   /// Setting this field will replace unspecified target triples in input files
   /// with this triple.
   std::string DefaultTriple;
+
+  /// Sample PGO profile path.
+  std::string SampleProfile;
+
+  /// Optimization remarks file path.
+  std::string RemarksFilename = "";
+
+  /// Whether to emit optimization remarks with hotness informations.
+  bool RemarksWithHotness = false;
 
   bool ShouldDiscardValueNames = true;
   DiagnosticHandlerFunction DiagHandler;

@@ -14,6 +14,7 @@
 #include "llvm/ObjectYAML/MachOYAML.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Format.h"
+#include "llvm/Support/Host.h"
 #include "llvm/Support/MachO.h"
 
 #include <string.h> // For memcpy, memset and strnlen.
@@ -27,10 +28,6 @@ bool MachOYAML::LinkEditData::isEmpty() const {
          RebaseOpcodes.size() + BindOpcodes.size() + WeakBindOpcodes.size() +
              LazyBindOpcodes.size() + ExportTrie.Children.size() +
              NameList.size() + StringTable.size();
-}
-
-bool MachOYAML::DWARFData::isEmpty() const {
-  return 0 == DebugStrings.size();
 }
 
 namespace yaml {
@@ -104,6 +101,10 @@ void MappingTraits<MachOYAML::Object>::mapping(IO &IO,
     IO.setContext(&Object);
   }
   IO.mapTag("!mach-o", true);
+  IO.mapOptional("IsLittleEndian", Object.IsLittleEndian,
+                 sys::IsLittleEndianHost);
+  Object.DWARF.IsLittleEndian = Object.IsLittleEndian;
+
   IO.mapRequired("FileHeader", Object.Header);
   IO.mapOptional("LoadCommands", Object.LoadCommands);
   if(!Object.LinkEdit.isEmpty() || !IO.outputting())
@@ -229,6 +230,12 @@ void mapLoadCommandData<MachO::dylinker_command>(
   IO.mapOptional("PayloadString", LoadCommand.PayloadString);
 }
 
+template <>
+void mapLoadCommandData<MachO::build_version_command>(
+    IO &IO, MachOYAML::LoadCommand &LoadCommand) {
+  IO.mapOptional("Tools", LoadCommand.Tools);
+}
+
 void MappingTraits<MachOYAML::LoadCommand>::mapping(
     IO &IO, MachOYAML::LoadCommand &LoadCommand) {
   MachO::LoadCommandType TempCmd = static_cast<MachO::LoadCommandType>(
@@ -279,6 +286,12 @@ void MappingTraits<MachOYAML::Section>::mapping(IO &IO,
   IO.mapRequired("reserved1", Section.reserved1);
   IO.mapRequired("reserved2", Section.reserved2);
   IO.mapOptional("reserved3", Section.reserved3);
+}
+
+void MappingTraits<MachO::build_tool_version>::mapping(
+    IO &IO, MachO::build_tool_version &tool) {
+  IO.mapRequired("tool", tool.tool);
+  IO.mapRequired("version", tool.version);
 }
 
 void MappingTraits<MachO::dylib>::mapping(IO &IO, MachO::dylib &DylibStruct) {
@@ -557,9 +570,21 @@ void MappingTraits<MachO::version_min_command>::mapping(
   IO.mapRequired("sdk", LoadCommand.sdk);
 }
 
-void MappingTraits<MachOYAML::DWARFData>::mapping(
-    IO &IO, MachOYAML::DWARFData &DWARF) {
-  IO.mapRequired("DebugStrings", DWARF.DebugStrings);
+void MappingTraits<MachO::note_command>::mapping(
+    IO &IO, MachO::note_command &LoadCommand) {
+
+  IO.mapRequired("data_owner", LoadCommand.data_owner);
+  IO.mapRequired("offset", LoadCommand.offset);
+  IO.mapRequired("size", LoadCommand.size);
+}
+
+void MappingTraits<MachO::build_version_command>::mapping(
+    IO &IO, MachO::build_version_command &LoadCommand) {
+
+  IO.mapRequired("platform", LoadCommand.platform);
+  IO.mapRequired("minos", LoadCommand.minos);
+  IO.mapRequired("sdk", LoadCommand.sdk);
+  IO.mapRequired("ntools", LoadCommand.ntools);
 }
 
 } // namespace llvm::yaml

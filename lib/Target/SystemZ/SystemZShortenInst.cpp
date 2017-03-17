@@ -167,10 +167,10 @@ bool SystemZShortenInst::shortenFPConv(MachineInstr &MI, unsigned Opcode) {
     MI.RemoveOperand(0);
     MI.setDesc(TII->get(Opcode));
     MachineInstrBuilder(*MI.getParent()->getParent(), &MI)
-      .addOperand(Dest)
-      .addOperand(Mode)
-      .addOperand(Src)
-      .addOperand(Suppress);
+        .add(Dest)
+        .add(Mode)
+        .add(Src)
+        .add(Suppress);
     return true;
   }
   return false;
@@ -275,7 +275,7 @@ bool SystemZShortenInst::runOnMachineFunction(MachineFunction &F) {
   const SystemZSubtarget &ST = F.getSubtarget<SystemZSubtarget>();
   TII = ST.getInstrInfo();
   TRI = ST.getRegisterInfo();
-  LiveRegs.init(TRI);
+  LiveRegs.init(*TRI);
 
   bool Changed = false;
   for (auto &MBB : F)

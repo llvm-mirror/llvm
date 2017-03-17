@@ -45,7 +45,11 @@ public:
     ExynosM1,
     Falkor,
     Kryo,
-    Vulcan
+    ThunderX2T99,
+    ThunderX,
+    ThunderXT81,
+    ThunderXT83,
+    ThunderXT88
   };
 
 protected:
@@ -61,6 +65,7 @@ protected:
   bool HasCRC = false;
   bool HasLSE = false;
   bool HasRAS = false;
+  bool HasRDM = false;
   bool HasPerfMon = false;
   bool HasFullFP16 = false;
   bool HasSPE = false;
@@ -79,10 +84,12 @@ protected:
   bool CustomAsCheapAsMove = false;
   bool UsePostRAScheduler = false;
   bool Misaligned128StoreIsSlow = false;
-  bool AvoidQuadLdStPairs = false;
+  bool Paired128IsSlow = false;
   bool UseAlternateSExtLoadCVTF32Pattern = false;
   bool HasArithmeticBccFusion = false;
   bool HasArithmeticCbzFusion = false;
+  bool HasFuseAES = false;
+  bool HasFuseLiterals = false;
   bool DisableLatencySchedHeuristic = false;
   bool UseRSqrt = false;
   uint8_t MaxInterleaveFactor = 2;
@@ -183,18 +190,21 @@ public:
   bool hasCRC() const { return HasCRC; }
   bool hasLSE() const { return HasLSE; }
   bool hasRAS() const { return HasRAS; }
+  bool hasRDM() const { return HasRDM; }
   bool balanceFPOps() const { return BalanceFPOps; }
   bool predictableSelectIsExpensive() const {
     return PredictableSelectIsExpensive;
   }
   bool hasCustomCheapAsMoveHandling() const { return CustomAsCheapAsMove; }
   bool isMisaligned128StoreSlow() const { return Misaligned128StoreIsSlow; }
-  bool avoidQuadLdStPairs() const { return AvoidQuadLdStPairs; }
+  bool isPaired128Slow() const { return Paired128IsSlow; }
   bool useAlternateSExtLoadCVTF32Pattern() const {
     return UseAlternateSExtLoadCVTF32Pattern;
   }
   bool hasArithmeticBccFusion() const { return HasArithmeticBccFusion; }
   bool hasArithmeticCbzFusion() const { return HasArithmeticCbzFusion; }
+  bool hasFuseAES() const { return HasFuseAES; }
+  bool hasFuseLiterals() const { return HasFuseLiterals; }
   bool useRSqrt() const { return UseRSqrt; }
   unsigned getMaxInterleaveFactor() const { return MaxInterleaveFactor; }
   unsigned getVectorInsertExtractBaseCost() const {
@@ -226,6 +236,7 @@ public:
   bool isTargetLinux() const { return TargetTriple.isOSLinux(); }
   bool isTargetWindows() const { return TargetTriple.isOSWindows(); }
   bool isTargetAndroid() const { return TargetTriple.isAndroid(); }
+  bool isTargetFuchsia() const { return TargetTriple.isOSFuchsia(); }
 
   bool isTargetCOFF() const { return TargetTriple.isOSBinFormatCOFF(); }
   bool isTargetELF() const { return TargetTriple.isOSBinFormatELF(); }

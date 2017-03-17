@@ -7,35 +7,43 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/MC/MCStreamer.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCCodeView.h"
 #include "llvm/MC/MCContext.h"
+#include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstPrinter.h"
 #include "llvm/MC/MCObjectFileInfo.h"
-#include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCSection.h"
 #include "llvm/MC/MCSectionCOFF.h"
+#include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/MCWin64EH.h"
+#include "llvm/MC/MCWinEH.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/COFF.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/LEB128.h"
+#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cstdlib>
-using namespace llvm;
+#include <cassert>
+#include <cstdint>
+#include <utility>
 
-// Pin the vtables to this file.
-MCTargetStreamer::~MCTargetStreamer() {}
+using namespace llvm;
 
 MCTargetStreamer::MCTargetStreamer(MCStreamer &S) : Streamer(S) {
   S.setTargetStreamer(this);
 }
+
+// Pin the vtables to this file.
+MCTargetStreamer::~MCTargetStreamer() = default;
 
 void MCTargetStreamer::emitLabel(MCSymbol *Symbol) {}
 
@@ -125,7 +133,7 @@ void MCStreamer::EmitSymbolValue(const MCSymbol *Sym, unsigned Size,
   if (!IsSectionRelative)
     EmitValueImpl(MCSymbolRefExpr::create(Sym, getContext()), Size);
   else
-    EmitCOFFSecRel32(Sym);
+    EmitCOFFSecRel32(Sym, /*Offset=*/0);
 }
 
 void MCStreamer::EmitDTPRel64Value(const MCExpr *Value) {
@@ -290,10 +298,17 @@ void MCStreamer::AssignFragment(MCSymbol *Symbol, MCFragment *Fragment) {
   SymbolOrdering[Symbol] = 1 + SymbolOrdering.size();
 }
 
-void MCStreamer::EmitLabel(MCSymbol *Symbol) {
+void MCStreamer::EmitLabel(MCSymbol *Symbol, SMLoc Loc) {
+  Symbol->redefineIfPossible();
+
+  if (!Symbol->isUndefined() || Symbol->isVariable())
+    return getContext().reportError(Loc, "invalid symbol redefinition");
+
   assert(!Symbol->isVariable() && "Cannot emit a variable symbol!");
   assert(getCurrentSectionOnly() && "Cannot emit before setting section!");
   assert(!Symbol->getFragment() && "Unexpected fragment on symbol data!");
+  assert(Symbol->isUndefined() && "Cannot define a symbol twice!");
+
   Symbol->setFragment(&getCurrentSectionOnly()->getDummyFragment());
 
   MCTargetStreamer *TS = getTargetStreamer();
@@ -666,7 +681,7 @@ void MCStreamer::EmitWinCFISaveXMM(unsigned Register, unsigned Offset) {
 
 void MCStreamer::EmitWinCFIPushFrame(bool Code) {
   EnsureValidWinFrameInfo();
-  if (CurrentWinFrameInfo->Instructions.size() > 0)
+  if (!CurrentWinFrameInfo->Instructions.empty())
     report_fatal_error("If present, PushMachFrame must be the first UOP");
 
   MCSymbol *Label = EmitCFILabel();
@@ -689,8 +704,7 @@ void MCStreamer::EmitCOFFSafeSEH(MCSymbol const *Symbol) {
 void MCStreamer::EmitCOFFSectionIndex(MCSymbol const *Symbol) {
 }
 
-void MCStreamer::EmitCOFFSecRel32(MCSymbol const *Symbol) {
-}
+void MCStreamer::EmitCOFFSecRel32(MCSymbol const *Symbol, uint64_t Offset) {}
 
 /// EmitRawText - If this file is backed by an assembly streamer, this dumps
 /// the specified string in the output .s file.  This capability is
@@ -793,12 +807,22 @@ void MCStreamer::emitAbsoluteSymbolDiff(const MCSymbol *Hi, const MCSymbol *Lo,
 void MCStreamer::EmitAssemblerFlag(MCAssemblerFlag Flag) {}
 void MCStreamer::EmitThumbFunc(MCSymbol *Func) {}
 void MCStreamer::EmitSymbolDesc(MCSymbol *Symbol, unsigned DescValue) {}
-void MCStreamer::BeginCOFFSymbolDef(const MCSymbol *Symbol) {}
-void MCStreamer::EndCOFFSymbolDef() {}
+void MCStreamer::BeginCOFFSymbolDef(const MCSymbol *Symbol) {
+  llvm_unreachable("this directive only supported on COFF targets");
+}
+void MCStreamer::EndCOFFSymbolDef() {
+  llvm_unreachable("this directive only supported on COFF targets");
+}
 void MCStreamer::EmitFileDirective(StringRef Filename) {}
-void MCStreamer::EmitCOFFSymbolStorageClass(int StorageClass) {}
-void MCStreamer::EmitCOFFSymbolType(int Type) {}
+void MCStreamer::EmitCOFFSymbolStorageClass(int StorageClass) {
+  llvm_unreachable("this directive only supported on COFF targets");
+}
+void MCStreamer::EmitCOFFSymbolType(int Type) {
+  llvm_unreachable("this directive only supported on COFF targets");
+}
 void MCStreamer::emitELFSize(MCSymbol *Symbol, const MCExpr *Value) {}
+void MCStreamer::emitELFSymverDirective(MCSymbol *Alias,
+                                        const MCSymbol *Aliasee) {}
 void MCStreamer::EmitLocalCommonSymbol(MCSymbol *Symbol, uint64_t Size,
                                        unsigned ByteAlignment) {}
 void MCStreamer::EmitTBSSSymbol(MCSection *Section, MCSymbol *Symbol,
@@ -820,7 +844,8 @@ void MCStreamer::EmitValueToAlignment(unsigned ByteAlignment, int64_t Value,
                                       unsigned MaxBytesToEmit) {}
 void MCStreamer::EmitCodeAlignment(unsigned ByteAlignment,
                                    unsigned MaxBytesToEmit) {}
-void MCStreamer::emitValueToOffset(const MCExpr *Offset, unsigned char Value) {}
+void MCStreamer::emitValueToOffset(const MCExpr *Offset, unsigned char Value,
+                                   SMLoc Loc) {}
 void MCStreamer::EmitBundleAlignMode(unsigned AlignPow2) {}
 void MCStreamer::EmitBundleLock(bool AlignToEnd) {}
 void MCStreamer::FinishImpl() {}

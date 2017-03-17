@@ -8,6 +8,7 @@
 //===----------------------------------------------------------------------===//
 // IO interface.
 //===----------------------------------------------------------------------===//
+
 #ifndef LLVM_FUZZER_IO_H
 #define LLVM_FUZZER_IO_H
 
@@ -36,11 +37,19 @@ std::string DirPlusFile(const std::string &DirPath,
 // Returns the name of the dir, similar to the 'dirname' utility.
 std::string DirName(const std::string &FileName);
 
+// Returns path to a TmpDir.
+std::string TmpDir();
+
+bool IsInterestingCoverageFile(const std::string &FileName);
+
 void DupAndCloseStderr();
 
 void CloseStdout();
 
 void Printf(const char *Fmt, ...);
+
+// Print using raw syscalls, useful when printing at early init stages.
+void RawPrint(const char *Str);
 
 // Platform specific functions:
 bool IsFile(const std::string &Path);
@@ -56,7 +65,12 @@ int CloseFile(int Fd);
 
 int DuplicateFile(int Fd);
 
-void DeleteFile(const std::string &Path);
+void RemoveFile(const std::string &Path);
+
+void DiscardOutput(int Fd);
+
+intptr_t GetHandleFromFd(int fd);
 
 }  // namespace fuzzer
+
 #endif  // LLVM_FUZZER_IO_H

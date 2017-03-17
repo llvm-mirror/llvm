@@ -17,6 +17,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/LTO/Caching.h"
+#include "llvm/CodeGen/CommandFlags.h"
+#include "llvm/IR/DiagnosticPrinter.h"
 #include "llvm/LTO/LTO.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/TargetSelect.h"
@@ -30,6 +32,11 @@ static cl::opt<char>
     OptLevel("O", cl::desc("Optimization level. [-O0, -O1, -O2, or -O3] "
                            "(default = '-O2')"),
              cl::Prefix, cl::ZeroOrMore, cl::init('2'));
+
+static cl::opt<char> CGOptLevel(
+    "cg-opt-level",
+    cl::desc("Codegen optimization level (0, 1, 2 or 3, default = '2')"),
+    cl::init('2'));
 
 static cl::list<std::string> InputFilenames(cl::Positional, cl::OneOrMore,
                                             cl::desc("<input bitcode files>"));
@@ -57,7 +64,7 @@ static cl::opt<bool>
                                        "import files for the "
                                        "distributed backend case"));
 
-static cl::opt<int> Threads("-thinlto-threads",
+static cl::opt<int> Threads("thinlto-threads",
                             cl::init(llvm::heavyweight_hardware_concurrency()));
 
 static cl::list<std::string> SymbolResolutions(
@@ -74,11 +81,29 @@ static cl::list<std::string> SymbolResolutions(
              "A resolution for each symbol must be specified."),
     cl::ZeroOrMore);
 
+static cl::opt<std::string> OverrideTriple(
+    "override-triple",
+    cl::desc("Replace target triples in input files with this triple"));
+
+static cl::opt<std::string> DefaultTriple(
+    "default-triple",
+    cl::desc(
+        "Replace unspecified target triples in input files with this triple"));
+
+static cl::opt<std::string>
+    OptRemarksOutput("pass-remarks-output",
+                     cl::desc("YAML output file for optimization remarks"));
+
+static cl::opt<bool> OptRemarksWithHotness(
+    "pass-remarks-with-hotness",
+    cl::desc("Whether to include hotness informations in the remarks.\n"
+             "Has effect only if -pass-remarks-output is specified."));
+
 static void check(Error E, std::string Msg) {
   if (!E)
     return;
   handleAllErrors(std::move(E), [&](ErrorInfoBase &EIB) {
-    errs() << "llvm-lto: " << Msg << ": " << EIB.message().c_str() << '\n';
+    errs() << "llvm-lto2: " << Msg << ": " << EIB.message().c_str() << '\n';
   });
   exit(1);
 }
@@ -132,9 +157,11 @@ int main(int argc, char **argv) {
         Res.FinalDefinitionInLinkageUnit = true;
       else if (C == 'x')
         Res.VisibleToRegularObj = true;
-      else
+      else {
         llvm::errs() << "invalid character " << C << " in resolution: " << R
                      << '\n';
+        return 1;
+      }
     }
     CommandLineResolutions[{FileName, SymbolName}].push_back(Res);
   }
@@ -142,19 +169,56 @@ int main(int argc, char **argv) {
   std::vector<std::unique_ptr<MemoryBuffer>> MBs;
 
   Config Conf;
-  Conf.DiagHandler = [](const DiagnosticInfo &) {
+  Conf.DiagHandler = [](const DiagnosticInfo &DI) {
+    DiagnosticPrinterRawOStream DP(errs());
+    DI.print(DP);
+    errs() << '\n';
     exit(1);
   };
+
+  Conf.CPU = MCPU;
+  Conf.Options = InitTargetOptionsFromCodeGenFlags();
+  Conf.MAttrs = MAttrs;
+  if (auto RM = getRelocModel())
+    Conf.RelocModel = *RM;
+  Conf.CodeModel = CMModel;
 
   if (SaveTemps)
     check(Conf.addSaveTemps(OutputFilename + "."),
           "Config::addSaveTemps failed");
+
+  // Optimization remarks.
+  Conf.RemarksFilename = OptRemarksOutput;
+  Conf.RemarksWithHotness = OptRemarksWithHotness;
 
   // Run a custom pipeline, if asked for.
   Conf.OptPipeline = OptPipeline;
   Conf.AAPipeline = AAPipeline;
 
   Conf.OptLevel = OptLevel - '0';
+  switch (CGOptLevel) {
+  case '0':
+    Conf.CGOptLevel = CodeGenOpt::None;
+    break;
+  case '1':
+    Conf.CGOptLevel = CodeGenOpt::Less;
+    break;
+  case '2':
+    Conf.CGOptLevel = CodeGenOpt::Default;
+    break;
+  case '3':
+    Conf.CGOptLevel = CodeGenOpt::Aggressive;
+    break;
+  default:
+    llvm::errs() << "invalid cg optimization level: " << CGOptLevel << '\n';
+    return 1;
+  }
+
+  if (FileType.getNumOccurrences())
+    Conf.CGFileType = FileType;
+
+  Conf.OverrideTriple = OverrideTriple;
+  Conf.DefaultTriple = DefaultTriple;
 
   ThinBackend Backend;
   if (ThinLTODistributedIndexes)
@@ -222,7 +286,7 @@ int main(int argc, char **argv) {
 
   NativeObjectCache Cache;
   if (!CacheDir.empty())
-    Cache = localCache(CacheDir, AddFile);
+    Cache = check(localCache(CacheDir, AddFile), "failed to create cache");
 
   check(Lto.run(AddStream, Cache), "LTO::run failed");
 }

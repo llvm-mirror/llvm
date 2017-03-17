@@ -340,8 +340,9 @@ TEST_F(IRBuilderTest, DIBuilder) {
   IRBuilder<> Builder(BB);
   DIBuilder DIB(*M);
   auto File = DIB.createFile("F.CBL", "/");
-  auto CU = DIB.createCompileUnit(dwarf::DW_LANG_Cobol74, "F.CBL", "/",
-                                  "llvm-cobol74", true, "", 0);
+  auto CU = DIB.createCompileUnit(dwarf::DW_LANG_Cobol74,
+                                  DIB.createFile("F.CBL", "/"), "llvm-cobol74",
+                                  true, "", 0);
   auto Type = DIB.createSubroutineType(DIB.getOrCreateTypeArray(None));
   auto SP = DIB.createFunction(CU, "foo", "", File, 1, Type, false, true, 1,
                                DINode::FlagZero, true);
@@ -392,8 +393,9 @@ TEST_F(IRBuilderTest, DebugLoc) {
 
   DIBuilder DIB(*M);
   auto File = DIB.createFile("tmp.cpp", "/");
-  auto CU = DIB.createCompileUnit(dwarf::DW_LANG_C_plus_plus_11, "tmp.cpp", "/",
-                                  "", true, "", 0);
+  auto CU = DIB.createCompileUnit(dwarf::DW_LANG_C_plus_plus_11,
+                                  DIB.createFile("tmp.cpp", "/"), "", true, "",
+                                  0);
   auto SPType = DIB.createSubroutineType(DIB.getOrCreateTypeArray(None));
   auto SP =
       DIB.createFunction(CU, "foo", "foo", File, 1, SPType, false, true, 1);
@@ -422,8 +424,9 @@ TEST_F(IRBuilderTest, DebugLoc) {
 TEST_F(IRBuilderTest, DIImportedEntity) {
   IRBuilder<> Builder(BB);
   DIBuilder DIB(*M);
-  auto CU = DIB.createCompileUnit(dwarf::DW_LANG_Cobol74, "F.CBL", "/",
-    "llvm-cobol74", true, "", 0);
+  auto CU = DIB.createCompileUnit(dwarf::DW_LANG_Cobol74,
+                                  DIB.createFile("F.CBL", "/"), "llvm-cobol74",
+                                  true, "", 0);
   DIB.createImportedDeclaration(CU, nullptr, 1);
   DIB.createImportedDeclaration(CU, nullptr, 1);
   DIB.createImportedModule(CU, (DIImportedEntity *)nullptr, 2);
@@ -431,5 +434,74 @@ TEST_F(IRBuilderTest, DIImportedEntity) {
   DIB.finalize();
   EXPECT_TRUE(verifyModule(*M));
   EXPECT_TRUE(CU->getImportedEntities().size() == 2);
+}
+
+//  0: #define M0 V0          <-- command line definition
+//  0: main.c                 <-- main file
+//     3:   #define M1 V1     <-- M1 definition in main.c
+//     5:   #include "file.h" <-- inclusion of file.h from main.c
+//          1: #define M2     <-- M2 definition in file.h with no value
+//     7:   #undef M1 V1      <-- M1 un-definition in main.c
+TEST_F(IRBuilderTest, DIBuilderMacro) {
+  IRBuilder<> Builder(BB);
+  DIBuilder DIB(*M);
+  auto File1 = DIB.createFile("main.c", "/");
+  auto File2 = DIB.createFile("file.h", "/");
+  auto CU = DIB.createCompileUnit(
+      dwarf::DW_LANG_C, DIB.createFile("main.c", "/"), "llvm-c", true, "", 0);
+  auto MDef0 =
+      DIB.createMacro(nullptr, 0, dwarf::DW_MACINFO_define, "M0", "V0");
+  auto TMF1 = DIB.createTempMacroFile(nullptr, 0, File1);
+  auto MDef1 = DIB.createMacro(TMF1, 3, dwarf::DW_MACINFO_define, "M1", "V1");
+  auto TMF2 = DIB.createTempMacroFile(TMF1, 5, File2);
+  auto MDef2 = DIB.createMacro(TMF2, 1, dwarf::DW_MACINFO_define, "M2");
+  auto MUndef1 = DIB.createMacro(TMF1, 7, dwarf::DW_MACINFO_undef, "M1");
+
+  EXPECT_EQ(dwarf::DW_MACINFO_define, MDef1->getMacinfoType());
+  EXPECT_EQ(3u, MDef1->getLine());
+  EXPECT_EQ("M1", MDef1->getName());
+  EXPECT_EQ("V1", MDef1->getValue());
+
+  EXPECT_EQ(dwarf::DW_MACINFO_undef, MUndef1->getMacinfoType());
+  EXPECT_EQ(7u, MUndef1->getLine());
+  EXPECT_EQ("M1", MUndef1->getName());
+  EXPECT_EQ("", MUndef1->getValue());
+
+  EXPECT_EQ(dwarf::DW_MACINFO_start_file, TMF2->getMacinfoType());
+  EXPECT_EQ(5u, TMF2->getLine());
+  EXPECT_EQ(File2, TMF2->getFile());
+
+  DIB.finalize();
+
+  SmallVector<Metadata *, 4> Elements;
+  Elements.push_back(MDef2);
+  auto MF2 = DIMacroFile::get(Ctx, dwarf::DW_MACINFO_start_file, 5, File2,
+                              DIB.getOrCreateMacroArray(Elements));
+
+  Elements.clear();
+  Elements.push_back(MDef1);
+  Elements.push_back(MF2);
+  Elements.push_back(MUndef1);
+  auto MF1 = DIMacroFile::get(Ctx, dwarf::DW_MACINFO_start_file, 0, File1,
+                              DIB.getOrCreateMacroArray(Elements));
+
+  Elements.clear();
+  Elements.push_back(MDef0);
+  Elements.push_back(MF1);
+  auto MN0 = MDTuple::get(Ctx, Elements);
+  EXPECT_EQ(MN0, CU->getRawMacros());
+
+  Elements.clear();
+  Elements.push_back(MDef1);
+  Elements.push_back(MF2);
+  Elements.push_back(MUndef1);
+  auto MN1 = MDTuple::get(Ctx, Elements);
+  EXPECT_EQ(MN1, MF1->getRawElements());
+
+  Elements.clear();
+  Elements.push_back(MDef2);
+  auto MN2 = MDTuple::get(Ctx, Elements);
+  EXPECT_EQ(MN2, MF2->getRawElements());
+  EXPECT_TRUE(verifyModule(*M));
 }
 }

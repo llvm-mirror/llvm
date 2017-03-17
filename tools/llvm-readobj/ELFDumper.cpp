@@ -12,7 +12,6 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "ARMAttributeParser.h"
 #include "ARMEHABIPrinter.h"
 #include "Error.h"
 #include "ObjDumper.h"
@@ -22,6 +21,7 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Object/ELFObjectFile.h"
+#include "llvm/Support/ARMAttributeParser.h"
 #include "llvm/Support/ARMBuildAttributes.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Format.h"
@@ -128,6 +128,8 @@ public:
   void printMipsABIFlags() override;
   void printMipsReginfo() override;
   void printMipsOptions() override;
+
+  void printAMDGPURuntimeMD() override;
 
   void printStackMap() const override;
 
@@ -1001,6 +1003,7 @@ static const char *getElfSectionType(unsigned Arch, unsigned Type) {
     LLVM_READOBJ_ENUM_CASE(ELF, SHT_MIPS_REGINFO);
     LLVM_READOBJ_ENUM_CASE(ELF, SHT_MIPS_OPTIONS);
     LLVM_READOBJ_ENUM_CASE(ELF, SHT_MIPS_ABIFLAGS);
+    LLVM_READOBJ_ENUM_CASE(ELF, SHT_MIPS_DWARF);
     }
   }
 
@@ -1065,6 +1068,10 @@ static const EnumEntry<unsigned> ElfAMDGPUSectionFlags[] = {
   LLVM_READOBJ_ENUM_ENT(ELF, SHF_AMDGPU_HSA_READONLY),
   LLVM_READOBJ_ENUM_ENT(ELF, SHF_AMDGPU_HSA_CODE),
   LLVM_READOBJ_ENUM_ENT(ELF, SHF_AMDGPU_HSA_AGENT)
+};
+
+static const EnumEntry<unsigned> ElfARMSectionFlags[] = {
+  LLVM_READOBJ_ENUM_ENT(ELF, SHF_ARM_PURECODE)
 };
 
 static const EnumEntry<unsigned> ElfHexagonSectionFlags[] = {
@@ -1498,7 +1505,29 @@ template <class ELFT> void ELFDumper<ELFT>::printNotes() {
 #define LLVM_READOBJ_TYPE_CASE(name) \
   case DT_##name: return #name
 
-static const char *getTypeString(uint64_t Type) {
+static const char *getTypeString(unsigned Arch, uint64_t Type) {
+  switch (Arch) {
+  case EM_HEXAGON:
+    switch (Type) {
+    LLVM_READOBJ_TYPE_CASE(HEXAGON_SYMSZ);
+    LLVM_READOBJ_TYPE_CASE(HEXAGON_VER);
+    LLVM_READOBJ_TYPE_CASE(HEXAGON_PLT);
+    }
+  case EM_MIPS:
+    switch (Type) {
+    LLVM_READOBJ_TYPE_CASE(MIPS_RLD_MAP_REL);
+    LLVM_READOBJ_TYPE_CASE(MIPS_RLD_VERSION);
+    LLVM_READOBJ_TYPE_CASE(MIPS_FLAGS);
+    LLVM_READOBJ_TYPE_CASE(MIPS_BASE_ADDRESS);
+    LLVM_READOBJ_TYPE_CASE(MIPS_LOCAL_GOTNO);
+    LLVM_READOBJ_TYPE_CASE(MIPS_SYMTABNO);
+    LLVM_READOBJ_TYPE_CASE(MIPS_UNREFEXTNO);
+    LLVM_READOBJ_TYPE_CASE(MIPS_GOTSYM);
+    LLVM_READOBJ_TYPE_CASE(MIPS_RLD_MAP);
+    LLVM_READOBJ_TYPE_CASE(MIPS_PLTGOT);
+    LLVM_READOBJ_TYPE_CASE(MIPS_OPTIONS);
+    }
+  }
   switch (Type) {
   LLVM_READOBJ_TYPE_CASE(BIND_NOW);
   LLVM_READOBJ_TYPE_CASE(DEBUG);
@@ -1544,17 +1573,6 @@ static const char *getTypeString(uint64_t Type) {
   LLVM_READOBJ_TYPE_CASE(GNU_HASH);
   LLVM_READOBJ_TYPE_CASE(TLSDESC_PLT);
   LLVM_READOBJ_TYPE_CASE(TLSDESC_GOT);
-  LLVM_READOBJ_TYPE_CASE(MIPS_RLD_VERSION);
-  LLVM_READOBJ_TYPE_CASE(MIPS_RLD_MAP_REL);
-  LLVM_READOBJ_TYPE_CASE(MIPS_FLAGS);
-  LLVM_READOBJ_TYPE_CASE(MIPS_BASE_ADDRESS);
-  LLVM_READOBJ_TYPE_CASE(MIPS_LOCAL_GOTNO);
-  LLVM_READOBJ_TYPE_CASE(MIPS_SYMTABNO);
-  LLVM_READOBJ_TYPE_CASE(MIPS_UNREFEXTNO);
-  LLVM_READOBJ_TYPE_CASE(MIPS_GOTSYM);
-  LLVM_READOBJ_TYPE_CASE(MIPS_RLD_MAP);
-  LLVM_READOBJ_TYPE_CASE(MIPS_PLTGOT);
-  LLVM_READOBJ_TYPE_CASE(MIPS_OPTIONS);
   LLVM_READOBJ_TYPE_CASE(AUXILIARY);
   default: return "unknown";
   }
@@ -1787,7 +1805,7 @@ void ELFDumper<ELFT>::printDynamicTable() {
     uintX_t Tag = Entry.getTag();
     ++I;
     W.startLine() << "  " << format_hex(Tag, Is64 ? 18 : 10, opts::Output != opts::GNU) << " "
-                  << format("%-21s", getTypeString(Tag));
+                  << format("%-21s", getTypeString(Obj->getHeader()->e_machine, Tag));
     printValue(Tag, Entry.getVal());
     OS << "\n";
   }
@@ -1875,7 +1893,7 @@ template <> void ELFDumper<ELFType<support::little, false>>::printAttributes() {
     if (Contents.size() == 1)
       continue;
 
-    ARMAttributeParser(W).Parse(Contents);
+    ARMAttributeParser(&W).Parse(Contents, true);
   }
 }
 }
@@ -2339,6 +2357,36 @@ template <class ELFT> void ELFDumper<ELFT>::printMipsOptions() {
   }
 }
 
+template <class ELFT> void ELFDumper<ELFT>::printAMDGPURuntimeMD() {
+  const Elf_Shdr *Shdr = findSectionByName(*Obj, ".note");
+  if (!Shdr) {
+    W.startLine() << "There is no .note section in the file.\n";
+    return;
+  }
+  ArrayRef<uint8_t> Sec = unwrapOrError(Obj->getSectionContents(Shdr));
+
+  const uint32_t RuntimeMDNoteType = 8;
+  for (auto I = reinterpret_cast<const Elf_Word *>(&Sec[0]),
+       E = I + Sec.size()/4; I != E;) {
+    uint32_t NameSZ = I[0];
+    uint32_t DescSZ = I[1];
+    uint32_t Type = I[2];
+    I += 3;
+
+    StringRef Name;
+    if (NameSZ) {
+      Name = StringRef(reinterpret_cast<const char *>(I), NameSZ - 1);
+      I += alignTo<4>(NameSZ)/4;
+    }
+
+    if (Name == "AMD" && Type == RuntimeMDNoteType) {
+      StringRef Desc(reinterpret_cast<const char *>(I), DescSZ);
+      W.printString(Desc);
+    }
+    I += alignTo<4>(DescSZ)/4;
+  }
+}
+
 template <class ELFT> void ELFDumper<ELFT>::printStackMap() const {
   const Elf_Shdr *StackMapSection = nullptr;
   for (const auto &Sec : unwrapOrError(Obj->sections())) {
@@ -2580,6 +2628,8 @@ std::string getSectionTypeString(unsigned Arch, unsigned Type) {
       return "MIPS_OPTIONS";
     case SHT_MIPS_ABIFLAGS:
       return "MIPS_ABIFLAGS";
+    case SHT_MIPS_DWARF:
+      return "SHT_MIPS_DWARF";
     }
   }
   switch (Type) {
@@ -3290,6 +3340,34 @@ static std::string getGNUNoteTypeName(const uint32_t NT) {
   return string;
 }
 
+static std::string getFreeBSDNoteTypeName(const uint32_t NT) {
+  static const struct {
+    uint32_t ID;
+    const char *Name;
+  } Notes[] = {
+      {ELF::NT_FREEBSD_THRMISC, "NT_THRMISC (thrmisc structure)"},
+      {ELF::NT_FREEBSD_PROCSTAT_PROC, "NT_PROCSTAT_PROC (proc data)"},
+      {ELF::NT_FREEBSD_PROCSTAT_FILES, "NT_PROCSTAT_FILES (files data)"},
+      {ELF::NT_FREEBSD_PROCSTAT_VMMAP, "NT_PROCSTAT_VMMAP (vmmap data)"},
+      {ELF::NT_FREEBSD_PROCSTAT_GROUPS, "NT_PROCSTAT_GROUPS (groups data)"},
+      {ELF::NT_FREEBSD_PROCSTAT_UMASK, "NT_PROCSTAT_UMASK (umask data)"},
+      {ELF::NT_FREEBSD_PROCSTAT_RLIMIT, "NT_PROCSTAT_RLIMIT (rlimit data)"},
+      {ELF::NT_FREEBSD_PROCSTAT_OSREL, "NT_PROCSTAT_OSREL (osreldate data)"},
+      {ELF::NT_FREEBSD_PROCSTAT_PSSTRINGS,
+       "NT_PROCSTAT_PSSTRINGS (ps_strings data)"},
+      {ELF::NT_FREEBSD_PROCSTAT_AUXV, "NT_PROCSTAT_AUXV (auxv data)"},
+  };
+
+  for (const auto &Note : Notes)
+    if (Note.ID == NT)
+      return std::string(Note.Name);
+
+  std::string string;
+  raw_string_ostream OS(string);
+  OS << format("Unknown note type (0x%08x)", NT);
+  return string;
+}
+
 template <typename ELFT>
 static void printGNUNote(raw_ostream &OS, uint32_t NoteType,
                          ArrayRef<typename ELFFile<ELFT>::Elf_Word> Words) {
@@ -3369,10 +3447,14 @@ void GNUStyle<ELFT>::printNotes(const ELFFile<ELFT> *Obj) {
       if (Name == "GNU") {
         OS << getGNUNoteTypeName(Type) << '\n';
         printGNUNote<ELFT>(OS, Type, Descriptor);
+      } else if (Name == "FreeBSD") {
+        OS << getFreeBSDNoteTypeName(Type) << '\n';
+      } else {
+        OS << "Unknown note type: (" << format_hex(Type, 10) << ')';
       }
       OS << '\n';
 
-      P = P + 3 * sizeof(Elf_Word) * alignTo<4>(NameSize) +
+      P = P + 3 * sizeof(Elf_Word) + alignTo<4>(NameSize) +
           alignTo<4>(DescriptorSize);
     }
   };
@@ -3563,6 +3645,10 @@ template <class ELFT> void LLVMStyle<ELFT>::printSections(const ELFO *Obj) {
     case EM_AMDGPU:
       SectionFlags.insert(SectionFlags.end(), std::begin(ElfAMDGPUSectionFlags),
                           std::end(ElfAMDGPUSectionFlags));
+      break;
+    case EM_ARM:
+      SectionFlags.insert(SectionFlags.end(), std::begin(ElfARMSectionFlags),
+                          std::end(ElfARMSectionFlags));
       break;
     case EM_HEXAGON:
       SectionFlags.insert(SectionFlags.end(),

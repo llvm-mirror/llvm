@@ -97,6 +97,10 @@ bool TargetTransformInfo::isSourceOfDivergence(const Value *V) const {
   return TTIImpl->isSourceOfDivergence(V);
 }
 
+unsigned TargetTransformInfo::getFlatAddressSpace() const {
+  return TTIImpl->getFlatAddressSpace();
+}
+
 bool TargetTransformInfo::isLoweredToCall(const Function *F) const {
   return TTIImpl->isLoweredToCall(F);
 }
@@ -180,6 +184,17 @@ bool TargetTransformInfo::shouldBuildLookupTables() const {
 }
 bool TargetTransformInfo::shouldBuildLookupTablesForConstant(Constant *C) const {
   return TTIImpl->shouldBuildLookupTablesForConstant(C);
+}
+
+unsigned TargetTransformInfo::
+getScalarizationOverhead(Type *Ty, bool Insert, bool Extract) const {
+  return TTIImpl->getScalarizationOverhead(Ty, Insert, Extract);
+}
+
+unsigned TargetTransformInfo::
+getOperandsScalarizationOverhead(ArrayRef<const Value *> Args,
+                                 unsigned VF) const {
+  return TTIImpl->getOperandsScalarizationOverhead(Args, VF);
 }
 
 bool TargetTransformInfo::enableAggressiveInterleaving(bool LoopHasReductions) const {
@@ -277,9 +292,10 @@ unsigned TargetTransformInfo::getMaxInterleaveFactor(unsigned VF) const {
 int TargetTransformInfo::getArithmeticInstrCost(
     unsigned Opcode, Type *Ty, OperandValueKind Opd1Info,
     OperandValueKind Opd2Info, OperandValueProperties Opd1PropInfo,
-    OperandValueProperties Opd2PropInfo) const {
+    OperandValueProperties Opd2PropInfo,
+    ArrayRef<const Value *> Args) const {
   int Cost = TTIImpl->getArithmeticInstrCost(Opcode, Ty, Opd1Info, Opd2Info,
-                                             Opd1PropInfo, Opd2PropInfo);
+                                             Opd1PropInfo, Opd2PropInfo, Args);
   assert(Cost >= 0 && "TTI should not produce negative costs!");
   return Cost;
 }
@@ -389,8 +405,9 @@ unsigned TargetTransformInfo::getNumberOfParts(Type *Tp) const {
 }
 
 int TargetTransformInfo::getAddressComputationCost(Type *Tp,
-                                                   bool IsComplex) const {
-  int Cost = TTIImpl->getAddressComputationCost(Tp, IsComplex);
+                                                   ScalarEvolution *SE,
+                                                   const SCEV *Ptr) const {
+  int Cost = TTIImpl->getAddressComputationCost(Tp, SE, Ptr);
   assert(Cost >= 0 && "TTI should not produce negative costs!");
   return Cost;
 }

@@ -287,7 +287,15 @@ bool llvm::ConstantFoldTerminator(BasicBlock *BB, bool DeleteDeadConditions,
 ///
 bool llvm::isInstructionTriviallyDead(Instruction *I,
                                       const TargetLibraryInfo *TLI) {
-  if (!I->use_empty() || isa<TerminatorInst>(I)) return false;
+  if (!I->use_empty())
+    return false;
+  return wouldInstructionBeTriviallyDead(I, TLI);
+}
+
+bool llvm::wouldInstructionBeTriviallyDead(Instruction *I,
+                                           const TargetLibraryInfo *TLI) {
+  if (isa<TerminatorInst>(I))
+    return false;
 
   // We don't want the landingpad-like instructions removed by anything this
   // general.
@@ -307,7 +315,8 @@ bool llvm::isInstructionTriviallyDead(Instruction *I,
     return true;
   }
 
-  if (!I->mayHaveSideEffects()) return true;
+  if (!I->mayHaveSideEffects())
+    return true;
 
   // Special case intrinsics that "may have side effects" but can be deleted
   // when dead.
@@ -334,7 +343,8 @@ bool llvm::isInstructionTriviallyDead(Instruction *I,
     }
   }
 
-  if (isAllocLikeFn(I, TLI)) return true;
+  if (isAllocLikeFn(I, TLI))
+    return true;
 
   if (CallInst *CI = isFreeCall(I, TLI))
     if (Constant *C = dyn_cast<Constant>(CI->getArgOperand(0)))
@@ -1075,11 +1085,11 @@ static bool PhiHasDebugValue(DILocalVariable *DIVar,
   // Since we can't guarantee that the original dbg.declare instrinsic
   // is removed by LowerDbgDeclare(), we need to make sure that we are
   // not inserting the same dbg.value intrinsic over and over.
-  DbgValueList DbgValues;
-  FindAllocaDbgValues(DbgValues, APN);
-  for (auto DVI : DbgValues) {
-    assert (DVI->getValue() == APN);
-    assert (DVI->getOffset() == 0);
+  SmallVector<DbgValueInst *, 1> DbgValues;
+  findDbgValues(DbgValues, APN);
+  for (auto *DVI : DbgValues) {
+    assert(DVI->getValue() == APN);
+    assert(DVI->getOffset() == 0);
     if ((DVI->getVariable() == DIVar) && (DVI->getExpression() == DIExpr))
       return true;
   }
@@ -1112,9 +1122,10 @@ void llvm::ConvertDebugDeclareToDebugValue(DbgDeclareInst *DDI,
     unsigned FragmentOffset = 0;
     // If this already is a bit fragment, we drop the bit fragment from the
     // expression and record the offset.
-    if (DIExpr->isFragment()) {
+    auto Fragment = DIExpr->getFragmentInfo();
+    if (Fragment) {
       Ops.append(DIExpr->elements_begin(), DIExpr->elements_end()-3);
-      FragmentOffset = DIExpr->getFragmentOffsetInBits();
+      FragmentOffset = Fragment->OffsetInBits;
     } else {
       Ops.append(DIExpr->elements_begin(), DIExpr->elements_end());
     }
@@ -1240,9 +1251,7 @@ DbgDeclareInst *llvm::FindAllocaDbgDeclare(Value *V) {
   return nullptr;
 }
 
-/// FindAllocaDbgValues - Finds the llvm.dbg.value intrinsics describing the
-/// alloca 'V', if any.
-void llvm::FindAllocaDbgValues(DbgValueList &DbgValues, Value *V) {
+void llvm::findDbgValues(SmallVectorImpl<DbgValueInst *> &DbgValues, Value *V) {
   if (auto *L = LocalAsMetadata::getIfExists(V))
     if (auto *MDV = MetadataAsValue::getIfExists(V->getContext(), L))
       for (User *U : MDV->users())
@@ -2067,7 +2076,7 @@ bool llvm::recognizeBSwapOrBitReverseIdiom(
 void llvm::maybeMarkSanitizerLibraryCallNoBuiltin(
     CallInst *CI, const TargetLibraryInfo *TLI) {
   Function *F = CI->getCalledFunction();
-  LibFunc::Func Func;
+  LibFunc Func;
   if (F && !F->hasLocalLinkage() && F->hasName() &&
       TLI->getLibFunc(F->getName(), Func) && TLI->hasOptimizedCodeGen(Func) &&
       !F->doesNotAccessMemory())

@@ -8,6 +8,7 @@
 //===----------------------------------------------------------------------===//
 // Basic definitions.
 //===----------------------------------------------------------------------===//
+
 #ifndef LLVM_FUZZER_DEFS_H
 #define LLVM_FUZZER_DEFS_H
 
@@ -41,6 +42,26 @@
 #define ATTRIBUTE_TARGET_POPCNT __attribute__((target("popcnt")))
 #else
 #define ATTRIBUTE_TARGET_POPCNT
+#endif
+
+
+#ifdef __clang__  // avoid gcc warning.
+#  define ATTRIBUTE_NO_SANITIZE_MEMORY __attribute__((no_sanitize("memory")))
+#  define ALWAYS_INLINE __attribute__((always_inline))
+#else
+#  define ATTRIBUTE_NO_SANITIZE_MEMORY
+#  define ALWAYS_INLINE
+#endif // __clang__
+
+#define ATTRIBUTE_NO_SANITIZE_ADDRESS __attribute__((no_sanitize_address))
+
+#define ATTRIBUTE_NO_SANITIZE_ALL ATTRIBUTE_NO_SANITIZE_ADDRESS ATTRIBUTE_NO_SANITIZE_MEMORY
+
+
+#if LIBFUZZER_WINDOWS
+#define ATTRIBUTE_INTERFACE __declspec(dllexport)
+#else
+#define ATTRIBUTE_INTERFACE __attribute__((visibility("default")))
 #endif
 
 namespace fuzzer {
@@ -77,4 +98,5 @@ inline uint32_t Bswap(uint32_t x) { return __builtin_bswap32(x); }
 inline uint64_t Bswap(uint64_t x) { return __builtin_bswap64(x); }
 
 }  // namespace fuzzer
+
 #endif  // LLVM_FUZZER_DEFS_H

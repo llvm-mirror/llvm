@@ -222,11 +222,15 @@ def S_MEMREALTIME   : SM_Time_Pseudo <"s_memrealtime", int_amdgcn_s_memrealtime>
 // Scalar Memory Patterns
 //===----------------------------------------------------------------------===//
 
+
 def smrd_load : PatFrag <(ops node:$ptr), (load node:$ptr), [{
   auto Ld = cast<LoadSDNode>(N);
   return Ld->getAlignment() >= 4  &&
-    Ld->getAddressSpace() == AMDGPUAS::CONSTANT_ADDRESS &&
-    static_cast<const SITargetLowering *>(getTargetLowering())->isMemOpUniform(N);
+    ((Ld->getAddressSpace() == AMDGPUAS::CONSTANT_ADDRESS &&
+    static_cast<const SITargetLowering *>(getTargetLowering())->isMemOpUniform(N)) ||
+    (Subtarget->getScalarizeGlobalBehavior() && Ld->getAddressSpace() == AMDGPUAS::GLOBAL_ADDRESS &&
+    static_cast<const SITargetLowering *>(getTargetLowering())->isMemOpUniform(N) &&
+    static_cast<const SITargetLowering *>(getTargetLowering())->isMemOpHasNoClobberedMemOperand(N)));
 }]>;
 
 def SMRDImm         : ComplexPattern<i64, 2, "SelectSMRDImm">;
@@ -288,12 +292,6 @@ def : Pat <
 } // let Predicates = [isGCN]
 
 let Predicates = [isVI] in {
-
-// 1. Offset as 20bit DWORD immediate
-def : Pat <
-  (SIload_constant v4i32:$sbase, IMM20bit:$offset),
-  (S_BUFFER_LOAD_DWORD_IMM $sbase, (as_i32imm $offset), 0)
->;
 
 def : Pat <
   (i64 (readcyclecounter)),

@@ -14,11 +14,11 @@ add_llvm_unittest(OrcJITTests
   IndirectionUtilsTest.cpp
   GlobalMappingLayerTest.cpp
   LazyEmittingLayerTest.cpp
-  ObjectLinkingLayerTest.cpp
+  RTDyldObjectLinkingLayerTest.cpp
   ObjectTransformLayerTest.cpp
   OrcCAPITest.cpp
   OrcTestCommon.cpp
   RPCUtilsTest.cpp
   )
 
-target_link_libraries(OrcJITTests ${PTHREAD_LIB})
+target_link_libraries(OrcJITTests ${LLVM_PTHREAD_LIB})

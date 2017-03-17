@@ -330,8 +330,6 @@ SDValue SelectionDAGLegalize::PerformInsertVectorEltInMemory(SDValue Vec,
   // supported by the target.
   EVT VT    = Tmp1.getValueType();
   EVT EltVT = VT.getVectorElementType();
-  EVT IdxVT = Tmp3.getValueType();
-  EVT PtrVT = TLI.getPointerTy(DAG.getDataLayout());
   SDValue StackPtr = DAG.CreateStackTemporary(VT);
 
   int SPFI = cast<FrameIndexSDNode>(StackPtr.getNode())->getIndex();
@@ -341,13 +339,8 @@ SDValue SelectionDAGLegalize::PerformInsertVectorEltInMemory(SDValue Vec,
       DAG.getEntryNode(), dl, Tmp1, StackPtr,
       MachinePointerInfo::getFixedStack(DAG.getMachineFunction(), SPFI));
 
-  // Truncate or zero extend offset to target pointer type.
-  Tmp3 = DAG.getZExtOrTrunc(Tmp3, dl, PtrVT);
-  // Add the offset to the index.
-  unsigned EltSize = EltVT.getSizeInBits()/8;
-  Tmp3 = DAG.getNode(ISD::MUL, dl, IdxVT, Tmp3,
-                     DAG.getConstant(EltSize, dl, IdxVT));
-  SDValue StackPtr2 = DAG.getNode(ISD::ADD, dl, IdxVT, Tmp3, StackPtr);
+  SDValue StackPtr2 = TLI.getVectorElementPointer(DAG, StackPtr, VT, Tmp3);
+
   // Store the scalar value.
   Ch = DAG.getTruncStore(Ch, dl, Tmp2, StackPtr2, MachinePointerInfo(), EltVT);
   // Load the updated vector.
@@ -1209,20 +1202,16 @@ SDValue SelectionDAGLegalize::ExpandExtractFromVectorThroughStack(SDValue Op) {
     }
   }
 
+  EVT VecVT = Vec.getValueType();
+
   if (!Ch.getNode()) {
     // Store the value to a temporary stack slot, then LOAD the returned part.
-    StackPtr = DAG.CreateStackTemporary(Vec.getValueType());
+    StackPtr = DAG.CreateStackTemporary(VecVT);
     Ch = DAG.getStore(DAG.getEntryNode(), dl, Vec, StackPtr,
                       MachinePointerInfo());
   }
 
-  // Add the offset to the index.
-  unsigned EltSize = Vec.getScalarValueSizeInBits() / 8;
-  Idx = DAG.getNode(ISD::MUL, dl, Idx.getValueType(), Idx,
-                    DAG.getConstant(EltSize, SDLoc(Vec), Idx.getValueType()));
-
-  Idx = DAG.getZExtOrTrunc(Idx, dl, TLI.getPointerTy(DAG.getDataLayout()));
-  StackPtr = DAG.getNode(ISD::ADD, dl, Idx.getValueType(), Idx, StackPtr);
+  StackPtr = TLI.getVectorElementPointer(DAG, StackPtr, VecVT, Idx);
 
   SDValue NewLoad;
 
@@ -1232,7 +1221,7 @@ SDValue SelectionDAGLegalize::ExpandExtractFromVectorThroughStack(SDValue Op) {
   else
     NewLoad = DAG.getExtLoad(ISD::EXTLOAD, dl, Op.getValueType(), Ch, StackPtr,
                              MachinePointerInfo(),
-                             Vec.getValueType().getVectorElementType());
+                             VecVT.getVectorElementType());
 
   // Replace the chain going out of the store, by the one out of the load.
   DAG.ReplaceAllUsesOfValueWith(Ch, SDValue(NewLoad.getNode(), 1));
@@ -1256,8 +1245,8 @@ SDValue SelectionDAGLegalize::ExpandInsertToVectorThroughStack(SDValue Op) {
   SDLoc dl(Op);
 
   // Store the value to a temporary stack slot, then LOAD the returned part.
-
-  SDValue StackPtr = DAG.CreateStackTemporary(Vec.getValueType());
+  EVT VecVT = Vec.getValueType();
+  SDValue StackPtr = DAG.CreateStackTemporary(VecVT);
   int FI = cast<FrameIndexSDNode>(StackPtr.getNode())->getIndex();
   MachinePointerInfo PtrInfo =
       MachinePointerInfo::getFixedStack(DAG.getMachineFunction(), FI);
@@ -1266,16 +1255,7 @@ SDValue SelectionDAGLegalize::ExpandInsertToVectorThroughStack(SDValue Op) {
   SDValue Ch = DAG.getStore(DAG.getEntryNode(), dl, Vec, StackPtr, PtrInfo);
 
   // Then store the inserted part.
-
-  // Add the offset to the index.
-  unsigned EltSize = Vec.getScalarValueSizeInBits() / 8;
-
-  Idx = DAG.getNode(ISD::MUL, dl, Idx.getValueType(), Idx,
-                    DAG.getConstant(EltSize, SDLoc(Vec), Idx.getValueType()));
-  Idx = DAG.getZExtOrTrunc(Idx, dl, TLI.getPointerTy(DAG.getDataLayout()));
-
-  SDValue SubStackPtr = DAG.getNode(ISD::ADD, dl, Idx.getValueType(), Idx,
-                                    StackPtr);
+  SDValue SubStackPtr = TLI.getVectorElementPointer(DAG, StackPtr, VecVT, Idx);
 
   // Store the subvector.
   Ch = DAG.getStore(Ch, dl, Part, SubStackPtr, MachinePointerInfo());
@@ -2549,12 +2529,12 @@ SDValue SelectionDAGLegalize::ExpandBITREVERSE(SDValue Op, const SDLoc &dl) {
     APInt MaskHi4(Sz, 0), MaskHi2(Sz, 0), MaskHi1(Sz, 0);
     APInt MaskLo4(Sz, 0), MaskLo2(Sz, 0), MaskLo1(Sz, 0);
     for (unsigned J = 0; J != Sz; J += 8) {
-      MaskHi4 = MaskHi4.Or(APInt(Sz, 0xF0ull << J));
-      MaskLo4 = MaskLo4.Or(APInt(Sz, 0x0Full << J));
-      MaskHi2 = MaskHi2.Or(APInt(Sz, 0xCCull << J));
-      MaskLo2 = MaskLo2.Or(APInt(Sz, 0x33ull << J));
-      MaskHi1 = MaskHi1.Or(APInt(Sz, 0xAAull << J));
-      MaskLo1 = MaskLo1.Or(APInt(Sz, 0x55ull << J));
+      MaskHi4 = MaskHi4 | (0xF0ull << J);
+      MaskLo4 = MaskLo4 | (0x0Full << J);
+      MaskHi2 = MaskHi2 | (0xCCull << J);
+      MaskLo2 = MaskLo2 | (0x33ull << J);
+      MaskHi1 = MaskHi1 | (0xAAull << J);
+      MaskLo1 = MaskLo1 | (0x55ull << J);
     }
 
     // BSWAP if the type is wider than a single byte.
@@ -3111,7 +3091,7 @@ bool SelectionDAGLegalize::ExpandNode(SDNode *Node) {
                             TLI.getVectorIdxTy(DAG.getDataLayout()))));
     }
 
-    Tmp1 = DAG.getNode(ISD::BUILD_VECTOR, dl, VT, Ops);
+    Tmp1 = DAG.getBuildVector(VT, dl, Ops);
     // We may have changed the BUILD_VECTOR type. Cast it back to the Node type.
     Tmp1 = DAG.getNode(ISD::BITCAST, dl, Node->getValueType(0), Tmp1);
     Results.push_back(Tmp1);
@@ -3312,15 +3292,47 @@ bool SelectionDAGLegalize::ExpandNode(SDNode *Node) {
   }
   case ISD::MULHU:
   case ISD::MULHS: {
-    unsigned ExpandOpcode = Node->getOpcode() == ISD::MULHU ? ISD::UMUL_LOHI :
-                                                              ISD::SMUL_LOHI;
+    unsigned ExpandOpcode =
+        Node->getOpcode() == ISD::MULHU ? ISD::UMUL_LOHI : ISD::SMUL_LOHI;
     EVT VT = Node->getValueType(0);
     SDVTList VTs = DAG.getVTList(VT, VT);
-    assert(TLI.isOperationLegalOrCustom(ExpandOpcode, VT) &&
-           "If this wasn't legal, it shouldn't have been created!");
+
     Tmp1 = DAG.getNode(ExpandOpcode, dl, VTs, Node->getOperand(0),
                        Node->getOperand(1));
     Results.push_back(Tmp1.getValue(1));
+    break;
+  }
+  case ISD::UMUL_LOHI:
+  case ISD::SMUL_LOHI: {
+    SDValue LHS = Node->getOperand(0);
+    SDValue RHS = Node->getOperand(1);
+    MVT VT = LHS.getSimpleValueType();
+    unsigned MULHOpcode =
+        Node->getOpcode() == ISD::UMUL_LOHI ? ISD::MULHU : ISD::MULHS;
+
+    if (TLI.isOperationLegalOrCustom(MULHOpcode, VT)) {
+      Results.push_back(DAG.getNode(ISD::MUL, dl, VT, LHS, RHS));
+      Results.push_back(DAG.getNode(MULHOpcode, dl, VT, LHS, RHS));
+      break;
+    }
+
+    SmallVector<SDValue, 4> Halves;
+    EVT HalfType = EVT(VT).getHalfSizedIntegerVT(*DAG.getContext());
+    assert(TLI.isTypeLegal(HalfType));
+    if (TLI.expandMUL_LOHI(Node->getOpcode(), VT, Node, LHS, RHS, Halves,
+                           HalfType, DAG,
+                           TargetLowering::MulExpansionKind::Always)) {
+      for (unsigned i = 0; i < 2; ++i) {
+        SDValue Lo = DAG.getNode(ISD::ZERO_EXTEND, dl, VT, Halves[2 * i]);
+        SDValue Hi = DAG.getNode(ISD::ANY_EXTEND, dl, VT, Halves[2 * i + 1]);
+        SDValue Shift = DAG.getConstant(
+            HalfType.getScalarSizeInBits(), dl,
+            TLI.getShiftAmountTy(HalfType, DAG.getDataLayout()));
+        Hi = DAG.getNode(ISD::SHL, dl, VT, Hi, Shift);
+        Results.push_back(DAG.getNode(ISD::OR, dl, VT, Lo, Hi));
+      }
+      break;
+    }
     break;
   }
   case ISD::MUL: {
@@ -3357,7 +3369,8 @@ bool SelectionDAGLegalize::ExpandNode(SDNode *Node) {
         TLI.isOperationLegalOrCustom(ISD::ANY_EXTEND, VT) &&
         TLI.isOperationLegalOrCustom(ISD::SHL, VT) &&
         TLI.isOperationLegalOrCustom(ISD::OR, VT) &&
-        TLI.expandMUL(Node, Lo, Hi, HalfType, DAG)) {
+        TLI.expandMUL(Node, Lo, Hi, HalfType, DAG,
+                      TargetLowering::MulExpansionKind::OnlyLegalOrCustom)) {
       Lo = DAG.getNode(ISD::ZERO_EXTEND, dl, VT, Lo);
       Hi = DAG.getNode(ISD::ANY_EXTEND, dl, VT, Hi);
       SDValue Shift =
@@ -3777,8 +3790,8 @@ bool SelectionDAGLegalize::ExpandNode(SDNode *Node) {
       Scalars.push_back(DAG.getNode(Node->getOpcode(), dl,
                                     VT.getScalarType(), Ex, Sh));
     }
-    SDValue Result =
-      DAG.getNode(ISD::BUILD_VECTOR, dl, Node->getValueType(0), Scalars);
+
+    SDValue Result = DAG.getBuildVector(Node->getValueType(0), dl, Scalars);
     ReplaceNode(SDValue(Node, 0), Result);
     break;
   }
@@ -4194,6 +4207,24 @@ void SelectionDAGLegalize::PromoteNode(SDNode *Node) {
     Results.push_back(DAG.getNode(TruncOp, dl, OVT, Tmp1));
     break;
   }
+  case ISD::UMUL_LOHI:
+  case ISD::SMUL_LOHI: {
+    // Promote to a multiply in a wider integer type.
+    unsigned ExtOp = Node->getOpcode() == ISD::UMUL_LOHI ? ISD::ZERO_EXTEND
+                                                         : ISD::SIGN_EXTEND;
+    Tmp1 = DAG.getNode(ExtOp, dl, NVT, Node->getOperand(0));
+    Tmp2 = DAG.getNode(ExtOp, dl, NVT, Node->getOperand(1));
+    Tmp1 = DAG.getNode(ISD::MUL, dl, NVT, Tmp1, Tmp2);
+
+    auto &DL = DAG.getDataLayout();
+    unsigned OriginalSize = OVT.getScalarSizeInBits();
+    Tmp2 = DAG.getNode(
+        ISD::SRL, dl, NVT, Tmp1,
+        DAG.getConstant(OriginalSize, dl, TLI.getScalarShiftAmountTy(DL, NVT)));
+    Results.push_back(DAG.getNode(ISD::TRUNCATE, dl, OVT, Tmp1));
+    Results.push_back(DAG.getNode(ISD::TRUNCATE, dl, OVT, Tmp2));
+    break;
+  }
   case ISD::SELECT: {
     unsigned ExtOp, TruncOp;
     if (Node->getValueType(0).isVector() ||
@@ -4393,8 +4424,7 @@ void SelectionDAGLegalize::PromoteNode(SDNode *Node) {
       NewOps.push_back(Elt);
     }
 
-    SDValue NewVec = DAG.getNode(ISD::BUILD_VECTOR, SL, MidVT, NewOps);
-
+    SDValue NewVec = DAG.getBuildVector(MidVT, SL, NewOps);
     Results.push_back(DAG.getNode(ISD::BITCAST, SL, EltVT, NewVec));
     break;
   }

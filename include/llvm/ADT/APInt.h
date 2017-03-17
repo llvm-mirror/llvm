@@ -147,7 +147,7 @@ class LLVM_NODISCARD APInt {
       return *this;
 
     // Mask out the high bits.
-    uint64_t mask = ~uint64_t(0ULL) >> (APINT_BITS_PER_WORD - wordBits);
+    uint64_t mask = UINT64_MAX >> (APINT_BITS_PER_WORD - wordBits);
     if (isSingleWord())
       VAL &= mask;
     else
@@ -196,15 +196,6 @@ class LLVM_NODISCARD APInt {
   /// out-of-line slow case for shl
   APInt shlSlowCase(unsigned shiftAmt) const;
 
-  /// out-of-line slow case for operator&
-  APInt AndSlowCase(const APInt &RHS) const;
-
-  /// out-of-line slow case for operator|
-  APInt OrSlowCase(const APInt &RHS) const;
-
-  /// out-of-line slow case for operator^
-  APInt XorSlowCase(const APInt &RHS) const;
-
   /// out-of-line slow case for operator=
   APInt &AssignSlowCase(const APInt &RHS);
 
@@ -223,6 +214,9 @@ class LLVM_NODISCARD APInt {
   /// out-of-line slow case for countPopulation
   unsigned countPopulationSlowCase() const;
 
+  /// out-of-line slow case for setBits.
+  void setBitsSlowCase(unsigned loBit, unsigned hiBit);
+
 public:
   /// \name Constructors
   /// @{
@@ -240,11 +234,12 @@ public:
   APInt(unsigned numBits, uint64_t val, bool isSigned = false)
       : BitWidth(numBits), VAL(0) {
     assert(BitWidth && "bitwidth too small");
-    if (isSingleWord())
+    if (isSingleWord()) {
       VAL = val;
-    else
+      clearUnusedBits();
+    } else {
       initSlowCase(val, isSigned);
-    clearUnusedBits();
+    }
   }
 
   /// \brief Construct an APInt of numBits width, initialized as bigVal[].
@@ -341,7 +336,7 @@ public:
   /// This checks to see if the value has all bits of the APInt are set or not.
   bool isAllOnesValue() const {
     if (isSingleWord())
-      return VAL == ~integerPart(0) >> (APINT_BITS_PER_WORD - BitWidth);
+      return VAL == UINT64_MAX >> (APINT_BITS_PER_WORD - BitWidth);
     return countPopulationSlowCase() == BitWidth;
   }
 
@@ -406,7 +401,7 @@ public:
 
   /// If this value is smaller than the specified limit, return it, otherwise
   /// return the limit value.  This causes the value to saturate to the limit.
-  uint64_t getLimitedValue(uint64_t Limit = ~0ULL) const {
+  uint64_t getLimitedValue(uint64_t Limit = UINT64_MAX) const {
     return (getActiveBits() > 64 || getZExtValue() > Limit) ? Limit
                                                             : getZExtValue();
   }
@@ -501,12 +496,26 @@ public:
   ///
   /// \returns An APInt value with the requested bits set.
   static APInt getBitsSet(unsigned numBits, unsigned loBit, unsigned hiBit) {
-    assert(hiBit <= numBits && "hiBit out of range");
-    assert(loBit < numBits && "loBit out of range");
-    if (hiBit < loBit)
-      return getLowBitsSet(numBits, hiBit) |
-             getHighBitsSet(numBits, numBits - loBit);
-    return getLowBitsSet(numBits, hiBit - loBit).shl(loBit);
+    APInt Res(numBits, 0);
+    Res.setBits(loBit, hiBit);
+    return Res;
+  }
+
+  /// \brief Get a value with upper bits starting at loBit set.
+  ///
+  /// Constructs an APInt value that has a contiguous range of bits set. The
+  /// bits from loBit (inclusive) to numBits (exclusive) will be set. All other
+  /// bits will be zero. For example, with parameters(32, 12) you would get
+  /// 0xFFFFF000.
+  ///
+  /// \param numBits the intended bit width of the result
+  /// \param loBit the index of the lowest bit to set.
+  ///
+  /// \returns An APInt value with the requested bits set.
+  static APInt getBitsSetFrom(unsigned numBits, unsigned loBit) {
+    APInt Res(numBits, 0);
+    Res.setBitsFrom(loBit);
+    return Res;
   }
 
   /// \brief Get a value with high bits set
@@ -516,15 +525,9 @@ public:
   /// \param numBits the bitwidth of the result
   /// \param hiBitsSet the number of high-order bits set in the result.
   static APInt getHighBitsSet(unsigned numBits, unsigned hiBitsSet) {
-    assert(hiBitsSet <= numBits && "Too many bits to set!");
-    // Handle a degenerate case, to avoid shifting by word size
-    if (hiBitsSet == 0)
-      return APInt(numBits, 0);
-    unsigned shiftAmt = numBits - hiBitsSet;
-    // For small values, return quickly
-    if (numBits <= APINT_BITS_PER_WORD)
-      return APInt(numBits, ~0ULL << shiftAmt);
-    return getAllOnesValue(numBits).shl(shiftAmt);
+    APInt Res(numBits, 0);
+    Res.setHighBits(hiBitsSet);
+    return Res;
   }
 
   /// \brief Get a value with low bits set
@@ -534,16 +537,9 @@ public:
   /// \param numBits the bitwidth of the result
   /// \param loBitsSet the number of low-order bits set in the result.
   static APInt getLowBitsSet(unsigned numBits, unsigned loBitsSet) {
-    assert(loBitsSet <= numBits && "Too many bits to set!");
-    // Handle a degenerate case, to avoid shifting by word size
-    if (loBitsSet == 0)
-      return APInt(numBits, 0);
-    if (loBitsSet == APINT_BITS_PER_WORD)
-      return APInt(numBits, UINT64_MAX);
-    // For small values, return quickly.
-    if (loBitsSet <= APINT_BITS_PER_WORD)
-      return APInt(numBits, UINT64_MAX >> (APINT_BITS_PER_WORD - loBitsSet));
-    return getAllOnesValue(numBits).lshr(numBits - loBitsSet);
+    APInt Res(numBits, 0);
+    Res.setLowBits(loBitsSet);
+    return Res;
   }
 
   /// \brief Return a value containing V broadcasted over NewLen bits.
@@ -612,17 +608,6 @@ public:
   ///
   /// \returns *this decremented by one.
   APInt &operator--();
-
-  /// \brief Unary bitwise complement operator.
-  ///
-  /// Performs a bitwise complement operation on this APInt.
-  ///
-  /// \returns an APInt that is the bitwise complement of *this
-  APInt operator~() const {
-    APInt Result(*this);
-    Result.flipAllBits();
-    return Result;
-  }
 
   /// \brief Logical negation operator.
   ///
@@ -698,6 +683,13 @@ public:
   /// \returns *this after ANDing with RHS.
   APInt &operator&=(const APInt &RHS);
 
+  /// \brief Bitwise AND assignment operator.
+  ///
+  /// Performs a bitwise AND operation on this APInt and RHS. RHS is
+  /// logically zero-extended or truncated to match the bit-width of
+  /// the LHS.
+  APInt &operator&=(uint64_t RHS);
+
   /// \brief Bitwise OR assignment operator.
   ///
   /// Performs a bitwise OR operation on this APInt and RHS. The result is
@@ -728,6 +720,21 @@ public:
   ///
   /// \returns *this after XORing with RHS.
   APInt &operator^=(const APInt &RHS);
+
+  /// \brief Bitwise XOR assignment operator.
+  ///
+  /// Performs a bitwise XOR operation on this APInt and RHS. RHS is
+  /// logically zero-extended or truncated to match the bit-width of
+  /// the LHS.
+  APInt &operator^=(uint64_t RHS) {
+    if (isSingleWord()) {
+      VAL ^= RHS;
+      clearUnusedBits();
+    } else {
+      pVal[0] ^= RHS;
+    }
+    return *this;
+  }
 
   /// \brief Multiplication assignment operator.
   ///
@@ -765,59 +772,6 @@ public:
   /// @}
   /// \name Binary Operators
   /// @{
-
-  /// \brief Bitwise AND operator.
-  ///
-  /// Performs a bitwise AND operation on *this and RHS.
-  ///
-  /// \returns An APInt value representing the bitwise AND of *this and RHS.
-  APInt operator&(const APInt &RHS) const {
-    assert(BitWidth == RHS.BitWidth && "Bit widths must be the same");
-    if (isSingleWord())
-      return APInt(getBitWidth(), VAL & RHS.VAL);
-    return AndSlowCase(RHS);
-  }
-  APInt And(const APInt &RHS) const { return this->operator&(RHS); }
-
-  /// \brief Bitwise OR operator.
-  ///
-  /// Performs a bitwise OR operation on *this and RHS.
-  ///
-  /// \returns An APInt value representing the bitwise OR of *this and RHS.
-  APInt operator|(const APInt &RHS) const {
-    assert(BitWidth == RHS.BitWidth && "Bit widths must be the same");
-    if (isSingleWord())
-      return APInt(getBitWidth(), VAL | RHS.VAL);
-    return OrSlowCase(RHS);
-  }
-
-  /// \brief Bitwise OR function.
-  ///
-  /// Performs a bitwise or on *this and RHS. This is implemented by simply
-  /// calling operator|.
-  ///
-  /// \returns An APInt value representing the bitwise OR of *this and RHS.
-  APInt Or(const APInt &RHS) const { return this->operator|(RHS); }
-
-  /// \brief Bitwise XOR operator.
-  ///
-  /// Performs a bitwise XOR operation on *this and RHS.
-  ///
-  /// \returns An APInt value representing the bitwise XOR of *this and RHS.
-  APInt operator^(const APInt &RHS) const {
-    assert(BitWidth == RHS.BitWidth && "Bit widths must be the same");
-    if (isSingleWord())
-      return APInt(BitWidth, VAL ^ RHS.VAL);
-    return XorSlowCase(RHS);
-  }
-
-  /// \brief Bitwise XOR function.
-  ///
-  /// Performs a bitwise XOR operation on *this and RHS. This is implemented
-  /// through the usage of operator^.
-  ///
-  /// \returns An APInt value representing the bitwise XOR of *this and RHS.
-  APInt Xor(const APInt &RHS) const { return this->operator^(RHS); }
 
   /// \brief Multiplication operator.
   ///
@@ -1144,7 +1098,11 @@ public:
 
   /// This operation tests if there are any pairs of corresponding bits
   /// between this APInt and RHS that are both set.
-  bool intersects(const APInt &RHS) const { return (*this & RHS) != 0; }
+  bool intersects(const APInt &RHS) const {
+    APInt temp(*this);
+    temp &= RHS;
+    return temp != 0;
+  }
 
   /// @}
   /// \name Resizing Operators
@@ -1217,6 +1175,44 @@ public:
   /// Set the given bit to 1 whose position is given as "bitPosition".
   void setBit(unsigned bitPosition);
 
+  /// Set the bits from loBit (inclusive) to hiBit (exclusive) to 1.
+  void setBits(unsigned loBit, unsigned hiBit) {
+    assert(hiBit <= BitWidth && "hiBit out of range");
+    assert(loBit <= BitWidth && "loBit out of range");
+    if (loBit == hiBit)
+      return;
+    if (loBit > hiBit) {
+      setLowBits(hiBit);
+      setHighBits(BitWidth - loBit);
+      return;
+    }
+    if (loBit < APINT_BITS_PER_WORD && hiBit <= APINT_BITS_PER_WORD) {
+      uint64_t mask = UINT64_MAX >> (APINT_BITS_PER_WORD - (hiBit - loBit));
+      mask <<= loBit;
+      if (isSingleWord())
+        VAL |= mask;
+      else
+        pVal[0] |= mask;
+    } else {
+      setBitsSlowCase(loBit, hiBit);
+    }
+  }
+
+  /// Set the top bits starting from loBit.
+  void setBitsFrom(unsigned loBit) {
+    return setBits(loBit, BitWidth);
+  }
+
+  /// Set the bottom loBits bits.
+  void setLowBits(unsigned loBits) {
+    return setBits(0, loBits);
+  }
+
+  /// Set the top hiBits bits.
+  void setHighBits(unsigned hiBits) {
+    return setBits(BitWidth - hiBits, BitWidth);
+  }
+
   /// \brief Set every bit to 0.
   void clearAllBits() {
     if (isSingleWord())
@@ -1246,6 +1242,12 @@ public:
   /// Toggle a given bit to its opposite value whose position is given
   /// as "bitPosition".
   void flipBit(unsigned bitPosition);
+
+  /// Insert the bits from a smaller APInt starting at bitPosition.
+  void insertBits(const APInt &SubBits, unsigned bitPosition);
+
+  /// Return an APInt with the extracted bits [bitPosition,bitPosition+numBits).
+  APInt extractBits(unsigned numBits, unsigned bitPosition) const;
 
   /// @}
   /// \name Value Characterization Functions
@@ -1723,6 +1725,74 @@ inline bool operator==(uint64_t V1, const APInt &V2) { return V2 == V1; }
 
 inline bool operator!=(uint64_t V1, const APInt &V2) { return V2 != V1; }
 
+/// \brief Unary bitwise complement operator.
+///
+/// \returns an APInt that is the bitwise complement of \p v.
+inline APInt operator~(APInt v) {
+  v.flipAllBits();
+  return v;
+}
+
+inline APInt operator&(APInt a, const APInt &b) {
+  a &= b;
+  return a;
+}
+
+inline APInt operator&(const APInt &a, APInt &&b) {
+  b &= a;
+  return std::move(b);
+}
+
+inline APInt operator&(APInt a, uint64_t RHS) {
+  a &= RHS;
+  return a;
+}
+
+inline APInt operator&(uint64_t LHS, APInt b) {
+  b &= LHS;
+  return b;
+}
+
+inline APInt operator|(APInt a, const APInt &b) {
+  a |= b;
+  return a;
+}
+
+inline APInt operator|(const APInt &a, APInt &&b) {
+  b |= a;
+  return std::move(b);
+}
+
+inline APInt operator|(APInt a, uint64_t RHS) {
+  a |= RHS;
+  return a;
+}
+
+inline APInt operator|(uint64_t LHS, APInt b) {
+  b |= LHS;
+  return b;
+}
+
+inline APInt operator^(APInt a, const APInt &b) {
+  a ^= b;
+  return a;
+}
+
+inline APInt operator^(const APInt &a, APInt &&b) {
+  b ^= a;
+  return std::move(b);
+}
+
+inline APInt operator^(APInt a, uint64_t RHS) {
+  a ^= RHS;
+  return a;
+}
+
+inline APInt operator^(uint64_t LHS, APInt b) {
+  b ^= LHS;
+  return b;
+}
+
 inline raw_ostream &operator<<(raw_ostream &OS, const APInt &I) {
   I.print(OS, true);
   return OS;
@@ -1924,37 +1994,6 @@ inline APInt urem(const APInt &LHS, const APInt &RHS) { return LHS.urem(RHS); }
 ///
 /// Performs multiplication on APInt values.
 inline APInt mul(const APInt &LHS, const APInt &RHS) { return LHS * RHS; }
-
-/// \brief Function for addition operation.
-///
-/// Performs addition on APInt values.
-inline APInt add(const APInt &LHS, const APInt &RHS) { return LHS + RHS; }
-
-/// \brief Function for subtraction operation.
-///
-/// Performs subtraction on APInt values.
-inline APInt sub(const APInt &LHS, const APInt &RHS) { return LHS - RHS; }
-
-/// \brief Bitwise AND function for APInt.
-///
-/// Performs bitwise AND operation on APInt LHS and
-/// APInt RHS.
-inline APInt And(const APInt &LHS, const APInt &RHS) { return LHS & RHS; }
-
-/// \brief Bitwise OR function for APInt.
-///
-/// Performs bitwise OR operation on APInt LHS and APInt RHS.
-inline APInt Or(const APInt &LHS, const APInt &RHS) { return LHS | RHS; }
-
-/// \brief Bitwise XOR function for APInt.
-///
-/// Performs bitwise XOR operation on APInt.
-inline APInt Xor(const APInt &LHS, const APInt &RHS) { return LHS ^ RHS; }
-
-/// \brief Bitwise complement function.
-///
-/// Performs a bitwise complement operation on APInt.
-inline APInt Not(const APInt &APIVal) { return ~APIVal; }
 
 } // End of APIntOps namespace
 

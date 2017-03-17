@@ -116,9 +116,9 @@ v_cndmask_b32_e32 v1, v2, v3, vcc
 // VI:   v_readlane_b32 s1, v2, s3 ; encoding: [0x01,0x00,0x89,0xd2,0x02,0x07,0x00,0x00]
 v_readlane_b32 s1, v2, s3
 
-// SICI: v_writelane_b32 v1, s2, s3 ; encoding: [0x02,0x06,0x02,0x04]
-// VI:   v_writelane_b32 v1, s2, s3 ; encoding: [0x01,0x00,0x8a,0xd2,0x02,0x06,0x00,0x00]
-v_writelane_b32 v1, s2, s3
+// SICI: v_writelane_b32 v1, s2, 4 ; encoding: [0x02,0x08,0x03,0x04]
+// VI:   v_writelane_b32 v1, s2, 4 ; encoding: [0x01,0x00,0x8a,0xd2,0x02,0x08,0x01,0x00]
+v_writelane_b32 v1, s2, 4
 
 // SICI: v_add_f32_e32 v1, v2, v3 ; encoding: [0x02,0x07,0x02,0x06]
 // VI:   v_add_f32_e32 v1, v2, v3 ; encoding: [0x02,0x07,0x02,0x02]
@@ -422,12 +422,12 @@ v_mac_f16_e32 v1, v2, v3
 
 // NOSICI: error: instruction not supported on this GPU
 // NOSICI: v_madmk_f16 v1, v2, 64.0, v3
-// VI:     v_madmk_f16_e32 v1, v2, 0x42800000, v3 ; encoding: [0x02,0x07,0x02,0x48,0x00,0x00,0x80,0x42]
+// VI:     v_madmk_f16_e32 v1, v2, 0x5400, v3 ; encoding: [0x02,0x07,0x02,0x48,0x00,0x54,0x00,0x00]
 v_madmk_f16 v1, v2, 64.0, v3
 
 // NOSICI: error: instruction not supported on this GPU
 // NOSICI: v_madak_f16 v1, v2, v3, 64.0
-// VI:     v_madak_f16_e32 v1, v2, v3, 0x42800000 ; encoding: [0x02,0x07,0x02,0x4a,0x00,0x00,0x80,0x42]
+// VI:     v_madak_f16_e32 v1, v2, v3, 0x5400 ; encoding: [0x02,0x07,0x02,0x4a,0x00,0x54,0x00,0x00]
 v_madak_f16 v1, v2, v3, 64.0
 
 // NOSICI: error: instruction not supported on this GPU
@@ -461,9 +461,9 @@ v_lshlrev_b16_e32 v1, v2, v3
 v_lshrrev_b16_e32 v1, v2, v3
 
 // NOSICI: error: instruction not supported on this GPU
-// NOSICI: v_ashrrev_b16_e32 v1, v2, v3
-// VI:     v_ashrrev_b16_e32 v1, v2, v3 ; encoding: [0x02,0x07,0x02,0x58]
-v_ashrrev_b16_e32 v1, v2, v3
+// NOSICI: v_ashrrev_i16_e32 v1, v2, v3
+// VI:     v_ashrrev_i16_e32 v1, v2, v3 ; encoding: [0x02,0x07,0x02,0x58]
+v_ashrrev_i16_e32 v1, v2, v3
 
 // NOSICI: error: instruction not supported on this GPU
 // NOSICI: v_max_f16_e32 v1, v2, v3

@@ -276,6 +276,10 @@ public:
   /// Determine whether the no signed wrap flag is set.
   bool hasNoSignedWrap() const;
 
+  /// Drops flags that may cause this instruction to evaluate to poison despite
+  /// having non-poison inputs.
+  void dropPoisonGeneratingFlags();
+
   /// Determine whether the exact flag is set.
   bool isExact() const;
 
@@ -597,21 +601,6 @@ protected:
 private:
   /// Create a copy of this instruction.
   Instruction *cloneImpl() const;
-};
-
-// Instruction* is only 4-byte aligned.
-template<>
-class PointerLikeTypeTraits<Instruction*> {
-  typedef Instruction* PT;
-
-public:
-  static inline void *getAsVoidPointer(PT P) { return P; }
-
-  static inline PT getFromVoidPointer(void *P) {
-    return static_cast<PT>(P);
-  }
-
-  enum { NumLowBitsAvailable = 2 };
 };
 
 } // end namespace llvm

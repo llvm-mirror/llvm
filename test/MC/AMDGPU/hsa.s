@@ -14,6 +14,8 @@
 // ELF: 0020: 03000000 414D4400 04000700 07000000
 // ELF: 0030: 00000000 00000000 414D4400 414D4447
 // ELF: 0040: 50550000
+// We can't check binary representation of metadata note: it is different on
+// Windows and Linux because of carriage return on Windows
 
 // ELF: Symbol {
 // ELF: Name: amd_kernel_code_t_minimal
@@ -35,9 +37,28 @@
 .hsa_code_object_isa 7,0,0,"AMD","AMDGPU"
 // ASM: .hsa_code_object_isa 7,0,0,"AMD","AMDGPU"
 
+.amdgpu_runtime_metadata
+    {
+        amd.MDVersion: [ 2, 0 ]
+        amd.Kernels: [
+            { amd.KernelName: amd_kernel_code_t_test_all },
+            { amd.KernelName: amd_kernel_code_t_minimal }
+        ]
+    }
+.end_amdgpu_runtime_metadata
+
+// ASM: .amdgpu_runtime_metadata
+// ASM:  {
+// ASM:    amd.MDVersion: [ 2, 0 ]
+// ASM:    amd.IsaInfo: { amd.IsaInfoWavefrontSize: 64, amd.IsaInfoLocalMemorySize: 65536, amd.IsaInfoEUsPerCU: 4, amd.IsaInfoMaxWavesPerEU: 10, amd.IsaInfoMaxFlatWorkGroupSize: 2048, amd.IsaInfoSGPRAllocGranule: 8, amd.IsaInfoTotalNumSGPRs: 512, amd.IsaInfoAddressableNumSGPRs: 104, amd.IsaInfoVGPRAllocGranule: 4, amd.IsaInfoTotalNumVGPRs: 256, amd.IsaInfoAddressableNumVGPRs: 256 },
+// ASM:    amd.Kernels:
+// ASM:      - { amd.KernelName: amd_kernel_code_t_test_all }
+// ASM:      - { amd.KernelName: amd_kernel_code_t_minimal }
+// ASM:  }
+// ASM: .end_amdgpu_runtime_metadata
+
 .amdgpu_hsa_kernel amd_kernel_code_t_test_all
 .amdgpu_hsa_kernel amd_kernel_code_t_minimal
-
 
 amd_kernel_code_t_test_all:
 ; Test all amd_kernel_code_t members with non-default values.
@@ -193,7 +214,7 @@ amd_kernel_code_t_minimal:
 // ASM-LABEL: {{^}}amd_kernel_code_t_minimal:
 // ASM: .amd_kernel_code_t
 // ASM:	amd_code_version_major = 1
-// ASM:	amd_code_version_minor = 0
+// ASM:	amd_code_version_minor = 1
 // ASM:	amd_machine_kind = 1
 // ASM:	amd_machine_version_major = 7
 // ASM:	amd_machine_version_minor = 0
@@ -252,6 +273,6 @@ amd_kernel_code_t_minimal:
 // ASM:	group_segment_alignment = 4
 // ASM:	private_segment_alignment = 4
 // ASM:	wavefront_size = 6
-// ASM:	call_convention = 0
+// ASM:	call_convention = -1
 // ASM:	runtime_loader_kernel_symbol = 0
 // ASM: .end_amd_kernel_code_t

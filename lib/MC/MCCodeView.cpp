@@ -200,7 +200,7 @@ void CodeViewContext::emitLineTableForFunction(MCObjectStreamer &OS,
   OS.EmitIntValue(unsigned(ModuleSubstreamKind::Lines), 4);
   OS.emitAbsoluteSymbolDiff(LineEnd, LineBegin, 4);
   OS.EmitLabel(LineBegin);
-  OS.EmitCOFFSecRel32(FuncBegin);
+  OS.EmitCOFFSecRel32(FuncBegin, /*Offset=*/0);
   OS.EmitCOFFSectionIndex(FuncBegin);
 
   // Actual line info.
@@ -361,7 +361,9 @@ void CodeViewContext::encodeInlineLineTable(MCAsmLayout &Layout,
     // Exit early if our line table would produce an oversized InlineSiteSym
     // record. Account for the ChangeCodeLength annotation emitted after the
     // loop ends.
-    size_t MaxBufferSize = MaxRecordLength - sizeof(InlineSiteSym::Hdr) - 8;
+    constexpr uint32_t InlineSiteSize = 12;
+    constexpr uint32_t AnnotationSize = 8;
+    size_t MaxBufferSize = MaxRecordLength - InlineSiteSize - AnnotationSize;
     if (Buffer.size() >= MaxBufferSize)
       break;
 
@@ -507,17 +509,17 @@ void CodeViewContext::encodeDefRange(MCAsmLayout &Layout,
       // are artificially constructing.
       size_t RecordSize = FixedSizePortion.size() +
                           sizeof(LocalVariableAddrRange) + 4 * NumGaps;
-      // Write out the recrod size.
-      support::endian::Writer<support::little>(OS).write<uint16_t>(RecordSize);
+      // Write out the record size.
+      LEWriter.write<uint16_t>(RecordSize);
       // Write out the fixed size prefix.
       OS << FixedSizePortion;
       // Make space for a fixup that will eventually have a section relative
       // relocation pointing at the offset where the variable becomes live.
       Fixups.push_back(MCFixup::create(Contents.size(), BE, FK_SecRel_4));
-      Contents.resize(Contents.size() + 4); // Fixup for code start.
+      LEWriter.write<uint32_t>(0); // Fixup for code start.
       // Make space for a fixup that will record the section index for the code.
       Fixups.push_back(MCFixup::create(Contents.size(), BE, FK_SecRel_2));
-      Contents.resize(Contents.size() + 2); // Fixup for section index.
+      LEWriter.write<uint16_t>(0); // Fixup for section index.
       // Write down the range's extent.
       LEWriter.write<uint16_t>(Chunk);
 
@@ -527,7 +529,7 @@ void CodeViewContext::encodeDefRange(MCAsmLayout &Layout,
     } while (RangeSize > 0);
 
     // Emit the gaps afterwards.
-    assert((NumGaps == 0 || Bias < MaxDefRange) &&
+    assert((NumGaps == 0 || Bias <= MaxDefRange) &&
            "large ranges should not have gaps");
     unsigned GapStartOffset = GapAndRangeSizes[I].second;
     for (++I; I != J; ++I) {
@@ -535,7 +537,7 @@ void CodeViewContext::encodeDefRange(MCAsmLayout &Layout,
       assert(I < GapAndRangeSizes.size());
       std::tie(GapSize, RangeSize) = GapAndRangeSizes[I];
       LEWriter.write<uint16_t>(GapStartOffset);
-      LEWriter.write<uint16_t>(RangeSize);
+      LEWriter.write<uint16_t>(GapSize);
       GapStartOffset += GapSize + RangeSize;
     }
   }

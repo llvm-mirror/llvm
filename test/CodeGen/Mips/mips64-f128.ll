@@ -1,11 +1,15 @@
 ; RUN: llc -mtriple=mips64el-unknown-unknown -mcpu=mips4 -mattr=+soft-float -O1 \
-; RUN:     -disable-mips-delay-filler < %s | FileCheck %s -check-prefixes=ALL,C_CC_FMT,PRER6
+; RUN:     -disable-mips-delay-filler -relocation-model=pic < %s | FileCheck \
+; RUN:     %s -check-prefixes=ALL,C_CC_FMT,PRER6
 ; RUN: llc -mtriple=mips64el-unknown-unknown -mcpu=mips64 -mattr=+soft-float -O1 \
-; RUN:     -disable-mips-delay-filler < %s | FileCheck %s -check-prefixes=ALL,C_CC_FMT,PRER6
-; RUN: llc -mtriple=mips64el-unknown-unknown -mcpu=mips64r2 -mattr=+soft-float -O1 \
-; RUN:     -disable-mips-delay-filler < %s | FileCheck %s -check-prefixes=ALL,C_CC_FMT,PRER6
-; RUN: llc -mtriple=mips64el-unknown-unknown -mcpu=mips64r6 -mattr=+soft-float -O1 \
-; RUN:     -disable-mips-delay-filler < %s | FileCheck %s -check-prefixes=ALL,CMP_CC_FMT,R6
+; RUN:     -disable-mips-delay-filler -relocation-model=pic < %s | FileCheck \
+; RUN:     %s -check-prefixes=ALL,C_CC_FMT,PRER6
+; RUN: llc -mtriple=mips64el-unknown-unknown -mcpu=mips64r2 -mattr=+soft-float \
+; RUN:     -O1 -disable-mips-delay-filler -relocation-model=pic < %s | FileCheck \
+; RUN:     %s -check-prefixes=ALL,C_CC_FMT,PRER6
+; RUN: llc -mtriple=mips64el-unknown-unknown -mcpu=mips64r6 -mattr=+soft-float \
+; RUN:     -O1 -disable-mips-delay-filler -relocation-model=pic < %s | FileCheck \
+; RUN:     %s -check-prefixes=ALL,CMP_CC_FMT,R6
 
 @gld0 = external global fp128
 @gld1 = external global fp128
@@ -573,10 +577,10 @@ entry:
 
 ; ALL-LABEL: store_LD_LD:
 ; ALL: ld $[[R0:[0-9]+]], %got_disp(gld1)
-; ALL: ld $[[R1:[0-9]+]], 0($[[R0]])
 ; ALL: ld $[[R2:[0-9]+]], 8($[[R0]])
 ; ALL: ld $[[R3:[0-9]+]], %got_disp(gld0)
 ; ALL: sd $[[R2]], 8($[[R3]])
+; ALL: ld $[[R1:[0-9]+]], 0($[[R0]])
 ; ALL: sd $[[R1]], 0($[[R3]])
 
 define void @store_LD_LD() {

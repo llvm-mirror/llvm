@@ -17,6 +17,7 @@
 #define LLVM_OBJECTYAML_MACHOYAML_H
 
 #include "llvm/ObjectYAML/YAML.h"
+#include "llvm/ObjectYAML/DWARFYAML.h"
 #include "llvm/Support/MachO.h"
 
 namespace llvm {
@@ -52,6 +53,7 @@ struct LoadCommand {
   virtual ~LoadCommand();
   llvm::MachO::macho_load_command Data;
   std::vector<Section> Sections;
+  std::vector<MachO::build_tool_version> Tools;
   std::vector<llvm::yaml::Hex8> PayloadBytes;
   std::string PayloadString;
   uint64_t ZeroPadBytes;
@@ -104,18 +106,13 @@ struct LinkEditData {
   bool isEmpty() const;
 };
 
-struct DWARFData {
-  std::vector<StringRef> DebugStrings;
-
-  bool isEmpty() const;
-};
-
 struct Object {
+  bool IsLittleEndian;
   FileHeader Header;
   std::vector<LoadCommand> LoadCommands;
   std::vector<Section> Sections;
   LinkEditData LinkEdit;
-  DWARFData DWARF;
+  DWARFYAML::Data DWARF;
 };
 
 struct FatHeader {
@@ -143,16 +140,14 @@ struct UniversalBinary {
 
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::MachOYAML::LoadCommand)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::MachOYAML::Section)
-LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::yaml::Hex8)
-LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::yaml::Hex64)
 LLVM_YAML_IS_SEQUENCE_VECTOR(int64_t)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::MachOYAML::RebaseOpcode)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::MachOYAML::BindOpcode)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::MachOYAML::ExportEntry)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::MachOYAML::NListEntry)
-LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::StringRef)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::MachOYAML::Object)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::MachOYAML::FatArch)
+LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::MachO::build_tool_version)
 
 namespace llvm {
 namespace yaml {
@@ -205,8 +200,8 @@ template <> struct MappingTraits<MachOYAML::NListEntry> {
   static void mapping(IO &IO, MachOYAML::NListEntry &NListEntry);
 };
 
-template <> struct MappingTraits<MachOYAML::DWARFData> {
-  static void mapping(IO &IO, MachOYAML::DWARFData &DWARF);
+template <> struct MappingTraits<MachO::build_tool_version> {
+  static void mapping(IO &IO, MachO::build_tool_version &tool);
 };
 
 #define HANDLE_LOAD_COMMAND(LCName, LCValue, LCStruct)                         \

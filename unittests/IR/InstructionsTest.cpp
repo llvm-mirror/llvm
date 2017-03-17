@@ -19,6 +19,7 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/NoFolder.h"
 #include "llvm/IR/Operator.h"
 #include "gtest/gtest.h"
 #include <memory>
@@ -577,6 +578,101 @@ TEST(InstructionsTest, AlterInvokeBundles) {
   EXPECT_EQ(Invoke->getDebugLoc(), Clone->getDebugLoc());
   EXPECT_EQ(Clone->getNumOperandBundles(), 1U);
   EXPECT_TRUE(Clone->getOperandBundle("after").hasValue());
+}
+
+TEST_F(ModuleWithFunctionTest, DropPoisonGeneratingFlags) {
+  auto *OnlyBB = BasicBlock::Create(Ctx, "bb", F);
+  auto *Arg0 = &*F->arg_begin();
+
+  IRBuilder<NoFolder> B(Ctx);
+  B.SetInsertPoint(OnlyBB);
+
+  {
+    auto *UI =
+        cast<Instruction>(B.CreateUDiv(Arg0, Arg0, "", /*isExact*/ true));
+    ASSERT_TRUE(UI->isExact());
+    UI->dropPoisonGeneratingFlags();
+    ASSERT_FALSE(UI->isExact());
+  }
+
+  {
+    auto *ShrI =
+        cast<Instruction>(B.CreateLShr(Arg0, Arg0, "", /*isExact*/ true));
+    ASSERT_TRUE(ShrI->isExact());
+    ShrI->dropPoisonGeneratingFlags();
+    ASSERT_FALSE(ShrI->isExact());
+  }
+
+  {
+    auto *AI = cast<Instruction>(
+        B.CreateAdd(Arg0, Arg0, "", /*HasNUW*/ true, /*HasNSW*/ false));
+    ASSERT_TRUE(AI->hasNoUnsignedWrap());
+    AI->dropPoisonGeneratingFlags();
+    ASSERT_FALSE(AI->hasNoUnsignedWrap());
+    ASSERT_FALSE(AI->hasNoSignedWrap());
+  }
+
+  {
+    auto *SI = cast<Instruction>(
+        B.CreateAdd(Arg0, Arg0, "", /*HasNUW*/ false, /*HasNSW*/ true));
+    ASSERT_TRUE(SI->hasNoSignedWrap());
+    SI->dropPoisonGeneratingFlags();
+    ASSERT_FALSE(SI->hasNoUnsignedWrap());
+    ASSERT_FALSE(SI->hasNoSignedWrap());
+  }
+
+  {
+    auto *ShlI = cast<Instruction>(
+        B.CreateShl(Arg0, Arg0, "", /*HasNUW*/ true, /*HasNSW*/ true));
+    ASSERT_TRUE(ShlI->hasNoSignedWrap());
+    ASSERT_TRUE(ShlI->hasNoUnsignedWrap());
+    ShlI->dropPoisonGeneratingFlags();
+    ASSERT_FALSE(ShlI->hasNoUnsignedWrap());
+    ASSERT_FALSE(ShlI->hasNoSignedWrap());
+  }
+
+  {
+    Value *GEPBase = Constant::getNullValue(B.getInt8PtrTy());
+    auto *GI = cast<GetElementPtrInst>(B.CreateInBoundsGEP(GEPBase, {Arg0}));
+    ASSERT_TRUE(GI->isInBounds());
+    GI->dropPoisonGeneratingFlags();
+    ASSERT_FALSE(GI->isInBounds());
+  }
+}
+
+TEST(InstructionsTest, GEPIndices) {
+  LLVMContext Context;
+  IRBuilder<NoFolder> Builder(Context);
+  Type *ElementTy = Builder.getInt8Ty();
+  Type *ArrTy = ArrayType::get(ArrayType::get(ElementTy, 64), 64);
+  Value *Indices[] = {
+    Builder.getInt32(0),
+    Builder.getInt32(13),
+    Builder.getInt32(42) };
+
+  Value *V = Builder.CreateGEP(ArrTy, UndefValue::get(PointerType::getUnqual(ArrTy)),
+                               Indices);
+  ASSERT_TRUE(isa<GetElementPtrInst>(V));
+
+  auto *GEPI = cast<GetElementPtrInst>(V);
+  ASSERT_NE(GEPI->idx_begin(), GEPI->idx_end());
+  ASSERT_EQ(GEPI->idx_end(), std::next(GEPI->idx_begin(), 3));
+  EXPECT_EQ(Indices[0], GEPI->idx_begin()[0]);
+  EXPECT_EQ(Indices[1], GEPI->idx_begin()[1]);
+  EXPECT_EQ(Indices[2], GEPI->idx_begin()[2]);
+  EXPECT_EQ(GEPI->idx_begin(), GEPI->indices().begin());
+  EXPECT_EQ(GEPI->idx_end(), GEPI->indices().end());
+
+  const auto *CGEPI = GEPI;
+  ASSERT_NE(CGEPI->idx_begin(), CGEPI->idx_end());
+  ASSERT_EQ(CGEPI->idx_end(), std::next(CGEPI->idx_begin(), 3));
+  EXPECT_EQ(Indices[0], CGEPI->idx_begin()[0]);
+  EXPECT_EQ(Indices[1], CGEPI->idx_begin()[1]);
+  EXPECT_EQ(Indices[2], CGEPI->idx_begin()[2]);
+  EXPECT_EQ(CGEPI->idx_begin(), CGEPI->indices().begin());
+  EXPECT_EQ(CGEPI->idx_end(), CGEPI->indices().end());
+
+  delete GEPI;
 }
 
 } // end anonymous namespace

@@ -1,3 +1,16 @@
+//===-- llvm/CodeGen/DwarfCompileUnit.cpp - Dwarf Compile Units -----------===//
+//
+//                     The LLVM Compiler Infrastructure
+//
+// This file is distributed under the University of Illinois Open Source
+// License. See LICENSE.TXT for details.
+//
+//===----------------------------------------------------------------------===//
+//
+// This file contains support for constructing a dwarf compile unit.
+//
+//===----------------------------------------------------------------------===//
+
 #include "DwarfCompileUnit.h"
 #include "DwarfExpression.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -73,9 +86,8 @@ unsigned DwarfCompileUnit::getOrCreateSourceID(StringRef FileName,
       Asm->OutStreamer->hasRawTextSupport() ? 0 : getUniqueID());
 }
 
-/// getOrCreateGlobalVariableDIE - get or create global variable DIE.
 DIE *DwarfCompileUnit::getOrCreateGlobalVariableDIE(
-    const DIGlobalVariable *GV, const GlobalVariable *Global) {
+    const DIGlobalVariable *GV, ArrayRef<GlobalExpr> GlobalExprs) {
   // Check for pre-existence.
   if (DIE *Die = getDIE(GV))
     return Die;
@@ -128,67 +140,76 @@ DIE *DwarfCompileUnit::getOrCreateGlobalVariableDIE(
 
   // Add location.
   bool addToAccelTable = false;
+  DIELoc *Loc = nullptr;
+  std::unique_ptr<DIEDwarfExpression> DwarfExpr;
+  bool AllConstant = std::all_of(
+      GlobalExprs.begin(), GlobalExprs.end(),
+      [&](const GlobalExpr GE) {
+        return GE.Expr && GE.Expr->isConstant();
+      });
 
-  DIExpression *Expr = GV->getExpr();
-
-  // For compatibility with DWARF 3 and earlier,
-  // DW_AT_location(DW_OP_constu, X, DW_OP_stack_value) becomes
-  // DW_AT_const_value(X).
-  if (Expr && Expr->getNumElements() == 3 &&
-      Expr->getElement(0) == dwarf::DW_OP_constu &&
-      Expr->getElement(2) == dwarf::DW_OP_stack_value) {
-    addConstantValue(*VariableDIE, /*Unsigned=*/true, Expr->getElement(1));
-    // We cannot describe the location of dllimport'd variables: the computation
-    // of their address requires loads from the IAT.
-  } else if (!Global || !Global->hasDLLImportStorageClass()) {
-    DIELoc *Loc = new (DIEValueAllocator) DIELoc;
-    if (Global) {
-      addToAccelTable = true;
-      const MCSymbol *Sym = Asm->getSymbol(Global);
-      if (Global->isThreadLocal()) {
-        if (Asm->TM.Options.EmulatedTLS) {
-          // TODO: add debug info for emulated thread local mode.
-        } else {
-          // FIXME: Make this work with -gsplit-dwarf.
-          unsigned PointerSize = Asm->getDataLayout().getPointerSize();
-          assert((PointerSize == 4 || PointerSize == 8) &&
-                 "Add support for other sizes if necessary");
-          // Based on GCC's support for TLS:
-          if (!DD->useSplitDwarf()) {
-            // 1) Start with a constNu of the appropriate pointer size
-            addUInt(*Loc, dwarf::DW_FORM_data1, PointerSize == 4
-                                                    ? dwarf::DW_OP_const4u
-                                                    : dwarf::DW_OP_const8u);
-            // 2) containing the (relocated) offset of the TLS variable
-            //    within the module's TLS block.
-            addExpr(*Loc, dwarf::DW_FORM_udata,
-                    Asm->getObjFileLowering().getDebugThreadLocalSymbol(Sym));
-          } else {
-            addUInt(*Loc, dwarf::DW_FORM_data1, dwarf::DW_OP_GNU_const_index);
-            addUInt(*Loc, dwarf::DW_FORM_udata,
-                    DD->getAddressPool().getIndex(Sym, /* TLS */ true));
-          }
-          // 3) followed by an OP to make the debugger do a TLS lookup.
-          addUInt(*Loc, dwarf::DW_FORM_data1,
-                  DD->useGNUTLSOpcode() ? dwarf::DW_OP_GNU_push_tls_address
-                                        : dwarf::DW_OP_form_tls_address);
-        }
-      } else {
-        DD->addArangeLabel(SymbolCU(this, Sym));
-        addOpAddress(*Loc, Sym);
+  for (const auto &GE : GlobalExprs) {
+    const GlobalVariable *Global = GE.Var;
+    const DIExpression *Expr = GE.Expr;
+    // For compatibility with DWARF 3 and earlier,
+    // DW_AT_location(DW_OP_constu, X, DW_OP_stack_value) becomes
+    // DW_AT_const_value(X).
+    if (GlobalExprs.size() == 1 && Expr && Expr->isConstant()) {
+      addConstantValue(*VariableDIE, /*Unsigned=*/true, Expr->getElement(1));
+      // We cannot describe the location of dllimport'd variables: the
+      // computation of their address requires loads from the IAT.
+    } else if ((Global && !Global->hasDLLImportStorageClass()) || AllConstant) {
+      if (!Loc) {
+        Loc = new (DIEValueAllocator) DIELoc;
+        DwarfExpr = llvm::make_unique<DIEDwarfExpression>(*Asm, *this, *Loc);
       }
-
+      addToAccelTable = true;
+      if (Global) {
+        const MCSymbol *Sym = Asm->getSymbol(Global);
+        if (Global->isThreadLocal()) {
+          if (Asm->TM.Options.EmulatedTLS) {
+            // TODO: add debug info for emulated thread local mode.
+          } else {
+            // FIXME: Make this work with -gsplit-dwarf.
+            unsigned PointerSize = Asm->getDataLayout().getPointerSize();
+            assert((PointerSize == 4 || PointerSize == 8) &&
+                   "Add support for other sizes if necessary");
+            // Based on GCC's support for TLS:
+            if (!DD->useSplitDwarf()) {
+              // 1) Start with a constNu of the appropriate pointer size
+              addUInt(*Loc, dwarf::DW_FORM_data1,
+                      PointerSize == 4 ? dwarf::DW_OP_const4u
+                                       : dwarf::DW_OP_const8u);
+              // 2) containing the (relocated) offset of the TLS variable
+              //    within the module's TLS block.
+              addExpr(*Loc, dwarf::DW_FORM_udata,
+                      Asm->getObjFileLowering().getDebugThreadLocalSymbol(Sym));
+            } else {
+              addUInt(*Loc, dwarf::DW_FORM_data1, dwarf::DW_OP_GNU_const_index);
+              addUInt(*Loc, dwarf::DW_FORM_udata,
+                      DD->getAddressPool().getIndex(Sym, /* TLS */ true));
+            }
+            // 3) followed by an OP to make the debugger do a TLS lookup.
+            addUInt(*Loc, dwarf::DW_FORM_data1,
+                    DD->useGNUTLSOpcode() ? dwarf::DW_OP_GNU_push_tls_address
+                                          : dwarf::DW_OP_form_tls_address);
+          }
+        } else {
+          DD->addArangeLabel(SymbolCU(this, Sym));
+          addOpAddress(*Loc, Sym);
+        }
+      }
       if (Expr) {
-        DIEDwarfExpression DwarfExpr(*Asm, *this, *Loc);
-        DwarfExpr.AddExpression(Expr);
+        DwarfExpr->addFragmentOffset(Expr);
+        DwarfExpr->AddExpression(Expr);
       }
     }
-
-    addBlock(*VariableDIE, dwarf::DW_AT_location, Loc);
-
-    if (DD->useAllLinkageNames())
-      addLinkageName(*VariableDIE, GV->getLinkageName());
   }
+  if (Loc)
+    addBlock(*VariableDIE, dwarf::DW_AT_location, DwarfExpr->finalize());
+
+  if (DD->useAllLinkageNames())
+    addLinkageName(*VariableDIE, GV->getLinkageName());
 
   if (addToAccelTable) {
     DD->addAccelName(GV->getName(), *VariableDIE);
@@ -498,9 +519,10 @@ DIE *DwarfCompileUnit::constructVariableDIEImpl(const DbgVariable &DV,
         DIELoc *Loc = new (DIEValueAllocator) DIELoc;
         DIEDwarfExpression DwarfExpr(*Asm, *this, *Loc);
         // If there is an expression, emit raw unsigned bytes.
+        DwarfExpr.addFragmentOffset(Expr);
         DwarfExpr.AddUnsignedConstant(DVInsn->getOperand(0).getImm());
         DwarfExpr.AddExpression(Expr);
-        addBlock(*VariableDie, dwarf::DW_AT_location, Loc);
+        addBlock(*VariableDie, dwarf::DW_AT_location, DwarfExpr.finalize());
       } else
         addConstantValue(*VariableDie, DVInsn->getOperand(0), DV.getType());
     } else if (DVInsn->getOperand(0).isFPImm())
@@ -513,23 +535,21 @@ DIE *DwarfCompileUnit::constructVariableDIEImpl(const DbgVariable &DV,
   }
 
   // .. else use frame index.
-  if (DV.getFrameIndex().empty())
+  if (!DV.hasFrameIndexExprs())
     return VariableDie;
 
-  auto Expr = DV.getExpression().begin();
   DIELoc *Loc = new (DIEValueAllocator) DIELoc;
   DIEDwarfExpression DwarfExpr(*Asm, *this, *Loc);
-  for (auto FI : DV.getFrameIndex()) {
+  for (auto &Fragment : DV.getFrameIndexExprs()) {
     unsigned FrameReg = 0;
     const TargetFrameLowering *TFI = Asm->MF->getSubtarget().getFrameLowering();
-    int Offset = TFI->getFrameIndexReference(*Asm->MF, FI, FrameReg);
-    assert(Expr != DV.getExpression().end() && "Wrong number of expressions");
+    int Offset = TFI->getFrameIndexReference(*Asm->MF, Fragment.FI, FrameReg);
+    DwarfExpr.addFragmentOffset(Fragment.Expr);
     DwarfExpr.AddMachineRegIndirect(*Asm->MF->getSubtarget().getRegisterInfo(),
                                     FrameReg, Offset);
-    DwarfExpr.AddExpression(*Expr);
-    ++Expr;
+    DwarfExpr.AddExpression(Fragment.Expr);
   }
-  addBlock(*VariableDie, dwarf::DW_AT_location, Loc);
+  addBlock(*VariableDie, dwarf::DW_AT_location, DwarfExpr.finalize());
 
   return VariableDie;
 }
@@ -562,24 +582,21 @@ DIE *DwarfCompileUnit::createScopeChildrenDIE(LexicalScope *Scope,
   return ObjectPointer;
 }
 
-void DwarfCompileUnit::constructSubprogramScopeDIE(LexicalScope *Scope) {
-  assert(Scope && Scope->getScopeNode());
-  assert(!Scope->getInlinedAt());
-  assert(!Scope->isAbstractScope());
-  auto *Sub = cast<DISubprogram>(Scope->getScopeNode());
-
-  DD->getProcessedSPNodes().insert(Sub);
-
+void DwarfCompileUnit::constructSubprogramScopeDIE(const DISubprogram *Sub, LexicalScope *Scope) {
   DIE &ScopeDIE = updateSubprogramScopeDIE(Sub);
+
+  if (Scope) {
+    assert(!Scope->getInlinedAt());
+    assert(!Scope->isAbstractScope());
+    // Collect lexical scope children first.
+    // ObjectPointer might be a local (non-argument) local variable if it's a
+    // block's synthetic this pointer.
+    if (DIE *ObjectPointer = createAndAddScopeChildren(Scope, ScopeDIE))
+      addDIEEntry(ScopeDIE, dwarf::DW_AT_object_pointer, *ObjectPointer);
+  }
 
   // If this is a variadic function, add an unspecified parameter.
   DITypeRefArray FnArgs = Sub->getType()->getTypeArray();
-
-  // Collect lexical scope children first.
-  // ObjectPointer might be a local (non-argument) local variable if it's a
-  // block's synthetic this pointer.
-  if (DIE *ObjectPointer = createAndAddScopeChildren(Scope, ScopeDIE))
-    addDIEEntry(ScopeDIE, dwarf::DW_AT_object_pointer, *ObjectPointer);
 
   // If we have a single element of null, it is a function that returns void.
   // If we have more than one elements and the last one is null, it is a
@@ -651,7 +668,7 @@ DIE *DwarfCompileUnit::constructImportedEntityDIE(
   else if (auto *T = dyn_cast<DIType>(Entity))
     EntityDie = getOrCreateTypeDIE(T);
   else if (auto *GV = dyn_cast<DIGlobalVariable>(Entity))
-    EntityDie = getOrCreateGlobalVariableDIE(GV, nullptr);
+    EntityDie = getOrCreateGlobalVariableDIE(GV, {});
   else
     EntityDie = getDIE(Entity);
   assert(EntityDie);
@@ -672,11 +689,7 @@ void DwarfCompileUnit::finishSubprogramDefinition(const DISubprogram *SP) {
       // If this subprogram has an abstract definition, reference that
       addDIEEntry(*D, dwarf::DW_AT_abstract_origin, *AbsSPDIE);
   } else {
-    if (!D && !includeMinimalInlineScopes())
-      // Lazily construct the subprogram if we didn't see either concrete or
-      // inlined versions during codegen. (except in -gmlt ^ where we want
-      // to omit these entirely)
-      D = getOrCreateSubprogramDIE(SP);
+    assert(D || includeMinimalInlineScopes());
     if (D)
       // And attach the attributes
       applySubprogramAttributesToDefinition(SP, *D);
@@ -690,16 +703,31 @@ void DwarfCompileUnit::emitHeader(bool UseOffsets) {
     Asm->OutStreamer->EmitLabel(LabelBegin);
   }
 
-  DwarfUnit::emitHeader(UseOffsets);
+  dwarf::UnitType UT = Skeleton ? dwarf::DW_UT_split_compile
+                                : DD->useSplitDwarf() ? dwarf::DW_UT_skeleton
+                                                      : dwarf::DW_UT_compile;
+  DwarfUnit::emitCommonHeader(UseOffsets, UT);
 }
 
 /// addGlobalName - Add a new global name to the compile unit.
-void DwarfCompileUnit::addGlobalName(StringRef Name, DIE &Die,
+void DwarfCompileUnit::addGlobalName(StringRef Name, const DIE &Die,
                                      const DIScope *Context) {
   if (includeMinimalInlineScopes())
     return;
   std::string FullName = getParentContextString(Context) + Name.str();
   GlobalNames[FullName] = &Die;
+}
+
+void DwarfCompileUnit::addGlobalNameForTypeUnit(StringRef Name,
+                                                const DIScope *Context) {
+  if (includeMinimalInlineScopes())
+    return;
+  std::string FullName = getParentContextString(Context) + Name.str();
+  // Insert, allowing the entry to remain as-is if it's already present
+  // This way the CU-level type DIE is preferred over the "can't describe this
+  // type as a unit offset because it's not really in the CU at all, it's only
+  // in a type unit"
+  GlobalNames.insert(std::make_pair(std::move(FullName), &getUnitDie()));
 }
 
 /// Add a new global type to the unit.
@@ -709,6 +737,18 @@ void DwarfCompileUnit::addGlobalType(const DIType *Ty, const DIE &Die,
     return;
   std::string FullName = getParentContextString(Context) + Ty->getName().str();
   GlobalTypes[FullName] = &Die;
+}
+
+void DwarfCompileUnit::addGlobalTypeUnitType(const DIType *Ty,
+                                             const DIScope *Context) {
+  if (includeMinimalInlineScopes())
+    return;
+  std::string FullName = getParentContextString(Context) + Ty->getName().str();
+  // Insert, allowing the entry to remain as-is if it's already present
+  // This way the CU-level type DIE is preferred over the "can't describe this
+  // type as a unit offset because it's not really in the CU at all, it's only
+  // in a type unit"
+  GlobalTypes.insert(std::make_pair(std::move(FullName), &getUnitDie()));
 }
 
 /// addVariableAddress - Add DW_AT_location attribute for a
@@ -727,18 +767,22 @@ void DwarfCompileUnit::addVariableAddress(const DbgVariable &DV, DIE &Die,
 void DwarfCompileUnit::addAddress(DIE &Die, dwarf::Attribute Attribute,
                                   const MachineLocation &Location) {
   DIELoc *Loc = new (DIEValueAllocator) DIELoc;
+  DIEDwarfExpression Expr(*Asm, *this, *Loc);
 
   bool validReg;
   if (Location.isReg())
-    validReg = addRegisterFragment(*Loc, Location.getReg());
+    validReg = Expr.AddMachineReg(*Asm->MF->getSubtarget().getRegisterInfo(),
+                                  Location.getReg());
   else
-    validReg = addRegisterOffset(*Loc, Location.getReg(), Location.getOffset());
+    validReg =
+        Expr.AddMachineRegIndirect(*Asm->MF->getSubtarget().getRegisterInfo(),
+                                   Location.getReg(), Location.getOffset());
 
   if (!validReg)
     return;
 
   // Now attach the location information to the DIE.
-  addBlock(Die, Attribute, Loc);
+  addBlock(Die, Attribute, Expr.finalize());
 }
 
 /// Start with the address based on the location provided, and generate the
@@ -750,9 +794,11 @@ void DwarfCompileUnit::addComplexAddress(const DbgVariable &DV, DIE &Die,
                                          const MachineLocation &Location) {
   DIELoc *Loc = new (DIEValueAllocator) DIELoc;
   DIEDwarfExpression DwarfExpr(*Asm, *this, *Loc);
-  DIExpressionCursor ExprCursor(DV.getSingleExpression());
+  const DIExpression *Expr = DV.getSingleExpression();
+  DIExpressionCursor ExprCursor(Expr);
   const TargetRegisterInfo &TRI = *Asm->MF->getSubtarget().getRegisterInfo();
   auto Reg = Location.getReg();
+  DwarfExpr.addFragmentOffset(Expr);
   bool ValidReg =
       Location.getOffset()
           ? DwarfExpr.AddMachineRegIndirect(TRI, Reg, Location.getOffset())

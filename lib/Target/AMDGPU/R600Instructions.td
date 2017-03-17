@@ -727,6 +727,20 @@ def FLOOR : R600_1OP_Helper <0x14, "FLOOR", ffloor>;
 
 def MOV : R600_1OP <0x19, "MOV", []>;
 
+
+// This is a hack to get rid of DUMMY_CHAIN nodes.
+// Most DUMMY_CHAINs should be eliminated during legalization, but undef
+// values can sneak in some to selection.
+let isPseudo = 1, isCodeGenOnly = 1 in {
+def DUMMY_CHAIN : AMDGPUInst <
+  (outs),
+  (ins),
+  "DUMMY_CHAIN",
+  [(R600dummy_chain)]
+>;
+} // end let isPseudo = 1, isCodeGenOnly = 1
+
+
 let isPseudo = 1, isCodeGenOnly = 1, usesCustomInserter = 1 in {
 
 class MOV_IMM <ValueType vt, Operand immType> : AMDGPUInst <
@@ -999,7 +1013,7 @@ multiclass CUBE_Common <bits<11> inst> {
     (outs R600_Reg128:$dst),
     (ins R600_Reg128:$src0),
     "CUBE $dst $src0",
-    [(set v4f32:$dst, (int_AMDGPU_cube v4f32:$src0))],
+    [(set v4f32:$dst, (int_r600_cube v4f32:$src0))],
     VecALU
   > {
     let isPseudo = 1;
@@ -1267,6 +1281,17 @@ let Predicates = [isR600] in {
 //===----------------------------------------------------------------------===//
 
 defm R600_ : RegisterLoadStore <R600_Reg32, FRAMEri, ADDRIndirect>;
+
+// Hardcode channel to 0
+// NOTE: LSHR is not available here. LSHR is per family instruction
+def : Pat <
+  (i32 (load_private ADDRIndirect:$addr) ),
+  (R600_RegisterLoad FRAMEri:$addr, (i32 0))
+>;
+def : Pat <
+  (store_private i32:$val, ADDRIndirect:$addr),
+  (R600_RegisterStore i32:$val, FRAMEri:$addr, (i32 0))
+>;
 
 
 //===----------------------------------------------------------------------===//

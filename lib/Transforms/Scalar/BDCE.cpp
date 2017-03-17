@@ -40,7 +40,8 @@ static bool bitTrackingDCE(Function &F, DemandedBits &DB) {
   bool Changed = false;
   for (Instruction &I : instructions(F)) {
     // If the instruction has side effects and no non-dbg uses,
-    // BDCE should skip it.
+    // skip it. This way we avoid computing known bits on an instruction
+    // that will not help us.
     if (I.mayHaveSideEffects() && I.use_empty())
       continue;
 
@@ -55,7 +56,7 @@ static bool bitTrackingDCE(Function &F, DemandedBits &DB) {
       // undef, poison, etc.
       Value *Zero = ConstantInt::get(I.getType(), 0);
       ++NumSimplified;
-      I.replaceAllUsesWith(Zero);
+      I.replaceNonMetadataUsesWith(Zero);
       Changed = true;
     }
     if (!DB.isInstructionDead(&I))
@@ -79,8 +80,8 @@ PreservedAnalyses BDCEPass::run(Function &F, FunctionAnalysisManager &AM) {
   if (!bitTrackingDCE(F, DB))
     return PreservedAnalyses::all();
 
-  // FIXME: This should also 'preserve the CFG'.
-  auto PA = PreservedAnalyses();
+  PreservedAnalyses PA;
+  PA.preserveSet<CFGAnalyses>();
   PA.preserve<GlobalsAA>();
   return PA;
 }

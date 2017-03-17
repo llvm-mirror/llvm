@@ -16,7 +16,7 @@ define <16 x i8> @test_x86_ssse3_pabs_b_128(<16 x i8> %a0) {
 ;
 ; SKX-LABEL: test_x86_ssse3_pabs_b_128:
 ; SKX:       ## BB#0:
-; SKX-NEXT:    vpabsb %xmm0, %xmm0 ## encoding: [0x62,0xf2,0x7d,0x08,0x1c,0xc0]
+; SKX-NEXT:    vpabsb %xmm0, %xmm0 ## EVEX TO VEX Compression encoding: [0xc4,0xe2,0x79,0x1c,0xc0]
 ; SKX-NEXT:    retl ## encoding: [0xc3]
   %res = call <16 x i8> @llvm.x86.ssse3.pabs.b.128(<16 x i8> %a0) ; <<16 x i8>> [#uses=1]
   ret <16 x i8> %res
@@ -37,7 +37,7 @@ define <4 x i32> @test_x86_ssse3_pabs_d_128(<4 x i32> %a0) {
 ;
 ; SKX-LABEL: test_x86_ssse3_pabs_d_128:
 ; SKX:       ## BB#0:
-; SKX-NEXT:    vpabsd %xmm0, %xmm0 ## encoding: [0x62,0xf2,0x7d,0x08,0x1e,0xc0]
+; SKX-NEXT:    vpabsd %xmm0, %xmm0 ## EVEX TO VEX Compression encoding: [0xc4,0xe2,0x79,0x1e,0xc0]
 ; SKX-NEXT:    retl ## encoding: [0xc3]
   %res = call <4 x i32> @llvm.x86.ssse3.pabs.d.128(<4 x i32> %a0) ; <<4 x i32>> [#uses=1]
   ret <4 x i32> %res
@@ -58,7 +58,7 @@ define <8 x i16> @test_x86_ssse3_pabs_w_128(<8 x i16> %a0) {
 ;
 ; SKX-LABEL: test_x86_ssse3_pabs_w_128:
 ; SKX:       ## BB#0:
-; SKX-NEXT:    vpabsw %xmm0, %xmm0 ## encoding: [0x62,0xf2,0x7d,0x08,0x1d,0xc0]
+; SKX-NEXT:    vpabsw %xmm0, %xmm0 ## EVEX TO VEX Compression encoding: [0xc4,0xe2,0x79,0x1d,0xc0]
 ; SKX-NEXT:    retl ## encoding: [0xc3]
   %res = call <8 x i16> @llvm.x86.ssse3.pabs.w.128(<8 x i16> %a0) ; <<8 x i16>> [#uses=1]
   ret <8 x i16> %res
@@ -175,12 +175,41 @@ define <8 x i16> @test_x86_ssse3_pmadd_ub_sw_128(<16 x i8> %a0, <16 x i8> %a1) {
 ;
 ; SKX-LABEL: test_x86_ssse3_pmadd_ub_sw_128:
 ; SKX:       ## BB#0:
-; SKX-NEXT:    vpmaddubsw %xmm1, %xmm0, %xmm0 ## encoding: [0x62,0xf2,0x7d,0x08,0x04,0xc1]
+; SKX-NEXT:    vpmaddubsw %xmm1, %xmm0, %xmm0 ## EVEX TO VEX Compression encoding: [0xc4,0xe2,0x79,0x04,0xc1]
 ; SKX-NEXT:    retl ## encoding: [0xc3]
   %res = call <8 x i16> @llvm.x86.ssse3.pmadd.ub.sw.128(<16 x i8> %a0, <16 x i8> %a1) ; <<8 x i16>> [#uses=1]
   ret <8 x i16> %res
 }
 declare <8 x i16> @llvm.x86.ssse3.pmadd.ub.sw.128(<16 x i8>, <16 x i8>) nounwind readnone
+
+
+; Make sure we don't commute this operation.
+define <8 x i16> @test_x86_ssse3_pmadd_ub_sw_128_load_op0(<16 x i8>* %ptr, <16 x i8> %a1) {
+; SSE-LABEL: test_x86_ssse3_pmadd_ub_sw_128_load_op0:
+; SSE:       ## BB#0:
+; SSE-NEXT:    movl {{[0-9]+}}(%esp), %eax ## encoding: [0x8b,0x44,0x24,0x04]
+; SSE-NEXT:    movdqa (%eax), %xmm1 ## encoding: [0x66,0x0f,0x6f,0x08]
+; SSE-NEXT:    pmaddubsw %xmm0, %xmm1 ## encoding: [0x66,0x0f,0x38,0x04,0xc8]
+; SSE-NEXT:    movdqa %xmm1, %xmm0 ## encoding: [0x66,0x0f,0x6f,0xc1]
+; SSE-NEXT:    retl ## encoding: [0xc3]
+;
+; AVX2-LABEL: test_x86_ssse3_pmadd_ub_sw_128_load_op0:
+; AVX2:       ## BB#0:
+; AVX2-NEXT:    movl {{[0-9]+}}(%esp), %eax ## encoding: [0x8b,0x44,0x24,0x04]
+; AVX2-NEXT:    vmovdqa (%eax), %xmm1 ## encoding: [0xc5,0xf9,0x6f,0x08]
+; AVX2-NEXT:    vpmaddubsw %xmm0, %xmm1, %xmm0 ## encoding: [0xc4,0xe2,0x71,0x04,0xc0]
+; AVX2-NEXT:    retl ## encoding: [0xc3]
+;
+; SKX-LABEL: test_x86_ssse3_pmadd_ub_sw_128_load_op0:
+; SKX:       ## BB#0:
+; SKX-NEXT:    movl {{[0-9]+}}(%esp), %eax ## encoding: [0x8b,0x44,0x24,0x04]
+; SKX-NEXT:    vmovdqu (%eax), %xmm1 ## EVEX TO VEX Compression encoding: [0xc5,0xfa,0x6f,0x08]
+; SKX-NEXT:    vpmaddubsw %xmm0, %xmm1, %xmm0 ## EVEX TO VEX Compression encoding: [0xc4,0xe2,0x71,0x04,0xc0]
+; SKX-NEXT:    retl ## encoding: [0xc3]
+  %a0 = load <16 x i8>, <16 x i8>* %ptr
+  %res = call <8 x i16> @llvm.x86.ssse3.pmadd.ub.sw.128(<16 x i8> %a0, <16 x i8> %a1) ; <<8 x i16>> [#uses=1]
+  ret <8 x i16> %res
+}
 
 
 define <8 x i16> @test_x86_ssse3_pmul_hr_sw_128(<8 x i16> %a0, <8 x i16> %a1) {
@@ -196,7 +225,7 @@ define <8 x i16> @test_x86_ssse3_pmul_hr_sw_128(<8 x i16> %a0, <8 x i16> %a1) {
 ;
 ; SKX-LABEL: test_x86_ssse3_pmul_hr_sw_128:
 ; SKX:       ## BB#0:
-; SKX-NEXT:    vpmulhrsw %xmm1, %xmm0, %xmm0 ## encoding: [0x62,0xf2,0x7d,0x08,0x0b,0xc1]
+; SKX-NEXT:    vpmulhrsw %xmm1, %xmm0, %xmm0 ## EVEX TO VEX Compression encoding: [0xc4,0xe2,0x79,0x0b,0xc1]
 ; SKX-NEXT:    retl ## encoding: [0xc3]
   %res = call <8 x i16> @llvm.x86.ssse3.pmul.hr.sw.128(<8 x i16> %a0, <8 x i16> %a1) ; <<8 x i16>> [#uses=1]
   ret <8 x i16> %res
@@ -217,7 +246,7 @@ define <16 x i8> @test_x86_ssse3_pshuf_b_128(<16 x i8> %a0, <16 x i8> %a1) {
 ;
 ; SKX-LABEL: test_x86_ssse3_pshuf_b_128:
 ; SKX:       ## BB#0:
-; SKX-NEXT:    vpshufb %xmm1, %xmm0, %xmm0 ## encoding: [0x62,0xf2,0x7d,0x08,0x00,0xc1]
+; SKX-NEXT:    vpshufb %xmm1, %xmm0, %xmm0 ## EVEX TO VEX Compression encoding: [0xc4,0xe2,0x79,0x00,0xc1]
 ; SKX-NEXT:    retl ## encoding: [0xc3]
   %res = call <16 x i8> @llvm.x86.ssse3.pshuf.b.128(<16 x i8> %a0, <16 x i8> %a1) ; <<16 x i8>> [#uses=1]
   ret <16 x i8> %res

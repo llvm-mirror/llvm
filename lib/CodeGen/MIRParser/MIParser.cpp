@@ -41,8 +41,11 @@
 using namespace llvm;
 
 PerFunctionMIParsingState::PerFunctionMIParsingState(MachineFunction &MF,
-    SourceMgr &SM, const SlotMapping &IRSlots)
-  : MF(MF), SM(&SM), IRSlots(IRSlots) {
+    SourceMgr &SM, const SlotMapping &IRSlots,
+    const Name2RegClassMap &Names2RegClasses,
+    const Name2RegBankMap &Names2RegBanks)
+  : MF(MF), SM(&SM), IRSlots(IRSlots), Names2RegClasses(Names2RegClasses),
+    Names2RegBanks(Names2RegBanks) {
 }
 
 VRegInfo &PerFunctionMIParsingState::getVRegInfo(unsigned Num) {
@@ -139,6 +142,7 @@ public:
   bool parseVirtualRegister(VRegInfo *&Info);
   bool parseRegister(unsigned &Reg, VRegInfo *&VRegInfo);
   bool parseRegisterFlag(unsigned &Flags);
+  bool parseRegisterClassOrBank(VRegInfo &RegInfo);
   bool parseSubRegisterIndex(unsigned &SubReg);
   bool parseRegisterTiedDefIndex(unsigned &TiedDefIdx);
   bool parseRegisterOperand(MachineOperand &Dest,
@@ -184,6 +188,7 @@ public:
   bool parseMemoryOperandFlag(MachineMemOperand::Flags &Flags);
   bool parseMemoryPseudoSourceValue(const PseudoSourceValue *&PSV);
   bool parseMachinePointerInfo(MachinePointerInfo &Dest);
+  bool parseOptionalAtomicOrdering(AtomicOrdering &Order);
   bool parseMachineMemoryOperand(MachineMemOperand *&Dest);
 
 private:
@@ -196,6 +201,12 @@ private:
   ///
   /// Return true if an error occurred.
   bool getUint64(uint64_t &Result);
+
+  /// Convert the hexadecimal literal in the current token into an unsigned
+  ///  APInt with a minimum bitwidth required to represent the value.
+  ///
+  /// Return true if the literal does not represent an integer value.
+  bool getHexUint(APInt &Result);
 
   /// If the current token is of the given kind, consume it and return false.
   /// Otherwise report an error and return true.
@@ -456,15 +467,18 @@ bool MIParser::parseBasicBlockLiveins(MachineBasicBlock &MBB) {
     if (parseNamedRegister(Reg))
       return true;
     lex();
-    LaneBitmask Mask = ~LaneBitmask(0);
+    LaneBitmask Mask = LaneBitmask::getAll();
     if (consumeIfPresent(MIToken::colon)) {
       // Parse lane mask.
       if (Token.isNot(MIToken::IntegerLiteral) &&
           Token.isNot(MIToken::HexLiteral))
         return error("expected a lane mask");
-      static_assert(sizeof(LaneBitmask) == sizeof(unsigned), "");
-      if (getUnsigned(Mask))
+      static_assert(sizeof(LaneBitmask::Type) == sizeof(unsigned),
+                    "Use correct get-function for lane mask");
+      LaneBitmask::Type V;
+      if (getUnsigned(V))
         return error("invalid lane mask value");
+      Mask = LaneBitmask(V);
       lex();
     }
     MBB.addLiveIn(Reg, Mask);
@@ -869,6 +883,66 @@ bool MIParser::parseRegister(unsigned &Reg, VRegInfo *&Info) {
   }
 }
 
+bool MIParser::parseRegisterClassOrBank(VRegInfo &RegInfo) {
+  if (Token.isNot(MIToken::Identifier) && Token.isNot(MIToken::underscore))
+    return error("expected '_', register class, or register bank name");
+  StringRef::iterator Loc = Token.location();
+  StringRef Name = Token.stringValue();
+
+  // Was it a register class?
+  auto RCNameI = PFS.Names2RegClasses.find(Name);
+  if (RCNameI != PFS.Names2RegClasses.end()) {
+    lex();
+    const TargetRegisterClass &RC = *RCNameI->getValue();
+
+    switch (RegInfo.Kind) {
+    case VRegInfo::UNKNOWN:
+    case VRegInfo::NORMAL:
+      RegInfo.Kind = VRegInfo::NORMAL;
+      if (RegInfo.Explicit && RegInfo.D.RC != &RC) {
+        const TargetRegisterInfo &TRI = *MF.getSubtarget().getRegisterInfo();
+        return error(Loc, Twine("conflicting register classes, previously: ") +
+                     Twine(TRI.getRegClassName(RegInfo.D.RC)));
+      }
+      RegInfo.D.RC = &RC;
+      RegInfo.Explicit = true;
+      return false;
+
+    case VRegInfo::GENERIC:
+    case VRegInfo::REGBANK:
+      return error(Loc, "register class specification on generic register");
+    }
+    llvm_unreachable("Unexpected register kind");
+  }
+
+  // Should be a register bank or a generic register.
+  const RegisterBank *RegBank = nullptr;
+  if (Name != "_") {
+    auto RBNameI = PFS.Names2RegBanks.find(Name);
+    if (RBNameI == PFS.Names2RegBanks.end())
+      return error(Loc, "expected '_', register class, or register bank name");
+    RegBank = RBNameI->getValue();
+  }
+
+  lex();
+
+  switch (RegInfo.Kind) {
+  case VRegInfo::UNKNOWN:
+  case VRegInfo::GENERIC:
+  case VRegInfo::REGBANK:
+    RegInfo.Kind = RegBank ? VRegInfo::REGBANK : VRegInfo::GENERIC;
+    if (RegInfo.Explicit && RegInfo.D.RegBank != RegBank)
+      return error(Loc, "conflicting generic register banks");
+    RegInfo.D.RegBank = RegBank;
+    RegInfo.Explicit = true;
+    return false;
+
+  case VRegInfo::NORMAL:
+    return error(Loc, "register bank specification on normal register");
+  }
+  llvm_unreachable("Unexpected register kind");
+}
+
 bool MIParser::parseRegisterFlag(unsigned &Flags) {
   const unsigned OldFlags = Flags;
   switch (Token.kind()) {
@@ -995,6 +1069,13 @@ bool MIParser::parseRegisterOperand(MachineOperand &Dest,
     if (!TargetRegisterInfo::isVirtualRegister(Reg))
       return error("subregister index expects a virtual register");
   }
+  if (Token.is(MIToken::colon)) {
+    if (!TargetRegisterInfo::isVirtualRegister(Reg))
+      return error("register class specification expects a virtual register");
+    lex();
+    if (parseRegisterClassOrBank(*RegInfo))
+        return true;
+  }
   MachineRegisterInfo &MRI = MF.getRegInfo();
   if ((Flags & RegState::Define) == 0) {
     if (consumeIfPresent(MIToken::lparen)) {
@@ -1017,12 +1098,9 @@ bool MIParser::parseRegisterOperand(MachineOperand &Dest,
       }
     }
   } else if (consumeIfPresent(MIToken::lparen)) {
-    // Virtual registers may have a size with GlobalISel.
+    // Virtual registers may have a tpe with GlobalISel.
     if (!TargetRegisterInfo::isVirtualRegister(Reg))
-      return error("unexpected size on physical register");
-    if (RegInfo->Kind != VRegInfo::GENERIC &&
-        RegInfo->Kind != VRegInfo::REGBANK)
-      return error("unexpected size on non-generic virtual register");
+      return error("unexpected type on physical register");
 
     LLT Ty;
     if (parseLowLevelType(Token.location(), Ty))
@@ -1036,12 +1114,12 @@ bool MIParser::parseRegisterOperand(MachineOperand &Dest,
 
     MRI.setType(Reg, Ty);
   } else if (TargetRegisterInfo::isVirtualRegister(Reg)) {
-    // Generic virtual registers must have a size.
-    // If we end up here this means the size hasn't been specified and
+    // Generic virtual registers must have a type.
+    // If we end up here this means the type hasn't been specified and
     // this is bad!
     if (RegInfo->Kind == VRegInfo::GENERIC ||
         RegInfo->Kind == VRegInfo::REGBANK)
-      return error("generic virtual registers must have a size");
+      return error("generic virtual registers must have a type");
   }
   Dest = MachineOperand::CreateReg(
       Reg, Flags & RegState::Define, Flags & RegState::Implicit,
@@ -1157,16 +1235,10 @@ bool MIParser::getUnsigned(unsigned &Result) {
     return false;
   }
   if (Token.is(MIToken::HexLiteral)) {
-    StringRef S = Token.range();
-    assert(S[0] == '0' && tolower(S[1]) == 'x');
-    // This could be a floating point literal with a special prefix.
-    if (!isxdigit(S[2]))
+    APInt A;
+    if (getHexUint(A))
       return true;
-    StringRef V = S.substr(2);
-    unsigned BW = std::min<unsigned>(V.size()*4, 32);
-    APInt A(BW, V, 16);
-    APInt Limit = APInt(BW, std::numeric_limits<unsigned>::max());
-    if (A.ugt(Limit))
+    if (A.getBitWidth() > 32)
       return error("expected 32-bit integer (too large)");
     Result = A.getZExtValue();
     return false;
@@ -1820,10 +1892,35 @@ bool MIParser::parseIRValue(const Value *&V) {
 }
 
 bool MIParser::getUint64(uint64_t &Result) {
-  assert(Token.hasIntegerValue());
-  if (Token.integerValue().getActiveBits() > 64)
-    return error("expected 64-bit integer (too large)");
-  Result = Token.integerValue().getZExtValue();
+  if (Token.hasIntegerValue()) {
+    if (Token.integerValue().getActiveBits() > 64)
+      return error("expected 64-bit integer (too large)");
+    Result = Token.integerValue().getZExtValue();
+    return false;
+  }
+  if (Token.is(MIToken::HexLiteral)) {
+    APInt A;
+    if (getHexUint(A))
+      return true;
+    if (A.getBitWidth() > 64)
+      return error("expected 64-bit integer (too large)");
+    Result = A.getZExtValue();
+    return false;
+  }
+  return true;
+}
+
+bool MIParser::getHexUint(APInt &Result) {
+  assert(Token.is(MIToken::HexLiteral));
+  StringRef S = Token.range();
+  assert(S[0] == '0' && tolower(S[1]) == 'x');
+  // This could be a floating point literal with a special prefix.
+  if (!isxdigit(S[2]))
+    return true;
+  StringRef V = S.substr(2);
+  APInt A(V.size()*4, V, 16);
+  Result = APInt(A.getActiveBits(),
+                 ArrayRef<uint64_t>(A.getRawData(), A.getNumWords()));
   return false;
 }
 
@@ -1944,6 +2041,28 @@ bool MIParser::parseMachinePointerInfo(MachinePointerInfo &Dest) {
   return false;
 }
 
+bool MIParser::parseOptionalAtomicOrdering(AtomicOrdering &Order) {
+  Order = AtomicOrdering::NotAtomic;
+  if (Token.isNot(MIToken::Identifier))
+    return false;
+
+  Order = StringSwitch<AtomicOrdering>(Token.stringValue())
+              .Case("unordered", AtomicOrdering::Unordered)
+              .Case("monotonic", AtomicOrdering::Monotonic)
+              .Case("acquire", AtomicOrdering::Acquire)
+              .Case("release", AtomicOrdering::Release)
+              .Case("acq_rel", AtomicOrdering::AcquireRelease)
+              .Case("seq_cst", AtomicOrdering::SequentiallyConsistent)
+              .Default(AtomicOrdering::NotAtomic);
+
+  if (Order != AtomicOrdering::NotAtomic) {
+    lex();
+    return false;
+  }
+
+  return error("expected an atomic scope, ordering or a size integer literal");
+}
+
 bool MIParser::parseMachineMemoryOperand(MachineMemOperand *&Dest) {
   if (expectAndConsume(MIToken::lparen))
     return true;
@@ -1960,6 +2079,21 @@ bool MIParser::parseMachineMemoryOperand(MachineMemOperand *&Dest) {
   else
     Flags |= MachineMemOperand::MOStore;
   lex();
+
+  // Optional "singlethread" scope.
+  SynchronizationScope Scope = SynchronizationScope::CrossThread;
+  if (Token.is(MIToken::Identifier) && Token.stringValue() == "singlethread") {
+    Scope = SynchronizationScope::SingleThread;
+    lex();
+  }
+
+  // Up to two atomic orderings (cmpxchg provides guarantees on failure).
+  AtomicOrdering Order, FailureOrder;
+  if (parseOptionalAtomicOrdering(Order))
+    return true;
+
+  if (parseOptionalAtomicOrdering(FailureOrder))
+    return true;
 
   if (Token.isNot(MIToken::IntegerLiteral))
     return error("expected the size integer literal after memory operation");
@@ -2015,8 +2149,8 @@ bool MIParser::parseMachineMemoryOperand(MachineMemOperand *&Dest) {
   }
   if (expectAndConsume(MIToken::rparen))
     return true;
-  Dest =
-      MF.getMachineMemOperand(Ptr, Flags, Size, BaseAlignment, AAInfo, Range);
+  Dest = MF.getMachineMemOperand(Ptr, Flags, Size, BaseAlignment, AAInfo, Range,
+                                 Scope, Order, FailureOrder);
   return false;
 }
 

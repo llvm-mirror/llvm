@@ -863,6 +863,37 @@ void LiveInterval::clearSubRanges() {
   SubRanges = nullptr;
 }
 
+void LiveInterval::refineSubRanges(BumpPtrAllocator &Allocator,
+    LaneBitmask LaneMask, std::function<void(LiveInterval::SubRange&)> Apply) {
+
+  LaneBitmask ToApply = LaneMask;
+  for (SubRange &SR : subranges()) {
+    LaneBitmask SRMask = SR.LaneMask;
+    LaneBitmask Matching = SRMask & LaneMask;
+    if (Matching.none())
+      continue;
+
+    SubRange *MatchingRange;
+    if (SRMask == Matching) {
+      // The subrange fits (it does not cover bits outside \p LaneMask).
+      MatchingRange = &SR;
+    } else {
+      // We have to split the subrange into a matching and non-matching part.
+      // Reduce lanemask of existing lane to non-matching part.
+      SR.LaneMask = SRMask & ~Matching;
+      // Create a new subrange for the matching part
+      MatchingRange = createSubRangeFrom(Allocator, Matching, SR);
+    }
+    Apply(*MatchingRange);
+    ToApply &= ~Matching;
+  }
+  // Create a new subrange if there are uncovered bits left.
+  if (ToApply.any()) {
+    SubRange *NewRange = createSubRange(Allocator, ToApply);
+    Apply(*NewRange);
+  }
+}
+
 unsigned LiveInterval::getSize() const {
   unsigned Sum = 0;
   for (const Segment &S : segments)
@@ -876,7 +907,7 @@ void LiveInterval::computeSubRangeUndefs(SmallVectorImpl<SlotIndex> &Undefs,
                                          const SlotIndexes &Indexes) const {
   assert(TargetRegisterInfo::isVirtualRegister(reg));
   LaneBitmask VRegMask = MRI.getMaxLaneMaskForVReg(reg);
-  assert((VRegMask & LaneMask) != 0);
+  assert((VRegMask & LaneMask).any());
   const TargetRegisterInfo &TRI = *MRI.getTargetRegisterInfo();
   for (const MachineOperand &MO : MRI.def_operands(reg)) {
     if (!MO.isUndef())
@@ -885,7 +916,7 @@ void LiveInterval::computeSubRangeUndefs(SmallVectorImpl<SlotIndex> &Undefs,
     assert(SubReg != 0 && "Undef should only be set on subreg defs");
     LaneBitmask DefMask = TRI.getSubRegIndexLaneMask(SubReg);
     LaneBitmask UndefMask = VRegMask & ~DefMask;
-    if ((UndefMask & LaneMask) != 0) {
+    if ((UndefMask & LaneMask).any()) {
       const MachineInstr &MI = *MO.getParent();
       bool EarlyClobber = MO.isEarlyClobber();
       SlotIndex Pos = Indexes.getInstructionIndex(MI).getRegSlot(EarlyClobber);
@@ -982,15 +1013,16 @@ void LiveInterval::verify(const MachineRegisterInfo *MRI) const {
   super::verify();
 
   // Make sure SubRanges are fine and LaneMasks are disjunct.
-  LaneBitmask Mask = 0;
-  LaneBitmask MaxMask = MRI != nullptr ? MRI->getMaxLaneMaskForVReg(reg) : ~0u;
+  LaneBitmask Mask;
+  LaneBitmask MaxMask = MRI != nullptr ? MRI->getMaxLaneMaskForVReg(reg)
+                                       : LaneBitmask::getAll();
   for (const SubRange &SR : subranges()) {
     // Subrange lanemask should be disjunct to any previous subrange masks.
-    assert((Mask & SR.LaneMask) == 0);
+    assert((Mask & SR.LaneMask).none());
     Mask |= SR.LaneMask;
 
     // subrange mask should not contained in maximum lane mask for the vreg.
-    assert((Mask & ~MaxMask) == 0);
+    assert((Mask & ~MaxMask).none());
     // empty subranges must be removed.
     assert(!SR.empty());
 
@@ -1031,6 +1063,7 @@ void LiveInterval::verify(const MachineRegisterInfo *MRI) const {
 // When they exist, Spills.back().start <= LastStart,
 //                 and WriteI[-1].start <= LastStart.
 
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 void LiveRangeUpdater::print(raw_ostream &OS) const {
   if (!isDirty()) {
     if (LR)
@@ -1057,6 +1090,7 @@ void LiveRangeUpdater::print(raw_ostream &OS) const {
 LLVM_DUMP_METHOD void LiveRangeUpdater::dump() const {
   print(errs());
 }
+#endif
 
 // Determine if A and B should be coalesced.
 static inline bool coalescable(const LiveRange::Segment &A,

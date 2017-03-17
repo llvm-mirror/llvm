@@ -166,7 +166,7 @@ namespace opts {
   // -arm-attributes, -a
   cl::opt<bool> ARMAttributes("arm-attributes",
                               cl::desc("Display the ARM attributes section"));
-  cl::alias ARMAttributesShort("-a", cl::desc("Alias for --arm-attributes"),
+  cl::alias ARMAttributesShort("a", cl::desc("Alias for --arm-attributes"),
                                cl::aliasopt(ARMAttributes));
 
   // -mips-plt-got
@@ -185,6 +185,10 @@ namespace opts {
   // -mips-options
   cl::opt<bool> MipsOptions("mips-options",
                             cl::desc("Display the MIPS .MIPS.options section"));
+
+  // -amdgpu-runtime-metadata
+  cl::opt<bool> AMDGPURuntimeMD("amdgpu-runtime-metadata",
+                                cl::desc("Display AMDGPU runtime metadata"));
 
   // -coff-imports
   cl::opt<bool>
@@ -354,6 +358,8 @@ static std::error_code createDumper(const ObjectFile *Obj,
     return createELFDumper(Obj, Writer, Result);
   if (Obj->isMachO())
     return createMachODumper(Obj, Writer, Result);
+  if (Obj->isWasm())
+    return createWasmDumper(Obj, Writer, Result);
 
   return readobj_error::unsupported_obj_file_format;
 }
@@ -415,6 +421,9 @@ static void dumpObject(const ObjectFile *Obj) {
       if (opts::MipsOptions)
         Dumper->printMipsOptions();
     }
+    if (Obj->getArch() == llvm::Triple::amdgcn)
+      if (opts::AMDGPURuntimeMD)
+        Dumper->printAMDGPURuntimeMD();
     if (opts::SectionGroups)
       Dumper->printGroupSections();
     if (opts::HashHistogram)

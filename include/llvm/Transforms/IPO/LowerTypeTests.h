@@ -15,11 +15,9 @@
 #ifndef LLVM_TRANSFORMS_IPO_LOWERTYPETESTS_H
 #define LLVM_TRANSFORMS_IPO_LOWERTYPETESTS_H
 
-#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/PassManager.h"
-
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -28,9 +26,6 @@
 
 namespace llvm {
 
-class DataLayout;
-class GlobalObject;
-class Value;
 class raw_ostream;
 
 namespace lowertypetests {
@@ -60,18 +55,15 @@ struct BitSetInfo {
 
   bool containsGlobalOffset(uint64_t Offset) const;
 
-  bool containsValue(const DataLayout &DL,
-                     const DenseMap<GlobalObject *, uint64_t> &GlobalLayout,
-                     Value *V, uint64_t COffset = 0) const;
-
   void print(raw_ostream &OS) const;
 };
 
 struct BitSetBuilder {
   SmallVector<uint64_t, 16> Offsets;
-  uint64_t Min, Max;
+  uint64_t Min = std::numeric_limits<uint64_t>::max();
+  uint64_t Max = 0;
 
-  BitSetBuilder() : Min(std::numeric_limits<uint64_t>::max()), Max(0) {}
+  BitSetBuilder() = default;
 
   void addOffset(uint64_t Offset) {
     if (Min > Offset)

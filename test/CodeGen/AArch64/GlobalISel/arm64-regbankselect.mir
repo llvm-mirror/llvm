@@ -1,5 +1,5 @@
-# RUN: llc -O0 -run-pass=regbankselect -global-isel %s -o - 2>&1 | FileCheck %s --check-prefix=CHECK --check-prefix=FAST
-# RUN: llc -O0 -run-pass=regbankselect -global-isel %s -regbankselect-greedy -o - 2>&1 | FileCheck %s --check-prefix=CHECK --check-prefix=GREEDY
+# RUN: llc -O0 -run-pass=regbankselect -global-isel %s -o - -verify-machineinstrs | FileCheck %s --check-prefix=CHECK --check-prefix=FAST
+# RUN: llc -O0 -run-pass=regbankselect -global-isel %s -regbankselect-greedy -o - -verify-machineinstrs | FileCheck %s --check-prefix=CHECK --check-prefix=GREEDY
 
 --- |
   ; ModuleID = 'generic-virtual-registers-type-error.mir'
@@ -219,7 +219,7 @@ body: |
 
     %0 = LDRWui killed %x0, 0 :: (load 4 from %ir.src)
     %5(s32) = COPY %0
-    %1 = COPY %x1
+    %1(p0) = COPY %x1
     %2 = COPY %w2
     TBNZW killed %2, 0, %bb.2.end
 
@@ -229,7 +229,7 @@ body: |
 
   bb.2.end:
     %4(s32) = PHI %0, %bb.0.entry, %3, %bb.1.then
-    STRWui killed %4, killed %1, 0 :: (store 4 into %ir.dst)
+    G_STORE killed %4, killed %1 :: (store 4 into %ir.dst)
     RET_ReallyLR
 ...
 
@@ -315,8 +315,8 @@ body: |
     ; Fast mode tries to reuse the source of the copy for the destination.
     ; Now, the default mapping says that %0 and %1 need to be in FPR.
     ; The repairing code insert two copies to materialize that.
-    ; FAST-NEXT: %3(s64) = COPY %0
-    ; FAST-NEXT: %4(s64) = COPY %1
+    ; FAST-NEXT: %3(<2 x s32>) = COPY %0
+    ; FAST-NEXT: %4(<2 x s32>) = COPY %1
     ; The mapping of G_OR is on FPR.
     ; FAST-NEXT: %2(<2 x s32>) = G_OR %3, %4
 
@@ -362,13 +362,13 @@ body: |
     ; Fast mode tries to reuse the source of the copy for the destination.
     ; Now, the default mapping says that %0 and %1 need to be in FPR.
     ; The repairing code insert two copies to materialize that.
-    ; FAST-NEXT: %3(s64) = COPY %0
-    ; FAST-NEXT: %4(s64) = COPY %1
+    ; FAST-NEXT: %3(<2 x s32>) = COPY %0
+    ; FAST-NEXT: %4(<2 x s32>) = COPY %1
     ; The mapping of G_OR is on FPR.
     ; FAST-NEXT: %2(<2 x s32>) = G_OR %3, %4
 
     ; Greedy mode remapped the instruction on the GPR bank.
-    ; GREEDY-NEXT: %3(s64) = G_OR %0, %1
+    ; GREEDY-NEXT: %3(<2 x s32>) = G_OR %0, %1
     ; We need to keep %2 into FPR because we do not know anything about it.
     ; GREEDY-NEXT: %2(<2 x s32>) = COPY %3
     %0(<2 x s32>) = COPY %x0

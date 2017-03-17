@@ -18,6 +18,7 @@
 #ifndef LLVM_IR_FUNCTION_H
 #define LLVM_IR_FUNCTION_H
 
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/ilist_node.h"
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/ADT/StringRef.h"
@@ -144,7 +145,11 @@ public:
   /// The particular intrinsic functions which correspond to this value are
   /// defined in llvm/Intrinsics.h.
   Intrinsic::ID getIntrinsicID() const LLVM_READONLY { return IntID; }
-  bool isIntrinsic() const { return getName().startswith("llvm."); }
+
+  /// isIntrinsic - Returns true if the function's name starts with "llvm.".
+  /// It's possible for this function to return true while getIntrinsicID()
+  /// returns Intrinsic::not_intrinsic!
+  bool isIntrinsic() const { return HasLLVMReservedName; }
 
   static Intrinsic::ID lookupIntrinsicID(StringRef Name);
 
@@ -203,14 +208,21 @@ public:
   /// \brief Set the entry count for this function.
   ///
   /// Entry count is the number of times this function was executed based on
-  /// pgo data.
-  void setEntryCount(uint64_t Count);
+  /// pgo data. \p Imports points to a set of GUIDs that needs to be imported
+  /// by the function for sample PGO, to enable the same inlines as the
+  /// profiled optimized binary.
+  void setEntryCount(uint64_t Count,
+                     const DenseSet<GlobalValue::GUID> *Imports = nullptr);
 
   /// \brief Get the entry count for this function.
   ///
   /// Entry count is the number of times the function was executed based on
   /// pgo data.
   Optional<uint64_t> getEntryCount() const;
+
+  /// Returns the set of GUIDs that needs to be imported to the function for
+  /// sample PGO, to enable the same inlines as the profiled optimized binary.
+  DenseSet<GlobalValue::GUID> getImportGUIDs() const;
 
   /// Set the section prefix for this function.
   void setSectionPrefix(StringRef Prefix);
@@ -666,6 +678,9 @@ public:
   /// Calls \a getMetadata() with \a LLVMContext::MD_dbg and casts the result
   /// to \a DISubprogram.
   DISubprogram *getSubprogram() const;
+
+  /// Returns true if we should emit debug info for profiling.
+  bool isDebugInfoForProfiling() const;
 
 private:
   void allocHungoffUselist();

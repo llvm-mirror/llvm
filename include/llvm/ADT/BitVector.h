@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <utility>
 
 namespace llvm {
 
@@ -45,14 +46,13 @@ public:
     BitWord *WordRef;
     unsigned BitPos;
 
-    reference();  // Undefined
-
   public:
     reference(BitVector &b, unsigned Idx) {
       WordRef = &b.Bits[Idx / BITWORD_SIZE];
       BitPos = Idx % BITWORD_SIZE;
     }
 
+    reference() = delete;
     reference(const reference&) = default;
 
     reference &operator=(reference t) {
@@ -539,7 +539,8 @@ private:
   }
 
   void init_words(BitWord *B, unsigned NumWords, bool t) {
-    memset(B, 0 - (int)t, NumWords*sizeof(BitWord));
+    if (NumWords > 0)
+      memset(B, 0 - (int)t, NumWords*sizeof(BitWord));
   }
 
   template<bool AddBits, bool InvertMask>

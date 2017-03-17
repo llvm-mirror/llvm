@@ -438,6 +438,11 @@ let Defs = [SCC] in {
 def S_ABSDIFF_I32 : SOP2_32 <"s_absdiff_i32">;
 } // End Defs = [SCC]
 
+let SubtargetPredicate = isGFX9 in {
+  def S_PACK_LL_B32_B16 : SOP2_32<"s_pack_ll_b32_b16">;
+  def S_PACK_LH_B32_B16 : SOP2_32<"s_pack_lh_b32_b16">;
+  def S_PACK_HH_B32_B16 : SOP2_32<"s_pack_hh_b32_b16">;
+}
 
 //===----------------------------------------------------------------------===//
 // SOPK Instructions
@@ -828,9 +833,12 @@ let Uses = [EXEC, M0] in {
 def S_SENDMSG : SOPP <0x00000010, (ins SendMsgImm:$simm16), "s_sendmsg $simm16",
   [(AMDGPUsendmsg (i32 imm:$simm16))]
 >;
+
+def S_SENDMSGHALT : SOPP <0x00000011, (ins SendMsgImm:$simm16), "s_sendmsghalt $simm16",
+  [(AMDGPUsendmsghalt (i32 imm:$simm16))]
+>;
 } // End Uses = [EXEC, M0]
 
-def S_SENDMSGHALT : SOPP <0x00000011, (ins SendMsgImm:$simm16), "s_sendmsghalt $simm16">;
 def S_TRAP : SOPP <0x00000012, (ins i16imm:$simm16), "s_trap $simm16">;
 def S_ICACHE_INV : SOPP <0x00000013, (ins), "s_icache_inv"> {
   let simm16 = 0;
@@ -1204,6 +1212,9 @@ def S_BFE_U64_vi           : SOP2_Real_vi <0x27, S_BFE_U64>;
 def S_BFE_I64_vi           : SOP2_Real_vi <0x28, S_BFE_I64>;
 def S_CBRANCH_G_FORK_vi    : SOP2_Real_vi <0x29, S_CBRANCH_G_FORK>;
 def S_ABSDIFF_I32_vi       : SOP2_Real_vi <0x2a, S_ABSDIFF_I32>;
+def S_PACK_LL_B32_B16_vi   : SOP2_Real_vi <0x32, S_PACK_LL_B32_B16>;
+def S_PACK_LH_B32_B16_vi   : SOP2_Real_vi <0x33, S_PACK_LH_B32_B16>;
+def S_PACK_HH_B32_B16_vi   : SOP2_Real_vi <0x34, S_PACK_HH_B32_B16>;
 
 def S_MOVK_I32_vi          : SOPK_Real_vi <0x00, S_MOVK_I32>;
 def S_CMOVK_I32_vi         : SOPK_Real_vi <0x01, S_CMOVK_I32>;

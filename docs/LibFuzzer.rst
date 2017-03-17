@@ -84,6 +84,7 @@ Some important things to remember about fuzz targets:
 * It must be as deterministic as possible. Non-determinism (e.g. random decisions not based on the input bytes) will make fuzzing inefficient.
 * It must be fast. Try avoiding cubic or greater complexity, logging, or excessive memory consumption.
 * Ideally, it should not modify any global state (although that's not strict).
+* Usually, the narrower the target the better. E.g. if your target can parse several data formats, split it into several targets, one per format.
 
 
 Building
@@ -340,9 +341,6 @@ possible event codes are:
 ``DONE``
   The fuzzer has completed operation because it has reached the specified
   iteration limit (``-runs``) or time limit (``-max_total_time``).
-``MIN<n>``
-  The fuzzer is minimizing the combination of input corpus directories into
-  a single unified corpus (due to the ``-merge`` command line option).
 ``RELOAD``
   The fuzzer is performing a periodic reload of inputs from the corpus
   directory; this allows it to discover any inputs discovered by other
@@ -770,7 +768,7 @@ Trophies
 
 * LLVM: `Clang <https://llvm.org/bugs/show_bug.cgi?id=23057>`_, `Clang-format <https://llvm.org/bugs/show_bug.cgi?id=23052>`_, `libc++ <https://llvm.org/bugs/show_bug.cgi?id=24411>`_, `llvm-as <https://llvm.org/bugs/show_bug.cgi?id=24639>`_, `Demangler <https://bugs.chromium.org/p/chromium/issues/detail?id=606626>`_, Disassembler: http://reviews.llvm.org/rL247405, http://reviews.llvm.org/rL247414, http://reviews.llvm.org/rL247416, http://reviews.llvm.org/rL247417, http://reviews.llvm.org/rL247420, http://reviews.llvm.org/rL247422.
 
-* Tensorflow: `[1] <https://github.com/tensorflow/tensorflow/commit/7231d01fcb2cd9ef9ffbfea03b724892c8a4026e>`__
+* Tensorflow: `[1] <https://da-data.blogspot.com/2017/01/finding-bugs-in-tensorflow-with.html>`__
 
 * Ffmpeg: `[1] <https://github.com/FFmpeg/FFmpeg/commit/c92f55847a3d9cd12db60bfcd0831ff7f089c37c>`__  `[2] <https://github.com/FFmpeg/FFmpeg/commit/25ab1a65f3acb5ec67b53fb7a2463a7368f1ad16>`__  `[3] <https://github.com/FFmpeg/FFmpeg/commit/85d23e5cbc9ad6835eef870a5b4247de78febe56>`__ `[4] <https://github.com/FFmpeg/FFmpeg/commit/04bd1b38ee6b8df410d0ab8d4949546b6c4af26a>`__
 

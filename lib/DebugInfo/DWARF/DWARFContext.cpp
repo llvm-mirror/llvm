@@ -1,4 +1,4 @@
-//===-- DWARFContext.cpp --------------------------------------------------===//
+//===- DWARFContext.cpp ---------------------------------------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,21 +7,45 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/DebugInfo/DWARF/DWARFContext.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSwitch.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/DebugInfo/DWARF/DWARFAcceleratorTable.h"
+#include "llvm/DebugInfo/DWARF/DWARFCompileUnit.h"
+#include "llvm/DebugInfo/DWARF/DWARFContext.h"
+#include "llvm/DebugInfo/DWARF/DWARFDebugAbbrev.h"
+#include "llvm/DebugInfo/DWARF/DWARFDebugAranges.h"
 #include "llvm/DebugInfo/DWARF/DWARFDebugArangeSet.h"
+#include "llvm/DebugInfo/DWARF/DWARFDebugFrame.h"
+#include "llvm/DebugInfo/DWARF/DWARFDebugLine.h"
+#include "llvm/DebugInfo/DWARF/DWARFDebugLoc.h"
+#include "llvm/DebugInfo/DWARF/DWARFDebugMacro.h"
+#include "llvm/DebugInfo/DWARF/DWARFDebugPubTable.h"
+#include "llvm/DebugInfo/DWARF/DWARFDebugRangeList.h"
+#include "llvm/DebugInfo/DWARF/DWARFDie.h"
+#include "llvm/DebugInfo/DWARF/DWARFFormValue.h"
+#include "llvm/DebugInfo/DWARF/DWARFGdbIndex.h"
+#include "llvm/DebugInfo/DWARF/DWARFSection.h"
 #include "llvm/DebugInfo/DWARF/DWARFUnitIndex.h"
+#include "llvm/Object/Decompressor.h"
 #include "llvm/Object/MachO.h"
+#include "llvm/Object/ObjectFile.h"
 #include "llvm/Object/RelocVisitor.h"
-#include "llvm/Support/Compression.h"
-#include "llvm/Support/Dwarf.h"
-#include "llvm/Support/ELF.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/DataExtractor.h"
+#include "llvm/Support/Debug.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/Format.h"
-#include "llvm/Support/Path.h"
+#include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
+#include <cstdint>
+#include <string>
+#include <utility>
+#include <vector>
+
 using namespace llvm;
 using namespace dwarf;
 using namespace object;
@@ -31,39 +55,6 @@ using namespace object;
 typedef DWARFDebugLine::LineTable DWARFLineTable;
 typedef DILineInfoSpecifier::FileLineInfoKind FileLineInfoKind;
 typedef DILineInfoSpecifier::FunctionNameKind FunctionNameKind;
-
-static void dumpPubSection(raw_ostream &OS, StringRef Name, StringRef Data,
-                           bool LittleEndian, bool GnuStyle) {
-  OS << "\n." << Name << " contents:\n";
-  DataExtractor pubNames(Data, LittleEndian, 0);
-  uint32_t offset = 0;
-  while (pubNames.isValidOffset(offset)) {
-    OS << "length = " << format("0x%08x", pubNames.getU32(&offset));
-    OS << " version = " << format("0x%04x", pubNames.getU16(&offset));
-    OS << " unit_offset = " << format("0x%08x", pubNames.getU32(&offset));
-    OS << " unit_size = " << format("0x%08x", pubNames.getU32(&offset)) << '\n';
-    if (GnuStyle)
-      OS << "Offset     Linkage  Kind     Name\n";
-    else
-      OS << "Offset     Name\n";
-
-    while (offset < Data.size()) {
-      uint32_t dieRef = pubNames.getU32(&offset);
-      if (dieRef == 0)
-        break;
-      OS << format("0x%8.8x ", dieRef);
-      if (GnuStyle) {
-        PubIndexEntryDescriptor desc(pubNames.getU8(&offset));
-        OS << format("%-8s",
-                     dwarf::GDBIndexEntryLinkageString(desc.Linkage).data())
-           << ' '
-           << format("%-8s", dwarf::GDBIndexEntryKindString(desc.Kind).data())
-           << ' ';
-      }
-      OS << '\"' << pubNames.getCStr(&offset) << "\"\n";
-    }
-  }
-}
 
 static void dumpAccelSection(raw_ostream &OS, StringRef Name,
                              const DWARFSection& Section, StringRef StringSection,
@@ -156,16 +147,15 @@ void DWARFContext::dump(raw_ostream &OS, DIDumpType DumpType, bool DumpEH,
     OS << "\n.debug_line contents:\n";
     for (const auto &CU : compile_units()) {
       savedAddressByteSize = CU->getAddressByteSize();
-      const auto *CUDIE = CU->getUnitDIE();
-      if (CUDIE == nullptr)
+      auto CUDIE = CU->getUnitDIE();
+      if (!CUDIE)
         continue;
-      unsigned stmtOffset = CUDIE->getAttributeValueAsSectionOffset(
-          CU.get(), DW_AT_stmt_list, -1U);
-      if (stmtOffset != -1U) {
+      if (auto StmtOffset = toSectionOffset(CUDIE.find(DW_AT_stmt_list))) {
         DataExtractor lineData(getLineSection().Data, isLittleEndian(),
                                savedAddressByteSize);
         DWARFDebugLine::LineTable LineTable;
-        LineTable.parse(lineData, &getLineSection().Relocs, &stmtOffset);
+        uint32_t Offset = *StmtOffset;
+        LineTable.parse(lineData, &getLineSection().Relocs, &Offset);
         LineTable.dump(OS);
       }
     }
@@ -231,20 +221,22 @@ void DWARFContext::dump(raw_ostream &OS, DIDumpType DumpType, bool DumpEH,
   }
 
   if (DumpType == DIDT_All || DumpType == DIDT_Pubnames)
-    dumpPubSection(OS, "debug_pubnames", getPubNamesSection(),
-                   isLittleEndian(), false);
+    DWARFDebugPubTable(getPubNamesSection(), isLittleEndian(), false)
+        .dump("debug_pubnames", OS);
 
   if (DumpType == DIDT_All || DumpType == DIDT_Pubtypes)
-    dumpPubSection(OS, "debug_pubtypes", getPubTypesSection(),
-                   isLittleEndian(), false);
+    DWARFDebugPubTable(getPubTypesSection(), isLittleEndian(), false)
+        .dump("debug_pubtypes", OS);
 
   if (DumpType == DIDT_All || DumpType == DIDT_GnuPubnames)
-    dumpPubSection(OS, "debug_gnu_pubnames", getGnuPubNamesSection(),
-                   isLittleEndian(), true /* GnuStyle */);
+    DWARFDebugPubTable(getGnuPubNamesSection(), isLittleEndian(),
+                       true /* GnuStyle */)
+        .dump("debug_gnu_pubnames", OS);
 
   if (DumpType == DIDT_All || DumpType == DIDT_GnuPubtypes)
-    dumpPubSection(OS, "debug_gnu_pubtypes", getGnuPubTypesSection(),
-                   isLittleEndian(), true /* GnuStyle */);
+    DWARFDebugPubTable(getGnuPubTypesSection(), isLittleEndian(),
+                       true /* GnuStyle */)
+        .dump("debug_gnu_pubtypes", OS);
 
   if ((DumpType == DIDT_All || DumpType == DIDT_StrOffsetsDwo) &&
       !getStringOffsetDWOSection().empty()) {
@@ -412,16 +404,15 @@ DWARFContext::getLineTableForUnit(DWARFUnit *U) {
   if (!Line)
     Line.reset(new DWARFDebugLine(&getLineSection().Relocs));
 
-  const auto *UnitDIE = U->getUnitDIE();
-  if (UnitDIE == nullptr)
+  auto UnitDIE = U->getUnitDIE();
+  if (!UnitDIE)
     return nullptr;
 
-  unsigned stmtOffset =
-      UnitDIE->getAttributeValueAsSectionOffset(U, DW_AT_stmt_list, -1U);
-  if (stmtOffset == -1U)
+  auto Offset = toSectionOffset(UnitDIE.find(DW_AT_stmt_list));
+  if (!Offset)
     return nullptr; // No line table for this compile unit.
 
-  stmtOffset += U->getLineTableOffset();
+  uint32_t stmtOffset = *Offset + U->getLineTableOffset();
   // See if the line table is cached.
   if (const DWARFLineTable *lt = Line->getLineTable(stmtOffset))
     return lt;
@@ -470,25 +461,32 @@ DWARFCompileUnit *DWARFContext::getCompileUnitForAddress(uint64_t Address) {
   return getCompileUnitForOffset(CUOffset);
 }
 
-static bool getFunctionNameForAddress(DWARFCompileUnit *CU, uint64_t Address,
-                                      FunctionNameKind Kind,
-                                      std::string &FunctionName) {
-  if (Kind == FunctionNameKind::None)
-    return false;
+static bool getFunctionNameAndStartLineForAddress(DWARFCompileUnit *CU,
+                                                  uint64_t Address,
+                                                  FunctionNameKind Kind,
+                                                  std::string &FunctionName,
+                                                  uint32_t &StartLine) {
   // The address may correspond to instruction in some inlined function,
   // so we have to build the chain of inlined functions and take the
   // name of the topmost function in it.
-  const DWARFDebugInfoEntryInlinedChain &InlinedChain =
-      CU->getInlinedChainForAddress(Address);
-  if (InlinedChain.DIEs.size() == 0)
+  SmallVector<DWARFDie, 4> InlinedChain;
+  CU->getInlinedChainForAddress(Address, InlinedChain);
+  if (InlinedChain.empty())
     return false;
-  const DWARFDebugInfoEntryMinimal &TopFunctionDIE = InlinedChain.DIEs[0];
-  if (const char *Name =
-          TopFunctionDIE.getSubroutineName(InlinedChain.U, Kind)) {
+
+  const DWARFDie &DIE = InlinedChain[0];
+  bool FoundResult = false;
+  const char *Name = nullptr;
+  if (Kind != FunctionNameKind::None && (Name = DIE.getSubroutineName(Kind))) {
     FunctionName = Name;
-    return true;
+    FoundResult = true;
   }
-  return false;
+  if (auto DeclLineResult = DIE.getDeclLine()) {
+    StartLine = DeclLineResult;
+    FoundResult = true;
+  }
+
+  return FoundResult;
 }
 
 DILineInfo DWARFContext::getLineInfoForAddress(uint64_t Address,
@@ -498,7 +496,9 @@ DILineInfo DWARFContext::getLineInfoForAddress(uint64_t Address,
   DWARFCompileUnit *CU = getCompileUnitForAddress(Address);
   if (!CU)
     return Result;
-  getFunctionNameForAddress(CU, Address, Spec.FNKind, Result.FunctionName);
+  getFunctionNameAndStartLineForAddress(CU, Address, Spec.FNKind,
+                                        Result.FunctionName,
+                                        Result.StartLine);
   if (Spec.FLIKind != FileLineInfoKind::None) {
     if (const DWARFLineTable *LineTable = getLineTableForUnit(CU))
       LineTable->getFileLineInfoForAddress(Address, CU->getCompilationDir(),
@@ -516,13 +516,16 @@ DWARFContext::getLineInfoForAddressRange(uint64_t Address, uint64_t Size,
     return Lines;
 
   std::string FunctionName = "<invalid>";
-  getFunctionNameForAddress(CU, Address, Spec.FNKind, FunctionName);
+  uint32_t StartLine = 0;
+  getFunctionNameAndStartLineForAddress(CU, Address, Spec.FNKind, FunctionName,
+                                        StartLine);
 
   // If the Specifier says we don't need FileLineInfo, just
   // return the top-most function at the starting address.
   if (Spec.FLIKind == FileLineInfoKind::None) {
     DILineInfo Result;
     Result.FunctionName = FunctionName;
+    Result.StartLine = StartLine;
     Lines.push_back(std::make_pair(Address, Result));
     return Lines;
   }
@@ -543,6 +546,7 @@ DWARFContext::getLineInfoForAddressRange(uint64_t Address, uint64_t Size,
     Result.FunctionName = FunctionName;
     Result.Line = Row.Line;
     Result.Column = Row.Column;
+    Result.StartLine = StartLine;
     Lines.push_back(std::make_pair(Row.Address, Result));
   }
 
@@ -559,9 +563,9 @@ DWARFContext::getInliningInfoForAddress(uint64_t Address,
     return InliningInfo;
 
   const DWARFLineTable *LineTable = nullptr;
-  const DWARFDebugInfoEntryInlinedChain &InlinedChain =
-      CU->getInlinedChainForAddress(Address);
-  if (InlinedChain.DIEs.size() == 0) {
+  SmallVector<DWARFDie, 4> InlinedChain;
+  CU->getInlinedChainForAddress(Address, InlinedChain);
+  if (InlinedChain.size() == 0) {
     // If there is no DIE for address (e.g. it is in unavailable .dwo file),
     // try to at least get file/line info from symbol table.
     if (Spec.FLIKind != FileLineInfoKind::None) {
@@ -576,13 +580,14 @@ DWARFContext::getInliningInfoForAddress(uint64_t Address,
   }
 
   uint32_t CallFile = 0, CallLine = 0, CallColumn = 0;
-  for (uint32_t i = 0, n = InlinedChain.DIEs.size(); i != n; i++) {
-    const DWARFDebugInfoEntryMinimal &FunctionDIE = InlinedChain.DIEs[i];
+  for (uint32_t i = 0, n = InlinedChain.size(); i != n; i++) {
+    DWARFDie &FunctionDIE = InlinedChain[i];
     DILineInfo Frame;
     // Get function name if necessary.
-    if (const char *Name =
-            FunctionDIE.getSubroutineName(InlinedChain.U, Spec.FNKind))
+    if (const char *Name = FunctionDIE.getSubroutineName(Spec.FNKind))
       Frame.FunctionName = Name;
+    if (auto DeclLineResult = FunctionDIE.getDeclLine())
+      Frame.StartLine = DeclLineResult;
     if (Spec.FLIKind != FileLineInfoKind::None) {
       if (i == 0) {
         // For the topmost frame, initialize the line table of this
@@ -603,73 +608,12 @@ DWARFContext::getInliningInfoForAddress(uint64_t Address,
       }
       // Get call file/line/column of a current DIE.
       if (i + 1 < n) {
-        FunctionDIE.getCallerFrame(InlinedChain.U, CallFile, CallLine,
-                                   CallColumn);
+        FunctionDIE.getCallerFrame(CallFile, CallLine, CallColumn);
       }
     }
     InliningInfo.addFrame(Frame);
   }
   return InliningInfo;
-}
-
-static bool consumeCompressedGnuHeader(StringRef &data,
-                                       uint64_t &OriginalSize) {
-  // Consume "ZLIB" prefix.
-  if (!data.startswith("ZLIB"))
-    return false;
-  data = data.substr(4);
-  // Consume uncompressed section size (big-endian 8 bytes).
-  DataExtractor extractor(data, false, 8);
-  uint32_t Offset = 0;
-  OriginalSize = extractor.getU64(&Offset);
-  if (Offset == 0)
-    return false;
-  data = data.substr(Offset);
-  return true;
-}
-
-static bool consumeCompressedZLibHeader(StringRef &Data, uint64_t &OriginalSize,
-                                        bool IsLE, bool Is64Bit) {
-  using namespace ELF;
-  uint64_t HdrSize = Is64Bit ? sizeof(Elf64_Chdr) : sizeof(Elf32_Chdr);
-  if (Data.size() < HdrSize)
-    return false;
-
-  DataExtractor Extractor(Data, IsLE, 0);
-  uint32_t Offset = 0;
-  if (Extractor.getUnsigned(&Offset, Is64Bit ? sizeof(Elf64_Word)
-                                             : sizeof(Elf32_Word)) !=
-      ELFCOMPRESS_ZLIB)
-    return false;
-
-  // Skip Elf64_Chdr::ch_reserved field.
-  if (Is64Bit)
-    Offset += sizeof(Elf64_Word);
-
-  OriginalSize = Extractor.getUnsigned(&Offset, Is64Bit ? sizeof(Elf64_Xword)
-                                                        : sizeof(Elf32_Word));
-  Data = Data.substr(HdrSize);
-  return true;
-}
-
-static bool tryDecompress(StringRef &Name, StringRef &Data,
-                          SmallString<32> &Out, bool ZLibStyle, bool IsLE,
-                          bool Is64Bit) {
-  if (!zlib::isAvailable())
-    return false;
-
-  uint64_t OriginalSize;
-  bool Result =
-      ZLibStyle ? consumeCompressedZLibHeader(Data, OriginalSize, IsLE, Is64Bit)
-                : consumeCompressedGnuHeader(Data, OriginalSize);
-
-  if (!Result || zlib::uncompress(Data, Out, OriginalSize) != zlib::StatusOK)
-    return false;
-
-  // gnu-style names are started from "z", consume that.
-  if (!ZLibStyle)
-    Name = Name.substr(1);
-  return true;
 }
 
 DWARFContextInMemory::DWARFContextInMemory(const object::ObjectFile &Obj,
@@ -695,52 +639,24 @@ DWARFContextInMemory::DWARFContextInMemory(const object::ObjectFile &Obj,
     if (!L || !L->getLoadedSectionContents(*RelocatedSection,data))
       Section.getContents(data);
 
-    name = name.substr(name.find_first_not_of("._")); // Skip . and _ prefixes.
-
-    bool ZLibStyleCompressed = Section.isCompressed();
-    if (ZLibStyleCompressed || name.startswith("zdebug_")) {
+    if (Decompressor::isCompressed(Section)) {
+      Expected<Decompressor> Decompressor =
+          Decompressor::create(name, data, IsLittleEndian, AddressSize == 8);
+      if (!Decompressor)
+        continue;
       SmallString<32> Out;
-      if (!tryDecompress(name, data, Out, ZLibStyleCompressed, IsLittleEndian,
-                         AddressSize == 8))
+      if (auto Err = Decompressor->decompress(Out))
         continue;
       UncompressedSections.emplace_back(std::move(Out));
       data = UncompressedSections.back();
     }
 
-    StringRef *SectionData =
-        StringSwitch<StringRef *>(name)
-            .Case("debug_info", &InfoSection.Data)
-            .Case("debug_abbrev", &AbbrevSection)
-            .Case("debug_loc", &LocSection.Data)
-            .Case("debug_line", &LineSection.Data)
-            .Case("debug_aranges", &ARangeSection)
-            .Case("debug_frame", &DebugFrameSection)
-            .Case("eh_frame", &EHFrameSection)
-            .Case("debug_str", &StringSection)
-            .Case("debug_ranges", &RangeSection)
-            .Case("debug_macinfo", &MacinfoSection)
-            .Case("debug_pubnames", &PubNamesSection)
-            .Case("debug_pubtypes", &PubTypesSection)
-            .Case("debug_gnu_pubnames", &GnuPubNamesSection)
-            .Case("debug_gnu_pubtypes", &GnuPubTypesSection)
-            .Case("debug_info.dwo", &InfoDWOSection.Data)
-            .Case("debug_abbrev.dwo", &AbbrevDWOSection)
-            .Case("debug_loc.dwo", &LocDWOSection.Data)
-            .Case("debug_line.dwo", &LineDWOSection.Data)
-            .Case("debug_str.dwo", &StringDWOSection)
-            .Case("debug_str_offsets.dwo", &StringOffsetDWOSection)
-            .Case("debug_addr", &AddrSection)
-            .Case("apple_names", &AppleNamesSection.Data)
-            .Case("apple_types", &AppleTypesSection.Data)
-            .Case("apple_namespaces", &AppleNamespacesSection.Data)
-            .Case("apple_namespac", &AppleNamespacesSection.Data)
-            .Case("apple_objc", &AppleObjCSection.Data)
-            .Case("debug_cu_index", &CUIndexSection)
-            .Case("debug_tu_index", &TUIndexSection)
-            .Case("gdb_index", &GdbIndexSection)
-            // Any more debug info sections go here.
-            .Default(nullptr);
-    if (SectionData) {
+    // Compressed sections names in GNU style starts from ".z",
+    // at this point section is decompressed and we drop compression prefix.
+    name = name.substr(
+        name.find_first_not_of("._z")); // Skip ".", "z" and "_" prefixes.
+
+    if (StringRef *SectionData = MapSectionToMember(name)) {
       *SectionData = data;
       if (name == "debug_ranges") {
         // FIXME: Use the other dwo range section when we emit it.
@@ -862,9 +778,9 @@ DWARFContextInMemory::DWARFContextInMemory(const object::ObjectFile &Obj,
           // we need to perform the same computation.
           StringRef SecName;
           RSec->getName(SecName);
-//           llvm::dbgs() << "Name: '" << SecName
-//                        << "', RSec: " << RSec->getRawDataRefImpl()
-//                        << ", Section: " << Section.getRawDataRefImpl() << "\n";
+//           dbgs() << "Name: '" << SecName
+//                  << "', RSec: " << RSec->getRawDataRefImpl()
+//                  << ", Section: " << Section.getRawDataRefImpl() << "\n";
           SectionLoadAddress = L->getSectionLoadAddress(*RSec);
           if (SectionLoadAddress != 0)
             SymAddr += SectionLoadAddress - RSec->getAddress();
@@ -901,4 +817,49 @@ DWARFContextInMemory::DWARFContextInMemory(const object::ObjectFile &Obj,
   }
 }
 
-void DWARFContextInMemory::anchor() { }
+DWARFContextInMemory::DWARFContextInMemory(
+    const StringMap<std::unique_ptr<MemoryBuffer>> &Sections, uint8_t AddrSize,
+    bool isLittleEndian)
+    : IsLittleEndian(isLittleEndian), AddressSize(AddrSize) {
+  for (const auto &SecIt : Sections) {
+    if (StringRef *SectionData = MapSectionToMember(SecIt.first()))
+      *SectionData = SecIt.second->getBuffer();
+  }
+}
+
+StringRef *DWARFContextInMemory::MapSectionToMember(StringRef Name) {
+  return StringSwitch<StringRef *>(Name)
+      .Case("debug_info", &InfoSection.Data)
+      .Case("debug_abbrev", &AbbrevSection)
+      .Case("debug_loc", &LocSection.Data)
+      .Case("debug_line", &LineSection.Data)
+      .Case("debug_aranges", &ARangeSection)
+      .Case("debug_frame", &DebugFrameSection)
+      .Case("eh_frame", &EHFrameSection)
+      .Case("debug_str", &StringSection)
+      .Case("debug_ranges", &RangeSection)
+      .Case("debug_macinfo", &MacinfoSection)
+      .Case("debug_pubnames", &PubNamesSection)
+      .Case("debug_pubtypes", &PubTypesSection)
+      .Case("debug_gnu_pubnames", &GnuPubNamesSection)
+      .Case("debug_gnu_pubtypes", &GnuPubTypesSection)
+      .Case("debug_info.dwo", &InfoDWOSection.Data)
+      .Case("debug_abbrev.dwo", &AbbrevDWOSection)
+      .Case("debug_loc.dwo", &LocDWOSection.Data)
+      .Case("debug_line.dwo", &LineDWOSection.Data)
+      .Case("debug_str.dwo", &StringDWOSection)
+      .Case("debug_str_offsets.dwo", &StringOffsetDWOSection)
+      .Case("debug_addr", &AddrSection)
+      .Case("apple_names", &AppleNamesSection.Data)
+      .Case("apple_types", &AppleTypesSection.Data)
+      .Case("apple_namespaces", &AppleNamespacesSection.Data)
+      .Case("apple_namespac", &AppleNamespacesSection.Data)
+      .Case("apple_objc", &AppleObjCSection.Data)
+      .Case("debug_cu_index", &CUIndexSection)
+      .Case("debug_tu_index", &TUIndexSection)
+      .Case("gdb_index", &GdbIndexSection)
+      // Any more debug info sections go here.
+      .Default(nullptr);
+}
+
+void DWARFContextInMemory::anchor() {}

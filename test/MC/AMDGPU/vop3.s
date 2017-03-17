@@ -1,9 +1,10 @@
 // RUN: not llvm-mc -arch=amdgcn -show-encoding %s | FileCheck %s --check-prefix=SICI
-// RUN: llvm-mc -arch=amdgcn -mcpu=hawaii -show-encoding %s | FileCheck %s --check-prefix=CI
+// RUN: not llvm-mc -arch=amdgcn -mcpu=hawaii -show-encoding %s | FileCheck %s --check-prefix=CI
 // RUN: not llvm-mc -arch=amdgcn -mcpu=tonga -show-encoding %s | FileCheck %s --check-prefix=VI
 
-// RUN: not llvm-mc -arch=amdgcn -show-encoding %s 2>&1 | FileCheck %s --check-prefix=NOSI
-// RUN: not llvm-mc -arch=amdgcn -mcpu=tonga -show-encoding %s 2>&1 | FileCheck %s -check-prefix=NOVI
+// RUN: not llvm-mc -arch=amdgcn -show-encoding %s 2>&1 | FileCheck %s --check-prefix=NOSI --check-prefix=NOSICI
+// RUN: not llvm-mc -arch=amdgcn -mcpu=hawaii -show-encoding %s 2>&1 | FileCheck %s --check-prefix=NOSICI
+// RUN: not llvm-mc -arch=amdgcn -mcpu=tonga -show-encoding %s 2>&1 | FileCheck %s --check-prefix=NOVI
 
 
 //===----------------------------------------------------------------------===//
@@ -258,6 +259,18 @@ v_mac_f32_e64 v0, -v1, |v2|
 // SICI: v_mac_f32_e64 v0, -v1, |v2| ; encoding: [0x00,0x02,0x3e,0xd2,0x01,0x05,0x02,0x20]
 // VI:   v_mac_f32_e64 v0, -v1, |v2| ; encoding: [0x00,0x02,0x16,0xd1,0x01,0x05,0x02,0x20]
 
+v_mac_f16_e64 v0, 0.5, flat_scratch_lo
+// NOSICI: error:
+// VI: v_mac_f16_e64 v0, 0.5, flat_scratch_lo ; encoding: [0x00,0x00,0x23,0xd1,0xf0,0xcc,0x00,0x00]
+
+v_mac_f16_e64 v0, -4.0, flat_scratch_lo
+// NOSICI: error:
+// VI: v_mac_f16_e64 v0, -4.0, flat_scratch_lo ; encoding: [0x00,0x00,0x23,0xd1,0xf6,0xcc,0x00,0x20]
+
+v_mac_f16_e64 v0, flat_scratch_lo, -4.0
+// NOSICI: error:
+// VI: v_mac_f16_e64 v0, flat_scratch_lo, -4.0 ; encoding: [0x00,0x00,0x23,0xd1,0x66,0xec,0x01,0x40]
+
 ///===---------------------------------------------------------------------===//
 // VOP3 Instructions
 ///===---------------------------------------------------------------------===//
@@ -352,10 +365,6 @@ v_div_scale_f32  v24, vcc, v22, v22, v20
 // SICI: v_div_scale_f32 v24, vcc, v22, v22, v20 ; encoding: [0x18,0x6a,0xda,0xd2,0x16,0x2d,0x52,0x04]
 // VI:   v_div_scale_f32 v24, vcc, v22, v22, v20 ; encoding: [0x18,0x6a,0xe0,0xd1,0x16,0x2d,0x52,0x04]
 
-v_div_scale_f32  v24, vcc, s[10:11], v22, v20
-// SICI: v_div_scale_f32 v24, vcc, s[10:11], v22, v20 ; encoding: [0x18,0x6a,0xda,0xd2,0x0a,0x2c,0x52,0x04]
-// VI:   v_div_scale_f32 v24, vcc, s[10:11], v22, v20 ; encoding: [0x18,0x6a,0xe0,0xd1,0x0a,0x2c,0x52,0x04]
-
 v_div_scale_f32  v24, s[10:11], v22, v22, v20
 // SICI: v_div_scale_f32 v24, s[10:11], v22, v22, v20 ; encoding: [0x18,0x0a,0xda,0xd2,0x16,0x2d,0x52,0x04]
 // VI:   v_div_scale_f32 v24, s[10:11], v22, v22, v20 ; encoding: [0x18,0x0a,0xe0,0xd1,0x16,0x2d,0x52,0x04]
@@ -365,8 +374,8 @@ v_div_scale_f32  v24, vcc, v22, 1.0, v22
 // VI:   v_div_scale_f32 v24, vcc, v22, 1.0, v22 ; encoding: [0x18,0x6a,0xe0,0xd1,0x16,0xe5,0x59,0x04]
 
 v_div_scale_f32  v24, vcc, v22, v22, -2.0
-// SICI: v_div_scale_f32 v24, vcc, v22, v22, -2.0 ; encoding: [0x18,0x6a,0xda,0xd2,0x16,0x2d,0xd2,0x83]
-// VI:   v_div_scale_f32 v24, vcc, v22, v22, -2.0 ; encoding: [0x18,0x6a,0xe0,0xd1,0x16,0x2d,0xd2,0x83]
+// SICI: v_div_scale_f32 v24, vcc, v22, v22, -2.0 ; encoding: [0x18,0x6a,0xda,0xd2,0x16,0x2d,0xd6,0x03]
+// VI:   v_div_scale_f32 v24, vcc, v22, v22, -2.0 ; encoding: [0x18,0x6a,0xe0,0xd1,0x16,0x2d,0xd6,0x03]
 
 v_div_scale_f32 v24, vcc, v22, v22, 0xc0000000
 // SICI: v_div_scale_f32 v24, vcc, v22, v22, -2.0 ; encoding: [0x18,0x6a,0xda,0xd2,0x16,0x2d,0xd6,0x03]

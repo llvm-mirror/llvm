@@ -55,11 +55,11 @@ done:                                             ; preds = %loop
 
 ; GCN-LABEL: {{^}}smrd_valu:
 ; SI: s_movk_i32 [[OFFSET:s[0-9]+]], 0x2ee0
+; SI: s_mov_b32
 ; GCN: v_readfirstlane_b32 s[[PTR_LO:[0-9]+]], v{{[0-9]+}}
 ; GCN: v_readfirstlane_b32 s[[PTR_HI:[0-9]+]], v{{[0-9]+}}
 ; SI: s_nop 3
 ; SI: s_load_dword [[OUT:s[0-9]+]], s{{\[}}[[PTR_LO]]:[[PTR_HI]]{{\]}}, [[OFFSET]]
-; SI: s_mov_b32
 
 ; CI: s_load_dword [[OUT:s[0-9]+]], s{{\[}}[[PTR_LO]]:[[PTR_HI]]{{\]}}, 0xbb8
 ; GCN: v_mov_b32_e32 [[V_OUT:v[0-9]+]], [[OUT]]
@@ -439,7 +439,7 @@ entry:
 ; GCN: v_mov_b32_e32 [[ONE:v[0-9]+]], 1
 ; GCN-NOHSA: buffer_store_dword [[ONE]]
 ; GCN-HSA: flat_store_dword v[{{[0-9]+:[0-9]+}}], [[ONE]]
-; GCN; {{^}}[[EXIT]]:
+; GCN: {{^}}[[EXIT]]:
 ; GCN: s_endpgm
 define void @sopc_vopc_legalize_bug(i32 %cond, i32 addrspace(1)* %out, i32 addrspace(1)* %in) {
 bb3:                                              ; preds = %bb2

@@ -339,3 +339,156 @@ define i32 @test75(i32 %x) {
   ret i32 %retval
 }
 
+; The next 4 tests are value clamping with constants:
+; https://llvm.org/bugs/show_bug.cgi?id=31693
+
+; (X <s C1) ? C1 : SMIN(X, C2) ==> SMAX(SMIN(X, C2), C1)
+
+define i32 @clamp_signed1(i32 %x) {
+; CHECK-LABEL: @clamp_signed1(
+; CHECK-NEXT:    [[CMP2:%.*]] = icmp slt i32 %x, 255
+; CHECK-NEXT:    [[MIN:%.*]] = select i1 [[CMP2]], i32 %x, i32 255
+; CHECK-NEXT:    [[TMP1:%.*]] = icmp sgt i32 [[MIN]], 15
+; CHECK-NEXT:    [[R:%.*]] = select i1 [[TMP1]], i32 [[MIN]], i32 15
+; CHECK-NEXT:    ret i32 [[R]]
+;
+  %cmp2 = icmp slt i32 %x, 255
+  %min = select i1 %cmp2, i32 %x, i32 255
+  %cmp1 = icmp slt i32 %x, 15
+  %r = select i1 %cmp1, i32 15, i32 %min
+  ret i32 %r
+}
+
+; (X >s C1) ? C1 : SMAX(X, C2) ==> SMIN(SMAX(X, C2), C1)
+
+define i32 @clamp_signed2(i32 %x) {
+; CHECK-LABEL: @clamp_signed2(
+; CHECK-NEXT:    [[CMP2:%.*]] = icmp sgt i32 %x, 15
+; CHECK-NEXT:    [[MAX:%.*]] = select i1 [[CMP2]], i32 %x, i32 15
+; CHECK-NEXT:    [[TMP1:%.*]] = icmp slt i32 [[MAX]], 255
+; CHECK-NEXT:    [[R:%.*]] = select i1 [[TMP1]], i32 [[MAX]], i32 255
+; CHECK-NEXT:    ret i32 [[R]]
+;
+  %cmp2 = icmp sgt i32 %x, 15
+  %max = select i1 %cmp2, i32 %x, i32 15
+  %cmp1 = icmp sgt i32 %x, 255
+  %r = select i1 %cmp1, i32 255, i32 %max
+  ret i32 %r
+}
+
+; (X <u C1) ? C1 : UMIN(X, C2) ==> UMAX(UMIN(X, C2), C1)
+
+define i32 @clamp_unsigned1(i32 %x) {
+; CHECK-LABEL: @clamp_unsigned1(
+; CHECK-NEXT:    [[CMP2:%.*]] = icmp ult i32 %x, 255
+; CHECK-NEXT:    [[MIN:%.*]] = select i1 [[CMP2]], i32 %x, i32 255
+; CHECK-NEXT:    [[TMP1:%.*]] = icmp ugt i32 [[MIN]], 15
+; CHECK-NEXT:    [[R:%.*]] = select i1 [[TMP1]], i32 [[MIN]], i32 15
+; CHECK-NEXT:    ret i32 [[R]]
+;
+  %cmp2 = icmp ult i32 %x, 255
+  %min = select i1 %cmp2, i32 %x, i32 255
+  %cmp1 = icmp ult i32 %x, 15
+  %r = select i1 %cmp1, i32 15, i32 %min
+  ret i32 %r
+}
+
+; (X >u C1) ? C1 : UMAX(X, C2) ==> UMIN(UMAX(X, C2), C1)
+
+define i32 @clamp_unsigned2(i32 %x) {
+; CHECK-LABEL: @clamp_unsigned2(
+; CHECK-NEXT:    [[CMP2:%.*]] = icmp ugt i32 %x, 15
+; CHECK-NEXT:    [[MAX:%.*]] = select i1 [[CMP2]], i32 %x, i32 15
+; CHECK-NEXT:    [[TMP1:%.*]] = icmp ult i32 [[MAX]], 255
+; CHECK-NEXT:    [[R:%.*]] = select i1 [[TMP1]], i32 [[MAX]], i32 255
+; CHECK-NEXT:    ret i32 [[R]]
+;
+  %cmp2 = icmp ugt i32 %x, 15
+  %max = select i1 %cmp2, i32 %x, i32 15
+  %cmp1 = icmp ugt i32 %x, 255
+  %r = select i1 %cmp1, i32 255, i32 %max
+  ret i32 %r
+}
+
+; The next 3 min tests should canonicalize to the same form...and not infinite loop.
+
+define double @PR31751_umin1(i32 %x) {
+; CHECK-LABEL: @PR31751_umin1(
+; CHECK-NEXT:    [[TMP1:%.*]] = icmp ult i32 %x, 2147483647
+; CHECK-NEXT:    [[CONV1:%.*]] = select i1 [[TMP1]], i32 %x, i32 2147483647
+; CHECK-NEXT:    [[TMP2:%.*]] = sitofp i32 [[CONV1]] to double
+; CHECK-NEXT:    ret double [[TMP2]]
+;
+  %cmp = icmp slt i32 %x, 0
+  %sel = select i1 %cmp, i32 2147483647, i32 %x
+  %conv = sitofp i32 %sel to double
+  ret double %conv
+}
+
+define double @PR31751_umin2(i32 %x) {
+; CHECK-LABEL: @PR31751_umin2(
+; CHECK-NEXT:    [[CMP:%.*]] = icmp ult i32 %x, 2147483647
+; CHECK-NEXT:    [[SEL:%.*]] = select i1 [[CMP]], i32 %x, i32 2147483647
+; CHECK-NEXT:    [[CONV:%.*]] = sitofp i32 [[SEL]] to double
+; CHECK-NEXT:    ret double [[CONV]]
+;
+  %cmp = icmp ult i32 %x, 2147483647
+  %sel = select i1 %cmp, i32 %x, i32 2147483647
+  %conv = sitofp i32 %sel to double
+  ret double %conv
+}
+
+define double @PR31751_umin3(i32 %x) {
+; CHECK-LABEL: @PR31751_umin3(
+; CHECK-NEXT:    [[TMP1:%.*]] = icmp ult i32 %x, 2147483647
+; CHECK-NEXT:    [[SEL:%.*]] = select i1 [[TMP1]], i32 %x, i32 2147483647
+; CHECK-NEXT:    [[CONV:%.*]] = sitofp i32 [[SEL]] to double
+; CHECK-NEXT:    ret double [[CONV]]
+;
+  %cmp = icmp ugt i32 %x, 2147483647
+  %sel = select i1 %cmp, i32 2147483647, i32 %x
+  %conv = sitofp i32 %sel to double
+  ret double %conv
+}
+
+; The next 3 max tests should canonicalize to the same form...and not infinite loop.
+
+define double @PR31751_umax1(i32 %x) {
+; CHECK-LABEL: @PR31751_umax1(
+; CHECK-NEXT:    [[TMP1:%.*]] = icmp ugt i32 %x, -2147483648
+; CHECK-NEXT:    [[CONV1:%.*]] = select i1 [[TMP1]], i32 %x, i32 -2147483648
+; CHECK-NEXT:    [[TMP2:%.*]] = sitofp i32 [[CONV1]] to double
+; CHECK-NEXT:    ret double [[TMP2]]
+;
+  %cmp = icmp sgt i32 %x, -1
+  %sel = select i1 %cmp, i32 2147483648, i32 %x
+  %conv = sitofp i32 %sel to double
+  ret double %conv
+}
+
+define double @PR31751_umax2(i32 %x) {
+; CHECK-LABEL: @PR31751_umax2(
+; CHECK-NEXT:    [[CMP:%.*]] = icmp ugt i32 %x, -2147483648
+; CHECK-NEXT:    [[SEL:%.*]] = select i1 [[CMP]], i32 %x, i32 -2147483648
+; CHECK-NEXT:    [[CONV:%.*]] = sitofp i32 [[SEL]] to double
+; CHECK-NEXT:    ret double [[CONV]]
+;
+  %cmp = icmp ugt i32 %x, 2147483648
+  %sel = select i1 %cmp, i32 %x, i32 2147483648
+  %conv = sitofp i32 %sel to double
+  ret double %conv
+}
+
+define double @PR31751_umax3(i32 %x) {
+; CHECK-LABEL: @PR31751_umax3(
+; CHECK-NEXT:    [[TMP1:%.*]] = icmp ugt i32 %x, -2147483648
+; CHECK-NEXT:    [[SEL:%.*]] = select i1 [[TMP1]], i32 %x, i32 -2147483648
+; CHECK-NEXT:    [[CONV:%.*]] = sitofp i32 [[SEL]] to double
+; CHECK-NEXT:    ret double [[CONV]]
+;
+  %cmp = icmp ult i32 %x, 2147483648
+  %sel = select i1 %cmp, i32 2147483648, i32 %x
+  %conv = sitofp i32 %sel to double
+  ret double %conv
+}
+

@@ -70,6 +70,7 @@ protected:
   bool shouldCombineMemoryType(EVT VT) const;
   SDValue performLoadCombine(SDNode *N, DAGCombinerInfo &DCI) const;
   SDValue performStoreCombine(SDNode *N, DAGCombinerInfo &DCI) const;
+  SDValue performClampCombine(SDNode *N, DAGCombinerInfo &DCI) const;
 
   SDValue splitBinaryBitConstantOpImpl(DAGCombinerInfo &DCI, const SDLoc &SL,
                                        unsigned Opc, SDValue LHS,
@@ -84,6 +85,8 @@ protected:
   SDValue performCtlzCombine(const SDLoc &SL, SDValue Cond, SDValue LHS,
                              SDValue RHS, DAGCombinerInfo &DCI) const;
   SDValue performSelectCombine(SDNode *N, DAGCombinerInfo &DCI) const;
+  SDValue performFNegCombine(SDNode *N, DAGCombinerInfo &DCI) const;
+  SDValue performFAbsCombine(SDNode *N, DAGCombinerInfo &DCI) const;
 
   static EVT getEquivalentMemType(LLVMContext &Context, EVT VT);
 
@@ -117,6 +120,16 @@ protected:
 
 public:
   AMDGPUTargetLowering(const TargetMachine &TM, const AMDGPUSubtarget &STI);
+
+  bool mayIgnoreSignedZero(SDValue Op) const {
+    if (getTargetMachine().Options.NoSignedZerosFPMath)
+      return true;
+
+    if (const auto *BO = dyn_cast<BinaryWithFlagsSDNode>(Op))
+      return BO->Flags.hasNoSignedZeros();
+
+    return false;
+  }
 
   bool isFAbsFree(EVT VT) const override;
   bool isFNegFree(EVT VT) const override;
@@ -163,7 +176,7 @@ public:
                           SmallVectorImpl<SDValue> &Results,
                           SelectionDAG &DAG) const override;
 
-  SDValue CombineFMinMaxLegacy(const SDLoc &DL, EVT VT, SDValue LHS,
+  SDValue combineFMinMaxLegacy(const SDLoc &DL, EVT VT, SDValue LHS,
                                SDValue RHS, SDValue True, SDValue False,
                                SDValue CC, DAGCombinerInfo &DCI) const;
 
@@ -226,7 +239,11 @@ enum NodeType : unsigned {
   RETURN,
   DWORDADDR,
   FRACT,
+
+  /// CLAMP value between 0.0 and 1.0. NaN clamped to 0, following clamp output
+  /// modifier behavior with dx10_enable.
   CLAMP,
+
   // This is SETCC with the full mask result which is used for a compare with a
   // result bit per item in the wavefront.
   SETCC,
@@ -254,6 +271,9 @@ enum NodeType : unsigned {
   DIV_SCALE,
   DIV_FMAS,
   DIV_FIXUP,
+  // For emitting ISD::FMAD when f32 denormals are enabled because mac/mad is
+  // treated as an illegal operation.
+  FMAD_FTZ,
   TRIG_PREOP, // 1 ULP max error for f64
 
   // RCP, RSQ - For f32, 1 ULP max error, no denormal handling.
@@ -301,6 +321,11 @@ enum NodeType : unsigned {
   CVT_F32_UBYTE1,
   CVT_F32_UBYTE2,
   CVT_F32_UBYTE3,
+
+  // Convert two float 32 numbers into a single register holding two packed f16
+  // with round to zero.
+  CVT_PKRTZ_F16_F32,
+
   /// This node is for VLIW targets and it is used to represent a vector
   /// that is stored in consecutive registers with the same channel.
   /// For example:
@@ -313,11 +338,13 @@ enum NodeType : unsigned {
   /// Pointer to the start of the shader's constant data.
   CONST_DATA_PTR,
   SENDMSG,
+  SENDMSGHALT,
   INTERP_MOV,
   INTERP_P1,
   INTERP_P2,
   PC_ADD_REL_OFFSET,
   KILL,
+  DUMMY_CHAIN,
   FIRST_MEM_OPCODE_NUMBER = ISD::FIRST_TARGET_MEMORY_OPCODE,
   STORE_MSKOR,
   LOAD_CONSTANT,
@@ -325,6 +352,8 @@ enum NodeType : unsigned {
   ATOMIC_CMP_SWAP,
   ATOMIC_INC,
   ATOMIC_DEC,
+  BUFFER_LOAD,
+  BUFFER_LOAD_FORMAT,
   LAST_AMDGPU_ISD_NUMBER
 };
 

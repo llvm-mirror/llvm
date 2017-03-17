@@ -412,6 +412,8 @@ public:
     return true;
   }
 
+  bool isMaskAndCmp0FoldingBeneficial(const Instruction &AndI) const override;
+
   bool hasAndNotCompare(SDValue) const override {
     // 'bics'
     return true;
@@ -434,6 +436,9 @@ public:
   bool supportSwiftError() const override {
     return true;
   }
+
+  /// Returns the size of the platform's va_list object.
+  unsigned getVaListSizeInBits(const DataLayout &DL) const override;
 
 private:
   bool isExtFreeImpl(const Instruction *Ext) const override;

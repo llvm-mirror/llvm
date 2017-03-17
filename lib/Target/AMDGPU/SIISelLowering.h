@@ -24,7 +24,8 @@ class SITargetLowering final : public AMDGPUTargetLowering {
   SDValue LowerParameterPtr(SelectionDAG &DAG, const SDLoc &SL, SDValue Chain,
                             unsigned Offset) const;
   SDValue LowerParameter(SelectionDAG &DAG, EVT VT, EVT MemVT, const SDLoc &SL,
-                         SDValue Chain, unsigned Offset, bool Signed) const;
+                         SDValue Chain, unsigned Offset, bool Signed,
+                         const ISD::InputArg *Arg = nullptr) const;
   SDValue LowerGlobalAddress(AMDGPUMachineFunction *MFI, SDValue Op,
                              SelectionDAG &DAG) const override;
   SDValue lowerImplicitZextParam(SelectionDAG &DAG, SDValue Op,
@@ -37,6 +38,7 @@ class SITargetLowering final : public AMDGPUTargetLowering {
   SDValue LowerSELECT(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerFastUnsafeFDIV(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerFDIV_FAST(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerFDIV16(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFDIV32(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFDIV64(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFDIV(SDValue Op, SelectionDAG &DAG) const;
@@ -53,14 +55,13 @@ class SITargetLowering final : public AMDGPUTargetLowering {
                             const SDLoc &DL,
                             EVT VT) const;
 
-  /// \brief Custom lowering for ISD::ConstantFP.
-  SDValue lowerConstantFP(SDValue Op, SelectionDAG &DAG) const;
-
   /// \brief Custom lowering for ISD::FP_ROUND for MVT::f16.
   SDValue lowerFP_ROUND(SDValue Op, SelectionDAG &DAG) const;
 
   SDValue getSegmentAperture(unsigned AS, SelectionDAG &DAG) const;
   SDValue lowerADDRSPACECAST(SDValue Op, SelectionDAG &DAG) const;
+  SDValue lowerINSERT_VECTOR_ELT(SDValue Op, SelectionDAG &DAG) const;
+  SDValue lowerEXTRACT_VECTOR_ELT(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerTRAP(SDValue Op, SelectionDAG &DAG) const;
 
   void adjustWritemask(MachineSDNode *&N, SelectionDAG &DAG) const;
@@ -70,6 +71,8 @@ class SITargetLowering final : public AMDGPUTargetLowering {
   SDValue performSHLPtrCombine(SDNode *N,
                                unsigned AS,
                                DAGCombinerInfo &DCI) const;
+
+  SDValue performMemSDNodeCombine(MemSDNode *N, DAGCombinerInfo &DCI) const;
 
   SDValue splitBinaryBitConstantOp(DAGCombinerInfo &DCI, const SDLoc &SL,
                                    unsigned Opc, SDValue LHS,
@@ -81,9 +84,20 @@ class SITargetLowering final : public AMDGPUTargetLowering {
   SDValue performClassCombine(SDNode *N, DAGCombinerInfo &DCI) const;
   SDValue performFCanonicalizeCombine(SDNode *N, DAGCombinerInfo &DCI) const;
 
+  SDValue performFPMed3ImmCombine(SelectionDAG &DAG, const SDLoc &SL,
+                                  SDValue Op0, SDValue Op1) const;
+  SDValue performIntMed3ImmCombine(SelectionDAG &DAG, const SDLoc &SL,
+                                   SDValue Op0, SDValue Op1, bool Signed) const;
   SDValue performMinMaxCombine(SDNode *N, DAGCombinerInfo &DCI) const;
+  SDValue performFMed3Combine(SDNode *N, DAGCombinerInfo &DCI) const;
+  SDValue performCvtPkRTZCombine(SDNode *N, DAGCombinerInfo &DCI) const;
 
+  unsigned getFusedOpcode(const SelectionDAG &DAG,
+                          const SDNode *N0, const SDNode *N1) const;
+  SDValue performFAddCombine(SDNode *N, DAGCombinerInfo &DCI) const;
+  SDValue performFSubCombine(SDNode *N, DAGCombinerInfo &DCI) const;
   SDValue performSetCCCombine(SDNode *N, DAGCombinerInfo &DCI) const;
+  SDValue performCvtF32UByteNCombine(SDNode *N, DAGCombinerInfo &DCI) const;
 
   bool isLegalFlatAddressingMode(const AddrMode &AM) const;
   bool isLegalMUBUFAddressingMode(const AddrMode &AM) const;
@@ -129,6 +143,7 @@ public:
                           MachineFunction &MF) const override;
 
   bool isMemOpUniform(const SDNode *N) const;
+  bool isMemOpHasNoClobberedMemOperand(const SDNode *N) const;
   bool isNoopAddrSpaceCast(unsigned SrcAS, unsigned DestAS) const override;
   bool isCheapAddrSpaceCast(unsigned SrcAS, unsigned DestAS) const override;
 
@@ -168,6 +183,9 @@ public:
   MVT getScalarShiftAmountTy(const DataLayout &, EVT) const override;
   bool isFMAFasterThanFMulAndFAdd(EVT VT) const override;
   SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
+  void ReplaceNodeResults(SDNode *N, SmallVectorImpl<SDValue> &Results,
+                          SelectionDAG &DAG) const override;
+
   SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const override;
   SDNode *PostISelFolding(MachineSDNode *N, SelectionDAG &DAG) const override;
   void AdjustInstrPostInstrSelection(MachineInstr &MI,

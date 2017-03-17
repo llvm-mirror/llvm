@@ -63,6 +63,21 @@ const unsigned MaxNumPhiBBsValueReachabilityCheck = 20;
 // depth otherwise the algorithm in aliasGEP will assert.
 static const unsigned MaxLookupSearchDepth = 6;
 
+bool BasicAAResult::invalidate(Function &F, const PreservedAnalyses &PA,
+                               FunctionAnalysisManager::Invalidator &Inv) {
+  // We don't care if this analysis itself is preserved, it has no state. But
+  // we need to check that the analyses it depends on have been. Note that we
+  // may be created without handles to some analyses and in that case don't
+  // depend on them.
+  if (Inv.invalidate<AssumptionAnalysis>(F, PA) ||
+      (DT && Inv.invalidate<DominatorTreeAnalysis>(F, PA)) ||
+      (LI && Inv.invalidate<LoopAnalysis>(F, PA)))
+    return true;
+
+  // Otherwise this analysis result remains valid.
+  return false;
+}
+
 //===----------------------------------------------------------------------===//
 // Useful predicates
 //===----------------------------------------------------------------------===//
@@ -629,9 +644,9 @@ static bool isWriteOnlyParam(ImmutableCallSite CS, unsigned ArgIdx,
   // whenever possible.
   // FIXME Consider handling this in InferFunctionAttr.cpp together with other
   // attributes.
-  LibFunc::Func F;
+  LibFunc F;
   if (CS.getCalledFunction() && TLI.getLibFunc(*CS.getCalledFunction(), F) &&
-      F == LibFunc::memset_pattern16 && TLI.has(F))
+      F == LibFunc_memset_pattern16 && TLI.has(F))
     if (ArgIdx == 0)
       return true;
 
@@ -734,7 +749,11 @@ ModRefInfo BasicAAResult::getModRefInfo(ImmutableCallSite CS,
   // as an argument, and itself doesn't capture it.
   if (!isa<Constant>(Object) && CS.getInstruction() != Object &&
       isNonEscapingLocalObject(Object)) {
-    bool PassedAsArg = false;
+
+    // Optimistically assume that call doesn't touch Object and check this
+    // assumption in the following loop.
+    ModRefInfo Result = MRI_NoModRef;
+
     unsigned OperandNo = 0;
     for (auto CI = CS.data_operands_begin(), CE = CS.data_operands_end();
          CI != CE; ++CI, ++OperandNo) {
@@ -742,23 +761,42 @@ ModRefInfo BasicAAResult::getModRefInfo(ImmutableCallSite CS,
       // pointer were passed to arguments that were neither of these, then it
       // couldn't be no-capture.
       if (!(*CI)->getType()->isPointerTy() ||
-          (!CS.doesNotCapture(OperandNo) && !CS.isByValArgument(OperandNo)))
+          (!CS.doesNotCapture(OperandNo) &&
+           OperandNo < CS.getNumArgOperands() && !CS.isByValArgument(OperandNo)))
+        continue;
+
+      // Call doesn't access memory through this operand, so we don't care
+      // if it aliases with Object.
+      if (CS.doesNotAccessMemory(OperandNo))
         continue;
 
       // If this is a no-capture pointer argument, see if we can tell that it
-      // is impossible to alias the pointer we're checking.  If not, we have to
-      // assume that the call could touch the pointer, even though it doesn't
-      // escape.
+      // is impossible to alias the pointer we're checking.
       AliasResult AR =
           getBestAAResults().alias(MemoryLocation(*CI), MemoryLocation(Object));
-      if (AR) {
-        PassedAsArg = true;
-        break;
+
+      // Operand doesnt alias 'Object', continue looking for other aliases
+      if (AR == NoAlias)
+        continue;
+      // Operand aliases 'Object', but call doesn't modify it. Strengthen
+      // initial assumption and keep looking in case if there are more aliases.
+      if (CS.onlyReadsMemory(OperandNo)) {
+        Result = static_cast<ModRefInfo>(Result | MRI_Ref);
+        continue;
       }
+      // Operand aliases 'Object' but call only writes into it.
+      if (CS.doesNotReadMemory(OperandNo)) {
+        Result = static_cast<ModRefInfo>(Result | MRI_Mod);
+        continue;
+      }
+      // This operand aliases 'Object' and call reads and writes into it.
+      Result = MRI_ModRef;
+      break;
     }
 
-    if (!PassedAsArg)
-      return MRI_NoModRef;
+    // Early return if we improved mod ref information
+    if (Result != MRI_ModRef)
+      return Result;
   }
 
   // If the CallSite is to malloc or calloc, we can assume that it doesn't
@@ -773,6 +811,31 @@ ModRefInfo BasicAAResult::getModRefInfo(ImmutableCallSite CS,
     // fallback to the generic handling below.
     if (getBestAAResults().alias(MemoryLocation(Inst), Loc) == NoAlias)
       return MRI_NoModRef;
+  }
+
+  // The semantics of memcpy intrinsics forbid overlap between their respective
+  // operands, i.e., source and destination of any given memcpy must no-alias.
+  // If Loc must-aliases either one of these two locations, then it necessarily
+  // no-aliases the other.
+  if (auto *Inst = dyn_cast<MemCpyInst>(CS.getInstruction())) {
+    AliasResult SrcAA, DestAA;
+
+    if ((SrcAA = getBestAAResults().alias(MemoryLocation::getForSource(Inst),
+                                          Loc)) == MustAlias)
+      // Loc is exactly the memcpy source thus disjoint from memcpy dest.
+      return MRI_Ref;
+    if ((DestAA = getBestAAResults().alias(MemoryLocation::getForDest(Inst),
+                                           Loc)) == MustAlias)
+      // The converse case.
+      return MRI_Mod;
+
+    // It's also possible for Loc to alias both src and dest, or neither.
+    ModRefInfo rv = MRI_NoModRef;
+    if (SrcAA != NoAlias)
+      rv = static_cast<ModRefInfo>(rv | MRI_Ref);
+    if (DestAA != NoAlias)
+      rv = static_cast<ModRefInfo>(rv | MRI_Mod);
+    return rv;
   }
 
   // While the assume intrinsic is marked as arbitrarily writing so that
@@ -1150,14 +1213,14 @@ AliasResult BasicAAResult::aliasGEP(const GEPOperator *GEP1, uint64_t V1Size,
       return MayAlias;
 
     AliasResult R = aliasCheck(UnderlyingV1, MemoryLocation::UnknownSize,
-                               AAMDNodes(), V2, V2Size, V2AAInfo,
-                               nullptr, UnderlyingV2);
+                               AAMDNodes(), V2, MemoryLocation::UnknownSize,
+                               V2AAInfo, nullptr, UnderlyingV2);
     if (R != MustAlias)
       // If V2 may alias GEP base pointer, conservatively returns MayAlias.
       // If V2 is known not to alias GEP base pointer, then the two values
-      // cannot alias per GEP semantics: "A pointer value formed from a
-      // getelementptr instruction is associated with the addresses associated
-      // with the first operand of the getelementptr".
+      // cannot alias per GEP semantics: "Any memory access must be done through
+      // a pointer value associated with an address range of the memory access,
+      // otherwise the behavior is undefined.".
       return R;
 
     // If the max search depth is reached the result is undefined

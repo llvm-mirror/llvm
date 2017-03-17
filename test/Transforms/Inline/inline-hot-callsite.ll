@@ -1,4 +1,5 @@
 ; RUN: opt < %s -inline -inline-threshold=0 -hot-callsite-threshold=100 -S | FileCheck %s
+; RUN: opt < %s -passes='require<profile-summary>,cgscc(inline)' -inline-threshold=0 -hot-callsite-threshold=100 -S | FileCheck %s
 
 ; This tests that a hot callsite gets the (higher) inlinehint-threshold even without
 ; without inline hints and gets inlined because the cost is less than
@@ -40,7 +41,7 @@ declare void @extern()
 
 !1 = !{i32 1, !"ProfileSummary", !2}
 !2 = !{!3, !4, !5, !6, !7, !8, !9, !10}
-!3 = !{!"ProfileFormat", !"InstrProf"}
+!3 = !{!"ProfileFormat", !"SampleProfile"}
 !4 = !{!"TotalCount", i64 10000}
 !5 = !{!"MaxCount", i64 1000}
 !6 = !{!"MaxInternalCount", i64 1}

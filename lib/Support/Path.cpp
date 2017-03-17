@@ -556,8 +556,16 @@ void native(const Twine &path, SmallVectorImpl<char> &result) {
 }
 
 void native(SmallVectorImpl<char> &Path) {
+  if (Path.empty())
+    return;
 #ifdef LLVM_ON_WIN32
   std::replace(Path.begin(), Path.end(), '/', '\\');
+  if (Path[0] == '~' && (Path.size() == 1 || is_separator(Path[1]))) {
+    SmallString<128> PathHome;
+    home_directory(PathHome);
+    PathHome.append(Path.begin() + 1, Path.end());
+    Path = PathHome;
+  }
 #else
   for (auto PI = Path.begin(), PE = Path.end(); PI < PE; ++PI) {
     if (*PI == '\\') {
@@ -568,6 +576,16 @@ void native(SmallVectorImpl<char> &Path) {
         *PI = '/';
     }
   }
+#endif
+}
+
+std::string convert_to_slash(StringRef path) {
+#ifdef LLVM_ON_WIN32
+  std::string s = path.str();
+  std::replace(s.begin(), s.end(), '\\', '/');
+  return s;
+#else
+  return path;
 #endif
 }
 
@@ -935,6 +953,13 @@ bool status_known(file_status s) {
   return s.type() != file_type::status_error;
 }
 
+file_type get_file_type(const Twine &Path, bool Follow) {
+  file_status st;
+  if (status(Path, st, Follow))
+    return file_type::status_error;
+  return st.type();
+}
+
 bool is_directory(file_status status) {
   return status.type() == file_type::directory_file;
 }
@@ -956,6 +981,18 @@ std::error_code is_regular_file(const Twine &path, bool &result) {
   if (std::error_code ec = status(path, st))
     return ec;
   result = is_regular_file(st);
+  return std::error_code();
+}
+
+bool is_symlink_file(file_status status) {
+  return status.type() == file_type::symlink_file;
+}
+
+std::error_code is_symlink_file(const Twine &path, bool &result) {
+  file_status st;
+  if (std::error_code ec = status(path, st, false))
+    return ec;
+  result = is_symlink_file(st);
   return std::error_code();
 }
 
@@ -1152,7 +1189,7 @@ std::error_code identify_magic(const Twine &Path, file_magic &Result) {
 }
 
 std::error_code directory_entry::status(file_status &result) const {
-  return fs::status(Path, result);
+  return fs::status(Path, result, FollowSymlinks);
 }
 
 } // end namespace fs

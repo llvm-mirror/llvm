@@ -33,6 +33,7 @@
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/MemorySSA.h"
+#include "llvm/Transforms/Utils/MemorySSAUpdater.h"
 #include <deque>
 using namespace llvm;
 using namespace llvm::PatternMatch;
@@ -253,6 +254,7 @@ public:
   DominatorTree &DT;
   AssumptionCache &AC;
   MemorySSA *MSSA;
+  std::unique_ptr<MemorySSAUpdater> MSSAUpdater;
   typedef RecyclingAllocator<
       BumpPtrAllocator, ScopedHashTableVal<SimpleValue, Value *>> AllocatorTy;
   typedef ScopedHashTable<SimpleValue, Value *, DenseMapInfo<SimpleValue>,
@@ -315,7 +317,9 @@ public:
   /// \brief Set up the EarlyCSE runner for a particular function.
   EarlyCSE(const TargetLibraryInfo &TLI, const TargetTransformInfo &TTI,
            DominatorTree &DT, AssumptionCache &AC, MemorySSA *MSSA)
-      : TLI(TLI), TTI(TTI), DT(DT), AC(AC), MSSA(MSSA), CurrentGeneration(0) {}
+      : TLI(TLI), TTI(TTI), DT(DT), AC(AC), MSSA(MSSA),
+        MSSAUpdater(make_unique<MemorySSAUpdater>(MSSA)), CurrentGeneration(0) {
+  }
 
   bool run();
 
@@ -481,9 +485,9 @@ private:
   bool processNode(DomTreeNode *Node);
 
   Value *getOrCreateResult(Value *Inst, Type *ExpectedType) const {
-    if (LoadInst *LI = dyn_cast<LoadInst>(Inst))
+    if (auto *LI = dyn_cast<LoadInst>(Inst))
       return LI;
-    else if (StoreInst *SI = dyn_cast<StoreInst>(Inst))
+    if (auto *SI = dyn_cast<StoreInst>(Inst))
       return SI->getValueOperand();
     assert(isa<IntrinsicInst>(Inst) && "Instruction not supported");
     return TTI.getOrCreateResultFromMemIntrinsic(cast<IntrinsicInst>(Inst),
@@ -517,7 +521,7 @@ private:
           if (MemoryPhi *MP = dyn_cast<MemoryPhi>(U))
             PhisToCheck.push_back(MP);
 
-        MSSA->removeMemoryAccess(WI);
+        MSSAUpdater->removeMemoryAccess(WI);
 
         for (MemoryPhi *MP : PhisToCheck) {
           MemoryAccess *FirstIn = MP->getIncomingValue(0);
@@ -761,12 +765,13 @@ bool EarlyCSE::processNode(DomTreeNode *Node) {
       continue;
     }
 
-    // If this instruction may read from memory, forget LastStore.
-    // Load/store intrinsics will indicate both a read and a write to
-    // memory.  The target may override this (e.g. so that a store intrinsic
-    // does not read  from memory, and thus will be treated the same as a
-    // regular store for commoning purposes).
-    if (Inst->mayReadFromMemory() &&
+    // If this instruction may read from memory or throw (and potentially read
+    // from memory in the exception handler), forget LastStore.  Load/store
+    // intrinsics will indicate both a read and a write to memory.  The target
+    // may override this (e.g. so that a store intrinsic does not read from
+    // memory, and thus will be treated the same as a regular store for
+    // commoning purposes).
+    if ((Inst->mayReadFromMemory() || Inst->mayThrow()) &&
         !(MemInst.isValid() && !MemInst.mayReadFromMemory()))
       LastStore = nullptr;
 
@@ -967,10 +972,8 @@ PreservedAnalyses EarlyCSEPass::run(Function &F,
   if (!CSE.run())
     return PreservedAnalyses::all();
 
-  // CSE preserves the dominator tree because it doesn't mutate the CFG.
-  // FIXME: Bundle this with other CFG-preservation.
   PreservedAnalyses PA;
-  PA.preserve<DominatorTreeAnalysis>();
+  PA.preserveSet<CFGAnalyses>();
   PA.preserve<GlobalsAA>();
   if (UseMemorySSA)
     PA.preserve<MemorySSAAnalysis>();

@@ -3,11 +3,13 @@
 ; RUN: llvm-as %s -o %t.o
 ; RUN: llvm-as %p/Inputs/thinlto.ll -o %t2.o
 ; RUN: %gold -plugin %llvmshlibdir/LLVMgold.so \
+; RUN:    -m elf_x86_64 \
 ; RUN:    --plugin-opt=thinlto \
 ; RUN:    --plugin-opt=thinlto-index-only \
 ; RUN:    -shared %t.o %t2.o -o %t3
 ; RUN: not test -e %t3
 ; RUN: %gold -plugin %llvmshlibdir/LLVMgold.so \
+; RUN:    -m elf_x86_64 \
 ; RUN:    --plugin-opt=thinlto \
 ; RUN:    -shared %t.o %t2.o -o %t4
 ; RUN: llvm-nm %t4 | FileCheck %s --check-prefix=NM
@@ -18,6 +20,7 @@
 
 ; Ensure gold generates an index and not a binary if requested.
 ; RUN: %gold -plugin %llvmshlibdir/LLVMgold.so \
+; RUN:    -m elf_x86_64 \
 ; RUN:    --plugin-opt=thinlto \
 ; RUN:    --plugin-opt=thinlto-index-only \
 ; RUN:    -shared %t.o %t2.o -o %t3
@@ -28,6 +31,7 @@
 ; Ensure gold generates an index as well as a binary with save-temps in ThinLTO mode.
 ; First force single-threaded mode
 ; RUN: %gold -plugin %llvmshlibdir/LLVMgold.so \
+; RUN:    -m elf_x86_64 \
 ; RUN:    --plugin-opt=save-temps \
 ; RUN:    --plugin-opt=thinlto \
 ; RUN:    --plugin-opt=jobs=1 \
@@ -37,6 +41,7 @@
 
 ; Check with --no-map-whole-files
 ; RUN: %gold -plugin %llvmshlibdir/LLVMgold.so \
+; RUN:    -m elf_x86_64 \
 ; RUN:    --plugin-opt=save-temps \
 ; RUN:    --plugin-opt=thinlto \
 ; RUN:    --plugin-opt=jobs=1 \
@@ -47,6 +52,7 @@
 
 ; Next force multi-threaded mode
 ; RUN: %gold -plugin %llvmshlibdir/LLVMgold.so \
+; RUN:    -m elf_x86_64 \
 ; RUN:    --plugin-opt=save-temps \
 ; RUN:    --plugin-opt=thinlto \
 ; RUN:    --plugin-opt=jobs=2 \
@@ -55,12 +61,14 @@
 ; RUN: llvm-nm %t4 | FileCheck %s --check-prefix=NM
 
 ; Test --plugin-opt=obj-path to ensure unique object files generated.
+; RUN: rm -f %t5.o %t5.o1
 ; RUN: %gold -plugin %llvmshlibdir/LLVMgold.so \
+; RUN:    -m elf_x86_64 \
 ; RUN:    --plugin-opt=thinlto \
 ; RUN:    --plugin-opt=jobs=2 \
 ; RUN:    --plugin-opt=obj-path=%t5.o \
 ; RUN:    -shared %t.o %t2.o -o %t4
-; RUN: llvm-nm %t5.o0 | FileCheck %s --check-prefix=NM2
+; RUN: llvm-nm %t5.o | FileCheck %s --check-prefix=NM2
 ; RUN: llvm-nm %t5.o1 | FileCheck %s --check-prefix=NM2
 
 ; NM: T f
@@ -114,6 +122,9 @@
 ; COMBINED-NEXT: <COMBINED_ENTRY abbrevid={{[0-9]+}} op0={{1|2}} op1={{-3706093650706652785|-5300342847281564238}}
 ; COMBINED-NEXT: <COMBINED_ENTRY abbrevid={{[0-9]+}} op0={{1|2}} op1={{-3706093650706652785|-5300342847281564238}}
 ; COMBINED-NEXT: </VALUE_SYMTAB
+
+target datalayout = "e-m:e-i64:64-f80:128-n8:16:32:64-S128"
+target triple = "x86_64-unknown-linux-gnu"
 
 declare void @g(...)
 

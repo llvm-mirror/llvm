@@ -144,6 +144,12 @@ EnableNoNaNsFPMath("enable-no-nans-fp-math",
                    cl::init(false));
 
 cl::opt<bool>
+EnableNoSignedZerosFPMath("enable-no-signed-zeros-fp-math",
+                          cl::desc("Enable FP math optimizations that assume "
+                                   "the sign of 0 is insignificant"),
+                          cl::init(false));
+
+cl::opt<bool>
 EnableNoTrappingFPMath("enable-no-trapping-fp-math",
                        cl::desc("Enable setting the FP exceptions build "
                                 "attribute not to use exceptions"),
@@ -232,6 +238,11 @@ UseCtors("use-ctors",
              cl::desc("Use .ctors instead of .init_array."),
              cl::init(false));
 
+cl::opt<bool> RelaxELFRelocations(
+    "relax-elf-relocations",
+    cl::desc("Emit GOTPCRELX/REX_GOTPCRELX instead of GOTPCREL on x86-64 ELF"),
+    cl::init(false));
+
 cl::opt<bool> DataSections("data-sections",
                            cl::desc("Emit data into separate sections"),
                            cl::init(false));
@@ -277,6 +288,7 @@ static inline TargetOptions InitTargetOptionsFromCodeGenFlags() {
   Options.UnsafeFPMath = EnableUnsafeFPMath;
   Options.NoInfsFPMath = EnableNoInfsFPMath;
   Options.NoNaNsFPMath = EnableNoNaNsFPMath;
+  Options.NoSignedZerosFPMath = EnableNoSignedZerosFPMath;
   Options.NoTrappingFPMath = EnableNoTrappingFPMath;
   Options.FPDenormalMode = DenormalMode;
   Options.HonorSignDependentRoundingFPMathOption =
@@ -288,6 +300,7 @@ static inline TargetOptions InitTargetOptionsFromCodeGenFlags() {
   Options.StackAlignmentOverride = OverrideStackAlignment;
   Options.StackSymbolOrdering = StackSymbolOrdering;
   Options.UseInitArray = !UseCtors;
+  Options.RelaxELFRelocations = RelaxELFRelocations;
   Options.DataSections = DataSections;
   Options.FunctionSections = FunctionSections;
   Options.UniqueSectionNames = UniqueSectionNames;

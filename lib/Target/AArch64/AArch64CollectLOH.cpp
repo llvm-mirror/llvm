@@ -344,7 +344,8 @@ static bool handleMiddleInst(const MachineInstr &MI, LOHInfo &DefInfo,
     OpInfo = DefInfo;
     // Invalidate \p DefInfo because we track it in \p OpInfo now.
     handleClobber(DefInfo);
-  }
+  } else
+    DefInfo.LastADRP = nullptr;
 
   // Advance state machine.
   assert(OpInfo.IsCandidate && "Expect valid state");

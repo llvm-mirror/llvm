@@ -12,11 +12,17 @@ tablegen(LLVM AMDGPUGenAsmWriter.inc -gen-asm-writer)
 tablegen(LLVM AMDGPUGenAsmMatcher.inc -gen-asm-matcher)
 tablegen(LLVM AMDGPUGenDisassemblerTables.inc -gen-disassembler)
 tablegen(LLVM AMDGPUGenMCPseudoLowering.inc -gen-pseudo-lowering)
+if(LLVM_BUILD_GLOBAL_ISEL)
+  tablegen(LLVM AMDGPUGenRegisterBank.inc -gen-register-bank)
+endif()
 add_public_tablegen_target(AMDGPUCommonTableGen)
 
 # List of all GlobalISel files.
 set(GLOBAL_ISEL_FILES
   AMDGPUCallLowering.cpp
+  AMDGPUInstructionSelector.cpp
+  AMDGPULegalizerInfo.cpp
+  AMDGPURegisterBankInfo.cpp
   )
 
 # Add GlobalISel files to the dependencies if the user wants to build it.
@@ -39,8 +45,10 @@ add_llvm_target(AMDGPUCodeGen
   AMDGPUTargetObjectFile.cpp
   AMDGPUIntrinsicInfo.cpp
   AMDGPUISelDAGToDAG.cpp
+  AMDGPULowerIntrinsics.cpp
   AMDGPUMCInstLower.cpp
   AMDGPUMachineFunction.cpp
+  AMDGPUUnifyMetadata.cpp
   AMDGPUOpenCLImageTypeLoweringPass.cpp
   AMDGPUSubtarget.cpp
   AMDGPUTargetMachine.cpp
@@ -67,6 +75,7 @@ add_llvm_target(AMDGPUCodeGen
   SIDebuggerInsertNops.cpp
   SIFixControlFlowLiveIntervals.cpp
   SIFixSGPRCopies.cpp
+  SIFixVGPRCopies.cpp
   SIFoldOperands.cpp
   SIFrameLowering.cpp
   SIInsertSkips.cpp

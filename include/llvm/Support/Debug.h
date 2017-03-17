@@ -33,11 +33,6 @@ namespace llvm {
 class raw_ostream;
 
 #ifndef NDEBUG
-/// DebugFlag - This boolean is set to true if the '-debug' command line option
-/// is specified.  This should probably not be referenced directly, instead, use
-/// the DEBUG macro below.
-///
-extern bool DebugFlag;
 
 /// isCurrentDebugType - Return true if the specified string is the debug type
 /// specified on the command line, or if none was specified on the command line
@@ -50,6 +45,12 @@ bool isCurrentDebugType(const char *Type);
 /// debug output to be produced.
 ///
 void setCurrentDebugType(const char *Type);
+
+/// setCurrentDebugTypes - Set the current debug type, as if the
+/// -debug-only=X,Y,Z option were specified. Note that DebugFlag
+/// also needs to be set to true for debug output to be produced.
+///
+void setCurrentDebugTypes(const char **Types, unsigned Count);
 
 /// DEBUG_WITH_TYPE macro - This macro should be used by passes to emit debug
 /// information.  In the '-debug' option is specified on the commandline, and if
@@ -67,8 +68,32 @@ void setCurrentDebugType(const char *Type);
 #else
 #define isCurrentDebugType(X) (false)
 #define setCurrentDebugType(X)
+#define setCurrentDebugTypes(X, N)
 #define DEBUG_WITH_TYPE(TYPE, X) do { } while (false)
 #endif
+
+/// This boolean is set to true if the '-debug' command line option
+/// is specified.  This should probably not be referenced directly, instead, use
+/// the DEBUG macro below.
+///
+extern bool DebugFlag;
+
+/// \name Verification flags.
+///
+/// These flags turns on/off that are expensive and are turned off by default,
+/// unless macro EXPENSIVE_CHECKS is defined. The flags allow selectively
+/// turning the checks on without need to recompile.
+/// \{
+
+/// Enables verification of dominator trees.
+///
+extern bool VerifyDomInfo;
+
+/// Enables verification of loop info.
+///
+extern bool VerifyLoopInfo;
+
+///\}
 
 /// EnableDebugBuffering - This defaults to false.  If true, the debug
 /// stream will install signal handlers to dump any buffered debug
