@@ -1,5 +1,5 @@
 ; RUN: llc -march=amdgcn -mcpu=verde -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=SI %s
-; RUN: llc -march=amdgcn -mcpu=tonga -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=VI %s
+; RUN: llc -march=amdgcn -mcpu=tonga -mattr=-flat-for-global -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=VI %s
 
 ; Use a 64-bit value with lo bits that can be represented as an inline constant
 ; GCN-LABEL: {{^}}i64_imm_inline_lo:
@@ -121,7 +121,7 @@ define void @store_inline_imm_m_4.0_f32(float addrspace(1)* %out) {
 
 ; GCN-LABEL: {{^}}store_inline_imm_inv_2pi_f32:
 ; SI: v_mov_b32_e32 [[REG:v[0-9]+]], 0x3e22f983{{$}}
-; VI: v_mov_b32_e32 [[REG:v[0-9]+]], 1/2pi{{$}}
+; VI: v_mov_b32_e32 [[REG:v[0-9]+]], 0.15915494{{$}}
 ; GCN: buffer_store_dword [[REG]]
 define void @store_inline_imm_inv_2pi_f32(float addrspace(1)* %out) {
   store float 0x3FC45F3060000000, float addrspace(1)* %out
@@ -443,7 +443,7 @@ define void @add_inline_imm_neg_4.0_f64(double addrspace(1)* %out, double %x) {
 ; SI: v_add_f64 v{{\[[0-9]+:[0-9]+\]}}, s{{\[[0-9]+:[0-9]+\]}}, v{{\[}}[[LO_VREG]]:[[HI_VREG]]{{\]}}
 
 ; VI: s_load_dwordx2 [[VAL:s\[[0-9]+:[0-9]+\]]], {{s\[[0-9]+:[0-9]+\]}}, 0x2c
-; VI: v_add_f64 [[REG:v\[[0-9]+:[0-9]+\]]], [[VAL]], 1/2pi
+; VI: v_add_f64 [[REG:v\[[0-9]+:[0-9]+\]]], [[VAL]], 0.15915494{{$}}
 ; VI: buffer_store_dwordx2 [[REG]]
 define void @add_inline_imm_inv_2pi_f64(double addrspace(1)* %out, double %x) {
   %y = fadd double %x, 0x3fc45f306dc9c882
@@ -667,3 +667,18 @@ define void @store_literal_imm_f64(double addrspace(1)* %out) {
   store double 4096.0, double addrspace(1)* %out
   ret void
 }
+
+; GCN-LABEL: {{^}}literal_folding:
+; GCN: v_mul_f32_e32 v{{[0-9]+}}, 0x3f4353f8, v{{[0-9]+}}
+; GCN: v_mul_f32_e32 v{{[0-9]+}}, 0xbf4353f8, v{{[0-9]+}}
+define amdgpu_vs void @literal_folding(float %arg) {
+main_body:
+  %tmp = fmul float %arg, 0x3FE86A7F00000000
+  %tmp1 = fmul float %arg, 0xBFE86A7F00000000
+  call void @llvm.amdgcn.exp.f32(i32 12, i32 15, float %tmp, float %tmp, float %tmp1, float %tmp1, i1 true, i1 false) #0
+  ret void
+}
+
+declare void @llvm.amdgcn.exp.f32(i32, i32, float, float, float, float, i1, i1) #0
+
+attributes #0 = { nounwind }

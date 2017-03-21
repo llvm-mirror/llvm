@@ -11,19 +11,18 @@
 #define LLVM_DEBUGINFO_CODEVIEW_CODEVIEWRECORDIO_H
 
 #include "llvm/ADT/APSInt.h"
+#include "llvm/ADT/None.h"
 #include "llvm/ADT/Optional.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/DebugInfo/CodeView/CodeView.h"
+#include "llvm/DebugInfo/CodeView/CodeViewError.h"
 #include "llvm/DebugInfo/CodeView/TypeRecord.h"
-#include "llvm/DebugInfo/MSF/StreamReader.h"
-#include "llvm/DebugInfo/MSF/StreamWriter.h"
+#include "llvm/Support/BinaryStreamReader.h"
+#include "llvm/Support/BinaryStreamWriter.h"
 #include "llvm/Support/Error.h"
-
+#include <cassert>
+#include <cstdint>
 #include <type_traits>
-
-#include <stdint.h>
 
 namespace llvm {
 namespace codeview {
@@ -34,8 +33,8 @@ class CodeViewRecordIO {
   }
 
 public:
-  explicit CodeViewRecordIO(msf::StreamReader &Reader) : Reader(&Reader) {}
-  explicit CodeViewRecordIO(msf::StreamWriter &Writer) : Writer(&Writer) {}
+  explicit CodeViewRecordIO(BinaryStreamReader &Reader) : Reader(&Reader) {}
+  explicit CodeViewRecordIO(BinaryStreamWriter &Writer) : Writer(&Writer) {}
 
   Error beginRecord(Optional<uint32_t> MaxLength);
   Error endRecord();
@@ -46,6 +45,17 @@ public:
   bool isWriting() const { return !isReading(); }
 
   uint32_t maxFieldLength() const;
+
+  template <typename T> Error mapObject(T &Value) {
+    if (isWriting())
+      return Writer->writeObject(Value);
+
+    const T *ValuePtr;
+    if (auto EC = Reader->readObject(ValuePtr))
+      return EC;
+    Value = *ValuePtr;
+    return Error::success();
+  }
 
   template <typename T> Error mapInteger(T &Value) {
     if (isWriting())
@@ -75,6 +85,8 @@ public:
   Error mapEncodedInteger(APSInt &Value);
   Error mapStringZ(StringRef &Value);
   Error mapGuid(StringRef &Guid);
+
+  Error mapStringZVectorZ(std::vector<StringRef> &Value);
 
   template <typename SizeType, typename T, typename ElementMapper>
   Error mapVectorN(T &Items, const ElementMapper &Mapper) {
@@ -122,6 +134,7 @@ public:
   }
 
   Error mapByteVectorTail(ArrayRef<uint8_t> &Bytes);
+  Error mapByteVectorTail(std::vector<uint8_t> &Bytes);
 
   Error skipPadding();
 
@@ -147,10 +160,11 @@ private:
 
   SmallVector<RecordLimit, 2> Limits;
 
-  msf::StreamReader *Reader = nullptr;
-  msf::StreamWriter *Writer = nullptr;
+  BinaryStreamReader *Reader = nullptr;
+  BinaryStreamWriter *Writer = nullptr;
 };
-}
-}
 
-#endif
+} // end namespace codeview
+} // end namespace llvm
+
+#endif // LLVM_DEBUGINFO_CODEVIEW_CODEVIEWRECORDIO_H

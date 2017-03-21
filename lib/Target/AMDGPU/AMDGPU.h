@@ -47,9 +47,13 @@ FunctionPass *createSIDebuggerInsertNopsPass();
 FunctionPass *createSIInsertWaitsPass();
 FunctionPass *createAMDGPUCodeGenPreparePass(const GCNTargetMachine *TM = nullptr);
 
-ModulePass *createAMDGPUAnnotateKernelFeaturesPass();
+ModulePass *createAMDGPUAnnotateKernelFeaturesPass(const TargetMachine *TM = nullptr);
 void initializeAMDGPUAnnotateKernelFeaturesPass(PassRegistry &);
 extern char &AMDGPUAnnotateKernelFeaturesID;
+
+ModulePass *createAMDGPULowerIntrinsicsPass();
+void initializeAMDGPULowerIntrinsicsPass(PassRegistry &);
+extern char &AMDGPULowerIntrinsicsID;
 
 void initializeSIFoldOperandsPass(PassRegistry &);
 extern char &SIFoldOperandsID;
@@ -59,6 +63,9 @@ extern char &SIShrinkInstructionsID;
 
 void initializeSIFixSGPRCopiesPass(PassRegistry &);
 extern char &SIFixSGPRCopiesID;
+
+void initializeSIFixVGPRCopiesPass(PassRegistry &);
+extern char &SIFixVGPRCopiesID;
 
 void initializeSILowerI1CopiesPass(PassRegistry &);
 extern char &SILowerI1CopiesID;
@@ -90,6 +97,10 @@ ModulePass *createAMDGPUAlwaysInlinePass();
 ModulePass *createAMDGPUOpenCLImageTypeLoweringPass();
 FunctionPass *createAMDGPUAnnotateUniformValues();
 
+ModulePass* createAMDGPUUnifyMetadataPass();
+void initializeAMDGPUUnifyMetadataPass(PassRegistry&);
+extern char &AMDGPUUnifyMetadataID;
+
 void initializeSIFixControlFlowLiveIntervalsPass(PassRegistry&);
 extern char &SIFixControlFlowLiveIntervalsID;
 
@@ -107,6 +118,9 @@ extern char &SIDebuggerInsertNopsID;
 
 void initializeSIInsertWaitsPass(PassRegistry&);
 extern char &SIInsertWaitsID;
+
+ImmutablePass *createAMDGPUAAWrapperPass();
+void initializeAMDGPUAAWrapperPassPass(PassRegistry&);
 
 Target &getTheAMDGPUTarget();
 Target &getTheGCNTarget();

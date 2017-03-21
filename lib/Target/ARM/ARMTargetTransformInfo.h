@@ -33,10 +33,6 @@ class ARMTTIImpl : public BasicTTIImplBase<ARMTTIImpl> {
   const ARMSubtarget *ST;
   const ARMTargetLowering *TLI;
 
-  /// Estimate the overhead of scalarizing an instruction. Insert and Extract
-  /// are set if the result needs to be inserted and/or extracted from vectors.
-  unsigned getScalarizationOverhead(Type *Ty, bool Insert, bool Extract);
-
   const ARMSubtarget *getST() const { return ST; }
   const ARMTargetLowering *getTLI() const { return TLI; }
 
@@ -104,7 +100,8 @@ public:
 
   int getVectorInstrCost(unsigned Opcode, Type *Val, unsigned Index);
 
-  int getAddressComputationCost(Type *Val, bool IsComplex);
+  int getAddressComputationCost(Type *Val, ScalarEvolution *SE, 
+                                const SCEV *Ptr);
 
   int getFPOpCost(Type *Ty);
 
@@ -113,7 +110,8 @@ public:
       TTI::OperandValueKind Op1Info = TTI::OK_AnyValue,
       TTI::OperandValueKind Op2Info = TTI::OK_AnyValue,
       TTI::OperandValueProperties Opd1PropInfo = TTI::OP_None,
-      TTI::OperandValueProperties Opd2PropInfo = TTI::OP_None);
+      TTI::OperandValueProperties Opd2PropInfo = TTI::OP_None,
+      ArrayRef<const Value *> Args = ArrayRef<const Value *>());
 
   int getMemoryOpCost(unsigned Opcode, Type *Src, unsigned Alignment,
                       unsigned AddressSpace);

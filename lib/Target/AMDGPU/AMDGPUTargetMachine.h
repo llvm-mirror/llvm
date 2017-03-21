@@ -17,6 +17,13 @@
 
 #include "AMDGPUIntrinsicInfo.h"
 #include "AMDGPUSubtarget.h"
+#include "llvm/ADT/Optional.h"
+#include "llvm/ADT/StringMap.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/Analysis/TargetTransformInfo.h"
+#include "llvm/Support/CodeGen.h"
+#include "llvm/Target/TargetMachine.h"
+#include <memory>
 
 namespace llvm {
 
@@ -37,7 +44,7 @@ public:
                       StringRef FS, TargetOptions Options,
                       Optional<Reloc::Model> RM, CodeModel::Model CM,
                       CodeGenOpt::Level OL);
-  ~AMDGPUTargetMachine();
+  ~AMDGPUTargetMachine() override;
 
   const AMDGPUSubtarget *getSubtargetImpl() const;
   const AMDGPUSubtarget *getSubtargetImpl(const Function &) const override = 0;
@@ -50,6 +57,19 @@ public:
   TargetLoweringObjectFile *getObjFileLowering() const override {
     return TLOF.get();
   }
+
+  void adjustPassManager(PassManagerBuilder &) override;
+  /// Get the integer value of a null pointer in the given address space.
+  uint64_t getNullPointerValue(unsigned AddrSpace) const {
+    switch(AddrSpace) {
+    case AMDGPUAS::LOCAL_ADDRESS:
+    case AMDGPUAS::REGION_ADDRESS:
+      return -1;
+    default:
+      return 0;
+    }
+  }
+
 };
 
 //===----------------------------------------------------------------------===//
@@ -90,6 +110,6 @@ public:
   const SISubtarget *getSubtargetImpl(const Function &) const override;
 };
 
-} // End namespace llvm
+} // end namespace llvm
 
-#endif
+#endif // LLVM_LIB_TARGET_AMDGPU_AMDGPUTARGETMACHINE_H

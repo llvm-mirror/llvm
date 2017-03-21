@@ -17,10 +17,10 @@
 #cmakedefine HAVE_BACKTRACE ${HAVE_BACKTRACE}
 
 /* Define to 1 if you have the <CrashReporterClient.h> header file. */
-#undef HAVE_CRASHREPORTERCLIENT_H
+#cmakedefine HAVE_CRASHREPORTERCLIENT_H
 
 /* can use __crashreporter_info__ */
-#undef HAVE_CRASHREPORTER_INFO
+#cmakedefine01 HAVE_CRASHREPORTER_INFO
 
 /* Define to 1 if you have the declaration of `arc4random', and to 0 if you
    don't. */
@@ -39,7 +39,7 @@
 #cmakedefine01 HAVE_DECL_STRERROR_S
 
 /* Define to 1 if you have the DIA SDK installed, and to 0 if you don't. */
-#cmakedefine01 HAVE_DIA_SDK
+#cmakedefine01 LLVM_ENABLE_DIA_SDK
 
 /* Define to 1 if you have the <dirent.h> header file, and it defines `DIR'.
    */
@@ -50,6 +50,9 @@
 
 /* Define if dlopen() is available on this platform. */
 #cmakedefine HAVE_DLOPEN ${HAVE_DLOPEN}
+
+/* Define if dladdr() is available on this platform. */
+#cmakedefine HAVE_DLADDR ${HAVE_DLADDR}
 
 /* Define to 1 if you have the <errno.h> header file. */
 #cmakedefine HAVE_ERRNO_H ${HAVE_ERRNO_H}
@@ -119,6 +122,9 @@
 
 /* Define to 1 if you have the <link.h> header file. */
 #cmakedefine HAVE_LINK_H ${HAVE_LINK_H}
+
+/* Define to 1 if you have the `lseek64' function. */
+#cmakedefine HAVE_LSEEK64 ${HAVE_LSEEK64}
 
 /* Define to 1 if you have the <mach/mach.h> header file. */
 #cmakedefine HAVE_MACH_MACH_H ${HAVE_MACH_MACH_H}
@@ -333,9 +339,6 @@
 /* Doesn't use `cmakedefine` because it is allowed to be empty. */
 #define LLVM_DEFAULT_TARGET_TRIPLE "${LLVM_DEFAULT_TARGET_TRIPLE}"
 
-/* Define to enable checks that alter the LLVM C++ ABI */
-#cmakedefine01 LLVM_ENABLE_ABI_BREAKING_CHECKS
-
 /* Define if threads enabled */
 #cmakedefine01 LLVM_ENABLE_THREADS
 
@@ -374,9 +377,6 @@
 
 /* Define if this is Win32ish platform */
 #cmakedefine LLVM_ON_WIN32 ${LLVM_ON_WIN32}
-
-/* Installation prefix directory */
-#cmakedefine LLVM_PREFIX "${LLVM_PREFIX}"
 
 /* Define if we have the Intel JIT API runtime support library */
 #cmakedefine01 LLVM_USE_INTEL_JITEVENTS

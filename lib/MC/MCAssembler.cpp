@@ -7,36 +7,49 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/MC/MCAssembler.h"
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/ADT/StringExtras.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCAsmLayout.h"
+#include "llvm/MC/MCAssembler.h"
 #include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCCodeView.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCExpr.h"
+#include "llvm/MC/MCFixup.h"
 #include "llvm/MC/MCFixupKindInfo.h"
+#include "llvm/MC/MCFragment.h"
+#include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCSection.h"
 #include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/MCValue.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/LEB128.h"
-#include "llvm/Support/TargetRegistry.h"
+#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
+#include <cstring>
+#include <cassert>
+#include <cstdint>
 #include <tuple>
+#include <utility>
+
 using namespace llvm;
 
 #define DEBUG_TYPE "assembler"
 
 namespace {
 namespace stats {
+
 STATISTIC(EmittedFragments, "Number of emitted assembler fragments - total");
 STATISTIC(EmittedRelaxableFragments,
           "Number of emitted assembler fragments - relaxable");
@@ -55,8 +68,9 @@ STATISTIC(FragmentLayouts, "Number of fragment layouts");
 STATISTIC(ObjectBytes, "Number of emitted object file bytes");
 STATISTIC(RelaxationSteps, "Number of assembler layout and relaxation steps");
 STATISTIC(RelaxedInstructions, "Number of relaxed instructions");
-}
-}
+
+} // end namespace stats
+} // end anonymous namespace
 
 // FIXME FIXME FIXME: There are number of places in this file where we convert
 // what is a 64-bit assembler value used for computation into a value in the
@@ -73,8 +87,7 @@ MCAssembler::MCAssembler(MCContext &Context, MCAsmBackend &Backend,
   VersionMinInfo.Major = 0; // Major version == 0 for "none specified"
 }
 
-MCAssembler::~MCAssembler() {
-}
+MCAssembler::~MCAssembler() = default;
 
 void MCAssembler::reset() {
   Sections.clear();
@@ -114,10 +127,16 @@ bool MCAssembler::isThumbFunc(const MCSymbol *Symbol) const {
   if (!Symbol->isVariable())
     return false;
 
-  // FIXME: It looks like gas supports some cases of the form "foo + 2". It
-  // is not clear if that is a bug or a feature.
   const MCExpr *Expr = Symbol->getVariableValue();
-  const MCSymbolRefExpr *Ref = dyn_cast<MCSymbolRefExpr>(Expr);
+
+  MCValue V;
+  if (!Expr->evaluateAsRelocatable(V, nullptr, nullptr))
+    return false;
+
+  if (V.getSymB() || V.getRefKind() != MCSymbolRefExpr::VK_None)
+    return false;
+
+  const MCSymbolRefExpr *Ref = V.getSymA();
   if (!Ref)
     return false;
 
@@ -219,7 +238,6 @@ bool MCAssembler::evaluateFixup(const MCAsmLayout &Layout,
       Value -= Layout.getSymbolOffset(Sym);
   }
 
-
   bool ShouldAlignPC = Backend.getFixupKindInfo(Fixup.getKind()).Flags &
                          MCFixupKindInfo::FKF_IsAlignedDownTo32Bits;
   assert((ShouldAlignPC ? IsPCRel : true) &&
@@ -278,22 +296,29 @@ uint64_t MCAssembler::computeFragmentSize(const MCAsmLayout &Layout,
   case MCFragment::FT_Org: {
     const MCOrgFragment &OF = cast<MCOrgFragment>(F);
     MCValue Value;
-    if (!OF.getOffset().evaluateAsValue(Value, Layout))
-      report_fatal_error("expected assembly-time absolute expression");
+    if (!OF.getOffset().evaluateAsValue(Value, Layout)) {
+      getContext().reportError(OF.getLoc(),
+                               "expected assembly-time absolute expression");
+        return 0;
+    }
 
-    // FIXME: We need a way to communicate this error.
     uint64_t FragmentOffset = Layout.getFragmentOffset(&OF);
     int64_t TargetLocation = Value.getConstant();
     if (const MCSymbolRefExpr *A = Value.getSymA()) {
       uint64_t Val;
-      if (!Layout.getSymbolOffset(A->getSymbol(), Val))
-        report_fatal_error("expected absolute expression");
+      if (!Layout.getSymbolOffset(A->getSymbol(), Val)) {
+        getContext().reportError(OF.getLoc(), "expected absolute expression");
+        return 0;
+      }
       TargetLocation += Val;
     }
     int64_t Size = TargetLocation - FragmentOffset;
-    if (Size < 0 || Size >= 0x40000000)
-      report_fatal_error("invalid .org offset '" + Twine(TargetLocation) +
-                         "' (at offset '" + Twine(FragmentOffset) + "')");
+    if (Size < 0 || Size >= 0x40000000) {
+      getContext().reportError(
+          OF.getLoc(), "invalid .org offset '" + Twine(TargetLocation) +
+                           "' (at offset '" + Twine(FragmentOffset) + "')");
+      return 0;
+    }
     return Size;
   }
 
@@ -634,7 +659,7 @@ std::pair<uint64_t, bool> MCAssembler::handleFixup(const MCAsmLayout &Layout,
 
 void MCAssembler::layout(MCAsmLayout &Layout) {
   DEBUG_WITH_TYPE("mc-dump", {
-      llvm::errs() << "assembler backend - pre-layout\n--\n";
+      errs() << "assembler backend - pre-layout\n--\n";
       dump(); });
 
   // Create dummy fragments and assign section ordinals.
@@ -660,17 +685,18 @@ void MCAssembler::layout(MCAsmLayout &Layout) {
 
   // Layout until everything fits.
   while (layoutOnce(Layout))
-    continue;
+    if (getContext().hadError())
+      return;
 
   DEBUG_WITH_TYPE("mc-dump", {
-      llvm::errs() << "assembler backend - post-relaxation\n--\n";
+      errs() << "assembler backend - post-relaxation\n--\n";
       dump(); });
 
   // Finalize the layout, including fragment lowering.
   finishLayout(Layout);
 
   DEBUG_WITH_TYPE("mc-dump", {
-      llvm::errs() << "assembler backend - final-layout\n--\n";
+      errs() << "assembler backend - final-layout\n--\n";
       dump(); });
 
   // Allow the object writer a chance to perform post-layout binding (for
@@ -733,6 +759,10 @@ bool MCAssembler::fixupNeedsRelaxation(const MCFixup &Fixup,
   MCValue Target;
   uint64_t Value;
   bool Resolved = evaluateFixup(Layout, Fixup, DF, Target, Value);
+  if (Target.getSymA() &&
+      Target.getSymA()->getKind() == MCSymbolRefExpr::VK_X86_ABS8 &&
+      Fixup.getKind() == FK_Data_1)
+    return false;
   return getBackend().fixupNeedsRelaxationAdvanced(Fixup, Resolved, Value, DF,
                                                    Layout);
 }
@@ -912,7 +942,9 @@ bool MCAssembler::layoutOnce(MCAsmLayout &Layout) {
 void MCAssembler::finishLayout(MCAsmLayout &Layout) {
   // The layout is done. Mark every fragment as valid.
   for (unsigned int i = 0, n = Layout.getSectionOrder().size(); i != n; ++i) {
-    Layout.getFragmentOffset(&*Layout.getSectionOrder()[i]->rbegin());
+    MCSection &Section = *Layout.getSectionOrder()[i];
+    Layout.getFragmentOffset(&*Section.rbegin());
+    computeFragmentSize(Layout, *Section.rbegin());
   }
   getBackend().finishLayout(*this, Layout);
 }

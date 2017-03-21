@@ -25,24 +25,40 @@ template <class ELFT> void printProgramHeaders(const ELFFile<ELFT> *o) {
   typedef ELFFile<ELFT> ELFO;
   outs() << "Program Header:\n";
   auto ProgramHeaderOrError = o->program_headers();
-  if (std::error_code EC = ProgramHeaderOrError.getError())
-    report_fatal_error(EC.message());
+  if (!ProgramHeaderOrError)
+    report_fatal_error(
+        errorToErrorCode(ProgramHeaderOrError.takeError()).message());
   for (const typename ELFO::Elf_Phdr &Phdr : *ProgramHeaderOrError) {
     switch (Phdr.p_type) {
-    case ELF::PT_LOAD:
-      outs() << "    LOAD ";
-      break;
-    case ELF::PT_GNU_STACK:
-      outs() << "   STACK ";
+    case ELF::PT_DYNAMIC:
+      outs() << " DYNAMIC ";
       break;
     case ELF::PT_GNU_EH_FRAME:
       outs() << "EH_FRAME ";
       break;
+    case ELF::PT_GNU_RELRO:
+      outs() << "   RELRO ";
+      break;
+    case ELF::PT_GNU_STACK:
+      outs() << "   STACK ";
+      break;
     case ELF::PT_INTERP:
       outs() << "  INTERP ";
       break;
-    case ELF::PT_DYNAMIC:
-      outs() << " DYNAMIC ";
+    case ELF::PT_LOAD:
+      outs() << "    LOAD ";
+      break;
+    case ELF::PT_NOTE:
+      outs() << "    NOTE ";
+      break;
+    case ELF::PT_OPENBSD_BOOTDATA:
+      outs() << "    OPENBSD_BOOTDATA ";
+      break;
+    case ELF::PT_OPENBSD_RANDOMIZE:
+      outs() << "    OPENBSD_RANDOMIZE ";
+      break;
+    case ELF::PT_OPENBSD_WXNEEDED:
+      outs() << "    OPENBSD_WXNEEDED ";
       break;
     case ELF::PT_PHDR:
       outs() << "    PHDR ";

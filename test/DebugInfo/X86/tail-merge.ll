@@ -1,4 +1,4 @@
-; RUN: llc %s -mtriple=x86_64-unknown-unknown -use-unknown-locations=true -o - | FileCheck %s
+; RUN: llc %s -mtriple=x86_64-unknown-unknown -use-unknown-locations=Enable -o - | FileCheck %s
 
 ; Generated with "clang -gline-tables-only -c -emit-llvm -o - | opt -sroa -S"
 ; from source:
@@ -27,7 +27,7 @@
 ; CHECK: .loc	1 8 10
 ; CHECK: callq	bar
 ; CHECK: [[TAIL]]:
-; CHECK: .loc	1 0 0
+; CHECK: .loc	1 0
 ; CHECK: addl	[[REG]], %eax
 ; CHECK: .loc	1 9 3
 

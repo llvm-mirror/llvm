@@ -470,13 +470,21 @@ static BasicBlock *insertUniqueBackedgeBlock(Loop *L, BasicBlock *Preheader,
   }
 
   // Now that all of the PHI nodes have been inserted and adjusted, modify the
-  // backedge blocks to just to the BEBlock instead of the header.
+  // backedge blocks to jump to the BEBlock instead of the header.
+  // If one of the backedges has llvm.loop metadata attached, we remove
+  // it from the backedge and add it to BEBlock.
+  unsigned LoopMDKind = BEBlock->getContext().getMDKindID("llvm.loop");
+  MDNode *LoopMD = nullptr;
   for (unsigned i = 0, e = BackedgeBlocks.size(); i != e; ++i) {
     TerminatorInst *TI = BackedgeBlocks[i]->getTerminator();
+    if (!LoopMD)
+      LoopMD = TI->getMetadata(LoopMDKind);
+    TI->setMetadata(LoopMDKind, nullptr);
     for (unsigned Op = 0, e = TI->getNumSuccessors(); Op != e; ++Op)
       if (TI->getSuccessor(Op) == Header)
         TI->setSuccessor(Op, BEBlock);
   }
+  BEBlock->getTerminator()->setMetadata(LoopMDKind, LoopMD);
 
   //===--- Update all analyses which we must preserve now -----------------===//
 
@@ -522,7 +530,7 @@ ReprocessLoop:
 
       // Zap the dead pred's terminator and replace it with unreachable.
       TerminatorInst *TI = P->getTerminator();
-      changeToUnreachable(TI, /*UseLLVMTrap=*/false);
+      changeToUnreachable(TI, /*UseLLVMTrap=*/false, PreserveLCSSA);
       Changed = true;
     }
   }
@@ -637,14 +645,7 @@ ReprocessLoop:
   // loop-invariant instructions out of the way to open up more
   // opportunities, and the disadvantage of having the responsibility
   // to preserve dominator information.
-  bool UniqueExit = true;
-  if (!ExitBlocks.empty())
-    for (unsigned i = 1, e = ExitBlocks.size(); i != e; ++i)
-      if (ExitBlocks[i] != ExitBlocks[0]) {
-        UniqueExit = false;
-        break;
-      }
-  if (UniqueExit) {
+  if (ExitBlockSet.size() == 1) {
     for (unsigned i = 0, e = ExitingBlocks.size(); i != e; ++i) {
       BasicBlock *ExitingBlock = ExitingBlocks[i];
       if (!ExitingBlock->getSinglePredecessor()) continue;
@@ -727,6 +728,17 @@ bool llvm::simplifyLoop(Loop *L, DominatorTree *DT, LoopInfo *LI,
                         bool PreserveLCSSA) {
   bool Changed = false;
 
+#ifndef NDEBUG
+  // If we're asked to preserve LCSSA, the loop nest needs to start in LCSSA
+  // form.
+  if (PreserveLCSSA) {
+    assert(DT && "DT not available.");
+    assert(LI && "LI not available.");
+    assert(L->isRecursivelyLCSSAForm(*DT, *LI) &&
+           "Requested to preserve LCSSA, but it's already broken.");
+  }
+#endif
+
   // Worklist maintains our depth-first queue of loops in this nest to process.
   SmallVector<Loop *, 4> Worklist;
   Worklist.push_back(L);
@@ -806,15 +818,6 @@ bool LoopSimplify::runOnFunction(Function &F) {
       &getAnalysis<AssumptionCacheTracker>().getAssumptionCache(F);
 
   bool PreserveLCSSA = mustPreserveAnalysisID(LCSSAID);
-#ifndef NDEBUG
-  if (PreserveLCSSA) {
-    assert(DT && "DT not available.");
-    assert(LI && "LI not available.");
-    bool InLCSSA = all_of(
-        *LI, [&](Loop *L) { return L->isRecursivelyLCSSAForm(*DT, *LI); });
-    assert(InLCSSA && "Requested to preserve LCSSA, but it's already broken.");
-  }
-#endif
 
   // Simplify each loop nest in the function.
   for (LoopInfo::iterator I = LI->begin(), E = LI->end(); I != E; ++I)
@@ -838,17 +841,14 @@ PreservedAnalyses LoopSimplifyPass::run(Function &F,
   ScalarEvolution *SE = AM.getCachedResult<ScalarEvolutionAnalysis>(F);
   AssumptionCache *AC = &AM.getResult<AssumptionAnalysis>(F);
 
-  // FIXME: This pass should verify that the loops on which it's operating
-  // are in canonical SSA form, and that the pass itself preserves this form.
+  // Note that we don't preserve LCSSA in the new PM, if you need it run LCSSA
+  // after simplifying the loops.
   for (LoopInfo::iterator I = LI->begin(), E = LI->end(); I != E; ++I)
-    Changed |= simplifyLoop(*I, DT, LI, SE, AC, true /* PreserveLCSSA */);
-
-  // FIXME: We need to invalidate this to avoid PR28400. Is there a better
-  // solution?
-  AM.invalidate<ScalarEvolutionAnalysis>(F);
+    Changed |= simplifyLoop(*I, DT, LI, SE, AC, /*PreserveLCSSA*/ false);
 
   if (!Changed)
     return PreservedAnalyses::all();
+
   PreservedAnalyses PA;
   PA.preserve<DominatorTreeAnalysis>();
   PA.preserve<LoopAnalysis>();

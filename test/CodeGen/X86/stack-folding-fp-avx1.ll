@@ -575,17 +575,6 @@ define i64 @stack_fold_cvtsd2si64_int(<2 x double> %a0) {
 }
 declare i64 @llvm.x86.sse2.cvtsd2si64(<2 x double>) nounwind readnone
 
-; TODO stack_fold_cvtsd2ss
-
-define <4 x float> @stack_fold_cvtsd2ss_int(<2 x double> %a0) {
-  ;CHECK-LABEL: stack_fold_cvtsd2ss_int
-  ;CHECK:  vcvtsd2ss {{-?[0-9]*}}(%rsp), {{%xmm[0-9][0-9]*}}, {{%xmm[0-9][0-9]*}} {{.*#+}} 16-byte Folded Reload
-  %1 = tail call <2 x i64> asm sideeffect "nop", "=x,~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15},~{flags}"()
-  %2 = call <4 x float> @llvm.x86.sse2.cvtsd2ss(<4 x float> <float 0x0, float 0x0, float 0x0, float 0x0>, <2 x double> %a0)
-  ret <4 x float> %2
-}
-declare <4 x float> @llvm.x86.sse2.cvtsd2ss(<4 x float>, <2 x double>) nounwind readnone
-
 define double @stack_fold_cvtsi2sd(i32 %a0) {
   ;CHECK-LABEL: stack_fold_cvtsi2sd
   ;CHECK:  vcvtsi2sdl {{-?[0-9]*}}(%rsp), {{%xmm[0-9][0-9]*}}, {{%xmm[0-9][0-9]*}} {{.*#+}} 4-byte Folded Reload
@@ -653,17 +642,6 @@ define <4 x float> @stack_fold_cvtsi642ss_int(i64 %a0) {
   ret <4 x float> %2
 }
 declare <4 x float> @llvm.x86.sse.cvtsi642ss(<4 x float>, i64) nounwind readnone
-
-; TODO stack_fold_cvtss2sd
-
-define <2 x double> @stack_fold_cvtss2sd_int(<4 x float> %a0) {
-  ;CHECK-LABEL: stack_fold_cvtss2sd_int
-  ;CHECK:  vcvtss2sd {{-?[0-9]*}}(%rsp), {{%xmm[0-9][0-9]*}}, {{%xmm[0-9][0-9]*}} {{.*#+}} 16-byte Folded Reload
-  %1 = tail call <2 x i64> asm sideeffect "nop", "=x,~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15},~{flags}"()
-  %2 = call <2 x double> @llvm.x86.sse2.cvtss2sd(<2 x double> <double 0x0, double 0x0>, <4 x float> %a0)
-  ret <2 x double> %2
-}
-declare <2 x double> @llvm.x86.sse2.cvtss2sd(<2 x double>, <4 x float>) nounwind readnone
 
 ; TODO stack_fold_cvtss2si
 
@@ -893,10 +871,12 @@ define i32 @stack_fold_extractps(<4 x float> %a0) {
   ;CHECK-LABEL: stack_fold_extractps
   ;CHECK:       vextractps $1, {{%xmm[0-9][0-9]*}}, {{-?[0-9]*}}(%rsp) {{.*#+}} 4-byte Folded Spill
   ;CHECK:       movl    {{-?[0-9]*}}(%rsp), %eax {{.*#+}} 4-byte Reload
-  %1 = extractelement <4 x float> %a0, i32 1
-  %2 = bitcast float %1 to i32
-  %3 = tail call <2 x i64> asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  ret i32 %2
+  ; fadd forces execution domain
+  %1 = fadd <4 x float> %a0, <float 1.0, float 2.0, float 3.0, float 4.0>
+  %2 = extractelement <4 x float> %1, i32 1
+  %3 = bitcast float %2 to i32
+  %4 = tail call <2 x i64> asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
+  ret i32 %3
 }
 
 define <2 x double> @stack_fold_haddpd(<2 x double> %a0, <2 x double> %a1) {
@@ -1504,15 +1484,7 @@ define <8 x float> @stack_fold_rcpps_ymm_int(<8 x float> %a0) {
 declare <8 x float> @llvm.x86.avx.rcp.ps.256(<8 x float>) nounwind readnone
 
 ; TODO stack_fold_rcpss
-
-define <4 x float> @stack_fold_rcpss_int(<4 x float> %a0) {
-  ;CHECK-LABEL: stack_fold_rcpss_int
-  ;CHECK:       vrcpss {{-?[0-9]*}}(%rsp), {{%xmm[0-9][0-9]*}}, {{%xmm[0-9][0-9]*}} {{.*#+}} 16-byte Folded Reload
-  %1 = tail call <2 x i64> asm sideeffect "nop", "=x,~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15},~{flags}"()
-  %2 = call <4 x float> @llvm.x86.sse.rcp.ss(<4 x float> %a0)
-  ret <4 x float> %2
-}
-declare <4 x float> @llvm.x86.sse.rcp.ss(<4 x float>) nounwind readnone
+; TODO stack_fold_rcpss_int
 
 define <2 x double> @stack_fold_roundpd(<2 x double> %a0) {
   ;CHECK-LABEL: stack_fold_roundpd
@@ -1609,15 +1581,7 @@ define <8 x float> @stack_fold_rsqrtps_ymm_int(<8 x float> %a0) {
 declare <8 x float> @llvm.x86.avx.rsqrt.ps.256(<8 x float>) nounwind readnone
 
 ; TODO stack_fold_rsqrtss
-
-define <4 x float> @stack_fold_rsqrtss_int(<4 x float> %a0) {
-  ;CHECK-LABEL: stack_fold_rsqrtss_int
-  ;CHECK:       vrsqrtss {{-?[0-9]*}}(%rsp), {{%xmm[0-9][0-9]*}}, {{%xmm[0-9][0-9]*}} {{.*#+}} 16-byte Folded Reload
-  %1 = tail call <2 x i64> asm sideeffect "nop", "=x,~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15},~{flags}"()
-  %2 = call <4 x float> @llvm.x86.sse.rsqrt.ss(<4 x float> %a0)
-  ret <4 x float> %2
-}
-declare <4 x float> @llvm.x86.sse.rsqrt.ss(<4 x float>) nounwind readnone
+; TODO stack_fold_rsqrtss_int
 
 define <2 x double> @stack_fold_shufpd(<2 x double> %a0, <2 x double> %a1) {
   ;CHECK-LABEL: stack_fold_shufpd
@@ -1696,14 +1660,7 @@ define double @stack_fold_sqrtsd(double %a0) {
 }
 declare double @llvm.sqrt.f64(double) nounwind readnone
 
-define <2 x double> @stack_fold_sqrtsd_int(<2 x double> %a0) {
-  ;CHECK-LABEL: stack_fold_sqrtsd_int
-  ;CHECK:       vsqrtsd {{-?[0-9]*}}(%rsp), {{%xmm[0-9][0-9]*}}, {{%xmm[0-9][0-9]*}} {{.*#+}} 16-byte Folded Reload
-  %1 = tail call <2 x i64> asm sideeffect "nop", "=x,~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15},~{flags}"()
-  %2 = call <2 x double> @llvm.x86.sse2.sqrt.sd(<2 x double> %a0)
-  ret <2 x double> %2
-}
-declare <2 x double> @llvm.x86.sse2.sqrt.sd(<2 x double>) nounwind readnone
+; TODO stack_fold_sqrtsd_int
 
 define float @stack_fold_sqrtss(float %a0) {
   ;CHECK-LABEL: stack_fold_sqrtss
@@ -1714,14 +1671,7 @@ define float @stack_fold_sqrtss(float %a0) {
 }
 declare float @llvm.sqrt.f32(float) nounwind readnone
 
-define <4 x float> @stack_fold_sqrtss_int(<4 x float> %a0) {
-  ;CHECK-LABEL: stack_fold_sqrtss_int
-  ;CHECK:       vsqrtss {{-?[0-9]*}}(%rsp), {{%xmm[0-9][0-9]*}}, {{%xmm[0-9][0-9]*}} {{.*#+}} 16-byte Folded Reload
-  %1 = tail call <2 x i64> asm sideeffect "nop", "=x,~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15},~{flags}"()
-  %2 = call <4 x float> @llvm.x86.sse.sqrt.ss(<4 x float> %a0)
-  ret <4 x float> %2
-}
-declare <4 x float> @llvm.x86.sse.sqrt.ss(<4 x float>) nounwind readnone
+; TODO stack_fold_sqrtss_int
 
 define <2 x double> @stack_fold_subpd(<2 x double> %a0, <2 x double> %a1) {
   ;CHECK-LABEL: stack_fold_subpd

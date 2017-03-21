@@ -15,8 +15,8 @@
 #ifndef LLVM_ANALYSIS_IVUSERS_H
 #define LLVM_ANALYSIS_IVUSERS_H
 
+#include "llvm/Analysis/LoopAnalysisManager.h"
 #include "llvm/Analysis/LoopPass.h"
-#include "llvm/Analysis/LoopPassManager.h"
 #include "llvm/Analysis/ScalarEvolutionNormalization.h"
 #include "llvm/IR/ValueHandle.h"
 
@@ -188,22 +188,15 @@ public:
 /// Analysis pass that exposes the \c IVUsers for a loop.
 class IVUsersAnalysis : public AnalysisInfoMixin<IVUsersAnalysis> {
   friend AnalysisInfoMixin<IVUsersAnalysis>;
-  static char PassID;
+  static AnalysisKey Key;
 
 public:
   typedef IVUsers Result;
 
-  IVUsers run(Loop &L, LoopAnalysisManager &AM);
+  IVUsers run(Loop &L, LoopAnalysisManager &AM,
+              LoopStandardAnalysisResults &AR);
 };
 
-/// Printer pass for the \c IVUsers for a loop.
-class IVUsersPrinterPass : public PassInfoMixin<IVUsersPrinterPass> {
-  raw_ostream &OS;
-
-public:
-  explicit IVUsersPrinterPass(raw_ostream &OS) : OS(OS) {}
-  PreservedAnalyses run(Loop &L, LoopAnalysisManager &AM);
-};
 }
 
 #endif

@@ -118,7 +118,7 @@ MCSymbol *TargetLoweringObjectFile::getSymbolWithGlobalValueBase(
 MCSymbol *TargetLoweringObjectFile::getCFIPersonalitySymbol(
     const GlobalValue *GV, const TargetMachine &TM,
     MachineModuleInfo *MMI) const {
-  return TM.getSymbol(GV, *Mang);
+  return TM.getSymbol(GV);
 }
 
 void TargetLoweringObjectFile::emitPersonalityValue(MCStreamer &Streamer,
@@ -264,10 +264,7 @@ bool TargetLoweringObjectFile::shouldPutJumpTableInFunctionSection(
   // in discardable section
   // FIXME: this isn't the right predicate, should be based on the MCSection
   // for the function.
-  if (F.isWeakForLinker())
-    return true;
-
-  return false;
+  return F.isWeakForLinker();
 }
 
 /// Given a mergable constant with the specified size and relocation
@@ -288,7 +285,7 @@ const MCExpr *TargetLoweringObjectFile::getTTypeGlobalReference(
     const GlobalValue *GV, unsigned Encoding, const TargetMachine &TM,
     MachineModuleInfo *MMI, MCStreamer &Streamer) const {
   const MCSymbolRefExpr *Ref =
-      MCSymbolRefExpr::create(TM.getSymbol(GV, *Mang), getContext());
+      MCSymbolRefExpr::create(TM.getSymbol(GV), getContext());
 
   return getTTypeReference(Ref, Encoding, Streamer);
 }

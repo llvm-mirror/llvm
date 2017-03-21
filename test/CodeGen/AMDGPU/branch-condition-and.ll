@@ -1,5 +1,5 @@
 ; RUN: llc -march=amdgcn -verify-machineinstrs < %s | FileCheck -check-prefix=GCN %s
-; RUN: llc -march=amdgcn -mcpu=tonga -verify-machineinstrs < %s | FileCheck -check-prefix=GCN %s
+; RUN: llc -march=amdgcn -mcpu=tonga -mattr=-flat-for-global -verify-machineinstrs < %s | FileCheck -check-prefix=GCN %s
 
 ; This used to crash because during intermediate control flow lowering, there
 ; was a sequence
@@ -14,7 +14,7 @@
 ; GCN-DAG: v_cmp_lt_f32_e32 vcc,
 ; GCN: s_and_b64 [[AND:s\[[0-9]+:[0-9]+\]]], vcc, [[OTHERCC]]
 ; GCN: s_and_saveexec_b64 [[SAVED:s\[[0-9]+:[0-9]+\]]], [[AND]]
-; GCN: s_xor_b64 [[SAVED]], exec, [[SAVED]]
+; GCN: s_xor_b64 {{s\[[0-9]+:[0-9]+\]}}, exec, [[SAVED]]
 ;
 ; TODO: The following sequence is a bug (missing s_endpgm)!
 ;

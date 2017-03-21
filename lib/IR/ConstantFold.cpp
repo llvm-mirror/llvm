@@ -18,6 +18,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "ConstantFold.h"
+#include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -120,7 +121,6 @@ static Constant *FoldBitCast(Constant *V, Type *DestTy) {
             IdxList.push_back(Zero);
           } else if (SequentialType *STy =
                      dyn_cast<SequentialType>(ElTy)) {
-            if (ElTy->isPointerTy()) break;  // Can't index into pointers!
             ElTy = STy->getElementType();
             IdxList.push_back(Zero);
           } else {
@@ -591,13 +591,13 @@ Constant *llvm::ConstantFoldCastInstruction(unsigned opc, Constant *V,
     if (ConstantFP *FPC = dyn_cast<ConstantFP>(V)) {
       bool ignored;
       APFloat Val = FPC->getValueAPF();
-      Val.convert(DestTy->isHalfTy() ? APFloat::IEEEhalf :
-                  DestTy->isFloatTy() ? APFloat::IEEEsingle :
-                  DestTy->isDoubleTy() ? APFloat::IEEEdouble :
-                  DestTy->isX86_FP80Ty() ? APFloat::x87DoubleExtended :
-                  DestTy->isFP128Ty() ? APFloat::IEEEquad :
-                  DestTy->isPPC_FP128Ty() ? APFloat::PPCDoubleDouble :
-                  APFloat::Bogus,
+      Val.convert(DestTy->isHalfTy() ? APFloat::IEEEhalf() :
+                  DestTy->isFloatTy() ? APFloat::IEEEsingle() :
+                  DestTy->isDoubleTy() ? APFloat::IEEEdouble() :
+                  DestTy->isX86_FP80Ty() ? APFloat::x87DoubleExtended() :
+                  DestTy->isFP128Ty() ? APFloat::IEEEquad() :
+                  DestTy->isPPC_FP128Ty() ? APFloat::PPCDoubleDouble() :
+                  APFloat::Bogus(),
                   APFloat::rmNearestTiesToEven, &ignored);
       return ConstantFP::get(V->getContext(), Val);
     }
@@ -607,17 +607,15 @@ Constant *llvm::ConstantFoldCastInstruction(unsigned opc, Constant *V,
     if (ConstantFP *FPC = dyn_cast<ConstantFP>(V)) {
       const APFloat &V = FPC->getValueAPF();
       bool ignored;
-      uint64_t x[2];
       uint32_t DestBitWidth = cast<IntegerType>(DestTy)->getBitWidth();
+      APSInt IntVal(DestBitWidth, opc == Instruction::FPToUI);
       if (APFloat::opInvalidOp ==
-          V.convertToInteger(x, DestBitWidth, opc==Instruction::FPToSI,
-                             APFloat::rmTowardZero, &ignored)) {
+          V.convertToInteger(IntVal, APFloat::rmTowardZero, &ignored)) {
         // Undefined behavior invoked - the destination type can't represent
         // the input constant.
         return UndefValue::get(DestTy);
       }
-      APInt Val(DestBitWidth, x);
-      return ConstantInt::get(FPC->getContext(), Val);
+      return ConstantInt::get(FPC->getContext(), IntVal);
     }
     return nullptr; // Can't fold.
   case Instruction::IntToPtr:   //always treated as unsigned
@@ -892,10 +890,8 @@ Constant *llvm::ConstantFoldInsertValueInstruction(Constant *Agg,
   unsigned NumElts;
   if (StructType *ST = dyn_cast<StructType>(Agg->getType()))
     NumElts = ST->getNumElements();
-  else if (ArrayType *AT = dyn_cast<ArrayType>(Agg->getType()))
-    NumElts = AT->getNumElements();
   else
-    NumElts = Agg->getType()->getVectorNumElements();
+    NumElts = cast<SequentialType>(Agg->getType())->getNumElements();
 
   SmallVector<Constant*, 32> Result;
   for (unsigned i = 0; i != NumElts; ++i) {
@@ -1212,10 +1208,15 @@ Constant *llvm::ConstantFoldBinaryInstruction(unsigned Opcode,
     SmallVector<Constant*, 16> Result;
     Type *Ty = IntegerType::get(VTy->getContext(), 32);
     for (unsigned i = 0, e = VTy->getNumElements(); i != e; ++i) {
-      Constant *LHS =
-        ConstantExpr::getExtractElement(C1, ConstantInt::get(Ty, i));
-      Constant *RHS =
-        ConstantExpr::getExtractElement(C2, ConstantInt::get(Ty, i));
+      Constant *ExtractIdx = ConstantInt::get(Ty, i);
+      Constant *LHS = ConstantExpr::getExtractElement(C1, ExtractIdx);
+      Constant *RHS = ConstantExpr::getExtractElement(C2, ExtractIdx);
+
+      // If any element of a divisor vector is zero, the whole op is undef.
+      if ((Opcode == Instruction::SDiv || Opcode == Instruction::UDiv ||
+           Opcode == Instruction::SRem || Opcode == Instruction::URem) &&
+          RHS->isNullValue())
+        return UndefValue::get(VTy);
 
       Result.push_back(ConstantExpr::get(Opcode, LHS, RHS));
     }
@@ -2019,22 +2020,8 @@ static bool isInBoundsIndices(ArrayRef<IndexTy> Idxs) {
 }
 
 /// Test whether a given ConstantInt is in-range for a SequentialType.
-static bool isIndexInRangeOfSequentialType(SequentialType *STy,
-                                           const ConstantInt *CI) {
-  // And indices are valid when indexing along a pointer
-  if (isa<PointerType>(STy))
-    return true;
-
-  uint64_t NumElements = 0;
-  // Determine the number of elements in our sequential type.
-  if (auto *ATy = dyn_cast<ArrayType>(STy))
-    NumElements = ATy->getNumElements();
-  else if (auto *VTy = dyn_cast<VectorType>(STy))
-    NumElements = VTy->getNumElements();
-
-  assert((isa<ArrayType>(STy) || NumElements > 0) &&
-         "didn't expect non-array type to have zero elements!");
-
+static bool isIndexInRangeOfArrayType(uint64_t NumElements,
+                                      const ConstantInt *CI) {
   // We cannot bounds check the index if it doesn't fit in an int64_t.
   if (CI->getValue().getActiveBits() > 64)
     return false;
@@ -2089,10 +2076,10 @@ Constant *llvm::ConstantFoldGetElementPtr(Type *PointeeTy, Constant *C,
     // getelementptr instructions into a single instruction.
     //
     if (CE->getOpcode() == Instruction::GetElementPtr) {
-      Type *LastTy = nullptr;
+      gep_type_iterator LastI = gep_type_end(CE);
       for (gep_type_iterator I = gep_type_begin(CE), E = gep_type_end(CE);
            I != E; ++I)
-        LastTy = *I;
+        LastI = I;
 
       // We cannot combine indices if doing so would take us outside of an
       // array or vector.  Doing otherwise could trick us if we evaluated such a
@@ -2115,9 +2102,11 @@ Constant *llvm::ConstantFoldGetElementPtr(Type *PointeeTy, Constant *C,
       bool PerformFold = false;
       if (Idx0->isNullValue())
         PerformFold = true;
-      else if (SequentialType *STy = dyn_cast_or_null<SequentialType>(LastTy))
+      else if (LastI.isSequential())
         if (ConstantInt *CI = dyn_cast<ConstantInt>(Idx0))
-          PerformFold = isIndexInRangeOfSequentialType(STy, CI);
+          PerformFold =
+              !LastI.isBoundedSequential() ||
+              isIndexInRangeOfArrayType(LastI.getSequentialNumElements(), CI);
 
       if (PerformFold) {
         SmallVector<Value*, 16> NewIndices;
@@ -2218,20 +2207,15 @@ Constant *llvm::ConstantFoldGetElementPtr(Type *PointeeTy, Constant *C,
       continue;
     }
     auto *STy = cast<SequentialType>(Ty);
-    if (isa<PointerType>(STy)) {
-      // We don't know if it's in range or not.
-      Unknown = true;
-      continue;
-    }
     if (isa<VectorType>(STy)) {
       // There can be awkward padding in after a non-power of two vector.
       Unknown = true;
       continue;
     }
-    if (isIndexInRangeOfSequentialType(STy, CI))
+    if (isIndexInRangeOfArrayType(STy->getNumElements(), CI))
       // It's in range, skip to the next index.
       continue;
-    if (!isa<SequentialType>(Prev)) {
+    if (isa<StructType>(Prev)) {
       // It's out of range, but the prior dimension is a struct
       // so we can't do anything about it.
       Unknown = true;
@@ -2251,7 +2235,8 @@ Constant *llvm::ConstantFoldGetElementPtr(Type *PointeeTy, Constant *C,
     ConstantInt *Factor = ConstantInt::get(CI->getType(), NumElements);
     NewIdxs[i] = ConstantExpr::getSRem(CI, Factor);
 
-    Constant *PrevIdx = cast<Constant>(Idxs[i - 1]);
+    Constant *PrevIdx = NewIdxs[i-1] ? NewIdxs[i-1] :
+                           cast<Constant>(Idxs[i - 1]);
     Constant *Div = ConstantExpr::getSDiv(CI, Factor);
 
     unsigned CommonExtendedWidth =

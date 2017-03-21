@@ -13,83 +13,114 @@
 #ifndef LLVM_LIB_TARGET_AMDGPU_SIDEFINES_H
 #define LLVM_LIB_TARGET_AMDGPU_SIDEFINES_H
 
+namespace llvm {
+
 namespace SIInstrFlags {
 // This needs to be kept in sync with the field bits in InstSI.
-enum {
-  SALU = 1 << 3,
-  VALU = 1 << 4,
+enum : uint64_t {
+  // Low bits - basic encoding information.
+  SALU = 1 << 0,
+  VALU = 1 << 1,
 
-  SOP1 = 1 << 5,
-  SOP2 = 1 << 6,
-  SOPC = 1 << 7,
-  SOPK = 1 << 8,
-  SOPP = 1 << 9,
+  // SALU instruction formats.
+  SOP1 = 1 << 2,
+  SOP2 = 1 << 3,
+  SOPC = 1 << 4,
+  SOPK = 1 << 5,
+  SOPP = 1 << 6,
 
-  VOP1 = 1 << 10,
-  VOP2 = 1 << 11,
-  VOP3 = 1 << 12,
-  VOPC = 1 << 13,
+  // VALU instruction formats.
+  VOP1 = 1 << 7,
+  VOP2 = 1 << 8,
+  VOPC = 1 << 9,
+
+ // TODO: Should this be spilt into VOP3 a and b?
+  VOP3 = 1 << 10,
+  VOP3P = 1 << 12,
+
+  VINTRP = 1 << 13,
   SDWA = 1 << 14,
   DPP = 1 << 15,
 
+  // Memory instruction formats.
   MUBUF = 1 << 16,
   MTBUF = 1 << 17,
   SMRD = 1 << 18,
-  DS = 1 << 19,
-  MIMG = 1 << 20,
+  MIMG = 1 << 19,
+  EXP = 1 << 20,
   FLAT = 1 << 21,
-  WQM = 1 << 22,
+  DS = 1 << 22,
+
+  // Pseudo instruction formats.
   VGPRSpill = 1 << 23,
   SGPRSpill = 1 << 24,
-  VOPAsmPrefer32Bit = 1 << 25,
-  Gather4 = 1 << 26,
-  DisableWQM = 1 << 27,
-  SOPK_ZEXT = 1 << 28,
-  SCALAR_STORE = 1 << 29,
-  FIXED_SIZE = 1 << 30
+
+  // High bits - other information.
+  VM_CNT = UINT64_C(1) << 32,
+  EXP_CNT = UINT64_C(1) << 33,
+  LGKM_CNT = UINT64_C(1) << 34,
+
+  WQM = UINT64_C(1) << 35,
+  DisableWQM = UINT64_C(1) << 36,
+  Gather4 = UINT64_C(1) << 37,
+  SOPK_ZEXT = UINT64_C(1) << 38,
+  SCALAR_STORE = UINT64_C(1) << 39,
+  FIXED_SIZE = UINT64_C(1) << 40,
+  VOPAsmPrefer32Bit = UINT64_C(1) << 41,
+  HasFPClamp = UINT64_C(1) << 42
+};
+
+// v_cmp_class_* etc. use a 10-bit mask for what operation is checked.
+// The result is true if any of these tests are true.
+enum ClassFlags {
+  S_NAN = 1 << 0,        // Signaling NaN
+  Q_NAN = 1 << 1,        // Quiet NaN
+  N_INFINITY = 1 << 2,   // Negative infinity
+  N_NORMAL = 1 << 3,     // Negative normal
+  N_SUBNORMAL = 1 << 4,  // Negative subnormal
+  N_ZERO = 1 << 5,       // Negative zero
+  P_ZERO = 1 << 6,       // Positive zero
+  P_SUBNORMAL = 1 << 7,  // Positive subnormal
+  P_NORMAL = 1 << 8,     // Positive normal
+  P_INFINITY = 1 << 9    // Positive infinity
 };
 }
 
-namespace llvm {
 namespace AMDGPU {
   enum OperandType {
     /// Operands with register or 32-bit immediate
-    OPERAND_REG_IMM32_INT = MCOI::OPERAND_FIRST_TARGET,
-    OPERAND_REG_IMM32_FP,
+    OPERAND_REG_IMM_INT32 = MCOI::OPERAND_FIRST_TARGET,
+    OPERAND_REG_IMM_INT64,
+    OPERAND_REG_IMM_INT16,
+    OPERAND_REG_IMM_FP32,
+    OPERAND_REG_IMM_FP64,
+    OPERAND_REG_IMM_FP16,
+
     /// Operands with register or inline constant
-    OPERAND_REG_INLINE_C_INT,
-    OPERAND_REG_INLINE_C_FP,
+    OPERAND_REG_INLINE_C_INT16,
+    OPERAND_REG_INLINE_C_INT32,
+    OPERAND_REG_INLINE_C_INT64,
+    OPERAND_REG_INLINE_C_FP16,
+    OPERAND_REG_INLINE_C_FP32,
+    OPERAND_REG_INLINE_C_FP64,
+    OPERAND_REG_INLINE_C_V2FP16,
+    OPERAND_REG_INLINE_C_V2INT16,
+
+    OPERAND_REG_IMM_FIRST = OPERAND_REG_IMM_INT32,
+    OPERAND_REG_IMM_LAST = OPERAND_REG_IMM_FP16,
+
+    OPERAND_REG_INLINE_C_FIRST = OPERAND_REG_INLINE_C_INT16,
+    OPERAND_REG_INLINE_C_LAST = OPERAND_REG_INLINE_C_V2INT16,
+
+    OPERAND_SRC_FIRST = OPERAND_REG_IMM_INT32,
+    OPERAND_SRC_LAST = OPERAND_REG_INLINE_C_LAST,
 
     // Operand for source modifiers for VOP instructions
     OPERAND_INPUT_MODS,
 
     /// Operand with 32-bit immediate that uses the constant bus.
-    OPERAND_KIMM32
-  };
-}
-}
-
-namespace SIInstrFlags {
-  enum Flags {
-    // First 4 bits are the instruction encoding
-    VM_CNT = 1 << 0,
-    EXP_CNT = 1 << 1,
-    LGKM_CNT = 1 << 2
-  };
-
-  // v_cmp_class_* etc. use a 10-bit mask for what operation is checked.
-  // The result is true if any of these tests are true.
-  enum ClassFlags {
-    S_NAN = 1 << 0,        // Signaling NaN
-    Q_NAN = 1 << 1,        // Quiet NaN
-    N_INFINITY = 1 << 2,   // Negative infinity
-    N_NORMAL = 1 << 3,     // Negative normal
-    N_SUBNORMAL = 1 << 4,  // Negative subnormal
-    N_ZERO = 1 << 5,       // Negative zero
-    P_ZERO = 1 << 6,       // Positive zero
-    P_SUBNORMAL = 1 << 7,  // Positive subnormal
-    P_NORMAL = 1 << 8,     // Positive normal
-    P_INFINITY = 1 << 9    // Positive infinity
+    OPERAND_KIMM32,
+    OPERAND_KIMM16
   };
 }
 
@@ -97,9 +128,12 @@ namespace SIInstrFlags {
 // NEG and SEXT share same bit-mask because they can't be set simultaneously.
 namespace SISrcMods {
   enum {
-   NEG = 1 << 0,  // Floating-point negate modifier
-   ABS = 1 << 1,  // Floating-point absolute modifier
-   SEXT = 1 << 0  // Integer sign-extend modifier
+   NEG = 1 << 0,   // Floating-point negate modifier
+   ABS = 1 << 1,   // Floating-point absolute modifier
+   SEXT = 1 << 0,  // Integer sign-extend modifier
+   NEG_HI = ABS,   // Floating-point negate high packed component modifier.
+   OP_SEL_0 = 1 << 2,
+   OP_SEL_1 = 1 << 3
   };
 }
 
@@ -130,7 +164,6 @@ namespace AMDGPUAsmVariants {
   };
 }
 
-namespace llvm {
 namespace AMDGPU {
 namespace EncValues { // Encoding values of enum9/8/7 operands
 
@@ -151,9 +184,7 @@ enum {
 
 } // namespace EncValues
 } // namespace AMDGPU
-} // namespace llvm
 
-namespace llvm {
 namespace AMDGPU {
 namespace SendMsg { // Encoding of SIMM16 used in s_sendmsg* insns.
 
@@ -258,7 +289,6 @@ enum DstUnused {
 
 } // namespace SDWA
 } // namespace AMDGPU
-} // namespace llvm
 
 #define R_00B028_SPI_SHADER_PGM_RSRC1_PS                                0x00B028
 #define R_00B02C_SPI_SHADER_PGM_RSRC2_PS                                0x00B02C
@@ -276,6 +306,9 @@ enum DstUnused {
 #define   S_00B84C_USER_SGPR(x)                                       (((x) & 0x1F) << 1)
 #define   G_00B84C_USER_SGPR(x)                                       (((x) >> 1) & 0x1F)
 #define   C_00B84C_USER_SGPR                                          0xFFFFFFC1
+#define   S_00B84C_TRAP_HANDLER(x)                                    (((x) & 0x1) << 6)
+#define   G_00B84C_TRAP_HANDLER(x)                                    (((x) >> 6) & 0x1)
+#define   C_00B84C_TRAP_HANDLER                                       0xFFFFFFBF
 #define   S_00B84C_TGID_X_EN(x)                                       (((x) & 0x1) << 7)
 #define   G_00B84C_TGID_X_EN(x)                                       (((x) >> 7) & 0x1)
 #define   C_00B84C_TGID_X_EN                                          0xFFFFFF7F
@@ -363,5 +396,6 @@ enum DstUnused {
 
 #define R_SPILLED_SGPRS         0x4
 #define R_SPILLED_VGPRS         0x8
+} // End namespace llvm
 
 #endif

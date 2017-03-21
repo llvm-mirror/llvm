@@ -32,10 +32,6 @@ void AMDGPUInstrInfo::anchor() {}
 AMDGPUInstrInfo::AMDGPUInstrInfo(const AMDGPUSubtarget &ST)
   : AMDGPUGenInstrInfo(-1, -1), ST(ST) {}
 
-bool AMDGPUInstrInfo::enableClusterLoads() const {
-  return true;
-}
-
 // FIXME: This behaves strangely. If, for example, you have 32 load + stores,
 // the first 16 loads will be interleaved with the stores, and the next 16 will
 // be clustered as expected. It should really split into 2 16 store batches.
@@ -90,6 +86,7 @@ static SIEncodingFamily subtargetEncodingFamily(const AMDGPUSubtarget &ST) {
   case AMDGPUSubtarget::SEA_ISLANDS:
     return SIEncodingFamily::SI;
   case AMDGPUSubtarget::VOLCANIC_ISLANDS:
+  case AMDGPUSubtarget::GFX9:
     return SIEncodingFamily::VI;
 
   // FIXME: This should never be called for r600 GPUs.

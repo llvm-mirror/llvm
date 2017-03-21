@@ -82,7 +82,7 @@ void RecordStreamer::EmitInstruction(const MCInst &Inst,
   MCStreamer::EmitInstruction(Inst, STI);
 }
 
-void RecordStreamer::EmitLabel(MCSymbol *Symbol) {
+void RecordStreamer::EmitLabel(MCSymbol *Symbol, SMLoc Loc) {
   MCStreamer::EmitLabel(Symbol);
   markDefined(*Symbol);
 }
@@ -109,4 +109,9 @@ void RecordStreamer::EmitZerofill(MCSection *Section, MCSymbol *Symbol,
 void RecordStreamer::EmitCommonSymbol(MCSymbol *Symbol, uint64_t Size,
                                       unsigned ByteAlignment) {
   markDefined(*Symbol);
+}
+
+void RecordStreamer::emitELFSymverDirective(MCSymbol *Alias,
+                                            const MCSymbol *Aliasee) {
+  SymverAliasMap[Aliasee].push_back(Alias);
 }

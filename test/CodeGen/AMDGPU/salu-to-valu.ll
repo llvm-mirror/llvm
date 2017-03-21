@@ -55,11 +55,11 @@ done:                                             ; preds = %loop
 
 ; GCN-LABEL: {{^}}smrd_valu:
 ; SI: s_movk_i32 [[OFFSET:s[0-9]+]], 0x2ee0
+; SI: s_mov_b32
 ; GCN: v_readfirstlane_b32 s[[PTR_LO:[0-9]+]], v{{[0-9]+}}
 ; GCN: v_readfirstlane_b32 s[[PTR_HI:[0-9]+]], v{{[0-9]+}}
 ; SI: s_nop 3
 ; SI: s_load_dword [[OUT:s[0-9]+]], s{{\[}}[[PTR_LO]]:[[PTR_HI]]{{\]}}, [[OFFSET]]
-; SI: s_mov_b32
 
 ; CI: s_load_dword [[OUT:s[0-9]+]], s{{\[}}[[PTR_LO]]:[[PTR_HI]]{{\]}}, 0xbb8
 ; GCN: v_mov_b32_e32 [[V_OUT:v[0-9]+]], [[OUT]]
@@ -439,7 +439,7 @@ entry:
 ; GCN: v_mov_b32_e32 [[ONE:v[0-9]+]], 1
 ; GCN-NOHSA: buffer_store_dword [[ONE]]
 ; GCN-HSA: flat_store_dword v[{{[0-9]+:[0-9]+}}], [[ONE]]
-; GCN; {{^}}[[EXIT]]:
+; GCN: {{^}}[[EXIT]]:
 ; GCN: s_endpgm
 define void @sopc_vopc_legalize_bug(i32 %cond, i32 addrspace(1)* %out, i32 addrspace(1)* %in) {
 bb3:                                              ; preds = %bb2
@@ -476,6 +476,31 @@ bb2:
 bb4:
   %tmp5 = phi i32 [ %tmp3, %bb2 ], [ %tmp, %bb1 ]
   br label %bb1
+}
+
+; GCN-LABEL: {{^}}phi_imm_in_sgprs
+; GCN: s_movk_i32 [[A:s[0-9]+]], 0x400
+; GCN: s_movk_i32 [[B:s[0-9]+]], 0x400
+; GCN: [[LOOP_LABEL:[0-9a-zA-Z_]+]]:
+; GCN: s_xor_b32 [[B]], [[B]], [[A]]
+; GCN: s_cbranch_scc{{[01]}} [[LOOP_LABEL]]
+define void @phi_imm_in_sgprs(i32 addrspace(3)* %out, i32 %cond) {
+entry:
+  br label %loop
+
+loop:
+  %i = phi i32 [0, %entry], [%i.add, %loop]
+  %offset = phi i32 [1024, %entry], [%offset.xor, %loop]
+  %offset.xor = xor i32 %offset, 1024
+  %offset.i = add i32 %offset.xor, %i
+  %ptr = getelementptr i32, i32 addrspace(3)* %out, i32 %offset.i
+  store i32 0, i32 addrspace(3)* %ptr
+  %i.add = add i32 %i, 1
+  %cmp = icmp ult i32 %i.add, %cond
+  br i1 %cmp, label %loop, label %exit
+
+exit:
+  ret void
 }
 
 attributes #0 = { nounwind readnone }

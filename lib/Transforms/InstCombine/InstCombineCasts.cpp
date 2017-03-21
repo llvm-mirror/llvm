@@ -278,7 +278,7 @@ Instruction *InstCombiner::commonCastTransforms(CastInst &CI) {
     // Don't do this if it would create a PHI node with an illegal type from a
     // legal type.
     if (!Src->getType()->isIntegerTy() || !CI.getType()->isIntegerTy() ||
-        ShouldChangeType(CI.getType(), Src->getType()))
+        shouldChangeType(CI.getType(), Src->getType()))
       if (Instruction *NV = FoldOpIntoPhi(CI))
         return NV;
   }
@@ -443,6 +443,76 @@ static Instruction *foldVecTruncToExtElt(TruncInst &Trunc, InstCombiner &IC,
   return ExtractElementInst::Create(VecInput, IC.Builder->getInt32(Elt));
 }
 
+/// Try to narrow the width of bitwise logic instructions with constants.
+Instruction *InstCombiner::shrinkBitwiseLogic(TruncInst &Trunc) {
+  Type *SrcTy = Trunc.getSrcTy();
+  Type *DestTy = Trunc.getType();
+  if (isa<IntegerType>(SrcTy) && !shouldChangeType(SrcTy, DestTy))
+    return nullptr;
+
+  BinaryOperator *LogicOp;
+  Constant *C;
+  if (!match(Trunc.getOperand(0), m_OneUse(m_BinOp(LogicOp))) ||
+      !LogicOp->isBitwiseLogicOp() ||
+      !match(LogicOp->getOperand(1), m_Constant(C)))
+    return nullptr;
+
+  // trunc (logic X, C) --> logic (trunc X, C')
+  Constant *NarrowC = ConstantExpr::getTrunc(C, DestTy);
+  Value *NarrowOp0 = Builder->CreateTrunc(LogicOp->getOperand(0), DestTy);
+  return BinaryOperator::Create(LogicOp->getOpcode(), NarrowOp0, NarrowC);
+}
+
+/// Try to narrow the width of a splat shuffle. This could be generalized to any
+/// shuffle with a constant operand, but we limit the transform to avoid
+/// creating a shuffle type that targets may not be able to lower effectively.
+static Instruction *shrinkSplatShuffle(TruncInst &Trunc,
+                                       InstCombiner::BuilderTy &Builder) {
+  auto *Shuf = dyn_cast<ShuffleVectorInst>(Trunc.getOperand(0));
+  if (Shuf && Shuf->hasOneUse() && isa<UndefValue>(Shuf->getOperand(1)) &&
+      Shuf->getMask()->getSplatValue() &&
+      Shuf->getType() == Shuf->getOperand(0)->getType()) {
+    // trunc (shuf X, Undef, SplatMask) --> shuf (trunc X), Undef, SplatMask
+    Constant *NarrowUndef = UndefValue::get(Trunc.getType());
+    Value *NarrowOp = Builder.CreateTrunc(Shuf->getOperand(0), Trunc.getType());
+    return new ShuffleVectorInst(NarrowOp, NarrowUndef, Shuf->getMask());
+  }
+
+  return nullptr;
+}
+
+/// Try to narrow the width of an insert element. This could be generalized for
+/// any vector constant, but we limit the transform to insertion into undef to
+/// avoid potential backend problems from unsupported insertion widths. This
+/// could also be extended to handle the case of inserting a scalar constant
+/// into a vector variable.
+static Instruction *shrinkInsertElt(CastInst &Trunc,
+                                    InstCombiner::BuilderTy &Builder) {
+  Instruction::CastOps Opcode = Trunc.getOpcode();
+  assert((Opcode == Instruction::Trunc || Opcode == Instruction::FPTrunc) &&
+         "Unexpected instruction for shrinking");
+
+  auto *InsElt = dyn_cast<InsertElementInst>(Trunc.getOperand(0));
+  if (!InsElt || !InsElt->hasOneUse())
+    return nullptr;
+
+  Type *DestTy = Trunc.getType();
+  Type *DestScalarTy = DestTy->getScalarType();
+  Value *VecOp = InsElt->getOperand(0);
+  Value *ScalarOp = InsElt->getOperand(1);
+  Value *Index = InsElt->getOperand(2);
+
+  if (isa<UndefValue>(VecOp)) {
+    // trunc   (inselt undef, X, Index) --> inselt undef,   (trunc X), Index
+    // fptrunc (inselt undef, X, Index) --> inselt undef, (fptrunc X), Index
+    UndefValue *NarrowUndef = UndefValue::get(DestTy);
+    Value *NarrowOp = Builder.CreateCast(Opcode, ScalarOp, DestScalarTy);
+    return InsertElementInst::Create(NarrowUndef, NarrowOp, Index);
+  }
+
+  return nullptr;
+}
+
 Instruction *InstCombiner::visitTrunc(TruncInst &CI) {
   if (Instruction *Result = commonCastTransforms(CI))
     return Result;
@@ -468,7 +538,7 @@ Instruction *InstCombiner::visitTrunc(TruncInst &CI) {
   // type.   Only do this if the dest type is a simple type, don't convert the
   // expression tree to something weird like i93 unless the source is also
   // strange.
-  if ((DestTy->isVectorTy() || ShouldChangeType(SrcTy, DestTy)) &&
+  if ((DestTy->isVectorTy() || shouldChangeType(SrcTy, DestTy)) &&
       canEvaluateTruncated(Src, DestTy, *this, &CI)) {
 
     // If this cast is a truncate, evaluting in a different type always
@@ -531,17 +601,17 @@ Instruction *InstCombiner::visitTrunc(TruncInst &CI) {
     }
   }
 
+  if (Instruction *I = shrinkBitwiseLogic(CI))
+    return I;
+
+  if (Instruction *I = shrinkSplatShuffle(CI, *Builder))
+    return I;
+
+  if (Instruction *I = shrinkInsertElt(CI, *Builder))
+    return I;
+
   if (Src->hasOneUse() && isa<IntegerType>(SrcTy) &&
-      ShouldChangeType(SrcTy, DestTy)) {
-
-    // Transform "trunc (and X, cst)" -> "and (trunc X), cst" so long as the
-    // dest type is native.
-    if (match(Src, m_And(m_Value(A), m_ConstantInt(Cst)))) {
-      Value *NewTrunc = Builder->CreateTrunc(A, DestTy, A->getName() + ".tr");
-      return BinaryOperator::CreateAnd(NewTrunc,
-                                       ConstantExpr::getTrunc(Cst, DestTy));
-    }
-
+      shouldChangeType(SrcTy, DestTy)) {
     // Transform "trunc (shl X, cst)" -> "shl (trunc X), cst" so long as the
     // dest type is native and cst < dest size.
     if (match(Src, m_Shl(m_Value(A), m_ConstantInt(Cst))) &&
@@ -747,9 +817,7 @@ static bool canEvaluateZExtd(Value *V, Type *Ty, unsigned &BitsToClear,
 
     // If the operation is an AND/OR/XOR and the bits to clear are zero in the
     // other side, BitsToClear is ok.
-    if (Tmp == 0 &&
-        (Opc == Instruction::And || Opc == Instruction::Or ||
-         Opc == Instruction::Xor)) {
+    if (Tmp == 0 && I->isBitwiseLogicOp()) {
       // We use MaskedValueIsZero here for generality, but the case we care
       // about the most is constant RHS.
       unsigned VSize = V->getType()->getScalarSizeInBits();
@@ -826,11 +894,6 @@ Instruction *InstCombiner::visitZExt(ZExtInst &CI) {
   if (Instruction *Result = commonCastTransforms(CI))
     return Result;
 
-  // See if we can simplify any instructions used by the input whose sole
-  // purpose is to compute bits we don't care about.
-  if (SimplifyDemandedInstructionBits(CI))
-    return &CI;
-
   Value *Src = CI.getOperand(0);
   Type *SrcTy = Src->getType(), *DestTy = CI.getType();
 
@@ -839,10 +902,10 @@ Instruction *InstCombiner::visitZExt(ZExtInst &CI) {
   // expression tree to something weird like i93 unless the source is also
   // strange.
   unsigned BitsToClear;
-  if ((DestTy->isVectorTy() || ShouldChangeType(SrcTy, DestTy)) &&
+  if ((DestTy->isVectorTy() || shouldChangeType(SrcTy, DestTy)) &&
       canEvaluateZExtd(Src, DestTy, BitsToClear, *this, &CI)) {
-    assert(BitsToClear < SrcTy->getScalarSizeInBits() &&
-           "Unreasonable BitsToClear");
+    assert(BitsToClear <= SrcTy->getScalarSizeInBits() &&
+           "Can't clear more bits than in SrcTy");
 
     // Okay, we can transform this!  Insert the new expression now.
     DEBUG(dbgs() << "ICE: EvaluateInDifferentType converting expression type"
@@ -1112,11 +1175,6 @@ Instruction *InstCombiner::visitSExt(SExtInst &CI) {
   if (Instruction *I = commonCastTransforms(CI))
     return I;
 
-  // See if we can simplify any instructions used by the input whose sole
-  // purpose is to compute bits we don't care about.
-  if (SimplifyDemandedInstructionBits(CI))
-    return &CI;
-
   Value *Src = CI.getOperand(0);
   Type *SrcTy = Src->getType(), *DestTy = CI.getType();
 
@@ -1133,7 +1191,7 @@ Instruction *InstCombiner::visitSExt(SExtInst &CI) {
   // type.   Only do this if the dest type is a simple type, don't convert the
   // expression tree to something weird like i93 unless the source is also
   // strange.
-  if ((DestTy->isVectorTy() || ShouldChangeType(SrcTy, DestTy)) &&
+  if ((DestTy->isVectorTy() || shouldChangeType(SrcTy, DestTy)) &&
       canEvaluateSExtd(Src, DestTy)) {
     // Okay, we can transform this!  Insert the new expression now.
     DEBUG(dbgs() << "ICE: EvaluateInDifferentType converting expression type"
@@ -1155,18 +1213,16 @@ Instruction *InstCombiner::visitSExt(SExtInst &CI) {
                                       ShAmt);
   }
 
-  // If this input is a trunc from our destination, then turn sext(trunc(x))
+  // If the input is a trunc from the destination type, then turn sext(trunc(x))
   // into shifts.
-  if (TruncInst *TI = dyn_cast<TruncInst>(Src))
-    if (TI->hasOneUse() && TI->getOperand(0)->getType() == DestTy) {
-      uint32_t SrcBitSize = SrcTy->getScalarSizeInBits();
-      uint32_t DestBitSize = DestTy->getScalarSizeInBits();
-
-      // We need to emit a shl + ashr to do the sign extend.
-      Value *ShAmt = ConstantInt::get(DestTy, DestBitSize-SrcBitSize);
-      Value *Res = Builder->CreateShl(TI->getOperand(0), ShAmt, "sext");
-      return BinaryOperator::CreateAShr(Res, ShAmt);
-    }
+  Value *X;
+  if (match(Src, m_OneUse(m_Trunc(m_Value(X)))) && X->getType() == DestTy) {
+    // sext(trunc(X)) --> ashr(shl(X, C), C)
+    unsigned SrcBitSize = SrcTy->getScalarSizeInBits();
+    unsigned DestBitSize = DestTy->getScalarSizeInBits();
+    Constant *ShAmt = ConstantInt::get(DestTy, DestBitSize - SrcBitSize);
+    return BinaryOperator::CreateAShr(Builder->CreateShl(X, ShAmt), ShAmt);
+  }
 
   if (ICmpInst *ICI = dyn_cast<ICmpInst>(Src))
     return transformSExtICmp(ICI, CI);
@@ -1213,28 +1269,26 @@ static Constant *fitsInFPType(ConstantFP *CFP, const fltSemantics &Sem) {
   return nullptr;
 }
 
-/// If this is a floating-point extension instruction, look
-/// through it until we get the source value.
+/// Look through floating-point extensions until we get the source value.
 static Value *lookThroughFPExtensions(Value *V) {
-  if (Instruction *I = dyn_cast<Instruction>(V))
-    if (I->getOpcode() == Instruction::FPExt)
-      return lookThroughFPExtensions(I->getOperand(0));
+  while (auto *FPExt = dyn_cast<FPExtInst>(V))
+    V = FPExt->getOperand(0);
 
   // If this value is a constant, return the constant in the smallest FP type
   // that can accurately represent it.  This allows us to turn
   // (float)((double)X+2.0) into x+2.0f.
-  if (ConstantFP *CFP = dyn_cast<ConstantFP>(V)) {
+  if (auto *CFP = dyn_cast<ConstantFP>(V)) {
     if (CFP->getType() == Type::getPPC_FP128Ty(V->getContext()))
       return V;  // No constant folding of this.
     // See if the value can be truncated to half and then reextended.
-    if (Value *V = fitsInFPType(CFP, APFloat::IEEEhalf))
+    if (Value *V = fitsInFPType(CFP, APFloat::IEEEhalf()))
       return V;
     // See if the value can be truncated to float and then reextended.
-    if (Value *V = fitsInFPType(CFP, APFloat::IEEEsingle))
+    if (Value *V = fitsInFPType(CFP, APFloat::IEEEsingle()))
       return V;
     if (CFP->getType()->isDoubleTy())
       return V;  // Won't shrink.
-    if (Value *V = fitsInFPType(CFP, APFloat::IEEEdouble))
+    if (Value *V = fitsInFPType(CFP, APFloat::IEEEdouble()))
       return V;
     // Don't try to shrink to various long double types.
   }
@@ -1380,23 +1434,48 @@ Instruction *InstCombiner::visitFPTrunc(FPTruncInst &CI) {
   IntrinsicInst *II = dyn_cast<IntrinsicInst>(CI.getOperand(0));
   if (II) {
     switch (II->getIntrinsicID()) {
-      default: break;
-      case Intrinsic::fabs: {
-        // (fptrunc (fabs x)) -> (fabs (fptrunc x))
-        Value *InnerTrunc = Builder->CreateFPTrunc(II->getArgOperand(0),
-                                                   CI.getType());
-        Type *IntrinsicType[] = { CI.getType() };
-        Function *Overload = Intrinsic::getDeclaration(
-            CI.getModule(), II->getIntrinsicID(), IntrinsicType);
+    default: break;
+    case Intrinsic::fabs:
+    case Intrinsic::ceil:
+    case Intrinsic::floor:
+    case Intrinsic::rint:
+    case Intrinsic::round:
+    case Intrinsic::nearbyint:
+    case Intrinsic::trunc: {
+      Value *Src = II->getArgOperand(0);
+      if (!Src->hasOneUse())
+        break;
 
-        SmallVector<OperandBundleDef, 1> OpBundles;
-        II->getOperandBundlesAsDefs(OpBundles);
-
-        Value *Args[] = { InnerTrunc };
-        return CallInst::Create(Overload, Args, OpBundles, II->getName());
+      // Except for fabs, this transformation requires the input of the unary FP
+      // operation to be itself an fpext from the type to which we're
+      // truncating.
+      if (II->getIntrinsicID() != Intrinsic::fabs) {
+        FPExtInst *FPExtSrc = dyn_cast<FPExtInst>(Src);
+        if (!FPExtSrc || FPExtSrc->getOperand(0)->getType() != CI.getType())
+          break;
       }
+
+      // Do unary FP operation on smaller type.
+      // (fptrunc (fabs x)) -> (fabs (fptrunc x))
+      Value *InnerTrunc = Builder->CreateFPTrunc(Src, CI.getType());
+      Type *IntrinsicType[] = { CI.getType() };
+      Function *Overload = Intrinsic::getDeclaration(
+        CI.getModule(), II->getIntrinsicID(), IntrinsicType);
+
+      SmallVector<OperandBundleDef, 1> OpBundles;
+      II->getOperandBundlesAsDefs(OpBundles);
+
+      Value *Args[] = { InnerTrunc };
+      CallInst *NewCI =  CallInst::Create(Overload, Args,
+                                          OpBundles, II->getName());
+      NewCI->copyFastMathFlags(II);
+      return NewCI;
+    }
     }
   }
+
+  if (Instruction *I = shrinkInsertElt(CI, *Builder))
+    return I;
 
   return nullptr;
 }
@@ -1778,6 +1857,84 @@ static Instruction *canonicalizeBitCastExtElt(BitCastInst &BitCast,
   return ExtractElementInst::Create(NewBC, ExtElt->getIndexOperand());
 }
 
+/// Change the type of a bitwise logic operation if we can eliminate a bitcast.
+static Instruction *foldBitCastBitwiseLogic(BitCastInst &BitCast,
+                                            InstCombiner::BuilderTy &Builder) {
+  Type *DestTy = BitCast.getType();
+  BinaryOperator *BO;
+  if (!DestTy->getScalarType()->isIntegerTy() ||
+      !match(BitCast.getOperand(0), m_OneUse(m_BinOp(BO))) ||
+      !BO->isBitwiseLogicOp())
+    return nullptr;
+  
+  // FIXME: This transform is restricted to vector types to avoid backend
+  // problems caused by creating potentially illegal operations. If a fix-up is
+  // added to handle that situation, we can remove this check.
+  if (!DestTy->isVectorTy() || !BO->getType()->isVectorTy())
+    return nullptr;
+  
+  Value *X;
+  if (match(BO->getOperand(0), m_OneUse(m_BitCast(m_Value(X)))) &&
+      X->getType() == DestTy && !isa<Constant>(X)) {
+    // bitcast(logic(bitcast(X), Y)) --> logic'(X, bitcast(Y))
+    Value *CastedOp1 = Builder.CreateBitCast(BO->getOperand(1), DestTy);
+    return BinaryOperator::Create(BO->getOpcode(), X, CastedOp1);
+  }
+
+  if (match(BO->getOperand(1), m_OneUse(m_BitCast(m_Value(X)))) &&
+      X->getType() == DestTy && !isa<Constant>(X)) {
+    // bitcast(logic(Y, bitcast(X))) --> logic'(bitcast(Y), X)
+    Value *CastedOp0 = Builder.CreateBitCast(BO->getOperand(0), DestTy);
+    return BinaryOperator::Create(BO->getOpcode(), CastedOp0, X);
+  }
+
+  return nullptr;
+}
+
+/// Change the type of a select if we can eliminate a bitcast.
+static Instruction *foldBitCastSelect(BitCastInst &BitCast,
+                                      InstCombiner::BuilderTy &Builder) {
+  Value *Cond, *TVal, *FVal;
+  if (!match(BitCast.getOperand(0),
+             m_OneUse(m_Select(m_Value(Cond), m_Value(TVal), m_Value(FVal)))))
+    return nullptr;
+
+  // A vector select must maintain the same number of elements in its operands.
+  Type *CondTy = Cond->getType();
+  Type *DestTy = BitCast.getType();
+  if (CondTy->isVectorTy()) {
+    if (!DestTy->isVectorTy())
+      return nullptr;
+    if (DestTy->getVectorNumElements() != CondTy->getVectorNumElements())
+      return nullptr;
+  }
+
+  // FIXME: This transform is restricted from changing the select between
+  // scalars and vectors to avoid backend problems caused by creating
+  // potentially illegal operations. If a fix-up is added to handle that
+  // situation, we can remove this check.
+  if (DestTy->isVectorTy() != TVal->getType()->isVectorTy())
+    return nullptr;
+
+  auto *Sel = cast<Instruction>(BitCast.getOperand(0));
+  Value *X;
+  if (match(TVal, m_OneUse(m_BitCast(m_Value(X)))) && X->getType() == DestTy &&
+      !isa<Constant>(X)) {
+    // bitcast(select(Cond, bitcast(X), Y)) --> select'(Cond, X, bitcast(Y))
+    Value *CastedVal = Builder.CreateBitCast(FVal, DestTy);
+    return SelectInst::Create(Cond, X, CastedVal, "", nullptr, Sel);
+  }
+
+  if (match(FVal, m_OneUse(m_BitCast(m_Value(X)))) && X->getType() == DestTy &&
+      !isa<Constant>(X)) {
+    // bitcast(select(Cond, Y, bitcast(X))) --> select'(Cond, bitcast(Y), X)
+    Value *CastedVal = Builder.CreateBitCast(TVal, DestTy);
+    return SelectInst::Create(Cond, CastedVal, X, "", nullptr, Sel);
+  }
+
+  return nullptr;
+}
+
 /// Check if all users of CI are StoreInsts.
 static bool hasStoreUsersOnly(CastInst &CI) {
   for (User *U : CI.users()) {
@@ -2028,6 +2185,12 @@ Instruction *InstCombiner::visitBitCast(BitCastInst &CI) {
       return I;
 
   if (Instruction *I = canonicalizeBitCastExtElt(CI, *this, DL))
+    return I;
+
+  if (Instruction *I = foldBitCastBitwiseLogic(CI, *Builder))
+    return I;
+
+  if (Instruction *I = foldBitCastSelect(CI, *Builder))
     return I;
 
   if (SrcTy->isPointerTy())

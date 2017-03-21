@@ -20,10 +20,12 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/AssumptionCache.h"
+#include "llvm/Analysis/BlockFrequencyInfo.h"
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/Analysis/CaptureTracking.h"
 #include "llvm/Analysis/EHPersonalities.h"
 #include "llvm/Analysis/InstructionSimplify.h"
+#include "llvm/Analysis/ProfileSummaryInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/CallSite.h"
@@ -40,8 +42,8 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Module.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include <algorithm>
 
 using namespace llvm;
@@ -535,37 +537,7 @@ static BasicBlock *HandleCallsInBlockInlinedThroughInvoke(
 #endif // NDEBUG
     }
 
-    // Convert this function call into an invoke instruction.  First, split the
-    // basic block.
-    BasicBlock *Split =
-        BB->splitBasicBlock(CI->getIterator(), CI->getName() + ".noexc");
-
-    // Delete the unconditional branch inserted by splitBasicBlock
-    BB->getInstList().pop_back();
-
-    // Create the new invoke instruction.
-    SmallVector<Value*, 8> InvokeArgs(CI->arg_begin(), CI->arg_end());
-    SmallVector<OperandBundleDef, 1> OpBundles;
-
-    CI->getOperandBundlesAsDefs(OpBundles);
-
-    // Note: we're round tripping operand bundles through memory here, and that
-    // can potentially be avoided with a cleverer API design that we do not have
-    // as of this time.
-
-    InvokeInst *II =
-        InvokeInst::Create(CI->getCalledValue(), Split, UnwindEdge, InvokeArgs,
-                           OpBundles, CI->getName(), BB);
-    II->setDebugLoc(CI->getDebugLoc());
-    II->setCallingConv(CI->getCallingConv());
-    II->setAttributes(CI->getAttributes());
-    
-    // Make sure that anything using the call now uses the invoke!  This also
-    // updates the CallGraph if present, because it uses a WeakVH.
-    CI->replaceAllUsesWith(II);
-
-    // Delete the original call
-    Split->getInstList().pop_front();
+    changeToInvokeAndSplitBasicBlock(CI, UnwindEdge);
     return BB;
   }
   return nullptr;
@@ -790,7 +762,7 @@ static void PropagateParallelLoopAccessMetadata(CallSite CS,
 
 /// When inlining a function that contains noalias scope metadata,
 /// this metadata needs to be cloned so that the inlined blocks
-/// have different "unqiue scopes" at every call site. Were this not done, then
+/// have different "unique scopes" at every call site. Were this not done, then
 /// aliasing scopes from a function inlined into a caller multiple times could
 /// not be differentiated (and this would lead to miscompiles because the
 /// non-aliasing property communicated by the metadata could have
@@ -1127,9 +1099,8 @@ static void AddAliasScopeMetadata(CallSite CS, ValueToValueMapTy &VMap,
 static void AddAlignmentAssumptions(CallSite CS, InlineFunctionInfo &IFI) {
   if (!PreserveAlignmentAssumptions || !IFI.GetAssumptionCache)
     return;
-  AssumptionCache *AC = IFI.GetAssumptionCache
-                            ? &(*IFI.GetAssumptionCache)(*CS.getCaller())
-                            : nullptr;
+
+  AssumptionCache *AC = &(*IFI.GetAssumptionCache)(*CS.getCaller());
   auto &DL = CS.getCaller()->getParent()->getDataLayout();
 
   // To avoid inserting redundant assumptions, we should check for assumptions
@@ -1138,27 +1109,23 @@ static void AddAlignmentAssumptions(CallSite CS, InlineFunctionInfo &IFI) {
   bool DTCalculated = false;
 
   Function *CalledFunc = CS.getCalledFunction();
-  for (Function::arg_iterator I = CalledFunc->arg_begin(),
-                              E = CalledFunc->arg_end();
-       I != E; ++I) {
-    unsigned Align = I->getType()->isPointerTy() ? I->getParamAlignment() : 0;
-    if (Align && !I->hasByValOrInAllocaAttr() && !I->hasNUses(0)) {
+  for (Argument &Arg : CalledFunc->args()) {
+    unsigned Align = Arg.getType()->isPointerTy() ? Arg.getParamAlignment() : 0;
+    if (Align && !Arg.hasByValOrInAllocaAttr() && !Arg.hasNUses(0)) {
       if (!DTCalculated) {
-        DT.recalculate(const_cast<Function&>(*CS.getInstruction()->getParent()
-                                               ->getParent()));
+        DT.recalculate(*CS.getCaller());
         DTCalculated = true;
       }
 
       // If we can already prove the asserted alignment in the context of the
       // caller, then don't bother inserting the assumption.
-      Value *Arg = CS.getArgument(I->getArgNo());
-      if (getKnownAlignment(Arg, DL, CS.getInstruction(), AC, &DT) >= Align)
+      Value *ArgVal = CS.getArgument(Arg.getArgNo());
+      if (getKnownAlignment(ArgVal, DL, CS.getInstruction(), AC, &DT) >= Align)
         continue;
 
-      CallInst *NewAssumption = IRBuilder<>(CS.getInstruction())
-                                    .CreateAlignmentAssumption(DL, Arg, Align);
-      if (AC)
-        AC->registerAssumption(NewAssumption);
+      CallInst *NewAsmp = IRBuilder<>(CS.getInstruction())
+                              .CreateAlignmentAssumption(DL, ArgVal, Align);
+      AC->registerAssumption(NewAsmp);
     }
   }
 }
@@ -1172,7 +1139,7 @@ static void UpdateCallGraphAfterInlining(CallSite CS,
                                          ValueToValueMapTy &VMap,
                                          InlineFunctionInfo &IFI) {
   CallGraph &CG = *IFI.CG;
-  const Function *Caller = CS.getInstruction()->getParent()->getParent();
+  const Function *Caller = CS.getCaller();
   const Function *Callee = CS.getCalledFunction();
   CallGraphNode *CalleeNode = CG[Callee];
   CallGraphNode *CallerNode = CG[Caller];
@@ -1257,7 +1224,7 @@ static Value *HandleByValArgument(Value *Arg, Instruction *TheCall,
   PointerType *ArgTy = cast<PointerType>(Arg->getType());
   Type *AggTy = ArgTy->getElementType();
 
-  Function *Caller = TheCall->getParent()->getParent();
+  Function *Caller = TheCall->getFunction();
 
   // If the called function is readonly, then it could not mutate the caller's
   // copy of the byval'd memory.  In this case, it is safe to elide the copy and
@@ -1380,7 +1347,7 @@ static bool allocaWouldBeStaticInEntry(const AllocaInst *AI ) {
 /// Update inlined instructions' line numbers to
 /// to encode location where these instructions are inlined.
 static void fixupLineNumbers(Function *Fn, Function::iterator FI,
-                             Instruction *TheCall) {
+                             Instruction *TheCall, bool CalleeHasDebugInfo) {
   const DebugLoc &TheCallDL = TheCall->getDebugLoc();
   if (!TheCallDL)
     return;
@@ -1402,24 +1369,111 @@ static void fixupLineNumbers(Function *Fn, Function::iterator FI,
   for (; FI != Fn->end(); ++FI) {
     for (BasicBlock::iterator BI = FI->begin(), BE = FI->end();
          BI != BE; ++BI) {
-      DebugLoc DL = BI->getDebugLoc();
-      if (!DL) {
-        // If the inlined instruction has no line number, make it look as if it
-        // originates from the call location. This is important for
-        // ((__always_inline__, __nodebug__)) functions which must use caller
-        // location for all instructions in their function body.
-
-        // Don't update static allocas, as they may get moved later.
-        if (auto *AI = dyn_cast<AllocaInst>(BI))
-          if (allocaWouldBeStaticInEntry(AI))
-            continue;
-
-        BI->setDebugLoc(TheCallDL);
-      } else {
-        BI->setDebugLoc(updateInlinedAtInfo(DL, InlinedAtNode, BI->getContext(), IANodes));
+      if (DebugLoc DL = BI->getDebugLoc()) {
+        BI->setDebugLoc(
+            updateInlinedAtInfo(DL, InlinedAtNode, BI->getContext(), IANodes));
+        continue;
       }
+
+      if (CalleeHasDebugInfo)
+        continue;
+      
+      // If the inlined instruction has no line number, make it look as if it
+      // originates from the call location. This is important for
+      // ((__always_inline__, __nodebug__)) functions which must use caller
+      // location for all instructions in their function body.
+
+      // Don't update static allocas, as they may get moved later.
+      if (auto *AI = dyn_cast<AllocaInst>(BI))
+        if (allocaWouldBeStaticInEntry(AI))
+          continue;
+
+      BI->setDebugLoc(TheCallDL);
     }
   }
+}
+/// Update the block frequencies of the caller after a callee has been inlined.
+///
+/// Each block cloned into the caller has its block frequency scaled by the
+/// ratio of CallSiteFreq/CalleeEntryFreq. This ensures that the cloned copy of
+/// callee's entry block gets the same frequency as the callsite block and the
+/// relative frequencies of all cloned blocks remain the same after cloning.
+static void updateCallerBFI(BasicBlock *CallSiteBlock,
+                            const ValueToValueMapTy &VMap,
+                            BlockFrequencyInfo *CallerBFI,
+                            BlockFrequencyInfo *CalleeBFI,
+                            const BasicBlock &CalleeEntryBlock) {
+  SmallPtrSet<BasicBlock *, 16> ClonedBBs;
+  for (auto const &Entry : VMap) {
+    if (!isa<BasicBlock>(Entry.first) || !Entry.second)
+      continue;
+    auto *OrigBB = cast<BasicBlock>(Entry.first);
+    auto *ClonedBB = cast<BasicBlock>(Entry.second);
+    uint64_t Freq = CalleeBFI->getBlockFreq(OrigBB).getFrequency();
+    if (!ClonedBBs.insert(ClonedBB).second) {
+      // Multiple blocks in the callee might get mapped to one cloned block in
+      // the caller since we prune the callee as we clone it. When that happens,
+      // we want to use the maximum among the original blocks' frequencies.
+      uint64_t NewFreq = CallerBFI->getBlockFreq(ClonedBB).getFrequency();
+      if (NewFreq > Freq)
+        Freq = NewFreq;
+    }
+    CallerBFI->setBlockFreq(ClonedBB, Freq);
+  }
+  BasicBlock *EntryClone = cast<BasicBlock>(VMap.lookup(&CalleeEntryBlock));
+  CallerBFI->setBlockFreqAndScale(
+      EntryClone, CallerBFI->getBlockFreq(CallSiteBlock).getFrequency(),
+      ClonedBBs);
+}
+
+/// Update the branch metadata for cloned call instructions.
+static void updateCallProfile(Function *Callee, const ValueToValueMapTy &VMap,
+                              const Optional<uint64_t> &CalleeEntryCount,
+                              const Instruction *TheCall) {
+  if (!CalleeEntryCount.hasValue() || CalleeEntryCount.getValue() < 1)
+    return;
+  Optional<uint64_t> CallSiteCount =
+      ProfileSummaryInfo::getProfileCount(TheCall, nullptr);
+  uint64_t CallCount =
+      std::min(CallSiteCount.hasValue() ? CallSiteCount.getValue() : 0,
+               CalleeEntryCount.getValue());
+
+  for (auto const &Entry : VMap)
+    if (isa<CallInst>(Entry.first))
+      if (auto *CI = dyn_cast_or_null<CallInst>(Entry.second))
+        CI->updateProfWeight(CallCount, CalleeEntryCount.getValue());
+  for (BasicBlock &BB : *Callee)
+    // No need to update the callsite if it is pruned during inlining.
+    if (VMap.count(&BB))
+      for (Instruction &I : BB)
+        if (CallInst *CI = dyn_cast<CallInst>(&I))
+          CI->updateProfWeight(CalleeEntryCount.getValue() - CallCount,
+                               CalleeEntryCount.getValue());
+}
+
+/// Update the entry count of callee after inlining.
+///
+/// The callsite's block count is subtracted from the callee's function entry
+/// count.
+static void updateCalleeCount(BlockFrequencyInfo *CallerBFI, BasicBlock *CallBB,
+                              Instruction *CallInst, Function *Callee) {
+  // If the callee has a original count of N, and the estimated count of
+  // callsite is M, the new callee count is set to N - M. M is estimated from
+  // the caller's entry count, its entry block frequency and the block frequency
+  // of the callsite.
+  Optional<uint64_t> CalleeCount = Callee->getEntryCount();
+  if (!CalleeCount.hasValue())
+    return;
+  Optional<uint64_t> CallCount =
+      ProfileSummaryInfo::getProfileCount(CallInst, CallerBFI);
+  if (!CallCount.hasValue())
+    return;
+  // Since CallSiteCount is an estimate, it could exceed the original callee
+  // count and has to be set to 0.
+  if (CallCount.getValue() > CalleeCount.getValue())
+    Callee->setEntryCount(0);
+  else
+    Callee->setEntryCount(CalleeCount.getValue() - CallCount.getValue());
 }
 
 /// This function inlines the called function into the basic block of the
@@ -1433,13 +1487,13 @@ static void fixupLineNumbers(Function *Fn, Function::iterator FI,
 bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
                           AAResults *CalleeAAR, bool InsertLifetime) {
   Instruction *TheCall = CS.getInstruction();
-  assert(TheCall->getParent() && TheCall->getParent()->getParent() &&
-         "Instruction not in function!");
+  assert(TheCall->getParent() && TheCall->getFunction()
+         && "Instruction not in function!");
 
   // If IFI has any state in it, zap it before we fill it in.
   IFI.reset();
-  
-  const Function *CalledFunc = CS.getCalledFunction();
+
+  Function *CalledFunc = CS.getCalledFunction();
   if (!CalledFunc ||              // Can't inline external function or indirect
       CalledFunc->isDeclaration() || // call, or call to a vararg function!
       CalledFunc->getFunctionType()->isVarArg()) return false;
@@ -1576,7 +1630,7 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
     // matches up the formal to the actual argument values.
     CallSite::arg_iterator AI = CS.arg_begin();
     unsigned ArgNo = 0;
-    for (Function::const_arg_iterator I = CalledFunc->arg_begin(),
+    for (Function::arg_iterator I = CalledFunc->arg_begin(),
          E = CalledFunc->arg_end(); I != E; ++I, ++AI, ++ArgNo) {
       Value *ActualArg = *AI;
 
@@ -1606,9 +1660,17 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
     CloneAndPruneFunctionInto(Caller, CalledFunc, VMap,
                               /*ModuleLevelChanges=*/false, Returns, ".i",
                               &InlinedFunctionInfo, TheCall);
-
     // Remember the first block that is newly cloned over.
     FirstNewBlock = LastBlock; ++FirstNewBlock;
+
+    if (IFI.CallerBFI != nullptr && IFI.CalleeBFI != nullptr)
+      // Update the BFI of blocks cloned into the caller.
+      updateCallerBFI(OrigBB, VMap, IFI.CallerBFI, IFI.CalleeBFI,
+                      CalledFunc->front());
+
+    updateCallProfile(CalledFunc, VMap, CalledFunc->getEntryCount(), TheCall);
+    // Update the profile count of callee.
+    updateCalleeCount(IFI.CallerBFI, OrigBB, TheCall, CalledFunc);
 
     // Inject byval arguments initialization.
     for (std::pair<Value*, Value*> &Init : ByValInit)
@@ -1673,8 +1735,11 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
     if (IFI.CG)
       UpdateCallGraphAfterInlining(CS, FirstNewBlock, VMap, IFI);
 
-    // Update inlined instructions' line number information.
-    fixupLineNumbers(Caller, FirstNewBlock, TheCall);
+    // For 'nodebug' functions, the associated DISubprogram is always null.
+    // Conservatively avoid propagating the callsite debug location to
+    // instructions inlined from a function whose DISubprogram is not null.
+    fixupLineNumbers(Caller, FirstNewBlock, TheCall,
+                     CalledFunc->getSubprogram() != nullptr);
 
     // Clone existing noalias metadata if necessary.
     CloneAliasScopeMetadata(CS, VMap);
@@ -2033,6 +2098,20 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
     std::swap(Returns, NormalReturns);
   }
 
+  // Now that all of the transforms on the inlined code have taken place but
+  // before we splice the inlined code into the CFG and lose track of which
+  // blocks were actually inlined, collect the call sites. We only do this if
+  // call graph updates weren't requested, as those provide value handle based
+  // tracking of inlined call sites instead.
+  if (InlinedFunctionInfo.ContainsCalls && !IFI.CG) {
+    // Otherwise just collect the raw call sites that were inlined.
+    for (BasicBlock &NewBB :
+         make_range(FirstNewBlock->getIterator(), Caller->end()))
+      for (Instruction &I : NewBB)
+        if (auto CS = CallSite(&I))
+          IFI.InlinedCallSites.push_back(CS);
+  }
+
   // If we cloned in _exactly one_ basic block, and if that block ends in a
   // return instruction, we splice the body of the inlined callee directly into
   // the calling basic block.
@@ -2096,6 +2175,12 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
     //
     AfterCallBB = OrigBB->splitBasicBlock(TheCall->getIterator(),
                                           CalledFunc->getName() + ".exit");
+  }
+
+  if (IFI.CallerBFI) {
+    // Copy original BB's block frequency to AfterCallBB
+    IFI.CallerBFI->setBlockFreq(
+        AfterCallBB, IFI.CallerBFI->getBlockFreq(OrigBB).getFrequency());
   }
 
   // Change the branch that used to go to AfterCallBB to branch to the first

@@ -24,11 +24,14 @@
 #include <cstring>
 
 namespace llvm {
+class ARMAttributeParser;
+
 namespace object {
 
 class ObjectFile;
 class COFFObjectFile;
 class MachOObjectFile;
+class WasmObjectFile;
 
 class SymbolRef;
 class symbol_iterator;
@@ -264,12 +267,18 @@ public:
   virtual StringRef getFileFormatName() const = 0;
   virtual /* Triple::ArchType */ unsigned getArch() const = 0;
   virtual SubtargetFeatures getFeatures() const = 0;
+  virtual void setARMSubArch(Triple &TheTriple) const { }
 
   /// Returns platform-specific object flags, if any.
   virtual std::error_code getPlatformFlags(unsigned &Result) const {
     Result = 0;
     return object_error::invalid_file_type;
   }
+
+  virtual std::error_code
+    getBuildAttributes(ARMAttributeParser &Attributes) const {
+      return std::error_code();
+    }
 
   /// True if this is a relocatable object (.o/.obj).
   virtual bool isRelocatableObject() const = 0;
@@ -304,6 +313,8 @@ public:
                         uint32_t UniversalCputype = 0,
                         uint32_t UniversalIndex = 0);
 
+  static Expected<std::unique_ptr<WasmObjectFile>>
+  createWasmObjectFile(MemoryBufferRef Object);
 };
 
 // Inline function definitions.

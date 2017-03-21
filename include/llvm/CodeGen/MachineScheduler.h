@@ -1,4 +1,4 @@
-//==- MachineScheduler.h - MachineInstr Scheduling Pass ----------*- C++ -*-==//
+//===- MachineScheduler.h - MachineInstr Scheduling Pass --------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -42,8 +42,8 @@
 //
 // ScheduleDAGInstrs *<Target>PassConfig::
 // createMachineScheduler(MachineSchedContext *C) {
-//   ScheduleDAGMI *DAG = new ScheduleDAGMI(C, CustomStrategy(C));
-//   DAG->addMutation(new CustomDependencies(DAG->TII, DAG->TRI));
+//   ScheduleDAGMI *DAG = createGenericSchedLive(C);
+//   DAG->addMutation(new CustomDAGMutation(...));
 //   return DAG;
 // }
 //
@@ -112,12 +112,12 @@ class ScheduleHazardRecognizer;
 /// MachineSchedContext provides enough context from the MachineScheduler pass
 /// for the target to instantiate a scheduler.
 struct MachineSchedContext {
-  MachineFunction *MF;
-  const MachineLoopInfo *MLI;
-  const MachineDominatorTree *MDT;
-  const TargetPassConfig *PassConfig;
-  AliasAnalysis *AA;
-  LiveIntervals *LIS;
+  MachineFunction *MF = nullptr;
+  const MachineLoopInfo *MLI = nullptr;
+  const MachineDominatorTree *MDT = nullptr;
+  const TargetPassConfig *PassConfig = nullptr;
+  AliasAnalysis *AA = nullptr;
+  LiveIntervals *LIS = nullptr;
 
   RegisterClassInfo *RegClassInfo;
 
@@ -165,22 +165,21 @@ class ScheduleDAGMI;
 /// before building the DAG.
 struct MachineSchedPolicy {
   // Allow the scheduler to disable register pressure tracking.
-  bool ShouldTrackPressure;
+  bool ShouldTrackPressure = false;
   /// Track LaneMasks to allow reordering of independent subregister writes
   /// of the same vreg. \sa MachineSchedStrategy::shouldTrackLaneMasks()
-  bool ShouldTrackLaneMasks;
+  bool ShouldTrackLaneMasks = false;
 
   // Allow the scheduler to force top-down or bottom-up scheduling. If neither
   // is true, the scheduler runs in both directions and converges.
-  bool OnlyTopDown;
-  bool OnlyBottomUp;
+  bool OnlyTopDown = false;
+  bool OnlyBottomUp = false;
 
   // Disable heuristic that tries to fetch nodes from long dependency chains
   // first.
-  bool DisableLatencyHeuristic;
+  bool DisableLatencyHeuristic = false;
 
-  MachineSchedPolicy(): ShouldTrackPressure(false), ShouldTrackLaneMasks(false),
-    OnlyTopDown(false), OnlyBottomUp(false), DisableLatencyHeuristic(false) {}
+  MachineSchedPolicy() = default;
 };
 
 /// MachineSchedStrategy - Interface to the scheduling algorithm used by
@@ -232,6 +231,7 @@ public:
   /// When all predecessor dependencies have been resolved, free this node for
   /// top-down scheduling.
   virtual void releaseTopNode(SUnit *SU) = 0;
+
   /// When all successor dependencies have been resolved, free this node for
   /// bottom-up scheduling.
   virtual void releaseBottomNode(SUnit *SU) = 0;
@@ -261,24 +261,20 @@ protected:
   MachineBasicBlock::iterator CurrentBottom;
 
   /// Record the next node in a scheduled cluster.
-  const SUnit *NextClusterPred;
-  const SUnit *NextClusterSucc;
+  const SUnit *NextClusterPred = nullptr;
+  const SUnit *NextClusterSucc = nullptr;
 
 #ifndef NDEBUG
   /// The number of instructions scheduled so far. Used to cut off the
   /// scheduler at the point determined by misched-cutoff.
-  unsigned NumInstrsScheduled;
+  unsigned NumInstrsScheduled = 0;
 #endif
+
 public:
   ScheduleDAGMI(MachineSchedContext *C, std::unique_ptr<MachineSchedStrategy> S,
                 bool RemoveKillFlags)
       : ScheduleDAGInstrs(*C->MF, C->MLI, RemoveKillFlags), AA(C->AA),
-        LIS(C->LIS), SchedImpl(std::move(S)), Topo(SUnits, &ExitSU),
-        NextClusterPred(nullptr), NextClusterSucc(nullptr) {
-#ifndef NDEBUG
-    NumInstrsScheduled = 0;
-#endif
-  }
+        LIS(C->LIS), SchedImpl(std::move(S)), Topo(SUnits, &ExitSU) {}
 
   // Provide a vtable anchor
   ~ScheduleDAGMI() override;
@@ -295,7 +291,8 @@ public:
   ///
   /// ScheduleDAGMI takes ownership of the Mutation object.
   void addMutation(std::unique_ptr<ScheduleDAGMutation> Mutation) {
-    Mutations.push_back(std::move(Mutation));
+    if (Mutation)
+      Mutations.push_back(std::move(Mutation));
   }
 
   /// \brief True if an edge can be added from PredSU to SuccSU without creating
@@ -374,7 +371,7 @@ protected:
 
   /// Information about DAG subtrees. If DFSResult is NULL, then SchedulerTrees
   /// will be empty.
-  SchedDFSResult *DFSResult;
+  SchedDFSResult *DFSResult = nullptr;
   BitVector ScheduledTrees;
 
   MachineBasicBlock::iterator LiveRegionEnd;
@@ -388,8 +385,8 @@ protected:
   PressureDiffs SUPressureDiffs;
 
   /// Register pressure in this region computed by initRegPressure.
-  bool ShouldTrackPressure;
-  bool ShouldTrackLaneMasks;
+  bool ShouldTrackPressure = false;
+  bool ShouldTrackLaneMasks = false;
   IntervalPressure RegPressure;
   RegPressureTracker RPTracker;
 
@@ -408,16 +405,14 @@ protected:
 
   /// True if disconnected subregister components are already renamed.
   /// The renaming is only done on demand if lane masks are tracked.
-  bool DisconnectedComponentsRenamed;
+  bool DisconnectedComponentsRenamed = false;
 
 public:
   ScheduleDAGMILive(MachineSchedContext *C,
                     std::unique_ptr<MachineSchedStrategy> S)
       : ScheduleDAGMI(C, std::move(S), /*RemoveKillFlags=*/false),
-        RegClassInfo(C->RegClassInfo), DFSResult(nullptr),
-        ShouldTrackPressure(false), ShouldTrackLaneMasks(false),
-        RPTracker(RegPressure), TopRPTracker(TopPressure),
-        BotRPTracker(BotPressure), DisconnectedComponentsRenamed(false) {}
+        RegClassInfo(C->RegClassInfo), RPTracker(RegPressure),
+        TopRPTracker(TopPressure), BotRPTracker(BotPressure) {}
 
   ~ScheduleDAGMILive() override;
 
@@ -572,6 +567,8 @@ struct SchedRemainder {
   // Unscheduled resources
   SmallVector<unsigned, 16> RemainingCounts;
 
+  SchedRemainder() { reset(); }
+
   void reset() {
     CriticalPath = 0;
     CyclicCritPath = 0;
@@ -579,8 +576,6 @@ struct SchedRemainder {
     IsAcyclicLatencyLimited = false;
     RemainingCounts.clear();
   }
-
-  SchedRemainder() { reset(); }
 
   void init(ScheduleDAGMI *DAG, const TargetSchedModel *SchedModel);
 };
@@ -597,14 +592,14 @@ public:
     LogMaxQID = 2
   };
 
-  ScheduleDAGMI *DAG;
-  const TargetSchedModel *SchedModel;
-  SchedRemainder *Rem;
+  ScheduleDAGMI *DAG = nullptr;
+  const TargetSchedModel *SchedModel = nullptr;
+  SchedRemainder *Rem = nullptr;
 
   ReadyQueue Available;
   ReadyQueue Pending;
 
-  ScheduleHazardRecognizer *HazardRec;
+  ScheduleHazardRecognizer *HazardRec = nullptr;
 
 private:
   /// True if the pending Q should be checked/updated before scheduling another
@@ -664,9 +659,7 @@ public:
   /// Pending queues extend the ready queues with the same ID and the
   /// PendingFlag set.
   SchedBoundary(unsigned ID, const Twine &Name):
-    DAG(nullptr), SchedModel(nullptr), Rem(nullptr), Available(ID, Name+".A"),
-    Pending(ID << LogMaxQID, Name+".P"),
-    HazardRec(nullptr) {
+    Available(ID, Name+".A"), Pending(ID << LogMaxQID, Name+".P") {
     reset();
   }
 
@@ -780,11 +773,11 @@ public:
 
   /// Policy for scheduling the next instruction in the candidate's zone.
   struct CandPolicy {
-    bool ReduceLatency;
-    unsigned ReduceResIdx;
-    unsigned DemandResIdx;
+    bool ReduceLatency = false;
+    unsigned ReduceResIdx = 0;
+    unsigned DemandResIdx = 0;
 
-    CandPolicy(): ReduceLatency(false), ReduceResIdx(0), DemandResIdx(0) {}
+    CandPolicy() = default;
 
     bool operator==(const CandPolicy &RHS) const {
       return ReduceLatency == RHS.ReduceLatency &&
@@ -799,12 +792,12 @@ public:
   /// Status of an instruction's critical resource consumption.
   struct SchedResourceDelta {
     // Count critical resources in the scheduled region required by SU.
-    unsigned CritResources;
+    unsigned CritResources = 0;
 
     // Count critical resources from another region consumed by SU.
-    unsigned DemandedResources;
+    unsigned DemandedResources = 0;
 
-    SchedResourceDelta(): CritResources(0), DemandedResources(0) {}
+    SchedResourceDelta() = default;
 
     bool operator==(const SchedResourceDelta &RHS) const {
       return CritResources == RHS.CritResources
@@ -865,13 +858,12 @@ public:
 
 protected:
   const MachineSchedContext *Context;
-  const TargetSchedModel *SchedModel;
-  const TargetRegisterInfo *TRI;
+  const TargetSchedModel *SchedModel = nullptr;
+  const TargetRegisterInfo *TRI = nullptr;
 
   SchedRemainder Rem;
 
-  GenericSchedulerBase(const MachineSchedContext *C):
-    Context(C), SchedModel(nullptr), TRI(nullptr) {}
+  GenericSchedulerBase(const MachineSchedContext *C) : Context(C) {}
 
   void setPolicy(CandPolicy &Policy, bool IsPostRA, SchedBoundary &CurrZone,
                  SchedBoundary *OtherZone);
@@ -886,7 +878,7 @@ protected:
 class GenericScheduler : public GenericSchedulerBase {
 public:
   GenericScheduler(const MachineSchedContext *C):
-    GenericSchedulerBase(C), DAG(nullptr), Top(SchedBoundary::TopQID, "TopQ"),
+    GenericSchedulerBase(C), Top(SchedBoundary::TopQID, "TopQ"),
     Bot(SchedBoundary::BotQID, "BotQ") {}
 
   void initPolicy(MachineBasicBlock::iterator Begin,
@@ -928,7 +920,7 @@ public:
   void registerRoots() override;
 
 protected:
-  ScheduleDAGMILive *DAG;
+  ScheduleDAGMILive *DAG = nullptr;
 
   MachineSchedPolicy RegionPolicy;
 
@@ -1015,6 +1007,14 @@ protected:
   void pickNodeFromQueue(SchedCandidate &Cand);
 };
 
+/// Create the standard converging machine scheduler. This will be used as the
+/// default scheduler if the target does not set a default.
+/// Adds default DAG mutations.
+ScheduleDAGMILive *createGenericSchedLive(MachineSchedContext *C);
+
+/// Create a generic scheduler with no vreg liveness or DAG mutation passes.
+ScheduleDAGMI *createGenericSchedPostRA(MachineSchedContext *C);
+
 std::unique_ptr<ScheduleDAGMutation>
 createLoadClusterDAGMutation(const TargetInstrInfo *TII,
                              const TargetRegisterInfo *TRI);
@@ -1022,9 +1022,6 @@ createLoadClusterDAGMutation(const TargetInstrInfo *TII,
 std::unique_ptr<ScheduleDAGMutation>
 createStoreClusterDAGMutation(const TargetInstrInfo *TII,
                               const TargetRegisterInfo *TRI);
-
-std::unique_ptr<ScheduleDAGMutation>
-createMacroFusionDAGMutation(const TargetInstrInfo *TII);
 
 std::unique_ptr<ScheduleDAGMutation>
 createCopyConstrainDAGMutation(const TargetInstrInfo *TII,

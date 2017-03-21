@@ -78,6 +78,24 @@ check_symbol_exists(FE_INEXACT "fenv.h" HAVE_DECL_FE_INEXACT)
 
 check_include_file(mach/mach.h HAVE_MACH_MACH_H)
 check_include_file(histedit.h HAVE_HISTEDIT_H)
+check_include_file(CrashReporterClient.h HAVE_CRASHREPORTERCLIENT_H)
+if(APPLE)
+  include(CheckCSourceCompiles)
+  CHECK_C_SOURCE_COMPILES("
+     static const char *__crashreporter_info__ = 0;
+     asm(\".desc ___crashreporter_info__, 0x10\");
+     int main() { return 0; }"
+    HAVE_CRASHREPORTER_INFO)
+endif()
+
+if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
+  check_include_file(linux/magic.h HAVE_LINUX_MAGIC_H)
+  if(NOT HAVE_LINUX_MAGIC_H)
+    # older kernels use split files
+    check_include_file(linux/nfs_fs.h HAVE_LINUX_NFS_FS_H)
+    check_include_file(linux/smb.h HAVE_LINUX_SMB_H)
+  endif()
+endif()
 
 # library checks
 if( NOT PURE_WINDOWS )
@@ -106,7 +124,7 @@ if(HAVE_LIBPTHREAD)
   set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
   set(THREADS_HAVE_PTHREAD_ARG Off)
   find_package(Threads REQUIRED)
-  set(PTHREAD_LIB ${CMAKE_THREAD_LIBS_INIT})
+  set(LLVM_PTHREAD_LIB ${CMAKE_THREAD_LIBS_INIT})
 endif()
 
 # Don't look for these libraries on Windows. Also don't look for them if we're
@@ -119,8 +137,10 @@ if( NOT PURE_WINDOWS AND NOT LLVM_USE_SANITIZER MATCHES "Memory.*")
     set(HAVE_LIBZ 0)
   endif()
   # Skip libedit if using ASan as it contains memory leaks.
-  if (HAVE_HISTEDIT_H AND NOT LLVM_USE_SANITIZER MATCHES ".*Address.*")
+  if (LLVM_ENABLE_LIBEDIT AND HAVE_HISTEDIT_H AND NOT LLVM_USE_SANITIZER MATCHES ".*Address.*")
     check_library_exists(edit el_init "" HAVE_LIBEDIT)
+  else()
+    set(HAVE_LIBEDIT 0)
   endif()
   if(LLVM_ENABLE_TERMINFO)
     set(HAVE_TERMINFO 0)
@@ -156,12 +176,18 @@ check_symbol_exists(futimens sys/stat.h HAVE_FUTIMENS)
 check_symbol_exists(futimes sys/time.h HAVE_FUTIMES)
 check_symbol_exists(posix_fallocate fcntl.h HAVE_POSIX_FALLOCATE)
 # AddressSanitizer conflicts with lib/Support/Unix/Signals.inc
-if( HAVE_SIGNAL_H AND NOT LLVM_USE_SANITIZER MATCHES ".*Address.*")
+# Avoid sigaltstack on Apple platforms, where backtrace() cannot handle it
+# (rdar://7089625) and _Unwind_Backtrace is unusable because it cannot unwind
+# past the signal handler after an assertion failure (rdar://29866587).
+if( HAVE_SIGNAL_H AND NOT LLVM_USE_SANITIZER MATCHES ".*Address.*" AND NOT APPLE )
   check_symbol_exists(sigaltstack signal.h HAVE_SIGALTSTACK)
 endif()
 if( HAVE_SYS_UIO_H )
   check_symbol_exists(writev sys/uio.h HAVE_WRITEV)
 endif()
+set(CMAKE_REQUIRED_DEFINITIONS "-D_LARGEFILE64_SOURCE")
+check_symbol_exists(lseek64 "sys/types.h;unistd.h" HAVE_LSEEK64)
+set(CMAKE_REQUIRED_DEFINITIONS "")
 check_symbol_exists(mallctl malloc_np.h HAVE_MALLCTL)
 check_symbol_exists(mallinfo malloc.h HAVE_MALLINFO)
 check_symbol_exists(malloc_zone_statistics malloc/malloc.h
@@ -210,6 +236,7 @@ if( HAVE_DLFCN_H )
     list(APPEND CMAKE_REQUIRED_LIBRARIES dl)
   endif()
   check_symbol_exists(dlopen dlfcn.h HAVE_DLOPEN)
+  check_symbol_exists(dladdr dlfcn.h HAVE_DLADDR)
   if( HAVE_LIBDL )
     list(REMOVE_ITEM CMAKE_REQUIRED_LIBRARIES dl)
   endif()
@@ -217,7 +244,15 @@ endif()
 
 check_symbol_exists(__GLIBC__ stdio.h LLVM_USING_GLIBC)
 if( LLVM_USING_GLIBC )
-  add_llvm_definitions( -D_GNU_SOURCE )
+  add_definitions( -D_GNU_SOURCE )
+endif()
+# This check requires _GNU_SOURCE
+if(HAVE_LIBPTHREAD)
+  check_library_exists(pthread pthread_getname_np "" HAVE_PTHREAD_GETNAME_NP)
+  check_library_exists(pthread pthread_setname_np "" HAVE_PTHREAD_SETNAME_NP)
+elseif(PTHREAD_IN_LIBC)
+  check_library_exists(c pthread_getname_np "" HAVE_PTHREAD_GETNAME_NP)
+  check_library_exists(c pthread_setname_np "" HAVE_PTHREAD_SETNAME_NP)
 endif()
 
 set(headers "sys/types.h")
@@ -299,7 +334,9 @@ else()
   endif()
 endif()
 
-check_cxx_compiler_flag("-Wno-variadic-macros" SUPPORTS_NO_VARIADIC_MACROS_FLAG)
+check_cxx_compiler_flag("-Wvariadic-macros" SUPPORTS_VARIADIC_MACROS_FLAG)
+check_cxx_compiler_flag("-Wgnu-zero-variadic-macro-arguments"
+                        SUPPORTS_GNU_ZERO_VARIADIC_MACRO_ARGUMENTS_FLAG)
 
 set(USE_NO_MAYBE_UNINITIALIZED 0)
 set(USE_NO_UNINITIALIZED 0)
@@ -436,8 +473,15 @@ if( MSVC )
   else()
     set(HAVE_DIA_SDK 0)
   endif()
+
+  option(LLVM_ENABLE_DIA_SDK "Use MSVC DIA SDK for debugging if available."
+                             ${HAVE_DIA_SDK})
+
+  if(LLVM_ENABLE_DIA_SDK AND NOT HAVE_DIA_SDK)
+    message(FATAL_ERROR "DIA SDK not found. If you have both VS 2012 and 2013 installed, you may need to uninstall the former and re-install the latter afterwards.")
+  endif()
 else()
-  set(HAVE_DIA_SDK 0)
+  set(LLVM_ENABLE_DIA_SDK 0)
 endif( MSVC )
 
 # FIXME: Signal handler return type, currently hardcoded to 'void'
@@ -462,8 +506,6 @@ if (LLVM_ENABLE_ZLIB )
     set(LLVM_ENABLE_ZLIB 0)
   endif()
 endif()
-
-set(LLVM_PREFIX ${CMAKE_INSTALL_PREFIX})
 
 if (LLVM_ENABLE_DOXYGEN)
   message(STATUS "Doxygen enabled.")
@@ -521,6 +563,9 @@ set(LLVM_BINUTILS_INCDIR "" CACHE PATH
 	"PATH to binutils/include containing plugin-api.h for gold plugin.")
 
 if(CMAKE_HOST_APPLE AND APPLE)
+  if(NOT CMAKE_XCRUN)
+    find_program(CMAKE_XCRUN NAMES xcrun)
+  endif()
   if(CMAKE_XCRUN)
     execute_process(COMMAND ${CMAKE_XCRUN} -find ld
       OUTPUT_VARIABLE LD64_EXECUTABLE

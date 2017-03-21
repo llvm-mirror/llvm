@@ -363,7 +363,8 @@ unsigned ARMAsmBackend::adjustFixupValue(const MCFixup &Fixup, uint64_t Value,
   unsigned Kind = Fixup.getKind();
   switch (Kind) {
   default:
-    llvm_unreachable("Unknown fixup kind!");
+    if (Ctx) Ctx->reportError(Fixup.getLoc(), "bad relocation fixup type");
+    return 0;
   case FK_Data_1:
   case FK_Data_2:
   case FK_Data_4:
@@ -740,7 +741,7 @@ void ARMAsmBackend::processFixupValue(const MCAssembler &Asm,
 
   // Try to get the encoded value for the fixup as-if we're mapping it into
   // the instruction. This allows adjustFixupValue() to issue a diagnostic
-  // if the value aren't invalid.
+  // if the value is invalid.
   (void)adjustFixupValue(Fixup, Value, false, &Asm.getContext(),
                          IsLittleEndian, IsResolved);
 }

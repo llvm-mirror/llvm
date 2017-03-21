@@ -165,7 +165,7 @@ bool ARMAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
   EmitFunctionBody();
 
   // Emit the XRay table for this function.
-  EmitXRayTable();
+  emitXRayTable();
 
   // If we need V4T thumb mode Register Indirect Jump pads, emit them.
   // These are created per function, rather than per TU, since it's
@@ -232,6 +232,8 @@ void ARMAsmPrinter::printOperand(const MachineInstr *MI, int OpNum,
     break;
   }
   case MachineOperand::MO_ConstantPoolIndex:
+    if (Subtarget->genExecuteOnly())
+      llvm_unreachable("execute-only should not generate constant pools");
     GetCPISymbol(MO.getIndex())->print(O, MAI);
     break;
   }
@@ -842,7 +844,7 @@ void ARMAsmPrinter::emitAttributes() {
                       ARMBuildAttrs::Allowed);
   else
     ATS.emitAttribute(ARMBuildAttrs::ABI_FP_number_model,
-                      ARMBuildAttrs::AllowIEE754);
+                      ARMBuildAttrs::AllowIEEE754);
 
   if (STI.allowsUnalignedMem())
     ATS.emitAttribute(ARMBuildAttrs::CPU_unaligned_access,
@@ -1140,6 +1142,11 @@ void ARMAsmPrinter::EmitJumpTableInsts(const MachineInstr *MI) {
   const MachineOperand &MO1 = MI->getOperand(1);
   unsigned JTI = MO1.getIndex();
 
+  // Make sure the Thumb jump table is 4-byte aligned. This will be a nop for
+  // ARM mode tables.
+  EmitAlignment(2);
+
+  // Emit a label for the jump table.
   MCSymbol *JTISymbol = GetARMJTIPICJumpTableLabel(JTI);
   OutStreamer->EmitLabel(JTISymbol);
 
@@ -1253,7 +1260,7 @@ void ARMAsmPrinter::EmitUnwindingInstruction(const MachineInstr *MI) {
 
     switch (Opc) {
     default:
-      MI->dump();
+      MI->print(errs());
       llvm_unreachable("Unsupported opcode for unwinding information");
     case ARM::tPUSH:
       // Special case here: no src & dst reg, but two extra imp ops.
@@ -1289,7 +1296,7 @@ void ARMAsmPrinter::EmitUnwindingInstruction(const MachineInstr *MI) {
       int64_t Offset = 0;
       switch (Opc) {
       default:
-        MI->dump();
+        MI->print(errs());
         llvm_unreachable("Unsupported opcode for unwinding information");
       case ARM::MOVr:
       case ARM::tMOVr:
@@ -1344,11 +1351,11 @@ void ARMAsmPrinter::EmitUnwindingInstruction(const MachineInstr *MI) {
         }
       }
     } else if (DstReg == ARM::SP) {
-      MI->dump();
+      MI->print(errs());
       llvm_unreachable("Unsupported opcode for unwinding information");
     }
     else {
-      MI->dump();
+      MI->print(errs());
       llvm_unreachable("Unsupported opcode for unwinding information");
     }
   }

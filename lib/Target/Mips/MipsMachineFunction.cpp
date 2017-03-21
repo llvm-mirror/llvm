@@ -7,16 +7,15 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "MCTargetDesc/MipsBaseInfo.h"
-#include "MipsInstrInfo.h"
+#include "MCTargetDesc/MipsABIInfo.h"
 #include "MipsMachineFunction.h"
 #include "MipsSubtarget.h"
 #include "MipsTargetMachine.h"
-#include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/IR/Function.h"
+#include "llvm/CodeGen/PseudoSourceValue.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/Support/raw_ostream.h"
+#include "llvm/Target/TargetRegisterInfo.h"
 
 using namespace llvm;
 
@@ -24,7 +23,7 @@ static cl::opt<bool>
 FixGlobalBaseReg("mips-fix-global-base-reg", cl::Hidden, cl::init(true),
                  cl::desc("Always use $gp as the global base register."));
 
-MipsFunctionInfo::~MipsFunctionInfo() {}
+MipsFunctionInfo::~MipsFunctionInfo() = default;
 
 bool MipsFunctionInfo::globalBaseRegSet() const {
   return GlobalBaseReg;
@@ -68,7 +67,7 @@ void MipsFunctionInfo::createEhDataRegsFI() {
 void MipsFunctionInfo::createISRRegFI() {
   // ISRs require spill slots for Status & ErrorPC Coprocessor 0 registers.
   // The current implementation only supports Mips32r2+ not Mips64rX. Status
-  // is always 32 bits, ErrorPC is 32 or 64 bits dependant on architecture,
+  // is always 32 bits, ErrorPC is 32 or 64 bits dependent on architecture,
   // however Mips32r2+ is the supported architecture.
   const TargetRegisterClass *RC = &Mips::GPR32RegClass;
 
@@ -101,4 +100,4 @@ int MipsFunctionInfo::getMoveF64ViaSpillFI(const TargetRegisterClass *RC) {
   return MoveF64ViaSpillFI;
 }
 
-void MipsFunctionInfo::anchor() { }
+void MipsFunctionInfo::anchor() {}

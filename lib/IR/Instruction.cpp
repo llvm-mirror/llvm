@@ -17,6 +17,7 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/IR/Type.h"
 using namespace llvm;
@@ -120,6 +121,29 @@ bool Instruction::hasNoUnsignedWrap() const {
 
 bool Instruction::hasNoSignedWrap() const {
   return cast<OverflowingBinaryOperator>(this)->hasNoSignedWrap();
+}
+
+void Instruction::dropPoisonGeneratingFlags() {
+  switch (getOpcode()) {
+  case Instruction::Add:
+  case Instruction::Sub:
+  case Instruction::Mul:
+  case Instruction::Shl:
+    cast<OverflowingBinaryOperator>(this)->setHasNoUnsignedWrap(false);
+    cast<OverflowingBinaryOperator>(this)->setHasNoSignedWrap(false);
+    break;
+
+  case Instruction::UDiv:
+  case Instruction::SDiv:
+  case Instruction::AShr:
+  case Instruction::LShr:
+    cast<PossiblyExactOperator>(this)->setIsExact(false);
+    break;
+
+  case Instruction::GetElementPtr:
+    cast<GetElementPtrInst>(this)->setIsInBounds(false);
+    break;
+  }
 }
 
 bool Instruction::isExact() const {
@@ -546,51 +570,6 @@ bool Instruction::isAssociative() const {
   }
 }
 
-/// Return true if the instruction is commutative:
-///
-///   Commutative operators satisfy: (x op y) === (y op x)
-///
-/// In LLVM, these are the associative operators, plus SetEQ and SetNE, when
-/// applied to any type.
-///
-bool Instruction::isCommutative(unsigned op) {
-  switch (op) {
-  case Add:
-  case FAdd:
-  case Mul:
-  case FMul:
-  case And:
-  case Or:
-  case Xor:
-    return true;
-  default:
-    return false;
-  }
-}
-
-/// Return true if the instruction is idempotent:
-///
-///   Idempotent operators satisfy:  x op x === x
-///
-/// In LLVM, the And and Or operators are idempotent.
-///
-bool Instruction::isIdempotent(unsigned Opcode) {
-  return Opcode == And || Opcode == Or;
-}
-
-/// Return true if the instruction is nilpotent:
-///
-///   Nilpotent operators satisfy:  x op x === Id,
-///
-///   where Id is the identity for the operator, i.e. a constant such that
-///     x op Id === x and Id op x === x for all x.
-///
-/// In LLVM, the Xor operator is nilpotent.
-///
-bool Instruction::isNilpotent(unsigned Opcode) {
-  return Opcode == Xor;
-}
-
 Instruction *Instruction::cloneImpl() const {
   llvm_unreachable("Subclass of Instruction failed to implement cloneImpl");
 }
@@ -650,4 +629,26 @@ Instruction *Instruction::clone() const {
   New->SubclassOptionalData = SubclassOptionalData;
   New->copyMetadata(*this);
   return New;
+}
+
+void Instruction::updateProfWeight(uint64_t S, uint64_t T) {
+  auto *ProfileData = getMetadata(LLVMContext::MD_prof);
+  if (ProfileData == nullptr)
+    return;
+
+  auto *ProfDataName = dyn_cast<MDString>(ProfileData->getOperand(0));
+  if (!ProfDataName || !ProfDataName->getString().equals("branch_weights"))
+    return;
+
+  SmallVector<uint32_t, 4> Weights;
+  for (unsigned i = 1; i < ProfileData->getNumOperands(); i++) {
+    // Using APInt::div may be expensive, but most cases should fit in 64 bits.
+    APInt Val(128, mdconst::dyn_extract<ConstantInt>(ProfileData->getOperand(i))
+                       ->getValue()
+                       .getZExtValue());
+    Val *= APInt(128, S);
+    Weights.push_back(Val.udiv(APInt(128, T)).getLimitedValue());
+  }
+  MDBuilder MDB(getContext());
+  setMetadata(LLVMContext::MD_prof, MDB.createBranchWeights(Weights));
 }

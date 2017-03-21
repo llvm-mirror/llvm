@@ -230,8 +230,9 @@ bool RecurrenceDescriptor::AddReductionVar(PHINode *Phi, RecurrenceKind Kind,
   //      - PHI:
   //        - All uses of the PHI must be the reduction (safe).
   //        - Otherwise, not safe.
-  //  - By one instruction outside of the loop (safe).
-  //  - By further instructions outside of the loop (not safe).
+  //  - By instructions outside of the loop (safe).
+  //      * One value may have several outside users, but all outside
+  //        uses must be of the same value.
   //  - By an instruction that is not part of the reduction (not safe).
   //    This is either:
   //      * An instruction type other than PHI or the reduction operation.
@@ -297,10 +298,15 @@ bool RecurrenceDescriptor::AddReductionVar(PHINode *Phi, RecurrenceKind Kind,
       // Check if we found the exit user.
       BasicBlock *Parent = UI->getParent();
       if (!TheLoop->contains(Parent)) {
-        // Exit if you find multiple outside users or if the header phi node is
-        // being used. In this case the user uses the value of the previous
-        // iteration, in which case we would loose "VF-1" iterations of the
-        // reduction operation if we vectorize.
+        // If we already know this instruction is used externally, move on to
+        // the next user.
+        if (ExitInstruction == Cur)
+          continue;
+
+        // Exit if you find multiple values used outside or if the header phi
+        // node is being used. In this case the user uses the value of the
+        // previous iteration, in which case we would loose "VF-1" iterations of
+        // the reduction operation if we vectorize.
         if (ExitInstruction != nullptr || Cur == Phi)
           return false;
 
@@ -869,8 +875,13 @@ bool InductionDescriptor::isInductionPHI(PHINode *Phi, const Loop *TheLoop,
     return false;
   }
 
-  assert(TheLoop->getHeader() == Phi->getParent() &&
-         "PHI is an AddRec for a different loop?!");
+  if (AR->getLoop() != TheLoop) {
+    // FIXME: We should treat this as a uniform. Unfortunately, we
+    // don't currently know how to handled uniform PHIs.
+    DEBUG(dbgs() << "LV: PHI is a recurrence with respect to an outer loop.\n");
+    return false;    
+  }
+
   Value *StartValue =
     Phi->getIncomingValueForBlock(AR->getLoop()->getLoopPreheader());
   const SCEV *Step = AR->getStepRecurrence(*SE);
@@ -1066,4 +1077,37 @@ bool llvm::isGuaranteedToExecute(const Instruction &Inst,
   // See http::llvm.org/PR24078 .  (The "ExitBlocks.empty()" check above is
   // just a special case of this.)
   return true;
+}
+
+Optional<unsigned> llvm::getLoopEstimatedTripCount(Loop *L) {
+  // Only support loops with a unique exiting block, and a latch.
+  if (!L->getExitingBlock())
+    return None;
+
+  // Get the branch weights for the the loop's backedge.
+  BranchInst *LatchBR =
+      dyn_cast<BranchInst>(L->getLoopLatch()->getTerminator());
+  if (!LatchBR || LatchBR->getNumSuccessors() != 2)
+    return None;
+
+  assert((LatchBR->getSuccessor(0) == L->getHeader() ||
+          LatchBR->getSuccessor(1) == L->getHeader()) &&
+         "At least one edge out of the latch must go to the header");
+
+  // To estimate the number of times the loop body was executed, we want to
+  // know the number of times the backedge was taken, vs. the number of times
+  // we exited the loop.
+  uint64_t TrueVal, FalseVal;
+  if (!LatchBR->extractProfMetadata(TrueVal, FalseVal))
+    return None;
+
+  if (!TrueVal || !FalseVal)
+    return 0;
+
+  // Divide the count of the backedge by the count of the edge exiting the loop,
+  // rounding to nearest.
+  if (LatchBR->getSuccessor(0) == L->getHeader())
+    return (TrueVal + (FalseVal / 2)) / FalseVal;
+  else
+    return (FalseVal + (TrueVal / 2)) / TrueVal;
 }

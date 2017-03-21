@@ -28,7 +28,7 @@ public:
 
   virtual uint64_t getLoadAddress() const = 0;
   virtual void setLoadAddress(uint64_t Address) = 0;
-  virtual std::unique_ptr<PDBSymbolExe> getGlobalScope() const = 0;
+  virtual std::unique_ptr<PDBSymbolExe> getGlobalScope() = 0;
   virtual std::unique_ptr<PDBSymbol> getSymbolById(uint32_t SymbolId) const = 0;
 
   template <typename T>
@@ -40,7 +40,7 @@ public:
     T *ConcreteSymbol = dyn_cast<T>(Symbol.get());
     if (!ConcreteSymbol)
       return nullptr;
-    Symbol.release();
+    (void)Symbol.release();
     return std::unique_ptr<T>(ConcreteSymbol);
   }
 

@@ -44,10 +44,10 @@ add_llvm_library(LLVMAnalysis
   Lint.cpp
   Loads.cpp
   LoopAccessAnalysis.cpp
+  LoopAnalysisManager.cpp
   LoopUnrollAnalyzer.cpp
   LoopInfo.cpp
   LoopPass.cpp
-  LoopPassManager.cpp
   MemDepPrinter.cpp
   MemDerefPrinter.cpp
   MemoryBuiltins.cpp
@@ -83,6 +83,7 @@ add_llvm_library(LLVMAnalysis
 
   ADDITIONAL_HEADER_DIRS
   ${LLVM_MAIN_INCLUDE_DIR}/llvm/Analysis
-  )
 
-add_dependencies(LLVMAnalysis intrinsics_gen)
+  DEPENDS
+  intrinsics_gen
+  )

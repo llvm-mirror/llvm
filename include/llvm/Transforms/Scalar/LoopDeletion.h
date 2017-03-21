@@ -1,4 +1,4 @@
-//===- LoopDeletion.h - Loop Deletion -------------------------------------===//
+//===- LoopDeletion.h - Loop Deletion ---------------------------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -14,26 +14,22 @@
 #ifndef LLVM_TRANSFORMS_SCALAR_LOOPDELETION_H
 #define LLVM_TRANSFORMS_SCALAR_LOOPDELETION_H
 
+#include "llvm/Analysis/LoopAnalysisManager.h"
 #include "llvm/Analysis/LoopInfo.h"
-#include "llvm/Analysis/LoopPassManager.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/IR/PassManager.h"
+#include "llvm/Transforms/Scalar/LoopPassManager.h"
 
 namespace llvm {
 
 class LoopDeletionPass : public PassInfoMixin<LoopDeletionPass> {
 public:
-  LoopDeletionPass() {}
-  PreservedAnalyses run(Loop &L, LoopAnalysisManager &AM);
-  bool runImpl(Loop *L, DominatorTree &DT, ScalarEvolution &SE,
-              LoopInfo &loopInfo);
+  LoopDeletionPass() = default;
 
-private:
-  bool isLoopDead(Loop *L, ScalarEvolution &SE,
-                  SmallVectorImpl<BasicBlock *> &exitingBlocks,
-                  SmallVectorImpl<BasicBlock *> &exitBlocks, bool &Changed,
-                  BasicBlock *Preheader);
+  PreservedAnalyses run(Loop &L, LoopAnalysisManager &AM,
+                        LoopStandardAnalysisResults &AR, LPMUpdater &U);
 };
-}
+
+} // end namespace llvm
 
 #endif // LLVM_TRANSFORMS_SCALAR_LOOPDELETION_H

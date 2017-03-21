@@ -33,9 +33,10 @@ class LoopInfo;
 
 /// This is the AA result object for the basic, local, and stateless alias
 /// analysis. It implements the AA query interface in an entirely stateless
-/// manner. As one consequence, it is never invalidated. While it does retain
-/// some storage, that is used as an optimization and not to preserve
-/// information from query to query.
+/// manner. As one consequence, it is never invalidated due to IR changes.
+/// While it does retain some storage, that is used as an optimization and not
+/// to preserve information from query to query. However it does retain handles
+/// to various other analyses and must be recomputed when those analyses are.
 class BasicAAResult : public AAResultBase<BasicAAResult> {
   friend AAResultBase<BasicAAResult>;
 
@@ -57,6 +58,10 @@ public:
   BasicAAResult(BasicAAResult &&Arg)
       : AAResultBase(std::move(Arg)), DL(Arg.DL), TLI(Arg.TLI), AC(Arg.AC),
         DT(Arg.DT), LI(Arg.LI) {}
+
+  /// Handle invalidation events in the new pass manager.
+  bool invalidate(Function &F, const PreservedAnalyses &PA,
+                  FunctionAnalysisManager::Invalidator &Inv);
 
   AliasResult alias(const MemoryLocation &LocA, const MemoryLocation &LocB);
 
@@ -196,7 +201,7 @@ private:
 /// Analysis pass providing a never-invalidated alias analysis result.
 class BasicAA : public AnalysisInfoMixin<BasicAA> {
   friend AnalysisInfoMixin<BasicAA>;
-  static char PassID;
+  static AnalysisKey Key;
 
 public:
   typedef BasicAAResult Result;
@@ -228,6 +233,24 @@ FunctionPass *createBasicAAWrapperPass();
 /// populated to the best of our ability for a particular function when inside
 /// of a \c ModulePass or a \c CallGraphSCCPass.
 BasicAAResult createLegacyPMBasicAAResult(Pass &P, Function &F);
+
+/// This class is a functor to be used in legacy module or SCC passes for
+/// computing AA results for a function. We store the results in fields so that
+/// they live long enough to be queried, but we re-use them each time.
+class LegacyAARGetter {
+  Pass &P;
+  Optional<BasicAAResult> BAR;
+  Optional<AAResults> AAR;
+
+public:
+  LegacyAARGetter(Pass &P) : P(P) {}
+  AAResults &operator()(Function &F) {
+    BAR.emplace(createLegacyPMBasicAAResult(P, F));
+    AAR.emplace(createLegacyPMAAResults(P, F, *BAR));
+    return *AAR;
+  }
+};
+
 }
 
 #endif

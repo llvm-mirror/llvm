@@ -28,11 +28,6 @@ def imm_sr : Operand<i32>, PatLeaf<(imm), [{
   let ParserMatchClass = ThumbSRImmAsmOperand;
 }
 
-def imm_comp_XFORM : SDNodeXForm<imm, [{
-  return CurDAG->getTargetConstant(~((uint32_t)N->getZExtValue()), SDLoc(N),
-                                   MVT::i32);
-}]>;
-
 def imm0_7_neg : PatLeaf<(i32 imm), [{
   return (uint32_t)-N->getZExtValue() < 8;
 }], imm_neg_XFORM>;
@@ -1477,7 +1472,7 @@ def : T1Pat<(extloadi16 t_addrmode_rr:$addr),  (tLDRHr t_addrmode_rr:$addr)>;
 // post-inc LDR -> LDM r0!, {r1}. The way operands are layed out in LDMs is
 // different to how ISel expects them for a post-inc load, so use a pseudo
 // and expand it just after ISel.
-let usesCustomInserter = 1,
+let usesCustomInserter = 1, mayLoad =1,
     Constraints = "$Rn = $Rn_wb,@earlyclobber $Rn_wb" in
  def tLDR_postidx: tPseudoInst<(outs rGPR:$Rt, rGPR:$Rn_wb),
                                (ins rGPR:$Rn, pred:$p),
@@ -1547,7 +1542,7 @@ def : T1Pat<(i32 thumb_immshifted:$src),
                     (thumb_immshifted_shamt imm:$src))>;
 
 def : T1Pat<(i32 imm0_255_comp:$src),
-            (tMVN (tMOVi8 (imm_comp_XFORM imm:$src)))>;
+            (tMVN (tMOVi8 (imm_not_XFORM imm:$src)))>;
 
 def : T1Pat<(i32 imm256_510:$src),
             (tADDi8 (tMOVi8 255),

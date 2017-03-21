@@ -156,20 +156,12 @@ PreservedAnalyses NaryReassociatePass::run(Function &F,
   auto *TLI = &AM.getResult<TargetLibraryAnalysis>(F);
   auto *TTI = &AM.getResult<TargetIRAnalysis>(F);
 
-  bool Changed = runImpl(F, AC, DT, SE, TLI, TTI);
-
-  // FIXME: We need to invalidate this to avoid PR28400. Is there a better
-  // solution?
-  AM.invalidate<ScalarEvolutionAnalysis>(F);
-
-  if (!Changed)
+  if (!runImpl(F, AC, DT, SE, TLI, TTI))
     return PreservedAnalyses::all();
 
-  // FIXME: This should also 'preserve the CFG'.
   PreservedAnalyses PA;
-  PA.preserve<DominatorTreeAnalysis>();
+  PA.preserveSet<CFGAnalyses>();
   PA.preserve<ScalarEvolutionAnalysis>();
-  PA.preserve<TargetLibraryAnalysis>();
   return PA;
 }
 
@@ -281,9 +273,10 @@ Instruction *NaryReassociatePass::tryReassociateGEP(GetElementPtrInst *GEP) {
     return nullptr;
 
   gep_type_iterator GTI = gep_type_begin(*GEP);
-  for (unsigned I = 1, E = GEP->getNumOperands(); I != E; ++I) {
-    if (isa<SequentialType>(*GTI++)) {
-      if (auto *NewGEP = tryReassociateGEPAtIndex(GEP, I - 1, *GTI)) {
+  for (unsigned I = 1, E = GEP->getNumOperands(); I != E; ++I, ++GTI) {
+    if (GTI.isSequential()) {
+      if (auto *NewGEP = tryReassociateGEPAtIndex(GEP, I - 1,
+                                                  GTI.getIndexedType())) {
         return NewGEP;
       }
     }

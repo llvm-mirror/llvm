@@ -11,6 +11,7 @@ set(GLOBAL_ISEL_FILES
       RegBankSelect.cpp
       RegisterBank.cpp
       RegisterBankInfo.cpp
+      Utils.cpp
       )
 
 # Add GlobalISel files to the dependencies if the user wants to build it.
@@ -21,13 +22,13 @@ else()
   set(LLVM_OPTIONAL_SOURCES LLVMGlobalISel ${GLOBAL_ISEL_FILES})
 endif()
 
-
 # In LLVMBuild.txt files, it is not possible to mark a dependency to a
 # library as optional. So instead, generate an empty library if we did
 # not ask for it. 
 add_llvm_library(LLVMGlobalISel
         ${GLOBAL_ISEL_BUILD_FILES}
         GlobalISel.cpp
+        
+        DEPENDS
+        intrinsics_gen
   )
-
-add_dependencies(LLVMGlobalISel intrinsics_gen)

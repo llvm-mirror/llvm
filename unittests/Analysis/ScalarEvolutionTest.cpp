@@ -465,5 +465,140 @@ TEST_F(ScalarEvolutionsTest, CommutativeExprOperandOrder) {
     });
 }
 
+TEST_F(ScalarEvolutionsTest, CompareSCEVComplexity) {
+  FunctionType *FTy =
+      FunctionType::get(Type::getVoidTy(Context), std::vector<Type *>(), false);
+  Function *F = cast<Function>(M.getOrInsertFunction("f", FTy));
+  BasicBlock *EntryBB = BasicBlock::Create(Context, "entry", F);
+  BasicBlock *LoopBB = BasicBlock::Create(Context, "bb1", F);
+  BranchInst::Create(LoopBB, EntryBB);
+
+  auto *Ty = Type::getInt32Ty(Context);
+  SmallVector<Instruction*, 8> Muls(8), Acc(8), NextAcc(8);
+
+  Acc[0] = PHINode::Create(Ty, 2, "", LoopBB);
+  Acc[1] = PHINode::Create(Ty, 2, "", LoopBB);
+  Acc[2] = PHINode::Create(Ty, 2, "", LoopBB);
+  Acc[3] = PHINode::Create(Ty, 2, "", LoopBB);
+  Acc[4] = PHINode::Create(Ty, 2, "", LoopBB);
+  Acc[5] = PHINode::Create(Ty, 2, "", LoopBB);
+  Acc[6] = PHINode::Create(Ty, 2, "", LoopBB);
+  Acc[7] = PHINode::Create(Ty, 2, "", LoopBB);
+
+  for (int i = 0; i < 20; i++) {
+    Muls[0] = BinaryOperator::CreateMul(Acc[0], Acc[0], "", LoopBB);
+    NextAcc[0] = BinaryOperator::CreateAdd(Muls[0], Acc[4], "", LoopBB);
+    Muls[1] = BinaryOperator::CreateMul(Acc[1], Acc[1], "", LoopBB);
+    NextAcc[1] = BinaryOperator::CreateAdd(Muls[1], Acc[5], "", LoopBB);
+    Muls[2] = BinaryOperator::CreateMul(Acc[2], Acc[2], "", LoopBB);
+    NextAcc[2] = BinaryOperator::CreateAdd(Muls[2], Acc[6], "", LoopBB);
+    Muls[3] = BinaryOperator::CreateMul(Acc[3], Acc[3], "", LoopBB);
+    NextAcc[3] = BinaryOperator::CreateAdd(Muls[3], Acc[7], "", LoopBB);
+
+    Muls[4] = BinaryOperator::CreateMul(Acc[4], Acc[4], "", LoopBB);
+    NextAcc[4] = BinaryOperator::CreateAdd(Muls[4], Acc[0], "", LoopBB);
+    Muls[5] = BinaryOperator::CreateMul(Acc[5], Acc[5], "", LoopBB);
+    NextAcc[5] = BinaryOperator::CreateAdd(Muls[5], Acc[1], "", LoopBB);
+    Muls[6] = BinaryOperator::CreateMul(Acc[6], Acc[6], "", LoopBB);
+    NextAcc[6] = BinaryOperator::CreateAdd(Muls[6], Acc[2], "", LoopBB);
+    Muls[7] = BinaryOperator::CreateMul(Acc[7], Acc[7], "", LoopBB);
+    NextAcc[7] = BinaryOperator::CreateAdd(Muls[7], Acc[3], "", LoopBB);
+    Acc = NextAcc;
+  }
+
+  auto II = LoopBB->begin();
+  for (int i = 0; i < 8; i++) {
+    PHINode *Phi = cast<PHINode>(&*II++);
+    Phi->addIncoming(Acc[i], LoopBB);
+    Phi->addIncoming(UndefValue::get(Ty), EntryBB);
+  }
+
+  BasicBlock *ExitBB = BasicBlock::Create(Context, "bb2", F);
+  BranchInst::Create(LoopBB, ExitBB, UndefValue::get(Type::getInt1Ty(Context)),
+                     LoopBB);
+
+  Acc[0] = BinaryOperator::CreateAdd(Acc[0], Acc[1], "", ExitBB);
+  Acc[1] = BinaryOperator::CreateAdd(Acc[2], Acc[3], "", ExitBB);
+  Acc[2] = BinaryOperator::CreateAdd(Acc[4], Acc[5], "", ExitBB);
+  Acc[3] = BinaryOperator::CreateAdd(Acc[6], Acc[7], "", ExitBB);
+  Acc[0] = BinaryOperator::CreateAdd(Acc[0], Acc[1], "", ExitBB);
+  Acc[1] = BinaryOperator::CreateAdd(Acc[2], Acc[3], "", ExitBB);
+  Acc[0] = BinaryOperator::CreateAdd(Acc[0], Acc[1], "", ExitBB);
+
+  ReturnInst::Create(Context, nullptr, ExitBB);
+
+  ScalarEvolution SE = buildSE(*F);
+
+  EXPECT_NE(nullptr, SE.getSCEV(Acc[0]));
+}
+
+TEST_F(ScalarEvolutionsTest, CompareValueComplexity) {
+  IntegerType *IntPtrTy = M.getDataLayout().getIntPtrType(Context);
+  PointerType *IntPtrPtrTy = IntPtrTy->getPointerTo();
+
+  FunctionType *FTy =
+      FunctionType::get(Type::getVoidTy(Context), {IntPtrTy, IntPtrTy}, false);
+  Function *F = cast<Function>(M.getOrInsertFunction("f", FTy));
+  BasicBlock *EntryBB = BasicBlock::Create(Context, "entry", F);
+
+  Value *X = &*F->arg_begin();
+  Value *Y = &*std::next(F->arg_begin());
+
+  const int ValueDepth = 10;
+  for (int i = 0; i < ValueDepth; i++) {
+    X = new LoadInst(new IntToPtrInst(X, IntPtrPtrTy, "", EntryBB), "",
+                     /*isVolatile*/ false, EntryBB);
+    Y = new LoadInst(new IntToPtrInst(Y, IntPtrPtrTy, "", EntryBB), "",
+                     /*isVolatile*/ false, EntryBB);
+  }
+
+  auto *MulA = BinaryOperator::CreateMul(X, Y, "", EntryBB);
+  auto *MulB = BinaryOperator::CreateMul(Y, X, "", EntryBB);
+  ReturnInst::Create(Context, nullptr, EntryBB);
+
+  // This test isn't checking for correctness.  Today making A and B resolve to
+  // the same SCEV would require deeper searching in CompareValueComplexity,
+  // which will slow down compilation.  However, this test can fail (with LLVM's
+  // behavior still being correct) if we ever have a smarter
+  // CompareValueComplexity that is both fast and more accurate.
+
+  ScalarEvolution SE = buildSE(*F);
+  auto *A = SE.getSCEV(MulA);
+  auto *B = SE.getSCEV(MulB);
+  EXPECT_NE(A, B);
+}
+
+TEST_F(ScalarEvolutionsTest, SCEVAddExpr) {
+  Type *Ty32 = Type::getInt32Ty(Context);
+  Type *ArgTys[] = {Type::getInt64Ty(Context), Ty32};
+
+  FunctionType *FTy =
+      FunctionType::get(Type::getVoidTy(Context), ArgTys, false);
+  Function *F = cast<Function>(M.getOrInsertFunction("f", FTy));
+
+  Argument *A1 = &*F->arg_begin();
+  Argument *A2 = &*(std::next(F->arg_begin()));
+  BasicBlock *EntryBB = BasicBlock::Create(Context, "entry", F);
+
+  Instruction *Trunc = CastInst::CreateTruncOrBitCast(A1, Ty32, "", EntryBB);
+  Instruction *Mul1 = BinaryOperator::CreateMul(Trunc, A2, "", EntryBB);
+  Instruction *Add1 = BinaryOperator::CreateAdd(Mul1, Trunc, "", EntryBB);
+  Mul1 = BinaryOperator::CreateMul(Add1, Trunc, "", EntryBB);
+  Instruction *Add2 = BinaryOperator::CreateAdd(Mul1, Add1, "", EntryBB);
+  // FIXME: The size of this is arbitrary and doesn't seem to change the
+  // result, but SCEV will do quadratic work for these so a large number here
+  // will be extremely slow. We should revisit what and how this is testing
+  // SCEV.
+  for (int i = 0; i < 10; i++) {
+    Mul1 = BinaryOperator::CreateMul(Add2, Add1, "", EntryBB);
+    Add1 = Add2;
+    Add2 = BinaryOperator::CreateAdd(Mul1, Add1, "", EntryBB);
+  }
+
+  ReturnInst::Create(Context, nullptr, EntryBB);
+  ScalarEvolution SE = buildSE(*F);
+  EXPECT_NE(nullptr, SE.getSCEV(Mul1));
+}
+
 }  // end anonymous namespace
 }  // end namespace llvm

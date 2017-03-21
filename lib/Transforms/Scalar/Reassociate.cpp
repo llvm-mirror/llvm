@@ -508,9 +508,10 @@ static bool LinearizeExprTree(BinaryOperator *I,
           continue;
         }
         // No uses outside the expression, try morphing it.
-      } else if (It != Leaves.end()) {
+      } else {
         // Already in the leaf map.
-        assert(Visited.count(Op) && "In leaf map but not visited!");
+        assert(It != Leaves.end() && Visited.count(Op) &&
+               "In leaf map but not visited!");
 
         // Update the number of paths to the leaf.
         IncorporateWeight(It->second, Weight, Opcode);
@@ -1068,8 +1069,7 @@ Value *ReassociatePass::RemoveFactorFromExpression(Value *V, Value *Factor) {
 ///
 /// Ops is the top-level list of add operands we're trying to factor.
 static void FindSingleUseMultiplyFactors(Value *V,
-                                         SmallVectorImpl<Value*> &Factors,
-                                       const SmallVectorImpl<ValueEntry> &Ops) {
+                                         SmallVectorImpl<Value*> &Factors) {
   BinaryOperator *BO = isReassociableOp(V, Instruction::Mul, Instruction::FMul);
   if (!BO) {
     Factors.push_back(V);
@@ -1077,8 +1077,8 @@ static void FindSingleUseMultiplyFactors(Value *V,
   }
 
   // Otherwise, add the LHS and RHS to the list of factors.
-  FindSingleUseMultiplyFactors(BO->getOperand(1), Factors, Ops);
-  FindSingleUseMultiplyFactors(BO->getOperand(0), Factors, Ops);
+  FindSingleUseMultiplyFactors(BO->getOperand(1), Factors);
+  FindSingleUseMultiplyFactors(BO->getOperand(0), Factors);
 }
 
 /// Optimize a series of operands to an 'and', 'or', or 'xor' instruction.
@@ -1498,7 +1498,7 @@ Value *ReassociatePass::OptimizeAdd(Instruction *I,
 
     // Compute all of the factors of this added value.
     SmallVector<Value*, 8> Factors;
-    FindSingleUseMultiplyFactors(BOp, Factors, Ops);
+    FindSingleUseMultiplyFactors(BOp, Factors);
     assert(Factors.size() > 1 && "Bad linearize!");
 
     // Add one to FactorOccurrences for each unique factor in this op.
@@ -1520,8 +1520,8 @@ Value *ReassociatePass::OptimizeAdd(Instruction *I,
       if (ConstantInt *CI = dyn_cast<ConstantInt>(Factor)) {
         if (CI->isNegative() && !CI->isMinValue(true)) {
           Factor = ConstantInt::get(CI->getContext(), -CI->getValue());
-          assert(!Duplicates.count(Factor) &&
-                 "Shouldn't have two constant factors, missed a canonicalize");
+          if (!Duplicates.insert(Factor).second)
+            continue;
           unsigned Occ = ++FactorOccurrences[Factor];
           if (Occ > MaxOcc) {
             MaxOcc = Occ;
@@ -1533,8 +1533,8 @@ Value *ReassociatePass::OptimizeAdd(Instruction *I,
           APFloat F(CF->getValueAPF());
           F.changeSign();
           Factor = ConstantFP::get(CF->getContext(), F);
-          assert(!Duplicates.count(Factor) &&
-                 "Shouldn't have two constant factors, missed a canonicalize");
+          if (!Duplicates.insert(Factor).second)
+            continue;
           unsigned Occ = ++FactorOccurrences[Factor];
           if (Occ > MaxOcc) {
             MaxOcc = Occ;
@@ -1777,6 +1777,12 @@ Value *ReassociatePass::OptimizeMul(BinaryOperator *I,
     return nullptr; // All distinct factors, so nothing left for us to do.
 
   IRBuilder<> Builder(I);
+  // The reassociate transformation for FP operations is performed only
+  // if unsafe algebra is permitted by FastMathFlags. Propagate those flags
+  // to the newly generated operations.
+  if (auto FPI = dyn_cast<FPMathOperator>(I))
+    Builder.setFastMathFlags(FPI->getFastMathFlags());
+
   Value *V = buildMinimalMultiplyDAG(Builder, Factors);
   if (Ops.empty())
     return V;
@@ -2229,8 +2235,8 @@ PreservedAnalyses ReassociatePass::run(Function &F, FunctionAnalysisManager &) {
   ValueRankMap.clear();
 
   if (MadeChange) {
-    // FIXME: This should also 'preserve the CFG'.
-    auto PA = PreservedAnalyses();
+    PreservedAnalyses PA;
+    PA.preserveSet<CFGAnalyses>();
     PA.preserve<GlobalsAA>();
     return PA;
   }

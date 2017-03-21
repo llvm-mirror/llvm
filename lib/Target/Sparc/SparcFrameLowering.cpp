@@ -154,24 +154,23 @@ void SparcFrameLowering::emitPrologue(MachineFunction &MF,
 
   emitSPAdjustment(MF, MBB, MBBI, -NumBytes, SAVErr, SAVEri);
 
-  MachineModuleInfo &MMI = MF.getMMI();
   unsigned regFP = RegInfo.getDwarfRegNum(SP::I6, true);
 
   // Emit ".cfi_def_cfa_register 30".
   unsigned CFIIndex =
-      MMI.addFrameInst(MCCFIInstruction::createDefCfaRegister(nullptr, regFP));
+      MF.addFrameInst(MCCFIInstruction::createDefCfaRegister(nullptr, regFP));
   BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
       .addCFIIndex(CFIIndex);
 
   // Emit ".cfi_window_save".
-  CFIIndex = MMI.addFrameInst(MCCFIInstruction::createWindowSave(nullptr));
+  CFIIndex = MF.addFrameInst(MCCFIInstruction::createWindowSave(nullptr));
   BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
       .addCFIIndex(CFIIndex);
 
   unsigned regInRA = RegInfo.getDwarfRegNum(SP::I7, true);
   unsigned regOutRA = RegInfo.getDwarfRegNum(SP::O7, true);
   // Emit ".cfi_register 15, 31".
-  CFIIndex = MMI.addFrameInst(
+  CFIIndex = MF.addFrameInst(
       MCCFIInstruction::createRegister(nullptr, regOutRA, regInRA));
   BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
       .addCFIIndex(CFIIndex);
@@ -289,11 +288,11 @@ static bool LLVM_ATTRIBUTE_UNUSED verifyLeafProcRegUse(MachineRegisterInfo *MRI)
 {
 
   for (unsigned reg = SP::I0; reg <= SP::I7; ++reg)
-    if (!MRI->reg_nodbg_empty(reg))
+    if (MRI->isPhysRegUsed(reg))
       return false;
 
   for (unsigned reg = SP::L0; reg <= SP::L7; ++reg)
-    if (!MRI->reg_nodbg_empty(reg))
+    if (MRI->isPhysRegUsed(reg))
       return false;
 
   return true;
@@ -306,8 +305,8 @@ bool SparcFrameLowering::isLeafProc(MachineFunction &MF) const
   MachineFrameInfo    &MFI = MF.getFrameInfo();
 
   return !(MFI.hasCalls()                  // has calls
-           || !MRI.reg_nodbg_empty(SP::L0) // Too many registers needed
-           || !MRI.reg_nodbg_empty(SP::O6) // %SP is used
+           || MRI.isPhysRegUsed(SP::L0)    // Too many registers needed
+           || MRI.isPhysRegUsed(SP::O6)    // %SP is used
            || hasFP(MF));                  // need %FP
 }
 
@@ -315,11 +314,10 @@ void SparcFrameLowering::remapRegsForLeafProc(MachineFunction &MF) const {
   MachineRegisterInfo &MRI = MF.getRegInfo();
   // Remap %i[0-7] to %o[0-7].
   for (unsigned reg = SP::I0; reg <= SP::I7; ++reg) {
-    if (MRI.reg_nodbg_empty(reg))
+    if (!MRI.isPhysRegUsed(reg))
       continue;
 
     unsigned mapped_reg = reg - SP::I0 + SP::O0;
-    assert(MRI.reg_nodbg_empty(mapped_reg));
 
     // Replace I register with O register.
     MRI.replaceRegWith(reg, mapped_reg);

@@ -365,6 +365,11 @@ findBaseDefiningValueOfVector(Value *I) {
     // for particular sufflevector patterns.
     return BaseDefiningValueResult(I, false);
 
+  // The behavior of getelementptr instructions is the same for vector and
+  // non-vector data types.
+  if (auto *GEP = dyn_cast<GetElementPtrInst>(I))
+    return findBaseDefiningValue(GEP->getPointerOperand());
+
   // A PHI or Select is a base defining value.  The outer findBasePointer
   // algorithm is responsible for constructing a base value for this BDV.
   assert((isa<SelectInst>(I) || isa<PHINode>(I)) &&
@@ -634,7 +639,7 @@ static BDVState meetBDVStateImpl(const BDVState &LHS, const BDVState &RHS) {
 
 // Values of type BDVState form a lattice, and this function implements the meet
 // operation.
-static BDVState meetBDVState(BDVState LHS, BDVState RHS) {
+static BDVState meetBDVState(const BDVState &LHS, const BDVState &RHS) {
   BDVState Result = meetBDVStateImpl(LHS, RHS);
   assert(Result == meetBDVStateImpl(RHS, LHS) &&
          "Math is wrong: meet does not commute!");
@@ -1395,7 +1400,7 @@ makeStatepointExplicitImpl(const CallSite CS, /* to replace */
         StatepointID, NumPatchBytes, CallTarget, Flags, CallArgs,
         TransitionArgs, DeoptArgs, GCArgs, "safepoint_token");
 
-    Call->setTailCall(ToReplace->isTailCall());
+    Call->setTailCallKind(ToReplace->getTailCallKind());
     Call->setCallingConv(ToReplace->getCallingConv());
 
     // Currently we will fail on parameter attributes and on certain

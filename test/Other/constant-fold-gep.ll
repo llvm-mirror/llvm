@@ -8,7 +8,7 @@
 
 ; "TO" - Optimizations and targetdata. This tests target-dependent
 ; folding in the optimizers.
-; RUN: opt -S -o - -instcombine -globalopt -default-data-layout="e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64" < %s | FileCheck --check-prefix=TO %s
+; RUN: opt -S -o - -instcombine -globalopt -data-layout="e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64" < %s | FileCheck --check-prefix=TO %s
 
 ; "SCEV" - ScalarEvolution with default target layout
 ; RUN: opt -analyze -scalar-evolution < %s | FileCheck --check-prefix=SCEV %s
@@ -106,9 +106,9 @@
 
 ; PLAIN: @Y = global [3 x { i32, i32 }]* getelementptr inbounds ([3 x { i32, i32 }], [3 x { i32, i32 }]* @ext, i64 2)
 ; PLAIN: @Z = global i32* getelementptr inbounds (i32, i32* getelementptr inbounds ([3 x { i32, i32 }], [3 x { i32, i32 }]* @ext, i64 0, i64 1, i32 0), i64 1)
-; OPT: @Y = local_unnamed_addr global [3 x { i32, i32 }]* getelementptr ([3 x { i32, i32 }], [3 x { i32, i32 }]* @ext, i64 2)
+; OPT: @Y = local_unnamed_addr global [3 x { i32, i32 }]* getelementptr inbounds ([3 x { i32, i32 }], [3 x { i32, i32 }]* @ext, i64 2)
 ; OPT: @Z = local_unnamed_addr global i32* getelementptr inbounds ([3 x { i32, i32 }], [3 x { i32, i32 }]* @ext, i64 0, i64 1, i32 1)
-; TO: @Y = local_unnamed_addr global [3 x { i32, i32 }]* getelementptr ([3 x { i32, i32 }], [3 x { i32, i32 }]* @ext, i64 2)
+; TO: @Y = local_unnamed_addr global [3 x { i32, i32 }]* getelementptr inbounds ([3 x { i32, i32 }], [3 x { i32, i32 }]* @ext, i64 2)
 ; TO: @Z = local_unnamed_addr global i32* getelementptr inbounds ([3 x { i32, i32 }], [3 x { i32, i32 }]* @ext, i64 0, i64 1, i32 1)
 
 @ext = external global [3 x { i32, i32 }]

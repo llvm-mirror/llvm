@@ -136,6 +136,8 @@ a:
         neg       $2, $3         # CHECK: neg  $2, $3            # encoding: [0x00,0x03,0x10,0x22]
         negu      $2             # CHECK: negu $2, $2            # encoding: [0x00,0x02,0x10,0x23]
         negu      $2,$3          # CHECK: negu $2, $3            # encoding: [0x00,0x03,0x10,0x23]
+        not       $3, $4         # CHECK: not $3, $4             # encoding: [0x00,0x80,0x18,0x27]
+        not       $3             # CHECK: not $3, $3             # encoding: [0x00,0x60,0x18,0x27]
         pref    1, 8($5)         # CHECK: pref 1, 8($5)          # encoding: [0x7c,0xa1,0x04,0x35]
         # FIXME: Use the code generator in order to print the .set directives
         #        instead of the instruction printer.
@@ -193,6 +195,10 @@ a:
         clz     $sp,$gp          # CHECK: clz $sp, $gp           # encoding: [0x03,0x80,0xe8,0x50]
         rsqrt.s $f0,$f4          # CHECK: rsqrt.s $f0, $f4       # encoding: [0x46,0x00,0x20,0x16]
         rsqrt.d $f2,$f6          # CHECK: rsqrt.d $f2, $f6       # encoding: [0x46,0x20,0x30,0x96]
+        seb       $25, $15       # CHECK: seb $25, $15           # encoding: [0x7c,0x0f,0xcc,0x20]
+        seb       $25            # CHECK: seb $25, $25           # encoding: [0x7c,0x19,0xcc,0x20]
+        seh       $3, $12        # CHECK: seh $3, $12            # encoding: [0x7c,0x0c,0x1e,0x20]
+        seh       $3             # CHECK: seh $3, $3             # encoding: [0x7c,0x03,0x1e,0x20]
         sgt     $4, $5           # CHECK: slt $4, $5, $4         # encoding: [0x00,0xa4,0x20,0x2a]
         sgt     $4, $5, $6       # CHECK: slt $4, $6, $5         # encoding: [0x00,0xc5,0x20,0x2a]
         sgtu    $4, $5           # CHECK: sltu $4, $5, $4        # encoding: [0x00,0xa4,0x20,0x2b]

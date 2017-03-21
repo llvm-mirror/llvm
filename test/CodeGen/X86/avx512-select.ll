@@ -149,10 +149,7 @@ define i8 @select07(i8 %a.0, i8 %b.0, i8 %m) {
 define i64 @pr30249() {
 ; CHECK-LABEL: pr30249:
 ; CHECK:       ## BB#0:
-; CHECK-NEXT:    xorl %ecx, %ecx
-; CHECK-NEXT:    cmpb $1, %cl
-; CHECK-NEXT:    movl $1, %eax
-; CHECK-NEXT:    adcxq %rcx, %rax
+; CHECK-NEXT:    movl $2, %eax
 ; CHECK-NEXT:    retq
   %v = select i1 undef , i64 1, i64 2
   ret i64 %v
@@ -179,3 +176,22 @@ define float @pr30561_f32(float %b, float %a, i1 %c) {
   %cond = select i1 %c, float %a, float %b
   ret float %cond
 }
+
+define <16 x i16> @pr31515(<16 x i1> %a, <16 x i1> %b, <16 x i16> %c) nounwind {
+; CHECK-LABEL: pr31515:
+; CHECK:       ## BB#0:
+; CHECK-NEXT:    vpmovsxbd %xmm1, %zmm1
+; CHECK-NEXT:    vpslld $31, %zmm1, %zmm1
+; CHECK-NEXT:    vpmovsxbd %xmm0, %zmm0
+; CHECK-NEXT:    vpslld $31, %zmm0, %zmm0
+; CHECK-NEXT:    vptestmd %zmm0, %zmm0, %k1
+; CHECK-NEXT:    vptestmd %zmm1, %zmm1, %k1 {%k1}
+; CHECK-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k1} {z}
+; CHECK-NEXT:    vpmovdw %zmm0, %ymm0
+; CHECK-NEXT:    vpandn %ymm2, %ymm0, %ymm0
+; CHECK-NEXT:    retq
+  %mask = and <16 x i1> %a, %b
+  %res = select <16 x i1> %mask, <16 x i16> zeroinitializer, <16 x i16> %c
+  ret <16 x i16> %res
+}
+

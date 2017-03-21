@@ -11,27 +11,40 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ADT/APInt.h"
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SetOperations.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/Analysis/EHPersonalities.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/CFG.h"
+#include "llvm/IR/Constant.h"
 #include "llvm/IR/ConstantRange.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/InstrTypes.h"
+#include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Metadata.h"
@@ -40,15 +53,29 @@
 #include "llvm/IR/Operator.h"
 #include "llvm/IR/PatternMatch.h"
 #include "llvm/IR/Type.h"
+#include "llvm/IR/User.h"
+#include "llvm/IR/Value.h"
+#include "llvm/IR/DebugInfo.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
 #include <algorithm>
+#include <cassert>
+#include <climits>
+#include <cstddef>
+#include <cstdint>
+#include <iterator>
 #include <map>
 #include <set>
+#include <utility>
+#include <vector>
+
 using namespace llvm;
 using namespace PatternMatch;
 
@@ -110,6 +137,7 @@ STATISTIC(NumSinkCommons,
 STATISTIC(NumSpeculations, "Number of speculative executed instructions");
 
 namespace {
+
 // The first field contains the value that the switch produces when a certain
 // case group is selected, and the second field is a vector containing the
 // cases composing the case group.
@@ -168,9 +196,11 @@ public:
                  SmallPtrSetImpl<BasicBlock *> *LoopHeaders)
       : TTI(TTI), DL(DL), BonusInstThreshold(BonusInstThreshold), AC(AC),
         LoopHeaders(LoopHeaders) {}
+
   bool run(BasicBlock *BB);
 };
-}
+
+} // end anonymous namespace
 
 /// Return true if it is safe to merge these two
 /// terminator instructions together.
@@ -627,7 +657,8 @@ private:
     }
   }
 };
-}
+
+} // end anonymous namespace
 
 static void EraseTerminatorInstAndDCECond(TerminatorInst *TI) {
   Instruction *Cond = nullptr;
@@ -712,7 +743,7 @@ static bool ValuesOverlap(std::vector<ValueEqualityComparisonCase> &C1,
   if (V1->size() > V2->size())
     std::swap(V1, V2);
 
-  if (V1->size() == 0)
+  if (V1->empty())
     return false;
   if (V1->size() == 1) {
     // Just scan V2.
@@ -880,6 +911,7 @@ bool SimplifyCFGOpt::SimplifyEqualityComparisonWithOnlyPredecessor(
 }
 
 namespace {
+
 /// This class implements a stable ordering of constant
 /// integers that does not depend on their address.  This is important for
 /// applications that sort ConstantInt's to ensure uniqueness.
@@ -888,7 +920,8 @@ struct ConstantIntOrdering {
     return LHS->getValue().ult(RHS->getValue());
   }
 };
-}
+
+} // end anonymous namespace
 
 static int ConstantIntSortPredicate(ConstantInt *const *P1,
                                     ConstantInt *const *P2) {
@@ -1243,13 +1276,12 @@ static bool HoistThenElseCodeToIf(BranchInst *BI,
                            LLVMContext::MD_mem_parallel_loop_access};
     combineMetadata(I1, I2, KnownIDs);
 
-    // If the debug loc for I1 and I2 are different, as we are combining them
-    // into one instruction, we do not want to select debug loc randomly from 
-    // I1 or I2. Instead, we set the 0-line DebugLoc to note that we do not
-    // know the debug loc of the hoisted instruction.
-    if (!isa<CallInst>(I1) &&  I1->getDebugLoc() != I2->getDebugLoc())
-      I1->setDebugLoc(DebugLoc());
- 
+    // I1 and I2 are being combined into a single instruction.  Its debug
+    // location is the merged locations of the original instructions.
+    if (!isa<CallInst>(I1))
+      I1->setDebugLoc(
+          DILocation::getMergedLocation(I1->getDebugLoc(), I2->getDebugLoc()));
+
     I2->eraseFromParent();
     Changed = true;
 
@@ -1385,7 +1417,7 @@ static bool canReplaceOperandWithVariable(const Instruction *I,
     if (OpIdx == 0)
       return true;
     gep_type_iterator It = std::next(gep_type_begin(I), OpIdx - 1);
-    return !It->isStructTy();
+    return It.isSequential();
   }
 }
 
@@ -1405,6 +1437,14 @@ static bool canSinkInstructions(
     if (isa<PHINode>(I) || I->isEHPad() || isa<AllocaInst>(I) ||
         I->getType()->isTokenTy())
       return false;
+
+    // Conservatively return false if I is an inline-asm instruction. Sinking
+    // and merging inline-asm instructions can potentially create arguments
+    // that cannot satisfy the inline-asm constraints.
+    if (const auto *C = dyn_cast<CallInst>(I))
+      if (C->isInlineAsm())
+        return false;
+
     // Everything must have only one use too, apart from stores which
     // have no uses.
     if (!isa<StoreInst>(I) && !I->hasOneUse())
@@ -1433,27 +1473,26 @@ static bool canSinkInstructions(
       return false;
   }
 
+  // Because SROA can't handle speculating stores of selects, try not
+  // to sink loads or stores of allocas when we'd have to create a PHI for
+  // the address operand. Also, because it is likely that loads or stores
+  // of allocas will disappear when Mem2Reg/SROA is run, don't sink them.
+  // This can cause code churn which can have unintended consequences down
+  // the line - see https://llvm.org/bugs/show_bug.cgi?id=30244.
+  // FIXME: This is a workaround for a deficiency in SROA - see
+  // https://llvm.org/bugs/show_bug.cgi?id=30188
+  if (isa<StoreInst>(I0) && any_of(Insts, [](const Instruction *I) {
+        return isa<AllocaInst>(I->getOperand(1));
+      }))
+    return false;
+  if (isa<LoadInst>(I0) && any_of(Insts, [](const Instruction *I) {
+        return isa<AllocaInst>(I->getOperand(0));
+      }))
+    return false;
+
   for (unsigned OI = 0, OE = I0->getNumOperands(); OI != OE; ++OI) {
     if (I0->getOperand(OI)->getType()->isTokenTy())
       // Don't touch any operand of token type.
-      return false;
-
-    // Because SROA can't handle speculating stores of selects, try not
-    // to sink loads or stores of allocas when we'd have to create a PHI for
-    // the address operand. Also, because it is likely that loads or stores
-    // of allocas will disappear when Mem2Reg/SROA is run, don't sink them.
-    // This can cause code churn which can have unintended consequences down
-    // the line - see https://llvm.org/bugs/show_bug.cgi?id=30244.
-    // FIXME: This is a workaround for a deficiency in SROA - see
-    // https://llvm.org/bugs/show_bug.cgi?id=30188
-    if (OI == 1 && isa<StoreInst>(I0) &&
-        any_of(Insts, [](const Instruction *I) {
-          return isa<AllocaInst>(I->getOperand(1));
-        }))
-      return false;
-    if (OI == 0 && isa<LoadInst>(I0) && any_of(Insts, [](const Instruction *I) {
-          return isa<AllocaInst>(I->getOperand(0));
-        }))
       return false;
 
     auto SameAsI0 = [&I0, OI](const Instruction *I) {
@@ -1507,7 +1546,7 @@ static bool sinkLastInstruction(ArrayRef<BasicBlock*> Blocks) {
         }))
       return false;
   }
-  
+
   // We don't need to do any more checking here; canSinkLastInstruction should
   // have done it all for us.
   SmallVector<Value*, 4> NewOperands;
@@ -1542,12 +1581,20 @@ static bool sinkLastInstruction(ArrayRef<BasicBlock*> Blocks) {
     I0->getOperandUse(O).set(NewOperands[O]);
   I0->moveBefore(&*BBEnd->getFirstInsertionPt());
 
-  // Update metadata and IR flags.
+  // The debug location for the "common" instruction is the merged locations of
+  // all the commoned instructions.  We start with the original location of the
+  // "common" instruction and iteratively merge each location in the loop below.
+  const DILocation *Loc = I0->getDebugLoc();
+
+  // Update metadata and IR flags, and merge debug locations.
   for (auto *I : Insts)
     if (I != I0) {
+      Loc = DILocation::getMergedLocation(Loc, I->getDebugLoc());
       combineMetadataForCSE(I0, I);
       I0->andIRFlags(I);
     }
+  if (!isa<CallInst>(I0))
+    I0->setDebugLoc(Loc);
 
   if (!isa<StoreInst>(I0)) {
     // canSinkLastInstruction checked that all instructions were used by
@@ -1568,6 +1615,7 @@ static bool sinkLastInstruction(ArrayRef<BasicBlock*> Blocks) {
 }
 
 namespace {
+
   // LockstepReverseIterator - Iterates through instructions
   // in a set of blocks in reverse order from the first non-terminator.
   // For example (assume all blocks have size n):
@@ -1605,7 +1653,7 @@ namespace {
     bool isValid() const {
       return !Fail;
     }
-    
+
     void operator -- () {
       if (Fail)
         return;
@@ -1624,7 +1672,8 @@ namespace {
       return Insts;
     }
   };
-}
+
+} // end anonymous namespace
 
 /// Given an unconditional branch that goes to BBEnd,
 /// check whether BBEnd has only two predecessors and the other predecessor
@@ -1650,7 +1699,7 @@ static bool SinkThenElseCodeToEnd(BranchInst *BI1) {
   //      /    \
   //    [f(1)] [if]
   //      |     | \
-  //      |     |  \
+  //      |     |  |
   //      |  [f(2)]|
   //       \    | /
   //        [ end ]
@@ -1688,7 +1737,7 @@ static bool SinkThenElseCodeToEnd(BranchInst *BI1) {
   }
   if (UnconditionalPreds.size() < 2)
     return false;
-  
+
   bool Changed = false;
   // We take a two-step approach to tail sinking. First we scan from the end of
   // each block upwards in lockstep. If the n'th instruction from the end of each
@@ -1718,7 +1767,7 @@ static bool SinkThenElseCodeToEnd(BranchInst *BI1) {
     unsigned NumPHIInsts = NumPHIdValues / UnconditionalPreds.size();
     if ((NumPHIdValues % UnconditionalPreds.size()) != 0)
         NumPHIInsts++;
-    
+
     return NumPHIInsts <= 1;
   };
 
@@ -1741,7 +1790,7 @@ static bool SinkThenElseCodeToEnd(BranchInst *BI1) {
     }
     if (!Profitable)
       return false;
-    
+
     DEBUG(dbgs() << "SINK: Splitting edge\n");
     // We have a conditional edge and we're going to sink some instructions.
     // Insert a new block postdominating all blocks we're going to sink from.
@@ -1751,7 +1800,7 @@ static bool SinkThenElseCodeToEnd(BranchInst *BI1) {
       return false;
     Changed = true;
   }
-  
+
   // Now that we've analyzed all potential sinking candidates, perform the
   // actual sink. We iteratively sink the last non-terminator of the source
   // blocks into their common successor unless doing so would require too
@@ -1777,7 +1826,7 @@ static bool SinkThenElseCodeToEnd(BranchInst *BI1) {
       DEBUG(dbgs() << "SINK: stopping here, too many PHIs would be created!\n");
       break;
     }
-    
+
     if (!sinkLastInstruction(UnconditionalPreds))
       return Changed;
     NumSinkCommons++;
@@ -2029,6 +2078,9 @@ static bool SpeculativelyExecuteBB(BranchInst *BI, BasicBlock *ThenBB,
     Value *S = Builder.CreateSelect(
         BrCond, TrueV, FalseV, TrueV->getName() + "." + FalseV->getName(), BI);
     SpeculatedStore->setOperand(0, S);
+    SpeculatedStore->setDebugLoc(
+        DILocation::getMergedLocation(
+          BI->getDebugLoc(), SpeculatedStore->getDebugLoc()));
   }
 
   // Metadata can be dependent on the condition we are hoisting above.
@@ -2098,7 +2150,8 @@ static bool BlockIsSimpleEnoughToThreadThrough(BasicBlock *BB) {
 /// If we have a conditional branch on a PHI node value that is defined in the
 /// same block as the branch and if any PHI entries are constants, thread edges
 /// corresponding to that entry to be branches to their ultimate destination.
-static bool FoldCondBranchOnPHI(BranchInst *BI, const DataLayout &DL) {
+static bool FoldCondBranchOnPHI(BranchInst *BI, const DataLayout &DL,
+                                AssumptionCache *AC) {
   BasicBlock *BB = BI->getParent();
   PHINode *PN = dyn_cast<PHINode>(BI->getCondition());
   // NOTE: we currently cannot transform this case if the PHI node is used
@@ -2190,6 +2243,11 @@ static bool FoldCondBranchOnPHI(BranchInst *BI, const DataLayout &DL) {
       // Insert the new instruction into its new home.
       if (N)
         EdgeBB->getInstList().insert(InsertPt, N);
+
+      // Register the new instruction with the assumption cache if necessary.
+      if (auto *II = dyn_cast_or_null<IntrinsicInst>(N))
+        if (II->getIntrinsicID() == Intrinsic::assume)
+          AC->registerAssumption(II);
     }
 
     // Loop over all of the edges from PredBB to BB, changing them to branch
@@ -2202,7 +2260,7 @@ static bool FoldCondBranchOnPHI(BranchInst *BI, const DataLayout &DL) {
       }
 
     // Recurse, simplifying any other constants.
-    return FoldCondBranchOnPHI(BI, DL) | true;
+    return FoldCondBranchOnPHI(BI, DL, AC) | true;
   }
 
   return false;
@@ -2758,6 +2816,11 @@ bool llvm::FoldBranchToCommonDest(BranchInst *BI, unsigned BonusInstThreshold) {
       EraseTerminatorInstAndDCECond(PBI);
       PBI = New_PBI;
     }
+
+    // If BI was a loop latch, it may have had associated loop metadata.
+    // We need to copy it to the new latch, that is, PBI.
+    if (MDNode *LoopMD = BI->getMetadata(LLVMContext::MD_loop))
+      PBI->setMetadata(LLVMContext::MD_loop, LoopMD);
 
     // TODO: If BB is reachable from all paths through PredBlock, then we
     // could replace PBI's branch probabilities with BI's.
@@ -4321,7 +4384,7 @@ static bool EliminateDeadSwitchCases(SwitchInst *SI, AssumptionCache *AC,
   bool HasDefault =
       !isa<UnreachableInst>(SI->getDefaultDest()->getFirstNonPHIOrDbg());
   const unsigned NumUnknownBits =
-      Bits - (KnownZero.Or(KnownOne)).countPopulation();
+      Bits - (KnownZero | KnownOne).countPopulation();
   assert(NumUnknownBits <= Bits);
   if (HasDefault && DeadCases.empty() &&
       NumUnknownBits < 64 /* avoid overflow */ &&
@@ -4520,7 +4583,7 @@ ConstantFold(Instruction *I, const DataLayout &DL,
 static bool
 GetCaseResults(SwitchInst *SI, ConstantInt *CaseVal, BasicBlock *CaseDest,
                BasicBlock **CommonDest,
-               SmallVectorImpl<std::pair<PHINode *, Constant *> > &Res,
+               SmallVectorImpl<std::pair<PHINode *, Constant *>> &Res,
                const DataLayout &DL, const TargetTransformInfo &TTI) {
   // The block from which we enter the common destination.
   BasicBlock *Pred = SI->getParent();
@@ -4748,6 +4811,7 @@ static bool SwitchToSelect(SwitchInst *SI, IRBuilder<> &Builder,
 }
 
 namespace {
+
 /// This class represents a lookup table that can be used to replace a switch.
 class SwitchLookupTable {
 public:
@@ -4804,7 +4868,8 @@ private:
   // For ArrayKind, this is the array.
   GlobalVariable *Array;
 };
-}
+
+} // end anonymous namespace
 
 SwitchLookupTable::SwitchLookupTable(
     Module &M, uint64_t TableSize, ConstantInt *Offset,
@@ -5406,7 +5471,7 @@ static bool ReduceSwitchRange(SwitchInst *SI, IRBuilder<> &Builder,
   // is bitwise only, we switch now to an unsigned representation.
   uint64_t GCD = 0;
   for (auto &V : Values)
-    GCD = llvm::GreatestCommonDivisor64(GCD, (uint64_t)V);
+    GCD = GreatestCommonDivisor64(GCD, (uint64_t)V);
 
   // This transform can be done speculatively because it is so cheap - it results
   // in a single rotate operation being inserted. This can only happen if the
@@ -5416,11 +5481,11 @@ static bool ReduceSwitchRange(SwitchInst *SI, IRBuilder<> &Builder,
   // FIXME: It's possible that optimizing a switch on powers of two might also
   // be beneficial - flag values are often powers of two and we could use a CLZ
   // as the key function.
-  if (GCD <= 1 || !llvm::isPowerOf2_64(GCD))
+  if (GCD <= 1 || !isPowerOf2_64(GCD))
     // No common divisor found or too expensive to compute key function.
     return false;
 
-  unsigned Shift = llvm::Log2_64(GCD);
+  unsigned Shift = Log2_64(GCD);
   for (auto &V : Values)
     V = (int64_t)((uint64_t)V >> Shift);
 
@@ -5777,7 +5842,7 @@ bool SimplifyCFGOpt::SimplifyCondBranch(BranchInst *BI, IRBuilder<> &Builder) {
   // through this block if any PHI node entries are constants.
   if (PHINode *PN = dyn_cast<PHINode>(BI->getCondition()))
     if (PN->getParent() == BI->getParent())
-      if (FoldCondBranchOnPHI(BI, DL))
+      if (FoldCondBranchOnPHI(BI, DL, AC))
         return SimplifyCFG(BB, TTI, BonusInstThreshold, AC) | true;
 
   // Scan predecessor blocks for conditional branches.

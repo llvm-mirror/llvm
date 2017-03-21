@@ -378,6 +378,10 @@ public:
 
   bool expandPostRAPseudo(MachineInstr &MI) const override;
 
+  /// Check whether the target can fold a load that feeds a subreg operand
+  /// (or a subreg operand that feeds a store).
+  bool isSubregFoldable() const override { return true; }
+
   /// foldMemoryOperand - If this target supports it, fold a load or store of
   /// the specified stack slot into the specified machine instruction for the
   /// specified operand(s).  If this is possible, the target should perform the
@@ -438,9 +442,6 @@ public:
   bool shouldScheduleLoadsNear(SDNode *Load1, SDNode *Load2,
                                int64_t Offset1, int64_t Offset2,
                                unsigned NumLoads) const override;
-
-  bool shouldScheduleAdjacent(MachineInstr &First,
-                              MachineInstr &Second) const override;
 
   void getNoopForMachoTarget(MCInst &NopInst) const override;
 
@@ -542,8 +543,28 @@ public:
   ArrayRef<std::pair<unsigned, const char *>>
   getSerializableDirectMachineOperandTargetFlags() const override;
 
-  bool isTailCall(const MachineInstr &Inst) const override;
+  unsigned getOutliningBenefit(size_t SequenceSize,
+                               size_t Occurrences,
+                               bool CanBeTailCall) const override;
 
+  bool isFunctionSafeToOutlineFrom(MachineFunction &MF) const override;
+
+  llvm::X86GenInstrInfo::MachineOutlinerInstrType
+  getOutliningType(MachineInstr &MI) const override;
+
+  void insertOutlinerEpilogue(MachineBasicBlock &MBB,
+                              MachineFunction &MF,
+                              bool IsTailCall) const override;
+
+  void insertOutlinerPrologue(MachineBasicBlock &MBB,
+                              MachineFunction &MF,
+                              bool isTailCall) const override;
+
+  MachineBasicBlock::iterator
+  insertOutlinedCall(Module &M, MachineBasicBlock &MBB,
+                     MachineBasicBlock::iterator &It,
+                     MachineFunction &MF,
+                     bool IsTailCall) const override;
 protected:
   /// Commutes the operands in the given instruction by changing the operands
   /// order and/or changing the instruction's opcode and/or the immediate value

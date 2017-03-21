@@ -26,8 +26,12 @@ def HasCrypto        : Predicate<"Subtarget->hasCrypto()">,
                                  AssemblerPredicate<"FeatureCrypto", "crypto">;
 def HasCRC           : Predicate<"Subtarget->hasCRC()">,
                                  AssemblerPredicate<"FeatureCRC", "crc">;
+def HasLSE           : Predicate<"Subtarget->hasLSE()">,
+                                 AssemblerPredicate<"FeatureLSE", "lse">;
 def HasRAS           : Predicate<"Subtarget->hasRAS()">,
                                  AssemblerPredicate<"FeatureRAS", "ras">;
+def HasRDM           : Predicate<"Subtarget->hasRDM()">,
+                                 AssemblerPredicate<"FeatureRDM", "rdm">;
 def HasPerfMon       : Predicate<"Subtarget->hasPerfMon()">;
 def HasFullFP16      : Predicate<"Subtarget->hasFullFP16()">,
                                  AssemblerPredicate<"FeatureFullFP16", "fullfp16">;
@@ -287,7 +291,9 @@ def AArch64smull    : SDNode<"AArch64ISD::SMULL", SDT_AArch64mull>;
 def AArch64umull    : SDNode<"AArch64ISD::UMULL", SDT_AArch64mull>;
 
 def AArch64frecpe   : SDNode<"AArch64ISD::FRECPE", SDTFPUnaryOp>;
+def AArch64frecps   : SDNode<"AArch64ISD::FRECPS", SDTFPBinOp>;
 def AArch64frsqrte  : SDNode<"AArch64ISD::FRSQRTE", SDTFPUnaryOp>;
+def AArch64frsqrts  : SDNode<"AArch64ISD::FRSQRTS", SDTFPBinOp>;
 
 def AArch64saddv    : SDNode<"AArch64ISD::SADDV", SDT_AArch64UnaryVec>;
 def AArch64uaddv    : SDNode<"AArch64ISD::UADDV", SDT_AArch64UnaryVec>;
@@ -570,31 +576,31 @@ def : Pat<(f64 fpimm:$in),
 // sequences.
 def : Pat<(AArch64WrapperLarge tglobaladdr:$g3, tglobaladdr:$g2,
                              tglobaladdr:$g1, tglobaladdr:$g0),
-          (MOVKXi (MOVKXi (MOVKXi (MOVZXi tglobaladdr:$g3, 48),
-                                  tglobaladdr:$g2, 32),
-                          tglobaladdr:$g1, 16),
-                  tglobaladdr:$g0, 0)>;
+          (MOVKXi (MOVKXi (MOVKXi (MOVZXi tglobaladdr:$g0, 0),
+                                  tglobaladdr:$g1, 16),
+                          tglobaladdr:$g2, 32),
+                  tglobaladdr:$g3, 48)>;
 
 def : Pat<(AArch64WrapperLarge tblockaddress:$g3, tblockaddress:$g2,
                              tblockaddress:$g1, tblockaddress:$g0),
-          (MOVKXi (MOVKXi (MOVKXi (MOVZXi tblockaddress:$g3, 48),
-                                  tblockaddress:$g2, 32),
-                          tblockaddress:$g1, 16),
-                  tblockaddress:$g0, 0)>;
+          (MOVKXi (MOVKXi (MOVKXi (MOVZXi tblockaddress:$g0, 0),
+                                  tblockaddress:$g1, 16),
+                          tblockaddress:$g2, 32),
+                  tblockaddress:$g3, 48)>;
 
 def : Pat<(AArch64WrapperLarge tconstpool:$g3, tconstpool:$g2,
                              tconstpool:$g1, tconstpool:$g0),
-          (MOVKXi (MOVKXi (MOVKXi (MOVZXi tconstpool:$g3, 48),
-                                  tconstpool:$g2, 32),
-                          tconstpool:$g1, 16),
-                  tconstpool:$g0, 0)>;
+          (MOVKXi (MOVKXi (MOVKXi (MOVZXi tconstpool:$g0, 0),
+                                  tconstpool:$g1, 16),
+                          tconstpool:$g2, 32),
+                  tconstpool:$g3, 48)>;
 
 def : Pat<(AArch64WrapperLarge tjumptable:$g3, tjumptable:$g2,
                              tjumptable:$g1, tjumptable:$g0),
-          (MOVKXi (MOVKXi (MOVKXi (MOVZXi tjumptable:$g3, 48),
-                                  tjumptable:$g2, 32),
-                          tjumptable:$g1, 16),
-                  tjumptable:$g0, 0)>;
+          (MOVKXi (MOVKXi (MOVKXi (MOVZXi tjumptable:$g0, 0),
+                                  tjumptable:$g1, 16),
+                          tjumptable:$g2, 32),
+                  tjumptable:$g3, 48)>;
 
 
 //===----------------------------------------------------------------------===//
@@ -947,10 +953,7 @@ def : Pat<(not GPR64:$Xm), (ORNXrr XZR, GPR64:$Xm)>;
 
 defm CLS    : OneOperandData<0b101, "cls">;
 defm CLZ    : OneOperandData<0b100, "clz", ctlz>;
-defm RBIT   : OneOperandData<0b000, "rbit">;
-
-def : Pat<(int_aarch64_rbit GPR32:$Rn), (RBITWr $Rn)>;
-def : Pat<(int_aarch64_rbit GPR64:$Rn), (RBITXr $Rn)>;
+defm RBIT   : OneOperandData<0b000, "rbit", bitreverse>;
 
 def  REV16Wr : OneWRegData<0b001, "rev16",
                                   UnOpFrag<(rotr (bswap node:$LHS), (i64 16))>>;
@@ -3283,7 +3286,7 @@ defm UQSHL    : SIMDThreeScalarBHSD<1, 0b01001, "uqshl", int_aarch64_neon_uqshl>
 defm UQSUB    : SIMDThreeScalarBHSD<1, 0b00101, "uqsub", int_aarch64_neon_uqsub>;
 defm URSHL    : SIMDThreeScalarD<   1, 0b01010, "urshl", int_aarch64_neon_urshl>;
 defm USHL     : SIMDThreeScalarD<   1, 0b01000, "ushl", int_aarch64_neon_ushl>;
-let Predicates = [HasV8_1a] in {
+let Predicates = [HasRDM] in {
   defm SQRDMLAH : SIMDThreeScalarHSTied<1, 0, 0b10000, "sqrdmlah">;
   defm SQRDMLSH : SIMDThreeScalarHSTied<1, 0, 0b10001, "sqrdmlsh">;
   def : Pat<(i32 (int_aarch64_neon_sqadd
@@ -3422,6 +3425,17 @@ def : Pat<(v1f64 (AArch64frecpe (v1f64 FPR64:$Rn))),
 def : Pat<(v2f64 (AArch64frecpe (v2f64 FPR128:$Rn))),
           (FRECPEv2f64 FPR128:$Rn)>;
 
+def : Pat<(f32 (AArch64frecps (f32 FPR32:$Rn), (f32 FPR32:$Rm))),
+          (FRECPS32 FPR32:$Rn, FPR32:$Rm)>;
+def : Pat<(v2f32 (AArch64frecps (v2f32 V64:$Rn), (v2f32 V64:$Rm))),
+          (FRECPSv2f32 V64:$Rn, V64:$Rm)>;
+def : Pat<(v4f32 (AArch64frecps (v4f32 FPR128:$Rn), (v4f32 FPR128:$Rm))),
+          (FRECPSv4f32 FPR128:$Rn, FPR128:$Rm)>;
+def : Pat<(f64 (AArch64frecps (f64 FPR64:$Rn), (f64 FPR64:$Rm))),
+          (FRECPS64 FPR64:$Rn, FPR64:$Rm)>;
+def : Pat<(v2f64 (AArch64frecps (v2f64 FPR128:$Rn), (v2f64 FPR128:$Rm))),
+          (FRECPSv2f64 FPR128:$Rn, FPR128:$Rm)>;
+
 def : Pat<(f32 (int_aarch64_neon_frecpx (f32 FPR32:$Rn))),
           (FRECPXv1i32 FPR32:$Rn)>;
 def : Pat<(f64 (int_aarch64_neon_frecpx (f64 FPR64:$Rn))),
@@ -3446,6 +3460,17 @@ def : Pat<(v1f64 (AArch64frsqrte (v1f64 FPR64:$Rn))),
           (FRSQRTEv1i64 FPR64:$Rn)>;
 def : Pat<(v2f64 (AArch64frsqrte (v2f64 FPR128:$Rn))),
           (FRSQRTEv2f64 FPR128:$Rn)>;
+
+def : Pat<(f32 (AArch64frsqrts (f32 FPR32:$Rn), (f32 FPR32:$Rm))),
+          (FRSQRTS32 FPR32:$Rn, FPR32:$Rm)>;
+def : Pat<(v2f32 (AArch64frsqrts (v2f32 V64:$Rn), (v2f32 V64:$Rm))),
+          (FRSQRTSv2f32 V64:$Rn, V64:$Rm)>;
+def : Pat<(v4f32 (AArch64frsqrts (v4f32 FPR128:$Rn), (v4f32 FPR128:$Rm))),
+          (FRSQRTSv4f32 FPR128:$Rn, FPR128:$Rm)>;
+def : Pat<(f64 (AArch64frsqrts (f64 FPR64:$Rn), (f64 FPR64:$Rm))),
+          (FRSQRTS64 FPR64:$Rn, FPR64:$Rm)>;
+def : Pat<(v2f64 (AArch64frsqrts (v2f64 FPR128:$Rn), (v2f64 FPR128:$Rm))),
+          (FRSQRTSv2f64 FPR128:$Rn, FPR128:$Rm)>;
 
 // If an integer is about to be converted to a floating point value,
 // just load it on the floating point unit.
@@ -5006,7 +5031,7 @@ class SExtLoadi16CVTf64Pat<dag addrmode, dag INST>
                                0),
                              dsub)))>,
     Requires<[NotForCodeSize, UseAlternateSExtLoadCVTF32]>;
- 
+
 def : SExtLoadi16CVTf64Pat<(ro16.Wpat GPR64sp:$Rn, GPR32:$Rm, ro16.Wext:$ext),
                            (LDRHroW GPR64sp:$Rn, GPR32:$Rm, ro16.Wext:$ext)>;
 def : SExtLoadi16CVTf64Pat<(ro16.Xpat GPR64sp:$Rn, GPR64:$Rm, ro16.Xext:$ext),

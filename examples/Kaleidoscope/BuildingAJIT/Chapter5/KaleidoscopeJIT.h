@@ -15,24 +15,31 @@
 #define LLVM_EXECUTIONENGINE_ORC_KALEIDOSCOPEJIT_H
 
 #include "RemoteJITUtils.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/Triple.h"
 #include "llvm/ExecutionEngine/ExecutionEngine.h"
 #include "llvm/ExecutionEngine/JITSymbol.h"
 #include "llvm/ExecutionEngine/RuntimeDyld.h"
-#include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/ExecutionEngine/Orc/CompileOnDemandLayer.h"
 #include "llvm/ExecutionEngine/Orc/CompileUtils.h"
 #include "llvm/ExecutionEngine/Orc/IRCompileLayer.h"
 #include "llvm/ExecutionEngine/Orc/IRTransformLayer.h"
 #include "llvm/ExecutionEngine/Orc/LambdaResolver.h"
-#include "llvm/ExecutionEngine/Orc/ObjectLinkingLayer.h"
+#include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
 #include "llvm/ExecutionEngine/Orc/OrcRemoteTargetClient.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Mangler.h"
 #include "llvm/Support/DynamicLibrary.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
+#include "llvm/Transforms/Scalar.h"
+#include "llvm/Transforms/Scalar/GVN.h"
 #include <algorithm>
+#include <cassert>
+#include <cstdlib>
 #include <memory>
 #include <string>
 #include <vector>
@@ -49,6 +56,7 @@ public:
   FunctionAST(std::unique_ptr<PrototypeAST> Proto,
               std::unique_ptr<ExprAST> Body)
       : Proto(std::move(Proto)), Body(std::move(Body)) {}
+
   const PrototypeAST& getProto() const;
   const std::string& getName() const;
   llvm::Function *codegen();
@@ -71,7 +79,7 @@ class KaleidoscopeJIT {
 private:
   std::unique_ptr<TargetMachine> TM;
   const DataLayout DL;
-  ObjectLinkingLayer<> ObjectLayer;
+  RTDyldObjectLinkingLayer<> ObjectLayer;
   IRCompileLayer<decltype(ObjectLayer)> CompileLayer;
 
   typedef std::function<std::unique_ptr<Module>(std::unique_ptr<Module>)>
@@ -229,7 +237,6 @@ public:
   }
 
 private:
-
   std::string mangle(const std::string &Name) {
     std::string MangledName;
     raw_string_ostream MangledNameStream(MangledName);
@@ -255,7 +262,6 @@ private:
 
     return M;
   }
-
 };
 
 } // end namespace orc

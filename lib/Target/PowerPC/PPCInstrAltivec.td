@@ -243,7 +243,7 @@ def VSPLTISB_get_imm : SDNodeXForm<build_vector, [{
   return PPC::get_VSPLTI_elt(N, 1, *CurDAG);
 }]>;
 def vecspltisb : PatLeaf<(build_vector), [{
-  return PPC::get_VSPLTI_elt(N, 1, *CurDAG).getNode() != 0;
+  return PPC::get_VSPLTI_elt(N, 1, *CurDAG).getNode() != nullptr;
 }], VSPLTISB_get_imm>;
 
 // VSPLTISH_get_imm xform function: convert build_vector to VSPLTISH imm.
@@ -251,7 +251,7 @@ def VSPLTISH_get_imm : SDNodeXForm<build_vector, [{
   return PPC::get_VSPLTI_elt(N, 2, *CurDAG);
 }]>;
 def vecspltish : PatLeaf<(build_vector), [{
-  return PPC::get_VSPLTI_elt(N, 2, *CurDAG).getNode() != 0;
+  return PPC::get_VSPLTI_elt(N, 2, *CurDAG).getNode() != nullptr;
 }], VSPLTISH_get_imm>;
 
 // VSPLTISW_get_imm xform function: convert build_vector to VSPLTISW imm.
@@ -259,7 +259,7 @@ def VSPLTISW_get_imm : SDNodeXForm<build_vector, [{
   return PPC::get_VSPLTI_elt(N, 4, *CurDAG);
 }]>;
 def vecspltisw : PatLeaf<(build_vector), [{
-  return PPC::get_VSPLTI_elt(N, 4, *CurDAG).getNode() != 0;
+  return PPC::get_VSPLTI_elt(N, 4, *CurDAG).getNode() != nullptr;
 }], VSPLTISW_get_imm>;
 
 //===----------------------------------------------------------------------===//
@@ -407,7 +407,7 @@ def MTVSCR : VXForm_5<1604, (outs), (ins vrrc:$vB),
                       "mtvscr $vB", IIC_LdStLoad,
                       [(int_ppc_altivec_mtvscr v4i32:$vB)]>; 
 
-let PPC970_Unit = 2 in {  // Loads.
+let PPC970_Unit = 2, mayLoad = 1, mayStore = 0 in {  // Loads.
 def LVEBX: XForm_1<31,   7, (outs vrrc:$vD), (ins memrr:$src),
                    "lvebx $vD, $src", IIC_LdStLoad,
                    [(set v16i8:$vD, (int_ppc_altivec_lvebx xoaddr:$src))]>;
@@ -434,7 +434,7 @@ def LVSR : XForm_1<31,  38, (outs vrrc:$vD), (ins memrr:$src),
                    [(set v16i8:$vD, (int_ppc_altivec_lvsr xoaddr:$src))]>,
                    PPC970_Unit_LSU;
 
-let PPC970_Unit = 2 in {   // Stores.
+let PPC970_Unit = 2, mayStore = 1, mayLoad = 0 in {   // Stores.
 def STVEBX: XForm_8<31, 135, (outs), (ins vrrc:$rS, memrr:$dst),
                    "stvebx $rS, $dst", IIC_LdStStore,
                    [(int_ppc_altivec_stvebx v16i8:$rS, xoaddr:$dst)]>;
@@ -850,6 +850,10 @@ def V_SETALLONES  : VXForm_3<908, (outs vrrc:$vD), (ins),
 //===----------------------------------------------------------------------===//
 // Additional Altivec Patterns
 //
+
+// Extended mnemonics
+def : InstAlias<"vmr $vD, $vA", (VOR vrrc:$vD, vrrc:$vA, vrrc:$vA)>;
+def : InstAlias<"vnot $vD, $vA", (VNOR vrrc:$vD, vrrc:$vA, vrrc:$vA)>;
 
 // Loads.
 def : Pat<(v4i32 (load xoaddr:$src)), (LVX xoaddr:$src)>;
@@ -1315,8 +1319,14 @@ let isCodeGenOnly = 1 in {
 }
 
 // Vector Integer Negate
-def VNEGW : VX_VT5_EO5_VB5<1538, 6, "vnegw", []>;
-def VNEGD : VX_VT5_EO5_VB5<1538, 7, "vnegd", []>;
+def VNEGW : VX_VT5_EO5_VB5<1538, 6, "vnegw",
+                           [(set v4i32:$vD,
+                            (sub (v4i32 immAllZerosV), v4i32:$vB))]>;
+
+def VNEGD : VX_VT5_EO5_VB5<1538, 7, "vnegd",
+                           [(set v2i64:$vD,
+                            (sub (v2i64 (bitconvert (v4i32 immAllZerosV))),
+                                  v2i64:$vB))]>;
 
 // Vector Parity Byte
 def VPRTYBW : VX_VT5_EO5_VB5<1538, 8, "vprtybw", [(set v4i32:$vD,

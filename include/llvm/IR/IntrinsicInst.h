@@ -25,20 +25,28 @@
 #define LLVM_IR_INTRINSICINST_H
 
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Metadata.h"
+#include "llvm/IR/Value.h"
+#include "llvm/Support/Casting.h"
+#include <cassert>
+#include <cstdint>
 
 namespace llvm {
+
   /// A wrapper class for inspecting calls to intrinsic functions.
   /// This allows the standard isa/dyncast/cast functionality to work with calls
   /// to intrinsic functions.
   class IntrinsicInst : public CallInst {
-    IntrinsicInst() = delete;
-    IntrinsicInst(const IntrinsicInst&) = delete;
-    void operator=(const IntrinsicInst&) = delete;
   public:
+    IntrinsicInst() = delete;
+    IntrinsicInst(const IntrinsicInst &) = delete;
+    IntrinsicInst &operator=(const IntrinsicInst &) = delete;
+
     /// Return the intrinsic ID of this intrinsic.
     Intrinsic::ID getIntrinsicID() const {
       return getCalledFunction()->getIntrinsicID();
@@ -81,9 +89,11 @@ namespace llvm {
   class DbgDeclareInst : public DbgInfoIntrinsic {
   public:
     Value *getAddress() const { return getVariableLocation(); }
+
     DILocalVariable *getVariable() const {
       return cast<DILocalVariable>(getRawVariable());
     }
+
     DIExpression *getExpression() const {
       return cast<DIExpression>(getRawExpression());
     }
@@ -91,6 +101,7 @@ namespace llvm {
     Metadata *getRawVariable() const {
       return cast<MetadataAsValue>(getArgOperand(1))->getMetadata();
     }
+
     Metadata *getRawExpression() const {
       return cast<MetadataAsValue>(getArgOperand(2))->getMetadata();
     }
@@ -110,13 +121,16 @@ namespace llvm {
     Value *getValue() const {
       return getVariableLocation(/* AllowNullOp = */ false);
     }
+
     uint64_t getOffset() const {
       return cast<ConstantInt>(
                           const_cast<Value*>(getArgOperand(1)))->getZExtValue();
     }
+
     DILocalVariable *getVariable() const {
       return cast<DILocalVariable>(getRawVariable());
     }
+
     DIExpression *getExpression() const {
       return cast<DIExpression>(getRawExpression());
     }
@@ -124,6 +138,7 @@ namespace llvm {
     Metadata *getRawVariable() const {
       return cast<MetadataAsValue>(getArgOperand(2))->getMetadata();
     }
+
     Metadata *getRawExpression() const {
       return cast<MetadataAsValue>(getArgOperand(3))->getMetadata();
     }
@@ -131,6 +146,71 @@ namespace llvm {
     // Methods for support type inquiry through isa, cast, and dyn_cast:
     static inline bool classof(const IntrinsicInst *I) {
       return I->getIntrinsicID() == Intrinsic::dbg_value;
+    }
+    static inline bool classof(const Value *V) {
+      return isa<IntrinsicInst>(V) && classof(cast<IntrinsicInst>(V));
+    }
+  };
+
+  /// This is the common base class for constrained floating point intrinsics.
+  class ConstrainedFPIntrinsic : public IntrinsicInst {
+  public:
+    enum RoundingMode {
+      rmInvalid,
+      rmDynamic,
+      rmToNearest,
+      rmDownward,
+      rmUpward,
+      rmTowardZero
+    };
+
+    enum ExceptionBehavior {
+      ebInvalid,
+      ebIgnore,
+      ebMayTrap,
+      ebStrict
+    };
+
+    RoundingMode getRoundingMode() const;
+    ExceptionBehavior getExceptionBehavior() const;
+
+    // Methods for support type inquiry through isa, cast, and dyn_cast:
+    static inline bool classof(const IntrinsicInst *I) {
+      switch (I->getIntrinsicID()) {
+      case Intrinsic::experimental_constrained_fadd:
+      case Intrinsic::experimental_constrained_fsub:
+      case Intrinsic::experimental_constrained_fmul:
+      case Intrinsic::experimental_constrained_fdiv:
+      case Intrinsic::experimental_constrained_frem:
+        return true;
+      default: return false;
+      }
+    }
+    static inline bool classof(const Value *V) {
+      return isa<IntrinsicInst>(V) && classof(cast<IntrinsicInst>(V));
+    }
+  };
+
+  /// This class represents atomic memcpy intrinsic
+  /// TODO: Integrate this class into MemIntrinsic hierarchy.
+  class ElementAtomicMemCpyInst : public IntrinsicInst {
+  public:
+    Value *getRawDest() const { return getArgOperand(0); }
+    Value *getRawSource() const { return getArgOperand(1); }
+
+    Value *getNumElements() const { return getArgOperand(2); }
+    void setNumElements(Value *V) { setArgOperand(2, V); }
+
+    uint64_t getSrcAlignment() const { return getParamAlignment(1); }
+    uint64_t getDstAlignment() const { return getParamAlignment(2); }
+
+    uint64_t getElementSizeInBytes() const {
+      Value *Arg = getArgOperand(3);
+      return cast<ConstantInt>(Arg)->getZExtValue();
+    }
+
+    static inline bool classof(const IntrinsicInst *I) {
+      return I->getIntrinsicID() == Intrinsic::memcpy_element_atomic;
     }
     static inline bool classof(const Value *V) {
       return isa<IntrinsicInst>(V) && classof(cast<IntrinsicInst>(V));
@@ -159,6 +239,7 @@ namespace llvm {
     ConstantInt *getVolatileCst() const {
       return cast<ConstantInt>(const_cast<Value*>(getArgOperand(4)));
     }
+
     bool isVolatile() const {
       return !getVolatileCst()->isZero();
     }
@@ -268,7 +349,6 @@ namespace llvm {
     }
   };
 
-
   /// This class wraps the llvm.memcpy intrinsic.
   class MemCpyInst : public MemTransferInst {
   public:
@@ -359,6 +439,7 @@ namespace llvm {
     ConstantInt *getIndex() const {
       return cast<ConstantInt>(const_cast<Value *>(getArgOperand(3)));
     }
+
     Value *getStep() const;
   };
 
@@ -404,6 +485,7 @@ namespace llvm {
       return cast<ConstantInt>(const_cast<Value *>(getArgOperand(4)));
     }
   };
-} // namespace llvm
 
-#endif
+} // end namespace llvm
+
+#endif // LLVM_IR_INTRINSICINST_H

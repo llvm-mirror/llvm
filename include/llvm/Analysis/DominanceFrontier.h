@@ -141,6 +141,10 @@ public:
   typedef DominanceFrontierBase<BasicBlock>::DomSetType DomSetType;
   typedef DominanceFrontierBase<BasicBlock>::iterator iterator;
   typedef DominanceFrontierBase<BasicBlock>::const_iterator const_iterator;
+
+  /// Handle invalidation explicitly.
+  bool invalidate(Function &F, const PreservedAnalyses &PA,
+                  FunctionAnalysisManager::Invalidator &);
 };
 
 class DominanceFrontierWrapperPass : public FunctionPass {
@@ -171,7 +175,7 @@ extern template class ForwardDominanceFrontierBase<BasicBlock>;
 class DominanceFrontierAnalysis
     : public AnalysisInfoMixin<DominanceFrontierAnalysis> {
   friend AnalysisInfoMixin<DominanceFrontierAnalysis>;
-  static char PassID;
+  static AnalysisKey Key;
 
 public:
   /// \brief Provide the result typedef for this analysis pass.

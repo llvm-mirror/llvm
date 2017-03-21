@@ -25,15 +25,13 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/Scalar/IndVarSimplify.h"
-#include "llvm/Transforms/Scalar.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/LoopPass.h"
-#include "llvm/Analysis/LoopPassManager.h"
-#include "llvm/Analysis/ScalarEvolutionExpander.h"
 #include "llvm/Analysis/ScalarEvolutionAliasAnalysis.h"
+#include "llvm/Analysis/ScalarEvolutionExpander.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/IR/BasicBlock.h"
@@ -49,6 +47,8 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/Scalar.h"
+#include "llvm/Transforms/Scalar/LoopPassManager.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
@@ -231,8 +231,9 @@ static bool ConvertToSInt(const APFloat &APF, int64_t &IntVal) {
   bool isExact = false;
   // See if we can convert this to an int64_t
   uint64_t UIntVal;
-  if (APF.convertToInteger(&UIntVal, 64, true, APFloat::rmTowardZero,
-                           &isExact) != APFloat::opOK || !isExact)
+  if (APF.convertToInteger(makeMutableArrayRef(UIntVal), 64, true,
+                           APFloat::rmTowardZero, &isExact) != APFloat::opOK ||
+      !isExact)
     return false;
   IntVal = UIntVal;
   return true;
@@ -906,7 +907,7 @@ class WidenIV {
   SmallVector<NarrowIVDefUse, 8> NarrowIVUsers;
 
   enum ExtendKind { ZeroExtended, SignExtended, Unknown };
-  // A map tracking the kind of extension used to widen each narrow IV 
+  // A map tracking the kind of extension used to widen each narrow IV
   // and narrow IV user.
   // Key: pointer to a narrow IV or IV user.
   // Value: the kind of extension used to widen this Instruction.
@@ -1412,9 +1413,9 @@ Instruction *WidenIV::widenIVUse(NarrowIVDefUse DU, SCEVExpander &Rewriter) {
   }
 
   // Does this user itself evaluate to a recurrence after widening?
-  WidenedRecTy WideAddRec = getWideRecurrence(DU);
+  WidenedRecTy WideAddRec = getExtendedOperandRecurrence(DU);
   if (!WideAddRec.first)
-    WideAddRec = getExtendedOperandRecurrence(DU);
+    WideAddRec = getWideRecurrence(DU);
 
   assert((WideAddRec.first == nullptr) == (WideAddRec.second == Unknown));
   if (!WideAddRec.first) {
@@ -1423,7 +1424,7 @@ Instruction *WidenIV::widenIVUse(NarrowIVDefUse DU, SCEVExpander &Rewriter) {
     if (widenLoopCompare(DU))
       return nullptr;
 
-    // This user does not evaluate to a recurence after widening, so don't
+    // This user does not evaluate to a recurrence after widening, so don't
     // follow it. Instead insert a Trunc to kill off the original use,
     // eventually isolating the original narrow IV so it can be removed.
     truncateIVUse(DU, DT, LI);
@@ -1608,7 +1609,7 @@ void WidenIV::calculatePostIncRange(Instruction *NarrowDef,
       return;
 
     CmpInst::Predicate P =
-            TrueDest ? Pred : CmpInst::getInversePredicate(Pred);  
+            TrueDest ? Pred : CmpInst::getInversePredicate(Pred);
 
     auto CmpRHSRange = SE->getSignedRange(SE->getSCEV(CmpRHS));
     auto CmpConstrainedLHSRange =
@@ -1634,8 +1635,8 @@ void WidenIV::calculatePostIncRange(Instruction *NarrowDef,
   UpdateRangeFromGuards(NarrowUser);
 
   BasicBlock *NarrowUserBB = NarrowUser->getParent();
-  // If NarrowUserBB is statically unreachable asking dominator queries may 
-  // yield suprising results. (e.g. the block may not have a dom tree node)
+  // If NarrowUserBB is statically unreachable asking dominator queries may
+  // yield surprising results. (e.g. the block may not have a dom tree node)
   if (!DT->isReachableFromEntry(NarrowUserBB))
     return;
 
@@ -2096,7 +2097,7 @@ static Value *genLoopLimit(PHINode *IndVar, const SCEV *IVCount, Loop *L,
     return Builder.CreateGEP(nullptr, GEPBase, GEPOffset, "lftr.limit");
   } else {
     // In any other case, convert both IVInit and IVCount to integers before
-    // comparing. This may result in SCEV expension of pointers, but in practice
+    // comparing. This may result in SCEV expansion of pointers, but in practice
     // SCEV will fold the pointer arithmetic away as such:
     // BECount = (IVEnd - IVInit - 1) => IVLimit = IVInit (postinc).
     //
@@ -2151,6 +2152,8 @@ linearFunctionTestReplace(Loop *L,
   // Initialize CmpIndVar and IVCount to their preincremented values.
   Value *CmpIndVar = IndVar;
   const SCEV *IVCount = BackedgeTakenCount;
+
+  assert(L->getLoopLatch() && "Loop no longer in simplified form?");
 
   // If the exiting block is the same as the backedge block, we prefer to
   // compare against the post-incremented value, otherwise we must compare
@@ -2376,6 +2379,7 @@ bool IndVarSimplify::run(Loop *L) {
   //    Loop::getCanonicalInductionVariable only supports loops with preheaders,
   //    and we're in trouble if we can't find the induction variable even when
   //    we've manually inserted one.
+  //  - LFTR relies on having a single backedge.
   if (!L->isLoopSimplifyForm())
     return false;
 
@@ -2482,28 +2486,19 @@ bool IndVarSimplify::run(Loop *L) {
   return Changed;
 }
 
-PreservedAnalyses IndVarSimplifyPass::run(Loop &L, LoopAnalysisManager &AM) {
-  auto &FAM = AM.getResult<FunctionAnalysisManagerLoopProxy>(L).getManager();
+PreservedAnalyses IndVarSimplifyPass::run(Loop &L, LoopAnalysisManager &AM,
+                                          LoopStandardAnalysisResults &AR,
+                                          LPMUpdater &) {
   Function *F = L.getHeader()->getParent();
   const DataLayout &DL = F->getParent()->getDataLayout();
 
-  auto *LI = FAM.getCachedResult<LoopAnalysis>(*F);
-  auto *SE = FAM.getCachedResult<ScalarEvolutionAnalysis>(*F);
-  auto *DT = FAM.getCachedResult<DominatorTreeAnalysis>(*F);
-
-  assert((LI && SE && DT) &&
-         "Analyses required for indvarsimplify not available!");
-
-  // Optional analyses.
-  auto *TTI = FAM.getCachedResult<TargetIRAnalysis>(*F);
-  auto *TLI = FAM.getCachedResult<TargetLibraryAnalysis>(*F);
-
-  IndVarSimplify IVS(LI, SE, DT, DL, TLI, TTI);
+  IndVarSimplify IVS(&AR.LI, &AR.SE, &AR.DT, DL, &AR.TLI, &AR.TTI);
   if (!IVS.run(&L))
     return PreservedAnalyses::all();
 
-  // FIXME: This should also 'preserve the CFG'.
-  return getLoopPassPreservedAnalyses();
+  auto PA = getLoopPassPreservedAnalyses();
+  PA.preserveSet<CFGAnalyses>();
+  return PA;
 }
 
 namespace {

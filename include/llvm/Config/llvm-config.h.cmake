@@ -20,9 +20,6 @@
 /* Target triple LLVM will generate code for by default */
 #cmakedefine LLVM_DEFAULT_TARGET_TRIPLE "${LLVM_DEFAULT_TARGET_TRIPLE}"
 
-/* Define to enable checks that alter the LLVM C++ ABI */
-#cmakedefine01 LLVM_ENABLE_ABI_BREAKING_CHECKS
-
 /* Define if threads enabled */
 #cmakedefine01 LLVM_ENABLE_THREADS
 
@@ -58,9 +55,6 @@
 
 /* Define if this is Win32ish platform */
 #cmakedefine LLVM_ON_WIN32 ${LLVM_ON_WIN32}
-
-/* Installation prefix directory */
-#cmakedefine LLVM_PREFIX "${LLVM_PREFIX}"
 
 /* Define if we have the Intel JIT API runtime support library */
 #cmakedefine01 LLVM_USE_INTEL_JITEVENTS

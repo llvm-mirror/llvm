@@ -180,61 +180,63 @@ int LLLexer::getNextChar() {
 }
 
 lltok::Kind LLLexer::LexToken() {
-  TokStart = CurPtr;
+  while (true) {
+    TokStart = CurPtr;
 
-  int CurChar = getNextChar();
-  switch (CurChar) {
-  default:
-    // Handle letters: [a-zA-Z_]
-    if (isalpha(static_cast<unsigned char>(CurChar)) || CurChar == '_')
-      return LexIdentifier();
+    int CurChar = getNextChar();
+    switch (CurChar) {
+    default:
+      // Handle letters: [a-zA-Z_]
+      if (isalpha(static_cast<unsigned char>(CurChar)) || CurChar == '_')
+        return LexIdentifier();
 
-    return lltok::Error;
-  case EOF: return lltok::Eof;
-  case 0:
-  case ' ':
-  case '\t':
-  case '\n':
-  case '\r':
-    // Ignore whitespace.
-    return LexToken();
-  case '+': return LexPositive();
-  case '@': return LexAt();
-  case '$': return LexDollar();
-  case '%': return LexPercent();
-  case '"': return LexQuote();
-  case '.':
-    if (const char *Ptr = isLabelTail(CurPtr)) {
-      CurPtr = Ptr;
-      StrVal.assign(TokStart, CurPtr-1);
-      return lltok::LabelStr;
+      return lltok::Error;
+    case EOF: return lltok::Eof;
+    case 0:
+    case ' ':
+    case '\t':
+    case '\n':
+    case '\r':
+      // Ignore whitespace.
+      continue;
+    case '+': return LexPositive();
+    case '@': return LexAt();
+    case '$': return LexDollar();
+    case '%': return LexPercent();
+    case '"': return LexQuote();
+    case '.':
+      if (const char *Ptr = isLabelTail(CurPtr)) {
+        CurPtr = Ptr;
+        StrVal.assign(TokStart, CurPtr-1);
+        return lltok::LabelStr;
+      }
+      if (CurPtr[0] == '.' && CurPtr[1] == '.') {
+        CurPtr += 2;
+        return lltok::dotdotdot;
+      }
+      return lltok::Error;
+    case ';':
+      SkipLineComment();
+      continue;
+    case '!': return LexExclaim();
+    case '#': return LexHash();
+    case '0': case '1': case '2': case '3': case '4':
+    case '5': case '6': case '7': case '8': case '9':
+    case '-':
+      return LexDigitOrNegative();
+    case '=': return lltok::equal;
+    case '[': return lltok::lsquare;
+    case ']': return lltok::rsquare;
+    case '{': return lltok::lbrace;
+    case '}': return lltok::rbrace;
+    case '<': return lltok::less;
+    case '>': return lltok::greater;
+    case '(': return lltok::lparen;
+    case ')': return lltok::rparen;
+    case ',': return lltok::comma;
+    case '*': return lltok::star;
+    case '|': return lltok::bar;
     }
-    if (CurPtr[0] == '.' && CurPtr[1] == '.') {
-      CurPtr += 2;
-      return lltok::dotdotdot;
-    }
-    return lltok::Error;
-  case ';':
-    SkipLineComment();
-    return LexToken();
-  case '!': return LexExclaim();
-  case '#': return LexHash();
-  case '0': case '1': case '2': case '3': case '4':
-  case '5': case '6': case '7': case '8': case '9':
-  case '-':
-    return LexDigitOrNegative();
-  case '=': return lltok::equal;
-  case '[': return lltok::lsquare;
-  case ']': return lltok::rsquare;
-  case '{': return lltok::lbrace;
-  case '}': return lltok::rbrace;
-  case '<': return lltok::less;
-  case '>': return lltok::greater;
-  case '(': return lltok::lparen;
-  case ')': return lltok::rparen;
-  case ',': return lltok::comma;
-  case '*': return lltok::star;
-  case '|': return lltok::bar;
   }
 }
 
@@ -806,6 +808,12 @@ lltok::Kind LLLexer::LexIdentifier() {
     StrVal.assign(Keyword.begin(), Keyword.end());
     return lltok::DIFlag;
   }
+
+  if (Keyword.startswith("CSK_")) {
+    StrVal.assign(Keyword.begin(), Keyword.end());
+    return lltok::ChecksumKind;
+  }
+
   if (Keyword == "NoDebug" || Keyword == "FullDebug" ||
       Keyword == "LineTablesOnly") {
     StrVal.assign(Keyword.begin(), Keyword.end());
@@ -874,7 +882,7 @@ lltok::Kind LLLexer::Lex0x() {
     // HexFPConstant - Floating point constant represented in IEEE format as a
     // hexadecimal number for when exponential notation is not precise enough.
     // Half, Float, and double only.
-    APFloatVal = APFloat(APFloat::IEEEdouble,
+    APFloatVal = APFloat(APFloat::IEEEdouble(),
                          APInt(64, HexIntToVal(TokStart + 2, CurPtr)));
     return lltok::APFloat;
   }
@@ -885,20 +893,20 @@ lltok::Kind LLLexer::Lex0x() {
   case 'K':
     // F80HexFPConstant - x87 long double in hexadecimal format (10 bytes)
     FP80HexToIntPair(TokStart+3, CurPtr, Pair);
-    APFloatVal = APFloat(APFloat::x87DoubleExtended, APInt(80, Pair));
+    APFloatVal = APFloat(APFloat::x87DoubleExtended(), APInt(80, Pair));
     return lltok::APFloat;
   case 'L':
     // F128HexFPConstant - IEEE 128-bit in hexadecimal format (16 bytes)
     HexToIntPair(TokStart+3, CurPtr, Pair);
-    APFloatVal = APFloat(APFloat::IEEEquad, APInt(128, Pair));
+    APFloatVal = APFloat(APFloat::IEEEquad(), APInt(128, Pair));
     return lltok::APFloat;
   case 'M':
     // PPC128HexFPConstant - PowerPC 128-bit in hexadecimal format (16 bytes)
     HexToIntPair(TokStart+3, CurPtr, Pair);
-    APFloatVal = APFloat(APFloat::PPCDoubleDouble, APInt(128, Pair));
+    APFloatVal = APFloat(APFloat::PPCDoubleDouble(), APInt(128, Pair));
     return lltok::APFloat;
   case 'H':
-    APFloatVal = APFloat(APFloat::IEEEhalf,
+    APFloatVal = APFloat(APFloat::IEEEhalf(),
                          APInt(16,HexIntToVal(TokStart+3, CurPtr)));
     return lltok::APFloat;
   }
@@ -965,7 +973,7 @@ lltok::Kind LLLexer::LexDigitOrNegative() {
     }
   }
 
-  APFloatVal = APFloat(APFloat::IEEEdouble,
+  APFloatVal = APFloat(APFloat::IEEEdouble(),
                        StringRef(TokStart, CurPtr - TokStart));
   return lltok::APFloat;
 }
@@ -1002,7 +1010,7 @@ lltok::Kind LLLexer::LexPositive() {
     }
   }
 
-  APFloatVal = APFloat(APFloat::IEEEdouble,
+  APFloatVal = APFloat(APFloat::IEEEdouble(),
                        StringRef(TokStart, CurPtr - TokStart));
   return lltok::APFloat;
 }

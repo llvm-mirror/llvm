@@ -432,9 +432,12 @@ Vectorizer::splitOddVectorElts(ArrayRef<Instruction *> Chain,
   unsigned ElementSizeBytes = ElementSizeBits / 8;
   unsigned SizeBytes = ElementSizeBytes * Chain.size();
   unsigned NumLeft = (SizeBytes - (SizeBytes % 4)) / ElementSizeBytes;
-  if (NumLeft == Chain.size())
-    --NumLeft;
-  else if (NumLeft == 0)
+  if (NumLeft == Chain.size()) {
+    if ((NumLeft & 1) == 0)
+      NumLeft /= 2; // Split even in half
+    else
+      --NumLeft;    // Split off last element
+  } else if (NumLeft == 0)
     NumLeft = 1;
   return std::make_pair(Chain.slice(0, NumLeft), Chain.slice(NumLeft));
 }
@@ -477,10 +480,23 @@ Vectorizer::getVectorizablePrefix(ArrayRef<Instruction *> Chain) {
 
   // Loop until we find an instruction in ChainInstrs that we can't vectorize.
   unsigned ChainInstrIdx = 0;
+  Instruction *BarrierMemoryInstr = nullptr;
+
   for (unsigned E = ChainInstrs.size(); ChainInstrIdx < E; ++ChainInstrIdx) {
     Instruction *ChainInstr = ChainInstrs[ChainInstrIdx];
-    bool AliasFound = false;
+
+    // If a barrier memory instruction was found, chain instructions that follow
+    // will not be added to the valid prefix.
+    if (BarrierMemoryInstr && OBB.dominates(BarrierMemoryInstr, ChainInstr))
+      break;
+
+    // Check (in BB order) if any instruction prevents ChainInstr from being
+    // vectorized. Find and store the first such "conflicting" instruction.
     for (Instruction *MemInstr : MemoryInstrs) {
+      // If a barrier memory instruction was found, do not check past it.
+      if (BarrierMemoryInstr && OBB.dominates(BarrierMemoryInstr, MemInstr))
+        break;
+
       if (isa<LoadInst>(MemInstr) && isa<LoadInst>(ChainInstr))
         continue;
 
@@ -508,12 +524,21 @@ Vectorizer::getVectorizablePrefix(ArrayRef<Instruction *> Chain) {
                  << "  " << *ChainInstr << '\n'
                  << "  " << *getPointerOperand(ChainInstr) << '\n';
         });
-        AliasFound = true;
+        // Save this aliasing memory instruction as a barrier, but allow other
+        // instructions that precede the barrier to be vectorized with this one.
+        BarrierMemoryInstr = MemInstr;
         break;
       }
     }
-    if (AliasFound)
+    // Continue the search only for store chains, since vectorizing stores that
+    // precede an aliasing load is valid. Conversely, vectorizing loads is valid
+    // up to an aliasing store, but should not pull loads from further down in
+    // the basic block.
+    if (IsLoadChain && BarrierMemoryInstr) {
+      // The BarrierMemoryInstr is a store that precedes ChainInstr.
+      assert(OBB.dominates(BarrierMemoryInstr, ChainInstr));
       break;
+    }
   }
 
   // Find the largest prefix of Chain whose elements are all in
@@ -566,7 +591,7 @@ Vectorizer::collectInstructions(BasicBlock *BB) {
         continue;
 
       // Make sure all the users of a vector are constant-index extracts.
-      if (isa<VectorType>(Ty) && !all_of(LI->users(), [LI](const User *U) {
+      if (isa<VectorType>(Ty) && !all_of(LI->users(), [](const User *U) {
             const ExtractElementInst *EEI = dyn_cast<ExtractElementInst>(U);
             return EEI && isa<ConstantInt>(EEI->getOperand(1));
           }))
@@ -600,7 +625,7 @@ Vectorizer::collectInstructions(BasicBlock *BB) {
       if (TySize > VecRegSize / 2)
         continue;
 
-      if (isa<VectorType>(Ty) && !all_of(SI->users(), [SI](const User *U) {
+      if (isa<VectorType>(Ty) && !all_of(SI->users(), [](const User *U) {
             const ExtractElementInst *EEI = dyn_cast<ExtractElementInst>(U);
             return EEI && isa<ConstantInt>(EEI->getOperand(1));
           }))

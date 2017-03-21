@@ -1136,12 +1136,6 @@ let Predicates = [InMicroMips] in {
   def : MipsInstAlias<
           "sgtu $rs, $rt",
           (SLTu_MM GPR32Opnd:$rs, GPR32Opnd:$rt, GPR32Opnd:$rs), 0>;
-  def : MipsInstAlias<"slt $rs, $rt, $imm",
-                      (SLTi_MM GPR32Opnd:$rs, GPR32Opnd:$rt,
-                               simm32_relaxed:$imm), 0>;
-  def : MipsInstAlias<"sltu $rs, $rt, $imm",
-                      (SLTiu_MM GPR32Opnd:$rs, GPR32Opnd:$rt,
-                                simm32_relaxed:$imm), 0>;
   def : MipsInstAlias<"sll $rd, $rt, $rs",
                       (SLLV_MM GPR32Opnd:$rd, GPR32Opnd:$rt, GPR32Opnd:$rs), 0>;
   def : MipsInstAlias<"sra $rd, $rt, $rs",
@@ -1163,22 +1157,31 @@ let Predicates = [InMicroMips] in {
   def : MipsInstAlias<"rotr $rt, $imm",
                       (ROTR_MM GPR32Opnd:$rt, GPR32Opnd:$rt, uimm5:$imm), 0>;
   def : MipsInstAlias<"syscall", (SYSCALL_MM 0), 1>;
-  def : MipsInstAlias<"and $rs, $rt, $imm",
-                      (ANDi_MM GPR32Opnd:$rs, GPR32Opnd:$rt, simm16:$imm), 0>;
-  def : MipsInstAlias<"and $rs, $imm",
-                      (ANDi_MM GPR32Opnd:$rs, GPR32Opnd:$rs, simm16:$imm), 0>;
-  def : MipsInstAlias<"or $rs, $rt, $imm",
-                      (ORi_MM GPR32Opnd:$rs, GPR32Opnd:$rt, uimm16:$imm), 0>;
-  def : MipsInstAlias<"or $rs, $imm",
-                      (ORi_MM GPR32Opnd:$rs, GPR32Opnd:$rs, uimm16:$imm), 0>;
-  def : MipsInstAlias<"xor $rs, $rt, $imm",
-                      (XORi_MM GPR32Opnd:$rs, GPR32Opnd:$rt, uimm16:$imm), 0>;
-  def : MipsInstAlias<"xor $rs, $imm",
-                      (XORi_MM GPR32Opnd:$rs, GPR32Opnd:$rs, uimm16:$imm), 0>;
+
+  defm : OneOrTwoOperandMacroImmediateAlias<"add", ADDi_MM>;
+
+  defm : OneOrTwoOperandMacroImmediateAlias<"addu", ADDiu_MM>;
+
+  defm : OneOrTwoOperandMacroImmediateAlias<"and", ANDi_MM>;
+
+  defm : OneOrTwoOperandMacroImmediateAlias<"or", ORi_MM>;
+
+  defm : OneOrTwoOperandMacroImmediateAlias<"xor", XORi_MM>;
+
+  defm : OneOrTwoOperandMacroImmediateAlias<"slt", SLTi_MM>;
+
+  defm : OneOrTwoOperandMacroImmediateAlias<"sltu", SLTiu_MM>;
+
   def : MipsInstAlias<"not $rt, $rs",
                       (NOR_MM GPR32Opnd:$rt, GPR32Opnd:$rs, ZERO), 0>;
+  def : MipsInstAlias<"not $rt",
+                      (NOR_MM GPR32Opnd:$rt, GPR32Opnd:$rt, ZERO), 0>;
   def : MipsInstAlias<"bnez $rs,$offset",
                       (BNE_MM GPR32Opnd:$rs, ZERO, brtarget:$offset), 0>;
   def : MipsInstAlias<"beqz $rs,$offset",
                       (BEQ_MM GPR32Opnd:$rs, ZERO, brtarget:$offset), 0>;
+  def : MipsInstAlias<"seh $rd", (SEH_MM GPR32Opnd:$rd, GPR32Opnd:$rd), 0>,
+                     ISA_MIPS32R2_NOT_32R6_64R6;
+  def : MipsInstAlias<"seb $rd", (SEB_MM GPR32Opnd:$rd, GPR32Opnd:$rd), 0>,
+                     ISA_MIPS32R2_NOT_32R6_64R6;
 }

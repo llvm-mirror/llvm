@@ -23,12 +23,15 @@
 #include "llvm/ExecutionEngine/Orc/IRCompileLayer.h"
 #include "llvm/ExecutionEngine/Orc/IRTransformLayer.h"
 #include "llvm/ExecutionEngine/Orc/LambdaResolver.h"
-#include "llvm/ExecutionEngine/Orc/ObjectLinkingLayer.h"
+#include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Mangler.h"
 #include "llvm/Support/DynamicLibrary.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/Scalar.h"
+#include "llvm/Transforms/Scalar/GVN.h"
 #include <algorithm>
 #include <memory>
 #include <string>
@@ -41,7 +44,7 @@ class KaleidoscopeJIT {
 private:
   std::unique_ptr<TargetMachine> TM;
   const DataLayout DL;
-  ObjectLinkingLayer<> ObjectLayer;
+  RTDyldObjectLinkingLayer<> ObjectLayer;
   IRCompileLayer<decltype(ObjectLayer)> CompileLayer;
 
   typedef std::function<std::unique_ptr<Module>(std::unique_ptr<Module>)>
@@ -105,7 +108,6 @@ public:
   }
 
 private:
-
   std::unique_ptr<Module> optimizeModule(std::unique_ptr<Module> M) {
     // Create a function pass manager.
     auto FPM = llvm::make_unique<legacy::FunctionPassManager>(M.get());
@@ -124,7 +126,6 @@ private:
 
     return M;
   }
-
 };
 
 } // end namespace orc

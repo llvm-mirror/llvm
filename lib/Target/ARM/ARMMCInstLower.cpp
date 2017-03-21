@@ -14,25 +14,36 @@
 
 #include "ARM.h"
 #include "ARMAsmPrinter.h"
+#include "ARMBaseInstrInfo.h"
+#include "ARMMachineFunctionInfo.h"
+#include "ARMSubtarget.h"
+#include "MCTargetDesc/ARMAddressingModes.h"
 #include "MCTargetDesc/ARMBaseInfo.h"
 #include "MCTargetDesc/ARMMCExpr.h"
+#include "llvm/ADT/APFloat.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
+#include "llvm/CodeGen/MachineInstr.h"
+#include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/IR/Constants.h"
-#include "llvm/IR/Mangler.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCContext.h"
-#include "llvm/MC/MCSymbolELF.h"
-#include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCInstBuilder.h"
 #include "llvm/MC/MCStreamer.h"
-using namespace llvm;
+#include "llvm/Support/ErrorHandling.h"
+#include <cassert>
+#include <cstdint>
 
+using namespace llvm;
 
 MCOperand ARMAsmPrinter::GetSymbolRef(const MachineOperand &MO,
                                       const MCSymbol *Symbol) {
+  MCSymbolRefExpr::VariantKind SymbolVariant = MCSymbolRefExpr::VK_None;
+  if (MO.getTargetFlags() & ARMII::MO_SBREL)
+    SymbolVariant = MCSymbolRefExpr::VK_ARM_SBREL;
+
   const MCExpr *Expr =
-      MCSymbolRefExpr::create(Symbol, MCSymbolRefExpr::VK_None, OutContext);
+      MCSymbolRefExpr::create(Symbol, SymbolVariant, OutContext);
   switch (MO.getTargetFlags() & ARMII::MO_OPTION_MASK) {
   default:
     llvm_unreachable("Unknown target flag on symbol operand");
@@ -40,12 +51,12 @@ MCOperand ARMAsmPrinter::GetSymbolRef(const MachineOperand &MO,
     break;
   case ARMII::MO_LO16:
     Expr =
-        MCSymbolRefExpr::create(Symbol, MCSymbolRefExpr::VK_None, OutContext);
+        MCSymbolRefExpr::create(Symbol, SymbolVariant, OutContext);
     Expr = ARMMCExpr::createLower16(Expr, OutContext);
     break;
   case ARMII::MO_HI16:
     Expr =
-        MCSymbolRefExpr::create(Symbol, MCSymbolRefExpr::VK_None, OutContext);
+        MCSymbolRefExpr::create(Symbol, SymbolVariant, OutContext);
     Expr = ARMMCExpr::createUpper16(Expr, OutContext);
     break;
   }
@@ -77,11 +88,10 @@ bool ARMAsmPrinter::lowerOperand(const MachineOperand &MO,
     MCOp = MCOperand::createExpr(MCSymbolRefExpr::create(
         MO.getMBB()->getSymbol(), OutContext));
     break;
-  case MachineOperand::MO_GlobalAddress: {
+  case MachineOperand::MO_GlobalAddress:
     MCOp = GetSymbolRef(MO,
                         GetARMGVSymbol(MO.getGlobal(), MO.getTargetFlags()));
     break;
-  }
   case MachineOperand::MO_ExternalSymbol:
     MCOp = GetSymbolRef(MO,
                         GetExternalSymbolSymbol(MO.getSymbolName()));
@@ -90,6 +100,8 @@ bool ARMAsmPrinter::lowerOperand(const MachineOperand &MO,
     MCOp = GetSymbolRef(MO, GetJTISymbol(MO.getIndex()));
     break;
   case MachineOperand::MO_ConstantPoolIndex:
+    if (Subtarget->genExecuteOnly())
+      llvm_unreachable("execute-only should not generate constant pools");
     MCOp = GetSymbolRef(MO, GetCPISymbol(MO.getIndex()));
     break;
   case MachineOperand::MO_BlockAddress:
@@ -98,7 +110,7 @@ bool ARMAsmPrinter::lowerOperand(const MachineOperand &MO,
   case MachineOperand::MO_FPImmediate: {
     APFloat Val = MO.getFPImm()->getValueAPF();
     bool ignored;
-    Val.convert(APFloat::IEEEdouble, APFloat::rmTowardZero, &ignored);
+    Val.convert(APFloat::IEEEdouble(), APFloat::rmTowardZero, &ignored);
     MCOp = MCOperand::createFPImm(Val.convertToDouble());
     break;
   }
@@ -222,30 +234,4 @@ void ARMAsmPrinter::LowerPATCHABLE_FUNCTION_EXIT(const MachineInstr &MI)
 void ARMAsmPrinter::LowerPATCHABLE_TAIL_CALL(const MachineInstr &MI)
 {
   EmitSled(MI, SledKind::TAIL_CALL);
-}
-
-void ARMAsmPrinter::EmitXRayTable()
-{
-  if (Sleds.empty())
-    return;
-  if (Subtarget->isTargetELF()) {
-    auto *Section = OutContext.getELFSection(
-      "xray_instr_map", ELF::SHT_PROGBITS,
-      ELF::SHF_ALLOC | ELF::SHF_GROUP | ELF::SHF_MERGE, 0,
-      CurrentFnSym->getName());
-    auto PrevSection = OutStreamer->getCurrentSectionOnly();
-    OutStreamer->SwitchSection(Section);
-    for (const auto &Sled : Sleds) {
-      OutStreamer->EmitSymbolValue(Sled.Sled, 4);
-      OutStreamer->EmitSymbolValue(CurrentFnSym, 4);
-      auto Kind = static_cast<uint8_t>(Sled.Kind);
-      OutStreamer->EmitBytes(
-        StringRef(reinterpret_cast<const char *>(&Kind), 1));
-      OutStreamer->EmitBytes(
-        StringRef(reinterpret_cast<const char *>(&Sled.AlwaysInstrument), 1));
-      OutStreamer->EmitZeros(6);
-    }
-    OutStreamer->SwitchSection(PrevSection);
-  }
-  Sleds.clear();
 }

@@ -58,6 +58,9 @@ public:
   virtual void printMipsReginfo() { }
   virtual void printMipsOptions() { }
 
+  // Only implemented for AMDGPU ELF at this time.
+  virtual void printAMDGPURuntimeMD() {}
+
   // Only implemented for PE/COFF.
   virtual void printCOFFImports() { }
   virtual void printCOFFExports() { }
@@ -92,6 +95,10 @@ std::error_code createELFDumper(const object::ObjectFile *Obj,
 std::error_code createMachODumper(const object::ObjectFile *Obj,
                                   ScopedPrinter &Writer,
                                   std::unique_ptr<ObjDumper> &Result);
+
+std::error_code createWasmDumper(const object::ObjectFile *Obj,
+                                 ScopedPrinter &Writer,
+                                 std::unique_ptr<ObjDumper> &Result);
 
 void dumpCOFFImportFile(const object::COFFImportFile *File);
 

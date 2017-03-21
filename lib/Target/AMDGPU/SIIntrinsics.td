@@ -14,8 +14,19 @@
 
 
 let TargetPrefix = "SI", isTarget = 1 in {
-  def int_SI_packf16 : Intrinsic <[llvm_i32_ty], [llvm_float_ty, llvm_float_ty], [IntrNoMem]>;
-  def int_SI_export : Intrinsic <[], [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty, llvm_i32_ty, llvm_i32_ty, llvm_float_ty, llvm_float_ty, llvm_float_ty, llvm_float_ty], []>;
+  def int_SI_export : Intrinsic <[],
+    [llvm_i32_ty,   // en
+    llvm_i32_ty,    // vm   (FIXME: should be i1)
+    llvm_i32_ty,    // done (FIXME: should be i1)
+    llvm_i32_ty,    // tgt
+    llvm_i32_ty,    // compr (FIXME: should be i1)
+    llvm_float_ty,  // src0
+    llvm_float_ty,  // src1
+    llvm_float_ty,  // src2
+    llvm_float_ty], // src3
+    []
+  >;
+
   def int_SI_load_const : Intrinsic <[llvm_float_ty], [llvm_anyint_ty, llvm_i32_ty], [IntrNoMem]>;
   def int_SI_vs_load_input : Intrinsic <[llvm_v4f32_ty], [llvm_anyint_ty, llvm_i16_ty, llvm_i32_ty], [IntrNoMem]> ;
 
@@ -50,8 +61,6 @@ let TargetPrefix = "SI", isTarget = 1 in {
      llvm_i32_ty,     // slc(imm)
      llvm_i32_ty],    // tfe(imm)
     [IntrReadMem, IntrArgMemOnly]>;
-
-  def int_SI_sendmsg : Intrinsic <[], [llvm_i32_ty, llvm_i32_ty], []>;
 
   // Fully-flexible SAMPLE instruction.
   class SampleRaw : Intrinsic <
@@ -170,27 +179,4 @@ let TargetPrefix = "SI", isTarget = 1 in {
   def int_SI_image_load : Image;
   def int_SI_image_load_mip : Image;
   def int_SI_getresinfo : Image;
-
-  /* Interpolation Intrinsics */
-
-  def int_SI_fs_constant : Intrinsic <[llvm_float_ty], [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], [IntrNoMem]>;
-  def int_SI_fs_interp : Intrinsic <[llvm_float_ty], [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty, llvm_v2i32_ty], [IntrNoMem]>;
 } // End TargetPrefix = "SI", isTarget = 1
-
-let TargetPrefix = "amdgcn", isTarget = 1 in {
-  // Emit 2.5 ulp, no denormal division. Should only be inserted by
-  // pass based on !fpmath metadata.
-  def int_amdgcn_fdiv_fast : Intrinsic<
-    [llvm_float_ty], [llvm_float_ty], [IntrNoMem]
-  >;
-
-  /* Control flow Intrinsics */
-
-  def int_amdgcn_if : Intrinsic<[llvm_i64_ty], [llvm_i1_ty, llvm_empty_ty], [IntrConvergent]>;
-  def int_amdgcn_else : Intrinsic<[llvm_i64_ty], [llvm_i64_ty, llvm_empty_ty], [IntrConvergent]>;
-  def int_amdgcn_break : Intrinsic<[llvm_i64_ty], [llvm_i64_ty], [IntrNoMem, IntrConvergent]>;
-  def int_amdgcn_if_break : Intrinsic<[llvm_i64_ty], [llvm_i1_ty, llvm_i64_ty], [IntrNoMem, IntrConvergent]>;
-  def int_amdgcn_else_break : Intrinsic<[llvm_i64_ty], [llvm_i64_ty, llvm_i64_ty], [IntrNoMem, IntrConvergent]>;
-  def int_amdgcn_loop : Intrinsic<[], [llvm_i64_ty, llvm_empty_ty], [IntrConvergent]>;
-  def int_amdgcn_end_cf : Intrinsic<[], [llvm_i64_ty], [IntrConvergent]>;
-}

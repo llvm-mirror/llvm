@@ -61,13 +61,13 @@ types ``IMAGE_REL_I386_SECREL`` (32-bit) or ``IMAGE_REL_AMD64_SECREL`` (64-bit).
 the target.  It corresponds to the COFF relocation types
 ``IMAGE_REL_I386_SECTION`` (32-bit) or ``IMAGE_REL_AMD64_SECTION`` (64-bit).
 
-.. code-block:: gas
+.. code-block:: none
 
   .section .debug$S,"rn"
     .long 4
     .long 242
     .long 40
-    .secrel32 _function_name
+    .secrel32 _function_name + 0
     .secidx   _function_name
     ...
 
@@ -204,8 +204,48 @@ For example, the following code creates two sections named ``.text``.
 The unique number is not present in the resulting object at all. It is just used
 in the assembler to differentiate the sections.
 
+The 'm' flag is mapped to SHF_LINK_ORDER. If it is present, a symbol
+must be given that identifies the section to be placed is the
+.sh_link.
+
+.. code-block:: gas
+
+        .section .foo,"a",@progbits
+        .Ltmp:
+        .section .bar,"am",@progbits,.Ltmp
+
+which is equivalent to just
+
+.. code-block:: gas
+
+        .section .foo,"a",@progbits
+        .section .bar,"am",@progbits,.foo
+
+
 Target Specific Behaviour
 =========================
+
+X86
+---
+
+Relocations
+^^^^^^^^^^^
+
+``@ABS8`` can be applied to symbols which appear as immediate operands to
+instructions that have an 8-bit immediate form for that operand. It causes
+the assembler to use the 8-bit form and an 8-bit relocation (e.g. ``R_386_8``
+or ``R_X86_64_8``) for the symbol.
+
+For example:
+
+.. code-block:: gas
+
+  cmpq $foo@ABS8, %rdi
+
+This causes the assembler to select the form of the 64-bit ``cmpq`` instruction
+that takes an 8-bit immediate operand that is sign extended to 64 bits, as
+opposed to ``cmpq $foo, %rdi`` which takes a 32-bit immediate operand. This
+is also not the same as ``cmpb $foo, %dil``, which is an 8-bit comparison.
 
 Windows on ARM
 --------------

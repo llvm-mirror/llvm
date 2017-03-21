@@ -18,17 +18,19 @@
 #ifndef LLVM_IR_DERIVEDTYPES_H
 #define LLVM_IR_DERIVEDTYPES_H
 
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Type.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/Compiler.h"
-#include "llvm/Support/DataTypes.h"
+#include <cassert>
+#include <cstdint>
 
 namespace llvm {
 
 class Value;
 class APInt;
 class LLVMContext;
-template<typename T> class ArrayRef;
-class StringRef;
 
 /// Class to represent integer types. Note that this class is also used to
 /// represent the built-in integer types: Int1Ty, Int8Ty, Int16Ty, Int32Ty and
@@ -98,11 +100,12 @@ unsigned Type::getIntegerBitWidth() const {
 /// Class to represent function types
 ///
 class FunctionType : public Type {
-  FunctionType(const FunctionType &) = delete;
-  const FunctionType &operator=(const FunctionType &) = delete;
   FunctionType(Type *Result, ArrayRef<Type*> Params, bool IsVarArgs);
 
 public:
+  FunctionType(const FunctionType &) = delete;
+  FunctionType &operator=(const FunctionType &) = delete;
+
   /// This static method is the primary way of constructing a FunctionType.
   static FunctionType *get(Type *Result,
                            ArrayRef<Type*> Params, bool isVarArg);
@@ -153,7 +156,7 @@ unsigned Type::getFunctionNumParams() const {
   return cast<FunctionType>(this)->getNumParams();
 }
 
-/// Common super class of ArrayType, StructType, PointerType and VectorType.
+/// Common super class of ArrayType, StructType and VectorType.
 class CompositeType : public Type {
 protected:
   explicit CompositeType(LLVMContext &C, TypeID tid) : Type(C, tid) {}
@@ -169,7 +172,6 @@ public:
   static inline bool classof(const Type *T) {
     return T->getTypeID() == ArrayTyID ||
            T->getTypeID() == StructTyID ||
-           T->getTypeID() == PointerTyID ||
            T->getTypeID() == VectorTyID;
   }
 };
@@ -195,10 +197,9 @@ public:
 /// generator for a target expects).
 ///
 class StructType : public CompositeType {
-  StructType(const StructType &) = delete;
-  const StructType &operator=(const StructType &) = delete;
   StructType(LLVMContext &C)
     : CompositeType(C, StructTyID), SymbolTableEntry(nullptr) {}
+
   enum {
     /// This is the contents of the SubClassData field.
     SCDB_HasBody = 1,
@@ -214,6 +215,9 @@ class StructType : public CompositeType {
   void *SymbolTableEntry;
 
 public:
+  StructType(const StructType &) = delete;
+  StructType &operator=(const StructType &) = delete;
+
   /// This creates an identified struct.
   static StructType *create(LLVMContext &Context, StringRef Name);
   static StructType *create(LLVMContext &Context);
@@ -306,51 +310,50 @@ Type *Type::getStructElementType(unsigned N) const {
   return cast<StructType>(this)->getElementType(N);
 }
 
-/// This is the superclass of the array, pointer and vector type classes.
-/// All of these represent "arrays" in memory. The array type represents a
-/// specifically sized array, pointer types are unsized/unknown size arrays,
-/// vector types represent specifically sized arrays that allow for use of SIMD
-/// instructions. SequentialType holds the common features of all, which stem
-/// from the fact that all three lay their components out in memory identically.
+/// This is the superclass of the array and vector type classes. Both of these
+/// represent "arrays" in memory. The array type represents a specifically sized
+/// array, and the vector type represents a specifically sized array that allows
+/// for use of SIMD instructions. SequentialType holds the common features of
+/// both, which stem from the fact that both lay their components out in memory
+/// identically.
 class SequentialType : public CompositeType {
   Type *ContainedType;               ///< Storage for the single contained type.
-  SequentialType(const SequentialType &) = delete;
-  const SequentialType &operator=(const SequentialType &) = delete;
+  uint64_t NumElements;
 
 protected:
-  SequentialType(TypeID TID, Type *ElType)
-    : CompositeType(ElType->getContext(), TID), ContainedType(ElType) {
+  SequentialType(TypeID TID, Type *ElType, uint64_t NumElements)
+    : CompositeType(ElType->getContext(), TID), ContainedType(ElType),
+      NumElements(NumElements) {
     ContainedTys = &ContainedType;
     NumContainedTys = 1;
   }
 
 public:
-  Type *getElementType() const { return getSequentialElementType(); }
+  SequentialType(const SequentialType &) = delete;
+  SequentialType &operator=(const SequentialType &) = delete;
+
+  uint64_t getNumElements() const { return NumElements; }
+  Type *getElementType() const { return ContainedType; }
 
   /// Methods for support type inquiry through isa, cast, and dyn_cast.
   static inline bool classof(const Type *T) {
-    return T->getTypeID() == ArrayTyID ||
-           T->getTypeID() == PointerTyID ||
-           T->getTypeID() == VectorTyID;
+    return T->getTypeID() == ArrayTyID || T->getTypeID() == VectorTyID;
   }
 };
 
 /// Class to represent array types.
 class ArrayType : public SequentialType {
-  uint64_t NumElements;
-
-  ArrayType(const ArrayType &) = delete;
-  const ArrayType &operator=(const ArrayType &) = delete;
   ArrayType(Type *ElType, uint64_t NumEl);
 
 public:
+  ArrayType(const ArrayType &) = delete;
+  ArrayType &operator=(const ArrayType &) = delete;
+
   /// This static method is the primary way to construct an ArrayType
   static ArrayType *get(Type *ElementType, uint64_t NumElements);
 
   /// Return true if the specified type is valid as a element type.
   static bool isValidElementType(Type *ElemTy);
-
-  uint64_t getNumElements() const { return NumElements; }
 
   /// Methods for support type inquiry through isa, cast, and dyn_cast.
   static inline bool classof(const Type *T) {
@@ -364,13 +367,12 @@ uint64_t Type::getArrayNumElements() const {
 
 /// Class to represent vector types.
 class VectorType : public SequentialType {
-  unsigned NumElements;
-
-  VectorType(const VectorType &) = delete;
-  const VectorType &operator=(const VectorType &) = delete;
   VectorType(Type *ElType, unsigned NumEl);
 
 public:
+  VectorType(const VectorType &) = delete;
+  VectorType &operator=(const VectorType &) = delete;
+
   /// This static method is the primary way to construct an VectorType.
   static VectorType *get(Type *ElementType, unsigned NumElements);
 
@@ -421,13 +423,10 @@ public:
   /// Return true if the specified type is valid as a element type.
   static bool isValidElementType(Type *ElemTy);
 
-  /// Return the number of elements in the Vector type.
-  unsigned getNumElements() const { return NumElements; }
-
   /// Return the number of bits in the Vector type.
   /// Returns zero when the vector is a vector of pointers.
   unsigned getBitWidth() const {
-    return NumElements * getElementType()->getPrimitiveSizeInBits();
+    return getNumElements() * getElementType()->getPrimitiveSizeInBits();
   }
 
   /// Methods for support type inquiry through isa, cast, and dyn_cast.
@@ -441,12 +440,15 @@ unsigned Type::getVectorNumElements() const {
 }
 
 /// Class to represent pointers.
-class PointerType : public SequentialType {
-  PointerType(const PointerType &) = delete;
-  const PointerType &operator=(const PointerType &) = delete;
+class PointerType : public Type {
   explicit PointerType(Type *ElType, unsigned AddrSpace);
 
+  Type *PointeeTy;
+
 public:
+  PointerType(const PointerType &) = delete;
+  PointerType &operator=(const PointerType &) = delete;
+
   /// This constructs a pointer to an object of the specified type in a numbered
   /// address space.
   static PointerType *get(Type *ElementType, unsigned AddressSpace);
@@ -456,6 +458,8 @@ public:
   static PointerType *getUnqual(Type *ElementType) {
     return PointerType::get(ElementType, 0);
   }
+
+  Type *getElementType() const { return PointeeTy; }
 
   /// Return true if the specified type is valid as a element type.
   static bool isValidElementType(Type *ElemTy);
@@ -476,6 +480,6 @@ unsigned Type::getPointerAddressSpace() const {
   return cast<PointerType>(getScalarType())->getAddressSpace();
 }
 
-} // End llvm namespace
+} // end namespace llvm
 
-#endif
+#endif // LLVM_IR_DERIVEDTYPES_H

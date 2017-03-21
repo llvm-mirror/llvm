@@ -80,7 +80,7 @@ X86RegisterInfo::X86RegisterInfo(const Triple &TT)
 
 bool
 X86RegisterInfo::trackLivenessAfterRegAlloc(const MachineFunction &MF) const {
-  // ExeDepsFixer and PostRAScheduler require liveness.
+  // ExecutionDepsFixer and PostRAScheduler require liveness.
   return true;
 }
 
@@ -270,7 +270,7 @@ X86RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   bool HasSSE = Subtarget.hasSSE1();
   bool HasAVX = Subtarget.hasAVX();
   bool HasAVX512 = Subtarget.hasAVX512();
-  bool CallsEHReturn = MF->getMMI().callsEHReturn();
+  bool CallsEHReturn = MF->callsEHReturn();
 
   switch (MF->getFunction()->getCallingConv()) {
   case CallingConv::GHC:
@@ -337,7 +337,9 @@ X86RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
         return CSR_64_AllRegs_AVX512_SaveList;
       if (HasAVX)
         return CSR_64_AllRegs_AVX_SaveList;
-      return CSR_64_AllRegs_SaveList;
+      if (HasSSE)
+        return CSR_64_AllRegs_SaveList;
+      return CSR_64_AllRegs_NoSSE_SaveList;
     } else {
       if (HasAVX512)
         return CSR_32_AllRegs_AVX512_SaveList;
@@ -447,7 +449,9 @@ X86RegisterInfo::getCallPreservedMask(const MachineFunction &MF,
         return CSR_64_AllRegs_AVX512_RegMask;
       if (HasAVX)
         return CSR_64_AllRegs_AVX_RegMask;
-      return CSR_64_AllRegs_RegMask;
+      if (HasSSE)
+        return CSR_64_AllRegs_RegMask;
+      return CSR_64_AllRegs_NoSSE_RegMask;
     } else {
       if (HasAVX512)
         return CSR_32_AllRegs_AVX512_RegMask;
@@ -558,6 +562,8 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
     }
   }
 
+  assert(checkAllSuperRegsMarked(Reserved,
+                                 {X86::SIL, X86::DIL, X86::BPL, X86::SPL}));
   return Reserved;
 }
 

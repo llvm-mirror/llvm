@@ -15,96 +15,118 @@ class InstSI <dag outs, dag ins, string asm = "",
               list<dag> pattern = []> :
   AMDGPUInst<outs, ins, asm, pattern>, PredicateControl {
 
-  field bits<1> VM_CNT = 0;
-  field bits<1> EXP_CNT = 0;
-  field bits<1> LGKM_CNT = 0;
+  // Low bits - basic encoding information.
+  field bit SALU = 0;
+  field bit VALU = 0;
 
-  field bits<1> SALU = 0;
-  field bits<1> VALU = 0;
+  // SALU instruction formats.
+  field bit SOP1 = 0;
+  field bit SOP2 = 0;
+  field bit SOPC = 0;
+  field bit SOPK = 0;
+  field bit SOPP = 0;
 
-  field bits<1> SOP1 = 0;
-  field bits<1> SOP2 = 0;
-  field bits<1> SOPC = 0;
-  field bits<1> SOPK = 0;
-  field bits<1> SOPP = 0;
+  // VALU instruction formats.
+  field bit VOP1 = 0;
+  field bit VOP2 = 0;
+  field bit VOPC = 0;
+  field bit VOP3 = 0;
+  field bit VOP3P = 0;
+  field bit VINTRP = 0;
+  field bit SDWA = 0;
+  field bit DPP = 0;
 
-  field bits<1> VOP1 = 0;
-  field bits<1> VOP2 = 0;
-  field bits<1> VOP3 = 0;
-  field bits<1> VOPC = 0;
-  field bits<1> SDWA = 0;
-  field bits<1> DPP = 0;
+  // Memory instruction formats.
+  field bit MUBUF = 0;
+  field bit MTBUF = 0;
+  field bit SMRD = 0;
+  field bit MIMG = 0;
+  field bit EXP = 0;
+  field bit FLAT = 0;
+  field bit DS = 0;
 
-  field bits<1> MUBUF = 0;
-  field bits<1> MTBUF = 0;
-  field bits<1> SMRD = 0;
-  field bits<1> DS = 0;
-  field bits<1> MIMG = 0;
-  field bits<1> FLAT = 0;
+   // Pseudo instruction formats.
+  field bit VGPRSpill = 0;
+  field bit SGPRSpill = 0;
+
+  // High bits - other information.
+  field bit VM_CNT = 0;
+  field bit EXP_CNT = 0;
+  field bit LGKM_CNT = 0;
 
   // Whether WQM _must_ be enabled for this instruction.
-  field bits<1> WQM = 0;
-  field bits<1> VGPRSpill = 0;
-  field bits<1> SGPRSpill = 0;
-
-  // This bit tells the assembler to use the 32-bit encoding in case it
-  // is unable to infer the encoding from the operands.
-  field bits<1> VOPAsmPrefer32Bit = 0;
-
-  field bits<1> Gather4 = 0;
+  field bit WQM = 0;
 
   // Whether WQM _must_ be disabled for this instruction.
-  field bits<1> DisableWQM = 0;
+  field bit DisableWQM = 0;
+
+  field bit Gather4 = 0;
 
   // Most sopk treat the immediate as a signed 16-bit, however some
   // use it as unsigned.
-  field bits<1> SOPKZext = 0;
+  field bit SOPKZext = 0;
 
   // This is an s_store_dword* instruction that requires a cache flush
   // on wave termination. It is necessary to distinguish from mayStore
   // SMEM instructions like the cache flush ones.
-  field bits<1> ScalarStore = 0;
+  field bit ScalarStore = 0;
 
   // Whether the operands can be ignored when computing the
   // instruction size.
-  field bits<1> FixedSize = 0;
+  field bit FixedSize = 0;
+
+  // This bit tells the assembler to use the 32-bit encoding in case it
+  // is unable to infer the encoding from the operands.
+  field bit VOPAsmPrefer32Bit = 0;
+
+  // This bit indicates that this has a floating point result type, so
+  // the clamp modifier has floating point semantics.
+  field bit FPClamp = 0;
 
   // These need to be kept in sync with the enum in SIInstrFlags.
-  let TSFlags{0} = VM_CNT;
-  let TSFlags{1} = EXP_CNT;
-  let TSFlags{2} = LGKM_CNT;
+  let TSFlags{0} = SALU;
+  let TSFlags{1} = VALU;
 
-  let TSFlags{3} = SALU;
-  let TSFlags{4} = VALU;
+  let TSFlags{2} = SOP1;
+  let TSFlags{3} = SOP2;
+  let TSFlags{4} = SOPC;
+  let TSFlags{5} = SOPK;
+  let TSFlags{6} = SOPP;
 
-  let TSFlags{5} = SOP1;
-  let TSFlags{6} = SOP2;
-  let TSFlags{7} = SOPC;
-  let TSFlags{8} = SOPK;
-  let TSFlags{9} = SOPP;
+  let TSFlags{7} = VOP1;
+  let TSFlags{8} = VOP2;
+  let TSFlags{9} = VOPC;
+  let TSFlags{10} = VOP3;
+  let TSFlags{12} = VOP3P;
 
-  let TSFlags{10} = VOP1;
-  let TSFlags{11} = VOP2;
-  let TSFlags{12} = VOP3;
-  let TSFlags{13} = VOPC;
+  let TSFlags{13} = VINTRP;
   let TSFlags{14} = SDWA;
   let TSFlags{15} = DPP;
 
   let TSFlags{16} = MUBUF;
   let TSFlags{17} = MTBUF;
   let TSFlags{18} = SMRD;
-  let TSFlags{19} = DS;
-  let TSFlags{20} = MIMG;
+  let TSFlags{19} = MIMG;
+  let TSFlags{20} = EXP;
   let TSFlags{21} = FLAT;
-  let TSFlags{22} = WQM;
+  let TSFlags{22} = DS;
+
   let TSFlags{23} = VGPRSpill;
   let TSFlags{24} = SGPRSpill;
-  let TSFlags{25} = VOPAsmPrefer32Bit;
-  let TSFlags{26} = Gather4;
-  let TSFlags{27} = DisableWQM;
-  let TSFlags{28} = SOPKZext;
-  let TSFlags{29} = ScalarStore;
-  let TSFlags{30} = FixedSize;
+
+  let TSFlags{32} = VM_CNT;
+  let TSFlags{33} = EXP_CNT;
+  let TSFlags{34} = LGKM_CNT;
+
+  let TSFlags{35} = WQM;
+  let TSFlags{36} = DisableWQM;
+  let TSFlags{37} = Gather4;
+
+  let TSFlags{38} = SOPKZext;
+  let TSFlags{39} = ScalarStore;
+  let TSFlags{40} = FixedSize;
+  let TSFlags{41} = VOPAsmPrefer32Bit;
+  let TSFlags{42} = FPClamp;
 
   let SchedRW = [Write32Bit];
 
@@ -227,9 +249,32 @@ let Uses = [EXEC] in {
 
 class VINTRPCommon <dag outs, dag ins, string asm, list<dag> pattern> :
     InstSI <outs, ins, asm, pattern> {
-  let mayLoad = 1;
+  let VINTRP = 1;
+  // VINTRP instructions read parameter values from LDS, but these parameter
+  // values are stored outside of the LDS memory that is allocated to the
+  // shader for general purpose use.
+  //
+  // While it may be possible for ds_read/ds_write instructions to access
+  // the parameter values in LDS, this would essentially be an out-of-bounds
+  // memory access which we consider to be undefined behavior.
+  //
+  // So even though these instructions read memory, this memory is outside the
+  // addressable memory space for the shader, and we consider these instructions
+  // to be readnone.
+  let mayLoad = 0;
   let mayStore = 0;
   let hasSideEffects = 0;
+}
+
+class EXPCommon<dag outs, dag ins, string asm, list<dag> pattern> :
+  InstSI<outs, ins, asm, pattern> {
+  let EXP = 1;
+  let EXP_CNT = 1;
+  let mayLoad = 0; // Set to 1 if done bit is set.
+  let mayStore = 1;
+  let UseNamedOperandTable = 1;
+  let Uses = [EXEC];
+  let SchedRW = [WriteExport];
 }
 
 } // End Uses = [EXEC]

@@ -163,15 +163,13 @@ bb3:
   ret void
 }
 
-; FIXME: Should be able to use s_cbranch_scc0
 ; GCN-LABEL: {{^}}long_backward_sbranch:
-; GCN: v_mov_b32_e32 [[LOOPIDX:v[0-9]+]], 0{{$}}
+; GCN: s_mov_b32 [[LOOPIDX:s[0-9]+]], 0{{$}}
 
 ; GCN: [[LOOPBB:BB[0-9]+_[0-9]+]]: ; %bb2
 ; GCN-NEXT: ; =>This Inner Loop Header: Depth=1
-; GCN-NEXT: v_add_i32_e32 [[INC:v[0-9]+]], vcc, 1, [[LOOPIDX]]
-; GCN-NEXT: v_cmp_gt_i32_e32 vcc, 10, [[INC]]
-; GCN-NEXT: s_and_b64 vcc, exec, vcc
+; GCN-NEXT: s_add_i32 [[INC:s[0-9]+]], [[LOOPIDX]], 1
+; GCN-NEXT: s_cmp_lt_i32 [[INC]], 10
 
 ; GCN-NEXT: ;;#ASMSTART
 ; GCN-NEXT: v_nop_e64
@@ -179,7 +177,7 @@ bb3:
 ; GCN-NEXT: v_nop_e64
 ; GCN-NEXT: ;;#ASMEND
 
-; GCN-NEXT: s_cbranch_vccz [[ENDBB:BB[0-9]+_[0-9]+]]
+; GCN-NEXT: s_cbranch_scc0 [[ENDBB:BB[0-9]+_[0-9]+]]
 
 ; GCN-NEXT: [[LONG_JUMP:BB[0-9]+_[0-9]+]]: ; %bb2
 ; GCN-NEXT: ; in Loop: Header=[[LOOPBB]] Depth=1
@@ -337,6 +335,12 @@ loop:
 ; GCN-NEXT: ;;#ASMEND
 
 ; GCN-NEXT: [[BB3]]: ; %bb3
+; GCN-NEXT: ;;#ASMSTART
+; GCN-NEXT: v_nop_e64
+; GCN-NEXT: ;;#ASMEND
+; GCN-NEXT: ;;#ASMSTART
+; GCN-NEXT: v_nop_e64
+; GCN-NEXT: ;;#ASMEND
 ; GCN-NEXT: s_endpgm
 define void @expand_requires_expand(i32 %cond0) #0 {
 bb0:
@@ -358,6 +362,12 @@ bb2:
   br label %bb3
 
 bb3:
+; These NOPs prevent tail-duplication-based outlining
+; from firing, which defeats the need to expand the branches and this test.
+  call void asm sideeffect
+   "v_nop_e64", ""() #0
+  call void asm sideeffect
+   "v_nop_e64", ""() #0
   ret void
 }
 
@@ -387,6 +397,7 @@ bb3:
 
 ; GCN-NEXT: [[ENDIF]]: ; %endif
 ; GCN-NEXT: s_or_b64 exec, exec, [[MASK]]
+; GCN-NEXT: s_sleep 5
 ; GCN-NEXT: s_endpgm
 define void @uniform_inside_divergent(i32 addrspace(1)* %out, i32 %cond) #0 {
 entry:
@@ -404,6 +415,9 @@ if_uniform:
   br label %endif
 
 endif:
+  ; layout can remove the split branch if it can copy the return block.
+  ; This call makes the return block long enough that it doesn't get copied.
+  call void @llvm.amdgcn.s.sleep(i32 5);
   ret void
 }
 
@@ -477,14 +491,14 @@ ret:
 
 ; GCN-LABEL: {{^}}long_branch_hang:
 ; GCN: s_cmp_lt_i32 s{{[0-9]+}}, 6
-; GCN-NEXT: s_cbranch_scc1 [[LONG_BR_0:BB[0-9]+_[0-9]+]]
-; GCN-NEXT: s_branch  [[SHORTB:BB[0-9]+_[0-9]+]]
+; GCN-NEXT: s_cbranch_scc1 {{BB[0-9]+_[0-9]+}}
+; GCN-NEXT: s_branch [[LONG_BR_0:BB[0-9]+_[0-9]+]]
+; GCN-NEXT: BB{{[0-9]+_[0-9]+}}:
 
-; GCN-NEXT: [[LONG_BR_0]]:
 ; GCN: s_add_u32 vcc_lo, vcc_lo, [[LONG_BR_DEST0:BB[0-9]+_[0-9]+]]-(
 ; GCN: s_setpc_b64
 
-; GCN: [[SHORTB]]:
+; GCN-NEXT: [[LONG_BR_0]]:
 ; GCN-DAG: v_cmp_lt_i32
 ; GCN-DAG: v_cmp_gt_i32
 ; GCN: s_cbranch_vccnz
@@ -493,9 +507,8 @@ ret:
 ; GCN: s_setpc_b64
 
 ; GCN: [[LONG_BR_DEST0]]
-; GCN: s_cmp_eq_u32
-; GCN-NEXT: ; implicit-def
-; GCN-NEXT: s_cbranch_scc0
+; GCN: v_cmp_ne_u32_e32
+; GCN-NEXT: s_cbranch_vccz
 ; GCN: s_setpc_b64
 
 ; GCN: s_endpgm

@@ -29,8 +29,10 @@
 #include "llvm/CodeGen/LiveStackAnalysis.h"
 #include "llvm/CodeGen/MachineBlockFrequencyInfo.h"
 #include "llvm/CodeGen/MachineDominators.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
+#include "llvm/CodeGen/MachineOptimizationRemarkEmitter.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/RegAllocRegistry.h"
@@ -125,6 +127,7 @@ class RAGreedy : public MachineFunctionPass,
   MachineBlockFrequencyInfo *MBFI;
   MachineDominatorTree *DomTree;
   MachineLoopInfo *Loops;
+  MachineOptimizationRemarkEmitter *ORE;
   EdgeBundles *Bundles;
   SpillPlacement *SpillPlacer;
   LiveDebugVariables *DebugVars;
@@ -419,10 +422,43 @@ private:
   void collectHintInfo(unsigned, HintsInfo &);
 
   bool isUnusedCalleeSavedReg(unsigned PhysReg) const;
+
+  /// Compute and report the number of spills and reloads for a loop.
+  void reportNumberOfSplillsReloads(MachineLoop *L, unsigned &Reloads,
+                                    unsigned &FoldedReloads, unsigned &Spills,
+                                    unsigned &FoldedSpills);
+
+  /// Report the number of spills and reloads for each loop.
+  void reportNumberOfSplillsReloads() {
+    for (MachineLoop *L : *Loops) {
+      unsigned Reloads, FoldedReloads, Spills, FoldedSpills;
+      reportNumberOfSplillsReloads(L, Reloads, FoldedReloads, Spills,
+                                   FoldedSpills);
+    }
+  }
 };
 } // end anonymous namespace
 
 char RAGreedy::ID = 0;
+char &llvm::RAGreedyID = RAGreedy::ID;
+
+INITIALIZE_PASS_BEGIN(RAGreedy, "greedy",
+                "Greedy Register Allocator", false, false)
+INITIALIZE_PASS_DEPENDENCY(LiveDebugVariables)
+INITIALIZE_PASS_DEPENDENCY(SlotIndexes)
+INITIALIZE_PASS_DEPENDENCY(LiveIntervals)
+INITIALIZE_PASS_DEPENDENCY(RegisterCoalescer)
+INITIALIZE_PASS_DEPENDENCY(MachineScheduler)
+INITIALIZE_PASS_DEPENDENCY(LiveStacks)
+INITIALIZE_PASS_DEPENDENCY(MachineDominatorTree)
+INITIALIZE_PASS_DEPENDENCY(MachineLoopInfo)
+INITIALIZE_PASS_DEPENDENCY(VirtRegMap)
+INITIALIZE_PASS_DEPENDENCY(LiveRegMatrix)
+INITIALIZE_PASS_DEPENDENCY(EdgeBundles)
+INITIALIZE_PASS_DEPENDENCY(SpillPlacement)
+INITIALIZE_PASS_DEPENDENCY(MachineOptimizationRemarkEmitterPass)
+INITIALIZE_PASS_END(RAGreedy, "greedy",
+                "Greedy Register Allocator", false, false)
 
 #ifndef NDEBUG
 const char *const RAGreedy::StageName[] = {
@@ -446,19 +482,6 @@ FunctionPass* llvm::createGreedyRegisterAllocator() {
 }
 
 RAGreedy::RAGreedy(): MachineFunctionPass(ID) {
-  initializeLiveDebugVariablesPass(*PassRegistry::getPassRegistry());
-  initializeSlotIndexesPass(*PassRegistry::getPassRegistry());
-  initializeLiveIntervalsPass(*PassRegistry::getPassRegistry());
-  initializeSlotIndexesPass(*PassRegistry::getPassRegistry());
-  initializeRegisterCoalescerPass(*PassRegistry::getPassRegistry());
-  initializeMachineSchedulerPass(*PassRegistry::getPassRegistry());
-  initializeLiveStacksPass(*PassRegistry::getPassRegistry());
-  initializeMachineDominatorTreePass(*PassRegistry::getPassRegistry());
-  initializeMachineLoopInfoPass(*PassRegistry::getPassRegistry());
-  initializeVirtRegMapPass(*PassRegistry::getPassRegistry());
-  initializeLiveRegMatrixPass(*PassRegistry::getPassRegistry());
-  initializeEdgeBundlesPass(*PassRegistry::getPassRegistry());
-  initializeSpillPlacementPass(*PassRegistry::getPassRegistry());
 }
 
 void RAGreedy::getAnalysisUsage(AnalysisUsage &AU) const {
@@ -485,6 +508,7 @@ void RAGreedy::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addPreserved<LiveRegMatrix>();
   AU.addRequired<EdgeBundles>();
   AU.addRequired<SpillPlacement>();
+  AU.addRequired<MachineOptimizationRemarkEmitterPass>();
   MachineFunctionPass::getAnalysisUsage(AU);
 }
 
@@ -641,6 +665,9 @@ unsigned RAGreedy::tryAssign(LiveInterval &VirtReg,
         evictInterference(VirtReg, Hint, NewVRegs);
         return Hint;
       }
+      // Record the missed hint, we may be able to recover
+      // at the end if the surrounding allocation changed.
+      SetOfBrokenHints.insert(&VirtReg);
     }
 
   // Try to evict interference from a cheaper alternative.
@@ -671,7 +698,7 @@ unsigned RAGreedy::canReassign(LiveInterval &VirtReg, unsigned PrevReg) {
     MCRegUnitIterator Units(PhysReg, TRI);
     for (; Units.isValid(); ++Units) {
       // Instantiate a "subquery", not to be confused with the Queries array.
-      LiveIntervalUnion::Query subQ(&VirtReg, &Matrix->getLiveUnions()[*Units]);
+      LiveIntervalUnion::Query subQ(VirtReg, Matrix->getLiveUnions()[*Units]);
       if (subQ.checkInterference())
         break;
     }
@@ -822,7 +849,11 @@ void RAGreedy::evictInterference(LiveInterval &VirtReg, unsigned PhysReg,
   SmallVector<LiveInterval*, 8> Intfs;
   for (MCRegUnitIterator Units(PhysReg, TRI); Units.isValid(); ++Units) {
     LiveIntervalUnion::Query &Q = Matrix->query(VirtReg, *Units);
-    assert(Q.seenAllInterferences() && "Didn't check all interfererences.");
+    // We usually have the interfering VRegs cached so collectInterferingVRegs()
+    // should be fast, we may need to recalculate if when different physregs
+    // overlap the same register unit so we had different SubRanges queried
+    // against it.
+    Q.collectInterferingVRegs();
     ArrayRef<LiveInterval*> IVR = Q.interferingVRegs();
     Intfs.append(IVR.begin(), IVR.end());
   }
@@ -861,7 +892,8 @@ unsigned RAGreedy::tryEvict(LiveInterval &VirtReg,
                             AllocationOrder &Order,
                             SmallVectorImpl<unsigned> &NewVRegs,
                             unsigned CostPerUseLimit) {
-  NamedRegionTimer T("Evict", TimerGroupName, TimePassesIsEnabled);
+  NamedRegionTimer T("evict", "Evict", TimerGroupName, TimerGroupDescription,
+                     TimePassesIsEnabled);
 
   // Keep track of the cheapest interference seen so far.
   EvictionCost BestCost;
@@ -1959,7 +1991,8 @@ unsigned RAGreedy::trySplit(LiveInterval &VirtReg, AllocationOrder &Order,
 
   // Local intervals are handled separately.
   if (LIS->intervalIsInOneMBB(VirtReg)) {
-    NamedRegionTimer T("Local Splitting", TimerGroupName, TimePassesIsEnabled);
+    NamedRegionTimer T("local_split", "Local Splitting", TimerGroupName,
+                       TimerGroupDescription, TimePassesIsEnabled);
     SA->analyze(&VirtReg);
     unsigned PhysReg = tryLocalSplit(VirtReg, Order, NewVRegs);
     if (PhysReg || !NewVRegs.empty())
@@ -1967,7 +2000,8 @@ unsigned RAGreedy::trySplit(LiveInterval &VirtReg, AllocationOrder &Order,
     return tryInstructionSplit(VirtReg, Order, NewVRegs);
   }
 
-  NamedRegionTimer T("Global Splitting", TimerGroupName, TimePassesIsEnabled);
+  NamedRegionTimer T("global_split", "Global Splitting", TimerGroupName,
+                     TimerGroupDescription, TimePassesIsEnabled);
 
   SA->analyze(&VirtReg);
 
@@ -2585,7 +2619,8 @@ unsigned RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
     DEBUG(dbgs() << "Do as if this register is in memory\n");
     NewVRegs.push_back(VirtReg.reg);
   } else {
-    NamedRegionTimer T("Spiller", TimerGroupName, TimePassesIsEnabled);
+    NamedRegionTimer T("spill", "Spiller", TimerGroupName,
+                       TimerGroupDescription, TimePassesIsEnabled);
     LiveRangeEdit LRE(&VirtReg, NewVRegs, *MF, *LIS, VRM, this, &DeadRemats);
     spiller().spill(LRE);
     setStage(NewVRegs.begin(), NewVRegs.end(), RS_Done);
@@ -2597,6 +2632,69 @@ unsigned RAGreedy::selectOrSplitImpl(LiveInterval &VirtReg,
   // The live virtual register requesting allocation was spilled, so tell
   // the caller not to allocate anything during this round.
   return 0;
+}
+
+void RAGreedy::reportNumberOfSplillsReloads(MachineLoop *L, unsigned &Reloads,
+                                            unsigned &FoldedReloads,
+                                            unsigned &Spills,
+                                            unsigned &FoldedSpills) {
+  Reloads = 0;
+  FoldedReloads = 0;
+  Spills = 0;
+  FoldedSpills = 0;
+
+  // Sum up the spill and reloads in subloops.
+  for (MachineLoop *SubLoop : *L) {
+    unsigned SubReloads;
+    unsigned SubFoldedReloads;
+    unsigned SubSpills;
+    unsigned SubFoldedSpills;
+
+    reportNumberOfSplillsReloads(SubLoop, SubReloads, SubFoldedReloads,
+                                 SubSpills, SubFoldedSpills);
+    Reloads += SubReloads;
+    FoldedReloads += SubFoldedReloads;
+    Spills += SubSpills;
+    FoldedSpills += SubFoldedSpills;
+  }
+
+  const MachineFrameInfo &MFI = MF->getFrameInfo();
+  const TargetInstrInfo *TII = MF->getSubtarget().getInstrInfo();
+  int FI;
+
+  for (MachineBasicBlock *MBB : L->getBlocks())
+    // Handle blocks that were not included in subloops.
+    if (Loops->getLoopFor(MBB) == L)
+      for (MachineInstr &MI : *MBB) {
+        const MachineMemOperand *MMO;
+
+        if (TII->isLoadFromStackSlot(MI, FI) && MFI.isSpillSlotObjectIndex(FI))
+          ++Reloads;
+        else if (TII->hasLoadFromStackSlot(MI, MMO, FI) &&
+                 MFI.isSpillSlotObjectIndex(FI))
+          ++FoldedReloads;
+        else if (TII->isStoreToStackSlot(MI, FI) &&
+                 MFI.isSpillSlotObjectIndex(FI))
+          ++Spills;
+        else if (TII->hasStoreToStackSlot(MI, MMO, FI) &&
+                 MFI.isSpillSlotObjectIndex(FI))
+          ++FoldedSpills;
+      }
+
+  if (Reloads || FoldedReloads || Spills || FoldedSpills) {
+    using namespace ore;
+    MachineOptimizationRemarkMissed R(DEBUG_TYPE, "LoopSpillReload",
+                                      L->getStartLoc(), L->getHeader());
+    if (Spills)
+      R << NV("NumSpills", Spills) << " spills ";
+    if (FoldedSpills)
+      R << NV("NumFoldedSpills", FoldedSpills) << " folded spills ";
+    if (Reloads)
+      R << NV("NumReloads", Reloads) << " reloads ";
+    if (FoldedReloads)
+      R << NV("NumFoldedReloads", FoldedReloads) << " folded reloads ";
+    ORE->emit(R << "generated in loop");
+  }
 }
 
 bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
@@ -2621,6 +2719,7 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   Indexes = &getAnalysis<SlotIndexes>();
   MBFI = &getAnalysis<MachineBlockFrequencyInfo>();
   DomTree = &getAnalysis<MachineDominatorTree>();
+  ORE = &getAnalysis<MachineOptimizationRemarkEmitterPass>().getORE();
   SpillerInstance.reset(createInlineSpiller(*this, *MF, *VRM));
   Loops = &getAnalysis<MachineLoopInfo>();
   Bundles = &getAnalysis<EdgeBundles>();
@@ -2646,6 +2745,7 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   allocatePhysRegs();
   tryHintsRecoloring();
   postOptimization();
+  reportNumberOfSplillsReloads();
 
   releaseMemory();
   return true;

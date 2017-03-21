@@ -63,14 +63,14 @@ MCSymbol *DebugHandlerBase::getLabelAfterInsn(const MachineInstr *MI) {
   return LabelsAfterInsn.lookup(MI);
 }
 
-// Determine the relative position of the pieces described by P1 and P2.
-// Returns  -1 if P1 is entirely before P2, 0 if P1 and P2 overlap,
-// 1 if P1 is entirely after P2.
-int DebugHandlerBase::pieceCmp(const DIExpression *P1, const DIExpression *P2) {
-  unsigned l1 = P1->getBitPieceOffset();
-  unsigned l2 = P2->getBitPieceOffset();
-  unsigned r1 = l1 + P1->getBitPieceSize();
-  unsigned r2 = l2 + P2->getBitPieceSize();
+int DebugHandlerBase::fragmentCmp(const DIExpression *P1,
+                                  const DIExpression *P2) {
+  auto Fragment1 = *P1->getFragmentInfo();
+  auto Fragment2 = *P2->getFragmentInfo();
+  unsigned l1 = Fragment1.OffsetInBits;
+  unsigned l2 = Fragment2.OffsetInBits;
+  unsigned r1 = l1 + Fragment1.SizeInBits;
+  unsigned r2 = l2 + Fragment2.SizeInBits;
   if (r1 <= l2)
     return -1;
   else if (r2 <= l1)
@@ -79,11 +79,11 @@ int DebugHandlerBase::pieceCmp(const DIExpression *P1, const DIExpression *P2) {
     return 0;
 }
 
-/// Determine whether two variable pieces overlap.
-bool DebugHandlerBase::piecesOverlap(const DIExpression *P1, const DIExpression *P2) {
-  if (!P1->isBitPiece() || !P2->isBitPiece())
+bool DebugHandlerBase::fragmentsOverlap(const DIExpression *P1,
+                                        const DIExpression *P2) {
+  if (!P1->isFragment() || !P2->isFragment())
     return true;
-  return pieceCmp(P1, P2) == 0;
+  return fragmentCmp(P1, P2) == 0;
 }
 
 /// If this type is derived from a base type then return base type size.
@@ -115,12 +115,34 @@ uint64_t DebugHandlerBase::getBaseTypeSize(const DITypeRef TyRef) {
   return getBaseTypeSize(BaseType);
 }
 
+bool hasDebugInfo(const MachineModuleInfo *MMI, const MachineFunction *MF) {
+  if (!MMI->hasDebugInfo())
+    return false;
+  auto *SP = MF->getFunction()->getSubprogram();
+  if (!SP)
+    return false;
+  assert(SP->getUnit());
+  auto EK = SP->getUnit()->getEmissionKind();
+  if (EK == DICompileUnit::NoDebug)
+    return false;
+  return true;
+}
+
 void DebugHandlerBase::beginFunction(const MachineFunction *MF) {
+  assert(Asm);
+
+  if (!hasDebugInfo(MMI, MF)) {
+    skippedNonDebugFunction();
+    return;
+  }
+
   // Grab the lexical scopes for the function, if we don't have any of those
   // then we're not going to be able to do anything.
   LScopes.initialize(*MF);
-  if (LScopes.empty())
+  if (LScopes.empty()) {
+    beginFunctionImpl(MF);
     return;
+  }
 
   // Make sure that each lexical scope will have a begin/end label.
   identifyScopeMarkers();
@@ -142,14 +164,15 @@ void DebugHandlerBase::beginFunction(const MachineFunction *MF) {
     if (DIVar->isParameter() &&
         getDISubprogram(DIVar->getScope())->describes(MF->getFunction())) {
       LabelsBeforeInsn[Ranges.front().first] = Asm->getFunctionBegin();
-      if (Ranges.front().first->getDebugExpression()->isBitPiece()) {
-        // Mark all non-overlapping initial pieces.
+      if (Ranges.front().first->getDebugExpression()->isFragment()) {
+        // Mark all non-overlapping initial fragments.
         for (auto I = Ranges.begin(); I != Ranges.end(); ++I) {
-          const DIExpression *Piece = I->first->getDebugExpression();
+          const DIExpression *Fragment = I->first->getDebugExpression();
           if (std::all_of(Ranges.begin(), I,
                           [&](DbgValueHistoryMap::InstrRange Pred) {
-                return !piecesOverlap(Piece, Pred.first->getDebugExpression());
-              }))
+                            return !fragmentsOverlap(
+                                Fragment, Pred.first->getDebugExpression());
+                          }))
             LabelsBeforeInsn[I->first] = Asm->getFunctionBegin();
           else
             break;
@@ -166,6 +189,7 @@ void DebugHandlerBase::beginFunction(const MachineFunction *MF) {
 
   PrevInstLoc = DebugLoc();
   PrevLabel = Asm->getFunctionBegin();
+  beginFunctionImpl(MF);
 }
 
 void DebugHandlerBase::beginInstruction(const MachineInstr *MI) {
@@ -201,8 +225,10 @@ void DebugHandlerBase::endInstruction() {
   assert(CurMI != nullptr);
   // Don't create a new label after DBG_VALUE instructions.
   // They don't generate code.
-  if (!CurMI->isDebugValue())
+  if (!CurMI->isDebugValue()) {
     PrevLabel = nullptr;
+    PrevInstBB = CurMI->getParent();
+  }
 
   DenseMap<const MachineInstr *, MCSymbol *>::iterator I =
       LabelsAfterInsn.find(CurMI);
@@ -225,6 +251,8 @@ void DebugHandlerBase::endInstruction() {
 }
 
 void DebugHandlerBase::endFunction(const MachineFunction *MF) {
+  if (hasDebugInfo(MMI, MF))
+    endFunctionImpl(MF);
   DbgValues.clear();
   LabelsBeforeInsn.clear();
   LabelsAfterInsn.clear();

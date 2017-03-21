@@ -1,5 +1,5 @@
 ; RUN: llc -march=amdgcn -mcpu=verde -mattr=+vgpr-spilling -verify-machineinstrs < %s | FileCheck %s
-; RUN: llc -march=amdgcn -mcpu=tonga -mattr=+vgpr-spilling -verify-machineinstrs < %s | FileCheck %s
+; RUN: llc -march=amdgcn -mcpu=tonga -mattr=-flat-for-global -mattr=+vgpr-spilling -verify-machineinstrs < %s | FileCheck %s
 
 ; This used to fail due to a v_add_i32 instruction with an illegal immediate
 ; operand that was created during Local Stack Slot Allocation. Test case derived
@@ -7,15 +7,13 @@
 ;
 ; CHECK-LABEL: {{^}}main:
 
-; FIXME: add 0?
-; CHECK-DAG: s_movk_i32 [[K0:s[0-9]+]], 0x140
-; CHECK-DAG: v_add_i32_e64 [[ADD_K0:v[0-9]+]], s{{\[[0-9]+:[0-9]+\]}}, [[K0]], 0
-
+; CHECK-DAG: v_mov_b32_e32 [[K:v[0-9]+]], 0x200
+; CHECK-DAG: v_mov_b32_e32 [[ZERO:v[0-9]+]], 0x400{{$}}
 ; CHECK-DAG: v_lshlrev_b32_e32 [[BYTES:v[0-9]+]], 2, v0
-; CHECK-DAG: buffer_store_dword {{v[0-9]+}}, [[ADD_K0]], {{s\[[0-9]+:[0-9]+\]}}, {{s[0-9]+}} offen{{$}}
+; CHECK-DAG: v_and_b32_e32 [[CLAMP_IDX:v[0-9]+]], 0x1fc, [[BYTES]]
 
-; CHECK-DAG: v_add_i32_e32 [[HI_OFF:v[0-9]+]], vcc, 0x200, [[BYTES]]
-; CHECK-DAG: v_add_i32_e32 [[LO_OFF:v[0-9]+]], vcc, 0, [[BYTES]]
+; CHECK-DAG: v_or_b32_e32 [[LO_OFF:v[0-9]+]], [[CLAMP_IDX]], [[K]]
+; CHECK-DAG: v_or_b32_e32 [[HI_OFF:v[0-9]+]], [[CLAMP_IDX]], [[ZERO]]
 
 ; CHECK: buffer_load_dword {{v[0-9]+}}, [[LO_OFF]], {{s\[[0-9]+:[0-9]+\]}}, {{s[0-9]+}} offen
 ; CHECK: buffer_load_dword {{v[0-9]+}}, [[HI_OFF]], {{s\[[0-9]+:[0-9]+\]}}, {{s[0-9]+}} offen

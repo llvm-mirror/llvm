@@ -852,6 +852,27 @@ TEST(StringRefTest, consumeIntegerSigned) {
   }
 }
 
+struct GetDoubleStrings {
+  const char *Str;
+  bool AllowInexact;
+  bool ShouldFail;
+  double D;
+} DoubleStrings[] = {{"0", false, false, 0.0},
+                     {"0.0", false, false, 0.0},
+                     {"-0.0", false, false, -0.0},
+                     {"123.45", false, true, 123.45},
+                     {"123.45", true, false, 123.45}};
+
+TEST(StringRefTest, getAsDouble) {
+  for (const auto &Entry : DoubleStrings) {
+    double Result;
+    StringRef S(Entry.Str);
+    EXPECT_EQ(Entry.ShouldFail, S.getAsDouble(Result, Entry.AllowInexact));
+    if (!Entry.ShouldFail)
+      EXPECT_EQ(Result, Entry.D);
+  }
+}
+
 static const char *join_input[] = { "a", "b", "c" };
 static const char join_result1[] = "a";
 static const char join_result2[] = "a:b:c";
@@ -1000,6 +1021,12 @@ TEST(StringRefTest, DropWhileUntil) {
   StringRef EmptyString = "";
   Taken = EmptyString.drop_while([](char c) { return true; });
   EXPECT_EQ("", Taken);
+}
+
+TEST(StringRefTest, StringLiteral) {
+  constexpr StringLiteral Strings[] = {"Foo", "Bar"};
+  EXPECT_EQ(StringRef("Foo"), Strings[0]);
+  EXPECT_EQ(StringRef("Bar"), Strings[1]);
 }
 
 } // end anonymous namespace

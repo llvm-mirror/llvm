@@ -18,7 +18,11 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/MC/MCDisassembler/MCDisassembler.h"
+#include "llvm/MC/MCDisassembler/MCRelocationInfo.h"
 #include "llvm/MC/MCDisassembler/MCSymbolizer.h"
+#include <cstdint>
+#include <algorithm>
+#include <memory>
 
 namespace llvm {
 
@@ -40,7 +44,7 @@ public:
   AMDGPUDisassembler(const MCSubtargetInfo &STI, MCContext &Ctx) :
     MCDisassembler(STI, Ctx) {}
 
-  ~AMDGPUDisassembler() {}
+  ~AMDGPUDisassembler() override = default;
 
   DecodeStatus getInstruction(MCInst &MI, uint64_t &Size,
                               ArrayRef<uint8_t> Bytes, uint64_t Address,
@@ -52,7 +56,7 @@ public:
   MCOperand createRegOperand(unsigned RegClassID, unsigned Val) const;
   MCOperand createSRegOperand(unsigned SRegClassID, unsigned Val) const;
 
-  MCOperand errOperand(unsigned V, const llvm::Twine& ErrMsg) const;
+  MCOperand errOperand(unsigned V, const Twine& ErrMsg) const;
 
   DecodeStatus tryDecodeInst(const uint8_t* Table,
                               MCInst &MI,
@@ -62,14 +66,17 @@ public:
   MCOperand decodeOperand_VGPR_32(unsigned Val) const;
   MCOperand decodeOperand_VS_32(unsigned Val) const;
   MCOperand decodeOperand_VS_64(unsigned Val) const;
+  MCOperand decodeOperand_VSrc16(unsigned Val) const;
+  MCOperand decodeOperand_VSrcV216(unsigned Val) const;
 
   MCOperand decodeOperand_VReg_64(unsigned Val) const;
   MCOperand decodeOperand_VReg_96(unsigned Val) const;
   MCOperand decodeOperand_VReg_128(unsigned Val) const;
 
   MCOperand decodeOperand_SReg_32(unsigned Val) const;
-  MCOperand decodeOperand_SReg_32_XM0(unsigned Val) const;
+  MCOperand decodeOperand_SReg_32_XM0_XEXEC(unsigned Val) const;
   MCOperand decodeOperand_SReg_64(unsigned Val) const;
+  MCOperand decodeOperand_SReg_64_XEXEC(unsigned Val) const;
   MCOperand decodeOperand_SReg_128(unsigned Val) const;
   MCOperand decodeOperand_SReg_256(unsigned Val) const;
   MCOperand decodeOperand_SReg_512(unsigned Val) const;
@@ -78,15 +85,18 @@ public:
     OPW32,
     OPW64,
     OPW128,
+    OPW16,
+    OPWV216,
     OPW_LAST_,
     OPW_FIRST_ = OPW32
   };
+
   unsigned getVgprClassId(const OpWidthTy Width) const;
   unsigned getSgprClassId(const OpWidthTy Width) const;
   unsigned getTtmpClassId(const OpWidthTy Width) const;
 
   static MCOperand decodeIntImmed(unsigned Imm);
-  static MCOperand decodeFPImmed(bool Is32, unsigned Imm);
+  static MCOperand decodeFPImmed(OpWidthTy Width, unsigned Imm);
   MCOperand decodeLiteralConstant() const;
 
   MCOperand decodeSrcOp(const OpWidthTy Width, unsigned Val) const;
@@ -114,11 +124,9 @@ public:
 
   void tryAddingPcLoadReferenceComment(raw_ostream &cStream,
                                        int64_t Value,
-                                       uint64_t Address) override {
-    assert(false && "Implement if needed");
-  }
+                                       uint64_t Address) override;
 };
 
-} // namespace llvm
+} // end namespace llvm
 
-#endif //LLVM_LIB_TARGET_AMDGPU_DISASSEMBLER_AMDGPUDISASSEMBLER_H
+#endif // LLVM_LIB_TARGET_AMDGPU_DISASSEMBLER_AMDGPUDISASSEMBLER_H

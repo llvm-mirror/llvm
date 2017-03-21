@@ -17,25 +17,30 @@
 #include "MCTargetDesc/AArch64MCTargetDesc.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCELFObjectWriter.h"
+#include "llvm/MC/MCFixup.h"
 #include "llvm/MC/MCValue.h"
+#include "llvm/Support/ELF.h"
 #include "llvm/Support/ErrorHandling.h"
+#include <cassert>
+#include <cstdint>
 
 using namespace llvm;
 
 namespace {
+
 class AArch64ELFObjectWriter : public MCELFObjectTargetWriter {
 public:
   AArch64ELFObjectWriter(uint8_t OSABI, bool IsLittleEndian, bool IsILP32);
 
-  ~AArch64ELFObjectWriter() override;
+  ~AArch64ELFObjectWriter() override = default;
 
 protected:
   unsigned getRelocType(MCContext &Ctx, const MCValue &Target,
                         const MCFixup &Fixup, bool IsPCRel) const override;
   bool IsILP32;
-private:
 };
-}
+
+} // end anonymous namespace
 
 AArch64ELFObjectWriter::AArch64ELFObjectWriter(uint8_t OSABI,
                                                bool IsLittleEndian,
@@ -44,17 +49,15 @@ AArch64ELFObjectWriter::AArch64ELFObjectWriter(uint8_t OSABI,
                               /*HasRelocationAddend*/ true),
       IsILP32(IsILP32) {}
 
-AArch64ELFObjectWriter::~AArch64ELFObjectWriter() {}
-
 #define R_CLS(rtype) \
         IsILP32 ? ELF::R_AARCH64_P32_##rtype : ELF::R_AARCH64_##rtype
 #define BAD_ILP32_MOV(lp64rtype) "ILP32 absolute MOV relocation not "\
         "supported (LP64 eqv: " #lp64rtype ")"
 
 // assumes IsILP32 is true
-bool isNonILP32reloc(const MCFixup &Fixup, AArch64MCExpr::VariantKind RefKind,
-                     MCContext &Ctx)
-{
+static bool isNonILP32reloc(const MCFixup &Fixup,
+                            AArch64MCExpr::VariantKind RefKind,
+                            MCContext &Ctx) {
   if ((unsigned)Fixup.getKind() != AArch64::fixup_aarch64_movw)
     return false;
   switch(RefKind) {

@@ -588,46 +588,6 @@ bool IfConverter::ValidTriangle(BBInfo &TrueBBI, BBInfo &FalseBBI,
   return TExit && TExit == FalseBBI.BB;
 }
 
-/// Increment \p It until it points to a non-debug instruction or to \p End.
-/// @param It Iterator to increment
-/// @param End Iterator that points to end. Will be compared to It
-/// @returns true if It == End, false otherwise.
-static inline bool skipDebugInstructionsForward(
-    MachineBasicBlock::iterator &It,
-    MachineBasicBlock::iterator &End) {
-  while (It != End && It->isDebugValue())
-    It++;
-  return It == End;
-}
-
-/// Shrink the provided inclusive range by one instruction.
-/// If the range was one instruction (\p It == \p Begin), It is not modified,
-/// but \p Empty is set to true.
-static inline void shrinkInclusiveRange(
-    MachineBasicBlock::iterator &Begin,
-    MachineBasicBlock::iterator &It,
-    bool &Empty) {
-  if (It == Begin)
-    Empty = true;
-  else
-    It--;
-}
-
-/// Decrement \p It until it points to a non-debug instruction or the range is
-/// empty.
-/// @param It Iterator to decrement.
-/// @param Begin Iterator that points to beginning. Will be compared to It
-/// @param Empty Set to true if the resulting range is Empty
-/// @returns the value of Empty as a convenience.
-static inline bool skipDebugInstructionsBackward(
-    MachineBasicBlock::iterator &Begin,
-    MachineBasicBlock::iterator &It,
-    bool &Empty) {
-  while (!Empty && It->isDebugValue())
-    shrinkInclusiveRange(Begin, It, Empty);
-  return Empty;
-}
-
 /// Count duplicated instructions and move the iterators to show where they
 /// are.
 /// @param TIB True Iterator Begin
@@ -659,9 +619,9 @@ bool IfConverter::CountDuplicatedInstructions(
 
   while (TIB != TIE && FIB != FIE) {
     // Skip dbg_value instructions. These do not count.
-    if(skipDebugInstructionsForward(TIB, TIE))
-      break;
-    if(skipDebugInstructionsForward(FIB, FIE))
+    TIB = skipDebugInstructionsForward(TIB, TIE);
+    FIB = skipDebugInstructionsForward(FIB, FIE);
+    if (TIB == TIE || FIB == FIE)
       break;
     if (!TIB->isIdenticalTo(*FIB))
       break;
@@ -681,56 +641,42 @@ bool IfConverter::CountDuplicatedInstructions(
   if (TIB == TIE || FIB == FIE)
     return true;
   // Now, in preparation for counting duplicate instructions at the ends of the
-  // blocks, move the end iterators up past any branch instructions.
-  --TIE;
-  --FIE;
-
-  // After this point TIB and TIE define an inclusive range, which means that
-  // TIB == TIE is true when there is one more instruction to consider, not at
-  // the end. Because we may not be able to go before TIB, we need a flag to
-  // indicate a completely empty range.
-  bool TEmpty = false, FEmpty = false;
-
-  // Upon exit TIE and FIE will both point at the last non-shared instruction.
-  // They need to be moved forward to point past the last non-shared
-  // instruction if the range they delimit is non-empty.
-  auto IncrementEndIteratorsOnExit = make_scope_exit([&]() {
-    if (!TEmpty)
-      ++TIE;
-    if (!FEmpty)
-      ++FIE;
-  });
+  // blocks, switch to reverse_iterators. Note that getReverse() returns an
+  // iterator that points to the same instruction, unlike std::reverse_iterator.
+  // We have to do our own shifting so that we get the same range.
+  MachineBasicBlock::reverse_iterator RTIE = std::next(TIE.getReverse());
+  MachineBasicBlock::reverse_iterator RFIE = std::next(FIE.getReverse());
+  const MachineBasicBlock::reverse_iterator RTIB = std::next(TIB.getReverse());
+  const MachineBasicBlock::reverse_iterator RFIB = std::next(FIB.getReverse());
 
   if (!TBB.succ_empty() || !FBB.succ_empty()) {
     if (SkipUnconditionalBranches) {
-      while (!TEmpty && TIE->isUnconditionalBranch())
-        shrinkInclusiveRange(TIB, TIE, TEmpty);
-      while (!FEmpty && FIE->isUnconditionalBranch())
-        shrinkInclusiveRange(FIB, FIE, FEmpty);
+      while (RTIE != RTIB && RTIE->isUnconditionalBranch())
+        ++RTIE;
+      while (RFIE != RFIB && RFIE->isUnconditionalBranch())
+        ++RFIE;
     }
   }
 
-  // If Dups1 includes all of a block, then don't count duplicate
-  // instructions at the end of the blocks.
-  if (TEmpty || FEmpty)
-    return true;
-
   // Count duplicate instructions at the ends of the blocks.
-  while (!TEmpty && !FEmpty) {
+  while (RTIE != RTIB && RFIE != RFIB) {
     // Skip dbg_value instructions. These do not count.
-    if (skipDebugInstructionsBackward(TIB, TIE, TEmpty))
+    // Note that these are reverse iterators going forward.
+    RTIE = skipDebugInstructionsForward(RTIE, RTIB);
+    RFIE = skipDebugInstructionsForward(RFIE, RFIB);
+    if (RTIE == RTIB || RFIE == RFIB)
       break;
-    if (skipDebugInstructionsBackward(FIB, FIE, FEmpty))
-      break;
-    if (!TIE->isIdenticalTo(*FIE))
+    if (!RTIE->isIdenticalTo(*RFIE))
       break;
     // We have to verify that any branch instructions are the same, and then we
     // don't count them toward the # of duplicate instructions.
-    if (!TIE->isBranch())
+    if (!RTIE->isBranch())
       ++Dups2;
-    shrinkInclusiveRange(TIB, TIE, TEmpty);
-    shrinkInclusiveRange(FIB, FIE, FEmpty);
+    ++RTIE;
+    ++RFIE;
   }
+  TIE = std::next(RTIE.getReverse());
+  FIE = std::next(RFIE.getReverse());
   return true;
 }
 
@@ -764,22 +710,21 @@ bool IfConverter::RescanInstructions(
 static void verifySameBranchInstructions(
     MachineBasicBlock *MBB1,
     MachineBasicBlock *MBB2) {
-  MachineBasicBlock::iterator B1 = MBB1->begin();
-  MachineBasicBlock::iterator B2 = MBB2->begin();
-  MachineBasicBlock::iterator E1 = std::prev(MBB1->end());
-  MachineBasicBlock::iterator E2 = std::prev(MBB2->end());
-  bool Empty1 = false, Empty2 = false;
-  while (!Empty1 && !Empty2) {
-    skipDebugInstructionsBackward(B1, E1, Empty1);
-    skipDebugInstructionsBackward(B2, E2, Empty2);
-    if (Empty1 && Empty2)
+  const MachineBasicBlock::reverse_iterator B1 = MBB1->rend();
+  const MachineBasicBlock::reverse_iterator B2 = MBB2->rend();
+  MachineBasicBlock::reverse_iterator E1 = MBB1->rbegin();
+  MachineBasicBlock::reverse_iterator E2 = MBB2->rbegin();
+  while (E1 != B1 && E2 != B2) {
+    skipDebugInstructionsForward(E1, B1);
+    skipDebugInstructionsForward(E2, B2);
+    if (E1 == B1 && E2 == B2)
       break;
 
-    if (Empty1) {
+    if (E1 == B1) {
       assert(!E2->isBranch() && "Branch mis-match, one block is empty.");
       break;
     }
-    if (Empty2) {
+    if (E2 == B2) {
       assert(!E1->isBranch() && "Branch mis-match, one block is empty.");
       break;
     }
@@ -789,8 +734,8 @@ static void verifySameBranchInstructions(
              "Branch mis-match, branch instructions don't match.");
     else
       break;
-    shrinkInclusiveRange(B1, E1, Empty1);
-    shrinkInclusiveRange(B2, E2, Empty2);
+    ++E1;
+    ++E2;
   }
 }
 #endif
@@ -1515,16 +1460,18 @@ bool IfConverter::IfConvertSimple(BBInfo &BBI, IfcvtKind Kind) {
     if (TII->reverseBranchCondition(Cond))
       llvm_unreachable("Unable to reverse branch condition!");
 
-  // Initialize liveins to the first BB. These are potentiall redefined by
-  // predicated instructions.
-  Redefs.init(TRI);
-  Redefs.addLiveIns(CvtMBB);
-  Redefs.addLiveIns(NextMBB);
+  Redefs.init(*TRI);
+  DontKill.init(*TRI);
 
-  // Compute a set of registers which must not be killed by instructions in
-  // BB1: This is everything live-in to BB2.
-  DontKill.init(TRI);
-  DontKill.addLiveIns(NextMBB);
+  if (MRI->tracksLiveness()) {
+    // Initialize liveins to the first BB. These are potentiall redefined by
+    // predicated instructions.
+    Redefs.addLiveIns(CvtMBB);
+    Redefs.addLiveIns(NextMBB);
+    // Compute a set of registers which must not be killed by instructions in
+    // BB1: This is everything live-in to BB2.
+    DontKill.addLiveIns(NextMBB);
+  }
 
   if (CvtMBB.pred_size() > 1) {
     BBI.NonPredSize -= TII->removeBranch(*BBI.BB);
@@ -1621,9 +1568,11 @@ bool IfConverter::IfConvertTriangle(BBInfo &BBI, IfcvtKind Kind) {
 
   // Initialize liveins to the first BB. These are potentially redefined by
   // predicated instructions.
-  Redefs.init(TRI);
-  Redefs.addLiveIns(CvtMBB);
-  Redefs.addLiveIns(NextMBB);
+  Redefs.init(*TRI);
+  if (MRI->tracksLiveness()) {
+    Redefs.addLiveIns(CvtMBB);
+    Redefs.addLiveIns(NextMBB);
+  }
 
   DontKill.clear();
 
@@ -1785,9 +1734,11 @@ bool IfConverter::IfConvertDiamondCommon(
   // - BB1 live-out regs need implicit uses before being redefined by BB2
   //   instructions. We start with BB1 live-ins so we have the live-out regs
   //   after tracking the BB1 instructions.
-  Redefs.init(TRI);
-  Redefs.addLiveIns(MBB1);
-  Redefs.addLiveIns(MBB2);
+  Redefs.init(*TRI);
+  if (MRI->tracksLiveness()) {
+    Redefs.addLiveIns(MBB1);
+    Redefs.addLiveIns(MBB2);
+  }
 
   // Remove the duplicated instructions at the beginnings of both paths.
   // Skip dbg_value instructions
@@ -1811,13 +1762,15 @@ bool IfConverter::IfConvertDiamondCommon(
   // Compute a set of registers which must not be killed by instructions in BB1:
   // This is everything used+live in BB2 after the duplicated instructions. We
   // can compute this set by simulating liveness backwards from the end of BB2.
-  DontKill.init(TRI);
-  for (const MachineInstr &MI : make_range(MBB2.rbegin(), ++DI2.getReverse()))
-    DontKill.stepBackward(MI);
+  DontKill.init(*TRI);
+  if (MRI->tracksLiveness()) {
+    for (const MachineInstr &MI : make_range(MBB2.rbegin(), ++DI2.getReverse()))
+      DontKill.stepBackward(MI);
 
-  for (const MachineInstr &MI : make_range(MBB1.begin(), DI1)) {
-    SmallVector<std::pair<unsigned, const MachineOperand*>, 4> IgnoredClobbers;
-    Redefs.stepForward(MI, IgnoredClobbers);
+    for (const MachineInstr &MI : make_range(MBB1.begin(), DI1)) {
+      SmallVector<std::pair<unsigned, const MachineOperand*>, 4> Dummy;
+      Redefs.stepForward(MI, Dummy);
+    }
   }
   BBI.BB->splice(BBI.BB->end(), &MBB1, MBB1.begin(), DI1);
   MBB2.erase(MBB2.begin(), DI2);
@@ -2195,7 +2148,8 @@ void IfConverter::MergeBlocks(BBInfo &ToBBI, BBInfo &FromBBI, bool AddEdges) {
   // unknown probabilities into known ones.
   // FIXME: This usage is too tricky and in the future we would like to
   // eliminate all unknown probabilities in MBB.
-  ToBBI.BB->normalizeSuccProbs();
+  if (ToBBI.IsBrAnalyzable)
+    ToBBI.BB->normalizeSuccProbs();
 
   SmallVector<MachineBasicBlock *, 4> FromSuccs(FromMBB.succ_begin(),
                                                 FromMBB.succ_end());
@@ -2275,7 +2229,8 @@ void IfConverter::MergeBlocks(BBInfo &ToBBI, BBInfo &FromBBI, bool AddEdges) {
 
   // Normalize the probabilities of ToBBI.BB's successors with all adjustment
   // we've done above.
-  ToBBI.BB->normalizeSuccProbs();
+  if (ToBBI.IsBrAnalyzable && FromBBI.IsBrAnalyzable)
+    ToBBI.BB->normalizeSuccProbs();
 
   ToBBI.Predicate.append(FromBBI.Predicate.begin(), FromBBI.Predicate.end());
   FromBBI.Predicate.clear();

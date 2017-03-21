@@ -17,28 +17,29 @@
 //===----------------------------------------------------------------------===//
 
 #include "PPC.h"
+#include "PPCInstrInfo.h"
 #include "InstPrinter/PPCInstPrinter.h"
 #include "MCTargetDesc/PPCMCExpr.h"
-#include "MCTargetDesc/PPCPredicates.h"
+#include "MCTargetDesc/PPCMCTargetDesc.h"
 #include "PPCMachineFunctionInfo.h"
 #include "PPCSubtarget.h"
 #include "PPCTargetMachine.h"
 #include "PPCTargetStreamer.h"
 #include "llvm/ADT/MapVector.h"
-#include "llvm/ADT/StringExtras.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/Triple.h"
+#include "llvm/ADT/Twine.h"
 #include "llvm/CodeGen/AsmPrinter.h"
-#include "llvm/CodeGen/MachineConstantPool.h"
-#include "llvm/CodeGen/MachineFunctionPass.h"
+#include "llvm/CodeGen/MachineBasicBlock.h"
+#include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
-#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineModuleInfoImpls.h"
+#include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/StackMaps.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
-#include "llvm/IR/Constants.h"
-#include "llvm/IR/DebugInfo.h"
-#include "llvm/IR/DerivedTypes.h"
-#include "llvm/IR/Mangler.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/Module.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
@@ -48,21 +49,30 @@
 #include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCStreamer.h"
+#include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/MCSymbolELF.h"
+#include "llvm/MC/SectionKind.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/CodeGen.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ELF.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/MathExtras.h"
-#include "llvm/Support/TargetRegistry.h"
+#include "llvm/Support/MachO.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetInstrInfo.h"
-#include "llvm/Target/TargetOptions.h"
-#include "llvm/Target/TargetRegisterInfo.h"
+#include "llvm/Support/TargetRegistry.h"
+#include "llvm/Target/TargetMachine.h"
+#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <memory>
+#include <new>
+
 using namespace llvm;
 
 #define DEBUG_TYPE "asmprinter"
 
 namespace {
+
 class PPCAsmPrinter : public AsmPrinter {
 protected:
   MapVector<MCSymbol *, MCSymbol *> TOC;
@@ -78,11 +88,11 @@ public:
 
   MCSymbol *lookUpOrCreateTOCEntry(MCSymbol *Sym);
 
-  virtual bool doInitialization(Module &M) override {
+  bool doInitialization(Module &M) override {
     if (!TOC.empty())
       TOC.clear();
     return AsmPrinter::doInitialization(M);
-    }
+  }
 
     void EmitInstruction(const MachineInstr *MI) override;
 
@@ -102,7 +112,9 @@ public:
     void EmitTlsCall(const MachineInstr *MI, MCSymbolRefExpr::VariantKind VK);
     bool runOnMachineFunction(MachineFunction &MF) override {
       Subtarget = &MF.getSubtarget<PPCSubtarget>();
-      return AsmPrinter::runOnMachineFunction(MF);
+      bool Changed = AsmPrinter::runOnMachineFunction(MF);
+      emitXRayTable();
+      return Changed;
     }
   };
 
@@ -124,6 +136,7 @@ public:
 
     void EmitFunctionBodyStart() override;
     void EmitFunctionBodyEnd() override;
+    void EmitInstruction(const MachineInstr *MI) override;
   };
 
   /// PPCDarwinAsmPrinter - PowerPC assembly printer, customized for Darwin/Mac
@@ -141,7 +154,8 @@ public:
     bool doFinalization(Module &M) override;
     void EmitStartOfAsmFile(Module &M) override;
   };
-} // end of anonymous namespace
+
+} // end anonymous namespace
 
 /// stripRegisterPrefix - This method strips the character prefix from a
 /// register name so that only the number is left.  Used by for linux asm.
@@ -1033,6 +1047,97 @@ void PPCAsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
   LowerPPCMachineInstrToMCInst(MI, TmpInst, *this, isDarwin);
   EmitToStreamer(*OutStreamer, TmpInst);
+}
+
+void PPCLinuxAsmPrinter::EmitInstruction(const MachineInstr *MI) {
+  if (!Subtarget->isPPC64())
+    return PPCAsmPrinter::EmitInstruction(MI);
+
+  switch (MI->getOpcode()) {
+  default:
+    return PPCAsmPrinter::EmitInstruction(MI);
+  case TargetOpcode::PATCHABLE_FUNCTION_ENTER: {
+    // .begin:
+    //   b .end # lis 0, FuncId[16..32]
+    //   nop    # li  0, FuncId[0..15]
+    //   std 0, -8(1)
+    //   mflr 0
+    //   bl __xray_FunctionEntry
+    //   mtlr 0
+    // .end:
+    //
+    // Update compiler-rt/lib/xray/xray_powerpc64.cc accordingly when number
+    // of instructions change.
+    MCSymbol *BeginOfSled = OutContext.createTempSymbol();
+    MCSymbol *EndOfSled = OutContext.createTempSymbol();
+    OutStreamer->EmitLabel(BeginOfSled);
+    EmitToStreamer(*OutStreamer,
+                   MCInstBuilder(PPC::B).addExpr(
+                       MCSymbolRefExpr::create(EndOfSled, OutContext)));
+    EmitToStreamer(*OutStreamer, MCInstBuilder(PPC::NOP));
+    EmitToStreamer(
+        *OutStreamer,
+        MCInstBuilder(PPC::STD).addReg(PPC::X0).addImm(-8).addReg(PPC::X1));
+    EmitToStreamer(*OutStreamer, MCInstBuilder(PPC::MFLR8).addReg(PPC::X0));
+    EmitToStreamer(*OutStreamer,
+                   MCInstBuilder(PPC::BL8_NOP)
+                       .addExpr(MCSymbolRefExpr::create(
+                           OutContext.getOrCreateSymbol("__xray_FunctionEntry"),
+                           OutContext)));
+    EmitToStreamer(*OutStreamer, MCInstBuilder(PPC::MTLR8).addReg(PPC::X0));
+    OutStreamer->EmitLabel(EndOfSled);
+    recordSled(BeginOfSled, *MI, SledKind::FUNCTION_ENTER);
+    break;
+  }
+  case TargetOpcode::PATCHABLE_FUNCTION_EXIT: {
+    // .p2align 3
+    // .begin:
+    //   b(lr)? # lis 0, FuncId[16..32]
+    //   nop    # li  0, FuncId[0..15]
+    //   std 0, -8(1)
+    //   mflr 0
+    //   bl __xray_FunctionExit
+    //   mtlr 0
+    // .end:
+    //   b(lr)?
+    //
+    // Update compiler-rt/lib/xray/xray_powerpc64.cc accordingly when number
+    // of instructions change.
+    const MachineInstr *Next = [&] {
+      MachineBasicBlock::const_iterator It(MI);
+      assert(It != MI->getParent()->end());
+      ++It;
+      assert(It->isReturn());
+      return &*It;
+    }();
+    OutStreamer->EmitCodeAlignment(8);
+    MCSymbol *BeginOfSled = OutContext.createTempSymbol();
+    OutStreamer->EmitLabel(BeginOfSled);
+    MCInst TmpInst;
+    LowerPPCMachineInstrToMCInst(Next, TmpInst, *this, false);
+    EmitToStreamer(*OutStreamer, TmpInst);
+    EmitToStreamer(*OutStreamer, MCInstBuilder(PPC::NOP));
+    EmitToStreamer(
+        *OutStreamer,
+        MCInstBuilder(PPC::STD).addReg(PPC::X0).addImm(-8).addReg(PPC::X1));
+    EmitToStreamer(*OutStreamer, MCInstBuilder(PPC::MFLR8).addReg(PPC::X0));
+    EmitToStreamer(*OutStreamer,
+                   MCInstBuilder(PPC::BL8_NOP)
+                       .addExpr(MCSymbolRefExpr::create(
+                           OutContext.getOrCreateSymbol("__xray_FunctionExit"),
+                           OutContext)));
+    EmitToStreamer(*OutStreamer, MCInstBuilder(PPC::MTLR8).addReg(PPC::X0));
+    recordSled(BeginOfSled, *MI, SledKind::FUNCTION_EXIT);
+    break;
+  }
+  case TargetOpcode::PATCHABLE_TAIL_CALL:
+  case TargetOpcode::PATCHABLE_RET:
+    // PPC's tail call instruction, e.g. PPC::TCRETURNdi8, doesn't really
+    // lower to a PPC::B instruction. The PPC::B instruction is generated
+    // before it, and handled by the normal case.
+    llvm_unreachable("Tail call is handled in the normal case. See comments"
+                     "around this assert.");
+  }
 }
 
 void PPCLinuxAsmPrinter::EmitStartOfAsmFile(Module &M) {

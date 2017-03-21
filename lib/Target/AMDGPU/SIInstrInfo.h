@@ -69,6 +69,9 @@ private:
                             MachineInstr &Inst) const;
   void splitScalar64BitBFE(SmallVectorImpl<MachineInstr *> &Worklist,
                            MachineInstr &Inst) const;
+  void movePackToVALU(SmallVectorImpl<MachineInstr *> &Worklist,
+                      MachineRegisterInfo &MRI,
+                      MachineInstr &Inst) const;
 
   void addUsersToMoveToVALUWorklist(
     unsigned Reg, MachineRegisterInfo &MRI,
@@ -203,6 +206,18 @@ public:
   bool reverseBranchCondition(
     SmallVectorImpl<MachineOperand> &Cond) const override;
 
+
+  bool canInsertSelect(const MachineBasicBlock &MBB,
+                       ArrayRef<MachineOperand> Cond,
+                       unsigned TrueReg, unsigned FalseReg,
+                       int &CondCycles,
+                       int &TrueCycles, int &FalseCycles) const override;
+
+  void insertSelect(MachineBasicBlock &MBB,
+                    MachineBasicBlock::iterator I, const DebugLoc &DL,
+                    unsigned DstReg, ArrayRef<MachineOperand> Cond,
+                    unsigned TrueReg, unsigned FalseReg) const override;
+
   bool
   areMemAccessesTriviallyDisjoint(MachineInstr &MIa, MachineInstr &MIb,
                                   AliasAnalysis *AA = nullptr) const override;
@@ -308,6 +323,14 @@ public:
     return get(Opcode).TSFlags & SIInstrFlags::VOP3;
   }
 
+  static bool isSDWA(const MachineInstr &MI) {
+    return MI.getDesc().TSFlags & SIInstrFlags::SDWA;
+  }
+
+  bool isSDWA(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::SDWA;
+  }
+
   static bool isVOPC(const MachineInstr &MI) {
     return MI.getDesc().TSFlags & SIInstrFlags::VOPC;
   }
@@ -372,6 +395,14 @@ public:
     return get(Opcode).TSFlags & SIInstrFlags::FLAT;
   }
 
+  static bool isEXP(const MachineInstr &MI) {
+    return MI.getDesc().TSFlags & SIInstrFlags::EXP;
+  }
+
+  bool isEXP(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::EXP;
+  }
+
   static bool isWQM(const MachineInstr &MI) {
     return MI.getDesc().TSFlags & SIInstrFlags::WQM;
   }
@@ -412,6 +443,22 @@ public:
     return get(Opcode).TSFlags & SIInstrFlags::DPP;
   }
 
+  static bool isVOP3P(const MachineInstr &MI) {
+    return MI.getDesc().TSFlags & SIInstrFlags::VOP3P;
+  }
+
+  bool isVOP3P(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::VOP3P;
+  }
+
+  static bool isVINTRP(const MachineInstr &MI) {
+    return MI.getDesc().TSFlags & SIInstrFlags::VINTRP;
+  }
+
+  bool isVINTRP(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::VINTRP;
+  }
+
   static bool isScalarUnit(const MachineInstr &MI) {
     return MI.getDesc().TSFlags & (SIInstrFlags::SALU | SIInstrFlags::SMRD);
   }
@@ -446,6 +493,14 @@ public:
     return get(Opcode).TSFlags & SIInstrFlags::FIXED_SIZE;
   }
 
+  static bool hasFPClamp(const MachineInstr &MI) {
+    return MI.getDesc().TSFlags & SIInstrFlags::HasFPClamp;
+  }
+
+  bool hasFPClamp(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::HasFPClamp;
+  }
+
   bool isVGPRCopy(const MachineInstr &MI) const {
     assert(MI.isCopy());
     unsigned Dest = MI.getOperand(0).getReg();
@@ -455,14 +510,73 @@ public:
   }
 
   bool isInlineConstant(const APInt &Imm) const;
-  bool isInlineConstant(const MachineOperand &MO, unsigned OpSize) const;
-  bool isLiteralConstant(const MachineOperand &MO, unsigned OpSize) const;
+
+  bool isInlineConstant(const MachineOperand &MO, uint8_t OperandType) const;
+
+  bool isInlineConstant(const MachineOperand &MO,
+                        const MCOperandInfo &OpInfo) const {
+    return isInlineConstant(MO, OpInfo.OperandType);
+  }
+
+  /// \p returns true if \p UseMO is substituted with \p DefMO in \p MI it would
+  /// be an inline immediate.
+  bool isInlineConstant(const MachineInstr &MI,
+                        const MachineOperand &UseMO,
+                        const MachineOperand &DefMO) const {
+    assert(UseMO.getParent() == &MI);
+    int OpIdx = MI.getOperandNo(&UseMO);
+    if (!MI.getDesc().OpInfo || OpIdx >= MI.getDesc().NumOperands) {
+      return false;
+    }
+
+    return isInlineConstant(DefMO, MI.getDesc().OpInfo[OpIdx]);
+  }
+
+  /// \p returns true if the operand \p OpIdx in \p MI is a valid inline
+  /// immediate.
+  bool isInlineConstant(const MachineInstr &MI, unsigned OpIdx) const {
+    const MachineOperand &MO = MI.getOperand(OpIdx);
+    return isInlineConstant(MO, MI.getDesc().OpInfo[OpIdx].OperandType);
+  }
+
+  bool isInlineConstant(const MachineInstr &MI, unsigned OpIdx,
+                        const MachineOperand &MO) const {
+    if (!MI.getDesc().OpInfo || OpIdx >= MI.getDesc().NumOperands)
+      return false;
+
+    if (MI.isCopy()) {
+      unsigned Size = getOpSize(MI, OpIdx);
+      assert(Size == 8 || Size == 4);
+
+      uint8_t OpType = (Size == 8) ?
+        AMDGPU::OPERAND_REG_IMM_INT64 : AMDGPU::OPERAND_REG_IMM_INT32;
+      return isInlineConstant(MO, OpType);
+    }
+
+    return isInlineConstant(MO, MI.getDesc().OpInfo[OpIdx].OperandType);
+  }
+
+  bool isInlineConstant(const MachineOperand &MO) const {
+    const MachineInstr *Parent = MO.getParent();
+    return isInlineConstant(*Parent, Parent->getOperandNo(&MO));
+  }
+
+  bool isLiteralConstant(const MachineOperand &MO,
+                         const MCOperandInfo &OpInfo) const {
+    return MO.isImm() && !isInlineConstant(MO, OpInfo.OperandType);
+  }
+
+  bool isLiteralConstant(const MachineInstr &MI, int OpIdx) const {
+    const MachineOperand &MO = MI.getOperand(OpIdx);
+    return MO.isImm() && !isInlineConstant(MI, OpIdx);
+  }
 
   // Returns true if this operand could potentially require a 32-bit literal
   // operand, but not necessarily. A FrameIndex for example could resolve to an
   // inline immediate value that will not require an additional 4-bytes; this
   // assumes that it will.
-  bool isLiteralConstantLike(const MachineOperand &MO, unsigned OpSize) const;
+  bool isLiteralConstantLike(const MachineOperand &MO,
+                             const MCOperandInfo &OpInfo) const;
 
   bool isImmOperandLegal(const MachineInstr &MI, unsigned OpNo,
                          const MachineOperand &MO) const;
@@ -474,7 +588,7 @@ public:
   /// \brief Returns true if this operand uses the constant bus.
   bool usesConstantBus(const MachineRegisterInfo &MRI,
                        const MachineOperand &MO,
-                       unsigned OpSize) const;
+                       const MCOperandInfo &OpInfo) const;
 
   /// \brief Return true if this instruction has any modifiers.
   ///  e.g. src[012]_mod, omod, clamp.
@@ -482,6 +596,7 @@ public:
 
   bool hasModifiersSet(const MachineInstr &MI,
                        unsigned OpName) const;
+  bool hasAnyModifiersSet(const MachineInstr &MI) const;
 
   bool verifyInstruction(const MachineInstr &MI,
                          StringRef &ErrInfo) const override;
@@ -567,6 +682,12 @@ public:
 
   void legalizeOperandsSMRD(MachineRegisterInfo &MRI, MachineInstr &MI) const;
 
+  void legalizeGenericOperand(MachineBasicBlock &InsertMBB,
+                              MachineBasicBlock::iterator I,
+                              const TargetRegisterClass *DstRC,
+                              MachineOperand &Op, MachineRegisterInfo &MRI,
+                              const DebugLoc &DL) const;
+
   /// \brief Legalize all operands in this instruction.  This function may
   /// create new instruction and insert them before \p MI.
   void legalizeOperands(MachineInstr &MI) const;
@@ -636,6 +757,8 @@ public:
 
   ScheduleHazardRecognizer *
   CreateTargetPostRAHazardRecognizer(const MachineFunction &MF) const override;
+
+  bool isBasicBlockPrologue(const MachineInstr &MI) const override;
 };
 
 namespace AMDGPU {

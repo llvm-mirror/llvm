@@ -23,6 +23,7 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/VirtRegMap.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetMachine.h"
@@ -412,7 +413,7 @@ void SplitEditor::addDeadDef(LiveInterval &LI, VNInfo *VNI, bool Original) {
     // register, we need to check which subranges need to be updated.
     const MachineInstr *DefMI = LIS.getInstructionFromIndex(Def);
     assert(DefMI != nullptr);
-    LaneBitmask LM = 0;
+    LaneBitmask LM;
     for (const MachineOperand &DefOp : DefMI->defs()) {
       unsigned R = DefOp.getReg();
       if (R != LI.reg)
@@ -425,7 +426,7 @@ void SplitEditor::addDeadDef(LiveInterval &LI, VNInfo *VNI, bool Original) {
       }
     }
     for (LiveInterval::SubRange &S : LI.subranges())
-      if (S.LaneMask & LM)
+      if ((S.LaneMask & LM).any())
         S.createDeadDef(Def, LIS.getVNInfoAllocator());
   }
 }
@@ -487,12 +488,127 @@ void SplitEditor::forceRecompute(unsigned RegIdx, const VNInfo *ParentVNI) {
   VFP = ValueForcePair(nullptr, true);
 }
 
+SlotIndex SplitEditor::buildSingleSubRegCopy(unsigned FromReg, unsigned ToReg,
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator InsertBefore,
+    unsigned SubIdx, LiveInterval &DestLI, bool Late, SlotIndex Def) {
+  const MCInstrDesc &Desc = TII.get(TargetOpcode::COPY);
+  bool FirstCopy = !Def.isValid();
+  MachineInstr *CopyMI = BuildMI(MBB, InsertBefore, DebugLoc(), Desc)
+      .addReg(ToReg, RegState::Define | getUndefRegState(FirstCopy)
+              | getInternalReadRegState(!FirstCopy), SubIdx)
+      .addReg(FromReg, 0, SubIdx);
+
+  BumpPtrAllocator &Allocator = LIS.getVNInfoAllocator();
+  if (FirstCopy) {
+    SlotIndexes &Indexes = *LIS.getSlotIndexes();
+    Def = Indexes.insertMachineInstrInMaps(*CopyMI, Late).getRegSlot();
+    DestLI.createDeadDef(Def, Allocator);
+  } else {
+    CopyMI->bundleWithPred();
+  }
+  LaneBitmask LaneMask = TRI.getSubRegIndexLaneMask(SubIdx);
+  DestLI.refineSubRanges(Allocator, LaneMask,
+                         [Def, &Allocator](LiveInterval::SubRange& SR) {
+    SR.createDeadDef(Def, Allocator);
+  });
+  return Def;
+}
+
+SlotIndex SplitEditor::buildCopy(unsigned FromReg, unsigned ToReg,
+    LaneBitmask LaneMask, MachineBasicBlock &MBB,
+    MachineBasicBlock::iterator InsertBefore, bool Late, unsigned RegIdx) {
+  const MCInstrDesc &Desc = TII.get(TargetOpcode::COPY);
+  if (LaneMask.all() || LaneMask == MRI.getMaxLaneMaskForVReg(FromReg)) {
+    // The full vreg is copied.
+    MachineInstr *CopyMI =
+        BuildMI(MBB, InsertBefore, DebugLoc(), Desc, ToReg).addReg(FromReg);
+    SlotIndexes &Indexes = *LIS.getSlotIndexes();
+    return Indexes.insertMachineInstrInMaps(*CopyMI, Late).getRegSlot();
+  }
+
+  // Only a subset of lanes needs to be copied. The following is a simple
+  // heuristic to construct a sequence of COPYs. We could add a target
+  // specific callback if this turns out to be suboptimal.
+  LiveInterval &DestLI = LIS.getInterval(Edit->get(RegIdx));
+
+  // First pass: Try to find a perfectly matching subregister index. If none
+  // exists find the one covering the most lanemask bits.
+  SmallVector<unsigned, 8> PossibleIndexes;
+  unsigned BestIdx = 0;
+  unsigned BestCover = 0;
+  const TargetRegisterClass *RC = MRI.getRegClass(FromReg);
+  assert(RC == MRI.getRegClass(ToReg) && "Should have same reg class");
+  for (unsigned Idx = 1, E = TRI.getNumSubRegIndices(); Idx < E; ++Idx) {
+    // Is this index even compatible with the given class?
+    if (TRI.getSubClassWithSubReg(RC, Idx) != RC)
+      continue;
+    LaneBitmask SubRegMask = TRI.getSubRegIndexLaneMask(Idx);
+    // Early exit if we found a perfect match.
+    if (SubRegMask == LaneMask) {
+      BestIdx = Idx;
+      break;
+    }
+
+    // The index must not cover any lanes outside \p LaneMask.
+    if ((SubRegMask & ~LaneMask).any())
+      continue;
+
+    unsigned PopCount = countPopulation(SubRegMask.getAsInteger());
+    PossibleIndexes.push_back(Idx);
+    if (PopCount > BestCover) {
+      BestCover = PopCount;
+      BestIdx = Idx;
+    }
+  }
+
+  // Abort if we cannot possibly implement the COPY with the given indexes.
+  if (BestIdx == 0)
+    report_fatal_error("Impossible to implement partial COPY");
+
+  SlotIndex Def = buildSingleSubRegCopy(FromReg, ToReg, MBB, InsertBefore,
+                                        BestIdx, DestLI, Late, SlotIndex());
+
+  // Greedy heuristic: Keep iterating keeping the best covering subreg index
+  // each time.
+  LaneBitmask LanesLeft =
+      LaneMask & ~(TRI.getSubRegIndexLaneMask(BestCover));
+  while (LanesLeft.any()) {
+    unsigned BestIdx = 0;
+    int BestCover = INT_MIN;
+    for (unsigned Idx : PossibleIndexes) {
+      LaneBitmask SubRegMask = TRI.getSubRegIndexLaneMask(Idx);
+      // Early exit if we found a perfect match.
+      if (SubRegMask == LanesLeft) {
+        BestIdx = Idx;
+        break;
+      }
+
+      // Try to cover as much of the remaining lanes as possible but
+      // as few of the already covered lanes as possible.
+      int Cover = countPopulation((SubRegMask & LanesLeft).getAsInteger())
+                - countPopulation((SubRegMask & ~LanesLeft).getAsInteger());
+      if (Cover > BestCover) {
+        BestCover = Cover;
+        BestIdx = Idx;
+      }
+    }
+
+    if (BestIdx == 0)
+      report_fatal_error("Impossible to implement partial COPY");
+
+    buildSingleSubRegCopy(FromReg, ToReg, MBB, InsertBefore, BestIdx,
+                          DestLI, Late, Def);
+    LanesLeft &= ~TRI.getSubRegIndexLaneMask(BestIdx);
+  }
+
+  return Def;
+}
+
 VNInfo *SplitEditor::defFromParent(unsigned RegIdx,
                                    VNInfo *ParentVNI,
                                    SlotIndex UseIdx,
                                    MachineBasicBlock &MBB,
                                    MachineBasicBlock::iterator I) {
-  MachineInstr *CopyMI = nullptr;
   SlotIndex Def;
   LiveInterval *LI = &LIS.getInterval(Edit->get(RegIdx));
 
@@ -505,24 +621,29 @@ VNInfo *SplitEditor::defFromParent(unsigned RegIdx,
   LiveInterval &OrigLI = LIS.getInterval(Original);
   VNInfo *OrigVNI = OrigLI.getVNInfoAt(UseIdx);
 
+  unsigned Reg = LI->reg;
   bool DidRemat = false;
   if (OrigVNI) {
     LiveRangeEdit::Remat RM(ParentVNI);
     RM.OrigMI = LIS.getInstructionFromIndex(OrigVNI->def);
     if (Edit->canRematerializeAt(RM, OrigVNI, UseIdx, true)) {
-      Def = Edit->rematerializeAt(MBB, I, LI->reg, RM, TRI, Late);
+      Def = Edit->rematerializeAt(MBB, I, Reg, RM, TRI, Late);
       ++NumRemats;
       DidRemat = true;
     }
   }
   if (!DidRemat) {
-    // Can't remat, just insert a copy from parent.
-    CopyMI = BuildMI(MBB, I, DebugLoc(), TII.get(TargetOpcode::COPY), LI->reg)
-               .addReg(Edit->getReg());
-    Def = LIS.getSlotIndexes()
-              ->insertMachineInstrInMaps(*CopyMI, Late)
-              .getRegSlot();
+    LaneBitmask LaneMask;
+    if (LI->hasSubRanges()) {
+      LaneMask = LaneBitmask::getNone();
+      for (LiveInterval::SubRange &S : LI->subranges())
+        LaneMask |= S.LaneMask;
+    } else {
+      LaneMask = LaneBitmask::getAll();
+    }
+
     ++NumCopies;
+    Def = buildCopy(Edit->getReg(), Reg, LaneMask, MBB, I, Late, RegIdx);
   }
 
   // Define the value in Reg.
@@ -1092,13 +1213,19 @@ static bool removeDeadSegment(SlotIndex Def, LiveRange &LR) {
 }
 
 void SplitEditor::extendPHIRange(MachineBasicBlock &B, LiveRangeCalc &LRC,
-                                 LiveRange &LR, ArrayRef<SlotIndex> Undefs) {
+                                 LiveRange &LR, LaneBitmask LM,
+                                 ArrayRef<SlotIndex> Undefs) {
   for (MachineBasicBlock *P : B.predecessors()) {
     SlotIndex End = LIS.getMBBEndIdx(P);
     SlotIndex LastUse = End.getPrevSlot();
     // The predecessor may not have a live-out value. That is OK, like an
     // undef PHI operand.
-    if (Edit->getParent().liveAt(LastUse))
+    LiveInterval &PLI = Edit->getParent();
+    // Need the cast because the inputs to ?: would otherwise be deemed
+    // "incompatible": SubRange vs LiveInterval.
+    LiveRange &PSR = !LM.all() ? getSubRangeForMask(LM, PLI)
+                               : static_cast<LiveRange&>(PLI);
+    if (PSR.liveAt(LastUse))
       LRC.extend(LR, End, /*PhysReg=*/0, Undefs);
   }
 }
@@ -1120,7 +1247,7 @@ void SplitEditor::extendPHIKillRanges() {
     LiveRangeCalc &LRC = getLRCalc(RegIdx);
     MachineBasicBlock &B = *LIS.getMBBFromIndex(V->def);
     if (!removeDeadSegment(V->def, LI))
-      extendPHIRange(B, LRC, LI, /*Undefs=*/{});
+      extendPHIRange(B, LRC, LI, LaneBitmask::getAll(), /*Undefs=*/{});
   }
 
   SmallVector<SlotIndex, 4> Undefs;
@@ -1141,7 +1268,7 @@ void SplitEditor::extendPHIKillRanges() {
                    &LIS.getVNInfoAllocator());
       Undefs.clear();
       LI.computeSubRangeUndefs(Undefs, PS.LaneMask, MRI, *LIS.getSlotIndexes());
-      extendPHIRange(B, SubLRC, S, Undefs);
+      extendPHIRange(B, SubLRC, S, PS.LaneMask, Undefs);
     }
   }
 }
@@ -1223,7 +1350,7 @@ void SplitEditor::rewriteAssigned(bool ExtendRanges) {
     LaneBitmask LM = Sub != 0 ? TRI.getSubRegIndexLaneMask(Sub)
                               : MRI.getMaxLaneMaskForVReg(Reg);
     for (LiveInterval::SubRange &S : LI.subranges()) {
-      if (!(S.LaneMask & LM))
+      if ((S.LaneMask & LM).none())
         continue;
       // The problem here can be that the new register may have been created
       // for a partially defined original register. For example:

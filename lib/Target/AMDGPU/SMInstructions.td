@@ -126,7 +126,7 @@ multiclass SM_Pseudo_Stores<string opName,
 }
 
 class SM_Time_Pseudo<string opName, SDPatternOperator node> : SM_Pseudo<
-  opName, (outs SReg_64:$sdst), (ins),
+  opName, (outs SReg_64_XEXEC:$sdst), (ins),
   " $sdst", [(set i64:$sdst, (node))]> {
   let hasSideEffects = 1;
   // FIXME: mayStore = ? is a workaround for tablegen bug for different
@@ -155,18 +155,23 @@ class SM_Inval_Pseudo <string opName, SDPatternOperator node> : SM_Pseudo<
 // We are using the SReg_32_XM0 and not the SReg_32 register class for 32-bit
 // SMRD instructions, because the SReg_32_XM0 register class does not include M0
 // and writing to M0 from an SMRD instruction will hang the GPU.
-defm S_LOAD_DWORD    : SM_Pseudo_Loads <"s_load_dword", SReg_64, SReg_32_XM0>;
-defm S_LOAD_DWORDX2  : SM_Pseudo_Loads <"s_load_dwordx2", SReg_64, SReg_64>;
+
+// XXX - SMEM instructions do not allow exec for data operand, but
+// does sdst for SMRD on SI/CI?
+defm S_LOAD_DWORD    : SM_Pseudo_Loads <"s_load_dword", SReg_64, SReg_32_XM0_XEXEC>;
+defm S_LOAD_DWORDX2  : SM_Pseudo_Loads <"s_load_dwordx2", SReg_64, SReg_64_XEXEC>;
 defm S_LOAD_DWORDX4  : SM_Pseudo_Loads <"s_load_dwordx4", SReg_64, SReg_128>;
 defm S_LOAD_DWORDX8  : SM_Pseudo_Loads <"s_load_dwordx8", SReg_64, SReg_256>;
 defm S_LOAD_DWORDX16 : SM_Pseudo_Loads <"s_load_dwordx16", SReg_64, SReg_512>;
 
 defm S_BUFFER_LOAD_DWORD : SM_Pseudo_Loads <
-  "s_buffer_load_dword", SReg_128, SReg_32_XM0
+  "s_buffer_load_dword", SReg_128, SReg_32_XM0_XEXEC
 >;
 
+// FIXME: exec_lo/exec_hi appear to be allowed for SMRD loads on
+// SI/CI, bit disallowed for SMEM on VI.
 defm S_BUFFER_LOAD_DWORDX2 : SM_Pseudo_Loads <
-  "s_buffer_load_dwordx2", SReg_128, SReg_64
+  "s_buffer_load_dwordx2", SReg_128, SReg_64_XEXEC
 >;
 
 defm S_BUFFER_LOAD_DWORDX4 : SM_Pseudo_Loads <
@@ -181,16 +186,16 @@ defm S_BUFFER_LOAD_DWORDX16 : SM_Pseudo_Loads <
   "s_buffer_load_dwordx16", SReg_128, SReg_512
 >;
 
-defm S_STORE_DWORD : SM_Pseudo_Stores <"s_store_dword", SReg_64, SReg_32_XM0>;
-defm S_STORE_DWORDX2 : SM_Pseudo_Stores <"s_store_dwordx2", SReg_64, SReg_64>;
+defm S_STORE_DWORD : SM_Pseudo_Stores <"s_store_dword", SReg_64, SReg_32_XM0_XEXEC>;
+defm S_STORE_DWORDX2 : SM_Pseudo_Stores <"s_store_dwordx2", SReg_64, SReg_64_XEXEC>;
 defm S_STORE_DWORDX4 : SM_Pseudo_Stores <"s_store_dwordx4", SReg_64, SReg_128>;
 
 defm S_BUFFER_STORE_DWORD : SM_Pseudo_Stores <
-  "s_buffer_store_dword", SReg_128, SReg_32_XM0
+  "s_buffer_store_dword", SReg_128, SReg_32_XM0_XEXEC
 >;
 
 defm S_BUFFER_STORE_DWORDX2 : SM_Pseudo_Stores <
-  "s_buffer_store_dwordx2", SReg_128, SReg_64
+  "s_buffer_store_dwordx2", SReg_128, SReg_64_XEXEC
 >;
 
 defm S_BUFFER_STORE_DWORDX4 : SM_Pseudo_Stores <
@@ -217,11 +222,15 @@ def S_MEMREALTIME   : SM_Time_Pseudo <"s_memrealtime", int_amdgcn_s_memrealtime>
 // Scalar Memory Patterns
 //===----------------------------------------------------------------------===//
 
+
 def smrd_load : PatFrag <(ops node:$ptr), (load node:$ptr), [{
   auto Ld = cast<LoadSDNode>(N);
   return Ld->getAlignment() >= 4  &&
-    Ld->getAddressSpace() == AMDGPUAS::CONSTANT_ADDRESS &&
-    static_cast<const SITargetLowering *>(getTargetLowering())->isMemOpUniform(N);
+    ((Ld->getAddressSpace() == AMDGPUAS::CONSTANT_ADDRESS &&
+    static_cast<const SITargetLowering *>(getTargetLowering())->isMemOpUniform(N)) ||
+    (Subtarget->getScalarizeGlobalBehavior() && Ld->getAddressSpace() == AMDGPUAS::GLOBAL_ADDRESS &&
+    static_cast<const SITargetLowering *>(getTargetLowering())->isMemOpUniform(N) &&
+    static_cast<const SITargetLowering *>(getTargetLowering())->isMemOpHasNoClobberedMemOperand(N)));
 }]>;
 
 def SMRDImm         : ComplexPattern<i64, 2, "SelectSMRDImm">;
@@ -283,12 +292,6 @@ def : Pat <
 } // let Predicates = [isGCN]
 
 let Predicates = [isVI] in {
-
-// 1. Offset as 20bit DWORD immediate
-def : Pat <
-  (SIload_constant v4i32:$sbase, IMM20bit:$offset),
-  (S_BUFFER_LOAD_DWORD_IMM $sbase, (as_i32imm $offset), 0)
->;
 
 def : Pat <
   (i64 (readcyclecounter)),
@@ -389,16 +392,24 @@ multiclass SM_Real_Loads_vi<bits<8> op, string ps,
   }
 }
 
+class SMEM_Real_Store_vi <bits<8> op, SM_Pseudo ps> : SMEM_Real_vi <op, ps> {
+  // encoding
+  bits<7> sdata;
+
+  let sdst = ?;
+  let Inst{12-6}  = !if(ps.has_sdst, sdata{6-0}, ?);
+}
+
 multiclass SM_Real_Stores_vi<bits<8> op, string ps,
                             SM_Store_Pseudo immPs = !cast<SM_Store_Pseudo>(ps#_IMM),
                             SM_Store_Pseudo sgprPs = !cast<SM_Store_Pseudo>(ps#_SGPR)> {
   // FIXME: The operand name $offset is inconsistent with $soff used
   // in the pseudo
-  def _IMM_vi : SMEM_Real_vi <op, immPs> {
+  def _IMM_vi : SMEM_Real_Store_vi <op, immPs> {
     let InOperandList = (ins immPs.SrcClass:$sdata, immPs.BaseClass:$sbase, smrd_offset_20:$offset, GLC:$glc);
   }
 
-  def _SGPR_vi : SMEM_Real_vi <op, sgprPs> {
+  def _SGPR_vi : SMEM_Real_Store_vi <op, sgprPs> {
     let InOperandList = (ins sgprPs.SrcClass:$sdata, sgprPs.BaseClass:$sbase, SReg_32:$offset, GLC:$glc);
   }
 }
@@ -422,6 +433,7 @@ defm S_BUFFER_STORE_DWORD    : SM_Real_Stores_vi <0x18, "S_BUFFER_STORE_DWORD">;
 defm S_BUFFER_STORE_DWORDX2  : SM_Real_Stores_vi <0x19, "S_BUFFER_STORE_DWORDX2">;
 defm S_BUFFER_STORE_DWORDX4  : SM_Real_Stores_vi <0x1a, "S_BUFFER_STORE_DWORDX4">;
 
+// These instructions use same encoding
 def S_DCACHE_INV_vi         : SMEM_Real_vi <0x20, S_DCACHE_INV>;
 def S_DCACHE_WB_vi          : SMEM_Real_vi <0x21, S_DCACHE_WB>;
 def S_DCACHE_INV_VOL_vi     : SMEM_Real_vi <0x22, S_DCACHE_INV_VOL>;

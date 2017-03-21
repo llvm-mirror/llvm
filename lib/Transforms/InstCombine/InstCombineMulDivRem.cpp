@@ -267,14 +267,8 @@ Instruction *InstCombiner::visitMul(BinaryOperator &I) {
 
   // Simplify mul instructions with a constant RHS.
   if (isa<Constant>(Op1)) {
-    // Try to fold constant mul into select arguments.
-    if (SelectInst *SI = dyn_cast<SelectInst>(Op0))
-      if (Instruction *R = FoldOpIntoSelect(I, SI))
-        return R;
-
-    if (isa<PHINode>(Op0))
-      if (Instruction *NV = FoldOpIntoPhi(I))
-        return NV;
+    if (Instruction *FoldedMul = foldOpWithConstantIntoOperand(I))
+      return FoldedMul;
 
     // Canonicalize (X+C1)*CI -> X*CI+C1*CI.
     {
@@ -304,39 +298,33 @@ Instruction *InstCombiner::visitMul(BinaryOperator &I) {
   // (X / Y) *  Y = X - (X % Y)
   // (X / Y) * -Y = (X % Y) - X
   {
-    Value *Op1C = Op1;
-    BinaryOperator *BO = dyn_cast<BinaryOperator>(Op0);
-    if (!BO ||
-        (BO->getOpcode() != Instruction::UDiv &&
-         BO->getOpcode() != Instruction::SDiv)) {
-      Op1C = Op0;
-      BO = dyn_cast<BinaryOperator>(Op1);
+    Value *Y = Op1;
+    BinaryOperator *Div = dyn_cast<BinaryOperator>(Op0);
+    if (!Div || (Div->getOpcode() != Instruction::UDiv &&
+                 Div->getOpcode() != Instruction::SDiv)) {
+      Y = Op0;
+      Div = dyn_cast<BinaryOperator>(Op1);
     }
-    Value *Neg = dyn_castNegVal(Op1C);
-    if (BO && BO->hasOneUse() &&
-        (BO->getOperand(1) == Op1C || BO->getOperand(1) == Neg) &&
-        (BO->getOpcode() == Instruction::UDiv ||
-         BO->getOpcode() == Instruction::SDiv)) {
-      Value *Op0BO = BO->getOperand(0), *Op1BO = BO->getOperand(1);
+    Value *Neg = dyn_castNegVal(Y);
+    if (Div && Div->hasOneUse() &&
+        (Div->getOperand(1) == Y || Div->getOperand(1) == Neg) &&
+        (Div->getOpcode() == Instruction::UDiv ||
+         Div->getOpcode() == Instruction::SDiv)) {
+      Value *X = Div->getOperand(0), *DivOp1 = Div->getOperand(1);
 
       // If the division is exact, X % Y is zero, so we end up with X or -X.
-      if (PossiblyExactOperator *SDiv = dyn_cast<PossiblyExactOperator>(BO))
-        if (SDiv->isExact()) {
-          if (Op1BO == Op1C)
-            return replaceInstUsesWith(I, Op0BO);
-          return BinaryOperator::CreateNeg(Op0BO);
-        }
+      if (Div->isExact()) {
+        if (DivOp1 == Y)
+          return replaceInstUsesWith(I, X);
+        return BinaryOperator::CreateNeg(X);
+      }
 
-      Value *Rem;
-      if (BO->getOpcode() == Instruction::UDiv)
-        Rem = Builder->CreateURem(Op0BO, Op1BO);
-      else
-        Rem = Builder->CreateSRem(Op0BO, Op1BO);
-      Rem->takeName(BO);
-
-      if (Op1BO == Op1C)
-        return BinaryOperator::CreateSub(Op0BO, Rem);
-      return BinaryOperator::CreateSub(Rem, Op0BO);
+      auto RemOpc = Div->getOpcode() == Instruction::UDiv ? Instruction::URem
+                                                          : Instruction::SRem;
+      Value *Rem = Builder->CreateBinOp(RemOpc, X, DivOp1);
+      if (DivOp1 == Y)
+        return BinaryOperator::CreateSub(X, Rem);
+      return BinaryOperator::CreateSub(Rem, X);
     }
   }
 
@@ -386,6 +374,80 @@ Instruction *InstCombiner::visitMul(BinaryOperator &I) {
       Value *V = Builder->CreateSub(Constant::getNullValue(I.getType()),
                                     BoolCast);
       return BinaryOperator::CreateAnd(V, OtherOp);
+    }
+  }
+
+  // Check for (mul (sext x), y), see if we can merge this into an
+  // integer mul followed by a sext.
+  if (SExtInst *Op0Conv = dyn_cast<SExtInst>(Op0)) {
+    // (mul (sext x), cst) --> (sext (mul x, cst'))
+    if (ConstantInt *Op1C = dyn_cast<ConstantInt>(Op1)) {
+      if (Op0Conv->hasOneUse()) {
+        Constant *CI =
+            ConstantExpr::getTrunc(Op1C, Op0Conv->getOperand(0)->getType());
+        if (ConstantExpr::getSExt(CI, I.getType()) == Op1C &&
+            WillNotOverflowSignedMul(Op0Conv->getOperand(0), CI, I)) {
+          // Insert the new, smaller mul.
+          Value *NewMul =
+              Builder->CreateNSWMul(Op0Conv->getOperand(0), CI, "mulconv");
+          return new SExtInst(NewMul, I.getType());
+        }
+      }
+    }
+
+    // (mul (sext x), (sext y)) --> (sext (mul int x, y))
+    if (SExtInst *Op1Conv = dyn_cast<SExtInst>(Op1)) {
+      // Only do this if x/y have the same type, if at last one of them has a
+      // single use (so we don't increase the number of sexts), and if the
+      // integer mul will not overflow.
+      if (Op0Conv->getOperand(0)->getType() ==
+              Op1Conv->getOperand(0)->getType() &&
+          (Op0Conv->hasOneUse() || Op1Conv->hasOneUse()) &&
+          WillNotOverflowSignedMul(Op0Conv->getOperand(0),
+                                   Op1Conv->getOperand(0), I)) {
+        // Insert the new integer mul.
+        Value *NewMul = Builder->CreateNSWMul(
+            Op0Conv->getOperand(0), Op1Conv->getOperand(0), "mulconv");
+        return new SExtInst(NewMul, I.getType());
+      }
+    }
+  }
+
+  // Check for (mul (zext x), y), see if we can merge this into an
+  // integer mul followed by a zext.
+  if (auto *Op0Conv = dyn_cast<ZExtInst>(Op0)) {
+    // (mul (zext x), cst) --> (zext (mul x, cst'))
+    if (ConstantInt *Op1C = dyn_cast<ConstantInt>(Op1)) {
+      if (Op0Conv->hasOneUse()) {
+        Constant *CI =
+            ConstantExpr::getTrunc(Op1C, Op0Conv->getOperand(0)->getType());
+        if (ConstantExpr::getZExt(CI, I.getType()) == Op1C &&
+            computeOverflowForUnsignedMul(Op0Conv->getOperand(0), CI, &I) ==
+                OverflowResult::NeverOverflows) {
+          // Insert the new, smaller mul.
+          Value *NewMul =
+              Builder->CreateNUWMul(Op0Conv->getOperand(0), CI, "mulconv");
+          return new ZExtInst(NewMul, I.getType());
+        }
+      }
+    }
+
+    // (mul (zext x), (zext y)) --> (zext (mul int x, y))
+    if (auto *Op1Conv = dyn_cast<ZExtInst>(Op1)) {
+      // Only do this if x/y have the same type, if at last one of them has a
+      // single use (so we don't increase the number of zexts), and if the
+      // integer mul will not overflow.
+      if (Op0Conv->getOperand(0)->getType() ==
+              Op1Conv->getOperand(0)->getType() &&
+          (Op0Conv->hasOneUse() || Op1Conv->hasOneUse()) &&
+          computeOverflowForUnsignedMul(Op0Conv->getOperand(0),
+                                        Op1Conv->getOperand(0),
+                                        &I) == OverflowResult::NeverOverflows) {
+        // Insert the new integer mul.
+        Value *NewMul = Builder->CreateNUWMul(
+            Op0Conv->getOperand(0), Op1Conv->getOperand(0), "mulconv");
+        return new ZExtInst(NewMul, I.getType());
+      }
     }
   }
 
@@ -552,14 +614,8 @@ Instruction *InstCombiner::visitFMul(BinaryOperator &I) {
 
   // Simplify mul instructions with a constant RHS.
   if (isa<Constant>(Op1)) {
-    // Try to fold constant mul into select arguments.
-    if (SelectInst *SI = dyn_cast<SelectInst>(Op0))
-      if (Instruction *R = FoldOpIntoSelect(I, SI))
-        return R;
-
-    if (isa<PHINode>(Op0))
-      if (Instruction *NV = FoldOpIntoPhi(I))
-        return NV;
+    if (Instruction *FoldedMul = foldOpWithConstantIntoOperand(I))
+      return FoldedMul;
 
     // (fmul X, -1.0) --> (fsub -0.0, X)
     if (match(Op1, m_SpecificFP(-1.0))) {
@@ -709,7 +765,6 @@ Instruction *InstCombiner::visitFMul(BinaryOperator &I) {
           BuilderTy::FastMathFlagGuard Guard(*Builder);
           Builder->setFastMathFlags(I.getFastMathFlags());
           Value *T = Builder->CreateFMul(Opnd1, Opnd1);
-
           Value *R = Builder->CreateFMul(T, Y);
           R->takeName(&I);
           return replaceInstUsesWith(I, R);
@@ -883,14 +938,9 @@ Instruction *InstCombiner::commonIDivTransforms(BinaryOperator &I) {
         }
       }
 
-      if (*C2 != 0) { // avoid X udiv 0
-        if (SelectInst *SI = dyn_cast<SelectInst>(Op0))
-          if (Instruction *R = FoldOpIntoSelect(I, SI))
-            return R;
-        if (isa<PHINode>(Op0))
-          if (Instruction *NV = FoldOpIntoPhi(I))
-            return NV;
-      }
+      if (*C2 != 0) // avoid X udiv 0
+        if (Instruction *FoldedDiv = foldOpWithConstantIntoOperand(I))
+          return FoldedDiv;
     }
   }
 
@@ -1368,6 +1418,16 @@ Instruction *InstCombiner::visitFDiv(BinaryOperator &I) {
       SimpR->setFastMathFlags(I.getFastMathFlags());
       return SimpR;
     }
+  }
+
+  Value *LHS;
+  Value *RHS;
+
+  // -x / -y -> x / y
+  if (match(Op0, m_FNeg(m_Value(LHS))) && match(Op1, m_FNeg(m_Value(RHS)))) {
+    I.setOperand(0, LHS);
+    I.setOperand(1, RHS);
+    return &I;
   }
 
   return nullptr;

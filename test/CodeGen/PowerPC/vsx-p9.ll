@@ -260,4 +260,154 @@ declare <4 x i32> @llvm.ppc.altivec.vrlwnm(<4 x i32>, <4 x i32>)
 ; Function Attrs: nounwind readnone
 declare <2 x i64> @llvm.ppc.altivec.vrldnm(<2 x i64>, <2 x i64>)
 
+define <4 x i32> @testXVXEXPSP(<4 x float> %a) {
+entry:
+  %0 = tail call <4 x i32> @llvm.ppc.vsx.xvxexpsp(<4 x float> %a)
+  ret <4 x i32> %0
+; CHECK-LABEL: testXVXEXPSP
+; CHECK: xvxexpsp 34, 34
+; CHECK: blr
+}
+; Function Attrs: nounwind readnone
+declare <4 x i32> @llvm.ppc.vsx.xvxexpsp(<4 x float>)
+
+; Function Attrs: nounwind readnone
+define <2 x i64> @testXVXEXPDP(<2 x double> %a) {
+entry:
+  %0 = tail call <2 x i64> @llvm.ppc.vsx.xvxexpdp(<2 x double> %a)
+  ret <2 x i64> %0
+; CHECK-LABEL: testXVXEXPDP
+; CHECK: xvxexpdp 34, 34
+; CHECK: blr
+}
+; Function Attrs: nounwind readnone
+declare <2 x i64>@llvm.ppc.vsx.xvxexpdp(<2 x double>)
+
+; Function Attrs: nounwind readnone
+define <4 x i32> @testXVXSIGSP(<4 x float> %a) {
+entry:
+  %0 = tail call <4 x i32> @llvm.ppc.vsx.xvxsigsp(<4 x float> %a)
+  ret <4 x i32> %0
+; CHECK-LABEL: testXVXSIGSP
+; CHECK: xvxsigsp 34, 34
+; CHECK: blr
+}
+; Function Attrs: nounwind readnone
+declare <4 x i32> @llvm.ppc.vsx.xvxsigsp(<4 x float>)
+
+; Function Attrs: nounwind readnone
+define <2 x i64> @testXVXSIGDP(<2 x double> %a) {
+entry:
+  %0 = tail call <2 x i64> @llvm.ppc.vsx.xvxsigdp(<2 x double> %a)
+  ret <2 x i64> %0
+; CHECK-LABEL: testXVXSIGDP
+; CHECK: xvxsigdp 34, 34
+; CHECK: blr
+}
+; Function Attrs: nounwind readnone
+declare <2 x i64> @llvm.ppc.vsx.xvxsigdp(<2 x double>)
+
+; Function Attrs: nounwind readnone
+define <4 x i32> @testXVTSTDCSP(<4 x float> %a) {
+entry:
+  %0 = tail call <4 x i32> @llvm.ppc.vsx.xvtstdcsp(<4 x float> %a, i32 127)
+  ret <4 x i32> %0
+; CHECK-LABEL: testXVTSTDCSP
+; CHECK: xvtstdcsp 34, 34, 127
+; CHECK: blr
+}
+; Function Attrs: nounwind readnone
+declare <4 x i32> @llvm.ppc.vsx.xvtstdcsp(<4 x float> %a, i32 %b)
+
+; Function Attrs: nounwind readnone
+define <2 x i64> @testXVTSTDCDP(<2 x double> %a) {
+entry:
+  %0 = tail call <2 x i64> @llvm.ppc.vsx.xvtstdcdp(<2 x double> %a, i32 127)
+  ret <2 x i64> %0
+; CHECK-LABEL: testXVTSTDCDP
+; CHECK: xvtstdcdp 34, 34, 127
+; CHECK: blr
+}
+; Function Attrs: nounwind readnone
+declare <2 x i64> @llvm.ppc.vsx.xvtstdcdp(<2 x double> %a, i32 %b)
+
+define <4 x float> @testXVCVHPSP(<8 x i16> %a) {
+entry:
+  %0 = tail call <4 x float>@llvm.ppc.vsx.xvcvhpsp(<8 x i16> %a)
+  ret <4 x float> %0
+; CHECK-LABEL: testXVCVHPSP
+; CHECK: xvcvhpsp 34, 34
+; CHECK: blr
+}
+; Function Attrs: nounwind readnone
+declare <4 x float>@llvm.ppc.vsx.xvcvhpsp(<8 x i16>)
+
+; Function Attrs: nounwind readnone
+define <4 x i32> @testLXVL(i8* %a, i64 %b) {
+entry:
+  %0 = tail call <4 x i32> @llvm.ppc.vsx.lxvl(i8* %a, i64 %b)
+  ret <4 x i32> %0
+; CHECK-LABEL: testLXVL
+; CHECK: lxvl 34, 3, 4
+; CHECK: blr
+}
+; Function Attrs: nounwind readnone
+declare <4 x i32> @llvm.ppc.vsx.lxvl(i8*, i64)
+
+define void @testSTXVL(<4 x i32> %a, i8* %b, i64 %c) {
+entry:
+  tail call void @llvm.ppc.vsx.stxvl(<4 x i32> %a, i8* %b, i64 %c)
+  ret void
+; CHECK-LABEL: testSTXVL
+; CHECK: stxvl 34, 5, 6
+; CHECK: blr
+}
+; Function Attrs: nounwind readnone
+declare void @llvm.ppc.vsx.stxvl(<4 x i32>, i8*, i64)
+
+; Function Attrs: nounwind readnone
+define <4 x i32> @testLXVLL(i8* %a, i64 %b) {
+entry:
+  %0 = tail call <4 x i32> @llvm.ppc.vsx.lxvll(i8* %a, i64 %b)
+  ret <4 x i32> %0
+; CHECK-LABEL: testLXVLL
+; CHECK: lxvll 34, 3, 4
+; CHECK: blr
+}
+; Function Attrs: nounwind readnone
+declare <4 x i32> @llvm.ppc.vsx.lxvll(i8*, i64)
+
+define void @testSTXVLL(<4 x i32> %a, i8* %b, i64 %c) {
+entry:
+  tail call void @llvm.ppc.vsx.stxvll(<4 x i32> %a, i8* %b, i64 %c)
+  ret void
+; CHECK-LABEL: testSTXVLL
+; CHECK: stxvll 34, 5, 6
+; CHECK: blr
+}
+; Function Attrs: nounwind readnone
+declare void @llvm.ppc.vsx.stxvll(<4 x i32>, i8*, i64)
+
+define <4 x i32> @test0(<4 x i32> %a) local_unnamed_addr #0 {
+entry:
+  %sub.i = sub <4 x i32> zeroinitializer, %a
+  ret <4 x i32> %sub.i
+
+; CHECK-LABEL: @test0
+; CHECK: vnegw 2, 2
+; CHECK: blr
+
+}
+
+define <2 x i64> @test1(<2 x i64> %a) local_unnamed_addr #0 {
+entry:
+  %sub.i = sub <2 x i64> zeroinitializer, %a
+  ret <2 x i64> %sub.i
+
+; CHECK-LABEL: @test1
+; CHECK: vnegd 2, 2
+; CHECK: blr
+
+}
+
 declare void @sink(...)

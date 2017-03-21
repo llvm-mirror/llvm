@@ -81,11 +81,29 @@ DECODE_OPERAND(VReg_96)
 DECODE_OPERAND(VReg_128)
 
 DECODE_OPERAND(SReg_32)
-DECODE_OPERAND(SReg_32_XM0)
+DECODE_OPERAND(SReg_32_XM0_XEXEC)
 DECODE_OPERAND(SReg_64)
+DECODE_OPERAND(SReg_64_XEXEC)
 DECODE_OPERAND(SReg_128)
 DECODE_OPERAND(SReg_256)
 DECODE_OPERAND(SReg_512)
+
+
+static DecodeStatus decodeOperand_VSrc16(MCInst &Inst,
+                                         unsigned Imm,
+                                         uint64_t Addr,
+                                         const void *Decoder) {
+  auto DAsm = static_cast<const AMDGPUDisassembler*>(Decoder);
+  return addOperand(Inst, DAsm->decodeOperand_VSrc16(Imm));
+}
+
+static DecodeStatus decodeOperand_VSrcV216(MCInst &Inst,
+                                         unsigned Imm,
+                                         uint64_t Addr,
+                                         const void *Decoder) {
+  auto DAsm = static_cast<const AMDGPUDisassembler*>(Decoder);
+  return addOperand(Inst, DAsm->decodeOperand_VSrcV216(Imm));
+}
 
 #define GET_SUBTARGETINFO_ENUM
 #include "AMDGPUGenSubtargetInfo.inc"
@@ -128,7 +146,8 @@ DecodeStatus AMDGPUDisassembler::getInstruction(MCInst &MI, uint64_t &Size,
   CommentStream = &CS;
 
   // ToDo: AMDGPUDisassembler supports only VI ISA.
-  assert(AMDGPU::isVI(STI) && "Can disassemble only VI ISA.");
+  if (!STI.getFeatureBits()[AMDGPU::FeatureGCN3Encoding])
+    report_fatal_error("Disassembly not yet supported for subtarget");
 
   const unsigned MaxInstBytesNum = (std::min)((size_t)8, Bytes_.size());
   Bytes = Bytes_.slice(0, MaxInstBytesNum);
@@ -230,12 +249,14 @@ MCOperand AMDGPUDisassembler::createSRegOperand(unsigned SRegClassID,
   // ToDo: unclear if s[88:104] is available on VI. Can we use VCC as SGPR in
   // this bundle?
   default:
-    assert(false);
-    break;
+    llvm_unreachable("unhandled register class");
   }
-  if (Val % (1 << shift))
+
+  if (Val % (1 << shift)) {
     *CommentStream << "Warning: " << getRegClassName(SRegClassID)
                    << ": scalar reg isn't aligned " << Val;
+  }
+
   return createRegOperand(SRegClassID, Val >> shift);
 }
 
@@ -245,6 +266,14 @@ MCOperand AMDGPUDisassembler::decodeOperand_VS_32(unsigned Val) const {
 
 MCOperand AMDGPUDisassembler::decodeOperand_VS_64(unsigned Val) const {
   return decodeSrcOp(OPW64, Val);
+}
+
+MCOperand AMDGPUDisassembler::decodeOperand_VSrc16(unsigned Val) const {
+  return decodeSrcOp(OPW16, Val);
+}
+
+MCOperand AMDGPUDisassembler::decodeOperand_VSrcV216(unsigned Val) const {
+  return decodeSrcOp(OPWV216, Val);
 }
 
 MCOperand AMDGPUDisassembler::decodeOperand_VGPR_32(unsigned Val) const {
@@ -275,13 +304,17 @@ MCOperand AMDGPUDisassembler::decodeOperand_SReg_32(unsigned Val) const {
   return decodeSrcOp(OPW32, Val);
 }
 
-MCOperand AMDGPUDisassembler::decodeOperand_SReg_32_XM0(unsigned Val) const {
-  // SReg_32_XM0 is SReg_32 without M0
+MCOperand AMDGPUDisassembler::decodeOperand_SReg_32_XM0_XEXEC(
+  unsigned Val) const {
+  // SReg_32_XM0 is SReg_32 without M0 or EXEC_LO/EXEC_HI
   return decodeOperand_SReg_32(Val);
 }
 
 MCOperand AMDGPUDisassembler::decodeOperand_SReg_64(unsigned Val) const {
-  // see decodeOperand_SReg_32 comment
+  return decodeSrcOp(OPW64, Val);
+}
+
+MCOperand AMDGPUDisassembler::decodeOperand_SReg_64_XEXEC(unsigned Val) const {
   return decodeSrcOp(OPW64, Val);
 }
 
@@ -317,28 +350,97 @@ MCOperand AMDGPUDisassembler::decodeIntImmed(unsigned Imm) {
       // Cast prevents negative overflow.
 }
 
-MCOperand AMDGPUDisassembler::decodeFPImmed(bool Is32, unsigned Imm) {
+static int64_t getInlineImmVal32(unsigned Imm) {
+  switch (Imm) {
+  case 240:
+    return FloatToBits(0.5f);
+  case 241:
+    return FloatToBits(-0.5f);
+  case 242:
+    return FloatToBits(1.0f);
+  case 243:
+    return FloatToBits(-1.0f);
+  case 244:
+    return FloatToBits(2.0f);
+  case 245:
+    return FloatToBits(-2.0f);
+  case 246:
+    return FloatToBits(4.0f);
+  case 247:
+    return FloatToBits(-4.0f);
+  case 248: // 1 / (2 * PI)
+    return 0x3e22f983;
+  default:
+    llvm_unreachable("invalid fp inline imm");
+  }
+}
+
+static int64_t getInlineImmVal64(unsigned Imm) {
+  switch (Imm) {
+  case 240:
+    return DoubleToBits(0.5);
+  case 241:
+    return DoubleToBits(-0.5);
+  case 242:
+    return DoubleToBits(1.0);
+  case 243:
+    return DoubleToBits(-1.0);
+  case 244:
+    return DoubleToBits(2.0);
+  case 245:
+    return DoubleToBits(-2.0);
+  case 246:
+    return DoubleToBits(4.0);
+  case 247:
+    return DoubleToBits(-4.0);
+  case 248: // 1 / (2 * PI)
+    return 0x3fc45f306dc9c882;
+  default:
+    llvm_unreachable("invalid fp inline imm");
+  }
+}
+
+static int64_t getInlineImmVal16(unsigned Imm) {
+  switch (Imm) {
+  case 240:
+    return 0x3800;
+  case 241:
+    return 0xB800;
+  case 242:
+    return 0x3C00;
+  case 243:
+    return 0xBC00;
+  case 244:
+    return 0x4000;
+  case 245:
+    return 0xC000;
+  case 246:
+    return 0x4400;
+  case 247:
+    return 0xC400;
+  case 248: // 1 / (2 * PI)
+    return 0x3118;
+  default:
+    llvm_unreachable("invalid fp inline imm");
+  }
+}
+
+MCOperand AMDGPUDisassembler::decodeFPImmed(OpWidthTy Width, unsigned Imm) {
   assert(Imm >= AMDGPU::EncValues::INLINE_FLOATING_C_MIN
       && Imm <= AMDGPU::EncValues::INLINE_FLOATING_C_MAX);
+
   // ToDo: case 248: 1/(2*PI) - is allowed only on VI
-  // ToDo: AMDGPUInstPrinter does not support 1/(2*PI). It consider 1/(2*PI) as
-  // literal constant.
-  float V = 0.0f;
-  switch (Imm) {
-  case 240: V =  0.5f; break;
-  case 241: V = -0.5f; break;
-  case 242: V =  1.0f; break;
-  case 243: V = -1.0f; break;
-  case 244: V =  2.0f; break;
-  case 245: V = -2.0f; break;
-  case 246: V =  4.0f; break;
-  case 247: V = -4.0f; break;
-  case 248: return MCOperand::createImm(Is32 ?         // 1/(2*PI)
-                                          0x3e22f983 :
-                                          0x3fc45f306dc9c882);
-  default: break;
+  switch (Width) {
+  case OPW32:
+    return MCOperand::createImm(getInlineImmVal32(Imm));
+  case OPW64:
+    return MCOperand::createImm(getInlineImmVal64(Imm));
+  case OPW16:
+  case OPWV216:
+    return MCOperand::createImm(getInlineImmVal16(Imm));
+  default:
+    llvm_unreachable("implement me");
   }
-  return MCOperand::createImm(Is32? FloatToBits(V) : DoubleToBits(V));
 }
 
 unsigned AMDGPUDisassembler::getVgprClassId(const OpWidthTy Width) const {
@@ -346,7 +448,10 @@ unsigned AMDGPUDisassembler::getVgprClassId(const OpWidthTy Width) const {
   assert(OPW_FIRST_ <= Width && Width < OPW_LAST_);
   switch (Width) {
   default: // fall
-  case OPW32: return VGPR_32RegClassID;
+  case OPW32:
+  case OPW16:
+  case OPWV216:
+    return VGPR_32RegClassID;
   case OPW64: return VReg_64RegClassID;
   case OPW128: return VReg_128RegClassID;
   }
@@ -357,7 +462,10 @@ unsigned AMDGPUDisassembler::getSgprClassId(const OpWidthTy Width) const {
   assert(OPW_FIRST_ <= Width && Width < OPW_LAST_);
   switch (Width) {
   default: // fall
-  case OPW32: return SGPR_32RegClassID;
+  case OPW32:
+  case OPW16:
+  case OPWV216:
+    return SGPR_32RegClassID;
   case OPW64: return SGPR_64RegClassID;
   case OPW128: return SGPR_128RegClassID;
   }
@@ -368,7 +476,10 @@ unsigned AMDGPUDisassembler::getTtmpClassId(const OpWidthTy Width) const {
   assert(OPW_FIRST_ <= Width && Width < OPW_LAST_);
   switch (Width) {
   default: // fall
-  case OPW32: return TTMP_32RegClassID;
+  case OPW32:
+  case OPW16:
+  case OPWV216:
+    return TTMP_32RegClassID;
   case OPW64: return TTMP_64RegClassID;
   case OPW128: return TTMP_128RegClassID;
   }
@@ -389,19 +500,27 @@ MCOperand AMDGPUDisassembler::decodeSrcOp(const OpWidthTy Width, unsigned Val) c
     return createSRegOperand(getTtmpClassId(Width), Val - TTMP_MIN);
   }
 
-  assert(Width == OPW32 || Width == OPW64);
-  const bool Is32 = (Width == OPW32);
+  assert(Width == OPW16 || Width == OPW32 || Width == OPW64);
 
   if (INLINE_INTEGER_C_MIN <= Val && Val <= INLINE_INTEGER_C_MAX)
     return decodeIntImmed(Val);
 
   if (INLINE_FLOATING_C_MIN <= Val && Val <= INLINE_FLOATING_C_MAX)
-    return decodeFPImmed(Is32, Val);
+    return decodeFPImmed(Width, Val);
 
   if (Val == LITERAL_CONST)
     return decodeLiteralConstant();
 
-  return Is32 ? decodeSpecialReg32(Val) : decodeSpecialReg64(Val);
+  switch (Width) {
+  case OPW32:
+  case OPW16:
+  case OPWV216:
+    return decodeSpecialReg32(Val);
+  case OPW64:
+    return decodeSpecialReg64(Val);
+  default:
+    llvm_unreachable("unexpected immediate type");
+  }
 }
 
 MCOperand AMDGPUDisassembler::decodeSpecialReg32(unsigned Val) const {
@@ -421,6 +540,11 @@ MCOperand AMDGPUDisassembler::decodeSpecialReg32(unsigned Val) const {
   case 124: return createRegOperand(M0);
   case 126: return createRegOperand(EXEC_LO);
   case 127: return createRegOperand(EXEC_HI);
+  case 235: return createRegOperand(SRC_SHARED_BASE);
+  case 236: return createRegOperand(SRC_SHARED_LIMIT);
+  case 237: return createRegOperand(SRC_PRIVATE_BASE);
+  case 238: return createRegOperand(SRC_PRIVATE_LIMIT);
+    // TODO: SRC_POPS_EXITING_WAVE_ID
     // ToDo: no support for vccz register
   case 251: break;
     // ToDo: no support for execz register
@@ -473,6 +597,12 @@ bool AMDGPUSymbolizer::tryAddingSymbolicOperand(MCInst &Inst,
     return true;
   }
   return false;
+}
+
+void AMDGPUSymbolizer::tryAddingPcLoadReferenceComment(raw_ostream &cStream,
+                                                       int64_t Value,
+                                                       uint64_t Address) {
+  llvm_unreachable("unimplemented");
 }
 
 //===----------------------------------------------------------------------===//

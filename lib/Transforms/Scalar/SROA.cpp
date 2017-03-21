@@ -692,7 +692,7 @@ private:
           break;
 
         // Handle a struct index, which adds its field offset to the pointer.
-        if (StructType *STy = dyn_cast<StructType>(*GTI)) {
+        if (StructType *STy = GTI.getStructTypeOrNull()) {
           unsigned ElementIdx = OpC->getZExtValue();
           const StructLayout *SL = DL.getStructLayout(STy);
           GEPOffset +=
@@ -1825,6 +1825,7 @@ static VectorType *isVectorPromotionViable(Partition &P, const DataLayout &DL) {
     // Rank the remaining candidate vector types. This is easy because we know
     // they're all integer vectors. We sort by ascending number of elements.
     auto RankVectorTypes = [&DL](VectorType *RHSTy, VectorType *LHSTy) {
+      (void)DL;
       assert(DL.getTypeSizeInBits(RHSTy) == DL.getTypeSizeInBits(LHSTy) &&
              "Cannot have vector types of different sizes!");
       assert(RHSTy->getElementType()->isIntegerTy() &&
@@ -2876,6 +2877,17 @@ private:
     // Record this instruction for deletion.
     Pass.DeadInsts.insert(&II);
 
+    // Lifetime intrinsics are only promotable if they cover the whole alloca.
+    // Therefore, we drop lifetime intrinsics which don't cover the whole
+    // alloca.
+    // (In theory, intrinsics which partially cover an alloca could be
+    // promoted, but PromoteMemToReg doesn't handle that case.)
+    // FIXME: Check whether the alloca is promotable before dropping the
+    // lifetime intrinsics?
+    if (NewBeginOffset != NewAllocaBeginOffset ||
+        NewEndOffset != NewAllocaEndOffset)
+      return true;
+
     ConstantInt *Size =
         ConstantInt::get(cast<IntegerType>(II.getArgOperand(0)->getType()),
                          NewEndOffset - NewBeginOffset);
@@ -2889,12 +2901,7 @@ private:
     (void)New;
     DEBUG(dbgs() << "          to: " << *New << "\n");
 
-    // Lifetime intrinsics are only promotable if they cover the whole alloca.
-    // (In theory, intrinsics which partially cover an alloca could be
-    // promoted, but PromoteMemToReg doesn't handle that case.)
-    bool IsWholeAlloca = NewBeginOffset == NewAllocaBeginOffset &&
-                         NewEndOffset == NewAllocaEndOffset;
-    return IsWholeAlloca;
+    return true;
   }
 
   bool visitPHINode(PHINode &PN) {
@@ -3213,20 +3220,11 @@ static Type *getTypePartition(const DataLayout &DL, Type *Ty, uint64_t Offset,
     return nullptr;
 
   if (SequentialType *SeqTy = dyn_cast<SequentialType>(Ty)) {
-    // We can't partition pointers...
-    if (SeqTy->isPointerTy())
-      return nullptr;
-
     Type *ElementTy = SeqTy->getElementType();
     uint64_t ElementSize = DL.getTypeAllocSize(ElementTy);
     uint64_t NumSkippedElements = Offset / ElementSize;
-    if (ArrayType *ArrTy = dyn_cast<ArrayType>(SeqTy)) {
-      if (NumSkippedElements >= ArrTy->getNumElements())
-        return nullptr;
-    } else if (VectorType *VecTy = dyn_cast<VectorType>(SeqTy)) {
-      if (NumSkippedElements >= VecTy->getNumElements())
-        return nullptr;
-    }
+    if (NumSkippedElements >= SeqTy->getNumElements())
+      return nullptr;
     Offset -= NumSkippedElements * ElementSize;
 
     // First check if we need to recurse.
@@ -3985,16 +3983,16 @@ bool SROA::splitAlloca(AllocaInst &AI, AllocaSlices &AS) {
   if (!IsSorted)
     std::sort(AS.begin(), AS.end());
 
-  /// \brief Describes the allocas introduced by rewritePartition
-  /// in order to migrate the debug info.
-  struct Piece {
+  /// Describes the allocas introduced by rewritePartition in order to migrate
+  /// the debug info.
+  struct Fragment {
     AllocaInst *Alloca;
     uint64_t Offset;
     uint64_t Size;
-    Piece(AllocaInst *AI, uint64_t O, uint64_t S)
+    Fragment(AllocaInst *AI, uint64_t O, uint64_t S)
       : Alloca(AI), Offset(O), Size(S) {}
   };
-  SmallVector<Piece, 4> Pieces;
+  SmallVector<Fragment, 4> Fragments;
 
   // Rewrite each partition.
   for (auto &P : AS.partitions()) {
@@ -4005,7 +4003,7 @@ bool SROA::splitAlloca(AllocaInst &AI, AllocaSlices &AS) {
         uint64_t AllocaSize = DL.getTypeSizeInBits(NewAI->getAllocatedType());
         // Don't include any padding.
         uint64_t Size = std::min(AllocaSize, P.size() * SizeOfByte);
-        Pieces.push_back(Piece(NewAI, P.beginOffset() * SizeOfByte, Size));
+        Fragments.push_back(Fragment(NewAI, P.beginOffset() * SizeOfByte, Size));
       }
     }
     ++NumPartitions;
@@ -4022,32 +4020,34 @@ bool SROA::splitAlloca(AllocaInst &AI, AllocaSlices &AS) {
     auto *Expr = DbgDecl->getExpression();
     DIBuilder DIB(*AI.getModule(), /*AllowUnresolved*/ false);
     uint64_t AllocaSize = DL.getTypeSizeInBits(AI.getAllocatedType());
-    for (auto Piece : Pieces) {
-      // Create a piece expression describing the new partition or reuse AI's
+    for (auto Fragment : Fragments) {
+      // Create a fragment expression describing the new partition or reuse AI's
       // expression if there is only one partition.
-      auto *PieceExpr = Expr;
-      if (Piece.Size < AllocaSize || Expr->isBitPiece()) {
+      auto *FragmentExpr = Expr;
+      if (Fragment.Size < AllocaSize || Expr->isFragment()) {
         // If this alloca is already a scalar replacement of a larger aggregate,
-        // Piece.Offset describes the offset inside the scalar.
-        uint64_t Offset = Expr->isBitPiece() ? Expr->getBitPieceOffset() : 0;
-        uint64_t Start = Offset + Piece.Offset;
-        uint64_t Size = Piece.Size;
-        if (Expr->isBitPiece()) {
-          uint64_t AbsEnd = Expr->getBitPieceOffset() + Expr->getBitPieceSize();
+        // Fragment.Offset describes the offset inside the scalar.
+        auto ExprFragment = Expr->getFragmentInfo();
+        uint64_t Offset = ExprFragment ? ExprFragment->OffsetInBits : 0;
+        uint64_t Start = Offset + Fragment.Offset;
+        uint64_t Size = Fragment.Size;
+        if (ExprFragment) {
+          uint64_t AbsEnd =
+	    ExprFragment->OffsetInBits + ExprFragment->SizeInBits;
           if (Start >= AbsEnd)
             // No need to describe a SROAed padding.
             continue;
           Size = std::min(Size, AbsEnd - Start);
         }
-        PieceExpr = DIB.createBitPieceExpression(Start, Size);
+        FragmentExpr = DIB.createFragmentExpression(Start, Size);
       }
 
       // Remove any existing dbg.declare intrinsic describing the same alloca.
-      if (DbgDeclareInst *OldDDI = FindAllocaDbgDeclare(Piece.Alloca))
+      if (DbgDeclareInst *OldDDI = FindAllocaDbgDeclare(Fragment.Alloca))
         OldDDI->eraseFromParent();
 
-      DIB.insertDeclare(Piece.Alloca, Var, PieceExpr, DbgDecl->getDebugLoc(),
-                        &AI);
+      DIB.insertDeclare(Fragment.Alloca, Var, FragmentExpr,
+                        DbgDecl->getDebugLoc(), &AI);
     }
   }
   return Changed;
@@ -4235,9 +4235,8 @@ PreservedAnalyses SROA::runImpl(Function &F, DominatorTree &RunDT,
   if (!Changed)
     return PreservedAnalyses::all();
 
-  // FIXME: Even when promoting allocas we should preserve some abstract set of
-  // CFG-specific analyses.
   PreservedAnalyses PA;
+  PA.preserveSet<CFGAnalyses>();
   PA.preserve<GlobalsAA>();
   return PA;
 }

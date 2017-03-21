@@ -70,6 +70,176 @@ define <2 x i32> @or_bitcast_int_to_vec(i64 %a) {
   ret <2 x i32> %t2
 }
 
+; PR27925 - https://llvm.org/bugs/show_bug.cgi?id=27925
+
+define <4 x i32> @bitcasts_and_bitcast(<4 x i32> %a, <8 x i16> %b) {
+; CHECK-LABEL: @bitcasts_and_bitcast(
+; CHECK-NEXT:    [[TMP1:%.*]] = bitcast <8 x i16> %b to <4 x i32>
+; CHECK-NEXT:    [[BC3:%.*]] = and <4 x i32> [[TMP1]], %a
+; CHECK-NEXT:    ret <4 x i32> [[BC3]]
+;
+  %bc1 = bitcast <4 x i32> %a to <2 x i64>
+  %bc2 = bitcast <8 x i16> %b to <2 x i64>
+  %and = and <2 x i64> %bc2, %bc1
+  %bc3 = bitcast <2 x i64> %and to <4 x i32>
+  ret <4 x i32> %bc3
+}
+
+; The destination must have an integer element type.
+; FIXME: We can still eliminate one bitcast in this test by doing the logic op
+; in the type of the input that has an integer element type.
+
+define <4 x float> @bitcasts_and_bitcast_to_fp(<4 x float> %a, <8 x i16> %b) {
+; CHECK-LABEL: @bitcasts_and_bitcast_to_fp(
+; CHECK-NEXT:    [[BC1:%.*]] = bitcast <4 x float> %a to <2 x i64>
+; CHECK-NEXT:    [[BC2:%.*]] = bitcast <8 x i16> %b to <2 x i64>
+; CHECK-NEXT:    [[AND:%.*]] = and <2 x i64> [[BC2]], [[BC1]]
+; CHECK-NEXT:    [[BC3:%.*]] = bitcast <2 x i64> [[AND]] to <4 x float>
+; CHECK-NEXT:    ret <4 x float> [[BC3]]
+;
+  %bc1 = bitcast <4 x float> %a to <2 x i64>
+  %bc2 = bitcast <8 x i16> %b to <2 x i64>
+  %and = and <2 x i64> %bc2, %bc1
+  %bc3 = bitcast <2 x i64> %and to <4 x float>
+  ret <4 x float> %bc3
+}
+
+; FIXME: Transform limited from changing vector op to integer op to avoid codegen problems.
+
+define i128 @bitcast_or_bitcast(i128 %a, <2 x i64> %b) {
+; CHECK-LABEL: @bitcast_or_bitcast(
+; CHECK-NEXT:    [[BC1:%.*]] = bitcast i128 %a to <2 x i64>
+; CHECK-NEXT:    [[OR:%.*]] = or <2 x i64> [[BC1]], %b
+; CHECK-NEXT:    [[BC2:%.*]] = bitcast <2 x i64> [[OR]] to i128
+; CHECK-NEXT:    ret i128 [[BC2]]
+;
+  %bc1 = bitcast i128 %a to <2 x i64>
+  %or = or <2 x i64> %b, %bc1
+  %bc2 = bitcast <2 x i64> %or to i128
+  ret i128 %bc2
+}
+
+; FIXME: Transform limited from changing integer op to vector op to avoid codegen problems.
+
+define <4 x i32> @bitcast_xor_bitcast(<4 x i32> %a, i128 %b) {
+; CHECK-LABEL: @bitcast_xor_bitcast(
+; CHECK-NEXT:    [[BC1:%.*]] = bitcast <4 x i32> %a to i128
+; CHECK-NEXT:    [[XOR:%.*]] = xor i128 [[BC1]], %b
+; CHECK-NEXT:    [[BC2:%.*]] = bitcast i128 [[XOR]] to <4 x i32>
+; CHECK-NEXT:    ret <4 x i32> [[BC2]]
+;
+  %bc1 = bitcast <4 x i32> %a to i128
+  %xor = xor i128 %bc1, %b
+  %bc2 = bitcast i128 %xor to <4 x i32>
+  ret <4 x i32> %bc2
+}
+
+; https://llvm.org/bugs/show_bug.cgi?id=6137#c6
+
+define <4 x float> @bitcast_vector_select(<4 x float> %x, <2 x i64> %y, <4 x i1> %cmp) {
+; CHECK-LABEL: @bitcast_vector_select(
+; CHECK-NEXT:    [[TMP1:%.*]] = bitcast <2 x i64> %y to <4 x float>
+; CHECK-NEXT:    [[T7:%.*]] = select <4 x i1> %cmp, <4 x float> %x, <4 x float> [[TMP1]]
+; CHECK-NEXT:    ret <4 x float> [[T7]]
+;
+  %t4 = bitcast <4 x float> %x to <4 x i32>
+  %t5 = bitcast <2 x i64> %y to <4 x i32>
+  %t6 = select <4 x i1> %cmp, <4 x i32> %t4, <4 x i32> %t5
+  %t7 = bitcast <4 x i32> %t6 to <4 x float>
+  ret <4 x float> %t7
+}
+
+define float @bitcast_scalar_select_of_scalars(float %x, i32 %y, i1 %cmp) {
+; CHECK-LABEL: @bitcast_scalar_select_of_scalars(
+; CHECK-NEXT:    [[TMP1:%.*]] = bitcast i32 %y to float
+; CHECK-NEXT:    [[T7:%.*]] = select i1 %cmp, float %x, float [[TMP1]]
+; CHECK-NEXT:    ret float [[T7]]
+;
+  %t4 = bitcast float %x to i32
+  %t6 = select i1 %cmp, i32 %t4, i32 %y
+  %t7 = bitcast i32 %t6 to float
+  ret float %t7
+}
+
+; FIXME: We should change the select operand types to scalars, but we need to make
+; sure the backend can reverse that transform if needed.
+
+define float @bitcast_scalar_select_type_mismatch1(float %x, <4 x i8> %y, i1 %cmp) {
+; CHECK-LABEL: @bitcast_scalar_select_type_mismatch1(
+; CHECK-NEXT:    [[T4:%.*]] = bitcast float %x to <4 x i8>
+; CHECK-NEXT:    [[T6:%.*]] = select i1 %cmp, <4 x i8> [[T4]], <4 x i8> %y
+; CHECK-NEXT:    [[T7:%.*]] = bitcast <4 x i8> [[T6]] to float
+; CHECK-NEXT:    ret float [[T7]]
+;
+  %t4 = bitcast float %x to <4 x i8>
+  %t6 = select i1 %cmp, <4 x i8> %t4, <4 x i8> %y
+  %t7 = bitcast <4 x i8> %t6 to float
+  ret float %t7
+}
+
+; FIXME: We should change the select operand types to vectors, but we need to make
+; sure the backend can reverse that transform if needed.
+
+define <4 x i8> @bitcast_scalar_select_type_mismatch2(<4 x i8> %x, float %y, i1 %cmp) {
+; CHECK-LABEL: @bitcast_scalar_select_type_mismatch2(
+; CHECK-NEXT:    [[T4:%.*]] = bitcast <4 x i8> %x to float
+; CHECK-NEXT:    [[T6:%.*]] = select i1 %cmp, float [[T4]], float %y
+; CHECK-NEXT:    [[T7:%.*]] = bitcast float [[T6]] to <4 x i8>
+; CHECK-NEXT:    ret <4 x i8> [[T7]]
+;
+  %t4 = bitcast <4 x i8> %x to float
+  %t6 = select i1 %cmp, float %t4, float %y
+  %t7 = bitcast float %t6 to <4 x i8>
+  ret <4 x i8> %t7
+}
+
+define <4 x float> @bitcast_scalar_select_of_vectors(<4 x float> %x, <2 x i64> %y, i1 %cmp) {
+; CHECK-LABEL: @bitcast_scalar_select_of_vectors(
+; CHECK-NEXT:    [[TMP1:%.*]] = bitcast <2 x i64> %y to <4 x float>
+; CHECK-NEXT:    [[T7:%.*]] = select i1 %cmp, <4 x float> %x, <4 x float> [[TMP1]]
+; CHECK-NEXT:    ret <4 x float> [[T7]]
+;
+  %t4 = bitcast <4 x float> %x to <4 x i32>
+  %t5 = bitcast <2 x i64> %y to <4 x i32>
+  %t6 = select i1 %cmp, <4 x i32> %t4, <4 x i32> %t5
+  %t7 = bitcast <4 x i32> %t6 to <4 x float>
+  ret <4 x float> %t7
+}
+
+; Can't change the type of the vector select if the dest type is scalar.
+
+define float @bitcast_vector_select_no_fold1(float %x, <2 x i16> %y, <4 x i1> %cmp) {
+; CHECK-LABEL: @bitcast_vector_select_no_fold1(
+; CHECK-NEXT:    [[T4:%.*]] = bitcast float %x to <4 x i8>
+; CHECK-NEXT:    [[T5:%.*]] = bitcast <2 x i16> %y to <4 x i8>
+; CHECK-NEXT:    [[T6:%.*]] = select <4 x i1> %cmp, <4 x i8> [[T4]], <4 x i8> [[T5]]
+; CHECK-NEXT:    [[T7:%.*]] = bitcast <4 x i8> [[T6]] to float
+; CHECK-NEXT:    ret float [[T7]]
+;
+  %t4 = bitcast float %x to <4 x i8>
+  %t5 = bitcast <2 x i16> %y to <4 x i8>
+  %t6 = select <4 x i1> %cmp, <4 x i8> %t4, <4 x i8> %t5
+  %t7 = bitcast <4 x i8> %t6 to float
+  ret float %t7
+}
+
+; Can't change the type of the vector select if the number of elements in the dest type is not the same.
+
+define <2 x float> @bitcast_vector_select_no_fold2(<2 x float> %x, <4 x i16> %y, <8 x i1> %cmp) {
+; CHECK-LABEL: @bitcast_vector_select_no_fold2(
+; CHECK-NEXT:    [[T4:%.*]] = bitcast <2 x float> %x to <8 x i8>
+; CHECK-NEXT:    [[T5:%.*]] = bitcast <4 x i16> %y to <8 x i8>
+; CHECK-NEXT:    [[T6:%.*]] = select <8 x i1> %cmp, <8 x i8> [[T4]], <8 x i8> [[T5]]
+; CHECK-NEXT:    [[T7:%.*]] = bitcast <8 x i8> [[T6]] to <2 x float>
+; CHECK-NEXT:    ret <2 x float> [[T7]]
+;
+  %t4 = bitcast <2 x float> %x to <8 x i8>
+  %t5 = bitcast <4 x i16> %y to <8 x i8>
+  %t6 = select <8 x i1> %cmp, <8 x i8> %t4, <8 x i8> %t5
+  %t7 = bitcast <8 x i8> %t6 to <2 x float>
+  ret <2 x float> %t7
+}
+
 ; Optimize bitcasts that are extracting low element of vector.  This happens because of SRoA.
 ; rdar://7892780
 define float @test2(<2 x float> %A, <2 x i32> %B) {
@@ -278,4 +448,68 @@ define i8 @test8() {
 ;
   %res = bitcast <8 x i1> <i1 true, i1 true, i1 false, i1 true, i1 false, i1 true, i1 false, i1 true> to i8
   ret i8 %res
+}
+
+@g = internal unnamed_addr global i32 undef
+
+; CHECK-LABEL: @constant_fold_vector_to_double(
+; CHECK: store volatile double 1.000000e+00,
+; CHECK: store volatile double 1.000000e+00,
+; CHECK: store volatile double 1.000000e+00,
+; CHECK: store volatile double 1.000000e+00,
+
+; CHECK: store volatile double 0xFFFFFFFFFFFFFFFF,
+; CHECK: store volatile double 0x162E000004D2,
+
+; CHECK: store volatile double bitcast (<2 x i32> <i32 1234, i32 ptrtoint (i32* @g to i32)> to double),
+; CHECK: store volatile double 0x400000003F800000,
+
+; CHECK: store volatile double 0.000000e+00,
+; CHECK: store volatile double 0.000000e+00,
+; CHECK: store volatile double 0.000000e+00,
+; CHECK: store volatile double 0.000000e+00,
+; CHECK: store volatile double 0.000000e+00,
+; CHECK: store volatile double 0.000000e+00,
+define void @constant_fold_vector_to_double() {
+  store volatile double bitcast (<1 x i64> <i64 4607182418800017408> to double), double* undef
+  store volatile double bitcast (<2 x i32> <i32 0, i32 1072693248> to double), double* undef
+  store volatile double bitcast (<4 x i16> <i16 0, i16 0, i16 0, i16 16368> to double), double* undef
+  store volatile double bitcast (<8 x i8> <i8 0, i8 0, i8 0, i8 0, i8 0, i8 0, i8 240, i8 63> to double), double* undef
+
+  store volatile double bitcast (<2 x i32> <i32 -1, i32 -1> to double), double* undef
+  store volatile double bitcast (<2 x i32> <i32 1234, i32 5678> to double), double* undef
+
+  store volatile double bitcast (<2 x i32> <i32 1234, i32 ptrtoint (i32* @g to i32)> to double), double* undef
+  store volatile double bitcast (<2 x float> <float 1.0, float 2.0> to double), double* undef
+
+  store volatile double bitcast (<2 x i32> zeroinitializer to double), double* undef
+  store volatile double bitcast (<4 x i16> zeroinitializer to double), double* undef
+  store volatile double bitcast (<8 x i8> zeroinitializer to double), double* undef
+  store volatile double bitcast (<16 x i4> zeroinitializer to double), double* undef
+  store volatile double bitcast (<32 x i2> zeroinitializer to double), double* undef
+  store volatile double bitcast (<64 x i1> zeroinitializer to double), double* undef
+  ret void
+}
+
+; CHECK-LABEL: @constant_fold_vector_to_float(
+; CHECK: store volatile float 1.000000e+00,
+; CHECK: store volatile float 1.000000e+00,
+; CHECK: store volatile float 1.000000e+00,
+; CHECK: store volatile float 1.000000e+00,
+define void @constant_fold_vector_to_float() {
+  store volatile float bitcast (<1 x i32> <i32 1065353216> to float), float* undef
+  store volatile float bitcast (<2 x i16> <i16 0, i16 16256> to float), float* undef
+  store volatile float bitcast (<4 x i8> <i8 0, i8 0, i8 128, i8 63> to float), float* undef
+  store volatile float bitcast (<32 x i1> <i1 0, i1 0, i1 0, i1 0, i1 0, i1 0, i1 0, i1 0, i1 0, i1 0, i1 0, i1 0, i1 0, i1 0, i1 0, i1 0, i1 0, i1 0, i1 0, i1 0, i1 0, i1 0, i1 0, i1 1, i1 1, i1 1, i1 1, i1 1, i1 1, i1 1, i1 0, i1 0> to float), float* undef
+
+  ret void
+}
+
+; CHECK-LABEL: @constant_fold_vector_to_half(
+; CHECK: store volatile half 0xH4000,
+; CHECK: store volatile half 0xH4000,
+define void @constant_fold_vector_to_half() {
+  store volatile half bitcast (<2 x i8> <i8 0, i8 64> to half), half* undef
+  store volatile half bitcast (<4 x i4> <i4 0, i4 0, i4 0, i4 4> to half), half* undef
+  ret void
 }

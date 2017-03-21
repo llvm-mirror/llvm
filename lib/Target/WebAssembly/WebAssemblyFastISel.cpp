@@ -84,7 +84,10 @@ class WebAssemblyFastISel final : public FastISel {
       return Base.FI;
     }
 
-    void setOffset(int64_t Offset_) { Offset = Offset_; }
+    void setOffset(int64_t Offset_) {
+      assert(Offset_ >= 0 && "Offsets must be non-negative");
+      Offset = Offset_;
+    }
     int64_t getOffset() const { return Offset; }
     void setGlobalValue(const GlobalValue *G) { GV = G; }
     const GlobalValue *getGlobalValue() const { return GV; }
@@ -113,6 +116,8 @@ private:
     case MVT::f32:
     case MVT::f64:
       return VT;
+    case MVT::f16:
+      return MVT::f32;
     case MVT::v16i8:
     case MVT::v8i16:
     case MVT::v4i32:
@@ -236,12 +241,15 @@ bool WebAssemblyFastISel::computeAddress(const Value *Obj, Address &Addr) {
   case Instruction::GetElementPtr: {
     Address SavedAddr = Addr;
     uint64_t TmpOffset = Addr.getOffset();
+    // Non-inbounds geps can wrap; wasm's offsets can't.
+    if (!cast<GEPOperator>(U)->isInBounds())
+      goto unsupported_gep;
     // Iterate through the GEP folding the constants into offsets where
     // we can.
     for (gep_type_iterator GTI = gep_type_begin(U), E = gep_type_end(U);
          GTI != E; ++GTI) {
       const Value *Op = GTI.getOperand();
-      if (StructType *STy = dyn_cast<StructType>(*GTI)) {
+      if (StructType *STy = GTI.getStructTypeOrNull()) {
         const StructLayout *SL = DL.getStructLayout(STy);
         unsigned Idx = cast<ConstantInt>(Op)->getZExtValue();
         TmpOffset += SL->getElementOffset(Idx);
@@ -272,10 +280,13 @@ bool WebAssemblyFastISel::computeAddress(const Value *Obj, Address &Addr) {
         }
       }
     }
-    // Try to grab the base operand now.
-    Addr.setOffset(TmpOffset);
-    if (computeAddress(U->getOperand(0), Addr))
-      return true;
+    // Don't fold in negative offsets.
+    if (int64_t(TmpOffset) >= 0) {
+      // Try to grab the base operand now.
+      Addr.setOffset(TmpOffset);
+      if (computeAddress(U->getOperand(0), Addr))
+        return true;
+    }
     // We failed, restore everything and try the other options.
     Addr = SavedAddr;
   unsupported_gep:
@@ -301,8 +312,11 @@ bool WebAssemblyFastISel::computeAddress(const Value *Obj, Address &Addr) {
       std::swap(LHS, RHS);
 
     if (const ConstantInt *CI = dyn_cast<ConstantInt>(RHS)) {
-      Addr.setOffset(Addr.getOffset() + CI->getSExtValue());
-      return computeAddress(LHS, Addr);
+      uint64_t TmpOffset = Addr.getOffset() + CI->getSExtValue();
+      if (int64_t(TmpOffset) >= 0) {
+        Addr.setOffset(TmpOffset);
+        return computeAddress(LHS, Addr);
+      }
     }
 
     Address Backup = Addr;
@@ -318,8 +332,11 @@ bool WebAssemblyFastISel::computeAddress(const Value *Obj, Address &Addr) {
     const Value *RHS = U->getOperand(1);
 
     if (const ConstantInt *CI = dyn_cast<ConstantInt>(RHS)) {
-      Addr.setOffset(Addr.getOffset() - CI->getSExtValue());
-      return computeAddress(LHS, Addr);
+      int64_t TmpOffset = Addr.getOffset() - CI->getSExtValue();
+      if (TmpOffset >= 0) {
+        Addr.setOffset(TmpOffset);
+        return computeAddress(LHS, Addr);
+      }
     }
     break;
   }
@@ -647,6 +664,9 @@ bool WebAssemblyFastISel::fastLowerArguments() {
   auto *MFI = MF->getInfo<WebAssemblyFunctionInfo>();
   for (auto const &Arg : F->args())
     MFI->addParam(getLegalType(getSimpleType(Arg.getType())));
+
+  if (!F->getReturnType()->isVoidTy())
+    MFI->addResult(getLegalType(getSimpleType(F->getReturnType())));
 
   return true;
 }

@@ -12,13 +12,15 @@
 //===----------------------------------------------------------------------===//
 
 #include "InstCombineInternal.h"
+#include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/Loads.h"
 #include "llvm/IR/ConstantRange.h"
 #include "llvm/IR/DataLayout.h"
-#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
@@ -223,6 +225,107 @@ static Instruction *simplifyAllocaArraySize(InstCombiner &IC, AllocaInst &AI) {
   return nullptr;
 }
 
+namespace {
+// If I and V are pointers in different address space, it is not allowed to
+// use replaceAllUsesWith since I and V have different types. A
+// non-target-specific transformation should not use addrspacecast on V since
+// the two address space may be disjoint depending on target.
+//
+// This class chases down uses of the old pointer until reaching the load
+// instructions, then replaces the old pointer in the load instructions with
+// the new pointer. If during the chasing it sees bitcast or GEP, it will
+// create new bitcast or GEP with the new pointer and use them in the load
+// instruction.
+class PointerReplacer {
+public:
+  PointerReplacer(InstCombiner &IC) : IC(IC) {}
+  void replacePointer(Instruction &I, Value *V);
+
+private:
+  void findLoadAndReplace(Instruction &I);
+  void replace(Instruction *I);
+  Value *getReplacement(Value *I);
+
+  SmallVector<Instruction *, 4> Path;
+  MapVector<Value *, Value *> WorkMap;
+  InstCombiner &IC;
+};
+} // end anonymous namespace
+
+void PointerReplacer::findLoadAndReplace(Instruction &I) {
+  for (auto U : I.users()) {
+    auto *Inst = dyn_cast<Instruction>(&*U);
+    if (!Inst)
+      return;
+    DEBUG(dbgs() << "Found pointer user: " << *U << '\n');
+    if (isa<LoadInst>(Inst)) {
+      for (auto P : Path)
+        replace(P);
+      replace(Inst);
+    } else if (isa<GetElementPtrInst>(Inst) || isa<BitCastInst>(Inst)) {
+      Path.push_back(Inst);
+      findLoadAndReplace(*Inst);
+      Path.pop_back();
+    } else {
+      return;
+    }
+  }
+}
+
+Value *PointerReplacer::getReplacement(Value *V) {
+  auto Loc = WorkMap.find(V);
+  if (Loc != WorkMap.end())
+    return Loc->second;
+  return nullptr;
+}
+
+void PointerReplacer::replace(Instruction *I) {
+  if (getReplacement(I))
+    return;
+
+  if (auto *LT = dyn_cast<LoadInst>(I)) {
+    auto *V = getReplacement(LT->getPointerOperand());
+    assert(V && "Operand not replaced");
+    auto *NewI = new LoadInst(V);
+    NewI->takeName(LT);
+    IC.InsertNewInstWith(NewI, *LT);
+    IC.replaceInstUsesWith(*LT, NewI);
+    WorkMap[LT] = NewI;
+  } else if (auto *GEP = dyn_cast<GetElementPtrInst>(I)) {
+    auto *V = getReplacement(GEP->getPointerOperand());
+    assert(V && "Operand not replaced");
+    SmallVector<Value *, 8> Indices;
+    Indices.append(GEP->idx_begin(), GEP->idx_end());
+    auto *NewI = GetElementPtrInst::Create(
+        V->getType()->getPointerElementType(), V, Indices);
+    IC.InsertNewInstWith(NewI, *GEP);
+    NewI->takeName(GEP);
+    WorkMap[GEP] = NewI;
+  } else if (auto *BC = dyn_cast<BitCastInst>(I)) {
+    auto *V = getReplacement(BC->getOperand(0));
+    assert(V && "Operand not replaced");
+    auto *NewT = PointerType::get(BC->getType()->getPointerElementType(),
+                                  V->getType()->getPointerAddressSpace());
+    auto *NewI = new BitCastInst(V, NewT);
+    IC.InsertNewInstWith(NewI, *BC);
+    NewI->takeName(BC);
+    WorkMap[BC] = NewI;
+  } else {
+    llvm_unreachable("should never reach here");
+  }
+}
+
+void PointerReplacer::replacePointer(Instruction &I, Value *V) {
+#ifndef NDEBUG
+  auto *PT = cast<PointerType>(I.getType());
+  auto *NT = cast<PointerType>(V->getType());
+  assert(PT != NT && PT->getElementType() == NT->getElementType() &&
+         "Invalid usage");
+#endif
+  WorkMap[&I] = V;
+  findLoadAndReplace(I);
+}
+
 Instruction *InstCombiner::visitAllocaInst(AllocaInst &AI) {
   if (auto *I = simplifyAllocaArraySize(*this, AI))
     return I;
@@ -293,12 +396,22 @@ Instruction *InstCombiner::visitAllocaInst(AllocaInst &AI) {
         for (unsigned i = 0, e = ToDelete.size(); i != e; ++i)
           eraseInstFromFunction(*ToDelete[i]);
         Constant *TheSrc = cast<Constant>(Copy->getSource());
-        Constant *Cast
-          = ConstantExpr::getPointerBitCastOrAddrSpaceCast(TheSrc, AI.getType());
-        Instruction *NewI = replaceInstUsesWith(AI, Cast);
-        eraseInstFromFunction(*Copy);
-        ++NumGlobalCopies;
-        return NewI;
+        auto *SrcTy = TheSrc->getType();
+        auto *DestTy = PointerType::get(AI.getType()->getPointerElementType(),
+                                        SrcTy->getPointerAddressSpace());
+        Constant *Cast =
+            ConstantExpr::getPointerBitCastOrAddrSpaceCast(TheSrc, DestTy);
+        if (AI.getType()->getPointerAddressSpace() ==
+            SrcTy->getPointerAddressSpace()) {
+          Instruction *NewI = replaceInstUsesWith(AI, Cast);
+          eraseInstFromFunction(*Copy);
+          ++NumGlobalCopies;
+          return NewI;
+        } else {
+          PointerReplacer PtrReplacer(*this);
+          PtrReplacer.replacePointer(AI, Cast);
+          ++NumGlobalCopies;
+        }
       }
     }
   }
@@ -306,6 +419,11 @@ Instruction *InstCombiner::visitAllocaInst(AllocaInst &AI) {
   // At last, use the generic allocation site handler to aggressively remove
   // unused allocas.
   return visitAllocSite(AI);
+}
+
+// Are we allowed to form a atomic load or store of this type?
+static bool isSupportedAtomicType(Type *Ty) {
+  return Ty->isIntegerTy() || Ty->isPointerTy() || Ty->isFloatingPointTy();
 }
 
 /// \brief Helper to combine a load to a new type.
@@ -319,6 +437,9 @@ Instruction *InstCombiner::visitAllocaInst(AllocaInst &AI) {
 /// point the \c InstCombiner currently is using.
 static LoadInst *combineLoadToNewType(InstCombiner &IC, LoadInst &LI, Type *NewTy,
                                       const Twine &Suffix = "") {
+  assert((!LI.isAtomic() || isSupportedAtomicType(NewTy)) &&
+         "can't fold an atomic load to requested type");
+  
   Value *Ptr = LI.getPointerOperand();
   unsigned AS = LI.getPointerAddressSpace();
   SmallVector<std::pair<unsigned, MDNode *>, 8> MD;
@@ -400,6 +521,9 @@ static LoadInst *combineLoadToNewType(InstCombiner &IC, LoadInst &LI, Type *NewT
 ///
 /// Returns the newly created store instruction.
 static StoreInst *combineStoreToNewValue(InstCombiner &IC, StoreInst &SI, Value *V) {
+  assert((!SI.isAtomic() || isSupportedAtomicType(V->getType())) &&
+         "can't fold an atomic store of requested type");
+  
   Value *Ptr = SI.getPointerOperand();
   unsigned AS = SI.getPointerAddressSpace();
   SmallVector<std::pair<unsigned, MDNode *>, 8> MD;
@@ -491,7 +615,8 @@ static Instruction *combineLoadToOperationType(InstCombiner &IC, LoadInst &LI) {
       !DL.isNonIntegralPointerType(Ty)) {
     if (all_of(LI.users(), [&LI](User *U) {
           auto *SI = dyn_cast<StoreInst>(U);
-          return SI && SI->getPointerOperand() != &LI;
+          return SI && SI->getPointerOperand() != &LI &&
+                 !SI->getPointerOperand()->isSwiftError();
         })) {
       LoadInst *NewLoad = combineLoadToNewType(
           IC, LI,
@@ -514,14 +639,14 @@ static Instruction *combineLoadToOperationType(InstCombiner &IC, LoadInst &LI) {
   // as long as those are noops (i.e., the source or dest type have the same
   // bitwidth as the target's pointers).
   if (LI.hasOneUse())
-    if (auto* CI = dyn_cast<CastInst>(LI.user_back())) {
-      if (CI->isNoopCast(DL)) {
-        LoadInst *NewLoad = combineLoadToNewType(IC, LI, CI->getDestTy());
-        CI->replaceAllUsesWith(NewLoad);
-        IC.eraseInstFromFunction(*CI);
-        return &LI;
-      }
-    }
+    if (auto* CI = dyn_cast<CastInst>(LI.user_back()))
+      if (CI->isNoopCast(DL))
+        if (!LI.isAtomic() || isSupportedAtomicType(CI->getDestTy())) {
+          LoadInst *NewLoad = combineLoadToNewType(IC, LI, CI->getDestTy());
+          CI->replaceAllUsesWith(NewLoad);
+          IC.eraseInstFromFunction(*CI);
+          return &LI;
+        }
 
   // FIXME: We should also canonicalize loads of vectors when their elements are
   // cast to other types.
@@ -596,7 +721,7 @@ static Instruction *unpackLoadToAggregate(InstCombiner &IC, LoadInst &LI) {
     // arrays of arbitrary size but this has a terrible impact on compile time.
     // The threshold here is chosen arbitrarily, maybe needs a little bit of
     // tuning.
-    if (NumElements > 1024)
+    if (NumElements > IC.MaxArraySizeForCombine)
       return nullptr;
 
     const DataLayout &DL = IC.getDataLayout();
@@ -839,20 +964,10 @@ Instruction *InstCombiner::visitLoadInst(LoadInst &LI) {
   // separated by a few arithmetic operations.
   BasicBlock::iterator BBI(LI);
   bool IsLoadCSE = false;
-  if (Value *AvailableVal =
-      FindAvailableLoadedValue(&LI, LI.getParent(), BBI,
-                               DefMaxInstsToScan, AA, &IsLoadCSE)) {
-    if (IsLoadCSE) {
-      LoadInst *NLI = cast<LoadInst>(AvailableVal);
-      unsigned KnownIDs[] = {
-          LLVMContext::MD_tbaa,            LLVMContext::MD_alias_scope,
-          LLVMContext::MD_noalias,         LLVMContext::MD_range,
-          LLVMContext::MD_invariant_load,  LLVMContext::MD_nonnull,
-          LLVMContext::MD_invariant_group, LLVMContext::MD_align,
-          LLVMContext::MD_dereferenceable,
-          LLVMContext::MD_dereferenceable_or_null};
-      combineMetadata(NLI, &LI, KnownIDs);
-    };
+  if (Value *AvailableVal = FindAvailableLoadedValue(
+          &LI, LI.getParent(), BBI, DefMaxInstsToScan, AA, &IsLoadCSE)) {
+    if (IsLoadCSE)
+      combineMetadataForCSE(cast<LoadInst>(AvailableVal), &LI);
 
     return replaceInstUsesWith(
         LI, Builder->CreateBitOrPointerCast(AvailableVal, LI.getType(),
@@ -1026,14 +1141,17 @@ static bool combineStoreToValueType(InstCombiner &IC, StoreInst &SI) {
   // Fold away bit casts of the stored value by storing the original type.
   if (auto *BC = dyn_cast<BitCastInst>(V)) {
     V = BC->getOperand(0);
-    combineStoreToNewValue(IC, SI, V);
-    return true;
+    if (!SI.isAtomic() || isSupportedAtomicType(V->getType())) {
+      combineStoreToNewValue(IC, SI, V);
+      return true;
+    }
   }
 
-  if (Value *U = likeBitCastFromVector(IC, V)) {
-    combineStoreToNewValue(IC, SI, U);
-    return true;
-  }
+  if (Value *U = likeBitCastFromVector(IC, V))
+    if (!SI.isAtomic() || isSupportedAtomicType(U->getType())) {
+      combineStoreToNewValue(IC, SI, U);
+      return true;
+    }
 
   // FIXME: We should also canonicalize stores of vectors when their elements
   // are cast to other types.
@@ -1108,7 +1226,7 @@ static bool unpackStoreToAggregate(InstCombiner &IC, StoreInst &SI) {
     // arrays of arbitrary size but this has a terrible impact on compile time.
     // The threshold here is chosen arbitrarily, maybe needs a little bit of
     // tuning.
-    if (NumElements > 1024)
+    if (NumElements > IC.MaxArraySizeForCombine)
       return false;
 
     const DataLayout &DL = IC.getDataLayout();
@@ -1263,8 +1381,8 @@ Instruction *InstCombiner::visitStoreInst(StoreInst &SI) {
       break;
     }
 
-    // Don't skip over loads or things that can modify memory.
-    if (BBI->mayWriteToMemory() || BBI->mayReadFromMemory())
+    // Don't skip over loads, throws or things that can modify memory.
+    if (BBI->mayWriteToMemory() || BBI->mayReadFromMemory() || BBI->mayThrow())
       break;
   }
 
@@ -1387,8 +1505,8 @@ bool InstCombiner::SimplifyStoreAtEndOfBlock(StoreInst &SI) {
       }
       // If we find something that may be using or overwriting the stored
       // value, or if we run out of instructions, we can't do the xform.
-      if (BBI->mayReadFromMemory() || BBI->mayWriteToMemory() ||
-          BBI == OtherBB->begin())
+      if (BBI->mayReadFromMemory() || BBI->mayThrow() ||
+          BBI->mayWriteToMemory() || BBI == OtherBB->begin())
         return false;
     }
 
@@ -1397,7 +1515,7 @@ bool InstCombiner::SimplifyStoreAtEndOfBlock(StoreInst &SI) {
     // StoreBB.
     for (BasicBlock::iterator I = StoreBB->begin(); &*I != &SI; ++I) {
       // FIXME: This should really be AA driven.
-      if (I->mayReadFromMemory() || I->mayWriteToMemory())
+      if (I->mayReadFromMemory() || I->mayThrow() || I->mayWriteToMemory())
         return false;
     }
   }
@@ -1420,7 +1538,9 @@ bool InstCombiner::SimplifyStoreAtEndOfBlock(StoreInst &SI) {
                                    SI.getOrdering(),
                                    SI.getSynchScope());
   InsertNewInstBefore(NewSI, *BBI);
-  NewSI->setDebugLoc(OtherStore->getDebugLoc());
+  // The debug locations of the original instructions might differ; merge them.
+  NewSI->setDebugLoc(DILocation::getMergedLocation(SI.getDebugLoc(),
+                                                   OtherStore->getDebugLoc()));
 
   // If the two stores had AA tags, merge them.
   AAMDNodes AATags;

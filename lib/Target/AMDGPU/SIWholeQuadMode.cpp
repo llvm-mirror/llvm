@@ -53,10 +53,28 @@
 #include "AMDGPUSubtarget.h"
 #include "SIInstrInfo.h"
 #include "SIMachineFunctionInfo.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/CodeGen/LiveInterval.h"
+#include "llvm/CodeGen/LiveIntervalAnalysis.h"
+#include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
+#include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/SlotIndexes.h"
+#include "llvm/IR/CallingConv.h"
+#include "llvm/IR/DebugLoc.h"
+#include "llvm/MC/MCRegisterInfo.h"
+#include "llvm/Pass.h"
+#include "llvm/Support/Debug.h"
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/Target/TargetRegisterInfo.h"
+#include <cassert>
+#include <vector>
 
 using namespace llvm;
 
@@ -71,9 +89,9 @@ enum {
 
 struct PrintState {
 public:
-  explicit PrintState(int State) : State(State) {}
-
   int State;
+
+  explicit PrintState(int State) : State(State) {}
 };
 
 static raw_ostream &operator<<(raw_ostream &OS, const PrintState &PS) {
@@ -103,7 +121,7 @@ struct WorkItem {
   MachineBasicBlock *MBB = nullptr;
   MachineInstr *MI = nullptr;
 
-  WorkItem() {}
+  WorkItem() = default;
   WorkItem(MachineBasicBlock *MBB) : MBB(MBB) {}
   WorkItem(MachineInstr *MI) : MI(MI) {}
 };
@@ -162,7 +180,7 @@ public:
   }
 };
 
-} // End anonymous namespace
+} // end anonymous namespace
 
 char SIWholeQuadMode::ID = 0;
 
@@ -437,7 +455,7 @@ bool SIWholeQuadMode::requiresCorrectState(const MachineInstr &MI) const {
 MachineBasicBlock::iterator
 SIWholeQuadMode::saveSCC(MachineBasicBlock &MBB,
                          MachineBasicBlock::iterator Before) {
-  unsigned SaveReg = MRI->createVirtualRegister(&AMDGPU::SReg_32RegClass);
+  unsigned SaveReg = MRI->createVirtualRegister(&AMDGPU::SReg_32_XM0RegClass);
 
   MachineInstr *Save =
       BuildMI(MBB, Before, DebugLoc(), TII->get(AMDGPU::COPY), SaveReg)

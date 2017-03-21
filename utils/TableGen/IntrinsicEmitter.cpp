@@ -133,14 +133,14 @@ void IntrinsicEmitter::EmitTargetInfo(const CodeGenIntrinsicTable &Ints,
   OS << "// Target mapping\n";
   OS << "#ifdef GET_INTRINSIC_TARGET_DATA\n";
   OS << "struct IntrinsicTargetInfo {\n"
-     << "  StringRef Name;\n"
+     << "  llvm::StringLiteral Name;\n"
      << "  size_t Offset;\n"
      << "  size_t Count;\n"
      << "};\n";
-  OS << "static const IntrinsicTargetInfo TargetInfos[] = {\n";
+  OS << "static constexpr IntrinsicTargetInfo TargetInfos[] = {\n";
   for (auto Target : Ints.Targets)
-    OS << "  {\"" << Target.Name << "\", " << Target.Offset << ", "
-       << Target.Count << "},\n";
+    OS << "  {llvm::StringLiteral(\"" << Target.Name << "\"), " << Target.Offset
+       << ", " << Target.Count << "},\n";
   OS << "};\n";
   OS << "#endif\n\n";
 }
@@ -646,6 +646,18 @@ void IntrinsicEmitter::EmitAttributes(const CodeGenIntrinsicTable &Ints,
           OS << ",";
         OS << "Attribute::ReadOnly";
         break;
+      case CodeGenIntrinsic::ReadInaccessibleMem:
+        if (addComma)
+          OS << ",";
+        OS << "Attribute::ReadOnly,";
+        OS << "Attribute::InaccessibleMemOnly";
+        break;
+      case CodeGenIntrinsic::ReadInaccessibleMemOrArgMem:
+        if (addComma)
+          OS << ",";
+        OS << "Attribute::ReadOnly,";
+        OS << "Attribute::InaccessibleMemOrArgMemOnly";
+        break;
       case CodeGenIntrinsic::WriteArgMem:
         if (addComma)
           OS << ",";
@@ -657,11 +669,32 @@ void IntrinsicEmitter::EmitAttributes(const CodeGenIntrinsicTable &Ints,
           OS << ",";
         OS << "Attribute::WriteOnly";
         break;
+      case CodeGenIntrinsic::WriteInaccessibleMem:
+        if (addComma)
+          OS << ",";
+        OS << "Attribute::WriteOnly,";
+        OS << "Attribute::InaccessibleMemOnly";
+        break;
+      case CodeGenIntrinsic::WriteInaccessibleMemOrArgMem:
+        if (addComma)
+          OS << ",";
+        OS << "Attribute::WriteOnly,";
+        OS << "Attribute::InaccessibleMemOrArgOnly";
+        break;
       case CodeGenIntrinsic::ReadWriteArgMem:
         if (addComma)
           OS << ",";
         OS << "Attribute::ArgMemOnly";
         break;
+      case CodeGenIntrinsic::ReadWriteInaccessibleMem:
+        if (addComma)
+          OS << ",";
+        OS << "Attribute::InaccessibleMemOnly";
+        break;
+      case CodeGenIntrinsic::ReadWriteInaccessibleMemOrArgMem:
+        if (addComma)
+          OS << ",";
+        OS << "Attribute::InaccessibleMemOrArgMemOnly";
       case CodeGenIntrinsic::ReadWriteMem:
         break;
       }

@@ -1,4 +1,4 @@
-//===-- LoopSink.cpp - Loop Sink Pass ------------------------===//
+//===-- LoopSink.cpp - Loop Sink Pass -------------------------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -28,8 +28,10 @@
 //       InsertBBs = UseBBs - DomBBs + BB
 //   For BB in InsertBBs:
 //     Insert I at BB's beginning
+//
 //===----------------------------------------------------------------------===//
 
+#include "llvm/Transforms/Scalar/LoopSink.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/AliasSetTracker.h"
@@ -38,7 +40,6 @@
 #include "llvm/Analysis/Loads.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/LoopPass.h"
-#include "llvm/Analysis/LoopPassManager.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionAliasAnalysis.h"
 #include "llvm/IR/Dominators.h"
@@ -47,6 +48,7 @@
 #include "llvm/IR/Metadata.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Transforms/Scalar.h"
+#include "llvm/Transforms/Scalar/LoopPassManager.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
 using namespace llvm;
@@ -283,8 +285,10 @@ static bool sinkLoopInvariantInstructions(Loop &L, AAResults &AA, LoopInfo &LI,
   // sinked.
   for (auto II = Preheader->rbegin(), E = Preheader->rend(); II != E;) {
     Instruction *I = &*II++;
-    if (!L.hasLoopInvariantOperands(I) ||
-        !canSinkOrHoistInst(*I, &AA, &DT, &L, &CurAST, nullptr))
+    // No need to check for instruction's operands are loop invariant.
+    assert(L.hasLoopInvariantOperands(I) &&
+           "Insts in a loop's preheader should have loop invariant operands!");
+    if (!canSinkOrHoistInst(*I, &AA, &DT, &L, &CurAST, nullptr))
       continue;
     if (sinkInstruction(L, *I, ColdLoopBBs, LoopBlockNumber, LI, DT, BFI))
       Changed = true;
@@ -293,6 +297,42 @@ static bool sinkLoopInvariantInstructions(Loop &L, AAResults &AA, LoopInfo &LI,
   if (Changed && SE)
     SE->forgetLoopDispositions(&L);
   return Changed;
+}
+
+PreservedAnalyses LoopSinkPass::run(Function &F, FunctionAnalysisManager &FAM) {
+  LoopInfo &LI = FAM.getResult<LoopAnalysis>(F);
+  // Nothing to do if there are no loops.
+  if (LI.empty())
+    return PreservedAnalyses::all();
+
+  AAResults &AA = FAM.getResult<AAManager>(F);
+  DominatorTree &DT = FAM.getResult<DominatorTreeAnalysis>(F);
+  BlockFrequencyInfo &BFI = FAM.getResult<BlockFrequencyAnalysis>(F);
+
+  // We want to do a postorder walk over the loops. Since loops are a tree this
+  // is equivalent to a reversed preorder walk and preorder is easy to compute
+  // without recursion. Since we reverse the preorder, we will visit siblings
+  // in reverse program order. This isn't expected to matter at all but is more
+  // consistent with sinking algorithms which generally work bottom-up.
+  SmallVector<Loop *, 4> PreorderLoops = LI.getLoopsInPreorder();
+
+  bool Changed = false;
+  do {
+    Loop &L = *PreorderLoops.pop_back_val();
+
+    // Note that we don't pass SCEV here because it is only used to invalidate
+    // loops in SCEV and we don't preserve (or request) SCEV at all making that
+    // unnecessary.
+    Changed |= sinkLoopInvariantInstructions(L, AA, LI, DT, BFI,
+                                             /*ScalarEvolution*/ nullptr);
+  } while (!PreorderLoops.empty());
+
+  if (!Changed)
+    return PreservedAnalyses::all();
+
+  PreservedAnalyses PA;
+  PA.preserveSet<CFGAnalyses>();
+  return PA;
 }
 
 namespace {

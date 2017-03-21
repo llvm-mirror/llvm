@@ -53,12 +53,8 @@ public:
       : Index(Index), ModuleLoader(std::move(ModuleLoader)) {}
 
   /// Import functions in Module \p M based on the supplied import list.
-  /// \p ForceImportReferencedDiscardableSymbols will set the ModuleLinker in
-  /// a mode where referenced discarable symbols in the source modules will be
-  /// imported as well even if they are not present in the ImportList.
   Expected<bool>
-  importFunctions(Module &M, const ImportMapTy &ImportList,
-                  bool ForceImportReferencedDiscardableSymbols = false);
+  importFunctions(Module &M, const ImportMapTy &ImportList);
 
 private:
   /// The summaries index used to trigger importing.
@@ -71,12 +67,7 @@ private:
 /// The function importing pass
 class FunctionImportPass : public PassInfoMixin<FunctionImportPass> {
 public:
-  FunctionImportPass(const ModuleSummaryIndex *Index = nullptr)
-      : Index(Index) {}
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
-
-private:
-  const ModuleSummaryIndex *Index;
 };
 
 /// Compute all the imports and exports for every module in the Index.
@@ -91,11 +82,15 @@ private:
 /// \p ExportLists contains for each Module the set of globals (GUID) that will
 /// be imported by another module, or referenced by such a function. I.e. this
 /// is the set of globals that need to be promoted/renamed appropriately.
+///
+/// \p DeadSymbols (optional) contains a list of GUID that are deemed "dead" and
+/// will be ignored for the purpose of importing.
 void ComputeCrossModuleImport(
     const ModuleSummaryIndex &Index,
     const StringMap<GVSummaryMapTy> &ModuleToDefinedGVSummaries,
     StringMap<FunctionImporter::ImportMapTy> &ImportLists,
-    StringMap<FunctionImporter::ExportSetTy> &ExportLists);
+    StringMap<FunctionImporter::ExportSetTy> &ExportLists,
+    const DenseSet<GlobalValue::GUID> *DeadSymbols = nullptr);
 
 /// Compute all the imports for the given module using the Index.
 ///
@@ -104,6 +99,13 @@ void ComputeCrossModuleImport(
 void ComputeCrossModuleImportForModule(
     StringRef ModulePath, const ModuleSummaryIndex &Index,
     FunctionImporter::ImportMapTy &ImportList);
+
+/// Compute all the symbols that are "dead": i.e these that can't be reached
+/// in the graph from any of the given symbols listed in
+/// \p GUIDPreservedSymbols.
+DenseSet<GlobalValue::GUID>
+computeDeadSymbols(const ModuleSummaryIndex &Index,
+                   const DenseSet<GlobalValue::GUID> &GUIDPreservedSymbols);
 
 /// Compute the set of summaries needed for a ThinLTO backend compilation of
 /// \p ModulePath.

@@ -18,10 +18,12 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/Sequence.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Compiler.h"
 #include <algorithm>
 #include <cassert>
-#include <utility>
+#include <cstddef>
 #include <vector>
 
 namespace llvm {
@@ -60,7 +62,7 @@ public:
   typedef typename MapT::size_type size_type;
 
   /// Construct an empty PriorityWorklist
-  PriorityWorklist() {}
+  PriorityWorklist() = default;
 
   /// Determine if the PriorityWorklist is empty or not.
   bool empty() const {
@@ -104,6 +106,39 @@ public:
       V.push_back(X);
     }
     return false;
+  }
+
+  /// Insert a sequence of new elements into the PriorityWorklist.
+  template <typename SequenceT>
+  typename std::enable_if<!std::is_convertible<SequenceT, T>::value>::type
+  insert(SequenceT &&Input) {
+    if (std::begin(Input) == std::end(Input))
+      // Nothing to do for an empty input sequence.
+      return;
+
+    // First pull the input sequence into the vector as a bulk append
+    // operation.
+    ptrdiff_t StartIndex = V.size();
+    V.insert(V.end(), std::begin(Input), std::end(Input));
+    // Now walk backwards fixing up the index map and deleting any duplicates.
+    for (ptrdiff_t i = V.size() - 1; i >= StartIndex; --i) {
+      auto InsertResult = M.insert({V[i], i});
+      if (InsertResult.second)
+        continue;
+
+      // If the existing index is before this insert's start, nuke that one and
+      // move it up.
+      ptrdiff_t &Index = InsertResult.first->second;
+      if (Index < StartIndex) {
+        V[Index] = T();
+        Index = i;
+        continue;
+      }
+
+      // Otherwise the existing one comes first so just clear out the value in
+      // this slot.
+      V[i] = T();
+    }
   }
 
   /// Remove the last element of the PriorityWorklist.
@@ -168,6 +203,11 @@ public:
     return true;
   }
 
+  /// Reverse the items in the PriorityWorklist.
+  ///
+  /// This does an in-place reversal. Other kinds of reverse aren't easy to
+  /// support in the face of the worklist semantics.
+
   /// Completely clear the PriorityWorklist
   void clear() {
     M.clear();
@@ -217,9 +257,9 @@ class SmallPriorityWorklist
     : public PriorityWorklist<T, SmallVector<T, N>,
                               SmallDenseMap<T, ptrdiff_t>> {
 public:
-  SmallPriorityWorklist() {}
+  SmallPriorityWorklist() = default;
 };
 
-}
+} // end namespace llvm
 
-#endif
+#endif // LLVM_ADT_PRIORITYWORKLIST_H

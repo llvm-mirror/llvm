@@ -148,7 +148,7 @@ define <4 x float> @stack_fold_blendps(<4 x float> %a0, <4 x float> %a1) {
 
 define <2 x double> @stack_fold_blendvpd(<2 x double> %a0, <2 x double> %a1, <2 x double> %c) {
   ;CHECK-LABEL: stack_fold_blendvpd
-  ;CHECK:       blendvpd {{-?[0-9]*}}(%rsp), {{%xmm[0-9][0-9]*}} {{.*#+}} 16-byte Folded Reload
+  ;CHECK:       blendvpd %xmm0, {{-?[0-9]*}}(%rsp), {{%xmm[0-9][0-9]*}} {{.*#+}} 16-byte Folded Reload
   %1 = tail call <2 x i64> asm sideeffect "nop", "=x,~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15},~{flags}"()
   %2 = call <2 x double> @llvm.x86.sse41.blendvpd(<2 x double> %a1, <2 x double> %c, <2 x double> %a0)
   ret <2 x double> %2
@@ -157,7 +157,7 @@ declare <2 x double> @llvm.x86.sse41.blendvpd(<2 x double>, <2 x double>, <2 x d
 
 define <4 x float> @stack_fold_blendvps(<4 x float> %a0, <4 x float> %a1, <4 x float> %c) {
   ;CHECK-LABEL: stack_fold_blendvps
-  ;CHECK:       blendvps {{-?[0-9]*}}(%rsp), {{%xmm[0-9][0-9]*}} {{.*#+}} 16-byte Folded Reload
+  ;CHECK:       blendvps %xmm0, {{-?[0-9]*}}(%rsp), {{%xmm[0-9][0-9]*}} {{.*#+}} 16-byte Folded Reload
   %1 = tail call <2 x i64> asm sideeffect "nop", "=x,~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15},~{flags}"()
   %2 = call <4 x float> @llvm.x86.sse41.blendvps(<4 x float> %a1, <4 x float> %c, <4 x float> %a0)
   ret <4 x float> %2
@@ -613,10 +613,12 @@ define i32 @stack_fold_extractps(<4 x float> %a0) {
   ;CHECK-LABEL: stack_fold_extractps
   ;CHECK:       extractps $1, {{%xmm[0-9][0-9]*}}, {{-?[0-9]*}}(%rsp) {{.*#+}} 4-byte Folded Spill
   ;CHECK:       movl    {{-?[0-9]*}}(%rsp), %eax {{.*#+}} 4-byte Reload
-  %1 = extractelement <4 x float> %a0, i32 1
-  %2 = bitcast float %1 to i32
-  %3 = tail call <2 x i64> asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  ret i32 %2
+  ; fadd forces execution domain
+  %1 = fadd <4 x float> %a0, <float 1.0, float 2.0, float 3.0, float 4.0>
+  %2 = extractelement <4 x float> %1, i32 1
+  %3 = bitcast float %2 to i32
+  %4 = tail call <2 x i64> asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
+  ret i32 %3
 }
 
 define <2 x double> @stack_fold_haddpd(<2 x double> %a0, <2 x double> %a1) {

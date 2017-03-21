@@ -56,7 +56,17 @@ LLVM_DUMP_METHOD void DominanceFrontierWrapperPass::dump() const {
 }
 #endif
 
-char DominanceFrontierAnalysis::PassID;
+/// Handle invalidation explicitly.
+bool DominanceFrontier::invalidate(Function &F, const PreservedAnalyses &PA,
+                                   FunctionAnalysisManager::Invalidator &) {
+  // Check whether the analysis, all analyses on functions, or the function's
+  // CFG have been preserved.
+  auto PAC = PA.getChecker<DominanceFrontierAnalysis>();
+  return !(PAC.preserved() || PAC.preservedSet<AllAnalysesOn<Function>>() ||
+           PAC.preservedSet<CFGAnalyses>());
+}
+
+AnalysisKey DominanceFrontierAnalysis::Key;
 
 DominanceFrontier DominanceFrontierAnalysis::run(Function &F,
                                                  FunctionAnalysisManager &AM) {

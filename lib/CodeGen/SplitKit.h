@@ -386,10 +386,14 @@ private:
   /// Return true if any ranges were skipped.
   bool transferValues();
 
-  /// Live range @p LR has a live PHI def at the beginning of block @p B.
-  /// Extend the range @p LR of all predecessor values that reach this def.
+  /// Live range @p LR corresponding to the lane Mask @p LM has a live
+  /// PHI def at the beginning of block @p B. Extend the range @p LR of
+  /// all predecessor values that reach this def. If @p LR is a subrange,
+  /// the array @p Undefs is the set of all locations where it is undefined
+  /// via <def,read-undef> in other subranges for the same register.
   void extendPHIRange(MachineBasicBlock &B, LiveRangeCalc &LRC,
-                      LiveRange &LR, ArrayRef<SlotIndex>);
+                      LiveRange &LR, LaneBitmask LM,
+                      ArrayRef<SlotIndex> Undefs);
 
   /// extendPHIKillRanges - Extend the ranges of all values killed by original
   /// parent PHIDefs.
@@ -400,6 +404,17 @@ private:
 
   /// deleteRematVictims - Delete defs that are dead after rematerializing.
   void deleteRematVictims();
+
+  /// Add a copy instruction copying \p FromReg to \p ToReg before
+  /// \p InsertBefore. This can be invoked with a \p LaneMask which may make it
+  /// necessary to construct a sequence of copies to cover it exactly.
+  SlotIndex buildCopy(unsigned FromReg, unsigned ToReg, LaneBitmask LaneMask,
+      MachineBasicBlock &MBB, MachineBasicBlock::iterator InsertBefore,
+      bool Late, unsigned RegIdx);
+
+  SlotIndex buildSingleSubRegCopy(unsigned FromReg, unsigned ToReg,
+      MachineBasicBlock &MB, MachineBasicBlock::iterator InsertBefore,
+      unsigned SubIdx, LiveInterval &DestLI, bool Late, SlotIndex PrevCopy);
 
 public:
   /// Create a new SplitEditor for editing the LiveInterval analyzed by SA.

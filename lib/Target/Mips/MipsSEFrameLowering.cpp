@@ -11,26 +11,41 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "MipsSEFrameLowering.h"
-#include "MCTargetDesc/MipsBaseInfo.h"
+#include "MCTargetDesc/MipsABIInfo.h"
 #include "MipsMachineFunction.h"
+#include "MipsRegisterInfo.h"
+#include "MipsSEFrameLowering.h"
 #include "MipsSEInstrInfo.h"
 #include "MipsSubtarget.h"
+#include "llvm/ADT/BitVector.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSwitch.h"
+#include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
+#include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/RegisterScavenging.h"
-#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/Function.h"
-#include "llvm/Target/TargetOptions.h"
+#include "llvm/MC/MCDwarf.h"
+#include "llvm/MC/MCRegisterInfo.h"
+#include "llvm/MC/MachineLocation.h"
+#include "llvm/Support/CodeGen.h"
+#include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/MathExtras.h"
+#include "llvm/Target/TargetInstrInfo.h"
+#include "llvm/Target/TargetRegisterInfo.h"
+#include "llvm/Target/TargetSubtargetInfo.h"
+#include <cassert>
+#include <cstdint>
+#include <utility>
+#include <vector>
 
 using namespace llvm;
-
-namespace {
-typedef MachineBasicBlock::iterator Iter;
 
 static std::pair<unsigned, unsigned> getMFHiLoOpc(unsigned Src) {
   if (Mips::ACC64RegClass.contains(Src))
@@ -47,6 +62,8 @@ static std::pair<unsigned, unsigned> getMFHiLoOpc(unsigned Src) {
   return std::make_pair(0, 0);
 }
 
+namespace {
+
 /// Helper class to expand pseudos.
 class ExpandPseudo {
 public:
@@ -54,6 +71,8 @@ public:
   bool expand();
 
 private:
+  typedef MachineBasicBlock::iterator Iter;
+
   bool expandInstr(MachineBasicBlock &MBB, Iter I);
   void expandLoadCCond(MachineBasicBlock &MBB, Iter I);
   void expandStoreCCond(MachineBasicBlock &MBB, Iter I);
@@ -74,7 +93,8 @@ private:
   const MipsSEInstrInfo &TII;
   const MipsRegisterInfo &RegInfo;
 };
-}
+
+} // end anonymous namespace
 
 ExpandPseudo::ExpandPseudo(MachineFunction &MF_)
     : MF(MF_), MRI(MF.getRegInfo()),
@@ -409,7 +429,7 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF,
   TII.adjustStackPtr(SP, -StackSize, MBB, MBBI);
 
   // emit ".cfi_def_cfa_offset StackSize"
-  unsigned CFIIndex = MMI.addFrameInst(
+  unsigned CFIIndex = MF.addFrameInst(
       MCCFIInstruction::createDefCfaOffset(nullptr, -StackSize));
   BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
       .addCFIIndex(CFIIndex);
@@ -419,7 +439,7 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF,
 
   const std::vector<CalleeSavedInfo> &CSI = MFI.getCalleeSavedInfo();
 
-  if (CSI.size()) {
+  if (!CSI.empty()) {
     // Find the instruction past the last instruction that saves a callee-saved
     // register to the stack.
     for (unsigned i = 0; i < CSI.size(); ++i)
@@ -443,12 +463,12 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF,
         if (!STI.isLittle())
           std::swap(Reg0, Reg1);
 
-        unsigned CFIIndex = MMI.addFrameInst(
+        unsigned CFIIndex = MF.addFrameInst(
             MCCFIInstruction::createOffset(nullptr, Reg0, Offset));
         BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
             .addCFIIndex(CFIIndex);
 
-        CFIIndex = MMI.addFrameInst(
+        CFIIndex = MF.addFrameInst(
             MCCFIInstruction::createOffset(nullptr, Reg1, Offset + 4));
         BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
             .addCFIIndex(CFIIndex);
@@ -459,19 +479,19 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF,
         if (!STI.isLittle())
           std::swap(Reg0, Reg1);
 
-        unsigned CFIIndex = MMI.addFrameInst(
+        unsigned CFIIndex = MF.addFrameInst(
           MCCFIInstruction::createOffset(nullptr, Reg0, Offset));
         BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
             .addCFIIndex(CFIIndex);
 
-        CFIIndex = MMI.addFrameInst(
+        CFIIndex = MF.addFrameInst(
           MCCFIInstruction::createOffset(nullptr, Reg1, Offset + 4));
         BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
             .addCFIIndex(CFIIndex);
       } else {
         // Reg is either in GPR32 or FGR32.
-        unsigned CFIIndex = MMI.addFrameInst(MCCFIInstruction::createOffset(
-            nullptr, MRI->getDwarfRegNum(Reg, 1), Offset));
+        unsigned CFIIndex = MF.addFrameInst(MCCFIInstruction::createOffset(
+            nullptr, MRI->getDwarfRegNum(Reg, true), Offset));
         BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
             .addCFIIndex(CFIIndex);
       }
@@ -491,7 +511,7 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF,
     for (int I = 0; I < 4; ++I) {
       int64_t Offset = MFI.getObjectOffset(MipsFI->getEhDataRegFI(I));
       unsigned Reg = MRI->getDwarfRegNum(ABI.GetEhDataReg(I), true);
-      unsigned CFIIndex = MMI.addFrameInst(
+      unsigned CFIIndex = MF.addFrameInst(
           MCCFIInstruction::createOffset(nullptr, Reg, Offset));
       BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
           .addCFIIndex(CFIIndex);
@@ -505,7 +525,7 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF,
       .setMIFlag(MachineInstr::FrameSetup);
 
     // emit ".cfi_def_cfa_register $fp"
-    unsigned CFIIndex = MMI.addFrameInst(MCCFIInstruction::createDefCfaRegister(
+    unsigned CFIIndex = MF.addFrameInst(MCCFIInstruction::createDefCfaRegister(
         nullptr, MRI->getDwarfRegNum(FP, true)));
     BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
         .addCFIIndex(CFIIndex);
@@ -534,7 +554,6 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF,
 
 void MipsSEFrameLowering::emitInterruptPrologueStub(
     MachineFunction &MF, MachineBasicBlock &MBB) const {
-
   MipsFunctionInfo *MipsFI = MF.getInfo<MipsFunctionInfo>();
   MachineBasicBlock::iterator MBBI = MBB.begin();
   DebugLoc DL = MBBI != MBB.end() ? MBBI->getDebugLoc() : DebugLoc();
@@ -722,7 +741,6 @@ void MipsSEFrameLowering::emitEpilogue(MachineFunction &MF,
 
 void MipsSEFrameLowering::emitInterruptEpilogueStub(
     MachineFunction &MF, MachineBasicBlock &MBB) const {
-
   MachineBasicBlock::iterator MBBI = MBB.getLastNonDebugInstr();
   MipsFunctionInfo *MipsFI = MF.getInfo<MipsFunctionInfo>();
   DebugLoc DL = MBBI != MBB.end() ? MBBI->getDebugLoc() : DebugLoc();
@@ -820,7 +838,6 @@ spillCalleeSavedRegisters(MachineBasicBlock &MBB,
 bool
 MipsSEFrameLowering::hasReservedCallFrame(const MachineFunction &MF) const {
   const MachineFrameInfo &MFI = MF.getFrameInfo();
-
   // Reserve call frame if the size of the maximum call frame fits into 16-bit
   // immediate field and there are no variable sized objects on the stack.
   // Make sure the second register scavenger spill slot can be accessed with one

@@ -119,11 +119,6 @@ FileType("filetype", cl::init(TargetMachine::CGFT_AssemblyFile),
                         "Emit nothing, for performance testing")));
 
 cl::opt<bool>
-EnableFPMAD("enable-fp-mad",
-            cl::desc("Enable less precise MAD instructions to be generated"),
-            cl::init(false));
-
-cl::opt<bool>
 DisableFPElim("disable-fp-elim",
               cl::desc("Disable frame pointer elimination optimization"),
               cl::init(false));
@@ -142,6 +137,12 @@ cl::opt<bool>
 EnableNoNaNsFPMath("enable-no-nans-fp-math",
                    cl::desc("Enable FP math optimizations that assume no NaNs"),
                    cl::init(false));
+
+cl::opt<bool>
+EnableNoSignedZerosFPMath("enable-no-signed-zeros-fp-math",
+                          cl::desc("Enable FP math optimizations that assume "
+                                   "the sign of 0 is insignificant"),
+                          cl::init(false));
 
 cl::opt<bool>
 EnableNoTrappingFPMath("enable-no-trapping-fp-math",
@@ -232,6 +233,11 @@ UseCtors("use-ctors",
              cl::desc("Use .ctors instead of .init_array."),
              cl::init(false));
 
+cl::opt<bool> RelaxELFRelocations(
+    "relax-elf-relocations",
+    cl::desc("Emit GOTPCRELX/REX_GOTPCRELX instead of GOTPCREL on x86-64 ELF"),
+    cl::init(false));
+
 cl::opt<bool> DataSections("data-sections",
                            cl::desc("Emit data into separate sections"),
                            cl::init(false));
@@ -272,11 +278,11 @@ DebuggerTuningOpt("debugger-tune",
 // a TargetOptions object with CodeGen flags and returns it.
 static inline TargetOptions InitTargetOptionsFromCodeGenFlags() {
   TargetOptions Options;
-  Options.LessPreciseFPMADOption = EnableFPMAD;
   Options.AllowFPOpFusion = FuseFPOps;
   Options.UnsafeFPMath = EnableUnsafeFPMath;
   Options.NoInfsFPMath = EnableNoInfsFPMath;
   Options.NoNaNsFPMath = EnableNoNaNsFPMath;
+  Options.NoSignedZerosFPMath = EnableNoSignedZerosFPMath;
   Options.NoTrappingFPMath = EnableNoTrappingFPMath;
   Options.FPDenormalMode = DenormalMode;
   Options.HonorSignDependentRoundingFPMathOption =
@@ -288,6 +294,7 @@ static inline TargetOptions InitTargetOptionsFromCodeGenFlags() {
   Options.StackAlignmentOverride = OverrideStackAlignment;
   Options.StackSymbolOrdering = StackSymbolOrdering;
   Options.UseInitArray = !UseCtors;
+  Options.RelaxELFRelocations = RelaxELFRelocations;
   Options.DataSections = DataSections;
   Options.FunctionSections = FunctionSections;
   Options.UniqueSectionNames = UniqueSectionNames;

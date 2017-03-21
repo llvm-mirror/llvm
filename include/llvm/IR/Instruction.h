@@ -17,23 +17,27 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/ilist_node.h"
+#include "llvm/ADT/None.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/SymbolTableListTraits.h"
 #include "llvm/IR/User.h"
+#include "llvm/IR/Value.h"
+#include "llvm/Support/Casting.h"
+#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <utility>
 
 namespace llvm {
 
-class FastMathFlags;
-class LLVMContext;
-class MDNode;
 class BasicBlock;
+class FastMathFlags;
+class MDNode;
 struct AAMDNodes;
 
 class Instruction : public User,
                     public ilist_node_with_parent<Instruction, BasicBlock> {
-  void operator=(const Instruction &) = delete;
-  Instruction(const Instruction &) = delete;
-
   BasicBlock *Parent;
   DebugLoc DbgLoc;                         // 'dbg' Metadata cache.
 
@@ -42,7 +46,11 @@ class Instruction : public User,
     /// this instruction has metadata attached to it or not.
     HasMetadataBit = 1 << 15
   };
+
 public:
+  Instruction(const Instruction &) = delete;
+  Instruction &operator=(const Instruction &) = delete;
+
   // Out of line virtual method, so the vtable, etc has a home.
   ~Instruction() override;
 
@@ -132,6 +140,11 @@ public:
   /// Return true if this is an arithmetic shift right.
   inline bool isArithmeticShift() const {
     return getOpcode() == AShr;
+  }
+
+  /// Return true if this is and/or/xor.
+  inline bool isBitwiseLogicOp() const {
+    return getOpcode() == And || getOpcode() == Or || getOpcode() == Xor;
   }
 
   /// Determine if the OpCode is one of the CastInst instructions.
@@ -239,6 +252,9 @@ public:
   /// Returns false if no metadata was found.
   bool extractProfTotalWeight(uint64_t &TotalVal) const;
 
+  /// Updates branch_weights metadata by scaling it by \p S / \p T.
+  void updateProfWeight(uint64_t S, uint64_t T);
+
   /// Set the debug location information for this instruction.
   void setDebugLoc(DebugLoc Loc) { DbgLoc = std::move(Loc); }
 
@@ -262,6 +278,10 @@ public:
 
   /// Determine whether the no signed wrap flag is set.
   bool hasNoSignedWrap() const;
+
+  /// Drops flags that may cause this instruction to evaluate to poison despite
+  /// having non-poison inputs.
+  void dropPoisonGeneratingFlags();
 
   /// Determine whether the exact flag is set.
   bool isExact() const;
@@ -347,11 +367,11 @@ private:
       SmallVectorImpl<std::pair<unsigned, MDNode *>> &) const;
   /// Clear all hashtable-based metadata from this instruction.
   void clearMetadataHashEntries();
+
 public:
   //===--------------------------------------------------------------------===//
   // Predicates and helper methods.
   //===--------------------------------------------------------------------===//
-
 
   /// Return true if the instruction is associative:
   ///
@@ -366,11 +386,20 @@ public:
   ///
   ///   Commutative operators satisfy: (x op y) === (y op x)
   ///
-  /// In LLVM, these are the associative operators, plus SetEQ and SetNE, when
+  /// In LLVM, these are the commutative operators, plus SetEQ and SetNE, when
   /// applied to any type.
   ///
   bool isCommutative() const { return isCommutative(getOpcode()); }
-  static bool isCommutative(unsigned op);
+  static bool isCommutative(unsigned Opcode) {
+    switch (Opcode) {
+    case Add: case FAdd:
+    case Mul: case FMul:
+    case And: case Or: case Xor:
+      return true;
+    default:
+      return false;
+  }
+  }
 
   /// Return true if the instruction is idempotent:
   ///
@@ -379,7 +408,9 @@ public:
   /// In LLVM, the And and Or operators are idempotent.
   ///
   bool isIdempotent() const { return isIdempotent(getOpcode()); }
-  static bool isIdempotent(unsigned op);
+  static bool isIdempotent(unsigned Opcode) {
+    return Opcode == And || Opcode == Or;
+  }
 
   /// Return true if the instruction is nilpotent:
   ///
@@ -391,7 +422,9 @@ public:
   /// In LLVM, the Xor operator is nilpotent.
   ///
   bool isNilpotent() const { return isNilpotent(getOpcode()); }
-  static bool isNilpotent(unsigned op);
+  static bool isNilpotent(unsigned Opcode) {
+    return Opcode == Xor;
+  }
 
   /// Return true if this instruction may modify memory.
   bool mayWriteToMemory() const;
@@ -541,12 +574,16 @@ public:
 #define   LAST_OTHER_INST(N)             OtherOpsEnd = N+1
 #include "llvm/IR/Instruction.def"
   };
+
 private:
+  friend class SymbolTableListTraits<Instruction>;
+
   // Shadow Value::setValueSubclassData with a private forwarding method so that
   // subclasses cannot accidentally use it.
   void setValueSubclassData(unsigned short D) {
     Value::setValueSubclassData(D);
   }
+
   unsigned short getSubclassDataFromValue() const {
     return Value::getSubclassDataFromValue();
   }
@@ -556,8 +593,8 @@ private:
                          (V ? HasMetadataBit : 0));
   }
 
-  friend class SymbolTableListTraits<Instruction>;
   void setParent(BasicBlock *P);
+
 protected:
   // Instruction subclasses can stick up to 15 bits of stuff into the
   // SubclassData field of instruction with these members.
@@ -582,18 +619,6 @@ private:
   Instruction *cloneImpl() const;
 };
 
-// Instruction* is only 4-byte aligned.
-template<>
-class PointerLikeTypeTraits<Instruction*> {
-  typedef Instruction* PT;
-public:
-  static inline void *getAsVoidPointer(PT P) { return P; }
-  static inline PT getFromVoidPointer(void *P) {
-    return static_cast<PT>(P);
-  }
-  enum { NumLowBitsAvailable = 2 };
-};
+} // end namespace llvm
 
-} // End llvm namespace
-
-#endif
+#endif // LLVM_IR_INSTRUCTION_H

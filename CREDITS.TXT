@@ -8,7 +8,6 @@ beautification by scripts.  The fields are: name (N), email (E), web-address
 (W), PGP key ID and fingerprint (P), description (D), snail-mail address
 (S), and (I) IRC handle.
 
-
 N: Vikram Adve
 E: vadve@cs.uiuc.edu
 W: http://www.cs.uiuc.edu/~vadve/
@@ -401,7 +400,7 @@ D: Fixes and improvements to the AArch64 backend
 
 N: Nadav Rotem
 E: nadav.rotem@me.com
-D: X86 code generation improvements, Loop Vectorizer.
+D: X86 code generation improvements, Loop Vectorizer, SLP Vectorizer
 
 N: Roman Samoilov
 E: roman@codedgers.com
@@ -457,6 +456,10 @@ D: Miscellaneous bug fixes
 N: Adam Treat
 E: manyoso@yahoo.com
 D: C++ bugs filed, and C++ front-end bug fixes.
+
+N: Andrew Trick
+E: atrick@apple.com
+D: Instruction Scheduling, ...
 
 N: Lauro Ramos Venancio
 E: lauro.venancio@indt.org.br

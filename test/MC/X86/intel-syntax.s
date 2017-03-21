@@ -19,6 +19,8 @@ _main:
 	mov	EAX, DWORD PTR [RSP - 4]
 // CHECK:	movq    (%rsp), %rax
 	mov     RAX, QWORD PTR [RSP]
+// CHECK: movabsq $4294967289, %rax
+	mov     RAX, 4294967289
 // CHECK:	movl	$-4, -4(%rsp)
 	mov	DWORD PTR [RSP - 4], -4
 // CHECK:	movq	0, %rcx
@@ -77,6 +79,8 @@ _main:
     vpgatherdd XMM10, XMMWORD PTR [R15 + 2*XMM9], XMM8
 // CHECK: movsd -8, %xmm5
     movsd   XMM5, QWORD PTR [-8]
+// CHECK: movsl (%rsi), %es:(%rdi)
+    movsd
 // CHECK: movl %ecx, (%eax)
     mov [eax], ecx
 // CHECK: movl %ecx, (,%ebx,4)

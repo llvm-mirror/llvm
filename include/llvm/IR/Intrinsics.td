@@ -43,6 +43,15 @@ def IntrWriteMem : IntrinsicProperty;
 // reads from and (possibly volatile) writes to memory, it has no side effects.
 def IntrArgMemOnly : IntrinsicProperty;
 
+// IntrInaccessibleMemOnly -- This intrinsic only accesses memory that is not
+// accessible by the module being compiled. This is a weaker form of IntrNoMem.
+def IntrInaccessibleMemOnly : IntrinsicProperty;
+
+// IntrInaccessibleMemOrArgMemOnly -- This intrinsic only accesses memory that
+// its pointer-typed arguments point to or memory that is not accessible
+// by the module being compiled. This is a weaker form of IntrArgMemOnly.
+def IntrInaccessibleMemOrArgMemOnly : IntrinsicProperty;
+
 // Commutative - This intrinsic is commutative: X op Y == Y op X.
 def Commutative : IntrinsicProperty;
 
@@ -380,6 +389,9 @@ def int_memset  : Intrinsic<[],
                              llvm_i32_ty, llvm_i1_ty],
                             [IntrArgMemOnly, NoCapture<0>, WriteOnly<0>]>;
 
+// FIXME: Add version of these floating point intrinsics which allow non-default
+// rounding modes and FP exception handling.
+
 let IntrProperties = [IntrNoMem] in {
   def int_fma  : Intrinsic<[llvm_anyfloat_ty],
                            [LLVMMatchType<0>, LLVMMatchType<0>,
@@ -432,6 +444,39 @@ def int_siglongjmp : Intrinsic<[], [llvm_ptr_ty, llvm_i32_ty], [IntrNoReturn]>;
 def int_objectsize : Intrinsic<[llvm_anyint_ty], [llvm_anyptr_ty, llvm_i1_ty],
                                [IntrNoMem]>,
                                GCCBuiltin<"__builtin_object_size">;
+
+//===--------------- Constrained Floating Point Intrinsics ----------------===//
+//
+
+let IntrProperties = [IntrInaccessibleMemOnly] in {
+  def int_experimental_constrained_fadd : Intrinsic<[ llvm_anyfloat_ty ],
+                                                    [ LLVMMatchType<0>,
+                                                      LLVMMatchType<0>,
+                                                      llvm_metadata_ty,
+                                                      llvm_metadata_ty ]>;
+  def int_experimental_constrained_fsub : Intrinsic<[ llvm_anyfloat_ty ],
+                                                    [ LLVMMatchType<0>,
+                                                      LLVMMatchType<0>,
+                                                      llvm_metadata_ty,
+                                                      llvm_metadata_ty ]>;
+  def int_experimental_constrained_fmul : Intrinsic<[ llvm_anyfloat_ty ],
+                                                    [ LLVMMatchType<0>,
+                                                      LLVMMatchType<0>,
+                                                      llvm_metadata_ty,
+                                                      llvm_metadata_ty ]>;
+  def int_experimental_constrained_fdiv : Intrinsic<[ llvm_anyfloat_ty ],
+                                                    [ LLVMMatchType<0>,
+                                                      LLVMMatchType<0>,
+                                                      llvm_metadata_ty,
+                                                      llvm_metadata_ty ]>;
+  def int_experimental_constrained_frem : Intrinsic<[ llvm_anyfloat_ty ],
+                                                    [ LLVMMatchType<0>,
+                                                      LLVMMatchType<0>,
+                                                      llvm_metadata_ty,
+                                                      llvm_metadata_ty ]>;
+}
+// FIXME: Add intrinsic for fcmp, fptrunc, fpext, fptoui and fptosi.
+
 
 //===------------------------- Expect Intrinsics --------------------------===//
 //
@@ -569,8 +614,8 @@ def int_invariant_end   : Intrinsic<[],
                                      llvm_anyptr_ty],
                                     [IntrArgMemOnly, NoCapture<2>]>;
 
-def int_invariant_group_barrier : Intrinsic<[llvm_ptr_ty], 
-                                            [llvm_ptr_ty], 
+def int_invariant_group_barrier : Intrinsic<[llvm_ptr_ty],
+                                            [llvm_ptr_ty],
                                             [IntrNoMem]>;
 
 //===------------------------ Stackmap Intrinsics -------------------------===//
@@ -621,7 +666,7 @@ def int_coro_begin : Intrinsic<[llvm_ptr_ty], [llvm_token_ty, llvm_ptr_ty],
 def int_coro_free : Intrinsic<[llvm_ptr_ty], [llvm_token_ty, llvm_ptr_ty], 
                               [IntrReadMem, IntrArgMemOnly, ReadOnly<1>, 
                                NoCapture<1>]>;
-def int_coro_end : Intrinsic<[], [llvm_ptr_ty, llvm_i1_ty], []>;
+def int_coro_end : Intrinsic<[llvm_i1_ty], [llvm_ptr_ty, llvm_i1_ty], []>;
 
 def int_coro_frame : Intrinsic<[llvm_ptr_ty], [], [IntrNoMem]>;
 def int_coro_size : Intrinsic<[llvm_anyint_ty], [], [IntrNoMem]>;
@@ -673,29 +718,6 @@ let IntrProperties = [IntrNoMem] in {
 def int_convert_to_fp16   : Intrinsic<[llvm_i16_ty], [llvm_anyfloat_ty]>;
 def int_convert_from_fp16 : Intrinsic<[llvm_anyfloat_ty], [llvm_i16_ty]>;
 }
-
-// These convert intrinsics are to support various conversions between
-// various types with rounding and saturation. NOTE: avoid using these
-// intrinsics as they might be removed sometime in the future and
-// most targets don't support them.
-def int_convertff  : Intrinsic<[llvm_anyfloat_ty],
-                               [llvm_anyfloat_ty, llvm_i32_ty, llvm_i32_ty]>;
-def int_convertfsi : Intrinsic<[llvm_anyfloat_ty],
-                               [llvm_anyint_ty, llvm_i32_ty, llvm_i32_ty]>;
-def int_convertfui : Intrinsic<[llvm_anyfloat_ty],
-                               [llvm_anyint_ty, llvm_i32_ty, llvm_i32_ty]>;
-def int_convertsif : Intrinsic<[llvm_anyint_ty],
-                               [llvm_anyfloat_ty, llvm_i32_ty, llvm_i32_ty]>;
-def int_convertuif : Intrinsic<[llvm_anyint_ty],
-                               [llvm_anyfloat_ty, llvm_i32_ty, llvm_i32_ty]>;
-def int_convertss  : Intrinsic<[llvm_anyint_ty],
-                               [llvm_anyint_ty, llvm_i32_ty, llvm_i32_ty]>;
-def int_convertsu  : Intrinsic<[llvm_anyint_ty],
-                               [llvm_anyint_ty, llvm_i32_ty, llvm_i32_ty]>;
-def int_convertus  : Intrinsic<[llvm_anyint_ty],
-                               [llvm_anyint_ty, llvm_i32_ty, llvm_i32_ty]>;
-def int_convertuu  : Intrinsic<[llvm_anyint_ty],
-                               [llvm_anyint_ty, llvm_i32_ty, llvm_i32_ty]>;
 
 // Clear cache intrinsic, default to ignore (ie. emit nothing)
 // maps to void __clear_cache() on supporting platforms
@@ -750,6 +772,19 @@ def int_type_checked_load : Intrinsic<[llvm_ptr_ty, llvm_i1_ty],
 def int_load_relative: Intrinsic<[llvm_ptr_ty], [llvm_ptr_ty, llvm_anyint_ty],
                                  [IntrReadMem, IntrArgMemOnly]>;
 
+//===------ Memory intrinsics with element-wise atomicity guarantees ------===//
+//
+
+def int_memcpy_element_atomic  : Intrinsic<[],
+                                           [llvm_anyptr_ty, llvm_anyptr_ty,
+                                            llvm_i64_ty, llvm_i32_ty],
+                                 [IntrArgMemOnly, NoCapture<0>, NoCapture<1>,
+                                  WriteOnly<0>, ReadOnly<1>]>;
+
+//===----- Intrinsics that are used to provide predicate information -----===//
+
+def int_ssa_copy : Intrinsic<[llvm_any_ty], [LLVMMatchType<0>],
+                             [IntrNoMem, Returned<0>]>;
 //===----------------------------------------------------------------------===//
 // Target-specific intrinsics
 //===----------------------------------------------------------------------===//

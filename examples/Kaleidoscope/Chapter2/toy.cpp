@@ -1,4 +1,5 @@
 #include "llvm/ADT/STLExtras.h"
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -82,11 +83,13 @@ static int gettok() {
 //===----------------------------------------------------------------------===//
 // Abstract Syntax Tree (aka Parse Tree)
 //===----------------------------------------------------------------------===//
+
 namespace {
+
 /// ExprAST - Base class for all expression nodes.
 class ExprAST {
 public:
-  virtual ~ExprAST() {}
+  virtual ~ExprAST() = default;
 };
 
 /// NumberExprAST - Expression class for numeric literals like "1.0".
@@ -137,6 +140,8 @@ class PrototypeAST {
 public:
   PrototypeAST(const std::string &Name, std::vector<std::string> Args)
       : Name(Name), Args(std::move(Args)) {}
+
+  const std::string &getName() const { return Name; }
 };
 
 /// FunctionAST - This class represents a function definition itself.
@@ -149,6 +154,7 @@ public:
               std::unique_ptr<ExprAST> Body)
       : Proto(std::move(Proto)), Body(std::move(Body)) {}
 };
+
 } // end anonymous namespace
 
 //===----------------------------------------------------------------------===//

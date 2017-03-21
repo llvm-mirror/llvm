@@ -29,6 +29,10 @@ using namespace llvm;
 
 #define DEBUG_TYPE "AMDGPUtti"
 
+static cl::opt<unsigned> UnrollThresholdPrivate(
+  "amdgpu-unroll-threshold-private",
+  cl::desc("Unroll threshold for AMDGPU if private memory used in a loop"),
+  cl::init(2000), cl::Hidden);
 
 void AMDGPUTTIImpl::getUnrollingPreferences(Loop *L,
                                             TTI::UnrollingPreferences &UP) {
@@ -38,6 +42,8 @@ void AMDGPUTTIImpl::getUnrollingPreferences(Loop *L,
 
   // TODO: Do we want runtime unrolling?
 
+  // Maximum alloca size than can fit registers. Reserve 16 registers.
+  const unsigned MaxAlloca = (256 - 16) * 4;
   for (const BasicBlock *BB : L->getBlocks()) {
     const DataLayout &DL = BB->getModule()->getDataLayout();
     for (const Instruction &I : *BB) {
@@ -48,7 +54,27 @@ void AMDGPUTTIImpl::getUnrollingPreferences(Loop *L,
       const Value *Ptr = GEP->getPointerOperand();
       const AllocaInst *Alloca =
           dyn_cast<AllocaInst>(GetUnderlyingObject(Ptr, DL));
-      if (Alloca) {
+      if (Alloca && Alloca->isStaticAlloca()) {
+        Type *Ty = Alloca->getAllocatedType();
+        unsigned AllocaSize = Ty->isSized() ? DL.getTypeAllocSize(Ty) : 0;
+        if (AllocaSize > MaxAlloca)
+          continue;
+
+        // Check if GEP depends on a value defined by this loop itself.
+        bool HasLoopDef = false;
+        for (const Value *Op : GEP->operands()) {
+          const Instruction *Inst = dyn_cast<Instruction>(Op);
+          if (!Inst || L->isLoopInvariant(Op))
+            continue;
+          if (any_of(L->getSubLoops(), [Inst](const Loop* SubLoop) {
+               return SubLoop->contains(Inst); }))
+            continue;
+          HasLoopDef = true;
+          break;
+        }
+        if (!HasLoopDef)
+          continue;
+
         // We want to do whatever we can to limit the number of alloca
         // instructions that make it through to the code generator.  allocas
         // require us to use indirect addressing, which is slow and prone to
@@ -59,7 +85,8 @@ void AMDGPUTTIImpl::getUnrollingPreferences(Loop *L,
         //
         // Don't use the maximum allowed value here as it will make some
         // programs way too big.
-        UP.Threshold = 800;
+        UP.Threshold = UnrollThresholdPrivate;
+        return;
       }
     }
   }
@@ -102,7 +129,36 @@ unsigned AMDGPUTTIImpl::getLoadStoreVecRegBitWidth(unsigned AddrSpace) const {
   }
 }
 
+bool AMDGPUTTIImpl::isLegalToVectorizeMemChain(unsigned ChainSizeInBytes,
+                                               unsigned Alignment,
+                                               unsigned AddrSpace) const {
+  // We allow vectorization of flat stores, even though we may need to decompose
+  // them later if they may access private memory. We don't have enough context
+  // here, and legalization can handle it.
+  if (AddrSpace == AMDGPUAS::PRIVATE_ADDRESS) {
+    return (Alignment >= 4 || ST->hasUnalignedScratchAccess()) &&
+      ChainSizeInBytes <= ST->getMaxPrivateElementSize();
+  }
+  return true;
+}
+
+bool AMDGPUTTIImpl::isLegalToVectorizeLoadChain(unsigned ChainSizeInBytes,
+                                                unsigned Alignment,
+                                                unsigned AddrSpace) const {
+  return isLegalToVectorizeMemChain(ChainSizeInBytes, Alignment, AddrSpace);
+}
+
+bool AMDGPUTTIImpl::isLegalToVectorizeStoreChain(unsigned ChainSizeInBytes,
+                                                 unsigned Alignment,
+                                                 unsigned AddrSpace) const {
+  return isLegalToVectorizeMemChain(ChainSizeInBytes, Alignment, AddrSpace);
+}
+
 unsigned AMDGPUTTIImpl::getMaxInterleaveFactor(unsigned VF) {
+  // Disable unrolling if the loop is not vectorized.
+  if (VF == 1)
+    return 1;
+
   // Semi-arbitrary large amount.
   return 64;
 }
@@ -110,7 +166,7 @@ unsigned AMDGPUTTIImpl::getMaxInterleaveFactor(unsigned VF) {
 int AMDGPUTTIImpl::getArithmeticInstrCost(
     unsigned Opcode, Type *Ty, TTI::OperandValueKind Opd1Info,
     TTI::OperandValueKind Opd2Info, TTI::OperandValueProperties Opd1PropInfo,
-    TTI::OperandValueProperties Opd2PropInfo) {
+    TTI::OperandValueProperties Opd2PropInfo, ArrayRef<const Value *> Args ) {
 
   EVT OrigTy = TLI->getValueType(DL, Ty);
   if (!OrigTy.isSimple()) {
@@ -228,19 +284,12 @@ int AMDGPUTTIImpl::getVectorInstrCost(unsigned Opcode, Type *ValTy,
   }
 }
 
-static bool isIntrinsicSourceOfDivergence(const TargetIntrinsicInfo *TII,
-                                          const IntrinsicInst *I) {
+static bool isIntrinsicSourceOfDivergence(const IntrinsicInst *I) {
   switch (I->getIntrinsicID()) {
-  default:
-    return false;
-  case Intrinsic::not_intrinsic:
-    // This means we have an intrinsic that isn't defined in
-    // IntrinsicsAMDGPU.td
-    break;
-
   case Intrinsic::amdgcn_workitem_id_x:
   case Intrinsic::amdgcn_workitem_id_y:
   case Intrinsic::amdgcn_workitem_id_z:
+  case Intrinsic::amdgcn_interp_mov:
   case Intrinsic::amdgcn_interp_p1:
   case Intrinsic::amdgcn_interp_p2:
   case Intrinsic::amdgcn_mbcnt_hi:
@@ -248,6 +297,8 @@ static bool isIntrinsicSourceOfDivergence(const TargetIntrinsicInfo *TII,
   case Intrinsic::r600_read_tidig_x:
   case Intrinsic::r600_read_tidig_y:
   case Intrinsic::r600_read_tidig_z:
+  case Intrinsic::amdgcn_atomic_inc:
+  case Intrinsic::amdgcn_atomic_dec:
   case Intrinsic::amdgcn_image_atomic_swap:
   case Intrinsic::amdgcn_image_atomic_add:
   case Intrinsic::amdgcn_image_atomic_sub:
@@ -273,16 +324,10 @@ static bool isIntrinsicSourceOfDivergence(const TargetIntrinsicInfo *TII,
   case Intrinsic::amdgcn_buffer_atomic_xor:
   case Intrinsic::amdgcn_buffer_atomic_cmpswap:
   case Intrinsic::amdgcn_ps_live:
+  case Intrinsic::amdgcn_ds_swizzle:
     return true;
-  }
-
-  StringRef Name = I->getCalledFunction()->getName();
-  switch (TII->lookupName((const char *)Name.bytes_begin(), Name.size())) {
   default:
     return false;
-  case AMDGPUIntrinsic::SI_fs_interp:
-  case AMDGPUIntrinsic::SI_fs_constant:
-    return true;
   }
 }
 
@@ -326,10 +371,8 @@ bool AMDGPUTTIImpl::isSourceOfDivergence(const Value *V) const {
   if (isa<AtomicRMWInst>(V) || isa<AtomicCmpXchgInst>(V))
     return true;
 
-  if (const IntrinsicInst *Intrinsic = dyn_cast<IntrinsicInst>(V)) {
-    const TargetMachine &TM = getTLI()->getTargetMachine();
-    return isIntrinsicSourceOfDivergence(TM.getIntrinsicInfo(), Intrinsic);
-  }
+  if (const IntrinsicInst *Intrinsic = dyn_cast<IntrinsicInst>(V))
+    return isIntrinsicSourceOfDivergence(Intrinsic);
 
   // Assume all function calls are a source of divergence.
   if (isa<CallInst>(V) || isa<InvokeInst>(V))

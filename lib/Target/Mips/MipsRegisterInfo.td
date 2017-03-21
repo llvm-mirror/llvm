@@ -290,6 +290,25 @@ class GPR32Class<list<ValueType> regTypes> :
   K0, K1, GP, SP, FP, RA)>;
 
 def GPR32 : GPR32Class<[i32]>;
+
+def GPR32ZERO : RegisterClass<"Mips", [i32], 32, (add
+  // Reserved
+  ZERO)>;
+
+def GPR32NONZERO : RegisterClass<"Mips", [i32], 32, (add
+  // Reserved
+  AT,
+  // Return Values and Arguments
+  V0, V1, A0, A1, A2, A3,
+  // Not preserved across procedure calls
+  T0, T1, T2, T3, T4, T5, T6, T7,
+  // Callee save
+  S0, S1, S2, S3, S4, S5, S6, S7,
+  // Not preserved across procedure calls
+  T8, T9,
+  // Reserved
+  K0, K1, GP, SP, FP, RA)>;
+
 def DSPR  : GPR32Class<[v4i8, v2i16]>;
 
 def GPRMM16 : RegisterClass<"Mips", [i32], 32, (add
@@ -317,7 +336,7 @@ def GPRMM16MoveP : RegisterClass<"Mips", [i32], 32, (add
   S0, S2, S3, S4)>;
 
 def GPR64 : RegisterClass<"Mips", [i64], 64, (add
-// Reserved
+  // Reserved
   ZERO_64, AT_64,
   // Return Values and Arguments
   V0_64, V1_64, A0_64, A1_64, A2_64, A3_64,
@@ -400,6 +419,8 @@ def FCC : RegisterClass<"Mips", [i32], 32, (sequence "FCC%u", 0, 7)>,
 // This class allows us to represent this in codegen patterns.
 def FGRCC : RegisterClass<"Mips", [i32], 32, (sequence "F%u", 0, 31)>;
 
+def MSA128F16 : RegisterClass<"Mips", [f16], 128, (sequence "W%u", 0, 31)>;
+
 def MSA128B: RegisterClass<"Mips", [v16i8], 128,
                            (sequence "W%u", 0, 31)>;
 def MSA128H: RegisterClass<"Mips", [v8i16, v8f16], 128,
@@ -477,6 +498,16 @@ def GPR64AsmOperand : MipsAsmRegOperand {
   let PredicateMethod = "isGPRAsmReg";
 }
 
+def GPR32ZeroAsmOperand : MipsAsmRegOperand {
+  let Name = "GPR32ZeroAsmReg";
+  let PredicateMethod = "isGPRZeroAsmReg";
+}
+
+def GPR32NonZeroAsmOperand : MipsAsmRegOperand {
+  let Name = "GPR32NonZeroAsmReg";
+  let PredicateMethod = "isGPRNonZeroAsmReg";
+}
+
 def GPR32AsmOperand : MipsAsmRegOperand {
   let Name = "GPR32AsmReg";
   let PredicateMethod = "isGPRAsmReg";
@@ -546,6 +577,14 @@ def MSA128AsmOperand : MipsAsmRegOperand {
 
 def MSACtrlAsmOperand : MipsAsmRegOperand {
   let Name = "MSACtrlAsmReg";
+}
+
+def GPR32ZeroOpnd : RegisterOperand<GPR32ZERO> {
+  let ParserMatchClass = GPR32ZeroAsmOperand;
+}
+
+def GPR32NonZeroOpnd : RegisterOperand<GPR32NONZERO> {
+  let ParserMatchClass = GPR32NonZeroAsmOperand;
 }
 
 def GPR32Opnd : RegisterOperand<GPR32> {
@@ -644,6 +683,10 @@ def COP2Opnd : RegisterOperand<COP2> {
 
 def COP3Opnd : RegisterOperand<COP3> {
   let ParserMatchClass = COP3AsmOperand;
+}
+
+def MSA128F16Opnd : RegisterOperand<MSA128F16> {
+  let ParserMatchClass = MSA128AsmOperand;
 }
 
 def MSA128BOpnd : RegisterOperand<MSA128B> {

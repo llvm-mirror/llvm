@@ -89,6 +89,7 @@
 #include "llvm/CodeGen/RegisterPressure.h"
 #include "llvm/CodeGen/ScheduleDAG.h"
 #include "llvm/CodeGen/ScheduleDAGInstrs.h"
+#include "llvm/CodeGen/ScheduleDAGMutation.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/MC/MCInstrItineraries.h"
@@ -256,6 +257,9 @@ class SwingSchedulerDAG : public ScheduleDAGInstrs {
   /// must be deleted when the pass is finished.
   SmallPtrSet<MachineInstr *, 4> NewMIs;
 
+  /// Ordered list of DAG postprocessing steps.
+  std::vector<std::unique_ptr<ScheduleDAGMutation>> Mutations;
+
   /// Helper class to implement Johnson's circuit finding algorithm.
   class Circuits {
     std::vector<SUnit> &SUnits;
@@ -287,7 +291,9 @@ public:
                     const RegisterClassInfo &rci)
       : ScheduleDAGInstrs(*P.MF, P.MLI, false), Pass(P), MII(0),
         Scheduled(false), Loop(L), LIS(lis), RegClassInfo(rci),
-        Topo(SUnits, &ExitSU) {}
+        Topo(SUnits, &ExitSU) {
+    P.MF->getSubtarget().getSMSMutations(Mutations);
+  }
 
   void schedule() override;
   void finishBlock() override;
@@ -370,6 +376,10 @@ public:
     return 0;
   }
 
+  void addMutation(std::unique_ptr<ScheduleDAGMutation> Mutation) {
+    Mutations.push_back(std::move(Mutation));
+  }
+
 private:
   void addLoopCarriedDependences(AliasAnalysis *AA);
   void updatePhiDependences();
@@ -438,6 +448,7 @@ private:
   bool canUseLastOffsetValue(MachineInstr *MI, unsigned &BasePos,
                              unsigned &OffsetPos, unsigned &NewBase,
                              int64_t &NewOffset);
+  void postprocessDAG();
 };
 
 /// A NodeSet contains a set of SUnit DAG nodes with additional information
@@ -541,7 +552,9 @@ public:
     os << "\n";
   }
 
-  void dump() const { print(dbgs()); }
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+  LLVM_DUMP_METHOD void dump() const { print(dbgs()); }
+#endif
 };
 
 /// This class repesents the scheduled code.  The main data structure is a
@@ -582,7 +595,7 @@ private:
   /// Virtual register information.
   MachineRegisterInfo &MRI;
 
-  DFAPacketizer *Resources;
+  std::unique_ptr<DFAPacketizer> Resources;
 
 public:
   SMSchedule(MachineFunction *mf)
@@ -591,13 +604,6 @@ public:
     FirstCycle = 0;
     LastCycle = 0;
     InitiationInterval = 0;
-  }
-
-  ~SMSchedule() {
-    ScheduledInstrs.clear();
-    InstrToCycle.clear();
-    RegToStageDiff.clear();
-    delete Resources;
   }
 
   void reset() {
@@ -847,6 +853,7 @@ void SwingSchedulerDAG::schedule() {
   addLoopCarriedDependences(AA);
   updatePhiDependences();
   Topo.InitDAGTopologicalSorting();
+  postprocessDAG();
   changeDependences();
   DEBUG({
     for (unsigned su = 0, e = SUnits.size(); su != e; ++su)
@@ -948,7 +955,7 @@ static void getPhiRegs(MachineInstr &Phi, MachineBasicBlock *Loop,
   for (unsigned i = 1, e = Phi.getNumOperands(); i != e; i += 2)
     if (Phi.getOperand(i + 1).getMBB() != Loop)
       InitVal = Phi.getOperand(i).getReg();
-    else if (Phi.getOperand(i + 1).getMBB() == Loop)
+    else
       LoopVal = Phi.getOperand(i).getReg();
 
   assert(InitVal != 0 && LoopVal != 0 && "Unexpected Phi structure.");
@@ -1742,11 +1749,13 @@ static void computeLiveOuts(MachineFunction &MF, RegPressureTracker &RPTracker,
         unsigned Reg = MO.getReg();
         if (TargetRegisterInfo::isVirtualRegister(Reg)) {
           if (!Uses.count(Reg))
-            LiveOutRegs.push_back(RegisterMaskPair(Reg, 0));
+            LiveOutRegs.push_back(RegisterMaskPair(Reg,
+                                                   LaneBitmask::getNone()));
         } else if (MRI.isAllocatable(Reg)) {
           for (MCRegUnitIterator Units(Reg, TRI); Units.isValid(); ++Units)
             if (!Uses.count(*Units))
-              LiveOutRegs.push_back(RegisterMaskPair(*Units, 0));
+              LiveOutRegs.push_back(RegisterMaskPair(*Units,
+                                                     LaneBitmask::getNone()));
         }
       }
   RPTracker.addLiveRegs(LiveOutRegs);
@@ -2674,7 +2683,7 @@ void SwingSchedulerDAG::generateExistingPhis(
               replaceRegUsesAfterLoop(Def, NewReg, BB, MRI, LIS);
             continue;
           }
-        } else if (StageDiff > 0 &&
+        } else if (InKernel && StageDiff > 0 &&
                    VRMap[CurStageNum - StageDiff - np].count(LoopVal))
           PhiOp2 = VRMap[CurStageNum - StageDiff - np][LoopVal];
       }
@@ -3214,7 +3223,7 @@ unsigned SwingSchedulerDAG::getPrevMapVal(unsigned StageNum, unsigned PhiStage,
       // The previous name is defined in the current stage when the instruction
       // order is swapped.
       PrevVal = VRMap[StageNum][LoopVal];
-    else if (!LoopInst->isPHI())
+    else if (!LoopInst->isPHI() || LoopInst->getParent() != BB)
       // The loop value hasn't yet been scheduled.
       PrevVal = LoopVal;
     else if (StageNum == PhiStage + 1)
@@ -3466,10 +3475,15 @@ bool SwingSchedulerDAG::isLoopCarriedOrder(SUnit *Source, const SDep &Dep,
   // increment value to determine if the accesses may be loop carried.
   if (OffsetS >= OffsetD)
     return OffsetS + AccessSizeS > DeltaS;
-  else if (OffsetS < OffsetD)
+  else
     return OffsetD + AccessSizeD > DeltaD;
 
   return true;
+}
+
+void SwingSchedulerDAG::postprocessDAG() {
+  for (auto &M : Mutations)
+    M->apply(this);
 }
 
 /// Try to schedule the node at the specified StartCycle and continue
@@ -3805,8 +3819,7 @@ bool SMSchedule::isLoopCarried(SwingSchedulerDAG *SSD, MachineInstr &Phi) {
     return true;
   unsigned LoopCycle = cycleScheduled(UseSU);
   int LoopStage = stageScheduled(UseSU);
-  return LoopCycle > DefCycle ||
-         (LoopCycle <= DefCycle && LoopStage <= DefStage);
+  return (LoopCycle > DefCycle) || (LoopStage <= DefStage);
 }
 
 /// Return true if the instruction is a definition that is loop carried
@@ -3962,5 +3975,7 @@ void SMSchedule::print(raw_ostream &os) const {
   }
 }
 
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 /// Utility function used for debugging to print the schedule.
-void SMSchedule::dump() const { print(dbgs()); }
+LLVM_DUMP_METHOD void SMSchedule::dump() const { print(dbgs()); }
+#endif

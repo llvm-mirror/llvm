@@ -1,4 +1,4 @@
-//===-- DIContext.h ---------------------------------------------*- C++ -*-===//
+//===- DIContext.h ----------------------------------------------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -17,9 +17,12 @@
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Object/ObjectFile.h"
-#include "llvm/Support/Casting.h"
-#include "llvm/Support/DataTypes.h"
+#include <cassert>
+#include <cstdint>
+#include <memory>
 #include <string>
+#include <tuple>
+#include <utility>
 
 namespace llvm {
 
@@ -29,22 +32,28 @@ class raw_ostream;
 struct DILineInfo {
   std::string FileName;
   std::string FunctionName;
-  uint32_t Line;
-  uint32_t Column;
+  uint32_t Line = 0;
+  uint32_t Column = 0;
+  uint32_t StartLine = 0;
 
-  DILineInfo()
-      : FileName("<invalid>"), FunctionName("<invalid>"), Line(0), Column(0) {}
+  // DWARF-specific.
+  uint32_t Discriminator = 0;
+
+  DILineInfo() : FileName("<invalid>"), FunctionName("<invalid>") {}
 
   bool operator==(const DILineInfo &RHS) const {
     return Line == RHS.Line && Column == RHS.Column &&
-           FileName == RHS.FileName && FunctionName == RHS.FunctionName;
+           FileName == RHS.FileName && FunctionName == RHS.FunctionName &&
+           StartLine == RHS.StartLine && Discriminator == RHS.Discriminator;
   }
   bool operator!=(const DILineInfo &RHS) const {
     return !(*this == RHS);
   }
   bool operator<(const DILineInfo &RHS) const {
-    return std::tie(FileName, FunctionName, Line, Column) <
-           std::tie(RHS.FileName, RHS.FunctionName, RHS.Line, RHS.Column);
+    return std::tie(FileName, FunctionName, Line, Column, StartLine,
+                    Discriminator) <
+           std::tie(RHS.FileName, RHS.FunctionName, RHS.Line, RHS.Column,
+                    RHS.StartLine, RHS.Discriminator);
   }
 };
 
@@ -53,19 +62,24 @@ typedef SmallVector<std::pair<uint64_t, DILineInfo>, 16> DILineInfoTable;
 /// DIInliningInfo - a format-neutral container for inlined code description.
 class DIInliningInfo {
   SmallVector<DILineInfo, 4> Frames;
- public:
-  DIInliningInfo() {}
+
+public:
+  DIInliningInfo() = default;
+
   DILineInfo getFrame(unsigned Index) const {
     assert(Index < Frames.size());
     return Frames[Index];
   }
+
   DILineInfo *getMutableFrame(unsigned Index) {
     assert(Index < Frames.size());
     return &Frames[Index];
   }
+
   uint32_t getNumberOfFrames() const {
     return Frames.size();
   }
+
   void addFrame(const DILineInfo &Frame) {
     Frames.push_back(Frame);
   }
@@ -74,10 +88,10 @@ class DIInliningInfo {
 /// DIGlobal - container for description of a global variable.
 struct DIGlobal {
   std::string Name;
-  uint64_t Start;
-  uint64_t Size;
+  uint64_t Start = 0;
+  uint64_t Size = 0;
 
-  DIGlobal() : Name("<invalid>"), Start(0), Size(0) {}
+  DIGlobal() : Name("<invalid>") {}
 };
 
 /// A DINameKind is passed to name search methods to specify a
@@ -138,10 +152,11 @@ public:
     CK_DWARF,
     CK_PDB
   };
-  DIContextKind getKind() const { return Kind; }
 
   DIContext(DIContextKind K) : Kind(K) {}
-  virtual ~DIContext() {}
+  virtual ~DIContext() = default;
+
+  DIContextKind getKind() const { return Kind; }
 
   virtual void dump(raw_ostream &OS, DIDumpType DumpType = DIDT_All,
                     bool DumpEH = false, bool SummarizeTypes = false) = 0;
@@ -152,6 +167,7 @@ public:
       uint64_t Size, DILineInfoSpecifier Specifier = DILineInfoSpecifier()) = 0;
   virtual DIInliningInfo getInliningInfoForAddress(uint64_t Address,
       DILineInfoSpecifier Specifier = DILineInfoSpecifier()) = 0;
+
 private:
   const DIContextKind Kind;
 };
@@ -161,8 +177,8 @@ private:
 /// on the fly.
 class LoadedObjectInfo {
 protected:
-  LoadedObjectInfo(const LoadedObjectInfo &) = default;
   LoadedObjectInfo() = default;
+  LoadedObjectInfo(const LoadedObjectInfo &) = default;
 
 public:
   virtual ~LoadedObjectInfo() = default;
@@ -197,6 +213,6 @@ public:
   virtual std::unique_ptr<LoadedObjectInfo> clone() const = 0;
 };
 
-}
+} // end namespace llvm
 
-#endif
+#endif // LLVM_DEBUGINFO_DICONTEXT_H

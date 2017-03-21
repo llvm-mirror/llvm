@@ -1,5 +1,5 @@
 ; RUN: llc -march=amdgcn -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=SI %s
-; RUN: llc -march=amdgcn -mcpu=fiji -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=VI %s
+; RUN: llc -march=amdgcn -mcpu=fiji -mattr=-flat-for-global -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=VI %s
 
 declare half @llvm.fma.f16(half %a, half %b, half %c)
 declare <2 x half> @llvm.fma.v2f16(<2 x half> %a, <2 x half> %b, <2 x half> %c)
@@ -32,7 +32,8 @@ define void @fma_f16(
 ; GCN-LABEL: {{^}}fma_f16_imm_a
 ; GCN: buffer_load_ushort v[[B_F16:[0-9]+]]
 ; GCN: buffer_load_ushort v[[C_F16:[0-9]+]]
-; SI:  v_cvt_f32_f16_e32 v[[A_F32:[0-9]+]], 0x4200{{$}}
+
+; SI:  v_mov_b32_e32 v[[A_F32:[0-9]+]], 0x40400000{{$}}
 ; SI:  v_cvt_f32_f16_e32 v[[B_F32:[0-9]+]], v[[B_F16]]
 ; SI:  v_cvt_f32_f16_e32 v[[C_F32:[0-9]+]], v[[C_F16]]
 ; SI:  v_fma_f32 v[[R_F32:[0-9]+]], v[[A_F32:[0-9]]], v[[B_F32:[0-9]]], v[[C_F32:[0-9]]]
@@ -55,7 +56,7 @@ define void @fma_f16_imm_a(
 ; GCN-LABEL: {{^}}fma_f16_imm_b
 ; GCN: buffer_load_ushort v[[A_F16:[0-9]+]]
 ; GCN: buffer_load_ushort v[[C_F16:[0-9]+]]
-; SI:  v_cvt_f32_f16_e32 v[[B_F32:[0-9]+]], 0x4200{{$}}
+; SI:  v_mov_b32_e32 v[[B_F32:[0-9]+]], 0x40400000{{$}}
 ; SI:  v_cvt_f32_f16_e32 v[[A_F32:[0-9]+]], v[[A_F16]]
 ; SI:  v_cvt_f32_f16_e32 v[[C_F32:[0-9]+]], v[[C_F16]]
 ; SI:  v_fma_f32 v[[R_F32:[0-9]+]], v[[A_F32:[0-9]]], v[[B_F32:[0-9]]], v[[C_F32:[0-9]]]
@@ -78,7 +79,7 @@ define void @fma_f16_imm_b(
 ; GCN-LABEL: {{^}}fma_f16_imm_c
 ; GCN: buffer_load_ushort v[[A_F16:[0-9]+]]
 ; GCN: buffer_load_ushort v[[B_F16:[0-9]+]]
-; SI:  v_cvt_f32_f16_e32 v[[C_F32:[0-9]+]], 0x4200{{$}}
+; SI:  v_mov_b32_e32 v[[C_F32:[0-9]+]], 0x40400000{{$}}
 ; SI:  v_cvt_f32_f16_e32 v[[A_F32:[0-9]+]], v[[A_F16]]
 ; SI:  v_cvt_f32_f16_e32 v[[B_F32:[0-9]+]], v[[B_F16]]
 ; SI:  v_fma_f32 v[[R_F32:[0-9]+]], v[[A_F32:[0-9]]], v[[B_F32:[0-9]]], v[[C_F32:[0-9]]]
@@ -102,24 +103,31 @@ define void @fma_f16_imm_c(
 ; GCN: buffer_load_dword v[[A_V2_F16:[0-9]+]]
 ; GCN: buffer_load_dword v[[B_V2_F16:[0-9]+]]
 ; GCN: buffer_load_dword v[[C_V2_F16:[0-9]+]]
-; GCN: v_lshrrev_b32_e32 v[[A_F16_1:[0-9]+]], 16, v[[A_V2_F16]]
-; GCN: v_lshrrev_b32_e32 v[[B_F16_1:[0-9]+]], 16, v[[B_V2_F16]]
-; GCN: v_lshrrev_b32_e32 v[[C_F16_1:[0-9]+]], 16, v[[C_V2_F16]]
-; SI:  v_cvt_f32_f16_e32 v[[A_F32_0:[0-9]+]], v[[A_V2_F16]]
-; SI:  v_cvt_f32_f16_e32 v[[B_F32_0:[0-9]+]], v[[B_V2_F16]]
-; SI:  v_cvt_f32_f16_e32 v[[C_F32_0:[0-9]+]], v[[C_V2_F16]]
+
+; SI: v_cvt_f32_f16_e32 v[[A_F32_0:[0-9]+]], v[[A_V2_F16]]
+; SI: v_lshrrev_b32_e32 v[[A_F16_1:[0-9]+]], 16, v[[A_V2_F16]]
+; SI: v_cvt_f32_f16_e32 v[[B_F32_0:[0-9]+]], v[[B_V2_F16]]
+; SI: v_lshrrev_b32_e32 v[[B_F16_1:[0-9]+]], 16, v[[B_V2_F16]]
+
+; SI: v_cvt_f32_f16_e32 v[[C_F32_0:[0-9]+]], v[[C_V2_F16]]
+; SI: v_lshrrev_b32_e32 v[[C_F16_1:[0-9]+]], 16, v[[C_V2_F16]]
+
 ; SI:  v_cvt_f32_f16_e32 v[[A_F32_1:[0-9]+]], v[[A_F16_1]]
 ; SI:  v_cvt_f32_f16_e32 v[[B_F32_1:[0-9]+]], v[[B_F16_1]]
 ; SI:  v_cvt_f32_f16_e32 v[[C_F32_1:[0-9]+]], v[[C_F16_1]]
-; SI:  v_fma_f32 v[[R_F32_0:[0-9]+]], v[[A_F32_0]], v[[B_F32_0]], v[[C_F32_0]]
-; SI:  v_cvt_f16_f32_e32 v[[R_F16_0:[0-9]+]], v[[R_F32_0]]
-; SI:  v_fma_f32 v[[R_F32_1:[0-9]+]], v[[A_F32_1]], v[[B_F32_1]], v[[C_F32_1]]
-; SI:  v_cvt_f16_f32_e32 v[[R_F16_1:[0-9]+]], v[[R_F32_1]]
-; VI:  v_fma_f16 v[[R_F16_0:[0-9]+]], v[[A_V2_F16]], v[[B_V2_F16]], v[[C_V2_F16]]
-; VI:  v_fma_f16 v[[R_F16_1:[0-9]+]], v[[A_F16_1]], v[[B_F16_1]], v[[C_F16_1]]
-; GCN: v_and_b32_e32 v[[R_F16_LO:[0-9]+]], 0xffff, v[[R_F16_0]]
+; SI-DAG:  v_fma_f32 v[[R_F32_0:[0-9]+]], v[[A_F32_0]], v[[B_F32_0]], v[[C_F32_0]]
+; SI-DAG:  v_cvt_f16_f32_e32 v[[R_F16_0:[0-9]+]], v[[R_F32_0]]
+; SI-DAG:  v_fma_f32 v[[R_F32_1:[0-9]+]], v[[A_F32_1]], v[[B_F32_1]], v[[C_F32_1]]
+; SI-DAG:  v_cvt_f16_f32_e32 v[[R_F16_1:[0-9]+]], v[[R_F32_1]]
+
+; VI: v_lshrrev_b32_e32 v[[A_F16_1:[0-9]+]], 16, v[[A_V2_F16]]
+; VI: v_lshrrev_b32_e32 v[[B_F16_1:[0-9]+]], 16, v[[B_V2_F16]]
+; VI: v_lshrrev_b32_e32 v[[C_F16_1:[0-9]+]], 16, v[[C_V2_F16]]
+; VI: v_fma_f16 v[[R_F16_0:[0-9]+]], v[[A_V2_F16]], v[[B_V2_F16]], v[[C_V2_F16]]
+; VI: v_fma_f16 v[[R_F16_1:[0-9]+]], v[[A_F16_1]], v[[B_F16_1]], v[[C_F16_1]]
+
 ; GCN: v_lshlrev_b32_e32 v[[R_F16_HI:[0-9]+]], 16, v[[R_F16_1]]
-; GCN: v_or_b32_e32 v[[R_V2_F16:[0-9]+]], v[[R_F16_HI]], v[[R_F16_LO]]
+; GCN: v_or_b32_e32 v[[R_V2_F16:[0-9]+]], v[[R_F16_HI]], v[[R_F16_0]]
 ; GCN: buffer_store_dword v[[R_V2_F16]]
 ; GCN: s_endpgm
 define void @fma_v2f16(
@@ -135,26 +143,26 @@ define void @fma_v2f16(
   ret void
 }
 
-; GCN-LABEL: {{^}}fma_v2f16_imm_a
+; GCN-LABEL: {{^}}fma_v2f16_imm_a:
 ; GCN: buffer_load_dword v[[B_V2_F16:[0-9]+]]
 ; GCN: buffer_load_dword v[[C_V2_F16:[0-9]+]]
-; SI:  v_cvt_f32_f16_e32 v[[A_F32:[0-9]+]], 0x4200{{$}}
+; SI:  v_mov_b32_e32 v[[A_F32:[0-9]+]], 0x40400000{{$}}
 ; VI:  v_mov_b32_e32 v[[A_F16:[0-9]+]], 0x4200{{$}}
-; GCN: v_lshrrev_b32_e32 v[[B_F16_1:[0-9]+]], 16, v[[B_V2_F16]]
-; GCN: v_lshrrev_b32_e32 v[[C_F16_1:[0-9]+]], 16, v[[C_V2_F16]]
-; SI:  v_cvt_f32_f16_e32 v[[B_F32_0:[0-9]+]], v[[B_V2_F16]]
-; SI:  v_cvt_f32_f16_e32 v[[C_F32_0:[0-9]+]], v[[C_V2_F16]]
+; GCN-DAG: v_lshrrev_b32_e32 v[[B_F16_1:[0-9]+]], 16, v[[B_V2_F16]]
+; GCN-DAG: v_lshrrev_b32_e32 v[[C_F16_1:[0-9]+]], 16, v[[C_V2_F16]]
+; SI-DAG:  v_cvt_f32_f16_e32 v[[B_F32_0:[0-9]+]], v[[B_V2_F16]]
+; SI-DAG:  v_cvt_f32_f16_e32 v[[C_F32_0:[0-9]+]], v[[C_V2_F16]]
 ; SI:  v_cvt_f32_f16_e32 v[[B_F32_1:[0-9]+]], v[[B_F16_1]]
 ; SI:  v_cvt_f32_f16_e32 v[[C_F32_1:[0-9]+]], v[[C_F16_1]]
 ; SI:  v_fma_f32 v[[R_F32_0:[0-9]+]], v[[B_F32_0]], v[[A_F32]], v[[C_F32_0]]
-; SI:  v_cvt_f16_f32_e32 v[[R_F16_0:[0-9]+]], v[[R_F32_0]]
-; SI:  v_fma_f32 v[[R_F32_1:[0-9]+]], v[[B_F32_1]], v[[A_F32]], v[[C_F32_1]]
-; SI:  v_cvt_f16_f32_e32 v[[R_F16_1:[0-9]+]], v[[R_F32_1]]
+; SI-DAG:  v_cvt_f16_f32_e32 v[[R_F16_0:[0-9]+]], v[[R_F32_0]]
+; SI-DAG:  v_fma_f32 v[[R_F32_1:[0-9]+]], v[[B_F32_1]], v[[A_F32]], v[[C_F32_1]]
+; SI-DAG:  v_cvt_f16_f32_e32 v[[R_F16_1:[0-9]+]], v[[R_F32_1]]
+
 ; VI:  v_fma_f16 v[[R_F16_0:[0-9]+]], v[[B_V2_F16]], v[[A_F16]], v[[C_V2_F16]]
 ; VI:  v_fma_f16 v[[R_F16_1:[0-9]+]], v[[B_F16_1]], v[[A_F16]], v[[C_F16_1]]
-; GCN: v_and_b32_e32 v[[R_F16_LO:[0-9]+]], 0xffff, v[[R_F16_0]]
 ; GCN: v_lshlrev_b32_e32 v[[R_F16_HI:[0-9]+]], 16, v[[R_F16_1]]
-; GCN: v_or_b32_e32 v[[R_V2_F16:[0-9]+]], v[[R_F16_HI]], v[[R_F16_LO]]
+; GCN: v_or_b32_e32 v[[R_V2_F16:[0-9]+]], v[[R_F16_HI]], v[[R_F16_0]]
 ; GCN: buffer_store_dword v[[R_V2_F16]]
 ; GCN: s_endpgm
 define void @fma_v2f16_imm_a(
@@ -168,26 +176,31 @@ define void @fma_v2f16_imm_a(
   ret void
 }
 
-; GCN-LABEL: {{^}}fma_v2f16_imm_b
+; GCN-LABEL: {{^}}fma_v2f16_imm_b:
 ; GCN: buffer_load_dword v[[A_V2_F16:[0-9]+]]
 ; GCN: buffer_load_dword v[[C_V2_F16:[0-9]+]]
-; SI:  v_cvt_f32_f16_e32 v[[B_F32:[0-9]+]], 0x4200{{$}}
+; SI:  v_mov_b32_e32 v[[B_F32:[0-9]+]], 0x40400000{{$}}
 ; VI:  v_mov_b32_e32 v[[B_F16:[0-9]+]], 0x4200{{$}}
-; GCN: v_lshrrev_b32_e32 v[[A_F16_1:[0-9]+]], 16, v[[A_V2_F16]]
-; GCN: v_lshrrev_b32_e32 v[[C_F16_1:[0-9]+]], 16, v[[C_V2_F16]]
+
 ; SI:  v_cvt_f32_f16_e32 v[[A_F32_0:[0-9]+]], v[[A_V2_F16]]
-; SI:  v_cvt_f32_f16_e32 v[[C_F32_0:[0-9]+]], v[[C_V2_F16]]
-; SI:  v_cvt_f32_f16_e32 v[[A_F32_1:[0-9]+]], v[[A_F16_1]]
-; SI:  v_cvt_f32_f16_e32 v[[C_F32_1:[0-9]+]], v[[C_F16_1]]
-; SI:  v_fma_f32 v[[R_F32_0:[0-9]+]], v[[A_F32_0]], v[[B_F32]], v[[C_F32_0]]
-; SI:  v_cvt_f16_f32_e32 v[[R_F16_0:[0-9]+]], v[[R_F32_0]]
-; SI:  v_fma_f32 v[[R_F32_1:[0-9]+]], v[[A_F32_1]], v[[B_F32]], v[[C_F32_1]]
-; SI:  v_cvt_f16_f32_e32 v[[R_F16_1:[0-9]+]], v[[R_F32_1]]
+; SI: v_lshrrev_b32_e32 v[[A_F16_1:[0-9]+]], 16, v[[A_V2_F16]]
+; SI-DAG:  v_cvt_f32_f16_e32 v[[C_F32_0:[0-9]+]], v[[C_V2_F16]]
+; SI: v_lshrrev_b32_e32 v[[C_F16_1:[0-9]+]], 16, v[[C_V2_F16]]
+
+; SI-DAG:  v_cvt_f32_f16_e32 v[[A_F32_1:[0-9]+]], v[[A_F16_1]]
+; SI-DAG:  v_cvt_f32_f16_e32 v[[C_F32_1:[0-9]+]], v[[C_F16_1]]
+; SI-DAG:  v_fma_f32 v[[R_F32_0:[0-9]+]], v[[A_F32_0]], v[[B_F32]], v[[C_F32_0]]
+; SI-DAG:  v_cvt_f16_f32_e32 v[[R_F16_0:[0-9]+]], v[[R_F32_0]]
+; SI-DAG:  v_fma_f32 v[[R_F32_1:[0-9]+]], v[[A_F32_1]], v[[B_F32]], v[[C_F32_1]]
+; SI-DAG:  v_cvt_f16_f32_e32 v[[R_F16_1:[0-9]+]], v[[R_F32_1]]
+
+; VI: v_lshrrev_b32_e32 v[[A_F16_1:[0-9]+]], 16, v[[A_V2_F16]]
+; VI: v_lshrrev_b32_e32 v[[C_F16_1:[0-9]+]], 16, v[[C_V2_F16]]
 ; VI:  v_fma_f16 v[[R_F16_0:[0-9]+]], v[[A_V2_F16]], v[[B_F16]], v[[C_V2_F16]]
 ; VI:  v_fma_f16 v[[R_F16_1:[0-9]+]], v[[A_F16_1]], v[[B_F16]], v[[C_F16_1]]
-; GCN: v_and_b32_e32 v[[R_F16_LO:[0-9]+]], 0xffff, v[[R_F16_0]]
+
 ; GCN: v_lshlrev_b32_e32 v[[R_F16_HI:[0-9]+]], 16, v[[R_F16_1]]
-; GCN: v_or_b32_e32 v[[R_V2_F16:[0-9]+]], v[[R_F16_HI]], v[[R_F16_LO]]
+; GCN: v_or_b32_e32 v[[R_V2_F16:[0-9]+]], v[[R_F16_HI]], v[[R_F16_0]]
 ; GCN: buffer_store_dword v[[R_V2_F16]]
 ; GCN: s_endpgm
 define void @fma_v2f16_imm_b(
@@ -201,26 +214,31 @@ define void @fma_v2f16_imm_b(
   ret void
 }
 
-; GCN-LABEL: {{^}}fma_v2f16_imm_c
+; GCN-LABEL: {{^}}fma_v2f16_imm_c:
 ; GCN: buffer_load_dword v[[A_V2_F16:[0-9]+]]
 ; GCN: buffer_load_dword v[[B_V2_F16:[0-9]+]]
-; SI:  v_cvt_f32_f16_e32 v[[C_F32:[0-9]+]], 0x4200{{$}}
+; SI:  v_mov_b32_e32 v[[C_F32:[0-9]+]], 0x40400000{{$}}
 ; VI:  v_mov_b32_e32 v[[C_F16:[0-9]+]], 0x4200{{$}}
-; GCN: v_lshrrev_b32_e32 v[[A_F16_1:[0-9]+]], 16, v[[A_V2_F16]]
-; GCN: v_lshrrev_b32_e32 v[[B_F16_1:[0-9]+]], 16, v[[B_V2_F16]]
+
 ; SI:  v_cvt_f32_f16_e32 v[[A_F32_0:[0-9]+]], v[[A_V2_F16]]
+; SI: v_lshrrev_b32_e32 v[[A_F16_1:[0-9]+]], 16, v[[A_V2_F16]]
 ; SI:  v_cvt_f32_f16_e32 v[[B_F32_0:[0-9]+]], v[[B_V2_F16]]
+; SI: v_lshrrev_b32_e32 v[[B_F16_1:[0-9]+]], 16, v[[B_V2_F16]]
+
 ; SI:  v_cvt_f32_f16_e32 v[[A_F32_1:[0-9]+]], v[[A_F16_1]]
 ; SI:  v_cvt_f32_f16_e32 v[[B_F32_1:[0-9]+]], v[[B_F16_1]]
 ; SI:  v_fma_f32 v[[R_F32_0:[0-9]+]], v[[A_F32_0]], v[[B_F32_0]], v[[C_F32]]
-; SI:  v_cvt_f16_f32_e32 v[[R_F16_0:[0-9]+]], v[[R_F32_0]]
-; SI:  v_fma_f32 v[[R_F32_1:[0-9]+]], v[[A_F32_1]], v[[B_F32_1]], v[[C_F32]]
-; SI:  v_cvt_f16_f32_e32 v[[R_F16_1:[0-9]+]], v[[R_F32_1]]
+; SI-DAG:  v_cvt_f16_f32_e32 v[[R_F16_0:[0-9]+]], v[[R_F32_0]]
+; SI-DAG:  v_fma_f32 v[[R_F32_1:[0-9]+]], v[[A_F32_1]], v[[B_F32_1]], v[[C_F32]]
+; SI-DAG:  v_cvt_f16_f32_e32 v[[R_F16_1:[0-9]+]], v[[R_F32_1]]
+
+; VI: v_lshrrev_b32_e32 v[[A_F16_1:[0-9]+]], 16, v[[A_V2_F16]]
+; VI: v_lshrrev_b32_e32 v[[B_F16_1:[0-9]+]], 16, v[[B_V2_F16]]
 ; VI:  v_fma_f16 v[[R_F16_0:[0-9]+]], v[[A_V2_F16]], v[[B_V2_F16]], v[[C_F16]]
 ; VI:  v_fma_f16 v[[R_F16_1:[0-9]+]], v[[A_F16_1]], v[[B_F16_1]], v[[C_F16]]
-; GCN: v_and_b32_e32 v[[R_F16_LO:[0-9]+]], 0xffff, v[[R_F16_0]]
+
 ; GCN: v_lshlrev_b32_e32 v[[R_F16_HI:[0-9]+]], 16, v[[R_F16_1]]
-; GCN: v_or_b32_e32 v[[R_V2_F16:[0-9]+]], v[[R_F16_HI]], v[[R_F16_LO]]
+; GCN: v_or_b32_e32 v[[R_V2_F16:[0-9]+]], v[[R_F16_HI]], v[[R_F16_0]]
 ; GCN: buffer_store_dword v[[R_V2_F16]]
 ; GCN: s_endpgm
 define void @fma_v2f16_imm_c(

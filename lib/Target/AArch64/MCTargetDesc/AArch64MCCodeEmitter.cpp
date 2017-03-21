@@ -15,15 +15,23 @@
 #include "MCTargetDesc/AArch64FixupKinds.h"
 #include "MCTargetDesc/AArch64MCExpr.h"
 #include "Utils/AArch64BaseInfo.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCContext.h"
+#include "llvm/MC/MCFixup.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/Endian.h"
 #include "llvm/Support/EndianStream.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
+#include <cassert>
+#include <cstdint>
+
 using namespace llvm;
 
 #define DEBUG_TYPE "mccodeemitter"
@@ -35,13 +43,14 @@ namespace {
 
 class AArch64MCCodeEmitter : public MCCodeEmitter {
   MCContext &Ctx;
+  const MCInstrInfo &MCII;
 
-  AArch64MCCodeEmitter(const AArch64MCCodeEmitter &); // DO NOT IMPLEMENT
-  void operator=(const AArch64MCCodeEmitter &);     // DO NOT IMPLEMENT
 public:
-  AArch64MCCodeEmitter(const MCInstrInfo &mcii, MCContext &ctx) : Ctx(ctx) {}
-
-  ~AArch64MCCodeEmitter() override {}
+  AArch64MCCodeEmitter(const MCInstrInfo &mcii, MCContext &ctx)
+      : Ctx(ctx), MCII(mcii) {}
+  AArch64MCCodeEmitter(const AArch64MCCodeEmitter &) = delete;
+  void operator=(const AArch64MCCodeEmitter &) = delete;
+  ~AArch64MCCodeEmitter() override = default;
 
   // getBinaryCodeForInstr - TableGen'erated function for getting the
   // binary encoding for an instruction.
@@ -170,15 +179,14 @@ public:
 
   unsigned fixOneOperandFPComparison(const MCInst &MI, unsigned EncodedValue,
                                      const MCSubtargetInfo &STI) const;
+
+private:
+  uint64_t computeAvailableFeatures(const FeatureBitset &FB) const;
+  void verifyInstructionPredicates(const MCInst &MI,
+                                   uint64_t AvailableFeatures) const;
 };
 
 } // end anonymous namespace
-
-MCCodeEmitter *llvm::createAArch64MCCodeEmitter(const MCInstrInfo &MCII,
-                                                const MCRegisterInfo &MRI,
-                                                MCContext &Ctx) {
-  return new AArch64MCCodeEmitter(MCII, Ctx);
-}
 
 /// getMachineOpValue - Return binary encoding of operand. If the machine
 /// operand requires relocation, record the relocation and return zero.
@@ -547,6 +555,9 @@ unsigned AArch64MCCodeEmitter::fixMOVZ(const MCInst &MI, unsigned EncodedValue,
 void AArch64MCCodeEmitter::encodeInstruction(const MCInst &MI, raw_ostream &OS,
                                              SmallVectorImpl<MCFixup> &Fixups,
                                              const MCSubtargetInfo &STI) const {
+  verifyInstructionPredicates(MI,
+                              computeAvailableFeatures(STI.getFeatureBits()));
+
   if (MI.getOpcode() == AArch64::TLSDESCCALL) {
     // This is a directive which applies an R_AARCH64_TLSDESC_CALL to the
     // following (BLR) instruction. It doesn't emit any code itself so it
@@ -589,4 +600,11 @@ unsigned AArch64MCCodeEmitter::fixOneOperandFPComparison(
   return EncodedValue;
 }
 
+#define ENABLE_INSTR_PREDICATE_VERIFIER
 #include "AArch64GenMCCodeEmitter.inc"
+
+MCCodeEmitter *llvm::createAArch64MCCodeEmitter(const MCInstrInfo &MCII,
+                                                const MCRegisterInfo &MRI,
+                                                MCContext &Ctx) {
+  return new AArch64MCCodeEmitter(MCII, Ctx);
+}

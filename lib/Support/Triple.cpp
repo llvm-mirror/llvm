@@ -46,6 +46,7 @@ StringRef Triple::getArchTypeName(ArchType Kind) {
   case sparcel:        return "sparcel";
   case systemz:        return "s390x";
   case tce:            return "tce";
+  case tcele:          return "tcele";
   case thumb:          return "thumb";
   case thumbeb:        return "thumbeb";
   case x86:            return "i386";
@@ -274,6 +275,7 @@ Triple::ArchType Triple::getArchTypeForLLVMName(StringRef Name) {
     .Case("sparcv9", sparcv9)
     .Case("systemz", systemz)
     .Case("tce", tce)
+    .Case("tcele", tcele)
     .Case("thumb", thumb)
     .Case("thumbeb", thumbeb)
     .Case("x86", x86)
@@ -391,6 +393,7 @@ static Triple::ArchType parseArch(StringRef ArchName) {
     .Case("sparcel", Triple::sparcel)
     .Cases("sparcv9", "sparc64", Triple::sparcv9)
     .Case("tce", Triple::tce)
+    .Case("tcele", Triple::tcele)
     .Case("xcore", Triple::xcore)
     .Case("nvptx", Triple::nvptx)
     .Case("nvptx64", Triple::nvptx64)
@@ -507,6 +510,7 @@ static Triple::ObjectFormatType parseFormat(StringRef EnvironmentName) {
     .EndsWith("coff", Triple::COFF)
     .EndsWith("elf", Triple::ELF)
     .EndsWith("macho", Triple::MachO)
+    .EndsWith("wasm", Triple::Wasm)
     .Default(Triple::UnknownObjectFormat);
 }
 
@@ -547,6 +551,8 @@ static Triple::SubArchType parseSubArch(StringRef SubArchName) {
   case ARM::AK_ARMV7A:
   case ARM::AK_ARMV7R:
     return Triple::ARMSubArch_v7;
+  case ARM::AK_ARMV7VE:
+    return Triple::ARMSubArch_v7ve;
   case ARM::AK_ARMV7K:
     return Triple::ARMSubArch_v7k;
   case ARM::AK_ARMV7M:
@@ -578,6 +584,7 @@ static StringRef getObjectFormatTypeName(Triple::ObjectFormatType Kind) {
   case Triple::COFF: return "coff";
   case Triple::ELF: return "elf";
   case Triple::MachO: return "macho";
+  case Triple::Wasm: return "wasm";
   }
   llvm_unreachable("unknown object format type");
 }
@@ -632,6 +639,7 @@ static Triple::ObjectFormatType getDefaultFormat(const Triple &T) {
   case Triple::spir64:
   case Triple::systemz:
   case Triple::tce:
+  case Triple::tcele:
   case Triple::thumbeb:
   case Triple::wasm32:
   case Triple::wasm64:
@@ -1155,6 +1163,7 @@ static unsigned getArchPointerBitWidth(llvm::Triple::ArchType Arch) {
   case llvm::Triple::sparc:
   case llvm::Triple::sparcel:
   case llvm::Triple::tce:
+  case llvm::Triple::tcele:
   case llvm::Triple::thumb:
   case llvm::Triple::thumbeb:
   case llvm::Triple::x86:
@@ -1237,6 +1246,7 @@ Triple Triple::get32BitArchVariant() const {
   case Triple::sparc:
   case Triple::sparcel:
   case Triple::tce:
+  case Triple::tcele:
   case Triple::thumb:
   case Triple::thumbeb:
   case Triple::x86:
@@ -1278,6 +1288,7 @@ Triple Triple::get64BitArchVariant() const {
   case Triple::msp430:
   case Triple::r600:
   case Triple::tce:
+  case Triple::tcele:
   case Triple::xcore:
   case Triple::sparcel:
   case Triple::shave:
@@ -1369,6 +1380,7 @@ Triple Triple::getBigEndianArchVariant() const {
     T.setArch(UnknownArch);
     break;
 
+  case Triple::tcele:   T.setArch(Triple::tce);        break;
   case Triple::aarch64: T.setArch(Triple::aarch64_be); break;
   case Triple::bpfel:   T.setArch(Triple::bpfeb);      break;
   case Triple::mips64el:T.setArch(Triple::mips64);     break;
@@ -1392,7 +1404,6 @@ Triple Triple::getLittleEndianArchVariant() const {
   case Triple::ppc:
   case Triple::sparcv9:
   case Triple::systemz:
-  case Triple::tce:
 
   // ARM is intentionally unsupported here, changing the architecture would
   // drop any arch suffixes.
@@ -1401,6 +1412,7 @@ Triple Triple::getLittleEndianArchVariant() const {
     T.setArch(UnknownArch);
     break;
 
+  case Triple::tce:        T.setArch(Triple::tcele);    break;
   case Triple::aarch64_be: T.setArch(Triple::aarch64);  break;
   case Triple::bpfeb:      T.setArch(Triple::bpfel);    break;
   case Triple::mips64:     T.setArch(Triple::mips64el); break;
@@ -1447,6 +1459,7 @@ bool Triple::isLittleEndian() const {
   case Triple::x86:
   case Triple::x86_64:
   case Triple::xcore:
+  case Triple::tcele:
   case Triple::renderscript32:
   case Triple::renderscript64:
     return true;
@@ -1502,6 +1515,7 @@ StringRef Triple::getARMCPUForArch(StringRef MArch) const {
       return "strongarm";
     }
   case llvm::Triple::NaCl:
+  case llvm::Triple::OpenBSD:
     return "cortex-a8";
   default:
     switch (getEnvironment()) {

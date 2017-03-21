@@ -64,6 +64,10 @@ def int_r600_recipsqrt_clamped : Intrinsic<
   [llvm_anyfloat_ty], [LLVMMatchType<0>], [IntrNoMem]
 >;
 
+def int_r600_cube : Intrinsic<
+  [llvm_v4f32_ty], [llvm_v4f32_ty], [IntrNoMem]
+>;
+
 } // End TargetPrefix = "r600"
 
 let TargetPrefix = "amdgcn" in {
@@ -100,14 +104,29 @@ def int_amdgcn_dispatch_id :
   GCCBuiltin<"__builtin_amdgcn_dispatch_id">,
   Intrinsic<[llvm_i64_ty], [], [IntrNoMem]>;
 
+def int_amdgcn_implicit_buffer_ptr :
+  GCCBuiltin<"__builtin_amdgcn_implicit_buffer_ptr">,
+  Intrinsic<[LLVMQualPointerType<llvm_i8_ty, 2>], [], [IntrNoMem]>;
+
 //===----------------------------------------------------------------------===//
 // Instruction Intrinsics
 //===----------------------------------------------------------------------===//
 
+// The first parameter is s_sendmsg immediate (i16),
+// the second one is copied to m0
+def int_amdgcn_s_sendmsg : GCCBuiltin<"__builtin_amdgcn_s_sendmsg">,
+  Intrinsic <[], [llvm_i32_ty, llvm_i32_ty], []>;
+def int_amdgcn_s_sendmsghalt : GCCBuiltin<"__builtin_amdgcn_s_sendmsghalt">,
+  Intrinsic <[], [llvm_i32_ty, llvm_i32_ty], []>;
+
 def int_amdgcn_s_barrier : GCCBuiltin<"__builtin_amdgcn_s_barrier">,
   Intrinsic<[], [], [IntrConvergent]>;
 
-def int_amdgcn_s_waitcnt : Intrinsic<[], [llvm_i32_ty], []>;
+def int_amdgcn_wave_barrier : GCCBuiltin<"__builtin_amdgcn_wave_barrier">,
+  Intrinsic<[], [], [IntrConvergent]>;
+
+def int_amdgcn_s_waitcnt : GCCBuiltin<"__builtin_amdgcn_s_waitcnt">,
+  Intrinsic<[], [llvm_i32_ty], []>;
 
 def int_amdgcn_div_scale : Intrinsic<
   // 1st parameter: Numerator
@@ -178,7 +197,7 @@ def int_amdgcn_frexp_mant : Intrinsic<
 >;
 
 def int_amdgcn_frexp_exp : Intrinsic<
-  [llvm_i32_ty], [llvm_anyfloat_ty], [IntrNoMem]
+  [llvm_anyint_ty], [llvm_anyfloat_ty], [IntrNoMem]
 >;
 
 // v_fract is buggy on SI/CI. It mishandles infinities, may return 1.0
@@ -188,8 +207,17 @@ def int_amdgcn_fract : Intrinsic<
   [llvm_anyfloat_ty], [LLVMMatchType<0>], [IntrNoMem]
 >;
 
+def int_amdgcn_cvt_pkrtz : Intrinsic<
+  [llvm_v2f16_ty], [llvm_float_ty, llvm_float_ty], [IntrNoMem]
+>;
+
 def int_amdgcn_class : Intrinsic<
   [llvm_i1_ty], [llvm_anyfloat_ty, llvm_i32_ty], [IntrNoMem]
+>;
+
+def int_amdgcn_fmed3 : GCCBuiltin<"__builtin_amdgcn_fmed3">,
+  Intrinsic<[llvm_anyfloat_ty],
+    [LLVMMatchType<0>, LLVMMatchType<0>, LLVMMatchType<0>], [IntrNoMem]
 >;
 
 def int_amdgcn_cubeid : GCCBuiltin<"__builtin_amdgcn_cubeid">,
@@ -437,6 +465,32 @@ def int_amdgcn_buffer_atomic_cmpswap : Intrinsic<
    llvm_i1_ty],       // slc(imm)
   []>;
 
+// Uses that do not set the done bit should set IntrWriteMem on the
+// call site.
+def int_amdgcn_exp : Intrinsic <[], [
+  llvm_i32_ty,       // tgt,
+  llvm_i32_ty,       // en
+  llvm_any_ty,       // src0 (f32 or i32)
+  LLVMMatchType<0>,  // src1
+  LLVMMatchType<0>,  // src2
+  LLVMMatchType<0>,  // src3
+  llvm_i1_ty,        // done
+  llvm_i1_ty         // vm
+  ],
+  []
+>;
+
+// exp with compr bit set.
+def int_amdgcn_exp_compr : Intrinsic <[], [
+  llvm_i32_ty,       // tgt,
+  llvm_i32_ty,       // en
+  llvm_anyvector_ty, // src0 (v2f16 or v2i16)
+  LLVMMatchType<0>,  // src1
+  llvm_i1_ty,        // done
+  llvm_i1_ty],       // vm
+  []
+>;
+
 def int_amdgcn_buffer_wbinvl1_sc :
   GCCBuiltin<"__builtin_amdgcn_buffer_wbinvl1_sc">,
   Intrinsic<[], [], []>;
@@ -472,11 +526,19 @@ def int_amdgcn_s_getreg :
   GCCBuiltin<"__builtin_amdgcn_s_getreg">,
   Intrinsic<[llvm_i32_ty], [llvm_i32_ty], [IntrReadMem]>;
 
+// __builtin_amdgcn_interp_mov <param>, <attr_chan>, <attr>, <m0>
+// param values: 0 = P10, 1 = P20, 2 = P0
+def int_amdgcn_interp_mov :
+  GCCBuiltin<"__builtin_amdgcn_interp_mov">,
+  Intrinsic<[llvm_float_ty],
+            [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty, llvm_i32_ty],
+            [IntrNoMem]>;
+
 // __builtin_amdgcn_interp_p1 <i>, <attr_chan>, <attr>, <m0>
 def int_amdgcn_interp_p1 :
   GCCBuiltin<"__builtin_amdgcn_interp_p1">,
   Intrinsic<[llvm_float_ty],
-            [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty, llvm_i32_ty],
+            [llvm_float_ty, llvm_i32_ty, llvm_i32_ty, llvm_i32_ty],
             [IntrNoMem]>;  // This intrinsic reads from lds, but the memory
                            // values are constant, so it behaves like IntrNoMem.
 
@@ -484,7 +546,7 @@ def int_amdgcn_interp_p1 :
 def int_amdgcn_interp_p2 :
   GCCBuiltin<"__builtin_amdgcn_interp_p2">,
   Intrinsic<[llvm_float_ty],
-            [llvm_float_ty, llvm_i32_ty, llvm_i32_ty, llvm_i32_ty, llvm_i32_ty],
+            [llvm_float_ty, llvm_float_ty, llvm_i32_ty, llvm_i32_ty, llvm_i32_ty],
             [IntrNoMem]>;  // See int_amdgcn_v_interp_p1 for why this is
                            // IntrNoMem.
 
@@ -508,7 +570,14 @@ def int_amdgcn_ds_swizzle :
   GCCBuiltin<"__builtin_amdgcn_ds_swizzle">,
   Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i32_ty], [IntrNoMem, IntrConvergent]>;
 
-// llvm.amdgcn.lerp
+def int_amdgcn_ubfe : Intrinsic<[llvm_anyint_ty],
+  [LLVMMatchType<0>, llvm_i32_ty, llvm_i32_ty], [IntrNoMem]
+>;
+
+def int_amdgcn_sbfe : Intrinsic<[llvm_anyint_ty],
+  [LLVMMatchType<0>, llvm_i32_ty, llvm_i32_ty], [IntrNoMem]
+>;
+
 def int_amdgcn_lerp :
   GCCBuiltin<"__builtin_amdgcn_lerp">,
   Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], [IntrNoMem]>;
@@ -597,10 +666,48 @@ def int_amdgcn_s_memrealtime :
 
 // llvm.amdgcn.ds.permute <index> <src>
 def int_amdgcn_ds_permute :
+  GCCBuiltin<"__builtin_amdgcn_ds_permute">,
   Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i32_ty], [IntrNoMem, IntrConvergent]>;
 
 // llvm.amdgcn.ds.bpermute <index> <src>
 def int_amdgcn_ds_bpermute :
+  GCCBuiltin<"__builtin_amdgcn_ds_bpermute">,
   Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i32_ty], [IntrNoMem, IntrConvergent]>;
 
+
+//===----------------------------------------------------------------------===//
+// Special Intrinsics for backend internal use only. No frontend
+// should emit calls to these.
+// ===----------------------------------------------------------------------===//
+def int_amdgcn_if : Intrinsic<[llvm_i1_ty, llvm_i64_ty],
+  [llvm_i1_ty], [IntrConvergent]
+>;
+
+def int_amdgcn_else : Intrinsic<[llvm_i1_ty, llvm_i64_ty],
+  [llvm_i64_ty], [IntrConvergent]
+>;
+
+def int_amdgcn_break : Intrinsic<[llvm_i64_ty],
+  [llvm_i64_ty], [IntrNoMem, IntrConvergent]
+>;
+
+def int_amdgcn_if_break : Intrinsic<[llvm_i64_ty],
+  [llvm_i1_ty, llvm_i64_ty], [IntrNoMem, IntrConvergent]
+>;
+
+def int_amdgcn_else_break : Intrinsic<[llvm_i64_ty],
+  [llvm_i64_ty, llvm_i64_ty], [IntrNoMem, IntrConvergent]
+>;
+
+def int_amdgcn_loop : Intrinsic<[llvm_i1_ty],
+  [llvm_i64_ty], [IntrConvergent]
+>;
+
+def int_amdgcn_end_cf : Intrinsic<[], [llvm_i64_ty], [IntrConvergent]>;
+
+// Emit 2.5 ulp, no denormal division. Should only be inserted by
+// pass based on !fpmath metadata.
+def int_amdgcn_fdiv_fast : Intrinsic<
+  [llvm_float_ty], [llvm_float_ty, llvm_float_ty], [IntrNoMem]
+>;
 }

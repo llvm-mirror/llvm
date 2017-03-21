@@ -103,7 +103,7 @@ class MachineFrameInfo {
 
     /// If true, this stack slot is used to spill a value (could be deopt
     /// and/or GC related) over a statepoint. We know that the address of the
-    /// slot can't alias any LLVM IR value.  This is very similiar to a Spill
+    /// slot can't alias any LLVM IR value.  This is very similar to a Spill
     /// Slot, but is created by statepoint lowering is SelectionDAG, not the
     /// register allocator. 
     bool isStatepointSpillSlot;
@@ -148,8 +148,7 @@ class MachineFrameInfo {
   /// grouping overaligned allocas into a "secondary stack frame" and
   /// then only use a single alloca to allocate this frame and only a
   /// single virtual register to access it. Currently, without such an
-  /// optimization, each such alloca gets it's own dynamic
-  /// realignment.
+  /// optimization, each such alloca gets its own dynamic realignment.
   bool StackRealignable;
 
   /// Whether the function has the \c alignstack attribute.
@@ -560,8 +559,7 @@ public:
     return Objects[ObjectIdx+NumFixedObjects].isAliased;
   }
 
-  /// isImmutableObjectIndex - Returns true if the specified index corresponds
-  /// to an immutable object.
+  /// Returns true if the specified index corresponds to an immutable object.
   bool isImmutableObjectIndex(int ObjectIdx) const {
     // Tail calling functions can clobber their function arguments.
     if (HasTailCall)
@@ -569,6 +567,13 @@ public:
     assert(unsigned(ObjectIdx+NumFixedObjects) < Objects.size() &&
            "Invalid Object Idx!");
     return Objects[ObjectIdx+NumFixedObjects].isImmutable;
+  }
+
+  /// Marks the immutability of an object.
+  void setIsImmutableObjectIndex(int ObjectIdx, bool Immutable) {
+    assert(unsigned(ObjectIdx+NumFixedObjects) < Objects.size() &&
+           "Invalid Object Idx!");
+    Objects[ObjectIdx+NumFixedObjects].isImmutable = Immutable;
   }
 
   /// Returns true if the specified index corresponds to a spill slot.

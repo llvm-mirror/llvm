@@ -7,32 +7,32 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "MCTargetDesc/ARMMCTargetDesc.h"
 #include "MCTargetDesc/ARMFixupKinds.h"
-#include "llvm/ADT/Statistic.h"
-#include "llvm/ADT/StringSwitch.h"
+#include "MCTargetDesc/ARMMCTargetDesc.h"
 #include "llvm/MC/MCELFObjectWriter.h"
 #include "llvm/MC/MCExpr.h"
-#include "llvm/MC/MCSectionELF.h"
+#include "llvm/MC/MCFixup.h"
 #include "llvm/MC/MCValue.h"
-#include "llvm/Support/Debug.h"
+#include "llvm/Support/ELF.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
+#include <cstdint>
 
 using namespace llvm;
 
 namespace {
+
   class ARMELFObjectWriter : public MCELFObjectTargetWriter {
     enum { DefaultEABIVersion = 0x05000000U };
+
     unsigned GetRelocTypeInner(const MCValue &Target,
                                const MCFixup &Fixup,
                                bool IsPCRel) const;
 
-
   public:
     ARMELFObjectWriter(uint8_t OSABI);
 
-    ~ARMELFObjectWriter() override;
+    ~ARMELFObjectWriter() override = default;
 
     unsigned getRelocType(MCContext &Ctx, const MCValue &Target,
                           const MCFixup &Fixup, bool IsPCRel) const override;
@@ -40,14 +40,13 @@ namespace {
     bool needsRelocateWithSymbol(const MCSymbol &Sym,
                                  unsigned Type) const override;
   };
-}
+
+} // end anonymous namespace
 
 ARMELFObjectWriter::ARMELFObjectWriter(uint8_t OSABI)
   : MCELFObjectTargetWriter(/*Is64Bit*/ false, OSABI,
                             ELF::EM_ARM,
                             /*HasRelocationAddend*/ false) {}
-
-ARMELFObjectWriter::~ARMELFObjectWriter() {}
 
 bool ARMELFObjectWriter::needsRelocateWithSymbol(const MCSymbol &Sym,
                                                  unsigned Type) const {
@@ -270,10 +269,26 @@ unsigned ARMELFObjectWriter::GetRelocTypeInner(const MCValue &Target,
       }
       break;
     case ARM::fixup_t2_movt_hi16:
-      Type = ELF::R_ARM_THM_MOVT_ABS;
+      switch (Modifier) {
+      default: llvm_unreachable("Unsupported Modifier");
+      case MCSymbolRefExpr::VK_None:
+        Type = ELF::R_ARM_THM_MOVT_ABS;
+        break;
+      case MCSymbolRefExpr::VK_ARM_SBREL:
+        Type = ELF:: R_ARM_THM_MOVT_BREL;
+        break;
+      }
       break;
     case ARM::fixup_t2_movw_lo16:
-      Type = ELF::R_ARM_THM_MOVW_ABS_NC;
+      switch (Modifier) {
+      default: llvm_unreachable("Unsupported Modifier");
+      case MCSymbolRefExpr::VK_None:
+        Type = ELF::R_ARM_THM_MOVW_ABS_NC;
+        break;
+      case MCSymbolRefExpr::VK_ARM_SBREL:
+        Type = ELF:: R_ARM_THM_MOVW_BREL_NC;
+        break;
+      }
       break;
     }
   }

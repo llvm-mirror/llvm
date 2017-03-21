@@ -1,6 +1,6 @@
 ; RUN: opt -S -vectorize-num-stores-pred=1 -force-vector-width=1 -force-vector-interleave=2 -loop-vectorize -verify-loop-info -simplifycfg < %s | FileCheck %s --check-prefix=UNROLL
 ; RUN: opt -S -vectorize-num-stores-pred=1 -force-vector-width=1 -force-vector-interleave=2 -loop-vectorize -verify-loop-info < %s | FileCheck %s --check-prefix=UNROLL-NOSIMPLIFY
-; RUN: opt -S -vectorize-num-stores-pred=1 -force-vector-width=2 -force-vector-interleave=1 -loop-vectorize -enable-cond-stores-vec -verify-loop-info -simplifycfg < %s | FileCheck %s --check-prefix=VEC
+; RUN: opt -S -vectorize-num-stores-pred=1 -force-vector-width=2 -force-vector-interleave=1 -loop-vectorize -verify-loop-info -simplifycfg < %s | FileCheck %s --check-prefix=VEC
 
 target datalayout = "e-m:o-i64:64-f80:128-n8:16:32:64-S128"
 
@@ -12,7 +12,6 @@ entry:
 ; VEC-LABEL: test
 ; VEC:   %[[v0:.+]] = add i64 %index, 0
 ; VEC:   %[[v8:.+]] = icmp sgt <2 x i32> %{{.*}}, <i32 100, i32 100>
-; VEC:   %[[v9:.+]] = add nsw <2 x i32> %{{.*}}, <i32 20, i32 20>
 ; VEC:   %[[v10:.+]] = and <2 x i1> %[[v8]], <i1 true, i1 true>
 ; VEC:   %[[o1:.+]] = or <2 x i1> zeroinitializer, %[[v10]]
 ; VEC:   %[[v11:.+]] = extractelement <2 x i1> %[[o1]], i32 0
@@ -20,9 +19,10 @@ entry:
 ; VEC:   br i1 %[[v12]], label %[[cond:.+]], label %[[else:.+]]
 ;
 ; VEC: [[cond]]:
-; VEC:   %[[v13:.+]] = extractelement <2 x i32> %[[v9]], i32 0
+; VEC:   %[[v13:.+]] = extractelement <2 x i32> %wide.load, i32 0
+; VEC:   %[[v9a:.+]] = add nsw i32 %[[v13]], 20
 ; VEC:   %[[v2:.+]] = getelementptr inbounds i32, i32* %f, i64 %[[v0]]
-; VEC:   store i32 %[[v13]], i32* %[[v2]], align 4
+; VEC:   store i32 %[[v9a]], i32* %[[v2]], align 4
 ; VEC:   br label %[[else:.+]]
 ;
 ; VEC: [[else]]:
@@ -31,10 +31,11 @@ entry:
 ; VEC:   br i1 %[[v16]], label %[[cond2:.+]], label %[[else2:.+]]
 ;
 ; VEC: [[cond2]]:
-; VEC:   %[[v17:.+]] = extractelement <2 x i32> %[[v9]], i32 1
+; VEC:   %[[v17:.+]] = extractelement <2 x i32> %wide.load, i32 1
+; VEC:   %[[v9b:.+]] = add nsw i32 %[[v17]], 20
 ; VEC:   %[[v1:.+]] = add i64 %index, 1
 ; VEC:   %[[v4:.+]] = getelementptr inbounds i32, i32* %f, i64 %[[v1]]
-; VEC:   store i32 %[[v17]], i32* %[[v4]], align 4
+; VEC:   store i32 %[[v9b]], i32* %[[v4]], align 4
 ; VEC:   br label %[[else2:.+]]
 ;
 ; VEC: [[else2]]:
@@ -129,4 +130,57 @@ for.inc23:
 for.inc26:
   %iNewChunks.1.lcssa = phi i32 [ undef, %for.body9 ], [ %iNewChunks.2, %for.inc23 ]
   unreachable
+}
+
+; VEC-LABEL: @minimal_bit_widths(
+;
+; In the test below, it's more profitable for the expression feeding the
+; conditional store to remain scalar. Since we can only type-shrink vector
+; types, we shouldn't try to represent the expression in a smaller type.
+;
+; VEC: vector.body:
+; VEC:   %wide.load = load <2 x i8>, <2 x i8>* {{.*}}, align 1
+; VEC:   br i1 {{.*}}, label %[[IF0:.+]], label %[[CONT0:.+]]
+; VEC: [[IF0]]:
+; VEC:   %[[E0:.+]] = extractelement <2 x i8> %wide.load, i32 0
+; VEC:   %[[Z0:.+]] = zext i8 %[[E0]] to i32
+; VEC:   %[[T0:.+]] = trunc i32 %[[Z0]] to i8
+; VEC:   store i8 %[[T0]], i8* {{.*}}, align 1
+; VEC:   br label %[[CONT0]]
+; VEC: [[CONT0]]:
+; VEC:   br i1 {{.*}}, label %[[IF1:.+]], label %[[CONT1:.+]]
+; VEC: [[IF1]]:
+; VEC:   %[[E1:.+]] = extractelement <2 x i8> %wide.load, i32 1
+; VEC:   %[[Z1:.+]] = zext i8 %[[E1]] to i32
+; VEC:   %[[T1:.+]] = trunc i32 %[[Z1]] to i8
+; VEC:   store i8 %[[T1]], i8* {{.*}}, align 1
+; VEC:   br label %[[CONT1]]
+; VEC: [[CONT1]]:
+; VEC:   br i1 {{.*}}, label %middle.block, label %vector.body
+;
+define void @minimal_bit_widths(i1 %c) {
+entry:
+  br label %for.body
+
+for.body:
+  %tmp0 = phi i64 [ %tmp6, %for.inc ], [ 0, %entry ]
+  %tmp1 = phi i64 [ %tmp7, %for.inc ], [ undef, %entry ]
+  %tmp2 = getelementptr i8, i8* undef, i64 %tmp0
+  %tmp3 = load i8, i8* %tmp2, align 1
+  br i1 %c, label %if.then, label %for.inc
+
+if.then:
+  %tmp4 = zext i8 %tmp3 to i32
+  %tmp5 = trunc i32 %tmp4 to i8
+  store i8 %tmp5, i8* %tmp2, align 1
+  br label %for.inc
+
+for.inc:
+  %tmp6 = add nuw nsw i64 %tmp0, 1
+  %tmp7 = add i64 %tmp1, -1
+  %tmp8 = icmp eq i64 %tmp7, 0
+  br i1 %tmp8, label %for.end, label %for.body
+
+for.end:
+  ret void
 }

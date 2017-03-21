@@ -239,7 +239,7 @@ public:
     std::function<void(SDNode *, SDNode *)> Callback;
     DAGNodeDeletedListener(SelectionDAG &DAG,
                            std::function<void(SDNode *, SDNode *)> Callback)
-        : DAGUpdateListener(DAG), Callback(Callback) {}
+        : DAGUpdateListener(DAG), Callback(std::move(Callback)) {}
     void NodeDeleted(SDNode *N, SDNode *E) override { Callback(N, E); }
   };
 
@@ -480,6 +480,13 @@ public:
                       bool isTarget = false, bool isOpaque = false);
   SDValue getConstant(const APInt &Val, const SDLoc &DL, EVT VT,
                       bool isTarget = false, bool isOpaque = false);
+
+  SDValue getAllOnesConstant(const SDLoc &DL, EVT VT, bool IsTarget = false,
+                             bool IsOpaque = false) {
+    return getConstant(APInt::getAllOnesValue(VT.getScalarSizeInBits()), DL,
+                       VT, IsTarget, IsOpaque);
+  }
+
   SDValue getConstant(const ConstantInt &Val, const SDLoc &DL, EVT VT,
                       bool isTarget = false, bool isOpaque = false);
   SDValue getIntPtrConstant(uint64_t Val, const SDLoc &DL,
@@ -626,12 +633,6 @@ public:
 
   SDValue getCondCode(ISD::CondCode Cond);
 
-  /// Returns the ConvertRndSat Note: Avoid using this node because it may
-  /// disappear in the future and most targets don't support it.
-  SDValue getConvertRndSat(EVT VT, const SDLoc &dl, SDValue Val, SDValue DTy,
-                           SDValue STy, SDValue Rnd, SDValue Sat,
-                           ISD::CvtCode Code);
-
   /// Return an ISD::VECTOR_SHUFFLE node. The number of elements in VT,
   /// which must be a vector type, must match the number of mask elements
   /// NumElts. An integer mask element equal to -1 is treated as undefined.
@@ -738,6 +739,9 @@ public:
       Ops.push_back(InGlue);
     return getNode(ISD::CALLSEQ_END, DL, NodeTys, Ops);
   }
+
+  /// Return true if the result of this operation is always undefined.
+  bool isUndef(unsigned Opcode, ArrayRef<SDValue> Ops);
 
   /// Return an UNDEF node. UNDEF does not have a useful SDLoc.
   SDValue getUNDEF(EVT VT) {
@@ -964,6 +968,14 @@ public:
                           ArrayRef<SDValue> Ops, MachineMemOperand *MMO);
   SDValue getMaskedScatter(SDVTList VTs, EVT VT, const SDLoc &dl,
                            ArrayRef<SDValue> Ops, MachineMemOperand *MMO);
+
+  /// Return (create a new or find existing) a target-specific node.
+  /// TargetMemSDNode should be derived class from MemSDNode.
+  template <class TargetMemSDNode>
+  SDValue getTargetMemSDNode(SDVTList VTs, ArrayRef<SDValue> Ops,
+                             const SDLoc &dl, EVT MemVT,
+                             MachineMemOperand *MMO);
+
   /// Construct a node to track a Value* through the backend.
   SDValue getSrcValue(const Value *v);
 
@@ -1180,12 +1192,12 @@ public:
   static const fltSemantics &EVTToAPFloatSemantics(EVT VT) {
     switch (VT.getScalarType().getSimpleVT().SimpleTy) {
     default: llvm_unreachable("Unknown FP format");
-    case MVT::f16:     return APFloat::IEEEhalf;
-    case MVT::f32:     return APFloat::IEEEsingle;
-    case MVT::f64:     return APFloat::IEEEdouble;
-    case MVT::f80:     return APFloat::x87DoubleExtended;
-    case MVT::f128:    return APFloat::IEEEquad;
-    case MVT::ppcf128: return APFloat::PPCDoubleDouble;
+    case MVT::f16:     return APFloat::IEEEhalf();
+    case MVT::f32:     return APFloat::IEEEsingle();
+    case MVT::f64:     return APFloat::IEEEdouble();
+    case MVT::f80:     return APFloat::x87DoubleExtended();
+    case MVT::f128:    return APFloat::IEEEquad();
+    case MVT::ppcf128: return APFloat::PPCDoubleDouble();
     }
   }
 
@@ -1271,6 +1283,19 @@ public:
   /// TargetLowering class to allow target nodes to be understood.
   void computeKnownBits(SDValue Op, APInt &KnownZero, APInt &KnownOne,
                         const APInt &DemandedElts, unsigned Depth = 0) const;
+
+  /// Used to represent the possible overflow behavior of an operation.
+  /// Never: the operation cannot overflow.
+  /// Always: the operation will always overflow.
+  /// Sometime: the operation may or may not overflow.
+  enum OverflowKind {
+    OFK_Never,
+    OFK_Sometime,
+    OFK_Always,
+  };
+
+  /// Determine if the result of the addition of 2 node can overflow.
+  OverflowKind computeOverflowKind(SDValue N0, SDValue N1) const;
 
   /// Test if the given value is known to have exactly one bit set. This differs
   /// from computeKnownBits in that it doesn't necessarily determine which bit
@@ -1362,6 +1387,16 @@ public:
   /// Test whether the given value is a constant int or similar node.
   SDNode *isConstantIntBuildVectorOrConstantInt(SDValue N);
 
+  /// Test whether the given value is a constant FP or similar node.
+  SDNode *isConstantFPBuildVectorOrConstantFP(SDValue N);
+
+  /// \returns true if \p N is any kind of constant or build_vector of
+  /// constants, int or float. If a vector, it may not necessarily be a splat.
+  inline bool isConstantValueOfAnyType(SDValue N) {
+    return isConstantIntBuildVectorOrConstantInt(N) ||
+           isConstantFPBuildVectorOrConstantFP(N);
+  }
+
 private:
   void InsertNode(SDNode *N);
   bool RemoveNodeFromCSEMaps(SDNode *N);
@@ -1371,7 +1406,7 @@ private:
                                void *&InsertPos);
   SDNode *FindModifiedNodeSlot(SDNode *N, ArrayRef<SDValue> Ops,
                                void *&InsertPos);
-  SDNode *UpdadeSDLocOnMergedSDNode(SDNode *N, const SDLoc &loc);
+  SDNode *UpdateSDLocOnMergeSDNode(SDNode *N, const SDLoc &loc);
 
   void DeleteNodeNotInCSEMaps(SDNode *N);
   void DeallocateNode(SDNode *N);
@@ -1417,6 +1452,42 @@ template <> struct GraphTraits<SelectionDAG*> : public GraphTraits<SDNode*> {
     return nodes_iterator(G->allnodes_end());
   }
 };
+
+template <class TargetMemSDNode>
+SDValue SelectionDAG::getTargetMemSDNode(SDVTList VTs,
+                                         ArrayRef<SDValue> Ops,
+                                         const SDLoc &dl, EVT MemVT,
+                                         MachineMemOperand *MMO) {
+
+  /// Compose node ID and try to find an existing node.
+  FoldingSetNodeID ID;
+  unsigned Opcode =
+    TargetMemSDNode(dl.getIROrder(), DebugLoc(), VTs, MemVT, MMO).getOpcode();
+  ID.AddInteger(Opcode);
+  ID.AddPointer(VTs.VTs);
+  for (auto& Op : Ops) {
+    ID.AddPointer(Op.getNode());
+    ID.AddInteger(Op.getResNo());
+  }
+  ID.AddInteger(MemVT.getRawBits());
+  ID.AddInteger(MMO->getPointerInfo().getAddrSpace());
+  ID.AddInteger(getSyntheticNodeSubclassData<TargetMemSDNode>(
+    dl.getIROrder(), VTs, MemVT, MMO));
+
+  void *IP = nullptr;
+  if (SDNode *E = FindNodeOrInsertPos(ID, dl, IP)) {
+    cast<TargetMemSDNode>(E)->refineAlignment(MMO);
+    return SDValue(E, 0);
+  }
+
+  /// Existing node was not found. Create a new one.
+  auto *N = newSDNode<TargetMemSDNode>(dl.getIROrder(), dl.getDebugLoc(), VTs,
+                                       MemVT, MMO);
+  createOperands(N, Ops);
+  CSEMap.InsertNode(N, IP);
+  InsertNode(N);
+  return SDValue(N, 0);
+}
 
 }  // end namespace llvm
 

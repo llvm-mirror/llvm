@@ -10,6 +10,8 @@ import threading
 
 def to_bytes(str):
     # Encode to UTF-8 to get binary data.
+    if isinstance(str, bytes):
+        return str
     return str.encode('utf-8')
 
 def to_string(bytes):
@@ -200,6 +202,8 @@ def executeCommand(command, cwd=None, env=None, input=None, timeout=0):
         If the timeout is hit an ``ExecuteCommandTimeoutException``
         is raised.
     """
+    if input is not None:
+        input = to_bytes(input)
     p = subprocess.Popen(command, cwd=cwd,
                          stdin=subprocess.PIPE,
                          stdout=subprocess.PIPE,
@@ -251,7 +255,7 @@ def usePlatformSdkOnDarwin(config, lit_config):
     # default system root path.
     if 'darwin' in config.target_triple:
         try:
-            cmd = subprocess.Popen(['xcrun', '--show-sdk-path'],
+            cmd = subprocess.Popen(['xcrun', '--show-sdk-path', '--sdk', 'macosx'],
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             out, err = cmd.communicate()
             out = out.strip()

@@ -1,4 +1,4 @@
-//===-- DWARFDebugFrame.h - Parsing of .debug_frame -------------*- C++ -*-===//
+//===- DWARFDebugFrame.h - Parsing of .debug_frame ------------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,7 +7,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/DebugInfo/DWARF/DWARFDebugFrame.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/Optional.h"
@@ -15,6 +14,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/DebugInfo/DWARF/DWARFDebugFrame.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/DataExtractor.h"
@@ -37,11 +37,11 @@ using namespace dwarf;
 class llvm::FrameEntry {
 public:
   enum FrameKind {FK_CIE, FK_FDE};
+
   FrameEntry(FrameKind K, uint64_t Offset, uint64_t Length)
       : Kind(K), Offset(Offset), Length(Length) {}
 
-  virtual ~FrameEntry() {
-  }
+  virtual ~FrameEntry() = default;
 
   FrameKind getKind() const { return Kind; }
   virtual uint64_t getOffset() const { return Offset; }
@@ -220,7 +220,7 @@ public:
         FDEPointerEncoding(FDEPointerEncoding),
         LSDAPointerEncoding(LSDAPointerEncoding) {}
 
-  ~CIE() override {}
+  ~CIE() override = default;
 
   StringRef getAugmentationString() const { return Augmentation; }
   uint64_t getCodeAlignmentFactor() const { return CodeAlignmentFactor; }
@@ -294,7 +294,7 @@ public:
         InitialLocation(InitialLocation), AddressRange(AddressRange),
         LinkedCIE(Cie) {}
 
-  ~FDE() override {}
+  ~FDE() override = default;
 
   CIE *getLinkedCIE() const { return LinkedCIE; }
 
@@ -465,11 +465,9 @@ void FrameEntry::dumpInstructions(raw_ostream &OS) const {
   }
 }
 
-DWARFDebugFrame::DWARFDebugFrame(bool IsEH) : IsEH(IsEH) {
-}
+DWARFDebugFrame::DWARFDebugFrame(bool IsEH) : IsEH(IsEH) {}
 
-DWARFDebugFrame::~DWARFDebugFrame() {
-}
+DWARFDebugFrame::~DWARFDebugFrame() = default;
 
 static void LLVM_ATTRIBUTE_UNUSED dumpDataAux(DataExtractor Data,
                                               uint32_t Offset, int Length) {
@@ -486,17 +484,17 @@ static unsigned getSizeForEncoding(const DataExtractor &Data,
   unsigned format = symbolEncoding & 0x0f;
   switch (format) {
     default: llvm_unreachable("Unknown Encoding");
-    case dwarf::DW_EH_PE_absptr:
-    case dwarf::DW_EH_PE_signed:
+    case DW_EH_PE_absptr:
+    case DW_EH_PE_signed:
       return Data.getAddressSize();
-    case dwarf::DW_EH_PE_udata2:
-    case dwarf::DW_EH_PE_sdata2:
+    case DW_EH_PE_udata2:
+    case DW_EH_PE_sdata2:
       return 2;
-    case dwarf::DW_EH_PE_udata4:
-    case dwarf::DW_EH_PE_sdata4:
+    case DW_EH_PE_udata4:
+    case DW_EH_PE_sdata4:
       return 4;
-    case dwarf::DW_EH_PE_udata8:
-    case dwarf::DW_EH_PE_sdata8:
+    case DW_EH_PE_udata8:
+    case DW_EH_PE_sdata8:
       return 8;
   }
 }
@@ -620,12 +618,14 @@ void DWARFDebugFrame::parse(DataExtractor Data) {
         }
       }
 
-      auto Cie = make_unique<CIE>(StartOffset, Length, Version,
-                                  AugmentationString, AddressSize,
-                                  SegmentDescriptorSize, CodeAlignmentFactor,
-                                  DataAlignmentFactor, ReturnAddressRegister,
-                                  AugmentationData, FDEPointerEncoding,
-                                  LSDAPointerEncoding);
+      auto Cie = llvm::make_unique<CIE>(StartOffset, Length, Version,
+                                        AugmentationString, AddressSize,
+                                        SegmentDescriptorSize,
+                                        CodeAlignmentFactor,
+                                        DataAlignmentFactor,
+                                        ReturnAddressRegister,
+                                        AugmentationData, FDEPointerEncoding,
+                                        LSDAPointerEncoding);
       CIEs[StartOffset] = Cie.get();
       Entries.emplace_back(std::move(Cie));
     } else {

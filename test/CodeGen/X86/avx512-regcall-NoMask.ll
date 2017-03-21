@@ -246,6 +246,44 @@ define x86_regcallcc double @test_CallargRetDouble(double %a)  {
   ret double %d
 }
 
+; X32: test_argRetf80
+; X32-NOT: fldt
+; X32: fadd	%st(0), %st(0)
+; X32: retl
+
+; WIN64: test_argRetf80
+; WIN64-NOT: fldt
+; WIN64: fadd	%st(0), %st(0)
+; WIN64: retq
+
+; Test regcall when receiving/returning long double
+define x86_regcallcc x86_fp80 @test_argRetf80(x86_fp80 %a0) nounwind {
+  %r0 = fadd x86_fp80 %a0, %a0
+  ret x86_fp80 %r0
+}
+
+; X32: test_CallargRetf80
+; X32-NOT: fldt
+; X32: fadd	%st({{[0-7]}}), %st({{[0-7]}})
+; X32: call{{.*}}   {{.*}}test_argRetf80
+; X32: fadd{{.*}}	%st({{[0-7]}})
+; X32: retl
+
+; WIN64: test_CallargRetf80
+; WIN64-NOT: fldt
+; WIN64: fadd	%st({{[0-7]}}), %st({{[0-7]}})
+; WIN64: call{{.*}}   {{.*}}test_argRetf80
+; WIN64: fadd{{.*}}	%st({{[0-7]}})
+; WIN64: retq
+
+; Test regcall when passing/retrieving long double
+define x86_regcallcc x86_fp80 @test_CallargRetf80(x86_fp80 %a)  {
+  %b = fadd x86_fp80 %a, %a
+  %c = call x86_regcallcc x86_fp80 @test_argRetf80(x86_fp80 %b)
+  %d = fadd x86_fp80 %c, %c
+  ret x86_fp80 %d
+}
+
 ; X32-LABEL:  test_argRetPointer:
 ; X32:        incl %eax
 ; X32:        ret{{.*}}
@@ -303,13 +341,13 @@ define x86_regcallcc <4 x i32> @test_argRet128Vector(<4 x i32> %a, <4 x i32> %b)
 ; X32-LABEL:  test_CallargRet128Vector:
 ; X32:        vmov{{.*}}  %xmm0, {{%xmm([0-7])}}
 ; X32:        call{{.*}}   {{.*}}test_argRet128Vector
-; X32:        vpblend{{.*}}  {{%xmm([0-7])}}, %xmm0, %xmm0
+; X32:        vmovdqa{{.*}}  {{%xmm([0-7])}}, %xmm0
 ; X32:        ret{{.*}}
 
 ; WIN64-LABEL:  test_CallargRet128Vector:
 ; WIN64:        vmov{{.*}}  %xmm0, {{%xmm([0-9]+)}}
 ; WIN64:        call{{.*}}   {{.*}}test_argRet128Vector
-; WIN64:        vpblend{{.*}}  {{%xmm([0-9]+)}}, %xmm0, %xmm0
+; WIN64:        vmovdqa{{.*}}  {{%xmm([0-9]+)}}, %xmm0
 ; WIN64:        ret{{.*}}
 
 ; Test regcall when passing/retrieving 128 bit vector
@@ -336,13 +374,13 @@ define x86_regcallcc <8 x i32> @test_argRet256Vector(<8 x i32> %a, <8 x i32> %b)
 ; X32-LABEL:  test_CallargRet256Vector:
 ; X32:        vmov{{.*}}  %ymm0, %ymm1
 ; X32:        call{{.*}}   {{.*}}test_argRet256Vector
-; X32:        vpblend{{.*}}  %ymm1, %ymm0, %ymm0
+; X32:        vmovdqa{{.*}}  %ymm1, %ymm0
 ; X32:        ret{{.*}}
 
 ; WIN64-LABEL:  test_CallargRet256Vector:
 ; WIN64:        vmov{{.*}}  %ymm0, %ymm1
 ; WIN64:        call{{.*}}   {{.*}}test_argRet256Vector
-; WIN64:        vpblend{{.*}}  %ymm1, %ymm0, %ymm0
+; WIN64:        vmovdqa{{.*}}  %ymm1, %ymm0
 ; WIN64:        ret{{.*}}
 
 ; Test regcall when passing/retrieving 256 bit vector
@@ -369,13 +407,13 @@ define x86_regcallcc <16 x i32> @test_argRet512Vector(<16 x i32> %a, <16 x i32> 
 ; X32-LABEL:  test_CallargRet512Vector:
 ; X32:        vmov{{.*}}  %zmm0, %zmm1
 ; X32:        call{{.*}}   {{.*}}test_argRet512Vector
-; X32:        vpblend{{.*}}  %zmm1, %zmm0, %zmm0
+; X32:        movdqa{{.*}}  %zmm1, %zmm0
 ; X32:        ret{{.*}}
 
 ; WIN64-LABEL:  test_CallargRet512Vector:
 ; WIN64:        vmov{{.*}}  %zmm0, %zmm1
 ; WIN64:        call{{.*}}   {{.*}}test_argRet512Vector
-; WIN64:        vpblend{{.*}}  %zmm1, %zmm0, %zmm0
+; WIN64:        vmovdqa{{.*}}  %zmm1, %zmm0
 ; WIN64:        ret{{.*}}
 
 ; Test regcall when passing/retrieving 512 bit vector
@@ -431,30 +469,25 @@ define x86_regcallcc <32 x float> @testf32_inp(<32 x float> %a, <32 x float> %b,
   ret <32 x float> %x4
 }
 
-; X32-LABEL: pushl {{%e(si|di|bx|bp)}}
-; X32: pushl {{%e(si|di|bx|bp)}}
-; X32: pushl {{%e(si|di|bx|bp)}}
-; X32: pushl {{%e(si|di|bx|bp)}}
-; X32: popl {{%e(si|di|bx|bp)}}
-; X32: popl {{%e(si|di|bx|bp)}}
-; X32: popl {{%e(si|di|bx|bp)}}
-; X32: popl {{%e(si|di|bx|bp)}}
+; X32-LABEL: testi32_inp
+; X32: pushl {{%e(bx|bp)}}
+; X32: pushl {{%e(bx|bp)}}
+; X32: popl {{%e(bx|bp)}}
+; X32: popl {{%e(bx|bp)}}
 ; X32: retl
 
-; WIN64-LABEL: pushq	{{%r(bp|bx|1[0-5])}}
+; WIN64-LABEL: testi32_inp
 ; WIN64: pushq	{{%r(bp|bx|1[0-5])}}
 ; WIN64: pushq	{{%r(bp|bx|1[0-5])}}
 ; WIN64: pushq	{{%r(bp|bx|1[0-5])}}
-; WIN64: popq	{{%r(bp|bx|1[0-5])}}
 ; WIN64: popq	{{%r(bp|bx|1[0-5])}}
 ; WIN64: popq	{{%r(bp|bx|1[0-5])}}
 ; WIN64: popq	{{%r(bp|bx|1[0-5])}}
 ; WIN64: retq
 
-; LINUXOSX64-LABEL: pushq	{{%r(bp|bx|1[2-5])}}
+; LINUXOSX64-LABEL: testi32_inp
 ; LINUXOSX64: pushq	{{%r(bp|bx|1[2-5])}}
 ; LINUXOSX64: pushq	{{%r(bp|bx|1[2-5])}}
-; LINUXOSX64: popq	{{%r(bp|bx|1[2-5])}}
 ; LINUXOSX64: popq	{{%r(bp|bx|1[2-5])}}
 ; LINUXOSX64: popq	{{%r(bp|bx|1[2-5])}}
 ; LINUXOSX64: retq

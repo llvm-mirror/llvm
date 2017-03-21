@@ -164,6 +164,43 @@
 	cdgbra	%f4, 5, %r6, 7
 	cdgbra	%f15, 0, %r0, 0
 
+#CHECK: brcth	%r0, .[[LAB:L.*]]-4294967296 # encoding: [0xcc,0x06,A,A,A,A]
+#CHECK:  fixup A - offset: 2, value: (.[[LAB]]-4294967296)+2, kind: FK_390_PC32DBL
+	brcth	%r0, -0x100000000
+#CHECK: brcth	%r0, .[[LAB:L.*]]-2	# encoding: [0xcc,0x06,A,A,A,A]
+#CHECK:  fixup A - offset: 2, value: (.[[LAB]]-2)+2, kind: FK_390_PC32DBL
+	brcth	%r0, -2
+#CHECK: brcth	%r0, .[[LAB:L.*]]	# encoding: [0xcc,0x06,A,A,A,A]
+#CHECK:  fixup A - offset: 2, value: .[[LAB]]+2, kind: FK_390_PC32DBL
+	brcth	%r0, 0
+#CHECK: brcth	%r0, .[[LAB:L.*]]+4294967294 # encoding: [0xcc,0x06,A,A,A,A]
+#CHECK:  fixup A - offset: 2, value: (.[[LAB]]+4294967294)+2, kind: FK_390_PC32DBL
+	brcth	%r0, 0xfffffffe
+
+#CHECK: brcth	%r0, foo                # encoding: [0xcc,0x06,A,A,A,A]
+# fixup A - offset: 2, value: foo+2, kind: FK_390_PC32DBL
+#CHECK: brcth	%r15, foo               # encoding: [0xcc,0xf6,A,A,A,A]
+# fixup A - offset: 2, value: foo+2, kind: FK_390_PC32DBL
+
+	brcth	%r0,foo
+	brcth	%r15,foo
+
+#CHECK: brcth	%r3, bar+100            # encoding: [0xcc,0x36,A,A,A,A]
+# fixup A - offset: 2, value: (bar+100)+2, kind: FK_390_PC32DBL
+#CHECK: brcth	%r4, bar+100            # encoding: [0xcc,0x46,A,A,A,A]
+# fixup A - offset: 2, value: (bar+100)+2, kind: FK_390_PC32DBL
+
+	brcth	%r3,bar+100
+	brcth	%r4,bar+100
+
+#CHECK: brcth	%r7, frob@PLT           # encoding: [0xcc,0x76,A,A,A,A]
+# fixup A - offset: 2, value: frob@PLT+2, kind: FK_390_PC32DBL
+#CHECK: brcth	%r8, frob@PLT           # encoding: [0xcc,0x86,A,A,A,A]
+# fixup A - offset: 2, value: frob@PLT+2, kind: FK_390_PC32DBL
+
+	brcth	%r7,frob@PLT
+	brcth	%r8,frob@PLT
+
 #CHECK: cdlfbr	%f0, 0, %r0, 0          # encoding: [0xb3,0x91,0x00,0x00]
 #CHECK: cdlfbr	%f0, 0, %r0, 15         # encoding: [0xb3,0x91,0x0f,0x00]
 #CHECK: cdlfbr	%f0, 0, %r15, 0         # encoding: [0xb3,0x91,0x00,0x0f]
@@ -1190,6 +1227,34 @@
 	locrnp  %r1,%r3
 	locrno  %r1,%r3
 
+#CHECK: lpd	%r0, 0, 0               # encoding: [0xc8,0x04,0x00,0x00,0x00,0x00]
+#CHECK: lpd	%r2, 0(%r1), 0(%r15)    # encoding: [0xc8,0x24,0x10,0x00,0xf0,0x00]
+#CHECK: lpd	%r2, 1(%r1), 0(%r15)    # encoding: [0xc8,0x24,0x10,0x01,0xf0,0x00]
+#CHECK: lpd	%r2, 4095(%r1), 0(%r15) # encoding: [0xc8,0x24,0x1f,0xff,0xf0,0x00]
+#CHECK: lpd	%r2, 0(%r1), 1(%r15)    # encoding: [0xc8,0x24,0x10,0x00,0xf0,0x01]
+#CHECK: lpd	%r2, 0(%r1), 4095(%r15) # encoding: [0xc8,0x24,0x10,0x00,0xff,0xff]
+
+	lpd	%r0, 0, 0
+	lpd	%r2, 0(%r1), 0(%r15)
+	lpd	%r2, 1(%r1), 0(%r15)
+	lpd	%r2, 4095(%r1), 0(%r15)
+	lpd	%r2, 0(%r1), 1(%r15)
+	lpd	%r2, 0(%r1), 4095(%r15)
+
+#CHECK: lpdg	%r0, 0, 0               # encoding: [0xc8,0x05,0x00,0x00,0x00,0x00]
+#CHECK: lpdg	%r2, 0(%r1), 0(%r15)    # encoding: [0xc8,0x25,0x10,0x00,0xf0,0x00]
+#CHECK: lpdg	%r2, 1(%r1), 0(%r15)    # encoding: [0xc8,0x25,0x10,0x01,0xf0,0x00]
+#CHECK: lpdg	%r2, 4095(%r1), 0(%r15) # encoding: [0xc8,0x25,0x1f,0xff,0xf0,0x00]
+#CHECK: lpdg	%r2, 0(%r1), 1(%r15)    # encoding: [0xc8,0x25,0x10,0x00,0xf0,0x01]
+#CHECK: lpdg	%r2, 0(%r1), 4095(%r15) # encoding: [0xc8,0x25,0x10,0x00,0xff,0xff]
+
+	lpdg	%r0, 0, 0
+	lpdg	%r2, 0(%r1), 0(%r15)
+	lpdg	%r2, 1(%r1), 0(%r15)
+	lpdg	%r2, 4095(%r1), 0(%r15)
+	lpdg	%r2, 0(%r1), 1(%r15)
+	lpdg	%r2, 0(%r1), 4095(%r15)
+
 #CHECK: ngrk	%r0, %r0, %r0           # encoding: [0xb9,0xe4,0x00,0x00]
 #CHECK: ngrk	%r0, %r0, %r15          # encoding: [0xb9,0xe4,0xf0,0x00]
 #CHECK: ngrk	%r0, %r15, %r0          # encoding: [0xb9,0xe4,0x00,0x0f]
@@ -1431,6 +1496,20 @@
 	srlk	%r0,%r0,0(%r15)
 	srlk	%r0,%r0,524287(%r1)
 	srlk	%r0,%r0,524287(%r15)
+
+#CHECK: srnmb	0                       # encoding: [0xb2,0xb8,0x00,0x00]
+#CHECK: srnmb	0(%r1)                  # encoding: [0xb2,0xb8,0x10,0x00]
+#CHECK: srnmb	0(%r15)                 # encoding: [0xb2,0xb8,0xf0,0x00]
+#CHECK: srnmb	4095                    # encoding: [0xb2,0xb8,0x0f,0xff]
+#CHECK: srnmb	4095(%r1)               # encoding: [0xb2,0xb8,0x1f,0xff]
+#CHECK: srnmb	4095(%r15)              # encoding: [0xb2,0xb8,0xff,0xff]
+
+	srnmb	0
+	srnmb	0(%r1)
+	srnmb	0(%r15)
+	srnmb	4095
+	srnmb	4095(%r1)
+	srnmb	4095(%r15)
 
 #CHECK: stch	%r0, -524288            # encoding: [0xe3,0x00,0x00,0x00,0x80,0xc3]
 #CHECK: stch	%r0, -1                 # encoding: [0xe3,0x00,0x0f,0xff,0xff,0xc3]

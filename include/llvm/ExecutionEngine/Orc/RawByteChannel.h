@@ -47,9 +47,11 @@ public:
   /// Locks the channel for writing.
   template <typename FunctionIdT, typename SequenceIdT>
   Error startSendMessage(const FunctionIdT &FnId, const SequenceIdT &SeqNo) {
-    if (auto Err = serializeSeq(*this, FnId, SeqNo))
-      return Err;
     writeLock.lock();
+    if (auto Err = serializeSeq(*this, FnId, SeqNo)) {
+      writeLock.unlock();
+      return Err;
+    }
     return Error::success();
   }
 
@@ -65,7 +67,11 @@ public:
   template <typename FunctionIdT, typename SequenceNumberT>
   Error startReceiveMessage(FunctionIdT &FnId, SequenceNumberT &SeqNo) {
     readLock.lock();
-    return deserializeSeq(*this, FnId, SeqNo);
+    if (auto Err = deserializeSeq(*this, FnId, SeqNo)) {
+      readLock.unlock();
+      return Err;
+    }
+    return Error::success();
   }
 
   /// Notify the channel that we're ending a message receive.
@@ -86,18 +92,15 @@ private:
 };
 
 template <typename ChannelT, typename T>
-class SerializationTraits<ChannelT, T, T,
-                          typename std::enable_if<
-                            std::is_base_of<RawByteChannel, ChannelT>::value &&
-                            (std::is_same<T, uint8_t>::value ||
-                             std::is_same<T, int8_t>::value ||
-                             std::is_same<T, uint16_t>::value ||
-                             std::is_same<T, int16_t>::value ||
-                             std::is_same<T, uint32_t>::value ||
-                             std::is_same<T, int32_t>::value ||
-                             std::is_same<T, uint64_t>::value ||
-                             std::is_same<T, int64_t>::value ||
-                             std::is_same<T, char>::value)>::type> {
+class SerializationTraits<
+    ChannelT, T, T,
+    typename std::enable_if<
+        std::is_base_of<RawByteChannel, ChannelT>::value &&
+        (std::is_same<T, uint8_t>::value || std::is_same<T, int8_t>::value ||
+         std::is_same<T, uint16_t>::value || std::is_same<T, int16_t>::value ||
+         std::is_same<T, uint32_t>::value || std::is_same<T, int32_t>::value ||
+         std::is_same<T, uint64_t>::value || std::is_same<T, int64_t>::value ||
+         std::is_same<T, char>::value)>::type> {
 public:
   static Error serialize(ChannelT &C, T V) {
     support::endian::byte_swap<T, support::big>(V);
@@ -114,9 +117,8 @@ public:
 
 template <typename ChannelT>
 class SerializationTraits<ChannelT, bool, bool,
-                          typename std::enable_if<
-                            std::is_base_of<RawByteChannel, ChannelT>::value>::
-                              type> {
+                          typename std::enable_if<std::is_base_of<
+                              RawByteChannel, ChannelT>::value>::type> {
 public:
   static Error serialize(ChannelT &C, bool V) {
     return C.appendBytes(reinterpret_cast<const char *>(&V), 1);
@@ -129,9 +131,8 @@ public:
 
 template <typename ChannelT>
 class SerializationTraits<ChannelT, std::string, StringRef,
-                          typename std::enable_if<
-                            std::is_base_of<RawByteChannel, ChannelT>::value>::
-                              type> {
+                          typename std::enable_if<std::is_base_of<
+                              RawByteChannel, ChannelT>::value>::type> {
 public:
   /// RPC channel serialization for std::strings.
   static Error serialize(RawByteChannel &C, StringRef S) {
@@ -141,28 +142,28 @@ public:
   }
 };
 
-template <typename ChannelT>
-class SerializationTraits<ChannelT, std::string, const char*,
+template <typename ChannelT, typename T>
+class SerializationTraits<ChannelT, std::string, T,
                           typename std::enable_if<
-                            std::is_base_of<RawByteChannel, ChannelT>::value>::
-                              type> {
+                            std::is_base_of<RawByteChannel, ChannelT>::value &&
+                            (std::is_same<T, const char*>::value ||
+                             std::is_same<T, char*>::value)>::type> {
 public:
   static Error serialize(RawByteChannel &C, const char *S) {
-    return SerializationTraits<ChannelT, std::string, StringRef>::
-             serialize(C, S);
+    return SerializationTraits<ChannelT, std::string, StringRef>::serialize(C,
+                                                                            S);
   }
 };
 
 template <typename ChannelT>
 class SerializationTraits<ChannelT, std::string, std::string,
-                          typename std::enable_if<
-                            std::is_base_of<RawByteChannel, ChannelT>::value>::
-                              type> {
+                          typename std::enable_if<std::is_base_of<
+                              RawByteChannel, ChannelT>::value>::type> {
 public:
   /// RPC channel serialization for std::strings.
   static Error serialize(RawByteChannel &C, const std::string &S) {
-    return SerializationTraits<ChannelT, std::string, StringRef>::
-             serialize(C, S);
+    return SerializationTraits<ChannelT, std::string, StringRef>::serialize(C,
+                                                                            S);
   }
 
   /// RPC channel deserialization for std::strings.

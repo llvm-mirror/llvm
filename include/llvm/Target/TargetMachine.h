@@ -20,36 +20,27 @@
 #include "llvm/Pass.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Target/TargetOptions.h"
-#include <cassert>
 #include <string>
 
 namespace llvm {
 
-class InstrItineraryData;
 class GlobalValue;
-class Mangler;
 class MachineFunctionInitializer;
-class MachineModuleInfo;
+class Mangler;
 class MCAsmInfo;
 class MCContext;
 class MCInstrInfo;
 class MCRegisterInfo;
 class MCSubtargetInfo;
 class MCSymbol;
-class Target;
-class TargetLibraryInfo;
-class TargetFrameLowering;
-class TargetIRAnalysis;
-class TargetIntrinsicInfo;
-class TargetLowering;
-class TargetPassConfig;
-class TargetRegisterInfo;
-class TargetSubtargetInfo;
-class TargetTransformInfo;
-class formatted_raw_ostream;
-class raw_ostream;
 class raw_pwrite_stream;
+class PassManagerBuilder;
+class Target;
+class TargetIntrinsicInfo;
+class TargetIRAnalysis;
 class TargetLoweringObjectFile;
+class TargetPassConfig;
+class TargetSubtargetInfo;
 
 // The old pass manager infrastructure is hidden in a legacy namespace now.
 namespace legacy {
@@ -64,8 +55,6 @@ using legacy::PassManagerBase;
 /// interface.
 ///
 class TargetMachine {
-  TargetMachine(const TargetMachine &) = delete;
-  void operator=(const TargetMachine &) = delete;
 protected: // Can only create subclasses.
   TargetMachine(const Target &T, StringRef DataLayoutString,
                 const Triple &TargetTriple, StringRef CPU, StringRef FS,
@@ -103,8 +92,11 @@ protected: // Can only create subclasses.
   unsigned O0WantsFastISel : 1;
 
 public:
+  const TargetOptions DefaultOptions;
   mutable TargetOptions Options;
 
+  TargetMachine(const TargetMachine &) = delete;
+  void operator=(const TargetMachine &) = delete;
   virtual ~TargetMachine();
 
   const Target &getTarget() const { return TheTarget; }
@@ -214,10 +206,9 @@ public:
   /// uses this to answer queries about the IR.
   virtual TargetIRAnalysis getTargetIRAnalysis();
 
-  /// Add target-specific function passes that should be run as early as
-  /// possible in the optimization pipeline.  Most TargetMachines have no such
-  /// passes.
-  virtual void addEarlyAsPossiblePasses(PassManagerBase &) {}
+  /// Allow the target to modify the pass manager, e.g. by calling
+  /// PassManagerBuilder::addExtension.
+  virtual void adjustPassManager(PassManagerBuilder &) {}
 
   /// These enums are meant to be passed into addPassesToEmitFile to indicate
   /// what type of file to emit, and returned by it to indicate what type of
@@ -261,7 +252,7 @@ public:
 
   void getNameWithPrefix(SmallVectorImpl<char> &Name, const GlobalValue *GV,
                          Mangler &Mang, bool MayAlwaysUsePrivate = false) const;
-  MCSymbol *getSymbol(const GlobalValue *GV, Mangler &Mang) const;
+  MCSymbol *getSymbol(const GlobalValue *GV) const;
 
   /// True if the target uses physical regs at Prolog/Epilog insertion
   /// time. If true (most machines), all vregs must be allocated before
@@ -277,8 +268,8 @@ class LLVMTargetMachine : public TargetMachine {
 protected: // Can only create subclasses.
   LLVMTargetMachine(const Target &T, StringRef DataLayoutString,
                     const Triple &TargetTriple, StringRef CPU, StringRef FS,
-                    TargetOptions Options, Reloc::Model RM, CodeModel::Model CM,
-                    CodeGenOpt::Level OL);
+                    const TargetOptions &Options, Reloc::Model RM,
+                    CodeModel::Model CM, CodeGenOpt::Level OL);
 
   void initAsmInfo();
 public:
@@ -310,6 +301,6 @@ public:
                          bool DisableVerify = true) override;
 };
 
-} // End llvm namespace
+} // end namespace llvm
 
-#endif
+#endif // LLVM_TARGET_TARGETMACHINE_H

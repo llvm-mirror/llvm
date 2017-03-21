@@ -41,7 +41,7 @@ STATISTIC(NumSDivs,     "Number of sdiv converted to udiv");
 STATISTIC(NumAShrs,     "Number of ashr converted to lshr");
 STATISTIC(NumSRems,     "Number of srem converted to urem");
 
-static cl::opt<bool> DontProcessAdds("cvp-dont-process-adds", cl::init(false));
+static cl::opt<bool> DontProcessAdds("cvp-dont-process-adds", cl::init(true));
 
 namespace {
   class CorrelatedValuePropagation : public FunctionPass {
@@ -486,9 +486,14 @@ static Constant *getConstantAt(Value *V, Instruction *At, LazyValueInfo *LVI) {
 static bool runImpl(Function &F, LazyValueInfo *LVI) {
   bool FnChanged = false;
 
-  for (BasicBlock &BB : F) {
+  // Visiting in a pre-order depth-first traversal causes us to simplify early
+  // blocks before querying later blocks (which require us to analyze early
+  // blocks).  Eagerly simplifying shallow blocks means there is strictly less
+  // work to do for deep blocks.  This also means we don't visit unreachable
+  // blocks. 
+  for (BasicBlock *BB : depth_first(&F.getEntryBlock())) {
     bool BBChanged = false;
-    for (BasicBlock::iterator BI = BB.begin(), BE = BB.end(); BI != BE;) {
+    for (BasicBlock::iterator BI = BB->begin(), BE = BB->end(); BI != BE;) {
       Instruction *II = &*BI++;
       switch (II->getOpcode()) {
       case Instruction::Select:
@@ -524,7 +529,7 @@ static bool runImpl(Function &F, LazyValueInfo *LVI) {
       }
     }
 
-    Instruction *Term = BB.getTerminator();
+    Instruction *Term = BB->getTerminator();
     switch (Term->getOpcode()) {
     case Instruction::Switch:
       BBChanged |= processSwitch(cast<SwitchInst>(Term), LVI);
@@ -564,10 +569,6 @@ CorrelatedValuePropagationPass::run(Function &F, FunctionAnalysisManager &AM) {
 
   LazyValueInfo *LVI = &AM.getResult<LazyValueAnalysis>(F);
   bool Changed = runImpl(F, LVI);
-
-  // FIXME: We need to invalidate LVI to avoid PR28400. Is there a better
-  // solution?
-  AM.invalidate<LazyValueAnalysis>(F);
 
   if (!Changed)
     return PreservedAnalyses::all();

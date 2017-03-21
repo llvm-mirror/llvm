@@ -122,8 +122,9 @@ bool X86ExpandPseudo::ExpandMI(MachineBasicBlock &MBB,
         Op = X86::TAILJMPd_CC;
         break;
       case X86::TCRETURNdi64cc:
-        assert(!IsWin64 && "Conditional tail calls confuse the Win64 unwinder.");
-        // TODO: We could do it for Win64 "leaf" functions though; PR30337.
+        assert(!MBB.getParent()->hasWinCFI() &&
+               "Conditional tail calls confuse "
+               "the Win64 unwinder.");
         Op = X86::TAILJMPd64_CC;
         break;
       default:
@@ -151,7 +152,7 @@ bool X86ExpandPseudo::ExpandMI(MachineBasicBlock &MBB,
                         : (IsWin64 ? X86::TAILJMPm64_REX : X86::TAILJMPm64);
       MachineInstrBuilder MIB = BuildMI(MBB, MBBI, DL, TII->get(Op));
       for (unsigned i = 0; i != 5; ++i)
-        MIB.addOperand(MBBI->getOperand(i));
+        MIB.add(MBBI->getOperand(i));
     } else if (Opcode == X86::TCRETURNri64) {
       BuildMI(MBB, MBBI, DL,
               TII->get(IsWin64 ? X86::TAILJMPr64_REX : X86::TAILJMPr64))
@@ -214,7 +215,7 @@ bool X86ExpandPseudo::ExpandMI(MachineBasicBlock &MBB,
       MIB = BuildMI(MBB, MBBI, DL, TII->get(X86::RETL));
     }
     for (unsigned I = 1, E = MBBI->getNumOperands(); I != E; ++I)
-      MIB.addOperand(MBBI->getOperand(I));
+      MIB.add(MBBI->getOperand(I));
     MBB.erase(MBBI);
     return true;
   }

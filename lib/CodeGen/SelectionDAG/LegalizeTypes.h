@@ -173,7 +173,6 @@ private:
   /// input operand is returned.
   SDValue DisintegrateMERGE_VALUES(SDNode *N, unsigned ResNo);
 
-  SDValue GetVectorElementPointer(SDValue VecPtr, EVT EltVT, SDValue Index);
   SDValue JoinIntegers(SDValue Lo, SDValue Hi);
   SDValue LibCallify(RTLIB::Libcall LC, SDNode *N, bool isSigned);
 
@@ -191,6 +190,11 @@ private:
   void SplitInteger(SDValue Op, SDValue &Lo, SDValue &Hi);
   void SplitInteger(SDValue Op, EVT LoVT, EVT HiVT,
                     SDValue &Lo, SDValue &Hi);
+
+  void AddToWorklist(SDNode *N) {
+    N->setNodeId(ReadyToProcess);
+    Worklist.push_back(N);
+  }
 
   //===--------------------------------------------------------------------===//
   // Integer Promotion Support: LegalizeIntegerTypes.cpp
@@ -250,7 +254,6 @@ private:
   SDValue PromoteIntRes_BITREVERSE(SDNode *N);
   SDValue PromoteIntRes_BUILD_PAIR(SDNode *N);
   SDValue PromoteIntRes_Constant(SDNode *N);
-  SDValue PromoteIntRes_CONVERT_RNDSAT(SDNode *N);
   SDValue PromoteIntRes_CTLZ(SDNode *N);
   SDValue PromoteIntRes_CTPOP(SDNode *N);
   SDValue PromoteIntRes_CTTZ(SDNode *N);
@@ -289,7 +292,6 @@ private:
   SDValue PromoteIntOp_BR_CC(SDNode *N, unsigned OpNo);
   SDValue PromoteIntOp_BRCOND(SDNode *N, unsigned OpNo);
   SDValue PromoteIntOp_BUILD_VECTOR(SDNode *N);
-  SDValue PromoteIntOp_CONVERT_RNDSAT(SDNode *N);
   SDValue PromoteIntOp_INSERT_VECTOR_ELT(SDNode *N, unsigned OpNo);
   SDValue PromoteIntOp_EXTRACT_VECTOR_ELT(SDNode *N);
   SDValue PromoteIntOp_EXTRACT_SUBVECTOR(SDNode *N);
@@ -600,10 +602,10 @@ private:
   SDValue ScalarizeVecRes_TernaryOp(SDNode *N);
   SDValue ScalarizeVecRes_UnaryOp(SDNode *N);
   SDValue ScalarizeVecRes_InregOp(SDNode *N);
+  SDValue ScalarizeVecRes_VecInregOp(SDNode *N);
 
   SDValue ScalarizeVecRes_BITCAST(SDNode *N);
   SDValue ScalarizeVecRes_BUILD_VECTOR(SDNode *N);
-  SDValue ScalarizeVecRes_CONVERT_RNDSAT(SDNode *N);
   SDValue ScalarizeVecRes_EXTRACT_SUBVECTOR(SDNode *N);
   SDValue ScalarizeVecRes_FP_ROUND(SDNode *N);
   SDValue ScalarizeVecRes_FPOWI(SDNode *N);
@@ -709,7 +711,6 @@ private:
   SDValue WidenVecRes_BITCAST(SDNode* N);
   SDValue WidenVecRes_BUILD_VECTOR(SDNode* N);
   SDValue WidenVecRes_CONCAT_VECTORS(SDNode* N);
-  SDValue WidenVecRes_CONVERT_RNDSAT(SDNode* N);
   SDValue WidenVecRes_EXTEND_VECTOR_INREG(SDNode* N);
   SDValue WidenVecRes_EXTRACT_SUBVECTOR(SDNode* N);
   SDValue WidenVecRes_INSERT_VECTOR_ELT(SDNode* N);
@@ -718,6 +719,7 @@ private:
   SDValue WidenVecRes_MGATHER(MaskedGatherSDNode* N);
   SDValue WidenVecRes_SCALAR_TO_VECTOR(SDNode* N);
   SDValue WidenVecRes_SELECT(SDNode* N);
+  SDValue WidenVSELECTAndMask(SDNode *N);
   SDValue WidenVecRes_SELECT_CC(SDNode* N);
   SDValue WidenVecRes_SETCC(SDNode* N);
   SDValue WidenVecRes_UNDEF(SDNode *N);
@@ -786,6 +788,13 @@ private:
   /// When FillWithZeroes is "on" the vector will be widened with zeroes.
   /// By default, the vector will be widened with undefined values.
   SDValue ModifyToType(SDValue InOp, EVT NVT, bool FillWithZeroes = false);
+
+  /// Return a mask of vector type MaskVT to replace InMask. Also adjust
+  /// MaskVT to ToMaskVT if needed with vector extension or truncation.
+  SDValue convertMask(SDValue InMask, EVT MaskVT, EVT ToMaskVT);
+
+  /// Get the target mask VT, and widen if needed.
+  EVT getSETCCWidenedResultTy(SDValue SetCC);
 
   //===--------------------------------------------------------------------===//
   // Generic Splitting: LegalizeTypesGeneric.cpp

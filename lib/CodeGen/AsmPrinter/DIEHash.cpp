@@ -330,6 +330,12 @@ void DIEHash::hashAttribute(const DIEValue &Value, dwarf::Tag Tag) {
     addULEB128(dwarf::DW_FORM_string);
     addString(Value.getDIEString().getString());
     break;
+  case DIEValue::isInlineString:
+    addULEB128('A');
+    addULEB128(Attribute);
+    addULEB128(dwarf::DW_FORM_string);
+    addString(Value.getDIEInlineString().getString());
+    break;
   case DIEValue::isBlock:
   case DIEValue::isLoc:
   case DIEValue::isLocList:
@@ -484,9 +490,9 @@ uint64_t DIEHash::computeCUSignature(const DIE &Die) {
   Hash.final(Result);
 
   // ... take the least significant 8 bytes and return those. Our MD5
-  // implementation always returns its results in little endian, swap bytes
-  // appropriately.
-  return support::endian::read64le(Result + 8);
+  // implementation always returns its results in little endian, so we actually
+  // need the "high" word.
+  return Result.high();
 }
 
 /// This is based on the type signature computation given in section 7.27 of the
@@ -508,7 +514,7 @@ uint64_t DIEHash::computeTypeSignature(const DIE &Die) {
   Hash.final(Result);
 
   // ... take the least significant 8 bytes and return those. Our MD5
-  // implementation always returns its results in little endian, swap bytes
-  // appropriately.
-  return support::endian::read64le(Result + 8);
+  // implementation always returns its results in little endian, so we actually
+  // need the "high" word.
+  return Result.high();
 }

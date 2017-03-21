@@ -130,6 +130,11 @@ static cl::opt<std::string> ThinLTOSaveTempsPrefix(
     cl::desc("Save ThinLTO temp files using filenames created by adding "
              "suffixes to the given file path prefix."));
 
+static cl::opt<std::string> ThinLTOGeneratedObjectsDir(
+    "thinlto-save-objects",
+    cl::desc("Save ThinLTO generated object files using filenames created in "
+             "the given directory."));
+
 static cl::opt<bool>
     SaveModuleFile("save-merged-module", cl::init(false),
                    cl::desc("Write merged LTO module to file before CodeGen"));
@@ -242,7 +247,7 @@ static void error(const ErrorOr<T> &V, const Twine &Prefix) {
 }
 
 static void maybeVerifyModule(const Module &Mod) {
-  if (!DisableVerify && verifyModule(Mod))
+  if (!DisableVerify && verifyModule(Mod, &errs()))
     error("Broken Module");
 }
 
@@ -707,6 +712,13 @@ private:
 
     if (!ThinLTOSaveTempsPrefix.empty())
       ThinGenerator.setSaveTempsDir(ThinLTOSaveTempsPrefix);
+
+    if (!ThinLTOGeneratedObjectsDir.empty()) {
+      ThinGenerator.setGeneratedObjectsDirectory(ThinLTOGeneratedObjectsDir);
+      ThinGenerator.run();
+      return;
+    }
+
     ThinGenerator.run();
 
     auto &Binaries = ThinGenerator.getProducedBinaries();

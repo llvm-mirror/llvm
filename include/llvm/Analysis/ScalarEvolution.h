@@ -543,6 +543,12 @@ private:
   /// predicate by splitting it into a set of independent predicates.
   bool ProvingSplitPredicate;
 
+  /// Memoized values for the GetMinTrailingZeros
+  DenseMap<const SCEV *, uint32_t> MinTrailingZerosCache;
+
+  /// Private helper method for the GetMinTrailingZeros method
+  uint32_t GetMinTrailingZerosImpl(const SCEV *S);
+
   /// Information about the number of loop iterations for which a loop exit's
   /// branch condition evaluates to the not-taken path.  This is a temporary
   /// pair of exact and max expressions that are eventually summarized in
@@ -600,14 +606,14 @@ private:
   /// Information about the number of times a particular loop exit may be
   /// reached before exiting the loop.
   struct ExitNotTakenInfo {
-    AssertingVH<BasicBlock> ExitingBlock;
+    PoisoningVH<BasicBlock> ExitingBlock;
     const SCEV *ExactNotTaken;
     std::unique_ptr<SCEVUnionPredicate> Predicate;
     bool hasAlwaysTruePredicate() const {
       return !Predicate || Predicate->isAlwaysTrue();
     }
 
-    explicit ExitNotTakenInfo(AssertingVH<BasicBlock> ExitingBlock,
+    explicit ExitNotTakenInfo(PoisoningVH<BasicBlock> ExitingBlock,
                               const SCEV *ExactNotTaken,
                               std::unique_ptr<SCEVUnionPredicate> Predicate)
         : ExitingBlock(ExitingBlock), ExactNotTaken(ExactNotTaken),
@@ -1065,18 +1071,6 @@ private:
   bool isMonotonicPredicateImpl(const SCEVAddRecExpr *LHS,
                                 ICmpInst::Predicate Pred, bool &Increasing);
 
-  /// Return true if, for all loop invariant X, the predicate "LHS `Pred` X"
-  /// is monotonically increasing or decreasing.  In the former case set
-  /// `Increasing` to true and in the latter case set `Increasing` to false.
-  ///
-  /// A predicate is said to be monotonically increasing if may go from being
-  /// false to being true as the loop iterates, but never the other way
-  /// around.  A predicate is said to be monotonically decreasing if may go
-  /// from being true to being false as the loop iterates, but never the other
-  /// way around.
-  bool isMonotonicPredicate(const SCEVAddRecExpr *LHS, ICmpInst::Predicate Pred,
-                            bool &Increasing);
-
   /// Return SCEV no-wrap flags that can be proven based on reasoning about
   /// how poison produced from no-wrap flags on this value (e.g. a nuw add)
   /// would trigger undefined behavior on overflow.
@@ -1152,7 +1146,8 @@ public:
   const SCEV *getSignExtendExpr(const SCEV *Op, Type *Ty);
   const SCEV *getAnyExtendExpr(const SCEV *Op, Type *Ty);
   const SCEV *getAddExpr(SmallVectorImpl<const SCEV *> &Ops,
-                         SCEV::NoWrapFlags Flags = SCEV::FlagAnyWrap);
+                         SCEV::NoWrapFlags Flags = SCEV::FlagAnyWrap,
+                         unsigned Depth = 0);
   const SCEV *getAddExpr(const SCEV *LHS, const SCEV *RHS,
                          SCEV::NoWrapFlags Flags = SCEV::FlagAnyWrap) {
     SmallVector<const SCEV *, 2> Ops = {LHS, RHS};
@@ -1301,7 +1296,7 @@ public:
   ///
   /// Implemented in terms of the \c getSmallConstantTripCount overload with
   /// the single exiting block passed to it. See that routine for details.
-  unsigned getSmallConstantTripCount(Loop *L);
+  unsigned getSmallConstantTripCount(const Loop *L);
 
   /// Returns the maximum trip count of this loop as a normal unsigned
   /// value. Returns 0 if the trip count is unknown or not constant. This
@@ -1310,12 +1305,12 @@ public:
   /// before taking the branch. For loops with multiple exits, it may not be
   /// the number times that the loop header executes if the loop exits
   /// prematurely via another branch.
-  unsigned getSmallConstantTripCount(Loop *L, BasicBlock *ExitingBlock);
+  unsigned getSmallConstantTripCount(const Loop *L, BasicBlock *ExitingBlock);
 
   /// Returns the upper bound of the loop trip count as a normal unsigned
   /// value.
   /// Returns 0 if the trip count is unknown or not constant.
-  unsigned getSmallConstantMaxTripCount(Loop *L);
+  unsigned getSmallConstantMaxTripCount(const Loop *L);
 
   /// Returns the largest constant divisor of the trip count of the
   /// loop if it is a single-exit loop and we can compute a small maximum for
@@ -1323,7 +1318,7 @@ public:
   ///
   /// Implemented in terms of the \c getSmallConstantTripMultiple overload with
   /// the single exiting block passed to it. See that routine for details.
-  unsigned getSmallConstantTripMultiple(Loop *L);
+  unsigned getSmallConstantTripMultiple(const Loop *L);
 
   /// Returns the largest constant divisor of the trip count of this loop as a
   /// normal unsigned value, if possible. This means that the actual trip
@@ -1331,12 +1326,13 @@ public:
   /// count could very well be zero as well!). As explained in the comments
   /// for getSmallConstantTripCount, this assumes that control exits the loop
   /// via ExitingBlock.
-  unsigned getSmallConstantTripMultiple(Loop *L, BasicBlock *ExitingBlock);
+  unsigned getSmallConstantTripMultiple(const Loop *L,
+                                        BasicBlock *ExitingBlock);
 
   /// Get the expression for the number of loop iterations for which this loop
   /// is guaranteed not to exit via ExitingBlock. Otherwise return
   /// SCEVCouldNotCompute.
-  const SCEV *getExitCount(Loop *L, BasicBlock *ExitingBlock);
+  const SCEV *getExitCount(const Loop *L, BasicBlock *ExitingBlock);
 
   /// If the specified loop has a predictable backedge-taken count, return it,
   /// otherwise return a SCEVCouldNotCompute object. The backedge-taken count
@@ -1432,6 +1428,18 @@ public:
   bool isKnownPredicate(ICmpInst::Predicate Pred, const SCEV *LHS,
                         const SCEV *RHS);
 
+  /// Return true if, for all loop invariant X, the predicate "LHS `Pred` X"
+  /// is monotonically increasing or decreasing.  In the former case set
+  /// `Increasing` to true and in the latter case set `Increasing` to false.
+  ///
+  /// A predicate is said to be monotonically increasing if may go from being
+  /// false to being true as the loop iterates, but never the other way
+  /// around.  A predicate is said to be monotonically decreasing if may go
+  /// from being true to being false as the loop iterates, but never the other
+  /// way around.
+  bool isMonotonicPredicate(const SCEVAddRecExpr *LHS, ICmpInst::Predicate Pred,
+                            bool &Increasing);
+
   /// Return true if the result of the predicate LHS `Pred` RHS is loop
   /// invariant with respect to L.  Set InvariantPred, InvariantLHS and
   /// InvariantLHS so that InvariantLHS `InvariantPred` InvariantRHS is the
@@ -1491,6 +1499,8 @@ public:
 
   void print(raw_ostream &OS) const;
   void verify() const;
+  bool invalidate(Function &F, const PreservedAnalyses &PA,
+                  FunctionAnalysisManager::Invalidator &Inv);
 
   /// Collect parametric terms occurring in step expressions (first step of
   /// delinearization).
@@ -1611,6 +1621,10 @@ private:
   bool doesIVOverflowOnGT(const SCEV *RHS, const SCEV *Stride, bool IsSigned,
                           bool NoWrap);
 
+  /// Get add expr already created or create a new one
+  const SCEV *getOrCreateAddExpr(SmallVectorImpl<const SCEV *> &Ops,
+                                 SCEV::NoWrapFlags Flags);
+
 private:
   FoldingSet<SCEV> UniqueSCEVs;
   FoldingSet<SCEVPredicate> UniquePreds;
@@ -1626,7 +1640,7 @@ private:
 class ScalarEvolutionAnalysis
     : public AnalysisInfoMixin<ScalarEvolutionAnalysis> {
   friend AnalysisInfoMixin<ScalarEvolutionAnalysis>;
-  static char PassID;
+  static AnalysisKey Key;
 
 public:
   typedef ScalarEvolution Result;

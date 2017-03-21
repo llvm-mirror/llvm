@@ -110,7 +110,7 @@ protected:
   Type * const *ContainedTys;
 
   static bool isSequentialType(TypeID TyID) {
-    return TyID == ArrayTyID || TyID == PointerTyID || TyID == VectorTyID;
+    return TyID == ArrayTyID || TyID == VectorTyID;
   }
 
 public:
@@ -166,12 +166,12 @@ public:
 
   const fltSemantics &getFltSemantics() const {
     switch (getTypeID()) {
-    case HalfTyID: return APFloat::IEEEhalf;
-    case FloatTyID: return APFloat::IEEEsingle;
-    case DoubleTyID: return APFloat::IEEEdouble;
-    case X86_FP80TyID: return APFloat::x87DoubleExtended;
-    case FP128TyID: return APFloat::IEEEquad;
-    case PPC_FP128TyID: return APFloat::PPCDoubleDouble;
+    case HalfTyID: return APFloat::IEEEhalf();
+    case FloatTyID: return APFloat::IEEEsingle();
+    case DoubleTyID: return APFloat::IEEEdouble();
+    case X86_FP80TyID: return APFloat::x87DoubleExtended();
+    case FP128TyID: return APFloat::IEEEquad();
+    case PPC_FP128TyID: return APFloat::PPCDoubleDouble();
     default: llvm_unreachable("Invalid floating type");
     }
   }
@@ -423,7 +423,7 @@ private:
 };
 
 // Printing of types.
-static inline raw_ostream &operator<<(raw_ostream &OS, Type &T) {
+static inline raw_ostream &operator<<(raw_ostream &OS, const Type &T) {
   T.print(OS);
   return OS;
 }

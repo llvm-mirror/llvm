@@ -1,8 +1,9 @@
-; RUN: llc -march=amdgcn -mcpu=bonaire -verify-machineinstrs -enable-misched -enable-aa-sched-mi < %s | FileCheck -check-prefix=FUNC -check-prefix=CI %s
+; RUN: llc -march=amdgcn -mcpu=bonaire -enable-amdgpu-aa=0 -verify-machineinstrs -enable-misched -enable-aa-sched-mi < %s | FileCheck -check-prefix=FUNC -check-prefix=CI %s
 
 declare void @llvm.SI.tbuffer.store.i32(<16 x i8>, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)
 declare void @llvm.SI.tbuffer.store.v4i32(<16 x i8>, <4 x i32>, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)
 declare void @llvm.amdgcn.s.barrier() #1
+declare i32 @llvm.amdgcn.workitem.id.x() #2
 
 
 @stored_lds_ptr = addrspace(3) global i32 addrspace(3)* undef, align 4
@@ -156,9 +157,8 @@ define void @reorder_global_load_local_store_global_load(i32 addrspace(1)* %out,
 
 ; FUNC-LABEL: @reorder_local_offsets
 ; CI: ds_read2_b32 {{v\[[0-9]+:[0-9]+\]}}, {{v[0-9]+}} offset0:100 offset1:102
-; CI: ds_write2_b32 {{v[0-9]+}}, {{v[0-9]+}}, {{v[0-9]+}} offset0:3 offset1:100
-; CI: ds_read_b32 {{v[0-9]+}}, {{v[0-9]+}} offset:12
-; CI: ds_write_b32 {{v[0-9]+}}, {{v[0-9]+}} offset:408
+; CI-DAG: ds_write2_b32 {{v[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}} offset0:3 offset1:100
+; CI-DAG: ds_write_b32 {{v[0-9]+}}, {{v[0-9]+}} offset:408
 ; CI: buffer_store_dword
 ; CI: s_endpgm
 define void @reorder_local_offsets(i32 addrspace(1)* nocapture %out, i32 addrspace(1)* noalias nocapture readnone %gptr, i32 addrspace(3)* noalias nocapture %ptr0) #0 {
@@ -180,12 +180,12 @@ define void @reorder_local_offsets(i32 addrspace(1)* nocapture %out, i32 addrspa
 }
 
 ; FUNC-LABEL: @reorder_global_offsets
-; CI: buffer_load_dword {{v[0-9]+}}, off, {{s\[[0-9]+:[0-9]+\]}}, 0 offset:400
-; CI: buffer_load_dword {{v[0-9]+}}, off, {{s\[[0-9]+:[0-9]+\]}}, 0 offset:408
-; CI: buffer_store_dword {{v[0-9]+}}, off, {{s\[[0-9]+:[0-9]+\]}}, 0 offset:12
-; CI: buffer_store_dword {{v[0-9]+}}, off, {{s\[[0-9]+:[0-9]+\]}}, 0 offset:400
-; CI: buffer_store_dword {{v[0-9]+}}, off, {{s\[[0-9]+:[0-9]+\]}}, 0 offset:408
-; CI: buffer_load_dword {{v[0-9]+}}, off, {{s\[[0-9]+:[0-9]+\]}}, 0 offset:12
+; CI-DAG: buffer_load_dword {{v[0-9]+}}, off, {{s\[[0-9]+:[0-9]+\]}}, 0 offset:400
+; CI-DAG: buffer_load_dword {{v[0-9]+}}, off, {{s\[[0-9]+:[0-9]+\]}}, 0 offset:408
+; CI-DAG: buffer_store_dword {{v[0-9]+}}, off, {{s\[[0-9]+:[0-9]+\]}}, 0 offset:12
+; CI-DAG: buffer_store_dword {{v[0-9]+}}, off, {{s\[[0-9]+:[0-9]+\]}}, 0 offset:400
+; CI-DAG: buffer_store_dword {{v[0-9]+}}, off, {{s\[[0-9]+:[0-9]+\]}}, 0 offset:408
+; CI: buffer_store_dword
 ; CI: s_endpgm
 define void @reorder_global_offsets(i32 addrspace(1)* nocapture %out, i32 addrspace(1)* noalias nocapture readnone %gptr, i32 addrspace(1)* noalias nocapture %ptr0) #0 {
   %ptr1 = getelementptr inbounds i32, i32 addrspace(1)* %ptr0, i32 3
@@ -202,6 +202,46 @@ define void @reorder_global_offsets(i32 addrspace(1)* nocapture %out, i32 addrsp
   %add.0 = add nsw i32 %tmp2, %tmp1
   %add.1 = add nsw i32 %add.0, %tmp3
   store i32 %add.1, i32 addrspace(1)* %out, align 4
+  ret void
+}
+
+; FUNC-LABEL: {{^}}reorder_global_offsets_addr64_soffset0:
+; GCN: buffer_load_dword v{{[0-9]+}}, v{{\[[0-9]+:[0-9]+\]}}, s{{\[[0-9]+:[0-9]+\]}} 0 addr64 offset:12{{$}}
+; GCN-NEXT: buffer_load_dword v{{[0-9]+}}, v{{\[[0-9]+:[0-9]+\]}}, s{{\[[0-9]+:[0-9]+\]}} 0 addr64 offset:28{{$}}
+; GCN-NEXT: buffer_load_dword v{{[0-9]+}}, v{{\[[0-9]+:[0-9]+\]}}, s{{\[[0-9]+:[0-9]+\]}} 0 addr64 offset:44{{$}}
+
+; GCN: v_mov_b32
+; GCN: v_mov_b32
+
+; GCN: buffer_store_dword v{{[0-9]+}}, v{{\[[0-9]+:[0-9]+\]}}, s{{\[[0-9]+:[0-9]+\]}} 0 addr64{{$}}
+; GCN-NEXT: buffer_store_dword v{{[0-9]+}}, v{{\[[0-9]+:[0-9]+\]}}, s{{\[[0-9]+:[0-9]+\]}} 0 addr64 offset:20{{$}}
+
+; GCN: v_add_i32
+; GCN: v_add_i32
+
+; GCN: buffer_store_dword v{{[0-9]+}}, v{{\[[0-9]+:[0-9]+\]}}, s{{\[[0-9]+:[0-9]+\]}} 0 addr64 offset:36{{$}}
+; GCN-NEXT: buffer_store_dword v{{[0-9]+}}, v{{\[[0-9]+:[0-9]+\]}}, s{{\[[0-9]+:[0-9]+\]}} 0 addr64 offset:52{{$}}
+define void @reorder_global_offsets_addr64_soffset0(i32 addrspace(1)* noalias nocapture %ptr.base) #0 {
+  %id = call i32 @llvm.amdgcn.workitem.id.x()
+  %id.ext = sext i32 %id to i64
+
+  %ptr0 = getelementptr inbounds i32, i32 addrspace(1)* %ptr.base, i64 %id.ext
+  %ptr1 = getelementptr inbounds i32, i32 addrspace(1)* %ptr0, i32 3
+  %ptr2 = getelementptr inbounds i32, i32 addrspace(1)* %ptr0, i32 5
+  %ptr3 = getelementptr inbounds i32, i32 addrspace(1)* %ptr0, i32 7
+  %ptr4 = getelementptr inbounds i32, i32 addrspace(1)* %ptr0, i32 9
+  %ptr5 = getelementptr inbounds i32, i32 addrspace(1)* %ptr0, i32 11
+  %ptr6 = getelementptr inbounds i32, i32 addrspace(1)* %ptr0, i32 13
+
+  store i32 789, i32 addrspace(1)* %ptr0, align 4
+  %tmp1 = load i32, i32 addrspace(1)* %ptr1, align 4
+  store i32 123, i32 addrspace(1)* %ptr2, align 4
+  %tmp2 = load i32, i32 addrspace(1)* %ptr3, align 4
+  %add.0 = add nsw i32 %tmp1, %tmp2
+  store i32 %add.0, i32 addrspace(1)* %ptr4, align 4
+  %tmp3 = load i32, i32 addrspace(1)* %ptr5, align 4
+  %add.1 = add nsw i32 %add.0, %tmp3
+  store i32 %add.1, i32 addrspace(1)* %ptr6, align 4
   ret void
 }
 
@@ -232,3 +272,4 @@ define void @reorder_global_offsets(i32 addrspace(1)* nocapture %out, i32 addrsp
 
 attributes #0 = { nounwind }
 attributes #1 = { nounwind convergent }
+attributes #2 = { nounwind readnone }

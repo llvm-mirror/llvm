@@ -78,11 +78,20 @@ private:
                raw_ostream &O);
   void printR128(const MCInst *MI, unsigned OpNo, const MCSubtargetInfo &STI,
                  raw_ostream &O);
-  void printLWE(const MCInst *MI, unsigned OpNo, const MCSubtargetInfo &STI,
-                raw_ostream &O);
+  void printLWE(const MCInst *MI, unsigned OpNo,
+                const MCSubtargetInfo &STI, raw_ostream &O);
+  void printExpCompr(const MCInst *MI, unsigned OpNo,
+                     const MCSubtargetInfo &STI, raw_ostream &O);
+  void printExpVM(const MCInst *MI, unsigned OpNo,
+                  const MCSubtargetInfo &STI, raw_ostream &O);
+
   void printRegOperand(unsigned RegNo, raw_ostream &O);
   void printVOPDst(const MCInst *MI, unsigned OpNo, const MCSubtargetInfo &STI,
                    raw_ostream &O);
+  void printImmediate16(uint32_t Imm, const MCSubtargetInfo &STI,
+                        raw_ostream &O);
+  void printImmediateV216(uint32_t Imm, const MCSubtargetInfo &STI,
+                          raw_ostream &O);
   void printImmediate32(uint32_t Imm, const MCSubtargetInfo &STI,
                         raw_ostream &O);
   void printImmediate64(uint64_t Imm, const MCSubtargetInfo &STI,
@@ -110,12 +119,41 @@ private:
                         const MCSubtargetInfo &STI, raw_ostream &O);
   void printSDWADstUnused(const MCInst *MI, unsigned OpNo,
                           const MCSubtargetInfo &STI, raw_ostream &O);
+  void printOpSel(const MCInst *MI, unsigned OpNo,
+                  const MCSubtargetInfo &STI, raw_ostream &O);
+  void printOpSelHi(const MCInst *MI, unsigned OpNo,
+                  const MCSubtargetInfo &STI, raw_ostream &O);
+  void printNegLo(const MCInst *MI, unsigned OpNo,
+                  const MCSubtargetInfo &STI, raw_ostream &O);
+  void printNegHi(const MCInst *MI, unsigned OpNo,
+                  const MCSubtargetInfo &STI, raw_ostream &O);
   void printInterpSlot(const MCInst *MI, unsigned OpNo,
                        const MCSubtargetInfo &STI, raw_ostream &O);
+  void printInterpAttr(const MCInst *MI, unsigned OpNo,
+                       const MCSubtargetInfo &STI, raw_ostream &O);
+  void printInterpAttrChan(const MCInst *MI, unsigned OpNo,
+                           const MCSubtargetInfo &STI, raw_ostream &O);
+
   void printVGPRIndexMode(const MCInst *MI, unsigned OpNo,
                           const MCSubtargetInfo &STI, raw_ostream &O);
   void printMemOperand(const MCInst *MI, unsigned OpNo,
                        const MCSubtargetInfo &STI, raw_ostream &O);
+
+
+  template <unsigned N>
+  void printExpSrcN(const MCInst *MI, unsigned OpNo,
+                    const MCSubtargetInfo &STI, raw_ostream &O);
+  void printExpSrc0(const MCInst *MI, unsigned OpNo,
+                    const MCSubtargetInfo &STI, raw_ostream &O);
+  void printExpSrc1(const MCInst *MI, unsigned OpNo,
+                    const MCSubtargetInfo &STI, raw_ostream &O);
+  void printExpSrc2(const MCInst *MI, unsigned OpNo,
+                    const MCSubtargetInfo &STI, raw_ostream &O);
+  void printExpSrc3(const MCInst *MI, unsigned OpNo,
+                    const MCSubtargetInfo &STI, raw_ostream &O);
+  void printExpTgt(const MCInst *MI, unsigned OpNo,
+                   const MCSubtargetInfo &STI, raw_ostream &O);
+
   static void printIfSet(const MCInst *MI, unsigned OpNo, raw_ostream &O,
                          StringRef Asm, StringRef Default = "");
   static void printIfSet(const MCInst *MI, unsigned OpNo, raw_ostream &O,

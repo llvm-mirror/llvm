@@ -10,28 +10,26 @@
 #ifndef LLVM_DEBUGINFO_CODEVIEW_SYMBOLVISITORDELEGATE_H
 #define LLVM_DEBUGINFO_CODEVIEW_SYMBOLVISITORDELEGATE_H
 
-#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"
-
-#include <stdint.h>
+#include <cstdint>
 
 namespace llvm {
 
-namespace msf {
-class StreamReader;
-}
+class BinaryStreamReader;
 
 namespace codeview {
 
 class SymbolVisitorDelegate {
 public:
-  virtual ~SymbolVisitorDelegate() {}
+  virtual ~SymbolVisitorDelegate() = default;
 
-  virtual uint32_t getRecordOffset(msf::StreamReader Reader) = 0;
+  virtual uint32_t getRecordOffset(BinaryStreamReader Reader) = 0;
   virtual StringRef getFileNameForFileOffset(uint32_t FileOffset) = 0;
   virtual StringRef getStringTable() = 0;
 };
+
 } // end namespace codeview
+
 } // end namespace llvm
 
 #endif // LLVM_DEBUGINFO_CODEVIEW_SYMBOLVISITORDELEGATE_H

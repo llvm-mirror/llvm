@@ -318,7 +318,7 @@ declare <8 x i16> @llvm.x86.sse2.pavg.w(<8 x i16>, <8 x i16>) nounwind readnone
 
 define <16 x i8> @stack_fold_pblendvb(<16 x i8> %a0, <16 x i8> %a1, <16 x i8> %c) {
   ;CHECK-LABEL: stack_fold_pblendvb
-  ;CHECK:       pblendvb {{-?[0-9]*}}(%rsp), {{%xmm[0-9][0-9]*}} {{.*#+}} 16-byte Folded Reload
+  ;CHECK:       pblendvb %xmm0, {{-?[0-9]*}}(%rsp), {{%xmm[0-9][0-9]*}} {{.*#+}} 16-byte Folded Reload
   %1 = tail call <2 x i64> asm sideeffect "nop", "=x,~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15},~{flags}"()
   %2 = call <16 x i8> @llvm.x86.sse41.pblendvb(<16 x i8> %a1, <16 x i8> %c, <16 x i8> %a0)
   ret <16 x i8> %2
@@ -457,9 +457,11 @@ define i32 @stack_fold_pextrd(<4 x i32> %a0) {
   ;CHECK-LABEL: stack_fold_pextrd
   ;CHECK:       pextrd $1, {{%xmm[0-9][0-9]*}}, {{-?[0-9]*}}(%rsp) {{.*#+}} 4-byte Folded Spill
   ;CHECK:       movl    {{-?[0-9]*}}(%rsp), %eax {{.*#+}} 4-byte Reload
-  %1 = extractelement <4 x i32> %a0, i32 1
-  %2 = tail call <2 x i64> asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  ret i32 %1
+  ; add forces execution domain
+  %1 = add <4 x i32> %a0, <i32 1, i32 2, i32 3, i32 4>
+  %2 = extractelement <4 x i32> %1, i32 1
+  %3 = tail call <2 x i64> asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
+  ret i32 %2
 }
 
 define i64 @stack_fold_pextrq(<2 x i64> %a0) {

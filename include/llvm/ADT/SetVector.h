@@ -20,12 +20,13 @@
 #ifndef LLVM_ADT_SETVECTOR_H
 #define LLVM_ADT_SETVECTOR_H
 
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/SmallSet.h"
+#include "llvm/Support/Compiler.h"
 #include <algorithm>
 #include <cassert>
-#include <utility>
+#include <iterator>
 #include <vector>
 
 namespace llvm {
@@ -52,7 +53,7 @@ public:
   typedef typename vector_type::size_type size_type;
 
   /// \brief Construct an empty SetVector
-  SetVector() {}
+  SetVector() = default;
 
   /// \brief Initialize a SetVector with a range of elements
   template<typename It>
@@ -61,6 +62,12 @@ public:
   }
 
   ArrayRef<T> getArrayRef() const { return vector_; }
+
+  /// Clear the SetVector and return the underlying vector.
+  Vector takeVector() {
+    set_.clear();
+    return std::move(vector_);
+  }
 
   /// \brief Determine if the SetVector is empty or not.
   bool empty() const {
@@ -110,6 +117,12 @@ public:
   /// \brief Get a const_reverse_iterator to the beginning of the SetVector.
   const_reverse_iterator rend() const {
     return vector_.rend();
+  }
+
+  /// \brief Return the first element of the SetVector.
+  const T &front() const {
+    assert(!empty() && "Cannot call front() on empty SetVector!");
+    return vector_.front();
   }
 
   /// \brief Return the last element of the SetVector.
@@ -285,7 +298,7 @@ template <typename T, unsigned N>
 class SmallSetVector
     : public SetVector<T, SmallVector<T, N>, SmallDenseSet<T, N>> {
 public:
-  SmallSetVector() {}
+  SmallSetVector() = default;
 
   /// \brief Initialize a SmallSetVector with a range of elements
   template<typename It>
@@ -294,7 +307,6 @@ public:
   }
 };
 
-} // End llvm namespace
+} // end namespace llvm
 
-// vim: sw=2 ai
-#endif
+#endif // LLVM_ADT_SETVECTOR_H

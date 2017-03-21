@@ -33,8 +33,10 @@ for details.  Note that clang `does not support
 <https://llvm.org/bugs/show_bug.cgi?id=26966>`_ the CUDA toolkit as installed
 by many Linux package managers; you probably need to install nvidia's package.
 
-You will need CUDA 7.0 or 7.5 to compile with clang.  CUDA 8 support is in the
-works.
+You will need CUDA 7.0, 7.5, or 8.0 to compile with clang.
+
+CUDA compilation is supported on Linux, on MacOS as of 2016-11-18, and on
+Windows as of 2017-01-05.
 
 Invoking clang
 --------------
@@ -60,6 +62,10 @@ brackets as described below:
   y[1] = 4
   y[2] = 6
   y[3] = 8
+
+On MacOS, replace `-lcudart_static` with `-lcudart`; otherwise, you may get
+"CUDA driver version is insufficient for CUDA runtime version" errors when you
+run your program.
 
 * ``<CUDA install path>`` -- the directory where you installed CUDA SDK.
   Typically, ``/usr/local/cuda``.
@@ -171,16 +177,9 @@ below).  However, we have heard from implementers that it's possible to get
 into situations where nvcc will omit a call to an ``std::complex`` function,
 especially when compiling without optimizations.
 
-clang does not yet support ``std::complex``.  Because we interpret the
-"wrong-side rule" more strictly than nvcc, ``std::complex`` doesn't work in
-``__device__`` or ``__host__ __device__`` code.
-
-In the meantime, you can get limited ``std::complex`` support in clang by
-building your code for C++14.  In clang, all ``constexpr`` functions are always
-implicitly ``__host__ __device__`` (this corresponds to nvcc's
-``--relaxed-constexpr`` flag).  In C++14, many ``std::complex`` functions are
-``constexpr``, so you can use these with clang.  (nvcc does not currently
-support C++14.)
+As of 2016-11-16, clang supports ``std::complex`` without these caveats.  It is
+tested with libstdc++ 4.8.5 and newer, but is known to work only with libc++
+newer than 2016-11-16.
 
 ``<algorithm>``
 ---------------

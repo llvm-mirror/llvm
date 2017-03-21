@@ -3,7 +3,7 @@ macro(add_pdb_impl_folder group)
   source_group(${group} FILES ${ARGN})
 endmacro()
 
-if(HAVE_DIA_SDK)
+if(LLVM_ENABLE_DIA_SDK)
   include_directories(${MSVC_DIA_SDK_DIR}/include)
   set(LIBPDB_LINK_FOLDERS "${MSVC_DIA_SDK_DIR}\\lib")
   if (CMAKE_SIZEOF_VOID_P EQUAL 8)
@@ -27,31 +27,37 @@ if(HAVE_DIA_SDK)
     set(LIBPDB_ADDITIONAL_HEADER_DIRS "${LLVM_MAIN_INCLUDE_DIR}/llvm/DebugInfo/PDB/DIA")
 endif()
 
-add_pdb_impl_folder(Raw
-  Raw/DbiStream.cpp
-  Raw/DbiStreamBuilder.cpp
-  Raw/EnumTables.cpp
-  Raw/GlobalsStream.cpp
-  Raw/GSI.cpp
-  Raw/Hash.cpp
-  Raw/InfoStream.cpp
-  Raw/InfoStreamBuilder.cpp
-  Raw/ModInfo.cpp
-  Raw/ModStream.cpp
-  Raw/NameHashTable.cpp
-  Raw/NameMap.cpp
-  Raw/NameMapBuilder.cpp
-  Raw/PDBFile.cpp
-  Raw/PDBFileBuilder.cpp
-  Raw/PublicsStream.cpp
-  Raw/RawError.cpp
-  Raw/RawSession.cpp
-  Raw/SymbolStream.cpp
-  Raw/TpiHashing.cpp
-  Raw/TpiStream.cpp
-  Raw/TpiStreamBuilder.cpp)
+add_pdb_impl_folder(Native
+  Native/DbiStream.cpp
+  Native/DbiStreamBuilder.cpp
+  Native/EnumTables.cpp
+  Native/GlobalsStream.cpp
+  Native/GSI.cpp
+  Native/Hash.cpp
+  Native/HashTable.cpp
+  Native/InfoStream.cpp
+  Native/InfoStreamBuilder.cpp
+  Native/ModInfo.cpp
+  Native/ModInfoBuilder.cpp
+  Native/ModStream.cpp
+  Native/NativeCompilandSymbol.cpp
+  Native/NativeEnumModules.cpp
+  Native/NativeRawSymbol.cpp
+  Native/NamedStreamMap.cpp
+  Native/NativeSession.cpp
+  Native/PDBFile.cpp
+  Native/PDBFileBuilder.cpp
+  Native/PDBTypeServerHandler.cpp
+  Native/PublicsStream.cpp
+  Native/RawError.cpp
+  Native/StringTable.cpp
+  Native/StringTableBuilder.cpp
+  Native/SymbolStream.cpp
+  Native/TpiHashing.cpp
+  Native/TpiStream.cpp
+  Native/TpiStreamBuilder.cpp)
 
-list(APPEND LIBPDB_ADDITIONAL_HEADER_DIRS "${LLVM_MAIN_INCLUDE_DIR}/llvm/DebugInfo/PDB/Raw")
+list(APPEND LIBPDB_ADDITIONAL_HEADER_DIRS "${LLVM_MAIN_INCLUDE_DIR}/llvm/DebugInfo/PDB/Native")
 list(APPEND LIBPDB_ADDITIONAL_HEADER_DIRS "${LLVM_MAIN_INCLUDE_DIR}/llvm/DebugInfo/PDB")
 
 add_llvm_library(LLVMDebugInfoPDB

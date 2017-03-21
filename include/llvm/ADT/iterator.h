@@ -12,6 +12,7 @@
 
 #include <cstddef>
 #include <iterator>
+#include <type_traits>
 
 namespace llvm {
 
@@ -32,6 +33,32 @@ namespace llvm {
 /// Another abstraction that this doesn't provide is implementing increment in
 /// terms of addition of one. These aren't equivalent for all iterator
 /// categories, and respecting that adds a lot of complexity for little gain.
+///
+/// Classes wishing to use `iterator_facade_base` should implement the following
+/// methods:
+///
+/// Forward Iterators:
+///   (All of the following methods)
+///   - DerivedT &operator=(const DerivedT &R);
+///   - bool operator==(const DerivedT &R) const;
+///   - const T &operator*() const;
+///   - T &operator*();
+///   - DerivedT &operator++();
+///
+/// Bidirectional Iterators:
+///   (All methods of forward iterators, plus the following)
+///   - DerivedT &operator--();
+///
+/// Random-access Iterators:
+///   (All methods of bidirectional iterators excluding the following)
+///   - DerivedT &operator++();
+///   - DerivedT &operator--();
+///   (and plus the following)
+///   - bool operator<(const DerivedT &RHS) const;
+///   - DifferenceTypeT operator-(const DerivedT &R) const;
+///   - DerivedT &operator+=(DifferenceTypeT N);
+///   - DerivedT &operator-=(DifferenceTypeT N);
+///
 template <typename DerivedT, typename IteratorCategoryT, typename T,
           typename DifferenceTypeT = std::ptrdiff_t, typename PointerT = T *,
           typename ReferenceT = T &>
@@ -64,6 +91,8 @@ protected:
 
 public:
   DerivedT operator+(DifferenceTypeT n) const {
+    static_assert(std::is_base_of<iterator_facade_base, DerivedT>::value,
+                  "Must pass the derived type to this template!");
     static_assert(
         IsRandomAccess,
         "The '+' operator is only defined for random access iterators.");
@@ -87,6 +116,8 @@ public:
   }
 
   DerivedT &operator++() {
+    static_assert(std::is_base_of<iterator_facade_base, DerivedT>::value,
+                  "Must pass the derived type to this template!");
     return static_cast<DerivedT *>(this)->operator+=(1);
   }
   DerivedT operator++(int) {
@@ -175,7 +206,10 @@ protected:
 
   iterator_adaptor_base() = default;
 
-  explicit iterator_adaptor_base(WrappedIteratorT u) : I(std::move(u)) {}
+  explicit iterator_adaptor_base(WrappedIteratorT u) : I(std::move(u)) {
+    static_assert(std::is_base_of<iterator_adaptor_base, DerivedT>::value,
+                  "Must pass the derived type to this template!");
+  }
 
   const WrappedIteratorT &wrapped() const { return I; }
 
@@ -264,7 +298,7 @@ class pointer_iterator
   mutable T Ptr;
 
 public:
-  pointer_iterator() {}
+  pointer_iterator() = default;
 
   explicit pointer_iterator(WrappedIteratorT u)
       : pointer_iterator::iterator_adaptor_base(std::move(u)) {}
@@ -273,6 +307,6 @@ public:
   const T &operator*() const { return Ptr = &*this->I; }
 };
 
-} // namespace llvm
+} // end namespace llvm
 
-#endif
+#endif // LLVM_ADT_ITERATOR_H

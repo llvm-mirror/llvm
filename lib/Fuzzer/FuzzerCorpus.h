@@ -12,12 +12,15 @@
 #ifndef LLVM_FUZZER_CORPUS
 #define LLVM_FUZZER_CORPUS
 
+#include "FuzzerDefs.h"
+#include "FuzzerIO.h"
+#include "FuzzerRandom.h"
+#include "FuzzerSHA1.h"
+#include "FuzzerTracePC.h"
+#include <algorithm>
+#include <numeric>
 #include <random>
 #include <unordered_set>
-
-#include "FuzzerDefs.h"
-#include "FuzzerRandom.h"
-#include "FuzzerTracePC.h"
 
 namespace fuzzer {
 
@@ -57,6 +60,12 @@ class InputCorpus {
       Res += !II->U.empty();
     return Res;
   }
+  size_t MaxInputSize() const {
+    size_t Res = 0;
+    for (auto II : Inputs)
+        Res = std::max(Res, II->U.size());
+    return Res;
+  }
   bool empty() const { return Inputs.empty(); }
   const Unit &operator[] (size_t Idx) const { return Inputs[Idx]->U; }
   void AddToCorpus(const Unit &U, size_t NumFeatures, bool MayDeleteFile = false) {
@@ -88,7 +97,7 @@ class InputCorpus {
   // Hypothesis: units added to the corpus last are more likely to be
   // interesting. This function gives more weight to the more recent units.
   size_t ChooseUnitIdxToMutate(Random &Rand) {
-    size_t Idx = static_cast<size_t>(CorpusDistribution(Rand.Get_mt19937()));
+    size_t Idx = static_cast<size_t>(CorpusDistribution(Rand));
     assert(Idx < Inputs.size());
     return Idx;
   }
@@ -117,7 +126,7 @@ class InputCorpus {
   void DeleteInput(size_t Idx) {
     InputInfo &II = *Inputs[Idx];
     if (!OutputCorpus.empty() && II.MayDeleteFile)
-      DeleteFile(DirPlusFile(OutputCorpus, Sha1ToString(II.Sha1)));
+      RemoveFile(DirPlusFile(OutputCorpus, Sha1ToString(II.Sha1)));
     Unit().swap(II.U);
     if (FeatureDebug)
       Printf("EVICTED %zd\n", Idx);

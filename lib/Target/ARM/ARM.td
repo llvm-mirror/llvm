@@ -72,8 +72,6 @@ def FeatureHWDiv  : SubtargetFeature<"hwdiv", "HasHardwareDivide", "true",
 def FeatureHWDivARM  : SubtargetFeature<"hwdiv-arm",
                                         "HasHardwareDivideInARM", "true",
                                       "Enable divide instructions in ARM mode">;
-def FeatureT2XtPk : SubtargetFeature<"t2xtpk", "HasT2ExtractPack", "true",
-                                 "Enable Thumb2 extract and pack instructions">;
 def FeatureDB     : SubtargetFeature<"db", "HasDataBarrier", "true",
                                    "Has data barrier (dmb / dsb) instructions">;
 def FeatureV7Clrex : SubtargetFeature<"v7clrex", "HasV7Clrex", "true",
@@ -297,8 +295,7 @@ def HasV7Ops    : SubtargetFeature<"v7", "HasV7Ops", "true",
                                     FeatureV7Clrex]>;
 def HasV8Ops    : SubtargetFeature<"v8", "HasV8Ops", "true",
                                    "Support ARM v8 instructions",
-                                   [HasV7Ops, FeatureAcquireRelease,
-                                    FeatureT2XtPk]>;
+                                   [HasV7Ops, FeatureAcquireRelease]>;
 def HasV8_1aOps : SubtargetFeature<"v8.1a", "HasV8_1aOps", "true",
                                    "Support ARM v8.1a instructions",
                                    [HasV8Ops]>;
@@ -393,8 +390,7 @@ def ARMv5tej  : Architecture<"armv5tej",  "ARMv5tej", [HasV5TEOps]>;
 def ARMv6     : Architecture<"armv6",     "ARMv6",    [HasV6Ops]>;
 
 def ARMv6t2   : Architecture<"armv6t2",   "ARMv6t2",  [HasV6T2Ops,
-                                                       FeatureDSP,
-                                                       FeatureT2XtPk]>;
+                                                       FeatureDSP]>;
 
 def ARMv6k    : Architecture<"armv6k",    "ARMv6k",   [HasV6KOps]>;
 
@@ -415,15 +411,22 @@ def ARMv7a    : Architecture<"armv7-a",   "ARMv7a",   [HasV7Ops,
                                                        FeatureNEON,
                                                        FeatureDB,
                                                        FeatureDSP,
-                                                       FeatureAClass,
-                                                       FeatureT2XtPk]>;
+                                                       FeatureAClass]>;
+
+def ARMv7ve   : Architecture<"armv7ve",   "ARMv7ve",  [HasV7Ops,
+                                                       FeatureNEON,
+                                                       FeatureDB,
+                                                       FeatureDSP,
+                                                       FeatureTrustZone,
+                                                       FeatureMP,
+                                                       FeatureVirtualization,
+                                                       FeatureAClass]>;
 
 def ARMv7r    : Architecture<"armv7-r",   "ARMv7r",   [HasV7Ops,
                                                        FeatureDB,
                                                        FeatureDSP,
                                                        FeatureHWDiv,
-                                                       FeatureRClass,
-                                                       FeatureT2XtPk]>;
+                                                       FeatureRClass]>;
 
 def ARMv7m    : Architecture<"armv7-m",   "ARMv7m",   [HasV7Ops,
                                                        FeatureThumb2,
@@ -438,8 +441,7 @@ def ARMv7em   : Architecture<"armv7e-m",  "ARMv7em",  [HasV7Ops,
                                                        FeatureDB,
                                                        FeatureHWDiv,
                                                        FeatureMClass,
-                                                       FeatureDSP,
-                                                       FeatureT2XtPk]>;
+                                                       FeatureDSP]>;
 
 def ARMv8a    : Architecture<"armv8-a",   "ARMv8a",   [HasV8Ops,
                                                        FeatureAClass,
@@ -481,9 +483,6 @@ def ARMv82a   : Architecture<"armv8.2-a", "ARMv82a",  [HasV8_2aOps,
 def ARMv8r    : Architecture<"armv8-r",   "ARMv8r",   [HasV8Ops,
                                                        FeatureRClass,
                                                        FeatureDB,
-                                                       FeatureHWDiv,
-                                                       FeatureHWDivARM,
-                                                       FeatureT2XtPk,
                                                        FeatureDSP,
                                                        FeatureCRC,
                                                        FeatureMP,
@@ -603,8 +602,6 @@ def : ProcessorModel<"cortex-a7",   CortexA8Model,      [ARMv7a, ProcA7,
                                                          FeatureVMLxForwarding,
                                                          FeatureMP,
                                                          FeatureVFP4,
-                                                         FeatureHWDiv,
-                                                         FeatureHWDivARM,
                                                          FeatureVirtualization]>;
 
 def : ProcessorModel<"cortex-a8",   CortexA8Model,      [ARMv7a, ProcA8,
@@ -636,8 +633,6 @@ def : ProcessorModel<"cortex-a12",  CortexA9Model,      [ARMv7a, ProcA12,
                                                          FeatureTrustZone,
                                                          FeatureVMLxForwarding,
                                                          FeatureVFP4,
-                                                         FeatureHWDiv,
-                                                         FeatureHWDivARM,
                                                          FeatureAvoidPartialCPSR,
                                                          FeatureVirtualization,
                                                          FeatureMP]>;
@@ -651,8 +646,6 @@ def : ProcessorModel<"cortex-a15",  CortexA9Model,      [ARMv7a, ProcA15,
                                                          FeatureVFP4,
                                                          FeatureMP,
                                                          FeatureCheckVLDnAlign,
-                                                         FeatureHWDiv,
-                                                         FeatureHWDivARM,
                                                          FeatureAvoidPartialCPSR,
                                                          FeatureVirtualization]>;
 
@@ -663,8 +656,6 @@ def : ProcessorModel<"cortex-a17",  CortexA9Model,      [ARMv7a, ProcA17,
                                                          FeatureMP,
                                                          FeatureVMLxForwarding,
                                                          FeatureVFP4,
-                                                         FeatureHWDiv,
-                                                         FeatureHWDivARM,
                                                          FeatureAvoidPartialCPSR,
                                                          FeatureVirtualization]>;
 
@@ -759,6 +750,15 @@ def : ProcNoItin<"cortex-m7",                           [ARMv7em,
                                                          FeatureFPARMv8,
                                                          FeatureD16]>;
 
+def : ProcNoItin<"cortex-m23",                          [ARMv8mBaseline,
+                                                         FeatureNoMovt]>;
+
+def : ProcNoItin<"cortex-m33",                          [ARMv8mMainline,
+                                                         FeatureDSP,
+                                                         FeatureFPARMv8,
+                                                         FeatureD16,
+                                                         FeatureVFPOnlySP]>;
+
 def : ProcNoItin<"cortex-a32",                           [ARMv8a,
                                                          FeatureHWDiv,
                                                          FeatureHWDivARM,
@@ -823,7 +823,13 @@ def : ProcNoItin<"exynos-m2",                           [ARMv8a, ProcExynosM1,
                                                          FeatureCrypto,
                                                          FeatureCRC]>;
 
-def : ProcNoItin<"cortex-r52",                          [ARMv8r, ProcR52,
+def : ProcNoItin<"exynos-m3",                           [ARMv8a, ProcExynosM1,
+                                                         FeatureHWDiv,
+                                                         FeatureHWDivARM,
+                                                         FeatureCrypto,
+                                                         FeatureCRC]>;
+
+def : ProcessorModel<"cortex-r52", CortexR52Model,      [ARMv8r, ProcR52,
                                                          FeatureFPAO]>;
 
 //===----------------------------------------------------------------------===//
@@ -831,6 +837,8 @@ def : ProcNoItin<"cortex-r52",                          [ARMv8r, ProcR52,
 //===----------------------------------------------------------------------===//
 
 include "ARMRegisterInfo.td"
+
+include "ARMRegisterBanks.td"
 
 include "ARMCallingConv.td"
 

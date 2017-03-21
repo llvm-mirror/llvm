@@ -1,6 +1,6 @@
-; RUN: llc -march=amdgcn -mcpu=SI -enable-misched < %s | FileCheck -check-prefix=SI -check-prefix=GCN -check-prefix=FUNC %s
-; RUN: llc -march=amdgcn -mcpu=bonaire -enable-misched < %s | FileCheck -check-prefix=CI -check-prefix=GCN -check-prefix=FUNC %s
-; RUN: llc -march=amdgcn -mcpu=tonga -enable-misched < %s | FileCheck -check-prefix=CI -check-prefix=GCN -check-prefix=FUNC %s
+; RUN: llc -march=amdgcn -verify-machineinstrs  < %s | FileCheck -check-prefix=SI -check-prefix=GCN -check-prefix=FUNC %s
+; RUN: llc -march=amdgcn -mcpu=bonaire -verify-machineinstrs < %s | FileCheck -check-prefix=CI -check-prefix=GCN -check-prefix=FUNC %s
+; RUN: llc -march=amdgcn -mcpu=tonga -mattr=-flat-for-global -verify-machineinstrs < %s | FileCheck -check-prefix=CI -check-prefix=GCN -check-prefix=FUNC %s
 
 ; FUNC-LABEL: {{^}}frem_f32:
 ; GCN-DAG: buffer_load_dword [[X:v[0-9]+]], {{.*$}}
@@ -12,8 +12,8 @@
 ; GCN: v_mul_f32_e32
 ; GCN: v_div_fmas_f32
 ; GCN: v_div_fixup_f32
-; GCN: v_trunc_f32_e32
-; GCN: v_mad_f32
+; GCN: v_trunc_f32_e32 v{{[0-9]+}}, v{{[0-9]+}}
+; GCN: v_mad_f32 v{{[0-9]+}}, -v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}}
 ; GCN: s_endpgm
 define void @frem_f32(float addrspace(1)* %out, float addrspace(1)* %in1,
                       float addrspace(1)* %in2) #0 {
@@ -33,7 +33,6 @@ define void @frem_f32(float addrspace(1)* %out, float addrspace(1)* %in1,
 ; GCN: v_trunc_f32_e32 [[TRUNC:v[0-9]+]], [[DIV]]
 ; GCN: v_mad_f32 [[RESULT:v[0-9]+]], -[[TRUNC]], [[Y]], [[X]]
 ; GCN: buffer_store_dword [[RESULT]]
-; GCN: s_endpgm
 define void @unsafe_frem_f32(float addrspace(1)* %out, float addrspace(1)* %in1,
                              float addrspace(1)* %in2) #1 {
    %gep2 = getelementptr float, float addrspace(1)* %in2, i32 4

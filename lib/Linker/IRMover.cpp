@@ -169,11 +169,9 @@ bool TypeMapTy::areTypesIsomorphic(Type *DstTy, Type *SrcTy) {
     if (DSTy->isLiteral() != SSTy->isLiteral() ||
         DSTy->isPacked() != SSTy->isPacked())
       return false;
-  } else if (ArrayType *DATy = dyn_cast<ArrayType>(DstTy)) {
-    if (DATy->getNumElements() != cast<ArrayType>(SrcTy)->getNumElements())
-      return false;
-  } else if (VectorType *DVTy = dyn_cast<VectorType>(DstTy)) {
-    if (DVTy->getNumElements() != cast<VectorType>(SrcTy)->getNumElements())
+  } else if (auto *DSeqTy = dyn_cast<SequentialType>(DstTy)) {
+    if (DSeqTy->getNumElements() !=
+        cast<SequentialType>(SrcTy)->getNumElements())
       return false;
   }
 
@@ -397,11 +395,12 @@ class IRLinker {
       Worklist.push_back(GV);
   }
 
-  /// Flag whether the ModuleInlineAsm string in Src should be linked with
-  /// (concatenated into) the ModuleInlineAsm string for the destination
-  /// module. It should be true for full LTO, but not when importing for
-  /// ThinLTO, otherwise we can have duplicate symbols.
-  bool LinkModuleInlineAsm;
+  /// Whether we are importing globals for ThinLTO, as opposed to linking the
+  /// source module. If this flag is set, it means that we can rely on some
+  /// other object file to define any non-GlobalValue entities defined by the
+  /// source module. This currently causes us to not link retained types in
+  /// debug info metadata and module inline asm.
+  bool IsPerformingImport;
 
   /// Set to true when all global value body linking is complete (including
   /// lazy linking). Used to prevent metadata linking from creating new
@@ -482,6 +481,10 @@ class IRLinker {
   Function *copyFunctionProto(const Function *SF);
   GlobalValue *copyGlobalAliasProto(const GlobalAlias *SGA);
 
+  /// When importing for ThinLTO, prevent importing of types listed on
+  /// the DICompileUnit that we don't need a copy of in the importing
+  /// module.
+  void prepareCompileUnitsForImport();
   void linkNamedMDNodes();
 
 public:
@@ -489,10 +492,10 @@ public:
            IRMover::IdentifiedStructTypeSet &Set, std::unique_ptr<Module> SrcM,
            ArrayRef<GlobalValue *> ValuesToLink,
            std::function<void(GlobalValue &, IRMover::ValueAdder)> AddLazyFor,
-           bool LinkModuleInlineAsm)
+           bool IsPerformingImport)
       : DstM(DstM), SrcM(std::move(SrcM)), AddLazyFor(std::move(AddLazyFor)),
         TypeMap(Set), GValMaterializer(*this), LValMaterializer(*this),
-        SharedMDs(SharedMDs), LinkModuleInlineAsm(LinkModuleInlineAsm),
+        SharedMDs(SharedMDs), IsPerformingImport(IsPerformingImport),
         Mapper(ValueMap, RF_MoveDistinctMDs | RF_IgnoreMissingLocals, &TypeMap,
                &GValMaterializer),
         AliasMCID(Mapper.registerAlternateMappingContext(AliasValueMap,
@@ -500,6 +503,8 @@ public:
     ValueMap.getMDMap() = std::move(SharedMDs);
     for (GlobalValue *GV : ValuesToLink)
       maybeAdd(GV);
+    if (IsPerformingImport)
+      prepareCompileUnitsForImport();
   }
   ~IRLinker() { SharedMDs = std::move(*ValueMap.getMDMap()); }
 
@@ -568,7 +573,7 @@ Value *IRLinker::materialize(Value *V, bool ForAlias) {
   }
 
   // When linking a global for an alias, it will always be linked. However we
-  // need to check if it was not already scheduled to satify a reference from a
+  // need to check if it was not already scheduled to satisfy a reference from a
   // regular global value initializer. We know if it has been schedule if the
   // "New" GlobalValue that is mapped here for the alias is the same as the one
   // already mapped. If there is an entry in the ValueMap but the value is
@@ -700,6 +705,14 @@ void IRLinker::computeTypeMapping() {
   for (StructType *ST : Types) {
     if (!ST->hasName())
       continue;
+
+    if (TypeMap.DstStructTypesSet.hasType(ST)) {
+      // This is actually a type from the destination module.
+      // getIdentifiedStructTypes() can have found it by walking debug info
+      // metadata nodes, some of which get linked by name when ODR Type Uniquing
+      // is enabled on the Context, from the source to the destination module.
+      continue;
+    }
 
     // Check to see if there is a dot in the name followed by a digit.
     size_t DotPos = ST->getName().rfind('.');
@@ -858,9 +871,6 @@ bool IRLinker::shouldLink(GlobalValue *DGV, GlobalValue &SGV) {
   if (DGV && !DGV->isDeclarationForLinker())
     return false;
 
-  if (SGV.hasAvailableExternallyLinkage())
-    return true;
-
   if (SGV.isDeclaration() || DoneLinkingBodies)
     return false;
 
@@ -950,8 +960,6 @@ Expected<Constant *> IRLinker::linkGlobalValueProto(GlobalValue *SGV,
 /// Update the initializers in the Dest module now that all globals that may be
 /// referenced are in Dest.
 void IRLinker::linkGlobalVariable(GlobalVariable &Dst, GlobalVariable &Src) {
-  Dst.copyMetadata(&Src, 0);
-
   // Figure out what the initializer looks like in the dest module.
   Mapper.scheduleMapGlobalInitializer(Dst, *Src.getInitializer());
 }
@@ -999,6 +1007,70 @@ Error IRLinker::linkGlobalValueBody(GlobalValue &Dst, GlobalValue &Src) {
   }
   linkAliasBody(cast<GlobalAlias>(Dst), cast<GlobalAlias>(Src));
   return Error::success();
+}
+
+void IRLinker::prepareCompileUnitsForImport() {
+  NamedMDNode *SrcCompileUnits = SrcM->getNamedMetadata("llvm.dbg.cu");
+  if (!SrcCompileUnits)
+    return;
+  // When importing for ThinLTO, prevent importing of types listed on
+  // the DICompileUnit that we don't need a copy of in the importing
+  // module. They will be emitted by the originating module.
+  for (unsigned I = 0, E = SrcCompileUnits->getNumOperands(); I != E; ++I) {
+    auto *CU = cast<DICompileUnit>(SrcCompileUnits->getOperand(I));
+    assert(CU && "Expected valid compile unit");
+    // Enums, macros, and retained types don't need to be listed on the
+    // imported DICompileUnit. This means they will only be imported
+    // if reached from the mapped IR. Do this by setting their value map
+    // entries to nullptr, which will automatically prevent their importing
+    // when reached from the DICompileUnit during metadata mapping.
+    ValueMap.MD()[CU->getRawEnumTypes()].reset(nullptr);
+    ValueMap.MD()[CU->getRawMacros()].reset(nullptr);
+    ValueMap.MD()[CU->getRawRetainedTypes()].reset(nullptr);
+    // If we ever start importing global variable defs, we'll need to
+    // add their DIGlobalVariable to the globals list on the imported
+    // DICompileUnit. Confirm none are imported, and then we can
+    // map the list of global variables to nullptr.
+    assert(none_of(
+               ValuesToLink,
+               [](const GlobalValue *GV) { return isa<GlobalVariable>(GV); }) &&
+           "Unexpected importing of a GlobalVariable definition");
+    ValueMap.MD()[CU->getRawGlobalVariables()].reset(nullptr);
+
+    // Imported entities only need to be mapped in if they have local
+    // scope, as those might correspond to an imported entity inside a
+    // function being imported (any locally scoped imported entities that
+    // don't end up referenced by an imported function will not be emitted
+    // into the object). Imported entities not in a local scope
+    // (e.g. on the namespace) only need to be emitted by the originating
+    // module. Create a list of the locally scoped imported entities, and
+    // replace the source CUs imported entity list with the new list, so
+    // only those are mapped in.
+    // FIXME: Locally-scoped imported entities could be moved to the
+    // functions they are local to instead of listing them on the CU, and
+    // we would naturally only link in those needed by function importing.
+    SmallVector<TrackingMDNodeRef, 4> AllImportedModules;
+    bool ReplaceImportedEntities = false;
+    for (auto *IE : CU->getImportedEntities()) {
+      DIScope *Scope = IE->getScope();
+      assert(Scope && "Invalid Scope encoding!");
+      if (isa<DILocalScope>(Scope))
+        AllImportedModules.emplace_back(IE);
+      else
+        ReplaceImportedEntities = true;
+    }
+    if (ReplaceImportedEntities) {
+      if (!AllImportedModules.empty())
+        CU->replaceImportedEntities(MDTuple::get(
+            CU->getContext(),
+            SmallVector<Metadata *, 16>(AllImportedModules.begin(),
+                                        AllImportedModules.end())));
+      else
+        // If there were no local scope imported entities, we can map
+        // the whole list to nullptr.
+        ValueMap.MD()[CU->getRawImportedEntities()].reset(nullptr);
+    }
+  }
 }
 
 /// Insert all of the named MDNodes in Src into the Dest module.
@@ -1223,7 +1295,7 @@ Error IRLinker::run() {
   DstM.setTargetTriple(mergeTriples(SrcTriple, DstTriple));
 
   // Append the module inline asm string.
-  if (LinkModuleInlineAsm && !SrcM->getModuleInlineAsm().empty()) {
+  if (!IsPerformingImport && !SrcM->getModuleInlineAsm().empty()) {
     if (DstM.getModuleInlineAsm().empty())
       DstM.setModuleInlineAsm(SrcM->getModuleInlineAsm());
     else
@@ -1344,7 +1416,7 @@ bool IRMover::IdentifiedStructTypeSet::hasType(StructType *Ty) {
 
 IRMover::IRMover(Module &M) : Composite(M) {
   TypeFinder StructTypes;
-  StructTypes.run(M, true);
+  StructTypes.run(M, /* OnlyNamed */ false);
   for (StructType *Ty : StructTypes) {
     if (Ty->isOpaque())
       IdentifiedStructTypes.addOpaque(Ty);
@@ -1362,10 +1434,10 @@ IRMover::IRMover(Module &M) : Composite(M) {
 Error IRMover::move(
     std::unique_ptr<Module> Src, ArrayRef<GlobalValue *> ValuesToLink,
     std::function<void(GlobalValue &, ValueAdder Add)> AddLazyFor,
-    bool LinkModuleInlineAsm) {
+    bool IsPerformingImport) {
   IRLinker TheIRLinker(Composite, SharedMDs, IdentifiedStructTypes,
                        std::move(Src), ValuesToLink, std::move(AddLazyFor),
-                       LinkModuleInlineAsm);
+                       IsPerformingImport);
   Error E = TheIRLinker.run();
   Composite.dropTriviallyDeadConstantArrays();
   return E;

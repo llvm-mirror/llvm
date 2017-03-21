@@ -73,7 +73,7 @@ void TargetFrameLowering::determineCalleeSaves(MachineFunction &MF,
     return;
 
   // Get the callee saved register list...
-  const MCPhysReg *CSRegs = TRI.getCalleeSavedRegs(&MF);
+  const MCPhysReg *CSRegs = MF.getRegInfo().getCalleeSavedRegs();
 
   // Early exit if there are no callee saved registers.
   if (!CSRegs || CSRegs[0] == 0)
@@ -84,7 +84,7 @@ void TargetFrameLowering::determineCalleeSaves(MachineFunction &MF,
     return;
 
   // Functions which call __builtin_unwind_init get all their registers saved.
-  bool CallsUnwindInit = MF.getMMI().callsUnwindInit();
+  bool CallsUnwindInit = MF.callsUnwindInit();
   const MachineRegisterInfo &MRI = MF.getRegInfo();
   for (unsigned i = 0; CSRegs[i]; ++i) {
     unsigned Reg = CSRegs[i];

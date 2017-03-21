@@ -138,7 +138,7 @@ std::string llvm::getQualifiedName(const Record *R) {
   if (R->getValue("Namespace"))
      Namespace = R->getValueAsString("Namespace");
   if (Namespace.empty()) return R->getName();
-  return Namespace + "::" + R->getName();
+  return Namespace + "::" + R->getName().str();
 }
 
 
@@ -157,7 +157,7 @@ CodeGenTarget::CodeGenTarget(RecordKeeper &records)
 CodeGenTarget::~CodeGenTarget() {
 }
 
-const std::string &CodeGenTarget::getName() const {
+const StringRef CodeGenTarget::getName() const {
   return TargetRec->getName();
 }
 
@@ -593,7 +593,12 @@ CodeGenIntrinsic::CodeGenIntrinsic(Record *R) {
     else if (Property->getName() == "IntrWriteMem")
       ModRef = ModRefBehavior(ModRef & ~MR_Ref);
     else if (Property->getName() == "IntrArgMemOnly")
-      ModRef = ModRefBehavior(ModRef & ~MR_Anywhere);
+      ModRef = ModRefBehavior((ModRef & ~MR_Anywhere) | MR_ArgMem);
+    else if (Property->getName() == "IntrInaccessibleMemOnly")
+      ModRef = ModRefBehavior((ModRef & ~MR_Anywhere) | MR_InaccessibleMem);
+    else if (Property->getName() == "IntrInaccessibleMemOrArgMemOnly")
+      ModRef = ModRefBehavior((ModRef & ~MR_Anywhere) | MR_ArgMem |
+                              MR_InaccessibleMem);
     else if (Property->getName() == "Commutative")
       isCommutative = true;
     else if (Property->getName() == "Throws")

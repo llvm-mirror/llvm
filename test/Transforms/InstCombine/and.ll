@@ -176,7 +176,7 @@ define i8 @test16(i8 %A) {
 define i8 @test17(i8 %X, i8 %Y) {
 ; CHECK-LABEL: @test17(
 ; CHECK-NEXT:    [[Y_NOT:%.*]] = xor i8 %Y, -1
-; CHECK-NEXT:    [[D:%.*]] = or i8 %X, [[Y_NOT]]
+; CHECK-NEXT:    [[D:%.*]] = or i8 [[Y_NOT]], %X
 ; CHECK-NEXT:    ret i8 [[D]]
 ;
   %B = xor i8 %X, -1
@@ -382,6 +382,18 @@ define i32 @test31(i1 %X) {
   ret i32 %A
 }
 
+; Demanded bit analysis allows us to eliminate the add.
+
+define <2 x i32> @and_demanded_bits_splat_vec(<2 x i32> %x) {
+; CHECK-LABEL: @and_demanded_bits_splat_vec(
+; CHECK-NEXT:    [[Z:%.*]] = and <2 x i32> %x, <i32 7, i32 7>
+; CHECK-NEXT:    ret <2 x i32> [[Z]]
+;
+  %y = add <2 x i32> %x, <i32 8, i32 8>
+  %z = and <2 x i32> %y, <i32 7, i32 7>
+  ret <2 x i32> %z
+}
+
 define i32 @test32(i32 %In) {
 ; CHECK-LABEL: @test32(
 ; CHECK-NEXT:    ret i32 0
@@ -425,3 +437,60 @@ define <2 x i32> @PR24942(<2 x i32> %x) {
   ret <2 x i32> %and
 }
 
+define i64 @test35(i32 %X) {
+; CHECK-LABEL: @test35(
+; CHECK-NEXT:  %[[sub:.*]] = sub i32 0, %X
+; CHECK-NEXT:  %[[and:.*]] = and i32 %[[sub]], 240
+; CHECK-NEXT:  %[[cst:.*]] = zext i32 %[[and]] to i64
+; CHECK-NEXT:  ret i64 %[[cst]]
+  %zext = zext i32 %X to i64
+  %zsub = sub i64 0, %zext
+  %res = and i64 %zsub, 240
+  ret i64 %res
+}
+
+define i64 @test36(i32 %X) {
+; CHECK-LABEL: @test36(
+; CHECK-NEXT:  %[[sub:.*]] = add i32 %X, 7
+; CHECK-NEXT:  %[[and:.*]] = and i32 %[[sub]], 240
+; CHECK-NEXT:  %[[cst:.*]] = zext i32 %[[and]] to i64
+; CHECK-NEXT:  ret i64 %[[cst]]
+  %zext = zext i32 %X to i64
+  %zsub = add i64 %zext, 7
+  %res = and i64 %zsub, 240
+  ret i64 %res
+}
+
+define i64 @test37(i32 %X) {
+; CHECK-LABEL: @test37(
+; CHECK-NEXT:  %[[sub:.*]] = mul i32 %X, 7
+; CHECK-NEXT:  %[[and:.*]] = and i32 %[[sub]], 240
+; CHECK-NEXT:  %[[cst:.*]] = zext i32 %[[and]] to i64
+; CHECK-NEXT:  ret i64 %[[cst]]
+  %zext = zext i32 %X to i64
+  %zsub = mul i64 %zext, 7
+  %res = and i64 %zsub, 240
+  ret i64 %res
+}
+
+define i64 @test38(i32 %X) {
+; CHECK-LABEL: @test38(
+; CHECK-NEXT:  %[[and:.*]] = and i32 %X, 240
+; CHECK-NEXT:  %[[cst:.*]] = zext i32 %[[and]] to i64
+; CHECK-NEXT:  ret i64 %[[cst]]
+  %zext = zext i32 %X to i64
+  %zsub = xor i64 %zext, 7
+  %res = and i64 %zsub, 240
+  ret i64 %res
+}
+
+define i64 @test39(i32 %X) {
+; CHECK-LABEL: @test39(
+; CHECK-NEXT:  %[[and:.*]] = and i32 %X, 240
+; CHECK-NEXT:  %[[cst:.*]] = zext i32 %[[and]] to i64
+; CHECK-NEXT:  ret i64 %[[cst]]
+  %zext = zext i32 %X to i64
+  %zsub = or i64 %zext, 7
+  %res = and i64 %zsub, 240
+  ret i64 %res
+}

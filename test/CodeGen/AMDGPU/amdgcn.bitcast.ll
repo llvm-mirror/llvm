@@ -3,19 +3,15 @@
 
 ; This test just checks that the compiler doesn't crash.
 
-declare void @llvm.SI.export(i32, i32, i32, i32, i32, float, float, float, float)
-
 ; FUNC-LABEL: {{^}}v32i8_to_v8i32:
-; SI: s_endpgm
-define amdgpu_ps void @v32i8_to_v8i32(<32 x i8> addrspace(2)* inreg) #0 {
+define amdgpu_ps float @v32i8_to_v8i32(<32 x i8> addrspace(2)* inreg) #0 {
 entry:
   %1 = load <32 x i8>, <32 x i8> addrspace(2)* %0
   %2 = bitcast <32 x i8> %1 to <8 x i32>
   %3 = extractelement <8 x i32> %2, i32 1
   %4 = icmp ne i32 %3, 0
   %5 = select i1 %4, float 0.0, float 1.0
-  call void @llvm.SI.export(i32 15, i32 1, i32 1, i32 0, i32 1, float %5, float %5, float %5, float %5)
-  ret void
+  ret float %5
 }
 
 ; FUNC-LABEL: {{^}}i8ptr_v16i8ptr:
@@ -30,15 +26,37 @@ entry:
 
 define void @f32_to_v2i16(<2 x i16> addrspace(1)* %out, float addrspace(1)* %in) nounwind {
   %load = load float, float addrspace(1)* %in, align 4
-  %bc = bitcast float %load to <2 x i16>
-  store <2 x i16> %bc, <2 x i16> addrspace(1)* %out, align 4
+  %fadd32 = fadd float %load, 1.0
+  %bc = bitcast float %fadd32 to <2 x i16>
+  %add.bitcast = add <2 x i16> %bc, <i16 2, i16 2>
+  store <2 x i16> %add.bitcast, <2 x i16> addrspace(1)* %out
   ret void
 }
 
 define void @v2i16_to_f32(float addrspace(1)* %out, <2 x i16> addrspace(1)* %in) nounwind {
   %load = load <2 x i16>, <2 x i16> addrspace(1)* %in, align 4
-  %bc = bitcast <2 x i16> %load to float
-  store float %bc, float addrspace(1)* %out, align 4
+  %add.v2i16 = add <2 x i16> %load, <i16 2, i16 2>
+  %bc = bitcast <2 x i16> %add.v2i16 to float
+  %fadd.bitcast = fadd float %bc, 1.0
+  store float %fadd.bitcast, float addrspace(1)* %out
+  ret void
+}
+
+define void @f32_to_v2f16(<2 x half> addrspace(1)* %out, float addrspace(1)* %in) nounwind {
+  %load = load float, float addrspace(1)* %in, align 4
+  %fadd32 = fadd float %load, 1.0
+  %bc = bitcast float %fadd32 to <2 x half>
+  %add.bitcast = fadd <2 x half> %bc, <half 2.0, half 2.0>
+  store <2 x half> %add.bitcast, <2 x half> addrspace(1)* %out
+  ret void
+}
+
+define void @v2f16_to_f32(float addrspace(1)* %out, <2 x half> addrspace(1)* %in) nounwind {
+  %load = load <2 x half>, <2 x half> addrspace(1)* %in, align 4
+  %add.v2f16 = fadd <2 x half> %load, <half 2.0, half 2.0>
+  %bc = bitcast <2 x half> %add.v2f16 to float
+  %fadd.bitcast = fadd float %bc, 1.0
+  store float %fadd.bitcast, float addrspace(1)* %out
   ret void
 }
 
@@ -62,7 +80,8 @@ define void @bitcast_v2i32_to_f64(double addrspace(1)* %out, <2 x i32> addrspace
   %val = load <2 x i32>, <2 x i32> addrspace(1)* %in, align 8
   %add = add <2 x i32> %val, <i32 4, i32 9>
   %bc = bitcast <2 x i32> %add to double
-  store double %bc, double addrspace(1)* %out, align 8
+  %fadd.bc = fadd double %bc, 1.0
+  store double %fadd.bc, double addrspace(1)* %out, align 8
   ret void
 }
 

@@ -10,15 +10,9 @@ entry:
 ; The FIXME below is due to the lowering for BUILD_VECTOR needing a re-vamp
 ; which will happen in a subsequent patch.
 ; CHECK-LABEL: test1
-; FIXME: mtvsrdd 34, 4, 3
-; CHECK: mtvsrd {{[0-9]+}}, 3
-; CHECK: mtvsrd {{[0-9]+}}, 4
-; CHECK: xxmrgld
+; CHECK: mtvsrdd 34, 4, 3
 ; CHECK-BE-LABEL: test1
-; FIXME-BE: mtvsrdd 34, 3, 4
-; CHECK-BE: mtvsrd {{[0-9]+}}, 4
-; CHECK-BE: mtvsrd {{[0-9]+}}, 3
-; CHECK-BE: xxmrghd
+; CHECK-BE: mtvsrdd 34, 3, 4
   %vecins = insertelement <2 x i64> undef, i64 %a, i32 0
   %vecins1 = insertelement <2 x i64> %vecins, i64 %b, i32 1
   ret <2 x i64> %vecins1
@@ -156,6 +150,15 @@ entry:
 ; CHECK-BE-LABEL: test13
 ; CHECK-BE: xxspltib 34, 129
   ret <16 x i8> <i8 -127, i8 -127, i8 -127, i8 -127, i8 -127, i8 -127, i8 -127, i8 -127, i8 -127, i8 -127, i8 -127, i8 -127, i8 -127, i8 -127, i8 -127, i8 -127>
+}
+
+define <16 x i8> @test13E127() {
+entry:
+; CHECK-LABEL: test13E127
+; CHECK: xxspltib 34, 200
+; CHECK-BE-LABEL: test13E127
+; CHECK-BE: xxspltib 34, 200
+  ret <16 x i8> <i8 200, i8 200, i8 200, i8 200, i8 200, i8 200, i8 200, i8 200, i8 200, i8 200, i8 200, i8 200, i8 200, i8 200, i8 200, i8 200>
 }
 
 define <4 x i32> @test14(<4 x i32> %a, i32* nocapture readonly %b) {
