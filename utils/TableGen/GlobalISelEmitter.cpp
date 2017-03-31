@@ -42,6 +42,7 @@
 #include "llvm/TableGen/Record.h"
 #include "llvm/TableGen/TableGenBackend.h"
 #include <string>
+#include <numeric>
 using namespace llvm;
 
 #define DEBUG_TYPE "gisel-emitter"
@@ -57,6 +58,7 @@ static cl::opt<bool> WarnOnSkippedPatterns(
              "in the GlobalISel selector"),
     cl::init(false));
 
+namespace {
 //===- Helper functions ---------------------------------------------------===//
 
 /// This class stands in for LLT wherever we want to tablegen-erate an
@@ -80,6 +82,55 @@ public:
     }
     llvm_unreachable("Unhandled LLT");
   }
+
+  const LLT &get() const { return Ty; }
+};
+
+class InstructionMatcher;
+class OperandPlaceholder {
+private:
+  enum PlaceholderKind {
+    OP_MatchReference,
+    OP_Temporary,
+  } Kind;
+
+  struct MatchReferenceData {
+    InstructionMatcher *InsnMatcher;
+    StringRef InsnVarName;
+    StringRef SymbolicName;
+  };
+
+  struct TemporaryData {
+    unsigned OpIdx;
+  };
+
+  union {
+    struct MatchReferenceData MatchReference;
+    struct TemporaryData Temporary;
+  };
+
+  OperandPlaceholder(PlaceholderKind Kind) : Kind(Kind) {}
+
+public:
+  ~OperandPlaceholder() {}
+
+  static OperandPlaceholder
+  CreateMatchReference(InstructionMatcher *InsnMatcher,
+                       const StringRef InsnVarName, const StringRef SymbolicName) {
+    OperandPlaceholder Result(OP_MatchReference);
+    Result.MatchReference.InsnMatcher = InsnMatcher;
+    Result.MatchReference.InsnVarName = InsnVarName;
+    Result.MatchReference.SymbolicName = SymbolicName;
+    return Result;
+  }
+
+  static OperandPlaceholder CreateTemporary(unsigned OpIdx) {
+    OperandPlaceholder Result(OP_Temporary);
+    Result.Temporary.OpIdx = OpIdx;
+    return Result;
+  }
+
+  void emitCxxValueExpr(raw_ostream &OS) const;
 };
 
 /// Convert an MVT to an equivalent LLT if possible, or the invalid LLT() for
@@ -98,6 +149,55 @@ static bool isTrivialOperatorNode(const TreePatternNode *N) {
 }
 
 //===- Matchers -----------------------------------------------------------===//
+
+class MatchAction;
+
+/// Generates code to check that a match rule matches.
+class RuleMatcher {
+  /// A list of matchers that all need to succeed for the current rule to match.
+  /// FIXME: This currently supports a single match position but could be
+  /// extended to support multiple positions to support div/rem fusion or
+  /// load-multiple instructions.
+  std::vector<std::unique_ptr<InstructionMatcher>> Matchers;
+
+  /// A list of actions that need to be taken when all predicates in this rule
+  /// have succeeded.
+  std::vector<std::unique_ptr<MatchAction>> Actions;
+
+  /// A map of instruction matchers to the local variables created by
+  /// emitCxxCaptureStmts().
+  std::map<const InstructionMatcher *, std::string> InsnVariableNames;
+
+  /// ID for the next instruction variable defined with defineInsnVar()
+  unsigned NextInsnVarID;
+
+public:
+  RuleMatcher()
+      : Matchers(), Actions(), InsnVariableNames(), NextInsnVarID(0) {}
+  RuleMatcher(RuleMatcher &&Other) = default;
+  RuleMatcher &operator=(RuleMatcher &&Other) = default;
+
+  InstructionMatcher &addInstructionMatcher();
+
+  template <class Kind, class... Args> Kind &addAction(Args &&... args);
+
+  std::string defineInsnVar(raw_ostream &OS, const InstructionMatcher &Matcher,
+                            StringRef Value);
+  StringRef getInsnVarName(const InstructionMatcher &InsnMatcher) const;
+
+  void emitCxxCaptureStmts(raw_ostream &OS, StringRef Expr);
+
+  void emit(raw_ostream &OS);
+
+  /// Compare the priority of this object and B.
+  ///
+  /// Returns true if this object is more important than B.
+  bool isHigherPriorityThan(const RuleMatcher &B) const;
+
+  /// Report the maximum number of temporary operands needed by the rule
+  /// matcher.
+  unsigned countTemporaryOperands() const;
+};
 
 template <class PredicateTy> class PredicateListMatcher {
 private:
@@ -154,6 +254,7 @@ public:
   /// but OPM_Int must have priority over OPM_RegBank since constant integers
   /// are represented by a virtual register defined by a G_CONSTANT instruction.
   enum PredicateKind {
+    OPM_ComplexPattern,
     OPM_Int,
     OPM_LLT,
     OPM_RegBank,
@@ -170,7 +271,7 @@ public:
   PredicateKind getKind() const { return Kind; }
 
   /// Emit a C++ expression that checks the predicate for the given operand.
-  virtual void emitCxxPredicateExpr(raw_ostream &OS,
+  virtual void emitCxxPredicateExpr(raw_ostream &OS, RuleMatcher &Rule,
                                     StringRef OperandExpr) const = 0;
 
   /// Compare the priority of this object and B.
@@ -179,6 +280,10 @@ public:
   virtual bool isHigherPriorityThan(const OperandPredicateMatcher &B) const {
     return Kind < B.Kind;
   };
+
+  /// Report the maximum number of temporary operands needed by the predicate
+  /// matcher.
+  virtual unsigned countTemporaryOperands() const { return 0; }
 };
 
 /// Generates code to check that an operand is a particular LLT.
@@ -194,11 +299,44 @@ public:
     return P->getKind() == OPM_LLT;
   }
 
-  void emitCxxPredicateExpr(raw_ostream &OS,
+  void emitCxxPredicateExpr(raw_ostream &OS, RuleMatcher &Rule,
                             StringRef OperandExpr) const override {
     OS << "MRI.getType(" << OperandExpr << ".getReg()) == (";
     Ty.emitCxxConstructorCall(OS);
     OS << ")";
+  }
+};
+
+/// Generates code to check that an operand is a particular target constant.
+class ComplexPatternOperandMatcher : public OperandPredicateMatcher {
+protected:
+  const Record &TheDef;
+  /// The index of the first temporary operand to allocate to this
+  /// ComplexPattern.
+  unsigned BaseTemporaryID;
+
+  unsigned getNumOperands() const {
+    return TheDef.getValueAsDag("Operands")->getNumArgs();
+  }
+
+public:
+  ComplexPatternOperandMatcher(const Record &TheDef, unsigned BaseTemporaryID)
+      : OperandPredicateMatcher(OPM_ComplexPattern), TheDef(TheDef),
+        BaseTemporaryID(BaseTemporaryID) {}
+
+  void emitCxxPredicateExpr(raw_ostream &OS, RuleMatcher &Rule,
+                            StringRef OperandExpr) const override {
+    OS << TheDef.getValueAsString("MatcherFn") << "(" << OperandExpr;
+    for (unsigned I = 0; I < getNumOperands(); ++I) {
+      OS << ", ";
+      OperandPlaceholder::CreateTemporary(BaseTemporaryID + I)
+          .emitCxxValueExpr(OS);
+    }
+    OS << ")";
+  }
+
+  unsigned countTemporaryOperands() const override {
+    return getNumOperands();
   }
 };
 
@@ -215,7 +353,7 @@ public:
     return P->getKind() == OPM_RegBank;
   }
 
-  void emitCxxPredicateExpr(raw_ostream &OS,
+  void emitCxxPredicateExpr(raw_ostream &OS, RuleMatcher &Rule,
                             StringRef OperandExpr) const override {
     OS << "(&RBI.getRegBankFromRegClass(" << RC.getQualifiedName()
        << "RegClass) == RBI.getRegBank(" << OperandExpr
@@ -232,7 +370,7 @@ public:
     return P->getKind() == OPM_MBB;
   }
 
-  void emitCxxPredicateExpr(raw_ostream &OS,
+  void emitCxxPredicateExpr(raw_ostream &OS, RuleMatcher &Rule,
                             StringRef OperandExpr) const override {
     OS << OperandExpr << ".isMBB()";
   }
@@ -251,7 +389,7 @@ public:
     return P->getKind() == OPM_Int;
   }
 
-  void emitCxxPredicateExpr(raw_ostream &OS,
+  void emitCxxPredicateExpr(raw_ostream &OS, RuleMatcher &Rule,
                             StringRef OperandExpr) const override {
     OS << "isOperandImmEqual(" << OperandExpr << ", " << Value << ", MRI)";
   }
@@ -261,12 +399,14 @@ public:
 /// operand.
 class OperandMatcher : public PredicateListMatcher<OperandPredicateMatcher> {
 protected:
+  InstructionMatcher &Insn;
   unsigned OpIdx;
   std::string SymbolicName;
 
 public:
-  OperandMatcher(unsigned OpIdx, const std::string &SymbolicName)
-      : OpIdx(OpIdx), SymbolicName(SymbolicName) {}
+  OperandMatcher(InstructionMatcher &Insn, unsigned OpIdx,
+                 const std::string &SymbolicName)
+      : Insn(Insn), OpIdx(OpIdx), SymbolicName(SymbolicName) {}
 
   bool hasSymbolicName() const { return !SymbolicName.empty(); }
   const StringRef getSymbolicName() const { return SymbolicName; }
@@ -276,16 +416,19 @@ public:
     return (InsnVarName + ".getOperand(" + llvm::to_string(OpIdx) + ")").str();
   }
 
+  InstructionMatcher &getInstructionMatcher() const { return Insn; }
+
   /// Emit a C++ expression that tests whether the instruction named in
   /// InsnVarName matches all the predicate and all the operands.
-  void emitCxxPredicateExpr(raw_ostream &OS, const StringRef InsnVarName) const {
+  void emitCxxPredicateExpr(raw_ostream &OS, RuleMatcher &Rule,
+                            const StringRef InsnVarName) const {
     OS << "(/* ";
     if (SymbolicName.empty())
       OS << "Operand " << OpIdx;
     else
       OS << SymbolicName;
     OS << " */ ";
-    emitCxxPredicateListExpr(OS, getOperandExpr(InsnVarName));
+    emitCxxPredicateListExpr(OS, Rule, getOperandExpr(InsnVarName));
     OS << ")";
   }
 
@@ -309,6 +452,17 @@ public:
 
     return false;
   };
+
+  /// Report the maximum number of temporary operands needed by the operand
+  /// matcher.
+  unsigned countTemporaryOperands() const {
+    return std::accumulate(
+        predicates().begin(), predicates().end(), 0,
+        [](unsigned A,
+           const std::unique_ptr<OperandPredicateMatcher> &Predicate) {
+          return A + Predicate->countTemporaryOperands();
+        });
+  }
 };
 
 /// Generates code to check a predicate on an instruction.
@@ -335,7 +489,7 @@ public:
 
   /// Emit a C++ expression that tests whether the instruction named in
   /// InsnVarName matches the predicate.
-  virtual void emitCxxPredicateExpr(raw_ostream &OS,
+  virtual void emitCxxPredicateExpr(raw_ostream &OS, RuleMatcher &Rule,
                                     StringRef InsnVarName) const = 0;
 
   /// Compare the priority of this object and B.
@@ -344,6 +498,10 @@ public:
   virtual bool isHigherPriorityThan(const InstructionPredicateMatcher &B) const {
     return Kind < B.Kind;
   };
+
+  /// Report the maximum number of temporary operands needed by the predicate
+  /// matcher.
+  virtual unsigned countTemporaryOperands() const { return 0; }
 };
 
 /// Generates code to check the opcode of an instruction.
@@ -359,7 +517,7 @@ public:
     return P->getKind() == IPM_Opcode;
   }
 
-  void emitCxxPredicateExpr(raw_ostream &OS,
+  void emitCxxPredicateExpr(raw_ostream &OS, RuleMatcher &Rule,
                             StringRef InsnVarName) const override {
     OS << InsnVarName << ".getOpcode() == " << I->Namespace
        << "::" << I->TheDef->getName();
@@ -403,18 +561,25 @@ protected:
 public:
   /// Add an operand to the matcher.
   OperandMatcher &addOperand(unsigned OpIdx, const std::string &SymbolicName) {
-    Operands.emplace_back(OpIdx, SymbolicName);
+    Operands.emplace_back(*this, OpIdx, SymbolicName);
     return Operands.back();
   }
 
-  const OperandMatcher &getOperand(const StringRef SymbolicName) const {
+  Optional<const OperandMatcher *> getOptionalOperand(StringRef SymbolicName) const {
     assert(!SymbolicName.empty() && "Cannot lookup unnamed operand");
     const auto &I = std::find_if(Operands.begin(), Operands.end(),
                                  [&SymbolicName](const OperandMatcher &X) {
                                    return X.getSymbolicName() == SymbolicName;
                                  });
     if (I != Operands.end())
-      return *I;
+      return &*I;
+    return None;
+  }
+
+  const OperandMatcher &getOperand(const StringRef SymbolicName) const {
+    Optional<const OperandMatcher *>OM = getOptionalOperand(SymbolicName);
+    if (OM.hasValue())
+      return *OM.getValue();
     llvm_unreachable("Failed to lookup operand");
   }
 
@@ -429,13 +594,24 @@ public:
     return make_range(operands_begin(), operands_end());
   }
 
+  /// Emit C++ statements to check the shape of the match and capture
+  /// instructions into local variables.
+  ///
+  /// TODO: When nested instruction matching is implemented, this function will
+  ///       descend into the operands and capture variables.
+  void emitCxxCaptureStmts(raw_ostream &OS, RuleMatcher &Rule, StringRef Expr) {
+    OS << "if (" << Expr << ".getNumOperands() < " << getNumOperands() << ")\n"
+       << "  return false;\n";
+  }
+
   /// Emit a C++ expression that tests whether the instruction named in
   /// InsnVarName matches all the predicates and all the operands.
-  void emitCxxPredicateExpr(raw_ostream &OS, StringRef InsnVarName) const {
-    emitCxxPredicateListExpr(OS, InsnVarName);
+  void emitCxxPredicateExpr(raw_ostream &OS, RuleMatcher &Rule,
+                            StringRef InsnVarName) const {
+    emitCxxPredicateListExpr(OS, Rule, InsnVarName);
     for (const auto &Operand : Operands) {
       OS << " &&\n(";
-      Operand.emitCxxPredicateExpr(OS, InsnVarName);
+      Operand.emitCxxPredicateExpr(OS, Rule, InsnVarName);
       OS << ")";
     }
   }
@@ -466,14 +642,39 @@ public:
 
     return false;
   };
+
+  /// Report the maximum number of temporary operands needed by the instruction
+  /// matcher.
+  unsigned countTemporaryOperands() const {
+    return std::accumulate(predicates().begin(), predicates().end(), 0,
+                           [](unsigned A,
+                              const std::unique_ptr<InstructionPredicateMatcher>
+                                  &Predicate) {
+                             return A + Predicate->countTemporaryOperands();
+                           }) +
+           std::accumulate(Operands.begin(), Operands.end(), 0,
+                           [](unsigned A, const OperandMatcher &Operand) {
+                             return A + Operand.countTemporaryOperands();
+                           });
+  }
 };
 
 //===- Actions ------------------------------------------------------------===//
+void OperandPlaceholder::emitCxxValueExpr(raw_ostream &OS) const {
+  switch (Kind) {
+  case OP_MatchReference:
+    OS << MatchReference.InsnMatcher->getOperand(MatchReference.SymbolicName)
+              .getOperandExpr(MatchReference.InsnVarName);
+    break;
+  case OP_Temporary:
+    OS << "TempOp" << Temporary.OpIdx;
+    break;
+  }
+}
 
-namespace {
 class OperandRenderer {
 public:
-  enum RendererKind { OR_Copy, OR_Register };
+  enum RendererKind { OR_Copy, OR_Register, OR_ComplexPattern };
 
 protected:
   RendererKind Kind;
@@ -484,7 +685,7 @@ public:
 
   RendererKind getKind() const { return Kind; }
 
-  virtual void emitCxxRenderStmts(raw_ostream &OS) const = 0;
+  virtual void emitCxxRenderStmts(raw_ostream &OS, RuleMatcher &Rule) const = 0;
 };
 
 /// A CopyRenderer emits code to copy a single operand from an existing
@@ -495,16 +696,13 @@ protected:
   /// This provides the facility for looking up an a operand by it's name so
   /// that it can be used as a source for the instruction being built.
   const InstructionMatcher &Matched;
-  /// The name of the instruction to copy from.
-  const StringRef InsnVarName;
   /// The name of the operand.
   const StringRef SymbolicName;
 
 public:
-  CopyRenderer(const InstructionMatcher &Matched, const StringRef InsnVarName,
-               const StringRef SymbolicName)
-      : OperandRenderer(OR_Copy), Matched(Matched), InsnVarName(InsnVarName),
-        SymbolicName(SymbolicName) {}
+  CopyRenderer(const InstructionMatcher &Matched, StringRef SymbolicName)
+      : OperandRenderer(OR_Copy), Matched(Matched), SymbolicName(SymbolicName) {
+  }
 
   static bool classof(const OperandRenderer *R) {
     return R->getKind() == OR_Copy;
@@ -512,9 +710,11 @@ public:
 
   const StringRef getSymbolicName() const { return SymbolicName; }
 
-  void emitCxxRenderStmts(raw_ostream &OS) const override {
-    std::string OperandExpr =
-        Matched.getOperand(SymbolicName).getOperandExpr(InsnVarName);
+  void emitCxxRenderStmts(raw_ostream &OS, RuleMatcher &Rule) const override {
+    const OperandMatcher &Operand = Matched.getOperand(SymbolicName);
+    StringRef InsnVarName =
+        Rule.getInsnVarName(Operand.getInstructionMatcher());
+    std::string OperandExpr = Operand.getOperandExpr(InsnVarName);
     OS << "    MIB.add(" << OperandExpr << "/*" << SymbolicName << "*/);\n";
   }
 };
@@ -533,9 +733,37 @@ public:
     return R->getKind() == OR_Register;
   }
 
-  void emitCxxRenderStmts(raw_ostream &OS) const override {
+  void emitCxxRenderStmts(raw_ostream &OS, RuleMatcher &Rule) const override {
     OS << "    MIB.addReg(" << RegisterDef->getValueAsString("Namespace")
        << "::" << RegisterDef->getName() << ");\n";
+  }
+};
+
+class RenderComplexPatternOperand : public OperandRenderer {
+private:
+  const Record &TheDef;
+  std::vector<OperandPlaceholder> Sources;
+
+  unsigned getNumOperands() const {
+    return TheDef.getValueAsDag("Operands")->getNumArgs();
+  }
+
+public:
+  RenderComplexPatternOperand(const Record &TheDef,
+                              const ArrayRef<OperandPlaceholder> Sources)
+      : OperandRenderer(OR_ComplexPattern), TheDef(TheDef), Sources(Sources) {}
+
+  static bool classof(const OperandRenderer *R) {
+    return R->getKind() == OR_ComplexPattern;
+  }
+
+  void emitCxxRenderStmts(raw_ostream &OS, RuleMatcher &Rule) const override {
+    assert(Sources.size() == getNumOperands() && "Inconsistent number of operands");
+    for (const auto &Source : Sources) {
+      OS << "MIB.add(";
+      Source.emitCxxValueExpr(OS);
+      OS << ");\n";
+    }
   }
 };
 
@@ -550,11 +778,11 @@ public:
 
   /// Emit the C++ statements to implement the action.
   ///
-  /// \param InsnVarName If given, it's an instruction to recycle. The
-  ///                    requirements on the instruction vary from action to
-  ///                    action.
-  virtual void emitCxxActionStmts(raw_ostream &OS,
-                                  const StringRef InsnVarName) const = 0;
+  /// \param RecycleVarName If given, it's an instruction to recycle. The
+  ///                       requirements on the instruction vary from action to
+  ///                       action.
+  virtual void emitCxxActionStmts(raw_ostream &OS, RuleMatcher &Rule,
+                                  StringRef RecycleVarName) const = 0;
 };
 
 /// Generates a comment describing the matched rule being acted upon.
@@ -565,9 +793,9 @@ private:
 public:
   DebugCommentAction(const PatternToMatch &P) : P(P) {}
 
-  void emitCxxActionStmts(raw_ostream &OS,
-                          const StringRef InsnVarName) const override {
-    OS << "// " << *P.getSrcPattern() << "  =>  " << *P.getDstPattern();
+  void emitCxxActionStmts(raw_ostream &OS, RuleMatcher &Rule,
+                          StringRef RecycleVarName) const override {
+    OS << "// " << *P.getSrcPattern() << "  =>  " << *P.getDstPattern() << "\n";
   }
 };
 
@@ -604,12 +832,29 @@ public:
     return *static_cast<Kind *>(OperandRenderers.back().get());
   }
 
-  virtual void emitCxxActionStmts(raw_ostream &OS,
-                                  const StringRef InsnVarName) const {
+  void emitCxxActionStmts(raw_ostream &OS, RuleMatcher &Rule,
+                          StringRef RecycleVarName) const override {
     if (canMutate()) {
-      OS << "I.setDesc(TII.get(" << I->Namespace << "::" << I->TheDef->getName()
-         << "));\n";
-      OS << "    MachineInstr &NewI = I;\n";
+      OS << "    " << RecycleVarName << ".setDesc(TII.get(" << I->Namespace
+         << "::" << I->TheDef->getName() << "));\n";
+
+      if (!I->ImplicitDefs.empty() || !I->ImplicitUses.empty()) {
+        OS << "    auto MIB = MachineInstrBuilder(MF, &" << RecycleVarName
+           << ");\n";
+
+        for (auto Def : I->ImplicitDefs) {
+          auto Namespace = Def->getValueAsString("Namespace");
+          OS << "    MIB.addDef(" << Namespace << "::" << Def->getName()
+             << ", RegState::Implicit);\n";
+        }
+        for (auto Use : I->ImplicitUses) {
+          auto Namespace = Use->getValueAsString("Namespace");
+          OS << "    MIB.addUse(" << Namespace << "::" << Use->getName()
+             << ", RegState::Implicit);\n";
+        }
+      }
+
+      OS << "    MachineInstr &NewI = " << RecycleVarName << ";\n";
       return;
     }
 
@@ -620,88 +865,106 @@ public:
           "I.getDebugLoc(), TII.get("
        << I->Namespace << "::" << I->TheDef->getName() << "));\n";
     for (const auto &Renderer : OperandRenderers)
-      Renderer->emitCxxRenderStmts(OS);
+      Renderer->emitCxxRenderStmts(OS, Rule);
     OS << "    MIB.setMemRefs(I.memoperands_begin(), I.memoperands_end());\n";
-    OS << "    " << InsnVarName << ".eraseFromParent();\n";
+    OS << "    " << RecycleVarName << ".eraseFromParent();\n";
     OS << "    MachineInstr &NewI = *MIB;\n";
   }
 };
 
-/// Generates code to check that a match rule matches.
-class RuleMatcher {
-  /// A list of matchers that all need to succeed for the current rule to match.
-  /// FIXME: This currently supports a single match position but could be
-  /// extended to support multiple positions to support div/rem fusion or
-  /// load-multiple instructions.
-  std::vector<std::unique_ptr<InstructionMatcher>> Matchers;
+InstructionMatcher &RuleMatcher::addInstructionMatcher() {
+  Matchers.emplace_back(new InstructionMatcher());
+  return *Matchers.back();
+}
 
-  /// A list of actions that need to be taken when all predicates in this rule
-  /// have succeeded.
-  std::vector<std::unique_ptr<MatchAction>> Actions;
+template <class Kind, class... Args>
+Kind &RuleMatcher::addAction(Args &&... args) {
+  Actions.emplace_back(llvm::make_unique<Kind>(std::forward<Args>(args)...));
+  return *static_cast<Kind *>(Actions.back().get());
+}
 
-public:
-  RuleMatcher() {}
+std::string RuleMatcher::defineInsnVar(raw_ostream &OS,
+                                       const InstructionMatcher &Matcher,
+                                       StringRef Value) {
+  std::string InsnVarName = "MI" + llvm::to_string(NextInsnVarID++);
+  OS << "MachineInstr &" << InsnVarName << " = " << Value << ";\n";
+  InsnVariableNames[&Matcher] = InsnVarName;
+  return InsnVarName;
+}
 
-  InstructionMatcher &addInstructionMatcher() {
-    Matchers.emplace_back(new InstructionMatcher());
-    return *Matchers.back();
+StringRef RuleMatcher::getInsnVarName(const InstructionMatcher &InsnMatcher) const {
+  const auto &I = InsnVariableNames.find(&InsnMatcher);
+  if (I != InsnVariableNames.end())
+    return I->second;
+  llvm_unreachable("Matched Insn was not captured in a local variable");
+}
+
+/// Emit C++ statements to check the shape of the match and capture
+/// instructions into local variables.
+void RuleMatcher::emitCxxCaptureStmts(raw_ostream &OS, StringRef Expr) {
+  assert(Matchers.size() == 1 && "Cannot handle multi-root matchers yet");
+  std::string InsnVarName = defineInsnVar(OS, *Matchers.front(), Expr);
+  Matchers.front()->emitCxxCaptureStmts(OS, *this, InsnVarName);
+}
+
+void RuleMatcher::emit(raw_ostream &OS) {
+  if (Matchers.empty())
+    llvm_unreachable("Unexpected empty matcher!");
+
+  // The representation supports rules that require multiple roots such as:
+  //    %ptr(p0) = ...
+  //    %elt0(s32) = G_LOAD %ptr
+  //    %1(p0) = G_ADD %ptr, 4
+  //    %elt1(s32) = G_LOAD p0 %1
+  // which could be usefully folded into:
+  //    %ptr(p0) = ...
+  //    %elt0(s32), %elt1(s32) = TGT_LOAD_PAIR %ptr
+  // on some targets but we don't need to make use of that yet.
+  assert(Matchers.size() == 1 && "Cannot handle multi-root matchers yet");
+  OS << "if ([&]() {\n";
+
+  emitCxxCaptureStmts(OS, "I");
+
+  OS << "    if (";
+  Matchers.front()->emitCxxPredicateExpr(OS, *this,
+                                         getInsnVarName(*Matchers.front()));
+  OS << ") {\n";
+
+  for (const auto &MA : Actions) {
+    MA->emitCxxActionStmts(OS, *this, "I");
   }
 
-  template <class Kind, class... Args>
-  Kind &addAction(Args&&... args) {
-    Actions.emplace_back(llvm::make_unique<Kind>(std::forward<Args>(args)...));
-    return *static_cast<Kind *>(Actions.back().get());
-  }
+  OS << "      constrainSelectedInstRegOperands(NewI, TII, TRI, RBI);\n";
+  OS << "      return true;\n";
+  OS << "    }\n";
+  OS << "    return false;\n";
+  OS << "  }()) { return true; }\n\n";
+}
 
-  void emit(raw_ostream &OS) const {
-    if (Matchers.empty())
-      llvm_unreachable("Unexpected empty matcher!");
-
-    // The representation supports rules that require multiple roots such as:
-    //    %ptr(p0) = ...
-    //    %elt0(s32) = G_LOAD %ptr
-    //    %1(p0) = G_ADD %ptr, 4
-    //    %elt1(s32) = G_LOAD p0 %1
-    // which could be usefully folded into:
-    //    %ptr(p0) = ...
-    //    %elt0(s32), %elt1(s32) = TGT_LOAD_PAIR %ptr
-    // on some targets but we don't need to make use of that yet.
-    assert(Matchers.size() == 1 && "Cannot handle multi-root matchers yet");
-    OS << "  if (";
-    Matchers.front()->emitCxxPredicateExpr(OS, "I");
-    OS << ") {\n";
-
-    for (const auto &MA : Actions) {
-      OS << "    ";
-      MA->emitCxxActionStmts(OS, "I");
-      OS << "\n";
-    }
-
-    OS << "    constrainSelectedInstRegOperands(NewI, TII, TRI, RBI);\n";
-    OS << "    return true;\n";
-    OS << "  }\n\n";
-  }
-
-  /// Compare the priority of this object and B.
-  ///
-  /// Returns true if this object is more important than B.
-  bool isHigherPriorityThan(const RuleMatcher &B) const {
-    // Rules involving more match roots have higher priority.
-    if (Matchers.size() > B.Matchers.size())
-      return true;
-    if (Matchers.size() < B.Matchers.size())
-      return false;
-
-    for (const auto &Matcher : zip(Matchers, B.Matchers)) {
-      if (std::get<0>(Matcher)->isHigherPriorityThan(*std::get<1>(Matcher)))
-        return true;
-      if (std::get<1>(Matcher)->isHigherPriorityThan(*std::get<0>(Matcher)))
-        return false;
-    }
-
+bool RuleMatcher::isHigherPriorityThan(const RuleMatcher &B) const {
+  // Rules involving more match roots have higher priority.
+  if (Matchers.size() > B.Matchers.size())
+    return true;
+  if (Matchers.size() < B.Matchers.size())
     return false;
-  };
-};
+
+  for (const auto &Matcher : zip(Matchers, B.Matchers)) {
+    if (std::get<0>(Matcher)->isHigherPriorityThan(*std::get<1>(Matcher)))
+      return true;
+    if (std::get<1>(Matcher)->isHigherPriorityThan(*std::get<0>(Matcher)))
+      return false;
+  }
+
+  return false;
+}
+
+unsigned RuleMatcher::countTemporaryOperands() const {
+  return std::accumulate(
+      Matchers.begin(), Matchers.end(), 0,
+      [](unsigned A, const std::unique_ptr<InstructionMatcher> &Matcher) {
+        return A + Matcher->countTemporaryOperands();
+      });
+}
 
 //===- GlobalISelEmitter class --------------------------------------------===//
 
@@ -719,8 +982,13 @@ private:
   /// This is defined using 'GINodeEquiv' in the target description.
   DenseMap<Record *, const CodeGenInstruction *> NodeEquivs;
 
+  /// Keep track of the equivalence between ComplexPattern's and
+  /// GIComplexOperandMatcher. Map entries are specified by subclassing
+  /// GIComplexPatternEquiv.
+  DenseMap<const Record *, const Record *> ComplexPatternEquivs;
+
   void gatherNodeEquivs();
-  const CodeGenInstruction *findNodeEquiv(Record *N);
+  const CodeGenInstruction *findNodeEquiv(Record *N) const;
 
   /// Analyze pattern \p P, returning a matcher for it if possible.
   /// Otherwise, return an Error explaining why we don't support it.
@@ -732,9 +1000,17 @@ void GlobalISelEmitter::gatherNodeEquivs() {
   for (Record *Equiv : RK.getAllDerivedDefinitions("GINodeEquiv"))
     NodeEquivs[Equiv->getValueAsDef("Node")] =
         &Target.getInstruction(Equiv->getValueAsDef("I"));
+
+  assert(ComplexPatternEquivs.empty());
+  for (Record *Equiv : RK.getAllDerivedDefinitions("GIComplexPatternEquiv")) {
+    Record *SelDAGEquiv = Equiv->getValueAsDef("SelDAGEquivalent");
+    if (!SelDAGEquiv)
+      continue;
+    ComplexPatternEquivs[SelDAGEquiv] = Equiv;
+ }
 }
 
-const CodeGenInstruction *GlobalISelEmitter::findNodeEquiv(Record *N) {
+const CodeGenInstruction *GlobalISelEmitter::findNodeEquiv(Record *N) const {
   return NodeEquivs.lookup(N);
 }
 
@@ -749,6 +1025,8 @@ static Error failedImport(const Twine &Reason) {
 }
 
 Expected<RuleMatcher> GlobalISelEmitter::runOnPattern(const PatternToMatch &P) {
+  unsigned TempOpIdx = 0;
+
   // Keep track of the matchers and actions to emit.
   RuleMatcher M;
   M.addAction<DebugCommentAction>(P);
@@ -813,7 +1091,7 @@ Expected<RuleMatcher> GlobalISelEmitter::runOnPattern(const PatternToMatch &P) {
     OM.addPredicate<LLTOperandMatcher>(*OpTyOrNone);
     OM.addPredicate<RegisterBankOperandMatcher>(
         Target.getRegisterClass(DstIOpRec));
-    DstMIBuilder.addRenderer<CopyRenderer>(InsnMatcher, "I", DstIOperand.Name);
+    DstMIBuilder.addRenderer<CopyRenderer>(InsnMatcher, DstIOperand.Name);
     ++OpIdx;
   }
 
@@ -856,18 +1134,32 @@ Expected<RuleMatcher> GlobalISelEmitter::runOnPattern(const PatternToMatch &P) {
     if (auto *ChildDefInit = dyn_cast<DefInit>(SrcChild->getLeafValue())) {
       auto *ChildRec = ChildDefInit->getDef();
 
-      // Otherwise, we're looking for a bog-standard RegisterClass operand.
-      if (!ChildRec->isSubClassOf("RegisterClass"))
-        return failedImport("Src pattern child isn't a RegisterClass");
+      if (ChildRec->isSubClassOf("RegisterClass")) {
+        OM.addPredicate<RegisterBankOperandMatcher>(
+            Target.getRegisterClass(ChildRec));
+        continue;
+      }
 
-      OM.addPredicate<RegisterBankOperandMatcher>(
-          Target.getRegisterClass(ChildRec));
-      continue;
+      if (ChildRec->isSubClassOf("ComplexPattern")) {
+        const auto &ComplexPattern = ComplexPatternEquivs.find(ChildRec);
+        if (ComplexPattern == ComplexPatternEquivs.end())
+          return failedImport(
+              "SelectionDAG ComplexPattern not mapped to GlobalISel");
+
+        const auto &Predicate = OM.addPredicate<ComplexPatternOperandMatcher>(
+            *ComplexPattern->second, TempOpIdx);
+        TempOpIdx += Predicate.countTemporaryOperands();
+        continue;
+      }
+
+      return failedImport(
+          "Src pattern child def is an unsupported tablegen class");
     }
 
     return failedImport("Src pattern child is an unsupported kind");
   }
 
+  TempOpIdx = 0;
   // Finally render the used operands (i.e., the children of the root operator).
   for (unsigned i = 0, e = Dst->getNumChildren(); i != e; ++i) {
     auto *DstChild = Dst->getChild(i);
@@ -878,7 +1170,7 @@ Expected<RuleMatcher> GlobalISelEmitter::runOnPattern(const PatternToMatch &P) {
       if (DstChild->getOperator()->isSubClassOf("SDNode")) {
         auto &ChildSDNI = CGP.getSDNodeInfo(DstChild->getOperator());
         if (ChildSDNI.getSDClassName() == "BasicBlockSDNode") {
-          DstMIBuilder.addRenderer<CopyRenderer>(InsnMatcher, "I",
+          DstMIBuilder.addRenderer<CopyRenderer>(InsnMatcher,
                                                  DstChild->getName());
           continue;
         }
@@ -907,8 +1199,27 @@ Expected<RuleMatcher> GlobalISelEmitter::runOnPattern(const PatternToMatch &P) {
       }
 
       if (ChildRec->isSubClassOf("RegisterClass")) {
-        DstMIBuilder.addRenderer<CopyRenderer>(InsnMatcher, "I",
+        DstMIBuilder.addRenderer<CopyRenderer>(InsnMatcher,
                                                DstChild->getName());
+        continue;
+      }
+
+      if (ChildRec->isSubClassOf("ComplexPattern")) {
+        const auto &ComplexPattern = ComplexPatternEquivs.find(ChildRec);
+        if (ComplexPattern == ComplexPatternEquivs.end())
+          return failedImport(
+              "SelectionDAG ComplexPattern not mapped to GlobalISel");
+
+        SmallVector<OperandPlaceholder, 2> RenderedOperands;
+        for (unsigned I = 0; I < InsnMatcher.getOperand(DstChild->getName())
+                                     .countTemporaryOperands();
+             ++I) {
+          RenderedOperands.push_back(OperandPlaceholder::CreateTemporary(I));
+          TempOpIdx++;
+        }
+        DstMIBuilder.addRenderer<RenderComplexPatternOperand>(
+            *ComplexPattern->second,
+            RenderedOperands);
         continue;
       }
 
@@ -916,7 +1227,7 @@ Expected<RuleMatcher> GlobalISelEmitter::runOnPattern(const PatternToMatch &P) {
           "Dst pattern child def is an unsupported tablegen class");
     }
 
-    return failedImport("Src pattern child is an unsupported kind");
+    return failedImport("Dst pattern child is an unsupported kind");
   }
 
   // We're done with this pattern!  It's eligible for GISel emission; return it.
@@ -930,11 +1241,6 @@ void GlobalISelEmitter::run(raw_ostream &OS) {
 
   emitSourceFileHeader(("Global Instruction Selector for the " +
                        Target.getName() + " target").str(), OS);
-  OS << "bool " << Target.getName()
-     << "InstructionSelector::selectImpl"
-        "(MachineInstr &I) const {\n  const MachineRegisterInfo &MRI = "
-        "I.getParent()->getParent()->getRegInfo();\n\n";
-
   std::vector<RuleMatcher> Rules;
   // Look through the SelectionDAG patterns we found, possibly emitting some.
   for (const PatternToMatch &Pat : CGP.ptms()) {
@@ -968,12 +1274,34 @@ void GlobalISelEmitter::run(raw_ostream &OS) {
               return false;
             });
 
-  for (const auto &Rule : Rules) {
+  unsigned MaxTemporaries = 0;
+  for (const auto &Rule : Rules)
+    MaxTemporaries = std::max(MaxTemporaries, Rule.countTemporaryOperands());
+
+  OS << "#ifdef GET_GLOBALISEL_TEMPORARIES_DECL\n";
+  for (unsigned I = 0; I < MaxTemporaries; ++I)
+    OS << "  mutable MachineOperand TempOp" << I << ";\n";
+  OS << "#endif // ifdef GET_GLOBALISEL_TEMPORARIES_DECL\n\n";
+
+  OS << "#ifdef GET_GLOBALISEL_TEMPORARIES_INIT\n";
+  for (unsigned I = 0; I < MaxTemporaries; ++I)
+    OS << ", TempOp" << I << "(MachineOperand::CreatePlaceholder())\n";
+  OS << "#endif // ifdef GET_GLOBALISEL_TEMPORARIES_INIT\n\n";
+
+  OS << "#ifdef GET_GLOBALISEL_IMPL\n"
+     << "bool " << Target.getName()
+     << "InstructionSelector::selectImpl(MachineInstr &I) const {\n"
+     << "  MachineFunction &MF = *I.getParent()->getParent();\n"
+     << "  const MachineRegisterInfo &MRI = MF.getRegInfo();\n";
+
+  for (auto &Rule : Rules) {
     Rule.emit(OS);
     ++NumPatternEmitted;
   }
 
-  OS << "  return false;\n}\n";
+  OS << "  return false;\n"
+     << "}\n"
+     << "#endif // ifdef GET_GLOBALISEL_IMPL\n";
 }
 
 } // end anonymous namespace

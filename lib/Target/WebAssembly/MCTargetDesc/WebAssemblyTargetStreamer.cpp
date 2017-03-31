@@ -31,6 +31,10 @@ using namespace llvm;
 WebAssemblyTargetStreamer::WebAssemblyTargetStreamer(MCStreamer &S)
     : MCTargetStreamer(S) {}
 
+void WebAssemblyTargetStreamer::emitValueType(wasm::ValType Type) {
+  Streamer.EmitSLEB128IntValue(int32_t(Type));
+}
+
 WebAssemblyTargetAsmStreamer::WebAssemblyTargetAsmStreamer(
     MCStreamer &S, formatted_raw_ostream &OS)
     : WebAssemblyTargetStreamer(S), OS(OS) {}
@@ -128,7 +132,7 @@ void WebAssemblyTargetELFStreamer::emitResult(MCSymbol *Symbol,
 void WebAssemblyTargetELFStreamer::emitLocal(ArrayRef<MVT> Types) {
   Streamer.EmitULEB128IntValue(Types.size());
   for (MVT Type : Types)
-    Streamer.EmitIntValue(int64_t(WebAssembly::toValType(Type)), 1);
+    emitValueType(WebAssembly::toValType(Type));
 }
 
 void WebAssemblyTargetELFStreamer::emitGlobal(ArrayRef<MVT> Types) {
@@ -152,30 +156,20 @@ void WebAssemblyTargetELFStreamer::emitIndirectFunctionType(
 void WebAssemblyTargetELFStreamer::emitGlobalImport(StringRef name) {
 }
 
-static unsigned MVT2WasmType(MVT Ty) {
-  switch (Ty.SimpleTy) {
-  case MVT::i32: return wasm::WASM_TYPE_I32;
-  case MVT::i64: return wasm::WASM_TYPE_I64;
-  case MVT::f32: return wasm::WASM_TYPE_F32;
-  case MVT::f64: return wasm::WASM_TYPE_F64;
-  default: llvm_unreachable("unsupported type");
-  }
-}
-
 void WebAssemblyTargetWasmStreamer::emitParam(MCSymbol *Symbol,
                                               ArrayRef<MVT> Types) {
-  SmallVector<unsigned, 4> Params;
+  SmallVector<wasm::ValType, 4> Params;
   for (MVT Ty : Types)
-    Params.push_back(MVT2WasmType(Ty));
+    Params.push_back(WebAssembly::toValType(Ty));
 
   cast<MCSymbolWasm>(Symbol)->setParams(std::move(Params));
 }
 
 void WebAssemblyTargetWasmStreamer::emitResult(MCSymbol *Symbol,
                                                ArrayRef<MVT> Types) {
-  SmallVector<unsigned, 4> Returns;
+  SmallVector<wasm::ValType, 4> Returns;
   for (MVT Ty : Types)
-    Returns.push_back(MVT2WasmType(Ty));
+    Returns.push_back(WebAssembly::toValType(Ty));
 
   cast<MCSymbolWasm>(Symbol)->setReturns(std::move(Returns));
 }
@@ -192,7 +186,7 @@ void WebAssemblyTargetWasmStreamer::emitLocal(ArrayRef<MVT> Types) {
   Streamer.EmitULEB128IntValue(Grouped.size());
   for (auto Pair : Grouped) {
     Streamer.EmitULEB128IntValue(Pair.second);
-    Streamer.EmitULEB128IntValue(uint64_t(WebAssembly::toValType(Pair.first)));
+    emitValueType(WebAssembly::toValType(Pair.first));
   }
 }
 
@@ -204,7 +198,7 @@ void WebAssemblyTargetWasmStreamer::emitGlobal(ArrayRef<MVT> Types) {
   Streamer.SwitchSection(Streamer.getContext()
                                  .getWasmSection(".global_variables", 0, 0));
   for (MVT Ty : Types)
-    Streamer.EmitIntValue(uint64_t(WebAssembly::toValType(Ty)), 1);
+    Streamer.EmitIntValue(int64_t(WebAssembly::toValType(Ty)), 1);
   Streamer.PopSection();
 }
 

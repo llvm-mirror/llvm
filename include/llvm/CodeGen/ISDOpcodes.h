@@ -339,6 +339,12 @@ namespace ISD {
     /// Bitwise operators - logical and, logical or, logical xor.
     AND, OR, XOR,
 
+    /// ABS - Determine the unsigned absolute value of a signed integer value of
+    /// the same bitwidth.
+    /// Note: A value of INT_MIN will return INT_MIN, no saturation or overflow
+    /// is performed.
+    ABS,
+
     /// Shift and rotation operations.  After legalization, the type of the
     /// shift amount is known to be TLI.getShiftAmountTy().  Before legalization
     /// the shift amount can be any type, but care must be taken to ensure it is
@@ -808,9 +814,10 @@ namespace ISD {
     PRE_INC,
     PRE_DEC,
     POST_INC,
-    POST_DEC,
-    LAST_INDEXED_MODE
+    POST_DEC
   };
+
+  static const int LAST_INDEXED_MODE = POST_DEC + 1;
 
   //===--------------------------------------------------------------------===//
   /// LoadExtType enum - This enum defines the three variants of LOADEXT
@@ -826,9 +833,10 @@ namespace ISD {
     NON_EXTLOAD = 0,
     EXTLOAD,
     SEXTLOAD,
-    ZEXTLOAD,
-    LAST_LOADEXT_TYPE
+    ZEXTLOAD
   };
+
+  static const int LAST_LOADEXT_TYPE = ZEXTLOAD + 1;
 
   NodeType getExtForLoadExtType(bool IsFP, LoadExtType);
 

@@ -5,6 +5,8 @@
 ; RUN: llc -march=amdgcn -mcpu=bonaire -mattr=-promote-alloca -amdgpu-sroa=0 < %s | FileCheck -check-prefix=GCN -check-prefix=CI %s
 ; RUN: llc -march=amdgcn -mcpu=tonga -mattr=-flat-for-global -mattr=-promote-alloca -amdgpu-sroa=0 < %s | FileCheck -check-prefix=GCN -check-prefix=VI %s
 
+target datalayout = "e-p:32:32-p1:64:64-p2:64:64-p3:32:32-p4:64:64-p5:32:32-p24:64:64-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048-n32:64"
+
 ; OPT-LABEL: @test_sink_global_small_offset_i32(
 ; OPT-CI-NOT: getelementptr i32, i32 addrspace(1)* %in
 ; OPT-VI: getelementptr i32, i32 addrspace(1)* %in
@@ -13,7 +15,7 @@
 
 ; GCN-LABEL: {{^}}test_sink_global_small_offset_i32:
 ; GCN: {{^}}BB0_2:
-define void @test_sink_global_small_offset_i32(i32 addrspace(1)* %out, i32 addrspace(1)* %in) {
+define amdgpu_kernel void @test_sink_global_small_offset_i32(i32 addrspace(1)* %out, i32 addrspace(1)* %in) {
 entry:
   %out.gep = getelementptr i32, i32 addrspace(1)* %out, i64 999999
   %in.gep = getelementptr i32, i32 addrspace(1)* %in, i64 7
@@ -43,7 +45,7 @@ done:
 ; GCN: buffer_load_sbyte {{v[0-9]+}}, off, {{s\[[0-9]+:[0-9]+\]}}, s{{[0-9]+$}}
 ; GCN: {{^}}BB1_2:
 ; GCN: s_or_b64 exec
-define void @test_sink_global_small_max_i32_ds_offset(i32 addrspace(1)* %out, i8 addrspace(1)* %in) {
+define amdgpu_kernel void @test_sink_global_small_max_i32_ds_offset(i32 addrspace(1)* %out, i8 addrspace(1)* %in) {
 entry:
   %out.gep = getelementptr i32, i32 addrspace(1)* %out, i64 99999
   %in.gep = getelementptr i8, i8 addrspace(1)* %in, i64 65535
@@ -70,7 +72,7 @@ done:
 ; GCN: buffer_load_sbyte {{v[0-9]+}}, off, {{s\[[0-9]+:[0-9]+\]}}, 0 offset:4095{{$}}
 ; GCN: {{^}}BB2_2:
 ; GCN: s_or_b64 exec
-define void @test_sink_global_small_max_mubuf_offset(i32 addrspace(1)* %out, i8 addrspace(1)* %in) {
+define amdgpu_kernel void @test_sink_global_small_max_mubuf_offset(i32 addrspace(1)* %out, i8 addrspace(1)* %in) {
 entry:
   %out.gep = getelementptr i32, i32 addrspace(1)* %out, i32 1024
   %in.gep = getelementptr i8, i8 addrspace(1)* %in, i64 4095
@@ -97,7 +99,7 @@ done:
 ; GCN: buffer_load_sbyte {{v[0-9]+}}, off, {{s\[[0-9]+:[0-9]+\]}}, s{{[0-9]+$}}
 ; GCN: {{^}}BB3_2:
 ; GCN: s_or_b64 exec
-define void @test_sink_global_small_max_plus_1_mubuf_offset(i32 addrspace(1)* %out, i8 addrspace(1)* %in) {
+define amdgpu_kernel void @test_sink_global_small_max_plus_1_mubuf_offset(i32 addrspace(1)* %out, i8 addrspace(1)* %in) {
 entry:
   %out.gep = getelementptr i32, i32 addrspace(1)* %out, i64 99999
   %in.gep = getelementptr i8, i8 addrspace(1)* %in, i64 4096
@@ -129,7 +131,7 @@ done:
 ; GCN: buffer_store_dword {{v[0-9]+}}, off, {{s\[[0-9]+:[0-9]+\]}}, {{s[0-9]+}} offset:4092{{$}}
 ; GCN: buffer_load_dword {{v[0-9]+}}, off, {{s\[[0-9]+:[0-9]+\]}}, {{s[0-9]+}} offset:4092{{$}}
 ; GCN: {{^}}BB4_2:
-define void @test_sink_scratch_small_offset_i32(i32 addrspace(1)* %out, i32 addrspace(1)* %in, i32 %arg) {
+define amdgpu_kernel void @test_sink_scratch_small_offset_i32(i32 addrspace(1)* %out, i32 addrspace(1)* %in, i32 %arg) {
 entry:
   %alloca = alloca [512 x i32], align 4
   %out.gep.0 = getelementptr i32, i32 addrspace(1)* %out, i64 999998
@@ -170,7 +172,7 @@ done:
 ; GCN: buffer_load_dword {{v[0-9]+}}, [[BASE_FI1]], {{s\[[0-9]+:[0-9]+\]}}, {{s[0-9]+}} offen offset:4092{{$}}
 ; GCN: {{^BB[0-9]+}}_2:
 
-define void @test_sink_scratch_small_offset_i32_reserved(i32 addrspace(1)* %out, i32 addrspace(1)* %in, i32 %arg) {
+define amdgpu_kernel void @test_sink_scratch_small_offset_i32_reserved(i32 addrspace(1)* %out, i32 addrspace(1)* %in, i32 %arg) {
 entry:
   %alloca = alloca [512 x i32], align 4
   %out.gep.0 = getelementptr i32, i32 addrspace(1)* %out, i64 999998
@@ -207,7 +209,7 @@ done:
 ; GCN: buffer_store_dword {{v[0-9]+}}, {{v[0-9]+}}, {{s\[[0-9]+:[0-9]+\]}}, {{s[0-9]+}} offen{{$}}
 ; GCN: buffer_load_dword {{v[0-9]+}}, {{v[0-9]+}}, {{s\[[0-9]+:[0-9]+\]}}, {{s[0-9]+}} offen{{$}}
 ; GCN: {{^BB[0-9]+}}_2:
-define void @test_no_sink_scratch_large_offset_i32(i32 addrspace(1)* %out, i32 addrspace(1)* %in, i32 %arg) {
+define amdgpu_kernel void @test_no_sink_scratch_large_offset_i32(i32 addrspace(1)* %out, i32 addrspace(1)* %in, i32 %arg) {
 entry:
   %alloca = alloca [512 x i32], align 4
   %out.gep.0 = getelementptr i32, i32 addrspace(1)* %out, i64 999998
@@ -239,7 +241,7 @@ done:
 ; CI: buffer_load_dword {{v[0-9]+}}, {{v\[[0-9]+:[0-9]+\]}}, {{s\[[0-9]+:[0-9]+\]}}, 0 addr64{{$}}
 ; VI: flat_load_dword v{{[0-9]+}}, v[{{[0-9]+:[0-9]+}}]
 ; GCN: {{^BB[0-9]+}}_2:
-define void @test_sink_global_vreg_sreg_i32(i32 addrspace(1)* %out, i32 addrspace(1)* %in, i32 %offset) {
+define amdgpu_kernel void @test_sink_global_vreg_sreg_i32(i32 addrspace(1)* %out, i32 addrspace(1)* %in, i32 %offset) {
 entry:
   %offset.ext = zext i32 %offset to i64
   %out.gep = getelementptr i32, i32 addrspace(1)* %out, i64 999999
@@ -269,7 +271,7 @@ done:
 ; GCN: s_and_saveexec_b64
 ; SI: s_load_dword s{{[0-9]+}}, {{s\[[0-9]+:[0-9]+\]}}, 0x7{{$}}
 ; GCN: s_or_b64 exec, exec
-define void @test_sink_constant_small_offset_i32(i32 addrspace(1)* %out, i32 addrspace(2)* %in) {
+define amdgpu_kernel void @test_sink_constant_small_offset_i32(i32 addrspace(1)* %out, i32 addrspace(2)* %in) {
 entry:
   %out.gep = getelementptr i32, i32 addrspace(1)* %out, i64 999999
   %in.gep = getelementptr i32, i32 addrspace(2)* %in, i64 7
@@ -298,7 +300,7 @@ done:
 ; GCN: s_and_saveexec_b64
 ; SI: s_load_dword s{{[0-9]+}}, {{s\[[0-9]+:[0-9]+\]}}, 0xff{{$}}
 ; GCN: s_or_b64 exec, exec
-define void @test_sink_constant_max_8_bit_offset_i32(i32 addrspace(1)* %out, i32 addrspace(2)* %in) {
+define amdgpu_kernel void @test_sink_constant_max_8_bit_offset_i32(i32 addrspace(1)* %out, i32 addrspace(2)* %in) {
 entry:
   %out.gep = getelementptr i32, i32 addrspace(1)* %out, i64 999999
   %in.gep = getelementptr i32, i32 addrspace(2)* %in, i64 255
@@ -331,7 +333,7 @@ done:
 
 ; SI: s_load_dword s{{[0-9]+}}, {{s\[[0-9]+:[0-9]+\]}}, [[OFFSET]]{{$}}
 ; GCN: s_or_b64 exec, exec
-define void @test_sink_constant_max_8_bit_offset_p1_i32(i32 addrspace(1)* %out, i32 addrspace(2)* %in) {
+define amdgpu_kernel void @test_sink_constant_max_8_bit_offset_p1_i32(i32 addrspace(1)* %out, i32 addrspace(2)* %in) {
 entry:
   %out.gep = getelementptr i32, i32 addrspace(1)* %out, i64 999999
   %in.gep = getelementptr i32, i32 addrspace(2)* %in, i64 256
@@ -363,7 +365,7 @@ done:
 ; GCN: s_addc_u32 s{{[0-9]+}}, s{{[0-9]+}}, 3{{$}}
 ; SI: s_load_dword s{{[0-9]+}}, {{s\[[0-9]+:[0-9]+\]}}, 0x0{{$}}
 ; GCN: s_or_b64 exec, exec
-define void @test_sink_constant_max_32_bit_offset_i32(i32 addrspace(1)* %out, i32 addrspace(2)* %in) {
+define amdgpu_kernel void @test_sink_constant_max_32_bit_offset_i32(i32 addrspace(1)* %out, i32 addrspace(2)* %in) {
 entry:
   %out.gep = getelementptr i32, i32 addrspace(1)* %out, i64 999999
   %in.gep = getelementptr i32, i32 addrspace(2)* %in, i64 4294967295
@@ -394,7 +396,7 @@ done:
 ; GCN: s_addc_u32
 ; SI: s_load_dword s{{[0-9]+}}, {{s\[[0-9]+:[0-9]+\]}}, 0x0{{$}}
 ; GCN: s_or_b64 exec, exec
-define void @test_sink_constant_max_32_bit_offset_p1_i32(i32 addrspace(1)* %out, i32 addrspace(2)* %in) {
+define amdgpu_kernel void @test_sink_constant_max_32_bit_offset_p1_i32(i32 addrspace(1)* %out, i32 addrspace(2)* %in) {
 entry:
   %out.gep = getelementptr i32, i32 addrspace(1)* %out, i64 999999
   %in.gep = getelementptr i32, i32 addrspace(2)* %in, i64 17179869181
@@ -424,7 +426,7 @@ done:
 ; VI: s_load_dword s{{[0-9]+}}, {{s\[[0-9]+:[0-9]+\]}}, 0xffffc{{$}}
 
 ; GCN: s_or_b64 exec, exec
-define void @test_sink_constant_max_20_bit_byte_offset_i32(i32 addrspace(1)* %out, i32 addrspace(2)* %in) {
+define amdgpu_kernel void @test_sink_constant_max_20_bit_byte_offset_i32(i32 addrspace(1)* %out, i32 addrspace(2)* %in) {
 entry:
   %out.gep = getelementptr i32, i32 addrspace(1)* %out, i64 999999
   %in.gep = getelementptr i32, i32 addrspace(2)* %in, i64 262143
@@ -462,7 +464,7 @@ done:
 ; VI: s_load_dword s{{[0-9]+}}, {{s\[[0-9]+:[0-9]+\]}}, [[OFFSET]]{{$}}
 
 ; GCN: s_or_b64 exec, exec
-define void @test_sink_constant_max_20_bit_byte_offset_p1_i32(i32 addrspace(1)* %out, i32 addrspace(2)* %in) {
+define amdgpu_kernel void @test_sink_constant_max_20_bit_byte_offset_p1_i32(i32 addrspace(1)* %out, i32 addrspace(2)* %in) {
 entry:
   %out.gep = getelementptr i32, i32 addrspace(1)* %out, i64 999999
   %in.gep = getelementptr i32, i32 addrspace(2)* %in, i64 262144
@@ -486,13 +488,13 @@ done:
 %struct.foo = type { [3 x float], [3 x float] }
 
 ; OPT-LABEL: @sink_ds_address(
-; OPT: ptrtoint %struct.foo addrspace(3)* %ptr to i64
+; OPT: ptrtoint %struct.foo addrspace(3)* %ptr to i32
 
 ; GCN-LABEL: {{^}}sink_ds_address:
 ; GCN: s_load_dword [[SREG1:s[0-9]+]],
 ; GCN: v_mov_b32_e32 [[VREG1:v[0-9]+]], [[SREG1]]
 ; GCN-DAG: ds_read2_b32 v[{{[0-9+:[0-9]+}}], [[VREG1]] offset0:3 offset1:5
-define void @sink_ds_address(%struct.foo addrspace(3)* nocapture %ptr) nounwind {
+define amdgpu_kernel void @sink_ds_address(%struct.foo addrspace(3)* nocapture %ptr) nounwind {
 entry:
   %x = getelementptr inbounds %struct.foo, %struct.foo addrspace(3)* %ptr, i32 0, i32 1, i32 0
   %y = getelementptr inbounds %struct.foo, %struct.foo addrspace(3)* %ptr, i32 0, i32 1, i32 2
@@ -519,7 +521,7 @@ bb34:
 ; OPT: if:
 ; OPT: %sunkaddr = ptrtoint i8 addrspace(2)* %in to i64
 ; OPT: %sunkaddr1 = add i64 %sunkaddr, 4095
-define void @test_sink_constant_small_max_mubuf_offset_load_i32_align_1(i32 addrspace(1)* %out, i8 addrspace(2)* %in) {
+define amdgpu_kernel void @test_sink_constant_small_max_mubuf_offset_load_i32_align_1(i32 addrspace(1)* %out, i8 addrspace(2)* %in) {
 entry:
   %out.gep = getelementptr i32, i32 addrspace(1)* %out, i32 1024
   %in.gep = getelementptr i8, i8 addrspace(2)* %in, i64 4095
@@ -541,7 +543,141 @@ done:
   ret void
 }
 
+; OPT-LABEL: @test_sink_local_small_offset_atomicrmw_i32(
+; OPT: %sunkaddr = ptrtoint i32 addrspace(3)* %in to i32
+; OPT: %sunkaddr1 = add i32 %sunkaddr, 28
+; OPT: %sunkaddr2 = inttoptr i32 %sunkaddr1 to i32 addrspace(3)*
+; OPT: %tmp1 = atomicrmw add i32 addrspace(3)* %sunkaddr2, i32 2 seq_cst
+define amdgpu_kernel void @test_sink_local_small_offset_atomicrmw_i32(i32 addrspace(3)* %out, i32 addrspace(3)* %in) {
+entry:
+  %out.gep = getelementptr i32, i32 addrspace(3)* %out, i32 999999
+  %in.gep = getelementptr i32, i32 addrspace(3)* %in, i32 7
+  %tid = call i32 @llvm.amdgcn.mbcnt.lo(i32 -1, i32 0) #0
+  %tmp0 = icmp eq i32 %tid, 0
+  br i1 %tmp0, label %endif, label %if
+
+if:
+  %tmp1 = atomicrmw add i32 addrspace(3)* %in.gep, i32 2 seq_cst
+  br label %endif
+
+endif:
+  %x = phi i32 [ %tmp1, %if ], [ 0, %entry ]
+  store i32 %x, i32 addrspace(3)* %out.gep
+  br label %done
+
+done:
+  ret void
+}
+
+; OPT-LABEL: @test_sink_local_small_offset_cmpxchg_i32(
+; OPT: %sunkaddr = ptrtoint i32 addrspace(3)* %in to i32
+; OPT: %sunkaddr1 = add i32 %sunkaddr, 28
+; OPT: %sunkaddr2 = inttoptr i32 %sunkaddr1 to i32 addrspace(3)*
+; OPT: %tmp1.struct = cmpxchg i32 addrspace(3)* %sunkaddr2, i32 undef, i32 2 seq_cst monotonic
+define amdgpu_kernel void @test_sink_local_small_offset_cmpxchg_i32(i32 addrspace(3)* %out, i32 addrspace(3)* %in) {
+entry:
+  %out.gep = getelementptr i32, i32 addrspace(3)* %out, i32 999999
+  %in.gep = getelementptr i32, i32 addrspace(3)* %in, i32 7
+  %tid = call i32 @llvm.amdgcn.mbcnt.lo(i32 -1, i32 0) #0
+  %tmp0 = icmp eq i32 %tid, 0
+  br i1 %tmp0, label %endif, label %if
+
+if:
+  %tmp1.struct = cmpxchg i32 addrspace(3)* %in.gep, i32 undef, i32 2 seq_cst monotonic
+  %tmp1 = extractvalue { i32, i1 } %tmp1.struct, 0
+  br label %endif
+
+endif:
+  %x = phi i32 [ %tmp1, %if ], [ 0, %entry ]
+  store i32 %x, i32 addrspace(3)* %out.gep
+  br label %done
+
+done:
+  ret void
+}
+
+; OPT-LABEL: @test_wrong_operand_local_small_offset_cmpxchg_i32(
+; OPT: %in.gep = getelementptr i32, i32 addrspace(3)* %in, i32 7
+; OPT: br i1
+; OPT: cmpxchg i32 addrspace(3)* addrspace(3)* undef, i32 addrspace(3)* %in.gep, i32 addrspace(3)* undef seq_cst monotonic
+define amdgpu_kernel void @test_wrong_operand_local_small_offset_cmpxchg_i32(i32 addrspace(3)* addrspace(3)* %out, i32 addrspace(3)* %in) {
+entry:
+  %out.gep = getelementptr i32 addrspace(3)*, i32 addrspace(3)* addrspace(3)* %out, i32 999999
+  %in.gep = getelementptr i32, i32 addrspace(3)* %in, i32 7
+  %tid = call i32 @llvm.amdgcn.mbcnt.lo(i32 -1, i32 0) #0
+  %tmp0 = icmp eq i32 %tid, 0
+  br i1 %tmp0, label %endif, label %if
+
+if:
+  %tmp1.struct = cmpxchg i32 addrspace(3)* addrspace(3)* undef, i32 addrspace(3)* %in.gep, i32 addrspace(3)* undef seq_cst monotonic
+  %tmp1 = extractvalue { i32 addrspace(3)*, i1 } %tmp1.struct, 0
+  br label %endif
+
+endif:
+  %x = phi i32 addrspace(3)* [ %tmp1, %if ], [ null, %entry ]
+  store i32 addrspace(3)* %x, i32 addrspace(3)* addrspace(3)* %out.gep
+  br label %done
+
+done:
+  ret void
+}
+
+; OPT-LABEL: @test_sink_local_small_offset_atomic_inc_i32(
+; OPT: %sunkaddr = ptrtoint i32 addrspace(3)* %in to i32
+; OPT: %sunkaddr1 = add i32 %sunkaddr, 28
+; OPT: %sunkaddr2 = inttoptr i32 %sunkaddr1 to i32 addrspace(3)*
+; OPT: %tmp1 = call i32 @llvm.amdgcn.atomic.inc.i32.p3i32(i32 addrspace(3)* %sunkaddr2, i32 2)
+define amdgpu_kernel void @test_sink_local_small_offset_atomic_inc_i32(i32 addrspace(3)* %out, i32 addrspace(3)* %in) {
+entry:
+  %out.gep = getelementptr i32, i32 addrspace(3)* %out, i32 999999
+  %in.gep = getelementptr i32, i32 addrspace(3)* %in, i32 7
+  %tid = call i32 @llvm.amdgcn.mbcnt.lo(i32 -1, i32 0) #0
+  %tmp0 = icmp eq i32 %tid, 0
+  br i1 %tmp0, label %endif, label %if
+
+if:
+  %tmp1 = call i32 @llvm.amdgcn.atomic.inc.i32.p3i32(i32 addrspace(3)* %in.gep, i32 2)
+  br label %endif
+
+endif:
+  %x = phi i32 [ %tmp1, %if ], [ 0, %entry ]
+  store i32 %x, i32 addrspace(3)* %out.gep
+  br label %done
+
+done:
+  ret void
+}
+
+; OPT-LABEL: @test_sink_local_small_offset_atomic_dec_i32(
+; OPT: %sunkaddr = ptrtoint i32 addrspace(3)* %in to i32
+; OPT: %sunkaddr1 = add i32 %sunkaddr, 28
+; OPT: %sunkaddr2 = inttoptr i32 %sunkaddr1 to i32 addrspace(3)*
+; OPT: %tmp1 = call i32 @llvm.amdgcn.atomic.dec.i32.p3i32(i32 addrspace(3)* %sunkaddr2, i32 2)
+define amdgpu_kernel void @test_sink_local_small_offset_atomic_dec_i32(i32 addrspace(3)* %out, i32 addrspace(3)* %in) {
+entry:
+  %out.gep = getelementptr i32, i32 addrspace(3)* %out, i32 999999
+  %in.gep = getelementptr i32, i32 addrspace(3)* %in, i32 7
+  %tid = call i32 @llvm.amdgcn.mbcnt.lo(i32 -1, i32 0) #0
+  %tmp0 = icmp eq i32 %tid, 0
+  br i1 %tmp0, label %endif, label %if
+
+if:
+  %tmp1 = call i32 @llvm.amdgcn.atomic.dec.i32.p3i32(i32 addrspace(3)* %in.gep, i32 2)
+  br label %endif
+
+endif:
+  %x = phi i32 [ %tmp1, %if ], [ 0, %entry ]
+  store i32 %x, i32 addrspace(3)* %out.gep
+  br label %done
+
+done:
+  ret void
+}
+
 declare i32 @llvm.amdgcn.mbcnt.lo(i32, i32) #0
+declare i32 @llvm.amdgcn.atomic.inc.i32.p3i32(i32 addrspace(3)* nocapture, i32) #2
+declare i32 @llvm.amdgcn.atomic.dec.i32.p3i32(i32 addrspace(3)* nocapture, i32) #2
 
 attributes #0 = { nounwind readnone }
 attributes #1 = { nounwind }
+attributes #2 = { nounwind argmemonly }

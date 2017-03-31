@@ -168,6 +168,7 @@ PassManagerBuilder::PassManagerBuilder() {
     PGOInstrUse = RunPGOInstrUse;
     PrepareForThinLTO = EnablePrepareForThinLTO;
     PerformThinLTO = false;
+    DivergentTarget = false;
 }
 
 PassManagerBuilder::~PassManagerBuilder() {
@@ -307,7 +308,7 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
   // Rotate Loop - disable header duplication at -Oz
   MPM.add(createLoopRotatePass(SizeLevel == 2 ? 0 : -1));
   MPM.add(createLICMPass());                  // Hoist loop invariants
-  MPM.add(createLoopUnswitchPass(SizeLevel || OptLevel < 3));
+  MPM.add(createLoopUnswitchPass(SizeLevel || OptLevel < 3, DivergentTarget));
   MPM.add(createCFGSimplificationPass());
   addInstructionCombiningPass(MPM);
   MPM.add(createIndVarSimplifyPass());        // Canonicalize indvars
@@ -434,6 +435,14 @@ void PassManagerBuilder::populateModulePassManager(
     MPM.add(createPGOIndirectCallPromotionLegacyPass(/*InLTO = */ true,
                                                      !PGOSampleUse.empty()));
 
+  // For SamplePGO in ThinLTO compile phase, we do not want to unroll loops
+  // as it will change the CFG too much to make the 2nd profile annotation
+  // in backend more difficult.
+  bool PrepareForThinLTOUsingPGOSampleProfile =
+      PrepareForThinLTO && !PGOSampleUse.empty();
+  if (PrepareForThinLTOUsingPGOSampleProfile)
+    DisableUnrollLoops = true;
+
   if (!DisableUnitAtATime) {
     // Infer attributes about declarations if possible.
     MPM.add(createInferFunctionAttrsLegacyPass());
@@ -452,7 +461,10 @@ void PassManagerBuilder::populateModulePassManager(
     MPM.add(createCFGSimplificationPass()); // Clean up after IPCP & DAE
   }
 
-  if (!PerformThinLTO) {
+  // For SamplePGO in ThinLTO compile phase, we do not want to do indirect
+  // call promotion as it will change the CFG too much to make the 2nd
+  // profile annotation in backend more difficult.
+  if (!PerformThinLTO && !PrepareForThinLTOUsingPGOSampleProfile) {
     /// PGO instrumentation is added during the compile phase for ThinLTO, do
     /// not run it a second time
     addPGOInstrPasses(MPM);
@@ -588,7 +600,7 @@ void PassManagerBuilder::populateModulePassManager(
     MPM.add(createCorrelatedValuePropagationPass());
     addInstructionCombiningPass(MPM);
     MPM.add(createLICMPass());
-    MPM.add(createLoopUnswitchPass(SizeLevel || OptLevel < 3));
+    MPM.add(createLoopUnswitchPass(SizeLevel || OptLevel < 3, DivergentTarget));
     MPM.add(createCFGSimplificationPass());
     addInstructionCombiningPass(MPM);
   }
@@ -703,8 +715,7 @@ void PassManagerBuilder::addLTOOptimizationPasses(legacy::PassManagerBase &PM) {
   PM.add(createGlobalSplitPass());
 
   // Apply whole-program devirtualization and virtual constant propagation.
-  PM.add(createWholeProgramDevirtPass(
-      Summary ? PassSummaryAction::Export : PassSummaryAction::None, Summary));
+  PM.add(createWholeProgramDevirtPass(ExportSummary, nullptr));
 
   // That's all we need at opt level 1.
   if (OptLevel == 1)
@@ -833,7 +844,7 @@ void PassManagerBuilder::populateThinLTOPassManager(
   if (VerifyInput)
     PM.add(createVerifierPass());
 
-  if (Summary) {
+  if (ImportSummary) {
     // These passes import type identifier resolutions for whole-program
     // devirtualization and CFI. They must run early because other passes may
     // disturb the specific instruction patterns that these passes look for,
@@ -846,8 +857,8 @@ void PassManagerBuilder::populateThinLTOPassManager(
     //
     // Also, WPD has access to more precise information than ICP and can
     // devirtualize more effectively, so it should operate on the IR first.
-    PM.add(createWholeProgramDevirtPass(PassSummaryAction::Import, Summary));
-    PM.add(createLowerTypeTestsPass(PassSummaryAction::Import, Summary));
+    PM.add(createWholeProgramDevirtPass(nullptr, ImportSummary));
+    PM.add(createLowerTypeTestsPass(nullptr, ImportSummary));
   }
 
   populateModulePassManager(PM);
@@ -874,8 +885,7 @@ void PassManagerBuilder::populateLTOPassManager(legacy::PassManagerBase &PM) {
   // Lower type metadata and the type.test intrinsic. This pass supports Clang's
   // control flow integrity mechanisms (-fsanitize=cfi*) and needs to run at
   // link time if CFI is enabled. The pass does nothing if CFI is disabled.
-  PM.add(createLowerTypeTestsPass(
-      Summary ? PassSummaryAction::Export : PassSummaryAction::None, Summary));
+  PM.add(createLowerTypeTestsPass(ExportSummary, nullptr));
 
   if (OptLevel != 0)
     addLateLTOOptimizationPasses(PM);

@@ -17,7 +17,7 @@
 ; VI:  v_cndmask_b32_e32 v[[R_F16:[0-9]+]], v[[D_F16]], v[[C_F16]], vcc
 ; GCN: buffer_store_short v[[R_F16]]
 ; GCN: s_endpgm
-define void @select_f16(
+define amdgpu_kernel void @select_f16(
     half addrspace(1)* %r,
     half addrspace(1)* %a,
     half addrspace(1)* %b,
@@ -48,7 +48,7 @@ entry:
 ; VI:  v_cndmask_b32_e32 v[[R_F16:[0-9]+]], v[[D_F16]], v[[C_F16]], vcc
 ; GCN: buffer_store_short v[[R_F16]]
 ; GCN: s_endpgm
-define void @select_f16_imm_a(
+define amdgpu_kernel void @select_f16_imm_a(
     half addrspace(1)* %r,
     half addrspace(1)* %b,
     half addrspace(1)* %c,
@@ -78,7 +78,7 @@ entry:
 ; VI:  v_cndmask_b32_e32 v[[R_F16:[0-9]+]], v[[D_F16]], v[[C_F16]], vcc
 ; GCN: buffer_store_short v[[R_F16]]
 ; GCN: s_endpgm
-define void @select_f16_imm_b(
+define amdgpu_kernel void @select_f16_imm_b(
     half addrspace(1)* %r,
     half addrspace(1)* %a,
     half addrspace(1)* %c,
@@ -109,7 +109,7 @@ entry:
 ; VI:  v_cndmask_b32_e32 v[[R_F16:[0-9]+]], v[[C_F16]], v[[D_F16]], vcc
 ; GCN: buffer_store_short v[[R_F16]]
 ; GCN: s_endpgm
-define void @select_f16_imm_c(
+define amdgpu_kernel void @select_f16_imm_c(
     half addrspace(1)* %r,
     half addrspace(1)* %a,
     half addrspace(1)* %b,
@@ -139,7 +139,7 @@ entry:
 ; VI:  v_cndmask_b32_e32 v[[R_F16:[0-9]+]], v[[D_F16]], v[[C_F16]], vcc
 ; GCN: buffer_store_short v[[R_F16]]
 ; GCN: s_endpgm
-define void @select_f16_imm_d(
+define amdgpu_kernel void @select_f16_imm_d(
     half addrspace(1)* %r,
     half addrspace(1)* %a,
     half addrspace(1)* %b,
@@ -168,7 +168,7 @@ entry:
 ; SI:  v_cvt_f16_f32_e32
 ; SI:  v_cvt_f16_f32_e32
 ; GCN: s_endpgm
-define void @select_v2f16(
+define amdgpu_kernel void @select_v2f16(
     <2 x half> addrspace(1)* %r,
     <2 x half> addrspace(1)* %a,
     <2 x half> addrspace(1)* %b,
@@ -188,21 +188,21 @@ entry:
 ; GCN-LABEL: {{^}}select_v2f16_imm_a:
 ; SI:  v_cvt_f32_f16_e32
 ; SI:  v_cvt_f32_f16_e32
-; SI:  v_cmp_lt_f32_e32 vcc, 0.5
 ; SI:  v_cvt_f32_f16_e32
 ; SI:  v_cvt_f32_f16_e32
 ; SI:  v_cvt_f32_f16_e32
 ; SI:  v_cvt_f32_f16_e32
 ; SI:  v_cmp_lt_f32_e64
+; SI:  v_cmp_lt_f32_e32 vcc, 0.5
 
 ; VI:  v_cmp_lt_f16_e32
 ; VI:  v_cmp_lt_f16_e64
 ; GCN: v_cndmask_b32_e32
-; SI:  v_cvt_f16_f32_e32
 ; GCN: v_cndmask_b32_e64
 ; SI:  v_cvt_f16_f32_e32
+; SI:  v_cvt_f16_f32_e32
 ; GCN: s_endpgm
-define void @select_v2f16_imm_a(
+define amdgpu_kernel void @select_v2f16_imm_a(
     <2 x half> addrspace(1)* %r,
     <2 x half> addrspace(1)* %b,
     <2 x half> addrspace(1)* %c,
@@ -220,21 +220,22 @@ entry:
 ; GCN-LABEL: {{^}}select_v2f16_imm_b:
 ; SI:  v_cvt_f32_f16_e32
 ; SI:  v_cvt_f32_f16_e32
-; SI:  v_cmp_gt_f32_e32 vcc, 0.5
 ; SI:  v_cvt_f32_f16_e32
 ; SI:  v_cvt_f32_f16_e32
 ; SI:  v_cvt_f32_f16_e32
 ; SI:  v_cvt_f32_f16_e32
 ; SI:  v_cmp_gt_f32_e64
+; SI:  v_cmp_gt_f32_e32 vcc, 0.5
 
 ; VI:  v_cmp_gt_f16_e32
 ; VI:  v_cmp_gt_f16_e64
 ; GCN: v_cndmask_b32_e32
-; SI:  v_cvt_f16_f32_e32
 ; GCN: v_cndmask_b32_e64
+
+; SI:  v_cvt_f16_f32_e32
 ; SI:  v_cvt_f16_f32_e32
 ; GCN: s_endpgm
-define void @select_v2f16_imm_b(
+define amdgpu_kernel void @select_v2f16_imm_b(
     <2 x half> addrspace(1)* %r,
     <2 x half> addrspace(1)* %a,
     <2 x half> addrspace(1)* %c,
@@ -258,8 +259,8 @@ entry:
 ; SI:  v_cvt_f32_f16_e32
 
 ; SI: v_cmp_nlt_f32_e32
-; SI: v_cndmask_b32_e32
-; SI: v_cmp_nlt_f32_e32
+; SI: v_cmp_nlt_f32_e64
+; SI: v_cndmask_b32_e64
 ; SI: v_cndmask_b32_e32
 
 ; VI: v_cmp_nlt_f16_e32
@@ -271,7 +272,7 @@ entry:
 ; SI:  v_cvt_f16_f32_e32
 ; SI:  v_cvt_f16_f32_e32
 ; GCN: s_endpgm
-define void @select_v2f16_imm_c(
+define amdgpu_kernel void @select_v2f16_imm_c(
     <2 x half> addrspace(1)* %r,
     <2 x half> addrspace(1)* %a,
     <2 x half> addrspace(1)* %b,
@@ -293,16 +294,17 @@ entry:
 ; SI:  v_cvt_f32_f16_e32
 ; SI:  v_cvt_f32_f16_e32
 ; SI:  v_cvt_f32_f16_e32
-; SI:  v_cmp_lt_f32_e32
 ; SI:  v_cmp_lt_f32_e64
+; SI:  v_cmp_lt_f32_e32
+
 ; VI:  v_cmp_lt_f16_e32
 ; VI:  v_cmp_lt_f16_e64
-; GCN: v_cndmask_b32_e32
-; GCN: v_cndmask_b32_e64
+; GCN: v_cndmask_b32
+; GCN: v_cndmask_b32
 ; SI:  v_cvt_f16_f32_e32
 ; SI:  v_cvt_f16_f32_e32
 ; GCN: s_endpgm
-define void @select_v2f16_imm_d(
+define amdgpu_kernel void @select_v2f16_imm_d(
     <2 x half> addrspace(1)* %r,
     <2 x half> addrspace(1)* %a,
     <2 x half> addrspace(1)* %b,

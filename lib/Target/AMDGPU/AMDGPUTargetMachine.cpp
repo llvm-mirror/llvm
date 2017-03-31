@@ -15,6 +15,7 @@
 
 #include "AMDGPUTargetMachine.h"
 #include "AMDGPU.h"
+#include "AMDGPUAliasAnalysis.h"
 #include "AMDGPUCallLowering.h"
 #include "AMDGPUInstructionSelector.h"
 #include "AMDGPULegalizerInfo.h"
@@ -23,6 +24,7 @@
 #endif
 #include "AMDGPUTargetObjectFile.h"
 #include "AMDGPUTargetTransformInfo.h"
+#include "GCNIterativeScheduler.h"
 #include "GCNSchedStrategy.h"
 #include "R600MachineScheduler.h"
 #include "SIMachineScheduler.h"
@@ -93,6 +95,16 @@ static cl::opt<bool> InternalizeSymbols(
   cl::init(false),
   cl::Hidden);
 
+static cl::opt<bool> EnableSDWAPeephole(
+  "amdgpu-sdwa-peephole",
+  cl::desc("Enable SDWA peepholer"),
+  cl::init(false));
+
+// Enable address space based alias analysis
+static cl::opt<bool> EnableAMDGPUAliasAnalysis("enable-amdgpu-aa", cl::Hidden,
+  cl::desc("Enable AMDGPU Alias Analysis"),
+  cl::init(true));
+
 extern "C" void LLVMInitializeAMDGPUTarget() {
   // Register the target
   RegisterTargetMachine<R600TargetMachine> X(getTheAMDGPUTarget());
@@ -103,6 +115,7 @@ extern "C" void LLVMInitializeAMDGPUTarget() {
   initializeSIFixSGPRCopiesPass(*PR);
   initializeSIFixVGPRCopiesPass(*PR);
   initializeSIFoldOperandsPass(*PR);
+  initializeSIPeepholeSDWAPass(*PR);
   initializeSIShrinkInstructionsPass(*PR);
   initializeSIFixControlFlowLiveIntervalsPass(*PR);
   initializeSILoadStoreOptimizerPass(*PR);
@@ -119,6 +132,7 @@ extern "C" void LLVMInitializeAMDGPUTarget() {
   initializeSIInsertSkipsPass(*PR);
   initializeSIDebuggerInsertNopsPass(*PR);
   initializeSIOptimizeExecMaskingPass(*PR);
+  initializeAMDGPUAAWrapperPassPass(*PR);
 }
 
 static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
@@ -142,6 +156,20 @@ createGCNMaxOccupancyMachineScheduler(MachineSchedContext *C) {
   return DAG;
 }
 
+static ScheduleDAGInstrs *
+createIterativeGCNMaxOccupancyMachineScheduler(MachineSchedContext *C) {
+  auto DAG = new GCNIterativeScheduler(C,
+    GCNIterativeScheduler::SCHEDULE_LEGACYMAXOCCUPANCY);
+  DAG->addMutation(createLoadClusterDAGMutation(DAG->TII, DAG->TRI));
+  DAG->addMutation(createStoreClusterDAGMutation(DAG->TII, DAG->TRI));
+  return DAG;
+}
+
+static ScheduleDAGInstrs *createMinRegScheduler(MachineSchedContext *C) {
+  return new GCNIterativeScheduler(C,
+    GCNIterativeScheduler::SCHEDULE_MINREGFORCED);
+}
+
 static MachineSchedRegistry
 R600SchedRegistry("r600", "Run R600's custom scheduler",
                    createR600MachineScheduler);
@@ -154,6 +182,16 @@ static MachineSchedRegistry
 GCNMaxOccupancySchedRegistry("gcn-max-occupancy",
                              "Run GCN scheduler to maximize occupancy",
                              createGCNMaxOccupancyMachineScheduler);
+
+static MachineSchedRegistry
+IterativeGCNMaxOccupancySchedRegistry("gcn-max-occupancy-experimental",
+  "Run GCN scheduler to maximize occupancy (experimental)",
+  createIterativeGCNMaxOccupancyMachineScheduler);
+
+static MachineSchedRegistry
+GCNMinRegSchedRegistry("gcn-minreg",
+  "Run GCN iterative scheduler for minimal register usage (experimental)",
+  createMinRegScheduler);
 
 static StringRef computeDataLayout(const Triple &TT) {
   if (TT.getArch() == Triple::r600) {
@@ -216,6 +254,8 @@ StringRef AMDGPUTargetMachine::getFeatureString(const Function &F) const {
 }
 
 void AMDGPUTargetMachine::adjustPassManager(PassManagerBuilder &Builder) {
+  Builder.DivergentTarget = true;
+
   bool Internalize = InternalizeSymbols &&
                      (getOptLevel() > CodeGenOpt::None) &&
                      (getTargetTriple().getArch() == Triple::amdgcn);
@@ -243,6 +283,7 @@ void AMDGPUTargetMachine::adjustPassManager(PassManagerBuilder &Builder) {
           return !GV.use_empty();
         }));
         PM.add(createGlobalDCEPass());
+        PM.add(createAMDGPUAlwaysInlinePass());
       }
   });
 }
@@ -504,6 +545,15 @@ void AMDGPUPassConfig::addIRPasses() {
       addPass(createSROAPass());
 
     addStraightLineScalarOptimizationPasses();
+
+    if (EnableAMDGPUAliasAnalysis) {
+      addPass(createAMDGPUAAWrapperPass());
+      addPass(createExternalAAWrapperPass([](Pass &P, Function &,
+                                             AAResults &AAR) {
+        if (auto *WrapperPass = P.getAnalysisIfAvailable<AMDGPUAAWrapperPass>())
+          AAR.addAAResult(WrapperPass->getResult());
+        }));
+    }
   }
 
   TargetPassConfig::addIRPasses();
@@ -664,6 +714,10 @@ bool GCNPassConfig::addGlobalInstructionSelect() {
 
 void GCNPassConfig::addPreRegAlloc() {
   addPass(createSIShrinkInstructionsPass());
+  if (EnableSDWAPeephole) {
+    addPass(&SIPeepholeSDWAID);
+    addPass(&DeadMachineInstructionElimID);
+  }
   addPass(createSIWholeQuadModePass());
 }
 

@@ -92,6 +92,13 @@ def SDTBinaryArithWithFlagsInOut : SDTypeProfile<2, 3,
                                              SDTCisVT<1, i32>,
                                              SDTCisVT<4, i32>]>;
 
+def SDT_LongMac  : SDTypeProfile<2, 4, [SDTCisVT<0, i32>,
+                                        SDTCisSameAs<0, 1>,
+                                        SDTCisSameAs<0, 2>,
+                                        SDTCisSameAs<0, 3>,
+                                        SDTCisSameAs<0, 4>,
+                                        SDTCisSameAs<0, 5>]>;
+
 // Node definitions.
 def ARMWrapper       : SDNode<"ARMISD::Wrapper",     SDTIntUnaryOp>;
 def ARMWrapperPIC    : SDNode<"ARMISD::WrapperPIC",  SDTIntUnaryOp>;
@@ -182,6 +189,13 @@ def ARMbfi           : SDNode<"ARMISD::BFI", SDT_ARMBFI>;
 def ARMmemcopy : SDNode<"ARMISD::MEMCPY", SDT_ARMMEMCPY,
                         [SDNPHasChain, SDNPInGlue, SDNPOutGlue,
                          SDNPMayStore, SDNPMayLoad]>;
+
+def ARMsmulwb       : SDNode<"ARMISD::SMULWB", SDTIntBinOp, []>;
+def ARMsmulwt       : SDNode<"ARMISD::SMULWT", SDTIntBinOp, []>;
+def ARMsmlalbb      : SDNode<"ARMISD::SMLALBB", SDT_LongMac, []>;
+def ARMsmlalbt      : SDNode<"ARMISD::SMLALBT", SDT_LongMac, []>;
+def ARMsmlaltb      : SDNode<"ARMISD::SMLALTB", SDT_LongMac, []>;
+def ARMsmlaltt      : SDNode<"ARMISD::SMLALTT", SDT_LongMac, []>;
 
 //===----------------------------------------------------------------------===//
 // ARM Instruction Predicate Definitions.
@@ -296,6 +310,11 @@ def IsNotWindows     : Predicate<"!Subtarget->isTargetWindows()">;
 def UseNaClTrap      : Predicate<"Subtarget->useNaClTrap()">,
                                  AssemblerPredicate<"FeatureNaClTrap", "NaCl">;
 def DontUseNaClTrap  : Predicate<"!Subtarget->useNaClTrap()">;
+
+def UseNegativeImmediates :
+  Predicate<"false">,
+            AssemblerPredicate<"!FeatureNoNegativeImmediates",
+                               "NegativeImmediates">;
 
 // FIXME: Eventually this will be just "hasV6T2Ops".
 def UseMovt          : Predicate<"Subtarget->useMovt(*MF)">;
@@ -3953,27 +3972,35 @@ let hasSideEffects = 0 in {
 let isCommutable = 1 in {
 def SMULL : AsMul1I64<0b0000110, (outs GPR:$RdLo, GPR:$RdHi),
                                  (ins GPR:$Rn, GPR:$Rm), IIC_iMUL64,
-                    "smull", "\t$RdLo, $RdHi, $Rn, $Rm", []>,
+                    "smull", "\t$RdLo, $RdHi, $Rn, $Rm",
+                    [(set GPR:$RdLo, GPR:$RdHi,
+                          (smullohi GPR:$Rn, GPR:$Rm))]>,
                     Requires<[IsARM, HasV6]>,
            Sched<[WriteMUL64Lo, WriteMUL64Hi, ReadMUL, ReadMUL]>;
 
 def UMULL : AsMul1I64<0b0000100, (outs GPR:$RdLo, GPR:$RdHi),
                                  (ins GPR:$Rn, GPR:$Rm), IIC_iMUL64,
-                    "umull", "\t$RdLo, $RdHi, $Rn, $Rm", []>,
+                    "umull", "\t$RdLo, $RdHi, $Rn, $Rm",
+                    [(set GPR:$RdLo, GPR:$RdHi,
+                          (umullohi GPR:$Rn, GPR:$Rm))]>,
                     Requires<[IsARM, HasV6]>,
            Sched<[WriteMAC64Lo, WriteMAC64Hi, ReadMUL, ReadMUL]>;
 
 let Constraints = "@earlyclobber $RdLo,@earlyclobber $RdHi" in {
 def SMULLv5 : ARMPseudoExpand<(outs GPR:$RdLo, GPR:$RdHi),
                             (ins GPR:$Rn, GPR:$Rm, pred:$p, cc_out:$s),
-                            4, IIC_iMUL64, [],
+                            4, IIC_iMUL64,
+                            [(set GPR:$RdLo, GPR:$RdHi,
+                                  (smullohi GPR:$Rn, GPR:$Rm))],
           (SMULL GPR:$RdLo, GPR:$RdHi, GPR:$Rn, GPR:$Rm, pred:$p, cc_out:$s)>,
                            Requires<[IsARM, NoV6]>,
               Sched<[WriteMUL64Lo, WriteMUL64Hi, ReadMUL, ReadMUL]>;
 
 def UMULLv5 : ARMPseudoExpand<(outs GPR:$RdLo, GPR:$RdHi),
                             (ins GPR:$Rn, GPR:$Rm, pred:$p, cc_out:$s),
-                            4, IIC_iMUL64, [],
+                            4, IIC_iMUL64,
+                            [(set GPR:$RdLo, GPR:$RdHi,
+                                  (umullohi GPR:$Rn, GPR:$Rm))],
           (UMULL GPR:$RdLo, GPR:$RdHi, GPR:$Rn, GPR:$Rm, pred:$p, cc_out:$s)>,
                            Requires<[IsARM, NoV6]>,
              Sched<[WriteMUL64Lo, WriteMUL64Hi, ReadMUL, ReadMUL]>;
@@ -4100,13 +4127,13 @@ multiclass AI_smul<string opc> {
 
   def WB : AMulxyI<0b0001001, 0b01, (outs GPR:$Rd), (ins GPR:$Rn, GPR:$Rm),
               IIC_iMUL16, !strconcat(opc, "wb"), "\t$Rd, $Rn, $Rm",
-              []>,
+              [(set GPR:$Rd, (ARMsmulwb GPR:$Rn, GPR:$Rm))]>,
            Requires<[IsARM, HasV5TE]>,
            Sched<[WriteMUL16, ReadMUL, ReadMUL]>;
 
   def WT : AMulxyI<0b0001001, 0b11, (outs GPR:$Rd), (ins GPR:$Rn, GPR:$Rm),
               IIC_iMUL16, !strconcat(opc, "wt"), "\t$Rd, $Rn, $Rm",
-              []>,
+              [(set GPR:$Rd, (ARMsmulwt GPR:$Rn, GPR:$Rm))]>,
             Requires<[IsARM, HasV5TE]>,
            Sched<[WriteMUL16, ReadMUL, ReadMUL]>;
 }
@@ -4153,14 +4180,16 @@ multiclass AI_smla<string opc> {
   def WB : AMulxyIa<0b0001001, 0b00, (outs GPRnopc:$Rd),
               (ins GPRnopc:$Rn, GPRnopc:$Rm, GPR:$Ra),
               IIC_iMAC16, !strconcat(opc, "wb"), "\t$Rd, $Rn, $Rm, $Ra",
-              []>,
+              [(set GPRnopc:$Rd,
+                    (add GPR:$Ra, (ARMsmulwb GPRnopc:$Rn, GPRnopc:$Rm)))]>,
            Requires<[IsARM, HasV5TE, UseMulOps]>,
            Sched<[WriteMAC16, ReadMUL, ReadMUL, ReadMAC]>;
 
   def WT : AMulxyIa<0b0001001, 0b10, (outs GPRnopc:$Rd),
               (ins GPRnopc:$Rn, GPRnopc:$Rm, GPR:$Ra),
               IIC_iMAC16, !strconcat(opc, "wt"), "\t$Rd, $Rn, $Rm, $Ra",
-              []>,
+              [(set GPRnopc:$Rd,
+                    (add GPR:$Ra, (ARMsmulwt GPRnopc:$Rn, GPRnopc:$Rm)))]>,
            Requires<[IsARM, HasV5TE, UseMulOps]>,
            Sched<[WriteMAC16, ReadMUL, ReadMUL, ReadMAC]>;
   }
@@ -4170,29 +4199,28 @@ defm SMUL : AI_smul<"smul">;
 defm SMLA : AI_smla<"smla">;
 
 // Halfword multiply accumulate long: SMLAL<x><y>.
-def SMLALBB : AMulxyI64<0b0001010, 0b00, (outs GPRnopc:$RdLo, GPRnopc:$RdHi),
-                      (ins GPRnopc:$Rn, GPRnopc:$Rm),
-                      IIC_iMAC64, "smlalbb", "\t$RdLo, $RdHi, $Rn, $Rm", []>,
-              Requires<[IsARM, HasV5TE]>,
-              Sched<[WriteMAC64Lo, WriteMAC64Hi, ReadMUL, ReadMUL, ReadMAC, ReadMAC]>;
+class SMLAL<bits<2> opc1, string asm>
+ : AMulxyI64<0b0001010, opc1,
+        (outs GPRnopc:$RdLo, GPRnopc:$RdHi),
+        (ins GPRnopc:$Rn, GPRnopc:$Rm, GPRnopc:$RLo, GPRnopc:$RHi),
+        IIC_iMAC64, asm, "\t$RdLo, $RdHi, $Rn, $Rm", []>,
+        RegConstraint<"$RLo = $RdLo, $RHi = $RdHi">,
+        Requires<[IsARM, HasV5TE]>,
+        Sched<[WriteMAC64Lo, WriteMAC64Hi, ReadMUL, ReadMUL, ReadMAC, ReadMAC]>;
 
-def SMLALBT : AMulxyI64<0b0001010, 0b10, (outs GPRnopc:$RdLo, GPRnopc:$RdHi),
-                      (ins GPRnopc:$Rn, GPRnopc:$Rm),
-                      IIC_iMAC64, "smlalbt", "\t$RdLo, $RdHi, $Rn, $Rm", []>,
-              Requires<[IsARM, HasV5TE]>,
-              Sched<[WriteMAC64Lo, WriteMAC64Hi, ReadMUL, ReadMUL, ReadMAC, ReadMAC]>;
+def SMLALBB : SMLAL<0b00, "smlalbb">;
+def SMLALBT : SMLAL<0b10, "smlalbt">;
+def SMLALTB : SMLAL<0b01, "smlaltb">;
+def SMLALTT : SMLAL<0b11, "smlaltt">;
 
-def SMLALTB : AMulxyI64<0b0001010, 0b01, (outs GPRnopc:$RdLo, GPRnopc:$RdHi),
-                      (ins GPRnopc:$Rn, GPRnopc:$Rm),
-                      IIC_iMAC64, "smlaltb", "\t$RdLo, $RdHi, $Rn, $Rm", []>,
-              Requires<[IsARM, HasV5TE]>,
-              Sched<[WriteMAC64Lo, WriteMAC64Hi, ReadMUL, ReadMUL, ReadMAC, ReadMAC]>;
-
-def SMLALTT : AMulxyI64<0b0001010, 0b11, (outs GPRnopc:$RdLo, GPRnopc:$RdHi),
-                      (ins GPRnopc:$Rn, GPRnopc:$Rm),
-                      IIC_iMAC64, "smlaltt", "\t$RdLo, $RdHi, $Rn, $Rm", []>,
-              Requires<[IsARM, HasV5TE]>,
-              Sched<[WriteMAC64Lo, WriteMAC64Hi, ReadMUL, ReadMUL, ReadMAC, ReadMAC]>;
+def : ARMV5TEPat<(ARMsmlalbb GPR:$Rn, GPR:$Rm, GPR:$RLo, GPR:$RHi),
+                 (SMLALBB $Rn, $Rm, $RLo, $RHi)>;
+def : ARMV5TEPat<(ARMsmlalbt GPR:$Rn, GPR:$Rm, GPR:$RLo, GPR:$RHi),
+                 (SMLALBT $Rn, $Rm, $RLo, $RHi)>;
+def : ARMV5TEPat<(ARMsmlaltb GPR:$Rn, GPR:$Rm, GPR:$RLo, GPR:$RHi),
+                 (SMLALTB $Rn, $Rm, $RLo, $RHi)>;
+def : ARMV5TEPat<(ARMsmlaltt GPR:$Rn, GPR:$Rm, GPR:$RLo, GPR:$RHi),
+                 (SMLALTT $Rn, $Rm, $RLo, $RHi)>;
 
 // Helper class for AI_smld.
 class AMulDualIbase<bit long, bit sub, bit swap, dag oops, dag iops,
@@ -5767,33 +5795,49 @@ def : MnemonicAlias<"usubaddx", "usax">;
 
 // "mov Rd, mod_imm_not" can be handled via "mvn" in assembly, just like
 // for isel.
-def : ARMInstAlias<"mov${s}${p} $Rd, $imm",
+def : ARMInstSubst<"mov${s}${p} $Rd, $imm",
                    (MVNi rGPR:$Rd, mod_imm_not:$imm, pred:$p, cc_out:$s)>;
-def : ARMInstAlias<"mvn${s}${p} $Rd, $imm",
+def : ARMInstSubst<"mvn${s}${p} $Rd, $imm",
                    (MOVi rGPR:$Rd, mod_imm_not:$imm, pred:$p, cc_out:$s)>;
 // Same for AND <--> BIC
-def : ARMInstAlias<"bic${s}${p} $Rd, $Rn, $imm",
+def : ARMInstSubst<"bic${s}${p} $Rd, $Rn, $imm",
                    (ANDri GPR:$Rd, GPR:$Rn, mod_imm_not:$imm,
                           pred:$p, cc_out:$s)>;
-def : ARMInstAlias<"bic${s}${p} $Rdn, $imm",
+def : ARMInstSubst<"bic${s}${p} $Rdn, $imm",
                    (ANDri GPR:$Rdn, GPR:$Rdn, mod_imm_not:$imm,
                           pred:$p, cc_out:$s)>;
-def : ARMInstAlias<"and${s}${p} $Rd, $Rn, $imm",
+def : ARMInstSubst<"and${s}${p} $Rd, $Rn, $imm",
                    (BICri GPR:$Rd, GPR:$Rn, mod_imm_not:$imm,
                           pred:$p, cc_out:$s)>;
-def : ARMInstAlias<"and${s}${p} $Rdn, $imm",
+def : ARMInstSubst<"and${s}${p} $Rdn, $imm",
                    (BICri GPR:$Rdn, GPR:$Rdn, mod_imm_not:$imm,
                           pred:$p, cc_out:$s)>;
 
 // Likewise, "add Rd, mod_imm_neg" -> sub
-def : ARMInstAlias<"add${s}${p} $Rd, $Rn, $imm",
+def : ARMInstSubst<"add${s}${p} $Rd, $Rn, $imm",
                  (SUBri GPR:$Rd, GPR:$Rn, mod_imm_neg:$imm, pred:$p, cc_out:$s)>;
-def : ARMInstAlias<"add${s}${p} $Rd, $imm",
+def : ARMInstSubst<"add${s}${p} $Rd, $imm",
                  (SUBri GPR:$Rd, GPR:$Rd, mod_imm_neg:$imm, pred:$p, cc_out:$s)>;
+// Likewise, "sub Rd, mod_imm_neg" -> add
+def : ARMInstSubst<"sub${s}${p} $Rd, $Rn, $imm",
+                 (ADDri GPR:$Rd, GPR:$Rn, mod_imm_neg:$imm, pred:$p, cc_out:$s)>;
+def : ARMInstSubst<"sub${s}${p} $Rd, $imm",
+                 (ADDri GPR:$Rd, GPR:$Rd, mod_imm_neg:$imm, pred:$p, cc_out:$s)>;
+
+
+def : ARMInstSubst<"adc${s}${p} $Rd, $Rn, $imm",
+                 (SBCri GPR:$Rd, GPR:$Rn, mod_imm_not:$imm, pred:$p, cc_out:$s)>;
+def : ARMInstSubst<"adc${s}${p} $Rdn, $imm",
+                 (SBCri GPR:$Rdn, GPR:$Rdn, mod_imm_not:$imm, pred:$p, cc_out:$s)>;
+def : ARMInstSubst<"sbc${s}${p} $Rd, $Rn, $imm",
+                 (ADCri GPR:$Rd, GPR:$Rn, mod_imm_not:$imm, pred:$p, cc_out:$s)>;
+def : ARMInstSubst<"sbc${s}${p} $Rdn, $imm",
+                 (ADCri GPR:$Rdn, GPR:$Rdn, mod_imm_not:$imm, pred:$p, cc_out:$s)>;
+
 // Same for CMP <--> CMN via mod_imm_neg
-def : ARMInstAlias<"cmp${p} $Rd, $imm",
+def : ARMInstSubst<"cmp${p} $Rd, $imm",
                    (CMNri rGPR:$Rd, mod_imm_neg:$imm, pred:$p)>;
-def : ARMInstAlias<"cmn${p} $Rd, $imm",
+def : ARMInstSubst<"cmn${p} $Rd, $imm",
                    (CMPri rGPR:$Rd, mod_imm_neg:$imm, pred:$p)>;
 
 // The shifter forms of the MOV instruction are aliased to the ASR, LSL,

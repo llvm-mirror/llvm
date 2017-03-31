@@ -33,6 +33,7 @@
 #include "llvm/Support/Chrono.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/ErrorOr.h"
+#include "llvm/Support/MD5.h"
 #include <cassert>
 #include <cstdint>
 #include <ctime>
@@ -93,6 +94,7 @@ enum perms {
   set_uid_on_exe = 04000,
   set_gid_on_exe = 02000,
   sticky_bit = 01000,
+  all_perms = all_all | set_uid_on_exe | set_gid_on_exe | sticky_bit,
   perms_not_known = 0xFFFF
 };
 
@@ -145,6 +147,7 @@ class file_status
 
   #if defined(LLVM_ON_UNIX)
   dev_t fs_st_dev = 0;
+  nlink_t fs_st_nlinks = 0;
   ino_t fs_st_ino = 0;
   time_t fs_st_atime = 0;
   time_t fs_st_mtime = 0;
@@ -152,6 +155,7 @@ class file_status
   gid_t fs_st_gid = 0;
   off_t fs_st_size = 0;
   #elif defined (LLVM_ON_WIN32)
+  uint32_t NumLinks = 0;
   uint32_t LastAccessedTimeHigh = 0;
   uint32_t LastAccessedTimeLow = 0;
   uint32_t LastWriteTimeHigh = 0;
@@ -171,27 +175,29 @@ public:
 
   file_status(file_type Type) : Type(Type) {}
 
-  file_status(file_type Type, perms Perms, dev_t Dev, ino_t Ino, time_t ATime,
-              time_t MTime, uid_t UID, gid_t GID, off_t Size)
-      : fs_st_dev(Dev), fs_st_ino(Ino), fs_st_atime(ATime), fs_st_mtime(MTime),
-        fs_st_uid(UID), fs_st_gid(GID), fs_st_size(Size), Type(Type),
-        Perms(Perms) {}
+  file_status(file_type Type, perms Perms, dev_t Dev, nlink_t Links, ino_t Ino,
+              time_t ATime, time_t MTime, uid_t UID, gid_t GID, off_t Size)
+      : fs_st_dev(Dev), fs_st_nlinks(Links), fs_st_ino(Ino), fs_st_atime(ATime),
+        fs_st_mtime(MTime), fs_st_uid(UID), fs_st_gid(GID), fs_st_size(Size),
+        Type(Type), Perms(Perms) {}
   #elif defined(LLVM_ON_WIN32)
   file_status() = default;
 
   file_status(file_type Type) : Type(Type) {}
 
-  file_status(file_type Type, uint32_t LastAccessTimeHigh,
-              uint32_t LastAccessTimeLow, uint32_t LastWriteTimeHigh,
-              uint32_t LastWriteTimeLow, uint32_t VolumeSerialNumber,
-              uint32_t FileSizeHigh, uint32_t FileSizeLow,
-              uint32_t FileIndexHigh, uint32_t FileIndexLow)
-      : LastAccessedTimeHigh(LastAccessTimeHigh), LastAccessedTimeLow(LastAccessTimeLow),
+  file_status(file_type Type, perms Perms, uint32_t LinkCount,
+              uint32_t LastAccessTimeHigh, uint32_t LastAccessTimeLow,
+              uint32_t LastWriteTimeHigh, uint32_t LastWriteTimeLow,
+              uint32_t VolumeSerialNumber, uint32_t FileSizeHigh,
+              uint32_t FileSizeLow, uint32_t FileIndexHigh,
+              uint32_t FileIndexLow)
+      : NumLinks(LinkCount), LastAccessedTimeHigh(LastAccessTimeHigh),
+        LastAccessedTimeLow(LastAccessTimeLow),
         LastWriteTimeHigh(LastWriteTimeHigh),
         LastWriteTimeLow(LastWriteTimeLow),
         VolumeSerialNumber(VolumeSerialNumber), FileSizeHigh(FileSizeHigh),
         FileSizeLow(FileSizeLow), FileIndexHigh(FileIndexHigh),
-        FileIndexLow(FileIndexLow), Type(Type) {}
+        FileIndexLow(FileIndexLow), Type(Type), Perms(Perms) {}
   #endif
 
   // getters
@@ -200,6 +206,7 @@ public:
   TimePoint<> getLastAccessedTime() const;
   TimePoint<> getLastModificationTime() const;
   UniqueID getUniqueID() const;
+  uint32_t getLinkCount() const;
 
   #if defined(LLVM_ON_UNIX)
   uint32_t getUser() const { return fs_st_uid; }
@@ -397,6 +404,16 @@ std::error_code copy_file(const Twine &From, const Twine &To);
 /// @returns errc::success if \a path has been resized to \a size, otherwise a
 ///          platform-specific error_code.
 std::error_code resize_file(int FD, uint64_t Size);
+
+/// @brief Compute an MD5 hash of a file's contents.
+///
+/// @param FD Input file descriptor.
+/// @returns An MD5Result with the hash computed, if successful, otherwise a
+///          std::error_code.
+ErrorOr<MD5::MD5Result> md5_contents(int FD);
+
+/// @brief Version of compute_md5 that doesn't require an open file descriptor.
+ErrorOr<MD5::MD5Result> md5_contents(const Twine &Path);
 
 /// @}
 /// @name Physical Observers
@@ -604,6 +621,27 @@ std::error_code status(const Twine &path, file_status &result,
 
 /// @brief A version for when a file descriptor is already available.
 std::error_code status(int FD, file_status &Result);
+
+/// @brief Set file permissions.
+///
+/// @param Path File to set permissions on.
+/// @param Permissions New file permissions.
+/// @returns errc::success if the permissions were successfully set, otherwise
+///          a platform-specific error_code.
+/// @note On Windows, all permissions except *_write are ignored. Using any of
+///       owner_write, group_write, or all_write will make the file writable.
+///       Otherwise, the file will be marked as read-only.
+std::error_code setPermissions(const Twine &Path, perms Permissions);
+
+/// @brief Get file permissions.
+///
+/// @param Path File to get permissions from.
+/// @returns the permissions if they were successfully retrieved, otherwise a
+///          platform-specific error_code.
+/// @note On Windows, if the file does not have the FILE_ATTRIBUTE_READONLY
+///       attribute, all_all will be returned. Otherwise, all_read | all_exe
+///       will be returned.
+ErrorOr<perms> getPermissions(const Twine &Path);
 
 /// @brief Get file size.
 ///

@@ -451,6 +451,14 @@ public:
     return get(Opcode).TSFlags & SIInstrFlags::VOP3P;
   }
 
+  static bool isVINTRP(const MachineInstr &MI) {
+    return MI.getDesc().TSFlags & SIInstrFlags::VINTRP;
+  }
+
+  bool isVINTRP(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::VINTRP;
+  }
+
   static bool isScalarUnit(const MachineInstr &MI) {
     return MI.getDesc().TSFlags & (SIInstrFlags::SALU | SIInstrFlags::SMRD);
   }
@@ -759,6 +767,9 @@ namespace AMDGPU {
 
   LLVM_READONLY
   int getVOPe32(uint16_t Opcode);
+
+  LLVM_READONLY
+  int getSDWAOp(uint16_t Opcode);
 
   LLVM_READONLY
   int getCommuteRev(uint16_t Opcode);

@@ -27,7 +27,7 @@
 // The coverage counters and PCs.
 // These are declared as global variables named "__sancov_*" to simplify
 // experiments with inlined instrumentation.
-alignas(8) ATTRIBUTE_INTERFACE
+alignas(64) ATTRIBUTE_INTERFACE
 uint8_t __sancov_trace_pc_guard_8bit_counters[fuzzer::TracePC::kNumPCs];
 
 ATTRIBUTE_INTERFACE
@@ -43,13 +43,6 @@ uint8_t *TracePC::Counters() const {
 
 uintptr_t *TracePC::PCs() const {
   return __sancov_trace_pc_pcs;
-}
-
-ATTRIBUTE_NO_SANITIZE_ALL
-void TracePC::HandleTrace(uint32_t *Guard, uintptr_t PC) {
-  uint32_t Idx = *Guard;
-  __sancov_trace_pc_pcs[Idx] = PC;
-  __sancov_trace_pc_guard_8bit_counters[Idx]++;
 }
 
 size_t TracePC::GetTotalPCCoverage() {
@@ -289,7 +282,9 @@ ATTRIBUTE_INTERFACE
 ATTRIBUTE_NO_SANITIZE_ALL
 void __sanitizer_cov_trace_pc_guard(uint32_t *Guard) {
   uintptr_t PC = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
-  fuzzer::TPC.HandleTrace(Guard, PC);
+  uint32_t Idx = *Guard;
+  __sancov_trace_pc_pcs[Idx] = PC;
+  __sancov_trace_pc_guard_8bit_counters[Idx]++;
 }
 
 ATTRIBUTE_INTERFACE

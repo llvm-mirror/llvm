@@ -348,7 +348,10 @@ public:
             ArrayRef<uint8_t>((const uint8_t *)&Entry, sizeof(GlobalValue::GUID)));
     }
 
-    sys::path::append(EntryPath, CachePath, toHex(Hasher.result()));
+    // This choice of file name allows the cache to be pruned (see pruneCache()
+    // in include/llvm/Support/CachePruning.h).
+    sys::path::append(EntryPath, CachePath,
+                      "llvmcache-" + toHex(Hasher.result()));
   }
 
   // Access the path to this entry in the cache.
@@ -1023,11 +1026,7 @@ void ThinLTOCodeGenerator::run() {
     }
   }
 
-  CachePruning(CacheOptions.Path)
-      .setPruningInterval(std::chrono::seconds(CacheOptions.PruningInterval))
-      .setEntryExpiration(std::chrono::seconds(CacheOptions.Expiration))
-      .setMaxSize(CacheOptions.MaxPercentageOfAvailableSpace)
-      .prune();
+  pruneCache(CacheOptions.Path, CacheOptions.Policy);
 
   // If statistics were requested, print them out now.
   if (llvm::AreStatisticsEnabled())

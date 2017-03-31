@@ -387,6 +387,7 @@ Error LLVMOutputStyle::dumpInfoStream() {
   P.printHex("Signature", IS->getSignature());
   P.printNumber("Age", IS->getAge());
   P.printObject("Guid", IS->getGuid());
+  P.printHex("Features", IS->getFeatures());
   {
     DictScope DD(P, "Named Streams");
     for (const auto &S : IS->getNamedStreams().entries())
@@ -458,9 +459,13 @@ Error LLVMOutputStyle::dumpTpiStream(uint32_t StreamIdx) {
     P.printNumber("Record count", Tpi->NumTypeRecords());
   }
 
-  TypeDatabaseVisitor DBV(TypeDB);
-  CompactTypeDumpVisitor CTDV(TypeDB, &P);
+  TypeDatabase &StreamDB = (StreamIdx == StreamTPI) ? TypeDB : ItemDB;
+
+  TypeDatabaseVisitor DBV(StreamDB);
+  CompactTypeDumpVisitor CTDV(StreamDB, &P);
   TypeDumpVisitor TDV(TypeDB, &P, false);
+  if (StreamIdx == StreamIPI)
+    TDV.setItemDB(ItemDB);
   RecordBytesVisitor RBV(P);
   TypeDeserializer Deserializer;
 

@@ -176,6 +176,30 @@ struct CongruenceClass {
       : ID(ID), RepLeader(Leader), DefiningExpr(E) {}
 };
 
+// Return true if two congruence classes are equivalent to each other.  This
+// means
+// that every field but the ID number and the dead field are equivalent.
+bool areClassesEquivalent(const CongruenceClass *A, const CongruenceClass *B) {
+  if (A == B)
+    return true;
+  if ((A && !B) || (B && !A))
+    return false;
+
+  if (std::tie(A->StoreCount, A->RepLeader, A->RepStoredValue,
+               A->RepMemoryAccess) != std::tie(B->StoreCount, B->RepLeader,
+                                               B->RepStoredValue,
+                                               B->RepMemoryAccess))
+    return false;
+  if (A->DefiningExpr != B->DefiningExpr)
+    if (!A->DefiningExpr || !B->DefiningExpr ||
+        *A->DefiningExpr != *B->DefiningExpr)
+      return false;
+  // We need some ordered set
+  std::set<Value *> AMembers(A->Members.begin(), A->Members.end());
+  std::set<Value *> BMembers(B->Members.begin(), B->Members.end());
+  return AMembers == BMembers;
+}
+
 namespace llvm {
 template <> struct DenseMapInfo<const Expression *> {
   static const Expression *getEmptyKey() {
@@ -270,8 +294,6 @@ class NewGVN {
   BitVector TouchedInstructions;
 
   DenseMap<const BasicBlock *, std::pair<unsigned, unsigned>> BlockInstRange;
-  DenseMap<const DomTreeNode *, std::pair<unsigned, unsigned>>
-      DominatedInstRange;
 
 #ifndef NDEBUG
   // Debugging for how many times each block and instruction got processed.
@@ -346,6 +368,7 @@ private:
   const Expression *performSymbolicPredicateInfoEvaluation(Instruction *);
 
   // Congruence finding.
+  bool someEquivalentDominates(const Instruction *, const Instruction *) const;
   Value *lookupOperandLeader(Value *) const;
   void performCongruenceFinding(Instruction *, const Expression *);
   void moveValueToNewCongruenceClass(Instruction *, CongruenceClass *,
@@ -353,7 +376,6 @@ private:
   bool setMemoryAccessEquivTo(MemoryAccess *From, CongruenceClass *To);
   MemoryAccess *lookupMemoryAccessEquiv(MemoryAccess *) const;
   bool isMemoryAccessTop(const MemoryAccess *) const;
-
   // Ranking
   unsigned int getRank(const Value *) const;
   bool shouldSwapOperands(const Value *, const Value *) const;
@@ -387,13 +409,21 @@ private:
   void markLeaderChangeTouched(CongruenceClass *CC);
   void addPredicateUsers(const PredicateBase *, Instruction *);
 
+  // Main loop of value numbering
+  void iterateTouchedInstructions();
+
   // Utilities.
   void cleanupTables();
   std::pair<unsigned, unsigned> assignDFSNumbers(BasicBlock *, unsigned);
   void updateProcessedCount(Value *V);
   void verifyMemoryCongruency() const;
-  void verifyComparisons(Function &F);
+  void verifyIterationSettled(Function &F);
   bool singleReachablePHIPath(const MemoryAccess *, const MemoryAccess *) const;
+  BasicBlock *getBlockForValue(Value *V) const;
+  void deleteExpression(const Expression *E);
+  // Debug counter info.  When verifying, we have to reset the value numbering
+  // debug counter to the same state it started in to get the same results.
+  std::pair<int, int> StartingVNCounter;
 };
 } // end anonymous namespace
 
@@ -432,6 +462,26 @@ static std::string getBlockName(const BasicBlock *B) {
 }
 #endif
 
+// Get the basic block from an instruction/memory value.
+BasicBlock *NewGVN::getBlockForValue(Value *V) const {
+  if (auto *I = dyn_cast<Instruction>(V))
+    return I->getParent();
+  else if (auto *MP = dyn_cast<MemoryPhi>(V))
+    return MP->getBlock();
+  llvm_unreachable("Should have been able to figure out a block for our value");
+  return nullptr;
+}
+
+// Delete a definitely dead expression, so it can be reused by the expression
+// allocator.  Some of these are not in creation functions, so we have to accept
+// const versions.
+void NewGVN::deleteExpression(const Expression *E) {
+  assert(isa<BasicExpression>(E));
+  auto *BE = cast<BasicExpression>(E);
+  const_cast<BasicExpression *>(BE)->deallocateOperands(ArgRecycler);
+  ExpressionAllocator.Deallocate(E);
+}
+
 PHIExpression *NewGVN::createPHIExpression(Instruction *I) {
   BasicBlock *PHIBlock = I->getParent();
   auto *PN = cast<PHINode>(I);
@@ -444,7 +494,7 @@ PHIExpression *NewGVN::createPHIExpression(Instruction *I) {
 
   // Filter out unreachable phi operands.
   auto Filtered = make_filter_range(PN->operands(), [&](const Use &U) {
-    return ReachableBlocks.count(PN->getIncomingBlock(U));
+    return ReachableEdges.count({PN->getIncomingBlock(U), PHIBlock});
   });
 
   std::transform(Filtered.begin(), Filtered.end(), op_inserter(E),
@@ -520,16 +570,13 @@ const Expression *NewGVN::checkSimplificationResults(Expression *E,
     NumGVNOpsSimplified++;
     assert(isa<BasicExpression>(E) &&
            "We should always have had a basic expression here");
-
-    cast<BasicExpression>(E)->deallocateOperands(ArgRecycler);
-    ExpressionAllocator.Deallocate(E);
+    deleteExpression(E);
     return createConstantExpression(C);
   } else if (isa<Argument>(V) || isa<GlobalVariable>(V)) {
     if (I)
       DEBUG(dbgs() << "Simplified " << *I << " to "
                    << " variable " << *V << "\n");
-    cast<BasicExpression>(E)->deallocateOperands(ArgRecycler);
-    ExpressionAllocator.Deallocate(E);
+    deleteExpression(E);
     return createVariableExpression(V);
   }
 
@@ -539,10 +586,7 @@ const Expression *NewGVN::checkSimplificationResults(Expression *E,
       DEBUG(dbgs() << "Simplified " << *I << " to "
                    << " expression " << *V << "\n");
     NumGVNOpsSimplified++;
-    assert(isa<BasicExpression>(E) &&
-           "We should always have had a basic expression here");
-    cast<BasicExpression>(E)->deallocateOperands(ArgRecycler);
-    ExpressionAllocator.Deallocate(E);
+    deleteExpression(E);
     return CC->DefiningExpr;
   }
   return nullptr;
@@ -686,6 +730,39 @@ const CallExpression *NewGVN::createCallExpression(CallInst *CI,
   return E;
 }
 
+// Return true if some equivalent of instruction Inst dominates instruction U.
+bool NewGVN::someEquivalentDominates(const Instruction *Inst,
+                                     const Instruction *U) const {
+  auto *CC = ValueToClass.lookup(Inst);
+  // This must be an instruction because we are only called from phi nodes
+  // in the case that the value it needs to check against is an instruction.
+
+  // The most likely candiates for dominance are the leader and the next leader.
+  // The leader or nextleader will dominate in all cases where there is an
+  // equivalent that is higher up in the dom tree.
+  // We can't *only* check them, however, because the
+  // dominator tree could have an infinite number of non-dominating siblings
+  // with instructions that are in the right congruence class.
+  //       A
+  // B C D E F G
+  // |
+  // H
+  // Instruction U could be in H,  with equivalents in every other sibling.
+  // Depending on the rpo order picked, the leader could be the equivalent in
+  // any of these siblings.
+  if (!CC)
+    return false;
+  if (DT->dominates(cast<Instruction>(CC->RepLeader), U))
+    return true;
+  if (CC->NextLeader.first &&
+      DT->dominates(cast<Instruction>(CC->NextLeader.first), U))
+    return true;
+  return llvm::any_of(CC->Members, [&](const Value *Member) {
+    return Member != CC->RepLeader &&
+           DT->dominates(cast<Instruction>(Member), U);
+  });
+}
+
 // See if we have a congruence class and leader for this operand, and if so,
 // return it. Otherwise, return the operand itself.
 Value *NewGVN::lookupOperandLeader(Value *V) const {
@@ -781,7 +858,8 @@ const Expression *NewGVN::performSymbolicStoreEvaluation(Instruction *I) {
     // The RepStoredValue gets nulled if all the stores disappear in a class, so
     // we don't need to check if the class contains a store besides us.
     if (CC && CC->RepStoredValue == lookupOperandLeader(SI->getValueOperand()))
-      return createStoreExpression(SI, StoreRHS);
+      return OldStore;
+    deleteExpression(OldStore);
     // Also check if our value operand is defined by a load of the same memory
     // location, and the memory state is the same as it was then
     // (otherwise, it could have been overwritten later. See test32 in
@@ -973,6 +1051,7 @@ bool NewGVN::setMemoryAccessEquivTo(MemoryAccess *From, CongruenceClass *To) {
 
   return Changed;
 }
+
 // Evaluate PHI nodes symbolically, and create an expression result.
 const Expression *NewGVN::performSymbolicPHIEvaluation(Instruction *I) {
   auto *E = cast<PHIExpression>(createPHIExpression(I));
@@ -994,8 +1073,7 @@ const Expression *NewGVN::performSymbolicPHIEvaluation(Instruction *I) {
   if (Filtered.begin() == Filtered.end()) {
     DEBUG(dbgs() << "Simplified PHI node " << *I << " to undef"
                  << "\n");
-    E->deallocateOperands(ArgRecycler);
-    ExpressionAllocator.Deallocate(E);
+    deleteExpression(E);
     return createConstantExpression(UndefValue::get(I->getType()));
   }
   Value *AllSameValue = *(Filtered.begin());
@@ -1016,15 +1094,14 @@ const Expression *NewGVN::performSymbolicPHIEvaluation(Instruction *I) {
     if (HasUndef) {
       // Only have to check for instructions
       if (auto *AllSameInst = dyn_cast<Instruction>(AllSameValue))
-        if (!DT->dominates(AllSameInst, I))
+        if (!someEquivalentDominates(AllSameInst, I))
           return E;
     }
 
     NumGVNPhisAllSame++;
     DEBUG(dbgs() << "Simplified PHI node " << *I << " to " << *AllSameValue
                  << "\n");
-    E->deallocateOperands(ArgRecycler);
-    ExpressionAllocator.Deallocate(E);
+    deleteExpression(E);
     return createVariableOrConstant(AllSameValue);
   }
   return E;
@@ -1290,9 +1367,11 @@ void NewGVN::addPredicateUsers(const PredicateBase *PB, Instruction *I) {
 // Touch all the predicates that depend on this instruction.
 void NewGVN::markPredicateUsersTouched(Instruction *I) {
   const auto Result = PredicateToUsers.find(I);
-  if (Result != PredicateToUsers.end())
+  if (Result != PredicateToUsers.end()) {
     for (auto *User : Result->second)
       TouchedInstructions.set(InstrDFS.lookup(User));
+    PredicateToUsers.erase(Result);
+  }
 }
 
 // Touch the instructions that need to be updated after a congruence class has a
@@ -1322,13 +1401,18 @@ void NewGVN::moveValueToNewCongruenceClass(Instruction *I,
   // We assert on phi nodes when this happens, currently, for debugging, because
   // we want to make sure we name phi node cycles properly.
   if (isa<Instruction>(NewClass->RepLeader) && NewClass->RepLeader &&
-      I != NewClass->RepLeader &&
-      DT->properlyDominates(
-          I->getParent(),
-          cast<Instruction>(NewClass->RepLeader)->getParent())) {
-    ++NumGVNNotMostDominatingLeader;
-    assert(!isa<PHINode>(I) &&
-           "New class for instruction should not be dominated by instruction");
+      I != NewClass->RepLeader) {
+    auto *IBB = I->getParent();
+    auto *NCBB = cast<Instruction>(NewClass->RepLeader)->getParent();
+    bool Dominated = IBB == NCBB &&
+                     InstrDFS.lookup(I) < InstrDFS.lookup(NewClass->RepLeader);
+    Dominated = Dominated || DT->properlyDominates(IBB, NCBB);
+    if (Dominated) {
+      ++NumGVNNotMostDominatingLeader;
+      assert(
+          !isa<PHINode>(I) &&
+          "New class for instruction should not be dominated by instruction");
+    }
   }
 
   if (NewClass->RepLeader != I) {
@@ -1690,7 +1774,6 @@ void NewGVN::cleanupTables() {
   DFSToInstr.clear();
   BlockInstRange.clear();
   TouchedInstructions.clear();
-  DominatedInstRange.clear();
   MemoryAccessToClass.clear();
   PredicateToUsers.clear();
 }
@@ -1740,10 +1823,11 @@ void NewGVN::valueNumberMemoryPhi(MemoryPhi *MP) {
   // If all the arguments are the same, the MemoryPhi has the same value as the
   // argument.
   // Filter out unreachable blocks and self phis from our operands.
+  const BasicBlock *PHIBlock = MP->getBlock();
   auto Filtered = make_filter_range(MP->operands(), [&](const Use &U) {
     return lookupMemoryAccessEquiv(cast<MemoryAccess>(U)) != MP &&
            !isMemoryAccessTop(cast<MemoryAccess>(U)) &&
-           ReachableBlocks.count(MP->getIncomingBlock(U));
+           ReachableEdges.count({MP->getIncomingBlock(U), PHIBlock});
   });
   // If all that is left is nothing, our memoryphi is undef. We keep it as
   // InitialClass.  Note: The only case this should happen is if we have at
@@ -1822,7 +1906,7 @@ bool NewGVN::singleReachablePHIPath(const MemoryAccess *First,
   } else {
     auto *MP = cast<MemoryPhi>(First);
     auto ReachableOperandPred = [&](const Use &U) {
-      return ReachableBlocks.count(MP->getIncomingBlock(U));
+      return ReachableEdges.count({MP->getIncomingBlock(U), MP->getBlock()});
     };
     auto FilteredPhiArgs =
         make_filter_range(MP->operands(), ReachableOperandPred);
@@ -1879,7 +1963,8 @@ void NewGVN::verifyMemoryCongruency() const {
       // We can only sanely verify that MemoryDefs in the operand list all have
       // the same class.
       auto ReachableOperandPred = [&](const Use &U) {
-        return ReachableBlocks.count(FirstMP->getIncomingBlock(U)) &&
+        return ReachableEdges.count(
+                   {FirstMP->getIncomingBlock(U), FirstMP->getBlock()}) &&
                isa<MemoryDef>(U);
 
       };
@@ -1899,29 +1984,121 @@ void NewGVN::verifyMemoryCongruency() const {
   }
 }
 
-// Re-evaluate all the comparisons after value numbering and ensure they don't
-// change. If they changed, we didn't mark them touched properly.
-void NewGVN::verifyComparisons(Function &F) {
+// Verify that the sparse propagation we did actually found the maximal fixpoint
+// We do this by storing the value to class mapping, touching all instructions,
+// and redoing the iteration to see if anything changed.
+void NewGVN::verifyIterationSettled(Function &F) {
 #ifndef NDEBUG
-  for (auto &BB : F) {
-    if (!ReachableBlocks.count(&BB))
-      continue;
-    for (auto &I : BB) {
-      if (InstrDFS.lookup(&I) == 0)
+  if (DebugCounter::isCounterSet(VNCounter))
+    DebugCounter::setCounterValue(VNCounter, StartingVNCounter);
+
+  // Note that we have to store the actual classes, as we may change existing
+  // classes during iteration.  This is because our memory iteration propagation
+  // is not perfect, and so may waste a little work.  But it should generate
+  // exactly the same congruence classes we have now, with different IDs.
+  std::map<const Value *, CongruenceClass> BeforeIteration;
+
+  for (auto &KV : ValueToClass) {
+    if (auto *I = dyn_cast<Instruction>(KV.first))
+      // Skip unused/dead instructions.
+      if (InstrDFS.lookup(I) == 0)
         continue;
-      if (isa<CmpInst>(&I)) {
-        auto *CurrentVal = ValueToClass.lookup(&I);
-        valueNumberInstruction(&I);
-        assert(CurrentVal == ValueToClass.lookup(&I) &&
-               "Re-evaluating comparison changed value");
-      }
+    BeforeIteration.insert({KV.first, *KV.second});
+  }
+
+  TouchedInstructions.set();
+  TouchedInstructions.reset(0);
+  iterateTouchedInstructions();
+  DenseSet<std::pair<const CongruenceClass *, const CongruenceClass *>>
+      EqualClasses;
+  for (const auto &KV : ValueToClass) {
+    if (auto *I = dyn_cast<Instruction>(KV.first))
+      // Skip unused/dead instructions.
+      if (InstrDFS.lookup(I) == 0)
+        continue;
+    // We could sink these uses, but i think this adds a bit of clarity here as
+    // to what we are comparing.
+    auto *BeforeCC = &BeforeIteration.find(KV.first)->second;
+    auto *AfterCC = KV.second;
+    // Note that the classes can't change at this point, so we memoize the set
+    // that are equal.
+    if (!EqualClasses.count({BeforeCC, AfterCC})) {
+      assert(areClassesEquivalent(BeforeCC, AfterCC) &&
+             "Value number changed after main loop completed!");
+      EqualClasses.insert({BeforeCC, AfterCC});
     }
   }
 #endif
 }
 
+// This is the main value numbering loop, it iterates over the initial touched
+// instruction set, propagating value numbers, marking things touched, etc,
+// until the set of touched instructions is completely empty.
+void NewGVN::iterateTouchedInstructions() {
+  unsigned int Iterations = 0;
+  // Figure out where touchedinstructions starts
+  int FirstInstr = TouchedInstructions.find_first();
+  // Nothing set, nothing to iterate, just return.
+  if (FirstInstr == -1)
+    return;
+  BasicBlock *LastBlock = getBlockForValue(DFSToInstr[FirstInstr]);
+  while (TouchedInstructions.any()) {
+    ++Iterations;
+    // Walk through all the instructions in all the blocks in RPO.
+    // TODO: As we hit a new block, we should push and pop equalities into a
+    // table lookupOperandLeader can use, to catch things PredicateInfo
+    // might miss, like edge-only equivalences.
+    for (int InstrNum = TouchedInstructions.find_first(); InstrNum != -1;
+         InstrNum = TouchedInstructions.find_next(InstrNum)) {
+
+      // This instruction was found to be dead. We don't bother looking
+      // at it again.
+      if (InstrNum == 0) {
+        TouchedInstructions.reset(InstrNum);
+        continue;
+      }
+
+      Value *V = DFSToInstr[InstrNum];
+      BasicBlock *CurrBlock = getBlockForValue(V);
+
+      // If we hit a new block, do reachability processing.
+      if (CurrBlock != LastBlock) {
+        LastBlock = CurrBlock;
+        bool BlockReachable = ReachableBlocks.count(CurrBlock);
+        const auto &CurrInstRange = BlockInstRange.lookup(CurrBlock);
+
+        // If it's not reachable, erase any touched instructions and move on.
+        if (!BlockReachable) {
+          TouchedInstructions.reset(CurrInstRange.first, CurrInstRange.second);
+          DEBUG(dbgs() << "Skipping instructions in block "
+                       << getBlockName(CurrBlock)
+                       << " because it is unreachable\n");
+          continue;
+        }
+        updateProcessedCount(CurrBlock);
+      }
+
+      if (auto *MP = dyn_cast<MemoryPhi>(V)) {
+        DEBUG(dbgs() << "Processing MemoryPhi " << *MP << "\n");
+        valueNumberMemoryPhi(MP);
+      } else if (auto *I = dyn_cast<Instruction>(V)) {
+        valueNumberInstruction(I);
+      } else {
+        llvm_unreachable("Should have been a MemoryPhi or Instruction");
+      }
+      updateProcessedCount(V);
+      // Reset after processing (because we may mark ourselves as touched when
+      // we propagate equalities).
+      TouchedInstructions.reset(InstrNum);
+    }
+  }
+  NumGVNMaxIterations = std::max(NumGVNMaxIterations.getValue(), Iterations);
+}
+
 // This is the main transformation entry point.
 bool NewGVN::runGVN() {
+  if (DebugCounter::isCounterSet(VNCounter))
+    StartingVNCounter = DebugCounter::getCounterValue(VNCounter);
   bool Changed = false;
   NumFuncArgs = F.arg_size();
   MSSAWalker = MSSA->getWalker();
@@ -1978,7 +2155,6 @@ bool NewGVN::runGVN() {
   }
 
   TouchedInstructions.resize(ICount);
-  DominatedInstRange.reserve(F.size());
   // Ensure we don't end up resizing the expressionToClass map, as
   // that can be quite expensive. At most, we have one expression per
   // instruction.
@@ -1990,71 +2166,10 @@ bool NewGVN::runGVN() {
   ReachableBlocks.insert(&F.getEntryBlock());
 
   initializeCongruenceClasses(F);
-
-  unsigned int Iterations = 0;
-  // We start out in the entry block.
-  BasicBlock *LastBlock = &F.getEntryBlock();
-  while (TouchedInstructions.any()) {
-    ++Iterations;
-    // Walk through all the instructions in all the blocks in RPO.
-    // TODO: As we hit a new block, we should push and pop equalities into a
-    // table lookupOperandLeader can use, to catch things PredicateInfo
-    // might miss, like edge-only equivalences.
-    for (int InstrNum = TouchedInstructions.find_first(); InstrNum != -1;
-         InstrNum = TouchedInstructions.find_next(InstrNum)) {
-
-      // This instruction was found to be dead. We don't bother looking
-      // at it again.
-      if (InstrNum == 0) {
-        TouchedInstructions.reset(InstrNum);
-        continue;
-      }
-
-      Value *V = DFSToInstr[InstrNum];
-      BasicBlock *CurrBlock = nullptr;
-
-      if (auto *I = dyn_cast<Instruction>(V))
-        CurrBlock = I->getParent();
-      else if (auto *MP = dyn_cast<MemoryPhi>(V))
-        CurrBlock = MP->getBlock();
-      else
-        llvm_unreachable("DFSToInstr gave us an unknown type of instruction");
-
-      // If we hit a new block, do reachability processing.
-      if (CurrBlock != LastBlock) {
-        LastBlock = CurrBlock;
-        bool BlockReachable = ReachableBlocks.count(CurrBlock);
-        const auto &CurrInstRange = BlockInstRange.lookup(CurrBlock);
-
-        // If it's not reachable, erase any touched instructions and move on.
-        if (!BlockReachable) {
-          TouchedInstructions.reset(CurrInstRange.first, CurrInstRange.second);
-          DEBUG(dbgs() << "Skipping instructions in block "
-                       << getBlockName(CurrBlock)
-                       << " because it is unreachable\n");
-          continue;
-        }
-        updateProcessedCount(CurrBlock);
-      }
-
-      if (auto *MP = dyn_cast<MemoryPhi>(V)) {
-        DEBUG(dbgs() << "Processing MemoryPhi " << *MP << "\n");
-        valueNumberMemoryPhi(MP);
-      } else if (auto *I = dyn_cast<Instruction>(V)) {
-        valueNumberInstruction(I);
-      } else {
-        llvm_unreachable("Should have been a MemoryPhi or Instruction");
-      }
-      updateProcessedCount(V);
-      // Reset after processing (because we may mark ourselves as touched when
-      // we propagate equalities).
-      TouchedInstructions.reset(InstrNum);
-    }
-  }
-  NumGVNMaxIterations = std::max(NumGVNMaxIterations.getValue(), Iterations);
+  iterateTouchedInstructions();
 #ifndef NDEBUG
   verifyMemoryCongruency();
-  verifyComparisons(F);
+  verifyIterationSettled(F);
 #endif
 
   Changed |= eliminateInstructions(F);
@@ -2089,13 +2204,6 @@ bool NewGVN::runGVN() {
 // TODO: Separate cost from availability
 static bool alwaysAvailable(Value *V) {
   return isa<Constant>(V) || isa<Argument>(V);
-}
-
-// Get the basic block from an instruction/value.
-static BasicBlock *getBlockForValue(Value *V) {
-  if (auto *I = dyn_cast<Instruction>(V))
-    return I->getParent();
-  return nullptr;
 }
 
 struct NewGVN::ValueDFS {

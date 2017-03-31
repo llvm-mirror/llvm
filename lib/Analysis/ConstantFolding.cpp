@@ -1058,8 +1058,8 @@ ConstantFoldConstantImpl(const Constant *C, const DataLayout &DL,
       if (It == FoldedOps.end()) {
         if (auto *FoldedC =
                 ConstantFoldConstantImpl(NewC, DL, TLI, FoldedOps)) {
-          NewC = FoldedC;
           FoldedOps.insert({NewC, FoldedC});
+          NewC = FoldedC;
         } else {
           FoldedOps.insert({NewC, NewC});
         }
@@ -1518,9 +1518,9 @@ Constant *ConstantFoldSSEConvertToInt(const APFloat &Val, bool roundTowardZero,
   bool isExact = false;
   APFloat::roundingMode mode = roundTowardZero? APFloat::rmTowardZero
                                               : APFloat::rmNearestTiesToEven;
-  APFloat::opStatus status = Val.convertToInteger(&UIntVal, ResultWidth,
-                                                  /*isSigned=*/true, mode,
-                                                  &isExact);
+  APFloat::opStatus status =
+      Val.convertToInteger(makeMutableArrayRef(UIntVal), ResultWidth,
+                           /*isSigned=*/true, mode, &isExact);
   if (status != APFloat::opOK &&
       (!roundTowardZero || status != APFloat::opInexact))
     return nullptr;
@@ -1768,7 +1768,8 @@ Constant *ConstantFoldScalarCall(StringRef Name, unsigned IntrinsicID, Type *Ty,
     }
 
     if (isa<UndefValue>(Operands[0])) {
-      if (IntrinsicID == Intrinsic::bswap)
+      if (IntrinsicID == Intrinsic::bswap ||
+          IntrinsicID == Intrinsic::bitreverse)
         return Operands[0];
       return nullptr;
     }

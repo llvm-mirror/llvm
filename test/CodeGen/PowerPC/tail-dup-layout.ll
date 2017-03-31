@@ -123,9 +123,6 @@ exit:
 ;CHECK-NEXT: .[[TEST3LABEL:[_0-9A-Za-z]+]]: # %test3
 ;CHECK-NEXT: rlwinm. {{[0-9]+}}, [[TAGREG]], 0, 29, 29
 ;CHECK-NEXT: bne 0, .[[OPT3LABEL:[_0-9A-Za-z]+]]
-;CHECK-NEXT: .[[TEST4LABEL:[_0-9A-Za-z]+]]: # %test4
-;CHECK-NEXT: rlwinm. {{[0-9]+}}, [[TAGREG]], 0, 28, 28
-;CHECK-NEXT: bne 0, .[[OPT4LABEL:[_0-9A-Za-z]+]]
 ;CHECK-NEXT: .[[EXITLABEL:[_0-9A-Za-z]+]]: # %exit
 ;CHECK: blr
 ;CHECK-NEXT: .[[OPT1LABEL]]:
@@ -133,11 +130,8 @@ exit:
 ;CHECK-NEXT: beq 0, .[[TEST3LABEL]]
 ;CHECK-NEXT: .[[OPT2LABEL]]:
 ;CHECK: rlwinm. {{[0-9]+}}, [[TAGREG]], 0, 29, 29
-;CHECK-NEXT: beq 0, .[[TEST4LABEL]]
-;CHECK-NEXT: .[[OPT3LABEL]]:
-;CHECK: rlwinm. {{[0-9]+}}, [[TAGREG]], 0, 28, 28
 ;CHECK-NEXT: beq 0, .[[EXITLABEL]]
-;CHECK-NEXT: .[[OPT4LABEL]]:
+;CHECK-NEXT: .[[OPT3LABEL]]:
 ;CHECK: b .[[EXITLABEL]]
 
 define void @straight_test_50(i32 %tag) {
@@ -160,16 +154,9 @@ optional2:
 test3:
   %tagbit3 = and i32 %tag, 4
   %tagbit3eq0 = icmp eq i32 %tagbit3, 0
-  br i1 %tagbit3eq0, label %test4, label %optional3, !prof !2
+  br i1 %tagbit3eq0, label %exit, label %optional3, !prof !1
 optional3:
   call void @c()
-  br label %test4
-test4:
-  %tagbit4 = and i32 %tag, 8
-  %tagbit4eq0 = icmp eq i32 %tagbit4, 0
-  br i1 %tagbit4eq0, label %exit, label %optional4, !prof !1
-optional4:
-  call void @d()
   br label %exit
 exit:
   ret void
@@ -487,6 +474,51 @@ ret:
   ret void
 }
 
+; Verify that we did not mis-identify triangle trellises if it is not
+; really a triangle.
+; CHECK-LABEL: trellis_no_triangle
+; CHECK: # %entry
+; CHECK: # %b
+; CHECK: # %d
+; CHECK: # %ret
+; CHECK: # %c
+; CHECK: # %e
+define void @trellis_no_triangle(i32 %tag) {
+entry:
+  br label %a
+a:
+  call void @a()
+  call void @a()
+  %tagbits.a = and i32 %tag, 3
+  %tagbits.a.eq0 = icmp eq i32 %tagbits.a, 0
+  br i1 %tagbits.a.eq0, label %b, label %c, !prof !8 ; 98 to 2
+b:
+  call void @b()
+  call void @b()
+  %tagbits.b = and i32 %tag, 12
+  %tagbits.b.eq1 = icmp eq i32 %tagbits.b, 8
+  br i1 %tagbits.b.eq1, label %d, label %e, !prof !9 ; 97 to 1
+d:
+  call void @d()
+  call void @d()
+  %tagbits.d = and i32 %tag, 48
+  %tagbits.d.eq1 = icmp eq i32 %tagbits.d, 32
+  br i1 %tagbits.d.eq1, label %ret, label %e, !prof !10 ; 96 to 2
+c:
+  call void @c()
+  call void @c()
+  %tagbits.c = and i32 %tag, 12
+  %tagbits.c.eq0 = icmp eq i32 %tagbits.c, 0
+  br i1 %tagbits.c.eq0, label %d, label %e, !prof !2 ; 1 to 1
+e:
+  call void @e()
+  call void @e()
+  br label %ret
+ret:
+  call void @f()
+  ret void
+}
+
 declare void @a()
 declare void @b()
 declare void @c()
@@ -505,3 +537,6 @@ declare void @j()
 !5 = !{!"branch_weights", i32 2, i32 8}
 !6 = !{!"branch_weights", i32 3, i32 4}
 !7 = !{!"branch_weights", i32 4, i32 2}
+!8 = !{!"branch_weights", i32 98, i32 2}
+!9 = !{!"branch_weights", i32 97, i32 1}
+!10 = !{!"branch_weights", i32 96, i32 2}

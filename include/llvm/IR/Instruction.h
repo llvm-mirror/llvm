@@ -252,6 +252,12 @@ public:
   /// Returns false if no metadata was found.
   bool extractProfTotalWeight(uint64_t &TotalVal) const;
 
+  /// Updates branch_weights metadata by scaling it by \p S / \p T.
+  void updateProfWeight(uint64_t S, uint64_t T);
+
+  /// Sets the branch_weights metadata to \p W for CallInst.
+  void setProfWeight(uint64_t W);
+
   /// Set the debug location information for this instruction.
   void setDebugLoc(DebugLoc Loc) { DbgLoc = std::move(Loc); }
 
@@ -383,11 +389,20 @@ public:
   ///
   ///   Commutative operators satisfy: (x op y) === (y op x)
   ///
-  /// In LLVM, these are the associative operators, plus SetEQ and SetNE, when
+  /// In LLVM, these are the commutative operators, plus SetEQ and SetNE, when
   /// applied to any type.
   ///
   bool isCommutative() const { return isCommutative(getOpcode()); }
-  static bool isCommutative(unsigned op);
+  static bool isCommutative(unsigned Opcode) {
+    switch (Opcode) {
+    case Add: case FAdd:
+    case Mul: case FMul:
+    case And: case Or: case Xor:
+      return true;
+    default:
+      return false;
+  }
+  }
 
   /// Return true if the instruction is idempotent:
   ///
@@ -396,7 +411,9 @@ public:
   /// In LLVM, the And and Or operators are idempotent.
   ///
   bool isIdempotent() const { return isIdempotent(getOpcode()); }
-  static bool isIdempotent(unsigned op);
+  static bool isIdempotent(unsigned Opcode) {
+    return Opcode == And || Opcode == Or;
+  }
 
   /// Return true if the instruction is nilpotent:
   ///
@@ -408,7 +425,9 @@ public:
   /// In LLVM, the Xor operator is nilpotent.
   ///
   bool isNilpotent() const { return isNilpotent(getOpcode()); }
-  static bool isNilpotent(unsigned op);
+  static bool isNilpotent(unsigned Opcode) {
+    return Opcode == Xor;
+  }
 
   /// Return true if this instruction may modify memory.
   bool mayWriteToMemory() const;

@@ -494,13 +494,13 @@ namespace {
       if (StoreInst *SI = dyn_cast<StoreInst>(I)) {
         // For stores, it is the value type, not the pointer type that matters
         // because the value is what will come from a vector register.
-  
+
         Value *IVal = SI->getValueOperand();
         T1 = IVal->getType();
       } else {
         T1 = I->getType();
       }
-  
+
       if (CastInst *CI = dyn_cast<CastInst>(I))
         T2 = CI->getSrcTy();
       else
@@ -547,7 +547,7 @@ namespace {
     // Returns the cost of the provided instruction using TTI.
     // This does not handle loads and stores.
     unsigned getInstrCost(unsigned Opcode, Type *T1, Type *T2,
-                          TargetTransformInfo::OperandValueKind Op1VK = 
+                          TargetTransformInfo::OperandValueKind Op1VK =
                               TargetTransformInfo::OK_AnyValue,
                           TargetTransformInfo::OperandValueKind Op2VK =
                               TargetTransformInfo::OK_AnyValue) {
@@ -894,7 +894,7 @@ namespace {
       // vectors that has a scalar condition results in a malformed select.
       // FIXME: We could probably be smarter about this by rewriting the select
       // with different types instead.
-      return (SI->getCondition()->getType()->isVectorTy() == 
+      return (SI->getCondition()->getType()->isVectorTy() ==
               SI->getTrueValue()->getType()->isVectorTy());
     } else if (isa<CmpInst>(I)) {
       if (!Config.VectorizeCmp)
@@ -1127,39 +1127,51 @@ namespace {
         FastMathFlags FMFCI;
         if (auto *FPMOCI = dyn_cast<FPMathOperator>(CI))
           FMFCI = FPMOCI->getFastMathFlags();
+        SmallVector<Value *, 4> IArgs(CI->arg_operands());
+        unsigned ICost = TTI->getIntrinsicInstrCost(IID, IT1, IArgs, FMFCI);
 
-        SmallVector<Type*, 4> Tys;
-        for (unsigned i = 0, ie = CI->getNumArgOperands(); i != ie; ++i)
-          Tys.push_back(CI->getArgOperand(i)->getType());
-        unsigned ICost = TTI->getIntrinsicInstrCost(IID, IT1, Tys, FMFCI);
-
-        Tys.clear();
         CallInst *CJ = cast<CallInst>(J);
 
         FastMathFlags FMFCJ;
         if (auto *FPMOCJ = dyn_cast<FPMathOperator>(CJ))
           FMFCJ = FPMOCJ->getFastMathFlags();
 
-        for (unsigned i = 0, ie = CJ->getNumArgOperands(); i != ie; ++i)
-          Tys.push_back(CJ->getArgOperand(i)->getType());
-        unsigned JCost = TTI->getIntrinsicInstrCost(IID, JT1, Tys, FMFCJ);
+        SmallVector<Value *, 4> JArgs(CJ->arg_operands());
+        unsigned JCost = TTI->getIntrinsicInstrCost(IID, JT1, JArgs, FMFCJ);
 
-        Tys.clear();
         assert(CI->getNumArgOperands() == CJ->getNumArgOperands() &&
                "Intrinsic argument counts differ");
+        SmallVector<Type*, 4> Tys;
+        SmallVector<Value *, 4> VecArgs;
         for (unsigned i = 0, ie = CI->getNumArgOperands(); i != ie; ++i) {
           if ((IID == Intrinsic::powi || IID == Intrinsic::ctlz ||
-               IID == Intrinsic::cttz) && i == 1)
+               IID == Intrinsic::cttz) && i == 1) {
             Tys.push_back(CI->getArgOperand(i)->getType());
-          else
+            VecArgs.push_back(CI->getArgOperand(i));
+          }
+          else {
             Tys.push_back(getVecTypeForPair(CI->getArgOperand(i)->getType(),
                                             CJ->getArgOperand(i)->getType()));
+            // Add both operands, and then count their scalarization overhead
+            // with VF 1.
+            VecArgs.push_back(CI->getArgOperand(i));
+            VecArgs.push_back(CJ->getArgOperand(i));
+          }
         }
+
+        // Compute the scalarization cost here with the original operands (to
+        // check for uniqueness etc), and then call getIntrinsicInstrCost()
+        // with the constructed vector types.
+        Type *RetTy = getVecTypeForPair(IT1, JT1);
+        unsigned ScalarizationCost = 0;
+        if (!RetTy->isVoidTy())
+          ScalarizationCost += TTI->getScalarizationOverhead(RetTy, true, false);
+        ScalarizationCost += TTI->getOperandsScalarizationOverhead(VecArgs, 1);
 
         FastMathFlags FMFV = FMFCI;
         FMFV &= FMFCJ;
-        Type *RetTy = getVecTypeForPair(IT1, JT1);
-        unsigned VCost = TTI->getIntrinsicInstrCost(IID, RetTy, Tys, FMFV);
+        unsigned VCost = TTI->getIntrinsicInstrCost(IID, RetTy, Tys, FMFV,
+                                                    ScalarizationCost);
 
         if (VCost > ICost + JCost)
           return false;
@@ -2502,7 +2514,7 @@ namespace {
         if (I2 == I1 || isa<UndefValue>(I2))
           I2 = nullptr;
       }
-  
+
       if (HEE) {
         Value *I3 = HEE->getOperand(0);
         if (!I2 && I3 != I1)
@@ -2693,14 +2705,14 @@ namespace {
         // so extend the smaller vector to be the same length as the larger one.
         Instruction *NLOp;
         if (numElemL > 1) {
-  
+
           std::vector<Constant *> Mask(numElemH);
           unsigned v = 0;
           for (; v < numElemL; ++v)
             Mask[v] = ConstantInt::get(Type::getInt32Ty(Context), v);
           for (; v < numElemH; ++v)
             Mask[v] = UndefValue::get(Type::getInt32Ty(Context));
-    
+
           NLOp = new ShuffleVectorInst(LOp, UndefValue::get(ArgTypeL),
                                        ConstantVector::get(Mask),
                                        getReplacementName(IBeforeJ ? I : J,
@@ -2710,7 +2722,7 @@ namespace {
                                            getReplacementName(IBeforeJ ? I : J,
                                                               true, o, 1));
         }
-  
+
         NLOp->insertBefore(IBeforeJ ? J : I);
         LOp = NLOp;
       }
@@ -2720,7 +2732,7 @@ namespace {
       if (numElemH == 1 && expandIEChain(Context, I, J, o, LOp, numElemL,
                                          ArgTypeH, VArgType, IBeforeJ)) {
         Instruction *S =
-          InsertElementInst::Create(LOp, HOp, 
+          InsertElementInst::Create(LOp, HOp,
                                     ConstantInt::get(Type::getInt32Ty(Context),
                                                      numElemL),
                                     getReplacementName(IBeforeJ ? I : J,
@@ -2737,7 +2749,7 @@ namespace {
             Mask[v] = ConstantInt::get(Type::getInt32Ty(Context), v);
           for (; v < numElemL; ++v)
             Mask[v] = UndefValue::get(Type::getInt32Ty(Context));
-    
+
           NHOp = new ShuffleVectorInst(HOp, UndefValue::get(ArgTypeH),
                                        ConstantVector::get(Mask),
                                        getReplacementName(IBeforeJ ? I : J,

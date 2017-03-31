@@ -200,19 +200,19 @@ class LLVM_NODISCARD APInt {
   APInt &AssignSlowCase(const APInt &RHS);
 
   /// out-of-line slow case for operator==
-  bool EqualSlowCase(const APInt &RHS) const;
+  bool EqualSlowCase(const APInt &RHS) const LLVM_READONLY;
 
   /// out-of-line slow case for operator==
-  bool EqualSlowCase(uint64_t Val) const;
+  bool EqualSlowCase(uint64_t Val) const LLVM_READONLY;
 
   /// out-of-line slow case for countLeadingZeros
-  unsigned countLeadingZerosSlowCase() const;
+  unsigned countLeadingZerosSlowCase() const LLVM_READONLY;
 
   /// out-of-line slow case for countTrailingOnes
-  unsigned countTrailingOnesSlowCase() const;
+  unsigned countTrailingOnesSlowCase() const LLVM_READONLY;
 
   /// out-of-line slow case for countPopulation
-  unsigned countPopulationSlowCase() const;
+  unsigned countPopulationSlowCase() const LLVM_READONLY;
 
   /// out-of-line slow case for setBits.
   void setBitsSlowCase(unsigned loBit, unsigned hiBit);
@@ -232,7 +232,7 @@ public:
   /// \param val the initial value of the APInt
   /// \param isSigned how to treat signedness of val
   APInt(unsigned numBits, uint64_t val, bool isSigned = false)
-      : BitWidth(numBits), VAL(0) {
+      : BitWidth(numBits) {
     assert(BitWidth && "bitwidth too small");
     if (isSingleWord()) {
       VAL = val;
@@ -275,7 +275,7 @@ public:
 
   /// Simply makes *this a copy of that.
   /// @brief Copy Constructor.
-  APInt(const APInt &that) : BitWidth(that.BitWidth), VAL(0) {
+  APInt(const APInt &that) : BitWidth(that.BitWidth) {
     if (isSingleWord())
       VAL = that.VAL;
     else
@@ -966,7 +966,7 @@ public:
   /// the validity of the less-than relationship.
   ///
   /// \returns true if *this < RHS when both are considered unsigned.
-  bool ult(const APInt &RHS) const;
+  bool ult(const APInt &RHS) const LLVM_READONLY;
 
   /// \brief Unsigned less than comparison
   ///
@@ -984,7 +984,7 @@ public:
   /// validity of the less-than relationship.
   ///
   /// \returns true if *this < RHS when both are considered signed.
-  bool slt(const APInt &RHS) const;
+  bool slt(const APInt &RHS) const LLVM_READONLY;
 
   /// \brief Signed less than comparison
   ///
@@ -1175,6 +1175,11 @@ public:
   /// Set the given bit to 1 whose position is given as "bitPosition".
   void setBit(unsigned bitPosition);
 
+  /// Set the sign bit to 1.
+  void setSignBit() {
+    setBit(BitWidth - 1);
+  }
+
   /// Set the bits from loBit (inclusive) to hiBit (exclusive) to 1.
   void setBits(unsigned loBit, unsigned hiBit) {
     assert(hiBit <= BitWidth && "hiBit out of range");
@@ -1358,7 +1363,7 @@ public:
   ///
   /// \returns 0 if the high order bit is not set, otherwise returns the number
   /// of 1 bits from the most significant to the least
-  unsigned countLeadingOnes() const;
+  unsigned countLeadingOnes() const LLVM_READONLY;
 
   /// Computes the number of leading bits of this APInt that are equal to its
   /// sign bit.
@@ -1374,7 +1379,7 @@ public:
   ///
   /// \returns BitWidth if the value is zero, otherwise returns the number of
   /// zeros from the least significant bit to the first one bit.
-  unsigned countTrailingZeros() const;
+  unsigned countTrailingZeros() const LLVM_READONLY;
 
   /// \brief Count the number of trailing one bits.
   ///

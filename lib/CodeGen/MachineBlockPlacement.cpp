@@ -149,7 +149,7 @@ static cl::opt<unsigned> TriangleChainCount(
     "triangle-chain-count",
     cl::desc("Number of triangle-shaped-CFG's that need to be in a row for the "
              "triangle tail duplication heuristic to kick in. 0 to disable."),
-    cl::init(3),
+    cl::init(2),
     cl::Hidden);
 
 extern cl::opt<unsigned> StaticLikelyProb;
@@ -839,8 +839,13 @@ bool MachineBlockPlacement::isTrellis(
     int PredCount = 0;
     for (auto SuccPred : Succ->predecessors()) {
       // Allow triangle successors, but don't count them.
-      if (Successors.count(SuccPred))
+      if (Successors.count(SuccPred)) {
+        // Make sure that it is actually a triangle.
+        for (MachineBasicBlock *CheckSucc : SuccPred->successors())
+          if (!Successors.count(CheckSucc))
+            return false;
         continue;
+      }
       const BlockChain *PredChain = BlockToChain[SuccPred];
       if (SuccPred == BB || (BlockFilter && !BlockFilter->count(SuccPred)) ||
           PredChain == &Chain || PredChain == BlockToChain[Succ])

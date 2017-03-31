@@ -50,16 +50,16 @@ bool CallLowering::lowerCall(
 
   ArgInfo OrigRet{ResReg, CS.getType(), ISD::ArgFlagsTy{}};
   if (!OrigRet.Ty->isVoidTy())
-    setArgFlags(OrigRet, AttributeSet::ReturnIndex, DL, CS);
+    setArgFlags(OrigRet, AttributeList::ReturnIndex, DL, CS);
 
-  return lowerCall(MIRBuilder, Callee, OrigRet, OrigArgs);
+  return lowerCall(MIRBuilder, CS.getCallingConv(), Callee, OrigRet, OrigArgs);
 }
 
 template <typename FuncInfoTy>
 void CallLowering::setArgFlags(CallLowering::ArgInfo &Arg, unsigned OpIdx,
                                const DataLayout &DL,
                                const FuncInfoTy &FuncInfo) const {
-  const AttributeSet &Attrs = FuncInfo.getAttributes();
+  const AttributeList &Attrs = FuncInfo.getAttributes();
   if (Attrs.hasAttribute(OpIdx, Attribute::ZExt))
     Arg.Flags.setZExt();
   if (Attrs.hasAttribute(OpIdx, Attribute::SExt))

@@ -108,6 +108,14 @@ class ModuleBitcodeWriter : public BitcodeWriterBase {
   /// True if a module hash record should be written.
   bool GenerateHash;
 
+  /// If non-null, when GenerateHash is true, the resulting hash is written
+  /// into ModHash. When GenerateHash is false, that specified value
+  /// is used as the hash instead of computing from the generated bitcode.
+  /// Can be used to produce the same module hash for a minimized bitcode
+  /// used just for the thin link as in the regular full bitcode that will
+  /// be used in the backend.
+  ModuleHash *ModHash;
+
   /// The start bit of the identification block.
   uint64_t BitcodeStartBit;
 
@@ -124,10 +132,12 @@ public:
   /// writing to the provided \p Buffer.
   ModuleBitcodeWriter(const Module *M, SmallVectorImpl<char> &Buffer,
                       BitstreamWriter &Stream, bool ShouldPreserveUseListOrder,
-                      const ModuleSummaryIndex *Index, bool GenerateHash)
+                      const ModuleSummaryIndex *Index, bool GenerateHash,
+                      ModuleHash *ModHash = nullptr)
       : BitcodeWriterBase(Stream), Buffer(Buffer), M(*M),
         VE(*M, ShouldPreserveUseListOrder), Index(Index),
-        GenerateHash(GenerateHash), BitcodeStartBit(Stream.GetCurrentBitNo()) {
+        GenerateHash(GenerateHash), ModHash(ModHash),
+        BitcodeStartBit(Stream.GetCurrentBitNo()) {
     // Assign ValueIds to any callee values in the index that came from
     // indirect call profiles and were recorded as a GUID not a Value*
     // (which would have been assigned an ID by the ValueEnumerator).
@@ -709,22 +719,22 @@ static uint64_t getAttrKindEncoding(Attribute::AttrKind Kind) {
 }
 
 void ModuleBitcodeWriter::writeAttributeGroupTable() {
-  const std::vector<AttributeSet> &AttrGrps = VE.getAttributeGroups();
+  const std::vector<AttributeList> &AttrGrps = VE.getAttributeGroups();
   if (AttrGrps.empty()) return;
 
   Stream.EnterSubblock(bitc::PARAMATTR_GROUP_BLOCK_ID, 3);
 
   SmallVector<uint64_t, 64> Record;
   for (unsigned i = 0, e = AttrGrps.size(); i != e; ++i) {
-    AttributeSet AS = AttrGrps[i];
+    AttributeList AS = AttrGrps[i];
     for (unsigned i = 0, e = AS.getNumSlots(); i != e; ++i) {
-      AttributeSet A = AS.getSlotAttributes(i);
+      AttributeList A = AS.getSlotAttributes(i);
 
       Record.push_back(VE.getAttributeGroupID(A));
       Record.push_back(AS.getSlotIndex(i));
 
-      for (AttributeSet::iterator I = AS.begin(0), E = AS.end(0);
-           I != E; ++I) {
+      for (AttributeList::iterator I = AS.begin(0), E = AS.end(0); I != E;
+           ++I) {
         Attribute Attr = *I;
         if (Attr.isEnumAttribute()) {
           Record.push_back(0);
@@ -756,14 +766,14 @@ void ModuleBitcodeWriter::writeAttributeGroupTable() {
 }
 
 void ModuleBitcodeWriter::writeAttributeTable() {
-  const std::vector<AttributeSet> &Attrs = VE.getAttributes();
+  const std::vector<AttributeList> &Attrs = VE.getAttributes();
   if (Attrs.empty()) return;
 
   Stream.EnterSubblock(bitc::PARAMATTR_BLOCK_ID, 3);
 
   SmallVector<uint64_t, 64> Record;
   for (unsigned i = 0, e = Attrs.size(); i != e; ++i) {
-    const AttributeSet &A = Attrs[i];
+    const AttributeList &A = Attrs[i];
     for (unsigned i = 0, e = A.getNumSlots(); i != e; ++i)
       Record.push_back(VE.getAttributeGroupID(A.getSlotAttributes(i)));
 
@@ -3708,9 +3718,16 @@ void IndexBitcodeWriter::writeCombinedGlobalValueSummary() {
     for (auto &EI : FS->calls()) {
       // If this GUID doesn't have a value id, it doesn't have a function
       // summary and we don't need to record any calls to it.
-      if (!hasValueId(EI.first.getGUID()))
-        continue;
-      NameVals.push_back(getValueId(EI.first.getGUID()));
+      GlobalValue::GUID GUID = EI.first.getGUID();
+      if (!hasValueId(GUID)) {
+        // For SamplePGO, the indirect call targets for local functions will
+        // have its original name annotated in profile. We try to find the
+        // corresponding PGOFuncName as the GUID.
+        GUID = Index.getGUIDFromOriginalID(GUID);
+        if (GUID == 0 || !hasValueId(GUID))
+          continue;
+      }
+      NameVals.push_back(getValueId(GUID));
       if (HasProfileData)
         NameVals.push_back(static_cast<uint8_t>(EI.second.Hotness));
     }
@@ -3771,17 +3788,24 @@ static void writeIdentificationBlock(BitstreamWriter &Stream) {
 void ModuleBitcodeWriter::writeModuleHash(size_t BlockStartPos) {
   // Emit the module's hash.
   // MODULE_CODE_HASH: [5*i32]
-  SHA1 Hasher;
-  Hasher.update(ArrayRef<uint8_t>((const uint8_t *)&(Buffer)[BlockStartPos],
-                                  Buffer.size() - BlockStartPos));
-  StringRef Hash = Hasher.result();
-  uint32_t Vals[5];
-  for (int Pos = 0; Pos < 20; Pos += 4) {
-    Vals[Pos / 4] = support::endian::read32be(Hash.data() + Pos);
-  }
+  if (GenerateHash) {
+    SHA1 Hasher;
+    uint32_t Vals[5];
+    Hasher.update(ArrayRef<uint8_t>((const uint8_t *)&(Buffer)[BlockStartPos],
+                                    Buffer.size() - BlockStartPos));
+    StringRef Hash = Hasher.result();
+    for (int Pos = 0; Pos < 20; Pos += 4) {
+      Vals[Pos / 4] = support::endian::read32be(Hash.data() + Pos);
+    }
 
-  // Emit the finished record.
-  Stream.EmitRecord(bitc::MODULE_CODE_HASH, Vals);
+    // Emit the finished record.
+    Stream.EmitRecord(bitc::MODULE_CODE_HASH, Vals);
+
+    if (ModHash)
+      // Save the written hash value.
+      std::copy(std::begin(Vals), std::end(Vals), std::begin(*ModHash));
+  } else if (ModHash)
+    Stream.EmitRecord(bitc::MODULE_CODE_HASH, ArrayRef<uint32_t>(*ModHash));
 }
 
 void ModuleBitcodeWriter::write() {
@@ -3842,9 +3866,7 @@ void ModuleBitcodeWriter::write() {
   writeValueSymbolTable(M.getValueSymbolTable(),
                         /* IsModuleLevel */ true, &FunctionToBitcodeIndex);
 
-  if (GenerateHash) {
-    writeModuleHash(BlockStartPos);
-  }
+  writeModuleHash(BlockStartPos);
 
   Stream.ExitBlock();
 }
@@ -3935,9 +3957,10 @@ BitcodeWriter::~BitcodeWriter() = default;
 void BitcodeWriter::writeModule(const Module *M,
                                 bool ShouldPreserveUseListOrder,
                                 const ModuleSummaryIndex *Index,
-                                bool GenerateHash) {
-  ModuleBitcodeWriter ModuleWriter(
-      M, Buffer, *Stream, ShouldPreserveUseListOrder, Index, GenerateHash);
+                                bool GenerateHash, ModuleHash *ModHash) {
+  ModuleBitcodeWriter ModuleWriter(M, Buffer, *Stream,
+                                   ShouldPreserveUseListOrder, Index,
+                                   GenerateHash, ModHash);
   ModuleWriter.write();
 }
 
@@ -3946,7 +3969,7 @@ void BitcodeWriter::writeModule(const Module *M,
 void llvm::WriteBitcodeToFile(const Module *M, raw_ostream &Out,
                               bool ShouldPreserveUseListOrder,
                               const ModuleSummaryIndex *Index,
-                              bool GenerateHash) {
+                              bool GenerateHash, ModuleHash *ModHash) {
   SmallVector<char, 0> Buffer;
   Buffer.reserve(256*1024);
 
@@ -3957,7 +3980,8 @@ void llvm::WriteBitcodeToFile(const Module *M, raw_ostream &Out,
     Buffer.insert(Buffer.begin(), BWH_HeaderSize, 0);
 
   BitcodeWriter Writer(Buffer);
-  Writer.writeModule(M, ShouldPreserveUseListOrder, Index, GenerateHash);
+  Writer.writeModule(M, ShouldPreserveUseListOrder, Index, GenerateHash,
+                     ModHash);
 
   if (TT.isOSDarwin() || TT.isOSBinFormatMachO())
     emitDarwinBCHeaderAndTrailer(Buffer, TT);

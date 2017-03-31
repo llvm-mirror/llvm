@@ -3019,12 +3019,11 @@ static bool AddReachableCodeToWorklist(BasicBlock *BB, const DataLayout &DL,
         }
 
       // See if we can constant fold its operands.
-      for (User::op_iterator i = Inst->op_begin(), e = Inst->op_end(); i != e;
-           ++i) {
-        if (!isa<ConstantVector>(i) && !isa<ConstantExpr>(i))
+      for (Use &U : Inst->operands()) {
+        if (!isa<ConstantVector>(U) && !isa<ConstantExpr>(U))
           continue;
 
-        auto *C = cast<Constant>(i);
+        auto *C = cast<Constant>(U);
         Constant *&FoldRes = FoldedConstants[C];
         if (!FoldRes)
           FoldRes = ConstantFoldConstant(C, DL, TLI);
@@ -3032,7 +3031,10 @@ static bool AddReachableCodeToWorklist(BasicBlock *BB, const DataLayout &DL,
           FoldRes = C;
 
         if (FoldRes != C) {
-          *i = FoldRes;
+          DEBUG(dbgs() << "IC: ConstFold operand of: " << *Inst
+                       << "\n    Old = " << *C
+                       << "\n    New = " << *FoldRes << '\n');
+          U = FoldRes;
           MadeIRChange = true;
         }
       }

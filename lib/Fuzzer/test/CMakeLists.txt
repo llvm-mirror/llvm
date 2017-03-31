@@ -123,11 +123,13 @@ set(Tests
   SwapCmpTest
   SwitchTest
   Switch2Test
+  TableLookupTest
   ThreadedLeakTest
   ThreadedTest
   TimeoutTest
   TimeoutEmptyTest
   TraceMallocTest
+  TwoDifferentBugsTest
   )
 
 if(APPLE OR MSVC)

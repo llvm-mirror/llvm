@@ -231,12 +231,27 @@ namespace AMDGPUISD {
 enum NodeType : unsigned {
   // AMDIL ISD Opcodes
   FIRST_NUMBER = ISD::BUILTIN_OP_END,
-  CALL,        // Function call based on a single integer
   UMUL,        // 32bit unsigned multiplication
   BRANCH_COND,
   // End AMDIL ISD Opcodes
+
+  // Function call.
+  CALL,
+
+  // Masked control flow nodes.
+  IF,
+  ELSE,
+  LOOP,
+
+  // A uniform kernel return that terminates the wavefront.
   ENDPGM,
-  RETURN,
+
+  // Return to a shader part's epilog code.
+  RETURN_TO_EPILOG,
+
+  // Return with values from a non-entry function.
+  RET_FLAG,
+
   DWORDADDR,
   FRACT,
 
@@ -325,6 +340,10 @@ enum NodeType : unsigned {
   // Convert two float 32 numbers into a single register holding two packed f16
   // with round to zero.
   CVT_PKRTZ_F16_F32,
+
+  // Same as the standard node, except the high bits of the resulting integer
+  // are known 0.
+  FP_TO_FP16,
 
   /// This node is for VLIW targets and it is used to represent a vector
   /// that is stored in consecutive registers with the same channel.

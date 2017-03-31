@@ -55,14 +55,15 @@ bool TargetLowering::isInTailCallPosition(SelectionDAG &DAG, SDNode *Node,
 
   // Conservatively require the attributes of the call to match those of
   // the return. Ignore noalias because it doesn't affect the call sequence.
-  AttributeSet CallerAttrs = F->getAttributes();
-  if (AttrBuilder(CallerAttrs, AttributeSet::ReturnIndex)
-      .removeAttribute(Attribute::NoAlias).hasAttributes())
+  AttributeList CallerAttrs = F->getAttributes();
+  if (AttrBuilder(CallerAttrs, AttributeList::ReturnIndex)
+          .removeAttribute(Attribute::NoAlias)
+          .hasAttributes())
     return false;
 
   // It's not safe to eliminate the sign / zero extension of the return value.
-  if (CallerAttrs.hasAttribute(AttributeSet::ReturnIndex, Attribute::ZExt) ||
-      CallerAttrs.hasAttribute(AttributeSet::ReturnIndex, Attribute::SExt))
+  if (CallerAttrs.hasAttribute(AttributeList::ReturnIndex, Attribute::ZExt) ||
+      CallerAttrs.hasAttribute(AttributeList::ReturnIndex, Attribute::SExt))
     return false;
 
   // Check if the only use is a function return node.
@@ -96,18 +97,18 @@ bool TargetLowering::parametersInCSRMatch(const MachineRegisterInfo &MRI,
 
 /// \brief Set CallLoweringInfo attribute flags based on a call instruction
 /// and called function attributes.
-void TargetLowering::ArgListEntry::setAttributes(ImmutableCallSite *CS,
-                                                 unsigned AttrIdx) {
-  isSExt     = CS->paramHasAttr(AttrIdx, Attribute::SExt);
-  isZExt     = CS->paramHasAttr(AttrIdx, Attribute::ZExt);
-  isInReg    = CS->paramHasAttr(AttrIdx, Attribute::InReg);
-  isSRet     = CS->paramHasAttr(AttrIdx, Attribute::StructRet);
-  isNest     = CS->paramHasAttr(AttrIdx, Attribute::Nest);
-  isByVal    = CS->paramHasAttr(AttrIdx, Attribute::ByVal);
-  isInAlloca = CS->paramHasAttr(AttrIdx, Attribute::InAlloca);
-  isReturned = CS->paramHasAttr(AttrIdx, Attribute::Returned);
-  isSwiftSelf = CS->paramHasAttr(AttrIdx, Attribute::SwiftSelf);
-  isSwiftError = CS->paramHasAttr(AttrIdx, Attribute::SwiftError);
+void TargetLoweringBase::ArgListEntry::setAttributes(ImmutableCallSite *CS,
+                                                     unsigned AttrIdx) {
+  IsSExt = CS->paramHasAttr(AttrIdx, Attribute::SExt);
+  IsZExt = CS->paramHasAttr(AttrIdx, Attribute::ZExt);
+  IsInReg = CS->paramHasAttr(AttrIdx, Attribute::InReg);
+  IsSRet = CS->paramHasAttr(AttrIdx, Attribute::StructRet);
+  IsNest = CS->paramHasAttr(AttrIdx, Attribute::Nest);
+  IsByVal = CS->paramHasAttr(AttrIdx, Attribute::ByVal);
+  IsInAlloca = CS->paramHasAttr(AttrIdx, Attribute::InAlloca);
+  IsReturned = CS->paramHasAttr(AttrIdx, Attribute::Returned);
+  IsSwiftSelf = CS->paramHasAttr(AttrIdx, Attribute::SwiftSelf);
+  IsSwiftError = CS->paramHasAttr(AttrIdx, Attribute::SwiftError);
   Alignment  = CS->getParamAlignment(AttrIdx);
 }
 
@@ -125,8 +126,8 @@ TargetLowering::makeLibCall(SelectionDAG &DAG, RTLIB::Libcall LC, EVT RetVT,
   for (SDValue Op : Ops) {
     Entry.Node = Op;
     Entry.Ty = Entry.Node.getValueType().getTypeForEVT(*DAG.getContext());
-    Entry.isSExt = shouldSignExtendTypeInLibCall(Op.getValueType(), isSigned);
-    Entry.isZExt = !shouldSignExtendTypeInLibCall(Op.getValueType(), isSigned);
+    Entry.IsSExt = shouldSignExtendTypeInLibCall(Op.getValueType(), isSigned);
+    Entry.IsZExt = !shouldSignExtendTypeInLibCall(Op.getValueType(), isSigned);
     Args.push_back(Entry);
   }
 
@@ -138,10 +139,13 @@ TargetLowering::makeLibCall(SelectionDAG &DAG, RTLIB::Libcall LC, EVT RetVT,
   Type *RetTy = RetVT.getTypeForEVT(*DAG.getContext());
   TargetLowering::CallLoweringInfo CLI(DAG);
   bool signExtend = shouldSignExtendTypeInLibCall(RetVT, isSigned);
-  CLI.setDebugLoc(dl).setChain(DAG.getEntryNode())
-    .setCallee(getLibcallCallingConv(LC), RetTy, Callee, std::move(Args))
-    .setNoReturn(doesNotReturn).setDiscardResult(!isReturnValueUsed)
-    .setSExtResult(signExtend).setZExtResult(!signExtend);
+  CLI.setDebugLoc(dl)
+      .setChain(DAG.getEntryNode())
+      .setLibCallee(getLibcallCallingConv(LC), RetTy, Callee, std::move(Args))
+      .setNoReturn(doesNotReturn)
+      .setDiscardResult(!isReturnValueUsed)
+      .setSExtResult(signExtend)
+      .setZExtResult(!signExtend);
   return LowerCallTo(CLI);
 }
 
@@ -469,6 +473,21 @@ TargetLowering::TargetLoweringOpt::SimplifyDemandedBits(SDNode *User,
   // with it.
   DCI.AddToWorklist(User);
   return true;
+}
+
+bool TargetLowering::SimplifyDemandedBits(SDValue Op, APInt &DemandedMask,
+                                          DAGCombinerInfo &DCI) const {
+
+  SelectionDAG &DAG = DCI.DAG;
+  TargetLoweringOpt TLO(DAG, !DCI.isBeforeLegalize(),
+                        !DCI.isBeforeLegalizeOps());
+  APInt KnownZero, KnownOne;
+
+  bool Simplified = SimplifyDemandedBits(Op, DemandedMask, KnownZero, KnownOne,
+                                         TLO);
+  if (Simplified)
+    DCI.CommitTargetLoweringOpt(TLO);
+  return Simplified;
 }
 
 /// Look at Op. At this point, we know that only the DemandedMask bits of the
@@ -858,7 +877,7 @@ bool TargetLowering::SimplifyDemandedBits(SDValue Op,
       KnownZero <<= SA->getZExtValue();
       KnownOne  <<= SA->getZExtValue();
       // low bits known zero.
-      KnownZero |= APInt::getLowBitsSet(BitWidth, SA->getZExtValue());
+      KnownZero.setLowBits(SA->getZExtValue());
     }
     break;
   case ISD::SRL:
@@ -877,7 +896,7 @@ bool TargetLowering::SimplifyDemandedBits(SDValue Op,
       // If the shift is exact, then it does demand the low bits (and knows that
       // they are zero).
       if (cast<BinaryWithFlagsSDNode>(Op)->Flags.hasExact())
-        InDemandedMask |= APInt::getLowBitsSet(BitWidth, ShAmt);
+        InDemandedMask.setLowBits(ShAmt);
 
       // If this is ((X << C1) >>u ShAmt), see if we can simplify this into a
       // single shift.  We can do this if the top bits (which are shifted out)
@@ -908,8 +927,7 @@ bool TargetLowering::SimplifyDemandedBits(SDValue Op,
       KnownZero = KnownZero.lshr(ShAmt);
       KnownOne  = KnownOne.lshr(ShAmt);
 
-      APInt HighBits = APInt::getHighBitsSet(BitWidth, ShAmt);
-      KnownZero |= HighBits;  // High bits known zero.
+      KnownZero.setHighBits(ShAmt);  // High bits known zero.
     }
     break;
   case ISD::SRA:
@@ -935,7 +953,7 @@ bool TargetLowering::SimplifyDemandedBits(SDValue Op,
       // If the shift is exact, then it does demand the low bits (and knows that
       // they are zero).
       if (cast<BinaryWithFlagsSDNode>(Op)->Flags.hasExact())
-        InDemandedMask |= APInt::getLowBitsSet(BitWidth, ShAmt);
+        InDemandedMask.setLowBits(ShAmt);
 
       // If any of the demanded bits are produced by the sign extension, we also
       // demand the input sign bit.
@@ -2964,7 +2982,7 @@ static SDValue BuildExactSDIV(const TargetLowering &TLI, SDValue Op1, APInt d,
 SDValue TargetLowering::BuildSDIVPow2(SDNode *N, const APInt &Divisor,
                                       SelectionDAG &DAG,
                                       std::vector<SDNode *> *Created) const {
-  AttributeSet Attr = DAG.getMachineFunction().getFunction()->getAttributes();
+  AttributeList Attr = DAG.getMachineFunction().getFunction()->getAttributes();
   const TargetLowering &TLI = DAG.getTargetLoweringInfo();
   if (TLI.isIntDivCheap(N->getValueType(0), Attr))
     return SDValue(N,0); // Lower SDIV as SDIV
@@ -3839,7 +3857,7 @@ SDValue TargetLowering::LowerToTLSEmulatedModel(const GlobalAddressSDNode *GA,
 
   TargetLowering::CallLoweringInfo CLI(DAG);
   CLI.setDebugLoc(dl).setChain(DAG.getEntryNode());
-  CLI.setCallee(CallingConv::C, VoidPtrType, EmuTlsGetAddr, std::move(Args));
+  CLI.setLibCallee(CallingConv::C, VoidPtrType, EmuTlsGetAddr, std::move(Args));
   std::pair<SDValue, SDValue> CallResult = LowerCallTo(CLI);
 
   // TLSADDR will be codegen'ed as call. Inform MFI that function has calls.

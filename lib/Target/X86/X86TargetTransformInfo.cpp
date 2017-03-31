@@ -1370,7 +1370,8 @@ int X86TTIImpl::getCmpSelInstrCost(unsigned Opcode, Type *ValTy, Type *CondTy) {
 }
 
 int X86TTIImpl::getIntrinsicInstrCost(Intrinsic::ID IID, Type *RetTy,
-                                      ArrayRef<Type *> Tys, FastMathFlags FMF) {
+                                      ArrayRef<Type *> Tys, FastMathFlags FMF,
+                                      unsigned ScalarizationCostPassed) {
   // Costs should match the codegen from:
   // BITREVERSE: llvm\test\CodeGen\X86\vector-bitreverse.ll
   // BSWAP: llvm\test\CodeGen\X86\bswap-vector.ll
@@ -1446,8 +1447,8 @@ int X86TTIImpl::getIntrinsicInstrCost(Intrinsic::ID IID, Type *RetTy,
     { ISD::FSQRT,      MVT::v4f64,  43 }, // SNB from http://www.agner.org/
   };
   static const CostTblEntry SSE42CostTbl[] = {
-    { ISD::FSQRT, MVT::f32,   18 }, // Nehalem from http://www.agner.org/
-    { ISD::FSQRT, MVT::v4f32, 18 }, // Nehalem from http://www.agner.org/
+    { ISD::FSQRT,      MVT::f32,    18 }, // Nehalem from http://www.agner.org/
+    { ISD::FSQRT,      MVT::v4f32,  18 }, // Nehalem from http://www.agner.org/
   };
   static const CostTblEntry SSSE3CostTbl[] = {
     { ISD::BITREVERSE, MVT::v2i64,   5 },
@@ -1471,6 +1472,10 @@ int X86TTIImpl::getIntrinsicInstrCost(Intrinsic::ID IID, Type *RetTy,
     { ISD::CTTZ,       MVT::v16i8,   9 }
   };
   static const CostTblEntry SSE2CostTbl[] = {
+    { ISD::BITREVERSE, MVT::v2i64,  29 },
+    { ISD::BITREVERSE, MVT::v4i32,  27 },
+    { ISD::BITREVERSE, MVT::v8i16,  27 },
+    { ISD::BITREVERSE, MVT::v16i8,  20 },
     { ISD::BSWAP,      MVT::v2i64,   7 },
     { ISD::BSWAP,      MVT::v4i32,   7 },
     { ISD::BSWAP,      MVT::v8i16,   7 },
@@ -1490,8 +1495,16 @@ int X86TTIImpl::getIntrinsicInstrCost(Intrinsic::ID IID, Type *RetTy,
     { ISD::FSQRT,      MVT::v2f64,  32 }, // Nehalem from http://www.agner.org/
   };
   static const CostTblEntry SSE1CostTbl[] = {
-    { ISD::FSQRT, MVT::f32,   28 }, // Pentium III from http://www.agner.org/
-    { ISD::FSQRT, MVT::v4f32, 56 }, // Pentium III from http://www.agner.org/
+    { ISD::FSQRT,      MVT::f32,    28 }, // Pentium III from http://www.agner.org/
+    { ISD::FSQRT,      MVT::v4f32,  56 }, // Pentium III from http://www.agner.org/
+  };
+  static const CostTblEntry X64CostTbl[] = { // 64-bit targets
+    { ISD::BITREVERSE, MVT::i64,    14 }
+  };
+  static const CostTblEntry X86CostTbl[] = { // 32 or 64-bit targets
+    { ISD::BITREVERSE, MVT::i32,    14 },
+    { ISD::BITREVERSE, MVT::i16,    14 },
+    { ISD::BITREVERSE, MVT::i8,     11 }
   };
 
   unsigned ISD = ISD::DELETED_NODE;
@@ -1551,12 +1564,19 @@ int X86TTIImpl::getIntrinsicInstrCost(Intrinsic::ID IID, Type *RetTy,
     if (const auto *Entry = CostTableLookup(SSE1CostTbl, ISD, MTy))
       return LT.first * Entry->Cost;
 
-  return BaseT::getIntrinsicInstrCost(IID, RetTy, Tys, FMF);
+  if (ST->is64Bit())
+    if (const auto *Entry = CostTableLookup(X64CostTbl, ISD, MTy))
+      return LT.first * Entry->Cost;
+
+  if (const auto *Entry = CostTableLookup(X86CostTbl, ISD, MTy))
+    return LT.first * Entry->Cost;
+
+  return BaseT::getIntrinsicInstrCost(IID, RetTy, Tys, FMF, ScalarizationCostPassed);
 }
 
 int X86TTIImpl::getIntrinsicInstrCost(Intrinsic::ID IID, Type *RetTy,
-                                      ArrayRef<Value *> Args, FastMathFlags FMF) {
-  return BaseT::getIntrinsicInstrCost(IID, RetTy, Args, FMF);
+                     ArrayRef<Value *> Args, FastMathFlags FMF, unsigned VF) {
+  return BaseT::getIntrinsicInstrCost(IID, RetTy, Args, FMF, VF);
 }
 
 int X86TTIImpl::getVectorInstrCost(unsigned Opcode, Type *Val, unsigned Index) {

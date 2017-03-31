@@ -32,10 +32,10 @@ struct SerializationContext;
 
 struct MSFHeaders {
   msf::SuperBlock SuperBlock;
-  uint32_t NumDirectoryBlocks;
+  uint32_t NumDirectoryBlocks = 0;
   std::vector<uint32_t> DirectoryBlocks;
-  uint32_t NumStreams;
-  uint32_t FileSize;
+  uint32_t NumStreams = 0;
+  uint32_t FileSize = 0;
 };
 
 struct StreamBlockList {
@@ -48,10 +48,11 @@ struct NamedStreamMapping {
 };
 
 struct PdbInfoStream {
-  PdbRaw_ImplVer Version;
-  uint32_t Signature;
-  uint32_t Age;
+  PdbRaw_ImplVer Version = PdbImplVC70;
+  uint32_t Signature = 0;
+  uint32_t Age = 1;
   PDB_UniqueId Guid;
+  std::vector<PdbRaw_FeatureSig> Features;
   std::vector<NamedStreamMapping> NamedStreams;
 };
 
@@ -72,13 +73,13 @@ struct PdbDbiModuleInfo {
 };
 
 struct PdbDbiStream {
-  PdbRaw_DbiVer VerHeader;
-  uint32_t Age;
-  uint16_t BuildNumber;
-  uint32_t PdbDllVersion;
-  uint16_t PdbDllRbld;
-  uint16_t Flags;
-  PDB_Machine MachineType;
+  PdbRaw_DbiVer VerHeader = PdbDbiV70;
+  uint32_t Age = 1;
+  uint16_t BuildNumber = 0;
+  uint32_t PdbDllVersion = 0;
+  uint16_t PdbDllRbld = 0;
+  uint16_t Flags = 1;
+  PDB_Machine MachineType = PDB_Machine::x86;
 
   std::vector<PdbDbiModuleInfo> ModInfos;
 };
@@ -92,7 +93,7 @@ struct PdbTpiFieldListRecord {
 };
 
 struct PdbTpiStream {
-  PdbRaw_TpiVer Version;
+  PdbRaw_TpiVer Version = PdbTpiV80;
   std::vector<PdbTpiRecord> Records;
 };
 
