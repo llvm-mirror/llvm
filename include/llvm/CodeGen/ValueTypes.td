@@ -42,7 +42,7 @@ def v64i1  : ValueType<64 , 18>;   //  64 x i1 vector value
 def v512i1 : ValueType<512, 19>;   // 512 x i1 vector value
 def v1024i1: ValueType<1024,20>;   //1024 x i1 vector value
 
-def v1i8   : ValueType<16,  21>;   //  1 x i8  vector value
+def v1i8   : ValueType<8 ,  21>;   //  1 x i8  vector value
 def v2i8   : ValueType<16 , 22>;   //  2 x i8  vector value
 def v4i8   : ValueType<32 , 23>;   //  4 x i8  vector value
 def v8i8   : ValueType<64 , 24>;   //  8 x i8  vector value
