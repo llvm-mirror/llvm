@@ -278,6 +278,77 @@ static bool AllInputsAreFiles() {
   return true;
 }
 
+static std::string GetDedupTokenFromFile(const std::string &Path) {
+  auto S = FileToString(Path);
+  auto Beg = S.find("DEDUP_TOKEN:");
+  if (Beg == std::string::npos)
+    return "";
+  auto End = S.find('\n', Beg);
+  if (End == std::string::npos)
+    return "";
+  return S.substr(Beg, End - Beg);
+}
+
+int CleanseCrashInput(const std::vector<std::string> &Args,
+                       const FuzzingOptions &Options) {
+  if (Inputs->size() != 1 || !Flags.exact_artifact_path) {
+    Printf("ERROR: -cleanse_crash should be given one input file and"
+          " -exact_artifact_path\n");
+    exit(1);
+  }
+  std::string InputFilePath = Inputs->at(0);
+  std::string OutputFilePath = Flags.exact_artifact_path;
+  std::string BaseCmd =
+      CloneArgsWithoutX(Args, "cleanse_crash", "cleanse_crash");
+
+  auto InputPos = BaseCmd.find(" " + InputFilePath + " ");
+  assert(InputPos != std::string::npos);
+  BaseCmd.erase(InputPos, InputFilePath.size() + 1);
+
+  auto LogFilePath = DirPlusFile(
+      TmpDir(), "libFuzzerTemp." + std::to_string(GetPid()) + ".txt");
+  auto TmpFilePath = DirPlusFile(
+      TmpDir(), "libFuzzerTemp." + std::to_string(GetPid()) + ".repro");
+  auto LogFileRedirect = " > " + LogFilePath + " 2>&1 ";
+
+  auto Cmd = BaseCmd + " " + TmpFilePath + LogFileRedirect;
+
+  std::string CurrentFilePath = InputFilePath;
+  auto U = FileToVector(CurrentFilePath);
+  size_t Size = U.size();
+
+  const std::vector<uint8_t> ReplacementBytes = {' ', 0xff};
+  for (int NumAttempts = 0; NumAttempts < 5; NumAttempts++) {
+    bool Changed = false;
+    for (size_t Idx = 0; Idx < Size; Idx++) {
+      Printf("CLEANSE[%d]: Trying to replace byte %zd of %zd\n", NumAttempts,
+             Idx, Size);
+      uint8_t OriginalByte = U[Idx];
+      if (ReplacementBytes.end() != std::find(ReplacementBytes.begin(),
+                                              ReplacementBytes.end(),
+                                              OriginalByte))
+        continue;
+      for (auto NewByte : ReplacementBytes) {
+        U[Idx] = NewByte;
+        WriteToFile(U, TmpFilePath);
+        auto ExitCode = ExecuteCommand(Cmd);
+        RemoveFile(TmpFilePath);
+        if (!ExitCode) {
+          U[Idx] = OriginalByte;
+        } else {
+          Changed = true;
+          Printf("CLEANSE: Replaced byte %zd with 0x%x\n", Idx, NewByte);
+          WriteToFile(U, OutputFilePath);
+          break;
+        }
+      }
+    }
+    if (!Changed) break;
+  }
+  RemoveFile(LogFilePath);
+  return 0;
+}
+
 int MinimizeCrashInput(const std::vector<std::string> &Args,
                        const FuzzingOptions &Options) {
   if (Inputs->size() != 1) {
@@ -296,7 +367,10 @@ int MinimizeCrashInput(const std::vector<std::string> &Args,
            "INFO: defaulting to -max_total_time=600\n");
     BaseCmd += " -max_total_time=600";
   }
-  // BaseCmd += " >  /dev/null 2>&1 ";
+
+  auto LogFilePath = DirPlusFile(
+      TmpDir(), "libFuzzerTemp." + std::to_string(GetPid()) + ".txt");
+  auto LogFileRedirect = " > " + LogFilePath + " 2>&1 ";
 
   std::string CurrentFilePath = InputFilePath;
   while (true) {
@@ -304,7 +378,7 @@ int MinimizeCrashInput(const std::vector<std::string> &Args,
     Printf("CRASH_MIN: minimizing crash input: '%s' (%zd bytes)\n",
            CurrentFilePath.c_str(), U.size());
 
-    auto Cmd = BaseCmd + " " + CurrentFilePath;
+    auto Cmd = BaseCmd + " " + CurrentFilePath + LogFileRedirect;
 
     Printf("CRASH_MIN: executing: %s\n", Cmd.c_str());
     int ExitCode = ExecuteCommand(Cmd);
@@ -315,13 +389,19 @@ int MinimizeCrashInput(const std::vector<std::string> &Args,
     Printf("CRASH_MIN: '%s' (%zd bytes) caused a crash. Will try to minimize "
            "it further\n",
            CurrentFilePath.c_str(), U.size());
+    auto DedupToken1 = GetDedupTokenFromFile(LogFilePath);
+    if (!DedupToken1.empty())
+      Printf("CRASH_MIN: DedupToken1: %s\n", DedupToken1.c_str());
 
     std::string ArtifactPath =
-        Options.ArtifactPrefix + "minimized-from-" + Hash(U);
+        Flags.exact_artifact_path
+            ? Flags.exact_artifact_path
+            : Options.ArtifactPrefix + "minimized-from-" + Hash(U);
     Cmd += " -minimize_crash_internal_step=1 -exact_artifact_path=" +
         ArtifactPath;
     Printf("CRASH_MIN: executing: %s\n", Cmd.c_str());
     ExitCode = ExecuteCommand(Cmd);
+    CopyFileToErr(LogFilePath);
     if (ExitCode == 0) {
       if (Flags.exact_artifact_path) {
         CurrentFilePath = Flags.exact_artifact_path;
@@ -329,11 +409,26 @@ int MinimizeCrashInput(const std::vector<std::string> &Args,
       }
       Printf("CRASH_MIN: failed to minimize beyond %s (%d bytes), exiting\n",
              CurrentFilePath.c_str(), U.size());
-      return 0;
+      break;
     }
+    auto DedupToken2 = GetDedupTokenFromFile(LogFilePath);
+    if (!DedupToken2.empty())
+      Printf("CRASH_MIN: DedupToken2: %s\n", DedupToken2.c_str());
+
+    if (DedupToken1 != DedupToken2) {
+      if (Flags.exact_artifact_path) {
+        CurrentFilePath = Flags.exact_artifact_path;
+        WriteToFile(U, CurrentFilePath);
+      }
+      Printf("CRASH_MIN: mismatch in dedup tokens"
+             " (looks like a different bug). Won't minimize further\n");
+      break;
+    }
+
     CurrentFilePath = ArtifactPath;
-    Printf("\n\n\n\n\n\n*********************************\n");
+    Printf("*********************************\n");
   }
+  RemoveFile(LogFilePath);
   return 0;
 }
 
@@ -481,7 +576,6 @@ int FuzzerDriver(int *argc, char ***argv, UserCallback Callback) {
   Options.PreferSmall = Flags.prefer_small;
   Options.ReloadIntervalSec = Flags.reload;
   Options.OnlyASCII = Flags.only_ascii;
-  Options.OutputCSV = Flags.output_csv;
   Options.DetectLeaks = Flags.detect_leaks;
   Options.TraceMalloc = Flags.trace_malloc;
   Options.RssLimitMb = Flags.rss_limit_mb;
@@ -547,6 +641,9 @@ int FuzzerDriver(int *argc, char ***argv, UserCallback Callback) {
 
   if (Flags.minimize_crash_internal_step)
     return MinimizeCrashInputInternalStep(F, Corpus);
+
+  if (Flags.cleanse_crash)
+    return CleanseCrashInput(Args, Options);
 
   if (auto Name = Flags.run_equivalence_server) {
     SMR.Destroy(Name);

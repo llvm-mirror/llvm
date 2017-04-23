@@ -43,8 +43,9 @@ ARMLegalizerInfo::ARMLegalizerInfo(const ARMSubtarget &ST) {
     setAction({Op, 1, p0}, Legal);
   }
 
-  for (auto Ty : {s1, s8, s16, s32})
-    setAction({G_ADD, Ty}, Legal);
+  for (unsigned Op : {G_ADD, G_SUB, G_MUL})
+    for (auto Ty : {s1, s8, s16, s32})
+      setAction({Op, Ty}, Legal);
 
   for (unsigned Op : {G_SEXT, G_ZEXT}) {
     setAction({Op, s32}, Legal);
@@ -57,13 +58,20 @@ ARMLegalizerInfo::ARMLegalizerInfo(const ARMSubtarget &ST) {
 
   setAction({G_CONSTANT, s32}, Legal);
 
-  if (ST.hasVFP2()) {
+  if (!ST.useSoftFloat() && ST.hasVFP2()) {
     setAction({G_FADD, s32}, Legal);
     setAction({G_FADD, s64}, Legal);
 
     setAction({G_LOAD, s64}, Legal);
     setAction({G_STORE, s64}, Legal);
+  } else {
+    for (auto Ty : {s32, s64})
+      setAction({G_FADD, Ty}, Libcall);
   }
+
+  for (unsigned Op : {G_FREM, G_FPOW})
+    for (auto Ty : {s32, s64})
+      setAction({Op, Ty}, Libcall);
 
   computeTables();
 }

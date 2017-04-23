@@ -245,16 +245,19 @@ def int_amdgcn_cubetc : GCCBuiltin<"__builtin_amdgcn_cubetc">,
 def int_amdgcn_sffbh :
   Intrinsic<[llvm_anyint_ty], [LLVMMatchType<0>], [IntrNoMem]>;
 
-// TODO: Do we want an ordering for these?
-def int_amdgcn_atomic_inc : Intrinsic<[llvm_anyint_ty],
-  [llvm_anyptr_ty, LLVMMatchType<0>],
+
+// Fields should mirror atomicrmw
+class AMDGPUAtomicIncIntrin : Intrinsic<[llvm_anyint_ty],
+  [llvm_anyptr_ty,
+  LLVMMatchType<0>,
+  llvm_i32_ty, // ordering
+  llvm_i32_ty, // scope
+  llvm_i1_ty], // isVolatile
   [IntrArgMemOnly, NoCapture<0>]
 >;
 
-def int_amdgcn_atomic_dec : Intrinsic<[llvm_anyint_ty],
-  [llvm_anyptr_ty, LLVMMatchType<0>],
-  [IntrArgMemOnly, NoCapture<0>]
->;
+def int_amdgcn_atomic_inc : AMDGPUAtomicIncIntrin;
+def int_amdgcn_atomic_dec : AMDGPUAtomicIncIntrin;
 
 class AMDGPUImageLoad : Intrinsic <
   [llvm_anyfloat_ty], // vdata(VGPR)
@@ -704,6 +707,9 @@ def int_amdgcn_loop : Intrinsic<[llvm_i1_ty],
 >;
 
 def int_amdgcn_end_cf : Intrinsic<[], [llvm_i64_ty], [IntrConvergent]>;
+
+// Represent unreachable in a divergent region.
+def int_amdgcn_unreachable : Intrinsic<[], [], [IntrConvergent]>;
 
 // Emit 2.5 ulp, no denormal division. Should only be inserted by
 // pass based on !fpmath metadata.

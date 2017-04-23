@@ -978,6 +978,20 @@ private:
 
   /// Test whether the condition described by Pred, LHS, and RHS is true
   /// whenever the condition described by Pred, FoundLHS, and FoundRHS is
+  /// true. Here LHS is an operation that includes FoundLHS as one of its
+  /// arguments.
+  bool isImpliedViaOperations(ICmpInst::Predicate Pred,
+                              const SCEV *LHS, const SCEV *RHS,
+                              const SCEV *FoundLHS, const SCEV *FoundRHS,
+                              unsigned Depth = 0);
+
+  /// Test whether the condition described by Pred, LHS, and RHS is true.
+  /// Use only simple non-recursive types of checks, such as range analysis etc.
+  bool isKnownViaSimpleReasoning(ICmpInst::Predicate Pred,
+                                 const SCEV *LHS, const SCEV *RHS);
+
+  /// Test whether the condition described by Pred, LHS, and RHS is true
+  /// whenever the condition described by Pred, FoundLHS, and FoundRHS is
   /// true.
   bool isImpliedCondOperandsHelper(ICmpInst::Predicate Pred, const SCEV *LHS,
                                    const SCEV *RHS, const SCEV *FoundLHS,
@@ -1123,6 +1137,9 @@ public:
   /// return true. For pointer types, this is the pointer-sized integer type.
   Type *getEffectiveSCEVType(Type *Ty) const;
 
+  // Returns a wider type among {Ty1, Ty2}.
+  Type *getWiderType(Type *Ty1, Type *Ty2) const;
+
   /// Return true if the SCEV is a scAddRecExpr or it contains
   /// scAddRecExpr. The result will be cached in HasRecMap.
   ///
@@ -1142,8 +1159,20 @@ public:
   const SCEV *getConstant(const APInt &Val);
   const SCEV *getConstant(Type *Ty, uint64_t V, bool isSigned = false);
   const SCEV *getTruncateExpr(const SCEV *Op, Type *Ty);
+
+  typedef SmallDenseMap<std::pair<const SCEV *, Type *>, const SCEV *, 8>
+      ExtendCacheTy;
   const SCEV *getZeroExtendExpr(const SCEV *Op, Type *Ty);
+  const SCEV *getZeroExtendExprCached(const SCEV *Op, Type *Ty,
+                                      ExtendCacheTy &Cache);
+  const SCEV *getZeroExtendExprImpl(const SCEV *Op, Type *Ty,
+                                    ExtendCacheTy &Cache);
+
   const SCEV *getSignExtendExpr(const SCEV *Op, Type *Ty);
+  const SCEV *getSignExtendExprCached(const SCEV *Op, Type *Ty,
+                                      ExtendCacheTy &Cache);
+  const SCEV *getSignExtendExprImpl(const SCEV *Op, Type *Ty,
+                                    ExtendCacheTy &Cache);
   const SCEV *getAnyExtendExpr(const SCEV *Op, Type *Ty);
   const SCEV *getAddExpr(SmallVectorImpl<const SCEV *> &Ops,
                          SCEV::NoWrapFlags Flags = SCEV::FlagAnyWrap,

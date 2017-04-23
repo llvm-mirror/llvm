@@ -1,5 +1,8 @@
 ; RUN: llc -O0 -march=amdgcn -mcpu=hawaii -verify-machineinstrs < %s | FileCheck -check-prefix=ALL -check-prefix=VGPR -check-prefix=GCN %s
 
+; FIXME: we should disable sdwa peephole because dead-code elimination, that
+; runs after peephole, ruins this test (different register numbers)
+
 ; Spill all SGPRs so multiple VGPRs are required for spilling all of them.
 
 ; Ideally we only need 2 VGPRs for all spilling. The VGPRs are

@@ -132,8 +132,9 @@ getELFKindForNamedSection(StringRef Name, SectionKind K) {
   // section(".eh_frame") gcc will produce:
   //
   //   .section   .eh_frame,"a",@progbits
-  
-  if (Name == getInstrProfCoverageSectionName(false))
+
+  if (Name == getInstrProfSectionName(IPSK_covmap, Triple::ELF,
+                                      /*AddSegmentInfo=*/false))
     return SectionKind::getMetadata();
 
   if (Name.empty() || Name[0] != '.') return K;
@@ -968,37 +969,6 @@ static int getSelectionForCOFF(const GlobalValue *GV) {
     }
   }
   return 0;
-}
-
-void llvm::emitLinkerFlagsForGlobalCOFF(raw_ostream &OS, const GlobalValue *GV,
-                                        const Triple &TT, Mangler &Mangler) {
-  if (!GV->hasDLLExportStorageClass() || GV->isDeclaration())
-    return;
-
-  if (TT.isKnownWindowsMSVCEnvironment())
-    OS << " /EXPORT:";
-  else
-    OS << " -export:";
-
-  if (TT.isWindowsGNUEnvironment() || TT.isWindowsCygwinEnvironment()) {
-    std::string Flag;
-    raw_string_ostream FlagOS(Flag);
-    Mangler.getNameWithPrefix(FlagOS, GV, false);
-    FlagOS.flush();
-    if (Flag[0] == GV->getParent()->getDataLayout().getGlobalPrefix())
-      OS << Flag.substr(1);
-    else
-      OS << Flag;
-  } else {
-    Mangler.getNameWithPrefix(OS, GV, false);
-  }
-
-  if (!GV->getValueType()->isFunctionTy()) {
-    if (TT.isKnownWindowsMSVCEnvironment())
-      OS << ",DATA";
-    else
-      OS << ",data";
-  }
 }
 
 MCSection *TargetLoweringObjectFileCOFF::getExplicitSectionGlobal(

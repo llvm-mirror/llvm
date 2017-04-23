@@ -21,6 +21,7 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/IR/AssemblyAnnotationWriter.h"
+#include "llvm/IR/Attributes.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/Constants.h"
@@ -604,7 +605,7 @@ private:
   unsigned mdnNext;
 
   /// asMap - The slot map for attribute sets.
-  DenseMap<AttributeList, unsigned> asMap;
+  DenseMap<AttributeSet, unsigned> asMap;
   unsigned asNext;
 public:
   /// Construct from a module.
@@ -627,7 +628,7 @@ public:
   int getLocalSlot(const Value *V);
   int getGlobalSlot(const GlobalValue *V);
   int getMetadataSlot(const MDNode *N);
-  int getAttributeGroupSlot(AttributeList AS);
+  int getAttributeGroupSlot(AttributeSet AS);
 
   /// If you'd like to deal with a function instead of just a module, use
   /// this method to get its data into the SlotTracker.
@@ -650,8 +651,8 @@ public:
   unsigned mdn_size() const { return mdnMap.size(); }
   bool mdn_empty() const { return mdnMap.empty(); }
 
-  /// AttributeList map iterators.
-  typedef DenseMap<AttributeList, unsigned>::iterator as_iterator;
+  /// AttributeSet map iterators.
+  typedef DenseMap<AttributeSet, unsigned>::iterator as_iterator;
   as_iterator as_begin()   { return asMap.begin(); }
   as_iterator as_end()     { return asMap.end(); }
   unsigned as_size() const { return asMap.size(); }
@@ -671,8 +672,8 @@ private:
   /// CreateFunctionSlot - Insert the specified Value* into the slot table.
   void CreateFunctionSlot(const Value *V);
 
-  /// \brief Insert the specified AttributeList into the slot table.
-  void CreateAttributeSetSlot(AttributeList AS);
+  /// \brief Insert the specified AttributeSet into the slot table.
+  void CreateAttributeSetSlot(AttributeSet AS);
 
   /// Add all of the module level global variables (and their initializers)
   /// and function declarations, but not the contents of those functions.
@@ -831,8 +832,8 @@ void SlotTracker::processModule() {
 
     // Add all the function attributes to the table.
     // FIXME: Add attributes of other objects?
-    AttributeList FnAttrs = F.getAttributes().getFnAttributes();
-    if (FnAttrs.hasAttributes(AttributeList::FunctionIndex))
+    AttributeSet FnAttrs = F.getAttributes().getFnAttributes();
+    if (FnAttrs.hasAttributes())
       CreateAttributeSetSlot(FnAttrs);
   }
 
@@ -867,15 +868,10 @@ void SlotTracker::processFunction() {
 
       // We allow direct calls to any llvm.foo function here, because the
       // target may not be linked into the optimizer.
-      if (const CallInst *CI = dyn_cast<CallInst>(&I)) {
+      if (auto CS = ImmutableCallSite(&I)) {
         // Add all the call attributes to the table.
-        AttributeList Attrs = CI->getAttributes().getFnAttributes();
-        if (Attrs.hasAttributes(AttributeList::FunctionIndex))
-          CreateAttributeSetSlot(Attrs);
-      } else if (const InvokeInst *II = dyn_cast<InvokeInst>(&I)) {
-        // Add all the call attributes to the table.
-        AttributeList Attrs = II->getAttributes().getFnAttributes();
-        if (Attrs.hasAttributes(AttributeList::FunctionIndex))
+        AttributeSet Attrs = CS.getAttributes().getFnAttributes();
+        if (Attrs.hasAttributes())
           CreateAttributeSetSlot(Attrs);
       }
     }
@@ -961,11 +957,11 @@ int SlotTracker::getLocalSlot(const Value *V) {
   return FI == fMap.end() ? -1 : (int)FI->second;
 }
 
-int SlotTracker::getAttributeGroupSlot(AttributeList AS) {
+int SlotTracker::getAttributeGroupSlot(AttributeSet AS) {
   // Check for uninitialized state and do lazy initialization.
   initialize();
 
-  // Find the AttributeList in the module map.
+  // Find the AttributeSet in the module map.
   as_iterator AI = asMap.find(AS);
   return AI == asMap.end() ? -1 : (int)AI->second;
 }
@@ -1015,9 +1011,8 @@ void SlotTracker::CreateMetadataSlot(const MDNode *N) {
       CreateMetadataSlot(Op);
 }
 
-void SlotTracker::CreateAttributeSetSlot(AttributeList AS) {
-  assert(AS.hasAttributes(AttributeList::FunctionIndex) &&
-         "Doesn't need a slot!");
+void SlotTracker::CreateAttributeSetSlot(AttributeSet AS) {
+  assert(AS.hasAttributes() && "Doesn't need a slot!");
 
   as_iterator I = asMap.find(AS);
   if (I != asMap.end())
@@ -1073,6 +1068,8 @@ static void WriteOptimizationInfo(raw_ostream &Out, const User *U) {
         Out << " nsz";
       if (FPO->hasAllowReciprocal())
         Out << " arcp";
+      if (FPO->hasAllowContract())
+        Out << " contract";
     }
   }
 
@@ -2604,17 +2601,10 @@ void AssemblyWriter::printFunction(const Function *F) {
 
   const AttributeList &Attrs = F->getAttributes();
   if (Attrs.hasAttributes(AttributeList::FunctionIndex)) {
-    AttributeList AS = Attrs.getFnAttributes();
+    AttributeSet AS = Attrs.getFnAttributes();
     std::string AttrStr;
 
-    unsigned Idx = 0;
-    for (unsigned E = AS.getNumSlots(); Idx != E; ++Idx)
-      if (AS.getSlotIndex(Idx) == AttributeList::FunctionIndex)
-        break;
-
-    for (AttributeList::iterator I = AS.begin(Idx), E = AS.end(Idx); I != E;
-         ++I) {
-      Attribute Attr = *I;
+    for (const Attribute &Attr : AS) {
       if (!Attr.isStringAttribute()) {
         if (!AttrStr.empty()) AttrStr += ' ';
         AttrStr += Attr.getAsString();
@@ -2907,12 +2897,11 @@ void AssemblyWriter::printInstruction(const Instruction &I) {
     Out << ", ";
     writeOperand(SI.getDefaultDest(), true);
     Out << " [";
-    for (SwitchInst::ConstCaseIt i = SI.case_begin(), e = SI.case_end();
-         i != e; ++i) {
+    for (auto Case : SI.cases()) {
       Out << "\n    ";
-      writeOperand(i.getCaseValue(), true);
+      writeOperand(Case.getCaseValue(), true);
       Out << ", ";
-      writeOperand(i.getCaseSuccessor(), true);
+      writeOperand(Case.getCaseSuccessor(), true);
     }
     Out << "\n  ]";
   } else if (isa<IndirectBrInst>(I)) {
@@ -3115,6 +3104,12 @@ void AssemblyWriter::printInstruction(const Instruction &I) {
     if (AI->getAlignment()) {
       Out << ", align " << AI->getAlignment();
     }
+
+    unsigned AddrSpace = AI->getType()->getAddressSpace();
+    if (AddrSpace != 0) {
+      Out << ", addrspace(" << AddrSpace << ')';
+    }
+
   } else if (isa<CastInst>(I)) {
     if (Operand) {
       Out << ' ';
@@ -3248,7 +3243,7 @@ void AssemblyWriter::printMDNodeBody(const MDNode *Node) {
 }
 
 void AssemblyWriter::writeAllAttributeGroups() {
-  std::vector<std::pair<AttributeList, unsigned>> asVec;
+  std::vector<std::pair<AttributeSet, unsigned>> asVec;
   asVec.resize(Machine.as_size());
 
   for (SlotTracker::as_iterator I = Machine.as_begin(), E = Machine.as_end();
@@ -3257,7 +3252,7 @@ void AssemblyWriter::writeAllAttributeGroups() {
 
   for (const auto &I : asVec)
     Out << "attributes #" << I.second << " = { "
-        << I.first.getAsString(AttributeList::FunctionIndex, true) << " }\n";
+        << I.first.getAsString(true) << " }\n";
 }
 
 void AssemblyWriter::printUseListOrder(const UseListOrder &Order) {

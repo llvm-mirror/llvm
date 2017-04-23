@@ -147,47 +147,6 @@ Constant *Module::getOrInsertFunction(StringRef Name,
   return getOrInsertFunction(Name, Ty, AttributeList());
 }
 
-// getOrInsertFunction - Look up the specified function in the module symbol
-// table.  If it does not exist, add a prototype for the function and return it.
-// This version of the method takes a null terminated list of function
-// arguments, which makes it easier for clients to use.
-//
-Constant *Module::getOrInsertFunction(StringRef Name,
-                                      AttributeList AttributeList, Type *RetTy,
-                                      ...) {
-  va_list Args;
-  va_start(Args, RetTy);
-
-  // Build the list of argument types...
-  std::vector<Type*> ArgTys;
-  while (Type *ArgTy = va_arg(Args, Type*))
-    ArgTys.push_back(ArgTy);
-
-  va_end(Args);
-
-  // Build the function type and chain to the other getOrInsertFunction...
-  return getOrInsertFunction(Name,
-                             FunctionType::get(RetTy, ArgTys, false),
-                             AttributeList);
-}
-
-Constant *Module::getOrInsertFunction(StringRef Name,
-                                      Type *RetTy, ...) {
-  va_list Args;
-  va_start(Args, RetTy);
-
-  // Build the list of argument types...
-  std::vector<Type*> ArgTys;
-  while (Type *ArgTy = va_arg(Args, Type*))
-    ArgTys.push_back(ArgTy);
-
-  va_end(Args);
-
-  // Build the function type and chain to the other getOrInsertFunction...
-  return getOrInsertFunction(Name, FunctionType::get(RetTy, ArgTys, false),
-                             AttributeList());
-}
-
 // getFunction - Look up the specified function in the module symbol table.
 // If it does not exist, return null.
 //
@@ -206,7 +165,8 @@ Function *Module::getFunction(StringRef Name) const {
 /// If AllowLocal is set to true, this function will return types that
 /// have an local. By default, these types are not returned.
 ///
-GlobalVariable *Module::getGlobalVariable(StringRef Name, bool AllowLocal) {
+GlobalVariable *Module::getGlobalVariable(StringRef Name,
+                                          bool AllowLocal) const {
   if (GlobalVariable *Result =
       dyn_cast_or_null<GlobalVariable>(getNamedValue(Name)))
     if (AllowLocal || !Result->hasLocalLinkage())

@@ -7,8 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/ExecutionEngine/Orc/RawByteChannel.h"
 #include "llvm/ExecutionEngine/Orc/RPCUtils.h"
+#include "QueueChannel.h"
 #include "gtest/gtest.h"
 
 #include <queue>
@@ -16,47 +16,6 @@
 using namespace llvm;
 using namespace llvm::orc;
 using namespace llvm::orc::rpc;
-
-class Queue : public std::queue<char> {
-public:
-  std::mutex &getMutex() { return M; }
-  std::condition_variable &getCondVar() { return CV; }
-private:
-  std::mutex M;
-  std::condition_variable CV;
-};
-
-class QueueChannel : public RawByteChannel {
-public:
-  QueueChannel(Queue &InQueue, Queue &OutQueue)
-      : InQueue(InQueue), OutQueue(OutQueue) {}
-
-  Error readBytes(char *Dst, unsigned Size) override {
-    std::unique_lock<std::mutex> Lock(InQueue.getMutex());
-    while (Size) {
-      while (InQueue.empty())
-        InQueue.getCondVar().wait(Lock);
-      *Dst++ = InQueue.front();
-      --Size;
-      InQueue.pop();
-    }
-    return Error::success();
-  }
-
-  Error appendBytes(const char *Src, unsigned Size) override {
-    std::unique_lock<std::mutex> Lock(OutQueue.getMutex());
-    while (Size--)
-      OutQueue.push(*Src++);
-    OutQueue.getCondVar().notify_one();
-    return Error::success();
-  }
-
-  Error send() override { return Error::success(); }
-
-private:
-  Queue &InQueue;
-  Queue &OutQueue;
-};
 
 class RPCFoo {};
 
@@ -87,6 +46,54 @@ namespace rpc {
 } // end namespace llvm
 
 class RPCBar {};
+
+class DummyError : public ErrorInfo<DummyError> {
+public:
+
+  static char ID;
+
+  DummyError(uint32_t Val) : Val(Val) {}
+
+  std::error_code convertToErrorCode() const override {
+    // Use a nonsense error code - we want to verify that errors
+    // transmitted over the network are replaced with
+    // OrcErrorCode::UnknownErrorCodeFromRemote.
+    return orcError(OrcErrorCode::RemoteAllocatorDoesNotExist);
+  }
+
+  void log(raw_ostream &OS) const override {
+    OS << "Dummy error " << Val;
+  }
+
+  uint32_t getValue() const { return Val; }
+
+public:
+  uint32_t Val;
+};
+
+char DummyError::ID = 0;
+
+template <typename ChannelT>
+void registerDummyErrorSerialization() {
+  static bool AlreadyRegistered = false;
+  if (!AlreadyRegistered) {
+    SerializationTraits<ChannelT, Error>::
+      template registerErrorType<DummyError>(
+        "DummyError",
+        [](ChannelT &C, const DummyError &DE) {
+          return serializeSeq(C, DE.getValue());
+        },
+        [](ChannelT &C, Error &Err) -> Error {
+          ErrorAsOutParameter EAO(&Err);
+          uint32_t Val;
+          if (auto Err = deserializeSeq(C, Val))
+            return Err;
+          Err = make_error<DummyError>(Val);
+          return Error::success();
+        });
+    AlreadyRegistered = true;
+  }
+}
 
 namespace llvm {
 namespace orc {
@@ -139,14 +146,22 @@ namespace DummyRPCAPI {
     static const char* getName() { return "CustomType"; }
   };
 
+  class ErrorFunc : public Function<ErrorFunc, Error()> {
+  public:
+    static const char* getName() { return "ErrorFunc"; }
+  };
+
+  class ExpectedFunc : public Function<ExpectedFunc, Expected<uint32_t>()> {
+  public:
+    static const char* getName() { return "ExpectedFunc"; }
+  };
+
 }
 
 class DummyRPCEndpoint : public SingleThreadedRPCEndpoint<QueueChannel> {
 public:
-  DummyRPCEndpoint(Queue &Q1, Queue &Q2)
-      : SingleThreadedRPCEndpoint(C, true), C(Q1, Q2) {}
-private:
-  QueueChannel C;
+  DummyRPCEndpoint(QueueChannel &C)
+      : SingleThreadedRPCEndpoint(C, true) {}
 };
 
 
@@ -154,15 +169,15 @@ void freeVoidBool(bool B) {
 }
 
 TEST(DummyRPC, TestFreeFunctionHandler) {
-  Queue Q1, Q2;
-  DummyRPCEndpoint Server(Q2, Q1);
+  auto Channels = createPairedQueueChannels();
+  DummyRPCEndpoint Server(*Channels.first);
   Server.addHandler<DummyRPCAPI::VoidBool>(freeVoidBool);
 }
 
 TEST(DummyRPC, TestCallAsyncVoidBool) {
-  Queue Q1, Q2;
-  DummyRPCEndpoint Client(Q1, Q2);
-  DummyRPCEndpoint Server(Q2, Q1);
+  auto Channels = createPairedQueueChannels();
+  DummyRPCEndpoint Client(*Channels.first);
+  DummyRPCEndpoint Server(*Channels.second);
 
   std::thread ServerThread([&]() {
       Server.addHandler<DummyRPCAPI::VoidBool>(
@@ -204,9 +219,9 @@ TEST(DummyRPC, TestCallAsyncVoidBool) {
 }
 
 TEST(DummyRPC, TestCallAsyncIntInt) {
-  Queue Q1, Q2;
-  DummyRPCEndpoint Client(Q1, Q2);
-  DummyRPCEndpoint Server(Q2, Q1);
+  auto Channels = createPairedQueueChannels();
+  DummyRPCEndpoint Client(*Channels.first);
+  DummyRPCEndpoint Server(*Channels.second);
 
   std::thread ServerThread([&]() {
       Server.addHandler<DummyRPCAPI::IntInt>(
@@ -249,9 +264,9 @@ TEST(DummyRPC, TestCallAsyncIntInt) {
 }
 
 TEST(DummyRPC, TestAsyncIntIntHandler) {
-  Queue Q1, Q2;
-  DummyRPCEndpoint Client(Q1, Q2);
-  DummyRPCEndpoint Server(Q2, Q1);
+  auto Channels = createPairedQueueChannels();
+  DummyRPCEndpoint Client(*Channels.first);
+  DummyRPCEndpoint Server(*Channels.second);
 
   std::thread ServerThread([&]() {
       Server.addAsyncHandler<DummyRPCAPI::IntInt>(
@@ -295,9 +310,9 @@ TEST(DummyRPC, TestAsyncIntIntHandler) {
 }
 
 TEST(DummyRPC, TestAsyncIntIntHandlerMethod) {
-  Queue Q1, Q2;
-  DummyRPCEndpoint Client(Q1, Q2);
-  DummyRPCEndpoint Server(Q2, Q1);
+  auto Channels = createPairedQueueChannels();
+  DummyRPCEndpoint Client(*Channels.first);
+  DummyRPCEndpoint Server(*Channels.second);
 
   class Dummy {
   public:
@@ -346,9 +361,9 @@ TEST(DummyRPC, TestAsyncIntIntHandlerMethod) {
 }
 
 TEST(DummyRPC, TestCallAsyncVoidString) {
-  Queue Q1, Q2;
-  DummyRPCEndpoint Client(Q1, Q2);
-  DummyRPCEndpoint Server(Q2, Q1);
+  auto Channels = createPairedQueueChannels();
+  DummyRPCEndpoint Client(*Channels.first);
+  DummyRPCEndpoint Server(*Channels.second);
 
   std::thread ServerThread([&]() {
       Server.addHandler<DummyRPCAPI::VoidString>(
@@ -386,9 +401,9 @@ TEST(DummyRPC, TestCallAsyncVoidString) {
 }
 
 TEST(DummyRPC, TestSerialization) {
-  Queue Q1, Q2;
-  DummyRPCEndpoint Client(Q1, Q2);
-  DummyRPCEndpoint Server(Q2, Q1);
+  auto Channels = createPairedQueueChannels();
+  DummyRPCEndpoint Client(*Channels.first);
+  DummyRPCEndpoint Server(*Channels.second);
 
   std::thread ServerThread([&]() {
       Server.addHandler<DummyRPCAPI::AllTheTypes>(
@@ -451,9 +466,9 @@ TEST(DummyRPC, TestSerialization) {
 }
 
 TEST(DummyRPC, TestCustomType) {
-  Queue Q1, Q2;
-  DummyRPCEndpoint Client(Q1, Q2);
-  DummyRPCEndpoint Server(Q2, Q1);
+  auto Channels = createPairedQueueChannels();
+  DummyRPCEndpoint Client(*Channels.first);
+  DummyRPCEndpoint Server(*Channels.second);
 
   std::thread ServerThread([&]() {
       Server.addHandler<DummyRPCAPI::CustomType>(
@@ -494,9 +509,9 @@ TEST(DummyRPC, TestCustomType) {
 }
 
 TEST(DummyRPC, TestWithAltCustomType) {
-  Queue Q1, Q2;
-  DummyRPCEndpoint Client(Q1, Q2);
-  DummyRPCEndpoint Server(Q2, Q1);
+  auto Channels = createPairedQueueChannels();
+  DummyRPCEndpoint Client(*Channels.first);
+  DummyRPCEndpoint Server(*Channels.second);
 
   std::thread ServerThread([&]() {
       Server.addHandler<DummyRPCAPI::CustomType>(
@@ -536,10 +551,144 @@ TEST(DummyRPC, TestWithAltCustomType) {
   ServerThread.join();
 }
 
+TEST(DummyRPC, ReturnErrorSuccess) {
+  registerDummyErrorSerialization<QueueChannel>();
+
+  auto Channels = createPairedQueueChannels();
+  DummyRPCEndpoint Client(*Channels.first);
+  DummyRPCEndpoint Server(*Channels.second);
+
+  std::thread ServerThread([&]() {
+      Server.addHandler<DummyRPCAPI::ErrorFunc>(
+        []() {
+          return Error::success();
+        });
+
+      // Handle the negotiate plus one call.
+      for (unsigned I = 0; I != 2; ++I)
+        cantFail(Server.handleOne());
+    });
+
+  cantFail(Client.callAsync<DummyRPCAPI::ErrorFunc>(
+             [&](Error Err) {
+               EXPECT_FALSE(!!Err) << "Expected success value";
+               return Error::success();
+             }));
+
+  cantFail(Client.handleOne());
+
+  ServerThread.join();
+}
+
+TEST(DummyRPC, ReturnErrorFailure) {
+  registerDummyErrorSerialization<QueueChannel>();
+
+  auto Channels = createPairedQueueChannels();
+  DummyRPCEndpoint Client(*Channels.first);
+  DummyRPCEndpoint Server(*Channels.second);
+
+  std::thread ServerThread([&]() {
+      Server.addHandler<DummyRPCAPI::ErrorFunc>(
+        []() {
+          return make_error<DummyError>(42);
+        });
+
+      // Handle the negotiate plus one call.
+      for (unsigned I = 0; I != 2; ++I)
+        cantFail(Server.handleOne());
+    });
+
+  cantFail(Client.callAsync<DummyRPCAPI::ErrorFunc>(
+             [&](Error Err) {
+               EXPECT_TRUE(Err.isA<DummyError>())
+                 << "Incorrect error type";
+               return handleErrors(
+                        std::move(Err),
+                        [](const DummyError &DE) {
+                          EXPECT_EQ(DE.getValue(), 42ULL)
+                            << "Incorrect DummyError serialization";
+                        });
+             }));
+
+  cantFail(Client.handleOne());
+
+  ServerThread.join();
+}
+
+TEST(DummyRPC, ReturnExpectedSuccess) {
+  registerDummyErrorSerialization<QueueChannel>();
+
+  auto Channels = createPairedQueueChannels();
+  DummyRPCEndpoint Client(*Channels.first);
+  DummyRPCEndpoint Server(*Channels.second);
+
+  std::thread ServerThread([&]() {
+      Server.addHandler<DummyRPCAPI::ExpectedFunc>(
+        []() -> uint32_t {
+          return 42;
+        });
+
+      // Handle the negotiate plus one call.
+      for (unsigned I = 0; I != 2; ++I)
+        cantFail(Server.handleOne());
+    });
+
+  cantFail(Client.callAsync<DummyRPCAPI::ExpectedFunc>(
+               [&](Expected<uint32_t> ValOrErr) {
+                 EXPECT_TRUE(!!ValOrErr)
+                   << "Expected success value";
+                 EXPECT_EQ(*ValOrErr, 42ULL)
+                   << "Incorrect Expected<uint32_t> deserialization";
+                 return Error::success();
+               }));
+
+  cantFail(Client.handleOne());
+
+  ServerThread.join();
+}
+
+TEST(DummyRPC, ReturnExpectedFailure) {
+  registerDummyErrorSerialization<QueueChannel>();
+
+  auto Channels = createPairedQueueChannels();
+  DummyRPCEndpoint Client(*Channels.first);
+  DummyRPCEndpoint Server(*Channels.second);
+
+  std::thread ServerThread([&]() {
+      Server.addHandler<DummyRPCAPI::ExpectedFunc>(
+        []() -> Expected<uint32_t> {
+          return make_error<DummyError>(7);
+        });
+
+      // Handle the negotiate plus one call.
+      for (unsigned I = 0; I != 2; ++I)
+        cantFail(Server.handleOne());
+    });
+
+  cantFail(Client.callAsync<DummyRPCAPI::ExpectedFunc>(
+               [&](Expected<uint32_t> ValOrErr) {
+                 EXPECT_FALSE(!!ValOrErr)
+                   << "Expected failure value";
+                 auto Err = ValOrErr.takeError();
+                 EXPECT_TRUE(Err.isA<DummyError>())
+                   << "Incorrect error type";
+                 return handleErrors(
+                          std::move(Err),
+                          [](const DummyError &DE) {
+                            EXPECT_EQ(DE.getValue(), 7ULL)
+                              << "Incorrect DummyError serialization";
+                          });
+               }));
+
+  cantFail(Client.handleOne());
+
+  ServerThread.join();
+}
+
 TEST(DummyRPC, TestParallelCallGroup) {
-  Queue Q1, Q2;
-  DummyRPCEndpoint Client(Q1, Q2);
-  DummyRPCEndpoint Server(Q2, Q1);
+  auto Channels = createPairedQueueChannels();
+  DummyRPCEndpoint Client(*Channels.first);
+  DummyRPCEndpoint Server(*Channels.second);
 
   std::thread ServerThread([&]() {
       Server.addHandler<DummyRPCAPI::IntInt>(
@@ -619,9 +768,9 @@ TEST(DummyRPC, TestAPICalls) {
   static_assert(!DummyCalls1::Contains<DummyRPCAPI::CustomType>::value,
                 "Contains<Func> template should return false here");
 
-  Queue Q1, Q2;
-  DummyRPCEndpoint Client(Q1, Q2);
-  DummyRPCEndpoint Server(Q2, Q1);
+  auto Channels = createPairedQueueChannels();
+  DummyRPCEndpoint Client(*Channels.first);
+  DummyRPCEndpoint Server(*Channels.second);
 
   std::thread ServerThread(
     [&]() {
@@ -647,18 +796,18 @@ TEST(DummyRPC, TestAPICalls) {
 
   {
     auto Err = DummyCallsAll::negotiate(Client);
-    EXPECT_EQ(errorToErrorCode(std::move(Err)).value(),
-              static_cast<int>(OrcErrorCode::UnknownRPCFunction))
-      << "Expected 'UnknownRPCFunction' error for attempted negotiate of "
+    EXPECT_TRUE(Err.isA<CouldNotNegotiate>())
+      << "Expected CouldNotNegotiate error for attempted negotiate of "
          "unsupported function";
+    consumeError(std::move(Err));
   }
 
   ServerThread.join();
 }
 
 TEST(DummyRPC, TestRemoveHandler) {
-  Queue Q1, Q2;
-  DummyRPCEndpoint Server(Q1, Q2);
+  auto Channels = createPairedQueueChannels();
+  DummyRPCEndpoint Server(*Channels.second);
 
   Server.addHandler<DummyRPCAPI::VoidBool>(
     [](bool B) {
@@ -670,8 +819,8 @@ TEST(DummyRPC, TestRemoveHandler) {
 }
 
 TEST(DummyRPC, TestClearHandlers) {
-  Queue Q1, Q2;
-  DummyRPCEndpoint Server(Q1, Q2);
+  auto Channels = createPairedQueueChannels();
+  DummyRPCEndpoint Server(*Channels.second);
 
   Server.addHandler<DummyRPCAPI::VoidBool>(
     [](bool B) {

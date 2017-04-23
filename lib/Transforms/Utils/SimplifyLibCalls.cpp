@@ -819,7 +819,7 @@ static Value *emitCalloc(Value *Num, Value *Size, const AttributeList &Attrs,
   const DataLayout &DL = M->getDataLayout();
   IntegerType *PtrType = DL.getIntPtrType((B.GetInsertBlock()->getContext()));
   Value *Calloc = M->getOrInsertFunction("calloc", Attrs, B.getInt8PtrTy(),
-                                         PtrType, PtrType, nullptr);
+                                         PtrType, PtrType);
   CallInst *CI = B.CreateCall(Calloc, { Num, Size }, "calloc");
 
   if (const auto *F = dyn_cast<Function>(Calloc->stripPointerCasts()))
@@ -1219,7 +1219,7 @@ Value *LibCallSimplifier::optimizeExp2(CallInst *CI, IRBuilder<> &B) {
       Module *M = CI->getModule();
       Value *NewCallee =
           M->getOrInsertFunction(TLI->getName(LdExp), Op->getType(),
-                                 Op->getType(), B.getInt32Ty(), nullptr);
+                                 Op->getType(), B.getInt32Ty());
       CallInst *CI = B.CreateCall(NewCallee, {One, LdExpArg});
       if (const Function *F = dyn_cast<Function>(Callee->stripPointerCasts()))
         CI->setCallingConv(F->getCallingConv());
@@ -1443,7 +1443,7 @@ static void insertSinCosCall(IRBuilder<> &B, Function *OrigCallee, Value *Arg,
 
   Module *M = OrigCallee->getParent();
   Value *Callee = M->getOrInsertFunction(Name, OrigCallee->getAttributes(),
-                                         ResTy, ArgTy, nullptr);
+                                         ResTy, ArgTy);
 
   if (Instruction *ArgInst = dyn_cast<Instruction>(Arg)) {
     // If the argument is an instruction, it must dominate all uses so put our
@@ -2160,8 +2160,9 @@ Value *LibCallSimplifier::optimizeCall(CallInst *CI) {
     case LibFunc_round:
       return replaceUnaryCall(CI, Builder, Intrinsic::round);
     case LibFunc_nearbyint:
-    case LibFunc_rint:
       return replaceUnaryCall(CI, Builder, Intrinsic::nearbyint);
+    case LibFunc_rint:
+      return replaceUnaryCall(CI, Builder, Intrinsic::rint);
     case LibFunc_trunc:
       return replaceUnaryCall(CI, Builder, Intrinsic::trunc);
     case LibFunc_acos:

@@ -1348,6 +1348,14 @@ template <typename Val_t> inline Signum_match<Val_t> m_Signum(const Val_t &V) {
 // Matchers for two-operands operators with the operators in either order
 //
 
+/// \brief Matches a BinaryOperator with LHS and RHS in either order.
+template<typename LHS, typename RHS>
+inline match_combine_or<AnyBinaryOp_match<LHS, RHS>,
+                        AnyBinaryOp_match<RHS, LHS>>
+m_c_BinOp(const LHS &L, const RHS &R) {
+  return m_CombineOr(m_BinOp(L, R), m_BinOp(R, L));
+}
+
 /// \brief Matches an ICmp with a predicate over LHS and RHS in either order.
 /// Does not swap the predicate.
 template<typename LHS, typename RHS>
@@ -1355,6 +1363,22 @@ inline match_combine_or<CmpClass_match<LHS, RHS, ICmpInst, ICmpInst::Predicate>,
                         CmpClass_match<RHS, LHS, ICmpInst, ICmpInst::Predicate>>
 m_c_ICmp(ICmpInst::Predicate &Pred, const LHS &L, const RHS &R) {
   return m_CombineOr(m_ICmp(Pred, L, R), m_ICmp(Pred, R, L));
+}
+
+/// \brief Matches a Add with LHS and RHS in either order.
+template<typename LHS, typename RHS>
+inline match_combine_or<BinaryOp_match<LHS, RHS, Instruction::Add>,
+                        BinaryOp_match<RHS, LHS, Instruction::Add>>
+m_c_Add(const LHS &L, const RHS &R) {
+  return m_CombineOr(m_Add(L, R), m_Add(R, L));
+}
+
+/// \brief Matches a Mul with LHS and RHS in either order.
+template<typename LHS, typename RHS>
+inline match_combine_or<BinaryOp_match<LHS, RHS, Instruction::Mul>,
+                        BinaryOp_match<RHS, LHS, Instruction::Mul>>
+m_c_Mul(const LHS &L, const RHS &R) {
+  return m_CombineOr(m_Mul(L, R), m_Mul(R, L));
 }
 
 /// \brief Matches an And with LHS and RHS in either order.

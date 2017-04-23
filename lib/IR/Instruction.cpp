@@ -60,12 +60,6 @@ const Module *Instruction::getModule() const {
   return getParent()->getModule();
 }
 
-Module *Instruction::getModule() {
-  return getParent()->getModule();
-}
-
-Function *Instruction::getFunction() { return getParent()->getParent(); }
-
 const Function *Instruction::getFunction() const {
   return getParent()->getParent();
 }
@@ -208,6 +202,11 @@ bool Instruction::hasNoSignedZeros() const {
 bool Instruction::hasAllowReciprocal() const {
   assert(isa<FPMathOperator>(this) && "getting fast-math flag on invalid op");
   return cast<FPMathOperator>(this)->hasAllowReciprocal();
+}
+
+bool Instruction::hasAllowContract() const {
+  assert(isa<FPMathOperator>(this) && "getting fast-math flag on invalid op");
+  return cast<FPMathOperator>(this)->hasAllowContract();
 }
 
 FastMathFlags Instruction::getFastMathFlags() const {
@@ -543,17 +542,6 @@ bool Instruction::mayThrow() const {
   if (const auto *CatchSwitch = dyn_cast<CatchSwitchInst>(this))
     return CatchSwitch->unwindsToCaller();
   return isa<ResumeInst>(this);
-}
-
-/// Return true if the instruction is associative:
-///
-///   Associative operators satisfy:  x op (y op z) === (x op y) op z
-///
-/// In LLVM, the Add, Mul, And, Or, and Xor operators are associative.
-///
-bool Instruction::isAssociative(unsigned Opcode) {
-  return Opcode == And || Opcode == Or || Opcode == Xor ||
-         Opcode == Add || Opcode == Mul;
 }
 
 bool Instruction::isAssociative() const {

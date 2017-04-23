@@ -32,7 +32,36 @@ using namespace llvm;
 static cl::opt<unsigned> UnrollThresholdPrivate(
   "amdgpu-unroll-threshold-private",
   cl::desc("Unroll threshold for AMDGPU if private memory used in a loop"),
-  cl::init(2000), cl::Hidden);
+  cl::init(2500), cl::Hidden);
+
+static cl::opt<unsigned> UnrollThresholdLocal(
+  "amdgpu-unroll-threshold-local",
+  cl::desc("Unroll threshold for AMDGPU if local memory used in a loop"),
+  cl::init(1000), cl::Hidden);
+
+static cl::opt<unsigned> UnrollThresholdIf(
+  "amdgpu-unroll-threshold-if",
+  cl::desc("Unroll threshold increment for AMDGPU for each if statement inside loop"),
+  cl::init(150), cl::Hidden);
+
+static bool dependsOnLocalPhi(const Loop *L, const Value *Cond,
+                              unsigned Depth = 0) {
+  const Instruction *I = dyn_cast<Instruction>(Cond);
+  if (!I)
+    return false;
+
+  for (const Value *V : I->operand_values()) {
+    if (!L->contains(I))
+      continue;
+    if (const PHINode *PHI = dyn_cast<PHINode>(V)) {
+      if (none_of(L->getSubLoops(), [PHI](const Loop* SubLoop) {
+                  return SubLoop->contains(PHI); }))
+        return true;
+    } else if (Depth < 10 && dependsOnLocalPhi(L, V, Depth+1))
+      return true;
+  }
+  return false;
+}
 
 void AMDGPUTTIImpl::getUnrollingPreferences(Loop *L,
                                             TTI::UnrollingPreferences &UP) {
@@ -44,50 +73,113 @@ void AMDGPUTTIImpl::getUnrollingPreferences(Loop *L,
 
   // Maximum alloca size than can fit registers. Reserve 16 registers.
   const unsigned MaxAlloca = (256 - 16) * 4;
+  unsigned ThresholdPrivate = UnrollThresholdPrivate;
+  unsigned ThresholdLocal = UnrollThresholdLocal;
+  unsigned MaxBoost = std::max(ThresholdPrivate, ThresholdLocal);
+  AMDGPUAS ASST = ST->getAMDGPUAS();
   for (const BasicBlock *BB : L->getBlocks()) {
     const DataLayout &DL = BB->getModule()->getDataLayout();
+    unsigned LocalGEPsSeen = 0;
+
+    if (any_of(L->getSubLoops(), [BB](const Loop* SubLoop) {
+               return SubLoop->contains(BB); }))
+        continue; // Block belongs to an inner loop.
+
     for (const Instruction &I : *BB) {
+
+      // Unroll a loop which contains an "if" statement whose condition
+      // defined by a PHI belonging to the loop. This may help to eliminate
+      // if region and potentially even PHI itself, saving on both divergence
+      // and registers used for the PHI.
+      // Add a small bonus for each of such "if" statements.
+      if (const BranchInst *Br = dyn_cast<BranchInst>(&I)) {
+        if (UP.Threshold < MaxBoost && Br->isConditional()) {
+          if (L->isLoopExiting(Br->getSuccessor(0)) ||
+              L->isLoopExiting(Br->getSuccessor(1)))
+            continue;
+          if (dependsOnLocalPhi(L, Br->getCondition())) {
+            UP.Threshold += UnrollThresholdIf;
+            DEBUG(dbgs() << "Set unroll threshold " << UP.Threshold
+                         << " for loop:\n" << *L << " due to " << *Br << '\n');
+            if (UP.Threshold >= MaxBoost)
+              return;
+          }
+        }
+        continue;
+      }
+
       const GetElementPtrInst *GEP = dyn_cast<GetElementPtrInst>(&I);
-      if (!GEP || GEP->getAddressSpace() != AMDGPUAS::PRIVATE_ADDRESS)
+      if (!GEP)
         continue;
 
-      const Value *Ptr = GEP->getPointerOperand();
-      const AllocaInst *Alloca =
-          dyn_cast<AllocaInst>(GetUnderlyingObject(Ptr, DL));
-      if (Alloca && Alloca->isStaticAlloca()) {
+      unsigned AS = GEP->getAddressSpace();
+      unsigned Threshold = 0;
+      if (AS == ASST.PRIVATE_ADDRESS)
+        Threshold = ThresholdPrivate;
+      else if (AS == ASST.LOCAL_ADDRESS)
+        Threshold = ThresholdLocal;
+      else
+        continue;
+
+      if (UP.Threshold >= Threshold)
+        continue;
+
+      if (AS == ASST.PRIVATE_ADDRESS) {
+        const Value *Ptr = GEP->getPointerOperand();
+        const AllocaInst *Alloca =
+            dyn_cast<AllocaInst>(GetUnderlyingObject(Ptr, DL));
+        if (!Alloca || !Alloca->isStaticAlloca())
+          continue;
         Type *Ty = Alloca->getAllocatedType();
         unsigned AllocaSize = Ty->isSized() ? DL.getTypeAllocSize(Ty) : 0;
         if (AllocaSize > MaxAlloca)
           continue;
+      } else if (AS == ASST.LOCAL_ADDRESS) {
+        LocalGEPsSeen++;
+        // Inhibit unroll for local memory if we have seen addressing not to
+        // a variable, most likely we will be unable to combine it.
+        // Do not unroll too deep inner loops for local memory to give a chance
+        // to unroll an outer loop for a more important reason.
+        if (LocalGEPsSeen > 1 || L->getLoopDepth() > 2 ||
+            (!isa<GlobalVariable>(GEP->getPointerOperand()) &&
+             !isa<Argument>(GEP->getPointerOperand())))
+          continue;
+      }
 
-        // Check if GEP depends on a value defined by this loop itself.
-        bool HasLoopDef = false;
-        for (const Value *Op : GEP->operands()) {
-          const Instruction *Inst = dyn_cast<Instruction>(Op);
-          if (!Inst || L->isLoopInvariant(Op))
-            continue;
-          if (any_of(L->getSubLoops(), [Inst](const Loop* SubLoop) {
-               return SubLoop->contains(Inst); }))
-            continue;
-          HasLoopDef = true;
-          break;
-        }
-        if (!HasLoopDef)
+      // Check if GEP depends on a value defined by this loop itself.
+      bool HasLoopDef = false;
+      for (const Value *Op : GEP->operands()) {
+        const Instruction *Inst = dyn_cast<Instruction>(Op);
+        if (!Inst || L->isLoopInvariant(Op))
           continue;
 
-        // We want to do whatever we can to limit the number of alloca
-        // instructions that make it through to the code generator.  allocas
-        // require us to use indirect addressing, which is slow and prone to
-        // compiler bugs.  If this loop does an address calculation on an
-        // alloca ptr, then we want to use a higher than normal loop unroll
-        // threshold. This will give SROA a better chance to eliminate these
-        // allocas.
-        //
-        // Don't use the maximum allowed value here as it will make some
-        // programs way too big.
-        UP.Threshold = UnrollThresholdPrivate;
-        return;
+        if (any_of(L->getSubLoops(), [Inst](const Loop* SubLoop) {
+             return SubLoop->contains(Inst); }))
+          continue;
+        HasLoopDef = true;
+        break;
       }
+      if (!HasLoopDef)
+        continue;
+
+      // We want to do whatever we can to limit the number of alloca
+      // instructions that make it through to the code generator.  allocas
+      // require us to use indirect addressing, which is slow and prone to
+      // compiler bugs.  If this loop does an address calculation on an
+      // alloca ptr, then we want to use a higher than normal loop unroll
+      // threshold. This will give SROA a better chance to eliminate these
+      // allocas.
+      //
+      // We also want to have more unrolling for local memory to let ds
+      // instructions with different offsets combine.
+      //
+      // Don't use the maximum allowed value here as it will make some
+      // programs way too big.
+      UP.Threshold = Threshold;
+      DEBUG(dbgs() << "Set unroll threshold " << Threshold << " for loop:\n"
+                   << *L << " due to " << *GEP << '\n');
+      if (UP.Threshold >= MaxBoost)
+        return;
     }
   }
 }
@@ -108,25 +200,24 @@ unsigned AMDGPUTTIImpl::getRegisterBitWidth(bool Vector) {
 }
 
 unsigned AMDGPUTTIImpl::getLoadStoreVecRegBitWidth(unsigned AddrSpace) const {
-  switch (AddrSpace) {
-  case AMDGPUAS::GLOBAL_ADDRESS:
-  case AMDGPUAS::CONSTANT_ADDRESS:
-  case AMDGPUAS::FLAT_ADDRESS:
+  AMDGPUAS AS = ST->getAMDGPUAS();
+  if (AddrSpace == AS.GLOBAL_ADDRESS ||
+      AddrSpace == AS.CONSTANT_ADDRESS ||
+      AddrSpace == AS.FLAT_ADDRESS)
     return 128;
-  case AMDGPUAS::LOCAL_ADDRESS:
-  case AMDGPUAS::REGION_ADDRESS:
+  if (AddrSpace == AS.LOCAL_ADDRESS ||
+      AddrSpace == AS.REGION_ADDRESS)
     return 64;
-  case AMDGPUAS::PRIVATE_ADDRESS:
+  if (AddrSpace == AS.PRIVATE_ADDRESS)
     return 8 * ST->getMaxPrivateElementSize();
-  default:
-    if (ST->getGeneration() <= AMDGPUSubtarget::NORTHERN_ISLANDS &&
-        (AddrSpace == AMDGPUAS::PARAM_D_ADDRESS ||
-         AddrSpace == AMDGPUAS::PARAM_I_ADDRESS ||
-         (AddrSpace >= AMDGPUAS::CONSTANT_BUFFER_0 &&
-          AddrSpace <= AMDGPUAS::CONSTANT_BUFFER_15)))
-      return 128;
-    llvm_unreachable("unhandled address space");
-  }
+
+  if (ST->getGeneration() <= AMDGPUSubtarget::NORTHERN_ISLANDS &&
+      (AddrSpace == AS.PARAM_D_ADDRESS ||
+      AddrSpace == AS.PARAM_I_ADDRESS ||
+      (AddrSpace >= AS.CONSTANT_BUFFER_0 &&
+      AddrSpace <= AS.CONSTANT_BUFFER_15)))
+    return 128;
+  llvm_unreachable("unhandled address space");
 }
 
 bool AMDGPUTTIImpl::isLegalToVectorizeMemChain(unsigned ChainSizeInBytes,
@@ -135,7 +226,7 @@ bool AMDGPUTTIImpl::isLegalToVectorizeMemChain(unsigned ChainSizeInBytes,
   // We allow vectorization of flat stores, even though we may need to decompose
   // them later if they may access private memory. We don't have enough context
   // here, and legalization can handle it.
-  if (AddrSpace == AMDGPUAS::PRIVATE_ADDRESS) {
+  if (AddrSpace == ST->getAMDGPUAS().PRIVATE_ADDRESS) {
     return (Alignment >= 4 || ST->hasUnalignedScratchAccess()) &&
       ChainSizeInBytes <= ST->getMaxPrivateElementSize();
   }
@@ -335,16 +426,23 @@ static bool isArgPassedInSGPR(const Argument *A) {
   const Function *F = A->getParent();
 
   // Arguments to compute shaders are never a source of divergence.
-  if (!AMDGPU::isShader(F->getCallingConv()))
+  CallingConv::ID CC = F->getCallingConv();
+  switch (CC) {
+  case CallingConv::AMDGPU_KERNEL:
+  case CallingConv::SPIR_KERNEL:
     return true;
-
-  // For non-compute shaders, SGPR inputs are marked with either inreg or byval.
-  if (F->getAttributes().hasAttribute(A->getArgNo() + 1, Attribute::InReg) ||
-      F->getAttributes().hasAttribute(A->getArgNo() + 1, Attribute::ByVal))
-    return true;
-
-  // Everything else is in VGPRs.
-  return false;
+  case CallingConv::AMDGPU_VS:
+  case CallingConv::AMDGPU_GS:
+  case CallingConv::AMDGPU_PS:
+  case CallingConv::AMDGPU_CS:
+    // For non-compute shaders, SGPR inputs are marked with either inreg or byval.
+    // Everything else is in VGPRs.
+    return F->getAttributes().hasParamAttribute(A->getArgNo(), Attribute::InReg) ||
+           F->getAttributes().hasParamAttribute(A->getArgNo(), Attribute::ByVal);
+  default:
+    // TODO: Should calls support inreg for SGPR inputs?
+    return false;
+  }
 }
 
 ///
@@ -362,7 +460,7 @@ bool AMDGPUTTIImpl::isSourceOfDivergence(const Value *V) const {
   // All other loads are not divergent, because if threads issue loads with the
   // same arguments, they will always get the same result.
   if (const LoadInst *Load = dyn_cast<LoadInst>(V))
-    return Load->getPointerAddressSpace() == AMDGPUAS::PRIVATE_ADDRESS;
+    return Load->getPointerAddressSpace() == ST->getAMDGPUAS().PRIVATE_ADDRESS;
 
   // Atomics are divergent because they are executed sequentially: when an
   // atomic operation refers to the same address in each thread, then each

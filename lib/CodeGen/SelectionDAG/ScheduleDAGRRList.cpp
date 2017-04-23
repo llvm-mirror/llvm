@@ -422,11 +422,9 @@ static bool IsChainDependent(SDNode *Outer, SDNode *Inner,
     }
     // Check for a lowered CALLSEQ_BEGIN or CALLSEQ_END.
     if (N->isMachineOpcode()) {
-      if (N->getMachineOpcode() ==
-          (unsigned)TII->getCallFrameDestroyOpcode()) {
+      if (N->getMachineOpcode() == TII->getCallFrameDestroyOpcode()) {
         ++NestLevel;
-      } else if (N->getMachineOpcode() ==
-                 (unsigned)TII->getCallFrameSetupOpcode()) {
+      } else if (N->getMachineOpcode() == TII->getCallFrameSetupOpcode()) {
         if (NestLevel == 0)
           return false;
         --NestLevel;
@@ -480,12 +478,10 @@ FindCallSeqStart(SDNode *N, unsigned &NestLevel, unsigned &MaxNest,
     }
     // Check for a lowered CALLSEQ_BEGIN or CALLSEQ_END.
     if (N->isMachineOpcode()) {
-      if (N->getMachineOpcode() ==
-          (unsigned)TII->getCallFrameDestroyOpcode()) {
+      if (N->getMachineOpcode() == TII->getCallFrameDestroyOpcode()) {
         ++NestLevel;
         MaxNest = std::max(MaxNest, NestLevel);
-      } else if (N->getMachineOpcode() ==
-                 (unsigned)TII->getCallFrameSetupOpcode()) {
+      } else if (N->getMachineOpcode() == TII->getCallFrameSetupOpcode()) {
         assert(NestLevel != 0);
         --NestLevel;
         if (NestLevel == 0)
@@ -550,7 +546,7 @@ void ScheduleDAGRRList::ReleasePredecessors(SUnit *SU) {
   if (!LiveRegDefs[CallResource])
     for (SDNode *Node = SU->getNode(); Node; Node = Node->getGluedNode())
       if (Node->isMachineOpcode() &&
-          Node->getMachineOpcode() == (unsigned)TII->getCallFrameDestroyOpcode()) {
+          Node->getMachineOpcode() == TII->getCallFrameDestroyOpcode()) {
         unsigned NestLevel = 0;
         unsigned MaxNest = 0;
         SDNode *N = FindCallSeqStart(Node, NestLevel, MaxNest, TII);
@@ -755,7 +751,7 @@ void ScheduleDAGRRList::ScheduleNodeBottomUp(SUnit *SU) {
     for (const SDNode *SUNode = SU->getNode(); SUNode;
          SUNode = SUNode->getGluedNode()) {
       if (SUNode->isMachineOpcode() &&
-          SUNode->getMachineOpcode() == (unsigned)TII->getCallFrameSetupOpcode()) {
+          SUNode->getMachineOpcode() == TII->getCallFrameSetupOpcode()) {
         assert(NumLiveRegs > 0 && "NumLiveRegs is already zero!");
         --NumLiveRegs;
         LiveRegDefs[CallResource] = nullptr;
@@ -826,7 +822,7 @@ void ScheduleDAGRRList::UnscheduleNodeBottomUp(SUnit *SU) {
   for (const SDNode *SUNode = SU->getNode(); SUNode;
        SUNode = SUNode->getGluedNode()) {
     if (SUNode->isMachineOpcode() &&
-        SUNode->getMachineOpcode() == (unsigned)TII->getCallFrameSetupOpcode()) {
+        SUNode->getMachineOpcode() == TII->getCallFrameSetupOpcode()) {
       ++NumLiveRegs;
       LiveRegDefs[CallResource] = SU;
       LiveRegGens[CallResource] = CallSeqEndForStart[SU];
@@ -839,7 +835,7 @@ void ScheduleDAGRRList::UnscheduleNodeBottomUp(SUnit *SU) {
     for (const SDNode *SUNode = SU->getNode(); SUNode;
          SUNode = SUNode->getGluedNode()) {
       if (SUNode->isMachineOpcode() &&
-          SUNode->getMachineOpcode() == (unsigned)TII->getCallFrameDestroyOpcode()) {
+          SUNode->getMachineOpcode() == TII->getCallFrameDestroyOpcode()) {
         assert(NumLiveRegs > 0 && "NumLiveRegs is already zero!");
         --NumLiveRegs;
         LiveRegDefs[CallResource] = nullptr;
@@ -1305,7 +1301,8 @@ DelayForLiveRegsBottomUp(SUnit *SU, SmallVectorImpl<unsigned> &LRegs) {
     // If we're in the middle of scheduling a call, don't begin scheduling
     // another call. Also, don't allow any physical registers to be live across
     // the call.
-    if (Node->getMachineOpcode() == (unsigned)TII->getCallFrameDestroyOpcode()) {
+    if ((Node->getMachineOpcode() == TII->getCallFrameDestroyOpcode()) ||
+        (Node->getMachineOpcode() == TII->getCallFrameSetupOpcode())) {
       // Check the special calling-sequence resource.
       unsigned CallResource = TRI->getNumRegs();
       if (LiveRegDefs[CallResource]) {

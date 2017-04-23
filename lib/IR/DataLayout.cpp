@@ -174,6 +174,7 @@ void DataLayout::reset(StringRef Desc) {
 
   LayoutMap = nullptr;
   BigEndian = false;
+  AllocaAddrSpace = 0;
   StackNaturalAlign = 0;
   ManglingMode = MM_None;
   NonIntegralAddressSpaces.clear();
@@ -352,6 +353,12 @@ void DataLayout::parseSpecifier(StringRef Desc) {
       StackNaturalAlign = inBytes(getInt(Tok));
       break;
     }
+    case 'A': { // Default stack/alloca address space.
+      AllocaAddrSpace = getInt(Tok);
+      if (!isUInt<24>(AllocaAddrSpace))
+        report_fatal_error("Invalid address space, must be a 24bit integer");
+      break;
+    }
     case 'm':
       if (!Tok.empty())
         report_fatal_error("Unexpected trailing characters after mangling specifier in datalayout string");
@@ -394,6 +401,7 @@ void DataLayout::init(const Module *M) { *this = M->getDataLayout(); }
 
 bool DataLayout::operator==(const DataLayout &Other) const {
   bool Ret = BigEndian == Other.BigEndian &&
+             AllocaAddrSpace == Other.AllocaAddrSpace &&
              StackNaturalAlign == Other.StackNaturalAlign &&
              ManglingMode == Other.ManglingMode &&
              LegalIntWidths == Other.LegalIntWidths &&
@@ -600,11 +608,8 @@ unsigned DataLayout::getPointerSize(unsigned AS) const {
 unsigned DataLayout::getPointerTypeSizeInBits(Type *Ty) const {
   assert(Ty->isPtrOrPtrVectorTy() &&
          "This should only be called with a pointer or pointer vector type");
-
-  if (Ty->isPointerTy())
-    return getTypeSizeInBits(Ty);
-
-  return getTypeSizeInBits(Ty->getScalarType());
+  Ty = Ty->getScalarType();
+  return getPointerSizeInBits(cast<PointerType>(Ty)->getAddressSpace());
 }
 
 /*!
@@ -616,7 +621,7 @@ unsigned DataLayout::getPointerTypeSizeInBits(Type *Ty) const {
   == false) for the requested type \a Ty.
  */
 unsigned DataLayout::getAlignment(Type *Ty, bool abi_or_pref) const {
-  int AlignType = -1;
+  AlignTypeEnum AlignType;
 
   assert(Ty->isSized() && "Cannot getTypeInfo() on a type that is unsized!");
   switch (Ty->getTypeID()) {
@@ -665,8 +670,7 @@ unsigned DataLayout::getAlignment(Type *Ty, bool abi_or_pref) const {
     llvm_unreachable("Bad type for getAlignment!!!");
   }
 
-  return getAlignmentInfo((AlignTypeEnum)AlignType, getTypeSizeInBits(Ty),
-                          abi_or_pref, Ty);
+  return getAlignmentInfo(AlignType, getTypeSizeInBits(Ty), abi_or_pref, Ty);
 }
 
 unsigned DataLayout::getABITypeAlignment(Type *Ty) const {

@@ -1,4 +1,4 @@
-//===-- RecordStreamer.cpp - Record asm definde and used symbols ----------===//
+//===-- RecordStreamer.cpp - Record asm defined and used symbols ----------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -78,7 +78,7 @@ RecordStreamer::const_iterator RecordStreamer::end() { return Symbols.end(); }
 RecordStreamer::RecordStreamer(MCContext &Context) : MCStreamer(Context) {}
 
 void RecordStreamer::EmitInstruction(const MCInst &Inst,
-                                     const MCSubtargetInfo &STI) {
+                                     const MCSubtargetInfo &STI, bool) {
   MCStreamer::EmitInstruction(Inst, STI);
 }
 

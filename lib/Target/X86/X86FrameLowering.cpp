@@ -988,6 +988,16 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
         .getValueAsString()
         .getAsInteger(0, StackProbeSize);
 
+  // Re-align the stack on 64-bit if the x86-interrupt calling convention is
+  // used and an error code was pushed, since the x86-64 ABI requires a 16-byte
+  // stack alignment.
+  if (Fn->getCallingConv() == CallingConv::X86_INTR && Is64Bit &&
+      Fn->arg_size() == 2) {
+    StackSize += 8;
+    MFI.setStackSize(StackSize);
+    emitSPUpdate(MBB, MBBI, -8, /*InEpilogue=*/false);
+  }
+
   // If this is x86-64 and the Red Zone is not disabled, if we are a leaf
   // function, and use up to 128 bytes of stack space, don't have a frame
   // pointer, calls, or dynamic alloca then we do not need to adjust the
@@ -1688,21 +1698,18 @@ void X86FrameLowering::emitEpilogue(MachineFunction &MF,
   }
 }
 
-// NOTE: this only has a subset of the full frame index logic. In
-// particular, the FI < 0 and AfterFPPop logic is handled in
-// X86RegisterInfo::eliminateFrameIndex, but not here. Possibly
-// (probably?) it should be moved into here.
 int X86FrameLowering::getFrameIndexReference(const MachineFunction &MF, int FI,
                                              unsigned &FrameReg) const {
   const MachineFrameInfo &MFI = MF.getFrameInfo();
 
+  bool IsFixed = MFI.isFixedObjectIndex(FI);
   // We can't calculate offset from frame pointer if the stack is realigned,
   // so enforce usage of stack/base pointer.  The base pointer is used when we
   // have dynamic allocas in addition to dynamic realignment.
   if (TRI->hasBasePointer(MF))
-    FrameReg = TRI->getBaseRegister();
+    FrameReg = IsFixed ? TRI->getFramePtr() : TRI->getBaseRegister();
   else if (TRI->needsStackRealignment(MF))
-    FrameReg = TRI->getStackRegister();
+    FrameReg = IsFixed ? TRI->getFramePtr() : TRI->getStackRegister();
   else
     FrameReg = TRI->getFrameRegister(MF);
 
@@ -2616,8 +2623,8 @@ eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
   unsigned Opcode = I->getOpcode();
   bool isDestroy = Opcode == TII.getCallFrameDestroyOpcode();
   DebugLoc DL = I->getDebugLoc();
-  uint64_t Amount = !reserveCallFrame ? I->getOperand(0).getImm() : 0;
-  uint64_t InternalAmt = (isDestroy || Amount) ? I->getOperand(1).getImm() : 0;
+  uint64_t Amount = !reserveCallFrame ? TII.getFrameSize(*I) : 0;
+  uint64_t InternalAmt = (isDestroy || Amount) ? TII.getFrameAdjustment(*I) : 0;
   I = MBB.erase(I);
   auto InsertPos = skipDebugInstructionsForward(I, MBB.end());
 

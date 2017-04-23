@@ -539,8 +539,16 @@ private:
   Value *SimplifyDemandedUseBits(Value *V, APInt DemandedMask, APInt &KnownZero,
                                  APInt &KnownOne, unsigned Depth,
                                  Instruction *CxtI);
-  bool SimplifyDemandedBits(Use &U, const APInt &DemandedMask, APInt &KnownZero,
+  bool SimplifyDemandedBits(Instruction *I, unsigned Op,
+                            const APInt &DemandedMask, APInt &KnownZero,
                             APInt &KnownOne, unsigned Depth = 0);
+  /// Helper routine of SimplifyDemandedUseBits. It computes KnownZero/KnownOne
+  /// bits. It also tries to handle simplifications that can be done based on
+  /// DemandedMask, but without modifying the Instruction.
+  Value *SimplifyMultipleUseDemandedBits(Instruction *I,
+                                         const APInt &DemandedMask,
+                                         APInt &KnownZero, APInt &KnownOne,
+                                         unsigned Depth, Instruction *CxtI);
   /// Helper routine of SimplifyDemandedUseBits. It tries to simplify demanded
   /// bit for "r1 = shr x, c1; r2 = shl r1, c2" instruction sequence.
   Value *SimplifyShrShlDemandedBits(Instruction *Lsr, Instruction *Sftl,
@@ -561,7 +569,7 @@ private:
   /// Given a binary operator, cast instruction, or select which has a PHI node
   /// as operand #0, see if we can fold the instruction into the PHI (which is
   /// only possible if all operands to the PHI are constants).
-  Instruction *FoldOpIntoPhi(Instruction &I);
+  Instruction *foldOpIntoPhi(Instruction &I, PHINode *PN);
 
   /// Given an instruction with a select as one operand and a constant as the
   /// other operand, try to fold the binary operator into the select arguments.
@@ -570,7 +578,7 @@ private:
   Instruction *FoldOpIntoSelect(Instruction &Op, SelectInst *SI);
 
   /// This is a convenience wrapper function for the above two functions.
-  Instruction *foldOpWithConstantIntoOperand(Instruction &I);
+  Instruction *foldOpWithConstantIntoOperand(BinaryOperator &I);
 
   /// \brief Try to rotate an operation below a PHI node, using PHI nodes for
   /// its operands.
@@ -649,11 +657,9 @@ private:
                             SelectPatternFlavor SPF2, Value *C);
   Instruction *foldSelectInstWithICmp(SelectInst &SI, ICmpInst *ICI);
 
-  Instruction *OptAndOp(Instruction *Op, ConstantInt *OpRHS,
+  Instruction *OptAndOp(BinaryOperator *Op, ConstantInt *OpRHS,
                         ConstantInt *AndRHS, BinaryOperator &TheAnd);
 
-  Value *FoldLogicalPlusAnd(Value *LHS, Value *RHS, ConstantInt *Mask,
-                            bool isSub, Instruction &I);
   Value *insertRangeTest(Value *V, const APInt &Lo, const APInt &Hi,
                          bool isSigned, bool Inside);
   Instruction *PromoteCastOfAllocation(BitCastInst &CI, AllocaInst &AI);

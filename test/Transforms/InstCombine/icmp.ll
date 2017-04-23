@@ -1123,19 +1123,6 @@ define i1 @test68(i32 %x) {
   ret i1 %cmp
 }
 
-; PR14708
-define i1 @test69(i32 %c) {
-; CHECK-LABEL: @test69(
-; CHECK-NEXT:    [[TMP1:%.*]] = or i32 %c, 32
-; CHECK-NEXT:    [[TMP2:%.*]] = icmp eq i32 [[TMP1]], 97
-; CHECK-NEXT:    ret i1 [[TMP2]]
-;
-  %1 = icmp eq i32 %c, 97
-  %2 = icmp eq i32 %c, 65
-  %3 = or i1 %1, %2
-  ret i1 %3
-}
-
 ; PR15940
 define i1 @test70(i32 %X) {
 ; CHECK-LABEL: @test70(
@@ -1874,6 +1861,55 @@ define <2 x i1> @icmp_and_X_-16_ne-16_vec(<2 x i32> %X) {
   %and = and <2 x i32> %X, <i32 -16, i32 -16>
   %cmp = icmp ne <2 x i32> %and, <i32 -16, i32 -16>
   ret <2 x i1> %cmp
+}
+
+; PR32524: https://bugs.llvm.org/show_bug.cgi?id=32524
+; X | C == C --> X <=u C (when C+1 is PowerOf2).
+
+define i1 @or1_eq1(i32 %x) {
+; CHECK-LABEL: @or1_eq1(
+; CHECK-NEXT:    [[T1:%.*]] = icmp ult i32 %x, 2
+; CHECK-NEXT:    ret i1 [[T1]]
+;
+  %t0 = or i32 %x, 1
+  %t1 = icmp eq i32 %t0, 1
+  ret i1 %t1
+}
+
+; X | C == C --> X <=u C (when C+1 is PowerOf2).
+
+define <2 x i1> @or3_eq3_vec(<2 x i8> %x) {
+; CHECK-LABEL: @or3_eq3_vec(
+; CHECK-NEXT:    [[T1:%.*]] = icmp ult <2 x i8> %x, <i8 4, i8 4>
+; CHECK-NEXT:    ret <2 x i1> [[T1]]
+;
+  %t0 = or <2 x i8> %x, <i8 3, i8 3>
+  %t1 = icmp eq <2 x i8> %t0, <i8 3, i8 3>
+  ret <2 x i1> %t1
+}
+
+; X | C != C --> X >u C (when C+1 is PowerOf2).
+
+define i1 @or7_ne7(i32 %x) {
+; CHECK-LABEL: @or7_ne7(
+; CHECK-NEXT:    [[T1:%.*]] = icmp ugt i32 %x, 7
+; CHECK-NEXT:    ret i1 [[T1]]
+;
+  %t0 = or i32 %x, 7
+  %t1 = icmp ne i32 %t0, 7
+  ret i1 %t1
+}
+
+; X | C != C --> X >u C (when C+1 is PowerOf2).
+
+define <2 x i1> @or63_ne63_vec(<2 x i8> %x) {
+; CHECK-LABEL: @or63_ne63_vec(
+; CHECK-NEXT:    [[T1:%.*]] = icmp ugt <2 x i8> %x, <i8 63, i8 63>
+; CHECK-NEXT:    ret <2 x i1> [[T1]]
+;
+  %t0 = or <2 x i8> %x, <i8 63, i8 63>
+  %t1 = icmp ne <2 x i8> %t0, <i8 63, i8 63>
+  ret <2 x i1> %t1
 }
 
 define i1 @shrink_constant(i32 %X) {

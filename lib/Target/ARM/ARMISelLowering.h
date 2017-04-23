@@ -352,6 +352,7 @@ class InstrItineraryData;
 
     void computeKnownBitsForTargetNode(const SDValue Op, APInt &KnownZero,
                                        APInt &KnownOne,
+                                       const APInt &DemandedElts,
                                        const SelectionDAG &DAG,
                                        unsigned Depth) const override;
 
@@ -514,6 +515,10 @@ class InstrItineraryData;
     bool isCheapToSpeculateCttz() const override;
     bool isCheapToSpeculateCtlz() const override;
 
+    bool convertSetCCLogicToBitwiseLogic(EVT VT) const override {
+      return VT.isScalarInteger();
+    }
+
     bool supportSwiftError() const override {
       return true;
     }
@@ -524,6 +529,17 @@ class InstrItineraryData;
 
     CCAssignFn *CCAssignFnForCall(CallingConv::ID CC, bool isVarArg) const;
     CCAssignFn *CCAssignFnForReturn(CallingConv::ID CC, bool isVarArg) const;
+
+    /// Returns true if \p VecTy is a legal interleaved access type. This
+    /// function checks the vector element type and the overall width of the
+    /// vector.
+    bool isLegalInterleavedAccessType(VectorType *VecTy,
+                                      const DataLayout &DL) const;
+
+    /// Returns the number of interleaved accesses that will be generated when
+    /// lowering accesses of the given type.
+    unsigned getNumInterleavedAccesses(VectorType *VecTy,
+                                       const DataLayout &DL) const;
 
   protected:
     std::pair<const TargetRegisterClass *, uint8_t>
@@ -701,7 +717,7 @@ class InstrItineraryData;
 
     bool isUsedByReturnOnly(SDNode *N, SDValue &Chain) const override;
 
-    bool mayBeEmittedAsTailCall(CallInst *CI) const override;
+    bool mayBeEmittedAsTailCall(const CallInst *CI) const override;
 
     SDValue getCMOV(const SDLoc &dl, EVT VT, SDValue FalseVal, SDValue TrueVal,
                     SDValue ARMcc, SDValue CCR, SDValue Cmp,

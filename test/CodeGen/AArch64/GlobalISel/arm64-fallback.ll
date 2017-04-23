@@ -71,6 +71,14 @@ define void @odd_type(i42* %addr) {
   ret void
 }
 
+; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: %vreg1<def>(<7 x s32>) = G_LOAD %vreg0; mem:LD28[%addr](align=32) (in function: odd_vector)
+; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for odd_vector
+; FALLBACK-WITH-REPORT-OUT-LABEL: odd_vector:
+define void @odd_vector(<7 x i32>* %addr) {
+  %vec = load <7 x i32>, <7 x i32>* %addr
+  ret void
+}
+
   ; RegBankSelect crashed when given invalid mappings, and AArch64's
   ; implementation produce valid-but-nonsense mappings for G_SEQUENCE.
 ; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to map instruction
@@ -145,4 +153,20 @@ continue:
 ; FALLBACK-WITH-REPORT-OUT-LABEL: test_quad_dump:
 define fp128 @test_quad_dump() {
   ret fp128 0xL00000000000000004000000000000000
+}
+
+; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: %vreg0<def>(p0) = G_EXTRACT_VECTOR_ELT %vreg1, %vreg2; (in function: vector_of_pointers_extractelement)
+; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for vector_of_pointers_extractelement
+; FALLBACK-WITH-REPORT-OUT-LABEL: vector_of_pointers_extractelement:
+define void @vector_of_pointers_extractelement() {
+  %dummy = extractelement <2 x i16*> undef, i32 0
+  ret void
+}
+
+; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: %vreg0<def>(<2 x p0>) = G_INSERT_VECTOR_ELT %vreg1, %vreg2, %vreg3; (in function: vector_of_pointers_insertelement
+; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for vector_of_pointers_insertelement
+; FALLBACK-WITH-REPORT-OUT-LABEL: vector_of_pointers_insertelement:
+define void @vector_of_pointers_insertelement() {
+  %dummy = insertelement <2 x i16*> undef, i16* null, i32 0
+  ret void
 }

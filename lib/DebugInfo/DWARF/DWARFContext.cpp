@@ -579,7 +579,7 @@ DWARFContext::getInliningInfoForAddress(uint64_t Address,
     return InliningInfo;
   }
 
-  uint32_t CallFile = 0, CallLine = 0, CallColumn = 0;
+  uint32_t CallFile = 0, CallLine = 0, CallColumn = 0, CallDiscriminator = 0;
   for (uint32_t i = 0, n = InlinedChain.size(); i != n; i++) {
     DWARFDie &FunctionDIE = InlinedChain[i];
     DILineInfo Frame;
@@ -605,15 +605,77 @@ DWARFContext::getInliningInfoForAddress(uint64_t Address,
                                         Spec.FLIKind, Frame.FileName);
         Frame.Line = CallLine;
         Frame.Column = CallColumn;
+        Frame.Discriminator = CallDiscriminator;
       }
       // Get call file/line/column of a current DIE.
       if (i + 1 < n) {
-        FunctionDIE.getCallerFrame(CallFile, CallLine, CallColumn);
+        FunctionDIE.getCallerFrame(CallFile, CallLine, CallColumn,
+                                   CallDiscriminator);
       }
     }
     InliningInfo.addFrame(Frame);
   }
   return InliningInfo;
+}
+
+static Error createError(const Twine &Reason, llvm::Error E) {
+  return make_error<StringError>(Reason + toString(std::move(E)),
+                                 inconvertibleErrorCode());
+}
+
+/// Returns the address of symbol relocation used against. Used for futher
+/// relocations computation. Symbol's section load address is taken in account if
+/// LoadedObjectInfo interface is provided.
+static Expected<uint64_t> getSymbolAddress(const object::ObjectFile &Obj,
+                                           const RelocationRef &Reloc,
+                                           const LoadedObjectInfo *L) {
+  uint64_t Ret = 0;
+  object::section_iterator RSec = Obj.section_end();
+  object::symbol_iterator Sym = Reloc.getSymbol();
+
+  // First calculate the address of the symbol or section as it appears
+  // in the object file
+  if (Sym != Obj.symbol_end()) {
+    Expected<uint64_t> SymAddrOrErr = Sym->getAddress();
+    if (!SymAddrOrErr)
+      return createError("error: failed to compute symbol address: ",
+                         SymAddrOrErr.takeError());
+
+    // Also remember what section this symbol is in for later
+    auto SectOrErr = Sym->getSection();
+    if (!SectOrErr)
+      return createError("error: failed to get symbol section: ",
+                         SectOrErr.takeError());
+
+    RSec = *SectOrErr;
+    Ret = *SymAddrOrErr;
+  } else if (auto *MObj = dyn_cast<MachOObjectFile>(&Obj)) {
+    RSec = MObj->getRelocationSection(Reloc.getRawDataRefImpl());
+    Ret = RSec->getAddress();
+  }
+
+  // If we are given load addresses for the sections, we need to adjust:
+  // SymAddr = (Address of Symbol Or Section in File) -
+  //           (Address of Section in File) +
+  //           (Load Address of Section)
+  // RSec is now either the section being targeted or the section
+  // containing the symbol being targeted. In either case,
+  // we need to perform the same computation.
+  if (L && RSec != Obj.section_end())
+    if (uint64_t SectionLoadAddress = L->getSectionLoadAddress(*RSec))
+      Ret += SectionLoadAddress - RSec->getAddress();
+  return Ret;
+}
+
+static bool isRelocScattered(const object::ObjectFile &Obj,
+                             const RelocationRef &Reloc) {
+  const MachOObjectFile *MachObj = dyn_cast<MachOObjectFile>(&Obj);
+  if (!MachObj)
+    return false;
+  // MachO also has relocations that point to sections and
+  // scattered relocations.
+  auto RelocInfo = MachObj->getRelocation(Reloc.getRawDataRefImpl());
+  return MachObj->isRelocationScattered(RelocInfo);
 }
 
 DWARFContextInMemory::DWARFContextInMemory(const object::ObjectFile &Obj,
@@ -721,73 +783,19 @@ DWARFContextInMemory::DWARFContextInMemory(const object::ObjectFile &Obj,
     if (Section.relocation_begin() != Section.relocation_end()) {
       uint64_t SectionSize = RelocatedSection->getSize();
       for (const RelocationRef &Reloc : Section.relocations()) {
-        uint64_t Address = Reloc.getOffset();
-        uint64_t Type = Reloc.getType();
-        uint64_t SymAddr = 0;
-        uint64_t SectionLoadAddress = 0;
-        object::symbol_iterator Sym = Reloc.getSymbol();
-        object::section_iterator RSec = Obj.section_end();
+        // FIXME: it's not clear how to correctly handle scattered
+        // relocations.
+        if (isRelocScattered(Obj, Reloc))
+          continue;
 
-        // First calculate the address of the symbol or section as it appears
-        // in the objct file
-        if (Sym != Obj.symbol_end()) {
-          Expected<uint64_t> SymAddrOrErr = Sym->getAddress();
-          if (!SymAddrOrErr) {
-            std::string Buf;
-            raw_string_ostream OS(Buf);
-            logAllUnhandledErrors(SymAddrOrErr.takeError(), OS, "");
-            OS.flush();
-            errs() << "error: failed to compute symbol address: "
-                   << Buf << '\n';
-            continue;
-          }
-          SymAddr = *SymAddrOrErr;
-          // Also remember what section this symbol is in for later
-          auto SectOrErr = Sym->getSection();
-          if (!SectOrErr) {
-            std::string Buf;
-            raw_string_ostream OS(Buf);
-            logAllUnhandledErrors(SectOrErr.takeError(), OS, "");
-            OS.flush();
-            errs() << "error: failed to get symbol section: "
-                   << Buf << '\n';
-            continue;
-          }
-          RSec = *SectOrErr;
-        } else if (auto *MObj = dyn_cast<MachOObjectFile>(&Obj)) {
-          // MachO also has relocations that point to sections and
-          // scattered relocations.
-          auto RelocInfo = MObj->getRelocation(Reloc.getRawDataRefImpl());
-          if (MObj->isRelocationScattered(RelocInfo)) {
-            // FIXME: it's not clear how to correctly handle scattered
-            // relocations.
-            continue;
-          } else {
-            RSec = MObj->getRelocationSection(Reloc.getRawDataRefImpl());
-            SymAddr = RSec->getAddress();
-          }
-        }
-
-        // If we are given load addresses for the sections, we need to adjust:
-        // SymAddr = (Address of Symbol Or Section in File) -
-        //           (Address of Section in File) +
-        //           (Load Address of Section)
-        if (L != nullptr && RSec != Obj.section_end()) {
-          // RSec is now either the section being targeted or the section
-          // containing the symbol being targeted. In either case,
-          // we need to perform the same computation.
-          StringRef SecName;
-          RSec->getName(SecName);
-//           dbgs() << "Name: '" << SecName
-//                  << "', RSec: " << RSec->getRawDataRefImpl()
-//                  << ", Section: " << Section.getRawDataRefImpl() << "\n";
-          SectionLoadAddress = L->getSectionLoadAddress(*RSec);
-          if (SectionLoadAddress != 0)
-            SymAddr += SectionLoadAddress - RSec->getAddress();
+        Expected<uint64_t> SymAddrOrErr = getSymbolAddress(Obj, Reloc, L);
+        if (!SymAddrOrErr) {
+          errs() << toString(SymAddrOrErr.takeError()) << '\n';
+          continue;
         }
 
         object::RelocVisitor V(Obj);
-        object::RelocToApply R(V.visit(Type, Reloc, SymAddr));
+        object::RelocToApply R(V.visit(Reloc.getType(), Reloc, *SymAddrOrErr));
         if (V.error()) {
           SmallString<32> Name;
           Reloc.getTypeName(Name);
@@ -795,7 +803,7 @@ DWARFContextInMemory::DWARFContextInMemory(const object::ObjectFile &Obj,
                  << Name << "\n";
           continue;
         }
-
+        uint64_t Address = Reloc.getOffset();
         if (Address + R.Width > SectionSize) {
           errs() << "error: " << R.Width << "-byte relocation starting "
                  << Address << " bytes into section " << name << " which is "

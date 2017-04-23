@@ -49,8 +49,7 @@ void Argument::setParent(Function *parent) {
 
 bool Argument::hasNonNullAttr() const {
   if (!getType()->isPointerTy()) return false;
-  if (getParent()->getAttributes().
-        hasAttribute(getArgNo()+1, Attribute::NonNull))
+  if (getParent()->hasParamAttribute(getArgNo(), Attribute::NonNull))
     return true;
   else if (getDereferenceableBytes() > 0 &&
            getType()->getPointerAddressSpace() == 0)
@@ -64,13 +63,11 @@ bool Argument::hasByValAttr() const {
 }
 
 bool Argument::hasSwiftSelfAttr() const {
-  return getParent()->getAttributes().
-    hasAttribute(getArgNo()+1, Attribute::SwiftSelf);
+  return getParent()->hasParamAttribute(getArgNo(), Attribute::SwiftSelf);
 }
 
 bool Argument::hasSwiftErrorAttr() const {
-  return getParent()->getAttributes().
-    hasAttribute(getArgNo()+1, Attribute::SwiftError);
+  return getParent()->hasParamAttribute(getArgNo(), Attribute::SwiftError);
 }
 
 bool Argument::hasInAllocaAttr() const {
@@ -81,8 +78,8 @@ bool Argument::hasInAllocaAttr() const {
 bool Argument::hasByValOrInAllocaAttr() const {
   if (!getType()->isPointerTy()) return false;
   AttributeList Attrs = getParent()->getAttributes();
-  return Attrs.hasAttribute(getArgNo() + 1, Attribute::ByVal) ||
-         Attrs.hasAttribute(getArgNo() + 1, Attribute::InAlloca);
+  return Attrs.hasParamAttribute(getArgNo(), Attribute::ByVal) ||
+         Attrs.hasParamAttribute(getArgNo(), Attribute::InAlloca);
 }
 
 unsigned Argument::getParamAlignment() const {
@@ -136,19 +133,23 @@ bool Argument::hasSExtAttr() const {
 }
 
 bool Argument::onlyReadsMemory() const {
-  return getParent()->getAttributes().
-      hasAttribute(getArgNo()+1, Attribute::ReadOnly) ||
-      getParent()->getAttributes().
-      hasAttribute(getArgNo()+1, Attribute::ReadNone);
+  AttributeList Attrs = getParent()->getAttributes();
+  return Attrs.hasParamAttribute(getArgNo(), Attribute::ReadOnly) ||
+         Attrs.hasParamAttribute(getArgNo(), Attribute::ReadNone);
 }
 
-void Argument::addAttr(AttributeList AS) {
-  assert(AS.getNumSlots() <= 1 &&
-         "Trying to add more than one attribute set to an argument!");
-  AttrBuilder B(AS, AS.getSlotIndex(0));
-  getParent()->addAttributes(
-      getArgNo() + 1,
-      AttributeList::get(Parent->getContext(), getArgNo() + 1, B));
+void Argument::addAttrs(AttrBuilder &B) {
+  AttributeList AL = getParent()->getAttributes();
+  AL = AL.addAttributes(Parent->getContext(), getArgNo() + 1, B);
+  getParent()->setAttributes(AL);
+}
+
+void Argument::addAttr(Attribute::AttrKind Kind) {
+  getParent()->addAttribute(getArgNo() + 1, Kind);
+}
+
+void Argument::addAttr(Attribute Attr) {
+  getParent()->addAttribute(getArgNo() + 1, Attr);
 }
 
 void Argument::removeAttr(AttributeList AS) {
@@ -160,8 +161,12 @@ void Argument::removeAttr(AttributeList AS) {
       AttributeList::get(Parent->getContext(), getArgNo() + 1, B));
 }
 
+void Argument::removeAttr(Attribute::AttrKind Kind) {
+  getParent()->removeAttribute(getArgNo() + 1, Kind);
+}
+
 bool Argument::hasAttribute(Attribute::AttrKind Kind) const {
-  return getParent()->hasAttribute(getArgNo() + 1, Kind);
+  return getParent()->hasParamAttribute(getArgNo(), Kind);
 }
 
 //===----------------------------------------------------------------------===//

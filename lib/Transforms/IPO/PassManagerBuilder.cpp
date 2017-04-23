@@ -137,8 +137,8 @@ static cl::opt<int> PreInlineThreshold(
              "(default = 75)"));
 
 static cl::opt<bool> EnableGVNHoist(
-    "enable-gvn-hoist", cl::init(false), cl::Hidden,
-    cl::desc("Enable the GVN hoisting pass"));
+    "enable-gvn-hoist", cl::init(true), cl::Hidden,
+    cl::desc("Enable the GVN hoisting pass (default = on)"));
 
 static cl::opt<bool>
     DisableLibCallsShrinkWrap("disable-libcalls-shrinkwrap", cl::init(false),
@@ -245,8 +245,6 @@ void PassManagerBuilder::populateFunctionPassManager(
   FPM.add(createCFGSimplificationPass());
   FPM.add(createSROAPass());
   FPM.add(createEarlyCSEPass());
-  if(EnableGVNHoist)
-    FPM.add(createGVNHoistPass());
   FPM.add(createLowerExpectIntrinsicPass());
 }
 
@@ -291,6 +289,8 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
   // Break up aggregate allocas, using SSAUpdater.
   MPM.add(createSROAPass());
   MPM.add(createEarlyCSEPass());              // Catch trivial redundancies
+  if (EnableGVNHoist)
+    MPM.add(createGVNHoistPass());
   // Speculative execution if the target has divergent branches; otherwise nop.
   MPM.add(createSpeculativeExecutionIfHasBranchDivergencePass());
   MPM.add(createJumpThreadingPass());         // Thread jumps.
@@ -301,6 +301,10 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
   if (SizeLevel == 0 && !DisableLibCallsShrinkWrap)
     MPM.add(createLibCallsShrinkWrapPass());
   addExtensionsToPM(EP_Peephole, MPM);
+
+  // Optimize memory intrinsic calls based on the profiled size information.
+  if (SizeLevel == 0)
+    MPM.add(createPGOMemOPSizeOptLegacyPass());
 
   MPM.add(createTailCallEliminationPass()); // Eliminate tail calls
   MPM.add(createCFGSimplificationPass());     // Merge & remove BBs
@@ -631,7 +635,7 @@ void PassManagerBuilder::populateModulePassManager(
   }
 
   addExtensionsToPM(EP_Peephole, MPM);
-  MPM.add(createCFGSimplificationPass());
+  MPM.add(createLateCFGSimplificationPass()); // Switches to lookup tables
   addInstructionCombiningPass(MPM);
 
   if (!DisableUnrollLoops) {

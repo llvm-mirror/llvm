@@ -26,6 +26,8 @@
 #include <string>
 
 namespace llvm {
+class MachineInstr;
+class MCInst;
 
 //===----------------------------------------------------------------------===//
 ///
@@ -62,6 +64,8 @@ public:
   MCSubtargetInfo &operator=(const MCSubtargetInfo &) = delete;
   MCSubtargetInfo &operator=(MCSubtargetInfo &&) = delete;
 
+  virtual ~MCSubtargetInfo() {}
+
   /// getTargetTriple - Return the target triple string.
   const Triple &getTargetTriple() const { return TargetTriple; }
 
@@ -80,6 +84,10 @@ public:
   ///
   void setFeatureBits(const FeatureBitset &FeatureBits_) {
     FeatureBits = FeatureBits_;
+  }
+
+  bool hasFeature(unsigned Feature) const {
+    return FeatureBits[Feature];
   }
 
 protected:
@@ -166,6 +174,15 @@ public:
   bool isCPUStringValid(StringRef CPU) const {
     auto Found = std::lower_bound(ProcDesc.begin(), ProcDesc.end(), CPU);
     return Found != ProcDesc.end() && StringRef(Found->Key) == CPU;
+  }
+
+  /// Returns string representation of scheduler comment
+  virtual std::string getSchedInfoStr(const MachineInstr &MI) const {
+    return std::string();
+  }
+
+  virtual std::string getSchedInfoStr(MCInst const &MCI) const {
+    return std::string();
   }
 };
 

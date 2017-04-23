@@ -42,6 +42,7 @@ add_pdb_impl_folder(Native
   Native/ModStream.cpp
   Native/NativeCompilandSymbol.cpp
   Native/NativeEnumModules.cpp
+  Native/NativeExeSymbol.cpp
   Native/NativeRawSymbol.cpp
   Native/NamedStreamMap.cpp
   Native/NativeSession.cpp
@@ -100,6 +101,7 @@ add_llvm_library(LLVMDebugInfoPDB
   PDBSymbolUnknown.cpp
   PDBSymbolUsingNamespace.cpp
   PDBSymDumper.cpp
+  UDTLayout.cpp
   ${PDB_IMPL_SOURCES}
 
   ADDITIONAL_HEADER_DIRS

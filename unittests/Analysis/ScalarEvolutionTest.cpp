@@ -51,13 +51,13 @@ protected:
     return ScalarEvolution(F, TLI, *AC, *DT, *LI);
   }
 
-  void runWithFunctionAndSE(
+  void runWithSE(
       Module &M, StringRef FuncName,
-      function_ref<void(Function &F, ScalarEvolution &SE)> Test) {
+      function_ref<void(Function &F, LoopInfo &LI, ScalarEvolution &SE)> Test) {
     auto *F = M.getFunction(FuncName);
     ASSERT_NE(F, nullptr) << "Could not find " << FuncName;
     ScalarEvolution SE = buildSE(*F);
-    Test(*F, SE);
+    Test(*F, *LI, SE);
   }
 };
 
@@ -306,9 +306,11 @@ TEST_F(ScalarEvolutionsTest, ExpandPtrTypeSCEV) {
   //   %bitcast2 = bitcast i8* %select to i32*
   //   br i1 undef, label %loop, label %exit
 
+  const DataLayout &DL = F->getParent()->getDataLayout();
   BranchInst *Br = BranchInst::Create(
       LoopBB, ExitBB, UndefValue::get(Type::getInt1Ty(Context)), LoopBB);
-  AllocaInst *Alloca = new AllocaInst(I32Ty, "alloca", Br);
+  AllocaInst *Alloca = new AllocaInst(I32Ty, DL.getAllocaAddrSpace(),
+                                      "alloca", Br);
   ConstantInt *Ci32 = ConstantInt::get(Context, APInt(32, 1));
   GetElementPtrInst *Gep0 =
       GetElementPtrInst::Create(I32Ty, Alloca, Ci32, "gep0", Br);
@@ -417,7 +419,7 @@ TEST_F(ScalarEvolutionsTest, CommutativeExprOperandOrder) {
   assert(M && "Could not parse module?");
   assert(!verifyModule(*M) && "Must have been well formed!");
 
-  runWithFunctionAndSE(*M, "f_1", [&](Function &F, ScalarEvolution &SE) {
+  runWithSE(*M, "f_1", [&](Function &F, LoopInfo &LI, ScalarEvolution &SE) {
     auto *IV0 = getInstructionByName(F, "iv0");
     auto *IV0Inc = getInstructionByName(F, "iv0.inc");
 
@@ -458,11 +460,12 @@ TEST_F(ScalarEvolutionsTest, CommutativeExprOperandOrder) {
   };
 
   for (StringRef FuncName : {"f_2", "f_3", "f_4"})
-    runWithFunctionAndSE(*M, FuncName, [&](Function &F, ScalarEvolution &SE) {
-      CheckCommutativeMulExprs(SE, SE.getSCEV(getInstructionByName(F, "x")),
-                               SE.getSCEV(getInstructionByName(F, "y")),
-                               SE.getSCEV(getInstructionByName(F, "z")));
-    });
+    runWithSE(
+        *M, FuncName, [&](Function &F, LoopInfo &LI, ScalarEvolution &SE) {
+          CheckCommutativeMulExprs(SE, SE.getSCEV(getInstructionByName(F, "x")),
+                                   SE.getSCEV(getInstructionByName(F, "y")),
+                                   SE.getSCEV(getInstructionByName(F, "z")));
+        });
 }
 
 TEST_F(ScalarEvolutionsTest, CompareSCEVComplexity) {
@@ -598,6 +601,159 @@ TEST_F(ScalarEvolutionsTest, SCEVAddExpr) {
   ReturnInst::Create(Context, nullptr, EntryBB);
   ScalarEvolution SE = buildSE(*F);
   EXPECT_NE(nullptr, SE.getSCEV(Mul1));
+}
+
+static Instruction &GetInstByName(Function &F, StringRef Name) {
+  for (auto &I : instructions(F))
+    if (I.getName() == Name)
+      return I;
+  llvm_unreachable("Could not find instructions!");
+}
+
+TEST_F(ScalarEvolutionsTest, SCEVNormalization) {
+  LLVMContext C;
+  SMDiagnostic Err;
+  std::unique_ptr<Module> M = parseAssemblyString(
+      "target datalayout = \"e-m:e-p:32:32-f64:32:64-f80:32-n8:16:32-S128\" "
+      " "
+      "@var_0 = external global i32, align 4"
+      "@var_1 = external global i32, align 4"
+      "@var_2 = external global i32, align 4"
+      " "
+      "declare i32 @unknown(i32, i32, i32)"
+      " "
+      "define void @f_1(i8* nocapture %arr, i32 %n, i32* %A, i32* %B) "
+      "    local_unnamed_addr { "
+      "entry: "
+      "  br label %loop.ph "
+      " "
+      "loop.ph: "
+      "  br label %loop "
+      " "
+      "loop: "
+      "  %iv0 = phi i32 [ %iv0.inc, %loop ], [ 0, %loop.ph ] "
+      "  %iv1 = phi i32 [ %iv1.inc, %loop ], [ -2147483648, %loop.ph ] "
+      "  %iv0.inc = add i32 %iv0, 1 "
+      "  %iv1.inc = add i32 %iv1, 3 "
+      "  br i1 undef, label %for.end.loopexit, label %loop "
+      " "
+      "for.end.loopexit: "
+      "  ret void "
+      "} "
+      ,
+      Err, C);
+
+  assert(M && "Could not parse module?");
+  assert(!verifyModule(*M) && "Must have been well formed!");
+
+  runWithSE(*M, "f_1", [&](Function &F, LoopInfo &LI, ScalarEvolution &SE) {
+    auto &I0 = GetInstByName(F, "iv0");
+    auto &I1 = *I0.getNextNode();
+
+    auto *S0 = cast<SCEVAddRecExpr>(SE.getSCEV(&I0));
+    PostIncLoopSet Loops;
+    Loops.insert(S0->getLoop());
+    auto *N0 = normalizeForPostIncUse(S0, Loops, SE);
+    auto *D0 = denormalizeForPostIncUse(N0, Loops, SE);
+    EXPECT_EQ(S0, D0) << *S0 << " " << *D0;
+
+    auto *S1 = cast<SCEVAddRecExpr>(SE.getSCEV(&I1));
+    Loops.clear();
+    Loops.insert(S1->getLoop());
+    auto *N1 = normalizeForPostIncUse(S1, Loops, SE);
+    auto *D1 = denormalizeForPostIncUse(N1, Loops, SE);
+    EXPECT_EQ(S1, D1) << *S1 << " " << *D1;
+  });
+}
+
+// Expect the call of getZeroExtendExpr will not cost exponential time.
+TEST_F(ScalarEvolutionsTest, SCEVZeroExtendExpr) {
+  LLVMContext C;
+  SMDiagnostic Err;
+
+  // Generate a function like below:
+  // define void @foo() {
+  // entry:
+  //   br label %for.cond
+  //
+  // for.cond:
+  //   %0 = phi i64 [ 100, %entry ], [ %dec, %for.inc ]
+  //   %cmp = icmp sgt i64 %0, 90
+  //   br i1 %cmp, label %for.inc, label %for.cond1
+  //
+  // for.inc:
+  //   %dec = add nsw i64 %0, -1
+  //   br label %for.cond
+  //
+  // for.cond1:
+  //   %1 = phi i64 [ 100, %for.cond ], [ %dec5, %for.inc2 ]
+  //   %cmp3 = icmp sgt i64 %1, 90
+  //   br i1 %cmp3, label %for.inc2, label %for.cond4
+  //
+  // for.inc2:
+  //   %dec5 = add nsw i64 %1, -1
+  //   br label %for.cond1
+  //
+  // ......
+  //
+  // for.cond89:
+  //   %19 = phi i64 [ 100, %for.cond84 ], [ %dec94, %for.inc92 ]
+  //   %cmp93 = icmp sgt i64 %19, 90
+  //   br i1 %cmp93, label %for.inc92, label %for.end
+  //
+  // for.inc92:
+  //   %dec94 = add nsw i64 %19, -1
+  //   br label %for.cond89
+  //
+  // for.end:
+  //   %gep = getelementptr i8, i8* null, i64 %dec
+  //   %gep6 = getelementptr i8, i8* %gep, i64 %dec5
+  //   ......
+  //   %gep95 = getelementptr i8, i8* %gep91, i64 %dec94
+  //   ret void
+  // }
+  FunctionType *FTy = FunctionType::get(Type::getVoidTy(Context), {}, false);
+  Function *F = cast<Function>(M.getOrInsertFunction("foo", FTy));
+
+  BasicBlock *EntryBB = BasicBlock::Create(Context, "entry", F);
+  BasicBlock *CondBB = BasicBlock::Create(Context, "for.cond", F);
+  BasicBlock *EndBB = BasicBlock::Create(Context, "for.end", F);
+  BranchInst::Create(CondBB, EntryBB);
+  BasicBlock *PrevBB = EntryBB;
+
+  Type *I64Ty = Type::getInt64Ty(Context);
+  Type *I8Ty = Type::getInt8Ty(Context);
+  Type *I8PtrTy = Type::getInt8PtrTy(Context);
+  Value *Accum = Constant::getNullValue(I8PtrTy);
+  int Iters = 20;
+  for (int i = 0; i < Iters; i++) {
+    BasicBlock *IncBB = BasicBlock::Create(Context, "for.inc", F, EndBB);
+    auto *PN = PHINode::Create(I64Ty, 2, "", CondBB);
+    PN->addIncoming(ConstantInt::get(Context, APInt(64, 100)), PrevBB);
+    auto *Cmp = CmpInst::Create(Instruction::ICmp, CmpInst::ICMP_SGT, PN,
+                                ConstantInt::get(Context, APInt(64, 90)), "cmp",
+                                CondBB);
+    BasicBlock *NextBB;
+    if (i != Iters - 1)
+      NextBB = BasicBlock::Create(Context, "for.cond", F, EndBB);
+    else
+      NextBB = EndBB;
+    BranchInst::Create(IncBB, NextBB, Cmp, CondBB);
+    auto *Dec = BinaryOperator::CreateNSWAdd(
+        PN, ConstantInt::get(Context, APInt(64, -1)), "dec", IncBB);
+    PN->addIncoming(Dec, IncBB);
+    BranchInst::Create(CondBB, IncBB);
+
+    Accum = GetElementPtrInst::Create(I8Ty, Accum, Dec, "gep", EndBB);
+
+    PrevBB = CondBB;
+    CondBB = NextBB;
+  }
+  ReturnInst::Create(Context, nullptr, EndBB);
+  ScalarEvolution SE = buildSE(*F);
+  const SCEV *S = SE.getSCEV(Accum);
+  Type *I128Ty = Type::getInt128Ty(Context);
+  SE.getZeroExtendExpr(S, I128Ty);
 }
 
 }  // end anonymous namespace

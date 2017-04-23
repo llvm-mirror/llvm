@@ -274,12 +274,12 @@ Instruction *InstCombiner::commonCastTransforms(CastInst &CI) {
       return NV;
 
   // If we are casting a PHI, then fold the cast into the PHI.
-  if (isa<PHINode>(Src)) {
+  if (auto *PN = dyn_cast<PHINode>(Src)) {
     // Don't do this if it would create a PHI node with an illegal type from a
     // legal type.
     if (!Src->getType()->isIntegerTy() || !CI.getType()->isIntegerTy() ||
         shouldChangeType(CI.getType(), Src->getType()))
-      if (Instruction *NV = FoldOpIntoPhi(CI))
+      if (Instruction *NV = foldOpIntoPhi(CI, PN))
         return NV;
   }
 
@@ -1591,7 +1591,7 @@ Instruction *InstCombiner::commonPointerCastTransforms(CastInst &CI) {
         // GEP into CI would undo canonicalizing addrspacecast with different
         // pointer types, causing infinite loops.
         (!isa<AddrSpaceCastInst>(CI) ||
-          GEP->getType() == GEP->getPointerOperand()->getType())) {
+         GEP->getType() == GEP->getPointerOperandType())) {
       // Changing the cast operand is usually not a good idea but it is safe
       // here because the pointer operand is being replaced with another
       // pointer operand so the opcode doesn't need to change.

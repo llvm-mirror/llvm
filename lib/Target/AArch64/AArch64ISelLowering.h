@@ -251,7 +251,8 @@ public:
   /// Determine which of the bits specified in Mask are known to be either zero
   /// or one and return them in the KnownZero/KnownOne bitsets.
   void computeKnownBitsForTargetNode(const SDValue Op, APInt &KnownZero,
-                                     APInt &KnownOne, const SelectionDAG &DAG,
+                                     APInt &KnownOne, const APInt &DemandedElts,
+                                     const SelectionDAG &DAG,
                                      unsigned Depth = 0) const override;
 
   MVT getScalarShiftAmountTy(const DataLayout &DL, EVT) const override;
@@ -440,6 +441,17 @@ public:
   /// Returns the size of the platform's va_list object.
   unsigned getVaListSizeInBits(const DataLayout &DL) const override;
 
+  /// Returns true if \p VecTy is a legal interleaved access type. This
+  /// function checks the vector element type and the overall width of the
+  /// vector.
+  bool isLegalInterleavedAccessType(VectorType *VecTy,
+                                    const DataLayout &DL) const;
+
+  /// Returns the number of interleaved accesses that will be generated when
+  /// lowering accesses of the given type.
+  unsigned getNumInterleavedAccesses(VectorType *VecTy,
+                                     const DataLayout &DL) const;
+
 private:
   bool isExtFreeImpl(const Instruction *Ext) const override;
 
@@ -581,7 +593,7 @@ private:
   }
 
   bool isUsedByReturnOnly(SDNode *N, SDValue &Chain) const override;
-  bool mayBeEmittedAsTailCall(CallInst *CI) const override;
+  bool mayBeEmittedAsTailCall(const CallInst *CI) const override;
   bool getIndexedAddressParts(SDNode *Op, SDValue &Base, SDValue &Offset,
                               ISD::MemIndexedMode &AM, bool &IsInc,
                               SelectionDAG &DAG) const;

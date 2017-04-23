@@ -71,11 +71,6 @@ def SIbuffer_load : SDNode <"AMDGPUISD::BUFFER_LOAD", SDTBufferLoad,
 def SIbuffer_load_format : SDNode <"AMDGPUISD::BUFFER_LOAD_FORMAT", SDTBufferLoad,
                             [SDNPMemOperand, SDNPHasChain, SDNPMayLoad]>;
 
-def SIload_input : SDNode<"AMDGPUISD::LOAD_INPUT",
-  SDTypeProfile<1, 3, [SDTCisVT<0, v4f32>, SDTCisVT<1, v4i32>, SDTCisVT<2, i16>,
-                       SDTCisVT<3, i32>]>
->;
-
 class SDSample<string opcode> : SDNode <opcode,
   SDTypeProfile<1, 4, [SDTCisVT<0, v4f32>, SDTCisVT<2, v8i32>,
                        SDTCisVT<3, v4i32>, SDTCisVT<4, i32>]>
@@ -107,7 +102,7 @@ def SIld_local : SDNode <"ISD::LOAD", SDTLoad,
 >;
 
 def si_ld_local : PatFrag <(ops node:$ptr), (SIld_local node:$ptr), [{
-  return cast<LoadSDNode>(N)->getAddressSpace() == AMDGPUAS::LOCAL_ADDRESS;
+  return cast<LoadSDNode>(N)->getAddressSpace() == AMDGPUASI.LOCAL_ADDRESS;
 }]>;
 
 def si_load_local : PatFrag <(ops node:$ptr), (si_ld_local node:$ptr), [{
@@ -144,7 +139,7 @@ def SIst_local : SDNode <"ISD::STORE", SDTStore,
 
 def si_st_local : PatFrag <
   (ops node:$val, node:$ptr), (SIst_local node:$val, node:$ptr), [{
-  return cast<StoreSDNode>(N)->getAddressSpace() == AMDGPUAS::LOCAL_ADDRESS;
+  return cast<StoreSDNode>(N)->getAddressSpace() == AMDGPUASI.LOCAL_ADDRESS;
 }]>;
 
 def si_store_local : PatFrag <
@@ -658,6 +653,8 @@ def VOP3Mods  : ComplexPattern<untyped, 2, "SelectVOP3Mods">;
 def VOP3NoMods : ComplexPattern<untyped, 2, "SelectVOP3NoMods">;
 // VOP3Mods, but the input source is known to never be NaN.
 def VOP3Mods_nnan : ComplexPattern<fAny, 2, "SelectVOP3Mods_NNaN">;
+
+def VOP3OMods : ComplexPattern<untyped, 3, "SelectVOP3OMods">;
 
 def VOP3PMods  : ComplexPattern<untyped, 2, "SelectVOP3PMods">;
 def VOP3PMods0 : ComplexPattern<untyped, 3, "SelectVOP3PMods0">;

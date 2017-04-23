@@ -425,7 +425,7 @@ void MemorySanitizer::initializeCallbacks(Module &M) {
   // which is not yet implemented.
   StringRef WarningFnName = Recover ? "__msan_warning"
                                     : "__msan_warning_noreturn";
-  WarningFn = M.getOrInsertFunction(WarningFnName, IRB.getVoidTy(), nullptr);
+  WarningFn = M.getOrInsertFunction(WarningFnName, IRB.getVoidTy());
 
   for (size_t AccessSizeIndex = 0; AccessSizeIndex < kNumberOfAccessSizes;
        AccessSizeIndex++) {
@@ -433,31 +433,31 @@ void MemorySanitizer::initializeCallbacks(Module &M) {
     std::string FunctionName = "__msan_maybe_warning_" + itostr(AccessSize);
     MaybeWarningFn[AccessSizeIndex] = M.getOrInsertFunction(
         FunctionName, IRB.getVoidTy(), IRB.getIntNTy(AccessSize * 8),
-        IRB.getInt32Ty(), nullptr);
+        IRB.getInt32Ty());
 
     FunctionName = "__msan_maybe_store_origin_" + itostr(AccessSize);
     MaybeStoreOriginFn[AccessSizeIndex] = M.getOrInsertFunction(
         FunctionName, IRB.getVoidTy(), IRB.getIntNTy(AccessSize * 8),
-        IRB.getInt8PtrTy(), IRB.getInt32Ty(), nullptr);
+        IRB.getInt8PtrTy(), IRB.getInt32Ty());
   }
 
   MsanSetAllocaOrigin4Fn = M.getOrInsertFunction(
     "__msan_set_alloca_origin4", IRB.getVoidTy(), IRB.getInt8PtrTy(), IntptrTy,
-    IRB.getInt8PtrTy(), IntptrTy, nullptr);
+    IRB.getInt8PtrTy(), IntptrTy);
   MsanPoisonStackFn =
       M.getOrInsertFunction("__msan_poison_stack", IRB.getVoidTy(),
-                            IRB.getInt8PtrTy(), IntptrTy, nullptr);
+                            IRB.getInt8PtrTy(), IntptrTy);
   MsanChainOriginFn = M.getOrInsertFunction(
-    "__msan_chain_origin", IRB.getInt32Ty(), IRB.getInt32Ty(), nullptr);
+    "__msan_chain_origin", IRB.getInt32Ty(), IRB.getInt32Ty());
   MemmoveFn = M.getOrInsertFunction(
     "__msan_memmove", IRB.getInt8PtrTy(), IRB.getInt8PtrTy(),
-    IRB.getInt8PtrTy(), IntptrTy, nullptr);
+    IRB.getInt8PtrTy(), IntptrTy);
   MemcpyFn = M.getOrInsertFunction(
     "__msan_memcpy", IRB.getInt8PtrTy(), IRB.getInt8PtrTy(), IRB.getInt8PtrTy(),
-    IntptrTy, nullptr);
+    IntptrTy);
   MemsetFn = M.getOrInsertFunction(
     "__msan_memset", IRB.getInt8PtrTy(), IRB.getInt8PtrTy(), IRB.getInt32Ty(),
-    IntptrTy, nullptr);
+    IntptrTy);
 
   // Create globals.
   RetvalTLS = new GlobalVariable(
@@ -2638,7 +2638,7 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
             " Shadow: " << *ArgShadow << "\n");
       bool ArgIsInitialized = false;
       const DataLayout &DL = F.getParent()->getDataLayout();
-      if (CS.paramHasAttr(i + 1, Attribute::ByVal)) {
+      if (CS.paramHasAttr(i, Attribute::ByVal)) {
         assert(A->getType()->isPointerTy() &&
                "ByVal argument is not a pointer!");
         Size = DL.getTypeAllocSize(A->getType()->getPointerElementType());
@@ -2976,7 +2976,7 @@ struct VarArgAMD64Helper : public VarArgHelper {
       Value *A = *ArgIt;
       unsigned ArgNo = CS.getArgumentNo(ArgIt);
       bool IsFixed = ArgNo < CS.getFunctionType()->getNumParams();
-      bool IsByVal = CS.paramHasAttr(ArgNo + 1, Attribute::ByVal);
+      bool IsByVal = CS.paramHasAttr(ArgNo, Attribute::ByVal);
       if (IsByVal) {
         // ByVal arguments always go to the overflow area.
         // Fixed arguments passed through the overflow area will be stepped
@@ -3497,7 +3497,7 @@ struct VarArgPowerPC64Helper : public VarArgHelper {
       Value *A = *ArgIt;
       unsigned ArgNo = CS.getArgumentNo(ArgIt);
       bool IsFixed = ArgNo < CS.getFunctionType()->getNumParams();
-      bool IsByVal = CS.paramHasAttr(ArgNo + 1, Attribute::ByVal);
+      bool IsByVal = CS.paramHasAttr(ArgNo, Attribute::ByVal);
       if (IsByVal) {
         assert(A->getType()->isPointerTy());
         Type *RealTy = A->getType()->getPointerElementType();

@@ -553,13 +553,14 @@ bool RecurrenceDescriptor::isFirstOrderRecurrence(PHINode *Phi, Loop *TheLoop,
   if (!Previous || !TheLoop->contains(Previous) || isa<PHINode>(Previous))
     return false;
 
-  // Ensure every user of the phi node is dominated by the previous value. The
-  // dominance requirement ensures the loop vectorizer will not need to
+  // Ensure every user of the phi node is dominated by the previous value.
+  // The dominance requirement ensures the loop vectorizer will not need to
   // vectorize the initial value prior to the first iteration of the loop.
   for (User *U : Phi->users())
-    if (auto *I = dyn_cast<Instruction>(U))
+    if (auto *I = dyn_cast<Instruction>(U)) {
       if (!DT->dominates(Previous, I))
         return false;
+    }
 
   return true;
 }

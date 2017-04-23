@@ -1023,6 +1023,7 @@ public:
                    const OperandVector &Operands,
                    OptionalImmIndexMap &OptionalIdx);
   void cvtVOP3(MCInst &Inst, const OperandVector &Operands);
+  void cvtVOP3OMod(MCInst &Inst, const OperandVector &Operands);
   void cvtVOP3P(MCInst &Inst, const OperandVector &Operands);
 
   void cvtMIMG(MCInst &Inst, const OperandVector &Operands);
@@ -3701,8 +3702,10 @@ void AMDGPUAsmParser::cvtVOP3Impl(MCInst &Inst, const OperandVector &Operands,
     AMDGPUOperand &Op = ((AMDGPUOperand &)*Operands[I]);
     if (isRegOrImmWithInputMods(Desc, Inst.getNumOperands())) {
       Op.addRegOrImmWithFPInputModsOperands(Inst, 2);
-    } else if (Op.isImm()) {
+    } else if (Op.isImmModifier()) {
       OptionalIdx[Op.getImmTy()] = I;
+    } else if (Op.isRegOrImm()) {
+      Op.addRegOrImmOperands(Inst, 1);
     } else {
       llvm_unreachable("unhandled operand type");
     }
@@ -3735,6 +3738,28 @@ void AMDGPUAsmParser::cvtVOP3(MCInst &Inst, const OperandVector &Operands) {
     ++it;
     Inst.insert(it, Inst.getOperand(0)); // src2 = dst
   }
+}
+
+void AMDGPUAsmParser::cvtVOP3OMod(MCInst &Inst, const OperandVector &Operands) {
+  OptionalImmIndexMap OptionalIdx;
+
+  unsigned I = 1;
+  const MCInstrDesc &Desc = MII.get(Inst.getOpcode());
+  for (unsigned J = 0; J < Desc.getNumDefs(); ++J) {
+    ((AMDGPUOperand &)*Operands[I++]).addRegOperands(Inst, 1);
+  }
+
+  for (unsigned E = Operands.size(); I != E; ++I) {
+    AMDGPUOperand &Op = ((AMDGPUOperand &)*Operands[I]);
+    if (Op.isMod()) {
+      OptionalIdx[Op.getImmTy()] = I;
+    } else {
+      Op.addRegOrImmOperands(Inst, 1);
+    }
+  }
+
+  addOptionalImmOperand(Inst, Operands, OptionalIdx, AMDGPUOperand::ImmTyClampSI);
+  addOptionalImmOperand(Inst, Operands, OptionalIdx, AMDGPUOperand::ImmTyOModSI);
 }
 
 void AMDGPUAsmParser::cvtVOP3P(MCInst &Inst, const OperandVector &Operands) {

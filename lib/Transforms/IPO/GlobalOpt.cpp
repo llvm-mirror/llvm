@@ -1819,12 +1819,14 @@ static bool processInternalGlobal(
       GS.AccessingFunction->doesNotRecurse() &&
       isPointerValueDeadOnEntryToFunction(GS.AccessingFunction, GV,
                                           LookupDomTree)) {
+    const DataLayout &DL = GV->getParent()->getDataLayout();
+
     DEBUG(dbgs() << "LOCALIZING GLOBAL: " << *GV << "\n");
     Instruction &FirstI = const_cast<Instruction&>(*GS.AccessingFunction
                                                    ->getEntryBlock().begin());
     Type *ElemTy = GV->getValueType();
     // FIXME: Pass Global's alignment when globals have alignment
-    AllocaInst *Alloca = new AllocaInst(ElemTy, nullptr,
+    AllocaInst *Alloca = new AllocaInst(ElemTy, DL.getAllocaAddrSpace(), nullptr,
                                         GV->getName(), &FirstI);
     if (!isa<UndefValue>(GV->getInitializer()))
       new StoreInst(GV->getInitializer(), Alloca, &FirstI);
@@ -1977,16 +1979,11 @@ static void ChangeCalleesToFastCall(Function *F) {
   }
 }
 
-static AttributeList StripNest(LLVMContext &C, const AttributeList &Attrs) {
-  for (unsigned i = 0, e = Attrs.getNumSlots(); i != e; ++i) {
-    unsigned Index = Attrs.getSlotIndex(i);
-    if (!Attrs.getSlotAttributes(i).hasAttribute(Index, Attribute::Nest))
-      continue;
-
-    // There can be only one.
-    return Attrs.removeAttribute(C, Index, Attribute::Nest);
-  }
-
+static AttributeList StripNest(LLVMContext &C, AttributeList Attrs) {
+  // There can be at most one attribute set with a nest attribute.
+  unsigned NestIndex;
+  if (Attrs.hasAttrSomewhere(Attribute::Nest, &NestIndex))
+    return Attrs.removeAttribute(C, NestIndex, Attribute::Nest);
   return Attrs;
 }
 

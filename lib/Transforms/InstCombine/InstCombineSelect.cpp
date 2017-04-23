@@ -1053,8 +1053,10 @@ static Instruction *canonicalizeSelectToShuffle(SelectInst &SI) {
       // If the select condition element is false, choose from the 2nd vector.
       Mask.push_back(ConstantInt::get(Int32Ty, i + NumElts));
     } else if (isa<UndefValue>(Elt)) {
-      // If the select condition element is undef, the shuffle mask is undef.
-      Mask.push_back(UndefValue::get(Int32Ty));
+      // Undef in a select condition (choose one of the operands) does not mean
+      // the same thing as undef in a shuffle mask (any value is acceptable), so
+      // give up.
+      return nullptr;
     } else {
       // Bail out on a constant expression.
       return nullptr;
@@ -1382,11 +1384,11 @@ Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
   }
 
   // See if we can fold the select into a phi node if the condition is a select.
-  if (isa<PHINode>(SI.getCondition()))
+  if (auto *PN = dyn_cast<PHINode>(SI.getCondition()))
     // The true/false values have to be live in the PHI predecessor's blocks.
     if (canSelectOperandBeMappingIntoPredBlock(TrueVal, SI) &&
         canSelectOperandBeMappingIntoPredBlock(FalseVal, SI))
-      if (Instruction *NV = FoldOpIntoPhi(SI))
+      if (Instruction *NV = foldOpIntoPhi(SI, PN))
         return NV;
 
   if (SelectInst *TrueSI = dyn_cast<SelectInst>(TrueVal)) {

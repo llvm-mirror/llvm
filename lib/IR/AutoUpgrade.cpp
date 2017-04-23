@@ -202,6 +202,9 @@ static bool ShouldUpgradeX86Intrinsic(Function *F, StringRef Name) {
       Name.startswith("sse4a.movnt.") || // Added in 3.9
       Name.startswith("avx.movnt.") || // Added in 3.2
       Name.startswith("avx512.storent.") || // Added in 3.9
+      Name == "sse41.movntdqa" || // Added in 5.0
+      Name == "avx2.movntdqa" || // Added in 5.0
+      Name == "avx512.movntdqa" || // Added in 5.0
       Name == "sse2.storel.dq" || // Added in 3.9
       Name.startswith("sse.storeu.") || // Added in 3.9
       Name.startswith("sse2.storeu.") || // Added in 3.9
@@ -234,6 +237,7 @@ static bool ShouldUpgradeX86Intrinsic(Function *F, StringRef Name) {
       Name == "xop.vpcmov" || // Added in 3.8
       Name == "xop.vpcmov.256" || // Added in 5.0
       Name.startswith("avx512.mask.move.s") || // Added in 4.0
+      Name.startswith("avx512.cvtmask2") || // Added in 5.0
       (Name.startswith("xop.vpcom") && // Added in 3.2
        F->arg_size() == 2))
     return true;
@@ -411,26 +415,31 @@ static bool UpgradeIntrinsicFunction1(Function *F, Function *&NewFn) {
     }
     break;
   }
-  case 'i': {
-    if (Name.startswith("invariant.start")) {
+  case 'i':
+  case 'l': {
+    bool IsLifetimeStart = Name.startswith("lifetime.start");
+    if (IsLifetimeStart || Name.startswith("invariant.start")) {
+      Intrinsic::ID ID = IsLifetimeStart ?
+        Intrinsic::lifetime_start : Intrinsic::invariant_start;
       auto Args = F->getFunctionType()->params();
       Type* ObjectPtr[1] = {Args[1]};
-      if (F->getName() !=
-          Intrinsic::getName(Intrinsic::invariant_start, ObjectPtr)) {
+      if (F->getName() != Intrinsic::getName(ID, ObjectPtr)) {
         rename(F);
-        NewFn = Intrinsic::getDeclaration(
-            F->getParent(), Intrinsic::invariant_start, ObjectPtr);
+        NewFn = Intrinsic::getDeclaration(F->getParent(), ID, ObjectPtr);
         return true;
       }
     }
-    if (Name.startswith("invariant.end")) {
+
+    bool IsLifetimeEnd = Name.startswith("lifetime.end");
+    if (IsLifetimeEnd || Name.startswith("invariant.end")) {
+      Intrinsic::ID ID = IsLifetimeEnd ?
+        Intrinsic::lifetime_end : Intrinsic::invariant_end;
+
       auto Args = F->getFunctionType()->params();
-      Type* ObjectPtr[1] = {Args[2]};
-      if (F->getName() !=
-          Intrinsic::getName(Intrinsic::invariant_end, ObjectPtr)) {
+      Type* ObjectPtr[1] = {Args[IsLifetimeEnd ? 1 : 2]};
+      if (F->getName() != Intrinsic::getName(ID, ObjectPtr)) {
         rename(F);
-        NewFn = Intrinsic::getDeclaration(F->getParent(),
-                                          Intrinsic::invariant_end, ObjectPtr);
+        NewFn = Intrinsic::getDeclaration(F->getParent(), ID, ObjectPtr);
         return true;
       }
     }
@@ -798,6 +807,15 @@ static Value* upgradeMaskedMove(IRBuilder<> &Builder, CallInst &CI) {
   Value* Extract2 = Builder.CreateExtractElement(Src, (uint64_t)0);
   Value* Select = Builder.CreateSelect(Cmp, Extract1, Extract2);
   return Builder.CreateInsertElement(A, Select, (uint64_t)0);
+}
+
+
+static Value* UpgradeMaskToInt(IRBuilder<> &Builder, CallInst &CI) {
+  Value* Op = CI.getArgOperand(0);
+  Type* ReturnOp = CI.getType();
+  unsigned NumElts = CI.getType()->getVectorNumElements();
+  Value *Mask = getX86MaskVec(Builder, Op, NumElts);
+  return Builder.CreateSExt(Mask, ReturnOp, "vpmovm2");
 }
 
 /// Upgrade a call to an old intrinsic. All argument and return casting must be
@@ -1836,6 +1854,8 @@ void llvm::UpgradeIntrinsicCall(CallInst *CI, Function *NewFn) {
       Rep = UpgradeX86MaskedShift(Builder, *CI, IID);
     } else if (IsX86 && Name.startswith("avx512.mask.move.s")) {
       Rep = upgradeMaskedMove(Builder, *CI);
+    } else if (IsX86 && Name.startswith("avx512.cvtmask2")) {
+      Rep = UpgradeMaskToInt(Builder, *CI);
     } else if (IsX86 && Name.startswith("avx512.mask.vpermilvar.")) {
       Intrinsic::ID IID;
       if (Name.endswith("ps.128"))
@@ -1858,6 +1878,20 @@ void llvm::UpgradeIntrinsicCall(CallInst *CI, Function *NewFn) {
                                { CI->getArgOperand(0), CI->getArgOperand(1) });
       Rep = EmitX86Select(Builder, CI->getArgOperand(3), Rep,
                           CI->getArgOperand(2));
+    } else if (IsX86 && Name.endswith(".movntdqa")) {
+      Module *M = F->getParent();
+      MDNode *Node = MDNode::get(
+          C, ConstantAsMetadata::get(ConstantInt::get(Type::getInt32Ty(C), 1)));
+
+      Value *Ptr = CI->getArgOperand(0);
+      VectorType *VTy = cast<VectorType>(CI->getType());
+
+      // Convert the type of the pointer to a pointer to the stored type.
+      Value *BC =
+          Builder.CreateBitCast(Ptr, PointerType::getUnqual(VTy), "cast");
+      LoadInst *LI = Builder.CreateAlignedLoad(BC, VTy->getBitWidth() / 8);
+      LI->setMetadata(M->getMDKindID("nontemporal"), Node);
+      Rep = LI;
     } else if (IsNVVM && (Name == "abs.i" || Name == "abs.ll")) {
       Value *Arg = CI->getArgOperand(0);
       Value *Neg = Builder.CreateNeg(Arg, "neg");

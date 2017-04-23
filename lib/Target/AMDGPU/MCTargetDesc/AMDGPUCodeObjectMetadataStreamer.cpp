@@ -117,7 +117,7 @@ struct MappingTraits<Kernel::Arg::Metadata> {
   static void mapping(IO &YIO, Kernel::Arg::Metadata &MD) {
     YIO.mapRequired(Kernel::Arg::Key::Size, MD.mSize);
     YIO.mapRequired(Kernel::Arg::Key::Align, MD.mAlign);
-    YIO.mapRequired(Kernel::Arg::Key::Kind, MD.mValueKind);
+    YIO.mapRequired(Kernel::Arg::Key::ValueKind, MD.mValueKind);
     YIO.mapRequired(Kernel::Arg::Key::ValueType, MD.mValueType);
     YIO.mapOptional(Kernel::Arg::Key::PointeeAlign, MD.mPointeeAlign,
                     uint32_t(0));
@@ -264,20 +264,18 @@ AccessQualifier MetadataStreamer::getAccessQualifier(StringRef AccQual) const {
 
 AddressSpaceQualifier MetadataStreamer::getAddressSpaceQualifer(
     unsigned AddressSpace) const {
-  switch (AddressSpace) {
-  case AMDGPUAS::PRIVATE_ADDRESS:
+  if (AddressSpace == AMDGPUASI.PRIVATE_ADDRESS)
     return AddressSpaceQualifier::Private;
-  case AMDGPUAS::GLOBAL_ADDRESS:
+  if (AddressSpace == AMDGPUASI.GLOBAL_ADDRESS)
     return AddressSpaceQualifier::Global;
-  case AMDGPUAS::CONSTANT_ADDRESS:
+  if (AddressSpace == AMDGPUASI.CONSTANT_ADDRESS)
     return AddressSpaceQualifier::Constant;
-  case AMDGPUAS::LOCAL_ADDRESS:
+  if (AddressSpace == AMDGPUASI.LOCAL_ADDRESS)
     return AddressSpaceQualifier::Local;
-  case AMDGPUAS::FLAT_ADDRESS:
+  if (AddressSpace == AMDGPUASI.FLAT_ADDRESS)
     return AddressSpaceQualifier::Generic;
-  case AMDGPUAS::REGION_ADDRESS:
+  if (AddressSpace == AMDGPUASI.REGION_ADDRESS)
     return AddressSpaceQualifier::Region;
-  }
 
   llvm_unreachable("Unknown address space qualifier");
 }
@@ -304,7 +302,7 @@ ValueKind MetadataStreamer::getValueKind(Type *Ty, StringRef TypeQual,
                     "image3d_t", ValueKind::Image)
              .Default(isa<PointerType>(Ty) ?
                           (Ty->getPointerAddressSpace() ==
-                           AMDGPUAS::LOCAL_ADDRESS ?
+                           AMDGPUASI.LOCAL_ADDRESS ?
                            ValueKind::DynamicSharedPointer :
                            ValueKind::GlobalBuffer) :
                       ValueKind::ByValue);
@@ -460,7 +458,7 @@ void MetadataStreamer::emitKernelArgs(const Function &Func) {
     return;
 
   auto Int8PtrTy = Type::getInt8PtrTy(Func.getContext(),
-                                      AMDGPUAS::GLOBAL_ADDRESS);
+                                      AMDGPUASI.GLOBAL_ADDRESS);
   emitKernelArg(DL, Int8PtrTy, ValueKind::HiddenPrintfBuffer);
 }
 
@@ -480,9 +478,14 @@ void MetadataStreamer::emitKernelArg(const Argument &Arg) {
     BaseTypeName = cast<MDString>(Node->getOperand(ArgNo))->getString();
 
   StringRef AccQual;
-  Node = Func->getMetadata("kernel_arg_access_qual");
-  if (Node && ArgNo < Node->getNumOperands())
-    AccQual = cast<MDString>(Node->getOperand(ArgNo))->getString();
+  if (Arg.getType()->isPointerTy() && Arg.onlyReadsMemory() &&
+      Arg.hasNoAliasAttr()) {
+    AccQual = "read_only";
+  } else {
+    Node = Func->getMetadata("kernel_arg_access_qual");
+    if (Node && ArgNo < Node->getNumOperands())
+      AccQual = cast<MDString>(Node->getOperand(ArgNo))->getString();
+  }
 
   StringRef Name;
   Node = Func->getMetadata("kernel_arg_name");
@@ -513,7 +516,7 @@ void MetadataStreamer::emitKernelArg(const DataLayout &DL, Type *Ty,
 
   if (auto PtrTy = dyn_cast<PointerType>(Ty)) {
     auto ElTy = PtrTy->getElementType();
-    if (PtrTy->getAddressSpace() == AMDGPUAS::LOCAL_ADDRESS && ElTy->isSized())
+    if (PtrTy->getAddressSpace() == AMDGPUASI.LOCAL_ADDRESS && ElTy->isSized())
       Arg.mPointeeAlign = DL.getABITypeAlignment(ElTy);
   }
 
@@ -576,6 +579,7 @@ void MetadataStreamer::emitKernelDebugProps(
 }
 
 void MetadataStreamer::begin(const Module &Mod) {
+  AMDGPUASI = getAMDGPUAS(Mod);
   emitVersion();
   emitPrintf(Mod);
 }

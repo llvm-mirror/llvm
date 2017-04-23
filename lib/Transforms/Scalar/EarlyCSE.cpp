@@ -19,6 +19,8 @@
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/InstructionSimplify.h"
+#include "llvm/Analysis/MemorySSA.h"
+#include "llvm/Analysis/MemorySSAUpdater.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/IR/DataLayout.h"
@@ -32,8 +34,6 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/Local.h"
-#include "llvm/Transforms/Utils/MemorySSA.h"
-#include "llvm/Transforms/Utils/MemorySSAUpdater.h"
 #include <deque>
 using namespace llvm;
 using namespace llvm::PatternMatch;
@@ -392,7 +392,7 @@ private:
     ParseMemoryInst(Instruction *Inst, const TargetTransformInfo &TTI)
       : IsTargetMemInst(false), Inst(Inst) {
       if (IntrinsicInst *II = dyn_cast<IntrinsicInst>(Inst))
-        if (TTI.getTgtMemIntrinsic(II, Info) && Info.NumMemRefs == 1)
+        if (TTI.getTgtMemIntrinsic(II, Info))
           IsTargetMemInst = true;
     }
     bool isLoad() const {
@@ -404,17 +404,14 @@ private:
       return isa<StoreInst>(Inst);
     }
     bool isAtomic() const {
-      if (IsTargetMemInst) {
-        assert(Info.IsSimple && "need to refine IsSimple in TTI");
-        return false;
-      }
+      if (IsTargetMemInst)
+        return Info.Ordering != AtomicOrdering::NotAtomic;
       return Inst->isAtomic();
     }
     bool isUnordered() const {
-      if (IsTargetMemInst) {
-        assert(Info.IsSimple && "need to refine IsSimple in TTI");
-        return true;
-      }
+      if (IsTargetMemInst)
+        return Info.isUnordered();
+
       if (LoadInst *LI = dyn_cast<LoadInst>(Inst)) {
         return LI->isUnordered();
       } else if (StoreInst *SI = dyn_cast<StoreInst>(Inst)) {
@@ -425,10 +422,9 @@ private:
     }
 
     bool isVolatile() const {
-      if (IsTargetMemInst) {
-        assert(Info.IsSimple && "need to refine IsSimple in TTI");
-        return false;
-      }
+      if (IsTargetMemInst)
+        return Info.IsVolatile;
+
       if (LoadInst *LI = dyn_cast<LoadInst>(Inst)) {
         return LI->isVolatile();
       } else if (StoreInst *SI = dyn_cast<StoreInst>(Inst)) {

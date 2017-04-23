@@ -71,18 +71,14 @@ bool InstructionSelector::constrainSelectedInstRegOperands(
 bool InstructionSelector::isOperandImmEqual(
     const MachineOperand &MO, int64_t Value,
     const MachineRegisterInfo &MRI) const {
-  // TODO: We should also test isImm() and isCImm() too but this isn't required
-  //       until a DAGCombine equivalent is implemented.
 
-  if (MO.isReg()) {
-    MachineInstr *Def = MRI.getVRegDef(MO.getReg());
-    if (Def->getOpcode() != TargetOpcode::G_CONSTANT)
-      return false;
-    assert(Def->getOperand(1).isCImm() &&
-           "G_CONSTANT values must be constants");
-    const ConstantInt &Imm = *Def->getOperand(1).getCImm();
-    return Imm.getBitWidth() <= 64 && Imm.getSExtValue() == Value;
-  }
-
+  if (MO.getReg())
+    if (auto VRegVal = getConstantVRegVal(MO.getReg(), MRI))
+      return *VRegVal == Value;
   return false;
+}
+
+bool InstructionSelector::isObviouslySafeToFold(MachineInstr &MI) const {
+  return !MI.mayLoadOrStore() && !MI.hasUnmodeledSideEffects() &&
+         MI.implicit_operands().begin() == MI.implicit_operands().end();
 }

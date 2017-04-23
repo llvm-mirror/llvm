@@ -17,7 +17,7 @@
 // instruction cost model.
 
 def FalkorModel : SchedMachineModel {
-  let IssueWidth = 4;          // 4-wide issue for expanded uops.
+  let IssueWidth = 8;          // 8 uops are dispatched per cycle.
   let MicroOpBufferSize = 128; // Out-of-order with temporary unified issue buffer.
   let LoopMicroOpBufferSize = 16;
   let LoadLatency = 3;         // Optimistic load latency.
@@ -42,7 +42,11 @@ let SchedModel = FalkorModel in {
   def FalkorUnitVX   : ProcResource<1>; // Vector X-pipe
   def FalkorUnitVY   : ProcResource<1>; // Vector Y-pipe
 
+  def FalkorUnitGTOV : ProcResource<1>; // Scalar to Vector
+  def FalkorUnitVTOG : ProcResource<1>; // Vector to Scalar
+
   // Define the resource groups.
+  def FalkorUnitXY   : ProcResGroup<[FalkorUnitX, FalkorUnitY]>;
   def FalkorUnitXYZ  : ProcResGroup<[FalkorUnitX, FalkorUnitY, FalkorUnitZ]>;
   def FalkorUnitXYZB : ProcResGroup<[FalkorUnitX, FalkorUnitY, FalkorUnitZ,
                                      FalkorUnitB]>;
@@ -67,18 +71,18 @@ def : WriteRes<WriteExtr,  [FalkorUnitXYZ, FalkorUnitXYZ]>
       { let Latency = 2; let NumMicroOps = 2; }
 def : WriteRes<WriteIS,    [FalkorUnitXYZ]> { let Latency = 1; }
 def : WriteRes<WriteID32,  [FalkorUnitX, FalkorUnitZ]>
-      { let Latency = 8; let NumMicroOps = 1; } // Fragent -1
+      { let Latency = 8; let NumMicroOps = 2; }
 def : WriteRes<WriteID64,  [FalkorUnitX, FalkorUnitZ]>
-      { let Latency = 8; let NumMicroOps = 1; } // Fragent -1
+      { let Latency = 16; let NumMicroOps = 2; }
 def : WriteRes<WriteIM32,  [FalkorUnitX]> { let Latency = 4; }
-def : WriteRes<WriteIM64,  [FalkorUnitX]> { let Latency = 4; }
+def : WriteRes<WriteIM64,  [FalkorUnitX]> { let Latency = 5; }
 def : WriteRes<WriteBr,    [FalkorUnitB]> { let Latency = 1; }
 def : WriteRes<WriteBrReg, [FalkorUnitB]> { let Latency = 1; }
 def : WriteRes<WriteLD,    [FalkorUnitLD]> { let Latency = 3; }
 def : WriteRes<WriteST,    [FalkorUnitLD, FalkorUnitST, FalkorUnitSD]>
       { let Latency = 3; let NumMicroOps = 3; }
 def : WriteRes<WriteSTP,   [FalkorUnitST, FalkorUnitSD]>
-      { let Latency = 3; let NumMicroOps = 2; }
+      { let Latency = 0; let NumMicroOps = 2; }
 def : WriteRes<WriteAdr,   [FalkorUnitXYZ]> { let Latency = 5; }
 def : WriteRes<WriteLDIdx, [FalkorUnitLD]> { let Latency = 5; }
 def : WriteRes<WriteSTIdx, [FalkorUnitLD, FalkorUnitST, FalkorUnitSD]>
@@ -95,7 +99,8 @@ def : WriteRes<WriteFDiv,  [FalkorUnitVXVY, FalkorUnitVXVY]>
       { let Latency = 12; let NumMicroOps = 2; } // Fragent -1 / NoRSV +1
 def : WriteRes<WriteV,     [FalkorUnitVXVY]> { let Latency = 6; }
 def : WriteRes<WriteVLD,   [FalkorUnitLD]> { let Latency = 3; }
-def : WriteRes<WriteVST,   [FalkorUnitST]> { let Latency = 4; }
+def : WriteRes<WriteVST,   [FalkorUnitST, FalkorUnitVSD]>
+      { let Latency = 0; let NumMicroOps = 2; }
 
 def : WriteRes<WriteSys,     []> { let Latency = 1; }
 def : WriteRes<WriteBarrier, []> { let Latency = 1; }
@@ -116,93 +121,8 @@ def : ReadAdvance<ReadExtrHi,  0>;
 def : ReadAdvance<ReadAdrBase, 0>;
 def : ReadAdvance<ReadVLD,     0>;
 
-//===----------------------------------------------------------------------===//
-// Specialize the coarse model by associating instruction groups with the
-// subtarget-defined types. As the modeled is refined, this will override most
-// of the above SchedWriteRes and SchedAlias mappings.
-
+// Detailed Refinements
 // -----------------------------------------------------------------------------
-// Miscellaneous
-// -----------------------------------------------------------------------------
-
-def : InstRW<[WriteI], (instrs COPY)>;
-
-// -----------------------------------------------------------------------------
-// Vector Loads
-// -----------------------------------------------------------------------------
-def : InstRW<[WriteVLD], (instregex "LD1i(8|16|32|64)$")>;
-def : InstRW<[WriteVLD], (instregex "LD1Rv(8b|4h|2s|1d|16b|8h|4s|2d)$")>;
-def : InstRW<[WriteVLD], (instregex "LD1Onev(8b|4h|2s|1d|16b|8h|4s|2d)$")>;
-def : InstRW<[WriteVLD], (instregex "LD1Twov(8b|4h|2s|1d|16b|8h|4s|2d)$")>;
-def : InstRW<[WriteVLD], (instregex "LD1Threev(8b|4h|2s|1d|16b|8h|4s|2d)$")>;
-def : InstRW<[WriteVLD], (instregex "LD1Fourv(8b|4h|2s|1d|16b|8h|4s|2d)$")>;
-def : InstRW<[WriteVLD, WriteAdr], (instregex "LD1i(8|16|32|64)_POST$")>;
-def : InstRW<[WriteVLD, WriteAdr], (instregex "LD1Rv(8b|4h|2s|1d|16b|8h|4s|2d)_POST$")>;
-def : InstRW<[WriteVLD, WriteAdr], (instregex "LD1Onev(8b|4h|2s|1d|16b|8h|4s|2d)_POST$")>;
-def : InstRW<[WriteVLD, WriteAdr], (instregex "LD1Twov(8b|4h|2s|1d|16b|8h|4s|2d)_POST$")>;
-def : InstRW<[WriteVLD, WriteAdr], (instregex "LD1Threev(8b|4h|2s|1d|16b|8h|4s|2d)_POST$")>;
-def : InstRW<[WriteVLD, WriteAdr], (instregex "LD1Fourv(8b|4h|2s|1d|16b|8h|4s|2d)_POST$")>;
-
-def : InstRW<[WriteVLD], (instregex "LD2i(8|16|32|64)$")>;
-def : InstRW<[WriteVLD], (instregex "LD2Rv(8b|4h|2s|1d|16b|8h|4s|2d)$")>;
-def : InstRW<[WriteVLD], (instregex "LD2Twov(8b|4h|2s)$")>;
-def : InstRW<[WriteVLD], (instregex "LD2Twov(16b|8h|4s|2d)$")>;
-def : InstRW<[WriteVLD, WriteAdr], (instregex "LD2i(8|16|32|64)(_POST)?$")>;
-def : InstRW<[WriteVLD, WriteAdr], (instregex "LD2Rv(8b|4h|2s|1d|16b|8h|4s|2d)(_POST)?$")>;
-def : InstRW<[WriteVLD, WriteAdr], (instregex "LD2Twov(8b|4h|2s)(_POST)?$")>;
-def : InstRW<[WriteVLD, WriteAdr], (instregex "LD2Twov(16b|8h|4s|2d)(_POST)?$")>;
-
-def : InstRW<[WriteVLD], (instregex "LD3i(8|16|32|64)$")>;
-def : InstRW<[WriteVLD], (instregex "LD3Rv(8b|4h|2s|1d|16b|8h|4s|2d)$")>;
-def : InstRW<[WriteVLD], (instregex "LD3Threev(8b|4h|2s|1d|16b|8h|4s)$")>;
-def : InstRW<[WriteVLD], (instregex "LD3Threev(2d)$")>;
-def : InstRW<[WriteVLD, WriteAdr], (instregex "LD3i(8|16|32|64)_POST$")>;
-def : InstRW<[WriteVLD, WriteAdr], (instregex "LD3Rv(8b|4h|2s|1d|16b|8h|4s|2d)_POST$")>;
-def : InstRW<[WriteVLD, WriteAdr], (instregex "LD3Threev(8b|4h|2s|1d|16b|8h|4s)_POST$")>;
-def : InstRW<[WriteVLD, WriteAdr], (instregex "LD3Threev(2d)_POST$")>;
-
-def : InstRW<[WriteVLD], (instregex "LD4i(8|16|32|64)$")>;
-def : InstRW<[WriteVLD], (instregex "LD4Rv(8b|4h|2s|1d|16b|8h|4s|2d)$")>;
-def : InstRW<[WriteVLD], (instregex "LD4Fourv(8b|4h|2s|1d|16b|8h|4s)$")>;
-def : InstRW<[WriteVLD], (instregex "LD4Fourv(2d)$")>;
-def : InstRW<[WriteVLD, WriteAdr], (instregex "LD4i(8|16|32|64)_POST$")>;
-def : InstRW<[WriteVLD, WriteAdr], (instregex "LD4Rv(8b|4h|2s|1d|16b|8h|4s|2d)_POST$")>;
-def : InstRW<[WriteVLD, WriteAdr], (instregex "LD4Fourv(8b|4h|2s|1d|16b|8h|4s)_POST$")>;
-def : InstRW<[WriteVLD, WriteAdr], (instregex "LD4Fourv(2d)_POST$")>;
-
-// -----------------------------------------------------------------------------
-// Vector Stores
-// -----------------------------------------------------------------------------
-def : InstRW<[WriteVST], (instregex "ST1i(8|16|32|64)$")>;
-def : InstRW<[WriteVST], (instregex "ST1Onev(8b|4h|2s|1d|16b|8h|4s|2d)$")>;
-def : InstRW<[WriteVST], (instregex "ST1Twov(8b|4h|2s|1d|16b|8h|4s|2d)$")>;
-def : InstRW<[WriteVST], (instregex "ST1Threev(8b|4h|2s|1d|16b|8h|4s|2d)$")>;
-def : InstRW<[WriteVST], (instregex "ST1Fourv(8b|4h|2s|1d|16b|8h|4s|2d)$")>;
-def : InstRW<[WriteVST, WriteAdr], (instregex "ST1i(8|16|32|64)_POST$")>;
-def : InstRW<[WriteVST, WriteAdr], (instregex "ST1Onev(8b|4h|2s|1d|16b|8h|4s|2d)_POST$")>;
-def : InstRW<[WriteVST, WriteAdr], (instregex "ST1Twov(8b|4h|2s|1d|16b|8h|4s|2d)_POST$")>;
-def : InstRW<[WriteVST, WriteAdr], (instregex "ST1Threev(8b|4h|2s|1d|16b|8h|4s|2d)_POST$")>;
-def : InstRW<[WriteVST, WriteAdr], (instregex "ST1Fourv(8b|4h|2s|1d|16b|8h|4s|2d)_POST$")>;
-
-def : InstRW<[WriteVST], (instregex "ST2i(8|16|32|64)$")>;
-def : InstRW<[WriteVST], (instregex "ST2Twov(8b|4h|2s)$")>;
-def : InstRW<[WriteVST], (instregex "ST2Twov(16b|8h|4s|2d)$")>;
-def : InstRW<[WriteVST, WriteAdr], (instregex "ST2i(8|16|32|64)_POST$")>;
-def : InstRW<[WriteVST, WriteAdr], (instregex "ST2Twov(8b|4h|2s)_POST$")>;
-def : InstRW<[WriteVST, WriteAdr], (instregex "ST2Twov(16b|8h|4s|2d)_POST$")>;
-
-def : InstRW<[WriteVST], (instregex "ST3i(8|16|32|64)$")>;
-def : InstRW<[WriteVST], (instregex "ST3Threev(8b|4h|2s|1d|16b|8h|4s)$")>;
-def : InstRW<[WriteVST], (instregex "ST3Threev(2d)$")>;
-def : InstRW<[WriteVST, WriteAdr], (instregex "ST3i(8|16|32|64)_POST$")>;
-def : InstRW<[WriteVST, WriteAdr], (instregex "ST3Threev(8b|4h|2s|1d|16b|8h|4s)_POST$")>;
-def : InstRW<[WriteVST, WriteAdr], (instregex "ST3Threev(2d)_POST$")>;
-
-def : InstRW<[WriteVST], (instregex "ST4i(8|16|32|64)$")>;
-def : InstRW<[WriteVST], (instregex "ST4Fourv(8b|4h|2s|1d|16b|8h|4s)$")>;
-def : InstRW<[WriteVST], (instregex "ST4Fourv(2d)$")>;
-def : InstRW<[WriteVST, WriteAdr], (instregex "ST4i(8|16|32|64)_POST$")>;
-def : InstRW<[WriteVST, WriteAdr], (instregex "ST4Fourv(8b|4h|2s|1d|16b|8h|4s)_POST$")>;
-def : InstRW<[WriteVST, WriteAdr], (instregex "ST4Fourv(2d)_POST$")>;
+include "AArch64SchedFalkorDetails.td"
 
 }

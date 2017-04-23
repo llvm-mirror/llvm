@@ -1852,10 +1852,11 @@ public:
 
   // Helper function for printOptions().
   // It shall return a negative value if A's name should be lexicographically
-  // ordered before B's name. It returns a value greater equal zero otherwise.
+  // ordered before B's name. It returns a value greater than zero if B's name
+  // should be ordered before A's name, and it returns 0 otherwise.
   static int OptionCategoryCompare(OptionCategory *const *A,
                                    OptionCategory *const *B) {
-    return (*A)->getName() == (*B)->getName();
+    return (*A)->getName().compare((*B)->getName());
   }
 
   // Make sure we inherit our base class's operator=()
@@ -2068,12 +2069,15 @@ public:
 #ifndef NDEBUG
     OS << " with assertions";
 #endif
+#if LLVM_VERSION_PRINTER_SHOW_HOST_TARGET_INFO
     std::string CPU = sys::getHostCPUName();
     if (CPU == "generic")
       CPU = "(unknown)";
     OS << ".\n"
        << "  Default target: " << sys::getDefaultTargetTriple() << '\n'
-       << "  Host CPU: " << CPU << '\n';
+       << "  Host CPU: " << CPU;
+#endif
+    OS << '\n';
   }
   void operator=(bool OptionWasSpecified) {
     if (!OptionWasSpecified)

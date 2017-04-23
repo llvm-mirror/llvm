@@ -62,6 +62,17 @@ define i32 @test6(i32 %A, i32 %B) {
   ret i32 %D
 }
 
+define i32 @test6commuted(i32 %A, i32 %B) {
+; CHECK-LABEL: @test6commuted(
+; CHECK-NEXT:    [[B_NOT:%.*]] = xor i32 [[B:%.*]], -1
+; CHECK-NEXT:    [[D:%.*]] = and i32 [[B_NOT]], [[A:%.*]]
+; CHECK-NEXT:    ret i32 [[D]]
+;
+  %C = and i32 %B, %A
+  %D = sub i32 %A, %C
+  ret i32 %D
+}
+
 define i32 @test7(i32 %A) {
 ; CHECK-LABEL: @test7(
 ; CHECK-NEXT:    [[B:%.*]] = xor i32 [[A:%.*]], -1
@@ -395,6 +406,83 @@ define i32 @test27(i32 %x, i32 %y) {
   ret i32 %sub
 }
 
+define <2 x i32> @test27vec(<2 x i32> %x, <2 x i32> %y) {
+; CHECK-LABEL: @test27vec(
+; CHECK-NEXT:    [[TMP1:%.*]] = mul <2 x i32> [[Y:%.*]], <i32 8, i32 6>
+; CHECK-NEXT:    [[SUB:%.*]] = add <2 x i32> [[TMP1]], [[X:%.*]]
+; CHECK-NEXT:    ret <2 x i32> [[SUB]]
+;
+  %mul = mul <2 x i32> %y, <i32 -8, i32 -6>
+  %sub = sub <2 x i32> %x, %mul
+  ret <2 x i32> %sub
+}
+
+define <2 x i32> @test27vecsplat(<2 x i32> %x, <2 x i32> %y) {
+; CHECK-LABEL: @test27vecsplat(
+; CHECK-NEXT:    [[TMP1:%.*]] = shl <2 x i32> [[Y:%.*]], <i32 3, i32 3>
+; CHECK-NEXT:    [[SUB:%.*]] = add <2 x i32> [[TMP1]], [[X:%.*]]
+; CHECK-NEXT:    ret <2 x i32> [[SUB]]
+;
+  %mul = mul <2 x i32> %y, <i32 -8, i32 -8>
+  %sub = sub <2 x i32> %x, %mul
+  ret <2 x i32> %sub
+}
+
+define <2 x i32> @test27vecmixed(<2 x i32> %x, <2 x i32> %y) {
+; CHECK-LABEL: @test27vecmixed(
+; CHECK-NEXT:    [[TMP1:%.*]] = mul <2 x i32> [[Y:%.*]], <i32 8, i32 -8>
+; CHECK-NEXT:    [[SUB:%.*]] = add <2 x i32> [[TMP1]], [[X:%.*]]
+; CHECK-NEXT:    ret <2 x i32> [[SUB]]
+;
+  %mul = mul <2 x i32> %y, <i32 -8, i32 8>
+  %sub = sub <2 x i32> %x, %mul
+  ret <2 x i32> %sub
+}
+
+define i32 @test27commuted(i32 %x, i32 %y) {
+; CHECK-LABEL: @test27commuted(
+; CHECK-NEXT:    [[TMP1:%.*]] = shl i32 [[Y:%.*]], 3
+; CHECK-NEXT:    [[SUB:%.*]] = add i32 [[TMP1]], [[X:%.*]]
+; CHECK-NEXT:    ret i32 [[SUB]]
+;
+  %mul = mul i32 -8, %y
+  %sub = sub i32 %x, %mul
+  ret i32 %sub
+}
+
+define <2 x i32> @test27commutedvec(<2 x i32> %x, <2 x i32> %y) {
+; CHECK-LABEL: @test27commutedvec(
+; CHECK-NEXT:    [[TMP1:%.*]] = mul <2 x i32> [[Y:%.*]], <i32 8, i32 6>
+; CHECK-NEXT:    [[SUB:%.*]] = add <2 x i32> [[TMP1]], [[X:%.*]]
+; CHECK-NEXT:    ret <2 x i32> [[SUB]]
+;
+  %mul = mul <2 x i32> <i32 -8, i32 -6>, %y
+  %sub = sub <2 x i32> %x, %mul
+  ret <2 x i32> %sub
+}
+
+define <2 x i32> @test27commutedvecsplat(<2 x i32> %x, <2 x i32> %y) {
+; CHECK-LABEL: @test27commutedvecsplat(
+; CHECK-NEXT:    [[TMP1:%.*]] = shl <2 x i32> [[Y:%.*]], <i32 3, i32 3>
+; CHECK-NEXT:    [[SUB:%.*]] = add <2 x i32> [[TMP1]], [[X:%.*]]
+; CHECK-NEXT:    ret <2 x i32> [[SUB]]
+;
+  %mul = mul <2 x i32> <i32 -8, i32 -8>, %y
+  %sub = sub <2 x i32> %x, %mul
+  ret <2 x i32> %sub
+}
+
+define <2 x i32> @test27commutedvecmixed(<2 x i32> %x, <2 x i32> %y) {
+; CHECK-LABEL: @test27commutedvecmixed(
+; CHECK-NEXT:    [[TMP1:%.*]] = mul <2 x i32> [[Y:%.*]], <i32 8, i32 -8>
+; CHECK-NEXT:    [[SUB:%.*]] = add <2 x i32> [[TMP1]], [[X:%.*]]
+; CHECK-NEXT:    ret <2 x i32> [[SUB]]
+;
+  %mul = mul <2 x i32> <i32 -8, i32 8>, %y
+  %sub = sub <2 x i32> %x, %mul
+  ret <2 x i32> %sub
+}
+
 define i32 @test28(i32 %x, i32 %y, i32 %z) {
 ; CHECK-LABEL: @test28(
 ; CHECK-NEXT:    [[TMP1:%.*]] = mul i32 [[Z:%.*]], [[Y:%.*]]
@@ -403,6 +491,18 @@ define i32 @test28(i32 %x, i32 %y, i32 %z) {
 ;
   %neg = sub i32 0, %z
   %mul = mul i32 %neg, %y
+  %sub = sub i32 %x, %mul
+  ret i32 %sub
+}
+
+define i32 @test28commuted(i32 %x, i32 %y, i32 %z) {
+; CHECK-LABEL: @test28commuted(
+; CHECK-NEXT:    [[TMP1:%.*]] = mul i32 [[Y:%.*]], [[Z:%.*]]
+; CHECK-NEXT:    [[SUB:%.*]] = add i32 [[TMP1]], [[X:%.*]]
+; CHECK-NEXT:    ret i32 [[SUB]]
+;
+  %neg = sub i32 0, %z
+  %mul = mul i32 %y, %neg
   %sub = sub i32 %x, %mul
   ret i32 %sub
 }
@@ -614,6 +714,17 @@ define i32 @test45(i32 %x, i32 %y) {
   ret i32 %sub
 }
 
+define i32 @test45commuted(i32 %x, i32 %y) {
+; CHECK-LABEL: @test45commuted(
+; CHECK-NEXT:    [[SUB:%.*]] = and i32 [[Y:%.*]], [[X:%.*]]
+; CHECK-NEXT:    ret i32 [[SUB]]
+;
+  %or = or i32 %x, %y
+  %xor = xor i32 %y, %x
+  %sub = sub i32 %or, %xor
+  ret i32 %sub
+}
+
 define i32 @test46(i32 %x, i32 %y) {
 ; CHECK-LABEL: @test46(
 ; CHECK-NEXT:    [[X_NOT:%.*]] = xor i32 [[X:%.*]], -1
@@ -621,6 +732,17 @@ define i32 @test46(i32 %x, i32 %y) {
 ; CHECK-NEXT:    ret i32 [[SUB]]
 ;
   %or = or i32 %x, %y
+  %sub = sub i32 %or, %x
+  ret i32 %sub
+}
+
+define i32 @test46commuted(i32 %x, i32 %y) {
+; CHECK-LABEL: @test46commuted(
+; CHECK-NEXT:    [[X_NOT:%.*]] = xor i32 [[X:%.*]], -1
+; CHECK-NEXT:    [[SUB:%.*]] = and i32 [[X_NOT]], [[Y:%.*]]
+; CHECK-NEXT:    ret i32 [[SUB]]
+;
+  %or = or i32 %y, %x
   %sub = sub i32 %or, %x
   ret i32 %sub
 }
@@ -744,3 +866,126 @@ define i32 @test52(i32 %X) {
   %res = and i32 %sub, 127
   ret i32 %res
 }
+
+define <2 x i1> @test53(<2 x i1> %A, <2 x i1> %B) {
+; CHECK-LABEL: @test53(
+; CHECK-NEXT:    [[SUB:%.*]] = xor <2 x i1> [[A:%.*]], [[B:%.*]]
+; CHECK-NEXT:    ret <2 x i1> [[SUB]]
+;
+  %sub = sub <2 x i1> %A, %B
+  ret <2 x i1> %sub
+}
+
+define i32 @test54(i1 %C) {
+; CHECK-LABEL: @test54(
+; CHECK-NEXT:    [[V:%.*]] = select i1 [[C:%.*]], i32 -877, i32 113
+; CHECK-NEXT:    ret i32 [[V]]
+;
+  %A = select i1 %C, i32 1000, i32 10
+  %V = sub i32 123, %A
+  ret i32 %V
+}
+
+define <2 x i32> @test54vec(i1 %C) {
+; CHECK-LABEL: @test54vec(
+; CHECK-NEXT:    [[V:%.*]] = select i1 [[C:%.*]], <2 x i32> <i32 -877, i32 -877>, <2 x i32> <i32 113, i32 113>
+; CHECK-NEXT:    ret <2 x i32> [[V]]
+;
+  %A = select i1 %C, <2 x i32> <i32 1000, i32 1000>, <2 x i32> <i32 10, i32 10>
+  %V = sub <2 x i32> <i32 123, i32 123>, %A
+  ret <2 x i32> %V
+}
+
+define <2 x i32> @test54vec2(i1 %C) {
+; CHECK-LABEL: @test54vec2(
+; CHECK-NEXT:    [[V:%.*]] = select i1 [[C:%.*]], <2 x i32> <i32 -877, i32 -2167>, <2 x i32> <i32 113, i32 303>
+; CHECK-NEXT:    ret <2 x i32> [[V]]
+;
+  %A = select i1 %C, <2 x i32> <i32 1000, i32 2500>, <2 x i32> <i32 10, i32 30>
+  %V = sub <2 x i32> <i32 123, i32 333>, %A
+  ret <2 x i32> %V
+}
+
+define i32 @test55(i1 %which) {
+; CHECK-LABEL: @test55(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    br i1 [[WHICH:%.*]], label [[FINAL:%.*]], label [[DELAY:%.*]]
+; CHECK:       delay:
+; CHECK-NEXT:    br label [[FINAL]]
+; CHECK:       final:
+; CHECK-NEXT:    [[A:%.*]] = phi i32 [ -877, [[ENTRY:%.*]] ], [ 113, [[DELAY]] ]
+; CHECK-NEXT:    ret i32 [[A]]
+;
+entry:
+  br i1 %which, label %final, label %delay
+
+delay:
+  br label %final
+
+final:
+  %A = phi i32 [ 1000, %entry ], [ 10, %delay ]
+  %value = sub i32 123, %A
+  ret i32 %value
+}
+
+define <2 x i32> @test55vec(i1 %which) {
+; CHECK-LABEL: @test55vec(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    br i1 [[WHICH:%.*]], label [[FINAL:%.*]], label [[DELAY:%.*]]
+; CHECK:       delay:
+; CHECK-NEXT:    br label [[FINAL]]
+; CHECK:       final:
+; CHECK-NEXT:    [[A:%.*]] = phi <2 x i32> [ <i32 -877, i32 -877>, [[ENTRY:%.*]] ], [ <i32 113, i32 113>, [[DELAY]] ]
+; CHECK-NEXT:    ret <2 x i32> [[A]]
+;
+entry:
+  br i1 %which, label %final, label %delay
+
+delay:
+  br label %final
+
+final:
+  %A = phi <2 x i32> [ <i32 1000, i32 1000>, %entry ], [ <i32 10, i32 10>, %delay ]
+  %value = sub <2 x i32> <i32 123, i32 123>, %A
+  ret <2 x i32> %value
+}
+
+define <2 x i32> @test55vec2(i1 %which) {
+; CHECK-LABEL: @test55vec2(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    br i1 [[WHICH:%.*]], label [[FINAL:%.*]], label [[DELAY:%.*]]
+; CHECK:       delay:
+; CHECK-NEXT:    br label [[FINAL]]
+; CHECK:       final:
+; CHECK-NEXT:    [[A:%.*]] = phi <2 x i32> [ <i32 -877, i32 -2167>, [[ENTRY:%.*]] ], [ <i32 113, i32 303>, [[DELAY]] ]
+; CHECK-NEXT:    ret <2 x i32> [[A]]
+;
+entry:
+  br i1 %which, label %final, label %delay
+
+delay:
+  br label %final
+
+final:
+  %A = phi <2 x i32> [ <i32 1000, i32 2500>, %entry ], [ <i32 10, i32 30>, %delay ]
+  %value = sub <2 x i32> <i32 123, i32 333>, %A
+  ret <2 x i32> %value
+}
+
+define i32 @test56(i32 %A, i32 %B) {
+; CHECK-LABEL: @test56(
+; CHECK-NEXT:    [[Y:%.*]] = sub i32 0, [[B:%.*]]
+; CHECK-NEXT:    ret i32 [[Y]]
+;
+  %X = add i32 %A, %B
+  %Y = sub i32 %A, %X
+  ret i32 %Y                                                                                                                                                                                                                                             }
+
+define i32 @test57(i32 %A, i32 %B) {
+; CHECK-LABEL: @test57(
+; CHECK-NEXT:    [[Y:%.*]] = sub i32 0, [[B:%.*]]
+; CHECK-NEXT:    ret i32 [[Y]]
+;
+  %X = add i32 %B, %A
+  %Y = sub i32 %A, %X
+  ret i32 %Y                                                                                                                                                                                                                                             }

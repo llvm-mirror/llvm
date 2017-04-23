@@ -531,6 +531,10 @@ namespace llvm {
       return true;
     }
 
+    bool convertSetCCLogicToBitwiseLogic(EVT VT) const override {
+      return VT.isScalarInteger();
+    }
+
     bool supportSplitCSR(MachineFunction *MF) const override {
       return
         MF->getFunction()->getCallingConv() == CallingConv::CXX_FAST_TLS &&
@@ -604,6 +608,7 @@ namespace llvm {
     void computeKnownBitsForTargetNode(const SDValue Op,
                                        APInt &KnownZero,
                                        APInt &KnownOne,
+                                       const APInt &DemandedElts,
                                        const SelectionDAG &DAG,
                                        unsigned Depth = 0) const override;
 

@@ -1,6 +1,5 @@
 ; RUN: llc -mtriple=x86_64-unknown-unknown -mattr=+avx -fixup-byte-word-insts=1 < %s | FileCheck -check-prefix=CHECK -check-prefix=BWON %s
 ; RUN: llc -mtriple=x86_64-unknown-unknown -mattr=+avx -fixup-byte-word-insts=0 < %s | FileCheck -check-prefix=CHECK -check-prefix=BWOFF %s
-; RUN: llc -mtriple=x86_64-unknown-unknown -mattr=+avx -addr-sink-using-gep=1 < %s | FileCheck -check-prefix=CHECK -check-prefix=BWON %s
 
 %struct.A = type { i8, i8, i8, i8, i8, i8, i8, i8 }
 %struct.B = type { i32, i32, i32, i32, i32, i32, i32, i32 }
@@ -582,4 +581,23 @@ define void @merge_vec_element_and_scalar_load([6 x i64]* %array) {
 ; CHECK-NEXT: movq	%rax, 32(%rdi)
 ; CHECK-NEXT: movq	%rcx, 40(%rdi)
 ; CHECK-NEXT: retq
+}
+
+
+
+; Don't let a non-consecutive store thwart merging of the last two.
+define void @almost_consecutive_stores(i8* %p) {
+  store i8 0, i8* %p
+  %p1 = getelementptr i8, i8* %p, i64 42
+  store i8 1, i8* %p1
+  %p2 = getelementptr i8, i8* %p, i64 2
+  store i8 2, i8* %p2
+  %p3 = getelementptr i8, i8* %p, i64 3
+  store i8 3, i8* %p3
+  ret void
+; CHECK-LABEL: almost_consecutive_stores
+; CHECK-DAG: movb $0, (%rdi)
+; CHECK-DAG: movb $1, 42(%rdi)
+; CHECK-DAG: movw $770, 2(%rdi)
+; CHECK: retq
 }

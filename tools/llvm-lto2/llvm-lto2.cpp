@@ -21,12 +21,12 @@
 #include "llvm/IR/DiagnosticPrinter.h"
 #include "llvm/LTO/LTO.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/Threading.h"
 
 using namespace llvm;
 using namespace lto;
-using namespace object;
 
 static cl::opt<char>
     OptLevel("O", cl::desc("Optimization level. [-O0, -O1, -O2, or -O3] "
@@ -126,12 +126,12 @@ template <typename T> static T check(ErrorOr<T> E, std::string Msg) {
   return T();
 }
 
-int main(int argc, char **argv) {
-  InitializeAllTargets();
-  InitializeAllTargetMCs();
-  InitializeAllAsmPrinters();
-  InitializeAllAsmParsers();
+static int usage() {
+  errs() << "Available subcommands: dump-symtab run\n";
+  return 1;
+}
 
+static int run(int argc, char **argv) {
   cl::ParseCommandLineOptions(argc, argv, "Resolution-based LTO test harness");
 
   // FIXME: Workaround PR30396 which means that a symbol can appear
@@ -284,4 +284,83 @@ int main(int argc, char **argv) {
     Cache = check(localCache(CacheDir, AddBuffer), "failed to create cache");
 
   check(Lto.run(AddStream, Cache), "LTO::run failed");
+  return 0;
+}
+
+static int dumpSymtab(int argc, char **argv) {
+  for (StringRef F : make_range(argv + 1, argv + argc)) {
+    std::unique_ptr<MemoryBuffer> MB = check(MemoryBuffer::getFile(F), F);
+    std::unique_ptr<InputFile> Input =
+        check(InputFile::create(MB->getMemBufferRef()), F);
+
+    outs() << "target triple: " << Input->getTargetTriple() << '\n';
+    Triple TT(Input->getTargetTriple());
+
+    outs() << "source filename: " << Input->getSourceFileName() << '\n';
+
+    if (TT.isOSBinFormatCOFF())
+      outs() << "linker opts: " << Input->getCOFFLinkerOpts() << '\n';
+
+    std::vector<StringRef> ComdatTable = Input->getComdatTable();
+    for (const InputFile::Symbol &Sym : Input->symbols()) {
+      switch (Sym.getVisibility()) {
+      case GlobalValue::HiddenVisibility:
+        outs() << 'H';
+        break;
+      case GlobalValue::ProtectedVisibility:
+        outs() << 'P';
+        break;
+      case GlobalValue::DefaultVisibility:
+        outs() << 'D';
+        break;
+      }
+
+      auto PrintBool = [&](char C, bool B) { outs() << (B ? C : '-'); };
+      PrintBool('U', Sym.isUndefined());
+      PrintBool('C', Sym.isCommon());
+      PrintBool('W', Sym.isWeak());
+      PrintBool('I', Sym.isIndirect());
+      PrintBool('O', Sym.canBeOmittedFromSymbolTable());
+      PrintBool('T', Sym.isTLS());
+      PrintBool('X', Sym.isExecutable());
+      outs() << ' ' << Sym.getName() << '\n';
+
+      if (Sym.isCommon())
+        outs() << "         size " << Sym.getCommonSize() << " align "
+               << Sym.getCommonAlignment() << '\n';
+
+      int Comdat = Sym.getComdatIndex();
+      if (Comdat != -1)
+        outs() << "         comdat " << ComdatTable[Comdat] << '\n';
+
+      if (TT.isOSBinFormatCOFF() && Sym.isWeak() && Sym.isIndirect())
+        outs() << "         fallback " << Sym.getCOFFWeakExternalFallback() << '\n';
+    }
+
+    outs() << '\n';
+  }
+
+  return 0;
+}
+
+int main(int argc, char **argv) {
+  InitializeAllTargets();
+  InitializeAllTargetMCs();
+  InitializeAllAsmPrinters();
+  InitializeAllAsmParsers();
+
+  // FIXME: This should use llvm::cl subcommands, but it isn't currently
+  // possible to pass an argument not associated with a subcommand to a
+  // subcommand (e.g. -lto-use-new-pm).
+  if (argc < 2)
+    return usage();
+
+  StringRef Subcommand = argv[1];
+  // Ensure that argv[0] is correct after adjusting argv/argc.
+  argv[1] = argv[0];
+  if (Subcommand == "dump-symtab")
+    return dumpSymtab(argc - 1, argv + 1);
+  if (Subcommand == "run")
+    return run(argc - 1, argv + 1);
+  return usage();
 }

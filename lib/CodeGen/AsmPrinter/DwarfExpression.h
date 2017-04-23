@@ -102,6 +102,9 @@ protected:
   unsigned SubRegisterSizeInBits = 0;
   unsigned SubRegisterOffsetInBits = 0;
 
+  /// The kind of location description being produced.
+  enum { Unknown = 0, Register, Memory, Implicit } LocationKind = Unknown;
+
   /// Push a DW_OP_piece / DW_OP_bit_piece for emitting later, if one is needed
   /// to represent a subregister.
   void setSubRegisterPiece(unsigned SizeInBits, unsigned OffsetInBits) {
@@ -122,7 +125,8 @@ protected:
   /// current function.
   virtual bool isFrameRegister(const TargetRegisterInfo &TRI, unsigned MachineReg) = 0;
 
-  /// Emit a DW_OP_reg operation.
+  /// Emit a DW_OP_reg operation. Note that this is only legal inside a DWARF
+  /// register location description.
   void addReg(int DwarfReg, const char *Comment = nullptr);
   /// Emit a DW_OP_breg operation.
   void addBReg(int DwarfReg, int Offset);
@@ -171,9 +175,9 @@ protected:
   /// expression.  See PR21176 for more details.
   void addStackValue();
 
+  ~DwarfExpression() = default;
 public:
   DwarfExpression(unsigned DwarfVersion) : DwarfVersion(DwarfVersion) {}
-  virtual ~DwarfExpression() {};
 
   /// This needs to be called last to commit any pending changes.
   void finalize();
@@ -185,11 +189,18 @@ public:
   /// Emit an unsigned constant.
   void addUnsignedConstant(const APInt &Value);
 
+  /// Lock this down to become a memory location description.
+  void setMemoryLocationKind() {
+    assert(LocationKind == Unknown);
+    LocationKind = Memory;
+  }
+
   /// Emit a machine register location. As an optimization this may also consume
   /// the prefix of a DwarfExpression if a more efficient representation for
   /// combining the register location and the first operation exists.
   ///
-  /// \param FragmentOffsetInBits     If this is one fragment out of a fragmented
+  /// \param FragmentOffsetInBits     If this is one fragment out of a
+  /// fragmented
   ///                                 location, this is the offset of the
   ///                                 fragment inside the entire variable.
   /// \return                         false if no DWARF register exists
@@ -211,7 +222,7 @@ public:
 };
 
 /// DwarfExpression implementation for .debug_loc entries.
-class DebugLocDwarfExpression : public DwarfExpression {
+class DebugLocDwarfExpression final : public DwarfExpression {
   ByteStreamer &BS;
 
   void emitOp(uint8_t Op, const char *Comment = nullptr) override;
@@ -225,7 +236,7 @@ public:
 };
 
 /// DwarfExpression implementation for singular DW_AT_location.
-class DIEDwarfExpression : public DwarfExpression {
+class DIEDwarfExpression final : public DwarfExpression {
 const AsmPrinter &AP;
   DwarfUnit &DU;
   DIELoc &DIE;

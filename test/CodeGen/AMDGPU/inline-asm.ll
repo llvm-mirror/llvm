@@ -183,3 +183,52 @@ entry:
   ", ""()
   ret void
 }
+
+; FIXME: Should not have intermediate sgprs
+; CHECK-LABEL: {{^}}i64_imm_input_phys_vgpr:
+; CHECK: s_mov_b32 s1, 0
+; CHECK: s_mov_b32 s0, 0x1e240
+; CHECK: v_mov_b32_e32 v0, s0
+; CHECK: v_mov_b32_e32 v1, s1
+; CHECK: use v[0:1]
+define void @i64_imm_input_phys_vgpr() {
+entry:
+  call void asm sideeffect "; use $0 ", "{VGPR0_VGPR1}"(i64 123456)
+  ret void
+}
+
+; CHECK-LABEL: {{^}}i1_imm_input_phys_vgpr:
+; CHECK: v_mov_b32_e32 v0, -1{{$}}
+; CHECK: ; use v0
+define amdgpu_kernel void @i1_imm_input_phys_vgpr() {
+entry:
+  call void asm sideeffect "; use $0 ", "{VGPR0}"(i1 true)
+  ret void
+}
+
+; CHECK-LABEL: {{^}}i1_input_phys_vgpr:
+; CHECK: {{buffer|flat}}_load_ubyte [[LOAD:v[0-9]+]]
+; CHECK: v_and_b32_e32 [[LOAD]], 1, [[LOAD]]
+; CHECK-NEXT: v_cmp_eq_u32_e32 vcc, 1, [[LOAD]]
+; CHECK-NEXT: v_cndmask_b32_e64 v0, 0, -1, vcc
+; CHECK: ; use v0
+define amdgpu_kernel void @i1_input_phys_vgpr() {
+entry:
+  %val = load i1, i1 addrspace(1)* undef
+  call void asm sideeffect "; use $0 ", "{VGPR0}"(i1 %val)
+  ret void
+}
+
+; FIXME: Should be scheduled to shrink vcc
+; CHECK-LABEL: {{^}}i1_input_phys_vgpr_x2:
+; CHECK: v_cmp_eq_u32_e32 vcc, 1, v0
+; CHECK: v_cmp_eq_u32_e64 s[0:1], 1, v1
+; CHECK: v_cndmask_b32_e64 v0, 0, -1, vcc
+; CHECK: v_cndmask_b32_e64 v1, 0, -1, s[0:1]
+define amdgpu_kernel void @i1_input_phys_vgpr_x2() {
+entry:
+  %val0 = load volatile i1, i1 addrspace(1)* undef
+  %val1 = load volatile i1, i1 addrspace(1)* undef
+  call void asm sideeffect "; use $0 $1 ", "{VGPR0}, {VGPR1}"(i1 %val0, i1 %val1)
+  ret void
+}

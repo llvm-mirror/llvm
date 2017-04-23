@@ -21,11 +21,13 @@
 namespace llvm {
 
 class SITargetLowering final : public AMDGPUTargetLowering {
-  SDValue LowerParameterPtr(SelectionDAG &DAG, const SDLoc &SL, SDValue Chain,
-                            unsigned Offset) const;
-  SDValue LowerParameter(SelectionDAG &DAG, EVT VT, EVT MemVT, const SDLoc &SL,
-                         SDValue Chain, unsigned Offset, bool Signed,
-                         const ISD::InputArg *Arg = nullptr) const;
+  SDValue lowerKernArgParameterPtr(SelectionDAG &DAG, const SDLoc &SL,
+                                   SDValue Chain, uint64_t Offset) const;
+  SDValue lowerKernargMemParameter(SelectionDAG &DAG, EVT VT, EVT MemVT,
+                                   const SDLoc &SL, SDValue Chain,
+                                   uint64_t Offset, bool Signed,
+                                   const ISD::InputArg *Arg = nullptr) const;
+
   SDValue LowerGlobalAddress(AMDGPUMachineFunction *MFI, SDValue Op,
                              SelectionDAG &DAG) const override;
   SDValue lowerImplicitZextParam(SelectionDAG &DAG, SDValue Op,
@@ -55,10 +57,16 @@ class SITargetLowering final : public AMDGPUTargetLowering {
                             const SDLoc &DL,
                             EVT VT) const;
 
+  SDValue convertArgType(
+    SelectionDAG &DAG, EVT VT, EVT MemVT, const SDLoc &SL, SDValue Val,
+    bool Signed, const ISD::InputArg *Arg = nullptr) const;
+
   /// \brief Custom lowering for ISD::FP_ROUND for MVT::f16.
   SDValue lowerFP_ROUND(SDValue Op, SelectionDAG &DAG) const;
 
-  SDValue getSegmentAperture(unsigned AS, SelectionDAG &DAG) const;
+  SDValue getSegmentAperture(unsigned AS, const SDLoc &DL,
+                             SelectionDAG &DAG) const;
+
   SDValue lowerADDRSPACECAST(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerINSERT_VECTOR_ELT(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerEXTRACT_VECTOR_ELT(SDValue Op, SelectionDAG &DAG) const;
@@ -81,6 +89,7 @@ class SITargetLowering final : public AMDGPUTargetLowering {
   SDValue performAndCombine(SDNode *N, DAGCombinerInfo &DCI) const;
   SDValue performOrCombine(SDNode *N, DAGCombinerInfo &DCI) const;
   SDValue performXorCombine(SDNode *N, DAGCombinerInfo &DCI) const;
+  SDValue performZeroExtendCombine(SDNode *N, DAGCombinerInfo &DCI) const;
   SDValue performClassCombine(SDNode *N, DAGCombinerInfo &DCI) const;
   SDValue performFCanonicalizeCombine(SDNode *N, DAGCombinerInfo &DCI) const;
 
@@ -197,7 +206,7 @@ public:
 
   SDValue CreateLiveInRegister(SelectionDAG &DAG, const TargetRegisterClass *RC,
                                unsigned Reg, EVT VT) const override;
-  void legalizeTargetIndependentNode(SDNode *Node, SelectionDAG &DAG) const;
+  SDNode *legalizeTargetIndependentNode(SDNode *Node, SelectionDAG &DAG) const;
 
   MachineSDNode *wrapAddr64Rsrc(SelectionDAG &DAG, const SDLoc &DL,
                                 SDValue Ptr) const;

@@ -15,7 +15,6 @@
 #include "X86.h"
 #include "X86CallLowering.h"
 #include "X86LegalizerInfo.h"
-#include "X86InstructionSelector.h"
 #ifdef LLVM_BUILD_GLOBAL_ISEL
 #include "X86RegisterBankInfo.h"
 #endif
@@ -283,12 +282,11 @@ X86TargetMachine::getSubtargetImpl(const Function &F) const {
     X86GISelActualAccessor *GISel = new X86GISelActualAccessor();
 
     GISel->CallLoweringInfo.reset(new X86CallLowering(*I->getTargetLowering()));
-    GISel->Legalizer.reset(new X86LegalizerInfo(*I));
+    GISel->Legalizer.reset(new X86LegalizerInfo(*I, *this));
 
     auto *RBI = new X86RegisterBankInfo(*I->getRegisterInfo());
     GISel->RegBankInfo.reset(RBI);
-    GISel->InstSelector.reset(new X86InstructionSelector(*I, *RBI));
-
+    GISel->InstSelector.reset(createX86InstructionSelector(*I, *RBI));
 #endif
     I->setGISelAccessor(*GISel);
   }

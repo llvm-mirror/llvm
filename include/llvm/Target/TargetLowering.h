@@ -186,7 +186,7 @@ public:
           IsNest(false), IsByVal(false), IsInAlloca(false), IsReturned(false),
           IsSwiftSelf(false), IsSwiftError(false) {}
 
-    void setAttributes(ImmutableCallSite *CS, unsigned AttrIdx);
+    void setAttributes(ImmutableCallSite *CS, unsigned ArgIdx);
   };
   typedef std::vector<ArgListEntry> ArgListTy;
 
@@ -435,6 +435,24 @@ public:
   /// \endcode
   virtual bool isMaskAndCmp0FoldingBeneficial(const Instruction &AndI) const {
     return false;
+  }
+
+  /// Use bitwise logic to make pairs of compares more efficient. For example:
+  /// and (seteq A, B), (seteq C, D) --> seteq (or (xor A, B), (xor C, D)), 0
+  /// This should be true when it takes more than one instruction to lower
+  /// setcc (cmp+set on x86 scalar), when bitwise ops are faster than logic on
+  /// condition bits (crand on PowerPC), and/or when reducing cmp+br is a win.
+  virtual bool convertSetCCLogicToBitwiseLogic(EVT VT) const {
+    return false;
+  }
+
+  /// Return the preferred operand type if the target has a quick way to compare
+  /// integer values of the given size. Assume that any legal integer type can
+  /// be compared efficiently. Targets may override this to allow illegal wide
+  /// types to return a vector type if there is support to compare that type.
+  virtual MVT hasFastEqualityCompare(unsigned NumBits) const {
+    MVT VT = MVT::getIntegerVT(NumBits);
+    return isTypeLegal(VT) ? VT : MVT::INVALID_SIMPLE_VALUE_TYPE;
   }
 
   /// Return true if the target should transform:
@@ -2412,16 +2430,22 @@ public:
                             DAGCombinerInfo &DCI) const;
 
   /// Determine which of the bits specified in Mask are known to be either zero
-  /// or one and return them in the KnownZero/KnownOne bitsets.
+  /// or one and return them in the KnownZero/KnownOne bitsets. The DemandedElts
+  /// argument allows us to only collect the known bits that are shared by the
+  /// requested vector elements.
   virtual void computeKnownBitsForTargetNode(const SDValue Op,
                                              APInt &KnownZero,
                                              APInt &KnownOne,
+                                             const APInt &DemandedElts,
                                              const SelectionDAG &DAG,
                                              unsigned Depth = 0) const;
 
   /// This method can be implemented by targets that want to expose additional
-  /// information about sign bits to the DAG Combiner.
+  /// information about sign bits to the DAG Combiner. The DemandedElts
+  /// argument allows us to only collect the minimum sign bits that are shared
+  /// by the requested vector elements.
   virtual unsigned ComputeNumSignBitsForTargetNode(SDValue Op,
+                                                   const APInt &DemandedElts,
                                                    const SelectionDAG &DAG,
                                                    unsigned Depth = 0) const;
 
@@ -2656,15 +2680,15 @@ public:
                                 ImmutableCallSite &Call) {
       RetTy = ResultType;
 
-      IsInReg = Call.paramHasAttr(0, Attribute::InReg);
+      IsInReg = Call.hasRetAttr(Attribute::InReg);
       DoesNotReturn =
           Call.doesNotReturn() ||
           (!Call.isInvoke() &&
            isa<UnreachableInst>(Call.getInstruction()->getNextNode()));
       IsVarArg = FTy->isVarArg();
       IsReturnValueUsed = !Call.getInstruction()->use_empty();
-      RetSExt = Call.paramHasAttr(0, Attribute::SExt);
-      RetZExt = Call.paramHasAttr(0, Attribute::ZExt);
+      RetSExt = Call.hasRetAttr(Attribute::SExt);
+      RetZExt = Call.hasRetAttr(Attribute::ZExt);
 
       Callee = Target;
 
@@ -2783,7 +2807,7 @@ public:
   /// Return true if the target may be able emit the call instruction as a tail
   /// call. This is used by optimization passes to determine if it's profitable
   /// to duplicate return instructions to enable tailcall optimization.
-  virtual bool mayBeEmittedAsTailCall(CallInst *) const {
+  virtual bool mayBeEmittedAsTailCall(const CallInst *) const {
     return false;
   }
 

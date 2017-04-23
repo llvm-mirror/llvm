@@ -139,27 +139,6 @@ FunctionPass *llvm::createSIFoldOperandsPass() {
   return new SIFoldOperands();
 }
 
-static bool isFoldableCopy(const MachineInstr &MI) {
-  switch (MI.getOpcode()) {
-  case AMDGPU::V_MOV_B32_e32:
-  case AMDGPU::V_MOV_B32_e64:
-  case AMDGPU::V_MOV_B64_PSEUDO: {
-    // If there are additional implicit register operands, this may be used for
-    // register indexing so the source register operand isn't simply copied.
-    unsigned NumOps = MI.getDesc().getNumOperands() +
-      MI.getDesc().getNumImplicitUses();
-
-    return MI.getNumOperands() == NumOps;
-  }
-  case AMDGPU::S_MOV_B32:
-  case AMDGPU::S_MOV_B64:
-  case AMDGPU::COPY:
-    return true;
-  default:
-    return false;
-  }
-}
-
 static bool updateOperand(FoldCandidate &Fold,
                           const TargetRegisterInfo &TRI) {
   MachineInstr *MI = Fold.UseMI;
@@ -591,6 +570,32 @@ static bool tryConstantFoldOp(MachineRegisterInfo &MRI,
   return false;
 }
 
+// Try to fold an instruction into a simpler one
+static bool tryFoldInst(const SIInstrInfo *TII,
+                        MachineInstr *MI) {
+  unsigned Opc = MI->getOpcode();
+
+  if (Opc == AMDGPU::V_CNDMASK_B32_e32    ||
+      Opc == AMDGPU::V_CNDMASK_B32_e64    ||
+      Opc == AMDGPU::V_CNDMASK_B64_PSEUDO) {
+    const MachineOperand *Src0 = TII->getNamedOperand(*MI, AMDGPU::OpName::src0);
+    const MachineOperand *Src1 = TII->getNamedOperand(*MI, AMDGPU::OpName::src1);
+    if (Src1->isIdenticalTo(*Src0)) {
+      DEBUG(dbgs() << "Folded " << *MI << " into ");
+      int Src2Idx = AMDGPU::getNamedOperandIdx(Opc, AMDGPU::OpName::src2);
+      if (Src2Idx != -1)
+        MI->RemoveOperand(Src2Idx);
+      MI->RemoveOperand(AMDGPU::getNamedOperandIdx(Opc, AMDGPU::OpName::src1));
+      mutateCopyOp(*MI, TII->get(Src0->isReg() ? (unsigned)AMDGPU::COPY
+                                               : getMovOpc(false)));
+      DEBUG(dbgs() << *MI << '\n');
+      return true;
+    }
+  }
+
+  return false;
+}
+
 void SIFoldOperands::foldInstOperand(MachineInstr &MI,
                                      MachineOperand &OpToFold) const {
   // We need mutate the operands of new mov instructions to add implicit
@@ -692,6 +697,7 @@ void SIFoldOperands::foldInstOperand(MachineInstr &MI,
       }
       DEBUG(dbgs() << "Folded source from " << MI << " into OpNo " <<
             static_cast<int>(Fold.UseOpNo) << " of " << *Fold.UseMI << '\n');
+      tryFoldInst(TII, Fold.UseMI);
     }
   }
 }
@@ -907,7 +913,9 @@ bool SIFoldOperands::runOnMachineFunction(MachineFunction &MF) {
       Next = std::next(I);
       MachineInstr &MI = *I;
 
-      if (!isFoldableCopy(MI)) {
+      tryFoldInst(TII, &MI);
+
+      if (!TII->isFoldableCopy(MI)) {
         if (IsIEEEMode || !tryFoldOMod(MI))
           tryFoldClamp(MI);
         continue;

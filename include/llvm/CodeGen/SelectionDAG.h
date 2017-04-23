@@ -36,6 +36,7 @@ namespace llvm {
 class MachineConstantPoolValue;
 class MachineFunction;
 class MDNode;
+class OptimizationRemarkEmitter;
 class SDDbgValue;
 class TargetLowering;
 class SelectionDAGTargetInfo;
@@ -170,6 +171,10 @@ class SelectionDAG {
   MachineFunction *MF;
   LLVMContext *Context;
   CodeGenOpt::Level OptLevel;
+
+  /// The function-level optimization remark emitter.  Used to emit remarks
+  /// whenever manipulating the DAG.
+  OptimizationRemarkEmitter *ORE;
 
   /// The starting token.
   SDNode EntryNode;
@@ -318,7 +323,7 @@ public:
   ~SelectionDAG();
 
   /// Prepare this SelectionDAG to process code in the given MachineFunction.
-  void init(MachineFunction &mf);
+  void init(MachineFunction &NewMF, OptimizationRemarkEmitter &NewORE);
 
   /// Clear state and free memory necessary to make this
   /// SelectionDAG ready to process a new block.
@@ -331,6 +336,7 @@ public:
   const TargetLowering &getTargetLoweringInfo() const { return *TLI; }
   const SelectionDAGTargetInfo &getSelectionDAGInfo() const { return *TSI; }
   LLVMContext *getContext() const {return Context; }
+  OptimizationRemarkEmitter &getORE() const { return *ORE; }
 
   /// Pop up a GraphViz/gv window with the DAG rendered using 'dot'.
   void viewGraph(const std::string &Title);
@@ -1310,6 +1316,17 @@ public:
   /// ComputeNumSignBitsForTarget method in the TargetLowering class to allow
   /// target nodes to be understood.
   unsigned ComputeNumSignBits(SDValue Op, unsigned Depth = 0) const;
+
+  /// Return the number of times the sign bit of the register is replicated into
+  /// the other bits. We know that at least 1 bit is always equal to the sign
+  /// bit (itself), but other cases can give us information. For example,
+  /// immediately after an "SRA X, 2", we know that the top 3 bits are all equal
+  /// to each other, so we return 3. The DemandedElts argument allows
+  /// us to only collect the minimum sign bits of the requested vector elements.
+  /// Targets can implement the ComputeNumSignBitsForTarget method in the
+  /// TargetLowering class to allow target nodes to be understood.
+  unsigned ComputeNumSignBits(SDValue Op, const APInt &DemandedElts,
+                              unsigned Depth = 0) const;
 
   /// Return true if the specified operand is an ISD::ADD with a ConstantSDNode
   /// on the right-hand side, or if it is an ISD::OR with a ConstantSDNode that

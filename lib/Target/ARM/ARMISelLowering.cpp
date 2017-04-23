@@ -2633,7 +2633,7 @@ bool ARMTargetLowering::isUsedByReturnOnly(SDNode *N, SDValue &Chain) const {
   return true;
 }
 
-bool ARMTargetLowering::mayBeEmittedAsTailCall(CallInst *CI) const {
+bool ARMTargetLowering::mayBeEmittedAsTailCall(const CallInst *CI) const {
   if (!Subtarget->supportsTailCall())
     return false;
 
@@ -3347,6 +3347,12 @@ ARMTargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op, SelectionDAG &DAG,
     return DAG.getNode(NewOpc, SDLoc(Op), Op.getValueType(),
                        Op.getOperand(1), Op.getOperand(2));
   }
+  case Intrinsic::arm_neon_vtbl1:
+    return DAG.getNode(ARMISD::VTBL1, SDLoc(Op), Op.getValueType(),
+                       Op.getOperand(1), Op.getOperand(2));
+  case Intrinsic::arm_neon_vtbl2:
+    return DAG.getNode(ARMISD::VTBL2, SDLoc(Op), Op.getValueType(),
+                       Op.getOperand(1), Op.getOperand(2), Op.getOperand(3));
   }
 }
 
@@ -6989,8 +6995,19 @@ static SDValue SkipExtensionForVMULL(SDNode *N, SelectionDAG &DAG) {
                                         N->getValueType(0),
                                         N->getOpcode());
 
-  if (LoadSDNode *LD = dyn_cast<LoadSDNode>(N))
-    return SkipLoadExtensionForVMULL(LD, DAG);
+  if (LoadSDNode *LD = dyn_cast<LoadSDNode>(N)) {
+    assert((ISD::isSEXTLoad(LD) || ISD::isZEXTLoad(LD)) &&
+           "Expected extending load");
+
+    SDValue newLoad = SkipLoadExtensionForVMULL(LD, DAG);
+    DAG.ReplaceAllUsesOfValueWith(SDValue(LD, 1), newLoad.getValue(1));
+    unsigned Opcode = ISD::isSEXTLoad(LD) ? ISD::SIGN_EXTEND : ISD::ZERO_EXTEND;
+    SDValue extLoad =
+        DAG.getNode(Opcode, SDLoc(newLoad), LD->getValueType(0), newLoad);
+    DAG.ReplaceAllUsesOfValueWith(SDValue(LD, 0), extLoad);
+
+    return newLoad;
+  }
 
   // Otherwise, the value must be a BUILD_VECTOR.  For v2i64, it will
   // have been legalized as a BITCAST from v4i32.
@@ -9517,19 +9534,19 @@ static SDValue AddCombineTo64BitSMLAL16(SDNode *AddcNode, SDNode *AddeNode,
   // be sign extended somehow or SRA'd into 32-bit values
   // (addc (adde (mul 16bit, 16bit), lo), hi)
   SDValue Mul = AddcNode->getOperand(0);
-  SDValue Hi = AddcNode->getOperand(1);
+  SDValue Lo = AddcNode->getOperand(1);
   if (Mul.getOpcode() != ISD::MUL) {
-    Hi = AddcNode->getOperand(0);
+    Lo = AddcNode->getOperand(0);
     Mul = AddcNode->getOperand(1);
     if (Mul.getOpcode() != ISD::MUL)
       return SDValue();
   }
 
   SDValue SRA = AddeNode->getOperand(0);
-  SDValue Lo = AddeNode->getOperand(1);
+  SDValue Hi = AddeNode->getOperand(1);
   if (SRA.getOpcode() != ISD::SRA) {
     SRA = AddeNode->getOperand(1);
-    Lo = AddeNode->getOperand(0);
+    Hi = AddeNode->getOperand(0);
     if (SRA.getOpcode() != ISD::SRA)
       return SDValue();
   }
@@ -11677,34 +11694,6 @@ static SDValue PerformExtendCombine(SDNode *N, SelectionDAG &DAG,
   return SDValue();
 }
 
-static void computeKnownBits(SelectionDAG &DAG, SDValue Op, APInt &KnownZero,
-                             APInt &KnownOne) {
-  if (Op.getOpcode() == ARMISD::BFI) {
-    // Conservatively, we can recurse down the first operand
-    // and just mask out all affected bits.
-    computeKnownBits(DAG, Op.getOperand(0), KnownZero, KnownOne);
-
-    // The operand to BFI is already a mask suitable for removing the bits it
-    // sets.
-    ConstantSDNode *CI = cast<ConstantSDNode>(Op.getOperand(2));
-    const APInt &Mask = CI->getAPIntValue();
-    KnownZero &= Mask;
-    KnownOne &= Mask;
-    return;
-  }
-  if (Op.getOpcode() == ARMISD::CMOV) {
-    APInt KZ2(KnownZero.getBitWidth(), 0);
-    APInt KO2(KnownOne.getBitWidth(), 0);
-    computeKnownBits(DAG, Op.getOperand(0), KnownZero, KnownOne);
-    computeKnownBits(DAG, Op.getOperand(1), KZ2, KO2);
-
-    KnownZero &= KZ2;
-    KnownOne &= KO2;
-    return;
-  }
-  return DAG.computeKnownBits(Op, KnownZero, KnownOne);
-}
-
 SDValue ARMTargetLowering::PerformCMOVToBFICombine(SDNode *CMOV, SelectionDAG &DAG) const {
   // If we have a CMOV, OR and AND combination such as:
   //   if (x & CN)
@@ -11766,7 +11755,7 @@ SDValue ARMTargetLowering::PerformCMOVToBFICombine(SDNode *CMOV, SelectionDAG &D
   // Lastly, can we determine that the bits defined by OrCI
   // are zero in Y?
   APInt KnownZero, KnownOne;
-  computeKnownBits(DAG, Y, KnownZero, KnownOne);
+  DAG.computeKnownBits(Y, KnownZero, KnownOne);
   if ((OrCI & KnownZero) != OrCI)
     return SDValue();
 
@@ -12605,6 +12594,7 @@ bool ARMTargetLowering::getPostIndexedAddressParts(SDNode *N, SDNode *Op,
 void ARMTargetLowering::computeKnownBitsForTargetNode(const SDValue Op,
                                                       APInt &KnownZero,
                                                       APInt &KnownOne,
+                                                      const APInt &DemandedElts,
                                                       const SelectionDAG &DAG,
                                                       unsigned Depth) const {
   unsigned BitWidth = KnownOne.getBitWidth();
@@ -12644,6 +12634,19 @@ void ARMTargetLowering::computeKnownBitsForTargetNode(const SDValue Op,
       return;
     }
     }
+  }
+  case ARMISD::BFI: {
+    // Conservatively, we can recurse down the first operand
+    // and just mask out all affected bits.
+    DAG.computeKnownBits(Op.getOperand(0), KnownZero, KnownOne, Depth + 1);
+
+    // The operand to BFI is already a mask suitable for removing the bits it
+    // sets.
+    ConstantSDNode *CI = cast<ConstantSDNode>(Op.getOperand(2));
+    const APInt &Mask = CI->getAPIntValue();
+    KnownZero &= Mask;
+    KnownOne &= Mask;
+    return;
   }
   }
 }
@@ -13040,7 +13043,9 @@ SDValue ARMTargetLowering::LowerDivRem(SDValue Op, SelectionDAG &DAG) const {
   //     rem = a - b * div
   //     return {div, rem}
   // This should be lowered into UDIV/SDIV + MLS later on.
-  if (Subtarget->hasDivide() && Op->getValueType(0).isSimple() &&
+  bool hasDivide = Subtarget->isThumb() ? Subtarget->hasDivide()
+                                        : Subtarget->hasDivideInARMMode();
+  if (hasDivide && Op->getValueType(0).isSimple() &&
       Op->getSimpleValueType(0) == MVT::i32) {
     unsigned DivOpcode = isSigned ? ISD::SDIV : ISD::UDIV;
     const SDValue Dividend = Op->getOperand(0);
@@ -13581,9 +13586,35 @@ Value *ARMTargetLowering::emitStoreConditional(IRBuilder<> &Builder, Value *Val,
 
 /// A helper function for determining the number of interleaved accesses we
 /// will generate when lowering accesses of the given type.
-static unsigned getNumInterleavedAccesses(VectorType *VecTy,
-                                          const DataLayout &DL) {
+unsigned
+ARMTargetLowering::getNumInterleavedAccesses(VectorType *VecTy,
+                                             const DataLayout &DL) const {
   return (DL.getTypeSizeInBits(VecTy) + 127) / 128;
+}
+
+bool ARMTargetLowering::isLegalInterleavedAccessType(
+    VectorType *VecTy, const DataLayout &DL) const {
+
+  unsigned VecSize = DL.getTypeSizeInBits(VecTy);
+  unsigned ElSize = DL.getTypeSizeInBits(VecTy->getElementType());
+
+  // Ensure the vector doesn't have f16 elements. Even though we could do an
+  // i16 vldN, we can't hold the f16 vectors and will end up converting via
+  // f32.
+  if (VecTy->getElementType()->isHalfTy())
+    return false;
+
+  // Ensure the number of vector elements is greater than 1.
+  if (VecTy->getNumElements() < 2)
+    return false;
+
+  // Ensure the element type is legal.
+  if (ElSize != 8 && ElSize != 16 && ElSize != 32)
+    return false;
+
+  // Ensure the total vector size is 64 or a multiple of 128. Types larger than
+  // 128 will be split into multiple interleaved accesses.
+  return VecSize == 64 || VecSize % 128 == 0;
 }
 
 /// \brief Lower an interleaved load into a vldN intrinsic.
@@ -13610,20 +13641,11 @@ bool ARMTargetLowering::lowerInterleavedLoad(
   Type *EltTy = VecTy->getVectorElementType();
 
   const DataLayout &DL = LI->getModule()->getDataLayout();
-  unsigned VecSize = DL.getTypeSizeInBits(VecTy);
-  bool EltIs64Bits = DL.getTypeSizeInBits(EltTy) == 64;
 
-  // Skip if we do not have NEON and skip illegal vector types and vector types
-  // with i64/f64 elements (vldN doesn't support i64/f64 elements). We can
+  // Skip if we do not have NEON and skip illegal vector types. We can
   // "legalize" wide vector types into multiple interleaved accesses as long as
   // the vector types are divisible by 128.
-  if (!Subtarget->hasNEON() || (VecSize != 64 && VecSize % 128 != 0) ||
-      EltIs64Bits)
-    return false;
-
-  // Skip if the vector has f16 elements: even though we could do an i16 vldN,
-  // we can't hold the f16 vectors and will end up converting via f32.
-  if (EltTy->isHalfTy())
+  if (!Subtarget->hasNEON() || !isLegalInterleavedAccessType(VecTy, DL))
     return false;
 
   unsigned NumLoads = getNumInterleavedAccesses(VecTy, DL);
@@ -13753,20 +13775,11 @@ bool ARMTargetLowering::lowerInterleavedStore(StoreInst *SI,
   VectorType *SubVecTy = VectorType::get(EltTy, LaneLen);
 
   const DataLayout &DL = SI->getModule()->getDataLayout();
-  unsigned SubVecSize = DL.getTypeSizeInBits(SubVecTy);
-  bool EltIs64Bits = DL.getTypeSizeInBits(EltTy) == 64;
 
-  // Skip if we do not have NEON and skip illegal vector types and vector types
-  // with i64/f64 elements (vldN doesn't support i64/f64 elements). We can
+  // Skip if we do not have NEON and skip illegal vector types. We can
   // "legalize" wide vector types into multiple interleaved accesses as long as
   // the vector types are divisible by 128.
-  if (!Subtarget->hasNEON() || (SubVecSize != 64 && SubVecSize % 128 != 0) ||
-      EltIs64Bits)
-    return false;
-
-  // Skip if the vector has f16 elements: even though we could do an i16 vldN,
-  // we can't hold the f16 vectors and will end up converting via f32.
-  if (EltTy->isHalfTy())
+  if (!Subtarget->hasNEON() || !isLegalInterleavedAccessType(SubVecTy, DL))
     return false;
 
   unsigned NumStores = getNumInterleavedAccesses(SubVecTy, DL);

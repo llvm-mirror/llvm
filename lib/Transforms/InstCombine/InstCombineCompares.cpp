@@ -1794,6 +1794,15 @@ Instruction *InstCombiner::foldICmpOrConstant(ICmpInst &Cmp, BinaryOperator *Or,
                           ConstantInt::get(V->getType(), 1));
   }
 
+  // X | C == C --> X <=u C
+  // X | C != C --> X  >u C
+  //   iff C+1 is a power of 2 (C is a bitmask of the low bits)
+  if (Cmp.isEquality() && Cmp.getOperand(1) == Or->getOperand(1) &&
+      (*C + 1).isPowerOf2()) {
+    Pred = (Pred == CmpInst::ICMP_EQ) ? CmpInst::ICMP_ULE : CmpInst::ICMP_UGT;
+    return new ICmpInst(Pred, Or->getOperand(0), Or->getOperand(1));
+  }
+
   if (!Cmp.isEquality() || *C != 0 || !Or->hasOneUse())
     return nullptr;
 
@@ -2700,7 +2709,7 @@ Instruction *InstCombiner::foldICmpInstWithConstantNotInt(ICmpInst &I) {
     // block.  If in the same block, we're encouraging jump threading.  If
     // not, we are just pessimizing the code by making an i1 phi.
     if (LHSI->getParent() == I.getParent())
-      if (Instruction *NV = FoldOpIntoPhi(I))
+      if (Instruction *NV = foldOpIntoPhi(I, cast<PHINode>(LHSI)))
         return NV;
     break;
   case Instruction::Select: {
@@ -3801,16 +3810,14 @@ static APInt getDemandedBitsLHSMask(ICmpInst &I, unsigned BitWidth,
   // greater than the RHS must differ in a bit higher than these due to carry.
   case ICmpInst::ICMP_UGT: {
     unsigned trailingOnes = RHS.countTrailingOnes();
-    APInt lowBitsSet = APInt::getLowBitsSet(BitWidth, trailingOnes);
-    return ~lowBitsSet;
+    return APInt::getBitsSetFrom(BitWidth, trailingOnes);
   }
 
   // Similarly, for a ULT comparison, we don't care about the trailing zeros.
   // Any value less than the RHS must differ in a higher bit because of carries.
   case ICmpInst::ICMP_ULT: {
     unsigned trailingZeros = RHS.countTrailingZeros();
-    APInt lowBitsSet = APInt::getLowBitsSet(BitWidth, trailingZeros);
-    return ~lowBitsSet;
+    return APInt::getBitsSetFrom(BitWidth, trailingZeros);
   }
 
   default:
@@ -3997,12 +4004,12 @@ Instruction *InstCombiner::foldICmpUsingKnownBits(ICmpInst &I) {
   APInt Op0KnownZero(BitWidth, 0), Op0KnownOne(BitWidth, 0);
   APInt Op1KnownZero(BitWidth, 0), Op1KnownOne(BitWidth, 0);
 
-  if (SimplifyDemandedBits(I.getOperandUse(0),
+  if (SimplifyDemandedBits(&I, 0,
                            getDemandedBitsLHSMask(I, BitWidth, IsSignBit),
                            Op0KnownZero, Op0KnownOne, 0))
     return &I;
 
-  if (SimplifyDemandedBits(I.getOperandUse(1), APInt::getAllOnesValue(BitWidth),
+  if (SimplifyDemandedBits(&I, 1, APInt::getAllOnesValue(BitWidth),
                            Op1KnownZero, Op1KnownOne, 0))
     return &I;
 
@@ -4866,7 +4873,7 @@ Instruction *InstCombiner::visitFCmpInst(FCmpInst &I) {
         // block.  If in the same block, we're encouraging jump threading.  If
         // not, we are just pessimizing the code by making an i1 phi.
         if (LHSI->getParent() == I.getParent())
-          if (Instruction *NV = FoldOpIntoPhi(I))
+          if (Instruction *NV = foldOpIntoPhi(I, cast<PHINode>(LHSI)))
             return NV;
         break;
       case Instruction::SIToFP:

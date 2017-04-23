@@ -205,12 +205,11 @@ private:
   void leaveBasicBlock(MachineBasicBlock*);
   bool isBlockDone(MachineBasicBlock *);
   void processBasicBlock(MachineBasicBlock *MBB, bool PrimaryPass);
-  void updateSuccessors(MachineBasicBlock *MBB, bool PrimaryPass);
   bool visitInstr(MachineInstr *);
   void processDefs(MachineInstr *, bool breakDependency, bool Kill);
   void visitSoftInstr(MachineInstr*, unsigned mask);
   void visitHardInstr(MachineInstr*, unsigned domain);
-  void pickBestRegisterForUndef(MachineInstr *MI, unsigned OpIdx,
+  bool pickBestRegisterForUndef(MachineInstr *MI, unsigned OpIdx,
                                 unsigned Pref);
   bool shouldBreakDependence(MachineInstr*, unsigned OpIdx, unsigned Pref);
   void processUndefReads(MachineBasicBlock*);

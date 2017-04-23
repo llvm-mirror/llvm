@@ -79,9 +79,19 @@ void DebugInfoFinder::processModule(const Module &M) {
         processScope(M->getScope());
     }
   }
-  for (auto &F : M.functions())
+  for (auto &F : M.functions()) {
     if (auto *SP = cast_or_null<DISubprogram>(F.getSubprogram()))
       processSubprogram(SP);
+    // There could be subprograms from inlined functions referenced from
+    // instructions only. Walk the function to find them.
+    for (const BasicBlock &BB : F) {
+      for (const Instruction &I : BB) {
+        if (!I.getDebugLoc())
+          continue;
+        processLocation(M, I.getDebugLoc().get());
+      }
+    }
+  }
 }
 
 void DebugInfoFinder::processLocation(const Module &M, const DILocation *Loc) {
@@ -601,17 +611,26 @@ bool llvm::stripNonLineTableDebugInfo(Module &M) {
     }
     for (auto &BB : F) {
       for (auto &I : BB) {
-        if (I.getDebugLoc() == DebugLoc())
-          continue;
+        auto remapDebugLoc = [&](DebugLoc DL) -> DebugLoc {
+          auto *Scope = DL.getScope();
+          MDNode *InlinedAt = DL.getInlinedAt();
+          Scope = remap(Scope);
+          InlinedAt = remap(InlinedAt);
+          return DebugLoc::get(DL.getLine(), DL.getCol(), Scope, InlinedAt);
+        };
 
-        // Make a replacement.
-        auto &DL = I.getDebugLoc();
-        auto *Scope = DL.getScope();
-        MDNode *InlinedAt = DL.getInlinedAt();
-        Scope = remap(Scope);
-        InlinedAt = remap(InlinedAt);
-        I.setDebugLoc(
-            DebugLoc::get(DL.getLine(), DL.getCol(), Scope, InlinedAt));
+        if (I.getDebugLoc() != DebugLoc())
+          I.setDebugLoc(remapDebugLoc(I.getDebugLoc()));
+
+        // Remap DILocations in untyped MDNodes (e.g., llvm.loop).
+        SmallVector<std::pair<unsigned, MDNode *>, 2> MDs;
+        I.getAllMetadata(MDs);
+        for (auto Attachment : MDs)
+          if (auto *T = dyn_cast_or_null<MDTuple>(Attachment.second))
+            for (unsigned N = 0; N < T->getNumOperands(); ++N)
+              if (auto *Loc = dyn_cast_or_null<DILocation>(T->getOperand(N)))
+                if (Loc != DebugLoc())
+                  T->replaceOperandWith(N, remapDebugLoc(Loc));
       }
     }
   }

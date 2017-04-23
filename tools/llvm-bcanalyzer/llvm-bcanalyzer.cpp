@@ -122,6 +122,7 @@ static const char *GetBlockName(unsigned BlockID,
   case bitc::GLOBALVAL_SUMMARY_BLOCK_ID:
                                            return "GLOBALVAL_SUMMARY_BLOCK";
   case bitc::MODULE_STRTAB_BLOCK_ID:       return "MODULE_STRTAB_BLOCK";
+  case bitc::STRTAB_BLOCK_ID:              return "STRTAB_BLOCK";
   }
 }
 
@@ -171,7 +172,6 @@ static const char *GetCodeName(unsigned CodeID, unsigned BlockID,
       STRINGIFY_CODE(MODULE_CODE, GLOBALVAR)
       STRINGIFY_CODE(MODULE_CODE, FUNCTION)
       STRINGIFY_CODE(MODULE_CODE, ALIAS)
-      STRINGIFY_CODE(MODULE_CODE, PURGEVALS)
       STRINGIFY_CODE(MODULE_CODE, GCNAME)
       STRINGIFY_CODE(MODULE_CODE, VSTOFFSET)
       STRINGIFY_CODE(MODULE_CODE, METADATA_VALUES_UNUSED)
@@ -316,6 +316,7 @@ static const char *GetCodeName(unsigned CodeID, unsigned BlockID,
       STRINGIFY_CODE(FS, TYPE_CHECKED_LOAD_VCALLS)
       STRINGIFY_CODE(FS, TYPE_TEST_ASSUME_CONST_VCALL)
       STRINGIFY_CODE(FS, TYPE_CHECKED_LOAD_CONST_VCALL)
+      STRINGIFY_CODE(FS, VALUE_GUID)
     }
   case bitc::METADATA_ATTACHMENT_ID:
     switch(CodeID) {
@@ -381,6 +382,11 @@ static const char *GetCodeName(unsigned CodeID, unsigned BlockID,
     switch(CodeID) {
     default: return nullptr;
     case bitc::OPERAND_BUNDLE_TAG: return "OPERAND_BUNDLE_TAG";
+    }
+  case bitc::STRTAB_BLOCK_ID:
+    switch(CodeID) {
+    default: return nullptr;
+    case bitc::STRTAB_BLOB: return "BLOB";
     }
   }
 #undef STRINGIFY_CODE

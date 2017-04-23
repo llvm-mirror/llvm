@@ -288,8 +288,10 @@ bool ExecutionDepsFix::visitInstr(MachineInstr *MI) {
 /// \brief Helps avoid false dependencies on undef registers by updating the
 /// machine instructions' undef operand to use a register that the instruction
 /// is truly dependent on, or use a register with clearance higher than Pref.
-void ExecutionDepsFix::pickBestRegisterForUndef(MachineInstr *MI,
-    unsigned OpIdx, unsigned Pref) {
+/// Returns true if it was able to find a true dependency, thus not requiring
+/// a dependency breaking instruction regardless of clearance.
+bool ExecutionDepsFix::pickBestRegisterForUndef(MachineInstr *MI,
+                                                unsigned OpIdx, unsigned Pref) {
   MachineOperand &MO = MI->getOperand(OpIdx);
   assert(MO.isUndef() && "Expected undef machine operand");
 
@@ -297,7 +299,7 @@ void ExecutionDepsFix::pickBestRegisterForUndef(MachineInstr *MI,
 
   // Update only undef operands that are mapped to one register.
   if (AliasMap[OriginalReg].size() != 1)
-    return;
+    return false;
 
   // Get the undef operand's register class
   const TargetRegisterClass *OpRC =
@@ -312,7 +314,7 @@ void ExecutionDepsFix::pickBestRegisterForUndef(MachineInstr *MI,
     // We found a true dependency - replace the undef register with the true
     // dependency.
     MO.setReg(CurrMO.getReg());
-    return;
+    return true;
   }
 
   // Go over all registers in the register class and find the register with
@@ -337,6 +339,8 @@ void ExecutionDepsFix::pickBestRegisterForUndef(MachineInstr *MI,
   // Update the operand if we found a register with better clearance.
   if (MaxClearanceReg != OriginalReg)
     MO.setReg(MaxClearanceReg);
+
+  return false;
 }
 
 /// \brief Return true to if it makes sense to break dependence on a partial def
@@ -371,8 +375,11 @@ void ExecutionDepsFix::processDefs(MachineInstr *MI, bool breakDependency,
   if (breakDependency) {
     unsigned Pref = TII->getUndefRegClearance(*MI, OpNum, TRI);
     if (Pref) {
-      pickBestRegisterForUndef(MI, OpNum, Pref);
-      if (shouldBreakDependence(MI, OpNum, Pref))
+      bool HadTrueDependency = pickBestRegisterForUndef(MI, OpNum, Pref);
+      // We don't need to bother trying to break a dependency if this
+      // instruction has a true dependency on that register through another
+      // operand - we'll have to wait for it to be available regardless.
+      if (!HadTrueDependency && shouldBreakDependence(MI, OpNum, Pref))
         UndefReads.push_back(std::make_pair(MI, OpNum));
     }
   }
@@ -609,26 +616,6 @@ bool ExecutionDepsFix::isBlockDone(MachineBasicBlock *MBB) {
          MBBInfos[MBB].IncomingProcessed == MBB->pred_size();
 }
 
-void ExecutionDepsFix::updateSuccessors(MachineBasicBlock *MBB, bool Primary) {
-  bool Done = isBlockDone(MBB);
-  for (auto *Succ : MBB->successors()) {
-    if (!isBlockDone(Succ)) {
-      if (Primary) {
-        MBBInfos[Succ].IncomingProcessed++;
-      }
-      if (Done) {
-        MBBInfos[Succ].IncomingCompleted++;
-      }
-      if (isBlockDone(Succ)) {
-        // Perform secondary processing for this successor. See the big comment
-        // in runOnMachineFunction, for an explanation of the iteration order.
-        processBasicBlock(Succ, false);
-        updateSuccessors(Succ, false);
-      }
-    }
-  }
-}
-
 bool ExecutionDepsFix::runOnMachineFunction(MachineFunction &mf) {
   if (skipFunction(*mf.getFunction()))
     return false;
@@ -701,6 +688,7 @@ bool ExecutionDepsFix::runOnMachineFunction(MachineFunction &mf) {
 
   MachineBasicBlock *Entry = &*MF->begin();
   ReversePostOrderTraversal<MachineBasicBlock*> RPOT(Entry);
+  SmallVector<MachineBasicBlock *, 4> Workqueue;
   for (ReversePostOrderTraversal<MachineBasicBlock*>::rpo_iterator
          MBBI = RPOT.begin(), MBBE = RPOT.end(); MBBI != MBBE; ++MBBI) {
     MachineBasicBlock *MBB = *MBBI;
@@ -708,8 +696,28 @@ bool ExecutionDepsFix::runOnMachineFunction(MachineFunction &mf) {
     // processing this block's predecessors.
     MBBInfos[MBB].PrimaryCompleted = true;
     MBBInfos[MBB].PrimaryIncoming = MBBInfos[MBB].IncomingProcessed;
-    processBasicBlock(MBB, true);
-    updateSuccessors(MBB, true);
+    bool Primary = true;
+    Workqueue.push_back(MBB);
+    while (!Workqueue.empty()) {
+      MachineBasicBlock *ActiveMBB = &*Workqueue.back();
+      Workqueue.pop_back();
+      processBasicBlock(ActiveMBB, Primary);
+      bool Done = isBlockDone(ActiveMBB);
+      for (auto *Succ : ActiveMBB->successors()) {
+        if (!isBlockDone(Succ)) {
+          if (Primary) {
+            MBBInfos[Succ].IncomingProcessed++;
+          }
+          if (Done) {
+            MBBInfos[Succ].IncomingCompleted++;
+          }
+          if (isBlockDone(Succ)) {
+            Workqueue.push_back(Succ);
+          }
+        }
+      }
+      Primary = false;
+    }
   }
 
   // We need to go through again and finalize any blocks that are not done yet.

@@ -1,4 +1,5 @@
-# RUN: llc -mtriple=x86_64-linux-gnu -global-isel -run-pass=regbankselect %s -o - | FileCheck %s
+# RUN: llc -mtriple=x86_64-linux-gnu -global-isel                       -run-pass=regbankselect %s -o - | FileCheck %s --check-prefix=CHECK --check-prefix=FAST
+# RUN: llc -mtriple=x86_64-linux-gnu -global-isel -regbankselect-greedy -run-pass=regbankselect %s -o - | FileCheck %s --check-prefix=CHECK --check-prefix=GREEDY
 
 --- |
   ; ModuleID = 'tmp.ll'
@@ -36,14 +37,14 @@
     ret double %ret
   }
 
-  define <4 x i32>  @test_add_v4i32(<4 x i32> %arg1, <4 x i32>  %arg2) {
-    %ret = add <4 x i32>  %arg1, %arg2
-    ret <4 x i32>  %ret
+  define <4 x i32> @test_add_v4i32(<4 x i32> %arg1, <4 x i32> %arg2) {
+    %ret = add <4 x i32> %arg1, %arg2
+    ret <4 x i32> %ret
   }
 
-  define <4 x float>  @test_add_v4f32(<4 x float> %arg1, <4 x float>  %arg2) {
-    %ret = fadd <4 x float>  %arg1, %arg2
-    ret <4 x float>  %ret
+  define <4 x float> @test_add_v4f32(<4 x float> %arg1, <4 x float> %arg2) {
+    %ret = fadd <4 x float> %arg1, %arg2
+    ret <4 x float> %ret
   }
 
   define i8 @test_load_i8(i8* %p1) {
@@ -99,6 +100,14 @@
   define double* @test_store_double(double %val, double* %p1) {
     store double %val, double* %p1
     ret double* %p1
+  }
+
+  define void @constInt_check() {
+    ret void
+  }
+
+  define void @trunc_check() {
+    ret void
   }
 
 ...
@@ -536,9 +545,13 @@ regBankSelected: false
 selected:        false
 # CHECK-LABEL: name:            test_store_float
 # CHECK: registers:
-# CHECK:    - { id: 0, class: vecr }
-# CHECK:    - { id: 1, class: gpr }
-# CHECK:    - { id: 2, class: gpr }
+
+# FAST-NEXT:    - { id: 0, class: vecr }
+# FAST-NEXT:    - { id: 1, class: gpr }
+# FAST-NEXT:    - { id: 2, class: gpr }
+
+# GREEDY-NEXT:    - { id: 0, class: vecr }
+# GREEDY-NEXT:    - { id: 1, class: gpr }
 
 registers:
   - { id: 0, class: _ }
@@ -549,8 +562,13 @@ body:             |
 
     %0(s32) = COPY %xmm0
     %1(p0) = COPY %rdi
-    ; CHECK:  %2(s32) = COPY %0(s32)
-    ; CHECK:  G_STORE %2(s32), %1(p0) :: (store 4 into %ir.p1)
+    ; CHECK:      %1(p0) = COPY %rdi
+
+    ; FAST-NEXT:  %2(s32) = COPY %0(s32)
+    ; FAST-NEXT:  G_STORE %2(s32), %1(p0) :: (store 4 into %ir.p1)
+
+    ; GREEDY-NEXT:  G_STORE %0(s32), %1(p0) :: (store 4 into %ir.p1)
+
     G_STORE %0(s32), %1(p0) :: (store 4 into %ir.p1)
     %rax = COPY %1(p0)
     RET 0, implicit %rax
@@ -564,9 +582,13 @@ regBankSelected: false
 selected:        false
 # CHECK-LABEL: name:            test_store_double
 # CHECK: registers:
-# CHECK:    - { id: 0, class: vecr }
-# CHECK:    - { id: 1, class: gpr }
-# CHECK:    - { id: 2, class: gpr }
+
+# FAST-NEXT:    - { id: 0, class: vecr }
+# FAST-NEXT:    - { id: 1, class: gpr }
+# FAST-NEXT:    - { id: 2, class: gpr }
+
+# GREEDY-NEXT:    - { id: 0, class: vecr }
+# GREEDY-NEXT:    - { id: 1, class: gpr }
 
 registers:
   - { id: 0, class: _ }
@@ -577,11 +599,64 @@ body:             |
 
     %0(s64) = COPY %xmm0
     %1(p0) = COPY %rdi
-    ; CHECK:  %2(s64) = COPY %0(s64)
-    ; CHECK:  G_STORE %2(s64), %1(p0) :: (store 8 into %ir.p1)
+
+    ; CHECK:       %1(p0) = COPY %rdi
+
+    ; FAST-NEXT:   %2(s64) = COPY %0(s64)
+    ; FAST-NEXT:   G_STORE %2(s64), %1(p0) :: (store 8 into %ir.p1)
+
+    ; GREEDY-NEXT: G_STORE %0(s64), %1(p0) :: (store 8 into %ir.p1)
+
     G_STORE %0(s64), %1(p0) :: (store 8 into %ir.p1)
     %rax = COPY %1(p0)
     RET 0, implicit %rax
 
 ...
+---
+name:            constInt_check
+alignment:       4
+legalized:       true
+# CHECK-LABEL: name:            constInt_check
+# CHECK: registers:
+# CHECK-NEXT:  - { id: 0, class: gpr }
+# CHECK-NEXT:  - { id: 1, class: gpr }
+# CHECK-NEXT:  - { id: 2, class: gpr }
+# CHECK-NEXT:  - { id: 3, class: gpr }
+registers:
+  - { id: 0, class: _ }
+  - { id: 1, class: _ }
+  - { id: 2, class: _ }
+  - { id: 3, class: _ }
+body:             |
+  bb.0 (%ir-block.0):
+    %0(s8) = G_CONSTANT i8 8
+    %1(s16) = G_CONSTANT i16 16
+    %2(s32) = G_CONSTANT i32 32
+    %3(s64) = G_CONSTANT i64 64
+    RET 0
 
+...
+---
+name:            trunc_check
+alignment:       4
+legalized:       true
+# CHECK-LABEL: name:            trunc_check
+# CHECK: registers:
+# CHECK-NEXT:  - { id: 0, class: gpr }
+# CHECK-NEXT:  - { id: 1, class: gpr }
+# CHECK-NEXT:  - { id: 2, class: gpr }
+# CHECK-NEXT:  - { id: 3, class: gpr }
+registers:
+  - { id: 0, class: _ }
+  - { id: 1, class: _ }
+  - { id: 2, class: _ }
+  - { id: 3, class: _ }
+body:             |
+  bb.0 (%ir-block.0):
+    %0(s32) = IMPLICIT_DEF
+    %1(s1) = G_TRUNC %0(s32)
+    %2(s8) = G_TRUNC %0(s32)
+    %3(s16) = G_TRUNC %0(s32)
+    RET 0
+
+...

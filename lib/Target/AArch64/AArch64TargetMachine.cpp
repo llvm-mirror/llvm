@@ -12,7 +12,6 @@
 
 #include "AArch64.h"
 #include "AArch64CallLowering.h"
-#include "AArch64InstructionSelector.h"
 #include "AArch64LegalizerInfo.h"
 #include "AArch64MacroFusion.h"
 #ifdef LLVM_BUILD_GLOBAL_ISEL
@@ -118,7 +117,7 @@ EnableA53Fix835769("aarch64-fix-cortex-a53-835769", cl::Hidden,
 static cl::opt<bool>
     EnableAddressTypePromotion("aarch64-enable-type-promotion", cl::Hidden,
                                cl::desc("Enable the type promotion pass"),
-                               cl::init(true));
+                               cl::init(false));
 
 static cl::opt<bool>
     EnableGEPOpt("aarch64-enable-gep-opt", cl::Hidden,
@@ -286,7 +285,8 @@ AArch64TargetMachine::getSubtargetImpl(const Function &F) const {
     // FIXME: At this point, we can't rely on Subtarget having RBI.
     // It's awkward to mix passing RBI and the Subtarget; should we pass
     // TII/TRI as well?
-    GISel->InstSelector.reset(new AArch64InstructionSelector(*this, *I, *RBI));
+    GISel->InstSelector.reset(
+        createAArch64InstructionSelector(*this, *I, *RBI));
 
     GISel->RegBankInfo.reset(RBI);
 #endif

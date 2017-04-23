@@ -20,6 +20,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSet.h"
+#include "llvm/ADT/Triple.h"
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/ProfileSummary.h"
 #include "llvm/ProfileData/InstrProfData.inc"
@@ -53,40 +54,19 @@ class Instruction;
 class MDNode;
 class Module;
 
-/// Return the name of data section containing profile counter variables.
-inline StringRef getInstrProfCountersSectionName(bool AddSegment) {
-  return AddSegment ? "__DATA," INSTR_PROF_CNTS_SECT_NAME_STR
-                    : INSTR_PROF_CNTS_SECT_NAME_STR;
-}
+enum InstrProfSectKind {
+#define INSTR_PROF_SECT_ENTRY(Kind, SectNameCommon, SectNameCoff, Prefix) Kind,
+#include "llvm/ProfileData/InstrProfData.inc"
+};
 
-/// Return the name of data section containing names of instrumented
-/// functions.
-inline StringRef getInstrProfNameSectionName(bool AddSegment) {
-  return AddSegment ? "__DATA," INSTR_PROF_NAME_SECT_NAME_STR
-                    : INSTR_PROF_NAME_SECT_NAME_STR;
-}
-
-/// Return the name of the data section containing per-function control
-/// data.
-inline StringRef getInstrProfDataSectionName(bool AddSegment) {
-  return AddSegment ? "__DATA," INSTR_PROF_DATA_SECT_NAME_STR
-                      ",regular,live_support"
-                    : INSTR_PROF_DATA_SECT_NAME_STR;
-}
-
-/// Return the name of data section containing pointers to value profile
-/// counters/nodes.
-inline StringRef getInstrProfValuesSectionName(bool AddSegment) {
-  return AddSegment ? "__DATA," INSTR_PROF_VALS_SECT_NAME_STR
-                    : INSTR_PROF_VALS_SECT_NAME_STR;
-}
-
-/// Return the name of data section containing nodes holdling value
-/// profiling data.
-inline StringRef getInstrProfVNodesSectionName(bool AddSegment) {
-  return AddSegment ? "__DATA," INSTR_PROF_VNODES_SECT_NAME_STR
-                    : INSTR_PROF_VNODES_SECT_NAME_STR;
-}
+/// Return the name of the profile section corresponding to \p IPSK.
+///
+/// The name of the section depends on the object format type \p OF. If
+/// \p AddSegmentInfo is true, a segment prefix and additional linker hints may
+/// be added to the section name (this is the default).
+std::string getInstrProfSectionName(InstrProfSectKind IPSK,
+                                    Triple::ObjectFormatType OF,
+                                    bool AddSegmentInfo = true);
 
 /// Return the name profile runtime entry point to do value profiling
 /// for a given site.
@@ -101,10 +81,11 @@ inline StringRef getInstrProfValueRangeProfFuncName() {
 
 /// Return the name of the section containing function coverage mapping
 /// data.
-inline StringRef getInstrProfCoverageSectionName(bool AddSegment) {
-  return AddSegment ? "__LLVM_COV," INSTR_PROF_COVMAP_SECT_NAME_STR
-                    : INSTR_PROF_COVMAP_SECT_NAME_STR;
-}
+std::string getInstrProfCoverageSectionName(const Module *M = nullptr);
+/// Similar to the above, but used by host tool (e.g, coverage) which has
+/// object format information. The section name returned is not prefixed
+/// with segment name.
+std::string getInstrProfCoverageSectionNameInObject(bool isCoff);
 
 /// Return the name prefix of variables containing instrumented function names.
 inline StringRef getInstrProfNameVarPrefix() { return "__profn_"; }
@@ -992,6 +973,10 @@ struct Header {
 };
 
 } // end namespace RawInstrProf
+
+// Parse MemOP Size range option.
+void getMemOPSizeRangeFromOption(std::string Str, int64_t &RangeStart,
+                                 int64_t &RangeLast);
 
 } // end namespace llvm
 

@@ -84,10 +84,6 @@ LimitFPPrecision("limit-float-precision",
                  cl::location(LimitFloatPrecision),
                  cl::init(0));
 
-static cl::opt<bool>
-EnableFMFInDAG("enable-fmf-dag", cl::init(true), cl::Hidden,
-                cl::desc("Enable fast-math-flags for DAG nodes"));
-
 /// Minimum jump table density for normal functions.
 static cl::opt<unsigned>
 JumpTableDensity("jump-table-density", cl::init(10), cl::Hidden,
@@ -2586,13 +2582,13 @@ void SelectionDAGBuilder::visitBinary(const User &I, unsigned OpCode) {
   Flags.setNoSignedWrap(nsw);
   Flags.setNoUnsignedWrap(nuw);
   Flags.setVectorReduction(vec_redux);
-  if (EnableFMFInDAG) {
-    Flags.setAllowReciprocal(FMF.allowReciprocal());
-    Flags.setNoInfs(FMF.noInfs());
-    Flags.setNoNaNs(FMF.noNaNs());
-    Flags.setNoSignedZeros(FMF.noSignedZeros());
-    Flags.setUnsafeAlgebra(FMF.unsafeAlgebra());
-  }
+  Flags.setAllowReciprocal(FMF.allowReciprocal());
+  Flags.setAllowContract(FMF.allowContract());
+  Flags.setNoInfs(FMF.noInfs());
+  Flags.setNoNaNs(FMF.noNaNs());
+  Flags.setNoSignedZeros(FMF.noSignedZeros());
+  Flags.setUnsafeAlgebra(FMF.unsafeAlgebra());
+
   SDValue BinNodeValue = DAG.getNode(OpCode, getCurSDLoc(), Op1.getValueType(),
                                      Op1, Op2, &Flags);
   setValue(&I, BinNodeValue);
@@ -4678,7 +4674,7 @@ static unsigned getUnderlyingArgReg(const SDValue &N) {
 /// At the end of instruction selection, they will be inserted to the entry BB.
 bool SelectionDAGBuilder::EmitFuncArgumentDbgValue(
     const Value *V, DILocalVariable *Variable, DIExpression *Expr,
-    DILocation *DL, int64_t Offset, bool IsIndirect, const SDValue &N) {
+    DILocation *DL, int64_t Offset, bool IsDbgDeclare, const SDValue &N) {
   const Argument *Arg = dyn_cast<Argument>(V);
   if (!Arg)
     return false;
@@ -4692,6 +4688,7 @@ bool SelectionDAGBuilder::EmitFuncArgumentDbgValue(
   if (!Variable->getScope()->getSubprogram()->describes(MF.getFunction()))
     return false;
 
+  bool IsIndirect = false;
   Optional<MachineOperand> Op;
   // Some arguments' frame index is recorded during argument lowering.
   if (int FI = FuncInfo.getArgumentFrameIndex(Arg))
@@ -4705,15 +4702,19 @@ bool SelectionDAGBuilder::EmitFuncArgumentDbgValue(
       if (PR)
         Reg = PR;
     }
-    if (Reg)
+    if (Reg) {
       Op = MachineOperand::CreateReg(Reg, false);
+      IsIndirect = IsDbgDeclare;
+    }
   }
 
   if (!Op) {
     // Check if ValueMap has reg number.
     DenseMap<const Value *, unsigned>::iterator VMI = FuncInfo.ValueMap.find(V);
-    if (VMI != FuncInfo.ValueMap.end())
+    if (VMI != FuncInfo.ValueMap.end()) {
       Op = MachineOperand::CreateReg(VMI->second, false);
+      IsIndirect = IsDbgDeclare;
+    }
   }
 
   if (!Op && N.getNode())
@@ -4959,8 +4960,7 @@ SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I, unsigned Intrinsic) {
       } else if (isa<Argument>(Address)) {
         // Address is an argument, so try to emit its dbg value using
         // virtual register info from the FuncInfo.ValueMap.
-        EmitFuncArgumentDbgValue(Address, Variable, Expression, dl, 0, false,
-                                 N);
+        EmitFuncArgumentDbgValue(Address, Variable, Expression, dl, 0, true, N);
         return nullptr;
       } else {
         SDV = DAG.getDbgValue(Variable, Expression, N.getNode(), N.getResNo(),
@@ -4970,7 +4970,7 @@ SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I, unsigned Intrinsic) {
     } else {
       // If Address is an argument then try to emit its dbg value using
       // virtual register info from the FuncInfo.ValueMap.
-      if (!EmitFuncArgumentDbgValue(Address, Variable, Expression, dl, 0, false,
+      if (!EmitFuncArgumentDbgValue(Address, Variable, Expression, dl, 0, true,
                                     N)) {
         // If variable is pinned by a alloca in dominating bb then
         // use StaticAllocaMap.
@@ -5880,8 +5880,7 @@ void SelectionDAGBuilder::LowerCallTo(ImmutableCallSite CS, SDValue Callee,
     SDValue ArgNode = getValue(V);
     Entry.Node = ArgNode; Entry.Ty = V->getType();
 
-    // Skip the first return-type Attribute to get to params.
-    Entry.setAttributes(&CS, i - CS.arg_begin() + 1);
+    Entry.setAttributes(&CS, i - CS.arg_begin());
 
     // Use swifterror virtual register as input to the call.
     if (Entry.IsSwiftError && TLI.supportSwiftError()) {
@@ -5955,13 +5954,17 @@ static bool IsOnlyUsedInZeroEqualityComparison(const Value *V) {
 }
 
 static SDValue getMemCmpLoad(const Value *PtrVal, MVT LoadVT,
-                             Type *LoadTy,
                              SelectionDAGBuilder &Builder) {
 
   // Check to see if this load can be trivially constant folded, e.g. if the
   // input is from a string literal.
   if (const Constant *LoadInput = dyn_cast<Constant>(PtrVal)) {
     // Cast pointer to the type we really want to load.
+    Type *LoadTy =
+        Type::getIntNTy(PtrVal->getContext(), LoadVT.getScalarSizeInBits());
+    if (LoadVT.isVector())
+      LoadTy = VectorType::get(LoadTy, LoadVT.getVectorNumElements());
+
     LoadInput = ConstantExpr::getBitCast(const_cast<Constant *>(LoadInput),
                                          PointerType::getUnqual(LoadTy));
 
@@ -6039,57 +6042,64 @@ bool SelectionDAGBuilder::visitMemCmpCall(const CallInst &I) {
   if (!CSize || !IsOnlyUsedInZeroEqualityComparison(&I))
     return false;
 
-  MVT LoadVT;
-  Type *LoadTy;
-  switch (CSize->getZExtValue()) {
-  default:
-    return false;
-  case 2:
-    LoadVT = MVT::i16;
-    LoadTy = Type::getInt16Ty(CSize->getContext());
-    break;
-  case 4:
-    LoadVT = MVT::i32;
-    LoadTy = Type::getInt32Ty(CSize->getContext());
-    break;
-  case 8:
-    LoadVT = MVT::i64;
-    LoadTy = Type::getInt64Ty(CSize->getContext());
-    break;
-  /*
-  case 16:
-    LoadVT = MVT::v4i32;
-    LoadTy = Type::getInt32Ty(CSize->getContext());
-    LoadTy = VectorType::get(LoadTy, 4);
-    break;
-  */
-  }
+  // If the target has a fast compare for the given size, it will return a
+  // preferred load type for that size. Require that the load VT is legal and
+  // that the target supports unaligned loads of that type. Otherwise, return
+  // INVALID.
+  auto hasFastLoadsAndCompare = [&](unsigned NumBits) {
+    const TargetLowering &TLI = DAG.getTargetLoweringInfo();
+    MVT LVT = TLI.hasFastEqualityCompare(NumBits);
+    if (LVT != MVT::INVALID_SIMPLE_VALUE_TYPE) {
+      // TODO: Handle 5 byte compare as 4-byte + 1 byte.
+      // TODO: Handle 8 byte compare on x86-32 as two 32-bit loads.
+      // TODO: Check alignment of src and dest ptrs.
+      unsigned DstAS = LHS->getType()->getPointerAddressSpace();
+      unsigned SrcAS = RHS->getType()->getPointerAddressSpace();
+      if (!TLI.isTypeLegal(LVT) ||
+          !TLI.allowsMisalignedMemoryAccesses(LVT, SrcAS) ||
+          !TLI.allowsMisalignedMemoryAccesses(LVT, DstAS))
+        LVT = MVT::INVALID_SIMPLE_VALUE_TYPE;
+    }
 
-  // This turns into unaligned loads.  We only do this if the target natively
+    return LVT;
+  };
+
+  // This turns into unaligned loads. We only do this if the target natively
   // supports the MVT we'll be loading or if it is small enough (<= 4) that
   // we'll only produce a small number of byte loads.
-
-  // Require that we can find a legal MVT, and only do this if the target
-  // supports unaligned loads of that type.  Expanding into byte loads would
-  // bloat the code.
-  const TargetLowering &TLI = DAG.getTargetLoweringInfo();
-  if (CSize->getZExtValue() > 4) {
-    unsigned DstAS = LHS->getType()->getPointerAddressSpace();
-    unsigned SrcAS = RHS->getType()->getPointerAddressSpace();
-    // TODO: Handle 5 byte compare as 4-byte + 1 byte.
-    // TODO: Handle 8 byte compare on x86-32 as two 32-bit loads.
-    // TODO: Check alignment of src and dest ptrs.
-    if (!TLI.isTypeLegal(LoadVT) ||
-        !TLI.allowsMisalignedMemoryAccesses(LoadVT, SrcAS) ||
-        !TLI.allowsMisalignedMemoryAccesses(LoadVT, DstAS))
-      return false;
+  MVT LoadVT;
+  unsigned NumBitsToCompare = CSize->getZExtValue() * 8;
+  switch (NumBitsToCompare) {
+  default:
+    return false;
+  case 16:
+    LoadVT = MVT::i16;
+    break;
+  case 32:
+    LoadVT = MVT::i32;
+    break;
+  case 64:
+  case 128:
+  case 256:
+    LoadVT = hasFastLoadsAndCompare(NumBitsToCompare);
+    break;
   }
 
-  SDValue LHSVal = getMemCmpLoad(LHS, LoadVT, LoadTy, *this);
-  SDValue RHSVal = getMemCmpLoad(RHS, LoadVT, LoadTy, *this);
-  SDValue SetCC =
-      DAG.getSetCC(getCurSDLoc(), MVT::i1, LHSVal, RHSVal, ISD::SETNE);
-  processIntegerCallValue(I, SetCC, false);
+  if (LoadVT == MVT::INVALID_SIMPLE_VALUE_TYPE)
+    return false;
+
+  SDValue LoadL = getMemCmpLoad(LHS, LoadVT, *this);
+  SDValue LoadR = getMemCmpLoad(RHS, LoadVT, *this);
+
+  // Bitcast to a wide integer type if the loads are vectors.
+  if (LoadVT.isVector()) {
+    EVT CmpVT = EVT::getIntegerVT(LHS->getContext(), LoadVT.getSizeInBits());
+    LoadL = DAG.getBitcast(CmpVT, LoadL);
+    LoadR = DAG.getBitcast(CmpVT, LoadR);
+  }
+
+  SDValue Cmp = DAG.getSetCC(getCurSDLoc(), MVT::i1, LoadL, LoadR, ISD::SETNE);
+  processIntegerCallValue(I, Cmp, false);
   return true;
 }
 
@@ -7333,7 +7343,7 @@ void SelectionDAGBuilder::populateCallLoweringInfo(
 
   // Populate the argument list.
   // Attributes for args start at offset 1, after the return attribute.
-  for (unsigned ArgI = ArgIdx, ArgE = ArgIdx + NumArgs, AttrI = ArgIdx + 1;
+  for (unsigned ArgI = ArgIdx, ArgE = ArgIdx + NumArgs;
        ArgI != ArgE; ++ArgI) {
     const Value *V = CS->getOperand(ArgI);
 
@@ -7342,7 +7352,7 @@ void SelectionDAGBuilder::populateCallLoweringInfo(
     TargetLowering::ArgListEntry Entry;
     Entry.Node = getValue(V);
     Entry.Ty = V->getType();
-    Entry.setAttributes(&CS, AttrI);
+    Entry.setAttributes(&CS, ArgIdx);
     Args.push_back(Entry);
   }
 

@@ -328,11 +328,52 @@ static AArch64_AM::ShiftExtendType getShiftTypeForNode(SDValue N) {
   }
 }
 
+/// \brief Determine whether it is worth it to fold SHL into the addressing
+/// mode.
+static bool isWorthFoldingSHL(SDValue V) {
+  assert(V.getOpcode() == ISD::SHL && "invalid opcode");
+  // It is worth folding logical shift of up to three places.
+  auto *CSD = dyn_cast<ConstantSDNode>(V.getOperand(1));
+  if (!CSD)
+    return false;
+  unsigned ShiftVal = CSD->getZExtValue();
+  if (ShiftVal > 3)
+    return false;
+
+  // Check if this particular node is reused in any non-memory related
+  // operation.  If yes, do not try to fold this node into the address
+  // computation, since the computation will be kept.
+  const SDNode *Node = V.getNode();
+  for (SDNode *UI : Node->uses())
+    if (!isa<MemSDNode>(*UI))
+      for (SDNode *UII : UI->uses())
+        if (!isa<MemSDNode>(*UII))
+          return false;
+  return true;
+}
+
 /// \brief Determine whether it is worth to fold V into an extended register.
 bool AArch64DAGToDAGISel::isWorthFolding(SDValue V) const {
-  // it hurts if the value is used at least twice, unless we are optimizing
-  // for code size.
-  return ForCodeSize || V.hasOneUse();
+  // Trivial if we are optimizing for code size or if there is only
+  // one use of the value.
+  if (ForCodeSize || V.hasOneUse())
+    return true;
+  // If a subtarget has a fastpath LSL we can fold a logical shift into
+  // the addressing mode and save a cycle.
+  if (Subtarget->hasLSLFast() && V.getOpcode() == ISD::SHL &&
+      isWorthFoldingSHL(V))
+    return true;
+  if (Subtarget->hasLSLFast() && V.getOpcode() == ISD::ADD) {
+    const SDValue LHS = V.getOperand(0);
+    const SDValue RHS = V.getOperand(1);
+    if (LHS.getOpcode() == ISD::SHL && isWorthFoldingSHL(LHS))
+      return true;
+    if (RHS.getOpcode() == ISD::SHL && isWorthFoldingSHL(RHS))
+      return true;
+  }
+
+  // It hurts otherwise, since the value will be reused.
+  return false;
 }
 
 /// SelectShiftedRegister - Select a "shifted register" operand.  If the value
@@ -1824,7 +1865,7 @@ static void getUsefulBitsFromBitfieldMoveOpd(SDValue Op, APInt &UsefulBits,
     OpUsefulBits = OpUsefulBits.shl(OpUsefulBits.getBitWidth() - Imm);
     getUsefulBits(Op, OpUsefulBits, Depth + 1);
     // The interesting part was at zero in the argument
-    OpUsefulBits = OpUsefulBits.lshr(OpUsefulBits.getBitWidth() - Imm);
+    OpUsefulBits.lshrInPlace(OpUsefulBits.getBitWidth() - Imm);
   }
 
   UsefulBits &= OpUsefulBits;
@@ -1853,13 +1894,13 @@ static void getUsefulBitsFromOrWithShiftedReg(SDValue Op, APInt &UsefulBits,
     uint64_t ShiftAmt = AArch64_AM::getShiftValue(ShiftTypeAndValue);
     Mask = Mask.shl(ShiftAmt);
     getUsefulBits(Op, Mask, Depth + 1);
-    Mask = Mask.lshr(ShiftAmt);
+    Mask.lshrInPlace(ShiftAmt);
   } else if (AArch64_AM::getShiftType(ShiftTypeAndValue) == AArch64_AM::LSR) {
     // Shift Right
     // We do not handle AArch64_AM::ASR, because the sign will change the
     // number of useful bits
     uint64_t ShiftAmt = AArch64_AM::getShiftValue(ShiftTypeAndValue);
-    Mask = Mask.lshr(ShiftAmt);
+    Mask.lshrInPlace(ShiftAmt);
     getUsefulBits(Op, Mask, Depth + 1);
     Mask = Mask.shl(ShiftAmt);
   } else
@@ -1913,7 +1954,7 @@ static void getUsefulBitsFromBFM(SDValue Op, SDValue Orig, APInt &UsefulBits,
     if (Op.getOperand(1) == Orig) {
       // Copy the bits from the result to the zero bits.
       Mask = ResultUsefulBits & OpUsefulBits;
-      Mask = Mask.lshr(LSB);
+      Mask.lshrInPlace(LSB);
     }
 
     if (Op.getOperand(0) == Orig)

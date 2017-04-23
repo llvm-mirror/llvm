@@ -1755,8 +1755,8 @@ bool AsmParser::parseStatement(ParseStatementInfo &Info,
     case DK_8BYTE:
       return parseDirectiveValue(IDVal, 8);
     case DK_DC_A:
-      return parseDirectiveValue(IDVal,
-                                 getContext().getAsmInfo()->getPointerSize());
+      return parseDirectiveValue(
+          IDVal, getContext().getAsmInfo()->getCodePointerSize());
     case DK_OCTA:
       return parseDirectiveOctaValue(IDVal);
     case DK_SINGLE:
@@ -1980,7 +1980,7 @@ bool AsmParser::parseStatement(ParseStatementInfo &Info,
   if (ParsingInlineAsm && (IDVal == "align" || IDVal == "ALIGN"))
     return parseDirectiveMSAlign(IDLoc, Info);
 
-  if (ParsingInlineAsm && (IDVal == "even"))
+  if (ParsingInlineAsm && (IDVal == "even" || IDVal == "EVEN"))
     Info.AsmRewrites->emplace_back(AOK_EVEN, IDLoc, 4);
   if (checkForValidSection())
     return true;
@@ -3873,6 +3873,12 @@ bool AsmParser::parseDirectiveMacro(SMLoc DirectiveLoc) {
     MCAsmMacroParameter Parameter;
     if (parseIdentifier(Parameter.Name))
       return TokError("expected identifier in '.macro' directive");
+
+    // Emit an error if two (or more) named parameters share the same name
+    for (const MCAsmMacroParameter& CurrParam : Parameters)
+      if (CurrParam.Name.equals(Parameter.Name))
+        return TokError("macro '" + Name + "' has multiple parameters"
+                        " named '" + Parameter.Name + "'");
 
     if (Lexer.is(AsmToken::Colon)) {
       Lex();  // consume ':'

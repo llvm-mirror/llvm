@@ -792,7 +792,7 @@ EVT AArch64TargetLowering::getSetCCResultType(const DataLayout &, LLVMContext &,
 /// KnownZero/KnownOne bitsets.
 void AArch64TargetLowering::computeKnownBitsForTargetNode(
     const SDValue Op, APInt &KnownZero, APInt &KnownOne,
-    const SelectionDAG &DAG, unsigned Depth) const {
+    const APInt &DemandedElts, const SelectionDAG &DAG, unsigned Depth) const {
   switch (Op.getOpcode()) {
   default:
     break;
@@ -2231,19 +2231,13 @@ static SDValue skipExtensionForVectorMULL(SDNode *N, SelectionDAG &DAG) {
 }
 
 static bool isSignExtended(SDNode *N, SelectionDAG &DAG) {
-  if (N->getOpcode() == ISD::SIGN_EXTEND)
-    return true;
-  if (isExtendedBUILD_VECTOR(N, DAG, true))
-    return true;
-  return false;
+  return N->getOpcode() == ISD::SIGN_EXTEND ||
+         isExtendedBUILD_VECTOR(N, DAG, true);
 }
 
 static bool isZeroExtended(SDNode *N, SelectionDAG &DAG) {
-  if (N->getOpcode() == ISD::ZERO_EXTEND)
-    return true;
-  if (isExtendedBUILD_VECTOR(N, DAG, false))
-    return true;
-  return false;
+  return N->getOpcode() == ISD::ZERO_EXTEND ||
+         isExtendedBUILD_VECTOR(N, DAG, false);
 }
 
 static bool isAddSubSExt(SDNode *N, SelectionDAG &DAG) {
@@ -3245,30 +3239,26 @@ AArch64TargetLowering::LowerCall(CallLoweringInfo &CLI,
   // If the callee is a GlobalAddress/ExternalSymbol node (quite common, every
   // direct call is) turn it into a TargetGlobalAddress/TargetExternalSymbol
   // node so that legalize doesn't hack it.
-  if (getTargetMachine().getCodeModel() == CodeModel::Large &&
-      Subtarget->isTargetMachO()) {
-    if (GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(Callee)) {
+  if (auto *G = dyn_cast<GlobalAddressSDNode>(Callee)) {
+    auto GV = G->getGlobal();
+    if (Subtarget->classifyGlobalFunctionReference(GV, getTargetMachine()) ==
+        AArch64II::MO_GOT) {
+      Callee = DAG.getTargetGlobalAddress(GV, DL, PtrVT, 0, AArch64II::MO_GOT);
+      Callee = DAG.getNode(AArch64ISD::LOADgot, DL, PtrVT, Callee);
+    } else {
       const GlobalValue *GV = G->getGlobal();
-      bool InternalLinkage = GV->hasInternalLinkage();
-      if (InternalLinkage)
-        Callee = DAG.getTargetGlobalAddress(GV, DL, PtrVT, 0, 0);
-      else {
-        Callee =
-            DAG.getTargetGlobalAddress(GV, DL, PtrVT, 0, AArch64II::MO_GOT);
-        Callee = DAG.getNode(AArch64ISD::LOADgot, DL, PtrVT, Callee);
-      }
-    } else if (ExternalSymbolSDNode *S =
-                   dyn_cast<ExternalSymbolSDNode>(Callee)) {
+      Callee = DAG.getTargetGlobalAddress(GV, DL, PtrVT, 0, 0);
+    }
+  } else if (auto *S = dyn_cast<ExternalSymbolSDNode>(Callee)) {
+    if (getTargetMachine().getCodeModel() == CodeModel::Large &&
+        Subtarget->isTargetMachO()) {
       const char *Sym = S->getSymbol();
       Callee = DAG.getTargetExternalSymbol(Sym, PtrVT, AArch64II::MO_GOT);
       Callee = DAG.getNode(AArch64ISD::LOADgot, DL, PtrVT, Callee);
+    } else {
+      const char *Sym = S->getSymbol();
+      Callee = DAG.getTargetExternalSymbol(Sym, PtrVT, 0);
     }
-  } else if (GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(Callee)) {
-    const GlobalValue *GV = G->getGlobal();
-    Callee = DAG.getTargetGlobalAddress(GV, DL, PtrVT, 0, 0);
-  } else if (ExternalSymbolSDNode *S = dyn_cast<ExternalSymbolSDNode>(Callee)) {
-    const char *Sym = S->getSymbol();
-    Callee = DAG.getTargetExternalSymbol(Sym, PtrVT, 0);
   }
 
   // We don't usually want to end the call-sequence here because we would tidy
@@ -3578,7 +3568,7 @@ SDValue
 AArch64TargetLowering::LowerELFGlobalTLSAddress(SDValue Op,
                                                 SelectionDAG &DAG) const {
   assert(Subtarget->isTargetELF() && "This function expects an ELF target");
-  assert(getTargetMachine().getCodeModel() == CodeModel::Small &&
+  assert(Subtarget->useSmallAddressing() &&
          "ELF TLS only supported in small memory model");
   // Different choices can be made for the maximum size of the TLS area for a
   // module. For the small address model, the default TLS size is 16MiB and the
@@ -3679,7 +3669,7 @@ SDValue AArch64TargetLowering::LowerGlobalTLSAddress(SDValue Op,
                                                      SelectionDAG &DAG) const {
   if (Subtarget->isTargetDarwin())
     return LowerDarwinGlobalTLSAddress(Op, DAG);
-  else if (Subtarget->isTargetELF())
+  if (Subtarget->isTargetELF())
     return LowerELFGlobalTLSAddress(Op, DAG);
 
   llvm_unreachable("Unexpected platform trying to use TLS");
@@ -4516,7 +4506,12 @@ unsigned AArch64TargetLowering::getRegisterByName(const char* RegName, EVT VT,
                                                   SelectionDAG &DAG) const {
   unsigned Reg = StringSwitch<unsigned>(RegName)
                        .Case("sp", AArch64::SP)
+                       .Case("x18", AArch64::X18)
+                       .Case("w18", AArch64::W18)
                        .Default(0);
+  if ((Reg == AArch64::X18 || Reg == AArch64::W18) &&
+      !Subtarget->isX18Reserved())
+    Reg = 0;
   if (Reg)
     return Reg;
   report_fatal_error(Twine("Invalid register name \""
@@ -6591,21 +6586,20 @@ FailedModImm:
   if (!isConstant && !usesOnlyOneValue) {
     SDValue Vec = DAG.getUNDEF(VT);
     SDValue Op0 = Op.getOperand(0);
-    unsigned ElemSize = VT.getScalarSizeInBits();
     unsigned i = 0;
-    // For 32 and 64 bit types, use INSERT_SUBREG for lane zero to
+
+    // Use SCALAR_TO_VECTOR for lane zero to
     // a) Avoid a RMW dependency on the full vector register, and
     // b) Allow the register coalescer to fold away the copy if the
-    //    value is already in an S or D register.
-    // Do not do this for UNDEF/LOAD nodes because we have better patterns
-    // for those avoiding the SCALAR_TO_VECTOR/BUILD_VECTOR.
-    if (!Op0.isUndef() && Op0.getOpcode() != ISD::LOAD &&
-        (ElemSize == 32 || ElemSize == 64)) {
-      unsigned SubIdx = ElemSize == 32 ? AArch64::ssub : AArch64::dsub;
-      MachineSDNode *N =
-          DAG.getMachineNode(TargetOpcode::INSERT_SUBREG, dl, VT, Vec, Op0,
-                             DAG.getTargetConstant(SubIdx, dl, MVT::i32));
-      Vec = SDValue(N, 0);
+    //    value is already in an S or D register, and we're forced to emit an
+    //    INSERT_SUBREG that we can't fold anywhere.
+    //
+    // We also allow types like i8 and i16 which are illegal scalar but legal
+    // vector element types. After type-legalization the inserted value is
+    // extended (i32) and it is safe to cast them to the vector type by ignoring
+    // the upper bits of the lowest lane (e.g. v8i8, v4i16).
+    if (!Op0.isUndef()) {
+      Vec = DAG.getNode(ISD::SCALAR_TO_VECTOR, dl, VT, Op0);
       ++i;
     }
     for (; i < NumElts; ++i) {
@@ -7132,7 +7126,7 @@ bool AArch64TargetLowering::isProfitableToHoist(Instruction *I) const {
   if (I->getOpcode() != Instruction::FMul)
     return true;
 
-  if (I->getNumUses() != 1)
+  if (!I->hasOneUse())
     return true;
 
   Instruction *User = I->user_back();
@@ -7251,9 +7245,29 @@ bool AArch64TargetLowering::hasPairedLoad(EVT LoadedType,
 
 /// A helper function for determining the number of interleaved accesses we
 /// will generate when lowering accesses of the given type.
-static unsigned getNumInterleavedAccesses(VectorType *VecTy,
-                                          const DataLayout &DL) {
+unsigned
+AArch64TargetLowering::getNumInterleavedAccesses(VectorType *VecTy,
+                                                 const DataLayout &DL) const {
   return (DL.getTypeSizeInBits(VecTy) + 127) / 128;
+}
+
+bool AArch64TargetLowering::isLegalInterleavedAccessType(
+    VectorType *VecTy, const DataLayout &DL) const {
+
+  unsigned VecSize = DL.getTypeSizeInBits(VecTy);
+  unsigned ElSize = DL.getTypeSizeInBits(VecTy->getElementType());
+
+  // Ensure the number of vector elements is greater than 1.
+  if (VecTy->getNumElements() < 2)
+    return false;
+
+  // Ensure the element type is legal.
+  if (ElSize != 8 && ElSize != 16 && ElSize != 32 && ElSize != 64)
+    return false;
+
+  // Ensure the total vector size is 64 or a multiple of 128. Types larger than
+  // 128 will be split into multiple interleaved accesses.
+  return VecSize == 64 || VecSize % 128 == 0;
 }
 
 /// \brief Lower an interleaved load into a ldN intrinsic.
@@ -7279,12 +7293,11 @@ bool AArch64TargetLowering::lowerInterleavedLoad(
   const DataLayout &DL = LI->getModule()->getDataLayout();
 
   VectorType *VecTy = Shuffles[0]->getType();
-  unsigned VecSize = DL.getTypeSizeInBits(VecTy);
 
   // Skip if we do not have NEON and skip illegal vector types. We can
   // "legalize" wide vector types into multiple interleaved accesses as long as
   // the vector types are divisible by 128.
-  if (!Subtarget->hasNEON() || (VecSize != 64 && VecSize % 128 != 0))
+  if (!Subtarget->hasNEON() || !isLegalInterleavedAccessType(VecTy, DL))
     return false;
 
   unsigned NumLoads = getNumInterleavedAccesses(VecTy, DL);
@@ -7409,12 +7422,11 @@ bool AArch64TargetLowering::lowerInterleavedStore(StoreInst *SI,
   VectorType *SubVecTy = VectorType::get(EltTy, LaneLen);
 
   const DataLayout &DL = SI->getModule()->getDataLayout();
-  unsigned SubVecSize = DL.getTypeSizeInBits(SubVecTy);
 
   // Skip if we do not have NEON and skip illegal vector types. We can
   // "legalize" wide vector types into multiple interleaved accesses as long as
   // the vector types are divisible by 128.
-  if (!Subtarget->hasNEON() || (SubVecSize != 64 && SubVecSize % 128 != 0))
+  if (!Subtarget->hasNEON() || !isLegalInterleavedAccessType(SubVecTy, DL))
     return false;
 
   unsigned NumStores = getNumInterleavedAccesses(SubVecTy, DL);
@@ -10379,7 +10391,7 @@ bool AArch64TargetLowering::isUsedByReturnOnly(SDNode *N,
 // call. This will cause the optimizers to attempt to move, or duplicate,
 // return instructions to help enable tail call optimizations for this
 // instruction.
-bool AArch64TargetLowering::mayBeEmittedAsTailCall(CallInst *CI) const {
+bool AArch64TargetLowering::mayBeEmittedAsTailCall(const CallInst *CI) const {
   return CI->isTailCall();
 }
 

@@ -380,13 +380,23 @@ void CallInst::addDereferenceableOrNullAttr(unsigned i, uint64_t Bytes) {
   setAttributes(PAL);
 }
 
-bool CallInst::paramHasAttr(unsigned i, Attribute::AttrKind Kind) const {
-  assert(i < (getNumArgOperands() + 1) && "Param index out of bounds!");
+bool CallInst::hasRetAttr(Attribute::AttrKind Kind) const {
+  if (Attrs.hasAttribute(AttributeList::ReturnIndex, Kind))
+    return true;
 
-  if (Attrs.hasAttribute(i, Kind))
+  // Look at the callee, if available.
+  if (const Function *F = getCalledFunction())
+    return F->getAttributes().hasAttribute(AttributeList::ReturnIndex, Kind);
+  return false;
+}
+
+bool CallInst::paramHasAttr(unsigned i, Attribute::AttrKind Kind) const {
+  assert(i < getNumArgOperands() && "Param index out of bounds!");
+
+  if (Attrs.hasParamAttribute(i, Kind))
     return true;
   if (const Function *F = getCalledFunction())
-    return F->getAttributes().hasAttribute(i, Kind);
+    return F->getAttributes().hasParamAttribute(i, Kind);
   return false;
 }
 
@@ -400,8 +410,10 @@ bool CallInst::dataOperandHasImpliedAttr(unsigned i,
   // question is a call argument; or be indirectly implied by the kind of its
   // containing operand bundle, if the operand is a bundle operand.
 
+  // FIXME: Avoid these i - 1 calculations and update the API to use zero-based
+  // indices.
   if (i < (getNumArgOperands() + 1))
-    return paramHasAttr(i, Kind);
+    return paramHasAttr(i - 1, Kind);
 
   assert(hasOperandBundles() && i >= (getBundleOperandsStartIndex() + 1) &&
          "Must be either a call argument or an operand bundle!");
@@ -466,7 +478,7 @@ static Instruction *createMalloc(Instruction *InsertBefore,
   Value *MallocFunc = MallocF;
   if (!MallocFunc)
     // prototype malloc as "void *malloc(size_t)"
-    MallocFunc = M->getOrInsertFunction("malloc", BPTy, IntPtrTy, nullptr);
+    MallocFunc = M->getOrInsertFunction("malloc", BPTy, IntPtrTy);
   PointerType *AllocPtrType = PointerType::getUnqual(AllocTy);
   CallInst *MCall = nullptr;
   Instruction *Result = nullptr;
@@ -560,7 +572,7 @@ static Instruction *createFree(Value *Source,
   Type *VoidTy = Type::getVoidTy(M->getContext());
   Type *IntPtrTy = Type::getInt8PtrTy(M->getContext());
   // prototype free as "void free(void*)"
-  Value *FreeFunc = M->getOrInsertFunction("free", VoidTy, IntPtrTy, nullptr);
+  Value *FreeFunc = M->getOrInsertFunction("free", VoidTy, IntPtrTy);
   CallInst *Result = nullptr;
   Value *PtrCast = Source;
   if (InsertBefore) {
@@ -691,13 +703,23 @@ Value *InvokeInst::getReturnedArgOperand() const {
   return nullptr;
 }
 
-bool InvokeInst::paramHasAttr(unsigned i, Attribute::AttrKind Kind) const {
-  assert(i < (getNumArgOperands() + 1) && "Param index out of bounds!");
+bool InvokeInst::hasRetAttr(Attribute::AttrKind Kind) const {
+  if (Attrs.hasAttribute(AttributeList::ReturnIndex, Kind))
+    return true;
 
-  if (Attrs.hasAttribute(i, Kind))
+  // Look at the callee, if available.
+  if (const Function *F = getCalledFunction())
+    return F->getAttributes().hasAttribute(AttributeList::ReturnIndex, Kind);
+  return false;
+}
+
+bool InvokeInst::paramHasAttr(unsigned i, Attribute::AttrKind Kind) const {
+  assert(i < getNumArgOperands() && "Param index out of bounds!");
+
+  if (Attrs.hasParamAttribute(i, Kind))
     return true;
   if (const Function *F = getCalledFunction())
-    return F->getAttributes().hasAttribute(i, Kind);
+    return F->getAttributes().hasParamAttribute(i, Kind);
   return false;
 }
 
@@ -711,8 +733,10 @@ bool InvokeInst::dataOperandHasImpliedAttr(unsigned i,
   // question is an invoke argument; or be indirectly implied by the kind of its
   // containing operand bundle, if the operand is a bundle operand.
 
+  // FIXME: Avoid these i - 1 calculations and update the API to use zero-based
+  // indices.
   if (i < (getNumArgOperands() + 1))
-    return paramHasAttr(i, Kind);
+    return paramHasAttr(i - 1, Kind);
 
   assert(hasOperandBundles() && i >= (getBundleOperandsStartIndex() + 1) &&
          "Must be either an invoke argument or an operand bundle!");
@@ -1199,34 +1223,38 @@ static Value *getAISize(LLVMContext &Context, Value *Amt) {
   return Amt;
 }
 
-AllocaInst::AllocaInst(Type *Ty, const Twine &Name, Instruction *InsertBefore)
-    : AllocaInst(Ty, /*ArraySize=*/nullptr, Name, InsertBefore) {}
-
-AllocaInst::AllocaInst(Type *Ty, const Twine &Name, BasicBlock *InsertAtEnd)
-    : AllocaInst(Ty, /*ArraySize=*/nullptr, Name, InsertAtEnd) {}
-
-AllocaInst::AllocaInst(Type *Ty, Value *ArraySize, const Twine &Name,
+AllocaInst::AllocaInst(Type *Ty, unsigned AddrSpace, const Twine &Name,
                        Instruction *InsertBefore)
-    : AllocaInst(Ty, ArraySize, /*Align=*/0, Name, InsertBefore) {}
+  : AllocaInst(Ty, AddrSpace, /*ArraySize=*/nullptr, Name, InsertBefore) {}
 
-AllocaInst::AllocaInst(Type *Ty, Value *ArraySize, const Twine &Name,
+AllocaInst::AllocaInst(Type *Ty, unsigned AddrSpace, const Twine &Name,
                        BasicBlock *InsertAtEnd)
-    : AllocaInst(Ty, ArraySize, /*Align=*/0, Name, InsertAtEnd) {}
+  : AllocaInst(Ty, AddrSpace, /*ArraySize=*/nullptr, Name, InsertAtEnd) {}
 
-AllocaInst::AllocaInst(Type *Ty, Value *ArraySize, unsigned Align,
+AllocaInst::AllocaInst(Type *Ty, unsigned AddrSpace, Value *ArraySize,
                        const Twine &Name, Instruction *InsertBefore)
-    : UnaryInstruction(PointerType::getUnqual(Ty), Alloca,
-                       getAISize(Ty->getContext(), ArraySize), InsertBefore),
-      AllocatedType(Ty) {
+  : AllocaInst(Ty, AddrSpace, ArraySize, /*Align=*/0, Name, InsertBefore) {}
+
+AllocaInst::AllocaInst(Type *Ty, unsigned AddrSpace, Value *ArraySize,
+                       const Twine &Name, BasicBlock *InsertAtEnd)
+  : AllocaInst(Ty, AddrSpace, ArraySize, /*Align=*/0, Name, InsertAtEnd) {}
+
+AllocaInst::AllocaInst(Type *Ty, unsigned AddrSpace, Value *ArraySize,
+                       unsigned Align, const Twine &Name,
+                       Instruction *InsertBefore)
+  : UnaryInstruction(PointerType::get(Ty, AddrSpace), Alloca,
+                     getAISize(Ty->getContext(), ArraySize), InsertBefore),
+    AllocatedType(Ty) {
   setAlignment(Align);
   assert(!Ty->isVoidTy() && "Cannot allocate void!");
   setName(Name);
 }
 
-AllocaInst::AllocaInst(Type *Ty, Value *ArraySize, unsigned Align,
-                       const Twine &Name, BasicBlock *InsertAtEnd)
-    : UnaryInstruction(PointerType::getUnqual(Ty), Alloca,
-                       getAISize(Ty->getContext(), ArraySize), InsertAtEnd),
+AllocaInst::AllocaInst(Type *Ty, unsigned AddrSpace, Value *ArraySize,
+                       unsigned Align, const Twine &Name,
+                       BasicBlock *InsertAtEnd)
+  : UnaryInstruction(PointerType::get(Ty, AddrSpace), Alloca,
+                     getAISize(Ty->getContext(), ArraySize), InsertAtEnd),
       AllocatedType(Ty) {
   setAlignment(Align);
   assert(!Ty->isVoidTy() && "Cannot allocate void!");
@@ -1827,7 +1855,7 @@ bool ShuffleVectorInst::isValidOperands(const Value *V1, const Value *V2,
     return false;
   
   // Mask must be vector of i32.
-  VectorType *MaskTy = dyn_cast<VectorType>(Mask->getType());
+  auto *MaskTy = dyn_cast<VectorType>(Mask->getType());
   if (!MaskTy || !MaskTy->getElementType()->isIntegerTy(32))
     return false;
 
@@ -1835,10 +1863,10 @@ bool ShuffleVectorInst::isValidOperands(const Value *V1, const Value *V2,
   if (isa<UndefValue>(Mask) || isa<ConstantAggregateZero>(Mask))
     return true;
 
-  if (const ConstantVector *MV = dyn_cast<ConstantVector>(Mask)) {
+  if (const auto *MV = dyn_cast<ConstantVector>(Mask)) {
     unsigned V1Size = cast<VectorType>(V1->getType())->getNumElements();
     for (Value *Op : MV->operands()) {
-      if (ConstantInt *CI = dyn_cast<ConstantInt>(Op)) {
+      if (auto *CI = dyn_cast<ConstantInt>(Op)) {
         if (CI->uge(V1Size*2))
           return false;
       } else if (!isa<UndefValue>(Op)) {
@@ -1848,8 +1876,7 @@ bool ShuffleVectorInst::isValidOperands(const Value *V1, const Value *V2,
     return true;
   }
   
-  if (const ConstantDataSequential *CDS =
-        dyn_cast<ConstantDataSequential>(Mask)) {
+  if (const auto *CDS = dyn_cast<ConstantDataSequential>(Mask)) {
     unsigned V1Size = cast<VectorType>(V1->getType())->getNumElements();
     for (unsigned i = 0, e = MaskTy->getNumElements(); i != e; ++i)
       if (CDS->getElementAsInteger(i) >= V1Size*2)
@@ -1861,7 +1888,7 @@ bool ShuffleVectorInst::isValidOperands(const Value *V1, const Value *V2,
   // used as the shuffle mask. When this occurs, the shuffle mask will
   // fall into this case and fail. To avoid this error, do this bit of
   // ugliness to allow such a mask pass.
-  if (const ConstantExpr *CE = dyn_cast<ConstantExpr>(Mask))
+  if (const auto *CE = dyn_cast<ConstantExpr>(Mask))
     if (CE->getOpcode() == Instruction::UserOp1)
       return true;
 
@@ -1870,7 +1897,7 @@ bool ShuffleVectorInst::isValidOperands(const Value *V1, const Value *V2,
 
 int ShuffleVectorInst::getMaskValue(Constant *Mask, unsigned i) {
   assert(i < Mask->getType()->getVectorNumElements() && "Index out of range");
-  if (ConstantDataSequential *CDS =dyn_cast<ConstantDataSequential>(Mask))
+  if (auto *CDS = dyn_cast<ConstantDataSequential>(Mask))
     return CDS->getElementAsInteger(i);
   Constant *C = Mask->getAggregateElement(i);
   if (isa<UndefValue>(C))
@@ -1882,7 +1909,7 @@ void ShuffleVectorInst::getShuffleMask(Constant *Mask,
                                        SmallVectorImpl<int> &Result) {
   unsigned NumElts = Mask->getType()->getVectorNumElements();
   
-  if (ConstantDataSequential *CDS=dyn_cast<ConstantDataSequential>(Mask)) {
+  if (auto *CDS = dyn_cast<ConstantDataSequential>(Mask)) {
     for (unsigned i = 0; i != NumElts; ++i)
       Result.push_back(CDS->getElementAsInteger(i));
     return;
@@ -3655,16 +3682,16 @@ void SwitchInst::addCase(ConstantInt *OnVal, BasicBlock *Dest) {
   // Initialize some new operands.
   assert(OpNo+1 < ReservedSpace && "Growing didn't work!");
   setNumHungOffUseOperands(OpNo+2);
-  CaseIt Case(this, NewCaseIdx);
+  CaseHandle Case(this, NewCaseIdx);
   Case.setValue(OnVal);
   Case.setSuccessor(Dest);
 }
 
 /// removeCase - This method removes the specified case and its successor
 /// from the switch instruction.
-void SwitchInst::removeCase(CaseIt i) {
-  unsigned idx = i.getCaseIndex();
-  
+SwitchInst::CaseIt SwitchInst::removeCase(CaseIt I) {
+  unsigned idx = I->getCaseIndex();
+
   assert(2 + idx*2 < getNumOperands() && "Case index out of range!!!");
 
   unsigned NumOps = getNumOperands();
@@ -3680,6 +3707,8 @@ void SwitchInst::removeCase(CaseIt i) {
   OL[NumOps-2].set(nullptr);
   OL[NumOps-2+1].set(nullptr);
   setNumHungOffUseOperands(NumOps-2);
+
+  return CaseIt(this, idx);
 }
 
 /// growOperands - grow operands - This grows the operand list in response
@@ -3826,6 +3855,7 @@ InsertValueInst *InsertValueInst::cloneImpl() const {
 
 AllocaInst *AllocaInst::cloneImpl() const {
   AllocaInst *Result = new AllocaInst(getAllocatedType(),
+                                      getType()->getAddressSpace(),
                                       (Value *)getOperand(0), getAlignment());
   Result->setUsedWithInAlloca(isUsedWithInAlloca());
   Result->setSwiftError(isSwiftError());

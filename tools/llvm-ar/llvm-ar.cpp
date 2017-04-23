@@ -52,7 +52,7 @@ static StringRef ToolName;
 
 // Show the error message and exit.
 LLVM_ATTRIBUTE_NORETURN static void fail(Twine Error) {
-  outs() << ToolName << ": " << Error << ".\n";
+  errs() << ToolName << ": " << Error << ".\n";
   exit(1);
 }
 
@@ -168,7 +168,7 @@ LLVM_ATTRIBUTE_NORETURN static void
 show_help(const std::string &msg) {
   errs() << ToolName << ": " << msg << "\n\n";
   cl::PrintHelpMessage();
-  std::exit(1);
+  exit(1);
 }
 
 // Extract the member filename from the command line for the [relpos] argument
@@ -377,7 +377,9 @@ static void doExtract(StringRef Name, const object::Archive::Child &C) {
   sys::fs::perms Mode = ModeOrErr.get();
 
   int FD;
-  failIfError(sys::fs::openFileForWrite(Name, FD, sys::fs::F_None, Mode), Name);
+  failIfError(sys::fs::openFileForWrite(sys::path::filename(Name), FD,
+                                        sys::fs::F_None, Mode),
+              Name);
 
   {
     raw_fd_ostream file(FD, false);
@@ -463,7 +465,7 @@ static void performReadOperation(ArchiveOperation Operation,
     return;
   for (StringRef Name : Members)
     errs() << Name << " was not found\n";
-  std::exit(1);
+  exit(1);
 }
 
 static void addMember(std::vector<NewArchiveMember> &Members,

@@ -185,12 +185,17 @@ namespace HexagonISD {
     SDValue LowerRETURNADDR(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerLOAD(SDValue Op, SelectionDAG &DAG) const;
 
+    bool CanLowerReturn(CallingConv::ID CallConv,
+                        MachineFunction &MF, bool isVarArg,
+                        const SmallVectorImpl<ISD::OutputArg> &Outs,
+                        LLVMContext &Context) const override;
+
     SDValue LowerReturn(SDValue Chain, CallingConv::ID CallConv, bool isVarArg,
                         const SmallVectorImpl<ISD::OutputArg> &Outs,
                         const SmallVectorImpl<SDValue> &OutVals,
                         const SDLoc &dl, SelectionDAG &DAG) const override;
 
-    bool mayBeEmittedAsTailCall(CallInst *CI) const override;
+    bool mayBeEmittedAsTailCall(const CallInst *CI) const override;
 
     /// If a physical register, this returns the register that receives the
     /// exception address on entry to an EH pad.

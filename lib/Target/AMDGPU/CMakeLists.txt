@@ -58,6 +58,7 @@ add_llvm_target(AMDGPUCodeGen
   AMDGPUInstrInfo.cpp
   AMDGPUPromoteAlloca.cpp
   AMDGPURegisterInfo.cpp
+  AMDGPUUnifyDivergentExitNodes.cpp
   GCNHazardRecognizer.cpp
   GCNSchedStrategy.cpp
   R600ClauseMergePass.cpp
@@ -81,6 +82,7 @@ add_llvm_target(AMDGPUCodeGen
   SIFrameLowering.cpp
   SIInsertSkips.cpp
   SIInsertWaits.cpp
+  SIInsertWaitcnts.cpp
   SIInstrInfo.cpp
   SIISelLowering.cpp
   SILoadStoreOptimizer.cpp

@@ -126,21 +126,20 @@ bool llvm::ConstantFoldTerminator(BasicBlock *BB, bool DeleteDeadConditions,
     // If the default is unreachable, ignore it when searching for TheOnlyDest.
     if (isa<UnreachableInst>(DefaultDest->getFirstNonPHIOrDbg()) &&
         SI->getNumCases() > 0) {
-      TheOnlyDest = SI->case_begin().getCaseSuccessor();
+      TheOnlyDest = SI->case_begin()->getCaseSuccessor();
     }
 
     // Figure out which case it goes to.
-    for (SwitchInst::CaseIt i = SI->case_begin(), e = SI->case_end();
-         i != e; ++i) {
+    for (auto i = SI->case_begin(), e = SI->case_end(); i != e;) {
       // Found case matching a constant operand?
-      if (i.getCaseValue() == CI) {
-        TheOnlyDest = i.getCaseSuccessor();
+      if (i->getCaseValue() == CI) {
+        TheOnlyDest = i->getCaseSuccessor();
         break;
       }
 
       // Check to see if this branch is going to the same place as the default
       // dest.  If so, eliminate it as an explicit compare.
-      if (i.getCaseSuccessor() == DefaultDest) {
+      if (i->getCaseSuccessor() == DefaultDest) {
         MDNode *MD = SI->getMetadata(LLVMContext::MD_prof);
         unsigned NCases = SI->getNumCases();
         // Fold the case metadata into the default if there will be any branches
@@ -154,7 +153,7 @@ bool llvm::ConstantFoldTerminator(BasicBlock *BB, bool DeleteDeadConditions,
             Weights.push_back(CI->getValue().getZExtValue());
           }
           // Merge weight of this case to the default weight.
-          unsigned idx = i.getCaseIndex();
+          unsigned idx = i->getCaseIndex();
           Weights[0] += Weights[idx+1];
           // Remove weight for this case.
           std::swap(Weights[idx+1], Weights.back());
@@ -165,15 +164,19 @@ bool llvm::ConstantFoldTerminator(BasicBlock *BB, bool DeleteDeadConditions,
         }
         // Remove this entry.
         DefaultDest->removePredecessor(SI->getParent());
-        SI->removeCase(i);
-        --i; --e;
+        i = SI->removeCase(i);
+        e = SI->case_end();
         continue;
       }
 
       // Otherwise, check to see if the switch only branches to one destination.
       // We do this by reseting "TheOnlyDest" to null when we find two non-equal
       // destinations.
-      if (i.getCaseSuccessor() != TheOnlyDest) TheOnlyDest = nullptr;
+      if (i->getCaseSuccessor() != TheOnlyDest)
+        TheOnlyDest = nullptr;
+
+      // Increment this iterator as we haven't removed the case.
+      ++i;
     }
 
     if (CI && !TheOnlyDest) {
@@ -209,7 +212,7 @@ bool llvm::ConstantFoldTerminator(BasicBlock *BB, bool DeleteDeadConditions,
     if (SI->getNumCases() == 1) {
       // Otherwise, we can fold this switch into a conditional branch
       // instruction if it has only one non-default destination.
-      SwitchInst::CaseIt FirstCase = SI->case_begin();
+      auto FirstCase = *SI->case_begin();
       Value *Cond = Builder.CreateICmpEQ(SI->getCondition(),
           FirstCase.getCaseValue(), "cond");
 
@@ -1224,13 +1227,9 @@ bool llvm::LowerDbgDeclare(Function &F) {
           // This is a call by-value or some other instruction that
           // takes a pointer to the variable. Insert a *value*
           // intrinsic that describes the alloca.
-          SmallVector<uint64_t, 1> NewDIExpr;
-          auto *DIExpr = DDI->getExpression();
-          NewDIExpr.push_back(dwarf::DW_OP_deref);
-          NewDIExpr.append(DIExpr->elements_begin(), DIExpr->elements_end());
           DIB.insertDbgValueIntrinsic(AI, 0, DDI->getVariable(),
-                                      DIB.createExpression(NewDIExpr),
-                                      DDI->getDebugLoc(), CI);
+                                      DDI->getExpression(), DDI->getDebugLoc(),
+                                      CI);
         }
       }
       DDI->eraseFromParent();
