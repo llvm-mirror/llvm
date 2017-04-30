@@ -23,6 +23,10 @@
 #include <type_traits>
 #include <limits>
 
+#ifdef __QNXNTO__
+#include <math.h>
+#endif
+
 #ifdef _MSC_VER
 #include <intrin.h>
 #endif

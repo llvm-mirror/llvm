@@ -47,7 +47,7 @@
 #include "llvm/Support/FormatVariadic.h"
 
 #include <unordered_map>
-
+#include <cstring>
 using namespace llvm;
 using namespace llvm::codeview;
 using namespace llvm::msf;
@@ -1006,7 +1006,11 @@ Error LLVMOutputStyle::dumpSectionHeaders() {
     DictScope DD(P, "");
 
     // If a name is 8 characters long, there is no NUL character at end.
-    StringRef Name(Section.Name, strnlen(Section.Name, sizeof(Section.Name)));
+#if __QNXNTO__
+    StringRef Name(Section.Name, std::strnlen(Section.Name, sizeof(Section.Name)));
+#else
+    StringRef Name(Section.Name, ::strnlen(Section.Name, sizeof(Section.Name)));
+#endif
     P.printString("Name", Name);
     P.printNumber("Virtual Size", Section.VirtualSize);
     P.printNumber("Virtual Address", Section.VirtualAddress);
