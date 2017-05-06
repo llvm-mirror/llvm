@@ -1535,6 +1535,17 @@ example:
 ``sanitize_thread``
     This attribute indicates that ThreadSanitizer checks
     (dynamic thread safety analysis) are enabled for this function.
+``speculatable``
+    This function attribute indicates that the function does not have any
+    effects besides calculating its result and does not have undefined behavior.
+    Note that ``speculatable`` is not enough to conclude that along any
+    particular execution path the number of calls to this function will not be
+    externally observable. This attribute is only valid on functions
+    and declarations, not on individual call sites. If a function is
+    incorrectly marked as speculatable and really does exhibit
+    undefined behavior, the undefined behavior may be observed even
+    if the call site is dead code.
+
 ``ssp``
     This attribute indicates that the function should emit a stack
     smashing protector. It is in the form of a "canary" --- a random value
@@ -12290,6 +12301,7 @@ The third argument is a metadata argument specifying the rounding mode to be
 assumed. This argument must be one of the following strings:
 
 ::
+
       "round.dynamic"
       "round.tonearest"
       "round.downward"
@@ -12321,6 +12333,7 @@ required exception behavior.  This argument must be one of the following
 strings:
 
 ::
+
       "fpexcept.ignore"
       "fpexcept.maytrap"
       "fpexcept.strict"

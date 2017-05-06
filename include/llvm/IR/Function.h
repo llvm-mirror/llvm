@@ -279,7 +279,7 @@ public:
   void addAttribute(unsigned i, Attribute Attr);
 
   /// @brief adds the attributes to the list of attributes.
-  void addAttributes(unsigned i, AttributeList Attrs);
+  void addAttributes(unsigned i, const AttrBuilder &Attrs);
 
   /// @brief removes the attribute from the list of attributes.
   void removeAttribute(unsigned i, Attribute::AttrKind Kind);
@@ -288,7 +288,7 @@ public:
   void removeAttribute(unsigned i, StringRef Kind);
 
   /// @brief removes the attributes from the list of attributes.
-  void removeAttributes(unsigned i, AttributeList Attrs);
+  void removeAttributes(unsigned i, const AttrBuilder &Attrs);
 
   /// @brief check if an attributes is in the list of attributes.
   bool hasAttribute(unsigned i, Attribute::AttrKind Kind) const {
@@ -316,18 +316,20 @@ public:
   void addDereferenceableOrNullAttr(unsigned i, uint64_t Bytes);
 
   /// @brief Extract the alignment for a call or parameter (0=unknown).
-  unsigned getParamAlignment(unsigned i) const {
-    return AttributeSets.getParamAlignment(i);
+  unsigned getParamAlignment(unsigned ArgNo) const {
+    return AttributeSets.getParamAlignment(ArgNo);
   }
 
   /// @brief Extract the number of dereferenceable bytes for a call or
   /// parameter (0=unknown).
+  /// @param i AttributeList index, referring to a return value or argument.
   uint64_t getDereferenceableBytes(unsigned i) const {
     return AttributeSets.getDereferenceableBytes(i);
   }
 
   /// @brief Extract the number of dereferenceable_or_null bytes for a call or
   /// parameter (0=unknown).
+  /// @param i AttributeList index, referring to a return value or argument.
   uint64_t getDereferenceableOrNullBytes(unsigned i) const {
     return AttributeSets.getDereferenceableOrNullBytes(i);
   }
@@ -416,6 +418,14 @@ public:
     removeFnAttr(Attribute::Convergent);
   }
 
+  /// @brief Determine if the call has sideeffects.
+  bool isSpeculatable() const {
+    return hasFnAttribute(Attribute::Speculatable);
+  }
+  void setSpeculatable() {
+    addFnAttr(Attribute::Speculatable);
+  }
+
   /// Determine if the function is known not to recurse, directly or
   /// indirectly.
   bool doesNotRecurse() const {
@@ -440,10 +450,10 @@ public:
   }
 
   /// @brief Determine if the function returns a structure through first
-  /// pointer argument.
+  /// or second pointer argument.
   bool hasStructRetAttr() const {
-    return AttributeSets.hasAttribute(1, Attribute::StructRet) ||
-           AttributeSets.hasAttribute(2, Attribute::StructRet);
+    return AttributeSets.hasParamAttribute(0, Attribute::StructRet) ||
+           AttributeSets.hasParamAttribute(1, Attribute::StructRet);
   }
 
   /// @brief Determine if the parameter or return value is marked with NoAlias

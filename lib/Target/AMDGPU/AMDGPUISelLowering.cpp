@@ -29,6 +29,7 @@
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DiagnosticInfo.h"
+#include "llvm/Support/KnownBits.h"
 #include "SIInstrInfo.h"
 using namespace llvm;
 
@@ -895,6 +896,7 @@ CCAssignFn *AMDGPUTargetLowering::CCAssignFnForCall(CallingConv::ID CC,
   case CallingConv::SPIR_KERNEL:
     return CC_AMDGPU_Kernel;
   case CallingConv::AMDGPU_VS:
+  case CallingConv::AMDGPU_HS:
   case CallingConv::AMDGPU_GS:
   case CallingConv::AMDGPU_PS:
   case CallingConv::AMDGPU_CS:
@@ -2293,11 +2295,11 @@ SDValue AMDGPUTargetLowering::LowerSIGN_EXTEND_INREG(SDValue Op,
 //===----------------------------------------------------------------------===//
 
 static bool isU24(SDValue Op, SelectionDAG &DAG) {
-  APInt KnownZero, KnownOne;
+  KnownBits Known;
   EVT VT = Op.getValueType();
-  DAG.computeKnownBits(Op, KnownZero, KnownOne);
+  DAG.computeKnownBits(Op, Known);
 
-  return (VT.getSizeInBits() - KnownZero.countLeadingOnes()) <= 24;
+  return (VT.getSizeInBits() - Known.Zero.countLeadingOnes()) <= 24;
 }
 
 static bool isI24(SDValue Op, SelectionDAG &DAG) {
@@ -2315,12 +2317,13 @@ static bool simplifyI24(SDNode *Node24, unsigned OpIdx,
 
   SelectionDAG &DAG = DCI.DAG;
   SDValue Op = Node24->getOperand(OpIdx);
+  const TargetLowering &TLI = DAG.getTargetLoweringInfo();
   EVT VT = Op.getValueType();
 
   APInt Demanded = APInt::getLowBitsSet(VT.getSizeInBits(), 24);
   APInt KnownZero, KnownOne;
   TargetLowering::TargetLoweringOpt TLO(DAG, true, true);
-  if (TLO.SimplifyDemandedBits(Node24, OpIdx, Demanded, DCI))
+  if (TLI.SimplifyDemandedBits(Node24, OpIdx, Demanded, DCI, TLO))
     return true;
 
   return false;
@@ -3357,13 +3360,12 @@ SDValue AMDGPUTargetLowering::PerformDAGCombine(SDNode *N,
                                          OffsetVal,
                                          OffsetVal + WidthVal);
 
-      APInt KnownZero, KnownOne;
+      KnownBits Known;
       TargetLowering::TargetLoweringOpt TLO(DAG, !DCI.isBeforeLegalize(),
                                             !DCI.isBeforeLegalizeOps());
       const TargetLowering &TLI = DAG.getTargetLoweringInfo();
-      if (TLO.ShrinkDemandedConstant(BitsFrom, Demanded) ||
-          TLI.SimplifyDemandedBits(BitsFrom, Demanded,
-                                   KnownZero, KnownOne, TLO)) {
+      if (TLI.ShrinkDemandedConstant(BitsFrom, Demanded, TLO) ||
+          TLI.SimplifyDemandedBits(BitsFrom, Demanded, Known, TLO)) {
         DCI.CommitTargetLoweringOpt(TLO);
       }
     }
@@ -3436,6 +3438,7 @@ const char* AMDGPUTargetLowering::getTargetNodeName(unsigned Opcode) const {
   NODE_NAME_CASE(ELSE)
   NODE_NAME_CASE(LOOP)
   NODE_NAME_CASE(CALL)
+  NODE_NAME_CASE(TRAP)
   NODE_NAME_CASE(RET_FLAG)
   NODE_NAME_CASE(RETURN_TO_EPILOG)
   NODE_NAME_CASE(ENDPGM)
@@ -3514,6 +3517,8 @@ const char* AMDGPUTargetLowering::getTargetNodeName(unsigned Opcode) const {
   NODE_NAME_CASE(KILL)
   NODE_NAME_CASE(DUMMY_CHAIN)
   case AMDGPUISD::FIRST_MEM_OPCODE_NUMBER: break;
+  NODE_NAME_CASE(INIT_EXEC)
+  NODE_NAME_CASE(INIT_EXEC_FROM_INPUT)
   NODE_NAME_CASE(SENDMSG)
   NODE_NAME_CASE(SENDMSGHALT)
   NODE_NAME_CASE(INTERP_MOV)
@@ -3572,14 +3577,12 @@ SDValue AMDGPUTargetLowering::getRecipEstimate(SDValue Operand,
 }
 
 void AMDGPUTargetLowering::computeKnownBitsForTargetNode(
-    const SDValue Op, APInt &KnownZero, APInt &KnownOne,
+    const SDValue Op, KnownBits &Known,
     const APInt &DemandedElts, const SelectionDAG &DAG, unsigned Depth) const {
 
-  unsigned BitWidth = KnownZero.getBitWidth();
-  KnownZero = KnownOne = APInt(BitWidth, 0); // Don't know anything.
+  Known.Zero.clearAllBits(); Known.One.clearAllBits(); // Don't know anything.
 
-  APInt KnownZero2;
-  APInt KnownOne2;
+  KnownBits Known2;
   unsigned Opc = Op.getOpcode();
 
   switch (Opc) {
@@ -3587,7 +3590,7 @@ void AMDGPUTargetLowering::computeKnownBitsForTargetNode(
     break;
   case AMDGPUISD::CARRY:
   case AMDGPUISD::BORROW: {
-    KnownZero = APInt::getHighBitsSet(32, 31);
+    Known.Zero = APInt::getHighBitsSet(32, 31);
     break;
   }
 
@@ -3600,16 +3603,16 @@ void AMDGPUTargetLowering::computeKnownBitsForTargetNode(
     uint32_t Width = CWidth->getZExtValue() & 0x1f;
 
     if (Opc == AMDGPUISD::BFE_U32)
-      KnownZero = APInt::getHighBitsSet(32, 32 - Width);
+      Known.Zero = APInt::getHighBitsSet(32, 32 - Width);
 
     break;
   }
   case AMDGPUISD::FP_TO_FP16:
   case AMDGPUISD::FP16_ZEXT: {
-    unsigned BitWidth = KnownZero.getBitWidth();
+    unsigned BitWidth = Known.getBitWidth();
 
     // High bits are zero.
-    KnownZero = APInt::getHighBitsSet(BitWidth, BitWidth - 16);
+    Known.Zero = APInt::getHighBitsSet(BitWidth, BitWidth - 16);
     break;
   }
   }

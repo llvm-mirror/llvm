@@ -287,8 +287,6 @@ bool MachineOperand::isIdenticalTo(const MachineOperand &Other) const {
     return getIntrinsicID() == Other.getIntrinsicID();
   case MachineOperand::MO_Predicate:
     return getPredicate() == Other.getPredicate();
-  case MachineOperand::MO_Placeholder:
-    return true;
   }
   llvm_unreachable("Invalid machine operand type");
 }
@@ -337,8 +335,6 @@ hash_code llvm::hash_value(const MachineOperand &MO) {
     return hash_combine(MO.getType(), MO.getTargetFlags(), MO.getIntrinsicID());
   case MachineOperand::MO_Predicate:
     return hash_combine(MO.getType(), MO.getTargetFlags(), MO.getPredicate());
-  case MachineOperand::MO_Placeholder:
-    return hash_combine();
   }
   llvm_unreachable("Invalid machine operand type");
 }
@@ -515,9 +511,6 @@ void MachineOperand::print(raw_ostream &OS, ModuleSlotTracker &MST,
        << CmpInst::getPredicateName(Pred) << '>';
     break;
   }
-  case MachineOperand::MO_Placeholder:
-    OS << "<placeholder>";
-    break;
   }
   if (unsigned TF = getTargetFlags())
     OS << "[TF=" << TF << ']';
@@ -2357,7 +2350,7 @@ MachineInstr *llvm::buildDbgValueForSpill(MachineBasicBlock &BB,
                                           const MachineInstr &Orig,
                                           int FrameIndex) {
   const MDNode *Var = Orig.getDebugVariable();
-  auto *Expr = cast_or_null<DIExpression>(Orig.getDebugExpression());
+  const auto *Expr = cast_or_null<DIExpression>(Orig.getDebugExpression());
   bool IsIndirect = Orig.isIndirectDebugValue();
   uint64_t Offset = IsIndirect ? Orig.getOperand(1).getImm() : 0;
   DebugLoc DL = Orig.getDebugLoc();
@@ -2366,13 +2359,8 @@ MachineInstr *llvm::buildDbgValueForSpill(MachineBasicBlock &BB,
   // If the DBG_VALUE already was a memory location, add an extra
   // DW_OP_deref. Otherwise just turning this from a register into a
   // memory/indirect location is sufficient.
-  if (IsIndirect) {
-    SmallVector<uint64_t, 8> Ops;
-    Ops.push_back(dwarf::DW_OP_deref);
-    if (Expr)
-      Ops.append(Expr->elements_begin(), Expr->elements_end());
-    Expr = DIExpression::get(Expr->getContext(), Ops);
-  }
+  if (IsIndirect)
+    Expr = DIExpression::prepend(Expr, DIExpression::WithDeref);
   return BuildMI(BB, I, DL, Orig.getDesc())
       .addFrameIndex(FrameIndex)
       .addImm(Offset)

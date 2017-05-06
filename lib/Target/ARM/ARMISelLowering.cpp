@@ -91,6 +91,7 @@
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/KnownBits.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetInstrInfo.h"
@@ -852,7 +853,7 @@ ARMTargetLowering::ARMTargetLowering(const TargetMachine &TM,
   if (!Subtarget->hasV6Ops())
     setOperationAction(ISD::BSWAP, MVT::i32, Expand);
 
-  bool hasDivide = Subtarget->isThumb() ? Subtarget->hasDivide()
+  bool hasDivide = Subtarget->isThumb() ? Subtarget->hasDivideInThumbMode()
                                         : Subtarget->hasDivideInARMMode();
   if (!hasDivide) {
     // These are expanded into libcalls if the cpu doesn't have HW divider.
@@ -860,7 +861,7 @@ ARMTargetLowering::ARMTargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::UDIV,  MVT::i32, LibCall);
   }
 
-  if (Subtarget->isTargetWindows() && !Subtarget->hasDivide()) {
+  if (Subtarget->isTargetWindows() && !Subtarget->hasDivideInThumbMode()) {
     setOperationAction(ISD::SDIV, MVT::i32, Custom);
     setOperationAction(ISD::UDIV, MVT::i32, Custom);
 
@@ -3358,8 +3359,12 @@ ARMTargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op, SelectionDAG &DAG,
 
 static SDValue LowerATOMIC_FENCE(SDValue Op, SelectionDAG &DAG,
                                  const ARMSubtarget *Subtarget) {
-  // FIXME: handle "fence singlethread" more efficiently.
   SDLoc dl(Op);
+  ConstantSDNode *ScopeN = cast<ConstantSDNode>(Op.getOperand(2));
+  auto Scope = static_cast<SynchronizationScope>(ScopeN->getZExtValue());
+  if (Scope == SynchronizationScope::SingleThread)
+    return Op;
+
   if (!Subtarget->hasDataBarrier()) {
     // Some ARMv6 cpus can support data barriers with an mcr instruction.
     // Thumb1 and pre-v6 ARM mode use a libcall instead and should never get
@@ -9476,8 +9481,11 @@ AddCombineBUILD_VECTORToVPADDL(SDNode *N, SDValue N0, SDValue N1,
       return SDValue();
   }
 
-  // Don't generate vpaddl+vmovn; we'll match it to vpadd later.
-  if (Vec.getValueType().getVectorElementType() == VT.getVectorElementType())
+  // Don't generate vpaddl+vmovn; we'll match it to vpadd later. Also make sure
+  // we're using the entire input vector, otherwise there's a size/legality
+  // mismatch somewhere.
+  if (nextIndex != Vec.getValueType().getVectorNumElements() ||
+      Vec.getValueType().getVectorElementType() == VT.getVectorElementType())
     return SDValue();
 
   // Create VPADDL node.
@@ -10873,11 +10881,8 @@ static SDValue CombineBaseUpdate(SDNode *N,
 
     // If the increment is a constant, it must match the memory ref size.
     SDValue Inc = User->getOperand(User->getOperand(0) == Addr ? 1 : 0);
-    if (ConstantSDNode *CInc = dyn_cast<ConstantSDNode>(Inc.getNode())) {
-      uint64_t IncVal = CInc->getZExtValue();
-      if (IncVal != NumBytes)
-        continue;
-    } else if (NumBytes >= 3 * 16) {
+    ConstantSDNode *CInc = dyn_cast<ConstantSDNode>(Inc.getNode());
+    if (NumBytes >= 3 * 16 && (!CInc || CInc->getZExtValue() != NumBytes)) {
       // VLD3/4 and VST3/4 for 128-bit vectors are implemented with two
       // separate instructions that make it harder to use a non-constant update.
       continue;
@@ -11754,9 +11759,9 @@ SDValue ARMTargetLowering::PerformCMOVToBFICombine(SDNode *CMOV, SelectionDAG &D
 
   // Lastly, can we determine that the bits defined by OrCI
   // are zero in Y?
-  APInt KnownZero, KnownOne;
-  DAG.computeKnownBits(Y, KnownZero, KnownOne);
-  if ((OrCI & KnownZero) != OrCI)
+  KnownBits Known;
+  DAG.computeKnownBits(Y, Known);
+  if ((OrCI & Known.Zero) != OrCI)
     return SDValue();
 
   // OK, we can do the combine.
@@ -11894,16 +11899,16 @@ ARMTargetLowering::PerformCMOVCombine(SDNode *N, SelectionDAG &DAG) const {
   }
 
   if (Res.getNode()) {
-    APInt KnownZero, KnownOne;
-    DAG.computeKnownBits(SDValue(N,0), KnownZero, KnownOne);
+    KnownBits Known;
+    DAG.computeKnownBits(SDValue(N,0), Known);
     // Capture demanded bits information that would be otherwise lost.
-    if (KnownZero == 0xfffffffe)
+    if (Known.Zero == 0xfffffffe)
       Res = DAG.getNode(ISD::AssertZext, dl, MVT::i32, Res,
                         DAG.getValueType(MVT::i1));
-    else if (KnownZero == 0xffffff00)
+    else if (Known.Zero == 0xffffff00)
       Res = DAG.getNode(ISD::AssertZext, dl, MVT::i32, Res,
                         DAG.getValueType(MVT::i8));
-    else if (KnownZero == 0xffff0000)
+    else if (Known.Zero == 0xffff0000)
       Res = DAG.getNode(ISD::AssertZext, dl, MVT::i32, Res,
                         DAG.getValueType(MVT::i16));
   }
@@ -12592,13 +12597,12 @@ bool ARMTargetLowering::getPostIndexedAddressParts(SDNode *N, SDNode *Op,
 }
 
 void ARMTargetLowering::computeKnownBitsForTargetNode(const SDValue Op,
-                                                      APInt &KnownZero,
-                                                      APInt &KnownOne,
+                                                      KnownBits &Known,
                                                       const APInt &DemandedElts,
                                                       const SelectionDAG &DAG,
                                                       unsigned Depth) const {
-  unsigned BitWidth = KnownOne.getBitWidth();
-  KnownZero = KnownOne = APInt(BitWidth, 0);
+  unsigned BitWidth = Known.getBitWidth();
+  Known.Zero.clearAllBits(); Known.One.clearAllBits();
   switch (Op.getOpcode()) {
   default: break;
   case ARMISD::ADDC:
@@ -12608,17 +12612,17 @@ void ARMTargetLowering::computeKnownBitsForTargetNode(const SDValue Op,
     // These nodes' second result is a boolean
     if (Op.getResNo() == 0)
       break;
-    KnownZero |= APInt::getHighBitsSet(BitWidth, BitWidth - 1);
+    Known.Zero |= APInt::getHighBitsSet(BitWidth, BitWidth - 1);
     break;
   case ARMISD::CMOV: {
     // Bits are known zero/one if known on the LHS and RHS.
-    DAG.computeKnownBits(Op.getOperand(0), KnownZero, KnownOne, Depth+1);
-    if (KnownZero == 0 && KnownOne == 0) return;
+    DAG.computeKnownBits(Op.getOperand(0), Known, Depth+1);
+    if (Known.Zero == 0 && Known.One == 0) return;
 
-    APInt KnownZeroRHS, KnownOneRHS;
-    DAG.computeKnownBits(Op.getOperand(1), KnownZeroRHS, KnownOneRHS, Depth+1);
-    KnownZero &= KnownZeroRHS;
-    KnownOne  &= KnownOneRHS;
+    KnownBits KnownRHS;
+    DAG.computeKnownBits(Op.getOperand(1), KnownRHS, Depth+1);
+    Known.Zero &= KnownRHS.Zero;
+    Known.One  &= KnownRHS.One;
     return;
   }
   case ISD::INTRINSIC_W_CHAIN: {
@@ -12630,7 +12634,7 @@ void ARMTargetLowering::computeKnownBitsForTargetNode(const SDValue Op,
     case Intrinsic::arm_ldrex: {
       EVT VT = cast<MemIntrinsicSDNode>(Op)->getMemoryVT();
       unsigned MemBits = VT.getScalarSizeInBits();
-      KnownZero |= APInt::getHighBitsSet(BitWidth, BitWidth - MemBits);
+      Known.Zero |= APInt::getHighBitsSet(BitWidth, BitWidth - MemBits);
       return;
     }
     }
@@ -12638,14 +12642,14 @@ void ARMTargetLowering::computeKnownBitsForTargetNode(const SDValue Op,
   case ARMISD::BFI: {
     // Conservatively, we can recurse down the first operand
     // and just mask out all affected bits.
-    DAG.computeKnownBits(Op.getOperand(0), KnownZero, KnownOne, Depth + 1);
+    DAG.computeKnownBits(Op.getOperand(0), Known, Depth + 1);
 
     // The operand to BFI is already a mask suitable for removing the bits it
     // sets.
     ConstantSDNode *CI = cast<ConstantSDNode>(Op.getOperand(2));
     const APInt &Mask = CI->getAPIntValue();
-    KnownZero &= Mask;
-    KnownOne &= Mask;
+    Known.Zero &= Mask;
+    Known.One &= Mask;
     return;
   }
   }
@@ -13043,7 +13047,7 @@ SDValue ARMTargetLowering::LowerDivRem(SDValue Op, SelectionDAG &DAG) const {
   //     rem = a - b * div
   //     return {div, rem}
   // This should be lowered into UDIV/SDIV + MLS later on.
-  bool hasDivide = Subtarget->isThumb() ? Subtarget->hasDivide()
+  bool hasDivide = Subtarget->isThumb() ? Subtarget->hasDivideInThumbMode()
                                         : Subtarget->hasDivideInARMMode();
   if (hasDivide && Op->getValueType(0).isSimple() &&
       Op->getSimpleValueType(0) == MVT::i32) {

@@ -84,8 +84,7 @@ bool Argument::hasByValOrInAllocaAttr() const {
 
 unsigned Argument::getParamAlignment() const {
   assert(getType()->isPointerTy() && "Only pointers have alignments");
-  return getParent()->getParamAlignment(getArgNo()+1);
-
+  return getParent()->getParamAlignment(getArgNo());
 }
 
 uint64_t Argument::getDereferenceableBytes() const {
@@ -150,15 +149,6 @@ void Argument::addAttr(Attribute::AttrKind Kind) {
 
 void Argument::addAttr(Attribute Attr) {
   getParent()->addAttribute(getArgNo() + 1, Attr);
-}
-
-void Argument::removeAttr(AttributeList AS) {
-  assert(AS.getNumSlots() <= 1 &&
-         "Trying to remove more than one attribute set from an argument!");
-  AttrBuilder B(AS, AS.getSlotIndex(0));
-  getParent()->removeAttributes(
-      getArgNo() + 1,
-      AttributeList::get(Parent->getContext(), getArgNo() + 1, B));
 }
 
 void Argument::removeAttr(Attribute::AttrKind Kind) {
@@ -338,7 +328,7 @@ void Function::addAttribute(unsigned i, Attribute Attr) {
   setAttributes(PAL);
 }
 
-void Function::addAttributes(unsigned i, AttributeList Attrs) {
+void Function::addAttributes(unsigned i, const AttrBuilder &Attrs) {
   AttributeList PAL = getAttributes();
   PAL = PAL.addAttributes(getContext(), i, Attrs);
   setAttributes(PAL);
@@ -356,7 +346,7 @@ void Function::removeAttribute(unsigned i, StringRef Kind) {
   setAttributes(PAL);
 }
 
-void Function::removeAttributes(unsigned i, AttributeList Attrs) {
+void Function::removeAttributes(unsigned i, const AttrBuilder &Attrs) {
   AttributeList PAL = getAttributes();
   PAL = PAL.removeAttributes(getContext(), i, Attrs);
   setAttributes(PAL);

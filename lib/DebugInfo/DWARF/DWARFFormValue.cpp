@@ -309,8 +309,10 @@ bool DWARFFormValue::isFormClass(DWARFFormValue::FormClass FC) const {
   }
   // In DWARF3 DW_FORM_data4 and DW_FORM_data8 served also as a section offset.
   // Don't check for DWARF version here, as some producers may still do this
-  // by mistake.
-  return (Form == DW_FORM_data4 || Form == DW_FORM_data8) &&
+  // by mistake. Also accept DW_FORM_strp since this is .debug_str section
+  // offset.
+  return (Form == DW_FORM_data4 || Form == DW_FORM_data8 ||
+          Form == DW_FORM_strp) &&
          FC == FC_SectionOffset;
 }
 
@@ -334,11 +336,8 @@ bool DWARFFormValue::extractValue(const DataExtractor &data,
           (Form == DW_FORM_addr)
               ? U->getAddressByteSize()
               : U->getRefAddrByteSize();
-      RelocAddrMap::const_iterator AI = U->getRelocMap()->find(*offset_ptr);
-      if (AI != U->getRelocMap()->end()) {
-        Value.uval = data.getUnsigned(offset_ptr, AddrSize) + AI->second.second;
-      } else
-        Value.uval = data.getUnsigned(offset_ptr, AddrSize);
+      Value.uval =
+          getRelocatedValue(data, AddrSize, offset_ptr, U->getRelocMap());
       break;
     }
     case DW_FORM_exprloc:
@@ -376,12 +375,8 @@ bool DWARFFormValue::extractValue(const DataExtractor &data,
     case DW_FORM_ref_sup4:
     case DW_FORM_strx4:
     case DW_FORM_addrx4: {
-      Value.uval = data.getU32(offset_ptr);
-      if (!U)
-        break;
-      RelocAddrMap::const_iterator AI = U->getRelocMap()->find(*offset_ptr-4);
-      if (AI != U->getRelocMap()->end())
-        Value.uval += AI->second.second;
+      const RelocAddrMap* RelocMap = U ? U->getRelocMap() : nullptr;
+      Value.uval = getRelocatedValue(data, 4, offset_ptr, RelocMap);
       break;
     }
     case DW_FORM_data8:
@@ -411,11 +406,8 @@ bool DWARFFormValue::extractValue(const DataExtractor &data,
     case DW_FORM_strp_sup: {
       if (!U)
         return false;
-      RelocAddrMap::const_iterator AI = U->getRelocMap()->find(*offset_ptr);
-      uint8_t Size = U->getDwarfOffsetByteSize();
-      Value.uval = data.getUnsigned(offset_ptr, Size);
-      if (AI != U->getRelocMap()->end())
-        Value.uval += AI->second.second;
+      Value.uval = getRelocatedValue(data, U->getDwarfOffsetByteSize(),
+                                     offset_ptr, U->getRelocMap());
       break;
     }
     case DW_FORM_flag_present:

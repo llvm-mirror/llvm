@@ -104,8 +104,6 @@ protected:
   bool applySubprogramDefinitionAttributes(const DISubprogram *SP, DIE &SPDie);
 
 public:
-  virtual ~DwarfUnit();
-
   // Accessors.
   AsmPrinter* getAsmPrinter() const { return Asm; }
   uint16_t getLanguage() const { return CUNode->getSourceLanguage(); }
@@ -212,7 +210,6 @@ public:
   void addSourceLine(DIE &Die, const DIGlobalVariable *G);
   void addSourceLine(DIE &Die, const DISubprogram *SP);
   void addSourceLine(DIE &Die, const DIType *Ty);
-  void addSourceLine(DIE &Die, const DINamespace *NS);
   void addSourceLine(DIE &Die, const DIObjCProperty *Ty);
 
   /// Add constant value entry in variable DIE.
@@ -231,6 +228,9 @@ public:
 
   /// Add template parameters in buffer.
   void addTemplateParams(DIE &Buffer, DINodeArray TParams);
+
+  /// Add thrown types.
+  void addThrownTypes(DIE &Die, DINodeArray ThrownTypes);
 
   // FIXME: Should be reformulated in terms of addComplexAddress.
   /// Start with the address based on the location provided, and generate the
@@ -289,6 +289,8 @@ public:
   void constructTypeDIE(DIE &Buffer, const DICompositeType *CTy);
 
 protected:
+  ~DwarfUnit();
+
   /// Create new static data member DIE.
   DIE *getOrCreateStaticMemberDIE(const DIDerivedType *DT);
 
@@ -335,9 +337,10 @@ private:
   void setIndexTyDie(DIE *D) { IndexTyDie = D; }
 
   virtual bool isDwoUnit() const = 0;
+  const MCSymbol *getCrossSectionRelativeBaseAddress() const override;
 };
 
-class DwarfTypeUnit : public DwarfUnit {
+class DwarfTypeUnit final : public DwarfUnit {
   uint64_t TypeSignature;
   const DIE *Ty;
   DwarfCompileUnit &CU;

@@ -69,6 +69,7 @@ class CCValAssign;
 class FastISel;
 class FunctionLoweringInfo;
 class IntrinsicInst;
+struct KnownBits;
 class MachineBasicBlock;
 class MachineFunction;
 class MachineInstr;
@@ -228,6 +229,18 @@ public:
   /// FIXME: The default needs to be removed once all the code is updated.
   MVT getPointerTy(const DataLayout &DL, uint32_t AS = 0) const {
     return MVT::getIntegerVT(DL.getPointerSizeInBits(AS));
+  }
+
+  /// Return the type for frame index, which is determined by
+  /// the alloca address space specified through the data layout.
+  MVT getFrameIndexTy(const DataLayout &DL) const {
+    return getPointerTy(DL, DL.getAllocaAddrSpace());
+  }
+
+  /// Return the type for operands of fence.
+  /// TODO: Let fence operands be of i32 type and remove this.
+  virtual MVT getFenceOperandTy(const DataLayout &DL) const {
+    return getPointerTy(DL);
   }
 
   /// EVT is not used in-tree, but is used by out-of-tree target.
@@ -762,6 +775,74 @@ public:
     return (!isTypeLegal(VT) && getOperationAction(Op, VT) == Custom);
   }
 
+  /// Return true if lowering to a jump table is allowed.
+  bool areJTsAllowed(const Function *Fn) const {
+    if (Fn->getFnAttribute("no-jump-tables").getValueAsString() == "true")
+      return false;
+
+    return isOperationLegalOrCustom(ISD::BR_JT, MVT::Other) ||
+           isOperationLegalOrCustom(ISD::BRIND, MVT::Other);
+  }
+
+  /// Check whether the range [Low,High] fits in a machine word.
+  bool rangeFitsInWord(const APInt &Low, const APInt &High,
+                       const DataLayout &DL) const {
+    // FIXME: Using the pointer type doesn't seem ideal.
+    uint64_t BW = DL.getPointerSizeInBits();
+    uint64_t Range = (High - Low).getLimitedValue(UINT64_MAX - 1) + 1;
+    return Range <= BW;
+  }
+
+  /// Return true if lowering to a jump table is suitable for a set of case
+  /// clusters which may contain \p NumCases cases, \p Range range of values.
+  /// FIXME: This function check the maximum table size and density, but the
+  /// minimum size is not checked. It would be nice if the the minimum size is
+  /// also combined within this function. Currently, the minimum size check is
+  /// performed in findJumpTable() in SelectionDAGBuiler and
+  /// getEstimatedNumberOfCaseClusters() in BasicTTIImpl.
+  bool isSuitableForJumpTable(const SwitchInst *SI, uint64_t NumCases,
+                              uint64_t Range) const {
+    const bool OptForSize = SI->getParent()->getParent()->optForSize();
+    const unsigned MinDensity = getMinimumJumpTableDensity(OptForSize);
+    const unsigned MaxJumpTableSize =
+        OptForSize || getMaximumJumpTableSize() == 0
+            ? UINT_MAX
+            : getMaximumJumpTableSize();
+    // Check whether a range of clusters is dense enough for a jump table.
+    if (Range <= MaxJumpTableSize &&
+        (NumCases * 100 >= Range * MinDensity)) {
+      return true;
+    }
+    return false;
+  }
+
+  /// Return true if lowering to a bit test is suitable for a set of case
+  /// clusters which contains \p NumDests unique destinations, \p Low and
+  /// \p High as its lowest and highest case values, and expects \p NumCmps
+  /// case value comparisons. Check if the number of destinations, comparison
+  /// metric, and range are all suitable.
+  bool isSuitableForBitTests(unsigned NumDests, unsigned NumCmps,
+                             const APInt &Low, const APInt &High,
+                             const DataLayout &DL) const {
+    // FIXME: I don't think NumCmps is the correct metric: a single case and a
+    // range of cases both require only one branch to lower. Just looking at the
+    // number of clusters and destinations should be enough to decide whether to
+    // build bit tests.
+
+    // To lower a range with bit tests, the range must fit the bitwidth of a
+    // machine word.
+    if (!rangeFitsInWord(Low, High, DL))
+      return false;
+
+    // Decide whether it's profitable to lower this range with bit tests. Each
+    // destination requires a bit test and branch, and there is an overall range
+    // check branch. For a small number of clusters, separate comparisons might
+    // be cheaper, and for many destinations, splitting the range might be
+    // better.
+    return (NumDests == 1 && NumCmps >= 3) || (NumDests == 2 && NumCmps >= 5) ||
+           (NumDests == 3 && NumCmps >= 6);
+  }
+
   /// Return true if the specified operation is illegal on this target or
   /// unlikely to be made legal with custom lowering. This is used to help guide
   /// high-level lowering decisions.
@@ -1135,6 +1216,9 @@ public:
 
   /// Return lower limit for number of blocks in a jump table.
   unsigned getMinimumJumpTableEntries() const;
+
+  /// Return lower limit of the density in a jump table.
+  unsigned getMinimumJumpTableDensity(bool OptForSize) const;
 
   /// Return upper limit for number of entries in a jump table.
   /// Zero if no limit.
@@ -1977,6 +2061,14 @@ public:
     return false;
   }
 
+  // Return true if the instruction that performs a << b actually performs
+  // a << (b % (sizeof(a) * 8)).
+  virtual bool supportsModuloShift(ISD::NodeType Inst, EVT ReturnType) const {
+    assert((Inst == ISD::SHL || Inst == ISD::SRA || Inst == ISD::SRL) &&
+           "Expect a shift instruction");
+    return false;
+  }
+
   //===--------------------------------------------------------------------===//
   // Runtime Library hooks
   //
@@ -2012,6 +2104,12 @@ public:
   CallingConv::ID getLibcallCallingConv(RTLIB::Libcall Call) const {
     return LibcallCallingConvs[Call];
   }
+
+  /// Execute target specific actions to finalize target lowering.
+  /// This is used to set extra flags in MachineFrameInformation and freezing
+  /// the set of reserved registers.
+  /// The default implementation just freezes the set of reserved registers.
+  virtual void finalizeLowering(MachineFunction &MF) const;
 
 private:
   const TargetMachine &TM;
@@ -2262,7 +2360,8 @@ protected:
 
   /// Return true if the value types that can be represented by the specified
   /// register class are all legal.
-  bool isLegalRC(const TargetRegisterClass *RC) const;
+  bool isLegalRC(const TargetRegisterInfo &TRI,
+                 const TargetRegisterClass &RC) const;
 
   /// Replace/modify any TargetFrameIndex operands with a targte-dependent
   /// sequence of memory operands that is recognized by PrologEpilogInserter.
@@ -2382,29 +2481,38 @@ public:
       New = N;
       return true;
     }
-
-    /// Check to see if the specified operand of the specified instruction is a
-    /// constant integer.  If so, check to see if there are any bits set in the
-    /// constant that are not demanded.  If so, shrink the constant and return
-    /// true.
-    bool ShrinkDemandedConstant(SDValue Op, const APInt &Demanded);
-
-    /// Convert x+y to (VT)((SmallVT)x+(SmallVT)y) if the casts are free.  This
-    /// uses isZExtFree and ZERO_EXTEND for the widening cast, but it could be
-    /// generalized for targets with other types of implicit widening casts.
-    bool ShrinkDemandedOp(SDValue Op, unsigned BitWidth, const APInt &Demanded,
-                          const SDLoc &dl);
-
-    /// Helper for SimplifyDemandedBits that can simplify an operation with
-    /// multiple uses.  This function uses TLI.SimplifyDemandedBits to
-    /// simplify Operand \p OpIdx of \p User and then updated \p User with
-    /// the simplified version.  No other uses of \p OpIdx are updated.
-    /// If \p User is the only user of \p OpIdx, this function behaves exactly
-    /// like TLI.SimplifyDemandedBits except that it also updates the DAG by
-    /// calling DCI.CommitTargetLoweringOpt.
-    bool SimplifyDemandedBits(SDNode *User, unsigned OpIdx,
-                              const APInt &Demanded, DAGCombinerInfo &DCI);
   };
+
+  /// Check to see if the specified operand of the specified instruction is a
+  /// constant integer.  If so, check to see if there are any bits set in the
+  /// constant that are not demanded.  If so, shrink the constant and return
+  /// true.
+  bool ShrinkDemandedConstant(SDValue Op, const APInt &Demanded,
+                              TargetLoweringOpt &TLO) const;
+
+  // Target hook to do target-specific const optimization, which is called by
+  // ShrinkDemandedConstant. This function should return true if the target
+  // doesn't want ShrinkDemandedConstant to further optimize the constant.
+  virtual bool targetShrinkDemandedConstant(SDValue Op, const APInt &Demanded,
+                                            TargetLoweringOpt &TLO) const {
+    return false;
+  }
+
+  /// Convert x+y to (VT)((SmallVT)x+(SmallVT)y) if the casts are free.  This
+  /// uses isZExtFree and ZERO_EXTEND for the widening cast, but it could be
+  /// generalized for targets with other types of implicit widening casts.
+  bool ShrinkDemandedOp(SDValue Op, unsigned BitWidth, const APInt &Demanded,
+                        TargetLoweringOpt &TLO) const;
+
+  /// Helper for SimplifyDemandedBits that can simplify an operation with
+  /// multiple uses.  This function simplifies operand \p OpIdx of \p User and
+  /// then updates \p User with the simplified version. No other uses of
+  /// \p OpIdx are updated. If \p User is the only user of \p OpIdx, this
+  /// function behaves exactly like function SimplifyDemandedBits declared
+  /// below except that it also updates the DAG by calling
+  /// DCI.CommitTargetLoweringOpt.
+  bool SimplifyDemandedBits(SDNode *User, unsigned OpIdx, const APInt &Demanded,
+                            DAGCombinerInfo &DCI, TargetLoweringOpt &TLO) const;
 
   /// Look at Op.  At this point, we know that only the DemandedMask bits of the
   /// result of Op are ever used downstream.  If we can use this information to
@@ -2420,7 +2528,7 @@ public:
   ///    with TLO.New will be incorrect when this parameter is true and TLO.Old
   ///    has multiple uses.
   bool SimplifyDemandedBits(SDValue Op, const APInt &DemandedMask,
-                            APInt &KnownZero, APInt &KnownOne,
+                            KnownBits &Known,
                             TargetLoweringOpt &TLO,
                             unsigned Depth = 0,
                             bool AssumeSingleUse = false) const;
@@ -2434,8 +2542,7 @@ public:
   /// argument allows us to only collect the known bits that are shared by the
   /// requested vector elements.
   virtual void computeKnownBitsForTargetNode(const SDValue Op,
-                                             APInt &KnownZero,
-                                             APInt &KnownOne,
+                                             KnownBits &Known,
                                              const APInt &DemandedElts,
                                              const SelectionDAG &DAG,
                                              unsigned Depth = 0) const;
@@ -2559,12 +2666,6 @@ public:
   /// Return true if the target supports that a subset of CSRs for the given
   /// machine function is handled explicitly via copies.
   virtual bool supportSplitCSR(MachineFunction *MF) const {
-    return false;
-  }
-
-  /// Return true if the MachineFunction contains a COPY which would imply
-  /// HasCopyImplyingStackAdjustment.
-  virtual bool hasCopyImplyingStackAdjustment(MachineFunction *MF) const {
     return false;
   }
 

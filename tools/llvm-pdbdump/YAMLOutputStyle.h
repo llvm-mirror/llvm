@@ -19,6 +19,8 @@
 
 namespace llvm {
 namespace pdb {
+class ModuleDebugStreamRef;
+
 class YAMLOutputStyle : public OutputStyle {
 public:
   YAMLOutputStyle(PDBFile &File);
@@ -26,6 +28,9 @@ public:
   Error dump() override;
 
 private:
+  Expected<Optional<llvm::pdb::yaml::PdbSourceFileInfo>>
+  getFileLineInfo(const pdb::ModuleDebugStreamRef &ModS);
+
   Error dumpStringTable();
   Error dumpFileHeaders();
   Error dumpStreamMetadata();

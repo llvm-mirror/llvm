@@ -172,19 +172,6 @@ define i8 @test16(i8 %A) {
   ret i8 %C
 }
 
-;; ~(~X & Y) --> (X | ~Y)
-define i8 @test17(i8 %X, i8 %Y) {
-; CHECK-LABEL: @test17(
-; CHECK-NEXT:    [[Y_NOT:%.*]] = xor i8 %Y, -1
-; CHECK-NEXT:    [[D:%.*]] = or i8 [[Y_NOT]], %X
-; CHECK-NEXT:    ret i8 [[D]]
-;
-  %B = xor i8 %X, -1
-  %C = and i8 %B, %Y
-  %D = xor i8 %C, -1
-  ret i8 %D
-}
-
 define i1 @test18(i32 %A) {
 ; CHECK-LABEL: @test18(
 ; CHECK-NEXT:    [[C:%.*]] = icmp ugt i32 %A, 127
@@ -612,4 +599,32 @@ final:
   %A = phi <2 x i32> [ <i32 1000, i32 2500>, %entry ], [ <i32 10, i32 30>, %delay ]
   %value = and <2 x i32> %A, <i32 123, i32 333>
   ret <2 x i32> %value
+}
+
+define i32 @test42(i32 %a, i32 %c, i32 %d) {
+; CHECK-LABEL: @test42(
+; CHECK-NEXT:    [[FORCE:%.*]] = mul i32 [[C:%.*]], [[D:%.*]]
+; CHECK-NEXT:    [[AND:%.*]] = and i32 [[FORCE]], [[A:%.*]]
+; CHECK-NEXT:    ret i32 [[AND]]
+;
+  %force = mul i32 %c, %d ; forces the complexity sorting
+  %or = or i32 %a, %force
+  %nota = xor i32 %a, -1
+  %xor = xor i32 %nota, %force
+  %and = and i32 %xor, %or
+  ret i32 %and
+}
+
+define i32 @test43(i32 %a, i32 %c, i32 %d) {
+; CHECK-LABEL: @test43(
+; CHECK-NEXT:    [[FORCE:%.*]] = mul i32 [[C:%.*]], [[D:%.*]]
+; CHECK-NEXT:    [[AND:%.*]] = and i32 [[FORCE]], [[A:%.*]]
+; CHECK-NEXT:    ret i32 [[AND]]
+;
+  %force = mul i32 %c, %d ; forces the complexity sorting
+  %or = or i32 %a, %force
+  %nota = xor i32 %a, -1
+  %xor = xor i32 %nota, %force
+  %and = and i32 %or, %xor
+  ret i32 %and
 }

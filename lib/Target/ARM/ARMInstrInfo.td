@@ -259,8 +259,8 @@ def HasFP16          : Predicate<"Subtarget->hasFP16()">,
                                  AssemblerPredicate<"FeatureFP16","half-float conversions">;
 def HasFullFP16      : Predicate<"Subtarget->hasFullFP16()">,
                                  AssemblerPredicate<"FeatureFullFP16","full half-float">;
-def HasDivide        : Predicate<"Subtarget->hasDivide()">,
-                                 AssemblerPredicate<"FeatureHWDiv", "divide in THUMB">;
+def HasDivideInThumb : Predicate<"Subtarget->hasDivideInThumbMode()">,
+                                 AssemblerPredicate<"FeatureHWDivThumb", "divide in THUMB">;
 def HasDivideInARM   : Predicate<"Subtarget->hasDivideInARMMode()">,
                                  AssemblerPredicate<"FeatureHWDivARM", "divide in ARM">;
 def HasDSP           : Predicate<"Subtarget->hasDSP()">,
@@ -317,8 +317,10 @@ def UseNegativeImmediates :
                                "NegativeImmediates">;
 
 // FIXME: Eventually this will be just "hasV6T2Ops".
-def UseMovt          : Predicate<"Subtarget->useMovt(*MF)">;
-def DontUseMovt      : Predicate<"!Subtarget->useMovt(*MF)">;
+let RecomputePerFunction = 1 in {
+  def UseMovt          : Predicate<"Subtarget->useMovt(*MF)">;
+  def DontUseMovt      : Predicate<"!Subtarget->useMovt(*MF)">;
+}
 def UseFPVMLx        : Predicate<"Subtarget->useFPVMLx()">;
 def UseMulOps        : Predicate<"Subtarget->useMulOps()">;
 
@@ -345,8 +347,10 @@ def UseVMOVSR : Predicate<"Subtarget->preferVMOVSR() ||"
 def DontUseVMOVSR : Predicate<"!Subtarget->preferVMOVSR() &&"
                               "Subtarget->useNEONForSinglePrecisionFP()">;
 
-def IsLE             : Predicate<"MF->getDataLayout().isLittleEndian()">;
-def IsBE             : Predicate<"MF->getDataLayout().isBigEndian()">;
+let RecomputePerFunction = 1 in {
+  def IsLE             : Predicate<"MF->getDataLayout().isLittleEndian()">;
+  def IsBE             : Predicate<"MF->getDataLayout().isBigEndian()">;
+}
 
 def GenExecuteOnly : Predicate<"Subtarget->genExecuteOnly()">;
 
@@ -5974,4 +5978,11 @@ def CMP_SWAP_32 : PseudoInst<(outs GPR:$Rd, GPR:$status),
 def CMP_SWAP_64 : PseudoInst<(outs GPRPair:$Rd, GPR:$status),
                              (ins GPR:$addr, GPRPair:$desired, GPRPair:$new),
                              NoItinerary, []>, Sched<[]>;
+}
+
+def CompilerBarrier : PseudoInst<(outs), (ins i32imm:$ordering), NoItinerary,
+                                 [(atomic_fence imm:$ordering, 0)]> {
+  let hasSideEffects = 1;
+  let Size = 0;
+  let AsmString = "@ COMPILER BARRIER";
 }

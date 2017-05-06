@@ -179,7 +179,7 @@ Instruction *InstCombiner::visitMul(BinaryOperator &I) {
   if (Value *V = SimplifyVectorOp(I))
     return replaceInstUsesWith(I, V);
 
-  if (Value *V = SimplifyMulInst(Op0, Op1, DL, &TLI, &DT, &AC))
+  if (Value *V = SimplifyMulInst(Op0, Op1, SQ))
     return replaceInstUsesWith(I, V);
 
   if (Value *V = SimplifyUsingDistributiveLaws(I))
@@ -606,8 +606,7 @@ Instruction *InstCombiner::visitFMul(BinaryOperator &I) {
   if (isa<Constant>(Op0))
     std::swap(Op0, Op1);
 
-  if (Value *V =
-          SimplifyFMulInst(Op0, Op1, I.getFastMathFlags(), DL, &TLI, &DT, &AC))
+  if (Value *V = SimplifyFMulInst(Op0, Op1, I.getFastMathFlags(), SQ))
     return replaceInstUsesWith(I, V);
 
   bool AllowReassociate = I.hasUnsafeAlgebra();
@@ -1111,7 +1110,7 @@ Instruction *InstCombiner::visitUDiv(BinaryOperator &I) {
   if (Value *V = SimplifyVectorOp(I))
     return replaceInstUsesWith(I, V);
 
-  if (Value *V = SimplifyUDivInst(Op0, Op1, DL, &TLI, &DT, &AC))
+  if (Value *V = SimplifyUDivInst(Op0, Op1, SQ))
     return replaceInstUsesWith(I, V);
 
   // Handle the integer div common cases
@@ -1184,7 +1183,7 @@ Instruction *InstCombiner::visitSDiv(BinaryOperator &I) {
   if (Value *V = SimplifyVectorOp(I))
     return replaceInstUsesWith(I, V);
 
-  if (Value *V = SimplifySDivInst(Op0, Op1, DL, &TLI, &DT, &AC))
+  if (Value *V = SimplifySDivInst(Op0, Op1, SQ))
     return replaceInstUsesWith(I, V);
 
   // Handle the integer div common cases
@@ -1237,7 +1236,7 @@ Instruction *InstCombiner::visitSDiv(BinaryOperator &I) {
 
   // If the sign bits of both operands are zero (i.e. we can prove they are
   // unsigned inputs), turn this into a udiv.
-  APInt Mask(APInt::getSignBit(I.getType()->getScalarSizeInBits()));
+  APInt Mask(APInt::getSignMask(I.getType()->getScalarSizeInBits()));
   if (MaskedValueIsZero(Op0, Mask, 0, &I)) {
     if (MaskedValueIsZero(Op1, Mask, 0, &I)) {
       // X sdiv Y -> X udiv Y, iff X and Y don't have sign bit set
@@ -1296,8 +1295,7 @@ Instruction *InstCombiner::visitFDiv(BinaryOperator &I) {
   if (Value *V = SimplifyVectorOp(I))
     return replaceInstUsesWith(I, V);
 
-  if (Value *V = SimplifyFDivInst(Op0, Op1, I.getFastMathFlags(),
-                                  DL, &TLI, &DT, &AC))
+  if (Value *V = SimplifyFDivInst(Op0, Op1, I.getFastMathFlags(), SQ))
     return replaceInstUsesWith(I, V);
 
   if (isa<Constant>(Op0))
@@ -1481,7 +1479,7 @@ Instruction *InstCombiner::visitURem(BinaryOperator &I) {
   if (Value *V = SimplifyVectorOp(I))
     return replaceInstUsesWith(I, V);
 
-  if (Value *V = SimplifyURemInst(Op0, Op1, DL, &TLI, &DT, &AC))
+  if (Value *V = SimplifyURemInst(Op0, Op1, SQ))
     return replaceInstUsesWith(I, V);
 
   if (Instruction *common = commonIRemTransforms(I))
@@ -1524,7 +1522,7 @@ Instruction *InstCombiner::visitSRem(BinaryOperator &I) {
   if (Value *V = SimplifyVectorOp(I))
     return replaceInstUsesWith(I, V);
 
-  if (Value *V = SimplifySRemInst(Op0, Op1, DL, &TLI, &DT, &AC))
+  if (Value *V = SimplifySRemInst(Op0, Op1, SQ))
     return replaceInstUsesWith(I, V);
 
   // Handle the integer rem common cases
@@ -1543,7 +1541,7 @@ Instruction *InstCombiner::visitSRem(BinaryOperator &I) {
 
   // If the sign bits of both operands are zero (i.e. we can prove they are
   // unsigned inputs), turn this into a urem.
-  APInt Mask(APInt::getSignBit(I.getType()->getScalarSizeInBits()));
+  APInt Mask(APInt::getSignMask(I.getType()->getScalarSizeInBits()));
   if (MaskedValueIsZero(Op1, Mask, 0, &I) &&
       MaskedValueIsZero(Op0, Mask, 0, &I)) {
     // X srem Y -> X urem Y, iff X and Y don't have sign bit set
@@ -1597,8 +1595,7 @@ Instruction *InstCombiner::visitFRem(BinaryOperator &I) {
   if (Value *V = SimplifyVectorOp(I))
     return replaceInstUsesWith(I, V);
 
-  if (Value *V = SimplifyFRemInst(Op0, Op1, I.getFastMathFlags(),
-                                  DL, &TLI, &DT, &AC))
+  if (Value *V = SimplifyFRemInst(Op0, Op1, I.getFastMathFlags(), SQ))
     return replaceInstUsesWith(I, V);
 
   // Handle cases involving: rem X, (select Cond, Y, Z)

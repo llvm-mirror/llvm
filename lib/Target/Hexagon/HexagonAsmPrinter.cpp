@@ -286,9 +286,9 @@ void HexagonAsmPrinter::HexagonProcessInstruction(MCInst &Inst,
   const MCRegisterInfo *RI = OutStreamer->getContext().getRegisterInfo();
   const MachineFunction &MF = *MI.getParent()->getParent();
   const auto &HST = MF.getSubtarget<HexagonSubtarget>();
-  unsigned VectorSize = HST.useHVXSglOps()
-                            ? Hexagon::VectorRegsRegClass.getSize()
-                            : Hexagon::VectorRegs128BRegClass.getSize();
+  const auto &VecRC = HST.useHVXSglOps() ? Hexagon::VectorRegsRegClass
+                                         : Hexagon::VectorRegs128BRegClass;
+  unsigned VectorSize = HST.getRegisterInfo()->getSpillSize(VecRC);
 
   switch (Inst.getOpcode()) {
   default: return;
@@ -298,7 +298,7 @@ void HexagonAsmPrinter::HexagonProcessInstruction(MCInst &Inst,
     MCOperand Reg = Inst.getOperand(0);
     MCOperand S16 = Inst.getOperand(1);
     HexagonMCInstrInfo::setMustNotExtend(*S16.getExpr());
-    HexagonMCInstrInfo::setS23_2_reloc(*S16.getExpr());
+    HexagonMCInstrInfo::setS27_2_reloc(*S16.getExpr());
     Inst.clear();
     Inst.addOperand(Reg);
     Inst.addOperand(MCOperand::createReg(Hexagon::R0));
