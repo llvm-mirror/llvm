@@ -85,15 +85,16 @@ bool hasUTF16ByteOrderMark(ArrayRef<char> S) {
 }
 
 bool convertUTF16ToUTF8String(ArrayRef<char> SrcBytes, std::string &Out) {
-  assert(Out.empty());
 
   // Error out on an uneven byte count.
   if (SrcBytes.size() % 2)
     return false;
 
   // Avoid OOB by returning early on empty input.
-  if (SrcBytes.empty())
+  if (SrcBytes.empty()) {
+    Out.clear();
     return true;
+  }
 
   const UTF16 *Src = reinterpret_cast<const UTF16 *>(SrcBytes.begin());
   const UTF16 *SrcEnd = reinterpret_cast<const UTF16 *>(SrcBytes.end());
@@ -142,10 +143,9 @@ bool convertUTF16ToUTF8String(ArrayRef<UTF16> Src, std::string &Out)
 
 bool convertUTF8ToUTF16String(StringRef SrcUTF8,
                               SmallVectorImpl<UTF16> &DstUTF16) {
-  assert(DstUTF16.empty());
-
   // Avoid OOB by returning early on empty input.
   if (SrcUTF8.empty()) {
+    DstUTF16.clear();
     DstUTF16.push_back(0);
     DstUTF16.pop_back();
     return true;
