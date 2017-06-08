@@ -1290,7 +1290,7 @@ static llvm::Function *createCatchWrappedInvokeFunction(
   typeInfoThrown = builder.CreateStructGEP(ourExceptionType, typeInfoThrown, 0);
 
   llvm::Value *typeInfoThrownType =
-      builder.CreateStructGEP(builder.getInt8PtrTy(), typeInfoThrown, 0);
+      builder.CreateStructGEP(ourTypeInfoType, typeInfoThrown, 0);
 
   generateIntegerPrint(context,
                        module,
