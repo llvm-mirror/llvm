@@ -580,7 +580,7 @@ Value *IRLinker::materialize(Value *V, bool ForAlias) {
   // different, it means that the value already had a definition in the
   // destination module (linkonce for instance), but we need a new definition
   // for the alias ("New" will be different.
-  if (ForAlias && ValueMap.lookup(SGV) == New)
+  if (ForAlias && ValueMap.lookup(SGV) == New) // Is this correct to handle all cases? What about AliasValueMap?
     return New;
 
   if (ForAlias || shouldLink(New, *SGV))
