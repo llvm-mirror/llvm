@@ -28,6 +28,7 @@
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/Path.h"
 
+#include <cstdio>
 using namespace llvm;
 
 // Each file in an archive must be aligned to this block size.

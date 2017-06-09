@@ -51,6 +51,11 @@
 #  include <termios.h>
 #endif
 
+// pagesize is defined in unistd.h for QNX
+#ifdef __QNXNTO__
+#include <unistd.h>
+#include <limits.h>
+#endif
 //===----------------------------------------------------------------------===//
 //=== WARNING: Implementation here must contain only generic UNIX code that
 //===          is guaranteed to work on *all* UNIX variants.
@@ -75,7 +80,7 @@ static std::pair<std::chrono::microseconds, std::chrono::microseconds> getRUsage
 unsigned Process::getPageSize() {
 #if defined(HAVE_GETPAGESIZE)
   static const int page_size = ::getpagesize();
-#elif defined(HAVE_SYSCONF)
+#elif defined(HAVE_SYSCONF) || defined(__QNXNTO__)
   static long page_size = ::sysconf(_SC_PAGE_SIZE);
 #else
 #warning Cannot get the page size on this machine

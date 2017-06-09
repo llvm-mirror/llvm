@@ -17,7 +17,7 @@
 #include "llvm/Support/Format.h"
 #include "llvm/Support/Host.h"
 
-#include <string.h> // For memcpy, memset and strnlen.
+#include <cstring> // For memcpy, memset and strnlen.
 
 namespace llvm {
 
@@ -34,7 +34,11 @@ namespace yaml {
 
 void ScalarTraits<char_16>::output(const char_16 &Val, void *,
                                    llvm::raw_ostream &Out) {
-  auto Len = strnlen(&Val[0], 16);
+#if __QNXNTO__
+  auto Len = std::strnlen(&Val[0], 16);
+#else
+  auto Len = ::strnlen(&Val[0], 16);
+#endif
   Out << StringRef(&Val[0], Len);
 }
 

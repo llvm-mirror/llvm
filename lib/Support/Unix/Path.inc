@@ -55,6 +55,12 @@
 #include <sys/attr.h>
 #endif
 
+// For futime
+#ifdef __QNXNTO__
+#  include <utime.h>
+#endif
+
+
 // Both stdio.h and cstdio are included via different paths and
 // stdcxx's cstdio doesn't include stdio.h, so it doesn't #undef the macros
 // either.
@@ -97,7 +103,7 @@
 #define STATVFS_F_FRSIZE(vfs) static_cast<uint64_t>(vfs.f_bsize)
 #endif
 
-#if defined(__NetBSD__)
+#if defined(__NetBSD__) || defined(__QNXNTO__)
 #define STATVFS_F_FLAG(vfs) (vfs).f_flag
 #else
 #define STATVFS_F_FLAG(vfs) (vfs).f_flags
@@ -200,7 +206,7 @@ std::string getMainExecutable(const char *argv0, void *MainAddr) {
       if (getprogpath(exe_path, argv0))
         return exe_path;
   }
-#elif defined(HAVE_DLFCN_H) && defined(HAVE_DLADDR)
+#elif (defined(HAVE_DLFCN_H) && defined(HAVE_DLADDR))  || defined(__QNXNTO__)
   // Use dladdr to get executable path if available.
   Dl_info DLInfo;
   int err = dladdr(MainAddr, &DLInfo);
@@ -387,7 +393,7 @@ static bool is_local_impl(struct STATVFS &Vfs) {
   // NFS is the only non-local fstype??
   return !fstype.equals("nfs");
 #else
-  return !!(STATVFS_F_FLAG(Vfs) & MNT_LOCAL);
+  return !!(STATVFS_F_FLAG(Vfs));
 #endif
 }
 
@@ -602,6 +608,12 @@ std::error_code setLastModificationAndAccessTime(int FD, TimePoint<> Time) {
   Times[0] = Times[1] = sys::toTimeVal(
       std::chrono::time_point_cast<std::chrono::microseconds>(Time));
   if (::futimes(FD, Times))
+    return std::error_code(errno, std::generic_category());
+  return std::error_code();
+#elif defined (__QNXNTO__)
+  struct utimbuf Times;
+  Times.actime = Times.modtime = std::chrono::system_clock::to_time_t( Time );
+  if (::futime(FD, &Times))
     return std::error_code(errno, std::generic_category());
   return std::error_code();
 #else

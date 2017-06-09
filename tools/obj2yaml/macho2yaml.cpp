@@ -15,7 +15,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/LEB128.h"
 
-#include <string.h> // for memcpy
+#include <cstring> // for memcpy
 
 using namespace llvm;
 
@@ -137,7 +137,11 @@ readString(MachOYAML::LoadCommand &LC,
            const llvm::object::MachOObjectFile::LoadCommandInfo &LoadCmd) {
   auto Start = LoadCmd.Ptr + sizeof(StructType);
   auto MaxSize = LoadCmd.C.cmdsize - sizeof(StructType);
-  auto Size = strnlen(Start, MaxSize);
+#if __QNXNTO__
+  auto Size = std::strnlen(Start, MaxSize);
+#else
+  auto Size = ::strnlen(Start, MaxSize);
+#endif
   LC.PayloadString = StringRef(Start, Size).str();
   return Start + Size;
 }
