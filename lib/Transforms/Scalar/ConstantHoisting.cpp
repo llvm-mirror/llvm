@@ -367,6 +367,12 @@ void ConstantHoistingPass::collectConstantCandidates(
 
   // Scan all operands.
   for (unsigned Idx = 0, E = Inst->getNumOperands(); Idx != E; ++Idx) {
+    if (Idx != 0 && Idx != E - 1 && dyn_cast<GetElementPtrInst>(Inst)) {
+      // skip constant int in GEP as the CodeGenPrepare require at most
+      // one variable offset.
+      continue;
+    }
+
     Value *Opnd = Inst->getOperand(Idx);
 
     // Visit constant integers.
