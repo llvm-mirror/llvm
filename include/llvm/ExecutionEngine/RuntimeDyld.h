@@ -1,4 +1,4 @@
-//===-- RuntimeDyld.h - Run-time dynamic linker for MC-JIT ------*- C++ -*-===//
+//===- RuntimeDyld.h - Run-time dynamic linker for MC-JIT -------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -32,7 +32,9 @@
 namespace llvm {
 
 namespace object {
-  template <typename T> class OwningBinary;
+
+template <typename T> class OwningBinary;
+
 } // end namespace object
 
 /// Base class for errors originating in RuntimeDyld, e.g. missing relocation
@@ -51,8 +53,8 @@ private:
   std::string ErrMsg;
 };
 
-class RuntimeDyldImpl;
 class RuntimeDyldCheckerImpl;
+class RuntimeDyldImpl;
 
 class RuntimeDyld {
   friend class RuntimeDyldCheckerImpl;
@@ -68,7 +70,7 @@ public:
     friend class RuntimeDyldImpl;
 
   public:
-    typedef std::map<object::SectionRef, unsigned> ObjSectionToIDMap;
+    using ObjSectionToIDMap = std::map<object::SectionRef, unsigned>;
 
     LoadedObjectInfo(RuntimeDyldImpl &RTDyld, ObjSectionToIDMap ObjSecToIDMap)
         : RTDyld(RTDyld), ObjSecToIDMap(std::move(ObjSecToIDMap)) {}
@@ -150,8 +152,7 @@ public:
     /// be the case for local execution) these two values will be the same.
     virtual void registerEHFrames(uint8_t *Addr, uint64_t LoadAddr,
                                   size_t Size) = 0;
-    virtual void deregisterEHFrames(uint8_t *addr, uint64_t LoadAddr,
-                                    size_t Size) = 0;
+    virtual void deregisterEHFrames() = 0;
 
     /// This method is called when object loading is complete and section page
     /// permissions can be applied.  It is up to the memory manager implementation
@@ -187,7 +188,7 @@ public:
   /// \brief Construct a RuntimeDyld instance.
   RuntimeDyld(MemoryManager &MemMgr, JITSymbolResolver &Resolver);
   RuntimeDyld(const RuntimeDyld &) = delete;
-  void operator=(const RuntimeDyld &) = delete;
+  RuntimeDyld &operator=(const RuntimeDyld &) = delete;
   ~RuntimeDyld();
 
   /// Add the referenced object file to the list of objects to be loaded and

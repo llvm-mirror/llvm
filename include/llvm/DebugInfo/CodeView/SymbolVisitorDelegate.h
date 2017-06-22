@@ -19,13 +19,15 @@ class BinaryStreamReader;
 
 namespace codeview {
 
+class DebugStringTableSubsectionRef;
+
 class SymbolVisitorDelegate {
 public:
   virtual ~SymbolVisitorDelegate() = default;
 
   virtual uint32_t getRecordOffset(BinaryStreamReader Reader) = 0;
   virtual StringRef getFileNameForFileOffset(uint32_t FileOffset) = 0;
-  virtual StringRef getStringTable() = 0;
+  virtual DebugStringTableSubsectionRef getStringTable() = 0;
 };
 
 } // end namespace codeview

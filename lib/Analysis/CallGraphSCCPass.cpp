@@ -477,10 +477,8 @@ bool CGPassManager::runOnModule(Module &M) {
     if (DevirtualizedCall)
       DEBUG(dbgs() << "  CGSCCPASSMGR: Stopped iteration after " << Iteration
                    << " times, due to -max-cg-scc-iterations\n");
-    
-    if (Iteration > MaxSCCIterations)
-      MaxSCCIterations = Iteration;
-    
+
+    MaxSCCIterations.updateMax(Iteration);
   }
   Changed |= doFinalization(CG);
   return Changed;
@@ -610,18 +608,18 @@ namespace {
     }
 
     bool runOnSCC(CallGraphSCC &SCC) override {
+      bool BannerPrinted = false;
       auto PrintBannerOnce = [&] () {
-        static bool BannerPrinted = false;
         if (BannerPrinted)
           return;
         Out << Banner;
         BannerPrinted = true;
         };
       for (CallGraphNode *CGN : SCC) {
-        if (CGN->getFunction()) {
-          if (isFunctionInPrintList(CGN->getFunction()->getName())) {
+        if (Function *F = CGN->getFunction()) {
+          if (!F->isDeclaration() && isFunctionInPrintList(F->getName())) {
             PrintBannerOnce();
-            CGN->getFunction()->print(Out);
+            F->print(Out);
           }
         } else if (llvm::isFunctionInPrintList("*")) {
           PrintBannerOnce();

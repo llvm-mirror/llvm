@@ -159,6 +159,24 @@ public:
 
   bool isPredicable(const MachineInstr &MI) const override;
 
+  // CPSR defined in instruction
+  static bool isCPSRDefined(const MachineInstr &MI);
+  bool isAddrMode3OpImm(const MachineInstr &MI, unsigned Op) const;
+  bool isAddrMode3OpMinusReg(const MachineInstr &MI, unsigned Op) const;
+
+  // Load, scaled register offset
+  bool isLdstScaledReg(const MachineInstr &MI, unsigned Op) const;
+  // Load, scaled register offset, not plus LSL2
+  bool isLdstScaledRegNotPlusLsl2(const MachineInstr &MI, unsigned Op) const;
+  // Minus reg for ldstso addr mode
+  bool isLdstSoMinusReg(const MachineInstr &MI, unsigned Op) const;
+  // Scaled register offset in address mode 2
+  bool isAm2ScaledReg(const MachineInstr &MI, unsigned Op) const;
+  // Load multiple, base reg in list
+  bool isLDMBaseRegInList(const MachineInstr &MI) const;
+  // get LDM variable defs size
+  unsigned getLDMVariableDefsSize(const MachineInstr &MI) const;
+
   /// GetInstSize - Returns the size of the specified MachineInstr.
   ///
   unsigned getInstSizeInBytes(const MachineInstr &MI) const override;
@@ -404,21 +422,11 @@ public:
   /// Returns predicate register associated with the given frame instruction.
   unsigned getFramePred(const MachineInstr &MI) const {
     assert(isFrameInstr(MI));
-    if (isFrameSetup(MI))
-      // Operands of ADJCALLSTACKDOWN:
-      // - argument declared in ADJCALLSTACKDOWN pattern:
-      // 0 - frame size
-      // 1 - predicate code (like ARMCC::AL)
-      // - added by predOps:
-      // 2 - predicate reg
-      return MI.getOperand(2).getReg();
-    assert(MI.getOpcode() == ARM::ADJCALLSTACKUP ||
-           MI.getOpcode() == ARM::tADJCALLSTACKUP);
-    // Operands of ADJCALLSTACKUP:
-    // - argument declared in ADJCALLSTACKUP pattern:
+    // Operands of ADJCALLSTACKDOWN/ADJCALLSTACKUP:
+    // - argument declared in the pattern:
     // 0 - frame size
-    // 1 - arg of CALLSEQ_END
-    // 2 - predicate code
+    // 1 - arg of CALLSEQ_START/CALLSEQ_END
+    // 2 - predicate code (like ARMCC::AL)
     // - added by predOps:
     // 3 - predicate reg
     return MI.getOperand(3).getReg();

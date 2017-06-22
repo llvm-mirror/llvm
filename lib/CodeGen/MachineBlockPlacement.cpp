@@ -25,8 +25,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/CodeGen/Passes.h"
-#include "llvm/CodeGen/TargetPassConfig.h"
 #include "BranchFolding.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -41,7 +39,9 @@
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachinePostDominators.h"
+#include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TailDuplicator.h"
+#include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -131,6 +131,14 @@ static cl::opt<unsigned> TailDupPlacementThreshold(
     cl::desc("Instruction cutoff for tail duplication during layout. "
              "Tail merging during layout is forced to have a threshold "
              "that won't conflict."), cl::init(2),
+    cl::Hidden);
+
+// Heuristic for aggressive tail duplication.
+static cl::opt<unsigned> TailDupPlacementAggressiveThreshold(
+    "tail-dup-placement-aggressive-threshold",
+    cl::desc("Instruction cutoff for aggressive tail duplication during "
+             "layout. Used at -O3. Tail merging during layout is forced to "
+             "have a threshold that won't conflict."), cl::init(3),
     cl::Hidden);
 
 // Heuristic for tail duplication.
@@ -237,25 +245,26 @@ public:
   /// updating the block -> chain mapping. It does not free or tear down the
   /// old chain, but the old chain's block list is no longer valid.
   void merge(MachineBasicBlock *BB, BlockChain *Chain) {
-    assert(BB);
-    assert(!Blocks.empty());
+    assert(BB && "Can't merge a null block.");
+    assert(!Blocks.empty() && "Can't merge into an empty chain.");
 
     // Fast path in case we don't have a chain already.
     if (!Chain) {
-      assert(!BlockToChain[BB]);
+      assert(!BlockToChain[BB] &&
+             "Passed chain is null, but BB has entry in BlockToChain.");
       Blocks.push_back(BB);
       BlockToChain[BB] = this;
       return;
     }
 
-    assert(BB == *Chain->begin());
+    assert(BB == *Chain->begin() && "Passed BB is not head of Chain.");
     assert(Chain->begin() != Chain->end());
 
     // Update the incoming blocks to point to this chain, and add them to the
     // chain structure.
     for (MachineBasicBlock *ChainBB : *Chain) {
       Blocks.push_back(ChainBB);
-      assert(BlockToChain[ChainBB] == Chain && "Incoming blocks not in chain");
+      assert(BlockToChain[ChainBB] == Chain && "Incoming blocks not in chain.");
       BlockToChain[ChainBB] = this;
     }
   }
@@ -490,13 +499,13 @@ public:
 
 char MachineBlockPlacement::ID = 0;
 char &llvm::MachineBlockPlacementID = MachineBlockPlacement::ID;
-INITIALIZE_PASS_BEGIN(MachineBlockPlacement, "block-placement",
+INITIALIZE_PASS_BEGIN(MachineBlockPlacement, DEBUG_TYPE,
                       "Branch Probability Basic Block Placement", false, false)
 INITIALIZE_PASS_DEPENDENCY(MachineBranchProbabilityInfo)
 INITIALIZE_PASS_DEPENDENCY(MachineBlockFrequencyInfo)
 INITIALIZE_PASS_DEPENDENCY(MachinePostDominatorTree)
 INITIALIZE_PASS_DEPENDENCY(MachineLoopInfo)
-INITIALIZE_PASS_END(MachineBlockPlacement, "block-placement",
+INITIALIZE_PASS_END(MachineBlockPlacement, DEBUG_TYPE,
                     "Branch Probability Basic Block Placement", false, false)
 
 #ifndef NDEBUG
@@ -585,8 +594,8 @@ BranchProbability MachineBlockPlacement::collectViableSuccessors(
   // Assume A->C is very hot (>90%), and C->D has a 50% probability, then after
   // A->C is chosen as a fall-through, D won't be selected as a successor of C
   // due to CFG constraint (the probability of C->D is not greater than
-  // HotProb to break top-order). If we exclude E that is not in BlockFilter
-  // when calculating the  probability of C->D, D will be selected and we
+  // HotProb to break topo-order). If we exclude E that is not in BlockFilter
+  // when calculating the probability of C->D, D will be selected and we
   // will get A C D B as the layout of this loop.
   auto AdjustedSumProb = BranchProbability::getOne();
   for (MachineBasicBlock *Succ : BB->successors()) {
@@ -1147,7 +1156,7 @@ void MachineBlockPlacement::precomputeTriangleChains() {
       continue;
 
     // Now we have an interesting triangle. Insert it if it's not part of an
-    // existing chain
+    // existing chain.
     // Note: This cannot be replaced with a call insert() or emplace() because
     // the find key is BB, but the insert/emplace key is PDom.
     auto Found = TriangleChainMap.find(&BB);
@@ -1289,9 +1298,9 @@ bool MachineBlockPlacement::hasBetterLayoutPredecessor(
   //       |    |                             |  |
   //    ---BB   |                             |  BB
   //    |       |                             |  |
-  //    |  pred--                             |  Succ--
+  //    |  Pred--                             |  Succ--
   //    |  |                                  |       |
-  //    ---succ                               ---pred--
+  //    ---Succ                               ---Pred--
   //
   // cost = freq(S->Pred) + freq(BB->Succ)    cost = 2 * freq (S->Pred)
   //      = freq(S->Pred) + freq(S->BB)
@@ -1539,13 +1548,15 @@ MachineBasicBlock *MachineBlockPlacement::selectBestCandidateBlock(
   MachineBasicBlock *BestBlock = nullptr;
   BlockFrequency BestFreq;
   for (MachineBasicBlock *MBB : WorkList) {
-    assert(MBB->isEHPad() == IsEHPad);
+    assert(MBB->isEHPad() == IsEHPad &&
+           "EHPad mismatch between block and work list.");
 
     BlockChain &SuccChain = *BlockToChain[MBB];
     if (&SuccChain == &Chain)
       continue;
 
-    assert(SuccChain.UnscheduledPredecessors == 0 && "Found CFG-violating block");
+    assert(SuccChain.UnscheduledPredecessors == 0 &&
+           "Found CFG-violating block");
 
     BlockFrequency CandidateFreq = MBFI->getBlockFreq(MBB);
     DEBUG(dbgs() << "    " << getBlockName(MBB) << " -> ";
@@ -1613,9 +1624,12 @@ void MachineBlockPlacement::fillWorkLists(
   if (!UpdatedPreds.insert(&Chain).second)
     return;
 
-  assert(Chain.UnscheduledPredecessors == 0);
+  assert(
+      Chain.UnscheduledPredecessors == 0 &&
+      "Attempting to place block with unscheduled predecessors in worklist.");
   for (MachineBasicBlock *ChainBB : Chain) {
-    assert(BlockToChain[ChainBB] == &Chain);
+    assert(BlockToChain[ChainBB] == &Chain &&
+           "Block in chain doesn't match BlockToChain map.");
     for (MachineBasicBlock *Pred : ChainBB->predecessors()) {
       if (BlockFilter && !BlockFilter->count(Pred))
         continue;
@@ -2128,8 +2142,10 @@ void MachineBlockPlacement::buildLoopChains(const MachineLoop &L) {
   for (const MachineLoop *InnerLoop : L)
     buildLoopChains(*InnerLoop);
 
-  assert(BlockWorkList.empty());
-  assert(EHPadWorkList.empty());
+  assert(BlockWorkList.empty() &&
+         "BlockWorkList not empty when starting to build loop chains.");
+  assert(EHPadWorkList.empty() &&
+         "EHPadWorkList not empty when starting to build loop chains.");
   BlockFilterSet LoopBlockSet = collectLoopBlockSet(L);
 
   // Check if we have profile data for this function. If yes, we will rotate
@@ -2159,7 +2175,8 @@ void MachineBlockPlacement::buildLoopChains(const MachineLoop &L) {
   // walk the blocks, and use a set to prevent visiting a particular chain
   // twice.
   SmallPtrSet<BlockChain *, 4> UpdatedPreds;
-  assert(LoopChain.UnscheduledPredecessors == 0);
+  assert(LoopChain.UnscheduledPredecessors == 0 &&
+         "LoopChain should not have unscheduled predecessors.");
   UpdatedPreds.insert(&LoopChain);
 
   for (const MachineBasicBlock *LoopBB : LoopBlockSet)
@@ -2248,8 +2265,10 @@ void MachineBlockPlacement::buildCFGChains() {
   for (MachineLoop *L : *MLI)
     buildLoopChains(*L);
 
-  assert(BlockWorkList.empty());
-  assert(EHPadWorkList.empty());
+  assert(BlockWorkList.empty() &&
+         "BlockWorkList should be empty before building final chain.");
+  assert(EHPadWorkList.empty() &&
+         "EHPadWorkList should be empty before building final chain.");
 
   SmallPtrSet<BlockChain *, 4> UpdatedPreds;
   for (MachineBasicBlock &MBB : *F)
@@ -2643,12 +2662,31 @@ bool MachineBlockPlacement::runOnMachineFunction(MachineFunction &MF) {
   // there are no MachineLoops.
   PreferredLoopExit = nullptr;
 
-  assert(BlockToChain.empty());
-  assert(ComputedEdges.empty());
+  assert(BlockToChain.empty() &&
+         "BlockToChain map should be empty before starting placement.");
+  assert(ComputedEdges.empty() &&
+         "Computed Edge map should be empty before starting placement.");
+
+  unsigned TailDupSize = TailDupPlacementThreshold;
+  // If only the aggressive threshold is explicitly set, use it.
+  if (TailDupPlacementAggressiveThreshold.getNumOccurrences() != 0 &&
+      TailDupPlacementThreshold.getNumOccurrences() == 0)
+    TailDupSize = TailDupPlacementAggressiveThreshold;
+
+  TargetPassConfig *PassConfig = &getAnalysis<TargetPassConfig>();
+  // For agressive optimization, we can adjust some thresholds to be less
+  // conservative.
+  if (PassConfig->getOptLevel() >= CodeGenOpt::Aggressive) {
+    // At O3 we should be more willing to copy blocks for tail duplication. This
+    // increases size pressure, so we only do it at O3
+    // Do this unless only the regular threshold is explicitly set.
+    if (TailDupPlacementThreshold.getNumOccurrences() == 0 ||
+        TailDupPlacementAggressiveThreshold.getNumOccurrences() != 0)
+      TailDupSize = TailDupPlacementAggressiveThreshold;
+  }
 
   if (TailDupPlacement) {
     MPDT = &getAnalysis<MachinePostDominatorTree>();
-    unsigned TailDupSize = TailDupPlacementThreshold;
     if (MF.getFunction()->optForSize())
       TailDupSize = 1;
     TailDup.initMF(MF, MBPI, /* LayoutMode */ true, TailDupSize);
@@ -2658,7 +2696,6 @@ bool MachineBlockPlacement::runOnMachineFunction(MachineFunction &MF) {
   buildCFGChains();
 
   // Changing the layout can create new tail merging opportunities.
-  TargetPassConfig *PassConfig = &getAnalysis<TargetPassConfig>();
   // TailMerge can create jump into if branches that make CFG irreducible for
   // HW that requires structured CFG.
   bool EnableTailMerge = !MF.getTarget().requiresStructuredCFG() &&
@@ -2666,7 +2703,7 @@ bool MachineBlockPlacement::runOnMachineFunction(MachineFunction &MF) {
                          BranchFoldPlacement;
   // No tail merging opportunities if the block number is less than four.
   if (MF.size() > 3 && EnableTailMerge) {
-    unsigned TailMergeSize = TailDupPlacementThreshold + 1;
+    unsigned TailMergeSize = TailDupSize + 1;
     BranchFolder BF(/*EnableTailMerge=*/true, /*CommonHoist=*/false, *MBFI,
                     *MBPI, TailMergeSize);
 

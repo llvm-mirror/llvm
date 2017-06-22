@@ -16,6 +16,10 @@
   define void @test_sdiv_s32() #1 { ret void }
   define void @test_udiv_s32() #1 { ret void }
 
+  define void @test_and_s32() { ret void}
+  define void @test_or_s32() { ret void}
+  define void @test_xor_s32() { ret void}
+
   define void @test_loads() #0 { ret void }
   define void @test_stores() #0 { ret void }
 
@@ -25,7 +29,12 @@
 
   define void @test_constants() { ret void }
 
+  define void @test_anyext_s8_32() { ret void }
+  define void @test_anyext_s16_32() { ret void }
+
   define void @test_trunc_s32_16() { ret void }
+
+  define void @test_icmp_eq_s32() { ret void }
 
   define void @test_fadd_s32() #0 { ret void }
   define void @test_fadd_s64() #0 { ret void }
@@ -42,9 +51,9 @@ legalized:       true
 regBankSelected: false
 selected:        false
 # CHECK: registers:
-# CHECK: - { id: 0, class: gprb }
-# CHECK: - { id: 1, class: gprb }
-# CHECK: - { id: 2, class: gprb }
+# CHECK: - { id: 0, class: gprb, preferred-register: '' }
+# CHECK: - { id: 1, class: gprb, preferred-register: '' }
+# CHECK: - { id: 2, class: gprb, preferred-register: '' }
 
 registers:
   - { id: 0, class: _ }
@@ -68,22 +77,31 @@ legalized:       true
 regBankSelected: false
 selected:        false
 # CHECK: registers:
-# CHECK: - { id: 0, class: gprb }
-# CHECK: - { id: 1, class: gprb }
-# CHECK: - { id: 2, class: gprb }
+# CHECK: - { id: 0, class: gprb, preferred-register: '' }
+# CHECK: - { id: 1, class: gprb, preferred-register: '' }
+# CHECK: - { id: 2, class: gprb, preferred-register: '' }
+# CHECK: - { id: 3, class: gprb, preferred-register: '' }
+# CHECK: - { id: 4, class: gprb, preferred-register: '' }
+# CHECK: - { id: 5, class: gprb, preferred-register: '' }
 
 registers:
   - { id: 0, class: _ }
   - { id: 1, class: _ }
   - { id: 2, class: _ }
+  - { id: 3, class: _ }
+  - { id: 4, class: _ }
+  - { id: 5, class: _ }
 body:             |
   bb.0:
     liveins: %r0, %r1
 
     %0(s16) = COPY %r0
     %1(s16) = COPY %r1
-    %2(s16) = G_ADD %0, %1
-    %r0 = COPY %2(s16)
+    %2(s32) = G_ANYEXT %0(s16)
+    %3(s32) = G_ANYEXT %1(s16)
+    %4(s32) = G_ADD %2, %3
+    %5(s16) = G_TRUNC %4(s32)
+    %r0 = COPY %5(s16)
     BX_RET 14, _, implicit %r0
 
 ...
@@ -94,22 +112,31 @@ legalized:       true
 regBankSelected: false
 selected:        false
 # CHECK: registers:
-# CHECK: - { id: 0, class: gprb }
-# CHECK: - { id: 1, class: gprb }
-# CHECK: - { id: 2, class: gprb }
+# CHECK: - { id: 0, class: gprb, preferred-register: '' }
+# CHECK: - { id: 1, class: gprb, preferred-register: '' }
+# CHECK: - { id: 2, class: gprb, preferred-register: '' }
+# CHECK: - { id: 3, class: gprb, preferred-register: '' }
+# CHECK: - { id: 4, class: gprb, preferred-register: '' }
+# CHECK: - { id: 5, class: gprb, preferred-register: '' }
 
 registers:
   - { id: 0, class: _ }
   - { id: 1, class: _ }
   - { id: 2, class: _ }
+  - { id: 3, class: _ }
+  - { id: 4, class: _ }
+  - { id: 5, class: _ }
 body:             |
   bb.0:
     liveins: %r0, %r1
 
     %0(s8) = COPY %r0
     %1(s8) = COPY %r1
-    %2(s8) = G_ADD %0, %1
-    %r0 = COPY %2(s8)
+    %2(s32) = G_ANYEXT %0(s8)
+    %3(s32) = G_ANYEXT %1(s8)
+    %4(s32) = G_ADD %2, %3
+    %5(s8) = G_TRUNC %4(s32)
+    %r0 = COPY %5(s8)
     BX_RET 14, _, implicit %r0
 
 ...
@@ -120,22 +147,31 @@ legalized:       true
 regBankSelected: false
 selected:        false
 # CHECK: registers:
-# CHECK: - { id: 0, class: gprb }
-# CHECK: - { id: 1, class: gprb }
-# CHECK: - { id: 2, class: gprb }
+# CHECK: - { id: 0, class: gprb, preferred-register: '' }
+# CHECK: - { id: 1, class: gprb, preferred-register: '' }
+# CHECK: - { id: 2, class: gprb, preferred-register: '' }
+# CHECK: - { id: 3, class: gprb, preferred-register: '' }
+# CHECK: - { id: 4, class: gprb, preferred-register: '' }
+# CHECK: - { id: 5, class: gprb, preferred-register: '' }
 
 registers:
   - { id: 0, class: _ }
   - { id: 1, class: _ }
   - { id: 2, class: _ }
+  - { id: 3, class: _ }
+  - { id: 4, class: _ }
+  - { id: 5, class: _ }
 body:             |
   bb.0:
     liveins: %r0, %r1
 
     %0(s1) = COPY %r0
     %1(s1) = COPY %r1
-    %2(s1) = G_ADD %0, %1
-    %r0 = COPY %2(s1)
+    %2(s32) = G_ANYEXT %0(s1)
+    %3(s32) = G_ANYEXT %1(s1)
+    %4(s32) = G_ADD %2, %3
+    %5(s1) = G_TRUNC %4(s32)
+    %r0 = COPY %5(s1)
     BX_RET 14, _, implicit %r0
 
 ...
@@ -146,9 +182,9 @@ legalized:       true
 regBankSelected: false
 selected:        false
 # CHECK: registers:
-# CHECK: - { id: 0, class: gprb }
-# CHECK: - { id: 1, class: gprb }
-# CHECK: - { id: 2, class: gprb }
+# CHECK: - { id: 0, class: gprb, preferred-register: '' }
+# CHECK: - { id: 1, class: gprb, preferred-register: '' }
+# CHECK: - { id: 2, class: gprb, preferred-register: '' }
 
 registers:
   - { id: 0, class: _ }
@@ -172,22 +208,31 @@ legalized:       true
 regBankSelected: false
 selected:        false
 # CHECK: registers:
-# CHECK: - { id: 0, class: gprb }
-# CHECK: - { id: 1, class: gprb }
-# CHECK: - { id: 2, class: gprb }
+# CHECK: - { id: 0, class: gprb, preferred-register: '' }
+# CHECK: - { id: 1, class: gprb, preferred-register: '' }
+# CHECK: - { id: 2, class: gprb, preferred-register: '' }
+# CHECK: - { id: 3, class: gprb, preferred-register: '' }
+# CHECK: - { id: 4, class: gprb, preferred-register: '' }
+# CHECK: - { id: 5, class: gprb, preferred-register: '' }
 
 registers:
   - { id: 0, class: _ }
   - { id: 1, class: _ }
   - { id: 2, class: _ }
+  - { id: 3, class: _ }
+  - { id: 4, class: _ }
+  - { id: 5, class: _ }
 body:             |
   bb.0:
     liveins: %r0, %r1
 
     %0(s16) = COPY %r0
     %1(s16) = COPY %r1
-    %2(s16) = G_SUB %0, %1
-    %r0 = COPY %2(s16)
+    %2(s32) = G_ANYEXT %0(s16)
+    %3(s32) = G_ANYEXT %1(s16)
+    %4(s32) = G_SUB %2, %3
+    %5(s16) = G_TRUNC %4(s32)
+    %r0 = COPY %5(s16)
     BX_RET 14, _, implicit %r0
 
 ...
@@ -198,22 +243,31 @@ legalized:       true
 regBankSelected: false
 selected:        false
 # CHECK: registers:
-# CHECK: - { id: 0, class: gprb }
-# CHECK: - { id: 1, class: gprb }
-# CHECK: - { id: 2, class: gprb }
+# CHECK: - { id: 0, class: gprb, preferred-register: '' }
+# CHECK: - { id: 1, class: gprb, preferred-register: '' }
+# CHECK: - { id: 2, class: gprb, preferred-register: '' }
+# CHECK: - { id: 3, class: gprb, preferred-register: '' }
+# CHECK: - { id: 4, class: gprb, preferred-register: '' }
+# CHECK: - { id: 5, class: gprb, preferred-register: '' }
 
 registers:
   - { id: 0, class: _ }
   - { id: 1, class: _ }
   - { id: 2, class: _ }
+  - { id: 3, class: _ }
+  - { id: 4, class: _ }
+  - { id: 5, class: _ }
 body:             |
   bb.0:
     liveins: %r0, %r1
 
     %0(s8) = COPY %r0
     %1(s8) = COPY %r1
-    %2(s8) = G_SUB %0, %1
-    %r0 = COPY %2(s8)
+    %2(s32) = G_ANYEXT %0(s8)
+    %3(s32) = G_ANYEXT %1(s8)
+    %4(s32) = G_SUB %2, %3
+    %5(s8) = G_TRUNC %4(s32)
+    %r0 = COPY %5(s8)
     BX_RET 14, _, implicit %r0
 
 ...
@@ -224,9 +278,9 @@ legalized:       true
 regBankSelected: false
 selected:        false
 # CHECK: registers:
-# CHECK: - { id: 0, class: gprb }
-# CHECK: - { id: 1, class: gprb }
-# CHECK: - { id: 2, class: gprb }
+# CHECK: - { id: 0, class: gprb, preferred-register: '' }
+# CHECK: - { id: 1, class: gprb, preferred-register: '' }
+# CHECK: - { id: 2, class: gprb, preferred-register: '' }
 
 registers:
   - { id: 0, class: _ }
@@ -250,22 +304,31 @@ legalized:       true
 regBankSelected: false
 selected:        false
 # CHECK: registers:
-# CHECK: - { id: 0, class: gprb }
-# CHECK: - { id: 1, class: gprb }
-# CHECK: - { id: 2, class: gprb }
+# CHECK: - { id: 0, class: gprb, preferred-register: '' }
+# CHECK: - { id: 1, class: gprb, preferred-register: '' }
+# CHECK: - { id: 2, class: gprb, preferred-register: '' }
+# CHECK: - { id: 3, class: gprb, preferred-register: '' }
+# CHECK: - { id: 4, class: gprb, preferred-register: '' }
+# CHECK: - { id: 5, class: gprb, preferred-register: '' }
 
 registers:
   - { id: 0, class: _ }
   - { id: 1, class: _ }
   - { id: 2, class: _ }
+  - { id: 3, class: _ }
+  - { id: 4, class: _ }
+  - { id: 5, class: _ }
 body:             |
   bb.0:
     liveins: %r0, %r1
 
     %0(s16) = COPY %r0
     %1(s16) = COPY %r1
-    %2(s16) = G_MUL %0, %1
-    %r0 = COPY %2(s16)
+    %2(s32) = G_ANYEXT %0(s16)
+    %3(s32) = G_ANYEXT %1(s16)
+    %4(s32) = G_MUL %2, %3
+    %5(s16) = G_TRUNC %4(s32)
+    %r0 = COPY %5(s16)
     BX_RET 14, _, implicit %r0
 
 ...
@@ -276,22 +339,31 @@ legalized:       true
 regBankSelected: false
 selected:        false
 # CHECK: registers:
-# CHECK: - { id: 0, class: gprb }
-# CHECK: - { id: 1, class: gprb }
-# CHECK: - { id: 2, class: gprb }
+# CHECK: - { id: 0, class: gprb, preferred-register: '' }
+# CHECK: - { id: 1, class: gprb, preferred-register: '' }
+# CHECK: - { id: 2, class: gprb, preferred-register: '' }
+# CHECK: - { id: 3, class: gprb, preferred-register: '' }
+# CHECK: - { id: 4, class: gprb, preferred-register: '' }
+# CHECK: - { id: 5, class: gprb, preferred-register: '' }
 
 registers:
   - { id: 0, class: _ }
   - { id: 1, class: _ }
   - { id: 2, class: _ }
+  - { id: 3, class: _ }
+  - { id: 4, class: _ }
+  - { id: 5, class: _ }
 body:             |
   bb.0:
     liveins: %r0, %r1
 
     %0(s8) = COPY %r0
     %1(s8) = COPY %r1
-    %2(s8) = G_MUL %0, %1
-    %r0 = COPY %2(s8)
+    %2(s32) = G_ANYEXT %0(s8)
+    %3(s32) = G_ANYEXT %1(s8)
+    %4(s32) = G_MUL %2, %3
+    %5(s8) = G_TRUNC %4(s32)
+    %r0 = COPY %5(s8)
     BX_RET 14, _, implicit %r0
 
 ...
@@ -302,9 +374,9 @@ legalized:       true
 regBankSelected: false
 selected:        false
 # CHECK: registers:
-# CHECK: - { id: 0, class: gprb }
-# CHECK: - { id: 1, class: gprb }
-# CHECK: - { id: 2, class: gprb }
+# CHECK: - { id: 0, class: gprb, preferred-register: '' }
+# CHECK: - { id: 1, class: gprb, preferred-register: '' }
+# CHECK: - { id: 2, class: gprb, preferred-register: '' }
 
 registers:
   - { id: 0, class: _ }
@@ -328,9 +400,9 @@ legalized:       true
 regBankSelected: false
 selected:        false
 # CHECK: registers:
-# CHECK: - { id: 0, class: gprb }
-# CHECK: - { id: 1, class: gprb }
-# CHECK: - { id: 2, class: gprb }
+# CHECK: - { id: 0, class: gprb, preferred-register: '' }
+# CHECK: - { id: 1, class: gprb, preferred-register: '' }
+# CHECK: - { id: 2, class: gprb, preferred-register: '' }
 
 registers:
   - { id: 0, class: _ }
@@ -348,19 +420,97 @@ body:             |
 
 ...
 ---
+name:            test_and_s32
+# CHECK-LABEL: name: test_and_s32
+legalized:       true
+regBankSelected: false
+selected:        false
+# CHECK: registers:
+# CHECK: - { id: 0, class: gprb, preferred-register: '' }
+# CHECK: - { id: 1, class: gprb, preferred-register: '' }
+# CHECK: - { id: 2, class: gprb, preferred-register: '' }
+
+registers:
+  - { id: 0, class: _ }
+  - { id: 1, class: _ }
+  - { id: 2, class: _ }
+body:             |
+  bb.0:
+    liveins: %r0, %r1
+
+    %0(s32) = COPY %r0
+    %1(s32) = COPY %r1
+    %2(s32) = G_AND %0, %1
+    %r0 = COPY %2(s32)
+    BX_RET 14, _, implicit %r0
+
+...
+---
+name:            test_or_s32
+# CHECK-LABEL: name: test_or_s32
+legalized:       true
+regBankSelected: false
+selected:        false
+# CHECK: registers:
+# CHECK: - { id: 0, class: gprb, preferred-register: '' }
+# CHECK: - { id: 1, class: gprb, preferred-register: '' }
+# CHECK: - { id: 2, class: gprb, preferred-register: '' }
+
+registers:
+  - { id: 0, class: _ }
+  - { id: 1, class: _ }
+  - { id: 2, class: _ }
+body:             |
+  bb.0:
+    liveins: %r0, %r1
+
+    %0(s32) = COPY %r0
+    %1(s32) = COPY %r1
+    %2(s32) = G_OR %0, %1
+    %r0 = COPY %2(s32)
+    BX_RET 14, _, implicit %r0
+
+...
+---
+name:            test_xor_s32
+# CHECK-LABEL: name: test_xor_s32
+legalized:       true
+regBankSelected: false
+selected:        false
+# CHECK: registers:
+# CHECK: - { id: 0, class: gprb, preferred-register: '' }
+# CHECK: - { id: 1, class: gprb, preferred-register: '' }
+# CHECK: - { id: 2, class: gprb, preferred-register: '' }
+
+registers:
+  - { id: 0, class: _ }
+  - { id: 1, class: _ }
+  - { id: 2, class: _ }
+body:             |
+  bb.0:
+    liveins: %r0, %r1
+
+    %0(s32) = COPY %r0
+    %1(s32) = COPY %r1
+    %2(s32) = G_XOR %0, %1
+    %r0 = COPY %2(s32)
+    BX_RET 14, _, implicit %r0
+
+...
+---
 name:            test_loads
 # CHECK-LABEL: name: test_loads
 legalized:       true
 regBankSelected: false
 selected:        false
 # CHECK: registers:
-# CHECK: - { id: 0, class: gprb }
-# CHECK: - { id: 1, class: gprb }
-# CHECK: - { id: 2, class: gprb }
-# CHECK: - { id: 3, class: gprb }
-# CHECK: - { id: 4, class: gprb }
-# CHECK: - { id: 5, class: gprb }
-# CHECK: - { id: 6, class: fprb }
+# CHECK: - { id: 0, class: gprb, preferred-register: '' }
+# CHECK: - { id: 1, class: gprb, preferred-register: '' }
+# CHECK: - { id: 2, class: gprb, preferred-register: '' }
+# CHECK: - { id: 3, class: gprb, preferred-register: '' }
+# CHECK: - { id: 4, class: gprb, preferred-register: '' }
+# CHECK: - { id: 5, class: gprb, preferred-register: '' }
+# CHECK: - { id: 6, class: fprb, preferred-register: '' }
 
 registers:
   - { id: 0, class: _ }
@@ -390,13 +540,13 @@ legalized:       true
 regBankSelected: false
 selected:        false
 # CHECK: registers:
-# CHECK: - { id: 0, class: gprb }
-# CHECK: - { id: 1, class: gprb }
-# CHECK: - { id: 2, class: gprb }
-# CHECK: - { id: 3, class: gprb }
-# CHECK: - { id: 4, class: gprb }
-# CHECK: - { id: 5, class: gprb }
-# CHECK: - { id: 6, class: fprb }
+# CHECK: - { id: 0, class: gprb, preferred-register: '' }
+# CHECK: - { id: 1, class: gprb, preferred-register: '' }
+# CHECK: - { id: 2, class: gprb, preferred-register: '' }
+# CHECK: - { id: 3, class: gprb, preferred-register: '' }
+# CHECK: - { id: 4, class: gprb, preferred-register: '' }
+# CHECK: - { id: 5, class: gprb, preferred-register: '' }
+# CHECK: - { id: 6, class: fprb, preferred-register: '' }
 
 registers:
   - { id: 0, class: _ }
@@ -432,11 +582,11 @@ legalized:       true
 regBankSelected: false
 selected:        false
 # CHECK: registers:
-# CHECK: - { id: 0, class: gprb }
-# CHECK: - { id: 1, class: gprb }
-# CHECK: - { id: 2, class: gprb }
-# CHECK: - { id: 3, class: gprb }
-# CHECK: - { id: 4, class: gprb }
+# CHECK: - { id: 0, class: gprb, preferred-register: '' }
+# CHECK: - { id: 1, class: gprb, preferred-register: '' }
+# CHECK: - { id: 2, class: gprb, preferred-register: '' }
+# CHECK: - { id: 3, class: gprb, preferred-register: '' }
+# CHECK: - { id: 4, class: gprb, preferred-register: '' }
 registers:
   - { id: 0, class: _ }
   - { id: 1, class: _ }
@@ -465,9 +615,9 @@ legalized:       true
 regBankSelected: false
 selected:        false
 # CHECK: registers:
-# CHECK: - { id: 0, class: gprb }
-# CHECK: - { id: 1, class: gprb }
-# CHECK: - { id: 2, class: gprb }
+# CHECK: - { id: 0, class: gprb, preferred-register: '' }
+# CHECK: - { id: 1, class: gprb, preferred-register: '' }
+# CHECK: - { id: 2, class: gprb, preferred-register: '' }
 
 registers:
   - { id: 0, class: _ }
@@ -490,7 +640,7 @@ legalized:       true
 regBankSelected: false
 selected:        false
 # CHECK: registers:
-# CHECK: - { id: 0, class: gprb }
+# CHECK: - { id: 0, class: gprb, preferred-register: '' }
 registers:
   - { id: 0, class: _ }
 body:             |
@@ -500,14 +650,56 @@ body:             |
     BX_RET 14, _, implicit %r0
 ...
 ---
+name:            test_anyext_s8_32
+# CHECK-LABEL: name: test_anyext_s8_32
+legalized:       true
+regBankSelected: false
+selected:        false
+# CHECK: registers:
+# CHECK: - { id: 0, class: gprb, preferred-register: '' }
+# CHECK: - { id: 1, class: gprb, preferred-register: '' }
+registers:
+  - { id: 0, class: _ }
+  - { id: 1, class: _ }
+body:             |
+  bb.0:
+    liveins: %r0
+
+    %0(s8) = COPY %r0
+    %1(s32) = G_ANYEXT %0(s8)
+    %r0 = COPY %1(s32)
+    BX_RET 14, _, implicit %r0
+...
+---
+name:            test_anyext_s16_32
+# CHECK-LABEL: name: test_anyext_s16_32
+legalized:       true
+regBankSelected: false
+selected:        false
+# CHECK: registers:
+# CHECK: - { id: 0, class: gprb, preferred-register: '' }
+# CHECK: - { id: 1, class: gprb, preferred-register: '' }
+registers:
+  - { id: 0, class: _ }
+  - { id: 1, class: _ }
+body:             |
+  bb.0:
+    liveins: %r0
+
+    %0(s16) = COPY %r0
+    %1(s32) = G_ANYEXT %0(s16)
+    %r0 = COPY %1(s32)
+    BX_RET 14, _, implicit %r0
+...
+---
 name:            test_trunc_s32_16
 # CHECK-LABEL: name: test_trunc_s32_16
 legalized:       true
 regBankSelected: false
 selected:        false
 # CHECK: registers:
-# CHECK: - { id: 0, class: gprb }
-# CHECK: - { id: 1, class: gprb }
+# CHECK: - { id: 0, class: gprb, preferred-register: '' }
+# CHECK: - { id: 1, class: gprb, preferred-register: '' }
 registers:
   - { id: 0, class: _ }
   - { id: 1, class: _ }
@@ -521,15 +713,43 @@ body:             |
     BX_RET 14, _, implicit %r0
 ...
 ---
+name:            test_icmp_eq_s32
+# CHECK-LABEL: name: test_icmp_eq_s32
+legalized:       true
+regBankSelected: false
+selected:        false
+# CHECK: registers:
+# CHECK: - { id: 0, class: gprb, preferred-register: '' }
+# CHECK: - { id: 1, class: gprb, preferred-register: '' }
+# CHECK: - { id: 2, class: gprb, preferred-register: '' }
+
+registers:
+  - { id: 0, class: _ }
+  - { id: 1, class: _ }
+  - { id: 2, class: _ }
+  - { id: 3, class: _ }
+body:             |
+  bb.0:
+    liveins: %r0, %r1
+
+    %0(s32) = COPY %r0
+    %1(s32) = COPY %r1
+    %2(s1) = G_ICMP intpred(eq), %0(s32), %1
+    %3(s32) = G_ZEXT %2(s1)
+    %r0 = COPY %3(s32)
+    BX_RET 14, _, implicit %r0
+
+...
+---
 name:            test_fadd_s32
 # CHECK-LABEL: name: test_fadd_s32
 legalized:       true
 regBankSelected: false
 selected:        false
 # CHECK: registers:
-# CHECK: - { id: 0, class: fprb }
-# CHECK: - { id: 1, class: fprb }
-# CHECK: - { id: 2, class: fprb }
+# CHECK: - { id: 0, class: fprb, preferred-register: '' }
+# CHECK: - { id: 1, class: fprb, preferred-register: '' }
+# CHECK: - { id: 2, class: fprb, preferred-register: '' }
 
 registers:
   - { id: 0, class: _ }
@@ -553,9 +773,9 @@ legalized:       true
 regBankSelected: false
 selected:        false
 # CHECK: registers:
-# CHECK: - { id: 0, class: fprb }
-# CHECK: - { id: 1, class: fprb }
-# CHECK: - { id: 2, class: fprb }
+# CHECK: - { id: 0, class: fprb, preferred-register: '' }
+# CHECK: - { id: 1, class: fprb, preferred-register: '' }
+# CHECK: - { id: 2, class: fprb, preferred-register: '' }
 
 registers:
   - { id: 0, class: _ }
@@ -579,11 +799,11 @@ legalized:       true
 regBankSelected: false
 selected:        false
 # CHECK: registers:
-# CHECK: - { id: 0, class: gprb }
-# CHECK: - { id: 1, class: gprb }
-# CHECK: - { id: 2, class: fprb }
-# CHECK: - { id: 3, class: gprb }
-# CHECK: - { id: 4, class: gprb }
+# CHECK: - { id: 0, class: gprb, preferred-register: '' }
+# CHECK: - { id: 1, class: gprb, preferred-register: '' }
+# CHECK: - { id: 2, class: fprb, preferred-register: '' }
+# CHECK: - { id: 3, class: gprb, preferred-register: '' }
+# CHECK: - { id: 4, class: gprb, preferred-register: '' }
 
 registers:
   - { id: 0, class: _ }
@@ -597,9 +817,8 @@ body:             |
 
     %0(s32) = COPY %r0
     %1(s32) = COPY %r1
-    %2(s64) = G_SEQUENCE %0(s32), 0, %1(s32), 32
-    %3(s32) = G_EXTRACT %2(s64), 0
-    %4(s32) = G_EXTRACT %2(s64), 32
+    %2(s64) = G_MERGE_VALUES %0(s32), %1(s32)
+    %3(s32), %4(s32) = G_UNMERGE_VALUES %2(s64)
     %r0 = COPY %3(s32)
     %r1 = COPY %4(s32)
     BX_RET 14, _, implicit %r0, implicit %r1

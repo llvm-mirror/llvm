@@ -20,6 +20,7 @@
 #include "llvm/Support/Error.h"
 #include <cstdint>
 #include <type_traits>
+#include <utility>
 
 namespace llvm {
 
@@ -30,10 +31,21 @@ namespace llvm {
 /// although no methods are overridable.
 class BinaryStreamWriter {
 public:
-  // FIXME: We should be able to slice and drop_front etc on Writers / Readers.
-
   BinaryStreamWriter() = default;
-  explicit BinaryStreamWriter(WritableBinaryStreamRef Stream);
+  explicit BinaryStreamWriter(WritableBinaryStreamRef Ref);
+  explicit BinaryStreamWriter(WritableBinaryStream &Stream);
+  explicit BinaryStreamWriter(MutableArrayRef<uint8_t> Data,
+                              llvm::support::endianness Endian);
+
+  BinaryStreamWriter(const BinaryStreamWriter &Other)
+      : Stream(Other.Stream), Offset(Other.Offset) {}
+
+  BinaryStreamWriter &operator=(const BinaryStreamWriter &Other) {
+    Stream = Other.Stream;
+    Offset = Other.Offset;
+    return *this;
+  }
+
   virtual ~BinaryStreamWriter() {}
 
   /// Write the bytes specified in \p Buffer to the underlying stream.
@@ -151,6 +163,9 @@ public:
   template <typename T> Error writeArray(FixedStreamArray<T> Array) {
     return writeStreamRef(Array.getUnderlyingStream());
   }
+
+  /// Splits the Writer into two Writers at a given offset.
+  std::pair<BinaryStreamWriter, BinaryStreamWriter> split(uint32_t Off) const;
 
   void setOffset(uint32_t Off) { Offset = Off; }
   uint32_t getOffset() const { return Offset; }

@@ -13,7 +13,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/CodeGen/Passes.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallSet.h"
@@ -23,12 +22,14 @@
 #include "llvm/Analysis/CFG.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/LoopInfo.h"
+#include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/Analysis/ProfileSummaryInfo.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
-#include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/CodeGen/Analysis.h"
+#include "llvm/CodeGen/Passes.h"
+#include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
@@ -59,6 +60,7 @@
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/SimplifyLibCalls.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
+
 using namespace llvm;
 using namespace llvm::PatternMatch;
 
@@ -82,6 +84,12 @@ STATISTIC(NumRetsDup,    "Number of return instructions duplicated");
 STATISTIC(NumDbgValueMoved, "Number of debug value instructions moved");
 STATISTIC(NumSelectsExpanded, "Number of selects turned into branches");
 STATISTIC(NumStoreExtractExposed, "Number of store(extractelement) exposed");
+
+STATISTIC(NumMemCmpCalls, "Number of memcmp calls");
+STATISTIC(NumMemCmpNotConstant, "Number of memcmp calls without constant size");
+STATISTIC(NumMemCmpGreaterThanMax,
+          "Number of memcmp calls with size greater than max size");
+STATISTIC(NumMemCmpInlined, "Number of inlined memcmp calls");
 
 static cl::opt<bool> DisableBranchOpts(
   "disable-cgp-branch-opts", cl::Hidden, cl::init(false),
@@ -126,7 +134,7 @@ static cl::opt<bool> DisablePreheaderProtect(
     cl::desc("Disable protection against removing loop preheaders"));
 
 static cl::opt<bool> ProfileGuidedSectionPrefix(
-    "profile-guided-section-prefix", cl::Hidden, cl::init(true),
+    "profile-guided-section-prefix", cl::Hidden, cl::init(true), cl::ZeroOrMore,
     cl::desc("Use profile info to add section prefix for hot/cold functions"));
 
 static cl::opt<unsigned> FreqRatioToSkipMerge(
@@ -142,6 +150,11 @@ static cl::opt<bool>
 EnableTypePromotionMerge("cgp-type-promotion-merge", cl::Hidden,
     cl::desc("Enable merging of redundant sexts when one is dominating"
     " the other."), cl::init(true));
+
+static cl::opt<unsigned> MemCmpNumLoadsPerBlock(
+    "memcmp-num-loads-per-block", cl::Hidden, cl::init(1),
+    cl::desc("The number of loads per basic block for inline expansion of "
+             "memcmp that is only being compared against zero."));
 
 namespace {
 typedef SmallPtrSet<Instruction *, 16> SetOfInstrs;
@@ -197,10 +210,11 @@ class TypePromotionTransaction;
 
   public:
     static char ID; // Pass identification, replacement for typeid
-    explicit CodeGenPrepare(const TargetMachine *TM = nullptr)
-        : FunctionPass(ID), TM(TM), TLI(nullptr), TTI(nullptr), DL(nullptr) {
-        initializeCodeGenPreparePass(*PassRegistry::getPassRegistry());
-      }
+    CodeGenPrepare()
+        : FunctionPass(ID), TM(nullptr), TLI(nullptr), TTI(nullptr),
+          DL(nullptr) {
+      initializeCodeGenPreparePass(*PassRegistry::getPassRegistry());
+    }
     bool runOnFunction(Function &F) override;
 
     StringRef getPassName() const override { return "CodeGen Prepare"; }
@@ -221,12 +235,12 @@ class TypePromotionTransaction;
     void eliminateMostlyEmptyBlock(BasicBlock *BB);
     bool isMergingEmptyBlockProfitable(BasicBlock *BB, BasicBlock *DestBB,
                                        bool isPreheader);
-    bool optimizeBlock(BasicBlock &BB, bool& ModifiedDT);
-    bool optimizeInst(Instruction *I, bool& ModifiedDT);
+    bool optimizeBlock(BasicBlock &BB, bool &ModifiedDT);
+    bool optimizeInst(Instruction *I, bool &ModifiedDT);
     bool optimizeMemoryInst(Instruction *I, Value *Addr,
                             Type *AccessTy, unsigned AS);
     bool optimizeInlineAsmInst(CallInst *CS);
-    bool optimizeCallInst(CallInst *CI, bool& ModifiedDT);
+    bool optimizeCallInst(CallInst *CI, bool &ModifiedDT);
     bool optimizeExt(Instruction *&I);
     bool optimizeExtUses(Instruction *I);
     bool optimizeLoadExt(LoadInst *I);
@@ -255,15 +269,13 @@ class TypePromotionTransaction;
 }
 
 char CodeGenPrepare::ID = 0;
-INITIALIZE_TM_PASS_BEGIN(CodeGenPrepare, "codegenprepare",
-                         "Optimize for code generation", false, false)
+INITIALIZE_PASS_BEGIN(CodeGenPrepare, DEBUG_TYPE,
+                      "Optimize for code generation", false, false)
 INITIALIZE_PASS_DEPENDENCY(ProfileSummaryInfoWrapperPass)
-INITIALIZE_TM_PASS_END(CodeGenPrepare, "codegenprepare",
-                       "Optimize for code generation", false, false)
+INITIALIZE_PASS_END(CodeGenPrepare, DEBUG_TYPE,
+                    "Optimize for code generation", false, false)
 
-FunctionPass *llvm::createCodeGenPreparePass(const TargetMachine *TM) {
-  return new CodeGenPrepare(TM);
-}
+FunctionPass *llvm::createCodeGenPreparePass() { return new CodeGenPrepare(); }
 
 bool CodeGenPrepare::runOnFunction(Function &F) {
   if (skipFunction(F))
@@ -279,7 +291,8 @@ bool CodeGenPrepare::runOnFunction(Function &F) {
   BPI.reset();
 
   ModifiedDT = false;
-  if (TM) {
+  if (auto *TPC = getAnalysisIfAvailable<TargetPassConfig>()) {
+    TM = &TPC->getTM<TargetMachine>();
     SubtargetInfo = TM->getSubtargetImpl(F);
     TLI = SubtargetInfo->getTargetLowering();
     TRI = SubtargetInfo->getRegisterInfo();
@@ -295,7 +308,7 @@ bool CodeGenPrepare::runOnFunction(Function &F) {
     if (PSI->isFunctionHotInCallGraph(&F))
       F.setSectionPrefix(".hot");
     else if (PSI->isFunctionColdInCallGraph(&F))
-      F.setSectionPrefix(".cold");
+      F.setSectionPrefix(".unlikely");
   }
 
   /// This optimization identifies DIV instructions that can be
@@ -349,7 +362,7 @@ bool CodeGenPrepare::runOnFunction(Function &F) {
 
     // Really free removed instructions during promotion.
     for (Instruction *I : RemovedInsts)
-      delete I;
+      I->deleteValue();
 
     EverMadeChange |= MadeChange;
   }
@@ -1549,519 +1562,6 @@ static bool OptimizeExtractBits(BinaryOperator *ShiftI, ConstantInt *CI,
   return MadeChange;
 }
 
-// Translate a masked load intrinsic like
-// <16 x i32 > @llvm.masked.load( <16 x i32>* %addr, i32 align,
-//                               <16 x i1> %mask, <16 x i32> %passthru)
-// to a chain of basic blocks, with loading element one-by-one if
-// the appropriate mask bit is set
-//
-//  %1 = bitcast i8* %addr to i32*
-//  %2 = extractelement <16 x i1> %mask, i32 0
-//  %3 = icmp eq i1 %2, true
-//  br i1 %3, label %cond.load, label %else
-//
-//cond.load:                                        ; preds = %0
-//  %4 = getelementptr i32* %1, i32 0
-//  %5 = load i32* %4
-//  %6 = insertelement <16 x i32> undef, i32 %5, i32 0
-//  br label %else
-//
-//else:                                             ; preds = %0, %cond.load
-//  %res.phi.else = phi <16 x i32> [ %6, %cond.load ], [ undef, %0 ]
-//  %7 = extractelement <16 x i1> %mask, i32 1
-//  %8 = icmp eq i1 %7, true
-//  br i1 %8, label %cond.load1, label %else2
-//
-//cond.load1:                                       ; preds = %else
-//  %9 = getelementptr i32* %1, i32 1
-//  %10 = load i32* %9
-//  %11 = insertelement <16 x i32> %res.phi.else, i32 %10, i32 1
-//  br label %else2
-//
-//else2:                                            ; preds = %else, %cond.load1
-//  %res.phi.else3 = phi <16 x i32> [ %11, %cond.load1 ], [ %res.phi.else, %else ]
-//  %12 = extractelement <16 x i1> %mask, i32 2
-//  %13 = icmp eq i1 %12, true
-//  br i1 %13, label %cond.load4, label %else5
-//
-static void scalarizeMaskedLoad(CallInst *CI) {
-  Value *Ptr  = CI->getArgOperand(0);
-  Value *Alignment = CI->getArgOperand(1);
-  Value *Mask = CI->getArgOperand(2);
-  Value *Src0 = CI->getArgOperand(3);
-
-  unsigned AlignVal = cast<ConstantInt>(Alignment)->getZExtValue();
-  VectorType *VecType = dyn_cast<VectorType>(CI->getType());
-  assert(VecType && "Unexpected return type of masked load intrinsic");
-
-  Type *EltTy = CI->getType()->getVectorElementType();
-
-  IRBuilder<> Builder(CI->getContext());
-  Instruction *InsertPt = CI;
-  BasicBlock *IfBlock = CI->getParent();
-  BasicBlock *CondBlock = nullptr;
-  BasicBlock *PrevIfBlock = CI->getParent();
-
-  Builder.SetInsertPoint(InsertPt);
-  Builder.SetCurrentDebugLocation(CI->getDebugLoc());
-
-  // Short-cut if the mask is all-true.
-  bool IsAllOnesMask = isa<Constant>(Mask) &&
-    cast<Constant>(Mask)->isAllOnesValue();
-
-  if (IsAllOnesMask) {
-    Value *NewI = Builder.CreateAlignedLoad(Ptr, AlignVal);
-    CI->replaceAllUsesWith(NewI);
-    CI->eraseFromParent();
-    return;
-  }
-
-  // Adjust alignment for the scalar instruction.
-  AlignVal = std::min(AlignVal, VecType->getScalarSizeInBits()/8);
-  // Bitcast %addr fron i8* to EltTy*
-  Type *NewPtrType =
-    EltTy->getPointerTo(cast<PointerType>(Ptr->getType())->getAddressSpace());
-  Value *FirstEltPtr = Builder.CreateBitCast(Ptr, NewPtrType);
-  unsigned VectorWidth = VecType->getNumElements();
-
-  Value *UndefVal = UndefValue::get(VecType);
-
-  // The result vector
-  Value *VResult = UndefVal;
-
-  if (isa<ConstantVector>(Mask)) {
-    for (unsigned Idx = 0; Idx < VectorWidth; ++Idx) {
-      if (cast<ConstantVector>(Mask)->getOperand(Idx)->isNullValue())
-          continue;
-      Value *Gep =
-          Builder.CreateInBoundsGEP(EltTy, FirstEltPtr, Builder.getInt32(Idx));
-      LoadInst* Load = Builder.CreateAlignedLoad(Gep, AlignVal);
-      VResult = Builder.CreateInsertElement(VResult, Load,
-                                            Builder.getInt32(Idx));
-    }
-    Value *NewI = Builder.CreateSelect(Mask, VResult, Src0);
-    CI->replaceAllUsesWith(NewI);
-    CI->eraseFromParent();
-    return;
-  }
-
-  PHINode *Phi = nullptr;
-  Value *PrevPhi = UndefVal;
-
-  for (unsigned Idx = 0; Idx < VectorWidth; ++Idx) {
-
-    // Fill the "else" block, created in the previous iteration
-    //
-    //  %res.phi.else3 = phi <16 x i32> [ %11, %cond.load1 ], [ %res.phi.else, %else ]
-    //  %mask_1 = extractelement <16 x i1> %mask, i32 Idx
-    //  %to_load = icmp eq i1 %mask_1, true
-    //  br i1 %to_load, label %cond.load, label %else
-    //
-    if (Idx > 0) {
-      Phi = Builder.CreatePHI(VecType, 2, "res.phi.else");
-      Phi->addIncoming(VResult, CondBlock);
-      Phi->addIncoming(PrevPhi, PrevIfBlock);
-      PrevPhi = Phi;
-      VResult = Phi;
-    }
-
-    Value *Predicate = Builder.CreateExtractElement(Mask, Builder.getInt32(Idx));
-    Value *Cmp = Builder.CreateICmp(ICmpInst::ICMP_EQ, Predicate,
-                                    ConstantInt::get(Predicate->getType(), 1));
-
-    // Create "cond" block
-    //
-    //  %EltAddr = getelementptr i32* %1, i32 0
-    //  %Elt = load i32* %EltAddr
-    //  VResult = insertelement <16 x i32> VResult, i32 %Elt, i32 Idx
-    //
-    CondBlock = IfBlock->splitBasicBlock(InsertPt->getIterator(), "cond.load");
-    Builder.SetInsertPoint(InsertPt);
-
-    Value *Gep =
-        Builder.CreateInBoundsGEP(EltTy, FirstEltPtr, Builder.getInt32(Idx));
-    LoadInst *Load = Builder.CreateAlignedLoad(Gep, AlignVal);
-    VResult = Builder.CreateInsertElement(VResult, Load, Builder.getInt32(Idx));
-
-    // Create "else" block, fill it in the next iteration
-    BasicBlock *NewIfBlock =
-        CondBlock->splitBasicBlock(InsertPt->getIterator(), "else");
-    Builder.SetInsertPoint(InsertPt);
-    Instruction *OldBr = IfBlock->getTerminator();
-    BranchInst::Create(CondBlock, NewIfBlock, Cmp, OldBr);
-    OldBr->eraseFromParent();
-    PrevIfBlock = IfBlock;
-    IfBlock = NewIfBlock;
-  }
-
-  Phi = Builder.CreatePHI(VecType, 2, "res.phi.select");
-  Phi->addIncoming(VResult, CondBlock);
-  Phi->addIncoming(PrevPhi, PrevIfBlock);
-  Value *NewI = Builder.CreateSelect(Mask, Phi, Src0);
-  CI->replaceAllUsesWith(NewI);
-  CI->eraseFromParent();
-}
-
-// Translate a masked store intrinsic, like
-// void @llvm.masked.store(<16 x i32> %src, <16 x i32>* %addr, i32 align,
-//                               <16 x i1> %mask)
-// to a chain of basic blocks, that stores element one-by-one if
-// the appropriate mask bit is set
-//
-//   %1 = bitcast i8* %addr to i32*
-//   %2 = extractelement <16 x i1> %mask, i32 0
-//   %3 = icmp eq i1 %2, true
-//   br i1 %3, label %cond.store, label %else
-//
-// cond.store:                                       ; preds = %0
-//   %4 = extractelement <16 x i32> %val, i32 0
-//   %5 = getelementptr i32* %1, i32 0
-//   store i32 %4, i32* %5
-//   br label %else
-//
-// else:                                             ; preds = %0, %cond.store
-//   %6 = extractelement <16 x i1> %mask, i32 1
-//   %7 = icmp eq i1 %6, true
-//   br i1 %7, label %cond.store1, label %else2
-//
-// cond.store1:                                      ; preds = %else
-//   %8 = extractelement <16 x i32> %val, i32 1
-//   %9 = getelementptr i32* %1, i32 1
-//   store i32 %8, i32* %9
-//   br label %else2
-//   . . .
-static void scalarizeMaskedStore(CallInst *CI) {
-  Value *Src = CI->getArgOperand(0);
-  Value *Ptr  = CI->getArgOperand(1);
-  Value *Alignment = CI->getArgOperand(2);
-  Value *Mask = CI->getArgOperand(3);
-
-  unsigned AlignVal = cast<ConstantInt>(Alignment)->getZExtValue();
-  VectorType *VecType = dyn_cast<VectorType>(Src->getType());
-  assert(VecType && "Unexpected data type in masked store intrinsic");
-
-  Type *EltTy = VecType->getElementType();
-
-  IRBuilder<> Builder(CI->getContext());
-  Instruction *InsertPt = CI;
-  BasicBlock *IfBlock = CI->getParent();
-  Builder.SetInsertPoint(InsertPt);
-  Builder.SetCurrentDebugLocation(CI->getDebugLoc());
-
-  // Short-cut if the mask is all-true.
-  bool IsAllOnesMask = isa<Constant>(Mask) &&
-    cast<Constant>(Mask)->isAllOnesValue();
-
-  if (IsAllOnesMask) {
-    Builder.CreateAlignedStore(Src, Ptr, AlignVal);
-    CI->eraseFromParent();
-    return;
-  }
-
-  // Adjust alignment for the scalar instruction.
-  AlignVal = std::max(AlignVal, VecType->getScalarSizeInBits()/8);
-  // Bitcast %addr fron i8* to EltTy*
-  Type *NewPtrType =
-    EltTy->getPointerTo(cast<PointerType>(Ptr->getType())->getAddressSpace());
-  Value *FirstEltPtr = Builder.CreateBitCast(Ptr, NewPtrType);
-  unsigned VectorWidth = VecType->getNumElements();
-
-  if (isa<ConstantVector>(Mask)) {
-    for (unsigned Idx = 0; Idx < VectorWidth; ++Idx) {
-      if (cast<ConstantVector>(Mask)->getOperand(Idx)->isNullValue())
-          continue;
-      Value *OneElt = Builder.CreateExtractElement(Src, Builder.getInt32(Idx));
-      Value *Gep =
-          Builder.CreateInBoundsGEP(EltTy, FirstEltPtr, Builder.getInt32(Idx));
-      Builder.CreateAlignedStore(OneElt, Gep, AlignVal);
-    }
-    CI->eraseFromParent();
-    return;
-  }
-
-  for (unsigned Idx = 0; Idx < VectorWidth; ++Idx) {
-
-    // Fill the "else" block, created in the previous iteration
-    //
-    //  %mask_1 = extractelement <16 x i1> %mask, i32 Idx
-    //  %to_store = icmp eq i1 %mask_1, true
-    //  br i1 %to_store, label %cond.store, label %else
-    //
-    Value *Predicate = Builder.CreateExtractElement(Mask, Builder.getInt32(Idx));
-    Value *Cmp = Builder.CreateICmp(ICmpInst::ICMP_EQ, Predicate,
-                                    ConstantInt::get(Predicate->getType(), 1));
-
-    // Create "cond" block
-    //
-    //  %OneElt = extractelement <16 x i32> %Src, i32 Idx
-    //  %EltAddr = getelementptr i32* %1, i32 0
-    //  %store i32 %OneElt, i32* %EltAddr
-    //
-    BasicBlock *CondBlock =
-        IfBlock->splitBasicBlock(InsertPt->getIterator(), "cond.store");
-    Builder.SetInsertPoint(InsertPt);
-
-    Value *OneElt = Builder.CreateExtractElement(Src, Builder.getInt32(Idx));
-    Value *Gep =
-        Builder.CreateInBoundsGEP(EltTy, FirstEltPtr, Builder.getInt32(Idx));
-    Builder.CreateAlignedStore(OneElt, Gep, AlignVal);
-
-    // Create "else" block, fill it in the next iteration
-    BasicBlock *NewIfBlock =
-        CondBlock->splitBasicBlock(InsertPt->getIterator(), "else");
-    Builder.SetInsertPoint(InsertPt);
-    Instruction *OldBr = IfBlock->getTerminator();
-    BranchInst::Create(CondBlock, NewIfBlock, Cmp, OldBr);
-    OldBr->eraseFromParent();
-    IfBlock = NewIfBlock;
-  }
-  CI->eraseFromParent();
-}
-
-// Translate a masked gather intrinsic like
-// <16 x i32 > @llvm.masked.gather.v16i32( <16 x i32*> %Ptrs, i32 4,
-//                               <16 x i1> %Mask, <16 x i32> %Src)
-// to a chain of basic blocks, with loading element one-by-one if
-// the appropriate mask bit is set
-//
-// % Ptrs = getelementptr i32, i32* %base, <16 x i64> %ind
-// % Mask0 = extractelement <16 x i1> %Mask, i32 0
-// % ToLoad0 = icmp eq i1 % Mask0, true
-// br i1 % ToLoad0, label %cond.load, label %else
-//
-// cond.load:
-// % Ptr0 = extractelement <16 x i32*> %Ptrs, i32 0
-// % Load0 = load i32, i32* % Ptr0, align 4
-// % Res0 = insertelement <16 x i32> undef, i32 % Load0, i32 0
-// br label %else
-//
-// else:
-// %res.phi.else = phi <16 x i32>[% Res0, %cond.load], [undef, % 0]
-// % Mask1 = extractelement <16 x i1> %Mask, i32 1
-// % ToLoad1 = icmp eq i1 % Mask1, true
-// br i1 % ToLoad1, label %cond.load1, label %else2
-//
-// cond.load1:
-// % Ptr1 = extractelement <16 x i32*> %Ptrs, i32 1
-// % Load1 = load i32, i32* % Ptr1, align 4
-// % Res1 = insertelement <16 x i32> %res.phi.else, i32 % Load1, i32 1
-// br label %else2
-// . . .
-// % Result = select <16 x i1> %Mask, <16 x i32> %res.phi.select, <16 x i32> %Src
-// ret <16 x i32> %Result
-static void scalarizeMaskedGather(CallInst *CI) {
-  Value *Ptrs = CI->getArgOperand(0);
-  Value *Alignment = CI->getArgOperand(1);
-  Value *Mask = CI->getArgOperand(2);
-  Value *Src0 = CI->getArgOperand(3);
-
-  VectorType *VecType = dyn_cast<VectorType>(CI->getType());
-
-  assert(VecType && "Unexpected return type of masked load intrinsic");
-
-  IRBuilder<> Builder(CI->getContext());
-  Instruction *InsertPt = CI;
-  BasicBlock *IfBlock = CI->getParent();
-  BasicBlock *CondBlock = nullptr;
-  BasicBlock *PrevIfBlock = CI->getParent();
-  Builder.SetInsertPoint(InsertPt);
-  unsigned AlignVal = cast<ConstantInt>(Alignment)->getZExtValue();
-
-  Builder.SetCurrentDebugLocation(CI->getDebugLoc());
-
-  Value *UndefVal = UndefValue::get(VecType);
-
-  // The result vector
-  Value *VResult = UndefVal;
-  unsigned VectorWidth = VecType->getNumElements();
-
-  // Shorten the way if the mask is a vector of constants.
-  bool IsConstMask = isa<ConstantVector>(Mask);
-
-  if (IsConstMask) {
-    for (unsigned Idx = 0; Idx < VectorWidth; ++Idx) {
-      if (cast<ConstantVector>(Mask)->getOperand(Idx)->isNullValue())
-        continue;
-      Value *Ptr = Builder.CreateExtractElement(Ptrs, Builder.getInt32(Idx),
-                                                "Ptr" + Twine(Idx));
-      LoadInst *Load = Builder.CreateAlignedLoad(Ptr, AlignVal,
-                                                 "Load" + Twine(Idx));
-      VResult = Builder.CreateInsertElement(VResult, Load,
-                                            Builder.getInt32(Idx),
-                                            "Res" + Twine(Idx));
-    }
-    Value *NewI = Builder.CreateSelect(Mask, VResult, Src0);
-    CI->replaceAllUsesWith(NewI);
-    CI->eraseFromParent();
-    return;
-  }
-
-  PHINode *Phi = nullptr;
-  Value *PrevPhi = UndefVal;
-
-  for (unsigned Idx = 0; Idx < VectorWidth; ++Idx) {
-
-    // Fill the "else" block, created in the previous iteration
-    //
-    //  %Mask1 = extractelement <16 x i1> %Mask, i32 1
-    //  %ToLoad1 = icmp eq i1 %Mask1, true
-    //  br i1 %ToLoad1, label %cond.load, label %else
-    //
-    if (Idx > 0) {
-      Phi = Builder.CreatePHI(VecType, 2, "res.phi.else");
-      Phi->addIncoming(VResult, CondBlock);
-      Phi->addIncoming(PrevPhi, PrevIfBlock);
-      PrevPhi = Phi;
-      VResult = Phi;
-    }
-
-    Value *Predicate = Builder.CreateExtractElement(Mask,
-                                                    Builder.getInt32(Idx),
-                                                    "Mask" + Twine(Idx));
-    Value *Cmp = Builder.CreateICmp(ICmpInst::ICMP_EQ, Predicate,
-                                    ConstantInt::get(Predicate->getType(), 1),
-                                    "ToLoad" + Twine(Idx));
-
-    // Create "cond" block
-    //
-    //  %EltAddr = getelementptr i32* %1, i32 0
-    //  %Elt = load i32* %EltAddr
-    //  VResult = insertelement <16 x i32> VResult, i32 %Elt, i32 Idx
-    //
-    CondBlock = IfBlock->splitBasicBlock(InsertPt, "cond.load");
-    Builder.SetInsertPoint(InsertPt);
-
-    Value *Ptr = Builder.CreateExtractElement(Ptrs, Builder.getInt32(Idx),
-                                              "Ptr" + Twine(Idx));
-    LoadInst *Load = Builder.CreateAlignedLoad(Ptr, AlignVal,
-                                               "Load" + Twine(Idx));
-    VResult = Builder.CreateInsertElement(VResult, Load, Builder.getInt32(Idx),
-                                          "Res" + Twine(Idx));
-
-    // Create "else" block, fill it in the next iteration
-    BasicBlock *NewIfBlock = CondBlock->splitBasicBlock(InsertPt, "else");
-    Builder.SetInsertPoint(InsertPt);
-    Instruction *OldBr = IfBlock->getTerminator();
-    BranchInst::Create(CondBlock, NewIfBlock, Cmp, OldBr);
-    OldBr->eraseFromParent();
-    PrevIfBlock = IfBlock;
-    IfBlock = NewIfBlock;
-  }
-
-  Phi = Builder.CreatePHI(VecType, 2, "res.phi.select");
-  Phi->addIncoming(VResult, CondBlock);
-  Phi->addIncoming(PrevPhi, PrevIfBlock);
-  Value *NewI = Builder.CreateSelect(Mask, Phi, Src0);
-  CI->replaceAllUsesWith(NewI);
-  CI->eraseFromParent();
-}
-
-// Translate a masked scatter intrinsic, like
-// void @llvm.masked.scatter.v16i32(<16 x i32> %Src, <16 x i32*>* %Ptrs, i32 4,
-//                                  <16 x i1> %Mask)
-// to a chain of basic blocks, that stores element one-by-one if
-// the appropriate mask bit is set.
-//
-// % Ptrs = getelementptr i32, i32* %ptr, <16 x i64> %ind
-// % Mask0 = extractelement <16 x i1> % Mask, i32 0
-// % ToStore0 = icmp eq i1 % Mask0, true
-// br i1 %ToStore0, label %cond.store, label %else
-//
-// cond.store:
-// % Elt0 = extractelement <16 x i32> %Src, i32 0
-// % Ptr0 = extractelement <16 x i32*> %Ptrs, i32 0
-// store i32 %Elt0, i32* % Ptr0, align 4
-// br label %else
-//
-// else:
-// % Mask1 = extractelement <16 x i1> % Mask, i32 1
-// % ToStore1 = icmp eq i1 % Mask1, true
-// br i1 % ToStore1, label %cond.store1, label %else2
-//
-// cond.store1:
-// % Elt1 = extractelement <16 x i32> %Src, i32 1
-// % Ptr1 = extractelement <16 x i32*> %Ptrs, i32 1
-// store i32 % Elt1, i32* % Ptr1, align 4
-// br label %else2
-//   . . .
-static void scalarizeMaskedScatter(CallInst *CI) {
-  Value *Src = CI->getArgOperand(0);
-  Value *Ptrs = CI->getArgOperand(1);
-  Value *Alignment = CI->getArgOperand(2);
-  Value *Mask = CI->getArgOperand(3);
-
-  assert(isa<VectorType>(Src->getType()) &&
-         "Unexpected data type in masked scatter intrinsic");
-  assert(isa<VectorType>(Ptrs->getType()) &&
-         isa<PointerType>(Ptrs->getType()->getVectorElementType()) &&
-         "Vector of pointers is expected in masked scatter intrinsic");
-
-  IRBuilder<> Builder(CI->getContext());
-  Instruction *InsertPt = CI;
-  BasicBlock *IfBlock = CI->getParent();
-  Builder.SetInsertPoint(InsertPt);
-  Builder.SetCurrentDebugLocation(CI->getDebugLoc());
-
-  unsigned AlignVal = cast<ConstantInt>(Alignment)->getZExtValue();
-  unsigned VectorWidth = Src->getType()->getVectorNumElements();
-
-  // Shorten the way if the mask is a vector of constants.
-  bool IsConstMask = isa<ConstantVector>(Mask);
-
-  if (IsConstMask) {
-    for (unsigned Idx = 0; Idx < VectorWidth; ++Idx) {
-      if (cast<ConstantVector>(Mask)->getOperand(Idx)->isNullValue())
-        continue;
-      Value *OneElt = Builder.CreateExtractElement(Src, Builder.getInt32(Idx),
-                                                   "Elt" + Twine(Idx));
-      Value *Ptr = Builder.CreateExtractElement(Ptrs, Builder.getInt32(Idx),
-                                                "Ptr" + Twine(Idx));
-      Builder.CreateAlignedStore(OneElt, Ptr, AlignVal);
-    }
-    CI->eraseFromParent();
-    return;
-  }
-  for (unsigned Idx = 0; Idx < VectorWidth; ++Idx) {
-    // Fill the "else" block, created in the previous iteration
-    //
-    //  % Mask1 = extractelement <16 x i1> % Mask, i32 Idx
-    //  % ToStore = icmp eq i1 % Mask1, true
-    //  br i1 % ToStore, label %cond.store, label %else
-    //
-    Value *Predicate = Builder.CreateExtractElement(Mask,
-                                                    Builder.getInt32(Idx),
-                                                    "Mask" + Twine(Idx));
-    Value *Cmp =
-       Builder.CreateICmp(ICmpInst::ICMP_EQ, Predicate,
-                          ConstantInt::get(Predicate->getType(), 1),
-                          "ToStore" + Twine(Idx));
-
-    // Create "cond" block
-    //
-    //  % Elt1 = extractelement <16 x i32> %Src, i32 1
-    //  % Ptr1 = extractelement <16 x i32*> %Ptrs, i32 1
-    //  %store i32 % Elt1, i32* % Ptr1
-    //
-    BasicBlock *CondBlock = IfBlock->splitBasicBlock(InsertPt, "cond.store");
-    Builder.SetInsertPoint(InsertPt);
-
-    Value *OneElt = Builder.CreateExtractElement(Src, Builder.getInt32(Idx),
-                                                 "Elt" + Twine(Idx));
-    Value *Ptr = Builder.CreateExtractElement(Ptrs, Builder.getInt32(Idx),
-                                              "Ptr" + Twine(Idx));
-    Builder.CreateAlignedStore(OneElt, Ptr, AlignVal);
-
-    // Create "else" block, fill it in the next iteration
-    BasicBlock *NewIfBlock = CondBlock->splitBasicBlock(InsertPt, "else");
-    Builder.SetInsertPoint(InsertPt);
-    Instruction *OldBr = IfBlock->getTerminator();
-    BranchInst::Create(CondBlock, NewIfBlock, Cmp, OldBr);
-    OldBr->eraseFromParent();
-    IfBlock = NewIfBlock;
-  }
-  CI->eraseFromParent();
-}
-
 /// If counting leading or trailing zeros is an expensive operation and a zero
 /// input is defined, add a check for zero to avoid calling the intrinsic.
 ///
@@ -2141,7 +1641,631 @@ static bool despeculateCountZeros(IntrinsicInst *CountZeros,
   return true;
 }
 
-bool CodeGenPrepare::optimizeCallInst(CallInst *CI, bool& ModifiedDT) {
+// This class provides helper functions to expand a memcmp library call into an
+// inline expansion.
+class MemCmpExpansion {
+  struct ResultBlock {
+    BasicBlock *BB;
+    PHINode *PhiSrc1;
+    PHINode *PhiSrc2;
+    ResultBlock();
+  };
+
+  CallInst *CI;
+  ResultBlock ResBlock;
+  unsigned MaxLoadSize;
+  unsigned NumBlocks;
+  unsigned NumBlocksNonOneByte;
+  unsigned NumLoadsPerBlock;
+  std::vector<BasicBlock *> LoadCmpBlocks;
+  BasicBlock *EndBlock;
+  PHINode *PhiRes;
+  bool IsUsedForZeroCmp;
+  const DataLayout &DL;
+
+  int calculateNumBlocks(unsigned Size);
+  void createLoadCmpBlocks();
+  void createResultBlock();
+  void setupResultBlockPHINodes();
+  void setupEndBlockPHINodes();
+  void emitLoadCompareBlock(unsigned Index, int LoadSize, int GEPIndex);
+  Value *getCompareLoadPairs(unsigned Index, unsigned Size,
+                             unsigned &NumBytesProcessed, IRBuilder<> &Builder);
+  void emitLoadCompareBlockMultipleLoads(unsigned Index, unsigned Size,
+                                         unsigned &NumBytesProcessed);
+  void emitLoadCompareByteBlock(unsigned Index, int GEPIndex);
+  void emitMemCmpResultBlock();
+  Value *getMemCmpExpansionZeroCase(unsigned Size);
+  Value *getMemCmpEqZeroOneBlock(unsigned Size);
+  unsigned getLoadSize(unsigned Size);
+  unsigned getNumLoads(unsigned Size);
+
+public:
+  MemCmpExpansion(CallInst *CI, uint64_t Size, unsigned MaxLoadSize,
+                  unsigned NumLoadsPerBlock, const DataLayout &DL);
+  Value *getMemCmpExpansion(uint64_t Size);
+};
+
+MemCmpExpansion::ResultBlock::ResultBlock()
+    : BB(nullptr), PhiSrc1(nullptr), PhiSrc2(nullptr) {}
+
+// Initialize the basic block structure required for expansion of memcmp call
+// with given maximum load size and memcmp size parameter.
+// This structure includes:
+// 1. A list of load compare blocks - LoadCmpBlocks.
+// 2. An EndBlock, split from original instruction point, which is the block to
+// return from.
+// 3. ResultBlock, block to branch to for early exit when a
+// LoadCmpBlock finds a difference.
+MemCmpExpansion::MemCmpExpansion(CallInst *CI, uint64_t Size,
+                                 unsigned MaxLoadSize, unsigned LoadsPerBlock,
+                                 const DataLayout &TheDataLayout)
+    : CI(CI), MaxLoadSize(MaxLoadSize), NumLoadsPerBlock(LoadsPerBlock),
+      DL(TheDataLayout) {
+
+  // A memcmp with zero-comparison with only one block of load and compare does
+  // not need to set up any extra blocks. This case could be handled in the DAG,
+  // but since we have all of the machinery to flexibly expand any memcpy here,
+  // we choose to handle this case too to avoid fragmented lowering.
+  IsUsedForZeroCmp = isOnlyUsedInZeroEqualityComparison(CI);
+  NumBlocks = calculateNumBlocks(Size);
+  if (!IsUsedForZeroCmp || NumBlocks != 1) {
+    BasicBlock *StartBlock = CI->getParent();
+    EndBlock = StartBlock->splitBasicBlock(CI, "endblock");
+    setupEndBlockPHINodes();
+    createResultBlock();
+
+    // If return value of memcmp is not used in a zero equality, we need to
+    // calculate which source was larger. The calculation requires the
+    // two loaded source values of each load compare block.
+    // These will be saved in the phi nodes created by setupResultBlockPHINodes.
+    if (!IsUsedForZeroCmp)
+      setupResultBlockPHINodes();
+
+    // Create the number of required load compare basic blocks.
+    createLoadCmpBlocks();
+
+    // Update the terminator added by splitBasicBlock to branch to the first
+    // LoadCmpBlock.
+    StartBlock->getTerminator()->setSuccessor(0, LoadCmpBlocks[0]);
+  }
+
+  IRBuilder<> Builder(CI->getContext());
+  Builder.SetCurrentDebugLocation(CI->getDebugLoc());
+}
+
+void MemCmpExpansion::createLoadCmpBlocks() {
+  for (unsigned i = 0; i < NumBlocks; i++) {
+    BasicBlock *BB = BasicBlock::Create(CI->getContext(), "loadbb",
+                                        EndBlock->getParent(), EndBlock);
+    LoadCmpBlocks.push_back(BB);
+  }
+}
+
+void MemCmpExpansion::createResultBlock() {
+  ResBlock.BB = BasicBlock::Create(CI->getContext(), "res_block",
+                                   EndBlock->getParent(), EndBlock);
+}
+
+// This function creates the IR instructions for loading and comparing 1 byte.
+// It loads 1 byte from each source of the memcmp parameters with the given
+// GEPIndex. It then subtracts the two loaded values and adds this result to the
+// final phi node for selecting the memcmp result.
+void MemCmpExpansion::emitLoadCompareByteBlock(unsigned Index, int GEPIndex) {
+  IRBuilder<> Builder(CI->getContext());
+
+  Value *Source1 = CI->getArgOperand(0);
+  Value *Source2 = CI->getArgOperand(1);
+
+  Builder.SetInsertPoint(LoadCmpBlocks[Index]);
+  Type *LoadSizeType = Type::getInt8Ty(CI->getContext());
+  // Cast source to LoadSizeType*.
+  if (Source1->getType() != LoadSizeType)
+    Source1 = Builder.CreateBitCast(Source1, LoadSizeType->getPointerTo());
+  if (Source2->getType() != LoadSizeType)
+    Source2 = Builder.CreateBitCast(Source2, LoadSizeType->getPointerTo());
+
+  // Get the base address using the GEPIndex.
+  if (GEPIndex != 0) {
+    Source1 = Builder.CreateGEP(LoadSizeType, Source1,
+                                ConstantInt::get(LoadSizeType, GEPIndex));
+    Source2 = Builder.CreateGEP(LoadSizeType, Source2,
+                                ConstantInt::get(LoadSizeType, GEPIndex));
+  }
+
+  Value *LoadSrc1 = Builder.CreateLoad(LoadSizeType, Source1);
+  Value *LoadSrc2 = Builder.CreateLoad(LoadSizeType, Source2);
+
+  LoadSrc1 = Builder.CreateZExt(LoadSrc1, Type::getInt32Ty(CI->getContext()));
+  LoadSrc2 = Builder.CreateZExt(LoadSrc2, Type::getInt32Ty(CI->getContext()));
+  Value *Diff = Builder.CreateSub(LoadSrc1, LoadSrc2);
+
+  PhiRes->addIncoming(Diff, LoadCmpBlocks[Index]);
+
+  if (Index < (LoadCmpBlocks.size() - 1)) {
+    // Early exit branch if difference found to EndBlock. Otherwise, continue to
+    // next LoadCmpBlock,
+    Value *Cmp = Builder.CreateICmp(ICmpInst::ICMP_NE, Diff,
+                                    ConstantInt::get(Diff->getType(), 0));
+    BranchInst *CmpBr =
+        BranchInst::Create(EndBlock, LoadCmpBlocks[Index + 1], Cmp);
+    Builder.Insert(CmpBr);
+  } else {
+    // The last block has an unconditional branch to EndBlock.
+    BranchInst *CmpBr = BranchInst::Create(EndBlock);
+    Builder.Insert(CmpBr);
+  }
+}
+
+unsigned MemCmpExpansion::getNumLoads(unsigned Size) {
+  return (Size / MaxLoadSize) + countPopulation(Size % MaxLoadSize);
+}
+
+unsigned MemCmpExpansion::getLoadSize(unsigned Size) {
+  return MinAlign(PowerOf2Floor(Size), MaxLoadSize);
+}
+
+/// Generate an equality comparison for one or more pairs of loaded values.
+/// This is used in the case where the memcmp() call is compared equal or not
+/// equal to zero.
+Value *MemCmpExpansion::getCompareLoadPairs(unsigned Index, unsigned Size,
+                                            unsigned &NumBytesProcessed,
+                                            IRBuilder<> &Builder) {
+  std::vector<Value *> XorList, OrList;
+  Value *Diff;
+
+  unsigned RemainingBytes = Size - NumBytesProcessed;
+  unsigned NumLoadsRemaining = getNumLoads(RemainingBytes);
+  unsigned NumLoads = std::min(NumLoadsRemaining, NumLoadsPerBlock);
+
+  // For a single-block expansion, start inserting before the memcmp call.
+  if (LoadCmpBlocks.empty())
+    Builder.SetInsertPoint(CI);
+  else
+    Builder.SetInsertPoint(LoadCmpBlocks[Index]);
+
+  Value *Cmp = nullptr;
+  for (unsigned i = 0; i < NumLoads; ++i) {
+    unsigned LoadSize = getLoadSize(RemainingBytes);
+    unsigned GEPIndex = NumBytesProcessed / LoadSize;
+    NumBytesProcessed += LoadSize;
+    RemainingBytes -= LoadSize;
+
+    Type *LoadSizeType = IntegerType::get(CI->getContext(), LoadSize * 8);
+    Type *MaxLoadType = IntegerType::get(CI->getContext(), MaxLoadSize * 8);
+
+    Value *Source1 = CI->getArgOperand(0);
+    Value *Source2 = CI->getArgOperand(1);
+
+    // Cast source to LoadSizeType*.
+    if (Source1->getType() != LoadSizeType)
+      Source1 = Builder.CreateBitCast(Source1, LoadSizeType->getPointerTo());
+    if (Source2->getType() != LoadSizeType)
+      Source2 = Builder.CreateBitCast(Source2, LoadSizeType->getPointerTo());
+
+    // Get the base address using the GEPIndex.
+    if (GEPIndex != 0) {
+      Source1 = Builder.CreateGEP(LoadSizeType, Source1,
+                                  ConstantInt::get(LoadSizeType, GEPIndex));
+      Source2 = Builder.CreateGEP(LoadSizeType, Source2,
+                                  ConstantInt::get(LoadSizeType, GEPIndex));
+    }
+
+    // Get a constant or load a value for each source address.
+    Value *LoadSrc1 = nullptr;
+    if (auto *Source1C = dyn_cast<Constant>(Source1))
+      LoadSrc1 = ConstantFoldLoadFromConstPtr(Source1C, LoadSizeType, DL);
+    if (!LoadSrc1)
+      LoadSrc1 = Builder.CreateLoad(LoadSizeType, Source1);
+
+    Value *LoadSrc2 = nullptr;
+    if (auto *Source2C = dyn_cast<Constant>(Source2))
+      LoadSrc2 = ConstantFoldLoadFromConstPtr(Source2C, LoadSizeType, DL);
+    if (!LoadSrc2)
+      LoadSrc2 = Builder.CreateLoad(LoadSizeType, Source2);
+
+    if (NumLoads != 1) {
+      if (LoadSizeType != MaxLoadType) {
+        LoadSrc1 = Builder.CreateZExtOrTrunc(LoadSrc1, MaxLoadType);
+        LoadSrc2 = Builder.CreateZExtOrTrunc(LoadSrc2, MaxLoadType);
+      }
+      // If we have multiple loads per block, we need to generate a composite
+      // comparison using xor+or.
+      Diff = Builder.CreateXor(LoadSrc1, LoadSrc2);
+      Diff = Builder.CreateZExtOrTrunc(Diff, MaxLoadType);
+      XorList.push_back(Diff);
+    } else {
+      // If there's only one load per block, we just compare the loaded values.
+      Cmp = Builder.CreateICmpNE(LoadSrc1, LoadSrc2);
+    }
+  }
+
+  auto pairWiseOr = [&](std::vector<Value *> &InList) -> std::vector<Value *> {
+    std::vector<Value *> OutList;
+    for (unsigned i = 0; i < InList.size() - 1; i = i + 2) {
+      Value *Or = Builder.CreateOr(InList[i], InList[i + 1]);
+      OutList.push_back(Or);
+    }
+    if (InList.size() % 2 != 0)
+      OutList.push_back(InList.back());
+    return OutList;
+  };
+
+  if (!Cmp) {
+    // Pairwise OR the XOR results.
+    OrList = pairWiseOr(XorList);
+
+    // Pairwise OR the OR results until one result left.
+    while (OrList.size() != 1) {
+      OrList = pairWiseOr(OrList);
+    }
+    Cmp = Builder.CreateICmpNE(OrList[0], ConstantInt::get(Diff->getType(), 0));
+  }
+
+  return Cmp;
+}
+
+void MemCmpExpansion::emitLoadCompareBlockMultipleLoads(
+    unsigned Index, unsigned Size, unsigned &NumBytesProcessed) {
+  IRBuilder<> Builder(CI->getContext());
+  Value *Cmp = getCompareLoadPairs(Index, Size, NumBytesProcessed, Builder);
+
+  BasicBlock *NextBB = (Index == (LoadCmpBlocks.size() - 1))
+                           ? EndBlock
+                           : LoadCmpBlocks[Index + 1];
+  // Early exit branch if difference found to ResultBlock. Otherwise,
+  // continue to next LoadCmpBlock or EndBlock.
+  BranchInst *CmpBr = BranchInst::Create(ResBlock.BB, NextBB, Cmp);
+  Builder.Insert(CmpBr);
+
+  // Add a phi edge for the last LoadCmpBlock to Endblock with a value of 0
+  // since early exit to ResultBlock was not taken (no difference was found in
+  // any of the bytes).
+  if (Index == LoadCmpBlocks.size() - 1) {
+    Value *Zero = ConstantInt::get(Type::getInt32Ty(CI->getContext()), 0);
+    PhiRes->addIncoming(Zero, LoadCmpBlocks[Index]);
+  }
+}
+
+// This function creates the IR intructions for loading and comparing using the
+// given LoadSize. It loads the number of bytes specified by LoadSize from each
+// source of the memcmp parameters. It then does a subtract to see if there was
+// a difference in the loaded values. If a difference is found, it branches
+// with an early exit to the ResultBlock for calculating which source was
+// larger. Otherwise, it falls through to the either the next LoadCmpBlock or
+// the EndBlock if this is the last LoadCmpBlock. Loading 1 byte is handled with
+// a special case through emitLoadCompareByteBlock. The special handling can
+// simply subtract the loaded values and add it to the result phi node.
+void MemCmpExpansion::emitLoadCompareBlock(unsigned Index, int LoadSize,
+                                           int GEPIndex) {
+  if (LoadSize == 1) {
+    MemCmpExpansion::emitLoadCompareByteBlock(Index, GEPIndex);
+    return;
+  }
+
+  IRBuilder<> Builder(CI->getContext());
+
+  Type *LoadSizeType = IntegerType::get(CI->getContext(), LoadSize * 8);
+  Type *MaxLoadType = IntegerType::get(CI->getContext(), MaxLoadSize * 8);
+
+  Value *Source1 = CI->getArgOperand(0);
+  Value *Source2 = CI->getArgOperand(1);
+
+  Builder.SetInsertPoint(LoadCmpBlocks[Index]);
+  // Cast source to LoadSizeType*.
+  if (Source1->getType() != LoadSizeType)
+    Source1 = Builder.CreateBitCast(Source1, LoadSizeType->getPointerTo());
+  if (Source2->getType() != LoadSizeType)
+    Source2 = Builder.CreateBitCast(Source2, LoadSizeType->getPointerTo());
+
+  // Get the base address using the GEPIndex.
+  if (GEPIndex != 0) {
+    Source1 = Builder.CreateGEP(LoadSizeType, Source1,
+                                ConstantInt::get(LoadSizeType, GEPIndex));
+    Source2 = Builder.CreateGEP(LoadSizeType, Source2,
+                                ConstantInt::get(LoadSizeType, GEPIndex));
+  }
+
+  // Load LoadSizeType from the base address.
+  Value *LoadSrc1 = Builder.CreateLoad(LoadSizeType, Source1);
+  Value *LoadSrc2 = Builder.CreateLoad(LoadSizeType, Source2);
+
+  if (DL.isLittleEndian()) {
+    Function *F = LoadCmpBlocks[Index]->getParent();
+
+    Function *Bswap = Intrinsic::getDeclaration(F->getParent(),
+                                                Intrinsic::bswap, LoadSizeType);
+    LoadSrc1 = Builder.CreateCall(Bswap, LoadSrc1);
+    LoadSrc2 = Builder.CreateCall(Bswap, LoadSrc2);
+  }
+
+  if (LoadSizeType != MaxLoadType) {
+    LoadSrc1 = Builder.CreateZExtOrTrunc(LoadSrc1, MaxLoadType);
+    LoadSrc2 = Builder.CreateZExtOrTrunc(LoadSrc2, MaxLoadType);
+  }
+
+  // Add the loaded values to the phi nodes for calculating memcmp result only
+  // if result is not used in a zero equality.
+  if (!IsUsedForZeroCmp) {
+    ResBlock.PhiSrc1->addIncoming(LoadSrc1, LoadCmpBlocks[Index]);
+    ResBlock.PhiSrc2->addIncoming(LoadSrc2, LoadCmpBlocks[Index]);
+  }
+
+  Value *Diff = Builder.CreateSub(LoadSrc1, LoadSrc2);
+
+  Value *Cmp = Builder.CreateICmp(ICmpInst::ICMP_NE, Diff,
+                                  ConstantInt::get(Diff->getType(), 0));
+  BasicBlock *NextBB = (Index == (LoadCmpBlocks.size() - 1))
+                           ? EndBlock
+                           : LoadCmpBlocks[Index + 1];
+  // Early exit branch if difference found to ResultBlock. Otherwise, continue
+  // to next LoadCmpBlock or EndBlock.
+  BranchInst *CmpBr = BranchInst::Create(ResBlock.BB, NextBB, Cmp);
+  Builder.Insert(CmpBr);
+
+  // Add a phi edge for the last LoadCmpBlock to Endblock with a value of 0
+  // since early exit to ResultBlock was not taken (no difference was found in
+  // any of the bytes).
+  if (Index == LoadCmpBlocks.size() - 1) {
+    Value *Zero = ConstantInt::get(Type::getInt32Ty(CI->getContext()), 0);
+    PhiRes->addIncoming(Zero, LoadCmpBlocks[Index]);
+  }
+}
+
+// This function populates the ResultBlock with a sequence to calculate the
+// memcmp result. It compares the two loaded source values and returns -1 if
+// src1 < src2 and 1 if src1 > src2.
+void MemCmpExpansion::emitMemCmpResultBlock() {
+  IRBuilder<> Builder(CI->getContext());
+
+  // Special case: if memcmp result is used in a zero equality, result does not
+  // need to be calculated and can simply return 1.
+  if (IsUsedForZeroCmp) {
+    BasicBlock::iterator InsertPt = ResBlock.BB->getFirstInsertionPt();
+    Builder.SetInsertPoint(ResBlock.BB, InsertPt);
+    Value *Res = ConstantInt::get(Type::getInt32Ty(CI->getContext()), 1);
+    PhiRes->addIncoming(Res, ResBlock.BB);
+    BranchInst *NewBr = BranchInst::Create(EndBlock);
+    Builder.Insert(NewBr);
+    return;
+  }
+  BasicBlock::iterator InsertPt = ResBlock.BB->getFirstInsertionPt();
+  Builder.SetInsertPoint(ResBlock.BB, InsertPt);
+
+  Value *Cmp = Builder.CreateICmp(ICmpInst::ICMP_ULT, ResBlock.PhiSrc1,
+                                  ResBlock.PhiSrc2);
+
+  Value *Res =
+      Builder.CreateSelect(Cmp, ConstantInt::get(Builder.getInt32Ty(), -1),
+                           ConstantInt::get(Builder.getInt32Ty(), 1));
+
+  BranchInst *NewBr = BranchInst::Create(EndBlock);
+  Builder.Insert(NewBr);
+  PhiRes->addIncoming(Res, ResBlock.BB);
+}
+
+int MemCmpExpansion::calculateNumBlocks(unsigned Size) {
+  int NumBlocks = 0;
+  bool HaveOneByteLoad = false;
+  unsigned RemainingSize = Size;
+  unsigned LoadSize = MaxLoadSize;
+  while (RemainingSize) {
+    if (LoadSize == 1)
+      HaveOneByteLoad = true;
+    NumBlocks += RemainingSize / LoadSize;
+    RemainingSize = RemainingSize % LoadSize;
+    LoadSize = LoadSize / 2;
+  }
+  NumBlocksNonOneByte = HaveOneByteLoad ? (NumBlocks - 1) : NumBlocks;
+
+  if (IsUsedForZeroCmp)
+    NumBlocks = NumBlocks / NumLoadsPerBlock +
+                (NumBlocks % NumLoadsPerBlock != 0 ? 1 : 0);
+
+  return NumBlocks;
+}
+
+void MemCmpExpansion::setupResultBlockPHINodes() {
+  IRBuilder<> Builder(CI->getContext());
+  Type *MaxLoadType = IntegerType::get(CI->getContext(), MaxLoadSize * 8);
+  Builder.SetInsertPoint(ResBlock.BB);
+  ResBlock.PhiSrc1 =
+      Builder.CreatePHI(MaxLoadType, NumBlocksNonOneByte, "phi.src1");
+  ResBlock.PhiSrc2 =
+      Builder.CreatePHI(MaxLoadType, NumBlocksNonOneByte, "phi.src2");
+}
+
+void MemCmpExpansion::setupEndBlockPHINodes() {
+  IRBuilder<> Builder(CI->getContext());
+
+  Builder.SetInsertPoint(&EndBlock->front());
+  PhiRes = Builder.CreatePHI(Type::getInt32Ty(CI->getContext()), 2, "phi.res");
+}
+
+Value *MemCmpExpansion::getMemCmpExpansionZeroCase(unsigned Size) {
+  unsigned NumBytesProcessed = 0;
+  // This loop populates each of the LoadCmpBlocks with the IR sequence to
+  // handle multiple loads per block.
+  for (unsigned i = 0; i < NumBlocks; ++i)
+    emitLoadCompareBlockMultipleLoads(i, Size, NumBytesProcessed);
+
+  emitMemCmpResultBlock();
+  return PhiRes;
+}
+
+/// A memcmp expansion that compares equality with 0 and only has one block of
+/// load and compare can bypass the compare, branch, and phi IR that is required
+/// in the general case.
+Value *MemCmpExpansion::getMemCmpEqZeroOneBlock(unsigned Size) {
+  unsigned NumBytesProcessed = 0;
+  IRBuilder<> Builder(CI->getContext());
+  Value *Cmp = getCompareLoadPairs(0, Size, NumBytesProcessed, Builder);
+  return Builder.CreateZExt(Cmp, Type::getInt32Ty(CI->getContext()));
+}
+
+// This function expands the memcmp call into an inline expansion and returns
+// the memcmp result.
+Value *MemCmpExpansion::getMemCmpExpansion(uint64_t Size) {
+  if (IsUsedForZeroCmp)
+    return NumBlocks == 1 ? getMemCmpEqZeroOneBlock(Size) :
+                            getMemCmpExpansionZeroCase(Size);
+
+  // This loop calls emitLoadCompareBlock for comparing Size bytes of the two
+  // memcmp sources. It starts with loading using the maximum load size set by
+  // the target. It processes any remaining bytes using a load size which is the
+  // next smallest power of 2.
+  int LoadSize = MaxLoadSize;
+  int NumBytesToBeProcessed = Size;
+  unsigned Index = 0;
+  while (NumBytesToBeProcessed) {
+    // Calculate how many blocks we can create with the current load size.
+    int NumBlocks = NumBytesToBeProcessed / LoadSize;
+    int GEPIndex = (Size - NumBytesToBeProcessed) / LoadSize;
+    NumBytesToBeProcessed = NumBytesToBeProcessed % LoadSize;
+
+    // For each NumBlocks, populate the instruction sequence for loading and
+    // comparing LoadSize bytes.
+    while (NumBlocks--) {
+      emitLoadCompareBlock(Index, LoadSize, GEPIndex);
+      Index++;
+      GEPIndex++;
+    }
+    // Get the next LoadSize to use.
+    LoadSize = LoadSize / 2;
+  }
+
+  emitMemCmpResultBlock();
+  return PhiRes;
+}
+
+// This function checks to see if an expansion of memcmp can be generated.
+// It checks for constant compare size that is less than the max inline size.
+// If an expansion cannot occur, returns false to leave as a library call.
+// Otherwise, the library call is replaced with a new IR instruction sequence.
+/// We want to transform:
+/// %call = call signext i32 @memcmp(i8* %0, i8* %1, i64 15)
+/// To:
+/// loadbb:
+///  %0 = bitcast i32* %buffer2 to i8*
+///  %1 = bitcast i32* %buffer1 to i8*
+///  %2 = bitcast i8* %1 to i64*
+///  %3 = bitcast i8* %0 to i64*
+///  %4 = load i64, i64* %2
+///  %5 = load i64, i64* %3
+///  %6 = call i64 @llvm.bswap.i64(i64 %4)
+///  %7 = call i64 @llvm.bswap.i64(i64 %5)
+///  %8 = sub i64 %6, %7
+///  %9 = icmp ne i64 %8, 0
+///  br i1 %9, label %res_block, label %loadbb1
+/// res_block:                                        ; preds = %loadbb2,
+/// %loadbb1, %loadbb
+///  %phi.src1 = phi i64 [ %6, %loadbb ], [ %22, %loadbb1 ], [ %36, %loadbb2 ]
+///  %phi.src2 = phi i64 [ %7, %loadbb ], [ %23, %loadbb1 ], [ %37, %loadbb2 ]
+///  %10 = icmp ult i64 %phi.src1, %phi.src2
+///  %11 = select i1 %10, i32 -1, i32 1
+///  br label %endblock
+/// loadbb1:                                          ; preds = %loadbb
+///  %12 = bitcast i32* %buffer2 to i8*
+///  %13 = bitcast i32* %buffer1 to i8*
+///  %14 = bitcast i8* %13 to i32*
+///  %15 = bitcast i8* %12 to i32*
+///  %16 = getelementptr i32, i32* %14, i32 2
+///  %17 = getelementptr i32, i32* %15, i32 2
+///  %18 = load i32, i32* %16
+///  %19 = load i32, i32* %17
+///  %20 = call i32 @llvm.bswap.i32(i32 %18)
+///  %21 = call i32 @llvm.bswap.i32(i32 %19)
+///  %22 = zext i32 %20 to i64
+///  %23 = zext i32 %21 to i64
+///  %24 = sub i64 %22, %23
+///  %25 = icmp ne i64 %24, 0
+///  br i1 %25, label %res_block, label %loadbb2
+/// loadbb2:                                          ; preds = %loadbb1
+///  %26 = bitcast i32* %buffer2 to i8*
+///  %27 = bitcast i32* %buffer1 to i8*
+///  %28 = bitcast i8* %27 to i16*
+///  %29 = bitcast i8* %26 to i16*
+///  %30 = getelementptr i16, i16* %28, i16 6
+///  %31 = getelementptr i16, i16* %29, i16 6
+///  %32 = load i16, i16* %30
+///  %33 = load i16, i16* %31
+///  %34 = call i16 @llvm.bswap.i16(i16 %32)
+///  %35 = call i16 @llvm.bswap.i16(i16 %33)
+///  %36 = zext i16 %34 to i64
+///  %37 = zext i16 %35 to i64
+///  %38 = sub i64 %36, %37
+///  %39 = icmp ne i64 %38, 0
+///  br i1 %39, label %res_block, label %loadbb3
+/// loadbb3:                                          ; preds = %loadbb2
+///  %40 = bitcast i32* %buffer2 to i8*
+///  %41 = bitcast i32* %buffer1 to i8*
+///  %42 = getelementptr i8, i8* %41, i8 14
+///  %43 = getelementptr i8, i8* %40, i8 14
+///  %44 = load i8, i8* %42
+///  %45 = load i8, i8* %43
+///  %46 = zext i8 %44 to i32
+///  %47 = zext i8 %45 to i32
+///  %48 = sub i32 %46, %47
+///  br label %endblock
+/// endblock:                                         ; preds = %res_block,
+/// %loadbb3
+///  %phi.res = phi i32 [ %48, %loadbb3 ], [ %11, %res_block ]
+///  ret i32 %phi.res
+static bool expandMemCmp(CallInst *CI, const TargetTransformInfo *TTI,
+                         const TargetLowering *TLI, const DataLayout *DL) {
+  NumMemCmpCalls++;
+  IRBuilder<> Builder(CI->getContext());
+
+  // TTI call to check if target would like to expand memcmp. Also, get the
+  // MaxLoadSize.
+  unsigned MaxLoadSize;
+  if (!TTI->expandMemCmp(CI, MaxLoadSize))
+    return false;
+
+  // Early exit from expansion if -Oz.
+  if (CI->getFunction()->optForMinSize())
+    return false;
+
+  // Early exit from expansion if size is not a constant.
+  ConstantInt *SizeCast = dyn_cast<ConstantInt>(CI->getArgOperand(2));
+  if (!SizeCast) {
+    NumMemCmpNotConstant++;
+    return false;
+  }
+
+  // Early exit from expansion if size greater than max bytes to load.
+  uint64_t SizeVal = SizeCast->getZExtValue();
+  unsigned NumLoads = 0;
+  unsigned RemainingSize = SizeVal;
+  unsigned LoadSize = MaxLoadSize;
+  while (RemainingSize) {
+    NumLoads += RemainingSize / LoadSize;
+    RemainingSize = RemainingSize % LoadSize;
+    LoadSize = LoadSize / 2;
+  }
+
+  if (NumLoads > TLI->getMaxExpandSizeMemcmp(CI->getFunction()->optForSize())) {
+    NumMemCmpGreaterThanMax++;
+    return false;
+  }
+
+  NumMemCmpInlined++;
+
+  // MemCmpHelper object creates and sets up basic blocks required for
+  // expanding memcmp with size SizeVal.
+  unsigned NumLoadsPerBlock = MemCmpNumLoadsPerBlock;
+  MemCmpExpansion MemCmpHelper(CI, SizeVal, MaxLoadSize, NumLoadsPerBlock, *DL);
+
+  Value *Res = MemCmpHelper.getMemCmpExpansion(SizeVal);
+
+  // Replace call with result of expansion and erase call.
+  CI->replaceAllUsesWith(Res);
+  CI->eraseFromParent();
+
+  return true;
+}
+
+bool CodeGenPrepare::optimizeCallInst(CallInst *CI, bool &ModifiedDT) {
   BasicBlock *BB = CI->getParent();
 
   // Lower inline assembly if we can.
@@ -2242,39 +2366,6 @@ bool CodeGenPrepare::optimizeCallInst(CallInst *CI, bool& ModifiedDT) {
       }
       return true;
     }
-    case Intrinsic::masked_load: {
-      // Scalarize unsupported vector masked load
-      if (!TTI->isLegalMaskedLoad(CI->getType())) {
-        scalarizeMaskedLoad(CI);
-        ModifiedDT = true;
-        return true;
-      }
-      return false;
-    }
-    case Intrinsic::masked_store: {
-      if (!TTI->isLegalMaskedStore(CI->getArgOperand(0)->getType())) {
-        scalarizeMaskedStore(CI);
-        ModifiedDT = true;
-        return true;
-      }
-      return false;
-    }
-    case Intrinsic::masked_gather: {
-      if (!TTI->isLegalMaskedGather(CI->getType())) {
-        scalarizeMaskedGather(CI);
-        ModifiedDT = true;
-        return true;
-      }
-      return false;
-    }
-    case Intrinsic::masked_scatter: {
-      if (!TTI->isLegalMaskedScatter(CI->getArgOperand(0)->getType())) {
-        scalarizeMaskedScatter(CI);
-        ModifiedDT = true;
-        return true;
-      }
-      return false;
-    }
     case Intrinsic::aarch64_stlxr:
     case Intrinsic::aarch64_stxr: {
       ZExtInst *ExtVal = dyn_cast<ZExtInst>(CI->getArgOperand(0));
@@ -2323,6 +2414,13 @@ bool CodeGenPrepare::optimizeCallInst(CallInst *CI, bool& ModifiedDT) {
   if (Value *V = Simplifier.optimizeCall(CI)) {
     CI->replaceAllUsesWith(V);
     CI->eraseFromParent();
+    return true;
+  }
+
+  LibFunc Func;
+  if (TLInfo->getLibFunc(ImmutableCallSite(CI), Func) &&
+      Func == LibFunc_memcmp && expandMemCmp(CI, TTI, TLI, DL)) {
+    ModifiedDT = true;
     return true;
   }
   return false;
@@ -3870,7 +3968,7 @@ bool AddressingModeMatcher::matchAddr(Value *Addr, unsigned Depth) {
 static bool IsOperandAMemoryOperand(CallInst *CI, InlineAsm *IA, Value *OpVal,
                                     const TargetLowering &TLI,
                                     const TargetRegisterInfo &TRI) {
-  const Function *F = CI->getParent()->getParent();
+  const Function *F = CI->getFunction();
   TargetLowering::AsmOperandInfoVector TargetConstraints =
       TLI.ParseConstraints(F->getParent()->getDataLayout(), &TRI,
                             ImmutableCallSite(CI));
@@ -4467,7 +4565,7 @@ bool CodeGenPrepare::optimizeInlineAsmInst(CallInst *CS) {
   bool MadeChange = false;
 
   const TargetRegisterInfo *TRI =
-      TM->getSubtargetImpl(*CS->getParent()->getParent())->getRegisterInfo();
+      TM->getSubtargetImpl(*CS->getFunction())->getRegisterInfo();
   TargetLowering::AsmOperandInfoVector TargetConstraints =
       TLI->ParseConstraints(*DL, TRI, CS);
   unsigned ArgNo = 0;
@@ -5472,6 +5570,7 @@ bool CodeGenPrepare::optimizeSwitchInst(SwitchInst *SI) {
   return true;
 }
 
+
 namespace {
 /// \brief Helper class to promote a scalar operation to a vector one.
 /// This class is used to move downward extractelement transition.
@@ -5950,7 +6049,7 @@ static bool splitMergedValStore(StoreInst &SI, const DataLayout &DL,
   return true;
 }
 
-bool CodeGenPrepare::optimizeInst(Instruction *I, bool& ModifiedDT) {
+bool CodeGenPrepare::optimizeInst(Instruction *I, bool &ModifiedDT) {
   // Bail out if we inserted the instruction to prevent optimizations from
   // stepping on each other's toes.
   if (InsertedInsts.count(I))
@@ -6105,7 +6204,7 @@ static bool makeBitReverse(Instruction &I, const DataLayout &DL,
 // In this pass we look for GEP and cast instructions that are used
 // across basic blocks and rewrite them to improve basic-block-at-a-time
 // selection.
-bool CodeGenPrepare::optimizeBlock(BasicBlock &BB, bool& ModifiedDT) {
+bool CodeGenPrepare::optimizeBlock(BasicBlock &BB, bool &ModifiedDT) {
   SunkAddrs.clear();
   bool MadeChange = false;
 

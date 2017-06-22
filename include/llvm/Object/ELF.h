@@ -17,9 +17,9 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/BinaryFormat/ELF.h"
 #include "llvm/Object/ELFTypes.h"
 #include "llvm/Object/Error.h"
-#include "llvm/Support/ELF.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/Error.h"
 #include <cassert>
@@ -235,10 +235,7 @@ ELFFile<ELFT>::getSection(const Elf_Sym *Sym, Elf_Sym_Range Symbols,
   uint32_t Index = *IndexOrErr;
   if (Index == 0)
     return nullptr;
-  auto SectionsOrErr = sections();
-  if (!SectionsOrErr)
-    return SectionsOrErr.takeError();
-  return object::getSection<ELFT>(*SectionsOrErr, Index);
+  return getSection(Index);
 }
 
 template <class ELFT>

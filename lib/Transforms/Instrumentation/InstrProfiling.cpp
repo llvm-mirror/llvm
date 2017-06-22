@@ -28,10 +28,10 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
-#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
 #include "llvm/Pass.h"
@@ -241,7 +241,7 @@ static Constant *getOrInsertValueProfilingCall(Module &M,
 
   if (Function *FunRes = dyn_cast<Function>(Res)) {
     if (auto AK = TLI.getExtAttrForI32Param(false))
-      FunRes->addAttribute(3, AK);
+      FunRes->addParamAttr(2, AK);
   }
   return Res;
 }
@@ -292,7 +292,7 @@ void InstrProfiling::lowerValueProfileInst(InstrProfValueProfileInst *Ind) {
         Builder.CreateCall(getOrInsertValueProfilingCall(*M, *TLI, true), Args);
   }
   if (auto AK = TLI->getExtAttrForI32Param(false))
-    Call->addAttribute(3, AK);
+    Call->addParamAttr(2, AK);
   Ind->replaceAllUsesWith(Call);
   Ind->eraseFromParent();
 }
@@ -343,14 +343,24 @@ static std::string getVarName(InstrProfIncrementInst *Inc, StringRef Prefix) {
 
 static inline bool shouldRecordFunctionAddr(Function *F) {
   // Check the linkage
+  bool HasAvailableExternallyLinkage = F->hasAvailableExternallyLinkage();
   if (!F->hasLinkOnceLinkage() && !F->hasLocalLinkage() &&
-      !F->hasAvailableExternallyLinkage())
+      !HasAvailableExternallyLinkage)
     return true;
+
+  // A function marked 'alwaysinline' with available_externally linkage can't
+  // have its address taken. Doing so would create an undefined external ref to
+  // the function, which would fail to link.
+  if (HasAvailableExternallyLinkage &&
+      F->hasFnAttribute(Attribute::AlwaysInline))
+    return false;
+
   // Prohibit function address recording if the function is both internal and
   // COMDAT. This avoids the profile data variable referencing internal symbols
   // in COMDAT.
   if (F->hasLocalLinkage() && F->hasComdat())
     return false;
+
   // Check uses of this function for other than direct calls or invokes to it.
   // Inline virtual functions have linkeOnceODR linkage. When a key method
   // exists, the vtable will only be emitted in the TU where the key method

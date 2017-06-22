@@ -14,8 +14,9 @@
 #ifndef LLVM_OBJECT_OBJECTFILE_H
 #define LLVM_OBJECT_OBJECTFILE_H
 
-#include "llvm/ADT/iterator_range.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/iterator_range.h"
+#include "llvm/BinaryFormat/Magic.h"
 #include "llvm/MC/SubtargetFeature.h"
 #include "llvm/Object/Binary.h"
 #include "llvm/Object/Error.h"
@@ -95,6 +96,7 @@ public:
 
   std::error_code getName(StringRef &Result) const;
   uint64_t getAddress() const;
+  uint64_t getIndex() const;
   uint64_t getSize() const;
   std::error_code getContents(StringRef &Result) const;
 
@@ -222,6 +224,7 @@ protected:
   virtual std::error_code getSectionName(DataRefImpl Sec,
                                          StringRef &Res) const = 0;
   virtual uint64_t getSectionAddress(DataRefImpl Sec) const = 0;
+  virtual uint64_t getSectionIndex(DataRefImpl Sec) const = 0;
   virtual uint64_t getSectionSize(DataRefImpl Sec) const = 0;
   virtual std::error_code getSectionContents(DataRefImpl Sec,
                                              StringRef &Res) const = 0;
@@ -290,6 +293,9 @@ public:
       return std::error_code();
     }
 
+  /// Maps a debug section name to a standard DWARF section name.
+  virtual StringRef mapDebugSectionName(StringRef Name) const { return Name; }
+
   /// True if this is a relocatable object (.o/.obj).
   virtual bool isRelocatableObject() const = 0;
 
@@ -301,10 +307,10 @@ public:
   createObjectFile(StringRef ObjectPath);
 
   static Expected<std::unique_ptr<ObjectFile>>
-  createObjectFile(MemoryBufferRef Object, sys::fs::file_magic Type);
+  createObjectFile(MemoryBufferRef Object, llvm::file_magic Type);
   static Expected<std::unique_ptr<ObjectFile>>
   createObjectFile(MemoryBufferRef Object) {
-    return createObjectFile(Object, sys::fs::file_magic::unknown);
+    return createObjectFile(Object, llvm::file_magic::unknown);
   }
 
   static inline bool classof(const Binary *v) {
@@ -391,6 +397,10 @@ inline std::error_code SectionRef::getName(StringRef &Result) const {
 
 inline uint64_t SectionRef::getAddress() const {
   return OwningObject->getSectionAddress(SectionPimpl);
+}
+
+inline uint64_t SectionRef::getIndex() const {
+  return OwningObject->getSectionIndex(SectionPimpl);
 }
 
 inline uint64_t SectionRef::getSize() const {

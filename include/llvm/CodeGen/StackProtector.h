@@ -19,17 +19,20 @@
 
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Triple.h"
-#include "llvm/IR/Dominators.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/ValueMap.h"
 #include "llvm/Pass.h"
-#include "llvm/Target/TargetLowering.h"
-#include "llvm/Target/TargetMachine.h"
 
 namespace llvm {
 
+class BasicBlock;
+class DominatorTree;
 class Function;
+class Instruction;
 class Module;
-class PHINode;
+class TargetLoweringBase;
+class TargetMachine;
+class Type;
 
 class StackProtector : public FunctionPass {
 public:
@@ -47,7 +50,7 @@ public:
   };
 
   /// A mapping of AllocaInsts to their required SSP layout.
-  typedef ValueMap<const AllocaInst *, SSPLayoutKind> SSPLayoutMap;
+  using SSPLayoutMap = ValueMap<const AllocaInst *, SSPLayoutKind>;
 
 private:
   const TargetMachine *TM = nullptr;
@@ -55,7 +58,7 @@ private:
   /// TLI - Keep a pointer of a TargetLowering to consult for determining
   /// target type sizes.
   const TargetLoweringBase *TLI = nullptr;
-  const Triple Trip;
+  Triple Trip;
 
   Function *F;
   Module *M;
@@ -114,19 +117,11 @@ private:
 public:
   static char ID; // Pass identification, replacement for typeid.
 
-  StackProtector() : FunctionPass(ID) {
+  StackProtector() : FunctionPass(ID), SSPBufferSize(8) {
     initializeStackProtectorPass(*PassRegistry::getPassRegistry());
   }
 
-  StackProtector(const TargetMachine *TM)
-      : FunctionPass(ID), TM(TM), Trip(TM->getTargetTriple()),
-        SSPBufferSize(8) {
-    initializeStackProtectorPass(*PassRegistry::getPassRegistry());
-  }
-
-  void getAnalysisUsage(AnalysisUsage &AU) const override {
-    AU.addPreserved<DominatorTreeWrapperPass>();
-  }
+  void getAnalysisUsage(AnalysisUsage &AU) const override;
 
   SSPLayoutKind getSSPLayout(const AllocaInst *AI) const;
 

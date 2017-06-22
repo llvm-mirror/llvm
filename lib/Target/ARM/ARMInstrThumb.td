@@ -284,8 +284,8 @@ def tADJCALLSTACKUP :
             Requires<[IsThumb, IsThumb1Only]>;
 
 def tADJCALLSTACKDOWN :
-  PseudoInst<(outs), (ins i32imm:$amt), NoItinerary,
-             [(ARMcallseq_start imm:$amt)]>,
+  PseudoInst<(outs), (ins i32imm:$amt, i32imm:$amt2), NoItinerary,
+             [(ARMcallseq_start imm:$amt, imm:$amt2)]>,
             Requires<[IsThumb, IsThumb1Only]>;
 }
 
@@ -1413,7 +1413,8 @@ def tLEApcrelJT : tPseudoInst<(outs tGPR:$Rd),
 
 // Thumb-1 doesn't have the TBB or TBH instructions, but we can synthesize them
 // and make use of the same compressed jump table format as Thumb-2.
-let Size = 2 in {
+let Size = 2, isBranch = 1, isTerminator = 1, isBarrier = 1,
+    isIndirectBranch = 1 in {
 def tTBB_JT : tPseudoInst<(outs),
         (ins tGPR:$base, tGPR:$index, i32imm:$jt, i32imm:$pclbl), 0, IIC_Br, []>,
         Sched<[WriteBr]>;

@@ -14,9 +14,9 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/BinaryStreamArray.h"
 #include "llvm/Support/BinaryStreamRef.h"
+#include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/Error.h"
-#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/type_traits.h"
 
 #include <string>
@@ -31,7 +31,22 @@ namespace llvm {
 /// are overridable.
 class BinaryStreamReader {
 public:
-  explicit BinaryStreamReader(BinaryStreamRef Stream);
+  BinaryStreamReader() = default;
+  explicit BinaryStreamReader(BinaryStreamRef Ref);
+  explicit BinaryStreamReader(BinaryStream &Stream);
+  explicit BinaryStreamReader(ArrayRef<uint8_t> Data,
+                              llvm::support::endianness Endian);
+  explicit BinaryStreamReader(StringRef Data, llvm::support::endianness Endian);
+
+  BinaryStreamReader(const BinaryStreamReader &Other)
+      : Stream(Other.Stream), Offset(Other.Offset) {}
+
+  BinaryStreamReader &operator=(const BinaryStreamReader &Other) {
+    Stream = Other.Stream;
+    Offset = Other.Offset;
+    return *this;
+  }
+
   virtual ~BinaryStreamReader() {}
 
   /// Read as much as possible from the underlying string at the current offset
@@ -89,6 +104,13 @@ public:
   /// \returns a success error code if the data was successfully read, otherwise
   /// returns an appropriate error code.
   Error readCString(StringRef &Dest);
+
+  /// Similar to readCString, however read a null-terminated UTF16 string
+  /// instead.
+  ///
+  /// \returns a success error code if the data was successfully read, otherwise
+  /// returns an appropriate error code.
+  Error readWideString(ArrayRef<UTF16> &Dest);
 
   /// Read a \p Length byte string into \p Dest.  Whether a copy occurs depends
   /// on the implementation of the underlying stream.  Updates the stream's
@@ -176,25 +198,7 @@ public:
     BinaryStreamRef S;
     if (auto EC = readStreamRef(S, Size))
       return EC;
-    Array = VarStreamArray<T, U>(S);
-    return Error::success();
-  }
-
-  /// Read a VarStreamArray of size \p Size bytes and store the result into
-  /// \p Array.  Updates the stream's offset to point after the newly read
-  /// array.  Never causes a copy (although iterating the elements of the
-  /// VarStreamArray may, depending upon the implementation of the underlying
-  /// stream).
-  ///
-  /// \returns a success error code if the data was successfully read, otherwise
-  /// returns an appropriate error code.
-  template <typename T, typename U, typename ContextType>
-  Error readArray(VarStreamArray<T, U> &Array, uint32_t Size,
-                  ContextType &&Context) {
-    BinaryStreamRef S;
-    if (auto EC = readStreamRef(S, Size))
-      return EC;
-    Array = VarStreamArray<T, U>(S, std::move(Context));
+    Array.setUnderlyingStream(S);
     return Error::success();
   }
 
@@ -243,9 +247,14 @@ public:
   /// \returns the next byte in the stream.
   uint8_t peek() const;
 
+  Error padToAlignment(uint32_t Align);
+
+  std::pair<BinaryStreamReader, BinaryStreamReader>
+  split(uint32_t Offset) const;
+
 private:
   BinaryStreamRef Stream;
-  uint32_t Offset;
+  uint32_t Offset = 0;
 };
 } // namespace llvm
 

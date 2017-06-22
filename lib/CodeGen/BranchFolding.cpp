@@ -1,4 +1,4 @@
-//===-- BranchFolding.cpp - Fold machine code branch instructions ---------===//
+//===- BranchFolding.cpp - Fold machine code branch instructions ----------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -18,33 +18,49 @@
 //===----------------------------------------------------------------------===//
 
 #include "BranchFolding.h"
-#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/BitVector.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallSet.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/CodeGen/Analysis.h"
+#include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineBlockFrequencyInfo.h"
 #include "llvm/CodeGen/MachineBranchProbabilityInfo.h"
+#include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
+#include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
-#include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
+#include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/IR/DebugInfoMetadata.h"
+#include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/Function.h"
+#include "llvm/MC/MCRegisterInfo.h"
+#include "llvm/Pass.h"
+#include "llvm/Support/BlockFrequency.h"
+#include "llvm/Support/BranchProbability.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetInstrInfo.h"
+#include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
-#include <algorithm>
+#include <cassert>
+#include <cstddef>
+#include <iterator>
+#include <numeric>
+#include <vector>
+
 using namespace llvm;
 
-#define DEBUG_TYPE "branchfolding"
+#define DEBUG_TYPE "branch-folder"
 
 STATISTIC(NumDeadBlocks, "Number of dead blocks removed");
 STATISTIC(NumBranchOpts, "Number of branches optimized");
@@ -69,10 +85,12 @@ TailMergeSize("tail-merge-size",
                               cl::init(3), cl::Hidden);
 
 namespace {
+
   /// BranchFolderPass - Wrap branch folder in a machine function pass.
   class BranchFolderPass : public MachineFunctionPass {
   public:
     static char ID;
+
     explicit BranchFolderPass(): MachineFunctionPass(ID) {}
 
     bool runOnMachineFunction(MachineFunction &MF) override;
@@ -84,12 +102,13 @@ namespace {
       MachineFunctionPass::getAnalysisUsage(AU);
     }
   };
-}
+
+} // end anonymous namespace
 
 char BranchFolderPass::ID = 0;
 char &llvm::BranchFolderPassID = BranchFolderPass::ID;
 
-INITIALIZE_PASS(BranchFolderPass, "branch-folder",
+INITIALIZE_PASS(BranchFolderPass, DEBUG_TYPE,
                 "Control Flow Optimizer", false, false)
 
 bool BranchFolderPass::runOnMachineFunction(MachineFunction &MF) {
@@ -153,13 +172,14 @@ bool BranchFolder::OptimizeFunction(MachineFunction &MF,
 
   TriedMerging.clear();
 
+  MachineRegisterInfo &MRI = MF.getRegInfo();
   AfterBlockPlacement = AfterPlacement;
   TII = tii;
   TRI = tri;
   MMI = mmi;
   MLI = mli;
+  this->MRI = &MRI;
 
-  MachineRegisterInfo &MRI = MF.getRegInfo();
   UpdateLiveIns = MRI.tracksLiveness() && TRI->trackLivenessAfterRegAlloc(MF);
   if (!UpdateLiveIns)
     MRI.invalidateLiveness();
@@ -351,7 +371,7 @@ void BranchFolder::ReplaceTailWithBranchTo(MachineBasicBlock::iterator OldInst,
 
   if (UpdateLiveIns) {
     NewDest->clearLiveIns();
-    computeLiveIns(LiveRegs, *TRI, *NewDest);
+    computeLiveIns(LiveRegs, *MRI, *NewDest);
   }
 
   ++NumTailMerge;
@@ -367,7 +387,7 @@ MachineBasicBlock *BranchFolder::SplitMBBAt(MachineBasicBlock &CurMBB,
 
   // Create the fall-through block.
   MachineFunction::iterator MBBI = CurMBB.getIterator();
-  MachineBasicBlock *NewMBB =MF.CreateMachineBasicBlock(BB);
+  MachineBasicBlock *NewMBB = MF.CreateMachineBasicBlock(BB);
   CurMBB.getParent()->insert(++MBBI, NewMBB);
 
   // Move all the successors of this block to the specified block.
@@ -388,7 +408,7 @@ MachineBasicBlock *BranchFolder::SplitMBBAt(MachineBasicBlock &CurMBB,
   MBBFreqInfo.setBlockFreq(NewMBB, MBBFreqInfo.getBlockFreq(&CurMBB));
 
   if (UpdateLiveIns)
-    computeLiveIns(LiveRegs, *TRI, *NewMBB);
+    computeLiveIns(LiveRegs, *MRI, *NewMBB);
 
   // Add the new block to the funclet.
   const auto &FuncletI = FuncletMembership.find(&CurMBB);
@@ -505,7 +525,7 @@ static unsigned CountTerminators(MachineBasicBlock *MBB,
                                  MachineBasicBlock::iterator &I) {
   I = MBB->end();
   unsigned NumTerms = 0;
-  for (;;) {
+  while (true) {
     if (I == MBB->begin()) {
       I = MBB->end();
       break;
@@ -1600,7 +1620,6 @@ ReoptimizeBlock:
   // block doesn't fall through into some other block, see if we can find a
   // place to move this block where a fall-through will happen.
   if (!PrevBB.canFallThrough()) {
-
     // Now we know that there was no fall-through into this block, check to
     // see if it has a fall-through into its successor.
     bool CurFallsThru = MBB->canFallThrough();
@@ -1850,8 +1869,8 @@ bool BranchFolder::HoistCommonCodeInSuccs(MachineBasicBlock *MBB) {
     return false;
 
   bool HasDups = false;
-  SmallVector<unsigned, 4> LocalDefs;
-  SmallSet<unsigned, 4> LocalDefsSet;
+  SmallVector<unsigned, 4> LocalDefs, LocalKills;
+  SmallSet<unsigned, 4> ActiveDefsSet, AllDefsSet;
   MachineBasicBlock::iterator TIB = TBB->begin();
   MachineBasicBlock::iterator FIB = FBB->begin();
   MachineBasicBlock::iterator TIE = TBB->end();
@@ -1905,7 +1924,7 @@ bool BranchFolder::HoistCommonCodeInSuccs(MachineBasicBlock *MBB) {
           IsSafe = false;
           break;
         }
-      } else if (!LocalDefsSet.count(Reg)) {
+      } else if (!ActiveDefsSet.count(Reg)) {
         if (Defs.count(Reg)) {
           // Use is defined by the instruction at the point of insertion.
           IsSafe = false;
@@ -1925,18 +1944,22 @@ bool BranchFolder::HoistCommonCodeInSuccs(MachineBasicBlock *MBB) {
     if (!TIB->isSafeToMove(nullptr, DontMoveAcrossStore))
       break;
 
-    // Remove kills from LocalDefsSet, these registers had short live ranges.
+    // Remove kills from ActiveDefsSet, these registers had short live ranges.
     for (const MachineOperand &MO : TIB->operands()) {
       if (!MO.isReg() || !MO.isUse() || !MO.isKill())
         continue;
       unsigned Reg = MO.getReg();
-      if (!Reg || !LocalDefsSet.count(Reg))
+      if (!Reg)
         continue;
+      if (!AllDefsSet.count(Reg)) {
+        LocalKills.push_back(Reg);
+        continue;
+      }
       if (TargetRegisterInfo::isPhysicalRegister(Reg)) {
         for (MCRegAliasIterator AI(Reg, TRI, true); AI.isValid(); ++AI)
-          LocalDefsSet.erase(*AI);
+          ActiveDefsSet.erase(*AI);
       } else {
-        LocalDefsSet.erase(Reg);
+        ActiveDefsSet.erase(Reg);
       }
     }
 
@@ -1948,7 +1971,8 @@ bool BranchFolder::HoistCommonCodeInSuccs(MachineBasicBlock *MBB) {
       if (!Reg || TargetRegisterInfo::isVirtualRegister(Reg))
         continue;
       LocalDefs.push_back(Reg);
-      addRegAndItsAliases(Reg, TRI, LocalDefsSet);
+      addRegAndItsAliases(Reg, TRI, ActiveDefsSet);
+      addRegAndItsAliases(Reg, TRI, AllDefsSet);
     }
 
     HasDups = true;
@@ -1963,17 +1987,22 @@ bool BranchFolder::HoistCommonCodeInSuccs(MachineBasicBlock *MBB) {
   FBB->erase(FBB->begin(), FIB);
 
   // Update livein's.
-  bool AddedLiveIns = false;
+  bool ChangedLiveIns = false;
   for (unsigned i = 0, e = LocalDefs.size(); i != e; ++i) {
     unsigned Def = LocalDefs[i];
-    if (LocalDefsSet.count(Def)) {
+    if (ActiveDefsSet.count(Def)) {
       TBB->addLiveIn(Def);
       FBB->addLiveIn(Def);
-      AddedLiveIns = true;
+      ChangedLiveIns = true;
     }
   }
+  for (unsigned K : LocalKills) {
+    TBB->removeLiveIn(K);
+    FBB->removeLiveIn(K);
+    ChangedLiveIns = true;
+  }
 
-  if (AddedLiveIns) {
+  if (ChangedLiveIns) {
     TBB->sortUniqueLiveIns();
     FBB->sortUniqueLiveIns();
   }

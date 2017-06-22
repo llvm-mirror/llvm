@@ -85,7 +85,6 @@ void FunctionLoweringInfo::set(const Function &fn, MachineFunction &mf,
   MF = &mf;
   TLI = MF->getSubtarget().getTargetLowering();
   RegInfo = &MF->getRegInfo();
-  MachineModuleInfo &MMI = MF->getMMI();
   const TargetFrameLowering *TFI = MF->getSubtarget().getFrameLowering();
   unsigned StackAlign = TFI->getStackAlignment();
 
@@ -213,33 +212,6 @@ void FunctionLoweringInfo::set(const Function &fn, MachineFunction &mf,
       if (isUsedOutsideOfDefiningBlock(&I))
         if (!isa<AllocaInst>(I) || !StaticAllocaMap.count(cast<AllocaInst>(&I)))
           InitializeRegForValue(&I);
-
-      // Collect llvm.dbg.declare information. This is done now instead of
-      // during the initial isel pass through the IR so that it is done
-      // in a predictable order.
-      if (const DbgDeclareInst *DI = dyn_cast<DbgDeclareInst>(&I)) {
-        assert(DI->getVariable() && "Missing variable");
-        assert(DI->getDebugLoc() && "Missing location");
-        if (MMI.hasDebugInfo()) {
-          // Don't handle byval struct arguments or VLAs, for example.
-          // Non-byval arguments are handled here (they refer to the stack
-          // temporary alloca at this point).
-          const Value *Address = DI->getAddress();
-          if (Address) {
-            if (const BitCastInst *BCI = dyn_cast<BitCastInst>(Address))
-              Address = BCI->getOperand(0);
-            if (const AllocaInst *AI = dyn_cast<AllocaInst>(Address)) {
-              DenseMap<const AllocaInst *, int>::iterator SI =
-                StaticAllocaMap.find(AI);
-              if (SI != StaticAllocaMap.end()) { // Check for VLAs.
-                int FI = SI->second;
-                MF->setVariableDbgInfo(DI->getVariable(), DI->getExpression(),
-                                       FI, DI->getDebugLoc());
-              }
-            }
-          }
-        }
-      }
 
       // Decide the preferred extend type for a value.
       PreferredExtendType[&I] = getPreferredExtendForValue(&I);
@@ -402,8 +374,7 @@ FunctionLoweringInfo::GetLiveOutRegInfo(unsigned Reg, unsigned BitWidth) {
 
   if (BitWidth > LOI->Known.getBitWidth()) {
     LOI->NumSignBits = 1;
-    LOI->Known.Zero = LOI->Known.Zero.zextOrTrunc(BitWidth);
-    LOI->Known.One = LOI->Known.One.zextOrTrunc(BitWidth);
+    LOI->Known = LOI->Known.zextOrTrunc(BitWidth);
   }
 
   return LOI;
@@ -511,12 +482,11 @@ void FunctionLoweringInfo::setArgumentFrameIndex(const Argument *A,
 /// If the argument does not have any assigned frame index then 0 is
 /// returned.
 int FunctionLoweringInfo::getArgumentFrameIndex(const Argument *A) {
-  DenseMap<const Argument *, int>::iterator I =
-    ByValArgFrameIndexMap.find(A);
+  auto I = ByValArgFrameIndexMap.find(A);
   if (I != ByValArgFrameIndexMap.end())
     return I->second;
   DEBUG(dbgs() << "Argument does not have assigned frame index!\n");
-  return 0;
+  return INT_MAX;
 }
 
 unsigned FunctionLoweringInfo::getCatchPadExceptionPointerVReg(
@@ -552,4 +522,30 @@ FunctionLoweringInfo::getOrCreateSwiftErrorVReg(const MachineBasicBlock *MBB,
 void FunctionLoweringInfo::setCurrentSwiftErrorVReg(
     const MachineBasicBlock *MBB, const Value *Val, unsigned VReg) {
   SwiftErrorVRegDefMap[std::make_pair(MBB, Val)] = VReg;
+}
+
+std::pair<unsigned, bool>
+FunctionLoweringInfo::getOrCreateSwiftErrorVRegDefAt(const Instruction *I) {
+  auto Key = PointerIntPair<const Instruction *, 1, bool>(I, true);
+  auto It = SwiftErrorVRegDefUses.find(Key);
+  if (It == SwiftErrorVRegDefUses.end()) {
+    auto &DL = MF->getDataLayout();
+    const TargetRegisterClass *RC = TLI->getRegClassFor(TLI->getPointerTy(DL));
+    unsigned VReg =  MF->getRegInfo().createVirtualRegister(RC);
+    SwiftErrorVRegDefUses[Key] = VReg;
+    return std::make_pair(VReg, true);
+  }
+  return std::make_pair(It->second, false);
+}
+
+std::pair<unsigned, bool>
+FunctionLoweringInfo::getOrCreateSwiftErrorVRegUseAt(const Instruction *I, const MachineBasicBlock *MBB, const Value *Val) {
+  auto Key = PointerIntPair<const Instruction *, 1, bool>(I, false);
+  auto It = SwiftErrorVRegDefUses.find(Key);
+  if (It == SwiftErrorVRegDefUses.end()) {
+    unsigned VReg = getOrCreateSwiftErrorVReg(MBB, Val);
+    SwiftErrorVRegDefUses[Key] = VReg;
+    return std::make_pair(VReg, true);
+  }
+  return std::make_pair(It->second, false);
 }

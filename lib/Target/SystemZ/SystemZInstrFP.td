@@ -121,7 +121,8 @@ let canFoldAsLoad = 1, SimpleBDXLoad = 1 in {
   defm LD : UnaryRXPair<"ld", 0x68, 0xED65, load, FP64, 8>;
 
   // For z13 we prefer LDE over LE to avoid partial register dependencies.
-  def LDE32 : UnaryRXE<"lde", 0xED24, null_frag, FP32, 4>;
+  let isCodeGenOnly = 1 in
+    def LDE32 : UnaryRXE<"lde", 0xED24, null_frag, FP32, 4>;
 
   // These instructions are split after register allocation, so we don't
   // want a custom inserter.
@@ -437,18 +438,18 @@ def : Pat<(fmul (f128 (fpextend FP64:$src1)),
                 bdxaddr12only:$addr)>;
 
 // Fused multiply-add.
-def MAEBR : TernaryRRD<"maebr", 0xB30E, z_fma, FP32>;
-def MADBR : TernaryRRD<"madbr", 0xB31E, z_fma, FP64>;
+def MAEBR : TernaryRRD<"maebr", 0xB30E, z_fma, FP32, FP32>;
+def MADBR : TernaryRRD<"madbr", 0xB31E, z_fma, FP64, FP64>;
 
-def MAEB : TernaryRXF<"maeb", 0xED0E, z_fma, FP32, load, 4>;
-def MADB : TernaryRXF<"madb", 0xED1E, z_fma, FP64, load, 8>;
+def MAEB : TernaryRXF<"maeb", 0xED0E, z_fma, FP32, FP32, load, 4>;
+def MADB : TernaryRXF<"madb", 0xED1E, z_fma, FP64, FP64, load, 8>;
 
 // Fused multiply-subtract.
-def MSEBR : TernaryRRD<"msebr", 0xB30F, z_fms, FP32>;
-def MSDBR : TernaryRRD<"msdbr", 0xB31F, z_fms, FP64>;
+def MSEBR : TernaryRRD<"msebr", 0xB30F, z_fms, FP32, FP32>;
+def MSDBR : TernaryRRD<"msdbr", 0xB31F, z_fms, FP64, FP64>;
 
-def MSEB : TernaryRXF<"mseb", 0xED0F, z_fms, FP32, load, 4>;
-def MSDB : TernaryRXF<"msdb", 0xED1F, z_fms, FP64, load, 8>;
+def MSEB : TernaryRXF<"mseb", 0xED0F, z_fms, FP32, FP32, load, 4>;
+def MSDB : TernaryRXF<"msdb", 0xED1F, z_fms, FP64, FP64, load, 8>;
 
 // Division.
 def DEBR : BinaryRRE<"debr", 0xB30D, fdiv, FP32,  FP32>;
@@ -457,6 +458,12 @@ def DXBR : BinaryRRE<"dxbr", 0xB34D, fdiv, FP128, FP128>;
 
 def DEB : BinaryRXE<"deb", 0xED0D, fdiv, FP32, load, 4>;
 def DDB : BinaryRXE<"ddb", 0xED1D, fdiv, FP64, load, 8>;
+
+// Divide to integer.
+let Defs = [CC] in {
+  def DIEBR : TernaryRRFb<"diebr", 0xB353, FP32, FP32, FP32>;
+  def DIDBR : TernaryRRFb<"didbr", 0xB35B, FP64, FP64, FP64>;
+}
 
 //===----------------------------------------------------------------------===//
 // Comparisons
@@ -469,6 +476,13 @@ let Defs = [CC], CCValues = 0xF in {
 
   def CEB : CompareRXE<"ceb", 0xED09, z_fcmp, FP32, load, 4>;
   def CDB : CompareRXE<"cdb", 0xED19, z_fcmp, FP64, load, 8>;
+
+  def KEBR : CompareRRE<"kebr", 0xB308, null_frag, FP32,  FP32>;
+  def KDBR : CompareRRE<"kdbr", 0xB318, null_frag, FP64,  FP64>;
+  def KXBR : CompareRRE<"kxbr", 0xB348, null_frag, FP128, FP128>;
+
+  def KEB : CompareRXE<"keb", 0xED08, null_frag, FP32, load, 4>;
+  def KDB : CompareRXE<"kdb", 0xED18, null_frag, FP64, load, 8>;
 }
 
 // Test Data Class.

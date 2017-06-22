@@ -21,6 +21,7 @@
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/TargetFolder.h"
 #include "llvm/Analysis/ValueTracking.h"
+#include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/IR/DIBuilder.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/IRBuilder.h"
@@ -29,7 +30,7 @@
 #include "llvm/IR/Operator.h"
 #include "llvm/IR/PatternMatch.h"
 #include "llvm/Pass.h"
-#include "llvm/Support/Dwarf.h"
+#include "llvm/Support/KnownBits.h"
 #include "llvm/Transforms/InstCombine/InstCombineWorklist.h"
 #include "llvm/Transforms/Utils/Local.h"
 
@@ -71,6 +72,27 @@ static inline unsigned getComplexity(Value *V) {
   if (isa<Argument>(V))
     return 3;
   return isa<Constant>(V) ? (isa<UndefValue>(V) ? 0 : 1) : 2;
+}
+
+/// Predicate canonicalization reduces the number of patterns that need to be
+/// matched by other transforms. For example, we may swap the operands of a
+/// conditional branch or select to create a compare with a canonical (inverted)
+/// predicate which is then more likely to be matched with other values.
+static inline bool isCanonicalPredicate(CmpInst::Predicate Pred) {
+  switch (Pred) {
+  case CmpInst::ICMP_NE:
+  case CmpInst::ICMP_ULE:
+  case CmpInst::ICMP_SLE:
+  case CmpInst::ICMP_UGE:
+  case CmpInst::ICMP_SGE:
+  // TODO: There are 16 FCMP predicates. Should others be (not) canonical?
+  case CmpInst::FCMP_ONE:
+  case CmpInst::FCMP_OLE:
+  case CmpInst::FCMP_OGE:
+    return false;
+  default:
+    return true;
+  }
 }
 
 /// \brief Add one to a Constant
@@ -253,11 +275,7 @@ public:
   Instruction *visitSDiv(BinaryOperator &I);
   Instruction *visitFDiv(BinaryOperator &I);
   Value *simplifyRangeCheck(ICmpInst *Cmp0, ICmpInst *Cmp1, bool Inverted);
-  Value *FoldAndOfICmps(ICmpInst *LHS, ICmpInst *RHS);
-  Value *FoldAndOfFCmps(FCmpInst *LHS, FCmpInst *RHS);
   Instruction *visitAnd(BinaryOperator &I);
-  Value *FoldOrOfICmps(ICmpInst *LHS, ICmpInst *RHS, Instruction *CxtI);
-  Value *FoldOrOfFCmps(FCmpInst *LHS, FCmpInst *RHS);
   Instruction *FoldOrWithConstants(BinaryOperator &I, Value *Op, Value *A,
                                    Value *B, Value *C);
   Instruction *FoldXorWithConstants(BinaryOperator &I, Value *Op, Value *A,
@@ -388,10 +406,27 @@ private:
                                  bool DoTransform = true);
 
   Instruction *transformSExtICmp(ICmpInst *ICI, Instruction &CI);
-  bool WillNotOverflowSignedAdd(Value *LHS, Value *RHS, Instruction &CxtI);
-  bool WillNotOverflowSignedSub(Value *LHS, Value *RHS, Instruction &CxtI);
-  bool WillNotOverflowUnsignedSub(Value *LHS, Value *RHS, Instruction &CxtI);
-  bool WillNotOverflowSignedMul(Value *LHS, Value *RHS, Instruction &CxtI);
+  bool willNotOverflowSignedAdd(const Value *LHS, const Value *RHS,
+                                const Instruction &CxtI) const {
+    return computeOverflowForSignedAdd(LHS, RHS, &CxtI) ==
+           OverflowResult::NeverOverflows;
+  };
+  bool willNotOverflowUnsignedAdd(const Value *LHS, const Value *RHS,
+                                  const Instruction &CxtI) const {
+    return computeOverflowForUnsignedAdd(LHS, RHS, &CxtI) ==
+           OverflowResult::NeverOverflows;
+  };
+  bool willNotOverflowSignedSub(const Value *LHS, const Value *RHS,
+                                const Instruction &CxtI) const;
+  bool willNotOverflowUnsignedSub(const Value *LHS, const Value *RHS,
+                                  const Instruction &CxtI) const;
+  bool willNotOverflowSignedMul(const Value *LHS, const Value *RHS,
+                                const Instruction &CxtI) const;
+  bool willNotOverflowUnsignedMul(const Value *LHS, const Value *RHS,
+                                  const Instruction &CxtI) const {
+    return computeOverflowForUnsignedMul(LHS, RHS, &CxtI) ==
+           OverflowResult::NeverOverflows;
+  };
   Value *EmitGEPOffset(User *GEP);
   Instruction *scalarizePHI(ExtractElementInst &EI, PHINode *PN);
   Value *EvaluateInDifferentElementOrder(Value *V, ArrayRef<int> Mask);
@@ -412,6 +447,14 @@ private:
   Instruction::CastOps isEliminableCastPair(const CastInst *CI1,
                                             const CastInst *CI2);
 
+  Value *foldAndOfICmps(ICmpInst *LHS, ICmpInst *RHS, Instruction &CxtI);
+  Value *foldAndOfFCmps(FCmpInst *LHS, FCmpInst *RHS);
+  Value *foldOrOfICmps(ICmpInst *LHS, ICmpInst *RHS, Instruction &CxtI);
+  Value *foldOrOfFCmps(FCmpInst *LHS, FCmpInst *RHS);
+  Value *foldXorOfICmps(ICmpInst *LHS, ICmpInst *RHS);
+
+  Value *foldAndOrOfICmpsOfAndWithPow2(ICmpInst *LHS, ICmpInst *RHS,
+                                       bool JoinedByAnd, Instruction &CxtI);
 public:
   /// \brief Inserts an instruction \p New before instruction \p Old
   ///
@@ -490,31 +533,43 @@ public:
     return nullptr; // Don't do anything with FI
   }
 
-  void computeKnownBits(Value *V, KnownBits &Known,
-                        unsigned Depth, Instruction *CxtI) const {
-    return llvm::computeKnownBits(V, Known, DL, Depth, &AC, CxtI, &DT);
+  void computeKnownBits(const Value *V, KnownBits &Known,
+                        unsigned Depth, const Instruction *CxtI) const {
+    llvm::computeKnownBits(V, Known, DL, Depth, &AC, CxtI, &DT);
+  }
+  KnownBits computeKnownBits(const Value *V, unsigned Depth,
+                             const Instruction *CxtI) const {
+    return llvm::computeKnownBits(V, DL, Depth, &AC, CxtI, &DT);
   }
 
-  bool MaskedValueIsZero(Value *V, const APInt &Mask, unsigned Depth = 0,
-                         Instruction *CxtI = nullptr) const {
+  bool isKnownToBeAPowerOfTwo(const Value *V, bool OrZero = false,
+                              unsigned Depth = 0,
+                              const Instruction *CxtI = nullptr) {
+    return llvm::isKnownToBeAPowerOfTwo(V, DL, OrZero, Depth, &AC, CxtI, &DT);
+  }
+
+  bool MaskedValueIsZero(const Value *V, const APInt &Mask, unsigned Depth = 0,
+                         const Instruction *CxtI = nullptr) const {
     return llvm::MaskedValueIsZero(V, Mask, DL, Depth, &AC, CxtI, &DT);
   }
-  unsigned ComputeNumSignBits(Value *Op, unsigned Depth = 0,
-                              Instruction *CxtI = nullptr) const {
+  unsigned ComputeNumSignBits(const Value *Op, unsigned Depth = 0,
+                              const Instruction *CxtI = nullptr) const {
     return llvm::ComputeNumSignBits(Op, DL, Depth, &AC, CxtI, &DT);
   }
-  void ComputeSignBit(Value *V, bool &KnownZero, bool &KnownOne,
-                      unsigned Depth = 0, Instruction *CxtI = nullptr) const {
-    return llvm::ComputeSignBit(V, KnownZero, KnownOne, DL, Depth, &AC, CxtI,
-                                &DT);
-  }
-  OverflowResult computeOverflowForUnsignedMul(Value *LHS, Value *RHS,
-                                               const Instruction *CxtI) {
+  OverflowResult computeOverflowForUnsignedMul(const Value *LHS,
+                                               const Value *RHS,
+                                               const Instruction *CxtI) const {
     return llvm::computeOverflowForUnsignedMul(LHS, RHS, DL, &AC, CxtI, &DT);
   }
-  OverflowResult computeOverflowForUnsignedAdd(Value *LHS, Value *RHS,
-                                               const Instruction *CxtI) {
+  OverflowResult computeOverflowForUnsignedAdd(const Value *LHS,
+                                               const Value *RHS,
+                                               const Instruction *CxtI) const {
     return llvm::computeOverflowForUnsignedAdd(LHS, RHS, DL, &AC, CxtI, &DT);
+  }
+  OverflowResult computeOverflowForSignedAdd(const Value *LHS,
+                                             const Value *RHS,
+                                             const Instruction *CxtI) const {
+    return llvm::computeOverflowForSignedAdd(LHS, RHS, DL, &AC, CxtI, &DT);
   }
 
   /// Maximum size of array considered when transforming.
@@ -671,7 +726,8 @@ private:
   Instruction *MatchBSwap(BinaryOperator &I);
   bool SimplifyStoreAtEndOfBlock(StoreInst &SI);
 
-  Instruction *SimplifyElementAtomicMemCpy(ElementAtomicMemCpyInst *AMI);
+  Instruction *
+  SimplifyElementUnorderedAtomicMemCpy(ElementUnorderedAtomicMemCpyInst *AMI);
   Instruction *SimplifyMemTransfer(MemIntrinsic *MI);
   Instruction *SimplifyMemSet(MemSetInst *MI);
 

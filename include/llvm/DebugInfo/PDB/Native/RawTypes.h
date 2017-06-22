@@ -73,13 +73,6 @@ struct SecMapEntry {
   support::ulittle32_t SecByteLength; // Byte count of the segment or group.
 };
 
-// Used for serialized hash table in TPI stream.
-// In the reference, it is an array of TI and cbOff pair.
-struct TypeIndexOffset {
-  codeview::TypeIndex Type;
-  support::ulittle32_t Offset;
-};
-
 /// Some of the values are stored in bitfields.  Since this needs to be portable
 /// across compilers and architectures (big / little endian in particular) we
 /// can't use the actual structures below, but must instead do the shifting
@@ -211,7 +204,7 @@ struct ModInfoFlags {
 };
 
 /// The header preceeding each entry in the Module Info substream of the DBI
-/// stream.
+/// stream.  Corresponds to the type MODI in the reference implementation.
 struct ModuleInfoHeader {
   /// Currently opened module. This field is a pointer in the reference
   /// implementation, but that won't work on 64-bit systems, and anyway it
@@ -243,9 +236,12 @@ struct ModuleInfoHeader {
   /// Padding so the next field is 4-byte aligned.
   char Padding1[2];
 
-  /// Array of [0..NumFiles) DBI name buffer offsets.  This field is a pointer
-  /// in the reference implementation, but as with `Mod`, we ignore it for now
-  /// since it is unused.
+  /// Array of [0..NumFiles) DBI name buffer offsets.  In the reference
+  /// implementation this field is a pointer.  But since you can't portably
+  /// serialize a pointer, on 64-bit platforms they copy all the values except
+  /// this one into the 32-bit version of the struct and use that for
+  /// serialization.  Regardless, this field is unused, it is only there to
+  /// store a pointer that can be accessed at runtime.
   support::ulittle32_t FileNameOffs;
 
   /// Name Index for src file name
@@ -308,9 +304,9 @@ struct InfoStreamHeader {
 
 /// The header preceeding the /names stream.
 struct PDBStringTableHeader {
-  support::ulittle32_t Signature;
-  support::ulittle32_t HashVersion;
-  support::ulittle32_t ByteSize;
+  support::ulittle32_t Signature;   // PDBStringTableSignature
+  support::ulittle32_t HashVersion; // 1 or 2
+  support::ulittle32_t ByteSize;    // Number of bytes of names buffer.
 };
 
 const uint32_t PDBStringTableSignature = 0xEFFEEFFE;

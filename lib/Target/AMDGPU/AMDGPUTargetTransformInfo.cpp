@@ -20,8 +20,8 @@
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/CodeGen/BasicTTIImpl.h"
-#include "llvm/IR/Module.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Target/CostTable.h"
 #include "llvm/Target/TargetLowering.h"
@@ -184,9 +184,9 @@ void AMDGPUTTIImpl::getUnrollingPreferences(Loop *L,
   }
 }
 
-unsigned AMDGPUTTIImpl::getNumberOfRegisters(bool Vec) {
-  if (Vec)
-    return 0;
+unsigned AMDGPUTTIImpl::getHardwareNumberOfRegisters(bool Vec) const {
+  // The concept of vector registers doesn't really exist. Some packed vector
+  // operations operate on the normal 32-bit registers.
 
   // Number of VGPRs on SI.
   if (ST->getGeneration() >= AMDGPUSubtarget::SOUTHERN_ISLANDS)
@@ -195,8 +195,18 @@ unsigned AMDGPUTTIImpl::getNumberOfRegisters(bool Vec) {
   return 4 * 128; // XXX - 4 channels. Should these count as vector instead?
 }
 
-unsigned AMDGPUTTIImpl::getRegisterBitWidth(bool Vector) {
-  return Vector ? 0 : 32;
+unsigned AMDGPUTTIImpl::getNumberOfRegisters(bool Vec) const {
+  // This is really the number of registers to fill when vectorizing /
+  // interleaving loops, so we lie to avoid trying to use all registers.
+  return getHardwareNumberOfRegisters(Vec) >> 3;
+}
+
+unsigned AMDGPUTTIImpl::getRegisterBitWidth(bool Vector) const {
+  return 32;
+}
+
+unsigned AMDGPUTTIImpl::getMinVectorRegisterBitWidth() const {
+  return 32;
 }
 
 unsigned AMDGPUTTIImpl::getLoadStoreVecRegBitWidth(unsigned AddrSpace) const {
@@ -247,11 +257,11 @@ bool AMDGPUTTIImpl::isLegalToVectorizeStoreChain(unsigned ChainSizeInBytes,
 
 unsigned AMDGPUTTIImpl::getMaxInterleaveFactor(unsigned VF) {
   // Disable unrolling if the loop is not vectorized.
+  // TODO: Enable this again.
   if (VF == 1)
     return 1;
 
-  // Semi-arbitrary large amount.
-  return 64;
+  return 8;
 }
 
 int AMDGPUTTIImpl::getArithmeticInstrCost(
@@ -363,13 +373,22 @@ int AMDGPUTTIImpl::getVectorInstrCost(unsigned Opcode, Type *ValTy,
                                       unsigned Index) {
   switch (Opcode) {
   case Instruction::ExtractElement:
-  case Instruction::InsertElement:
+  case Instruction::InsertElement: {
+    unsigned EltSize
+      = DL.getTypeSizeInBits(cast<VectorType>(ValTy)->getElementType());
+    if (EltSize < 32) {
+      if (EltSize == 16 && Index == 0 && ST->has16BitInsts())
+        return 0;
+      return BaseT::getVectorInstrCost(Opcode, ValTy, Index);
+    }
+
     // Extracts are just reads of a subregister, so are free. Inserts are
     // considered free because we don't want to have any cost for scalarizing
     // operations, and we don't have to copy into a different register class.
 
     // Dynamic indexing isn't free and is best avoided.
     return Index == ~0u ? 2 : 0;
+  }
   default:
     return BaseT::getVectorInstrCost(Opcode, ValTy, Index);
   }
@@ -478,4 +497,40 @@ bool AMDGPUTTIImpl::isSourceOfDivergence(const Value *V) const {
     return true;
 
   return false;
+}
+
+bool AMDGPUTTIImpl::isAlwaysUniform(const Value *V) const {
+  if (const IntrinsicInst *Intrinsic = dyn_cast<IntrinsicInst>(V)) {
+    switch (Intrinsic->getIntrinsicID()) {
+    default:
+      return false;
+    case Intrinsic::amdgcn_readfirstlane:
+    case Intrinsic::amdgcn_readlane:
+      return true;
+    }
+  }
+  return false;
+}
+
+unsigned AMDGPUTTIImpl::getShuffleCost(TTI::ShuffleKind Kind, Type *Tp, int Index,
+                                       Type *SubTp) {
+  if (ST->hasVOP3PInsts()) {
+    VectorType *VT = cast<VectorType>(Tp);
+    if (VT->getNumElements() == 2 &&
+        DL.getTypeSizeInBits(VT->getElementType()) == 16) {
+      // With op_sel VOP3P instructions freely can access the low half or high
+      // half of a register, so any swizzle is free.
+
+      switch (Kind) {
+      case TTI::SK_Broadcast:
+      case TTI::SK_Reverse:
+      case TTI::SK_PermuteSingleSrc:
+        return 0;
+      default:
+        break;
+      }
+    }
+  }
+
+  return BaseT::getShuffleCost(Kind, Tp, Index, SubTp);
 }

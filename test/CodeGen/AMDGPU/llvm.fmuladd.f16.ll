@@ -50,7 +50,7 @@ define amdgpu_kernel void @fmuladd_f16(
 ; VI-FLUSH: buffer_store_short v[[C_F16]]
 
 ; VI-DENORM: v_mov_b32_e32 [[KA:v[0-9]+]], 0x4200
-; VI-DENORM: v_fma_f16 [[RESULT:v[0-9]+]], [[KA]], v[[B_F16]], v[[C_F16]]
+; VI-DENORM: v_fma_f16 [[RESULT:v[0-9]+]], v[[B_F16]], [[KA]], v[[C_F16]]
 ; VI-DENORM: buffer_store_short [[RESULT]]
 
 ; GCN: s_endpgm
@@ -78,7 +78,7 @@ define amdgpu_kernel void @fmuladd_f16_imm_a(
 ; VI-FLUSH: buffer_store_short v[[C_F16]]
 
 ; VI-DENORM: v_mov_b32_e32 [[KA:v[0-9]+]], 0x4200
-; VI-DENORM: v_fma_f16 [[RESULT:v[0-9]+]], [[KA]], v[[A_F16]], v[[C_F16]]
+; VI-DENORM: v_fma_f16 [[RESULT:v[0-9]+]], v[[A_F16]], [[KA]], v[[C_F16]]
 ; VI-DENORM buffer_store_short [[RESULT]]
 
 
@@ -118,7 +118,7 @@ define amdgpu_kernel void @fmuladd_f16_imm_b(
 ; SI:  v_or_b32_e32 v[[R_V2_F16:[0-9]+]], v[[R_F16_HI]], v[[R_F16_LO]]
 
 ; VI-FLUSH:     v_lshrrev_b32_e32 v[[A_F16_1:[0-9]+]], 16, v[[A_V2_F16]]
-; VI-FLUSH-DAG: v_mac_f16_sdwa v[[A_F16_1]], v[[C_V2_F16]], v[[B_V2_F16]] dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1 src1_sel:WORD_1
+; VI-FLUSH-DAG: v_mac_f16_sdwa v[[A_F16_1]], v[[B_V2_F16]], v[[C_V2_F16]] dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1 src1_sel:WORD_1
 ; VI-FLUSH-DAG: v_mac_f16_e32 v[[A_V2_F16]], v[[C_V2_F16]], v[[B_V2_F16]]
 ; VI-FLUSH-DAG: v_lshlrev_b32_e32 v[[R_F16_HI:[0-9]+]], 16, v[[A_F16_1]]
 ; VI-FLUSH-NOT: v_and_b32

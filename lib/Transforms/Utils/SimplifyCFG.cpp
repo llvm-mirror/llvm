@@ -15,13 +15,13 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/Optional.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetOperations.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/Analysis/EHPersonalities.h"
@@ -29,8 +29,8 @@
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/BasicBlock.h"
-#include "llvm/IR/CallSite.h"
 #include "llvm/IR/CFG.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/ConstantRange.h"
 #include "llvm/IR/Constants.h"
@@ -55,7 +55,6 @@
 #include "llvm/IR/Type.h"
 #include "llvm/IR/User.h"
 #include "llvm/IR/Value.h"
-#include "llvm/IR/DebugInfo.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -596,7 +595,7 @@ private:
       Span = Span.inverse();
 
     // If there are a ton of values, we don't want to make a ginormous switch.
-    if (Span.getSetSize().ugt(8) || Span.isEmptySet()) {
+    if (Span.isSizeLargerThan(8) || Span.isEmptySet()) {
       return false;
     }
 
@@ -1374,53 +1373,6 @@ HoistTerminator:
 
   EraseTerminatorInstAndDCECond(BI);
   return true;
-}
-
-// Is it legal to place a variable in operand \c OpIdx of \c I?
-// FIXME: This should be promoted to Instruction.
-static bool canReplaceOperandWithVariable(const Instruction *I,
-                                          unsigned OpIdx) {
-  // We can't have a PHI with a metadata type.
-  if (I->getOperand(OpIdx)->getType()->isMetadataTy())
-    return false;
-
-  // Early exit.
-  if (!isa<Constant>(I->getOperand(OpIdx)))
-    return true;
-
-  switch (I->getOpcode()) {
-  default:
-    return true;
-  case Instruction::Call:
-  case Instruction::Invoke:
-    // FIXME: many arithmetic intrinsics have no issue taking a
-    // variable, however it's hard to distingish these from
-    // specials such as @llvm.frameaddress that require a constant.
-    if (isa<IntrinsicInst>(I))
-      return false;
-
-    // Constant bundle operands may need to retain their constant-ness for
-    // correctness.
-    if (ImmutableCallSite(I).isBundleOperand(OpIdx))
-      return false;
-
-    return true;
-
-  case Instruction::ShuffleVector:
-    // Shufflevector masks are constant.
-    return OpIdx != 2;
-  case Instruction::ExtractValue:
-  case Instruction::InsertValue:
-    // All operands apart from the first are constant.
-    return OpIdx == 0;
-  case Instruction::Alloca:
-    return false;
-  case Instruction::GetElementPtr:
-    if (OpIdx == 0)
-      return true;
-    gep_type_iterator It = std::next(gep_type_begin(I), OpIdx - 1);
-    return It.isSequential();
-  }
 }
 
 // All instructions in Insts belong to different blocks that all unconditionally
@@ -2235,7 +2187,7 @@ static bool FoldCondBranchOnPHI(BranchInst *BI, const DataLayout &DL,
         if (!BBI->use_empty())
           TranslateMap[&*BBI] = V;
         if (!N->mayHaveSideEffects()) {
-          delete N; // Instruction folded away, don't need actual inst
+          N->deleteValue(); // Instruction folded away, don't need actual inst
           N = nullptr;
         }
       } else {
@@ -4368,8 +4320,7 @@ static bool EliminateDeadSwitchCases(SwitchInst *SI, AssumptionCache *AC,
                                      const DataLayout &DL) {
   Value *Cond = SI->getCondition();
   unsigned Bits = Cond->getType()->getIntegerBitWidth();
-  KnownBits Known(Bits);
-  computeKnownBits(Cond, Known, DL, 0, AC, SI);
+  KnownBits Known = computeKnownBits(Cond, DL, 0, AC, SI);
 
   // We can also eliminate cases by determining that their values are outside of
   // the limited range of the condition based on how many significant (non-sign)
@@ -4380,7 +4331,7 @@ static bool EliminateDeadSwitchCases(SwitchInst *SI, AssumptionCache *AC,
   // Gather dead cases.
   SmallVector<ConstantInt *, 8> DeadCases;
   for (auto &Case : SI->cases()) {
-    APInt CaseVal = Case.getCaseValue()->getValue();
+    const APInt &CaseVal = Case.getCaseValue()->getValue();
     if (Known.Zero.intersects(CaseVal) || !Known.One.isSubsetOf(CaseVal) ||
         (CaseVal.getMinSignedBits() > MaxSignificantBitsInCond)) {
       DeadCases.push_back(Case.getCaseValue());
@@ -4946,7 +4897,7 @@ SwitchLookupTable::SwitchLookupTable(
         LinearMappingPossible = false;
         break;
       }
-      APInt Val = ConstVal->getValue();
+      const APInt &Val = ConstVal->getValue();
       if (I != 0) {
         APInt Dist = Val - PrevVal;
         if (I == 1) {

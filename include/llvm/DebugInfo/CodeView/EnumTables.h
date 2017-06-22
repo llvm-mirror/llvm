@@ -11,8 +11,8 @@
 #define LLVM_DEBUGINFO_CODEVIEW_ENUMTABLES_H
 
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/BinaryFormat/COFF.h"
 #include "llvm/DebugInfo/CodeView/CodeView.h"
-#include "llvm/Support/COFF.h"
 #include "llvm/Support/ScopedPrinter.h"
 
 #include <stdint.h>
@@ -22,6 +22,7 @@ namespace codeview {
 ArrayRef<EnumEntry<SymbolKind>> getSymbolTypeNames();
 ArrayRef<EnumEntry<TypeLeafKind>> getTypeLeafNames();
 ArrayRef<EnumEntry<uint16_t>> getRegisterNames();
+ArrayRef<EnumEntry<uint32_t>> getPublicSymFlagNames();
 ArrayRef<EnumEntry<uint8_t>> getProcSymFlagNames();
 ArrayRef<EnumEntry<uint16_t>> getLocalFlagNames();
 ArrayRef<EnumEntry<uint8_t>> getFrameCookieKindNames();

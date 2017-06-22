@@ -34,14 +34,17 @@
 
 #include "llvm/ADT/APInt.h"
 #include "llvm/IR/InstrTypes.h"
-#include "llvm/Support/DataTypes.h"
+#include "llvm/IR/Instruction.h"
+#include "llvm/Support/Compiler.h"
+#include <cstdint>
 
 namespace llvm {
 
 class MDNode;
+class raw_ostream;
 
 /// This class represents a range of values.
-class ConstantRange {
+class LLVM_NODISCARD ConstantRange {
   APInt Lower, Upper;
 
 public:
@@ -167,7 +170,10 @@ public:
   APInt getSetSize() const;
 
   /// Compare set size of this range with the range CR.
-  bool isSizeStrictlySmallerThanOf(const ConstantRange &CR) const;
+  bool isSizeStrictlySmallerThan(const ConstantRange &CR) const;
+
+  // Compare set size of this range with Value.
+  bool isSizeLargerThan(uint64_t MaxSize) const;
 
   /// Return the largest unsigned value contained in the ConstantRange.
   APInt getUnsignedMax() const;
@@ -327,6 +333,6 @@ inline raw_ostream &operator<<(raw_ostream &OS, const ConstantRange &CR) {
 /// E.g. if RangeMD is !{i32 0, i32 10, i32 15, i32 20} then return [0, 20).
 ConstantRange getConstantRangeFromMetadata(const MDNode &RangeMD);
 
-} // End llvm namespace
+} // end namespace llvm
 
-#endif
+#endif // LLVM_IR_CONSTANTRANGE_H

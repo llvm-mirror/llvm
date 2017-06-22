@@ -15,6 +15,7 @@
 #ifndef LLVM_IR_IRBUILDER_H
 #define LLVM_IR_IRBUILDER_H
 
+#include "llvm-c/Types.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/None.h"
 #include "llvm/ADT/StringRef.h"
@@ -41,11 +42,10 @@
 #include "llvm/Support/AtomicOrdering.h"
 #include "llvm/Support/CBindingWrapping.h"
 #include "llvm/Support/Casting.h"
-#include "llvm-c/Types.h"
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
-#include <algorithm>
 #include <functional>
 
 namespace llvm {
@@ -435,6 +435,26 @@ public:
                          MDNode *ScopeTag = nullptr,
                          MDNode *NoAliasTag = nullptr);
 
+  /// \brief Create and insert an element unordered-atomic memcpy between the
+  /// specified pointers.
+  ///
+  /// If the pointers aren't i8*, they will be converted.  If a TBAA tag is
+  /// specified, it will be added to the instruction. Likewise with alias.scope
+  /// and noalias tags.
+  CallInst *CreateElementUnorderedAtomicMemCpy(
+      Value *Dst, Value *Src, uint64_t Size, uint32_t ElementSize,
+      MDNode *TBAATag = nullptr, MDNode *TBAAStructTag = nullptr,
+      MDNode *ScopeTag = nullptr, MDNode *NoAliasTag = nullptr) {
+    return CreateElementUnorderedAtomicMemCpy(
+        Dst, Src, getInt64(Size), ElementSize, TBAATag, TBAAStructTag, ScopeTag,
+        NoAliasTag);
+  }
+
+  CallInst *CreateElementUnorderedAtomicMemCpy(
+      Value *Dst, Value *Src, Value *Size, uint32_t ElementSize,
+      MDNode *TBAATag = nullptr, MDNode *TBAAStructTag = nullptr,
+      MDNode *ScopeTag = nullptr, MDNode *NoAliasTag = nullptr);
+
   /// \brief Create and insert a memmove between the specified
   /// pointers.
   ///
@@ -453,6 +473,45 @@ public:
                           bool isVolatile = false, MDNode *TBAATag = nullptr,
                           MDNode *ScopeTag = nullptr,
                           MDNode *NoAliasTag = nullptr);
+
+  /// \brief Create a vector fadd reduction intrinsic of the source vector.
+  /// The first parameter is a scalar accumulator value for ordered reductions.
+  CallInst *CreateFAddReduce(Value *Acc, Value *Src);
+
+  /// \brief Create a vector fmul reduction intrinsic of the source vector.
+  /// The first parameter is a scalar accumulator value for ordered reductions.
+  CallInst *CreateFMulReduce(Value *Acc, Value *Src);
+
+  /// \brief Create a vector int add reduction intrinsic of the source vector.
+  CallInst *CreateAddReduce(Value *Src);
+
+  /// \brief Create a vector int mul reduction intrinsic of the source vector.
+  CallInst *CreateMulReduce(Value *Src);
+
+  /// \brief Create a vector int AND reduction intrinsic of the source vector.
+  CallInst *CreateAndReduce(Value *Src);
+
+  /// \brief Create a vector int OR reduction intrinsic of the source vector.
+  CallInst *CreateOrReduce(Value *Src);
+
+  /// \brief Create a vector int XOR reduction intrinsic of the source vector.
+  CallInst *CreateXorReduce(Value *Src);
+
+  /// \brief Create a vector integer max reduction intrinsic of the source
+  /// vector.
+  CallInst *CreateIntMaxReduce(Value *Src, bool IsSigned = false);
+
+  /// \brief Create a vector integer min reduction intrinsic of the source
+  /// vector.
+  CallInst *CreateIntMinReduce(Value *Src, bool IsSigned = false);
+
+  /// \brief Create a vector float max reduction intrinsic of the source
+  /// vector.
+  CallInst *CreateFPMaxReduce(Value *Src, bool NoNaN = false);
+
+  /// \brief Create a vector float min reduction intrinsic of the source
+  /// vector.
+  CallInst *CreateFPMinReduce(Value *Src, bool NoNaN = false);
 
   /// \brief Create a lifetime.start intrinsic.
   ///

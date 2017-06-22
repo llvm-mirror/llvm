@@ -184,6 +184,10 @@ class InstrItineraryData;
       SMLALBT,      // 64-bit signed accumulate multiply bottom, top 16
       SMLALTB,      // 64-bit signed accumulate multiply top, bottom 16
       SMLALTT,      // 64-bit signed accumulate multiply top, top 16
+      SMLALD,       // Signed multiply accumulate long dual
+      SMLALDX,      // Signed multiply accumulate long dual exchange
+      SMLSLD,       // Signed multiply subtract long dual
+      SMLSLDX,      // Signed multiply subtract long dual exchange
 
       // Operands of the standard BUILD_VECTOR node are not legalized, which
       // is fine if BUILD_VECTORs are always lowered to shuffles or other
@@ -479,10 +483,10 @@ class InstrItineraryData;
 
     void emitAtomicCmpXchgNoStoreLLBalance(IRBuilder<> &Builder) const override;
 
-    Instruction* emitLeadingFence(IRBuilder<> &Builder, AtomicOrdering Ord,
-                          bool IsStore, bool IsLoad) const override;
-    Instruction* emitTrailingFence(IRBuilder<> &Builder, AtomicOrdering Ord,
-                           bool IsStore, bool IsLoad) const override;
+    Instruction *emitLeadingFence(IRBuilder<> &Builder, Instruction *Inst,
+                                  AtomicOrdering Ord) const override;
+    Instruction *emitTrailingFence(IRBuilder<> &Builder, Instruction *Inst,
+                                   AtomicOrdering Ord) const override;
 
     unsigned getMaxSupportedInterleaveFactor() const override { return 4; }
 
@@ -506,7 +510,7 @@ class InstrItineraryData;
     bool canCombineStoreAndExtract(Type *VectorTy, Value *Idx,
                                    unsigned &Cost) const override;
 
-    bool canMergeStoresTo(EVT MemVT) const override {
+    bool canMergeStoresTo(unsigned AddressSpace, EVT MemVT) const override {
       // Do not merge to larger than i32.
       return (MemVT.getSizeInBits() <= 32);
     }
@@ -539,6 +543,8 @@ class InstrItineraryData;
     /// lowering accesses of the given type.
     unsigned getNumInterleavedAccesses(VectorType *VecTy,
                                        const DataLayout &DL) const;
+
+    void finalizeLowering(MachineFunction &MF) const override;
 
   protected:
     std::pair<const TargetRegisterClass *, uint8_t>
@@ -595,6 +601,8 @@ class InstrItineraryData;
     SDValue LowerINTRINSIC_WO_CHAIN(SDValue Op, SelectionDAG &DAG,
                                     const ARMSubtarget *Subtarget) const;
     SDValue LowerBlockAddress(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerGlobalAddressDarwin(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerGlobalAddressELF(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerGlobalAddressWindows(SDValue Op, SelectionDAG &DAG) const;

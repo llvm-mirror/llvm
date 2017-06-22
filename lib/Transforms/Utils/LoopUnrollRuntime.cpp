@@ -21,7 +21,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Transforms/Utils/UnrollLoop.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/LoopIterator.h"
@@ -37,6 +36,7 @@
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Cloning.h"
+#include "llvm/Transforms/Utils/UnrollLoop.h"
 #include <algorithm>
 
 using namespace llvm;
@@ -512,6 +512,16 @@ bool llvm::UnrollRuntimeLoopRemainder(Loop *L, unsigned Count,
 
   BasicBlock *Latch = L->getLoopLatch();
 
+  // Cloning the loop basic blocks (`CloneLoopBlocks`) requires that one of the
+  // targets of the Latch be the single exit block out of the loop. This needs
+  // to be guaranteed by the callers of UnrollRuntimeLoopRemainder.
+  BranchInst *LatchBR = cast<BranchInst>(Latch->getTerminator());
+  assert(
+      (LatchBR->getSuccessor(0) == Exit || LatchBR->getSuccessor(1) == Exit) &&
+      "one of the loop latch successors should be "
+      "the exit block!");
+  // Avoid warning of unused `LatchBR` variable in release builds.
+  (void)LatchBR;
   // Loop structure is the following:
   //
   // PreHeader

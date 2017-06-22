@@ -15,8 +15,15 @@
 
 using namespace llvm;
 
-BinaryStreamWriter::BinaryStreamWriter(WritableBinaryStreamRef S)
-    : Stream(S), Offset(0) {}
+BinaryStreamWriter::BinaryStreamWriter(WritableBinaryStreamRef Ref)
+    : Stream(Ref) {}
+
+BinaryStreamWriter::BinaryStreamWriter(WritableBinaryStream &Stream)
+    : Stream(Stream) {}
+
+BinaryStreamWriter::BinaryStreamWriter(MutableArrayRef<uint8_t> Data,
+                                       llvm::support::endianness Endian)
+    : Stream(Data, Endian) {}
 
 Error BinaryStreamWriter::writeBytes(ArrayRef<uint8_t> Buffer) {
   if (auto EC = Stream.writeBytes(Offset, Buffer))
@@ -59,10 +66,25 @@ Error BinaryStreamWriter::writeStreamRef(BinaryStreamRef Ref, uint32_t Length) {
   return Error::success();
 }
 
+std::pair<BinaryStreamWriter, BinaryStreamWriter>
+BinaryStreamWriter::split(uint32_t Off) const {
+  assert(getLength() >= Off);
+
+  WritableBinaryStreamRef First = Stream.drop_front(Offset);
+
+  WritableBinaryStreamRef Second = First.drop_front(Off);
+  First = First.keep_front(Off);
+  BinaryStreamWriter W1{First};
+  BinaryStreamWriter W2{Second};
+  return std::make_pair(W1, W2);
+}
+
 Error BinaryStreamWriter::padToAlignment(uint32_t Align) {
   uint32_t NewOffset = alignTo(Offset, Align);
   if (NewOffset > getLength())
     return make_error<BinaryStreamError>(stream_error_code::stream_too_short);
-  Offset = NewOffset;
+  while (Offset < NewOffset)
+    if (auto EC = writeInteger('\0'))
+      return EC;
   return Error::success();
 }

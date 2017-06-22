@@ -85,7 +85,7 @@ define amdgpu_kernel void @v_test_sub_i16_zext_to_i32(i32 addrspace(1)* %out, i1
 
 ; FIXME: Need to handle non-uniform case for function below (load without gep).
 ; GCN-LABEL: {{^}}v_test_sub_i16_zext_to_i64:
-; VI-DAG: v_mov_b32_e32 v[[VZERO:[0-9]+]], 0
+; VI: v_mov_b32_e32 v[[VZERO:[0-9]+]], 0
 ; VI: flat_load_ushort [[A:v[0-9]+]]
 ; VI: flat_load_ushort [[B:v[0-9]+]]
 ; VI-DAG: v_subrev_u16_e32 v[[ADD:[0-9]+]], [[B]], [[A]]

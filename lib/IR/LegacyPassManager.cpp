@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/IR/LegacyPassManager.h"
+#include "llvm/ADT/Statistic.h"
 #include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/LegacyPassManagers.h"
@@ -465,6 +466,11 @@ public:
   // null.  It may be called multiple times.
   static void createTheTimeInfo();
 
+  // print - Prints out timing information and then resets the timers.
+  void print() {
+    TG.print(*CreateInfoOutputFile());
+  }
+
   /// getPassTimer - Return the timer for the specified pass if it exists.
   Timer *getPassTimer(Pass *P) {
     if (P->getAsPMDataManager())
@@ -587,7 +593,7 @@ AnalysisUsage *PMTopLevelManager::findAnalysisUsage(Pass *P) {
     assert(Node && "cached analysis usage must be non null");
 
     AnUsageMap[P] = &Node->AU;
-    AnUsage = &Node->AU;;
+    AnUsage = &Node->AU;
   }
   return AnUsage;
 }
@@ -1750,6 +1756,13 @@ Timer *llvm::getPassTimer(Pass *P) {
   if (TheTimeInfo)
     return TheTimeInfo->getPassTimer(P);
   return nullptr;
+}
+
+/// If timing is enabled, report the times collected up to now and then reset
+/// them.
+void llvm::reportAndResetTimings() {
+  if (TheTimeInfo)
+    TheTimeInfo->print();
 }
 
 //===----------------------------------------------------------------------===//

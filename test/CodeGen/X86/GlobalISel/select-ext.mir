@@ -1,7 +1,12 @@
-# RUN: llc -mtriple=i386-linux-gnu   -global-isel -run-pass=instruction-select %s -o - | FileCheck %s --check-prefix=ALL --check-prefix=X32
-# RUN: llc -mtriple=x86_64-linux-gnu -global-isel -run-pass=instruction-select %s -o - | FileCheck %s --check-prefix=ALL --check-prefix=X64
+# RUN: llc -mtriple=i386-linux-gnu   -global-isel -run-pass=instruction-select -verify-machineinstrs %s -o - | FileCheck %s --check-prefix=ALL --check-prefix=X32
+# RUN: llc -mtriple=x86_64-linux-gnu -global-isel -run-pass=instruction-select -verify-machineinstrs %s -o - | FileCheck %s --check-prefix=ALL --check-prefix=X64
 
 --- |
+  define i32 @test_zext_i1(i1 %a) {
+    %r = zext i1 %a to i32
+    ret i32 %r
+  }
+
   define i32 @test_zext_i8(i8 %val) {
     %r = zext i8 %val to i32
     ret i32 %r
@@ -24,14 +29,42 @@
 
 ...
 ---
+name:            test_zext_i1
+# ALL-LABEL: name:  test_zext_i1
+alignment:       4
+legalized:       true
+regBankSelected: true
+# ALL:      registers:
+# ALL-NEXT:   - { id: 0, class: gr8, preferred-register: '' }
+# ALL-NEXT:   - { id: 1, class: gr32, preferred-register: '' }
+# ALL-NEXT:   - { id: 2, class: gr32, preferred-register: '' }
+registers:
+  - { id: 0, class: gpr }
+  - { id: 1, class: gpr }
+# ALL:          %0 = COPY %dil
+# ALL-NEXT:     %2 = SUBREG_TO_REG 0, %0, 1
+# ALL-NEXT:     %1 = AND32ri8 %2, 1, implicit-def %eflags
+# ALL-NEXT:     %eax = COPY %1
+# ALL-NEXT:     RET 0, implicit %eax
+body:             |
+  bb.1 (%ir-block.0):
+    liveins: %edi
+
+    %0(s1) = COPY %edi
+    %1(s32) = G_ZEXT %0(s1)
+    %eax = COPY %1(s32)
+    RET 0, implicit %eax
+
+...
+---
 name:            test_zext_i8
 # ALL-LABEL: name:  test_zext_i8
 alignment:       4
 legalized:       true
 regBankSelected: true
 # ALL:      registers:
-# ALL-NEXT:   - { id: 0, class: gr8 }
-# ALL-NEXT:   - { id: 1, class: gr32 }
+# ALL-NEXT:   - { id: 0, class: gr8, preferred-register: '' }
+# ALL-NEXT:   - { id: 1, class: gr32, preferred-register: '' }
 registers:
   - { id: 0, class: gpr }
   - { id: 1, class: gpr }
@@ -56,8 +89,8 @@ alignment:       4
 legalized:       true
 regBankSelected: true
 # ALL:      registers:
-# ALL-NEXT:   - { id: 0, class: gr16 }
-# ALL-NEXT:   - { id: 1, class: gr32 }
+# ALL-NEXT:   - { id: 0, class: gr16, preferred-register: '' }
+# ALL-NEXT:   - { id: 1, class: gr32, preferred-register: '' }
 registers:
   - { id: 0, class: gpr }
   - { id: 1, class: gpr }
@@ -82,8 +115,8 @@ alignment:       4
 legalized:       true
 regBankSelected: true
 # ALL:      registers:
-# ALL-NEXT:   - { id: 0, class: gr8 }
-# ALL-NEXT:   - { id: 1, class: gr32 }
+# ALL-NEXT:   - { id: 0, class: gr8, preferred-register: '' }
+# ALL-NEXT:   - { id: 1, class: gr32, preferred-register: '' }
 registers:
   - { id: 0, class: gpr }
   - { id: 1, class: gpr }
@@ -108,8 +141,8 @@ alignment:       4
 legalized:       true
 regBankSelected: true
 # ALL:      registers:
-# ALL-NEXT:   - { id: 0, class: gr16 }
-# ALL-NEXT:   - { id: 1, class: gr32 }
+# ALL-NEXT:   - { id: 0, class: gr16, preferred-register: '' }
+# ALL-NEXT:   - { id: 1, class: gr32, preferred-register: '' }
 registers:
   - { id: 0, class: gpr }
   - { id: 1, class: gpr }

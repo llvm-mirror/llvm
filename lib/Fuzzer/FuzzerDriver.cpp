@@ -10,9 +10,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "FuzzerCorpus.h"
+#include "FuzzerIO.h"
 #include "FuzzerInterface.h"
 #include "FuzzerInternal.h"
-#include "FuzzerIO.h"
 #include "FuzzerMutate.h"
 #include "FuzzerRandom.h"
 #include "FuzzerShmem.h"
@@ -149,7 +149,7 @@ static bool ParseOneFlag(const char *Param) {
         int Val = MyStol(Str);
         *FlagDescriptions[F].IntFlag = Val;
         if (Flags.verbosity >= 2)
-          Printf("Flag: %s %d\n", Name, Val);;
+          Printf("Flag: %s %d\n", Name, Val);
         return true;
       } else if (FlagDescriptions[F].UIntFlag) {
         unsigned int Val = std::stoul(Str);
@@ -553,12 +553,12 @@ int FuzzerDriver(int *argc, char ***argv, UserCallback Callback) {
     return RunInMultipleProcesses(Args, Flags.workers, Flags.jobs);
 
   const size_t kMaxSaneLen = 1 << 20;
-  const size_t kMinDefaultLen = 64;
+  const size_t kMinDefaultLen = 4096;
   FuzzingOptions Options;
   Options.Verbosity = Flags.verbosity;
   Options.MaxLen = Flags.max_len;
   Options.ExperimentalLenControl = Flags.experimental_len_control;
-  if (Flags.experimental_len_control && Flags.max_len == 64)
+  if (Flags.experimental_len_control && Flags.max_len == kMinDefaultLen)
     Options.MaxLen = 1 << 20;
   Options.UnitTimeoutSec = Flags.timeout;
   Options.ErrorExitCode = Flags.error_exitcode;
@@ -656,7 +656,8 @@ int FuzzerDriver(int *argc, char ***argv, UserCallback Callback) {
       SMR.WaitClient();
       size_t Size = SMR.ReadByteArraySize();
       SMR.WriteByteArray(nullptr, 0);
-      F->RunOne(SMR.GetByteArray(), Size);
+      const Unit tmp(SMR.GetByteArray(), SMR.GetByteArray() + Size);
+      F->RunOne(tmp.data(), tmp.size());
       SMR.PostServer();
     }
     return 0;

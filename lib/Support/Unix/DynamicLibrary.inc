@@ -15,7 +15,8 @@
 #include <dlfcn.h>
 
 DynamicLibrary::HandleSet::~HandleSet() {
-  for (void *Handle : Handles)
+  // Close the libraries in reverse order.
+  for (void *Handle : llvm::reverse(Handles))
     ::dlclose(Handle);
   if (Process)
     ::dlclose(Process);
@@ -31,7 +32,7 @@ void *DynamicLibrary::HandleSet::DLOpen(const char *File, std::string *Err) {
 #ifdef __CYGWIN__
   // Cygwin searches symbols only in the main
   // with the handle of dlopen(NULL, RTLD_GLOBAL).
-  if (!Filename)
+  if (!File)
     Handle = RTLD_DEFAULT;
 #endif
 
@@ -101,10 +102,10 @@ static void *DoSearch(const char* SymbolName) {
 #define EXPLICIT_SYMBOL(SYM) \
    if (!strcmp(SymbolName, #SYM)) return &SYM
 
-// On linux we have a weird situation. The stderr/out/in symbols are both
+// Under glibc we have a weird situation. The stderr/out/in symbols are both
 // macros and global variables because of standards requirements. So, we
 // boldly use the EXPLICIT_SYMBOL macro without checking for a #define first.
-#if defined(__linux__) and !defined(__ANDROID__)
+#if defined(__GLIBC__)
   {
     EXPLICIT_SYMBOL(stderr);
     EXPLICIT_SYMBOL(stdout);

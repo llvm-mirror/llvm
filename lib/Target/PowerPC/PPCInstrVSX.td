@@ -843,7 +843,9 @@ let Uses = [RM] in {
 
   def XXPERMDI : XX3Form_2<60, 10,
                        (outs vsrc:$XT), (ins vsrc:$XA, vsrc:$XB, u2imm:$DM),
-                       "xxpermdi $XT, $XA, $XB, $DM", IIC_VecPerm, []>;
+                       "xxpermdi $XT, $XA, $XB, $DM", IIC_VecPerm,
+                       [(set v2i64:$XT, (PPCxxpermdi v2i64:$XA, v2i64:$XB,
+                         imm32SExt16:$DM))]>;
   let isCodeGenOnly = 1 in
   def XXPERMDIs : XX3Form_2s<60, 10, (outs vsrc:$XT), (ins vsfrc:$XA, u2imm:$DM),
                              "xxpermdi $XT, $XA, $XA, $DM", IIC_VecPerm, []>;
@@ -1065,6 +1067,10 @@ def : Pat<(v2i64 (PPCxxswapd v2i64:$src)), (XXPERMDI $src, $src, 2)>;
 def : Pat<(v4f32 (PPCxxswapd v4f32:$src)), (XXPERMDI $src, $src, 2)>;
 def : Pat<(v4i32 (PPCxxswapd v4i32:$src)), (XXPERMDI $src, $src, 2)>;
 def : Pat<(v2f64 (PPCswapNoChain v2f64:$src)), (XXPERMDI $src, $src, 2)>;
+
+// PPCvecshl XT, XA, XA, 2 can be selected to both XXSLDWI XT,XA,XA,2 and
+// XXSWAPD XT,XA (i.e. XXPERMDI XT,XA,XA,2), the later one is more profitable.
+def : Pat<(v4i32 (PPCvecshl v4i32:$src, v4i32:$src, 2)), (XXPERMDI $src, $src, 2)>;
 
 // Selects.
 def : Pat<(v2f64 (selectcc i1:$lhs, i1:$rhs, v2f64:$tval, v2f64:$fval, SETLT)),
@@ -1436,7 +1442,7 @@ let Predicates = [IsISA3_0, HasDirectMove] in {
   def MTVSRWS: XX1_RS6_RD5_XO<31, 403, (outs vsrc:$XT), (ins gprc:$rA),
                               "mtvsrws $XT, $rA", IIC_VecGeneral, []>;
 
-  def MTVSRDD: XX1Form<31, 435, (outs vsrc:$XT), (ins g8rc:$rA, g8rc:$rB),
+  def MTVSRDD: XX1Form<31, 435, (outs vsrc:$XT), (ins g8rc_nox0:$rA, g8rc:$rB),
                        "mtvsrdd $XT, $rA, $rB", IIC_VecGeneral,
                        []>, Requires<[In64BitMode]>;
 
@@ -2334,6 +2340,16 @@ let AddedComplexity = 400, Predicates = [HasP9Vector] in {
   def XXBRD : XX2_XT6_XO5_XB6<60, 23, 475, "xxbrd", vsrc, []>;
   def XXBRQ : XX2_XT6_XO5_XB6<60, 31, 475, "xxbrq", vsrc, []>;
 
+  // Vector Reverse
+  def : Pat<(v8i16 (PPCxxreverse v8i16 :$A)),
+            (v8i16 (COPY_TO_REGCLASS (XXBRH (COPY_TO_REGCLASS $A, VSRC)), VRRC))>;
+  def : Pat<(v4i32 (PPCxxreverse v4i32 :$A)),
+            (v4i32 (XXBRW $A))>;
+  def : Pat<(v2i64 (PPCxxreverse v2i64 :$A)),
+            (v2i64 (XXBRD $A))>;
+  def : Pat<(v1i128 (PPCxxreverse v1i128 :$A)),
+            (v1i128 (COPY_TO_REGCLASS (XXBRQ (COPY_TO_REGCLASS $A, VSRC)), VRRC))>;
+
   // Vector Permute
   def XXPERM  : XX3_XT5_XA5_XB5<60, 26, "xxperm" , vsrc, vsrc, vsrc,
                                 IIC_VecPerm, []>;
@@ -2379,8 +2395,7 @@ let AddedComplexity = 400, Predicates = [HasP9Vector] in {
 
   // Load Vector Indexed
   def LXVX    : X_XT6_RA5_RB5<31, 268, "lxvx"   , vsrc,
-                [(set v2f64:$XT, (load xoaddr:$src))]>;
-
+                [(set v2f64:$XT, (load xaddr:$src))]>;
   // Load Vector (Left-justified) with Length
   def LXVL : XX1Form<31, 269, (outs vsrc:$XT), (ins memr:$src, g8rc:$rB),
                    "lxvl $XT, $src, $rB", IIC_LdStLoad,
@@ -2430,7 +2445,7 @@ let AddedComplexity = 400, Predicates = [HasP9Vector] in {
 
   // Store Vector Indexed
   def STXVX    : X_XS6_RA5_RB5<31,  396, "stxvx"   , vsrc,
-                 [(store v2f64:$XT, xoaddr:$dst)]>;
+                 [(store v2f64:$XT, xaddr:$dst)]>;
 
   // Store Vector (Left-justified) with Length
   def STXVL : XX1Form<31, 397, (outs), (ins vsrc:$XT, memr:$dst, g8rc:$rB),
@@ -2498,21 +2513,38 @@ let AddedComplexity = 400, Predicates = [HasP9Vector] in {
             (v4f32 (XXINSERTW v4f32:$A, AlignValues.F32_TO_BE_WORD1, 12))>;
   } // IsLittleEndian, HasP9Vector
 
-  def : Pat<(v2f64 (load xoaddr:$src)), (LXVX xoaddr:$src)>;
-  def : Pat<(v2i64 (load xoaddr:$src)), (LXVX xoaddr:$src)>;
-  def : Pat<(v4f32 (load xoaddr:$src)), (LXVX xoaddr:$src)>;
-  def : Pat<(v4i32 (load xoaddr:$src)), (LXVX xoaddr:$src)>;
-  def : Pat<(v4i32 (int_ppc_vsx_lxvw4x xoaddr:$src)), (LXVX xoaddr:$src)>;
-  def : Pat<(v2f64 (int_ppc_vsx_lxvd2x xoaddr:$src)), (LXVX xoaddr:$src)>;
-  def : Pat<(store v2f64:$rS, xoaddr:$dst), (STXVX $rS, xoaddr:$dst)>;
-  def : Pat<(store v2i64:$rS, xoaddr:$dst), (STXVX $rS, xoaddr:$dst)>;
-  def : Pat<(store v4f32:$rS, xoaddr:$dst), (STXVX $rS, xoaddr:$dst)>;
-  def : Pat<(store v4i32:$rS, xoaddr:$dst), (STXVX $rS, xoaddr:$dst)>;
-  def : Pat<(int_ppc_vsx_stxvw4x v4i32:$rS, xoaddr:$dst),
-            (STXVX $rS, xoaddr:$dst)>;
-  def : Pat<(int_ppc_vsx_stxvd2x v2f64:$rS, xoaddr:$dst),
-            (STXVX $rS, xoaddr:$dst)>;
+  // D-Form Load/Store
+  def : Pat<(v4i32 (load iaddr:$src)), (LXV memrix16:$src)>;
+  def : Pat<(v4f32 (load iaddr:$src)), (LXV memrix16:$src)>;
+  def : Pat<(v2i64 (load iaddr:$src)), (LXV memrix16:$src)>;
+  def : Pat<(v2f64 (load iaddr:$src)), (LXV memrix16:$src)>;
+  def : Pat<(v4i32 (int_ppc_vsx_lxvw4x iaddr:$src)), (LXV memrix16:$src)>;
+  def : Pat<(v2f64 (int_ppc_vsx_lxvd2x iaddr:$src)), (LXV memrix16:$src)>;
 
+  def : Pat<(store v4f32:$rS, iaddr:$dst), (STXV $rS, memrix16:$dst)>;
+  def : Pat<(store v4i32:$rS, iaddr:$dst), (STXV $rS, memrix16:$dst)>;
+  def : Pat<(store v2f64:$rS, iaddr:$dst), (STXV $rS, memrix16:$dst)>;
+  def : Pat<(store v2i64:$rS, iaddr:$dst), (STXV $rS, memrix16:$dst)>;
+  def : Pat<(int_ppc_vsx_stxvw4x v4i32:$rS, iaddr:$dst),
+            (STXV $rS, memrix16:$dst)>;
+  def : Pat<(int_ppc_vsx_stxvd2x v2f64:$rS, iaddr:$dst),
+            (STXV $rS, memrix16:$dst)>;
+
+
+  def : Pat<(v2f64 (load xaddr:$src)), (LXVX xaddr:$src)>;
+  def : Pat<(v2i64 (load xaddr:$src)), (LXVX xaddr:$src)>;
+  def : Pat<(v4f32 (load xaddr:$src)), (LXVX xaddr:$src)>;
+  def : Pat<(v4i32 (load xaddr:$src)), (LXVX xaddr:$src)>;
+  def : Pat<(v4i32 (int_ppc_vsx_lxvw4x xaddr:$src)), (LXVX xaddr:$src)>;
+  def : Pat<(v2f64 (int_ppc_vsx_lxvd2x xaddr:$src)), (LXVX xaddr:$src)>;
+  def : Pat<(store v2f64:$rS, xaddr:$dst), (STXVX $rS, xaddr:$dst)>;
+  def : Pat<(store v2i64:$rS, xaddr:$dst), (STXVX $rS, xaddr:$dst)>;
+  def : Pat<(store v4f32:$rS, xaddr:$dst), (STXVX $rS, xaddr:$dst)>;
+  def : Pat<(store v4i32:$rS, xaddr:$dst), (STXVX $rS, xaddr:$dst)>;
+  def : Pat<(int_ppc_vsx_stxvw4x v4i32:$rS, xaddr:$dst),
+            (STXVX $rS, xaddr:$dst)>;
+  def : Pat<(int_ppc_vsx_stxvd2x v2f64:$rS, xaddr:$dst),
+            (STXVX $rS, xaddr:$dst)>;
   def : Pat<(v4i32 (scalar_to_vector (i32 (load xoaddr:$src)))),
             (v4i32 (LXVWSX xoaddr:$src))>;
   def : Pat<(v4f32 (scalar_to_vector (f32 (load xoaddr:$src)))),
@@ -2695,6 +2727,40 @@ def DblToFlt {
   dag B0 = (f32 (fpround (f64 (extractelt v2f64:$B, 0))));
   dag B1 = (f32 (fpround (f64 (extractelt v2f64:$B, 1))));
 }
+
+def ByteToWord {
+  dag A0 = (i32 (sext_inreg (i32 (vector_extract v16i8:$A, 0)), i8));
+  dag A1 = (i32 (sext_inreg (i32 (vector_extract v16i8:$A, 4)), i8));
+  dag A2 = (i32 (sext_inreg (i32 (vector_extract v16i8:$A, 8)), i8));
+  dag A3 = (i32 (sext_inreg (i32 (vector_extract v16i8:$A, 12)), i8));
+}
+
+def ByteToDWord {
+  dag A0 = (i64 (sext_inreg
+            (i64 (anyext (i32 (vector_extract v16i8:$A, 0)))), i8));
+  dag A1 = (i64 (sext_inreg
+            (i64 (anyext (i32 (vector_extract v16i8:$A, 8)))), i8));
+}
+
+def HWordToWord {
+  dag A0 = (i32 (sext_inreg (i32 (vector_extract v8i16:$A, 0)), i16));
+  dag A1 = (i32 (sext_inreg (i32 (vector_extract v8i16:$A, 2)), i16));
+  dag A2 = (i32 (sext_inreg (i32 (vector_extract v8i16:$A, 4)), i16));
+  dag A3 = (i32 (sext_inreg (i32 (vector_extract v8i16:$A, 6)), i16));
+}
+
+def HWordToDWord {
+  dag A0 = (i64 (sext_inreg
+            (i64 (anyext (i32 (vector_extract v8i16:$A, 0)))), i16));
+  dag A1 = (i64 (sext_inreg
+            (i64 (anyext (i32 (vector_extract v8i16:$A, 4)))), i16));
+}
+
+def WordToDWord {
+  dag A0 = (i64 (sext (i32 (vector_extract v4i32:$A, 0))));
+  dag A1 = (i64 (sext (i32 (vector_extract v4i32:$A, 2))));
+}
+
 def FltToIntLoad {
   dag A = (i32 (PPCmfvsr (PPCfctiwz (f64 (extloadf32 xoaddr:$A)))));
 }
@@ -2704,8 +2770,14 @@ def FltToUIntLoad {
 def FltToLongLoad {
   dag A = (i64 (PPCmfvsr (PPCfctidz (f64 (extloadf32 xoaddr:$A)))));
 }
+def FltToLongLoadP9 {
+  dag A = (i64 (PPCmfvsr (PPCfctidz (f64 (extloadf32 iaddr:$A)))));
+}
 def FltToULongLoad {
   dag A = (i64 (PPCmfvsr (PPCfctiduz (f64 (extloadf32 xoaddr:$A)))));
+}
+def FltToULongLoadP9 {
+  dag A = (i64 (PPCmfvsr (PPCfctiduz (f64 (extloadf32 iaddr:$A)))));
 }
 def FltToLong {
   dag A = (i64 (PPCmfvsr (PPCfctidz (fpextend f32:$A))));
@@ -2728,8 +2800,14 @@ def DblToULong {
 def DblToIntLoad {
   dag A = (i32 (PPCmfvsr (PPCfctiwz (f64 (load xoaddr:$A)))));
 }
+def DblToIntLoadP9 {
+  dag A = (i32 (PPCmfvsr (PPCfctiwz (f64 (load iaddr:$A)))));
+}
 def DblToUIntLoad {
   dag A = (i32 (PPCmfvsr (PPCfctiwuz (f64 (load xoaddr:$A)))));
+}
+def DblToUIntLoadP9 {
+  dag A = (i32 (PPCmfvsr (PPCfctiwuz (f64 (load iaddr:$A)))));
 }
 def DblToLongLoad {
   dag A = (i64 (PPCmfvsr (PPCfctidz (f64 (load xoaddr:$A)))));
@@ -2898,17 +2976,17 @@ let AddedComplexity = 400 in {
               (v4i32 (XVCVSPSXWS (LXVWSX xoaddr:$A)))>;
     def : Pat<(v4i32 (scalar_to_vector FltToUIntLoad.A)),
               (v4i32 (XVCVSPUXWS (LXVWSX xoaddr:$A)))>;
-    def : Pat<(v4i32 (scalar_to_vector DblToIntLoad.A)),
+    def : Pat<(v4i32 (scalar_to_vector DblToIntLoadP9.A)),
               (v4i32 (XXSPLTW (COPY_TO_REGCLASS
                                 (XSCVDPSXWS (DFLOADf64 iaddr:$A)), VSRC), 1))>;
-    def : Pat<(v4i32 (scalar_to_vector DblToUIntLoad.A)),
+    def : Pat<(v4i32 (scalar_to_vector DblToUIntLoadP9.A)),
               (v4i32 (XXSPLTW (COPY_TO_REGCLASS
                                 (XSCVDPUXWS (DFLOADf64 iaddr:$A)), VSRC), 1))>;
-    def : Pat<(v2i64 (scalar_to_vector FltToLongLoad.A)),
+    def : Pat<(v2i64 (scalar_to_vector FltToLongLoadP9.A)),
               (v2i64 (XXPERMDIs (XSCVDPSXDS (COPY_TO_REGCLASS
                                               (DFLOADf32 iaddr:$A),
                                               VSFRC)), 0))>;
-    def : Pat<(v2i64 (scalar_to_vector FltToULongLoad.A)),
+    def : Pat<(v2i64 (scalar_to_vector FltToULongLoadP9.A)),
               (v2i64 (XXPERMDIs (XSCVDPUXDS (COPY_TO_REGCLASS
                                               (DFLOADf32 iaddr:$A),
                                               VSFRC)), 0))>;
@@ -2934,5 +3012,22 @@ let AddedComplexity = 400 in {
     def : Pat<(v4i32 (build_vector i32:$A, i32:$B, i32:$C, i32:$D)),
               (VMRGOW (COPY_TO_REGCLASS (MTVSRDD AnyExts.D, AnyExts.B), VSRC),
                       (COPY_TO_REGCLASS (MTVSRDD AnyExts.C, AnyExts.A), VSRC))>;
+  }
+  // P9 Altivec instructions that can be used to build vectors.
+  // Adding them to PPCInstrVSX.td rather than PPCAltivecVSX.td to compete
+  // with complexities of existing build vector patterns in this file.
+  let Predicates = [HasP9Altivec] in {
+    def : Pat<(v2i64 (build_vector WordToDWord.A0, WordToDWord.A1)),
+              (v2i64 (VEXTSW2D $A))>;
+    def : Pat<(v2i64 (build_vector HWordToDWord.A0, HWordToDWord.A1)),
+              (v2i64 (VEXTSH2D $A))>;
+    def : Pat<(v4i32 (build_vector HWordToWord.A0, HWordToWord.A1,
+                      HWordToWord.A2, HWordToWord.A3)),
+              (v4i32 (VEXTSH2W $A))>;
+    def : Pat<(v4i32 (build_vector ByteToWord.A0, ByteToWord.A1,
+                      ByteToWord.A2, ByteToWord.A3)),
+              (v4i32 (VEXTSB2W $A))>;
+    def : Pat<(v2i64 (build_vector ByteToDWord.A0, ByteToDWord.A1)),
+              (v2i64 (VEXTSB2D $A))>;
   }
 }

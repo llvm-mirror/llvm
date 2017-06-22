@@ -42,6 +42,10 @@ public:
 private:
   bool selectImpl(MachineInstr &I) const;
 
+  bool selectICmp(MachineInstrBuilder &MIB, const ARMBaseInstrInfo &TII,
+                  MachineRegisterInfo &MRI, const TargetRegisterInfo &TRI,
+                  const RegisterBankInfo &RBI) const;
+
   const ARMBaseInstrInfo &TII;
   const ARMBaseRegisterInfo &TRI;
   const ARMBaseTargetMachine &TM;
@@ -101,14 +105,6 @@ static bool selectCopy(MachineInstr &I, const TargetInstrInfo &TII,
   assert(RegBank && "Can't get reg bank for virtual register");
 
   const unsigned DstSize = MRI.getType(DstReg).getSizeInBits();
-  (void)DstSize;
-  unsigned SrcReg = I.getOperand(1).getReg();
-  const unsigned SrcSize = RBI.getSizeInBits(SrcReg, MRI, TRI);
-  (void)SrcSize;
-  // We use copies for trunc, so it's ok for the size of the destination to be
-  // smaller (the higher bits will just be undefined).
-  assert(DstSize <= SrcSize && "Copy with different width?!");
-
   assert((RegBank->getID() == ARM::GPRRegBankID ||
           RegBank->getID() == ARM::FPRRegBankID) &&
          "Unsupported reg bank");
@@ -135,56 +131,30 @@ static bool selectCopy(MachineInstr &I, const TargetInstrInfo &TII,
   return true;
 }
 
-static bool selectFAdd(MachineInstrBuilder &MIB, const ARMBaseInstrInfo &TII,
-                       MachineRegisterInfo &MRI) {
-  assert(TII.getSubtarget().hasVFP2() && "Can't select fp add without vfp");
+static bool selectMergeValues(MachineInstrBuilder &MIB,
+                              const ARMBaseInstrInfo &TII,
+                              MachineRegisterInfo &MRI,
+                              const TargetRegisterInfo &TRI,
+                              const RegisterBankInfo &RBI) {
+  assert(TII.getSubtarget().hasVFP2() && "Can't select merge without VFP");
 
-  LLT Ty = MRI.getType(MIB->getOperand(0).getReg());
-  unsigned ValSize = Ty.getSizeInBits();
-
-  if (ValSize == 32) {
-    if (TII.getSubtarget().useNEONForSinglePrecisionFP())
-      return false;
-    MIB->setDesc(TII.get(ARM::VADDS));
-  } else {
-    assert(ValSize == 64 && "Unsupported size for floating point value");
-    if (TII.getSubtarget().isFPOnlySP())
-      return false;
-    MIB->setDesc(TII.get(ARM::VADDD));
-  }
-  MIB.add(predOps(ARMCC::AL));
-
-  return true;
-}
-
-static bool selectSequence(MachineInstrBuilder &MIB,
-                           const ARMBaseInstrInfo &TII,
-                           MachineRegisterInfo &MRI,
-                           const TargetRegisterInfo &TRI,
-                           const RegisterBankInfo &RBI) {
-  assert(TII.getSubtarget().hasVFP2() && "Can't select sequence without VFP");
-
-  // We only support G_SEQUENCE as a way to stick together two scalar GPRs
+  // We only support G_MERGE_VALUES as a way to stick together two scalar GPRs
   // into one DPR.
   unsigned VReg0 = MIB->getOperand(0).getReg();
   (void)VReg0;
   assert(MRI.getType(VReg0).getSizeInBits() == 64 &&
          RBI.getRegBank(VReg0, MRI, TRI)->getID() == ARM::FPRRegBankID &&
-         "Unsupported operand for G_SEQUENCE");
+         "Unsupported operand for G_MERGE_VALUES");
   unsigned VReg1 = MIB->getOperand(1).getReg();
   (void)VReg1;
   assert(MRI.getType(VReg1).getSizeInBits() == 32 &&
          RBI.getRegBank(VReg1, MRI, TRI)->getID() == ARM::GPRRegBankID &&
-         "Unsupported operand for G_SEQUENCE");
-  unsigned VReg2 = MIB->getOperand(3).getReg();
+         "Unsupported operand for G_MERGE_VALUES");
+  unsigned VReg2 = MIB->getOperand(2).getReg();
   (void)VReg2;
   assert(MRI.getType(VReg2).getSizeInBits() == 32 &&
          RBI.getRegBank(VReg2, MRI, TRI)->getID() == ARM::GPRRegBankID &&
-         "Unsupported operand for G_SEQUENCE");
-
-  // Remove the operands corresponding to the offsets.
-  MIB->RemoveOperand(4);
-  MIB->RemoveOperand(2);
+         "Unsupported operand for G_MERGE_VALUES");
 
   MIB->setDesc(TII.get(ARM::VMOVDRR));
   MIB.add(predOps(ARMCC::AL));
@@ -192,30 +162,32 @@ static bool selectSequence(MachineInstrBuilder &MIB,
   return true;
 }
 
-static bool selectExtract(MachineInstrBuilder &MIB, const ARMBaseInstrInfo &TII,
-                          MachineRegisterInfo &MRI,
-                          const TargetRegisterInfo &TRI,
-                          const RegisterBankInfo &RBI) {
-  assert(TII.getSubtarget().hasVFP2() && "Can't select extract without VFP");
+static bool selectUnmergeValues(MachineInstrBuilder &MIB,
+                                const ARMBaseInstrInfo &TII,
+                                MachineRegisterInfo &MRI,
+                                const TargetRegisterInfo &TRI,
+                                const RegisterBankInfo &RBI) {
+  assert(TII.getSubtarget().hasVFP2() && "Can't select unmerge without VFP");
 
-  // We only support G_EXTRACT as a way to break up one DPR into two GPRs.
+  // We only support G_UNMERGE_VALUES as a way to break up one DPR into two
+  // GPRs.
   unsigned VReg0 = MIB->getOperand(0).getReg();
   (void)VReg0;
   assert(MRI.getType(VReg0).getSizeInBits() == 32 &&
          RBI.getRegBank(VReg0, MRI, TRI)->getID() == ARM::GPRRegBankID &&
-         "Unsupported operand for G_EXTRACT");
+         "Unsupported operand for G_UNMERGE_VALUES");
   unsigned VReg1 = MIB->getOperand(1).getReg();
   (void)VReg1;
-  assert(MRI.getType(VReg1).getSizeInBits() == 64 &&
-         RBI.getRegBank(VReg1, MRI, TRI)->getID() == ARM::FPRRegBankID &&
-         "Unsupported operand for G_EXTRACT");
-  assert(MIB->getOperand(2).getImm() % 32 == 0 &&
-         "Unsupported operand for G_EXTRACT");
+  assert(MRI.getType(VReg1).getSizeInBits() == 32 &&
+         RBI.getRegBank(VReg1, MRI, TRI)->getID() == ARM::GPRRegBankID &&
+         "Unsupported operand for G_UNMERGE_VALUES");
+  unsigned VReg2 = MIB->getOperand(2).getReg();
+  (void)VReg2;
+  assert(MRI.getType(VReg2).getSizeInBits() == 64 &&
+         RBI.getRegBank(VReg2, MRI, TRI)->getID() == ARM::FPRRegBankID &&
+         "Unsupported operand for G_UNMERGE_VALUES");
 
-  // Remove the operands corresponding to the offsets.
-  MIB->getOperand(2).setImm(MIB->getOperand(2).getImm() / 32);
-
-  MIB->setDesc(TII.get(ARM::VGETLNi32));
+  MIB->setDesc(TII.get(ARM::VMOVRRD));
   MIB.add(predOps(ARMCC::AL));
 
   return true;
@@ -273,6 +245,105 @@ static unsigned selectLoadStoreOpCode(unsigned Opc, unsigned RegBank,
   }
 
   return Opc;
+}
+
+static ARMCC::CondCodes getComparePred(CmpInst::Predicate Pred) {
+  switch (Pred) {
+  // Needs two compares...
+  case CmpInst::FCMP_ONE:
+  case CmpInst::FCMP_UEQ:
+  default:
+    // AL is our "false" for now. The other two need more compares.
+    return ARMCC::AL;
+  case CmpInst::ICMP_EQ:
+  case CmpInst::FCMP_OEQ:
+    return ARMCC::EQ;
+  case CmpInst::ICMP_SGT:
+  case CmpInst::FCMP_OGT:
+    return ARMCC::GT;
+  case CmpInst::ICMP_SGE:
+  case CmpInst::FCMP_OGE:
+    return ARMCC::GE;
+  case CmpInst::ICMP_UGT:
+  case CmpInst::FCMP_UGT:
+    return ARMCC::HI;
+  case CmpInst::FCMP_OLT:
+    return ARMCC::MI;
+  case CmpInst::ICMP_ULE:
+  case CmpInst::FCMP_OLE:
+    return ARMCC::LS;
+  case CmpInst::FCMP_ORD:
+    return ARMCC::VC;
+  case CmpInst::FCMP_UNO:
+    return ARMCC::VS;
+  case CmpInst::FCMP_UGE:
+    return ARMCC::PL;
+  case CmpInst::ICMP_SLT:
+  case CmpInst::FCMP_ULT:
+    return ARMCC::LT;
+  case CmpInst::ICMP_SLE:
+  case CmpInst::FCMP_ULE:
+    return ARMCC::LE;
+  case CmpInst::FCMP_UNE:
+  case CmpInst::ICMP_NE:
+    return ARMCC::NE;
+  case CmpInst::ICMP_UGE:
+    return ARMCC::HS;
+  case CmpInst::ICMP_ULT:
+    return ARMCC::LO;
+  }
+}
+
+bool ARMInstructionSelector::selectICmp(MachineInstrBuilder &MIB,
+                                        const ARMBaseInstrInfo &TII,
+                                        MachineRegisterInfo &MRI,
+                                        const TargetRegisterInfo &TRI,
+                                        const RegisterBankInfo &RBI) const {
+  auto &MBB = *MIB->getParent();
+  auto InsertBefore = std::next(MIB->getIterator());
+  auto &DebugLoc = MIB->getDebugLoc();
+
+  // Move 0 into the result register.
+  auto Mov0I = BuildMI(MBB, InsertBefore, DebugLoc, TII.get(ARM::MOVi))
+                   .addDef(MRI.createVirtualRegister(&ARM::GPRRegClass))
+                   .addImm(0)
+                   .add(predOps(ARMCC::AL))
+                   .add(condCodeOp());
+  if (!constrainSelectedInstRegOperands(*Mov0I, TII, TRI, RBI))
+    return false;
+
+  // Perform the comparison.
+  auto LHSReg = MIB->getOperand(2).getReg();
+  auto RHSReg = MIB->getOperand(3).getReg();
+  assert(MRI.getType(LHSReg) == MRI.getType(RHSReg) &&
+         MRI.getType(LHSReg).getSizeInBits() == 32 &&
+         MRI.getType(RHSReg).getSizeInBits() == 32 &&
+         "Unsupported types for comparison operation");
+  auto CmpI = BuildMI(MBB, InsertBefore, DebugLoc, TII.get(ARM::CMPrr))
+                  .addUse(LHSReg)
+                  .addUse(RHSReg)
+                  .add(predOps(ARMCC::AL));
+  if (!constrainSelectedInstRegOperands(*CmpI, TII, TRI, RBI))
+    return false;
+
+  // Move 1 into the result register if the flags say so.
+  auto ResReg = MIB->getOperand(0).getReg();
+  auto Cond =
+      static_cast<CmpInst::Predicate>(MIB->getOperand(1).getPredicate());
+  auto ARMCond = getComparePred(Cond);
+  if (ARMCond == ARMCC::AL)
+    return false;
+
+  auto Mov1I = BuildMI(MBB, InsertBefore, DebugLoc, TII.get(ARM::MOVCCi))
+                   .addDef(ResReg)
+                   .addUse(Mov0I->getOperand(0).getReg())
+                   .addImm(1)
+                   .add(predOps(ARMCond, ARM::CPSR));
+  if (!constrainSelectedInstRegOperands(*Mov1I, TII, TRI, RBI))
+    return false;
+
+  MIB->eraseFromParent();
+  return true;
 }
 
 bool ARMInstructionSelector::select(MachineInstr &I) const {
@@ -352,6 +423,7 @@ bool ARMInstructionSelector::select(MachineInstr &I) const {
     }
     break;
   }
+  case G_ANYEXT:
   case G_TRUNC: {
     // The high bits are undefined, so there's nothing special to do, just
     // treat it as a copy.
@@ -362,40 +434,23 @@ bool ARMInstructionSelector::select(MachineInstr &I) const {
     const auto &DstRegBank = *RBI.getRegBank(DstReg, MRI, TRI);
 
     if (SrcRegBank.getID() != DstRegBank.getID()) {
-      DEBUG(dbgs() << "G_TRUNC operands on different register banks\n");
+      DEBUG(dbgs() << "G_TRUNC/G_ANYEXT operands on different register banks\n");
       return false;
     }
 
     if (SrcRegBank.getID() != ARM::GPRRegBankID) {
-      DEBUG(dbgs() << "G_TRUNC on non-GPR not supported yet\n");
+      DEBUG(dbgs() << "G_TRUNC/G_ANYEXT on non-GPR not supported yet\n");
       return false;
     }
 
     I.setDesc(TII.get(COPY));
     return selectCopy(I, TII, MRI, TRI, RBI);
   }
-  case G_ADD:
+  case G_ICMP:
+    return selectICmp(MIB, TII, MRI, TRI, RBI);
   case G_GEP:
     I.setDesc(TII.get(ARM::ADDrr));
     MIB.add(predOps(ARMCC::AL)).add(condCodeOp());
-    break;
-  case G_SUB:
-    I.setDesc(TII.get(ARM::SUBrr));
-    MIB.add(predOps(ARMCC::AL)).add(condCodeOp());
-    break;
-  case G_MUL:
-    if (TII.getSubtarget().hasV6Ops()) {
-      I.setDesc(TII.get(ARM::MUL));
-    } else {
-      assert(TII.getSubtarget().useMulOps() && "Unsupported target");
-      I.setDesc(TII.get(ARM::MULv5));
-      MIB->getOperand(0).setIsEarlyClobber(true);
-    }
-    MIB.add(predOps(ARMCC::AL)).add(condCodeOp());
-    break;
-  case G_FADD:
-    if (!selectFAdd(MIB, TII, MRI))
-      return false;
     break;
   case G_FRAME_INDEX:
     // Add 0 to the given frame index and hope it will eventually be folded into
@@ -455,13 +510,13 @@ bool ARMInstructionSelector::select(MachineInstr &I) const {
     MIB.addImm(0).add(predOps(ARMCC::AL));
     break;
   }
-  case G_SEQUENCE: {
-    if (!selectSequence(MIB, TII, MRI, TRI, RBI))
+  case G_MERGE_VALUES: {
+    if (!selectMergeValues(MIB, TII, MRI, TRI, RBI))
       return false;
     break;
   }
-  case G_EXTRACT: {
-    if (!selectExtract(MIB, TII, MRI, TRI, RBI))
+  case G_UNMERGE_VALUES: {
+    if (!selectUnmergeValues(MIB, TII, MRI, TRI, RBI))
       return false;
     break;
   }

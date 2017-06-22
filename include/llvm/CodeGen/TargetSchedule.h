@@ -16,6 +16,7 @@
 #ifndef LLVM_CODEGEN_TARGETSCHEDULE_H
 #define LLVM_CODEGEN_TARGETSCHEDULE_H
 
+#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/MC/MCInstrItineraries.h"
 #include "llvm/MC/MCSchedule.h"
@@ -54,6 +55,9 @@ public:
 
   /// Return the MCSchedClassDesc for this instruction.
   const MCSchedClassDesc *resolveSchedClass(const MachineInstr *MI) const;
+
+  /// \brief TargetSubtargetInfo getter.
+  const TargetSubtargetInfo *getSubtargetInfo() const { return STI; }
 
   /// \brief TargetInstrInfo getter.
   const TargetInstrInfo *getInstrInfo() const { return TII; }
@@ -120,7 +124,7 @@ public:
   }
 #endif
 
-  typedef const MCWriteProcResEntry *ProcResIter;
+  using ProcResIter = const MCWriteProcResEntry *;
 
   // \brief Get an iterator into the processor resources consumed by this
   // scheduling class.

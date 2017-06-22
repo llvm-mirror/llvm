@@ -13,6 +13,7 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Triple.h"
+#include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/Config/llvm-config.h"
 #include "llvm/DebugInfo/DWARF/DWARFCompileUnit.h"
 #include "llvm/DebugInfo/DWARF/DWARFContext.h"
@@ -21,7 +22,6 @@
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/ObjectYAML/DWARFEmitter.h"
 #include "llvm/ObjectYAML/DWARFYAML.h"
-#include "llvm/Support/Dwarf.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/TargetSelect.h"
@@ -311,8 +311,9 @@ void TestAllForms() {
   EXPECT_EQ(Data2, toReference(DieDG.find(Attr_DW_FORM_ref2), 0));
   EXPECT_EQ(Data4, toReference(DieDG.find(Attr_DW_FORM_ref4), 0));
   EXPECT_EQ(Data8, toReference(DieDG.find(Attr_DW_FORM_ref8), 0));
-  if (Version >= 4)
+  if (Version >= 4) {
     EXPECT_EQ(Data8_2, toReference(DieDG.find(Attr_DW_FORM_ref_sig8), 0));
+  }
   EXPECT_EQ(UData[0], toReference(DieDG.find(Attr_DW_FORM_ref_udata), 0));
 
   //----------------------------------------------------------------------
@@ -320,15 +321,17 @@ void TestAllForms() {
   //----------------------------------------------------------------------
   EXPECT_EQ(1ULL, toUnsigned(DieDG.find(Attr_DW_FORM_flag_true), 0));
   EXPECT_EQ(0ULL, toUnsigned(DieDG.find(Attr_DW_FORM_flag_false), 1));
-  if (Version >= 4)
+  if (Version >= 4) {
     EXPECT_EQ(1ULL, toUnsigned(DieDG.find(Attr_DW_FORM_flag_present), 0));
+  }
 
   //----------------------------------------------------------------------
   // Test SLEB128 based forms
   //----------------------------------------------------------------------
   EXPECT_EQ(SData, toSigned(DieDG.find(Attr_DW_FORM_sdata), 0));
-  if (Version >= 5)
+  if (Version >= 5) {
     EXPECT_EQ(ICSData, toSigned(DieDG.find(Attr_DW_FORM_implicit_const), 0));
+  }
 
   //----------------------------------------------------------------------
   // Test ULEB128 based forms
@@ -340,9 +343,10 @@ void TestAllForms() {
   //----------------------------------------------------------------------
   EXPECT_EQ(Dwarf32Values[0],
             toReference(DieDG.find(Attr_DW_FORM_GNU_ref_alt), 0));
-  if (Version >= 4)
+  if (Version >= 4) {
     EXPECT_EQ(Dwarf32Values[1],
               toSectionOffset(DieDG.find(Attr_DW_FORM_sec_offset), 0));
+  }
 
   //----------------------------------------------------------------------
   // Add an address at the end to make sure we can decode this value
@@ -849,8 +853,8 @@ template <uint16_t Version, class AddrType> void TestAddresses() {
   // Get the compile unit DIE is valid.
   auto DieDG = U->getUnitDIE(false);
   EXPECT_TRUE(DieDG.isValid());
-  
-  uint64_t LowPC, HighPC;
+
+  uint64_t LowPC, HighPC, SectionIndex;
   Optional<uint64_t> OptU64;
   // Verify the that our subprogram with no PC value fails appropriately when
   // asked for any PC values.
@@ -861,14 +865,14 @@ template <uint16_t Version, class AddrType> void TestAddresses() {
   EXPECT_FALSE((bool)OptU64);
   OptU64 = toAddress(SubprogramDieNoPC.find(DW_AT_high_pc));
   EXPECT_FALSE((bool)OptU64);
-  EXPECT_FALSE(SubprogramDieNoPC.getLowAndHighPC(LowPC, HighPC));
+  EXPECT_FALSE(SubprogramDieNoPC.getLowAndHighPC(LowPC, HighPC, SectionIndex));
   OptU64 = toAddress(SubprogramDieNoPC.find(DW_AT_high_pc));
   EXPECT_FALSE((bool)OptU64);
   OptU64 = toUnsigned(SubprogramDieNoPC.find(DW_AT_high_pc));
   EXPECT_FALSE((bool)OptU64);
   OptU64 = SubprogramDieNoPC.getHighPC(ActualLowPC);
   EXPECT_FALSE((bool)OptU64);
-  EXPECT_FALSE(SubprogramDieNoPC.getLowAndHighPC(LowPC, HighPC));
+  EXPECT_FALSE(SubprogramDieNoPC.getLowAndHighPC(LowPC, HighPC, SectionIndex));
  
   // Verify the that our subprogram with only a low PC value succeeds when
   // we ask for the Low PC, but fails appropriately when asked for the high PC
@@ -885,7 +889,7 @@ template <uint16_t Version, class AddrType> void TestAddresses() {
   EXPECT_FALSE((bool)OptU64);
   OptU64 = SubprogramDieLowPC.getHighPC(ActualLowPC);
   EXPECT_FALSE((bool)OptU64);
-  EXPECT_FALSE(SubprogramDieLowPC.getLowAndHighPC(LowPC, HighPC));
+  EXPECT_FALSE(SubprogramDieLowPC.getLowAndHighPC(LowPC, HighPC, SectionIndex));
 
   // Verify the that our subprogram with only a low PC value succeeds when
   // we ask for the Low PC, but fails appropriately when asked for the high PC
@@ -919,7 +923,7 @@ template <uint16_t Version, class AddrType> void TestAddresses() {
   EXPECT_TRUE((bool)OptU64);
   EXPECT_EQ(OptU64.getValue(), ActualHighPC);
 
-  EXPECT_TRUE(SubprogramDieLowHighPC.getLowAndHighPC(LowPC, HighPC));
+  EXPECT_TRUE(SubprogramDieLowHighPC.getLowAndHighPC(LowPC, HighPC, SectionIndex));
   EXPECT_EQ(LowPC, ActualLowPC);
   EXPECT_EQ(HighPC, ActualHighPC);
 }
@@ -2059,6 +2063,87 @@ TEST(DWARFDebugInfo, TestDwarfVerifyInvalidLineFileIndex) {
   DWARFContextInMemory DwarfContext(*ErrOrSections, 8);
   VerifyError(DwarfContext, "error: .debug_line[0x00000000][1] has invalid "
                             "file index 5 (valid values are [1,1]):");
+}
+
+TEST(DWARFDebugInfo, TestDwarfVerifyCUDontShareLineTable) {
+  // Create a two compile units where both compile units share the same
+  // DW_AT_stmt_list value and verify we report the error correctly.
+  StringRef yamldata = R"(
+    debug_str:
+      - ''
+      - /tmp/main.c
+      - /tmp/foo.c
+    debug_abbrev:    
+      - Code:            0x00000001
+        Tag:             DW_TAG_compile_unit
+        Children:        DW_CHILDREN_no
+        Attributes:      
+          - Attribute:       DW_AT_name
+            Form:            DW_FORM_strp
+          - Attribute:       DW_AT_stmt_list
+            Form:            DW_FORM_sec_offset
+    debug_info:      
+      - Length:          
+          TotalLength:     16
+        Version:         4
+        AbbrOffset:      0
+        AddrSize:        8
+        Entries:         
+          - AbbrCode:        0x00000001
+            Values:          
+              - Value:           0x0000000000000001
+              - Value:           0x0000000000000000
+      - Length:          
+          TotalLength:     16
+        Version:         4
+        AbbrOffset:      0
+        AddrSize:        8
+        Entries:         
+          - AbbrCode:        0x00000001
+            Values:          
+              - Value:           0x000000000000000D
+              - Value:           0x0000000000000000
+    debug_line:      
+      - Length:          
+          TotalLength:     60
+        Version:         2
+        PrologueLength:  34
+        MinInstLength:   1
+        DefaultIsStmt:   1
+        LineBase:        251
+        LineRange:       14
+        OpcodeBase:      13
+        StandardOpcodeLengths: [ 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1 ]
+        IncludeDirs:     
+          - /tmp
+        Files:           
+          - Name:            main.c
+            DirIdx:          1
+            ModTime:         0
+            Length:          0
+        Opcodes:         
+          - Opcode:          DW_LNS_extended_op
+            ExtLen:          9
+            SubOpcode:       DW_LNE_set_address
+            Data:            4096
+          - Opcode:          DW_LNS_advance_line
+            SData:           9
+            Data:            4096
+          - Opcode:          DW_LNS_copy
+            Data:            4096
+          - Opcode:          DW_LNS_advance_pc
+            Data:            256
+          - Opcode:          DW_LNS_extended_op
+            ExtLen:          1
+            SubOpcode:       DW_LNE_end_sequence
+            Data:            256
+  )";
+  auto ErrOrSections = DWARFYAML::EmitDebugSections(yamldata);
+  ASSERT_TRUE((bool)ErrOrSections);
+  DWARFContextInMemory DwarfContext(*ErrOrSections, 8);
+  VerifyError(DwarfContext, "error: two compile unit DIEs, 0x0000000b and "
+                            "0x0000001f, have the same DW_AT_stmt_list section "
+                            "offset:");
 }
 
 } // end anonymous namespace

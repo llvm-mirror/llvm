@@ -12,17 +12,18 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "MipsAsmPrinter.h"
 #include "InstPrinter/MipsInstPrinter.h"
 #include "MCTargetDesc/MipsBaseInfo.h"
 #include "MCTargetDesc/MipsMCNaCl.h"
 #include "Mips.h"
-#include "MipsAsmPrinter.h"
 #include "MipsInstrInfo.h"
 #include "MipsMCInstLower.h"
 #include "MipsTargetMachine.h"
 #include "MipsTargetStreamer.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/Twine.h"
+#include "llvm/BinaryFormat/ELF.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
@@ -43,7 +44,6 @@
 #include "llvm/MC/MCSection.h"
 #include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCSymbolELF.h"
-#include "llvm/Support/ELF.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
@@ -81,7 +81,7 @@ bool MipsAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
 
   AsmPrinter::runOnMachineFunction(MF);
 
-  EmitXRayTable();
+  emitXRayTable();
 
   return true;
 }
@@ -1146,39 +1146,6 @@ void MipsAsmPrinter::EmitSled(const MachineInstr &MI, SledKind Kind) {
   }
 
   recordSled(CurSled, MI, Kind);
-}
-
-void MipsAsmPrinter::EmitXRayTable() {
-  if (Sleds.empty())
-    return;
-  if (Subtarget->isTargetELF()) {
-    auto PrevSection = OutStreamer->getCurrentSectionOnly();
-    auto Fn = MF->getFunction();
-    MCSection *Section;
-
-    if (Fn->hasComdat())
-      Section = OutContext.getELFSection("xray_instr_map", ELF::SHT_PROGBITS,
-                                         ELF::SHF_ALLOC | ELF::SHF_GROUP, 0,
-                                         Fn->getComdat()->getName());
-    else
-      Section =
-          OutContext.getELFSection("xray_instr_map", ELF::SHT_PROGBITS,
-                                   ELF::SHF_ALLOC, 0, CurrentFnSym->getName());
-
-    OutStreamer->SwitchSection(Section);
-    for (const auto &Sled : Sleds) {
-      OutStreamer->EmitSymbolValue(Sled.Sled, Subtarget->isGP64bit() ? 8 : 4);
-      OutStreamer->EmitSymbolValue(CurrentFnSym, Subtarget->isGP64bit() ? 8 : 4);
-      auto Kind = static_cast<uint8_t>(Sled.Kind);
-      OutStreamer->EmitBytes(
-          StringRef(reinterpret_cast<const char *>(&Kind), 1));
-      OutStreamer->EmitBytes(
-          StringRef(reinterpret_cast<const char *>(&Sled.AlwaysInstrument), 1));
-      OutStreamer->EmitZeros(Subtarget->isGP64bit() ? 14 : 6);
-    }
-    OutStreamer->SwitchSection(PrevSection);
-  }
-  Sleds.clear();
 }
 
 void MipsAsmPrinter::LowerPATCHABLE_FUNCTION_ENTER(const MachineInstr &MI) {

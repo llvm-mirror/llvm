@@ -28,8 +28,8 @@
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/AutoUpgrade.h"
 #include "llvm/IR/BasicBlock.h"
-#include "llvm/IR/CallingConv.h"
 #include "llvm/IR/CallSite.h"
+#include "llvm/IR/CallingConv.h"
 #include "llvm/IR/Comdat.h"
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/Constants.h"
@@ -40,13 +40,13 @@
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/DiagnosticPrinter.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/GVMaterializer.h"
 #include "llvm/IR/GlobalAlias.h"
 #include "llvm/IR/GlobalIFunc.h"
 #include "llvm/IR/GlobalIndirectSymbol.h"
 #include "llvm/IR/GlobalObject.h"
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/GlobalVariable.h"
-#include "llvm/IR/GVMaterializer.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/InstrTypes.h"
@@ -92,13 +92,6 @@ static cl::opt<bool> PrintSummaryGUIDs(
     "print-summary-global-ids", cl::init(false), cl::Hidden,
     cl::desc(
         "Print the global id for each value when reading the module summary"));
-
-// FIXME: This flag should either be removed or moved to clang as a driver flag.
-static llvm::cl::opt<bool> IgnoreEmptyThinLTOIndexFile(
-    "ignore-empty-index-file", llvm::cl::ZeroOrMore,
-    llvm::cl::desc(
-        "Ignore an empty index file and perform non-ThinLTO compilation"),
-    llvm::cl::init(false));
 
 namespace {
 
@@ -694,15 +687,16 @@ class ModuleSummaryIndexBitcodeReader : public BitcodeReaderBase {
   /// Used to enable on-demand parsing of the VST.
   uint64_t VSTOffset = 0;
 
-  // Map to save ValueId to GUID association that was recorded in the
+  // Map to save ValueId to ValueInfo association that was recorded in the
   // ValueSymbolTable. It is used after the VST is parsed to convert
   // call graph edges read from the function summary from referencing
-  // callees by their ValueId to using the GUID instead, which is how
+  // callees by their ValueId to using the ValueInfo instead, which is how
   // they are recorded in the summary index being built.
-  // We save a second GUID which is the same as the first one, but ignoring the
-  // linkage, i.e. for value other than local linkage they are identical.
-  DenseMap<unsigned, std::pair<GlobalValue::GUID, GlobalValue::GUID>>
-      ValueIdToCallGraphGUIDMap;
+  // We save a GUID which refers to the same global as the ValueInfo, but
+  // ignoring the linkage, i.e. for values other than local linkage they are
+  // identical.
+  DenseMap<unsigned, std::pair<ValueInfo, GlobalValue::GUID>>
+      ValueIdToValueInfoMap;
 
   /// Map populated during module path string table parsing, from the
   /// module ID to a string reference owned by the index's module
@@ -739,13 +733,13 @@ private:
   std::vector<FunctionSummary::EdgeTy> makeCallList(ArrayRef<uint64_t> Record,
                                                     bool IsOldProfileFormat,
                                                     bool HasProfile);
-  Error parseEntireSummary();
+  Error parseEntireSummary(unsigned ID);
   Error parseModuleStringTable();
 
-  std::pair<GlobalValue::GUID, GlobalValue::GUID>
-  getGUIDFromValueId(unsigned ValueId);
+  std::pair<ValueInfo, GlobalValue::GUID>
+  getValueInfoFromValueId(unsigned ValueId);
 
-  ModulePathStringTableTy::iterator addThisModulePath();
+  ModuleSummaryIndex::ModuleInfo *addThisModule();
 };
 
 } // end anonymous namespace
@@ -871,11 +865,11 @@ static GlobalValueSummary::GVFlags getDecodedGVSummaryFlags(uint64_t RawFlags,
   auto Linkage = GlobalValue::LinkageTypes(RawFlags & 0xF); // 4 bits
   RawFlags = RawFlags >> 4;
   bool NotEligibleToImport = (RawFlags & 0x1) || Version < 3;
-  // The LiveRoot flag wasn't introduced until version 3. For dead stripping
+  // The Live flag wasn't introduced until version 3. For dead stripping
   // to work correctly on earlier versions, we must conservatively treat all
   // values as live.
-  bool LiveRoot = (RawFlags & 0x2) || Version < 3;
-  return GlobalValueSummary::GVFlags(Linkage, NotEligibleToImport, LiveRoot);
+  bool Live = (RawFlags & 0x2) || Version < 3;
+  return GlobalValueSummary::GVFlags(Linkage, NotEligibleToImport, Live);
 }
 
 static GlobalValue::VisibilityTypes getDecodedVisibility(unsigned Val) {
@@ -2614,6 +2608,16 @@ Error BitcodeReader::materializeMetadata() {
     if (Error Err = MDLoader->parseModuleMetadata())
       return Err;
   }
+
+  // Upgrade "Linker Options" module flag to "llvm.linker.options" module-level
+  // metadata.
+  if (Metadata *Val = TheModule->getModuleFlag("Linker Options")) {
+    NamedMDNode *LinkerOpts =
+        TheModule->getOrInsertNamedMetadata("llvm.linker.options");
+    for (const MDOperand &MDOptions : cast<MDNode>(Val)->operands())
+      LinkerOpts->addOperand(cast<MDNode>(MDOptions));
+  }
+
   DeferredMetadataInfo.clear();
   return Error::success();
 }
@@ -2749,7 +2753,7 @@ Error BitcodeReader::parseComdatRecord(ArrayRef<uint64_t> Record) {
 Error BitcodeReader::parseGlobalVarRecord(ArrayRef<uint64_t> Record) {
   // v1: [pointer type, isconst, initid, linkage, alignment, section,
   // visibility, threadlocal, unnamed_addr, externally_initialized,
-  // dllstorageclass, comdat] (name in VST)
+  // dllstorageclass, comdat, attributes] (name in VST)
   // v2: [strtab_offset, strtab_size, v1]
   StringRef Name;
   std::tie(Name, Record) = readNameFromStrtab(Record);
@@ -2828,6 +2832,11 @@ Error BitcodeReader::parseGlobalVarRecord(ArrayRef<uint64_t> Record) {
     }
   } else if (hasImplicitComdat(RawLinkage)) {
     NewGV->setComdat(reinterpret_cast<Comdat *>(1));
+  }
+
+  if (Record.size() > 12) {
+    auto AS = getAttributes(Record[12]).getFnAttributes();
+    NewGV->setAttributes(AS);
   }
   return Error::success();
 }
@@ -4490,11 +4499,11 @@ Error BitcodeReader::parseFunctionBody(Function *F) {
     // Add instruction to end of current BB.  If there is no current BB, reject
     // this file.
     if (!CurBB) {
-      delete I;
+      I->deleteValue();
       return error("Invalid instruction with no BB");
     }
     if (!OperandBundles.empty()) {
-      delete I;
+      I->deleteValue();
       return error("Operand bundles found with no consumer");
     }
     CurBB->getInstList().push_back(I);
@@ -4692,16 +4701,16 @@ ModuleSummaryIndexBitcodeReader::ModuleSummaryIndexBitcodeReader(
     : BitcodeReaderBase(std::move(Cursor), Strtab), TheIndex(TheIndex),
       ModulePath(ModulePath), ModuleId(ModuleId) {}
 
-ModulePathStringTableTy::iterator
-ModuleSummaryIndexBitcodeReader::addThisModulePath() {
-  return TheIndex.addModulePath(ModulePath, ModuleId);
+ModuleSummaryIndex::ModuleInfo *
+ModuleSummaryIndexBitcodeReader::addThisModule() {
+  return TheIndex.addModule(ModulePath, ModuleId);
 }
 
-std::pair<GlobalValue::GUID, GlobalValue::GUID>
-ModuleSummaryIndexBitcodeReader::getGUIDFromValueId(unsigned ValueId) {
-  auto VGI = ValueIdToCallGraphGUIDMap.find(ValueId);
-  assert(VGI != ValueIdToCallGraphGUIDMap.end());
-  return VGI->second;
+std::pair<ValueInfo, GlobalValue::GUID>
+ModuleSummaryIndexBitcodeReader::getValueInfoFromValueId(unsigned ValueId) {
+  auto VGI = ValueIdToValueInfoMap[ValueId];
+  assert(VGI.first);
+  return VGI;
 }
 
 void ModuleSummaryIndexBitcodeReader::setValueGUID(
@@ -4716,8 +4725,8 @@ void ModuleSummaryIndexBitcodeReader::setValueGUID(
   if (PrintSummaryGUIDs)
     dbgs() << "GUID " << ValueGUID << "(" << OriginalNameID << ") is "
            << ValueName << "\n";
-  ValueIdToCallGraphGUIDMap[ValueID] =
-      std::make_pair(ValueGUID, OriginalNameID);
+  ValueIdToValueInfoMap[ValueID] =
+      std::make_pair(TheIndex.getOrInsertValueInfo(ValueGUID), OriginalNameID);
 }
 
 // Specialized value symbol table parser used when reading module index
@@ -4795,7 +4804,8 @@ Error ModuleSummaryIndexBitcodeReader::parseValueSymbolTable(
       GlobalValue::GUID RefGUID = Record[1];
       // The "original name", which is the second value of the pair will be
       // overriden later by a FS_COMBINED_ORIGINAL_NAME in the combined index.
-      ValueIdToCallGraphGUIDMap[ValueID] = std::make_pair(RefGUID, RefGUID);
+      ValueIdToValueInfoMap[ValueID] =
+          std::make_pair(TheIndex.getOrInsertValueInfo(RefGUID), RefGUID);
       break;
     }
     }
@@ -4844,6 +4854,7 @@ Error ModuleSummaryIndexBitcodeReader::parseModule() {
           return error("Invalid record");
         break;
       case bitc::GLOBALVAL_SUMMARY_BLOCK_ID:
+      case bitc::FULL_LTO_GLOBALVAL_SUMMARY_BLOCK_ID:
         assert(!SeenValueSymbolTable &&
                "Already read VST when parsing summary block?");
         // We might not have a VST if there were no values in the
@@ -4856,7 +4867,7 @@ Error ModuleSummaryIndexBitcodeReader::parseModule() {
           SeenValueSymbolTable = true;
         }
         SeenGlobalValSummary = true;
-        if (Error Err = parseEntireSummary())
+        if (Error Err = parseEntireSummary(Entry.ID))
           return Err;
         break;
       case bitc::MODULE_STRTAB_BLOCK_ID:
@@ -4889,7 +4900,7 @@ Error ModuleSummaryIndexBitcodeReader::parseModule() {
         case bitc::MODULE_CODE_HASH: {
           if (Record.size() != 5)
             return error("Invalid hash length " + Twine(Record.size()).str());
-          auto &Hash = addThisModulePath()->second.second;
+          auto &Hash = addThisModule()->second.second;
           int Pos = 0;
           for (auto &Val : Record) {
             assert(!(Val >> 32) && "Unexpected high bits set");
@@ -4940,7 +4951,7 @@ ModuleSummaryIndexBitcodeReader::makeRefList(ArrayRef<uint64_t> Record) {
   std::vector<ValueInfo> Ret;
   Ret.reserve(Record.size());
   for (uint64_t RefValueId : Record)
-    Ret.push_back(getGUIDFromValueId(RefValueId).first);
+    Ret.push_back(getValueInfoFromValueId(RefValueId).first);
   return Ret;
 }
 
@@ -4950,22 +4961,22 @@ std::vector<FunctionSummary::EdgeTy> ModuleSummaryIndexBitcodeReader::makeCallLi
   Ret.reserve(Record.size());
   for (unsigned I = 0, E = Record.size(); I != E; ++I) {
     CalleeInfo::HotnessType Hotness = CalleeInfo::HotnessType::Unknown;
-    GlobalValue::GUID CalleeGUID = getGUIDFromValueId(Record[I]).first;
+    ValueInfo Callee = getValueInfoFromValueId(Record[I]).first;
     if (IsOldProfileFormat) {
       I += 1; // Skip old callsitecount field
       if (HasProfile)
         I += 1; // Skip old profilecount field
     } else if (HasProfile)
       Hotness = static_cast<CalleeInfo::HotnessType>(Record[++I]);
-    Ret.push_back(FunctionSummary::EdgeTy{CalleeGUID, CalleeInfo{Hotness}});
+    Ret.push_back(FunctionSummary::EdgeTy{Callee, CalleeInfo{Hotness}});
   }
   return Ret;
 }
 
 // Eagerly parse the entire summary block. This populates the GlobalValueSummary
 // objects in the index.
-Error ModuleSummaryIndexBitcodeReader::parseEntireSummary() {
-  if (Stream.EnterSubBlock(bitc::GLOBALVAL_SUMMARY_BLOCK_ID))
+Error ModuleSummaryIndexBitcodeReader::parseEntireSummary(unsigned ID) {
+  if (Stream.EnterSubBlock(ID))
     return error("Invalid record");
   SmallVector<uint64_t, 64> Record;
 
@@ -5027,7 +5038,8 @@ Error ModuleSummaryIndexBitcodeReader::parseEntireSummary() {
     case bitc::FS_VALUE_GUID: { // [valueid, refguid]
       uint64_t ValueID = Record[0];
       GlobalValue::GUID RefGUID = Record[1];
-      ValueIdToCallGraphGUIDMap[ValueID] = std::make_pair(RefGUID, RefGUID);
+      ValueIdToValueInfoMap[ValueID] =
+          std::make_pair(TheIndex.getOrInsertValueInfo(RefGUID), RefGUID);
       break;
     }
     // FS_PERMODULE: [valueid, flags, instcount, numrefs, numrefs x valueid,
@@ -5068,10 +5080,10 @@ Error ModuleSummaryIndexBitcodeReader::parseEntireSummary() {
       PendingTypeCheckedLoadVCalls.clear();
       PendingTypeTestAssumeConstVCalls.clear();
       PendingTypeCheckedLoadConstVCalls.clear();
-      auto GUID = getGUIDFromValueId(ValueID);
-      FS->setModulePath(addThisModulePath()->first());
-      FS->setOriginalName(GUID.second);
-      TheIndex.addGlobalValueSummary(GUID.first, std::move(FS));
+      auto VIAndOriginalGUID = getValueInfoFromValueId(ValueID);
+      FS->setModulePath(addThisModule()->first());
+      FS->setOriginalName(VIAndOriginalGUID.second);
+      TheIndex.addGlobalValueSummary(VIAndOriginalGUID.first, std::move(FS));
       break;
     }
     // FS_ALIAS: [valueid, flags, valueid]
@@ -5089,16 +5101,17 @@ Error ModuleSummaryIndexBitcodeReader::parseEntireSummary() {
       // string table section in the per-module index, we create a single
       // module path string table entry with an empty (0) ID to take
       // ownership.
-      AS->setModulePath(addThisModulePath()->first());
+      AS->setModulePath(addThisModule()->first());
 
-      GlobalValue::GUID AliaseeGUID = getGUIDFromValueId(AliaseeID).first;
+      GlobalValue::GUID AliaseeGUID =
+          getValueInfoFromValueId(AliaseeID).first.getGUID();
       auto AliaseeInModule =
           TheIndex.findSummaryInModule(AliaseeGUID, ModulePath);
       if (!AliaseeInModule)
         return error("Alias expects aliasee summary to be parsed");
       AS->setAliasee(AliaseeInModule);
 
-      auto GUID = getGUIDFromValueId(ValueID);
+      auto GUID = getValueInfoFromValueId(ValueID);
       AS->setOriginalName(GUID.second);
       TheIndex.addGlobalValueSummary(GUID.first, std::move(AS));
       break;
@@ -5111,8 +5124,8 @@ Error ModuleSummaryIndexBitcodeReader::parseEntireSummary() {
       std::vector<ValueInfo> Refs =
           makeRefList(ArrayRef<uint64_t>(Record).slice(2));
       auto FS = llvm::make_unique<GlobalVarSummary>(Flags, std::move(Refs));
-      FS->setModulePath(addThisModulePath()->first());
-      auto GUID = getGUIDFromValueId(ValueID);
+      FS->setModulePath(addThisModule()->first());
+      auto GUID = getValueInfoFromValueId(ValueID);
       FS->setOriginalName(GUID.second);
       TheIndex.addGlobalValueSummary(GUID.first, std::move(FS));
       break;
@@ -5139,7 +5152,7 @@ Error ModuleSummaryIndexBitcodeReader::parseEntireSummary() {
       std::vector<FunctionSummary::EdgeTy> Edges = makeCallList(
           ArrayRef<uint64_t>(Record).slice(CallGraphEdgeStartIndex),
           IsOldProfileFormat, HasProfile);
-      GlobalValue::GUID GUID = getGUIDFromValueId(ValueID).first;
+      ValueInfo VI = getValueInfoFromValueId(ValueID).first;
       auto FS = llvm::make_unique<FunctionSummary>(
           Flags, InstCount, std::move(Refs), std::move(Edges),
           std::move(PendingTypeTests), std::move(PendingTypeTestAssumeVCalls),
@@ -5152,9 +5165,9 @@ Error ModuleSummaryIndexBitcodeReader::parseEntireSummary() {
       PendingTypeTestAssumeConstVCalls.clear();
       PendingTypeCheckedLoadConstVCalls.clear();
       LastSeenSummary = FS.get();
-      LastSeenGUID = GUID;
+      LastSeenGUID = VI.getGUID();
       FS->setModulePath(ModuleIdMap[ModuleId]);
-      TheIndex.addGlobalValueSummary(GUID, std::move(FS));
+      TheIndex.addGlobalValueSummary(VI, std::move(FS));
       break;
     }
     // FS_COMBINED_ALIAS: [valueid, modid, flags, valueid]
@@ -5170,16 +5183,17 @@ Error ModuleSummaryIndexBitcodeReader::parseEntireSummary() {
       LastSeenSummary = AS.get();
       AS->setModulePath(ModuleIdMap[ModuleId]);
 
-      auto AliaseeGUID = getGUIDFromValueId(AliaseeValueId).first;
+      auto AliaseeGUID =
+          getValueInfoFromValueId(AliaseeValueId).first.getGUID();
       auto AliaseeInModule =
           TheIndex.findSummaryInModule(AliaseeGUID, AS->modulePath());
       if (!AliaseeInModule)
         return error("Alias expects aliasee summary to be parsed");
       AS->setAliasee(AliaseeInModule);
 
-      GlobalValue::GUID GUID = getGUIDFromValueId(ValueID).first;
-      LastSeenGUID = GUID;
-      TheIndex.addGlobalValueSummary(GUID, std::move(AS));
+      ValueInfo VI = getValueInfoFromValueId(ValueID).first;
+      LastSeenGUID = VI.getGUID();
+      TheIndex.addGlobalValueSummary(VI, std::move(AS));
       break;
     }
     // FS_COMBINED_GLOBALVAR_INIT_REFS: [valueid, modid, flags, n x valueid]
@@ -5193,9 +5207,9 @@ Error ModuleSummaryIndexBitcodeReader::parseEntireSummary() {
       auto FS = llvm::make_unique<GlobalVarSummary>(Flags, std::move(Refs));
       LastSeenSummary = FS.get();
       FS->setModulePath(ModuleIdMap[ModuleId]);
-      GlobalValue::GUID GUID = getGUIDFromValueId(ValueID).first;
-      LastSeenGUID = GUID;
-      TheIndex.addGlobalValueSummary(GUID, std::move(FS));
+      ValueInfo VI = getValueInfoFromValueId(ValueID).first;
+      LastSeenGUID = VI.getGUID();
+      TheIndex.addGlobalValueSummary(VI, std::move(FS));
       break;
     }
     // FS_COMBINED_ORIGINAL_NAME: [original_name]
@@ -5238,6 +5252,20 @@ Error ModuleSummaryIndexBitcodeReader::parseEntireSummary() {
           {{Record[0], Record[1]}, {Record.begin() + 2, Record.end()}});
       break;
     }
+    case bitc::FS_CFI_FUNCTION_DEFS: {
+      std::set<std::string> &CfiFunctionDefs = TheIndex.cfiFunctionDefs();
+      for (unsigned I = 0; I != Record.size(); I += 2)
+        CfiFunctionDefs.insert(
+            {Strtab.data() + Record[I], static_cast<size_t>(Record[I + 1])});
+      break;
+    }
+    case bitc::FS_CFI_FUNCTION_DECLS: {
+      std::set<std::string> &CfiFunctionDecls = TheIndex.cfiFunctionDecls();
+      for (unsigned I = 0; I != Record.size(); I += 2)
+        CfiFunctionDecls.insert(
+            {Strtab.data() + Record[I], static_cast<size_t>(Record[I + 1])});
+      break;
+    }
     }
   }
   llvm_unreachable("Exit infinite loop");
@@ -5252,7 +5280,7 @@ Error ModuleSummaryIndexBitcodeReader::parseModuleStringTable() {
   SmallVector<uint64_t, 64> Record;
 
   SmallString<128> ModulePath;
-  ModulePathStringTableTy::iterator LastSeenModulePath;
+  ModuleSummaryIndex::ModuleInfo *LastSeenModule = nullptr;
 
   while (true) {
     BitstreamEntry Entry = Stream.advanceSkippingSubblocks();
@@ -5279,8 +5307,8 @@ Error ModuleSummaryIndexBitcodeReader::parseModuleStringTable() {
       if (convertToString(Record, 1, ModulePath))
         return error("Invalid record");
 
-      LastSeenModulePath = TheIndex.addModulePath(ModulePath, ModuleId);
-      ModuleIdMap[ModuleId] = LastSeenModulePath->first();
+      LastSeenModule = TheIndex.addModule(ModulePath, ModuleId);
+      ModuleIdMap[ModuleId] = LastSeenModule->first();
 
       ModulePath.clear();
       break;
@@ -5289,15 +5317,15 @@ Error ModuleSummaryIndexBitcodeReader::parseModuleStringTable() {
     case bitc::MST_CODE_HASH: {
       if (Record.size() != 5)
         return error("Invalid hash length " + Twine(Record.size()).str());
-      if (LastSeenModulePath == TheIndex.modulePaths().end())
+      if (!LastSeenModule)
         return error("Invalid hash that does not follow a module path");
       int Pos = 0;
       for (auto &Val : Record) {
         assert(!(Val >> 32) && "Unexpected high bits set");
-        LastSeenModulePath->second.second[Pos++] = Val;
+        LastSeenModule->second.second[Pos++] = Val;
       }
-      // Reset LastSeenModulePath to avoid overriding the hash unexpectedly.
-      LastSeenModulePath = TheIndex.modulePaths().end();
+      // Reset LastSeenModule to avoid overriding the hash unexpectedly.
+      LastSeenModule = nullptr;
       break;
     }
     }
@@ -5367,12 +5395,20 @@ static Expected<StringRef> readStrtab(BitstreamCursor &Stream) {
 
 Expected<std::vector<BitcodeModule>>
 llvm::getBitcodeModuleList(MemoryBufferRef Buffer) {
+  auto FOrErr = getBitcodeFileContents(Buffer);
+  if (!FOrErr)
+    return FOrErr.takeError();
+  return std::move(FOrErr->Mods);
+}
+
+Expected<BitcodeFileContents>
+llvm::getBitcodeFileContents(MemoryBufferRef Buffer) {
   Expected<BitstreamCursor> StreamOrErr = initStream(Buffer);
   if (!StreamOrErr)
     return StreamOrErr.takeError();
   BitstreamCursor &Stream = *StreamOrErr;
 
-  std::vector<BitcodeModule> Modules;
+  BitcodeFileContents F;
   while (true) {
     uint64_t BCBegin = Stream.getCurrentByteNo();
 
@@ -5380,7 +5416,7 @@ llvm::getBitcodeModuleList(MemoryBufferRef Buffer) {
     // of the bitcode stream (e.g. Apple's ar tool). If we are close enough to
     // the end that there cannot possibly be another module, stop looking.
     if (BCBegin + 8 >= Stream.getBitcodeBytes().size())
-      return Modules;
+      return F;
 
     BitstreamEntry Entry = Stream.advance();
     switch (Entry.Kind) {
@@ -5406,10 +5442,10 @@ llvm::getBitcodeModuleList(MemoryBufferRef Buffer) {
         if (Stream.SkipBlock())
           return error("Malformed block");
 
-        Modules.push_back({Stream.getBitcodeBytes().slice(
-                               BCBegin, Stream.getCurrentByteNo() - BCBegin),
-                           Buffer.getBufferIdentifier(), IdentificationBit,
-                           ModuleBit});
+        F.Mods.push_back({Stream.getBitcodeBytes().slice(
+                              BCBegin, Stream.getCurrentByteNo() - BCBegin),
+                          Buffer.getBufferIdentifier(), IdentificationBit,
+                          ModuleBit});
         continue;
       }
 
@@ -5421,7 +5457,7 @@ llvm::getBitcodeModuleList(MemoryBufferRef Buffer) {
         // not have its own string table. A bitcode file may have multiple
         // string tables if it was created by binary concatenation, for example
         // with "llvm-cat -b".
-        for (auto I = Modules.rbegin(), E = Modules.rend(); I != E; ++I) {
+        for (auto I = F.Mods.rbegin(), E = F.Mods.rend(); I != E; ++I) {
           if (!I->Strtab.empty())
             break;
           I->Strtab = *Strtab;
@@ -5496,13 +5532,16 @@ BitcodeModule::getLazyModule(LLVMContext &Context, bool ShouldLazyLoadMetadata,
 }
 
 // Parse the specified bitcode buffer and merge the index into CombinedIndex.
+// We don't use ModuleIdentifier here because the client may need to control the
+// module path used in the combined summary (e.g. when reading summaries for
+// regular LTO modules).
 Error BitcodeModule::readSummary(ModuleSummaryIndex &CombinedIndex,
-                                 unsigned ModuleId) {
+                                 StringRef ModulePath, uint64_t ModuleId) {
   BitstreamCursor Stream(Buffer);
   Stream.JumpToBit(ModuleBit);
 
   ModuleSummaryIndexBitcodeReader R(std::move(Stream), Strtab, CombinedIndex,
-                                    ModuleIdentifier, ModuleId);
+                                    ModulePath, ModuleId);
   return R.parseModule();
 }
 
@@ -5522,7 +5561,7 @@ Expected<std::unique_ptr<ModuleSummaryIndex>> BitcodeModule::getSummary() {
 }
 
 // Check if the given bitcode buffer contains a global value summary block.
-Expected<bool> BitcodeModule::hasSummary() {
+Expected<BitcodeLTOInfo> BitcodeModule::getLTOInfo() {
   BitstreamCursor Stream(Buffer);
   Stream.JumpToBit(ModuleBit);
 
@@ -5536,11 +5575,14 @@ Expected<bool> BitcodeModule::hasSummary() {
     case BitstreamEntry::Error:
       return error("Malformed block");
     case BitstreamEntry::EndBlock:
-      return false;
+      return BitcodeLTOInfo{/*IsThinLTO=*/false, /*HasSummary=*/false};
 
     case BitstreamEntry::SubBlock:
       if (Entry.ID == bitc::GLOBALVAL_SUMMARY_BLOCK_ID)
-        return true;
+        return BitcodeLTOInfo{/*IsThinLTO=*/true, /*HasSummary=*/true};
+
+      if (Entry.ID == bitc::FULL_LTO_GLOBALVAL_SUMMARY_BLOCK_ID)
+        return BitcodeLTOInfo{/*IsThinLTO=*/false, /*HasSummary=*/true};
 
       // Ignore other sub-blocks.
       if (Stream.SkipBlock())
@@ -5627,12 +5669,12 @@ Expected<std::string> llvm::getBitcodeProducerString(MemoryBufferRef Buffer) {
 
 Error llvm::readModuleSummaryIndex(MemoryBufferRef Buffer,
                                    ModuleSummaryIndex &CombinedIndex,
-                                   unsigned ModuleId) {
+                                   uint64_t ModuleId) {
   Expected<BitcodeModule> BM = getSingleModule(Buffer);
   if (!BM)
     return BM.takeError();
 
-  return BM->readSummary(CombinedIndex, ModuleId);
+  return BM->readSummary(CombinedIndex, BM->getModuleIdentifier(), ModuleId);
 }
 
 Expected<std::unique_ptr<ModuleSummaryIndex>>
@@ -5644,16 +5686,17 @@ llvm::getModuleSummaryIndex(MemoryBufferRef Buffer) {
   return BM->getSummary();
 }
 
-Expected<bool> llvm::hasGlobalValueSummary(MemoryBufferRef Buffer) {
+Expected<BitcodeLTOInfo> llvm::getBitcodeLTOInfo(MemoryBufferRef Buffer) {
   Expected<BitcodeModule> BM = getSingleModule(Buffer);
   if (!BM)
     return BM.takeError();
 
-  return BM->hasSummary();
+  return BM->getLTOInfo();
 }
 
 Expected<std::unique_ptr<ModuleSummaryIndex>>
-llvm::getModuleSummaryIndexForFile(StringRef Path) {
+llvm::getModuleSummaryIndexForFile(StringRef Path,
+                                   bool IgnoreEmptyThinLTOIndexFile) {
   ErrorOr<std::unique_ptr<MemoryBuffer>> FileOrErr =
       MemoryBuffer::getFileOrSTDIN(Path);
   if (!FileOrErr)

@@ -10,9 +10,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "XCoreTargetMachine.h"
 #include "MCTargetDesc/XCoreMCTargetDesc.h"
 #include "XCore.h"
-#include "XCoreTargetMachine.h"
 #include "XCoreTargetObjectFile.h"
 #include "XCoreTargetTransformInfo.h"
 #include "llvm/ADT/Optional.h"
@@ -54,7 +54,7 @@ namespace {
 /// XCore Code Generator Pass Configuration Options.
 class XCorePassConfig : public TargetPassConfig {
 public:
-  XCorePassConfig(XCoreTargetMachine *TM, PassManagerBase &PM)
+  XCorePassConfig(XCoreTargetMachine &TM, PassManagerBase &PM)
     : TargetPassConfig(TM, PM) {}
 
   XCoreTargetMachine &getXCoreTargetMachine() const {
@@ -70,11 +70,11 @@ public:
 } // end anonymous namespace
 
 TargetPassConfig *XCoreTargetMachine::createPassConfig(PassManagerBase &PM) {
-  return new XCorePassConfig(this, PM);
+  return new XCorePassConfig(*this, PM);
 }
 
 void XCorePassConfig::addIRPasses() {
-  addPass(createAtomicExpandPass(&getXCoreTargetMachine()));
+  addPass(createAtomicExpandPass());
 
   TargetPassConfig::addIRPasses();
 }

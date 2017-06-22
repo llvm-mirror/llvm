@@ -27,6 +27,7 @@
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/MDBuilder.h"
@@ -141,16 +142,255 @@ static bool definedInCaller(const SetVector<BasicBlock *> &Blocks, Value *V) {
   return false;
 }
 
-void CodeExtractor::findInputsOutputs(ValueSet &Inputs,
-                                      ValueSet &Outputs) const {
+static BasicBlock *getCommonExitBlock(const SetVector<BasicBlock *> &Blocks) {
+  BasicBlock *CommonExitBlock = nullptr;
+  auto hasNonCommonExitSucc = [&](BasicBlock *Block) {
+    for (auto *Succ : successors(Block)) {
+      // Internal edges, ok.
+      if (Blocks.count(Succ))
+        continue;
+      if (!CommonExitBlock) {
+        CommonExitBlock = Succ;
+        continue;
+      }
+      if (CommonExitBlock == Succ)
+        continue;
+
+      return true;
+    }
+    return false;
+  };
+
+  if (any_of(Blocks, hasNonCommonExitSucc))
+    return nullptr;
+
+  return CommonExitBlock;
+}
+
+bool CodeExtractor::isLegalToShrinkwrapLifetimeMarkers(
+    Instruction *Addr) const {
+  AllocaInst *AI = cast<AllocaInst>(Addr->stripInBoundsConstantOffsets());
+  Function *Func = (*Blocks.begin())->getParent();
+  for (BasicBlock &BB : *Func) {
+    if (Blocks.count(&BB))
+      continue;
+    for (Instruction &II : BB) {
+
+      if (isa<DbgInfoIntrinsic>(II))
+        continue;
+
+      unsigned Opcode = II.getOpcode();
+      Value *MemAddr = nullptr;
+      switch (Opcode) {
+      case Instruction::Store:
+      case Instruction::Load: {
+        if (Opcode == Instruction::Store) {
+          StoreInst *SI = cast<StoreInst>(&II);
+          MemAddr = SI->getPointerOperand();
+        } else {
+          LoadInst *LI = cast<LoadInst>(&II);
+          MemAddr = LI->getPointerOperand();
+        }
+        // Global variable can not be aliased with locals.
+        if (dyn_cast<Constant>(MemAddr))
+          break;
+        Value *Base = MemAddr->stripInBoundsConstantOffsets();
+        if (!dyn_cast<AllocaInst>(Base) || Base == AI)
+          return false;
+        break;
+      }
+      default: {
+        IntrinsicInst *IntrInst = dyn_cast<IntrinsicInst>(&II);
+        if (IntrInst) {
+          if (IntrInst->getIntrinsicID() == Intrinsic::lifetime_start ||
+              IntrInst->getIntrinsicID() == Intrinsic::lifetime_end)
+            break;
+          return false;
+        }
+        // Treat all the other cases conservatively if it has side effects.
+        if (II.mayHaveSideEffects())
+          return false;
+      }
+      }
+    }
+  }
+
+  return true;
+}
+
+BasicBlock *
+CodeExtractor::findOrCreateBlockForHoisting(BasicBlock *CommonExitBlock) {
+  BasicBlock *SinglePredFromOutlineRegion = nullptr;
+  assert(!Blocks.count(CommonExitBlock) &&
+         "Expect a block outside the region!");
+  for (auto *Pred : predecessors(CommonExitBlock)) {
+    if (!Blocks.count(Pred))
+      continue;
+    if (!SinglePredFromOutlineRegion) {
+      SinglePredFromOutlineRegion = Pred;
+    } else if (SinglePredFromOutlineRegion != Pred) {
+      SinglePredFromOutlineRegion = nullptr;
+      break;
+    }
+  }
+
+  if (SinglePredFromOutlineRegion)
+    return SinglePredFromOutlineRegion;
+
+#ifndef NDEBUG
+  auto getFirstPHI = [](BasicBlock *BB) {
+    BasicBlock::iterator I = BB->begin();
+    PHINode *FirstPhi = nullptr;
+    while (I != BB->end()) {
+      PHINode *Phi = dyn_cast<PHINode>(I);
+      if (!Phi)
+        break;
+      if (!FirstPhi) {
+        FirstPhi = Phi;
+        break;
+      }
+    }
+    return FirstPhi;
+  };
+  // If there are any phi nodes, the single pred either exists or has already
+  // be created before code extraction.
+  assert(!getFirstPHI(CommonExitBlock) && "Phi not expected");
+#endif
+
+  BasicBlock *NewExitBlock = CommonExitBlock->splitBasicBlock(
+      CommonExitBlock->getFirstNonPHI()->getIterator());
+
+  for (auto *Pred : predecessors(CommonExitBlock)) {
+    if (Blocks.count(Pred))
+      continue;
+    Pred->getTerminator()->replaceUsesOfWith(CommonExitBlock, NewExitBlock);
+  }
+  // Now add the old exit block to the outline region.
+  Blocks.insert(CommonExitBlock);
+  return CommonExitBlock;
+}
+
+void CodeExtractor::findAllocas(ValueSet &SinkCands, ValueSet &HoistCands,
+                                BasicBlock *&ExitBlock) const {
+  Function *Func = (*Blocks.begin())->getParent();
+  ExitBlock = getCommonExitBlock(Blocks);
+
+  for (BasicBlock &BB : *Func) {
+    if (Blocks.count(&BB))
+      continue;
+    for (Instruction &II : BB) {
+      auto *AI = dyn_cast<AllocaInst>(&II);
+      if (!AI)
+        continue;
+
+      // Find the pair of life time markers for address 'Addr' that are either
+      // defined inside the outline region or can legally be shrinkwrapped into
+      // the outline region. If there are not other untracked uses of the
+      // address, return the pair of markers if found; otherwise return a pair
+      // of nullptr.
+      auto GetLifeTimeMarkers =
+          [&](Instruction *Addr, bool &SinkLifeStart,
+              bool &HoistLifeEnd) -> std::pair<Instruction *, Instruction *> {
+        Instruction *LifeStart = nullptr, *LifeEnd = nullptr;
+
+        for (User *U : Addr->users()) {
+          IntrinsicInst *IntrInst = dyn_cast<IntrinsicInst>(U);
+          if (IntrInst) {
+            if (IntrInst->getIntrinsicID() == Intrinsic::lifetime_start) {
+              // Do not handle the case where AI has multiple start markers.
+              if (LifeStart)
+                return std::make_pair<Instruction *>(nullptr, nullptr);
+              LifeStart = IntrInst;
+            }
+            if (IntrInst->getIntrinsicID() == Intrinsic::lifetime_end) {
+              if (LifeEnd)
+                return std::make_pair<Instruction *>(nullptr, nullptr);
+              LifeEnd = IntrInst;
+            }
+            continue;
+          }
+          // Find untracked uses of the address, bail.
+          if (!definedInRegion(Blocks, U))
+            return std::make_pair<Instruction *>(nullptr, nullptr);
+        }
+
+        if (!LifeStart || !LifeEnd)
+          return std::make_pair<Instruction *>(nullptr, nullptr);
+
+        SinkLifeStart = !definedInRegion(Blocks, LifeStart);
+        HoistLifeEnd = !definedInRegion(Blocks, LifeEnd);
+        // Do legality Check.
+        if ((SinkLifeStart || HoistLifeEnd) &&
+            !isLegalToShrinkwrapLifetimeMarkers(Addr))
+          return std::make_pair<Instruction *>(nullptr, nullptr);
+
+        // Check to see if we have a place to do hoisting, if not, bail.
+        if (HoistLifeEnd && !ExitBlock)
+          return std::make_pair<Instruction *>(nullptr, nullptr);
+
+        return std::make_pair(LifeStart, LifeEnd);
+      };
+
+      bool SinkLifeStart = false, HoistLifeEnd = false;
+      auto Markers = GetLifeTimeMarkers(AI, SinkLifeStart, HoistLifeEnd);
+
+      if (Markers.first) {
+        if (SinkLifeStart)
+          SinkCands.insert(Markers.first);
+        SinkCands.insert(AI);
+        if (HoistLifeEnd)
+          HoistCands.insert(Markers.second);
+        continue;
+      }
+
+      // Follow the bitcast.
+      Instruction *MarkerAddr = nullptr;
+      for (User *U : AI->users()) {
+
+        if (U->stripInBoundsConstantOffsets() == AI) {
+          SinkLifeStart = false;
+          HoistLifeEnd = false;
+          Instruction *Bitcast = cast<Instruction>(U);
+          Markers = GetLifeTimeMarkers(Bitcast, SinkLifeStart, HoistLifeEnd);
+          if (Markers.first) {
+            MarkerAddr = Bitcast;
+            continue;
+          }
+        }
+
+        // Found unknown use of AI.
+        if (!definedInRegion(Blocks, U)) {
+          MarkerAddr = nullptr;
+          break;
+        }
+      }
+
+      if (MarkerAddr) {
+        if (SinkLifeStart)
+          SinkCands.insert(Markers.first);
+        if (!definedInRegion(Blocks, MarkerAddr))
+          SinkCands.insert(MarkerAddr);
+        SinkCands.insert(AI);
+        if (HoistLifeEnd)
+          HoistCands.insert(Markers.second);
+      }
+    }
+  }
+}
+
+void CodeExtractor::findInputsOutputs(ValueSet &Inputs, ValueSet &Outputs,
+                                      const ValueSet &SinkCands) const {
+
   for (BasicBlock *BB : Blocks) {
     // If a used value is defined outside the region, it's an input.  If an
     // instruction is used outside the region, it's an output.
     for (Instruction &II : *BB) {
       for (User::op_iterator OI = II.op_begin(), OE = II.op_end(); OI != OE;
-           ++OI)
-        if (definedInCaller(Blocks, *OI))
-          Inputs.insert(*OI);
+           ++OI) {
+        Value *V = *OI;
+        if (!SinkCands.count(V) && definedInCaller(Blocks, V))
+          Inputs.insert(V);
+      }
 
       for (User *U : II.users())
         if (!definedInRegion(Blocks, U)) {
@@ -718,7 +958,8 @@ Function *CodeExtractor::extractCodeRegion() {
   if (!isEligible())
     return nullptr;
 
-  ValueSet inputs, outputs;
+  ValueSet inputs, outputs, SinkingCands, HoistingCands;
+  BasicBlock *CommonExit = nullptr;
 
   // Assumption: this is a single-entry code region, and the header is the first
   // block in the region.
@@ -757,8 +998,23 @@ Function *CodeExtractor::extractCodeRegion() {
                                                "newFuncRoot");
   newFuncRoot->getInstList().push_back(BranchInst::Create(header));
 
+  findAllocas(SinkingCands, HoistingCands, CommonExit);
+  assert(HoistingCands.empty() || CommonExit);
+
   // Find inputs to, outputs from the code region.
-  findInputsOutputs(inputs, outputs);
+  findInputsOutputs(inputs, outputs, SinkingCands);
+
+  // Now sink all instructions which only have non-phi uses inside the region
+  for (auto *II : SinkingCands)
+    cast<Instruction>(II)->moveBefore(*newFuncRoot,
+                                      newFuncRoot->getFirstInsertionPt());
+
+  if (!HoistingCands.empty()) {
+    auto *HoistToBlock = findOrCreateBlockForHoisting(CommonExit);
+    Instruction *TI = HoistToBlock->getTerminator();
+    for (auto *II : HoistingCands)
+      cast<Instruction>(II)->moveBefore(TI);
+  }
 
   // Calculate the exit blocks for the extracted region and the total exit
   //  weights for each of those blocks.

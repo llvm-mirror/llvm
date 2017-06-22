@@ -20,9 +20,9 @@
 #include "MCTargetDesc/ARMAddressingModes.h"
 #include "MCTargetDesc/ARMBaseInfo.h"
 #include "llvm/ADT/BitVector.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -968,8 +968,9 @@ void ARMFrameLowering::emitPushInst(MachineBasicBlock &MBB,
       if (Reg >= ARM::D8 && Reg < ARM::D8 + NumAlignedDPRCS2Regs)
         continue;
 
-      bool isLiveIn = MF.getRegInfo().isLiveIn(Reg);
-      if (!isLiveIn)
+      const MachineRegisterInfo &MRI = MF.getRegInfo();
+      bool isLiveIn = MRI.isLiveIn(Reg);
+      if (!isLiveIn && !MRI.isReserved(Reg))
         MBB.addLiveIn(Reg);
       // If NoGap is true, push consecutive registers and then leave the rest
       // for other instructions. e.g.

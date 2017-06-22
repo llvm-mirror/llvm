@@ -146,7 +146,8 @@ Error PDBFile::parseFileHeaders() {
   // at getBlockSize() intervals, so we have to be compatible.
   // See the function fpmPn() for more information:
   // https://github.com/Microsoft/microsoft-pdb/blob/master/PDB/msf/msf.cpp#L489
-  auto FpmStream = MappedBlockStream::createFpmStream(ContainerLayout, *Buffer);
+  auto FpmStream =
+      MappedBlockStream::createFpmStream(ContainerLayout, *Buffer, Allocator);
   BinaryStreamReader FpmReader(*FpmStream);
   ArrayRef<uint8_t> FpmBytes;
   if (auto EC = FpmReader.readBytes(FpmBytes,
@@ -184,7 +185,8 @@ Error PDBFile::parseStreamData() {
   // is exactly what we are attempting to parse.  By specifying a custom
   // subclass of IPDBStreamData which only accesses the fields that have already
   // been parsed, we can avoid this and reuse MappedBlockStream.
-  auto DS = MappedBlockStream::createDirectoryStream(ContainerLayout, *Buffer);
+  auto DS = MappedBlockStream::createDirectoryStream(ContainerLayout, *Buffer,
+                                                     Allocator);
   BinaryStreamReader Reader(*DS);
   if (auto EC = Reader.readInteger(NumStreams))
     return EC;
@@ -338,7 +340,7 @@ Expected<SymbolStream &> PDBFile::getPDBSymbolStream() {
 }
 
 Expected<PDBStringTable &> PDBFile::getStringTable() {
-  if (!Strings || !PDBStringTableStream) {
+  if (!Strings) {
     auto IS = getPDBInfoStream();
     if (!IS)
       return IS.takeError();
@@ -350,14 +352,25 @@ Expected<PDBStringTable &> PDBFile::getStringTable() {
     if (!NS)
       return NS.takeError();
 
-    BinaryStreamReader Reader(**NS);
     auto N = llvm::make_unique<PDBStringTable>();
-    if (auto EC = N->load(Reader))
+    BinaryStreamReader Reader(**NS);
+    if (auto EC = N->reload(Reader))
       return std::move(EC);
+    assert(Reader.bytesRemaining() == 0);
+    StringTableStream = std::move(*NS);
     Strings = std::move(N);
-    PDBStringTableStream = std::move(*NS);
   }
   return *Strings;
+}
+
+uint32_t PDBFile::getPointerSize() {
+  auto DbiS = getPDBDbiStream();
+  if (!DbiS)
+    return 0;
+  PDB_Machine Machine = DbiS->getMachineType();
+  if (Machine == PDB_Machine::Amd64)
+    return 8;
+  return 4;
 }
 
 bool PDBFile::hasPDBDbiStream() const { return StreamDBI < getNumStreams(); }
@@ -406,5 +419,6 @@ PDBFile::safelyCreateIndexedStream(const MSFLayout &Layout,
                                    uint32_t StreamIndex) const {
   if (StreamIndex >= getNumStreams())
     return make_error<RawError>(raw_error_code::no_stream);
-  return MappedBlockStream::createIndexedStream(Layout, MsfData, StreamIndex);
+  return MappedBlockStream::createIndexedStream(Layout, MsfData, StreamIndex,
+                                                Allocator);
 }

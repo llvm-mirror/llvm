@@ -2,14 +2,14 @@
 // License. See LICENSE.TXT for details.
 
 // abs(x) < 0 and y == Const puzzle, 64-bit variant.
-#include <cstring>
-#include <cstdint>
-#include <cstdlib>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
-  if (Size < 16) return 0;
+  if (Size < 16 || Size > 64) return 0;
   int64_t x;
   uint64_t y;
   memcpy(&x, Data, sizeof(x));

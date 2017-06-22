@@ -680,6 +680,11 @@ class RegisterOperand<RegisterClass regclass, string pm = "printOperand">
   // this type. The method normally will just use an alt-name index to look
   // up the name to print. Default to the generic printOperand().
   string PrintMethod = pm;
+
+  // EncoderMethod - The target method name to call to encode this register
+  // operand.
+  string EncoderMethod = "";
+
   // ParserMatchClass - The "match class" that operands of this type fit
   // in. Match classes are used to define the order in which instructions are
   // match, to ensure that which instructions gets matched is deterministic.
@@ -1001,6 +1006,16 @@ def PATCHABLE_TAIL_CALL : Instruction {
   let usesCustomInserter = 1;
   let hasSideEffects = 1;
   let isReturn = 1;
+}
+def PATCHABLE_EVENT_CALL : Instruction {
+  let OutOperandList = (outs);
+  let InOperandList = (ins ptr_rc:$event, i8imm:$size);
+  let AsmString = "# XRay Custom Event Log.";
+  let usesCustomInserter = 1;
+  let isCall = 1;
+  let mayLoad = 1;
+  let mayStore = 1;
+  let hasSideEffects = 1;
 }
 def FENTRY_CALL : Instruction {
   let OutOperandList = (outs unknown:$dst);

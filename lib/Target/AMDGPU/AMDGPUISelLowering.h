@@ -34,6 +34,9 @@ private:
   /// compare.
   SDValue getFFBH_U32(SelectionDAG &DAG, SDValue Op, const SDLoc &DL) const;
 
+public:
+  static bool isOrEquivalentToAdd(SelectionDAG &DAG, SDValue Op);
+
 protected:
   const AMDGPUSubtarget *Subtarget;
   AMDGPUAS AMDGPUASI;
@@ -115,9 +118,6 @@ protected:
                                     SmallVectorImpl<SDValue> &Results) const;
   void analyzeFormalArgumentsCompute(CCState &State,
                               const SmallVectorImpl<ISD::InputArg> &Ins) const;
-  void AnalyzeReturn(CCState &State,
-                     const SmallVectorImpl<ISD::OutputArg> &Outs) const;
-
 public:
   AMDGPUTargetLowering(const TargetMachine &TM, const AMDGPUSubtarget &STI);
 
@@ -132,6 +132,8 @@ public:
     return false;
   }
 
+  static bool allUsesHaveSourceMods(const SDNode *N,
+                                    unsigned CostThreshold = 4);
   bool isFAbsFree(EVT VT) const override;
   bool isFNegFree(EVT VT) const override;
   bool isTruncateFree(EVT Src, EVT Dest) const override;
@@ -162,6 +164,8 @@ public:
   bool isCheapToSpeculateCtlz() const override;
 
   static CCAssignFn *CCAssignFnForCall(CallingConv::ID CC, bool IsVarArg);
+  static CCAssignFn *CCAssignFnForReturn(CallingConv::ID CC, bool IsVarArg);
+
   SDValue LowerReturn(SDValue Chain, CallingConv::ID CallConv, bool isVarArg,
                       const SmallVectorImpl<ISD::OutputArg> &Outs,
                       const SmallVectorImpl<SDValue> &OutVals, const SDLoc &DL,
@@ -212,10 +216,25 @@ public:
   /// \brief Helper function that adds Reg to the LiveIn list of the DAG's
   /// MachineFunction.
   ///
-  /// \returns a RegisterSDNode representing Reg.
-  virtual SDValue CreateLiveInRegister(SelectionDAG &DAG,
-                                       const TargetRegisterClass *RC,
-                                       unsigned Reg, EVT VT) const;
+  /// \returns a RegisterSDNode representing Reg if \p RawReg is true, otherwise
+  /// a copy from the register.
+  SDValue CreateLiveInRegister(SelectionDAG &DAG,
+                               const TargetRegisterClass *RC,
+                               unsigned Reg, EVT VT,
+                               const SDLoc &SL,
+                               bool RawReg = false) const;
+  SDValue CreateLiveInRegister(SelectionDAG &DAG,
+                               const TargetRegisterClass *RC,
+                               unsigned Reg, EVT VT) const {
+    return CreateLiveInRegister(DAG, RC, Reg, VT, SDLoc(DAG.getEntryNode()));
+  }
+
+  // Returns the raw live in register rather than a copy from it.
+  SDValue CreateLiveInRegisterRaw(SelectionDAG &DAG,
+                                  const TargetRegisterClass *RC,
+                                  unsigned Reg, EVT VT) const {
+    return CreateLiveInRegister(DAG, RC, Reg, VT, SDLoc(DAG.getEntryNode()), true);
+  }
 
   enum ImplicitParameter {
     FIRST_IMPLICIT,

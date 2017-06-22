@@ -36,7 +36,6 @@ protected:
 
 #define GET_TARGET_REGBANK_CLASS
 #include "AMDGPUGenRegisterBank.inc"
-
 };
 class AMDGPURegisterBankInfo : public AMDGPUGenRegisterBankInfo {
   const SIRegisterInfo *TRI;
@@ -44,7 +43,7 @@ class AMDGPURegisterBankInfo : public AMDGPUGenRegisterBankInfo {
   /// See RegisterBankInfo::applyMapping.
   void applyMappingImpl(const OperandsMapper &OpdMapper) const override;
 
-  RegisterBankInfo::InstructionMapping
+  const RegisterBankInfo::InstructionMapping &
   getInstrMappingForLoad(const MachineInstr &MI) const;
 
 public:
@@ -59,7 +58,8 @@ public:
   InstructionMappings
   getInstrAlternativeMappings(const MachineInstr &MI) const override;
 
-  InstructionMapping getInstrMapping(const MachineInstr &MI) const override;
+  const InstructionMapping &
+  getInstrMapping(const MachineInstr &MI) const override;
 };
 } // End llvm namespace.
 #endif

@@ -36,6 +36,7 @@ class BasicBlock;
 class BlockFrequencyInfo;
 class CallInst;
 class CallGraph;
+class DebugInfoFinder;
 class DominatorTree;
 class Function;
 class Instruction;
@@ -43,6 +44,7 @@ class InvokeInst;
 class Loop;
 class LoopInfo;
 class Module;
+class ProfileSummaryInfo;
 class ReturnInst;
 
 /// Return an exact copy of the specified module
@@ -109,7 +111,8 @@ struct ClonedCodeInfo {
 ///
 BasicBlock *CloneBasicBlock(const BasicBlock *BB, ValueToValueMapTy &VMap,
                             const Twine &NameSuffix = "", Function *F = nullptr,
-                            ClonedCodeInfo *CodeInfo = nullptr);
+                            ClonedCodeInfo *CodeInfo = nullptr,
+                            DebugInfoFinder *DIFinder = nullptr);
 
 /// CloneFunction - Return a copy of the specified function and add it to that
 /// function's module.  Also, any references specified in the VMap are changed
@@ -175,15 +178,17 @@ public:
   explicit InlineFunctionInfo(CallGraph *cg = nullptr,
                               std::function<AssumptionCache &(Function &)>
                                   *GetAssumptionCache = nullptr,
+                              ProfileSummaryInfo *PSI = nullptr,
                               BlockFrequencyInfo *CallerBFI = nullptr,
                               BlockFrequencyInfo *CalleeBFI = nullptr)
-      : CG(cg), GetAssumptionCache(GetAssumptionCache), CallerBFI(CallerBFI),
-        CalleeBFI(CalleeBFI) {}
+      : CG(cg), GetAssumptionCache(GetAssumptionCache), PSI(PSI),
+        CallerBFI(CallerBFI), CalleeBFI(CalleeBFI) {}
 
   /// CG - If non-null, InlineFunction will update the callgraph to reflect the
   /// changes it makes.
   CallGraph *CG;
   std::function<AssumptionCache &(Function &)> *GetAssumptionCache;
+  ProfileSummaryInfo *PSI;
   BlockFrequencyInfo *CallerBFI, *CalleeBFI;
 
   /// StaticAllocas - InlineFunction fills this in with all static allocas that

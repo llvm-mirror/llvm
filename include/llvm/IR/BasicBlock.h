@@ -1,4 +1,4 @@
-//===-- llvm/BasicBlock.h - Represent a basic block in the VM ---*- C++ -*-===//
+//===- llvm/BasicBlock.h - Represent a basic block in the VM ----*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -14,16 +14,21 @@
 #ifndef LLVM_IR_BASICBLOCK_H
 #define LLVM_IR_BASICBLOCK_H
 
+#include "llvm-c/Types.h"
+#include "llvm/ADT/Twine.h"
 #include "llvm/ADT/ilist.h"
 #include "llvm/ADT/ilist_node.h"
-#include "llvm/ADT/Twine.h"
+#include "llvm/ADT/iterator.h"
+#include "llvm/ADT/iterator_range.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/SymbolTableListTraits.h"
 #include "llvm/IR/Value.h"
 #include "llvm/Support/CBindingWrapping.h"
-#include "llvm-c/Types.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/Compiler.h"
 #include <cassert>
 #include <cstddef>
+#include <iterator>
 
 namespace llvm {
 
@@ -31,7 +36,10 @@ class CallInst;
 class Function;
 class LandingPadInst;
 class LLVMContext;
+class Module;
+class PHINode;
 class TerminatorInst;
+class ValueSymbolTable;
 
 /// \brief LLVM Basic Block Representation
 ///
@@ -48,10 +56,10 @@ class TerminatorInst;
 /// occur because it may be useful in the intermediate stage of constructing or
 /// modifying a program. However, the verifier will ensure that basic blocks
 /// are "well formed".
-class BasicBlock : public Value, // Basic blocks are data objects also
-                   public ilist_node_with_parent<BasicBlock, Function> {
+class BasicBlock final : public Value, // Basic blocks are data objects also
+                         public ilist_node_with_parent<BasicBlock, Function> {
 public:
-  typedef SymbolTableList<Instruction> InstListType;
+  using InstListType = SymbolTableList<Instruction>;
 
 private:
   friend class BlockAddress;
@@ -74,16 +82,16 @@ private:
 public:
   BasicBlock(const BasicBlock &) = delete;
   BasicBlock &operator=(const BasicBlock &) = delete;
-  ~BasicBlock() override;
+  ~BasicBlock();
 
   /// \brief Get the context in which this basic block lives.
   LLVMContext &getContext() const;
 
   /// Instruction iterators...
-  typedef InstListType::iterator iterator;
-  typedef InstListType::const_iterator const_iterator;
-  typedef InstListType::reverse_iterator reverse_iterator;
-  typedef InstListType::const_reverse_iterator const_reverse_iterator;
+  using iterator = InstListType::iterator;
+  using const_iterator = InstListType::const_iterator;
+  using reverse_iterator = InstListType::reverse_iterator;
+  using const_reverse_iterator = InstListType::const_reverse_iterator;
 
   /// \brief Creates a new BasicBlock.
   ///
@@ -257,6 +265,50 @@ public:
   inline       Instruction      &front()       { return InstList.front(); }
   inline const Instruction       &back() const { return InstList.back();  }
   inline       Instruction       &back()       { return InstList.back();  }
+
+  /// Iterator to walk just the phi nodes in the basic block.
+  template <typename PHINodeT = PHINode, typename BBIteratorT = iterator>
+  class phi_iterator_impl
+      : public iterator_facade_base<phi_iterator_impl<PHINodeT, BBIteratorT>,
+                                    std::forward_iterator_tag, PHINodeT> {
+    friend BasicBlock;
+
+    PHINodeT *PN;
+
+    phi_iterator_impl(PHINodeT *PN) : PN(PN) {}
+
+  public:
+    // Allow default construction to build variables, but this doesn't build
+    // a useful iterator.
+    phi_iterator_impl() = default;
+
+    // Allow conversion between instantiations where valid.
+    template <typename PHINodeU, typename BBIteratorU>
+    phi_iterator_impl(const phi_iterator_impl<PHINodeU, BBIteratorU> &Arg)
+        : PN(Arg.PN) {}
+
+    bool operator==(const phi_iterator_impl &Arg) const { return PN == Arg.PN; }
+
+    PHINodeT &operator*() const { return *PN; }
+
+    using phi_iterator_impl::iterator_facade_base::operator++;
+    phi_iterator_impl &operator++() {
+      assert(PN && "Cannot increment the end iterator!");
+      PN = dyn_cast<PHINodeT>(std::next(BBIteratorT(PN)));
+      return *this;
+    }
+  };
+  using phi_iterator = phi_iterator_impl<>;
+  using const_phi_iterator =
+      phi_iterator_impl<const PHINode, BasicBlock::const_iterator>;
+
+  /// Returns a range that iterates over the phis in the basic block.
+  ///
+  /// Note that this cannot be used with basic blocks that have no terminator.
+  iterator_range<const_phi_iterator> phis() const {
+    return const_cast<BasicBlock *>(this)->phis();
+  }
+  iterator_range<phi_iterator> phis();
 
   /// \brief Return the underlying instruction list container.
   ///

@@ -8,11 +8,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/DebugInfo/PDB/Native/TpiStream.h"
+
 #include "llvm/ADT/iterator_range.h"
-#include "llvm/DebugInfo/CodeView/CVTypeVisitor.h"
-#include "llvm/DebugInfo/CodeView/TypeDeserializer.h"
+#include "llvm/DebugInfo/CodeView/LazyRandomTypeCollection.h"
 #include "llvm/DebugInfo/CodeView/TypeRecord.h"
-#include "llvm/DebugInfo/CodeView/TypeVisitorCallbackPipeline.h"
 #include "llvm/DebugInfo/MSF/MappedBlockStream.h"
 #include "llvm/DebugInfo/PDB/Native/PDBFile.h"
 #include "llvm/DebugInfo/PDB/Native/PDBTypeServerHandler.h"
@@ -33,25 +32,10 @@ using namespace llvm::support;
 using namespace llvm::msf;
 using namespace llvm::pdb;
 
-TpiStream::TpiStream(const PDBFile &File,
-                     std::unique_ptr<MappedBlockStream> Stream)
+TpiStream::TpiStream(PDBFile &File, std::unique_ptr<MappedBlockStream> Stream)
     : Pdb(File), Stream(std::move(Stream)) {}
 
 TpiStream::~TpiStream() = default;
-
-// Verifies that a given type record matches with a given hash value.
-// Currently we only verify SRC_LINE records.
-Error TpiStream::verifyHashValues() {
-  TpiHashVerifier Verifier(HashValues, Header->NumHashBuckets);
-  TypeDeserializer Deserializer;
-
-  TypeVisitorCallbackPipeline Pipeline;
-  Pipeline.addCallbackToPipeline(Deserializer);
-  Pipeline.addCallbackToPipeline(Verifier);
-
-  CVTypeVisitor Visitor(Pipeline);
-  return Visitor.visitTypeStream(TypeRecords);
-}
 
 Error TpiStream::reload() {
   BinaryStreamReader Reader(*Stream);
@@ -92,22 +76,20 @@ Error TpiStream::reload() {
                                   "Invalid TPI hash stream index.");
 
     auto HS = MappedBlockStream::createIndexedStream(
-        Pdb.getMsfLayout(), Pdb.getMsfBuffer(), Header->HashStreamIndex);
+        Pdb.getMsfLayout(), Pdb.getMsfBuffer(), Header->HashStreamIndex,
+        Pdb.getAllocator());
     BinaryStreamReader HSR(*HS);
 
     // There should be a hash value for every type record, or no hashes at all.
     uint32_t NumHashValues =
         Header->HashValueBuffer.Length / sizeof(ulittle32_t);
-    if (NumHashValues != NumTypeRecords() && NumHashValues != 0)
+    if (NumHashValues != getNumTypeRecords() && NumHashValues != 0)
       return make_error<RawError>(
           raw_error_code::corrupt_file,
           "TPI hash count does not match with the number of type records.");
     HSR.setOffset(Header->HashValueBuffer.Off);
     if (auto EC = HSR.readArray(HashValues, NumHashValues))
       return EC;
-    std::vector<ulittle32_t> HashValueList;
-    for (auto I : HashValues)
-      HashValueList.push_back(I);
 
     HSR.setOffset(Header->IndexOffsetBuffer.Off);
     uint32_t NumTypeIndexOffsets =
@@ -122,14 +104,10 @@ Error TpiStream::reload() {
     }
 
     HashStream = std::move(HS);
-
-    // TPI hash table is a parallel array for the type records.
-    // Verify that the hash values match with type records.
-    if (NumHashValues > 0)
-      if (auto EC = verifyHashValues())
-        return EC;
   }
 
+  Types = llvm::make_unique<LazyRandomTypeCollection>(
+      TypeRecords, getNumTypeRecords(), getTypeIndexOffsets());
   return Error::success();
 }
 
@@ -142,7 +120,7 @@ uint32_t TpiStream::TypeIndexBegin() const { return Header->TypeIndexBegin; }
 
 uint32_t TpiStream::TypeIndexEnd() const { return Header->TypeIndexEnd; }
 
-uint32_t TpiStream::NumTypeRecords() const {
+uint32_t TpiStream::getNumTypeRecords() const {
   return TypeIndexEnd() - TypeIndexBegin();
 }
 
@@ -154,7 +132,7 @@ uint16_t TpiStream::getTypeHashStreamAuxIndex() const {
   return Header->HashAuxStreamIndex;
 }
 
-uint32_t TpiStream::NumHashBuckets() const { return Header->NumHashBuckets; }
+uint32_t TpiStream::getNumHashBuckets() const { return Header->NumHashBuckets; }
 uint32_t TpiStream::getHashKeySize() const { return Header->HashKeySize; }
 
 FixedStreamArray<support::ulittle32_t> TpiStream::getHashValues() const {

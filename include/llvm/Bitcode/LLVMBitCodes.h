@@ -55,6 +55,8 @@ enum BlockIDs {
   METADATA_KIND_BLOCK_ID,
 
   STRTAB_BLOCK_ID,
+
+  FULL_LTO_GLOBALVAL_SUMMARY_BLOCK_ID,
 };
 
 /// Identification block contains a string that describes the producer details,
@@ -238,6 +240,14 @@ enum GlobalValueSummarySymtabCodes {
   // summaries, but it can also appear in per-module summaries for PGO data.
   // [valueid, guid]
   FS_VALUE_GUID = 16,
+  // The list of local functions with CFI jump tables. Function names are
+  // strings in strtab.
+  // [n * name]
+  FS_CFI_FUNCTION_DEFS = 17,
+  // The list of external functions with CFI jump tables. Function names are
+  // strings in strtab.
+  // [n * name]
+  FS_CFI_FUNCTION_DECLS = 18,
 };
 
 enum MetadataCodes {

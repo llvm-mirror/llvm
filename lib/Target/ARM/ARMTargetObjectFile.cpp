@@ -7,17 +7,17 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "ARMTargetObjectFile.h"
 #include "ARMSubtarget.h"
 #include "ARMTargetMachine.h"
-#include "ARMTargetObjectFile.h"
+#include "llvm/BinaryFormat/Dwarf.h"
+#include "llvm/BinaryFormat/ELF.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCTargetOptions.h"
 #include "llvm/MC/SectionKind.h"
-#include "llvm/Support/Dwarf.h"
-#include "llvm/Support/ELF.h"
 #include "llvm/Target/TargetMachine.h"
 #include <cassert>
 
@@ -30,8 +30,8 @@ using namespace dwarf;
 
 void ARMElfTargetObjectFile::Initialize(MCContext &Ctx,
                                         const TargetMachine &TM) {
-  const ARMTargetMachine &ARM_TM = static_cast<const ARMTargetMachine &>(TM);
-  bool isAAPCS_ABI = ARM_TM.TargetABI == ARMTargetMachine::ARMABI::ARM_ABI_AAPCS;
+  const ARMBaseTargetMachine &ARM_TM = static_cast<const ARMBaseTargetMachine &>(TM);
+  bool isAAPCS_ABI = ARM_TM.TargetABI == ARMBaseTargetMachine::ARMABI::ARM_ABI_AAPCS;
   genExecuteOnly = ARM_TM.getSubtargetImpl()->genExecuteOnly();
 
   TargetLoweringObjectFileELF::Initialize(Ctx, TM);

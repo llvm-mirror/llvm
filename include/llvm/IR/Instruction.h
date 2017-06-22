@@ -16,9 +16,9 @@
 #define LLVM_IR_INSTRUCTION_H
 
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/ilist_node.h"
 #include "llvm/ADT/None.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/ilist_node.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/SymbolTableListTraits.h"
 #include "llvm/IR/User.h"
@@ -36,6 +36,10 @@ class FastMathFlags;
 class MDNode;
 struct AAMDNodes;
 
+template <> struct ilist_alloc_traits<Instruction> {
+  static inline void deleteNode(Instruction *V);
+};
+
 class Instruction : public User,
                     public ilist_node_with_parent<Instruction, BasicBlock> {
   BasicBlock *Parent;
@@ -47,12 +51,12 @@ class Instruction : public User,
     HasMetadataBit = 1 << 15
   };
 
+protected:
+  ~Instruction(); // Use deleteValue() to delete a generic Instruction.
+
 public:
   Instruction(const Instruction &) = delete;
   Instruction &operator=(const Instruction &) = delete;
-
-  // Out of line virtual method, so the vtable, etc has a home.
-  ~Instruction() override;
 
   /// Specialize the methods defined in Value, as we know that an instruction
   /// can only be used by other instructions.
@@ -356,9 +360,9 @@ public:
   /// Copy I's fast-math flags
   void copyFastMathFlags(const Instruction *I);
 
-  /// Convenience method to copy supported wrapping, exact, and fast-math flags
-  /// from V to this instruction.
-  void copyIRFlags(const Value *V);
+  /// Convenience method to copy supported exact, fast-math, and (optionally)
+  /// wrapping flags from V to this instruction.
+  void copyIRFlags(const Value *V, bool IncludeWrapFlags = true);
 
   /// Logical 'and' of any supported wrapping, exact, and fast-math flags of
   /// V and this instruction.
@@ -455,6 +459,12 @@ public:
   /// Return true if this instruction has an AtomicOrdering of unordered or
   /// higher.
   bool isAtomic() const;
+
+  /// Return true if this atomic instruction loads from memory.
+  bool hasAtomicLoad() const;
+
+  /// Return true if this atomic instruction stores to memory.
+  bool hasAtomicStore() const;
 
   /// Return true if this instruction may throw an exception.
   bool mayThrow() const;
@@ -633,6 +643,10 @@ private:
   /// Create a copy of this instruction.
   Instruction *cloneImpl() const;
 };
+
+inline void ilist_alloc_traits<Instruction>::deleteNode(Instruction *V) {
+  V->deleteValue();
+}
 
 } // end namespace llvm
 

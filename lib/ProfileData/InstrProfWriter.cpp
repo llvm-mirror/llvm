@@ -12,11 +12,11 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ProfileData/InstrProfWriter.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/ProfileSummary.h"
 #include "llvm/ProfileData/InstrProf.h"
-#include "llvm/ProfileData/InstrProfWriter.h"
 #include "llvm/ProfileData/ProfileCommon.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/EndianStream.h"
@@ -363,17 +363,19 @@ void InstrProfWriter::writeRecordInText(const InstrProfRecord &Func,
   OS << "\n";
 }
 
-void InstrProfWriter::writeText(raw_fd_ostream &OS) {
+Error InstrProfWriter::writeText(raw_fd_ostream &OS) {
   if (ProfileKind == PF_IRLevel)
     OS << "# IR level Instrumentation Flag\n:ir\n";
   InstrProfSymtab Symtab;
   for (const auto &I : FunctionData)
     if (shouldEncodeData(I.getValue()))
-      Symtab.addFuncName(I.getKey());
+      if (Error E = Symtab.addFuncName(I.getKey()))
+        return E;
   Symtab.finalizeSymtab();
 
   for (const auto &I : FunctionData)
     if (shouldEncodeData(I.getValue()))
       for (const auto &Func : I.getValue())
         writeRecordInText(Func.second, Symtab, OS);
+  return Error::success();
 }

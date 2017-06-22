@@ -6,7 +6,7 @@ define zeroext i1 @all_bits_clear(i32 %P, i32 %Q)  {
 ; CHECK:       # BB#0:
 ; CHECK-NEXT:    or 3, 3, 4
 ; CHECK-NEXT:    cntlzw 3, 3
-; CHECK-NEXT:    rlwinm 3, 3, 27, 31, 31
+; CHECK-NEXT:    srwi 3, 3, 5
 ; CHECK-NEXT:    blr
   %a = icmp eq i32 %P, 0
   %b = icmp eq i32 %Q, 0
@@ -30,11 +30,11 @@ define zeroext i1 @all_sign_bits_clear(i32 %P, i32 %Q)  {
 define zeroext i1 @all_bits_set(i32 %P, i32 %Q)  {
 ; CHECK-LABEL: all_bits_set:
 ; CHECK:       # BB#0:
+; CHECK-NEXT:    li 5, -1
 ; CHECK-NEXT:    and 3, 3, 4
-; CHECK-NEXT:    li 5, 0
-; CHECK-NEXT:    li 12, 1
-; CHECK-NEXT:    cmpwi 0, 3, -1
-; CHECK-NEXT:    isel 3, 12, 5, 2
+; CHECK-NEXT:    xor 3, 3, 5
+; CHECK-NEXT:    cntlzw 3, 3
+; CHECK-NEXT:    srwi 3, 3, 5
 ; CHECK-NEXT:    blr
   %a = icmp eq i32 %P, -1
   %b = icmp eq i32 %Q, -1
@@ -59,8 +59,8 @@ define zeroext i1 @any_bits_set(i32 %P, i32 %Q)  {
 ; CHECK:       # BB#0:
 ; CHECK-NEXT:    or 3, 3, 4
 ; CHECK-NEXT:    cntlzw 3, 3
-; CHECK-NEXT:    nor 3, 3, 3
-; CHECK-NEXT:    rlwinm 3, 3, 27, 31, 31
+; CHECK-NEXT:    srwi 3, 3, 5
+; CHECK-NEXT:    xori 3, 3, 1
 ; CHECK-NEXT:    blr
   %a = icmp ne i32 %P, 0
   %b = icmp ne i32 %Q, 0
@@ -83,10 +83,12 @@ define zeroext i1 @any_sign_bits_set(i32 %P, i32 %Q)  {
 define zeroext i1 @any_bits_clear(i32 %P, i32 %Q)  {
 ; CHECK-LABEL: any_bits_clear:
 ; CHECK:       # BB#0:
+; CHECK-NEXT:    li 5, -1
 ; CHECK-NEXT:    and 3, 3, 4
-; CHECK-NEXT:    li 5, 1
-; CHECK-NEXT:    cmpwi 0, 3, -1
-; CHECK-NEXT:    isel 3, 0, 5, 2
+; CHECK-NEXT:    xor 3, 3, 5
+; CHECK-NEXT:    cntlzw   3, 3
+; CHECK-NEXT:    srwi 3, 3, 5
+; CHECK-NEXT:    xori 3, 3, 1
 ; CHECK-NEXT:    blr
   %a = icmp ne i32 %P, -1
   %b = icmp ne i32 %Q, -1
@@ -437,7 +439,7 @@ define zeroext i1 @and_eq(i16 zeroext  %a, i16 zeroext %b, i16 zeroext %c, i16 z
 ; CHECK-NEXT:    xor 3, 3, 4
 ; CHECK-NEXT:    or 3, 3, 5
 ; CHECK-NEXT:    cntlzw 3, 3
-; CHECK-NEXT:    rlwinm 3, 3, 27, 31, 31
+; CHECK-NEXT:    srwi 3, 3, 5
 ; CHECK-NEXT:    blr
   %cmp1 = icmp eq i16 %a, %b
   %cmp2 = icmp eq i16 %c, %d
@@ -452,8 +454,8 @@ define zeroext i1 @or_ne(i32 %a, i32 %b, i32 %c, i32 %d) {
 ; CHECK-NEXT:    xor 3, 3, 4
 ; CHECK-NEXT:    or 3, 3, 5
 ; CHECK-NEXT:    cntlzw 3, 3
-; CHECK-NEXT:    nor 3, 3, 3
-; CHECK-NEXT:    rlwinm 3, 3, 27, 31, 31
+; CHECK-NEXT:    srwi 3, 3, 5
+; CHECK-NEXT:    xori 3, 3, 1
 ; CHECK-NEXT:    blr
   %cmp1 = icmp ne i32 %a, %b
   %cmp2 = icmp ne i32 %c, %d

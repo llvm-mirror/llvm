@@ -9,13 +9,15 @@
 #ifndef LLVM_MC_MCSYMBOLWASM_H
 #define LLVM_MC_MCSYMBOLWASM_H
 
+#include "llvm/BinaryFormat/Wasm.h"
 #include "llvm/MC/MCSymbol.h"
-#include "llvm/Support/Wasm.h"
 
 namespace llvm {
+
 class MCSymbolWasm : public MCSymbol {
 private:
   bool IsFunction = false;
+  bool IsWeak = false;
   std::string ModuleName;
   SmallVector<wasm::ValType, 1> Returns;
   SmallVector<wasm::ValType, 4> Params;
@@ -38,6 +40,9 @@ public:
   bool isFunction() const { return IsFunction; }
   void setIsFunction(bool isFunc) { IsFunction = isFunc; }
 
+  bool isWeak() const { return IsWeak; }
+  void setWeak(bool isWeak) { IsWeak = isWeak; }
+
   const StringRef getModuleName() const { return ModuleName; }
 
   const SmallVector<wasm::ValType, 1> &getReturns() const { return Returns; }
@@ -52,6 +57,7 @@ public:
     Params = std::move(Pars);
   }
 };
-}
 
-#endif
+}  // end namespace llvm
+
+#endif // LLVM_MC_MCSYMBOLWASM_H

@@ -7,13 +7,13 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ExecutionEngine/Orc/ObjectTransformLayer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ExecutionEngine/Orc/CompileUtils.h"
 #include "llvm/ExecutionEngine/Orc/IRCompileLayer.h"
 #include "llvm/ExecutionEngine/Orc/NullResolver.h"
 #include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
-#include "llvm/ExecutionEngine/Orc/ObjectTransformLayer.h"
 #include "llvm/Object/ObjectFile.h"
 #include "gtest/gtest.h"
 
@@ -304,7 +304,7 @@ TEST(ObjectTransformLayerTest, Main) {
       return nullptr;
     }
     void registerEHFrames(uint8_t *, uint64_t, size_t) override {}
-    void deregisterEHFrames(uint8_t *, uint64_t, size_t) override {}
+    void deregisterEHFrames() override {}
     bool finalizeMemory(std::string *) override { return false; }
   };
 

@@ -14,6 +14,7 @@
 #include "llvm/Support/YAMLTraits.h"
 
 using namespace llvm;
+using object::WasmSection;
 
 namespace {
 
@@ -22,8 +23,67 @@ class WasmDumper {
 
 public:
   WasmDumper(const object::WasmObjectFile &O) : Obj(O) {}
+
   ErrorOr<WasmYAML::Object *> dump();
+
+  std::unique_ptr<WasmYAML::CustomSection>
+  dumpCustomSection(const WasmSection &WasmSec);
 };
+
+} // namespace
+
+static WasmYAML::Table make_table(const wasm::WasmTable &Table) {
+  WasmYAML::Table T;
+  T.ElemType = Table.ElemType;
+  T.TableLimits.Flags = Table.Limits.Flags;
+  T.TableLimits.Initial = Table.Limits.Initial;
+  T.TableLimits.Maximum = Table.Limits.Maximum;
+  return T;
+}
+
+static WasmYAML::Limits make_limits(const wasm::WasmLimits &Limits) {
+  WasmYAML::Limits L;
+  L.Flags = Limits.Flags;
+  L.Initial = Limits.Initial;
+  L.Maximum = Limits.Maximum;
+  return L;
+}
+
+std::unique_ptr<WasmYAML::CustomSection> WasmDumper::dumpCustomSection(const WasmSection &WasmSec) {
+  std::unique_ptr<WasmYAML::CustomSection> CustomSec;
+  if (WasmSec.Name == "name") {
+    std::unique_ptr<WasmYAML::NameSection> NameSec = make_unique<WasmYAML::NameSection>();
+    for (const object::SymbolRef& Sym: Obj.symbols()) {
+      uint32_t Flags = Sym.getFlags();
+      // Skip over symbols that come from imports or exports
+      if (Flags &
+          (object::SymbolRef::SF_Global | object::SymbolRef::SF_Undefined))
+        continue;
+      Expected<StringRef> NameOrError = Sym.getName();
+      if (!NameOrError)
+        continue;
+      WasmYAML::NameEntry NameEntry;
+      NameEntry.Name = *NameOrError;
+      NameEntry.Index = Sym.getValue();
+      NameSec->FunctionNames.push_back(NameEntry);
+    }
+    CustomSec = std::move(NameSec);
+  } else if (WasmSec.Name == "linking") {
+    std::unique_ptr<WasmYAML::LinkingSection> LinkingSec = make_unique<WasmYAML::LinkingSection>();
+    for (const object::SymbolRef& Sym: Obj.symbols()) {
+      const object::WasmSymbol Symbol = Obj.getWasmSymbol(Sym);
+      if (Symbol.Flags != 0) {
+        WasmYAML::SymbolInfo Info = { Symbol.Name, Symbol.Flags };
+        LinkingSec->SymbolInfos.push_back(Info);
+      }
+    }
+    CustomSec = std::move(LinkingSec);
+  } else {
+    CustomSec = make_unique<WasmYAML::CustomSection>(WasmSec.Name);
+  }
+  CustomSec->Payload = yaml::BinaryRef(WasmSec.Content);
+  return CustomSec;
+}
 
 ErrorOr<WasmYAML::Object *> WasmDumper::dump() {
   auto Y = make_unique<WasmYAML::Object>();
@@ -33,7 +93,7 @@ ErrorOr<WasmYAML::Object *> WasmDumper::dump() {
 
   // Dump sections
   for (const auto &Sec : Obj.sections()) {
-    const object::WasmSection &WasmSec = Obj.getWasmSection(Sec);
+    const WasmSection &WasmSec = Obj.getWasmSection(Sec);
     std::unique_ptr<WasmYAML::Section> S;
     switch (WasmSec.Type) {
     case wasm::WASM_SEC_CUSTOM: {
@@ -42,10 +102,7 @@ ErrorOr<WasmYAML::Object *> WasmDumper::dump() {
         // being represented as a custom section in the YAML output.
         continue;
       }
-      auto CustomSec = make_unique<WasmYAML::CustomSection>();
-      CustomSec->Name = WasmSec.Name;
-      CustomSec->Payload = yaml::BinaryRef(WasmSec.Content);
-      S = std::move(CustomSec);
+      S = dumpCustomSection(WasmSec);
       break;
     }
     case wasm::WASM_SEC_TYPE: {
@@ -65,17 +122,26 @@ ErrorOr<WasmYAML::Object *> WasmDumper::dump() {
     case wasm::WASM_SEC_IMPORT: {
       auto ImportSec = make_unique<WasmYAML::ImportSection>();
       for (auto &Import : Obj.imports()) {
-        WasmYAML::Import Ex;
-        Ex.Module = Import.Module;
-        Ex.Field = Import.Field;
-        Ex.Kind = Import.Kind;
-        if (Ex.Kind == wasm::WASM_EXTERNAL_FUNCTION) {
-          Ex.SigIndex = Import.SigIndex;
-        } else if (Ex.Kind == wasm::WASM_EXTERNAL_GLOBAL) {
-          Ex.GlobalType = Import.GlobalType;
-          Ex.GlobalMutable = Import.GlobalMutable;
+        WasmYAML::Import Im;
+        Im.Module = Import.Module;
+        Im.Field = Import.Field;
+        Im.Kind = Import.Kind;
+        switch (Im.Kind) {
+        case wasm::WASM_EXTERNAL_FUNCTION:
+          Im.SigIndex = Import.SigIndex;
+          break;
+        case wasm::WASM_EXTERNAL_GLOBAL:
+          Im.GlobalImport.Type = Import.Global.Type;
+          Im.GlobalImport.Mutable = Import.Global.Mutable;
+          break;
+        case wasm::WASM_EXTERNAL_TABLE:
+          Im.TableImport = make_table(Import.Table);
+          break;
+        case wasm::WASM_EXTERNAL_MEMORY:
+          Im.Memory = make_limits(Import.Memory);
+          break;
         }
-        ImportSec->Imports.push_back(Ex);
+        ImportSec->Imports.push_back(Im);
       }
       S = std::move(ImportSec);
       break;
@@ -90,25 +156,16 @@ ErrorOr<WasmYAML::Object *> WasmDumper::dump() {
     }
     case wasm::WASM_SEC_TABLE: {
       auto TableSec = make_unique<WasmYAML::TableSection>();
-      for (auto &Table : Obj.tables()) {
-        WasmYAML::Table T;
-        T.ElemType = Table.ElemType;
-        T.TableLimits.Flags = Table.Limits.Flags;
-        T.TableLimits.Initial = Table.Limits.Initial;
-        T.TableLimits.Maximum = Table.Limits.Maximum;
-        TableSec->Tables.push_back(T);
+      for (const wasm::WasmTable &Table : Obj.tables()) {
+        TableSec->Tables.push_back(make_table(Table));
       }
       S = std::move(TableSec);
       break;
     }
     case wasm::WASM_SEC_MEMORY: {
       auto MemorySec = make_unique<WasmYAML::MemorySection>();
-      for (auto &Memory : Obj.memories()) {
-        WasmYAML::Limits L;
-        L.Flags = Memory.Flags;
-        L.Initial = Memory.Initial;
-        L.Maximum = Memory.Maximum;
-        MemorySec->Memories.push_back(L);
+      for (const wasm::WasmLimits &Memory : Obj.memories()) {
+        MemorySec->Memories.push_back(make_limits(Memory));
       }
       S = std::move(MemorySec);
       break;
@@ -202,8 +259,6 @@ ErrorOr<WasmYAML::Object *> WasmDumper::dump() {
 
   return Y.release();
 }
-
-} // namespace
 
 std::error_code wasm2yaml(raw_ostream &Out, const object::WasmObjectFile &Obj) {
   WasmDumper Dumper(Obj);

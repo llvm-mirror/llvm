@@ -80,17 +80,22 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
   FlatWorkGroupSizes = ST.getFlatWorkGroupSizes(*F);
   WavesPerEU = ST.getWavesPerEU(*F);
 
-  // Non-entry functions have no special inputs for now.
-  // TODO: Return early for non-entry CCs.
+  if (!isEntryFunction()) {
+    // Non-entry functions have no special inputs for now, other registers
+    // required for scratch access.
+    ScratchRSrcReg = AMDGPU::SGPR0_SGPR1_SGPR2_SGPR3;
+    ScratchWaveOffsetReg = AMDGPU::SGPR4;
+    FrameOffsetReg = AMDGPU::SGPR5;
+    return;
+  }
 
   CallingConv::ID CC = F->getCallingConv();
-  if (CC == CallingConv::AMDGPU_PS)
-    PSInputAddr = AMDGPU::getInitialPSInputAddr(*F);
-
-  if (AMDGPU::isKernel(CC)) {
+  if (CC == CallingConv::AMDGPU_KERNEL || CC == CallingConv::SPIR_KERNEL) {
     KernargSegmentPtr = true;
     WorkGroupIDX = true;
     WorkItemIDX = true;
+  } else if (CC == CallingConv::AMDGPU_PS) {
+    PSInputAddr = AMDGPU::getInitialPSInputAddr(*F);
   }
 
   if (ST.debuggerEmitPrologue()) {
@@ -120,10 +125,16 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
 
   const MachineFrameInfo &FrameInfo = MF.getFrameInfo();
   bool MaySpill = ST.isVGPRSpillingEnabled(*F);
-  bool HasStackObjects = FrameInfo.hasStackObjects();
+  bool HasStackObjects = FrameInfo.hasStackObjects() || FrameInfo.hasCalls();
 
-  if (HasStackObjects || MaySpill)
+  if (HasStackObjects || MaySpill) {
     PrivateSegmentWaveByteOffset = true;
+
+    // HS and GS always have the scratch wave offset in SGPR5 on GFX9.
+    if (ST.getGeneration() >= AMDGPUSubtarget::GFX9 &&
+        (CC == CallingConv::AMDGPU_HS || CC == CallingConv::AMDGPU_GS))
+      PrivateSegmentWaveByteOffsetSystemSGPR = AMDGPU::SGPR5;
+  }
 
   if (ST.isAmdCodeObjectV2(MF)) {
     if (HasStackObjects || MaySpill)

@@ -19,11 +19,12 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/StringMap.h"
+#include "llvm/BinaryFormat/Wasm.h"
 #include "llvm/Object/Binary.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/MemoryBuffer.h"
-#include "llvm/Support/Wasm.h"
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -41,10 +42,31 @@ public:
     DEBUG_FUNCTION_NAME,
   };
 
-  WasmSymbol(StringRef Name, SymbolType Type) : Name(Name), Type(Type) {}
+  WasmSymbol(StringRef Name, SymbolType Type, uint32_t Section,
+             uint32_t ElementIndex)
+      : Name(Name), Type(Type), Section(Section), ElementIndex(ElementIndex) {}
 
   StringRef Name;
   SymbolType Type;
+  uint32_t Section;
+  uint32_t Flags = 0;
+
+  // Index into the imports, exports or functions array of the object depending
+  // on the type
+  uint32_t ElementIndex;
+
+  bool isWeak() const {
+    return Flags & wasm::WASM_SYMBOL_FLAG_WEAK;
+  }
+
+  void print(raw_ostream &Out) const {
+    Out << "Name=" << Name << ", Type=" << static_cast<int>(Type)
+        << ", Flags=" << Flags;
+  }
+
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+  LLVM_DUMP_METHOD void dump() const { print(dbgs()); }
+#endif
 };
 
 class WasmSection {
@@ -59,11 +81,13 @@ public:
 };
 
 class WasmObjectFile : public ObjectFile {
+
 public:
   WasmObjectFile(MemoryBufferRef Object, Error &Err);
 
   const wasm::WasmObjectHeader &getHeader() const;
-  const WasmSymbol &getWasmSymbol(DataRefImpl Symb) const;
+  const WasmSymbol &getWasmSymbol(const DataRefImpl &Symb) const;
+  const WasmSymbol &getWasmSymbol(const SymbolRef &Symbol) const;
   const WasmSection &getWasmSection(const SectionRef &Section) const;
   const wasm::WasmRelocation &getWasmRelocation(const RelocationRef& Ref) const;
 
@@ -76,6 +100,10 @@ public:
   const std::vector<wasm::WasmLimits>& memories() const { return Memories; }
   const std::vector<wasm::WasmGlobal>& globals() const { return Globals; }
   const std::vector<wasm::WasmExport>& exports() const { return Exports; }
+
+  uint32_t getNumberOfSymbols() const {
+    return Symbols.size();
+  }
 
   const std::vector<wasm::WasmElemSegment>& elements() const {
     return ElemSegments;
@@ -110,6 +138,7 @@ public:
   std::error_code getSectionName(DataRefImpl Sec,
                                  StringRef &Res) const override;
   uint64_t getSectionAddress(DataRefImpl Sec) const override;
+  uint64_t getSectionIndex(DataRefImpl Sec) const override;
   uint64_t getSectionSize(DataRefImpl Sec) const override;
   std::error_code getSectionContents(DataRefImpl Sec,
                                      StringRef &Res) const override;
@@ -166,6 +195,7 @@ private:
 
   // Custom section types
   Error parseNameSection(const uint8_t *Ptr, const uint8_t *End);
+  Error parseLinkingSection(const uint8_t *Ptr, const uint8_t *End);
   Error parseRelocSection(StringRef Name, const uint8_t *Ptr,
                           const uint8_t *End);
 
@@ -180,13 +210,22 @@ private:
   std::vector<wasm::WasmExport> Exports;
   std::vector<wasm::WasmElemSegment> ElemSegments;
   std::vector<wasm::WasmDataSegment> DataSegments;
-  std::vector<WasmSymbol> Symbols;
   std::vector<wasm::WasmFunction> Functions;
+  std::vector<WasmSymbol> Symbols;
   ArrayRef<uint8_t> CodeSection;
   uint32_t StartFunction = -1;
+
+  StringMap<uint32_t> SymbolMap;
 };
 
 } // end namespace object
+
+inline raw_ostream &operator<<(raw_ostream &OS,
+                               const object::WasmSymbol &Sym) {
+  Sym.print(OS);
+  return OS;
+}
+
 } // end namespace llvm
 
 #endif // LLVM_OBJECT_WASM_H

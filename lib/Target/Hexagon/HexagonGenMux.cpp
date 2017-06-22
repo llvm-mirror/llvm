@@ -40,8 +40,8 @@
 #include "llvm/Pass.h"
 #include "llvm/Support/MathExtras.h"
 #include <algorithm>
-#include <limits>
 #include <iterator>
+#include <limits>
 #include <utility>
 
 using namespace llvm;
@@ -59,9 +59,7 @@ namespace {
   public:
     static char ID;
 
-    HexagonGenMux() : MachineFunctionPass(ID), HII(nullptr), HRI(nullptr) {
-      initializeHexagonGenMuxPass(*PassRegistry::getPassRegistry());
-    }
+    HexagonGenMux() : MachineFunctionPass(ID) {}
 
     StringRef getPassName() const override {
       return "Hexagon generate mux instructions";
@@ -79,8 +77,8 @@ namespace {
     }
 
   private:
-    const HexagonInstrInfo *HII;
-    const HexagonRegisterInfo *HRI;
+    const HexagonInstrInfo *HII = nullptr;
+    const HexagonRegisterInfo *HRI = nullptr;
 
     struct CondsetInfo {
       unsigned PredR = 0;
@@ -134,7 +132,7 @@ namespace {
 
 } // end anonymous namespace
 
-INITIALIZE_PASS(HexagonGenMux, "hexagon-mux",
+INITIALIZE_PASS(HexagonGenMux, "hexagon-gen-mux",
   "Hexagon generate mux instructions", false, false)
 
 void HexagonGenMux::getSubRegs(unsigned Reg, BitVector &SRs) const {
@@ -235,8 +233,11 @@ bool HexagonGenMux::genMuxInBlock(MachineBasicBlock &B) {
     unsigned DR = MI->getOperand(0).getReg();
     if (isRegPair(DR))
       continue;
+    MachineOperand &PredOp = MI->getOperand(1);
+    if (PredOp.isUndef())
+      continue;
 
-    unsigned PR = MI->getOperand(1).getReg();
+    unsigned PR = PredOp.getReg();
     unsigned Idx = I2X.lookup(MI);
     CondsetMap::iterator F = CM.find(DR);
     bool IfTrue = HII->isPredicatedTrue(Opc);
@@ -294,12 +295,15 @@ bool HexagonGenMux::genMuxInBlock(MachineBasicBlock &B) {
     unsigned SR1 = Src1->isReg() ? Src1->getReg() : 0;
     unsigned SR2 = Src2->isReg() ? Src2->getReg() : 0;
     bool Failure = false, CanUp = true, CanDown = true;
+    bool Used1 = false, Used2 = false;
     for (unsigned X = MinX+1; X < MaxX; X++) {
       const DefUseInfo &DU = DUM.lookup(X);
       if (DU.Defs[PR] || DU.Defs[DR] || DU.Uses[DR]) {
         Failure = true;
         break;
       }
+      Used1 |= DU.Uses[SR1];
+      Used2 |= DU.Uses[SR2];
       if (CanDown && DU.Defs[SR1])
         CanDown = false;
       if (CanUp && DU.Defs[SR2])
@@ -313,6 +317,45 @@ bool HexagonGenMux::genMuxInBlock(MachineBasicBlock &B) {
     // Prefer "down", since this will move the MUX farther away from the
     // predicate definition.
     MachineBasicBlock::iterator At = CanDown ? Def2 : Def1;
+    if (CanDown) {
+      // If the MUX is placed "down", we need to make sure that there aren't
+      // any kills of the source registers between the two defs.
+      if (Used1 || Used2) {
+        auto ResetKill = [this] (unsigned Reg, MachineInstr &MI) -> bool {
+          if (MachineOperand *Op = MI.findRegisterUseOperand(Reg, true, HRI)) {
+            Op->setIsKill(false);
+            return true;
+          }
+          return false;
+        };
+        bool KilledSR1 = false, KilledSR2 = false;
+        for (MachineInstr &MJ : make_range(std::next(It1), It2)) {
+          if (SR1)
+            KilledSR1 |= ResetKill(SR1, MJ);
+          if (SR2)
+            KilledSR2 |= ResetKill(SR1, MJ);
+        }
+        // If any of the source registers were killed in this range, transfer
+        // the kills to the source operands: they will me "moved" to the
+        // resulting MUX and their parent instructions will be deleted.
+        if (KilledSR1) {
+          assert(Src1->isReg());
+          Src1->setIsKill(true);
+        }
+        if (KilledSR2) {
+          assert(Src2->isReg());
+          Src2->setIsKill(true);
+        }
+      }
+    } else {
+      // If the MUX is placed "up", it shouldn't kill any source registers
+      // that are still used afterwards. We can reset the kill flags directly
+      // on the operands, because the source instructions will be erased.
+      if (Used1 && Src1->isReg())
+        Src1->setIsKill(false);
+      if (Used2 && Src2->isReg())
+        Src2->setIsKill(false);
+    }
     ML.push_back(MuxInfo(At, DR, PR, SrcT, SrcF, Def1, Def2));
   }
 

@@ -379,19 +379,17 @@ liveins:
   - { reg: '%esi' }
 # CHECK:  bb.0.entry:
 # CHECK:    %eax = MOV32ri 2200000
-# CHECK-NEXT:    %eax = FAULTING_OP 1, %bb.3.is_null, {{[0-9]+}}, killed %eax, killed %rdi, 1, _, 0, _, implicit-def dead %eflags :: (load 4 from %ir.x)
+# CHECK-NEXT:    %eax = FAULTING_OP 1, %bb.3.is_null, {{[0-9]+}}, %eax, %rdi, 1, _, 0, _, implicit-def %eflags :: (load 4 from %ir.x)
 # CHECK-NEXT:    JMP_1 %bb.1.not_null
 
 body:             |
   bb.0.entry:
-    successors: %bb.3.is_null, %bb.1.not_null
     liveins: %esi, %rdi
 
     TEST64rr %rdi, %rdi, implicit-def %eflags
     JE_1 %bb.3.is_null, implicit %eflags
 
   bb.1.not_null:
-    successors: %bb.4.ret_100, %bb.2.ret_200
     liveins: %esi, %rdi
 
     %eax = MOV32ri 2200000
@@ -427,7 +425,6 @@ liveins:
 
 body:             |
   bb.0.entry:
-    successors: %bb.3.is_null, %bb.1.not_null
     liveins: %esi, %rdi, %rdx
 
     %eax = MOV32rm killed %rdx, 1, _, 0, _ :: (volatile load 4 from %ir.ptr)
@@ -435,7 +432,6 @@ body:             |
     JE_1 %bb.3.is_null, implicit %eflags
 
   bb.1.not_null:
-    successors: %bb.4.ret_100, %bb.2.ret_200
     liveins: %esi, %rdi
 
     %eax = MOV32ri 2200000
@@ -444,7 +440,6 @@ body:             |
     JE_1 %bb.4.ret_100, implicit %eflags
 
   bb.2.ret_200:
-    successors: %bb.3.is_null
 
     %eax = MOV32ri 200
 
@@ -472,14 +467,12 @@ liveins:
 
 body:             |
   bb.0.entry:
-    successors: %bb.3.is_null, %bb.1.not_null
     liveins: %esi, %rdi
 
     TEST64rr %rdi, %rdi, implicit-def %eflags
     JE_1 %bb.3.is_null, implicit %eflags
 
   bb.1.not_null:
-    successors: %bb.4.ret_100, %bb.2.ret_200
     liveins: %esi, %rdi
 
     %eax = MOV32ri 2200000
@@ -515,14 +508,12 @@ liveins:
 
 body:             |
   bb.0.entry:
-    successors: %bb.3.is_null, %bb.1.not_null
     liveins: %rsi, %rdi
 
     TEST64rr %rdi, %rdi, implicit-def %eflags
     JE_1 %bb.3.is_null, implicit %eflags
 
   bb.1.not_null:
-    successors: %bb.4.ret_100, %bb.2.ret_200
     liveins: %rsi, %rdi
 
     %rdi  = MOV64ri 5000
@@ -553,24 +544,22 @@ liveins:
   - { reg: '%rsi' }
 # CHECK:  bb.0.entry:
 # CHECK:  %rbx = MOV64rr %rdx
-# CHECK-NEXT:  %rdi = FAULTING_OP 1, %bb.3.is_null, {{[0-9]+}}, killed %rbx, killed %rdi, 1, _, 0, _, implicit-def dead %eflags :: (load 4 from %ir.x)
+# CHECK-NEXT:  %rbx = FAULTING_OP 1, %bb.3.is_null, {{[0-9]+}}, %rbx, %rdi, 1, _, 0, _, implicit-def %eflags :: (load 4 from %ir.x)
 
 body:             |
   bb.0.entry:
-    successors: %bb.3.is_null, %bb.1.not_null
     liveins: %rsi, %rdi, %rdx
 
     TEST64rr %rdi, %rdi, implicit-def %eflags
     JE_1 %bb.3.is_null, implicit %eflags
 
   bb.1.not_null:
-    successors: %bb.4.ret_100, %bb.2.ret_200
     liveins: %rsi, %rdi, %rdx
 
     %rbx  = MOV64rr %rdx
-    %rdi = AND64rm killed %rbx, killed %rdi, 1, _, 0, _, implicit-def dead %eflags :: (load 4 from %ir.x)
+    %rbx = AND64rm killed %rbx, killed %rdi, 1, _, 0, _, implicit-def dead %eflags :: (load 4 from %ir.x)
     %rdx = MOV64ri 0
-    CMP64rr killed %rdi, killed %rsi, implicit-def %eflags
+    CMP64rr killed %rbx, killed %rsi, implicit-def %eflags
     JE_1 %bb.4.ret_100, implicit %eflags
 
   bb.2.ret_200:
@@ -603,7 +592,6 @@ calleeSavedRegisters: [ '%bh', '%bl', '%bp', '%bpl', '%bx', '%ebp', '%ebx',
 # CHECK: CALL64pcrel32
 body:             |
   bb.0.entry:
-    successors: %bb.2.leave, %bb.1.stay
     liveins: %rdi, %rbx
 
     frame-setup PUSH64r killed %rbx, implicit-def %rsp, implicit %rsp
@@ -645,7 +633,6 @@ liveins:
   - { reg: '%rsi' }
 body:             |
   bb.0.entry:
-    successors: %bb.2.is_null, %bb.1.not_null
     liveins: %rdi, %rsi
 
     TEST64rr %rdi, %rdi, implicit-def %eflags
@@ -669,7 +656,7 @@ body:             |
 name:            use_alternate_load_op
 # CHECK-LABEL: name:            use_alternate_load_op
 # CHECK: bb.0.entry:
-# CHECK: %rax = FAULTING_OP 1, %bb.2.is_null, {{[0-9]+}}, killed %rdi, 1, _, 0, _
+# CHECK: %rax = FAULTING_OP 1, %bb.2.is_null, {{[0-9]+}}, %rdi, 1, _, 0, _
 # CHECK-NEXT: JMP_1 %bb.1.not_null
 # CHECK: bb.1.not_null
 
@@ -680,7 +667,6 @@ liveins:
   - { reg: '%rsi' }
 body:             |
   bb.0.entry:
-    successors: %bb.2.is_null, %bb.1.not_null
     liveins: %rdi, %rsi
 
     TEST64rr %rdi, %rdi, implicit-def %eflags
@@ -703,7 +689,7 @@ body:             |
 name:            imp_null_check_gep_load_with_use_dep
 # CHECK-LABEL: name:            imp_null_check_gep_load_with_use_dep
 # CHECK:  bb.0.entry:
-# CHECK:    %eax = FAULTING_OP 1, %bb.2.is_null, {{[0-9]+}}, killed %rdi, 1, _, 0, _, implicit-def %rax :: (load 4 from %ir.x)
+# CHECK:    %eax = FAULTING_OP 1, %bb.2.is_null, {{[0-9]+}}, %rdi, 1, _, 0, _, implicit-def %rax :: (load 4 from %ir.x)
 # CHECK-NEXT:    JMP_1 %bb.1.not_null
 alignment:       4
 tracksRegLiveness: true
@@ -712,7 +698,6 @@ liveins:
   - { reg: '%rsi' }
 body:             |
   bb.0.entry:
-    successors: %bb.1.is_null(0x30000000), %bb.2.not_null(0x50000000)
     liveins: %rsi, %rdi
   
     TEST64rr %rdi, %rdi, implicit-def %eflags
@@ -736,7 +721,7 @@ name:            imp_null_check_load_with_base_sep
 # CHECK-LABEL: name:            imp_null_check_load_with_base_sep
 # CHECK:  bb.0.entry:
 # CHECK:     %rsi = ADD64rr %rsi, %rdi, implicit-def dead %eflags
-# CHECK-NEXT:    %esi = FAULTING_OP 1, %bb.2.is_null, {{[0-9]+}}, killed %esi, %rdi, 1, _, 0, _, implicit-def dead %eflags
+# CHECK-NEXT:    %esi = FAULTING_OP 1, %bb.2.is_null, {{[0-9]+}}, %esi, %rdi, 1, _, 0, _, implicit-def %eflags
 # CHECK-NEXT:    JMP_1 %bb.1.not_null
 alignment:       4
 tracksRegLiveness: true
@@ -745,7 +730,6 @@ liveins:
   - { reg: '%rsi' }
 body:             |
   bb.0.entry:
-    successors: %bb.1.is_null(0x30000000), %bb.2.not_null(0x50000000)
     liveins: %rsi, %rdi
   
     TEST64rr %rdi, %rdi, implicit-def %eflags
@@ -768,7 +752,7 @@ body:             |
 name:            inc_store
 # CHECK-LABEL: name:            inc_store
 # CHECK: bb.0.entry:
-# CHECK:  _ = FAULTING_OP 3, %bb.2.is_null, {{[0-9]+}}, killed %rdi, 1, _, 0, _, killed %rsi
+# CHECK:  _ = FAULTING_OP 3, %bb.2.is_null, {{[0-9]+}}, %rdi, 1, _, 0, _, %rsi
 # CHECK-NEXT: JMP_1 %bb.1.not_null
 # CHECK: bb.1.not_null
 
@@ -779,7 +763,6 @@ liveins:
   - { reg: '%rsi' }
 body:             |
   bb.0.entry:
-    successors: %bb.2.is_null, %bb.1.not_null
     liveins: %rdi, %rsi
 
     TEST64rr %rdi, %rdi, implicit-def %eflags
@@ -799,7 +782,7 @@ body:             |
 name:            inc_store_plus_offset
 # CHECK-LABEL: inc_store_plus_offset
 # CHECK: bb.0.entry:
-# CHECK:  _ = FAULTING_OP 3, %bb.2.is_null, {{[0-9]+}}, killed %rdi, 1, _, 16, _, killed %rsi
+# CHECK:  _ = FAULTING_OP 3, %bb.2.is_null, {{[0-9]+}}, %rdi, 1, _, 16, _, %rsi
 # CHECK-NEXT: JMP_1 %bb.1.not_null
 # CHECK: bb.1.not_null
 
@@ -810,7 +793,6 @@ liveins:
   - { reg: '%rsi' }
 body:             |
   bb.0.entry:
-    successors: %bb.2.is_null, %bb.1.not_null
     liveins: %rdi, %rsi
 
     TEST64rr %rdi, %rdi, implicit-def %eflags
@@ -831,7 +813,7 @@ name:            inc_store_with_dep
 # CHECK-LABEL: inc_store_with_dep
 # CHECK: bb.0.entry:
 # CHECK:  %esi = ADD32rr killed %esi, killed %esi, implicit-def dead %eflags
-# CHECK-NEXT:  _ = FAULTING_OP 3, %bb.2.is_null, {{[0-9]+}}, killed %rdi, 1, _, 16, _, killed %esi
+# CHECK-NEXT:  _ = FAULTING_OP 3, %bb.2.is_null, {{[0-9]+}}, %rdi, 1, _, 16, _, %esi
 # CHECK-NEXT: JMP_1 %bb.1.not_null
 # CHECK: bb.1.not_null
 
@@ -842,7 +824,6 @@ liveins:
   - { reg: '%rsi' }
 body:             |
   bb.0.entry:
-    successors: %bb.2.is_null, %bb.1.not_null
     liveins: %rdi, %rsi
 
     TEST64rr %rdi, %rdi, implicit-def %eflags
@@ -874,7 +855,6 @@ liveins:
   - { reg: '%rsi' }
 body:             |
   bb.0.entry:
-    successors: %bb.2.is_null, %bb.1.not_null
     liveins: %rdi, %rsi
 
     TEST64rr %rdi, %rdi, implicit-def %eflags
@@ -910,7 +890,6 @@ liveins:
   - { reg: '%rsi' }
 body:             |
   bb.0.entry:
-    successors: %bb.2.is_null, %bb.1.not_null
     liveins: %rdi, %rsi
 
     TEST64rr %rdi, %rdi, implicit-def %eflags
@@ -941,7 +920,6 @@ liveins:
   - { reg: '%rsi' }
 body:             |
   bb.0.entry:
-    successors: %bb.2.is_null, %bb.1.not_null
     liveins: %rdi, %rsi
 
     TEST64rr %rdi, %rdi, implicit-def %eflags
@@ -974,7 +952,6 @@ liveins:
   - { reg: '%rsi' }
 body:             |
   bb.0.entry:
-    successors: %bb.2.is_null, %bb.1.not_null
     liveins: %rdi, %rsi
 
     TEST64rr %rdi, %rdi, implicit-def %eflags
@@ -995,7 +972,7 @@ body:             |
 name:            inc_store_with_reused_base
 # CHECK-LABEL: inc_store_with_reused_base
 # CHECK: bb.0.entry:
-# CHECK:  _ = FAULTING_OP 3, %bb.2.is_null, {{[0-9]+}}, killed %rdi, 1, _, 16, _, killed %esi
+# CHECK:  _ = FAULTING_OP 3, %bb.2.is_null, {{[0-9]+}}, %rdi, 1, _, 16, _, %esi
 # CHECK-NEXT: JMP_1 %bb.1.not_null
 # CHECK: bb.1.not_null
 
@@ -1006,7 +983,6 @@ liveins:
   - { reg: '%rsi' }
 body:             |
   bb.0.entry:
-    successors: %bb.2.is_null, %bb.1.not_null
     liveins: %rdi, %rsi
 
     TEST64rr %rdi, %rdi, implicit-def %eflags
@@ -1042,7 +1018,6 @@ calleeSavedRegisters: [ '%bh', '%bl', '%bp', '%bpl', '%bx', '%ebp', '%ebx',
                         '%r14d', '%r15d', '%r12w', '%r13w', '%r14w', '%r15w' ]
 body:             |
   bb.0.entry:
-    successors: %bb.2.is_null, %bb.1.not_null
     liveins: %rdi, %rbx
 
     frame-setup PUSH64r killed %rbx, implicit-def %rsp, implicit %rsp
@@ -1082,7 +1057,6 @@ liveins:
   - { reg: '%rsi' }
 body:             |
   bb.0.entry:
-    successors: %bb.2.is_null, %bb.1.not_null
     liveins: %rdi, %rsi
 
     TEST64rr %rdi, %rdi, implicit-def %eflags
@@ -1116,7 +1090,6 @@ liveins:
   - { reg: '%rsi' }
 body:             |
   bb.0.entry:
-    successors: %bb.2.is_null, %bb.1.not_null
     liveins: %rdi, %rsi
 
     TEST64rr %rdi, %rdi, implicit-def %eflags
@@ -1149,7 +1122,6 @@ liveins:
   - { reg: '%rsi' }
 body:             |
   bb.0.entry:
-    successors: %bb.2.is_null, %bb.1.not_null
     liveins: %rdi, %rsi
 
     TEST64rr %rdi, %rdi, implicit-def %eflags
@@ -1182,7 +1154,6 @@ liveins:
   - { reg: '%rsi' }
 body:             |
   bb.0.entry:
-    successors: %bb.2.is_null, %bb.1.not_null
     liveins: %rdi, %rsi
 
     TEST64rr %rdi, %rdi, implicit-def %eflags
@@ -1203,7 +1174,7 @@ body:             |
 name:            inc_store_with_load_and_store
 # CHECK-LABEL: inc_store_with_load_and_store
 # CHECK: bb.0.entry:
-# CHECK:  _ = FAULTING_OP 2, %bb.2.is_null, {{[0-9]+}}, killed %rdi, 1, _, 0, _, killed %esi, implicit-def dead %eflags
+# CHECK:  _ = FAULTING_OP 2, %bb.2.is_null, {{[0-9]+}}, %rdi, 1, _, 0, _, %esi, implicit-def %eflags
 # CHECK-NEXT: JMP_1 %bb.1.not_null
 # CHECK: bb.1.not_null
 
@@ -1214,7 +1185,6 @@ liveins:
   - { reg: '%rsi' }
 body:             |
   bb.0.entry:
-    successors: %bb.2.is_null, %bb.1.not_null
     liveins: %rdi, %rsi
 
     TEST64rr %rdi, %rdi, implicit-def %eflags
@@ -1235,7 +1205,7 @@ body:             |
 name:            inc_store_and_load_no_alias
 # CHECK-LABEL: inc_store_and_load_no_alias
 # CHECK: bb.0.entry:
-# CHECK:  %eax = FAULTING_OP 1, %bb.2.is_null, {{[0-9]+}}, killed %rdi, 1, _, 0, _ :: (load 4 from %ir.ptr)
+# CHECK:  %eax = FAULTING_OP 1, %bb.2.is_null, {{[0-9]+}}, %rdi, 1, _, 0, _ :: (load 4 from %ir.ptr)
 # CHECK-NEXT: JMP_1 %bb.1.not_null
 # CHECK: bb.1.not_null
 
@@ -1246,7 +1216,6 @@ liveins:
   - { reg: '%rsi' }
 body:             |
   bb.0.entry:
-    successors: %bb.2.is_null, %bb.1.not_null
     liveins: %rdi, %rsi
 
     TEST64rr %rdi, %rdi, implicit-def %eflags
@@ -1279,7 +1248,6 @@ liveins:
   - { reg: '%rsi' }
 body:             |
   bb.0.entry:
-    successors: %bb.2.is_null, %bb.1.not_null
     liveins: %rdi, %rsi
 
     TEST64rr %rdi, %rdi, implicit-def %eflags

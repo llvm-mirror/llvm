@@ -893,7 +893,9 @@ std::string PatternToMatch::getPredicateCheck() const {
   for (Record *Pred : PredicateRecs) {
     if (!PredicateCheck.empty())
       PredicateCheck += " && ";
-    PredicateCheck += "(" + Pred->getValueAsString("CondString") + ")";
+    PredicateCheck += "(";
+    PredicateCheck += Pred->getValueAsString("CondString");
+    PredicateCheck += ")";
   }
 
   return PredicateCheck.str();
@@ -2450,7 +2452,7 @@ void CodeGenDAGPatterns::ParseNodeTransforms() {
   while (!Xforms.empty()) {
     Record *XFormNode = Xforms.back();
     Record *SDNode = XFormNode->getValueAsDef("Opcode");
-    std::string Code = XFormNode->getValueAsString("XFormFunction");
+    StringRef Code = XFormNode->getValueAsString("XFormFunction");
     SDNodeXForms.insert(std::make_pair(XFormNode, NodeXForm(SDNode, Code)));
 
     Xforms.pop_back();
@@ -2760,8 +2762,8 @@ public:
     AnalyzeNode(Pat->getTree(0));
   }
 
-  void Analyze(const PatternToMatch *Pat) {
-    AnalyzeNode(Pat->getSrcPattern());
+  void Analyze(const PatternToMatch &Pat) {
+    AnalyzeNode(Pat.getSrcPattern());
   }
 
 private:
@@ -3287,9 +3289,7 @@ void CodeGenDAGPatterns::InferInstructionFlags() {
 
   // Second, look for single-instruction patterns defined outside the
   // instruction.
-  for (ptm_iterator I = ptm_begin(), E = ptm_end(); I != E; ++I) {
-    const PatternToMatch &PTM = *I;
-
+  for (const PatternToMatch &PTM : ptms()) {
     // We can only infer from single-instruction patterns, otherwise we won't
     // know which instruction should get the flags.
     SmallVector<Record*, 8> PatInstrs;
@@ -3305,7 +3305,7 @@ void CodeGenDAGPatterns::InferInstructionFlags() {
       continue;
 
     InstAnalyzer PatInfo(*this);
-    PatInfo.Analyze(&PTM);
+    PatInfo.Analyze(PTM);
     Errors += InferFromPattern(InstInfo, PatInfo, PTM.getSrcRecord());
   }
 
@@ -3365,7 +3365,7 @@ void CodeGenDAGPatterns::VerifyInstructionFlags() {
 
     // Analyze the source pattern.
     InstAnalyzer PatInfo(*this);
-    PatInfo.Analyze(&PTM);
+    PatInfo.Analyze(PTM);
 
     // Collect error messages.
     SmallVector<std::string, 4> Msgs;
@@ -3806,9 +3806,7 @@ void CodeGenDAGPatterns::GenerateVariants() {
                        DepVars);
 
     assert(!Variants.empty() && "Must create at least original variant!");
-    Variants.erase(Variants.begin());  // Remove the original pattern.
-
-    if (Variants.empty())  // No variants for this pattern.
+    if (Variants.size() == 1)  // No additional variants for this pattern.
       continue;
 
     DEBUG(errs() << "FOUND VARIANTS OF: ";

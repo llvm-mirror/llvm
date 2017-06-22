@@ -348,8 +348,7 @@ static Constant *ExtractConstantBytes(Constant *C, unsigned ByteStart,
 /// factors factored out. If Folded is false, return null if no factoring was
 /// possible, to avoid endlessly bouncing an unfoldable expression back into the
 /// top-level folder.
-static Constant *getFoldedSizeOf(Type *Ty, Type *DestTy,
-                                 bool Folded) {
+static Constant *getFoldedSizeOf(Type *Ty, Type *DestTy, bool Folded) {
   if (ArrayType *ATy = dyn_cast<ArrayType>(Ty)) {
     Constant *N = ConstantInt::get(DestTy, ATy->getNumElements());
     Constant *E = getFoldedSizeOf(ATy->getElementType(), DestTy, true);
@@ -404,8 +403,7 @@ static Constant *getFoldedSizeOf(Type *Ty, Type *DestTy,
 /// factors factored out. If Folded is false, return null if no factoring was
 /// possible, to avoid endlessly bouncing an unfoldable expression back into the
 /// top-level folder.
-static Constant *getFoldedAlignOf(Type *Ty, Type *DestTy,
-                                  bool Folded) {
+static Constant *getFoldedAlignOf(Type *Ty, Type *DestTy, bool Folded) {
   // The alignment of an array is equal to the alignment of the
   // array element. Note that this is not always true for vectors.
   if (ArrayType *ATy = dyn_cast<ArrayType>(Ty)) {
@@ -469,8 +467,7 @@ static Constant *getFoldedAlignOf(Type *Ty, Type *DestTy,
 /// any known factors factored out. If Folded is false, return null if no
 /// factoring was possible, to avoid endlessly bouncing an unfoldable expression
 /// back into the top-level folder.
-static Constant *getFoldedOffsetOf(Type *Ty, Constant *FieldNo,
-                                   Type *DestTy,
+static Constant *getFoldedOffsetOf(Type *Ty, Constant *FieldNo, Type *DestTy,
                                    bool Folded) {
   if (ArrayType *ATy = dyn_cast<ArrayType>(Ty)) {
     Constant *N = ConstantExpr::getCast(CastInst::getCastOpcode(FieldNo, false,
@@ -2041,9 +2038,6 @@ Constant *llvm::ConstantFoldGetElementPtr(Type *PointeeTy, Constant *C,
                                           Optional<unsigned> InRangeIndex,
                                           ArrayRef<Value *> Idxs) {
   if (Idxs.empty()) return C;
-  Constant *Idx0 = cast<Constant>(Idxs[0]);
-  if ((Idxs.size() == 1 && Idx0->isNullValue()))
-    return C;
 
   if (isa<UndefValue>(C)) {
     Type *GEPTy = GetElementPtrInst::getGEPReturnType(
@@ -2051,10 +2045,15 @@ Constant *llvm::ConstantFoldGetElementPtr(Type *PointeeTy, Constant *C,
     return UndefValue::get(GEPTy);
   }
 
+  Constant *Idx0 = cast<Constant>(Idxs[0]);
+  if (Idxs.size() == 1 && (Idx0->isNullValue() || isa<UndefValue>(Idx0)))
+    return C;
+
   if (C->isNullValue()) {
     bool isNull = true;
     for (unsigned i = 0, e = Idxs.size(); i != e; ++i)
-      if (!cast<Constant>(Idxs[i])->isNullValue()) {
+      if (!isa<UndefValue>(Idxs[i]) &&
+          !cast<Constant>(Idxs[i])->isNullValue()) {
         isNull = false;
         break;
       }

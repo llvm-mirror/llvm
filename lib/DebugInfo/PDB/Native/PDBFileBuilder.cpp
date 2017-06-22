@@ -80,9 +80,19 @@ Error PDBFileBuilder::addNamedStream(StringRef Name, uint32_t Size) {
 }
 
 Expected<msf::MSFLayout> PDBFileBuilder::finalizeMsfLayout() {
-  uint32_t PDBStringTableSize = Strings.finalize();
 
-  if (auto EC = addNamedStream("/names", PDBStringTableSize))
+  if (Ipi && Ipi->getRecordCount() > 0) {
+    // In theory newer PDBs always have an ID stream, but by saying that we're
+    // only going to *really* have an ID stream if there is at least one ID
+    // record, we leave open the opportunity to test older PDBs such as those
+    // that don't have an ID stream.
+    auto &Info = getInfoBuilder();
+    Info.addFeature(PdbRaw_FeatureSig::VC140);
+  }
+
+  uint32_t StringsLen = Strings.calculateSerializedSize();
+
+  if (auto EC = addNamedStream("/names", StringsLen))
     return std::move(EC);
   if (auto EC = addNamedStream("/LinkInfo", 0))
     return std::move(EC);
@@ -109,7 +119,15 @@ Expected<msf::MSFLayout> PDBFileBuilder::finalizeMsfLayout() {
   return Msf->build();
 }
 
+Expected<uint32_t> PDBFileBuilder::getNamedStreamIndex(StringRef Name) const {
+  uint32_t SN = 0;
+  if (!NamedStreams.get(Name, SN))
+    return llvm::make_error<pdb::RawError>(raw_error_code::no_stream);
+  return SN;
+}
+
 Error PDBFileBuilder::commit(StringRef Filename) {
+  assert(!Filename.empty());
   auto ExpectedLayout = finalizeMsfLayout();
   if (!ExpectedLayout)
     return ExpectedLayout.takeError();
@@ -132,8 +150,8 @@ Error PDBFileBuilder::commit(StringRef Filename) {
   if (auto EC = Writer.writeArray(Layout.DirectoryBlocks))
     return EC;
 
-  auto DirStream =
-      WritableMappedBlockStream::createDirectoryStream(Layout, Buffer);
+  auto DirStream = WritableMappedBlockStream::createDirectoryStream(
+      Layout, Buffer, Allocator);
   BinaryStreamWriter DW(*DirStream);
   if (auto EC = DW.writeInteger<uint32_t>(Layout.StreamSizes.size()))
     return EC;
@@ -146,12 +164,12 @@ Error PDBFileBuilder::commit(StringRef Filename) {
       return EC;
   }
 
-  uint32_t PDBStringTableStreamNo = 0;
-  if (!NamedStreams.get("/names", PDBStringTableStreamNo))
-    return llvm::make_error<pdb::RawError>(raw_error_code::no_stream);
+  auto ExpectedSN = getNamedStreamIndex("/names");
+  if (!ExpectedSN)
+    return ExpectedSN.takeError();
 
   auto NS = WritableMappedBlockStream::createIndexedStream(
-      Layout, Buffer, PDBStringTableStreamNo);
+      Layout, Buffer, *ExpectedSN, Allocator);
   BinaryStreamWriter NSWriter(*NS);
   if (auto EC = Strings.commit(NSWriter))
     return EC;

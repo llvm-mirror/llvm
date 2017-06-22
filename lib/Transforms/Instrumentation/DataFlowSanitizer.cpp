@@ -44,15 +44,14 @@
 /// For more information, please refer to the design document:
 /// http://clang.llvm.org/docs/DataFlowSanitizerDesign.html
 
-#include "llvm/Transforms/Instrumentation.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/ValueTracking.h"
-#include "llvm/IR/Dominators.h"
 #include "llvm/IR/DebugInfo.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/InstVisitor.h"
@@ -63,6 +62,7 @@
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/SpecialCaseList.h"
+#include "llvm/Transforms/Instrumentation.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include <algorithm>
@@ -388,7 +388,7 @@ FunctionType *DataFlowSanitizer::getArgsFunctionType(FunctionType *T) {
     ArgTypes.push_back(ShadowPtrTy);
   Type *RetType = T->getReturnType();
   if (!RetType->isVoidTy())
-    RetType = StructType::get(RetType, ShadowTy, (Type *)nullptr);
+    RetType = StructType::get(RetType, ShadowTy);
   return FunctionType::get(RetType, ArgTypes, T->isVarArg());
 }
 
@@ -476,16 +476,14 @@ bool DataFlowSanitizer::doInitialization(Module &M) {
     GetArgTLS = ConstantExpr::getIntToPtr(
         ConstantInt::get(IntptrTy, uintptr_t(GetArgTLSPtr)),
         PointerType::getUnqual(
-            FunctionType::get(PointerType::getUnqual(ArgTLSTy),
-                              (Type *)nullptr)));
+            FunctionType::get(PointerType::getUnqual(ArgTLSTy), false)));
   }
   if (GetRetvalTLSPtr) {
     RetvalTLS = nullptr;
     GetRetvalTLS = ConstantExpr::getIntToPtr(
         ConstantInt::get(IntptrTy, uintptr_t(GetRetvalTLSPtr)),
         PointerType::getUnqual(
-            FunctionType::get(PointerType::getUnqual(ShadowTy),
-                              (Type *)nullptr)));
+            FunctionType::get(PointerType::getUnqual(ShadowTy), false)));
   }
 
   ColdCallWeights = MDBuilder(*Ctx).createBranchWeights(1, 1000);
@@ -625,16 +623,16 @@ bool DataFlowSanitizer::runOnModule(Module &M) {
     F->addAttribute(AttributeList::FunctionIndex, Attribute::NoUnwind);
     F->addAttribute(AttributeList::FunctionIndex, Attribute::ReadNone);
     F->addAttribute(AttributeList::ReturnIndex, Attribute::ZExt);
-    F->addAttribute(1, Attribute::ZExt);
-    F->addAttribute(2, Attribute::ZExt);
+    F->addParamAttr(0, Attribute::ZExt);
+    F->addParamAttr(1, Attribute::ZExt);
   }
   DFSanCheckedUnionFn = Mod->getOrInsertFunction("dfsan_union", DFSanUnionFnTy);
   if (Function *F = dyn_cast<Function>(DFSanCheckedUnionFn)) {
     F->addAttribute(AttributeList::FunctionIndex, Attribute::NoUnwind);
     F->addAttribute(AttributeList::FunctionIndex, Attribute::ReadNone);
     F->addAttribute(AttributeList::ReturnIndex, Attribute::ZExt);
-    F->addAttribute(1, Attribute::ZExt);
-    F->addAttribute(2, Attribute::ZExt);
+    F->addParamAttr(0, Attribute::ZExt);
+    F->addParamAttr(1, Attribute::ZExt);
   }
   DFSanUnionLoadFn =
       Mod->getOrInsertFunction("__dfsan_union_load", DFSanUnionLoadFnTy);
@@ -648,7 +646,7 @@ bool DataFlowSanitizer::runOnModule(Module &M) {
   DFSanSetLabelFn =
       Mod->getOrInsertFunction("__dfsan_set_label", DFSanSetLabelFnTy);
   if (Function *F = dyn_cast<Function>(DFSanSetLabelFn)) {
-    F->addAttribute(1, Attribute::ZExt);
+    F->addParamAttr(0, Attribute::ZExt);
   }
   DFSanNonzeroLabelFn =
       Mod->getOrInsertFunction("__dfsan_nonzero_label", DFSanNonzeroLabelFnTy);
@@ -982,8 +980,8 @@ Value *DFSanFunction::combineShadows(Value *V1, Value *V2, Instruction *Pos) {
   if (AvoidNewBlocks) {
     CallInst *Call = IRB.CreateCall(DFS.DFSanCheckedUnionFn, {V1, V2});
     Call->addAttribute(AttributeList::ReturnIndex, Attribute::ZExt);
-    Call->addAttribute(1, Attribute::ZExt);
-    Call->addAttribute(2, Attribute::ZExt);
+    Call->addParamAttr(0, Attribute::ZExt);
+    Call->addParamAttr(1, Attribute::ZExt);
 
     CCS.Block = Pos->getParent();
     CCS.Shadow = Call;
@@ -995,8 +993,8 @@ Value *DFSanFunction::combineShadows(Value *V1, Value *V2, Instruction *Pos) {
     IRBuilder<> ThenIRB(BI);
     CallInst *Call = ThenIRB.CreateCall(DFS.DFSanUnionFn, {V1, V2});
     Call->addAttribute(AttributeList::ReturnIndex, Attribute::ZExt);
-    Call->addAttribute(1, Attribute::ZExt);
-    Call->addAttribute(2, Attribute::ZExt);
+    Call->addParamAttr(0, Attribute::ZExt);
+    Call->addParamAttr(1, Attribute::ZExt);
 
     BasicBlock *Tail = BI->getSuccessor(0);
     PHINode *Phi = PHINode::Create(DFS.ShadowTy, 2, "", &Tail->front());

@@ -1,4 +1,4 @@
-//===-- llvm/ADT/StringExtras.h - Useful string functions -------*- C++ -*-===//
+//===- llvm/ADT/StringExtras.h - Useful string functions --------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -14,13 +14,20 @@
 #ifndef LLVM_ADT_STRINGEXTRAS_H
 #define LLVM_ADT_STRINGEXTRAS_H
 
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/Support/DataTypes.h"
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <iterator>
+#include <string>
+#include <utility>
 
 namespace llvm {
-class raw_ostream;
+
 template<typename T> class SmallVectorImpl;
+class raw_ostream;
 
 /// hexdigit - Return the hexadecimal character for the
 /// given number \p X (which should be less than 16).
@@ -32,6 +39,11 @@ static inline char hexdigit(unsigned X, bool LowerCase = false) {
 /// Construct a string ref from a boolean.
 static inline StringRef toStringRef(bool B) {
   return StringRef(B ? "true" : "false");
+}
+
+/// Construct a string ref from an array ref of unsigned chars.
+static inline StringRef toStringRef(ArrayRef<uint8_t> Input) {
+  return StringRef(reinterpret_cast<const char *>(Input.begin()), Input.size());
 }
 
 /// Interpret the given character \p C as a hexadecimal digit and return its
@@ -62,7 +74,7 @@ static inline std::string utohexstr(uint64_t X, bool LowerCase = false) {
 
 /// Convert buffer \p Input to its hexadecimal representation.
 /// The returned string is double the size of \p Input.
-static inline std::string toHex(StringRef Input) {
+inline std::string toHex(StringRef Input) {
   static const char *const LUT = "0123456789ABCDEF";
   size_t Length = Input.size();
 
@@ -74,6 +86,10 @@ static inline std::string toHex(StringRef Input) {
     Output.push_back(LUT[c & 15]);
   }
   return Output;
+}
+
+inline std::string toHex(ArrayRef<uint8_t> Input) {
+  return toHex(toStringRef(Input));
 }
 
 static inline uint8_t hexFromNibbles(char MSB, char LSB) {
@@ -106,6 +122,13 @@ static inline std::string fromHex(StringRef Input) {
   return Output;
 }
 
+/// \brief Convert the string \p S to an integer of the specified type using
+/// the radix \p Base.  If \p Base is 0, auto-detects the radix.
+/// Returns true if the number was successfully converted, false otherwise.
+template <typename N> bool to_integer(StringRef S, N &Num, unsigned Base = 0) {
+  return !S.getAsInteger(Base, Num);
+}
+
 static inline std::string utostr(uint64_t X, bool isNeg = false) {
   char Buffer[21];
   char *BufPtr = std::end(Buffer);
@@ -120,7 +143,6 @@ static inline std::string utostr(uint64_t X, bool isNeg = false) {
   if (isNeg) *--BufPtr = '-';   // Add negative sign...
   return std::string(BufPtr, std::end(Buffer));
 }
-
 
 static inline std::string itostr(int64_t X) {
   if (X < 0)
@@ -254,13 +276,14 @@ template <typename A1, typename... Args>
 inline size_t join_items_size(const A1 &A, Args &&... Items) {
   return join_one_item_size(A) + join_items_size(std::forward<Args>(Items)...);
 }
-}
+
+} // end namespace detail
 
 /// Joins the strings in the range [Begin, End), adding Separator between
 /// the elements.
 template <typename IteratorT>
 inline std::string join(IteratorT Begin, IteratorT End, StringRef Separator) {
-  typedef typename std::iterator_traits<IteratorT>::iterator_category tag;
+  using tag = typename std::iterator_traits<IteratorT>::iterator_category;
   return detail::join_impl(Begin, End, Separator, tag());
 }
 
@@ -288,6 +311,6 @@ inline std::string join_items(Sep Separator, Args &&... Items) {
   return Result;
 }
 
-} // End llvm namespace
+} // end namespace llvm
 
-#endif
+#endif // LLVM_ADT_STRINGEXTRAS_H

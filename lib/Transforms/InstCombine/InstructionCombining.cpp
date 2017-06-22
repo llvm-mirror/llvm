@@ -33,7 +33,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Transforms/InstCombine/InstCombine.h"
 #include "InstCombineInternal.h"
 #include "llvm-c/Initialization.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -62,6 +61,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/KnownBits.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/InstCombine/InstCombine.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include <algorithm>
@@ -256,7 +256,7 @@ bool InstCombiner::SimplifyAssociativeOrCommutative(BinaryOperator &I) {
         Value *C = I.getOperand(1);
 
         // Does "B op C" simplify?
-        if (Value *V = SimplifyBinOp(Opcode, B, C, SQ)) {
+        if (Value *V = SimplifyBinOp(Opcode, B, C, SQ.getWithInstruction(&I))) {
           // It simplifies to V.  Form "A op V".
           I.setOperand(0, A);
           I.setOperand(1, V);
@@ -285,7 +285,7 @@ bool InstCombiner::SimplifyAssociativeOrCommutative(BinaryOperator &I) {
         Value *C = Op1->getOperand(1);
 
         // Does "A op B" simplify?
-        if (Value *V = SimplifyBinOp(Opcode, A, B, SQ)) {
+        if (Value *V = SimplifyBinOp(Opcode, A, B, SQ.getWithInstruction(&I))) {
           // It simplifies to V.  Form "V op C".
           I.setOperand(0, V);
           I.setOperand(1, C);
@@ -313,7 +313,7 @@ bool InstCombiner::SimplifyAssociativeOrCommutative(BinaryOperator &I) {
         Value *C = I.getOperand(1);
 
         // Does "C op A" simplify?
-        if (Value *V = SimplifyBinOp(Opcode, C, A, SQ)) {
+        if (Value *V = SimplifyBinOp(Opcode, C, A, SQ.getWithInstruction(&I))) {
           // It simplifies to V.  Form "V op B".
           I.setOperand(0, V);
           I.setOperand(1, B);
@@ -333,7 +333,7 @@ bool InstCombiner::SimplifyAssociativeOrCommutative(BinaryOperator &I) {
         Value *C = Op1->getOperand(1);
 
         // Does "C op A" simplify?
-        if (Value *V = SimplifyBinOp(Opcode, C, A, SQ)) {
+        if (Value *V = SimplifyBinOp(Opcode, C, A, SQ.getWithInstruction(&I))) {
           // It simplifies to V.  Form "B op V".
           I.setOperand(0, B);
           I.setOperand(1, V);
@@ -521,7 +521,7 @@ Value *InstCombiner::tryFactorization(InstCombiner::BuilderTy *Builder,
         std::swap(C, D);
       // Consider forming "A op' (B op D)".
       // If "B op D" simplifies then it can be formed with no cost.
-      V = SimplifyBinOp(TopLevelOpcode, B, D, SQ);
+      V = SimplifyBinOp(TopLevelOpcode, B, D, SQ.getWithInstruction(&I));
       // If "B op D" doesn't simplify then only go on if both of the existing
       // operations "A op' B" and "C op' D" will be zapped as no longer used.
       if (!V && LHS->hasOneUse() && RHS->hasOneUse())
@@ -540,7 +540,7 @@ Value *InstCombiner::tryFactorization(InstCombiner::BuilderTy *Builder,
         std::swap(C, D);
       // Consider forming "(A op C) op' B".
       // If "A op C" simplifies then it can be formed with no cost.
-      V = SimplifyBinOp(TopLevelOpcode, A, C, SQ);
+      V = SimplifyBinOp(TopLevelOpcode, A, C, SQ.getWithInstruction(&I));
 
       // If "A op C" doesn't simplify then only go on if both of the existing
       // operations "A op' B" and "C op' D" will be zapped as no longer used.
@@ -638,8 +638,10 @@ Value *InstCombiner::SimplifyUsingDistributiveLaws(BinaryOperator &I) {
     Instruction::BinaryOps InnerOpcode = Op0->getOpcode(); // op'
 
     // Do "A op C" and "B op C" both simplify?
-    if (Value *L = SimplifyBinOp(TopLevelOpcode, A, C, SQ))
-      if (Value *R = SimplifyBinOp(TopLevelOpcode, B, C, SQ)) {
+    if (Value *L =
+            SimplifyBinOp(TopLevelOpcode, A, C, SQ.getWithInstruction(&I)))
+      if (Value *R =
+              SimplifyBinOp(TopLevelOpcode, B, C, SQ.getWithInstruction(&I))) {
         // They do! Return "L op' R".
         ++NumExpand;
         C = Builder->CreateBinOp(InnerOpcode, L, R);
@@ -655,8 +657,10 @@ Value *InstCombiner::SimplifyUsingDistributiveLaws(BinaryOperator &I) {
     Instruction::BinaryOps InnerOpcode = Op1->getOpcode(); // op'
 
     // Do "A op B" and "A op C" both simplify?
-    if (Value *L = SimplifyBinOp(TopLevelOpcode, A, B, SQ))
-      if (Value *R = SimplifyBinOp(TopLevelOpcode, A, C, SQ)) {
+    if (Value *L =
+            SimplifyBinOp(TopLevelOpcode, A, B, SQ.getWithInstruction(&I)))
+      if (Value *R =
+              SimplifyBinOp(TopLevelOpcode, A, C, SQ.getWithInstruction(&I))) {
         // They do! Return "L op' R".
         ++NumExpand;
         A = Builder->CreateBinOp(InnerOpcode, L, R);
@@ -671,15 +675,17 @@ Value *InstCombiner::SimplifyUsingDistributiveLaws(BinaryOperator &I) {
     if (auto *SI1 = dyn_cast<SelectInst>(RHS)) {
       if (SI0->getCondition() == SI1->getCondition()) {
         Value *SI = nullptr;
-        if (Value *V = SimplifyBinOp(TopLevelOpcode, SI0->getFalseValue(),
-                                     SI1->getFalseValue(), SQ))
+        if (Value *V =
+                SimplifyBinOp(TopLevelOpcode, SI0->getFalseValue(),
+                              SI1->getFalseValue(), SQ.getWithInstruction(&I)))
           SI = Builder->CreateSelect(SI0->getCondition(),
                                      Builder->CreateBinOp(TopLevelOpcode,
                                                           SI0->getTrueValue(),
                                                           SI1->getTrueValue()),
                                      V);
-        if (Value *V = SimplifyBinOp(TopLevelOpcode, SI0->getTrueValue(),
-                                     SI1->getTrueValue(), SQ))
+        if (Value *V =
+                SimplifyBinOp(TopLevelOpcode, SI0->getTrueValue(),
+                              SI1->getTrueValue(), SQ.getWithInstruction(&I)))
           SI = Builder->CreateSelect(
               SI0->getCondition(), V,
               Builder->CreateBinOp(TopLevelOpcode, SI0->getFalseValue(),
@@ -933,9 +939,19 @@ Instruction *InstCombiner::foldOpIntoPhi(Instruction &I, PHINode *PN) {
       // `TrueVInPred`.
       if (InC && !isa<ConstantExpr>(InC) && isa<ConstantInt>(InC))
         InV = InC->isNullValue() ? FalseVInPred : TrueVInPred;
-      else
+      else {
+        // Generate the select in the same block as PN's current incoming block.
+        // Note: ThisBB need not be the NonConstBB because vector constants
+        // which are constants by definition are handled here.
+        // FIXME: This can lead to an increase in IR generation because we might
+        // generate selects for vector constant phi operand, that could not be
+        // folded to TrueVInPred or FalseVInPred as done for ConstantInt. For
+        // non-vector phis, this transformation was always profitable because
+        // the select would be generated exactly once in the NonConstBB.
+        Builder->SetInsertPoint(ThisBB->getTerminator());
         InV = Builder->CreateSelect(PN->getIncomingValue(i),
                                     TrueVInPred, FalseVInPred, "phitmp");
+      }
       NewPN->addIncoming(InV, ThisBB);
     }
   } else if (CmpInst *CI = dyn_cast<CmpInst>(&I)) {
@@ -1399,7 +1415,8 @@ Value *InstCombiner::SimplifyVectorOp(BinaryOperator &Inst) {
 Instruction *InstCombiner::visitGetElementPtrInst(GetElementPtrInst &GEP) {
   SmallVector<Value*, 8> Ops(GEP.op_begin(), GEP.op_end());
 
-  if (Value *V = SimplifyGEPInst(GEP.getSourceElementType(), Ops, SQ))
+  if (Value *V = SimplifyGEPInst(GEP.getSourceElementType(), Ops,
+                                 SQ.getWithInstruction(&GEP)))
     return replaceInstUsesWith(GEP, V);
 
   Value *PtrOp = GEP.getOperand(0);
@@ -1588,7 +1605,8 @@ Instruction *InstCombiner::visitGetElementPtrInst(GetElementPtrInst &GEP) {
       if (SO1->getType() != GO1->getType())
         return nullptr;
 
-      Value *Sum = SimplifyAddInst(GO1, SO1, false, false, SQ);
+      Value *Sum =
+          SimplifyAddInst(GO1, SO1, false, false, SQ.getWithInstruction(&GEP));
       // Only do the combine when we are sure the cost after the
       // merge is never more than that before the merge.
       if (Sum == nullptr)
@@ -1963,6 +1981,7 @@ static bool isAllocSiteRemovable(Instruction *AI,
         // Give up the moment we see something we can't handle.
         return false;
 
+      case Instruction::AddrSpaceCast:
       case Instruction::BitCast:
       case Instruction::GetElementPtr:
         Users.emplace_back(I);
@@ -2064,7 +2083,8 @@ Instruction *InstCombiner::visitAllocSite(Instruction &MI) {
         replaceInstUsesWith(*C,
                             ConstantInt::get(Type::getInt1Ty(C->getContext()),
                                              C->isFalseWhenEqual()));
-      } else if (isa<BitCastInst>(I) || isa<GetElementPtrInst>(I)) {
+      } else if (isa<BitCastInst>(I) || isa<GetElementPtrInst>(I) ||
+                 isa<AddrSpaceCastInst>(I)) {
         replaceInstUsesWith(*I, UndefValue::get(I->getType()));
       }
       eraseInstFromFunction(*I);
@@ -2180,10 +2200,9 @@ Instruction *InstCombiner::visitReturnInst(ReturnInst &RI) {
 
   // There might be assume intrinsics dominating this return that completely
   // determine the value. If so, constant fold it.
-  KnownBits Known(VTy->getPrimitiveSizeInBits());
-  computeKnownBits(ResultOp, Known, 0, &RI);
-  if ((Known.Zero|Known.One).isAllOnesValue())
-    RI.setOperand(0, Constant::getIntegerValue(VTy, Known.One));
+  KnownBits Known = computeKnownBits(ResultOp, 0, &RI);
+  if (Known.isConstant())
+    RI.setOperand(0, Constant::getIntegerValue(VTy, Known.getConstant()));
 
   return nullptr;
 }
@@ -2210,37 +2229,18 @@ Instruction *InstCombiner::visitBranchInst(BranchInst &BI) {
     return &BI;
   }
 
-  // Canonicalize fcmp_one -> fcmp_oeq
-  FCmpInst::Predicate FPred; Value *Y;
-  if (match(&BI, m_Br(m_FCmp(FPred, m_Value(X), m_Value(Y)),
-                             TrueDest, FalseDest)) &&
-      BI.getCondition()->hasOneUse())
-    if (FPred == FCmpInst::FCMP_ONE || FPred == FCmpInst::FCMP_OLE ||
-        FPred == FCmpInst::FCMP_OGE) {
-      FCmpInst *Cond = cast<FCmpInst>(BI.getCondition());
-      Cond->setPredicate(FCmpInst::getInversePredicate(FPred));
-
-      // Swap Destinations and condition.
-      BI.swapSuccessors();
-      Worklist.Add(Cond);
-      return &BI;
-    }
-
-  // Canonicalize icmp_ne -> icmp_eq
-  ICmpInst::Predicate IPred;
-  if (match(&BI, m_Br(m_ICmp(IPred, m_Value(X), m_Value(Y)),
-                      TrueDest, FalseDest)) &&
-      BI.getCondition()->hasOneUse())
-    if (IPred == ICmpInst::ICMP_NE  || IPred == ICmpInst::ICMP_ULE ||
-        IPred == ICmpInst::ICMP_SLE || IPred == ICmpInst::ICMP_UGE ||
-        IPred == ICmpInst::ICMP_SGE) {
-      ICmpInst *Cond = cast<ICmpInst>(BI.getCondition());
-      Cond->setPredicate(ICmpInst::getInversePredicate(IPred));
-      // Swap Destinations and condition.
-      BI.swapSuccessors();
-      Worklist.Add(Cond);
-      return &BI;
-    }
+  // Canonicalize, for example, icmp_ne -> icmp_eq or fcmp_one -> fcmp_oeq.
+  CmpInst::Predicate Pred;
+  if (match(&BI, m_Br(m_OneUse(m_Cmp(Pred, m_Value(), m_Value())), TrueDest,
+                      FalseDest)) &&
+      !isCanonicalPredicate(Pred)) {
+    // Swap destinations and condition.
+    CmpInst *Cond = cast<CmpInst>(BI.getCondition());
+    Cond->setPredicate(CmpInst::getInversePredicate(Pred));
+    BI.swapSuccessors();
+    Worklist.Add(Cond);
+    return &BI;
+  }
 
   return nullptr;
 }
@@ -2261,11 +2261,9 @@ Instruction *InstCombiner::visitSwitchInst(SwitchInst &SI) {
     return &SI;
   }
 
-  unsigned BitWidth = cast<IntegerType>(Cond->getType())->getBitWidth();
-  KnownBits Known(BitWidth);
-  computeKnownBits(Cond, Known, 0, &SI);
-  unsigned LeadingKnownZeros = Known.Zero.countLeadingOnes();
-  unsigned LeadingKnownOnes = Known.One.countLeadingOnes();
+  KnownBits Known = computeKnownBits(Cond, 0, &SI);
+  unsigned LeadingKnownZeros = Known.countMinLeadingZeros();
+  unsigned LeadingKnownOnes = Known.countMinLeadingOnes();
 
   // Compute the number of leading bits we can ignore.
   // TODO: A better way to determine this would use ComputeNumSignBits().
@@ -2276,12 +2274,12 @@ Instruction *InstCombiner::visitSwitchInst(SwitchInst &SI) {
         LeadingKnownOnes, C.getCaseValue()->getValue().countLeadingOnes());
   }
 
-  unsigned NewWidth = BitWidth - std::max(LeadingKnownZeros, LeadingKnownOnes);
+  unsigned NewWidth = Known.getBitWidth() - std::max(LeadingKnownZeros, LeadingKnownOnes);
 
   // Shrink the condition operand if the new type is smaller than the old type.
   // This may produce a non-standard type for the switch, but that's ok because
   // the backend should extend back to a legal type for the target.
-  if (NewWidth > 0 && NewWidth < BitWidth) {
+  if (NewWidth > 0 && NewWidth < Known.getBitWidth()) {
     IntegerType *Ty = IntegerType::get(SI.getContext(), NewWidth);
     Builder->SetInsertPoint(&SI);
     Value *NewCond = Builder->CreateTrunc(Cond, Ty, "trunc");
@@ -2303,7 +2301,8 @@ Instruction *InstCombiner::visitExtractValueInst(ExtractValueInst &EV) {
   if (!EV.hasIndices())
     return replaceInstUsesWith(EV, Agg);
 
-  if (Value *V = SimplifyExtractValueInst(Agg, EV.getIndices(), SQ))
+  if (Value *V = SimplifyExtractValueInst(Agg, EV.getIndices(),
+                                          SQ.getWithInstruction(&EV)))
     return replaceInstUsesWith(EV, V);
 
   if (InsertValueInst *IV = dyn_cast<InsertValueInst>(Agg)) {
@@ -2860,11 +2859,9 @@ bool InstCombiner::run() {
     // a value even when the operands are not all constants.
     Type *Ty = I->getType();
     if (ExpensiveCombines && !I->use_empty() && Ty->isIntOrIntVectorTy()) {
-      unsigned BitWidth = Ty->getScalarSizeInBits();
-      KnownBits Known(BitWidth);
-      computeKnownBits(I, Known, /*Depth*/0, I);
-      if ((Known.Zero | Known.One).isAllOnesValue()) {
-        Constant *C = ConstantInt::get(Ty, Known.One);
+      KnownBits Known = computeKnownBits(I, /*Depth*/0, I);
+      if (Known.isConstant()) {
+        Constant *C = ConstantInt::get(Ty, Known.getConstant());
         DEBUG(dbgs() << "IC: ConstFold (all bits known) to: " << *C <<
                         " from: " << *I << '\n');
 
@@ -3015,6 +3012,7 @@ static bool AddReachableCodeToWorklist(BasicBlock *BB, const DataLayout &DL,
         ++NumDeadInst;
         DEBUG(dbgs() << "IC: DCE: " << *Inst << '\n');
         Inst->eraseFromParent();
+        MadeIRChange = true;
         continue;
       }
 
@@ -3028,6 +3026,7 @@ static bool AddReachableCodeToWorklist(BasicBlock *BB, const DataLayout &DL,
           ++NumConstProp;
           if (isInstructionTriviallyDead(Inst, TLI))
             Inst->eraseFromParent();
+          MadeIRChange = true;
           continue;
         }
 
@@ -3052,7 +3051,10 @@ static bool AddReachableCodeToWorklist(BasicBlock *BB, const DataLayout &DL,
         }
       }
 
-      InstrsForInstCombineWorklist.push_back(Inst);
+      // Skip processing debug intrinsics in InstCombine. Processing these call instructions
+      // consumes non-trivial amount of time and provides no value for the optimization.
+      if (!isa<DbgInfoIntrinsic>(Inst))
+        InstrsForInstCombineWorklist.push_back(Inst);
     }
 
     // Recursively visit successors.  If this is a branch or switch on a
@@ -3141,7 +3143,7 @@ combineInstructionsOverFunction(Function &F, InstCombineWorklist &Worklist,
 
   // Lower dbg.declare intrinsics otherwise their value may be clobbered
   // by instcombiner.
-  bool DbgDeclaresChanged = LowerDbgDeclare(F);
+  bool MadeIRChange = LowerDbgDeclare(F);
 
   // Iterate while there is work to do.
   int Iteration = 0;
@@ -3150,18 +3152,17 @@ combineInstructionsOverFunction(Function &F, InstCombineWorklist &Worklist,
     DEBUG(dbgs() << "\n\nINSTCOMBINE ITERATION #" << Iteration << " on "
                  << F.getName() << "\n");
 
-    bool Changed = prepareICWorklistFromFunction(F, DL, &TLI, Worklist);
+    MadeIRChange |= prepareICWorklistFromFunction(F, DL, &TLI, Worklist);
 
     InstCombiner IC(Worklist, &Builder, F.optForMinSize(), ExpensiveCombines,
                     AA, AC, TLI, DT, DL, LI);
     IC.MaxArraySizeForCombine = MaxArraySize;
-    Changed |= IC.run();
 
-    if (!Changed)
+    if (!IC.run())
       break;
   }
 
-  return DbgDeclaresChanged || Iteration > 1;
+  return MadeIRChange || Iteration > 1;
 }
 
 PreservedAnalyses InstCombinePass::run(Function &F,

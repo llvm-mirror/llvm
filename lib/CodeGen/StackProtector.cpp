@@ -21,6 +21,7 @@
 #include "llvm/Analysis/OptimizationDiagnosticInfo.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/StackProtector.h"
+#include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
@@ -28,6 +29,7 @@
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instruction.h"
@@ -58,12 +60,14 @@ static cl::opt<bool> EnableSelectionDAGSP("enable-selectiondag-sp",
                                           cl::init(true), cl::Hidden);
 
 char StackProtector::ID = 0;
-INITIALIZE_TM_PASS(StackProtector, "stack-protector", "Insert stack protectors",
-                   false, true)
 
-FunctionPass *llvm::createStackProtectorPass(const TargetMachine *TM) {
-  return new StackProtector(TM);
-}
+INITIALIZE_PASS_BEGIN(StackProtector, DEBUG_TYPE,
+                      "Insert stack protectors", false, true)
+INITIALIZE_PASS_DEPENDENCY(TargetPassConfig)
+INITIALIZE_PASS_END(StackProtector, DEBUG_TYPE,
+                    "Insert stack protectors", false, true)
+
+FunctionPass *llvm::createStackProtectorPass() { return new StackProtector(); }
 
 StackProtector::SSPLayoutKind
 StackProtector::getSSPLayout(const AllocaInst *AI) const {
@@ -91,12 +95,19 @@ void StackProtector::adjustForColoring(const AllocaInst *From,
   }
 }
 
+void StackProtector::getAnalysisUsage(AnalysisUsage &AU) const {
+  AU.addRequired<TargetPassConfig>();
+  AU.addPreserved<DominatorTreeWrapperPass>();
+}
+
 bool StackProtector::runOnFunction(Function &Fn) {
   F = &Fn;
   M = F->getParent();
   DominatorTreeWrapperPass *DTWP =
       getAnalysisIfAvailable<DominatorTreeWrapperPass>();
   DT = DTWP ? &DTWP->getDomTree() : nullptr;
+  TM = &getAnalysis<TargetPassConfig>().getTM<TargetMachine>();
+  Trip = TM->getTargetTriple();
   TLI = TM->getSubtargetImpl(Fn)->getTargetLowering();
   HasPrologue = false;
   HasIRCheck = false;

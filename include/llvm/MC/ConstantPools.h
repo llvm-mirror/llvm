@@ -19,6 +19,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/SMLoc.h"
 #include <cstdint>
+#include <map>
 
 namespace llvm {
 
@@ -44,7 +45,7 @@ struct ConstantPoolEntry {
 class ConstantPool {
   using EntryVecTy = SmallVector<ConstantPoolEntry, 4>;
   EntryVecTy Entries;
-  DenseMap<int64_t, const MCSymbolRefExpr *> CachedEntries;
+  std::map<int64_t, const MCSymbolRefExpr *> CachedEntries;
 
 public:
   // Initialize a new empty constant pool
@@ -63,6 +64,8 @@ public:
 
   // Return true if the constant pool is empty
   bool empty();
+
+  void clearCache();
 };
 
 class AssemblerConstantPools {
@@ -86,6 +89,7 @@ class AssemblerConstantPools {
 public:
   void emitAll(MCStreamer &Streamer);
   void emitForCurrentSection(MCStreamer &Streamer);
+  void clearCacheForCurrentSection(MCStreamer &Streamer);
   const MCExpr *addEntry(MCStreamer &Streamer, const MCExpr *Expr,
                          unsigned Size, SMLoc Loc);
 

@@ -7,10 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/DebugInfo/DWARF/DWARFTypeUnit.h"
 #include "llvm/DebugInfo/DIContext.h"
 #include "llvm/DebugInfo/DWARF/DWARFDebugAbbrev.h"
 #include "llvm/DebugInfo/DWARF/DWARFDie.h"
-#include "llvm/DebugInfo/DWARF/DWARFTypeUnit.h"
 #include "llvm/DebugInfo/DWARF/DWARFUnit.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/raw_ostream.h"
@@ -24,7 +24,11 @@ bool DWARFTypeUnit::extractImpl(DataExtractor debug_info,
     return false;
   TypeHash = debug_info.getU64(offset_ptr);
   TypeOffset = debug_info.getU32(offset_ptr);
-  return TypeOffset < getLength();
+  // TypeOffset is relative to the beginning of the header,
+  // so we have to account for the leading length field.
+  // FIXME: The size of the length field is 12 in DWARF64.
+  unsigned SizeOfLength = 4;
+  return TypeOffset < getLength() + SizeOfLength;
 }
 
 void DWARFTypeUnit::dump(raw_ostream &OS, bool SummarizeTypes) {

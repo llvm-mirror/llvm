@@ -14,6 +14,7 @@
 #include "llvm/Object/ArchiveWriter.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/BinaryFormat/Magic.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/Object/Archive.h"
 #include "llvm/Object/ObjectFile.h"
@@ -35,7 +36,8 @@
 using namespace llvm;
 
 NewArchiveMember::NewArchiveMember(MemoryBufferRef BufRef)
-    : Buf(MemoryBuffer::getMemBuffer(BufRef, false)) {}
+    : Buf(MemoryBuffer::getMemBuffer(BufRef, false)),
+      MemberName(BufRef.getBufferIdentifier()) {}
 
 Expected<NewArchiveMember>
 NewArchiveMember::getOldMember(const object::Archive::Child &OldMember,
@@ -47,6 +49,7 @@ NewArchiveMember::getOldMember(const object::Archive::Child &OldMember,
   NewArchiveMember M;
   assert(M.IsNew == false);
   M.Buf = MemoryBuffer::getMemBuffer(*BufOrErr, false);
+  M.MemberName = M.Buf->getBufferIdentifier();
   if (!Deterministic) {
     auto ModTimeOrErr = OldMember.getLastModified();
     if (!ModTimeOrErr)
@@ -96,6 +99,7 @@ Expected<NewArchiveMember> NewArchiveMember::getFile(StringRef FileName,
   NewArchiveMember M;
   M.IsNew = true;
   M.Buf = std::move(*MemberBufferOrErr);
+  M.MemberName = M.Buf->getBufferIdentifier();
   if (!Deterministic) {
     M.ModTime = std::chrono::time_point_cast<std::chrono::seconds>(
         Status.getLastModificationTime());
@@ -184,7 +188,7 @@ printBSDMemberHeader(raw_fd_ostream &Out, StringRef Name,
 }
 
 static bool useStringTable(bool Thin, StringRef Name) {
-  return Thin || Name.size() >= 16;
+  return Thin || Name.size() >= 16 || Name.contains('/');
 }
 
 static void
@@ -238,7 +242,7 @@ static void writeStringTable(raw_fd_ostream &Out, StringRef ArcName,
   unsigned StartOffset = 0;
   for (const NewArchiveMember &M : Members) {
     StringRef Path = M.Buf->getBufferIdentifier();
-    StringRef Name = sys::path::filename(Path);
+    StringRef Name = M.MemberName;
     if (!useStringTable(Thin, Name))
       continue;
     if (StartOffset == 0) {
@@ -290,7 +294,7 @@ writeSymbolTable(raw_fd_ostream &Out, object::Archive::Kind Kind,
     MemoryBufferRef MemberBuffer = Members[MemberNum].Buf->getMemBufferRef();
     Expected<std::unique_ptr<object::SymbolicFile>> ObjOrErr =
         object::SymbolicFile::createSymbolicFile(
-            MemberBuffer, sys::fs::file_magic::unknown, &Context);
+            MemberBuffer, llvm::file_magic::unknown, &Context);
     if (!ObjOrErr) {
       // FIXME: check only for "not an object file" errors.
       consumeError(ObjOrErr.takeError());
@@ -422,9 +426,8 @@ llvm::writeArchive(StringRef ArcName,
     if (Kind == object::Archive::K_DARWIN)
       Padding = OffsetToAlignment(M.Buf->getBufferSize(), 8);
 
-    printMemberHeader(Out, Kind, Thin,
-                      sys::path::filename(M.Buf->getBufferIdentifier()),
-                      StringMapIndexIter, M.ModTime, M.UID, M.GID, M.Perms,
+    printMemberHeader(Out, Kind, Thin, M.MemberName, StringMapIndexIter,
+                      M.ModTime, M.UID, M.GID, M.Perms,
                       M.Buf->getBufferSize() + Padding);
 
     if (!Thin)

@@ -19,8 +19,8 @@
 #include "llvm/ADT/PointerIntPair.h"
 #include "llvm/Support/PointerLikeTypeTraits.h"
 #include <cassert>
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 
 namespace llvm {
 
@@ -158,7 +158,7 @@ public:
     assert(
         get<PT1>() == Val.getPointer() &&
         "Can't get the address because PointerLikeTypeTraits changes the ptr");
-    return (PT1 *)Val.getAddrOfPointer();
+    return const_cast<PT1 *>(reinterpret_cast<const PT1 *>(Val.getAddrOfPointer()));
   }
 
   /// Assignment from nullptr which just clears the union.

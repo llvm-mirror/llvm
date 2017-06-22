@@ -21,6 +21,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/NoFolder.h"
 #include "llvm/IR/Operator.h"
+#include "gmock/gmock-matchers.h"
 #include "gtest/gtest.h"
 #include <memory>
 
@@ -405,8 +406,8 @@ TEST(InstructionsTest, FPMathOperator) {
   EXPECT_TRUE(isa<FPMathOperator>(V1));
   FPMathOperator *O1 = cast<FPMathOperator>(V1);
   EXPECT_EQ(O1->getFPAccuracy(), 1.0);
-  delete V1;
-  delete I;
+  V1->deleteValue();
+  I->deleteValue();
 }
 
 
@@ -738,6 +739,12 @@ TEST(InstructionsTest, SwitchInst) {
   const auto &Handle = *CCI;
   EXPECT_EQ(1, Handle.getCaseValue()->getSExtValue());
   EXPECT_EQ(BB1.get(), Handle.getCaseSuccessor());
+}
+
+TEST(InstructionsTest, CommuteShuffleMask) {
+  SmallVector<int, 16> Indices({-1, 0, 7});
+  ShuffleVectorInst::commuteShuffleMask(Indices, 4);
+  EXPECT_THAT(Indices, testing::ContainerEq(ArrayRef<int>({-1, 4, 3})));
 }
 
 } // end anonymous namespace

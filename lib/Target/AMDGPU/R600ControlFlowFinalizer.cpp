@@ -12,15 +12,14 @@
 /// computing their address on the fly ; it also sets STACK_SIZE info.
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Support/Debug.h"
 #include "AMDGPU.h"
 #include "AMDGPUSubtarget.h"
 #include "R600Defines.h"
 #include "R600InstrInfo.h"
 #include "R600MachineFunctionInfo.h"
 #include "R600RegisterInfo.h"
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -30,6 +29,7 @@
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/DebugLoc.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
@@ -499,7 +499,7 @@ private:
   }
 
 public:
-  R600ControlFlowFinalizer(TargetMachine &tm) : MachineFunctionPass(ID) {}
+  R600ControlFlowFinalizer() : MachineFunctionPass(ID) {}
 
   bool runOnMachineFunction(MachineFunction &MF) override {
     ST = &MF.getSubtarget<R600Subtarget>();
@@ -706,6 +706,6 @@ char R600ControlFlowFinalizer::ID = 0;
 
 } // end anonymous namespace
 
-FunctionPass *llvm::createR600ControlFlowFinalizer(TargetMachine &TM) {
-  return new R600ControlFlowFinalizer(TM);
+FunctionPass *llvm::createR600ControlFlowFinalizer() {
+  return new R600ControlFlowFinalizer();
 }

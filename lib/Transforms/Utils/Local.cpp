@@ -22,8 +22,8 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/EHPersonalities.h"
 #include "llvm/Analysis/InstructionSimplify.h"
-#include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/Analysis/LazyValueInfo.h"
+#include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
@@ -1037,17 +1037,15 @@ unsigned llvm::getOrEnforceKnownAlignment(Value *V, unsigned PrefAlign,
                                           const DominatorTree *DT) {
   assert(V->getType()->isPointerTy() &&
          "getOrEnforceKnownAlignment expects a pointer!");
-  unsigned BitWidth = DL.getPointerTypeSizeInBits(V->getType());
 
-  KnownBits Known(BitWidth);
-  computeKnownBits(V, Known, DL, 0, AC, CxtI, DT);
-  unsigned TrailZ = Known.Zero.countTrailingOnes();
+  KnownBits Known = computeKnownBits(V, DL, 0, AC, CxtI, DT);
+  unsigned TrailZ = Known.countMinTrailingZeros();
 
   // Avoid trouble with ridiculously large TrailZ values, such as
   // those computed from a null pointer.
   TrailZ = std::min(TrailZ, unsigned(sizeof(unsigned) * CHAR_BIT - 1));
 
-  unsigned Align = 1u << std::min(BitWidth - 1, TrailZ);
+  unsigned Align = 1u << std::min(Known.getBitWidth() - 1, TrailZ);
 
   // LLVM doesn't support alignments larger than this currently.
   Align = std::min(Align, +Value::MaximumAlignment);
@@ -1105,8 +1103,9 @@ static bool PhiHasDebugValue(DILocalVariable *DIVar,
 void llvm::ConvertDebugDeclareToDebugValue(DbgDeclareInst *DDI,
                                            StoreInst *SI, DIBuilder &Builder) {
   auto *DIVar = DDI->getVariable();
-  auto *DIExpr = DDI->getExpression();
   assert(DIVar && "Missing variable");
+  auto *DIExpr = DDI->getExpression();
+  Value *DV = SI->getOperand(0);
 
   // If an argument is zero extended then use argument directly. The ZExt
   // may be zapped by an optimization pass in future.
@@ -1116,34 +1115,28 @@ void llvm::ConvertDebugDeclareToDebugValue(DbgDeclareInst *DDI,
   if (SExtInst *SExt = dyn_cast<SExtInst>(SI->getOperand(0)))
     ExtendedArg = dyn_cast<Argument>(SExt->getOperand(0));
   if (ExtendedArg) {
-    // We're now only describing a subset of the variable. The fragment we're
-    // describing will always be smaller than the variable size, because
-    // VariableSize == Size of Alloca described by DDI. Since SI stores
-    // to the alloca described by DDI, if it's first operand is an extend,
-    // we're guaranteed that before extension, the value was narrower than
-    // the size of the alloca, hence the size of the described variable.
-    SmallVector<uint64_t, 3> Ops;
-    unsigned FragmentOffset = 0;
-    // If this already is a bit fragment, we drop the bit fragment from the
-    // expression and record the offset.
-    auto Fragment = DIExpr->getFragmentInfo();
-    if (Fragment) {
-      Ops.append(DIExpr->elements_begin(), DIExpr->elements_end()-3);
-      FragmentOffset = Fragment->OffsetInBits;
-    } else {
-      Ops.append(DIExpr->elements_begin(), DIExpr->elements_end());
+    // If this DDI was already describing only a fragment of a variable, ensure
+    // that fragment is appropriately narrowed here.
+    // But if a fragment wasn't used, describe the value as the original
+    // argument (rather than the zext or sext) so that it remains described even
+    // if the sext/zext is optimized away. This widens the variable description,
+    // leaving it up to the consumer to know how the smaller value may be
+    // represented in a larger register.
+    if (auto Fragment = DIExpr->getFragmentInfo()) {
+      unsigned FragmentOffset = Fragment->OffsetInBits;
+      SmallVector<uint64_t, 3> Ops(DIExpr->elements_begin(),
+                                   DIExpr->elements_end() - 3);
+      Ops.push_back(dwarf::DW_OP_LLVM_fragment);
+      Ops.push_back(FragmentOffset);
+      const DataLayout &DL = DDI->getModule()->getDataLayout();
+      Ops.push_back(DL.getTypeSizeInBits(ExtendedArg->getType()));
+      DIExpr = Builder.createExpression(Ops);
     }
-    Ops.push_back(dwarf::DW_OP_LLVM_fragment);
-    Ops.push_back(FragmentOffset);
-    const DataLayout &DL = DDI->getModule()->getDataLayout();
-    Ops.push_back(DL.getTypeSizeInBits(ExtendedArg->getType()));
-    auto NewDIExpr = Builder.createExpression(Ops);
-    if (!LdStHasDebugValue(DIVar, NewDIExpr, SI))
-      Builder.insertDbgValueIntrinsic(ExtendedArg, 0, DIVar, NewDIExpr,
-                                      DDI->getDebugLoc(), SI);
-  } else if (!LdStHasDebugValue(DIVar, DIExpr, SI))
-    Builder.insertDbgValueIntrinsic(SI->getOperand(0), 0, DIVar, DIExpr,
-                                    DDI->getDebugLoc(), SI);
+    DV = ExtendedArg;
+  }
+  if (!LdStHasDebugValue(DIVar, DIExpr, SI))
+    Builder.insertDbgValueIntrinsic(DV, 0, DIVar, DIExpr, DDI->getDebugLoc(),
+                                    SI);
 }
 
 /// Inserts a llvm.dbg.value intrinsic before a load of an alloca'd value
@@ -1781,44 +1774,60 @@ void llvm::combineMetadataForCSE(Instruction *K, const Instruction *J) {
   combineMetadata(K, J, KnownIDs);
 }
 
-unsigned llvm::replaceDominatedUsesWith(Value *From, Value *To,
-                                        DominatorTree &DT,
-                                        const BasicBlockEdge &Root) {
-  assert(From->getType() == To->getType());
-  
-  unsigned Count = 0;
-  for (Value::use_iterator UI = From->use_begin(), UE = From->use_end();
-       UI != UE; ) {
-    Use &U = *UI++;
-    if (DT.dominates(Root, U)) {
-      U.set(To);
-      DEBUG(dbgs() << "Replace dominated use of '"
-            << From->getName() << "' as "
-            << *To << " in " << *U << "\n");
-      ++Count;
-    }
-  }
-  return Count;
-}
-
-unsigned llvm::replaceDominatedUsesWith(Value *From, Value *To,
-                                        DominatorTree &DT,
-                                        const BasicBlock *BB) {
+template <typename RootType, typename DominatesFn>
+static unsigned replaceDominatedUsesWith(Value *From, Value *To,
+                                         const RootType &Root,
+                                         const DominatesFn &Dominates) {
   assert(From->getType() == To->getType());
 
   unsigned Count = 0;
   for (Value::use_iterator UI = From->use_begin(), UE = From->use_end();
        UI != UE;) {
     Use &U = *UI++;
-    auto *I = cast<Instruction>(U.getUser());
-    if (DT.properlyDominates(BB, I->getParent())) {
-      U.set(To);
-      DEBUG(dbgs() << "Replace dominated use of '" << From->getName() << "' as "
-                   << *To << " in " << *U << "\n");
-      ++Count;
-    }
+    if (!Dominates(Root, U))
+      continue;
+    U.set(To);
+    DEBUG(dbgs() << "Replace dominated use of '" << From->getName() << "' as "
+                 << *To << " in " << *U << "\n");
+    ++Count;
   }
   return Count;
+}
+
+unsigned llvm::replaceNonLocalUsesWith(Instruction *From, Value *To) {
+   assert(From->getType() == To->getType());
+   auto *BB = From->getParent();
+   unsigned Count = 0;
+
+  for (Value::use_iterator UI = From->use_begin(), UE = From->use_end();
+       UI != UE;) {
+    Use &U = *UI++;
+    auto *I = cast<Instruction>(U.getUser());
+    if (I->getParent() == BB)
+      continue;
+    U.set(To);
+    ++Count;
+  }
+  return Count;
+}
+
+unsigned llvm::replaceDominatedUsesWith(Value *From, Value *To,
+                                        DominatorTree &DT,
+                                        const BasicBlockEdge &Root) {
+  auto Dominates = [&DT](const BasicBlockEdge &Root, const Use &U) {
+    return DT.dominates(Root, U);
+  };
+  return ::replaceDominatedUsesWith(From, To, Root, Dominates);
+}
+
+unsigned llvm::replaceDominatedUsesWith(Value *From, Value *To,
+                                        DominatorTree &DT,
+                                        const BasicBlock *BB) {
+  auto ProperlyDominates = [&DT](const BasicBlock *BB, const Use &U) {
+    auto *I = cast<Instruction>(U.getUser())->getParent();
+    return DT.properlyDominates(BB, I);
+  };
+  return ::replaceDominatedUsesWith(From, To, BB, ProperlyDominates);
 }
 
 bool llvm::callsGCLeafFunction(ImmutableCallSite CS) {
@@ -2099,4 +2108,49 @@ void llvm::maybeMarkSanitizerLibraryCallNoBuiltin(
       TLI->getLibFunc(F->getName(), Func) && TLI->hasOptimizedCodeGen(Func) &&
       !F->doesNotAccessMemory())
     CI->addAttribute(AttributeList::FunctionIndex, Attribute::NoBuiltin);
+}
+
+bool llvm::canReplaceOperandWithVariable(const Instruction *I, unsigned OpIdx) {
+  // We can't have a PHI with a metadata type.
+  if (I->getOperand(OpIdx)->getType()->isMetadataTy())
+    return false;
+
+  // Early exit.
+  if (!isa<Constant>(I->getOperand(OpIdx)))
+    return true;
+
+  switch (I->getOpcode()) {
+  default:
+    return true;
+  case Instruction::Call:
+  case Instruction::Invoke:
+    // Many arithmetic intrinsics have no issue taking a
+    // variable, however it's hard to distingish these from
+    // specials such as @llvm.frameaddress that require a constant.
+    if (isa<IntrinsicInst>(I))
+      return false;
+
+    // Constant bundle operands may need to retain their constant-ness for
+    // correctness.
+    if (ImmutableCallSite(I).isBundleOperand(OpIdx))
+      return false;
+    return true;
+  case Instruction::ShuffleVector:
+    // Shufflevector masks are constant.
+    return OpIdx != 2;
+  case Instruction::ExtractValue:
+  case Instruction::InsertValue:
+    // All operands apart from the first are constant.
+    return OpIdx == 0;
+  case Instruction::Alloca:
+    return false;
+  case Instruction::GetElementPtr:
+    if (OpIdx == 0)
+      return true;
+    gep_type_iterator It = gep_type_begin(I);
+    for (auto E = std::next(It, OpIdx); It != E; ++It)
+      if (It.isStruct())
+        return false;
+    return true;
+  }
 }

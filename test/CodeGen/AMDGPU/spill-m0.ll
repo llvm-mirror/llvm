@@ -18,13 +18,11 @@
 ; TOVMEM-DAG: s_mov_b32 [[M0_COPY:s[0-9]+]], m0
 ; TOVMEM-DAG: v_mov_b32_e32 [[SPILL_VREG:v[0-9]+]], [[M0_COPY]]
 ; TOVMEM: buffer_store_dword [[SPILL_VREG]], off, s{{\[[0-9]+:[0-9]+\]}}, s{{[0-9]+}} offset:4 ; 4-byte Folded Spill
-; TOVMEM: s_waitcnt vmcnt(0)
 
 ; TOSMEM-DAG: s_mov_b32 [[M0_COPY:s[0-9]+]], m0
 ; TOSMEM: s_add_u32 m0, s3, 0x100{{$}}
 ; TOSMEM-NOT: [[M0_COPY]]
 ; TOSMEM: s_buffer_store_dword [[M0_COPY]], s{{\[}}[[LO]]:[[HI]]], m0 ; 4-byte Folded Spill
-; TOSMEM: s_waitcnt lgkmcnt(0)
 
 ; GCN: s_cbranch_scc1 [[ENDIF:BB[0-9]+_[0-9]+]]
 
@@ -121,10 +119,10 @@ endif:                                            ; preds = %else, %if
 
 ; GCN: ; clobber m0
 
-; TOSMEM: s_mov_b32 vcc_hi, m0
+; TOSMEM: s_mov_b32 s2, m0
 ; TOSMEM: s_add_u32 m0, s3, 0x100
 ; TOSMEM-NEXT: s_buffer_store_dwordx2 s{{\[[0-9]+:[0-9]+\]}}, s{{\[[0-9]+:[0-9]+\]}}, m0 ; 8-byte Folded Spill
-; TOSMEM: s_mov_b32 m0, vcc_hi
+; TOSMEM: s_mov_b32 m0, s2
 
 ; TOSMEM: s_mov_b64 exec,
 ; TOSMEM: s_cbranch_execz
@@ -172,10 +170,10 @@ endif:
 
 ; TOSMEM: s_mov_b32 m0, -1
 
-; TOSMEM: s_mov_b32 vcc_hi, m0
+; TOSMEM: s_mov_b32 s0, m0
 ; TOSMEM: s_add_u32 m0, s3, 0x100
 ; TOSMEM: s_buffer_load_dwordx2 s{{\[[0-9]+:[0-9]+\]}}, s[88:91], m0 ; 8-byte Folded Reload
-; TOSMEM: s_mov_b32 m0, vcc_hi
+; TOSMEM: s_mov_b32 m0, s0
 ; TOSMEM: s_waitcnt lgkmcnt(0)
 
 ; TOSMEM: ds_write_b64

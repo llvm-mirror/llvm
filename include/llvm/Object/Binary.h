@@ -57,6 +57,8 @@ protected:
     ID_MachO64L, // MachO 64-bit, little endian
     ID_MachO64B, // MachO 64-bit, big endian
 
+    ID_WinRes, // Windows resource (.res) file.
+
     ID_Wasm,
 
     ID_EndObjects
@@ -93,9 +95,7 @@ public:
     return TypeID > ID_StartObjects && TypeID < ID_EndObjects;
   }
 
-  bool isSymbolic() const {
-    return isIR() || isObject();
-  }
+  bool isSymbolic() const { return isIR() || isObject() || isCOFFImportFile(); }
 
   bool isArchive() const {
     return TypeID == ID_Archive;
@@ -131,6 +131,8 @@ public:
     return !(TypeID == ID_ELF32B || TypeID == ID_ELF64B ||
              TypeID == ID_MachO32B || TypeID == ID_MachO64B);
   }
+
+  bool isWinRes() const { return TypeID == ID_WinRes; }
 
   Triple::ObjectFormatType getTripleObjectFormat() const {
     if (isCOFF())

@@ -31,21 +31,21 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/CodeGen/FaultMaps.h"
-#include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/MachineFunction.h"
-#include "llvm/CodeGen/MachineMemOperand.h"
-#include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
-#include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
+#include "llvm/CodeGen/MachineOperand.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/Passes.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include "llvm/Target/TargetInstrInfo.h"
+#include "llvm/Target/TargetSubtargetInfo.h"
 
 using namespace llvm;
 
@@ -607,8 +607,20 @@ MachineInstr *ImplicitNullChecks::insertFaultingInstr(
                  .addMBB(HandlerMBB)
                  .addImm(MI->getOpcode());
 
-  for (auto &MO : MI->uses())
-    MIB.add(MO);
+  for (auto &MO : MI->uses()) {
+    if (MO.isReg()) {
+      MachineOperand NewMO = MO;
+      if (MO.isUse()) {
+        NewMO.setIsKill(false);
+      } else {
+        assert(MO.isDef() && "Expected def or use");
+        NewMO.setIsDead(false);
+      }
+      MIB.add(NewMO);
+    } else {
+      MIB.add(MO);
+    }
+  }
 
   MIB.setMemRefs(MI->memoperands_begin(), MI->memoperands_end());
 
@@ -674,8 +686,8 @@ void ImplicitNullChecks::rewriteNullChecks(
 
 char ImplicitNullChecks::ID = 0;
 char &llvm::ImplicitNullChecksID = ImplicitNullChecks::ID;
-INITIALIZE_PASS_BEGIN(ImplicitNullChecks, "implicit-null-checks",
+INITIALIZE_PASS_BEGIN(ImplicitNullChecks, DEBUG_TYPE,
                       "Implicit null checks", false, false)
 INITIALIZE_PASS_DEPENDENCY(AAResultsWrapperPass)
-INITIALIZE_PASS_END(ImplicitNullChecks, "implicit-null-checks",
+INITIALIZE_PASS_END(ImplicitNullChecks, DEBUG_TYPE,
                     "Implicit null checks", false, false)

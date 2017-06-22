@@ -1,13 +1,14 @@
+//==- HexagonPatterns.td - Target Description for Hexagon -*- tablegen -*-===//
+//
+//                     The LLVM Compiler Infrastructure
+//
+// This file is distributed under the University of Illinois Open Source
+// License. See LICENSE.TXT for details.
+//
+//===----------------------------------------------------------------------===//
+
 // Pattern fragment that combines the value type and the register class
 // into a single parameter.
-// The pat frags in the definitions below need to have a named register,
-// otherwise i32 will be assumed regardless of the register class. The
-// name of the register does not matter.
-def I1  : PatLeaf<(i1 PredRegs:$R)>;
-def I32 : PatLeaf<(i32 IntRegs:$R)>;
-def I64 : PatLeaf<(i64 DoubleRegs:$R)>;
-def F32 : PatLeaf<(f32 IntRegs:$R)>;
-def F64 : PatLeaf<(f64 DoubleRegs:$R)>;
 
 // Pattern fragments to extract the low and high subregisters from a
 // 64-bit value.
@@ -353,7 +354,7 @@ def: Pat<(add (mul IntRegs:$src2, u32_0ImmPred:$src3), IntRegs:$src1),
          (M2_macsip IntRegs:$src1, IntRegs:$src2, imm:$src3)>;
 def: Pat<(add (mul I32:$src2, I32:$src3), I32:$src1),
          (M2_maci IntRegs:$src1, IntRegs:$src2, IntRegs:$src3)>;
-def: Pat<(add (add IntRegs:$src2, u32_0ImmPred:$src3), IntRegs:$src1),
+def: Pat<(add (add IntRegs:$src2, s32_0ImmPred:$src3), IntRegs:$src1),
          (M2_accii IntRegs:$src1, IntRegs:$src2, imm:$src3)>;
 def: Pat<(add (add I32:$src2, I32:$src3), I32:$src1),
          (M2_acci IntRegs:$src1, IntRegs:$src2, IntRegs:$src3)>;
@@ -390,48 +391,47 @@ def: T_MType_acc_pat3 <M4_or_andn, and, or>;
 def: T_MType_acc_pat3 <M4_and_andn, and, and>;
 def: T_MType_acc_pat3 <M4_xor_andn, and, xor>;
 
+// This complex pattern is really only to detect various forms of
+// sign-extension i32->i64. The selected value will be of type i64
+// whose low word is the value being extended. The high word is
+// unspecified.
+def Usxtw : ComplexPattern<i64, 1, "DetectUseSxtw", [], []>;
+
 def Aext64: PatFrag<(ops node:$Rs), (i64 (anyext node:$Rs))>;
-def Sext64: PatFrag<(ops node:$Rs), (i64 (sext node:$Rs))>;
 def Zext64: PatFrag<(ops node:$Rs), (i64 (zext node:$Rs))>;
+def Sext64: PatLeaf<(i64 Usxtw:$Rs)>;
 
-// Return true if for a 32 to 64-bit sign-extended load.
-def Sext64Ld : PatLeaf<(i64 DoubleRegs:$src1), [{
-  LoadSDNode *LD = dyn_cast<LoadSDNode>(N);
-  if (!LD)
-    return false;
-  return LD->getExtensionType() == ISD::SEXTLOAD &&
-         LD->getMemoryVT().getScalarType() == MVT::i32;
-}]>;
+def: Pat<(i32 (trunc (sra (mul Sext64:$Rs, Sext64:$Rt), (i32 32)))),
+         (M2_mpy_up (LoReg Sext64:$Rs), (LoReg Sext64:$Rt))>;
+def: Pat<(i32 (trunc (srl (mul Sext64:$Rs, Sext64:$Rt), (i32 32)))),
+         (M2_mpy_up (LoReg Sext64:$Rs), (LoReg Sext64:$Rt))>;
 
-def: Pat<(mul (Aext64 I32:$src1), (Aext64 I32:$src2)),
-         (M2_dpmpyuu_s0 IntRegs:$src1, IntRegs:$src2)>;
+def: Pat<(mul (Aext64 I32:$Rs), (Aext64 I32:$Rt)),
+         (M2_dpmpyuu_s0 I32:$Rs, I32:$Rt)>;
 
-def: Pat<(mul (Sext64 I32:$src1), (Sext64 I32:$src2)),
-         (M2_dpmpyss_s0 IntRegs:$src1, IntRegs:$src2)>;
-
-def: Pat<(mul Sext64Ld:$src1, Sext64Ld:$src2),
-         (M2_dpmpyss_s0 (LoReg DoubleRegs:$src1), (LoReg DoubleRegs:$src2))>;
+def: Pat<(mul Sext64:$Rs, Sext64:$Rt),
+         (M2_dpmpyss_s0 (LoReg Sext64:$Rs), (LoReg Sext64:$Rt))>;
 
 // Multiply and accumulate, use full result.
 // Rxx[+-]=mpy(Rs,Rt)
 
-def: Pat<(add I64:$src1, (mul (Sext64 I32:$src2), (Sext64 I32:$src3))),
-         (M2_dpmpyss_acc_s0 DoubleRegs:$src1, IntRegs:$src2, IntRegs:$src3)>;
+def: Pat<(add I64:$Rx, (mul Sext64:$Rs, Sext64:$Rt)),
+         (M2_dpmpyss_acc_s0 I64:$Rx, (LoReg Sext64:$Rs), (LoReg Sext64:$Rt))>;
 
-def: Pat<(sub I64:$src1, (mul (Sext64 I32:$src2), (Sext64 I32:$src3))),
-         (M2_dpmpyss_nac_s0 DoubleRegs:$src1, IntRegs:$src2, IntRegs:$src3)>;
+def: Pat<(sub I64:$Rx, (mul Sext64:$Rs, Sext64:$Rt)),
+         (M2_dpmpyss_nac_s0 I64:$Rx, (LoReg Sext64:$Rs), (LoReg Sext64:$Rt))>;
 
-def: Pat<(add I64:$src1, (mul (Aext64 I32:$src2), (Aext64 I32:$src3))),
-         (M2_dpmpyuu_acc_s0 DoubleRegs:$src1, IntRegs:$src2, IntRegs:$src3)>;
+def: Pat<(add I64:$Rx, (mul (Aext64 I32:$Rs), (Aext64 I32:$Rt))),
+         (M2_dpmpyuu_acc_s0 I64:$Rx, I32:$Rs, I32:$Rt)>;
 
-def: Pat<(add I64:$src1, (mul (Zext64 I32:$src2), (Zext64 I32:$src3))),
-         (M2_dpmpyuu_acc_s0 DoubleRegs:$src1, IntRegs:$src2, IntRegs:$src3)>;
+def: Pat<(add I64:$Rx, (mul (Zext64 I32:$Rs), (Zext64 I32:$Rt))),
+         (M2_dpmpyuu_acc_s0 I64:$Rx, I32:$Rs, I32:$Rt)>;
 
-def: Pat<(sub I64:$src1, (mul (Aext64 I32:$src2), (Aext64 I32:$src3))),
-         (M2_dpmpyuu_nac_s0 DoubleRegs:$src1, IntRegs:$src2, IntRegs:$src3)>;
+def: Pat<(sub I64:$Rx, (mul (Aext64 I32:$Rs), (Aext64 I32:$Rt))),
+         (M2_dpmpyuu_nac_s0 I64:$Rx, I32:$Rs, I32:$Rt)>;
 
-def: Pat<(sub I64:$src1, (mul (Zext64 I32:$src2), (Zext64 I32:$src3))),
-         (M2_dpmpyuu_nac_s0 DoubleRegs:$src1, IntRegs:$src2, IntRegs:$src3)>;
+def: Pat<(sub I64:$Rx, (mul (Zext64 I32:$Rs), (Zext64 I32:$Rt))),
+         (M2_dpmpyuu_nac_s0 I64:$Rx, I32:$Rs, I32:$Rt)>;
 
 class Storepi_pat<PatFrag Store, PatFrag Value, PatFrag Offset,
                   InstHexagon MI>
@@ -553,7 +553,8 @@ def: Storexm_simple_pat<truncstorei8,  I64, LoReg, S2_storerb_io>;
 def: Storexm_simple_pat<truncstorei16, I64, LoReg, S2_storerh_io>;
 def: Storexm_simple_pat<truncstorei32, I64, LoReg, S2_storeri_io>;
 
-def: Pat <(Sext64 I32:$src), (A2_sxtw I32:$src)>;
+def: Pat <(i64 (sext I32:$src)),            (A2_sxtw I32:$src)>;
+def: Pat <(i64 (sext_inreg I64:$src, i32)), (A2_sxtw (LoReg I64:$src))>;
 
 def: Pat<(select (i1 (setlt I32:$src, 0)), (sub 0, I32:$src), I32:$src),
          (A2_abs IntRegs:$src)>;
@@ -687,6 +688,8 @@ def I32toI1: OutPatFrag<(ops node:$Rs),
 defm: Storexm_pat<store, I1, s32_0ImmPred, I1toI32, S2_storerb_io>;
 def: Storexm_simple_pat<store, I1, I1toI32, S2_storerb_io>;
 
+def: Pat<(sra (add (sra I64:$src, u6_0ImmPred:$u6), 1), (i32 1)),
+         (S2_asr_i_p_rnd DoubleRegs:$src, imm:$u6)>, Requires<[HasV5T]>;
 def: Pat<(sra I64:$src, u6_0ImmPred:$u6),
          (S2_asr_i_p DoubleRegs:$src, imm:$u6)>;
 def: Pat<(srl I64:$src, u6_0ImmPred:$u6),
@@ -722,7 +725,8 @@ def: Pat<(i1 0), (PS_false)>;
 def: Pat<(i1 1), (PS_true)>;
 
 // Pseudo instructions.
-def SDT_SPCallSeqStart : SDCallSeqStart<[ SDTCisVT<0, i32> ]>;
+def SDT_SPCallSeqStart : SDCallSeqStart<[ SDTCisVT<0, i32>,
+                                          SDTCisVT<1, i32> ]>;
 def SDT_SPCallSeqEnd   : SDCallSeqEnd<[ SDTCisVT<0, i32>,
                                         SDTCisVT<1, i32> ]>;
 
@@ -740,8 +744,8 @@ def HexagonTCRet : SDNode<"HexagonISD::TC_RETURN", SDT_SPCall,
                           [SDNPHasChain,  SDNPOptInGlue, SDNPVariadic]>;
 
 
-def: Pat<(callseq_start timm:$amt),
-          (ADJCALLSTACKDOWN imm:$amt)>;
+def: Pat<(callseq_start timm:$amt, timm:$amt2),
+          (ADJCALLSTACKDOWN imm:$amt, imm:$amt2)>;
 def: Pat<(callseq_end timm:$amt1, timm:$amt2),
          (ADJCALLSTACKUP imm:$amt1, imm:$amt2)>;
 
@@ -798,27 +802,19 @@ def: Pat<(i64 (sext_inreg I64:$src1, i16)),
 def: Pat<(i64 (sext_inreg I64:$src1, i8)),
          (A2_sxtw (A2_sxtb (LoReg DoubleRegs:$src1)))>;
 
-// We want to prevent emitting pnot's as much as possible.
-// Map brcond with an unsupported setcc to a J2_jumpf.
-def : Pat <(brcond (i1 (setne I32:$src1, I32:$src2)),
-                        bb:$offset),
-      (J2_jumpf (C2_cmpeq I32:$src1, I32:$src2),
-                bb:$offset)>;
-
-def : Pat <(brcond (i1 (setne I32:$src1, s10_0ImmPred:$src2)),
-                        bb:$offset),
-      (J2_jumpf (C2_cmpeqi I32:$src1, s10_0ImmPred:$src2), bb:$offset)>;
-
-def: Pat<(brcond (i1 (setne I1:$src1, (i1 -1))), bb:$offset),
-         (J2_jumpf PredRegs:$src1, bb:$offset)>;
-
-def: Pat<(brcond (i1 (setne I1:$src1, (i1 0))), bb:$offset),
-         (J2_jumpt PredRegs:$src1, bb:$offset)>;
+def: Pat<(brcond (i1 (setne I32:$Rs, I32:$Rt)), bb:$offset),
+         (J2_jumpf (C2_cmpeq I32:$Rs, I32:$Rt), bb:$offset)>;
+def: Pat<(brcond (i1 (setne I32:$Rs, s10_0ImmPred:$s10)), bb:$offset),
+         (J2_jumpf (C2_cmpeqi I32:$Rs, imm:$s10), bb:$offset)>;
+def: Pat<(brcond (i1 (setne I1:$Pu, (i1 -1))), bb:$offset),
+         (J2_jumpf PredRegs:$Pu, bb:$offset)>;
+def: Pat<(brcond (i1 (setne I1:$Pu, (i1 0))), bb:$offset),
+         (J2_jumpt PredRegs:$Pu, bb:$offset)>;
 
 // cmp.lt(Rs, Imm) -> !cmp.ge(Rs, Imm) -> !cmp.gt(Rs, Imm-1)
-def: Pat<(brcond (i1 (setlt I32:$src1, s8_0ImmPred:$src2)), bb:$offset),
-        (J2_jumpf (C2_cmpgti IntRegs:$src1, (SDEC1 s8_0ImmPred:$src2)),
-                  bb:$offset)>;
+def: Pat<(brcond (i1 (setlt I32:$Rs, s8_0ImmPred:$s8)), bb:$offset),
+         (J2_jumpf (C2_cmpgti IntRegs:$Rs, (SDEC1 imm:$s8)), bb:$offset)>;
+
 
 // Map from a 64-bit select to an emulated 64-bit mux.
 // Hexagon does not support 64-bit MUXes; so emulate with combines.
@@ -872,15 +868,13 @@ def: Pat<(i1 (setne I1:$src1, I1:$src2)),
 def: Pat<(i1 (setne I64:$src1, I64:$src2)),
          (C2_not (C2_cmpeqp DoubleRegs:$src1, DoubleRegs:$src2))>;
 
-// Map cmpge(Rs, Rt) -> !cmpgt(Rs, Rt).
-// rs >= rt -> !(rt > rs).
-def : Pat <(i1 (setge I32:$src1, I32:$src2)),
-      (i1 (C2_not (i1 (C2_cmpgt I32:$src2, I32:$src1))))>;
+// rs >= rt -> rt <= rs
+def: Pat<(i1 (setge I32:$Rs, I32:$Rt)),
+         (C4_cmplte I32:$Rt, I32:$Rs)>;
 
-// cmpge(Rs, Imm) -> cmpgt(Rs, Imm-1)
 let AddedComplexity = 30 in
-def: Pat<(i1 (setge I32:$src1, s32_0ImmPred:$src2)),
-         (C2_cmpgti IntRegs:$src1, (SDEC1 s32_0ImmPred:$src2))>;
+def: Pat<(i1 (setge I32:$Rs, s32_0ImmPred:$s10)),
+         (C2_cmpgti IntRegs:$Rs, (SDEC1 imm:$s10))>;
 
 // Map cmpge(Rss, Rtt) -> !cmpgt(Rtt, Rss).
 // rss >= rtt -> !(rtt > rss).
@@ -1166,8 +1160,8 @@ multiclass MinMax_pats_p<PatFrag Op, InstHexagon Inst, InstHexagon SwapInst> {
   defm: T_MinMax_pats<Op, I64, Inst, SwapInst>;
 }
 
-def: Pat<(add (Sext64 I32:$Rs), I64:$Rt),
-         (A2_addsp IntRegs:$Rs, DoubleRegs:$Rt)>;
+def: Pat<(add Sext64:$Rs, I64:$Rt),
+         (A2_addsp (LoReg Sext64:$Rs), DoubleRegs:$Rt)>;
 
 let AddedComplexity = 200 in {
   defm: MinMax_pats_p<setge,  A2_maxp,  A2_minp>;
@@ -1481,16 +1475,22 @@ def i32in8ImmPred: PatLeaf<(i32 imm), [{
   return v == (int64_t)(int8_t)v;
 }]>;
 
+class SmallStackStore<PatFrag Store>
+  : PatFrag<(ops node:$Val, node:$Addr), (Store node:$Val, node:$Addr), [{
+  return isSmallStackStore(cast<StoreSDNode>(N));
+}]>;
 
 let AddedComplexity = 40 in {
   // Even though the offset is not extendable in the store-immediate, we
   // can still generate the fi# in the base address. If the final offset
   // is not valid for the instruction, we will replace it with a scratch
   // register.
-//  def: Storexm_fi_pat <truncstorei8, s32_0ImmPred, ToImmByte, S4_storeirb_io>;
-//  def: Storexm_fi_pat <truncstorei16, i16in8ImmPred, ToImmHalf,
-//                       S4_storeirh_io>;
-//  def: Storexm_fi_pat <store, i32in8ImmPred, ToImmWord, S4_storeiri_io>;
+  def: Storexm_fi_pat <SmallStackStore<truncstorei8>, s32_0ImmPred,
+                       ToImmByte, S4_storeirb_io>;
+  def: Storexm_fi_pat <SmallStackStore<truncstorei16>, i16in8ImmPred,
+                       ToImmHalf, S4_storeirh_io>;
+  def: Storexm_fi_pat <SmallStackStore<store>, i32in8ImmPred,
+                       ToImmWord, S4_storeiri_io>;
 
 //  defm: Storexm_fi_add_pat <truncstorei8, s32_0ImmPred, u6_0ImmPred, ToImmByte,
 //                            S4_storeirb_io>;
@@ -1646,9 +1646,14 @@ def: Pat<(i1 (setne (and I32:$Rs, I32:$Rt), I32:$Rt)),
 
 def: Pat<(add (mul I32:$Rs, u6_0ImmPred:$U6), u32_0ImmPred:$u6),
          (M4_mpyri_addi imm:$u6, IntRegs:$Rs, imm:$U6)>;
+def: Pat<(add (mul I32:$Rs, u6_0ImmPred:$U6),
+              (HexagonCONST32 tglobaladdr:$global)),
+         (M4_mpyri_addi tglobaladdr:$global, IntRegs:$Rs, imm:$U6)>;
 def: Pat<(add (mul I32:$Rs, I32:$Rt), u32_0ImmPred:$u6),
          (M4_mpyrr_addi imm:$u6, IntRegs:$Rs, IntRegs:$Rt)>;
-
+def: Pat<(add (mul I32:$Rs, I32:$Rt),
+              (HexagonCONST32 tglobaladdr:$global)),
+         (M4_mpyrr_addi tglobaladdr:$global, IntRegs:$Rs, IntRegs:$Rt)>;
 def: Pat<(add I32:$src1, (mul I32:$src3, u6_2ImmPred:$src2)),
          (M4_mpyri_addr_u2 IntRegs:$src1, imm:$src2, IntRegs:$src3)>;
 def: Pat<(add I32:$src1, (mul I32:$src3, u32_0ImmPred:$src2)),
@@ -2141,6 +2146,11 @@ let AddedComplexity  = 30 in {
   def: Storea_pat<truncstorei8,  I32, u32_0ImmPred, PS_storerbabs>;
   def: Storea_pat<truncstorei16, I32, u32_0ImmPred, PS_storerhabs>;
   def: Storea_pat<store,         I32, u32_0ImmPred, PS_storeriabs>;
+  def: Storea_pat<store,         I64, u32_0ImmPred, PS_storerdabs>;
+
+  def: Stoream_pat<truncstorei8,  I64, u32_0ImmPred, LoReg, PS_storerbabs>;
+  def: Stoream_pat<truncstorei16, I64, u32_0ImmPred, LoReg, PS_storerhabs>;
+  def: Stoream_pat<truncstorei32, I64, u32_0ImmPred, LoReg, PS_storeriabs>;
 }
 
 let AddedComplexity  = 30 in {
@@ -2149,6 +2159,19 @@ let AddedComplexity  = 30 in {
   def: Loada_pat<zextloadi8,  i32, u32_0ImmPred, PS_loadrubabs>;
   def: Loada_pat<sextloadi16, i32, u32_0ImmPred, PS_loadrhabs>;
   def: Loada_pat<zextloadi16, i32, u32_0ImmPred, PS_loadruhabs>;
+  def: Loada_pat<load,        i64, u32_0ImmPred, PS_loadrdabs>;
+
+  def: Loadam_pat<extloadi8,   i64, u32_0ImmPred, ToZext64, PS_loadrubabs>;
+  def: Loadam_pat<sextloadi8,  i64, u32_0ImmPred, ToSext64, PS_loadrbabs>;
+  def: Loadam_pat<zextloadi8,  i64, u32_0ImmPred, ToZext64, PS_loadrubabs>;
+
+  def: Loadam_pat<extloadi16,  i64, u32_0ImmPred, ToZext64, PS_loadruhabs>;
+  def: Loadam_pat<sextloadi16, i64, u32_0ImmPred, ToSext64, PS_loadrhabs>;
+  def: Loadam_pat<zextloadi16, i64, u32_0ImmPred, ToZext64, PS_loadruhabs>;
+
+  def: Loadam_pat<extloadi32,  i64, u32_0ImmPred, ToZext64, PS_loadriabs>;
+  def: Loadam_pat<sextloadi32, i64, u32_0ImmPred, ToSext64, PS_loadriabs>;
+  def: Loadam_pat<zextloadi32, i64, u32_0ImmPred, ToZext64, PS_loadriabs>;
 }
 
 // Indexed store word - global address.
@@ -2718,6 +2741,15 @@ def: Pat<(fneg F64:$Rs),
          (REG_SEQUENCE DoubleRegs,
               (S2_togglebit_i (HiReg $Rs), 31), isub_hi,
               (i32 (LoReg $Rs)), isub_lo)>;
+
+def: Pat<(mul I64:$Rss, I64:$Rtt),
+         (A2_combinew
+           (M2_maci (M2_maci (HiReg (M2_dpmpyuu_s0 (LoReg $Rss), (LoReg $Rtt))),
+                             (LoReg $Rss),
+                             (HiReg $Rtt)),
+                    (LoReg $Rtt),
+                    (HiReg $Rss)),
+           (LoReg (M2_dpmpyuu_s0 (LoReg $Rss), (LoReg $Rtt))))>;
 
 def alignedload : PatFrag<(ops node:$addr), (load $addr), [{
   return isAlignedMemNode(dyn_cast<MemSDNode>(N));

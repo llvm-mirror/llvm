@@ -15,8 +15,10 @@
 #define LLVM_OBJECTYAML_COFFYAML_H
 
 #include "llvm/ADT/Optional.h"
+#include "llvm/BinaryFormat/COFF.h"
+#include "llvm/ObjectYAML/CodeViewYAMLDebugSections.h"
+#include "llvm/ObjectYAML/CodeViewYAMLTypes.h"
 #include "llvm/ObjectYAML/YAML.h"
-#include "llvm/Support/COFF.h"
 
 namespace llvm {
 
@@ -56,6 +58,8 @@ namespace COFFYAML {
     COFF::section Header;
     unsigned Alignment = 0;
     yaml::BinaryRef SectionData;
+    std::vector<CodeViewYAML::YAMLDebugSubsection> DebugS;
+    std::vector<CodeViewYAML::LeafRecord> DebugT;
     std::vector<Relocation> Relocations;
     StringRef Name;
     Section();

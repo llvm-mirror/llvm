@@ -11,9 +11,9 @@
 #define LLVM_DEBUGINFO_DWARFACCELERATORTABLE_H
 
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/DebugInfo/DWARF/DWARFRelocMap.h"
 #include "llvm/Support/DataExtractor.h"
-#include "llvm/Support/Dwarf.h"
 #include <cstdint>
 #include <utility>
 
@@ -50,6 +50,10 @@ public:
     : AccelSection(AccelSection), StringSection(StringSection), Relocs(Relocs) {}
 
   bool extract();
+  uint32_t getNumBuckets();
+  uint32_t getNumHashes();
+  uint32_t getSizeHdr();
+  uint32_t getHeaderDataLength();
   void dump(raw_ostream &OS) const;
 };
 

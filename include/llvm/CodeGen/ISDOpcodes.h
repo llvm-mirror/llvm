@@ -264,6 +264,14 @@ namespace ISD {
     /// optimized.
     STRICT_FADD, STRICT_FSUB, STRICT_FMUL, STRICT_FDIV, STRICT_FREM,
 
+    /// Constrained versions of libm-equivalent floating point intrinsics.
+    /// These will be lowered to the equivalent non-constrained pseudo-op
+    /// (or expanded to the equivalent library call) before final selection.
+    /// They are used to limit optimizations while the DAG is being optimized.
+    STRICT_FSQRT, STRICT_FPOW, STRICT_FPOWI, STRICT_FSIN, STRICT_FCOS,
+    STRICT_FEXP, STRICT_FEXP2, STRICT_FLOG, STRICT_FLOG10, STRICT_FLOG2,
+    STRICT_FRINT, STRICT_FNEARBYINT,
+
     /// FMA - Perform a * b + c with no intermediate rounding step.
     FMA,
 
@@ -402,11 +410,21 @@ namespace ISD {
     /// then the result type must also be a vector type.
     SETCC,
 
-    /// Like SetCC, ops #0 and #1 are the LHS and RHS operands to compare, but
+    /// Like SetCC, ops #0 and #1 are the LHS and RHS operands to compare, and
     /// op #2 is a *carry value*. This operator checks the result of
     /// "LHS - RHS - Carry", and can be used to compare two wide integers:
     /// (setcce lhshi rhshi (subc lhslo rhslo) cc). Only valid for integers.
+    /// FIXME: This node is deprecated in favor of SETCCCARRY.
+    /// It is kept around for now to provide a smooth transition path
+    /// toward the use of SETCCCARRY and will eventually be removed.
     SETCCE,
+
+    /// Like SetCC, ops #0 and #1 are the LHS and RHS operands to compare, but
+    /// op #2 is a boolean indicating if there is an incoming carry. This
+    /// operator checks the result of "LHS - RHS - Carry", and can be used to
+    /// compare two wide integers: (setcce lhshi rhshi (subc lhslo rhslo) cc).
+    /// Only valid for integers.
+    SETCCCARRY,
 
     /// SHL_PARTS/SRA_PARTS/SRL_PARTS - These operators are used for expanded
     /// integer shift operations.  The operation ordering is:
@@ -644,6 +662,13 @@ namespace ISD {
     /// of a call sequence, and carry arbitrary information that target might
     /// want to know.  The first operand is a chain, the rest are specified by
     /// the target and not touched by the DAG optimizers.
+    /// Targets that may use stack to pass call arguments define additional
+    /// operands:
+    /// - size of the call frame part that must be set up within the
+    ///   CALLSEQ_START..CALLSEQ_END pair,
+    /// - part of the call frame prepared prior to CALLSEQ_START.
+    /// Both these parameters must be constants, their sum is the total call
+    /// frame size.
     /// CALLSEQ_START..CALLSEQ_END pairs may not be nested.
     CALLSEQ_START,  // Beginning of a call sequence
     CALLSEQ_END,    // End of a call sequence
@@ -782,6 +807,20 @@ namespace ISD {
     /// for some others (e.g. PowerPC, PowerPC64) that would be compile-time
     /// known nonzero constant. The only operand here is the chain.
     GET_DYNAMIC_AREA_OFFSET,
+
+    /// Generic reduction nodes. These nodes represent horizontal vector
+    /// reduction operations, producing a scalar result.
+    /// The STRICT variants perform reductions in sequential order. The first
+    /// operand is an initial scalar accumulator value, and the second operand
+    /// is the vector to reduce.
+    VECREDUCE_STRICT_FADD, VECREDUCE_STRICT_FMUL,
+    /// These reductions are non-strict, and have a single vector operand.
+    VECREDUCE_FADD, VECREDUCE_FMUL,
+    VECREDUCE_ADD, VECREDUCE_MUL,
+    VECREDUCE_AND, VECREDUCE_OR, VECREDUCE_XOR,
+    VECREDUCE_SMAX, VECREDUCE_SMIN, VECREDUCE_UMAX, VECREDUCE_UMIN,
+    /// FMIN/FMAX nodes can have flags, for NaN/NoNaN variants.
+    VECREDUCE_FMAX, VECREDUCE_FMIN,
 
     /// BUILTIN_OP_END - This must be the last enum value in this list.
     /// The target-specific pre-isel opcode values start here.

@@ -19,6 +19,7 @@
 #include "X86Subtarget.h"
 #include "X86TargetMachine.h"
 #include "llvm/CodeGen/GlobalISel/InstructionSelector.h"
+#include "llvm/CodeGen/GlobalISel/Utils.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
@@ -56,21 +57,28 @@ private:
   bool selectImpl(MachineInstr &I) const;
 
   // TODO: remove after suported by Tablegen-erated instruction selection.
-  unsigned getFAddOp(LLT &Ty, const RegisterBank &RB) const;
-  unsigned getFSubOp(LLT &Ty, const RegisterBank &RB) const;
   unsigned getLoadStoreOp(LLT &Ty, const RegisterBank &RB, unsigned Opc,
                           uint64_t Alignment) const;
 
-  bool selectBinaryOp(MachineInstr &I, MachineRegisterInfo &MRI,
-                      MachineFunction &MF) const;
   bool selectLoadStoreOp(MachineInstr &I, MachineRegisterInfo &MRI,
                          MachineFunction &MF) const;
-  bool selectFrameIndex(MachineInstr &I, MachineRegisterInfo &MRI,
-                        MachineFunction &MF) const;
+  bool selectFrameIndexOrGep(MachineInstr &I, MachineRegisterInfo &MRI,
+                             MachineFunction &MF) const;
   bool selectConstant(MachineInstr &I, MachineRegisterInfo &MRI,
                       MachineFunction &MF) const;
   bool selectTrunc(MachineInstr &I, MachineRegisterInfo &MRI,
                    MachineFunction &MF) const;
+  bool selectZext(MachineInstr &I, MachineRegisterInfo &MRI,
+                  MachineFunction &MF) const;
+  bool selectCmp(MachineInstr &I, MachineRegisterInfo &MRI,
+                 MachineFunction &MF) const;
+  bool selectUadde(MachineInstr &I, MachineRegisterInfo &MRI,
+                   MachineFunction &MF) const;
+  bool selectCopy(MachineInstr &I, MachineRegisterInfo &MRI) const;
+
+  const TargetRegisterClass *getRegClass(LLT Ty, const RegisterBank &RB) const;
+  const TargetRegisterClass *getRegClass(LLT Ty, unsigned Reg,
+                                         MachineRegisterInfo &MRI) const;
 
   const X86TargetMachine &TM;
   const X86Subtarget &STI;
@@ -109,8 +117,8 @@ X86InstructionSelector::X86InstructionSelector(const X86TargetMachine &TM,
 
 // FIXME: This should be target-independent, inferred from the types declared
 // for each class in the bank.
-static const TargetRegisterClass *
-getRegClassForTypeOnBank(LLT Ty, const RegisterBank &RB) {
+const TargetRegisterClass *
+X86InstructionSelector::getRegClass(LLT Ty, const RegisterBank &RB) const {
   if (RB.getID() == X86::GPRRegBankID) {
     if (Ty.getSizeInBits() <= 8)
       return &X86::GR8RegClass;
@@ -123,13 +131,13 @@ getRegClassForTypeOnBank(LLT Ty, const RegisterBank &RB) {
   }
   if (RB.getID() == X86::VECRRegBankID) {
     if (Ty.getSizeInBits() == 32)
-      return &X86::FR32XRegClass;
+      return STI.hasAVX512() ? &X86::FR32XRegClass : &X86::FR32RegClass;
     if (Ty.getSizeInBits() == 64)
-      return &X86::FR64XRegClass;
+      return STI.hasAVX512() ? &X86::FR64XRegClass : &X86::FR64RegClass;
     if (Ty.getSizeInBits() == 128)
-      return &X86::VR128XRegClass;
+      return STI.hasAVX512() ? &X86::VR128XRegClass : &X86::VR128RegClass;
     if (Ty.getSizeInBits() == 256)
-      return &X86::VR256XRegClass;
+      return STI.hasAVX512() ? &X86::VR256XRegClass : &X86::VR256RegClass;
     if (Ty.getSizeInBits() == 512)
       return &X86::VR512RegClass;
   }
@@ -137,10 +145,16 @@ getRegClassForTypeOnBank(LLT Ty, const RegisterBank &RB) {
   llvm_unreachable("Unknown RegBank!");
 }
 
+const TargetRegisterClass *
+X86InstructionSelector::getRegClass(LLT Ty, unsigned Reg,
+                                    MachineRegisterInfo &MRI) const {
+  const RegisterBank &RegBank = *RBI.getRegBank(Reg, MRI, TRI);
+  return getRegClass(Ty, RegBank);
+}
+
 // Set X86 Opcode and constrain DestReg.
-static bool selectCopy(MachineInstr &I, const TargetInstrInfo &TII,
-                       MachineRegisterInfo &MRI, const TargetRegisterInfo &TRI,
-                       const RegisterBankInfo &RBI) {
+bool X86InstructionSelector::selectCopy(MachineInstr &I,
+                                        MachineRegisterInfo &MRI) const {
 
   unsigned DstReg = I.getOperand(0).getReg();
   if (TargetRegisterInfo::isPhysicalRegister(DstReg)) {
@@ -167,7 +181,7 @@ static bool selectCopy(MachineInstr &I, const TargetInstrInfo &TII,
   switch (RegBank.getID()) {
   case X86::GPRRegBankID:
     assert((DstSize <= 64) && "GPRs cannot get more than 64-bit width values.");
-    RC = getRegClassForTypeOnBank(MRI.getType(DstReg), RegBank);
+    RC = getRegClass(MRI.getType(DstReg), RegBank);
 
     // Change the physical register
     if (SrcSize > DstSize && TargetRegisterInfo::isPhysicalRegister(SrcReg)) {
@@ -182,7 +196,7 @@ static bool selectCopy(MachineInstr &I, const TargetInstrInfo &TII,
     }
     break;
   case X86::VECRRegBankID:
-    RC = getRegClassForTypeOnBank(MRI.getType(DstReg), RegBank);
+    RC = getRegClass(MRI.getType(DstReg), RegBank);
     break;
   default:
     llvm_unreachable("Unknown RegBank!");
@@ -216,7 +230,7 @@ bool X86InstructionSelector::select(MachineInstr &I) const {
     // Certain non-generic instructions also need some special handling.
 
     if (I.isCopy())
-      return selectCopy(I, TII, MRI, TRI, RBI);
+      return selectCopy(I, MRI);
 
     // TODO: handle more cases - LOAD_STACK_GUARD, PHI
     return true;
@@ -226,122 +240,27 @@ bool X86InstructionSelector::select(MachineInstr &I) const {
          "Generic instruction has unexpected implicit operands\n");
 
   if (selectImpl(I))
-     return true;
+    return true;
 
   DEBUG(dbgs() << " C++ instruction selection: "; I.print(dbgs()));
 
   // TODO: This should be implemented by tblgen.
-  if (selectBinaryOp(I, MRI, MF))
-    return true;
   if (selectLoadStoreOp(I, MRI, MF))
     return true;
-  if (selectFrameIndex(I, MRI, MF))
+  if (selectFrameIndexOrGep(I, MRI, MF))
     return true;
   if (selectConstant(I, MRI, MF))
     return true;
   if (selectTrunc(I, MRI, MF))
     return true;
+  if (selectZext(I, MRI, MF))
+    return true;
+  if (selectCmp(I, MRI, MF))
+    return true;
+  if (selectUadde(I, MRI, MF))
+    return true;
 
   return false;
-}
-
-unsigned X86InstructionSelector::getFAddOp(LLT &Ty,
-                                           const RegisterBank &RB) const {
-
-  if (X86::VECRRegBankID != RB.getID())
-    return TargetOpcode::G_FADD;
-
-  if (Ty == LLT::scalar(32)) {
-    if (STI.hasAVX512()) {
-      return X86::VADDSSZrr;
-    } else if (STI.hasAVX()) {
-      return X86::VADDSSrr;
-    } else if (STI.hasSSE1()) {
-      return X86::ADDSSrr;
-    }
-  } else if (Ty == LLT::scalar(64)) {
-    if (STI.hasAVX512()) {
-      return X86::VADDSDZrr;
-    } else if (STI.hasAVX()) {
-      return X86::VADDSDrr;
-    } else if (STI.hasSSE2()) {
-      return X86::ADDSDrr;
-    }
-  } else if (Ty == LLT::vector(4, 32)) {
-    if ((STI.hasAVX512()) && (STI.hasVLX())) {
-      return X86::VADDPSZ128rr;
-    } else if (STI.hasAVX()) {
-      return X86::VADDPSrr;
-    } else if (STI.hasSSE1()) {
-      return X86::ADDPSrr;
-    }
-  }
-
-  return TargetOpcode::G_FADD;
-}
-
-unsigned X86InstructionSelector::getFSubOp(LLT &Ty,
-                                           const RegisterBank &RB) const {
-
-  if (X86::VECRRegBankID != RB.getID())
-    return TargetOpcode::G_FSUB;
-
-  if (Ty == LLT::scalar(32)) {
-    if (STI.hasAVX512()) {
-      return X86::VSUBSSZrr;
-    } else if (STI.hasAVX()) {
-      return X86::VSUBSSrr;
-    } else if (STI.hasSSE1()) {
-      return X86::SUBSSrr;
-    }
-  } else if (Ty == LLT::scalar(64)) {
-    if (STI.hasAVX512()) {
-      return X86::VSUBSDZrr;
-    } else if (STI.hasAVX()) {
-      return X86::VSUBSDrr;
-    } else if (STI.hasSSE2()) {
-      return X86::SUBSDrr;
-    }
-  } else if (Ty == LLT::vector(4, 32)) {
-    if ((STI.hasAVX512()) && (STI.hasVLX())) {
-      return X86::VSUBPSZ128rr;
-    } else if (STI.hasAVX()) {
-      return X86::VSUBPSrr;
-    } else if (STI.hasSSE1()) {
-      return X86::SUBPSrr;
-    }
-  }
-
-  return TargetOpcode::G_FSUB;
-}
-
-bool X86InstructionSelector::selectBinaryOp(MachineInstr &I,
-                                            MachineRegisterInfo &MRI,
-                                            MachineFunction &MF) const {
-
-  const unsigned DefReg = I.getOperand(0).getReg();
-  LLT Ty = MRI.getType(DefReg);
-  const RegisterBank &RB = *RBI.getRegBank(DefReg, MRI, TRI);
-
-  unsigned NewOpc = I.getOpcode();
-
-  switch (NewOpc) {
-  case TargetOpcode::G_FADD:
-    NewOpc = getFAddOp(Ty, RB);
-    break;
-  case TargetOpcode::G_FSUB:
-    NewOpc = getFSubOp(Ty, RB);
-    break;
-  default:
-    break;
-  }
-
-  if (NewOpc == I.getOpcode())
-    return false;
-
-  I.setDesc(TII.get(NewOpc));
-
-  return constrainSelectedInstRegOperands(I, TII, TRI, RBI);
 }
 
 unsigned X86InstructionSelector::getLoadStoreOp(LLT &Ty, const RegisterBank &RB,
@@ -393,8 +312,56 @@ unsigned X86InstructionSelector::getLoadStoreOp(LLT &Ty, const RegisterBank &RB,
                               : HasAVX512
                                     ? X86::VMOVUPSZ128mr_NOVLX
                                     : HasAVX ? X86::VMOVUPSmr : X86::MOVUPSmr);
+  } else if (Ty.isVector() && Ty.getSizeInBits() == 256) {
+    if (Alignment >= 32)
+      return Isload ? (HasVLX ? X86::VMOVAPSZ256rm
+                              : HasAVX512 ? X86::VMOVAPSZ256rm_NOVLX
+                                          : X86::VMOVAPSYrm)
+                    : (HasVLX ? X86::VMOVAPSZ256mr
+                              : HasAVX512 ? X86::VMOVAPSZ256mr_NOVLX
+                                          : X86::VMOVAPSYmr);
+    else
+      return Isload ? (HasVLX ? X86::VMOVUPSZ256rm
+                              : HasAVX512 ? X86::VMOVUPSZ256rm_NOVLX
+                                          : X86::VMOVUPSYrm)
+                    : (HasVLX ? X86::VMOVUPSZ256mr
+                              : HasAVX512 ? X86::VMOVUPSZ256mr_NOVLX
+                                          : X86::VMOVUPSYmr);
+  } else if (Ty.isVector() && Ty.getSizeInBits() == 512) {
+    if (Alignment >= 64)
+      return Isload ? X86::VMOVAPSZrm : X86::VMOVAPSZmr;
+    else
+      return Isload ? X86::VMOVUPSZrm : X86::VMOVUPSZmr;
   }
   return Opc;
+}
+
+// Fill in an address from the given instruction.
+void X86SelectAddress(const MachineInstr &I, const MachineRegisterInfo &MRI,
+                      X86AddressMode &AM) {
+
+  assert(I.getOperand(0).isReg() && "unsupported opperand.");
+  assert(MRI.getType(I.getOperand(0).getReg()).isPointer() &&
+         "unsupported type.");
+
+  if (I.getOpcode() == TargetOpcode::G_GEP) {
+    if (auto COff = getConstantVRegVal(I.getOperand(2).getReg(), MRI)) {
+      int64_t Imm = *COff;
+      if (isInt<32>(Imm)) { // Check for displacement overflow.
+        AM.Disp = static_cast<int32_t>(Imm);
+        AM.Base.Reg = I.getOperand(1).getReg();
+        return;
+      }
+    }
+  } else if (I.getOpcode() == TargetOpcode::G_FRAME_INDEX) {
+    AM.Base.FrameIndex = I.getOperand(1).getIndex();
+    AM.BaseType = X86AddressMode::FrameIndexBase;
+    return;
+  }
+
+  // Default behavior.
+  AM.Base.Reg = I.getOperand(0).getReg();
+  return;
 }
 
 bool X86InstructionSelector::selectLoadStoreOp(MachineInstr &I,
@@ -411,43 +378,63 @@ bool X86InstructionSelector::selectLoadStoreOp(MachineInstr &I,
   const RegisterBank &RB = *RBI.getRegBank(DefReg, MRI, TRI);
 
   auto &MemOp = **I.memoperands_begin();
+  if (MemOp.getOrdering() != AtomicOrdering::NotAtomic) {
+    DEBUG(dbgs() << "Atomic load/store not supported yet\n");
+    return false;
+  }
+
   unsigned NewOpc = getLoadStoreOp(Ty, RB, Opc, MemOp.getAlignment());
   if (NewOpc == Opc)
     return false;
 
+  X86AddressMode AM;
+  X86SelectAddress(*MRI.getVRegDef(I.getOperand(1).getReg()), MRI, AM);
+
   I.setDesc(TII.get(NewOpc));
   MachineInstrBuilder MIB(MF, I);
-  if (Opc == TargetOpcode::G_LOAD)
-    addOffset(MIB, 0);
-  else {
+  if (Opc == TargetOpcode::G_LOAD) {
+    I.RemoveOperand(1);
+    addFullAddress(MIB, AM);
+  } else {
     // G_STORE (VAL, Addr), X86Store instruction (Addr, VAL)
+    I.RemoveOperand(1);
     I.RemoveOperand(0);
-    addOffset(MIB, 0).addUse(DefReg);
+    addFullAddress(MIB, AM).addUse(DefReg);
   }
   return constrainSelectedInstRegOperands(I, TII, TRI, RBI);
 }
 
-bool X86InstructionSelector::selectFrameIndex(MachineInstr &I,
-                                              MachineRegisterInfo &MRI,
-                                              MachineFunction &MF) const {
-  if (I.getOpcode() != TargetOpcode::G_FRAME_INDEX)
+bool X86InstructionSelector::selectFrameIndexOrGep(MachineInstr &I,
+                                                   MachineRegisterInfo &MRI,
+                                                   MachineFunction &MF) const {
+  unsigned Opc = I.getOpcode();
+
+  if (Opc != TargetOpcode::G_FRAME_INDEX && Opc != TargetOpcode::G_GEP)
     return false;
 
   const unsigned DefReg = I.getOperand(0).getReg();
   LLT Ty = MRI.getType(DefReg);
 
-  // Use LEA to calculate frame index.
+  // Use LEA to calculate frame index and GEP
   unsigned NewOpc;
   if (Ty == LLT::pointer(0, 64))
     NewOpc = X86::LEA64r;
   else if (Ty == LLT::pointer(0, 32))
     NewOpc = STI.isTarget64BitILP32() ? X86::LEA64_32r : X86::LEA32r;
   else
-    llvm_unreachable("Can't select G_FRAME_INDEX, unsupported type.");
+    llvm_unreachable("Can't select G_FRAME_INDEX/G_GEP, unsupported type.");
 
   I.setDesc(TII.get(NewOpc));
   MachineInstrBuilder MIB(MF, I);
-  addOffset(MIB, 0);
+
+  if (Opc == TargetOpcode::G_FRAME_INDEX) {
+    addOffset(MIB, 0);
+  } else {
+    MachineOperand &InxOp = I.getOperand(2);
+    I.addOperand(InxOp);        // set IndexReg
+    InxOp.ChangeToImmediate(1); // set Scale
+    MIB.addImm(0).addReg(0);
+  }
 
   return constrainSelectedInstRegOperands(I, TII, TRI, RBI);
 }
@@ -522,13 +509,29 @@ bool X86InstructionSelector::selectTrunc(MachineInstr &I,
   if (DstRB.getID() != X86::GPRRegBankID)
     return false;
 
-  const TargetRegisterClass *DstRC = getRegClassForTypeOnBank(DstTy, DstRB);
+  const TargetRegisterClass *DstRC = getRegClass(DstTy, DstRB);
   if (!DstRC)
     return false;
 
-  const TargetRegisterClass *SrcRC = getRegClassForTypeOnBank(SrcTy, SrcRB);
+  const TargetRegisterClass *SrcRC = getRegClass(SrcTy, SrcRB);
   if (!SrcRC)
     return false;
+
+  unsigned SubIdx;
+  if (DstRC == SrcRC) {
+    // Nothing to be done
+    SubIdx = X86::NoSubRegister;
+  } else if (DstRC == &X86::GR32RegClass) {
+    SubIdx = X86::sub_32bit;
+  } else if (DstRC == &X86::GR16RegClass) {
+    SubIdx = X86::sub_16bit;
+  } else if (DstRC == &X86::GR8RegClass) {
+    SubIdx = X86::sub_8bit;
+  } else {
+    return false;
+  }
+
+  SrcRC = TRI.getSubClassWithSubReg(SrcRC, SubIdx);
 
   if (!RBI.constrainGenericRegister(SrcReg, *SrcRC, MRI) ||
       !RBI.constrainGenericRegister(DstReg, *DstRC, MRI)) {
@@ -536,19 +539,167 @@ bool X86InstructionSelector::selectTrunc(MachineInstr &I,
     return false;
   }
 
-  if (DstRC == SrcRC) {
-    // Nothing to be done
-  } else if (DstRC == &X86::GR32RegClass) {
-    I.getOperand(1).setSubReg(X86::sub_32bit);
-  } else if (DstRC == &X86::GR16RegClass) {
-    I.getOperand(1).setSubReg(X86::sub_16bit);
-  } else if (DstRC == &X86::GR8RegClass) {
-    I.getOperand(1).setSubReg(X86::sub_8bit);
-  } else {
-    return false;
-  }
+  I.getOperand(1).setSubReg(SubIdx);
 
   I.setDesc(TII.get(X86::COPY));
+  return true;
+}
+
+bool X86InstructionSelector::selectZext(MachineInstr &I,
+                                        MachineRegisterInfo &MRI,
+                                        MachineFunction &MF) const {
+  if (I.getOpcode() != TargetOpcode::G_ZEXT)
+    return false;
+
+  const unsigned DstReg = I.getOperand(0).getReg();
+  const unsigned SrcReg = I.getOperand(1).getReg();
+
+  const LLT DstTy = MRI.getType(DstReg);
+  const LLT SrcTy = MRI.getType(SrcReg);
+
+  if (SrcTy == LLT::scalar(1)) {
+
+    unsigned AndOpc;
+    if (DstTy == LLT::scalar(32))
+      AndOpc = X86::AND32ri8;
+    else if (DstTy == LLT::scalar(64))
+      AndOpc = X86::AND64ri8;
+    else
+      return false;
+
+    unsigned DefReg =
+        MRI.createVirtualRegister(getRegClass(DstTy, DstReg, MRI));
+
+    BuildMI(*I.getParent(), I, I.getDebugLoc(),
+            TII.get(TargetOpcode::SUBREG_TO_REG), DefReg)
+        .addImm(0)
+        .addReg(SrcReg)
+        .addImm(X86::sub_8bit);
+
+    MachineInstr &AndInst =
+        *BuildMI(*I.getParent(), I, I.getDebugLoc(), TII.get(AndOpc), DstReg)
+             .addReg(DefReg)
+             .addImm(1);
+
+    constrainSelectedInstRegOperands(AndInst, TII, TRI, RBI);
+
+    I.eraseFromParent();
+    return true;
+  }
+
+  return false;
+}
+
+bool X86InstructionSelector::selectCmp(MachineInstr &I,
+                                       MachineRegisterInfo &MRI,
+                                       MachineFunction &MF) const {
+  if (I.getOpcode() != TargetOpcode::G_ICMP)
+    return false;
+
+  X86::CondCode CC;
+  bool SwapArgs;
+  std::tie(CC, SwapArgs) = X86::getX86ConditionCode(
+      (CmpInst::Predicate)I.getOperand(1).getPredicate());
+  unsigned OpSet = X86::getSETFromCond(CC);
+
+  unsigned LHS = I.getOperand(2).getReg();
+  unsigned RHS = I.getOperand(3).getReg();
+
+  if (SwapArgs)
+    std::swap(LHS, RHS);
+
+  unsigned OpCmp;
+  LLT Ty = MRI.getType(LHS);
+
+  switch (Ty.getSizeInBits()) {
+  default:
+    return false;
+  case 8:
+    OpCmp = X86::CMP8rr;
+    break;
+  case 16:
+    OpCmp = X86::CMP16rr;
+    break;
+  case 32:
+    OpCmp = X86::CMP32rr;
+    break;
+  case 64:
+    OpCmp = X86::CMP64rr;
+    break;
+  }
+
+  MachineInstr &CmpInst =
+      *BuildMI(*I.getParent(), I, I.getDebugLoc(), TII.get(OpCmp))
+           .addReg(LHS)
+           .addReg(RHS);
+
+  MachineInstr &SetInst = *BuildMI(*I.getParent(), I, I.getDebugLoc(),
+                                   TII.get(OpSet), I.getOperand(0).getReg());
+
+  constrainSelectedInstRegOperands(CmpInst, TII, TRI, RBI);
+  constrainSelectedInstRegOperands(SetInst, TII, TRI, RBI);
+
+  I.eraseFromParent();
+  return true;
+}
+
+bool X86InstructionSelector::selectUadde(MachineInstr &I,
+                                         MachineRegisterInfo &MRI,
+                                         MachineFunction &MF) const {
+  if (I.getOpcode() != TargetOpcode::G_UADDE)
+    return false;
+
+  const unsigned DstReg = I.getOperand(0).getReg();
+  const unsigned CarryOutReg = I.getOperand(1).getReg();
+  const unsigned Op0Reg = I.getOperand(2).getReg();
+  const unsigned Op1Reg = I.getOperand(3).getReg();
+  unsigned CarryInReg = I.getOperand(4).getReg();
+
+  const LLT DstTy = MRI.getType(DstReg);
+
+  if (DstTy != LLT::scalar(32))
+    return false;
+
+  // find CarryIn def instruction.
+  MachineInstr *Def = MRI.getVRegDef(CarryInReg);
+  while (Def->getOpcode() == TargetOpcode::G_TRUNC) {
+    CarryInReg = Def->getOperand(1).getReg();
+    Def = MRI.getVRegDef(CarryInReg);
+  }
+
+  unsigned Opcode;
+  if (Def->getOpcode() == TargetOpcode::G_UADDE) {
+    // carry set by prev ADD.
+
+    BuildMI(*I.getParent(), I, I.getDebugLoc(), TII.get(X86::COPY), X86::EFLAGS)
+        .addReg(CarryInReg);
+
+    if (!RBI.constrainGenericRegister(CarryInReg, X86::GR32RegClass, MRI))
+      return false;
+
+    Opcode = X86::ADC32rr;
+  } else if (auto val = getConstantVRegVal(CarryInReg, MRI)) {
+    // carry is constant, support only 0.
+    if (*val != 0)
+      return false;
+
+    Opcode = X86::ADD32rr;
+  } else
+    return false;
+
+  MachineInstr &AddInst =
+      *BuildMI(*I.getParent(), I, I.getDebugLoc(), TII.get(Opcode), DstReg)
+           .addReg(Op0Reg)
+           .addReg(Op1Reg);
+
+  BuildMI(*I.getParent(), I, I.getDebugLoc(), TII.get(X86::COPY), CarryOutReg)
+      .addReg(X86::EFLAGS);
+
+  if (!constrainSelectedInstRegOperands(AddInst, TII, TRI, RBI) ||
+      !RBI.constrainGenericRegister(CarryOutReg, X86::GR32RegClass, MRI))
+    return false;
+
+  I.eraseFromParent();
   return true;
 }
 

@@ -15,8 +15,8 @@
 #define LLVM_LIB_TARGET_AMDGPU_SIMACHINEFUNCTIONINFO_H
 
 #include "AMDGPUMachineFunction.h"
-#include "SIRegisterInfo.h"
 #include "MCTargetDesc/AMDGPUMCTargetDesc.h"
+#include "SIRegisterInfo.h"
 #include "llvm/CodeGen/PseudoSourceValue.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -388,9 +388,8 @@ public:
   void setScratchWaveOffsetReg(unsigned Reg) {
     assert(Reg != AMDGPU::NoRegister && "Should never be unset");
     ScratchWaveOffsetReg = Reg;
-
-    // FIXME: Only for entry functions.
-    FrameOffsetReg = ScratchWaveOffsetReg;
+    if (isEntryFunction())
+      FrameOffsetReg = ScratchWaveOffsetReg;
   }
 
   unsigned getQueuePtrUserSGPR() const {

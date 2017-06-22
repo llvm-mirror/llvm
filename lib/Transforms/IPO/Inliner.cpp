@@ -502,7 +502,7 @@ inlineCallsImpl(CallGraphSCC &SCC, CallGraph &CG,
         std::swap(CallSites[i--], CallSites[--FirstCallInSCC]);
 
   InlinedArrayAllocasTy InlinedArrayAllocas;
-  InlineFunctionInfo InlineInfo(&CG, &GetAssumptionCache);
+  InlineFunctionInfo InlineInfo(&CG, &GetAssumptionCache, PSI);
 
   // Now that we have all of the call sites, loop over them and inline them if
   // it looks profitable to do so.
@@ -519,44 +519,51 @@ inlineCallsImpl(CallGraphSCC &SCC, CallGraph &CG,
       Function *Caller = CS.getCaller();
       Function *Callee = CS.getCalledFunction();
 
-      // If this call site is dead and it is to a readonly function, we should
-      // just delete the call instead of trying to inline it, regardless of
-      // size.  This happens because IPSCCP propagates the result out of the
-      // call and then we're left with the dead call.
-      if (isInstructionTriviallyDead(CS.getInstruction(), &TLI)) {
-        DEBUG(dbgs() << "    -> Deleting dead call: " << *CS.getInstruction()
-                     << "\n");
-        // Update the call graph by deleting the edge from Callee to Caller.
-        CG[Caller]->removeCallEdgeFor(CS);
-        CS.getInstruction()->eraseFromParent();
-        ++NumCallsDeleted;
-      } else {
-        // We can only inline direct calls to non-declarations.
-        if (!Callee || Callee->isDeclaration())
-          continue;
+      // We can only inline direct calls to non-declarations.
+      if (!Callee || Callee->isDeclaration())
+        continue;
 
+      Instruction *Instr = CS.getInstruction();
+
+      bool IsTriviallyDead = isInstructionTriviallyDead(Instr, &TLI);
+
+      int InlineHistoryID;
+      if (!IsTriviallyDead) {
         // If this call site was obtained by inlining another function, verify
         // that the include path for the function did not include the callee
         // itself.  If so, we'd be recursively inlining the same function,
         // which would provide the same callsites, which would cause us to
         // infinitely inline.
-        int InlineHistoryID = CallSites[CSi].second;
+        InlineHistoryID = CallSites[CSi].second;
         if (InlineHistoryID != -1 &&
             InlineHistoryIncludes(Callee, InlineHistoryID, InlineHistory))
           continue;
+      }
 
+      // FIXME for new PM: because of the old PM we currently generate ORE and
+      // in turn BFI on demand.  With the new PM, the ORE dependency should
+      // just become a regular analysis dependency.
+      OptimizationRemarkEmitter ORE(Caller);
+
+      // If the policy determines that we should inline this function,
+      // delete the call instead.
+      if (!shouldInline(CS, GetInlineCost, ORE))
+        continue;
+
+      // If this call site is dead and it is to a readonly function, we should
+      // just delete the call instead of trying to inline it, regardless of
+      // size.  This happens because IPSCCP propagates the result out of the
+      // call and then we're left with the dead call.
+      if (IsTriviallyDead) {
+        DEBUG(dbgs() << "    -> Deleting dead call: " << *Instr << "\n");
+        // Update the call graph by deleting the edge from Callee to Caller.
+        CG[Caller]->removeCallEdgeFor(CS);
+        Instr->eraseFromParent();
+        ++NumCallsDeleted;
+      } else {
         // Get DebugLoc to report. CS will be invalid after Inliner.
-        DebugLoc DLoc = CS.getInstruction()->getDebugLoc();
+        DebugLoc DLoc = Instr->getDebugLoc();
         BasicBlock *Block = CS.getParent();
-        // FIXME for new PM: because of the old PM we currently generate ORE and
-        // in turn BFI on demand.  With the new PM, the ORE dependency should
-        // just become a regular analysis dependency.
-        OptimizationRemarkEmitter ORE(Caller);
-
-        // If the policy determines that we should inline this function,
-        // try to do so.
-        if (!shouldInline(CS, GetInlineCost, ORE))
-          continue;
 
         // Attempt to inline the function.
         using namespace ore;
@@ -872,7 +879,7 @@ PreservedAnalyses InlinerPass::run(LazyCallGraph::SCC &InitialC,
       // Setup the data structure used to plumb customization into the
       // `InlineFunction` routine.
       InlineFunctionInfo IFI(
-          /*cg=*/nullptr, &GetAssumptionCache,
+          /*cg=*/nullptr, &GetAssumptionCache, PSI,
           &FAM.getResult<BlockFrequencyAnalysis>(*(CS.getCaller())),
           &FAM.getResult<BlockFrequencyAnalysis>(Callee));
 

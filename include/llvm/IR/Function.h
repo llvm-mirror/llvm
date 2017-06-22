@@ -1,4 +1,4 @@
-//===-- llvm/Function.h - Class to represent a single function --*- C++ -*-===//
+//===- llvm/Function.h - Class to represent a single function ---*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -19,18 +19,22 @@
 #define LLVM_IR_FUNCTION_H
 
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/Twine.h"
 #include "llvm/ADT/ilist_node.h"
 #include "llvm/ADT/iterator_range.h"
-#include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CallingConv.h"
+#include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/GlobalObject.h"
+#include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/OperandTraits.h"
 #include "llvm/IR/SymbolTableListTraits.h"
 #include "llvm/IR/Value.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/Compiler.h"
 #include <cassert>
 #include <cstddef>
@@ -40,27 +44,31 @@
 
 namespace llvm {
 
-template <typename T> class Optional;
 class AssemblyAnnotationWriter;
-class FunctionType;
-class LLVMContext;
+class Constant;
 class DISubprogram;
+class LLVMContext;
+class Module;
+template <typename T> class Optional;
+class raw_ostream;
+class Type;
+class User;
 
 class Function : public GlobalObject, public ilist_node<Function> {
 public:
-  typedef SymbolTableList<BasicBlock> BasicBlockListType;
+  using BasicBlockListType = SymbolTableList<BasicBlock>;
 
   // BasicBlock iterators...
-  typedef BasicBlockListType::iterator iterator;
-  typedef BasicBlockListType::const_iterator const_iterator;
+  using iterator = BasicBlockListType::iterator;
+  using const_iterator = BasicBlockListType::const_iterator;
 
-  typedef Argument *arg_iterator;
-  typedef const Argument *const_arg_iterator;
+  using arg_iterator = Argument *;
+  using const_arg_iterator = const Argument *;
 
 private:
   // Important things that make up a function!
-  BasicBlockListType  BasicBlocks;        ///< The basic blocks
-  mutable Argument *Arguments;            ///< The formal arguments
+  BasicBlockListType BasicBlocks;         ///< The basic blocks
+  mutable Argument *Arguments = nullptr;  ///< The formal arguments
   size_t NumArgs;
   std::unique_ptr<ValueSymbolTable>
       SymTab;                             ///< Symbol table of args/instructions
@@ -115,7 +123,7 @@ private:
 public:
   Function(const Function&) = delete;
   void operator=(const Function&) = delete;
-  ~Function() override;
+  ~Function();
 
   static Function *Create(FunctionType *Ty, LinkageTypes Linkage,
                           const Twine &N = "", Module *M = nullptr) {
@@ -124,10 +132,12 @@ public:
 
   // Provide fast operand accessors.
   DECLARE_TRANSPARENT_OPERAND_ACCESSORS(Value);
+
   /// Returns the FunctionType for me.
   FunctionType *getFunctionType() const {
     return cast<FunctionType>(getValueType());
   }
+
   /// Returns the type of the ret val.
   Type *getReturnType() const { return getFunctionType()->getReturnType(); }
 
@@ -211,7 +221,7 @@ public:
 
   /// @brief Remove function attribute from this function.
   void removeFnAttr(StringRef Kind) {
-    setAttributes(AttributeSets.removeAttribute(
+    setAttributes(getAttributes().removeAttribute(
         getContext(), AttributeList::FunctionIndex, Kind));
   }
 
@@ -281,6 +291,15 @@ public:
   /// @brief adds the attributes to the list of attributes.
   void addAttributes(unsigned i, const AttrBuilder &Attrs);
 
+  /// @brief adds the attribute to the list of attributes for the given arg.
+  void addParamAttr(unsigned ArgNo, Attribute::AttrKind Kind);
+
+  /// @brief adds the attribute to the list of attributes for the given arg.
+  void addParamAttr(unsigned ArgNo, Attribute Attr);
+
+  /// @brief adds the attributes to the list of attributes for the given arg.
+  void addParamAttrs(unsigned ArgNo, const AttrBuilder &Attrs);
+
   /// @brief removes the attribute from the list of attributes.
   void removeAttribute(unsigned i, Attribute::AttrKind Kind);
 
@@ -289,6 +308,15 @@ public:
 
   /// @brief removes the attributes from the list of attributes.
   void removeAttributes(unsigned i, const AttrBuilder &Attrs);
+
+  /// @brief removes the attribute from the list of attributes.
+  void removeParamAttr(unsigned ArgNo, Attribute::AttrKind Kind);
+
+  /// @brief removes the attribute from the list of attributes.
+  void removeParamAttr(unsigned ArgNo, StringRef Kind);
+
+  /// @brief removes the attribute from the list of attributes.
+  void removeParamAttrs(unsigned ArgNo, const AttrBuilder &Attrs);
 
   /// @brief check if an attributes is in the list of attributes.
   bool hasAttribute(unsigned i, Attribute::AttrKind Kind) const {
@@ -311,9 +339,17 @@ public:
   /// @brief adds the dereferenceable attribute to the list of attributes.
   void addDereferenceableAttr(unsigned i, uint64_t Bytes);
 
+  /// @brief adds the dereferenceable attribute to the list of attributes for
+  /// the given arg.
+  void addDereferenceableParamAttr(unsigned ArgNo, uint64_t Bytes);
+
   /// @brief adds the dereferenceable_or_null attribute to the list of
   /// attributes.
   void addDereferenceableOrNullAttr(unsigned i, uint64_t Bytes);
+
+  /// @brief adds the dereferenceable_or_null attribute to the list of
+  /// attributes for the given arg.
+  void addDereferenceableOrNullParamAttr(unsigned ArgNo, uint64_t Bytes);
 
   /// @brief Extract the alignment for a call or parameter (0=unknown).
   unsigned getParamAlignment(unsigned ArgNo) const {
@@ -327,11 +363,24 @@ public:
     return AttributeSets.getDereferenceableBytes(i);
   }
 
+  /// @brief Extract the number of dereferenceable bytes for a parameter.
+  /// @param ArgNo Index of an argument, with 0 being the first function arg.
+  uint64_t getParamDereferenceableBytes(unsigned ArgNo) const {
+    return AttributeSets.getParamDereferenceableBytes(ArgNo);
+  }
+
   /// @brief Extract the number of dereferenceable_or_null bytes for a call or
   /// parameter (0=unknown).
   /// @param i AttributeList index, referring to a return value or argument.
   uint64_t getDereferenceableOrNullBytes(unsigned i) const {
     return AttributeSets.getDereferenceableOrNullBytes(i);
+  }
+
+  /// @brief Extract the number of dereferenceable_or_null bytes for a
+  /// parameter.
+  /// @param ArgNo AttributeList ArgNo, referring to an argument.
+  uint64_t getParamDereferenceableOrNullBytes(unsigned ArgNo) const {
+    return AttributeSets.getParamDereferenceableOrNullBytes(ArgNo);
   }
 
   /// @brief Determine if the function does not access memory.
@@ -458,36 +507,12 @@ public:
 
   /// @brief Determine if the parameter or return value is marked with NoAlias
   /// attribute.
-  /// @param n The parameter to check. 1 is the first parameter, 0 is the return
-  bool doesNotAlias(unsigned n) const {
-    return AttributeSets.hasAttribute(n, Attribute::NoAlias);
+  bool returnDoesNotAlias() const {
+    return AttributeSets.hasAttribute(AttributeList::ReturnIndex,
+                                      Attribute::NoAlias);
   }
-  void setDoesNotAlias(unsigned n) {
-    addAttribute(n, Attribute::NoAlias);
-  }
-
-  /// @brief Determine if the parameter can be captured.
-  /// @param n The parameter to check. 1 is the first parameter, 0 is the return
-  bool doesNotCapture(unsigned n) const {
-    return AttributeSets.hasAttribute(n, Attribute::NoCapture);
-  }
-  void setDoesNotCapture(unsigned n) {
-    addAttribute(n, Attribute::NoCapture);
-  }
-
-  bool doesNotAccessMemory(unsigned n) const {
-    return AttributeSets.hasAttribute(n, Attribute::ReadNone);
-  }
-  void setDoesNotAccessMemory(unsigned n) {
-    addAttribute(n, Attribute::ReadNone);
-  }
-
-  bool onlyReadsMemory(unsigned n) const {
-    return doesNotAccessMemory(n) ||
-      AttributeSets.hasAttribute(n, Attribute::ReadOnly);
-  }
-  void setOnlyReadsMemory(unsigned n) {
-    addAttribute(n, Attribute::ReadOnly);
+  void setReturnDoesNotAlias() {
+    addAttribute(AttributeList::ReturnIndex, Attribute::NoAlias);
   }
 
   /// Optimize this function for minimum size (-Oz).
@@ -500,7 +525,7 @@ public:
 
   /// copyAttributesFrom - copy all additional attributes (those not needed to
   /// create a Function) from the Function Src to this one.
-  void copyAttributesFrom(const GlobalValue *Src) override;
+  void copyAttributesFrom(const Function *Src);
 
   /// deleteBody - This method deletes the body of the function, and converts
   /// the linkage to external.
@@ -513,12 +538,12 @@ public:
   /// removeFromParent - This method unlinks 'this' from the containing module,
   /// but does not delete it.
   ///
-  void removeFromParent() override;
+  void removeFromParent();
 
   /// eraseFromParent - This method unlinks 'this' from the containing module
   /// and deletes it.
   ///
-  void eraseFromParent() override;
+  void eraseFromParent();
 
   /// Steal arguments from another function.
   ///

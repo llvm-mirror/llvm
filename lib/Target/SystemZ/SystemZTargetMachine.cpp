@@ -7,14 +7,14 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "SystemZTargetMachine.h"
 #include "MCTargetDesc/SystemZMCTargetDesc.h"
 #include "SystemZ.h"
 #include "SystemZMachineScheduler.h"
-#include "SystemZTargetMachine.h"
 #include "SystemZTargetTransformInfo.h"
 #include "llvm/ADT/Optional.h"
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/CodeGen/Passes.h"
@@ -119,7 +119,7 @@ namespace {
 /// SystemZ Code Generator Pass Configuration Options.
 class SystemZPassConfig : public TargetPassConfig {
 public:
-  SystemZPassConfig(SystemZTargetMachine *TM, PassManagerBase &PM)
+  SystemZPassConfig(SystemZTargetMachine &TM, PassManagerBase &PM)
     : TargetPassConfig(TM, PM) {}
 
   SystemZTargetMachine &getSystemZTargetMachine() const {
@@ -212,7 +212,7 @@ void SystemZPassConfig::addPreEmitPass() {
 }
 
 TargetPassConfig *SystemZTargetMachine::createPassConfig(PassManagerBase &PM) {
-  return new SystemZPassConfig(this, PM);
+  return new SystemZPassConfig(*this, PM);
 }
 
 TargetIRAnalysis SystemZTargetMachine::getTargetIRAnalysis() {

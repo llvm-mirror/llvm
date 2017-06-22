@@ -19,8 +19,9 @@ class DWARFCompileUnit : public DWARFUnit {
 public:
   DWARFCompileUnit(DWARFContext &Context, const DWARFSection &Section,
                    const DWARFDebugAbbrev *DA, const DWARFSection *RS,
-                   StringRef SS, StringRef SOS, StringRef AOS, StringRef LS,
-                   bool LE, bool IsDWO, const DWARFUnitSectionBase &UnitSection,
+                   StringRef SS, const DWARFSection &SOS,
+                   const DWARFSection *AOS, StringRef LS, bool LE, bool IsDWO,
+                   const DWARFUnitSectionBase &UnitSection,
                    const DWARFUnitIndex::Entry *Entry)
       : DWARFUnit(Context, Section, DA, RS, SS, SOS, AOS, LS, LE, IsDWO,
                   UnitSection, Entry) {}
@@ -28,7 +29,7 @@ public:
   // VTable anchor.
   ~DWARFCompileUnit() override;
 
-  void dump(raw_ostream &OS);
+  void dump(raw_ostream &OS, DIDumpOptions DumpOpts);
 
   static const DWARFSectionKind Section = DW_SECT_INFO;
 };

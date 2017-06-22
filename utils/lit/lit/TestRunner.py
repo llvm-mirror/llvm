@@ -506,13 +506,9 @@ def _executeShCmd(cmd, shenv, results, timeoutHelper):
             cmd.commands[i], out, err, res, timeoutHelper.timeoutReached(),
             output_files))
         if cmd.pipe_err:
-            # Python treats the exit code as a signed char.
-            if exitCode is None:
+            # Take the last failing exit code from the pipeline.
+            if not exitCode or res != 0:
                 exitCode = res
-            elif res < 0:
-                exitCode = min(exitCode, res)
-            else:
-                exitCode = max(exitCode, res)
         else:
             exitCode = res
 
@@ -1060,7 +1056,7 @@ def _runShTest(test, litConfig, useExternalSh, script, tmpBase):
 def executeShTest(test, litConfig, useExternalSh,
                   extra_substitutions=[]):
     if test.config.unsupported:
-        return (Test.UNSUPPORTED, 'Test is unsupported')
+        return lit.Test.Result(Test.UNSUPPORTED, 'Test is unsupported')
 
     script = parseIntegratedTestScript(test)
     if isinstance(script, lit.Test.Result):

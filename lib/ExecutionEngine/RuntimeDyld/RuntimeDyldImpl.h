@@ -28,8 +28,8 @@
 #include "llvm/Support/Mutex.h"
 #include "llvm/Support/SwapByteOrder.h"
 #include <map>
-#include <unordered_map>
 #include <system_error>
+#include <unordered_map>
 
 using namespace llvm;
 using namespace llvm::object;
@@ -515,7 +515,7 @@ public:
 
   virtual void registerEHFrames();
 
-  virtual void deregisterEHFrames();
+  void deregisterEHFrames();
 
   virtual Error finalizeLoad(const ObjectFile &ObjImg,
                              ObjSectionToIDMap &SectionMap) {

@@ -12,7 +12,8 @@
 
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/DebugInfo/CodeView/CVRecord.h"
-#include "llvm/DebugInfo/CodeView/ModuleDebugFragmentRecord.h"
+#include "llvm/DebugInfo/CodeView/DebugChecksumsSubsection.h"
+#include "llvm/DebugInfo/CodeView/DebugSubsectionRecord.h"
 #include "llvm/DebugInfo/CodeView/SymbolRecord.h"
 #include "llvm/DebugInfo/MSF/MappedBlockStream.h"
 #include "llvm/Support/BinaryStreamArray.h"
@@ -25,12 +26,12 @@ class PDBFile;
 class DbiModuleDescriptor;
 
 class ModuleDebugStreamRef {
-  typedef codeview::ModuleDebugFragmentArray::Iterator
-      LinesAndChecksumsIterator;
+  typedef codeview::DebugSubsectionArray::Iterator DebugSubsectionIterator;
 
 public:
   ModuleDebugStreamRef(const DbiModuleDescriptor &Module,
                        std::unique_ptr<msf::MappedBlockStream> Stream);
+  ModuleDebugStreamRef(ModuleDebugStreamRef &&Other) = default;
   ~ModuleDebugStreamRef();
 
   Error reload();
@@ -40,25 +41,34 @@ public:
   iterator_range<codeview::CVSymbolArray::Iterator>
   symbols(bool *HadError) const;
 
-  llvm::iterator_range<LinesAndChecksumsIterator> linesAndChecksums() const;
+  const codeview::CVSymbolArray &getSymbolArray() const {
+    return SymbolsSubstream;
+  }
 
-  bool hasLineInfo() const;
+  ModuleDebugStreamRef &operator=(ModuleDebugStreamRef &&Other) = default;
+
+  llvm::iterator_range<DebugSubsectionIterator> subsections() const;
+
+  bool hasDebugSubsections() const;
 
   Error commit();
+
+  Expected<codeview::DebugChecksumsSubsectionRef>
+  findChecksumsSubsection() const;
 
 private:
   const DbiModuleDescriptor &Mod;
 
   uint32_t Signature;
 
-  std::unique_ptr<msf::MappedBlockStream> Stream;
+  std::shared_ptr<msf::MappedBlockStream> Stream;
 
   codeview::CVSymbolArray SymbolsSubstream;
   BinaryStreamRef C11LinesSubstream;
   BinaryStreamRef C13LinesSubstream;
   BinaryStreamRef GlobalRefsSubstream;
 
-  codeview::ModuleDebugFragmentArray LinesAndChecksums;
+  codeview::DebugSubsectionArray Subsections;
 };
 }
 }

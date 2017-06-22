@@ -12,20 +12,21 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "X86AsmPrinter.h"
-#include "X86RegisterInfo.h"
-#include "X86ShuffleDecodeConstantPool.h"
 #include "InstPrinter/X86ATTInstPrinter.h"
 #include "InstPrinter/X86InstComments.h"
 #include "MCTargetDesc/X86BaseInfo.h"
 #include "Utils/X86ShuffleDecode.h"
+#include "X86AsmPrinter.h"
+#include "X86RegisterInfo.h"
+#include "X86ShuffleDecodeConstantPool.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/iterator_range.h"
-#include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/BinaryFormat/ELF.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
-#include "llvm/CodeGen/MachineOperand.h"
+#include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineModuleInfoImpls.h"
+#include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/StackMaps.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/GlobalValue.h"
@@ -38,13 +39,12 @@
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstBuilder.h"
 #include "llvm/MC/MCSection.h"
+#include "llvm/MC/MCSectionELF.h"
+#include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/MCSymbolELF.h"
-#include "llvm/MC/MCSectionELF.h"
-#include "llvm/MC/MCSectionMachO.h"
 #include "llvm/Support/TargetRegistry.h"
-#include "llvm/Support/ELF.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
 
 using namespace llvm;
@@ -1040,6 +1040,83 @@ void X86AsmPrinter::LowerPATCHPOINT(const MachineInstr &MI,
            getSubtargetInfo());
 }
 
+void X86AsmPrinter::LowerPATCHABLE_EVENT_CALL(const MachineInstr &MI,
+                                              X86MCInstLower &MCIL) {
+  assert(Subtarget->is64Bit() && "XRay custom events only suports X86-64");
+
+  // We want to emit the following pattern, which follows the x86 calling
+  // convention to prepare for the trampoline call to be patched in.
+  //
+  //   <args placement according SysV64 calling convention>
+  //   .p2align 1, ...
+  // .Lxray_event_sled_N:
+  //   jmp +N                    // jump across the call instruction
+  //   callq __xray_CustomEvent  // force relocation to symbol
+  //   <args cleanup, jump to here>
+  //
+  // The relative jump needs to jump forward 24 bytes:
+  // 10 (args) + 5 (nops) + 9 (cleanup)
+  //
+  // After patching, it would look something like:
+  //
+  //   nopw (2-byte nop)
+  //   callq __xrayCustomEvent  // already lowered
+  //
+  // ---
+  // First we emit the label and the jump.
+  auto CurSled = OutContext.createTempSymbol("xray_event_sled_", true);
+  OutStreamer->AddComment("# XRay Custom Event Log");
+  OutStreamer->EmitCodeAlignment(2);
+  OutStreamer->EmitLabel(CurSled);
+
+  // Use a two-byte `jmp`. This version of JMP takes an 8-bit relative offset as
+  // an operand (computed as an offset from the jmp instruction).
+  // FIXME: Find another less hacky way do force the relative jump.
+  OutStreamer->EmitBytes("\xeb\x14");
+
+  // The default C calling convention will place two arguments into %rcx and
+  // %rdx -- so we only work with those.
+  unsigned UsedRegs[] = {X86::RDI, X86::RSI, X86::RAX};
+
+  // Because we will use %rax, we preserve that across the call.
+  EmitAndCountInstruction(MCInstBuilder(X86::PUSH64r).addReg(X86::RAX));
+
+  // Then we put the operands in the %rdi and %rsi registers.
+  for (unsigned I = 0; I < MI.getNumOperands(); ++I)
+    if (auto Op = MCIL.LowerMachineOperand(&MI, MI.getOperand(I))) {
+      if (Op->isImm())
+        EmitAndCountInstruction(MCInstBuilder(X86::MOV64ri)
+                                    .addReg(UsedRegs[I])
+                                    .addImm(Op->getImm()));
+      else if (Op->isReg()) {
+        if (Op->getReg() != UsedRegs[I])
+          EmitAndCountInstruction(MCInstBuilder(X86::MOV64rr)
+                                      .addReg(UsedRegs[I])
+                                      .addReg(Op->getReg()));
+        else
+          EmitNops(*OutStreamer, 3, Subtarget->is64Bit(), getSubtargetInfo());
+      }
+    }
+
+  // We emit a hard dependency on the __xray_CustomEvent symbol, which is the
+  // name of the trampoline to be implemented by the XRay runtime. We put this
+  // explicitly in the %rax register.
+  auto TSym = OutContext.getOrCreateSymbol("__xray_CustomEvent");
+  MachineOperand TOp = MachineOperand::CreateMCSymbol(TSym);
+  EmitAndCountInstruction(MCInstBuilder(X86::MOV64ri)
+                              .addReg(X86::RAX)
+                              .addOperand(MCIL.LowerSymbolOperand(TOp, TSym)));
+
+  // Emit the call instruction.
+  EmitAndCountInstruction(MCInstBuilder(X86::CALL64r).addReg(X86::RAX));
+
+  // Restore caller-saved and used registers.
+  OutStreamer->AddComment("xray custom event end.");
+  EmitAndCountInstruction(MCInstBuilder(X86::POP64r).addReg(X86::RAX));
+
+  recordSled(CurSled, MI, SledKind::CUSTOM_EVENT);
+}
+
 void X86AsmPrinter::LowerPATCHABLE_FUNCTION_ENTER(const MachineInstr &MI,
                                                   X86MCInstLower &MCIL) {
   // We want to emit the following pattern:
@@ -1415,6 +1492,9 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
   case TargetOpcode::PATCHABLE_TAIL_CALL:
     return LowerPATCHABLE_TAIL_CALL(*MI, MCInstLowering);
+    
+  case TargetOpcode::PATCHABLE_EVENT_CALL:
+    return LowerPATCHABLE_EVENT_CALL(*MI, MCInstLowering);
 
   case X86::MORESTACK_RET:
     EmitAndCountInstruction(MCInstBuilder(getRetOpcode(*Subtarget)));

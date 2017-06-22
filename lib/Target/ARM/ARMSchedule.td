@@ -131,11 +131,25 @@ def WriteFPDIV64 : SchedWrite;
 def WriteFPSQRT32 : SchedWrite;
 def WriteFPSQRT64 : SchedWrite;
 
+// Vector load and stores
+def WriteVLD1 : SchedWrite;
+def WriteVLD2 : SchedWrite;
+def WriteVLD3 : SchedWrite;
+def WriteVLD4 : SchedWrite;
+def WriteVST1 : SchedWrite;
+def WriteVST2 : SchedWrite;
+def WriteVST3 : SchedWrite;
+def WriteVST4 : SchedWrite;
+
+
 // Define TII for use in SchedVariant Predicates.
 def : PredicateProlog<[{
   const ARMBaseInstrInfo *TII =
     static_cast<const ARMBaseInstrInfo*>(SchedModel->getInstrInfo());
   (void)TII;
+  const ARMSubtarget *STI =
+    static_cast<const ARMSubtarget*>(SchedModel->getSubtargetInfo());
+  (void)STI;
 }]>;
 
 def IsPredicatedPred : SchedPredicate<[{TII->isPredicated(*MI)}]>;
@@ -409,3 +423,4 @@ include "ARMScheduleA8.td"
 include "ARMScheduleA9.td"
 include "ARMScheduleSwift.td"
 include "ARMScheduleR52.td"
+include "ARMScheduleA57.td"

@@ -17,11 +17,14 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/BitmaskEnum.h"
 #include "llvm/ADT/None.h"
+#include "llvm/ADT/Optional.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/iterator_range.h"
+#include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/Support/Casting.h"
-#include "llvm/Support/Dwarf.h"
 #include <cassert>
 #include <climits>
 #include <cstddef>
@@ -55,10 +58,6 @@
   DEFINE_MDNODE_GET_DISTINCT_TEMPORARY(CLASS, FORMAL, ARGS)
 
 namespace llvm {
-
-class DIBuilder;
-
-template <typename T> class Optional;
 
 /// Holds a subclass of DINode.
 ///
@@ -94,9 +93,9 @@ public:
   bool operator!=(const TypedDINodeRef<T> &X) const { return MD != X.MD; }
 };
 
-typedef TypedDINodeRef<DINode> DINodeRef;
-typedef TypedDINodeRef<DIScope> DIScopeRef;
-typedef TypedDINodeRef<DIType> DITypeRef;
+using DINodeRef = TypedDINodeRef<DINode>;
+using DIScopeRef = TypedDINodeRef<DIScope>;
+using DITypeRef = TypedDINodeRef<DIType>;
 
 class DITypeRefArray {
   const MDTuple *N = nullptr;
@@ -149,7 +148,7 @@ public:
 /// Tagged DWARF-like metadata node.
 ///
 /// A metadata node with a DWARF tag (i.e., a constant named \c DW_TAG_*,
-/// defined in llvm/Support/Dwarf.h).  Called \a DINode because it's
+/// defined in llvm/BinaryFormat/Dwarf.h).  Called \a DINode because it's
 /// potentially used for non-DWARF output.
 class DINode : public MDNode {
   friend class LLVMContextImpl;
@@ -240,7 +239,8 @@ public:
 };
 
 template <class T> struct simplify_type<const TypedDINodeRef<T>> {
-  typedef Metadata *SimpleType;
+  using SimpleType = Metadata *;
+
   static SimpleType getSimplifiedValue(const TypedDINodeRef<T> &MD) {
     return MD;
   }
@@ -799,15 +799,18 @@ public:
     assert(getTag() == dwarf::DW_TAG_ptr_to_member_type);
     return DITypeRef(getExtraData());
   }
+
   DIObjCProperty *getObjCProperty() const {
     return dyn_cast_or_null<DIObjCProperty>(getExtraData());
   }
+
   Constant *getStorageOffsetInBits() const {
     assert(getTag() == dwarf::DW_TAG_member && isBitField());
     if (auto *C = cast_or_null<ConstantAsMetadata>(getExtraData()))
       return C->getValue();
     return nullptr;
   }
+
   Constant *getConstant() const {
     assert(getTag() == dwarf::DW_TAG_member && isStaticMember());
     if (auto *C = cast_or_null<ConstantAsMetadata>(getExtraData()))
@@ -970,9 +973,11 @@ public:
 #endif
     replaceOperandWith(4, Elements.get());
   }
+
   void replaceVTableHolder(DITypeRef VTableHolder) {
     replaceOperandWith(5, VTableHolder);
   }
+
   void replaceTemplateParams(DITemplateParameterArray TemplateParams) {
     replaceOperandWith(6, TemplateParams.get());
   }
@@ -1031,6 +1036,7 @@ public:
   DITypeRefArray getTypeArray() const {
     return cast_or_null<MDTuple>(getRawTypeArray());
   }
+
   Metadata *getRawTypeArray() const { return getOperand(3); }
 
   static bool classof(const Metadata *MD) {
@@ -1319,6 +1325,7 @@ public:
   unsigned getLine() const { return SubclassData32; }
   unsigned getColumn() const { return SubclassData16; }
   DILocalScope *getScope() const { return cast<DILocalScope>(getRawScope()); }
+
   DILocation *getInlinedAt() const {
     return cast_or_null<DILocation>(getRawInlinedAt());
   }
@@ -1452,7 +1459,6 @@ public:
   static bool classof(const Metadata *MD) {
     return MD->getMetadataID() == DILocationKind;
   }
-
 };
 
 /// Subprogram description.
@@ -2087,6 +2093,7 @@ public:
       return F->getFilename();
     return "";
   }
+
   StringRef getDirectory() const {
     if (auto *F = getFile())
       return F->getDirectory();
@@ -2109,9 +2116,6 @@ public:
 /// This is (almost) a DWARF expression that modifies the location of a
 /// variable, or the location of a single piece of a variable, or (when using
 /// DW_OP_stack_value) is the constant variable value.
-///
-/// FIXME: Instead of DW_OP_plus taking an argument, this should use DW_OP_const
-/// and have DW_OP_plus consume the topmost elements on the stack.
 ///
 /// TODO: Co-allocate the expression elements.
 /// TODO: Separate from MDNode, or otherwise drop Distinct and Temporary
@@ -2143,6 +2147,7 @@ public:
   ArrayRef<uint64_t> getElements() const { return Elements; }
 
   unsigned getNumElements() const { return Elements.size(); }
+
   uint64_t getElement(unsigned I) const {
     assert(I < Elements.size() && "Index out of range");
     return Elements[I];
@@ -2151,7 +2156,8 @@ public:
   /// Determine whether this represents a standalone constant value.
   bool isConstant() const;
 
-  typedef ArrayRef<uint64_t>::iterator element_iterator;
+  using element_iterator = ArrayRef<uint64_t>::iterator;
+
   element_iterator elements_begin() const { return getElements().begin(); }
   element_iterator elements_end() const { return getElements().end(); }
 
@@ -2275,6 +2281,10 @@ public:
 
   /// Append \p Ops with operations to apply the \p Offset.
   static void appendOffset(SmallVectorImpl<uint64_t> &Ops, int64_t Offset);
+
+  /// If this is a constant offset, extract it. If there is no expression,
+  /// return true with an offset of zero.
+  bool extractIfOffset(int64_t &Offset) const;
 
   /// Constants for DIExpression::prepend.
   enum { NoDeref = false, WithDeref = true, WithStackValue = true };
@@ -2509,6 +2519,7 @@ public:
       return F->getFilename();
     return "";
   }
+
   StringRef getDirectory() const {
     if (auto *F = getFile())
       return F->getDirectory();
@@ -2609,10 +2620,13 @@ public:
   TempDIGlobalVariableExpression clone() const { return cloneImpl(); }
 
   Metadata *getRawVariable() const { return getOperand(0); }
+
   DIGlobalVariable *getVariable() const {
     return cast_or_null<DIGlobalVariable>(getRawVariable());
   }
+
   Metadata *getRawExpression() const { return getOperand(1); }
+
   DIExpression *getExpression() const {
     return cast_or_null<DIExpression>(getRawExpression());
   }
@@ -2625,7 +2639,8 @@ public:
 /// Macro Info DWARF-like metadata node.
 ///
 /// A metadata node with a DWARF macro info (i.e., a constant named
-/// \c DW_MACINFO_*, defined in llvm/Support/Dwarf.h).  Called \a DIMacroNode
+/// \c DW_MACINFO_*, defined in llvm/BinaryFormat/Dwarf.h).  Called \a
+/// DIMacroNode
 /// because it's potentially used for non-DWARF output.
 class DIMacroNode : public MDNode {
   friend class LLVMContextImpl;

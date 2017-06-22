@@ -11,7 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Target/TargetLowering.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
@@ -34,6 +33,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
+#include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetRegisterInfo.h"
@@ -374,11 +374,16 @@ static void InitLibcallNames(const char **Names, const Triple &TT) {
   Names[RTLIB::MEMCPY] = "memcpy";
   Names[RTLIB::MEMMOVE] = "memmove";
   Names[RTLIB::MEMSET] = "memset";
-  Names[RTLIB::MEMCPY_ELEMENT_ATOMIC_1] = "__llvm_memcpy_element_atomic_1";
-  Names[RTLIB::MEMCPY_ELEMENT_ATOMIC_2] = "__llvm_memcpy_element_atomic_2";
-  Names[RTLIB::MEMCPY_ELEMENT_ATOMIC_4] = "__llvm_memcpy_element_atomic_4";
-  Names[RTLIB::MEMCPY_ELEMENT_ATOMIC_8] = "__llvm_memcpy_element_atomic_8";
-  Names[RTLIB::MEMCPY_ELEMENT_ATOMIC_16] = "__llvm_memcpy_element_atomic_16";
+  Names[RTLIB::MEMCPY_ELEMENT_UNORDERED_ATOMIC_1] =
+      "__llvm_memcpy_element_unordered_atomic_1";
+  Names[RTLIB::MEMCPY_ELEMENT_UNORDERED_ATOMIC_2] =
+      "__llvm_memcpy_element_unordered_atomic_2";
+  Names[RTLIB::MEMCPY_ELEMENT_UNORDERED_ATOMIC_4] =
+      "__llvm_memcpy_element_unordered_atomic_4";
+  Names[RTLIB::MEMCPY_ELEMENT_UNORDERED_ATOMIC_8] =
+      "__llvm_memcpy_element_unordered_atomic_8";
+  Names[RTLIB::MEMCPY_ELEMENT_UNORDERED_ATOMIC_16] =
+      "__llvm_memcpy_element_unordered_atomic_16";
   Names[RTLIB::UNWIND_RESUME] = "_Unwind_Resume";
   Names[RTLIB::SYNC_VAL_COMPARE_AND_SWAP_1] = "__sync_val_compare_and_swap_1";
   Names[RTLIB::SYNC_VAL_COMPARE_AND_SWAP_2] = "__sync_val_compare_and_swap_2";
@@ -781,22 +786,21 @@ RTLIB::Libcall RTLIB::getSYNC(unsigned Opc, MVT VT) {
   return UNKNOWN_LIBCALL;
 }
 
-RTLIB::Libcall RTLIB::getMEMCPY_ELEMENT_ATOMIC(uint64_t ElementSize) {
+RTLIB::Libcall RTLIB::getMEMCPY_ELEMENT_UNORDERED_ATOMIC(uint64_t ElementSize) {
   switch (ElementSize) {
   case 1:
-    return MEMCPY_ELEMENT_ATOMIC_1;
+    return MEMCPY_ELEMENT_UNORDERED_ATOMIC_1;
   case 2:
-    return MEMCPY_ELEMENT_ATOMIC_2;
+    return MEMCPY_ELEMENT_UNORDERED_ATOMIC_2;
   case 4:
-    return MEMCPY_ELEMENT_ATOMIC_4;
+    return MEMCPY_ELEMENT_UNORDERED_ATOMIC_4;
   case 8:
-    return MEMCPY_ELEMENT_ATOMIC_8;
+    return MEMCPY_ELEMENT_UNORDERED_ATOMIC_8;
   case 16:
-    return MEMCPY_ELEMENT_ATOMIC_16;
+    return MEMCPY_ELEMENT_UNORDERED_ATOMIC_16;
   default:
     return UNKNOWN_LIBCALL;
   }
-
 }
 
 /// InitCmpLibcallCCs - Set default comparison libcall CC.
@@ -842,9 +846,10 @@ TargetLoweringBase::TargetLoweringBase(const TargetMachine &tm) : TM(tm) {
   initActions();
 
   // Perform these initializations only once.
-  MaxStoresPerMemset = MaxStoresPerMemcpy = MaxStoresPerMemmove = 8;
-  MaxStoresPerMemsetOptSize = MaxStoresPerMemcpyOptSize
-    = MaxStoresPerMemmoveOptSize = 4;
+  MaxStoresPerMemset = MaxStoresPerMemcpy = MaxStoresPerMemmove =
+      MaxLoadsPerMemcmp = 8;
+  MaxStoresPerMemsetOptSize = MaxStoresPerMemcpyOptSize =
+      MaxStoresPerMemmoveOptSize = MaxLoadsPerMemcmpOptSize = 4;
   UseUnderscoreSetJmp = false;
   UseUnderscoreLongJmp = false;
   HasMultipleConditionRegisters = false;
@@ -926,6 +931,7 @@ void TargetLoweringBase::initActions() {
     // ADDCARRY operations default to expand
     setOperationAction(ISD::ADDCARRY, VT, Expand);
     setOperationAction(ISD::SUBCARRY, VT, Expand);
+    setOperationAction(ISD::SETCCCARRY, VT, Expand);
 
     // These default to Expand so they will be expanded to CTLZ/CTTZ by default.
     setOperationAction(ISD::CTLZ_ZERO_UNDEF, VT, Expand);
@@ -935,6 +941,7 @@ void TargetLoweringBase::initActions() {
     
     // These library functions default to expand.
     setOperationAction(ISD::FROUND, VT, Expand);
+    setOperationAction(ISD::FPOWI, VT, Expand);
 
     // These operations default to expand for vector types.
     if (VT.isVector()) {
@@ -1312,7 +1319,7 @@ TargetLoweringBase::findRepresentativeClass(const TargetRegisterInfo *TRI,
 
   // Find the first legal register class with the largest spill size.
   const TargetRegisterClass *BestRC = RC;
-  for (int i = SuperRegRC.find_first(); i >= 0; i = SuperRegRC.find_next(i)) {
+  for (unsigned i : SuperRegRC.set_bits()) {
     const TargetRegisterClass *SuperRC = TRI->getRegClass(i);
     // We want the largest possible spill size.
     if (TRI->getSpillSize(*SuperRC) <= TRI->getSpillSize(*BestRC))
@@ -1453,6 +1460,7 @@ void TargetLoweringBase::computeRegisterProperties(
       }
       if (IsLegalWiderType)
         break;
+      LLVM_FALLTHROUGH;
     }
     case TypeWidenVector: {
       // Try to widen the vector.
@@ -1470,6 +1478,7 @@ void TargetLoweringBase::computeRegisterProperties(
       }
       if (IsLegalWiderType)
         break;
+      LLVM_FALLTHROUGH;
     }
     case TypeSplitVector:
     case TypeScalarizeVector: {
@@ -1632,8 +1641,10 @@ void llvm::GetReturnInfo(Type *ReturnType, AttributeList attr,
         VT = MinVT;
     }
 
-    unsigned NumParts = TLI.getNumRegisters(ReturnType->getContext(), VT);
-    MVT PartVT = TLI.getRegisterType(ReturnType->getContext(), VT);
+    unsigned NumParts =
+        TLI.getNumRegistersForCallingConv(ReturnType->getContext(), VT);
+    MVT PartVT =
+        TLI.getRegisterTypeForCallingConv(ReturnType->getContext(), VT);
 
     // 'inreg' on function refers to return value
     ISD::ArgFlagsTy Flags = ISD::ArgFlagsTy();

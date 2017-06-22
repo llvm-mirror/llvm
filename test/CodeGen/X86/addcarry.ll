@@ -81,26 +81,43 @@ entry:
  ret void
 }
 
+define i8 @e(i32* nocapture %a, i32 %b) nounwind {
+; CHECK-LABEL: e:
+; CHECK:       # BB#0:
+; CHECK-NEXT:    # kill: %ESI<def> %ESI<kill> %RSI<def>
+; CHECK-NEXT:    movl (%rdi), %ecx
+; CHECK-NEXT:    leal (%rsi,%rcx), %edx
+; CHECK-NEXT:    addl %esi, %edx
+; CHECK-NEXT:    setb %al
+; CHECK-NEXT:    addl %esi, %ecx
+; CHECK-NEXT:    movl %edx, (%rdi)
+; CHECK-NEXT:    adcb $0, %al
+; CHECK-NEXT:    retq
+  %1 = load i32, i32* %a, align 4
+  %2 = add i32 %1, %b
+  %3 = icmp ult i32 %2, %b
+  %4 = zext i1 %3 to i8
+  %5 = add i32 %2, %b
+  store i32 %5, i32* %a, align 4
+  %6 = icmp ult i32 %5, %b
+  %7 = zext i1 %6 to i8
+  %8 = add nuw nsw i8 %7, %4
+  ret i8 %8
+}
+
 %scalar = type { [4 x i64] }
 
 define %scalar @pr31719(%scalar* nocapture readonly %this, %scalar %arg.b) {
 ; CHECK-LABEL: pr31719:
 ; CHECK:       # BB#0: # %entry
-; CHECK-NEXT:    addq 8(%rsi), %rcx
-; CHECK-NEXT:    sbbq %r10, %r10
-; CHECK-NEXT:    andl $1, %r10d
-; CHECK-NEXT:    addq 16(%rsi), %r8
-; CHECK-NEXT:    sbbq %rax, %rax
-; CHECK-NEXT:    andl $1, %eax
-; CHECK-NEXT:    addq 24(%rsi), %r9
 ; CHECK-NEXT:    addq (%rsi), %rdx
-; CHECK-NEXT:    adcq $0, %rcx
-; CHECK-NEXT:    adcq %r8, %r10
-; CHECK-NEXT:    adcq %r9, %rax
+; CHECK-NEXT:    adcq 8(%rsi), %rcx
+; CHECK-NEXT:    adcq 16(%rsi), %r8
+; CHECK-NEXT:    adcq 24(%rsi), %r9
 ; CHECK-NEXT:    movq %rdx, (%rdi)
 ; CHECK-NEXT:    movq %rcx, 8(%rdi)
-; CHECK-NEXT:    movq %r10, 16(%rdi)
-; CHECK-NEXT:    movq %rax, 24(%rdi)
+; CHECK-NEXT:    movq %r8, 16(%rdi)
+; CHECK-NEXT:    movq %r9, 24(%rdi)
 ; CHECK-NEXT:    movq %rdi, %rax
 ; CHECK-NEXT:    retq
 entry:
@@ -190,9 +207,9 @@ entry:
 define i64 @shiftadd(i64 %a, i64 %b, i64 %c, i64 %d) {
 ; CHECK-LABEL: shiftadd:
 ; CHECK:       # BB#0: # %entry
-; CHECK-NEXT:    leaq (%rdx,%rcx), %rax
 ; CHECK-NEXT:    addq %rsi, %rdi
-; CHECK-NEXT:    adcq $0, %rax
+; CHECK-NEXT:    adcq %rcx, %rdx
+; CHECK-NEXT:    movq %rdx, %rax
 ; CHECK-NEXT:    retq
 entry:
   %0 = zext i64 %a to i128
@@ -203,4 +220,71 @@ entry:
   %5 = add i64 %c, %d
   %6 = add i64 %4, %5
   ret i64 %6
+}
+
+%S = type { [4 x i64] }
+
+define %S @readd(%S* nocapture readonly %this, %S %arg.b) {
+; CHECK-LABEL: readd:
+; CHECK:       # BB#0: # %entry
+; CHECK-NEXT:    addq (%rsi), %rdx
+; CHECK-NEXT:    movq 8(%rsi), %r10
+; CHECK-NEXT:    adcq $0, %r10
+; CHECK-NEXT:    setb %al
+; CHECK-NEXT:    movzbl %al, %eax
+; CHECK-NEXT:    addq %rcx, %r10
+; CHECK-NEXT:    adcq 16(%rsi), %rax
+; CHECK-NEXT:    setb %cl
+; CHECK-NEXT:    movzbl %cl, %ecx
+; CHECK-NEXT:    addq %r8, %rax
+; CHECK-NEXT:    adcq 24(%rsi), %rcx
+; CHECK-NEXT:    addq %r9, %rcx
+; CHECK-NEXT:    movq %rdx, (%rdi)
+; CHECK-NEXT:    movq %r10, 8(%rdi)
+; CHECK-NEXT:    movq %rax, 16(%rdi)
+; CHECK-NEXT:    movq %rcx, 24(%rdi)
+; CHECK-NEXT:    movq %rdi, %rax
+; CHECK-NEXT:    retq
+entry:
+  %0 = extractvalue %S %arg.b, 0
+  %.elt6 = extractvalue [4 x i64] %0, 1
+  %.elt8 = extractvalue [4 x i64] %0, 2
+  %.elt10 = extractvalue [4 x i64] %0, 3
+  %.elt = extractvalue [4 x i64] %0, 0
+  %1 = getelementptr inbounds %S, %S* %this, i64 0, i32 0, i64 0
+  %2 = load i64, i64* %1, align 8
+  %3 = zext i64 %2 to i128
+  %4 = zext i64 %.elt to i128
+  %5 = add nuw nsw i128 %3, %4
+  %6 = trunc i128 %5 to i64
+  %7 = lshr i128 %5, 64
+  %8 = getelementptr inbounds %S, %S* %this, i64 0, i32 0, i64 1
+  %9 = load i64, i64* %8, align 8
+  %10 = zext i64 %9 to i128
+  %11 = add nuw nsw i128 %7, %10
+  %12 = zext i64 %.elt6 to i128
+  %13 = add nuw nsw i128 %11, %12
+  %14 = trunc i128 %13 to i64
+  %15 = lshr i128 %13, 64
+  %16 = getelementptr inbounds %S, %S* %this, i64 0, i32 0, i64 2
+  %17 = load i64, i64* %16, align 8
+  %18 = zext i64 %17 to i128
+  %19 = add nuw nsw i128 %15, %18
+  %20 = zext i64 %.elt8 to i128
+  %21 = add nuw nsw i128 %19, %20
+  %22 = lshr i128 %21, 64
+  %23 = trunc i128 %21 to i64
+  %24 = getelementptr inbounds %S, %S* %this, i64 0,i32 0, i64 3
+  %25 = load i64, i64* %24, align 8
+  %26 = zext i64 %25 to i128
+  %27 = add nuw nsw i128 %22, %26
+  %28 = zext i64 %.elt10 to i128
+  %29 = add nuw nsw i128 %27, %28
+  %30 = trunc i128 %29 to i64
+  %31 = insertvalue [4 x i64] undef, i64 %6, 0
+  %32 = insertvalue [4 x i64] %31, i64 %14, 1
+  %33 = insertvalue [4 x i64] %32, i64 %23, 2
+  %34 = insertvalue [4 x i64] %33, i64 %30, 3
+  %35 = insertvalue %S undef, [4 x i64] %34, 0
+  ret %S %35
 }

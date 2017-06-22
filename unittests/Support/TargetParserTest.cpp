@@ -7,9 +7,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/Support/TargetParser.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ARMBuildAttributes.h"
-#include "llvm/Support/TargetParser.h"
 #include "gtest/gtest.h"
 #include <string>
 
@@ -319,7 +319,7 @@ TEST(TargetParserTest, testARMArch) {
       testARMArch("armv6-m", "cortex-m0", "v6m",
                           ARMBuildAttrs::CPUArch::v6_M));
   EXPECT_TRUE(
-      testARMArch("armv7-a", "cortex-a8", "v7",
+      testARMArch("armv7-a", "generic", "v7",
                           ARMBuildAttrs::CPUArch::v7));
   EXPECT_TRUE(
       testARMArch("armv7ve", "generic", "v7ve",
@@ -334,7 +334,7 @@ TEST(TargetParserTest, testARMArch) {
       testARMArch("armv7e-m", "cortex-m4", "v7em",
                           ARMBuildAttrs::CPUArch::v7E_M));
   EXPECT_TRUE(
-      testARMArch("armv8-a", "cortex-a53", "v8",
+      testARMArch("armv8-a", "generic", "v8",
                           ARMBuildAttrs::CPUArch::v8_A));
   EXPECT_TRUE(
       testARMArch("armv8.1-a", "generic", "v8.1a",
@@ -611,48 +611,58 @@ bool testAArch64CPU(StringRef CPUName, StringRef ExpectedArch,
 TEST(TargetParserTest, testAArch64CPU) {
   EXPECT_TRUE(testAArch64CPU(
       "invalid", "invalid", "invalid",
-      AArch64::AEK_INVALID, ""));
+      AArch64::AEK_NONE, ""));
   EXPECT_TRUE(testAArch64CPU(
       "generic", "invalid", "none",
       AArch64::AEK_NONE, ""));
 
   EXPECT_TRUE(testAArch64CPU(
       "cortex-a35", "armv8-a", "crypto-neon-fp-armv8",
-      AArch64::AEK_CRC | AArch64::AEK_CRYPTO | AArch64::AEK_SIMD, "8-A"));
+      AArch64::AEK_CRC | AArch64::AEK_CRYPTO | AArch64::AEK_FP |
+      AArch64::AEK_SIMD, "8-A"));
   EXPECT_TRUE(testAArch64CPU(
       "cortex-a53", "armv8-a", "crypto-neon-fp-armv8",
-      AArch64::AEK_CRC | AArch64::AEK_CRYPTO | AArch64::AEK_SIMD, "8-A"));
+      AArch64::AEK_CRC | AArch64::AEK_CRYPTO | AArch64::AEK_FP |
+      AArch64::AEK_SIMD, "8-A"));
   EXPECT_TRUE(testAArch64CPU(
       "cortex-a57", "armv8-a", "crypto-neon-fp-armv8",
-      AArch64::AEK_CRC | AArch64::AEK_CRYPTO | AArch64::AEK_SIMD, "8-A"));
+      AArch64::AEK_CRC | AArch64::AEK_CRYPTO | AArch64::AEK_FP |
+      AArch64::AEK_SIMD, "8-A"));
   EXPECT_TRUE(testAArch64CPU(
       "cortex-a72", "armv8-a", "crypto-neon-fp-armv8",
-      AArch64::AEK_CRC | AArch64::AEK_CRYPTO | AArch64::AEK_SIMD, "8-A"));
+      AArch64::AEK_CRC | AArch64::AEK_CRYPTO | AArch64::AEK_FP |
+      AArch64::AEK_SIMD, "8-A"));
   EXPECT_TRUE(testAArch64CPU(
       "cortex-a73", "armv8-a", "crypto-neon-fp-armv8",
-      AArch64::AEK_CRC | AArch64::AEK_CRYPTO | AArch64::AEK_SIMD, "8-A"));
+      AArch64::AEK_CRC | AArch64::AEK_CRYPTO | AArch64::AEK_FP |
+      AArch64::AEK_SIMD, "8-A"));
   EXPECT_TRUE(testAArch64CPU(
       "cyclone", "armv8-a", "crypto-neon-fp-armv8",
-      AArch64::AEK_CRYPTO | AArch64::AEK_SIMD, "8-A"));
+      AArch64::AEK_CRYPTO | AArch64::AEK_FP | AArch64::AEK_SIMD, "8-A"));
   EXPECT_TRUE(testAArch64CPU(
       "exynos-m1", "armv8-a", "crypto-neon-fp-armv8",
-      AArch64::AEK_CRC | AArch64::AEK_CRYPTO | AArch64::AEK_SIMD, "8-A"));
+      AArch64::AEK_CRC | AArch64::AEK_CRYPTO | AArch64::AEK_FP |
+      AArch64::AEK_SIMD, "8-A"));
   EXPECT_TRUE(testAArch64CPU(
       "exynos-m2", "armv8-a", "crypto-neon-fp-armv8",
-      AArch64::AEK_CRC | AArch64::AEK_CRYPTO | AArch64::AEK_SIMD, "8-A"));
+      AArch64::AEK_CRC | AArch64::AEK_CRYPTO | AArch64::AEK_FP |
+      AArch64::AEK_SIMD, "8-A"));
   EXPECT_TRUE(testAArch64CPU(
       "exynos-m3", "armv8-a", "crypto-neon-fp-armv8",
-      AArch64::AEK_CRC | AArch64::AEK_CRYPTO | AArch64::AEK_SIMD, "8-A"));
+      AArch64::AEK_CRC | AArch64::AEK_CRYPTO | AArch64::AEK_FP |
+      AArch64::AEK_SIMD, "8-A"));
   EXPECT_TRUE(testAArch64CPU(
       "falkor", "armv8-a", "crypto-neon-fp-armv8",
-      AArch64::AEK_CRC | AArch64::AEK_CRYPTO | AArch64::AEK_SIMD, "8-A"));
+      AArch64::AEK_CRC | AArch64::AEK_CRYPTO | AArch64::AEK_FP |
+      AArch64::AEK_SIMD, "8-A"));
   EXPECT_TRUE(testAArch64CPU(
       "kryo", "armv8-a", "crypto-neon-fp-armv8",
-      AArch64::AEK_CRC | AArch64::AEK_CRYPTO | AArch64::AEK_SIMD, "8-A"));
+      AArch64::AEK_CRC | AArch64::AEK_CRYPTO | AArch64::AEK_FP |
+      AArch64::AEK_SIMD, "8-A"));
   EXPECT_TRUE(testAArch64CPU(
       "thunderx2t99", "armv8.1-a", "crypto-neon-fp-armv8",
       AArch64::AEK_CRC | AArch64::AEK_CRYPTO | AArch64::AEK_LSE |
-      AArch64::AEK_SIMD, "8.1-A"));
+      AArch64::AEK_FP | AArch64::AEK_SIMD, "8.1-A"));
   EXPECT_TRUE(testAArch64CPU(
       "thunderx", "armv8-a", "crypto-neon-fp-armv8",
       AArch64::AEK_CRC | AArch64::AEK_CRYPTO | AArch64::AEK_SIMD |

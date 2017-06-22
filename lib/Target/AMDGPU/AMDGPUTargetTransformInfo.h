@@ -75,8 +75,10 @@ public:
     return TTI::PSK_FastHardware;
   }
 
-  unsigned getNumberOfRegisters(bool Vector);
-  unsigned getRegisterBitWidth(bool Vector);
+  unsigned getHardwareNumberOfRegisters(bool Vector) const;
+  unsigned getNumberOfRegisters(bool Vector) const;
+  unsigned getRegisterBitWidth(bool Vector) const ;
+  unsigned getMinVectorRegisterBitWidth() const;
   unsigned getLoadStoreVecRegBitWidth(unsigned AddrSpace) const;
 
   bool isLegalToVectorizeMemChain(unsigned ChainSizeInBytes,
@@ -103,6 +105,7 @@ public:
 
   int getVectorInstrCost(unsigned Opcode, Type *ValTy, unsigned Index);
   bool isSourceOfDivergence(const Value *V) const;
+  bool isAlwaysUniform(const Value *V) const;
 
   unsigned getFlatAddressSpace() const {
     // Don't bother running InferAddressSpaces pass on graphics shaders which
@@ -114,6 +117,9 @@ public:
   }
 
   unsigned getVectorSplitCost() { return 0; }
+
+  unsigned getShuffleCost(TTI::ShuffleKind Kind, Type *Tp, int Index,
+                          Type *SubTp);
 };
 
 } // end namespace llvm

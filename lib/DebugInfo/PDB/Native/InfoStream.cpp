@@ -79,6 +79,7 @@ Error InfoStream::reload() {
       break;
     case uint32_t(PdbRaw_FeatureSig::MinimalDebugInfo):
       Features |= PdbFeatureMinimalDebugInfo;
+      break;
     default:
       continue;
     }
@@ -99,6 +100,10 @@ uint32_t InfoStream::getNamedStreamIndex(llvm::StringRef Name) const {
 iterator_range<StringMapConstIterator<uint32_t>>
 InfoStream::named_streams() const {
   return NamedStreams.entries();
+}
+
+bool InfoStream::containsIdStream() const {
+  return !!(Features & PdbFeatureContainsIdStream);
 }
 
 PdbRaw_ImplVer InfoStream::getVersion() const {

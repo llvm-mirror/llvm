@@ -12,6 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ProfileData/InstrProf.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
@@ -29,7 +30,6 @@
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
-#include "llvm/ProfileData/InstrProf.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
@@ -45,8 +45,8 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
-#include <cstring>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <system_error>
@@ -330,14 +330,15 @@ GlobalVariable *createPGOFuncNameVar(Function &F, StringRef PGOFuncName) {
   return createPGOFuncNameVar(*F.getParent(), F.getLinkage(), PGOFuncName);
 }
 
-void InstrProfSymtab::create(Module &M, bool InLTO) {
+Error InstrProfSymtab::create(Module &M, bool InLTO) {
   for (Function &F : M) {
     // Function may not have a name: like using asm("") to overwrite the name.
     // Ignore in this case.
     if (!F.hasName())
       continue;
     const std::string &PGOFuncName = getPGOFuncName(F, InLTO);
-    addFuncName(PGOFuncName);
+    if (Error E = addFuncName(PGOFuncName))
+      return E;
     MD5FuncMap.emplace_back(Function::getGUID(PGOFuncName), &F);
     // In ThinLTO, local function may have been promoted to global and have
     // suffix added to the function name. We need to add the stripped function
@@ -346,16 +347,18 @@ void InstrProfSymtab::create(Module &M, bool InLTO) {
       auto pos = PGOFuncName.find('.');
       if (pos != std::string::npos) {
         const std::string &OtherFuncName = PGOFuncName.substr(0, pos);
-        addFuncName(OtherFuncName);
+        if (Error E = addFuncName(OtherFuncName))
+          return E;
         MD5FuncMap.emplace_back(Function::getGUID(OtherFuncName), &F);
       }
     }
   }
 
   finalizeSymtab();
+  return Error::success();
 }
 
-Error collectPGOFuncNameStrings(const std::vector<std::string> &NameStrs,
+Error collectPGOFuncNameStrings(ArrayRef<std::string> NameStrs,
                                 bool doCompression, std::string &Result) {
   assert(!NameStrs.empty() && "No name data to emit");
 
@@ -403,7 +406,7 @@ StringRef getPGOFuncNameVarInitializer(GlobalVariable *NameVar) {
   return NameStr;
 }
 
-Error collectPGOFuncNameStrings(const std::vector<GlobalVariable *> &NameVars,
+Error collectPGOFuncNameStrings(ArrayRef<GlobalVariable *> NameVars,
                                 std::string &Result, bool doCompression) {
   std::vector<std::string> NameStrs;
   for (auto *NameVar : NameVars) {
@@ -447,7 +450,8 @@ Error readPGOFuncNameStrings(StringRef NameStrings, InstrProfSymtab &Symtab) {
     SmallVector<StringRef, 0> Names;
     NameStrings.split(Names, getInstrProfNameSeparator());
     for (StringRef &Name : Names)
-      Symtab.addFuncName(Name);
+      if (Error E = Symtab.addFuncName(Name))
+        return E;
 
     while (P < EndP && *P == 0)
       P++;
@@ -978,22 +982,22 @@ bool canRenameComdatFunc(const Function &F, bool CheckAddressTaken) {
 }
 
 // Parse the value profile options.
-void getMemOPSizeRangeFromOption(std::string MemOPSizeRange,
-                                 int64_t &RangeStart, int64_t &RangeLast) {
+void getMemOPSizeRangeFromOption(StringRef MemOPSizeRange, int64_t &RangeStart,
+                                 int64_t &RangeLast) {
   static const int64_t DefaultMemOPSizeRangeStart = 0;
   static const int64_t DefaultMemOPSizeRangeLast = 8;
   RangeStart = DefaultMemOPSizeRangeStart;
   RangeLast = DefaultMemOPSizeRangeLast;
 
   if (!MemOPSizeRange.empty()) {
-    auto Pos = MemOPSizeRange.find(":");
+    auto Pos = MemOPSizeRange.find(':');
     if (Pos != std::string::npos) {
       if (Pos > 0)
-        RangeStart = atoi(MemOPSizeRange.substr(0, Pos).c_str());
+        MemOPSizeRange.substr(0, Pos).getAsInteger(10, RangeStart);
       if (Pos < MemOPSizeRange.size() - 1)
-        RangeLast = atoi(MemOPSizeRange.substr(Pos + 1).c_str());
+        MemOPSizeRange.substr(Pos + 1).getAsInteger(10, RangeLast);
     } else
-      RangeLast = atoi(MemOPSizeRange.c_str());
+      MemOPSizeRange.getAsInteger(10, RangeLast);
   }
   assert(RangeLast >= RangeStart);
 }

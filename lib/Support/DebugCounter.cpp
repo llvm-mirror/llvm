@@ -6,6 +6,7 @@
 
 using namespace llvm;
 
+namespace {
 // This class overrides the default list implementation of printing so we
 // can pretty print the list of debug counter options.  This type of
 // dynamic option is pretty rare (basically this and pass lists).
@@ -40,6 +41,7 @@ private:
     }
   }
 };
+} // namespace
 
 // Create our command line option.
 static DebugCounterList DebugCounterOption(
@@ -100,9 +102,13 @@ void DebugCounter::push_back(const std::string &Val) {
   }
 }
 
-void DebugCounter::print(raw_ostream &OS) {
+void DebugCounter::print(raw_ostream &OS) const {
   OS << "Counters and values:\n";
   for (const auto &KV : Counters)
     OS << left_justify(RegisteredCounters[KV.first], 32) << ": {"
        << KV.second.first << "," << KV.second.second << "}\n";
+}
+
+LLVM_DUMP_METHOD void DebugCounter::dump() const {
+  print(dbgs());
 }

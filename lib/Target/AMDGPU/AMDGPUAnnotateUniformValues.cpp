@@ -19,8 +19,8 @@
 #include "llvm/Analysis/DivergenceAnalysis.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/MemoryDependenceAnalysis.h"
-#include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/InstVisitor.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -107,7 +107,7 @@ bool AMDGPUAnnotateUniformValues::isClobberedInFunction(LoadInst * Load) {
 
   DFS(Start, Checklist);
   for (auto &BB : Checklist) {
-    BasicBlock::iterator StartIt = (BB == Load->getParent()) ?
+    BasicBlock::iterator StartIt = (!L && (BB == Load->getParent())) ?
      BasicBlock::iterator(Load) : BB->end();
      if (MDR->getPointerDependencyFrom(MemoryLocation(Ptr),
        true, StartIt, BB, Load).isClobber())

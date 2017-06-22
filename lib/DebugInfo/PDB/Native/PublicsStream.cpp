@@ -105,10 +105,12 @@ Error PublicsStream::reload() {
                                            "Could not read a thunk map."));
 
   // Something called "section map" follows.
-  if (auto EC = Reader.readArray(SectionOffsets, Header->NumSections))
-    return joinErrors(std::move(EC),
-                      make_error<RawError>(raw_error_code::corrupt_file,
-                                           "Could not read a section map."));
+  if (Reader.bytesRemaining() > 0) {
+    if (auto EC = Reader.readArray(SectionOffsets, Header->NumSections))
+      return joinErrors(std::move(EC),
+                        make_error<RawError>(raw_error_code::corrupt_file,
+                                             "Could not read a section map."));
+  }
 
   if (Reader.bytesRemaining() > 0)
     return make_error<RawError>(raw_error_code::corrupt_file,
@@ -126,6 +128,15 @@ PublicsStream::getSymbols(bool *HadError) const {
   SymbolStream &SS = SymbolS.get();
 
   return SS.getSymbols(HadError);
+}
+
+Expected<const codeview::CVSymbolArray &>
+PublicsStream::getSymbolArray() const {
+  auto SymbolS = Pdb.getPDBSymbolStream();
+  if (!SymbolS)
+    return SymbolS.takeError();
+
+  return SymbolS->getSymbolArray();
 }
 
 Error PublicsStream::commit() { return Error::success(); }

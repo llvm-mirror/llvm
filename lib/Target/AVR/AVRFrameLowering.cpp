@@ -228,9 +228,8 @@ void AVRFrameLowering::emitEpilogue(MachineFunction &MF,
 bool AVRFrameLowering::hasFP(const MachineFunction &MF) const {
   const AVRMachineFunctionInfo *FuncInfo = MF.getInfo<AVRMachineFunctionInfo>();
 
-  // TODO: We do not always need a frame pointer.
-  // This can be optimised.
-  return true;
+  return (FuncInfo->getHasSpills() || FuncInfo->getHasAllocas() ||
+          FuncInfo->getHasStackArgs());
 }
 
 bool AVRFrameLowering::spillCalleeSavedRegisters(
@@ -376,7 +375,7 @@ MachineBasicBlock::iterator AVRFrameLowering::eliminateCallFramePseudoInstr(
 
   DebugLoc DL = MI->getDebugLoc();
   unsigned int Opcode = MI->getOpcode();
-  int Amount = MI->getOperand(0).getImm();
+  int Amount = TII.getFrameSize(*MI);
 
   // Adjcallstackup does not need to allocate stack space for the call, instead
   // we insert push instructions that will allocate the necessary stack.

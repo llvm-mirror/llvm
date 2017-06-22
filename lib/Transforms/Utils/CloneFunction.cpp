@@ -13,7 +13,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Analysis/ConstantFolding.h"
@@ -31,16 +30,18 @@
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
+#include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
 #include <map>
 using namespace llvm;
 
 /// See comments in Cloning.h.
-BasicBlock *llvm::CloneBasicBlock(const BasicBlock *BB,
-                                  ValueToValueMapTy &VMap,
+BasicBlock *llvm::CloneBasicBlock(const BasicBlock *BB, ValueToValueMapTy &VMap,
                                   const Twine &NameSuffix, Function *F,
-                                  ClonedCodeInfo *CodeInfo) {
+                                  ClonedCodeInfo *CodeInfo,
+                                  DebugInfoFinder *DIFinder) {
+  DenseMap<const MDNode *, MDNode *> Cache;
   BasicBlock *NewBB = BasicBlock::Create(BB->getContext(), "", F);
   if (BB->hasName()) NewBB->setName(BB->getName()+NameSuffix);
 
@@ -49,6 +50,10 @@ BasicBlock *llvm::CloneBasicBlock(const BasicBlock *BB,
   // Loop over all instructions, and copy them over.
   for (BasicBlock::const_iterator II = BB->begin(), IE = BB->end();
        II != IE; ++II) {
+
+    if (DIFinder && F->getParent() && II->getDebugLoc())
+      DIFinder->processLocation(*F->getParent(), II->getDebugLoc().get());
+
     Instruction *NewInst = II->clone();
     if (II->hasName())
       NewInst->setName(II->getName()+NameSuffix);
@@ -118,14 +123,37 @@ void llvm::CloneFunctionInto(Function *NewFunc, const Function *OldFunc,
       AttributeList::get(NewFunc->getContext(), OldAttrs.getFnAttributes(),
                          OldAttrs.getRetAttributes(), NewArgAttrs));
 
+  bool MustCloneSP =
+      OldFunc->getParent() && OldFunc->getParent() == NewFunc->getParent();
+  DISubprogram *SP = OldFunc->getSubprogram();
+  if (SP) {
+    assert(!MustCloneSP || ModuleLevelChanges);
+    // Add mappings for some DebugInfo nodes that we don't want duplicated
+    // even if they're distinct.
+    auto &MD = VMap.MD();
+    MD[SP->getUnit()].reset(SP->getUnit());
+    MD[SP->getType()].reset(SP->getType());
+    MD[SP->getFile()].reset(SP->getFile());
+    // If we're not cloning into the same module, no need to clone the
+    // subprogram
+    if (!MustCloneSP)
+      MD[SP].reset(SP);
+  }
+
   SmallVector<std::pair<unsigned, MDNode *>, 1> MDs;
   OldFunc->getAllMetadata(MDs);
-  for (auto MD : MDs)
+  for (auto MD : MDs) {
     NewFunc->addMetadata(
         MD.first,
         *MapMetadata(MD.second, VMap,
                      ModuleLevelChanges ? RF_None : RF_NoModuleLevelChanges,
                      TypeMapper, Materializer));
+  }
+
+  // When we remap instructions, we want to avoid duplicating inlined
+  // DISubprograms, so record all subprograms we find as we duplicate
+  // instructions and then freeze them in the MD map.
+  DebugInfoFinder DIFinder;
 
   // Loop over all of the basic blocks in the function, cloning them as
   // appropriate.  Note that we save BE this way in order to handle cloning of
@@ -136,7 +164,8 @@ void llvm::CloneFunctionInto(Function *NewFunc, const Function *OldFunc,
     const BasicBlock &BB = *BI;
 
     // Create a new basic block and copy instructions into it!
-    BasicBlock *CBB = CloneBasicBlock(&BB, VMap, NameSuffix, NewFunc, CodeInfo);
+    BasicBlock *CBB = CloneBasicBlock(&BB, VMap, NameSuffix, NewFunc, CodeInfo,
+                                      SP ? &DIFinder : nullptr);
 
     // Add basic block mapping.
     VMap[&BB] = CBB;
@@ -156,6 +185,12 @@ void llvm::CloneFunctionInto(Function *NewFunc, const Function *OldFunc,
     // Note return instructions for the caller.
     if (ReturnInst *RI = dyn_cast<ReturnInst>(CBB->getTerminator()))
       Returns.push_back(RI);
+  }
+
+  for (DISubprogram *ISP : DIFinder.subprograms()) {
+    if (ISP != SP) {
+      VMap.MD()[ISP].reset(ISP);
+    }
   }
 
   // Loop over all of the instructions in the function, fixing up operand
@@ -206,7 +241,7 @@ Function *llvm::CloneFunction(Function *F, ValueToValueMapTy &VMap,
     }
 
   SmallVector<ReturnInst*, 8> Returns;  // Ignore returns cloned.
-  CloneFunctionInto(NewF, F, VMap, /*ModuleLevelChanges=*/false, Returns, "",
+  CloneFunctionInto(NewF, F, VMap, F->getSubprogram() != nullptr, Returns, "",
                     CodeInfo);
 
   return NewF;
@@ -297,7 +332,7 @@ void PruningFunctionCloner::CloneBlock(const BasicBlock *BB,
 
         if (!NewInst->mayHaveSideEffects()) {
           VMap[&*II] = V;
-          delete NewInst;
+          NewInst->deleteValue();
           continue;
         }
       }

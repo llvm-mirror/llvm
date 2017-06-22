@@ -247,7 +247,7 @@ doPromotion(Function *F, SmallPtrSetImpl<Argument *> &ArgsToPromote,
           if (!ArgIndex.second.empty()) {
             Ops.reserve(ArgIndex.second.size());
             Type *ElTy = V->getType();
-            for (unsigned long II : ArgIndex.second) {
+            for (auto II : ArgIndex.second) {
               // Use i32 to index structs, and i64 for others (pointers/arrays).
               // This satisfies GEP constraints.
               Type *IdxTy =
@@ -839,12 +839,12 @@ promoteArguments(Function *F, function_ref<AAResults &(Function &F)> AARGetter,
     // avoiding a register copy.
     if (PtrArg->hasStructRetAttr()) {
       unsigned ArgNo = PtrArg->getArgNo();
-      F->removeAttribute(ArgNo + 1, Attribute::StructRet);
-      F->addAttribute(ArgNo + 1, Attribute::NoAlias);
+      F->removeParamAttr(ArgNo, Attribute::StructRet);
+      F->addParamAttr(ArgNo, Attribute::NoAlias);
       for (Use &U : F->uses()) {
         CallSite CS(U.getUser());
-        CS.removeAttribute(ArgNo + 1, Attribute::StructRet);
-        CS.addAttribute(ArgNo + 1, Attribute::NoAlias);
+        CS.removeParamAttr(ArgNo, Attribute::StructRet);
+        CS.addParamAttr(ArgNo, Attribute::NoAlias);
       }
     }
 

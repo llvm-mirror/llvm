@@ -14,6 +14,7 @@
 #include "llvm/Analysis/BranchProbabilityInfo.h"
 #include "llvm/ADT/PostOrderIterator.h"
 #include "llvm/Analysis/LoopInfo.h"
+#include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
@@ -30,6 +31,7 @@ using namespace llvm;
 INITIALIZE_PASS_BEGIN(BranchProbabilityInfoWrapperPass, "branch-prob",
                       "Branch Probability Analysis", false, true)
 INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(TargetLibraryInfoWrapperPass)
 INITIALIZE_PASS_END(BranchProbabilityInfoWrapperPass, "branch-prob",
                     "Branch Probability Analysis", false, true)
 
@@ -58,45 +60,12 @@ char BranchProbabilityInfoWrapperPass::ID = 0;
 static const uint32_t LBH_TAKEN_WEIGHT = 124;
 static const uint32_t LBH_NONTAKEN_WEIGHT = 4;
 
-/// \brief Unreachable-terminating branch taken weight.
+/// \brief Unreachable-terminating branch taken probability.
 ///
-/// This is the weight for a branch being taken to a block that terminates
+/// This is the probability for a branch being taken to a block that terminates
 /// (eventually) in unreachable. These are predicted as unlikely as possible.
-static const uint32_t UR_TAKEN_WEIGHT = 1;
-
-/// \brief Unreachable-terminating branch not-taken weight.
-///
-/// This is the weight for a branch not being taken toward a block that
-/// terminates (eventually) in unreachable. Such a branch is essentially never
-/// taken. Set the weight to an absurdly high value so that nested loops don't
-/// easily subsume it.
-static const uint32_t UR_NONTAKEN_WEIGHT = 1024*1024 - 1;
-
-/// \brief Returns the branch probability for unreachable edge according to
-/// heuristic.
-///
-/// This is the branch probability being taken to a block that terminates
-/// (eventually) in unreachable. These are predicted as unlikely as possible.
-static BranchProbability getUnreachableProbability(uint64_t UnreachableCount) {
-  assert(UnreachableCount > 0 && "UnreachableCount must be > 0");
-  return BranchProbability::getBranchProbability(
-      UR_TAKEN_WEIGHT,
-      (UR_TAKEN_WEIGHT + UR_NONTAKEN_WEIGHT) * UnreachableCount);
-}
-
-/// \brief Returns the branch probability for reachable edge according to
-/// heuristic.
-///
-/// This is the branch probability not being taken toward a block that
-/// terminates (eventually) in unreachable. Such a branch is essentially never
-/// taken. Set the weight to an absurdly high value so that nested loops don't
-/// easily subsume it.
-static BranchProbability getReachableProbability(uint64_t ReachableCount) {
-  assert(ReachableCount > 0 && "ReachableCount must be > 0");
-  return BranchProbability::getBranchProbability(
-      UR_NONTAKEN_WEIGHT,
-      (UR_TAKEN_WEIGHT + UR_NONTAKEN_WEIGHT) * ReachableCount);
-}
+/// All reachable probability will equally share the remaining part.
+static const BranchProbability UR_TAKEN_PROB = BranchProbability::getRaw(1);
 
 /// \brief Weight for a branch taken going into a cold block.
 ///
@@ -232,8 +201,10 @@ bool BranchProbabilityInfo::calcUnreachableHeuristics(const BasicBlock *BB) {
     return true;
   }
 
-  auto UnreachableProb = getUnreachableProbability(UnreachableEdges.size());
-  auto ReachableProb = getReachableProbability(ReachableEdges.size());
+  auto UnreachableProb = UR_TAKEN_PROB;
+  auto ReachableProb =
+      (BranchProbability::getOne() - UR_TAKEN_PROB * UnreachableEdges.size()) /
+      ReachableEdges.size();
 
   for (unsigned SuccIdx : UnreachableEdges)
     setEdgeProbability(BB, SuccIdx, UnreachableProb);
@@ -301,6 +272,8 @@ bool BranchProbabilityInfo::calcMetadataWeights(const BasicBlock *BB) {
       WeightSum += Weights[i];
     }
   }
+  assert(WeightSum <= UINT32_MAX &&
+         "Expected weights to scale down to 32 bits");
 
   if (WeightSum == 0 || ReachableIdxs.size() == 0) {
     for (unsigned i = 0, e = TI->getNumSuccessors(); i != e; ++i)
@@ -317,7 +290,7 @@ bool BranchProbabilityInfo::calcMetadataWeights(const BasicBlock *BB) {
   // If the unreachable heuristic is more strong then we use it for this edge.
   if (UnreachableIdxs.size() > 0 && ReachableIdxs.size() > 0) {
     auto ToDistribute = BranchProbability::getZero();
-    auto UnreachableProb = getUnreachableProbability(UnreachableIdxs.size());
+    auto UnreachableProb = UR_TAKEN_PROB;
     for (auto i : UnreachableIdxs)
       if (UnreachableProb < BP[i]) {
         ToDistribute += BP[i] - UnreachableProb;
@@ -328,20 +301,13 @@ bool BranchProbabilityInfo::calcMetadataWeights(const BasicBlock *BB) {
     // the difference between reachable blocks.
     if (ToDistribute > BranchProbability::getZero()) {
       BranchProbability PerEdge = ToDistribute / ReachableIdxs.size();
-      for (auto i : ReachableIdxs) {
+      for (auto i : ReachableIdxs)
         BP[i] += PerEdge;
-        ToDistribute -= PerEdge;
-      }
-      // Tail goes to the first reachable edge.
-      BP[ReachableIdxs[0]] += ToDistribute;
     }
   }
 
   for (unsigned i = 0, e = TI->getNumSuccessors(); i != e; ++i)
     setEdgeProbability(BB, i, BP[i]);
-
-  assert(WeightSum <= UINT32_MAX &&
-         "Expected weights to scale down to 32 bits");
 
   return true;
 }
@@ -493,7 +459,8 @@ bool BranchProbabilityInfo::calcLoopBranchHeuristics(const BasicBlock *BB,
   return true;
 }
 
-bool BranchProbabilityInfo::calcZeroHeuristics(const BasicBlock *BB) {
+bool BranchProbabilityInfo::calcZeroHeuristics(const BasicBlock *BB,
+                                               const TargetLibraryInfo *TLI) {
   const BranchInst *BI = dyn_cast<BranchInst>(BB->getTerminator());
   if (!BI || !BI->isConditional())
     return false;
@@ -516,8 +483,37 @@ bool BranchProbabilityInfo::calcZeroHeuristics(const BasicBlock *BB) {
         if (AndRHS->getUniqueInteger().isPowerOf2())
           return false;
 
+  // Check if the LHS is the return value of a library function
+  LibFunc Func = NumLibFuncs;
+  if (TLI)
+    if (CallInst *Call = dyn_cast<CallInst>(CI->getOperand(0)))
+      if (Function *CalledFn = Call->getCalledFunction())
+        TLI->getLibFunc(*CalledFn, Func);
+
   bool isProb;
-  if (CV->isZero()) {
+  if (Func == LibFunc_strcasecmp ||
+      Func == LibFunc_strcmp ||
+      Func == LibFunc_strncasecmp ||
+      Func == LibFunc_strncmp ||
+      Func == LibFunc_memcmp) {
+    // strcmp and similar functions return zero, negative, or positive, if the
+    // first string is equal, less, or greater than the second. We consider it
+    // likely that the strings are not equal, so a comparison with zero is
+    // probably false, but also a comparison with any other number is also
+    // probably false given that what exactly is returned for nonzero values is
+    // not specified. Any kind of comparison other than equality we know
+    // nothing about.
+    switch (CI->getPredicate()) {
+    case CmpInst::ICMP_EQ:
+      isProb = false;
+      break;
+    case CmpInst::ICMP_NE:
+      isProb = true;
+      break;
+    default:
+      return false;
+    }
+  } else if (CV->isZero()) {
     switch (CI->getPredicate()) {
     case CmpInst::ICMP_EQ:
       // X == 0   ->  Unlikely
@@ -743,7 +739,8 @@ void BranchProbabilityInfo::eraseBlock(const BasicBlock *BB) {
   }
 }
 
-void BranchProbabilityInfo::calculate(const Function &F, const LoopInfo &LI) {
+void BranchProbabilityInfo::calculate(const Function &F, const LoopInfo &LI,
+                                      const TargetLibraryInfo *TLI) {
   DEBUG(dbgs() << "---- Branch Probability Info : " << F.getName()
                << " ----\n\n");
   LastF = &F; // Store the last function we ran on for printing.
@@ -769,7 +766,7 @@ void BranchProbabilityInfo::calculate(const Function &F, const LoopInfo &LI) {
       continue;
     if (calcPointerHeuristics(BB))
       continue;
-    if (calcZeroHeuristics(BB))
+    if (calcZeroHeuristics(BB, TLI))
       continue;
     if (calcFloatingPointHeuristics(BB))
       continue;
@@ -783,12 +780,14 @@ void BranchProbabilityInfo::calculate(const Function &F, const LoopInfo &LI) {
 void BranchProbabilityInfoWrapperPass::getAnalysisUsage(
     AnalysisUsage &AU) const {
   AU.addRequired<LoopInfoWrapperPass>();
+  AU.addRequired<TargetLibraryInfoWrapperPass>();
   AU.setPreservesAll();
 }
 
 bool BranchProbabilityInfoWrapperPass::runOnFunction(Function &F) {
   const LoopInfo &LI = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
-  BPI.calculate(F, LI);
+  const TargetLibraryInfo &TLI = getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
+  BPI.calculate(F, LI, &TLI);
   return false;
 }
 
@@ -803,7 +802,7 @@ AnalysisKey BranchProbabilityAnalysis::Key;
 BranchProbabilityInfo
 BranchProbabilityAnalysis::run(Function &F, FunctionAnalysisManager &AM) {
   BranchProbabilityInfo BPI;
-  BPI.calculate(F, AM.getResult<LoopAnalysis>(F));
+  BPI.calculate(F, AM.getResult<LoopAnalysis>(F), &AM.getResult<TargetLibraryAnalysis>(F));
   return BPI;
 }
 

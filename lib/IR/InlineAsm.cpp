@@ -11,11 +11,11 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/IR/InlineAsm.h"
 #include "ConstantsContext.h"
 #include "LLVMContextImpl.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/DerivedTypes.h"
-#include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Value.h"
 #include "llvm/Support/Casting.h"
@@ -39,10 +39,6 @@ InlineAsm::InlineAsm(FunctionType *FTy, const std::string &asmString,
   assert(Verify(getFunctionType(), constraints) &&
          "Function type not legal for constraints!");
 }
-
-// Implement the first virtual method in this class in this file so the
-// InlineAsm vtable is emitted here.
-InlineAsm::~InlineAsm() = default;
 
 InlineAsm *InlineAsm::get(FunctionType *FTy, StringRef AsmString,
                           StringRef Constraints, bool hasSideEffects,

@@ -547,15 +547,14 @@ defm UREM : I3<"rem.u", urem>;
 // Integer absolute value.  NumBits should be one minus the bit width of RC.
 // This idiom implements the algorithm at
 // http://graphics.stanford.edu/~seander/bithacks.html#IntegerAbs.
-multiclass ABS<RegisterClass RC, int NumBits, string SizeName> {
+multiclass ABS<RegisterClass RC, string SizeName> {
   def : NVPTXInst<(outs RC:$dst), (ins RC:$a),
                   !strconcat("abs", SizeName, " \t$dst, $a;"),
-                  [(set RC:$dst, (xor (add (sra RC:$a, (i32 NumBits)), RC:$a),
-                                      (sra RC:$a, (i32 NumBits))))]>;
+                  [(set RC:$dst, (abs RC:$a))]>;
 }
-defm ABS_16 : ABS<Int16Regs, 15, ".s16">;
-defm ABS_32 : ABS<Int32Regs, 31, ".s32">;
-defm ABS_64 : ABS<Int64Regs, 63, ".s64">;
+defm ABS_16 : ABS<Int16Regs, ".s16">;
+defm ABS_32 : ABS<Int32Regs, ".s32">;
+defm ABS_64 : ABS<Int64Regs, ".s64">;
 
 // Integer min/max.
 defm SMAX : I3<"max.s", smax>;
@@ -3102,7 +3101,8 @@ def : Pat<(brcond (i1 (setne Int1Regs:$a, -1)), bb:$target),
           (CBranchOther Int1Regs:$a, bb:$target)>;
 
 // Call
-def SDT_NVPTXCallSeqStart : SDCallSeqStart<[SDTCisVT<0, i32>]>;
+def SDT_NVPTXCallSeqStart : SDCallSeqStart<[SDTCisVT<0, i32>,
+                                            SDTCisVT<1, i32>]>;
 def SDT_NVPTXCallSeqEnd   : SDCallSeqEnd<[SDTCisVT<0, i32>, SDTCisVT<1, i32>]>;
 
 def callseq_start : SDNode<"ISD::CALLSEQ_START", SDT_NVPTXCallSeqStart,
@@ -3127,10 +3127,10 @@ class Pseudo<dag outs, dag ins, string asmstr, list<dag> pattern>
    : NVPTXInst<outs, ins, asmstr, pattern>;
 
 def Callseq_Start :
-  NVPTXInst<(outs), (ins i32imm:$amt),
-            "\\{ // callseq $amt\n"
+  NVPTXInst<(outs), (ins i32imm:$amt1, i32imm:$amt2),
+            "\\{ // callseq $amt1, $amt2\n"
             "\t.reg .b32 temp_param_reg;",
-           [(callseq_start timm:$amt)]>;
+            [(callseq_start timm:$amt1, timm:$amt2)]>;
 def Callseq_End :
   NVPTXInst<(outs), (ins i32imm:$amt1, i32imm:$amt2),
             "\\} // callseq $amt1",

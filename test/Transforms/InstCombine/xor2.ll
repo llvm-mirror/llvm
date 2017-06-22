@@ -57,17 +57,6 @@ define i32 @test3(i32 %tmp1) {
   ret i32 %ov110
 }
 
-define i32 @test4(i32 %A, i32 %B) {
-; CHECK-LABEL: @test4(
-; CHECK-NEXT:    [[TMP1:%.*]] = ashr i32 %A, %B
-; CHECK-NEXT:    ret i32 [[TMP1]]
-;
-  %1 = xor i32 %A, -1
-  %2 = ashr i32 %1, %B
-  %3 = xor i32 %2, -1
-  ret i32 %3
-}
-
 ; defect-2 in rdar://12329730
 ; (X^C1) >> C2) ^ C3 -> (X>>C2) ^ ((C1>>C2)^C3)
 ;   where the "X" has more than one use
@@ -336,3 +325,36 @@ define i32 @test14(i32 %a, i32 %b, i32 %c) {
   ret i32 %xor
 }
 
+define i8 @test15(i8 %A, i8 %B) {
+; CHECK-LABEL: @test15(
+; CHECK-NEXT:    [[XOR1:%.*]] = xor i8 [[B:%.*]], [[A:%.*]]
+; CHECK-NEXT:    [[NOT:%.*]] = xor i8 [[A]], 33
+; CHECK-NEXT:    [[XOR2:%.*]] = xor i8 [[NOT]], [[B]]
+; CHECK-NEXT:    [[AND:%.*]] = and i8 [[XOR1]], -34
+; CHECK-NEXT:    [[RES:%.*]] = mul i8 [[AND]], [[XOR2]]
+; CHECK-NEXT:    ret i8 [[RES]]
+;
+  %xor1 = xor i8 %B, %A
+  %not = xor i8 %A, 33
+  %xor2 = xor i8 %not, %B
+  %and = and i8 %xor1, %xor2
+  %res = mul i8 %and, %xor2 ; to increase the use count for the xor
+  ret i8 %res
+}
+
+define i8 @test16(i8 %A, i8 %B) {
+; CHECK-LABEL: @test16(
+; CHECK-NEXT:    [[XOR1:%.*]] = xor i8 [[B:%.*]], [[A:%.*]]
+; CHECK-NEXT:    [[NOT:%.*]] = xor i8 [[A]], 33
+; CHECK-NEXT:    [[XOR2:%.*]] = xor i8 [[NOT]], [[B]]
+; CHECK-NEXT:    [[AND:%.*]] = and i8 [[XOR1]], -34
+; CHECK-NEXT:    [[RES:%.*]] = mul i8 [[AND]], [[XOR2]]
+; CHECK-NEXT:    ret i8 [[RES]]
+;
+  %xor1 = xor i8 %B, %A
+  %not = xor i8 %A, 33
+  %xor2 = xor i8 %not, %B
+  %and = and i8 %xor2, %xor1
+  %res = mul i8 %and, %xor2 ; to increase the use count for the xor
+  ret i8 %res
+}

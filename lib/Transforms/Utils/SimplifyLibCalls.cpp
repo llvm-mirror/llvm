@@ -85,20 +85,6 @@ static bool isCallingConvCCompatible(CallInst *CI) {
   return false;
 }
 
-/// Return true if it only matters that the value is equal or not-equal to zero.
-static bool isOnlyUsedInZeroEqualityComparison(Value *V) {
-  for (User *U : V->users()) {
-    if (ICmpInst *IC = dyn_cast<ICmpInst>(U))
-      if (IC->isEquality())
-        if (Constant *C = dyn_cast<Constant>(IC->getOperand(1)))
-          if (C->isNullValue())
-            continue;
-    // Unknown instruction.
-    return false;
-  }
-  return true;
-}
-
 /// Return true if it is only used in equality comparisons with With.
 static bool isOnlyUsedInEqualityComparison(Value *V, Value *With) {
   for (User *U : V->users()) {
@@ -426,57 +412,68 @@ Value *LibCallSimplifier::optimizeStrNCpy(CallInst *CI, IRBuilder<> &B) {
   return Dst;
 }
 
-Value *LibCallSimplifier::optimizeStrLen(CallInst *CI, IRBuilder<> &B) {
+Value *LibCallSimplifier::optimizeStringLength(CallInst *CI, IRBuilder<> &B,
+                                               unsigned CharSize) {
   Value *Src = CI->getArgOperand(0);
 
   // Constant folding: strlen("xyz") -> 3
-  if (uint64_t Len = GetStringLength(Src))
+  if (uint64_t Len = GetStringLength(Src, CharSize))
     return ConstantInt::get(CI->getType(), Len - 1);
 
   // If s is a constant pointer pointing to a string literal, we can fold
-  // strlen(s + x) to strlen(s) - x, when x is known to be in the range 
+  // strlen(s + x) to strlen(s) - x, when x is known to be in the range
   // [0, strlen(s)] or the string has a single null terminator '\0' at the end.
-  // We only try to simplify strlen when the pointer s points to an array 
+  // We only try to simplify strlen when the pointer s points to an array
   // of i8. Otherwise, we would need to scale the offset x before doing the
-  // subtraction. This will make the optimization more complex, and it's not 
-  // very useful because calling strlen for a pointer of other types is 
+  // subtraction. This will make the optimization more complex, and it's not
+  // very useful because calling strlen for a pointer of other types is
   // very uncommon.
   if (GEPOperator *GEP = dyn_cast<GEPOperator>(Src)) {
-    if (!isGEPBasedOnPointerToString(GEP))
+    if (!isGEPBasedOnPointerToString(GEP, CharSize))
       return nullptr;
 
-    StringRef Str;
-    if (getConstantStringInfo(GEP->getOperand(0), Str, 0, false)) {
-      size_t NullTermIdx = Str.find('\0');
-      
-      // If the string does not have '\0', leave it to strlen to compute
-      // its length.
-      if (NullTermIdx == StringRef::npos)
-        return nullptr;
-     
+    ConstantDataArraySlice Slice;
+    if (getConstantDataArrayInfo(GEP->getOperand(0), Slice, CharSize)) {
+      uint64_t NullTermIdx;
+      if (Slice.Array == nullptr) {
+        NullTermIdx = 0;
+      } else {
+        NullTermIdx = ~((uint64_t)0);
+        for (uint64_t I = 0, E = Slice.Length; I < E; ++I) {
+          if (Slice.Array->getElementAsInteger(I + Slice.Offset) == 0) {
+            NullTermIdx = I;
+            break;
+          }
+        }
+        // If the string does not have '\0', leave it to strlen to compute
+        // its length.
+        if (NullTermIdx == ~((uint64_t)0))
+          return nullptr;
+      }
+
       Value *Offset = GEP->getOperand(2);
-      unsigned BitWidth = Offset->getType()->getIntegerBitWidth();
-      KnownBits Known(BitWidth);
-      computeKnownBits(Offset, Known, DL, 0, nullptr, CI, nullptr);
+      KnownBits Known = computeKnownBits(Offset, DL, 0, nullptr, CI, nullptr);
       Known.Zero.flipAllBits();
-      size_t ArrSize = 
+      uint64_t ArrSize =
              cast<ArrayType>(GEP->getSourceElementType())->getNumElements();
 
-      // KnownZero's bits are flipped, so zeros in KnownZero now represent 
-      // bits known to be zeros in Offset, and ones in KnowZero represent 
+      // KnownZero's bits are flipped, so zeros in KnownZero now represent
+      // bits known to be zeros in Offset, and ones in KnowZero represent
       // bits unknown in Offset. Therefore, Offset is known to be in range
-      // [0, NullTermIdx] when the flipped KnownZero is non-negative and 
+      // [0, NullTermIdx] when the flipped KnownZero is non-negative and
       // unsigned-less-than NullTermIdx.
       //
-      // If Offset is not provably in the range [0, NullTermIdx], we can still 
-      // optimize if we can prove that the program has undefined behavior when 
-      // Offset is outside that range. That is the case when GEP->getOperand(0) 
+      // If Offset is not provably in the range [0, NullTermIdx], we can still
+      // optimize if we can prove that the program has undefined behavior when
+      // Offset is outside that range. That is the case when GEP->getOperand(0)
       // is a pointer to an object whose memory extent is NullTermIdx+1.
-      if ((Known.Zero.isNonNegative() && Known.Zero.ule(NullTermIdx)) || 
+      if ((Known.Zero.isNonNegative() && Known.Zero.ule(NullTermIdx)) ||
           (GEP->isInBounds() && isa<GlobalVariable>(GEP->getOperand(0)) &&
-           NullTermIdx == ArrSize - 1))
-        return B.CreateSub(ConstantInt::get(CI->getType(), NullTermIdx), 
+           NullTermIdx == ArrSize - 1)) {
+        Offset = B.CreateSExtOrTrunc(Offset, CI->getType());
+        return B.CreateSub(ConstantInt::get(CI->getType(), NullTermIdx),
                            Offset);
+      }
     }
 
     return nullptr;
@@ -484,8 +481,8 @@ Value *LibCallSimplifier::optimizeStrLen(CallInst *CI, IRBuilder<> &B) {
 
   // strlen(x?"foo":"bars") --> x ? 3 : 4
   if (SelectInst *SI = dyn_cast<SelectInst>(Src)) {
-    uint64_t LenTrue = GetStringLength(SI->getTrueValue());
-    uint64_t LenFalse = GetStringLength(SI->getFalseValue());
+    uint64_t LenTrue = GetStringLength(SI->getTrueValue(), CharSize);
+    uint64_t LenFalse = GetStringLength(SI->getFalseValue(), CharSize);
     if (LenTrue && LenFalse) {
       Function *Caller = CI->getParent()->getParent();
       emitOptimizationRemark(CI->getContext(), "simplify-libcalls", *Caller,
@@ -503,6 +500,17 @@ Value *LibCallSimplifier::optimizeStrLen(CallInst *CI, IRBuilder<> &B) {
     return B.CreateZExt(B.CreateLoad(Src, "strlenfirst"), CI->getType());
 
   return nullptr;
+}
+
+Value *LibCallSimplifier::optimizeStrLen(CallInst *CI, IRBuilder<> &B) {
+  return optimizeStringLength(CI, B, 8);
+}
+
+Value *LibCallSimplifier::optimizeWcslen(CallInst *CI, IRBuilder<> &B) {
+  Module &M = *CI->getParent()->getParent()->getParent();
+  unsigned WCharSize = TLI->getWCharSize(M) * 8;
+
+  return optimizeStringLength(CI, B, WCharSize);
 }
 
 Value *LibCallSimplifier::optimizeStrPBrk(CallInst *CI, IRBuilder<> &B) {
@@ -537,7 +545,7 @@ Value *LibCallSimplifier::optimizeStrTo(CallInst *CI, IRBuilder<> &B) {
   if (isa<ConstantPointerNull>(EndPtr)) {
     // With a null EndPtr, this function won't capture the main argument.
     // It would be readonly too, except that it still may write to errno.
-    CI->addAttribute(1, Attribute::NoCapture);
+    CI->addParamAttr(0, Attribute::NoCapture);
   }
 
   return nullptr;
@@ -730,8 +738,8 @@ Value *LibCallSimplifier::optimizeMemCmp(CallInst *CI, IRBuilder<> &B) {
   ConstantInt *LenC = dyn_cast<ConstantInt>(CI->getArgOperand(2));
   if (!LenC)
     return nullptr;
-  uint64_t Len = LenC->getZExtValue();
 
+  uint64_t Len = LenC->getZExtValue();
   if (Len == 0) // memcmp(s1,s2,0) -> 0
     return Constant::getNullValue(CI->getType());
 
@@ -1450,11 +1458,11 @@ static void insertSinCosCall(IRBuilder<> &B, Function *OrigCallee, Value *Arg,
     // x86_64 can't use {float, float} since that would be returned in both
     // xmm0 and xmm1, which isn't what a real struct would do.
     ResTy = T.getArch() == Triple::x86_64
-    ? static_cast<Type *>(VectorType::get(ArgTy, 2))
-    : static_cast<Type *>(StructType::get(ArgTy, ArgTy, nullptr));
+                ? static_cast<Type *>(VectorType::get(ArgTy, 2))
+                : static_cast<Type *>(StructType::get(ArgTy, ArgTy));
   } else {
     Name = "__sincospi_stret";
-    ResTy = StructType::get(ArgTy, ArgTy, nullptr);
+    ResTy = StructType::get(ArgTy, ArgTy);
   }
 
   Module *M = OrigCallee->getParent();
@@ -2026,6 +2034,8 @@ Value *LibCallSimplifier::optimizeStringMemoryLibCall(CallInst *CI,
       return optimizeMemMove(CI, Builder);
     case LibFunc_memset:
       return optimizeMemSet(CI, Builder);
+    case LibFunc_wcslen:
+      return optimizeWcslen(CI, Builder);
     default:
       break;
     }

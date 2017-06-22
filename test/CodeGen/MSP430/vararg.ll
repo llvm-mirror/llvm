@@ -1,4 +1,4 @@
-; RUN: llc < %s | FileCheck %s
+; RUN: llc -verify-machineinstrs < %s | FileCheck %s
 
 target datalayout = "e-p:16:16:16-i8:8:8-i16:16:16-i32:16:32-n8:16"
 target triple = "msp430---elf"
@@ -25,7 +25,6 @@ define i16 @va_arg(i8* %vl) nounwind {
 entry:
 ; CHECK-LABEL: va_arg:
   %vl.addr = alloca i8*, align 2
-; CHECK: mov.w r12, 0(r1)
   store i8* %vl, i8** %vl.addr, align 2
 ; CHECK: mov.w r12, [[REG:r[0-9]+]]
 ; CHECK-NEXT: add.w #2, [[REG]]

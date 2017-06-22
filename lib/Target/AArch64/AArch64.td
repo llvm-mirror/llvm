@@ -190,6 +190,7 @@ def ProcA53     : SubtargetFeature<"a53", "ARMProcFamily", "CortexA53",
                                    FeatureCrypto,
                                    FeatureCustomCheapAsMoveHandling,
                                    FeatureFPARMv8,
+                                   FeatureFuseAES,
                                    FeatureNEON,
                                    FeaturePerfMon,
                                    FeaturePostRAScheduler,
@@ -216,6 +217,7 @@ def ProcA72     : SubtargetFeature<"a72", "ARMProcFamily", "CortexA72",
                                    FeatureCRC,
                                    FeatureCrypto,
                                    FeatureFPARMv8,
+                                   FeatureFuseAES,
                                    FeatureNEON,
                                    FeaturePerfMon
                                    ]>;
@@ -225,6 +227,7 @@ def ProcA73     : SubtargetFeature<"a73", "ARMProcFamily", "CortexA73",
                                    FeatureCRC,
                                    FeatureCrypto,
                                    FeatureFPARMv8,
+                                   FeatureFuseAES,
                                    FeatureNEON,
                                    FeaturePerfMon
                                    ]>;
@@ -358,8 +361,8 @@ def ProcThunderXT83 : SubtargetFeature<"thunderxt83", "ARMProcFamily",
                                        FeatureNEON]>;
 
 def : ProcessorModel<"generic", NoSchedModel, [
-                     FeatureCRC,
                      FeatureFPARMv8,
+                     FeatureFuseAES,
                      FeatureNEON,
                      FeaturePerfMon,
                      FeaturePostRAScheduler

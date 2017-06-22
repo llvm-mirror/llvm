@@ -47,6 +47,18 @@ static void commonSectionMapping(IO &IO, WasmYAML::Section &Section) {
   IO.mapOptional("Relocations", Section.Relocations);
 }
 
+static void sectionMapping(IO &IO, WasmYAML::NameSection &Section) {
+  commonSectionMapping(IO, Section);
+  IO.mapRequired("Name", Section.Name);
+  IO.mapOptional("FunctionNames", Section.FunctionNames);
+}
+
+static void sectionMapping(IO &IO, WasmYAML::LinkingSection &Section) {
+  commonSectionMapping(IO, Section);
+  IO.mapRequired("Name", Section.Name);
+  IO.mapRequired("SymbolInfo", Section.SymbolInfos);
+}
+
 static void sectionMapping(IO &IO, WasmYAML::CustomSection &Section) {
   commonSectionMapping(IO, Section);
   IO.mapRequired("Name", Section.Name);
@@ -117,11 +129,29 @@ void MappingTraits<std::unique_ptr<WasmYAML::Section>>::mapping(
     IO.mapRequired("Type", SectionType);
 
   switch (SectionType) {
-  case wasm::WASM_SEC_CUSTOM:
-    if (!IO.outputting())
-      Section.reset(new WasmYAML::CustomSection());
-    sectionMapping(IO, *cast<WasmYAML::CustomSection>(Section.get()));
+  case wasm::WASM_SEC_CUSTOM: {
+    StringRef SectionName;
+    if (IO.outputting()) {
+      auto CustomSection = cast<WasmYAML::CustomSection>(Section.get());
+      SectionName = CustomSection->Name;
+    } else {
+      IO.mapRequired("Name", SectionName);
+    }
+    if (SectionName == "linking") {
+      if (!IO.outputting())
+        Section.reset(new WasmYAML::LinkingSection());
+      sectionMapping(IO, *cast<WasmYAML::LinkingSection>(Section.get()));
+    } else if (SectionName == "name") {
+      if (!IO.outputting())
+        Section.reset(new WasmYAML::NameSection());
+      sectionMapping(IO, *cast<WasmYAML::NameSection>(Section.get()));
+    } else {
+      if (!IO.outputting())
+        Section.reset(new WasmYAML::CustomSection(SectionName));
+      sectionMapping(IO, *cast<WasmYAML::CustomSection>(Section.get()));
+    }
     break;
+  }
   case wasm::WASM_SEC_TYPE:
     if (!IO.outputting())
       Section.reset(new WasmYAML::TypeSection());
@@ -226,6 +256,12 @@ void MappingTraits<WasmYAML::Relocation>::mapping(
   IO.mapOptional("Addend", Relocation.Addend, 0);
 }
 
+void MappingTraits<WasmYAML::NameEntry>::mapping(
+    IO &IO, WasmYAML::NameEntry &NameEntry) {
+  IO.mapRequired("Index", NameEntry.Index);
+  IO.mapRequired("Name", NameEntry.Name);
+}
+
 void MappingTraits<WasmYAML::LocalDecl>::mapping(
     IO &IO, WasmYAML::LocalDecl &LocalDecl) {
   IO.mapRequired("Type", LocalDecl.Type);
@@ -255,8 +291,12 @@ void MappingTraits<WasmYAML::Import>::mapping(IO &IO,
   if (Import.Kind == wasm::WASM_EXTERNAL_FUNCTION) {
     IO.mapRequired("SigIndex", Import.SigIndex);
   } else if (Import.Kind == wasm::WASM_EXTERNAL_GLOBAL) {
-    IO.mapRequired("GlobalType", Import.GlobalType);
-    IO.mapRequired("GlobalMutable", Import.GlobalMutable);
+    IO.mapRequired("GlobalType", Import.GlobalImport.Type);
+    IO.mapRequired("GlobalMutable", Import.GlobalImport.Mutable);
+  } else if (Import.Kind == wasm::WASM_EXTERNAL_TABLE) {
+    IO.mapRequired("Table", Import.TableImport);
+  } else if (Import.Kind == wasm::WASM_EXTERNAL_MEMORY ) {
+    IO.mapRequired("Memory", Import.Memory);
   } else {
     llvm_unreachable("unhandled import type");
   }
@@ -307,6 +347,12 @@ void MappingTraits<WasmYAML::DataSegment>::mapping(
   IO.mapRequired("Content", Segment.Content);
 }
 
+void MappingTraits<WasmYAML::SymbolInfo>::mapping(IO &IO,
+                                                  WasmYAML::SymbolInfo &Info) {
+  IO.mapRequired("Name", Info.Name);
+  IO.mapRequired("Flags", Info.Flags);
+}
+
 void ScalarEnumerationTraits<WasmYAML::ValueType>::enumeration(
     IO &IO, WasmYAML::ValueType &Type) {
 #define ECase(X) IO.enumCase(Type, #X, wasm::WASM_TYPE_##X);
@@ -352,7 +398,7 @@ void ScalarEnumerationTraits<WasmYAML::TableType>::enumeration(
 void ScalarEnumerationTraits<WasmYAML::RelocType>::enumeration(
     IO &IO, WasmYAML::RelocType &Type) {
 #define WASM_RELOC(name, value) IO.enumCase(Type, #name, wasm::name);
-#include "llvm/Support/WasmRelocs/WebAssembly.def"
+#include "llvm/BinaryFormat/WasmRelocs/WebAssembly.def"
 #undef WASM_RELOC
 }
 

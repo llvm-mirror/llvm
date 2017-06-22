@@ -314,10 +314,13 @@ ValueEnumerator::ValueEnumerator(const Module &M,
   // Remember what is the cutoff between globalvalue's and other constants.
   unsigned FirstConstant = Values.size();
 
-  // Enumerate the global variable initializers.
-  for (const GlobalVariable &GV : M.globals())
+  // Enumerate the global variable initializers and attributes.
+  for (const GlobalVariable &GV : M.globals()) {
     if (GV.hasInitializer())
       EnumerateValue(GV.getInitializer());
+    if (GV.hasAttributes())
+      EnumerateAttributes(GV.getAttributesAsList(AttributeList::FunctionIndex));
+  }
 
   // Enumerate the aliasees.
   for (const GlobalAlias &GA : M.aliases())
@@ -899,8 +902,11 @@ void ValueEnumerator::EnumerateAttributes(AttributeList PAL) {
   }
 
   // Do lookups for all attribute groups.
-  for (unsigned i = 0, e = PAL.getNumSlots(); i != e; ++i) {
-    IndexAndAttrSet Pair = {PAL.getSlotIndex(i), PAL.getSlotAttributes(i)};
+  for (unsigned i = PAL.index_begin(), e = PAL.index_end(); i != e; ++i) {
+    AttributeSet AS = PAL.getAttributes(i);
+    if (!AS.hasAttributes())
+      continue;
+    IndexAndAttrSet Pair = {i, AS};
     unsigned &Entry = AttributeGroupMap[Pair];
     if (Entry == 0) {
       AttributeGroups.push_back(Pair);

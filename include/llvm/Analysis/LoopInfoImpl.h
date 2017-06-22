@@ -17,8 +17,8 @@
 
 #include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/ADT/PostOrderIterator.h"
-#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/Dominators.h"
 
@@ -220,8 +220,8 @@ void LoopBase<BlockT, LoopT>::verifyLoop() const {
     BI = df_ext_begin(getHeader(), VisitSet),
     BE = df_ext_end(getHeader(), VisitSet);
 
-  // Keep track of the number of BBs visited.
-  unsigned NumVisited = 0;
+  // Keep track of the BBs visited.
+  SmallPtrSet<BlockT*, 8> VisitedBBs;
 
   // Check the individual blocks.
   for ( ; BI != BE; ++BI) {
@@ -259,10 +259,18 @@ void LoopBase<BlockT, LoopT>::verifyLoop() const {
     assert(BB != &getHeader()->getParent()->front() &&
            "Loop contains function entry block!");
 
-    NumVisited++;
+    VisitedBBs.insert(BB);
   }
 
-  assert(NumVisited == getNumBlocks() && "Unreachable block in loop");
+  if (VisitedBBs.size() != getNumBlocks()) {
+    dbgs() << "The following blocks are unreachable in the loop: ";
+    for (auto BB : Blocks) {
+      if (!VisitedBBs.count(BB)) {
+        dbgs() << *BB << "\n";
+      }
+    }
+    assert(false && "Unreachable block in loop");
+  }
 
   // Check the subloops.
   for (iterator I = begin(), E = end(); I != E; ++I)

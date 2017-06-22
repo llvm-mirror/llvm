@@ -13,6 +13,7 @@
 #include "AMDGPUSubtarget.h"
 #include "SIInstrInfo.h"
 #include "SIMachineFunctionInfo.h"
+#include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/CodeGen/LiveIntervalAnalysis.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
@@ -35,9 +36,12 @@ struct FoldCandidate {
   };
   unsigned char UseOpNo;
   MachineOperand::MachineOperandType Kind;
+  bool Commuted;
 
-  FoldCandidate(MachineInstr *MI, unsigned OpNo, MachineOperand *FoldOp) :
-    UseMI(MI), OpToFold(nullptr), UseOpNo(OpNo), Kind(FoldOp->getType()) {
+  FoldCandidate(MachineInstr *MI, unsigned OpNo, MachineOperand *FoldOp,
+                bool Commuted_ = false) :
+    UseMI(MI), OpToFold(nullptr), UseOpNo(OpNo), Kind(FoldOp->getType()),
+    Commuted(Commuted_) {
     if (FoldOp->isImm()) {
       ImmToFold = FoldOp->getImm();
     } else if (FoldOp->isFI()) {
@@ -58,6 +62,10 @@ struct FoldCandidate {
 
   bool isReg() const {
     return Kind == MachineOperand::MO_Register;
+  }
+
+  bool isCommuted() const {
+    return Commuted;
   }
 };
 
@@ -159,6 +167,8 @@ static bool updateOperand(FoldCandidate &Fold,
   if (TargetRegisterInfo::isVirtualRegister(Old.getReg()) &&
       TargetRegisterInfo::isVirtualRegister(New->getReg())) {
     Old.substVirtReg(New->getReg(), New->getSubReg(), TRI);
+
+    Old.setIsUndef(New->isUndef());
     return true;
   }
 
@@ -237,8 +247,13 @@ static bool tryAddToFoldList(SmallVectorImpl<FoldCandidate> &FoldList,
         !TII->commuteInstruction(*MI, false, CommuteIdx0, CommuteIdx1))
       return false;
 
-    if (!TII->isOperandLegal(*MI, OpNo, OpToFold))
+    if (!TII->isOperandLegal(*MI, OpNo, OpToFold)) {
+      TII->commuteInstruction(*MI, false, CommuteIdx0, CommuteIdx1);
       return false;
+    }
+
+    FoldList.push_back(FoldCandidate(MI, OpNo, OpToFold, true));
+    return true;
   }
 
   FoldList.push_back(FoldCandidate(MI, OpNo, OpToFold));
@@ -247,9 +262,10 @@ static bool tryAddToFoldList(SmallVectorImpl<FoldCandidate> &FoldList,
 
 // If the use operand doesn't care about the value, this may be an operand only
 // used for register indexing, in which case it is unsafe to fold.
-static bool isUseSafeToFold(const MachineInstr &MI,
+static bool isUseSafeToFold(const SIInstrInfo *TII,
+                            const MachineInstr &MI,
                             const MachineOperand &UseMO) {
-  return !UseMO.isUndef();
+  return !UseMO.isUndef() && !TII->isSDWA(MI);
   //return !MI.hasRegisterImplicitUseOperand(UseMO.getReg());
 }
 
@@ -261,7 +277,7 @@ void SIFoldOperands::foldOperand(
   SmallVectorImpl<MachineInstr *> &CopiesToReplace) const {
   const MachineOperand &UseOp = UseMI->getOperand(UseOpIdx);
 
-  if (!isUseSafeToFold(*UseMI, UseOp))
+  if (!isUseSafeToFold(TII, *UseMI, UseOp))
     return;
 
   // FIXME: Fold operands with subregs.
@@ -457,7 +473,7 @@ static MachineOperand *getImmOrMaterializedImm(MachineRegisterInfo &MRI,
       return &Op;
 
     MachineInstr *Def = MRI.getVRegDef(Op.getReg());
-    if (Def->isMoveImmediate()) {
+    if (Def && Def->isMoveImmediate()) {
       MachineOperand &ImmSrc = Def->getOperand(1);
       if (ImmSrc.isImm())
         return &ImmSrc;
@@ -698,6 +714,9 @@ void SIFoldOperands::foldInstOperand(MachineInstr &MI,
       DEBUG(dbgs() << "Folded source from " << MI << " into OpNo " <<
             static_cast<int>(Fold.UseOpNo) << " of " << *Fold.UseMI << '\n');
       tryFoldInst(TII, Fold.UseMI);
+    } else if (Fold.isCommuted()) {
+      // Restoring instruction's original operand order if fold has failed.
+      TII->commuteInstruction(*Fold.UseMI, false);
     }
   }
 }
@@ -714,7 +733,8 @@ const MachineOperand *SIFoldOperands::isClamp(const MachineInstr &MI) const {
     // Make sure sources are identical.
     const MachineOperand *Src0 = TII->getNamedOperand(MI, AMDGPU::OpName::src0);
     const MachineOperand *Src1 = TII->getNamedOperand(MI, AMDGPU::OpName::src1);
-    if (!Src0->isReg() || Src0->getSubReg() != Src1->getSubReg() ||
+    if (!Src0->isReg() || !Src1->isReg() ||
+        Src0->getSubReg() != Src1->getSubReg() ||
         Src0->getSubReg() != AMDGPU::NoSubRegister)
       return nullptr;
 
@@ -904,12 +924,9 @@ bool SIFoldOperands::runOnMachineFunction(MachineFunction &MF) {
   // level.
   bool IsIEEEMode = ST->enableIEEEBit(MF) || !MFI->hasNoSignedZerosFPMath();
 
-  for (MachineFunction::iterator BI = MF.begin(), BE = MF.end();
-       BI != BE; ++BI) {
-
-    MachineBasicBlock &MBB = *BI;
+  for (MachineBasicBlock *MBB : depth_first(&MF)) {
     MachineBasicBlock::iterator I, Next;
-    for (I = MBB.begin(); I != MBB.end(); I = Next) {
+    for (I = MBB->begin(); I != MBB->end(); I = Next) {
       Next = std::next(I);
       MachineInstr &MI = *I;
 

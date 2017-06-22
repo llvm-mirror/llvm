@@ -17,9 +17,9 @@
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/FunctionLoweringInfo.h"
-#include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/GCMetadata.h"
 #include "llvm/CodeGen/GCStrategy.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/StackMaps.h"
 #include "llvm/IR/CallingConv.h"
@@ -110,8 +110,8 @@ StatepointLoweringState::allocateStackSlot(EVT ValueType,
          Builder.FuncInfo.StatepointStackSlots.size() &&
          "Broken invariant");
 
-  StatepointMaxSlotsRequired = std::max<unsigned long>(
-      StatepointMaxSlotsRequired, Builder.FuncInfo.StatepointStackSlots.size());
+  StatepointMaxSlotsRequired.updateMax(
+      Builder.FuncInfo.StatepointStackSlots.size());
 
   return SpillSlot;
 }
@@ -818,7 +818,7 @@ SelectionDAGBuilder::LowerStatepoint(ImmutableStatepoint ISP,
   SI.GCTransitionArgs =
       ArrayRef<const Use>(ISP.gc_args_begin(), ISP.gc_args_end());
   SI.ID = ISP.getID();
-  SI.DeoptState = ArrayRef<const Use>(ISP.vm_state_begin(), ISP.vm_state_end());
+  SI.DeoptState = ArrayRef<const Use>(ISP.deopt_begin(), ISP.deopt_end());
   SI.StatepointFlags = ISP.getFlags();
   SI.NumPatchBytes = ISP.getNumPatchBytes();
   SI.EHPadBB = EHPadBB;
@@ -840,7 +840,7 @@ SelectionDAGBuilder::LowerStatepoint(ImmutableStatepoint ISP,
       //       completely and make statepoint call to return a tuple.
       unsigned Reg = FuncInfo.CreateRegs(RetTy);
       RegsForValue RFV(*DAG.getContext(), DAG.getTargetLoweringInfo(),
-                       DAG.getDataLayout(), Reg, RetTy);
+                       DAG.getDataLayout(), Reg, RetTy, true);
       SDValue Chain = DAG.getEntryNode();
 
       RFV.getCopyToRegs(ReturnValue, DAG, getCurSDLoc(), Chain, nullptr);

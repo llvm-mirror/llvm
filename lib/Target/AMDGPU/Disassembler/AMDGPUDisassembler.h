@@ -20,8 +20,8 @@
 #include "llvm/MC/MCDisassembler/MCDisassembler.h"
 #include "llvm/MC/MCDisassembler/MCRelocationInfo.h"
 #include "llvm/MC/MCDisassembler/MCSymbolizer.h"
-#include <cstdint>
 #include <algorithm>
+#include <cstdint>
 #include <memory>
 
 namespace llvm {
@@ -39,6 +39,8 @@ class Twine;
 class AMDGPUDisassembler : public MCDisassembler {
 private:
   mutable ArrayRef<uint8_t> Bytes;
+  mutable uint32_t Literal;
+  mutable bool HasLiteral;
 
 public:
   AMDGPUDisassembler(const MCSubtargetInfo &STI, MCContext &Ctx) :
@@ -102,6 +104,11 @@ public:
   MCOperand decodeSrcOp(const OpWidthTy Width, unsigned Val) const;
   MCOperand decodeSpecialReg32(unsigned Val) const;
   MCOperand decodeSpecialReg64(unsigned Val) const;
+
+  MCOperand decodeSDWA9Src(const OpWidthTy Width, unsigned Val) const;
+  MCOperand decodeSDWA9Src16(unsigned Val) const;
+  MCOperand decodeSDWA9Src32(unsigned Val) const;
+  MCOperand decodeSDWA9VopcDst(unsigned Val) const;
 };
 
 //===----------------------------------------------------------------------===//

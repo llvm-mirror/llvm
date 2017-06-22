@@ -10,8 +10,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "FuzzerCorpus.h"
-#include "FuzzerInternal.h"
 #include "FuzzerIO.h"
+#include "FuzzerInternal.h"
 #include "FuzzerMutate.h"
 #include "FuzzerRandom.h"
 #include "FuzzerShmem.h"
@@ -199,7 +199,7 @@ void Fuzzer::CrashCallback() {
   Printf("SUMMARY: libFuzzer: deadly signal\n");
   DumpCurrentUnit("crash-");
   PrintFinalStats();
-  exit(Options.ErrorExitCode);
+  _Exit(Options.ErrorExitCode);  // Stop right now.
 }
 
 void Fuzzer::InterruptCallback() {
@@ -301,7 +301,9 @@ void Fuzzer::SetMaxInputLen(size_t MaxInputLen) {
   this->MaxInputLen = MaxInputLen;
   this->MaxMutationLen = MaxInputLen;
   AllocateCurrentUnitData();
-  Printf("INFO: -max_len is not provided, using %zd\n", MaxInputLen);
+  Printf("INFO: -max_len is not provided; "
+         "libFuzzer will not generate inputs larger than %zd bytes\n",
+         MaxInputLen);
 }
 
 void Fuzzer::SetMaxMutationLen(size_t MaxMutationLen) {
@@ -422,6 +424,24 @@ size_t Fuzzer::GetCurrentUnitInFuzzingThead(const uint8_t **Data) const {
   return CurrentUnitSize;
 }
 
+void Fuzzer::CrashOnOverwrittenData() {
+  Printf("==%d== ERROR: libFuzzer: fuzz target overwrites it's const input\n",
+         GetPid());
+  DumpCurrentUnit("crash-");
+  Printf("SUMMARY: libFuzzer: out-of-memory\n");
+  _Exit(Options.ErrorExitCode); // Stop right now.
+}
+
+// Compare two arrays, but not all bytes if the arrays are large.
+static bool LooseMemeq(const uint8_t *A, const uint8_t *B, size_t Size) {
+  const size_t Limit = 64;
+  if (Size <= 64)
+    return !memcmp(A, B, Size);
+  // Compare first and last Limit/2 bytes.
+  return !memcmp(A, B, Limit / 2) &&
+         !memcmp(A + Size - Limit / 2, B + Size - Limit / 2, Limit / 2);
+}
+
 void Fuzzer::ExecuteCallback(const uint8_t *Data, size_t Size) {
   assert(InFuzzingThread());
   if (SMR.IsClient())
@@ -443,6 +463,8 @@ void Fuzzer::ExecuteCallback(const uint8_t *Data, size_t Size) {
   (void)Res;
   assert(Res == 0);
   HasMoreMallocsThanFrees = AllocTracer.Stop();
+  if (!LooseMemeq(DataCopy, Data, Size))
+    CrashOnOverwrittenData();
   CurrentUnitSize = 0;
   delete[] DataCopy;
 }

@@ -54,9 +54,36 @@ public:
   ProfileSummaryInfo(Module &M) : M(M) {}
   ProfileSummaryInfo(ProfileSummaryInfo &&Arg)
       : M(Arg.M), Summary(std::move(Arg.Summary)) {}
+
+  /// \brief Returns true if profile summary is available.
+  bool hasProfileSummary() { return computeSummary(); }
+
+  /// \brief Returns true if module \c M has sample profile.
+  bool hasSampleProfile() {
+    return hasProfileSummary() &&
+           Summary->getKind() == ProfileSummary::PSK_Sample;
+  }
+
+  /// \brief Returns true if module \c M has instrumentation profile.
+  bool hasInstrumentationProfile() {
+    return hasProfileSummary() &&
+           Summary->getKind() == ProfileSummary::PSK_Instr;
+  }
+
+  /// Handle the invalidation of this information.
+  ///
+  /// When used as a result of \c ProfileSummaryAnalysis this method will be
+  /// called when the module this was computed for changes. Since profile
+  /// summary is immutable after it is annotated on the module, we return false
+  /// here.
+  bool invalidate(Module &, const PreservedAnalyses &,
+                  ModuleAnalysisManager::Invalidator &) {
+    return false;
+  }
+
   /// Returns the profile count for \p CallInst.
-  static Optional<uint64_t> getProfileCount(const Instruction *CallInst,
-                                            BlockFrequencyInfo *BFI);
+  Optional<uint64_t> getProfileCount(const Instruction *CallInst,
+                                     BlockFrequencyInfo *BFI);
   /// \brief Returns true if \p F has hot function entry.
   bool isFunctionEntryHot(const Function *F);
   /// Returns true if \p F has hot function entry or hot call edge.

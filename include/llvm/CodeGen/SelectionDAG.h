@@ -1,4 +1,4 @@
-//===-- llvm/CodeGen/SelectionDAG.h - InstSelection DAG ---------*- C++ -*-===//
+//===- llvm/CodeGen/SelectionDAG.h - InstSelection DAG ----------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -15,35 +15,72 @@
 #ifndef LLVM_CODEGEN_SELECTIONDAG_H
 #define LLVM_CODEGEN_SELECTIONDAG_H
 
+#include "llvm/ADT/APFloat.h"
+#include "llvm/ADT/APInt.h"
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/FoldingSet.h"
 #include "llvm/ADT/SetVector.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/ilist.h"
+#include "llvm/ADT/iterator.h"
+#include "llvm/ADT/iterator_range.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/CodeGen/DAGCombine.h"
+#include "llvm/CodeGen/ISDOpcodes.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineMemOperand.h"
+#include "llvm/CodeGen/MachineValueType.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
+#include "llvm/CodeGen/ValueTypes.h"
+#include "llvm/IR/DebugLoc.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/Metadata.h"
+#include "llvm/Support/Allocator.h"
 #include "llvm/Support/ArrayRecycler.h"
+#include "llvm/Support/AtomicOrdering.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/CodeGen.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/RecyclingAllocator.h"
-#include "llvm/Target/TargetMachine.h"
+#include <algorithm>
 #include <cassert>
+#include <cstdint>
+#include <functional>
 #include <map>
 #include <string>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 namespace llvm {
 
+class BlockAddress;
+class Constant;
+class ConstantFP;
+class ConstantInt;
+class DataLayout;
+struct fltSemantics;
+class GlobalValue;
 struct KnownBits;
+class LLVMContext;
+class MachineBasicBlock;
 class MachineConstantPoolValue;
-class MachineFunction;
-class MDNode;
+class MCSymbol;
 class OptimizationRemarkEmitter;
 class SDDbgValue;
-class TargetLowering;
+class SelectionDAG;
 class SelectionDAGTargetInfo;
+class TargetLowering;
+class TargetMachine;
+class TargetSubtargetInfo;
+class Value;
 
 class SDVTListNode : public FoldingSetNode {
   friend struct FoldingSetTrait<SDVTListNode>;
+
   /// A reference to an Interned FoldingSetNodeID for this node.
   /// The Allocator in SelectionDAG holds the data.
   /// SDVTList contains all types which are frequently accessed in SelectionDAG.
@@ -55,11 +92,13 @@ class SDVTListNode : public FoldingSetNode {
   /// The hash value for SDVTList is fixed, so cache it to avoid
   /// hash calculation.
   unsigned HashValue;
+
 public:
   SDVTListNode(const FoldingSetNodeIDRef ID, const EVT *VT, unsigned int Num) :
       FastID(ID), VTs(VT), NumVTs(Num) {
     HashValue = ID.ComputeHash();
   }
+
   SDVTList getSDVTList() {
     SDVTList result = {VTs, NumVTs};
     return result;
@@ -72,12 +111,14 @@ template<> struct FoldingSetTrait<SDVTListNode> : DefaultFoldingSetTrait<SDVTLis
   static void Profile(const SDVTListNode &X, FoldingSetNodeID& ID) {
     ID = X.FastID;
   }
+
   static bool Equals(const SDVTListNode &X, const FoldingSetNodeID &ID,
                      unsigned IDHash, FoldingSetNodeID &TempID) {
     if (X.HashValue != IDHash)
       return false;
     return ID == X.FastID;
   }
+
   static unsigned ComputeHash(const SDVTListNode &X, FoldingSetNodeID &TempID) {
     return X.HashValue;
   }
@@ -104,13 +145,13 @@ class SDDbgInfo {
   BumpPtrAllocator Alloc;
   SmallVector<SDDbgValue*, 32> DbgValues;
   SmallVector<SDDbgValue*, 32> ByvalParmDbgValues;
-  typedef DenseMap<const SDNode*, SmallVector<SDDbgValue*, 2> > DbgValMapType;
+  using DbgValMapType = DenseMap<const SDNode *, SmallVector<SDDbgValue *, 2>>;
   DbgValMapType DbgValMap;
 
-  void operator=(const SDDbgInfo&) = delete;
-  SDDbgInfo(const SDDbgInfo&) = delete;
 public:
-  SDDbgInfo() {}
+  SDDbgInfo() = default;
+  SDDbgInfo(const SDDbgInfo &) = delete;
+  SDDbgInfo &operator=(const SDDbgInfo &) = delete;
 
   void add(SDDbgValue *V, const SDNode *Node, bool isParameter) {
     if (isParameter) {
@@ -144,14 +185,14 @@ public:
     return ArrayRef<SDDbgValue*>();
   }
 
-  typedef SmallVectorImpl<SDDbgValue*>::iterator DbgIterator;
+  using DbgIterator = SmallVectorImpl<SDDbgValue*>::iterator;
+
   DbgIterator DbgBegin() { return DbgValues.begin(); }
   DbgIterator DbgEnd()   { return DbgValues.end(); }
   DbgIterator ByvalParmDbgBegin() { return ByvalParmDbgValues.begin(); }
   DbgIterator ByvalParmDbgEnd()   { return ByvalParmDbgValues.end(); }
 };
 
-class SelectionDAG;
 void checkForCycles(const SelectionDAG *DAG, bool force = false);
 
 /// This is used to represent a portion of an LLVM function in a low-level
@@ -167,8 +208,8 @@ void checkForCycles(const SelectionDAG *DAG, bool force = false);
 ///
 class SelectionDAG {
   const TargetMachine &TM;
-  const SelectionDAGTargetInfo *TSI;
-  const TargetLowering *TLI;
+  const SelectionDAGTargetInfo *TSI = nullptr;
+  const TargetLowering *TLI = nullptr;
   MachineFunction *MF;
   LLVMContext *Context;
   CodeGenOpt::Level OptLevel;
@@ -188,9 +229,9 @@ class SelectionDAG {
 
   /// The AllocatorType for allocating SDNodes. We use
   /// pool allocation with recycling.
-  typedef RecyclingAllocator<BumpPtrAllocator, SDNode, sizeof(LargestSDNode),
-                             alignof(MostAlignedSDNode)>
-      NodeAllocatorType;
+  using NodeAllocatorType = RecyclingAllocator<BumpPtrAllocator, SDNode,
+                                               sizeof(LargestSDNode),
+                                               alignof(MostAlignedSDNode)>;
 
   /// Pool allocation for nodes.
   NodeAllocatorType NodeAllocator;
@@ -243,9 +284,11 @@ public:
 
   struct DAGNodeDeletedListener : public DAGUpdateListener {
     std::function<void(SDNode *, SDNode *)> Callback;
+
     DAGNodeDeletedListener(SelectionDAG &DAG,
                            std::function<void(SDNode *, SDNode *)> Callback)
         : DAGUpdateListener(DAG), Callback(std::move(Callback)) {}
+
     void NodeDeleted(SDNode *N, SDNode *E) override { Callback(N, E); }
   };
 
@@ -254,7 +297,7 @@ public:
   /// have legal types. This is important after type legalization since
   /// any illegally typed nodes generated after this point will not experience
   /// type legalization.
-  bool NewNodesMustHaveLegalTypes;
+  bool NewNodesMustHaveLegalTypes = false;
 
 private:
   /// DAGUpdateListener is a friend so it can manipulate the listener stack.
@@ -262,7 +305,7 @@ private:
 
   /// Linked list of registered DAGUpdateListener instances.
   /// This stack is maintained by DAGUpdateListener RAII.
-  DAGUpdateListener *UpdateListeners;
+  DAGUpdateListener *UpdateListeners = nullptr;
 
   /// Implementation of setSubgraphColor.
   /// Return whether we had to truncate the search.
@@ -316,11 +359,10 @@ private:
     Node->OperandList = nullptr;
   }
 
-  void operator=(const SelectionDAG&) = delete;
-  SelectionDAG(const SelectionDAG&) = delete;
-
 public:
-  explicit SelectionDAG(const TargetMachine &TM, llvm::CodeGenOpt::Level);
+  explicit SelectionDAG(const TargetMachine &TM, CodeGenOpt::Level);
+  SelectionDAG(const SelectionDAG &) = delete;
+  SelectionDAG &operator=(const SelectionDAG &) = delete;
   ~SelectionDAG();
 
   /// Prepare this SelectionDAG to process code in the given MachineFunction.
@@ -364,12 +406,16 @@ public:
   /// Convenience for setting subgraph color attribute.
   void setSubgraphColor(SDNode *N, const char *Color);
 
-  typedef ilist<SDNode>::const_iterator allnodes_const_iterator;
+  using allnodes_const_iterator = ilist<SDNode>::const_iterator;
+
   allnodes_const_iterator allnodes_begin() const { return AllNodes.begin(); }
   allnodes_const_iterator allnodes_end() const { return AllNodes.end(); }
-  typedef ilist<SDNode>::iterator allnodes_iterator;
+
+  using allnodes_iterator = ilist<SDNode>::iterator;
+
   allnodes_iterator allnodes_begin() { return AllNodes.begin(); }
   allnodes_iterator allnodes_end() { return AllNodes.end(); }
+
   ilist<SDNode>::size_type allnodes_size() const {
     return AllNodes.size();
   }
@@ -406,7 +452,7 @@ public:
   /// certain types of nodes together, or eliminating superfluous nodes.  The
   /// Level argument controls whether Combine is allowed to produce nodes and
   /// types that are illegal on the target.
-  void Combine(CombineLevel Level, AliasAnalysis &AA,
+  void Combine(CombineLevel Level, AliasAnalysis *AA,
                CodeGenOpt::Level OptLevel);
 
   /// This transforms the SelectionDAG into a SelectionDAG that
@@ -475,7 +521,6 @@ public:
 
   //===--------------------------------------------------------------------===//
   // Node creation methods.
-  //
 
   /// \brief Create a ConstantSDNode wrapping a constant value.
   /// If VT is a vector type, the constant is splatted into a BUILD_VECTOR.
@@ -737,11 +782,15 @@ public:
   /// \brief Create a logical NOT operation as (XOR Val, BooleanOne).
   SDValue getLogicalNOT(const SDLoc &DL, SDValue Val, EVT VT);
 
-  /// Return a new CALLSEQ_START node, which always must have a glue result
-  /// (to ensure it's not CSE'd).  CALLSEQ_START does not have a useful SDLoc.
-  SDValue getCALLSEQ_START(SDValue Chain, SDValue Op, const SDLoc &DL) {
+  /// Return a new CALLSEQ_START node, that starts new call frame, in which
+  /// InSize bytes are set up inside CALLSEQ_START..CALLSEQ_END sequence and
+  /// OutSize specifies part of the frame set up prior to the sequence.
+  SDValue getCALLSEQ_START(SDValue Chain, uint64_t InSize, uint64_t OutSize,
+                           const SDLoc &DL) {
     SDVTList VTs = getVTList(MVT::Other, MVT::Glue);
-    SDValue Ops[] = { Chain,  Op };
+    SDValue Ops[] = { Chain,
+                      getIntPtrConstant(InSize, DL, true),
+                      getIntPtrConstant(OutSize, DL, true) };
     return getNode(ISD::CALLSEQ_START, DL, VTs, Ops);
   }
 
@@ -1066,6 +1115,11 @@ public:
   SDNode *MorphNodeTo(SDNode *N, unsigned Opc, SDVTList VTs,
                       ArrayRef<SDValue> Ops);
 
+  /// Mutate the specified strict FP node to its non-strict equivalent,
+  /// unlinking the node from its chain and dropping the metadata arguments.
+  /// The node must be a strict FP node.
+  SDNode *mutateStrictFPToFP(SDNode *Node);
+
   /// These are used for target selectors to create a new node
   /// with specified return type(s), MachineInstr opcode, and operands.
   ///
@@ -1163,6 +1217,12 @@ public:
   void ReplaceAllUsesOfValuesWith(const SDValue *From, const SDValue *To,
                                   unsigned Num);
 
+  /// If an existing load has uses of its chain, create a token factor node with
+  /// that chain and the new memory node's chain and update users of the old
+  /// chain to the token factor. This ensures that the new memory node will have
+  /// the same relative memory dependency position as the old load.
+  void makeEquivalentMemoryOrdering(LoadSDNode *Old, SDValue New);
+
   /// Topological-sort the AllNodes list and a
   /// assign a unique node id for each node in the DAG based on their
   /// topological order. Returns the number of nodes.
@@ -1173,39 +1233,6 @@ public:
   /// topological ordering when the list of nodes is modified.
   void RepositionNode(allnodes_iterator Position, SDNode *N) {
     AllNodes.insert(Position, AllNodes.remove(N));
-  }
-
-  /// Returns true if the opcode is a commutative binary operation.
-  static bool isCommutativeBinOp(unsigned Opcode) {
-    // FIXME: This should get its info from the td file, so that we can include
-    // target info.
-    switch (Opcode) {
-    case ISD::ADD:
-    case ISD::SMIN:
-    case ISD::SMAX:
-    case ISD::UMIN:
-    case ISD::UMAX:
-    case ISD::MUL:
-    case ISD::MULHU:
-    case ISD::MULHS:
-    case ISD::SMUL_LOHI:
-    case ISD::UMUL_LOHI:
-    case ISD::FADD:
-    case ISD::FMUL:
-    case ISD::AND:
-    case ISD::OR:
-    case ISD::XOR:
-    case ISD::SADDO:
-    case ISD::UADDO:
-    case ISD::ADDC:
-    case ISD::ADDE:
-    case ISD::FMINNUM:
-    case ISD::FMAXNUM:
-    case ISD::FMINNAN:
-    case ISD::FMAXNAN:
-      return true;
-    default: return false;
-    }
   }
 
   /// Returns an APFloat semantics tag appropriate for the given type. If VT is
@@ -1242,9 +1269,11 @@ public:
 
   SDDbgInfo::DbgIterator DbgBegin() { return DbgInfo->DbgBegin(); }
   SDDbgInfo::DbgIterator DbgEnd()   { return DbgInfo->DbgEnd(); }
+
   SDDbgInfo::DbgIterator ByvalParmDbgBegin() {
     return DbgInfo->ByvalParmDbgBegin();
   }
+
   SDDbgInfo::DbgIterator ByvalParmDbgEnd()   {
     return DbgInfo->ByvalParmDbgEnd();
   }
@@ -1470,10 +1499,12 @@ private:
 };
 
 template <> struct GraphTraits<SelectionDAG*> : public GraphTraits<SDNode*> {
-  typedef pointer_iterator<SelectionDAG::allnodes_iterator> nodes_iterator;
+  using nodes_iterator = pointer_iterator<SelectionDAG::allnodes_iterator>;
+
   static nodes_iterator nodes_begin(SelectionDAG *G) {
     return nodes_iterator(G->allnodes_begin());
   }
+
   static nodes_iterator nodes_end(SelectionDAG *G) {
     return nodes_iterator(G->allnodes_end());
   }
@@ -1484,7 +1515,6 @@ SDValue SelectionDAG::getTargetMemSDNode(SDVTList VTs,
                                          ArrayRef<SDValue> Ops,
                                          const SDLoc &dl, EVT MemVT,
                                          MachineMemOperand *MMO) {
-
   /// Compose node ID and try to find an existing node.
   FoldingSetNodeID ID;
   unsigned Opcode =
@@ -1515,6 +1545,6 @@ SDValue SelectionDAG::getTargetMemSDNode(SDVTList VTs,
   return SDValue(N, 0);
 }
 
-}  // end namespace llvm
+} // end namespace llvm
 
-#endif
+#endif // LLVM_CODEGEN_SELECTIONDAG_H

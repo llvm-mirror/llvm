@@ -28,6 +28,10 @@ class SITargetLowering final : public AMDGPUTargetLowering {
                                    uint64_t Offset, bool Signed,
                                    const ISD::InputArg *Arg = nullptr) const;
 
+  SDValue lowerStackParameter(SelectionDAG &DAG, CCValAssign &VA,
+                              const SDLoc &SL, SDValue Chain,
+                              const ISD::InputArg &Arg) const;
+
   SDValue LowerGlobalAddress(AMDGPUMachineFunction *MFI, SDValue Op,
                              SelectionDAG &DAG) const override;
   SDValue lowerImplicitZextParam(SelectionDAG &DAG, SDValue Op,
@@ -100,6 +104,7 @@ class SITargetLowering final : public AMDGPUTargetLowering {
   SDValue performMinMaxCombine(SDNode *N, DAGCombinerInfo &DCI) const;
   SDValue performFMed3Combine(SDNode *N, DAGCombinerInfo &DCI) const;
   SDValue performCvtPkRTZCombine(SDNode *N, DAGCombinerInfo &DCI) const;
+  SDValue performExtractVectorEltCombine(SDNode *N, DAGCombinerInfo &DCI) const;
 
   unsigned getFusedOpcode(const SelectionDAG &DAG,
                           const SDNode *N0, const SDNode *N1) const;
@@ -145,6 +150,8 @@ public:
   bool isLegalAddressingMode(const DataLayout &DL, const AddrMode &AM, Type *Ty,
                              unsigned AS) const override;
 
+  bool canMergeStoresTo(unsigned AS, EVT MemVT) const override;
+
   bool allowsMisalignedMemoryAccesses(EVT VT, unsigned AS,
                                       unsigned Align,
                                       bool *IsFast) const override;
@@ -176,7 +183,12 @@ public:
                                const SDLoc &DL, SelectionDAG &DAG,
                                SmallVectorImpl<SDValue> &InVals) const override;
 
-  SDValue LowerReturn(SDValue Chain, CallingConv::ID CallConv, bool isVarArg,
+  bool CanLowerReturn(CallingConv::ID CallConv,
+                      MachineFunction &MF, bool isVarArg,
+                      const SmallVectorImpl<ISD::OutputArg> &Outs,
+                      LLVMContext &Context) const override;
+
+  SDValue LowerReturn(SDValue Chain, CallingConv::ID CallConv, bool IsVarArg,
                       const SmallVectorImpl<ISD::OutputArg> &Outs,
                       const SmallVectorImpl<SDValue> &OutVals, const SDLoc &DL,
                       SelectionDAG &DAG) const override;
@@ -204,8 +216,6 @@ public:
   void AdjustInstrPostInstrSelection(MachineInstr &MI,
                                      SDNode *Node) const override;
 
-  SDValue CreateLiveInRegister(SelectionDAG &DAG, const TargetRegisterClass *RC,
-                               unsigned Reg, EVT VT) const override;
   SDNode *legalizeTargetIndependentNode(SDNode *Node, SelectionDAG &DAG) const;
 
   MachineSDNode *wrapAddr64Rsrc(SelectionDAG &DAG, const SDLoc &DL,

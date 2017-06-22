@@ -7,6 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/CodeGen/MachineTraceMetrics.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/Optional.h"
@@ -21,7 +22,6 @@
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/CodeGen/MachineTraceMetrics.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Debug.h"
@@ -44,12 +44,12 @@ using namespace llvm;
 char MachineTraceMetrics::ID = 0;
 char &llvm::MachineTraceMetricsID = MachineTraceMetrics::ID;
 
-INITIALIZE_PASS_BEGIN(MachineTraceMetrics,
-                  "machine-trace-metrics", "Machine Trace Metrics", false, true)
+INITIALIZE_PASS_BEGIN(MachineTraceMetrics, DEBUG_TYPE,
+                      "Machine Trace Metrics", false, true)
 INITIALIZE_PASS_DEPENDENCY(MachineBranchProbabilityInfo)
 INITIALIZE_PASS_DEPENDENCY(MachineLoopInfo)
-INITIALIZE_PASS_END(MachineTraceMetrics,
-                  "machine-trace-metrics", "Machine Trace Metrics", false, true)
+INITIALIZE_PASS_END(MachineTraceMetrics, DEBUG_TYPE,
+                    "Machine Trace Metrics", false, true)
 
 MachineTraceMetrics::MachineTraceMetrics() : MachineFunctionPass(ID) {
   std::fill(std::begin(Ensembles), std::end(Ensembles), nullptr);

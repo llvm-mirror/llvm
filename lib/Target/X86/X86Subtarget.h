@@ -124,6 +124,9 @@ protected:
   /// Target has TBM instructions.
   bool HasTBM;
 
+  /// Target has LWP instructions
+  bool HasLWP;
+
   /// True if the processor has the MOVBE instruction.
   bool HasMOVBE;
 
@@ -250,6 +253,11 @@ protected:
   /// True if the LEA instruction with certain arguments is slow
   bool SlowLEA;
 
+  /// True if the LEA instruction has all three source operands: base, index,
+  /// and offset or if the LEA instruction uses base and index registers where
+  /// the base is EBP, RBP,or R13
+  bool Slow3OpsLEA;
+
   /// True if INC and DEC instructions are slow when writing to flags
   bool SlowIncDec;
 
@@ -261,6 +269,9 @@ protected:
 
   /// Processor has AVX-512 Conflict Detection Instructions
   bool HasCDI;
+
+  /// Processor has AVX-512 population count Instructions
+  bool HasVPOPCNTDQ;
 
   /// Processor has AVX-512 Doubleword and Quadword instructions
   bool HasDQI;
@@ -328,16 +339,12 @@ private:
   X86TargetLowering TLInfo;
   X86FrameLowering FrameLowering;
 
-  bool OptForSize;
-  bool OptForMinSize;
-
 public:
   /// This constructor initializes the data members to match that
   /// of the specified triple.
   ///
   X86Subtarget(const Triple &TT, StringRef CPU, StringRef FS,
-               const X86TargetMachine &TM, unsigned StackAlignOverride,
-               bool OptForSize, bool OptForMinSize);
+               const X86TargetMachine &TM, unsigned StackAlignOverride);
 
   /// This object will take onwership of \p GISelAccessor.
   void setGISelAccessor(GISelAccessor &GISel) { this->GISel.reset(&GISel); }
@@ -447,6 +454,7 @@ public:
   bool hasAnyFMA() const { return hasFMA() || hasFMA4(); }
   bool hasXOP() const { return HasXOP; }
   bool hasTBM() const { return HasTBM; }
+  bool hasLWP() const { return HasLWP; }
   bool hasMOVBE() const { return HasMOVBE; }
   bool hasRDRAND() const { return HasRDRAND; }
   bool hasF16C() const { return HasF16C; }
@@ -486,8 +494,10 @@ public:
   bool callRegIndirect() const { return CallRegIndirect; }
   bool LEAusesAG() const { return LEAUsesAG; }
   bool slowLEA() const { return SlowLEA; }
+  bool slow3OpsLEA() const { return Slow3OpsLEA; }
   bool slowIncDec() const { return SlowIncDec; }
   bool hasCDI() const { return HasCDI; }
+  bool hasVPOPCNTDQ() const { return HasVPOPCNTDQ; }
   bool hasPFI() const { return HasPFI; }
   bool hasERI() const { return HasERI; }
   bool hasDQI() const { return HasDQI; }
@@ -502,9 +512,6 @@ public:
   bool isAtom() const { return X86ProcFamily == IntelAtom; }
   bool isSLM() const { return X86ProcFamily == IntelSLM; }
   bool useSoftFloat() const { return UseSoftFloat; }
-
-  bool getOptForSize() const { return OptForSize; }
-  bool getOptForMinSize() const { return OptForMinSize; }
 
   /// Use mfence if we have SSE2 or we're on x86-64 (even if we asked for
   /// no-sse2). There isn't any reason to disable it if the target processor

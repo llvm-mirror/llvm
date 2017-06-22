@@ -16,9 +16,9 @@
 #ifndef LLVM_LIB_TARGET_WEBASSEMBLY_MCTARGETDESC_WEBASSEMBLYTARGETSTREAMER_H
 #define LLVM_LIB_TARGET_WEBASSEMBLY_MCTARGETDESC_WEBASSEMBLYTARGETSTREAMER_H
 
+#include "llvm/BinaryFormat/Wasm.h"
 #include "llvm/CodeGen/MachineValueType.h"
 #include "llvm/MC/MCStreamer.h"
-#include "llvm/Support/Wasm.h"
 
 namespace llvm {
 
@@ -46,9 +46,7 @@ public:
   /// .functype
   virtual void emitIndirectFunctionType(StringRef name,
                                         SmallVectorImpl<MVT> &Params,
-                                        SmallVectorImpl<MVT> &Results) {
-    llvm_unreachable("emitIndirectFunctionType not implemented");
-  }
+                                        SmallVectorImpl<MVT> &Results) = 0;
   /// .indidx
   virtual void emitIndIdx(const MCExpr *Value) = 0;
   /// .import_global
