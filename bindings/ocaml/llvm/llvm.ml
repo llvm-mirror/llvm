@@ -259,7 +259,7 @@ module AtomicOrdering = struct
   | Invalid
   | Acquire
   | Release
-  | AcqiureRelease
+  | AcquireRelease
   | SequentiallyConsistent
 end
 
