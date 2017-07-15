@@ -37,7 +37,11 @@ class SequenceToOffsetTable {
 
   // Define a comparator for SeqT that sorts a suffix immediately before a
   // sequence with that suffix.
-  struct SeqLess : public std::binary_function<SeqT, SeqT, bool> {
+  struct SeqLess {
+    typedef SeqT first_argument_type;
+    typedef SeqT second_argument_type;
+    typedef bool result_type;
+
     Less L;
     bool operator()(const SeqT &A, const SeqT &B) const {
       return std::lexicographical_compare(A.rbegin(), A.rend(),

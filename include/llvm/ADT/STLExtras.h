@@ -57,7 +57,10 @@ using ValueOfRange = typename std::remove_reference<decltype(
 //===----------------------------------------------------------------------===//
 
 template<class Ty>
-struct identity : public std::unary_function<Ty, Ty> {
+struct identity {
+  typedef Ty argument_type;
+  typedef Ty result_type;
+
   Ty &operator()(Ty &self) const {
     return self;
   }
@@ -67,14 +70,22 @@ struct identity : public std::unary_function<Ty, Ty> {
 };
 
 template<class Ty>
-struct less_ptr : public std::binary_function<Ty, Ty, bool> {
+struct less_ptr {
+  typedef Ty first_argument_type;
+  typedef Ty second_argument_type;
+  typedef bool result_Type;
+
   bool operator()(const Ty* left, const Ty* right) const {
     return *left < *right;
   }
 };
 
 template<class Ty>
-struct greater_ptr : public std::binary_function<Ty, Ty, bool> {
+struct greater_ptr {
+  typedef Ty first_argument_type;
+  typedef Ty second_argument_type;
+  typedef bool result_Type;
+
   bool operator()(const Ty* left, const Ty* right) const {
     return *right < *left;
   }

@@ -28,7 +28,11 @@ namespace llvm {
   class ResourcePriorityQueue;
 
   /// Sorting functions for the Available queue.
-  struct resource_sort : public std::binary_function<SUnit*, SUnit*, bool> {
+  struct resource_sort {
+    typedef SUnit* first_argument_type;
+    typedef SUnit* second_argument_type;
+    typedef bool result_type;
+
     ResourcePriorityQueue *PQ;
     explicit resource_sort(ResourcePriorityQueue *pq) : PQ(pq) {}
 
