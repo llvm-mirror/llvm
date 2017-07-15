@@ -1563,7 +1563,11 @@ void ScheduleDAGRRList::ListScheduleBottomUp() {
 namespace {
 class RegReductionPQBase;
 
-struct queue_sort : public std::binary_function<SUnit*, SUnit*, bool> {
+struct queue_sort {
+  typedef SUnit* first_argument_type;
+  typedef SUnit* second_argument_type;
+  typedef bool result_type;
+
   bool isReady(SUnit* SU, unsigned CurCycle) const { return true; }
 };
 
