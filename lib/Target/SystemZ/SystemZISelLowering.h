@@ -86,14 +86,11 @@ enum NodeType : unsigned {
   // Count number of bits set in operand 0 per byte.
   POPCNT,
 
-  // Wrappers around the ISD opcodes of the same name.  The output and
-  // first input operands are GR128s.  The trailing numbers are the
-  // widths of the second operand in bits.
-  UMUL_LOHI64,
-  SDIVREM32,
-  SDIVREM64,
-  UDIVREM32,
-  UDIVREM64,
+  // Wrappers around the ISD opcodes of the same name.  The output is GR128.
+  // Input operands may be GR64 or GR32, depending on the instruction.
+  UMUL_LOHI,
+  SDIVREM,
+  UDIVREM,
 
   // Use a series of MVCs to copy bytes from one memory location to another.
   // The operands are:
@@ -138,9 +135,6 @@ enum NodeType : unsigned {
 
   // Store the CC value in bits 29 and 28 of an integer.
   IPM,
-
-  // Perform a serialization operation.  (BCR 15,0 or BCR 14,0.)
-  SERIALIZE,
 
   // Compiler barrier only; generate a no-op.
   MEMBARRIER,
@@ -471,8 +465,6 @@ public:
                       const SmallVectorImpl<ISD::OutputArg> &Outs,
                       const SmallVectorImpl<SDValue> &OutVals, const SDLoc &DL,
                       SelectionDAG &DAG) const override;
-  SDValue prepareVolatileOrAtomicLoad(SDValue Chain, const SDLoc &DL,
-                                      SelectionDAG &DAG) const override;
   SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const override;
 
   ISD::NodeType getExtendForAtomicOps() const override {
@@ -522,7 +514,6 @@ private:
                               unsigned Opcode) const;
   SDValue lowerATOMIC_LOAD_SUB(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerATOMIC_CMP_SWAP(SDValue Op, SelectionDAG &DAG) const;
-  SDValue lowerLOAD_SEQUENCE_POINT(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerSTACKSAVE(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerSTACKRESTORE(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerPREFETCH(SDValue Op, SelectionDAG &DAG) const;
@@ -568,7 +559,7 @@ private:
                                    unsigned StoreOpcode, unsigned STOCOpcode,
                                    bool Invert) const;
   MachineBasicBlock *emitExt128(MachineInstr &MI, MachineBasicBlock *MBB,
-                                bool ClearEven, unsigned SubReg) const;
+                                bool ClearEven) const;
   MachineBasicBlock *emitAtomicLoadBinary(MachineInstr &MI,
                                           MachineBasicBlock *BB,
                                           unsigned BinOpcode, unsigned BitSize,

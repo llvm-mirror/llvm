@@ -39,6 +39,9 @@
   define void @test_icmp_s16() { ret void }
   define void @test_icmp_s32() { ret void }
 
+  define void @test_select_s32() { ret void }
+  define void @test_select_ptr() { ret void }
+
   define void @test_fadd_s32() #0 { ret void }
   define void @test_fadd_s64() #0 { ret void }
 
@@ -108,6 +111,7 @@ body:             |
     %1(s8) = COPY %r1
     %2(s8) = G_ADD %0, %1
     ; G_ADD with s8 should widen
+    ; CHECK-NOT: {{%[0-9]+}}(s8) = G_ADD {{%[0-9]+, %[0-9]+}}
     ; CHECK: {{%[0-9]+}}(s32) = G_ADD {{%[0-9]+, %[0-9]+}}
     ; CHECK-NOT: {{%[0-9]+}}(s8) = G_ADD {{%[0-9]+, %[0-9]+}}
     %r0 = COPY %2(s8)
@@ -133,6 +137,7 @@ body:             |
     %1(s16) = COPY %r1
     %2(s16) = G_ADD %0, %1
     ; G_ADD with s16 should widen
+    ; CHECK-NOT: {{%[0-9]+}}(s16) = G_ADD {{%[0-9]+, %[0-9]+}}
     ; CHECK: {{%[0-9]+}}(s32) = G_ADD {{%[0-9]+, %[0-9]+}}
     ; CHECK-NOT: {{%[0-9]+}}(s16) = G_ADD {{%[0-9]+, %[0-9]+}}
     %r0 = COPY %2(s16)
@@ -184,6 +189,7 @@ body:             |
     %1(s8) = COPY %r1
     %2(s8) = G_SUB %0, %1
     ; G_SUB with s8 should widen
+    ; CHECK-NOT: {{%[0-9]+}}(s8) = G_SUB {{%[0-9]+, %[0-9]+}}
     ; CHECK: {{%[0-9]+}}(s32) = G_SUB {{%[0-9]+, %[0-9]+}}
     ; CHECK-NOT: {{%[0-9]+}}(s8) = G_SUB {{%[0-9]+, %[0-9]+}}
     %r0 = COPY %2(s8)
@@ -209,6 +215,7 @@ body:             |
     %1(s16) = COPY %r1
     %2(s16) = G_SUB %0, %1
     ; G_SUB with s16 should widen
+    ; CHECK-NOT: {{%[0-9]+}}(s16) = G_SUB {{%[0-9]+, %[0-9]+}}
     ; CHECK: {{%[0-9]+}}(s32) = G_SUB {{%[0-9]+, %[0-9]+}}
     ; CHECK-NOT: {{%[0-9]+}}(s16) = G_SUB {{%[0-9]+, %[0-9]+}}
     %r0 = COPY %2(s16)
@@ -260,6 +267,7 @@ body:             |
     %1(s8) = COPY %r1
     %2(s8) = G_MUL %0, %1
     ; G_MUL with s8 should widen
+    ; CHECK-NOT: {{%[0-9]+}}(s8) = G_MUL {{%[0-9]+, %[0-9]+}}
     ; CHECK: {{%[0-9]+}}(s32) = G_MUL {{%[0-9]+, %[0-9]+}}
     ; CHECK-NOT: {{%[0-9]+}}(s8) = G_MUL {{%[0-9]+, %[0-9]+}}
     %r0 = COPY %2(s8)
@@ -285,6 +293,7 @@ body:             |
     %1(s16) = COPY %r1
     %2(s16) = G_MUL %0, %1
     ; G_MUL with s16 should widen
+    ; CHECK-NOT: {{%[0-9]+}}(s16) = G_MUL {{%[0-9]+, %[0-9]+}}
     ; CHECK: {{%[0-9]+}}(s32) = G_MUL {{%[0-9]+, %[0-9]+}}
     ; CHECK-NOT: {{%[0-9]+}}(s16) = G_MUL {{%[0-9]+, %[0-9]+}}
     %r0 = COPY %2(s16)
@@ -336,6 +345,7 @@ body:             |
     %1(s8) = COPY %r1
     %2(s8) = G_AND %0, %1
     ; G_AND with s8 should widen
+    ; CHECK-NOT: {{%[0-9]+}}(s8) = G_AND {{%[0-9]+, %[0-9]+}}
     ; CHECK: {{%[0-9]+}}(s32) = G_AND {{%[0-9]+, %[0-9]+}}
     ; CHECK-NOT: {{%[0-9]+}}(s8) = G_AND {{%[0-9]+, %[0-9]+}}
     %r0 = COPY %2(s8)
@@ -361,6 +371,7 @@ body:             |
     %1(s16) = COPY %r1
     %2(s16) = G_AND %0, %1
     ; G_AND with s16 should widen
+    ; CHECK-NOT: {{%[0-9]+}}(s16) = G_AND {{%[0-9]+, %[0-9]+}}
     ; CHECK: {{%[0-9]+}}(s32) = G_AND {{%[0-9]+, %[0-9]+}}
     ; CHECK-NOT: {{%[0-9]+}}(s16) = G_AND {{%[0-9]+, %[0-9]+}}
     %r0 = COPY %2(s16)
@@ -412,6 +423,7 @@ body:             |
     %1(s8) = COPY %r1
     %2(s8) = G_OR %0, %1
     ; G_OR with s8 should widen
+    ; CHECK-NOT: {{%[0-9]+}}(s8) = G_OR {{%[0-9]+, %[0-9]+}}
     ; CHECK: {{%[0-9]+}}(s32) = G_OR {{%[0-9]+, %[0-9]+}}
     ; CHECK-NOT: {{%[0-9]+}}(s8) = G_OR {{%[0-9]+, %[0-9]+}}
     %r0 = COPY %2(s8)
@@ -437,6 +449,7 @@ body:             |
     %1(s16) = COPY %r1
     %2(s16) = G_OR %0, %1
     ; G_OR with s16 should widen
+    ; CHECK-NOT: {{%[0-9]+}}(s16) = G_OR {{%[0-9]+, %[0-9]+}}
     ; CHECK: {{%[0-9]+}}(s32) = G_OR {{%[0-9]+, %[0-9]+}}
     ; CHECK-NOT: {{%[0-9]+}}(s16) = G_OR {{%[0-9]+, %[0-9]+}}
     %r0 = COPY %2(s16)
@@ -488,6 +501,7 @@ body:             |
     %1(s8) = COPY %r1
     %2(s8) = G_XOR %0, %1
     ; G_XOR with s8 should widen
+    ; CHECK-NOT: {{%[0-9]+}}(s8) = G_XOR {{%[0-9]+, %[0-9]+}}
     ; CHECK: {{%[0-9]+}}(s32) = G_XOR {{%[0-9]+, %[0-9]+}}
     ; CHECK-NOT: {{%[0-9]+}}(s8) = G_XOR {{%[0-9]+, %[0-9]+}}
     %r0 = COPY %2(s8)
@@ -513,6 +527,7 @@ body:             |
     %1(s16) = COPY %r1
     %2(s16) = G_XOR %0, %1
     ; G_XOR with s16 should widen
+    ; CHECK-NOT: {{%[0-9]+}}(s16) = G_XOR {{%[0-9]+, %[0-9]+}}
     ; CHECK: {{%[0-9]+}}(s32) = G_XOR {{%[0-9]+, %[0-9]+}}
     ; CHECK-NOT: {{%[0-9]+}}(s16) = G_XOR {{%[0-9]+, %[0-9]+}}
     %r0 = COPY %2(s16)
@@ -686,10 +701,31 @@ selected:        false
 tracksRegLiveness: true
 registers:
   - { id: 0, class: _ }
+  - { id: 1, class: _ }
+  - { id: 2, class: _ }
+  - { id: 3, class: _ }
 body:             |
   bb.0:
     %0(s32) = G_CONSTANT 42
     ; CHECK: {{%[0-9]+}}(s32) = G_CONSTANT 42
+
+    %1(s16) = G_CONSTANT i16 21
+    ; CHECK-NOT: G_CONSTANT i16
+    ; CHECK: [[EXT:%[0-9]+]](s32) = G_CONSTANT i32 21
+    ; CHECK: {{%[0-9]+}}(s16) = G_TRUNC [[EXT]](s32)
+    ; CHECK-NOT: G_CONSTANT i16
+
+    %2(s8) = G_CONSTANT i8 10
+    ; CHECK-NOT: G_CONSTANT i8
+    ; CHECK: [[EXT:%[0-9]+]](s32) = G_CONSTANT i32 10
+    ; CHECK: {{%[0-9]+}}(s8) = G_TRUNC [[EXT]](s32)
+    ; CHECK-NOT: G_CONSTANT i8
+
+    %3(s1) = G_CONSTANT i1 1
+    ; CHECK-NOT: G_CONSTANT i1
+    ; CHECK: [[EXT:%[0-9]+]](s32) = G_CONSTANT i32 -1
+    ; CHECK: {{%[0-9]+}}(s1) = G_TRUNC [[EXT]](s32)
+    ; CHECK-NOT: G_CONSTANT i1
 
     %r0 = COPY %0(s32)
     BX_RET 14, _, implicit %r0
@@ -772,6 +808,58 @@ body:             |
     ; CHECK: {{%[0-9]+}}(s1) = G_ICMP intpred(eq), {{%[0-9]+}}(s32), {{%[0-9]+}}
     %3(s32) = G_ZEXT %2(s1)
     %r0 = COPY %3(s32)
+    BX_RET 14, _, implicit %r0
+...
+---
+name:            test_select_s32
+# CHECK-LABEL: name: test_select_s32
+legalized:       false
+# CHECK: legalized: true
+regBankSelected: false
+selected:        false
+tracksRegLiveness: true
+registers:
+  - { id: 0, class: _ }
+  - { id: 1, class: _ }
+  - { id: 2, class: _ }
+  - { id: 3, class: _ }
+body:             |
+  bb.0:
+    liveins: %r0, %r1, %r2
+
+    %0(s32) = COPY %r0
+    %1(s32) = COPY %r1
+    %2(s1) = COPY %r2
+    %3(s32) = G_SELECT %2(s1), %0, %1
+    ; G_SELECT with s32 is legal, so we should find it unchanged in the output
+    ; CHECK: {{%[0-9]+}}(s32) = G_SELECT {{%[0-9]+}}(s1), {{%[0-9]+}}, {{%[0-9]+}}
+    %r0 = COPY %3(s32)
+    BX_RET 14, _, implicit %r0
+...
+---
+name:            test_select_ptr
+# CHECK-LABEL: name: test_select_ptr
+legalized:       false
+# CHECK: legalized: true
+regBankSelected: false
+selected:        false
+tracksRegLiveness: true
+registers:
+  - { id: 0, class: _ }
+  - { id: 1, class: _ }
+  - { id: 2, class: _ }
+  - { id: 3, class: _ }
+body:             |
+  bb.0:
+    liveins: %r0, %r1, %r2
+
+    %0(p0) = COPY %r0
+    %1(p0) = COPY %r1
+    %2(s1) = COPY %r2
+    %3(p0) = G_SELECT %2(s1), %0, %1
+    ; G_SELECT with p0 is legal, so we should find it unchanged in the output
+    ; CHECK: {{%[0-9]+}}(p0) = G_SELECT {{%[0-9]+}}(s1), {{%[0-9]+}}, {{%[0-9]+}}
+    %r0 = COPY %3(p0)
     BX_RET 14, _, implicit %r0
 ...
 ---

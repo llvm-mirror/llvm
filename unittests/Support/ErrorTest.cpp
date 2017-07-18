@@ -360,7 +360,7 @@ TEST(Error, CheckJoinErrors) {
         [&](const CustomError &CE) {
           Sum += CE.getInfo();
         });
-    EXPECT_EQ(Sum, 28) << "Failed to correctly concatenate erorr lists.";
+    EXPECT_EQ(Sum, 28) << "Failed to correctly concatenate error lists.";
   }
 }
 
@@ -475,6 +475,10 @@ TEST(Error, CantFailSuccess) {
 
   int X = cantFail(Expected<int>(42));
   EXPECT_EQ(X, 42) << "Expected value modified by cantFail";
+
+  int Dummy = 42;
+  int &Y = cantFail(Expected<int&>(Dummy));
+  EXPECT_EQ(&Dummy, &Y) << "Reference mangled by cantFail";
 }
 
 // Test that cantFail results in a crash if you pass it a failure value.

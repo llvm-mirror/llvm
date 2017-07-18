@@ -452,6 +452,8 @@ bool llvm::AArch64::getExtensionFeatures(unsigned Extensions,
     Features.push_back("+ras");
   if (Extensions & AArch64::AEK_LSE)
     Features.push_back("+lse");
+  if (Extensions & AArch64::AEK_SVE)
+    Features.push_back("+sve");
 
   return true;
 }
@@ -782,6 +784,42 @@ unsigned llvm::ARM::parseArchVersion(StringRef Arch) {
     return 8;
   }
   return 0;
+}
+
+StringRef llvm::ARM::computeDefaultTargetABI(const Triple &TT, StringRef CPU) {
+  StringRef ArchName =
+      CPU.empty() ? TT.getArchName() : ARM::getArchName(ARM::parseCPUArch(CPU));
+
+  if (TT.isOSBinFormatMachO()) {
+    if (TT.getEnvironment() == Triple::EABI ||
+        TT.getOS() == Triple::UnknownOS ||
+        llvm::ARM::parseArchProfile(ArchName) == ARM::PK_M)
+      return "aapcs";
+    if (TT.isWatchABI())
+      return "aapcs16";
+    return "apcs-gnu";
+  } else if (TT.isOSWindows())
+    // FIXME: this is invalid for WindowsCE.
+    return "aapcs";
+
+  // Select the default based on the platform.
+  switch (TT.getEnvironment()) {
+  case Triple::Android:
+  case Triple::GNUEABI:
+  case Triple::GNUEABIHF:
+  case Triple::MuslEABI:
+  case Triple::MuslEABIHF:
+    return "aapcs-linux";
+  case Triple::EABIHF:
+  case Triple::EABI:
+    return "aapcs";
+  default:
+    if (TT.isOSNetBSD())
+      return "apcs-gnu";
+    if (TT.isOSOpenBSD())
+      return "aapcs-linux";
+    return "aapcs";
+  }
 }
 
 StringRef llvm::AArch64::getCanonicalArchName(StringRef Arch) {

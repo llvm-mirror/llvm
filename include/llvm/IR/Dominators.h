@@ -36,11 +36,13 @@ class raw_ostream;
 extern template class DomTreeNodeBase<BasicBlock>;
 extern template class DominatorTreeBase<BasicBlock>;
 
-extern template void Calculate<Function, BasicBlock *>(
-    DominatorTreeBaseByGraphTraits<GraphTraits<BasicBlock *>> &DT, Function &F);
-extern template void Calculate<Function, Inverse<BasicBlock *>>(
-    DominatorTreeBaseByGraphTraits<GraphTraits<Inverse<BasicBlock *>>> &DT,
-    Function &F);
+namespace DomTreeBuilder {
+using BBDomTree = DominatorTreeBase<BasicBlock>;
+
+extern template void Calculate<BBDomTree, Function>(BBDomTree &DT, Function &F);
+
+extern template bool Verify<BBDomTree>(const BBDomTree &DT);
+}  // namespace DomTreeBuilder
 
 using DomTreeNode = DomTreeNodeBase<BasicBlock>;
 

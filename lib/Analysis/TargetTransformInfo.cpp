@@ -16,12 +16,18 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <utility>
 
 using namespace llvm;
 
 #define DEBUG_TYPE "tti"
+
+static cl::opt<bool> UseWideMemcpyLoopLowering(
+    "use-wide-memcpy-loop-lowering", cl::init(false),
+    cl::desc("Enables the new wide memcpy loop lowering in Transforms/Utils."),
+    cl::Hidden);
 
 namespace {
 /// \brief No-op implementation of the TTI interface using the utility base
@@ -89,8 +95,9 @@ TargetTransformInfo::getEstimatedNumberOfCaseClusters(const SwitchInst &SI,
   return TTIImpl->getEstimatedNumberOfCaseClusters(SI, JTSize);
 }
 
-int TargetTransformInfo::getUserCost(const User *U) const {
-  int Cost = TTIImpl->getUserCost(U);
+int TargetTransformInfo::getUserCost(const User *U,
+    ArrayRef<const Value *> Operands) const {
+  int Cost = TTIImpl->getUserCost(U, Operands);
   assert(Cost >= 0 && "TTI should not produce negative costs!");
   return Cost;
 }
@@ -116,8 +123,8 @@ bool TargetTransformInfo::isLoweredToCall(const Function *F) const {
 }
 
 void TargetTransformInfo::getUnrollingPreferences(
-    Loop *L, UnrollingPreferences &UP) const {
-  return TTIImpl->getUnrollingPreferences(L, UP);
+    Loop *L, ScalarEvolution &SE, UnrollingPreferences &UP) const {
+  return TTIImpl->getUnrollingPreferences(L, SE, UP);
 }
 
 bool TargetTransformInfo::isLegalAddImmediate(int64_t Imm) const {
@@ -479,6 +486,25 @@ unsigned TargetTransformInfo::getAtomicMemIntrinsicMaxElementSize() const {
 Value *TargetTransformInfo::getOrCreateResultFromMemIntrinsic(
     IntrinsicInst *Inst, Type *ExpectedType) const {
   return TTIImpl->getOrCreateResultFromMemIntrinsic(Inst, ExpectedType);
+}
+
+Type *TargetTransformInfo::getMemcpyLoopLoweringType(LLVMContext &Context,
+                                                     Value *Length,
+                                                     unsigned SrcAlign,
+                                                     unsigned DestAlign) const {
+  return TTIImpl->getMemcpyLoopLoweringType(Context, Length, SrcAlign,
+                                            DestAlign);
+}
+
+void TargetTransformInfo::getMemcpyLoopResidualLoweringType(
+    SmallVectorImpl<Type *> &OpsOut, LLVMContext &Context,
+    unsigned RemainingBytes, unsigned SrcAlign, unsigned DestAlign) const {
+  TTIImpl->getMemcpyLoopResidualLoweringType(OpsOut, Context, RemainingBytes,
+                                             SrcAlign, DestAlign);
+}
+
+bool TargetTransformInfo::useWideIRMemcpyLoopLowering() const {
+  return UseWideMemcpyLoopLowering;
 }
 
 bool TargetTransformInfo::areInlineCompatible(const Function *Caller,

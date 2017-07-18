@@ -100,3 +100,9 @@ AArch64MCAsmInfoELF::AArch64MCAsmInfoELF(const Triple &T) {
 
   HasIdentDirective = true;
 }
+
+AArch64MCAsmInfoCOFF::AArch64MCAsmInfoCOFF() {
+  CommentString = ";";
+  PrivateGlobalPrefix = ".L";
+  PrivateLabelPrefix = ".L";
+}

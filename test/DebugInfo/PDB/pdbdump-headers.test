@@ -1,7 +1,7 @@
-; RUN: llvm-pdbutil raw -all %p/Inputs/empty.pdb | FileCheck -check-prefix=ALL %s
-; RUN: llvm-pdbutil raw -summary -modules -files \
+; RUN: llvm-pdbutil dump -all %p/Inputs/empty.pdb | FileCheck -check-prefix=ALL %s
+; RUN: llvm-pdbutil dump -summary -modules -files \
 ; RUN:              %p/Inputs/big-read.pdb | FileCheck -check-prefix=BIG %s
-; RUN: not llvm-pdbutil raw -summary %p/Inputs/bad-block-size.pdb 2>&1 | FileCheck -check-prefix=BAD-BLOCK-SIZE %s
+; RUN: not llvm-pdbutil dump -summary %p/Inputs/bad-block-size.pdb 2>&1 | FileCheck -check-prefix=BAD-BLOCK-SIZE %s
 
 ALL:                                Summary
 ALL-NEXT: ============================================================
@@ -22,23 +22,40 @@ ALL-NEXT:   Has conflicting types: false
 ALL-NEXT:   Is stripped: false
 ALL:                                  Streams
 ALL-NEXT: ============================================================
-ALL-NEXT: Stream  0: [Old MSF Directory] (40 bytes)
-ALL-NEXT:   Stream  1: [PDB Stream] (118 bytes)
-ALL-NEXT:   Stream  2: [TPI Stream] (5392 bytes)
-ALL-NEXT:   Stream  3: [DBI Stream] (739 bytes)
-ALL-NEXT:   Stream  4: [IPI Stream] (784 bytes)
-ALL-NEXT:   Stream  5: [Named Stream "/LinkInfo"] (0 bytes)
-ALL-NEXT:   Stream  6: [Global Symbol Hash] (556 bytes)
-ALL-NEXT:   Stream  7: [Public Symbol Hash] (604 bytes)
-ALL-NEXT:   Stream  8: [Public Symbol Records] (104 bytes)
-ALL-NEXT:   Stream  9: [Named Stream "/src/headerblock"] (0 bytes)
-ALL-NEXT:   Stream 10: [Section Header Data] (160 bytes)
-ALL-NEXT:   Stream 11: [New FPO Data] (32 bytes)
-ALL-NEXT:   Stream 12: [Module "d:\src\llvm\test\DebugInfo\PDB\Inputs\empty.obj"] (308 bytes)
-ALL-NEXT:   Stream 13: [Named Stream "/names"] (239 bytes)
-ALL-NEXT:   Stream 14: [Module "* Linker *"] (520 bytes)
-ALL-NEXT:   Stream 15: [TPI Hash] (308 bytes)
-ALL-NEXT:   Stream 16: [IPI Hash] (68 bytes)
+ALL-NEXT:     Stream  0: [Old MSF Directory] (40 bytes)
+ALL-NEXT:                Blocks: [8]
+ALL-NEXT:     Stream  1: [PDB Stream] (118 bytes)
+ALL-NEXT:                Blocks: [19]
+ALL-NEXT:     Stream  2: [TPI Stream] (5392 bytes)
+ALL-NEXT:                Blocks: [18, 17]
+ALL-NEXT:     Stream  3: [DBI Stream] (739 bytes)
+ALL-NEXT:                Blocks: [14]
+ALL-NEXT:     Stream  4: [IPI Stream] (784 bytes)
+ALL-NEXT:                Blocks: [20]
+ALL-NEXT:     Stream  5: [Named Stream "/LinkInfo"] (0 bytes)
+ALL-NEXT:                Blocks: []
+ALL-NEXT:     Stream  6: [Global Symbol Hash] (556 bytes)
+ALL-NEXT:                Blocks: [11]
+ALL-NEXT:     Stream  7: [Public Symbol Hash] (604 bytes)
+ALL-NEXT:                Blocks: [13]
+ALL-NEXT:     Stream  8: [Public Symbol Records] (104 bytes)
+ALL-NEXT:                Blocks: [12]
+ALL-NEXT:     Stream  9: [Named Stream "/src/headerblock"] (0 bytes)
+ALL-NEXT:                Blocks: []
+ALL-NEXT:     Stream 10: [Section Header Data] (160 bytes)
+ALL-NEXT:                Blocks: [10]
+ALL-NEXT:     Stream 11: [New FPO Data] (32 bytes)
+ALL-NEXT:                Blocks: [15]
+ALL-NEXT:     Stream 12: [Module "d:\src\llvm\test\DebugInfo\PDB\Inputs\empty.obj"] (308 bytes)
+ALL-NEXT:                Blocks: [6]
+ALL-NEXT:     Stream 13: [Named Stream "/names"] (239 bytes)
+ALL-NEXT:                Blocks: [16]
+ALL-NEXT:     Stream 14: [Module "* Linker *"] (520 bytes)
+ALL-NEXT:                Blocks: [7]
+ALL-NEXT:     Stream 15: [TPI Hash] (308 bytes)
+ALL-NEXT:                Blocks: [21]
+ALL-NEXT:     Stream 16: [IPI Hash] (68 bytes)
+ALL-NEXT:                Blocks: [22]
 ALL:                                String Table
 ALL-NEXT: ============================================================
 ALL-NEXT:    ID | String
@@ -50,9 +67,11 @@ ALL-NEXT: ============================================================
 ALL-NEXT:   Mod 0000 | Name: `d:\src\llvm\test\DebugInfo\PDB\Inputs\empty.obj`:
 ALL-NEXT:              Obj: `d:\src\llvm\test\DebugInfo\PDB\Inputs\empty.obj`:
 ALL-NEXT:              debug stream: 12, # files: 1, has ec info: false
+ALL-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 ALL-NEXT:   Mod 0001 | Name: `* Linker *`:
 ALL-NEXT:              Obj: ``:
 ALL-NEXT:              debug stream: 14, # files: 0, has ec info: false
+ALL-NEXT:              pdb file ni: 1 `{{.*empty.pdb}}`, src file ni: 0 ``
 ALL:                                Files
 ALL-NEXT: ============================================================
 ALL-NEXT:   Mod 0000 | `d:\src\llvm\test\DebugInfo\PDB\Inputs\empty.obj`:
@@ -82,13 +101,11 @@ ALL-NEXT:            - LF_ENUMERATE [single = 2]
 ALL-NEXT:            - LF_ENUMERATE [free = 3]
 ALL-NEXT:            - LF_ENUMERATE [neutral = 4]
 ALL-NEXT:            - LF_ENUMERATE [both = 5]
-ALL-NEXT:   0x1003 | LF_ENUM [size = 120, hash = 208239]
-ALL-NEXT:            name: `__vc_attributes::threadingAttribute::threading_e`
+ALL-NEXT:   0x1003 | LF_ENUM [size = 120, hash = 208239] `__vc_attributes::threadingAttribute::threading_e`
 ALL-NEXT:            unique name: `.?AW4threading_e@threadingAttribute@__vc_attributes@@`
 ALL-NEXT:            field list: 0x1002, underlying type: 0x0074 (int)
 ALL-NEXT:            options: has unique name | is nested
-ALL-NEXT:   0x1004 | LF_STRUCTURE [size = 100, hash = 16377]
-ALL-NEXT:            class name: `__vc_attributes::threadingAttribute`
+ALL-NEXT:   0x1004 | LF_STRUCTURE [size = 100, hash = 16377] `__vc_attributes::threadingAttribute`
 ALL-NEXT:            unique name: `.?AUthreadingAttribute@__vc_attributes@@`
 ALL-NEXT:            vtable: <no type>, base list: <no type>, field list: <no type>
 ALL-NEXT:            options: forward ref | has unique name
@@ -97,11 +114,11 @@ ALL-NEXT:            referent = 0x1004, mode = pointer, opts = const, kind = ptr
 ALL-NEXT:   0x1006 | LF_ARGLIST [size = 12, hash = 194342]
 ALL-NEXT:            0x1003: `__vc_attributes::threadingAttribute::threading_e`
 ALL-NEXT:   0x1007 | LF_MFUNCTION [size = 28, hash = 254156]
-ALL-NEXT:            return type = 1, # args = 0x1006, param list = 0x0003 (void)
+ALL-NEXT:            return type = 0x0003 (void), # args = 1, param list = 0x1006
 ALL-NEXT:            class type = 0x1004, this type = 0x1005, this adjust = 0
 ALL-NEXT:            calling conv = thiscall, options = constructor
 ALL-NEXT:   0x1008 | LF_MFUNCTION [size = 28, hash = 194536]
-ALL-NEXT:            return type = 0, # args = 0x1000, param list = 0x0003 (void)
+ALL-NEXT:            return type = 0x0003 (void), # args = 0, param list = 0x1000
 ALL-NEXT:            class type = 0x1004, this type = 0x1005, this adjust = 0
 ALL-NEXT:            calling conv = thiscall, options = constructor
 ALL-NEXT:   0x1009 | LF_METHODLIST [size = 20, hash = 167492]
@@ -111,8 +128,7 @@ ALL-NEXT:   0x100A | LF_FIELDLIST [size = 68, hash = 185421]
 ALL-NEXT:            - LF_NESTTYPE [name = `threading_e`, parent = 0x1003]
 ALL-NEXT:            - LF_METHOD [name = `threadingAttribute`, # overloads = 2, overload list = 0x1009]
 ALL-NEXT:            - LF_MEMBER [name = `value`, Type = 0x1003, offset = 0, attrs = public]
-ALL-NEXT:   0x100B | LF_STRUCTURE [size = 100, hash = 119540]
-ALL-NEXT:            class name: `__vc_attributes::threadingAttribute`
+ALL-NEXT:   0x100B | LF_STRUCTURE [size = 100, hash = 119540] `__vc_attributes::threadingAttribute`
 ALL-NEXT:            unique name: `.?AUthreadingAttribute@__vc_attributes@@`
 ALL-NEXT:            vtable: <no type>, base list: <no type>, field list: 0x100A
 ALL-NEXT:            options: has ctor / dtor | contains nested class | has unique name
@@ -120,13 +136,11 @@ ALL-NEXT:   0x100C | LF_FIELDLIST [size = 48, hash = 261871]
 ALL-NEXT:            - LF_ENUMERATE [native = 0]
 ALL-NEXT:            - LF_ENUMERATE [com = 1]
 ALL-NEXT:            - LF_ENUMERATE [managed = 2]
-ALL-NEXT:   0x100D | LF_ENUM [size = 120, hash = 198119]
-ALL-NEXT:            name: `__vc_attributes::event_receiverAttribute::type_e`
+ALL-NEXT:   0x100D | LF_ENUM [size = 120, hash = 198119] `__vc_attributes::event_receiverAttribute::type_e`
 ALL-NEXT:            unique name: `.?AW4type_e@event_receiverAttribute@__vc_attributes@@`
 ALL-NEXT:            field list: 0x100C, underlying type: 0x0074 (int)
 ALL-NEXT:            options: has unique name | is nested
-ALL-NEXT:   0x100E | LF_STRUCTURE [size = 112, hash = 48056]
-ALL-NEXT:            class name: `__vc_attributes::event_receiverAttribute`
+ALL-NEXT:   0x100E | LF_STRUCTURE [size = 112, hash = 48056] `__vc_attributes::event_receiverAttribute`
 ALL-NEXT:            unique name: `.?AUevent_receiverAttribute@__vc_attributes@@`
 ALL-NEXT:            vtable: <no type>, base list: <no type>, field list: <no type>
 ALL-NEXT:            options: forward ref | has unique name
@@ -136,17 +150,17 @@ ALL-NEXT:   0x1010 | LF_ARGLIST [size = 16, hash = 134580]
 ALL-NEXT:            0x100D: `__vc_attributes::event_receiverAttribute::type_e`
 ALL-NEXT:            0x0030 (bool): `bool`
 ALL-NEXT:   0x1011 | LF_MFUNCTION [size = 28, hash = 148190]
-ALL-NEXT:            return type = 2, # args = 0x1010, param list = 0x0003 (void)
+ALL-NEXT:            return type = 0x0003 (void), # args = 2, param list = 0x1010
 ALL-NEXT:            class type = 0x100E, this type = 0x100F, this adjust = 0
 ALL-NEXT:            calling conv = thiscall, options = constructor
 ALL-NEXT:   0x1012 | LF_ARGLIST [size = 12, hash = 113636]
 ALL-NEXT:            0x100D: `__vc_attributes::event_receiverAttribute::type_e`
 ALL-NEXT:   0x1013 | LF_MFUNCTION [size = 28, hash = 53336]
-ALL-NEXT:            return type = 1, # args = 0x1012, param list = 0x0003 (void)
+ALL-NEXT:            return type = 0x0003 (void), # args = 1, param list = 0x1012
 ALL-NEXT:            class type = 0x100E, this type = 0x100F, this adjust = 0
 ALL-NEXT:            calling conv = thiscall, options = constructor
 ALL-NEXT:   0x1014 | LF_MFUNCTION [size = 28, hash = 55779]
-ALL-NEXT:            return type = 0, # args = 0x1000, param list = 0x0003 (void)
+ALL-NEXT:            return type = 0x0003 (void), # args = 0, param list = 0x1000
 ALL-NEXT:            class type = 0x100E, this type = 0x100F, this adjust = 0
 ALL-NEXT:            calling conv = thiscall, options = constructor
 ALL-NEXT:   0x1015 | LF_METHODLIST [size = 28, hash = 220695]
@@ -158,8 +172,7 @@ ALL-NEXT:            - LF_NESTTYPE [name = `type_e`, parent = 0x100D]
 ALL-NEXT:            - LF_METHOD [name = `event_receiverAttribute`, # overloads = 3, overload list = 0x1015]
 ALL-NEXT:            - LF_MEMBER [name = `type`, Type = 0x100D, offset = 0, attrs = public]
 ALL-NEXT:            - LF_MEMBER [name = `layout_dependent`, Type = 0x0030 (bool), offset = 4, attrs = public]
-ALL-NEXT:   0x1017 | LF_STRUCTURE [size = 112, hash = 148734]
-ALL-NEXT:            class name: `__vc_attributes::event_receiverAttribute`
+ALL-NEXT:   0x1017 | LF_STRUCTURE [size = 112, hash = 148734] `__vc_attributes::event_receiverAttribute`
 ALL-NEXT:            unique name: `.?AUevent_receiverAttribute@__vc_attributes@@`
 ALL-NEXT:            vtable: <no type>, base list: <no type>, field list: 0x1016
 ALL-NEXT:            options: has ctor / dtor | contains nested class | has unique name
@@ -167,13 +180,11 @@ ALL-NEXT:   0x1018 | LF_FIELDLIST [size = 48, hash = 81128]
 ALL-NEXT:            - LF_ENUMERATE [never = 0]
 ALL-NEXT:            - LF_ENUMERATE [allowed = 1]
 ALL-NEXT:            - LF_ENUMERATE [always = 2]
-ALL-NEXT:   0x1019 | LF_ENUM [size = 116, hash = 60158]
-ALL-NEXT:            name: `__vc_attributes::aggregatableAttribute::type_e`
+ALL-NEXT:   0x1019 | LF_ENUM [size = 116, hash = 60158] `__vc_attributes::aggregatableAttribute::type_e`
 ALL-NEXT:            unique name: `.?AW4type_e@aggregatableAttribute@__vc_attributes@@`
 ALL-NEXT:            field list: 0x1018, underlying type: 0x0074 (int)
 ALL-NEXT:            options: has unique name | is nested
-ALL-NEXT:   0x101A | LF_STRUCTURE [size = 108, hash = 217249]
-ALL-NEXT:            class name: `__vc_attributes::aggregatableAttribute`
+ALL-NEXT:   0x101A | LF_STRUCTURE [size = 108, hash = 217249] `__vc_attributes::aggregatableAttribute`
 ALL-NEXT:            unique name: `.?AUaggregatableAttribute@__vc_attributes@@`
 ALL-NEXT:            vtable: <no type>, base list: <no type>, field list: <no type>
 ALL-NEXT:            options: forward ref | has unique name
@@ -182,11 +193,11 @@ ALL-NEXT:            referent = 0x101A, mode = pointer, opts = const, kind = ptr
 ALL-NEXT:   0x101C | LF_ARGLIST [size = 12, hash = 159978]
 ALL-NEXT:            0x1019: `__vc_attributes::aggregatableAttribute::type_e`
 ALL-NEXT:   0x101D | LF_MFUNCTION [size = 28, hash = 249504]
-ALL-NEXT:            return type = 1, # args = 0x101C, param list = 0x0003 (void)
+ALL-NEXT:            return type = 0x0003 (void), # args = 1, param list = 0x101C
 ALL-NEXT:            class type = 0x101A, this type = 0x101B, this adjust = 0
 ALL-NEXT:            calling conv = thiscall, options = constructor
 ALL-NEXT:   0x101E | LF_MFUNCTION [size = 28, hash = 141941]
-ALL-NEXT:            return type = 0, # args = 0x1000, param list = 0x0003 (void)
+ALL-NEXT:            return type = 0x0003 (void), # args = 0, param list = 0x1000
 ALL-NEXT:            class type = 0x101A, this type = 0x101B, this adjust = 0
 ALL-NEXT:            calling conv = thiscall, options = constructor
 ALL-NEXT:   0x101F | LF_METHODLIST [size = 20, hash = 238785]
@@ -196,26 +207,22 @@ ALL-NEXT:   0x1020 | LF_FIELDLIST [size = 68, hash = 6214]
 ALL-NEXT:            - LF_NESTTYPE [name = `type_e`, parent = 0x1019]
 ALL-NEXT:            - LF_METHOD [name = `aggregatableAttribute`, # overloads = 2, overload list = 0x101F]
 ALL-NEXT:            - LF_MEMBER [name = `type`, Type = 0x1019, offset = 0, attrs = public]
-ALL-NEXT:   0x1021 | LF_STRUCTURE [size = 108, hash = 94935]
-ALL-NEXT:            class name: `__vc_attributes::aggregatableAttribute`
+ALL-NEXT:   0x1021 | LF_STRUCTURE [size = 108, hash = 94935] `__vc_attributes::aggregatableAttribute`
 ALL-NEXT:            unique name: `.?AUaggregatableAttribute@__vc_attributes@@`
 ALL-NEXT:            vtable: <no type>, base list: <no type>, field list: 0x1020
 ALL-NEXT:            options: has ctor / dtor | contains nested class | has unique name
-ALL-NEXT:   0x1022 | LF_ENUM [size = 116, hash = 151449]
-ALL-NEXT:            name: `__vc_attributes::event_sourceAttribute::type_e`
+ALL-NEXT:   0x1022 | LF_ENUM [size = 116, hash = 151449] `__vc_attributes::event_sourceAttribute::type_e`
 ALL-NEXT:            unique name: `.?AW4type_e@event_sourceAttribute@__vc_attributes@@`
 ALL-NEXT:            field list: 0x100C, underlying type: 0x0074 (int)
 ALL-NEXT:            options: has unique name | is nested
 ALL-NEXT:   0x1023 | LF_FIELDLIST [size = 28, hash = 135589]
 ALL-NEXT:            - LF_ENUMERATE [speed = 0]
 ALL-NEXT:            - LF_ENUMERATE [size = 1]
-ALL-NEXT:   0x1024 | LF_ENUM [size = 124, hash = 73373]
-ALL-NEXT:            name: `__vc_attributes::event_sourceAttribute::optimize_e`
+ALL-NEXT:   0x1024 | LF_ENUM [size = 124, hash = 73373] `__vc_attributes::event_sourceAttribute::optimize_e`
 ALL-NEXT:            unique name: `.?AW4optimize_e@event_sourceAttribute@__vc_attributes@@`
 ALL-NEXT:            field list: 0x1023, underlying type: 0x0074 (int)
 ALL-NEXT:            options: has unique name | is nested
-ALL-NEXT:   0x1025 | LF_STRUCTURE [size = 108, hash = 96512]
-ALL-NEXT:            class name: `__vc_attributes::event_sourceAttribute`
+ALL-NEXT:   0x1025 | LF_STRUCTURE [size = 108, hash = 96512] `__vc_attributes::event_sourceAttribute`
 ALL-NEXT:            unique name: `.?AUevent_sourceAttribute@__vc_attributes@@`
 ALL-NEXT:            vtable: <no type>, base list: <no type>, field list: <no type>
 ALL-NEXT:            options: forward ref | has unique name
@@ -224,11 +231,11 @@ ALL-NEXT:            referent = 0x1025, mode = pointer, opts = const, kind = ptr
 ALL-NEXT:   0x1027 | LF_ARGLIST [size = 12, hash = 17744]
 ALL-NEXT:            0x1022: `__vc_attributes::event_sourceAttribute::type_e`
 ALL-NEXT:   0x1028 | LF_MFUNCTION [size = 28, hash = 239514]
-ALL-NEXT:            return type = 1, # args = 0x1027, param list = 0x0003 (void)
+ALL-NEXT:            return type = 0x0003 (void), # args = 1, param list = 0x1027
 ALL-NEXT:            class type = 0x1025, this type = 0x1026, this adjust = 0
 ALL-NEXT:            calling conv = thiscall, options = constructor
 ALL-NEXT:   0x1029 | LF_MFUNCTION [size = 28, hash = 173189]
-ALL-NEXT:            return type = 0, # args = 0x1000, param list = 0x0003 (void)
+ALL-NEXT:            return type = 0x0003 (void), # args = 0, param list = 0x1000
 ALL-NEXT:            class type = 0x1025, this type = 0x1026, this adjust = 0
 ALL-NEXT:            calling conv = thiscall, options = constructor
 ALL-NEXT:   0x102A | LF_METHODLIST [size = 20, hash = 130544]
@@ -241,8 +248,7 @@ ALL-NEXT:            - LF_METHOD [name = `event_sourceAttribute`, # overloads = 
 ALL-NEXT:            - LF_MEMBER [name = `type`, Type = 0x1022, offset = 0, attrs = public]
 ALL-NEXT:            - LF_MEMBER [name = `optimize`, Type = 0x1024, offset = 4, attrs = public]
 ALL-NEXT:            - LF_MEMBER [name = `decorate`, Type = 0x0030 (bool), offset = 8, attrs = public]
-ALL-NEXT:   0x102C | LF_STRUCTURE [size = 108, hash = 238560]
-ALL-NEXT:            class name: `__vc_attributes::event_sourceAttribute`
+ALL-NEXT:   0x102C | LF_STRUCTURE [size = 108, hash = 238560] `__vc_attributes::event_sourceAttribute`
 ALL-NEXT:            unique name: `.?AUevent_sourceAttribute@__vc_attributes@@`
 ALL-NEXT:            vtable: <no type>, base list: <no type>, field list: 0x102B
 ALL-NEXT:            options: has ctor / dtor | contains nested class | has unique name
@@ -253,13 +259,11 @@ ALL-NEXT:            - LF_ENUMERATE [service = 3]
 ALL-NEXT:            - LF_ENUMERATE [unspecified = 4]
 ALL-NEXT:            - LF_ENUMERATE [EXE = 2]
 ALL-NEXT:            - LF_ENUMERATE [SERVICE = 3]
-ALL-NEXT:   0x102E | LF_ENUM [size = 104, hash = 115151]
-ALL-NEXT:            name: `__vc_attributes::moduleAttribute::type_e`
+ALL-NEXT:   0x102E | LF_ENUM [size = 104, hash = 115151] `__vc_attributes::moduleAttribute::type_e`
 ALL-NEXT:            unique name: `.?AW4type_e@moduleAttribute@__vc_attributes@@`
 ALL-NEXT:            field list: 0x102D, underlying type: 0x0074 (int)
 ALL-NEXT:            options: has unique name | is nested
-ALL-NEXT:   0x102F | LF_STRUCTURE [size = 96, hash = 197306]
-ALL-NEXT:            class name: `__vc_attributes::moduleAttribute`
+ALL-NEXT:   0x102F | LF_STRUCTURE [size = 96, hash = 197306] `__vc_attributes::moduleAttribute`
 ALL-NEXT:            unique name: `.?AUmoduleAttribute@__vc_attributes@@`
 ALL-NEXT:            vtable: <no type>, base list: <no type>, field list: <no type>
 ALL-NEXT:            options: forward ref | has unique name
@@ -286,17 +290,17 @@ ALL-NEXT:            0x0030 (bool): `bool`
 ALL-NEXT:            0x1032: `const char*`
 ALL-NEXT:            0x1032: `const char*`
 ALL-NEXT:   0x1034 | LF_MFUNCTION [size = 28, hash = 48854]
-ALL-NEXT:            return type = 15, # args = 0x1033, param list = 0x0003 (void)
+ALL-NEXT:            return type = 0x0003 (void), # args = 15, param list = 0x1033
 ALL-NEXT:            class type = 0x102F, this type = 0x1030, this adjust = 0
 ALL-NEXT:            calling conv = thiscall, options = constructor
 ALL-NEXT:   0x1035 | LF_ARGLIST [size = 12, hash = 170035]
 ALL-NEXT:            0x102E: `__vc_attributes::moduleAttribute::type_e`
 ALL-NEXT:   0x1036 | LF_MFUNCTION [size = 28, hash = 177041]
-ALL-NEXT:            return type = 1, # args = 0x1035, param list = 0x0003 (void)
+ALL-NEXT:            return type = 0x0003 (void), # args = 1, param list = 0x1035
 ALL-NEXT:            class type = 0x102F, this type = 0x1030, this adjust = 0
 ALL-NEXT:            calling conv = thiscall, options = constructor
 ALL-NEXT:   0x1037 | LF_MFUNCTION [size = 28, hash = 102745]
-ALL-NEXT:            return type = 0, # args = 0x1000, param list = 0x0003 (void)
+ALL-NEXT:            return type = 0x0003 (void), # args = 0, param list = 0x1000
 ALL-NEXT:            class type = 0x102F, this type = 0x1030, this adjust = 0
 ALL-NEXT:            calling conv = thiscall, options = constructor
 ALL-NEXT:   0x1038 | LF_METHODLIST [size = 28, hash = 16947]
@@ -321,8 +325,7 @@ ALL-NEXT:            - LF_MEMBER [name = `hidden`, Type = 0x0030 (bool), offset 
 ALL-NEXT:            - LF_MEMBER [name = `restricted`, Type = 0x0030 (bool), offset = 45, attrs = public]
 ALL-NEXT:            - LF_MEMBER [name = `custom`, Type = 0x1032, offset = 48, attrs = public]
 ALL-NEXT:            - LF_MEMBER [name = `resource_name`, Type = 0x1032, offset = 52, attrs = public]
-ALL-NEXT:   0x103A | LF_STRUCTURE [size = 96, hash = 98548]
-ALL-NEXT:            class name: `__vc_attributes::moduleAttribute`
+ALL-NEXT:   0x103A | LF_STRUCTURE [size = 96, hash = 98548] `__vc_attributes::moduleAttribute`
 ALL-NEXT:            unique name: `.?AUmoduleAttribute@__vc_attributes@@`
 ALL-NEXT:            vtable: <no type>, base list: <no type>, field list: 0x1039
 ALL-NEXT:            options: has ctor / dtor | contains nested class | has unique name
@@ -357,13 +360,11 @@ ALL-NEXT:            - LF_ENUMERATE [eModuleUsage = 16777216]
 ALL-NEXT:            - LF_ENUMERATE [eIllegalUsage = 33554432]
 ALL-NEXT:            - LF_ENUMERATE [eAsynchronousUsage = 67108864]
 ALL-NEXT:            - LF_ENUMERATE [eAnyIDLUsage = 4161535]
-ALL-NEXT:   0x103C | LF_ENUM [size = 140, hash = 171328]
-ALL-NEXT:            name: `__vc_attributes::helper_attributes::usageAttribute::usage_e`
+ALL-NEXT:   0x103C | LF_ENUM [size = 140, hash = 171328] `__vc_attributes::helper_attributes::usageAttribute::usage_e`
 ALL-NEXT:            unique name: `.?AW4usage_e@usageAttribute@helper_attributes@__vc_attributes@@`
 ALL-NEXT:            field list: 0x103B, underlying type: 0x0074 (int)
 ALL-NEXT:            options: has unique name | is nested
-ALL-NEXT:   0x103D | LF_STRUCTURE [size = 128, hash = 203640]
-ALL-NEXT:            class name: `__vc_attributes::helper_attributes::usageAttribute`
+ALL-NEXT:   0x103D | LF_STRUCTURE [size = 128, hash = 203640] `__vc_attributes::helper_attributes::usageAttribute`
 ALL-NEXT:            unique name: `.?AUusageAttribute@helper_attributes@__vc_attributes@@`
 ALL-NEXT:            vtable: <no type>, base list: <no type>, field list: <no type>
 ALL-NEXT:            options: forward ref | has unique name
@@ -372,7 +373,7 @@ ALL-NEXT:            referent = 0x103D, mode = pointer, opts = const, kind = ptr
 ALL-NEXT:   0x103F | LF_ARGLIST [size = 12, hash = 49018]
 ALL-NEXT:            0x0075 (unsigned): `unsigned`
 ALL-NEXT:   0x1040 | LF_MFUNCTION [size = 28, hash = 43821]
-ALL-NEXT:            return type = 1, # args = 0x103F, param list = 0x0003 (void)
+ALL-NEXT:            return type = 0x0003 (void), # args = 1, param list = 0x103F
 ALL-NEXT:            class type = 0x103D, this type = 0x103E, this adjust = 0
 ALL-NEXT:            calling conv = thiscall, options = constructor
 ALL-NEXT:   0x1041 | LF_FIELDLIST [size = 60, hash = 202555]
@@ -380,8 +381,7 @@ ALL-NEXT:            - LF_NESTTYPE [name = `usage_e`, parent = 0x103C]
 ALL-NEXT:            - LF_ONEMETHOD [name = `usageAttribute`]
 ALL-NEXT:              type = 0x1040, vftable offset = -1, attrs = public
 ALL-NEXT:            - LF_MEMBER [name = `value`, Type = 0x0075 (unsigned), offset = 0, attrs = public]
-ALL-NEXT:   0x1042 | LF_STRUCTURE [size = 128, hash = 165040]
-ALL-NEXT:            class name: `__vc_attributes::helper_attributes::usageAttribute`
+ALL-NEXT:   0x1042 | LF_STRUCTURE [size = 128, hash = 165040] `__vc_attributes::helper_attributes::usageAttribute`
 ALL-NEXT:            unique name: `.?AUusageAttribute@helper_attributes@__vc_attributes@@`
 ALL-NEXT:            vtable: <no type>, base list: <no type>, field list: 0x1041
 ALL-NEXT:            options: has ctor / dtor | contains nested class | has unique name
@@ -390,13 +390,11 @@ ALL-NEXT:            - LF_ENUMERATE [eBoolean = 0]
 ALL-NEXT:            - LF_ENUMERATE [eInteger = 1]
 ALL-NEXT:            - LF_ENUMERATE [eFloat = 2]
 ALL-NEXT:            - LF_ENUMERATE [eDouble = 3]
-ALL-NEXT:   0x1044 | LF_ENUM [size = 148, hash = 142625]
-ALL-NEXT:            name: `__vc_attributes::helper_attributes::v1_alttypeAttribute::type_e`
+ALL-NEXT:   0x1044 | LF_ENUM [size = 148, hash = 142625] `__vc_attributes::helper_attributes::v1_alttypeAttribute::type_e`
 ALL-NEXT:            unique name: `.?AW4type_e@v1_alttypeAttribute@helper_attributes@__vc_attributes@@`
 ALL-NEXT:            field list: 0x1043, underlying type: 0x0074 (int)
 ALL-NEXT:            options: has unique name | is nested
-ALL-NEXT:   0x1045 | LF_STRUCTURE [size = 140, hash = 52534]
-ALL-NEXT:            class name: `__vc_attributes::helper_attributes::v1_alttypeAttribute`
+ALL-NEXT:   0x1045 | LF_STRUCTURE [size = 140, hash = 52534] `__vc_attributes::helper_attributes::v1_alttypeAttribute`
 ALL-NEXT:            unique name: `.?AUv1_alttypeAttribute@helper_attributes@__vc_attributes@@`
 ALL-NEXT:            vtable: <no type>, base list: <no type>, field list: <no type>
 ALL-NEXT:            options: forward ref | has unique name
@@ -405,7 +403,7 @@ ALL-NEXT:            referent = 0x1045, mode = pointer, opts = const, kind = ptr
 ALL-NEXT:   0x1047 | LF_ARGLIST [size = 12, hash = 103930]
 ALL-NEXT:            0x1044: `__vc_attributes::helper_attributes::v1_alttypeAttribute::type_e`
 ALL-NEXT:   0x1048 | LF_MFUNCTION [size = 28, hash = 110942]
-ALL-NEXT:            return type = 1, # args = 0x1047, param list = 0x0003 (void)
+ALL-NEXT:            return type = 0x0003 (void), # args = 1, param list = 0x1047
 ALL-NEXT:            class type = 0x1045, this type = 0x1046, this adjust = 0
 ALL-NEXT:            calling conv = thiscall, options = constructor
 ALL-NEXT:   0x1049 | LF_FIELDLIST [size = 64, hash = 17991]
@@ -413,8 +411,7 @@ ALL-NEXT:            - LF_NESTTYPE [name = `type_e`, parent = 0x1044]
 ALL-NEXT:            - LF_ONEMETHOD [name = `v1_alttypeAttribute`]
 ALL-NEXT:              type = 0x1048, vftable offset = -1, attrs = public
 ALL-NEXT:            - LF_MEMBER [name = `type`, Type = 0x1044, offset = 0, attrs = public]
-ALL-NEXT:   0x104A | LF_STRUCTURE [size = 140, hash = 213215]
-ALL-NEXT:            class name: `__vc_attributes::helper_attributes::v1_alttypeAttribute`
+ALL-NEXT:   0x104A | LF_STRUCTURE [size = 140, hash = 213215] `__vc_attributes::helper_attributes::v1_alttypeAttribute`
 ALL-NEXT:            unique name: `.?AUv1_alttypeAttribute@helper_attributes@__vc_attributes@@`
 ALL-NEXT:            vtable: <no type>, base list: <no type>, field list: 0x1049
 ALL-NEXT:            options: has ctor / dtor | contains nested class | has unique name
@@ -457,64 +454,64 @@ ALL-NEXT:     TI: 0x1000, Offset: 0
 ALL:        Hash Adjusters:
 ALL:                             Public Symbols
 ALL-NEXT: ============================================================
-ALL-NEXT:   - S_PUB32 [size = 36] `?__purecall@@3PAXA`
+ALL-NEXT:    0 | S_PUB32 [size = 36] `?__purecall@@3PAXA`
 ALL-NEXT:       flags = none, addr = 0003:0000
-ALL-NEXT:   - S_PUB32 [size = 20] `_main`
+ALL-NEXT:   36 | S_PUB32 [size = 20] `_main`
 ALL-NEXT:       flags = function, addr = 0001:0016
-ALL-NEXT:   - S_PROCREF [size = 20] `main`
+ALL-NEXT:   56 | S_PROCREF [size = 20] `main`
 ALL-NEXT:       module = 1, sum name = 0, offset = 120
-ALL-NEXT:   - S_GDATA32 [size = 28] `__purecall`
+ALL-NEXT:   76 | S_GDATA32 [size = 28] `__purecall`
 ALL-NEXT:       type = 0x0403 (void*), addr = 0003:0000
 ALL:                                Symbols
 ALL-NEXT: ============================================================
 ALL-NEXT:   Mod 0000 | `d:\src\llvm\test\DebugInfo\PDB\Inputs\empty.obj`:
-ALL-NEXT:   - S_OBJNAME [size = 56] sig=0, `d:\src\llvm\test\DebugInfo\PDB\Inputs\empty.obj`
-ALL-NEXT:   - S_COMPILE3 [size = 60]
-ALL-NEXT:       machine = intel pentium 3, Ver = Microsoft (R) Optimizing Compiler, language = c++
-ALL-NEXT:       frontend = 18.0.31101.0, backend = 18.0.31101.0
-ALL-NEXT:       flags = security checks
-ALL-NEXT:   - S_GPROC32 [size = 44] `main`
-ALL-NEXT:       parent = 0, addr = 0001:0016, code size = 10, end = 196
-ALL-NEXT:       debug start = 3, debug end = 8, flags = has fp
-ALL-NEXT:   - S_FRAMEPROC [size = 32]
-ALL-NEXT:       size = 0, padding size = 0, offset to padding = 0
-ALL-NEXT:       bytes of callee saved registers = 0, exception handler addr = 0000:0000
-ALL-NEXT:       flags = has async eh | opt speed
-ALL-NEXT:   - S_END [size = 4]
-ALL-NEXT:   - S_BUILDINFO [size = 8] BuildId = `4110`
+ALL-NEXT:      4 | S_OBJNAME [size = 56] sig=0, `d:\src\llvm\test\DebugInfo\PDB\Inputs\empty.obj`
+ALL-NEXT:     60 | S_COMPILE3 [size = 60]
+ALL-NEXT:          machine = intel pentium 3, Ver = Microsoft (R) Optimizing Compiler, language = c++
+ALL-NEXT:          frontend = 18.0.31101.0, backend = 18.0.31101.0
+ALL-NEXT:          flags = security checks
+ALL-NEXT:    120 | S_GPROC32 [size = 44] `main`
+ALL-NEXT:          parent = 0, end = 196, addr = 0001:0016, code size = 10
+ALL-NEXT:          debug start = 3, debug end = 8, flags = has fp
+ALL-NEXT:    164 | S_FRAMEPROC [size = 32]
+ALL-NEXT:          size = 0, padding size = 0, offset to padding = 0
+ALL-NEXT:          bytes of callee saved registers = 0, exception handler addr = 0000:0000
+ALL-NEXT:          flags = has async eh | opt speed
+ALL-NEXT:    196 | S_END [size = 4]
+ALL-NEXT:    200 | S_BUILDINFO [size = 8] BuildId = `4110`
 ALL-NEXT:   Mod 0001 | `* Linker *`:
-ALL-NEXT:   - S_OBJNAME [size = 20] sig=0, `* Linker *`
-ALL-NEXT:   - S_COMPILE3 [size = 48]
-ALL-NEXT:       machine = intel 80386, Ver = Microsoft (R) LINK, language = link
-ALL-NEXT:       frontend = 0.0.0.0, backend = 12.0.31101.0
-ALL-NEXT:       flags = none
-ALL-NEXT:   - S_ENVBLOCK [size = 172]
-ALL-NEXT:     - cwd
-ALL-NEXT:     - d:\src\llvm\test\DebugInfo\PDB\Inputs
-ALL-NEXT:     - exe
-ALL-NEXT:     - C:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\BIN\link.exe
-ALL-NEXT:     - pdb
-ALL-NEXT:     - d:\src\llvm\test\DebugInfo\PDB\Inputs\empty.pdb
-ALL-NEXT:   - S_TRAMPOLINE [size = 20]
-ALL-NEXT:       type = tramp incremental, size = 5, source = 0001:0005, target = 0001:0005
-ALL-NEXT:   - S_SECTION [size = 28] `.text`
-ALL-NEXT:       length = 4122, alignment = 12, rva = 4096, section # = 1, characteristics = 1610612768
-ALL-NEXT:   - S_COFFGROUP [size = 28] `.text$mn`
-ALL-NEXT:       length = 4122, addr = 0001:0000, characteristics = 1610612768
-ALL-NEXT:   - S_SECTION [size = 28] `.rdata`
-ALL-NEXT:       length = 690, alignment = 12, rva = 12288, section # = 2, characteristics = 1073741888
-ALL-NEXT:   - S_COFFGROUP [size = 28] `.rdata`
-ALL-NEXT:       length = 323, addr = 0002:0000, characteristics = 1073741888
-ALL-NEXT:   - S_COFFGROUP [size = 28] `.edata`
-ALL-NEXT:       length = 0, addr = 0002:0323, characteristics = 1073741888
-ALL-NEXT:   - S_COFFGROUP [size = 32] `.rdata$debug`
-ALL-NEXT:       length = 366, addr = 0002:0324, characteristics = 1073741888
-ALL-NEXT:   - S_SECTION [size = 28] `.data`
-ALL-NEXT:       length = 4, alignment = 12, rva = 16384, section # = 3, characteristics = 3221225536
-ALL-NEXT:   - S_COFFGROUP [size = 24] `.bss`
-ALL-NEXT:       length = 4, addr = 0003:0000, characteristics = 3221225600
-ALL-NEXT:   - S_SECTION [size = 28] `.reloc`
-ALL-NEXT:       length = 8, alignment = 12, rva = 20480, section # = 4, characteristics = 1107296320
+ALL-NEXT:      4 | S_OBJNAME [size = 20] sig=0, `* Linker *`
+ALL-NEXT:     24 | S_COMPILE3 [size = 48]
+ALL-NEXT:          machine = intel 80386, Ver = Microsoft (R) LINK, language = link
+ALL-NEXT:          frontend = 0.0.0.0, backend = 12.0.31101.0
+ALL-NEXT:          flags = none
+ALL-NEXT:     72 | S_ENVBLOCK [size = 172]
+ALL-NEXT:          - cwd
+ALL-NEXT:          - d:\src\llvm\test\DebugInfo\PDB\Inputs
+ALL-NEXT:          - exe
+ALL-NEXT:          - C:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\BIN\link.exe
+ALL-NEXT:          - pdb
+ALL-NEXT:          - d:\src\llvm\test\DebugInfo\PDB\Inputs\empty.pdb
+ALL-NEXT:    244 | S_TRAMPOLINE [size = 20]
+ALL-NEXT:          type = tramp incremental, size = 5, source = 0001:0005, target = 0001:0005
+ALL-NEXT:    264 | S_SECTION [size = 28] `.text`
+ALL-NEXT:          length = 4122, alignment = 12, rva = 4096, section # = 1, characteristics = 1610612768
+ALL-NEXT:    292 | S_COFFGROUP [size = 28] `.text$mn`
+ALL-NEXT:          length = 4122, addr = 0001:0000, characteristics = 1610612768
+ALL-NEXT:    320 | S_SECTION [size = 28] `.rdata`
+ALL-NEXT:          length = 690, alignment = 12, rva = 12288, section # = 2, characteristics = 1073741888
+ALL-NEXT:    348 | S_COFFGROUP [size = 28] `.rdata`
+ALL-NEXT:          length = 323, addr = 0002:0000, characteristics = 1073741888
+ALL-NEXT:    376 | S_COFFGROUP [size = 28] `.edata`
+ALL-NEXT:          length = 0, addr = 0002:0323, characteristics = 1073741888
+ALL-NEXT:    404 | S_COFFGROUP [size = 32] `.rdata$debug`
+ALL-NEXT:          length = 366, addr = 0002:0324, characteristics = 1073741888
+ALL-NEXT:    436 | S_SECTION [size = 28] `.data`
+ALL-NEXT:          length = 4, alignment = 12, rva = 16384, section # = 3, characteristics = 3221225536
+ALL-NEXT:    464 | S_COFFGROUP [size = 24] `.bss`
+ALL-NEXT:          length = 4, addr = 0003:0000, characteristics = 3221225600
+ALL-NEXT:    488 | S_SECTION [size = 28] `.reloc`
+ALL-NEXT:          length = 8, alignment = 12, rva = 20480, section # = 4, characteristics = 1107296320
 ALL:                         Section Contributions
 ALL-NEXT: ============================================================
 ALL-NEXT:   SC  | mod = 1, 0001:0000, size = 10, data crc = 0, reloc crc = 0
@@ -573,147 +570,195 @@ BIG-NEXT: ============================================================
 BIG-NEXT:   Mod 0000 | Name: `D:\src\llvm\test\tools\llvm-symbolizer\pdb\Inputs\test.obj`:
 BIG-NEXT:              Obj: `D:\src\llvm\test\tools\llvm-symbolizer\pdb\Inputs\test.obj`:
 BIG-NEXT:              debug stream: 12, # files: 1, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0001 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\_cpu_disp_.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 14, # files: 14, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0002 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\_initsect_.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 15, # files: 19, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0003 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\_sehprolg4_.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 16, # files: 1, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 1 `f:\dd\vctools\crt\vcstartup\src\eh\i386\sehprolg4.asm`
 BIG-NEXT:   Mod 0004 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\_chandler4gs_.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 17, # files: 14, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0005 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\_secchk_.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 18, # files: 14, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0006 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\gs_cookie.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 19, # files: 9, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0007 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\gs_report.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 20, # files: 14, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0008 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\gs_support.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 21, # files: 10, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0009 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\checkcfg.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 22, # files: 14, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0010 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\guard_support.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 23, # files: 10, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0011 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\loadcfg.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 24, # files: 9, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0012 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\dyn_tls_dtor.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 25, # files: 11, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0013 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\dyn_tls_init.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 26, # files: 10, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0014 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\matherr_detection.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 27, # files: 1, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0015 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\ucrt_detection.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 28, # files: 1, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0016 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\argv_mode.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 29, # files: 1, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0017 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\commit_mode.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 30, # files: 1, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0018 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\default_local_stdio_options.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 31, # files: 24, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0019 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\denormal_control.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 32, # files: 1, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0020 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\env_mode.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 33, # files: 1, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0021 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\file_mode.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 34, # files: 1, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0022 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\invalid_parameter_handler.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 35, # files: 1, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0023 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\matherr.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 36, # files: 2, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0024 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\new_mode.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 37, # files: 1, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0025 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\thread_locale.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 38, # files: 1, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0026 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\tncleanup.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 39, # files: 21, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0027 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\exe_main.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 40, # files: 26, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0028 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\initializers.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 41, # files: 20, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0029 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\utility.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 42, # files: 20, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0030 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\ucrt_stubs.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 43, # files: 1, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0031 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\utility_desktop.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 44, # files: 20, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0032 | Name: `f:\dd\vctools\crt\vcstartup\build\md\msvcrt_kernel32\obj1r\i386\default_precision.obj`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\MSVCRT.lib`:
 BIG-NEXT:              debug stream: 45, # files: 20, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0033 | Name: `Import:KERNEL32.dll`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\WI3CF2~1\10\Lib\10.0.10586.0\um\x86\kernel32.lib`:
 BIG-NEXT:              debug stream: 47, # files: 0, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0034 | Name: `KERNEL32.dll`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\WI3CF2~1\10\Lib\10.0.10586.0\um\x86\kernel32.lib`:
 BIG-NEXT:              debug stream: 46, # files: 0, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0035 | Name: `Import:VCRUNTIME140.dll`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\vcruntime.lib`:
 BIG-NEXT:              debug stream: 49, # files: 0, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0036 | Name: `VCRUNTIME140.dll`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\MI0E91~1.0\VC\LIB\vcruntime.lib`:
 BIG-NEXT:              debug stream: 48, # files: 0, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0037 | Name: `Import:api-ms-win-crt-stdio-l1-1-0.dll`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\WI3CF2~1\10\Lib\10.0.10586.0\ucrt\x86\ucrt.lib`:
 BIG-NEXT:              debug stream: 59, # files: 0, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0038 | Name: `api-ms-win-crt-stdio-l1-1-0.dll`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\WI3CF2~1\10\Lib\10.0.10586.0\ucrt\x86\ucrt.lib`:
 BIG-NEXT:              debug stream: 58, # files: 0, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0039 | Name: `Import:api-ms-win-crt-runtime-l1-1-0.dll`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\WI3CF2~1\10\Lib\10.0.10586.0\ucrt\x86\ucrt.lib`:
 BIG-NEXT:              debug stream: 57, # files: 0, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0040 | Name: `api-ms-win-crt-runtime-l1-1-0.dll`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\WI3CF2~1\10\Lib\10.0.10586.0\ucrt\x86\ucrt.lib`:
 BIG-NEXT:              debug stream: 56, # files: 0, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0041 | Name: `Import:api-ms-win-crt-math-l1-1-0.dll`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\WI3CF2~1\10\Lib\10.0.10586.0\ucrt\x86\ucrt.lib`:
 BIG-NEXT:              debug stream: 55, # files: 0, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0042 | Name: `api-ms-win-crt-math-l1-1-0.dll`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\WI3CF2~1\10\Lib\10.0.10586.0\ucrt\x86\ucrt.lib`:
 BIG-NEXT:              debug stream: 54, # files: 0, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0043 | Name: `Import:api-ms-win-crt-locale-l1-1-0.dll`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\WI3CF2~1\10\Lib\10.0.10586.0\ucrt\x86\ucrt.lib`:
 BIG-NEXT:              debug stream: 53, # files: 0, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0044 | Name: `api-ms-win-crt-locale-l1-1-0.dll`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\WI3CF2~1\10\Lib\10.0.10586.0\ucrt\x86\ucrt.lib`:
 BIG-NEXT:              debug stream: 52, # files: 0, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0045 | Name: `Import:api-ms-win-crt-heap-l1-1-0.dll`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\WI3CF2~1\10\Lib\10.0.10586.0\ucrt\x86\ucrt.lib`:
 BIG-NEXT:              debug stream: 51, # files: 0, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0046 | Name: `api-ms-win-crt-heap-l1-1-0.dll`:
 BIG-NEXT:              Obj: `C:\PROGRA~2\WI3CF2~1\10\Lib\10.0.10586.0\ucrt\x86\ucrt.lib`:
 BIG-NEXT:              debug stream: 50, # files: 0, has ec info: false
+BIG-NEXT:              pdb file ni: 0 ``, src file ni: 0 ``
 BIG-NEXT:   Mod 0047 | Name: `* Linker *`:
 BIG-NEXT:              Obj: ``:
 BIG-NEXT:              debug stream: 60, # files: 0, has ec info: false
+BIG-NEXT:              pdb file ni: 55 `{{.*test.pdb}}`, src file ni: 0 ``
 BIG:                                Files
 BIG-NEXT: ============================================================
 BIG-NEXT:   Mod 0000 | `D:\src\llvm\test\tools\llvm-symbolizer\pdb\Inputs\test.obj`:

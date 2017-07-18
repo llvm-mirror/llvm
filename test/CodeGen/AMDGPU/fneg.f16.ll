@@ -1,6 +1,6 @@
-; RUN: llc -march=amdgcn -mcpu=kaveri -mtriple=amdgcn--amdhsa -verify-machineinstrs < %s | FileCheck -check-prefix=CI -check-prefix=CIVI -check-prefix=GCN %s
-; RUN: llc -march=amdgcn -mcpu=tonga -mtriple=amdgcn--amdhsa -verify-machineinstrs < %s | FileCheck -check-prefix=VI -check-prefix=CIVI -check-prefix=GCN -check-prefix=GFX89 %s
-; RUN: llc -march=amdgcn -mcpu=gfx901 -mtriple=amdgcn--amdhsa -verify-machineinstrs < %s | FileCheck -check-prefix=GFX9 -check-prefix=GCN -check-prefix=GFX89 %s
+; RUN:  llc -amdgpu-scalarize-global-loads=false  -march=amdgcn -mcpu=kaveri -mtriple=amdgcn--amdhsa -verify-machineinstrs < %s | FileCheck -check-prefix=CI -check-prefix=CIVI -check-prefix=GCN %s
+; RUN:  llc -amdgpu-scalarize-global-loads=false  -march=amdgcn -mcpu=tonga -mtriple=amdgcn--amdhsa -verify-machineinstrs < %s | FileCheck -check-prefix=VI -check-prefix=CIVI -check-prefix=GCN -check-prefix=GFX89 %s
+; RUN:  llc -amdgpu-scalarize-global-loads=false  -march=amdgcn -mcpu=gfx901 -mtriple=amdgcn--amdhsa -verify-machineinstrs < %s | FileCheck -check-prefix=GFX9 -check-prefix=GCN -check-prefix=GFX89 %s
 
 ; FIXME: Should be able to do scalar op
 ; GCN-LABEL: {{^}}s_fneg_f16:
@@ -46,7 +46,7 @@ define amdgpu_kernel void @fneg_free_f16(half addrspace(1)* %out, i16 %in) #0 {
 
 ; CI-DAG: v_cvt_f32_f16_e32 [[CVT_VAL:v[0-9]+]], [[NEG_VALUE]]
 ; CI-DAG: v_cvt_f32_f16_e64 [[NEG_CVT0:v[0-9]+]], -[[NEG_VALUE]]
-; CI: v_mul_f32_e32 [[MUL:v[0-9]+]], [[CVT_VAL]], [[NEG_CVT0]]
+; CI: v_mul_f32_e32 [[MUL:v[0-9]+]], [[NEG_CVT0]], [[CVT_VAL]]
 ; CI: v_cvt_f16_f32_e32 [[CVT1:v[0-9]+]], [[MUL]]
 ; CI: flat_store_short v{{\[[0-9]+:[0-9]+\]}}, [[CVT1]]
 
@@ -134,11 +134,10 @@ define amdgpu_kernel void @v_fneg_fold_v2f16(<2 x half> addrspace(1)* %out, <2 x
 ; CI-DAG: v_mul_f32_e32 v{{[0-9]+}}, -4.0, v{{[0-9]+}}
 ; CI-DAG: v_sub_f32_e32 v{{[0-9]+}}, 2.0, v{{[0-9]+}}
 
-; GFX9: v_lshrrev_b32_e32 [[ELT1:v[0-9]+]], 16, [[VAL]]
 ; GFX89-DAG: v_mul_f16_e32 v{{[0-9]+}}, -4.0, [[VAL]]
-; GFX9-DAG: v_sub_f16_e32 v{{[0-9]+}}, 2.0, [[ELT1]]
-; VI-DAG: v_mov_b32_e32 [[CONST2:v[0-9]+]], 0x4000
-; VI-DAG: v_sub_f16_sdwa v{{[0-9]+}}, [[CONST2]], [[VAL]] dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:DWORD src1_sel:WORD_1
+; GFX89-DAG: v_mov_b32_e32 [[CONST2:v[0-9]+]], 0x4000
+; GFX89-DAG: v_sub_f16_sdwa v{{[0-9]+}}, [[CONST2]], [[VAL]] dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:DWORD src1_sel:WORD_1
+
 define amdgpu_kernel void @v_extract_fneg_fold_v2f16(<2 x half> addrspace(1)* %in) #0 {
   %val = load <2 x half>, <2 x half> addrspace(1)* %in
   %fneg = fsub <2 x half> <half -0.0, half -0.0>, %val

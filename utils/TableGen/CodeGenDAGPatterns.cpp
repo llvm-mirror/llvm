@@ -3220,7 +3220,7 @@ static void FindNames(const TreePatternNode *P,
 }
 
 void CodeGenDAGPatterns::AddPatternToMatch(TreePattern *Pattern,
-                                           const PatternToMatch &PTM) {
+                                           PatternToMatch &&PTM) {
   // Do some sanity checking on the pattern we're about to match.
   std::string Reason;
   if (!PTM.getSrcPattern()->canPatternMatch(Reason, *this)) {
@@ -3259,7 +3259,7 @@ void CodeGenDAGPatterns::AddPatternToMatch(TreePattern *Pattern,
         SrcNames[Entry.first].second == 1)
       Pattern->error("Pattern has dead named input: $" + Entry.first);
 
-  PatternsToMatch.push_back(PTM);
+  PatternsToMatch.push_back(std::move(PTM));
 }
 
 
@@ -3551,14 +3551,12 @@ void CodeGenDAGPatterns::ParsePatterns() {
     TreePattern Temp(Result.getRecord(), DstPattern, false, *this);
     Temp.InferAllTypes();
 
-
-    AddPatternToMatch(Pattern,
-                    PatternToMatch(CurPattern,
-                                   CurPattern->getValueAsListInit("Predicates"),
-                                   Pattern->getTree(0),
-                                   Temp.getOnlyTree(), InstImpResults,
-                                   CurPattern->getValueAsInt("AddedComplexity"),
-                                   CurPattern->getID()));
+    AddPatternToMatch(
+        Pattern,
+        PatternToMatch(
+            CurPattern, CurPattern->getValueAsListInit("Predicates"),
+            Pattern->getTree(0), Temp.getOnlyTree(), std::move(InstImpResults),
+            CurPattern->getValueAsInt("AddedComplexity"), CurPattern->getID()));
   }
 }
 
@@ -3839,11 +3837,11 @@ void CodeGenDAGPatterns::GenerateVariants() {
       if (AlreadyExists) continue;
 
       // Otherwise, add it to the list of patterns we have.
-      PatternsToMatch.emplace_back(
+      PatternsToMatch.push_back(PatternToMatch(
           PatternsToMatch[i].getSrcRecord(), PatternsToMatch[i].getPredicates(),
           Variant, PatternsToMatch[i].getDstPattern(),
           PatternsToMatch[i].getDstRegs(),
-          PatternsToMatch[i].getAddedComplexity(), Record::getNewUID());
+          PatternsToMatch[i].getAddedComplexity(), Record::getNewUID()));
     }
 
     DEBUG(errs() << "\n");

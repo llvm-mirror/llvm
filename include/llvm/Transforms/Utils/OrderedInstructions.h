@@ -43,7 +43,10 @@ public:
   bool dominates(const Instruction *, const Instruction *) const;
 
   /// Invalidate the OrderedBasicBlock cache when its basic block changes.
-  void invalidateBlock(BasicBlock *BB) { OBBMap.erase(BB); }
+  /// i.e. If an instruction is deleted or added to the basic block, the user
+  /// should call this function to invalidate the OrderedBasicBlock cache for
+  /// this basic block.
+  void invalidateBlock(const BasicBlock *BB) { OBBMap.erase(BB); }
 };
 
 } // end namespace llvm

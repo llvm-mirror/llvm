@@ -277,7 +277,8 @@ public:
 
   unsigned getInliningThresholdMultiplier() { return 1; }
 
-  void getUnrollingPreferences(Loop *L, TTI::UnrollingPreferences &UP) {
+  void getUnrollingPreferences(Loop *L, ScalarEvolution &SE,
+                               TTI::UnrollingPreferences &UP) {
     // This unrolling functionality is target independent, but to provide some
     // motivation for its intended use, for x86:
 
@@ -427,7 +428,7 @@ public:
 
     std::pair<unsigned, MVT> LT = TLI->getTypeLegalizationCost(DL, Ty);
 
-    bool IsFloat = Ty->getScalarType()->isFloatingPointTy();
+    bool IsFloat = Ty->isFPOrFPVectorTy();
     // Assume that floating point arithmetic operations cost twice as much as
     // integer operations.
     unsigned OpCost = (IsFloat ? 2 : 1);

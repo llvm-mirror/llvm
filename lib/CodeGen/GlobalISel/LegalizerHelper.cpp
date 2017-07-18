@@ -99,23 +99,19 @@ static RTLIB::Libcall getRTLibDesc(unsigned Opcode, unsigned Size) {
   llvm_unreachable("Unknown libcall function");
 }
 
-LegalizerHelper::LegalizeResult llvm::replaceWithLibcall(
-    MachineInstr &MI, MachineIRBuilder &MIRBuilder, RTLIB::Libcall Libcall,
-    const CallLowering::ArgInfo &Result, ArrayRef<CallLowering::ArgInfo> Args) {
+LegalizerHelper::LegalizeResult
+llvm::createLibcall(MachineIRBuilder &MIRBuilder, RTLIB::Libcall Libcall,
+                    const CallLowering::ArgInfo &Result,
+                    ArrayRef<CallLowering::ArgInfo> Args) {
   auto &CLI = *MIRBuilder.getMF().getSubtarget().getCallLowering();
   auto &TLI = *MIRBuilder.getMF().getSubtarget().getTargetLowering();
   const char *Name = TLI.getLibcallName(Libcall);
+
   MIRBuilder.getMF().getFrameInfo().setHasCalls(true);
-  MIRBuilder.setInstr(MI);
   if (!CLI.lowerCall(MIRBuilder, TLI.getLibcallCallingConv(Libcall),
                      MachineOperand::CreateES(Name), Result, Args))
     return LegalizerHelper::UnableToLegalize;
 
-  // We're about to remove MI, so move the insert point after it.
-  MIRBuilder.setInsertPt(MIRBuilder.getMBB(),
-                         std::next(MIRBuilder.getInsertPt()));
-
-  MI.eraseFromParent();
   return LegalizerHelper::Legalized;
 }
 
@@ -123,10 +119,9 @@ static LegalizerHelper::LegalizeResult
 simpleLibcall(MachineInstr &MI, MachineIRBuilder &MIRBuilder, unsigned Size,
               Type *OpType) {
   auto Libcall = getRTLibDesc(MI.getOpcode(), Size);
-  return replaceWithLibcall(MI, MIRBuilder, Libcall,
-                            {MI.getOperand(0).getReg(), OpType},
-                            {{MI.getOperand(1).getReg(), OpType},
-                             {MI.getOperand(2).getReg(), OpType}});
+  return createLibcall(MIRBuilder, Libcall, {MI.getOperand(0).getReg(), OpType},
+                       {{MI.getOperand(1).getReg(), OpType},
+                        {MI.getOperand(2).getReg(), OpType}});
 }
 
 LegalizerHelper::LegalizeResult
@@ -134,6 +129,8 @@ LegalizerHelper::libcall(MachineInstr &MI) {
   LLT LLTy = MRI.getType(MI.getOperand(0).getReg());
   unsigned Size = LLTy.getSizeInBits();
   auto &Ctx = MIRBuilder.getMF().getFunction()->getContext();
+
+  MIRBuilder.setInstr(MI);
 
   switch (MI.getOpcode()) {
   default:
@@ -143,22 +140,31 @@ LegalizerHelper::libcall(MachineInstr &MI) {
   case TargetOpcode::G_SREM:
   case TargetOpcode::G_UREM: {
     Type *HLTy = Type::getInt32Ty(Ctx);
-    return simpleLibcall(MI, MIRBuilder, Size, HLTy);
+    auto Status = simpleLibcall(MI, MIRBuilder, Size, HLTy);
+    if (Status != Legalized)
+      return Status;
+    break;
   }
   case TargetOpcode::G_FADD:
   case TargetOpcode::G_FPOW:
   case TargetOpcode::G_FREM: {
     Type *HLTy = Size == 64 ? Type::getDoubleTy(Ctx) : Type::getFloatTy(Ctx);
-    return simpleLibcall(MI, MIRBuilder, Size, HLTy);
+    auto Status = simpleLibcall(MI, MIRBuilder, Size, HLTy);
+    if (Status != Legalized)
+      return Status;
+    break;
   }
   }
+
+  MI.eraseFromParent();
+  return Legalized;
 }
 
 LegalizerHelper::LegalizeResult LegalizerHelper::narrowScalar(MachineInstr &MI,
                                                               unsigned TypeIdx,
                                                               LLT NarrowTy) {
   // FIXME: Don't know how to handle secondary types yet.
-  if (TypeIdx != 0)
+  if (TypeIdx != 0 && MI.getOpcode() != TargetOpcode::G_EXTRACT)
     return UnableToLegalize;
 
   MIRBuilder.setInstr(MI);
@@ -166,6 +172,20 @@ LegalizerHelper::LegalizeResult LegalizerHelper::narrowScalar(MachineInstr &MI,
   switch (MI.getOpcode()) {
   default:
     return UnableToLegalize;
+  case TargetOpcode::G_IMPLICIT_DEF: {
+    int NumParts = MRI.getType(MI.getOperand(0).getReg()).getSizeInBits() /
+                   NarrowTy.getSizeInBits();
+
+    SmallVector<unsigned, 2> DstRegs;
+    for (int i = 0; i < NumParts; ++i) {
+      unsigned Dst = MRI.createGenericVirtualRegister(NarrowTy);
+      MIRBuilder.buildUndef(Dst);
+      DstRegs.push_back(Dst);
+    }
+    MIRBuilder.buildMerge(MI.getOperand(0).getReg(), DstRegs);
+    MI.eraseFromParent();
+    return Legalized;
+  }
   case TargetOpcode::G_ADD: {
     // Expand in terms of carry-setting/consuming G_ADDE instructions.
     int NumParts = MRI.getType(MI.getOperand(0).getReg()).getSizeInBits() /
@@ -190,6 +210,58 @@ LegalizerHelper::LegalizeResult LegalizerHelper::narrowScalar(MachineInstr &MI,
     }
     unsigned DstReg = MI.getOperand(0).getReg();
     MIRBuilder.buildMerge(DstReg, DstRegs);
+    MI.eraseFromParent();
+    return Legalized;
+  }
+  case TargetOpcode::G_EXTRACT: {
+    if (TypeIdx != 1)
+      return UnableToLegalize;
+
+    int64_t NarrowSize = NarrowTy.getSizeInBits();
+    int NumParts =
+        MRI.getType(MI.getOperand(1).getReg()).getSizeInBits() / NarrowSize;
+
+    SmallVector<unsigned, 2> SrcRegs, DstRegs;
+    SmallVector<uint64_t, 2> Indexes;
+    extractParts(MI.getOperand(1).getReg(), NarrowTy, NumParts, SrcRegs);
+
+    unsigned OpReg = MI.getOperand(0).getReg();
+    int64_t OpStart = MI.getOperand(2).getImm();
+    int64_t OpSize = MRI.getType(OpReg).getSizeInBits();
+    for (int i = 0; i < NumParts; ++i) {
+      unsigned SrcStart = i * NarrowSize;
+
+      if (SrcStart + NarrowSize <= OpStart || SrcStart >= OpStart + OpSize) {
+        // No part of the extract uses this subregister, ignore it.
+        continue;
+      } else if (SrcStart == OpStart && NarrowTy == MRI.getType(OpReg)) {
+        // The entire subregister is extracted, forward the value.
+        DstRegs.push_back(SrcRegs[i]);
+        continue;
+      }
+
+      // OpSegStart is where this destination segment would start in OpReg if it
+      // extended infinitely in both directions.
+      int64_t ExtractOffset, SegSize;
+      if (OpStart < SrcStart) {
+        ExtractOffset = 0;
+        SegSize = std::min(NarrowSize, OpStart + OpSize - SrcStart);
+      } else {
+        ExtractOffset = OpStart - SrcStart;
+        SegSize = std::min(SrcStart + NarrowSize - OpStart, OpSize);
+      }
+
+      unsigned SegReg = SrcRegs[i];
+      if (ExtractOffset != 0 || SegSize != NarrowSize) {
+        // A genuine extract is needed.
+        SegReg = MRI.createGenericVirtualRegister(LLT::scalar(SegSize));
+        MIRBuilder.buildExtract(SegReg, SrcRegs[i], ExtractOffset);
+      }
+
+      DstRegs.push_back(SegReg);
+    }
+
+    MIRBuilder.buildMerge(MI.getOperand(0).getReg(), DstRegs);
     MI.eraseFromParent();
     return Legalized;
   }

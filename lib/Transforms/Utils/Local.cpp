@@ -26,6 +26,7 @@
 #include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/CFG.h"
+#include "llvm/IR/ConstantRange.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DIBuilder.h"
 #include "llvm/IR/DataLayout.h"
@@ -1081,7 +1082,7 @@ static bool LdStHasDebugValue(DILocalVariable *DIVar, DIExpression *DIExpr,
 }
 
 /// See if there is a dbg.value intrinsic for DIVar for the PHI node.
-static bool PhiHasDebugValue(DILocalVariable *DIVar, 
+static bool PhiHasDebugValue(DILocalVariable *DIVar,
                              DIExpression *DIExpr,
                              PHINode *APN) {
   // Since we can't guarantee that the original dbg.declare instrinsic
@@ -1159,7 +1160,7 @@ void llvm::ConvertDebugDeclareToDebugValue(DbgDeclareInst *DDI,
   DbgValue->insertAfter(LI);
 }
 
-/// Inserts a llvm.dbg.value intrinsic after a phi 
+/// Inserts a llvm.dbg.value intrinsic after a phi
 /// that has an associated llvm.dbg.decl intrinsic.
 void llvm::ConvertDebugDeclareToDebugValue(DbgDeclareInst *DDI,
                                            PHINode *APN, DIBuilder &Builder) {
@@ -1661,9 +1662,10 @@ void llvm::removeUnwindEdge(BasicBlock *BB) {
   TI->eraseFromParent();
 }
 
-/// removeUnreachableBlocksFromFn - Remove blocks that are not reachable, even
+/// removeUnreachableBlocks - Remove blocks that are not reachable, even
 /// if they are in a dead cycle.  Return true if a change was made, false
-/// otherwise.
+/// otherwise. If `LVI` is passed, this function preserves LazyValueInfo
+/// after modifying the CFG.
 bool llvm::removeUnreachableBlocks(Function &F, LazyValueInfo *LVI) {
   SmallPtrSet<BasicBlock*, 16> Reachable;
   bool Changed = markAliveBlocks(F, Reachable);
@@ -1742,12 +1744,12 @@ void llvm::combineMetadata(Instruction *K, const Instruction *J,
         // Preserve !invariant.group in K.
         break;
       case LLVMContext::MD_align:
-        K->setMetadata(Kind, 
+        K->setMetadata(Kind,
           MDNode::getMostGenericAlignmentOrDereferenceable(JMD, KMD));
         break;
       case LLVMContext::MD_dereferenceable:
       case LLVMContext::MD_dereferenceable_or_null:
-        K->setMetadata(Kind, 
+        K->setMetadata(Kind,
           MDNode::getMostGenericAlignmentOrDereferenceable(JMD, KMD));
         break;
     }
@@ -1845,6 +1847,49 @@ bool llvm::callsGCLeafFunction(ImmutableCallSite CS) {
   }
 
   return false;
+}
+
+void llvm::copyNonnullMetadata(const LoadInst &OldLI, MDNode *N,
+                               LoadInst &NewLI) {
+  auto *NewTy = NewLI.getType();
+
+  // This only directly applies if the new type is also a pointer.
+  if (NewTy->isPointerTy()) {
+    NewLI.setMetadata(LLVMContext::MD_nonnull, N);
+    return;
+  }
+
+  // The only other translation we can do is to integral loads with !range
+  // metadata.
+  if (!NewTy->isIntegerTy())
+    return;
+
+  MDBuilder MDB(NewLI.getContext());
+  const Value *Ptr = OldLI.getPointerOperand();
+  auto *ITy = cast<IntegerType>(NewTy);
+  auto *NullInt = ConstantExpr::getPtrToInt(
+      ConstantPointerNull::get(cast<PointerType>(Ptr->getType())), ITy);
+  auto *NonNullInt = ConstantExpr::getAdd(NullInt, ConstantInt::get(ITy, 1));
+  NewLI.setMetadata(LLVMContext::MD_range,
+                    MDB.createRange(NonNullInt, NullInt));
+}
+
+void llvm::copyRangeMetadata(const DataLayout &DL, const LoadInst &OldLI,
+                             MDNode *N, LoadInst &NewLI) {
+  auto *NewTy = NewLI.getType();
+
+  // Give up unless it is converted to a pointer where there is a single very
+  // valuable mapping we can do reliably.
+  // FIXME: It would be nice to propagate this in more ways, but the type
+  // conversions make it hard.
+  if (!NewTy->isPointerTy())
+    return;
+
+  unsigned BitWidth = DL.getTypeSizeInBits(NewTy);
+  if (!getConstantRangeFromMetadata(*N).contains(APInt(BitWidth, 0))) {
+    MDNode *NN = MDNode::get(OldLI.getContext(), None);
+    NewLI.setMetadata(LLVMContext::MD_nonnull, NN);
+  }
 }
 
 namespace {
@@ -1968,7 +2013,7 @@ collectBitParts(Value *V, bool MatchBSwaps, bool MatchBitReversals,
       unsigned NumMaskedBits = AndMask.countPopulation();
       if (!MatchBitReversals && NumMaskedBits % 8 != 0)
         return Result;
-      
+
       auto &Res = collectBitParts(I->getOperand(0), MatchBSwaps,
                                   MatchBitReversals, BPS);
       if (!Res)
@@ -2124,6 +2169,9 @@ bool llvm::canReplaceOperandWithVariable(const Instruction *I, unsigned OpIdx) {
     return true;
   case Instruction::Call:
   case Instruction::Invoke:
+    // Can't handle inline asm. Skip it.
+    if (isa<InlineAsm>(ImmutableCallSite(I).getCalledValue()))
+      return false;
     // Many arithmetic intrinsics have no issue taking a
     // variable, however it's hard to distingish these from
     // specials such as @llvm.frameaddress that require a constant.
@@ -2138,12 +2186,18 @@ bool llvm::canReplaceOperandWithVariable(const Instruction *I, unsigned OpIdx) {
   case Instruction::ShuffleVector:
     // Shufflevector masks are constant.
     return OpIdx != 2;
+  case Instruction::Switch:
   case Instruction::ExtractValue:
-  case Instruction::InsertValue:
     // All operands apart from the first are constant.
     return OpIdx == 0;
+  case Instruction::InsertValue:
+    // All operands apart from the first and the second are constant.
+    return OpIdx < 2;
   case Instruction::Alloca:
-    return false;
+    // Static allocas (constant size in the entry block) are handled by
+    // prologue/epilogue insertion so they're free anyway. We definitely don't
+    // want to make them non-constant.
+    return !dyn_cast<AllocaInst>(I)->isStaticAlloca();
   case Instruction::GetElementPtr:
     if (OpIdx == 0)
       return true;

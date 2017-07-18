@@ -184,9 +184,14 @@ public:
   /// Returns true if Phi is a first-order recurrence. A first-order recurrence
   /// is a non-reduction recurrence relation in which the value of the
   /// recurrence in the current loop iteration equals a value defined in the
-  /// previous iteration.
-  static bool isFirstOrderRecurrence(PHINode *Phi, Loop *TheLoop,
-                                     DominatorTree *DT);
+  /// previous iteration. \p SinkAfter includes pairs of instructions where the
+  /// first will be rescheduled to appear after the second if/when the loop is
+  /// vectorized. It may be augmented with additional pairs if needed in order
+  /// to handle Phi as a first-order recurrence.
+  static bool
+  isFirstOrderRecurrence(PHINode *Phi, Loop *TheLoop,
+                         DenseMap<Instruction *, Instruction *> &SinkAfter,
+                         DominatorTree *DT);
 
   RecurrenceKind getRecurrenceKind() { return Kind; }
 
@@ -361,6 +366,14 @@ private:
 
 BasicBlock *InsertPreheaderForLoop(Loop *L, DominatorTree *DT, LoopInfo *LI,
                                    bool PreserveLCSSA);
+
+/// Ensure that all exit blocks of the loop are dedicated exits.
+///
+/// For any loop exit block with non-loop predecessors, we split the loop
+/// predecessors to use a dedicated loop exit block. We update the dominator
+/// tree and loop info if provided, and will preserve LCSSA if requested.
+bool formDedicatedExitBlocks(Loop *L, DominatorTree *DT, LoopInfo *LI,
+                             bool PreserveLCSSA);
 
 /// Ensures LCSSA form for every instruction from the Worklist in the scope of
 /// innermost containing loop.

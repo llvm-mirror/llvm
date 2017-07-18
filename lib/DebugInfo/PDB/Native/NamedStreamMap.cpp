@@ -1,4 +1,4 @@
-//===- NamedStreamMap.cpp - PDB Named Stream Map ----------------*- C++ -*-===//
+//===- NamedStreamMap.cpp - PDB Named Stream Map --------------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -8,20 +8,31 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/DebugInfo/PDB/Native/NamedStreamMap.h"
-
-#include "llvm/ADT/SparseBitVector.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/DebugInfo/PDB/Native/HashTable.h"
 #include "llvm/DebugInfo/PDB/Native/RawError.h"
 #include "llvm/Support/BinaryStreamReader.h"
+#include "llvm/Support/BinaryStreamRef.h"
+#include "llvm/Support/BinaryStreamWriter.h"
+#include "llvm/Support/Endian.h"
 #include "llvm/Support/Error.h"
 #include <algorithm>
+#include <cassert>
 #include <cstdint>
+#include <tuple>
 
 using namespace llvm;
 using namespace llvm::pdb;
+
+// FIXME: This shouldn't be necessary, but if we insert the strings in any
+// other order, cvdump cannot read the generated name map.  This suggests that
+// we may be using the wrong hash function.  A closer inspection of the cvdump
+// source code may reveal something, but for now this at least makes us work,
+// even if only by accident.
+static constexpr const char *OrderedStreamNames[] = {"/LinkInfo", "/names",
+                                                     "/src/headerblock"};
 
 NamedStreamMap::NamedStreamMap() = default;
 
@@ -73,9 +84,11 @@ Error NamedStreamMap::commit(BinaryStreamWriter &Writer) const {
   if (auto EC = Writer.writeInteger(FinalizedInfo->StringDataBytes))
     return EC;
 
-  // Now all of the string data itself.
-  for (const auto &Item : Mapping) {
-    if (auto EC = Writer.writeCString(Item.getKey()))
+  for (const auto &Name : OrderedStreamNames) {
+    auto Item = Mapping.find(Name);
+    if (Item == Mapping.end())
+      continue;
+    if (auto EC = Writer.writeCString(Item->getKey()))
       return EC;
   }
 
@@ -93,9 +106,13 @@ uint32_t NamedStreamMap::finalize() {
   // Build the finalized hash table.
   FinalizedHashTable.clear();
   FinalizedInfo.emplace();
-  for (const auto &Item : Mapping) {
-    FinalizedHashTable.set(FinalizedInfo->StringDataBytes, Item.getValue());
-    FinalizedInfo->StringDataBytes += Item.getKeyLength() + 1;
+
+  for (const auto &Name : OrderedStreamNames) {
+    auto Item = Mapping.find(Name);
+    if (Item == Mapping.end())
+      continue;
+    FinalizedHashTable.set(FinalizedInfo->StringDataBytes, Item->getValue());
+    FinalizedInfo->StringDataBytes += Item->getKeyLength() + 1;
   }
 
   // Number of bytes of string data.

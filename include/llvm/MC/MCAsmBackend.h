@@ -60,22 +60,20 @@ public:
   /// Get information on a fixup kind.
   virtual const MCFixupKindInfo &getFixupKindInfo(MCFixupKind Kind) const;
 
-  /// Target hook to adjust the literal value of a fixup if necessary.
-  /// IsResolved signals whether the caller believes a relocation is needed; the
-  /// target can modify the value. The default does nothing.
-  virtual void processFixupValue(const MCAssembler &Asm,
-                                 const MCAsmLayout &Layout,
-                                 const MCFixup &Fixup, const MCFragment *DF,
-                                 const MCValue &Target, uint64_t &Value,
-                                 bool &IsResolved) {}
+  /// Hook to check if a relocation is needed for some target specific reason.
+  virtual bool shouldForceRelocation(const MCAssembler &Asm,
+                                     const MCFixup &Fixup,
+                                     const MCValue &Target) {
+    return false;
+  }
 
   /// Apply the \p Value for given \p Fixup into the provided data fragment, at
   /// the offset specified by the fixup and following the fixup kind as
   /// appropriate. Errors (such as an out of range fixup value) should be
   /// reported via \p Ctx.
-  virtual void applyFixup(const MCFixup &Fixup, char *Data, unsigned DataSize,
-                          uint64_t Value, bool IsPCRel,
-                          MCContext &Ctx) const = 0;
+  virtual void applyFixup(const MCAssembler &Asm, const MCFixup &Fixup,
+                          const MCValue &Target, MutableArrayRef<char> Data,
+                          uint64_t Value, bool IsResolved) const = 0;
 
   /// @}
 

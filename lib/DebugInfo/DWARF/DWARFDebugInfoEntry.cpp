@@ -21,13 +21,13 @@ using namespace dwarf;
 
 bool DWARFDebugInfoEntry::extractFast(const DWARFUnit &U,
                                              uint32_t *OffsetPtr) {
-  DataExtractor DebugInfoData = U.getDebugInfoExtractor();
+  DWARFDataExtractor DebugInfoData = U.getDebugInfoExtractor();
   const uint32_t UEndOffset = U.getNextUnitOffset();
   return extractFast(U, OffsetPtr, DebugInfoData, UEndOffset, 0);
 }
 
 bool DWARFDebugInfoEntry::extractFast(const DWARFUnit &U, uint32_t *OffsetPtr,
-                                      const DataExtractor &DebugInfoData,
+                                      const DWARFDataExtractor &DebugInfoData,
                                       uint32_t UEndOffset, uint32_t D) {
   Offset = *OffsetPtr;
   Depth = D;
@@ -59,7 +59,7 @@ bool DWARFDebugInfoEntry::extractFast(const DWARFUnit &U, uint32_t *OffsetPtr,
       // Attribute byte size if fixed, just add the size to the offset.
       *OffsetPtr += *FixedSize;
     } else if (!DWARFFormValue::skipValue(AttrSpec.Form, DebugInfoData,
-                                          OffsetPtr, &U)) {
+                                          OffsetPtr, U.getFormParams())) {
       // We failed to skip this attribute's value, restore the original offset
       // and return the failure status.
       *OffsetPtr = Offset;

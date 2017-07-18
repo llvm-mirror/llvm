@@ -716,6 +716,7 @@ HexagonTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 
   bool IsStructRet    = (Outs.empty()) ? false : Outs[0].Flags.isSRet();
   MachineFunction &MF = DAG.getMachineFunction();
+  MachineFrameInfo &MFI = MF.getFrameInfo();
   auto PtrVT = getPointerTy(MF.getDataLayout());
 
   // Check for varargs.
@@ -832,7 +833,6 @@ HexagonTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 
   if (NeedsArgAlign && Subtarget.hasV60TOps()) {
     DEBUG(dbgs() << "Function needs byte stack align due to call args\n");
-    MachineFrameInfo &MFI = DAG.getMachineFunction().getFrameInfo();
     // V6 vectors passed by value have 64 or 128 byte alignment depending
     // on whether we are 64 byte vector mode or 128 byte.
     bool UseHVXDbl = Subtarget.useHVXDblOps();
@@ -916,9 +916,14 @@ HexagonTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     Ops.push_back(Glue);
 
   if (IsTailCall) {
-    MF.getFrameInfo().setHasTailCall();
+    MFI.setHasTailCall();
     return DAG.getNode(HexagonISD::TC_RETURN, dl, NodeTys, Ops);
   }
+
+  // Set this here because we need to know this for "hasFP" in frame lowering.
+  // The target-independent code calls getFrameRegister before setting it, and
+  // getFrameRegister uses hasFP to determine whether the function has FP.
+  MFI.setHasCalls(true);
 
   unsigned OpCode = DoesNotReturn ? HexagonISD::CALLnr : HexagonISD::CALL;
   Chain = DAG.getNode(OpCode, dl, NodeTys, Ops);
@@ -1002,51 +1007,46 @@ bool HexagonTargetLowering::getPostIndexedAddressParts(SDNode *N, SDNode *Op,
 
 SDValue
 HexagonTargetLowering::LowerINLINEASM(SDValue Op, SelectionDAG &DAG) const {
-  SDNode *Node = Op.getNode();
   MachineFunction &MF = DAG.getMachineFunction();
-  auto &FuncInfo = *MF.getInfo<HexagonMachineFunctionInfo>();
-  switch (Node->getOpcode()) {
-    case ISD::INLINEASM: {
-      unsigned NumOps = Node->getNumOperands();
-      if (Node->getOperand(NumOps-1).getValueType() == MVT::Glue)
-        --NumOps;  // Ignore the flag operand.
+  auto &HMFI = *MF.getInfo<HexagonMachineFunctionInfo>();
+  const HexagonRegisterInfo &HRI = *Subtarget.getRegisterInfo();
+  unsigned LR = HRI.getRARegister();
 
-      for (unsigned i = InlineAsm::Op_FirstOperand; i != NumOps;) {
-        if (FuncInfo.hasClobberLR())
-          break;
-        unsigned Flags =
-          cast<ConstantSDNode>(Node->getOperand(i))->getZExtValue();
-        unsigned NumVals = InlineAsm::getNumOperandRegisters(Flags);
-        ++i;  // Skip the ID value.
+  if (Op.getOpcode() != ISD::INLINEASM || HMFI.hasClobberLR())
+    return Op;
 
-        switch (InlineAsm::getKind(Flags)) {
-        default: llvm_unreachable("Bad flags!");
-          case InlineAsm::Kind_RegDef:
-          case InlineAsm::Kind_RegUse:
-          case InlineAsm::Kind_Imm:
-          case InlineAsm::Kind_Clobber:
-          case InlineAsm::Kind_Mem: {
-            for (; NumVals; --NumVals, ++i) {}
-            break;
-          }
-          case InlineAsm::Kind_RegDefEarlyClobber: {
-            for (; NumVals; --NumVals, ++i) {
-              unsigned Reg =
-                cast<RegisterSDNode>(Node->getOperand(i))->getReg();
+  unsigned NumOps = Op.getNumOperands();
+  if (Op.getOperand(NumOps-1).getValueType() == MVT::Glue)
+    --NumOps;  // Ignore the flag operand.
 
-              // Check it to be lr
-              const HexagonRegisterInfo *QRI = Subtarget.getRegisterInfo();
-              if (Reg == QRI->getRARegister()) {
-                FuncInfo.setHasClobberLR(true);
-                break;
-              }
-            }
-            break;
-          }
+  for (unsigned i = InlineAsm::Op_FirstOperand; i != NumOps;) {
+    unsigned Flags = cast<ConstantSDNode>(Op.getOperand(i))->getZExtValue();
+    unsigned NumVals = InlineAsm::getNumOperandRegisters(Flags);
+    ++i;  // Skip the ID value.
+
+    switch (InlineAsm::getKind(Flags)) {
+      default:
+        llvm_unreachable("Bad flags!");
+      case InlineAsm::Kind_RegUse:
+      case InlineAsm::Kind_Imm:
+      case InlineAsm::Kind_Mem:
+        i += NumVals;
+        break;
+      case InlineAsm::Kind_Clobber:
+      case InlineAsm::Kind_RegDef:
+      case InlineAsm::Kind_RegDefEarlyClobber: {
+        for (; NumVals; --NumVals, ++i) {
+          unsigned Reg = cast<RegisterSDNode>(Op.getOperand(i))->getReg();
+          if (Reg != LR)
+            continue;
+          HMFI.setHasClobberLR(true);
+          return Op;
         }
+        break;
       }
     }
-  } // Node->getOpcode
+  }
+
   return Op;
 }
 
@@ -1284,18 +1284,6 @@ HexagonTargetLowering::LowerVASTART(SDValue Op, SelectionDAG &DAG) const {
   const Value *SV = cast<SrcValueSDNode>(Op.getOperand(2))->getValue();
   return DAG.getStore(Op.getOperand(0), SDLoc(Op), Addr, Op.getOperand(1),
                       MachinePointerInfo(SV));
-}
-
-// Creates a SPLAT instruction for a constant value VAL.
-static SDValue createSplat(SelectionDAG &DAG, const SDLoc &dl, EVT VT,
-                           SDValue Val) {
-  if (VT.getSimpleVT() == MVT::v4i8)
-    return DAG.getNode(HexagonISD::VSPLATB, dl, VT, Val);
-
-  if (VT.getSimpleVT() == MVT::v4i16)
-    return DAG.getNode(HexagonISD::VSPLATH, dl, VT, Val);
-
-  return SDValue();
 }
 
 static bool isSExtFree(SDValue N) {
@@ -2301,32 +2289,13 @@ const char* HexagonTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case HexagonISD::JT:            return "HexagonISD::JT";
   case HexagonISD::PACKHL:        return "HexagonISD::PACKHL";
   case HexagonISD::RET_FLAG:      return "HexagonISD::RET_FLAG";
-  case HexagonISD::SHUFFEB:       return "HexagonISD::SHUFFEB";
-  case HexagonISD::SHUFFEH:       return "HexagonISD::SHUFFEH";
-  case HexagonISD::SHUFFOB:       return "HexagonISD::SHUFFOB";
-  case HexagonISD::SHUFFOH:       return "HexagonISD::SHUFFOH";
   case HexagonISD::TC_RETURN:     return "HexagonISD::TC_RETURN";
-  case HexagonISD::VCMPBEQ:       return "HexagonISD::VCMPBEQ";
-  case HexagonISD::VCMPBGT:       return "HexagonISD::VCMPBGT";
-  case HexagonISD::VCMPBGTU:      return "HexagonISD::VCMPBGTU";
-  case HexagonISD::VCMPHEQ:       return "HexagonISD::VCMPHEQ";
-  case HexagonISD::VCMPHGT:       return "HexagonISD::VCMPHGT";
-  case HexagonISD::VCMPHGTU:      return "HexagonISD::VCMPHGTU";
-  case HexagonISD::VCMPWEQ:       return "HexagonISD::VCMPWEQ";
-  case HexagonISD::VCMPWGT:       return "HexagonISD::VCMPWGT";
-  case HexagonISD::VCMPWGTU:      return "HexagonISD::VCMPWGTU";
   case HexagonISD::VCOMBINE:      return "HexagonISD::VCOMBINE";
   case HexagonISD::VPACK:         return "HexagonISD::VPACK";
-  case HexagonISD::VSHLH:         return "HexagonISD::VSHLH";
-  case HexagonISD::VSHLW:         return "HexagonISD::VSHLW";
-  case HexagonISD::VSPLATB:       return "HexagonISD::VSPLTB";
-  case HexagonISD::VSPLATH:       return "HexagonISD::VSPLATH";
-  case HexagonISD::VSRAH:         return "HexagonISD::VSRAH";
-  case HexagonISD::VSRAW:         return "HexagonISD::VSRAW";
-  case HexagonISD::VSRLH:         return "HexagonISD::VSRLH";
-  case HexagonISD::VSRLW:         return "HexagonISD::VSRLW";
-  case HexagonISD::VSXTBH:        return "HexagonISD::VSXTBH";
-  case HexagonISD::VSXTBW:        return "HexagonISD::VSXTBW";
+  case HexagonISD::VASL:          return "HexagonISD::VASL";
+  case HexagonISD::VASR:          return "HexagonISD::VASR";
+  case HexagonISD::VLSR:          return "HexagonISD::VLSR";
+  case HexagonISD::VSPLAT:        return "HexagonISD::VSPLAT";
   case HexagonISD::READCYCLE:     return "HexagonISD::READCYCLE";
   case HexagonISD::OP_END:        break;
   }
@@ -2415,7 +2384,7 @@ HexagonTargetLowering::LowerVECTOR_SHUFFLE(SDValue Op, SelectionDAG &DAG)
 
     // Test if V1 is a SCALAR_TO_VECTOR.
     if (Lane == 0 && V1.getOpcode() == ISD::SCALAR_TO_VECTOR)
-      return createSplat(DAG, dl, VT, V1.getOperand(0));
+      return DAG.getNode(HexagonISD::VSPLAT, dl, VT, V1.getOperand(0));
 
     // Test if V1 is a BUILD_VECTOR which is equivalent to a SCALAR_TO_VECTOR
     // (and probably will turn into a SCALAR_TO_VECTOR once legalization
@@ -2430,9 +2399,10 @@ HexagonTargetLowering::LowerVECTOR_SHUFFLE(SDValue Op, SelectionDAG &DAG)
         }
       }
       if (IsScalarToVector)
-        return createSplat(DAG, dl, VT, V1.getOperand(0));
+        return DAG.getNode(HexagonISD::VSPLAT, dl, VT, V1.getOperand(0));
     }
-    return createSplat(DAG, dl, VT, DAG.getConstant(Lane, dl, MVT::i32));
+    return DAG.getNode(HexagonISD::VSPLAT, dl, VT,
+                       DAG.getConstant(Lane, dl, MVT::i32));
   }
 
   if (UseHVX) {
@@ -2508,13 +2478,13 @@ HexagonTargetLowering::LowerVECTOR_SHIFT(SDValue Op, SelectionDAG &DAG) const {
   if (VT.getSimpleVT() == MVT::v4i16) {
     switch (Op.getOpcode()) {
     case ISD::SRA:
-      Result = DAG.getNode(HexagonISD::VSRAH, dl, VT, V3, CommonSplat);
+      Result = DAG.getNode(HexagonISD::VASR, dl, VT, V3, CommonSplat);
       break;
     case ISD::SHL:
-      Result = DAG.getNode(HexagonISD::VSHLH, dl, VT, V3, CommonSplat);
+      Result = DAG.getNode(HexagonISD::VASL, dl, VT, V3, CommonSplat);
       break;
     case ISD::SRL:
-      Result = DAG.getNode(HexagonISD::VSRLH, dl, VT, V3, CommonSplat);
+      Result = DAG.getNode(HexagonISD::VLSR, dl, VT, V3, CommonSplat);
       break;
     default:
       return SDValue();
@@ -2522,13 +2492,13 @@ HexagonTargetLowering::LowerVECTOR_SHIFT(SDValue Op, SelectionDAG &DAG) const {
   } else if (VT.getSimpleVT() == MVT::v2i32) {
     switch (Op.getOpcode()) {
     case ISD::SRA:
-      Result = DAG.getNode(HexagonISD::VSRAW, dl, VT, V3, CommonSplat);
+      Result = DAG.getNode(HexagonISD::VASR, dl, VT, V3, CommonSplat);
       break;
     case ISD::SHL:
-      Result = DAG.getNode(HexagonISD::VSHLW, dl, VT, V3, CommonSplat);
+      Result = DAG.getNode(HexagonISD::VASL, dl, VT, V3, CommonSplat);
       break;
     case ISD::SRL:
-      Result = DAG.getNode(HexagonISD::VSRLW, dl, VT, V3, CommonSplat);
+      Result = DAG.getNode(HexagonISD::VLSR, dl, VT, V3, CommonSplat);
       break;
     default:
       return SDValue();
@@ -2552,19 +2522,26 @@ HexagonTargetLowering::LowerBUILD_VECTOR(SDValue Op, SelectionDAG &DAG) const {
   if (Size > 64)
     return SDValue();
 
-  APInt APSplatBits, APSplatUndef;
-  unsigned SplatBitSize;
-  bool HasAnyUndefs;
   unsigned NElts = BVN->getNumOperands();
 
   // Try to generate a SPLAT instruction.
-  if ((VT.getSimpleVT() == MVT::v4i8 || VT.getSimpleVT() == MVT::v4i16) &&
-      (BVN->isConstantSplat(APSplatBits, APSplatUndef, SplatBitSize,
-                            HasAnyUndefs, 0, true) && SplatBitSize <= 16)) {
-    unsigned SplatBits = APSplatBits.getZExtValue();
-    int32_t SextVal = ((int32_t) (SplatBits << (32 - SplatBitSize)) >>
-                       (32 - SplatBitSize));
-    return createSplat(DAG, dl, VT, DAG.getConstant(SextVal, dl, MVT::i32));
+  if (VT == MVT::v4i8 || VT == MVT::v4i16 || VT == MVT::v2i32) {
+    APInt APSplatBits, APSplatUndef;
+    unsigned SplatBitSize;
+    bool HasAnyUndefs;
+    if (BVN->isConstantSplat(APSplatBits, APSplatUndef, SplatBitSize,
+                             HasAnyUndefs, 0, false)) {
+      if (SplatBitSize == VT.getVectorElementType().getSizeInBits()) {
+        unsigned ZV = APSplatBits.getZExtValue();
+        assert(SplatBitSize <= 32 && "Can only handle up to i32");
+        // Sign-extend the splat value from SplatBitSize to 32.
+        int32_t SV = SplatBitSize < 32
+                        ? int32_t(ZV << (32-SplatBitSize)) >> (32-SplatBitSize)
+                        : int32_t(ZV);
+        return DAG.getNode(HexagonISD::VSPLAT, dl, VT,
+                           DAG.getConstant(SV, dl, MVT::i32));
+      }
+    }
   }
 
   // Try to generate COMBINE to build v2i32 vectors.

@@ -907,6 +907,11 @@ static SDValue performORCombine(SDNode *N, SelectionDAG &DAG,
         if (!(CN1 = dyn_cast<ConstantSDNode>(N->getOperand(1))))
           return SDValue();
       }
+      // Don't generate INS if constant OR operand doesn't fit into bits
+      // cleared by constant AND operand.
+      if (CN->getSExtValue() & CN1->getSExtValue())
+        return SDValue();
+
       SDLoc DL(N);
       EVT ValTy = N->getOperand(0)->getValueType(0);
       SDValue Const1;
@@ -985,17 +990,14 @@ static SDValue performMADD_MSUBCombine(SDNode *ROOTNode, SelectionDAG &CurDAG,
   // this optimization pre-legalization.
   SDValue MultLHS = Mult->getOperand(0);
   SDValue MultRHS = Mult->getOperand(1);
-  unsigned LHSSB = CurDAG.ComputeNumSignBits(MultLHS);
-  unsigned RHSSB = CurDAG.ComputeNumSignBits(MultRHS);
 
-  if (LHSSB < 32 || RHSSB < 32)
+  bool IsSigned = MultLHS->getOpcode() == ISD::SIGN_EXTEND &&
+                  MultRHS->getOpcode() == ISD::SIGN_EXTEND;
+  bool IsUnsigned = MultLHS->getOpcode() == ISD::ZERO_EXTEND &&
+                    MultRHS->getOpcode() == ISD::ZERO_EXTEND;
+
+  if (!IsSigned && !IsUnsigned)
     return SDValue();
-
-  APInt HighMask =
-      APInt::getHighBitsSet(Mult->getValueType(0).getScalarSizeInBits(), 32);
-  bool IsUnsigned = CurDAG.MaskedValueIsZero(Mult->getOperand(0), HighMask) &&
-                    CurDAG.MaskedValueIsZero(Mult->getOperand(1), HighMask) &&
-                    CurDAG.MaskedValueIsZero(AddOperand, HighMask);
 
   // Initialize accumulator.
   SDLoc DL(ROOTNode);

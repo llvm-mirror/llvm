@@ -308,7 +308,7 @@ void DWARFDie::dump(raw_ostream &OS, unsigned RecurseDepth, unsigned Indent,
                     DIDumpOptions DumpOpts) const {
   if (!isValid())
     return;
-  DataExtractor debug_info_data = U->getDebugInfoExtractor();
+  DWARFDataExtractor debug_info_data = U->getDebugInfoExtractor();
   const uint32_t Offset = getOffset();
   uint32_t offset = Offset;
   
@@ -395,7 +395,7 @@ DWARFDie::attribute_iterator::attribute_iterator(DWARFDie D, bool End) :
 void DWARFDie::attribute_iterator::updateForIndex(
     const DWARFAbbreviationDeclaration &AbbrDecl, uint32_t I) {
   Index = I;
-  // AbbrDecl must be valid befor calling this function.
+  // AbbrDecl must be valid before calling this function.
   auto NumAttrs = AbbrDecl.getNumAttributes();
   if (Index < NumAttrs) {
     AttrValue.Attr = AbbrDecl.getAttrByIndex(Index);

@@ -2063,10 +2063,12 @@ getAttributeOffsets(const DWARFAbbreviationDeclaration *Abbrev, unsigned Idx,
   DataExtractor Data = Unit.getDebugInfoExtractor();
 
   for (unsigned i = 0; i < Idx; ++i)
-    DWARFFormValue::skipValue(Abbrev->getFormByIndex(i), Data, &Offset, &Unit);
+    DWARFFormValue::skipValue(Abbrev->getFormByIndex(i), Data, &Offset,
+                              Unit.getFormParams());
 
   uint32_t End = Offset;
-  DWARFFormValue::skipValue(Abbrev->getFormByIndex(Idx), Data, &End, &Unit);
+  DWARFFormValue::skipValue(Abbrev->getFormByIndex(Idx), Data, &End,
+                            Unit.getFormParams());
 
   return std::make_pair(Offset, End);
 }
@@ -2210,7 +2212,7 @@ void DwarfLinker::keepDIEAndDependencies(RelocationManager &RelocMgr,
 
   // Then we need to mark all the DIEs referenced by this DIE's
   // attributes as kept.
-  DataExtractor Data = Unit.getDebugInfoExtractor();
+  DWARFDataExtractor Data = Unit.getDebugInfoExtractor();
   const auto *Abbrev = Die.getAbbreviationDeclarationPtr();
   uint32_t Offset = Die.getOffset() + getULEB128Size(Abbrev->getCode());
 
@@ -2219,7 +2221,8 @@ void DwarfLinker::keepDIEAndDependencies(RelocationManager &RelocMgr,
     DWARFFormValue Val(AttrSpec.Form);
 
     if (!Val.isFormClass(DWARFFormValue::FC_Reference)) {
-      DWARFFormValue::skipValue(AttrSpec.Form, Data, &Offset, &Unit);
+      DWARFFormValue::skipValue(AttrSpec.Form, Data, &Offset,
+                                Unit.getFormParams());
       continue;
     }
 
@@ -2726,7 +2729,7 @@ DIE *DwarfLinker::DIECloner::cloneDIE(
   }
 
   // Extract and clone every attribute.
-  DataExtractor Data = U.getDebugInfoExtractor();
+  DWARFDataExtractor Data = U.getDebugInfoExtractor();
   // Point to the next DIE (generally there is always at least a NULL
   // entry after the current one). If this is a lone
   // DW_TAG_compile_unit without any children, point to the next unit.
@@ -2740,7 +2743,8 @@ DIE *DwarfLinker::DIECloner::cloneDIE(
   // it. After testing, it seems there is no performance downside to
   // doing the copy unconditionally, and it makes the code simpler.
   SmallString<40> DIECopy(Data.getData().substr(Offset, NextOffset - Offset));
-  Data = DataExtractor(DIECopy, Data.isLittleEndian(), Data.getAddressSize());
+  Data =
+      DWARFDataExtractor(DIECopy, Data.isLittleEndian(), Data.getAddressSize());
   // Modify the copy with relocated addresses.
   if (RelocMgr.applyValidRelocs(DIECopy, Offset, Data.isLittleEndian())) {
     // If we applied relocations, we store the value of high_pc that was
@@ -2779,7 +2783,8 @@ DIE *DwarfLinker::DIECloner::cloneDIE(
   for (const auto &AttrSpec : Abbrev->attributes()) {
     if (shouldSkipAttribute(AttrSpec, Die->getTag(), Info.InDebugMap,
                             Flags & TF_SkipPC, Flags & TF_InFunctionScope)) {
-      DWARFFormValue::skipValue(AttrSpec.Form, Data, &Offset, &U);
+      DWARFFormValue::skipValue(AttrSpec.Form, Data, &Offset,
+                                U.getFormParams());
       // FIXME: dsymutil-classic keeps the old abbreviation around
       // even if it's not used. We can remove this (and the copyAbbrev
       // helper) as soon as bit-for-bit compatibility is not a goal anymore.
@@ -2868,8 +2873,8 @@ void DwarfLinker::patchRangesForUnit(const CompileUnit &Unit,
   DWARFDebugRangeList RangeList;
   const auto &FunctionRanges = Unit.getFunctionRanges();
   unsigned AddressSize = Unit.getOrigUnit().getAddressByteSize();
-  DataExtractor RangeExtractor(OrigDwarf.getRangeSection().Data,
-                               OrigDwarf.isLittleEndian(), AddressSize);
+  DWARFDataExtractor RangeExtractor(OrigDwarf.getRangeSection(),
+                                    OrigDwarf.isLittleEndian(), AddressSize);
   auto InvalidRange = FunctionRanges.end(), CurrRange = InvalidRange;
   DWARFUnit &OrigUnit = Unit.getOrigUnit();
   auto OrigUnitDie = OrigUnit.getUnitDIE(false);
@@ -2883,7 +2888,7 @@ void DwarfLinker::patchRangesForUnit(const CompileUnit &Unit,
   for (const auto &RangeAttribute : Unit.getRangesAttributes()) {
     uint32_t Offset = RangeAttribute.get();
     RangeAttribute.set(Streamer->getRangesSectionSize());
-    RangeList.extract(RangeExtractor, &Offset, OrigDwarf.getRangeSection().Relocs);
+    RangeList.extract(RangeExtractor, &Offset);
     const auto &Entries = RangeList.getEntries();
     if (!Entries.empty()) {
       const DWARFDebugRangeList::RangeListEntry &First = Entries.front();
@@ -2979,11 +2984,10 @@ void DwarfLinker::patchLineTableForUnit(CompileUnit &Unit,
   // Parse the original line info for the unit.
   DWARFDebugLine::LineTable LineTable;
   uint32_t StmtOffset = *StmtList;
-  StringRef LineData = OrigDwarf.getLineSection().Data;
-  DataExtractor LineExtractor(LineData, OrigDwarf.isLittleEndian(),
-                              Unit.getOrigUnit().getAddressByteSize());
-  LineTable.parse(LineExtractor, &OrigDwarf.getLineSection().Relocs,
-                  &StmtOffset);
+  DWARFDataExtractor LineExtractor(OrigDwarf.getLineSection(),
+                                   OrigDwarf.isLittleEndian(),
+                                   Unit.getOrigUnit().getAddressByteSize());
+  LineTable.parse(LineExtractor, &StmtOffset);
 
   // This vector is the output line table.
   std::vector<DWARFDebugLine::Row> NewRows;
@@ -3077,11 +3081,12 @@ void DwarfLinker::patchLineTableForUnit(CompileUnit &Unit,
   // prologue over and that works because we act as both producer and
   // consumer. It would be nicer to have a real configurable line
   // table emitter.
-  if (LineTable.Prologue.Version != 2 ||
+  if (LineTable.Prologue.getVersion() != 2 ||
       LineTable.Prologue.DefaultIsStmt != DWARF2_LINE_DEFAULT_IS_STMT ||
       LineTable.Prologue.OpcodeBase > 13)
     reportWarning("line table parameters mismatch. Cannot emit.");
   else {
+    StringRef LineData = OrigDwarf.getLineSection().Data;
     MCDwarfLineTableParams Params;
     Params.DWARF2LineOpcodeBase = LineTable.Prologue.OpcodeBase;
     Params.DWARF2LineBase = LineTable.Prologue.LineBase;

@@ -24,6 +24,93 @@ using namespace llvm;
 using namespace dwarf;
 using namespace object;
 
+bool DWARFVerifier::verifyUnitHeader(const DWARFDataExtractor DebugInfoData,
+                               uint32_t *Offset, unsigned UnitIndex,
+                               bool &isUnitDWARF64) {
+  uint32_t AbbrOffset, Length;
+  uint8_t AddrSize = 0, UnitType = 0;
+  uint16_t Version;
+  bool Success = true;
+
+  bool ValidLength = false;
+  bool ValidVersion = false;
+  bool ValidAddrSize = false;
+  bool ValidType = true;
+  bool ValidAbbrevOffset = true;
+
+  uint32_t OffsetStart = *Offset;
+  Length = DebugInfoData.getU32(Offset);
+  if (Length == UINT32_MAX) {
+    isUnitDWARF64 = true;
+    OS << format(
+        "Unit[%d] is in 64-bit DWARF format; cannot verify from this point.\n",
+        UnitIndex);
+    return false;
+  }
+  Version = DebugInfoData.getU16(Offset);
+
+  if (Version >= 5) {
+    UnitType = DebugInfoData.getU8(Offset);
+    AddrSize = DebugInfoData.getU8(Offset);
+    AbbrOffset = DebugInfoData.getU32(Offset);
+    ValidType = DWARFUnit::isValidUnitType(UnitType);
+  } else {
+    AbbrOffset = DebugInfoData.getU32(Offset);
+    AddrSize = DebugInfoData.getU8(Offset);
+  }
+
+  if (!DCtx.getDebugAbbrev()->getAbbreviationDeclarationSet(AbbrOffset))
+    ValidAbbrevOffset = false;
+
+  ValidLength = DebugInfoData.isValidOffset(OffsetStart + Length + 3);
+  ValidVersion = DWARFContext::isSupportedVersion(Version);
+  ValidAddrSize = AddrSize == 4 || AddrSize == 8;
+  if (!ValidLength || !ValidVersion || !ValidAddrSize || !ValidAbbrevOffset ||
+      !ValidType) {
+    Success = false;
+    OS << format("Units[%d] - start offset: 0x%08x \n", UnitIndex, OffsetStart);
+    if (!ValidLength)
+      OS << "\tError: The length for this unit is too "
+            "large for the .debug_info provided.\n";
+    if (!ValidVersion)
+      OS << "\tError: The 16 bit unit header version is not valid.\n";
+    if (!ValidType)
+      OS << "\tError: The unit type encoding is not valid.\n";
+    if (!ValidAbbrevOffset)
+      OS << "\tError: The offset into the .debug_abbrev section is "
+            "not valid.\n";
+    if (!ValidAddrSize)
+      OS << "\tError: The address size is unsupported.\n";
+  }
+  *Offset = OffsetStart + Length + 4;
+  return Success;
+}
+
+bool DWARFVerifier::handleDebugInfoUnitHeaderChain() {
+  OS << "Verifying .debug_info Unit Header Chain...\n";
+
+  DWARFDataExtractor DebugInfoData(DCtx.getInfoSection(), DCtx.isLittleEndian(),
+                                   0);
+  uint32_t Offset = 0, UnitIdx = 0;
+  bool isUnitDWARF64 = false;
+  bool Success = true;
+  bool hasDIE = DebugInfoData.isValidOffset(Offset);
+  while (hasDIE) {
+    if (!verifyUnitHeader(DebugInfoData, &Offset, UnitIdx, isUnitDWARF64)) {
+      Success = false;
+      if (isUnitDWARF64)
+        break;
+    }
+    hasDIE = DebugInfoData.isValidOffset(Offset);
+    ++UnitIdx;
+  }
+  if (UnitIdx == 0 && !hasDIE) {
+    OS << "Warning: .debug_info is empty.\n";
+    Success = true;
+  }
+  return Success;
+}
+
 void DWARFVerifier::verifyDebugInfoAttribute(const DWARFDie &Die,
                                              DWARFAttribute &AttrValue) {
   const auto Attr = AttrValue.Attr;
@@ -280,11 +367,10 @@ bool DWARFVerifier::handleDebugLine() {
 bool DWARFVerifier::handleAppleNames() {
   NumAppleNamesErrors = 0;
 
-  DataExtractor AppleNamesSection(DCtx.getAppleNamesSection().Data,
-                                  DCtx.isLittleEndian(), 0);
+  DWARFDataExtractor AppleNamesSection(DCtx.getAppleNamesSection(),
+                                       DCtx.isLittleEndian(), 0);
   DataExtractor StrData(DCtx.getStringSection(), DCtx.isLittleEndian(), 0);
-  DWARFAcceleratorTable AppleNames(AppleNamesSection, StrData,
-                                   DCtx.getAppleNamesSection().Relocs);
+  DWARFAcceleratorTable AppleNames(AppleNamesSection, StrData);
 
   if (!AppleNames.extract()) {
     return true;
@@ -292,19 +378,79 @@ bool DWARFVerifier::handleAppleNames() {
 
   OS << "Verifying .apple_names...\n";
 
-  // Verify that all buckets have a valid hash index or are empty
+  // Verify that all buckets have a valid hash index or are empty.
   uint32_t NumBuckets = AppleNames.getNumBuckets();
   uint32_t NumHashes = AppleNames.getNumHashes();
 
   uint32_t BucketsOffset =
       AppleNames.getSizeHdr() + AppleNames.getHeaderDataLength();
+  uint32_t HashesBase = BucketsOffset + NumBuckets * 4;
+  uint32_t OffsetsBase = HashesBase + NumHashes * 4;
 
   for (uint32_t BucketIdx = 0; BucketIdx < NumBuckets; ++BucketIdx) {
     uint32_t HashIdx = AppleNamesSection.getU32(&BucketsOffset);
     if (HashIdx >= NumHashes && HashIdx != UINT32_MAX) {
-      OS << format("error: Bucket[%d] has invalid hash index: [%d]\n",
-                   BucketIdx, HashIdx);
+      OS << format("error: Bucket[%d] has invalid hash index: %u\n", BucketIdx,
+                   HashIdx);
       ++NumAppleNamesErrors;
+    }
+  }
+
+  uint32_t NumAtoms = AppleNames.getAtomsDesc().size();
+  if (NumAtoms == 0) {
+    OS << "error: no atoms; failed to read HashData\n";
+    ++NumAppleNamesErrors;
+    return false;
+  }
+
+  if (!AppleNames.validateForms()) {
+    OS << "error: unsupported form; failed to read HashData\n";
+    ++NumAppleNamesErrors;
+    return false;
+  }
+
+  for (uint32_t HashIdx = 0; HashIdx < NumHashes; ++HashIdx) {
+    uint32_t HashOffset = HashesBase + 4 * HashIdx;
+    uint32_t DataOffset = OffsetsBase + 4 * HashIdx;
+    uint32_t Hash = AppleNamesSection.getU32(&HashOffset);
+    uint32_t HashDataOffset = AppleNamesSection.getU32(&DataOffset);
+    if (!AppleNamesSection.isValidOffsetForDataOfSize(HashDataOffset,
+                                                      sizeof(uint64_t))) {
+      OS << format("error: Hash[%d] has invalid HashData offset: 0x%08x\n",
+                   HashIdx, HashDataOffset);
+      ++NumAppleNamesErrors;
+    }
+
+    uint32_t StrpOffset;
+    uint32_t StringOffset;
+    uint32_t StringCount = 0;
+    uint32_t DieOffset = dwarf::DW_INVALID_OFFSET;
+
+    while ((StrpOffset = AppleNamesSection.getU32(&HashDataOffset)) != 0) {
+      const uint32_t NumHashDataObjects =
+          AppleNamesSection.getU32(&HashDataOffset);
+      for (uint32_t HashDataIdx = 0; HashDataIdx < NumHashDataObjects;
+           ++HashDataIdx) {
+        DieOffset = AppleNames.readAtoms(HashDataOffset);
+        if (!DCtx.getDIEForOffset(DieOffset)) {
+          const uint32_t BucketIdx =
+              NumBuckets ? (Hash % NumBuckets) : UINT32_MAX;
+          StringOffset = StrpOffset;
+          const char *Name = StrData.getCStr(&StringOffset);
+          if (!Name)
+            Name = "<NULL>";
+
+          OS << format(
+              "error: .apple_names Bucket[%d] Hash[%d] = 0x%08x "
+              "Str[%u] = 0x%08x "
+              "DIE[%d] = 0x%08x is not a valid DIE offset for \"%s\".\n",
+              BucketIdx, HashIdx, Hash, StringCount, StrpOffset, HashDataIdx,
+              DieOffset, Name);
+
+          ++NumAppleNamesErrors;
+        }
+      }
+      ++StringCount;
     }
   }
   return NumAppleNamesErrors == 0;

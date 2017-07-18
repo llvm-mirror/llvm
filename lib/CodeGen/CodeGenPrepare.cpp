@@ -1662,21 +1662,24 @@ class MemCmpExpansion {
   PHINode *PhiRes;
   bool IsUsedForZeroCmp;
   const DataLayout &DL;
+  IRBuilder<> Builder;
 
-  int calculateNumBlocks(unsigned Size);
+  unsigned calculateNumBlocks(unsigned Size);
   void createLoadCmpBlocks();
   void createResultBlock();
   void setupResultBlockPHINodes();
   void setupEndBlockPHINodes();
-  void emitLoadCompareBlock(unsigned Index, int LoadSize, int GEPIndex);
+  void emitLoadCompareBlock(unsigned Index, unsigned LoadSize,
+                            unsigned GEPIndex);
   Value *getCompareLoadPairs(unsigned Index, unsigned Size,
-                             unsigned &NumBytesProcessed, IRBuilder<> &Builder);
+                             unsigned &NumBytesProcessed);
   void emitLoadCompareBlockMultipleLoads(unsigned Index, unsigned Size,
                                          unsigned &NumBytesProcessed);
-  void emitLoadCompareByteBlock(unsigned Index, int GEPIndex);
+  void emitLoadCompareByteBlock(unsigned Index, unsigned GEPIndex);
   void emitMemCmpResultBlock();
   Value *getMemCmpExpansionZeroCase(unsigned Size);
   Value *getMemCmpEqZeroOneBlock(unsigned Size);
+  Value *getMemCmpOneBlock(unsigned Size);
   unsigned getLoadSize(unsigned Size);
   unsigned getNumLoads(unsigned Size);
 
@@ -1701,7 +1704,7 @@ MemCmpExpansion::MemCmpExpansion(CallInst *CI, uint64_t Size,
                                  unsigned MaxLoadSize, unsigned LoadsPerBlock,
                                  const DataLayout &TheDataLayout)
     : CI(CI), MaxLoadSize(MaxLoadSize), NumLoadsPerBlock(LoadsPerBlock),
-      DL(TheDataLayout) {
+      DL(TheDataLayout), Builder(CI) {
 
   // A memcmp with zero-comparison with only one block of load and compare does
   // not need to set up any extra blocks. This case could be handled in the DAG,
@@ -1709,7 +1712,7 @@ MemCmpExpansion::MemCmpExpansion(CallInst *CI, uint64_t Size,
   // we choose to handle this case too to avoid fragmented lowering.
   IsUsedForZeroCmp = isOnlyUsedInZeroEqualityComparison(CI);
   NumBlocks = calculateNumBlocks(Size);
-  if (!IsUsedForZeroCmp || NumBlocks != 1) {
+  if ((!IsUsedForZeroCmp && NumLoadsPerBlock != 1) || NumBlocks != 1) {
     BasicBlock *StartBlock = CI->getParent();
     EndBlock = StartBlock->splitBasicBlock(CI, "endblock");
     setupEndBlockPHINodes();
@@ -1730,7 +1733,6 @@ MemCmpExpansion::MemCmpExpansion(CallInst *CI, uint64_t Size,
     StartBlock->getTerminator()->setSuccessor(0, LoadCmpBlocks[0]);
   }
 
-  IRBuilder<> Builder(CI->getContext());
   Builder.SetCurrentDebugLocation(CI->getDebugLoc());
 }
 
@@ -1751,9 +1753,8 @@ void MemCmpExpansion::createResultBlock() {
 // It loads 1 byte from each source of the memcmp parameters with the given
 // GEPIndex. It then subtracts the two loaded values and adds this result to the
 // final phi node for selecting the memcmp result.
-void MemCmpExpansion::emitLoadCompareByteBlock(unsigned Index, int GEPIndex) {
-  IRBuilder<> Builder(CI->getContext());
-
+void MemCmpExpansion::emitLoadCompareByteBlock(unsigned Index,
+                                               unsigned GEPIndex) {
   Value *Source1 = CI->getArgOperand(0);
   Value *Source2 = CI->getArgOperand(1);
 
@@ -1809,8 +1810,7 @@ unsigned MemCmpExpansion::getLoadSize(unsigned Size) {
 /// This is used in the case where the memcmp() call is compared equal or not
 /// equal to zero.
 Value *MemCmpExpansion::getCompareLoadPairs(unsigned Index, unsigned Size,
-                                            unsigned &NumBytesProcessed,
-                                            IRBuilder<> &Builder) {
+                                            unsigned &NumBytesProcessed) {
   std::vector<Value *> XorList, OrList;
   Value *Diff;
 
@@ -1833,6 +1833,7 @@ Value *MemCmpExpansion::getCompareLoadPairs(unsigned Index, unsigned Size,
 
     Type *LoadSizeType = IntegerType::get(CI->getContext(), LoadSize * 8);
     Type *MaxLoadType = IntegerType::get(CI->getContext(), MaxLoadSize * 8);
+    assert(LoadSize <= MaxLoadSize && "Unexpected load type");
 
     Value *Source1 = CI->getArgOperand(0);
     Value *Source2 = CI->getArgOperand(1);
@@ -1866,13 +1867,13 @@ Value *MemCmpExpansion::getCompareLoadPairs(unsigned Index, unsigned Size,
 
     if (NumLoads != 1) {
       if (LoadSizeType != MaxLoadType) {
-        LoadSrc1 = Builder.CreateZExtOrTrunc(LoadSrc1, MaxLoadType);
-        LoadSrc2 = Builder.CreateZExtOrTrunc(LoadSrc2, MaxLoadType);
+        LoadSrc1 = Builder.CreateZExt(LoadSrc1, MaxLoadType);
+        LoadSrc2 = Builder.CreateZExt(LoadSrc2, MaxLoadType);
       }
       // If we have multiple loads per block, we need to generate a composite
       // comparison using xor+or.
       Diff = Builder.CreateXor(LoadSrc1, LoadSrc2);
-      Diff = Builder.CreateZExtOrTrunc(Diff, MaxLoadType);
+      Diff = Builder.CreateZExt(Diff, MaxLoadType);
       XorList.push_back(Diff);
     } else {
       // If there's only one load per block, we just compare the loaded values.
@@ -1907,8 +1908,7 @@ Value *MemCmpExpansion::getCompareLoadPairs(unsigned Index, unsigned Size,
 
 void MemCmpExpansion::emitLoadCompareBlockMultipleLoads(
     unsigned Index, unsigned Size, unsigned &NumBytesProcessed) {
-  IRBuilder<> Builder(CI->getContext());
-  Value *Cmp = getCompareLoadPairs(Index, Size, NumBytesProcessed, Builder);
+  Value *Cmp = getCompareLoadPairs(Index, Size, NumBytesProcessed);
 
   BasicBlock *NextBB = (Index == (LoadCmpBlocks.size() - 1))
                            ? EndBlock
@@ -1936,17 +1936,16 @@ void MemCmpExpansion::emitLoadCompareBlockMultipleLoads(
 // the EndBlock if this is the last LoadCmpBlock. Loading 1 byte is handled with
 // a special case through emitLoadCompareByteBlock. The special handling can
 // simply subtract the loaded values and add it to the result phi node.
-void MemCmpExpansion::emitLoadCompareBlock(unsigned Index, int LoadSize,
-                                           int GEPIndex) {
+void MemCmpExpansion::emitLoadCompareBlock(unsigned Index, unsigned LoadSize,
+                                           unsigned GEPIndex) {
   if (LoadSize == 1) {
     MemCmpExpansion::emitLoadCompareByteBlock(Index, GEPIndex);
     return;
   }
 
-  IRBuilder<> Builder(CI->getContext());
-
   Type *LoadSizeType = IntegerType::get(CI->getContext(), LoadSize * 8);
   Type *MaxLoadType = IntegerType::get(CI->getContext(), MaxLoadSize * 8);
+  assert(LoadSize <= MaxLoadSize && "Unexpected load type");
 
   Value *Source1 = CI->getArgOperand(0);
   Value *Source2 = CI->getArgOperand(1);
@@ -1971,17 +1970,15 @@ void MemCmpExpansion::emitLoadCompareBlock(unsigned Index, int LoadSize,
   Value *LoadSrc2 = Builder.CreateLoad(LoadSizeType, Source2);
 
   if (DL.isLittleEndian()) {
-    Function *F = LoadCmpBlocks[Index]->getParent();
-
-    Function *Bswap = Intrinsic::getDeclaration(F->getParent(),
+    Function *Bswap = Intrinsic::getDeclaration(CI->getModule(),
                                                 Intrinsic::bswap, LoadSizeType);
     LoadSrc1 = Builder.CreateCall(Bswap, LoadSrc1);
     LoadSrc2 = Builder.CreateCall(Bswap, LoadSrc2);
   }
 
   if (LoadSizeType != MaxLoadType) {
-    LoadSrc1 = Builder.CreateZExtOrTrunc(LoadSrc1, MaxLoadType);
-    LoadSrc2 = Builder.CreateZExtOrTrunc(LoadSrc2, MaxLoadType);
+    LoadSrc1 = Builder.CreateZExt(LoadSrc1, MaxLoadType);
+    LoadSrc2 = Builder.CreateZExt(LoadSrc2, MaxLoadType);
   }
 
   // Add the loaded values to the phi nodes for calculating memcmp result only
@@ -1991,16 +1988,13 @@ void MemCmpExpansion::emitLoadCompareBlock(unsigned Index, int LoadSize,
     ResBlock.PhiSrc2->addIncoming(LoadSrc2, LoadCmpBlocks[Index]);
   }
 
-  Value *Diff = Builder.CreateSub(LoadSrc1, LoadSrc2);
-
-  Value *Cmp = Builder.CreateICmp(ICmpInst::ICMP_NE, Diff,
-                                  ConstantInt::get(Diff->getType(), 0));
+  Value *Cmp = Builder.CreateICmp(ICmpInst::ICMP_EQ, LoadSrc1, LoadSrc2);
   BasicBlock *NextBB = (Index == (LoadCmpBlocks.size() - 1))
                            ? EndBlock
                            : LoadCmpBlocks[Index + 1];
   // Early exit branch if difference found to ResultBlock. Otherwise, continue
   // to next LoadCmpBlock or EndBlock.
-  BranchInst *CmpBr = BranchInst::Create(ResBlock.BB, NextBB, Cmp);
+  BranchInst *CmpBr = BranchInst::Create(NextBB, ResBlock.BB, Cmp);
   Builder.Insert(CmpBr);
 
   // Add a phi edge for the last LoadCmpBlock to Endblock with a value of 0
@@ -2016,8 +2010,6 @@ void MemCmpExpansion::emitLoadCompareBlock(unsigned Index, int LoadSize,
 // memcmp result. It compares the two loaded source values and returns -1 if
 // src1 < src2 and 1 if src1 > src2.
 void MemCmpExpansion::emitMemCmpResultBlock() {
-  IRBuilder<> Builder(CI->getContext());
-
   // Special case: if memcmp result is used in a zero equality, result does not
   // need to be calculated and can simply return 1.
   if (IsUsedForZeroCmp) {
@@ -2044,8 +2036,8 @@ void MemCmpExpansion::emitMemCmpResultBlock() {
   PhiRes->addIncoming(Res, ResBlock.BB);
 }
 
-int MemCmpExpansion::calculateNumBlocks(unsigned Size) {
-  int NumBlocks = 0;
+unsigned MemCmpExpansion::calculateNumBlocks(unsigned Size) {
+  unsigned NumBlocks = 0;
   bool HaveOneByteLoad = false;
   unsigned RemainingSize = Size;
   unsigned LoadSize = MaxLoadSize;
@@ -2066,7 +2058,6 @@ int MemCmpExpansion::calculateNumBlocks(unsigned Size) {
 }
 
 void MemCmpExpansion::setupResultBlockPHINodes() {
-  IRBuilder<> Builder(CI->getContext());
   Type *MaxLoadType = IntegerType::get(CI->getContext(), MaxLoadSize * 8);
   Builder.SetInsertPoint(ResBlock.BB);
   ResBlock.PhiSrc1 =
@@ -2076,8 +2067,6 @@ void MemCmpExpansion::setupResultBlockPHINodes() {
 }
 
 void MemCmpExpansion::setupEndBlockPHINodes() {
-  IRBuilder<> Builder(CI->getContext());
-
   Builder.SetInsertPoint(&EndBlock->front());
   PhiRes = Builder.CreatePHI(Type::getInt32Ty(CI->getContext()), 2, "phi.res");
 }
@@ -2098,9 +2087,43 @@ Value *MemCmpExpansion::getMemCmpExpansionZeroCase(unsigned Size) {
 /// in the general case.
 Value *MemCmpExpansion::getMemCmpEqZeroOneBlock(unsigned Size) {
   unsigned NumBytesProcessed = 0;
-  IRBuilder<> Builder(CI->getContext());
-  Value *Cmp = getCompareLoadPairs(0, Size, NumBytesProcessed, Builder);
+  Value *Cmp = getCompareLoadPairs(0, Size, NumBytesProcessed);
   return Builder.CreateZExt(Cmp, Type::getInt32Ty(CI->getContext()));
+}
+
+/// A memcmp expansion that only has one block of load and compare can bypass
+/// the compare, branch, and phi IR that is required in the general case.
+Value *MemCmpExpansion::getMemCmpOneBlock(unsigned Size) {
+  assert(NumLoadsPerBlock == 1 && "Only handles one load pair per block");
+
+  Type *LoadSizeType = IntegerType::get(CI->getContext(), Size * 8);
+  Value *Source1 = CI->getArgOperand(0);
+  Value *Source2 = CI->getArgOperand(1);
+
+  // Cast source to LoadSizeType*.
+  if (Source1->getType() != LoadSizeType)
+    Source1 = Builder.CreateBitCast(Source1, LoadSizeType->getPointerTo());
+  if (Source2->getType() != LoadSizeType)
+    Source2 = Builder.CreateBitCast(Source2, LoadSizeType->getPointerTo());
+
+  // Load LoadSizeType from the base address.
+  Value *LoadSrc1 = Builder.CreateLoad(LoadSizeType, Source1);
+  Value *LoadSrc2 = Builder.CreateLoad(LoadSizeType, Source2);
+
+  if (DL.isLittleEndian() && Size != 1) {
+    Function *Bswap = Intrinsic::getDeclaration(CI->getModule(),
+                                                Intrinsic::bswap, LoadSizeType);
+    LoadSrc1 = Builder.CreateCall(Bswap, LoadSrc1);
+    LoadSrc2 = Builder.CreateCall(Bswap, LoadSrc2);
+  }
+
+  // TODO: Instead of comparing ULT, just subtract and return the difference?
+  Value *CmpNE = Builder.CreateICmpNE(LoadSrc1, LoadSrc2);
+  Value *CmpULT = Builder.CreateICmpULT(LoadSrc1, LoadSrc2);
+  Type *I32 = Builder.getInt32Ty();
+  Value *Sel1 = Builder.CreateSelect(CmpULT, ConstantInt::get(I32, -1),
+                                             ConstantInt::get(I32, 1));
+  return Builder.CreateSelect(CmpNE, Sel1, ConstantInt::get(I32, 0));
 }
 
 // This function expands the memcmp call into an inline expansion and returns
@@ -2110,17 +2133,21 @@ Value *MemCmpExpansion::getMemCmpExpansion(uint64_t Size) {
     return NumBlocks == 1 ? getMemCmpEqZeroOneBlock(Size) :
                             getMemCmpExpansionZeroCase(Size);
 
+  // TODO: Handle more than one load pair per block in getMemCmpOneBlock().
+  if (NumBlocks == 1 && NumLoadsPerBlock == 1)
+    return getMemCmpOneBlock(Size);
+
   // This loop calls emitLoadCompareBlock for comparing Size bytes of the two
   // memcmp sources. It starts with loading using the maximum load size set by
   // the target. It processes any remaining bytes using a load size which is the
   // next smallest power of 2.
-  int LoadSize = MaxLoadSize;
-  int NumBytesToBeProcessed = Size;
+  unsigned LoadSize = MaxLoadSize;
+  unsigned NumBytesToBeProcessed = Size;
   unsigned Index = 0;
   while (NumBytesToBeProcessed) {
     // Calculate how many blocks we can create with the current load size.
-    int NumBlocks = NumBytesToBeProcessed / LoadSize;
-    int GEPIndex = (Size - NumBytesToBeProcessed) / LoadSize;
+    unsigned NumBlocks = NumBytesToBeProcessed / LoadSize;
+    unsigned GEPIndex = (Size - NumBytesToBeProcessed) / LoadSize;
     NumBytesToBeProcessed = NumBytesToBeProcessed % LoadSize;
 
     // For each NumBlocks, populate the instruction sequence for loading and
@@ -2214,7 +2241,6 @@ Value *MemCmpExpansion::getMemCmpExpansion(uint64_t Size) {
 static bool expandMemCmp(CallInst *CI, const TargetTransformInfo *TTI,
                          const TargetLowering *TLI, const DataLayout *DL) {
   NumMemCmpCalls++;
-  IRBuilder<> Builder(CI->getContext());
 
   // TTI call to check if target would like to expand memcmp. Also, get the
   // MaxLoadSize.
@@ -4244,6 +4270,7 @@ bool CodeGenPrepare::optimizeMemoryInst(Instruction *MemoryInst, Value *Addr,
   Value *Consensus = nullptr;
   unsigned NumUsesConsensus = 0;
   bool IsNumUsesConsensusValid = false;
+  bool PhiSeen = false;
   SmallVector<Instruction*, 16> AddrModeInsts;
   ExtAddrMode AddrMode;
   TypePromotionTransaction TPT(RemovedInsts);
@@ -4263,6 +4290,7 @@ bool CodeGenPrepare::optimizeMemoryInst(Instruction *MemoryInst, Value *Addr,
     if (PHINode *P = dyn_cast<PHINode>(V)) {
       for (Value *IncValue : P->incoming_values())
         worklist.push_back(IncValue);
+      PhiSeen = true;
       continue;
     }
 
@@ -4316,9 +4344,10 @@ bool CodeGenPrepare::optimizeMemoryInst(Instruction *MemoryInst, Value *Addr,
   TPT.commit();
 
   // If all the instructions matched are already in this BB, don't do anything.
-  if (none_of(AddrModeInsts, [&](Value *V) {
+  // If we saw Phi node then it is not local definitely.
+  if (!PhiSeen && none_of(AddrModeInsts, [&](Value *V) {
         return IsNonLocalValue(V, MemoryInst->getParent());
-      })) {
+                  })) {
     DEBUG(dbgs() << "CGP: Found      local addrmode: " << AddrMode << "\n");
     return false;
   }
@@ -4364,6 +4393,20 @@ bool CodeGenPrepare::optimizeMemoryInst(Instruction *MemoryInst, Value *Addr,
       AddrMode.Scale = 0;
     }
 
+    // It is only safe to sign extend the BaseReg if we know that the math
+    // required to create it did not overflow before we extend it. Since
+    // the original IR value was tossed in favor of a constant back when
+    // the AddrMode was created we need to bail out gracefully if widths
+    // do not match instead of extending it.
+    //
+    // (See below for code to add the scale.)
+    if (AddrMode.Scale) {
+      Type *ScaledRegTy = AddrMode.ScaledReg->getType();
+      if (cast<IntegerType>(IntPtrTy)->getBitWidth() >
+          cast<IntegerType>(ScaledRegTy)->getBitWidth())
+        return false;
+    }
+
     if (AddrMode.BaseGV) {
       if (ResultPtr)
         return false;
@@ -4374,14 +4417,16 @@ bool CodeGenPrepare::optimizeMemoryInst(Instruction *MemoryInst, Value *Addr,
     // If the real base value actually came from an inttoptr, then the matcher
     // will look through it and provide only the integer value. In that case,
     // use it here.
-    if (!ResultPtr && AddrMode.BaseReg) {
-      ResultPtr =
-        Builder.CreateIntToPtr(AddrMode.BaseReg, Addr->getType(), "sunkaddr");
-      AddrMode.BaseReg = nullptr;
-    } else if (!ResultPtr && AddrMode.Scale == 1) {
-      ResultPtr =
-        Builder.CreateIntToPtr(AddrMode.ScaledReg, Addr->getType(), "sunkaddr");
-      AddrMode.Scale = 0;
+    if (!DL->isNonIntegralPointerType(Addr->getType())) {
+      if (!ResultPtr && AddrMode.BaseReg) {
+        ResultPtr = Builder.CreateIntToPtr(AddrMode.BaseReg, Addr->getType(),
+                                           "sunkaddr");
+        AddrMode.BaseReg = nullptr;
+      } else if (!ResultPtr && AddrMode.Scale == 1) {
+        ResultPtr = Builder.CreateIntToPtr(AddrMode.ScaledReg, Addr->getType(),
+                                           "sunkaddr");
+        AddrMode.Scale = 0;
+      }
     }
 
     if (!ResultPtr &&
@@ -4412,19 +4457,11 @@ bool CodeGenPrepare::optimizeMemoryInst(Instruction *MemoryInst, Value *Addr,
         Value *V = AddrMode.ScaledReg;
         if (V->getType() == IntPtrTy) {
           // done.
-        } else if (cast<IntegerType>(IntPtrTy)->getBitWidth() <
-                   cast<IntegerType>(V->getType())->getBitWidth()) {
-          V = Builder.CreateTrunc(V, IntPtrTy, "sunkaddr");
         } else {
-          // It is only safe to sign extend the BaseReg if we know that the math
-          // required to create it did not overflow before we extend it. Since
-          // the original IR value was tossed in favor of a constant back when
-          // the AddrMode was created we need to bail out gracefully if widths
-          // do not match instead of extending it.
-          Instruction *I = dyn_cast_or_null<Instruction>(ResultIndex);
-          if (I && (ResultIndex != AddrMode.BaseReg))
-            I->eraseFromParent();
-          return false;
+          assert(cast<IntegerType>(IntPtrTy)->getBitWidth() <
+                 cast<IntegerType>(V->getType())->getBitWidth() &&
+                 "We can't transform if ScaledReg is too narrow");
+          V = Builder.CreateTrunc(V, IntPtrTy, "sunkaddr");
         }
 
         if (AddrMode.Scale != 1)
@@ -4462,6 +4499,19 @@ bool CodeGenPrepare::optimizeMemoryInst(Instruction *MemoryInst, Value *Addr,
         SunkAddr = Builder.CreatePointerCast(SunkAddr, Addr->getType());
     }
   } else {
+    // We'd require a ptrtoint/inttoptr down the line, which we can't do for
+    // non-integral pointers, so in that case bail out now.
+    Type *BaseTy = AddrMode.BaseReg ? AddrMode.BaseReg->getType() : nullptr;
+    Type *ScaleTy = AddrMode.Scale ? AddrMode.ScaledReg->getType() : nullptr;
+    PointerType *BasePtrTy = dyn_cast_or_null<PointerType>(BaseTy);
+    PointerType *ScalePtrTy = dyn_cast_or_null<PointerType>(ScaleTy);
+    if (DL->isNonIntegralPointerType(Addr->getType()) ||
+        (BasePtrTy && DL->isNonIntegralPointerType(BasePtrTy)) ||
+        (ScalePtrTy && DL->isNonIntegralPointerType(ScalePtrTy)) ||
+        (AddrMode.BaseGV &&
+         DL->isNonIntegralPointerType(AddrMode.BaseGV->getType())))
+      return false;
+
     DEBUG(dbgs() << "CGP: SINKING nonlocal addrmode: " << AddrMode << " for "
                  << *MemoryInst << "\n");
     Type *IntPtrTy = DL->getIntPtrType(Addr->getType());
@@ -6363,7 +6413,7 @@ bool CodeGenPrepare::splitBranchCondition(Function &F) {
     }
 
     // Update PHI nodes in both successors. The original BB needs to be
-    // replaced in one succesor's PHI nodes, because the branch comes now from
+    // replaced in one successor's PHI nodes, because the branch comes now from
     // the newly generated BB (NewBB). In the other successor we need to add one
     // incoming edge to the PHI nodes, because both branch instructions target
     // now the same successor. Depending on the original branch condition

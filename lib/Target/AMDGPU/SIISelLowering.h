@@ -108,6 +108,9 @@ class SITargetLowering final : public AMDGPUTargetLowering {
 
   unsigned getFusedOpcode(const SelectionDAG &DAG,
                           const SDNode *N0, const SDNode *N1) const;
+  SDValue performAddCombine(SDNode *N, DAGCombinerInfo &DCI) const;
+  SDValue performAddCarrySubCarryCombine(SDNode *N, DAGCombinerInfo &DCI) const;
+  SDValue performSubCombine(SDNode *N, DAGCombinerInfo &DCI) const;
   SDValue performFAddCombine(SDNode *N, DAGCombinerInfo &DCI) const;
   SDValue performFSubCombine(SDNode *N, DAGCombinerInfo &DCI) const;
   SDValue performSetCCCombine(SDNode *N, DAGCombinerInfo &DCI) const;
@@ -150,7 +153,8 @@ public:
   bool isLegalAddressingMode(const DataLayout &DL, const AddrMode &AM, Type *Ty,
                              unsigned AS) const override;
 
-  bool canMergeStoresTo(unsigned AS, EVT MemVT) const override;
+  bool canMergeStoresTo(unsigned AS, EVT MemVT,
+                        const SelectionDAG &DAG) const override;
 
   bool allowsMisalignedMemoryAccesses(EVT VT, unsigned AS,
                                       unsigned Align,

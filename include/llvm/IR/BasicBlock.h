@@ -326,7 +326,7 @@ public:
   ValueSymbolTable *getValueSymbolTable();
 
   /// \brief Methods for support type inquiry through isa, cast, and dyn_cast.
-  static inline bool classof(const Value *V) {
+  static bool classof(const Value *V) {
     return V->getValueID() == Value::BasicBlockVal;
   }
 
@@ -394,6 +394,9 @@ public:
     return const_cast<LandingPadInst *>(
                     static_cast<const BasicBlock *>(this)->getLandingPadInst());
   }
+
+  /// \brief Return true if it is legal to hoist instructions into this block.
+  bool isLegalToHoistInto() const;
 
 private:
   /// \brief Increment the internal refcount of the number of BlockAddresses

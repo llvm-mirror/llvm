@@ -690,6 +690,9 @@ bool SampleProfileLoader::inlineHotFunctions(
     for (auto I : CIS) {
       InlineFunctionInfo IFI(nullptr, ACT ? &GetAssumptionCache : nullptr);
       Function *CalledFunction = CallSite(I).getCalledFunction();
+      // Do not inline recursive calls.
+      if (CalledFunction == &F)
+        continue;
       Instruction *DI = I;
       if (!CalledFunction && !PromotedInsns.count(I) &&
           CallSite(I).isIndirectCall())
@@ -1481,7 +1484,8 @@ bool SampleProfileLoader::runOnFunction(Function &F) {
 PreservedAnalyses SampleProfileLoaderPass::run(Module &M,
                                                ModuleAnalysisManager &AM) {
 
-  SampleProfileLoader SampleLoader(SampleProfileFile);
+  SampleProfileLoader SampleLoader(
+      ProfileFileName.empty() ? SampleProfileFile : ProfileFileName);
 
   SampleLoader.doInitialization(M);
 

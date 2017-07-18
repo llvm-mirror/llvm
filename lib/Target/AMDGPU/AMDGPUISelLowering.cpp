@@ -2651,8 +2651,11 @@ SDValue AMDGPUTargetLowering::performShlCombine(SDNode *N,
     SDValue Shl = DAG.getNode(ISD::SHL, SL, XVT, X, SDValue(RHS, 0));
     return DAG.getZExtOrTrunc(Shl, SL, VT);
   }
-  case ISD::OR:  if (!isOrEquivalentToAdd(DAG, LHS)) break;
-  case ISD::ADD: { // Fall through from above
+  case ISD::OR:
+    if (!isOrEquivalentToAdd(DAG, LHS))
+      break;
+    LLVM_FALLTHROUGH;
+  case ISD::ADD: {
     // shl (or|add x, c2), c1 => or|add (shl x, c1), (c2 << c1)
     if (ConstantSDNode *C2 = dyn_cast<ConstantSDNode>(LHS->getOperand(1))) {
       SDValue Shl = DAG.getNode(ISD::SHL, SL, VT, LHS->getOperand(0),
@@ -3664,6 +3667,8 @@ const char* AMDGPUTargetLowering::getTargetNodeName(unsigned Opcode) const {
   NODE_NAME_CASE(STORE_MSKOR)
   NODE_NAME_CASE(LOAD_CONSTANT)
   NODE_NAME_CASE(TBUFFER_STORE_FORMAT)
+  NODE_NAME_CASE(TBUFFER_STORE_FORMAT_X3)
+  NODE_NAME_CASE(TBUFFER_LOAD_FORMAT)
   NODE_NAME_CASE(ATOMIC_CMP_SWAP)
   NODE_NAME_CASE(ATOMIC_INC)
   NODE_NAME_CASE(ATOMIC_DEC)

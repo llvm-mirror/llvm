@@ -16,6 +16,7 @@
 
 #include "llvm/ExecutionEngine/JITSymbol.h"
 #include <algorithm>
+#include <memory>
 #include <string>
 
 namespace llvm {
@@ -23,14 +24,14 @@ namespace orc {
 
 /// @brief Object mutating layer.
 ///
-///   This layer accepts sets of ObjectFiles (via addObjectSet). It
+///   This layer accepts sets of ObjectFiles (via addObject). It
 /// immediately applies the user supplied functor to each object, then adds
 /// the set of transformed objects to the layer below.
 template <typename BaseLayerT, typename TransformFtor>
 class ObjectTransformLayer {
 public:
   /// @brief Handle to a set of added objects.
-  using ObjSetHandleT = typename BaseLayerT::ObjSetHandleT;
+  using ObjHandleT = typename BaseLayerT::ObjHandleT;
 
   /// @brief Construct an ObjectTransformLayer with the given BaseLayer
   ObjectTransformLayer(BaseLayerT &BaseLayer,
@@ -42,19 +43,14 @@ public:
   ///        memory manager and symbol resolver.
   ///
   /// @return A handle for the added objects.
-  template <typename ObjSetT, typename MemoryManagerPtrT,
-            typename SymbolResolverPtrT>
-  ObjSetHandleT addObjectSet(ObjSetT Objects, MemoryManagerPtrT MemMgr,
-                             SymbolResolverPtrT Resolver) {
-    for (auto I = Objects.begin(), E = Objects.end(); I != E; ++I)
-      *I = Transform(std::move(*I));
-
-    return BaseLayer.addObjectSet(std::move(Objects), std::move(MemMgr),
-                                  std::move(Resolver));
+  template <typename ObjectPtr>
+  Expected<ObjHandleT> addObject(ObjectPtr Obj,
+                                 std::shared_ptr<JITSymbolResolver> Resolver) {
+    return BaseLayer.addObject(Transform(std::move(Obj)), std::move(Resolver));
   }
 
   /// @brief Remove the object set associated with the handle H.
-  void removeObjectSet(ObjSetHandleT H) { BaseLayer.removeObjectSet(H); }
+  Error removeObject(ObjHandleT H) { return BaseLayer.removeObject(H); }
 
   /// @brief Search for the given named symbol.
   /// @param Name The name of the symbol to search for.
@@ -72,7 +68,7 @@ public:
   /// @param ExportedSymbolsOnly If true, search only for exported symbols.
   /// @return A handle for the given named symbol, if it is found in the
   ///         given object set.
-  JITSymbol findSymbolIn(ObjSetHandleT H, const std::string &Name,
+  JITSymbol findSymbolIn(ObjHandleT H, const std::string &Name,
                          bool ExportedSymbolsOnly) {
     return BaseLayer.findSymbolIn(H, Name, ExportedSymbolsOnly);
   }
@@ -80,10 +76,12 @@ public:
   /// @brief Immediately emit and finalize the object set represented by the
   ///        given handle.
   /// @param H Handle for object set to emit/finalize.
-  void emitAndFinalize(ObjSetHandleT H) { BaseLayer.emitAndFinalize(H); }
+  Error emitAndFinalize(ObjHandleT H) {
+    return BaseLayer.emitAndFinalize(H);
+  }
 
   /// @brief Map section addresses for the objects associated with the handle H.
-  void mapSectionAddress(ObjSetHandleT H, const void *LocalAddress,
+  void mapSectionAddress(ObjHandleT H, const void *LocalAddress,
                          JITTargetAddress TargetAddr) {
     BaseLayer.mapSectionAddress(H, LocalAddress, TargetAddr);
   }

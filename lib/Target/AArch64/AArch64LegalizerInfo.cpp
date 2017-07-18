@@ -39,6 +39,9 @@ AArch64LegalizerInfo::AArch64LegalizerInfo() {
   const LLT v4s32 = LLT::vector(4, 32);
   const LLT v2s64 = LLT::vector(2, 64);
 
+  for (auto Ty : {p0, s1, s8, s16, s32, s64})
+    setAction({G_IMPLICIT_DEF, Ty}, Legal);
+
   for (unsigned BinOp : {G_ADD, G_SUB, G_MUL, G_AND, G_OR, G_XOR, G_SHL}) {
     // These operations naturally get the right answer when used on
     // GPR32, even if the actual type is narrower.
@@ -98,6 +101,12 @@ AArch64LegalizerInfo::AArch64LegalizerInfo() {
     // FIXME: Can't widen the sources because that violates the constraints on
     // G_INSERT (It seems entirely reasonable that inputs shouldn't overlap).
   }
+
+  for (auto Ty : {s1, s8, s16, s32, s64, p0})
+    setAction({G_EXTRACT, Ty}, Legal);
+
+  for (auto Ty : {s32, s64})
+    setAction({G_EXTRACT, 1, Ty}, Legal);
 
   for (unsigned MemOp : {G_LOAD, G_STORE}) {
     for (auto Ty : {s8, s16, s32, s64, p0, v2s32})
@@ -282,11 +291,10 @@ bool AArch64LegalizerInfo::legalizeVaArg(MachineInstr &MI,
   unsigned DstPtr;
   if (Align > PtrSize) {
     // Realign the list to the actual required alignment.
-    unsigned AlignMinus1 = MRI.createGenericVirtualRegister(IntPtrTy);
-    MIRBuilder.buildConstant(AlignMinus1, Align - 1);
+    auto AlignMinus1 = MIRBuilder.buildConstant(IntPtrTy, Align - 1);
 
     unsigned ListTmp = MRI.createGenericVirtualRegister(PtrTy);
-    MIRBuilder.buildGEP(ListTmp, List, AlignMinus1);
+    MIRBuilder.buildGEP(ListTmp, List, AlignMinus1->getOperand(0).getReg());
 
     DstPtr = MRI.createGenericVirtualRegister(PtrTy);
     MIRBuilder.buildPtrMask(DstPtr, ListTmp, Log2_64(Align));

@@ -168,13 +168,21 @@ class CounterExpressionBuilder {
   /// expression is added to the builder's collection of expressions.
   Counter get(const CounterExpression &E);
 
+  /// Represents a term in a counter expression tree.
+  struct Term {
+    unsigned CounterID;
+    int Factor;
+
+    Term(unsigned CounterID, int Factor)
+        : CounterID(CounterID), Factor(Factor) {}
+  };
+
   /// \brief Gather the terms of the expression tree for processing.
   ///
   /// This collects each addition and subtraction referenced by the counter into
   /// a sequence that can be sorted and combined to build a simplified counter
   /// expression.
-  void extractTerms(Counter C, int Sign,
-                    SmallVectorImpl<std::pair<unsigned, int>> &Terms);
+  void extractTerms(Counter C, int Sign, SmallVectorImpl<Term> &Terms);
 
   /// \brief Simplifies the given expression tree
   /// by getting rid of algebraically redundant operations.
@@ -411,9 +419,11 @@ public:
   std::vector<CoverageSegment>::const_iterator begin() const {
     return Segments.begin();
   }
+
   std::vector<CoverageSegment>::const_iterator end() const {
     return Segments.end();
   }
+
   bool empty() const { return Segments.empty(); }
 
   /// \brief Expansions that can be further processed.
@@ -430,6 +440,7 @@ class CoverageMapping {
   unsigned MismatchedFunctionCount = 0;
 
   CoverageMapping() = default;
+
   /// \brief Add a function record corresponding to \p Record.
   Error loadFunctionRecord(const CoverageMappingRecord &Record,
                            IndexedInstrProfReader &ProfileReader);
@@ -440,19 +451,8 @@ public:
 
   /// \brief Load the coverage mapping using the given readers.
   static Expected<std::unique_ptr<CoverageMapping>>
-  load(CoverageMappingReader &CoverageReader,
-       IndexedInstrProfReader &ProfileReader);
-
-  static Expected<std::unique_ptr<CoverageMapping>>
   load(ArrayRef<std::unique_ptr<CoverageMappingReader>> CoverageReaders,
        IndexedInstrProfReader &ProfileReader);
-
-  /// \brief Load the coverage mapping from the given files.
-  static Expected<std::unique_ptr<CoverageMapping>>
-  load(StringRef ObjectFilename, StringRef ProfileFilename,
-       StringRef Arch = StringRef()) {
-    return load(ArrayRef<StringRef>(ObjectFilename), ProfileFilename, Arch);
-  }
 
   static Expected<std::unique_ptr<CoverageMapping>>
   load(ArrayRef<StringRef> ObjectFilenames, StringRef ProfileFilename,
@@ -607,13 +607,13 @@ enum CovMapVersion {
 };
 
 template <int CovMapVersion, class IntPtrT> struct CovMapTraits {
-  typedef CovMapFunctionRecord CovMapFuncRecordType;
-  typedef uint64_t NameRefType;
+  using CovMapFuncRecordType = CovMapFunctionRecord;
+  using NameRefType = uint64_t;
 };
 
 template <class IntPtrT> struct CovMapTraits<CovMapVersion::Version1, IntPtrT> {
-  typedef CovMapFunctionRecordV1<IntPtrT> CovMapFuncRecordType;
-  typedef IntPtrT NameRefType;
+  using CovMapFuncRecordType = CovMapFunctionRecordV1<IntPtrT>;
+  using NameRefType = IntPtrT;
 };
 
 } // end namespace coverage
@@ -622,6 +622,7 @@ template <class IntPtrT> struct CovMapTraits<CovMapVersion::Version1, IntPtrT> {
 template<> struct DenseMapInfo<coverage::CounterExpression> {
   static inline coverage::CounterExpression getEmptyKey() {
     using namespace coverage;
+
     return CounterExpression(CounterExpression::ExprKind::Subtract,
                              Counter::getCounter(~0U),
                              Counter::getCounter(~0U));
@@ -629,6 +630,7 @@ template<> struct DenseMapInfo<coverage::CounterExpression> {
 
   static inline coverage::CounterExpression getTombstoneKey() {
     using namespace coverage;
+
     return CounterExpression(CounterExpression::ExprKind::Add,
                              Counter::getCounter(~0U),
                              Counter::getCounter(~0U));

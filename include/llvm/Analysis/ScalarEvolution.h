@@ -262,7 +262,7 @@ public:
   const SCEVConstant *getRHS() const { return RHS; }
 
   /// Methods for support type inquiry through isa, cast, and dyn_cast:
-  static inline bool classof(const SCEVPredicate *P) {
+  static bool classof(const SCEVPredicate *P) {
     return P->getKind() == P_Equal;
   }
 };
@@ -360,7 +360,7 @@ public:
   bool isAlwaysTrue() const override;
 
   /// Methods for support type inquiry through isa, cast, and dyn_cast:
-  static inline bool classof(const SCEVPredicate *P) {
+  static bool classof(const SCEVPredicate *P) {
     return P->getKind() == P_Wrap;
   }
 };
@@ -406,7 +406,7 @@ public:
   unsigned getComplexity() const override { return Preds.size(); }
 
   /// Methods for support type inquiry through isa, cast, and dyn_cast:
-  static inline bool classof(const SCEVPredicate *P) {
+  static bool classof(const SCEVPredicate *P) {
     return P->getKind() == P_Union;
   }
 };
@@ -784,7 +784,9 @@ private:
   }
 
   /// Determine the range for a particular SCEV.
-  ConstantRange getRange(const SCEV *S, RangeSignHint Hint);
+  /// NOTE: This returns a reference to an entry in a cache. It must be
+  /// copied if its needed for longer.
+  const ConstantRange &getRangeRef(const SCEV *S, RangeSignHint Hint);
 
   /// Determines the range for the affine SCEVAddRecExpr {\p Start,+,\p Stop}.
   /// Helper for \c getRange.
@@ -1195,20 +1197,8 @@ public:
   const SCEV *getConstant(const APInt &Val);
   const SCEV *getConstant(Type *Ty, uint64_t V, bool isSigned = false);
   const SCEV *getTruncateExpr(const SCEV *Op, Type *Ty);
-
-  typedef SmallDenseMap<std::pair<const SCEV *, Type *>, const SCEV *, 8>
-      ExtendCacheTy;
-  const SCEV *getZeroExtendExpr(const SCEV *Op, Type *Ty);
-  const SCEV *getZeroExtendExprCached(const SCEV *Op, Type *Ty,
-                                      ExtendCacheTy &Cache);
-  const SCEV *getZeroExtendExprImpl(const SCEV *Op, Type *Ty,
-                                    ExtendCacheTy &Cache);
-
-  const SCEV *getSignExtendExpr(const SCEV *Op, Type *Ty);
-  const SCEV *getSignExtendExprCached(const SCEV *Op, Type *Ty,
-                                      ExtendCacheTy &Cache);
-  const SCEV *getSignExtendExprImpl(const SCEV *Op, Type *Ty,
-                                    ExtendCacheTy &Cache);
+  const SCEV *getZeroExtendExpr(const SCEV *Op, Type *Ty, unsigned Depth = 0);
+  const SCEV *getSignExtendExpr(const SCEV *Op, Type *Ty, unsigned Depth = 0);
   const SCEV *getAnyExtendExpr(const SCEV *Op, Type *Ty);
   const SCEV *getAddExpr(SmallVectorImpl<const SCEV *> &Ops,
                          SCEV::NoWrapFlags Flags = SCEV::FlagAnyWrap,
@@ -1464,15 +1454,35 @@ public:
   uint32_t GetMinTrailingZeros(const SCEV *S);
 
   /// Determine the unsigned range for a particular SCEV.
-  ///
+  /// NOTE: This returns a copy of the reference returned by getRangeRef.
   ConstantRange getUnsignedRange(const SCEV *S) {
-    return getRange(S, HINT_RANGE_UNSIGNED);
+    return getRangeRef(S, HINT_RANGE_UNSIGNED);
+  }
+
+  /// Determine the min of the unsigned range for a particular SCEV.
+  APInt getUnsignedRangeMin(const SCEV *S) {
+    return getRangeRef(S, HINT_RANGE_UNSIGNED).getUnsignedMin();
+  }
+
+  /// Determine the max of the unsigned range for a particular SCEV.
+  APInt getUnsignedRangeMax(const SCEV *S) {
+    return getRangeRef(S, HINT_RANGE_UNSIGNED).getUnsignedMax();
   }
 
   /// Determine the signed range for a particular SCEV.
-  ///
+  /// NOTE: This returns a copy of the reference returned by getRangeRef.
   ConstantRange getSignedRange(const SCEV *S) {
-    return getRange(S, HINT_RANGE_SIGNED);
+    return getRangeRef(S, HINT_RANGE_SIGNED);
+  }
+
+  /// Determine the min of the signed range for a particular SCEV.
+  APInt getSignedRangeMin(const SCEV *S) {
+    return getRangeRef(S, HINT_RANGE_SIGNED).getSignedMin();
+  }
+
+  /// Determine the max of the signed range for a particular SCEV.
+  APInt getSignedRangeMax(const SCEV *S) {
+    return getRangeRef(S, HINT_RANGE_SIGNED).getSignedMax();
   }
 
   /// Test if the given expression is known to be negative.

@@ -926,7 +926,7 @@ while.body:
 
 define i32 @test76(i1 %flag, i32* %x) {
 ; The load here must not be speculated around the select. One side of the
-; select is trivially dereferencable but may have a lower alignment than the
+; select is trivially dereferenceable but may have a lower alignment than the
 ; load does.
 ; CHECK-LABEL: @test76(
 ; CHECK: store i32 0, i32* %x
@@ -943,7 +943,7 @@ declare void @scribble_on_i32(i32*)
 
 define i32 @test77(i1 %flag, i32* %x) {
 ; The load here must not be speculated around the select. One side of the
-; select is trivially dereferencable but may have a lower alignment than the
+; select is trivially dereferenceable but may have a lower alignment than the
 ; load does.
 ; CHECK-LABEL: @test77(
 ; CHECK: %[[A:.*]] = alloca i32, align 1
@@ -1220,12 +1220,13 @@ entry:
 }
 
 define i32 @test_select_select0(i32 %a, i32 %r0, i32 %r1, i32 %v1, i32 %v2) {
-  ; CHECK-LABEL: @test_select_select0(
-  ; CHECK: %[[C0:.*]] = icmp sge i32 %a, %v1
-  ; CHECK-NEXT: %[[C1:.*]] = icmp slt i32 %a, %v2
-  ; CHECK-NEXT: %[[C:.*]] = and i1 %[[C1]], %[[C0]]
-  ; CHECK-NEXT: %[[SEL:.*]] = select i1 %[[C]], i32 %r0, i32 %r1
-  ; CHECK-NEXT: ret i32 %[[SEL]]
+; CHECK-LABEL: @test_select_select0(
+; CHECK-NEXT:    [[C0:%.*]] = icmp slt i32 %a, %v1
+; CHECK-NEXT:    [[S0:%.*]] = select i1 [[C0]], i32 %r1, i32 %r0
+; CHECK-NEXT:    [[C1:%.*]] = icmp slt i32 %a, %v2
+; CHECK-NEXT:    [[S1:%.*]] = select i1 [[C1]], i32 [[S0]], i32 %r1
+; CHECK-NEXT:    ret i32 [[S1]]
+;
   %c0 = icmp sge i32 %a, %v1
   %s0 = select i1 %c0, i32 %r0, i32 %r1
   %c1 = icmp slt i32 %a, %v2
@@ -1234,12 +1235,13 @@ define i32 @test_select_select0(i32 %a, i32 %r0, i32 %r1, i32 %v1, i32 %v2) {
 }
 
 define i32 @test_select_select1(i32 %a, i32 %r0, i32 %r1, i32 %v1, i32 %v2) {
-  ; CHECK-LABEL: @test_select_select1(
-  ; CHECK: %[[C0:.*]] = icmp sge i32 %a, %v1
-  ; CHECK-NEXT: %[[C1:.*]] = icmp slt i32 %a, %v2
-  ; CHECK-NEXT: %[[C:.*]] = or i1 %[[C1]], %[[C0]]
-  ; CHECK-NEXT: %[[SEL:.*]] = select i1 %[[C]], i32 %r0, i32 %r1
-  ; CHECK-NEXT: ret i32 %[[SEL]]
+; CHECK-LABEL: @test_select_select1(
+; CHECK-NEXT:    [[C0:%.*]] = icmp slt i32 %a, %v1
+; CHECK-NEXT:    [[S0:%.*]] = select i1 [[C0]], i32 %r1, i32 %r0
+; CHECK-NEXT:    [[C1:%.*]] = icmp slt i32 %a, %v2
+; CHECK-NEXT:    [[S1:%.*]] = select i1 [[C1]], i32 %r0, i32 [[S0]]
+; CHECK-NEXT:    ret i32 [[S1]]
+;
   %c0 = icmp sge i32 %a, %v1
   %s0 = select i1 %c0, i32 %r0, i32 %r1
   %c1 = icmp slt i32 %a, %v2
@@ -1368,3 +1370,10 @@ define i8 @assume_cond_false(i1 %cond, i8 %x, i8 %y) {
   ret i8 %sel
 }
 
+; Test case to make sure we don't consider an all ones float values for converting the select into a sext.
+define <4 x float> @PR33721(<4 x float> %w) {
+entry:
+  %0 = fcmp ole <4 x float> %w, zeroinitializer
+  %1 = select <4 x i1> %0, <4 x float> <float 0xFFFFFFFFE0000000, float 0xFFFFFFFFE0000000, float 0xFFFFFFFFE0000000, float 0xFFFFFFFFE0000000>, <4 x float> zeroinitializer
+  ret <4 x float> %1
+}

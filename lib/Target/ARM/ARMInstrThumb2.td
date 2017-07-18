@@ -4756,6 +4756,16 @@ def t2MOVsr: t2AsmPseudo<"mov${p} $Rd, $shift",
 def t2MOVSsr: t2AsmPseudo<"movs${p} $Rd, $shift",
                           (ins rGPR:$Rd, so_reg_reg:$shift, pred:$p)>;
 
+// Aliases for the above with the .w qualifier
+def : t2InstAlias<"mov${p}.w $Rd, $shift",
+                  (t2MOVsi rGPR:$Rd, t2_so_reg:$shift, pred:$p)>;
+def : t2InstAlias<"movs${p}.w $Rd, $shift",
+                  (t2MOVSsi rGPR:$Rd, t2_so_reg:$shift, pred:$p)>;
+def : t2InstAlias<"mov${p}.w $Rd, $shift",
+                  (t2MOVsr rGPR:$Rd, so_reg_reg:$shift, pred:$p)>;
+def : t2InstAlias<"movs${p}.w $Rd, $shift",
+                  (t2MOVSsr rGPR:$Rd, so_reg_reg:$shift, pred:$p)>;
+
 // ADR w/o the .w suffix
 def : t2InstAlias<"adr${p} $Rd, $addr",
                   (t2ADR rGPR:$Rd, t2adrlabel:$addr, pred:$p)>;
@@ -4789,7 +4799,7 @@ def : t2InstAlias<"add${p} $Rd, pc, $imm",
 // Pseudo instruction ldr Rt, =immediate
 def t2LDRConstPool
   : t2AsmPseudo<"ldr${p} $Rt, $immediate",
-                (ins GPRnopc:$Rt, const_pool_asm_imm:$immediate, pred:$p)>;
+                (ins GPR:$Rt, const_pool_asm_imm:$immediate, pred:$p)>;
 // Version w/ the .w suffix.
 def : t2InstAlias<"ldr${p}.w $Rt, $immediate",
                   (t2LDRConstPool GPRnopc:$Rt,

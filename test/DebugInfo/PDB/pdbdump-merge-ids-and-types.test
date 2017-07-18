@@ -1,8 +1,8 @@
 ; RUN: llvm-pdbutil yaml2pdb -pdb=%t.1.pdb %p/Inputs/merge-ids-and-types-1.yaml
 ; RUN: llvm-pdbutil yaml2pdb -pdb=%t.2.pdb %p/Inputs/merge-ids-and-types-2.yaml
 ; RUN: llvm-pdbutil merge -pdb=%t.3.pdb %t.1.pdb %t.2.pdb
-; RUN: llvm-pdbutil raw -types %t.3.pdb | FileCheck -check-prefix=TPI-TYPES %s
-; RUN: llvm-pdbutil raw -ids %t.3.pdb | FileCheck -check-prefix=IPI-TYPES %s
+; RUN: llvm-pdbutil dump -types %t.3.pdb | FileCheck -check-prefix=TPI-TYPES %s
+; RUN: llvm-pdbutil dump -ids %t.3.pdb | FileCheck -check-prefix=IPI-TYPES %s
 
 TPI-TYPES:                          Types (TPI Stream)
 TPI-TYPES-NEXT: ============================================================
@@ -14,8 +14,7 @@ TPI-TYPES-NEXT:            - LF_MEMBER [name = `FooMember`, Type = 0x0403 (void*
 TPI-TYPES-NEXT:   0x1002 | LF_ARGLIST [size = 16]
 TPI-TYPES-NEXT:            0x0074 (int): `int`
 TPI-TYPES-NEXT:            0x1000: `char**`
-TPI-TYPES-NEXT:   0x1003 | LF_STRUCTURE [size = 36]
-TPI-TYPES-NEXT:            class name: `FooBar`
+TPI-TYPES-NEXT:   0x1003 | LF_STRUCTURE [size = 36] `FooBar`
 TPI-TYPES-NEXT:            unique name: `FooBar`
 TPI-TYPES-NEXT:            vtable: <no type>, base list: <no type>, field list: 0x1001
 TPI-TYPES-NEXT:            options: has unique name
@@ -24,7 +23,7 @@ TPI-TYPES-NEXT:            referent = 0x1003, mode = pointer, opts = None, kind 
 TPI-TYPES-NEXT:   0x1005 | LF_ARGLIST [size = 12]
 TPI-TYPES-NEXT:            0x0074 (int): `int`
 TPI-TYPES-NEXT:   0x1006 | LF_MFUNCTION [size = 28]
-TPI-TYPES-NEXT:            return type = 1, # args = 0x1005, param list = 0x0003 (void)
+TPI-TYPES-NEXT:            return type = 0x0003 (void), # args = 1, param list = 0x1005
 TPI-TYPES-NEXT:            class type = 0x1003, this type = 0x1004, this adjust = 0
 TPI-TYPES-NEXT:            calling conv = thiscall, options = constructor
 TPI-TYPES-NEXT:   0x1007 | LF_PROCEDURE [size = 16]

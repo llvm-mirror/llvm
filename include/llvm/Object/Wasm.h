@@ -61,7 +61,7 @@ public:
 
   void print(raw_ostream &Out) const {
     Out << "Name=" << Name << ", Type=" << static_cast<int>(Type)
-        << ", Flags=" << Flags;
+        << ", Flags=" << Flags << " ElemIndex=" << ElementIndex;
   }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
@@ -69,8 +69,7 @@ public:
 #endif
 };
 
-class WasmSection {
-public:
+struct WasmSection {
   WasmSection() = default;
 
   uint32_t Type = 0; // Section type (See below)
@@ -78,6 +77,11 @@ public:
   StringRef Name; // Section name (User-defined sections only)
   ArrayRef<uint8_t> Content; // Section content
   std::vector<wasm::WasmRelocation> Relocations; // Relocations for this section
+};
+
+struct WasmSegment {
+  uint32_t SectionOffset;
+  wasm::WasmDataSegment Data;
 };
 
 class WasmObjectFile : public ObjectFile {
@@ -100,6 +104,7 @@ public:
   const std::vector<wasm::WasmLimits>& memories() const { return Memories; }
   const std::vector<wasm::WasmGlobal>& globals() const { return Globals; }
   const std::vector<wasm::WasmExport>& exports() const { return Exports; }
+  const wasm::WasmLinkingData& linkingData() const { return LinkingData; }
 
   uint32_t getNumberOfSymbols() const {
     return Symbols.size();
@@ -109,7 +114,7 @@ public:
     return ElemSegments;
   }
 
-  const std::vector<wasm::WasmDataSegment>& dataSegments() const {
+  const std::vector<WasmSegment>& dataSegments() const {
     return DataSegments;
   }
 
@@ -209,11 +214,13 @@ private:
   std::vector<wasm::WasmImport> Imports;
   std::vector<wasm::WasmExport> Exports;
   std::vector<wasm::WasmElemSegment> ElemSegments;
-  std::vector<wasm::WasmDataSegment> DataSegments;
+  std::vector<WasmSegment> DataSegments;
   std::vector<wasm::WasmFunction> Functions;
   std::vector<WasmSymbol> Symbols;
   ArrayRef<uint8_t> CodeSection;
   uint32_t StartFunction = -1;
+  bool HasLinkingSection = false;
+  wasm::WasmLinkingData LinkingData;
 
   StringMap<uint32_t> SymbolMap;
 };

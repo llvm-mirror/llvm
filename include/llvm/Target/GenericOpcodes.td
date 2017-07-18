@@ -49,6 +49,12 @@ def G_TRUNC : Instruction {
   let hasSideEffects = 0;
 }
 
+def G_IMPLICIT_DEF : Instruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins);
+  let hasSideEffects = 0;
+}
+
 def G_FRAME_INDEX : Instruction {
   let OutOperandList = (outs type0:$dst);
   let InOperandList = (ins unknown:$src2);
@@ -416,6 +422,34 @@ def G_FPOW : Instruction {
   let hasSideEffects = 0;
 }
 
+// Floating point base-e exponential of a value.
+def G_FEXP : Instruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins type0:$src1);
+  let hasSideEffects = 0;
+}
+
+// Floating point base-2 exponential of a value.
+def G_FEXP2 : Instruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins type0:$src1);
+  let hasSideEffects = 0;
+}
+
+// Floating point base-2 logarithm of a value.
+def G_FLOG : Instruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins type0:$src1);
+  let hasSideEffects = 0;
+}
+
+// Floating point base-2 logarithm of a value.
+def G_FLOG2 : Instruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins type0:$src1);
+  let hasSideEffects = 0;
+}
+
 //------------------------------------------------------------------------------
 // Memory ops
 //------------------------------------------------------------------------------
@@ -462,15 +496,6 @@ def G_UNMERGE_VALUES : Instruction {
 def G_INSERT : Instruction {
   let OutOperandList = (outs type0:$dst);
   let InOperandList = (ins type0:$src, type1:$op, unknown:$offset);
-  let hasSideEffects = 0;
-}
-
-// Combine a sequence of generic vregs into a single larger value (starting at
-// bit 0). Essentially a G_INSERT where $src is an IMPLICIT_DEF, but it's so
-// important to legalization it probably deserves its own instruction.
-def G_SEQUENCE : Instruction {
-  let OutOperandList = (outs type0:$dst);
-  let InOperandList = (ins variable_ops);
   let hasSideEffects = 0;
 }
 

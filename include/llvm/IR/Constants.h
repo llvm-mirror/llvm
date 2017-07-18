@@ -680,11 +680,6 @@ class ConstantDataArray final : public ConstantDataSequential {
   explicit ConstantDataArray(Type *ty, const char *Data)
       : ConstantDataSequential(ty, ConstantDataArrayVal, Data) {}
 
-  /// Allocate space for exactly zero operands.
-  void *operator new(size_t s) {
-    return User::operator new(s, 0);
-  }
-
 public:
   ConstantDataArray(const ConstantDataArray &) = delete;
 
@@ -738,11 +733,6 @@ class ConstantDataVector final : public ConstantDataSequential {
 
   explicit ConstantDataVector(Type *ty, const char *Data)
       : ConstantDataSequential(ty, ConstantDataVectorVal, Data) {}
-
-  // allocate space for exactly zero operands.
-  void *operator new(size_t s) {
-    return User::operator new(s, 0);
-  }
 
 public:
   ConstantDataVector(const ConstantDataVector &) = delete;
@@ -842,7 +832,7 @@ public:
   BasicBlock *getBasicBlock() const { return (BasicBlock*)Op<1>().get(); }
 
   /// Methods for support type inquiry through isa, cast, and dyn_cast:
-  static inline bool classof(const Value *V) {
+  static bool classof(const Value *V) {
     return V->getValueID() == BlockAddressVal;
   }
 };
@@ -1217,7 +1207,7 @@ public:
   Instruction *getAsInstruction();
 
   /// Methods for support type inquiry through isa, cast, and dyn_cast:
-  static inline bool classof(const Value *V) {
+  static bool classof(const Value *V) {
     return V->getValueID() == ConstantExprVal;
   }
 

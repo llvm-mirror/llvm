@@ -231,6 +231,24 @@ void AMDGPUInstPrinter::printExpVM(const MCInst *MI, unsigned OpNo,
     O << " vm";
 }
 
+void AMDGPUInstPrinter::printDFMT(const MCInst *MI, unsigned OpNo,
+                                  const MCSubtargetInfo &STI,
+                                  raw_ostream &O) {
+  if (MI->getOperand(OpNo).getImm()) {
+    O << " dfmt:";
+    printU8ImmDecOperand(MI, OpNo, O);
+  }
+}
+
+void AMDGPUInstPrinter::printNFMT(const MCInst *MI, unsigned OpNo,
+                                  const MCSubtargetInfo &STI,
+                                  raw_ostream &O) {
+  if (MI->getOperand(OpNo).getImm()) {
+    O << " nfmt:";
+    printU8ImmDecOperand(MI, OpNo, O);
+  }
+}
+
 void AMDGPUInstPrinter::printRegOperand(unsigned RegNo, raw_ostream &O,
                                         const MCRegisterInfo &MRI) {
   switch (RegNo) {
@@ -394,7 +412,6 @@ void AMDGPUInstPrinter::printImmediateV216(uint32_t Imm,
                                            const MCSubtargetInfo &STI,
                                            raw_ostream &O) {
   uint16_t Lo16 = static_cast<uint16_t>(Imm);
-  assert(Lo16 == static_cast<uint16_t>(Imm >> 16));
   printImmediate16(Lo16, STI, O);
 }
 

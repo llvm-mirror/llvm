@@ -16,6 +16,8 @@ declare %ov.result.32 @llvm.umul.with.overflow.i32(i32, i32) nounwind readnone
 declare double @llvm.powi.f64(double, i32) nounwind readonly
 declare i32 @llvm.cttz.i32(i32, i1) nounwind readnone
 declare i32 @llvm.ctlz.i32(i32, i1) nounwind readnone
+declare i1 @llvm.cttz.i1(i1, i1) nounwind readnone
+declare i1 @llvm.ctlz.i1(i1, i1) nounwind readnone
 declare i32 @llvm.ctpop.i32(i32) nounwind readnone
 declare <2 x i32> @llvm.cttz.v2i32(<2 x i32>, i1) nounwind readnone
 declare <2 x i32> @llvm.ctlz.v2i32(<2 x i32>, i1) nounwind readnone
@@ -293,6 +295,16 @@ define <2 x i32> @cttz_vec(<2 x i32> %a) {
   ret <2 x i32> %count
 }
 
+; Make sure we don't add range metadata to i1 cttz.
+define i1 @cttz_i1(i1 %arg) {
+; CHECK-LABEL: @cttz_i1(
+; CHECK-NEXT:    [[CNT:%.*]] = call i1 @llvm.cttz.i1(i1 [[ARG:%.*]], i1 false) #2
+; CHECK-NEXT:    ret i1 [[CNT]]
+;
+  %cnt = call i1 @llvm.cttz.i1(i1 %arg, i1 false) nounwind readnone
+  ret i1 %cnt
+}
+
 define i1 @cttz_knownbits(i32 %arg) {
 ; CHECK-LABEL: @cttz_knownbits(
 ; CHECK-NEXT:    ret i1 false
@@ -316,7 +328,7 @@ define <2 x i1> @cttz_knownbits_vec(<2 x i32> %arg) {
 define i1 @cttz_knownbits2(i32 %arg) {
 ; CHECK-LABEL: @cttz_knownbits2(
 ; CHECK-NEXT:    [[OR:%.*]] = or i32 [[ARG:%.*]], 4
-; CHECK-NEXT:    [[CNT:%.*]] = call i32 @llvm.cttz.i32(i32 [[OR]], i1 true)
+; CHECK-NEXT:    [[CNT:%.*]] = call i32 @llvm.cttz.i32(i32 [[OR]], i1 true) #2, !range ![[CTTZ_RANGE:[0-9]+]]
 ; CHECK-NEXT:    [[RES:%.*]] = icmp eq i32 [[CNT]], 2
 ; CHECK-NEXT:    ret i1 [[RES]]
 ;
@@ -339,13 +351,9 @@ define <2 x i1> @cttz_knownbits2_vec(<2 x i32> %arg) {
   ret <2 x i1> %res
 }
 
-; TODO: The icmp is unnecessary given the known bits of the input.
 define i1 @cttz_knownbits3(i32 %arg) {
 ; CHECK-LABEL: @cttz_knownbits3(
-; CHECK-NEXT:    [[OR:%.*]] = or i32 [[ARG:%.*]], 4
-; CHECK-NEXT:    [[CNT:%.*]] = call i32 @llvm.cttz.i32(i32 [[OR]], i1 true) #2
-; CHECK-NEXT:    [[RES:%.*]] = icmp eq i32 [[CNT]], 3
-; CHECK-NEXT:    ret i1 [[RES]]
+; CHECK-NEXT:    ret i1 false
 ;
   %or = or i32 %arg, 4
   %cnt = call i32 @llvm.cttz.i32(i32 %or, i1 true) nounwind readnone
@@ -387,6 +395,16 @@ define <2 x i8> @ctlz_vec(<2 x i8> %a) {
   ret <2 x i8> %count
 }
 
+; Make sure we don't add range metadata to i1 ctlz.
+define i1 @ctlz_i1(i1 %arg) {
+; CHECK-LABEL: @ctlz_i1(
+; CHECK-NEXT:    [[CNT:%.*]] = call i1 @llvm.ctlz.i1(i1 [[ARG:%.*]], i1 false) #2
+; CHECK-NEXT:    ret i1 [[CNT]]
+;
+  %cnt = call i1 @llvm.ctlz.i1(i1 %arg, i1 false) nounwind readnone
+  ret i1 %cnt
+}
+
 define i1 @ctlz_knownbits(i8 %arg) {
 ; CHECK-LABEL: @ctlz_knownbits(
 ; CHECK-NEXT:    ret i1 false
@@ -410,7 +428,7 @@ define <2 x i1> @ctlz_knownbits_vec(<2 x i8> %arg) {
 define i1 @ctlz_knownbits2(i8 %arg) {
 ; CHECK-LABEL: @ctlz_knownbits2(
 ; CHECK-NEXT:    [[OR:%.*]] = or i8 [[ARG:%.*]], 32
-; CHECK-NEXT:    [[CNT:%.*]] = call i8 @llvm.ctlz.i8(i8 [[OR]], i1 true)
+; CHECK-NEXT:    [[CNT:%.*]] = call i8 @llvm.ctlz.i8(i8 [[OR]], i1 true) #2, !range ![[CTLZ_RANGE:[0-9]+]]
 ; CHECK-NEXT:    [[RES:%.*]] = icmp eq i8 [[CNT]], 2
 ; CHECK-NEXT:    ret i1 [[RES]]
 ;
@@ -433,13 +451,9 @@ define <2 x i1> @ctlz_knownbits2_vec(<2 x i8> %arg) {
   ret <2 x i1> %res
 }
 
-; TODO: The icmp is unnecessary given the known bits of the input.
 define i1 @ctlz_knownbits3(i8 %arg) {
 ; CHECK-LABEL: @ctlz_knownbits3(
-; CHECK-NEXT:    [[OR:%.*]] = or i8 [[ARG:%.*]], 32
-; CHECK-NEXT:    [[CNT:%.*]] = call i8 @llvm.ctlz.i8(i8 [[OR]], i1 true) #2
-; CHECK-NEXT:    [[RES:%.*]] = icmp eq i8 [[CNT]], 3
-; CHECK-NEXT:    ret i1 [[RES]]
+; CHECK-NEXT:    ret i1 false
 ;
   %or = or i8 %arg, 32
   %cnt = call i8 @llvm.ctlz.i8(i8 %or, i1 true) nounwind readnone
@@ -459,66 +473,6 @@ define <2 x i1> @ctlz_knownbits3_vec(<2 x i8> %arg) {
   %cnt = call <2 x i8> @llvm.ctlz.v2i8(<2 x i8> %or, i1 true) nounwind readnone
   %res = icmp eq <2 x i8> %cnt, <i8 3, i8 3>
   ret <2 x i1> %res
-}
-
-define void @cmp.simplify(i32 %a, i32 %b, i1* %c) {
-  %lz = tail call i32 @llvm.ctlz.i32(i32 %a, i1 false) nounwind readnone
-  %lz.cmp = icmp eq i32 %lz, 32
-  store volatile i1 %lz.cmp, i1* %c
-  %tz = tail call i32 @llvm.cttz.i32(i32 %a, i1 false) nounwind readnone
-  %tz.cmp = icmp ne i32 %tz, 32
-  store volatile i1 %tz.cmp, i1* %c
-  %pop0 = tail call i32 @llvm.ctpop.i32(i32 %b) nounwind readnone
-  %pop0.cmp = icmp eq i32 %pop0, 0
-  store volatile i1 %pop0.cmp, i1* %c
-  %pop1 = tail call i32 @llvm.ctpop.i32(i32 %b) nounwind readnone
-  %pop1.cmp = icmp eq i32 %pop1, 32
-  store volatile i1 %pop1.cmp, i1* %c
-  ret void
-; CHECK: @cmp.simplify
-; CHECK-NEXT: %lz.cmp = icmp eq i32 %a, 0
-; CHECK-NEXT: store volatile i1 %lz.cmp, i1* %c
-; CHECK-NEXT: %tz.cmp = icmp ne i32 %a, 0
-; CHECK-NEXT: store volatile i1 %tz.cmp, i1* %c
-; CHECK-NEXT: %pop0.cmp = icmp eq i32 %b, 0
-; CHECK-NEXT: store volatile i1 %pop0.cmp, i1* %c
-; CHECK-NEXT: %pop1.cmp = icmp eq i32 %b, -1
-; CHECK-NEXT: store volatile i1 %pop1.cmp, i1* %c
-}
-
-define <2 x i1> @ctlz_cmp_vec(<2 x i32> %a) {
-; CHECK-LABEL: @ctlz_cmp_vec(
-; CHECK-NEXT:    [[CMP:%.*]] = icmp eq <2 x i32> %a, zeroinitializer
-; CHECK-NEXT:    ret <2 x i1> [[CMP]]
-;
-  %x = tail call <2 x i32> @llvm.ctlz.v2i32(<2 x i32> %a, i1 false) nounwind readnone
-  %cmp = icmp eq <2 x i32> %x, <i32 32, i32 32>
-  ret <2 x i1> %cmp
-}
-
-define <2 x i1> @cttz_cmp_vec(<2 x i32> %a) {
-; CHECK-LABEL: @cttz_cmp_vec(
-; CHECK-NEXT:    [[CMP:%.*]] = icmp ne <2 x i32> %a, zeroinitializer
-; CHECK-NEXT:    ret <2 x i1> [[CMP]]
-;
-  %x = tail call <2 x i32> @llvm.cttz.v2i32(<2 x i32> %a, i1 false) nounwind readnone
-  %cmp = icmp ne <2 x i32> %x, <i32 32, i32 32>
-  ret <2 x i1> %cmp
-}
-
-define void @ctpop_cmp_vec(<2 x i32> %a, <2 x i1>* %b) {
-  %pop0 = tail call <2 x i32> @llvm.ctpop.v2i32(<2 x i32> %a) nounwind readnone
-  %pop0.cmp = icmp eq <2 x i32> %pop0, zeroinitializer
-  store volatile <2 x i1> %pop0.cmp, <2 x i1>* %b
-  %pop1 = tail call <2 x i32> @llvm.ctpop.v2i32(<2 x i32> %a) nounwind readnone
-  %pop1.cmp = icmp eq <2 x i32> %pop1, < i32 32, i32 32 >
-  store volatile <2 x i1> %pop1.cmp, <2 x i1>* %b
-  ret void
-; CHECK-LABEL: @ctpop_cmp_vec(
-; CHECK-NEXT: %pop0.cmp = icmp eq <2 x i32> %a, zeroinitializer
-; CHECK-NEXT: store volatile <2 x i1> %pop0.cmp, <2 x i1>* %b
-; CHECK-NEXT: %pop1.cmp = icmp eq <2 x i32> %a, <i32 -1, i32 -1>
-; CHECK-NEXT: store volatile <2 x i1> %pop1.cmp, <2 x i1>* %b
 }
 
 define i32 @ctlz_undef(i32 %Value) {
@@ -790,3 +744,6 @@ define void @nearbyint(double *%P) {
   store volatile double %C, double* %P
   ret void
 }
+
+; CHECK: [[CTTZ_RANGE]] = !{i32 0, i32 3}
+; CHECK: [[CTLZ_RANGE]] = !{i8 0, i8 3}

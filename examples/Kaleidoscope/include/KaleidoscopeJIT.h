@@ -39,12 +39,13 @@ namespace orc {
 
 class KaleidoscopeJIT {
 public:
-  using ObjLayerT = RTDyldObjectLinkingLayer<>;
-  using CompileLayerT = IRCompileLayer<ObjLayerT>;
-  using ModuleHandleT = CompileLayerT::ModuleSetHandleT;
+  using ObjLayerT = RTDyldObjectLinkingLayer;
+  using CompileLayerT = IRCompileLayer<ObjLayerT, SimpleCompiler>;
+  using ModuleHandleT = CompileLayerT::ModuleHandleT;
 
   KaleidoscopeJIT()
       : TM(EngineBuilder().selectTarget()), DL(TM->createDataLayout()),
+        ObjectLayer([]() { return std::make_shared<SectionMemoryManager>(); }),
         CompileLayer(ObjectLayer, SimpleCompiler(*TM)) {
     llvm::sys::DynamicLibrary::LoadLibraryPermanently(nullptr);
   }
@@ -62,9 +63,8 @@ public:
           return JITSymbol(nullptr);
         },
         [](const std::string &S) { return nullptr; });
-    auto H = CompileLayer.addModuleSet(singletonSet(std::move(M)),
-                                       make_unique<SectionMemoryManager>(),
-                                       std::move(Resolver));
+    auto H = cantFail(CompileLayer.addModule(std::move(M),
+                                             std::move(Resolver)));
 
     ModuleHandles.push_back(H);
     return H;
@@ -72,7 +72,7 @@ public:
 
   void removeModule(ModuleHandleT H) {
     ModuleHandles.erase(find(ModuleHandles, H));
-    CompileLayer.removeModuleSet(H);
+    cantFail(CompileLayer.removeModule(H));
   }
 
   JITSymbol findSymbol(const std::string Name) {
@@ -87,12 +87,6 @@ private:
       Mangler::getNameWithPrefix(MangledNameStream, Name, DL);
     }
     return MangledName;
-  }
-
-  template <typename T> static std::vector<T> singletonSet(T t) {
-    std::vector<T> Vec;
-    Vec.push_back(std::move(t));
-    return Vec;
   }
 
   JITSymbol findMangledSymbol(const std::string &Name) {
@@ -121,7 +115,7 @@ private:
       return JITSymbol(SymAddr, JITSymbolFlags::Exported);
 
 #ifdef LLVM_ON_WIN32
-    // For Windows retry without "_" at begining, as RTDyldMemoryManager uses
+    // For Windows retry without "_" at beginning, as RTDyldMemoryManager uses
     // GetProcAddress and standard libraries like msvcrt.dll use names
     // with and without "_" (for example "_itoa" but "sin").
     if (Name.length() > 2 && Name[0] == '_')

@@ -1169,7 +1169,8 @@ public:
   LLVMContext::DiagnosticHandlerTy DiagnosticHandler = nullptr;
   void *DiagnosticContext = nullptr;
   bool RespectDiagnosticFilters = false;
-  bool DiagnosticHotnessRequested = false;
+  bool DiagnosticsHotnessRequested = false;
+  uint64_t DiagnosticsHotnessThreshold = 0;
   std::unique_ptr<yaml::Output> DiagnosticsOutputFile;
 
   LLVMContext::YieldCallbackTy YieldCallback = nullptr;
@@ -1295,6 +1296,20 @@ public:
   StringMapEntry<uint32_t> *getOrInsertBundleTag(StringRef Tag);
   void getOperandBundleTags(SmallVectorImpl<StringRef> &Tags) const;
   uint32_t getOperandBundleTagID(StringRef Tag) const;
+
+  /// A set of interned synchronization scopes.  The StringMap maps
+  /// synchronization scope names to their respective synchronization scope IDs.
+  StringMap<SyncScope::ID> SSC;
+
+  /// getOrInsertSyncScopeID - Maps synchronization scope name to
+  /// synchronization scope ID.  Every synchronization scope registered with
+  /// LLVMContext has unique ID except pre-defined ones.
+  SyncScope::ID getOrInsertSyncScopeID(StringRef SSN);
+
+  /// getSyncScopeNames - Populates client supplied SmallVector with
+  /// synchronization scope names registered with LLVMContext.  Synchronization
+  /// scope names are ordered by increasing synchronization scope IDs.
+  void getSyncScopeNames(SmallVectorImpl<StringRef> &SSNs) const;
 
   /// Maintain the GC name for each function.
   ///

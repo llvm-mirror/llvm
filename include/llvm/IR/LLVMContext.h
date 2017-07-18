@@ -42,6 +42,24 @@ class Output;
 
 } // end namespace yaml
 
+namespace SyncScope {
+
+typedef uint8_t ID;
+
+/// Known synchronization scope IDs, which always have the same value.  All
+/// synchronization scope IDs that LLVM has special knowledge of are listed
+/// here.  Additionally, this scheme allows LLVM to efficiently check for
+/// specific synchronization scope ID without comparing strings.
+enum {
+  /// Synchronized with respect to signal handlers executing in the same thread.
+  SingleThread = 0,
+
+  /// Synchronized with respect to all concurrently executing threads.
+  System = 1
+};
+
+} // end namespace SyncScope
+
 /// This is an important class for using LLVM in a threaded context.  It
 /// (opaquely) owns and manages the core "global" data of LLVM's core
 /// infrastructure, including the type and constant uniquing tables.
@@ -110,6 +128,16 @@ public:
   /// getOperandBundleTagID - Maps a bundle tag to an integer ID.  Every bundle
   /// tag registered with an LLVMContext has an unique ID.
   uint32_t getOperandBundleTagID(StringRef Tag) const;
+
+  /// getOrInsertSyncScopeID - Maps synchronization scope name to
+  /// synchronization scope ID.  Every synchronization scope registered with
+  /// LLVMContext has unique ID except pre-defined ones.
+  SyncScope::ID getOrInsertSyncScopeID(StringRef SSN);
+
+  /// getSyncScopeNames - Populates client supplied SmallVector with
+  /// synchronization scope names registered with LLVMContext.  Synchronization
+  /// scope names are ordered by increasing synchronization scope IDs.
+  void getSyncScopeNames(SmallVectorImpl<StringRef> &SSNs) const;
 
   /// Define the GC for a function
   void setGC(const Function &Fn, std::string GCName);
@@ -188,10 +216,19 @@ public:
 
   /// \brief Return if a code hotness metric should be included in optimization
   /// diagnostics.
-  bool getDiagnosticHotnessRequested() const;
+  bool getDiagnosticsHotnessRequested() const;
   /// \brief Set if a code hotness metric should be included in optimization
   /// diagnostics.
-  void setDiagnosticHotnessRequested(bool Requested);
+  void setDiagnosticsHotnessRequested(bool Requested);
+
+  /// \brief Return the minimum hotness value a diagnostic would need in order
+  /// to be included in optimization diagnostics. If there is no minimum, this
+  /// returns None.
+  uint64_t getDiagnosticsHotnessThreshold() const;
+
+  /// \brief Set the minimum hotness value a diagnostic needs in order to be
+  /// included in optimization diagnostics.
+  void setDiagnosticsHotnessThreshold(uint64_t Threshold);
 
   /// \brief Return the YAML file used by the backend to save optimization
   /// diagnostics.  If null, diagnostics are not saved in a file but only

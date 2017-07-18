@@ -19,12 +19,14 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/ADT/Twine.h"
+#include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/GlobalVariable.h"
@@ -40,7 +42,10 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Transforms/Utils/BasicBlockUtils.h"
+#include "llvm/Transforms/Utils/LoopSimplify.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
+#include "llvm/Transforms/Utils/SSAUpdater.h"
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
@@ -92,6 +97,46 @@ cl::opt<double> NumCountersPerValueSite(
     // is usually smaller than 2.
     cl::init(1.0));
 
+cl::opt<bool> AtomicCounterUpdatePromoted(
+    "atomic-counter-update-promoted", cl::ZeroOrMore,
+    cl::desc("Do counter update using atomic fetch add "
+             " for promoted counters only"),
+    cl::init(false));
+
+// If the option is not specified, the default behavior about whether
+// counter promotion is done depends on how instrumentaiton lowering
+// pipeline is setup, i.e., the default value of true of this option
+// does not mean the promotion will be done by default. Explicitly
+// setting this option can override the default behavior.
+cl::opt<bool> DoCounterPromotion("do-counter-promotion", cl::ZeroOrMore,
+                                 cl::desc("Do counter register promotion"),
+                                 cl::init(false));
+cl::opt<unsigned> MaxNumOfPromotionsPerLoop(
+    cl::ZeroOrMore, "max-counter-promotions-per-loop", cl::init(20),
+    cl::desc("Max number counter promotions per loop to avoid"
+             " increasing register pressure too much"));
+
+// A debug option
+cl::opt<int>
+    MaxNumOfPromotions(cl::ZeroOrMore, "max-counter-promotions", cl::init(-1),
+                       cl::desc("Max number of allowed counter promotions"));
+
+cl::opt<unsigned> SpeculativeCounterPromotionMaxExiting(
+    cl::ZeroOrMore, "speculative-counter-promotion-max-exiting", cl::init(3),
+    cl::desc("The max number of exiting blocks of a loop to allow "
+             " speculative counter promotion"));
+
+cl::opt<bool> SpeculativeCounterPromotionToLoop(
+    cl::ZeroOrMore, "speculative-counter-promotion-to-loop", cl::init(false),
+    cl::desc("When the option is false, if the target block is in a loop, "
+             "the promotion will be disallowed unless the promoted counter "
+             " update can be further/iteratively promoted into an acyclic "
+             " region."));
+
+cl::opt<bool> IterativeCounterPromotion(
+    cl::ZeroOrMore, "iterative-counter-promotion", cl::init(true),
+    cl::desc("Allow counter promotion across the whole loop nest."));
+
 class InstrProfilingLegacyPass : public ModulePass {
   InstrProfiling InstrProf;
 
@@ -114,6 +159,183 @@ public:
     AU.setPreservesCFG();
     AU.addRequired<TargetLibraryInfoWrapperPass>();
   }
+};
+
+///
+/// A helper class to promote one counter RMW operation in the loop
+/// into register update.
+///
+/// RWM update for the counter will be sinked out of the loop after
+/// the transformation.
+///
+class PGOCounterPromoterHelper : public LoadAndStorePromoter {
+public:
+  PGOCounterPromoterHelper(
+      Instruction *L, Instruction *S, SSAUpdater &SSA, Value *Init,
+      BasicBlock *PH, ArrayRef<BasicBlock *> ExitBlocks,
+      ArrayRef<Instruction *> InsertPts,
+      DenseMap<Loop *, SmallVector<LoadStorePair, 8>> &LoopToCands,
+      LoopInfo &LI)
+      : LoadAndStorePromoter({L, S}, SSA), Store(S), ExitBlocks(ExitBlocks),
+        InsertPts(InsertPts), LoopToCandidates(LoopToCands), LI(LI) {
+    assert(isa<LoadInst>(L));
+    assert(isa<StoreInst>(S));
+    SSA.AddAvailableValue(PH, Init);
+  }
+
+  void doExtraRewritesBeforeFinalDeletion() const override {
+    for (unsigned i = 0, e = ExitBlocks.size(); i != e; ++i) {
+      BasicBlock *ExitBlock = ExitBlocks[i];
+      Instruction *InsertPos = InsertPts[i];
+      // Get LiveIn value into the ExitBlock. If there are multiple
+      // predecessors, the value is defined by a PHI node in this
+      // block.
+      Value *LiveInValue = SSA.GetValueInMiddleOfBlock(ExitBlock);
+      Value *Addr = cast<StoreInst>(Store)->getPointerOperand();
+      IRBuilder<> Builder(InsertPos);
+      if (AtomicCounterUpdatePromoted)
+        // automic update currently can only be promoted across the current
+        // loop, not the whole loop nest.
+        Builder.CreateAtomicRMW(AtomicRMWInst::Add, Addr, LiveInValue,
+                                AtomicOrdering::SequentiallyConsistent);
+      else {
+        LoadInst *OldVal = Builder.CreateLoad(Addr, "pgocount.promoted");
+        auto *NewVal = Builder.CreateAdd(OldVal, LiveInValue);
+        auto *NewStore = Builder.CreateStore(NewVal, Addr);
+
+        // Now update the parent loop's candidate list:
+        if (IterativeCounterPromotion) {
+          auto *TargetLoop = LI.getLoopFor(ExitBlock);
+          if (TargetLoop)
+            LoopToCandidates[TargetLoop].emplace_back(OldVal, NewStore);
+        }
+      }
+    }
+  }
+
+private:
+  Instruction *Store;
+  ArrayRef<BasicBlock *> ExitBlocks;
+  ArrayRef<Instruction *> InsertPts;
+  DenseMap<Loop *, SmallVector<LoadStorePair, 8>> &LoopToCandidates;
+  LoopInfo &LI;
+};
+
+/// A helper class to do register promotion for all profile counter
+/// updates in a loop.
+///
+class PGOCounterPromoter {
+public:
+  PGOCounterPromoter(
+      DenseMap<Loop *, SmallVector<LoadStorePair, 8>> &LoopToCands,
+      Loop &CurLoop, LoopInfo &LI)
+      : LoopToCandidates(LoopToCands), ExitBlocks(), InsertPts(), L(CurLoop),
+        LI(LI) {
+
+    SmallVector<BasicBlock *, 8> LoopExitBlocks;
+    SmallPtrSet<BasicBlock *, 8> BlockSet;
+    L.getExitBlocks(LoopExitBlocks);
+
+    for (BasicBlock *ExitBlock : LoopExitBlocks) {
+      if (BlockSet.insert(ExitBlock).second) {
+        ExitBlocks.push_back(ExitBlock);
+        InsertPts.push_back(&*ExitBlock->getFirstInsertionPt());
+      }
+    }
+  }
+
+  bool run(int64_t *NumPromoted) {
+    unsigned MaxProm = getMaxNumOfPromotionsInLoop(&L);
+    if (MaxProm == 0)
+      return false;
+
+    unsigned Promoted = 0;
+    for (auto &Cand : LoopToCandidates[&L]) {
+
+      SmallVector<PHINode *, 4> NewPHIs;
+      SSAUpdater SSA(&NewPHIs);
+      Value *InitVal = ConstantInt::get(Cand.first->getType(), 0);
+
+      PGOCounterPromoterHelper Promoter(Cand.first, Cand.second, SSA, InitVal,
+                                        L.getLoopPreheader(), ExitBlocks,
+                                        InsertPts, LoopToCandidates, LI);
+      Promoter.run(SmallVector<Instruction *, 2>({Cand.first, Cand.second}));
+      Promoted++;
+      if (Promoted >= MaxProm)
+        break;
+
+      (*NumPromoted)++;
+      if (MaxNumOfPromotions != -1 && *NumPromoted >= MaxNumOfPromotions)
+        break;
+    }
+
+    DEBUG(dbgs() << Promoted << " counters promoted for loop (depth="
+                 << L.getLoopDepth() << ")\n");
+    return Promoted != 0;
+  }
+
+private:
+  bool allowSpeculativeCounterPromotion(Loop *LP) {
+    SmallVector<BasicBlock *, 8> ExitingBlocks;
+    L.getExitingBlocks(ExitingBlocks);
+    // Not considierered speculative.
+    if (ExitingBlocks.size() == 1)
+      return true;
+    if (ExitingBlocks.size() > SpeculativeCounterPromotionMaxExiting)
+      return false;
+    return true;
+  }
+
+  // Returns the max number of Counter Promotions for LP.
+  unsigned getMaxNumOfPromotionsInLoop(Loop *LP) {
+    // We can't insert into a catchswitch.
+    SmallVector<BasicBlock *, 8> LoopExitBlocks;
+    LP->getExitBlocks(LoopExitBlocks);
+    if (llvm::any_of(LoopExitBlocks, [](BasicBlock *Exit) {
+          return isa<CatchSwitchInst>(Exit->getTerminator());
+        }))
+      return 0;
+
+    if (!LP->hasDedicatedExits())
+      return 0;
+
+    BasicBlock *PH = LP->getLoopPreheader();
+    if (!PH)
+      return 0;
+
+    SmallVector<BasicBlock *, 8> ExitingBlocks;
+    LP->getExitingBlocks(ExitingBlocks);
+    // Not considierered speculative.
+    if (ExitingBlocks.size() == 1)
+      return MaxNumOfPromotionsPerLoop;
+
+    if (ExitingBlocks.size() > SpeculativeCounterPromotionMaxExiting)
+      return 0;
+
+    // Whether the target block is in a loop does not matter:
+    if (SpeculativeCounterPromotionToLoop)
+      return MaxNumOfPromotionsPerLoop;
+
+    // Now check the target block:
+    unsigned MaxProm = MaxNumOfPromotionsPerLoop;
+    for (auto *TargetBlock : LoopExitBlocks) {
+      auto *TargetLoop = LI.getLoopFor(TargetBlock);
+      if (!TargetLoop)
+        continue;
+      unsigned MaxPromForTarget = getMaxNumOfPromotionsInLoop(TargetLoop);
+      unsigned PendingCandsInTarget = LoopToCandidates[TargetLoop].size();
+      MaxProm =
+          std::min(MaxProm, std::max(MaxPromForTarget, PendingCandsInTarget) -
+                                PendingCandsInTarget);
+    }
+    return MaxProm;
+  }
+
+  DenseMap<Loop *, SmallVector<LoadStorePair, 8>> &LoopToCandidates;
+  SmallVector<BasicBlock *, 8> ExitBlocks;
+  SmallVector<Instruction *, 8> InsertPts;
+  Loop &L;
+  LoopInfo &LI;
 };
 
 } // end anonymous namespace
@@ -145,6 +367,65 @@ static InstrProfIncrementInst *castToIncrementInst(Instruction *Instr) {
   if (Inc)
     return Inc;
   return dyn_cast<InstrProfIncrementInst>(Instr);
+}
+
+bool InstrProfiling::lowerIntrinsics(Function *F) {
+  bool MadeChange = false;
+  PromotionCandidates.clear();
+  for (BasicBlock &BB : *F) {
+    for (auto I = BB.begin(), E = BB.end(); I != E;) {
+      auto Instr = I++;
+      InstrProfIncrementInst *Inc = castToIncrementInst(&*Instr);
+      if (Inc) {
+        lowerIncrement(Inc);
+        MadeChange = true;
+      } else if (auto *Ind = dyn_cast<InstrProfValueProfileInst>(Instr)) {
+        lowerValueProfileInst(Ind);
+        MadeChange = true;
+      }
+    }
+  }
+
+  if (!MadeChange)
+    return false;
+
+  promoteCounterLoadStores(F);
+  return true;
+}
+
+bool InstrProfiling::isCounterPromotionEnabled() const {
+  if (DoCounterPromotion.getNumOccurrences() > 0)
+    return DoCounterPromotion;
+
+  return Options.DoCounterPromotion;
+}
+
+void InstrProfiling::promoteCounterLoadStores(Function *F) {
+  if (!isCounterPromotionEnabled())
+    return;
+
+  DominatorTree DT(*F);
+  LoopInfo LI(DT);
+  DenseMap<Loop *, SmallVector<LoadStorePair, 8>> LoopPromotionCandidates;
+
+  for (const auto &LoadStore : PromotionCandidates) {
+    auto *CounterLoad = LoadStore.first;
+    auto *CounterStore = LoadStore.second;
+    BasicBlock *BB = CounterLoad->getParent();
+    Loop *ParentLoop = LI.getLoopFor(BB);
+    if (!ParentLoop)
+      continue;
+    LoopPromotionCandidates[ParentLoop].emplace_back(CounterLoad, CounterStore);
+  }
+
+  SmallVector<Loop *, 4> Loops = LI.getLoopsInPreorder();
+
+  // Do a post-order traversal of the loops so that counter updates can be
+  // iteratively hoisted outside the loop nest.
+  for (auto *Loop : llvm::reverse(Loops)) {
+    PGOCounterPromoter Promoter(LoopPromotionCandidates, *Loop, LI);
+    Promoter.run(&TotalCountersPromoted);
+  }
 }
 
 bool InstrProfiling::run(Module &M, const TargetLibraryInfo &TLI) {
@@ -179,18 +460,7 @@ bool InstrProfiling::run(Module &M, const TargetLibraryInfo &TLI) {
   }
 
   for (Function &F : M)
-    for (BasicBlock &BB : F)
-      for (auto I = BB.begin(), E = BB.end(); I != E;) {
-        auto Instr = I++;
-        InstrProfIncrementInst *Inc = castToIncrementInst(&*Instr);
-        if (Inc) {
-          lowerIncrement(Inc);
-          MadeChange = true;
-        } else if (auto *Ind = dyn_cast<InstrProfValueProfileInst>(Instr)) {
-          lowerValueProfileInst(Ind);
-          MadeChange = true;
-        }
-      }
+    MadeChange |= lowerIntrinsics(&F);
 
   if (GlobalVariable *CoverageNamesVar =
           M.getNamedGlobal(getCoverageUnusedNamesVarName())) {
@@ -303,9 +573,12 @@ void InstrProfiling::lowerIncrement(InstrProfIncrementInst *Inc) {
   IRBuilder<> Builder(Inc);
   uint64_t Index = Inc->getIndex()->getZExtValue();
   Value *Addr = Builder.CreateConstInBoundsGEP2_64(Counters, 0, Index);
-  Value *Count = Builder.CreateLoad(Addr, "pgocount");
-  Count = Builder.CreateAdd(Count, Inc->getStep());
-  Inc->replaceAllUsesWith(Builder.CreateStore(Count, Addr));
+  Value *Load = Builder.CreateLoad(Addr, "pgocount");
+  auto *Count = Builder.CreateAdd(Load, Inc->getStep());
+  auto *Store = Builder.CreateStore(Count, Addr);
+  Inc->replaceAllUsesWith(Store);
+  if (isCounterPromotionEnabled())
+    PromotionCandidates.emplace_back(cast<Instruction>(Load), Store);
   Inc->eraseFromParent();
 }
 

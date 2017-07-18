@@ -63,7 +63,7 @@
 
 using namespace llvm;
 
-#define DEBUG_TYPE "misched"
+#define DEBUG_TYPE "machine-scheduler"
 
 static cl::opt<bool> EnableAASchedMI("enable-aa-sched-mi", cl::Hidden,
     cl::ZeroOrMore, cl::init(false),
@@ -1089,7 +1089,7 @@ static void toggleKills(const MachineRegisterInfo &MRI, LivePhysRegs &LiveRegs,
     // Things that are available after the instruction are killed by it.
     bool IsKill = LiveRegs.available(MRI, Reg);
     MO.setIsKill(IsKill);
-    if (IsKill && addToLiveRegs)
+    if (addToLiveRegs)
       LiveRegs.addReg(Reg);
   }
 }

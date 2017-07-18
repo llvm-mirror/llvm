@@ -979,6 +979,11 @@ bool RegisterCoalescer::removePartialRedundancy(const CoalescerPair &CP,
     IntB.createDeadDef(NewCopyIdx, LIS->getVNInfoAllocator());
     for (LiveInterval::SubRange &SR : IntB.subranges())
       SR.createDeadDef(NewCopyIdx, LIS->getVNInfoAllocator());
+
+    // If the newly created Instruction has an address of an instruction that was
+    // deleted before (object recycled by the allocator) it needs to be removed from
+    // the deleted list.
+    ErasedInstrs.erase(NewCopyMI);
   } else {
     DEBUG(dbgs() << "\tremovePartialRedundancy: Remove the copy from BB#"
                  << MBB.getNumber() << '\t' << CopyMI);
@@ -989,6 +994,8 @@ bool RegisterCoalescer::removePartialRedundancy(const CoalescerPair &CP,
   // While updating the live-ranges, we only look at slot indices and
   // never go back to the instruction.
   LIS->RemoveMachineInstrFromMaps(CopyMI);
+  // Mark instructions as deleted.
+  ErasedInstrs.insert(&CopyMI);
   CopyMI.eraseFromParent();
 
   // Update the liveness.
@@ -1219,6 +1226,34 @@ bool RegisterCoalescer::reMaterializeTrivialDef(const CoalescerPair &CP,
         LiveInterval::SubRange *SR = DstInt.createSubRange(Alloc, MaxMask);
         SR->createDeadDef(DefIndex, Alloc);
       }
+    }
+
+    // Make sure that the subrange for resultant undef is removed
+    // For example:
+    //   vreg1:sub1<def,read-undef> = LOAD CONSTANT 1
+    //   vreg2<def> = COPY vreg1
+    // ==>
+    //   vreg2:sub1<def, read-undef> = LOAD CONSTANT 1
+    //     ; Correct but need to remove the subrange for vreg2:sub0
+    //     ; as it is now undef
+    if (NewIdx != 0 && DstInt.hasSubRanges()) {
+      // The affected subregister segments can be removed.
+      SlotIndex CurrIdx = LIS->getInstructionIndex(NewMI);
+      LaneBitmask DstMask = TRI->getSubRegIndexLaneMask(NewIdx);
+      bool UpdatedSubRanges = false;
+      for (LiveInterval::SubRange &SR : DstInt.subranges()) {
+        if ((SR.LaneMask & DstMask).none()) {
+          DEBUG(dbgs() << "Removing undefined SubRange "
+                << PrintLaneMask(SR.LaneMask) << " : " << SR << "\n");
+          // VNI is in ValNo - remove any segments in this SubRange that have this ValNo
+          if (VNInfo *RmValNo = SR.getVNInfoAt(CurrIdx.getRegSlot())) {
+            SR.removeValNo(RmValNo);
+            UpdatedSubRanges = true;
+          }
+        }
+      }
+      if (UpdatedSubRanges)
+        DstInt.removeEmptySubRanges();
     }
   } else if (NewMI.getOperand(0).getReg() != CopyDstReg) {
     // The New instruction may be defining a sub-register of what's actually
@@ -3095,7 +3130,7 @@ copyCoalesceWorkList(MutableArrayRef<MachineInstr*> CurrList) {
       continue;
     // Skip instruction pointers that have already been erased, for example by
     // dead code elimination.
-    if (ErasedInstrs.erase(CurrList[i])) {
+    if (ErasedInstrs.count(CurrList[i])) {
       CurrList[i] = nullptr;
       continue;
     }
