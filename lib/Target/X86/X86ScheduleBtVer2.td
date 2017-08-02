@@ -371,6 +371,22 @@ def : WriteRes<WriteFence,  [JSAGU]>;
 def : WriteRes<WriteNop, []>;
 
 ////////////////////////////////////////////////////////////////////////////////
+// SSE4A instructions.
+////////////////////////////////////////////////////////////////////////////////
+
+def WriteEXTRQ: SchedWriteRes<[JFPU01]> {
+  let Latency = 1;
+  let ResourceCycles = [1];
+}
+def : InstRW<[WriteEXTRQ], (instregex "EXTRQ")>;
+
+def WriteINSERTQ: SchedWriteRes<[JFPU01]> {
+  let Latency = 2;
+  let ResourceCycles = [4];
+}
+def : InstRW<[WriteINSERTQ], (instregex "INSERTQ")>;
+
+////////////////////////////////////////////////////////////////////////////////
 // AVX instructions.
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -446,5 +462,16 @@ def WriteVSQRTYPSLd: SchedWriteRes<[JLAGU, JFPU1]> {
 }
 def : InstRW<[WriteVSQRTYPSLd], (instregex "VSQRTPSYm")>;
 
+def WriteJVZEROALL: SchedWriteRes<[]> {
+  let Latency = 90;
+  let NumMicroOps = 73;
+}
+def : InstRW<[WriteJVZEROALL], (instregex "VZEROALL")>;
+
+def WriteJVZEROUPPER: SchedWriteRes<[]> {
+  let Latency = 46;
+  let NumMicroOps = 37;
+}
+def : InstRW<[WriteJVZEROUPPER], (instregex "VZEROUPPER")>;
 } // SchedModel
 

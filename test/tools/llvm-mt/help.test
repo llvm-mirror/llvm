@@ -1,0 +1,3 @@
+RUN: llvm-mt /h | FileCheck %s -check-prefix=HELP
+
+HELP:      OVERVIEW: Manifest Tool

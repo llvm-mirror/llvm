@@ -15,7 +15,7 @@ foreach (VARNAME ${variables_to_filter})
 endforeach()
 
 # Enable the coverage instrumentation (it is disabled for the Fuzzer lib).
-set(CMAKE_CXX_FLAGS "${LIBFUZZER_FLAGS_BASE} -fsanitize-coverage=trace-pc-guard,indirect-calls,trace-cmp,trace-div,trace-gep -gline-tables-only")
+set(CMAKE_CXX_FLAGS "${LIBFUZZER_FLAGS_BASE} -fsanitize-coverage=trace-pc-guard,indirect-calls,trace-cmp,trace-div,trace-gep,pc-table -gline-tables-only")
 
 if(MSVC)
   # For tests use the CRT specified for release build
@@ -86,10 +86,12 @@ set(Tests
   CustomCrossOverTest
   CustomMutatorTest
   CxxStringEqTest
+  DeepRecursionTest
   DivTest
   EmptyTest
   EquivalenceATest
   EquivalenceBTest
+  FlagsTest
   FourIndependentBranchesTest
   FullCoverageSetTest
   InitializeTest
@@ -157,6 +159,7 @@ function(test_export_symbol target symbol)
   endif()
 endfunction()
 
+test_export_symbol(FlagsTest "LLVMFuzzerInitialize")
 test_export_symbol(InitializeTest "LLVMFuzzerInitialize")
 test_export_symbol(BogusInitializeTest "LLVMFuzzerInitialize")
 test_export_symbol(CustomCrossOverTest "LLVMFuzzerCustomCrossOver")

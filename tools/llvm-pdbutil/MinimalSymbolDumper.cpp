@@ -216,6 +216,7 @@ static std::string formatSourceLanguage(SourceLanguage Lang) {
     RETURN_CASE(SourceLanguage, JScript, "javascript");
     RETURN_CASE(SourceLanguage, MSIL, "msil");
     RETURN_CASE(SourceLanguage, HLSL, "hlsl");
+    RETURN_CASE(SourceLanguage, D, "d");
   }
   return formatUnknownEnum(Lang);
 }
@@ -269,6 +270,7 @@ static std::string formatMachineType(CPUType Cpu) {
     RETURN_CASE(CPUType, ARM_XMAC, "arm xmac");
     RETURN_CASE(CPUType, ARM_WMMX, "arm wmmx");
     RETURN_CASE(CPUType, ARM7, "arm 7");
+    RETURN_CASE(CPUType, ARM64, "arm64");
     RETURN_CASE(CPUType, Omni, "omni");
     RETURN_CASE(CPUType, Ia64, "intel itanium ia64");
     RETURN_CASE(CPUType, Ia64_2, "intel itanium ia64 2");
@@ -725,8 +727,9 @@ Error MinimalSymbolDumper::visitKnownRecord(CVSymbol &CVR, ProcSym &Proc) {
                Proc.Parent, Proc.End,
                formatSegmentOffset(Proc.Segment, Proc.CodeOffset),
                Proc.CodeSize);
-  P.formatLine("debug start = {0}, debug end = {1}, flags = {2}", Proc.DbgStart,
-               Proc.DbgEnd,
+  // FIXME: It seems FunctionType is sometimes an id and sometimes a type.
+  P.formatLine("type = `{0}`, debug start = {1}, debug end = {2}, flags = {3}",
+               typeIndex(Proc.FunctionType), Proc.DbgStart, Proc.DbgEnd,
                formatProcSymFlags(P.getIndentLevel() + 9, Proc.Flags));
   return Error::success();
 }

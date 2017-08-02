@@ -564,7 +564,7 @@ TEST(Corpus, Distribution) {
   size_t N = 10;
   size_t TriesPerUnit = 1<<16;
   for (size_t i = 0; i < N; i++)
-    C->AddToCorpus(Unit{ static_cast<uint8_t>(i) }, 0, false, {});
+    C->AddToCorpus(Unit{ static_cast<uint8_t>(i) }, 1, false, {});
 
   std::vector<size_t> Hist(N);
   for (size_t i = 0; i < N * TriesPerUnit; i++) {
@@ -741,7 +741,9 @@ TEST(Fuzzer, ForEachNonZeroByte) {
   };
   typedef std::vector<std::pair<size_t, uint8_t> > Vec;
   Vec Res, Expected;
-  auto CB = [&](size_t Idx, uint8_t V) { Res.push_back({Idx, V}); };
+  auto CB = [&](size_t FirstFeature, size_t Idx, uint8_t V) {
+    Res.push_back({FirstFeature + Idx, V});
+  };
   ForEachNonZeroByte(Ar, Ar + N, 100, CB);
   Expected = {{108, 1}, {109, 2}, {118, 3}, {120, 4},
               {135, 5}, {137, 6}, {146, 7}, {163, 8}};

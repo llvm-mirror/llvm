@@ -119,6 +119,11 @@ class SIMachineFunctionInfo final : public AMDGPUMachineFunction {
   unsigned WorkGroupInfoSystemSGPR;
   unsigned PrivateSegmentWaveByteOffsetSystemSGPR;
 
+  // VGPR inputs. These are always v0, v1 and v2 for entry functions.
+  unsigned WorkItemIDXVGPR;
+  unsigned WorkItemIDYVGPR;
+  unsigned WorkItemIDZVGPR;
+
   // Graphics info.
   unsigned PSInputAddr;
   unsigned PSInputEnable;
@@ -180,6 +185,10 @@ private:
   // Compute directly in sgpr[0:1]
   // Other shaders indirect 64-bits at sgpr[0:1]
   bool ImplicitBufferPtr : 1;
+
+  // Pointer to where the ABI inserts special kernel arguments separate from the
+  // user arguments. This is an offset from the KernargSegmentPtr.
+  bool ImplicitArgPtr : 1;
 
   MCPhysReg getNextUserSGPR() const {
     assert(NumSystemSGPRs == 0 && "System SGPRs must be added after user SGPRs");
@@ -341,6 +350,10 @@ public:
     return WorkItemIDZ;
   }
 
+  bool hasImplicitArgPtr() const {
+    return ImplicitArgPtr;
+  }
+
   bool hasImplicitBufferPtr() const {
     return ImplicitBufferPtr;
   }
@@ -377,10 +390,13 @@ public:
   }
 
   void setStackPtrOffsetReg(unsigned Reg) {
-    assert(Reg != AMDGPU::NoRegister && "Should never be unset");
     StackPtrOffsetReg = Reg;
   }
 
+  // Note the unset value for this is AMDGPU::SP_REG rather than
+  // NoRegister. This is mostly a workaround for MIR tests where state that
+  // can't be directly computed from the function is not preserved in serialized
+  // MIR.
   unsigned getStackPtrOffsetReg() const {
     return StackPtrOffsetReg;
   }

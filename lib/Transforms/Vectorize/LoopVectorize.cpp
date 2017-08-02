@@ -574,11 +574,9 @@ protected:
   /// Returns (and creates if needed) the trip count of the widened loop.
   Value *getOrCreateVectorTripCount(Loop *NewLoop);
 
-  /// Emit a bypass check to see if the trip count would overflow, or we
-  /// wouldn't have enough iterations to execute one vector loop.
+  /// Emit a bypass check to see if the vector trip count is zero, including if
+  /// it overflows.
   void emitMinimumIterationCountCheck(Loop *L, BasicBlock *Bypass);
-  /// Emit a bypass check to see if the vector trip count is nonzero.
-  void emitVectorLoopEnteredCheck(Loop *L, BasicBlock *Bypass);
   /// Emit a bypass check to see if all of the SCEV assumptions we've
   /// had to make are correct.
   void emitSCEVChecks(Loop *L, BasicBlock *Bypass);
@@ -3047,13 +3045,14 @@ void InnerLoopVectorizer::vectorizeMemoryInstruction(Instruction *Instr) {
               Builder.CreateGEP(nullptr, Ptr, Builder.getInt32(-Part * VF));
           PartPtr =
               Builder.CreateGEP(nullptr, PartPtr, Builder.getInt32(1 - VF));
-          Mask[Part] = reverseVector(Mask[Part]);
+          if (Mask[Part]) // The reverse of a null all-one mask is a null mask.
+            Mask[Part] = reverseVector(Mask[Part]);
         }
 
         Value *VecPtr =
             Builder.CreateBitCast(PartPtr, DataTy->getPointerTo(AddressSpace));
 
-        if (Legal->isMaskRequired(SI))
+        if (Legal->isMaskRequired(SI) && Mask[Part])
           NewSI = Builder.CreateMaskedStore(StoredVal, VecPtr, Alignment,
                                             Mask[Part]);
         else
@@ -3085,12 +3084,13 @@ void InnerLoopVectorizer::vectorizeMemoryInstruction(Instruction *Instr) {
         // wide load needs to start at the last vector element.
         PartPtr = Builder.CreateGEP(nullptr, Ptr, Builder.getInt32(-Part * VF));
         PartPtr = Builder.CreateGEP(nullptr, PartPtr, Builder.getInt32(1 - VF));
-        Mask[Part] = reverseVector(Mask[Part]);
+        if (Mask[Part]) // The reverse of a null all-one mask is a null mask.
+          Mask[Part] = reverseVector(Mask[Part]);
       }
 
       Value *VecPtr =
           Builder.CreateBitCast(PartPtr, DataTy->getPointerTo(AddressSpace));
-      if (Legal->isMaskRequired(LI))
+      if (Legal->isMaskRequired(LI) && Mask[Part])
         NewLI = Builder.CreateMaskedLoad(VecPtr, Alignment, Mask[Part],
                                          UndefValue::get(DataTy),
                                          "wide.masked.load");
@@ -3138,10 +3138,10 @@ void InnerLoopVectorizer::scalarizeInstruction(Instruction *Instr,
       Value *Cmp = nullptr;
       if (IfPredicateInstr) {
         Cmp = Cond[Part];
-        if (Cmp->getType()->isVectorTy())
+        if (!Cmp) // Block in mask is all-one.
+          Cmp = Builder.getTrue();
+        else if (Cmp->getType()->isVectorTy())
           Cmp = Builder.CreateExtractElement(Cmp, Builder.getInt32(Lane));
-        Cmp = Builder.CreateICmp(ICmpInst::ICMP_EQ, Cmp,
-                                 ConstantInt::get(Cmp->getType(), 1));
       }
 
       Instruction *Cloned = Instr->clone();
@@ -3289,37 +3289,16 @@ void InnerLoopVectorizer::emitMinimumIterationCountCheck(Loop *L,
   BasicBlock *BB = L->getLoopPreheader();
   IRBuilder<> Builder(BB->getTerminator());
 
-  // Generate code to check that the loop's trip count that we computed by
-  // adding one to the backedge-taken count will not overflow.
-  Value *CheckMinIters = Builder.CreateICmpULT(
-      Count, ConstantInt::get(Count->getType(), VF * UF), "min.iters.check");
+  // Generate code to check if the loop's trip count is less than VF * UF, or
+  // equal to it in case a scalar epilogue is required; this implies that the
+  // vector trip count is zero. This check also covers the case where adding one
+  // to the backedge-taken count overflowed leading to an incorrect trip count
+  // of zero. In this case we will also jump to the scalar loop.
+  auto P = Legal->requiresScalarEpilogue() ? ICmpInst::ICMP_ULE
+                                           : ICmpInst::ICMP_ULT;
+  Value *CheckMinIters = Builder.CreateICmp(
+      P, Count, ConstantInt::get(Count->getType(), VF * UF), "min.iters.check");
 
-  BasicBlock *NewBB =
-      BB->splitBasicBlock(BB->getTerminator(), "min.iters.checked");
-  // Update dominator tree immediately if the generated block is a
-  // LoopBypassBlock because SCEV expansions to generate loop bypass
-  // checks may query it before the current function is finished.
-  DT->addNewBlock(NewBB, BB);
-  if (L->getParentLoop())
-    L->getParentLoop()->addBasicBlockToLoop(NewBB, *LI);
-  ReplaceInstWithInst(BB->getTerminator(),
-                      BranchInst::Create(Bypass, NewBB, CheckMinIters));
-  LoopBypassBlocks.push_back(BB);
-}
-
-void InnerLoopVectorizer::emitVectorLoopEnteredCheck(Loop *L,
-                                                     BasicBlock *Bypass) {
-  Value *TC = getOrCreateVectorTripCount(L);
-  BasicBlock *BB = L->getLoopPreheader();
-  IRBuilder<> Builder(BB->getTerminator());
-
-  // Now, compare the new count to zero. If it is zero skip the vector loop and
-  // jump to the scalar loop.
-  Value *Cmp = Builder.CreateICmpEQ(TC, Constant::getNullValue(TC->getType()),
-                                    "cmp.zero");
-
-  // Generate code to check that the loop's trip count that we computed by
-  // adding one to the backedge-taken count will not overflow.
   BasicBlock *NewBB = BB->splitBasicBlock(BB->getTerminator(), "vector.ph");
   // Update dominator tree immediately if the generated block is a
   // LoopBypassBlock because SCEV expansions to generate loop bypass
@@ -3328,7 +3307,7 @@ void InnerLoopVectorizer::emitVectorLoopEnteredCheck(Loop *L,
   if (L->getParentLoop())
     L->getParentLoop()->addBasicBlockToLoop(NewBB, *LI);
   ReplaceInstWithInst(BB->getTerminator(),
-                      BranchInst::Create(Bypass, NewBB, Cmp));
+                      BranchInst::Create(Bypass, NewBB, CheckMinIters));
   LoopBypassBlocks.push_back(BB);
 }
 
@@ -3477,14 +3456,13 @@ void InnerLoopVectorizer::createVectorizedLoopSkeleton() {
 
   Value *StartIdx = ConstantInt::get(IdxTy, 0);
 
-  // We need to test whether the backedge-taken count is uint##_max. Adding one
-  // to it will cause overflow and an incorrect loop trip count in the vector
-  // body. In case of overflow we want to directly jump to the scalar remainder
-  // loop.
-  emitMinimumIterationCountCheck(Lp, ScalarPH);
   // Now, compare the new count to zero. If it is zero skip the vector loop and
-  // jump to the scalar loop.
-  emitVectorLoopEnteredCheck(Lp, ScalarPH);
+  // jump to the scalar loop. This check also covers the case where the
+  // backedge-taken count is uint##_max: adding one to it will overflow leading
+  // to an incorrect trip count of zero. In this (rare) case we will also jump
+  // to the scalar loop.
+  emitMinimumIterationCountCheck(Lp, ScalarPH);
+
   // Generate the code to check any assumptions that we've made for SCEV
   // expressions.
   emitSCEVChecks(Lp, ScalarPH);
@@ -3527,7 +3505,7 @@ void InnerLoopVectorizer::createVectorizedLoopSkeleton() {
       // We know what the end value is.
       EndValue = CountRoundDown;
     } else {
-      IRBuilder<> B(LoopBypassBlocks.back()->getTerminator());
+      IRBuilder<> B(Lp->getLoopPreheader()->getTerminator());
       Type *StepType = II.getStep()->getType();
       Instruction::CastOps CastOp =
         CastInst::getCastOpcode(CountRoundDown, true, StepType, true);
@@ -4168,7 +4146,7 @@ void InnerLoopVectorizer::fixReduction(PHINode *Phi) {
   // To do so, we need to generate the 'identity' vector and override
   // one of the elements with the incoming scalar reduction. We need
   // to do it in the vector-loop preheader.
-  Builder.SetInsertPoint(LoopBypassBlocks[1]->getTerminator());
+  Builder.SetInsertPoint(LoopVectorPreHeader->getTerminator());
 
   // This is the vector-clone of the value that leaves the loop.
   Type *VecTy = getOrCreateVectorValue(LoopExitInst, 0)->getType();
@@ -4542,24 +4520,22 @@ InnerLoopVectorizer::createEdgeMask(BasicBlock *Src, BasicBlock *Dst) {
   BranchInst *BI = dyn_cast<BranchInst>(Src->getTerminator());
   assert(BI && "Unexpected terminator found");
 
-  if (BI->isConditional()) {
+  if (!BI->isConditional())
+    return EdgeMaskCache[Edge] = SrcMask;
 
-    VectorParts EdgeMask(UF);
-    for (unsigned Part = 0; Part < UF; ++Part) {
-      auto *EdgeMaskPart = getOrCreateVectorValue(BI->getCondition(), Part);
-      if (BI->getSuccessor(0) != Dst)
-        EdgeMaskPart = Builder.CreateNot(EdgeMaskPart);
+  VectorParts EdgeMask(UF);
+  for (unsigned Part = 0; Part < UF; ++Part) {
+    auto *EdgeMaskPart = getOrCreateVectorValue(BI->getCondition(), Part);
+    if (BI->getSuccessor(0) != Dst)
+      EdgeMaskPart = Builder.CreateNot(EdgeMaskPart);
 
+    if (SrcMask[Part]) // Otherwise block in-mask is all-one, no need to AND.
       EdgeMaskPart = Builder.CreateAnd(EdgeMaskPart, SrcMask[Part]);
-      EdgeMask[Part] = EdgeMaskPart;
-    }
 
-    EdgeMaskCache[Edge] = EdgeMask;
-    return EdgeMask;
+    EdgeMask[Part] = EdgeMaskPart;
   }
 
-  EdgeMaskCache[Edge] = SrcMask;
-  return SrcMask;
+  return EdgeMaskCache[Edge] = EdgeMask;
 }
 
 InnerLoopVectorizer::VectorParts
@@ -4571,31 +4547,32 @@ InnerLoopVectorizer::createBlockInMask(BasicBlock *BB) {
   if (BCEntryIt != BlockMaskCache.end())
     return BCEntryIt->second;
 
+  // All-one mask is modelled as no-mask following the convention for masked
+  // load/store/gather/scatter. Initialize BlockMask to no-mask.
   VectorParts BlockMask(UF);
+  for (unsigned Part = 0; Part < UF; ++Part)
+    BlockMask[Part] = nullptr;
 
   // Loop incoming mask is all-one.
-  if (OrigLoop->getHeader() == BB) {
-    Value *C = ConstantInt::get(IntegerType::getInt1Ty(BB->getContext()), 1);
+  if (OrigLoop->getHeader() == BB)
+    return BlockMaskCache[BB] = BlockMask;
+
+  // This is the block mask. We OR all incoming edges.
+  for (auto *Predecessor : predecessors(BB)) {
+    VectorParts EdgeMask = createEdgeMask(Predecessor, BB);
+    if (!EdgeMask[0]) // Mask of predecessor is all-one so mask of block is too.
+      return BlockMaskCache[BB] = EdgeMask;
+
+    if (!BlockMask[0]) { // BlockMask has its initialized nullptr value.
+      BlockMask = EdgeMask;
+      continue;
+    }
+
     for (unsigned Part = 0; Part < UF; ++Part)
-      BlockMask[Part] = getOrCreateVectorValue(C, Part);
-    BlockMaskCache[BB] = BlockMask;
-    return BlockMask;
+      BlockMask[Part] = Builder.CreateOr(BlockMask[Part], EdgeMask[Part]);
   }
 
-  // This is the block mask. We OR all incoming edges, and with zero.
-  Value *Zero = ConstantInt::get(IntegerType::getInt1Ty(BB->getContext()), 0);
-  for (unsigned Part = 0; Part < UF; ++Part)
-    BlockMask[Part] = getOrCreateVectorValue(Zero, Part);
-
-  // For each pred:
-  for (pred_iterator It = pred_begin(BB), E = pred_end(BB); It != E; ++It) {
-    VectorParts EM = createEdgeMask(*It, BB);
-    for (unsigned Part = 0; Part < UF; ++Part)
-      BlockMask[Part] = Builder.CreateOr(BlockMask[Part], EM[Part]);
-  }
-
-  BlockMaskCache[BB] = BlockMask;
-  return BlockMask;
+  return BlockMaskCache[BB] = BlockMask;
 }
 
 void InnerLoopVectorizer::widenPHIInstruction(Instruction *PN, unsigned UF,

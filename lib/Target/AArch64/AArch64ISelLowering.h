@@ -290,7 +290,7 @@ public:
 
   /// Return true if the given shuffle mask can be codegen'd directly, or if it
   /// should be stack expanded.
-  bool isShuffleMaskLegal(const SmallVectorImpl<int> &M, EVT VT) const override;
+  bool isShuffleMaskLegal(ArrayRef<int> M, EVT VT) const override;
 
   /// Return the ISD::SETCC ValueType.
   EVT getSetCCResultType(const DataLayout &DL, LLVMContext &Context,
@@ -338,7 +338,8 @@ public:
   /// Return true if the addressing mode represented by AM is legal for this
   /// target, for a load/store of the specified type.
   bool isLegalAddressingMode(const DataLayout &DL, const AddrMode &AM, Type *Ty,
-                             unsigned AS) const override;
+                             unsigned AS,
+                             Instruction *I = nullptr) const override;
 
   /// \brief Return the cost of the scaling factor used in the addressing
   /// mode represented by AM for this target, for a load/store
@@ -408,6 +409,19 @@ public:
 
   bool isIntDivCheap(EVT VT, AttributeList Attr) const override;
 
+  bool canMergeStoresTo(unsigned AddressSpace, EVT MemVT,
+                        const SelectionDAG &DAG) const override {
+    // Do not merge to float value size (128 bytes) if no implicit
+    // float attribute is set.
+
+    bool NoFloat = DAG.getMachineFunction().getFunction()->hasFnAttribute(
+        Attribute::NoImplicitFloat);
+
+    if (NoFloat)
+      return (MemVT.getSizeInBits() <= 64);
+    return true;
+  }
+
   bool isCheapToSpeculateCttz() const override {
     return true;
   }
@@ -454,6 +468,8 @@ public:
   /// lowering accesses of the given type.
   unsigned getNumInterleavedAccesses(VectorType *VecTy,
                                      const DataLayout &DL) const;
+
+  MachineMemOperand::Flags getMMOFlags(const Instruction &I) const override;
 
 private:
   bool isExtFreeImpl(const Instruction *Ext) const override;

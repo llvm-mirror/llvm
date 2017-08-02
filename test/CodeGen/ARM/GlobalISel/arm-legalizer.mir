@@ -42,8 +42,13 @@
   define void @test_select_s32() { ret void }
   define void @test_select_ptr() { ret void }
 
+  define void @test_brcond() { ret void }
+
   define void @test_fadd_s32() #0 { ret void }
   define void @test_fadd_s64() #0 { ret void }
+
+  @a_global = global i32 42
+  define void @test_global_variable() { ret void }
 
   attributes #0 = { "target-features"="+vfp2" }
 ...
@@ -863,6 +868,40 @@ body:             |
     BX_RET 14, _, implicit %r0
 ...
 ---
+name:            test_brcond
+# CHECK-LABEL: name: test_brcond
+legalized:       false
+# CHECK: legalized: true
+regBankSelected: false
+selected:        false
+tracksRegLiveness: true
+registers:
+  - { id: 0, class: _ }
+  - { id: 1, class: _ }
+  - { id: 2, class: _ }
+body:             |
+  bb.0:
+    successors: %bb.1(0x40000000), %bb.2(0x40000000)
+    liveins: %r0, %r1
+
+    %0(s32) = COPY %r0
+    %1(s32) = COPY %r1
+    %2(s1) = G_ICMP intpred(sgt), %0(s32), %1
+    G_BRCOND %2(s1), %bb.1
+    ; G_BRCOND with s1 is legal, so we should find it unchanged in the output
+    ; CHECK: G_BRCOND {{%[0-9]+}}(s1), %bb.1
+    G_BR %bb.2
+
+  bb.1:
+    %r0 = COPY %1(s32)
+    BX_RET 14, _, implicit %r0
+
+  bb.2:
+    %r0 = COPY %0(s32)
+    BX_RET 14, _, implicit %r0
+
+...
+---
 name:            test_fadd_s32
 # CHECK-LABEL: name: test_fadd_s32
 legalized:       false
@@ -910,5 +949,28 @@ body:             |
     ; CHECK: {{%[0-9]+}}(s64) = G_FADD {{%[0-9]+, %[0-9]+}}
     %d0 = COPY %2(s64)
     BX_RET 14, _, implicit %d0
+
+...
+---
+name:            test_global_variable
+# CHECK-LABEL: name: test_global_variable
+legalized:       false
+# CHECK: legalized: true
+regBankSelected: false
+selected:        false
+tracksRegLiveness: true
+registers:
+  - { id: 0, class: _ }
+  - { id: 1, class: _ }
+body:             |
+  bb.0:
+    liveins: %r0
+
+    %0(s32) = COPY %r0
+    %1(p0) = G_GLOBAL_VALUE @a_global
+    ; G_GLOBAL_VALUE is legal, so we should find it unchanged in the output
+    ; CHECK: {{%[0-9]+}}(p0) = G_GLOBAL_VALUE @a_global
+    %r0 = COPY %1(p0)
+    BX_RET 14, _, implicit %r0
 
 ...

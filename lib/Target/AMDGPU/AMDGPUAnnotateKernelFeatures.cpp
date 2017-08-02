@@ -35,9 +35,6 @@ private:
 
   bool addFeatureAttributes(Function &F);
 
-  void addAttrToCallers(Function &Intrin, StringRef AttrName);
-  bool addAttrsForIntrinsics(Module &M, ArrayRef<StringRef[2]>);
-
 public:
   static char ID;
 
@@ -132,8 +129,16 @@ bool AMDGPUAnnotateKernelFeatures::visitConstantExprsRecursively(
 //
 // TODO: We should not add the attributes if the known compile time workgroup
 // size is 1 for y/z.
-static StringRef intrinsicToAttrName(Intrinsic::ID ID, bool &IsQueuePtr) {
+static StringRef intrinsicToAttrName(Intrinsic::ID ID,
+                                     bool &NonKernelOnly,
+                                     bool &IsQueuePtr) {
   switch (ID) {
+  case Intrinsic::amdgcn_workitem_id_x:
+    NonKernelOnly = true;
+    return "amdgpu-work-item-id-x";
+  case Intrinsic::amdgcn_workgroup_id_x:
+    NonKernelOnly = true;
+    return "amdgpu-work-group-id-x";
   case Intrinsic::amdgcn_workitem_id_y:
   case Intrinsic::r600_read_tidig_y:
     return "amdgpu-work-item-id-y";
@@ -151,8 +156,9 @@ static StringRef intrinsicToAttrName(Intrinsic::ID ID, bool &IsQueuePtr) {
   case Intrinsic::amdgcn_dispatch_id:
     return "amdgpu-dispatch-id";
   case Intrinsic::amdgcn_kernarg_segment_ptr:
-  case Intrinsic::amdgcn_implicitarg_ptr:
     return "amdgpu-kernarg-segment-ptr";
+  case Intrinsic::amdgcn_implicitarg_ptr:
+    return "amdgpu-implicitarg-ptr";
   case Intrinsic::amdgcn_queue_ptr:
   case Intrinsic::trap:
   case Intrinsic::debugtrap:
@@ -175,17 +181,18 @@ static bool handleAttr(Function &Parent, const Function &Callee,
 
 static void copyFeaturesToFunction(Function &Parent, const Function &Callee,
                                    bool &NeedQueuePtr) {
-
+  // X ids unnecessarily propagated to kernels.
   static const StringRef AttrNames[] = {
-    // .x omitted
+    { "amdgpu-work-item-id-x" },
     { "amdgpu-work-item-id-y" },
     { "amdgpu-work-item-id-z" },
-    // .x omitted
+    { "amdgpu-work-group-id-x" },
     { "amdgpu-work-group-id-y" },
     { "amdgpu-work-group-id-z" },
     { "amdgpu-dispatch-ptr" },
     { "amdgpu-dispatch-id" },
-    { "amdgpu-kernarg-segment-ptr" }
+    { "amdgpu-kernarg-segment-ptr" },
+    { "amdgpu-implicitarg-ptr" }
   };
 
   if (handleAttr(Parent, Callee, "amdgpu-queue-ptr"))
@@ -196,11 +203,15 @@ static void copyFeaturesToFunction(Function &Parent, const Function &Callee,
 }
 
 bool AMDGPUAnnotateKernelFeatures::addFeatureAttributes(Function &F) {
-  bool HasApertureRegs = TM->getSubtarget<AMDGPUSubtarget>(F).hasApertureRegs();
+  const AMDGPUSubtarget &ST = TM->getSubtarget<AMDGPUSubtarget>(F);
+  bool HasFlat = ST.hasFlatAddressSpace();
+  bool HasApertureRegs = ST.hasApertureRegs();
   SmallPtrSet<const Constant *, 8> ConstantExprVisited;
 
   bool Changed = false;
   bool NeedQueuePtr = false;
+  bool HaveCall = false;
+  bool IsFunc = !AMDGPU::isEntryFunctionCC(F.getCallingConv());
 
   for (BasicBlock &BB : F) {
     for (Instruction &I : BB) {
@@ -209,16 +220,22 @@ bool AMDGPUAnnotateKernelFeatures::addFeatureAttributes(Function &F) {
         Function *Callee = CS.getCalledFunction();
 
         // TODO: Do something with indirect calls.
-        if (!Callee)
+        if (!Callee) {
+          if (!CS.isInlineAsm())
+            HaveCall = true;
           continue;
+        }
 
         Intrinsic::ID IID = Callee->getIntrinsicID();
         if (IID == Intrinsic::not_intrinsic) {
+          HaveCall = true;
           copyFeaturesToFunction(F, *Callee, NeedQueuePtr);
           Changed = true;
         } else {
-          StringRef AttrName = intrinsicToAttrName(IID, NeedQueuePtr);
-          if (!AttrName.empty()) {
+          bool NonKernelOnly = false;
+          StringRef AttrName = intrinsicToAttrName(IID,
+                                                   NonKernelOnly, NeedQueuePtr);
+          if (!AttrName.empty() && (IsFunc || !NonKernelOnly)) {
             F.addFnAttr(AttrName);
             Changed = true;
           }
@@ -253,33 +270,12 @@ bool AMDGPUAnnotateKernelFeatures::addFeatureAttributes(Function &F) {
     Changed = true;
   }
 
-  return Changed;
-}
-
-void AMDGPUAnnotateKernelFeatures::addAttrToCallers(Function &Intrin,
-                                                    StringRef AttrName) {
-  SmallPtrSet<Function *, 4> SeenFuncs;
-
-  for (User *U : Intrin.users()) {
-    // CallInst is the only valid user for an intrinsic.
-    CallInst *CI = cast<CallInst>(U);
-
-    Function *CallingFunction = CI->getParent()->getParent();
-    if (SeenFuncs.insert(CallingFunction).second)
-      CallingFunction->addFnAttr(AttrName);
-  }
-}
-
-bool AMDGPUAnnotateKernelFeatures::addAttrsForIntrinsics(
-  Module &M,
-  ArrayRef<StringRef[2]> IntrinsicToAttr) {
-  bool Changed = false;
-
-  for (const StringRef *Arr  : IntrinsicToAttr) {
-    if (Function *Fn = M.getFunction(Arr[0])) {
-      addAttrToCallers(*Fn, Arr[1]);
-      Changed = true;
-    }
+  // TODO: We could refine this to captured pointers that could possibly be
+  // accessed by flat instructions. For now this is mostly a poor way of
+  // estimating whether there are calls before argument lowering.
+  if (HasFlat && !IsFunc && HaveCall) {
+    F.addFnAttr("amdgpu-flat-scratch");
+    Changed = true;
   }
 
   return Changed;

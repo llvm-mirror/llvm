@@ -13,9 +13,20 @@ import operator
 from collections import defaultdict
 from multiprocessing import cpu_count, Pool
 
+try:
+    from guppy import hpy
+    hp = hpy()
+except ImportError:
+    print("Memory consumption not shown because guppy is not installed")
+    hp = None
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=desc)
-    parser.add_argument('yaml_files', nargs='+')
+    parser.add_argument(
+        'yaml_dirs_or_files',
+        nargs='+',
+        help='List of optimization record files or directories searched '
+             'for optimization record files.')
     parser.add_argument(
         '--jobs',
         '-j',
@@ -31,8 +42,14 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     print_progress = not args.no_progress_indicator
+
+    files = optrecord.find_opt_files(args.yaml_dirs_or_files)
+    if not files:
+        parser.error("No *.opt.yaml files found")
+        sys.exit(1)
+
     all_remarks, file_remarks, _ = optrecord.gather_results(
-        args.yaml_files, args.jobs, print_progress)
+        files, args.jobs, print_progress)
     if print_progress:
         print('\n')
 
@@ -43,7 +60,12 @@ if __name__ == '__main__':
         byname[r.Pass + "/" + r.Name] += 1
 
     total = len(all_remarks)
-    print("{:24s} {:10d}\n".format("Total number of remarks", total))
+    print("{:24s} {:10d}".format("Total number of remarks", total))
+    if hp:
+        h = hp.heap()
+        print("{:24s} {:10d}".format("Memory per remark",
+                                     h.size / len(all_remarks)))
+    print('\n')
 
     print("Top 10 remarks by pass:")
     for (passname, count) in sorted(bypass.items(), key=operator.itemgetter(1),

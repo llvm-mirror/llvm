@@ -82,7 +82,7 @@ AArch64LegalizerInfo::AArch64LegalizerInfo() {
     setAction({Op, 1, s1}, Legal);
   }
 
-  for (unsigned BinOp : {G_FADD, G_FSUB, G_FMUL, G_FDIV})
+  for (unsigned BinOp : {G_FADD, G_FSUB, G_FMA, G_FMUL, G_FDIV})
     for (auto Ty : {s32, s64})
       setAction({BinOp, Ty}, Legal);
 
@@ -131,16 +131,18 @@ AArch64LegalizerInfo::AArch64LegalizerInfo() {
 
   setAction({TargetOpcode::G_FCONSTANT, s16}, WidenScalar);
 
-  setAction({G_ICMP, s1}, Legal);
   setAction({G_ICMP, 1, s32}, Legal);
   setAction({G_ICMP, 1, s64}, Legal);
   setAction({G_ICMP, 1, p0}, Legal);
 
   for (auto Ty : {s1, s8, s16}) {
+    setAction({G_ICMP, Ty}, WidenScalar);
+    setAction({G_FCMP, Ty}, WidenScalar);
     setAction({G_ICMP, 1, Ty}, WidenScalar);
   }
 
-  setAction({G_FCMP, s1}, Legal);
+  setAction({G_ICMP, s32}, Legal);
+  setAction({G_FCMP, s32}, Legal);
   setAction({G_FCMP, 1, s32}, Legal);
   setAction({G_FCMP, 1, s64}, Legal);
 

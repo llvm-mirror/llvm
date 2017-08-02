@@ -120,6 +120,10 @@ public:
     return SI.getNumCases();
   }
 
+  int getExtCost(const Instruction *I, const Value *Src) {
+    return TTI::TCC_Basic;
+  }
+
   unsigned getCallCost(FunctionType *FTy, int NumArgs) {
     assert(FTy && "FunctionType must be provided to this routine.");
 
@@ -226,7 +230,7 @@ public:
 
   bool isLegalAddressingMode(Type *Ty, GlobalValue *BaseGV, int64_t BaseOffset,
                              bool HasBaseReg, int64_t Scale,
-                             unsigned AddrSpace) {
+                             unsigned AddrSpace, Instruction *I = nullptr) {
     // Guess that only reg and reg+reg addressing is allowed. This heuristic is
     // taken from the implementation of LSR.
     return !BaseGV && BaseOffset == 0 && (Scale == 0 || Scale == 1);
@@ -257,6 +261,8 @@ public:
       return 0;
     return -1;
   }
+
+  bool LSRWithInstrQueries() { return false; }
 
   bool isFoldableMemAccessOffset(Instruction *I, int64_t Offset) { return true; }
 
@@ -422,7 +428,7 @@ public:
     return 0; 
   }
 
-  unsigned getReductionCost(unsigned, Type *, bool) { return 1; }
+  unsigned getArithmeticReductionCost(unsigned, Type *, bool) { return 1; }
 
   unsigned getCostOfKeepingLiveOverCall(ArrayRef<Type *> Tys) { return 0; }
 
@@ -728,6 +734,8 @@ public:
       // nop on most sane targets.
       if (isa<CmpInst>(CI->getOperand(0)))
         return TTI::TCC_Free;
+      if (isa<SExtInst>(CI) || isa<ZExtInst>(CI) || isa<FPExtInst>(CI))
+        return static_cast<T *>(this)->getExtCost(CI, Operands.back());
     }
 
     return static_cast<T *>(this)->getOperationCost(

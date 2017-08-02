@@ -1284,56 +1284,42 @@ Instruction *InstCombiner::visitAnd(BinaryOperator &I) {
   if (Value *V = SimplifyBSwap(I, Builder))
     return replaceInstUsesWith(I, V);
 
+  const APInt *C;
+  if (match(Op1, m_APInt(C))) {
+    Value *X, *Y;
+    if (match(Op0, m_OneUse(m_LogicalShift(m_One(), m_Value(X)))) &&
+        C->isOneValue()) {
+      // (1 << X) & 1 --> zext(X == 0)
+      // (1 >> X) & 1 --> zext(X == 0)
+      Value *IsZero = Builder.CreateICmpEQ(X, ConstantInt::get(I.getType(), 0));
+      return new ZExtInst(IsZero, I.getType());
+    }
+
+    // If the mask is only needed on one incoming arm, push the 'and' op up.
+    if (match(Op0, m_OneUse(m_Xor(m_Value(X), m_Value(Y)))) ||
+        match(Op0, m_OneUse(m_Or(m_Value(X), m_Value(Y))))) {
+      APInt NotAndMask(~(*C));
+      BinaryOperator::BinaryOps BinOp = cast<BinaryOperator>(Op0)->getOpcode();
+      if (MaskedValueIsZero(X, NotAndMask, 0, &I)) {
+        // Not masking anything out for the LHS, move mask to RHS.
+        // and ({x}or X, Y), C --> {x}or X, (and Y, C)
+        Value *NewRHS = Builder.CreateAnd(Y, Op1, Y->getName() + ".masked");
+        return BinaryOperator::Create(BinOp, X, NewRHS);
+      }
+      if (!isa<Constant>(Y) && MaskedValueIsZero(Y, NotAndMask, 0, &I)) {
+        // Not masking anything out for the RHS, move mask to LHS.
+        // and ({x}or X, Y), C --> {x}or (and X, C), Y
+        Value *NewLHS = Builder.CreateAnd(X, Op1, X->getName() + ".masked");
+        return BinaryOperator::Create(BinOp, NewLHS, Y);
+      }
+    }
+  }
+
   if (ConstantInt *AndRHS = dyn_cast<ConstantInt>(Op1)) {
     const APInt &AndRHSMask = AndRHS->getValue();
 
     // Optimize a variety of ((val OP C1) & C2) combinations...
     if (BinaryOperator *Op0I = dyn_cast<BinaryOperator>(Op0)) {
-      Value *Op0LHS = Op0I->getOperand(0);
-      Value *Op0RHS = Op0I->getOperand(1);
-      switch (Op0I->getOpcode()) {
-      default: break;
-      case Instruction::Xor:
-      case Instruction::Or: {
-        // If the mask is only needed on one incoming arm, push it up.
-        if (!Op0I->hasOneUse()) break;
-
-        APInt NotAndRHS(~AndRHSMask);
-        if (MaskedValueIsZero(Op0LHS, NotAndRHS, 0, &I)) {
-          // Not masking anything out for the LHS, move to RHS.
-          Value *NewRHS = Builder.CreateAnd(Op0RHS, AndRHS,
-                                            Op0RHS->getName()+".masked");
-          return BinaryOperator::Create(Op0I->getOpcode(), Op0LHS, NewRHS);
-        }
-        if (!isa<Constant>(Op0RHS) &&
-            MaskedValueIsZero(Op0RHS, NotAndRHS, 0, &I)) {
-          // Not masking anything out for the RHS, move to LHS.
-          Value *NewLHS = Builder.CreateAnd(Op0LHS, AndRHS,
-                                            Op0LHS->getName()+".masked");
-          return BinaryOperator::Create(Op0I->getOpcode(), NewLHS, Op0RHS);
-        }
-
-        break;
-      }
-      case Instruction::Sub:
-        // -x & 1 -> x & 1
-        if (AndRHSMask.isOneValue() && match(Op0LHS, m_Zero()))
-          return BinaryOperator::CreateAnd(Op0RHS, AndRHS);
-
-        break;
-
-      case Instruction::Shl:
-      case Instruction::LShr:
-        // (1 << x) & 1 --> zext(x == 0)
-        // (1 >> x) & 1 --> zext(x == 0)
-        if (AndRHSMask.isOneValue() && Op0LHS == AndRHS) {
-          Value *NewICmp =
-            Builder.CreateICmpEQ(Op0RHS, Constant::getNullValue(I.getType()));
-          return new ZExtInst(NewICmp, I.getType());
-        }
-        break;
-      }
-
       // ((C1 OP zext(X)) & C2) -> zext((C1-X) & C2) if C2 fits in the bitwidth
       // of X and OP behaves well when given trunc(C1) and X.
       switch (Op0I->getOpcode()) {
@@ -1350,6 +1336,7 @@ Instruction *InstCombiner::visitAnd(BinaryOperator &I) {
           if (AndRHSMask.isIntN(X->getType()->getScalarSizeInBits())) {
             auto *TruncC1 = ConstantExpr::getTrunc(C1, X->getType());
             Value *BinOp;
+            Value *Op0LHS = Op0I->getOperand(0);
             if (isa<ZExtInst>(Op0LHS))
               BinOp = Builder.CreateBinOp(Op0I->getOpcode(), X, TruncC1);
             else
@@ -1416,12 +1403,6 @@ Instruction *InstCombiner::visitAnd(BinaryOperator &I) {
           return BinaryOperator::CreateAnd(A, Builder.CreateNot(B));
       }
     }
-
-    // (A&((~A)|B)) -> A&B
-    if (match(Op0, m_c_Or(m_Not(m_Specific(Op1)), m_Value(A))))
-      return BinaryOperator::CreateAnd(A, Op1);
-    if (match(Op1, m_c_Or(m_Not(m_Specific(Op0)), m_Value(A))))
-      return BinaryOperator::CreateAnd(A, Op0);
 
     // (A ^ B) & ((B ^ C) ^ A) -> (A ^ B) & ~C
     if (match(Op0, m_Xor(m_Value(A), m_Value(B))))
@@ -2020,18 +2001,6 @@ Instruction *InstCombiner::visitOr(BinaryOperator &I) {
 
   Value *A, *B;
 
-  // ((~A & B) | A) -> (A | B)
-  if (match(Op0, m_c_And(m_Not(m_Specific(Op1)), m_Value(A))))
-    return BinaryOperator::CreateOr(A, Op1);
-  if (match(Op1, m_c_And(m_Not(m_Specific(Op0)), m_Value(A))))
-    return BinaryOperator::CreateOr(Op0, A);
-
-  // ((A & B) | ~A) -> (~A | B)
-  // The NOT is guaranteed to be in the RHS by complexity ordering.
-  if (match(Op1, m_Not(m_Value(A))) &&
-      match(Op0, m_c_And(m_Specific(A), m_Value(B))))
-    return BinaryOperator::CreateOr(Op1, B);
-
   // (A & C)|(B & D)
   Value *C = nullptr, *D = nullptr;
   if (match(Op0, m_And(m_Value(A), m_Value(C))) &&
@@ -2175,17 +2144,6 @@ Instruction *InstCombiner::visitOr(BinaryOperator &I) {
         Value *Not = Builder.CreateNot(NotOp, NotOp->getName() + ".not");
         return BinaryOperator::CreateOr(Not, Op0);
       }
-
-  // (A & B) | (~A ^ B) -> (~A ^ B)
-  // (A & B) | (B ^ ~A) -> (~A ^ B)
-  // (B & A) | (~A ^ B) -> (~A ^ B)
-  // (B & A) | (B ^ ~A) -> (~A ^ B)
-  // The match order is important: match the xor first because the 'not'
-  // operation defines 'A'. We do not need to match the xor as Op0 because the
-  // xor was canonicalized to Op1 above.
-  if (match(Op1, m_c_Xor(m_Not(m_Value(A)), m_Value(B))) &&
-      match(Op0, m_c_And(m_Specific(A), m_Specific(B))))
-    return BinaryOperator::CreateXor(Builder.CreateNot(A), B);
 
   if (SwappedForXor)
     std::swap(Op0, Op1);

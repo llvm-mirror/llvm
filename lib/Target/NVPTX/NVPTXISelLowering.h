@@ -456,7 +456,8 @@ public:
   /// reduction (LoopStrengthReduce.cpp) and memory optimization for
   /// address mode (CodeGenPrepare.cpp)
   bool isLegalAddressingMode(const DataLayout &DL, const AddrMode &AM, Type *Ty,
-                             unsigned AS) const override;
+                             unsigned AS,
+                             Instruction *I = nullptr) const override;
 
   bool isTruncateFree(Type *SrcTy, Type *DstTy) const override {
     // Truncating 64-bit to 32-bit is free in SASS.
@@ -490,7 +491,7 @@ public:
   std::string getPrototype(const DataLayout &DL, Type *, const ArgListTy &,
                            const SmallVectorImpl<ISD::OutputArg> &,
                            unsigned retAlignment,
-                           const ImmutableCallSite *CS) const;
+                           ImmutableCallSite CS) const;
 
   SDValue LowerReturn(SDValue Chain, CallingConv::ID CallConv, bool isVarArg,
                       const SmallVectorImpl<ISD::OutputArg> &Outs,
@@ -570,9 +571,8 @@ private:
                           SelectionDAG &DAG) const override;
   SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const override;
 
-  unsigned getArgumentAlignment(SDValue Callee, const ImmutableCallSite *CS,
-                                Type *Ty, unsigned Idx,
-                                const DataLayout &DL) const;
+  unsigned getArgumentAlignment(SDValue Callee, ImmutableCallSite CS, Type *Ty,
+                                unsigned Idx, const DataLayout &DL) const;
 };
 } // namespace llvm
 

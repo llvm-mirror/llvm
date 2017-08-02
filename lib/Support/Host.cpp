@@ -250,6 +250,8 @@ StringRef sys::detail::getHostCPUNameForS390x(
         Pos += sizeof("machine = ") - 1;
         unsigned int Id;
         if (!Lines[I].drop_front(Pos).getAsInteger(10, Id)) {
+          if (Id >= 3906 && HaveVectorSupport)
+            return "z14";
           if (Id >= 2964 && HaveVectorSupport)
             return "z13";
           if (Id >= 2827)
@@ -378,7 +380,9 @@ enum ProcessorFeatures {
   // Only one bit free left in the first 32 features.
   FEATURE_MOVBE = 32,
   FEATURE_ADX,
-  FEATURE_EM64T
+  FEATURE_EM64T,
+  FEATURE_CLFLUSHOPT,
+  FEATURE_SHA,
 };
 
 // The check below for i386 was copied from clang's cpuid.h (__get_cpuid_max).
@@ -460,8 +464,8 @@ static bool getX86CpuIDAndInfo(unsigned value, unsigned *rEAX, unsigned *rEBX,
 static bool getX86CpuIDAndInfoEx(unsigned value, unsigned subleaf,
                                  unsigned *rEAX, unsigned *rEBX, unsigned *rECX,
                                  unsigned *rEDX) {
-#if defined(__x86_64__) || defined(_M_X64)
 #if defined(__GNUC__) || defined(__clang__)
+#if defined(__x86_64__)
   // gcc doesn't know cpuid would clobber ebx/rbx. Preserve it manually.
   // FIXME: should we save this for Clang?
   __asm__("movq\t%%rbx, %%rsi\n\t"
@@ -470,6 +474,16 @@ static bool getX86CpuIDAndInfoEx(unsigned value, unsigned subleaf,
           : "=a"(*rEAX), "=S"(*rEBX), "=c"(*rECX), "=d"(*rEDX)
           : "a"(value), "c"(subleaf));
   return false;
+#elif defined(__i386__)
+  __asm__("movl\t%%ebx, %%esi\n\t"
+          "cpuid\n\t"
+          "xchgl\t%%ebx, %%esi\n\t"
+          : "=a"(*rEAX), "=S"(*rEBX), "=c"(*rECX), "=d"(*rEDX)
+          : "a"(value), "c"(subleaf));
+  return false;
+#else
+  return true;
+#endif
 #elif defined(_MSC_VER)
   int registers[4];
   __cpuidex(registers, value, subleaf);
@@ -478,35 +492,6 @@ static bool getX86CpuIDAndInfoEx(unsigned value, unsigned subleaf,
   *rECX = registers[2];
   *rEDX = registers[3];
   return false;
-#else
-  return true;
-#endif
-#elif defined(__i386__) || defined(_M_IX86)
-#if defined(__GNUC__) || defined(__clang__)
-  __asm__("movl\t%%ebx, %%esi\n\t"
-          "cpuid\n\t"
-          "xchgl\t%%ebx, %%esi\n\t"
-          : "=a"(*rEAX), "=S"(*rEBX), "=c"(*rECX), "=d"(*rEDX)
-          : "a"(value), "c"(subleaf));
-  return false;
-#elif defined(_MSC_VER)
-  __asm {
-      mov   eax,value
-      mov   ecx,subleaf
-      cpuid
-      mov   esi,rEAX
-      mov   dword ptr [esi],eax
-      mov   esi,rEBX
-      mov   dword ptr [esi],ebx
-      mov   esi,rECX
-      mov   dword ptr [esi],ecx
-      mov   esi,rEDX
-      mov   dword ptr [esi],edx
-  }
-  return false;
-#else
-  return true;
-#endif
 #else
   return true;
 #endif
@@ -731,7 +716,21 @@ getIntelProcessorTypeAndSubtype(unsigned Family, unsigned Model,
 
     default: // Unknown family 6 CPU, try to guess.
       if (Features & (1 << FEATURE_AVX512F)) {
-        *Type = INTEL_KNL; // knl
+        if (Features & (1 << FEATURE_AVX512VL)) {
+          *Type = INTEL_COREI7;
+          *Subtype = INTEL_COREI7_SKYLAKE_AVX512;
+        } else {
+          *Type = INTEL_KNL; // knl
+        }
+        break;
+      }
+      if (Features2 & (1 << (FEATURE_CLFLUSHOPT - 32))) {
+        if (Features2 & (1 << (FEATURE_SHA - 32))) {
+          *Type = INTEL_GOLDMONT;
+        } else {
+          *Type = INTEL_COREI7;
+          *Subtype = INTEL_COREI7_SKYLAKE;
+        }
         break;
       }
       if (Features2 & (1 << (FEATURE_ADX - 32))) {
@@ -991,12 +990,16 @@ static void getAvailableFeatures(unsigned ECX, unsigned EDX, unsigned MaxLeaf,
     Features2 |= 1 << (FEATURE_ADX - 32);
   if (HasLeaf7 && ((EBX >> 21) & 1) && HasAVX512Save)
     Features |= 1 << FEATURE_AVX512IFMA;
+  if (HasLeaf7 && ((EBX >> 23) & 1))
+    Features2 |= 1 << (FEATURE_CLFLUSHOPT - 32);
   if (HasLeaf7 && ((EBX >> 26) & 1) && HasAVX512Save)
     Features |= 1 << FEATURE_AVX512PF;
   if (HasLeaf7 && ((EBX >> 27) & 1) && HasAVX512Save)
     Features |= 1 << FEATURE_AVX512ER;
   if (HasLeaf7 && ((EBX >> 28) & 1) && HasAVX512Save)
     Features |= 1 << FEATURE_AVX512CD;
+  if (HasLeaf7 && ((EBX >> 29) & 1))
+    Features2 |= 1 << (FEATURE_SHA - 32);
   if (HasLeaf7 && ((EBX >> 30) & 1) && HasAVX512Save)
     Features |= 1 << FEATURE_AVX512BW;
   if (HasLeaf7 && ((EBX >> 31) & 1) && HasAVX512Save)

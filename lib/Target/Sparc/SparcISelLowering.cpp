@@ -692,9 +692,9 @@ SparcTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 }
 
 static bool hasReturnsTwiceAttr(SelectionDAG &DAG, SDValue Callee,
-                                     ImmutableCallSite *CS) {
+                                ImmutableCallSite CS) {
   if (CS)
-    return CS->hasFnAttr(Attribute::ReturnsTwice);
+    return CS.hasFnAttr(Attribute::ReturnsTwice);
 
   const Function *CalleeFn = nullptr;
   if (GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(Callee)) {
@@ -1334,7 +1334,7 @@ SparcTargetLowering::LowerCall_64(TargetLowering::CallLoweringInfo &CLI,
 
   // Set inreg flag manually for codegen generated library calls that
   // return float.
-  if (CLI.Ins.size() == 1 && CLI.Ins[0].VT == MVT::f32 && CLI.CS == nullptr)
+  if (CLI.Ins.size() == 1 && CLI.Ins[0].VT == MVT::f32 && !CLI.CS)
     CLI.Ins[0].Flags.setInReg();
 
   RVInfo.AnalyzeCallResult(CLI.Ins, RetCC_Sparc64);
@@ -1689,6 +1689,19 @@ SparcTargetLowering::SparcTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::MULHS,     MVT::i32, Expand);
   setOperationAction(ISD::MUL,       MVT::i32, Expand);
 
+  if (Subtarget->useSoftMulDiv()) {
+    // .umul works for both signed and unsigned
+    setOperationAction(ISD::SMUL_LOHI, MVT::i32, Expand);
+    setOperationAction(ISD::UMUL_LOHI, MVT::i32, Expand);
+    setLibcallName(RTLIB::MUL_I32, ".umul");
+
+    setOperationAction(ISD::SDIV, MVT::i32, Expand);
+    setLibcallName(RTLIB::SDIV_I32, ".div");
+
+    setOperationAction(ISD::UDIV, MVT::i32, Expand);
+    setLibcallName(RTLIB::UDIV_I32, ".udiv");
+  }
+
   if (Subtarget->is64Bit()) {
     setOperationAction(ISD::UMUL_LOHI, MVT::i64, Expand);
     setOperationAction(ISD::SMUL_LOHI, MVT::i64, Expand);
@@ -1815,9 +1828,7 @@ SparcTargetLowering::SparcTargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::FSQRT, MVT::f32, Promote);
   }
 
-  if (Subtarget->replaceFMULS()) {
-    // Promote FMULS to FMULD instructions instead as
-    // the former instructions generate errata on LEON processors.
+  if (Subtarget->hasNoFMULS()) {
     setOperationAction(ISD::FMUL, MVT::f32, Promote);
   }
 

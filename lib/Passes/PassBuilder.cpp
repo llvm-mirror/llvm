@@ -325,8 +325,8 @@ void PassBuilder::registerLoopAnalyses(LoopAnalysisManager &LAM) {
 
 FunctionPassManager
 PassBuilder::buildFunctionSimplificationPipeline(OptimizationLevel Level,
-                                                 bool DebugLogging,
-                                                 bool PrepareForThinLTO) {
+                                                 ThinLTOPhase Phase,
+                                                 bool DebugLogging) {
   assert(Level != O0 && "Must request optimizations!");
   FunctionPassManager FPM(DebugLogging);
 
@@ -389,10 +389,11 @@ PassBuilder::buildFunctionSimplificationPipeline(OptimizationLevel Level,
     C(LPM2, Level);
 
   LPM2.addPass(LoopDeletionPass());
-  // Do not enable unrolling in PrepareForThinLTO phase during sample PGO
+  // Do not enable unrolling in PreLinkThinLTO phase during sample PGO
   // because it changes IR to makes profile annotation in back compile
   // inaccurate.
-  if (!PrepareForThinLTO || !PGOOpt || PGOOpt->SampleProfileFile.empty())
+  if (Phase != ThinLTOPhase::PreLink ||
+      !PGOOpt || PGOOpt->SampleProfileFile.empty())
     LPM2.addPass(LoopUnrollPass::createFull(Level));
 
   for (auto &C : LoopOptimizerEndEPCallbacks)
@@ -524,8 +525,8 @@ getInlineParamsFromOptLevel(PassBuilder::OptimizationLevel Level) {
 
 ModulePassManager
 PassBuilder::buildModuleSimplificationPipeline(OptimizationLevel Level,
-                                               bool DebugLogging,
-                                               bool PrepareForThinLTO) {
+                                               ThinLTOPhase Phase,
+                                               bool DebugLogging) {
   ModulePassManager MPM(DebugLogging);
 
   // Do basic inference of function attributes from known properties of system
@@ -572,18 +573,19 @@ PassBuilder::buildModuleSimplificationPipeline(OptimizationLevel Level,
 
   // Add all the requested passes for PGO, if requested.
   if (PGOOpt) {
-    assert(PGOOpt->RunProfileGen || !PGOOpt->SampleProfileFile.empty() ||
-           !PGOOpt->ProfileUseFile.empty());
-    if (PGOOpt->SampleProfileFile.empty())
+    if (!PGOOpt->ProfileGenFile.empty() || !PGOOpt->ProfileUseFile.empty())
+      // Instrumentation based PGO (gen and use)
       addPGOInstrPasses(MPM, DebugLogging, Level, PGOOpt->RunProfileGen,
                         PGOOpt->ProfileGenFile, PGOOpt->ProfileUseFile);
-    else
+    else if (!PGOOpt->SampleProfileFile.empty())
+      // SamplePGO use
       MPM.addPass(SampleProfileLoaderPass(PGOOpt->SampleProfileFile));
 
     // Indirect call promotion that promotes intra-module targes only.
-    // Do not enable it in PrepareForThinLTO phase during sample PGO because
+    // Do not enable it in PreLinkThinLTO phase during sample PGO because
     // it changes IR to makes profile annotation in back compile inaccurate.
-    if (!PrepareForThinLTO || PGOOpt->SampleProfileFile.empty())
+    if ((Phase != ThinLTOPhase::PreLink && !PGOOpt->SampleProfileFile.empty())
+        || !PGOOpt->ProfileUseFile.empty())
       MPM.addPass(PGOIndirectCallPromotion(
           false, PGOOpt && !PGOOpt->SampleProfileFile.empty()));
   }
@@ -610,10 +612,11 @@ PassBuilder::buildModuleSimplificationPipeline(OptimizationLevel Level,
   // Run the inliner first. The theory is that we are walking bottom-up and so
   // the callees have already been fully optimized, and we want to inline them
   // into the callers so that our optimizations can reflect that.
-  // For PrepareForThinLTO pass, we disable hot-caller heuristic for sample PGO
+  // For PreLinkThinLTO pass, we disable hot-caller heuristic for sample PGO
   // because it makes profile annotation in the backend inaccurate.
   InlineParams IP = getInlineParamsFromOptLevel(Level);
-  if (PrepareForThinLTO && PGOOpt && !PGOOpt->SampleProfileFile.empty())
+  if (Phase == ThinLTOPhase::PreLink &&
+      PGOOpt && !PGOOpt->SampleProfileFile.empty())
     IP.HotCallSiteThreshold = 0;
   MainCGPipeline.addPass(InlinerPass(IP));
 
@@ -628,8 +631,7 @@ PassBuilder::buildModuleSimplificationPipeline(OptimizationLevel Level,
   // Lastly, add the core function simplification pipeline nested inside the
   // CGSCC walk.
   MainCGPipeline.addPass(createCGSCCToFunctionPassAdaptor(
-      buildFunctionSimplificationPipeline(Level, DebugLogging,
-                                          PrepareForThinLTO)));
+      buildFunctionSimplificationPipeline(Level, Phase, DebugLogging)));
 
   for (auto &C : CGSCCOptimizerLateEPCallbacks)
     C(MainCGPipeline, Level);
@@ -777,9 +779,12 @@ PassBuilder::buildPerModuleDefaultPipeline(OptimizationLevel Level,
   // Force any function attributes we want the rest of the pipeline to observe.
   MPM.addPass(ForceFunctionAttrsPass());
 
+  if (PGOOpt && PGOOpt->SamplePGOSupport)
+    MPM.addPass(createModuleToFunctionPassAdaptor(AddDiscriminatorsPass()));
+
   // Add the core simplification pipeline.
-  MPM.addPass(buildModuleSimplificationPipeline(Level, DebugLogging,
-                                                /*PrepareForThinLTO=*/false));
+  MPM.addPass(buildModuleSimplificationPipeline(Level, ThinLTOPhase::None,
+                                                DebugLogging));
 
   // Now add the optimization pipeline.
   MPM.addPass(buildModuleOptimizationPipeline(Level, DebugLogging));
@@ -797,11 +802,14 @@ PassBuilder::buildThinLTOPreLinkDefaultPipeline(OptimizationLevel Level,
   // Force any function attributes we want the rest of the pipeline to observe.
   MPM.addPass(ForceFunctionAttrsPass());
 
+  if (PGOOpt && PGOOpt->SamplePGOSupport)
+    MPM.addPass(createModuleToFunctionPassAdaptor(AddDiscriminatorsPass()));
+
   // If we are planning to perform ThinLTO later, we don't bloat the code with
   // unrolling/vectorization/... now. Just simplify the module as much as we
   // can.
-  MPM.addPass(buildModuleSimplificationPipeline(Level, DebugLogging,
-                                                /*PrepareForThinLTO=*/true));
+  MPM.addPass(buildModuleSimplificationPipeline(Level, ThinLTOPhase::PreLink,
+                                                DebugLogging));
 
   // Run partial inlining pass to partially inline functions that have
   // large bodies.
@@ -839,8 +847,8 @@ PassBuilder::buildThinLTODefaultPipeline(OptimizationLevel Level,
                             !PGOOpt->ProfileUseFile.empty()));
 
   // Add the core simplification pipeline.
-  MPM.addPass(buildModuleSimplificationPipeline(Level, DebugLogging,
-                                                /*PrepareForThinLTO=*/false));
+  MPM.addPass(buildModuleSimplificationPipeline(Level, ThinLTOPhase::PostLink,
+                                                DebugLogging));
 
   // Now add the optimization pipeline.
   MPM.addPass(buildModuleOptimizationPipeline(Level, DebugLogging));

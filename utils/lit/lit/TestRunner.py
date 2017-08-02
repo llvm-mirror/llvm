@@ -313,7 +313,7 @@ def processRedirects(cmd, stdin_source, cmd_shenv, opened_files):
         elif op == ('<',):
             redirects[0] = [filename, 'r', None]
         else:
-            raise InternalShellError(cmd, "Unsupported redirect: %r" % (r,))
+            raise InternalShellError(cmd, "Unsupported redirect: %r" % ((op, filename),))
 
     # Open file descriptors in a second pass.
     std_fds = [None, None, None]
@@ -711,6 +711,7 @@ def executeScript(test, litConfig, tmpBase, commands, cwd):
       mode += 'b'  # Avoid CRLFs when writing bash scripts.
     f = open(script, mode)
     if isWin32CMDEXE:
+        f.write('@echo off\n')
         f.write('\nif %ERRORLEVEL% NEQ 0 EXIT\n'.join(commands))
     else:
         if test.config.pipefail:
@@ -787,9 +788,13 @@ def parseIntegratedTestScriptCommands(source_path, keywords):
             # command. Note that we take care to return regular strings in
             # Python 2, to avoid other code having to differentiate between the
             # str and unicode types.
+            #
+            # Opening the file in binary mode prevented Windows \r newline
+            # characters from being converted to Unix \n newlines, so manually
+            # strip those from the yielded lines.
             keyword,ln = match.groups()
             yield (line_number, to_string(keyword.decode('utf-8')),
-                   to_string(ln.decode('utf-8')))
+                   to_string(ln.decode('utf-8').rstrip('\r')))
     finally:
         f.close()
 

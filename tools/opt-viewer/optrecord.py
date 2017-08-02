@@ -12,8 +12,10 @@ except ImportError:
 
 import cgi
 from collections import defaultdict
+import fnmatch
 import functools
 from multiprocessing import Lock
+import os, os.path
 import subprocess
 
 import optpmap
@@ -47,7 +49,7 @@ def demangle(name):
 
 
 def html_file_name(filename):
-    return filename.replace('/', '_') + ".html"
+    return filename.replace('/', '_').replace('#', '_') + ".html"
 
 
 def make_link(File, Line):
@@ -58,11 +60,54 @@ class Remark(yaml.YAMLObject):
     # Work-around for http://pyyaml.org/ticket/154.
     yaml_loader = Loader
 
-    def initmissing(self):
+    # Intern all strings since we have lot of duplication across filenames,
+    # remark text.
+    #
+    # Change Args from a list of dicts to a tuple of tuples.  This saves
+    # memory in two ways.  One, a small tuple is significantly smaller than a
+    # small dict.  Two, using tuple instead of list allows Args to be directly
+    # used as part of the key (in Python only immutable types are hashable).
+    def _reduce_memory(self):
+        self.Pass = intern(self.Pass)
+        self.Name = intern(self.Name)
+        self.Function = intern(self.Function)
+
+        def _reduce_memory_dict(old_dict):
+            new_dict = dict()
+            for (k, v) in old_dict.iteritems():
+                if type(k) is str:
+                    k = intern(k)
+
+                if type(v) is str:
+                    v = intern(v)
+                elif type(v) is dict:
+                    # This handles [{'Caller': ..., 'DebugLoc': { 'File': ... }}]
+                    v = _reduce_memory_dict(v)
+                new_dict[k] = v
+            return tuple(new_dict.items())
+
+        self.Args = tuple([_reduce_memory_dict(arg_dict) for arg_dict in self.Args])
+
+    # The inverse operation of the dictonary-related memory optimization in
+    # _reduce_memory_dict.  E.g.
+    #     (('DebugLoc', (('File', ...) ... ))) -> [{'DebugLoc': {'File': ...} ....}]
+    def recover_yaml_structure(self):
+        def tuple_to_dict(t):
+            d = dict()
+            for (k, v) in t:
+                if type(v) is tuple:
+                    v = tuple_to_dict(v)
+                d[k] = v
+            return d
+
+        self.Args = [tuple_to_dict(arg_tuple) for arg_tuple in self.Args]
+
+    def canonicalize(self):
         if not hasattr(self, 'Hotness'):
             self.Hotness = 0
         if not hasattr(self, 'Args'):
             self.Args = []
+        self._reduce_memory()
 
     @property
     def File(self):
@@ -89,7 +134,7 @@ class Remark(yaml.YAMLObject):
         return make_link(self.File, self.Line)
 
     def getArgString(self, mapping):
-        mapping = mapping.copy()
+        mapping = dict(list(mapping))
         dl = mapping.get('DebugLoc')
         if dl:
             del mapping['DebugLoc']
@@ -101,8 +146,9 @@ class Remark(yaml.YAMLObject):
             value = cgi.escape(demangle(value))
 
         if dl and key != 'Caller':
+            dl_dict = dict(list(dl))
             return "<a href={}>{}</a>".format(
-                make_link(dl['File'], dl['Line']), value)
+                make_link(dl_dict['File'], dl_dict['Line']), value)
         else:
             return value
 
@@ -133,13 +179,8 @@ class Remark(yaml.YAMLObject):
 
     @property
     def key(self):
-        k = (self.__class__, self.PassWithDiffPrefix, self.Name, self.File, self.Line, self.Column, self.Function)
-        for arg in self.Args:
-            for (key, value) in iteritems(arg):
-                if type(value) is dict:
-                    value = tuple(value.items())
-                k += (key, value)
-        return k
+        return (self.__class__, self.PassWithDiffPrefix, self.Name, self.File,
+                self.Line, self.Column, self.Function, self.Args)
 
     def __hash__(self):
         return hash(self.key)
@@ -191,7 +232,7 @@ def get_remarks(input_file):
     with open(input_file) as f:
         docs = yaml.load_all(f, Loader=Loader)
         for remark in docs:
-            remark.initmissing()
+            remark.canonicalize()
             # Avoid remarks withoug debug location or if they are duplicated
             if not hasattr(remark, 'DebugLoc') or remark.key in all_remarks:
                 continue
@@ -233,3 +274,19 @@ def gather_results(filenames, num_jobs, should_print_progress):
         all_remarks.update(all_remarks_job)
 
     return all_remarks, file_remarks, max_hotness != 0
+
+
+def find_opt_files(dirs_or_files):
+    all = []
+    for dir_or_file in dirs_or_files:
+        if os.path.isfile(dir_or_file):
+            all.append(dir_or_file)
+        else:
+            for dir, subdirs, files in os.walk(dir_or_file):
+                # Exclude mounted directories and symlinks (os.walk default).
+                subdirs[:] = [d for d in subdirs
+                              if not os.path.ismount(os.path.join(dir, d))]
+                for file in files:
+                    if fnmatch.fnmatch(file, "*.opt.yaml"):
+                        all.append(os.path.join(dir, file))
+    return all

@@ -101,7 +101,10 @@ SystemZTargetLowering::SystemZTargetLowering(const TargetMachine &TM,
     addRegisterClass(MVT::f32, &SystemZ::FP32BitRegClass);
     addRegisterClass(MVT::f64, &SystemZ::FP64BitRegClass);
   }
-  addRegisterClass(MVT::f128, &SystemZ::FP128BitRegClass);
+  if (Subtarget.hasVectorEnhancements1())
+    addRegisterClass(MVT::f128, &SystemZ::VR128BitRegClass);
+  else
+    addRegisterClass(MVT::f128, &SystemZ::FP128BitRegClass);
 
   if (Subtarget.hasVector()) {
     addRegisterClass(MVT::v16i8, &SystemZ::VR128BitRegClass);
@@ -316,7 +319,10 @@ SystemZTargetLowering::SystemZTargetLowering(const TargetMachine &TM,
       setOperationAction(ISD::AND, VT, Legal);
       setOperationAction(ISD::OR, VT, Legal);
       setOperationAction(ISD::XOR, VT, Legal);
-      setOperationAction(ISD::CTPOP, VT, Custom);
+      if (Subtarget.hasVectorEnhancements1())
+        setOperationAction(ISD::CTPOP, VT, Legal);
+      else
+        setOperationAction(ISD::CTPOP, VT, Custom);
       setOperationAction(ISD::CTTZ, VT, Legal);
       setOperationAction(ISD::CTLZ, VT, Legal);
 
@@ -414,16 +420,72 @@ SystemZTargetLowering::SystemZTargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::FROUND, MVT::v2f64, Legal);
   }
 
+  // The vector enhancements facility 1 has instructions for these.
+  if (Subtarget.hasVectorEnhancements1()) {
+    setOperationAction(ISD::FADD, MVT::v4f32, Legal);
+    setOperationAction(ISD::FNEG, MVT::v4f32, Legal);
+    setOperationAction(ISD::FSUB, MVT::v4f32, Legal);
+    setOperationAction(ISD::FMUL, MVT::v4f32, Legal);
+    setOperationAction(ISD::FMA, MVT::v4f32, Legal);
+    setOperationAction(ISD::FDIV, MVT::v4f32, Legal);
+    setOperationAction(ISD::FABS, MVT::v4f32, Legal);
+    setOperationAction(ISD::FSQRT, MVT::v4f32, Legal);
+    setOperationAction(ISD::FRINT, MVT::v4f32, Legal);
+    setOperationAction(ISD::FNEARBYINT, MVT::v4f32, Legal);
+    setOperationAction(ISD::FFLOOR, MVT::v4f32, Legal);
+    setOperationAction(ISD::FCEIL, MVT::v4f32, Legal);
+    setOperationAction(ISD::FTRUNC, MVT::v4f32, Legal);
+    setOperationAction(ISD::FROUND, MVT::v4f32, Legal);
+
+    setOperationAction(ISD::FMAXNUM, MVT::f64, Legal);
+    setOperationAction(ISD::FMAXNAN, MVT::f64, Legal);
+    setOperationAction(ISD::FMINNUM, MVT::f64, Legal);
+    setOperationAction(ISD::FMINNAN, MVT::f64, Legal);
+
+    setOperationAction(ISD::FMAXNUM, MVT::v2f64, Legal);
+    setOperationAction(ISD::FMAXNAN, MVT::v2f64, Legal);
+    setOperationAction(ISD::FMINNUM, MVT::v2f64, Legal);
+    setOperationAction(ISD::FMINNAN, MVT::v2f64, Legal);
+
+    setOperationAction(ISD::FMAXNUM, MVT::f32, Legal);
+    setOperationAction(ISD::FMAXNAN, MVT::f32, Legal);
+    setOperationAction(ISD::FMINNUM, MVT::f32, Legal);
+    setOperationAction(ISD::FMINNAN, MVT::f32, Legal);
+
+    setOperationAction(ISD::FMAXNUM, MVT::v4f32, Legal);
+    setOperationAction(ISD::FMAXNAN, MVT::v4f32, Legal);
+    setOperationAction(ISD::FMINNUM, MVT::v4f32, Legal);
+    setOperationAction(ISD::FMINNAN, MVT::v4f32, Legal);
+
+    setOperationAction(ISD::FMAXNUM, MVT::f128, Legal);
+    setOperationAction(ISD::FMAXNAN, MVT::f128, Legal);
+    setOperationAction(ISD::FMINNUM, MVT::f128, Legal);
+    setOperationAction(ISD::FMINNAN, MVT::f128, Legal);
+  }
+
   // We have fused multiply-addition for f32 and f64 but not f128.
   setOperationAction(ISD::FMA, MVT::f32,  Legal);
   setOperationAction(ISD::FMA, MVT::f64,  Legal);
-  setOperationAction(ISD::FMA, MVT::f128, Expand);
+  if (Subtarget.hasVectorEnhancements1())
+    setOperationAction(ISD::FMA, MVT::f128, Legal);
+  else
+    setOperationAction(ISD::FMA, MVT::f128, Expand);
+
+  // We don't have a copysign instruction on vector registers.
+  if (Subtarget.hasVectorEnhancements1())
+    setOperationAction(ISD::FCOPYSIGN, MVT::f128, Expand);
 
   // Needed so that we don't try to implement f128 constant loads using
   // a load-and-extend of a f80 constant (in cases where the constant
   // would fit in an f80).
   for (MVT VT : MVT::fp_valuetypes())
     setLoadExtAction(ISD::EXTLOAD, VT, MVT::f80, Expand);
+
+  // We don't have extending load instruction on vector registers.
+  if (Subtarget.hasVectorEnhancements1()) {
+    setLoadExtAction(ISD::EXTLOAD, MVT::f128, MVT::f32, Expand);
+    setLoadExtAction(ISD::EXTLOAD, MVT::f128, MVT::f64, Expand);
+  }
 
   // Floating-point truncation and stores need to be done separately.
   setTruncStoreAction(MVT::f64,  MVT::f32, Expand);
@@ -489,7 +551,7 @@ bool SystemZTargetLowering::isFMAFasterThanFMulAndFAdd(EVT VT) const {
   case MVT::f64:
     return true;
   case MVT::f128:
-    return false;
+    return Subtarget.hasVectorEnhancements1();
   default:
     break;
   }
@@ -524,9 +586,107 @@ bool SystemZTargetLowering::allowsMisalignedMemoryAccesses(EVT VT,
   return true;
 }
 
+// Information about the addressing mode for a memory access.
+struct AddressingMode {
+  // True if a long displacement is supported.
+  bool LongDisplacement;
+
+  // True if use of index register is supported.
+  bool IndexReg;
+  
+  AddressingMode(bool LongDispl, bool IdxReg) :
+    LongDisplacement(LongDispl), IndexReg(IdxReg) {}
+};
+
+// Return the desired addressing mode for a Load which has only one use (in
+// the same block) which is a Store.
+static AddressingMode getLoadStoreAddrMode(bool HasVector,
+                                          Type *Ty) {
+  // With vector support a Load->Store combination may be combined to either
+  // an MVC or vector operations and it seems to work best to allow the
+  // vector addressing mode.
+  if (HasVector)
+    return AddressingMode(false/*LongDispl*/, true/*IdxReg*/);
+
+  // Otherwise only the MVC case is special.
+  bool MVC = Ty->isIntegerTy(8);
+  return AddressingMode(!MVC/*LongDispl*/, !MVC/*IdxReg*/);
+}
+
+// Return the addressing mode which seems most desirable given an LLVM
+// Instruction pointer.
+static AddressingMode
+supportedAddressingMode(Instruction *I, bool HasVector) {
+  if (IntrinsicInst *II = dyn_cast<IntrinsicInst>(I)) {
+    switch (II->getIntrinsicID()) {
+    default: break;
+    case Intrinsic::memset:
+    case Intrinsic::memmove:
+    case Intrinsic::memcpy:
+      return AddressingMode(false/*LongDispl*/, false/*IdxReg*/);
+    }
+  }
+
+  if (isa<LoadInst>(I) && I->hasOneUse()) {
+    auto *SingleUser = dyn_cast<Instruction>(*I->user_begin());
+    if (SingleUser->getParent() == I->getParent()) {
+      if (isa<ICmpInst>(SingleUser)) {
+        if (auto *C = dyn_cast<ConstantInt>(SingleUser->getOperand(1)))
+          if (isInt<16>(C->getSExtValue()) || isUInt<16>(C->getZExtValue()))
+            // Comparison of memory with 16 bit signed / unsigned immediate
+            return AddressingMode(false/*LongDispl*/, false/*IdxReg*/);
+      } else if (isa<StoreInst>(SingleUser))
+        // Load->Store
+        return getLoadStoreAddrMode(HasVector, I->getType());
+    }
+  } else if (auto *StoreI = dyn_cast<StoreInst>(I)) {
+    if (auto *LoadI = dyn_cast<LoadInst>(StoreI->getValueOperand()))
+      if (LoadI->hasOneUse() && LoadI->getParent() == I->getParent())
+        // Load->Store
+        return getLoadStoreAddrMode(HasVector, LoadI->getType());
+  }
+
+  if (HasVector && (isa<LoadInst>(I) || isa<StoreInst>(I))) {
+
+    // * Use LDE instead of LE/LEY for z13 to avoid partial register
+    //   dependencies (LDE only supports small offsets).
+    // * Utilize the vector registers to hold floating point
+    //   values (vector load / store instructions only support small
+    //   offsets).
+
+    Type *MemAccessTy = (isa<LoadInst>(I) ? I->getType() :
+                         I->getOperand(0)->getType());
+    bool IsFPAccess = MemAccessTy->isFloatingPointTy();
+    bool IsVectorAccess = MemAccessTy->isVectorTy();
+
+    // A store of an extracted vector element will be combined into a VSTE type
+    // instruction.
+    if (!IsVectorAccess && isa<StoreInst>(I)) {
+      Value *DataOp = I->getOperand(0);
+      if (isa<ExtractElementInst>(DataOp))
+        IsVectorAccess = true;
+    }
+
+    // A load which gets inserted into a vector element will be combined into a
+    // VLE type instruction.
+    if (!IsVectorAccess && isa<LoadInst>(I) && I->hasOneUse()) {
+      User *LoadUser = *I->user_begin();
+      if (isa<InsertElementInst>(LoadUser))
+        IsVectorAccess = true;
+    }
+
+    if (IsFPAccess || IsVectorAccess)
+      return AddressingMode(false/*LongDispl*/, true/*IdxReg*/);
+  }
+
+  return AddressingMode(true/*LongDispl*/, true/*IdxReg*/);
+}
+
+// TODO: This method should also check for the displacement when *I is
+// passed. It may also be possible to merge with isFoldableMemAccessOffset()
+// now that both methods get the *I.
 bool SystemZTargetLowering::isLegalAddressingMode(const DataLayout &DL,
-                                                  const AddrMode &AM, Type *Ty,
-                                                  unsigned AS) const {
+            const AddrMode &AM, Type *Ty, unsigned AS, Instruction *I) const {
   // Punt on globals for now, although they can be used in limited
   // RELATIVE LONG cases.
   if (AM.BaseGV)
@@ -536,46 +696,20 @@ bool SystemZTargetLowering::isLegalAddressingMode(const DataLayout &DL,
   if (!isInt<20>(AM.BaseOffs))
     return false;
 
-  // Indexing is OK but no scale factor can be applied.
-  return AM.Scale == 0 || AM.Scale == 1;
+  if (I != nullptr &&
+      !supportedAddressingMode(I, Subtarget.hasVector()).IndexReg)
+    // No indexing allowed.
+    return AM.Scale == 0;
+  else
+    // Indexing is OK but no scale factor can be applied.
+    return AM.Scale == 0 || AM.Scale == 1;
 }
 
+// TODO: Should we check for isInt<20> also?
 bool SystemZTargetLowering::isFoldableMemAccessOffset(Instruction *I,
                                                       int64_t Offset) const {
-  // This only applies to z13.
-  if (!Subtarget.hasVector())
-    return true;
-
-  // * Use LDE instead of LE/LEY to avoid partial register
-  //   dependencies (LDE only supports small offsets).
-  // * Utilize the vector registers to hold floating point
-  //   values (vector load / store instructions only support small
-  //   offsets).
-
-  assert (isa<LoadInst>(I) || isa<StoreInst>(I));
-  Type *MemAccessTy = (isa<LoadInst>(I) ? I->getType() :
-                       I->getOperand(0)->getType());
-  bool IsFPAccess = MemAccessTy->isFloatingPointTy();
-  bool IsVectorAccess = MemAccessTy->isVectorTy();
-
-  // A store of an extracted vector element will be combined into a VSTE type
-  // instruction.
-  if (!IsVectorAccess && isa<StoreInst>(I)) {
-    Value *DataOp = I->getOperand(0);
-    if (isa<ExtractElementInst>(DataOp))
-      IsVectorAccess = true;
-  }
-
-  // A load which gets inserted into a vector element will be combined into a
-  // VLE type instruction.
-  if (!IsVectorAccess && isa<LoadInst>(I) && I->hasOneUse()) {
-    User *LoadUser = *I->user_begin();
-    if (isa<InsertElementInst>(LoadUser))
-      IsVectorAccess = true;
-  }
-
-  if (!isUInt<12>(Offset) && (IsFPAccess || IsVectorAccess))
-    return false;
+  if (!supportedAddressingMode(I, Subtarget.hasVector()).LongDisplacement)
+    return (isUInt<12>(Offset));
 
   return true;
 }
@@ -1462,21 +1596,25 @@ static bool isIntrinsicWithCC(SDValue Op, unsigned &Opcode, unsigned &CCValid) {
     return true;
 
   case Intrinsic::s390_vfcedbs:
+  case Intrinsic::s390_vfcesbs:
     Opcode = SystemZISD::VFCMPES;
     CCValid = SystemZ::CCMASK_VCMP;
     return true;
 
   case Intrinsic::s390_vfchdbs:
+  case Intrinsic::s390_vfchsbs:
     Opcode = SystemZISD::VFCMPHS;
     CCValid = SystemZ::CCMASK_VCMP;
     return true;
 
   case Intrinsic::s390_vfchedbs:
+  case Intrinsic::s390_vfchesbs:
     Opcode = SystemZISD::VFCMPHES;
     CCValid = SystemZ::CCMASK_VCMP;
     return true;
 
   case Intrinsic::s390_vftcidb:
+  case Intrinsic::s390_vftcisb:
     Opcode = SystemZISD::VFTCI;
     CCValid = SystemZ::CCMASK_VCMP;
     return true;
@@ -2316,11 +2454,15 @@ static SDValue expandV4F32ToV2F64(SelectionDAG &DAG, int Start, const SDLoc &DL,
 
 // Build a comparison of vectors CmpOp0 and CmpOp1 using opcode Opcode,
 // producing a result of type VT.
-static SDValue getVectorCmp(SelectionDAG &DAG, unsigned Opcode, const SDLoc &DL,
-                            EVT VT, SDValue CmpOp0, SDValue CmpOp1) {
-  // There is no hardware support for v4f32, so extend the vector into
-  // two v2f64s and compare those.
-  if (CmpOp0.getValueType() == MVT::v4f32) {
+SDValue SystemZTargetLowering::getVectorCmp(SelectionDAG &DAG, unsigned Opcode,
+                                            const SDLoc &DL, EVT VT,
+                                            SDValue CmpOp0,
+                                            SDValue CmpOp1) const {
+  // There is no hardware support for v4f32 (unless we have the vector
+  // enhancements facility 1), so extend the vector into two v2f64s
+  // and compare those.
+  if (CmpOp0.getValueType() == MVT::v4f32 &&
+      !Subtarget.hasVectorEnhancements1()) {
     SDValue H0 = expandV4F32ToV2F64(DAG, 0, DL, CmpOp0);
     SDValue L0 = expandV4F32ToV2F64(DAG, 2, DL, CmpOp0);
     SDValue H1 = expandV4F32ToV2F64(DAG, 0, DL, CmpOp1);
@@ -2334,9 +2476,11 @@ static SDValue getVectorCmp(SelectionDAG &DAG, unsigned Opcode, const SDLoc &DL,
 
 // Lower a vector comparison of type CC between CmpOp0 and CmpOp1, producing
 // an integer mask of type VT.
-static SDValue lowerVectorSETCC(SelectionDAG &DAG, const SDLoc &DL, EVT VT,
-                                ISD::CondCode CC, SDValue CmpOp0,
-                                SDValue CmpOp1) {
+SDValue SystemZTargetLowering::lowerVectorSETCC(SelectionDAG &DAG,
+                                                const SDLoc &DL, EVT VT,
+                                                ISD::CondCode CC,
+                                                SDValue CmpOp0,
+                                                SDValue CmpOp1) const {
   bool IsFP = CmpOp0.getValueType().isFloatingPoint();
   bool Invert = false;
   SDValue Cmp;
@@ -2960,6 +3104,12 @@ SDValue SystemZTargetLowering::lowerSMUL_LOHI(SDValue Op,
     // We define this so that it can be used for constant division.
     lowerMUL_LOHI32(DAG, DL, ISD::SIGN_EXTEND, Op.getOperand(0),
                     Op.getOperand(1), Ops[1], Ops[0]);
+  else if (Subtarget.hasMiscellaneousExtensions2())
+    // SystemZISD::SMUL_LOHI returns the low result in the odd register and
+    // the high result in the even register.  ISD::SMUL_LOHI is defined to
+    // return the low half first, so the results are in reverse order.
+    lowerGR128Binary(DAG, DL, VT, SystemZISD::SMUL_LOHI,
+                     Op.getOperand(0), Op.getOperand(1), Ops[1], Ops[0]);
   else {
     // Do a full 128-bit multiplication based on SystemZISD::UMUL_LOHI:
     //
@@ -4658,6 +4808,7 @@ const char *SystemZTargetLowering::getTargetNodeName(unsigned Opcode) const {
     OPCODE(SELECT_CCMASK);
     OPCODE(ADJDYNALLOC);
     OPCODE(POPCNT);
+    OPCODE(SMUL_LOHI);
     OPCODE(UMUL_LOHI);
     OPCODE(SDIVREM);
     OPCODE(UDIVREM);
@@ -6118,6 +6269,7 @@ MachineBasicBlock *SystemZTargetLowering::EmitInstrWithCustomInserter(
   case SystemZ::SelectF32:
   case SystemZ::SelectF64:
   case SystemZ::SelectF128:
+  case SystemZ::SelectVR128:
     return emitSelect(MI, MBB, 0);
 
   case SystemZ::CondStore8Mux:

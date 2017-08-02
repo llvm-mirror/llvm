@@ -88,6 +88,7 @@ enum NodeType : unsigned {
 
   // Wrappers around the ISD opcodes of the same name.  The output is GR128.
   // Input operands may be GR64 or GR32, depending on the instruction.
+  SMUL_LOHI,
   UMUL_LOHI,
   SDIVREM,
   UDIVREM,
@@ -383,7 +384,8 @@ public:
   bool isLegalICmpImmediate(int64_t Imm) const override;
   bool isLegalAddImmediate(int64_t Imm) const override;
   bool isLegalAddressingMode(const DataLayout &DL, const AddrMode &AM, Type *Ty,
-                             unsigned AS) const override;
+                             unsigned AS,
+                             Instruction *I = nullptr) const override;
   bool isFoldableMemAccessOffset(Instruction *I, int64_t Offset) const override;
   bool allowsMisalignedMemoryAccesses(EVT VT, unsigned AS,
                                       unsigned Align,
@@ -479,6 +481,12 @@ private:
   const SystemZSubtarget &Subtarget;
 
   // Implement LowerOperation for individual opcodes.
+  SDValue getVectorCmp(SelectionDAG &DAG, unsigned Opcode,
+                       const SDLoc &DL, EVT VT,
+                       SDValue CmpOp0, SDValue CmpOp1) const;
+  SDValue lowerVectorSETCC(SelectionDAG &DAG, const SDLoc &DL,
+                           EVT VT, ISD::CondCode CC,
+                           SDValue CmpOp0, SDValue CmpOp1) const;
   SDValue lowerSETCC(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerBR_CC(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const;

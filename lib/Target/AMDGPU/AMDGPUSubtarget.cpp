@@ -167,6 +167,7 @@ AMDGPUSubtarget::AMDGPUSubtarget(const Triple &TT, StringRef GPU, StringRef FS,
     FlatInstOffsets(false),
     FlatGlobalInsts(false),
     FlatScratchInsts(false),
+    AddNoCarryInsts(false),
 
     R600ALUInst(false),
     CaymanISA(false),
@@ -277,7 +278,7 @@ std::pair<unsigned, unsigned> AMDGPUSubtarget::getWavesPerEU(
   // Make sure requested values are compatible with values implied by requested
   // minimum/maximum flat work group sizes.
   if (RequestedFlatWorkGroupSize &&
-      Requested.first > MinImpliedByFlatWorkGroupSize)
+      Requested.first < MinImpliedByFlatWorkGroupSize)
     return Default;
 
   return Requested;

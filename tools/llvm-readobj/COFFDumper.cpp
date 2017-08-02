@@ -1215,8 +1215,7 @@ void COFFDumper::mergeCodeViewTypes(TypeTableBuilder &CVIDs,
         error(object_error::parse_failed);
       }
       SmallVector<TypeIndex, 128> SourceToDest;
-      if (auto EC = mergeTypeAndIdRecords(CVIDs, CVTypes, SourceToDest, nullptr,
-                                          Types))
+      if (auto EC = mergeTypeAndIdRecords(CVIDs, CVTypes, SourceToDest, Types))
         return error(std::move(EC));
     }
   }
@@ -1628,7 +1627,7 @@ void COFFDumper::printCOFFDirectives() {
   }
 }
 
-static StringRef getBaseRelocTypeName(uint8_t Type) {
+static std::string getBaseRelocTypeName(uint8_t Type) {
   switch (Type) {
   case COFF::IMAGE_REL_BASED_ABSOLUTE: return "ABSOLUTE";
   case COFF::IMAGE_REL_BASED_HIGH: return "HIGH";
@@ -1637,11 +1636,7 @@ static StringRef getBaseRelocTypeName(uint8_t Type) {
   case COFF::IMAGE_REL_BASED_HIGHADJ: return "HIGHADJ";
   case COFF::IMAGE_REL_BASED_ARM_MOV32T: return "ARM_MOV32(T)";
   case COFF::IMAGE_REL_BASED_DIR64: return "DIR64";
-  default: {
-    static std::string Result;
-    Result = "unknown (" + llvm::utostr(Type) + ")";
-    return Result;
-  }
+  default: return "unknown (" + llvm::utostr(Type) + ")";
   }
 }
 

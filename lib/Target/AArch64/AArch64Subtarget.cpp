@@ -130,11 +130,15 @@ void AArch64Subtarget::initializeProperties() {
     MinVectorRegisterBitWidth = 128;
     break;
   case CortexA35: break;
-  case CortexA53: break;
+  case CortexA53:
+    PrefFunctionAlignment = 3;
+    break;
   case CortexA72:
     PrefFunctionAlignment = 4;
     break;
-  case CortexA73: break;
+  case CortexA73:
+    PrefFunctionAlignment = 4;
+    break;
   case Others: break;
   }
 }
@@ -171,7 +175,8 @@ struct AArch64GISelActualAccessor : public GISelAccessor {
 AArch64Subtarget::AArch64Subtarget(const Triple &TT, const std::string &CPU,
                                    const std::string &FS,
                                    const TargetMachine &TM, bool LittleEndian)
-    : AArch64GenSubtargetInfo(TT, CPU, FS), ReserveX18(TT.isOSDarwin()),
+    : AArch64GenSubtargetInfo(TT, CPU, FS),
+      ReserveX18(TT.isOSDarwin() || TT.isOSWindows()),
       IsLittle(LittleEndian), TargetTriple(TT), FrameLowering(),
       InstrInfo(initializeSubtargetDependencies(FS, CPU)), TSInfo(),
       TLInfo(TM, *this), GISel() {

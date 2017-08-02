@@ -960,7 +960,7 @@ define <64 x i8> @test16(i64 %x) {
 ; KNL-NEXT:    vinserti128 $1, %xmm2, %ymm1, %ymm1
 ; KNL-NEXT:    vpsllw $7, %ymm0, %ymm0
 ; KNL-NEXT:    vpand {{.*}}(%rip), %ymm0, %ymm0
-; KNL-NEXT:    vpxor %ymm2, %ymm2, %ymm2
+; KNL-NEXT:    vpxor %xmm2, %xmm2, %xmm2
 ; KNL-NEXT:    vpcmpgtb %ymm0, %ymm2, %ymm0
 ; KNL-NEXT:    movq %rbp, %rsp
 ; KNL-NEXT:    popq %rbp
@@ -1030,7 +1030,7 @@ define <64 x i8> @test16(i64 %x) {
 ; AVX512DQ-NEXT:    vinserti128 $1, %xmm2, %ymm1, %ymm1
 ; AVX512DQ-NEXT:    vpsllw $7, %ymm0, %ymm0
 ; AVX512DQ-NEXT:    vpand {{.*}}(%rip), %ymm0, %ymm0
-; AVX512DQ-NEXT:    vpxor %ymm2, %ymm2, %ymm2
+; AVX512DQ-NEXT:    vpxor %xmm2, %xmm2, %xmm2
 ; AVX512DQ-NEXT:    vpcmpgtb %ymm0, %ymm2, %ymm0
 ; AVX512DQ-NEXT:    movq %rbp, %rsp
 ; AVX512DQ-NEXT:    popq %rbp
@@ -1078,7 +1078,7 @@ define <64 x i8> @test17(i64 %x, i32 %y, i32 %z) {
 ; KNL-NEXT:    vinserti128 $1, %xmm2, %ymm1, %ymm1
 ; KNL-NEXT:    vpsllw $7, %ymm0, %ymm0
 ; KNL-NEXT:    vpand {{.*}}(%rip), %ymm0, %ymm0
-; KNL-NEXT:    vpxor %ymm2, %ymm2, %ymm2
+; KNL-NEXT:    vpxor %xmm2, %xmm2, %xmm2
 ; KNL-NEXT:    vpcmpgtb %ymm0, %ymm2, %ymm0
 ; KNL-NEXT:    movq %rbp, %rsp
 ; KNL-NEXT:    popq %rbp
@@ -1152,7 +1152,7 @@ define <64 x i8> @test17(i64 %x, i32 %y, i32 %z) {
 ; AVX512DQ-NEXT:    vinserti128 $1, %xmm2, %ymm1, %ymm1
 ; AVX512DQ-NEXT:    vpsllw $7, %ymm0, %ymm0
 ; AVX512DQ-NEXT:    vpand {{.*}}(%rip), %ymm0, %ymm0
-; AVX512DQ-NEXT:    vpxor %ymm2, %ymm2, %ymm2
+; AVX512DQ-NEXT:    vpxor %xmm2, %xmm2, %xmm2
 ; AVX512DQ-NEXT:    vpcmpgtb %ymm0, %ymm2, %ymm0
 ; AVX512DQ-NEXT:    movq %rbp, %rsp
 ; AVX512DQ-NEXT:    popq %rbp
@@ -1630,10 +1630,8 @@ define void @f1(i32 %c) {
 ; CHECK-LABEL: f1:
 ; CHECK:       ## BB#0: ## %entry
 ; CHECK-NEXT:    movzbl {{.*}}(%rip), %edi
-; CHECK-NEXT:    movl %edi, %eax
-; CHECK-NEXT:    xorb $1, %al
-; CHECK-NEXT:    movb %al, {{.*}}(%rip)
 ; CHECK-NEXT:    xorl $1, %edi
+; CHECK-NEXT:    movb %dil, {{.*}}(%rip)
 ; CHECK-NEXT:    jmp _f2 ## TAILCALL
 entry:
   %.b1 = load i1, i1* @f1.v, align 4

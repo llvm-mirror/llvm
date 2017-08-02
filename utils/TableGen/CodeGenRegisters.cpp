@@ -1268,12 +1268,12 @@ void CodeGenRegBank::computeSubRegLaneMasks() {
   CoveringLanes = LaneBitmask::getAll();
   for (auto &Idx : SubRegIndices) {
     if (Idx.getComposites().empty()) {
-      if (Bit > 32) {
+      if (Bit > LaneBitmask::BitWidth) {
         PrintFatalError(
           Twine("Ran out of lanemask bits to represent subregister ")
           + Idx.getName());
       }
-      Idx.LaneMask = LaneBitmask(1 << Bit);
+      Idx.LaneMask = LaneBitmask::getLane(Bit);
       ++Bit;
     } else {
       Idx.LaneMask = LaneBitmask::getNone();
@@ -1295,12 +1295,10 @@ void CodeGenRegBank::computeSubRegLaneMasks() {
       // Moving from a class with no subregisters we just had a single lane:
       // The subregister must be a leaf subregister and only occupies 1 bit.
       // Move the bit from the class without subregisters into that position.
-      static_assert(sizeof(Idx.LaneMask.getAsInteger()) == 4,
-                    "Change Log2_32 to a proper one");
-      unsigned DstBit = Log2_32(Idx.LaneMask.getAsInteger());
-      assert(Idx.LaneMask == LaneBitmask(1 << DstBit) &&
+      unsigned DstBit = Idx.LaneMask.getHighestLane();
+      assert(Idx.LaneMask == LaneBitmask::getLane(DstBit) &&
              "Must be a leaf subregister");
-      MaskRolPair MaskRol = { LaneBitmask(1), (uint8_t)DstBit };
+      MaskRolPair MaskRol = { LaneBitmask::getLane(0), (uint8_t)DstBit };
       LaneTransforms.push_back(MaskRol);
     } else {
       // Go through all leaf subregisters and find the ones that compose with
@@ -1314,7 +1312,7 @@ void CodeGenRegBank::computeSubRegLaneMasks() {
           continue;
         // Replicate the behaviour from the lane mask generation loop above.
         unsigned SrcBit = NextBit;
-        LaneBitmask SrcMask = LaneBitmask(1 << SrcBit);
+        LaneBitmask SrcMask = LaneBitmask::getLane(SrcBit);
         if (NextBit < LaneBitmask::BitWidth-1)
           ++NextBit;
         assert(Idx2.LaneMask == SrcMask);
@@ -1328,9 +1326,7 @@ void CodeGenRegBank::computeSubRegLaneMasks() {
         assert(Composite->getComposites().empty());
 
         // Create Mask+Rotate operation and merge with existing ops if possible.
-        static_assert(sizeof(Composite->LaneMask.getAsInteger()) == 4,
-                      "Change Log2_32 to a proper one");
-        unsigned DstBit = Log2_32(Composite->LaneMask.getAsInteger());
+        unsigned DstBit = Composite->LaneMask.getHighestLane();
         int Shift = DstBit - SrcBit;
         uint8_t RotateLeft = Shift >= 0 ? (uint8_t)Shift
                                         : LaneBitmask::BitWidth + Shift;
@@ -1386,7 +1382,7 @@ void CodeGenRegBank::computeSubRegLaneMasks() {
     // For classes without any subregisters set LaneMask to 1 instead of 0.
     // This makes it easier for client code to handle classes uniformly.
     if (LaneMask.none())
-      LaneMask = LaneBitmask(1);
+      LaneMask = LaneBitmask::getLane(0);
 
     RegClass.LaneMask = LaneMask;
   }

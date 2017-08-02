@@ -19,6 +19,7 @@
 #include "AMDGPUInstrInfo.h"
 #include "SIDefines.h"
 #include "SIRegisterInfo.h"
+#include "llvm/ADT/SetVector.h"
 
 namespace llvm {
 
@@ -38,6 +39,8 @@ private:
     EXECZ = 3
   };
 
+  typedef SmallSetVector<MachineInstr *, 32> SetVectorType;
+
   static unsigned getBranchOpcode(BranchPredicate Cond);
   static BranchPredicate getBranchPredicate(unsigned Opcode);
 
@@ -56,30 +59,30 @@ private:
 
   void swapOperands(MachineInstr &Inst) const;
 
-  void lowerScalarAbs(SmallVectorImpl<MachineInstr *> &Worklist,
+  void lowerScalarAbs(SetVectorType &Worklist,
                       MachineInstr &Inst) const;
 
-  void splitScalar64BitUnaryOp(SmallVectorImpl<MachineInstr *> &Worklist,
+  void splitScalar64BitUnaryOp(SetVectorType &Worklist,
                                MachineInstr &Inst, unsigned Opcode) const;
 
-  void splitScalar64BitBinaryOp(SmallVectorImpl<MachineInstr *> &Worklist,
+  void splitScalar64BitBinaryOp(SetVectorType &Worklist,
                                 MachineInstr &Inst, unsigned Opcode) const;
 
-  void splitScalar64BitBCNT(SmallVectorImpl<MachineInstr *> &Worklist,
+  void splitScalar64BitBCNT(SetVectorType &Worklist,
                             MachineInstr &Inst) const;
-  void splitScalar64BitBFE(SmallVectorImpl<MachineInstr *> &Worklist,
+  void splitScalar64BitBFE(SetVectorType &Worklist,
                            MachineInstr &Inst) const;
-  void movePackToVALU(SmallVectorImpl<MachineInstr *> &Worklist,
+  void movePackToVALU(SetVectorType &Worklist,
                       MachineRegisterInfo &MRI,
                       MachineInstr &Inst) const;
 
   void addUsersToMoveToVALUWorklist(
     unsigned Reg, MachineRegisterInfo &MRI,
-    SmallVectorImpl<MachineInstr *> &Worklist) const;
+    SetVectorType &Worklist) const;
 
   void
   addSCCDefUsersToVALUWorklist(MachineInstr &SCCDefInst,
-                               SmallVectorImpl<MachineInstr *> &Worklist) const;
+                               SetVectorType &Worklist) const;
 
   const TargetRegisterClass *
   getDestEquivalentVGPRClass(const MachineInstr &Inst) const;
@@ -417,6 +420,14 @@ public:
     return MI.getDesc().TSFlags & SIInstrFlags::FLAT;
   }
 
+  // Is a FLAT encoded instruction which accesses a specific segment,
+  // i.e. global_* or scratch_*.
+  static bool isSegmentSpecificFLAT(const MachineInstr &MI) {
+    auto Flags = MI.getDesc().TSFlags;
+    return (Flags & SIInstrFlags::FLAT) && !(Flags & SIInstrFlags::LGKM_CNT);
+  }
+
+  // Any FLAT encoded instruction, including global_* and scratch_*.
   bool isFLAT(uint16_t Opcode) const {
     return get(Opcode).TSFlags & SIInstrFlags::FLAT;
   }
@@ -491,6 +502,10 @@ public:
 
   static bool usesVM_CNT(const MachineInstr &MI) {
     return MI.getDesc().TSFlags & SIInstrFlags::VM_CNT;
+  }
+
+  static bool usesLGKM_CNT(const MachineInstr &MI) {
+    return MI.getDesc().TSFlags & SIInstrFlags::LGKM_CNT;
   }
 
   static bool sopkIsZext(const MachineInstr &MI) {
