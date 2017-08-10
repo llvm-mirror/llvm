@@ -131,7 +131,7 @@ static cl::opt<bool> EnablePhiElim(
 
 // The flag adds instruction count to solutions cost comparision.
 static cl::opt<bool> InsnsCost(
-  "lsr-insns-cost", cl::Hidden, cl::init(false),
+  "lsr-insns-cost", cl::Hidden, cl::init(true),
   cl::desc("Add instruction count to a LSR cost model"));
 
 // Flag to choose how to narrow complex lsr solution
@@ -3672,6 +3672,12 @@ void LSRInstance::GenerateICmpZeroScales(LSRUse &LU, unsigned LUIdx,
   // Don't do this if there is more than one offset.
   if (LU.MinOffset != LU.MaxOffset) return;
 
+  // Check if transformation is valid. It is illegal to multiply pointer.
+  if (Base.ScaledReg && Base.ScaledReg->getType()->isPointerTy())
+    return;
+  for (const SCEV *BaseReg : Base.BaseRegs)
+    if (BaseReg->getType()->isPointerTy())
+      return;
   assert(!Base.BaseGV && "ICmpZero use is not legal!");
 
   // Check each interesting stride.

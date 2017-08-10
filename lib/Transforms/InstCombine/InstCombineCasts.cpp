@@ -235,8 +235,8 @@ Instruction::CastOps InstCombiner::isEliminableCastPair(const CastInst *CI1,
   Type *MidTy = CI1->getDestTy();
   Type *DstTy = CI2->getDestTy();
 
-  Instruction::CastOps firstOp = Instruction::CastOps(CI1->getOpcode());
-  Instruction::CastOps secondOp = Instruction::CastOps(CI2->getOpcode());
+  Instruction::CastOps firstOp = CI1->getOpcode();
+  Instruction::CastOps secondOp = CI2->getOpcode();
   Type *SrcIntPtrTy =
       SrcTy->isPtrOrPtrVectorTy() ? DL.getIntPtrType(SrcTy) : nullptr;
   Type *MidIntPtrTy =
@@ -443,24 +443,49 @@ static Instruction *foldVecTruncToExtElt(TruncInst &Trunc, InstCombiner &IC) {
   return ExtractElementInst::Create(VecInput, IC.Builder.getInt32(Elt));
 }
 
-/// Try to narrow the width of bitwise logic instructions with constants.
-Instruction *InstCombiner::shrinkBitwiseLogic(TruncInst &Trunc) {
+/// Try to narrow the width of math or bitwise logic instructions by pulling a
+/// truncate ahead of binary operators.
+/// TODO: Transforms for truncated shifts should be moved into here.
+Instruction *InstCombiner::narrowBinOp(TruncInst &Trunc) {
   Type *SrcTy = Trunc.getSrcTy();
   Type *DestTy = Trunc.getType();
   if (isa<IntegerType>(SrcTy) && !shouldChangeType(SrcTy, DestTy))
     return nullptr;
 
-  BinaryOperator *LogicOp;
-  Constant *C;
-  if (!match(Trunc.getOperand(0), m_OneUse(m_BinOp(LogicOp))) ||
-      !LogicOp->isBitwiseLogicOp() ||
-      !match(LogicOp->getOperand(1), m_Constant(C)))
+  BinaryOperator *BinOp;
+  if (!match(Trunc.getOperand(0), m_OneUse(m_BinOp(BinOp))))
     return nullptr;
 
-  // trunc (logic X, C) --> logic (trunc X, C')
-  Constant *NarrowC = ConstantExpr::getTrunc(C, DestTy);
-  Value *NarrowOp0 = Builder.CreateTrunc(LogicOp->getOperand(0), DestTy);
-  return BinaryOperator::Create(LogicOp->getOpcode(), NarrowOp0, NarrowC);
+  switch (BinOp->getOpcode()) {
+  case Instruction::And:
+  case Instruction::Or:
+  case Instruction::Xor:
+  case Instruction::Add:
+  case Instruction::Mul: {
+    Constant *C;
+    if (match(BinOp->getOperand(1), m_Constant(C))) {
+      // trunc (binop X, C) --> binop (trunc X, C')
+      Constant *NarrowC = ConstantExpr::getTrunc(C, DestTy);
+      Value *TruncX = Builder.CreateTrunc(BinOp->getOperand(0), DestTy);
+      return BinaryOperator::Create(BinOp->getOpcode(), TruncX, NarrowC);
+    }
+    break;
+  }
+  case Instruction::Sub: {
+    Constant *C;
+    if (match(BinOp->getOperand(0), m_Constant(C))) {
+      // trunc (binop C, X) --> binop (trunc C', X)
+      Constant *NarrowC = ConstantExpr::getTrunc(C, DestTy);
+      Value *TruncX = Builder.CreateTrunc(BinOp->getOperand(1), DestTy);
+      return BinaryOperator::Create(BinOp->getOpcode(), NarrowC, TruncX);
+    }
+    break;
+  }
+
+  default: break;
+  }
+
+  return nullptr;
 }
 
 /// Try to narrow the width of a splat shuffle. This could be generalized to any
@@ -616,7 +641,7 @@ Instruction *InstCombiner::visitTrunc(TruncInst &CI) {
     }
   }
 
-  if (Instruction *I = shrinkBitwiseLogic(CI))
+  if (Instruction *I = narrowBinOp(CI))
     return I;
 
   if (Instruction *I = shrinkSplatShuffle(CI, Builder))
