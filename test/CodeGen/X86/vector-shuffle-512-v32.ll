@@ -29,7 +29,7 @@ define <32 x i16> @shuffle_v32i16_08_08_08_08_08_08_08_08_08_08_08_08_08_08_08_0
 ;
 ; SKX-LABEL: shuffle_v32i16_08_08_08_08_08_08_08_08_08_08_08_08_08_08_08_08_08_08_08_08_08_08_08_08_08_08_08_08_08_08_08_08:
 ; SKX:       ## BB#0:
-; SKX-NEXT:    vextracti32x4 $1, %zmm0, %xmm0
+; SKX-NEXT:    vextracti128 $1, %ymm0, %xmm0
 ; SKX-NEXT:    vpbroadcastw %xmm0, %zmm0
 ; SKX-NEXT:    retq
   %c = shufflevector <32 x i16> %a, <32 x i16> undef, <32 x i32> <i32 8, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8>
@@ -63,24 +63,18 @@ define <32 x i16> @shuffle_v32i16_02_05_u_u_07_u_0a_01_00_05_u_04_07_u_0a_01_02_
 define <32 x i16> @shuffle_v32i16_0f_1f_0e_16_0d_1d_04_1e_0b_1b_0a_1a_09_19_08_18_0f_1f_0e_16_0d_1d_04_1e_0b_1b_0a_1a_09_19_08_38(<32 x i16> %a, <32 x i16> %b)  {
 ; KNL-LABEL: shuffle_v32i16_0f_1f_0e_16_0d_1d_04_1e_0b_1b_0a_1a_09_19_08_18_0f_1f_0e_16_0d_1d_04_1e_0b_1b_0a_1a_09_19_08_38:
 ; KNL:       ## BB#0:
-; KNL-NEXT:    vextracti128 $1, %ymm1, %xmm2
-; KNL-NEXT:    vpunpckhwd {{.*#+}} xmm1 = xmm2[4],xmm1[4],xmm2[5],xmm1[5],xmm2[6],xmm1[6],xmm2[7],xmm1[7]
-; KNL-NEXT:    vpshufb {{.*#+}} xmm4 = xmm1[8,9,12,13,12,13,10,11,0,1,4,5,4,5,0,1]
-; KNL-NEXT:    vpshufd {{.*#+}} xmm1 = xmm2[0,1,0,3]
-; KNL-NEXT:    vpshuflw {{.*#+}} xmm2 = xmm1[0,3,2,2,4,5,6,7]
-; KNL-NEXT:    vinserti128 $1, %xmm2, %ymm4, %ymm1
-; KNL-NEXT:    vextracti128 $1, %ymm0, %xmm5
-; KNL-NEXT:    vpunpckhwd {{.*#+}} xmm0 = xmm5[4],xmm0[4],xmm5[5],xmm0[5],xmm5[6],xmm0[6],xmm5[7],xmm0[7]
-; KNL-NEXT:    vpshufb {{.*#+}} xmm0 = xmm0[12,13,10,11,8,9,14,15,4,5,2,3,2,3,6,7]
-; KNL-NEXT:    vpshufb {{.*#+}} xmm5 = xmm5[6,7,2,3,4,5,6,7,2,3,2,3,0,1,14,15]
-; KNL-NEXT:    vinserti128 $1, %xmm5, %ymm0, %ymm0
+; KNL-NEXT:    vperm2i128 {{.*#+}} ymm2 = ymm1[2,3,0,1]
+; KNL-NEXT:    vpblendw {{.*#+}} ymm2 = ymm1[0,1,2,3],ymm2[4,5],ymm1[6],ymm2[7],ymm1[8,9,10,11],ymm2[12,13],ymm1[14],ymm2[15]
+; KNL-NEXT:    vpshufb {{.*#+}} ymm1 = ymm2[u,u,14,15,u,u,12,13,u,u,10,11,u,u,8,9,u,u,22,23,u,u,20,21,u,u,18,19,u,u,u,u]
+; KNL-NEXT:    vperm2i128 {{.*#+}} ymm4 = ymm0[2,3,0,1]
+; KNL-NEXT:    vpblendw {{.*#+}} ymm0 = ymm0[0,1,2,3,4],ymm4[5,6,7],ymm0[8,9,10,11,12],ymm4[13,14,15]
+; KNL-NEXT:    vpshufb {{.*#+}} ymm0 = ymm0[14,15,u,u,12,13,u,u,10,11,u,u,8,9,u,u,22,23,u,u,20,21,u,u,18,19,u,u,16,17,u,u]
 ; KNL-NEXT:    vpblendw {{.*#+}} ymm1 = ymm0[0],ymm1[1],ymm0[2],ymm1[3],ymm0[4],ymm1[5],ymm0[6],ymm1[7],ymm0[8],ymm1[9],ymm0[10],ymm1[11],ymm0[12],ymm1[13],ymm0[14],ymm1[15]
 ; KNL-NEXT:    vextracti128 $1, %ymm3, %xmm3
 ; KNL-NEXT:    vpbroadcastw %xmm3, %ymm3
-; KNL-NEXT:    vmovdqa {{.*#+}} ymm5 = [255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,0,0]
-; KNL-NEXT:    vpblendvb %ymm5, %ymm1, %ymm3, %ymm1
-; KNL-NEXT:    vpshufhw {{.*#+}} xmm2 = xmm2[0,1,2,3,4,5,6,4]
-; KNL-NEXT:    vinserti128 $1, %xmm2, %ymm4, %ymm2
+; KNL-NEXT:    vmovdqa {{.*#+}} ymm4 = [255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,0,0]
+; KNL-NEXT:    vpblendvb %ymm4, %ymm1, %ymm3, %ymm1
+; KNL-NEXT:    vpshufb {{.*#+}} ymm2 = ymm2[u,u,14,15,u,u,12,13,u,u,10,11,u,u,8,9,u,u,22,23,u,u,20,21,u,u,18,19,u,u,16,17]
 ; KNL-NEXT:    vpblendw {{.*#+}} ymm0 = ymm0[0],ymm2[1],ymm0[2],ymm2[3],ymm0[4],ymm2[5],ymm0[6],ymm2[7],ymm0[8],ymm2[9],ymm0[10],ymm2[11],ymm0[12],ymm2[13],ymm0[14],ymm2[15]
 ; KNL-NEXT:    retq
 ;
@@ -101,7 +95,7 @@ define <32 x i16> @shuffle_v16i32_0_32_1_33_2_34_3_35_8_40_9_41_u_u_u_u(<32 x i1
 ;
 ; SKX-LABEL: shuffle_v16i32_0_32_1_33_2_34_3_35_8_40_9_41_u_u_u_u:
 ; SKX:       ## BB#0:
-; SKX-NEXT:    vpunpcklwd {{.*#+}} zmm0 = zmm0[0],zmm1[0],zmm0[1],zmm1[1],zmm0[2],zmm1[2],zmm0[3],zmm1[3],zmm0[8],zmm1[8],zmm0[9],zmm1[9],zmm0[10],zmm1[10],zmm0[11],zmm1[11],zmm0[16],zmm1[16],zmm0[17],zmm1[17],zmm0[18],zmm1[18],zmm0[19],zmm1[19],zmm0[24],zmm1[24],zmm0[25],zmm1[25],zmm0[26],zmm1[26],zmm0[27],zmm1[27]
+; SKX-NEXT:    vpunpcklwd {{.*#+}} ymm0 = ymm0[0],ymm1[0],ymm0[1],ymm1[1],ymm0[2],ymm1[2],ymm0[3],ymm1[3],ymm0[8],ymm1[8],ymm0[9],ymm1[9],ymm0[10],ymm1[10],ymm0[11],ymm1[11]
 ; SKX-NEXT:    retq
   %c = shufflevector <32 x i16> %a, <32 x i16> %b, <32 x i32> <i32 0, i32 32, i32 1, i32 33, i32 2, i32 34, i32 3, i32 35, i32 8, i32 40, i32 9, i32 41, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef>
   ret <32 x i16> %c
@@ -115,7 +109,7 @@ define <32 x i16> @shuffle_v16i32_4_36_5_37_6_38_7_39_12_44_13_45_u_u_u_u(<32 x 
 ;
 ; SKX-LABEL: shuffle_v16i32_4_36_5_37_6_38_7_39_12_44_13_45_u_u_u_u:
 ; SKX:       ## BB#0:
-; SKX-NEXT:    vpunpckhwd {{.*#+}} zmm0 = zmm0[4],zmm1[4],zmm0[5],zmm1[5],zmm0[6],zmm1[6],zmm0[7],zmm1[7],zmm0[12],zmm1[12],zmm0[13],zmm1[13],zmm0[14],zmm1[14],zmm0[15],zmm1[15],zmm0[20],zmm1[20],zmm0[21],zmm1[21],zmm0[22],zmm1[22],zmm0[23],zmm1[23],zmm0[28],zmm1[28],zmm0[29],zmm1[29],zmm0[30],zmm1[30],zmm0[31],zmm1[31]
+; SKX-NEXT:    vpunpckhwd {{.*#+}} ymm0 = ymm0[4],ymm1[4],ymm0[5],ymm1[5],ymm0[6],ymm1[6],ymm0[7],ymm1[7],ymm0[12],ymm1[12],ymm0[13],ymm1[13],ymm0[14],ymm1[14],ymm0[15],ymm1[15]
 ; SKX-NEXT:    retq
   %c = shufflevector <32 x i16> %a, <32 x i16> %b, <32 x i32> <i32 4, i32 36, i32 5, i32 37, i32 6, i32 38, i32 7, i32 39, i32 12, i32 44, i32 13, i32 45, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef>
   ret <32 x i16> %c
@@ -228,7 +222,7 @@ define <32 x i16> @insert_dup_mem_v32i16_i32(i32* %ptr) {
 ; SKX-LABEL: insert_dup_mem_v32i16_i32:
 ; SKX:       ## BB#0:
 ; SKX-NEXT:    movl (%rdi), %eax
-; SKX-NEXT:    vpbroadcastw %ax, %zmm0
+; SKX-NEXT:    vpbroadcastw %eax, %zmm0
 ; SKX-NEXT:    retq
   %tmp = load i32, i32* %ptr, align 4
   %tmp1 = insertelement <4 x i32> zeroinitializer, i32 %tmp, i32 0
@@ -249,7 +243,7 @@ define <32 x i16> @insert_dup_mem_v32i16_sext_i16(i16* %ptr) {
 ; SKX-LABEL: insert_dup_mem_v32i16_sext_i16:
 ; SKX:       ## BB#0:
 ; SKX-NEXT:    movswl (%rdi), %eax
-; SKX-NEXT:    vpbroadcastw %ax, %zmm0
+; SKX-NEXT:    vpbroadcastw %eax, %zmm0
 ; SKX-NEXT:    retq
   %tmp = load i16, i16* %ptr, align 2
   %tmp1 = sext i16 %tmp to i32
@@ -269,7 +263,7 @@ define <32 x i16> @insert_dup_elt1_mem_v32i16_i32(i32* %ptr) #0 {
 ; SKX-LABEL: insert_dup_elt1_mem_v32i16_i32:
 ; SKX:       ## BB#0:
 ; SKX-NEXT:    movzwl 2(%rdi), %eax
-; SKX-NEXT:    vpbroadcastw %ax, %zmm0
+; SKX-NEXT:    vpbroadcastw %eax, %zmm0
 ; SKX-NEXT:    retq
   %tmp = load i32, i32* %ptr, align 4
   %tmp1 = insertelement <4 x i32> zeroinitializer, i32 %tmp, i32 0
@@ -288,7 +282,7 @@ define <32 x i16> @insert_dup_elt3_mem_v32i16_i32(i32* %ptr) #0 {
 ; SKX-LABEL: insert_dup_elt3_mem_v32i16_i32:
 ; SKX:       ## BB#0:
 ; SKX-NEXT:    movzwl 2(%rdi), %eax
-; SKX-NEXT:    vpbroadcastw %ax, %zmm0
+; SKX-NEXT:    vpbroadcastw %eax, %zmm0
 ; SKX-NEXT:    retq
   %tmp = load i32, i32* %ptr, align 4
   %tmp1 = insertelement <4 x i32> zeroinitializer, i32 %tmp, i32 1

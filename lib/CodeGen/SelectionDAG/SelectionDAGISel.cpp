@@ -1287,10 +1287,10 @@ static void propagateSwiftErrorVRegs(FunctionLoweringInfo *FuncInfo) {
   }
 }
 
-void preassignSwiftErrorRegs(const TargetLowering *TLI,
-                             FunctionLoweringInfo *FuncInfo,
-                             BasicBlock::const_iterator Begin,
-                             BasicBlock::const_iterator End) {
+static void preassignSwiftErrorRegs(const TargetLowering *TLI,
+                                    FunctionLoweringInfo *FuncInfo,
+                                    BasicBlock::const_iterator Begin,
+                                    BasicBlock::const_iterator End) {
   if (!TLI->supportSwiftError() || FuncInfo->SwiftErrorVals.empty())
     return;
 
@@ -2911,6 +2911,7 @@ void SelectionDAGISel::SelectCodeCommon(SDNode *NodeToMatch,
   case ISD::CopyFromReg:
   case ISD::CopyToReg:
   case ISD::EH_LABEL:
+  case ISD::ANNOTATION_LABEL:
   case ISD::LIFETIME_START:
   case ISD::LIFETIME_END:
     NodeToMatch->setNodeId(-1); // Mark selected.

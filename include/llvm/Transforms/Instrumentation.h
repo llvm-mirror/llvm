@@ -111,7 +111,7 @@ bool isLegalToPromote(Instruction *Inst, Function *F, const char **Reason);
 Instruction *promoteIndirectCall(Instruction *Inst, Function *F, uint64_t Count,
                                  uint64_t TotalCount,
                                  bool AttachProfToDirectCall,
-                                 OptimizationRemarkEmitter *ORE = nullptr);
+                                 OptimizationRemarkEmitter *ORE);
 
 /// Options for the frontend instrumentation based profiling pass.
 struct InstrProfOptions {
@@ -185,6 +185,7 @@ struct SanitizerCoverageOptions {
   bool Inline8bitCounters = false;
   bool PCTable = false;
   bool NoPrune = false;
+  bool StackDepth = false;
 
   SanitizerCoverageOptions() = default;
 };

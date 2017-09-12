@@ -42,9 +42,12 @@ class AMDGPUShaderInst <dag outs, dag ins, string asm = "",
   field bits<32> Inst = 0xffffffff;
 }
 
-def FP16Denormals : Predicate<"Subtarget.hasFP16Denormals()">;
-def FP32Denormals : Predicate<"Subtarget.hasFP32Denormals()">;
-def FP64Denormals : Predicate<"Subtarget.hasFP64Denormals()">;
+def FP16Denormals : Predicate<"Subtarget->hasFP16Denormals()">;
+def FP32Denormals : Predicate<"Subtarget->hasFP32Denormals()">;
+def FP64Denormals : Predicate<"Subtarget->hasFP64Denormals()">;
+def NoFP16Denormals : Predicate<"!Subtarget->hasFP16Denormals()">;
+def NoFP32Denormals : Predicate<"!Subtarget->hasFP32Denormals()">;
+def NoFP64Denormals : Predicate<"!Subtarget->hasFP64Denormals()">;
 def UnsafeFPMath : Predicate<"TM.Options.UnsafeFPMath">;
 
 def InstFlag : OperandWithDefaultOps <i32, (ops (i32 0))>;
@@ -702,14 +705,16 @@ def cvt_flr_i32_f32 : PatFrag <
   [{ (void)N; return TM.Options.NoNaNsFPMath; }]
 >;
 
-class IMad24Pat<Instruction Inst> : Pat <
+class IMad24Pat<Instruction Inst, bit HasClamp = 0> : Pat <
   (add (AMDGPUmul_i24 i32:$src0, i32:$src1), i32:$src2),
-  (Inst $src0, $src1, $src2)
+  !if(HasClamp, (Inst $src0, $src1, $src2, (i1 0)),
+                (Inst $src0, $src1, $src2))
 >;
 
-class UMad24Pat<Instruction Inst> : Pat <
+class UMad24Pat<Instruction Inst, bit HasClamp = 0> : Pat <
   (add (AMDGPUmul_u24 i32:$src0, i32:$src1), i32:$src2),
-  (Inst $src0, $src1, $src2)
+  !if(HasClamp, (Inst $src0, $src1, $src2, (i1 0)),
+                (Inst $src0, $src1, $src2))
 >;
 
 class RcpPat<Instruction RcpInst, ValueType vt> : Pat <

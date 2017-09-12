@@ -264,6 +264,11 @@ class ARMAsmParser : public MCTargetAsmParser {
     return;
   }
 
+  // Return the low-subreg of a given Q register.
+  unsigned getDRegFromQReg(unsigned QReg) const {
+    return MRI->getSubReg(QReg, ARM::dsub_0);
+  }
+
   // Get the encoding of the IT mask, as it will appear in an IT instruction.
   unsigned getITMaskEncoding() {
     assert(inITBlock());
@@ -3334,25 +3339,7 @@ ARMAsmParser::parseITCondCode(OperandVector &Operands) {
   const AsmToken &Tok = Parser.getTok();
   if (!Tok.is(AsmToken::Identifier))
     return MatchOperand_NoMatch;
-  unsigned CC = StringSwitch<unsigned>(Tok.getString().lower())
-    .Case("eq", ARMCC::EQ)
-    .Case("ne", ARMCC::NE)
-    .Case("hs", ARMCC::HS)
-    .Case("cs", ARMCC::HS)
-    .Case("lo", ARMCC::LO)
-    .Case("cc", ARMCC::LO)
-    .Case("mi", ARMCC::MI)
-    .Case("pl", ARMCC::PL)
-    .Case("vs", ARMCC::VS)
-    .Case("vc", ARMCC::VC)
-    .Case("hi", ARMCC::HI)
-    .Case("ls", ARMCC::LS)
-    .Case("ge", ARMCC::GE)
-    .Case("lt", ARMCC::LT)
-    .Case("gt", ARMCC::GT)
-    .Case("le", ARMCC::LE)
-    .Case("al", ARMCC::AL)
-    .Default(~0U);
+  unsigned CC = ARMCondCodeFromString(Tok.getString());
   if (CC == ~0U)
     return MatchOperand_NoMatch;
   Parser.Lex(); // Eat the token.
@@ -3459,29 +3446,6 @@ static unsigned getNextRegister(unsigned Reg) {
   case ARM::R10: return ARM::R11; case ARM::R11: return ARM::R12;
   case ARM::R12: return ARM::SP;  case ARM::SP:  return ARM::LR;
   case ARM::LR:  return ARM::PC;  case ARM::PC:  return ARM::R0;
-  }
-}
-
-// Return the low-subreg of a given Q register.
-static unsigned getDRegFromQReg(unsigned QReg) {
-  switch (QReg) {
-  default: llvm_unreachable("expected a Q register!");
-  case ARM::Q0:  return ARM::D0;
-  case ARM::Q1:  return ARM::D2;
-  case ARM::Q2:  return ARM::D4;
-  case ARM::Q3:  return ARM::D6;
-  case ARM::Q4:  return ARM::D8;
-  case ARM::Q5:  return ARM::D10;
-  case ARM::Q6:  return ARM::D12;
-  case ARM::Q7:  return ARM::D14;
-  case ARM::Q8:  return ARM::D16;
-  case ARM::Q9:  return ARM::D18;
-  case ARM::Q10: return ARM::D20;
-  case ARM::Q11: return ARM::D22;
-  case ARM::Q12: return ARM::D24;
-  case ARM::Q13: return ARM::D26;
-  case ARM::Q14: return ARM::D28;
-  case ARM::Q15: return ARM::D30;
   }
 }
 
@@ -5348,7 +5312,8 @@ StringRef ARMAsmParser::splitMnemonic(StringRef Mnemonic,
       Mnemonic == "vcvtm" || Mnemonic == "vrinta" || Mnemonic == "vrintn" ||
       Mnemonic == "vrintp" || Mnemonic == "vrintm" || Mnemonic == "hvc" ||
       Mnemonic.startswith("vsel") || Mnemonic == "vins" || Mnemonic == "vmovx" ||
-      Mnemonic == "bxns"  || Mnemonic == "blxns")
+      Mnemonic == "bxns"  || Mnemonic == "blxns" ||
+      Mnemonic == "vudot" || Mnemonic == "vsdot")
     return Mnemonic;
 
   // First, split out any predication code. Ignore mnemonics we know aren't
@@ -5357,25 +5322,7 @@ StringRef ARMAsmParser::splitMnemonic(StringRef Mnemonic,
       Mnemonic != "muls" && Mnemonic != "smlals" && Mnemonic != "smulls" &&
       Mnemonic != "umlals" && Mnemonic != "umulls" && Mnemonic != "lsls" &&
       Mnemonic != "sbcs" && Mnemonic != "rscs") {
-    unsigned CC = StringSwitch<unsigned>(Mnemonic.substr(Mnemonic.size()-2))
-      .Case("eq", ARMCC::EQ)
-      .Case("ne", ARMCC::NE)
-      .Case("hs", ARMCC::HS)
-      .Case("cs", ARMCC::HS)
-      .Case("lo", ARMCC::LO)
-      .Case("cc", ARMCC::LO)
-      .Case("mi", ARMCC::MI)
-      .Case("pl", ARMCC::PL)
-      .Case("vs", ARMCC::VS)
-      .Case("vc", ARMCC::VC)
-      .Case("hi", ARMCC::HI)
-      .Case("ls", ARMCC::LS)
-      .Case("ge", ARMCC::GE)
-      .Case("lt", ARMCC::LT)
-      .Case("gt", ARMCC::GT)
-      .Case("le", ARMCC::LE)
-      .Case("al", ARMCC::AL)
-      .Default(~0U);
+    unsigned CC = ARMCondCodeFromString(Mnemonic.substr(Mnemonic.size()-2));
     if (CC != ~0U) {
       Mnemonic = Mnemonic.slice(0, Mnemonic.size() - 2);
       PredicationCode = CC;
@@ -5454,7 +5401,8 @@ void ARMAsmParser::getMnemonicAcceptInfo(StringRef Mnemonic, StringRef FullInst,
       Mnemonic.startswith("aes") || Mnemonic == "hvc" || Mnemonic == "setpan" ||
       Mnemonic.startswith("sha1") || Mnemonic.startswith("sha256") ||
       (FullInst.startswith("vmull") && FullInst.endswith(".p64")) ||
-      Mnemonic == "vmovx" || Mnemonic == "vins") {
+      Mnemonic == "vmovx" || Mnemonic == "vins" ||
+      Mnemonic == "vudot" || Mnemonic == "vsdot") {
     // These mnemonics are never predicable
     CanAcceptPredicationCode = false;
   } else if (!isThumb()) {
@@ -8745,11 +8693,6 @@ unsigned ARMAsmParser::checkTargetMatchPredicate(MCInst &Inst) {
          Inst.getOperand(1).getReg() == ARM::SP))
       return Match_RequiresV8;
   }
-
-  // Use of SP for VMRS/VMSR is only allowed in ARM mode.
-  if ((Inst.getOpcode() == ARM::VMRS || Inst.getOpcode() == ARM::VMSR) &&
-      Inst.getOperand(0).getReg() == ARM::SP && (isThumb() && !hasV8Ops()))
-    return Match_InvalidOperand;
 
   for (unsigned I = 0; I < MCID.NumOperands; ++I)
     if (MCID.OpInfo[I].RegClass == ARM::rGPRRegClassID) {

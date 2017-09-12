@@ -235,6 +235,12 @@ OPTIONS
 
  Show code coverage only for functions with the given name.
 
+.. option:: -name-whitelist=<FILE>
+
+ Show code coverage only for functions listed in the given file. Each line in
+ the file should start with `whitelist_fun:`, immediately followed by the name
+ of the function to accept. This name can be a wildcard expression.
+
 .. option:: -name-regex=<PATTERN>
 
  Show code coverage only for functions that match the given regular expression.
@@ -289,6 +295,12 @@ OPTIONS
 
  Show code coverage only for functions with region coverage less than the given
  threshold.
+
+.. option:: -path-equivalence=<from>,<to>
+
+ Map the paths in the coverage data to local source file paths. This allows you
+ to generate the coverage data on one machine, and then use llvm-cov on a
+ different machine where you have the same files on a different path.
 
 .. program:: llvm-cov report
 

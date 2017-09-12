@@ -14,6 +14,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/BasicAliasAnalysis.h"
+#include "llvm/ADT/APInt.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/AliasAnalysis.h"
@@ -23,21 +25,40 @@
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
+#include "llvm/Analysis/MemoryLocation.h"
+#include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
+#include "llvm/IR/Argument.h"
+#include "llvm/IR/Attributes.h"
+#include "llvm/IR/CallSite.h"
+#include "llvm/IR/Constant.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Dominators.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/GetElementPtrTypeIterator.h"
 #include "llvm/IR/GlobalAlias.h"
 #include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/InstrTypes.h"
+#include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
-#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/Metadata.h"
 #include "llvm/IR/Operator.h"
+#include "llvm/IR/Type.h"
+#include "llvm/IR/User.h"
+#include "llvm/IR/Value.h"
 #include "llvm/Pass.h"
-#include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/KnownBits.h"
-#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <cstdlib>
+#include <utility>
 
 #define DEBUG_TYPE "basicaa"
 
@@ -223,7 +244,6 @@ static bool isObjectSize(const Value *V, uint64_t Size, const DataLayout &DL,
 
   if (const BinaryOperator *BOp = dyn_cast<BinaryOperator>(V)) {
     if (ConstantInt *RHSC = dyn_cast<ConstantInt>(BOp->getOperand(1))) {
-
       // If we've been called recursively, then Offset and Scale will be wider
       // than the BOp operands. We'll always zext it here as we'll process sign
       // extensions below (see the isa<SExtInst> / isa<ZExtInst> cases).
@@ -574,7 +594,6 @@ bool BasicAAResult::pointsToConstantMemory(const MemoryLocation &Loc,
     // Otherwise be conservative.
     Visited.clear();
     return AAResultBase::pointsToConstantMemory(Loc, OrLocal);
-
   } while (!Worklist.empty() && --MaxLookup);
 
   Visited.clear();
@@ -662,7 +681,6 @@ static bool isWriteOnlyParam(ImmutableCallSite CS, unsigned ArgIdx,
 
 ModRefInfo BasicAAResult::getArgModRefInfo(ImmutableCallSite CS,
                                            unsigned ArgIdx) {
-
   // Checking for known builtin intrinsics and target library functions.
   if (isWriteOnlyParam(CS, ArgIdx, TLI))
     return MRI_Mod;
@@ -927,7 +945,6 @@ static AliasResult aliasSameBasePointerGEPs(const GEPOperator *GEP1,
                                             const GEPOperator *GEP2,
                                             uint64_t V2Size,
                                             const DataLayout &DL) {
-
   assert(GEP1->getPointerOperand()->stripPointerCastsAndBarriers() ==
              GEP2->getPointerOperand()->stripPointerCastsAndBarriers() &&
          GEP1->getPointerOperandType() == GEP2->getPointerOperandType() &&
@@ -1196,8 +1213,10 @@ AliasResult BasicAAResult::aliasGEP(const GEPOperator *GEP1, uint64_t V1Size,
 
     // If we get a No or May, then return it immediately, no amount of analysis
     // will improve this situation.
-    if (BaseAlias != MustAlias)
+    if (BaseAlias != MustAlias) {
+      assert(BaseAlias == NoAlias || BaseAlias == MayAlias);
       return BaseAlias;
+    }
 
     // Otherwise, we have a MustAlias.  Since the base pointers alias each other
     // exactly, see if the computed offset from the common pointer tells us
@@ -1236,13 +1255,15 @@ AliasResult BasicAAResult::aliasGEP(const GEPOperator *GEP1, uint64_t V1Size,
     AliasResult R = aliasCheck(UnderlyingV1, MemoryLocation::UnknownSize,
                                AAMDNodes(), V2, MemoryLocation::UnknownSize,
                                V2AAInfo, nullptr, UnderlyingV2);
-    if (R != MustAlias)
+    if (R != MustAlias) {
       // If V2 may alias GEP base pointer, conservatively returns MayAlias.
       // If V2 is known not to alias GEP base pointer, then the two values
       // cannot alias per GEP semantics: "Any memory access must be done through
       // a pointer value associated with an address range of the memory access,
       // otherwise the behavior is undefined.".
+      assert(R == NoAlias || R == MayAlias);
       return R;
+    }
 
     // If the max search depth is reached the result is undefined
     if (GEP1MaxLookupReached)
@@ -1810,6 +1831,7 @@ BasicAAWrapperPass::BasicAAWrapperPass() : FunctionPass(ID) {
 }
 
 char BasicAAWrapperPass::ID = 0;
+
 void BasicAAWrapperPass::anchor() {}
 
 INITIALIZE_PASS_BEGIN(BasicAAWrapperPass, "basicaa",

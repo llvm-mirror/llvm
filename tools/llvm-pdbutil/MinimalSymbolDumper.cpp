@@ -24,18 +24,6 @@ using namespace llvm;
 using namespace llvm::codeview;
 using namespace llvm::pdb;
 
-static StringRef getSymbolKindName(SymbolKind K) {
-  switch (K) {
-#define SYMBOL_RECORD(EnumName, value, name)                                   \
-  case EnumName:                                                               \
-    return #EnumName;
-#include "llvm/DebugInfo/CodeView/CodeViewSymbols.def"
-  default:
-    llvm_unreachable("Unknown symbol kind!");
-  }
-  return "";
-}
-
 static std::string formatLocalSymFlags(uint32_t IndentLevel,
                                        LocalSymFlags Flags) {
   std::vector<std::string> Opts;
@@ -379,25 +367,39 @@ Error MinimalSymbolDumper::visitSymbolBegin(codeview::CVSymbol &Record,
   // append to the existing line.
   P.formatLine("{0} | {1} [size = {2}]",
                fmt_align(Offset, AlignStyle::Right, 6),
-               getSymbolKindName(Record.Type), Record.length());
+               formatSymbolKind(Record.Type), Record.length());
   P.Indent();
   return Error::success();
 }
 
 Error MinimalSymbolDumper::visitSymbolEnd(CVSymbol &Record) {
+  if (RecordBytes) {
+    AutoIndent Indent(P, 7);
+    P.formatBinary("bytes", Record.content(), 0);
+  }
   P.Unindent();
   return Error::success();
 }
 
-std::string MinimalSymbolDumper::typeIndex(TypeIndex TI) const {
+std::string MinimalSymbolDumper::typeOrIdIndex(codeview::TypeIndex TI,
+                                               bool IsType) const {
   if (TI.isSimple())
     return formatv("{0}", TI).str();
-  StringRef Name = Types.getTypeName(TI);
+  auto &Container = IsType ? Types : Ids;
+  StringRef Name = Container.getTypeName(TI);
   if (Name.size() > 32) {
     Name = Name.take_front(32);
     return formatv("{0} ({1}...)", TI, Name);
   } else
     return formatv("{0} ({1})", TI, Name);
+}
+
+std::string MinimalSymbolDumper::idIndex(codeview::TypeIndex TI) const {
+  return typeOrIdIndex(TI, false);
+}
+
+std::string MinimalSymbolDumper::typeIndex(TypeIndex TI) const {
+  return typeOrIdIndex(TI, true);
 }
 
 Error MinimalSymbolDumper::visitKnownRecord(CVSymbol &CVR, BlockSym &Block) {
@@ -436,18 +438,27 @@ Error MinimalSymbolDumper::visitKnownRecord(CVSymbol &CVR,
                                             SectionSym &Section) {
   P.format(" `{0}`", Section.Name);
   AutoIndent Indent(P, 7);
-  P.formatLine("length = {0}, alignment = {1}, rva = {2}, section # = {3}, "
-               "characteristics = {4}",
+  P.formatLine("length = {0}, alignment = {1}, rva = {2}, section # = {3}",
                Section.Length, Section.Alignment, Section.Rva,
-               Section.SectionNumber, Section.Characteristics);
+               Section.SectionNumber);
+  P.printLine("characteristics =");
+  AutoIndent Indent2(P, 2);
+  P.printLine(formatSectionCharacteristics(P.getIndentLevel(),
+                                           Section.Characteristics, 1, "",
+                                           CharacteristicStyle::Descriptive));
   return Error::success();
 }
 
 Error MinimalSymbolDumper::visitKnownRecord(CVSymbol &CVR, CoffGroupSym &CG) {
   P.format(" `{0}`", CG.Name);
   AutoIndent Indent(P, 7);
-  P.formatLine("length = {0}, addr = {1}, characteristics = {2}", CG.Size,
-               formatSegmentOffset(CG.Segment, CG.Offset), CG.Characteristics);
+  P.formatLine("length = {0}, addr = {1}", CG.Size,
+               formatSegmentOffset(CG.Segment, CG.Offset));
+  P.printLine("characteristics =");
+  AutoIndent Indent2(P, 2);
+  P.printLine(formatSectionCharacteristics(P.getIndentLevel(),
+                                           CG.Characteristics, 1, "",
+                                           CharacteristicStyle::Descriptive));
   return Error::success();
 }
 
@@ -650,7 +661,7 @@ Error MinimalSymbolDumper::visitKnownRecord(CVSymbol &CVR, FrameProcSym &FP) {
 Error MinimalSymbolDumper::visitKnownRecord(CVSymbol &CVR,
                                             HeapAllocationSiteSym &HAS) {
   AutoIndent Indent(P, 7);
-  P.formatLine("type = {0}, addr = {1} call size = {2}", typeIndex(HAS.Type),
+  P.formatLine("type = {0}, addr = {1} call size = {2}", idIndex(HAS.Type),
                formatSegmentOffset(HAS.Segment, HAS.CodeOffset),
                HAS.CallInstructionSize);
   return Error::success();
@@ -662,7 +673,7 @@ Error MinimalSymbolDumper::visitKnownRecord(CVSymbol &CVR, InlineSiteSym &IS) {
   StringRef Annotations(reinterpret_cast<const char *>(Bytes.begin()),
                         Bytes.size());
 
-  P.formatLine("inlinee = {0}, parent = {1}, end = {2}", typeIndex(IS.Inlinee),
+  P.formatLine("inlinee = {0}, parent = {1}, end = {2}", idIndex(IS.Inlinee),
                IS.Parent, IS.End);
   P.formatLine("annotations = {0}", toHex(Annotations));
   return Error::success();
@@ -727,9 +738,19 @@ Error MinimalSymbolDumper::visitKnownRecord(CVSymbol &CVR, ProcSym &Proc) {
                Proc.Parent, Proc.End,
                formatSegmentOffset(Proc.Segment, Proc.CodeOffset),
                Proc.CodeSize);
-  // FIXME: It seems FunctionType is sometimes an id and sometimes a type.
+  bool IsType = true;
+  switch (Proc.getKind()) {
+  case SymbolRecordKind::GlobalProcIdSym:
+  case SymbolRecordKind::ProcIdSym:
+  case SymbolRecordKind::DPCProcIdSym:
+    IsType = false;
+    break;
+  default:
+    break;
+  }
   P.formatLine("type = `{0}`, debug start = {1}, debug end = {2}, flags = {3}",
-               typeIndex(Proc.FunctionType), Proc.DbgStart, Proc.DbgEnd,
+               typeOrIdIndex(Proc.FunctionType, IsType), Proc.DbgStart,
+               Proc.DbgEnd,
                formatProcSymFlags(P.getIndentLevel() + 9, Proc.Flags));
   return Error::success();
 }
@@ -742,7 +763,7 @@ Error MinimalSymbolDumper::visitKnownRecord(CVSymbol &CVR,
 Error MinimalSymbolDumper::visitKnownRecord(CVSymbol &CVR, CallerSym &Caller) {
   AutoIndent Indent(P, 7);
   for (const auto &I : Caller.Indices) {
-    P.formatLine("callee: {0}", typeIndex(I));
+    P.formatLine("callee: {0}", idIndex(I));
   }
   return Error::success();
 }

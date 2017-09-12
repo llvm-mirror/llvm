@@ -24,11 +24,9 @@ target triple = "x86_64-apple-macosx10.12.0"
 ; CHECK: @array.0.0 = internal unnamed_addr global i32 0, align 16, !dbg ![[EL0:.*]]
 ; CHECK: @array.1.0 = internal unnamed_addr global i32 0, align 8, !dbg ![[EL1:.*]]
 ;
-; CHECK: ![[EL0]] = !DIGlobalVariableExpression(var: ![[VAR:.*]], expr: ![[EX1:.*]])
+; CHECK: ![[EL0]] = !DIGlobalVariableExpression(var: ![[VAR:.*]], expr: !DIExpression(DW_OP_LLVM_fragment, 0, 32))
 ; CHECK: ![[VAR]] = distinct !DIGlobalVariable(name: "array"
-; CHECK: ![[EX1]] = !DIExpression(DW_OP_LLVM_fragment, 0, 32)
-; CHECK: ![[EL1]] = !DIGlobalVariableExpression(var: ![[VAR]], expr: ![[EX2:.*]])
-; CHECK: ![[EX2]] = !DIExpression(DW_OP_LLVM_fragment, 64, 32)
+; CHECK: ![[EL1]] = !DIGlobalVariableExpression(var: ![[VAR]], expr: !DIExpression(DW_OP_LLVM_fragment, 64, 32))
 
 
 ; Function Attrs: nounwind optsize ssp uwtable
@@ -80,7 +78,7 @@ attributes #2 = { optsize }
 !llvm.module.flags = !{!15, !16, !17, !18}
 !llvm.ident = !{!19}
 
-!0 = !DIGlobalVariableExpression(var: !1)
+!0 = !DIGlobalVariableExpression(var: !1, expr: !DIExpression())
 !1 = distinct !DIGlobalVariable(name: "array", scope: !2, file: !3, line: 1, type: !6, isLocal: true, isDefinition: true)
 !2 = distinct !DICompileUnit(language: DW_LANG_C99, file: !3, producer: "clang version 6.0.0 (trunk 309960) (llvm/trunk 309961)", isOptimized: true, runtimeVersion: 0, emissionKind: FullDebug, enums: !4, globals: !5)
 !3 = !DIFile(filename: "test.c", directory: "/")

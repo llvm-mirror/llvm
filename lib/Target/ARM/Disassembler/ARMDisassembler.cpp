@@ -398,8 +398,6 @@ static DecodeStatus DecodeLDR(MCInst &Inst, unsigned Val,
                                 uint64_t Address, const void *Decoder);
 static DecodeStatus DecoderForMRRC2AndMCRR2(MCInst &Inst, unsigned Val,
                                             uint64_t Address, const void *Decoder);
-static DecodeStatus DecodeForVMRSandVMSR(MCInst &Inst, unsigned Val,
-                                         uint64_t Address, const void *Decoder);
 
 #include "ARMGenDisassemblerTables.inc"
 
@@ -486,6 +484,13 @@ DecodeStatus ARMDisassembler::getInstruction(MCInst &MI, uint64_t &Size,
         return MCDisassembler::Fail;
       return Result;
     }
+  }
+
+  Result =
+      decodeInstruction(DecoderTableCoProc32, MI, Insn, Address, this, STI);
+  if (Result != MCDisassembler::Fail) {
+    Size = 4;
+    return checkDecodedInstruction(MI, Size, Address, OS, CS, Insn, Result);
   }
 
   Size = 4;
@@ -821,6 +826,14 @@ DecodeStatus ThumbDisassembler::getInstruction(MCInst &MI, uint64_t &Size,
       Size = 4;
       return Result;
     }
+  }
+
+  Result =
+      decodeInstruction(DecoderTableThumb2CoProc32, MI, Insn32, Address, this, STI);
+  if (Result != MCDisassembler::Fail) {
+    Size = 4;
+    Check(Result, AddThumbPredicate(MI));
+    return Result;
   }
 
   Size = 0;
@@ -5269,28 +5282,6 @@ static DecodeStatus DecoderForMRRC2AndMCRR2(MCInst &Inst, unsigned Val,
       return MCDisassembler::Fail;
   }
   Inst.addOperand(MCOperand::createImm(CRm));
-
-  return S;
-}
-
-static DecodeStatus DecodeForVMRSandVMSR(MCInst &Inst, unsigned Val,
-                                         uint64_t Address,
-                                         const void *Decoder) {
-  const FeatureBitset &featureBits =
-      ((const MCDisassembler *)Decoder)->getSubtargetInfo().getFeatureBits();
-  DecodeStatus S = MCDisassembler::Success;
-
-  unsigned Rt = fieldFromInstruction(Val, 12, 4);
-
-  if (featureBits[ARM::ModeThumb] && !featureBits[ARM::HasV8Ops]) {
-    if (Rt == 13 || Rt == 15)
-      S = MCDisassembler::SoftFail;
-    Check(S, DecodeGPRRegisterClass(Inst, Rt, Address, Decoder));
-  } else
-    Check(S, DecodeGPRnopcRegisterClass(Inst, Rt, Address, Decoder));
-
-  Inst.addOperand(MCOperand::createImm(ARMCC::AL));
-  Inst.addOperand(MCOperand::createReg(0));
 
   return S;
 }

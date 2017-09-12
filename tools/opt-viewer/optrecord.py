@@ -17,6 +17,12 @@ import functools
 from multiprocessing import Lock
 import os, os.path
 import subprocess
+try:
+    # The previously builtin function `intern()` was moved
+    # to the `sys` module in Python 3.
+    from sys import intern
+except:
+    pass
 
 import optpmap
 
@@ -74,7 +80,7 @@ class Remark(yaml.YAMLObject):
 
         def _reduce_memory_dict(old_dict):
             new_dict = dict()
-            for (k, v) in old_dict.iteritems():
+            for (k, v) in iteritems(old_dict):
                 if type(k) is str:
                     k = intern(k)
 
@@ -140,7 +146,7 @@ class Remark(yaml.YAMLObject):
             del mapping['DebugLoc']
 
         assert(len(mapping) == 1)
-        (key, value) = mapping.items()[0]
+        (key, value) = list(mapping.items())[0]
 
         if key == 'Caller' or key == 'Callee':
             value = cgi.escape(demangle(value))

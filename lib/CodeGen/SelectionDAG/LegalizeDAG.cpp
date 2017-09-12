@@ -907,6 +907,7 @@ getStrictFPOpcodeAction(const TargetLowering &TLI, unsigned Opcode, EVT VT) {
     case ISD::STRICT_FSQRT: EqOpc = ISD::FSQRT; break;
     case ISD::STRICT_FPOW: EqOpc = ISD::FPOW; break;
     case ISD::STRICT_FPOWI: EqOpc = ISD::FPOWI; break;
+    case ISD::STRICT_FMA: EqOpc = ISD::FMA; break;
     case ISD::STRICT_FSIN: EqOpc = ISD::FSIN; break;
     case ISD::STRICT_FCOS: EqOpc = ISD::FCOS; break;
     case ISD::STRICT_FEXP: EqOpc = ISD::FEXP; break;
@@ -1072,6 +1073,7 @@ void SelectionDAGLegalize::LegalizeOp(SDNode *Node) {
     }
     break;
   case ISD::STRICT_FSQRT:
+  case ISD::STRICT_FMA:
   case ISD::STRICT_FPOW:
   case ISD::STRICT_FPOWI:
   case ISD::STRICT_FSIN:
@@ -1240,7 +1242,7 @@ SDValue SelectionDAGLegalize::ExpandExtractFromVectorThroughStack(SDValue Op) {
       // If the index is dependent on the store we will introduce a cycle when
       // creating the load (the load uses the index, and by replacing the chain
       // we will make the index dependent on the load). Also, the store might be
-      // dependent on the extractelement and introduce a cycle when creating 
+      // dependent on the extractelement and introduce a cycle when creating
       // the load.
       if (SDNode::hasPredecessorHelper(ST, Visited, Worklist) ||
           ST->hasPredecessor(Op.getNode()))
@@ -3666,10 +3668,15 @@ bool SelectionDAGLegalize::ExpandNode(SDNode *Node) {
                          Tmp2.getOperand(0), Tmp2.getOperand(1),
                          Node->getOperand(2));
     } else {
-      // We test only the i1 bit.  Skip the AND if UNDEF.
-      Tmp3 = (Tmp2.isUndef()) ? Tmp2 :
-        DAG.getNode(ISD::AND, dl, Tmp2.getValueType(), Tmp2,
-                    DAG.getConstant(1, dl, Tmp2.getValueType()));
+      // We test only the i1 bit.  Skip the AND if UNDEF or another AND.
+      if (Tmp2.isUndef() ||
+          (Tmp2.getOpcode() == ISD::AND &&
+           isa<ConstantSDNode>(Tmp2.getOperand(1)) &&
+           dyn_cast<ConstantSDNode>(Tmp2.getOperand(1))->getZExtValue() == 1))
+        Tmp3 = Tmp2;
+      else
+        Tmp3 = DAG.getNode(ISD::AND, dl, Tmp2.getValueType(), Tmp2,
+                           DAG.getConstant(1, dl, Tmp2.getValueType()));
       Tmp1 = DAG.getNode(ISD::BR_CC, dl, MVT::Other, Tmp1,
                          DAG.getCondCode(ISD::SETNE), Tmp3,
                          DAG.getConstant(0, dl, Tmp3.getValueType()),
@@ -4057,6 +4064,7 @@ void SelectionDAGLegalize::ConvertNodeToLibcall(SDNode *Node) {
                                       RTLIB::REM_PPCF128));
     break;
   case ISD::FMA:
+  case ISD::STRICT_FMA:
     Results.push_back(ExpandFPLibCall(Node, RTLIB::FMA_F32, RTLIB::FMA_F64,
                                       RTLIB::FMA_F80, RTLIB::FMA_F128,
                                       RTLIB::FMA_PPCF128));

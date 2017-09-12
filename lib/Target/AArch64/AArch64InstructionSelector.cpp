@@ -590,13 +590,14 @@ bool AArch64InstructionSelector::select(MachineInstr &I) const {
   MachineRegisterInfo &MRI = MF.getRegInfo();
 
   unsigned Opcode = I.getOpcode();
-  if (!isPreISelGenericOpcode(I.getOpcode())) {
+  // G_PHI requires same handling as PHI
+  if (!isPreISelGenericOpcode(Opcode) || Opcode == TargetOpcode::G_PHI) {
     // Certain non-generic instructions also need some special handling.
 
     if (Opcode ==  TargetOpcode::LOAD_STACK_GUARD)
       return constrainSelectedInstRegOperands(I, TII, TRI, RBI);
 
-    if (Opcode == TargetOpcode::PHI) {
+    if (Opcode == TargetOpcode::PHI || Opcode == TargetOpcode::G_PHI) {
       const unsigned DefReg = I.getOperand(0).getReg();
       const LLT DefTy = MRI.getType(DefReg);
 
@@ -621,6 +622,7 @@ bool AArch64InstructionSelector::select(MachineInstr &I) const {
           }
         }
       }
+      I.setDesc(TII.get(TargetOpcode::PHI));
 
       return RBI.constrainGenericRegister(DefReg, *DefRC, MRI);
     }
@@ -702,7 +704,8 @@ bool AArch64InstructionSelector::select(MachineInstr &I) const {
         return false;
       }
     } else {
-      if (Ty != s32 && Ty != s64 && Ty != p0) {
+      // s32 and s64 are covered by tablegen.
+      if (Ty != p0) {
         DEBUG(dbgs() << "Unable to materialize integer " << Ty
                      << " constant, expected: " << s32 << ", " << s64 << ", or "
                      << p0 << '\n');
@@ -1162,8 +1165,18 @@ bool AArch64InstructionSelector::select(MachineInstr &I) const {
 
 
   case TargetOpcode::G_INTTOPTR:
-  case TargetOpcode::G_BITCAST:
+    // The importer is currently unable to import pointer types since they
+    // didn't exist in SelectionDAG.
     return selectCopy(I, TII, MRI, TRI, RBI);
+
+  case TargetOpcode::G_BITCAST:
+    // Imported SelectionDAG rules can handle every bitcast except those that
+    // bitcast from a type to the same type. Ideally, these shouldn't occur
+    // but we might not run an optimizer that deletes them.
+    if (MRI.getType(I.getOperand(0).getReg()) ==
+        MRI.getType(I.getOperand(1).getReg()))
+      return selectCopy(I, TII, MRI, TRI, RBI);
+    return false;
 
   case TargetOpcode::G_FPEXT: {
     if (MRI.getType(I.getOperand(0).getReg()) != LLT::scalar(64)) {

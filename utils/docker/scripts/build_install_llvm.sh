@@ -145,10 +145,12 @@ if [ "$LLVM_BRANCH" == "" ]; then
   LLVM_BRANCH="trunk"
 fi
 
-if [ "$LLVM_SVN_REVISION" != "" ]; then
-  SVN_REV_ARG="-r$LLVM_SVN_REVISION"
+if [ "$LLVM_SVN_REV" != "" ]; then
+  SVN_REV_ARG="-r$LLVM_SVN_REV"
+  echo "Checking out svn revision r$LLVM_SVN_REV."
 else
   SVN_REV_ARG=""
+  echo "Checking out latest svn revision."
 fi
 
 CLANG_BUILD_DIR=/tmp/clang-build
@@ -167,20 +169,14 @@ for LLVM_PROJECT in $LLVM_PROJECTS; do
   fi
 
   echo "Checking out https://llvm.org/svn/llvm-project/$SVN_PROJECT to $CLANG_BUILD_DIR/src/$LLVM_PROJECT"
-  # FIXME: --trust-server-cert is required to workaround 'SSL issuer is not
-  #        trusted' error. Using https seems preferable to http either way,
-  #        albeit this is not secure.
-  svn co -q $SVN_REV_ARG --trust-server-cert \
+  svn co -q $SVN_REV_ARG \
     "https://llvm.org/svn/llvm-project/$SVN_PROJECT/$LLVM_BRANCH" \
     "$CLANG_BUILD_DIR/src/$LLVM_PROJECT"
 done
 
 if [ $CLANG_TOOLS_EXTRA_ENABLED -ne 0 ]; then
   echo "Checking out https://llvm.org/svn/llvm-project/clang-tools-extra to $CLANG_BUILD_DIR/src/clang/tools/extra"
-  # FIXME: --trust-server-cert is required to workaround 'SSL issuer is not
-  #        trusted' error. Using https seems preferable to http either way,
-  #        albeit this is not secure.
-  svn co -q $SVN_REV_ARG --trust-server-cert \
+  svn co -q $SVN_REV_ARG \
     "https://llvm.org/svn/llvm-project/clang-tools-extra/$LLVM_BRANCH" \
     "$CLANG_BUILD_DIR/src/clang/tools/extra"
 fi

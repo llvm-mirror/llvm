@@ -1137,7 +1137,7 @@ const char *PPCTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case PPCISD::VNMSUBFP:        return "PPCISD::VNMSUBFP";
   case PPCISD::VPERM:           return "PPCISD::VPERM";
   case PPCISD::XXSPLT:          return "PPCISD::XXSPLT";
-  case PPCISD::XXINSERT:        return "PPCISD::XXINSERT";
+  case PPCISD::VECINSERT:       return "PPCISD::VECINSERT";
   case PPCISD::XXREVERSE:       return "PPCISD::XXREVERSE";
   case PPCISD::XXPERMDI:        return "PPCISD::XXPERMDI";
   case PPCISD::VECSHL:          return "PPCISD::VECSHL";
@@ -4255,12 +4255,24 @@ static int CalculateTailCallSPDiff(SelectionDAG& DAG, bool isTailCall,
 static bool isFunctionGlobalAddress(SDValue Callee);
 
 static bool
-resideInSameSection(const Function *Caller, SDValue Callee,
+callsShareTOCBase(const Function *Caller, SDValue Callee,
                     const TargetMachine &TM) {
   // If !G, Callee can be an external symbol.
   GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(Callee);
   if (!G)
     return false;
+
+  // The medium and large code models are expected to provide a sufficiently
+  // large TOC to provide all data addressing needs of a module with a
+  // single TOC. Since each module will be addressed with a single TOC then we
+  // only need to check that caller and callee don't cross dso boundaries.
+  if (CodeModel::Medium == TM.getCodeModel() ||
+      CodeModel::Large == TM.getCodeModel())
+    return TM.shouldAssumeDSOLocal(*Caller->getParent(), G->getGlobal());
+
+  // Otherwise we need to ensure callee and caller are in the same section,
+  // since the linker may allocate multiple TOCs, and we don't know which
+  // sections will belong to the same TOC base.
 
   const GlobalValue *GV = G->getGlobal();
   if (!GV->isStrongDefinitionForLinker())
@@ -4410,11 +4422,10 @@ PPCTargetLowering::IsEligibleForTailCallOptimization_64SVR4(
       !isa<ExternalSymbolSDNode>(Callee))
     return false;
 
-  // Check if Callee resides in the same section, because for now, PPC64 SVR4
-  // ABI (ELFv1/ELFv2) doesn't allow tail calls to a symbol resides in another
-  // section.
+  // If the caller and callee potentially have different TOC bases then we
+  // cannot tail call since we need to restore the TOC pointer after the call.
   // ref: https://bugzilla.mozilla.org/show_bug.cgi?id=973977
-  if (!resideInSameSection(MF.getFunction(), Callee, getTargetMachine()))
+  if (!callsShareTOCBase(MF.getFunction(), Callee, getTargetMachine()))
     return false;
 
   // TCO allows altering callee ABI, so we don't have to check further.
@@ -4996,7 +5007,7 @@ SDValue PPCTargetLowering::FinishCall(
       // any other variadic arguments).
       Ops.insert(std::next(Ops.begin()), AddTOC);
     } else if (CallOpc == PPCISD::CALL &&
-      !resideInSameSection(MF.getFunction(), Callee, DAG.getTarget())) {
+      !callsShareTOCBase(MF.getFunction(), Callee, DAG.getTarget())) {
       // Otherwise insert NOP for non-local calls.
       CallOpc = PPCISD::CALL_NOP;
     }
@@ -7452,9 +7463,11 @@ static SDValue BuildVSLDOI(SDValue LHS, SDValue RHS, unsigned Amt, EVT VT,
 /// - The node is a "load-and-splat"
 /// In all other cases, we will choose to keep the BUILD_VECTOR.
 static bool haveEfficientBuildVectorPattern(BuildVectorSDNode *V,
-                                            bool HasDirectMove) {
+                                            bool HasDirectMove,
+                                            bool HasP8Vector) {
   EVT VecVT = V->getValueType(0);
-  bool RightType = VecVT == MVT::v2f64 || VecVT == MVT::v4f32 ||
+  bool RightType = VecVT == MVT::v2f64 ||
+    (HasP8Vector && VecVT == MVT::v4f32) ||
     (HasDirectMove && (VecVT == MVT::v2i64 || VecVT == MVT::v4i32));
   if (!RightType)
     return false;
@@ -7616,7 +7629,8 @@ SDValue PPCTargetLowering::LowerBUILD_VECTOR(SDValue Op,
     // lowered to VSX instructions under certain conditions.
     // Without VSX, there is no pattern more efficient than expanding the node.
     if (Subtarget.hasVSX() &&
-        haveEfficientBuildVectorPattern(BVN, Subtarget.hasDirectMove()))
+        haveEfficientBuildVectorPattern(BVN, Subtarget.hasDirectMove(),
+                                        Subtarget.hasP8Vector()))
       return Op;
     return SDValue();
   }
@@ -7650,6 +7664,15 @@ SDValue PPCTargetLowering::LowerBUILD_VECTOR(SDValue Op,
         return DAG.getBitcast(Op.getValueType(), NewBV);
       return NewBV;
     }
+
+    // BuildVectorSDNode::isConstantSplat() is actually pretty smart. It'll
+    // detect that constant splats like v8i16: 0xABAB are really just splats
+    // of a 1-byte constant. In this case, we need to convert the node to a
+    // splat of v16i8 and a bitcast.
+    if (Op.getValueType() != MVT::v16i8)
+      return DAG.getBitcast(Op.getValueType(),
+                            DAG.getConstant(SplatBits, dl, MVT::v16i8));
+
     return Op;
   }
 
@@ -7873,7 +7896,7 @@ SDValue PPCTargetLowering::LowerVECTOR_SHUFFLE(SDValue Op,
   bool isLittleEndian = Subtarget.isLittleEndian();
 
   unsigned ShiftElts, InsertAtByte;
-  bool Swap;
+  bool Swap = false;
   if (Subtarget.hasP9Vector() &&
       PPC::isXXINSERTWMask(SVOp, ShiftElts, InsertAtByte, Swap,
                            isLittleEndian)) {
@@ -7884,11 +7907,11 @@ SDValue PPCTargetLowering::LowerVECTOR_SHUFFLE(SDValue Op,
     if (ShiftElts) {
       SDValue Shl = DAG.getNode(PPCISD::VECSHL, dl, MVT::v4i32, Conv2, Conv2,
                                 DAG.getConstant(ShiftElts, dl, MVT::i32));
-      SDValue Ins = DAG.getNode(PPCISD::XXINSERT, dl, MVT::v4i32, Conv1, Shl,
+      SDValue Ins = DAG.getNode(PPCISD::VECINSERT, dl, MVT::v4i32, Conv1, Shl,
                                 DAG.getConstant(InsertAtByte, dl, MVT::i32));
       return DAG.getNode(ISD::BITCAST, dl, MVT::v16i8, Ins);
     }
-    SDValue Ins = DAG.getNode(PPCISD::XXINSERT, dl, MVT::v4i32, Conv1, Conv2,
+    SDValue Ins = DAG.getNode(PPCISD::VECINSERT, dl, MVT::v4i32, Conv1, Conv2,
                               DAG.getConstant(InsertAtByte, dl, MVT::i32));
     return DAG.getNode(ISD::BITCAST, dl, MVT::v16i8, Ins);
   }

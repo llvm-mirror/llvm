@@ -441,6 +441,15 @@ the program where they can be handled appropriately. Handling the error may be
 as simple as reporting the issue to the user, or it may involve attempts at
 recovery.
 
+.. note::
+
+   While it would be ideal to use this error handling scheme throughout
+   LLVM, there are places where this hasn't been practical to apply. In
+   situations where you absolutely must emit a non-programmatic error and
+   the ``Error`` model isn't workable you can call ``report_fatal_error``,
+   which will call installed error handlers, print a message, and exit the
+   program.
+
 Recoverable errors are modeled using LLVM's ``Error`` scheme. This scheme
 represents errors using function return values, similar to classic C integer
 error codes, or C++'s ``std::error_code``. However, the ``Error`` class is
@@ -1224,7 +1233,7 @@ Define your DebugCounter like this:
 .. code-block:: c++
 
   DEBUG_COUNTER(DeleteAnInstruction, "passname-delete-instruction",
-		"Controls which instructions get delete").
+		"Controls which instructions get delete");
 
 The ``DEBUG_COUNTER`` macro defines a static variable, whose name
 is specified by the first argument.  The name of the counter

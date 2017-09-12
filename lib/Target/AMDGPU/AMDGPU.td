@@ -274,6 +274,12 @@ def FeatureDPP : SubtargetFeature<"dpp",
   "Support DPP (Data Parallel Primitives) extension"
 >;
 
+def FeatureIntClamp : SubtargetFeature<"int-clamp-insts",
+  "HasIntClamp",
+  "true",
+  "Support clamp for integer destination"
+>;
+
 //===------------------------------------------------------------===//
 // Subtarget Features (options and debugging)
 //===------------------------------------------------------------===//
@@ -452,7 +458,8 @@ def FeatureVolcanicIslands : SubtargetFeatureGeneration<"VOLCANIC_ISLANDS",
    FeatureGCN3Encoding, FeatureCIInsts, Feature16BitInsts,
    FeatureSMemRealTime, FeatureVGPRIndexMode, FeatureMovrel,
    FeatureScalarStores, FeatureInv2PiInlineImm,
-   FeatureSDWA, FeatureSDWAOutModsVOPC, FeatureSDWAMac, FeatureDPP
+   FeatureSDWA, FeatureSDWAOutModsVOPC, FeatureSDWAMac, FeatureDPP,
+   FeatureIntClamp
   ]
 >;
 
@@ -462,7 +469,7 @@ def FeatureGFX9 : SubtargetFeatureGeneration<"GFX9",
    FeatureGCN3Encoding, FeatureCIInsts, Feature16BitInsts,
    FeatureSMemRealTime, FeatureScalarStores, FeatureInv2PiInlineImm,
    FeatureApertureRegs, FeatureGFX9Insts, FeatureVOP3P, FeatureVGPRIndexMode,
-   FeatureFastFMAF32, FeatureDPP,
+   FeatureFastFMAF32, FeatureDPP, FeatureIntClamp,
    FeatureSDWA, FeatureSDWAOmod, FeatureSDWAScalar, FeatureSDWASdst,
    FeatureFlatInstOffsets, FeatureFlatGlobalInsts, FeatureFlatScratchInsts,
    FeatureAddNoCarryInsts
@@ -514,6 +521,8 @@ def FeatureISAVersion8_0_0 : SubtargetFeatureISAVersion <8,0,0,
 
 def FeatureISAVersion8_0_1 : SubtargetFeatureISAVersion <8,0,1,
   [FeatureVolcanicIslands,
+   FeatureFastFMAF32,
+   HalfRate64Ops,
    FeatureLDSBankCount32,
    FeatureXNACK]>;
 
@@ -683,6 +692,11 @@ def HasFlatGlobalInsts : Predicate<"Subtarget->hasFlatGlobalInsts()">,
   AssemblerPredicate<"FeatureFlatGlobalInsts">;
 def HasFlatScratchInsts : Predicate<"Subtarget->hasFlatScratchInsts()">,
   AssemblerPredicate<"FeatureFlatScratchInsts">;
+def HasD16LoadStore : Predicate<"Subtarget->hasD16LoadStore()">,
+  AssemblerPredicate<"FeatureGFX9Insts">;
+
+def HasDSAddTid : Predicate<"Subtarget->getGeneration() >= AMDGPUSubtarget::GFX9">,
+  AssemblerPredicate<"FeatureGFX9Insts">;
 
 def HasAddNoCarryInsts : Predicate<"Subtarget->hasAddNoCarryInsts()">,
   AssemblerPredicate<"FeatureAddNoCarryInsts">;
@@ -703,6 +717,9 @@ def HasSDWA9 : Predicate<"Subtarget->hasSDWA()">,
 
 def HasDPP : Predicate<"Subtarget->hasDPP()">,
   AssemblerPredicate<"FeatureDPP">;
+
+def HasIntClamp : Predicate<"Subtarget->hasIntClamp()">,
+  AssemblerPredicate<"FeatureIntClamp">;
 
 class PredicateControl {
   Predicate SubtargetPredicate;

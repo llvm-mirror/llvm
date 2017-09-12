@@ -239,6 +239,14 @@ static bool ShouldUpgradeX86Intrinsic(Function *F, StringRef Name) {
       Name.startswith("avx2.pblendd.") || // Added in 3.7
       Name.startswith("avx.vbroadcastf128") || // Added in 4.0
       Name == "avx2.vbroadcasti128" || // Added in 3.7
+      Name.startswith("avx512.mask.broadcastf32x4.") || // Added in 6.0
+      Name.startswith("avx512.mask.broadcastf64x2.") || // Added in 6.0
+      Name.startswith("avx512.mask.broadcasti32x4.") || // Added in 6.0
+      Name.startswith("avx512.mask.broadcasti64x2.") || // Added in 6.0
+      Name == "avx512.mask.broadcastf32x8.512" || // Added in 6.0
+      Name == "avx512.mask.broadcasti32x8.512" || // Added in 6.0
+      Name == "avx512.mask.broadcastf64x4.512" || // Added in 6.0
+      Name == "avx512.mask.broadcasti64x4.512" || // Added in 6.0
       Name == "xop.vpcmov" || // Added in 3.8
       Name == "xop.vpcmov.256" || // Added in 5.0
       Name.startswith("avx512.mask.move.s") || // Added in 4.0
@@ -1221,6 +1229,21 @@ void llvm::UpgradeIntrinsicCall(CallInst *CI, Function *NewFn) {
       else
         Rep = Builder.CreateShuffleVector(Load, UndefValue::get(Load->getType()),
                                           { 0, 1, 2, 3, 0, 1, 2, 3 });
+    } else if (IsX86 && (Name.startswith("avx512.mask.broadcastf") ||
+                         Name.startswith("avx512.mask.broadcasti"))) {
+      unsigned NumSrcElts =
+                        CI->getArgOperand(0)->getType()->getVectorNumElements();
+      unsigned NumDstElts = CI->getType()->getVectorNumElements();
+
+      SmallVector<uint32_t, 8> ShuffleMask(NumDstElts);
+      for (unsigned i = 0; i != NumDstElts; ++i)
+        ShuffleMask[i] = i % NumSrcElts;
+
+      Rep = Builder.CreateShuffleVector(CI->getArgOperand(0),
+                                        CI->getArgOperand(0),
+                                        ShuffleMask);
+      Rep = EmitX86Select(Builder, CI->getArgOperand(2), Rep,
+                          CI->getArgOperand(1));
     } else if (IsX86 && (Name.startswith("avx2.pbroadcast") ||
                          Name.startswith("avx2.vbroadcast") ||
                          Name.startswith("avx512.pbroadcast") ||
@@ -2261,14 +2284,14 @@ bool llvm::UpgradeDebugInfo(Module &M) {
 }
 
 bool llvm::UpgradeModuleFlags(Module &M) {
-  const NamedMDNode *ModFlags = M.getModuleFlagsMetadata();
+  NamedMDNode *ModFlags = M.getModuleFlagsMetadata();
   if (!ModFlags)
     return false;
 
-  bool HasObjCFlag = false, HasClassProperties = false;
+  bool HasObjCFlag = false, HasClassProperties = false, Changed = false;
   for (unsigned I = 0, E = ModFlags->getNumOperands(); I != E; ++I) {
     MDNode *Op = ModFlags->getOperand(I);
-    if (Op->getNumOperands() < 2)
+    if (Op->getNumOperands() != 3)
       continue;
     MDString *ID = dyn_cast_or_null<MDString>(Op->getOperand(1));
     if (!ID)
@@ -2277,7 +2300,24 @@ bool llvm::UpgradeModuleFlags(Module &M) {
       HasObjCFlag = true;
     if (ID->getString() == "Objective-C Class Properties")
       HasClassProperties = true;
+    // Upgrade PIC/PIE Module Flags. The module flag behavior for these two
+    // field was Error and now they are Max.
+    if (ID->getString() == "PIC Level" || ID->getString() == "PIE Level") {
+      if (auto *Behavior =
+              mdconst::dyn_extract_or_null<ConstantInt>(Op->getOperand(0))) {
+        if (Behavior->getLimitedValue() == Module::Error) {
+          Type *Int32Ty = Type::getInt32Ty(M.getContext());
+          Metadata *Ops[3] = {
+              ConstantAsMetadata::get(ConstantInt::get(Int32Ty, Module::Max)),
+              MDString::get(M.getContext(), ID->getString()),
+              Op->getOperand(2)};
+          ModFlags->setOperand(I, MDNode::get(M.getContext(), Ops));
+          Changed = true;
+        }
+      }
+    }
   }
+
   // "Objective-C Class Properties" is recently added for Objective-C. We
   // upgrade ObjC bitcodes to contain a "Objective-C Class Properties" module
   // flag of value 0, so we can correclty downgrade this flag when trying to
@@ -2286,9 +2326,10 @@ bool llvm::UpgradeModuleFlags(Module &M) {
   if (HasObjCFlag && !HasClassProperties) {
     M.addModuleFlag(llvm::Module::Override, "Objective-C Class Properties",
                     (uint32_t)0);
-    return true;
+    Changed = true;
   }
-  return false;
+
+  return Changed;
 }
 
 static bool isOldLoopArgument(Metadata *MD) {

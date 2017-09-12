@@ -1332,6 +1332,8 @@ bool ARMFastISel::SelectIndirectBr(const Instruction *I) {
   if (AddrReg == 0) return false;
 
   unsigned Opc = isThumb2 ? ARM::tBRIND : ARM::BX;
+  assert(isThumb2 || Subtarget->hasV4TOps());
+
   AddOptionalDefs(BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
                           TII.get(Opc)).addReg(AddrReg));
 
@@ -1846,7 +1848,7 @@ CCAssignFn *ARMFastISel::CCAssignFnForCall(CallingConv::ID CC,
                                            bool isVarArg) {
   switch (CC) {
   default:
-    llvm_unreachable("Unsupported calling convention");
+    report_fatal_error("Unsupported calling convention");
   case CallingConv::Fast:
     if (Subtarget->hasVFP2() && !isVarArg) {
       if (!Subtarget->isAAPCS_ABI())
@@ -1880,7 +1882,7 @@ CCAssignFn *ARMFastISel::CCAssignFnForCall(CallingConv::ID CC,
     return (Return ? RetCC_ARM_APCS: CC_ARM_APCS);
   case CallingConv::GHC:
     if (Return)
-      llvm_unreachable("Can't return in GHC call convention");
+      report_fatal_error("Can't return in GHC call convention");
     else
       return CC_ARM_APCS_GHC;
   }
@@ -2168,9 +2170,8 @@ bool ARMFastISel::SelectRet(const Instruction *I) {
     RetRegs.push_back(VA.getLocReg());
   }
 
-  unsigned RetOpc = isThumb2 ? ARM::tBX_RET : ARM::BX_RET;
   MachineInstrBuilder MIB = BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
-                                    TII.get(RetOpc));
+                                    TII.get(Subtarget->getReturnOpcode()));
   AddOptionalDefs(MIB);
   for (unsigned R : RetRegs)
     MIB.addReg(R, RegState::Implicit);

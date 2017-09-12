@@ -61,6 +61,7 @@ public:
   uint64_t getBlockMapOffset() const;
 
   uint32_t getNumStreams() const override;
+  uint32_t getMaxStreamSize() const;
   uint32_t getStreamByteSize(uint32_t StreamIndex) const override;
   ArrayRef<support::ulittle32_t>
   getStreamBlockList(uint32_t StreamIndex) const override;
@@ -83,6 +84,8 @@ public:
 
   ArrayRef<support::ulittle32_t> getDirectoryBlockArray() const;
 
+  std::unique_ptr<msf::MappedBlockStream> createIndexedStream(uint16_t SN);
+
   msf::MSFStreamLayout getStreamLayout(uint32_t StreamIdx) const;
   msf::MSFStreamLayout getFpmStreamLayout() const;
 
@@ -102,7 +105,7 @@ public:
 
   bool hasPDBDbiStream() const;
   bool hasPDBGlobalsStream();
-  bool hasPDBInfoStream();
+  bool hasPDBInfoStream() const;
   bool hasPDBIpiStream() const;
   bool hasPDBPublicsStream();
   bool hasPDBSymbolStream();

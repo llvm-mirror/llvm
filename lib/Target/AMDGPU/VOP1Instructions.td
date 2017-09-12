@@ -275,7 +275,7 @@ def VOP_MOVRELD : VOPProfile<[untyped, i32, untyped, untyped]> {
                      src0_sel:$src0_sel);
 
   let Asm32 = getAsm32<1, 1>.ret;
-  let Asm64 = getAsm64<1, 1, 0, 1>.ret;
+  let Asm64 = getAsm64<1, 1, 0, 0, 1>.ret;
   let AsmDPP = getAsmDPP<1, 1, 0>.ret;
   let AsmSDWA = getAsmSDWA<1, 1>.ret;
   let AsmSDWA9 = getAsmSDWA9<1, 0, 1>.ret;
@@ -659,6 +659,14 @@ def : Pat <
   (i32 (int_amdgcn_mov_dpp i32:$src, imm:$dpp_ctrl, imm:$row_mask, imm:$bank_mask,
                       imm:$bound_ctrl)),
   (V_MOV_B32_dpp $src, $src, (as_i32imm $dpp_ctrl),
+                       (as_i32imm $row_mask), (as_i32imm $bank_mask),
+                       (as_i1imm $bound_ctrl))
+>;
+
+def : Pat <
+  (i32 (int_amdgcn_update_dpp i32:$old, i32:$src, imm:$dpp_ctrl, imm:$row_mask,
+                      imm:$bank_mask, imm:$bound_ctrl)),
+  (V_MOV_B32_dpp $old, $src, (as_i32imm $dpp_ctrl),
                        (as_i32imm $row_mask), (as_i32imm $bank_mask),
                        (as_i1imm $bound_ctrl))
 >;

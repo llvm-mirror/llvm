@@ -382,6 +382,8 @@ public:
     bool UpperBound;
     /// Allow peeling off loop iterations for loops with low dynamic tripcount.
     bool AllowPeeling;
+    /// Allow unrolling of all the iterations of the runtime loop remainder.
+    bool UnrollRemainder;
   };
 
   /// \brief Get target-customized preferences for the generic loop unrolling
@@ -461,12 +463,6 @@ public:
   /// immediate offset and no index register.
   bool LSRWithInstrQueries() const;
 
-  /// \brief Return true if target supports the load / store
-  /// instruction with the given Offset on the form reg + Offset. It
-  /// may be that Offset is too big for a certain type (register
-  /// class).
-  bool isFoldableMemAccessOffset(Instruction *I, int64_t Offset) const;
-  
   /// \brief Return true if it's free to truncate a value of type Ty1 to type
   /// Ty2. e.g. On x86 it's free to truncate a i32 value in register EAX to i16
   /// by referencing its sub-register AX.
@@ -606,6 +602,22 @@ public:
 
   /// \return The size of a cache line in bytes.
   unsigned getCacheLineSize() const;
+
+  /// The possible cache levels
+  enum class CacheLevel {
+    L1D,   // The L1 data cache
+    L2D,   // The L2 data cache
+
+    // We currently do not model L3 caches, as their sizes differ widely between
+    // microarchitectures. Also, we currently do not have a use for L3 cache
+    // size modeling yet.
+  };
+
+  /// \return The size of the cache level in bytes, if available.
+  llvm::Optional<unsigned> getCacheSize(CacheLevel Level) const;
+
+  /// \return The associativity of the cache level, if available.
+  llvm::Optional<unsigned> getCacheAssociativity(CacheLevel Level) const;
 
   /// \return How much before a load we should place the prefetch instruction.
   /// This is currently measured in number of instructions.
@@ -904,7 +916,6 @@ public:
                                    int64_t BaseOffset, bool HasBaseReg,
                                    int64_t Scale, unsigned AddrSpace) = 0;
   virtual bool LSRWithInstrQueries() = 0;
-  virtual bool isFoldableMemAccessOffset(Instruction *I, int64_t Offset) = 0;
   virtual bool isTruncateFree(Type *Ty1, Type *Ty2) = 0;
   virtual bool isProfitableToHoist(Instruction *I) = 0;
   virtual bool isTypeLegal(Type *Ty) = 0;
@@ -942,6 +953,8 @@ public:
   virtual bool shouldConsiderAddressTypePromotion(
       const Instruction &I, bool &AllowPromotionWithoutCommonHeader) = 0;
   virtual unsigned getCacheLineSize() = 0;
+  virtual llvm::Optional<unsigned> getCacheSize(CacheLevel Level) = 0;
+  virtual llvm::Optional<unsigned> getCacheAssociativity(CacheLevel Level) = 0;
   virtual unsigned getPrefetchDistance() = 0;
   virtual unsigned getMinPrefetchStride() = 0;
   virtual unsigned getMaxPrefetchIterationsAhead() = 0;
@@ -1129,9 +1142,6 @@ public:
   bool LSRWithInstrQueries() override {
     return Impl.LSRWithInstrQueries();
   }
-  bool isFoldableMemAccessOffset(Instruction *I, int64_t Offset) override {
-    return Impl.isFoldableMemAccessOffset(I, Offset);
-  }
   bool isTruncateFree(Type *Ty1, Type *Ty2) override {
     return Impl.isTruncateFree(Ty1, Ty2);
   }
@@ -1216,6 +1226,12 @@ public:
   }
   unsigned getCacheLineSize() override {
     return Impl.getCacheLineSize();
+  }
+  llvm::Optional<unsigned> getCacheSize(CacheLevel Level) override {
+    return Impl.getCacheSize(Level);
+  }
+  llvm::Optional<unsigned> getCacheAssociativity(CacheLevel Level) override {
+    return Impl.getCacheAssociativity(Level);
   }
   unsigned getPrefetchDistance() override { return Impl.getPrefetchDistance(); }
   unsigned getMinPrefetchStride() override {

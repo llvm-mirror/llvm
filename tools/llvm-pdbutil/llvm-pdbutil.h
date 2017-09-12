@@ -12,6 +12,7 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/Optional.h"
+#include "llvm/ADT/PointerUnion.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -19,11 +20,17 @@
 #include <stdint.h>
 
 namespace llvm {
+namespace object {
+class COFFObjectFile;
+}
 namespace pdb {
 class PDBSymbolData;
 class PDBSymbolFunc;
+class PDBFile;
 uint32_t getTypeLength(const PDBSymbolData &Symbol);
 }
+typedef llvm::PointerUnion<object::COFFObjectFile *, pdb::PDBFile *>
+    PdbOrCoffObj;
 }
 
 namespace opts {
@@ -127,6 +134,8 @@ namespace dump {
 extern llvm::cl::opt<bool> DumpSummary;
 extern llvm::cl::opt<bool> DumpFpm;
 extern llvm::cl::opt<bool> DumpStreams;
+extern llvm::cl::opt<bool> DumpSymbolStats;
+extern llvm::cl::opt<bool> DumpUdtStats;
 extern llvm::cl::opt<bool> DumpStreamBlocks;
 
 extern llvm::cl::opt<bool> DumpLines;
@@ -146,6 +155,7 @@ extern llvm::cl::opt<bool> DumpIdData;
 extern llvm::cl::opt<bool> DumpIdExtras;
 extern llvm::cl::list<uint32_t> DumpIdIndex;
 extern llvm::cl::opt<uint32_t> DumpModi;
+extern llvm::cl::opt<bool> JustMyCode;
 extern llvm::cl::opt<bool> DumpSymbols;
 extern llvm::cl::opt<bool> DumpSymRecordBytes;
 extern llvm::cl::opt<bool> DumpGlobals;

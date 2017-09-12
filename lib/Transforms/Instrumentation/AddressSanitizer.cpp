@@ -83,6 +83,7 @@ static const uint64_t kMIPS64_ShadowOffset64 = 1ULL << 37;
 static const uint64_t kAArch64_ShadowOffset64 = 1ULL << 36;
 static const uint64_t kFreeBSD_ShadowOffset32 = 1ULL << 30;
 static const uint64_t kFreeBSD_ShadowOffset64 = 1ULL << 46;
+static const uint64_t kNetBSD_ShadowOffset64 = 1ULL << 46;
 static const uint64_t kPS4CPU_ShadowOffset64 = 1ULL << 40;
 static const uint64_t kWindowsShadowOffset32 = 3ULL << 28;
 // The shadow memory space is dynamically allocated.
@@ -402,6 +403,7 @@ static ShadowMapping getShadowMapping(Triple &TargetTriple, int LongSize,
   bool IsAndroid = TargetTriple.isAndroid();
   bool IsIOS = TargetTriple.isiOS() || TargetTriple.isWatchOS();
   bool IsFreeBSD = TargetTriple.isOSFreeBSD();
+  bool IsNetBSD = TargetTriple.isOSNetBSD();
   bool IsPS4CPU = TargetTriple.isPS4CPU();
   bool IsLinux = TargetTriple.isOSLinux();
   bool IsPPC64 = TargetTriple.getArch() == llvm::Triple::ppc64 ||
@@ -446,6 +448,8 @@ static ShadowMapping getShadowMapping(Triple &TargetTriple, int LongSize,
       Mapping.Offset = kSystemZ_ShadowOffset64;
     else if (IsFreeBSD)
       Mapping.Offset = kFreeBSD_ShadowOffset64;
+    else if (IsNetBSD)
+      Mapping.Offset = kNetBSD_ShadowOffset64;
     else if (IsPS4CPU)
       Mapping.Offset = kPS4CPU_ShadowOffset64;
     else if (IsLinux && IsX86_64) {
@@ -756,7 +760,7 @@ struct FunctionStackPoisoner : public InstVisitor<FunctionStackPoisoner> {
   bool runOnFunction() {
     if (!ClStack) return false;
 
-    if (ClRedzoneByvalArgs && Mapping.Offset != kDynamicShadowSentinel)
+    if (ClRedzoneByvalArgs)
       copyArgsPassedByValToAllocas();
 
     // Collect alloca, ret, lifetime instructions etc.
@@ -2134,31 +2138,31 @@ void AddressSanitizer::initializeCallbacks(Module &M) {
         Args2.push_back(ExpType);
         Args1.push_back(ExpType);
       }
-	    AsanErrorCallbackSized[AccessIsWrite][Exp] =
-	        checkSanitizerInterfaceFunction(M.getOrInsertFunction(
-	            kAsanReportErrorTemplate + ExpStr + TypeStr + SuffixStr +
-	                EndingStr,
-	            FunctionType::get(IRB.getVoidTy(), Args2, false)));
+      AsanErrorCallbackSized[AccessIsWrite][Exp] =
+          checkSanitizerInterfaceFunction(M.getOrInsertFunction(
+              kAsanReportErrorTemplate + ExpStr + TypeStr + SuffixStr +
+                  EndingStr,
+              FunctionType::get(IRB.getVoidTy(), Args2, false)));
 
-	    AsanMemoryAccessCallbackSized[AccessIsWrite][Exp] =
-	        checkSanitizerInterfaceFunction(M.getOrInsertFunction(
-	            ClMemoryAccessCallbackPrefix + ExpStr + TypeStr + "N" + EndingStr,
-	            FunctionType::get(IRB.getVoidTy(), Args2, false)));
+      AsanMemoryAccessCallbackSized[AccessIsWrite][Exp] =
+          checkSanitizerInterfaceFunction(M.getOrInsertFunction(
+              ClMemoryAccessCallbackPrefix + ExpStr + TypeStr + "N" + EndingStr,
+              FunctionType::get(IRB.getVoidTy(), Args2, false)));
 
-	    for (size_t AccessSizeIndex = 0; AccessSizeIndex < kNumberOfAccessSizes;
-	         AccessSizeIndex++) {
-	      const std::string Suffix = TypeStr + itostr(1ULL << AccessSizeIndex);
-	      AsanErrorCallback[AccessIsWrite][Exp][AccessSizeIndex] =
-	          checkSanitizerInterfaceFunction(M.getOrInsertFunction(
-	              kAsanReportErrorTemplate + ExpStr + Suffix + EndingStr,
-	              FunctionType::get(IRB.getVoidTy(), Args1, false)));
+      for (size_t AccessSizeIndex = 0; AccessSizeIndex < kNumberOfAccessSizes;
+           AccessSizeIndex++) {
+        const std::string Suffix = TypeStr + itostr(1ULL << AccessSizeIndex);
+        AsanErrorCallback[AccessIsWrite][Exp][AccessSizeIndex] =
+            checkSanitizerInterfaceFunction(M.getOrInsertFunction(
+                kAsanReportErrorTemplate + ExpStr + Suffix + EndingStr,
+                FunctionType::get(IRB.getVoidTy(), Args1, false)));
 
-	      AsanMemoryAccessCallback[AccessIsWrite][Exp][AccessSizeIndex] =
-	          checkSanitizerInterfaceFunction(M.getOrInsertFunction(
-	              ClMemoryAccessCallbackPrefix + ExpStr + Suffix + EndingStr,
-	              FunctionType::get(IRB.getVoidTy(), Args1, false)));
-	    }
-	  }
+        AsanMemoryAccessCallback[AccessIsWrite][Exp][AccessSizeIndex] =
+            checkSanitizerInterfaceFunction(M.getOrInsertFunction(
+                ClMemoryAccessCallbackPrefix + ExpStr + Suffix + EndingStr,
+                FunctionType::get(IRB.getVoidTy(), Args1, false)));
+      }
+    }
   }
 
   const std::string MemIntrinCallbackPrefix =
@@ -2546,8 +2550,13 @@ static int StackMallocSizeClass(uint64_t LocalStackSize) {
 }
 
 void FunctionStackPoisoner::copyArgsPassedByValToAllocas() {
-  BasicBlock &FirstBB = *F.begin();
-  IRBuilder<> IRB(&FirstBB, FirstBB.getFirstInsertionPt());
+  Instruction *CopyInsertPoint = &F.front().front();
+  if (CopyInsertPoint == ASan.LocalDynamicShadow) {
+    // Insert after the dynamic shadow location is determined
+    CopyInsertPoint = CopyInsertPoint->getNextNode();
+    assert(CopyInsertPoint);
+  }
+  IRBuilder<> IRB(CopyInsertPoint);
   const DataLayout &DL = F.getParent()->getDataLayout();
   for (Argument &Arg : F.args()) {
     if (Arg.hasByValAttr()) {

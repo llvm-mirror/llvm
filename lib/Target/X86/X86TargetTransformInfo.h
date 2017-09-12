@@ -47,6 +47,14 @@ public:
 
   /// @}
 
+  /// \name Cache TTI Implementation
+  /// @{
+  llvm::Optional<unsigned> getCacheSize(
+    TargetTransformInfo::CacheLevel Level) const;
+  llvm::Optional<unsigned> getCacheAssociativity(
+    TargetTransformInfo::CacheLevel Level) const;
+  /// @}
+
   /// \name Vector TTI Implementations
   /// @{
 
@@ -101,6 +109,8 @@ public:
   int getIntImmCost(int64_t);
 
   int getIntImmCost(const APInt &Imm, Type *Ty);
+
+  unsigned getUserCost(const User *U, ArrayRef<const Value *> Operands);
 
   int getIntImmCost(unsigned Opcode, unsigned Idx, const APInt &Imm, Type *Ty);
   int getIntImmCost(Intrinsic::ID IID, unsigned Idx, const APInt &Imm,

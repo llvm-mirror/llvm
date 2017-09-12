@@ -233,8 +233,12 @@ if( CMAKE_SIZEOF_VOID_P EQUAL 8 AND NOT WIN32 )
 endif( CMAKE_SIZEOF_VOID_P EQUAL 8 AND NOT WIN32 )
 
 # If building on a GNU specific 32-bit system, make sure off_t is 64 bits
-# so that off_t can stored offset > 2GB
-if( CMAKE_SIZEOF_VOID_P EQUAL 4 )
+# so that off_t can stored offset > 2GB.
+# Android until version N (API 24) doesn't support it.
+if (ANDROID AND (ANDROID_NATIVE_API_LEVEL LESS 24))
+  set(LLVM_FORCE_SMALLFILE_FOR_ANDROID TRUE)
+endif()
+if( CMAKE_SIZEOF_VOID_P EQUAL 4 AND NOT LLVM_FORCE_SMALLFILE_FOR_ANDROID)
   add_definitions( -D_LARGEFILE_SOURCE )
   add_definitions( -D_FILE_OFFSET_BITS=64 )
 endif()
@@ -303,13 +307,13 @@ if( MSVC )
     # especially so std::equal(nullptr, nullptr, nullptr) will not assert.
     add_definitions("-D_DEBUG_POINTER_IMPL=")
   endif()
-  
+
   include(ChooseMSVCCRT)
 
   if( MSVC11 )
     add_definitions(-D_VARIADIC_MAX=10)
   endif()
-  
+
   # Add definitions that make MSVC much less annoying.
   add_definitions(
     # For some reason MS wants to deprecate a bunch of standard functions...
@@ -370,7 +374,7 @@ if( MSVC )
 
       string(FIND "${upper_exe_flags} ${upper_module_flags} ${upper_shared_flags}"
         "/INCREMENTAL" linker_flag_idx)
-      
+
       if (${linker_flag_idx} GREATER -1)
         message(WARNING "/Brepro not compatible with /INCREMENTAL linking - builds will be non-deterministic")
       else()
@@ -383,6 +387,7 @@ elseif( LLVM_COMPILER_IS_GCC_COMPATIBLE )
   append_if(LLVM_ENABLE_WERROR "-Werror" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
   append_if(LLVM_ENABLE_WERROR "-Wno-error" CMAKE_REQUIRED_FLAGS)
   add_flag_if_supported("-Werror=date-time" WERROR_DATE_TIME)
+  add_flag_if_supported("-Werror=unguarded-availability-new" WERROR_UNGUARDED_AVAILABILITY_NEW)
   if (LLVM_ENABLE_CXX1Y)
     check_cxx_compiler_flag("-std=c++1y" CXX_SUPPORTS_CXX1Y)
     append_if(CXX_SUPPORTS_CXX1Y "-std=c++1y" CMAKE_CXX_FLAGS)
@@ -664,7 +669,7 @@ if(LLVM_USE_SANITIZER)
                           FSANITIZE_USE_AFTER_SCOPE_FLAG)
   endif()
   if (LLVM_USE_SANITIZE_COVERAGE)
-    append("-fsanitize-coverage=trace-pc-guard,indirect-calls,trace-cmp" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+    append("-fsanitize=fuzzer-no-link" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
   endif()
 endif()
 
@@ -791,7 +796,7 @@ endif()
 # Plugin support
 # FIXME: Make this configurable.
 if(WIN32 OR CYGWIN)
-  if(BUILD_SHARED_LIBS)
+  if(BUILD_SHARED_LIBS OR LLVM_BUILD_LLVM_DYLIB)
     set(LLVM_ENABLE_PLUGINS ON)
   else()
     set(LLVM_ENABLE_PLUGINS OFF)

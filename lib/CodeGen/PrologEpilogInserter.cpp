@@ -489,7 +489,7 @@ static void insertCSRSaves(MachineBasicBlock &SaveBlock,
 
 /// Insert restore code for the callee-saved registers used in the function.
 static void insertCSRRestores(MachineBasicBlock &RestoreBlock,
-                              ArrayRef<CalleeSavedInfo> CSI) {
+                              std::vector<CalleeSavedInfo> &CSI) {
   MachineFunction &Fn = *RestoreBlock.getParent();
   const TargetInstrInfo &TII = *Fn.getSubtarget().getInstrInfo();
   const TargetFrameLowering *TFI = Fn.getSubtarget().getFrameLowering();
@@ -534,7 +534,7 @@ static void doSpillCalleeSavedRegs(MachineFunction &Fn, RegScavenger *RS,
   if (!F->hasFnAttribute(Attribute::Naked)) {
     MFI.setCalleeSavedInfoValid(true);
 
-    ArrayRef<CalleeSavedInfo> CSI = MFI.getCalleeSavedInfo();
+    std::vector<CalleeSavedInfo> &CSI = MFI.getCalleeSavedInfo();
     if (!CSI.empty()) {
       for (MachineBasicBlock *SaveBlock : SaveBlocks) {
         insertCSRSaves(*SaveBlock, CSI);
@@ -1086,9 +1086,6 @@ void PEI::replaceFrameIndices(MachineBasicBlock *BB, MachineFunction &Fn,
         auto *DIExpr = DIExpression::prepend(MI.getDebugExpression(),
                                              DIExpression::NoDeref, Offset);
         MI.getOperand(3).setMetadata(DIExpr);
-        const Module *M = Fn.getMMI().getModule();
-        // Add the expression to the metadata graph so isn't lost in MIR dumps.
-        M->getNamedMetadata("llvm.dbg.mir")->addOperand(DIExpr);
         continue;
       }
 

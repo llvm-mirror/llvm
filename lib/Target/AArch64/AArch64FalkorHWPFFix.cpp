@@ -92,9 +92,7 @@ public:
     AU.addRequired<LoopInfoWrapperPass>();
     AU.addPreserved<LoopInfoWrapperPass>();
     AU.addRequired<ScalarEvolutionWrapperPass>();
-    // FIXME: For some reason, preserving SE here breaks LSR (even if
-    // this pass changes nothing).
-    // AU.addPreserved<ScalarEvolutionWrapperPass>();
+    AU.addPreserved<ScalarEvolutionWrapperPass>();
   }
 
   bool runOnFunction(Function &F) override;
@@ -594,7 +592,6 @@ static Optional<LoadInfo> getLoadInfo(const MachineInstr &MI) {
     IsPrePost = true;
     break;
 
-  case AArch64::LDPDi:
   case AArch64::LDPQi:
     DestRegIdx = -1;
     BaseRegIdx = 2;
@@ -602,6 +599,7 @@ static Optional<LoadInfo> getLoadInfo(const MachineInstr &MI) {
     IsPrePost = false;
     break;
 
+  case AArch64::LDPDi:
   case AArch64::LDPSWi:
   case AArch64::LDPSi:
   case AArch64::LDPWi:

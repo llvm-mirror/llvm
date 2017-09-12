@@ -140,7 +140,10 @@ scalar.body:
 ; CHECK:       vector.body:
 ; CHECK:         %vector.recur = phi <4 x i16> [ %vector.recur.init, %vector.ph ], [ [[L1:%[a-zA-Z0-9.]+]], %vector.body ]
 ; CHECK:         [[L1]] = load <4 x i16>
-; CHECK:         {{.*}} = shufflevector <4 x i16> %vector.recur, <4 x i16> [[L1]], <4 x i32> <i32 3, i32 4, i32 5, i32 6>
+; CHECK:         [[SHUF:%[a-zA-Z0-9.]+]] = shufflevector <4 x i16> %vector.recur, <4 x i16> [[L1]], <4 x i32> <i32 3, i32 4, i32 5, i32 6>
+; Check also that the casts were not moved needlessly.
+; CHECK:         sitofp <4 x i16> [[L1]] to <4 x double>
+; CHECK:         sitofp <4 x i16> [[SHUF]] to <4 x double> 
 ; CHECK:       middle.block:
 ; CHECK:         %vector.recur.extract = extractelement <4 x i16> [[L1]], i32 3
 ; CHECK:       scalar.ph:
@@ -464,13 +467,6 @@ for.body:
 ; SINK-AFTER:   %[[VCONV:.+]] = sext <4 x i16> %[[VSHUF]] to <4 x i32>
 ; SINK-AFTER:   %[[VCONV3:.+]] = sext <4 x i16> %wide.load to <4 x i32>
 ; SINK-AFTER:   mul nsw <4 x i32> %[[VCONV3]], %[[VCONV]]
-; Check also that the sext sank after the load in the scalar loop.
-; SINK-AFTER: for.body
-; SINK-AFTER:   %scalar.recur = phi i16 [ %scalar.recur.init, %scalar.ph ], [ %[[LOAD:.+]], %for.body ]
-; SINK-AFTER:   %[[LOAD]] = load i16, i16* %arrayidx2
-; SINK-AFTER:   %[[CONV:.+]] = sext i16 %scalar.recur to i32
-; SINK-AFTER:   %[[CONV3:.+]] = sext i16 %[[LOAD]] to i32
-; SINK-AFTER:   %mul = mul nsw i32 %[[CONV3]], %[[CONV]]
 ;
 define void @sink_after(i16* %a, i32* %b, i64 %n) {
 entry:

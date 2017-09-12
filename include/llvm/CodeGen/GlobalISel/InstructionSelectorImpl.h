@@ -17,6 +17,12 @@
 #define LLVM_CODEGEN_GLOBALISEL_INSTRUCTIONSELECTORIMPL_H
 
 namespace llvm {
+
+/// GlobalISel PatFrag Predicates
+enum {
+  GIPFP_Invalid,
+};
+
 template <class TgtInstructionSelector, class PredicateBitset,
           class ComplexMatcherMemFn>
 bool InstructionSelector::executeMatchTable(
@@ -124,6 +130,28 @@ bool InstructionSelector::executeMatchTable(
         if (handleReject() == RejectAndGiveUp)
           return false;
       }
+      break;
+    }
+    case GIM_CheckImmPredicate: {
+      int64_t InsnID = MatchTable[CurrentIdx++];
+      int64_t Predicate = MatchTable[CurrentIdx++];
+      DEBUG(dbgs() << CurrentIdx << ": GIM_CheckImmPredicate(MIs[" << InsnID
+                   << "], Predicate=" << Predicate << ")\n");
+      assert(State.MIs[InsnID] != nullptr && "Used insn before defined");
+      assert(State.MIs[InsnID]->getOpcode() == TargetOpcode::G_CONSTANT &&
+             "Expected G_CONSTANT");
+      assert(Predicate > GIPFP_Invalid && "Expected a valid predicate");
+      int64_t Value = 0;
+      if (State.MIs[InsnID]->getOperand(1).isCImm())
+        Value = State.MIs[InsnID]->getOperand(1).getCImm()->getSExtValue();
+      else if (State.MIs[InsnID]->getOperand(1).isImm())
+        Value = State.MIs[InsnID]->getOperand(1).getImm();
+      else
+        llvm_unreachable("Expected Imm or CImm operand");
+
+      if (!MatcherInfo.ImmPredicateFns[Predicate](Value))
+        if (handleReject() == RejectAndGiveUp)
+          return false;
       break;
     }
 
@@ -343,6 +371,23 @@ bool InstructionSelector::executeMatchTable(
       State.Renderers[RendererID](OutMIs[InsnID]);
       DEBUG(dbgs() << CurrentIdx << ": GIR_ComplexRenderer(OutMIs[" << InsnID
                    << "], " << RendererID << ")\n");
+      break;
+    }
+
+    case GIR_CopyConstantAsSImm: {
+      int64_t NewInsnID = MatchTable[CurrentIdx++];
+      int64_t OldInsnID = MatchTable[CurrentIdx++];
+      assert(OutMIs[NewInsnID] && "Attempted to add to undefined instruction");
+      assert(State.MIs[OldInsnID]->getOpcode() == TargetOpcode::G_CONSTANT && "Expected G_CONSTANT");
+      if (State.MIs[OldInsnID]->getOperand(1).isCImm()) {
+        OutMIs[NewInsnID].addImm(
+            State.MIs[OldInsnID]->getOperand(1).getCImm()->getSExtValue());
+      } else if (State.MIs[OldInsnID]->getOperand(1).isImm())
+        OutMIs[NewInsnID].add(State.MIs[OldInsnID]->getOperand(1));
+      else
+        llvm_unreachable("Expected Imm or CImm operand");
+      DEBUG(dbgs() << CurrentIdx << ": GIR_CopyConstantAsSImm(OutMIs[" << NewInsnID
+                   << "], MIs[" << OldInsnID << "])\n");
       break;
     }
 

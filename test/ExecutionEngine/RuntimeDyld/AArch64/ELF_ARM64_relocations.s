@@ -1,5 +1,5 @@
-# RUN: llvm-mc -triple=arm64-none-linux-gnu -filetype=obj -o %T/reloc.o %s
-# RUN: llvm-rtdyld -triple=arm64-none-linux-gnu -verify -dummy-extern f=0x0123456789abcdef -check=%s %T/reloc.o
+# RUN: llvm-mc -triple=arm64-none-linux-gnu -filetype=obj -o %t %s
+# RUN: llvm-rtdyld -triple=arm64-none-linux-gnu -verify -dummy-extern f=0x0123456789abcdef -check=%s %t
         
         .globl Q
         .section .dummy, "ax"
@@ -33,7 +33,7 @@ l:
 p:
 # R_AARCH64_ADR_PREL_PG_HI21
 # Test both low and high immediate values
-        adrp x4, a + 20480 # 16384 + 4096
+        adrp x4, a + 20480 // 16384 + 4096
 # Align next label to 16 bytes, so that LDST immediate
 # fields will be non-zero        
         .align 4

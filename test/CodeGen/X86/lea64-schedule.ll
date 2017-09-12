@@ -40,7 +40,7 @@ define i64 @test_lea_offset(i64) {
 ; HASWELL-LABEL: test_lea_offset:
 ; HASWELL:       # BB#0:
 ; HASWELL-NEXT:    leaq -24(%rdi), %rax # sched: [1:0.50]
-; HASWELL-NEXT:    retq # sched: [1:1.00]
+; HASWELL-NEXT:    retq # sched: [2:1.00]
 ;
 ; BTVER2-LABEL: test_lea_offset:
 ; BTVER2:       # BB#0:
@@ -50,7 +50,7 @@ define i64 @test_lea_offset(i64) {
 ; ZNVER1-LABEL: test_lea_offset:
 ; ZNVER1:       # BB#0:
 ; ZNVER1-NEXT:    leaq -24(%rdi), %rax # sched: [1:0.25]
-; ZNVER1-NEXT:    retq # sched: [5:0.50]
+; ZNVER1-NEXT:    retq # sched: [1:0.50]
   %2 = add nsw i64 %0, -24
   ret i64 %2
 }
@@ -85,7 +85,7 @@ define i64 @test_lea_offset_big(i64) {
 ; HASWELL-LABEL: test_lea_offset_big:
 ; HASWELL:       # BB#0:
 ; HASWELL-NEXT:    leaq 1024(%rdi), %rax # sched: [1:0.50]
-; HASWELL-NEXT:    retq # sched: [1:1.00]
+; HASWELL-NEXT:    retq # sched: [2:1.00]
 ;
 ; BTVER2-LABEL: test_lea_offset_big:
 ; BTVER2:       # BB#0:
@@ -95,7 +95,7 @@ define i64 @test_lea_offset_big(i64) {
 ; ZNVER1-LABEL: test_lea_offset_big:
 ; ZNVER1:       # BB#0:
 ; ZNVER1-NEXT:    leaq 1024(%rdi), %rax # sched: [1:0.25]
-; ZNVER1-NEXT:    retq # sched: [5:0.50]
+; ZNVER1-NEXT:    retq # sched: [1:0.50]
   %2 = add nsw i64 %0, 1024
   ret i64 %2
 }
@@ -131,7 +131,7 @@ define i64 @test_lea_add(i64, i64) {
 ; HASWELL-LABEL: test_lea_add:
 ; HASWELL:       # BB#0:
 ; HASWELL-NEXT:    leaq (%rdi,%rsi), %rax # sched: [1:0.50]
-; HASWELL-NEXT:    retq # sched: [1:1.00]
+; HASWELL-NEXT:    retq # sched: [2:1.00]
 ;
 ; BTVER2-LABEL: test_lea_add:
 ; BTVER2:       # BB#0:
@@ -141,7 +141,7 @@ define i64 @test_lea_add(i64, i64) {
 ; ZNVER1-LABEL: test_lea_add:
 ; ZNVER1:       # BB#0:
 ; ZNVER1-NEXT:    leaq (%rdi,%rsi), %rax # sched: [1:0.25]
-; ZNVER1-NEXT:    retq # sched: [5:0.50]
+; ZNVER1-NEXT:    retq # sched: [1:0.50]
   %3 = add nsw i64 %1, %0
   ret i64 %3
 }
@@ -149,7 +149,8 @@ define i64 @test_lea_add(i64, i64) {
 define i64 @test_lea_add_offset(i64, i64) {
 ; GENERIC-LABEL: test_lea_add_offset:
 ; GENERIC:       # BB#0:
-; GENERIC-NEXT:    leaq 16(%rdi,%rsi), %rax # sched: [1:0.50]
+; GENERIC-NEXT:    leaq (%rdi,%rsi), %rax # sched: [1:0.50]
+; GENERIC-NEXT:    addq $16, %rax # sched: [1:0.33]
 ; GENERIC-NEXT:    retq # sched: [1:1.00]
 ;
 ; ATOM-LABEL: test_lea_add_offset:
@@ -178,7 +179,7 @@ define i64 @test_lea_add_offset(i64, i64) {
 ; HASWELL:       # BB#0:
 ; HASWELL-NEXT:    leaq (%rdi,%rsi), %rax # sched: [1:0.50]
 ; HASWELL-NEXT:    addq $16, %rax # sched: [1:0.25]
-; HASWELL-NEXT:    retq # sched: [1:1.00]
+; HASWELL-NEXT:    retq # sched: [2:1.00]
 ;
 ; BTVER2-LABEL: test_lea_add_offset:
 ; BTVER2:       # BB#0:
@@ -188,7 +189,7 @@ define i64 @test_lea_add_offset(i64, i64) {
 ; ZNVER1-LABEL: test_lea_add_offset:
 ; ZNVER1:       # BB#0:
 ; ZNVER1-NEXT:    leaq 16(%rdi,%rsi), %rax # sched: [1:0.25]
-; ZNVER1-NEXT:    retq # sched: [5:0.50]
+; ZNVER1-NEXT:    retq # sched: [1:0.50]
   %3 = add i64 %0, 16
   %4 = add i64 %3, %1
   ret i64 %4
@@ -197,7 +198,9 @@ define i64 @test_lea_add_offset(i64, i64) {
 define i64 @test_lea_add_offset_big(i64, i64) {
 ; GENERIC-LABEL: test_lea_add_offset_big:
 ; GENERIC:       # BB#0:
-; GENERIC-NEXT:    leaq -4096(%rdi,%rsi), %rax # sched: [1:0.50]
+; GENERIC-NEXT:    leaq (%rdi,%rsi), %rax # sched: [1:0.50]
+; GENERIC-NEXT:    addq $-4096, %rax # imm = 0xF000
+; GENERIC-NEXT:    # sched: [1:0.33]
 ; GENERIC-NEXT:    retq # sched: [1:1.00]
 ;
 ; ATOM-LABEL: test_lea_add_offset_big:
@@ -228,7 +231,7 @@ define i64 @test_lea_add_offset_big(i64, i64) {
 ; HASWELL-NEXT:    leaq (%rdi,%rsi), %rax # sched: [1:0.50]
 ; HASWELL-NEXT:    addq $-4096, %rax # imm = 0xF000
 ; HASWELL-NEXT:    # sched: [1:0.25]
-; HASWELL-NEXT:    retq # sched: [1:1.00]
+; HASWELL-NEXT:    retq # sched: [2:1.00]
 ;
 ; BTVER2-LABEL: test_lea_add_offset_big:
 ; BTVER2:       # BB#0:
@@ -238,7 +241,7 @@ define i64 @test_lea_add_offset_big(i64, i64) {
 ; ZNVER1-LABEL: test_lea_add_offset_big:
 ; ZNVER1:       # BB#0:
 ; ZNVER1-NEXT:    leaq -4096(%rdi,%rsi), %rax # sched: [1:0.25]
-; ZNVER1-NEXT:    retq # sched: [5:0.50]
+; ZNVER1-NEXT:    retq # sched: [1:0.50]
   %3 = add i64 %0, -4096
   %4 = add i64 %3, %1
   ret i64 %4
@@ -274,7 +277,7 @@ define i64 @test_lea_mul(i64) {
 ; HASWELL-LABEL: test_lea_mul:
 ; HASWELL:       # BB#0:
 ; HASWELL-NEXT:    leaq (%rdi,%rdi,2), %rax # sched: [1:0.50]
-; HASWELL-NEXT:    retq # sched: [1:1.00]
+; HASWELL-NEXT:    retq # sched: [2:1.00]
 ;
 ; BTVER2-LABEL: test_lea_mul:
 ; BTVER2:       # BB#0:
@@ -284,7 +287,7 @@ define i64 @test_lea_mul(i64) {
 ; ZNVER1-LABEL: test_lea_mul:
 ; ZNVER1:       # BB#0:
 ; ZNVER1-NEXT:    leaq (%rdi,%rdi,2), %rax # sched: [1:0.25]
-; ZNVER1-NEXT:    retq # sched: [5:0.50]
+; ZNVER1-NEXT:    retq # sched: [1:0.50]
   %2 = mul nsw i64 %0, 3
   ret i64 %2
 }
@@ -292,7 +295,8 @@ define i64 @test_lea_mul(i64) {
 define i64 @test_lea_mul_offset(i64) {
 ; GENERIC-LABEL: test_lea_mul_offset:
 ; GENERIC:       # BB#0:
-; GENERIC-NEXT:    leaq -32(%rdi,%rdi,2), %rax # sched: [1:0.50]
+; GENERIC-NEXT:    leaq (%rdi,%rdi,2), %rax # sched: [1:0.50]
+; GENERIC-NEXT:    addq $-32, %rax # sched: [1:0.33]
 ; GENERIC-NEXT:    retq # sched: [1:1.00]
 ;
 ; ATOM-LABEL: test_lea_mul_offset:
@@ -321,7 +325,7 @@ define i64 @test_lea_mul_offset(i64) {
 ; HASWELL:       # BB#0:
 ; HASWELL-NEXT:    leaq (%rdi,%rdi,2), %rax # sched: [1:0.50]
 ; HASWELL-NEXT:    addq $-32, %rax # sched: [1:0.25]
-; HASWELL-NEXT:    retq # sched: [1:1.00]
+; HASWELL-NEXT:    retq # sched: [2:1.00]
 ;
 ; BTVER2-LABEL: test_lea_mul_offset:
 ; BTVER2:       # BB#0:
@@ -331,7 +335,7 @@ define i64 @test_lea_mul_offset(i64) {
 ; ZNVER1-LABEL: test_lea_mul_offset:
 ; ZNVER1:       # BB#0:
 ; ZNVER1-NEXT:    leaq -32(%rdi,%rdi,2), %rax # sched: [1:0.25]
-; ZNVER1-NEXT:    retq # sched: [5:0.50]
+; ZNVER1-NEXT:    retq # sched: [1:0.50]
   %2 = mul nsw i64 %0, 3
   %3 = add nsw i64 %2, -32
   ret i64 %3
@@ -340,7 +344,9 @@ define i64 @test_lea_mul_offset(i64) {
 define i64 @test_lea_mul_offset_big(i64) {
 ; GENERIC-LABEL: test_lea_mul_offset_big:
 ; GENERIC:       # BB#0:
-; GENERIC-NEXT:    leaq 10000(%rdi,%rdi,8), %rax # sched: [1:0.50]
+; GENERIC-NEXT:    leaq (%rdi,%rdi,8), %rax # sched: [1:0.50]
+; GENERIC-NEXT:    addq $10000, %rax # imm = 0x2710
+; GENERIC-NEXT:    # sched: [1:0.33]
 ; GENERIC-NEXT:    retq # sched: [1:1.00]
 ;
 ; ATOM-LABEL: test_lea_mul_offset_big:
@@ -371,7 +377,7 @@ define i64 @test_lea_mul_offset_big(i64) {
 ; HASWELL-NEXT:    leaq (%rdi,%rdi,8), %rax # sched: [1:0.50]
 ; HASWELL-NEXT:    addq $10000, %rax # imm = 0x2710
 ; HASWELL-NEXT:    # sched: [1:0.25]
-; HASWELL-NEXT:    retq # sched: [1:1.00]
+; HASWELL-NEXT:    retq # sched: [2:1.00]
 ;
 ; BTVER2-LABEL: test_lea_mul_offset_big:
 ; BTVER2:       # BB#0:
@@ -381,7 +387,7 @@ define i64 @test_lea_mul_offset_big(i64) {
 ; ZNVER1-LABEL: test_lea_mul_offset_big:
 ; ZNVER1:       # BB#0:
 ; ZNVER1-NEXT:    leaq 10000(%rdi,%rdi,8), %rax # sched: [1:0.25]
-; ZNVER1-NEXT:    retq # sched: [5:0.50]
+; ZNVER1-NEXT:    retq # sched: [1:0.50]
   %2 = mul nsw i64 %0, 9
   %3 = add nsw i64 %2, 10000
   ret i64 %3
@@ -417,7 +423,7 @@ define i64 @test_lea_add_scale(i64, i64) {
 ; HASWELL-LABEL: test_lea_add_scale:
 ; HASWELL:       # BB#0:
 ; HASWELL-NEXT:    leaq (%rdi,%rsi,2), %rax # sched: [1:0.50]
-; HASWELL-NEXT:    retq # sched: [1:1.00]
+; HASWELL-NEXT:    retq # sched: [2:1.00]
 ;
 ; BTVER2-LABEL: test_lea_add_scale:
 ; BTVER2:       # BB#0:
@@ -427,7 +433,7 @@ define i64 @test_lea_add_scale(i64, i64) {
 ; ZNVER1-LABEL: test_lea_add_scale:
 ; ZNVER1:       # BB#0:
 ; ZNVER1-NEXT:    leaq (%rdi,%rsi,2), %rax # sched: [1:0.25]
-; ZNVER1-NEXT:    retq # sched: [5:0.50]
+; ZNVER1-NEXT:    retq # sched: [1:0.50]
   %3 = shl i64 %1, 1
   %4 = add nsw i64 %3, %0
   ret i64 %4
@@ -436,7 +442,8 @@ define i64 @test_lea_add_scale(i64, i64) {
 define i64 @test_lea_add_scale_offset(i64, i64) {
 ; GENERIC-LABEL: test_lea_add_scale_offset:
 ; GENERIC:       # BB#0:
-; GENERIC-NEXT:    leaq 96(%rdi,%rsi,4), %rax # sched: [1:0.50]
+; GENERIC-NEXT:    leaq (%rdi,%rsi,4), %rax # sched: [1:0.50]
+; GENERIC-NEXT:    addq $96, %rax # sched: [1:0.33]
 ; GENERIC-NEXT:    retq # sched: [1:1.00]
 ;
 ; ATOM-LABEL: test_lea_add_scale_offset:
@@ -465,7 +472,7 @@ define i64 @test_lea_add_scale_offset(i64, i64) {
 ; HASWELL:       # BB#0:
 ; HASWELL-NEXT:    leaq (%rdi,%rsi,4), %rax # sched: [1:0.50]
 ; HASWELL-NEXT:    addq $96, %rax # sched: [1:0.25]
-; HASWELL-NEXT:    retq # sched: [1:1.00]
+; HASWELL-NEXT:    retq # sched: [2:1.00]
 ;
 ; BTVER2-LABEL: test_lea_add_scale_offset:
 ; BTVER2:       # BB#0:
@@ -475,7 +482,7 @@ define i64 @test_lea_add_scale_offset(i64, i64) {
 ; ZNVER1-LABEL: test_lea_add_scale_offset:
 ; ZNVER1:       # BB#0:
 ; ZNVER1-NEXT:    leaq 96(%rdi,%rsi,4), %rax # sched: [1:0.25]
-; ZNVER1-NEXT:    retq # sched: [5:0.50]
+; ZNVER1-NEXT:    retq # sched: [1:0.50]
   %3 = shl i64 %1, 2
   %4 = add i64 %0, 96
   %5 = add i64 %4, %3
@@ -485,7 +492,9 @@ define i64 @test_lea_add_scale_offset(i64, i64) {
 define i64 @test_lea_add_scale_offset_big(i64, i64) {
 ; GENERIC-LABEL: test_lea_add_scale_offset_big:
 ; GENERIC:       # BB#0:
-; GENERIC-NEXT:    leaq -1200(%rdi,%rsi,8), %rax # sched: [1:0.50]
+; GENERIC-NEXT:    leaq (%rdi,%rsi,8), %rax # sched: [1:0.50]
+; GENERIC-NEXT:    addq $-1200, %rax # imm = 0xFB50
+; GENERIC-NEXT:    # sched: [1:0.33]
 ; GENERIC-NEXT:    retq # sched: [1:1.00]
 ;
 ; ATOM-LABEL: test_lea_add_scale_offset_big:
@@ -516,7 +525,7 @@ define i64 @test_lea_add_scale_offset_big(i64, i64) {
 ; HASWELL-NEXT:    leaq (%rdi,%rsi,8), %rax # sched: [1:0.50]
 ; HASWELL-NEXT:    addq $-1200, %rax # imm = 0xFB50
 ; HASWELL-NEXT:    # sched: [1:0.25]
-; HASWELL-NEXT:    retq # sched: [1:1.00]
+; HASWELL-NEXT:    retq # sched: [2:1.00]
 ;
 ; BTVER2-LABEL: test_lea_add_scale_offset_big:
 ; BTVER2:       # BB#0:
@@ -526,7 +535,7 @@ define i64 @test_lea_add_scale_offset_big(i64, i64) {
 ; ZNVER1-LABEL: test_lea_add_scale_offset_big:
 ; ZNVER1:       # BB#0:
 ; ZNVER1-NEXT:    leaq -1200(%rdi,%rsi,8), %rax # sched: [1:0.25]
-; ZNVER1-NEXT:    retq # sched: [5:0.50]
+; ZNVER1-NEXT:    retq # sched: [1:0.50]
   %3 = shl i64 %1, 3
   %4 = add i64 %0, -1200
   %5 = add i64 %4, %3

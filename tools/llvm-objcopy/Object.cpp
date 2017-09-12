@@ -90,6 +90,70 @@ void StringTableSection::writeSection(FileOutputBuffer &Out) const {
   StrTabBuilder.write(Out.getBufferStart() + Offset);
 }
 
+void SymbolTableSection::addSymbol(StringRef Name, uint8_t Bind, uint8_t Type,
+                                   SectionBase *DefinedIn, uint64_t Value,
+                                   uint64_t Sz) {
+  Symbol Sym;
+  Sym.Name = Name;
+  Sym.Binding = Bind;
+  Sym.Type = Type;
+  Sym.DefinedIn = DefinedIn;
+  Sym.Value = Value;
+  Sym.Size = Sz;
+  Sym.Index = Symbols.size();
+  Symbols.emplace_back(llvm::make_unique<Symbol>(Sym));
+  Size += this->EntrySize;
+}
+
+void SymbolTableSection::finalize() {
+  // Make sure SymbolNames is finalized before getting name indexes.
+  SymbolNames->finalize();
+
+  uint32_t MaxLocalIndex = 0;
+  for (auto &Sym : Symbols) {
+    Sym->NameIndex = SymbolNames->findIndex(Sym->Name);
+    if (Sym->Binding == STB_LOCAL)
+      MaxLocalIndex = std::max(MaxLocalIndex, Sym->Index);
+  }
+  // Now we need to set the Link and Info fields.
+  Link = SymbolNames->Index;
+  Info = MaxLocalIndex + 1;
+}
+
+void SymbolTableSection::addSymbolNames() {
+  // Add all of our strings to SymbolNames so that SymbolNames has the right
+  // size before layout is decided.
+  for (auto &Sym : Symbols)
+    SymbolNames->addString(Sym->Name);
+}
+
+const Symbol *SymbolTableSection::getSymbolByIndex(uint32_t Index) const {
+  if (Symbols.size() <= Index)
+    error("Invalid symbol index: " + Twine(Index));
+  return Symbols[Index].get();
+}
+
+template <class ELFT>
+void SymbolTableSectionImpl<ELFT>::writeSection(
+    llvm::FileOutputBuffer &Out) const {
+  uint8_t *Buf = Out.getBufferStart();
+  Buf += Offset;
+  typename ELFT::Sym *Sym = reinterpret_cast<typename ELFT::Sym *>(Buf);
+  // Loop though symbols setting each entry of the symbol table.
+  for (auto &Symbol : Symbols) {
+    Sym->st_name = Symbol->NameIndex;
+    Sym->st_value = Symbol->Value;
+    Sym->st_size = Symbol->Size;
+    Sym->setBinding(Symbol->Binding);
+    Sym->setType(Symbol->Type);
+    if (Symbol->DefinedIn)
+      Sym->st_shndx = Symbol->DefinedIn->Index;
+    else
+      Sym->st_shndx = SHN_UNDEF;
+    ++Sym;
+  }
+}
+
 // Returns true IFF a section is wholly inside the range of a segment
 static bool sectionWithinSegment(const SectionBase &Section,
                                  const Segment &Segment) {
@@ -112,6 +176,7 @@ void Object<ELFT>::readProgramHeaders(const ELFFile<ELFT> &ElfFile) {
     Segment &Seg = *Segments.back();
     Seg.Type = Phdr.p_type;
     Seg.Flags = Phdr.p_flags;
+    Seg.OriginalOffset = Phdr.p_offset;
     Seg.Offset = Phdr.p_offset;
     Seg.VAddr = Phdr.p_vaddr;
     Seg.PAddr = Phdr.p_paddr;
@@ -132,6 +197,40 @@ void Object<ELFT>::readProgramHeaders(const ELFFile<ELFT> &ElfFile) {
 }
 
 template <class ELFT>
+void Object<ELFT>::initSymbolTable(const llvm::object::ELFFile<ELFT> &ElfFile,
+                                   SymbolTableSection *SymTab) {
+
+  SymTab->Size = 0;
+  if (SymbolTable->Link - 1 >= Sections.size())
+    error("Symbol table has link index of " + Twine(SymbolTable->Link) +
+          " which is not a valid index");
+
+  if (auto StrTab =
+          dyn_cast<StringTableSection>(Sections[SymbolTable->Link - 1].get()))
+    SymTab->setStrTab(StrTab);
+  else
+    error("Symbol table has link index of " + Twine(SymbolTable->Link) +
+          "which is not a string table");
+
+  const Elf_Shdr &Shdr = *unwrapOrError(ElfFile.getSection(SymTab->Index));
+  StringRef StrTabData = unwrapOrError(ElfFile.getStringTableForSymtab(Shdr));
+
+  for (const auto &Sym : unwrapOrError(ElfFile.symbols(&Shdr))) {
+    SectionBase *DefSection = nullptr;
+    StringRef Name = unwrapOrError(Sym.getName(StrTabData));
+    if (Sym.st_shndx != SHN_UNDEF) {
+      if (Sym.st_shndx >= Sections.size())
+        error("Symbol '" + Name +
+              "' is defined in invalid section with index " +
+              Twine(Sym.st_shndx));
+      DefSection = Sections[Sym.st_shndx - 1].get();
+    }
+    SymTab->addSymbol(Name, Sym.getBinding(), Sym.getType(), DefSection,
+                      Sym.getValue(), Sym.st_size);
+  }
+}
+
+template <class ELFT>
 std::unique_ptr<SectionBase>
 Object<ELFT>::makeSection(const llvm::object::ELFFile<ELFT> &ElfFile,
                           const Elf_Shdr &Shdr) {
@@ -139,6 +238,11 @@ Object<ELFT>::makeSection(const llvm::object::ELFFile<ELFT> &ElfFile,
   switch (Shdr.sh_type) {
   case SHT_STRTAB:
     return llvm::make_unique<StringTableSection>();
+  case SHT_SYMTAB: {
+    auto SymTab = llvm::make_unique<SymbolTableSectionImpl<ELFT>>();
+    SymbolTable = SymTab.get();
+    return std::move(SymTab);
+  }
   case SHT_NOBITS:
     return llvm::make_unique<Section>(Data);
   default:
@@ -170,6 +274,11 @@ void Object<ELFT>::readSectionHeaders(const ELFFile<ELFT> &ElfFile) {
     Sec->Index = Index++;
     Sections.push_back(std::move(Sec));
   }
+
+  // Now that all of the sections have been added we can fill out some extra
+  // details about symbol tables.
+  if (SymbolTable)
+    initSymbolTable(ElfFile, SymbolTable);
 }
 
 template <class ELFT> Object<ELFT>::Object(const ELFObjectFile<ELFT> &Obj) {
@@ -254,57 +363,47 @@ template <class ELFT> void ELFObject<ELFT>::sortSections() {
 }
 
 template <class ELFT> void ELFObject<ELFT>::assignOffsets() {
-  // Decide file offsets and indexes.
-  size_t PhdrSize = this->Segments.size() * sizeof(Elf_Phdr);
-  // We can put section data after the ELF header and the program headers.
-  uint64_t Offset = sizeof(Elf_Ehdr) + PhdrSize;
-  uint64_t Index = 1;
-  for (auto &Section : this->Sections) {
-    // The segment can have a different alignment than the section. In the case
-    // that there is a parent segment then as long as we satisfy the alignment
-    // of the segment it should follow that that the section is aligned.
-    if (Section->ParentSegment) {
-      auto FirstInSeg = Section->ParentSegment->firstSection();
-      if (FirstInSeg == Section.get()) {
-        Offset = alignTo(Offset, Section->ParentSegment->Align);
-        // There can be gaps at the start of a segment before the first section.
-        // So first we assign the alignment of the segment and then assign the
-        // location of the section from there
-        Section->Offset =
-            Offset + Section->OriginalOffset - Section->ParentSegment->Offset;
-      }
-      // We should respect interstitial gaps of allocated sections. We *must*
-      // maintain the memory image so that addresses are preserved. As, with the
-      // exception of SHT_NOBITS sections at the end of segments, the memory
-      // image is a copy of the file image, we preserve the file image as well.
-      // There's a strange case where a thread local SHT_NOBITS can cause the
-      // memory image and file image to not be the same. This occurs, on some
-      // systems, when a thread local SHT_NOBITS is between two SHT_PROGBITS
-      // and the thread local SHT_NOBITS section is at the end of a TLS segment.
-      // In this case to faithfully copy the segment file image we must use
-      // relative offsets. In any other case this would be the same as using the
-      // relative addresses so this should maintian the memory image as desired.
-      Offset = FirstInSeg->Offset + Section->OriginalOffset -
-               FirstInSeg->OriginalOffset;
-    }
-    // Alignment should have already been handled by the above if statement if
-    // this if this section is in a segment. Technically this shouldn't do
-    // anything bad if the alignments of the sections are all correct and the
-    // file image isn't corrupted. Still in sticking with the motto "maintain
-    // the file image" we should avoid messing up the file image if the
-    // alignment disagrees with the file image.
-    if (!Section->ParentSegment && Section->Align)
-      Offset = alignTo(Offset, Section->Align);
-    Section->Offset = Offset;
-    Section->Index = Index++;
-    if (Section->Type != SHT_NOBITS)
-      Offset += Section->Size;
+  // The size of ELF + program headers will not change so it is ok to assume
+  // that the first offset of the first segment is a good place to start
+  // outputting sections. This covers both the standard case and the PT_PHDR
+  // case.
+  uint64_t Offset;
+  if (!this->Segments.empty()) {
+    Offset = this->Segments[0]->Offset;
+  } else {
+    Offset = sizeof(Elf_Ehdr);
   }
-  // 'offset' should now be just after all the section data so we should set the
-  // section header table offset to be exactly here. This spot might not be
-  // aligned properly however so we should align it as needed. For 32-bit ELF
-  // this needs to be 4-byte aligned and on 64-bit it needs to be 8-byte aligned
-  // so the size of ELFT::Addr is used to ensure this.
+  // The only way a segment should move is if a section was between two
+  // segments and that section was removed. If that section isn't in a segment
+  // then it's acceptable, but not ideal, to simply move it to after the
+  // segments. So we can simply layout segments one after the other accounting
+  // for alignment.
+  for (auto &Segment : this->Segments) {
+    Offset = alignTo(Offset, Segment->Align);
+    Segment->Offset = Offset;
+    Offset += Segment->FileSize;
+  }
+  // Now the offset of every segment has been set we can assign the offsets
+  // of each section. For sections that are covered by a segment we should use
+  // the segment's original offset and the section's original offset to compute
+  // the offset from the start of the segment. Using the offset from the start
+  // of the segment we can assign a new offset to the section. For sections not
+  // covered by segments we can just bump Offset to the next valid location.
+  uint32_t Index = 1;
+  for (auto &Section : this->Sections) {
+    Section->Index = Index++;
+    if (Section->ParentSegment != nullptr) {
+      auto Segment = Section->ParentSegment;
+      Section->Offset =
+          Segment->Offset + (Section->OriginalOffset - Segment->OriginalOffset);
+    } else {
+      Offset = alignTo(Offset, Section->Offset);
+      Section->Offset = Offset;
+      if (Section->Type != SHT_NOBITS)
+        Offset += Section->Size;
+    }
+  }
+
   Offset = alignTo(Offset, sizeof(typename ELFT::Addr));
   this->SHOffset = Offset;
 }
@@ -324,9 +423,12 @@ template <class ELFT> void ELFObject<ELFT>::write(FileOutputBuffer &Out) const {
 }
 
 template <class ELFT> void ELFObject<ELFT>::finalize() {
+  // Make sure we add the names of all the sections.
   for (const auto &Section : this->Sections) {
     this->SectionNames->addString(Section->Name);
   }
+  // Make sure we add the names of all the symbols.
+  this->SymbolTable->addSymbolNames();
 
   sortSections();
   assignOffsets();

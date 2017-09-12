@@ -16,6 +16,7 @@
 
 #include "ARMBaseInstrInfo.h"
 #include "ARMBaseRegisterInfo.h"
+#include "ARMConstantPoolValue.h"
 #include "ARMFrameLowering.h"
 #include "ARMISelLowering.h"
 #include "ARMSelectionDAGInfo.h"
@@ -53,10 +54,12 @@ protected:
     CortexA35,
     CortexA5,
     CortexA53,
+    CortexA55,
     CortexA57,
     CortexA7,
     CortexA72,
     CortexA73,
+    CortexA75,
     CortexA8,
     CortexA9,
     CortexM3,
@@ -101,6 +104,7 @@ protected:
     ARMv7ve,
     ARMv81a,
     ARMv82a,
+    ARMv83a,
     ARMv8a,
     ARMv8mBaseline,
     ARMv8mMainline,
@@ -146,6 +150,7 @@ protected:
   bool HasV8Ops = false;
   bool HasV8_1aOps = false;
   bool HasV8_2aOps = false;
+  bool HasV8_3aOps = false;
   bool HasV8MBaselineOps = false;
   bool HasV8MMainlineOps = false;
 
@@ -156,6 +161,9 @@ protected:
   bool HasVFPv4 = false;
   bool HasFPARMv8 = false;
   bool HasNEON = false;
+
+  /// HasDotProd - True if the ARMv8.2A dot product instructions are supported.
+  bool HasDotProd = false;
 
   /// UseNEONForSinglePrecisionFP - if the NEONFP attribute has been
   /// specified. Use the method useNEONForSinglePrecisionFP() to
@@ -185,6 +193,10 @@ protected:
 
   /// UseMISched - True if MachineScheduler should be used for this subtarget.
   bool UseMISched = false;
+
+  /// DisablePostRAScheduler - False if scheduling should happen again after
+  /// register allocation.
+  bool DisablePostRAScheduler = false;
 
   /// HasThumb2 - True if Thumb2 instructions are supported.
   bool HasThumb2 = false;
@@ -493,6 +505,7 @@ public:
   bool hasV8Ops()   const { return HasV8Ops;  }
   bool hasV8_1aOps() const { return HasV8_1aOps; }
   bool hasV8_2aOps() const { return HasV8_2aOps; }
+  bool hasV8_3aOps() const { return HasV8_3aOps; }
   bool hasV8MBaselineOps() const { return HasV8MBaselineOps; }
   bool hasV8MMainlineOps() const { return HasV8MMainlineOps; }
 
@@ -519,6 +532,7 @@ public:
   bool hasFPARMv8() const { return HasFPARMv8; }
   bool hasNEON() const { return HasNEON;  }
   bool hasCrypto() const { return HasCrypto; }
+  bool hasDotProd() const { return HasDotProd; }
   bool hasCRC() const { return HasCRC; }
   bool hasRAS() const { return HasRAS; }
   bool hasVirtualization() const { return HasVirtualization; }
@@ -653,6 +667,7 @@ public:
   bool isRWPI() const;
 
   bool useMachineScheduler() const { return UseMISched; }
+  bool disablePostRAScheduler() const { return DisablePostRAScheduler; }
   bool useSoftFloat() const { return UseSoftFloat; }
   bool isThumb() const { return InThumbMode; }
   bool isThumb1Only() const { return InThumbMode && !HasThumb2; }
@@ -736,8 +751,22 @@ public:
   /// True if the GV will be accessed via an indirect symbol.
   bool isGVIndirectSymbol(const GlobalValue *GV) const;
 
+  /// Returns the constant pool modifier needed to access the GV.
+  ARMCP::ARMCPModifier getCPModifier(const GlobalValue *GV) const;
+
   /// True if fast-isel is used.
   bool useFastISel() const;
+
+  /// Returns the correct return opcode for the current feature set.
+  /// Use BX if available to allow mixing thumb/arm code, but fall back
+  /// to plain mov pc,lr on ARMv4.
+  unsigned getReturnOpcode() const {
+    if (isThumb())
+      return ARM::tBX_RET;
+    if (hasV4TOps())
+      return ARM::BX_RET;
+    return ARM::MOVPCLR;
+  }
 };
 
 } // end namespace llvm

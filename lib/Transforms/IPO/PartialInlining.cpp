@@ -51,7 +51,7 @@ static cl::opt<bool> SkipCostAnalysis("skip-partial-inlining-cost-analysis",
 
 static cl::opt<unsigned> MaxNumInlineBlocks(
     "max-num-inline-blocks", cl::init(5), cl::Hidden,
-    cl::desc("Max Number of Blocks  To be Partially Inlined"));
+    cl::desc("Max number of blocks to be partially inlined"));
 
 // Command line option to set the maximum number of partial inlining allowed
 // for the module. The default value of -1 means no limit.
@@ -462,7 +462,7 @@ bool PartialInlinerImpl::shouldPartialInline(
   Function *Caller = CS.getCaller();
   auto &CalleeTTI = (*GetTTI)(*Callee);
   InlineCost IC = getInlineCost(CS, getInlineParams(), CalleeTTI,
-                                *GetAssumptionCache, GetBFI, PSI);
+                                *GetAssumptionCache, GetBFI, PSI, &ORE);
 
   if (IC.isAlways()) {
     ORE.emit(OptimizationRemarkAnalysis(DEBUG_TYPE, "AlwaysInline", Call)
@@ -845,7 +845,7 @@ bool PartialInlinerImpl::tryPartialInline(FunctionCloner &Cloner) {
 
   // The call sequence to the outlined function is larger than the original
   // outlined region size, it does not increase the chances of inlining
-  // the function with outlining (The inliner usies the size increase to
+  // the function with outlining (The inliner uses the size increase to
   // model the cost of inlining a callee).
   if (!SkipCostAnalysis && Cloner.OutlinedRegionCost < SizeCost) {
     OptimizationRemarkEmitter ORE(Cloner.OrigFunc);

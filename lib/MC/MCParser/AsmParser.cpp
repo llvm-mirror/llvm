@@ -1327,10 +1327,10 @@ bool AsmParser::isAltmacroString(SMLoc &StrLoc, SMLoc &EndLoc) {
   assert((StrLoc.getPointer() != NULL) &&
          "Argument to the function cannot be a NULL value");
   const char *CharPtr = StrLoc.getPointer();
-  while ((*CharPtr != '>') && (*CharPtr != '\n') &&
-         (*CharPtr != '\r') && (*CharPtr != '\0')){
-	  if(*CharPtr == '!')
-		  CharPtr++;
+  while ((*CharPtr != '>') && (*CharPtr != '\n') && (*CharPtr != '\r') &&
+         (*CharPtr != '\0')) {
+    if (*CharPtr == '!')
+      CharPtr++;
     CharPtr++;
   }
   if (*CharPtr == '>') {
@@ -1646,16 +1646,6 @@ bool AsmParser::parseStatement(ParseStatementInfo &Info,
         getTok().getString().front() == '\n')
       Out.AddBlankLine();
     Lex();
-    return false;
-  }
-  if (Lexer.is(AsmToken::Hash)) {
-    // Seeing a hash here means that it was an end-of-line comment in
-    // an asm syntax where hash's are not comment and the previous
-    // statement parser did not check the end of statement. Relex as
-    // EndOfStatement.
-    StringRef CommentStr = parseStringToEndOfStatement();
-    Lexer.Lex();
-    Lexer.UnLex(AsmToken(AsmToken::EndOfStatement, CommentStr));
     return false;
   }
   // Statements always start with an identifier.
@@ -5583,8 +5573,6 @@ bool AsmParser::parseMSInlineAsm(
   array_pod_sort(AsmStrRewrites.begin(), AsmStrRewrites.end(), rewritesSort);
   for (const AsmRewrite &AR : AsmStrRewrites) {
     AsmRewriteKind Kind = AR.Kind;
-    if (Kind == AOK_Delete)
-      continue;
 
     const char *Loc = AR.Loc.getPointer();
     assert(Loc >= AsmStart && "Expected Loc to be at or after Start!");
@@ -5604,11 +5592,21 @@ bool AsmParser::parseMSInlineAsm(
     switch (Kind) {
     default:
       break;
-    case AOK_Imm:
-      OS << "$$" << AR.Val;
-      break;
-    case AOK_ImmPrefix:
-      OS << "$$";
+    case AOK_IntelExpr:
+      assert(AR.IntelExp.isValid() && "cannot write invalid intel expression");
+      if (AR.IntelExp.NeedBracs)
+        OS << "[";
+      if (AR.IntelExp.hasBaseReg())
+        OS << AR.IntelExp.BaseReg;
+      if (AR.IntelExp.hasIndexReg())
+        OS << (AR.IntelExp.hasBaseReg() ? " + " : "")
+           << AR.IntelExp.IndexReg;
+      if (AR.IntelExp.Scale > 1)
+          OS << " * $$" << AR.IntelExp.Scale;
+      if (AR.IntelExp.Imm || !AR.IntelExp.hasRegs())
+        OS << (AR.IntelExp.hasRegs() ? " + $$" : "$$") << AR.IntelExp.Imm;
+      if (AR.IntelExp.NeedBracs)
+        OS << "]";
       break;
     case AOK_Label:
       OS << Ctx.getAsmInfo()->getPrivateLabelPrefix() << AR.Label;
@@ -5651,13 +5649,6 @@ bool AsmParser::parseMSInlineAsm(
     }
     case AOK_EVEN:
       OS << ".even";
-      break;
-    case AOK_DotOperator:
-      // Insert the dot if the user omitted it.
-      OS.flush();
-      if (AsmStringIR.back() != '.')
-        OS << '.';
-      OS << AR.Val;
       break;
     case AOK_EndOfStatement:
       OS << "\n\t";

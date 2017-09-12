@@ -510,6 +510,20 @@ Instruction *InstCombiner::FoldShiftByConstant(Value *Op0, Constant *Op1,
                                         NewRHS);
         }
       }
+
+      // If the operand is a subtract with a constant LHS, and the shift
+      // is the only use, we can pull it out of the shift.
+      // This folds (shl (sub C1, X), C2) -> (sub (C1 << C2), (shl X, C2))
+      if (isLeftShift && Op0BO->getOpcode() == Instruction::Sub &&
+          match(Op0BO->getOperand(0), m_APInt(Op0C))) {
+        Constant *NewRHS = ConstantExpr::get(I.getOpcode(),
+                                   cast<Constant>(Op0BO->getOperand(0)), Op1);
+
+        Value *NewShift = Builder.CreateShl(Op0BO->getOperand(1), Op1);
+        NewShift->takeName(Op0BO);
+
+        return BinaryOperator::CreateSub(NewRHS, NewShift);
+      }
     }
   }
 
@@ -545,8 +559,8 @@ Instruction *InstCombiner::visitShl(BinaryOperator &I) {
         return new ZExtInst(Builder.CreateShl(X, ShAmt), Ty);
     }
 
-    // (X >>u C) << C --> X & (-1 << C)
-    if (match(Op0, m_LShr(m_Value(X), m_Specific(Op1)))) {
+    // (X >> C) << C --> X & (-1 << C)
+    if (match(Op0, m_Shr(m_Value(X), m_Specific(Op1)))) {
       APInt Mask(APInt::getHighBitsSet(BitWidth, BitWidth - ShAmt));
       return BinaryOperator::CreateAnd(X, ConstantInt::get(Ty, Mask));
     }
@@ -787,6 +801,15 @@ Instruction *InstCombiner::visitAShr(BinaryOperator &I) {
       AmtSum = std::min(AmtSum, BitWidth - 1);
       // (X >>s C1) >>s C2 --> X >>s (C1 + C2)
       return BinaryOperator::CreateAShr(X, ConstantInt::get(Ty, AmtSum));
+    }
+
+    if (match(Op0, m_OneUse(m_SExt(m_Value(X)))) &&
+        (Ty->isVectorTy() || shouldChangeType(Ty, X->getType()))) {
+      // ashr (sext X), C --> sext (ashr X, C')
+      Type *SrcTy = X->getType();
+      ShAmt = std::min(ShAmt, SrcTy->getScalarSizeInBits() - 1);
+      Value *NewSh = Builder.CreateAShr(X, ConstantInt::get(SrcTy, ShAmt));
+      return new SExtInst(NewSh, Ty);
     }
 
     // If the shifted-out value is known-zero, then this is an exact shift.

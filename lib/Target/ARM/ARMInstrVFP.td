@@ -1561,6 +1561,15 @@ def VTOUIRH : AVConv1IsH_Encode<0b11101, 0b11, 0b1100, 0b1001,
 }
 }
 
+// v8.3-a Javascript Convert to Signed fixed-point
+def VJCVT : AVConv1IsD_Encode<0b11101, 0b11, 0b1001, 0b1011,
+                                (outs SPR:$Sd), (ins DPR:$Dm),
+                                IIC_fpCVTDI, "vjcvt", ".s32.f64\t$Sd, $Dm",
+                                []>,
+            Requires<[HasFPARMv8, HasV8_3a]> {
+  let Inst{7} = 1; // Z bit
+}
+
 // Convert between floating-point and fixed-point
 // Data type for fixed-point naming convention:
 //   S16 (U=0, sx=0) -> SH
@@ -2160,32 +2169,28 @@ let Defs = [CPSR], Uses = [FPSCR_NZCV], Rt = 0b1111 /* apsr_nzcv */ in
 def FMSTAT : MovFromVFP<0b0001 /* fpscr */, (outs), (ins),
                         "vmrs", "\tAPSR_nzcv, fpscr", [(arm_fmstat)]>;
 
-let DecoderMethod = "DecodeForVMRSandVMSR" in {
- // Application level FPSCR -> GPR
- let hasSideEffects = 1, Uses = [FPSCR] in
- def VMRS :  MovFromVFP<0b0001 /* fpscr */, (outs GPRnopc:$Rt), (ins),
-                        "vmrs", "\t$Rt, fpscr",
-                        [(set GPRnopc:$Rt, (int_arm_get_fpscr))]>;
+// Application level FPSCR -> GPR
+let hasSideEffects = 1, Uses = [FPSCR] in
+def VMRS : MovFromVFP<0b0001 /* fpscr */, (outs GPR:$Rt), (ins),
+                      "vmrs", "\t$Rt, fpscr",
+                      [(set GPR:$Rt, (int_arm_get_fpscr))]>;
 
- // System level FPEXC, FPSID -> GPR
- let Uses = [FPSCR] in {
-   let Predicates = [HasV8, HasVFP2] in {
-     def VMRS_FPEXC : MovFromVFP<0b1000 /* fpexc */, (outs GPRnopc:$Rt), (ins),
-                                 "vmrs", "\t$Rt, fpexc", []>;
-     def VMRS_FPSID : MovFromVFP<0b0000 /* fpsid */, (outs GPRnopc:$Rt), (ins),
-                                 "vmrs", "\t$Rt, fpsid", []>;
-     def VMRS_MVFR0 : MovFromVFP<0b0111 /* mvfr0 */, (outs GPRnopc:$Rt), (ins),
-                                "vmrs", "\t$Rt, mvfr0", []>;
-     def VMRS_MVFR1 : MovFromVFP<0b0110 /* mvfr1 */, (outs GPRnopc:$Rt), (ins),
-                                 "vmrs", "\t$Rt, mvfr1", []>;
-     def VMRS_MVFR2 : MovFromVFP<0b0101 /* mvfr2 */, (outs GPRnopc:$Rt), (ins),
-                                 "vmrs", "\t$Rt, mvfr2", []>;
-   }
-   def VMRS_FPINST : MovFromVFP<0b1001 /* fpinst */, (outs GPRnopc:$Rt), (ins),
-                                "vmrs", "\t$Rt, fpinst", []>;
-   def VMRS_FPINST2 : MovFromVFP<0b1010 /* fpinst2 */, (outs GPRnopc:$Rt),
-                                 (ins), "vmrs", "\t$Rt, fpinst2", []>;
- }
+// System level FPEXC, FPSID -> GPR
+let Uses = [FPSCR] in {
+  def VMRS_FPEXC : MovFromVFP<0b1000 /* fpexc */, (outs GPR:$Rt), (ins),
+                              "vmrs", "\t$Rt, fpexc", []>;
+  def VMRS_FPSID : MovFromVFP<0b0000 /* fpsid */, (outs GPR:$Rt), (ins),
+                              "vmrs", "\t$Rt, fpsid", []>;
+  def VMRS_MVFR0 : MovFromVFP<0b0111 /* mvfr0 */, (outs GPR:$Rt), (ins),
+                              "vmrs", "\t$Rt, mvfr0", []>;
+  def VMRS_MVFR1 : MovFromVFP<0b0110 /* mvfr1 */, (outs GPR:$Rt), (ins),
+                              "vmrs", "\t$Rt, mvfr1", []>;
+  def VMRS_MVFR2 : MovFromVFP<0b0101 /* mvfr2 */, (outs GPR:$Rt), (ins),
+                              "vmrs", "\t$Rt, mvfr2", []>, Requires<[HasFPARMv8]>;
+  def VMRS_FPINST : MovFromVFP<0b1001 /* fpinst */, (outs GPR:$Rt), (ins),
+                              "vmrs", "\t$Rt, fpinst", []>;
+  def VMRS_FPINST2 : MovFromVFP<0b1010 /* fpinst2 */, (outs GPR:$Rt), (ins),
+                                "vmrs", "\t$Rt, fpinst2", []>;
 }
 
 //===----------------------------------------------------------------------===//
@@ -2209,25 +2214,21 @@ class MovToVFP<bits<4> opc19_16, dag oops, dag iops, string opc, string asm,
   let Inst{4}     = 1;
 }
 
-let DecoderMethod = "DecodeForVMRSandVMSR" in {
- let Defs = [FPSCR] in {
-   // Application level GPR -> FPSCR
-   def VMSR : MovToVFP<0b0001 /* fpscr */, (outs), (ins GPRnopc:$src),
-                       "vmsr", "\tfpscr, $src",
-                       [(int_arm_set_fpscr GPRnopc:$src)]>;
-   let Predicates = [HasV8, HasVFP2] in {
-     // System level GPR -> FPEXC
-     def VMSR_FPEXC : MovToVFP<0b1000 /* fpexc */, (outs), (ins GPRnopc:$src),
-                               "vmsr", "\tfpexc, $src", []>;
-     // System level GPR -> FPSID
-     def VMSR_FPSID : MovToVFP<0b0000 /* fpsid */, (outs), (ins GPRnopc:$src),
-                               "vmsr", "\tfpsid, $src", []>;
-   }
-   def VMSR_FPINST : MovToVFP<0b1001 /* fpinst */, (outs), (ins GPRnopc:$src),
+let Defs = [FPSCR] in {
+  // Application level GPR -> FPSCR
+  def VMSR : MovToVFP<0b0001 /* fpscr */, (outs), (ins GPR:$src),
+                      "vmsr", "\tfpscr, $src", [(int_arm_set_fpscr GPR:$src)]>;
+  // System level GPR -> FPEXC
+  def VMSR_FPEXC : MovToVFP<0b1000 /* fpexc */, (outs), (ins GPR:$src),
+                      "vmsr", "\tfpexc, $src", []>;
+  // System level GPR -> FPSID
+  def VMSR_FPSID : MovToVFP<0b0000 /* fpsid */, (outs), (ins GPR:$src),
+                      "vmsr", "\tfpsid, $src", []>;
+
+  def VMSR_FPINST : MovToVFP<0b1001 /* fpinst */, (outs), (ins GPR:$src),
                               "vmsr", "\tfpinst, $src", []>;
-   def VMSR_FPINST2 : MovToVFP<0b1010 /* fpinst2 */, (outs), (ins GPRnopc:$src),
-                               "vmsr", "\tfpinst2, $src", []>;
- }
+  def VMSR_FPINST2 : MovToVFP<0b1010 /* fpinst2 */, (outs), (ins GPR:$src),
+                                "vmsr", "\tfpinst2, $src", []>;
 }
 
 //===----------------------------------------------------------------------===//

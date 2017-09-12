@@ -5439,12 +5439,12 @@ bool MipsAsmParser::isEvaluated(const MCExpr *Expr) {
     return true;
   case MCExpr::SymbolRef:
     return (cast<MCSymbolRefExpr>(Expr)->getKind() != MCSymbolRefExpr::VK_None);
-  case MCExpr::Binary:
-    if (const MCBinaryExpr *BE = dyn_cast<MCBinaryExpr>(Expr)) {
-      if (!isEvaluated(BE->getLHS()))
-        return false;
-      return isEvaluated(BE->getRHS());
-    }
+  case MCExpr::Binary: {
+    const MCBinaryExpr *BE = cast<MCBinaryExpr>(Expr);
+    if (!isEvaluated(BE->getLHS()))
+      return false;
+    return isEvaluated(BE->getRHS());
+  }
   case MCExpr::Unary:
     return isEvaluated(cast<MCUnaryExpr>(Expr)->getSubExpr());
   case MCExpr::Target:

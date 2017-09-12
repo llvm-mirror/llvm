@@ -189,11 +189,6 @@ bool TargetTransformInfo::LSRWithInstrQueries() const {
   return TTIImpl->LSRWithInstrQueries();
 }
 
-bool TargetTransformInfo::isFoldableMemAccessOffset(Instruction *I,
-                                                    int64_t Offset) const {
-  return TTIImpl->isFoldableMemAccessOffset(I, Offset);
-}
-
 bool TargetTransformInfo::isTruncateFree(Type *Ty1, Type *Ty2) const {
   return TTIImpl->isTruncateFree(Ty1, Ty2);
 }
@@ -324,6 +319,16 @@ bool TargetTransformInfo::shouldConsiderAddressTypePromotion(
 
 unsigned TargetTransformInfo::getCacheLineSize() const {
   return TTIImpl->getCacheLineSize();
+}
+
+llvm::Optional<unsigned> TargetTransformInfo::getCacheSize(CacheLevel Level)
+  const {
+  return TTIImpl->getCacheSize(Level);
+}
+
+llvm::Optional<unsigned> TargetTransformInfo::getCacheAssociativity(
+  CacheLevel Level) const {
+  return TTIImpl->getCacheAssociativity(Level);
 }
 
 unsigned TargetTransformInfo::getPrefetchDistance() const {

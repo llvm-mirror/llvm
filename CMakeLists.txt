@@ -203,10 +203,6 @@ include(VersionFromVCS)
 option(LLVM_APPEND_VC_REV
   "Embed the version control system revision id in LLVM" ON)
 
-if( LLVM_APPEND_VC_REV )
-  add_version_info_from_vcs(PACKAGE_VERSION)
-endif()
-
 set(PACKAGE_NAME LLVM)
 set(PACKAGE_STRING "${PACKAGE_NAME} ${PACKAGE_VERSION}")
 set(PACKAGE_BUGREPORT "http://llvm.org/bugs/")
@@ -309,6 +305,7 @@ set(LLVM_CMAKE_PATH ${LLVM_MAIN_SRC_DIR}/cmake/modules)
 set(LLVM_EXAMPLES_BINARY_DIR ${LLVM_BINARY_DIR}/examples)
 set(LLVM_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/include)
 
+# List of all targets to be built by default:
 set(LLVM_ALL_TARGETS
   AArch64
   AMDGPU
@@ -320,7 +317,6 @@ set(LLVM_ALL_TARGETS
   MSP430
   NVPTX
   PowerPC
-  RISCV
   Sparc
   SystemZ
   X86

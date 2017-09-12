@@ -80,6 +80,10 @@ static cl::opt<unsigned> UnrollFullMaxCount(
     cl::desc(
         "Set the max unroll count for full unrolling, for testing purposes"));
 
+static cl::opt<unsigned> UnrollPeelCount(
+    "unroll-peel-count", cl::Hidden,
+    cl::desc("Set the unroll peeling count, for testing purposes"));
+
 static cl::opt<bool>
     UnrollAllowPartial("unroll-allow-partial", cl::Hidden,
                        cl::desc("Allows loops to be partially unrolled until "
@@ -114,6 +118,10 @@ static cl::opt<bool>
     UnrollAllowPeeling("unroll-allow-peeling", cl::init(true), cl::Hidden,
                        cl::desc("Allows loops to be peeled when the dynamic "
                                 "trip count is known to be low."));
+
+static cl::opt<bool> UnrollUnrollRemainder(
+  "unroll-remainder", cl::Hidden,
+  cl::desc("Allow the loop remainder to be unrolled."));
 
 // This option isn't ever intended to be enabled, it serves to allow
 // experiments to check the assumptions about when this kind of revisit is
@@ -153,6 +161,7 @@ static TargetTransformInfo::UnrollingPreferences gatherUnrollingPreferences(
   UP.Partial = false;
   UP.Runtime = false;
   UP.AllowRemainder = true;
+  UP.UnrollRemainder = false;
   UP.AllowExpensiveTripCount = false;
   UP.Force = false;
   UP.UpperBound = false;
@@ -178,6 +187,8 @@ static TargetTransformInfo::UnrollingPreferences gatherUnrollingPreferences(
     UP.MaxCount = UnrollMaxCount;
   if (UnrollFullMaxCount.getNumOccurrences() > 0)
     UP.FullUnrollMaxCount = UnrollFullMaxCount;
+  if (UnrollPeelCount.getNumOccurrences() > 0)
+    UP.PeelCount = UnrollPeelCount;
   if (UnrollAllowPartial.getNumOccurrences() > 0)
     UP.Partial = UnrollAllowPartial;
   if (UnrollAllowRemainder.getNumOccurrences() > 0)
@@ -188,6 +199,8 @@ static TargetTransformInfo::UnrollingPreferences gatherUnrollingPreferences(
     UP.UpperBound = false;
   if (UnrollAllowPeeling.getNumOccurrences() > 0)
     UP.AllowPeeling = UnrollAllowPeeling;
+  if (UnrollUnrollRemainder.getNumOccurrences() > 0)
+    UP.UnrollRemainder = UnrollUnrollRemainder;
 
   // Apply user values provided by argument
   if (UserThreshold.hasValue()) {
@@ -1034,7 +1047,8 @@ static bool tryToUnrollLoop(
   // Unroll the loop.
   if (!UnrollLoop(L, UP.Count, TripCount, UP.Force, UP.Runtime,
                   UP.AllowExpensiveTripCount, UseUpperBound, MaxOrZero,
-                  TripMultiple, UP.PeelCount, LI, &SE, &DT, &AC, &ORE,
+                  TripMultiple, UP.PeelCount, UP.UnrollRemainder,
+                  LI, &SE, &DT, &AC, &ORE,
                   PreserveLCSSA))
     return false;
 

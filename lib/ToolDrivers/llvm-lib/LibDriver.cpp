@@ -40,17 +40,17 @@ enum {
 #include "Options.inc"
 #undef PREFIX
 
-static const llvm::opt::OptTable::Info infoTable[] = {
-#define OPTION(X1, X2, ID, KIND, GROUP, ALIAS, X6, X7, X8, X9, X10, X11)       \
-  {X1, X2, X9,          X10,         OPT_##ID, llvm::opt::Option::KIND##Class, \
-   X8, X7, OPT_##GROUP, OPT_##ALIAS, X6,       X11},
+static const llvm::opt::OptTable::Info InfoTable[] = {
+#define OPTION(X1, X2, ID, KIND, GROUP, ALIAS, X7, X8, X9, X10, X11, X12)      \
+  {X1, X2, X10,         X11,         OPT_##ID, llvm::opt::Option::KIND##Class, \
+   X9, X8, OPT_##GROUP, OPT_##ALIAS, X7,       X12},
 #include "Options.inc"
 #undef OPTION
 };
 
 class LibOptTable : public llvm::opt::OptTable {
 public:
-  LibOptTable() : OptTable(infoTable, true) {}
+  LibOptTable() : OptTable(InfoTable, true) {}
 };
 
 }
@@ -153,15 +153,14 @@ int llvm::libDriverMain(llvm::ArrayRef<const char*> ArgsArr) {
     Members.emplace_back(std::move(*MOrErr));
   }
 
-  std::pair<StringRef, std::error_code> Result =
-      llvm::writeArchive(getOutputPath(&Args, Members[0]), Members,
+  std::string OutputPath = getOutputPath(&Args, Members[0]);
+  std::error_code EC =
+      llvm::writeArchive(OutputPath, Members,
                          /*WriteSymtab=*/true, object::Archive::K_GNU,
                          /*Deterministic*/ true, Args.hasArg(OPT_llvmlibthin));
 
-  if (Result.second) {
-    if (Result.first.empty())
-      Result.first = ArgsArr[0];
-    llvm::errs() << Result.first << ": " << Result.second.message() << "\n";
+  if (EC) {
+    llvm::errs() << OutputPath << ": " << EC.message() << "\n";
     return 1;
   }
 

@@ -91,6 +91,7 @@ extern "C" void LLVMInitializeARMTarget() {
   initializeARMPreAllocLoadStoreOptPass(Registry);
   initializeARMConstantIslandsPass(Registry);
   initializeARMExecutionDepsFixPass(Registry);
+  initializeARMExpandPseudoPass(Registry);
 }
 
 static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
@@ -227,10 +228,10 @@ ARMBaseTargetMachine::ARMBaseTargetMachine(const Target &T, const Triple &TT,
       Options.EABIVersion == EABI::Unknown) {
     // musl is compatible with glibc with regard to EABI version
     if ((TargetTriple.getEnvironment() == Triple::GNUEABI ||
-	 TargetTriple.getEnvironment() == Triple::GNUEABIHF ||
-	 TargetTriple.getEnvironment() == Triple::MuslEABI ||
-	 TargetTriple.getEnvironment() == Triple::MuslEABIHF) &&
-	!(TargetTriple.isOSWindows() || TargetTriple.isOSDarwin()))
+         TargetTriple.getEnvironment() == Triple::GNUEABIHF ||
+         TargetTriple.getEnvironment() == Triple::MuslEABI ||
+         TargetTriple.getEnvironment() == Triple::MuslEABIHF) &&
+        !(TargetTriple.isOSWindows() || TargetTriple.isOSDarwin()))
       this->Options.EABIVersion = EABI::GNU;
     else
       this->Options.EABIVersion = EABI::EABI5;
@@ -272,7 +273,12 @@ ARMBaseTargetMachine::getSubtargetImpl(const Function &F) const {
     // function that reside in TargetOptions.
     resetTargetOptions(F);
     I = llvm::make_unique<ARMSubtarget>(TargetTriple, CPU, FS, *this, isLittle);
+
+    if (!I->isThumb() && !I->hasARMOps())
+      F.getContext().emitError("Function '" + F.getName() + "' uses ARM "
+          "instructions, but the target does not support ARM mode execution.");
   }
+
   return I.get();
 }
 

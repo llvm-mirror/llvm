@@ -93,6 +93,10 @@ enum {
   /// - InsnID - Instruction ID
   /// - Expected number of operands
   GIM_CheckNumOperands,
+  /// Check an immediate predicate on the specified instruction
+  /// - InsnID - Instruction ID
+  /// - The predicate to test
+  GIM_CheckImmPredicate,
 
   /// Check the type for the specified operand
   /// - InsnID - Instruction ID
@@ -184,6 +188,12 @@ enum {
   /// - RendererID - The renderer to call
   GIR_ComplexRenderer,
 
+  /// Render a G_CONSTANT operator as a sign-extended immediate.
+  /// - NewInsnID - Instruction ID to modify
+  /// - OldInsnID - Instruction ID to copy from
+  /// The operand index is implicitly 1.
+  GIR_CopyConstantAsSImm,
+
   /// Constrain an instruction operand to a register class.
   /// - InsnID - Instruction ID to modify
   /// - OpIdx - Operand index
@@ -216,6 +226,8 @@ enum {
 /// Provides the logic to select generic machine instructions.
 class InstructionSelector {
 public:
+  typedef bool(*ImmediatePredicateFn)(int64_t);
+
   virtual ~InstructionSelector() = default;
 
   /// Select the (possibly generic) instruction \p I to only use target-specific
@@ -248,6 +260,7 @@ public:
   struct MatcherInfoTy {
     const LLT *TypeObjects;
     const PredicateBitset *FeatureBitsets;
+    const ImmediatePredicateFn *ImmPredicateFns;
     const std::vector<ComplexMatcherMemFn> ComplexPredicates;
   };
 

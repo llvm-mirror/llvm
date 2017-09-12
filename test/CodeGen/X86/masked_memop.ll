@@ -787,15 +787,10 @@ define <4 x double> @mload_constmask_v4f64(<4 x double>* %addr, <4 x double> %ds
 ; 256-bit integer vectors are supported with AVX2.
 
 define <8 x i32> @mload_constmask_v8i32(<8 x i32>* %addr, <8 x i32> %dst) {
-; AVX1-LABEL: mload_constmask_v8i32:
-; AVX1:       ## BB#0:
-; AVX1-NEXT:    vblendps {{.*#+}} ymm0 = mem[0,1,2],ymm0[3,4,5,6],mem[7]
-; AVX1-NEXT:    retq
-;
-; AVX2-LABEL: mload_constmask_v8i32:
-; AVX2:       ## BB#0:
-; AVX2-NEXT:    vpblendd {{.*#+}} ymm0 = mem[0,1,2],ymm0[3,4,5,6],mem[7]
-; AVX2-NEXT:    retq
+; AVX-LABEL: mload_constmask_v8i32:
+; AVX:       ## BB#0:
+; AVX-NEXT:    vblendps {{.*#+}} ymm0 = mem[0,1,2],ymm0[3,4,5,6],mem[7]
+; AVX-NEXT:    retq
 ;
 ; AVX512F-LABEL: mload_constmask_v8i32:
 ; AVX512F:       ## BB#0:
@@ -824,7 +819,7 @@ define <4 x i64> @mload_constmask_v4i64(<4 x i64>* %addr, <4 x i64> %dst) {
 ;
 ; AVX2-LABEL: mload_constmask_v4i64:
 ; AVX2:       ## BB#0:
-; AVX2-NEXT:    vpblendd {{.*#+}} ymm0 = mem[0,1],ymm0[2,3,4,5],mem[6,7]
+; AVX2-NEXT:    vblendps {{.*#+}} ymm0 = mem[0,1],ymm0[2,3,4,5],mem[6,7]
 ; AVX2-NEXT:    retq
 ;
 ; AVX512F-LABEL: mload_constmask_v4i64:
@@ -1143,6 +1138,34 @@ define <8 x double> @load_one_mask_bit_set5(<8 x double>* %addr, <8 x double> %v
 ; AVX512-NEXT:    retq
   %res = call <8 x double> @llvm.masked.load.v8f64.p0v8f64(<8 x double>* %addr, i32 4, <8 x i1><i1 false, i1 false, i1 false, i1 false, i1 false, i1 false, i1 false, i1 true>, <8 x double> %val)
   ret <8 x double> %res
+}
+
+; FIXME: The mask bit for each data element is the most significant bit of the mask operand, so a compare isn't needed.
+
+define void @trunc_mask(<4 x float> %x, <4 x float>* %ptr, <4 x float> %y, <4 x i32> %mask) {
+; AVX-LABEL: trunc_mask:
+; AVX:       ## BB#0:
+; AVX-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; AVX-NEXT:    vpcmpgtd %xmm2, %xmm1, %xmm1
+; AVX-NEXT:    vmaskmovps %xmm0, %xmm1, (%rdi)
+; AVX-NEXT:    retq
+;
+; AVX512F-LABEL: trunc_mask:
+; AVX512F:       ## BB#0:
+; AVX512F-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; AVX512F-NEXT:    vpcmpgtd %xmm2, %xmm1, %xmm1
+; AVX512F-NEXT:    vmaskmovps %xmm0, %xmm1, (%rdi)
+; AVX512F-NEXT:    retq
+;
+; SKX-LABEL: trunc_mask:
+; SKX:       ## BB#0:
+; SKX-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; SKX-NEXT:    vpcmpgtd %xmm2, %xmm1, %k1
+; SKX-NEXT:    vmovups %xmm0, (%rdi) {%k1}
+; SKX-NEXT:    retq
+  %bool_mask = icmp slt <4 x i32> %mask, zeroinitializer
+  call void @llvm.masked.store.v4f32.p0v4f32(<4 x float> %x, <4 x float>* %ptr, i32 1, <4 x i1> %bool_mask)
+  ret void
 }
 
 declare <4 x i32> @llvm.masked.load.v4i32.p0v4i32(<4 x i32>*, i32, <4 x i1>, <4 x i32>)

@@ -295,7 +295,8 @@ static bool isEpilogProfitable(Loop *L) {
 bool llvm::UnrollLoop(Loop *L, unsigned Count, unsigned TripCount, bool Force,
                       bool AllowRuntime, bool AllowExpensiveTripCount,
                       bool PreserveCondBr, bool PreserveOnlyFirst,
-                      unsigned TripMultiple, unsigned PeelCount, LoopInfo *LI,
+                      unsigned TripMultiple, unsigned PeelCount,
+                      bool UnrollRemainder, LoopInfo *LI,
                       ScalarEvolution *SE, DominatorTree *DT,
                       AssumptionCache *AC, OptimizationRemarkEmitter *ORE,
                       bool PreserveLCSSA) {
@@ -395,8 +396,19 @@ bool llvm::UnrollLoop(Loop *L, unsigned Count, unsigned TripCount, bool Force,
          "Did not expect runtime trip-count unrolling "
          "and peeling for the same loop");
 
-  if (PeelCount)
-    peelLoop(L, PeelCount, LI, SE, DT, AC, PreserveLCSSA);
+  if (PeelCount) {
+    bool Peeled = peelLoop(L, PeelCount, LI, SE, DT, AC, PreserveLCSSA);
+
+    // Successful peeling may result in a change in the loop preheader/trip
+    // counts. If we later unroll the loop, we want these to be updated.
+    if (Peeled) {
+      BasicBlock *ExitingBlock = L->getExitingBlock();
+      assert(ExitingBlock && "Loop without exiting block?");
+      Preheader = L->getLoopPreheader();
+      TripCount = SE->getSmallConstantTripCount(L, ExitingBlock);
+      TripMultiple = SE->getSmallConstantTripMultiple(L, ExitingBlock);
+    }
+  }
 
   // Loops containing convergent instructions must have a count that divides
   // their TripMultiple.
@@ -418,7 +430,8 @@ bool llvm::UnrollLoop(Loop *L, unsigned Count, unsigned TripCount, bool Force,
 
   if (RuntimeTripCount && TripMultiple % Count != 0 &&
       !UnrollRuntimeLoopRemainder(L, Count, AllowExpensiveTripCount,
-                                  EpilogProfitability, LI, SE, DT,
+                                  EpilogProfitability, UnrollRemainder,
+                                  LI, SE, DT, AC, ORE,
                                   PreserveLCSSA)) {
     if (Force)
       RuntimeTripCount = false;

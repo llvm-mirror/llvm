@@ -94,15 +94,15 @@ namespace llvm {
       ///
       XXSPLT,
 
-      /// XXINSERT - The PPC VSX insert instruction
+      /// VECINSERT - The PPC vector insert instruction
       ///
-      XXINSERT,
+      VECINSERT,
 
       /// XXREVERSE - The PPC VSX reverse instruction
       ///
       XXREVERSE,
 
-      /// VECSHL - The PPC VSX shift left instruction
+      /// VECSHL - The PPC vector shift left instruction
       ///
       VECSHL,
 
@@ -765,7 +765,7 @@ namespace llvm {
     bool shouldConvertConstantLoadToIntImm(const APInt &Imm,
                                            Type *Ty) const override;
 
-    bool convertSelectOfConstantsToMath() const override {
+    bool convertSelectOfConstantsToMath(EVT VT) const override {
       return true;
     }
 

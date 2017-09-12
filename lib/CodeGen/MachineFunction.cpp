@@ -166,6 +166,7 @@ void MachineFunction::clear() {
   InstructionRecycler.clear(Allocator);
   OperandRecycler.clear(Allocator);
   BasicBlockRecycler.clear(Allocator);
+  CodeViewAnnotations.clear();
   VariableDbgInfos.clear();
   if (RegInfo) {
     RegInfo->~MachineRegisterInfo();
@@ -268,6 +269,26 @@ MachineInstr *
 MachineFunction::CloneMachineInstr(const MachineInstr *Orig) {
   return new (InstructionRecycler.Allocate<MachineInstr>(Allocator))
              MachineInstr(*this, *Orig);
+}
+
+MachineInstr &MachineFunction::CloneMachineInstrBundle(MachineBasicBlock &MBB,
+    MachineBasicBlock::iterator InsertBefore, const MachineInstr &Orig) {
+  MachineInstr *FirstClone = nullptr;
+  MachineBasicBlock::const_instr_iterator I = Orig.getIterator();
+  for (;;) {
+    MachineInstr *Cloned = CloneMachineInstr(&*I);
+    MBB.insert(InsertBefore, Cloned);
+    if (FirstClone == nullptr) {
+      FirstClone = Cloned;
+    } else {
+      Cloned->bundleWithPred();
+    }
+
+    if (!I->isBundledWithSucc())
+      break;
+    ++I;
+  }
+  return *FirstClone;
 }
 
 /// Delete the given MachineInstr.

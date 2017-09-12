@@ -610,6 +610,8 @@ static uint64_t getAttrKindEncoding(Attribute::AttrKind Kind) {
     return bitc::ATTR_KIND_STACK_PROTECT_STRONG;
   case Attribute::SafeStack:
     return bitc::ATTR_KIND_SAFESTACK;
+  case Attribute::StrictFP:
+    return bitc::ATTR_KIND_STRICT_FP;
   case Attribute::StructRet:
     return bitc::ATTR_KIND_STRUCT_RET;
   case Attribute::SanitizeAddress:
@@ -3624,6 +3626,20 @@ void IndexBitcodeWriter::writeCombinedGlobalValueSummary() {
         CallValueId = getValueId(GUID);
         if (!CallValueId)
           continue;
+        // The mapping from OriginalId to GUID may return a GUID
+        // that corresponds to a static variable. Filter it out here.
+        // This can happen when 
+        // 1) There is a call to a library function which does not have
+        // a CallValidId;
+        // 2) There is a static variable with the  OriginalGUID identical
+        // to the GUID of the library function in 1);
+        // When this happens, the logic for SamplePGO kicks in and
+        // the static varible in 2) will be found, which needs to be
+        // filtered out.
+        auto *GVSum = Index.getGlobalValueSummary(GUID, false);
+        if (GVSum &&
+            GVSum->getSummaryKind() == GlobalValueSummary::GlobalVarKind)
+          continue;
       }
       NameVals.push_back(*CallValueId);
       if (HasProfileData)
@@ -4015,6 +4031,7 @@ void llvm::WriteIndexToFile(
   Out.write((char *)&Buffer.front(), Buffer.size());
 }
 
+namespace {
 /// Class to manage the bitcode writing for a thin link bitcode file.
 class ThinLinkBitcodeWriter : public ModuleBitcodeWriterBase {
   /// ModHash is for use in ThinLTO incremental build, generated while writing
@@ -4035,6 +4052,7 @@ public:
 private:
   void writeSimplifiedModuleInfo();
 };
+} // namespace
 
 // This function writes a simpilified module info for thin link bitcode file.
 // It only contains the source file name along with the name(the offset and

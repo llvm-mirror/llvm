@@ -7113,16 +7113,20 @@ inline static bool isDefConvertible(MachineInstr &MI) {
   case X86::OR8ri:     case X86::OR64rr:   case X86::OR32rr:
   case X86::OR16rr:    case X86::OR8rr:    case X86::OR64rm:
   case X86::OR32rm:    case X86::OR16rm:   case X86::OR8rm:
+  case X86::ADC64ri32: case X86::ADC64ri8: case X86::ADC32ri:
+  case X86::ADC32ri8:  case X86::ADC16ri:  case X86::ADC16ri8:
+  case X86::ADC8ri:    case X86::ADC64rr:  case X86::ADC32rr:
+  case X86::ADC16rr:   case X86::ADC8rr:   case X86::ADC64rm:
+  case X86::ADC32rm:   case X86::ADC16rm:  case X86::ADC8rm:
+  case X86::SBB64ri32: case X86::SBB64ri8: case X86::SBB32ri:
+  case X86::SBB32ri8:  case X86::SBB16ri:  case X86::SBB16ri8:
+  case X86::SBB8ri:    case X86::SBB64rr:  case X86::SBB32rr:
+  case X86::SBB16rr:   case X86::SBB8rr:   case X86::SBB64rm:
+  case X86::SBB32rm:   case X86::SBB16rm:  case X86::SBB8rm:
   case X86::NEG8r:     case X86::NEG16r:   case X86::NEG32r: case X86::NEG64r:
   case X86::SAR8r1:    case X86::SAR16r1:  case X86::SAR32r1:case X86::SAR64r1:
   case X86::SHR8r1:    case X86::SHR16r1:  case X86::SHR32r1:case X86::SHR64r1:
   case X86::SHL8r1:    case X86::SHL16r1:  case X86::SHL32r1:case X86::SHL64r1:
-  case X86::ADC32ri:   case X86::ADC32ri8:
-  case X86::ADC32rr:   case X86::ADC64ri32:
-  case X86::ADC64ri8:  case X86::ADC64rr:
-  case X86::SBB32ri:   case X86::SBB32ri8:
-  case X86::SBB32rr:   case X86::SBB64ri32:
-  case X86::SBB64ri8:  case X86::SBB64rr:
   case X86::ANDN32rr:  case X86::ANDN32rm:
   case X86::ANDN64rr:  case X86::ANDN64rm:
   case X86::BEXTR32rr: case X86::BEXTR64rr:
@@ -7144,6 +7148,22 @@ inline static bool isDefConvertible(MachineInstr &MI) {
   case X86::TZCNT16rr: case X86::TZCNT16rm:
   case X86::TZCNT32rr: case X86::TZCNT32rm:
   case X86::TZCNT64rr: case X86::TZCNT64rm:
+  case X86::BEXTRI32ri:  case X86::BEXTRI32mi:
+  case X86::BEXTRI64ri:  case X86::BEXTRI64mi:
+  case X86::BLCFILL32rr: case X86::BLCFILL32rm:
+  case X86::BLCFILL64rr: case X86::BLCFILL64rm:
+  case X86::BLCI32rr:    case X86::BLCI32rm:
+  case X86::BLCI64rr:    case X86::BLCI64rm:
+  case X86::BLCIC32rr:   case X86::BLCIC32rm:
+  case X86::BLCIC64rr:   case X86::BLCIC64rm:
+  case X86::BLCMSK32rr:  case X86::BLCMSK32rm:
+  case X86::BLCMSK64rr:  case X86::BLCMSK64rm:
+  case X86::BLCS32rr:    case X86::BLCS32rm:
+  case X86::BLCS64rr:    case X86::BLCS64rm:
+  case X86::BLSFILL32rr: case X86::BLSFILL32rm:
+  case X86::BLSFILL64rr: case X86::BLSFILL64rm:
+  case X86::BLSIC32rr:   case X86::BLSIC32rm:
+  case X86::BLSIC64rr:   case X86::BLSIC64rm:
     return true;
   }
 }
@@ -7990,13 +8010,13 @@ MachineInstr *X86InstrInfo::foldMemoryOperandImpl(
     unsigned Size, unsigned Align, bool AllowCommute) const {
   const DenseMap<unsigned,
                  std::pair<uint16_t, uint16_t> > *OpcodeTablePtr = nullptr;
-  bool isCallRegIndirect = Subtarget.callRegIndirect();
+  bool isSlowTwoMemOps = Subtarget.slowTwoMemOps();
   bool isTwoAddrFold = false;
 
   // For CPUs that favor the register form of a call or push,
   // do not fold loads into calls or pushes, unless optimizing for size
   // aggressively.
-  if (isCallRegIndirect && !MF.getFunction()->optForMinSize() &&
+  if (isSlowTwoMemOps && !MF.getFunction()->optForMinSize() &&
       (MI.getOpcode() == X86::CALL32r || MI.getOpcode() == X86::CALL64r ||
        MI.getOpcode() == X86::PUSH16r || MI.getOpcode() == X86::PUSH32r ||
        MI.getOpcode() == X86::PUSH64r))
@@ -9406,6 +9426,10 @@ static const uint16_t ReplaceableInstrsAVX2[][3] = {
   { X86::VBROADCASTSDYrr, X86::VBROADCASTSDYrr, X86::VPBROADCASTQYrr},
   { X86::VBROADCASTSDYrm, X86::VBROADCASTSDYrm, X86::VPBROADCASTQYrm},
   { X86::VBROADCASTF128,  X86::VBROADCASTF128,  X86::VBROADCASTI128 },
+  { X86::VBLENDPSrri,     X86::VBLENDPSrri,     X86::VPBLENDDrri },
+  { X86::VBLENDPSrmi,     X86::VBLENDPSrmi,     X86::VPBLENDDrmi },
+  { X86::VBLENDPSYrri,    X86::VBLENDPSYrri,    X86::VPBLENDDYrri },
+  { X86::VBLENDPSYrmi,    X86::VBLENDPSYrmi,    X86::VPBLENDDYrmi },
 };
 
 static const uint16_t ReplaceableInstrsAVX2InsertExtract[][3] = {

@@ -474,7 +474,7 @@ namespace llvm {
       VPMADD52L, VPMADD52H,
 
       // FMA nodes.
-      FMADD,
+      // We use the target independent ISD::FMA for the non-inverted case.
       FNMADD,
       FMSUB,
       FNMSUB,
@@ -812,6 +812,11 @@ namespace llvm {
     /// This method returns the name of a target specific DAG node.
     const char *getTargetNodeName(unsigned Opcode) const override;
 
+    bool mergeStoresAfterLegalization() const override { return true; }
+
+    bool canMergeStoresTo(unsigned AddressSpace, EVT MemVT,
+                          const SelectionDAG &DAG) const override;
+
     bool isCheapToSpeculateCttz() const override;
 
     bool isCheapToSpeculateCtlz() const override;
@@ -866,6 +871,8 @@ namespace llvm {
                                              const APInt &DemandedElts,
                                              const SelectionDAG &DAG,
                                              unsigned Depth) const override;
+
+    SDValue unwrapAddress(SDValue N) const override;
 
     bool isGAPlusOffset(SDNode *N, const GlobalValue* &GA,
                         int64_t &Offset) const override;
@@ -1026,13 +1033,12 @@ namespace llvm {
     bool shouldConvertConstantLoadToIntImm(const APInt &Imm,
                                            Type *Ty) const override;
 
-    bool convertSelectOfConstantsToMath() const override {
-      return true;
-    }
+    bool convertSelectOfConstantsToMath(EVT VT) const override;
 
     /// Return true if EXTRACT_SUBVECTOR is cheap for this result type
     /// with this index.
-    bool isExtractSubvectorCheap(EVT ResVT, unsigned Index) const override;
+    bool isExtractSubvectorCheap(EVT ResVT, EVT SrcVT,
+                                 unsigned Index) const override;
 
     /// Intel processors have a unified instruction and data cache
     const char * getClearCacheBuiltinName() const override {
@@ -1280,6 +1286,10 @@ namespace llvm {
     MachineBasicBlock *
     EmitVAStartSaveXMMRegsWithCustomInserter(MachineInstr &BInstr,
                                              MachineBasicBlock *BB) const;
+
+    MachineBasicBlock *EmitLoweredCascadedSelect(MachineInstr &MI1,
+                                                 MachineInstr &MI2,
+                                                 MachineBasicBlock *BB) const;
 
     MachineBasicBlock *EmitLoweredSelect(MachineInstr &I,
                                          MachineBasicBlock *BB) const;

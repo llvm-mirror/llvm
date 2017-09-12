@@ -607,28 +607,25 @@ int main(int argc, char **argv, char * const *envp) {
     }
 
     // Create a remote target client running over the channel.
-    typedef orc::remote::OrcRemoteTargetClient<orc::rpc::RawByteChannel>
-      MyRemote;
-    auto R = ExitOnErr(MyRemote::Create(*C));
+    typedef orc::remote::OrcRemoteTargetClient MyRemote;
+    auto R = ExitOnErr(MyRemote::Create(*C, ExitOnErr));
 
     // Create a remote memory manager.
-    std::unique_ptr<MyRemote::RCMemoryManager> RemoteMM;
-    ExitOnErr(R->createRemoteMemoryManager(RemoteMM));
+    auto RemoteMM = ExitOnErr(R->createRemoteMemoryManager());
 
     // Forward MCJIT's memory manager calls to the remote memory manager.
     static_cast<ForwardingMemoryManager*>(RTDyldMM)->setMemMgr(
       std::move(RemoteMM));
 
     // Forward MCJIT's symbol resolution calls to the remote.
-    static_cast<ForwardingMemoryManager*>(RTDyldMM)->setResolver(
-      orc::createLambdaResolver(
-        [](const std::string &Name) { return nullptr; },
-        [&](const std::string &Name) {
-          if (auto Addr = ExitOnErr(R->getSymbolAddress(Name)))
-	    return JITSymbol(Addr, JITSymbolFlags::Exported);
-          return JITSymbol(nullptr);
-        }
-      ));
+    static_cast<ForwardingMemoryManager *>(RTDyldMM)->setResolver(
+        orc::createLambdaResolver(
+            [](const std::string &Name) { return nullptr; },
+            [&](const std::string &Name) {
+              if (auto Addr = ExitOnErr(R->getSymbolAddress(Name)))
+                return JITSymbol(Addr, JITSymbolFlags::Exported);
+              return JITSymbol(nullptr);
+            }));
 
     // Grab the target address of the JIT'd main function on the remote and call
     // it.

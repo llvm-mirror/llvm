@@ -28,6 +28,28 @@ define <2 x i1> @t9(<2 x float> %a, <2 x double> %b) {
   ret <2 x i1> %and
 }
 
+define i1 @fcmp_ord_nonzero(float %x, float %y) {
+; CHECK-LABEL: @fcmp_ord_nonzero(
+; CHECK-NEXT:    [[TMP1:%.*]] = fcmp ord float %x, %y
+; CHECK-NEXT:    ret i1 [[TMP1]]
+;
+  %cmp1 = fcmp ord float %x, 1.0
+  %cmp2 = fcmp ord float %y, 2.0
+  %and = and i1 %cmp1, %cmp2
+  ret i1 %and
+}
+
+define <3 x i1> @fcmp_ord_nonzero_vec(<3 x float> %x, <3 x float> %y) {
+; CHECK-LABEL: @fcmp_ord_nonzero_vec(
+; CHECK-NEXT:    [[TMP1:%.*]] = fcmp ord <3 x float> %x, %y
+; CHECK-NEXT:    ret <3 x i1> [[TMP1]]
+;
+  %cmp1 = fcmp ord <3 x float> %x, <float 1.0, float 2.0, float 3.0>
+  %cmp2 = fcmp ord <3 x float> %y, <float 3.0, float 2.0, float 1.0>
+  %and = and <3 x i1> %cmp1, %cmp2
+  ret <3 x i1> %and
+}
+
 define i1 @auto_gen_0(double %a, double %b) {
 ; CHECK-LABEL: @auto_gen_0(
 ; CHECK-NEXT:    ret i1 false

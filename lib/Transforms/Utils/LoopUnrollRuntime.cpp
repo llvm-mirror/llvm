@@ -294,7 +294,8 @@ static void ConnectEpilog(Loop *L, Value *ModVal, BasicBlock *NewExit,
 /// Return the new cloned loop that is created when CreateRemainderLoop is true.
 static Loop *
 CloneLoopBlocks(Loop *L, Value *NewIter, const bool CreateRemainderLoop,
-                const bool UseEpilogRemainder, BasicBlock *InsertTop,
+                const bool UseEpilogRemainder, const bool UnrollRemainder,
+                BasicBlock *InsertTop,
                 BasicBlock *InsertBot, BasicBlock *Preheader,
                 std::vector<BasicBlock *> &NewBlocks, LoopBlocksDFS &LoopBlocks,
                 ValueToValueMapTy &VMap, DominatorTree *DT, LoopInfo *LI) {
@@ -393,6 +394,12 @@ CloneLoopBlocks(Loop *L, Value *NewIter, const bool CreateRemainderLoop,
   if (CreateRemainderLoop) {
     Loop *NewLoop = NewLoops[L];
     assert(NewLoop && "L should have been cloned");
+
+    // Only add loop metadata if the loop is not going to be completely
+    // unrolled.
+    if (UnrollRemainder)
+      return NewLoop;
+
     // Add unroll disable metadata to disable future unrolling for this loop.
     SmallVector<Metadata *, 4> MDs;
     // Reserve first location for self reference to the LoopID metadata node.
@@ -414,7 +421,8 @@ CloneLoopBlocks(Loop *L, Value *NewIter, const bool CreateRemainderLoop,
 
     LLVMContext &Context = NewLoop->getHeader()->getContext();
     SmallVector<Metadata *, 1> DisableOperands;
-    DisableOperands.push_back(MDString::get(Context, "llvm.loop.unroll.disable"));
+    DisableOperands.push_back(MDString::get(Context,
+                                            "llvm.loop.unroll.disable"));
     MDNode *DisableNode = MDNode::get(Context, DisableOperands);
     MDs.push_back(DisableNode);
 
@@ -525,10 +533,15 @@ static bool canProfitablyUnrollMultiExitLoop(
 bool llvm::UnrollRuntimeLoopRemainder(Loop *L, unsigned Count,
                                       bool AllowExpensiveTripCount,
                                       bool UseEpilogRemainder,
+                                      bool UnrollRemainder,
                                       LoopInfo *LI, ScalarEvolution *SE,
-                                      DominatorTree *DT, bool PreserveLCSSA) {
+                                      DominatorTree *DT, AssumptionCache *AC,
+                                      OptimizationRemarkEmitter *ORE,
+                                      bool PreserveLCSSA) {
   DEBUG(dbgs() << "Trying runtime unrolling on Loop: \n");
   DEBUG(L->dump());
+  DEBUG(UseEpilogRemainder ? dbgs() << "Using epilog remainder.\n" :
+        dbgs() << "Using prolog remainder.\n");
 
   // Make sure the loop is in canonical form.
   if (!L->isLoopSimplifyForm()) {
@@ -739,7 +752,8 @@ bool llvm::UnrollRuntimeLoopRemainder(Loop *L, unsigned Count,
   BasicBlock *InsertBot = UseEpilogRemainder ? LatchExit : PrologExit;
   BasicBlock *InsertTop = UseEpilogRemainder ? EpilogPreHeader : PrologPreHeader;
   Loop *remainderLoop = CloneLoopBlocks(
-      L, ModVal, CreateRemainderLoop, UseEpilogRemainder, InsertTop, InsertBot,
+      L, ModVal, CreateRemainderLoop, UseEpilogRemainder, UnrollRemainder,
+      InsertTop, InsertBot,
       NewPreHeader, NewBlocks, LoopBlocks, VMap, DT, LI);
 
   // Insert the cloned blocks into the function.
@@ -881,6 +895,16 @@ bool llvm::UnrollRuntimeLoopRemainder(Loop *L, unsigned Count,
     // preserve LoopSimplifyForm.
     if (remainderLoop)
       formDedicatedExitBlocks(remainderLoop, DT, LI, PreserveLCSSA);
+  }
+
+  if (remainderLoop && UnrollRemainder) {
+    DEBUG(dbgs() << "Unrolling remainder loop\n");
+    UnrollLoop(remainderLoop, /*Count*/Count - 1, /*TripCount*/Count - 1,
+               /*Force*/false, /*AllowRuntime*/false,
+               /*AllowExpensiveTripCount*/false, /*PreserveCondBr*/true,
+               /*PreserveOnlyFirst*/false, /*TripMultiple*/1,
+               /*PeelCount*/0, /*UnrollRemainder*/false, LI, SE, DT, AC, ORE,
+               PreserveLCSSA);
   }
 
   NumRuntimeUnrolled++;

@@ -179,6 +179,9 @@ static DecodeStatus DecodeXSeqPairsClassRegisterClass(MCInst &Inst,
                                                       unsigned RegNo,
                                                       uint64_t Addr,
                                                       const void *Decoder);
+template<int Bits>
+static DecodeStatus DecodeSImm(llvm::MCInst &Inst, uint64_t Imm,
+                               uint64_t Address, const void *Decoder);
 
 static bool Check(DecodeStatus &Out, DecodeStatus In) {
   switch (In) {
@@ -1588,3 +1591,18 @@ static DecodeStatus DecodeXSeqPairsClassRegisterClass(MCInst &Inst,
                                              AArch64::XSeqPairsClassRegClassID,
                                              RegNo, Addr, Decoder);
 }
+
+template<int Bits>
+static DecodeStatus DecodeSImm(llvm::MCInst &Inst, uint64_t Imm,
+                               uint64_t Address, const void *Decoder) {
+  if (Imm & ~((1LL << Bits) - 1))
+      return Fail;
+
+  // Imm is a signed immediate, so sign extend it.
+  if (Imm & (1 << (Bits - 1)))
+    Imm |= ~((1LL << Bits) - 1);
+
+  Inst.addOperand(MCOperand::createImm(Imm));
+  return Success;
+}
+

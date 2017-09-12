@@ -188,17 +188,13 @@ private:
 public:
   /// \p The function that is concerned by this stack size diagnostic.
   /// \p The computed stack size.
-  DiagnosticInfoResourceLimit(const Function &Fn,
-                              const char *ResourceName,
+  DiagnosticInfoResourceLimit(const Function &Fn, const char *ResourceName,
                               uint64_t ResourceSize,
                               DiagnosticSeverity Severity = DS_Warning,
                               DiagnosticKind Kind = DK_ResourceLimit,
                               uint64_t ResourceLimit = 0)
-      : DiagnosticInfo(Kind, Severity),
-        Fn(Fn),
-        ResourceName(ResourceName),
-        ResourceSize(ResourceSize),
-        ResourceLimit(ResourceLimit) {}
+      : DiagnosticInfo(Kind, Severity), Fn(Fn), ResourceName(ResourceName),
+        ResourceSize(ResourceSize), ResourceLimit(ResourceLimit) {}
 
   const Function &getFunction() const { return Fn; }
   const char *getResourceName() const { return ResourceName; }
@@ -209,19 +205,17 @@ public:
   void print(DiagnosticPrinter &DP) const override;
 
   static bool classof(const DiagnosticInfo *DI) {
-    return DI->getKind() == DK_ResourceLimit ||
-           DI->getKind() == DK_StackSize;
+    return DI->getKind() == DK_ResourceLimit || DI->getKind() == DK_StackSize;
   }
 };
 
 class DiagnosticInfoStackSize : public DiagnosticInfoResourceLimit {
 public:
-  DiagnosticInfoStackSize(const Function &Fn,
-                          uint64_t StackSize,
+  DiagnosticInfoStackSize(const Function &Fn, uint64_t StackSize,
                           DiagnosticSeverity Severity = DS_Warning,
                           uint64_t StackLimit = 0)
-    : DiagnosticInfoResourceLimit(Fn, "stack size", StackSize,
-                                  Severity, DK_StackSize, StackLimit) {}
+      : DiagnosticInfoResourceLimit(Fn, "stack size", StackSize, Severity,
+                                    DK_StackSize, StackLimit) {}
 
   uint64_t getStackSize() const { return getResourceSize(); }
   uint64_t getStackLimit() const { return getResourceLimit(); }
@@ -244,7 +238,7 @@ public:
   /// \p The module that is concerned by this debug metadata version diagnostic.
   /// \p The actual metadata version.
   DiagnosticInfoDebugMetadataVersion(const Module &M, unsigned MetadataVersion,
-                          DiagnosticSeverity Severity = DS_Warning)
+                                     DiagnosticSeverity Severity = DS_Warning)
       : DiagnosticInfo(DK_DebugMetadataVersion, Severity), M(M),
         MetadataVersion(MetadataVersion) {}
 
@@ -411,7 +405,7 @@ public:
   /// \brief Used in the streaming interface as the general argument type.  It
   /// internally converts everything into a key-value pair.
   struct Argument {
-    StringRef Key;
+    std::string Key;
     std::string Val;
     // If set, the debug location corresponding to the value.
     DiagnosticLocation Loc;
@@ -421,10 +415,13 @@ public:
     Argument(StringRef Key, const Type *T);
     Argument(StringRef Key, StringRef S);
     Argument(StringRef Key, int N);
-    Argument(StringRef Key, int64_t N);
+    Argument(StringRef Key, long N);
+    Argument(StringRef Key, long long N);
     Argument(StringRef Key, unsigned N);
-    Argument(StringRef Key, uint64_t N);
+    Argument(StringRef Key, unsigned long N);
+    Argument(StringRef Key, unsigned long long N);
     Argument(StringRef Key, bool B) : Key(Key), Val(B ? "true" : "false") {}
+    Argument(StringRef Key, DebugLoc dl);
   };
 
   /// \p PassName is the name of the pass emitting this diagnostic. \p
@@ -626,11 +623,6 @@ private:
                      const DiagnosticLocation &Loc, const Twine &Msg)
       : DiagnosticInfoIROptimization(DK_OptimizationRemark, DS_Remark, PassName,
                                      Fn, Loc, Msg) {}
-
-  friend void emitOptimizationRemark(LLVMContext &Ctx, const char *PassName,
-                                     const Function &Fn,
-                                     const DiagnosticLocation &Loc,
-                                     const Twine &Msg);
 };
 
 /// Diagnostic information for missed-optimization remarks.
@@ -674,12 +666,6 @@ private:
                            const DiagnosticLocation &Loc, const Twine &Msg)
       : DiagnosticInfoIROptimization(DK_OptimizationRemarkMissed, DS_Remark,
                                      PassName, Fn, Loc, Msg) {}
-
-  friend void emitOptimizationRemarkMissed(LLVMContext &Ctx,
-                                           const char *PassName,
-                                           const Function &Fn,
-                                           const DiagnosticLocation &Loc,
-                                           const Twine &Msg);
 };
 
 /// Diagnostic information for optimization analysis remarks.
@@ -751,12 +737,6 @@ private:
                              const DiagnosticLocation &Loc, const Twine &Msg)
       : DiagnosticInfoIROptimization(DK_OptimizationRemarkAnalysis, DS_Remark,
                                      PassName, Fn, Loc, Msg) {}
-
-  friend void emitOptimizationRemarkAnalysis(LLVMContext &Ctx,
-                                             const char *PassName,
-                                             const Function &Fn,
-                                             const DiagnosticLocation &Loc,
-                                             const Twine &Msg);
 };
 
 /// Diagnostic information for optimization analysis remarks related to
@@ -798,10 +778,6 @@ private:
                                       const Twine &Msg)
       : OptimizationRemarkAnalysis(DK_OptimizationRemarkAnalysisFPCommute,
                                    PassName, Fn, Loc, Msg) {}
-
-  friend void emitOptimizationRemarkAnalysisFPCommute(
-      LLVMContext &Ctx, const char *PassName, const Function &Fn,
-      const DiagnosticLocation &Loc, const Twine &Msg);
 };
 
 /// Diagnostic information for optimization analysis remarks related to
@@ -842,10 +818,6 @@ private:
                                      const Twine &Msg)
       : OptimizationRemarkAnalysis(DK_OptimizationRemarkAnalysisAliasing,
                                    PassName, Fn, Loc, Msg) {}
-
-  friend void emitOptimizationRemarkAnalysisAliasing(
-      LLVMContext &Ctx, const char *PassName, const Function &Fn,
-      const DiagnosticLocation &Loc, const Twine &Msg);
 };
 
 /// Diagnostic information for machine IR parser.
@@ -887,74 +859,6 @@ public:
 
 // Create wrappers for C Binding types (see CBindingWrapping.h).
 DEFINE_SIMPLE_CONVERSION_FUNCTIONS(DiagnosticInfo, LLVMDiagnosticInfoRef)
-
-/// \brief Legacy interface to emit an optimization-applied message.  Use
-/// (Machine)OptimizationRemarkEmitter instead.
-///
-/// \p PassName is the name of the pass emitting the message. If -Rpass= is
-/// given and \p PassName matches the regular expression in -Rpass, then the
-/// remark will be emitted. \p Fn is the function triggering the remark, \p Loc
-/// is the debug location where the diagnostic is generated. \p Msg is the
-/// message string to use.
-void emitOptimizationRemark(LLVMContext &Ctx, const char *PassName,
-                            const Function &Fn, const DiagnosticLocation &Loc,
-                            const Twine &Msg);
-
-/// \brief Legacy interface to emit an optimization-missed message.  Use
-/// (Machine)OptimizationRemarkEmitter instead.
-///
-/// \p PassName is the name of the pass emitting the message. If -Rpass-missed=
-/// is given and \p PassName matches the regular expression in -Rpass, then the
-/// remark will be emitted. \p Fn is the function triggering the remark, \p Loc
-/// is the debug location where the diagnostic is generated. \p Msg is the
-/// message string to use.
-void emitOptimizationRemarkMissed(LLVMContext &Ctx, const char *PassName,
-                                  const Function &Fn,
-                                  const DiagnosticLocation &Loc,
-                                  const Twine &Msg);
-
-/// \brief Legacy interface to emit an optimization analysis remark message.
-/// Use (Machine)OptimizationRemarkEmitter instead.
-///
-/// \p PassName is the name of the pass emitting the message. If
-/// -Rpass-analysis= is given and \p PassName matches the regular expression in
-/// -Rpass, then the remark will be emitted. \p Fn is the function triggering
-/// the remark, \p Loc is the debug location where the diagnostic is
-/// generated. \p Msg is the message string to use.
-void emitOptimizationRemarkAnalysis(LLVMContext &Ctx, const char *PassName,
-                                    const Function &Fn,
-                                    const DiagnosticLocation &Loc,
-                                    const Twine &Msg);
-
-/// \brief Legacy interface to emit an optimization analysis remark related to
-/// messages about floating-point non-commutativity.  Use
-/// (Machine)OptimizationRemarkEmitter instead.
-///
-/// \p PassName is the name of the pass emitting the message. If
-/// -Rpass-analysis= is given and \p PassName matches the regular expression in
-/// -Rpass, then the remark will be emitted. \p Fn is the function triggering
-/// the remark, \p Loc is the debug location where the diagnostic is
-/// generated. \p Msg is the message string to use.
-void emitOptimizationRemarkAnalysisFPCommute(LLVMContext &Ctx,
-                                             const char *PassName,
-                                             const Function &Fn,
-                                             const DiagnosticLocation &Loc,
-                                             const Twine &Msg);
-
-/// \brief Legacy interface to emit an optimization analysis remark related to
-/// messages about pointer aliasing.  Use (Machine)OptimizationRemarkEmitter
-/// instead.
-///
-/// \p PassName is the name of the pass emitting the message.
-/// If -Rpass-analysis= is given and \p PassName matches the regular expression
-/// in -Rpass, then the remark will be emitted. \p Fn is the function triggering
-/// the remark, \p Loc is the debug location where the diagnostic is generated.
-/// \p Msg is the message string to use.
-void emitOptimizationRemarkAnalysisAliasing(LLVMContext &Ctx,
-                                            const char *PassName,
-                                            const Function &Fn,
-                                            const DiagnosticLocation &Loc,
-                                            const Twine &Msg);
 
 /// Diagnostic information for optimization failures.
 class DiagnosticInfoOptimizationFailure : public DiagnosticInfoIROptimization {

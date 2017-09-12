@@ -141,36 +141,35 @@ static void moveInstsAfter(MachineBasicBlock::iterator I,
   }
 }
 
-static void addDefsToList(const MachineInstr &MI,
-                          SmallVectorImpl<const MachineOperand *> &Defs) {
-  for (const MachineOperand &Def : MI.defs()) {
-    Defs.push_back(&Def);
-  }
+static void addDefsToList(const MachineInstr &MI, DenseSet<unsigned> &Defs) {
+  // XXX: Should this be looking for implicit defs?
+  for (const MachineOperand &Def : MI.defs())
+    Defs.insert(Def.getReg());
 }
 
 static bool memAccessesCanBeReordered(MachineBasicBlock::iterator A,
                                       MachineBasicBlock::iterator B,
                                       const SIInstrInfo *TII,
                                       AliasAnalysis * AA) {
-  return (TII->areMemAccessesTriviallyDisjoint(*A, *B, AA) ||
-    // RAW or WAR - cannot reorder
-    // WAW - cannot reorder
-    // RAR - safe to reorder
-    !(A->mayStore() || B->mayStore()));
+  // RAW or WAR - cannot reorder
+  // WAW - cannot reorder
+  // RAR - safe to reorder
+  return !(A->mayStore() || B->mayStore()) ||
+    TII->areMemAccessesTriviallyDisjoint(*A, *B, AA);
 }
 
 // Add MI and its defs to the lists if MI reads one of the defs that are
 // already in the list. Returns true in that case.
 static bool
 addToListsIfDependent(MachineInstr &MI,
-                      SmallVectorImpl<const MachineOperand *> &Defs,
+                      DenseSet<unsigned> &Defs,
                       SmallVectorImpl<MachineInstr*> &Insts) {
-  for (const MachineOperand *Def : Defs) {
-    bool ReadDef = MI.readsVirtualRegister(Def->getReg());
-    // If ReadDef is true, then there is a use of Def between I
-    // and the instruction that I will potentially be merged with. We
-    // will need to move this instruction after the merged instructions.
-    if (ReadDef) {
+  for (MachineOperand &Use : MI.operands()) {
+    // If one of the defs is read, then there is a use of Def between I and the
+    // instruction that I will potentially be merged with. We will need to move
+    // this instruction after the merged instructions.
+
+    if (Use.isReg() && Use.readsReg() && Defs.count(Use.getReg())) {
       Insts.push_back(&MI);
       addDefsToList(MI, Defs);
       return true;
@@ -249,11 +248,23 @@ bool SILoadStoreOptimizer::offsetsCanBeCombined(CombineInfo &CI) {
 }
 
 bool SILoadStoreOptimizer::findMatchingDSInst(CombineInfo &CI) {
-  MachineBasicBlock::iterator E = CI.I->getParent()->end();
+  MachineBasicBlock *MBB = CI.I->getParent();
+  MachineBasicBlock::iterator E = MBB->end();
   MachineBasicBlock::iterator MBBI = CI.I;
+
+  int AddrIdx = AMDGPU::getNamedOperandIdx(CI.I->getOpcode(),
+                                           AMDGPU::OpName::addr);
+  const MachineOperand &AddrReg0 = CI.I->getOperand(AddrIdx);
+
+  // We only ever merge operations with the same base address register, so don't
+  // bother scanning forward if there are no other uses.
+  if (TargetRegisterInfo::isPhysicalRegister(AddrReg0.getReg()) ||
+      MRI->hasOneNonDBGUse(AddrReg0.getReg()))
+    return false;
+
   ++MBBI;
 
-  SmallVector<const MachineOperand *, 8> DefsToMove;
+  DenseSet<unsigned> DefsToMove;
   addDefsToList(*CI.I, DefsToMove);
 
   for ( ; MBBI != E; ++MBBI) {
@@ -264,10 +275,11 @@ bool SILoadStoreOptimizer::findMatchingDSInst(CombineInfo &CI) {
       // 2. It is safe to move MBBI down past the instruction that I will
       //    be merged into.
 
-      if (MBBI->hasUnmodeledSideEffects())
+      if (MBBI->hasUnmodeledSideEffects()) {
         // We can't re-order this instruction with respect to other memory
-        // opeations, so we fail both conditions mentioned above.
+        // operations, so we fail both conditions mentioned above.
         return false;
+      }
 
       if (MBBI->mayLoadOrStore() &&
         !memAccessesCanBeReordered(*CI.I, *MBBI, TII, AA)) {
@@ -299,9 +311,6 @@ bool SILoadStoreOptimizer::findMatchingDSInst(CombineInfo &CI) {
     if (addToListsIfDependent(*MBBI, DefsToMove, CI.InstsToMove))
       continue;
 
-    int AddrIdx = AMDGPU::getNamedOperandIdx(CI.I->getOpcode(),
-                                             AMDGPU::OpName::addr);
-    const MachineOperand &AddrReg0 = CI.I->getOperand(AddrIdx);
     const MachineOperand &AddrReg1 = MBBI->getOperand(AddrIdx);
 
     // Check same base pointer. Be careful of subregisters, which can occur with
@@ -538,6 +547,8 @@ bool SILoadStoreOptimizer::runOnMachineFunction(MachineFunction &MF) {
 
   MRI = &MF.getRegInfo();
   AA = &getAnalysis<AAResultsWrapperPass>().getAAResults();
+
+  assert(MRI->isSSA() && "Must be run on SSA");
 
   DEBUG(dbgs() << "Running SILoadStoreOptimizer\n");
 

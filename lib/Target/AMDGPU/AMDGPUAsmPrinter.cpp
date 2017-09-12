@@ -500,7 +500,8 @@ AMDGPUAsmPrinter::SIFunctionResourceInfo AMDGPUAsmPrinter::analyzeResourceUsage(
 
   // If there are no calls, MachineRegisterInfo can tell us the used register
   // count easily.
-  if (!FrameInfo.hasCalls()) {
+  // A tail call isn't considered a call for MachineFrameInfo's purposes.
+  if (!FrameInfo.hasCalls() && !FrameInfo.hasTailCall()) {
     MCPhysReg HighestVGPRReg = AMDGPU::NoRegister;
     for (MCPhysReg Reg : reverse(AMDGPU::VGPR_32RegClass.getRegisters())) {
       if (MRI.isPhysRegUsed(Reg)) {
@@ -631,10 +632,12 @@ AMDGPUAsmPrinter::SIFunctionResourceInfo AMDGPUAsmPrinter::analyzeResourceUsage(
       }
 
       if (MI.isCall()) {
-        assert(MI.getOpcode() == AMDGPU::SI_CALL);
         // Pseudo used just to encode the underlying global. Is there a better
         // way to track this?
-        const Function *Callee = cast<Function>(MI.getOperand(2).getGlobal());
+
+        const MachineOperand *CalleeOp
+          = TII->getNamedOperand(MI, AMDGPU::OpName::callee);
+        const Function *Callee = cast<Function>(CalleeOp->getGlobal());
         if (Callee->isDeclaration()) {
           // If this is a call to an external function, we can't do much. Make
           // conservative guesses.
@@ -1017,20 +1020,29 @@ void AMDGPUAsmPrinter::getAmdKernelCode(amd_kernel_code_t &Out,
 bool AMDGPUAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
                                        unsigned AsmVariant,
                                        const char *ExtraCode, raw_ostream &O) {
+  // First try the generic code, which knows about modifiers like 'c' and 'n'.
+  if (!AsmPrinter::PrintAsmOperand(MI, OpNo, AsmVariant, ExtraCode, O))
+    return false;
+
   if (ExtraCode && ExtraCode[0]) {
     if (ExtraCode[1] != 0)
       return true; // Unknown modifier.
 
     switch (ExtraCode[0]) {
-    default:
-      // See if this is a generic print operand
-      return AsmPrinter::PrintAsmOperand(MI, OpNo, AsmVariant, ExtraCode, O);
     case 'r':
       break;
+    default:
+      return true;
     }
   }
 
-  AMDGPUInstPrinter::printRegOperand(MI->getOperand(OpNo).getReg(), O,
-                   *TM.getSubtargetImpl(*MF->getFunction())->getRegisterInfo());
-  return false;
+  // TODO: Should be able to support other operand types like globals.
+  const MachineOperand &MO = MI->getOperand(OpNo);
+  if (MO.isReg()) {
+    AMDGPUInstPrinter::printRegOperand(MO.getReg(), O,
+                                       *MF->getSubtarget().getRegisterInfo());
+    return false;
+  }
+
+  return true;
 }

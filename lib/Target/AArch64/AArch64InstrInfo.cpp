@@ -673,8 +673,9 @@ static bool canBeExpandedToORR(const MachineInstr &MI, unsigned BitSize) {
 bool AArch64InstrInfo::isAsCheapAsAMove(const MachineInstr &MI) const {
   if (!Subtarget.hasCustomCheapAsMoveHandling())
     return MI.isAsCheapAsAMove();
-
-  unsigned Imm;
+  if (Subtarget.getProcFamily() == AArch64Subtarget::ExynosM1 &&
+      isExynosShiftLeftFast(MI))
+    return true;
 
   switch (MI.getOpcode()) {
   default:
@@ -685,17 +686,7 @@ bool AArch64InstrInfo::isAsCheapAsAMove(const MachineInstr &MI) const {
   case AArch64::ADDXri:
   case AArch64::SUBWri:
   case AArch64::SUBXri:
-    return (Subtarget.getProcFamily() == AArch64Subtarget::ExynosM1 ||
-            MI.getOperand(3).getImm() == 0);
-
-  // add/sub on register with shift
-  case AArch64::ADDWrs:
-  case AArch64::ADDXrs:
-  case AArch64::SUBWrs:
-  case AArch64::SUBXrs:
-    Imm = MI.getOperand(3).getImm();
-    return (Subtarget.getProcFamily() == AArch64Subtarget::ExynosM1 &&
-            AArch64_AM::getArithShiftValue(Imm) < 4);
+    return (MI.getOperand(3).getImm() == 0);
 
   // logical ops on immediate
   case AArch64::ANDWri:
@@ -721,24 +712,6 @@ bool AArch64InstrInfo::isAsCheapAsAMove(const MachineInstr &MI) const {
   case AArch64::ORRXrr:
     return true;
 
-  // logical ops on register with shift
-  case AArch64::ANDWrs:
-  case AArch64::ANDXrs:
-  case AArch64::BICWrs:
-  case AArch64::BICXrs:
-  case AArch64::EONWrs:
-  case AArch64::EONXrs:
-  case AArch64::EORWrs:
-  case AArch64::EORXrs:
-  case AArch64::ORNWrs:
-  case AArch64::ORNXrs:
-  case AArch64::ORRWrs:
-  case AArch64::ORRXrs:
-    Imm = MI.getOperand(3).getImm();
-    return (Subtarget.getProcFamily() == AArch64Subtarget::ExynosM1 &&
-            AArch64_AM::getShiftValue(Imm) < 4 &&
-            AArch64_AM::getShiftType(Imm) == AArch64_AM::LSL);
-
   // If MOVi32imm or MOVi64imm can be expanded into ORRWri or
   // ORRXri, it is as cheap as MOV
   case AArch64::MOVi32imm:
@@ -748,6 +721,7 @@ bool AArch64InstrInfo::isAsCheapAsAMove(const MachineInstr &MI) const {
 
   // It is cheap to zero out registers if the subtarget has ZeroCycleZeroing
   // feature.
+  case AArch64::FMOVH0:
   case AArch64::FMOVS0:
   case AArch64::FMOVD0:
     return Subtarget.hasZeroCycleZeroing();
@@ -758,6 +732,74 @@ bool AArch64InstrInfo::isAsCheapAsAMove(const MachineInstr &MI) const {
   }
 
   llvm_unreachable("Unknown opcode to check as cheap as a move!");
+}
+
+bool AArch64InstrInfo::isExynosShiftLeftFast(const MachineInstr &MI) const {
+  unsigned Imm, Shift;
+
+  switch (MI.getOpcode()) {
+  default:
+    return false;
+
+  // WriteI
+  case AArch64::ADDSWri:
+  case AArch64::ADDSXri:
+  case AArch64::ADDWri:
+  case AArch64::ADDXri:
+  case AArch64::SUBSWri:
+  case AArch64::SUBSXri:
+  case AArch64::SUBWri:
+  case AArch64::SUBXri:
+    return true;
+
+  // WriteISReg
+  case AArch64::ADDSWrs:
+  case AArch64::ADDSXrs:
+  case AArch64::ADDWrs:
+  case AArch64::ADDXrs:
+  case AArch64::ANDSWrs:
+  case AArch64::ANDSXrs:
+  case AArch64::ANDWrs:
+  case AArch64::ANDXrs:
+  case AArch64::BICSWrs:
+  case AArch64::BICSXrs:
+  case AArch64::BICWrs:
+  case AArch64::BICXrs:
+  case AArch64::EONWrs:
+  case AArch64::EONXrs:
+  case AArch64::EORWrs:
+  case AArch64::EORXrs:
+  case AArch64::ORNWrs:
+  case AArch64::ORNXrs:
+  case AArch64::ORRWrs:
+  case AArch64::ORRXrs:
+  case AArch64::SUBSWrs:
+  case AArch64::SUBSXrs:
+  case AArch64::SUBWrs:
+  case AArch64::SUBXrs:
+    Imm = MI.getOperand(3).getImm();
+    Shift = AArch64_AM::getShiftValue(Imm);
+    return (Shift == 0 ||
+            (Shift <= 3 && AArch64_AM::getShiftType(Imm) == AArch64_AM::LSL));
+
+  // WriteIEReg
+  case AArch64::ADDSWrx:
+  case AArch64::ADDSXrx:
+  case AArch64::ADDSXrx64:
+  case AArch64::ADDWrx:
+  case AArch64::ADDXrx:
+  case AArch64::ADDXrx64:
+  case AArch64::SUBSWrx:
+  case AArch64::SUBSXrx:
+  case AArch64::SUBSXrx64:
+  case AArch64::SUBWrx:
+  case AArch64::SUBXrx:
+  case AArch64::SUBXrx64:
+    Imm = MI.getOperand(3).getImm();
+    Shift = AArch64_AM::getArithShiftValue(Imm);
+    return (Shift == 0 ||
+            (Shift <= 3 && AArch64_AM::getExtendType(Imm) == AArch64_AM::UXTX));
+  }
 }
 
 bool AArch64InstrInfo::isFalkorShiftExtFast(const MachineInstr &MI) const {
@@ -4495,16 +4537,17 @@ AArch64InstrInfo::getOutliningType(MachineInstr &MI) const {
   if (MI.isPosition())
     return MachineOutlinerInstrType::Illegal;
 
+  // Don't touch the link register or W30.
+  if (MI.readsRegister(AArch64::W30, &getRegisterInfo()) ||
+      MI.modifiesRegister(AArch64::W30, &getRegisterInfo()))
+    return MachineOutlinerInstrType::Illegal;
+
   // Make sure none of the operands are un-outlinable.
-  for (const MachineOperand &MOP : MI.operands())
+  for (const MachineOperand &MOP : MI.operands()) {
     if (MOP.isCPI() || MOP.isJTI() || MOP.isCFIIndex() || MOP.isFI() ||
         MOP.isTargetIndex())
       return MachineOutlinerInstrType::Illegal;
-
-  // Don't outline anything that uses the link register.
-  if (MI.modifiesRegister(AArch64::LR, &RI) ||
-      MI.readsRegister(AArch64::LR, &RI))
-    return MachineOutlinerInstrType::Illegal;
+  }
 
   // Does this use the stack?
   if (MI.modifiesRegister(AArch64::SP, &RI) ||
@@ -4625,7 +4668,7 @@ MachineBasicBlock::iterator AArch64InstrInfo::insertOutlinedCall(
   // Restore the link register.
   MachineInstr *LDRXpost = BuildMI(MF, DebugLoc(), get(AArch64::LDRXpost))
                                .addReg(AArch64::SP, RegState::Define)
-                               .addReg(AArch64::LR)
+                               .addReg(AArch64::LR, RegState::Define)
                                .addReg(AArch64::SP)
                                .addImm(16);
   It = MBB.insert(It, LDRXpost);

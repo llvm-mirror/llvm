@@ -110,8 +110,6 @@ ARMSubtarget::ARMSubtarget(const Triple &TT, const std::string &CPU,
                           ? (ARMBaseInstrInfo *)new ARMInstrInfo(*this)
                           : (ARMBaseInstrInfo *)new Thumb2InstrInfo(*this)),
       TLInfo(TM, *this) {
-  assert((isThumb() || hasARMOps()) &&
-         "Target must either be thumb or support ARM operations!");
 
   CallLoweringInfo.reset(new ARMCallLowering(*getTargetLowering()));
   Legalizer.reset(new ARMLegalizerInfo(*this));
@@ -281,9 +279,11 @@ void ARMSubtarget::initSubtargetFeatures(StringRef CPU, StringRef FS) {
   case CortexA32:
   case CortexA35:
   case CortexA53:
+  case CortexA55:
   case CortexA57:
   case CortexA72:
   case CortexA73:
+  case CortexA75:
   case CortexR4:
   case CortexR4F:
   case CortexR5:
@@ -342,6 +342,13 @@ bool ARMSubtarget::isGVIndirectSymbol(const GlobalValue *GV) const {
   return false;
 }
 
+ARMCP::ARMCPModifier ARMSubtarget::getCPModifier(const GlobalValue *GV) const {
+  if (isTargetELF() && TM.isPositionIndependent() &&
+      !TM.shouldAssumeDSOLocal(*GV->getParent(), GV))
+    return ARMCP::GOT_PREL;
+  return ARMCP::no_modifier;
+}
+
 unsigned ARMSubtarget::getMispredictionPenalty() const {
   return SchedModel.MispredictPenalty;
 }
@@ -359,11 +366,10 @@ bool ARMSubtarget::enableMachineScheduler() const {
 
 // This overrides the PostRAScheduler bit in the SchedModel for any CPU.
 bool ARMSubtarget::enablePostRAScheduler() const {
-  // No need for PostRA scheduling on subtargets where we use the
-  // MachineScheduler.
-  if (useMachineScheduler())
+  if (disablePostRAScheduler())
     return false;
-  return (!isThumb() || hasThumb2());
+  // Don't reschedule potential IT blocks.
+  return !isThumb1Only();
 }
 
 bool ARMSubtarget::enableAtomicExpand() const { return hasAnyDataBarrier(); }

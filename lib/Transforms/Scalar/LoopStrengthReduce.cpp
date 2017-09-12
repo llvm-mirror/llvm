@@ -1160,6 +1160,12 @@ public:
 
 } // end anonymous namespace
 
+static bool isAMCompletelyFolded(const TargetTransformInfo &TTI,
+                                 LSRUse::KindType Kind, MemAccessTy AccessTy,
+                                 GlobalValue *BaseGV, int64_t BaseOffset,
+                                 bool HasBaseReg, int64_t Scale,
+                                 Instruction *Fixup = nullptr);
+
 /// Tally up interesting quantities from the given register.
 void Cost::RateRegister(const SCEV *Reg,
                         SmallPtrSetImpl<const SCEV *> &Regs,
@@ -1288,7 +1294,8 @@ void Cost::RateFormula(const TargetTransformInfo &TTI,
     // Check with target if this offset with this instruction is
     // specifically not supported.
     if (LU.Kind == LSRUse::Address && Offset != 0 &&
-        !TTI.isFoldableMemAccessOffset(Fixup.UserInst, Offset))
+        !isAMCompletelyFolded(TTI, LSRUse::Address, LU.AccessTy, F.BaseGV,
+                              Offset, F.HasBaseReg, F.Scale, Fixup.UserInst))
       C.NumBaseAdds++;
   }
 
@@ -1543,7 +1550,7 @@ static bool isAMCompletelyFolded(const TargetTransformInfo &TTI,
                                  LSRUse::KindType Kind, MemAccessTy AccessTy,
                                  GlobalValue *BaseGV, int64_t BaseOffset,
                                  bool HasBaseReg, int64_t Scale,
-                                 Instruction *Fixup = nullptr) {
+                                 Instruction *Fixup/*= nullptr*/) {
   switch (Kind) {
   case LSRUse::Address:
     return TTI.isLegalAddressingMode(AccessTy.MemTy, BaseGV, BaseOffset,
@@ -1657,8 +1664,8 @@ static bool isAMCompletelyFolded(const TargetTransformInfo &TTI,
   if (LU.Kind == LSRUse::Address && TTI.LSRWithInstrQueries()) {
     for (const LSRFixup &Fixup : LU.Fixups)
       if (!isAMCompletelyFolded(TTI, LSRUse::Address, LU.AccessTy, F.BaseGV,
-                                F.BaseOffset, F.HasBaseReg, F.Scale,
-                                Fixup.UserInst))
+                                (F.BaseOffset + Fixup.Offset), F.HasBaseReg,
+                                F.Scale, Fixup.UserInst))
         return false;
     return true;
   }
@@ -2019,6 +2026,14 @@ void LSRInstance::OptimizeShadowIV() {
     PHINode *PH = dyn_cast<PHINode>(ShadowUse->getOperand(0));
     if (!PH) continue;
     if (PH->getNumIncomingValues() != 2) continue;
+
+    // If the calculation in integers overflows, the result in FP type will
+    // differ. So we only can do this transformation if we are guaranteed to not
+    // deal with overflowing values
+    const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(SE.getSCEV(PH));
+    if (!AR) continue;
+    if (IsSigned && !AR->hasNoSignedWrap()) continue;
+    if (!IsSigned && !AR->hasNoUnsignedWrap()) continue;
 
     Type *SrcTy = PH->getType();
     int Mantissa = DestTy->getFPMantissaWidth();

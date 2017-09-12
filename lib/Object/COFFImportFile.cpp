@@ -560,7 +560,7 @@ NewArchiveMember ObjectFactory::createWeakExternal(StringRef Sym,
 
 std::error_code writeImportLibrary(StringRef ImportName, StringRef Path,
                                    ArrayRef<COFFShortExport> Exports,
-                                   MachineTypes Machine) {
+                                   MachineTypes Machine, bool MakeWeakAliases) {
 
   std::vector<NewArchiveMember> Members;
   ObjectFactory OF(llvm::sys::path::filename(ImportName), Machine);
@@ -578,7 +578,7 @@ std::error_code writeImportLibrary(StringRef ImportName, StringRef Path,
     if (E.Private)
       continue;
 
-    if (E.isWeak()) {
+    if (E.isWeak() && MakeWeakAliases) {
       Members.push_back(OF.createWeakExternal(E.Name, E.ExtName, false));
       Members.push_back(OF.createWeakExternal(E.Name, E.ExtName, true));
       continue;
@@ -590,7 +590,7 @@ std::error_code writeImportLibrary(StringRef ImportName, StringRef Path,
     if (E.Constant)
       ImportType = IMPORT_CONST;
 
-    StringRef SymbolName = E.isWeak() ? E.ExtName : E.Name;
+    StringRef SymbolName = E.SymbolName.empty() ? E.Name : E.SymbolName;
     ImportNameType NameType = getNameType(SymbolName, E.Name, Machine);
     Expected<std::string> Name = E.ExtName.empty()
                                      ? SymbolName
@@ -604,11 +604,9 @@ std::error_code writeImportLibrary(StringRef ImportName, StringRef Path,
         OF.createShortImport(*Name, E.Ordinal, ImportType, NameType));
   }
 
-  std::pair<StringRef, std::error_code> Result =
-      writeArchive(Path, Members, /*WriteSymtab*/ true, object::Archive::K_GNU,
-                   /*Deterministic*/ true, /*Thin*/ false);
-
-  return Result.second;
+  return writeArchive(Path, Members, /*WriteSymtab*/ true,
+                      object::Archive::K_GNU,
+                      /*Deterministic*/ true, /*Thin*/ false);
 }
 
 } // namespace object

@@ -17,6 +17,7 @@
 #include "AArch64MachineFunctionInfo.h"
 #include "AArch64RegisterInfo.h"
 #include "AArch64Subtarget.h"
+#include "AArch64TargetObjectFile.h"
 #include "InstPrinter/AArch64InstPrinter.h"
 #include "MCTargetDesc/AArch64AddressingModes.h"
 #include "MCTargetDesc/AArch64MCTargetDesc.h"
@@ -208,6 +209,29 @@ void AArch64AsmPrinter::EmitEndOfAsmFile(Module &M) {
     // generates code that does this, it is always safe to set.
     OutStreamer->EmitAssemblerFlag(MCAF_SubsectionsViaSymbols);
     SM.serializeToStackMapSection();
+  }
+
+  if (TT.isOSBinFormatCOFF()) {
+    const auto &TLOF =
+        static_cast<const TargetLoweringObjectFileCOFF &>(getObjFileLowering());
+
+    std::string Flags;
+    raw_string_ostream OS(Flags);
+
+    for (const auto &Function : M)
+      TLOF.emitLinkerFlagsForGlobal(OS, &Function);
+    for (const auto &Global : M.globals())
+      TLOF.emitLinkerFlagsForGlobal(OS, &Global);
+    for (const auto &Alias : M.aliases())
+      TLOF.emitLinkerFlagsForGlobal(OS, &Alias);
+
+    OS.flush();
+
+    // Output collected flags
+    if (!Flags.empty()) {
+      OutStreamer->SwitchSection(TLOF.getDrectveSection());
+      OutStreamer->EmitBytes(Flags);
+    }
   }
 }
 
@@ -500,10 +524,12 @@ void AArch64AsmPrinter::LowerPATCHPOINT(MCStreamer &OutStreamer, StackMaps &SM,
 void AArch64AsmPrinter::EmitFMov0(const MachineInstr &MI) {
   unsigned DestReg = MI.getOperand(0).getReg();
   if (STI->hasZeroCycleZeroing()) {
-    // Convert S/D register to corresponding Q register
-    if (AArch64::S0 <= DestReg && DestReg <= AArch64::S31) {
+    // Convert H/S/D register to corresponding Q register
+    if (AArch64::H0 <= DestReg && DestReg <= AArch64::H31)
+      DestReg = AArch64::Q0 + (DestReg - AArch64::H0);
+    else if (AArch64::S0 <= DestReg && DestReg <= AArch64::S31)
       DestReg = AArch64::Q0 + (DestReg - AArch64::S0);
-    } else {
+    else {
       assert(AArch64::D0 <= DestReg && DestReg <= AArch64::D31);
       DestReg = AArch64::Q0 + (DestReg - AArch64::D0);
     }
@@ -516,6 +542,11 @@ void AArch64AsmPrinter::EmitFMov0(const MachineInstr &MI) {
     MCInst FMov;
     switch (MI.getOpcode()) {
     default: llvm_unreachable("Unexpected opcode");
+    case AArch64::FMOVH0:
+      FMov.setOpcode(AArch64::FMOVWHr);
+      FMov.addOperand(MCOperand::createReg(DestReg));
+      FMov.addOperand(MCOperand::createReg(AArch64::WZR));
+      break;
     case AArch64::FMOVS0:
       FMov.setOpcode(AArch64::FMOVWSr);
       FMov.addOperand(MCOperand::createReg(DestReg));
@@ -635,6 +666,7 @@ void AArch64AsmPrinter::EmitInstruction(const MachineInstr *MI) {
     return;
   }
 
+  case AArch64::FMOVH0:
   case AArch64::FMOVS0:
   case AArch64::FMOVD0:
     EmitFMov0(*MI);
