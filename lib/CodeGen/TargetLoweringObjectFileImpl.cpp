@@ -1248,15 +1248,13 @@ static const Comdat *getWasmComdat(const GlobalValue *GV) {
 
 MCSection *TargetLoweringObjectFileWasm::getExplicitSectionGlobal(
     const GlobalObject *GO, SectionKind Kind, const TargetMachine &TM) const {
-  llvm_unreachable("getExplicitSectionGlobal not yet implemented");
-  return nullptr;
+  StringRef Name = GO->getSection();
+  return getContext().getWasmSection(Name, wasm::WASM_SEC_DATA);
 }
 
-static MCSectionWasm *
-selectWasmSectionForGlobal(MCContext &Ctx, const GlobalObject *GO,
-                           SectionKind Kind, Mangler &Mang,
-                           const TargetMachine &TM, bool EmitUniqueSection,
-                           unsigned Flags, unsigned *NextUniqueID) {
+static MCSectionWasm *selectWasmSectionForGlobal(
+    MCContext &Ctx, const GlobalObject *GO, SectionKind Kind, Mangler &Mang,
+    const TargetMachine &TM, bool EmitUniqueSection, unsigned *NextUniqueID) {
   StringRef Group = "";
   if (getWasmComdat(GO))
     llvm_unreachable("comdat not yet supported for wasm");
@@ -1264,10 +1262,12 @@ selectWasmSectionForGlobal(MCContext &Ctx, const GlobalObject *GO,
   bool UniqueSectionNames = TM.getUniqueSectionNames();
   SmallString<128> Name = getSectionPrefixForGlobal(Kind);
 
+  uint32_t Type = wasm::WASM_SEC_DATA;
   if (const auto *F = dyn_cast<Function>(GO)) {
     const auto &OptionalPrefix = F->getSectionPrefix();
     if (OptionalPrefix)
       Name += *OptionalPrefix;
+    Type = wasm::WASM_SEC_CODE;
   }
 
   if (EmitUniqueSection && UniqueSectionNames) {
@@ -1279,8 +1279,7 @@ selectWasmSectionForGlobal(MCContext &Ctx, const GlobalObject *GO,
     UniqueID = *NextUniqueID;
     (*NextUniqueID)++;
   }
-  return Ctx.getWasmSection(Name, /*Type=*/0, Flags,
-                            Group, UniqueID);
+  return Ctx.getWasmSection(Name, Type, Group, UniqueID);
 }
 
 MCSection *TargetLoweringObjectFileWasm::SelectSectionForGlobal(
@@ -1299,8 +1298,7 @@ MCSection *TargetLoweringObjectFileWasm::SelectSectionForGlobal(
   EmitUniqueSection |= GO->hasComdat();
 
   return selectWasmSectionForGlobal(getContext(), GO, Kind, getMangler(), TM,
-                                    EmitUniqueSection, /*Flags=*/0,
-                                    &NextUniqueID);
+                                    EmitUniqueSection, &NextUniqueID);
 }
 
 bool TargetLoweringObjectFileWasm::shouldPutJumpTableInFunctionSection(

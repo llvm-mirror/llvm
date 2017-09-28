@@ -23,6 +23,10 @@ local_label:
         break 7, 1024     # CHECK: :[[@LINE]]:18: error: expected 10-bit unsigned immediate
         break 1024, 1024  # CHECK: :[[@LINE]]:15: error: expected 10-bit unsigned immediate
         dati $2, $3, 1    # CHECK: :[[@LINE]]:9: error: source and destination must match
+        dextm $3, $4, 31, 34 # CHECK: :[[@LINE]]:{{[0-9]+}}: error: size plus position are not in the range 33 .. 64
+        dextu $3, $4, 33, 32 # CHECK: :[[@LINE]]:{{[0-9]+}}: error: size plus position are not in the range 33 .. 64
+        dinsm $4, $5, 31, 34 # CHECK: :[[@LINE]]:{{[0-9]+}}: error: size plus position are not in the range 33 .. 64
+        dinsu $4, $5, 33, 32 # CHECK: :[[@LINE]]:{{[0-9]+}}: error: size plus position are not in the range 33 .. 64
         lh  $33, 8($4)    # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
         lhe $34, 8($2)    # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
         lhu $35, 8($2)    # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
@@ -137,6 +141,10 @@ local_label:
         evp 3                # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
         jalr.hb $31          # CHECK: :[[@LINE]]:{{[0-9]+}}: error: source and destination must be different
         jalr.hb $31, $31     # CHECK: :[[@LINE]]:{{[0-9]+}}: error: source and destination must be different
+        lapc $7, 1048576     # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected both 19-bit signed immediate and multiple of 4
+        lapc $6, -1048580    # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected both 19-bit signed immediate and multiple of 4
+        lapc $3, 3           # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected both 19-bit signed immediate and multiple of 4
+        lapc $3, -1          # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected both 19-bit signed immediate and multiple of 4
         lsa     $2, $3, $4, 0     # CHECK: :[[@LINE]]:29: error: expected immediate in range 1 .. 4
         lsa     $2, $3, $4, 5     # CHECK: :[[@LINE]]:29: error: expected immediate in range 1 .. 4
         pref -1, 255($7)     # CHECK: :[[@LINE]]:14: error: expected 5-bit unsigned immediate

@@ -50,7 +50,7 @@ int main() {                              // TEXT: [[@LINE]]|   161|int main(
 // HTML: <td class='line-number'><a name='L[[@LINE-44]]' href='#L[[@LINE-44]]'><pre>[[@LINE-44]]</pre></a></td><td class='covered-line'><pre>161</pre></td><td class='code'><pre>int main() {
 // HTML: <td class='line-number'><a name='L[[@LINE-44]]' href='#L[[@LINE-44]]'><pre>[[@LINE-44]]</pre></a></td><td class='covered-line'><pre>161</pre></td><td class='code'><pre>  int x = 0
 // HTML: <td class='line-number'><a name='L[[@LINE-44]]' href='#L[[@LINE-44]]'><pre>[[@LINE-44]]</pre></a></td><td class='covered-line'><pre>161</pre></td><td class='code'><pre>
-// HTML: <td class='line-number'><a name='L[[@LINE-44]]' href='#L[[@LINE-44]]'><pre>[[@LINE-44]]</pre></a></td><td class='covered-line'><pre>161</pre></td><td class='code'><pre>  if (x) {
+// HTML: <td class='line-number'><a name='L[[@LINE-44]]' href='#L[[@LINE-44]]'><pre>[[@LINE-44]]</pre></a></td><td class='covered-line'><pre>161</pre></td><td class='code'><pre>  if (x)
 // HTML: <td class='line-number'><a name='L[[@LINE-44]]' href='#L[[@LINE-44]]'><pre>[[@LINE-44]]</pre></a></td><td class='uncovered-line'><pre>0</pre></td><td class='code'><pre>
 // HTML: <td class='line-number'><a name='L[[@LINE-44]]' href='#L[[@LINE-44]]'><pre>[[@LINE-44]]</pre></a></td><td class='covered-line'><pre>161</pre></td><td class='code'><pre><span class='red'>  }</span>
 // HTML: <td class='line-number'><a name='L[[@LINE-44]]' href='#L[[@LINE-44]]'><pre>[[@LINE-44]]</pre></a></td><td class='covered-line'><pre>161</pre></td><td class='code'><pre>    x = 1;
@@ -62,7 +62,7 @@ int main() {                              // TEXT: [[@LINE]]|   161|int main(
 // HTML: <td class='line-number'><a name='L[[@LINE-44]]' href='#L[[@LINE-44]]'><pre>[[@LINE-44]]</pre></a></td><td class='covered-line'><pre>161</pre></td><td class='code'><pre>
 // HTML: <td class='line-number'><a name='L[[@LINE-44]]' href='#L[[@LINE-44]]'><pre>[[@LINE-44]]</pre></a></td><td class='covered-line'><pre>161</pre></td><td class='code'><pre>  x = x &lt; 10
 // HTML: <td class='line-number'><a name='L[[@LINE-44]]' href='#L[[@LINE-44]]'><pre>[[@LINE-44]]</pre></a></td><td class='covered-line'><pre>161</pre></td><td class='code'><pre>  x = x &gt; 10
-// HTML: <td class='line-number'><a name='L[[@LINE-44]]' href='#L[[@LINE-44]]'><pre>[[@LINE-44]]</pre></a></td><td class='uncovered-line'><pre>0</pre></td><td class='code'><pre>        x - 1:
+// HTML: <td class='line-number'><a name='L[[@LINE-44]]' href='#L[[@LINE-44]]'><pre>[[@LINE-44]]</pre></a></td><td class='uncovered-line'><pre>0</pre></td><td class='code'><pre> <span class='red'>x - 1</span>:
 // HTML: <td class='line-number'><a name='L[[@LINE-44]]' href='#L[[@LINE-44]]'><pre>[[@LINE-44]]</pre></a></td><td class='covered-line'><pre>161</pre></td><td class='code'><pre>        x + 1;
 // HTML: <td class='line-number'><a name='L[[@LINE-44]]' href='#L[[@LINE-44]]'><pre>[[@LINE-44]]</pre></a></td><td class='covered-line'><pre>161</pre></td><td class='code'><pre>
 // HTML: <td class='line-number'><a name='L[[@LINE-44]]' href='#L[[@LINE-44]]'><pre>[[@LINE-44]]</pre></a></td><td class='covered-line'><pre>161</pre></td><td class='code'><pre>  return 0;
@@ -80,16 +80,13 @@ int main() {                              // TEXT: [[@LINE]]|   161|int main(
 // HTML-INDEX-LABEL: <table>
 // HTML-INDEX: <td class='column-entry-left'>Filename</td>
 // HTML-INDEX: <td class='column-entry'>Function Coverage</td>
-// HTML-INDEX: <td class='column-entry'>Instantiation Coverage</td>
 // HTML-INDEX: <td class='column-entry'>Line Coverage</td>
 // HTML-INDEX: <td class='column-entry'>Region Coverage</td>
 // HTML-INDEX: <a href='coverage{{.*}}showLineExecutionCounts.cpp.html'{{.*}}showLineExecutionCounts.cpp</a>
 // HTML-INDEX: <td class='column-entry-green'>
 // HTML-INDEX: 100.00% (1/1)
-// HTML-INDEX: <td class='column-entry-green'>
-// HTML-INDEX: 100.00% (1/1)
 // HTML-INDEX: <td class='column-entry-yellow'>
-// HTML-INDEX: 80.00% (16/20)
+// HTML-INDEX: 90.00% (18/20)
 // HTML-INDEX: <td class='column-entry-red'>
-// HTML-INDEX: 70.00% (7/10)
+// HTML-INDEX: 72.73% (8/11)
 // HTML-INDEX: TOTALS

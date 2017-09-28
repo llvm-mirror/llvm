@@ -251,6 +251,8 @@ public:
 
   bool isLegalMaskedGather(Type *DataType) { return false; }
 
+  bool hasDivRemOp(Type *DataType, bool IsSigned) { return false; }
+
   bool prefersVectorizedAddressing() { return true; }
 
   int getScalingFactorCost(Type *Ty, GlobalValue *BaseGV, int64_t BaseOffset,
@@ -450,6 +452,8 @@ public:
   }
 
   unsigned getArithmeticReductionCost(unsigned, Type *, bool) { return 1; }
+
+  unsigned getMinMaxReductionCost(Type *, Type *, bool, bool) { return 1; }
 
   unsigned getCostOfKeepingLiveOverCall(ArrayRef<Type *> Tys) { return 0; }
 
@@ -736,6 +740,11 @@ public:
     if (isa<PHINode>(U))
       return TTI::TCC_Free; // Model all PHI nodes as free.
 
+    // Static alloca doesn't generate target instructions.
+    if (auto *A = dyn_cast<AllocaInst>(U))
+      if (A->isStaticAlloca())
+        return TTI::TCC_Free;
+
     if (const GEPOperator *GEP = dyn_cast<GEPOperator>(U)) {
       return static_cast<T *>(this)->getGEPCost(GEP->getSourceElementType(),
                                                 GEP->getPointerOperand(),
@@ -768,6 +777,27 @@ public:
     return static_cast<T *>(this)->getOperationCost(
         Operator::getOpcode(U), U->getType(),
         U->getNumOperands() == 1 ? U->getOperand(0)->getType() : nullptr);
+  }
+
+  int getInstructionLatency(const Instruction *I) {
+    SmallVector<const Value *, 4> Operands(I->value_op_begin(),
+                                           I->value_op_end());
+    if (getUserCost(I, Operands) == TTI::TCC_Free)
+      return 0;
+
+    if (isa<CallInst>(I))
+      return 40;
+
+    if (isa<LoadInst>(I))
+      return 4;
+
+    Type *dstTy = I->getType();
+    if (VectorType *VectorTy = dyn_cast<VectorType>(dstTy))
+      dstTy = VectorTy->getElementType();
+    if (dstTy->isFloatingPointTy())
+      return 3;
+
+    return 1;
   }
 };
 }

@@ -15,6 +15,7 @@
 #define LLVM_COV_SOURCECOVERAGEVIEW_H
 
 #include "CoverageViewOptions.h"
+#include "CoverageSummaryInfo.h"
 #include "llvm/ProfileData/Coverage/CoverageMapping.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include <vector>
@@ -62,20 +63,6 @@ struct InstantiationView {
                         const InstantiationView &RHS) {
     return LHS.Line < RHS.Line;
   }
-};
-
-/// \brief Coverage statistics for a single line.
-struct LineCoverageStats {
-  uint64_t ExecutionCount;
-  bool HasMultipleRegions;
-  bool Mapped;
-
-  LineCoverageStats(ArrayRef<const coverage::CoverageSegment *> LineSegments,
-                    const coverage::CoverageSegment *WrappedSegment);
-
-  bool isMapped() const { return Mapped; }
-
-  bool hasMultipleRegions() const { return HasMultipleRegions; }
 };
 
 /// \brief A file manager that handles format-aware file creation.
@@ -236,7 +223,7 @@ protected:
   static std::string formatCount(uint64_t N);
 
   /// \brief Check if region marker output is expected for a line.
-  bool shouldRenderRegionMarkers(bool LineHasMultipleRegions) const;
+  bool shouldRenderRegionMarkers(CoverageSegmentArray Segments) const;
 
   /// \brief Check if there are any sub-views attached to this view.
   bool hasSubViews() const;

@@ -1495,8 +1495,12 @@ static DWARFDie resolveDIEReference(
   uint64_t RefOffset = *RefValue.getAsReference();
 
   if ((RefCU = getUnitForOffset(Units, RefOffset)))
-    if (const auto RefDie = RefCU->getOrigUnit().getDIEForOffset(RefOffset))
-      return RefDie;
+    if (const auto RefDie = RefCU->getOrigUnit().getDIEForOffset(RefOffset)) {
+      // In a file with broken references, an attribute might point to a NULL
+      // DIE.
+      if(!RefDie.isNULL())
+        return RefDie;
+    }
 
   Linker.reportWarning("could not find referenced DIE", &DIE);
   return DWARFDie();
@@ -1743,8 +1747,12 @@ void DwarfLinker::reportWarning(const Twine &Warning,
   if (!Options.Verbose || !DIE)
     return;
 
+  DIDumpOptions DumpOpts;
+  DumpOpts.RecurseDepth = 0;
+  DumpOpts.Verbose = Options.Verbose;
+
   errs() << "    in DIE:\n";
-  DIE->dump(errs(), 0 /* RecurseDepth */, 6 /* Indent */);
+  DIE->dump(errs(), 6 /* Indent */, DumpOpts);
 }
 
 bool DwarfLinker::createStreamer(const Triple &TheTriple,
@@ -2107,8 +2115,12 @@ unsigned DwarfLinker::shouldKeepVariableDIE(RelocationManager &RelocMgr,
       (Flags & TF_InFunctionScope))
     return Flags;
 
-  if (Options.Verbose)
-    DIE.dump(outs(), 0, 8 /* Indent */);
+  if (Options.Verbose) {
+    DIDumpOptions DumpOpts;
+    DumpOpts.RecurseDepth = 0;
+    DumpOpts.Verbose = Options.Verbose;
+    DIE.dump(outs(), 8 /* Indent */, DumpOpts);
+  }
 
   return Flags | TF_Keep;
 }
@@ -2139,8 +2151,12 @@ unsigned DwarfLinker::shouldKeepSubprogramDIE(
       !RelocMgr.hasValidRelocation(LowPcOffset, LowPcEndOffset, MyInfo))
     return Flags;
 
-  if (Options.Verbose)
-    DIE.dump(outs(), 0, 8 /* Indent */);
+  if (Options.Verbose) {
+    DIDumpOptions DumpOpts;
+    DumpOpts.RecurseDepth = 0;
+    DumpOpts.Verbose = Options.Verbose;
+    DIE.dump(outs(), 8 /* Indent */, DumpOpts);
+  }
 
   Flags |= TF_Keep;
 
@@ -3476,7 +3492,10 @@ bool DwarfLinker::link(const DebugMap &Map) {
       auto CUDie = CU->getUnitDIE(false);
       if (Options.Verbose) {
         outs() << "Input compilation unit:";
-        CUDie.dump(outs(), 0);
+        DIDumpOptions DumpOpts;
+        DumpOpts.RecurseDepth = 0;
+        DumpOpts.Verbose = Options.Verbose;
+        CUDie.dump(outs(), 0, DumpOpts);
       }
 
       if (!registerModuleReference(CUDie, *CU, ModuleMap)) {

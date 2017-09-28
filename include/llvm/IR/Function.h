@@ -30,7 +30,6 @@
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/GlobalObject.h"
 #include "llvm/IR/GlobalValue.h"
-#include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/OperandTraits.h"
 #include "llvm/IR/SymbolTableListTraits.h"
 #include "llvm/IR/Value.h"
@@ -43,6 +42,10 @@
 #include <string>
 
 namespace llvm {
+
+namespace Intrinsic {
+enum ID : unsigned;
+}
 
 class AssemblyAnnotationWriter;
 class Constant;
@@ -124,6 +127,11 @@ public:
   Function(const Function&) = delete;
   void operator=(const Function&) = delete;
   ~Function();
+
+  // This is here to help easily convert from FunctionT * (Function * or
+  // MachineFunction *) in BlockFrequencyInfoImpl to Function * by calling
+  // FunctionT->getFunction().
+  const Function *getFunction() const { return this; }
 
   static Function *Create(FunctionType *Ty, LinkageTypes Linkage,
                           const Twine &N = "", Module *M = nullptr) {

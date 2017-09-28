@@ -96,6 +96,9 @@ public:
   int getArithmeticReductionCost(unsigned Opcode, Type *Ty,
                                  bool IsPairwiseForm);
 
+  int getMinMaxReductionCost(Type *Ty, Type *CondTy, bool IsPairwiseForm,
+                             bool IsUnsigned);
+
   int getInterleavedMemoryOpCost(unsigned Opcode, Type *VecTy,
                                  unsigned Factor, ArrayRef<unsigned> Indices,
                                  unsigned Alignment, unsigned AddressSpace);
@@ -121,6 +124,7 @@ public:
   bool isLegalMaskedStore(Type *DataType);
   bool isLegalMaskedGather(Type *DataType);
   bool isLegalMaskedScatter(Type *DataType);
+  bool hasDivRemOp(Type *DataType, bool IsSigned);
   bool areInlineCompatible(const Function *Caller,
                            const Function *Callee) const;
   bool expandMemCmp(Instruction *I, unsigned &MaxLoadSize);

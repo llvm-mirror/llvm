@@ -5595,16 +5595,18 @@ SDValue DAGCombiner::visitSHL(SDNode *N) {
   }
 
   // fold (shl (add x, c1), c2) -> (add (shl x, c2), c1 << c2)
+  // fold (shl (or x, c1), c2) -> (or (shl x, c2), c1 << c2)
   // Variant of version done on multiply, except mul by a power of 2 is turned
   // into a shift.
-  if (N0.getOpcode() == ISD::ADD && N0.getNode()->hasOneUse() &&
+  if ((N0.getOpcode() == ISD::ADD || N0.getOpcode() == ISD::OR) &&
+      N0.getNode()->hasOneUse() &&
       isConstantOrConstantVector(N1, /* No Opaques */ true) &&
       isConstantOrConstantVector(N0.getOperand(1), /* No Opaques */ true)) {
     SDValue Shl0 = DAG.getNode(ISD::SHL, SDLoc(N0), VT, N0.getOperand(0), N1);
     SDValue Shl1 = DAG.getNode(ISD::SHL, SDLoc(N1), VT, N0.getOperand(1), N1);
     AddToWorklist(Shl0.getNode());
     AddToWorklist(Shl1.getNode());
-    return DAG.getNode(ISD::ADD, SDLoc(N), VT, Shl0, Shl1);
+    return DAG.getNode(N0.getOpcode(), SDLoc(N), VT, Shl0, Shl1);
   }
 
   // fold (shl (mul x, c1), c2) -> (mul x, c1 << c2)
@@ -7968,15 +7970,38 @@ SDValue DAGCombiner::visitANY_EXTEND(SDNode *N) {
   return SDValue();
 }
 
+// TODO: These transforms should work with AssertSext too.
+// Change the function name, comments, opcode references, and caller.
 SDValue DAGCombiner::visitAssertZext(SDNode *N) {
   SDValue N0 = N->getOperand(0);
   SDValue N1 = N->getOperand(1);
-  EVT EVT = cast<VTSDNode>(N1)->getVT();
+  EVT AssertVT = cast<VTSDNode>(N1)->getVT();
 
   // fold (assertzext (assertzext x, vt), vt) -> (assertzext x, vt)
   if (N0.getOpcode() == ISD::AssertZext &&
-      EVT == cast<VTSDNode>(N0.getOperand(1))->getVT())
+      AssertVT == cast<VTSDNode>(N0.getOperand(1))->getVT())
     return N0;
+
+  if (N0.getOpcode() == ISD::TRUNCATE && N0.hasOneUse() &&
+      N0.getOperand(0).getOpcode() == ISD::AssertZext) {
+    // We have an assert, truncate, assert sandwich. Make one stronger assert
+    // by asserting on the smallest asserted type to the larger source type.
+    // This eliminates the later assert:
+    // assert (trunc (assert X, i8) to iN), i1 --> trunc (assert X, i1) to iN
+    // assert (trunc (assert X, i1) to iN), i8 --> trunc (assert X, i1) to iN
+    SDValue BigA = N0.getOperand(0);
+    EVT BigA_AssertVT = cast<VTSDNode>(BigA.getOperand(1))->getVT();
+    assert(BigA_AssertVT.bitsLE(N0.getValueType()) &&
+           "Asserting zero/sign-extended bits from a type larger than the "
+           "truncated destination does not provide information");
+
+    SDLoc DL(N);
+    EVT MinAssertVT = AssertVT.bitsLT(BigA_AssertVT) ? AssertVT : BigA_AssertVT;
+    SDValue MinAssertVTVal = DAG.getValueType(MinAssertVT);
+    SDValue NewAssert = DAG.getNode(ISD::AssertZext, DL, BigA.getValueType(),
+                                    BigA.getOperand(0), MinAssertVTVal);
+    return DAG.getNode(ISD::TRUNCATE, DL, N->getValueType(0), NewAssert);
+  }
 
   return SDValue();
 }
@@ -13563,10 +13588,10 @@ SDValue DAGCombiner::visitSTORE(SDNode *N) {
                              Ptr, ST->getMemoryVT(), ST->getMemOperand());
   }
 
-  // Only perform this optimization before the types are legal, because we
-  // don't want to perform this optimization on every DAGCombine invocation.
-  if ((TLI.mergeStoresAfterLegalization()) ? Level == AfterLegalizeDAG
-                                           : !LegalTypes) {
+  // Always perform this optimization before types are legal. If the target
+  // prefers, also try this after legalization to catch stores that were created
+  // by intrinsics or other nodes.
+  if (!LegalTypes || (TLI.mergeStoresAfterLegalization())) {
     for (;;) {
       // There can be multiple store sequences on the same chain.
       // Keep trying to merge store sequences until we are unable to do so
@@ -13963,7 +13988,10 @@ SDValue DAGCombiner::visitEXTRACT_VECTOR_ELT(SDNode *N) {
     // FIXME: We should handle recursing on other vector shuffles and
     // scalar_to_vector here as well.
 
-    if (!LegalOperations) {
+    if (!LegalOperations ||
+        // FIXME: Should really be just isOperationLegalOrCustom.
+        TLI.isOperationLegal(ISD::EXTRACT_VECTOR_ELT, VT) ||
+        TLI.isOperationExpand(ISD::VECTOR_SHUFFLE, VT)) {
       EVT IndexTy = TLI.getVectorIdxTy(DAG.getDataLayout());
       return DAG.getNode(ISD::EXTRACT_VECTOR_ELT, SDLoc(N), NVT, SVInVec,
                          DAG.getConstant(OrigElt, SDLoc(SVOp), IndexTy));

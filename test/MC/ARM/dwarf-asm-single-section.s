@@ -1,5 +1,5 @@
 // RUN: llvm-mc < %s -triple=armv7-linux-gnueabi -filetype=obj -o %t -g -fdebug-compilation-dir=/tmp
-// RUN: llvm-dwarfdump %t | FileCheck -check-prefix DWARF %s
+// RUN: llvm-dwarfdump -v %t | FileCheck -check-prefix DWARF %s
 // RUN: llvm-objdump -r %t | FileCheck -check-prefix RELOC %s
 
   .section .text, "ax"
@@ -37,9 +37,8 @@ a:
 // DWARF-NEXT: 0x0000000000000004      7      0      1   0   0 is_stmt end_sequence
 
 
-// DWARF: .debug_ranges contents:
-// DWARF-NOT: {{0-9a-f}}
-// DWARF: .debug_pubnames contents:
+// DWARF-NOT: .debug_ranges contents:
+// DWARF-NOT: .debug_pubnames contents:
 
 
 // RELOC: RELOCATION RECORDS FOR [.rel.debug_info]:

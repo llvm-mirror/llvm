@@ -270,7 +270,7 @@ define <4 x float> @merge_4f32_f32_012u(float* %ptr) nounwind uwtable noinline s
 ; SSE2:       # BB#0:
 ; SSE2-NEXT:    movss {{.*#+}} xmm1 = mem[0],zero,zero,zero
 ; SSE2-NEXT:    movsd {{.*#+}} xmm0 = mem[0],zero
-; SSE2-NEXT:    unpcklpd {{.*#+}} xmm0 = xmm0[0],xmm1[0]
+; SSE2-NEXT:    movlhps {{.*#+}} xmm0 = xmm0[0],xmm1[0]
 ; SSE2-NEXT:    retq
 ;
 ; SSE41-LABEL: merge_4f32_f32_012u:
@@ -319,7 +319,7 @@ define <4 x float> @merge_4f32_f32_019u(float* %ptr) nounwind uwtable noinline s
 ; SSE2:       # BB#0:
 ; SSE2-NEXT:    movss {{.*#+}} xmm1 = mem[0],zero,zero,zero
 ; SSE2-NEXT:    movsd {{.*#+}} xmm0 = mem[0],zero
-; SSE2-NEXT:    unpcklpd {{.*#+}} xmm0 = xmm0[0],xmm1[0]
+; SSE2-NEXT:    movlhps {{.*#+}} xmm0 = xmm0[0],xmm1[0]
 ; SSE2-NEXT:    retq
 ;
 ; SSE41-LABEL: merge_4f32_f32_019u:
@@ -544,8 +544,8 @@ define <8 x i16> @merge_8i16_i16_23u567u9(i16* %ptr) nounwind uwtable noinline s
 ; X32-SSE1-NEXT:    movzwl 18(%ecx), %ecx
 ; X32-SSE1-NEXT:    movw %di, 10(%eax)
 ; X32-SSE1-NEXT:    movw %cx, 14(%eax)
-; X32-SSE1-NEXT:    movl %edx, (%eax)
 ; X32-SSE1-NEXT:    movl %esi, 6(%eax)
+; X32-SSE1-NEXT:    movl %edx, (%eax)
 ; X32-SSE1-NEXT:    popl %esi
 ; X32-SSE1-NEXT:    popl %edi
 ; X32-SSE1-NEXT:    retl $4
@@ -626,8 +626,8 @@ define <8 x i16> @merge_8i16_i16_45u7zzzz(i16* %ptr) nounwind uwtable noinline s
 ; X32-SSE1-NEXT:    movl {{[0-9]+}}(%esp), %ecx
 ; X32-SSE1-NEXT:    movl 8(%ecx), %edx
 ; X32-SSE1-NEXT:    movzwl 14(%ecx), %ecx
-; X32-SSE1-NEXT:    movl %edx, (%eax)
 ; X32-SSE1-NEXT:    movw %cx, 6(%eax)
+; X32-SSE1-NEXT:    movl %edx, (%eax)
 ; X32-SSE1-NEXT:    movl $0, 12(%eax)
 ; X32-SSE1-NEXT:    movl $0, 8(%eax)
 ; X32-SSE1-NEXT:    retl $4
@@ -698,8 +698,8 @@ define <16 x i8> @merge_16i8_i8_01u3456789ABCDuF(i8* %ptr) nounwind uwtable noin
 ; X32-SSE1-NEXT:    movb %cl, 15(%eax)
 ; X32-SSE1-NEXT:    movw %bx, 11(%eax)
 ; X32-SSE1-NEXT:    movl %edi, 7(%eax)
-; X32-SSE1-NEXT:    movw %bp, (%eax)
 ; X32-SSE1-NEXT:    movl %esi, 3(%eax)
+; X32-SSE1-NEXT:    movw %bp, (%eax)
 ; X32-SSE1-NEXT:    popl %esi
 ; X32-SSE1-NEXT:    popl %edi
 ; X32-SSE1-NEXT:    popl %ebx
@@ -773,8 +773,8 @@ define <16 x i8> @merge_16i8_i8_01u3uuzzuuuuuzzz(i8* %ptr) nounwind uwtable noin
 ; X32-SSE1-NEXT:    movl {{[0-9]+}}(%esp), %ecx
 ; X32-SSE1-NEXT:    movzwl (%ecx), %edx
 ; X32-SSE1-NEXT:    movb 3(%ecx), %cl
-; X32-SSE1-NEXT:    movw %dx, (%eax)
 ; X32-SSE1-NEXT:    movb %cl, 3(%eax)
+; X32-SSE1-NEXT:    movw %dx, (%eax)
 ; X32-SSE1-NEXT:    movb $0, 15(%eax)
 ; X32-SSE1-NEXT:    movw $0, 13(%eax)
 ; X32-SSE1-NEXT:    movw $0, 6(%eax)
@@ -902,16 +902,16 @@ define void @merge_4i32_i32_combine(<4 x i32>* %dst, i32* %src) {
 define <2 x i64> @merge_2i64_i64_12_volatile(i64* %ptr) nounwind uwtable noinline ssp {
 ; SSE-LABEL: merge_2i64_i64_12_volatile:
 ; SSE:       # BB#0:
-; SSE-NEXT:    movq {{.*#+}} xmm0 = mem[0],zero
-; SSE-NEXT:    movq {{.*#+}} xmm1 = mem[0],zero
-; SSE-NEXT:    punpcklqdq {{.*#+}} xmm0 = xmm0[0],xmm1[0]
+; SSE-NEXT:    movsd {{.*#+}} xmm0 = mem[0],zero
+; SSE-NEXT:    movsd {{.*#+}} xmm1 = mem[0],zero
+; SSE-NEXT:    movlhps {{.*#+}} xmm0 = xmm0[0],xmm1[0]
 ; SSE-NEXT:    retq
 ;
 ; AVX-LABEL: merge_2i64_i64_12_volatile:
 ; AVX:       # BB#0:
-; AVX-NEXT:    vmovq {{.*#+}} xmm0 = mem[0],zero
-; AVX-NEXT:    vmovq {{.*#+}} xmm1 = mem[0],zero
-; AVX-NEXT:    vpunpcklqdq {{.*#+}} xmm0 = xmm0[0],xmm1[0]
+; AVX-NEXT:    vmovsd {{.*#+}} xmm0 = mem[0],zero
+; AVX-NEXT:    vmovsd {{.*#+}} xmm1 = mem[0],zero
+; AVX-NEXT:    vmovlhps {{.*#+}} xmm0 = xmm0[0],xmm1[0]
 ; AVX-NEXT:    retq
 ;
 ; X32-SSE1-LABEL: merge_2i64_i64_12_volatile:
@@ -964,7 +964,7 @@ define <4 x float> @merge_4f32_f32_2345_volatile(float* %ptr) nounwind uwtable n
 ; SSE2-NEXT:    movss {{.*#+}} xmm1 = mem[0],zero,zero,zero
 ; SSE2-NEXT:    unpcklps {{.*#+}} xmm0 = xmm0[0],xmm1[0],xmm0[1],xmm1[1]
 ; SSE2-NEXT:    movsd {{.*#+}} xmm1 = mem[0],zero
-; SSE2-NEXT:    unpcklpd {{.*#+}} xmm0 = xmm0[0],xmm1[0]
+; SSE2-NEXT:    movlhps {{.*#+}} xmm0 = xmm0[0],xmm1[0]
 ; SSE2-NEXT:    retq
 ;
 ; SSE41-LABEL: merge_4f32_f32_2345_volatile:

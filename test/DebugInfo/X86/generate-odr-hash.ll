@@ -1,11 +1,11 @@
 ; REQUIRES: object-emission
 
 ; RUN: llc < %s -o %t -filetype=obj -O0 -generate-type-units -mtriple=x86_64-unknown-linux-gnu
-; RUN: llvm-dwarfdump %t | FileCheck --check-prefix=CHECK --check-prefix=SINGLE %s
+; RUN: llvm-dwarfdump -v %t | FileCheck --check-prefix=CHECK --check-prefix=SINGLE %s
 ; RUN: llvm-readobj -s -t %t | FileCheck --check-prefix=OBJ_SINGLE %s
 
 ; RUN: llc < %s -split-dwarf-file=foo.dwo -o %t -filetype=obj -O0 -generate-type-units -mtriple=x86_64-unknown-linux-gnu
-; RUN: llvm-dwarfdump %t | FileCheck --check-prefix=CHECK --check-prefix=FISSION %s
+; RUN: llvm-dwarfdump -v %t | FileCheck --check-prefix=CHECK --check-prefix=FISSION %s
 ; RUN: llvm-readobj -s -t %t | FileCheck --check-prefix=OBJ_FISSION %s
 
 ; Generated from bar.cpp:
@@ -74,8 +74,7 @@
 ; CHECK-NEXT: DW_AT_signature {{.*}} (0xfd756cee88f8a118)
 
 ; SINGLE-LABEL: .debug_types contents:
-; FISSION-NOT: .debug_types contents:
-; FISSION-LABEL: .debug_types.dwo contents:
+; FISSION: .debug_types.dwo contents:
 
 ; Check that we generate a hash for bar and the value.
 ; CHECK-NOT: type_signature
@@ -127,7 +126,8 @@
 ; CHECK: file_names{{.*}} bar.cpp
 ; CHECK-NOT: file_names[
 
-; CHECK-LABEL: .debug_line.dwo contents:
+; FISSION: .debug_line.dwo contents:
+; CHECK-NOT: .debug_line.dwo contents:
 ; FISSION: Line table prologue
 ; FISSION: opcode_base: 1
 ; FISSION-NOT: standard_opcode_lengths

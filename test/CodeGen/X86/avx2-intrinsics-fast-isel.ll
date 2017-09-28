@@ -15,8 +15,10 @@ define <4 x i64> @test_mm256_abs_epi8(<4 x i64> %a0) {
 ; X64-NEXT:    vpabsb %ymm0, %ymm0
 ; X64-NEXT:    retq
   %arg = bitcast <4 x i64> %a0 to <32 x i8>
-  %call = call <32 x i8> @llvm.x86.avx2.pabs.b(<32 x i8> %arg)
-  %res = bitcast <32 x i8> %call to <4 x i64>
+  %sub = sub <32 x i8> zeroinitializer, %arg
+  %cmp = icmp sgt <32 x i8> %arg, zeroinitializer
+  %sel = select <32 x i1> %cmp, <32 x i8> %arg, <32 x i8> %sub
+  %res = bitcast <32 x i8> %sel to <4 x i64>
   ret <4 x i64> %res
 }
 declare <32 x i8> @llvm.x86.avx2.pabs.b(<32 x i8>) nounwind readnone
@@ -32,8 +34,10 @@ define <4 x i64> @test_mm256_abs_epi16(<4 x i64> %a0) {
 ; X64-NEXT:    vpabsw %ymm0, %ymm0
 ; X64-NEXT:    retq
   %arg = bitcast <4 x i64> %a0 to <16 x i16>
-  %call = call <16 x i16> @llvm.x86.avx2.pabs.w(<16 x i16> %arg)
-  %res = bitcast <16 x i16> %call to <4 x i64>
+  %sub = sub <16 x i16> zeroinitializer, %arg
+  %cmp = icmp sgt <16 x i16> %arg, zeroinitializer
+  %sel = select <16 x i1> %cmp, <16 x i16> %arg, <16 x i16> %sub
+  %res = bitcast <16 x i16> %sel to <4 x i64>
   ret <4 x i64> %res
 }
 declare <16 x i16> @llvm.x86.avx2.pabs.w(<16 x i16>) nounwind readnone
@@ -49,8 +53,10 @@ define <4 x i64> @test_mm256_abs_epi32(<4 x i64> %a0) {
 ; X64-NEXT:    vpabsd %ymm0, %ymm0
 ; X64-NEXT:    retq
   %arg = bitcast <4 x i64> %a0 to <8 x i32>
-  %call = call <8 x i32> @llvm.x86.avx2.pabs.d(<8 x i32> %arg)
-  %res = bitcast <8 x i32> %call to <4 x i64>
+  %sub = sub <8 x i32> zeroinitializer, %arg
+  %cmp = icmp sgt <8 x i32> %arg, zeroinitializer
+  %sel = select <8 x i1> %cmp, <8 x i32> %arg, <8 x i32> %sub
+  %res = bitcast <8 x i32> %sel to <4 x i64>
   ret <4 x i64> %res
 }
 declare <8 x i32> @llvm.x86.avx2.pabs.d(<8 x i32>) nounwind readnone
@@ -259,7 +265,7 @@ define <4 x i64> @test_mm256_andnot_si256(<4 x i64> %a0, <4 x i64> %a1) nounwind
   ret <4 x i64> %res
 }
 
-define <4 x i64> @test_mm256_avg_epu8(<4 x i64> %a0, <4 x i64> %a1) {
+define <4 x i64> @test_mm256_avg_epu8(<4 x i64> %a0, <4 x i64> %a1) nounwind {
 ; X32-LABEL: test_mm256_avg_epu8:
 ; X32:       # BB#0:
 ; X32-NEXT:    vpavgb %ymm1, %ymm0, %ymm0
@@ -271,13 +277,17 @@ define <4 x i64> @test_mm256_avg_epu8(<4 x i64> %a0, <4 x i64> %a1) {
 ; X64-NEXT:    retq
   %arg0 = bitcast <4 x i64> %a0 to <32 x i8>
   %arg1 = bitcast <4 x i64> %a1 to <32 x i8>
-  %res = call <32 x i8> @llvm.x86.avx2.pavg.b(<32 x i8> %arg0, <32 x i8> %arg1)
+  %zext0 = zext <32 x i8> %arg0 to <32 x i16>
+  %zext1 = zext <32 x i8> %arg1 to <32 x i16>
+  %add = add <32 x i16> %zext0, %zext1
+  %add1 = add <32 x i16> %add, <i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1>
+  %lshr = lshr <32 x i16> %add1, <i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1>
+  %res = trunc <32 x i16> %lshr to <32 x i8>
   %bc = bitcast <32 x i8> %res to <4 x i64>
   ret <4 x i64> %bc
 }
-declare <32 x i8> @llvm.x86.avx2.pavg.b(<32 x i8>, <32 x i8>) nounwind readnone
 
-define <4 x i64> @test_mm256_avg_epu16(<4 x i64> %a0, <4 x i64> %a1) {
+define <4 x i64> @test_mm256_avg_epu16(<4 x i64> %a0, <4 x i64> %a1) nounwind {
 ; X32-LABEL: test_mm256_avg_epu16:
 ; X32:       # BB#0:
 ; X32-NEXT:    vpavgw %ymm1, %ymm0, %ymm0
@@ -289,11 +299,15 @@ define <4 x i64> @test_mm256_avg_epu16(<4 x i64> %a0, <4 x i64> %a1) {
 ; X64-NEXT:    retq
   %arg0 = bitcast <4 x i64> %a0 to <16 x i16>
   %arg1 = bitcast <4 x i64> %a1 to <16 x i16>
-  %res = call <16 x i16> @llvm.x86.avx2.pavg.w(<16 x i16> %arg0, <16 x i16> %arg1)
+  %zext0 = zext <16 x i16> %arg0 to <16 x i32>
+  %zext1 = zext <16 x i16> %arg1 to <16 x i32>
+  %add = add <16 x i32> %zext0, %zext1
+  %add1 = add <16 x i32> %add, <i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1>
+  %lshr = lshr <16 x i32> %add1, <i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1>
+  %res = trunc <16 x i32> %lshr to <16 x i16>
   %bc = bitcast <16 x i16> %res to <4 x i64>
   ret <4 x i64> %bc
 }
-declare <16 x i16> @llvm.x86.avx2.pavg.w(<16 x i16>, <16 x i16>) nounwind readnone
 
 define <4 x i64> @test_mm256_blend_epi16(<4 x i64> %a0, <4 x i64> %a1) {
 ; X32-LABEL: test_mm256_blend_epi16:
@@ -2435,7 +2449,7 @@ define <4 x i64> @test_mm256_permute2x128_si256(<4 x i64> %a0, <4 x i64> %a1) {
 ; X64:       # BB#0:
 ; X64-NEXT:    vperm2f128 {{.*#+}} ymm0 = ymm0[2,3],ymm1[2,3]
 ; X64-NEXT:    retq
-  %res = call <4 x i64> @llvm.x86.avx2.vperm2i128(<4 x i64> %a0, <4 x i64> %a1, i8 49)
+  %res = shufflevector <4 x i64> %a0, <4 x i64> %a1, <4 x i32> <i32 2, i32 3, i32 6, i32 7>
   ret <4 x i64> %res
 }
 declare <4 x i64> @llvm.x86.avx2.vperm2i128(<4 x i64>, <4 x i64>, i8) nounwind readonly
@@ -2443,12 +2457,12 @@ declare <4 x i64> @llvm.x86.avx2.vperm2i128(<4 x i64>, <4 x i64>, i8) nounwind r
 define <4 x i64> @test_mm256_permute4x64_epi64(<4 x i64> %a0) {
 ; X32-LABEL: test_mm256_permute4x64_epi64:
 ; X32:       # BB#0:
-; X32-NEXT:    vpermq {{.*#+}} ymm0 = ymm0[3,0,2,0]
+; X32-NEXT:    vpermpd {{.*#+}} ymm0 = ymm0[3,0,2,0]
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test_mm256_permute4x64_epi64:
 ; X64:       # BB#0:
-; X64-NEXT:    vpermq {{.*#+}} ymm0 = ymm0[3,0,2,0]
+; X64-NEXT:    vpermpd {{.*#+}} ymm0 = ymm0[3,0,2,0]
 ; X64-NEXT:    retq
   %res = shufflevector <4 x i64> %a0, <4 x i64> undef, <4 x i32> <i32 3, i32 0, i32 2, i32 0>
   ret <4 x i64> %res
@@ -2471,12 +2485,12 @@ define <4 x double> @test_mm256_permute4x64_pd(<4 x double> %a0) {
 define <4 x i64> @test_mm256_permutevar8x32_epi32(<4 x i64> %a0, <4 x i64> %a1) {
 ; X32-LABEL: test_mm256_permutevar8x32_epi32:
 ; X32:       # BB#0:
-; X32-NEXT:    vpermd %ymm0, %ymm1, %ymm0
+; X32-NEXT:    vpermps %ymm0, %ymm1, %ymm0
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test_mm256_permutevar8x32_epi32:
 ; X64:       # BB#0:
-; X64-NEXT:    vpermd %ymm0, %ymm1, %ymm0
+; X64-NEXT:    vpermps %ymm0, %ymm1, %ymm0
 ; X64-NEXT:    retq
   %arg0 = bitcast <4 x i64> %a0 to <8 x i32>
   %arg1 = bitcast <4 x i64> %a1 to <8 x i32>
@@ -2522,12 +2536,12 @@ declare <4 x i64> @llvm.x86.avx2.psad.bw(<32 x i8>, <32 x i8>) nounwind readnone
 define <4 x i64> @test_mm256_shuffle_epi32(<4 x i64> %a0) {
 ; X32-LABEL: test_mm256_shuffle_epi32:
 ; X32:       # BB#0:
-; X32-NEXT:    vpshufd {{.*#+}} ymm0 = ymm0[3,3,0,0,7,7,4,4]
+; X32-NEXT:    vpermilps {{.*#+}} ymm0 = ymm0[3,3,0,0,7,7,4,4]
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test_mm256_shuffle_epi32:
 ; X64:       # BB#0:
-; X64-NEXT:    vpshufd {{.*#+}} ymm0 = ymm0[3,3,0,0,7,7,4,4]
+; X64-NEXT:    vpermilps {{.*#+}} ymm0 = ymm0[3,3,0,0,7,7,4,4]
 ; X64-NEXT:    retq
   %arg0 = bitcast <4 x i64> %a0 to <8 x i32>
   %shuf = shufflevector <8 x i32> %arg0, <8 x i32> undef, <8 x i32> <i32 3, i32 3, i32 0, i32 0, i32 7, i32 7, i32 4, i32 4>
@@ -3300,12 +3314,12 @@ define <4 x i64> @test_mm256_unpackhi_epi16(<4 x i64> %a0, <4 x i64> %a1) nounwi
 define <4 x i64> @test_mm256_unpackhi_epi32(<4 x i64> %a0, <4 x i64> %a1) nounwind {
 ; X32-LABEL: test_mm256_unpackhi_epi32:
 ; X32:       # BB#0:
-; X32-NEXT:    vpunpckhdq {{.*#+}} ymm0 = ymm0[2],ymm1[2],ymm0[3],ymm1[3],ymm0[6],ymm1[6],ymm0[7],ymm1[7]
+; X32-NEXT:    vunpckhps {{.*#+}} ymm0 = ymm0[2],ymm1[2],ymm0[3],ymm1[3],ymm0[6],ymm1[6],ymm0[7],ymm1[7]
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test_mm256_unpackhi_epi32:
 ; X64:       # BB#0:
-; X64-NEXT:    vpunpckhdq {{.*#+}} ymm0 = ymm0[2],ymm1[2],ymm0[3],ymm1[3],ymm0[6],ymm1[6],ymm0[7],ymm1[7]
+; X64-NEXT:    vunpckhps {{.*#+}} ymm0 = ymm0[2],ymm1[2],ymm0[3],ymm1[3],ymm0[6],ymm1[6],ymm0[7],ymm1[7]
 ; X64-NEXT:    retq
   %arg0 = bitcast <4 x i64> %a0 to <8 x i32>
   %arg1 = bitcast <4 x i64> %a1 to <8 x i32>
@@ -3317,12 +3331,12 @@ define <4 x i64> @test_mm256_unpackhi_epi32(<4 x i64> %a0, <4 x i64> %a1) nounwi
 define <4 x i64> @test_mm256_unpackhi_epi64(<4 x i64> %a0, <4 x i64> %a1) nounwind {
 ; X32-LABEL: test_mm256_unpackhi_epi64:
 ; X32:       # BB#0:
-; X32-NEXT:    vpunpckhqdq {{.*#+}} ymm0 = ymm0[1],ymm1[1],ymm0[3],ymm1[3]
+; X32-NEXT:    vunpckhpd {{.*#+}} ymm0 = ymm0[1],ymm1[1],ymm0[3],ymm1[3]
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test_mm256_unpackhi_epi64:
 ; X64:       # BB#0:
-; X64-NEXT:    vpunpckhqdq {{.*#+}} ymm0 = ymm0[1],ymm1[1],ymm0[3],ymm1[3]
+; X64-NEXT:    vunpckhpd {{.*#+}} ymm0 = ymm0[1],ymm1[1],ymm0[3],ymm1[3]
 ; X64-NEXT:    retq
   %res = shufflevector <4 x i64> %a0, <4 x i64> %a1, <4 x i32> <i32 1, i32 5, i32 3, i32 7>
   ret <4 x i64> %res
@@ -3365,12 +3379,12 @@ define <4 x i64> @test_mm256_unpacklo_epi16(<4 x i64> %a0, <4 x i64> %a1) nounwi
 define <4 x i64> @test_mm256_unpacklo_epi32(<4 x i64> %a0, <4 x i64> %a1) nounwind {
 ; X32-LABEL: test_mm256_unpacklo_epi32:
 ; X32:       # BB#0:
-; X32-NEXT:    vpunpckldq {{.*#+}} ymm0 = ymm0[0],ymm1[0],ymm0[1],ymm1[1],ymm0[4],ymm1[4],ymm0[5],ymm1[5]
+; X32-NEXT:    vunpcklps {{.*#+}} ymm0 = ymm0[0],ymm1[0],ymm0[1],ymm1[1],ymm0[4],ymm1[4],ymm0[5],ymm1[5]
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test_mm256_unpacklo_epi32:
 ; X64:       # BB#0:
-; X64-NEXT:    vpunpckldq {{.*#+}} ymm0 = ymm0[0],ymm1[0],ymm0[1],ymm1[1],ymm0[4],ymm1[4],ymm0[5],ymm1[5]
+; X64-NEXT:    vunpcklps {{.*#+}} ymm0 = ymm0[0],ymm1[0],ymm0[1],ymm1[1],ymm0[4],ymm1[4],ymm0[5],ymm1[5]
 ; X64-NEXT:    retq
   %arg0 = bitcast <4 x i64> %a0 to <8 x i32>
   %arg1 = bitcast <4 x i64> %a1 to <8 x i32>
@@ -3382,12 +3396,12 @@ define <4 x i64> @test_mm256_unpacklo_epi32(<4 x i64> %a0, <4 x i64> %a1) nounwi
 define <4 x i64> @test_mm256_unpacklo_epi64(<4 x i64> %a0, <4 x i64> %a1) nounwind {
 ; X32-LABEL: test_mm256_unpacklo_epi64:
 ; X32:       # BB#0:
-; X32-NEXT:    vpunpcklqdq {{.*#+}} ymm0 = ymm0[0],ymm1[0],ymm0[2],ymm1[2]
+; X32-NEXT:    vunpcklpd {{.*#+}} ymm0 = ymm0[0],ymm1[0],ymm0[2],ymm1[2]
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test_mm256_unpacklo_epi64:
 ; X64:       # BB#0:
-; X64-NEXT:    vpunpcklqdq {{.*#+}} ymm0 = ymm0[0],ymm1[0],ymm0[2],ymm1[2]
+; X64-NEXT:    vunpcklpd {{.*#+}} ymm0 = ymm0[0],ymm1[0],ymm0[2],ymm1[2]
 ; X64-NEXT:    retq
   %res = shufflevector <4 x i64> %a0, <4 x i64> %a1, <4 x i32> <i32 0, i32 4, i32 2, i32 6>
   ret <4 x i64> %res

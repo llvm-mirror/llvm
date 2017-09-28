@@ -21,6 +21,7 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/KnownBits.h"
 #include <cctype>
@@ -5224,7 +5225,8 @@ SDValue SystemZTargetLowering::combineSTORE(
   }
   // Combine STORE (BSWAP) into STRVH/STRV/STRVG
   // See comment in combineBSWAP about volatile accesses.
-  if (!SN->isVolatile() &&
+  if (!SN->isTruncatingStore() &&
+      !SN->isVolatile() &&
       Op1.getOpcode() == ISD::BSWAP &&
       Op1.getNode()->hasOneUse() &&
       (Op1.getValueType() == MVT::i16 ||

@@ -266,7 +266,7 @@ public:
   StringRef ValueStr; // String describing what the value of this option is
   OptionCategory *Category; // The Category this option belongs to
   SmallPtrSet<SubCommand *, 4> Subs; // The subcommands this option belongs to.
-  bool FullyInitialized = false; // Has addArguemnt been called?
+  bool FullyInitialized = false; // Has addArgument been called?
 
   inline enum NumOccurrencesFlag getNumOccurrencesFlag() const {
     return (enum NumOccurrencesFlag)Occurrences;
@@ -1761,8 +1761,6 @@ void PrintVersionMessage();
 
 /// This function just prints the help message, exactly the same way as if the
 /// -help or -help-hidden option had been given on the command line.
-///
-/// NOTE: THIS FUNCTION TERMINATES THE PROGRAM!
 ///
 /// \param Hidden if true will print hidden options
 /// \param Categorized if true print options in categories

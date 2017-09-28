@@ -56,7 +56,19 @@ public:
   uint32_t ElementIndex;
 
   bool isWeak() const {
-    return Flags & wasm::WASM_SYMBOL_FLAG_WEAK;
+    return getBinding() == wasm::WASM_SYMBOL_BINDING_WEAK;
+  }
+
+  bool isGlobal() const {
+    return getBinding() == wasm::WASM_SYMBOL_BINDING_GLOBAL;
+  }
+
+  bool isLocal() const {
+    return getBinding() == wasm::WASM_SYMBOL_BINDING_LOCAL;
+  }
+
+  unsigned getBinding() const {
+    return Flags & wasm::WASM_SYMBOL_BINDING_MASK;
   }
 
   void print(raw_ostream &Out) const {
@@ -132,6 +144,7 @@ public:
   Expected<StringRef> getSymbolName(DataRefImpl Symb) const override;
 
   Expected<uint64_t> getSymbolAddress(DataRefImpl Symb) const override;
+  uint64_t getWasmSymbolValue(const WasmSymbol& Sym) const;
   uint64_t getSymbolValueImpl(DataRefImpl Symb) const override;
   uint32_t getSymbolAlignment(DataRefImpl Symb) const override;
   uint64_t getCommonSymbolSizeImpl(DataRefImpl Symb) const override;
@@ -204,6 +217,8 @@ private:
   Error parseRelocSection(StringRef Name, const uint8_t *Ptr,
                           const uint8_t *End);
 
+  void populateSymbolTable();
+
   wasm::WasmObjectHeader Header;
   std::vector<WasmSection> Sections;
   std::vector<wasm::WasmSignature> Signatures;
@@ -223,6 +238,8 @@ private:
   wasm::WasmLinkingData LinkingData;
   uint32_t NumImportedGlobals = 0;
   uint32_t NumImportedFunctions = 0;
+  uint32_t ImportSection = 0;
+  uint32_t ExportSection = 0;
 
   StringMap<uint32_t> SymbolMap;
 };

@@ -1,5 +1,5 @@
 ; RUN: llc -split-dwarf-file=foo.dwo -O0 %s -mtriple=x86_64-unknown-linux-gnu -filetype=obj -o %t
-; RUN: llvm-dwarfdump %t | FileCheck %s
+; RUN: llvm-dwarfdump -v %t | FileCheck %s
 ; RUN: llvm-objdump -h %t | FileCheck --check-prefix=HDR %s
 
 ; CHECK: .debug_info contents:
@@ -17,7 +17,7 @@
 ; CHECK: DW_AT_location [DW_FORM_sec_offset]   ([[B:0x[0-9a-z]*]]
 ; CHECK: DW_AT_location [DW_FORM_sec_offset]   ([[D:0x[0-9a-z]*]]
 ; CHECK: DW_AT_ranges [DW_FORM_sec_offset]   (0x00000000
-; CHECK: .debug_loc contents:
+; CHECK-NOT: .debug_loc contents:
 ; CHECK-NOT: Beginning address offset
 ; CHECK: .debug_loc.dwo contents:
 

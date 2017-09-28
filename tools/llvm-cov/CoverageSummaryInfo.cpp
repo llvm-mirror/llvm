@@ -17,8 +17,53 @@
 using namespace llvm;
 using namespace coverage;
 
+LineCoverageStats::LineCoverageStats(
+    ArrayRef<const coverage::CoverageSegment *> LineSegments,
+    const coverage::CoverageSegment *WrappedSegment) {
+  // Find the minimum number of regions which start in this line.
+  unsigned MinRegionCount = 0;
+  auto isStartOfRegion = [](const coverage::CoverageSegment *S) {
+    return !S->IsGapRegion && S->HasCount && S->IsRegionEntry;
+  };
+  for (unsigned I = 0; I < LineSegments.size() && MinRegionCount < 2; ++I)
+    if (isStartOfRegion(LineSegments[I]))
+      ++MinRegionCount;
+
+  bool StartOfSkippedRegion = !LineSegments.empty() &&
+                              !LineSegments.front()->HasCount &&
+                              LineSegments.front()->IsRegionEntry;
+
+  ExecutionCount = 0;
+  HasMultipleRegions = MinRegionCount > 1;
+  Mapped =
+      !StartOfSkippedRegion &&
+      ((WrappedSegment && WrappedSegment->HasCount) || (MinRegionCount > 0));
+
+  if (!Mapped)
+    return;
+
+  // Pick the max count among regions which start and end on this line, to
+  // avoid erroneously using the wrapped count, and to avoid picking region
+  // counts which come from deferred regions.
+  if (LineSegments.size() > 1) {
+    for (unsigned I = 0; I < LineSegments.size() - 1; ++I) {
+      if (!LineSegments[I]->IsGapRegion)
+        ExecutionCount = std::max(ExecutionCount, LineSegments[I]->Count);
+    }
+    return;
+  }
+
+  // If a non-gap region starts here, use its count. Otherwise use the wrapped
+  // count.
+  if (MinRegionCount == 1)
+    ExecutionCount = LineSegments[0]->Count;
+  else
+    ExecutionCount = WrappedSegment->Count;
+}
+
 FunctionCoverageSummary
-FunctionCoverageSummary::get(const coverage::FunctionRecord &Function) {
+FunctionCoverageSummary::get(const CoverageMapping &CM,
+                             const coverage::FunctionRecord &Function) {
   // Compute the region coverage.
   size_t NumCodeRegions = 0, CoveredRegions = 0;
   for (auto &CR : Function.CountedRegions) {
@@ -31,39 +76,30 @@ FunctionCoverageSummary::get(const coverage::FunctionRecord &Function) {
 
   // Compute the line coverage
   size_t NumLines = 0, CoveredLines = 0;
-  for (unsigned FileID = 0, E = Function.Filenames.size(); FileID < E;
-       ++FileID) {
-    // Find the line start and end of the function's source code
-    // in that particular file
-    unsigned LineStart = std::numeric_limits<unsigned>::max();
-    unsigned LineEnd = 0;
-    for (auto &CR : Function.CountedRegions) {
-      if (CR.FileID != FileID)
-        continue;
-      LineStart = std::min(LineStart, CR.LineStart);
-      LineEnd = std::max(LineEnd, CR.LineEnd);
-    }
-    unsigned LineCount = LineEnd - LineStart + 1;
+  CoverageData CD = CM.getCoverageForFunction(Function);
+  auto NextSegment = CD.begin();
+  auto EndSegment = CD.end();
+  const coverage::CoverageSegment *WrappedSegment = nullptr;
+  SmallVector<const coverage::CoverageSegment *, 4> LineSegments;
+  unsigned Line = NextSegment->Line;
+  while (NextSegment != EndSegment) {
+    // Gather the segments on this line and the wrapped segment.
+    if (LineSegments.size())
+      WrappedSegment = LineSegments.back();
+    LineSegments.clear();
+    while (NextSegment != EndSegment && NextSegment->Line == Line)
+      LineSegments.push_back(&*NextSegment++);
 
-    // Get counters
-    llvm::SmallVector<uint64_t, 16> ExecutionCounts;
-    ExecutionCounts.resize(LineCount, 0);
-    for (auto &CR : Function.CountedRegions) {
-      if (CR.FileID != FileID)
-        continue;
-      // Ignore the lines that were skipped by the preprocessor.
-      auto ExecutionCount = CR.ExecutionCount;
-      if (CR.Kind == CounterMappingRegion::SkippedRegion) {
-        LineCount -= CR.LineEnd - CR.LineStart + 1;
-        ExecutionCount = 1;
-      }
-      for (unsigned I = CR.LineStart; I <= CR.LineEnd; ++I)
-        ExecutionCounts[I - LineStart] = ExecutionCount;
+    LineCoverageStats LCS{LineSegments, WrappedSegment};
+    if (LCS.isMapped()) {
+      ++NumLines;
+      if (LCS.ExecutionCount)
+        ++CoveredLines;
     }
-    CoveredLines += LineCount - std::count(ExecutionCounts.begin(),
-                                           ExecutionCounts.end(), 0);
-    NumLines += LineCount;
+
+    ++Line;
   }
+
   return FunctionCoverageSummary(
       Function.Name, Function.ExecutionCount,
       RegionCoverageInfo(CoveredRegions, NumCodeRegions),
@@ -82,19 +118,13 @@ FunctionCoverageSummary::get(const InstantiationGroup &Group,
        << Group.getColumn();
   }
 
-  FunctionCoverageSummary Summary(std::move(Name));
+  FunctionCoverageSummary Summary(Name);
   Summary.ExecutionCount = Group.getTotalExecutionCount();
   Summary.RegionCoverage = Summaries[0].RegionCoverage;
   Summary.LineCoverage = Summaries[0].LineCoverage;
   for (const auto &FCS : Summaries.drop_front()) {
-    Summary.RegionCoverage.Covered =
-        std::max(FCS.RegionCoverage.Covered, Summary.RegionCoverage.Covered);
-    Summary.RegionCoverage.NotCovered = std::min(
-        FCS.RegionCoverage.NotCovered, Summary.RegionCoverage.NotCovered);
-    Summary.LineCoverage.Covered =
-        std::max(FCS.LineCoverage.Covered, Summary.LineCoverage.Covered);
-    Summary.LineCoverage.NotCovered =
-        std::min(FCS.LineCoverage.NotCovered, Summary.LineCoverage.NotCovered);
+    Summary.RegionCoverage.merge(FCS.RegionCoverage);
+    Summary.LineCoverage.merge(FCS.LineCoverage);
   }
   return Summary;
 }

@@ -185,7 +185,10 @@ private:
 
 protected:
   GlobalValueSummary(SummaryKind K, GVFlags Flags, std::vector<ValueInfo> Refs)
-      : Kind(K), Flags(Flags), RefEdgeList(std::move(Refs)) {}
+      : Kind(K), Flags(Flags), RefEdgeList(std::move(Refs)) {
+    assert((K != AliasKind || Refs.empty()) &&
+           "Expect no references for AliasSummary");
+  }
 
 public:
   virtual ~GlobalValueSummary() = default;
@@ -232,6 +235,10 @@ public:
   /// Return the list of values referenced by this global value definition.
   ArrayRef<ValueInfo> refs() const { return RefEdgeList; }
 
+  /// If this is an alias summary, returns the summary of the aliased object (a
+  /// global variable or function), otherwise returns itself.
+  GlobalValueSummary *getBaseObject();
+
   friend class ModuleSummaryIndex;
   friend void computeDeadSymbols(class ModuleSummaryIndex &,
                                  const DenseSet<GlobalValue::GUID> &);
@@ -242,8 +249,8 @@ class AliasSummary : public GlobalValueSummary {
   GlobalValueSummary *AliaseeSummary;
 
 public:
-  AliasSummary(GVFlags Flags, std::vector<ValueInfo> Refs)
-      : GlobalValueSummary(AliasKind, Flags, std::move(Refs)) {}
+  AliasSummary(GVFlags Flags)
+      : GlobalValueSummary(AliasKind, Flags, ArrayRef<ValueInfo>{}) {}
 
   /// Check if this is an alias summary.
   static bool classof(const GlobalValueSummary *GVS) {
@@ -263,6 +270,12 @@ public:
   }
 };
 
+inline GlobalValueSummary *GlobalValueSummary::getBaseObject() {
+  if (auto *AS = dyn_cast<AliasSummary>(this))
+    return &AS->getAliasee();
+  return this;
+}
+
 /// \brief Function summary information to aid decisions and implementation of
 /// importing.
 class FunctionSummary : public GlobalValueSummary {
@@ -273,7 +286,7 @@ public:
   /// An "identifier" for a virtual function. This contains the type identifier
   /// represented as a GUID and the offset from the address point to the virtual
   /// function pointer, where "address point" is as defined in the Itanium ABI:
-  /// https://mentorembedded.github.io/cxx-abi/abi.html#vtable-general
+  /// https://itanium-cxx-abi.github.io/cxx-abi/abi.html#vtable-general
   struct VFuncId {
     GlobalValue::GUID GUID;
     uint64_t Offset;
@@ -487,6 +500,16 @@ struct TypeTestResolution {
   /// range [1,256], this number will be 8. This helps generate the most compact
   /// instruction sequences.
   unsigned SizeM1BitWidth = 0;
+
+  // The following fields are only used if the target does not support the use
+  // of absolute symbols to store constants. Their meanings are the same as the
+  // corresponding fields in LowerTypeTestsModule::TypeIdLowering in
+  // LowerTypeTests.cpp.
+
+  uint64_t AlignLog2 = 0;
+  uint64_t SizeM1 = 0;
+  uint8_t BitMask = 0;
+  uint64_t InlineBits = 0;
 };
 
 struct WholeProgramDevirtResolution {
@@ -510,6 +533,12 @@ struct WholeProgramDevirtResolution {
     /// - UniqueRetVal: the return value associated with the unique vtable (0 or
     ///   1).
     uint64_t Info = 0;
+
+    // The following fields are only used if the target does not support the use
+    // of absolute symbols to store constants.
+
+    uint32_t Byte = 0;
+    uint32_t Bit = 0;
   };
 
   /// Resolutions for calls with all constant integer arguments (excluding the

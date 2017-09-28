@@ -481,7 +481,7 @@ def INC32r_alt : I<0x40, AddRegFrm, (outs GR32:$dst), (ins GR32:$src1),
 } // CodeSize = 1, hasSideEffects = 0
 } // Constraints = "$src1 = $dst", SchedRW
 
-let CodeSize = 2, SchedRW = [WriteALULd, WriteRMW], Predicates = [NotSlowIncDec] in {
+let CodeSize = 2, SchedRW = [WriteALULd, WriteRMW], Predicates = [UseIncDec] in {
   def INC8m  : I<0xFE, MRM0m, (outs), (ins i8mem :$dst), "inc{b}\t$dst",
                [(store (add (loadi8 addr:$dst), 1), addr:$dst),
                 (implicit EFLAGS)], IIC_UNARY_MEM>;
@@ -528,7 +528,7 @@ def DEC32r_alt : I<0x48, AddRegFrm, (outs GR32:$dst), (ins GR32:$src1),
 } // Constraints = "$src1 = $dst", SchedRW
 
 
-let CodeSize = 2, SchedRW = [WriteALULd, WriteRMW], Predicates = [NotSlowIncDec] in {
+let CodeSize = 2, SchedRW = [WriteALULd, WriteRMW], Predicates = [UseIncDec] in {
   def DEC8m  : I<0xFE, MRM1m, (outs), (ins i8mem :$dst), "dec{b}\t$dst",
                [(store (add (loadi8 addr:$dst), -1), addr:$dst),
                 (implicit EFLAGS)], IIC_UNARY_MEM>;
@@ -724,13 +724,6 @@ class BinOpRM<bits<8> opcode, string mnemonic, X86TypeInfo typeinfo,
         (ins typeinfo.RegClass:$src1, typeinfo.MemOperand:$src2),
         mnemonic, "{$src2, $src1|$src1, $src2}", pattern, itin>,
     Sched<[WriteALULd, ReadAfterLd]>;
-
-// BinOpRM_R - Instructions like "add reg, reg, [mem]".
-class BinOpRM_R<bits<8> opcode, string mnemonic, X86TypeInfo typeinfo,
-              SDNode opnode>
-  : BinOpRM<opcode, mnemonic, typeinfo, (outs typeinfo.RegClass:$dst),
-            [(set typeinfo.RegClass:$dst,
-            (opnode typeinfo.RegClass:$src1, (typeinfo.LoadNode addr:$src2)))]>;
 
 // BinOpRM_F - Instructions like "cmp reg, [mem]".
 class BinOpRM_F<bits<8> opcode, string mnemonic, X86TypeInfo typeinfo,

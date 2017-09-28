@@ -1610,40 +1610,50 @@ static bool TryToShrinkGlobalToBoolean(GlobalVariable *GV, Constant *OtherVal) {
   // If initialized to zero and storing one into the global, we can use a cast
   // instead of a select to synthesize the desired value.
   bool IsOneZero = false;
+  bool EmitOneOrZero = true;
   if (ConstantInt *CI = dyn_cast<ConstantInt>(OtherVal)){
     IsOneZero = InitVal->isNullValue() && CI->isOne();
 
-    ConstantInt *CIInit = dyn_cast<ConstantInt>(GV->getInitializer());
-    uint64_t ValInit = CIInit->getZExtValue();
-    uint64_t ValOther = CI->getZExtValue();
-    uint64_t ValMinus = ValOther - ValInit;
+    if (ConstantInt *CIInit = dyn_cast<ConstantInt>(GV->getInitializer())){
+      uint64_t ValInit = CIInit->getZExtValue();
+      uint64_t ValOther = CI->getZExtValue();
+      uint64_t ValMinus = ValOther - ValInit;
 
-    for(auto *GVe : GVs){
-      DIGlobalVariable *DGV = GVe->getVariable();
-      DIExpression *E = GVe->getExpression();
+      for(auto *GVe : GVs){
+        DIGlobalVariable *DGV = GVe->getVariable();
+        DIExpression *E = GVe->getExpression();
 
-      // val * (ValOther - ValInit) + ValInit:
-      // DW_OP_deref DW_OP_constu <ValMinus>
-      // DW_OP_mul DW_OP_constu <ValInit> DW_OP_plus DW_OP_stack_value
-      E = DIExpression::get(NewGV->getContext(),
-                           {dwarf::DW_OP_deref,
-                            dwarf::DW_OP_constu,
-                            ValMinus,
-                            dwarf::DW_OP_mul,
-                            dwarf::DW_OP_constu,
-                            ValInit,
-                            dwarf::DW_OP_plus,
-                            dwarf::DW_OP_stack_value});
-      DIGlobalVariableExpression *DGVE =
-        DIGlobalVariableExpression::get(NewGV->getContext(), DGV, E);
-      NewGV->addDebugInfo(DGVE);
+        // It is expected that the address of global optimized variable is on
+        // top of the stack. After optimization, value of that variable will
+        // be ether 0 for initial value or 1 for other value. The following
+        // expression should return constant integer value depending on the
+        // value at global object address:
+        // val * (ValOther - ValInit) + ValInit:
+        // DW_OP_deref DW_OP_constu <ValMinus>
+        // DW_OP_mul DW_OP_constu <ValInit> DW_OP_plus DW_OP_stack_value
+        E = DIExpression::get(NewGV->getContext(),
+                             {dwarf::DW_OP_deref,
+                              dwarf::DW_OP_constu,
+                              ValMinus,
+                              dwarf::DW_OP_mul,
+                              dwarf::DW_OP_constu,
+                              ValInit,
+                              dwarf::DW_OP_plus,
+                              dwarf::DW_OP_stack_value});
+        DIGlobalVariableExpression *DGVE =
+          DIGlobalVariableExpression::get(NewGV->getContext(), DGV, E);
+        NewGV->addDebugInfo(DGVE);
+     }
+     EmitOneOrZero = false;
     }
-  } else {
-    // FIXME: This will only emit address for debugger on which will
-    // be written only 0 or 1.
-    for(auto *GV : GVs)
-      NewGV->addDebugInfo(GV);
   }
+
+  if (EmitOneOrZero) {
+     // FIXME: This will only emit address for debugger on which will
+     // be written only 0 or 1.
+     for(auto *GV : GVs)
+       NewGV->addDebugInfo(GV);
+   }
 
   while (!GV->use_empty()) {
     Instruction *UI = cast<Instruction>(GV->user_back());

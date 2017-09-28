@@ -200,8 +200,7 @@ INITIALIZE_PASS_DEPENDENCY(LiveIntervals)
 INITIALIZE_PASS_END(MachineScheduler, DEBUG_TYPE,
                     "Machine Instruction Scheduler", false, false)
 
-MachineScheduler::MachineScheduler()
-: MachineSchedulerBase(ID) {
+MachineScheduler::MachineScheduler() : MachineSchedulerBase(ID) {
   initializeMachineSchedulerPass(*PassRegistry::getPassRegistry());
 }
 
@@ -225,8 +224,7 @@ char &llvm::PostMachineSchedulerID = PostMachineScheduler::ID;
 INITIALIZE_PASS(PostMachineScheduler, "postmisched",
                 "PostRA Machine Instruction Scheduler", false, false)
 
-PostMachineScheduler::PostMachineScheduler()
-: MachineSchedulerBase(ID) {
+PostMachineScheduler::PostMachineScheduler() : MachineSchedulerBase(ID) {
   initializePostMachineSchedulerPass(*PassRegistry::getPassRegistry());
 }
 
@@ -439,6 +437,7 @@ static bool isSchedBoundary(MachineBasicBlock::iterator MI,
 }
 
 /// A region of an MBB for scheduling.
+namespace {
 struct SchedRegion {
   /// RegionBegin is the first instruction in the scheduling region, and
   /// RegionEnd is either MBB->end() or the scheduling boundary after the
@@ -448,12 +447,15 @@ struct SchedRegion {
   MachineBasicBlock::iterator RegionBegin;
   MachineBasicBlock::iterator RegionEnd;
   unsigned NumRegionInstrs;
+
   SchedRegion(MachineBasicBlock::iterator B, MachineBasicBlock::iterator E,
               unsigned N) :
     RegionBegin(B), RegionEnd(E), NumRegionInstrs(N) {}
 };
+} // end anonymous namespace
 
-typedef SmallVector<SchedRegion, 16> MBBRegionsVector;
+using MBBRegionsVector = SmallVector<SchedRegion, 16>;
+
 static void
 getSchedRegions(MachineBasicBlock *MBB,
                 MBBRegionsVector &Regions,
@@ -1559,14 +1561,10 @@ void BaseMemOpClusterMutation::clusterNeighboringMemOps(
   std::sort(MemOpRecords.begin(), MemOpRecords.end());
   unsigned ClusterLength = 1;
   for (unsigned Idx = 0, End = MemOpRecords.size(); Idx < (End - 1); ++Idx) {
-    if (MemOpRecords[Idx].BaseReg != MemOpRecords[Idx+1].BaseReg) {
-      ClusterLength = 1;
-      continue;
-    }
-
     SUnit *SUa = MemOpRecords[Idx].SU;
     SUnit *SUb = MemOpRecords[Idx+1].SU;
-    if (TII->shouldClusterMemOps(*SUa->getInstr(), *SUb->getInstr(),
+    if (TII->shouldClusterMemOps(*SUa->getInstr(), MemOpRecords[Idx].BaseReg,
+                                 *SUb->getInstr(), MemOpRecords[Idx+1].BaseReg,
                                  ClusterLength) &&
         DAG->addEdge(SUb, SDep(SUa, SDep::Cluster))) {
       DEBUG(dbgs() << "Cluster ld/st SU(" << SUa->NodeNum << ") - SU("
@@ -1589,7 +1587,6 @@ void BaseMemOpClusterMutation::clusterNeighboringMemOps(
 
 /// \brief Callback from DAG postProcessing to create cluster edges for loads.
 void BaseMemOpClusterMutation::apply(ScheduleDAGInstrs *DAGInstrs) {
-
   ScheduleDAGMI *DAG = static_cast<ScheduleDAGMI*>(DAGInstrs);
 
   // Map DAG NodeNum to store chain ID.
@@ -1635,6 +1632,7 @@ namespace {
 class CopyConstrain : public ScheduleDAGMutation {
   // Transient state.
   SlotIndex RegionBeginIdx;
+
   // RegionEndIdx is the slot index of the last non-debug instruction in the
   // scheduling region. So we may have RegionBeginIdx == RegionEndIdx.
   SlotIndex RegionEndIdx;
@@ -3247,7 +3245,6 @@ void PostGenericScheduler::registerRoots() {
 /// \param TryCand refers to the next SUnit candidate, otherwise uninitialized.
 void PostGenericScheduler::tryCandidate(SchedCandidate &Cand,
                                         SchedCandidate &TryCand) {
-
   // Initialize the candidate if needed.
   if (!Cand.isValid()) {
     TryCand.Reason = NodeOrder;
@@ -3486,6 +3483,7 @@ class InstructionShuffler : public MachineSchedStrategy {
   // instructions to be scheduled first.
   PriorityQueue<SUnit*, std::vector<SUnit*>, SUnitOrder<false>>
     TopQ;
+
   // When scheduling bottom-up, use greater-than as the queue priority.
   PriorityQueue<SUnit*, std::vector<SUnit*>, SUnitOrder<true>>
     BottomQ;
@@ -3602,6 +3600,7 @@ struct DOTGraphTraits<ScheduleDAGMI*> : public DefaultDOTGraphTraits {
       SS << " I:" << DFS->getNumInstrs(SU);
     return SS.str();
   }
+
   static std::string getNodeDescription(const SUnit *SU, const ScheduleDAG *G) {
     return G->getGraphNodeLabel(SU);
   }
@@ -3625,7 +3624,6 @@ struct DOTGraphTraits<ScheduleDAGMI*> : public DefaultDOTGraphTraits {
 
 /// viewGraph - Pop up a ghostview window with the reachable parts of the DAG
 /// rendered using 'dot'.
-///
 void ScheduleDAGMI::viewGraph(const Twine &Name, const Twine &Title) {
 #ifndef NDEBUG
   ViewGraph(this, Name, false, Title);

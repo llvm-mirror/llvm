@@ -1057,6 +1057,20 @@ multiclass XSForm_1rc<bits<6> opcode, bits<9> xo, dag OOL, dag IOL,
   }
 }
 
+multiclass XSForm_1r<bits<6> opcode, bits<9> xo, dag OOL, dag IOL,
+                    string asmbase, string asmstr, InstrItinClass itin,
+                    list<dag> pattern> {
+  let BaseName = asmbase in {
+    def NAME : XSForm_1<opcode, xo, OOL, IOL,
+                       !strconcat(asmbase, !strconcat(" ", asmstr)), itin,
+                       pattern>, RecFormRel;
+    let Defs = [CR0] in
+    def o    : XSForm_1<opcode, xo, OOL, IOL,
+                       !strconcat(asmbase, !strconcat(". ", asmstr)), itin,
+                       []>, isDOT, RecFormRel;
+  }
+}
+
 multiclass XForm_26r<bits<6> opcode, bits<10> xo, dag OOL, dag IOL,
                     string asmbase, string asmstr, InstrItinClass itin,
                     list<dag> pattern> {
@@ -4237,6 +4251,7 @@ def CLRLSLDI : PPCAsmPseudo<"clrlsldi $rA, $rS, $b, $n",
                             (ins g8rc:$rA, g8rc:$rS, u6imm:$b, u6imm:$n)>;
 def CLRLSLDIo : PPCAsmPseudo<"clrlsldi. $rA, $rS, $b, $n",
                              (ins g8rc:$rA, g8rc:$rS, u6imm:$b, u6imm:$n)>;
+def SUBPCIS : PPCAsmPseudo<"subpcis $RT, $D", (ins g8rc:$RT, s16imm:$D)>;
 
 def : InstAlias<"rotldi $rA, $rS, $n", (RLDICL g8rc:$rA, g8rc:$rS, u6imm:$n, 0)>;
 def : InstAlias<"rotldi. $rA, $rS, $n", (RLDICLo g8rc:$rA, g8rc:$rS, u6imm:$n, 0)>;
@@ -4246,6 +4261,7 @@ def : InstAlias<"clrldi $rA, $rS, $n", (RLDICL g8rc:$rA, g8rc:$rS, 0, u6imm:$n)>
 def : InstAlias<"clrldi $rA, $rS, $n",
                 (RLDICL_32 gprc:$rA, gprc:$rS, 0, u6imm:$n)>;
 def : InstAlias<"clrldi. $rA, $rS, $n", (RLDICLo g8rc:$rA, g8rc:$rS, 0, u6imm:$n)>;
+def : InstAlias<"lnia $RT", (ADDPCIS g8rc:$RT, 0)>;
 
 def RLWINMbm : PPCAsmPseudo<"rlwinm $rA, $rS, $n, $b",
                             (ins g8rc:$rA, g8rc:$rS, u5imm:$n, i32imm:$b)>;

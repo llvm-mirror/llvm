@@ -59,7 +59,7 @@ static void dumpRanges(const DWARFObject &Obj, raw_ostream &OS,
                        unsigned AddressSize, unsigned Indent,
                        const DIDumpOptions &DumpOpts) {
   ArrayRef<SectionName> SectionNames;
-  if (!DumpOpts.Brief)
+  if (DumpOpts.Verbose)
     SectionNames = Obj.getSectionNames();
 
   for (size_t I = 0; I < Ranges.size(); ++I) {
@@ -83,7 +83,8 @@ static void dumpRanges(const DWARFObject &Obj, raw_ostream &OS,
 }
 
 static void dumpLocation(raw_ostream &OS, DWARFFormValue &FormValue,
-                         DWARFUnit *U, unsigned Indent) {
+                         DWARFUnit *U, unsigned Indent,
+                         DIDumpOptions DumpOpts) {
   DWARFContext &Ctx = U->getContext();
   const DWARFObject &Obj = Ctx.getDWARFObj();
   const MCRegisterInfo *MRI = Ctx.getRegisterInfo();
@@ -97,7 +98,7 @@ static void dumpLocation(raw_ostream &OS, DWARFFormValue &FormValue,
     return;
   }
 
-  FormValue.dump(OS);
+  FormValue.dump(OS, DumpOpts);
   if (FormValue.isFormClass(DWARFFormValue::FC_SectionOffset)) {
     const DWARFSection &LocSection = Obj.getLocSection();
     const DWARFSection &LocDWOSection = Obj.getLocDWOSection();
@@ -138,7 +139,7 @@ static void dumpAttribute(raw_ostream &OS, const DWARFDie &Die,
   else
     WithColor(OS, syntax::Attribute).get() << format("DW_AT_Unknown_%x", Attr);
 
-  if (!DumpOpts.Brief) {
+  if (DumpOpts.Verbose) {
     auto formString = FormEncodingString(Form);
     if (!formString.empty())
       OS << " [" << formString << ']';
@@ -173,7 +174,7 @@ static void dumpAttribute(raw_ostream &OS, const DWARFDie &Die,
     OS << *formValue.getAsUnsignedConstant();
   else if (Attr == DW_AT_location || Attr == DW_AT_frame_base ||
            Attr == DW_AT_data_member_location)
-    dumpLocation(OS, formValue, U, sizeof(BaseIndent) + Indent + 4);
+    dumpLocation(OS, formValue, U, sizeof(BaseIndent) + Indent + 4, DumpOpts);
   else
     formValue.dump(OS, DumpOpts);
 
@@ -366,13 +367,29 @@ void DWARFDie::getCallerFrame(uint32_t &CallFile, uint32_t &CallLine,
   CallDiscriminator = toUnsigned(find(DW_AT_GNU_discriminator), 0);
 }
 
-void DWARFDie::dump(raw_ostream &OS, unsigned RecurseDepth, unsigned Indent,
+/// Helper to dump a DIE with all of its parents, but no siblings.
+static unsigned dumpParentChain(DWARFDie Die, raw_ostream &OS, unsigned Indent,
+                                DIDumpOptions DumpOpts) {
+  if (!Die)
+    return Indent;
+  Indent = dumpParentChain(Die.getParent(), OS, Indent, DumpOpts);
+  Die.dump(OS, Indent, DumpOpts);
+  return Indent + 2;
+}
+
+void DWARFDie::dump(raw_ostream &OS, unsigned Indent,
                     DIDumpOptions DumpOpts) const {
   if (!isValid())
     return;
   DWARFDataExtractor debug_info_data = U->getDebugInfoExtractor();
   const uint32_t Offset = getOffset();
   uint32_t offset = Offset;
+  //  if (DumpOpts.ShowChildren && DumpOpts.RecurseDepth)
+  //  DumpOpts.RecurseDepth++;
+  if (DumpOpts.ShowParents) {
+    DumpOpts.ShowParents = false;
+    Indent = dumpParentChain(getParent(), OS, Indent, DumpOpts);
+  }
 
   if (debug_info_data.isValidOffset(offset)) {
     uint32_t abbrCode = debug_info_data.getULEB128(&offset);
@@ -388,7 +405,7 @@ void DWARFDie::dump(raw_ostream &OS, unsigned RecurseDepth, unsigned Indent,
           WithColor(OS, syntax::Tag).get().indent(Indent)
           << format("DW_TAG_Unknown_%x", getTag());
 
-        if (!DumpOpts.Brief)
+        if (DumpOpts.Verbose)
           OS << format(" [%u] %c", abbrCode,
                        AbbrevDecl->hasChildren() ? '*' : ' ');
         OS << '\n';
@@ -406,9 +423,10 @@ void DWARFDie::dump(raw_ostream &OS, unsigned RecurseDepth, unsigned Indent,
         }
 
         DWARFDie child = getFirstChild();
-        if (RecurseDepth > 0 && child) {
+        if (DumpOpts.RecurseDepth > 0 && child) {
+          DumpOpts.RecurseDepth--;
           while (child) {
-            child.dump(OS, RecurseDepth-1, Indent+2, DumpOpts);
+            child.dump(OS, Indent+2, DumpOpts);
             child = child.getSibling();
           }
         }

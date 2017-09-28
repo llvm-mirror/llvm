@@ -112,48 +112,52 @@ struct DILineInfoSpecifier {
       : FLIKind(FLIKind), FNKind(FNKind) {}
 };
 
+/// This is just a helper to programmatically construct DIDumpType.
+enum DIDumpTypeCounter {
+#define HANDLE_DWARF_SECTION(ENUM_NAME, ELF_NAME, CMDLINE_NAME) \
+  DIDT_ID_##ENUM_NAME,
+#include "llvm/BinaryFormat/Dwarf.def"
+#undef HANDLE_DWARF_SECTION
+  DIDT_ID_UUID,
+  DIDT_ID_Count
+};
+static_assert(DIDT_ID_Count <= 32, "section types overflow storage");
+
 /// Selects which debug sections get dumped.
-enum DIDumpType {
+enum DIDumpType : unsigned {
   DIDT_Null,
-  DIDT_All,
-  DIDT_Abbrev,
-  DIDT_AbbrevDwo,
-  DIDT_Aranges,
-  DIDT_Frames,
-  DIDT_Info,
-  DIDT_InfoDwo,
-  DIDT_Types,
-  DIDT_TypesDwo,
-  DIDT_Line,
-  DIDT_LineDwo,
-  DIDT_Loc,
-  DIDT_LocDwo,
-  DIDT_Macro,
-  DIDT_Ranges,
-  DIDT_Pubnames,
-  DIDT_Pubtypes,
-  DIDT_GnuPubnames,
-  DIDT_GnuPubtypes,
-  DIDT_Str,
-  DIDT_StrOffsets,
-  DIDT_StrDwo,
-  DIDT_StrOffsetsDwo,
-  DIDT_AppleNames,
-  DIDT_AppleTypes,
-  DIDT_AppleNamespaces,
-  DIDT_AppleObjC,
-  DIDT_CUIndex,
-  DIDT_GdbIndex,
-  DIDT_TUIndex,
+  DIDT_All             = ~0U,
+#define HANDLE_DWARF_SECTION(ENUM_NAME, ELF_NAME, CMDLINE_NAME) \
+  DIDT_##ENUM_NAME = 1U << DIDT_ID_##ENUM_NAME,
+#include "llvm/BinaryFormat/Dwarf.def"
+#undef HANDLE_DWARF_SECTION
+  DIDT_UUID = 1 << DIDT_ID_UUID,
 };
 
 /// Container for dump options that control which debug information will be
 /// dumped.
 struct DIDumpOptions {
-    DIDumpType DumpType = DIDT_All;
-    bool DumpEH = false;
-    bool SummarizeTypes = false;
-    bool Brief = false;
+  unsigned DumpType = DIDT_All;
+  unsigned RecurseDepth = -1U;
+  bool ShowChildren = false;
+  bool ShowParents = false;
+  bool SummarizeTypes = false;
+  bool Verbose = false;
+
+  /// Return default option set for printing a single DIE without children.
+  static DIDumpOptions getForSingleDIE() {
+    DIDumpOptions Opts;
+    Opts.RecurseDepth = 0;
+    return Opts;
+  }
+
+  /// Return the options with RecurseDepth set to 0 unless explicitly required.
+  DIDumpOptions noImplicitRecursion() const {
+    DIDumpOptions Opts = *this;
+    if (RecurseDepth == -1U && !ShowChildren)
+      Opts.RecurseDepth = 0;
+    return Opts;
+  }
 };
 
 class DIContext {
@@ -170,7 +174,7 @@ public:
 
   virtual void dump(raw_ostream &OS, DIDumpOptions DumpOpts) = 0;
 
-  virtual bool verify(raw_ostream &OS, DIDumpType DumpType = DIDT_All) {
+  virtual bool verify(raw_ostream &OS, DIDumpOptions DumpOpts = {}) {
     // No verifier? Just say things went well.
     return true;
   }

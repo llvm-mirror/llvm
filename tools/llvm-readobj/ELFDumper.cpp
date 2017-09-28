@@ -18,6 +18,7 @@
 #include "StackMapPrinter.h"
 #include "llvm-readobj.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/PointerIntPair.h"
 #include "llvm/ADT/SmallString.h"
@@ -2441,34 +2442,91 @@ template <class ELFT> void GNUStyle<ELFT>::printFileHeaders(const ELFO *Obj) {
   printFields(OS, "Section header string table index:", Str);
 }
 
-template <class ELFT> void GNUStyle<ELFT>::printGroupSections(const ELFO *Obj) {
-  uint32_t SectionIndex = 0;
-  bool HasGroups = false;
+namespace {
+struct GroupMember {
+  StringRef Name;
+  uint64_t Index;
+};
+
+struct GroupSection {
+  StringRef Name;
+  StringRef Signature;
+  uint64_t ShName;
+  uint64_t Index;
+  uint32_t Type;
+  std::vector<GroupMember> Members;
+};
+
+template <class ELFT>
+std::vector<GroupSection> getGroups(const ELFFile<ELFT> *Obj) {
+  using Elf_Shdr = typename ELFFile<ELFT>::Elf_Shdr;
+  using Elf_Sym = typename ELFFile<ELFT>::Elf_Sym;
+  using Elf_Word = typename ELFFile<ELFT>::Elf_Word;
+
+  std::vector<GroupSection> Ret;
+  uint64_t I = 0;
   for (const Elf_Shdr &Sec : unwrapOrError(Obj->sections())) {
-    if (Sec.sh_type == ELF::SHT_GROUP) {
-      HasGroups = true;
-      const Elf_Shdr *Symtab = unwrapOrError(Obj->getSection(Sec.sh_link));
-      StringRef StrTable = unwrapOrError(Obj->getStringTableForSymtab(*Symtab));
-      const Elf_Sym *Signature =
-          unwrapOrError(Obj->template getEntry<Elf_Sym>(Symtab, Sec.sh_info));
-      ArrayRef<Elf_Word> Data = unwrapOrError(
-          Obj->template getSectionContentsAsArray<Elf_Word>(&Sec));
-      StringRef Name = unwrapOrError(Obj->getSectionName(&Sec));
-      OS << "\n" << getGroupType(Data[0]) << " group section ["
-         << format_decimal(SectionIndex, 5) << "] `" << Name << "' ["
-         << StrTable.data() + Signature->st_name << "] contains "
-         << (Data.size() - 1) << " sections:\n"
-         << "   [Index]    Name\n";
-      for (auto &Ndx : Data.slice(1)) {
-        auto Sec = unwrapOrError(Obj->getSection(Ndx));
-        const StringRef Name = unwrapOrError(Obj->getSectionName(Sec));
-        OS << "   [" << format_decimal(Ndx, 5) << "]   " << Name
-           << "\n";
-      }
+    ++I;
+    if (Sec.sh_type != ELF::SHT_GROUP)
+      continue;
+
+    const Elf_Shdr *Symtab = unwrapOrError(Obj->getSection(Sec.sh_link));
+    StringRef StrTable = unwrapOrError(Obj->getStringTableForSymtab(*Symtab));
+    const Elf_Sym *Sym =
+        unwrapOrError(Obj->template getEntry<Elf_Sym>(Symtab, Sec.sh_info));
+    auto Data =
+        unwrapOrError(Obj->template getSectionContentsAsArray<Elf_Word>(&Sec));
+
+    StringRef Name = unwrapOrError(Obj->getSectionName(&Sec));
+    StringRef Signature = StrTable.data() + Sym->st_name;
+    Ret.push_back({Name, Signature, Sec.sh_name, I - 1, Data[0], {}});
+
+    std::vector<GroupMember> &GM = Ret.back().Members;
+    for (uint32_t Ndx : Data.slice(1)) {
+      auto Sec = unwrapOrError(Obj->getSection(Ndx));
+      const StringRef Name = unwrapOrError(Obj->getSectionName(Sec));
+      GM.push_back({Name, Ndx});
     }
-    ++SectionIndex;
   }
-  if (!HasGroups)
+  return Ret;
+}
+
+DenseMap<uint64_t, const GroupSection *>
+mapSectionsToGroups(ArrayRef<GroupSection> Groups) {
+  DenseMap<uint64_t, const GroupSection *> Ret;
+  for (const GroupSection &G : Groups)
+    for (const GroupMember &GM : G.Members)
+      Ret.insert({GM.Index, &G});
+  return Ret;
+}
+
+} // namespace
+
+template <class ELFT> void GNUStyle<ELFT>::printGroupSections(const ELFO *Obj) {
+  std::vector<GroupSection> V = getGroups<ELFT>(Obj);
+  DenseMap<uint64_t, const GroupSection *> Map = mapSectionsToGroups(V);
+  for (const GroupSection &G : V) {
+    OS << "\n"
+       << getGroupType(G.Type) << " group section ["
+       << format_decimal(G.Index, 5) << "] `" << G.Name << "' [" << G.Signature
+       << "] contains " << G.Members.size() << " sections:\n"
+       << "   [Index]    Name\n";
+    for (const GroupMember &GM : G.Members) {
+      const GroupSection *MainGroup = Map[GM.Index];
+      if (MainGroup != &G) {
+        OS.flush();
+        errs() << "Error: section [" << format_decimal(GM.Index, 5)
+               << "] in group section [" << format_decimal(G.Index, 5)
+               << "] already in group section ["
+               << format_decimal(MainGroup->Index, 5) << "]";
+        errs().flush();
+        continue;
+      }
+      OS << "   [" << format_decimal(GM.Index, 5) << "]   " << GM.Name << "\n";
+    }
+  }
+
+  if (V.empty())
     OS << "There are no section groups in this file.\n";
 }
 
@@ -3489,36 +3547,32 @@ template <class ELFT> void LLVMStyle<ELFT>::printFileHeaders(const ELFO *Obj) {
 template <class ELFT>
 void LLVMStyle<ELFT>::printGroupSections(const ELFO *Obj) {
   DictScope Lists(W, "Groups");
-  uint32_t SectionIndex = 0;
-  bool HasGroups = false;
-  for (const Elf_Shdr &Sec : unwrapOrError(Obj->sections())) {
-    if (Sec.sh_type == ELF::SHT_GROUP) {
-      HasGroups = true;
-      const Elf_Shdr *Symtab = unwrapOrError(Obj->getSection(Sec.sh_link));
-      StringRef StrTable = unwrapOrError(Obj->getStringTableForSymtab(*Symtab));
-      const Elf_Sym *Sym =
-          unwrapOrError(Obj->template getEntry<Elf_Sym>(Symtab, Sec.sh_info));
-      auto Data = unwrapOrError(
-          Obj->template getSectionContentsAsArray<Elf_Word>(&Sec));
-      DictScope D(W, "Group");
-      StringRef Name = unwrapOrError(Obj->getSectionName(&Sec));
-      W.printNumber("Name", Name, Sec.sh_name);
-      W.printNumber("Index", SectionIndex);
-      W.printHex("Type", getGroupType(Data[0]), Data[0]);
-      W.startLine() << "Signature: " << StrTable.data() + Sym->st_name << "\n";
-      {
-        ListScope L(W, "Section(s) in group");
-        size_t Member = 1;
-        while (Member < Data.size()) {
-          auto Sec = unwrapOrError(Obj->getSection(Data[Member]));
-          const StringRef Name = unwrapOrError(Obj->getSectionName(Sec));
-          W.startLine() << Name << " (" << Data[Member++] << ")\n";
-        }
+  std::vector<GroupSection> V = getGroups<ELFT>(Obj);
+  DenseMap<uint64_t, const GroupSection *> Map = mapSectionsToGroups(V);
+  for (const GroupSection &G : V) {
+    DictScope D(W, "Group");
+    W.printNumber("Name", G.Name, G.ShName);
+    W.printNumber("Index", G.Index);
+    W.printHex("Type", getGroupType(G.Type), G.Type);
+    W.startLine() << "Signature: " << G.Signature << "\n";
+
+    ListScope L(W, "Section(s) in group");
+    for (const GroupMember &GM : G.Members) {
+      const GroupSection *MainGroup = Map[GM.Index];
+      if (MainGroup != &G) {
+        W.flush();
+        errs() << "Error: " << GM.Name << " (" << GM.Index
+               << ") in a group " + G.Name + " (" << G.Index
+               << ") is already in a group " + MainGroup->Name + " ("
+               << MainGroup->Index << ")\n";
+        errs().flush();
+        continue;
       }
+      W.startLine() << GM.Name << " (" << GM.Index << ")\n";
     }
-    ++SectionIndex;
   }
-  if (!HasGroups)
+
+  if (V.empty())
     W.startLine() << "There are no group sections in the file.\n";
 }
 

@@ -3035,6 +3035,30 @@ unsigned SelectionDAG::ComputeNumSignBits(SDValue Op, const APInt &DemandedElts,
     return Tmp;
   }
 
+  case ISD::BITCAST: {
+    SDValue N0 = Op.getOperand(0);
+    unsigned SrcBits = N0.getScalarValueSizeInBits();
+
+    // Ignore bitcasts from floating point.
+    if (!N0.getValueType().isInteger())
+      break;
+
+    // Fast handling of 'identity' bitcasts.
+    if (VTBits == SrcBits)
+      return ComputeNumSignBits(N0, DemandedElts, Depth + 1);
+
+    // Bitcast 'large element' scalar/vector to 'small element' vector.
+    // TODO: Handle cases other than 'sign splat' when we have a use case.
+    // Requires handling of DemandedElts and Endianness.
+    if ((SrcBits % VTBits) == 0) {
+      assert(Op.getValueType().isVector() && "Expected bitcast to vector");
+      Tmp = ComputeNumSignBits(N0, Depth + 1);
+      if (Tmp == SrcBits)
+        return VTBits;
+    }
+    break;
+  }
+
   case ISD::SIGN_EXTEND:
   case ISD::SIGN_EXTEND_VECTOR_INREG:
     Tmp = VTBits - Op.getOperand(0).getScalarValueSizeInBits();
@@ -3124,16 +3148,16 @@ unsigned SelectionDAG::ComputeNumSignBits(SDValue Op, const APInt &DemandedElts,
   case ISD::ROTL:
   case ISD::ROTR:
     if (ConstantSDNode *C = dyn_cast<ConstantSDNode>(Op.getOperand(1))) {
-      unsigned RotAmt = C->getZExtValue() & (VTBits-1);
+      unsigned RotAmt = C->getAPIntValue().urem(VTBits);
 
       // Handle rotate right by N like a rotate left by 32-N.
       if (Op.getOpcode() == ISD::ROTR)
-        RotAmt = (VTBits-RotAmt) & (VTBits-1);
+        RotAmt = (VTBits - RotAmt) % VTBits;
 
       // If we aren't rotating out all of the known-in sign bits, return the
       // number that are left.  This handles rotl(sext(x), 1) for example.
       Tmp = ComputeNumSignBits(Op.getOperand(0), Depth+1);
-      if (Tmp > RotAmt+1) return Tmp-RotAmt;
+      if (Tmp > (RotAmt + 1)) return (Tmp - RotAmt);
     }
     break;
   case ISD::ADD:

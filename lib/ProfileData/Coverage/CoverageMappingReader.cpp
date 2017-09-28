@@ -49,16 +49,18 @@ using namespace object;
 #define DEBUG_TYPE "coverage-mapping"
 
 void CoverageMappingIterator::increment() {
+  if (ReadErr != coveragemap_error::success)
+    return;
+
   // Check if all the records were read or if an error occurred while reading
   // the next record.
-  if (auto E = Reader->readNextRecord(Record)) {
+  if (auto E = Reader->readNextRecord(Record))
     handleAllErrors(std::move(E), [&](const CoverageMapError &CME) {
       if (CME.get() == coveragemap_error::eof)
         *this = CoverageMappingIterator();
       else
-        llvm_unreachable("Unexpected error in coverage mapping iterator");
+        ReadErr = CME.get();
     });
-  }
 }
 
 Error RawCoverageReader::readULEB128(uint64_t &Result) {
@@ -214,6 +216,13 @@ Error RawCoverageMappingReader::readMappingRegionsSubArray(
     if (auto Err = readIntMax(ColumnEnd, std::numeric_limits<unsigned>::max()))
       return Err;
     LineStart += LineStartDelta;
+
+    // If the high bit of ColumnEnd is set, this is a gap region.
+    if (ColumnEnd & (1U << 31)) {
+      Kind = CounterMappingRegion::GapRegion;
+      ColumnEnd &= ~(1U << 31);
+    }
+
     // Adjust the column locations for the empty regions that are supposed to
     // cover whole lines. Those regions should be encoded with the
     // column range (1 -> std::numeric_limits<unsigned>::max()), but because
@@ -238,9 +247,12 @@ Error RawCoverageMappingReader::readMappingRegionsSubArray(
       dbgs() << "\n";
     });
 
-    MappingRegions.push_back(CounterMappingRegion(
-        C, InferredFileID, ExpandedFileID, LineStart, ColumnStart,
-        LineStart + NumLines, ColumnEnd, Kind));
+    auto CMR = CounterMappingRegion(C, InferredFileID, ExpandedFileID,
+                                    LineStart, ColumnStart,
+                                    LineStart + NumLines, ColumnEnd, Kind);
+    if (CMR.startLoc() > CMR.endLoc())
+      return make_error<CoverageMapError>(coveragemap_error::malformed);
+    MappingRegions.push_back(CMR);
   }
   return Error::success();
 }
@@ -529,11 +541,16 @@ Expected<std::unique_ptr<CovMapFuncRecordReader>> CovMapFuncRecordReader::get(
     return llvm::make_unique<VersionedCovMapFuncRecordReader<
         CovMapVersion::Version1, IntPtrT, Endian>>(P, R, F);
   case CovMapVersion::Version2:
+  case CovMapVersion::Version3:
     // Decompress the name data.
     if (Error E = P.create(P.getNameData()))
       return std::move(E);
-    return llvm::make_unique<VersionedCovMapFuncRecordReader<
-        CovMapVersion::Version2, IntPtrT, Endian>>(P, R, F);
+    if (Version == CovMapVersion::Version2)
+      return llvm::make_unique<VersionedCovMapFuncRecordReader<
+          CovMapVersion::Version2, IntPtrT, Endian>>(P, R, F);
+    else
+      return llvm::make_unique<VersionedCovMapFuncRecordReader<
+          CovMapVersion::Version3, IntPtrT, Endian>>(P, R, F);
   }
   llvm_unreachable("Unsupported version");
 }

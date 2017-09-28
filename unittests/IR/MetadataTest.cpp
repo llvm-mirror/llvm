@@ -92,10 +92,10 @@ protected:
     return DIFile::getDistinct(Context, "file.c", "/path/to/dir");
   }
   DICompileUnit *getUnit() {
-    return DICompileUnit::getDistinct(Context, 1, getFile(), "clang", false,
-                                      "-g", 2, "", DICompileUnit::FullDebug,
-                                      getTuple(), getTuple(), getTuple(),
-                                      getTuple(), getTuple(), 0, true, false);
+    return DICompileUnit::getDistinct(
+        Context, 1, getFile(), "clang", false, "-g", 2, "",
+        DICompileUnit::FullDebug, getTuple(), getTuple(), getTuple(),
+        getTuple(), getTuple(), 0, true, false, false);
   }
   DIType *getBasicType(StringRef Name) {
     return DIBasicType::get(Context, dwarf::DW_TAG_unspecified_type, Name);
@@ -1383,7 +1383,8 @@ TEST_F(DIFileTest, get) {
 
   EXPECT_NE(N, DIFile::get(Context, "other", Directory, CSKind, Checksum));
   EXPECT_NE(N, DIFile::get(Context, Filename, "other", CSKind, Checksum));
-  EXPECT_NE(N, DIFile::get(Context, Filename, Directory, DIFile::CSK_SHA1, Checksum));
+  EXPECT_NE(
+      N, DIFile::get(Context, Filename, Directory, DIFile::CSK_SHA1, Checksum));
   EXPECT_NE(N, DIFile::get(Context, Filename, Directory));
 
   TempDIFile Temp = N->clone();
@@ -1417,7 +1418,7 @@ TEST_F(DICompileUnitTest, get) {
       Context, SourceLanguage, File, Producer, IsOptimized, Flags,
       RuntimeVersion, SplitDebugFilename, EmissionKind, EnumTypes,
       RetainedTypes, GlobalVariables, ImportedEntities, Macros, DWOId, true,
-      false);
+      false, false);
 
   EXPECT_EQ(dwarf::DW_TAG_compile_unit, N->getTag());
   EXPECT_EQ(SourceLanguage, N->getSourceLanguage());
@@ -1474,7 +1475,8 @@ TEST_F(DICompileUnitTest, replaceArrays) {
   auto *N = DICompileUnit::getDistinct(
       Context, SourceLanguage, File, Producer, IsOptimized, Flags,
       RuntimeVersion, SplitDebugFilename, EmissionKind, EnumTypes,
-      RetainedTypes, nullptr, ImportedEntities, nullptr, DWOId, true, false);
+      RetainedTypes, nullptr, ImportedEntities, nullptr, DWOId, true, false,
+      false);
 
   auto *GlobalVariables = MDTuple::getDistinct(Context, None);
   EXPECT_EQ(nullptr, N->getGlobalVariables().get());

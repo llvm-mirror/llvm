@@ -179,6 +179,7 @@ extern "C" void LLVMInitializeAMDGPUTarget() {
   initializeAMDGPUAAWrapperPassPass(*PR);
   initializeAMDGPUUseNativeCallsPass(*PR);
   initializeAMDGPUSimplifyLibCallsPass(*PR);
+  initializeAMDGPUInlinerPass(*PR);
 }
 
 static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
@@ -319,15 +320,38 @@ static ImmutablePass *createAMDGPUExternalAAWrapperPass() {
       });
 }
 
+/// Predicate for Internalize pass.
+bool mustPreserveGV(const GlobalValue &GV) {
+  if (const Function *F = dyn_cast<Function>(&GV))
+    return F->isDeclaration() || AMDGPU::isEntryFunctionCC(F->getCallingConv());
+
+  return !GV.use_empty();
+}
+
 void AMDGPUTargetMachine::adjustPassManager(PassManagerBuilder &Builder) {
   Builder.DivergentTarget = true;
 
   bool EnableOpt = getOptLevel() > CodeGenOpt::None;
-  bool Internalize = InternalizeSymbols && EnableOpt &&
-                     (getTargetTriple().getArch() == Triple::amdgcn);
-  bool EarlyInline = EarlyInlineAll && EnableOpt;
+  bool Internalize = InternalizeSymbols;
+  bool EarlyInline = EarlyInlineAll && EnableOpt && !EnableAMDGPUFunctionCalls;
   bool AMDGPUAA = EnableAMDGPUAliasAnalysis && EnableOpt;
   bool LibCallSimplify = EnableLibCallSimplify && EnableOpt;
+
+  if (EnableAMDGPUFunctionCalls) {
+    delete Builder.Inliner;
+    Builder.Inliner = createAMDGPUFunctionInliningPass();
+  }
+
+  if (Internalize) {
+    // If we're generating code, we always have the whole program available. The
+    // relocations expected for externally visible functions aren't supported,
+    // so make sure every non-entry function is hidden.
+    Builder.addExtension(
+      PassManagerBuilder::EP_EnabledOnOptLevel0,
+      [](const PassManagerBuilder &, legacy::PassManagerBase &PM) {
+        PM.add(createInternalizePass(mustPreserveGV));
+      });
+  }
 
   Builder.addExtension(
     PassManagerBuilder::EP_ModuleOptimizerEarly,
@@ -339,25 +363,7 @@ void AMDGPUTargetMachine::adjustPassManager(PassManagerBuilder &Builder) {
       }
       PM.add(createAMDGPUUnifyMetadataPass());
       if (Internalize) {
-        PM.add(createInternalizePass([=](const GlobalValue &GV) -> bool {
-          if (const Function *F = dyn_cast<Function>(&GV)) {
-            if (F->isDeclaration())
-                return true;
-            switch (F->getCallingConv()) {
-            default:
-              return false;
-            case CallingConv::AMDGPU_VS:
-            case CallingConv::AMDGPU_HS:
-            case CallingConv::AMDGPU_GS:
-            case CallingConv::AMDGPU_PS:
-            case CallingConv::AMDGPU_CS:
-            case CallingConv::AMDGPU_KERNEL:
-            case CallingConv::SPIR_KERNEL:
-              return true;
-            }
-          }
-          return !GV.use_empty();
-        }));
+        PM.add(createInternalizePass(mustPreserveGV));
         PM.add(createGlobalDCEPass());
       }
       if (EarlyInline)

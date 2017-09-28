@@ -1893,7 +1893,7 @@ private:
   void gatherNodeEquivs();
   const CodeGenInstruction *findNodeEquiv(Record *N) const;
 
-  Error importRulePredicates(RuleMatcher &M, ArrayRef<Init *> Predicates);
+  Error importRulePredicates(RuleMatcher &M, ArrayRef<Predicate> Predicates);
   Expected<InstructionMatcher &>
   createAndImportSelDAGMatcher(InstructionMatcher &InsnMatcher,
                                const TreePatternNode *Src,
@@ -1940,17 +1940,19 @@ const CodeGenInstruction *GlobalISelEmitter::findNodeEquiv(Record *N) const {
 }
 
 GlobalISelEmitter::GlobalISelEmitter(RecordKeeper &RK)
-    : RK(RK), CGP(RK), Target(CGP.getTargetInfo()), CGRegs(RK) {}
+    : RK(RK), CGP(RK), Target(CGP.getTargetInfo()),
+      CGRegs(RK, Target.getHwModes()) {}
 
 //===- Emitter ------------------------------------------------------------===//
 
 Error
 GlobalISelEmitter::importRulePredicates(RuleMatcher &M,
-                                        ArrayRef<Init *> Predicates) {
-  for (const Init *Predicate : Predicates) {
-    const DefInit *PredicateDef = static_cast<const DefInit *>(Predicate);
-    declareSubtargetFeature(PredicateDef->getDef());
-    M.addRequiredFeature(PredicateDef->getDef());
+                                        ArrayRef<Predicate> Predicates) {
+  for (const Predicate &P : Predicates) {
+    if (!P.Def)
+      continue;
+    declareSubtargetFeature(P.Def);
+    M.addRequiredFeature(P.Def);
   }
 
   return Error::success();
@@ -1986,9 +1988,10 @@ GlobalISelEmitter::createAndImportSelDAGMatcher(InstructionMatcher &InsnMatcher,
   }
 
   unsigned OpIdx = 0;
-  for (const EEVT::TypeSet &Ty : Src->getExtTypes()) {
-    auto OpTyOrNone = MVTToLLT(Ty.getConcrete());
-
+  for (const TypeSetByHwMode &VTy : Src->getExtTypes()) {
+    auto OpTyOrNone = VTy.isMachineValueType()
+                          ? MVTToLLT(VTy.getMachineValueType().SimpleTy)
+                          : None;
     if (!OpTyOrNone)
       return failedImport(
           "Result of Src pattern operator has an unsupported type");
@@ -2035,9 +2038,11 @@ GlobalISelEmitter::createAndImportSelDAGMatcher(InstructionMatcher &InsnMatcher,
     for (unsigned i = 0, e = Src->getNumChildren(); i != e; ++i) {
       TreePatternNode *SrcChild = Src->getChild(i);
 
-      // For G_INTRINSIC, the operand immediately following the defs is an
-      // intrinsic ID.
-      if (SrcGIOrNull->TheDef->getName() == "G_INTRINSIC" && i == 0) {
+      // For G_INTRINSIC/G_INTRINSIC_W_SIDE_EFFECTS, the operand immediately
+      // following the defs is an intrinsic ID.
+      if ((SrcGIOrNull->TheDef->getName() == "G_INTRINSIC" ||
+           SrcGIOrNull->TheDef->getName() == "G_INTRINSIC_W_SIDE_EFFECTS") &&
+          i == 0) {
         if (const CodeGenIntrinsic *II = Src->getIntrinsicInfo(CGP)) {
           OperandMatcher &OM =
               InsnMatcher.addOperand(OpIdx++, SrcChild->getName(), TempOpIdx);
@@ -2064,7 +2069,7 @@ Error GlobalISelEmitter::importChildMatcher(InstructionMatcher &InsnMatcher,
   OperandMatcher &OM =
       InsnMatcher.addOperand(OpIdx, SrcChild->getName(), TempOpIdx);
 
-  ArrayRef<EEVT::TypeSet> ChildTypes = SrcChild->getExtTypes();
+  ArrayRef<TypeSetByHwMode> ChildTypes = SrcChild->getExtTypes();
   if (ChildTypes.size() != 1)
     return failedImport("Src pattern child has multiple results");
 
@@ -2079,7 +2084,9 @@ Error GlobalISelEmitter::importChildMatcher(InstructionMatcher &InsnMatcher,
     }
   }
 
-  auto OpTyOrNone = MVTToLLT(ChildTypes.front().getConcrete());
+  Optional<LLTCodeGen> OpTyOrNone = None;
+  if (ChildTypes.front().isMachineValueType())
+    OpTyOrNone = MVTToLLT(ChildTypes.front().getMachineValueType().SimpleTy);
   if (!OpTyOrNone)
     return failedImport("Src operand has an unsupported type (" + to_string(*SrcChild) + ")");
   OM.addPredicate<LLTOperandMatcher>(*OpTyOrNone);
@@ -2177,11 +2184,13 @@ Error GlobalISelEmitter::importExplicitUseRenderer(
   if (auto *ChildDefInit = dyn_cast<DefInit>(DstChild->getLeafValue())) {
     auto *ChildRec = ChildDefInit->getDef();
 
-    ArrayRef<EEVT::TypeSet> ChildTypes = DstChild->getExtTypes();
+    ArrayRef<TypeSetByHwMode> ChildTypes = DstChild->getExtTypes();
     if (ChildTypes.size() != 1)
       return failedImport("Dst pattern child has multiple results");
 
-    auto OpTyOrNone = MVTToLLT(ChildTypes.front().getConcrete());
+    Optional<LLTCodeGen> OpTyOrNone = None;
+    if (ChildTypes.front().isMachineValueType())
+      OpTyOrNone = MVTToLLT(ChildTypes.front().getMachineValueType().SimpleTy);
     if (!OpTyOrNone)
       return failedImport("Dst operand has an unsupported type");
 
@@ -2360,7 +2369,7 @@ Expected<RuleMatcher> GlobalISelEmitter::runOnPattern(const PatternToMatch &P) {
   RuleMatcher M;
   M.addAction<DebugCommentAction>(P);
 
-  if (auto Error = importRulePredicates(M, P.getPredicates()->getValues()))
+  if (auto Error = importRulePredicates(M, P.getPredicates()))
     return std::move(Error);
 
   // Next, analyze the pattern operators.
@@ -2426,8 +2435,8 @@ Expected<RuleMatcher> GlobalISelEmitter::runOnPattern(const PatternToMatch &P) {
   // The root of the match also has constraints on the register bank so that it
   // matches the result instruction.
   unsigned OpIdx = 0;
-  for (const EEVT::TypeSet &Ty : Src->getExtTypes()) {
-    (void)Ty;
+  for (const TypeSetByHwMode &VTy : Src->getExtTypes()) {
+    (void)VTy;
 
     const auto &DstIOperand = DstI.Operands[OpIdx];
     Record *DstIOpRec = DstIOperand.Rec;

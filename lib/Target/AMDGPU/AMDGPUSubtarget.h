@@ -313,6 +313,10 @@ public:
     return getGeneration() >= GFX9;
   }
 
+  bool hasMadMixInsts() const {
+    return getGeneration() >= GFX9;
+  }
+
   bool hasCARRY() const {
     return (getGeneration() >= EVERGREEN);
   }
@@ -879,6 +883,10 @@ public:
   /// subtarget's specifications, or does not meet number of waves per execution
   /// unit requirement.
   unsigned getMaxNumVGPRs(const MachineFunction &MF) const;
+
+  void getPostRAMutations(
+      std::vector<std::unique_ptr<ScheduleDAGMutation>> &Mutations)
+      const override;
 };
 
 } // end namespace llvm

@@ -1,12 +1,12 @@
 RUN: cat %p/../Inputs/basic.macho.x86_64 > %t1
 RUN: llvm-dsymutil -f -oso-prepend-path=%p/.. %t1
-RUN: llvm-dwarfdump %t1.dwarf | FileCheck %s
+RUN: llvm-dwarfdump -v %t1.dwarf | FileCheck %s
 RUN: llvm-dsymutil -f -o %t2 -oso-prepend-path=%p/.. %p/../Inputs/basic.macho.x86_64
-RUN: llvm-dwarfdump %t2 | FileCheck %s
-RUN: llvm-dsymutil -f -o - -oso-prepend-path=%p/.. %p/../Inputs/basic.macho.x86_64 | llvm-dwarfdump - | FileCheck %s --check-prefix=CHECK --check-prefix=BASIC
-RUN: llvm-dsymutil -f -o - -oso-prepend-path=%p/.. %p/../Inputs/basic-archive.macho.x86_64 | llvm-dwarfdump - | FileCheck %s --check-prefix=CHECK --check-prefix=ARCHIVE
-RUN: llvm-dsymutil -dump-debug-map -oso-prepend-path=%p/.. %p/../Inputs/basic.macho.x86_64 | llvm-dsymutil -f -y -o - - | llvm-dwarfdump - | FileCheck %s --check-prefix=CHECK --check-prefix=BASIC
-RUN: llvm-dsymutil -dump-debug-map -oso-prepend-path=%p/.. %p/../Inputs/basic-archive.macho.x86_64 | llvm-dsymutil -f -o - -y - | llvm-dwarfdump - | FileCheck %s --check-prefix=CHECK --check-prefix=ARCHIVE
+RUN: llvm-dwarfdump -v %t2 | FileCheck %s
+RUN: llvm-dsymutil -f -o - -oso-prepend-path=%p/.. %p/../Inputs/basic.macho.x86_64 | llvm-dwarfdump -v - | FileCheck %s --check-prefix=CHECK --check-prefix=BASIC
+RUN: llvm-dsymutil -f -o - -oso-prepend-path=%p/.. %p/../Inputs/basic-archive.macho.x86_64 | llvm-dwarfdump -v - | FileCheck %s --check-prefix=CHECK --check-prefix=ARCHIVE
+RUN: llvm-dsymutil -dump-debug-map -oso-prepend-path=%p/.. %p/../Inputs/basic.macho.x86_64 | llvm-dsymutil -f -y -o - - | llvm-dwarfdump -v - | FileCheck %s --check-prefix=CHECK --check-prefix=BASIC
+RUN: llvm-dsymutil -dump-debug-map -oso-prepend-path=%p/.. %p/../Inputs/basic-archive.macho.x86_64 | llvm-dsymutil -f -o - -y - | llvm-dwarfdump -v - | FileCheck %s --check-prefix=CHECK --check-prefix=ARCHIVE
 
 CHECK: file format Mach-O 64-bit x86-64
 
@@ -140,8 +140,7 @@ CHECK:      DW_AT_frame_base [DW_FORM_block1]	(DW_OP_reg6 RBP)
 
 CHECK:    NULL
 
-CHECK: .debug_loc contents
-CHECK-NOT: Location
+CHECK-NOT: .debug_loc contents
 
 CHECK:.debug_aranges contents:
 CHECK-NEXT:Address Range Header: length = 0x0000002c, version = 0x0002, cu_offset = 0x00000000, addr_size = 0x08, seg_size = 0x00

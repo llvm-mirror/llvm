@@ -159,7 +159,14 @@ unsigned CodeViewDebug::maybeRecordFile(const DIFile *F) {
   if (Insertion.second) {
     // We have to compute the full filepath and emit a .cv_file directive.
     StringRef FullPath = getFullFilepath(F);
-    bool Success = OS.EmitCVFileDirective(NextId, FullPath);
+    std::string Checksum = fromHex(F->getChecksum());
+    void *CKMem = OS.getContext().allocate(Checksum.size(), 1);
+    memcpy(CKMem, Checksum.data(), Checksum.size());
+    ArrayRef<uint8_t> ChecksumAsBytes(reinterpret_cast<const uint8_t *>(CKMem),
+                                      Checksum.size());
+    DIFile::ChecksumKind ChecksumKind = F->getChecksumKind();
+    bool Success = OS.EmitCVFileDirective(NextId, FullPath, ChecksumAsBytes,
+                                          static_cast<unsigned>(ChecksumKind));
     (void)Success;
     assert(Success && ".cv_file directive failed");
   }
@@ -325,8 +332,9 @@ TypeIndex CodeViewDebug::getMemberFunctionType(const DISubprogram *SP,
   // function type, as the complete class type is likely to reference this
   // member function type.
   TypeLoweringScope S(*this);
-  TypeIndex TI =
-      lowerTypeMemberFunction(SP->getType(), Class, SP->getThisAdjustment());
+  const bool IsStaticMethod = (SP->getFlags() & DINode::FlagStaticMember) != 0;
+  TypeIndex TI = lowerTypeMemberFunction(
+      SP->getType(), Class, SP->getThisAdjustment(), IsStaticMethod);
   return recordTypeIndexForDINode(SP, TI, Class);
 }
 
@@ -680,8 +688,10 @@ void CodeViewDebug::emitInlineeLinesSubsection() {
   OS.AddComment("Inlinee lines subsection");
   MCSymbol *InlineEnd = beginCVSubsection(DebugSubsectionKind::InlineeLines);
 
-  // We don't provide any extra file info.
-  // FIXME: Find out if debuggers use this info.
+  // We emit the checksum info for files.  This is used by debuggers to
+  // determine if a pdb matches the source before loading it.  Visual Studio,
+  // for instance, will display a warning that the breakpoints are not valid if
+  // the pdb does not match the source.
   OS.AddComment("Inlinee lines signature");
   OS.EmitIntValue(unsigned(InlineeLinesSignature::Normal), 4);
 
@@ -694,13 +704,10 @@ void CodeViewDebug::emitInlineeLinesSubsection() {
     OS.AddComment("Inlined function " + SP->getName() + " starts at " +
                   SP->getFilename() + Twine(':') + Twine(SP->getLine()));
     OS.AddBlankLine();
-    // The filechecksum table uses 8 byte entries for now, and file ids start at
-    // 1.
-    unsigned FileOffset = (FileId - 1) * 8;
     OS.AddComment("Type index of inlined function");
     OS.EmitIntValue(InlineeIdx.getIndex(), 4);
     OS.AddComment("Offset into filechecksum table");
-    OS.EmitIntValue(FileOffset, 4);
+    OS.EmitCVFileChecksumOffsetDirective(FileId);
     OS.AddComment("Starting line number");
     OS.EmitIntValue(SP->getLine(), 4);
   }
@@ -1221,7 +1228,8 @@ TypeIndex CodeViewDebug::lowerType(const DIType *Ty, const DIType *ClassTy) {
       // The member function type of a member function pointer has no
       // ThisAdjustment.
       return lowerTypeMemberFunction(cast<DISubroutineType>(Ty), ClassTy,
-                                     /*ThisAdjustment=*/0);
+                                     /*ThisAdjustment=*/0,
+                                     /*IsStaticMethod=*/false);
     }
     return lowerTypeFunction(cast<DISubroutineType>(Ty));
   case dwarf::DW_TAG_enumeration_type:
@@ -1275,11 +1283,12 @@ TypeIndex CodeViewDebug::lowerTypeArray(const DICompositeType *Ty) {
            "codeview doesn't support subranges with lower bounds");
     int64_t Count = Subrange->getCount();
 
-    // Variable Length Array (VLA) has Count equal to '-1'.
-    // Replace with Count '1', assume it is the minimum VLA length.
-    // FIXME: Make front-end support VLA subrange and emit LF_DIMVARLU.
+    // Forward declarations of arrays without a size and VLAs use a count of -1.
+    // Emit a count of zero in these cases to match what MSVC does for arrays
+    // without a size. MSVC doesn't support VLAs, so it's not clear what we
+    // should do for them even if we could distinguish them.
     if (Count == -1)
-      Count = 1;
+      Count = 0;
 
     // Update the element size and element type index for subsequent subranges.
     ElementSize *= Count;
@@ -1542,7 +1551,8 @@ TypeIndex CodeViewDebug::lowerTypeFunction(const DISubroutineType *Ty) {
 
 TypeIndex CodeViewDebug::lowerTypeMemberFunction(const DISubroutineType *Ty,
                                                  const DIType *ClassTy,
-                                                 int ThisAdjustment) {
+                                                 int ThisAdjustment,
+                                                 bool IsStaticMethod) {
   // Lower the containing class type.
   TypeIndex ClassType = getTypeIndex(ClassTy);
 
@@ -1557,8 +1567,8 @@ TypeIndex CodeViewDebug::lowerTypeMemberFunction(const DISubroutineType *Ty,
     ReturnTypeIndex = ReturnAndArgTypesRef.front();
     ArgTypeIndices = ReturnAndArgTypesRef.drop_front();
   }
-  TypeIndex ThisTypeIndex = TypeIndex::Void();
-  if (!ArgTypeIndices.empty()) {
+  TypeIndex ThisTypeIndex;
+  if (!IsStaticMethod && !ArgTypeIndices.empty()) {
     ThisTypeIndex = ArgTypeIndices.front();
     ArgTypeIndices = ArgTypeIndices.drop_front();
   }
@@ -1568,9 +1578,7 @@ TypeIndex CodeViewDebug::lowerTypeMemberFunction(const DISubroutineType *Ty,
 
   CallingConvention CC = dwarfCCToCodeView(Ty->getCC());
 
-  // TODO: Need to use the correct values for:
-  //       FunctionOptions
-  //       ThisPointerAdjustment.
+  // TODO: Need to use the correct values for FunctionOptions.
   MemberFunctionRecord MFR(ReturnTypeIndex, ClassType, ThisTypeIndex, CC,
                            FunctionOptions::None, ArgTypeIndices.size(),
                            ArgListIndex, ThisAdjustment);
@@ -1612,6 +1620,9 @@ static MethodOptions translateMethodOptionFlags(const DISubprogram *SP) {
 
 static MethodKind translateMethodKindFlags(const DISubprogram *SP,
                                            bool Introduced) {
+  if (SP->getFlags() & DINode::FlagStaticMember)
+    return MethodKind::Static;
+
   switch (SP->getVirtuality()) {
   case dwarf::DW_VIRTUALITY_none:
     break;
@@ -1623,8 +1634,6 @@ static MethodKind translateMethodKindFlags(const DISubprogram *SP,
   default:
     llvm_unreachable("unhandled virtuality case");
   }
-
-  // FIXME: Get Clang to mark DISubprogram as static and do something with it.
 
   return MethodKind::Vanilla;
 }

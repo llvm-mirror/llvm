@@ -78,6 +78,9 @@ private:
   void lowerScalarAbs(SetVectorType &Worklist,
                       MachineInstr &Inst) const;
 
+  void lowerScalarXnor(SetVectorType &Worklist,
+                       MachineInstr &Inst) const;
+
   void splitScalar64BitUnaryOp(SetVectorType &Worklist,
                                MachineInstr &Inst, unsigned Opcode) const;
 
@@ -151,7 +154,8 @@ public:
                              int64_t &Offset,
                              const TargetRegisterInfo *TRI) const final;
 
-  bool shouldClusterMemOps(MachineInstr &FirstLdSt, MachineInstr &SecondLdSt,
+  bool shouldClusterMemOps(MachineInstr &FirstLdSt, unsigned BaseReg1,
+                           MachineInstr &SecondLdSt, unsigned BaseReg2,
                            unsigned NumLoads) const final;
 
   void copyPhysReg(MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
@@ -257,6 +261,9 @@ public:
                           MachineBasicBlock::iterator I, const DebugLoc &DL,
                           unsigned DstReg, ArrayRef<MachineOperand> Cond,
                           unsigned TrueReg, unsigned FalseReg) const;
+
+  unsigned getAddressSpaceForPseudoSourceKind(
+             PseudoSourceValue::PSVKind Kind) const override;
 
   bool
   areMemAccessesTriviallyDisjoint(MachineInstr &MIa, MachineInstr &MIb,
