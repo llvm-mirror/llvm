@@ -42,7 +42,7 @@
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
-#include "llvm/Analysis/OptimizationDiagnosticInfo.h"
+#include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionAliasAnalysis.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
@@ -577,10 +577,13 @@ bool llvm::canSinkOrHoistInst(Instruction &I, AAResults *AA, DominatorTree *DT,
                               Loop *CurLoop, AliasSetTracker *CurAST,
                               LoopSafetyInfo *SafetyInfo,
                               OptimizationRemarkEmitter *ORE) {
+  // SafetyInfo is nullptr if we are checking for sinking from preheader to
+  // loop body.
+  const bool SinkingToLoopBody = !SafetyInfo;
   // Loads have extra constraints we have to verify before we can hoist them.
   if (LoadInst *LI = dyn_cast<LoadInst>(&I)) {
     if (!LI->isUnordered())
-      return false; // Don't hoist volatile/atomic loads!
+      return false; // Don't sink/hoist volatile or ordered atomic loads!
 
     // Loads from constant memory are always safe to move, even if they end up
     // in the same alias set as something that ends up being modified.
@@ -588,6 +591,9 @@ bool llvm::canSinkOrHoistInst(Instruction &I, AAResults *AA, DominatorTree *DT,
       return true;
     if (LI->getMetadata(LLVMContext::MD_invariant_load))
       return true;
+
+    if (LI->isAtomic() && SinkingToLoopBody)
+      return false; // Don't sink unordered atomic loads to loop body.
 
     // This checks for an invariant.start dominating the load.
     if (isLoadInvariantInLoop(LI, DT, CurLoop))
@@ -606,10 +612,12 @@ bool llvm::canSinkOrHoistInst(Instruction &I, AAResults *AA, DominatorTree *DT,
     // Check loop-invariant address because this may also be a sinkable load
     // whose address is not necessarily loop-invariant.
     if (ORE && Invalidated && CurLoop->isLoopInvariant(LI->getPointerOperand()))
-      ORE->emit(OptimizationRemarkMissed(
-                    DEBUG_TYPE, "LoadWithLoopInvariantAddressInvalidated", LI)
-                << "failed to move load with loop-invariant address "
-                   "because the loop may invalidate its value");
+      ORE->emit([&]() {
+        return OptimizationRemarkMissed(
+                   DEBUG_TYPE, "LoadWithLoopInvariantAddressInvalidated", LI)
+               << "failed to move load with loop-invariant address "
+                  "because the loop may invalidate its value";
+      });
 
     return !Invalidated;
   } else if (CallInst *CI = dyn_cast<CallInst>(&I)) {
@@ -664,9 +672,9 @@ bool llvm::canSinkOrHoistInst(Instruction &I, AAResults *AA, DominatorTree *DT,
       !isa<InsertValueInst>(I))
     return false;
 
-  // SafetyInfo is nullptr if we are checking for sinking from preheader to
-  // loop body. It will be always safe as there is no speculative execution.
-  if (!SafetyInfo)
+  // If we are checking for sinking from preheader to loop body it will be
+  // always safe as there is no speculative execution.
+  if (SinkingToLoopBody)
     return true;
 
   // TODO: Plumb the context instruction through to make hoisting and sinking
@@ -808,8 +816,10 @@ static bool sink(Instruction &I, const LoopInfo *LI, const DominatorTree *DT,
                  const LoopSafetyInfo *SafetyInfo,
                  OptimizationRemarkEmitter *ORE) {
   DEBUG(dbgs() << "LICM sinking instruction: " << I << "\n");
-  ORE->emit(OptimizationRemark(DEBUG_TYPE, "InstSunk", &I)
-            << "sinking " << ore::NV("Inst", &I));
+  ORE->emit([&]() {
+    return OptimizationRemark(DEBUG_TYPE, "InstSunk", &I)
+           << "sinking " << ore::NV("Inst", &I);
+  });
   bool Changed = false;
   if (isa<LoadInst>(I))
     ++NumMovedLoads;
@@ -881,8 +891,10 @@ static bool hoist(Instruction &I, const DominatorTree *DT, const Loop *CurLoop,
   auto *Preheader = CurLoop->getLoopPreheader();
   DEBUG(dbgs() << "LICM hoisting to " << Preheader->getName() << ": " << I
                << "\n");
-  ORE->emit(OptimizationRemark(DEBUG_TYPE, "Hoisted", &I)
-            << "hoisting " << ore::NV("Inst", &I));
+  ORE->emit([&]() {
+    return OptimizationRemark(DEBUG_TYPE, "Hoisted", &I) << "hoisting "
+                                                         << ore::NV("Inst", &I);
+  });
 
   // Metadata can be dependent on conditions we are hoisting above.
   // Conservatively strip all metadata on the instruction unless we were
@@ -932,10 +944,12 @@ static bool isSafeToExecuteUnconditionally(Instruction &Inst,
   if (!GuaranteedToExecute) {
     auto *LI = dyn_cast<LoadInst>(&Inst);
     if (LI && CurLoop->isLoopInvariant(LI->getPointerOperand()))
-      ORE->emit(OptimizationRemarkMissed(
-                    DEBUG_TYPE, "LoadWithLoopInvariantAddressCondExecuted", LI)
-                << "failed to hoist load with loop-invariant address "
-                   "because load is conditionally executed");
+      ORE->emit([&]() {
+        return OptimizationRemarkMissed(
+                   DEBUG_TYPE, "LoadWithLoopInvariantAddressCondExecuted", LI)
+               << "failed to hoist load with loop-invariant address "
+                  "because load is conditionally executed";
+      });
   }
 
   return GuaranteedToExecute;
@@ -1251,9 +1265,11 @@ bool llvm::promoteLoopAccessesToScalars(
   // Otherwise, this is safe to promote, lets do it!
   DEBUG(dbgs() << "LICM: Promoting value stored to in loop: " << *SomePtr
                << '\n');
-  ORE->emit(
-      OptimizationRemark(DEBUG_TYPE, "PromoteLoopAccessesToScalar", LoopUses[0])
-      << "Moving accesses to memory location out of the loop");
+  ORE->emit([&]() {
+    return OptimizationRemark(DEBUG_TYPE, "PromoteLoopAccessesToScalar",
+                              LoopUses[0])
+           << "Moving accesses to memory location out of the loop";
+  });
   ++NumPromoted;
 
   // Grab a debug location for the inserted loads/stores; given that the

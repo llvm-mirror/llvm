@@ -68,17 +68,6 @@ DWARFContext::DWARFContext(std::unique_ptr<const DWARFObject> DObj,
 
 DWARFContext::~DWARFContext() = default;
 
-static void dumpAccelSection(raw_ostream &OS, const DWARFObject &Obj,
-                             const DWARFSection &Section,
-                             StringRef StringSection, bool LittleEndian) {
-  DWARFDataExtractor AccelSection(Obj, Section, LittleEndian, 0);
-  DataExtractor StrData(StringSection, LittleEndian, 0);
-  DWARFAcceleratorTable Accel(AccelSection, StrData);
-  if (!Accel.extract())
-    return;
-  Accel.dump(OS);
-}
-
 /// Dump the UUID load command.
 static void dumpUUID(raw_ostream &OS, const ObjectFile &Obj) {
   auto *MachO = dyn_cast<MachOObjectFile>(&Obj);
@@ -291,22 +280,20 @@ void DWARFContext::dump(
 
   if (shouldDump(Explicit, ".debug_loc", DIDT_ID_DebugLoc,
                  DObj->getLocSection().Data)) {
-    getDebugLoc()->dump(OS, getRegisterInfo());
+    getDebugLoc()->dump(OS, getRegisterInfo(), DumpOffset);
   }
   if (shouldDump(ExplicitDWO, ".debug_loc.dwo", DIDT_ID_DebugLoc,
                  DObj->getLocDWOSection().Data)) {
-    getDebugLocDWO()->dump(OS, getRegisterInfo());
+    getDebugLocDWO()->dump(OS, getRegisterInfo(), DumpOffset);
   }
 
   if (shouldDump(Explicit, ".debug_frame", DIDT_ID_DebugFrame,
-                 DObj->getDebugFrameSection())) {
-    getDebugFrame()->dump(OS);
-  }
+                 DObj->getDebugFrameSection()))
+    getDebugFrame()->dump(OS, DumpOffset);
 
   if (shouldDump(Explicit, ".eh_frame", DIDT_ID_DebugFrame,
-                 DObj->getEHFrameSection())) {
-    getEHFrame()->dump(OS);
-  }
+                 DObj->getEHFrameSection()))
+    getEHFrame()->dump(OS, DumpOffset);
 
   if (DumpType & DIDT_DebugMacro) {
     if (Explicit || !getDebugMacro()->empty()) {
@@ -333,12 +320,21 @@ void DWARFContext::dump(
       if (!CUDIE)
         continue;
       if (auto StmtOffset = toSectionOffset(CUDIE.find(DW_AT_stmt_list))) {
+        if (DumpOffset && *StmtOffset != *DumpOffset)
+          continue;
         DWARFDataExtractor lineData(*DObj, DObj->getLineSection(),
                                     isLittleEndian(), savedAddressByteSize);
         DWARFDebugLine::LineTable LineTable;
         uint32_t Offset = *StmtOffset;
-        LineTable.parse(lineData, &Offset);
-        LineTable.dump(OS);
+        // Verbose dumping is done during parsing and not on the intermediate
+        // representation.
+        OS << "debug_line[" << format("0x%8.8x", Offset) << "]\n";
+        if (DumpOpts.Verbose) {
+          LineTable.parse(lineData, &Offset, &OS);
+        } else {
+          LineTable.parse(lineData, &Offset);
+          LineTable.dump(OS);
+        }
       }
     }
   }
@@ -446,23 +442,19 @@ void DWARFContext::dump(
 
   if (shouldDump(Explicit, ".apple_names", DIDT_ID_AppleNames,
                  DObj->getAppleNamesSection().Data))
-    dumpAccelSection(OS, *DObj, DObj->getAppleNamesSection(),
-                     DObj->getStringSection(), isLittleEndian());
+    getAppleNames().dump(OS);
 
   if (shouldDump(Explicit, ".apple_types", DIDT_ID_AppleTypes,
                  DObj->getAppleTypesSection().Data))
-    dumpAccelSection(OS, *DObj, DObj->getAppleTypesSection(),
-                     DObj->getStringSection(), isLittleEndian());
+    getAppleTypes().dump(OS);
 
   if (shouldDump(Explicit, ".apple_namespaces", DIDT_ID_AppleNamespaces,
                  DObj->getAppleNamespacesSection().Data))
-    dumpAccelSection(OS, *DObj, DObj->getAppleNamespacesSection(),
-                     DObj->getStringSection(), isLittleEndian());
+    getAppleNamespaces().dump(OS);
 
   if (shouldDump(Explicit, ".apple_objc", DIDT_ID_AppleObjC,
                  DObj->getAppleObjCSection().Data))
-    dumpAccelSection(OS, *DObj, DObj->getAppleObjCSection(),
-                     DObj->getStringSection(), isLittleEndian());
+    getAppleObjC().dump(OS);
 }
 
 DWARFCompileUnit *DWARFContext::getDWOCompileUnitForHash(uint64_t Hash) {
@@ -629,6 +621,40 @@ const DWARFDebugMacro *DWARFContext::getDebugMacro() {
   Macro.reset(new DWARFDebugMacro());
   Macro->parse(MacinfoData);
   return Macro.get();
+}
+
+static DWARFAcceleratorTable &
+getAccelTable(std::unique_ptr<DWARFAcceleratorTable> &Cache,
+              const DWARFObject &Obj, const DWARFSection &Section,
+              StringRef StringSection, bool IsLittleEndian) {
+  if (Cache)
+    return *Cache;
+  DWARFDataExtractor AccelSection(Obj, Section, IsLittleEndian, 0);
+  DataExtractor StrData(StringSection, IsLittleEndian, 0);
+  Cache.reset(new DWARFAcceleratorTable(AccelSection, StrData));
+  Cache->extract();
+  return *Cache;
+}
+
+const DWARFAcceleratorTable &DWARFContext::getAppleNames() {
+  return getAccelTable(AppleNames, *DObj, DObj->getAppleNamesSection(),
+                       DObj->getStringSection(), isLittleEndian());
+}
+
+const DWARFAcceleratorTable &DWARFContext::getAppleTypes() {
+  return getAccelTable(AppleTypes, *DObj, DObj->getAppleTypesSection(),
+                       DObj->getStringSection(), isLittleEndian());
+}
+
+const DWARFAcceleratorTable &DWARFContext::getAppleNamespaces() {
+  return getAccelTable(AppleNamespaces, *DObj,
+                       DObj->getAppleNamespacesSection(),
+                       DObj->getStringSection(), isLittleEndian());
+}
+
+const DWARFAcceleratorTable &DWARFContext::getAppleObjC() {
+  return getAccelTable(AppleObjC, *DObj, DObj->getAppleObjCSection(),
+                       DObj->getStringSection(), isLittleEndian());
 }
 
 const DWARFLineTable *
@@ -1129,6 +1155,10 @@ public:
 
       // Skip BSS and Virtual sections, they aren't interesting.
       if (Section.isBSS() || Section.isVirtual())
+        continue;
+
+      // Skip sections stripped by dsymutil.
+      if (Section.isStripped())
         continue;
 
       StringRef Data;

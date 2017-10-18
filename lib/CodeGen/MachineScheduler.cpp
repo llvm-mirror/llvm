@@ -581,7 +581,7 @@ void MachineSchedulerBase::print(raw_ostream &O, const Module* m) const {
   // unimplemented
 }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+#ifdef LLVM_ENABLE_DUMP
 LLVM_DUMP_METHOD void ReadyQueue::dump() const {
   dbgs() << "Queue " << Name << ": ";
   for (const SUnit *SU : Queue)
@@ -919,7 +919,7 @@ void ScheduleDAGMI::placeDebugValues() {
   FirstDbgValue = nullptr;
 }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+#ifdef LLVM_ENABLE_DUMP
 LLVM_DUMP_METHOD void ScheduleDAGMI::dumpSchedule() const {
   for (MachineBasicBlock::iterator MI = begin(), ME = end(); MI != ME; ++MI) {
     if (SUnit *SU = getSUnit(&(*MI)))
@@ -1962,16 +1962,18 @@ bool SchedBoundary::checkHazard(SUnit *SU) {
 
   if (SchedModel->hasInstrSchedModel() && SU->hasReservedResource) {
     const MCSchedClassDesc *SC = DAG->getSchedClass(SU);
-    for (TargetSchedModel::ProcResIter
-           PI = SchedModel->getWriteProcResBegin(SC),
-           PE = SchedModel->getWriteProcResEnd(SC); PI != PE; ++PI) {
-      unsigned NRCycle = getNextResourceCycle(PI->ProcResourceIdx, PI->Cycles);
+    for (const MCWriteProcResEntry &PE :
+          make_range(SchedModel->getWriteProcResBegin(SC),
+                     SchedModel->getWriteProcResEnd(SC))) {
+      unsigned ResIdx = PE.ProcResourceIdx;
+      unsigned Cycles = PE.Cycles;
+      unsigned NRCycle = getNextResourceCycle(ResIdx, Cycles);
       if (NRCycle > CurrCycle) {
 #ifndef NDEBUG
-        MaxObservedStall = std::max(PI->Cycles, MaxObservedStall);
+        MaxObservedStall = std::max(Cycles, MaxObservedStall);
 #endif
         DEBUG(dbgs() << "  SU(" << SU->NodeNum << ") "
-              << SchedModel->getResourceName(PI->ProcResourceIdx)
+              << SchedModel->getResourceName(ResIdx)
               << "=" << NRCycle << "c\n");
         return true;
       }
@@ -2352,7 +2354,7 @@ SUnit *SchedBoundary::pickOnlyChoice() {
   return nullptr;
 }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+#ifdef LLVM_ENABLE_DUMP
 // This is useful information to dump after bumpNode.
 // Note that the Queue contents are more useful before pickNodeFromQueue.
 LLVM_DUMP_METHOD void SchedBoundary::dumpScheduledState() const {
@@ -2363,7 +2365,7 @@ LLVM_DUMP_METHOD void SchedBoundary::dumpScheduledState() const {
     ResCount = getResourceCount(ZoneCritResIdx);
   } else {
     ResFactor = SchedModel->getMicroOpFactor();
-    ResCount = RetiredMOps * SchedModel->getMicroOpFactor();
+    ResCount = RetiredMOps * ResFactor;
   }
   unsigned LFactor = SchedModel->getLatencyFactor();
   dbgs() << Available.getName() << " @" << CurrCycle << "c\n"
@@ -2651,7 +2653,7 @@ void GenericScheduler::initialize(ScheduleDAGMI *dag) {
 void GenericScheduler::initPolicy(MachineBasicBlock::iterator Begin,
                                   MachineBasicBlock::iterator End,
                                   unsigned NumRegionInstrs) {
-  const MachineFunction &MF = *Begin->getParent()->getParent();
+  const MachineFunction &MF = *Begin->getMF();
   const TargetLowering *TLI = MF.getSubtarget().getTargetLowering();
 
   // Avoid setting up the register pressure tracker for small regions to save
@@ -2696,7 +2698,7 @@ void GenericScheduler::initPolicy(MachineBasicBlock::iterator Begin,
 
 void GenericScheduler::dumpPolicy() const {
   // Cannot completely remove virtual function even in release mode.
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+#ifdef LLVM_ENABLE_DUMP
   dbgs() << "GenericScheduler RegionPolicy: "
          << " ShouldTrackPressure=" << RegionPolicy.ShouldTrackPressure
          << " OnlyTopDown=" << RegionPolicy.OnlyTopDown

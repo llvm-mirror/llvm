@@ -86,10 +86,11 @@ class AArch64ELFStreamer : public MCELFStreamer {
 public:
   friend class AArch64TargetELFStreamer;
 
-  AArch64ELFStreamer(MCContext &Context, MCAsmBackend &TAB,
-                     raw_pwrite_stream &OS, MCCodeEmitter *Emitter)
-      : MCELFStreamer(Context, TAB, OS, Emitter), MappingSymbolCounter(0),
-        LastEMS(EMS_None) {}
+  AArch64ELFStreamer(MCContext &Context, std::unique_ptr<MCAsmBackend> TAB,
+                     raw_pwrite_stream &OS,
+                     std::unique_ptr<MCCodeEmitter> Emitter)
+      : MCELFStreamer(Context, std::move(TAB), OS, std::move(Emitter)),
+        MappingSymbolCounter(0), LastEMS(EMS_None) {}
 
   void ChangeSection(MCSection *Section, const MCExpr *Subsection) override {
     // We have to keep track of the mapping symbol state of any sections we
@@ -198,10 +199,13 @@ MCTargetStreamer *createAArch64AsmTargetStreamer(MCStreamer &S,
   return new AArch64TargetAsmStreamer(S, OS);
 }
 
-MCELFStreamer *createAArch64ELFStreamer(MCContext &Context, MCAsmBackend &TAB,
+MCELFStreamer *createAArch64ELFStreamer(MCContext &Context,
+                                        std::unique_ptr<MCAsmBackend> TAB,
                                         raw_pwrite_stream &OS,
-                                        MCCodeEmitter *Emitter, bool RelaxAll) {
-  AArch64ELFStreamer *S = new AArch64ELFStreamer(Context, TAB, OS, Emitter);
+                                        std::unique_ptr<MCCodeEmitter> Emitter,
+                                        bool RelaxAll) {
+  AArch64ELFStreamer *S =
+      new AArch64ELFStreamer(Context, std::move(TAB), OS, std::move(Emitter));
   if (RelaxAll)
     S->getAssembler().setRelaxAll(true);
   return S;

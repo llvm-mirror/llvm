@@ -116,7 +116,7 @@ public:
     return SchedModel.getProcResource(PIdx);
   }
 
-#ifndef NDEBUG
+#ifdef LLVM_ENABLE_DUMP
   const char *getResourceName(unsigned PIdx) const {
     if (!PIdx)
       return "MOps";

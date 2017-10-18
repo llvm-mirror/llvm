@@ -22,7 +22,7 @@
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/LoopIterator.h"
 #include "llvm/Analysis/LoopPass.h"
-#include "llvm/Analysis/OptimizationDiagnosticInfo.h"
+#include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/DataLayout.h"
@@ -200,7 +200,7 @@ const Loop* llvm::addClonedBlockToLoopInfo(BasicBlock *OriginalBB,
     assert(OriginalBB == OldLoop->getHeader() &&
            "Header should be first in RPO");
 
-    NewLoop = new Loop();
+    NewLoop = LI->AllocateLoop();
     Loop *NewLoopParent = NewLoops.lookup(OldLoop->getParentLoop());
 
     if (NewLoopParent)
@@ -291,7 +291,7 @@ static bool isEpilogProfitable(Loop *L) {
 ///
 /// This utility preserves LoopInfo. It will also preserve ScalarEvolution and
 /// DominatorTree if they are non-null.
-LoopUnrollStatus llvm::UnrollLoop(
+LoopUnrollResult llvm::UnrollLoop(
     Loop *L, unsigned Count, unsigned TripCount, bool Force, bool AllowRuntime,
     bool AllowExpensiveTripCount, bool PreserveCondBr, bool PreserveOnlyFirst,
     unsigned TripMultiple, unsigned PeelCount, bool UnrollRemainder,
@@ -301,19 +301,19 @@ LoopUnrollStatus llvm::UnrollLoop(
   BasicBlock *Preheader = L->getLoopPreheader();
   if (!Preheader) {
     DEBUG(dbgs() << "  Can't unroll; loop preheader-insertion failed.\n");
-    return LoopUnrollStatus::Unmodified;
+    return LoopUnrollResult::Unmodified;
   }
 
   BasicBlock *LatchBlock = L->getLoopLatch();
   if (!LatchBlock) {
     DEBUG(dbgs() << "  Can't unroll; loop exit-block-insertion failed.\n");
-    return LoopUnrollStatus::Unmodified;
+    return LoopUnrollResult::Unmodified;
   }
 
   // Loops with indirectbr cannot be cloned.
   if (!L->isSafeToClone()) {
     DEBUG(dbgs() << "  Can't unroll; Loop body cannot be cloned.\n");
-    return LoopUnrollStatus::Unmodified;
+    return LoopUnrollResult::Unmodified;
   }
 
   // The current loop unroll pass can only unroll loops with a single latch
@@ -327,7 +327,7 @@ LoopUnrollStatus llvm::UnrollLoop(
     // The loop-rotate pass can be helpful to avoid this in many cases.
     DEBUG(dbgs() <<
              "  Can't unroll; loop not terminated by a conditional branch.\n");
-    return LoopUnrollStatus::Unmodified;
+    return LoopUnrollResult::Unmodified;
   }
 
   auto CheckSuccessors = [&](unsigned S1, unsigned S2) {
@@ -337,14 +337,14 @@ LoopUnrollStatus llvm::UnrollLoop(
   if (!CheckSuccessors(0, 1) && !CheckSuccessors(1, 0)) {
     DEBUG(dbgs() << "Can't unroll; only loops with one conditional latch"
                     " exiting the loop can be unrolled\n");
-    return LoopUnrollStatus::Unmodified;
+    return LoopUnrollResult::Unmodified;
   }
 
   if (Header->hasAddressTaken()) {
     // The loop-rotate pass can be helpful to avoid this in many cases.
     DEBUG(dbgs() <<
           "  Won't unroll loop: address of header block is taken.\n");
-    return LoopUnrollStatus::Unmodified;
+    return LoopUnrollResult::Unmodified;
   }
 
   if (TripCount != 0)
@@ -360,7 +360,7 @@ LoopUnrollStatus llvm::UnrollLoop(
   // Don't enter the unroll code if there is nothing to do.
   if (TripCount == 0 && Count < 2 && PeelCount == 0) {
     DEBUG(dbgs() << "Won't unroll; almost nothing to do\n");
-    return LoopUnrollStatus::Unmodified;
+    return LoopUnrollResult::Unmodified;
   }
 
   assert(Count > 0);
@@ -436,7 +436,7 @@ LoopUnrollStatus llvm::UnrollLoop(
       DEBUG(
           dbgs() << "Wont unroll; remainder loop could not be generated"
                     "when assuming runtime trip count\n");
-      return LoopUnrollStatus::Unmodified;
+      return LoopUnrollResult::Unmodified;
     }
   }
 
@@ -460,18 +460,22 @@ LoopUnrollStatus llvm::UnrollLoop(
   // Report the unrolling decision.
   if (CompletelyUnroll) {
     DEBUG(dbgs() << "COMPLETELY UNROLLING loop %" << Header->getName()
-          << " with trip count " << TripCount << "!\n");
-    ORE->emit(OptimizationRemark(DEBUG_TYPE, "FullyUnrolled", L->getStartLoc(),
-                                 L->getHeader())
-              << "completely unrolled loop with "
-              << NV("UnrollCount", TripCount) << " iterations");
+                 << " with trip count " << TripCount << "!\n");
+    ORE->emit([&]() {
+      return OptimizationRemark(DEBUG_TYPE, "FullyUnrolled", L->getStartLoc(),
+                                L->getHeader())
+             << "completely unrolled loop with " << NV("UnrollCount", TripCount)
+             << " iterations";
+    });
   } else if (PeelCount) {
     DEBUG(dbgs() << "PEELING loop %" << Header->getName()
                  << " with iteration count " << PeelCount << "!\n");
-    ORE->emit(OptimizationRemark(DEBUG_TYPE, "Peeled", L->getStartLoc(),
-                                 L->getHeader())
-              << " peeled loop by " << NV("PeelCount", PeelCount)
-              << " iterations");
+    ORE->emit([&]() {
+      return OptimizationRemark(DEBUG_TYPE, "Peeled", L->getStartLoc(),
+                                L->getHeader())
+             << " peeled loop by " << NV("PeelCount", PeelCount)
+             << " iterations";
+    });
   } else {
     auto DiagBuilder = [&]() {
       OptimizationRemark Diag(DEBUG_TYPE, "PartialUnrolled", L->getStartLoc(),
@@ -813,7 +817,7 @@ LoopUnrollStatus llvm::UnrollLoop(
   Loop *OuterL = L->getParentLoop();
   // Update LoopInfo if the loop is completely removed.
   if (CompletelyUnroll)
-    LI->markAsErased(L);
+    LI->erase(L);
 
   // After complete unrolling most of the blocks should be contained in OuterL.
   // However, some of them might happen to be out of OuterL (e.g. if they
@@ -838,7 +842,7 @@ LoopUnrollStatus llvm::UnrollLoop(
       if (NeedToFixLCSSA) {
         // LCSSA must be performed on the outermost affected loop. The unrolled
         // loop's last loop latch is guaranteed to be in the outermost loop
-        // after LoopInfo's been updated by markAsErased.
+        // after LoopInfo's been updated by LoopInfo::erase.
         Loop *LatchLoop = LI->getLoopFor(Latches.back());
         Loop *FixLCSSALoop = OuterL;
         if (!FixLCSSALoop->contains(LatchLoop))
@@ -861,8 +865,8 @@ LoopUnrollStatus llvm::UnrollLoop(
     }
   }
 
-  return CompletelyUnroll ? LoopUnrollStatus::FullyUnrolled
-                          : LoopUnrollStatus::PartiallyUnrolled;
+  return CompletelyUnroll ? LoopUnrollResult::FullyUnrolled
+                          : LoopUnrollResult::PartiallyUnrolled;
 }
 
 /// Given an llvm.loop loop id metadata node, returns the loop hint metadata

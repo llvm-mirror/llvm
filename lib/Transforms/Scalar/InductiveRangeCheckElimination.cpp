@@ -79,6 +79,9 @@ static cl::opt<int> MaxExitProbReciprocal("irce-max-exit-prob-reciprocal",
 static cl::opt<bool> SkipProfitabilityChecks("irce-skip-profitability-checks",
                                              cl::Hidden, cl::init(false));
 
+static cl::opt<bool> AllowUnsignedLatchCondition("irce-allow-unsigned-latch",
+                                                 cl::Hidden, cl::init(false));
+
 static const char *ClonedLoopTag = "irce.loop.clone";
 
 #define DEBUG_TYPE "irce"
@@ -173,6 +176,7 @@ public:
     Type *getType() const { return Begin->getType(); }
     const SCEV *getBegin() const { return Begin; }
     const SCEV *getEnd() const { return End; }
+    bool isEmpty() const { return Begin == End; }
   };
 
   /// This is the value the condition of the branch needs to evaluate to for the
@@ -889,6 +893,15 @@ LoopStructure::parseLoopStructure(ScalarEvolution &SE,
 
     IsSignedPredicate =
         Pred == ICmpInst::ICMP_SLT || Pred == ICmpInst::ICMP_SGT;
+
+    // FIXME: We temporarily disable unsigned latch conditions by default
+    // because of found problems with intersecting signed and unsigned ranges.
+    // We are going to turn it on once the problems are fixed.
+    if (!IsSignedPredicate && !AllowUnsignedLatchCondition) {
+      FailureReason = "unsigned latch conditions are explicitly prohibited";
+      return None;
+    }
+
     // The predicate that we need to check that the induction variable lies
     // within bounds.
     ICmpInst::Predicate BoundPred =
@@ -964,6 +977,15 @@ LoopStructure::parseLoopStructure(ScalarEvolution &SE,
 
     IsSignedPredicate =
         Pred == ICmpInst::ICMP_SLT || Pred == ICmpInst::ICMP_SGT;
+
+    // FIXME: We temporarily disable unsigned latch conditions by default
+    // because of found problems with intersecting signed and unsigned ranges.
+    // We are going to turn it on once the problems are fixed.
+    if (!IsSignedPredicate && !AllowUnsignedLatchCondition) {
+      FailureReason = "unsigned latch conditions are explicitly prohibited";
+      return None;
+    }
+
     // The predicate that we need to check that the induction variable lies
     // within bounds.
     ICmpInst::Predicate BoundPred =
@@ -1386,7 +1408,7 @@ void LoopConstrainer::addToParentLoopIfNeeded(ArrayRef<BasicBlock *> BBs) {
 
 Loop *LoopConstrainer::createClonedLoopStructure(Loop *Original, Loop *Parent,
                                                  ValueToValueMapTy &VM) {
-  Loop &New = *new Loop();
+  Loop &New = *LI.AllocateLoop();
   if (Parent)
     Parent->addChildLoop(&New);
   else
@@ -1633,8 +1655,11 @@ static Optional<InductiveRangeCheck::Range>
 IntersectRange(ScalarEvolution &SE,
                const Optional<InductiveRangeCheck::Range> &R1,
                const InductiveRangeCheck::Range &R2) {
-  if (!R1.hasValue())
-    return R2;
+  if (!R1.hasValue()) {
+    if (!R2.isEmpty())
+      return R2;
+    return None;
+  }
   auto &R1Value = R1.getValue();
 
   // TODO: we could widen the smaller range and have this work; but for now we
@@ -1645,7 +1670,11 @@ IntersectRange(ScalarEvolution &SE,
   const SCEV *NewBegin = SE.getSMaxExpr(R1Value.getBegin(), R2.getBegin());
   const SCEV *NewEnd = SE.getSMinExpr(R1Value.getEnd(), R2.getEnd());
 
-  return InductiveRangeCheck::Range(NewBegin, NewEnd);
+  // If the resulting range is empty, just return None.
+  auto Ret = InductiveRangeCheck::Range(NewBegin, NewEnd);
+  if (Ret.isEmpty())
+    return None;
+  return Ret;
 }
 
 bool InductiveRangeCheckElimination::runOnLoop(Loop *L, LPPassManager &LPM) {
@@ -1714,6 +1743,8 @@ bool InductiveRangeCheckElimination::runOnLoop(Loop *L, LPPassManager &LPM) {
       auto MaybeSafeIterRange =
           IntersectRange(SE, SafeIterRange, Result.getValue());
       if (MaybeSafeIterRange.hasValue()) {
+        assert(!MaybeSafeIterRange.getValue().isEmpty() &&
+               "We should never return empty ranges!");
         RangeChecksToEliminate.push_back(IRC);
         SafeIterRange = MaybeSafeIterRange.getValue();
       }

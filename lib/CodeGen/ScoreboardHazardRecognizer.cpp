@@ -32,6 +32,7 @@ ScoreboardHazardRecognizer::ScoreboardHazardRecognizer(
     const char *ParentDebugType)
     : ScheduleHazardRecognizer(), DebugType(ParentDebugType), ItinData(II),
       DAG(SchedDAG) {
+  (void)DebugType;
   // Determine the maximum depth of any itinerary. This determines the depth of
   // the scoreboard. We always make the scoreboard at least 1 cycle deep to
   // avoid dealing with the boundary condition.
@@ -82,7 +83,7 @@ void ScoreboardHazardRecognizer::Reset() {
   ReservedScoreboard.reset();
 }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+#ifdef LLVM_ENABLE_DUMP
 LLVM_DUMP_METHOD void ScoreboardHazardRecognizer::Scoreboard::dump() const {
   dbgs() << "Scoreboard:\n";
 

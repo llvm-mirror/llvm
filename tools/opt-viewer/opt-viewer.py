@@ -10,6 +10,7 @@ from multiprocessing import cpu_count
 import os.path
 import re
 import shutil
+import sys
 
 from pygments import highlight
 from pygments.lexers.c_cpp import CppLexer
@@ -62,7 +63,11 @@ class SourceFileRenderer:
         html_highlighted = highlight(
             file_text,
             self.cpp_lexer,
-            self.html_formatter).decode('utf-8')
+            self.html_formatter)
+
+        # On Python 3, pygments.highlight() returns a bytes object, not a str.
+        if sys.version_info >= (3, 0):
+          html_highlighted = html_highlighted.decode('utf-8')
 
         # Take off the header and footer, these must be
         #   reapplied line-wise, within the page structure
@@ -258,7 +263,7 @@ if __name__ == '__main__':
 
     print_progress = not args.no_progress_indicator
 
-    files = optrecord.find_opt_files(args.yaml_dirs_or_files)
+    files = optrecord.find_opt_files(*args.yaml_dirs_or_files)
     if not files:
         parser.error("No *.opt.yaml files found")
         sys.exit(1)

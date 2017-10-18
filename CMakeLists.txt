@@ -237,7 +237,7 @@ endif()
 include(CPack)
 
 # Sanity check our source directory to make sure that we are not trying to
-# generate an in-tree build (unless on MSVC_IDE, where it is ok), and to make
+# generate an in-source build (unless on MSVC_IDE, where it is ok), and to make
 # sure that we don't have any stray generated files lying around in the tree
 # (which would end up getting picked up by header search, instead of the correct
 # versions).
@@ -390,8 +390,14 @@ option(LLVM_ENABLE_WERROR "Fail and stop if a warning is triggered." OFF)
 
 if( NOT uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG" )
   option(LLVM_ENABLE_ASSERTIONS "Enable assertions" OFF)
+  option(LLVM_FORCE_ENABLE_DUMP "Enable dump functions in release builds" OFF)
 else()
   option(LLVM_ENABLE_ASSERTIONS "Enable assertions" ON)
+  option(LLVM_FORCE_ENABLE_DUMP "Enable dump functions in release builds" ON)
+endif()
+
+if( LLVM_ENABLE_ASSERTIONS OR LLVM_FORCE_ENABLE_DUMP )
+  set(LLVM_ENABLE_DUMP ON)
 endif()
 
 option(LLVM_ENABLE_EXPENSIVE_CHECKS "Enable expensive checks" OFF)
@@ -429,6 +435,8 @@ endif( LLVM_USE_OPROFILE )
 
 set(LLVM_USE_SANITIZER "" CACHE STRING
   "Define the sanitizer used to build binaries and tests.")
+set(LLVM_LIB_FUZZING_ENGINE "" CACHE PATH
+  "Path to fuzzing library for linking with fuzz targets")
 
 option(LLVM_USE_SPLIT_DWARF
   "Use -gsplit-dwarf when compiling llvm." OFF)
@@ -789,7 +797,7 @@ if(LLVM_USE_HOST_TOOLS)
   include(CrossCompile)
 endif(LLVM_USE_HOST_TOOLS)
 if(LLVM_TARGET_IS_CROSSCOMPILE_HOST)
-# Dummy use to avoid CMake Wraning: Manually-specified variables were not used
+# Dummy use to avoid CMake Warning: Manually-specified variables were not used
 # (this is a variable that CrossCompile sets on recursive invocations)
 endif()
 

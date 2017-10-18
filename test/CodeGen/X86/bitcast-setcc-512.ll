@@ -52,12 +52,9 @@ define i32 @v32i16(<32 x i16> %a, <32 x i16> %b) {
 ; AVX512F-LABEL: v32i16:
 ; AVX512F:       # BB#0:
 ; AVX512F-NEXT:    pushq %rbp
-; AVX512F-NEXT:  .Lcfi0:
 ; AVX512F-NEXT:    .cfi_def_cfa_offset 16
-; AVX512F-NEXT:  .Lcfi1:
 ; AVX512F-NEXT:    .cfi_offset %rbp, -16
 ; AVX512F-NEXT:    movq %rsp, %rbp
-; AVX512F-NEXT:  .Lcfi2:
 ; AVX512F-NEXT:    .cfi_def_cfa_register %rbp
 ; AVX512F-NEXT:    andq $-32, %rsp
 ; AVX512F-NEXT:    subq $32, %rsp
@@ -560,12 +557,9 @@ define i64 @v64i8(<64 x i8> %a, <64 x i8> %b) {
 ; AVX1-LABEL: v64i8:
 ; AVX1:       # BB#0:
 ; AVX1-NEXT:    pushq %rbp
-; AVX1-NEXT:  .Lcfi0:
 ; AVX1-NEXT:    .cfi_def_cfa_offset 16
-; AVX1-NEXT:  .Lcfi1:
 ; AVX1-NEXT:    .cfi_offset %rbp, -16
 ; AVX1-NEXT:    movq %rsp, %rbp
-; AVX1-NEXT:  .Lcfi2:
 ; AVX1-NEXT:    .cfi_def_cfa_register %rbp
 ; AVX1-NEXT:    andq $-32, %rsp
 ; AVX1-NEXT:    subq $64, %rsp
@@ -781,12 +775,9 @@ define i64 @v64i8(<64 x i8> %a, <64 x i8> %b) {
 ; AVX2-LABEL: v64i8:
 ; AVX2:       # BB#0:
 ; AVX2-NEXT:    pushq %rbp
-; AVX2-NEXT:  .Lcfi0:
 ; AVX2-NEXT:    .cfi_def_cfa_offset 16
-; AVX2-NEXT:  .Lcfi1:
 ; AVX2-NEXT:    .cfi_offset %rbp, -16
 ; AVX2-NEXT:    movq %rsp, %rbp
-; AVX2-NEXT:  .Lcfi2:
 ; AVX2-NEXT:    .cfi_def_cfa_register %rbp
 ; AVX2-NEXT:    andq $-32, %rsp
 ; AVX2-NEXT:    subq $64, %rsp
@@ -998,12 +989,9 @@ define i64 @v64i8(<64 x i8> %a, <64 x i8> %b) {
 ; AVX512F-LABEL: v64i8:
 ; AVX512F:       # BB#0:
 ; AVX512F-NEXT:    pushq %rbp
-; AVX512F-NEXT:  .Lcfi3:
 ; AVX512F-NEXT:    .cfi_def_cfa_offset 16
-; AVX512F-NEXT:  .Lcfi4:
 ; AVX512F-NEXT:    .cfi_offset %rbp, -16
 ; AVX512F-NEXT:    movq %rsp, %rbp
-; AVX512F-NEXT:  .Lcfi5:
 ; AVX512F-NEXT:    .cfi_def_cfa_register %rbp
 ; AVX512F-NEXT:    andq $-32, %rsp
 ; AVX512F-NEXT:    subq $64, %rsp
@@ -1074,9 +1062,8 @@ define i8 @v8i64(<8 x i64> %a, <8 x i64> %b) {
 ; AVX1-NEXT:    vpcmpgtq %xmm3, %xmm4, %xmm3
 ; AVX1-NEXT:    vpcmpgtq %xmm2, %xmm0, %xmm0
 ; AVX1-NEXT:    vpacksswb %xmm3, %xmm0, %xmm0
-; AVX1-NEXT:    vpacksswb %xmm1, %xmm0, %xmm0
-; AVX1-NEXT:    vpshufb {{.*#+}} xmm0 = xmm0[0,2,4,6,8,10,12,14,u,u,u,u,u,u,u,u]
-; AVX1-NEXT:    vpmovmskb %xmm0, %eax
+; AVX1-NEXT:    vinsertf128 $1, %xmm1, %ymm0, %ymm0
+; AVX1-NEXT:    vmovmskps %ymm0, %eax
 ; AVX1-NEXT:    # kill: %AL<def> %AL<kill> %EAX<kill>
 ; AVX1-NEXT:    vzeroupper
 ; AVX1-NEXT:    retq
@@ -1087,10 +1074,7 @@ define i8 @v8i64(<8 x i64> %a, <8 x i64> %b) {
 ; AVX2-NEXT:    vpcmpgtq %ymm2, %ymm0, %ymm0
 ; AVX2-NEXT:    vpacksswb %ymm1, %ymm0, %ymm0
 ; AVX2-NEXT:    vpermq {{.*#+}} ymm0 = ymm0[0,2,1,3]
-; AVX2-NEXT:    vextracti128 $1, %ymm0, %xmm1
-; AVX2-NEXT:    vpacksswb %xmm1, %xmm0, %xmm0
-; AVX2-NEXT:    vpshufb {{.*#+}} xmm0 = xmm0[0,2,4,6,8,10,12,14,u,u,u,u,u,u,u,u]
-; AVX2-NEXT:    vpmovmskb %xmm0, %eax
+; AVX2-NEXT:    vmovmskps %ymm0, %eax
 ; AVX2-NEXT:    # kill: %AL<def> %AL<kill> %EAX<kill>
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
@@ -1138,9 +1122,8 @@ define i8 @v8f64(<8 x double> %a, <8 x double> %b) {
 ; AVX1-NEXT:    vcmpltpd %ymm0, %ymm2, %ymm0
 ; AVX1-NEXT:    vextractf128 $1, %ymm0, %xmm2
 ; AVX1-NEXT:    vpacksswb %xmm2, %xmm0, %xmm0
-; AVX1-NEXT:    vpacksswb %xmm1, %xmm0, %xmm0
-; AVX1-NEXT:    vpshufb {{.*#+}} xmm0 = xmm0[0,2,4,6,8,10,12,14,u,u,u,u,u,u,u,u]
-; AVX1-NEXT:    vpmovmskb %xmm0, %eax
+; AVX1-NEXT:    vinsertf128 $1, %xmm1, %ymm0, %ymm0
+; AVX1-NEXT:    vmovmskps %ymm0, %eax
 ; AVX1-NEXT:    # kill: %AL<def> %AL<kill> %EAX<kill>
 ; AVX1-NEXT:    vzeroupper
 ; AVX1-NEXT:    retq
@@ -1151,10 +1134,7 @@ define i8 @v8f64(<8 x double> %a, <8 x double> %b) {
 ; AVX2-NEXT:    vcmpltpd %ymm0, %ymm2, %ymm0
 ; AVX2-NEXT:    vpacksswb %ymm1, %ymm0, %ymm0
 ; AVX2-NEXT:    vpermq {{.*#+}} ymm0 = ymm0[0,2,1,3]
-; AVX2-NEXT:    vextracti128 $1, %ymm0, %xmm1
-; AVX2-NEXT:    vpacksswb %xmm1, %xmm0, %xmm0
-; AVX2-NEXT:    vpshufb {{.*#+}} xmm0 = xmm0[0,2,4,6,8,10,12,14,u,u,u,u,u,u,u,u]
-; AVX2-NEXT:    vpmovmskb %xmm0, %eax
+; AVX2-NEXT:    vmovmskps %ymm0, %eax
 ; AVX2-NEXT:    # kill: %AL<def> %AL<kill> %EAX<kill>
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq

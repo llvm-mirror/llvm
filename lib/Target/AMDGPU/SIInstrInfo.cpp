@@ -649,15 +649,18 @@ void SIInstrInfo::insertVectorSelect(MachineBasicBlock &MBB,
          "Not a VGPR32 reg");
 
   if (Cond.size() == 1) {
+    unsigned SReg = MRI.createVirtualRegister(&AMDGPU::SReg_64_XEXECRegClass);
+    BuildMI(MBB, I, DL, get(AMDGPU::COPY), SReg)
+      .add(Cond[0]);
     BuildMI(MBB, I, DL, get(AMDGPU::V_CNDMASK_B32_e64), DstReg)
       .addReg(FalseReg)
       .addReg(TrueReg)
-      .add(Cond[0]);
+      .addReg(SReg);
   } else if (Cond.size() == 2) {
     assert(Cond[0].isImm() && "Cond[0] is not an immediate");
     switch (Cond[0].getImm()) {
     case SIInstrInfo::SCC_TRUE: {
-      unsigned SReg = MRI.createVirtualRegister(&AMDGPU::SReg_64RegClass);
+      unsigned SReg = MRI.createVirtualRegister(&AMDGPU::SReg_64_XEXECRegClass);
       BuildMI(MBB, I, DL, get(AMDGPU::S_CSELECT_B64), SReg)
         .addImm(-1)
         .addImm(0);
@@ -668,7 +671,7 @@ void SIInstrInfo::insertVectorSelect(MachineBasicBlock &MBB,
       break;
     }
     case SIInstrInfo::SCC_FALSE: {
-      unsigned SReg = MRI.createVirtualRegister(&AMDGPU::SReg_64RegClass);
+      unsigned SReg = MRI.createVirtualRegister(&AMDGPU::SReg_64_XEXECRegClass);
       BuildMI(MBB, I, DL, get(AMDGPU::S_CSELECT_B64), SReg)
         .addImm(0)
         .addImm(-1);
@@ -681,23 +684,29 @@ void SIInstrInfo::insertVectorSelect(MachineBasicBlock &MBB,
     case SIInstrInfo::VCCNZ: {
       MachineOperand RegOp = Cond[1];
       RegOp.setImplicit(false);
+      unsigned SReg = MRI.createVirtualRegister(&AMDGPU::SReg_64_XEXECRegClass);
+      BuildMI(MBB, I, DL, get(AMDGPU::COPY), SReg)
+        .add(RegOp);
       BuildMI(MBB, I, DL, get(AMDGPU::V_CNDMASK_B32_e64), DstReg)
           .addReg(FalseReg)
           .addReg(TrueReg)
-          .add(RegOp);
+          .addReg(SReg);
       break;
     }
     case SIInstrInfo::VCCZ: {
       MachineOperand RegOp = Cond[1];
       RegOp.setImplicit(false);
+      unsigned SReg = MRI.createVirtualRegister(&AMDGPU::SReg_64_XEXECRegClass);
+      BuildMI(MBB, I, DL, get(AMDGPU::COPY), SReg)
+        .add(RegOp);
       BuildMI(MBB, I, DL, get(AMDGPU::V_CNDMASK_B32_e64), DstReg)
           .addReg(TrueReg)
           .addReg(FalseReg)
-          .add(RegOp);
+          .addReg(SReg);
       break;
     }
     case SIInstrInfo::EXECNZ: {
-      unsigned SReg = MRI.createVirtualRegister(&AMDGPU::SReg_64RegClass);
+      unsigned SReg = MRI.createVirtualRegister(&AMDGPU::SReg_64_XEXECRegClass);
       unsigned SReg2 = MRI.createVirtualRegister(&AMDGPU::SReg_64RegClass);
       BuildMI(MBB, I, DL, get(AMDGPU::S_OR_SAVEEXEC_B64), SReg2)
         .addImm(0);
@@ -711,7 +720,7 @@ void SIInstrInfo::insertVectorSelect(MachineBasicBlock &MBB,
       break;
     }
     case SIInstrInfo::EXECZ: {
-      unsigned SReg = MRI.createVirtualRegister(&AMDGPU::SReg_64RegClass);
+      unsigned SReg = MRI.createVirtualRegister(&AMDGPU::SReg_64_XEXECRegClass);
       unsigned SReg2 = MRI.createVirtualRegister(&AMDGPU::SReg_64RegClass);
       BuildMI(MBB, I, DL, get(AMDGPU::S_OR_SAVEEXEC_B64), SReg2)
         .addImm(0);
@@ -4362,6 +4371,18 @@ unsigned SIInstrInfo::isStoreToStackSlot(const MachineInstr &MI,
   return AMDGPU::NoRegister;
 }
 
+unsigned SIInstrInfo::getInstBundleSize(const MachineInstr &MI) const {
+  unsigned Size = 0;
+  MachineBasicBlock::const_instr_iterator I = MI.getIterator();
+  MachineBasicBlock::const_instr_iterator E = MI.getParent()->instr_end();
+  while (++I != E && I->isInsideBundle()) {
+    assert(!I->isBundle() && "No nested bundle!");
+    Size += getInstSizeInBytes(*I);
+  }
+
+  return Size;
+}
+
 unsigned SIInstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   unsigned Opc = MI.getOpcode();
   const MCInstrDesc &Desc = getMCOpcodeFromPseudo(Opc);
@@ -4405,9 +4426,10 @@ unsigned SIInstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   case TargetOpcode::IMPLICIT_DEF:
   case TargetOpcode::KILL:
   case TargetOpcode::DBG_VALUE:
-  case TargetOpcode::BUNDLE:
   case TargetOpcode::EH_LABEL:
     return 0;
+  case TargetOpcode::BUNDLE:
+    return getInstBundleSize(MI);
   case TargetOpcode::INLINEASM: {
     const MachineFunction *MF = MI.getParent()->getParent();
     const char *AsmStr = MI.getOperand(0).getSymbolName();

@@ -1590,12 +1590,12 @@ std::error_code ImportedSymbolRef::getOrdinal(uint16_t &Result) const {
   return std::error_code();
 }
 
-ErrorOr<std::unique_ptr<COFFObjectFile>>
+Expected<std::unique_ptr<COFFObjectFile>>
 ObjectFile::createCOFFObjectFile(MemoryBufferRef Object) {
   std::error_code EC;
   std::unique_ptr<COFFObjectFile> Ret(new COFFObjectFile(Object, EC));
   if (EC)
-    return EC;
+    return errorCodeToError(EC);
   return std::move(Ret);
 }
 
@@ -1633,11 +1633,12 @@ std::error_code BaseRelocRef::getRVA(uint32_t &Result) const {
   return std::error_code();
 }
 
-#define RETURN_IF_ERROR(X)                                                     \
-  if (auto EC = errorToErrorCode(X))                                           \
-    return EC;
+#define RETURN_IF_ERROR(E)                                                     \
+  if (E)                                                                       \
+    return E;
 
-ErrorOr<ArrayRef<UTF16>> ResourceSectionRef::getDirStringAtOffset(uint32_t Offset) {
+Expected<ArrayRef<UTF16>>
+ResourceSectionRef::getDirStringAtOffset(uint32_t Offset) {
   BinaryStreamReader Reader = BinaryStreamReader(BBS);
   Reader.setOffset(Offset);
   uint16_t Length;
@@ -1647,12 +1648,12 @@ ErrorOr<ArrayRef<UTF16>> ResourceSectionRef::getDirStringAtOffset(uint32_t Offse
   return RawDirString;
 }
 
-ErrorOr<ArrayRef<UTF16>>
+Expected<ArrayRef<UTF16>>
 ResourceSectionRef::getEntryNameString(const coff_resource_dir_entry &Entry) {
   return getDirStringAtOffset(Entry.Identifier.getNameOffset());
 }
 
-ErrorOr<const coff_resource_dir_table &>
+Expected<const coff_resource_dir_table &>
 ResourceSectionRef::getTableAtOffset(uint32_t Offset) {
   const coff_resource_dir_table *Table = nullptr;
 
@@ -1663,11 +1664,11 @@ ResourceSectionRef::getTableAtOffset(uint32_t Offset) {
   return *Table;
 }
 
-ErrorOr<const coff_resource_dir_table &>
+Expected<const coff_resource_dir_table &>
 ResourceSectionRef::getEntrySubDir(const coff_resource_dir_entry &Entry) {
   return getTableAtOffset(Entry.Offset.value());
 }
 
-ErrorOr<const coff_resource_dir_table &> ResourceSectionRef::getBaseTable() {
+Expected<const coff_resource_dir_table &> ResourceSectionRef::getBaseTable() {
   return getTableAtOffset(0);
 }

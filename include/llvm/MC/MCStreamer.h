@@ -171,14 +171,16 @@ class MCStreamer {
 
   std::vector<MCDwarfFrameInfo> DwarfFrameInfos;
   MCDwarfFrameInfo *getCurrentDwarfFrameInfo();
-  void EnsureValidDwarfFrame();
 
-  MCSymbol *EmitCFILabel();
-  MCSymbol *EmitCFICommon();
+  /// Similar to DwarfFrameInfos, but for SEH unwind info. Chained frames may
+  /// refer to each other, so use std::unique_ptr to provide pointer stability.
+  std::vector<std::unique_ptr<WinEH::FrameInfo>> WinFrameInfos;
 
-  std::vector<WinEH::FrameInfo *> WinFrameInfos;
   WinEH::FrameInfo *CurrentWinFrameInfo;
-  void EnsureValidWinFrameInfo();
+
+  /// Retreive the current frame info if one is available and it is not yet
+  /// closed. Otherwise, issue an error and return null.
+  WinEH::FrameInfo *EnsureValidWinFrameInfo(SMLoc Loc);
 
   /// \brief Tracks an index to represent the order a symbol was emitted in.
   /// Zero means we did not emit that symbol.
@@ -199,6 +201,10 @@ protected:
 
   virtual void EmitCFIStartProcImpl(MCDwarfFrameInfo &Frame);
   virtual void EmitCFIEndProcImpl(MCDwarfFrameInfo &CurFrame);
+
+  /// When emitting an object file, create and emit a real label. When emitting
+  /// textual assembly, this should do nothing to avoid polluting our output.
+  virtual MCSymbol *EmitCFILabel();
 
   WinEH::FrameInfo *getCurrentWinFrameInfo() {
     return CurrentWinFrameInfo;
@@ -238,7 +244,7 @@ public:
   bool hasUnfinishedDwarfFrameInfo();
 
   unsigned getNumWinFrameInfos() { return WinFrameInfos.size(); }
-  ArrayRef<WinEH::FrameInfo *> getWinFrameInfos() const {
+  ArrayRef<std::unique_ptr<WinEH::FrameInfo>> getWinFrameInfos() const {
     return WinFrameInfos;
   }
 
@@ -784,6 +790,9 @@ public:
   /// directive.
   virtual void EmitCVFileChecksumOffsetDirective(unsigned FileNo) {}
 
+  /// This implements the CodeView '.cv_fpo_data' assembler directive.
+  virtual void EmitCVFPOData(const MCSymbol *ProcSym, SMLoc Loc = {}) {}
+
   /// Emit the absolute difference between two symbols.
   ///
   /// \pre Offset of \c Hi is greater than the offset \c Lo.
@@ -814,20 +823,23 @@ public:
   virtual void EmitCFIRegister(int64_t Register1, int64_t Register2);
   virtual void EmitCFIWindowSave();
 
-  virtual void EmitWinCFIStartProc(const MCSymbol *Symbol);
-  virtual void EmitWinCFIEndProc();
-  virtual void EmitWinCFIStartChained();
-  virtual void EmitWinCFIEndChained();
-  virtual void EmitWinCFIPushReg(unsigned Register);
-  virtual void EmitWinCFISetFrame(unsigned Register, unsigned Offset);
-  virtual void EmitWinCFIAllocStack(unsigned Size);
-  virtual void EmitWinCFISaveReg(unsigned Register, unsigned Offset);
-  virtual void EmitWinCFISaveXMM(unsigned Register, unsigned Offset);
-  virtual void EmitWinCFIPushFrame(bool Code);
-  virtual void EmitWinCFIEndProlog();
-
-  virtual void EmitWinEHHandler(const MCSymbol *Sym, bool Unwind, bool Except);
-  virtual void EmitWinEHHandlerData();
+  virtual void EmitWinCFIStartProc(const MCSymbol *Symbol, SMLoc Loc = SMLoc());
+  virtual void EmitWinCFIEndProc(SMLoc Loc = SMLoc());
+  virtual void EmitWinCFIStartChained(SMLoc Loc = SMLoc());
+  virtual void EmitWinCFIEndChained(SMLoc Loc = SMLoc());
+  virtual void EmitWinCFIPushReg(unsigned Register, SMLoc Loc = SMLoc());
+  virtual void EmitWinCFISetFrame(unsigned Register, unsigned Offset,
+                                  SMLoc Loc = SMLoc());
+  virtual void EmitWinCFIAllocStack(unsigned Size, SMLoc Loc = SMLoc());
+  virtual void EmitWinCFISaveReg(unsigned Register, unsigned Offset,
+                                 SMLoc Loc = SMLoc());
+  virtual void EmitWinCFISaveXMM(unsigned Register, unsigned Offset,
+                                 SMLoc Loc = SMLoc());
+  virtual void EmitWinCFIPushFrame(bool Code, SMLoc Loc = SMLoc());
+  virtual void EmitWinCFIEndProlog(SMLoc Loc = SMLoc());
+  virtual void EmitWinEHHandler(const MCSymbol *Sym, bool Unwind, bool Except,
+                                SMLoc Loc = SMLoc());
+  virtual void EmitWinEHHandlerData(SMLoc Loc = SMLoc());
 
   /// Get the .pdata section used for the given section. Typically the given
   /// section is either the main .text section or some other COMDAT .text

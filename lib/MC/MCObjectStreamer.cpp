@@ -25,20 +25,17 @@
 #include "llvm/Support/TargetRegistry.h"
 using namespace llvm;
 
-MCObjectStreamer::MCObjectStreamer(MCContext &Context, MCAsmBackend &TAB,
+MCObjectStreamer::MCObjectStreamer(MCContext &Context,
+                                   std::unique_ptr<MCAsmBackend> TAB,
                                    raw_pwrite_stream &OS,
-                                   MCCodeEmitter *Emitter_)
-    : MCStreamer(Context),
-      Assembler(new MCAssembler(Context, TAB, *Emitter_,
-                                *TAB.createObjectWriter(OS))),
+                                   std::unique_ptr<MCCodeEmitter> Emitter)
+    : MCStreamer(Context), ObjectWriter(TAB->createObjectWriter(OS)),
+      TAB(std::move(TAB)), Emitter(std::move(Emitter)),
+      Assembler(llvm::make_unique<MCAssembler>(Context, *this->TAB,
+                                               *this->Emitter, *ObjectWriter)),
       EmitEHFrame(true), EmitDebugFrame(false) {}
 
-MCObjectStreamer::~MCObjectStreamer() {
-  delete &Assembler->getBackend();
-  delete &Assembler->getEmitter();
-  delete &Assembler->getWriter();
-  delete Assembler;
-}
+MCObjectStreamer::~MCObjectStreamer() {}
 
 void MCObjectStreamer::flushPendingLabels(MCFragment *F, uint64_t FOffset) {
   if (PendingLabels.empty())
@@ -145,6 +142,12 @@ void MCObjectStreamer::EmitValueImpl(const MCExpr *Value, unsigned Size,
       MCFixup::create(DF->getContents().size(), Value,
                       MCFixup::getKindForSize(Size, false), Loc));
   DF->getContents().resize(DF->getContents().size() + Size, 0);
+}
+
+MCSymbol *MCObjectStreamer::EmitCFILabel() {
+  MCSymbol *Label = getContext().createTempSymbol("cfi", true);
+  EmitLabel(Label);
+  return Label;
 }
 
 void MCObjectStreamer::EmitCFIStartProcImpl(MCDwarfFrameInfo &Frame) {

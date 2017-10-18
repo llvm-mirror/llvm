@@ -60,7 +60,7 @@
 #include "llvm/Analysis/InlineCost.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/Loads.h"
-#include "llvm/Analysis/OptimizationDiagnosticInfo.h"
+#include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/CallSite.h"
@@ -255,8 +255,10 @@ static bool markTails(Function &F, bool &AllCallsAreTailCalls,
         }
         if (SafeToTail) {
           using namespace ore;
-          ORE->emit(OptimizationRemark(DEBUG_TYPE, "tailcall-readnone", CI)
-                    << "marked as tail call candidate (readnone)");
+          ORE->emit([&]() {
+            return OptimizationRemark(DEBUG_TYPE, "tailcall-readnone", CI)
+                   << "marked as tail call candidate (readnone)";
+          });
           CI->setTailCall();
           Modified = true;
           continue;
@@ -301,8 +303,10 @@ static bool markTails(Function &F, bool &AllCallsAreTailCalls,
     if (Visited[CI->getParent()] != ESCAPED) {
       // If the escape point was part way through the block, calls after the
       // escape point wouldn't have been put into DeferredTails.
-      ORE->emit(OptimizationRemark(DEBUG_TYPE, "tailcall", CI)
-                << "marked as tail call candidate");
+      ORE->emit([&]() {
+        return OptimizationRemark(DEBUG_TYPE, "tailcall", CI)
+               << "marked as tail call candidate";
+      });
       CI->setTailCall();
       Modified = true;
     } else {
@@ -554,8 +558,10 @@ static bool eliminateRecursiveTailCall(CallInst *CI, ReturnInst *Ret,
   Function *F = BB->getParent();
 
   using namespace ore;
-  ORE->emit(OptimizationRemark(DEBUG_TYPE, "tailcall-recursion", CI)
-            << "transforming tail recursion into loop");
+  ORE->emit([&]() {
+    return OptimizationRemark(DEBUG_TYPE, "tailcall-recursion", CI)
+           << "transforming tail recursion into loop";
+  });
 
   // OK! We can transform this tail call.  If this is the first one found,
   // create the new entry block, allowing us to branch back to the old entry.

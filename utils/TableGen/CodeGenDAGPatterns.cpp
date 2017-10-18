@@ -238,10 +238,16 @@ bool TypeSetByHwMode::operator==(const TypeSetByHwMode &VTS) const {
   return true;
 }
 
+namespace llvm {
+  raw_ostream &operator<<(raw_ostream &OS, const TypeSetByHwMode &T) {
+    T.writeToStream(OS);
+    return OS;
+  }
+}
+
 LLVM_DUMP_METHOD
 void TypeSetByHwMode::dump() const {
-  writeToStream(dbgs());
-  dbgs() << '\n';
+  dbgs() << *this << '\n';
 }
 
 bool TypeSetByHwMode::intersect(SetType &Out, const SetType &In) {
@@ -848,11 +854,11 @@ TreePredicateFn::TreePredicateFn(TreePattern *N) : PatFragRec(N) {
         ".td file corrupt: can't have a node predicate *and* an imm predicate");
 }
 
-std::string TreePredicateFn::getPredCode() const {
+StringRef TreePredicateFn::getPredCode() const {
   return PatFragRec->getRecord()->getValueAsString("PredicateCode");
 }
 
-std::string TreePredicateFn::getImmCode() const {
+StringRef TreePredicateFn::getImmCode() const {
   return PatFragRec->getRecord()->getValueAsString("ImmediateCode");
 }
 
@@ -874,16 +880,16 @@ std::string TreePredicateFn::getFnName() const {
 /// appropriate.
 std::string TreePredicateFn::getCodeToRunOnSDNode() const {
   // Handle immediate predicates first.
-  std::string ImmCode = getImmCode();
+  StringRef ImmCode = getImmCode();
   if (!ImmCode.empty()) {
     std::string Result =
       "    int64_t Imm = cast<ConstantSDNode>(Node)->getSExtValue();\n";
-    return Result + ImmCode;
+    return Result + ImmCode.str();
   }
-  
+
   // Handle arbitrary node predicates.
   assert(!getPredCode().empty() && "Don't have any predicate code!");
-  std::string ClassName;
+  StringRef ClassName;
   if (PatFragRec->getOnlyTree()->isLeaf())
     ClassName = "SDNode";
   else {
@@ -894,9 +900,9 @@ std::string TreePredicateFn::getCodeToRunOnSDNode() const {
   if (ClassName == "SDNode")
     Result = "    SDNode *N = Node;\n";
   else
-    Result = "    auto *N = cast<" + ClassName + ">(Node);\n";
-  
-  return Result + getPredCode();
+    Result = "    auto *N = cast<" + ClassName.str() + ">(Node);\n";
+
+  return Result + getPredCode().str();
 }
 
 //===----------------------------------------------------------------------===//
@@ -914,10 +920,8 @@ static unsigned getPatternSize(const TreePatternNode *P,
   if (P->isLeaf() && isa<IntInit>(P->getLeafValue()))
     Size += 2;
 
-  const ComplexPattern *AM = P->getComplexPatternInfo(CGP);
-  if (AM) {
+  if (const ComplexPattern *AM = P->getComplexPatternInfo(CGP)) {
     Size += AM->getComplexity();
-
     // We don't want to count any children twice, so return early.
     return Size;
   }
@@ -929,7 +933,7 @@ static unsigned getPatternSize(const TreePatternNode *P,
 
   // Count children in the count if they are also nodes.
   for (unsigned i = 0, e = P->getNumChildren(); i != e; ++i) {
-    TreePatternNode *Child = P->getChild(i);
+    const TreePatternNode *Child = P->getChild(i);
     if (!Child->isLeaf() && Child->getNumTypes()) {
       const TypeSetByHwMode &T0 = Child->getType(0);
       // At this point, all variable type sets should be simple, i.e. only
@@ -2560,7 +2564,7 @@ CodeGenDAGPatterns::CodeGenDAGPatterns(RecordKeeper &R) :
   VerifyInstructionFlags();
 }
 
-Record *CodeGenDAGPatterns::getSDNodeNamed(const std::string &Name) const {
+Record *CodeGenDAGPatterns::getSDNodeNamed(StringRef Name) const {
   Record *N = Records.getDef(Name);
   if (!N || !N->isSubClassOf("SDNode"))
     PrintFatalError("Error getting SDNode '" + Name + "'!");

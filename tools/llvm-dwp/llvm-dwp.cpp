@@ -20,7 +20,9 @@
 #include "llvm/DebugInfo/DWARF/DWARFContext.h"
 #include "llvm/DebugInfo/DWARF/DWARFFormValue.h"
 #include "llvm/DebugInfo/DWARF/DWARFUnitIndex.h"
+#include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCAsmInfo.h"
+#include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCObjectFileInfo.h"
@@ -706,7 +708,8 @@ int main(int argc, char **argv) {
 
   MCTargetOptions MCOptions = InitMCTargetOptionsFromFlags();
   std::unique_ptr<MCStreamer> MS(TheTarget->createMCObjectStreamer(
-      TheTriple, MC, *MAB, OutFile, MCE, *MSTI, MCOptions.MCRelaxAll,
+      TheTriple, MC, std::unique_ptr<MCAsmBackend>(MAB), OutFile,
+      std::unique_ptr<MCCodeEmitter>(MCE), *MSTI, MCOptions.MCRelaxAll,
       MCOptions.MCIncrementalLinkerCompatible,
       /*DWARFMustBeAtTheEnd*/ false));
   if (!MS)

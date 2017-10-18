@@ -322,6 +322,10 @@ static DecodeStatus DecodeVCVTD(MCInst &Inst, unsigned Insn,
                                 uint64_t Address, const void *Decoder);
 static DecodeStatus DecodeVCVTQ(MCInst &Inst, unsigned Insn,
                                 uint64_t Address, const void *Decoder);
+static DecodeStatus DecodeNEONComplexLane64Instruction(MCInst &Inst,
+                                                       unsigned Val,
+                                                       uint64_t Address,
+                                                       const void *Decoder);
 
 static DecodeStatus DecodeThumbAddSpecialReg(MCInst &Inst, uint16_t Insn,
                                uint64_t Address, const void *Decoder);
@@ -400,6 +404,8 @@ static DecodeStatus DecodeLDR(MCInst &Inst, unsigned Val,
                                 uint64_t Address, const void *Decoder);
 static DecodeStatus DecoderForMRRC2AndMCRR2(MCInst &Inst, unsigned Val,
                                             uint64_t Address, const void *Decoder);
+static DecodeStatus DecodeForVMRSandVMSR(MCInst &Inst, unsigned Val,
+                                         uint64_t Address, const void *Decoder);
 
 #include "ARMGenDisassemblerTables.inc"
 
@@ -5213,6 +5219,39 @@ static DecodeStatus DecodeVCVTQ(MCInst &Inst, unsigned Insn,
   return S;
 }
 
+static DecodeStatus DecodeNEONComplexLane64Instruction(MCInst &Inst,
+                                                       unsigned Insn,
+                                                       uint64_t Address,
+                                                       const void *Decoder) {
+  unsigned Vd = (fieldFromInstruction(Insn, 12, 4) << 0);
+  Vd |= (fieldFromInstruction(Insn, 22, 1) << 4);
+  unsigned Vn = (fieldFromInstruction(Insn, 16, 4) << 0);
+  Vn |= (fieldFromInstruction(Insn, 7, 1) << 4);
+  unsigned Vm = (fieldFromInstruction(Insn, 0, 4) << 0);
+  Vm |= (fieldFromInstruction(Insn, 5, 1) << 4);
+  unsigned q = (fieldFromInstruction(Insn, 6, 1) << 0);
+  unsigned rotate = (fieldFromInstruction(Insn, 20, 2) << 0);
+
+  DecodeStatus S = MCDisassembler::Success;
+
+  auto DestRegDecoder = q ? DecodeQPRRegisterClass : DecodeDPRRegisterClass;
+
+  if (!Check(S, DestRegDecoder(Inst, Vd, Address, Decoder)))
+    return MCDisassembler::Fail;
+  if (!Check(S, DestRegDecoder(Inst, Vd, Address, Decoder)))
+    return MCDisassembler::Fail;
+  if (!Check(S, DestRegDecoder(Inst, Vn, Address, Decoder)))
+    return MCDisassembler::Fail;
+  if (!Check(S, DecodeDPRRegisterClass(Inst, Vm, Address, Decoder)))
+    return MCDisassembler::Fail;
+  // The lane index does not have any bits in the encoding, because it can only
+  // be 0.
+  Inst.addOperand(MCOperand::createImm(0));
+  Inst.addOperand(MCOperand::createImm(rotate));
+
+  return S;
+}
+
 static DecodeStatus DecodeLDR(MCInst &Inst, unsigned Val,
                                 uint64_t Address, const void *Decoder) {
   DecodeStatus S = MCDisassembler::Success;
@@ -5281,6 +5320,28 @@ static DecodeStatus DecoderForMRRC2AndMCRR2(MCInst &Inst, unsigned Val,
       return MCDisassembler::Fail;
   }
   Inst.addOperand(MCOperand::createImm(CRm));
+
+  return S;
+}
+
+static DecodeStatus DecodeForVMRSandVMSR(MCInst &Inst, unsigned Val,
+                                         uint64_t Address,
+                                         const void *Decoder) {
+  const FeatureBitset &featureBits =
+      ((const MCDisassembler *)Decoder)->getSubtargetInfo().getFeatureBits();
+  DecodeStatus S = MCDisassembler::Success;
+
+  unsigned Rt = fieldFromInstruction(Val, 12, 4);
+
+  if (featureBits[ARM::ModeThumb] && !featureBits[ARM::HasV8Ops]) {
+    if (Rt == 13 || Rt == 15)
+      S = MCDisassembler::SoftFail;
+    Check(S, DecodeGPRRegisterClass(Inst, Rt, Address, Decoder));
+  } else
+    Check(S, DecodeGPRnopcRegisterClass(Inst, Rt, Address, Decoder));
+
+  Inst.addOperand(MCOperand::createImm(ARMCC::AL));
+  Inst.addOperand(MCOperand::createReg(0));
 
   return S;
 }

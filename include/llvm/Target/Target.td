@@ -269,6 +269,21 @@ class RegisterClass<string namespace, list<ValueType> regTypes, int alignment,
   // useful as it is sometimes beneficial to assign registers to highly
   // constrained classes first. The value has to be in the range [0,63].
   int AllocationPriority = 0;
+
+  // The diagnostic type to present when referencing this operand in a match
+  // failure error message. If this is empty, the default Match_InvalidOperand
+  // diagnostic type will be used. If this is "<name>", a Match_<name> enum
+  // value will be generated and used for this operand type. The target
+  // assembly parser is responsible for converting this into a user-facing
+  // diagnostic message.
+  string DiagnosticType = "";
+
+  // A diagnostic message to emit when an invalid value is provided for this
+  // register class when it is being used an an assembly operand. If this is
+  // non-empty, an anonymous diagnostic type enum value will be generated, and
+  // the assembly matcher will provide a function to map from diagnostic types
+  // to message strings.
+  string DiagnosticString = "";
 }
 
 // The memberList in a RegisterClass is a dag of set operations. TableGen
@@ -677,6 +692,10 @@ class AsmOperandClass {
   // diagnostic. The target AsmParser maps these codes to text.
   string DiagnosticType = "";
 
+  /// A diagnostic message to emit when an invalid value is provided for this
+  /// operand.
+  string DiagnosticString = "";
+
   /// Set to 1 if this operand is optional and not always required. Typically,
   /// the AsmParser will emit an error when it finishes parsing an
   /// instruction if it hasn't matched all the operands yet.  However, this
@@ -1049,6 +1068,7 @@ def PATCHABLE_RET : Instruction {
   let AsmString = "# XRay Function Patchable RET.";
   let usesCustomInserter = 1;
   let hasSideEffects = 1;
+  let isTerminator = 1;
   let isReturn = 1;
 }
 def PATCHABLE_FUNCTION_EXIT : Instruction {
@@ -1125,6 +1145,14 @@ class AsmParser {
   // HasMnemonicFirst - Set to false if target instructions don't always
   // start with a mnemonic as the first token.
   bit HasMnemonicFirst = 1;
+
+  // ReportMultipleNearMisses -
+  // When 0, the assembly matcher reports an error for one encoding or operand
+  // that did not match the parsed instruction.
+  // When 1, the assmebly matcher returns a list of encodings that were close
+  // to matching the parsed instruction, so to allow more detailed error
+  // messages.
+  bit ReportMultipleNearMisses = 0;
 }
 def DefaultAsmParser : AsmParser;
 

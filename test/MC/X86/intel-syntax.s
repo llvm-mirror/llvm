@@ -532,14 +532,14 @@ xchg [ECX], EAX
 xchg AX, [ECX]
 xchg [ECX], AX
 
-// CHECK: testq (%ecx), %rax
-// CHECK: testq (%ecx), %rax
-// CHECK: testl (%ecx), %eax
-// CHECK: testl (%ecx), %eax
-// CHECK: testw (%ecx), %ax
-// CHECK: testw (%ecx), %ax
-// CHECK: testb (%ecx), %al
-// CHECK: testb (%ecx), %al
+// CHECK: testq %rax, (%ecx)
+// CHECK: testq %rax, (%ecx)
+// CHECK: testl %eax, (%ecx)
+// CHECK: testl %eax, (%ecx)
+// CHECK: testw %ax, (%ecx)
+// CHECK: testw %ax, (%ecx)
+// CHECK: testb %al, (%ecx)
+// CHECK: testb %al, (%ecx)
 test RAX, [ECX]
 test [ECX], RAX
 test EAX, [ECX]
@@ -693,10 +693,12 @@ fadd   dword ptr "?half@?0??bar@@YAXXZ@4NA"@IMGREL
 // CHECK: fadds   "?half@?0??bar@@YAXXZ@4NA"@IMGREL
 
 inc qword ptr [rax]
+inc long ptr [rax]
 inc dword ptr [rax]
 inc word ptr [rax]
 inc byte ptr [rax]
 // CHECK: incq (%rax)
+// CHECK: incl (%rax)
 // CHECK: incl (%rax)
 // CHECK: incw (%rax)
 // CHECK: incb (%rax)
@@ -806,6 +808,11 @@ fbld tbyte ptr [eax]
 fbstp tbyte ptr [eax]
 // CHECK: fbld (%eax)
 // CHECK: fbstp (%eax)
+
+fld float ptr [rax]
+fld double ptr [rax]
+// CHECK: flds (%rax)
+// CHECK: fldl (%rax)
 
 fcomip st, st(2)
 fucomip st, st(2)

@@ -160,7 +160,7 @@ private:
     /// dominates MBB.
     bool dominates(MachineBasicBlock &MBB) const { return UVS.dominates(&MBB); }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+#ifdef LLVM_ENABLE_DUMP
     LLVM_DUMP_METHOD void dump() const { MI.dump(); }
 #endif
 
@@ -374,7 +374,7 @@ void LiveDebugValues::transferDebugValue(const MachineInstr &MI,
 void LiveDebugValues::transferRegisterDef(MachineInstr &MI,
                                           OpenRangesSet &OpenRanges,
                                           const VarLocMap &VarLocIDs) {
-  MachineFunction *MF = MI.getParent()->getParent();
+  MachineFunction *MF = MI.getMF();
   const TargetLowering *TLI = MF->getSubtarget().getTargetLowering();
   unsigned SP = TLI->getStackPointerRegisterToSaveRestore();
   SparseBitVector<> KillSet;
@@ -450,7 +450,7 @@ void LiveDebugValues::transferSpillInst(MachineInstr &MI,
                                         VarLocMap &VarLocIDs,
                                         SpillMap &Spills) {
   unsigned Reg;
-  MachineFunction *MF = MI.getParent()->getParent();
+  MachineFunction *MF = MI.getMF();
   if (!isSpillInstruction(MI, MF, Reg))
     return;
 

@@ -619,7 +619,7 @@ AttributeSet::iterator AttributeSet::end() const {
   return SetNode ? SetNode->end() : nullptr;
 }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+#ifdef LLVM_ENABLE_DUMP
 LLVM_DUMP_METHOD void AttributeSet::dump() const {
   dbgs() << "AS =\n";
     dbgs() << "  { ";
@@ -790,14 +790,12 @@ std::string AttributeSetNode::getAsString(bool InAttrGrp) const {
 // AttributeListImpl Definition
 //===----------------------------------------------------------------------===//
 
-/// Map from AttributeList index to the internal array index. Adding one works:
-///   FunctionIndex: ~0U -> 0
-///   ReturnIndex:    0  -> 1
-///   FirstArgIndex: 1.. -> 2..
+/// Map from AttributeList index to the internal array index. Adding one happens
+/// to work, but it relies on unsigned integer wrapping. MSVC warns about
+/// unsigned wrapping in constexpr functions, so write out the conditional. LLVM
+/// folds it to add anyway.
 static constexpr unsigned attrIdxToArrayIdx(unsigned Index) {
-  // MSVC warns about '~0U + 1' wrapping around when this is called on
-  // FunctionIndex, so cast to int first.
-  return static_cast<int>(Index) + 1;
+  return Index == AttributeList::FunctionIndex ? 0 : Index + 1;
 }
 
 AttributeListImpl::AttributeListImpl(LLVMContext &C,
@@ -830,7 +828,7 @@ void AttributeListImpl::Profile(FoldingSetNodeID &ID,
     ID.AddPointer(Set.SetNode);
 }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+#ifdef LLVM_ENABLE_DUMP
 LLVM_DUMP_METHOD void AttributeListImpl::dump() const {
   AttributeList(const_cast<AttributeListImpl *>(this)).dump();
 }
@@ -1290,7 +1288,7 @@ unsigned AttributeList::getNumAttrSets() const {
   return pImpl ? pImpl->NumAttrSets : 0;
 }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+#ifdef LLVM_ENABLE_DUMP
 LLVM_DUMP_METHOD void AttributeList::dump() const {
   dbgs() << "PAL[\n";
 

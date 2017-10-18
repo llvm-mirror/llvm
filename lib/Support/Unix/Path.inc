@@ -217,11 +217,11 @@ std::string getMainExecutable(const char *argv0, void *MainAddr) {
   return "";
 }
 
-TimePoint<> file_status::getLastAccessedTime() const {
+TimePoint<> basic_file_status::getLastAccessedTime() const {
   return toTimePoint(fs_st_atime);
 }
 
-TimePoint<> file_status::getLastModificationTime() const {
+TimePoint<> basic_file_status::getLastModificationTime() const {
   return toTimePoint(fs_st_mtime);
 }
 
@@ -641,15 +641,9 @@ std::error_code mapped_file_region::init(int FD, uint64_t Offset,
   return std::error_code();
 }
 
-mapped_file_region::mapped_file_region(int fd, mapmode mode, uint64_t length,
+mapped_file_region::mapped_file_region(int fd, mapmode mode, size_t length,
                                        uint64_t offset, std::error_code &ec)
     : Size(length), Mapping() {
-  // Make sure that the requested size fits within SIZE_T.
-  if (length > std::numeric_limits<size_t>::max()) {
-    ec = make_error_code(errc::invalid_argument);
-    return;
-  }
-
   ec = init(fd, offset, mode);
   if (ec)
     Mapping = nullptr;
@@ -660,7 +654,7 @@ mapped_file_region::~mapped_file_region() {
     ::munmap(Mapping, Size);
 }
 
-uint64_t mapped_file_region::size() const {
+size_t mapped_file_region::size() const {
   assert(Mapping && "Mapping failed but used anyway!");
   return Size;
 }
@@ -717,6 +711,13 @@ std::error_code detail::directory_iterator_increment(detail::DirIterState &it) {
     return directory_iterator_destruct(it);
 
   return std::error_code();
+}
+
+ErrorOr<basic_file_status> directory_entry::status() const {
+  file_status s;
+  if (auto EC = fs::status(Path, s, FollowSymlinks))
+    return EC;
+  return s;
 }
 
 #if !defined(F_GETPATH)
@@ -815,12 +816,11 @@ static std::error_code remove_directories_impl(const T &Entry,
   directory_iterator End;
   while (Begin != End) {
     auto &Item = *Begin;
-    file_status st;
-    EC = Item.status(st);
-    if (EC && !IgnoreErrors)
-      return EC;
+    ErrorOr<basic_file_status> st = Item.status();
+    if (!st && !IgnoreErrors)
+      return st.getError();
 
-    if (is_directory(st)) {
+    if (is_directory(*st)) {
       EC = remove_directories_impl(Item, IgnoreErrors);
       if (EC && !IgnoreErrors)
         return EC;

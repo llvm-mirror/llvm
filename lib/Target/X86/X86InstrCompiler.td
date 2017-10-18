@@ -1241,7 +1241,7 @@ def : Pat<(i64 (anyext GR8 :$src)),
 def : Pat<(i64 (anyext GR16:$src)),
           (SUBREG_TO_REG (i64 0), (MOVZX32rr16 GR16 :$src), sub_32bit)>;
 def : Pat<(i64 (anyext GR32:$src)),
-          (SUBREG_TO_REG (i64 0), GR32:$src, sub_32bit)>;
+          (INSERT_SUBREG (i64 (IMPLICIT_DEF)), GR32:$src, sub_32bit)>;
 
 
 // Any instruction that defines a 32-bit result leaves the high half of the
@@ -1488,21 +1488,16 @@ def : Pat<(i8 (trunc (srl_su GR32:$src, (i8 8)))),
       Requires<[Not64BitMode]>;
 def : Pat<(srl GR16:$src, (i8 8)),
           (EXTRACT_SUBREG
-            (MOVZX32rr8 (EXTRACT_SUBREG GR16:$src, sub_8bit_hi)),
-            sub_16bit)>,
-      Requires<[Not64BitMode]>;
+            (MOVZX32_NOREXrr8 (EXTRACT_SUBREG GR16:$src, sub_8bit_hi)),
+            sub_16bit)>;
 def : Pat<(i32 (zext (srl_su GR16:$src, (i8 8)))),
-          (MOVZX32rr8 (EXTRACT_SUBREG GR16:$src, sub_8bit_hi))>,
-      Requires<[Not64BitMode]>;
+          (MOVZX32_NOREXrr8 (EXTRACT_SUBREG GR16:$src, sub_8bit_hi))>;
 def : Pat<(i32 (anyext (srl_su GR16:$src, (i8 8)))),
-          (MOVZX32rr8 (EXTRACT_SUBREG GR16:$src, sub_8bit_hi))>,
-      Requires<[Not64BitMode]>;
+          (MOVZX32_NOREXrr8 (EXTRACT_SUBREG GR16:$src, sub_8bit_hi))>;
 def : Pat<(and (srl_su GR32:$src, (i8 8)), (i32 255)),
-          (MOVZX32rr8 (EXTRACT_SUBREG GR32:$src, sub_8bit_hi))>,
-      Requires<[Not64BitMode]>;
+          (MOVZX32_NOREXrr8 (EXTRACT_SUBREG GR32:$src, sub_8bit_hi))>;
 def : Pat<(srl (and_su GR32:$src, 0xff00), (i8 8)),
-          (MOVZX32rr8 (EXTRACT_SUBREG GR32:$src, sub_8bit_hi))>,
-      Requires<[Not64BitMode]>;
+          (MOVZX32_NOREXrr8 (EXTRACT_SUBREG GR32:$src, sub_8bit_hi))>;
 
 // h-register tricks.
 // For now, be conservative on x86-64 and use an h-register extract only if the
@@ -1518,27 +1513,6 @@ def : Pat<(and (srl_su GR64:$src, (i8 8)), (i64 255)),
             (MOVZX32_NOREXrr8
               (EXTRACT_SUBREG GR64:$src, sub_8bit_hi)),
             sub_32bit)>;
-def : Pat<(and (srl_su GR32:$src, (i8 8)), (i32 255)),
-          (MOVZX32_NOREXrr8
-            (EXTRACT_SUBREG GR32:$src, sub_8bit_hi))>,
-      Requires<[In64BitMode]>;
-def : Pat<(srl (and_su GR32:$src, 0xff00), (i8 8)),
-          (MOVZX32_NOREXrr8 (EXTRACT_SUBREG GR32:$src, sub_8bit_hi))>,
-      Requires<[In64BitMode]>;
-def : Pat<(srl GR16:$src, (i8 8)),
-          (EXTRACT_SUBREG
-            (MOVZX32_NOREXrr8
-              (EXTRACT_SUBREG GR16:$src, sub_8bit_hi)),
-            sub_16bit)>,
-      Requires<[In64BitMode]>;
-def : Pat<(i32 (zext (srl_su GR16:$src, (i8 8)))),
-          (MOVZX32_NOREXrr8
-            (EXTRACT_SUBREG GR16:$src, sub_8bit_hi))>,
-      Requires<[In64BitMode]>;
-def : Pat<(i32 (anyext (srl_su GR16:$src, (i8 8)))),
-          (MOVZX32_NOREXrr8
-            (EXTRACT_SUBREG GR16:$src, sub_8bit_hi))>,
-      Requires<[In64BitMode]>;
 def : Pat<(i64 (zext (srl_su GR16:$src, (i8 8)))),
           (SUBREG_TO_REG
             (i64 0),

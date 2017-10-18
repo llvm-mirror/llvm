@@ -311,7 +311,7 @@ bool MachineOperand::isIdenticalTo(const MachineOperand &Other) const {
       return true;
 
     // Calculate the size of the RegMask
-    const MachineFunction *MF = getParent()->getParent()->getParent();
+    const MachineFunction *MF = getParent()->getMF();
     const TargetRegisterInfo *TRI = MF->getSubtarget().getRegisterInfo();
     unsigned RegMaskSize = (TRI->getNumRegs() + 31) / 32;
 
@@ -566,7 +566,7 @@ void MachineOperand::print(raw_ostream &OS, ModuleSlotTracker &MST,
     OS << "[TF=" << TF << ']';
 }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+#ifdef LLVM_ENABLE_DUMP
 LLVM_DUMP_METHOD void MachineOperand::dump() const {
   dbgs() << *this << '\n';
 }
@@ -1055,7 +1055,7 @@ MachineInstr::mergeMemRefsWith(const MachineInstr& Other) {
   if (CombinedNumMemRefs != uint8_t(CombinedNumMemRefs))
     return std::make_pair(nullptr, 0);
 
-  MachineFunction *MF = getParent()->getParent();
+  MachineFunction *MF = getMF();
   mmo_iterator MemBegin = MF->allocateMemRefsArray(CombinedNumMemRefs);
   mmo_iterator MemEnd = std::copy(memoperands_begin(), memoperands_end(),
                                   MemBegin);
@@ -1129,9 +1129,9 @@ bool MachineInstr::isIdenticalTo(const MachineInstr &Other,
       if (Check == IgnoreDefs)
         continue;
       else if (Check == IgnoreVRegDefs) {
-        if (TargetRegisterInfo::isPhysicalRegister(MO.getReg()) ||
-            TargetRegisterInfo::isPhysicalRegister(OMO.getReg()))
-          if (MO.getReg() != OMO.getReg())
+        if (!TargetRegisterInfo::isVirtualRegister(MO.getReg()) ||
+            !TargetRegisterInfo::isVirtualRegister(OMO.getReg()))
+          if (!MO.isIdenticalTo(OMO))
             return false;
       } else {
         if (!MO.isIdenticalTo(OMO))
@@ -1152,6 +1152,10 @@ bool MachineInstr::isIdenticalTo(const MachineInstr &Other,
         getDebugLoc() != Other.getDebugLoc())
       return false;
   return true;
+}
+
+const MachineFunction *MachineInstr::getMF() const {
+  return getParent()->getParent();
 }
 
 MachineInstr *MachineInstr::removeFromParent() {
@@ -1303,8 +1307,8 @@ MachineInstr::getRegClassConstraint(unsigned OpIdx,
                                     const TargetInstrInfo *TII,
                                     const TargetRegisterInfo *TRI) const {
   assert(getParent() && "Can't have an MBB reference here!");
-  assert(getParent()->getParent() && "Can't have an MF reference here!");
-  const MachineFunction &MF = *getParent()->getParent();
+  assert(getMF() && "Can't have an MF reference here!");
+  const MachineFunction &MF = *getMF();
 
   // Most opcodes have fixed constraints in their MCInstrDesc.
   if (!isInlineAsm())
@@ -1665,7 +1669,7 @@ bool MachineInstr::isSafeToMove(AliasAnalysis *AA, bool &SawStore) const {
 
 bool MachineInstr::mayAlias(AliasAnalysis *AA, MachineInstr &Other,
                             bool UseTBAA) {
-  const MachineFunction *MF = getParent()->getParent();
+  const MachineFunction *MF = getMF();
   const TargetInstrInfo *TII = MF->getSubtarget().getInstrInfo();
   const MachineFrameInfo &MFI = MF->getFrameInfo();
 
@@ -1869,7 +1873,7 @@ void MachineInstr::copyImplicitOps(MachineFunction &MF,
   }
 }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+#ifdef LLVM_ENABLE_DUMP
 LLVM_DUMP_METHOD void MachineInstr::dump() const {
   dbgs() << "  ";
   print(dbgs());

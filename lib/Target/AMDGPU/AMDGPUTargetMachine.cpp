@@ -117,10 +117,10 @@ static cl::opt<bool> EnableSIInsertWaitcntsPass(
   cl::init(true));
 
 // Option to run late CFG structurizer
-static cl::opt<bool> LateCFGStructurize(
+static cl::opt<bool, true> LateCFGStructurize(
   "amdgpu-late-structurize",
   cl::desc("Enable late CFG structurization"),
-  cl::init(false),
+  cl::location(AMDGPUTargetMachine::EnableLateStructurizeCFG),
   cl::Hidden);
 
 static cl::opt<bool> EnableAMDGPUFunctionCalls(
@@ -161,6 +161,7 @@ extern "C" void LLVMInitializeAMDGPUTarget() {
   initializeAMDGPUAnnotateUniformValuesPass(*PR);
   initializeAMDGPUArgumentUsageInfoPass(*PR);
   initializeAMDGPULowerIntrinsicsPass(*PR);
+  initializeAMDGPUOpenCLEnqueuedBlockLoweringPass(*PR);
   initializeAMDGPUPromoteAllocaPass(*PR);
   initializeAMDGPUCodeGenPreparePass(*PR);
   initializeAMDGPURewriteOutArgumentsPass(*PR);
@@ -299,6 +300,8 @@ AMDGPUTargetMachine::AMDGPUTargetMachine(const Target &T, const Triple &TT,
 
 AMDGPUTargetMachine::~AMDGPUTargetMachine() = default;
 
+bool AMDGPUTargetMachine::EnableLateStructurizeCFG = false;
+
 StringRef AMDGPUTargetMachine::getGPUName(const Function &F) const {
   Attribute GPUAttr = F.getFnAttribute("target-cpu");
   return GPUAttr.hasAttribute(Attribute::None) ?
@@ -370,17 +373,18 @@ void AMDGPUTargetMachine::adjustPassManager(PassManagerBuilder &Builder) {
         PM.add(createAMDGPUAlwaysInlinePass(false));
   });
 
+  const auto &Opt = Options;
   Builder.addExtension(
     PassManagerBuilder::EP_EarlyAsPossible,
-    [AMDGPUAA, LibCallSimplify](const PassManagerBuilder &,
-                                legacy::PassManagerBase &PM) {
+    [AMDGPUAA, LibCallSimplify, &Opt](const PassManagerBuilder &,
+                                      legacy::PassManagerBase &PM) {
       if (AMDGPUAA) {
         PM.add(createAMDGPUAAWrapperPass());
         PM.add(createAMDGPUExternalAAWrapperPass());
       }
       PM.add(llvm::createAMDGPUUseNativeCallsPass());
       if (LibCallSimplify)
-        PM.add(llvm::createAMDGPUSimplifyLibCallsPass());
+        PM.add(llvm::createAMDGPUSimplifyLibCallsPass(Opt));
   });
 
   Builder.addExtension(
@@ -608,6 +612,9 @@ void AMDGPUPassConfig::addIRPasses() {
 
   // Handle uses of OpenCL image2d_t, image3d_t and sampler_t arguments.
   addPass(createAMDGPUOpenCLImageTypeLoweringPass());
+
+  // Replace OpenCL enqueued block function pointers with global variables.
+  addPass(createAMDGPUOpenCLEnqueuedBlockLoweringPass());
 
   if (TM.getOptLevel() > CodeGenOpt::None) {
     addPass(createInferAddressSpacesPass());

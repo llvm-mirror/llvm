@@ -104,6 +104,8 @@ struct WasmDataSegment {
   MCSectionWasm *Section;
   StringRef Name;
   uint32_t Offset;
+  uint32_t Alignment;
+  uint32_t Flags;
   SmallVector<char, 4> Data;
 };
 
@@ -168,7 +170,7 @@ struct WasmRelocationEntry {
         << ", FixupSection=" << FixupSection->getSectionName();
   }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+#ifdef LLVM_ENABLE_DUMP
   LLVM_DUMP_METHOD void dump() const { print(dbgs()); }
 #endif
 };
@@ -225,8 +227,10 @@ class WasmObjectWriter : public MCObjectWriter {
   void endSection(SectionBookkeeping &Section);
 
 public:
-  WasmObjectWriter(MCWasmObjectTargetWriter *MOTW, raw_pwrite_stream &OS)
-      : MCObjectWriter(OS, /*IsLittleEndian=*/true), TargetObjectWriter(MOTW) {}
+  WasmObjectWriter(std::unique_ptr<MCWasmObjectTargetWriter> MOTW,
+                   raw_pwrite_stream &OS)
+      : MCObjectWriter(OS, /*IsLittleEndian=*/true),
+        TargetObjectWriter(std::move(MOTW)) {}
 
 private:
   ~WasmObjectWriter() override;
@@ -282,7 +286,6 @@ private:
   void writeDataRelocSection();
   void writeLinkingMetaDataSection(
       ArrayRef<WasmDataSegment> Segments, uint32_t DataSize,
-      uint32_t DataAlignment,
       SmallVector<std::pair<StringRef, uint32_t>, 4> SymbolFlags,
       bool HasStackPointer, uint32_t StackPointerGlobal);
 
@@ -499,10 +502,10 @@ WasmObjectWriter::getProvisionalValue(const WasmRelocationEntry &RelEntry) {
 }
 
 static void addData(SmallVectorImpl<char> &DataBytes,
-                    MCSectionWasm &DataSection, uint32_t &DataAlignment) {
-  DataBytes.resize(alignTo(DataBytes.size(), DataSection.getAlignment()));
-  DataAlignment = std::max(DataAlignment, DataSection.getAlignment());
+                    MCSectionWasm &DataSection) {
   DEBUG(errs() << "addData: " << DataSection.getSectionName() << "\n");
+
+  DataBytes.resize(alignTo(DataBytes.size(), DataSection.getAlignment()));
 
   for (const MCFragment &Frag : DataSection) {
     if (Frag.hasInstructions())
@@ -914,7 +917,6 @@ void WasmObjectWriter::writeDataRelocSection() {
 
 void WasmObjectWriter::writeLinkingMetaDataSection(
     ArrayRef<WasmDataSegment> Segments, uint32_t DataSize,
-    uint32_t DataAlignment,
     SmallVector<std::pair<StringRef, uint32_t>, 4> SymbolFlags,
     bool HasStackPointer, uint32_t StackPointerGlobal) {
   SectionBookkeeping Section;
@@ -941,17 +943,16 @@ void WasmObjectWriter::writeLinkingMetaDataSection(
     startSection(SubSection, wasm::WASM_DATA_SIZE);
     encodeULEB128(DataSize, getStream());
     endSection(SubSection);
-
-    startSection(SubSection, wasm::WASM_DATA_ALIGNMENT);
-    encodeULEB128(DataAlignment, getStream());
-    endSection(SubSection);
   }
 
   if (Segments.size()) {
-    startSection(SubSection, wasm::WASM_SEGMENT_NAMES);
+    startSection(SubSection, wasm::WASM_SEGMENT_INFO);
     encodeULEB128(Segments.size(), getStream());
-    for (const WasmDataSegment &Segment : Segments)
+    for (const WasmDataSegment &Segment : Segments) {
       writeString(Segment.Name);
+      encodeULEB128(Segment.Alignment, getStream());
+      encodeULEB128(Segment.Flags, getStream());
+    }
     endSection(SubSection);
   }
 
@@ -998,7 +999,6 @@ void WasmObjectWriter::writeObject(MCAssembler &Asm,
   SmallPtrSet<const MCSymbolWasm *, 4> IsAddressTaken;
   unsigned NumFuncImports = 0;
   SmallVector<WasmDataSegment, 4> DataSegments;
-  uint32_t DataAlignment = 1;
   uint32_t StackPointerGlobal = 0;
   uint32_t DataSize = 0;
   bool HasStackPointer = false;
@@ -1036,7 +1036,7 @@ void WasmObjectWriter::writeObject(MCAssembler &Asm,
       registerFunctionType(WS);
 
     // If the symbol is not defined in this translation unit, import it.
-    if (!WS.isDefined(/*SetUsed=*/false) || WS.isVariable()) {
+    if (!WS.isDefined(/*SetUsed=*/false)) {
       WasmImport Import;
       Import.ModuleName = WS.getModuleName();
       Import.FieldName = WS.getName();
@@ -1144,7 +1144,9 @@ void WasmObjectWriter::writeObject(MCAssembler &Asm,
     Segment.Name = Section.getSectionName();
     Segment.Offset = DataSize;
     Segment.Section = &Section;
-    addData(Segment.Data, Section, DataAlignment);
+    addData(Segment.Data, Section);
+    Segment.Alignment = Section.getAlignment();
+    Segment.Flags = 0;
     DataSize += Segment.Data.size();
     Section.setMemoryOffset(Segment.Offset);
   }
@@ -1268,6 +1270,7 @@ void WasmObjectWriter::writeObject(MCAssembler &Asm,
     uint32_t Index = SymbolIndices.find(ResolvedSym)->second;
     DEBUG(dbgs() << "  -> index:" << Index << "\n");
 
+    SymbolIndices[&WS] = Index;
     WasmExport Export;
     Export.FieldName = WS.getName();
     Export.Index = Index;
@@ -1307,14 +1310,18 @@ void WasmObjectWriter::writeObject(MCAssembler &Asm,
   writeNameSection(Functions, Imports, NumFuncImports);
   writeCodeRelocSection();
   writeDataRelocSection();
-  writeLinkingMetaDataSection(DataSegments, DataSize, DataAlignment,
-                              SymbolFlags, HasStackPointer, StackPointerGlobal);
+  writeLinkingMetaDataSection(DataSegments, DataSize, SymbolFlags,
+                              HasStackPointer, StackPointerGlobal);
 
   // TODO: Translate the .comment section to the output.
   // TODO: Translate debug sections to the output.
 }
 
-MCObjectWriter *llvm::createWasmObjectWriter(MCWasmObjectTargetWriter *MOTW,
-                                             raw_pwrite_stream &OS) {
-  return new WasmObjectWriter(MOTW, OS);
+std::unique_ptr<MCObjectWriter>
+llvm::createWasmObjectWriter(std::unique_ptr<MCWasmObjectTargetWriter> MOTW,
+                             raw_pwrite_stream &OS) {
+  // FIXME: Can't use make_unique<WasmObjectWriter>(...) as WasmObjectWriter's
+  //        destructor is private. Is that necessary?
+  return std::unique_ptr<MCObjectWriter>(
+      new WasmObjectWriter(std::move(MOTW), OS));
 }

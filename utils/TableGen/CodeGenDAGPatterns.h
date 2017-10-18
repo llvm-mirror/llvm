@@ -240,6 +240,8 @@ private:
   bool intersect(SetType &Out, const SetType &In);
 };
 
+raw_ostream &operator<<(raw_ostream &OS, const TypeSetByHwMode &T);
+
 struct TypeInfer {
   TypeInfer(TreePattern &T) : TP(T), ForceMode(0) {}
 
@@ -427,7 +429,7 @@ public:
   /// found, an error is flagged.
   bool ApplyTypeConstraints(TreePatternNode *N, TreePattern &TP) const;
 };
-  
+
 /// TreePredicateFn - This is an abstraction that represents the predicates on
 /// a PatFrag node.  This is a simple one-word wrapper around a pointer to
 /// provide nice accessors.
@@ -439,24 +441,24 @@ public:
   /// TreePredicateFn constructor.  Here 'N' is a subclass of PatFrag.
   TreePredicateFn(TreePattern *N);
 
-  
+
   TreePattern *getOrigPatFragRecord() const { return PatFragRec; }
-  
+
   /// isAlwaysTrue - Return true if this is a noop predicate.
   bool isAlwaysTrue() const;
-  
+
   bool isImmediatePattern() const { return !getImmCode().empty(); }
-  
+
   /// getImmediatePredicateCode - Return the code that evaluates this pattern if
   /// this is an immediate predicate.  It is an error to call this on a
   /// non-immediate pattern.
-  std::string getImmediatePredicateCode() const {
-    std::string Result = getImmCode();
+  StringRef getImmediatePredicateCode() const {
+    StringRef Result = getImmCode();
     assert(!Result.empty() && "Isn't an immediate pattern!");
     return Result;
   }
-  
-  
+
+
   bool operator==(const TreePredicateFn &RHS) const {
     return PatFragRec == RHS.PatFragRec;
   }
@@ -466,18 +468,18 @@ public:
   /// Return the name to use in the generated code to reference this, this is
   /// "Predicate_foo" if from a pattern fragment "foo".
   std::string getFnName() const;
-  
+
   /// getCodeToRunOnSDNode - Return the code for the function body that
   /// evaluates this predicate.  The argument is expected to be in "Node",
   /// not N.  This handles casting and conversion to a concrete node type as
   /// appropriate.
   std::string getCodeToRunOnSDNode() const;
-  
+
 private:
-  std::string getPredCode() const;
-  std::string getImmCode() const;
+  StringRef getPredCode() const;
+  StringRef getImmCode() const;
 };
-  
+
 
 /// FIXME: TreePatternNode's can be shared in some cases (due to dag-shaped
 /// patterns), and as such should be ref counted.  We currently just leak all
@@ -570,7 +572,7 @@ public:
   bool setDefaultMode(unsigned Mode);
 
   bool hasAnyPredicate() const { return !PredicateFns.empty(); }
-  
+
   const std::vector<TreePredicateFn> &getPredicateFns() const {
     return PredicateFns;
   }
@@ -993,18 +995,20 @@ public:
   const CodeGenTarget &getTargetInfo() const { return Target; }
   const TypeSetByHwMode &getLegalTypes() const { return LegalVTS; }
 
-  Record *getSDNodeNamed(const std::string &Name) const;
+  Record *getSDNodeNamed(StringRef Name) const;
 
   const SDNodeInfo &getSDNodeInfo(Record *R) const {
-    assert(SDNodes.count(R) && "Unknown node!");
-    return SDNodes.find(R)->second;
+    auto F = SDNodes.find(R);
+    assert(F != SDNodes.end() && "Unknown node!");
+    return F->second;
   }
 
   // Node transformation lookups.
   typedef std::pair<Record*, std::string> NodeXForm;
   const NodeXForm &getSDNodeTransform(Record *R) const {
-    assert(SDNodeXForms.count(R) && "Invalid transform!");
-    return SDNodeXForms.find(R)->second;
+    auto F = SDNodeXForms.find(R);
+    assert(F != SDNodeXForms.end() && "Invalid transform!");
+    return F->second;
   }
 
   typedef std::map<Record*, NodeXForm, LessRecordByID>::const_iterator
@@ -1014,8 +1018,9 @@ public:
 
 
   const ComplexPattern &getComplexPattern(Record *R) const {
-    assert(ComplexPatterns.count(R) && "Unknown addressing mode!");
-    return ComplexPatterns.find(R)->second;
+    auto F = ComplexPatterns.find(R);
+    assert(F != ComplexPatterns.end() && "Unknown addressing mode!");
+    return F->second;
   }
 
   const CodeGenIntrinsic &getIntrinsic(Record *R) const {
@@ -1043,19 +1048,22 @@ public:
   }
 
   const DAGDefaultOperand &getDefaultOperand(Record *R) const {
-    assert(DefaultOperands.count(R) &&"Isn't an analyzed default operand!");
-    return DefaultOperands.find(R)->second;
+    auto F = DefaultOperands.find(R);
+    assert(F != DefaultOperands.end() &&"Isn't an analyzed default operand!");
+    return F->second;
   }
 
   // Pattern Fragment information.
   TreePattern *getPatternFragment(Record *R) const {
-    assert(PatternFragments.count(R) && "Invalid pattern fragment request!");
-    return PatternFragments.find(R)->second.get();
+    auto F = PatternFragments.find(R);
+    assert(F != PatternFragments.end() && "Invalid pattern fragment request!");
+    return F->second.get();
   }
   TreePattern *getPatternFragmentIfRead(Record *R) const {
-    if (!PatternFragments.count(R))
+    auto F = PatternFragments.find(R);
+    if (F == PatternFragments.end())
       return nullptr;
-    return PatternFragments.find(R)->second.get();
+    return F->second.get();
   }
 
   typedef std::map<Record *, std::unique_ptr<TreePattern>,
@@ -1077,8 +1085,9 @@ public:
       DAGInstMap &DAGInsts);
 
   const DAGInstruction &getInstruction(Record *R) const {
-    assert(Instructions.count(R) && "Unknown instruction!");
-    return Instructions.find(R)->second;
+    auto F = Instructions.find(R);
+    assert(F != Instructions.end() && "Unknown instruction!");
+    return F->second;
   }
 
   Record *get_intrinsic_void_sdnode() const {

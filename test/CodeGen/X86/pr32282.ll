@@ -13,7 +13,6 @@ define void @foo() {
 ; X86-LABEL: foo:
 ; X86:       # BB#0:
 ; X86-NEXT:    pushl %eax
-; X86-NEXT:  .Lcfi0:
 ; X86-NEXT:    .cfi_def_cfa_offset 8
 ; X86-NEXT:    movl d, %eax
 ; X86-NEXT:    movl d+4, %ecx
@@ -28,24 +27,18 @@ define void @foo() {
 ; X86-NEXT:    cmovnel %ecx, %edx
 ; X86-NEXT:    cmovnel %eax, %ecx
 ; X86-NEXT:    andl $-2, %edx
-; X86-NEXT:    andl $2147483647, %ecx # imm = 0x7FFFFFFF
 ; X86-NEXT:    addl $7, %edx
 ; X86-NEXT:    adcxl %eax, %ecx
 ; X86-NEXT:    pushl %ecx
-; X86-NEXT:  .Lcfi1:
 ; X86-NEXT:    .cfi_adjust_cfa_offset 4
 ; X86-NEXT:    pushl %edx
-; X86-NEXT:  .Lcfi2:
 ; X86-NEXT:    .cfi_adjust_cfa_offset 4
 ; X86-NEXT:    pushl $0
-; X86-NEXT:  .Lcfi3:
 ; X86-NEXT:    .cfi_adjust_cfa_offset 4
 ; X86-NEXT:    pushl $0
-; X86-NEXT:  .Lcfi4:
 ; X86-NEXT:    .cfi_adjust_cfa_offset 4
 ; X86-NEXT:    calll __divdi3
 ; X86-NEXT:    addl $16, %esp
-; X86-NEXT:  .Lcfi5:
 ; X86-NEXT:    .cfi_adjust_cfa_offset -16
 ; X86-NEXT:    orl %eax, %edx
 ; X86-NEXT:    setne {{[0-9]+}}(%esp)

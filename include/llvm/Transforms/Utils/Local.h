@@ -16,6 +16,7 @@
 #define LLVM_TRANSFORMS_UTILS_LOCAL_H
 
 #include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/TinyPtrVector.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Dominators.h"
@@ -32,6 +33,7 @@ class BranchInst;
 class Instruction;
 class CallInst;
 class DbgDeclareInst;
+class DbgInfoIntrinsic;
 class DbgValueInst;
 class StoreInst;
 class LoadInst;
@@ -48,6 +50,25 @@ class DominatorTree;
 class LazyValueInfo;
 
 template<typename T> class SmallVectorImpl;
+
+/// A set of parameters used to control the transforms in the SimplifyCFG pass.
+/// Options may change depending on the position in the optimization pipeline.
+/// For example, canonical form that includes switches and branches may later be
+/// replaced by lookup tables and selects.
+struct SimplifyCFGOptions {
+  int BonusInstThreshold;
+  bool ConvertSwitchToLookupTable;
+  bool NeedCanonicalLoop;
+  AssumptionCache *AC;
+
+  SimplifyCFGOptions(int BonusThreshold = 1, bool SwitchToLookup = false,
+                     bool CanonicalLoops = true,
+                     AssumptionCache *AssumpCache = nullptr)
+      : BonusInstThreshold(BonusThreshold),
+        ConvertSwitchToLookupTable(SwitchToLookup),
+        NeedCanonicalLoop(CanonicalLoops),
+        AC(AssumpCache) {}
+};
 
 //===----------------------------------------------------------------------===//
 //  Local constant propagation.
@@ -133,17 +154,15 @@ bool TryToSimplifyUncondBranchFromEmptyBlock(BasicBlock *BB);
 /// values, but instcombine orders them so it usually won't matter.
 bool EliminateDuplicatePHINodes(BasicBlock *BB);
 
-/// This function is used to do simplification of a CFG.  For
-/// example, it adjusts branches to branches to eliminate the extra hop, it
-/// eliminates unreachable basic blocks, and does other "peephole" optimization
-/// of the CFG.  It returns true if a modification was made, possibly deleting
-/// the basic block that was pointed to. LoopHeaders is an optional input
-/// parameter, providing the set of loop header that SimplifyCFG should not
-/// eliminate.
-bool SimplifyCFG(BasicBlock *BB, const TargetTransformInfo &TTI,
-                 unsigned BonusInstThreshold, AssumptionCache *AC = nullptr,
-                 SmallPtrSetImpl<BasicBlock *> *LoopHeaders = nullptr,
-                 bool LateSimplifyCFG = false);
+/// This function is used to do simplification of a CFG.  For example, it
+/// adjusts branches to branches to eliminate the extra hop, it eliminates
+/// unreachable basic blocks, and does other peephole optimization of the CFG.
+/// It returns true if a modification was made, possibly deleting the basic
+/// block that was pointed to. LoopHeaders is an optional input parameter
+/// providing the set of loop headers that SimplifyCFG should not eliminate.
+bool simplifyCFG(BasicBlock *BB, const TargetTransformInfo &TTI,
+                 const SimplifyCFGOptions &Options = {},
+                 SmallPtrSetImpl<BasicBlock *> *LoopHeaders = nullptr);
 
 /// This function is used to flatten a CFG. For example, it uses parallel-and
 /// and parallel-or mode to collapse if-conditions and merge if-regions with
@@ -262,26 +281,28 @@ Value *EmitGEPOffset(IRBuilderTy *Builder, const DataLayout &DL, User *GEP,
 ///
 
 /// Inserts a llvm.dbg.value intrinsic before a store to an alloca'd value
-/// that has an associated llvm.dbg.decl intrinsic.
-void ConvertDebugDeclareToDebugValue(DbgDeclareInst *DDI,
+/// that has an associated llvm.dbg.declare or llvm.dbg.addr intrinsic.
+void ConvertDebugDeclareToDebugValue(DbgInfoIntrinsic *DII,
                                      StoreInst *SI, DIBuilder &Builder);
 
 /// Inserts a llvm.dbg.value intrinsic before a load of an alloca'd value
-/// that has an associated llvm.dbg.decl intrinsic.
-void ConvertDebugDeclareToDebugValue(DbgDeclareInst *DDI,
+/// that has an associated llvm.dbg.declare or llvm.dbg.addr intrinsic.
+void ConvertDebugDeclareToDebugValue(DbgInfoIntrinsic *DII,
                                      LoadInst *LI, DIBuilder &Builder);
 
-/// Inserts a llvm.dbg.value intrinsic after a phi of an alloca'd value
-/// that has an associated llvm.dbg.decl intrinsic.
-void ConvertDebugDeclareToDebugValue(DbgDeclareInst *DDI,
+/// Inserts a llvm.dbg.value intrinsic after a phi that has an associated
+/// llvm.dbg.declare or llvm.dbg.addr intrinsic.
+void ConvertDebugDeclareToDebugValue(DbgInfoIntrinsic *DII,
                                      PHINode *LI, DIBuilder &Builder);
 
 /// Lowers llvm.dbg.declare intrinsics into appropriate set of
 /// llvm.dbg.value intrinsics.
 bool LowerDbgDeclare(Function &F);
 
-/// Finds the llvm.dbg.declare intrinsic corresponding to an alloca, if any.
-DbgDeclareInst *FindAllocaDbgDeclare(Value *V);
+/// Finds all intrinsics declaring local variables as living in the memory that
+/// 'V' points to. This may include a mix of dbg.declare and
+/// dbg.addr intrinsics.
+TinyPtrVector<DbgInfoIntrinsic *> FindDbgAddrUses(Value *V);
 
 /// Finds the llvm.dbg.value intrinsics describing a value.
 void findDbgValues(SmallVectorImpl<DbgValueInst *> &DbgValues, Value *V);

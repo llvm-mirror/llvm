@@ -856,6 +856,17 @@ TEST_F(ScalarEvolutionsTest, SCEVExitLimitForgetLoop) {
   EXPECT_TRUE(isa<SCEVConstant>(EC));
   EXPECT_EQ(cast<SCEVConstant>(EC)->getAPInt().getLimitedValue(), 999u);
 
+  // The add recurrence {5,+,1} does not correspond to any PHI in the IR, and
+  // that is relevant to this test.
+  auto *Five = SE.getConstant(APInt(/*numBits=*/64, 5));
+  auto *AR =
+      SE.getAddRecExpr(Five, SE.getOne(T_int64), Loop, SCEV::FlagAnyWrap);
+  const SCEV *ARAtLoopExit = SE.getSCEVAtScope(AR, nullptr);
+  EXPECT_FALSE(isa<SCEVCouldNotCompute>(ARAtLoopExit));
+  EXPECT_TRUE(isa<SCEVConstant>(ARAtLoopExit));
+  EXPECT_EQ(cast<SCEVConstant>(ARAtLoopExit)->getAPInt().getLimitedValue(),
+            1004u);
+
   SE.forgetLoop(Loop);
   Br->eraseFromParent();
   Cond->eraseFromParent();
@@ -868,6 +879,11 @@ TEST_F(ScalarEvolutionsTest, SCEVExitLimitForgetLoop) {
   EXPECT_FALSE(isa<SCEVCouldNotCompute>(NewEC));
   EXPECT_TRUE(isa<SCEVConstant>(NewEC));
   EXPECT_EQ(cast<SCEVConstant>(NewEC)->getAPInt().getLimitedValue(), 1999u);
+  const SCEV *NewARAtLoopExit = SE.getSCEVAtScope(AR, nullptr);
+  EXPECT_FALSE(isa<SCEVCouldNotCompute>(NewARAtLoopExit));
+  EXPECT_TRUE(isa<SCEVConstant>(NewARAtLoopExit));
+  EXPECT_EQ(cast<SCEVConstant>(NewARAtLoopExit)->getAPInt().getLimitedValue(),
+            2004u);
 }
 
 // Make sure that SCEV invalidates exit limits after invalidating the values it
@@ -1007,6 +1023,94 @@ TEST_F(ScalarEvolutionsTest, SCEVAddRecFromPHIwithLargeConstants) {
   EXPECT_NE(nullptr, Expr);
   EXPECT_TRUE(isa<SCEVUnknown>(Expr));
   auto Result = SE.createAddRecFromPHIWithCasts(cast<SCEVUnknown>(Expr));
+}
+
+TEST_F(ScalarEvolutionsTest, SCEVAddRecFromPHIwithLargeConstantAccum) {
+  // Make sure that SCEV does not blow up when constructing an AddRec
+  // with predicates for a phi with the update pattern:
+  //  (SExt/ZExt ix (Trunc iy (%SymbolicPHI) to ix) to iy) + InvariantAccum
+  // when the InvariantAccum is a constant that is too large to fit in an
+  // ix but are zero when truncated to ix, and the initial value of the
+  // phi is not a constant.
+  Type *Int32Ty = Type::getInt32Ty(Context);
+  SmallVector<Type *, 1> Types;
+  Types.push_back(Int32Ty);
+  FunctionType *FTy = FunctionType::get(Type::getVoidTy(Context), Types, false);
+  Function *F = cast<Function>(M.getOrInsertFunction("addrecphitest", FTy));
+
+  /*
+    Create IR:
+    define @addrecphitest(i32)
+    entry:
+     br label %loop
+    loop:
+     %1 = phi i32 [%0, %entry], [%4, %loop]
+     %2 = shl i32 %1, 16
+     %3 = ashr exact i32 %2, 16
+     %4 = add i32 %3, -2147483648
+     br i1 undef, label %exit, label %loop
+    exit:
+     ret void
+   */
+  BasicBlock *EntryBB = BasicBlock::Create(Context, "entry", F);
+  BasicBlock *LoopBB = BasicBlock::Create(Context, "loop", F);
+  BasicBlock *ExitBB = BasicBlock::Create(Context, "exit", F);
+
+  // entry:
+  BranchInst::Create(LoopBB, EntryBB);
+  // loop:
+  auto *MinInt32 = ConstantInt::get(Context, APInt(32, 0x80000000U, true));
+  auto *Int32_16 = ConstantInt::get(Context, APInt(32, 16));
+  auto *Br = BranchInst::Create(
+      LoopBB, ExitBB, UndefValue::get(Type::getInt1Ty(Context)), LoopBB);
+  auto *Phi = PHINode::Create(Int32Ty, 2, "", Br);
+  auto *Shl = BinaryOperator::CreateShl(Phi, Int32_16, "", Br);
+  auto *AShr = BinaryOperator::CreateExactAShr(Shl, Int32_16, "", Br);
+  auto *Add = BinaryOperator::CreateAdd(AShr, MinInt32, "", Br);
+  auto *Arg = &*(F->arg_begin());
+  Phi->addIncoming(Arg, EntryBB);
+  Phi->addIncoming(Add, LoopBB);
+  // exit:
+  ReturnInst::Create(Context, nullptr, ExitBB);
+
+  // Make sure that SCEV doesn't blow up
+  ScalarEvolution SE = buildSE(*F);
+  SCEVUnionPredicate Preds;
+  const SCEV *Expr = SE.getSCEV(Phi);
+  EXPECT_NE(nullptr, Expr);
+  EXPECT_TRUE(isa<SCEVUnknown>(Expr));
+  auto Result = SE.createAddRecFromPHIWithCasts(cast<SCEVUnknown>(Expr));
+}
+
+TEST_F(ScalarEvolutionsTest, SCEVFoldSumOfTruncs) {
+  // Verify that the following SCEV gets folded to a zero:
+  //  (-1 * (trunc i64 (-1 * %0) to i32)) + (-1 * (trunc i64 %0 to i32)
+  Type *ArgTy = Type::getInt64Ty(Context);
+  Type *Int32Ty = Type::getInt32Ty(Context);
+  SmallVector<Type *, 1> Types;
+  Types.push_back(ArgTy);
+  FunctionType *FTy = FunctionType::get(Type::getVoidTy(Context), Types, false);
+  Function *F = cast<Function>(M.getOrInsertFunction("f", FTy));
+  BasicBlock *BB = BasicBlock::Create(Context, "entry", F);
+  ReturnInst::Create(Context, nullptr, BB);
+
+  ScalarEvolution SE = buildSE(*F);
+
+  auto *Arg = &*(F->arg_begin());
+  const auto *ArgSCEV = SE.getSCEV(Arg);
+
+  // Build the SCEV
+  const auto *A0 = SE.getNegativeSCEV(ArgSCEV);
+  const auto *A1 = SE.getTruncateExpr(A0, Int32Ty);
+  const auto *A = SE.getNegativeSCEV(A1);
+
+  const auto *B0 = SE.getTruncateExpr(ArgSCEV, Int32Ty);
+  const auto *B = SE.getNegativeSCEV(B0);
+
+  const auto *Expr = SE.getAddExpr(A, B);
+  // Verify that the SCEV was folded to 0
+  const auto *ZeroConst = SE.getConstant(Int32Ty, 0);
+  EXPECT_EQ(Expr, ZeroConst);
 }
 
 }  // end anonymous namespace

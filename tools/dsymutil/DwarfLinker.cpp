@@ -525,6 +525,9 @@ public:
   /// Emit the string table described by \p Pool.
   void emitStrings(const NonRelocatableStringpool &Pool);
 
+  /// Emit the swift_ast section stored in \p Buffers.
+  void emitSwiftAST(const std::vector<MemoryBufferRef> &Buffers);
+
   /// Emit debug_ranges for \p FuncRange by translating the
   /// original \p Entries.
   void emitRangesEntries(
@@ -620,7 +623,8 @@ bool DwarfStreamer::init(Triple TheTriple, StringRef OutputFilename) {
 
   MCTargetOptions MCOptions = InitMCTargetOptionsFromFlags();
   MS = TheTarget->createMCObjectStreamer(
-      TheTriple, *MC, *MAB, *OutFile, MCE, *MSTI, MCOptions.MCRelaxAll,
+      TheTriple, *MC, std::unique_ptr<MCAsmBackend>(MAB), *OutFile,
+      std::unique_ptr<MCCodeEmitter>(MCE), *MSTI, MCOptions.MCRelaxAll,
       MCOptions.MCIncrementalLinkerCompatible,
       /*DWARFMustBeAtTheEnd*/ false);
   if (!MS)
@@ -706,6 +710,15 @@ void DwarfStreamer::emitStrings(const NonRelocatableStringpool &Pool) {
        Entry = Pool.getNextEntry(Entry))
     Asm->OutStreamer->EmitBytes(
         StringRef(Entry->getKey().data(), Entry->getKey().size() + 1));
+}
+
+/// Emit the swift_ast section stored in \p Buffers.
+void DwarfStreamer::emitSwiftAST(const std::vector<MemoryBufferRef> &Buffers) {
+  MCSection *SwiftASTSection = MOFI->getDwarfSwiftASTSection();
+  SwiftASTSection->setAlignment(1 << 5);
+  MS->SwitchSection(SwiftASTSection);
+  for (auto Buf : Buffers)
+    MS->EmitBytes(Buf.getBuffer());
 }
 
 /// Emit the debug_range section contents for \p FuncRange by
@@ -1792,7 +1805,8 @@ static bool analyzeContextInfo(const DWARFDie &DIE,
   //
   // We treat non-C++ modules like namespaces for this reason.
   if (DIE.getTag() == dwarf::DW_TAG_module && ParentIdx == 0 &&
-      dwarf::toString(DIE.find(dwarf::DW_AT_name), "") != CU.getClangModuleName()) {
+      dwarf::toString(DIE.find(dwarf::DW_AT_name), "") !=
+          CU.getClangModuleName()) {
     InImportedModule = true;
   }
 
@@ -2796,11 +2810,13 @@ DIE *DwarfLinker::DIECloner::cloneDIE(
     // file might be start address of another function which got moved
     // independantly by the linker). The computation of the actual
     // high_pc value is done in cloneAddressAttribute().
-    AttrInfo.OrigHighPc = dwarf::toAddress(InputDIE.find(dwarf::DW_AT_high_pc), 0);
+    AttrInfo.OrigHighPc =
+        dwarf::toAddress(InputDIE.find(dwarf::DW_AT_high_pc), 0);
     // Also store the low_pc. It might get relocated in an
     // inline_subprogram that happens at the beginning of its
     // inlining function.
-    AttrInfo.OrigLowPc = dwarf::toAddress(InputDIE.find(dwarf::DW_AT_low_pc), UINT64_MAX);
+    AttrInfo.OrigLowPc =
+        dwarf::toAddress(InputDIE.find(dwarf::DW_AT_low_pc), UINT64_MAX);
   }
 
   // Reset the Offset to 0 as we will be working on the local copy of
@@ -2921,7 +2937,8 @@ void DwarfLinker::patchRangesForUnit(const CompileUnit &Unit,
   auto InvalidRange = FunctionRanges.end(), CurrRange = InvalidRange;
   DWARFUnit &OrigUnit = Unit.getOrigUnit();
   auto OrigUnitDie = OrigUnit.getUnitDIE(false);
-  uint64_t OrigLowPc = dwarf::toAddress(OrigUnitDie.find(dwarf::DW_AT_low_pc), -1ULL);
+  uint64_t OrigLowPc =
+      dwarf::toAddress(OrigUnitDie.find(dwarf::DW_AT_low_pc), -1ULL);
   // Ranges addresses are based on the unit's low_pc. Compute the
   // offset we need to apply to adapt to the new unit's low_pc.
   int64_t UnitPcOffset = 0;
@@ -3325,8 +3342,8 @@ void DwarfLinker::loadClangModule(StringRef Filename, StringRef ModulePath,
   else
     sys::path::append(Path, Filename);
   BinaryHolder ObjHolder(Options.Verbose);
-  auto &Obj =
-      ModuleMap.addDebugMapObject(Path, sys::TimePoint<std::chrono::seconds>());
+  auto &Obj = ModuleMap.addDebugMapObject(
+      Path, sys::TimePoint<std::chrono::seconds>(), MachO::N_OSO);
   auto ErrOrObj = loadObject(ObjHolder, Obj, ModuleMap);
   if (!ErrOrObj) {
     // Try and emit more helpful warnings by applying some heuristics.
@@ -3471,6 +3488,19 @@ bool DwarfLinker::link(const DebugMap &Map) {
 
     if (Options.Verbose)
       outs() << "DEBUG MAP OBJECT: " << Obj->getObjectFilename() << "\n";
+
+    // N_AST objects (swiftmodule files) should get dumped directly into the
+    // appropriate DWARF section.
+    if (Obj->getType() == MachO::N_AST) {
+      auto ErrOrMemBufferRefs = BinHolder.GetMemoryBuffersForFile(
+          Obj->getObjectFilename(), Obj->getTimestamp());
+      if (ErrOrMemBufferRefs.getError())
+        continue;
+      if (!Options.NoOutput)
+        Streamer->emitSwiftAST(ErrOrMemBufferRefs.get());
+      continue;
+    }
+
     auto ErrOrObj = loadObject(BinHolder, *Obj, Map);
     if (!ErrOrObj)
       continue;

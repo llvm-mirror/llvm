@@ -821,10 +821,22 @@ static const EnumEntry<unsigned> ElfOSABI[] = {
   {"AROS",         "AROS",                 ELF::ELFOSABI_AROS},
   {"FenixOS",      "FenixOS",              ELF::ELFOSABI_FENIXOS},
   {"CloudABI",     "CloudABI",             ELF::ELFOSABI_CLOUDABI},
-  {"C6000_ELFABI", "Bare-metal C6000",     ELF::ELFOSABI_C6000_ELFABI},
-  {"C6000_LINUX",  "Linux C6000",          ELF::ELFOSABI_C6000_LINUX},
-  {"ARM",          "ARM",                  ELF::ELFOSABI_ARM},
   {"Standalone",   "Standalone App",       ELF::ELFOSABI_STANDALONE}
+};
+
+static const EnumEntry<unsigned> AMDGPUElfOSABI[] = {
+  {"AMDGPU_HSA",    "AMDGPU - HSA",    ELF::ELFOSABI_AMDGPU_HSA},
+  {"AMDGPU_PAL",    "AMDGPU - PAL",    ELF::ELFOSABI_AMDGPU_PAL},
+  {"AMDGPU_MESA3D", "AMDGPU - MESA3D", ELF::ELFOSABI_AMDGPU_MESA3D}
+};
+
+static const EnumEntry<unsigned> ARMElfOSABI[] = {
+  {"ARM", "ARM", ELF::ELFOSABI_ARM}
+};
+
+static const EnumEntry<unsigned> C6000ElfOSABI[] = {
+  {"C6000_ELFABI", "Bare-metal C6000", ELF::ELFOSABI_C6000_ELFABI},
+  {"C6000_LINUX",  "Linux C6000",      ELF::ELFOSABI_C6000_LINUX}
 };
 
 static const EnumEntry<unsigned> ElfMachineType[] = {
@@ -968,7 +980,7 @@ static const EnumEntry<unsigned> ElfMachineType[] = {
   ENUM_ENT(EM_L10M,          "EM_L10M"),
   ENUM_ENT(EM_K10M,          "EM_K10M"),
   ENUM_ENT(EM_AARCH64,       "AArch64"),
-  ENUM_ENT(EM_AVR32,         "Atmel AVR 8-bit microcontroller"),
+  ENUM_ENT(EM_AVR32,         "Atmel Corporation 32-bit microprocessor family"),
   ENUM_ENT(EM_STM8,          "STMicroeletronics STM8 8-bit microcontroller"),
   ENUM_ENT(EM_TILE64,        "Tilera TILE64 multicore architecture family"),
   ENUM_ENT(EM_TILEPRO,       "Tilera TILEPro multicore architecture family"),
@@ -1232,6 +1244,20 @@ static const EnumEntry<unsigned> ElfHeaderMipsFlags[] = {
   LLVM_READOBJ_ENUM_ENT(ELF, EF_MIPS_ARCH_64R6)
 };
 
+static const EnumEntry<unsigned> ElfHeaderAMDGPUFlags[] = {
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_ARCH_NONE),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_ARCH_R600),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_ARCH_GCN)
+};
+
+static const EnumEntry<unsigned> ElfHeaderRISCVFlags[] = {
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_RISCV_RVC),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_RISCV_FLOAT_ABI_SINGLE),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_RISCV_FLOAT_ABI_DOUBLE),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_RISCV_FLOAT_ABI_QUAD),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_RISCV_RVE)
+};
+
 static const EnumEntry<unsigned> ElfSymOtherFlags[] = {
   LLVM_READOBJ_ENUM_ENT(ELF, STV_INTERNAL),
   LLVM_READOBJ_ENUM_ENT(ELF, STV_HIDDEN),
@@ -1288,12 +1314,12 @@ ELFDumper<ELFT>::ELFDumper(const ELFFile<ELFT> *Obj, ScopedPrinter &Writer)
     switch (Sec.sh_type) {
     case ELF::SHT_SYMTAB:
       if (DotSymtabSec != nullptr)
-        reportError("Multilpe SHT_SYMTAB");
+        reportError("Multiple SHT_SYMTAB");
       DotSymtabSec = &Sec;
       break;
     case ELF::SHT_DYNSYM:
       if (DynSymRegion.Size)
-        reportError("Multilpe SHT_DYNSYM");
+        reportError("Multiple SHT_DYNSYM");
       DynSymRegion = createDRIFrom(&Sec);
       // This is only used (if Elf_Shdr present)for naming section in GNU style
       DynSymtabName = unwrapOrError(Obj->getSectionName(&Sec));
@@ -1313,7 +1339,7 @@ ELFDumper<ELFT>::ELFDumper(const ELFFile<ELFT> *Obj, ScopedPrinter &Writer)
       break;
     case ELF::SHT_GNU_verneed:
       if (dot_gnu_version_r_sec != nullptr)
-        reportError("Multilpe SHT_GNU_verneed");
+        reportError("Multiple SHT_GNU_verneed");
       dot_gnu_version_r_sec = &Sec;
       break;
     }
@@ -2370,7 +2396,6 @@ template <class ELFT> void ELFDumper<ELFT>::printStackMap() const {
   if (!StackMapSection)
     return;
 
-  StringRef StackMapContents;
   ArrayRef<uint8_t> StackMapContentsArray =
       unwrapOrError(Obj->getSectionContents(StackMapSection));
 
@@ -3512,13 +3537,22 @@ template <class ELFT> void LLVMStyle<ELFT>::printFileHeaders(const ELFO *Obj) {
                   makeArrayRef(ElfDataEncoding));
       W.printNumber("FileVersion", e->e_ident[ELF::EI_VERSION]);
 
-      // Handle architecture specific OS/ABI values.
-      if (e->e_machine == ELF::EM_AMDGPU &&
-          e->e_ident[ELF::EI_OSABI] == ELF::ELFOSABI_AMDGPU_HSA)
-        W.printHex("OS/ABI", "AMDGPU_HSA", ELF::ELFOSABI_AMDGPU_HSA);
-      else
-        W.printEnum("OS/ABI", e->e_ident[ELF::EI_OSABI],
-                    makeArrayRef(ElfOSABI));
+      auto OSABI = makeArrayRef(ElfOSABI);
+      if (e->e_ident[ELF::EI_OSABI] >= ELF::ELFOSABI_FIRST_ARCH &&
+          e->e_ident[ELF::EI_OSABI] <= ELF::ELFOSABI_LAST_ARCH) {
+        switch (e->e_machine) {
+        case ELF::EM_AMDGPU:
+          OSABI = makeArrayRef(AMDGPUElfOSABI);
+          break;
+        case ELF::EM_ARM:
+          OSABI = makeArrayRef(ARMElfOSABI);
+          break;
+        case ELF::EM_TI_C6000:
+          OSABI = makeArrayRef(C6000ElfOSABI);
+          break;
+        }
+      }
+      W.printEnum("OS/ABI", e->e_ident[ELF::EI_OSABI], OSABI);
       W.printNumber("ABIVersion", e->e_ident[ELF::EI_ABIVERSION]);
       W.printBinary("Unused", makeArrayRef(e->e_ident).slice(ELF::EI_PAD));
     }
@@ -3533,6 +3567,11 @@ template <class ELFT> void LLVMStyle<ELFT>::printFileHeaders(const ELFO *Obj) {
       W.printFlags("Flags", e->e_flags, makeArrayRef(ElfHeaderMipsFlags),
                    unsigned(ELF::EF_MIPS_ARCH), unsigned(ELF::EF_MIPS_ABI),
                    unsigned(ELF::EF_MIPS_MACH));
+    else if (e->e_machine == EM_AMDGPU)
+      W.printFlags("Flags", e->e_flags, makeArrayRef(ElfHeaderAMDGPUFlags),
+                   unsigned(ELF::EF_AMDGPU_ARCH));
+    else if (e->e_machine == EM_RISCV)
+      W.printFlags("Flags", e->e_flags, makeArrayRef(ElfHeaderRISCVFlags));
     else
       W.printFlags("Flags", e->e_flags);
     W.printNumber("HeaderSize", e->e_ehsize);

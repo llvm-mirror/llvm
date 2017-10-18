@@ -12,12 +12,15 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "ResourceScriptToken.h"
+#include "ResourceFileWriter.h"
 #include "ResourceScriptParser.h"
+#include "ResourceScriptStmt.h"
+#include "ResourceScriptToken.h"
 
 #include "llvm/Option/Arg.h"
 #include "llvm/Option/ArgList.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Process.h"
@@ -27,6 +30,7 @@
 #include <system_error>
 
 using namespace llvm;
+using namespace llvm::rc;
 
 namespace {
 
@@ -64,7 +68,7 @@ public:
 
 static ExitOnError ExitOnErr;
 
-LLVM_ATTRIBUTE_NORETURN static void fatalError(Twine Message) {
+LLVM_ATTRIBUTE_NORETURN static void fatalError(const Twine &Message) {
   errs() << Message << "\n";
   exit(1);
 }
@@ -103,10 +107,10 @@ int main(int argc_, const char *argv_[]) {
   }
 
   // Read and tokenize the input file.
-  const Twine &Filename = InArgsInfo[0];
-  ErrorOr<std::unique_ptr<MemoryBuffer>> File = MemoryBuffer::getFile(Filename);
+  ErrorOr<std::unique_ptr<MemoryBuffer>> File =
+      MemoryBuffer::getFile(InArgsInfo[0]);
   if (!File) {
-    fatalError("Error opening file '" + Filename +
+    fatalError("Error opening file '" + Twine(InArgsInfo[0]) +
                "': " + File.getError().message());
   }
 
@@ -134,12 +138,49 @@ int main(int argc_, const char *argv_[]) {
     }
   }
 
+  SearchParams Params;
+  SmallString<128> InputFile(InArgsInfo[0]);
+  llvm::sys::fs::make_absolute(InputFile);
+  Params.InputFilePath = InputFile;
+  Params.Include = InputArgs.getAllArgValues(OPT_INCLUDE);
+  Params.NoInclude = InputArgs.getAllArgValues(OPT_NOINCLUDE);
+
+  std::unique_ptr<ResourceFileWriter> Visitor;
+  bool IsDryRun = InputArgs.hasArg(OPT_DRY_RUN);
+
+  if (!IsDryRun) {
+    auto OutArgsInfo = InputArgs.getAllArgValues(OPT_FILEOUT);
+    if (OutArgsInfo.size() != 1)
+      fatalError(
+          "Exactly one output file should be provided (using /FO flag).");
+
+    std::error_code EC;
+    auto FOut =
+        llvm::make_unique<raw_fd_ostream>(OutArgsInfo[0], EC, sys::fs::F_RW);
+    if (EC)
+      fatalError("Error opening output file '" + OutArgsInfo[0] +
+                 "': " + EC.message());
+    Visitor = llvm::make_unique<ResourceFileWriter>(Params, std::move(FOut));
+    Visitor->AppendNull = InputArgs.hasArg(OPT_ADD_NULL);
+
+    ExitOnErr(NullResource().visit(Visitor.get()));
+
+    // Set the default language; choose en-US arbitrarily.
+    ExitOnErr(LanguageResource(0x09, 0x01).visit(Visitor.get()));
+  }
+
   rc::RCParser Parser{std::move(Tokens)};
   while (!Parser.isEof()) {
     auto Resource = ExitOnErr(Parser.parseSingleResource());
     if (BeVerbose)
       Resource->log(outs());
+    if (!IsDryRun)
+      ExitOnErr(Resource->visit(Visitor.get()));
   }
+
+  // STRINGTABLE resources come at the very end.
+  if (!IsDryRun)
+    ExitOnErr(Visitor->dumpAllStringTables());
 
   return 0;
 }

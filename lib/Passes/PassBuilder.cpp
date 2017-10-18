@@ -41,7 +41,7 @@
 #include "llvm/Analysis/MemoryDependenceAnalysis.h"
 #include "llvm/Analysis/MemorySSA.h"
 #include "llvm/Analysis/ModuleSummaryAnalysis.h"
-#include "llvm/Analysis/OptimizationDiagnosticInfo.h"
+#include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/PostDominators.h"
 #include "llvm/Analysis/ProfileSummaryInfo.h"
 #include "llvm/Analysis/RegionInfo.h"
@@ -555,7 +555,8 @@ PassBuilder::buildModuleSimplificationPipeline(OptimizationLevel Level,
   if (PGOOpt && !PGOOpt->SampleProfileFile.empty()) {
     // Annotate sample profile right after early FPM to ensure freshness of
     // the debug info.
-    MPM.addPass(SampleProfileLoaderPass(PGOOpt->SampleProfileFile));
+    MPM.addPass(SampleProfileLoaderPass(PGOOpt->SampleProfileFile,
+                                        Phase == ThinLTOPhase::PreLink));
     // Do not invoke ICP in the ThinLTOPrelink phase as it makes it hard
     // for the profile annotation to be accurate in the ThinLTO backend.
     if (Phase != ThinLTOPhase::PreLink)
@@ -669,6 +670,7 @@ PassBuilder::buildModuleOptimizationPipeline(OptimizationLevel Level,
 
   // Optimize globals now that the module is fully simplified.
   MPM.addPass(GlobalOptPass());
+  MPM.addPass(GlobalDCEPass());
 
   // Run partial inlining pass to partially inline functions that have
   // large bodies.

@@ -292,7 +292,7 @@ public:
   /// need to replace with undef.
   ArrayRef<Use *> getDeadOperands() const { return DeadOperands; }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+#ifdef LLVM_ENABLE_DUMP
   void print(raw_ostream &OS, const_iterator I, StringRef Indent = "  ") const;
   void printSlice(raw_ostream &OS, const_iterator I,
                   StringRef Indent = "  ") const;
@@ -309,7 +309,7 @@ private:
 
   friend class AllocaSlices::SliceBuilder;
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+#ifdef LLVM_ENABLE_DUMP
   /// \brief Handle to alloca instruction to simplify method interfaces.
   AllocaInst &AI;
 #endif
@@ -1027,7 +1027,7 @@ private:
 
 AllocaSlices::AllocaSlices(const DataLayout &DL, AllocaInst &AI)
     :
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+#ifdef LLVM_ENABLE_DUMP
       AI(AI),
 #endif
       PointerEscapingInstr(nullptr) {
@@ -1059,7 +1059,7 @@ AllocaSlices::AllocaSlices(const DataLayout &DL, AllocaInst &AI)
   std::sort(Slices.begin(), Slices.end());
 }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+#ifdef LLVM_ENABLE_DUMP
 
 void AllocaSlices::print(raw_ostream &OS, const_iterator I,
                          StringRef Indent) const {
@@ -1098,7 +1098,7 @@ LLVM_DUMP_METHOD void AllocaSlices::dump(const_iterator I) const {
 }
 LLVM_DUMP_METHOD void AllocaSlices::dump() const { print(dbgs()); }
 
-#endif // !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+#endif // LLVM_ENABLE_DUMP
 
 /// Walk the range of a partitioning looking for a common type to cover this
 /// sequence of slices.
@@ -4102,9 +4102,10 @@ bool SROA::splitAlloca(AllocaInst &AI, AllocaSlices &AS) {
 
   // Migrate debug information from the old alloca to the new alloca(s)
   // and the individual partitions.
-  if (DbgDeclareInst *DbgDecl = FindAllocaDbgDeclare(&AI)) {
-    auto *Var = DbgDecl->getVariable();
-    auto *Expr = DbgDecl->getExpression();
+  TinyPtrVector<DbgInfoIntrinsic *> DbgDeclares = FindDbgAddrUses(&AI);
+  if (!DbgDeclares.empty()) {
+    auto *Var = DbgDeclares.front()->getVariable();
+    auto *Expr = DbgDeclares.front()->getExpression();
     DIBuilder DIB(*AI.getModule(), /*AllowUnresolved*/ false);
     uint64_t AllocaSize = DL.getTypeSizeInBits(AI.getAllocatedType());
     for (auto Fragment : Fragments) {
@@ -4136,12 +4137,12 @@ bool SROA::splitAlloca(AllocaInst &AI, AllocaSlices &AS) {
             DIExpression::createFragmentExpression(Expr, Start, Size);
       }
 
-      // Remove any existing dbg.declare intrinsic describing the same alloca.
-      if (DbgDeclareInst *OldDDI = FindAllocaDbgDeclare(Fragment.Alloca))
-        OldDDI->eraseFromParent();
+      // Remove any existing intrinsics describing the same alloca.
+      for (DbgInfoIntrinsic *OldDII : FindDbgAddrUses(Fragment.Alloca))
+        OldDII->eraseFromParent();
 
       DIB.insertDeclare(Fragment.Alloca, Var, FragmentExpr,
-                        DbgDecl->getDebugLoc(), &AI);
+                        DbgDeclares.front()->getDebugLoc(), &AI);
     }
   }
   return Changed;
@@ -4246,6 +4247,15 @@ void SROA::deleteDeadInstructions(
     Instruction *I = DeadInsts.pop_back_val();
     DEBUG(dbgs() << "Deleting dead instruction: " << *I << "\n");
 
+    // If the instruction is an alloca, find the possible dbg.declare connected
+    // to it, and remove it too. We must do this before calling RAUW or we will
+    // not be able to find it.
+    if (AllocaInst *AI = dyn_cast<AllocaInst>(I)) {
+      DeletedAllocas.insert(AI);
+      for (DbgInfoIntrinsic *OldDII : FindDbgAddrUses(AI))
+        OldDII->eraseFromParent();
+    }
+
     I->replaceAllUsesWith(UndefValue::get(I->getType()));
 
     for (Use &Operand : I->operands())
@@ -4255,12 +4265,6 @@ void SROA::deleteDeadInstructions(
         if (isInstructionTriviallyDead(U))
           DeadInsts.insert(U);
       }
-
-    if (AllocaInst *AI = dyn_cast<AllocaInst>(I)) {
-      DeletedAllocas.insert(AI);
-      if (DbgDeclareInst *DbgDecl = FindAllocaDbgDeclare(AI))
-        DbgDecl->eraseFromParent();
-    }
 
     ++NumDeleted;
     I->eraseFromParent();

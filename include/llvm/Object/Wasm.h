@@ -43,17 +43,27 @@ public:
   };
 
   WasmSymbol(StringRef Name, SymbolType Type, uint32_t Section,
-             uint32_t ElementIndex)
-      : Name(Name), Type(Type), Section(Section), ElementIndex(ElementIndex) {}
+             uint32_t ElementIndex, uint32_t ImportIndex = 0)
+      : Name(Name), Type(Type), Section(Section), ElementIndex(ElementIndex),
+        ImportIndex(ImportIndex) {}
 
   StringRef Name;
   SymbolType Type;
   uint32_t Section;
   uint32_t Flags = 0;
 
-  // Index into the imports, exports or functions array of the object depending
-  // on the type
+  // Index into either the function or global index space.
   uint32_t ElementIndex;
+
+  // For imports, the index into the import table
+  uint32_t ImportIndex;
+
+  bool isFunction() const {
+    return Type == WasmSymbol::SymbolType::FUNCTION_IMPORT ||
+           Type == WasmSymbol::SymbolType::FUNCTION_EXPORT ||
+           Type == WasmSymbol::SymbolType::DEBUG_FUNCTION_NAME;
+  }
+
 
   bool isWeak() const {
     return getBinding() == wasm::WASM_SYMBOL_BINDING_WEAK;
@@ -73,10 +83,11 @@ public:
 
   void print(raw_ostream &Out) const {
     Out << "Name=" << Name << ", Type=" << static_cast<int>(Type)
-        << ", Flags=" << Flags << " ElemIndex=" << ElementIndex;
+        << ", Flags=" << Flags << " ElemIndex=" << ElementIndex
+        << ", ImportIndex=" << ImportIndex;
   }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+#ifdef LLVM_ENABLE_DUMP
   LLVM_DUMP_METHOD void dump() const { print(dbgs()); }
 #endif
 };

@@ -373,7 +373,9 @@ static void PrintCallingConv(unsigned cc, raw_ostream &Out) {
   case CallingConv::HHVM:          Out << "hhvmcc"; break;
   case CallingConv::HHVM_C:        Out << "hhvm_ccc"; break;
   case CallingConv::AMDGPU_VS:     Out << "amdgpu_vs"; break;
+  case CallingConv::AMDGPU_LS:     Out << "amdgpu_ls"; break;
   case CallingConv::AMDGPU_HS:     Out << "amdgpu_hs"; break;
+  case CallingConv::AMDGPU_ES:     Out << "amdgpu_es"; break;
   case CallingConv::AMDGPU_GS:     Out << "amdgpu_gs"; break;
   case CallingConv::AMDGPU_PS:     Out << "amdgpu_ps"; break;
   case CallingConv::AMDGPU_CS:     Out << "amdgpu_cs"; break;
@@ -3621,7 +3623,7 @@ void Metadata::print(raw_ostream &OS, ModuleSlotTracker &MST,
   printMetadataImpl(OS, *this, MST, M, /* OnlyAsOperand */ false);
 }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+#ifdef LLVM_ENABLE_DUMP
 // Value::dump - allow easy printing of Values from the debugger.
 LLVM_DUMP_METHOD
 void Value::dump() const { print(dbgs(), /*IsForDebug=*/true); dbgs() << '\n'; }

@@ -559,30 +559,27 @@ public:
   ArrayRef<std::pair<unsigned, const char *>>
   getSerializableDirectMachineOperandTargetFlags() const override;
 
-  std::pair<size_t, unsigned>
-  getOutliningCallOverhead(MachineBasicBlock::iterator &StartIt,
-                           MachineBasicBlock::iterator &EndIt) const override;
-
-  std::pair<size_t, unsigned> getOutliningFrameOverhead(
+  virtual MachineOutlinerInfo getOutlininingCandidateInfo(
       std::vector<
           std::pair<MachineBasicBlock::iterator, MachineBasicBlock::iterator>>
-          &CandidateClass) const override;
+          &RepeatedSequenceLocs) const override;
 
-  bool isFunctionSafeToOutlineFrom(MachineFunction &MF) const override;
+  bool isFunctionSafeToOutlineFrom(MachineFunction &MF,
+                                   bool OutlineFromLinkOnceODRs) const override;
 
   llvm::X86GenInstrInfo::MachineOutlinerInstrType
   getOutliningType(MachineInstr &MI) const override;
 
   void insertOutlinerEpilogue(MachineBasicBlock &MBB, MachineFunction &MF,
-                              unsigned FrameClass) const override;
+                              const MachineOutlinerInfo &MInfo) const override;
 
   void insertOutlinerPrologue(MachineBasicBlock &MBB, MachineFunction &MF,
-                              unsigned FrameClass) const override;
+                              const MachineOutlinerInfo &MInfo) const override;
 
   MachineBasicBlock::iterator
   insertOutlinedCall(Module &M, MachineBasicBlock &MBB,
                      MachineBasicBlock::iterator &It, MachineFunction &MF,
-                     unsigned CallClass) const override;
+                     const MachineOutlinerInfo &MInfo) const override;
 
 protected:
   /// Commutes the operands in the given instruction by changing the operands

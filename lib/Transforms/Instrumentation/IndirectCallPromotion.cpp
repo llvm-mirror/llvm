@@ -21,7 +21,7 @@
 #include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/IndirectCallPromotionAnalysis.h"
 #include "llvm/Analysis/IndirectCallSiteVisitor.h"
-#include "llvm/Analysis/OptimizationDiagnosticInfo.h"
+#include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/ProfileSummaryInfo.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CallSite.h"
@@ -277,38 +277,48 @@ ICallPromotionFunc::getPromotionCandidatesForCallSite(
 
     if (ICPInvokeOnly && dyn_cast<CallInst>(Inst)) {
       DEBUG(dbgs() << " Not promote: User options.\n");
-      ORE.emit(OptimizationRemarkMissed(DEBUG_TYPE, "UserOptions", Inst)
-               << " Not promote: User options");
+      ORE.emit([&]() {
+        return OptimizationRemarkMissed(DEBUG_TYPE, "UserOptions", Inst)
+               << " Not promote: User options";
+      });
       break;
     }
     if (ICPCallOnly && dyn_cast<InvokeInst>(Inst)) {
       DEBUG(dbgs() << " Not promote: User option.\n");
-      ORE.emit(OptimizationRemarkMissed(DEBUG_TYPE, "UserOptions", Inst)
-               << " Not promote: User options");
+      ORE.emit([&]() {
+        return OptimizationRemarkMissed(DEBUG_TYPE, "UserOptions", Inst)
+               << " Not promote: User options";
+      });
       break;
     }
     if (ICPCutOff != 0 && NumOfPGOICallPromotion >= ICPCutOff) {
       DEBUG(dbgs() << " Not promote: Cutoff reached.\n");
-      ORE.emit(OptimizationRemarkMissed(DEBUG_TYPE, "CutOffReached", Inst)
-               << " Not promote: Cutoff reached");
+      ORE.emit([&]() {
+        return OptimizationRemarkMissed(DEBUG_TYPE, "CutOffReached", Inst)
+               << " Not promote: Cutoff reached";
+      });
       break;
     }
 
     Function *TargetFunction = Symtab->getFunction(Target);
     if (TargetFunction == nullptr) {
       DEBUG(dbgs() << " Not promote: Cannot find the target\n");
-      ORE.emit(OptimizationRemarkMissed(DEBUG_TYPE, "UnableToFindTarget", Inst)
-               << "Cannot promote indirect call: target not found");
+      ORE.emit([&]() {
+        return OptimizationRemarkMissed(DEBUG_TYPE, "UnableToFindTarget", Inst)
+               << "Cannot promote indirect call: target not found";
+      });
       break;
     }
 
     const char *Reason = nullptr;
     if (!isLegalToPromote(Inst, TargetFunction, &Reason)) {
       using namespace ore;
-      ORE.emit(OptimizationRemarkMissed(DEBUG_TYPE, "UnableToPromote", Inst)
+      ORE.emit([&]() {
+        return OptimizationRemarkMissed(DEBUG_TYPE, "UnableToPromote", Inst)
                << "Cannot promote indirect call to "
                << NV("TargetFunction", TargetFunction) << " with count of "
-               << NV("Count", Count) << ": " << Reason);
+               << NV("Count", Count) << ": " << Reason;
+      });
       break;
     }
 
@@ -461,11 +471,13 @@ static Instruction *insertCallRetCast(const Instruction *Inst,
 // MergeBB is the bottom BB of the if-then-else-diamond after the
 // transformation. For invoke instruction, the edges from DirectCallBB and
 // IndirectCallBB to MergeBB are removed before this call (during
-// createIfThenElse).
+// createIfThenElse). Stores the pointer to the Instruction that cast
+// the direct call in \p CastInst.
 static Instruction *createDirectCallInst(const Instruction *Inst,
                                          Function *DirectCallee,
                                          BasicBlock *DirectCallBB,
-                                         BasicBlock *MergeBB) {
+                                         BasicBlock *MergeBB,
+                                         Instruction *&CastInst) {
   Instruction *NewInst = Inst->clone();
   if (CallInst *CI = dyn_cast<CallInst>(NewInst)) {
     CI->setCalledFunction(DirectCallee);
@@ -499,7 +511,8 @@ static Instruction *createDirectCallInst(const Instruction *Inst,
     }
   }
 
-  return insertCallRetCast(Inst, NewInst, DirectCallee);
+  CastInst = insertCallRetCast(Inst, NewInst, DirectCallee);
+  return NewInst;
 }
 
 // Create a PHI to unify the return values of calls.
@@ -559,15 +572,17 @@ Instruction *llvm::promoteIndirectCall(Instruction *Inst,
   createIfThenElse(Inst, DirectCallee, Count, TotalCount, &DirectCallBB,
                    &IndirectCallBB, &MergeBB);
 
+  // If the return type of the NewInst is not the same as the Inst, a CastInst
+  // is needed for type casting. Otherwise CastInst is the same as NewInst.
+  Instruction *CastInst = nullptr;
   Instruction *NewInst =
-      createDirectCallInst(Inst, DirectCallee, DirectCallBB, MergeBB);
+      createDirectCallInst(Inst, DirectCallee, DirectCallBB, MergeBB, CastInst);
 
   if (AttachProfToDirectCall) {
     SmallVector<uint32_t, 1> Weights;
     Weights.push_back(Count);
     MDBuilder MDB(NewInst->getContext());
-    if (Instruction *DI = dyn_cast<Instruction>(NewInst->stripPointerCasts()))
-      DI->setMetadata(LLVMContext::MD_prof, MDB.createBranchWeights(Weights));
+    NewInst->setMetadata(LLVMContext::MD_prof, MDB.createBranchWeights(Weights));
   }
 
   // Move Inst from MergeBB to IndirectCallBB.
@@ -589,20 +604,22 @@ Instruction *llvm::promoteIndirectCall(Instruction *Inst,
     // We don't need to update the operand from NormalDest for DirectCallBB.
     // Pass nullptr here.
     fixupPHINodeForNormalDest(Inst, II->getNormalDest(), MergeBB,
-                              IndirectCallBB, NewInst);
+                              IndirectCallBB, CastInst);
   }
 
-  insertCallRetPHI(Inst, NewInst, DirectCallee);
+  insertCallRetPHI(Inst, CastInst, DirectCallee);
 
   DEBUG(dbgs() << "\n== Basic Blocks After ==\n");
   DEBUG(dbgs() << *BB << *DirectCallBB << *IndirectCallBB << *MergeBB << "\n");
 
   using namespace ore;
   if (ORE)
-    ORE->emit(OptimizationRemark(DEBUG_TYPE, "Promoted", Inst)
-              << "Promote indirect call to " << NV("DirectCallee", DirectCallee)
-              << " with count " << NV("Count", Count) << " out of "
-              << NV("TotalCount", TotalCount));
+    ORE->emit([&]() {
+      return OptimizationRemark(DEBUG_TYPE, "Promoted", Inst)
+             << "Promote indirect call to " << NV("DirectCallee", DirectCallee)
+             << " with count " << NV("Count", Count) << " out of "
+             << NV("TotalCount", TotalCount);
+    });
   return NewInst;
 }
 

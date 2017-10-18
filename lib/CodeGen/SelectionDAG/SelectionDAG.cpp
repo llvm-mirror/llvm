@@ -89,10 +89,10 @@ void SelectionDAG::DAGUpdateListener::NodeUpdated(SDNode*) {}
 
 #define DEBUG_TYPE "selectiondag"
 
-static void NewSDValueDbgMsg(SDValue V, StringRef Msg) {
+static void NewSDValueDbgMsg(SDValue V, StringRef Msg, SelectionDAG *G) {
   DEBUG(
     dbgs() << Msg;
-    V.dump();
+    V.getNode()->dump(G);
   );
 }
 
@@ -1027,7 +1027,7 @@ SDValue SelectionDAG::getZeroExtendInReg(SDValue Op, const SDLoc &DL, EVT VT) {
   assert(!VT.isVector() &&
          "getZeroExtendInReg should use the vector element type instead of "
          "the vector type!");
-  if (Op.getValueType() == VT) return Op;
+  if (Op.getValueType().getScalarType() == VT) return Op;
   unsigned BitWidth = Op.getScalarValueSizeInBits();
   APInt Imm = APInt::getLowBitsSet(BitWidth,
                                    VT.getSizeInBits());
@@ -1167,7 +1167,7 @@ SDValue SelectionDAG::getConstant(const ConstantInt &Val, const SDLoc &DL,
       Ops.insert(Ops.end(), EltParts.begin(), EltParts.end());
 
     SDValue V = getNode(ISD::BITCAST, DL, VT, getBuildVector(ViaVecVT, DL, Ops));
-    NewSDValueDbgMsg(V, "Creating constant: ");
+    NewSDValueDbgMsg(V, "Creating constant: ", this);
     return V;
   }
 
@@ -1194,7 +1194,7 @@ SDValue SelectionDAG::getConstant(const ConstantInt &Val, const SDLoc &DL,
   if (VT.isVector())
     Result = getSplatBuildVector(VT, DL, Result);
 
-  NewSDValueDbgMsg(Result, "Creating constant: ");
+  NewSDValueDbgMsg(Result, "Creating constant: ", this);
   return Result;
 }
 
@@ -1236,7 +1236,7 @@ SDValue SelectionDAG::getConstantFP(const ConstantFP &V, const SDLoc &DL,
   SDValue Result(N, 0);
   if (VT.isVector())
     Result = getSplatBuildVector(VT, DL, Result);
-  NewSDValueDbgMsg(Result, "Creating fp constant: ");
+  NewSDValueDbgMsg(Result, "Creating fp constant: ", this);
   return Result;
 }
 
@@ -2128,7 +2128,7 @@ void SelectionDAG::computeKnownBits(SDValue Op, KnownBits &Known,
       Known.Zero &= Known2.Zero;
 
       // If we don't know any bits, early out.
-      if (!Known.One && !Known.Zero)
+      if (Known.isUnknown())
         break;
     }
     break;
@@ -2166,7 +2166,7 @@ void SelectionDAG::computeKnownBits(SDValue Op, KnownBits &Known,
       Known.Zero &= Known2.Zero;
     }
     // If we don't know any bits, early out.
-    if (!Known.One && !Known.Zero)
+    if (Known.isUnknown())
       break;
     if (!!DemandedRHS) {
       SDValue RHS = Op.getOperand(1);
@@ -2192,7 +2192,7 @@ void SelectionDAG::computeKnownBits(SDValue Op, KnownBits &Known,
         Known.Zero &= Known2.Zero;
       }
       // If we don't know any bits, early out.
-      if (!Known.One && !Known.Zero)
+      if (Known.isUnknown())
         break;
     }
     break;
@@ -2276,7 +2276,7 @@ void SelectionDAG::computeKnownBits(SDValue Op, KnownBits &Known,
           Known.One &= Known2.One.lshr(Offset).trunc(BitWidth);
           Known.Zero &= Known2.Zero.lshr(Offset).trunc(BitWidth);
           // If we don't know any bits, early out.
-          if (!Known.One && !Known.Zero)
+          if (Known.isUnknown())
             break;
         }
     }
@@ -2349,7 +2349,7 @@ void SelectionDAG::computeKnownBits(SDValue Op, KnownBits &Known,
   case ISD::SELECT:
     computeKnownBits(Op.getOperand(2), Known, Depth+1);
     // If we don't know any bits, early out.
-    if (!Known.One && !Known.Zero)
+    if (Known.isUnknown())
       break;
     computeKnownBits(Op.getOperand(1), Known2, Depth+1);
 
@@ -2360,7 +2360,7 @@ void SelectionDAG::computeKnownBits(SDValue Op, KnownBits &Known,
   case ISD::SELECT_CC:
     computeKnownBits(Op.getOperand(3), Known, Depth+1);
     // If we don't know any bits, early out.
-    if (!Known.One && !Known.Zero)
+    if (Known.isUnknown())
       break;
     computeKnownBits(Op.getOperand(2), Known2, Depth+1);
 
@@ -2838,7 +2838,7 @@ void SelectionDAG::computeKnownBits(SDValue Op, KnownBits &Known,
     computeKnownBits(Op.getOperand(0), Known, DemandedElts,
                      Depth + 1);
     // If we don't know any bits, early out.
-    if (!Known.One && !Known.Zero)
+    if (Known.isUnknown())
       break;
     computeKnownBits(Op.getOperand(1), Known2, DemandedElts, Depth + 1);
     Known.Zero &= Known2.Zero;
@@ -2866,7 +2866,7 @@ void SelectionDAG::computeKnownBits(SDValue Op, KnownBits &Known,
     break;
   }
 
-  assert((Known.Zero & Known.One) == 0 && "Bits known to be one AND zero?");
+  assert(!Known.hasConflict() && "Bits known to be one AND zero?");
 }
 
 SelectionDAG::OverflowKind SelectionDAG::computeOverflowKind(SDValue N0,
@@ -3499,7 +3499,7 @@ static SDValue FoldCONCAT_VECTORS(const SDLoc &DL, EVT VT,
                : DAG.getSExtOrTrunc(Op, DL, SVT);
 
   SDValue V = DAG.getBuildVector(VT, DL, Elts);
-  NewSDValueDbgMsg(V, "New node fold concat vectors: ");
+  NewSDValueDbgMsg(V, "New node fold concat vectors: ", &DAG);
   return V;
 }
 
@@ -3517,7 +3517,7 @@ SDValue SelectionDAG::getNode(unsigned Opcode, const SDLoc &DL, EVT VT) {
 
   InsertNode(N);
   SDValue V = SDValue(N, 0);
-  NewSDValueDbgMsg(V, "Creating new node: ");
+  NewSDValueDbgMsg(V, "Creating new node: ", this);
   return V;
 }
 
@@ -3880,7 +3880,7 @@ SDValue SelectionDAG::getNode(unsigned Opcode, const SDLoc &DL, EVT VT,
 
   InsertNode(N);
   SDValue V = SDValue(N, 0);
-  NewSDValueDbgMsg(V, "Creating new node: ");
+  NewSDValueDbgMsg(V, "Creating new node: ", this);
   return V;
 }
 
@@ -4155,7 +4155,7 @@ SDValue SelectionDAG::FoldConstantVectorArithmetic(unsigned Opcode,
   }
 
   SDValue V = getBuildVector(VT, DL, ScalarResults);
-  NewSDValueDbgMsg(V, "New node fold constant vector: ");
+  NewSDValueDbgMsg(V, "New node fold constant vector: ", this);
   return V;
 }
 
@@ -4657,7 +4657,7 @@ SDValue SelectionDAG::getNode(unsigned Opcode, const SDLoc &DL, EVT VT,
 
   InsertNode(N);
   SDValue V = SDValue(N, 0);
-  NewSDValueDbgMsg(V, "Creating new node: ");
+  NewSDValueDbgMsg(V, "Creating new node: ", this);
   return V;
 }
 
@@ -4694,7 +4694,7 @@ SDValue SelectionDAG::getNode(unsigned Opcode, const SDLoc &DL, EVT VT,
     // Vector constant folding.
     SDValue Ops[] = {N1, N2, N3};
     if (SDValue V = FoldConstantVectorArithmetic(Opcode, DL, VT, Ops)) {
-      NewSDValueDbgMsg(V, "New node vector constant folding: ");
+      NewSDValueDbgMsg(V, "New node vector constant folding: ", this);
       return V;
     }
     break;
@@ -4769,7 +4769,7 @@ SDValue SelectionDAG::getNode(unsigned Opcode, const SDLoc &DL, EVT VT,
 
   InsertNode(N);
   SDValue V = SDValue(N, 0);
-  NewSDValueDbgMsg(V, "Creating new node: ");
+  NewSDValueDbgMsg(V, "Creating new node: ", this);
   return V;
 }
 

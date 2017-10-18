@@ -27,7 +27,7 @@
 #include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/Analysis/LoopAnalysisManager.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
-#include "llvm/Analysis/OptimizationDiagnosticInfo.h"
+#include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/Analysis/VectorUtils.h"
 #include "llvm/IR/ConstantRange.h"
@@ -3580,6 +3580,9 @@ static Value *SimplifySelectInst(Value *CondVal, Value *TrueVal,
   // select true, X, Y  -> X
   // select false, X, Y -> Y
   if (Constant *CB = dyn_cast<Constant>(CondVal)) {
+    if (Constant *CT = dyn_cast<Constant>(TrueVal))
+      if (Constant *CF = dyn_cast<Constant>(FalseVal))
+        return ConstantFoldSelectInstruction(CB, CT, CF);
     if (CB->isAllOnesValue())
       return TrueVal;
     if (CB->isNullValue())

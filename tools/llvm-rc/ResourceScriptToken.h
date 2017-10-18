@@ -56,9 +56,13 @@ public:
 
   // Get an integer value of the integer token.
   uint32_t intValue() const;
+  bool isLongInt() const;
 
   StringRef value() const;
   Kind kind() const;
+
+  // Check if a token describes a binary operator.
+  bool isBinaryOp() const;
 
 private:
   Kind TokenKind;

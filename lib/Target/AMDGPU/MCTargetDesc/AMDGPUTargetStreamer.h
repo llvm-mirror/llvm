@@ -10,9 +10,9 @@
 #ifndef LLVM_LIB_TARGET_AMDGPU_MCTARGETDESC_AMDGPUTARGETSTREAMER_H
 #define LLVM_LIB_TARGET_AMDGPU_MCTARGETDESC_AMDGPUTARGETSTREAMER_H
 
-#include "AMDGPUCodeObjectMetadataStreamer.h"
 #include "AMDKernelCodeT.h"
 #include "llvm/MC/MCStreamer.h"
+#include "llvm/Support/AMDGPUMetadata.h"
 
 namespace llvm {
 #include "AMDGPUPTNote.h"
@@ -27,7 +27,6 @@ class Type;
 
 class AMDGPUTargetStreamer : public MCTargetStreamer {
 protected:
-  AMDGPU::CodeObject::MetadataStreamer CodeObjectMetadataStreamer;
   MCContext &getContext() const { return Streamer.getContext(); }
 
 public:
@@ -44,15 +43,14 @@ public:
 
   virtual void EmitAMDGPUSymbolType(StringRef SymbolName, unsigned Type) = 0;
 
-  virtual void EmitStartOfCodeObjectMetadata(const Module &Mod);
-
-  virtual void EmitKernelCodeObjectMetadata(
-      const Function &Func, const amd_kernel_code_t &KernelCode);
-
-  virtual void EmitEndOfCodeObjectMetadata();
+  /// \returns True on success, false on failure.
+  virtual bool EmitHSAMetadata(StringRef HSAMetadataString);
 
   /// \returns True on success, false on failure.
-  virtual bool EmitCodeObjectMetadata(StringRef YamlString) = 0;
+  virtual bool EmitHSAMetadata(const AMDGPU::HSAMD::Metadata &HSAMetadata) = 0;
+
+  /// \returns True on success, false on failure.
+  virtual bool EmitPALMetadata(const AMDGPU::PALMD::Metadata &PALMetadata) = 0;
 };
 
 class AMDGPUTargetAsmStreamer final : public AMDGPUTargetStreamer {
@@ -71,14 +69,16 @@ public:
   void EmitAMDGPUSymbolType(StringRef SymbolName, unsigned Type) override;
 
   /// \returns True on success, false on failure.
-  bool EmitCodeObjectMetadata(StringRef YamlString) override;
+  bool EmitHSAMetadata(const AMDGPU::HSAMD::Metadata &HSAMetadata) override;
+
+  /// \returns True on success, false on failure.
+  bool EmitPALMetadata(const AMDGPU::PALMD::Metadata &PALMetadata) override;
 };
 
 class AMDGPUTargetELFStreamer final : public AMDGPUTargetStreamer {
   MCStreamer &Streamer;
 
-  void EmitAMDGPUNote(const MCExpr *DescSize,
-                      AMDGPU::ElfNote::NoteType Type,
+  void EmitAMDGPUNote(const MCExpr *DescSize, unsigned NoteType,
                       function_ref<void(MCELFStreamer &)> EmitDesc);
 
 public:
@@ -98,7 +98,10 @@ public:
   void EmitAMDGPUSymbolType(StringRef SymbolName, unsigned Type) override;
 
   /// \returns True on success, false on failure.
-  bool EmitCodeObjectMetadata(StringRef YamlString) override;
+  bool EmitHSAMetadata(const AMDGPU::HSAMD::Metadata &HSAMetadata) override;
+
+  /// \returns True on success, false on failure.
+  bool EmitPALMetadata(const AMDGPU::PALMD::Metadata &PALMetadata) override;
 };
 
 }

@@ -476,7 +476,8 @@ class GoldmontProc<string Name> : ProcessorModel<Name, SLMModel, [
   FeatureXSAVEOPT,
   FeatureXSAVEC,
   FeatureXSAVES,
-  FeatureCLFLUSHOPT
+  FeatureCLFLUSHOPT,
+  FeatureFSGSBase
 ]>;
 def : GoldmontProc<"goldmont">;
 
@@ -639,8 +640,7 @@ def SKXFeatures : ProcessorFeatures<SKLFeatures.Value, [
   FeatureCLWB
 ]>;
 
-// FIXME: define SKX model
-class SkylakeServerProc<string Name> : ProcModel<Name, SkylakeClientModel,
+class SkylakeServerProc<string Name> : ProcModel<Name, SkylakeServerModel,
                                                  SKXFeatures.Value, [
     ProcIntelSKX
   ]>;

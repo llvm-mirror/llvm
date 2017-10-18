@@ -6,9 +6,15 @@ HELP: Section-specific Dump Options
 HELP: -debug-info            - Dump the .debug_info section
 HELP: -eh-frame
 HELP: Specific Options
-HELP: -recurse-depth=<N> 
+HELP: -find
+HELP: -ignore-case
+HELP: -name
+HELP: -recurse-depth=<N>
+HELP: -regex
 HELP: -show-children
+HELP: -show-form
 HELP: -show-parents
+HELP: -statistics
 HELP: -summarize-types
 HELP-NOT: -reverse-iterate
 

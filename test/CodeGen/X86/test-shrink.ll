@@ -3,10 +3,10 @@
 ; RUN: llc < %s -mtriple=i686-- | FileCheck %s --check-prefix=CHECK-32
 
 ; CHECK-64-LABEL: g64xh:
-; CHECK-64:   testb $8, {{%ah|%ch}}
+; CHECK-64:   btl $11
 ; CHECK-64:   ret
 ; CHECK-32-LABEL: g64xh:
-; CHECK-32:   testb $8, %ah
+; CHECK-32:   btl $11
 ; CHECK-32:   ret
 define void @g64xh(i64 inreg %x) nounwind {
   %t = and i64 %x, 2048
@@ -37,10 +37,10 @@ no:
   ret void
 }
 ; CHECK-64-LABEL: g32xh:
-; CHECK-64:   testb $8, {{%ah|%ch}}
+; CHECK-64:   btl $11
 ; CHECK-64:   ret
 ; CHECK-32-LABEL: g32xh:
-; CHECK-32:   testb $8, %ah
+; CHECK-32:   btl $11
 ; CHECK-32:   ret
 define void @g32xh(i32 inreg %x) nounwind {
   %t = and i32 %x, 2048
@@ -71,10 +71,10 @@ no:
   ret void
 }
 ; CHECK-64-LABEL: g16xh:
-; CHECK-64:   testb $8, {{%ah|%ch}}
+; CHECK-64:   btl $11
 ; CHECK-64:   ret
 ; CHECK-32-LABEL: g16xh:
-; CHECK-32:   testb $8, %ah
+; CHECK-32:   btl $11
 ; CHECK-32:   ret
 define void @g16xh(i16 inreg %x) nounwind {
   %t = and i16 %x, 2048
@@ -105,10 +105,10 @@ no:
   ret void
 }
 ; CHECK-64-LABEL: g64x16:
-; CHECK-64:   testw $-32640, %[[A0W:di|cx]]
+; CHECK-64:   testl $32896, %[[A0D:edi|ecx]]
 ; CHECK-64:   ret
 ; CHECK-32-LABEL: g64x16:
-; CHECK-32:   testw $-32640, %ax
+; CHECK-32:   testl $32896, %eax
 ; CHECK-32:   ret
 define void @g64x16(i64 inreg %x) nounwind {
   %t = and i64 %x, 32896
@@ -121,11 +121,28 @@ yes:
 no:
   ret void
 }
+; CHECK-64-LABEL: g64x16minsize:
+; CHECK-64:   testw $-32640, %[[A0W:di|cx]]
+; CHECK-64:   ret
+; CHECK-32-LABEL: g64x16minsize:
+; CHECK-32:   testw $-32640, %ax
+; CHECK-32:   ret
+define void @g64x16minsize(i64 inreg %x) nounwind minsize {
+  %t = and i64 %x, 32896
+  %s = icmp eq i64 %t, 0
+  br i1 %s, label %yes, label %no
+
+yes:
+  call void @bar()
+  ret void
+no:
+  ret void
+}
 ; CHECK-64-LABEL: g32x16:
-; CHECK-64:   testw $-32640, %[[A0W]]
+; CHECK-64:   testl $32896, %[[A0D]]
 ; CHECK-64:   ret
 ; CHECK-32-LABEL: g32x16:
-; CHECK-32:   testw $-32640, %ax
+; CHECK-32:   testl $32896, %eax
 ; CHECK-32:   ret
 define void @g32x16(i32 inreg %x) nounwind {
   %t = and i32 %x, 32896
@@ -138,8 +155,25 @@ yes:
 no:
   ret void
 }
+; CHECK-64-LABEL: g32x16minsize:
+; CHECK-64:   testw $-32640, %[[A0W]]
+; CHECK-64:   ret
+; CHECK-32-LABEL: g32x16minsize:
+; CHECK-32:   testw $-32640, %ax
+; CHECK-32:   ret
+define void @g32x16minsize(i32 inreg %x) nounwind minsize {
+  %t = and i32 %x, 32896
+  %s = icmp eq i32 %t, 0
+  br i1 %s, label %yes, label %no
+
+yes:
+  call void @bar()
+  ret void
+no:
+  ret void
+}
 ; CHECK-64-LABEL: g64x32:
-; CHECK-64:   testl $268468352, %e[[A0W]]
+; CHECK-64:   testl $268468352, %[[A0D]]
 ; CHECK-64:   ret
 ; CHECK-32-LABEL: g64x32:
 ; CHECK-32:   testl $268468352, %eax

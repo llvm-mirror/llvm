@@ -23,6 +23,7 @@ class ModulePass;
 class Pass;
 class Target;
 class TargetMachine;
+class TargetOptions;
 class PassRegistry;
 class Module;
 
@@ -52,7 +53,7 @@ FunctionPass *createSIDebuggerInsertNopsPass();
 FunctionPass *createSIInsertWaitsPass();
 FunctionPass *createSIInsertWaitcntsPass();
 FunctionPass *createSIFixWWMLivenessPass();
-FunctionPass *createAMDGPUSimplifyLibCallsPass();
+FunctionPass *createAMDGPUSimplifyLibCallsPass(const TargetOptions &);
 FunctionPass *createAMDGPUUseNativeCallsPass();
 FunctionPass *createAMDGPUCodeGenPreparePass();
 FunctionPass *createAMDGPUMachineCFGStructurizerPass();
@@ -184,6 +185,10 @@ void initializeAMDGPUArgumentUsageInfoPass(PassRegistry &);
 
 Pass *createAMDGPUFunctionInliningPass();
 void initializeAMDGPUInlinerPass(PassRegistry&);
+
+ModulePass *createAMDGPUOpenCLEnqueuedBlockLoweringPass();
+void initializeAMDGPUOpenCLEnqueuedBlockLoweringPass(PassRegistry &);
+extern char &AMDGPUOpenCLEnqueuedBlockLoweringID;
 
 Target &getTheAMDGPUTarget();
 Target &getTheGCNTarget();

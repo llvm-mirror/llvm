@@ -335,29 +335,33 @@ enum {
 
 // OS ABI identification.
 enum {
-  ELFOSABI_NONE = 0,          // UNIX System V ABI
-  ELFOSABI_HPUX = 1,          // HP-UX operating system
-  ELFOSABI_NETBSD = 2,        // NetBSD
-  ELFOSABI_GNU = 3,           // GNU/Linux
-  ELFOSABI_LINUX = 3,         // Historical alias for ELFOSABI_GNU.
-  ELFOSABI_HURD = 4,          // GNU/Hurd
-  ELFOSABI_SOLARIS = 6,       // Solaris
-  ELFOSABI_AIX = 7,           // AIX
-  ELFOSABI_IRIX = 8,          // IRIX
-  ELFOSABI_FREEBSD = 9,       // FreeBSD
-  ELFOSABI_TRU64 = 10,        // TRU64 UNIX
-  ELFOSABI_MODESTO = 11,      // Novell Modesto
-  ELFOSABI_OPENBSD = 12,      // OpenBSD
-  ELFOSABI_OPENVMS = 13,      // OpenVMS
-  ELFOSABI_NSK = 14,          // Hewlett-Packard Non-Stop Kernel
-  ELFOSABI_AROS = 15,         // AROS
-  ELFOSABI_FENIXOS = 16,      // FenixOS
-  ELFOSABI_CLOUDABI = 17,     // Nuxi CloudABI
-  ELFOSABI_C6000_ELFABI = 64, // Bare-metal TMS320C6000
-  ELFOSABI_AMDGPU_HSA = 64,   // AMD HSA runtime
-  ELFOSABI_C6000_LINUX = 65,  // Linux TMS320C6000
-  ELFOSABI_ARM = 97,          // ARM
-  ELFOSABI_STANDALONE = 255   // Standalone (embedded) application
+  ELFOSABI_NONE = 0,           // UNIX System V ABI
+  ELFOSABI_HPUX = 1,           // HP-UX operating system
+  ELFOSABI_NETBSD = 2,         // NetBSD
+  ELFOSABI_GNU = 3,            // GNU/Linux
+  ELFOSABI_LINUX = 3,          // Historical alias for ELFOSABI_GNU.
+  ELFOSABI_HURD = 4,           // GNU/Hurd
+  ELFOSABI_SOLARIS = 6,        // Solaris
+  ELFOSABI_AIX = 7,            // AIX
+  ELFOSABI_IRIX = 8,           // IRIX
+  ELFOSABI_FREEBSD = 9,        // FreeBSD
+  ELFOSABI_TRU64 = 10,         // TRU64 UNIX
+  ELFOSABI_MODESTO = 11,       // Novell Modesto
+  ELFOSABI_OPENBSD = 12,       // OpenBSD
+  ELFOSABI_OPENVMS = 13,       // OpenVMS
+  ELFOSABI_NSK = 14,           // Hewlett-Packard Non-Stop Kernel
+  ELFOSABI_AROS = 15,          // AROS
+  ELFOSABI_FENIXOS = 16,       // FenixOS
+  ELFOSABI_CLOUDABI = 17,      // Nuxi CloudABI
+  ELFOSABI_FIRST_ARCH = 64,    // First architecture-specific OS ABI
+  ELFOSABI_AMDGPU_HSA = 64,    // AMD HSA runtime
+  ELFOSABI_AMDGPU_PAL = 65,    // AMD PAL runtime
+  ELFOSABI_AMDGPU_MESA3D = 66, // AMD GCN GPUs (GFX6+) for MESA runtime
+  ELFOSABI_ARM = 97,           // ARM
+  ELFOSABI_C6000_ELFABI = 64,  // Bare-metal TMS320C6000
+  ELFOSABI_C6000_LINUX = 65,   // Linux TMS320C6000
+  ELFOSABI_STANDALONE = 255,   // Standalone (embedded) application
+  ELFOSABI_LAST_ARCH = 255     // Last Architecture-specific OS ABI
 };
 
 #define ELF_RELOC(name, value) name = value,
@@ -612,6 +616,17 @@ enum {
 #include "ELFRelocs/Lanai.def"
 };
 
+// RISCV Specific e_flags
+enum : unsigned {
+  EF_RISCV_RVC = 0x0001,
+  EF_RISCV_FLOAT_ABI = 0x0006,
+  EF_RISCV_FLOAT_ABI_SOFT = 0x0000,
+  EF_RISCV_FLOAT_ABI_SINGLE = 0x0002,
+  EF_RISCV_FLOAT_ABI_DOUBLE = 0x0004,
+  EF_RISCV_FLOAT_ABI_QUAD = 0x0006,
+  EF_RISCV_RVE = 0x0008
+};
+
 // ELF Relocation types for RISC-V
 enum {
 #include "ELFRelocs/RISCV.def"
@@ -630,6 +645,15 @@ enum {
 // ELF Relocation types for WebAssembly
 enum {
 #include "ELFRelocs/WebAssembly.def"
+};
+
+// AMDGPU specific e_flags.
+enum : unsigned {
+  // AMDGPU machine architectures.
+  EF_AMDGPU_ARCH_NONE = 0x00000000, // None/unknown.
+  EF_AMDGPU_ARCH_R600 = 0x00000001, // AMD HD2XXX-HD6XXX GPUs.
+  EF_AMDGPU_ARCH_GCN = 0x00000002,  // AMD GCN GFX6+ GPUs.
+  EF_AMDGPU_ARCH = 0x0000000f       // EF_AMDGPU_ARCH_XXX selection mask.
 };
 
 // ELF Relocation types for AMDGPU
@@ -1343,6 +1367,14 @@ enum {
   NT_GNU_HWCAP = 2,
   NT_GNU_BUILD_ID = 3,
   NT_GNU_GOLD_VERSION = 4,
+};
+
+// AMDGPU specific notes.
+enum {
+  // Note types with values between 0 and 9 (inclusive) are reserved.
+  NT_AMD_AMDGPU_HSA_METADATA = 10,
+  NT_AMD_AMDGPU_ISA = 11,
+  NT_AMD_AMDGPU_PAL_METADATA = 12
 };
 
 enum {

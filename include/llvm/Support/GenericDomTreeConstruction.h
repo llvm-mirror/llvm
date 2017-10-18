@@ -923,6 +923,8 @@ struct SemiNCAInfo {
     // To dominates From -- nothing to do.
     if (ToTN == NCD) return;
 
+    DT.DFSInfoValid = false;
+
     const TreeNodePtr ToIDom = ToTN->getIDom();
     DEBUG(dbgs() << "\tNCD " << BlockNamePrinter(NCD) << ", ToIDom "
                  << BlockNamePrinter(ToIDom) << "\n");
@@ -1120,6 +1122,22 @@ struct SemiNCAInfo {
   //~~
 
   static void ApplyUpdates(DomTreeT &DT, ArrayRef<UpdateT> Updates) {
+    const size_t NumUpdates = Updates.size();
+    if (NumUpdates == 0)
+      return;
+
+    // Take the fast path for a single update and avoid running the batch update
+    // machinery.
+    if (NumUpdates == 1) {
+      const auto &Update = Updates.front();
+      if (Update.getKind() == UpdateKind::Insert)
+        DT.insertEdge(Update.getFrom(), Update.getTo());
+      else
+        DT.deleteEdge(Update.getFrom(), Update.getTo());
+
+      return;
+    }
+
     BatchUpdateInfo BUI;
     LegalizeUpdates(Updates, BUI.Updates);
 
@@ -1347,6 +1365,102 @@ struct SemiNCAInfo {
     return true;
   }
 
+  // Check if the computed DFS numbers are correct. Note that DFS info may not
+  // be valid, and when that is the case, we don't verify the numbers.
+  static bool VerifyDFSNumbers(const DomTreeT &DT) {
+    if (!DT.DFSInfoValid || !DT.Parent)
+      return true;
+
+    const NodePtr RootBB = IsPostDom ? nullptr : DT.getRoots()[0];
+    const TreeNodePtr Root = DT.getNode(RootBB);
+
+    auto PrintNodeAndDFSNums = [](const TreeNodePtr TN) {
+      errs() << BlockNamePrinter(TN) << " {" << TN->getDFSNumIn() << ", "
+             << TN->getDFSNumOut() << '}';
+    };
+
+    // Verify the root's DFS In number. Although DFS numbering would also work
+    // if we started from some other value, we assume 0-based numbering.
+    if (Root->getDFSNumIn() != 0) {
+      errs() << "DFSIn number for the tree root is not:\n\t";
+      PrintNodeAndDFSNums(Root);
+      errs() << '\n';
+      errs().flush();
+      return false;
+    }
+
+    // For each tree node verify if children's DFS numbers cover their parent's
+    // DFS numbers with no gaps.
+    for (const auto &NodeToTN : DT.DomTreeNodes) {
+      const TreeNodePtr Node = NodeToTN.second.get();
+
+      // Handle tree leaves.
+      if (Node->getChildren().empty()) {
+        if (Node->getDFSNumIn() + 1 != Node->getDFSNumOut()) {
+          errs() << "Tree leaf should have DFSOut = DFSIn + 1:\n\t";
+          PrintNodeAndDFSNums(Node);
+          errs() << '\n';
+          errs().flush();
+          return false;
+        }
+
+        continue;
+      }
+
+      // Make a copy and sort it such that it is possible to check if there are
+      // no gaps between DFS numbers of adjacent children.
+      SmallVector<TreeNodePtr, 8> Children(Node->begin(), Node->end());
+      std::sort(Children.begin(), Children.end(),
+                [](const TreeNodePtr Ch1, const TreeNodePtr Ch2) {
+                  return Ch1->getDFSNumIn() < Ch2->getDFSNumIn();
+                });
+
+      auto PrintChildrenError = [Node, &Children, PrintNodeAndDFSNums](
+          const TreeNodePtr FirstCh, const TreeNodePtr SecondCh) {
+        assert(FirstCh);
+
+        errs() << "Incorrect DFS numbers for:\n\tParent ";
+        PrintNodeAndDFSNums(Node);
+
+        errs() << "\n\tChild ";
+        PrintNodeAndDFSNums(FirstCh);
+
+        if (SecondCh) {
+          errs() << "\n\tSecond child ";
+          PrintNodeAndDFSNums(SecondCh);
+        }
+
+        errs() << "\nAll children: ";
+        for (const TreeNodePtr Ch : Children) {
+          PrintNodeAndDFSNums(Ch);
+          errs() << ", ";
+        }
+
+        errs() << '\n';
+        errs().flush();
+      };
+
+      if (Children.front()->getDFSNumIn() != Node->getDFSNumIn() + 1) {
+        PrintChildrenError(Children.front(), nullptr);
+        return false;
+      }
+
+      if (Children.back()->getDFSNumOut() + 1 != Node->getDFSNumOut()) {
+        PrintChildrenError(Children.back(), nullptr);
+        return false;
+      }
+
+      for (size_t i = 0, e = Children.size() - 1; i != e; ++i) {
+        if (Children[i]->getDFSNumOut() + 1 != Children[i + 1]->getDFSNumIn()) {
+          PrintChildrenError(Children[i], Children[i + 1]);
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
   // Checks if for every edge From -> To in the graph
   //     NCD(From, To) == IDom(To) or To.
   bool verifyNCD(const DomTreeT &DT) {
@@ -1519,7 +1633,8 @@ bool Verify(const DomTreeT &DT) {
   SemiNCAInfo<DomTreeT> SNCA(nullptr);
   return SNCA.verifyRoots(DT) && SNCA.verifyReachability(DT) &&
          SNCA.VerifyLevels(DT) && SNCA.verifyNCD(DT) &&
-         SNCA.verifyParentProperty(DT) && SNCA.verifySiblingProperty(DT);
+         SNCA.verifyParentProperty(DT) && SNCA.verifySiblingProperty(DT) &&
+         SNCA.VerifyDFSNumbers(DT);
 }
 
 }  // namespace DomTreeBuilder

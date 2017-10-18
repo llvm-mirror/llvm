@@ -246,7 +246,6 @@ void ScalarEnumerationTraits<ELFYAML::ELF_ELFOSABI>::enumeration(
   ECase(ELFOSABI_HPUX);
   ECase(ELFOSABI_NETBSD);
   ECase(ELFOSABI_GNU);
-  ECase(ELFOSABI_GNU);
   ECase(ELFOSABI_HURD);
   ECase(ELFOSABI_SOLARIS);
   ECase(ELFOSABI_AIX);
@@ -260,10 +259,12 @@ void ScalarEnumerationTraits<ELFYAML::ELF_ELFOSABI>::enumeration(
   ECase(ELFOSABI_AROS);
   ECase(ELFOSABI_FENIXOS);
   ECase(ELFOSABI_CLOUDABI);
-  ECase(ELFOSABI_C6000_ELFABI);
   ECase(ELFOSABI_AMDGPU_HSA);
-  ECase(ELFOSABI_C6000_LINUX);
+  ECase(ELFOSABI_AMDGPU_PAL);
+  ECase(ELFOSABI_AMDGPU_MESA3D);
   ECase(ELFOSABI_ARM);
+  ECase(ELFOSABI_C6000_ELFABI);
+  ECase(ELFOSABI_C6000_LINUX);
   ECase(ELFOSABI_STANDALONE);
 #undef ECase
 }
@@ -359,7 +360,18 @@ void ScalarBitSetTraits<ELFYAML::ELF_EF>::bitset(IO &IO,
     BCase(EF_AVR_ARCH_XMEGA6);
     BCase(EF_AVR_ARCH_XMEGA7);
     break;
+  case ELF::EM_RISCV:
+    BCase(EF_RISCV_RVC);
+    BCaseMask(EF_RISCV_FLOAT_ABI_SOFT, EF_RISCV_FLOAT_ABI);
+    BCaseMask(EF_RISCV_FLOAT_ABI_SINGLE, EF_RISCV_FLOAT_ABI);
+    BCaseMask(EF_RISCV_FLOAT_ABI_DOUBLE, EF_RISCV_FLOAT_ABI);
+    BCaseMask(EF_RISCV_FLOAT_ABI_QUAD, EF_RISCV_FLOAT_ABI);
+    BCase(EF_RISCV_RVE);
+    break;
   case ELF::EM_AMDGPU:
+    BCaseMask(EF_AMDGPU_ARCH_R600, EF_AMDGPU_ARCH);
+    BCaseMask(EF_AMDGPU_ARCH_GCN, EF_AMDGPU_ARCH);
+    break;
   case ELF::EM_X86_64:
     break;
   default:
@@ -450,6 +462,7 @@ void ScalarBitSetTraits<ELFYAML::ELF_SHF>::bitset(IO &IO,
   BCase(SHF_OS_NONCONFORMING);
   BCase(SHF_GROUP);
   BCase(SHF_TLS);
+  BCase(SHF_COMPRESSED);
   switch (Object->Header.Machine) {
   case ELF::EM_ARM:
     BCase(SHF_ARM_PURECODE);

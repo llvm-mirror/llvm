@@ -205,6 +205,9 @@ struct ClassInfo {
   /// For custom match classes: the diagnostic kind for when the predicate fails.
   std::string DiagnosticType;
 
+  /// For custom match classes: the diagnostic string for when the predicate fails.
+  std::string DiagnosticString;
+
   /// Is this operand optional and not always required.
   bool IsOptional;
 
@@ -701,12 +704,12 @@ public:
   /// Map of AsmOperandClass records to their class information.
   std::map<Record*, ClassInfo*> AsmOperandClasses;
 
+  /// Map of RegisterClass records to their class information.
+  std::map<Record*, ClassInfo*> RegisterClassClasses;
+
 private:
   /// Map of token to class information which has already been constructed.
   std::map<std::string, ClassInfo*> TokenClasses;
-
-  /// Map of RegisterClass records to their class information.
-  std::map<Record*, ClassInfo*> RegisterClassClasses;
 
 private:
   /// getTokenClass - Lookup or create the class for the given token.
@@ -763,7 +766,7 @@ public:
 
 } // end anonymous namespace
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+#ifdef LLVM_ENABLE_DUMP
 LLVM_DUMP_METHOD void MatchableInfo::dump() const {
   errs() << TheDef->getName() << " -- " << "flattened:\"" << AsmString <<"\"\n";
 
@@ -1279,6 +1282,19 @@ buildRegisterClasses(SmallPtrSetImpl<Record*> &SingletonRegisters) {
     } else
       CI->ValueName = CI->ValueName + "," + RC.getName();
 
+    Init *DiagnosticType = Def->getValueInit("DiagnosticType");
+    if (StringInit *SI = dyn_cast<StringInit>(DiagnosticType))
+      CI->DiagnosticType = SI->getValue();
+
+    Init *DiagnosticString = Def->getValueInit("DiagnosticString");
+    if (StringInit *SI = dyn_cast<StringInit>(DiagnosticString))
+      CI->DiagnosticString = SI->getValue();
+
+    // If we have a diagnostic string but the diagnostic type is not specified
+    // explicitly, create an anonymous diagnostic type.
+    if (!CI->DiagnosticString.empty() && CI->DiagnosticType.empty())
+      CI->DiagnosticType = RC.getName();
+
     RegisterClassClasses.insert(std::make_pair(Def, CI));
   }
 
@@ -1357,11 +1373,17 @@ void AsmMatcherInfo::buildOperandClasses() {
     if (StringInit *SI = dyn_cast<StringInit>(PRMName))
       CI->ParserMethod = SI->getValue();
 
-    // Get the diagnostic type or leave it as empty.
-    // Get the parse method name or leave it as empty.
+    // Get the diagnostic type and string or leave them as empty.
     Init *DiagnosticType = Rec->getValueInit("DiagnosticType");
     if (StringInit *SI = dyn_cast<StringInit>(DiagnosticType))
       CI->DiagnosticType = SI->getValue();
+    Init *DiagnosticString = Rec->getValueInit("DiagnosticString");
+    if (StringInit *SI = dyn_cast<StringInit>(DiagnosticString))
+      CI->DiagnosticString = SI->getValue();
+    // If we have a DiagnosticString, we need a DiagnosticType for use within
+    // the matcher.
+    if (!CI->DiagnosticString.empty() && CI->DiagnosticType.empty())
+      CI->DiagnosticType = CI->ClassName;
 
     Init *IsOptional = Rec->getValueInit("IsOptional");
     if (BitInit *BI = dyn_cast<BitInit>(IsOptional))
@@ -2169,7 +2191,18 @@ static void emitMatchClassEnumeration(CodeGenTarget &Target,
   OS << "enum MatchClassKind {\n";
   OS << "  InvalidMatchClass = 0,\n";
   OS << "  OptionalMatchClass = 1,\n";
+  ClassInfo::ClassInfoKind LastKind = ClassInfo::Token;
+  StringRef LastName = "OptionalMatchClass";
   for (const auto &CI : Infos) {
+    if (LastKind == ClassInfo::Token && CI.Kind != ClassInfo::Token) {
+      OS << "  MCK_LAST_TOKEN = " << LastName << ",\n";
+    } else if (LastKind < ClassInfo::UserClass0 &&
+               CI.Kind >= ClassInfo::UserClass0) {
+      OS << "  MCK_LAST_REGISTER = " << LastName << ",\n";
+    }
+    LastKind = (ClassInfo::ClassInfoKind)CI.Kind;
+    LastName = CI.Name;
+
     OS << "  " << CI.Name << ", // ";
     if (CI.Kind == ClassInfo::Token) {
       OS << "'" << CI.ValueName << "'\n";
@@ -2188,6 +2221,64 @@ static void emitMatchClassEnumeration(CodeGenTarget &Target,
   OS << "}\n\n";
 }
 
+/// emitMatchClassDiagStrings - Emit a function to get the diagnostic text to be
+/// used when an assembly operand does not match the expected operand class.
+static void emitOperandMatchErrorDiagStrings(AsmMatcherInfo &Info, raw_ostream &OS) {
+  // If the target does not use DiagnosticString for any operands, don't emit
+  // an unused function.
+  if (std::all_of(
+          Info.Classes.begin(), Info.Classes.end(),
+          [](const ClassInfo &CI) { return CI.DiagnosticString.empty(); }))
+    return;
+
+  OS << "static const char *getMatchKindDiag(" << Info.Target.getName()
+     << "AsmParser::" << Info.Target.getName()
+     << "MatchResultTy MatchResult) {\n";
+  OS << "  switch (MatchResult) {\n";
+
+  for (const auto &CI: Info.Classes) {
+    if (!CI.DiagnosticString.empty()) {
+      assert(!CI.DiagnosticType.empty() &&
+             "DiagnosticString set without DiagnosticType");
+      OS << "  case " << Info.Target.getName()
+         << "AsmParser::Match_" << CI.DiagnosticType << ":\n";
+      OS << "    return \"" << CI.DiagnosticString << "\";\n";
+    }
+  }
+
+  OS << "  default:\n";
+  OS << "    return nullptr;\n";
+
+  OS << "  }\n";
+  OS << "}\n\n";
+}
+
+static void emitRegisterMatchErrorFunc(AsmMatcherInfo &Info, raw_ostream &OS) {
+  OS << "static unsigned getDiagKindFromRegisterClass(MatchClassKind "
+        "RegisterClass) {\n";
+  if (std::none_of(Info.Classes.begin(), Info.Classes.end(),
+                   [](const ClassInfo &CI) {
+                     return CI.isRegisterClass() && !CI.DiagnosticType.empty();
+                   })) {
+    OS << "  return MCTargetAsmParser::Match_InvalidOperand;\n";
+  } else {
+    OS << "  switch (RegisterClass) {\n";
+    for (const auto &CI: Info.Classes) {
+      if (CI.isRegisterClass() && !CI.DiagnosticType.empty()) {
+        OS << "  case " << CI.Name << ":\n";
+        OS << "    return " << Info.Target.getName() << "AsmParser::Match_"
+           << CI.DiagnosticType << ";\n";
+      }
+    }
+
+    OS << "  default:\n";
+    OS << "    return MCTargetAsmParser::Match_InvalidOperand;\n";
+
+    OS << "  }\n";
+  }
+  OS << "}\n\n";
+}
+
 /// emitValidateOperandClass - Emit the function to validate an operand class.
 static void emitValidateOperandClass(AsmMatcherInfo &Info,
                                      raw_ostream &OS) {
@@ -2202,7 +2293,7 @@ static void emitValidateOperandClass(AsmMatcherInfo &Info,
 
   // Check for Token operands first.
   // FIXME: Use a more specific diagnostic type.
-  OS << "  if (Operand.isToken())\n";
+  OS << "  if (Operand.isToken() && Kind <= MCK_LAST_TOKEN)\n";
   OS << "    return isSubclass(matchTokenString(Operand.getToken()), Kind) ?\n"
      << "             MCTargetAsmParser::Match_Success :\n"
      << "             MCTargetAsmParser::Match_InvalidOperand;\n\n";
@@ -2238,8 +2329,12 @@ static void emitValidateOperandClass(AsmMatcherInfo &Info,
        << "; break;\n";
   OS << "    }\n";
   OS << "    return isSubclass(OpKind, Kind) ? "
-     << "MCTargetAsmParser::Match_Success :\n                             "
-     << "         MCTargetAsmParser::Match_InvalidOperand;\n  }\n\n";
+     << "(unsigned)MCTargetAsmParser::Match_Success :\n                     "
+     << "                 getDiagKindFromRegisterClass(Kind);\n  }\n\n";
+
+  // Expected operand is a register, but actual is not.
+  OS << "  if (Kind > MCK_LAST_TOKEN && Kind <= MCK_LAST_REGISTER)\n";
+  OS << "    return getDiagKindFromRegisterClass(Kind);\n\n";
 
   // Generic fallthrough match failure case for operands that don't have
   // specialized diagnostic types.
@@ -2385,6 +2480,10 @@ static void emitOperandDiagnosticTypes(AsmMatcherInfo &Info, raw_ostream &OS) {
   // Get the set of diagnostic types from all of the operand classes.
   std::set<StringRef> Types;
   for (const auto &OpClassEntry : Info.AsmOperandClasses) {
+    if (!OpClassEntry.second->DiagnosticType.empty())
+      Types.insert(OpClassEntry.second->DiagnosticType);
+  }
+  for (const auto &OpClassEntry : Info.RegisterClassClasses) {
     if (!OpClassEntry.second->DiagnosticType.empty())
       Types.insert(OpClassEntry.second->DiagnosticType);
   }
@@ -2763,6 +2862,26 @@ static void emitMnemonicSpellChecker(raw_ostream &OS, CodeGenTarget &Target,
 }
 
 
+// Emit a function mapping match classes to strings, for debugging.
+static void emitMatchClassKindNames(std::forward_list<ClassInfo> &Infos,
+                                    raw_ostream &OS) {
+  OS << "#ifndef NDEBUG\n";
+  OS << "const char *getMatchClassName(MatchClassKind Kind) {\n";
+  OS << "  switch (Kind) {\n";
+
+  OS << "  case InvalidMatchClass: return \"InvalidMatchClass\";\n";
+  OS << "  case OptionalMatchClass: return \"OptionalMatchClass\";\n";
+  for (const auto &CI : Infos) {
+    OS << "  case " << CI.Name << ": return \"" << CI.Name << "\";\n";
+  }
+  OS << "  case NumMatchClassKinds: return \"NumMatchClassKinds\";\n";
+
+  OS << "  }\n";
+  OS << "  llvm_unreachable(\"unhandled MatchClassKind!\");\n";
+  OS << "}\n\n";
+  OS << "#endif // NDEBUG\n";
+}
+
 void AsmMatcherEmitter::run(raw_ostream &OS) {
   CodeGenTarget Target(Records);
   Record *AsmParser = Target.getAsmParser();
@@ -2824,6 +2943,8 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
 
   bool HasMnemonicFirst = AsmParser->getValueAsBit("HasMnemonicFirst");
   bool HasOptionalOperands = Info.hasOptionalOperands();
+  bool ReportMultipleNearMisses =
+      AsmParser->getValueAsBit("ReportMultipleNearMisses");
 
   // Write the output.
 
@@ -2846,9 +2967,12 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
   OS << "  void convertToMapAndConstraints(unsigned Kind,\n                ";
   OS << "           const OperandVector &Operands) override;\n";
   OS << "  unsigned MatchInstructionImpl(const OperandVector &Operands,\n"
-     << "                                MCInst &Inst,\n"
-     << "                                uint64_t &ErrorInfo,"
-     << " bool matchingInlineAsm,\n"
+     << "                                MCInst &Inst,\n";
+  if (ReportMultipleNearMisses)
+    OS << "                                SmallVectorImpl<NearMissInfo> *NearMisses,\n";
+  else
+    OS << "                                uint64_t &ErrorInfo,\n";
+  OS << "                                bool matchingInlineAsm,\n"
      << "                                unsigned VariantID = 0);\n";
 
   if (!Info.OperandMatchInfo.empty()) {
@@ -2909,6 +3033,13 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
   // Emit the enumeration for classes which participate in matching.
   emitMatchClassEnumeration(Target, Info.Classes, OS);
 
+  // Emit a function to get the user-visible string to describe an operand
+  // match failure in diagnostics.
+  emitOperandMatchErrorDiagStrings(Info, OS);
+
+  // Emit a function to map register classes to operand match failure codes.
+  emitRegisterMatchErrorFunc(Info, OS);
+
   // Emit the routine to match token strings to their match class.
   emitMatchTokenString(Target, Info.Classes, OS);
 
@@ -2917,6 +3048,8 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
 
   // Emit the routine to validate an operand against a match class.
   emitValidateOperandClass(Info, OS);
+
+  emitMatchClassKindNames(Info.Classes, OS);
 
   // Emit the available features compute function.
   SubtargetFeatureInfo::emitComputeAssemblerAvailableFeatures(
@@ -3028,19 +3161,28 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
 
   emitMnemonicSpellChecker(OS, Target, VariantCount);
 
+  OS << "#include \"llvm/Support/Debug.h\"\n";
+  OS << "#include \"llvm/Support/Format.h\"\n\n";
+
   // Finally, build the match function.
   OS << "unsigned " << Target.getName() << ClassName << "::\n"
      << "MatchInstructionImpl(const OperandVector &Operands,\n";
-  OS << "                     MCInst &Inst, uint64_t &ErrorInfo,\n"
-     << "                     bool matchingInlineAsm, unsigned VariantID) {\n";
+  OS << "                     MCInst &Inst,\n";
+  if (ReportMultipleNearMisses)
+    OS << "                     SmallVectorImpl<NearMissInfo> *NearMisses,\n";
+  else
+    OS << "                     uint64_t &ErrorInfo,\n";
+  OS << "                     bool matchingInlineAsm, unsigned VariantID) {\n";
 
-  OS << "  // Eliminate obvious mismatches.\n";
-  OS << "  if (Operands.size() > "
-     << (MaxNumOperands + HasMnemonicFirst) << ") {\n";
-  OS << "    ErrorInfo = "
-     << (MaxNumOperands + HasMnemonicFirst) << ";\n";
-  OS << "    return Match_InvalidOperand;\n";
-  OS << "  }\n\n";
+  if (!ReportMultipleNearMisses) {
+    OS << "  // Eliminate obvious mismatches.\n";
+    OS << "  if (Operands.size() > "
+       << (MaxNumOperands + HasMnemonicFirst) << ") {\n";
+    OS << "    ErrorInfo = "
+       << (MaxNumOperands + HasMnemonicFirst) << ";\n";
+    OS << "    return Match_InvalidOperand;\n";
+    OS << "  }\n\n";
+  }
 
   // Emit code to get the available features.
   OS << "  // Get the current feature set.\n";
@@ -3063,17 +3205,20 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
   }
 
   // Emit code to compute the class list for this operand vector.
-  OS << "  // Some state to try to produce better error messages.\n";
-  OS << "  bool HadMatchOtherThanFeatures = false;\n";
-  OS << "  bool HadMatchOtherThanPredicate = false;\n";
-  OS << "  unsigned RetCode = Match_InvalidOperand;\n";
-  OS << "  uint64_t MissingFeatures = ~0ULL;\n";
+  if (!ReportMultipleNearMisses) {
+    OS << "  // Some state to try to produce better error messages.\n";
+    OS << "  bool HadMatchOtherThanFeatures = false;\n";
+    OS << "  bool HadMatchOtherThanPredicate = false;\n";
+    OS << "  unsigned RetCode = Match_InvalidOperand;\n";
+    OS << "  uint64_t MissingFeatures = ~0ULL;\n";
+    OS << "  // Set ErrorInfo to the operand that mismatches if it is\n";
+    OS << "  // wrong for all instances of the instruction.\n";
+    OS << "  ErrorInfo = ~0ULL;\n";
+  }
+
   if (HasOptionalOperands) {
     OS << "  SmallBitVector OptionalOperandsMask(" << MaxNumOperands << ");\n";
   }
-  OS << "  // Set ErrorInfo to the operand that mismatches if it is\n";
-  OS << "  // wrong for all instances of the instruction.\n";
-  OS << "  ErrorInfo = ~0ULL;\n";
 
   // Emit code to search the table.
   OS << "  // Find the appropriate table for this asm variant.\n";
@@ -3100,6 +3245,10 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
           "std::equal_range(Start, End, Mnemonic.lower(), LessOpcode());\n\n";
   }
 
+  OS << "  DEBUG_WITH_TYPE(\"asm-matcher\", dbgs() << \"AsmMatcher: found \" <<\n"
+     << "  std::distance(MnemonicRange.first, MnemonicRange.second) << \n"
+     << "  \" encodings with mnemonic '\" << Mnemonic << \"'\\n\");\n\n";
+
   OS << "  // Return a more specific error code if no mnemonics match.\n";
   OS << "  if (MnemonicRange.first == MnemonicRange.second)\n";
   OS << "    return Match_MnemonicFail;\n\n";
@@ -3108,13 +3257,26 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
      << "*ie = MnemonicRange.second;\n";
   OS << "       it != ie; ++it) {\n";
 
+  OS << "    DEBUG_WITH_TYPE(\"asm-matcher\", dbgs() << \"Trying to match opcode \"\n";
+  OS << "                                          << MII.getName(it->Opcode) << \"\\n\");\n";
+
+  if (ReportMultipleNearMisses) {
+    OS << "    // Some state to record ways in which this instruction did not match.\n";
+    OS << "    NearMissInfo OperandNearMiss = NearMissInfo::getSuccess();\n";
+    OS << "    NearMissInfo FeaturesNearMiss = NearMissInfo::getSuccess();\n";
+    OS << "    NearMissInfo EarlyPredicateNearMiss = NearMissInfo::getSuccess();\n";
+    OS << "    NearMissInfo LatePredicateNearMiss = NearMissInfo::getSuccess();\n";
+    OS << "    bool MultipleInvalidOperands = false;\n";
+  }
+
   if (HasMnemonicFirst) {
     OS << "    // equal_range guarantees that instruction mnemonic matches.\n";
     OS << "    assert(Mnemonic == it->getMnemonic());\n";
   }
 
   // Emit check that the subclasses match.
-  OS << "    bool OperandsValid = true;\n";
+  if (!ReportMultipleNearMisses)
+    OS << "    bool OperandsValid = true;\n";
   if (HasOptionalOperands) {
     OS << "    OptionalOperandsMask.reset(0, " << MaxNumOperands << ");\n";
   }
@@ -3123,30 +3285,69 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
      << "; FormalIdx != " << MaxNumOperands << "; ++FormalIdx) {\n";
   OS << "      auto Formal = "
      << "static_cast<MatchClassKind>(it->Classes[FormalIdx]);\n";
+  OS << "      DEBUG_WITH_TYPE(\"asm-matcher\",\n";
+  OS << "                      dbgs() << \"  Matching formal operand class \" << getMatchClassName(Formal)\n";
+  OS << "                             << \" against actual operand at index \" << ActualIdx);\n";
+  OS << "      if (ActualIdx < Operands.size())\n";
+  OS << "        DEBUG_WITH_TYPE(\"asm-matcher\", dbgs() << \" (\";\n";
+  OS << "                        Operands[ActualIdx]->print(dbgs()); dbgs() << \"): \");\n";
+  OS << "      else\n";
+  OS << "        DEBUG_WITH_TYPE(\"asm-matcher\", dbgs() << \": \");\n";
   OS << "      if (ActualIdx >= Operands.size()) {\n";
-  OS << "        OperandsValid = (Formal == " <<"InvalidMatchClass) || "
-                                 "isSubclass(Formal, OptionalMatchClass);\n";
-  OS << "        if (!OperandsValid) ErrorInfo = ActualIdx;\n";
-  if (HasOptionalOperands) {
-    OS << "        OptionalOperandsMask.set(FormalIdx, " << MaxNumOperands
-       << ");\n";
+  OS << "        DEBUG_WITH_TYPE(\"asm-matcher\", dbgs() << \"actual operand index out of range \");\n";
+  if (ReportMultipleNearMisses) {
+    OS << "        bool ThisOperandValid = (Formal == " <<"InvalidMatchClass) || "
+                                   "isSubclass(Formal, OptionalMatchClass);\n";
+    OS << "        if (!ThisOperandValid) {\n";
+    OS << "          if (!OperandNearMiss) {\n";
+    OS << "            // Record info about match failure for later use.\n";
+    OS << "            DEBUG_WITH_TYPE(\"asm-matcher\", dbgs() << \"recording too-few-operands near miss\\n\");\n";
+    OS << "            OperandNearMiss =\n";
+    OS << "                NearMissInfo::getTooFewOperands(Formal, it->Opcode);\n";
+    OS << "          } else {\n";
+    OS << "            // If more than one operand is invalid, give up on this match entry.\n";
+    OS << "            DEBUG_WITH_TYPE(\n";
+    OS << "                \"asm-matcher\",\n";
+    OS << "                dbgs() << \"second invalid operand, giving up on this opcode\\n\");\n";
+    OS << "            MultipleInvalidOperands = true;\n";
+    OS << "            break;\n";
+    OS << "          }\n";
+    OS << "        } else {\n";
+    OS << "          DEBUG_WITH_TYPE(\"asm-matcher\", dbgs() << \"but formal operand not required\\n\");\n";
+    OS << "        }\n";
+    OS << "        continue;\n";
+  } else {
+    OS << "        OperandsValid = (Formal == InvalidMatchClass) || isSubclass(Formal, OptionalMatchClass);\n";
+    OS << "        if (!OperandsValid) ErrorInfo = ActualIdx;\n";
+    if (HasOptionalOperands) {
+      OS << "        OptionalOperandsMask.set(FormalIdx, " << MaxNumOperands
+         << ");\n";
+    }
+    OS << "        break;\n";
   }
-  OS << "        break;\n";
   OS << "      }\n";
   OS << "      MCParsedAsmOperand &Actual = *Operands[ActualIdx];\n";
   OS << "      unsigned Diag = validateOperandClass(Actual, Formal);\n";
   OS << "      if (Diag == Match_Success) {\n";
+  OS << "        DEBUG_WITH_TYPE(\"asm-matcher\",\n";
+  OS << "                        dbgs() << \"match success using generic matcher\\n\");\n";
   OS << "        ++ActualIdx;\n";
   OS << "        continue;\n";
   OS << "      }\n";
   OS << "      // If the generic handler indicates an invalid operand\n";
   OS << "      // failure, check for a special case.\n";
-  OS << "      if (Diag == Match_InvalidOperand) {\n";
-  OS << "        Diag = validateTargetOperandClass(Actual, Formal);\n";
-  OS << "        if (Diag == Match_Success) {\n";
+  OS << "      if (Diag != Match_Success) {\n";
+  OS << "        unsigned TargetDiag = validateTargetOperandClass(Actual, Formal);\n";
+  OS << "        if (TargetDiag == Match_Success) {\n";
+  OS << "          DEBUG_WITH_TYPE(\"asm-matcher\",\n";
+  OS << "                          dbgs() << \"match success using target matcher\\n\");\n";
   OS << "          ++ActualIdx;\n";
   OS << "          continue;\n";
   OS << "        }\n";
+  OS << "        // If the target matcher returned a specific error code use\n";
+  OS << "        // that, else use the one from the generic matcher.\n";
+  OS << "        if (TargetDiag != Match_InvalidOperand)\n";
+  OS << "          Diag = TargetDiag;\n";
   OS << "      }\n";
   OS << "      // If current formal operand wasn't matched and it is optional\n"
      << "      // then try to match next formal operand\n";
@@ -3155,36 +3356,77 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
   if (HasOptionalOperands) {
     OS << "        OptionalOperandsMask.set(FormalIdx);\n";
   }
+    OS << "        DEBUG_WITH_TYPE(\"asm-matcher\", dbgs() << \"ignoring optional operand\\n\");\n";
   OS << "        continue;\n";
   OS << "      }\n";
-  OS << "      // If this operand is broken for all of the instances of this\n";
-  OS << "      // mnemonic, keep track of it so we can report loc info.\n";
-  OS << "      // If we already had a match that only failed due to a\n";
-  OS << "      // target predicate, that diagnostic is preferred.\n";
-  OS << "      if (!HadMatchOtherThanPredicate &&\n";
-  OS << "          (it == MnemonicRange.first || ErrorInfo <= ActualIdx)) {\n";
-  OS << "        ErrorInfo = ActualIdx;\n";
-  OS << "        // InvalidOperand is the default. Prefer specificity.\n";
-  OS << "        if (Diag != Match_InvalidOperand)\n";
-  OS << "          RetCode = Diag;\n";
-  OS << "      }\n";
-  OS << "      // Otherwise, just reject this instance of the mnemonic.\n";
-  OS << "      OperandsValid = false;\n";
-  OS << "      break;\n";
-  OS << "    }\n\n";
 
-  OS << "    if (!OperandsValid) continue;\n";
+  if (ReportMultipleNearMisses) {
+    OS << "      if (!OperandNearMiss) {\n";
+    OS << "        // If this is the first invalid operand we have seen, record some\n";
+    OS << "        // information about it.\n";
+    OS << "        DEBUG_WITH_TYPE(\n";
+    OS << "            \"asm-matcher\",\n";
+    OS << "            dbgs()\n";
+    OS << "                << \"operand match failed, recording near-miss with diag code \"\n";
+    OS << "                << Diag << \"\\n\");\n";
+    OS << "        OperandNearMiss =\n";
+    OS << "            NearMissInfo::getMissedOperand(Diag, Formal, it->Opcode, ActualIdx);\n";
+    OS << "        ++ActualIdx;\n";
+    OS << "      } else {\n";
+    OS << "        // If more than one operand is invalid, give up on this match entry.\n";
+    OS << "        DEBUG_WITH_TYPE(\n";
+    OS << "            \"asm-matcher\",\n";
+    OS << "            dbgs() << \"second operand mismatch, skipping this opcode\\n\");\n";
+    OS << "        MultipleInvalidOperands = true;\n";
+    OS << "        break;\n";
+    OS << "      }\n";
+    OS << "    }\n\n";
+  } else {
+    OS << "      // If this operand is broken for all of the instances of this\n";
+    OS << "      // mnemonic, keep track of it so we can report loc info.\n";
+    OS << "      // If we already had a match that only failed due to a\n";
+    OS << "      // target predicate, that diagnostic is preferred.\n";
+    OS << "      if (!HadMatchOtherThanPredicate &&\n";
+    OS << "          (it == MnemonicRange.first || ErrorInfo <= ActualIdx)) {\n";
+    OS << "        ErrorInfo = ActualIdx;\n";
+    OS << "        // InvalidOperand is the default. Prefer specificity.\n";
+    OS << "        if (Diag != Match_InvalidOperand)\n";
+    OS << "          RetCode = Diag;\n";
+    OS << "      }\n";
+    OS << "      // Otherwise, just reject this instance of the mnemonic.\n";
+    OS << "      OperandsValid = false;\n";
+    OS << "      break;\n";
+    OS << "    }\n\n";
+  }
+
+  if (ReportMultipleNearMisses)
+    OS << "    if (MultipleInvalidOperands) {\n";
+  else
+    OS << "    if (!OperandsValid) {\n";
+  OS << "      DEBUG_WITH_TYPE(\"asm-matcher\", dbgs() << \"Opcode result: multiple \"\n";
+  OS << "                                               \"operand mismatches, ignoring \"\n";
+  OS << "                                               \"this opcode\\n\");\n";
+  OS << "      continue;\n";
+  OS << "    }\n";
 
   // Emit check that the required features are available.
   OS << "    if ((AvailableFeatures & it->RequiredFeatures) "
      << "!= it->RequiredFeatures) {\n";
-  OS << "      HadMatchOtherThanFeatures = true;\n";
+  if (!ReportMultipleNearMisses)
+    OS << "      HadMatchOtherThanFeatures = true;\n";
   OS << "      uint64_t NewMissingFeatures = it->RequiredFeatures & "
         "~AvailableFeatures;\n";
-  OS << "      if (countPopulation(NewMissingFeatures) <=\n"
-        "          countPopulation(MissingFeatures))\n";
-  OS << "        MissingFeatures = NewMissingFeatures;\n";
-  OS << "      continue;\n";
+  OS << "      DEBUG_WITH_TYPE(\"asm-matcher\", dbgs() << \"Missing target features: \"\n";
+  OS << "                                            << format_hex(NewMissingFeatures, 18)\n";
+  OS << "                                            << \"\\n\");\n";
+  if (ReportMultipleNearMisses) {
+    OS << "      FeaturesNearMiss = NearMissInfo::getMissedFeature(NewMissingFeatures);\n";
+  } else {
+    OS << "      if (countPopulation(NewMissingFeatures) <=\n"
+          "          countPopulation(MissingFeatures))\n";
+    OS << "        MissingFeatures = NewMissingFeatures;\n";
+    OS << "      continue;\n";
+  }
   OS << "    }\n";
   OS << "\n";
   OS << "    Inst.clear();\n\n";
@@ -3200,11 +3442,40 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
      << "    unsigned MatchResult;\n"
      << "    if ((MatchResult = checkEarlyTargetMatchPredicate(Inst, "
         "Operands)) != Match_Success) {\n"
-     << "      Inst.clear();\n"
-     << "      RetCode = MatchResult;\n"
-     << "      HadMatchOtherThanPredicate = true;\n"
-     << "      continue;\n"
-     << "    }\n\n";
+     << "      Inst.clear();\n";
+  OS << "      DEBUG_WITH_TYPE(\n";
+  OS << "          \"asm-matcher\",\n";
+  OS << "          dbgs() << \"Early target match predicate failed with diag code \"\n";
+  OS << "                 << MatchResult << \"\\n\");\n";
+  if (ReportMultipleNearMisses) {
+    OS << "      EarlyPredicateNearMiss = NearMissInfo::getMissedPredicate(MatchResult);\n";
+  } else {
+    OS << "      RetCode = MatchResult;\n"
+       << "      HadMatchOtherThanPredicate = true;\n"
+       << "      continue;\n";
+  }
+  OS << "    }\n\n";
+
+  if (ReportMultipleNearMisses) {
+    OS << "    // If we did not successfully match the operands, then we can't convert to\n";
+    OS << "    // an MCInst, so bail out on this instruction variant now.\n";
+    OS << "    if (OperandNearMiss) {\n";
+    OS << "      // If the operand mismatch was the only problem, reprrt it as a near-miss.\n";
+    OS << "      if (NearMisses && !FeaturesNearMiss && !EarlyPredicateNearMiss) {\n";
+    OS << "        DEBUG_WITH_TYPE(\n";
+    OS << "            \"asm-matcher\",\n";
+    OS << "            dbgs()\n";
+    OS << "                << \"Opcode result: one mismatched operand, adding near-miss\\n\");\n";
+    OS << "        NearMisses->push_back(OperandNearMiss);\n";
+    OS << "      } else {\n";
+    OS << "        DEBUG_WITH_TYPE(\"asm-matcher\", dbgs() << \"Opcode result: multiple \"\n";
+    OS << "                                                 \"types of mismatch, so not \"\n";
+    OS << "                                                 \"reporting near-miss\\n\");\n";
+    OS << "      }\n";
+    OS << "      continue;\n";
+    OS << "    }\n\n";
+  }
+
   OS << "    if (matchingInlineAsm) {\n";
   OS << "      convertToMapAndConstraints(it->ConvertFn, Operands);\n";
   OS << "      return Match_Success;\n";
@@ -3224,11 +3495,46 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
      << "    // handle any context sensitive constraints.\n"
      << "    if ((MatchResult = checkTargetMatchPredicate(Inst)) !="
      << " Match_Success) {\n"
-     << "      Inst.clear();\n"
-     << "      RetCode = MatchResult;\n"
-     << "      HadMatchOtherThanPredicate = true;\n"
-     << "      continue;\n"
-     << "    }\n\n";
+     << "      DEBUG_WITH_TYPE(\"asm-matcher\",\n"
+     << "                      dbgs() << \"Target match predicate failed with diag code \"\n"
+     << "                             << MatchResult << \"\\n\");\n"
+     << "      Inst.clear();\n";
+  if (ReportMultipleNearMisses) {
+    OS << "      LatePredicateNearMiss = NearMissInfo::getMissedPredicate(MatchResult);\n";
+  } else {
+    OS << "      RetCode = MatchResult;\n"
+       << "      HadMatchOtherThanPredicate = true;\n"
+       << "      continue;\n";
+  }
+  OS << "    }\n\n";
+
+  if (ReportMultipleNearMisses) {
+    OS << "    int NumNearMisses = ((int)(bool)OperandNearMiss +\n";
+    OS << "                         (int)(bool)FeaturesNearMiss +\n";
+    OS << "                         (int)(bool)EarlyPredicateNearMiss +\n";
+    OS << "                         (int)(bool)LatePredicateNearMiss);\n";
+    OS << "    if (NumNearMisses == 1) {\n";
+    OS << "      // We had exactly one type of near-miss, so add that to the list.\n";
+    OS << "      assert(!OperandNearMiss && \"OperandNearMiss was handled earlier\");\n";
+    OS << "      DEBUG_WITH_TYPE(\"asm-matcher\", dbgs() << \"Opcode result: found one type of \"\n";
+    OS << "                                            \"mismatch, so reporting a \"\n";
+    OS << "                                            \"near-miss\\n\");\n";
+    OS << "      if (NearMisses && FeaturesNearMiss)\n";
+    OS << "        NearMisses->push_back(FeaturesNearMiss);\n";
+    OS << "      else if (NearMisses && EarlyPredicateNearMiss)\n";
+    OS << "        NearMisses->push_back(EarlyPredicateNearMiss);\n";
+    OS << "      else if (NearMisses && LatePredicateNearMiss)\n";
+    OS << "        NearMisses->push_back(LatePredicateNearMiss);\n";
+    OS << "\n";
+    OS << "      continue;\n";
+    OS << "    } else if (NumNearMisses > 1) {\n";
+    OS << "      // This instruction missed in more than one way, so ignore it.\n";
+    OS << "      DEBUG_WITH_TYPE(\"asm-matcher\", dbgs() << \"Opcode result: multiple \"\n";
+    OS << "                                               \"types of mismatch, so not \"\n";
+    OS << "                                               \"reporting near-miss\\n\");\n";
+    OS << "      continue;\n";
+    OS << "    }\n";
+  }
 
   // Call the post-processing function, if used.
   StringRef InsnCleanupFn = AsmParser->getValueAsString("AsmParserInstCleanup");
@@ -3246,15 +3552,23 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
     OS << "    }\n";
   }
 
+  OS << "    DEBUG_WITH_TYPE(\n";
+  OS << "        \"asm-matcher\",\n";
+  OS << "        dbgs() << \"Opcode result: complete match, selecting this opcode\\n\");\n";
   OS << "    return Match_Success;\n";
   OS << "  }\n\n";
 
-  OS << "  // Okay, we had no match.  Try to return a useful error code.\n";
-  OS << "  if (HadMatchOtherThanPredicate || !HadMatchOtherThanFeatures)\n";
-  OS << "    return RetCode;\n\n";
-  OS << "  // Missing feature matches return which features were missing\n";
-  OS << "  ErrorInfo = MissingFeatures;\n";
-  OS << "  return Match_MissingFeature;\n";
+  if (ReportMultipleNearMisses) {
+    OS << "  // No instruction variants matched exactly.\n";
+    OS << "  return Match_NearMisses;\n";
+  } else {
+    OS << "  // Okay, we had no match.  Try to return a useful error code.\n";
+    OS << "  if (HadMatchOtherThanPredicate || !HadMatchOtherThanFeatures)\n";
+    OS << "    return RetCode;\n\n";
+    OS << "  // Missing feature matches return which features were missing\n";
+    OS << "  ErrorInfo = MissingFeatures;\n";
+    OS << "  return Match_MissingFeature;\n";
+  }
   OS << "}\n\n";
 
   if (!Info.OperandMatchInfo.empty())

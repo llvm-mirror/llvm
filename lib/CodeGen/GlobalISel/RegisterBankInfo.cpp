@@ -151,7 +151,7 @@ RegisterBankInfo::getInstrMappingImpl(const MachineInstr &MI) const {
   // is important. The rest is not constrained.
   unsigned NumOperandsForMapping = IsCopyLike ? 1 : MI.getNumOperands();
 
-  const MachineFunction &MF = *MI.getParent()->getParent();
+  const MachineFunction &MF = *MI.getMF();
   const TargetSubtargetInfo &STI = MF.getSubtarget();
   const TargetRegisterInfo &TRI = *STI.getRegisterInfo();
   const MachineRegisterInfo &MRI = MF.getRegInfo();
@@ -465,7 +465,7 @@ unsigned RegisterBankInfo::getSizeInBits(unsigned Reg,
 //------------------------------------------------------------------------------
 // Helper classes implementation.
 //------------------------------------------------------------------------------
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+#ifdef LLVM_ENABLE_DUMP
 LLVM_DUMP_METHOD void RegisterBankInfo::PartialMapping::dump() const {
   print(dbgs());
   dbgs() << '\n';
@@ -518,7 +518,7 @@ bool RegisterBankInfo::ValueMapping::verify(unsigned MeaningfulBitWidth) const {
   return true;
 }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+#ifdef LLVM_ENABLE_DUMP
 LLVM_DUMP_METHOD void RegisterBankInfo::ValueMapping::dump() const {
   print(dbgs());
   dbgs() << '\n';
@@ -543,9 +543,9 @@ bool RegisterBankInfo::InstructionMapping::verify(
   // For PHI, we only care about mapping the definition.
   assert(NumOperands == (isCopyLike(MI) ? 1 : MI.getNumOperands()) &&
          "NumOperands must match, see constructor");
-  assert(MI.getParent() && MI.getParent()->getParent() &&
+  assert(MI.getParent() && MI.getMF() &&
          "MI must be connected to a MachineFunction");
-  const MachineFunction &MF = *MI.getParent()->getParent();
+  const MachineFunction &MF = *MI.getMF();
   (void)MF;
 
   for (unsigned Idx = 0; Idx < NumOperands; ++Idx) {
@@ -571,7 +571,7 @@ bool RegisterBankInfo::InstructionMapping::verify(
   return true;
 }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+#ifdef LLVM_ENABLE_DUMP
 LLVM_DUMP_METHOD void RegisterBankInfo::InstructionMapping::dump() const {
   print(dbgs());
   dbgs() << '\n';
@@ -694,7 +694,7 @@ RegisterBankInfo::OperandsMapper::getVRegs(unsigned OpIdx,
   return Res;
 }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+#ifdef LLVM_ENABLE_DUMP
 LLVM_DUMP_METHOD void RegisterBankInfo::OperandsMapper::dump() const {
   print(dbgs(), true);
   dbgs() << '\n';
@@ -725,8 +725,8 @@ void RegisterBankInfo::OperandsMapper::print(raw_ostream &OS,
   // If we have a function, we can pretty print the name of the registers.
   // Otherwise we will print the raw numbers.
   const TargetRegisterInfo *TRI =
-      getMI().getParent() && getMI().getParent()->getParent()
-          ? getMI().getParent()->getParent()->getSubtarget().getRegisterInfo()
+      getMI().getParent() && getMI().getMF()
+          ? getMI().getMF()->getSubtarget().getRegisterInfo()
           : nullptr;
   bool IsFirst = true;
   for (unsigned Idx = 0; Idx != NumOpds; ++Idx) {

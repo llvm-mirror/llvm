@@ -31,7 +31,7 @@
 #include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/LoopAccessAnalysis.h"
 #include "llvm/Analysis/LoopInfo.h"
-#include "llvm/Analysis/OptimizationDiagnosticInfo.h"
+#include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/Pass.h"
@@ -755,9 +755,11 @@ public:
 
     ++NumLoopsDistributed;
     // Report the success.
-    ORE->emit(OptimizationRemark(LDIST_NAME, "Distribute", L->getStartLoc(),
-                                 L->getHeader())
-              << "distributed loop");
+    ORE->emit([&]() {
+      return OptimizationRemark(LDIST_NAME, "Distribute", L->getStartLoc(),
+                                L->getHeader())
+             << "distributed loop";
+    });
     return true;
   }
 
@@ -769,11 +771,13 @@ public:
     DEBUG(dbgs() << "Skipping; " << Message << "\n");
 
     // With Rpass-missed report that distribution failed.
-    ORE->emit(
-        OptimizationRemarkMissed(LDIST_NAME, "NotDistributed", L->getStartLoc(),
-                                 L->getHeader())
-        << "loop not distributed: use -Rpass-analysis=loop-distribute for more "
-           "info");
+    ORE->emit([&]() {
+      return OptimizationRemarkMissed(LDIST_NAME, "NotDistributed",
+                                      L->getStartLoc(), L->getHeader())
+             << "loop not distributed: use -Rpass-analysis=loop-distribute for "
+                "more "
+                "info";
+    });
 
     // With Rpass-analysis report why.  This is on by default if distribution
     // was requested explicitly.

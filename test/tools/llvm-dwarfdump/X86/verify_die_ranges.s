@@ -3,7 +3,7 @@
 # RUN: | FileCheck %s
 
 # CHECK: Verifying .debug_info Unit Header Chain...
-# CHECK-NEXT: error: Invalid address range [0x00000007 - 0x00000006].
+# CHECK-NEXT: error: Invalid address range [0x0000000000000007, 0x0000000000000006)
 
 	.section	__TEXT,__text,regular,pure_instructions
 	.macosx_version_min 10, 12
@@ -16,12 +16,9 @@ Lfunc_begin0:
 	.cfi_startproc
 ## BB#0:                                ## %entry
 	pushq	%rbp
-Lcfi0:
 	.cfi_def_cfa_offset 16
-Lcfi1:
 	.cfi_offset %rbp, -16
 	movq	%rsp, %rbp
-Lcfi2:
 	.cfi_def_cfa_register %rbp
 Ltmp0:
 	.loc	1 1 17 prologue_end     ## basic.c:1:17

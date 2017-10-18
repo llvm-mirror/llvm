@@ -407,7 +407,7 @@ BasicBlock *Loop::getUniqueExitBlock() const {
   return nullptr;
 }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+#ifdef LLVM_ENABLE_DUMP
 LLVM_DUMP_METHOD void Loop::dump() const { print(dbgs()); }
 
 LLVM_DUMP_METHOD void Loop::dumpVerbose() const {
@@ -618,12 +618,10 @@ bool LoopInfo::invalidate(Function &F, const PreservedAnalyses &PA,
            PAC.preservedSet<CFGAnalyses>());
 }
 
-void LoopInfo::markAsErased(Loop *Unloop) {
+void LoopInfo::erase(Loop *Unloop) {
   assert(!Unloop->isInvalid() && "Loop has already been erased!");
-  RemovedLoops.push_back(Unloop);
 
-  auto InvalidateOnExit =
-      make_scope_exit([&]() { BaseT::clearLoop(*Unloop); });
+  auto InvalidateOnExit = make_scope_exit([&]() { destroy(Unloop); });
 
   // First handle the special case of no parent loop to simplify the algorithm.
   if (!Unloop->getParentLoop()) {

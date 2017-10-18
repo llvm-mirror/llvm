@@ -3473,9 +3473,12 @@ let TargetPrefix = "x86" in {  // All intrinsics start with "llvm.x86.".
 }
 
 //===----------------------------------------------------------------------===//
-// CLFLUSHOPT
+// CLFLUSHOPT and CLWB
 let TargetPrefix = "x86" in {  // All intrinsics start with "llvm.x86.".
   def int_x86_clflushopt : GCCBuiltin<"__builtin_ia32_clflushopt">,
+              Intrinsic<[], [llvm_ptr_ty], []>;
+
+  def int_x86_clwb : GCCBuiltin<"__builtin_ia32_clwb">,
               Intrinsic<[], [llvm_ptr_ty], []>;
 }
 
@@ -4238,26 +4241,6 @@ let TargetPrefix = "x86" in {  // All intrinsics start with "llvm.x86.".
 
   def int_x86_avx512_vbroadcast_sd_512 :
         Intrinsic<[llvm_v8f64_ty], [llvm_ptr_ty], [IntrReadMem, IntrArgMemOnly]>;
-
-  def int_x86_avx512_mask_broadcastf32x2_256 :
-          Intrinsic<[llvm_v8f32_ty],
-                    [llvm_v4f32_ty, llvm_v8f32_ty, llvm_i8_ty], [IntrNoMem]>;
-
-  def int_x86_avx512_mask_broadcastf32x2_512 :
-          Intrinsic<[llvm_v16f32_ty],
-                    [llvm_v4f32_ty, llvm_v16f32_ty, llvm_i16_ty], [IntrNoMem]>;
-
-  def int_x86_avx512_mask_broadcasti32x2_128 :
-          Intrinsic<[llvm_v4i32_ty],
-                    [llvm_v4i32_ty, llvm_v4i32_ty, llvm_i8_ty], [IntrNoMem]>;
-
-  def int_x86_avx512_mask_broadcasti32x2_256 :
-          Intrinsic<[llvm_v8i32_ty],
-                    [llvm_v4i32_ty, llvm_v8i32_ty, llvm_i8_ty], [IntrNoMem]>;
-
-  def int_x86_avx512_mask_broadcasti32x2_512 :
-          Intrinsic<[llvm_v16i32_ty],
-                    [llvm_v4i32_ty, llvm_v16i32_ty, llvm_i16_ty], [IntrNoMem]>;
 
    def int_x86_avx512_broadcastmw_512 :
           GCCBuiltin<"__builtin_ia32_broadcastmw512">,

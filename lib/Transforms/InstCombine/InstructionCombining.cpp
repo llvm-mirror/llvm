@@ -48,7 +48,7 @@
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
-#include "llvm/Analysis/OptimizationDiagnosticInfo.h"
+#include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/CFG.h"
@@ -731,6 +731,7 @@ Value *InstCombiner::SimplifySelectsFeedingBinaryOp(BinaryOperator &I,
   Value *SI = nullptr;
   if (match(LHS, m_Select(m_Value(A), m_Value(B), m_Value(C))) &&
       match(RHS, m_Select(m_Specific(A), m_Value(D), m_Value(E)))) {
+    bool SelectsHaveOneUse = LHS->hasOneUse() && RHS->hasOneUse();
     BuilderTy::FastMathFlagGuard Guard(Builder);
     if (isa<FPMathOperator>(&I))
       Builder.setFastMathFlags(I.getFastMathFlags());
@@ -739,9 +740,9 @@ Value *InstCombiner::SimplifySelectsFeedingBinaryOp(BinaryOperator &I,
     Value *V2 = SimplifyBinOp(Opcode, B, D, SQ.getWithInstruction(&I));
     if (V1 && V2)
       SI = Builder.CreateSelect(A, V2, V1);
-    else if (V2)
+    else if (V2 && SelectsHaveOneUse)
       SI = Builder.CreateSelect(A, V2, Builder.CreateBinOp(Opcode, C, E));
-    else if (V1)
+    else if (V1 && SelectsHaveOneUse)
       SI = Builder.CreateSelect(A, Builder.CreateBinOp(Opcode, B, D), V1);
 
     if (SI)
@@ -2106,10 +2107,10 @@ Instruction *InstCombiner::visitAllocSite(Instruction &MI) {
 
   // If we are removing an alloca with a dbg.declare, insert dbg.value calls
   // before each store.
-  DbgDeclareInst *DDI = nullptr;
+  TinyPtrVector<DbgInfoIntrinsic *> DIIs;
   std::unique_ptr<DIBuilder> DIB;
   if (isa<AllocaInst>(MI)) {
-    DDI = FindAllocaDbgDeclare(&MI);
+    DIIs = FindDbgAddrUses(&MI);
     DIB.reset(new DIBuilder(*MI.getModule(), /*AllowUnresolved=*/false));
   }
 
@@ -2145,8 +2146,9 @@ Instruction *InstCombiner::visitAllocSite(Instruction &MI) {
       } else if (isa<BitCastInst>(I) || isa<GetElementPtrInst>(I) ||
                  isa<AddrSpaceCastInst>(I)) {
         replaceInstUsesWith(*I, UndefValue::get(I->getType()));
-      } else if (DDI && isa<StoreInst>(I)) {
-        ConvertDebugDeclareToDebugValue(DDI, cast<StoreInst>(I), *DIB);
+      } else if (auto *SI = dyn_cast<StoreInst>(I)) {
+        for (auto *DII : DIIs)
+          ConvertDebugDeclareToDebugValue(DII, SI, *DIB);
       }
       eraseInstFromFunction(*I);
     }
@@ -2159,8 +2161,8 @@ Instruction *InstCombiner::visitAllocSite(Instruction &MI) {
                          None, "", II->getParent());
     }
 
-    if (DDI)
-      eraseInstFromFunction(*DDI);
+    for (auto *DII : DIIs)
+      eraseInstFromFunction(*DII);
 
     return eraseInstFromFunction(MI);
   }

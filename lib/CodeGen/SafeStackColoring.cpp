@@ -1,4 +1,4 @@
-//===-- SafeStackColoring.cpp - SafeStack frame coloring -------*- C++ -*--===//
+//===- SafeStackColoring.cpp - SafeStack frame coloring -------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -8,12 +8,25 @@
 //===----------------------------------------------------------------------===//
 
 #include "SafeStackColoring.h"
-
+#include "llvm/ADT/BitVector.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DepthFirstIterator.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
+#include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/User.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/raw_ostream.h"
+#include <cassert>
+#include <tuple>
+#include <utility>
 
 using namespace llvm;
 using namespace llvm::safestack;
@@ -237,7 +250,7 @@ void StackColoring::calculateLiveIntervals() {
   }
 }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+#ifdef LLVM_ENABLE_DUMP
 LLVM_DUMP_METHOD void StackColoring::dumpAllocas() {
   dbgs() << "Allocas:\n";
   for (unsigned AllocaNo = 0; AllocaNo < NumAllocas; ++AllocaNo)

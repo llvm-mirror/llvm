@@ -179,7 +179,7 @@ class Remark(yaml.YAMLObject):
     @property
     def RelativeHotness(self):
         if self.max_hotness:
-            return "{}%".format(int(round(self.Hotness * 100 / self.max_hotness)))
+            return "{0:.2f}%".format(self.Hotness * 100. / self.max_hotness)
         else:
             return ''
 
@@ -282,7 +282,7 @@ def gather_results(filenames, num_jobs, should_print_progress):
     return all_remarks, file_remarks, max_hotness != 0
 
 
-def find_opt_files(dirs_or_files):
+def find_opt_files(*dirs_or_files):
     all = []
     for dir_or_file in dirs_or_files:
         if os.path.isfile(dir_or_file):

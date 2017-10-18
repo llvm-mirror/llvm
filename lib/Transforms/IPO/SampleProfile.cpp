@@ -30,7 +30,7 @@
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/InlineCost.h"
 #include "llvm/Analysis/LoopInfo.h"
-#include "llvm/Analysis/OptimizationDiagnosticInfo.h"
+#include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/PostDominators.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/IR/Constants.h"
@@ -149,13 +149,14 @@ private:
 class SampleProfileLoader {
 public:
   SampleProfileLoader(
-      StringRef Name,
+      StringRef Name, bool IsThinLTOPreLink,
       std::function<AssumptionCache &(Function &)> GetAssumptionCache,
       std::function<TargetTransformInfo &(Function &)> GetTargetTransformInfo)
       : DT(nullptr), PDT(nullptr), LI(nullptr), GetAC(GetAssumptionCache),
         GetTTI(GetTargetTransformInfo), Reader(), Samples(nullptr),
-        Filename(Name), ProfileIsValid(false), TotalCollectedSamples(0),
-        ORE(nullptr) {}
+        Filename(Name), ProfileIsValid(false),
+        IsThinLTOPreLink(IsThinLTOPreLink),
+        TotalCollectedSamples(0), ORE(nullptr) {}
 
   bool doInitialization(Module &M);
   bool runOnModule(Module &M, ModuleAnalysisManager *AM);
@@ -170,8 +171,9 @@ protected:
   ErrorOr<uint64_t> getBlockWeight(const BasicBlock *BB);
   const FunctionSamples *findCalleeFunctionSamples(const Instruction &I) const;
   std::vector<const FunctionSamples *>
-  findIndirectCallFunctionSamples(const Instruction &I) const;
+  findIndirectCallFunctionSamples(const Instruction &I, uint64_t &Sum) const;
   const FunctionSamples *findFunctionSamples(const Instruction &I) const;
+  bool inlineCallInstruction(Instruction *I);
   bool inlineHotFunctions(Function &F,
                           DenseSet<GlobalValue::GUID> &ImportGUIDs);
   void printEdgeWeight(raw_ostream &OS, Edge E);
@@ -251,6 +253,12 @@ protected:
   /// \brief Flag indicating whether the profile input loaded successfully.
   bool ProfileIsValid;
 
+  /// \brief Flag indicating if the pass is invoked in ThinLTO compile phase.
+  ///
+  /// In this phase, in annotation, we should not promote indirect calls.
+  /// Instead, we will mark GUIDs that needs to be annotated to the function.
+  bool IsThinLTOPreLink;
+
   /// \brief Total number of samples collected in this profile.
   ///
   /// This is the sum of all the samples collected in all the functions executed
@@ -266,8 +274,9 @@ public:
   // Class identification, replacement for typeinfo
   static char ID;
 
-  SampleProfileLoaderLegacyPass(StringRef Name = SampleProfileFile)
-      : ModulePass(ID), SampleLoader(Name,
+  SampleProfileLoaderLegacyPass(StringRef Name = SampleProfileFile,
+                                bool IsThinLTOPreLink = false)
+      : ModulePass(ID), SampleLoader(Name, IsThinLTOPreLink,
                                      [&](Function &F) -> AssumptionCache & {
                                        return ACT->getAssumptionCache(F);
                                      },
@@ -502,10 +511,12 @@ ErrorOr<uint64_t> SampleProfileLoader::getInstWeight(const Instruction &Inst) {
   if (isa<BranchInst>(Inst) || isa<IntrinsicInst>(Inst))
     return std::error_code();
 
-  // If a call/invoke instruction is inlined in profile, but not inlined here,
+  // If a direct call/invoke instruction is inlined in profile
+  // (findCalleeFunctionSamples returns non-empty result), but not inlined here,
   // it means that the inlined callsite has no sample, thus the call
   // instruction should have 0 count.
   if ((isa<CallInst>(Inst) || isa<InvokeInst>(Inst)) &&
+      !ImmutableCallSite(&Inst).isIndirectCall() &&
       findCalleeFunctionSamples(Inst))
     return 0;
 
@@ -517,17 +528,18 @@ ErrorOr<uint64_t> SampleProfileLoader::getInstWeight(const Instruction &Inst) {
     bool FirstMark =
         CoverageTracker.markSamplesUsed(FS, LineOffset, Discriminator, R.get());
     if (FirstMark) {
-      if (Discriminator)
-        ORE->emit(OptimizationRemarkAnalysis(DEBUG_TYPE, "AppliedSamples", &Inst)
-                  << "Applied " << ore::NV("NumSamples", *R)
-                  << " samples from profile (offset: "
-                  << ore::NV("LineOffset", LineOffset) << "."
-                  << ore::NV("Discriminator", Discriminator) << ")");
-      else
-        ORE->emit(OptimizationRemarkAnalysis(DEBUG_TYPE, "AppliedSamples", &Inst)
-                  << "Applied " << ore::NV("NumSamples", *R)
-                  << " samples from profile (offset: "
-                  << ore::NV("LineOffset", LineOffset) << ")");
+      ORE->emit([&]() {
+        OptimizationRemarkAnalysis Remark(DEBUG_TYPE, "AppliedSamples", &Inst);
+        Remark << "Applied " << ore::NV("NumSamples", *R);
+        Remark << " samples from profile (offset: ";
+        Remark << ore::NV("LineOffset", LineOffset);
+        if (Discriminator) {
+          Remark << ".";
+          Remark << ore::NV("Discriminator", Discriminator);
+        }
+        Remark << ")";
+        return Remark;
+      });
     }
     DEBUG(dbgs() << "    " << DLoc.getLine() << "."
                  << DIL->getBaseDiscriminator() << ":" << Inst
@@ -614,10 +626,11 @@ SampleProfileLoader::findCalleeFunctionSamples(const Instruction &Inst) const {
 }
 
 /// Returns a vector of FunctionSamples that are the indirect call targets
-/// of \p Inst. The vector is sorted by the total number of samples.
+/// of \p Inst. The vector is sorted by the total number of samples. Stores
+/// the total call count of the indirect call in \p Sum.
 std::vector<const FunctionSamples *>
 SampleProfileLoader::findIndirectCallFunctionSamples(
-    const Instruction &Inst) const {
+    const Instruction &Inst, uint64_t &Sum) const {
   const DILocation *DIL = Inst.getDebugLoc();
   std::vector<const FunctionSamples *> R;
 
@@ -629,16 +642,25 @@ SampleProfileLoader::findIndirectCallFunctionSamples(
   if (FS == nullptr)
     return R;
 
+  uint32_t LineOffset = getOffset(DIL);
+  uint32_t Discriminator = DIL->getBaseDiscriminator();
+
+  auto T = FS->findCallTargetMapAt(LineOffset, Discriminator);
+  Sum = 0;
+  if (T)
+    for (const auto &T_C : T.get())
+      Sum += T_C.second;
   if (const FunctionSamplesMap *M = FS->findFunctionSamplesMapAt(
           LineLocation(getOffset(DIL), DIL->getBaseDiscriminator()))) {
     if (M->size() == 0)
       return R;
     for (const auto &NameFS : *M) {
+      Sum += NameFS.second.getEntrySamples();
       R.push_back(&NameFS.second);
     }
     std::sort(R.begin(), R.end(),
               [](const FunctionSamples *L, const FunctionSamples *R) {
-                return L->getTotalSamples() > R->getTotalSamples();
+                return L->getEntrySamples() > R->getEntrySamples();
               });
   }
   return R;
@@ -674,6 +696,39 @@ SampleProfileLoader::findFunctionSamples(const Instruction &Inst) const {
     FS = FS->findFunctionSamplesAt(S[i].first, S[i].second);
   }
   return FS;
+}
+
+bool SampleProfileLoader::inlineCallInstruction(Instruction *I) {
+  assert(isa<CallInst>(I) || isa<InvokeInst>(I));
+  CallSite CS(I);
+  Function *CalledFunction = CS.getCalledFunction();
+  assert(CalledFunction);
+  DebugLoc DLoc = I->getDebugLoc();
+  BasicBlock *BB = I->getParent();
+  InlineParams Params = getInlineParams();
+  Params.ComputeFullInlineCost = true;
+  // Checks if there is anything in the reachable portion of the callee at
+  // this callsite that makes this inlining potentially illegal. Need to
+  // set ComputeFullInlineCost, otherwise getInlineCost may return early
+  // when cost exceeds threshold without checking all IRs in the callee.
+  // The acutal cost does not matter because we only checks isNever() to
+  // see if it is legal to inline the callsite.
+  InlineCost Cost = getInlineCost(CS, Params, GetTTI(*CalledFunction), GetAC,
+                                  None, nullptr, nullptr);
+  if (Cost.isNever()) {
+    ORE->emit(OptimizationRemark(DEBUG_TYPE, "Not inline", DLoc, BB)
+              << "incompatible inlining");
+    return false;
+  }
+  InlineFunctionInfo IFI(nullptr, &GetAC);
+  if (InlineFunction(CS, IFI)) {
+    // The call to InlineFunction erases I, so we can't pass it here.
+    ORE->emit(OptimizationRemark(DEBUG_TYPE, "HotInline", DLoc, BB)
+              << "inlined hot callee '" << ore::NV("Callee", CalledFunction)
+              << "' into '" << ore::NV("Caller", BB->getParent()) << "'");
+    return true;
+  }
+  return false;
 }
 
 /// \brief Iteratively inline hot callsites of a function.
@@ -713,82 +768,59 @@ bool SampleProfileLoader::inlineHotFunctions(
       }
     }
     for (auto I : CIS) {
-      InlineFunctionInfo IFI(nullptr, &GetAC);
       Function *CalledFunction = CallSite(I).getCalledFunction();
       // Do not inline recursive calls.
       if (CalledFunction == &F)
         continue;
-      Instruction *DI = I;
-      if (!CalledFunction && !PromotedInsns.count(I) &&
-          CallSite(I).isIndirectCall()) {
-        for (const auto *FS : findIndirectCallFunctionSamples(*I)) {
+      if (CallSite(I).isIndirectCall()) {
+        if (PromotedInsns.count(I))
+          continue;
+        uint64_t Sum;
+        for (const auto *FS : findIndirectCallFunctionSamples(*I, Sum)) {
+          if (IsThinLTOPreLink) {
+            FS->findImportedFunctions(ImportGUIDs, F.getParent(),
+                                      Samples->getTotalSamples() *
+                                          SampleProfileHotThreshold / 100);
+            continue;
+          }
           auto CalleeFunctionName = FS->getName();
           // If it is a recursive call, we do not inline it as it could bloat
           // the code exponentially. There is way to better handle this, e.g.
           // clone the caller first, and inline the cloned caller if it is
-          // recursive. As llvm does not inline recursive calls, we will simply
-          // ignore it instead of handling it explicitly.
+          // recursive. As llvm does not inline recursive calls, we will
+          // simply ignore it instead of handling it explicitly.
           if (CalleeFunctionName == F.getName())
             continue;
+
           const char *Reason = "Callee function not available";
           auto R = SymbolMap.find(CalleeFunctionName);
-          if (R == SymbolMap.end())
-            continue;
-          CalledFunction = R->getValue();
-          if (CalledFunction && isLegalToPromote(I, CalledFunction, &Reason)) {
-            // The indirect target was promoted and inlined in the profile, as a
-            // result, we do not have profile info for the branch probability.
-            // We set the probability to 80% taken to indicate that the static
-            // call is likely taken.
-            DI = dyn_cast<Instruction>(
-                promoteIndirectCall(I, CalledFunction, 80, 100, false, ORE)
-                    ->stripPointerCasts());
+          if (R != SymbolMap.end() && R->getValue() &&
+              !R->getValue()->isDeclaration() &&
+              R->getValue()->getSubprogram() &&
+              isLegalToPromote(I, R->getValue(), &Reason)) {
+            uint64_t C = FS->getEntrySamples();
+            Instruction *DI = promoteIndirectCall(
+                I, R->getValue(), C, Sum, false, ORE);
+            Sum -= C;
             PromotedInsns.insert(I);
+            // If profile mismatches, we should not attempt to inline DI.
+            if ((isa<CallInst>(DI) || isa<InvokeInst>(DI)) &&
+                inlineCallInstruction(DI))
+              LocalChanged = true;
           } else {
-            DEBUG(dbgs() << "\nFailed to promote indirect call to "
-                         << CalleeFunctionName << " because " << Reason
-                         << "\n");
-            continue;
+            DEBUG(dbgs()
+                  << "\nFailed to promote indirect call to "
+                  << CalleeFunctionName << " because " << Reason << "\n");
           }
         }
-        // If there is profile mismatch, we should not attempt to inline DI.
-        if (!isa<CallInst>(DI) && !isa<InvokeInst>(DI))
-          continue;
-      }
-      if (!CalledFunction || !CalledFunction->getSubprogram()) {
-        // Handles functions that are imported from other modules.
-        for (const FunctionSamples *FS : findIndirectCallFunctionSamples(*I))
-          FS->findImportedFunctions(
-              ImportGUIDs, F.getParent(),
-              Samples->getTotalSamples() * SampleProfileHotThreshold / 100);
-        continue;
-      }
-      assert(isa<CallInst>(DI) || isa<InvokeInst>(DI));
-      CallSite CS(DI);
-      DebugLoc DLoc = I->getDebugLoc();
-      BasicBlock *BB = I->getParent();
-      InlineParams Params = getInlineParams();
-      Params.ComputeFullInlineCost = true;
-      // Checks if there is anything in the reachable portion of the callee at
-      // this callsite that makes this inlining potentially illegal. Need to
-      // set ComputeFullInlineCost, otherwise getInlineCost may return early
-      // when cost exceeds threshold without checking all IRs in the callee.
-      // The acutal cost does not matter because we only checks isNever() to
-      // see if it is legal to inline the callsite.
-      InlineCost Cost = getInlineCost(CS, Params, GetTTI(*CalledFunction), GetAC,
-                                      None, nullptr, nullptr);
-      if (Cost.isNever()) {
-        ORE->emit(OptimizationRemark(DEBUG_TYPE, "Not inline", DLoc, BB)
-                  << "incompatible inlining");
-        continue;
-      }
-      if (InlineFunction(CS, IFI)) {
-        LocalChanged = true;
-        // The call to InlineFunction erases DI, so we can't pass it here.
-        ORE->emit(OptimizationRemark(DEBUG_TYPE, "HotInline", DLoc, BB)
-                  << "inlined hot callee '"
-                  << ore::NV("Callee", CalledFunction) << "' into '"
-                  << ore::NV("Caller", &F) << "'");
+      } else if (CalledFunction && CalledFunction->getSubprogram() &&
+                 !CalledFunction->isDeclaration()) {
+        if (inlineCallInstruction(I))
+          LocalChanged = true;
+      } else if (IsThinLTOPreLink) {
+        findCalleeFunctionSamples(*I)->findImportedFunctions(
+            ImportGUIDs, F.getParent(),
+            Samples->getTotalSamples() * SampleProfileHotThreshold / 100);
       }
     }
     if (LocalChanged) {
@@ -1293,9 +1325,11 @@ void SampleProfileLoader::propagateWeights(Function &F) {
       DEBUG(dbgs() << "SUCCESS. Found non-zero weights.\n");
       TI->setMetadata(llvm::LLVMContext::MD_prof,
                       MDB.createBranchWeights(Weights));
-      ORE->emit(OptimizationRemark(DEBUG_TYPE, "PopularDest", MaxDestInst)
-                << "most popular destination for conditional branches at "
-                << ore::NV("CondBranchesLoc", BranchLoc));
+      ORE->emit([&]() {
+        return OptimizationRemark(DEBUG_TYPE, "PopularDest", MaxDestInst)
+               << "most popular destination for conditional branches at "
+               << ore::NV("CondBranchesLoc", BranchLoc);
+      });
     } else {
       DEBUG(dbgs() << "SKIPPED. All branch weights are zero.\n");
     }
@@ -1551,9 +1585,9 @@ PreservedAnalyses SampleProfileLoaderPass::run(Module &M,
     return FAM.getResult<TargetIRAnalysis>(F);
   };
 
-  SampleProfileLoader SampleLoader(ProfileFileName.empty() ? SampleProfileFile
-                                                           : ProfileFileName,
-                                   GetAssumptionCache, GetTTI);
+  SampleProfileLoader SampleLoader(
+      ProfileFileName.empty() ? SampleProfileFile : ProfileFileName,
+      IsThinLTOPreLink, GetAssumptionCache, GetTTI);
 
   SampleLoader.doInitialization(M);
 

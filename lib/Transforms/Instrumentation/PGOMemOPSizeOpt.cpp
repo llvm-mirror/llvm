@@ -21,7 +21,7 @@
 #include "llvm/ADT/Twine.h"
 #include "llvm/Analysis/BlockFrequencyInfo.h"
 #include "llvm/Analysis/GlobalsModRef.h"
-#include "llvm/Analysis/OptimizationDiagnosticInfo.h"
+#include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -382,14 +382,14 @@ bool MemOPSizeOpt::perform(MemIntrinsic *MI) {
   DEBUG(dbgs() << *DefaultBB << "\n");
   DEBUG(dbgs() << *MergeBB << "\n");
 
-  {
+  ORE.emit([&]() {
     using namespace ore;
-    ORE.emit(OptimizationRemark(DEBUG_TYPE, "memopt-opt", MI)
+    return OptimizationRemark(DEBUG_TYPE, "memopt-opt", MI)
              << "optimized " << NV("Intrinsic", StringRef(getMIName(MI)))
              << " with count " << NV("Count", SumForOpt) << " out of "
              << NV("Total", TotalCount) << " for " << NV("Versions", Version)
-             << " versions");
-  }
+             << " versions";
+  });
 
   return true;
 }

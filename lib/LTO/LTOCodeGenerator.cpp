@@ -83,16 +83,6 @@ cl::opt<bool> LTODiscardValueNames(
 #endif
     cl::Hidden);
 
-cl::opt<bool> LTOStripInvalidDebugInfo(
-    "lto-strip-invalid-debug-info",
-    cl::desc("Strip invalid debug info metadata during LTO instead of aborting."),
-#ifdef NDEBUG
-    cl::init(true),
-#else
-    cl::init(false),
-#endif
-    cl::Hidden);
-
 cl::opt<std::string>
     LTORemarksFilename("lto-pass-remarks-output",
                        cl::desc("Output filename for pass remarks"),
@@ -225,7 +215,7 @@ bool LTOCodeGenerator::writeMergedModules(StringRef Path) {
 
   // create output file
   std::error_code EC;
-  tool_output_file Out(Path, EC, sys::fs::F_None);
+  ToolOutputFile Out(Path, EC, sys::fs::F_None);
   if (EC) {
     std::string ErrMsg = "could not open bitcode file for writing: ";
     ErrMsg += Path;
@@ -265,7 +255,7 @@ bool LTOCodeGenerator::compileOptimizedToFile(const char **Name) {
   }
 
   // generate object file
-  tool_output_file objFile(Filename, FD);
+  ToolOutputFile objFile(Filename, FD);
 
   bool genResult = compileOptimized(&objFile.os());
   objFile.os().close();
@@ -495,8 +485,7 @@ void LTOCodeGenerator::verifyMergedModuleOnce() {
   HasVerifiedInput = true;
 
   bool BrokenDebugInfo = false;
-  if (verifyModule(*MergedModule, &dbgs(),
-                   LTOStripInvalidDebugInfo ? &BrokenDebugInfo : nullptr))
+  if (verifyModule(*MergedModule, &dbgs(), &BrokenDebugInfo))
     report_fatal_error("Broken module found, compilation aborted!");
   if (BrokenDebugInfo) {
     emitWarning("Invalid debug info found, debug info will be stripped");
