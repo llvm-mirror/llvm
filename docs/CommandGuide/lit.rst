@@ -80,6 +80,13 @@ OUTPUT OPTIONS
  Show more information on test failures, for example the entire test output
  instead of just the test result.
 
+.. option:: -vv, --echo-all-commands
+
+ Echo all commands to stdout, as they are being executed.
+ This can be valuable for debugging test failures, as the last echoed command
+ will be the one which has failed.
+ This option implies ``--verbose``.
+
 .. option:: -a, --show-all
 
  Show more information about all tests, for example the entire test
@@ -168,6 +175,13 @@ SELECTION OPTIONS
  provided. The two options must be used together, and the value of ``N``
  must be in the range ``1..M``. The environment variable
  ``LIT_RUN_SHARD`` can also be used in place of this option.
+
+.. option:: --filter=REGEXP
+
+  Run only those tests whose name matches the regular expression specified in
+  ``REGEXP``. The environment variable ``LIT_FILTER`` can be also used in place
+  of this option, which is especially useful in environments where the call
+  to ``lit`` is issued indirectly.
 
 ADDITIONAL OPTIONS
 ------------------

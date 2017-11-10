@@ -26,6 +26,7 @@
 #include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Process.h"
 #include "llvm/Support/Signals.h"
+#include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/Valgrind.h"
 #include "llvm/Transforms/IPO/AlwaysInliner.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
@@ -49,10 +50,10 @@ static cl::opt<unsigned> TimeoutValue(
     cl::desc("Number of seconds program is allowed to run before it "
              "is killed (default is 300s), 0 disables timeout"));
 
-static cl::opt<int>
-    MemoryLimit("mlimit", cl::init(-1), cl::value_desc("MBytes"),
-                cl::desc("Maximum amount of memory to use. 0 disables check."
-                         " Defaults to 400MB (800MB under valgrind)."));
+static cl::opt<int> MemoryLimit(
+    "mlimit", cl::init(-1), cl::value_desc("MBytes"),
+    cl::desc("Maximum amount of memory to use. 0 disables check. Defaults to "
+             "400MB (800MB under valgrind, 0 with sanitizers)."));
 
 static cl::opt<bool>
     UseValgrind("enable-valgrind",
@@ -138,6 +139,13 @@ int main(int argc, char **argv) {
   polly::initializePollyPasses(Registry);
 #endif
 
+  if (std::getenv("bar") == (char*) -1) {
+    InitializeAllTargets();
+    InitializeAllTargetMCs();
+    InitializeAllAsmPrinters();
+    InitializeAllAsmParsers();
+  }
+
   cl::ParseCommandLineOptions(argc, argv,
                               "LLVM automatic testcase reducer. See\nhttp://"
                               "llvm.org/cmds/bugpoint.html"
@@ -161,6 +169,12 @@ int main(int argc, char **argv) {
       MemoryLimit = 800;
     else
       MemoryLimit = 400;
+#if (LLVM_ADDRESS_SANITIZER_BUILD || LLVM_MEMORY_SANITIZER_BUILD ||            \
+     LLVM_THREAD_SANITIZER_BUILD)
+    // Starting from kernel 4.9 memory allocated with mmap is counted against
+    // RLIMIT_DATA. Sanitizers need to allocate tens of terabytes for shadow.
+    MemoryLimit = 0;
+#endif
   }
 
   BugDriver D(argv[0], FindBugs, TimeoutValue, MemoryLimit, UseValgrind,
@@ -181,7 +195,8 @@ int main(int argc, char **argv) {
     if (OptLevelO1)
       Builder.Inliner = createAlwaysInlinerLegacyPass();
     else if (OptLevelOs || OptLevelO2)
-      Builder.Inliner = createFunctionInliningPass(2, OptLevelOs ? 1 : 0);
+      Builder.Inliner = createFunctionInliningPass(
+          2, OptLevelOs ? 1 : 0, false);
     else
       Builder.Inliner = createFunctionInliningPass(275);
     Builder.populateFunctionPassManager(PM);

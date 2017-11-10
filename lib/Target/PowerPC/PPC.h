@@ -15,6 +15,7 @@
 #ifndef LLVM_LIB_TARGET_POWERPC_PPC_H
 #define LLVM_LIB_TARGET_POWERPC_PPC_H
 
+#include "llvm/Support/CodeGen.h"
 #include "MCTargetDesc/PPCMCTargetDesc.h"
 
 // GCC #defines PPC on Linux but we use it as our namespace name
@@ -24,12 +25,13 @@ namespace llvm {
   class PPCTargetMachine;
   class PassRegistry;
   class FunctionPass;
-  class ImmutablePass;
   class MachineInstr;
+  class MachineOperand;
   class AsmPrinter;
   class MCInst;
+  class MCOperand;
 
-  FunctionPass *createPPCCTRLoops(PPCTargetMachine &TM);
+  FunctionPass *createPPCCTRLoops();
 #ifndef NDEBUG
   FunctionPass *createPPCCTRLoopsVerify();
 #endif
@@ -41,17 +43,22 @@ namespace llvm {
   FunctionPass *createPPCVSXSwapRemovalPass();
   FunctionPass *createPPCMIPeepholePass();
   FunctionPass *createPPCBranchSelectionPass();
+  FunctionPass *createPPCBranchCoalescingPass();
   FunctionPass *createPPCQPXLoadSplatPass();
-  FunctionPass *createPPCISelDag(PPCTargetMachine &TM);
+  FunctionPass *createPPCISelDag(PPCTargetMachine &TM, CodeGenOpt::Level OL);
   FunctionPass *createPPCTLSDynamicCallPass();
   FunctionPass *createPPCBoolRetToIntPass();
   FunctionPass *createPPCExpandISELPass();
   void LowerPPCMachineInstrToMCInst(const MachineInstr *MI, MCInst &OutMI,
                                     AsmPrinter &AP, bool isDarwin);
+  bool LowerPPCMachineOperandToMCOperand(const MachineOperand &MO,
+                                         MCOperand &OutMO, AsmPrinter &AP,
+                                         bool isDarwin);
 
   void initializePPCVSXFMAMutatePass(PassRegistry&);
   void initializePPCBoolRetToIntPass(PassRegistry&);
   void initializePPCExpandISELPass(PassRegistry &);
+  void initializePPCTLSDynamicCallPass(PassRegistry &);
   extern char &PPCVSXFMAMutateID;
 
   namespace PPCII {

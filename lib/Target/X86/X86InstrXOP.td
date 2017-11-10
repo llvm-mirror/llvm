@@ -111,14 +111,14 @@ multiclass xop3op<bits<8> opc, string OpcodeStr, SDNode OpNode,
                (ins VR128:$src1, VR128:$src2),
                !strconcat(OpcodeStr, "\t{$src2, $src1, $dst|$dst, $src1, $src2}"),
                []>,
-               XOP_4V, VEX_W, Sched<[WriteVarVecShift]>;
+               XOP_4V, VEX_W, Sched<[WriteVarVecShift]>, FoldGenData<NAME#rr>;
 }
 
 let ExeDomain = SSEPackedInt in {
-  defm VPROTB : xop3op<0x90, "vprotb", X86vprot, v16i8>;
-  defm VPROTD : xop3op<0x92, "vprotd", X86vprot, v4i32>;
-  defm VPROTQ : xop3op<0x93, "vprotq", X86vprot, v2i64>;
-  defm VPROTW : xop3op<0x91, "vprotw", X86vprot, v8i16>;
+  defm VPROTB : xop3op<0x90, "vprotb", rotl, v16i8>;
+  defm VPROTD : xop3op<0x92, "vprotd", rotl, v4i32>;
+  defm VPROTQ : xop3op<0x93, "vprotq", rotl, v2i64>;
+  defm VPROTW : xop3op<0x91, "vprotw", rotl, v8i16>;
   defm VPSHAB : xop3op<0x98, "vpshab", X86vpsha, v16i8>;
   defm VPSHAD : xop3op<0x9A, "vpshad", X86vpsha, v4i32>;
   defm VPSHAQ : xop3op<0x9B, "vpshaq", X86vpsha, v2i64>;
@@ -144,10 +144,10 @@ multiclass xop3opimm<bits<8> opc, string OpcodeStr, SDNode OpNode,
 }
 
 let ExeDomain = SSEPackedInt in {
-  defm VPROTB : xop3opimm<0xC0, "vprotb", X86vproti, v16i8>;
-  defm VPROTD : xop3opimm<0xC2, "vprotd", X86vproti, v4i32>;
-  defm VPROTQ : xop3opimm<0xC3, "vprotq", X86vproti, v2i64>;
-  defm VPROTW : xop3opimm<0xC1, "vprotw", X86vproti, v8i16>;
+  defm VPROTB : xop3opimm<0xC0, "vprotb", X86vrotli, v16i8>;
+  defm VPROTD : xop3opimm<0xC2, "vprotd", X86vrotli, v4i32>;
+  defm VPROTQ : xop3opimm<0xC3, "vprotq", X86vrotli, v2i64>;
+  defm VPROTW : xop3opimm<0xC1, "vprotw", X86vrotli, v8i16>;
 }
 
 // Instruction where second source can be memory, but third must be register
@@ -213,7 +213,7 @@ multiclass xopvpcom<bits<8> opc, string Suffix, SDNode OpNode, ValueType vt128> 
            "\t{$src2, $src1, $dst|$dst, $src1, $src2}"),
            [(set VR128:$dst,
               (vt128 (OpNode (vt128 VR128:$src1), (vt128 VR128:$src2),
-                             i8immZExt3:$cc)))]>,
+                             imm:$cc)))]>,
            XOP_4V;
   def mi : IXOPi8<opc, MRMSrcMem, (outs VR128:$dst),
            (ins VR128:$src1, i128mem:$src2, XOPCC:$cc),
@@ -222,7 +222,7 @@ multiclass xopvpcom<bits<8> opc, string Suffix, SDNode OpNode, ValueType vt128> 
            [(set VR128:$dst,
               (vt128 (OpNode (vt128 VR128:$src1),
                              (vt128 (bitconvert (loadv2i64 addr:$src2))),
-                              i8immZExt3:$cc)))]>,
+                              imm:$cc)))]>,
            XOP_4V;
   let isAsmParserOnly = 1, hasSideEffects = 0 in {
     def ri_alt : IXOPi8<opc, MRMSrcReg, (outs VR128:$dst),
@@ -282,7 +282,7 @@ multiclass xop4op<bits<8> opc, string OpcodeStr, SDNode OpNode,
                 (ins VR128:$src1, VR128:$src2, VR128:$src3),
                 !strconcat(OpcodeStr,
                 "\t{$src3, $src2, $src1, $dst|$dst, $src1, $src2, $src3}"),
-                []>, XOP_4V, VEX_W;
+                []>, XOP_4V, VEX_W, FoldGenData<NAME#rrr>;
 }
 
 let ExeDomain = SSEPackedInt in {
@@ -318,7 +318,7 @@ multiclass xop4op_int<bits<8> opc, string OpcodeStr, RegisterClass RC,
             (ins RC:$src1, RC:$src2, RC:$src3),
             !strconcat(OpcodeStr,
             "\t{$src3, $src2, $src1, $dst|$dst, $src1, $src2, $src3}"),
-            []>, XOP_4V, VEX_W;
+            []>, XOP_4V, VEX_W, FoldGenData<NAME#rrr>;
 }
 
 let ExeDomain = SSEPackedInt in {
@@ -357,7 +357,7 @@ multiclass xop_vpermil2<bits<8> Opc, string OpcodeStr, RegisterClass RC,
         (ins RC:$src1, RC:$src2, RC:$src3, u8imm:$src4),
         !strconcat(OpcodeStr,
         "\t{$src4, $src3, $src2, $src1, $dst|$dst, $src1, $src2, $src3, $src4}"),
-        []>, VEX_W;
+        []>, VEX_W, FoldGenData<NAME#rr>;
 }
 
 let ExeDomain = SSEPackedDouble in {

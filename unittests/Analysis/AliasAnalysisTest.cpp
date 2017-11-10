@@ -180,10 +180,11 @@ TEST_F(AliasAnalysisTest, getModRefInfo) {
   auto *VAArg1 = new VAArgInst(Addr, PtrType, "vaarg", BB);
   auto *CmpXChg1 = new AtomicCmpXchgInst(
       Addr, ConstantInt::get(IntType, 0), ConstantInt::get(IntType, 1),
-      AtomicOrdering::Monotonic, AtomicOrdering::Monotonic, CrossThread, BB);
+      AtomicOrdering::Monotonic, AtomicOrdering::Monotonic,
+      SyncScope::System, BB);
   auto *AtomicRMW =
       new AtomicRMWInst(AtomicRMWInst::Xchg, Addr, ConstantInt::get(IntType, 1),
-                        AtomicOrdering::Monotonic, CrossThread, BB);
+                        AtomicOrdering::Monotonic, SyncScope::System, BB);
 
   ReturnInst::Create(C, nullptr, BB);
 
@@ -191,17 +192,17 @@ TEST_F(AliasAnalysisTest, getModRefInfo) {
 
   // Check basic results
   EXPECT_EQ(AA.getModRefInfo(Store1, MemoryLocation()), MRI_Mod);
-  EXPECT_EQ(AA.getModRefInfo(Store1), MRI_Mod);
+  EXPECT_EQ(AA.getModRefInfo(Store1, None), MRI_Mod);
   EXPECT_EQ(AA.getModRefInfo(Load1, MemoryLocation()), MRI_Ref);
-  EXPECT_EQ(AA.getModRefInfo(Load1), MRI_Ref);
+  EXPECT_EQ(AA.getModRefInfo(Load1, None), MRI_Ref);
   EXPECT_EQ(AA.getModRefInfo(Add1, MemoryLocation()), MRI_NoModRef);
-  EXPECT_EQ(AA.getModRefInfo(Add1), MRI_NoModRef);
+  EXPECT_EQ(AA.getModRefInfo(Add1, None), MRI_NoModRef);
   EXPECT_EQ(AA.getModRefInfo(VAArg1, MemoryLocation()), MRI_ModRef);
-  EXPECT_EQ(AA.getModRefInfo(VAArg1), MRI_ModRef);
+  EXPECT_EQ(AA.getModRefInfo(VAArg1, None), MRI_ModRef);
   EXPECT_EQ(AA.getModRefInfo(CmpXChg1, MemoryLocation()), MRI_ModRef);
-  EXPECT_EQ(AA.getModRefInfo(CmpXChg1), MRI_ModRef);
+  EXPECT_EQ(AA.getModRefInfo(CmpXChg1, None), MRI_ModRef);
   EXPECT_EQ(AA.getModRefInfo(AtomicRMW, MemoryLocation()), MRI_ModRef);
-  EXPECT_EQ(AA.getModRefInfo(AtomicRMW), MRI_ModRef);
+  EXPECT_EQ(AA.getModRefInfo(AtomicRMW, None), MRI_ModRef);
 }
 
 class AAPassInfraTest : public testing::Test {

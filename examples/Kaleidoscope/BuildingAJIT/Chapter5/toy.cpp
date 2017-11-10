@@ -1177,7 +1177,7 @@ static void HandleTopLevelExpression() {
 
       // Get the symbol's address and cast it to the right type (takes no
       // arguments, returns a double) so we can call it as a native function.
-      ExitOnErr(TheJIT->executeRemoteExpr(ExprSymbol.getAddress()));
+      ExitOnErr(TheJIT->executeRemoteExpr(cantFail(ExprSymbol.getAddress())));
 
       // Delete the anonymous expression module from the JIT.
       TheJIT->removeModule(H);
@@ -1277,7 +1277,7 @@ int main(int argc, char *argv[]) {
   BinopPrecedence['*'] = 40; // highest.
 
   auto TCPChannel = connect();
-  auto Remote = ExitOnErr(MyRemote::Create(*TCPChannel));
+  auto Remote = ExitOnErr(MyRemote::Create(*TCPChannel, ExitOnErr));
   TheJIT = llvm::make_unique<KaleidoscopeJIT>(*Remote);
 
   // Automatically inject a definition for 'printExprResult'.

@@ -13,7 +13,7 @@
 @------------------------------------------------------------------------------
         blx _baz
 
-@ CHECK: error: instruction requires: !armv*m
+@ CHECK: instruction requires: !armv*m
 
 @------------------------------------------------------------------------------
 @ SETEND
@@ -22,5 +22,5 @@
         setend be
         setend le
 
-@ CHECK: error: invalid operand for instruction
-@ CHECK: error: invalid operand for instruction
+@ CHECK: error: invalid instruction
+@ CHECK: error: invalid instruction

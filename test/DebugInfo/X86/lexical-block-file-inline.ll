@@ -1,4 +1,4 @@
-; RUN: llc -mtriple=x86_64-unknown-linux-gnu -filetype=obj -O0 < %s  | llvm-dwarfdump -debug-dump=info - | FileCheck %s
+; RUN: llc -mtriple=x86_64-unknown-linux-gnu -filetype=obj -O0 < %s  | llvm-dwarfdump -v -debug-info - | FileCheck %s
 
 ;; This test checks that Inlined DILexicalBlockFile with local decl entry
 ;; is skipped and only one DW_TAG_lexical_block is generated.
@@ -134,10 +134,10 @@ attributes #2 = { nounwind }
 !8 = distinct !DISubprogram(name: "foo", linkageName: "_Z3foov", scope: !9, file: !9, line: 6, type: !5, isLocal: false, isDefinition: true, scopeLine: 6, flags: DIFlagPrototyped, isOptimized: false, unit: !0, variables: !2)
 !9 = !DIFile(filename: "test.h", directory: "/")
 !10 = !{!11}
-!11 = !DIImportedEntity(tag: DW_TAG_imported_module, scope: !12, entity: !14, line: 1)
+!11 = !DIImportedEntity(tag: DW_TAG_imported_module, scope: !12, entity: !14, file: !1, line: 1)
 !12 = !DILexicalBlockFile(scope: !13, file: !9, discriminator: 0)
 !13 = distinct !DILexicalBlock(scope: !4, file: !1, line: 3)
-!14 = !DINamespace(name: "N", scope: null, file: !1, line: 1)
+!14 = !DINamespace(name: "N", scope: null)
 !15 = !{i32 2, !"Dwarf Version", i32 4}
 !16 = !{i32 2, !"Debug Info Version", i32 3}
 !17 = !{!"clang version 3.9.0 (trunk 264349)"}

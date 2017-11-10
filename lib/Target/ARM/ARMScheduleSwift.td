@@ -168,10 +168,10 @@ let SchedModel = SwiftModel in {
   def : InstRW<[SwiftWriteP01OneCycle2x_load],
         (instregex "MOV_ga_pcrel_ldr", "t2MOV_ga_pcrel_ldr")>;
 
-  def SwiftWriteP0TwoCyleTwoUops : WriteSequence<[SwiftWriteP0OneCycle], 2>;
+  def SwiftWriteP0TwoCycleTwoUops : WriteSequence<[SwiftWriteP0OneCycle], 2>;
 
   def SwiftPredP0OneOrTwoCycle : SchedWriteVariant<[
-    SchedVar<IsPredicatedPred, [ SwiftWriteP0TwoCyleTwoUops ]>,
+    SchedVar<IsPredicatedPred, [ SwiftWriteP0TwoCycleTwoUops ]>,
     SchedVar<NoSchedPred,     [ SwiftWriteP0OneCycle ]>
   ]>;
 
@@ -324,7 +324,7 @@ let SchedModel = SwiftModel in {
     let Latency = 3;
     let NumMicroOps = 2;
   }
-  def SwiftWriteP2P01FourCyle : SchedWriteRes<[SwiftUnitP2, SwiftUnitP01]> {
+  def SwiftWriteP2P01FourCycle : SchedWriteRes<[SwiftUnitP2, SwiftUnitP01]> {
     let Latency = 4;
     let NumMicroOps = 2;
   }
@@ -357,7 +357,7 @@ let SchedModel = SwiftModel in {
         "tLDR(r|i|spi|pci|pciASM)")>;
   def : InstRW<[SwiftWriteP2ThreeCycle],
         (instregex "LDRH$",  "PICLDR$", "PICLDR(H|B)$", "LDRcp$")>;
-  def : InstRW<[SwiftWriteP2P01FourCyle],
+  def : InstRW<[SwiftWriteP2P01FourCycle],
         (instregex "PICLDRS(H|B)$", "t2LDRS(H|B)(i|r|p|s)", "LDRS(H|B)$",
         "t2LDRpci_pic", "tLDRS(B|H)")>;
   def : InstRW<[SwiftWriteP2P01ThreeCycle,  SwiftWrBackOne],
@@ -1069,6 +1069,16 @@ let SchedModel = SwiftModel in {
 
   def : ReadAdvance<ReadFPMUL, 0>;
   def : ReadAdvance<ReadFPMAC, 0>;
+
+  // Overriden via InstRW for this processor.
+  def : WriteRes<WriteVLD1, []>;
+  def : WriteRes<WriteVLD2, []>;
+  def : WriteRes<WriteVLD3, []>;
+  def : WriteRes<WriteVLD4, []>;
+  def : WriteRes<WriteVST1, []>;
+  def : WriteRes<WriteVST2, []>;
+  def : WriteRes<WriteVST3, []>;
+  def : WriteRes<WriteVST4, []>;
 
   // Not specified.
   def : InstRW<[SwiftWriteP01OneCycle2x], (instregex "ABS")>;

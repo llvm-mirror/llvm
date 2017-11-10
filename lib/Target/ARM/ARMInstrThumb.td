@@ -19,7 +19,7 @@ def imm_sr_XFORM: SDNodeXForm<imm, [{
   unsigned Imm = N->getZExtValue();
   return CurDAG->getTargetConstant((Imm == 32 ? 0 : Imm), SDLoc(N), MVT::i32);
 }]>;
-def ThumbSRImmAsmOperand: AsmOperandClass { let Name = "ImmThumbSR"; }
+def ThumbSRImmAsmOperand: ImmAsmOperand<1,32> { let Name = "ImmThumbSR"; }
 def imm_sr : Operand<i32>, PatLeaf<(imm), [{
   uint64_t Imm = N->getZExtValue();
   return Imm > 0 && Imm <= 32;
@@ -32,13 +32,27 @@ def imm0_7_neg : PatLeaf<(i32 imm), [{
   return (uint32_t)-N->getZExtValue() < 8;
 }], imm_neg_XFORM>;
 
+def ThumbModImmNeg1_7AsmOperand : AsmOperandClass { let Name = "ThumbModImmNeg1_7"; }
+def mod_imm1_7_neg : Operand<i32>, PatLeaf<(imm), [{
+    unsigned Value = -(unsigned)N->getZExtValue();
+    return 0 < Value && Value < 8;
+  }], imm_neg_XFORM> {
+  let ParserMatchClass = ThumbModImmNeg1_7AsmOperand;
+}
+
+def ThumbModImmNeg8_255AsmOperand : AsmOperandClass { let Name = "ThumbModImmNeg8_255"; }
+def mod_imm8_255_neg : Operand<i32>, PatLeaf<(imm), [{
+    unsigned Value = -(unsigned)N->getZExtValue();
+    return 7 < Value && Value < 256;
+  }], imm_neg_XFORM> {
+  let ParserMatchClass = ThumbModImmNeg8_255AsmOperand;
+}
+
+
 def imm0_255_comp : PatLeaf<(i32 imm), [{
   return ~((uint32_t)N->getZExtValue()) < 256;
 }]>;
 
-def imm8_255 : ImmLeaf<i32, [{
-  return Imm >= 8 && Imm < 256;
-}]>;
 def imm8_255_neg : PatLeaf<(i32 imm), [{
   unsigned Val = -N->getZExtValue();
   return Val >= 8 && Val < 256;
@@ -270,8 +284,8 @@ def tADJCALLSTACKUP :
             Requires<[IsThumb, IsThumb1Only]>;
 
 def tADJCALLSTACKDOWN :
-  PseudoInst<(outs), (ins i32imm:$amt), NoItinerary,
-             [(ARMcallseq_start imm:$amt)]>,
+  PseudoInst<(outs), (ins i32imm:$amt, i32imm:$amt2), NoItinerary,
+             [(ARMcallseq_start imm:$amt, imm:$amt2)]>,
             Requires<[IsThumb, IsThumb1Only]>;
 }
 
@@ -324,7 +338,7 @@ def tHLT : T1I<(outs), (ins imm0_63:$val), NoItinerary, "hlt\t$val",
 }
 
 def tSETEND : T1I<(outs), (ins setend_op:$end), NoItinerary, "setend\t$end",
-                  []>, T1Encoding<0b101101>, Requires<[IsNotMClass]>, Deprecated<HasV8Ops> {
+                  []>, T1Encoding<0b101101>, Requires<[IsThumb, IsNotMClass]>, Deprecated<HasV8Ops> {
   bits<1> end;
   // A8.6.156
   let Inst{9-5} = 0b10010;
@@ -402,9 +416,9 @@ def tSUBspi : T1pIt<(outs GPRsp:$Rdn), (ins GPRsp:$Rn, t_imm0_508s4:$imm),
   let DecoderMethod = "DecodeThumbAddSPImm";
 }
 
-def : tInstAlias<"add${p} sp, $imm",
+def : tInstSubst<"add${p} sp, $imm",
                  (tSUBspi SP, t_imm0_508s4_neg:$imm, pred:$p)>;
-def : tInstAlias<"add${p} sp, sp, $imm",
+def : tInstSubst<"add${p} sp, sp, $imm",
                  (tSUBspi SP, t_imm0_508s4_neg:$imm, pred:$p)>;
 
 // Can optionally specify SP as a three operand instruction.
@@ -939,7 +953,7 @@ let isAdd = 1 in {
   /// These opcodes will be converted to the real non-S opcodes by
   /// AdjustInstrPostInstrSelection after giving then an optional CPSR operand.
   let hasPostISelHook = 1, Defs = [CPSR] in {
-    let isCommutable = 1 in
+    let isCommutable = 1, Uses = [CPSR] in
     def tADCS : tPseudoInst<(outs tGPR:$Rdn), (ins tGPR:$Rn, tGPR:$Rm),
                             2, IIC_iALUr,
                             [(set tGPR:$Rdn, CPSR, (ARMadde tGPR:$Rn, tGPR:$Rm,
@@ -982,6 +996,15 @@ let isAdd = 1 in {
     let Inst{2-0} = Rdn{2-0};
   }
 }
+
+def : tInstAlias <"add${s}${p} $Rdn, $Rm",
+                 (tADDrr tGPR:$Rdn,s_cc_out:$s, tGPR:$Rdn, tGPR:$Rm, pred:$p)>;
+
+def : tInstSubst<"sub${s}${p} $rd, $rn, $imm",
+                 (tADDi3 tGPR:$rd, s_cc_out:$s, tGPR:$rn, mod_imm1_7_neg:$imm, pred:$p)>;
+def : tInstSubst<"sub${s}${p} $rdn, $imm",
+                 (tADDi8 tGPR:$rdn, s_cc_out:$s, mod_imm8_255_neg:$imm, pred:$p)>;
+
 
 // AND register
 let isCommutable = 1 in
@@ -1250,6 +1273,14 @@ def tSUBi8 :                    // A8.6.210 T2
                     [(set tGPR:$Rdn, (add tGPR:$Rn, imm8_255_neg:$imm8))]>,
                     Sched<[WriteALU]>;
 
+def : tInstSubst<"add${s}${p} $rd, $rn, $imm",
+                 (tSUBi3 tGPR:$rd, s_cc_out:$s, tGPR:$rn, mod_imm1_7_neg:$imm, pred:$p)>;
+
+
+def : tInstSubst<"add${s}${p} $rdn, $imm",
+                 (tSUBi8 tGPR:$rdn, s_cc_out:$s, mod_imm8_255_neg:$imm, pred:$p)>;
+
+
 // Subtract register
 def tSUBrr :                    // A8.6.212
   T1sIGenEncode<0b01101, (outs tGPR:$Rd), (ins tGPR:$Rn, tGPR:$Rm),
@@ -1258,12 +1289,16 @@ def tSUBrr :                    // A8.6.212
                 [(set tGPR:$Rd, (sub tGPR:$Rn, tGPR:$Rm))]>,
                 Sched<[WriteALU]>;
 
+def : tInstAlias <"sub${s}${p} $Rdn, $Rm",
+                 (tSUBrr tGPR:$Rdn,s_cc_out:$s, tGPR:$Rdn, tGPR:$Rm, pred:$p)>;
+
 /// Similar to the above except these set the 's' bit so the
 /// instruction modifies the CPSR register.
 ///
 /// These opcodes will be converted to the real non-S opcodes by
 /// AdjustInstrPostInstrSelection after giving then an optional CPSR operand.
 let hasPostISelHook = 1, Defs = [CPSR] in {
+  let Uses = [CPSR] in
   def tSBCS : tPseudoInst<(outs tGPR:$Rdn), (ins tGPR:$Rn, tGPR:$Rm),
                           2, IIC_iALUr,
                           [(set tGPR:$Rdn, CPSR, (ARMsube tGPR:$Rn, tGPR:$Rm,
@@ -1384,14 +1419,15 @@ def tLEApcrelJT : tPseudoInst<(outs tGPR:$Rd),
 
 // Thumb-1 doesn't have the TBB or TBH instructions, but we can synthesize them
 // and make use of the same compressed jump table format as Thumb-2.
-let Size = 2 in {
+let Size = 2, isBranch = 1, isTerminator = 1, isBarrier = 1,
+    isIndirectBranch = 1 in {
 def tTBB_JT : tPseudoInst<(outs),
-        (ins tGPR:$base, tGPR:$index, i32imm:$jt, i32imm:$pclbl), 0, IIC_Br, []>,
-        Sched<[WriteBr]>;
+        (ins tGPRwithpc:$base, tGPR:$index, i32imm:$jt, i32imm:$pclbl), 0,
+         IIC_Br, []>, Sched<[WriteBr]>;
 
 def tTBH_JT : tPseudoInst<(outs),
-        (ins tGPR:$base, tGPR:$index, i32imm:$jt, i32imm:$pclbl), 0, IIC_Br, []>,
-        Sched<[WriteBr]>;
+        (ins tGPRwithpc:$base, tGPR:$index, i32imm:$jt, i32imm:$pclbl), 0,
+         IIC_Br, []>,  Sched<[WriteBr]>;
 }
 
 //===----------------------------------------------------------------------===//
@@ -1634,13 +1670,6 @@ let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1 in {
 // encoding is available on ARMv6K, but we don't differentiate that finely.
 def : InstAlias<"nop", (tMOVr R8, R8, 14, 0), 0>, Requires<[IsThumb, IsThumb1Only]>;
 
-
-// For round-trip assembly/disassembly, we have to handle a CPS instruction
-// without any iflags. That's not, strictly speaking, valid syntax, but it's
-// a useful extension and assembles to defined behaviour (the insn does
-// nothing).
-def : tInstAlias<"cps$imod", (tCPS imod_op:$imod, 0)>;
-def : tInstAlias<"cps$imod", (tCPS imod_op:$imod, 0)>;
 
 // "neg" is and alias for "rsb rd, rn, #0"
 def : tInstAlias<"neg${s}${p} $Rd, $Rm",

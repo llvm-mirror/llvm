@@ -1,4 +1,4 @@
-//===-- HexagonBaseInfo.h - Top level definitions for Hexagon --*- C++ -*--===//
+//===- HexagonBaseInfo.h - Top level definitions for Hexagon ----*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -18,18 +18,15 @@
 #define LLVM_LIB_TARGET_HEXAGON_MCTARGETDESC_HEXAGONBASEINFO_H
 
 #include "HexagonDepITypes.h"
-#include "HexagonMCTargetDesc.h"
-#include "llvm/Support/ErrorHandling.h"
-#include <stdint.h>
+#include "MCTargetDesc/HexagonMCTargetDesc.h"
 
 namespace llvm {
 
 /// HexagonII - This namespace holds all of the target specific flags that
 /// instruction info tracks.
-///
 namespace HexagonII {
   unsigned const TypeCVI_FIRST = TypeCVI_HIST;
-  unsigned const TypeCVI_LAST = TypeCVI_VX_DV;
+  unsigned const TypeCVI_LAST = TypeCVI_VX_LATE;
 
   enum SubTarget {
     HasV4SubT     = 0x3f,
@@ -48,16 +45,13 @@ namespace HexagonII {
     PostInc        = 6   // Post increment addressing mode
   };
 
-  // MemAccessSize is represented as 1+log2(N) where N is size in bits.
-  enum class MemAccessSize {
-    NoMemAccess = 0,            // Not a memory access instruction.
-    ByteAccess = 1,             // Byte access instruction (memb).
-    HalfWordAccess = 2,         // Half word access instruction (memh).
-    WordAccess = 3,             // Word access instruction (memw).
-    DoubleWordAccess = 4,       // Double word access instruction (memd)
-                    // 5,       // We do not have a 16 byte vector access.
-    Vector64Access = 7,         // 64 Byte vector access instruction (vmem).
-    Vector128Access = 8         // 128 Byte vector access instruction (vmem).
+  enum MemAccessSize {
+    NoMemAccess = 0,
+    ByteAccess,
+    HalfWordAccess,
+    WordAccess,
+    DoubleWordAccess,
+    HVXVectorAccess
   };
 
   // MCInstrDesc TSFlags
@@ -128,10 +122,6 @@ namespace HexagonII {
     ExtentAlignPos  = 33,
     ExtentAlignMask = 0x3,
 
-    // Valid subtargets
-    validSubTargetPos  = 35,
-    validSubTargetMask = 0x3f,
-
     // Addressing mode for load/store instructions.
     AddrModePos  = 41,
     AddrModeMask = 0x7,
@@ -163,15 +153,21 @@ namespace HexagonII {
     PrefersSlot3Mask = 0x1,
 
     CofMax1Pos = 60,
-    CofMax1Mask = 0x1
+    CofMax1Mask = 0x1,
+
+    CVINewPos = 61,
+    CVINewMask = 0x1
   };
 
   // *** The code above must match HexagonInstrFormat*.td *** //
 
   // Hexagon specific MO operand flag mask.
   enum HexagonMOTargetFlagVal {
-    //===------------------------------------------------------------------===//
-    // Hexagon Specific MachineOperand flags.
+    // Hexagon-specific MachineOperand target flags.
+    //
+    // When chaning these, make sure to update
+    // getSerializableDirectMachineOperandTargetFlags and
+    // getSerializableBitmaskMachineOperandTargetFlags if needed.
     MO_NO_FLAG,
 
     /// MO_PCREL - On a symbol operand, indicates a PC-relative relocation
@@ -208,10 +204,12 @@ namespace HexagonII {
     MO_TPREL,
 
     // HMOTF_ConstExtended
-    // Addendum to abovem, indicates a const extended op
+    // Addendum to above, indicates a const extended op
     // Can be used as a mask.
-    HMOTF_ConstExtended = 0x80
+    HMOTF_ConstExtended = 0x80,
 
+    // Union of all bitmasks (currently only HMOTF_ConstExtended).
+    MO_Bitmasks = HMOTF_ConstExtended
   };
 
   // Hexagon Sub-instruction classes.
@@ -262,8 +260,18 @@ namespace HexagonII {
     INST_ICLASS_ALU32_3   = 0xf0000000
   };
 
-} // End namespace HexagonII.
+  LLVM_ATTRIBUTE_UNUSED
+  static unsigned getMemAccessSizeInBytes(MemAccessSize S) {
+    switch (S) {
+      case ByteAccess:        return 1;
+      case HalfWordAccess:    return 2;
+      case WordAccess:        return 4;
+      case DoubleWordAccess:  return 8;
+      default:                return 0;
+    }
+  }
+} // end namespace HexagonII
 
-} // End namespace llvm.
+} // end namespace llvm
 
-#endif
+#endif // LLVM_LIB_TARGET_HEXAGON_MCTARGETDESC_HEXAGONBASEINFO_H

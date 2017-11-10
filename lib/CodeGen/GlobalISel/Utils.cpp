@@ -18,12 +18,30 @@
 #include "llvm/CodeGen/MachineOptimizationRemarkEmitter.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 
 #define DEBUG_TYPE "globalisel-utils"
 
 using namespace llvm;
+
+unsigned llvm::constrainRegToClass(MachineRegisterInfo &MRI,
+                                   const TargetInstrInfo &TII,
+                                   const RegisterBankInfo &RBI,
+                                   MachineInstr &InsertPt, unsigned Reg,
+                                   const TargetRegisterClass &RegClass) {
+  if (!RBI.constrainGenericRegister(Reg, RegClass, MRI)) {
+    unsigned NewReg = MRI.createVirtualRegister(&RegClass);
+    BuildMI(*InsertPt.getParent(), InsertPt, InsertPt.getDebugLoc(),
+            TII.get(TargetOpcode::COPY), NewReg)
+        .addReg(Reg);
+    return NewReg;
+  }
+
+  return Reg;
+}
+
 
 unsigned llvm::constrainOperandRegClass(
     const MachineFunction &MF, const TargetRegisterInfo &TRI,
@@ -35,16 +53,28 @@ unsigned llvm::constrainOperandRegClass(
          "PhysReg not implemented");
 
   const TargetRegisterClass *RegClass = TII.getRegClass(II, OpIdx, &TRI, MF);
+  return constrainRegToClass(MRI, TII, RBI, InsertPt, Reg, *RegClass);
+}
 
-  if (!RBI.constrainGenericRegister(Reg, *RegClass, MRI)) {
-    unsigned NewReg = MRI.createVirtualRegister(RegClass);
-    BuildMI(*InsertPt.getParent(), InsertPt, InsertPt.getDebugLoc(),
-            TII.get(TargetOpcode::COPY), NewReg)
-        .addReg(Reg);
-    return NewReg;
+bool llvm::isTriviallyDead(const MachineInstr &MI,
+                           const MachineRegisterInfo &MRI) {
+  // If we can move an instruction, we can remove it.  Otherwise, it has
+  // a side-effect of some sort.
+  bool SawStore = false;
+  if (!MI.isSafeToMove(/*AA=*/nullptr, SawStore))
+    return false;
+
+  // Instructions without side-effects are dead iff they only define dead vregs.
+  for (auto &MO : MI.operands()) {
+    if (!MO.isReg() || !MO.isDef())
+      continue;
+
+    unsigned Reg = MO.getReg();
+    if (TargetRegisterInfo::isPhysicalRegister(Reg) ||
+        !MRI.use_nodbg_empty(Reg))
+      return false;
   }
-
-  return Reg;
+  return true;
 }
 
 void llvm::reportGISelFailure(MachineFunction &MF, const TargetPassConfig &TPC,
@@ -69,6 +99,33 @@ void llvm::reportGISelFailure(MachineFunction &MF, const TargetPassConfig &TPC,
                               const MachineInstr &MI) {
   MachineOptimizationRemarkMissed R(PassName, "GISelFailure: ",
                                     MI.getDebugLoc(), MI.getParent());
-  R << Msg << ": " << ore::MNV("Inst", MI);
+  R << Msg;
+  // Printing MI is expensive;  only do it if expensive remarks are enabled.
+  if (MORE.allowExtraAnalysis(PassName))
+    R << ": " << ore::MNV("Inst", MI);
   reportGISelFailure(MF, TPC, MORE, R);
+}
+
+Optional<int64_t> llvm::getConstantVRegVal(unsigned VReg,
+                                           const MachineRegisterInfo &MRI) {
+  MachineInstr *MI = MRI.getVRegDef(VReg);
+  if (MI->getOpcode() != TargetOpcode::G_CONSTANT)
+    return None;
+
+  if (MI->getOperand(1).isImm())
+    return MI->getOperand(1).getImm();
+
+  if (MI->getOperand(1).isCImm() &&
+      MI->getOperand(1).getCImm()->getBitWidth() <= 64)
+    return MI->getOperand(1).getCImm()->getSExtValue();
+
+  return None;
+}
+
+const llvm::ConstantFP* llvm::getConstantFPVRegVal(unsigned VReg,
+                                       const MachineRegisterInfo &MRI) {
+  MachineInstr *MI = MRI.getVRegDef(VReg);
+  if (TargetOpcode::G_FCONSTANT != MI->getOpcode())
+    return nullptr;
+  return MI->getOperand(1).getFPImm();
 }

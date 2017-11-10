@@ -21,11 +21,12 @@ class LitConfig(object):
 
     def __init__(self, progname, path, quiet,
                  useValgrind, valgrindLeakCheck, valgrindArgs,
-                 noExecute, debug, isWindows,
+                 noExecute, debug, isWindows, singleProcess,
                  params, config_prefix = None,
                  maxIndividualTestTime = 0,
                  maxFailures = None,
-                 parallelism_groups = []):
+                 parallelism_groups = {},
+                 echo_all_commands = False):
         # The name of the test runner.
         self.progname = progname
         # The items to add to the PATH environment variable.
@@ -36,15 +37,17 @@ class LitConfig(object):
         self.valgrindUserArgs = list(valgrindArgs)
         self.noExecute = noExecute
         self.debug = debug
+        self.singleProcess = singleProcess
         self.isWindows = bool(isWindows)
         self.params = dict(params)
         self.bashPath = None
 
         # Configuration files to look for when discovering test suites.
         self.config_prefix = config_prefix or 'lit'
-        self.config_name = '%s.cfg' % (self.config_prefix,)
-        self.site_config_name = '%s.site.cfg' % (self.config_prefix,)
-        self.local_config_name = '%s.local.cfg' % (self.config_prefix,)
+        self.suffixes = ['cfg.py', 'cfg']
+        self.config_names = ['%s.%s' % (self.config_prefix,x) for x in self.suffixes]
+        self.site_config_names = ['%s.site.%s' % (self.config_prefix,x) for x in self.suffixes]
+        self.local_config_names = ['%s.local.%s' % (self.config_prefix,x) for x in self.suffixes]
 
         self.numErrors = 0
         self.numWarnings = 0
@@ -64,6 +67,7 @@ class LitConfig(object):
         self.maxIndividualTestTime = maxIndividualTestTime
         self.maxFailures = maxFailures
         self.parallelism_groups = parallelism_groups
+        self.echo_all_commands = echo_all_commands
 
     @property
     def maxIndividualTestTime(self):

@@ -15,6 +15,7 @@
 #ifndef LLVM_LIB_TARGET_AMDGPU_AMDGPUCALLLOWERING_H
 #define LLVM_LIB_TARGET_AMDGPU_AMDGPUCALLLOWERING_H
 
+#include "AMDGPU.h"
 #include "llvm/CodeGen/GlobalISel/CallLowering.h"
 
 namespace llvm {
@@ -22,6 +23,7 @@ namespace llvm {
 class AMDGPUTargetLowering;
 
 class AMDGPUCallLowering: public CallLowering {
+  AMDGPUAS AMDGPUASI;
 
   unsigned lowerParameterPtr(MachineIRBuilder &MIRBuilder, Type *ParamTy,
                              unsigned Offset) const;
@@ -36,7 +38,8 @@ class AMDGPUCallLowering: public CallLowering {
                    unsigned VReg) const override;
   bool lowerFormalArguments(MachineIRBuilder &MIRBuilder, const Function &F,
                             ArrayRef<unsigned> VRegs) const override;
-  CCAssignFn *CCAssignFnForCall(CallingConv::ID CC, bool IsVarArg) const;
+  static CCAssignFn *CCAssignFnForCall(CallingConv::ID CC, bool IsVarArg);
+  static CCAssignFn *CCAssignFnForReturn(CallingConv::ID CC, bool IsVarArg);
 };
 } // End of namespace llvm;
 #endif

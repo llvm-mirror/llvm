@@ -7,19 +7,20 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/MC/MCDwarf.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/None.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
+#include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/Config/config.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
-#include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCObjectFileInfo.h"
 #include "llvm/MC/MCObjectStreamer.h"
@@ -28,7 +29,6 @@
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/Support/Casting.h"
-#include "llvm/Support/Dwarf.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/EndianStream.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -168,7 +168,7 @@ EmitDwarfLineTable(MCObjectStreamer *MCOS, MCSection *Section,
     // and the current Label.
     const MCAsmInfo *asmInfo = MCOS->getContext().getAsmInfo();
     MCOS->EmitDwarfAdvanceLineAddr(LineDelta, LastLabel, Label,
-                                   asmInfo->getPointerSize());
+                                   asmInfo->getCodePointerSize());
 
     Discriminator = 0;
     LastLine = LineEntry.getLine();
@@ -188,7 +188,7 @@ EmitDwarfLineTable(MCObjectStreamer *MCOS, MCSection *Section,
 
   const MCAsmInfo *AsmInfo = Ctx.getAsmInfo();
   MCOS->EmitDwarfAdvanceLineAddr(INT64_MAX, LastLabel, SectionEnd,
-                                 AsmInfo->getPointerSize());
+                                 AsmInfo->getCodePointerSize());
 }
 
 //
@@ -594,7 +594,7 @@ static void EmitGenDwarfAranges(MCStreamer *MCOS,
   // Figure the padding after the header before the table of address and size
   // pairs who's values are PointerSize'ed.
   const MCAsmInfo *asmInfo = context.getAsmInfo();
-  int AddrSize = asmInfo->getPointerSize();
+  int AddrSize = asmInfo->getCodePointerSize();
   int Pad = 2 * AddrSize - (Length & (2 * AddrSize - 1));
   if (Pad == 2 * AddrSize)
     Pad = 0;
@@ -677,7 +677,7 @@ static void EmitGenDwarfInfo(MCStreamer *MCOS,
   // The DWARF v5 header has unit type, address size, abbrev offset.
   // Earlier versions have abbrev offset, address size.
   const MCAsmInfo &AsmInfo = *context.getAsmInfo();
-  int AddrSize = AsmInfo.getPointerSize();
+  int AddrSize = AsmInfo.getCodePointerSize();
   if (context.getDwarfVersion() >= 5) {
     MCOS->EmitIntValue(dwarf::DW_UT_compile, 1);
     MCOS->EmitIntValue(AddrSize, 1);
@@ -823,7 +823,7 @@ static void EmitGenDwarfRanges(MCStreamer *MCOS) {
   auto &Sections = context.getGenDwarfSectionSyms();
 
   const MCAsmInfo *AsmInfo = context.getAsmInfo();
-  int AddrSize = AsmInfo->getPointerSize();
+  int AddrSize = AsmInfo->getCodePointerSize();
 
   MCOS->SwitchSection(context.getObjectFileInfo()->getDwarfRangesSection());
 
@@ -981,7 +981,7 @@ static unsigned getSizeForEncoding(MCStreamer &streamer,
   default: llvm_unreachable("Unknown Encoding");
   case dwarf::DW_EH_PE_absptr:
   case dwarf::DW_EH_PE_signed:
-    return context.getAsmInfo()->getPointerSize();
+    return context.getAsmInfo()->getCodePointerSize();
   case dwarf::DW_EH_PE_udata2:
   case dwarf::DW_EH_PE_sdata2:
     return 2;
@@ -1034,10 +1034,7 @@ public:
   /// Emit the unwind information in a compact way.
   void EmitCompactUnwind(const MCDwarfFrameInfo &frame);
 
-  const MCSymbol &EmitCIE(const MCSymbol *personality,
-                          unsigned personalityEncoding, const MCSymbol *lsda,
-                          bool IsSignalFrame, unsigned lsdaEncoding,
-                          bool IsSimple);
+  const MCSymbol &EmitCIE(const MCDwarfFrameInfo &F);
   void EmitFDE(const MCSymbol &cieStart, const MCDwarfFrameInfo &frame,
                bool LastInSection, const MCSymbol &SectionStart);
   void EmitCFIInstructions(ArrayRef<MCCFIInstruction> Instrs,
@@ -1273,12 +1270,7 @@ static unsigned getCIEVersion(bool IsEH, unsigned DwarfVersion) {
   llvm_unreachable("Unknown version");
 }
 
-const MCSymbol &FrameEmitterImpl::EmitCIE(const MCSymbol *personality,
-                                          unsigned personalityEncoding,
-                                          const MCSymbol *lsda,
-                                          bool IsSignalFrame,
-                                          unsigned lsdaEncoding,
-                                          bool IsSimple) {
+const MCSymbol &FrameEmitterImpl::EmitCIE(const MCDwarfFrameInfo &Frame) {
   MCContext &context = Streamer.getContext();
   const MCRegisterInfo *MRI = context.getRegisterInfo();
   const MCObjectFileInfo *MOFI = context.getObjectFileInfo();
@@ -1305,12 +1297,12 @@ const MCSymbol &FrameEmitterImpl::EmitCIE(const MCSymbol *personality,
   SmallString<8> Augmentation;
   if (IsEH) {
     Augmentation += "z";
-    if (personality)
+    if (Frame.Personality)
       Augmentation += "P";
-    if (lsda)
+    if (Frame.Lsda)
       Augmentation += "L";
     Augmentation += "R";
-    if (IsSignalFrame)
+    if (Frame.IsSignalFrame)
       Augmentation += "S";
     Streamer.EmitBytes(Augmentation);
   }
@@ -1318,7 +1310,7 @@ const MCSymbol &FrameEmitterImpl::EmitCIE(const MCSymbol *personality,
 
   if (CIEVersion >= 4) {
     // Address Size
-    Streamer.EmitIntValue(context.getAsmInfo()->getPointerSize(), 1);
+    Streamer.EmitIntValue(context.getAsmInfo()->getCodePointerSize(), 1);
 
     // Segment Descriptor Size
     Streamer.EmitIntValue(0, 1);
@@ -1331,26 +1323,29 @@ const MCSymbol &FrameEmitterImpl::EmitCIE(const MCSymbol *personality,
   Streamer.EmitSLEB128IntValue(getDataAlignmentFactor(Streamer));
 
   // Return Address Register
+  unsigned RAReg = Frame.RAReg;
+  if (RAReg == static_cast<unsigned>(INT_MAX))
+    RAReg = MRI->getDwarfRegNum(MRI->getRARegister(), IsEH);
+
   if (CIEVersion == 1) {
-    assert(MRI->getRARegister() <= 255 &&
+    assert(RAReg <= 255 &&
            "DWARF 2 encodes return_address_register in one byte");
-    Streamer.EmitIntValue(MRI->getDwarfRegNum(MRI->getRARegister(), IsEH), 1);
+    Streamer.EmitIntValue(RAReg, 1);
   } else {
-    Streamer.EmitULEB128IntValue(
-        MRI->getDwarfRegNum(MRI->getRARegister(), IsEH));
+    Streamer.EmitULEB128IntValue(RAReg);
   }
 
   // Augmentation Data Length (optional)
-
   unsigned augmentationLength = 0;
   if (IsEH) {
-    if (personality) {
+    if (Frame.Personality) {
       // Personality Encoding
       augmentationLength += 1;
       // Personality
-      augmentationLength += getSizeForEncoding(Streamer, personalityEncoding);
+      augmentationLength +=
+          getSizeForEncoding(Streamer, Frame.PersonalityEncoding);
     }
-    if (lsda)
+    if (Frame.Lsda)
       augmentationLength += 1;
     // Encoding of the FDE pointers
     augmentationLength += 1;
@@ -1358,15 +1353,15 @@ const MCSymbol &FrameEmitterImpl::EmitCIE(const MCSymbol *personality,
     Streamer.EmitULEB128IntValue(augmentationLength);
 
     // Augmentation Data (optional)
-    if (personality) {
+    if (Frame.Personality) {
       // Personality Encoding
-      emitEncodingByte(Streamer, personalityEncoding);
+      emitEncodingByte(Streamer, Frame.PersonalityEncoding);
       // Personality
-      EmitPersonality(Streamer, *personality, personalityEncoding);
+      EmitPersonality(Streamer, *Frame.Personality, Frame.PersonalityEncoding);
     }
 
-    if (lsda)
-      emitEncodingByte(Streamer, lsdaEncoding);
+    if (Frame.Lsda)
+      emitEncodingByte(Streamer, Frame.LsdaEncoding);
 
     // Encoding of the FDE pointers
     emitEncodingByte(Streamer, MOFI->getFDEEncoding());
@@ -1375,7 +1370,7 @@ const MCSymbol &FrameEmitterImpl::EmitCIE(const MCSymbol *personality,
   // Initial Instructions
 
   const MCAsmInfo *MAI = context.getAsmInfo();
-  if (!IsSimple) {
+  if (!Frame.IsSimple) {
     const std::vector<MCCFIInstruction> &Instructions =
         MAI->getInitialFrameState();
     EmitCFIInstructions(Instructions, nullptr);
@@ -1384,7 +1379,7 @@ const MCSymbol &FrameEmitterImpl::EmitCIE(const MCSymbol *personality,
   InitialCFAOffset = CFAOffset;
 
   // Padding
-  Streamer.EmitValueToAlignment(IsEH ? 4 : MAI->getPointerSize());
+  Streamer.EmitValueToAlignment(IsEH ? 4 : MAI->getCodePointerSize());
 
   Streamer.EmitLabel(sectionEnd);
   return *sectionStart;
@@ -1453,7 +1448,7 @@ void FrameEmitterImpl::EmitFDE(const MCSymbol &cieStart,
   // The size of a .eh_frame section has to be a multiple of the alignment
   // since a null CIE is interpreted as the end. Old systems overaligned
   // .eh_frame, so we do too and account for it in the last FDE.
-  unsigned Align = LastInSection ? asmInfo->getPointerSize() : PCSize;
+  unsigned Align = LastInSection ? asmInfo->getCodePointerSize() : PCSize;
   Streamer.EmitValueToAlignment(Align);
 
   Streamer.EmitLabel(fdeEnd);
@@ -1463,24 +1458,32 @@ namespace {
 
 struct CIEKey {
   static const CIEKey getEmptyKey() {
-    return CIEKey(nullptr, 0, -1, false, false);
+    return CIEKey(nullptr, 0, -1, false, false, static_cast<unsigned>(INT_MAX));
   }
 
   static const CIEKey getTombstoneKey() {
-    return CIEKey(nullptr, -1, 0, false, false);
+    return CIEKey(nullptr, -1, 0, false, false, static_cast<unsigned>(INT_MAX));
   }
 
   CIEKey(const MCSymbol *Personality, unsigned PersonalityEncoding,
-         unsigned LsdaEncoding, bool IsSignalFrame, bool IsSimple)
+         unsigned LSDAEncoding, bool IsSignalFrame, bool IsSimple,
+         unsigned RAReg)
       : Personality(Personality), PersonalityEncoding(PersonalityEncoding),
-        LsdaEncoding(LsdaEncoding), IsSignalFrame(IsSignalFrame),
-        IsSimple(IsSimple) {}
+        LsdaEncoding(LSDAEncoding), IsSignalFrame(IsSignalFrame),
+        IsSimple(IsSimple), RAReg(RAReg) {}
+
+  explicit CIEKey(const MCDwarfFrameInfo &Frame)
+      : Personality(Frame.Personality),
+        PersonalityEncoding(Frame.PersonalityEncoding),
+        LsdaEncoding(Frame.LsdaEncoding), IsSignalFrame(Frame.IsSignalFrame),
+        IsSimple(Frame.IsSimple), RAReg(Frame.RAReg) {}
 
   const MCSymbol *Personality;
   unsigned PersonalityEncoding;
   unsigned LsdaEncoding;
   bool IsSignalFrame;
   bool IsSimple;
+  unsigned RAReg;
 };
 
 } // end anonymous namespace
@@ -1494,7 +1497,7 @@ template <> struct DenseMapInfo<CIEKey> {
   static unsigned getHashValue(const CIEKey &Key) {
     return static_cast<unsigned>(
         hash_combine(Key.Personality, Key.PersonalityEncoding, Key.LsdaEncoding,
-                     Key.IsSignalFrame, Key.IsSimple));
+                     Key.IsSignalFrame, Key.IsSimple, Key.RAReg));
   }
 
   static bool isEqual(const CIEKey &LHS, const CIEKey &RHS) {
@@ -1502,7 +1505,8 @@ template <> struct DenseMapInfo<CIEKey> {
            LHS.PersonalityEncoding == RHS.PersonalityEncoding &&
            LHS.LsdaEncoding == RHS.LsdaEncoding &&
            LHS.IsSignalFrame == RHS.IsSignalFrame &&
-           LHS.IsSimple == RHS.IsSimple;
+           LHS.IsSimple == RHS.IsSimple &&
+           LHS.RAReg == RHS.RAReg;
   }
 };
 
@@ -1514,6 +1518,7 @@ void MCDwarfFrameEmitter::Emit(MCObjectStreamer &Streamer, MCAsmBackend *MAB,
 
   MCContext &Context = Streamer.getContext();
   const MCObjectFileInfo *MOFI = Context.getObjectFileInfo();
+  const MCAsmInfo *AsmInfo = Context.getAsmInfo();
   FrameEmitterImpl Emitter(IsEH, Streamer);
   ArrayRef<MCDwarfFrameInfo> FrameArray = Streamer.getDwarfFrameInfos();
 
@@ -1525,7 +1530,7 @@ void MCDwarfFrameEmitter::Emit(MCObjectStreamer &Streamer, MCAsmBackend *MAB,
       if (Frame.CompactUnwindEncoding == 0) continue;
       if (!SectionEmitted) {
         Streamer.SwitchSection(MOFI->getCompactUnwindSection());
-        Streamer.EmitValueToAlignment(Context.getAsmInfo()->getPointerSize());
+        Streamer.EmitValueToAlignment(AsmInfo->getCodePointerSize());
         SectionEmitted = true;
       }
       NeedsEHFrameSection |=
@@ -1558,13 +1563,10 @@ void MCDwarfFrameEmitter::Emit(MCObjectStreamer &Streamer, MCAsmBackend *MAB,
       // of by the compact unwind encoding.
       continue;
 
-    CIEKey Key(Frame.Personality, Frame.PersonalityEncoding,
-               Frame.LsdaEncoding, Frame.IsSignalFrame, Frame.IsSimple);
+    CIEKey Key(Frame);
     const MCSymbol *&CIEStart = IsEH ? CIEStarts[Key] : DummyDebugKey;
     if (!CIEStart)
-      CIEStart = &Emitter.EmitCIE(Frame.Personality, Frame.PersonalityEncoding,
-                                  Frame.Lsda, Frame.IsSignalFrame,
-                                  Frame.LsdaEncoding, Frame.IsSimple);
+      CIEStart = &Emitter.EmitCIE(Frame);
 
     Emitter.EmitFDE(*CIEStart, Frame, I == E, *SectionStart);
   }

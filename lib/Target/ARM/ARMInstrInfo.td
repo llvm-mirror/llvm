@@ -16,7 +16,8 @@
 //
 
 // Type profiles.
-def SDT_ARMCallSeqStart : SDCallSeqStart<[ SDTCisVT<0, i32> ]>;
+def SDT_ARMCallSeqStart : SDCallSeqStart<[ SDTCisVT<0, i32>,
+                                           SDTCisVT<1, i32> ]>;
 def SDT_ARMCallSeqEnd   : SDCallSeqEnd<[ SDTCisVT<0, i32>, SDTCisVT<1, i32> ]>;
 def SDT_ARMStructByVal : SDTypeProfile<0, 4,
                                        [SDTCisVT<0, i32>, SDTCisVT<1, i32>,
@@ -91,6 +92,18 @@ def SDTBinaryArithWithFlagsInOut : SDTypeProfile<2, 3,
                                              SDTCisInt<0>,
                                              SDTCisVT<1, i32>,
                                              SDTCisVT<4, i32>]>;
+
+def SDT_LongMac  : SDTypeProfile<2, 4, [SDTCisVT<0, i32>,
+                                        SDTCisSameAs<0, 1>,
+                                        SDTCisSameAs<0, 2>,
+                                        SDTCisSameAs<0, 3>,
+                                        SDTCisSameAs<0, 4>,
+                                        SDTCisSameAs<0, 5>]>;
+
+def ARMSmlald        : SDNode<"ARMISD::SMLALD", SDT_LongMac>;
+def ARMSmlaldx       : SDNode<"ARMISD::SMLALDX", SDT_LongMac>;
+def ARMSmlsld        : SDNode<"ARMISD::SMLSLD", SDT_LongMac>;
+def ARMSmlsldx       : SDNode<"ARMISD::SMLSLDX", SDT_LongMac>;
 
 // Node definitions.
 def ARMWrapper       : SDNode<"ARMISD::Wrapper",     SDTIntUnaryOp>;
@@ -183,6 +196,13 @@ def ARMmemcopy : SDNode<"ARMISD::MEMCPY", SDT_ARMMEMCPY,
                         [SDNPHasChain, SDNPInGlue, SDNPOutGlue,
                          SDNPMayStore, SDNPMayLoad]>;
 
+def ARMsmulwb       : SDNode<"ARMISD::SMULWB", SDTIntBinOp, []>;
+def ARMsmulwt       : SDNode<"ARMISD::SMULWT", SDTIntBinOp, []>;
+def ARMsmlalbb      : SDNode<"ARMISD::SMLALBB", SDT_LongMac, []>;
+def ARMsmlalbt      : SDNode<"ARMISD::SMLALBT", SDT_LongMac, []>;
+def ARMsmlaltb      : SDNode<"ARMISD::SMLALTB", SDT_LongMac, []>;
+def ARMsmlaltt      : SDNode<"ARMISD::SMLALTT", SDT_LongMac, []>;
+
 //===----------------------------------------------------------------------===//
 // ARM Instruction Predicate Definitions.
 //
@@ -221,6 +241,8 @@ def HasV8_1a         : Predicate<"Subtarget->hasV8_1aOps()">,
                                  AssemblerPredicate<"HasV8_1aOps", "armv8.1a">;
 def HasV8_2a         : Predicate<"Subtarget->hasV8_2aOps()">,
                                  AssemblerPredicate<"HasV8_2aOps", "armv8.2a">;
+def HasV8_3a         : Predicate<"Subtarget->hasV8_3aOps()">,
+                                 AssemblerPredicate<"HasV8_3aOps", "armv8.3a">;
 def NoVFP            : Predicate<"!Subtarget->hasVFP2()">;
 def HasVFP2          : Predicate<"Subtarget->hasVFP2()">,
                                  AssemblerPredicate<"FeatureVFP2", "VFP2">;
@@ -237,6 +259,8 @@ def HasNEON          : Predicate<"Subtarget->hasNEON()">,
                                  AssemblerPredicate<"FeatureNEON", "NEON">;
 def HasCrypto        : Predicate<"Subtarget->hasCrypto()">,
                                  AssemblerPredicate<"FeatureCrypto", "crypto">;
+def HasDotProd       : Predicate<"Subtarget->hasDotProd()">,
+                                 AssemblerPredicate<"FeatureDotProd", "dotprod">;
 def HasCRC           : Predicate<"Subtarget->hasCRC()">,
                                  AssemblerPredicate<"FeatureCRC", "crc">;
 def HasRAS           : Predicate<"Subtarget->hasRAS()">,
@@ -245,8 +269,8 @@ def HasFP16          : Predicate<"Subtarget->hasFP16()">,
                                  AssemblerPredicate<"FeatureFP16","half-float conversions">;
 def HasFullFP16      : Predicate<"Subtarget->hasFullFP16()">,
                                  AssemblerPredicate<"FeatureFullFP16","full half-float">;
-def HasDivide        : Predicate<"Subtarget->hasDivide()">,
-                                 AssemblerPredicate<"FeatureHWDiv", "divide in THUMB">;
+def HasDivideInThumb : Predicate<"Subtarget->hasDivideInThumbMode()">,
+                                 AssemblerPredicate<"FeatureHWDivThumb", "divide in THUMB">;
 def HasDivideInARM   : Predicate<"Subtarget->hasDivideInARMMode()">,
                                  AssemblerPredicate<"FeatureHWDivARM", "divide in ARM">;
 def HasDSP           : Predicate<"Subtarget->hasDSP()">,
@@ -293,13 +317,22 @@ def IsNotMachO       : Predicate<"!Subtarget->isTargetMachO()">;
 def IsNaCl           : Predicate<"Subtarget->isTargetNaCl()">;
 def IsWindows        : Predicate<"Subtarget->isTargetWindows()">;
 def IsNotWindows     : Predicate<"!Subtarget->isTargetWindows()">;
+def IsReadTPHard     : Predicate<"Subtarget->isReadTPHard()">;
+def IsReadTPSoft     : Predicate<"!Subtarget->isReadTPHard()">;
 def UseNaClTrap      : Predicate<"Subtarget->useNaClTrap()">,
                                  AssemblerPredicate<"FeatureNaClTrap", "NaCl">;
 def DontUseNaClTrap  : Predicate<"!Subtarget->useNaClTrap()">;
 
+def UseNegativeImmediates :
+  Predicate<"false">,
+            AssemblerPredicate<"!FeatureNoNegativeImmediates",
+                               "NegativeImmediates">;
+
 // FIXME: Eventually this will be just "hasV6T2Ops".
-def UseMovt          : Predicate<"Subtarget->useMovt(*MF)">;
-def DontUseMovt      : Predicate<"!Subtarget->useMovt(*MF)">;
+let RecomputePerFunction = 1 in {
+  def UseMovt          : Predicate<"Subtarget->useMovt(*MF)">;
+  def DontUseMovt      : Predicate<"!Subtarget->useMovt(*MF)">;
+}
 def UseFPVMLx        : Predicate<"Subtarget->useFPVMLx()">;
 def UseMulOps        : Predicate<"Subtarget->useMulOps()">;
 
@@ -326,8 +359,10 @@ def UseVMOVSR : Predicate<"Subtarget->preferVMOVSR() ||"
 def DontUseVMOVSR : Predicate<"!Subtarget->preferVMOVSR() &&"
                               "Subtarget->useNEONForSinglePrecisionFP()">;
 
-def IsLE             : Predicate<"MF->getDataLayout().isLittleEndian()">;
-def IsBE             : Predicate<"MF->getDataLayout().isBigEndian()">;
+let RecomputePerFunction = 1 in {
+  def IsLE             : Predicate<"MF->getDataLayout().isLittleEndian()">;
+  def IsBE             : Predicate<"MF->getDataLayout().isBigEndian()">;
+}
 
 def GenExecuteOnly : Predicate<"Subtarget->genExecuteOnly()">;
 
@@ -422,7 +457,17 @@ def fsub_mlx : PatFrag<(ops node:$lhs, node:$rhs),(fsub node:$lhs, node:$rhs),[{
 //
 
 // Immediate operands with a shared generic asm render method.
-class ImmAsmOperand : AsmOperandClass { let RenderMethod = "addImmOperands"; }
+class ImmAsmOperand<int Low, int High> : AsmOperandClass {
+  let RenderMethod = "addImmOperands";
+  let PredicateMethod = "isImmediate<" # Low # "," # High # ">";
+  let DiagnosticString = "operand must be an immediate in the range [" # Low # "," # High # "]";
+}
+
+class ImmAsmOperandMinusOne<int Low, int High> : AsmOperandClass {
+  let PredicateMethod = "isImmediate<" # Low # "," # High # ">";
+  let DiagnosticType = "ImmRange" # Low # "_" # High;
+  let DiagnosticString = "operand must be an immediate in the range [" # Low # "," # High # "]";
+}
 
 // Operands that are part of a memory addressing mode.
 class MemOperand : Operand<i32> { let OperandType = "OPERAND_MEMORY"; }
@@ -644,35 +689,45 @@ def arm_i32imm : PatLeaf<(imm), [{
 }]>;
 
 /// imm0_1 predicate - Immediate in the range [0,1].
-def Imm0_1AsmOperand: ImmAsmOperand { let Name = "Imm0_1"; }
+def Imm0_1AsmOperand: ImmAsmOperand<0,1> { let Name = "Imm0_1"; }
 def imm0_1 : Operand<i32> { let ParserMatchClass = Imm0_1AsmOperand; }
 
 /// imm0_3 predicate - Immediate in the range [0,3].
-def Imm0_3AsmOperand: ImmAsmOperand { let Name = "Imm0_3"; }
+def Imm0_3AsmOperand: ImmAsmOperand<0,3> { let Name = "Imm0_3"; }
 def imm0_3 : Operand<i32> { let ParserMatchClass = Imm0_3AsmOperand; }
 
 /// imm0_7 predicate - Immediate in the range [0,7].
-def Imm0_7AsmOperand: ImmAsmOperand { let Name = "Imm0_7"; }
+def Imm0_7AsmOperand: ImmAsmOperand<0,7> {
+  let Name = "Imm0_7";
+}
 def imm0_7 : Operand<i32>, ImmLeaf<i32, [{
   return Imm >= 0 && Imm < 8;
 }]> {
   let ParserMatchClass = Imm0_7AsmOperand;
 }
 
+/// imm8_255 predicate - Immediate in the range [8,255].
+def Imm8_255AsmOperand: ImmAsmOperand<8,255> { let Name = "Imm8_255"; }
+def imm8_255 : Operand<i32>, ImmLeaf<i32, [{
+  return Imm >= 8 && Imm < 256;
+}]> {
+  let ParserMatchClass = Imm8_255AsmOperand;
+}
+
 /// imm8 predicate - Immediate is exactly 8.
-def Imm8AsmOperand: ImmAsmOperand { let Name = "Imm8"; }
+def Imm8AsmOperand: ImmAsmOperand<8,8> { let Name = "Imm8"; }
 def imm8 : Operand<i32>, ImmLeaf<i32, [{ return Imm == 8; }]> {
   let ParserMatchClass = Imm8AsmOperand;
 }
 
 /// imm16 predicate - Immediate is exactly 16.
-def Imm16AsmOperand: ImmAsmOperand { let Name = "Imm16"; }
+def Imm16AsmOperand: ImmAsmOperand<16,16> { let Name = "Imm16"; }
 def imm16 : Operand<i32>, ImmLeaf<i32, [{ return Imm == 16; }]> {
   let ParserMatchClass = Imm16AsmOperand;
 }
 
 /// imm32 predicate - Immediate is exactly 32.
-def Imm32AsmOperand: ImmAsmOperand { let Name = "Imm32"; }
+def Imm32AsmOperand: ImmAsmOperand<32,32> { let Name = "Imm32"; }
 def imm32 : Operand<i32>, ImmLeaf<i32, [{ return Imm == 32; }]> {
   let ParserMatchClass = Imm32AsmOperand;
 }
@@ -680,27 +735,26 @@ def imm32 : Operand<i32>, ImmLeaf<i32, [{ return Imm == 32; }]> {
 def imm8_or_16 : ImmLeaf<i32, [{ return Imm == 8 || Imm == 16;}]>;
 
 /// imm1_7 predicate - Immediate in the range [1,7].
-def Imm1_7AsmOperand: ImmAsmOperand { let Name = "Imm1_7"; }
+def Imm1_7AsmOperand: ImmAsmOperand<1,7> { let Name = "Imm1_7"; }
 def imm1_7 : Operand<i32>, ImmLeaf<i32, [{ return Imm > 0 && Imm < 8; }]> {
   let ParserMatchClass = Imm1_7AsmOperand;
 }
 
 /// imm1_15 predicate - Immediate in the range [1,15].
-def Imm1_15AsmOperand: ImmAsmOperand { let Name = "Imm1_15"; }
+def Imm1_15AsmOperand: ImmAsmOperand<1,15> { let Name = "Imm1_15"; }
 def imm1_15 : Operand<i32>, ImmLeaf<i32, [{ return Imm > 0 && Imm < 16; }]> {
   let ParserMatchClass = Imm1_15AsmOperand;
 }
 
 /// imm1_31 predicate - Immediate in the range [1,31].
-def Imm1_31AsmOperand: ImmAsmOperand { let Name = "Imm1_31"; }
+def Imm1_31AsmOperand: ImmAsmOperand<1,31> { let Name = "Imm1_31"; }
 def imm1_31 : Operand<i32>, ImmLeaf<i32, [{ return Imm > 0 && Imm < 32; }]> {
   let ParserMatchClass = Imm1_31AsmOperand;
 }
 
 /// imm0_15 predicate - Immediate in the range [0,15].
-def Imm0_15AsmOperand: ImmAsmOperand {
+def Imm0_15AsmOperand: ImmAsmOperand<0,15> {
   let Name = "Imm0_15";
-  let DiagnosticType = "ImmRange0_15";
 }
 def imm0_15 : Operand<i32>, ImmLeaf<i32, [{
   return Imm >= 0 && Imm < 16;
@@ -709,7 +763,7 @@ def imm0_15 : Operand<i32>, ImmLeaf<i32, [{
 }
 
 /// imm0_31 predicate - True if the 32-bit immediate is in the range [0,31].
-def Imm0_31AsmOperand: ImmAsmOperand { let Name = "Imm0_31"; }
+def Imm0_31AsmOperand: ImmAsmOperand<0,31> { let Name = "Imm0_31"; }
 def imm0_31 : Operand<i32>, ImmLeaf<i32, [{
   return Imm >= 0 && Imm < 32;
 }]> {
@@ -717,15 +771,15 @@ def imm0_31 : Operand<i32>, ImmLeaf<i32, [{
 }
 
 /// imm0_32 predicate - True if the 32-bit immediate is in the range [0,32].
-def Imm0_32AsmOperand: ImmAsmOperand { let Name = "Imm0_32"; }
+def Imm0_32AsmOperand: ImmAsmOperand<0,32> { let Name = "Imm0_32"; }
 def imm0_32 : Operand<i32>, ImmLeaf<i32, [{
-  return Imm >= 0 && Imm < 32;
+  return Imm >= 0 && Imm < 33;
 }]> {
   let ParserMatchClass = Imm0_32AsmOperand;
 }
 
 /// imm0_63 predicate - True if the 32-bit immediate is in the range [0,63].
-def Imm0_63AsmOperand: ImmAsmOperand { let Name = "Imm0_63"; }
+def Imm0_63AsmOperand: ImmAsmOperand<0,63> { let Name = "Imm0_63"; }
 def imm0_63 : Operand<i32>, ImmLeaf<i32, [{
   return Imm >= 0 && Imm < 64;
 }]> {
@@ -733,22 +787,21 @@ def imm0_63 : Operand<i32>, ImmLeaf<i32, [{
 }
 
 /// imm0_239 predicate - Immediate in the range [0,239].
-def Imm0_239AsmOperand : ImmAsmOperand {
+def Imm0_239AsmOperand : ImmAsmOperand<0,239> {
   let Name = "Imm0_239";
-  let DiagnosticType = "ImmRange0_239";
 }
 def imm0_239 : Operand<i32>, ImmLeaf<i32, [{ return Imm >= 0 && Imm < 240; }]> {
   let ParserMatchClass = Imm0_239AsmOperand;
 }
 
 /// imm0_255 predicate - Immediate in the range [0,255].
-def Imm0_255AsmOperand : ImmAsmOperand { let Name = "Imm0_255"; }
+def Imm0_255AsmOperand : ImmAsmOperand<0,255> { let Name = "Imm0_255"; }
 def imm0_255 : Operand<i32>, ImmLeaf<i32, [{ return Imm >= 0 && Imm < 256; }]> {
   let ParserMatchClass = Imm0_255AsmOperand;
 }
 
-/// imm0_65535 - An immediate is in the range [0.65535].
-def Imm0_65535AsmOperand: ImmAsmOperand { let Name = "Imm0_65535"; }
+/// imm0_65535 - An immediate is in the range [0,65535].
+def Imm0_65535AsmOperand: ImmAsmOperand<0,65535> { let Name = "Imm0_65535"; }
 def imm0_65535 : Operand<i32>, ImmLeaf<i32, [{
   return Imm >= 0 && Imm < 65536;
 }]> {
@@ -766,19 +819,27 @@ def imm0_65535_neg : Operand<i32>, ImmLeaf<i32, [{
 // FIXME: This really needs a Thumb version separate from the ARM version.
 // While the range is the same, and can thus use the same match class,
 // the encoding is different so it should have a different encoder method.
-def Imm0_65535ExprAsmOperand: ImmAsmOperand { let Name = "Imm0_65535Expr"; }
+def Imm0_65535ExprAsmOperand: AsmOperandClass {
+  let Name = "Imm0_65535Expr";
+  let RenderMethod = "addImmOperands";
+  let DiagnosticString = "operand must be an immediate in the range [0,0xffff] or a relocatable expression";
+}
+
 def imm0_65535_expr : Operand<i32> {
   let EncoderMethod = "getHiLo16ImmOpValue";
   let ParserMatchClass = Imm0_65535ExprAsmOperand;
 }
 
-def Imm256_65535ExprAsmOperand: ImmAsmOperand { let Name = "Imm256_65535Expr"; }
+def Imm256_65535ExprAsmOperand: ImmAsmOperand<256,65535> { let Name = "Imm256_65535Expr"; }
 def imm256_65535_expr : Operand<i32> {
   let ParserMatchClass = Imm256_65535ExprAsmOperand;
 }
 
 /// imm24b - True if the 32-bit immediate is encodable in 24 bits.
-def Imm24bitAsmOperand: ImmAsmOperand { let Name = "Imm24bit"; }
+def Imm24bitAsmOperand: ImmAsmOperand<0,0xffffff> {
+  let Name = "Imm24bit";
+  let DiagnosticString = "operand must be an immediate in the range [0,0xffffff]";
+}
 def imm24b : Operand<i32>, ImmLeaf<i32, [{
   return Imm >= 0 && Imm <= 0xffffff;
 }]> {
@@ -807,7 +868,9 @@ def imm1_32_XFORM: SDNodeXForm<imm, [{
   return CurDAG->getTargetConstant((int)N->getZExtValue() - 1, SDLoc(N),
                                    MVT::i32);
 }]>;
-def Imm1_32AsmOperand: AsmOperandClass { let Name = "Imm1_32"; }
+def Imm1_32AsmOperand: ImmAsmOperandMinusOne<1,32> {
+  let Name = "Imm1_32";
+}
 def imm1_32 : Operand<i32>, PatLeaf<(imm), [{
    uint64_t Imm = N->getZExtValue();
    return Imm > 0 && Imm <= 32;
@@ -821,8 +884,10 @@ def imm1_16_XFORM: SDNodeXForm<imm, [{
   return CurDAG->getTargetConstant((int)N->getZExtValue() - 1, SDLoc(N),
                                    MVT::i32);
 }]>;
-def Imm1_16AsmOperand: AsmOperandClass { let Name = "Imm1_16"; }
-def imm1_16 : Operand<i32>, PatLeaf<(imm), [{ return Imm > 0 && Imm <= 16; }],
+def Imm1_16AsmOperand: ImmAsmOperandMinusOne<1,16> { let Name = "Imm1_16"; }
+def imm1_16 : Operand<i32>, ImmLeaf<i32, [{
+    return Imm > 0 && Imm <= 16;
+  }],
     imm1_16_XFORM> {
   let PrintMethod = "printImmPlusOneOperand";
   let ParserMatchClass = Imm1_16AsmOperand;
@@ -1067,7 +1132,7 @@ class AddrMode6Align : MemOperand,
 // VLD/VST instructions and checking the alignment is not specified.
 def AddrMode6AlignNoneAsmOperand : AsmOperandClass {
   let Name = "AlignedMemoryNone";
-  let DiagnosticType = "AlignedMemoryRequiresNone";
+  let DiagnosticString = "alignment must be omitted";
 }
 def addrmode6alignNone : AddrMode6Align {
   // The alignment specifier can only be omitted.
@@ -1078,7 +1143,7 @@ def addrmode6alignNone : AddrMode6Align {
 // VLD/VST instructions and checking the alignment value.
 def AddrMode6Align16AsmOperand : AsmOperandClass {
   let Name = "AlignedMemory16";
-  let DiagnosticType = "AlignedMemoryRequires16";
+  let DiagnosticString = "alignment must be 16 or omitted";
 }
 def addrmode6align16 : AddrMode6Align {
   // The alignment specifier can only be 16 or omitted.
@@ -1089,7 +1154,7 @@ def addrmode6align16 : AddrMode6Align {
 // VLD/VST instructions and checking the alignment value.
 def AddrMode6Align32AsmOperand : AsmOperandClass {
   let Name = "AlignedMemory32";
-  let DiagnosticType = "AlignedMemoryRequires32";
+  let DiagnosticString = "alignment must be 32 or omitted";
 }
 def addrmode6align32 : AddrMode6Align {
   // The alignment specifier can only be 32 or omitted.
@@ -1100,7 +1165,7 @@ def addrmode6align32 : AddrMode6Align {
 // VLD/VST instructions and checking the alignment value.
 def AddrMode6Align64AsmOperand : AsmOperandClass {
   let Name = "AlignedMemory64";
-  let DiagnosticType = "AlignedMemoryRequires64";
+  let DiagnosticString = "alignment must be 64 or omitted";
 }
 def addrmode6align64 : AddrMode6Align {
   // The alignment specifier can only be 64 or omitted.
@@ -1111,7 +1176,7 @@ def addrmode6align64 : AddrMode6Align {
 // for VLD/VST instructions and checking the alignment value.
 def AddrMode6Align64or128AsmOperand : AsmOperandClass {
   let Name = "AlignedMemory64or128";
-  let DiagnosticType = "AlignedMemoryRequires64or128";
+  let DiagnosticString = "alignment must be 64, 128 or omitted";
 }
 def addrmode6align64or128 : AddrMode6Align {
   // The alignment specifier can only be 64, 128 or omitted.
@@ -1122,7 +1187,7 @@ def addrmode6align64or128 : AddrMode6Align {
 // encoding for VLD/VST instructions and checking the alignment value.
 def AddrMode6Align64or128or256AsmOperand : AsmOperandClass {
   let Name = "AlignedMemory64or128or256";
-  let DiagnosticType = "AlignedMemoryRequires64or128or256";
+  let DiagnosticString = "alignment must be 64, 128, 256 or omitted";
 }
 def addrmode6align64or128or256 : AddrMode6Align {
   // The alignment specifier can only be 64, 128, 256 or omitted.
@@ -1153,7 +1218,7 @@ class AddrMode6DupAlign : MemOperand,
 // VLD-dup instruction and checking the alignment is not specified.
 def AddrMode6dupAlignNoneAsmOperand : AsmOperandClass {
   let Name = "DupAlignedMemoryNone";
-  let DiagnosticType = "DupAlignedMemoryRequiresNone";
+  let DiagnosticString = "alignment must be omitted";
 }
 def addrmode6dupalignNone : AddrMode6DupAlign {
   // The alignment specifier can only be omitted.
@@ -1164,7 +1229,7 @@ def addrmode6dupalignNone : AddrMode6DupAlign {
 // instruction and checking the alignment value.
 def AddrMode6dupAlign16AsmOperand : AsmOperandClass {
   let Name = "DupAlignedMemory16";
-  let DiagnosticType = "DupAlignedMemoryRequires16";
+  let DiagnosticString = "alignment must be 16 or omitted";
 }
 def addrmode6dupalign16 : AddrMode6DupAlign {
   // The alignment specifier can only be 16 or omitted.
@@ -1175,7 +1240,7 @@ def addrmode6dupalign16 : AddrMode6DupAlign {
 // instruction and checking the alignment value.
 def AddrMode6dupAlign32AsmOperand : AsmOperandClass {
   let Name = "DupAlignedMemory32";
-  let DiagnosticType = "DupAlignedMemoryRequires32";
+  let DiagnosticString = "alignment must be 32 or omitted";
 }
 def addrmode6dupalign32 : AddrMode6DupAlign {
   // The alignment specifier can only be 32 or omitted.
@@ -1186,7 +1251,7 @@ def addrmode6dupalign32 : AddrMode6DupAlign {
 // instructions and checking the alignment value.
 def AddrMode6dupAlign64AsmOperand : AsmOperandClass {
   let Name = "DupAlignedMemory64";
-  let DiagnosticType = "DupAlignedMemoryRequires64";
+  let DiagnosticString = "alignment must be 64 or omitted";
 }
 def addrmode6dupalign64 : AddrMode6DupAlign {
   // The alignment specifier can only be 64 or omitted.
@@ -1197,7 +1262,7 @@ def addrmode6dupalign64 : AddrMode6DupAlign {
 // for VLD instructions and checking the alignment value.
 def AddrMode6dupAlign64or128AsmOperand : AsmOperandClass {
   let Name = "DupAlignedMemory64or128";
-  let DiagnosticType = "DupAlignedMemoryRequires64or128";
+  let DiagnosticString = "alignment must be 64, 128 or omitted";
 }
 def addrmode6dupalign64or128 : AddrMode6DupAlign {
   // The alignment specifier can only be 64, 128 or omitted.
@@ -1913,8 +1978,8 @@ PseudoInst<(outs), (ins i32imm:$amt1, i32imm:$amt2, pred:$p), NoItinerary,
            [(ARMcallseq_end timm:$amt1, timm:$amt2)]>;
 
 def ADJCALLSTACKDOWN :
-PseudoInst<(outs), (ins i32imm:$amt, pred:$p), NoItinerary,
-           [(ARMcallseq_start timm:$amt)]>;
+PseudoInst<(outs), (ins i32imm:$amt, i32imm:$amt2, pred:$p), NoItinerary,
+           [(ARMcallseq_start timm:$amt, timm:$amt2)]>;
 }
 
 def HINT : AI<(outs), (ins imm0_239:$imm), MiscFrm, NoItinerary,
@@ -1935,7 +2000,9 @@ def : InstAlias<"sevl$p", (HINT 5, pred:$p)>, Requires<[IsARM, HasV8]>;
 def : InstAlias<"esb$p", (HINT 16, pred:$p)>, Requires<[IsARM, HasRAS]>;
 
 def SEL : AI<(outs GPR:$Rd), (ins GPR:$Rn, GPR:$Rm), DPFrm, NoItinerary, "sel",
-             "\t$Rd, $Rn, $Rm", []>, Requires<[IsARM, HasV6]> {
+             "\t$Rd, $Rn, $Rm",
+             [(set GPR:$Rd, (int_arm_sel GPR:$Rn, GPR:$Rm))]>,
+             Requires<[IsARM, HasV6]> {
   bits<4> Rd;
   bits<4> Rn;
   bits<4> Rm;
@@ -2367,7 +2434,7 @@ let isCall = 1, isTerminator = 1, isReturn = 1, isBarrier = 1, Uses = [SP] in {
   def TAILJMPr : ARMPseudoExpand<(outs), (ins tcGPR:$dst),
                                  4, IIC_Br, [],
                                  (BX GPR:$dst)>, Sched<[WriteBr]>,
-                                 Requires<[IsARM]>;
+                                 Requires<[IsARM, HasV4T]>;
 }
 
 // Secure Monitor Call is a system instruction.
@@ -3424,8 +3491,12 @@ def : ARMV6Pat<(add rGPR:$Rn, (sext_inreg (srl rGPR:$Rm, imm8_or_16:$rot),
                (SXTAH rGPR:$Rn, rGPR:$Rm, rot_imm:$rot)>;
 
 def SXTB16  : AI_ext_rrot_np<0b01101000, "sxtb16">;
+def : ARMV6Pat<(int_arm_sxtb16 GPR:$Src),
+               (SXTB16 GPR:$Src, 0)>;
 
 def SXTAB16 : AI_exta_rrot_np<0b01101000, "sxtab16">;
+def : ARMV6Pat<(int_arm_sxtab16 GPR:$LHS, GPR:$RHS),
+               (SXTAB16 GPR:$LHS, GPR:$RHS, 0)>;
 
 // Zero extenders
 
@@ -3445,6 +3516,8 @@ def UXTB16 : AI_ext_rrot<0b01101100,
 //               (UXTB16r_rot GPR:$Src, 3)>;
 def : ARMV6Pat<(and (srl GPR:$Src, (i32 8)), 0xFF00FF),
                (UXTB16 GPR:$Src, 1)>;
+def : ARMV6Pat<(int_arm_uxtb16 GPR:$Src),
+               (UXTB16 GPR:$Src, 0)>;
 
 def UXTAB : AI_exta_rrot<0b01101110, "uxtab",
                         BinOpFrag<(add node:$LHS, (and node:$RHS, 0x00FF))>>;
@@ -3459,6 +3532,8 @@ def : ARMV6Pat<(add rGPR:$Rn, (and (srl rGPR:$Rm, imm8_or_16:$rot), 0xFFFF)),
 
 // This isn't safe in general, the add is two 16-bit units, not a 32-bit add.
 def UXTAB16 : AI_exta_rrot_np<0b01101100, "uxtab16">;
+def : ARMV6Pat<(int_arm_uxtab16 GPR:$LHS, GPR:$RHS),
+               (UXTAB16 GPR:$LHS, GPR:$RHS, 0)>;
 
 
 def SBFX  : I<(outs GPRnopc:$Rd),
@@ -3585,71 +3660,85 @@ class AAI<bits<8> op27_20, bits<8> op11_4, string opc,
   let Unpredictable{11-8} = 0b1111;
 }
 
+// Wrappers around the AAI class
+class AAIRevOpr<bits<8> op27_20, bits<8> op11_4, string opc,
+                list<dag> pattern = []>
+  : AAI<op27_20, op11_4, opc,
+        pattern,
+        (ins GPRnopc:$Rm, GPRnopc:$Rn),
+        "\t$Rd, $Rm, $Rn">;
+
+class AAIIntrinsic<bits<8> op27_20, bits<8> op11_4, string opc,
+                 Intrinsic intrinsic>
+  : AAI<op27_20, op11_4, opc,
+        [(set GPRnopc:$Rd, (intrinsic GPRnopc:$Rn, GPRnopc:$Rm))]>;
+
 // Saturating add/subtract
+let hasSideEffects = 1 in {
+def QADD8   : AAIIntrinsic<0b01100010, 0b11111001, "qadd8", int_arm_qadd8>;
+def QADD16  : AAIIntrinsic<0b01100010, 0b11110001, "qadd16", int_arm_qadd16>;
+def QSUB16  : AAIIntrinsic<0b01100010, 0b11110111, "qsub16", int_arm_qsub16>;
+def QSUB8   : AAIIntrinsic<0b01100010, 0b11111111, "qsub8", int_arm_qsub8>;
 
+def QDADD   : AAIRevOpr<0b00010100, 0b00000101, "qdadd",
+              [(set GPRnopc:$Rd, (int_arm_qadd (int_arm_qadd GPRnopc:$Rm,
+                                                             GPRnopc:$Rm),
+                                  GPRnopc:$Rn))]>;
+def QDSUB   : AAIRevOpr<0b00010110, 0b00000101, "qdsub",
+              [(set GPRnopc:$Rd, (int_arm_qsub GPRnopc:$Rm,
+                                  (int_arm_qadd GPRnopc:$Rn, GPRnopc:$Rn)))]>;
+def QSUB    : AAIRevOpr<0b00010010, 0b00000101, "qsub",
+              [(set GPRnopc:$Rd, (int_arm_qsub GPRnopc:$Rm, GPRnopc:$Rn))]>;
 let DecoderMethod = "DecodeQADDInstruction" in
-def QADD    : AAI<0b00010000, 0b00000101, "qadd",
-                  [(set GPRnopc:$Rd, (int_arm_qadd GPRnopc:$Rm, GPRnopc:$Rn))],
-                  (ins GPRnopc:$Rm, GPRnopc:$Rn), "\t$Rd, $Rm, $Rn">;
+  def QADD    : AAIRevOpr<0b00010000, 0b00000101, "qadd",
+                [(set GPRnopc:$Rd, (int_arm_qadd GPRnopc:$Rm, GPRnopc:$Rn))]>;
+}
 
-def QSUB    : AAI<0b00010010, 0b00000101, "qsub",
-                  [(set GPRnopc:$Rd, (int_arm_qsub GPRnopc:$Rm, GPRnopc:$Rn))],
-                  (ins GPRnopc:$Rm, GPRnopc:$Rn), "\t$Rd, $Rm, $Rn">;
-def QDADD   : AAI<0b00010100, 0b00000101, "qdadd", [],
-                  (ins GPRnopc:$Rm, GPRnopc:$Rn),
-                  "\t$Rd, $Rm, $Rn">;
-def QDSUB   : AAI<0b00010110, 0b00000101, "qdsub", [],
-                  (ins GPRnopc:$Rm, GPRnopc:$Rn),
-                  "\t$Rd, $Rm, $Rn">;
-
-def QADD16  : AAI<0b01100010, 0b11110001, "qadd16">;
-def QADD8   : AAI<0b01100010, 0b11111001, "qadd8">;
-def QASX    : AAI<0b01100010, 0b11110011, "qasx">;
-def QSAX    : AAI<0b01100010, 0b11110101, "qsax">;
-def QSUB16  : AAI<0b01100010, 0b11110111, "qsub16">;
-def QSUB8   : AAI<0b01100010, 0b11111111, "qsub8">;
-def UQADD16 : AAI<0b01100110, 0b11110001, "uqadd16">;
-def UQADD8  : AAI<0b01100110, 0b11111001, "uqadd8">;
-def UQASX   : AAI<0b01100110, 0b11110011, "uqasx">;
-def UQSAX   : AAI<0b01100110, 0b11110101, "uqsax">;
-def UQSUB16 : AAI<0b01100110, 0b11110111, "uqsub16">;
-def UQSUB8  : AAI<0b01100110, 0b11111111, "uqsub8">;
+def UQADD16 : AAIIntrinsic<0b01100110, 0b11110001, "uqadd16", int_arm_uqadd16>;
+def UQADD8  : AAIIntrinsic<0b01100110, 0b11111001, "uqadd8", int_arm_uqadd8>;
+def UQSUB16 : AAIIntrinsic<0b01100110, 0b11110111, "uqsub16", int_arm_uqsub16>;
+def UQSUB8  : AAIIntrinsic<0b01100110, 0b11111111, "uqsub8", int_arm_uqsub8>;
+def QASX    : AAIIntrinsic<0b01100010, 0b11110011, "qasx", int_arm_qasx>;
+def QSAX    : AAIIntrinsic<0b01100010, 0b11110101, "qsax", int_arm_qsax>;
+def UQASX   : AAIIntrinsic<0b01100110, 0b11110011, "uqasx", int_arm_uqasx>;
+def UQSAX   : AAIIntrinsic<0b01100110, 0b11110101, "uqsax", int_arm_uqsax>;
 
 // Signed/Unsigned add/subtract
 
-def SASX   : AAI<0b01100001, 0b11110011, "sasx">;
-def SADD16 : AAI<0b01100001, 0b11110001, "sadd16">;
-def SADD8  : AAI<0b01100001, 0b11111001, "sadd8">;
-def SSAX   : AAI<0b01100001, 0b11110101, "ssax">;
-def SSUB16 : AAI<0b01100001, 0b11110111, "ssub16">;
-def SSUB8  : AAI<0b01100001, 0b11111111, "ssub8">;
-def UASX   : AAI<0b01100101, 0b11110011, "uasx">;
-def UADD16 : AAI<0b01100101, 0b11110001, "uadd16">;
-def UADD8  : AAI<0b01100101, 0b11111001, "uadd8">;
-def USAX   : AAI<0b01100101, 0b11110101, "usax">;
-def USUB16 : AAI<0b01100101, 0b11110111, "usub16">;
-def USUB8  : AAI<0b01100101, 0b11111111, "usub8">;
+def SASX   : AAIIntrinsic<0b01100001, 0b11110011, "sasx", int_arm_sasx>;
+def SADD16 : AAIIntrinsic<0b01100001, 0b11110001, "sadd16", int_arm_sadd16>;
+def SADD8  : AAIIntrinsic<0b01100001, 0b11111001, "sadd8", int_arm_sadd8>;
+def SSAX   : AAIIntrinsic<0b01100001, 0b11110101, "ssax", int_arm_ssax>;
+def SSUB16 : AAIIntrinsic<0b01100001, 0b11110111, "ssub16", int_arm_ssub16>;
+def SSUB8  : AAIIntrinsic<0b01100001, 0b11111111, "ssub8", int_arm_ssub8>;
+def UASX   : AAIIntrinsic<0b01100101, 0b11110011, "uasx", int_arm_uasx>;
+def UADD16 : AAIIntrinsic<0b01100101, 0b11110001, "uadd16", int_arm_uadd16>;
+def UADD8  : AAIIntrinsic<0b01100101, 0b11111001, "uadd8", int_arm_uadd8>;
+def USAX   : AAIIntrinsic<0b01100101, 0b11110101, "usax", int_arm_usax>;
+def USUB16 : AAIIntrinsic<0b01100101, 0b11110111, "usub16", int_arm_usub16>;
+def USUB8  : AAIIntrinsic<0b01100101, 0b11111111, "usub8", int_arm_usub8>;
 
 // Signed/Unsigned halving add/subtract
 
-def SHASX   : AAI<0b01100011, 0b11110011, "shasx">;
-def SHADD16 : AAI<0b01100011, 0b11110001, "shadd16">;
-def SHADD8  : AAI<0b01100011, 0b11111001, "shadd8">;
-def SHSAX   : AAI<0b01100011, 0b11110101, "shsax">;
-def SHSUB16 : AAI<0b01100011, 0b11110111, "shsub16">;
-def SHSUB8  : AAI<0b01100011, 0b11111111, "shsub8">;
-def UHASX   : AAI<0b01100111, 0b11110011, "uhasx">;
-def UHADD16 : AAI<0b01100111, 0b11110001, "uhadd16">;
-def UHADD8  : AAI<0b01100111, 0b11111001, "uhadd8">;
-def UHSAX   : AAI<0b01100111, 0b11110101, "uhsax">;
-def UHSUB16 : AAI<0b01100111, 0b11110111, "uhsub16">;
-def UHSUB8  : AAI<0b01100111, 0b11111111, "uhsub8">;
+def SHASX   : AAIIntrinsic<0b01100011, 0b11110011, "shasx", int_arm_shasx>;
+def SHADD16 : AAIIntrinsic<0b01100011, 0b11110001, "shadd16", int_arm_shadd16>;
+def SHADD8  : AAIIntrinsic<0b01100011, 0b11111001, "shadd8", int_arm_shadd8>;
+def SHSAX   : AAIIntrinsic<0b01100011, 0b11110101, "shsax", int_arm_shsax>;
+def SHSUB16 : AAIIntrinsic<0b01100011, 0b11110111, "shsub16", int_arm_shsub16>;
+def SHSUB8  : AAIIntrinsic<0b01100011, 0b11111111, "shsub8", int_arm_shsub8>;
+def UHASX   : AAIIntrinsic<0b01100111, 0b11110011, "uhasx", int_arm_uhasx>;
+def UHADD16 : AAIIntrinsic<0b01100111, 0b11110001, "uhadd16", int_arm_uhadd16>;
+def UHADD8  : AAIIntrinsic<0b01100111, 0b11111001, "uhadd8", int_arm_uhadd8>;
+def UHSAX   : AAIIntrinsic<0b01100111, 0b11110101, "uhsax", int_arm_uhsax>;
+def UHSUB16 : AAIIntrinsic<0b01100111, 0b11110111, "uhsub16", int_arm_uhsub16>;
+def UHSUB8  : AAIIntrinsic<0b01100111, 0b11111111, "uhsub8", int_arm_uhsub8>;
 
 // Unsigned Sum of Absolute Differences [and Accumulate].
 
 def USAD8  : AI<(outs GPR:$Rd), (ins GPR:$Rn, GPR:$Rm),
                 MulFrm /* for convenience */, NoItinerary, "usad8",
-                "\t$Rd, $Rn, $Rm", []>,
+                "\t$Rd, $Rn, $Rm",
+             [(set GPR:$Rd, (int_arm_usad8 GPR:$Rn, GPR:$Rm))]>,
              Requires<[IsARM, HasV6]>, Sched<[WriteALU, ReadALU, ReadALU]> {
   bits<4> Rd;
   bits<4> Rn;
@@ -3663,7 +3752,8 @@ def USAD8  : AI<(outs GPR:$Rd), (ins GPR:$Rn, GPR:$Rm),
 }
 def USADA8 : AI<(outs GPR:$Rd), (ins GPR:$Rn, GPR:$Rm, GPR:$Ra),
                 MulFrm /* for convenience */, NoItinerary, "usada8",
-                "\t$Rd, $Rn, $Rm, $Ra", []>,
+                "\t$Rd, $Rn, $Rm, $Ra",
+             [(set GPR:$Rd, (int_arm_usada8 GPR:$Rn, GPR:$Rm, GPR:$Ra))]>,
              Requires<[IsARM, HasV6]>, Sched<[WriteALU, ReadALU, ReadALU]>{
   bits<4> Rd;
   bits<4> Rn;
@@ -3678,7 +3768,6 @@ def USADA8 : AI<(outs GPR:$Rd), (ins GPR:$Rn, GPR:$Rm, GPR:$Ra),
 }
 
 // Signed/Unsigned saturate
-
 def SSAT : AI<(outs GPRnopc:$Rd),
               (ins imm1_32:$sat_imm, GPRnopc:$Rn, shift_imm:$sh),
               SatFrm, NoItinerary, "ssat", "\t$Rd, $sat_imm, $Rn$sh", []>,
@@ -3747,6 +3836,10 @@ def : ARMV6Pat<(int_arm_usat GPRnopc:$a, imm0_31:$pos),
                (USAT imm0_31:$pos, GPRnopc:$a, 0)>;
 def : ARMPat<(ARMssatnoshift GPRnopc:$Rn, imm0_31:$imm),
              (SSAT imm0_31:$imm, GPRnopc:$Rn, 0)>;
+def : ARMV6Pat<(int_arm_ssat16 GPRnopc:$a, imm1_16:$pos),
+               (SSAT16 imm1_16:$pos, GPRnopc:$a)>;
+def : ARMV6Pat<(int_arm_usat16 GPRnopc:$a, imm0_15:$pos),
+               (USAT16 imm0_15:$pos, GPRnopc:$a)>;
 
 //===----------------------------------------------------------------------===//
 //  Bitwise Instructions.
@@ -3849,6 +3942,7 @@ def  MVNi  : AsI1<0b1111, (outs GPR:$Rd), (ins mod_imm:$imm), DPFrm,
   let Inst{11-0} = imm;
 }
 
+let AddedComplexity = 1 in
 def : ARMPat<(and   GPR:$src, mod_imm_not:$imm),
              (BICri GPR:$src, mod_imm_not:$imm)>;
 
@@ -3953,27 +4047,35 @@ let hasSideEffects = 0 in {
 let isCommutable = 1 in {
 def SMULL : AsMul1I64<0b0000110, (outs GPR:$RdLo, GPR:$RdHi),
                                  (ins GPR:$Rn, GPR:$Rm), IIC_iMUL64,
-                    "smull", "\t$RdLo, $RdHi, $Rn, $Rm", []>,
+                    "smull", "\t$RdLo, $RdHi, $Rn, $Rm",
+                    [(set GPR:$RdLo, GPR:$RdHi,
+                          (smullohi GPR:$Rn, GPR:$Rm))]>,
                     Requires<[IsARM, HasV6]>,
            Sched<[WriteMUL64Lo, WriteMUL64Hi, ReadMUL, ReadMUL]>;
 
 def UMULL : AsMul1I64<0b0000100, (outs GPR:$RdLo, GPR:$RdHi),
                                  (ins GPR:$Rn, GPR:$Rm), IIC_iMUL64,
-                    "umull", "\t$RdLo, $RdHi, $Rn, $Rm", []>,
+                    "umull", "\t$RdLo, $RdHi, $Rn, $Rm",
+                    [(set GPR:$RdLo, GPR:$RdHi,
+                          (umullohi GPR:$Rn, GPR:$Rm))]>,
                     Requires<[IsARM, HasV6]>,
            Sched<[WriteMAC64Lo, WriteMAC64Hi, ReadMUL, ReadMUL]>;
 
 let Constraints = "@earlyclobber $RdLo,@earlyclobber $RdHi" in {
 def SMULLv5 : ARMPseudoExpand<(outs GPR:$RdLo, GPR:$RdHi),
                             (ins GPR:$Rn, GPR:$Rm, pred:$p, cc_out:$s),
-                            4, IIC_iMUL64, [],
+                            4, IIC_iMUL64,
+                            [(set GPR:$RdLo, GPR:$RdHi,
+                                  (smullohi GPR:$Rn, GPR:$Rm))],
           (SMULL GPR:$RdLo, GPR:$RdHi, GPR:$Rn, GPR:$Rm, pred:$p, cc_out:$s)>,
                            Requires<[IsARM, NoV6]>,
               Sched<[WriteMUL64Lo, WriteMUL64Hi, ReadMUL, ReadMUL]>;
 
 def UMULLv5 : ARMPseudoExpand<(outs GPR:$RdLo, GPR:$RdHi),
                             (ins GPR:$Rn, GPR:$Rm, pred:$p, cc_out:$s),
-                            4, IIC_iMUL64, [],
+                            4, IIC_iMUL64,
+                            [(set GPR:$RdLo, GPR:$RdHi,
+                                  (umullohi GPR:$Rn, GPR:$Rm))],
           (UMULL GPR:$RdLo, GPR:$RdHi, GPR:$Rn, GPR:$Rm, pred:$p, cc_out:$s)>,
                            Requires<[IsARM, NoV6]>,
              Sched<[WriteMUL64Lo, WriteMUL64Hi, ReadMUL, ReadMUL]>;
@@ -4100,13 +4202,13 @@ multiclass AI_smul<string opc> {
 
   def WB : AMulxyI<0b0001001, 0b01, (outs GPR:$Rd), (ins GPR:$Rn, GPR:$Rm),
               IIC_iMUL16, !strconcat(opc, "wb"), "\t$Rd, $Rn, $Rm",
-              []>,
+              [(set GPR:$Rd, (ARMsmulwb GPR:$Rn, GPR:$Rm))]>,
            Requires<[IsARM, HasV5TE]>,
            Sched<[WriteMUL16, ReadMUL, ReadMUL]>;
 
   def WT : AMulxyI<0b0001001, 0b11, (outs GPR:$Rd), (ins GPR:$Rn, GPR:$Rm),
               IIC_iMUL16, !strconcat(opc, "wt"), "\t$Rd, $Rn, $Rm",
-              []>,
+              [(set GPR:$Rd, (ARMsmulwt GPR:$Rn, GPR:$Rm))]>,
             Requires<[IsARM, HasV5TE]>,
            Sched<[WriteMUL16, ReadMUL, ReadMUL]>;
 }
@@ -4153,16 +4255,18 @@ multiclass AI_smla<string opc> {
   def WB : AMulxyIa<0b0001001, 0b00, (outs GPRnopc:$Rd),
               (ins GPRnopc:$Rn, GPRnopc:$Rm, GPR:$Ra),
               IIC_iMAC16, !strconcat(opc, "wb"), "\t$Rd, $Rn, $Rm, $Ra",
-              []>,
+              [(set GPRnopc:$Rd,
+                    (add GPR:$Ra, (ARMsmulwb GPRnopc:$Rn, GPRnopc:$Rm)))]>,
            Requires<[IsARM, HasV5TE, UseMulOps]>,
            Sched<[WriteMAC16, ReadMUL, ReadMUL, ReadMAC]>;
 
   def WT : AMulxyIa<0b0001001, 0b10, (outs GPRnopc:$Rd),
               (ins GPRnopc:$Rn, GPRnopc:$Rm, GPR:$Ra),
               IIC_iMAC16, !strconcat(opc, "wt"), "\t$Rd, $Rn, $Rm, $Ra",
-              []>,
-           Requires<[IsARM, HasV5TE, UseMulOps]>,
-           Sched<[WriteMAC16, ReadMUL, ReadMUL, ReadMAC]>;
+              [(set GPRnopc:$Rd,
+                    (add GPR:$Ra, (ARMsmulwt GPRnopc:$Rn, GPRnopc:$Rm)))]>,
+            Requires<[IsARM, HasV5TE, UseMulOps]>,
+            Sched<[WriteMAC16, ReadMUL, ReadMUL, ReadMAC]>;
   }
 }
 
@@ -4170,34 +4274,34 @@ defm SMUL : AI_smul<"smul">;
 defm SMLA : AI_smla<"smla">;
 
 // Halfword multiply accumulate long: SMLAL<x><y>.
-def SMLALBB : AMulxyI64<0b0001010, 0b00, (outs GPRnopc:$RdLo, GPRnopc:$RdHi),
-                      (ins GPRnopc:$Rn, GPRnopc:$Rm),
-                      IIC_iMAC64, "smlalbb", "\t$RdLo, $RdHi, $Rn, $Rm", []>,
-              Requires<[IsARM, HasV5TE]>,
-              Sched<[WriteMAC64Lo, WriteMAC64Hi, ReadMUL, ReadMUL, ReadMAC, ReadMAC]>;
+class SMLAL<bits<2> opc1, string asm>
+ : AMulxyI64<0b0001010, opc1,
+        (outs GPRnopc:$RdLo, GPRnopc:$RdHi),
+        (ins GPRnopc:$Rn, GPRnopc:$Rm, GPRnopc:$RLo, GPRnopc:$RHi),
+        IIC_iMAC64, asm, "\t$RdLo, $RdHi, $Rn, $Rm", []>,
+        RegConstraint<"$RLo = $RdLo, $RHi = $RdHi">,
+        Requires<[IsARM, HasV5TE]>,
+        Sched<[WriteMAC64Lo, WriteMAC64Hi, ReadMUL, ReadMUL, ReadMAC, ReadMAC]>;
 
-def SMLALBT : AMulxyI64<0b0001010, 0b10, (outs GPRnopc:$RdLo, GPRnopc:$RdHi),
-                      (ins GPRnopc:$Rn, GPRnopc:$Rm),
-                      IIC_iMAC64, "smlalbt", "\t$RdLo, $RdHi, $Rn, $Rm", []>,
-              Requires<[IsARM, HasV5TE]>,
-              Sched<[WriteMAC64Lo, WriteMAC64Hi, ReadMUL, ReadMUL, ReadMAC, ReadMAC]>;
+def SMLALBB : SMLAL<0b00, "smlalbb">;
+def SMLALBT : SMLAL<0b10, "smlalbt">;
+def SMLALTB : SMLAL<0b01, "smlaltb">;
+def SMLALTT : SMLAL<0b11, "smlaltt">;
 
-def SMLALTB : AMulxyI64<0b0001010, 0b01, (outs GPRnopc:$RdLo, GPRnopc:$RdHi),
-                      (ins GPRnopc:$Rn, GPRnopc:$Rm),
-                      IIC_iMAC64, "smlaltb", "\t$RdLo, $RdHi, $Rn, $Rm", []>,
-              Requires<[IsARM, HasV5TE]>,
-              Sched<[WriteMAC64Lo, WriteMAC64Hi, ReadMUL, ReadMUL, ReadMAC, ReadMAC]>;
-
-def SMLALTT : AMulxyI64<0b0001010, 0b11, (outs GPRnopc:$RdLo, GPRnopc:$RdHi),
-                      (ins GPRnopc:$Rn, GPRnopc:$Rm),
-                      IIC_iMAC64, "smlaltt", "\t$RdLo, $RdHi, $Rn, $Rm", []>,
-              Requires<[IsARM, HasV5TE]>,
-              Sched<[WriteMAC64Lo, WriteMAC64Hi, ReadMUL, ReadMUL, ReadMAC, ReadMAC]>;
+def : ARMV5TEPat<(ARMsmlalbb GPR:$Rn, GPR:$Rm, GPR:$RLo, GPR:$RHi),
+                 (SMLALBB $Rn, $Rm, $RLo, $RHi)>;
+def : ARMV5TEPat<(ARMsmlalbt GPR:$Rn, GPR:$Rm, GPR:$RLo, GPR:$RHi),
+                 (SMLALBT $Rn, $Rm, $RLo, $RHi)>;
+def : ARMV5TEPat<(ARMsmlaltb GPR:$Rn, GPR:$Rm, GPR:$RLo, GPR:$RHi),
+                 (SMLALTB $Rn, $Rm, $RLo, $RHi)>;
+def : ARMV5TEPat<(ARMsmlaltt GPR:$Rn, GPR:$Rm, GPR:$RLo, GPR:$RHi),
+                 (SMLALTT $Rn, $Rm, $RLo, $RHi)>;
 
 // Helper class for AI_smld.
 class AMulDualIbase<bit long, bit sub, bit swap, dag oops, dag iops,
                     InstrItinClass itin, string opc, string asm>
-  : AI<oops, iops, MulFrm, itin, opc, asm, []>, Requires<[IsARM, HasV6]> {
+  : AI<oops, iops, MulFrm, itin, opc, asm, []>,
+       Requires<[IsARM, HasV6]> {
   bits<4> Rn;
   bits<4> Rm;
   let Inst{27-23} = 0b01110;
@@ -4247,19 +4351,39 @@ multiclass AI_smld<bit sub, string opc> {
           Sched<[WriteMAC32, ReadMUL, ReadMUL, ReadMAC]>;
 
   def LD: AMulDualI64<1, sub, 0, (outs GPRnopc:$RdLo, GPRnopc:$RdHi),
-                  (ins GPRnopc:$Rn, GPRnopc:$Rm), NoItinerary,
+                  (ins GPRnopc:$Rn, GPRnopc:$Rm, GPRnopc:$RLo, GPRnopc:$RHi),
+                  NoItinerary,
                   !strconcat(opc, "ld"), "\t$RdLo, $RdHi, $Rn, $Rm">,
+                  RegConstraint<"$RLo = $RdLo, $RHi = $RdHi">,
           Sched<[WriteMAC64Lo, WriteMAC64Hi, ReadMUL, ReadMUL, ReadMAC, ReadMAC]>;
 
   def LDX : AMulDualI64<1, sub, 1, (outs GPRnopc:$RdLo, GPRnopc:$RdHi),
-                  (ins GPRnopc:$Rn, GPRnopc:$Rm), NoItinerary,
+                  (ins GPRnopc:$Rn, GPRnopc:$Rm, GPRnopc:$RLo, GPRnopc:$RHi),
+                  NoItinerary,
                   !strconcat(opc, "ldx"),"\t$RdLo, $RdHi, $Rn, $Rm">,
+                  RegConstraint<"$RLo = $RdLo, $RHi = $RdHi">,
              Sched<[WriteMUL64Lo, WriteMUL64Hi, ReadMUL, ReadMUL]>;
-
 }
 
 defm SMLA : AI_smld<0, "smla">;
 defm SMLS : AI_smld<1, "smls">;
+
+def : ARMV6Pat<(int_arm_smlad GPRnopc:$Rn, GPRnopc:$Rm, GPR:$Ra),
+               (SMLAD GPRnopc:$Rn, GPRnopc:$Rm, GPRnopc:$Ra)>;
+def : ARMV6Pat<(int_arm_smladx GPRnopc:$Rn, GPRnopc:$Rm, GPR:$Ra),
+               (SMLADX GPRnopc:$Rn, GPRnopc:$Rm, GPRnopc:$Ra)>;
+def : ARMV6Pat<(int_arm_smlsd GPRnopc:$Rn, GPRnopc:$Rm, GPR:$Ra),
+               (SMLSD GPRnopc:$Rn, GPRnopc:$Rm, GPRnopc:$Ra)>;
+def : ARMV6Pat<(int_arm_smlsdx GPRnopc:$Rn, GPRnopc:$Rm, GPR:$Ra),
+               (SMLSDX GPRnopc:$Rn, GPRnopc:$Rm, GPRnopc:$Ra)>;
+def : ARMV6Pat<(ARMSmlald GPRnopc:$Rn, GPRnopc:$Rm, GPRnopc:$RLo, GPRnopc:$RHi),
+               (SMLALD GPRnopc:$Rn, GPRnopc:$Rm, GPRnopc:$RLo, GPRnopc:$RHi)>;
+def : ARMV6Pat<(ARMSmlaldx GPRnopc:$Rn, GPRnopc:$Rm, GPRnopc:$RLo, GPRnopc:$RHi),
+               (SMLALDX GPRnopc:$Rn, GPRnopc:$Rm, GPRnopc:$RLo, GPRnopc:$RHi)>;
+def : ARMV6Pat<(ARMSmlsld GPRnopc:$Rn, GPRnopc:$Rm, GPRnopc:$RLo, GPRnopc:$RHi),
+               (SMLSLD GPRnopc:$Rn, GPRnopc:$Rm, GPRnopc:$RLo, GPRnopc:$RHi)>;
+def : ARMV6Pat<(ARMSmlsldx GPRnopc:$Rn, GPRnopc:$Rm, GPRnopc:$RLo, GPRnopc:$RHi),
+               (SMLSLDX GPRnopc:$Rn, GPRnopc:$Rm, GPRnopc:$RLo, GPRnopc:$RHi)>;
 
 multiclass AI_sdml<bit sub, string opc> {
 
@@ -4273,6 +4397,15 @@ multiclass AI_sdml<bit sub, string opc> {
 
 defm SMUA : AI_sdml<0, "smua">;
 defm SMUS : AI_sdml<1, "smus">;
+
+def : ARMV6Pat<(int_arm_smuad GPRnopc:$Rn, GPRnopc:$Rm),
+               (SMUAD GPRnopc:$Rn, GPRnopc:$Rm)>;
+def : ARMV6Pat<(int_arm_smuadx GPRnopc:$Rn, GPRnopc:$Rm),
+               (SMUADX GPRnopc:$Rn, GPRnopc:$Rm)>;
+def : ARMV6Pat<(int_arm_smusd GPRnopc:$Rn, GPRnopc:$Rm),
+               (SMUSD GPRnopc:$Rn, GPRnopc:$Rm)>;
+def : ARMV6Pat<(int_arm_smusdx GPRnopc:$Rn, GPRnopc:$Rm),
+               (SMUSDX GPRnopc:$Rn, GPRnopc:$Rm)>;
 
 //===----------------------------------------------------------------------===//
 //  Division Instructions (ARMv7-A with virtualization extension)
@@ -4909,6 +5042,8 @@ def CDP : ABI<0b1110, (outs), (ins p_imm:$cop, imm0_15:$opc1,
   let Inst{15-12} = CRd;
   let Inst{19-16} = CRn;
   let Inst{23-20} = opc1;
+
+  let DecoderNamespace = "CoProc";
 }
 
 def CDP2 : ABXI<0b1110, (outs), (ins p_imm:$cop, imm0_15:$opc1,
@@ -4932,6 +5067,8 @@ def CDP2 : ABXI<0b1110, (outs), (ins p_imm:$cop, imm0_15:$opc1,
   let Inst{15-12} = CRd;
   let Inst{19-16} = CRn;
   let Inst{23-20} = opc1;
+
+  let DecoderNamespace = "CoProc";
 }
 
 class ACI<dag oops, dag iops, string opc, string asm,
@@ -4947,6 +5084,8 @@ class ACInoP<dag oops, dag iops, string opc, string asm,
   let Inst{31-28} = 0b1111;
   let Inst{27-25} = 0b110;
 }
+
+let DecoderNamespace = "CoProc" in {
 multiclass LdStCop<bit load, bit Dbit, string asm, list<dag> pattern> {
   def _OFFSET : ACI<(outs), (ins p_imm:$cop, c_imm:$CRd, addrmode5:$addr),
                     asm, "\t$cop, $CRd, $addr", pattern> {
@@ -5100,6 +5239,8 @@ defm STCL  : LdStCop <0, 1, "stcl", [(int_arm_stcl imm:$cop, imm:$CRd, addrmode5
 defm STC2  : LdSt2Cop<0, 0, "stc2", [(int_arm_stc2 imm:$cop, imm:$CRd, addrmode5:$addr)]>, Requires<[IsARM,PreV8]>;
 defm STC2L : LdSt2Cop<0, 1, "stc2l", [(int_arm_stc2l imm:$cop, imm:$CRd, addrmode5:$addr)]>, Requires<[IsARM,PreV8]>;
 
+} // DecoderNamespace = "CoProc"
+
 //===----------------------------------------------------------------------===//
 // Move between coprocessor and ARM core register.
 //
@@ -5124,6 +5265,8 @@ class MovRCopro<string opc, bit direction, dag oops, dag iops,
   let Inst{7-5}   = opc2;
   let Inst{3-0}   = CRm;
   let Inst{19-16} = CRn;
+
+  let DecoderNamespace = "CoProc";
 }
 
 def MCR : MovRCopro<"mcr", 0 /* from ARM core register to coprocessor */,
@@ -5168,6 +5311,8 @@ class MovRCopro2<string opc, bit direction, dag oops, dag iops,
   let Inst{7-5}   = opc2;
   let Inst{3-0}   = CRm;
   let Inst{19-16} = CRn;
+
+  let DecoderNamespace = "CoProc";
 }
 
 def MCR2 : MovRCopro2<"mcr2", 0 /* from ARM core register to coprocessor */,
@@ -5395,8 +5540,13 @@ let usesCustomInserter = 1, Defs = [CPSR] in
 let isCall = 1,
   Defs = [R0, R12, LR, CPSR], Uses = [SP] in {
   def TPsoft : ARMPseudoInst<(outs), (ins), 4, IIC_Br,
-               [(set R0, ARMthread_pointer)]>, Sched<[WriteBr]>;
+               [(set R0, ARMthread_pointer)]>, Sched<[WriteBr]>,
+               Requires<[IsARM, IsReadTPSoft]>;
 }
+
+// Reading thread pointer from coprocessor register
+def : ARMPat<(ARMthread_pointer), (MRC 15, 0, 13, 0, 3)>,
+      Requires<[IsARM, IsReadTPHard]>;
 
 //===----------------------------------------------------------------------===//
 // SJLJ Exception handling intrinsics
@@ -5462,6 +5612,12 @@ def Int_eh_sjlj_dispatchsetup : PseudoInst<(outs), (ins), NoItinerary, []>;
 let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1 in
   def MOVPCRX : ARMPseudoExpand<(outs), (ins GPR:$dst),
                     4, IIC_Br, [(brind GPR:$dst)],
+                    (MOVr PC, GPR:$dst, (ops 14, zero_reg), zero_reg)>,
+                  Requires<[IsARM, NoV4T]>, Sched<[WriteBr]>;
+
+let isCall = 1, isTerminator = 1, isReturn = 1, isBarrier = 1, Uses = [SP] in
+  def TAILJMPr4 : ARMPseudoExpand<(outs), (ins GPR:$dst),
+                    4, IIC_Br, [],
                     (MOVr PC, GPR:$dst, (ops 14, zero_reg), zero_reg)>,
                   Requires<[IsARM, NoV4T]>, Sched<[WriteBr]>;
 
@@ -5589,6 +5745,32 @@ def : ARMV5MOPat<(add GPR:$acc,
                       (mul (sra GPR:$a, (i32 16)), sext_16_node:$b)),
                  (SMLATB GPR:$a, GPR:$b, GPR:$acc)>,
       Sched<[WriteMUL32, ReadMUL, ReadMUL]>;
+
+def : ARMV5TEPat<(int_arm_smulbb GPR:$a, GPR:$b),
+                 (SMULBB GPR:$a, GPR:$b)>;
+def : ARMV5TEPat<(int_arm_smulbt GPR:$a, GPR:$b),
+                 (SMULBT GPR:$a, GPR:$b)>;
+def : ARMV5TEPat<(int_arm_smultb GPR:$a, GPR:$b),
+                 (SMULTB GPR:$a, GPR:$b)>;
+def : ARMV5TEPat<(int_arm_smultt GPR:$a, GPR:$b),
+                 (SMULTT GPR:$a, GPR:$b)>;
+def : ARMV5TEPat<(int_arm_smulwb GPR:$a, GPR:$b),
+                 (SMULWB GPR:$a, GPR:$b)>;
+def : ARMV5TEPat<(int_arm_smulwt GPR:$a, GPR:$b),
+                 (SMULWT GPR:$a, GPR:$b)>;
+
+def : ARMV5TEPat<(int_arm_smlabb GPR:$a, GPR:$b, GPR:$acc),
+                 (SMLABB GPR:$a, GPR:$b, GPR:$acc)>;
+def : ARMV5TEPat<(int_arm_smlabt GPR:$a, GPR:$b, GPR:$acc),
+                 (SMLABT GPR:$a, GPR:$b, GPR:$acc)>;
+def : ARMV5TEPat<(int_arm_smlatb GPR:$a, GPR:$b, GPR:$acc),
+                 (SMLATB GPR:$a, GPR:$b, GPR:$acc)>;
+def : ARMV5TEPat<(int_arm_smlatt GPR:$a, GPR:$b, GPR:$acc),
+                 (SMLATT GPR:$a, GPR:$b, GPR:$acc)>;
+def : ARMV5TEPat<(int_arm_smlawb GPR:$a, GPR:$b, GPR:$acc),
+                 (SMLAWB GPR:$a, GPR:$b, GPR:$acc)>;
+def : ARMV5TEPat<(int_arm_smlawt GPR:$a, GPR:$b, GPR:$acc),
+                 (SMLAWT GPR:$a, GPR:$b, GPR:$acc)>;
 
 // Pre-v7 uses MCR for synchronization barriers.
 def : ARMPat<(ARMMemBarrierMCR GPR:$zero), (MCR 15, 0, GPR:$zero, 7, 10, 5)>,
@@ -5767,33 +5949,49 @@ def : MnemonicAlias<"usubaddx", "usax">;
 
 // "mov Rd, mod_imm_not" can be handled via "mvn" in assembly, just like
 // for isel.
-def : ARMInstAlias<"mov${s}${p} $Rd, $imm",
+def : ARMInstSubst<"mov${s}${p} $Rd, $imm",
                    (MVNi rGPR:$Rd, mod_imm_not:$imm, pred:$p, cc_out:$s)>;
-def : ARMInstAlias<"mvn${s}${p} $Rd, $imm",
+def : ARMInstSubst<"mvn${s}${p} $Rd, $imm",
                    (MOVi rGPR:$Rd, mod_imm_not:$imm, pred:$p, cc_out:$s)>;
 // Same for AND <--> BIC
-def : ARMInstAlias<"bic${s}${p} $Rd, $Rn, $imm",
+def : ARMInstSubst<"bic${s}${p} $Rd, $Rn, $imm",
                    (ANDri GPR:$Rd, GPR:$Rn, mod_imm_not:$imm,
                           pred:$p, cc_out:$s)>;
-def : ARMInstAlias<"bic${s}${p} $Rdn, $imm",
+def : ARMInstSubst<"bic${s}${p} $Rdn, $imm",
                    (ANDri GPR:$Rdn, GPR:$Rdn, mod_imm_not:$imm,
                           pred:$p, cc_out:$s)>;
-def : ARMInstAlias<"and${s}${p} $Rd, $Rn, $imm",
+def : ARMInstSubst<"and${s}${p} $Rd, $Rn, $imm",
                    (BICri GPR:$Rd, GPR:$Rn, mod_imm_not:$imm,
                           pred:$p, cc_out:$s)>;
-def : ARMInstAlias<"and${s}${p} $Rdn, $imm",
+def : ARMInstSubst<"and${s}${p} $Rdn, $imm",
                    (BICri GPR:$Rdn, GPR:$Rdn, mod_imm_not:$imm,
                           pred:$p, cc_out:$s)>;
 
 // Likewise, "add Rd, mod_imm_neg" -> sub
-def : ARMInstAlias<"add${s}${p} $Rd, $Rn, $imm",
+def : ARMInstSubst<"add${s}${p} $Rd, $Rn, $imm",
                  (SUBri GPR:$Rd, GPR:$Rn, mod_imm_neg:$imm, pred:$p, cc_out:$s)>;
-def : ARMInstAlias<"add${s}${p} $Rd, $imm",
+def : ARMInstSubst<"add${s}${p} $Rd, $imm",
                  (SUBri GPR:$Rd, GPR:$Rd, mod_imm_neg:$imm, pred:$p, cc_out:$s)>;
+// Likewise, "sub Rd, mod_imm_neg" -> add
+def : ARMInstSubst<"sub${s}${p} $Rd, $Rn, $imm",
+                 (ADDri GPR:$Rd, GPR:$Rn, mod_imm_neg:$imm, pred:$p, cc_out:$s)>;
+def : ARMInstSubst<"sub${s}${p} $Rd, $imm",
+                 (ADDri GPR:$Rd, GPR:$Rd, mod_imm_neg:$imm, pred:$p, cc_out:$s)>;
+
+
+def : ARMInstSubst<"adc${s}${p} $Rd, $Rn, $imm",
+                 (SBCri GPR:$Rd, GPR:$Rn, mod_imm_not:$imm, pred:$p, cc_out:$s)>;
+def : ARMInstSubst<"adc${s}${p} $Rdn, $imm",
+                 (SBCri GPR:$Rdn, GPR:$Rdn, mod_imm_not:$imm, pred:$p, cc_out:$s)>;
+def : ARMInstSubst<"sbc${s}${p} $Rd, $Rn, $imm",
+                 (ADCri GPR:$Rd, GPR:$Rn, mod_imm_not:$imm, pred:$p, cc_out:$s)>;
+def : ARMInstSubst<"sbc${s}${p} $Rdn, $imm",
+                 (ADCri GPR:$Rdn, GPR:$Rdn, mod_imm_not:$imm, pred:$p, cc_out:$s)>;
+
 // Same for CMP <--> CMN via mod_imm_neg
-def : ARMInstAlias<"cmp${p} $Rd, $imm",
+def : ARMInstSubst<"cmp${p} $Rd, $imm",
                    (CMNri rGPR:$Rd, mod_imm_neg:$imm, pred:$p)>;
-def : ARMInstAlias<"cmn${p} $Rd, $imm",
+def : ARMInstSubst<"cmn${p} $Rd, $imm",
                    (CMPri rGPR:$Rd, mod_imm_neg:$imm, pred:$p)>;
 
 // The shifter forms of the MOV instruction are aliased to the ASR, LSL,
@@ -5887,21 +6085,28 @@ def SPACE : PseudoInst<(outs GPR:$Rd), (ins i32imm:$size, GPR:$Rn),
 // significantly more naive than the standard expansion: we conservatively
 // assume seq_cst, strong cmpxchg and omit clrex on failure.
 
-let Constraints = "@earlyclobber $Rd,@earlyclobber $status",
+let Constraints = "@earlyclobber $Rd,@earlyclobber $temp",
     mayLoad = 1, mayStore = 1 in {
-def CMP_SWAP_8 : PseudoInst<(outs GPR:$Rd, GPR:$status),
+def CMP_SWAP_8 : PseudoInst<(outs GPR:$Rd, GPR:$temp),
                             (ins GPR:$addr, GPR:$desired, GPR:$new),
                             NoItinerary, []>, Sched<[]>;
 
-def CMP_SWAP_16 : PseudoInst<(outs GPR:$Rd, GPR:$status),
+def CMP_SWAP_16 : PseudoInst<(outs GPR:$Rd, GPR:$temp),
                              (ins GPR:$addr, GPR:$desired, GPR:$new),
                              NoItinerary, []>, Sched<[]>;
 
-def CMP_SWAP_32 : PseudoInst<(outs GPR:$Rd, GPR:$status),
+def CMP_SWAP_32 : PseudoInst<(outs GPR:$Rd, GPR:$temp),
                              (ins GPR:$addr, GPR:$desired, GPR:$new),
                              NoItinerary, []>, Sched<[]>;
 
-def CMP_SWAP_64 : PseudoInst<(outs GPRPair:$Rd, GPR:$status),
+def CMP_SWAP_64 : PseudoInst<(outs GPRPair:$Rd, GPR:$temp),
                              (ins GPR:$addr, GPRPair:$desired, GPRPair:$new),
                              NoItinerary, []>, Sched<[]>;
+}
+
+def CompilerBarrier : PseudoInst<(outs), (ins i32imm:$ordering), NoItinerary,
+                                 [(atomic_fence imm:$ordering, 0)]> {
+  let hasSideEffects = 1;
+  let Size = 0;
+  let AsmString = "@ COMPILER BARRIER";
 }

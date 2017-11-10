@@ -24,8 +24,8 @@
 #include "llvm/IR/Module.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
-#include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetInstrInfo.h"
+#include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
 #include "llvm/Transforms/Utils/GlobalStatus.h"
 
@@ -516,10 +516,9 @@ bool llvm::attributesPermitTailCall(const Function *F, const Instruction *I,
   bool &ADS = AllowDifferingSizes ? *AllowDifferingSizes : DummyADS;
   ADS = true;
 
-  AttrBuilder CallerAttrs(F->getAttributes(),
-                          AttributeSet::ReturnIndex);
+  AttrBuilder CallerAttrs(F->getAttributes(), AttributeList::ReturnIndex);
   AttrBuilder CalleeAttrs(cast<CallInst>(I)->getAttributes(),
-                          AttributeSet::ReturnIndex);
+                          AttributeList::ReturnIndex);
 
   // Noalias is completely benign as far as calling convention goes, it
   // shouldn't affect whether the call is a tail call.
@@ -566,6 +565,24 @@ bool llvm::returnTypeIsEligibleForTailCall(const Function *F,
     return false;
 
   const Value *RetVal = Ret->getOperand(0), *CallVal = I;
+  // Intrinsic like llvm.memcpy has no return value, but the expanded
+  // libcall may or may not have return value. On most platforms, it
+  // will be expanded as memcpy in libc, which returns the first
+  // argument. On other platforms like arm-none-eabi, memcpy may be
+  // expanded as library call without return value, like __aeabi_memcpy.
+  const CallInst *Call = cast<CallInst>(I);
+  if (Function *F = Call->getCalledFunction()) {
+    Intrinsic::ID IID = F->getIntrinsicID();
+    if (((IID == Intrinsic::memcpy &&
+          TLI.getLibcallName(RTLIB::MEMCPY) == StringRef("memcpy")) ||
+         (IID == Intrinsic::memmove &&
+          TLI.getLibcallName(RTLIB::MEMMOVE) == StringRef("memmove")) ||
+         (IID == Intrinsic::memset &&
+          TLI.getLibcallName(RTLIB::MEMSET) == StringRef("memset"))) &&
+        RetVal == Call->getArgOperand(0))
+      return true;
+  }
+
   SmallVector<unsigned, 4> RetPath, CallPath;
   SmallVector<CompositeType *, 4> RetSubTypes, CallSubTypes;
 
@@ -611,25 +628,6 @@ bool llvm::returnTypeIsEligibleForTailCall(const Function *F,
   } while(nextRealType(RetSubTypes, RetPath));
 
   return true;
-}
-
-bool llvm::canBeOmittedFromSymbolTable(const GlobalValue *GV) {
-  if (!GV->hasLinkOnceODRLinkage())
-    return false;
-
-  // We assume that anyone who sets global unnamed_addr on a non-constant knows
-  // what they're doing.
-  if (GV->hasGlobalUnnamedAddr())
-    return true;
-
-  // If it is a non constant variable, it needs to be uniqued across shared
-  // objects.
-  if (const GlobalVariable *Var = dyn_cast<GlobalVariable>(GV)) {
-    if (!Var->isConstant())
-      return false;
-  }
-
-  return GV->hasAtLeastLocalUnnamedAddr();
 }
 
 static void collectFuncletMembers(

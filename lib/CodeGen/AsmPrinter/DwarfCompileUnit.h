@@ -1,4 +1,4 @@
-//===-- llvm/CodeGen/DwarfCompileUnit.h - Dwarf Compile Unit ---*- C++ -*--===//
+//===- llvm/CodeGen/DwarfCompileUnit.h - Dwarf Compile Unit -----*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -14,21 +14,34 @@
 #ifndef LLVM_LIB_CODEGEN_ASMPRINTER_DWARFCOMPILEUNIT_H
 #define LLVM_LIB_CODEGEN_ASMPRINTER_DWARFCOMPILEUNIT_H
 
+#include "DbgValueHistoryCalculator.h"
+#include "DwarfDebug.h"
 #include "DwarfUnit.h"
-#include "llvm/IR/DebugInfo.h"
-#include "llvm/Support/Dwarf.h"
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringMap.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/BinaryFormat/Dwarf.h"
+#include "llvm/CodeGen/DIE.h"
+#include "llvm/CodeGen/LexicalScopes.h"
+#include "llvm/IR/DebugInfoMetadata.h"
+#include "llvm/Support/Casting.h"
+#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <memory>
 
 namespace llvm {
 
-class StringRef;
 class AsmPrinter;
-class DIE;
-class DwarfDebug;
 class DwarfFile;
+class GlobalVariable;
+class MCExpr;
 class MCSymbol;
-class LexicalScope;
+class MDNode;
 
-class DwarfCompileUnit : public DwarfUnit {
+class DwarfCompileUnit final : public DwarfUnit {
   /// A numeric ID unique among all CUs in the module
   unsigned UniqueID;
 
@@ -37,7 +50,7 @@ class DwarfCompileUnit : public DwarfUnit {
   DIE::value_iterator StmtListValue;
 
   /// Skeleton unit associated with this unit.
-  DwarfCompileUnit *Skeleton;
+  DwarfCompileUnit *Skeleton = nullptr;
 
   /// The start of the unit within its section.
   MCSymbol *LabelBegin;
@@ -45,9 +58,8 @@ class DwarfCompileUnit : public DwarfUnit {
   /// The start of the unit macro info within macro section.
   MCSymbol *MacroLabelBegin;
 
-  typedef llvm::SmallVector<const MDNode *, 8> ImportedEntityList;
-  typedef llvm::DenseMap<const MDNode *, ImportedEntityList>
-  ImportedEntityMap;
+  using ImportedEntityList = SmallVector<const MDNode *, 8>;
+  using ImportedEntityMap = DenseMap<const MDNode *, ImportedEntityList>;
 
   ImportedEntityMap ImportedEntities;
 
@@ -66,7 +78,10 @@ class DwarfCompileUnit : public DwarfUnit {
 
   // The base address of this unit, if any. Used for relative references in
   // ranges/locs.
-  const MCSymbol *BaseAddress;
+  const MCSymbol *BaseAddress = nullptr;
+
+  DenseMap<const MDNode *, DIE *> AbstractSPDies;
+  DenseMap<const MDNode *, std::unique_ptr<DbgVariable>> AbstractVariables;
 
   /// \brief Construct a DIE for the given DbgVariable without initializing the
   /// DbgVariable's DIE reference.
@@ -74,7 +89,17 @@ class DwarfCompileUnit : public DwarfUnit {
 
   bool isDwoUnit() const override;
 
-  bool includeMinimalInlineScopes() const;
+  DenseMap<const MDNode *, DIE *> &getAbstractSPDies() {
+    if (isDwoUnit() && !DD->shareAcrossDWOCUs())
+      return AbstractSPDies;
+    return DU->getAbstractSPDies();
+  }
+
+  DenseMap<const MDNode *, std::unique_ptr<DbgVariable>> &getAbstractVariables() {
+    if (isDwoUnit() && !DD->shareAcrossDWOCUs())
+      return AbstractVariables;
+    return DU->getAbstractVariables();
+  }
 
 public:
   DwarfCompileUnit(unsigned UID, const DICompileUnit *Node, AsmPrinter *A,
@@ -85,6 +110,8 @@ public:
   DwarfCompileUnit *getSkeleton() const {
     return Skeleton;
   }
+
+  bool includeMinimalInlineScopes() const;
 
   void initStmtList();
 
@@ -112,10 +139,6 @@ public:
   void addLocalLabelAddress(DIE &Die, dwarf::Attribute Attribute,
                             const MCSymbol *Label);
 
-  /// addSectionDelta - Add a label delta attribute data and value.
-  DIE::value_iterator addSectionDelta(DIE &Die, dwarf::Attribute Attribute,
-                                      const MCSymbol *Hi, const MCSymbol *Lo);
-
   DwarfCompileUnit &getCU() override { return *this; }
 
   unsigned getOrCreateSourceID(StringRef FileName, StringRef DirName) override;
@@ -136,12 +159,6 @@ public:
 
   void attachLowHighPC(DIE &D, const MCSymbol *Begin, const MCSymbol *End);
 
-  /// addSectionLabel - Add a Dwarf section label attribute data and value.
-  ///
-  DIE::value_iterator addSectionLabel(DIE &Die, dwarf::Attribute Attribute,
-                                      const MCSymbol *Label,
-                                      const MCSymbol *Sec);
-
   /// \brief Find DIE for the given subprogram and attach appropriate
   /// DW_AT_low_pc and DW_AT_high_pc attributes. If there are global
   /// variables in this scope then create and insert DIEs for these
@@ -159,6 +176,7 @@ public:
 
   void attachRangesOrLowHighPC(DIE &D,
                                const SmallVectorImpl<InsnRange> &Ranges);
+
   /// \brief This scope represents inlined body of a function. Construct
   /// DIE to represent this concrete inlined copy of the function.
   DIE *constructInlinedScopeDIE(LexicalScope *Scope);
@@ -176,7 +194,7 @@ public:
   /// A helper function to create children of a Scope DIE.
   DIE *createScopeChildrenDIE(LexicalScope *Scope,
                               SmallVectorImpl<DIE *> &Children,
-                              unsigned *ChildScopeCount = nullptr);
+                              bool *HasNonScopeChildren = nullptr);
 
   /// \brief Construct a DIE for this subprogram scope.
   void constructSubprogramScopeDIE(const DISubprogram *Sub, LexicalScope *Scope);
@@ -189,6 +207,14 @@ public:
   DIE *constructImportedEntityDIE(const DIImportedEntity *Module);
 
   void finishSubprogramDefinition(const DISubprogram *SP);
+  void finishVariableDefinition(const DbgVariable &Var);
+
+  /// Find abstract variable associated with Var.
+  using InlinedVariable = DbgValueHistoryMap::InlinedVariable;
+  DbgVariable *getExistingAbstractVariable(InlinedVariable IV,
+                                           const DILocalVariable *&Cleansed);
+  DbgVariable *getExistingAbstractVariable(InlinedVariable IV);
+  void createAbstractVariable(const DILocalVariable *DV, LexicalScope *Scope);
 
   /// Set the skeleton unit associated with this unit.
   void setSkeleton(DwarfCompileUnit &Skel) { Skeleton = &Skel; }
@@ -263,8 +289,10 @@ public:
 
   void setBaseAddress(const MCSymbol *Base) { BaseAddress = Base; }
   const MCSymbol *getBaseAddress() const { return BaseAddress; }
+
+  bool hasDwarfPubSections() const;
 };
 
-} // end llvm namespace
+} // end namespace llvm
 
-#endif
+#endif // LLVM_LIB_CODEGEN_ASMPRINTER_DWARFCOMPILEUNIT_H

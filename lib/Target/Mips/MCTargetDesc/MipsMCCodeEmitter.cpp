@@ -11,10 +11,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "MipsMCCodeEmitter.h"
 #include "MCTargetDesc/MipsFixupKinds.h"
 #include "MCTargetDesc/MipsMCExpr.h"
 #include "MCTargetDesc/MipsMCTargetDesc.h"
-#include "MipsMCCodeEmitter.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/SmallVector.h"
@@ -101,30 +101,6 @@ static void LowerLargeShift(MCInst& Inst) {
   }
 }
 
-// Pick a DINS instruction variant based on the pos and size operands
-static void LowerDins(MCInst& InstIn) {
-  assert(InstIn.getNumOperands() == 5 &&
-         "Invalid no. of machine operands for DINS!");
-
-  assert(InstIn.getOperand(2).isImm());
-  int64_t pos = InstIn.getOperand(2).getImm();
-  assert(InstIn.getOperand(3).isImm());
-  int64_t size = InstIn.getOperand(3).getImm();
-
-  if (size <= 32) {
-    if (pos < 32)  // DINS, do nothing
-      return;
-    // DINSU
-    InstIn.getOperand(2).setImm(pos - 32);
-    InstIn.setOpcode(Mips::DINSU);
-    return;
-  }
-  // DINSM
-  assert(pos < 32 && "DINS cannot have both size and pos > 32");
-  InstIn.getOperand(3).setImm(size - 32);
-  InstIn.setOpcode(Mips::DINSM);
-}
-
 // Fix a bad compact branch encoding for beqc/bnec.
 void MipsMCCodeEmitter::LowerCompactBranch(MCInst& Inst) const {
   // Encoding may be illegal !(rs < rt), but this situation is
@@ -207,10 +183,6 @@ encodeInstruction(const MCInst &MI, raw_ostream &OS,
   case Mips::DSRA_MM64R6:
   case Mips::DROTR_MM64R6:
     LowerLargeShift(TmpInst);
-    break;
-    // Double extract instruction is chosen by pos and size operands
-  case Mips::DINS:
-    LowerDins(TmpInst);
     break;
   // Compact branches, enforce encoding restrictions.
   case Mips::BEQC:
@@ -666,7 +638,8 @@ getExprOpValue(const MCExpr *Expr, SmallVectorImpl<MCFixup> &Fixups,
                                    : Mips::fixup_Mips_DTPREL_LO;
       break;
     case MipsMCExpr::MEK_GOTTPREL:
-      FixupKind = Mips::fixup_Mips_GOTTPREL;
+      FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_GOTTPREL
+                                   : Mips::fixup_Mips_GOTTPREL;
       break;
     case MipsMCExpr::MEK_GOT:
       FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_GOT16

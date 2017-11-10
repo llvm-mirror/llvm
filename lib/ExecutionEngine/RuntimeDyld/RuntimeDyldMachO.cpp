@@ -27,7 +27,8 @@ using namespace llvm::object;
 namespace {
 
 class LoadedMachOObjectInfo final
-    : public RuntimeDyld::LoadedObjectInfoHelper<LoadedMachOObjectInfo> {
+    : public LoadedObjectInfoHelper<LoadedMachOObjectInfo,
+                                    RuntimeDyld::LoadedObjectInfo> {
 public:
   LoadedMachOObjectInfo(RuntimeDyldImpl &RTDyld,
                         ObjSectionToIDMap ObjSecToIDMap)
@@ -54,7 +55,8 @@ Expected<relocation_iterator>
 RuntimeDyldMachO::processScatteredVANILLA(
                           unsigned SectionID, relocation_iterator RelI,
                           const ObjectFile &BaseObjT,
-                          RuntimeDyldMachO::ObjSectionToIDMap &ObjSectionToID) {
+                          RuntimeDyldMachO::ObjSectionToIDMap &ObjSectionToID,
+                          bool TargetIsLocalThumbFunc) {
   const MachOObjectFile &Obj =
     static_cast<const MachOObjectFile&>(BaseObjT);
   MachO::any_relocation_info RE =
@@ -84,6 +86,7 @@ RuntimeDyldMachO::processScatteredVANILLA(
 
   Addend -= SectionBaseAddr;
   RelocationEntry R(SectionID, Offset, RelocType, Addend, IsPCRel, Size);
+  R.IsTargetThumbFunc = TargetIsLocalThumbFunc;
 
   addRelocationForSection(R, TargetSectionID);
 

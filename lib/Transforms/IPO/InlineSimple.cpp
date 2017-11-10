@@ -57,12 +57,23 @@ public:
   InlineCost getInlineCost(CallSite CS) override {
     Function *Callee = CS.getCalledFunction();
     TargetTransformInfo &TTI = TTIWP->getTTI(*Callee);
+
+    bool RemarksEnabled = false;
+    const auto &BBs = CS.getCaller()->getBasicBlockList();
+    if (!BBs.empty()) {
+      auto DI = OptimizationRemark(DEBUG_TYPE, "", DebugLoc(), &BBs.front());
+      if (DI.isEnabled())
+        RemarksEnabled = true;
+    }
+    OptimizationRemarkEmitter ORE(CS.getCaller());
+
     std::function<AssumptionCache &(Function &)> GetAssumptionCache =
         [&](Function &F) -> AssumptionCache & {
       return ACT->getAssumptionCache(F);
     };
     return llvm::getInlineCost(CS, Params, TTI, GetAssumptionCache,
-                               /*GetBFI=*/None, PSI);
+                               /*GetBFI=*/None, PSI,
+                               RemarksEnabled ? &ORE : nullptr);
   }
 
   bool runOnSCC(CallGraphSCC &SCC) override;
@@ -93,8 +104,12 @@ Pass *llvm::createFunctionInliningPass(int Threshold) {
 }
 
 Pass *llvm::createFunctionInliningPass(unsigned OptLevel,
-                                       unsigned SizeOptLevel) {
-  return new SimpleInliner(llvm::getInlineParams(OptLevel, SizeOptLevel));
+                                       unsigned SizeOptLevel,
+                                       bool DisableInlineHotCallSite) {
+  auto Param = llvm::getInlineParams(OptLevel, SizeOptLevel);
+  if (DisableInlineHotCallSite)
+    Param.HotCallSiteThreshold = 0;
+  return new SimpleInliner(Param);
 }
 
 Pass *llvm::createFunctionInliningPass(InlineParams &Params) {

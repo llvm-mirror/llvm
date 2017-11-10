@@ -1,4 +1,4 @@
-//===-- llvm/CodeGen/AsmPrinter/DbgValueHistoryCalculator.cpp -------------===//
+//===- llvm/CodeGen/AsmPrinter/DbgValueHistoryCalculator.cpp --------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -9,17 +9,24 @@
 
 #include "DbgValueHistoryCalculator.h"
 #include "llvm/ADT/BitVector.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
-#include "llvm/IR/DebugInfo.h"
+#include "llvm/CodeGen/MachineInstr.h"
+#include "llvm/CodeGen/MachineOperand.h"
+#include "llvm/IR/DebugInfoMetadata.h"
+#include "llvm/IR/DebugLoc.h"
+#include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
-#include <algorithm>
+#include <cassert>
 #include <map>
+#include <utility>
+
 using namespace llvm;
 
 #define DEBUG_TYPE "dwarfdebug"
@@ -72,10 +79,12 @@ unsigned DbgValueHistoryMap::getRegisterForVar(InlinedVariable Var) const {
 }
 
 namespace {
+
 // Maps physreg numbers to the variables they describe.
-typedef DbgValueHistoryMap::InlinedVariable InlinedVariable;
-typedef std::map<unsigned, SmallVector<InlinedVariable, 1>> RegDescribedVarsMap;
-}
+using InlinedVariable = DbgValueHistoryMap::InlinedVariable;
+using RegDescribedVarsMap = std::map<unsigned, SmallVector<InlinedVariable, 1>>;
+
+} // end anonymous namespace
 
 // \brief Claim that @Var is not described by @RegNo anymore.
 static void dropRegDescribedVar(RegDescribedVarsMap &RegVars, unsigned RegNo,
@@ -83,7 +92,7 @@ static void dropRegDescribedVar(RegDescribedVarsMap &RegVars, unsigned RegNo,
   const auto &I = RegVars.find(RegNo);
   assert(RegNo != 0U && I != RegVars.end());
   auto &VarSet = I->second;
-  const auto &VarPos = find(VarSet, Var);
+  const auto &VarPos = llvm::find(VarSet, Var);
   assert(VarPos != VarSet.end());
   VarSet.erase(VarPos);
   // Don't keep empty sets in a map to keep it as small as possible.
@@ -194,6 +203,10 @@ void llvm::calculateDbgValueHistory(const MachineFunction *MF,
         // some variables.
         for (const MachineOperand &MO : MI.operands()) {
           if (MO.isReg() && MO.isDef() && MO.getReg()) {
+            // Ignore call instructions that claim to clobber SP. The AArch64
+            // backend does this for aggregate function arguments.
+            if (MI.isCall() && MO.getReg() == SP)
+              continue;
             // If this is a virtual register, only clobber it since it doesn't
             // have aliases.
             if (TRI->isVirtualRegister(MO.getReg()))
@@ -209,8 +222,7 @@ void llvm::calculateDbgValueHistory(const MachineFunction *MF,
           } else if (MO.isRegMask()) {
             // If this is a register mask operand, clobber all debug values in
             // non-CSRs.
-            for (int I = ChangingRegs.find_first(); I != -1;
-                 I = ChangingRegs.find_next(I)) {
+            for (unsigned I : ChangingRegs.set_bits()) {
               // Don't consider SP to be clobbered by register masks.
               if (unsigned(I) != SP && TRI->isPhysicalRegister(I) &&
                   MO.clobbersPhysReg(I)) {

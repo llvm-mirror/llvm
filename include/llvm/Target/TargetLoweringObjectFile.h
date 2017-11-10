@@ -47,10 +47,10 @@ protected:
   bool SupportGOTPCRelWithOffset = true;
 
   /// This section contains the static constructor pointer list.
-  MCSection *StaticCtorSection;
+  MCSection *StaticCtorSection = nullptr;
 
   /// This section contains the static destructor pointer list.
-  MCSection *StaticDtorSection;
+  MCSection *StaticDtorSection = nullptr;
 
 public:
   TargetLoweringObjectFile() = default;
@@ -70,10 +70,9 @@ public:
   virtual void emitPersonalityValue(MCStreamer &Streamer, const DataLayout &TM,
                                     const MCSymbol *Sym) const;
 
-  /// Emit the module flags that the platform cares about.
-  virtual void emitModuleFlags(MCStreamer &Streamer,
-                               ArrayRef<Module::ModuleFlagEntry> Flags,
-                               const TargetMachine &TM) const {}
+  /// Emit the module-level metadata that the platform cares about.
+  virtual void emitModuleMetadata(MCStreamer &Streamer, Module &M,
+                                  const TargetMachine &TM) const {}
 
   /// Given a constant with the SectionKind, return a section that it should be
   /// placed in.

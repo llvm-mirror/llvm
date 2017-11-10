@@ -12,9 +12,9 @@
 #include "MCTargetDesc/HexagonBaseInfo.h"
 #include "MCTargetDesc/HexagonMCChecker.h"
 #include "MCTargetDesc/HexagonMCCodeEmitter.h"
-#include "MCTargetDesc/HexagonMCTargetDesc.h"
 #include "MCTargetDesc/HexagonMCInstrInfo.h"
 #include "MCTargetDesc/HexagonMCShuffler.h"
+#include "MCTargetDesc/HexagonMCTargetDesc.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCAsmLayout.h"
 #include "llvm/MC/MCAssembler.h"
@@ -58,13 +58,15 @@ class HexagonAsmBackend : public MCAsmBackend {
     RF.getContents() = Code;
     RF.getFixups() = Fixups;
   }
+
 public:
   HexagonAsmBackend(const Target &T, const Triple &TT, uint8_t OSABI,
       StringRef CPU) :
       OSABI(OSABI), CPU(CPU), MCII(T.createMCInstrInfo()),
       RelaxTarget(new MCInst *), Extender(nullptr) {}
 
-  MCObjectWriter *createObjectWriter(raw_pwrite_stream &OS) const override {
+  std::unique_ptr<MCObjectWriter>
+  createObjectWriter(raw_pwrite_stream &OS) const override {
     return createHexagonELFObjectWriter(OS, OSABI, CPU);
   }
 
@@ -183,7 +185,11 @@ public:
       { "fixup_Hexagon_IE_GOT_11_X",    0,      32,     0 },
       { "fixup_Hexagon_TPREL_32_6_X",   0,      32,     0 },
       { "fixup_Hexagon_TPREL_16_X",     0,      32,     0 },
-      { "fixup_Hexagon_TPREL_11_X",     0,      32,     0 }
+      { "fixup_Hexagon_TPREL_11_X",     0,      32,     0 },
+      { "fixup_Hexagon_GD_PLT_B22_PCREL_X",0,     32,     MCFixupKindInfo::FKF_IsPCRel },
+      { "fixup_Hexagon_GD_PLT_B32_PCREL_X",0,     32,     MCFixupKindInfo::FKF_IsPCRel },
+      { "fixup_Hexagon_LD_PLT_B22_PCREL_X",0,     32,     MCFixupKindInfo::FKF_IsPCRel },
+      { "fixup_Hexagon_LD_PLT_B32_PCREL_X",0,     32,     MCFixupKindInfo::FKF_IsPCRel }
     };
 
     if (Kind < FirstTargetFixupKind)
@@ -194,13 +200,8 @@ public:
     return Infos[Kind - FirstTargetFixupKind];
   }
 
-  /// processFixupValue - Target hook to adjust the literal value of a fixup
-  /// if necessary. IsResolved signals whether the caller believes a relocation
-  /// is needed; the target can modify the value. The default does nothing.
-  void processFixupValue(const MCAssembler &Asm, const MCAsmLayout &Layout,
-                         const MCFixup &Fixup, const MCFragment *DF,
-                         const MCValue &Target, uint64_t &Value,
-                         bool &IsResolved) override {
+  bool shouldForceRelocation(const MCAssembler &Asm, const MCFixup &Fixup,
+                             const MCValue &Target) override {
     MCFixupKind Kind = Fixup.getKind();
 
     switch((unsigned)Kind) {
@@ -290,9 +291,13 @@ public:
       case fixup_Hexagon_32_PCREL:
       case fixup_Hexagon_6_PCREL_X:
       case fixup_Hexagon_23_REG:
+      case fixup_Hexagon_27_REG:
+      case fixup_Hexagon_GD_PLT_B22_PCREL_X:
+      case fixup_Hexagon_GD_PLT_B32_PCREL_X:
+      case fixup_Hexagon_LD_PLT_B22_PCREL_X:
+      case fixup_Hexagon_LD_PLT_B32_PCREL_X:
         // These relocations should always have a relocation recorded
-        IsResolved = false;
-        return;
+        return true;
 
       case fixup_Hexagon_B22_PCREL:
         //IsResolved = false;
@@ -309,7 +314,7 @@ public:
       case fixup_Hexagon_B7_PCREL:
       case fixup_Hexagon_B7_PCREL_X:
         if (DisableFixup)
-          IsResolved = false;
+          return true;
         break;
 
       case FK_Data_1:
@@ -318,8 +323,9 @@ public:
       case FK_PCRel_4:
       case fixup_Hexagon_32:
         // Leave these relocations alone as they are used for EH.
-        return;
+        return false;
     }
+    return false;
   }
 
   /// getFixupKindNumBytes - The number of bytes the fixup may change.
@@ -346,6 +352,8 @@ public:
       case fixup_Hexagon_B9_PCREL_X:
       case fixup_Hexagon_B7_PCREL:
       case fixup_Hexagon_B7_PCREL_X:
+      case fixup_Hexagon_GD_PLT_B32_PCREL_X:
+      case fixup_Hexagon_LD_PLT_B32_PCREL_X:
         return 4;
     }
   }
@@ -373,6 +381,8 @@ public:
         break;
 
       case fixup_Hexagon_B32_PCREL_X:
+      case fixup_Hexagon_GD_PLT_B32_PCREL_X:
+      case fixup_Hexagon_LD_PLT_B32_PCREL_X:
         Value >>= 6;
         break;
     }
@@ -401,8 +411,9 @@ public:
   /// ApplyFixup - Apply the \arg Value for given \arg Fixup into the provided
   /// data fragment, at the offset specified by the fixup and following the
   /// fixup kind as appropriate.
-  void applyFixup(const MCFixup &Fixup, char *Data, unsigned DataSize,
-                  uint64_t FixupValue, bool IsPCRel) const override {
+  void applyFixup(const MCAssembler &Asm, const MCFixup &Fixup,
+                  const MCValue &Target, MutableArrayRef<char> Data,
+                  uint64_t FixupValue, bool IsResolved) const override {
 
     // When FixupValue is 0 the relocation is external and there
     // is nothing for us to do.
@@ -417,8 +428,8 @@ public:
     // to a real offset before we can use it.
     uint32_t Offset = Fixup.getOffset();
     unsigned NumBytes = getFixupKindNumBytes(Kind);
-    assert(Offset + NumBytes <= DataSize && "Invalid fixup offset!");
-    char *InstAddr = Data + Offset;
+    assert(Offset + NumBytes <= Data.size() && "Invalid fixup offset!");
+    char *InstAddr = Data.data() + Offset;
 
     Value = adjustFixupValue(Kind, FixupValue);
     if(!Value)
@@ -432,6 +443,7 @@ public:
       case fixup_Hexagon_B7_PCREL:
         if (!(isIntN(7, sValue)))
           HandleFixupError(7, 2, (int64_t)FixupValue, "B7_PCREL");
+        LLVM_FALLTHROUGH;
       case fixup_Hexagon_B7_PCREL_X:
         InstMask = 0x00001f18;  // Word32_B7
         Reloc = (((Value >> 2) & 0x1f) << 8) |    // Value 6-2 = Target 12-8
@@ -441,6 +453,7 @@ public:
       case fixup_Hexagon_B9_PCREL:
         if (!(isIntN(9, sValue)))
           HandleFixupError(9, 2, (int64_t)FixupValue, "B9_PCREL");
+        LLVM_FALLTHROUGH;
       case fixup_Hexagon_B9_PCREL_X:
         InstMask = 0x003000fe;  // Word32_B9
         Reloc = (((Value >> 7) & 0x3) << 20) |    // Value 8-7 = Target 21-20
@@ -452,6 +465,7 @@ public:
       case fixup_Hexagon_B13_PCREL:
         if (!(isIntN(13, sValue)))
           HandleFixupError(13, 2, (int64_t)FixupValue, "B13_PCREL");
+        LLVM_FALLTHROUGH;
       case fixup_Hexagon_B13_PCREL_X:
         InstMask = 0x00202ffe;  // Word32_B13
         Reloc = (((Value >> 12) & 0x1) << 21) |    // Value 12   = Target 21
@@ -462,6 +476,7 @@ public:
       case fixup_Hexagon_B15_PCREL:
         if (!(isIntN(15, sValue)))
           HandleFixupError(15, 2, (int64_t)FixupValue, "B15_PCREL");
+        LLVM_FALLTHROUGH;
       case fixup_Hexagon_B15_PCREL_X:
         InstMask = 0x00df20fe;  // Word32_B15
         Reloc = (((Value >> 13) & 0x3) << 22) |    // Value 14-13 = Target 23-22
@@ -473,6 +488,7 @@ public:
       case fixup_Hexagon_B22_PCREL:
         if (!(isIntN(22, sValue)))
           HandleFixupError(22, 2, (int64_t)FixupValue, "B22_PCREL");
+        LLVM_FALLTHROUGH;
       case fixup_Hexagon_B22_PCREL_X:
         InstMask = 0x01ff3ffe;  // Word32_B22
         Reloc = (((Value >> 13) & 0x1ff) << 16) |  // Value 21-13 = Target 24-16
@@ -502,7 +518,7 @@ public:
           dbgs() << "\tBValue=0x"; dbgs().write_hex(Value) <<
             ": AValue=0x"; dbgs().write_hex(FixupValue) <<
             ": Offset=" << Offset <<
-            ": Size=" << DataSize <<
+            ": Size=" << Data.size() <<
             ": OInst=0x"; dbgs().write_hex(OldData) <<
             ": Reloc=0x"; dbgs().write_hex(Reloc););
 
@@ -710,22 +726,24 @@ public:
               break;
             }
             case MCFragment::FT_Relaxable: {
+              MCContext &Context = Asm.getContext();
               auto &RF = cast<MCRelaxableFragment>(*K);
               auto &Inst = const_cast<MCInst &>(RF.getInst());
               while (Size > 0 && HexagonMCInstrInfo::bundleSize(Inst) < 4) {
-                MCInst *Nop = new (Asm.getContext()) MCInst;
+                MCInst *Nop = new (Context) MCInst;
                 Nop->setOpcode(Hexagon::A2_nop);
                 Inst.addOperand(MCOperand::createInst(Nop));
                 Size -= 4;
                 if (!HexagonMCChecker(
-                           *MCII, RF.getSubtargetInfo(), Inst, Inst,
-                           *Asm.getContext().getRegisterInfo()).check()) {
+                         Context, *MCII, RF.getSubtargetInfo(), Inst,
+                         *Context.getRegisterInfo(), false)
+                         .check()) {
                   Inst.erase(Inst.end() - 1);
                   Size = 0;
                 }
               }
-              bool Error = HexagonMCShuffle(true, *MCII, RF.getSubtargetInfo(),
-                                            Inst);
+              bool Error = HexagonMCShuffle(Context, true, *MCII,
+                                            RF.getSubtargetInfo(), Inst);
               //assert(!Error);
               (void)Error;
               ReplaceInstruction(Asm.getEmitter(), RF, Inst);

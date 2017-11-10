@@ -7,11 +7,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "AMDGPU.h"
 #include "AMDGPUBaseInfo.h"
+#include "AMDGPU.h"
 #include "SIDefines.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Triple.h"
+#include "llvm/BinaryFormat/ELF.h"
 #include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/Constants.h"
@@ -19,6 +20,7 @@
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCInstrDesc.h"
 #include "llvm/MC/MCRegisterInfo.h"
@@ -26,7 +28,6 @@
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/SubtargetFeature.h"
 #include "llvm/Support/Casting.h"
-#include "llvm/Support/ELF.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include <algorithm>
@@ -35,19 +36,11 @@
 #include <cstring>
 #include <utility>
 
-#define GET_SUBTARGETINFO_ENUM
-#include "AMDGPUGenSubtargetInfo.inc"
-#undef GET_SUBTARGETINFO_ENUM
-
-#define GET_REGINFO_ENUM
-#include "AMDGPUGenRegisterInfo.inc"
-#undef GET_REGINFO_ENUM
+#include "MCTargetDesc/AMDGPUMCTargetDesc.h"
 
 #define GET_INSTRINFO_NAMED_OPS
-#define GET_INSTRINFO_ENUM
 #include "AMDGPUGenInstrInfo.inc"
 #undef GET_INSTRINFO_NAMED_OPS
-#undef GET_INSTRINFO_ENUM
 
 namespace {
 
@@ -99,11 +92,22 @@ unsigned getVmcntBitWidthHi() { return 2; }
 } // end namespace anonymous
 
 namespace llvm {
+
+static cl::opt<bool> EnablePackedInlinableLiterals(
+    "enable-packed-inlinable-literals",
+    cl::desc("Enable packed inlinable literals (v2f16, v2i16)"),
+    cl::init(false));
+
 namespace AMDGPU {
 
 namespace IsaInfo {
 
 IsaVersion getIsaVersion(const FeatureBitset &Features) {
+  // SI.
+  if (Features.test(FeatureISAVersion6_0_0))
+    return {6, 0, 0};
+  if (Features.test(FeatureISAVersion6_0_1))
+    return {6, 0, 1};
   // CI.
   if (Features.test(FeatureISAVersion7_0_0))
     return {7, 0, 0};
@@ -111,6 +115,8 @@ IsaVersion getIsaVersion(const FeatureBitset &Features) {
     return {7, 0, 1};
   if (Features.test(FeatureISAVersion7_0_2))
     return {7, 0, 2};
+  if (Features.test(FeatureISAVersion7_0_3))
+    return {7, 0, 3};
 
   // VI.
   if (Features.test(FeatureISAVersion8_0_0))
@@ -131,10 +137,33 @@ IsaVersion getIsaVersion(const FeatureBitset &Features) {
     return {9, 0, 0};
   if (Features.test(FeatureISAVersion9_0_1))
     return {9, 0, 1};
+  if (Features.test(FeatureISAVersion9_0_2))
+    return {9, 0, 2};
+  if (Features.test(FeatureISAVersion9_0_3))
+    return {9, 0, 3};
 
   if (!Features.test(FeatureGCN) || Features.test(FeatureSouthernIslands))
     return {0, 0, 0};
   return {7, 0, 0};
+}
+
+void streamIsaVersion(const MCSubtargetInfo *STI, raw_ostream &Stream) {
+  auto TargetTriple = STI->getTargetTriple();
+  auto ISAVersion = IsaInfo::getIsaVersion(STI->getFeatureBits());
+
+  Stream << TargetTriple.getArchName() << '-'
+         << TargetTriple.getVendorName() << '-'
+         << TargetTriple.getOSName() << '-'
+         << TargetTriple.getEnvironmentName() << '-'
+         << "gfx"
+         << ISAVersion.Major
+         << ISAVersion.Minor
+         << ISAVersion.Stepping;
+  Stream.flush();
+}
+
+bool hasCodeObjectV3(const FeatureBitset &Features) {
+  return Features.test(FeatureCodeObjectV3);
 }
 
 unsigned getWavefrontSize(const FeatureBitset &Features) {
@@ -327,33 +356,6 @@ void initDefaultAMDKernelCodeT(amd_kernel_code_t &Header,
   Header.private_segment_alignment = 4;
 }
 
-MCSection *getHSATextSection(MCContext &Ctx) {
-  return Ctx.getELFSection(".hsatext", ELF::SHT_PROGBITS,
-                           ELF::SHF_ALLOC | ELF::SHF_WRITE |
-                           ELF::SHF_EXECINSTR |
-                           ELF::SHF_AMDGPU_HSA_AGENT |
-                           ELF::SHF_AMDGPU_HSA_CODE);
-}
-
-MCSection *getHSADataGlobalAgentSection(MCContext &Ctx) {
-  return Ctx.getELFSection(".hsadata_global_agent", ELF::SHT_PROGBITS,
-                           ELF::SHF_ALLOC | ELF::SHF_WRITE |
-                           ELF::SHF_AMDGPU_HSA_GLOBAL |
-                           ELF::SHF_AMDGPU_HSA_AGENT);
-}
-
-MCSection *getHSADataGlobalProgramSection(MCContext &Ctx) {
-  return  Ctx.getELFSection(".hsadata_global_program", ELF::SHT_PROGBITS,
-                            ELF::SHF_ALLOC | ELF::SHF_WRITE |
-                            ELF::SHF_AMDGPU_HSA_GLOBAL);
-}
-
-MCSection *getHSARodataReadonlyAgentSection(MCContext &Ctx) {
-  return Ctx.getELFSection(".hsarodata_readonly_agent", ELF::SHT_PROGBITS,
-                           ELF::SHF_ALLOC | ELF::SHF_AMDGPU_HSA_READONLY |
-                           ELF::SHF_AMDGPU_HSA_AGENT);
-}
-
 bool isGroupSegment(const GlobalValue *GV) {
   return GV->getType()->getAddressSpace() == AMDGPUAS::LOCAL_ADDRESS;
 }
@@ -503,6 +505,9 @@ unsigned getInitialPSInputAddr(const Function &F) {
 bool isShader(CallingConv::ID cc) {
   switch(cc) {
     case CallingConv::AMDGPU_VS:
+    case CallingConv::AMDGPU_LS:
+    case CallingConv::AMDGPU_HS:
+    case CallingConv::AMDGPU_ES:
     case CallingConv::AMDGPU_GS:
     case CallingConv::AMDGPU_PS:
     case CallingConv::AMDGPU_CS:
@@ -516,6 +521,23 @@ bool isCompute(CallingConv::ID cc) {
   return !isShader(cc) || cc == CallingConv::AMDGPU_CS;
 }
 
+bool isEntryFunctionCC(CallingConv::ID CC) {
+  switch (CC) {
+  case CallingConv::AMDGPU_KERNEL:
+  case CallingConv::SPIR_KERNEL:
+  case CallingConv::AMDGPU_VS:
+  case CallingConv::AMDGPU_GS:
+  case CallingConv::AMDGPU_PS:
+  case CallingConv::AMDGPU_CS:
+  case CallingConv::AMDGPU_ES:
+  case CallingConv::AMDGPU_HS:
+  case CallingConv::AMDGPU_LS:
+    return true;
+  default:
+    return false;
+  }
+}
+
 bool isSI(const MCSubtargetInfo &STI) {
   return STI.getFeatureBits()[AMDGPU::FeatureSouthernIslands];
 }
@@ -526,6 +548,28 @@ bool isCI(const MCSubtargetInfo &STI) {
 
 bool isVI(const MCSubtargetInfo &STI) {
   return STI.getFeatureBits()[AMDGPU::FeatureVolcanicIslands];
+}
+
+bool isGFX9(const MCSubtargetInfo &STI) {
+  return STI.getFeatureBits()[AMDGPU::FeatureGFX9];
+}
+
+bool isGCN3Encoding(const MCSubtargetInfo &STI) {
+  return STI.getFeatureBits()[AMDGPU::FeatureGCN3Encoding];
+}
+
+bool isSGPR(unsigned Reg, const MCRegisterInfo* TRI) {
+  const MCRegisterClass SGPRClass = TRI->getRegClass(AMDGPU::SReg_32RegClassID);
+  const unsigned FirstSubReg = TRI->getSubReg(Reg, 1);
+  return SGPRClass.contains(FirstSubReg != 0 ? FirstSubReg : Reg) ||
+    Reg == AMDGPU::SCC;
+}
+
+bool isRegIntersect(unsigned Reg0, unsigned Reg1, const MCRegisterInfo* TRI) {
+  for (MCRegAliasIterator R(Reg0, TRI, true); R.isValid(); ++R) {
+    if (*R == Reg1) return true;
+  }
+  return false;
 }
 
 unsigned getMCReg(unsigned Reg, const MCSubtargetInfo &STI) {
@@ -705,37 +749,98 @@ bool isInlinableLiteral16(int16_t Literal, bool HasInv2Pi) {
 bool isInlinableLiteralV216(int32_t Literal, bool HasInv2Pi) {
   assert(HasInv2Pi);
 
+  if (!EnablePackedInlinableLiterals)
+    return false;
+
   int16_t Lo16 = static_cast<int16_t>(Literal);
   int16_t Hi16 = static_cast<int16_t>(Literal >> 16);
   return Lo16 == Hi16 && isInlinableLiteral16(Lo16, HasInv2Pi);
 }
 
+bool isArgPassedInSGPR(const Argument *A) {
+  const Function *F = A->getParent();
+
+  // Arguments to compute shaders are never a source of divergence.
+  CallingConv::ID CC = F->getCallingConv();
+  switch (CC) {
+  case CallingConv::AMDGPU_KERNEL:
+  case CallingConv::SPIR_KERNEL:
+    return true;
+  case CallingConv::AMDGPU_VS:
+  case CallingConv::AMDGPU_LS:
+  case CallingConv::AMDGPU_HS:
+  case CallingConv::AMDGPU_ES:
+  case CallingConv::AMDGPU_GS:
+  case CallingConv::AMDGPU_PS:
+  case CallingConv::AMDGPU_CS:
+    // For non-compute shaders, SGPR inputs are marked with either inreg or byval.
+    // Everything else is in VGPRs.
+    return F->getAttributes().hasParamAttribute(A->getArgNo(), Attribute::InReg) ||
+           F->getAttributes().hasParamAttribute(A->getArgNo(), Attribute::ByVal);
+  default:
+    // TODO: Should calls support inreg for SGPR inputs?
+    return false;
+  }
+}
+
+// TODO: Should largely merge with AMDGPUTTIImpl::isSourceOfDivergence.
 bool isUniformMMO(const MachineMemOperand *MMO) {
   const Value *Ptr = MMO->getValue();
   // UndefValue means this is a load of a kernel input.  These are uniform.
   // Sometimes LDS instructions have constant pointers.
   // If Ptr is null, then that means this mem operand contains a
   // PseudoSourceValue like GOT.
-  if (!Ptr || isa<UndefValue>(Ptr) || isa<Argument>(Ptr) ||
+  if (!Ptr || isa<UndefValue>(Ptr) ||
       isa<Constant>(Ptr) || isa<GlobalValue>(Ptr))
     return true;
+
+  if (const Argument *Arg = dyn_cast<Argument>(Ptr))
+    return isArgPassedInSGPR(Arg);
 
   const Instruction *I = dyn_cast<Instruction>(Ptr);
   return I && I->getMetadata("amdgpu.uniform");
 }
 
 int64_t getSMRDEncodedOffset(const MCSubtargetInfo &ST, int64_t ByteOffset) {
-  if (isSI(ST) || isCI(ST))
-    return ByteOffset >> 2;
-
-  return ByteOffset;
+  if (isGCN3Encoding(ST))
+    return ByteOffset;
+  return ByteOffset >> 2;
 }
 
 bool isLegalSMRDImmOffset(const MCSubtargetInfo &ST, int64_t ByteOffset) {
   int64_t EncodedOffset = getSMRDEncodedOffset(ST, ByteOffset);
-  return isSI(ST) || isCI(ST) ? isUInt<8>(EncodedOffset) :
-                                isUInt<20>(EncodedOffset);
+  return isGCN3Encoding(ST) ?
+    isUInt<20>(EncodedOffset) : isUInt<8>(EncodedOffset);
+}
+} // end namespace AMDGPU
+
+} // end namespace llvm
+
+namespace llvm {
+namespace AMDGPU {
+
+AMDGPUAS getAMDGPUAS(Triple T) {
+  auto Env = T.getEnvironmentName();
+  AMDGPUAS AS;
+  if (Env == "amdgiz" || Env == "amdgizcl") {
+    AS.FLAT_ADDRESS     = 0;
+    AS.PRIVATE_ADDRESS  = 5;
+    AS.REGION_ADDRESS   = 4;
+  }
+  else {
+    AS.FLAT_ADDRESS     = 4;
+    AS.PRIVATE_ADDRESS  = 0;
+    AS.REGION_ADDRESS   = 5;
+   }
+  return AS;
 }
 
-} // end namespace AMDGPU
-} // end namespace llvm
+AMDGPUAS getAMDGPUAS(const TargetMachine &M) {
+  return getAMDGPUAS(M.getTargetTriple());
+}
+
+AMDGPUAS getAMDGPUAS(const Module &M) {
+  return getAMDGPUAS(Triple(M.getTargetTriple()));
+}
+} // namespace AMDGPU
+} // namespace llvm

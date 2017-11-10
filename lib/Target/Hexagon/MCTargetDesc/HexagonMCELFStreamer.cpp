@@ -17,7 +17,10 @@
 #include "MCTargetDesc/HexagonMCInstrInfo.h"
 #include "MCTargetDesc/HexagonMCShuffler.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/BinaryFormat/ELF.h"
+#include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCAssembler.h"
+#include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
@@ -29,7 +32,6 @@
 #include "llvm/MC/MCSymbolELF.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/Support/ELF.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include <cassert>
@@ -43,8 +45,21 @@ static cl::opt<unsigned> GPSize
    cl::Prefix,
    cl::init(8));
 
+HexagonMCELFStreamer::HexagonMCELFStreamer(
+    MCContext &Context, std::unique_ptr<MCAsmBackend> TAB,
+    raw_pwrite_stream &OS, std::unique_ptr<MCCodeEmitter> Emitter)
+    : MCELFStreamer(Context, std::move(TAB), OS, std::move(Emitter)),
+      MCII(createHexagonMCInstrInfo()) {}
+
+HexagonMCELFStreamer::HexagonMCELFStreamer(
+    MCContext &Context, std::unique_ptr<MCAsmBackend> TAB,
+    raw_pwrite_stream &OS, std::unique_ptr<MCCodeEmitter> Emitter,
+    MCAssembler *Assembler)
+    : MCELFStreamer(Context, std::move(TAB), OS, std::move(Emitter)),
+      MCII(createHexagonMCInstrInfo()) {}
+
 void HexagonMCELFStreamer::EmitInstruction(const MCInst &MCB,
-                                           const MCSubtargetInfo &STI) {
+                                           const MCSubtargetInfo &STI, bool) {
   assert(MCB.getOpcode() == Hexagon::BUNDLE);
   assert(HexagonMCInstrInfo::bundleSize(MCB) <= HEXAGON_PACKET_SIZE);
   assert(HexagonMCInstrInfo::bundleSize(MCB) > 0);
@@ -149,10 +164,11 @@ void HexagonMCELFStreamer::HexagonMCEmitLocalCommonSymbol(MCSymbol *Symbol,
 
 
 namespace llvm {
-  MCStreamer *createHexagonELFStreamer(Triple const &TT, MCContext &Context,
-                                       MCAsmBackend &MAB,
-                                       raw_pwrite_stream &OS, MCCodeEmitter *CE) {
-    return new HexagonMCELFStreamer(Context, MAB, OS, CE);
+MCStreamer *createHexagonELFStreamer(Triple const &TT, MCContext &Context,
+                                     std::unique_ptr<MCAsmBackend> MAB,
+                                     raw_pwrite_stream &OS,
+                                     std::unique_ptr<MCCodeEmitter> CE) {
+  return new HexagonMCELFStreamer(Context, std::move(MAB), OS, std::move(CE));
   }
 
 } // end namespace llvm

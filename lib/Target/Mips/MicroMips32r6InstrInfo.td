@@ -1124,10 +1124,7 @@ class ROUND_W_D_MMR6_DESC : ABSS_FT_MMR6_DESC_BASE<"round.w.d", FGR64Opnd,
                                                    FGR64Opnd, II_ROUND>;
 
 class SEL_S_MMR6_DESC : COP1_SEL_DESC_BASE<"sel.s", FGR32Opnd, II_SEL_S>;
-class SEL_D_MMR6_DESC : COP1_SEL_DESC_BASE<"sel.d", FGR64Opnd, II_SEL_D> {
-  // We must insert a SUBREG_TO_REG around $fd_in
-  bit usesCustomInserter = 1;
-}
+class SEL_D_MMR6_DESC : COP1_SEL_D_DESC_BASE<"sel.d", FGR64Opnd, II_SEL_D>;
 
 class SELEQZ_S_MMR6_DESC : SELEQNEZ_DESC_BASE<"seleqz.s", FGR32Opnd,
                                               II_SELCCZ_S>;
@@ -1488,7 +1485,7 @@ def MTC1_MMR6 : StdMMR6Rel, MTC1_MMR6_DESC, MTC1_MMR6_ENC, ISA_MICROMIPS32R6;
 def MTC2_MMR6 : StdMMR6Rel, MTC2_MMR6_ENC, MTC2_MMR6_DESC, ISA_MICROMIPS32R6;
 def MTHC0_MMR6 : R6MMR6Rel, MTHC0_MMR6_ENC, MTHC0_MMR6_DESC, ISA_MICROMIPS32R6;
 def MTHC1_D32_MMR6 : StdMMR6Rel, MTHC1_D32_MMR6_DESC, MTHC1_MMR6_ENC, ISA_MICROMIPS32R6;
-let DecoderNamespace = "MicroMips32r6FP64" in {
+let DecoderNamespace = "MicroMipsFP64" in {
   def MTHC1_D64_MMR6 : R6MMR6Rel, MTHC1_D64_MMR6_DESC, MTHC1_MMR6_ENC,
                        ISA_MICROMIPS32R6;
 }
@@ -1499,7 +1496,7 @@ def MFC2_MMR6 : StdMMR6Rel, MFC2_MMR6_ENC, MFC2_MMR6_DESC, ISA_MICROMIPS32R6;
 def MFHC0_MMR6 : R6MMR6Rel, MFHC0_MMR6_ENC, MFHC0_MMR6_DESC, ISA_MICROMIPS32R6;
 def MFHC1_D32_MMR6 : StdMMR6Rel, MFHC1_D32_MMR6_DESC, MFHC1_MMR6_ENC,
                      ISA_MICROMIPS32R6;
-let DecoderNamespace = "MicroMips32r6FP64" in {
+let DecoderNamespace = "MicroMipsFP64" in {
   def MFHC1_D64_MMR6 : StdMMR6Rel, MFHC1_D64_MMR6_DESC, MFHC1_MMR6_ENC,
                        ISA_MICROMIPS32R6;
 }
@@ -1732,7 +1729,7 @@ def BC2EQZC_MMR6 : R6MMR6Rel, MipsR6Inst, BC2EQZC_MMR6_ENC, BC2EQZC_MMR6_DESC,
                    ISA_MICROMIPS32R6;
 def BC2NEZC_MMR6 : R6MMR6Rel, MipsR6Inst, BC2NEZC_MMR6_ENC, BC2NEZC_MMR6_DESC,
                    ISA_MICROMIPS32R6;
-let DecoderNamespace = "MicroMips32r6FP64" in {
+let DecoderNamespace = "MicroMipsFP64" in {
   def LDC1_D64_MMR6 : StdMMR6Rel, LDC1_D64_MMR6_DESC, LDC1_MMR6_ENC,
                       ISA_MICROMIPS32R6 {
     let BaseOpcode = "LDC164";
@@ -1831,6 +1828,9 @@ def : MipsInstAlias<"not $rt, $rs",
 def : MipsInstAlias<"seh $rd", (SEH_MMR6 GPR32Opnd:$rd, GPR32Opnd:$rd), 0>,
                     ISA_MICROMIPS32R6;
 def : MipsInstAlias<"seb $rd", (SEB_MMR6 GPR32Opnd:$rd, GPR32Opnd:$rd), 0>,
+                    ISA_MICROMIPS32R6;
+def : MipsInstAlias<"lapc $rd, $imm",
+                    (ADDIUPC_MMR6 GPR32Opnd:$rd, simm19_lsl2:$imm)>,
                     ISA_MICROMIPS32R6;
 
 //===----------------------------------------------------------------------===//

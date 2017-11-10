@@ -32,6 +32,7 @@ HANDLE_TARGET_OPCODE(INLINEASM)
 HANDLE_TARGET_OPCODE(CFI_INSTRUCTION)
 HANDLE_TARGET_OPCODE(EH_LABEL)
 HANDLE_TARGET_OPCODE(GC_LABEL)
+HANDLE_TARGET_OPCODE(ANNOTATION_LABEL)
 
 /// KILL - This instruction is a noop that is used only to adjust the
 /// liveness of registers. This can be useful when dealing with
@@ -182,6 +183,10 @@ HANDLE_TARGET_OPCODE(PATCHABLE_FUNCTION_EXIT)
 /// PATCHABLE_RET which specifically only works for return instructions.
 HANDLE_TARGET_OPCODE(PATCHABLE_TAIL_CALL)
 
+/// Wraps a logging call and its arguments with nop sleds. At runtime, this can be
+/// patched to insert instrumentation instructions.
+HANDLE_TARGET_OPCODE(PATCHABLE_EVENT_CALL)
+
 /// The following generic opcodes are not supposed to appear after ISel.
 /// This is something we might want to relax, but for now, this is convenient
 /// to produce diagnostics.
@@ -218,6 +223,11 @@ HANDLE_TARGET_OPCODE(G_OR)
 HANDLE_TARGET_OPCODE(G_XOR)
 
 
+HANDLE_TARGET_OPCODE(G_IMPLICIT_DEF)
+
+/// Generic PHI instruction with types.
+HANDLE_TARGET_OPCODE(G_PHI)
+
 /// Generic instruction to materialize the address of an alloca or other
 /// stack-based object.
 HANDLE_TARGET_OPCODE(G_FRAME_INDEX)
@@ -237,8 +247,6 @@ HANDLE_TARGET_OPCODE(G_INSERT)
 
 /// Generic instruction to paste a variable number of components together into a
 /// larger register.
-HANDLE_TARGET_OPCODE(G_SEQUENCE)
-
 HANDLE_TARGET_OPCODE(G_MERGE_VALUES)
 
 /// Generic pointer to int conversion.
@@ -355,6 +363,9 @@ HANDLE_TARGET_OPCODE(G_FSUB)
 /// Generic FP multiplication.
 HANDLE_TARGET_OPCODE(G_FMUL)
 
+/// Generic FMA multiplication. Behaves like llvm fma intrinsic
+HANDLE_TARGET_OPCODE(G_FMA)
+
 /// Generic FP division.
 HANDLE_TARGET_OPCODE(G_FDIV)
 
@@ -363,6 +374,18 @@ HANDLE_TARGET_OPCODE(G_FREM)
 
 /// Generic FP exponentiation.
 HANDLE_TARGET_OPCODE(G_FPOW)
+
+/// Generic base-e exponential of a value.
+HANDLE_TARGET_OPCODE(G_FEXP)
+
+/// Generic base-2 exponential of a value.
+HANDLE_TARGET_OPCODE(G_FEXP2)
+
+/// Floating point base-e logarithm of a value.
+HANDLE_TARGET_OPCODE(G_FLOG)
+
+/// Floating point base-2 logarithm of a value.
+HANDLE_TARGET_OPCODE(G_FLOG2)
 
 /// Generic FP negation.
 HANDLE_TARGET_OPCODE(G_FNEG)
@@ -401,12 +424,18 @@ HANDLE_TARGET_OPCODE(G_INSERT_VECTOR_ELT)
 /// Generic extractelement.
 HANDLE_TARGET_OPCODE(G_EXTRACT_VECTOR_ELT)
 
+/// Generic shufflevector.
+HANDLE_TARGET_OPCODE(G_SHUFFLE_VECTOR)
+
+/// Generic byte swap.
+HANDLE_TARGET_OPCODE(G_BSWAP)
+
 // TODO: Add more generic opcodes as we move along.
 
 /// Marker for the end of the generic opcode.
 /// This is used to check if an opcode is in the range of the
 /// generic opcodes.
-HANDLE_TARGET_OPCODE_MARKER(PRE_ISEL_GENERIC_OPCODE_END, G_EXTRACT_VECTOR_ELT)
+HANDLE_TARGET_OPCODE_MARKER(PRE_ISEL_GENERIC_OPCODE_END, G_BSWAP)
 
 /// BUILTIN_OP_END - This must be the last enum value in this list.
 /// The target-specific post-isel opcode values start here.

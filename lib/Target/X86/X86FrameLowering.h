@@ -20,6 +20,7 @@ namespace llvm {
 
 class MachineInstrBuilder;
 class MCCFIInstruction;
+class X86InstrInfo;
 class X86Subtarget;
 class X86RegisterInfo;
 
@@ -30,7 +31,7 @@ public:
   // Cached subtarget predicates.
 
   const X86Subtarget &STI;
-  const TargetInstrInfo &TII;
+  const X86InstrInfo &TII;
   const X86RegisterInfo *TRI;
 
   unsigned SlotSize;
@@ -88,7 +89,7 @@ public:
 
   bool restoreCalleeSavedRegisters(MachineBasicBlock &MBB,
                                   MachineBasicBlock::iterator MI,
-                                  const std::vector<CalleeSavedInfo> &CSI,
+                                  std::vector<CalleeSavedInfo> &CSI,
                                   const TargetRegisterInfo *TRI) const override;
 
   bool hasFP(const MachineFunction &MF) const override;
@@ -99,6 +100,8 @@ public:
   int getFrameIndexReference(const MachineFunction &MF, int FI,
                              unsigned &FrameReg) const override;
 
+  int getFrameIndexReferenceSP(const MachineFunction &MF,
+                               int FI, unsigned &SPReg, int Adjustment) const;
   int getFrameIndexReferencePreferSP(const MachineFunction &MF, int FI,
                                      unsigned &FrameReg,
                                      bool IgnoreSPUpdates) const override;
@@ -154,15 +157,6 @@ public:
   void orderFrameObjects(const MachineFunction &MF,
                          SmallVectorImpl<int> &ObjectsToAllocate) const override;
 
-  /// convertArgMovsToPushes - This method tries to convert a call sequence
-  /// that uses sub and mov instructions to put the argument onto the stack
-  /// into a series of pushes.
-  /// Returns true if the transformation succeeded, false if not.
-  bool convertArgMovsToPushes(MachineFunction &MF, 
-                              MachineBasicBlock &MBB,
-                              MachineBasicBlock::iterator I, 
-                              uint64_t Amount) const;
-
   /// Wraps up getting a CFI index and building a MachineInstr for it.
   void BuildCFI(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
                 const DebugLoc &DL, const MCCFIInstruction &CFIInst) const;
@@ -211,6 +205,11 @@ private:
   unsigned getPSPSlotOffsetFromSP(const MachineFunction &MF) const;
 
   unsigned getWinEHFuncletFrameSize(const MachineFunction &MF) const;
+
+  /// Materialize the catchret target MBB in RAX.
+  void emitCatchRetReturnValue(MachineBasicBlock &MBB,
+                               MachineBasicBlock::iterator MBBI,
+                               MachineInstr *CatchRet) const;
 };
 
 } // End llvm namespace

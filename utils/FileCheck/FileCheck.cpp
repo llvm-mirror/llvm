@@ -10,7 +10,7 @@
 // FileCheck does a line-by line check of a file that validates whether it
 // contains the expected content.  This is useful for regression tests etc.
 //
-// This program exits with an error status of 2 on error, exit status of 0 if
+// This program exits with an exit status of 2 on error, exit status of 0 if
 // the file matched the expected contents, and exit status of 1 if it did not
 // contain the expected contents.
 //
@@ -1203,7 +1203,7 @@ size_t CheckString::CheckDag(const SourceMgr &SM, StringRef Buffer,
       // If there's CHECK-NOTs between two CHECK-DAGs or from CHECK to
       // CHECK-DAG, verify that there's no 'not' strings occurred in that
       // region.
-      StringRef SkippedRegion = Buffer.substr(LastPos, MatchPos);
+      StringRef SkippedRegion = Buffer.slice(LastPos, MatchPos);
       if (CheckNot(SM, SkippedRegion, NotStrings, VariableTable))
         return StringRef::npos;
       // Clear "not strings".

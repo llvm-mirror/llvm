@@ -10,6 +10,7 @@
 #include "MCTargetDesc/AArch64FixupKinds.h"
 #include "MCTargetDesc/AArch64MCTargetDesc.h"
 #include "llvm/ADT/Twine.h"
+#include "llvm/BinaryFormat/MachO.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCAsmLayout.h"
 #include "llvm/MC/MCAssembler.h"
@@ -23,7 +24,6 @@
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/MCValue.h"
 #include "llvm/Support/Casting.h"
-#include "llvm/Support/MachO.h"
 #include "llvm/Support/MathExtras.h"
 #include <cassert>
 #include <cstdint>
@@ -430,10 +430,10 @@ void AArch64MachObjectWriter::recordRelocation(
   Writer->addRelocation(RelSymbol, Fragment->getParent(), MRE);
 }
 
-MCObjectWriter *llvm::createAArch64MachObjectWriter(raw_pwrite_stream &OS,
-                                                    uint32_t CPUType,
-                                                    uint32_t CPUSubtype) {
+std::unique_ptr<MCObjectWriter>
+llvm::createAArch64MachObjectWriter(raw_pwrite_stream &OS, uint32_t CPUType,
+                                    uint32_t CPUSubtype) {
   return createMachObjectWriter(
-      new AArch64MachObjectWriter(CPUType, CPUSubtype), OS,
+      llvm::make_unique<AArch64MachObjectWriter>(CPUType, CPUSubtype), OS,
       /*IsLittleEndian=*/true);
 }

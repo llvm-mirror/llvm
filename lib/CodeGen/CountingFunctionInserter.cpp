@@ -27,13 +27,13 @@ namespace {
     CountingFunctionInserter() : FunctionPass(ID) {
       initializeCountingFunctionInserterPass(*PassRegistry::getPassRegistry());
     }
-    
+
     void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.addPreserved<GlobalsAAWrapperPass>();
     }
 
     bool runOnFunction(Function &F) override {
-      std::string CountingFunctionName =
+      StringRef CountingFunctionName =
         F.getFnAttribute("counting-function").getValueAsString();
       if (CountingFunctionName.empty())
         return false;
@@ -41,22 +41,18 @@ namespace {
       Type *VoidTy = Type::getVoidTy(F.getContext());
       Constant *CountingFn =
         F.getParent()->getOrInsertFunction(CountingFunctionName,
-                                           VoidTy, nullptr);
+                                           VoidTy);
       CallInst::Create(CountingFn, "", &*F.begin()->getFirstInsertionPt());
       return true;
     }
   };
-  
+
   char CountingFunctionInserter::ID = 0;
 }
 
-INITIALIZE_PASS(CountingFunctionInserter, "cfinserter", 
+INITIALIZE_PASS(CountingFunctionInserter, "cfinserter",
                 "Inserts calls to mcount-like functions", false, false)
 
-//===----------------------------------------------------------------------===//
-//
-// CountingFunctionInserter - Give any unnamed non-void instructions "tmp" names.
-//
 FunctionPass *llvm::createCountingFunctionInserterPass() {
   return new CountingFunctionInserter();
 }

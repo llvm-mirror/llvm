@@ -18,6 +18,8 @@
 
 namespace llvm {
 
+class raw_ostream;
+
 class DWARFAbbreviationDeclarationSet {
   uint32_t Offset;
   /// Code of the first abbreviation, if all abbreviations in the set have
@@ -25,8 +27,8 @@ class DWARFAbbreviationDeclarationSet {
   uint32_t FirstAbbrCode;
   std::vector<DWARFAbbreviationDeclaration> Decls;
 
-  typedef std::vector<DWARFAbbreviationDeclaration>::const_iterator
-      const_iterator;
+  using const_iterator =
+      std::vector<DWARFAbbreviationDeclaration>::const_iterator;
 
 public:
   DWARFAbbreviationDeclarationSet();
@@ -51,11 +53,12 @@ private:
 };
 
 class DWARFDebugAbbrev {
-  typedef std::map<uint64_t, DWARFAbbreviationDeclarationSet>
-    DWARFAbbreviationDeclarationSetMap;
+  using DWARFAbbreviationDeclarationSetMap =
+      std::map<uint64_t, DWARFAbbreviationDeclarationSet>;
 
-  DWARFAbbreviationDeclarationSetMap AbbrDeclSets;
+  mutable DWARFAbbreviationDeclarationSetMap AbbrDeclSets;
   mutable DWARFAbbreviationDeclarationSetMap::const_iterator PrevAbbrOffsetPos;
+  mutable Optional<DataExtractor> Data;
 
 public:
   DWARFDebugAbbrev();
@@ -64,9 +67,11 @@ public:
   getAbbreviationDeclarationSet(uint64_t CUAbbrOffset) const;
 
   void dump(raw_ostream &OS) const;
+  void parse() const;
   void extract(DataExtractor Data);
 
   DWARFAbbreviationDeclarationSetMap::const_iterator begin() const {
+    parse();
     return AbbrDeclSets.begin();
   }
 

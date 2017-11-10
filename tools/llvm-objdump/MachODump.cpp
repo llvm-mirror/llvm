@@ -11,12 +11,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Object/MachO.h"
 #include "llvm-objdump.h"
 #include "llvm-c/Disassembler.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/Triple.h"
+#include "llvm/BinaryFormat/MachO.h"
 #include "llvm/Config/config.h"
 #include "llvm/DebugInfo/DIContext.h"
 #include "llvm/DebugInfo/DWARF/DWARFContext.h"
@@ -30,6 +30,7 @@
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
+#include "llvm/Object/MachO.h"
 #include "llvm/Object/MachOUniversal.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
@@ -39,7 +40,6 @@
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/GraphWriter.h"
 #include "llvm/Support/LEB128.h"
-#include "llvm/Support/MachO.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
@@ -201,6 +201,35 @@ struct SymbolSorter {
 typedef std::pair<uint64_t, DiceRef> DiceTableEntry;
 typedef std::vector<DiceTableEntry> DiceTable;
 typedef DiceTable::iterator dice_table_iterator;
+
+#ifdef HAVE_LIBXAR
+namespace {
+struct ScopedXarFile {
+  xar_t xar;
+  ScopedXarFile(const char *filename, int32_t flags)
+      : xar(xar_open(filename, flags)) {}
+  ~ScopedXarFile() {
+    if (xar)
+      xar_close(xar);
+  }
+  ScopedXarFile(const ScopedXarFile &) = delete;
+  ScopedXarFile &operator=(const ScopedXarFile &) = delete;
+  operator xar_t() { return xar; }
+};
+
+struct ScopedXarIter {
+  xar_iter_t iter;
+  ScopedXarIter() : iter(xar_iter_new()) {}
+  ~ScopedXarIter() {
+    if (iter)
+      xar_iter_free(iter);
+  }
+  ScopedXarIter(const ScopedXarIter &) = delete;
+  ScopedXarIter &operator=(const ScopedXarIter &) = delete;
+  operator xar_iter_t() { return iter; }
+};
+} // namespace
+#endif // defined(HAVE_LIBXAR)
 
 // This is used to search for a data in code table entry for the PC being
 // disassembled.  The j parameter has the PC in j.first.  A single data in code
@@ -1135,7 +1164,8 @@ static void DumpInfoPlistSectionContents(StringRef Filename,
     DataRefImpl Ref = Section.getRawDataRefImpl();
     StringRef SegName = O->getSectionFinalSegmentName(Ref);
     if (SegName == "__TEXT" && SectName == "__info_plist") {
-      outs() << "Contents of (" << SegName << "," << SectName << ") section\n";
+      if (!NoLeadingHeaders)
+        outs() << "Contents of (" << SegName << "," << SectName << ") section\n";
       StringRef BytesStr;
       Section.getContents(BytesStr);
       const char *sect = reinterpret_cast<const char *>(BytesStr.data());
@@ -1223,8 +1253,13 @@ static void ProcessMachO(StringRef Name, MachOObjectFile *MachOOF,
     if (Error Err = MachOOF->checkSymbolTable())
       report_error(ArchiveName, FileName, std::move(Err), ArchitectureName);
 
-  if (Disassemble)
-    DisassembleMachO(FileName, MachOOF, "__TEXT", "__text");
+  if (Disassemble) {
+    if (MachOOF->getHeader().filetype == MachO::MH_KEXT_BUNDLE &&
+        MachOOF->getHeader().cputype == MachO::CPU_TYPE_ARM64)
+      DisassembleMachO(FileName, MachOOF, "__TEXT_EXEC", "__text");
+    else
+      DisassembleMachO(FileName, MachOOF, "__TEXT", "__text");
+  }
   if (IndirectSymbols)
     PrintIndirectSymbols(MachOOF, !NonVerbose);
   if (DataInCode)
@@ -1269,9 +1304,11 @@ static void ProcessMachO(StringRef Name, MachOObjectFile *MachOOF,
     printWeakBindTable(MachOOF);
 
   if (DwarfDumpType != DIDT_Null) {
-    std::unique_ptr<DIContext> DICtx(new DWARFContextInMemory(*MachOOF));
+    std::unique_ptr<DIContext> DICtx = DWARFContext::create(*MachOOF);
     // Dump the complete DWARF structure.
-    DICtx->dump(outs(), DwarfDumpType, true /* DumpEH */);
+    DIDumpOptions DumpOpts;
+    DumpOpts.DumpType = DwarfDumpType;
+    DICtx->dump(outs(), DumpOpts);
   }
 }
 
@@ -1917,11 +1954,45 @@ static int SymbolizerGetOpInfo(void *DisInfo, uint64_t Pc, uint64_t Offset,
   if (Arch == Triple::x86_64) {
     if (Size != 1 && Size != 2 && Size != 4 && Size != 0)
       return 0;
+    // For non MH_OBJECT types, like MH_KEXT_BUNDLE, Search the external
+    // relocation entries of a linked image (if any) for an entry that matches
+    // this segment offset.
     if (info->O->getHeader().filetype != MachO::MH_OBJECT) {
-      // TODO:
-      // Search the external relocation entries of a fully linked image
-      // (if any) for an entry that matches this segment offset.
-      // uint64_t seg_offset = (Pc + Offset);
+      uint64_t seg_offset = Pc + Offset;
+      bool reloc_found = false;
+      DataRefImpl Rel;
+      MachO::any_relocation_info RE;
+      bool isExtern = false;
+      SymbolRef Symbol;
+      for (const RelocationRef &Reloc : info->O->external_relocations()) {
+        uint64_t RelocOffset = Reloc.getOffset();
+        if (RelocOffset == seg_offset) {
+          Rel = Reloc.getRawDataRefImpl();
+          RE = info->O->getRelocation(Rel);
+          // external relocation entries should always be external.
+          isExtern = info->O->getPlainRelocationExternal(RE);
+          if (isExtern) {
+            symbol_iterator RelocSym = Reloc.getSymbol();
+            Symbol = *RelocSym;
+          }
+          reloc_found = true;
+          break;
+        }
+      }
+      if (reloc_found && isExtern) {
+        // The Value passed in will be adjusted by the Pc if the instruction
+        // adds the Pc.  But for x86_64 external relocation entries the Value
+        // is the offset from the external symbol.
+        if (info->O->getAnyRelocationPCRel(RE))
+          op_info->Value -= Pc + Offset + Size;
+        Expected<StringRef> SymName = Symbol.getName();
+        if (!SymName)
+          report_error(info->O->getFileName(), SymName.takeError());
+        const char *name = SymName->data();
+        op_info->AddSymbol.Present = 1;
+        op_info->AddSymbol.Name = name;
+        return 1;
+      }
       return 0;
     }
     // In MH_OBJECT filetypes search the section's relocation entries (if any)
@@ -2591,7 +2662,8 @@ static const char *get_symbol_32(uint32_t sect_offset, SectionRef S,
 
 // These are structs in the Objective-C meta data and read to produce the
 // comments for disassembly.  While these are part of the ABI they are no
-// public defintions.  So the are here not in include/llvm/Support/MachO.h .
+// public defintions.  So the are here not in include/llvm/BinaryFormat/MachO.h
+// .
 
 // The cfstring object in a 64-bit Mach-O file.
 struct cfstring64_t {
@@ -4568,6 +4640,12 @@ static void print_class64_t(uint64_t p, struct DisassembleInfo *info) {
                        n_value, c.superclass);
   if (name != nullptr)
     outs() << " " << name;
+  else {
+    name = get_dyld_bind_info_symbolname(S.getAddress() +
+             offset + offsetof(struct class64_t, superclass), info);
+    if (name != nullptr)
+      outs() << " " << name;
+  }
   outs() << "\n";
 
   outs() << "         cache " << format("0x%" PRIx64, c.cache);
@@ -5753,14 +5831,12 @@ static void PrintModeVerbose(uint32_t mode) {
 }
 
 static void PrintXarFilesSummary(const char *XarFilename, xar_t xar) {
-  xar_iter_t xi;
   xar_file_t xf;
-  xar_iter_t xp;
   const char *key, *type, *mode, *user, *group, *size, *mtime, *name, *m;
   char *endp;
   uint32_t mode_value;
 
-  xi = xar_iter_new();
+  ScopedXarIter xi;
   if (!xi) {
     errs() << "Can't obtain an xar iterator for xar archive "
            << XarFilename << "\n";
@@ -5769,7 +5845,7 @@ static void PrintXarFilesSummary(const char *XarFilename, xar_t xar) {
 
   // Go through the xar's files.
   for (xf = xar_file_first(xar, xi); xf; xf = xar_file_next(xi)) {
-    xp = xar_iter_new();
+    ScopedXarIter xp;
     if(!xp){
       errs() << "Can't obtain an xar iterator for xar archive "
              << XarFilename << "\n";
@@ -5783,7 +5859,7 @@ static void PrintXarFilesSummary(const char *XarFilename, xar_t xar) {
     mtime = nullptr;
     name = nullptr;
     for(key = xar_prop_first(xf, xp); key; key = xar_prop_next(xp)){
-      const char *val = nullptr; 
+      const char *val = nullptr;
       xar_prop_get(xf, key, &val);
 #if 0 // Useful for debugging.
       outs() << "key: " << key << " value: " << val << "\n";
@@ -5899,7 +5975,7 @@ static void DumpBitcodeSection(MachOObjectFile *O, const char *sect,
     errs() << XarEC.message() << "\n";
     return;
   }
-  tool_output_file XarFile(XarFilename, FD);
+  ToolOutputFile XarFile(XarFilename, FD);
   raw_fd_ostream &XarOut = XarFile.os();
   StringRef XarContents(sect, size);
   XarOut << XarContents;
@@ -5907,7 +5983,7 @@ static void DumpBitcodeSection(MachOObjectFile *O, const char *sect,
   if (XarOut.has_error())
     return;
 
-  xar_t xar = xar_open(XarFilename.c_str(), READ);
+  ScopedXarFile xar(XarFilename.c_str(), READ);
   if (!xar) {
     errs() << "Can't create temporary xar archive " << XarFilename << "\n";
     return;
@@ -5947,41 +6023,38 @@ static void DumpBitcodeSection(MachOObjectFile *O, const char *sect,
   outs() << Buffer->getBuffer() << "\n";
 
   // TODO: Go through the xar's files.
-  xar_iter_t xi = xar_iter_new();
+  ScopedXarIter xi;
   if(!xi){
     errs() << "Can't obtain an xar iterator for xar archive "
            << XarFilename.c_str() << "\n";
-    xar_close(xar);
     return;
   }
   for(xar_file_t xf = xar_file_first(xar, xi); xf; xf = xar_file_next(xi)){
     const char *key;
-    xar_iter_t xp;
     const char *member_name, *member_type, *member_size_string;
     size_t member_size;
 
-    xp = xar_iter_new();
+    ScopedXarIter xp;
     if(!xp){
       errs() << "Can't obtain an xar iterator for xar archive "
-	     << XarFilename.c_str() << "\n";
-      xar_close(xar);
+             << XarFilename.c_str() << "\n";
       return;
     }
     member_name = NULL;
     member_type = NULL;
     member_size_string = NULL;
     for(key = xar_prop_first(xf, xp); key; key = xar_prop_next(xp)){
-      const char *val = nullptr; 
+      const char *val = nullptr;
       xar_prop_get(xf, key, &val);
 #if 0 // Useful for debugging.
       outs() << "key: " << key << " value: " << val << "\n";
 #endif
-      if(strcmp(key, "name") == 0)
-	member_name = val;
-      if(strcmp(key, "type") == 0)
-	member_type = val;
-      if(strcmp(key, "data/size") == 0)
-	member_size_string = val;
+      if (strcmp(key, "name") == 0)
+        member_name = val;
+      if (strcmp(key, "type") == 0)
+        member_type = val;
+      if (strcmp(key, "data/size") == 0)
+        member_size_string = val;
     }
     /*
      * If we find a file with a name, date/size and type properties
@@ -5994,44 +6067,42 @@ static void DumpBitcodeSection(MachOObjectFile *O, const char *sect,
       char *endptr;
       member_size = strtoul(member_size_string, &endptr, 10);
       if (*endptr == '\0' && member_size != 0) {
-	char *buffer = (char *) ::operator new (member_size);
-	if (xar_extract_tobuffersz(xar, xf, &buffer, &member_size) == 0) {
+        char *buffer;
+        if (xar_extract_tobuffersz(xar, xf, &buffer, &member_size) == 0) {
 #if 0 // Useful for debugging.
-	  outs() << "xar member: " << member_name << " extracted\n";
+          outs() << "xar member: " << member_name << " extracted\n";
 #endif
           // Set the XarMemberName we want to see printed in the header.
-	  std::string OldXarMemberName;
-	  // If XarMemberName is already set this is nested. So
-	  // save the old name and create the nested name.
-	  if (!XarMemberName.empty()) {
-	    OldXarMemberName = XarMemberName;
+          std::string OldXarMemberName;
+          // If XarMemberName is already set this is nested. So
+          // save the old name and create the nested name.
+          if (!XarMemberName.empty()) {
+            OldXarMemberName = XarMemberName;
             XarMemberName =
-             (Twine("[") + XarMemberName + "]" + member_name).str();
-	  } else {
-	    OldXarMemberName = "";
-	    XarMemberName = member_name;
-	  }
-	  // See if this is could be a xar file (nested).
-	  if (member_size >= sizeof(struct xar_header)) {
+                (Twine("[") + XarMemberName + "]" + member_name).str();
+          } else {
+            OldXarMemberName = "";
+            XarMemberName = member_name;
+          }
+          // See if this is could be a xar file (nested).
+          if (member_size >= sizeof(struct xar_header)) {
 #if 0 // Useful for debugging.
-	    outs() << "could be a xar file: " << member_name << "\n";
+            outs() << "could be a xar file: " << member_name << "\n";
 #endif
-	    memcpy((char *)&XarHeader, buffer, sizeof(struct xar_header));
+            memcpy((char *)&XarHeader, buffer, sizeof(struct xar_header));
             if (sys::IsLittleEndianHost)
-	      swapStruct(XarHeader);
-	    if(XarHeader.magic == XAR_HEADER_MAGIC)
-	      DumpBitcodeSection(O, buffer, member_size, verbose,
+              swapStruct(XarHeader);
+            if (XarHeader.magic == XAR_HEADER_MAGIC)
+              DumpBitcodeSection(O, buffer, member_size, verbose,
                                  PrintXarHeader, PrintXarFileHeaders,
-		                 XarMemberName);
-	  }
-	  XarMemberName = OldXarMemberName;
-	}
-        delete buffer;
+                                 XarMemberName);
+          }
+          XarMemberName = OldXarMemberName;
+          delete buffer;
+        }
       }
     }
-    xar_iter_free(xp);
   }
-  xar_close(xar);
 }
 #endif // defined(HAVE_LIBXAR)
 
@@ -6387,8 +6458,11 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
     // GetTarget prints out stuff.
     return;
   }
+  std::string MachOMCPU;
   if (MCPU.empty() && McpuDefault)
-    MCPU = McpuDefault;
+    MachOMCPU = McpuDefault;
+  else
+    MachOMCPU = MCPU;
 
   std::unique_ptr<const MCInstrInfo> InstrInfo(TheTarget->createMCInstrInfo());
   std::unique_ptr<const MCInstrInfo> ThumbInstrInfo;
@@ -6410,7 +6484,7 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
   std::unique_ptr<const MCAsmInfo> AsmInfo(
       TheTarget->createMCAsmInfo(*MRI, TripleName));
   std::unique_ptr<const MCSubtargetInfo> STI(
-      TheTarget->createMCSubtargetInfo(TripleName, MCPU, FeaturesStr));
+      TheTarget->createMCSubtargetInfo(TripleName, MachOMCPU, FeaturesStr));
   MCContext Ctx(AsmInfo.get(), MRI.get(), nullptr);
   std::unique_ptr<MCDisassembler> DisAsm(
       TheTarget->createMCDisassembler(*STI, Ctx));
@@ -6460,7 +6534,8 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
     ThumbAsmInfo.reset(
         ThumbTarget->createMCAsmInfo(*ThumbMRI, ThumbTripleName));
     ThumbSTI.reset(
-        ThumbTarget->createMCSubtargetInfo(ThumbTripleName, MCPU, FeaturesStr));
+        ThumbTarget->createMCSubtargetInfo(ThumbTripleName, MachOMCPU,
+                                           FeaturesStr));
     ThumbCtx.reset(new MCContext(ThumbAsmInfo.get(), ThumbMRI.get(), nullptr));
     ThumbDisAsm.reset(ThumbTarget->createMCDisassembler(*ThumbSTI, *ThumbCtx));
     MCContext *PtrThumbCtx = ThumbCtx.get();
@@ -6544,7 +6619,7 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
     }
 
     // Setup the DIContext
-    diContext.reset(new DWARFContextInMemory(*DbgObj));
+    diContext = DWARFContext::create(*DbgObj);
   }
 
   if (FilterSections.size() == 0)
@@ -6653,7 +6728,7 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
         if (!DisSymName.empty() && DisSymName == SymName) {
           outs() << "-dis-symname: " << DisSymName << " not in the section\n";
           return;
-	}
+        }
         continue;
       }
       // The __mh_execute_header is special and we need to deal with that fact
@@ -7629,6 +7704,10 @@ static void PrintMachHeader(uint32_t magic, uint32_t cputype,
     if (f & MachO::MH_APP_EXTENSION_SAFE) {
       outs() << " APP_EXTENSION_SAFE";
       f &= ~MachO::MH_APP_EXTENSION_SAFE;
+    }
+    if (f & MachO::MH_NLIST_OUTOFSYNC_WITH_DYLDINFO) {
+      outs() << " NLIST_OUTOFSYNC_WITH_DYLDINFO";
+      f &= ~MachO::MH_NLIST_OUTOFSYNC_WITH_DYLDINFO;
     }
     if (f != 0 || flags == 0)
       outs() << format(" 0x%08" PRIx32, f);
@@ -9332,7 +9411,24 @@ void llvm::printMachOLoadCommands(const object::ObjectFile *Obj) {
 //===----------------------------------------------------------------------===//
 
 void llvm::printMachOExportsTrie(const object::MachOObjectFile *Obj) {
-  for (const llvm::object::ExportEntry &Entry : Obj->exports()) {
+  uint64_t BaseSegmentAddress = 0;
+  for (const auto &Command : Obj->load_commands()) {
+    if (Command.C.cmd == MachO::LC_SEGMENT) {
+      MachO::segment_command Seg = Obj->getSegmentLoadCommand(Command);
+      if (Seg.fileoff == 0 && Seg.filesize != 0) {
+        BaseSegmentAddress = Seg.vmaddr;
+        break;
+      }
+    } else if (Command.C.cmd == MachO::LC_SEGMENT_64) {
+      MachO::segment_command_64 Seg = Obj->getSegment64LoadCommand(Command);
+      if (Seg.fileoff == 0 && Seg.filesize != 0) {
+        BaseSegmentAddress = Seg.vmaddr;
+        break;
+      }
+    }
+  }
+  Error Err = Error::success();
+  for (const llvm::object::ExportEntry &Entry : Obj->exports(Err)) {
     uint64_t Flags = Entry.flags();
     bool ReExport = (Flags & MachO::EXPORT_SYMBOL_FLAGS_REEXPORT);
     bool WeakDef = (Flags & MachO::EXPORT_SYMBOL_FLAGS_WEAK_DEFINITION);
@@ -9345,7 +9441,7 @@ void llvm::printMachOExportsTrie(const object::MachOObjectFile *Obj) {
       outs() << "[re-export] ";
     else
       outs() << format("0x%08llX  ",
-                       Entry.address()); // FIXME:add in base address
+                       Entry.address() + BaseSegmentAddress);
     outs() << Entry.name();
     if (WeakDef || ThreadLocal || Resolver || Abs) {
       bool NeedsComma = false;
@@ -9385,123 +9481,29 @@ void llvm::printMachOExportsTrie(const object::MachOObjectFile *Obj) {
     }
     outs() << "\n";
   }
+  if (Err)
+    report_error(Obj->getFileName(), std::move(Err));
 }
 
 //===----------------------------------------------------------------------===//
 // rebase table dumping
 //===----------------------------------------------------------------------===//
 
-namespace {
-class SegInfo {
-public:
-  SegInfo(const object::MachOObjectFile *Obj);
-
-  StringRef segmentName(uint32_t SegIndex);
-  StringRef sectionName(uint32_t SegIndex, uint64_t SegOffset);
-  uint64_t address(uint32_t SegIndex, uint64_t SegOffset);
-  bool isValidSegIndexAndOffset(uint32_t SegIndex, uint64_t SegOffset);
-
-private:
-  struct SectionInfo {
-    uint64_t Address;
-    uint64_t Size;
-    StringRef SectionName;
-    StringRef SegmentName;
-    uint64_t OffsetInSegment;
-    uint64_t SegmentStartAddress;
-    uint32_t SegmentIndex;
-  };
-  const SectionInfo &findSection(uint32_t SegIndex, uint64_t SegOffset);
-  SmallVector<SectionInfo, 32> Sections;
-};
-}
-
-SegInfo::SegInfo(const object::MachOObjectFile *Obj) {
-  // Build table of sections so segIndex/offset pairs can be translated.
-  uint32_t CurSegIndex = Obj->hasPageZeroSegment() ? 1 : 0;
-  StringRef CurSegName;
-  uint64_t CurSegAddress;
-  for (const SectionRef &Section : Obj->sections()) {
-    SectionInfo Info;
-    error(Section.getName(Info.SectionName));
-    Info.Address = Section.getAddress();
-    Info.Size = Section.getSize();
-    Info.SegmentName =
-        Obj->getSectionFinalSegmentName(Section.getRawDataRefImpl());
-    if (!Info.SegmentName.equals(CurSegName)) {
-      ++CurSegIndex;
-      CurSegName = Info.SegmentName;
-      CurSegAddress = Info.Address;
-    }
-    Info.SegmentIndex = CurSegIndex - 1;
-    Info.OffsetInSegment = Info.Address - CurSegAddress;
-    Info.SegmentStartAddress = CurSegAddress;
-    Sections.push_back(Info);
-  }
-}
-
-StringRef SegInfo::segmentName(uint32_t SegIndex) {
-  for (const SectionInfo &SI : Sections) {
-    if (SI.SegmentIndex == SegIndex)
-      return SI.SegmentName;
-  }
-  llvm_unreachable("invalid segIndex");
-}
-
-bool SegInfo::isValidSegIndexAndOffset(uint32_t SegIndex,
-                                       uint64_t OffsetInSeg) {
-  for (const SectionInfo &SI : Sections) {
-    if (SI.SegmentIndex != SegIndex)
-      continue;
-    if (SI.OffsetInSegment > OffsetInSeg)
-      continue;
-    if (OffsetInSeg >= (SI.OffsetInSegment + SI.Size))
-      continue;
-    return true;
-  }
-  return false;
-}
-
-const SegInfo::SectionInfo &SegInfo::findSection(uint32_t SegIndex,
-                                                 uint64_t OffsetInSeg) {
-  for (const SectionInfo &SI : Sections) {
-    if (SI.SegmentIndex != SegIndex)
-      continue;
-    if (SI.OffsetInSegment > OffsetInSeg)
-      continue;
-    if (OffsetInSeg >= (SI.OffsetInSegment + SI.Size))
-      continue;
-    return SI;
-  }
-  llvm_unreachable("segIndex and offset not in any section");
-}
-
-StringRef SegInfo::sectionName(uint32_t SegIndex, uint64_t OffsetInSeg) {
-  return findSection(SegIndex, OffsetInSeg).SectionName;
-}
-
-uint64_t SegInfo::address(uint32_t SegIndex, uint64_t OffsetInSeg) {
-  const SectionInfo &SI = findSection(SegIndex, OffsetInSeg);
-  return SI.SegmentStartAddress + OffsetInSeg;
-}
-
-void llvm::printMachORebaseTable(const object::MachOObjectFile *Obj) {
-  // Build table of sections so names can used in final output.
-  SegInfo sectionTable(Obj);
-
+void llvm::printMachORebaseTable(object::MachOObjectFile *Obj) {
   outs() << "segment  section            address     type\n";
-  for (const llvm::object::MachORebaseEntry &Entry : Obj->rebaseTable()) {
-    uint32_t SegIndex = Entry.segmentIndex();
-    uint64_t OffsetInSeg = Entry.segmentOffset();
-    StringRef SegmentName = sectionTable.segmentName(SegIndex);
-    StringRef SectionName = sectionTable.sectionName(SegIndex, OffsetInSeg);
-    uint64_t Address = sectionTable.address(SegIndex, OffsetInSeg);
+  Error Err = Error::success();
+  for (const llvm::object::MachORebaseEntry &Entry : Obj->rebaseTable(Err)) {
+    StringRef SegmentName = Entry.segmentName();
+    StringRef SectionName = Entry.sectionName();
+    uint64_t Address = Entry.address();
 
     // Table lines look like: __DATA  __nl_symbol_ptr  0x0000F00C  pointer
     outs() << format("%-8s %-18s 0x%08" PRIX64 "  %s\n",
                      SegmentName.str().c_str(), SectionName.str().c_str(),
                      Address, Entry.typeName().str().c_str());
   }
+  if (Err)
+    report_error(Obj->getFileName(), std::move(Err));
 }
 
 static StringRef ordinalName(const object::MachOObjectFile *Obj, int Ordinal) {
@@ -9529,19 +9531,15 @@ static StringRef ordinalName(const object::MachOObjectFile *Obj, int Ordinal) {
 // bind table dumping
 //===----------------------------------------------------------------------===//
 
-void llvm::printMachOBindTable(const object::MachOObjectFile *Obj) {
+void llvm::printMachOBindTable(object::MachOObjectFile *Obj) {
   // Build table of sections so names can used in final output.
-  SegInfo sectionTable(Obj);
-
   outs() << "segment  section            address    type       "
             "addend dylib            symbol\n";
   Error Err = Error::success();
   for (const llvm::object::MachOBindEntry &Entry : Obj->bindTable(Err)) {
-    uint32_t SegIndex = Entry.segmentIndex();
-    uint64_t OffsetInSeg = Entry.segmentOffset();
-    StringRef SegmentName = sectionTable.segmentName(SegIndex);
-    StringRef SectionName = sectionTable.sectionName(SegIndex, OffsetInSeg);
-    uint64_t Address = sectionTable.address(SegIndex, OffsetInSeg);
+    StringRef SegmentName = Entry.segmentName();
+    StringRef SectionName = Entry.sectionName();
+    uint64_t Address = Entry.address();
 
     // Table lines look like:
     //  __DATA  __got  0x00012010    pointer   0 libSystem ___stack_chk_guard
@@ -9564,19 +9562,14 @@ void llvm::printMachOBindTable(const object::MachOObjectFile *Obj) {
 // lazy bind table dumping
 //===----------------------------------------------------------------------===//
 
-void llvm::printMachOLazyBindTable(const object::MachOObjectFile *Obj) {
-  // Build table of sections so names can used in final output.
-  SegInfo sectionTable(Obj);
-
+void llvm::printMachOLazyBindTable(object::MachOObjectFile *Obj) {
   outs() << "segment  section            address     "
             "dylib            symbol\n";
   Error Err = Error::success();
   for (const llvm::object::MachOBindEntry &Entry : Obj->lazyBindTable(Err)) {
-    uint32_t SegIndex = Entry.segmentIndex();
-    uint64_t OffsetInSeg = Entry.segmentOffset();
-    StringRef SegmentName = sectionTable.segmentName(SegIndex);
-    StringRef SectionName = sectionTable.sectionName(SegIndex, OffsetInSeg);
-    uint64_t Address = sectionTable.address(SegIndex, OffsetInSeg);
+    StringRef SegmentName = Entry.segmentName();
+    StringRef SectionName = Entry.sectionName();
+    uint64_t Address = Entry.address();
 
     // Table lines look like:
     //  __DATA  __got  0x00012010 libSystem ___stack_chk_guard
@@ -9594,10 +9587,7 @@ void llvm::printMachOLazyBindTable(const object::MachOObjectFile *Obj) {
 // weak bind table dumping
 //===----------------------------------------------------------------------===//
 
-void llvm::printMachOWeakBindTable(const object::MachOObjectFile *Obj) {
-  // Build table of sections so names can used in final output.
-  SegInfo sectionTable(Obj);
-
+void llvm::printMachOWeakBindTable(object::MachOObjectFile *Obj) {
   outs() << "segment  section            address     "
             "type       addend   symbol\n";
   Error Err = Error::success();
@@ -9608,11 +9598,9 @@ void llvm::printMachOWeakBindTable(const object::MachOObjectFile *Obj) {
              << Entry.symbolName() << "\n";
       continue;
     }
-    uint32_t SegIndex = Entry.segmentIndex();
-    uint64_t OffsetInSeg = Entry.segmentOffset();
-    StringRef SegmentName = sectionTable.segmentName(SegIndex);
-    StringRef SectionName = sectionTable.sectionName(SegIndex, OffsetInSeg);
-    uint64_t Address = sectionTable.address(SegIndex, OffsetInSeg);
+    StringRef SegmentName = Entry.segmentName();
+    StringRef SectionName = Entry.sectionName();
+    uint64_t Address = Entry.address();
 
     // Table lines look like:
     // __DATA  __data  0x00001000  pointer    0   _foo
@@ -9635,17 +9623,9 @@ static const char *get_dyld_bind_info_symbolname(uint64_t ReferenceValue,
                                                  struct DisassembleInfo *info) {
   if (info->bindtable == nullptr) {
     info->bindtable = llvm::make_unique<SymbolAddressMap>();
-    SegInfo sectionTable(info->O);
     Error Err = Error::success();
     for (const llvm::object::MachOBindEntry &Entry : info->O->bindTable(Err)) {
-      uint32_t SegIndex = Entry.segmentIndex();
-      uint64_t OffsetInSeg = Entry.segmentOffset();
-      if (!sectionTable.isValidSegIndexAndOffset(SegIndex, OffsetInSeg)) {
-        if (Err)
-          report_error(info->O->getFileName(), std::move(Err));
-        return nullptr;
-      }
-      uint64_t Address = sectionTable.address(SegIndex, OffsetInSeg);
+      uint64_t Address = Entry.address();
       StringRef name = Entry.symbolName();
       if (!name.empty())
         (*info->bindtable)[Address] = name;

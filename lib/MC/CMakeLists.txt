@@ -10,6 +10,7 @@ add_llvm_library(LLVMMC
   MCAsmStreamer.cpp
   MCAssembler.cpp
   MCCodeEmitter.cpp
+  MCCodePadder.cpp
   MCCodeView.cpp
   MCContext.cpp
   MCDwarf.cpp
@@ -45,13 +46,13 @@ add_llvm_library(LLVMMC
   MCWasmObjectTargetWriter.cpp
   MCWasmStreamer.cpp
   MCWin64EH.cpp
+  MCWinCOFFStreamer.cpp
   MCWinEH.cpp
   MachObjectWriter.cpp
   StringTableBuilder.cpp
   SubtargetFeature.cpp
   WasmObjectWriter.cpp
   WinCOFFObjectWriter.cpp
-  WinCOFFStreamer.cpp
 
   ADDITIONAL_HEADER_DIRS
   ${LLVM_MAIN_INCLUDE_DIR}/llvm/MC

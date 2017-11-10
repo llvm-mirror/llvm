@@ -6,33 +6,52 @@
 ; RUN: llvm-bcanalyzer -dump %t3.thinlto.bc | FileCheck %s --check-prefix=COMBINED
 
 
+; CHECK: <SOURCE_FILENAME
+; "hot_function"
+; CHECK-NEXT: <FUNCTION op0=0 op1=12
+; "hot1"
+; CHECK-NEXT: <FUNCTION op0=12 op1=4
+; "hot2"
+; CHECK-NEXT: <FUNCTION op0=16 op1=4
+; "hot3"
+; CHECK-NEXT: <FUNCTION op0=20 op1=4
+; "hot4"
+; CHECK-NEXT: <FUNCTION op0=24 op1=4
+; "cold"
+; CHECK-NEXT: <FUNCTION op0=28 op1=4
+; "none1"
+; CHECK-NEXT: <FUNCTION op0=32 op1=5
+; "none2"
+; CHECK-NEXT: <FUNCTION op0=37 op1=5
+; "none3"
+; CHECK-NEXT: <FUNCTION op0=42 op1=5
 ; CHECK-LABEL:       <GLOBALVAL_SUMMARY_BLOCK
 ; CHECK-NEXT:    <VERSION
-; See if the call to func is registered, using the expected callsite count
-; and profile count, with value id matching the subsequent value symbol table.
-; CHECK-NEXT:    <PERMODULE_PROFILE {{.*}} op4=[[HOT1:.*]] op5=3 op6=[[COLD:.*]] op7=1 op8=[[HOT2:.*]] op9=3 op10=[[NONE1:.*]] op11=2 op12=[[HOT3:.*]] op13=3 op14=[[NONE2:.*]] op15=2 op16=[[NONE3:.*]] op17=2 op18=[[LEGACY:.*]] op19=3/>
+; CHECK-NEXT:    <VALUE_GUID op0=25 op1=123/>
+; op4=hot1 op6=cold op8=hot2 op10=hot4 op12=none1 op14=hot3 op16=none2 op18=none3 op20=123
+; CHECK-NEXT:    <PERMODULE_PROFILE {{.*}} op5=1 op6=3 op7=5 op8=1 op9=2 op10=3 op11=4 op12=1 op13=6 op14=2 op15=3 op16=3 op17=7 op18=2 op19=8 op20=2 op21=25 op22=4/>
 ; CHECK-NEXT:  </GLOBALVAL_SUMMARY_BLOCK>
-; CHECK-LABEL:  <VALUE_SYMTAB
-; CHECK-NEXT:       <FNENTRY {{.*}} record string = 'hot_function
-; CHECK-DAG:        <ENTRY abbrevid=6 op0=[[NONE1]] {{.*}} record string = 'none1'
-; CHECK-DAG:        <ENTRY abbrevid=6 op0=[[COLD]] {{.*}} record string = 'cold'
-; CHECK-DAG:        <ENTRY abbrevid=6 op0=[[NONE2]] {{.*}} record string = 'none2'
-; CHECK-DAG:        <ENTRY abbrevid=6 op0=[[NONE3]] {{.*}} record string = 'none3'
-; CHECK-DAG:        <ENTRY abbrevid=6 op0=[[HOT1]] {{.*}} record string = 'hot1'
-; CHECK-DAG:        <ENTRY abbrevid=6 op0=[[HOT2]] {{.*}} record string = 'hot2'
-; CHECK-DAG:        <ENTRY abbrevid=6 op0=[[HOT3]] {{.*}} record string = 'hot3'
-; CHECK-DAG:        <COMBINED_ENTRY abbrevid=11 op0=[[LEGACY]] op1=123/>
-; CHECK-LABEL:  </VALUE_SYMTAB>
+
+; CHECK: <STRTAB_BLOCK
+; CHECK-NEXT: blob data = 'hot_functionhot1hot2hot3hot4coldnone1none2none3{{.*}}'
 
 ; COMBINED:       <GLOBALVAL_SUMMARY_BLOCK
 ; COMBINED-NEXT:    <VERSION
+; COMBINED-NEXT:    <VALUE_GUID
+; COMBINED-NEXT:    <VALUE_GUID
+; COMBINED-NEXT:    <VALUE_GUID
+; COMBINED-NEXT:    <VALUE_GUID
+; COMBINED-NEXT:    <VALUE_GUID
+; COMBINED-NEXT:    <VALUE_GUID
+; COMBINED-NEXT:    <VALUE_GUID
+; COMBINED-NEXT:    <VALUE_GUID
 ; COMBINED-NEXT:    <COMBINED abbrevid=
 ; COMBINED-NEXT:    <COMBINED abbrevid=
 ; COMBINED-NEXT:    <COMBINED abbrevid=
 ; COMBINED-NEXT:    <COMBINED abbrevid=
 ; COMBINED-NEXT:    <COMBINED abbrevid=
 ; COMBINED-NEXT:    <COMBINED abbrevid=
-; COMBINED-NEXT:    <COMBINED_PROFILE {{.*}} op5=[[HOT1:.*]] op6=3 op7=[[COLD:.*]] op8=1 op9=[[HOT2:.*]] op10=3 op11=[[NONE1:.*]] op12=2 op13=[[HOT3:.*]] op14=3 op15=[[NONE2:.*]] op16=2 op17=[[NONE3:.*]] op18=2/>
+; COMBINED-NEXT:    <COMBINED_PROFILE {{.*}} op6=[[HOT1:.*]] op7=3 op8=[[COLD:.*]] op9=1 op10=[[HOT2:.*]] op11=3 op12=[[NONE1:.*]] op13=2 op14=[[HOT3:.*]] op15=3 op16=[[NONE2:.*]] op17=2 op18=[[NONE3:.*]] op19=2/>
 ; COMBINED_NEXT:    <COMBINED abbrevid=
 ; COMBINED_NEXT:  </GLOBALVAL_SUMMARY_BLOCK>
 
@@ -49,6 +68,7 @@ entry:
 Cold:           ; 1/1000 goes here
   call void @cold()
   call void @hot2()
+  call void @hot4(), !prof !15
   call void @none1()
   br label %exit
 Hot:            ; 999/1000 goes here
@@ -69,6 +89,7 @@ exit:
 declare void @hot1() #1
 declare void @hot2() #1
 declare void @hot3() #1
+declare void @hot4() #1
 declare void @cold() #1
 declare void @none1() #1
 declare void @none2() #1
@@ -97,3 +118,4 @@ declare void @none3() #1
 !12 = !{i32 10000, i64 100, i32 1}
 !13 = !{i32 999000, i64 100, i32 1}
 !14 = !{i32 999999, i64 1, i32 2}
+!15 = !{!"branch_weights", i32 100}

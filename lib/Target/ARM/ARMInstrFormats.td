@@ -69,6 +69,7 @@ def NVExtFrm      : Format<39>;
 def NVMulSLFrm    : Format<40>;
 def NVTBLFrm      : Format<41>;
 def DPSoRegImmFrm  : Format<42>;
+def N3RegCplxFrm  : Format<43>;
 
 // Misc flags.
 
@@ -184,7 +185,7 @@ def s_cc_out : OptionalDefOperand<OtherVT, (ops CCR), (ops (i32 CPSR))> {
 
 // ARM special operands for disassembly only.
 //
-def SetEndAsmOperand : ImmAsmOperand {
+def SetEndAsmOperand : ImmAsmOperand<0,1> {
   let Name = "SetEndImm";
   let ParserMethod = "parseSetEndImm";
 }
@@ -221,25 +222,25 @@ def banked_reg : Operand<i32> {
 //     16       imm6<5:4> = '01', 16 - <imm> is encoded in imm6<3:0>
 //     32       imm6<5> = '1', 32 - <imm> is encoded in imm6<4:0>
 //     64       64 - <imm> is encoded in imm6<5:0>
-def shr_imm8_asm_operand : ImmAsmOperand { let Name = "ShrImm8"; }
+def shr_imm8_asm_operand : ImmAsmOperand<1,8> { let Name = "ShrImm8"; }
 def shr_imm8  : Operand<i32>, ImmLeaf<i32, [{ return Imm > 0 && Imm <= 8; }]> {
   let EncoderMethod = "getShiftRight8Imm";
   let DecoderMethod = "DecodeShiftRight8Imm";
   let ParserMatchClass = shr_imm8_asm_operand;
 }
-def shr_imm16_asm_operand : ImmAsmOperand { let Name = "ShrImm16"; }
+def shr_imm16_asm_operand : ImmAsmOperand<1,16> { let Name = "ShrImm16"; }
 def shr_imm16 : Operand<i32>, ImmLeaf<i32, [{ return Imm > 0 && Imm <= 16; }]> {
   let EncoderMethod = "getShiftRight16Imm";
   let DecoderMethod = "DecodeShiftRight16Imm";
   let ParserMatchClass = shr_imm16_asm_operand;
 }
-def shr_imm32_asm_operand : ImmAsmOperand { let Name = "ShrImm32"; }
+def shr_imm32_asm_operand : ImmAsmOperand<1,32> { let Name = "ShrImm32"; }
 def shr_imm32 : Operand<i32>, ImmLeaf<i32, [{ return Imm > 0 && Imm <= 32; }]> {
   let EncoderMethod = "getShiftRight32Imm";
   let DecoderMethod = "DecodeShiftRight32Imm";
   let ParserMatchClass = shr_imm32_asm_operand;
 }
-def shr_imm64_asm_operand : ImmAsmOperand { let Name = "ShrImm64"; }
+def shr_imm64_asm_operand : ImmAsmOperand<1,64> { let Name = "ShrImm64"; }
 def shr_imm64 : Operand<i32>, ImmLeaf<i32, [{ return Imm > 0 && Imm <= 64; }]> {
   let EncoderMethod = "getShiftRight64Imm";
   let DecoderMethod = "DecodeShiftRight64Imm";
@@ -261,10 +262,19 @@ def const_pool_asm_imm : Operand<i32> {
 // Note: When EmitPriority == 1, the alias will be used for printing
 class ARMInstAlias<string Asm, dag Result, bit EmitPriority = 0>
       : InstAlias<Asm, Result, EmitPriority>, Requires<[IsARM]>;
+class ARMInstSubst<string Asm, dag Result, bit EmitPriority = 0>
+      : InstAlias<Asm, Result, EmitPriority>,
+        Requires<[IsARM,UseNegativeImmediates]>;
 class  tInstAlias<string Asm, dag Result, bit EmitPriority = 0>
       : InstAlias<Asm, Result, EmitPriority>, Requires<[IsThumb]>;
+class  tInstSubst<string Asm, dag Result, bit EmitPriority = 0>
+      : InstAlias<Asm, Result, EmitPriority>,
+        Requires<[IsThumb,UseNegativeImmediates]>;
 class t2InstAlias<string Asm, dag Result, bit EmitPriority = 0>
       : InstAlias<Asm, Result, EmitPriority>, Requires<[IsThumb2]>;
+class t2InstSubst<string Asm, dag Result, bit EmitPriority = 0>
+      : InstAlias<Asm, Result, EmitPriority>,
+        Requires<[IsThumb2,UseNegativeImmediates]>;
 class VFP2InstAlias<string Asm, dag Result, bit EmitPriority = 0>
       : InstAlias<Asm, Result, EmitPriority>, Requires<[HasVFP2]>;
 class VFP2DPInstAlias<string Asm, dag Result, bit EmitPriority = 0>
@@ -948,7 +958,7 @@ class ADivA1I<bits<3> opcod, dag oops, dag iops,
 }
 
 // PKH instructions
-def PKHLSLAsmOperand : ImmAsmOperand {
+def PKHLSLAsmOperand : ImmAsmOperand<0,31> {
   let Name = "PKHLSLImm";
   let ParserMethod = "parsePKHLSLImm";
 }
@@ -2503,6 +2513,80 @@ multiclass NEONDTAnyInstAlias<string opc, string asm, dag Result, bit EmitPriori
 // for instalias defs.
 class NEONDataTypeAsmPseudoInst<string opc, string dt, string asm, dag iops> :
   AsmPseudoInst<!strconcat(opc, dt, "\t", asm), iops>, Requires<[HasNEON]>;
+
+// Extension of NEON 3-vector data processing instructions in coprocessor 8
+// encoding space, introduced in ARMv8.3-A.
+class N3VCP8<bits<2> op24_23, bits<2> op21_20, bit op6, bit op4,
+             dag oops, dag iops, InstrItinClass itin,
+             string opc, string dt, string asm, string cstr, list<dag> pattern>
+  : NeonInp<oops, iops, AddrModeNone, IndexModeNone, N3RegCplxFrm, itin, opc,
+            dt, asm, cstr, pattern> {
+  bits<5> Vd;
+  bits<5> Vn;
+  bits<5> Vm;
+
+  let DecoderNamespace = "VFPV8";
+  // These have the same encodings in ARM and Thumb2
+  let PostEncoderMethod = "";
+
+  let Inst{31-25} = 0b1111110;
+  let Inst{24-23} = op24_23;
+  let Inst{22}    = Vd{4};
+  let Inst{21-20} = op21_20;
+  let Inst{19-16} = Vn{3-0};
+  let Inst{15-12} = Vd{3-0};
+  let Inst{11-8}  = 0b1000;
+  let Inst{7}     = Vn{4};
+  let Inst{6}     = op6;
+  let Inst{5}     = Vm{4};
+  let Inst{4}     = op4;
+  let Inst{3-0}   = Vm{3-0};
+}
+
+// Extension of NEON 2-vector-and-scalar data processing instructions in
+// coprocessor 8 encoding space, introduced in ARMv8.3-A.
+class N3VLaneCP8<bit op23, bits<2> op21_20, bit op6, bit op4,
+             dag oops, dag iops, InstrItinClass itin,
+             string opc, string dt, string asm, string cstr, list<dag> pattern>
+  : NeonInp<oops, iops, AddrModeNone, IndexModeNone, N3RegCplxFrm, itin, opc,
+            dt, asm, cstr, pattern> {
+  bits<5> Vd;
+  bits<5> Vn;
+  bits<5> Vm;
+
+  let DecoderNamespace = "VFPV8";
+  // These have the same encodings in ARM and Thumb2
+  let PostEncoderMethod = "";
+
+  let Inst{31-24} = 0b11111110;
+  let Inst{23}    = op23;
+  let Inst{22}    = Vd{4};
+  let Inst{21-20} = op21_20;
+  let Inst{19-16} = Vn{3-0};
+  let Inst{15-12} = Vd{3-0};
+  let Inst{11-8}  = 0b1000;
+  let Inst{7}     = Vn{4};
+  let Inst{6}     = op6;
+  // Bit 5 set by sub-classes
+  let Inst{4}     = op4;
+  let Inst{3-0}   = Vm{3-0};
+}
+
+// Operand types for complex instructions
+class ComplexRotationOperand<int Angle, int Remainder, string Type, string Diag>
+  : AsmOperandClass {
+  let PredicateMethod = "isComplexRotation<" # Angle # ", " # Remainder # ">";
+  let DiagnosticString = "complex rotation must be " # Diag;
+  let Name = "ComplexRotation" # Type;
+}
+def complexrotateop : Operand<i32> {
+  let ParserMatchClass = ComplexRotationOperand<90, 0, "Even", "0, 90, 180 or 270">;
+  let PrintMethod = "printComplexRotationOp<90, 0>";
+}
+def complexrotateopodd : Operand<i32> {
+  let ParserMatchClass = ComplexRotationOperand<180, 90, "Odd", "90 or 270">;
+  let PrintMethod = "printComplexRotationOp<180, 90>";
+}
 
 // Data type suffix token aliases. Implements Table A7-3 in the ARM ARM.
 def : TokenAlias<".s8", ".i8">;

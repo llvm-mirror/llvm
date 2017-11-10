@@ -8,8 +8,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/iterator_range.h"
 #include "llvm/ADT/Twine.h"
+#include "llvm/ADT/iterator_range.h"
+#include "llvm/BinaryFormat/MachO.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCAsmLayout.h"
 #include "llvm/MC/MCAssembler.h"
@@ -27,7 +28,6 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/MachO.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
@@ -449,7 +449,7 @@ void MachObjectWriter::recordRelocation(MCAssembler &Asm,
                                         const MCAsmLayout &Layout,
                                         const MCFragment *Fragment,
                                         const MCFixup &Fixup, MCValue Target,
-                                        bool &IsPCRel, uint64_t &FixedValue) {
+                                        uint64_t &FixedValue) {
   TargetObjectWriter->recordRelocation(this, Asm, Layout, Fragment, Fixup,
                                        Target, FixedValue);
 }
@@ -994,8 +994,9 @@ void MachObjectWriter::writeObject(MCAssembler &Asm,
   }
 }
 
-MCObjectWriter *llvm::createMachObjectWriter(MCMachObjectTargetWriter *MOTW,
-                                             raw_pwrite_stream &OS,
-                                             bool IsLittleEndian) {
-  return new MachObjectWriter(MOTW, OS, IsLittleEndian);
+std::unique_ptr<MCObjectWriter>
+llvm::createMachObjectWriter(std::unique_ptr<MCMachObjectTargetWriter> MOTW,
+                             raw_pwrite_stream &OS, bool IsLittleEndian) {
+  return llvm::make_unique<MachObjectWriter>(std::move(MOTW), OS,
+                                             IsLittleEndian);
 }

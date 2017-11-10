@@ -33,6 +33,8 @@
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
+#include "llvm/MC/MCSymbolWasm.h"
+#include "llvm/MC/MCSymbolELF.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/raw_ostream.h"
@@ -45,10 +47,11 @@ using namespace llvm;
 //===----------------------------------------------------------------------===//
 
 MVT WebAssemblyAsmPrinter::getRegType(unsigned RegNo) const {
+  const TargetRegisterInfo *TRI = Subtarget->getRegisterInfo();
   const TargetRegisterClass *TRC = MRI->getRegClass(RegNo);
   for (MVT T : {MVT::i32, MVT::i64, MVT::f32, MVT::f64, MVT::v16i8, MVT::v8i16,
                 MVT::v4i32, MVT::v4f32})
-    if (TRC->hasType(T))
+    if (TRI->isTypeLegalForClass(*TRC, T))
       return T;
   DEBUG(errs() << "Unknown type for register number: " << RegNo);
   llvm_unreachable("Unknown register type");
@@ -81,7 +84,7 @@ void WebAssemblyAsmPrinter::EmitEndOfAsmFile(Module &M) {
       SmallVector<MVT, 4> Results;
       SmallVector<MVT, 4> Params;
       ComputeSignatureVTs(F, TM, Params, Results);
-      getTargetStreamer()->emitIndirectFunctionType(F.getName(), Params,
+      getTargetStreamer()->emitIndirectFunctionType(getSymbol(&F), Params,
                                                     Results);
     }
   }
@@ -92,11 +95,6 @@ void WebAssemblyAsmPrinter::EmitEndOfAsmFile(Module &M) {
       OutStreamer->emitELFSize(getSymbol(&G),
                                MCConstantExpr::create(Size, OutContext));
     }
-  }
-
-  if (!TM.getTargetTriple().isOSBinFormatELF()) {
-    MachineModuleInfoWasm &MMIW = MMI->getObjFileInfo<MachineModuleInfoWasm>();
-    getTargetStreamer()->emitGlobal(MMIW.getGlobals());
   }
 }
 
@@ -215,9 +213,10 @@ void WebAssemblyAsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
 const MCExpr *WebAssemblyAsmPrinter::lowerConstant(const Constant *CV) {
   if (const GlobalValue *GV = dyn_cast<GlobalValue>(CV))
-    if (GV->getValueType()->isFunctionTy())
+    if (GV->getValueType()->isFunctionTy()) {
       return MCSymbolRefExpr::create(
           getSymbol(GV), MCSymbolRefExpr::VK_WebAssembly_FUNCTION, OutContext);
+    }
   return AsmPrinter::lowerConstant(CV);
 }
 

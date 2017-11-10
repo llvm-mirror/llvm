@@ -14,6 +14,7 @@
 #include "llvm/CodeGen/PseudoSourceValue.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -24,12 +25,19 @@ static const char *const PSVNames[] = {
     "Stack", "GOT", "JumpTable", "ConstantPool", "FixedStack",
     "GlobalValueCallEntry", "ExternalSymbolCallEntry"};
 
-PseudoSourceValue::PseudoSourceValue(PSVKind Kind) : Kind(Kind) {}
+PseudoSourceValue::PseudoSourceValue(PSVKind Kind, const TargetInstrInfo &TII)
+    : Kind(Kind) {
+  AddressSpace = TII.getAddressSpaceForPseudoSourceKind(Kind);
+}
+
 
 PseudoSourceValue::~PseudoSourceValue() {}
 
 void PseudoSourceValue::printCustom(raw_ostream &O) const {
-  O << PSVNames[Kind];
+  if (Kind < TargetCustom)
+    O << PSVNames[Kind];
+  else
+    O << "TargetCustom" << Kind;
 }
 
 bool PseudoSourceValue::isConstant(const MachineFrameInfo *) const {
@@ -72,8 +80,9 @@ void FixedStackPseudoSourceValue::printCustom(raw_ostream &OS) const {
   OS << "FixedStack" << FI;
 }
 
-CallEntryPseudoSourceValue::CallEntryPseudoSourceValue(PSVKind Kind)
-    : PseudoSourceValue(Kind) {}
+CallEntryPseudoSourceValue::CallEntryPseudoSourceValue(
+    PSVKind Kind, const TargetInstrInfo &TII)
+    : PseudoSourceValue(Kind, TII) {}
 
 bool CallEntryPseudoSourceValue::isConstant(const MachineFrameInfo *) const {
   return false;
@@ -88,16 +97,20 @@ bool CallEntryPseudoSourceValue::mayAlias(const MachineFrameInfo *) const {
 }
 
 GlobalValuePseudoSourceValue::GlobalValuePseudoSourceValue(
-    const GlobalValue *GV)
-    : CallEntryPseudoSourceValue(GlobalValueCallEntry), GV(GV) {}
+    const GlobalValue *GV,
+    const TargetInstrInfo &TII)
+    : CallEntryPseudoSourceValue(GlobalValueCallEntry, TII), GV(GV) {}
+ExternalSymbolPseudoSourceValue::ExternalSymbolPseudoSourceValue(
+    const char *ES, const TargetInstrInfo &TII)
+    : CallEntryPseudoSourceValue(ExternalSymbolCallEntry, TII), ES(ES) {}
 
-ExternalSymbolPseudoSourceValue::ExternalSymbolPseudoSourceValue(const char *ES)
-    : CallEntryPseudoSourceValue(ExternalSymbolCallEntry), ES(ES) {}
-
-PseudoSourceValueManager::PseudoSourceValueManager()
-    : StackPSV(PseudoSourceValue::Stack), GOTPSV(PseudoSourceValue::GOT),
-      JumpTablePSV(PseudoSourceValue::JumpTable),
-      ConstantPoolPSV(PseudoSourceValue::ConstantPool) {}
+PseudoSourceValueManager::PseudoSourceValueManager(
+    const TargetInstrInfo &TIInfo)
+    : TII(TIInfo),
+      StackPSV(PseudoSourceValue::Stack, TII),
+      GOTPSV(PseudoSourceValue::GOT, TII),
+      JumpTablePSV(PseudoSourceValue::JumpTable, TII),
+      ConstantPoolPSV(PseudoSourceValue::ConstantPool, TII) {}
 
 const PseudoSourceValue *PseudoSourceValueManager::getStack() {
   return &StackPSV;
@@ -113,10 +126,11 @@ const PseudoSourceValue *PseudoSourceValueManager::getJumpTable() {
   return &JumpTablePSV;
 }
 
-const PseudoSourceValue *PseudoSourceValueManager::getFixedStack(int FI) {
+const PseudoSourceValue *
+PseudoSourceValueManager::getFixedStack(int FI) {
   std::unique_ptr<FixedStackPseudoSourceValue> &V = FSValues[FI];
   if (!V)
-    V = llvm::make_unique<FixedStackPseudoSourceValue>(FI);
+    V = llvm::make_unique<FixedStackPseudoSourceValue>(FI, TII);
   return V.get();
 }
 
@@ -125,7 +139,7 @@ PseudoSourceValueManager::getGlobalValueCallEntry(const GlobalValue *GV) {
   std::unique_ptr<const GlobalValuePseudoSourceValue> &E =
       GlobalCallEntries[GV];
   if (!E)
-    E = llvm::make_unique<GlobalValuePseudoSourceValue>(GV);
+    E = llvm::make_unique<GlobalValuePseudoSourceValue>(GV, TII);
   return E.get();
 }
 
@@ -134,6 +148,6 @@ PseudoSourceValueManager::getExternalSymbolCallEntry(const char *ES) {
   std::unique_ptr<const ExternalSymbolPseudoSourceValue> &E =
       ExternalCallEntries[ES];
   if (!E)
-    E = llvm::make_unique<ExternalSymbolPseudoSourceValue>(ES);
+    E = llvm::make_unique<ExternalSymbolPseudoSourceValue>(ES, TII);
   return E.get();
 }

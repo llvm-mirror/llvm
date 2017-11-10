@@ -13,7 +13,6 @@ define i32 @caller_0() {
 ; CHECK-NEXT: {{.+cfi.+}}
 ; CHECK-NEXT: ##{{.+}}
 ; CHECK-NEXT: pushq   %rax
-; CHECK-NEXT: {{Lcfi[0-9]+}}:
 ; CHECK-NEXT: {{.+cfi.+}}
 ; CHECK-NEXT: callq	___llvm_deoptimize
 ; CHECK-NEXT: {{Ltmp[0-9]+}}:
@@ -27,7 +26,6 @@ define i8 @caller_1() {
 ; CHECK-NEXT: {{.+cfi.+}}
 ; CHECK-NEXT: ##{{.+}}
 ; CHECK-NEXT: pushq	%rax
-; CHECK-NEXT: {{Lcfi[0-9]+}}:
 ; CHECK-NEXT: {{.+cfi.+}}
 ; CHECK-NEXT: movss	{{[a-zA-Z0-9_]+}}(%rip), %xmm0    ## xmm0 = mem[0],zero,zero,zero
 ; CHECK-NEXT: movl	$42, %edi
@@ -42,15 +40,15 @@ entry:
 ; STACKMAPS: Stack Maps: callsites:
 ; STACKMAPS-NEXT: Stack Maps: callsite 2882400015
 ; STACKMAPS-NEXT: Stack Maps:   has 4 locations
-; STACKMAPS-NEXT: Stack Maps: 		Loc 0: Constant 0	[encoding: .byte 4, .byte 8, .short 0, .int 0]
-; STACKMAPS-NEXT: Stack Maps: 		Loc 1: Constant 0	[encoding: .byte 4, .byte 8, .short 0, .int 0]
-; STACKMAPS-NEXT: Stack Maps: 		Loc 2: Constant 1	[encoding: .byte 4, .byte 8, .short 0, .int 1]
-; STACKMAPS-NEXT: Stack Maps: 		Loc 3: Constant 0	[encoding: .byte 4, .byte 8, .short 0, .int 0]
+; STACKMAPS-NEXT: Stack Maps: 		Loc 0: Constant 0	[encoding: .byte 4, .byte 0, .short 8, .short 0, .short 0, .int 0]
+; STACKMAPS-NEXT: Stack Maps: 		Loc 1: Constant 0	[encoding: .byte 4, .byte 0, .short 8, .short 0, .short 0, .int 0]
+; STACKMAPS-NEXT: Stack Maps: 		Loc 2: Constant 1	[encoding: .byte 4, .byte 0, .short 8, .short 0, .short 0, .int 1]
+; STACKMAPS-NEXT: Stack Maps: 		Loc 3: Constant 0	[encoding: .byte 4, .byte 0, .short 8, .short 0, .short 0, .int 0]
 ; STACKMAPS-NEXT: Stack Maps: 	has 0 live-out registers
 ; STACKMAPS-NEXT: Stack Maps: callsite 2882400015
 ; STACKMAPS-NEXT: Stack Maps:   has 4 locations
-; STACKMAPS-NEXT: Stack Maps: 		Loc 0: Constant 0	[encoding: .byte 4, .byte 8, .short 0, .int 0]
-; STACKMAPS-NEXT: Stack Maps: 		Loc 1: Constant 0	[encoding: .byte 4, .byte 8, .short 0, .int 0]
-; STACKMAPS-NEXT: Stack Maps: 		Loc 2: Constant 1	[encoding: .byte 4, .byte 8, .short 0, .int 1]
-; STACKMAPS-NEXT: Stack Maps: 		Loc 3: Constant 1	[encoding: .byte 4, .byte 8, .short 0, .int 1]
+; STACKMAPS-NEXT: Stack Maps: 		Loc 0: Constant 0	[encoding: .byte 4, .byte 0, .short 8, .short 0, .short 0, .int 0]
+; STACKMAPS-NEXT: Stack Maps: 		Loc 1: Constant 0	[encoding: .byte 4, .byte 0, .short 8, .short 0, .short 0, .int 0]
+; STACKMAPS-NEXT: Stack Maps: 		Loc 2: Constant 1	[encoding: .byte 4, .byte 0, .short 8, .short 0, .short 0, .int 1]
+; STACKMAPS-NEXT: Stack Maps: 		Loc 3: Constant 1	[encoding: .byte 4, .byte 0, .short 8, .short 0, .short 0, .int 1]
 ; STACKMAPS-NEXT: Stack Maps: 	has 0 live-out registers

@@ -1,4 +1,4 @@
-//===--- HexagonEarlyIfConv.cpp -------------------------------------------===//
+//===- HexagonEarlyIfConv.cpp ---------------------------------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -59,15 +59,13 @@
 //         J2_jump <BB#6>, %PC<imp-def,dead>
 //     Successors according to CFG: BB#6 BB#3
 
-#define DEBUG_TYPE "hexagon-eif"
-
 #include "Hexagon.h"
 #include "HexagonInstrInfo.h"
 #include "HexagonSubtarget.h"
 #include "llvm/ADT/DenseSet.h"
-#include "llvm/ADT/iterator_range.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/iterator_range.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineBranchProbabilityInfo.h"
 #include "llvm/CodeGen/MachineDominators.h"
@@ -90,6 +88,8 @@
 #include <cassert>
 #include <iterator>
 
+#define DEBUG_TYPE "hexagon-eif"
+
 using namespace llvm;
 
 namespace llvm {
@@ -99,17 +99,18 @@ namespace llvm {
 
 } // end namespace llvm
 
-namespace {
+static cl::opt<bool> EnableHexagonBP("enable-hexagon-br-prob", cl::Hidden,
+  cl::init(false), cl::desc("Enable branch probability info"));
+static cl::opt<unsigned> SizeLimit("eif-limit", cl::init(6), cl::Hidden,
+  cl::desc("Size limit in Hexagon early if-conversion"));
+static cl::opt<bool> SkipExitBranches("eif-no-loop-exit", cl::init(false),
+  cl::Hidden, cl::desc("Do not convert branches that may exit the loop"));
 
-  cl::opt<bool> EnableHexagonBP("enable-hexagon-br-prob", cl::Hidden,
-    cl::init(false), cl::desc("Enable branch probability info"));
-  cl::opt<unsigned> SizeLimit("eif-limit", cl::init(6), cl::Hidden,
-    cl::desc("Size limit in Hexagon early if-conversion"));
-  cl::opt<bool> SkipExitBranches("eif-no-loop-exit", cl::init(false),
-    cl::Hidden, cl::desc("Do not convert branches that may exit the loop"));
+namespace {
 
   struct PrintMB {
     PrintMB(const MachineBasicBlock *B) : MB(B) {}
+
     const MachineBasicBlock *MB;
   };
   raw_ostream &operator<< (raw_ostream &OS, const PrintMB &P) {
@@ -154,11 +155,7 @@ namespace {
   public:
     static char ID;
 
-    HexagonEarlyIfConversion() : MachineFunctionPass(ID),
-        HII(nullptr), TRI(nullptr), MFN(nullptr), MRI(nullptr), MDT(nullptr),
-        MLI(nullptr) {
-      initializeHexagonEarlyIfConversionPass(*PassRegistry::getPassRegistry());
-    }
+    HexagonEarlyIfConversion() : MachineFunctionPass(ID) {}
 
     StringRef getPassName() const override {
       return "Hexagon early if conversion";
@@ -175,7 +172,7 @@ namespace {
     bool runOnMachineFunction(MachineFunction &MF) override;
 
   private:
-    typedef DenseSet<MachineBasicBlock*> BlockSetType;
+    using BlockSetType = DenseSet<MachineBasicBlock *>;
 
     bool isPreheader(const MachineBasicBlock *B) const;
     bool matchFlowPattern(MachineBasicBlock *B, MachineLoop *L,
@@ -214,21 +211,21 @@ namespace {
     void mergeBlocks(MachineBasicBlock *PredB, MachineBasicBlock *SuccB);
     void simplifyFlowGraph(const FlowPattern &FP);
 
-    const HexagonInstrInfo *HII;
-    const TargetRegisterInfo *TRI;
-    MachineFunction *MFN;
-    MachineRegisterInfo *MRI;
-    MachineDominatorTree *MDT;
-    MachineLoopInfo *MLI;
+    const HexagonInstrInfo *HII = nullptr;
+    const TargetRegisterInfo *TRI = nullptr;
+    MachineFunction *MFN = nullptr;
+    MachineRegisterInfo *MRI = nullptr;
+    MachineDominatorTree *MDT = nullptr;
+    MachineLoopInfo *MLI = nullptr;
     BlockSetType Deleted;
     const MachineBranchProbabilityInfo *MBPI;
   };
 
-  char HexagonEarlyIfConversion::ID = 0;
-
 } // end anonymous namespace
 
-INITIALIZE_PASS(HexagonEarlyIfConversion, "hexagon-eif",
+char HexagonEarlyIfConversion::ID = 0;
+
+INITIALIZE_PASS(HexagonEarlyIfConversion, "hexagon-early-if",
   "Hexagon early if conversion", false, false)
 
 bool HexagonEarlyIfConversion::isPreheader(const MachineBasicBlock *B) const {
@@ -392,8 +389,7 @@ bool HexagonEarlyIfConversion::isValidCandidate(const MachineBasicBlock *B)
         continue;
       switch (MRI->getRegClass(R)->getID()) {
         case Hexagon::PredRegsRegClassID:
-        case Hexagon::VecPredRegsRegClassID:
-        case Hexagon::VecPredRegs128BRegClassID:
+        case Hexagon::HvxQRRegClassID:
           break;
         default:
           continue;
@@ -482,7 +478,7 @@ unsigned HexagonEarlyIfConversion::computePhiCost(const MachineBasicBlock *B,
     const MachineOperand &RB = MI.getOperand(3);
     assert(RA.isReg() && RB.isReg());
     // Must have a MUX if the phi uses a subregister.
-    if (RA.getSubReg() != 0 || RA.getSubReg() != 0) {
+    if (RA.getSubReg() != 0 || RB.getSubReg() != 0) {
       Cost++;
       continue;
     }
@@ -537,18 +533,19 @@ bool HexagonEarlyIfConversion::isProfitable(const FlowPattern &FP) const {
   // the code size. If the predicated blocks are smaller than a packet size,
   // approximate the spare room in the packet that could be filled with the
   // predicated/speculated instructions.
-  unsigned TS = 0, FS = 0, Spare = 0;
-  if (FP.TrueB) {
-    TS = std::distance(FP.TrueB->begin(), FP.TrueB->getFirstTerminator());
-    if (TS < HEXAGON_PACKET_SIZE)
-      Spare += HEXAGON_PACKET_SIZE-TS;
-  }
-  if (FP.FalseB) {
-    FS = std::distance(FP.FalseB->begin(), FP.FalseB->getFirstTerminator());
-    if (FS < HEXAGON_PACKET_SIZE)
-      Spare += HEXAGON_PACKET_SIZE-TS;
-  }
-  unsigned TotalIn = TS+FS;
+  auto TotalCount = [] (const MachineBasicBlock *B, unsigned &Spare) {
+    if (!B)
+      return 0u;
+    unsigned T = std::count_if(B->begin(), B->getFirstTerminator(),
+                               [](const MachineInstr &MI) {
+                                 return !MI.isMetaInstruction();
+                               });
+    if (T < HEXAGON_PACKET_SIZE)
+      Spare += HEXAGON_PACKET_SIZE-T;
+    return T;
+  };
+  unsigned Spare = 0;
+  unsigned TotalIn = TotalCount(FP.TrueB, Spare) + TotalCount(FP.FalseB, Spare);
   DEBUG(dbgs() << "Total number of instructions to be predicated/speculated: "
                << TotalIn << ", spare room: " << Spare << "\n");
   if (TotalIn >= SizeLimit+Spare)
@@ -595,7 +592,9 @@ bool HexagonEarlyIfConversion::visitBlock(MachineBasicBlock *B,
 
   // Visit all dominated blocks from the same loop first, then process B.
   MachineDomTreeNode *N = MDT->getNode(B);
-  typedef GraphTraits<MachineDomTreeNode*> GTN;
+
+  using GTN = GraphTraits<MachineDomTreeNode *>;
+
   // We will change CFG/DT during this traversal, so take precautions to
   // avoid problems related to invalidated iterators. In fact, processing
   // a child C of B cannot cause another child to be removed, but it can
@@ -603,7 +602,7 @@ bool HexagonEarlyIfConversion::visitBlock(MachineBasicBlock *B,
   // was removed. This new child C, however, would have been processed
   // prior to processing B, so there is no need to process it again.
   // Simply keep a list of children of B, and traverse that list.
-  typedef SmallVector<MachineDomTreeNode*,4> DTNodeVectType;
+  using DTNodeVectType = SmallVector<MachineDomTreeNode *, 4>;
   DTNodeVectType Cn(GTN::child_begin(N), GTN::child_end(N));
   for (DTNodeVectType::iterator I = Cn.begin(), E = Cn.end(); I != E; ++I) {
     MachineBasicBlock *SB = (*I)->getBlock();
@@ -771,17 +770,11 @@ unsigned HexagonEarlyIfConversion::buildMux(MachineBasicBlock *B,
     case Hexagon::DoubleRegsRegClassID:
       Opc = Hexagon::PS_pselect;
       break;
-    case Hexagon::VectorRegsRegClassID:
+    case Hexagon::HvxVRRegClassID:
       Opc = Hexagon::PS_vselect;
       break;
-    case Hexagon::VecDblRegsRegClassID:
+    case Hexagon::HvxWRRegClassID:
       Opc = Hexagon::PS_wselect;
-      break;
-    case Hexagon::VectorRegs128BRegClassID:
-      Opc = Hexagon::PS_vselect_128B;
-      break;
-    case Hexagon::VecDblRegs128BRegClassID:
-      Opc = Hexagon::PS_wselect_128B;
       break;
     default:
       llvm_unreachable("unexpected register type");
@@ -949,8 +942,10 @@ void HexagonEarlyIfConversion::removeBlock(MachineBasicBlock *B) {
   MachineDomTreeNode *IDN = N->getIDom();
   if (IDN) {
     MachineBasicBlock *IDB = IDN->getBlock();
-    typedef GraphTraits<MachineDomTreeNode*> GTN;
-    typedef SmallVector<MachineDomTreeNode*,4> DTNodeVectType;
+
+    using GTN = GraphTraits<MachineDomTreeNode *>;
+    using DTNodeVectType = SmallVector<MachineDomTreeNode *, 4>;
+
     DTNodeVectType Cn(GTN::child_begin(N), GTN::child_end(N));
     for (DTNodeVectType::iterator I = Cn.begin(), E = Cn.end(); I != E; ++I) {
       MachineBasicBlock *SB = (*I)->getBlock();

@@ -4,10 +4,10 @@
 ; GCN-LABEL: {{^}}madak_f16
 ; GCN: buffer_load_ushort v[[A_F16:[0-9]+]]
 ; GCN: buffer_load_ushort v[[B_F16:[0-9]+]]
-; VI:  v_madak_f16_e32 v[[R_F16:[0-9]+]], v[[A_F16]], v[[B_F16]], 0x4900{{$}}
+; VI:  v_madak_f16 v[[R_F16:[0-9]+]], v[[A_F16]], v[[B_F16]], 0x4900{{$}}
 ; VI:  buffer_store_short v[[R_F16]]
 ; GCN: s_endpgm
-define void @madak_f16(
+define amdgpu_kernel void @madak_f16(
     half addrspace(1)* %r,
     half addrspace(1)* %a,
     half addrspace(1)* %b) {
@@ -23,12 +23,12 @@ entry:
 }
 
 ; GCN-LABEL: {{^}}madak_f16_use_2
-; SI:  v_mad_f32 v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}}
+; SI:  v_madak_f32 v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}}, 0x41200000
 ; SI:  v_mac_f32_e32 v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}}
-; VI:  v_mad_f16 v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}}
+; VI:  v_madak_f16 v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}}, 0x4900
 ; VI:  v_mac_f16_e32 v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}}
 ; GCN: s_endpgm
-define void @madak_f16_use_2(
+define amdgpu_kernel void @madak_f16_use_2(
     half addrspace(1)* %r0,
     half addrspace(1)* %r1,
     half addrspace(1)* %a,

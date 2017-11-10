@@ -64,13 +64,14 @@ define i1 @test_simplify5() {
   ret i1 %eq_hello
 }
 
-define i1 @test_simplify6() {
+define i1 @test_simplify6(i8* %str_p) {
 ; CHECK-LABEL: @test_simplify6(
-; CHECK-NEXT:    ret i1 true
+; CHECK-NEXT:    [[STRLENFIRST:%.*]] = load i8, i8* [[STR_P:%.*]], align 1
+; CHECK-NEXT:    [[EQ_NULL:%.*]] = icmp eq i8 [[STRLENFIRST]], 0
+; CHECK-NEXT:    ret i1 [[EQ_NULL]]
 ;
-  %null_p = getelementptr [1 x i8], [1 x i8]* @null, i32 0, i32 0
-  %null_l = call i32 @strlen(i8* %null_p)
-  %eq_null = icmp eq i32 %null_l, 0
+  %str_l = call i32 @strlen(i8* %str_p)
+  %eq_null = icmp eq i32 %str_l, 0
   ret i1 %eq_null
 }
 
@@ -86,13 +87,14 @@ define i1 @test_simplify7() {
   ret i1 %ne_hello
 }
 
-define i1 @test_simplify8() {
+define i1 @test_simplify8(i8* %str_p) {
 ; CHECK-LABEL: @test_simplify8(
-; CHECK-NEXT:    ret i1 false
+; CHECK-NEXT:    [[STRLENFIRST:%.*]] = load i8, i8* [[STR_P:%.*]], align 1
+; CHECK-NEXT:    [[NE_NULL:%.*]] = icmp ne i8 [[STRLENFIRST]], 0
+; CHECK-NEXT:    ret i1 [[NE_NULL]]
 ;
-  %null_p = getelementptr [1 x i8], [1 x i8]* @null, i32 0, i32 0
-  %null_l = call i32 @strlen(i8* %null_p)
-  %ne_null = icmp ne i32 %null_l, 0
+  %str_l = call i32 @strlen(i8* %str_p)
+  %ne_null = icmp ne i32 %str_l, 0
   ret i1 %ne_null
 }
 
@@ -152,7 +154,7 @@ define i32 @test_no_simplify1() {
 define i32 @test_no_simplify2(i32 %x) {
 ; CHECK-LABEL: @test_no_simplify2(
 ; CHECK-NEXT:    [[HELLO_P:%.*]] = getelementptr inbounds [7 x i8], [7 x i8]* @null_hello, i32 0, i32 %x
-; CHECK-NEXT:    [[HELLO_L:%.*]] = call i32 @strlen(i8* [[HELLO_P]])
+; CHECK-NEXT:    [[HELLO_L:%.*]] = call i32 @strlen(i8* nonnull [[HELLO_P]])
 ; CHECK-NEXT:    ret i32 [[HELLO_L]]
 ;
   %hello_p = getelementptr inbounds [7 x i8], [7 x i8]* @null_hello, i32 0, i32 %x
@@ -166,7 +168,7 @@ define i32 @test_no_simplify3(i32 %x) {
 ; CHECK-LABEL: @test_no_simplify3(
 ; CHECK-NEXT:    [[AND:%.*]] = and i32 %x, 15
 ; CHECK-NEXT:    [[HELLO_P:%.*]] = getelementptr inbounds [13 x i8], [13 x i8]* @null_hello_mid, i32 0, i32 [[AND]]
-; CHECK-NEXT:    [[HELLO_L:%.*]] = call i32 @strlen(i8* [[HELLO_P]])
+; CHECK-NEXT:    [[HELLO_L:%.*]] = call i32 @strlen(i8* nonnull [[HELLO_P]])
 ; CHECK-NEXT:    ret i32 [[HELLO_L]]
 ;
   %and = and i32 %x, 15

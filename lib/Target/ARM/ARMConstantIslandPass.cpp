@@ -1,4 +1,4 @@
-//===-- ARMConstantIslandPass.cpp - ARM constant islands ------------------===//
+//===- ARMConstantIslandPass.cpp - ARM constant islands -------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -20,11 +20,12 @@
 #include "ARMSubtarget.h"
 #include "MCTargetDesc/ARMBaseInfo.h"
 #include "Thumb2InstrInfo.h"
+#include "Utils/ARMBaseInfo.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
@@ -37,6 +38,7 @@
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/MC/MCInstrDesc.h"
+#include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
@@ -48,7 +50,6 @@
 #include <cassert>
 #include <cstdint>
 #include <iterator>
-#include <new>
 #include <utility>
 #include <vector>
 
@@ -107,7 +108,7 @@ namespace {
     /// previous iteration by inserting unconditional branches.
     SmallSet<MachineBasicBlock*, 4> NewWaterList;
 
-    typedef std::vector<MachineBasicBlock*>::iterator water_iterator;
+    using water_iterator = std::vector<MachineBasicBlock *>::iterator;
 
     /// CPUser - One user of a constant pool, keeping the machine instruction
     /// pointer, the constant pool being referenced, and the max displacement
@@ -128,12 +129,11 @@ namespace {
       unsigned MaxDisp;
       bool NegOk;
       bool IsSoImm;
-      bool KnownAlignment;
+      bool KnownAlignment = false;
 
       CPUser(MachineInstr *mi, MachineInstr *cpemi, unsigned maxdisp,
              bool neg, bool soimm)
-        : MI(mi), CPEMI(cpemi), MaxDisp(maxdisp), NegOk(neg), IsSoImm(soimm),
-          KnownAlignment(false) {
+        : MI(mi), CPEMI(cpemi), MaxDisp(maxdisp), NegOk(neg), IsSoImm(soimm) {
         HighWaterMark = CPEMI->getParent();
       }
 
@@ -195,11 +195,9 @@ namespace {
     };
 
     /// ImmBranches - Keep track of all the immediate branch instructions.
-    ///
     std::vector<ImmBranch> ImmBranches;
 
     /// PushPopMIs - Keep track of all the Thumb push / pop instructions.
-    ///
     SmallVector<MachineInstr*, 4> PushPopMIs;
 
     /// T2JumpTables - Keep track of all the Thumb2 jumptable instructions.
@@ -290,9 +288,9 @@ namespace {
     }
   };
 
-  char ARMConstantIslands::ID = 0;
-
 } // end anonymous namespace
+
+char ARMConstantIslands::ID = 0;
 
 /// verify - check BBOffsets, BBSizes, alignment of islands
 void ARMConstantIslands::verify() {
@@ -629,9 +627,9 @@ bool ARMConstantIslands::BBHasFallthrough(MachineBasicBlock *MBB) {
 
 /// findConstPoolEntry - Given the constpool index and CONSTPOOL_ENTRY MI,
 /// look up the corresponding CPEntry.
-ARMConstantIslands::CPEntry
-*ARMConstantIslands::findConstPoolEntry(unsigned CPI,
-                                        const MachineInstr *CPEMI) {
+ARMConstantIslands::CPEntry *
+ARMConstantIslands::findConstPoolEntry(unsigned CPI,
+                                       const MachineInstr *CPEMI) {
   std::vector<CPEntry> &CPEs = CPEntries[CPI];
   // Number of entries per constpool index should be small, just do a
   // linear search.
@@ -1126,7 +1124,6 @@ void ARMConstantIslands::adjustBBOffsetsAfter(MachineBasicBlock *BB) {
 /// and instruction CPEMI, and decrement its refcount.  If the refcount
 /// becomes 0 remove the entry and instruction.  Returns true if we removed
 /// the entry, false if we didn't.
-
 bool ARMConstantIslands::decrementCPEReferenceCount(unsigned CPI,
                                                     MachineInstr *CPEMI) {
   // Find the old entry. Eliminate it if it is no longer used.
@@ -1154,8 +1151,7 @@ unsigned ARMConstantIslands::getCombinedIndex(const MachineInstr *CPEMI) {
 /// 0 = no existing entry found
 /// 1 = entry found, and there were no code insertions or deletions
 /// 2 = entry found, and there were code insertions or deletions
-int ARMConstantIslands::findInRangeCPEntry(CPUser& U, unsigned UserOffset)
-{
+int ARMConstantIslands::findInRangeCPEntry(CPUser& U, unsigned UserOffset) {
   MachineInstr *UserMI = U.MI;
   MachineInstr *CPEMI  = U.CPEMI;
 
@@ -1741,10 +1737,9 @@ bool ARMConstantIslands::undoLRSpillRestore() {
           .add(MI->getOperand(1));
       MI->eraseFromParent();
       MadeChange = true;
-    }
-    if (MI->getOpcode() == ARM::tPUSH &&
-        MI->getOperand(2).getReg() == ARM::LR &&
-        MI->getNumExplicitOperands() == 3) {
+    } else if (MI->getOpcode() == ARM::tPUSH &&
+               MI->getOperand(2).getReg() == ARM::LR &&
+               MI->getNumExplicitOperands() == 3) {
       // Just remove the push.
       MI->eraseFromParent();
       MadeChange = true;
@@ -2017,6 +2012,44 @@ static bool jumpTableFollowsTB(MachineInstr *JTMI, MachineInstr *CPEMI) {
          &*MBB->begin() == CPEMI;
 }
 
+static void RemoveDeadAddBetweenLEAAndJT(MachineInstr *LEAMI,
+                                         MachineInstr *JumpMI,
+                                         unsigned &DeadSize) {
+  // Remove a dead add between the LEA and JT, which used to compute EntryReg,
+  // but the JT now uses PC. Finds the last ADD (if any) that def's EntryReg
+  // and is not clobbered / used.
+  MachineInstr *RemovableAdd = nullptr;
+  unsigned EntryReg = JumpMI->getOperand(0).getReg();
+
+  // Find the last ADD to set EntryReg
+  MachineBasicBlock::iterator I(LEAMI);
+  for (++I; &*I != JumpMI; ++I) {
+    if (I->getOpcode() == ARM::t2ADDrs && I->getOperand(0).getReg() == EntryReg)
+      RemovableAdd = &*I;
+  }
+
+  if (!RemovableAdd)
+    return;
+
+  // Ensure EntryReg is not clobbered or used.
+  MachineBasicBlock::iterator J(RemovableAdd);
+  for (++J; &*J != JumpMI; ++J) {
+    for (unsigned K = 0, E = J->getNumOperands(); K != E; ++K) {
+      const MachineOperand &MO = J->getOperand(K);
+      if (!MO.isReg() || !MO.getReg())
+        continue;
+      if (MO.isDef() && MO.getReg() == EntryReg)
+        return;
+      if (MO.isUse() && MO.getReg() == EntryReg)
+        return;
+    }
+  }
+
+  DEBUG(dbgs() << "Removing Dead Add: " << *RemovableAdd);
+  RemovableAdd->eraseFromParent();
+  DeadSize += 4;
+}
+
 static bool registerDefinedBetween(unsigned Reg,
                                    MachineBasicBlock::iterator From,
                                    MachineBasicBlock::iterator To,
@@ -2104,6 +2137,12 @@ bool ARMConstantIslands::optimizeThumb2JumpTables() {
       IdxReg = Shift->getOperand(2).getReg();
       unsigned ShiftedIdxReg = Shift->getOperand(0).getReg();
 
+      // It's important that IdxReg is live until the actual TBB/TBH. Most of
+      // the range is checked later, but the LEA might still clobber it and not
+      // actually get removed.
+      if (BaseReg == IdxReg && !jumpTableFollowsTB(MI, User.CPEMI))
+        continue;
+
       MachineInstr *Load = User.MI->getNextNode();
       if (Load->getOpcode() != ARM::tLDRr)
         continue;
@@ -2114,6 +2153,15 @@ bool ARMConstantIslands::optimizeThumb2JumpTables() {
 
       // If we're in PIC mode, there should be another ADD following.
       auto *TRI = STI->getRegisterInfo();
+
+      // %base cannot be redefined after the load as it will appear before
+      // TBB/TBH like:
+      //      %base =
+      //      %base =
+      //      tBB %base, %idx
+      if (registerDefinedBetween(BaseReg, Load->getNextNode(), MBB->end(), TRI))
+        continue;
+
       if (isPositionIndependentOrROPI) {
         MachineInstr *Add = Load->getNextNode();
         if (Add->getOpcode() != ARM::tADDrr ||
@@ -2135,14 +2183,14 @@ bool ARMConstantIslands::optimizeThumb2JumpTables() {
           // IdxReg gets redefined in the middle of the sequence.
           continue;
       }
-      
+
       // Now safe to delete the load and lsl. The LEA will be removed later.
       CanDeleteLEA = true;
       Shift->eraseFromParent();
       Load->eraseFromParent();
       DeadSize += 4;
     }
-    
+
     DEBUG(dbgs() << "Shrink JT: " << *MI);
     MachineInstr *CPEMI = User.CPEMI;
     unsigned Opc = ByteOk ? ARM::t2TBB_JT : ARM::t2TBH_JT;
@@ -2166,7 +2214,10 @@ bool ARMConstantIslands::optimizeThumb2JumpTables() {
       NewJTMI->getOperand(0).setReg(ARM::PC);
       NewJTMI->getOperand(0).setIsKill(false);
 
-      if (CanDeleteLEA)  {
+      if (CanDeleteLEA) {
+        if (isThumb2)
+          RemoveDeadAddBetweenLEAAndJT(User.MI, MI, DeadSize);
+
         User.MI->eraseFromParent();
         DeadSize += isThumb2 ? 4 : 2;
 

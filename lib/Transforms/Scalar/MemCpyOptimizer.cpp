@@ -12,11 +12,14 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/Transforms/Scalar/MemCpyOptimizer.h"
 #include "llvm/ADT/DenseSet.h"
-#include "llvm/ADT/iterator_range.h"
+#include "llvm/ADT/None.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/iterator_range.h"
+#include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/MemoryDependenceAnalysis.h"
@@ -24,6 +27,8 @@
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Argument.h"
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -31,15 +36,16 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GetElementPtrTypeIterator.h"
 #include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
-#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
+#include "llvm/IR/PassManager.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/User.h"
 #include "llvm/IR/Value.h"
@@ -49,11 +55,11 @@
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Scalar.h"
-#include "llvm/Transforms/Scalar/MemCpyOptimizer.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <utility>
 
 using namespace llvm;
 
@@ -225,15 +231,18 @@ bool MemsetRange::isProfitableToUseMemset(const DataLayout &DL) const {
 namespace {
 
 class MemsetRanges {
+  using range_iterator = SmallVectorImpl<MemsetRange>::iterator;
+
   /// A sorted list of the memset ranges.
   SmallVector<MemsetRange, 8> Ranges;
-  typedef SmallVectorImpl<MemsetRange>::iterator range_iterator;
+
   const DataLayout &DL;
 
 public:
   MemsetRanges(const DataLayout &DL) : DL(DL) {}
 
-  typedef SmallVectorImpl<MemsetRange>::const_iterator const_iterator;
+  using const_iterator = SmallVectorImpl<MemsetRange>::const_iterator;
+
   const_iterator begin() const { return Ranges.begin(); }
   const_iterator end() const { return Ranges.end(); }
   bool empty() const { return Ranges.empty(); }
@@ -259,7 +268,6 @@ public:
 
   void addRange(int64_t Start, int64_t Size, Value *Ptr,
                 unsigned Alignment, Instruction *Inst);
-
 };
 
 } // end anonymous namespace
@@ -356,9 +364,9 @@ private:
   }
 };
 
-char MemCpyOptLegacyPass::ID = 0;
-
 } // end anonymous namespace
+
+char MemCpyOptLegacyPass::ID = 0;
 
 /// The public interface to this file...
 FunctionPass *llvm::createMemCpyOptPass() { return new MemCpyOptLegacyPass(); }
@@ -450,7 +458,6 @@ Instruction *MemCpyOptPass::tryMergingIntoMemset(Instruction *StartInst,
   // emit memset's for anything big enough to be worthwhile.
   Instruction *AMemSet = nullptr;
   for (const MemsetRange &Range : Ranges) {
-
     if (Range.TheStores.size() == 1) continue;
 
     // If it is profitable to lower this range to memset, do so now.
@@ -535,7 +542,7 @@ static bool moveUp(AliasAnalysis &AA, StoreInst *SI, Instruction *P,
   for (auto I = --SI->getIterator(), E = P->getIterator(); I != E; --I) {
     auto *C = &*I;
 
-    bool MayAlias = AA.getModRefInfo(C) != MRI_NoModRef;
+    bool MayAlias = AA.getModRefInfo(C, None) != MRI_NoModRef;
 
     bool NeedLift = false;
     if (Args.erase(C))
@@ -932,6 +939,17 @@ bool MemCpyOptPass::performCallSlotOptzn(Instruction *cpy, Value *cpyDest,
   if (MR != MRI_NoModRef)
     return false;
 
+  // We can't create address space casts here because we don't know if they're
+  // safe for the target.
+  if (cpySrc->getType()->getPointerAddressSpace() !=
+      cpyDest->getType()->getPointerAddressSpace())
+    return false;
+  for (unsigned i = 0; i < CS.arg_size(); ++i)
+    if (CS.getArgument(i)->stripPointerCasts() == cpySrc &&
+        cpySrc->getType()->getPointerAddressSpace() !=
+        CS.getArgument(i)->getType()->getPointerAddressSpace())
+      return false;
+
   // All the checks have passed, so do the transformation.
   bool changedArgument = false;
   for (unsigned i = 0; i < CS.arg_size(); ++i)
@@ -1312,7 +1330,7 @@ bool MemCpyOptPass::processByValArgument(CallSite CS, unsigned ArgNo) {
 
   // Get the alignment of the byval.  If the call doesn't specify the alignment,
   // then it is some target specific value that we can't know.
-  unsigned ByValAlign = CS.getParamAlignment(ArgNo+1);
+  unsigned ByValAlign = CS.getParamAlignment(ArgNo);
   if (ByValAlign == 0) return false;
 
   // If it is greater than the memcpy, then we check to see if we can force the
@@ -1322,6 +1340,11 @@ bool MemCpyOptPass::processByValArgument(CallSite CS, unsigned ArgNo) {
   if (MDep->getAlignment() < ByValAlign &&
       getOrEnforceKnownAlignment(MDep->getSource(), ByValAlign, DL,
                                  CS.getInstruction(), &AC, &DT) < ByValAlign)
+    return false;
+
+  // The address space of the memcpy source must match the byval argument
+  if (MDep->getSource()->getType()->getPointerAddressSpace() !=
+      ByValArg->getType()->getPointerAddressSpace())
     return false;
 
   // Verify that the copied-from memory doesn't change in between the memcpy and

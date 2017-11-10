@@ -11,14 +11,15 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/MC/MCELFStreamer.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/BinaryFormat/ELF.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCAssembler.h"
 #include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCContext.h"
-#include "llvm/MC/MCELFStreamer.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCFixup.h"
 #include "llvm/MC/MCFragment.h"
@@ -27,10 +28,9 @@
 #include "llvm/MC/MCSection.h"
 #include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCStreamer.h"
-#include "llvm/MC/MCSymbolELF.h"
 #include "llvm/MC/MCSymbol.h"
+#include "llvm/MC/MCSymbolELF.h"
 #include "llvm/Support/Casting.h"
-#include "llvm/Support/ELF.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/raw_ostream.h"
@@ -38,6 +38,12 @@
 #include <cstdint>
 
 using namespace llvm;
+
+MCELFStreamer::MCELFStreamer(MCContext &Context,
+                             std::unique_ptr<MCAsmBackend> TAB,
+                             raw_pwrite_stream &OS,
+                             std::unique_ptr<MCCodeEmitter> Emitter)
+    : MCObjectStreamer(Context, std::move(TAB), OS, std::move(Emitter)) {}
 
 bool MCELFStreamer::isBundleLocked() const {
   return getCurrentSectionOnly()->isBundleLocked();
@@ -62,12 +68,13 @@ void MCELFStreamer::mergeFragment(MCDataFragment *DF,
     if (RequiredBundlePadding > 0) {
       SmallString<256> Code;
       raw_svector_ostream VecOS(Code);
-      MCObjectWriter *OW = Assembler.getBackend().createObjectWriter(VecOS);
+      {
+        auto OW = Assembler.getBackend().createObjectWriter(VecOS);
 
-      EF->setBundlePadding(static_cast<uint8_t>(RequiredBundlePadding));
+        EF->setBundlePadding(static_cast<uint8_t>(RequiredBundlePadding));
 
-      Assembler.writeFragmentPadding(*EF, FSize, OW);
-      delete OW;
+        Assembler.writeFragmentPadding(*EF, FSize, OW.get());
+      }
 
       DF->getContents().append(Code.begin(), Code.end());
     }
@@ -96,6 +103,16 @@ void MCELFStreamer::InitSections(bool NoExecStack) {
 void MCELFStreamer::EmitLabel(MCSymbol *S, SMLoc Loc) {
   auto *Symbol = cast<MCSymbolELF>(S);
   MCObjectStreamer::EmitLabel(Symbol, Loc);
+
+  const MCSectionELF &Section =
+      static_cast<const MCSectionELF &>(*getCurrentSectionOnly());
+  if (Section.getFlags() & ELF::SHF_TLS)
+    Symbol->setType(ELF::STT_TLS);
+}
+
+void MCELFStreamer::EmitLabel(MCSymbol *S, SMLoc Loc, MCFragment *F) {
+  auto *Symbol = cast<MCSymbolELF>(S);
+  MCObjectStreamer::EmitLabel(Symbol, Loc, F);
 
   const MCSectionELF &Section =
       static_cast<const MCSectionELF &>(*getCurrentSectionOnly());
@@ -143,7 +160,7 @@ void MCELFStreamer::ChangeSection(MCSection *Section,
   if (Grp)
     Asm.registerSymbol(*Grp);
 
-  this->MCObjectStreamer::ChangeSection(Section, Subsection);
+  changeSectionImpl(Section, Subsection);
   Asm.registerSymbol(*Section->getBeginSymbol());
 }
 
@@ -628,10 +645,13 @@ void MCELFStreamer::EmitTBSSSymbol(MCSection *Section, MCSymbol *Symbol,
   llvm_unreachable("ELF doesn't support this directive");
 }
 
-MCStreamer *llvm::createELFStreamer(MCContext &Context, MCAsmBackend &MAB,
-                                    raw_pwrite_stream &OS, MCCodeEmitter *CE,
+MCStreamer *llvm::createELFStreamer(MCContext &Context,
+                                    std::unique_ptr<MCAsmBackend> &&MAB,
+                                    raw_pwrite_stream &OS,
+                                    std::unique_ptr<MCCodeEmitter> &&CE,
                                     bool RelaxAll) {
-  MCELFStreamer *S = new MCELFStreamer(Context, MAB, OS, CE);
+  MCELFStreamer *S =
+      new MCELFStreamer(Context, std::move(MAB), OS, std::move(CE));
   if (RelaxAll)
     S->getAssembler().setRelaxAll(true);
   return S;

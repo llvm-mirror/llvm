@@ -14,24 +14,56 @@
 #ifndef LLVM_LIB_TARGET_HEXAGON_MCTARGETDESC_HEXAGONMCINSTRINFO_H
 #define LLVM_LIB_TARGET_HEXAGON_MCTARGETDESC_HEXAGONMCINSTRINFO_H
 
-#include "HexagonMCExpr.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/iterator_range.h"
 #include "llvm/MC/MCInst.h"
+#include "llvm/Support/MathExtras.h"
+#include <cstddef>
+#include <cstdint>
 
 namespace llvm {
+
 class HexagonMCChecker;
+class MCContext;
+class MCExpr;
 class MCInstrDesc;
 class MCInstrInfo;
 class MCSubtargetInfo;
-namespace HexagonII {
-enum class MemAccessSize;
-}
+
 class DuplexCandidate {
 public:
   unsigned packetIndexI, packetIndexJ, iClass;
+
   DuplexCandidate(unsigned i, unsigned j, unsigned iClass)
       : packetIndexI(i), packetIndexJ(j), iClass(iClass) {}
 };
+
+namespace Hexagon {
+
+class PacketIterator {
+  MCInstrInfo const &MCII;
+  MCInst::const_iterator BundleCurrent;
+  MCInst::const_iterator BundleEnd;
+  MCInst::const_iterator DuplexCurrent;
+  MCInst::const_iterator DuplexEnd;
+
+public:
+  PacketIterator(MCInstrInfo const &MCII, MCInst const &Inst);
+  PacketIterator(MCInstrInfo const &MCII, MCInst const &Inst, std::nullptr_t);
+
+  PacketIterator &operator++();
+  MCInst const &operator*() const;
+  bool operator==(PacketIterator const &Other) const;
+  bool operator!=(PacketIterator const &Other) const {
+    return !(*this == Other);
+  }
+};
+
+} // end namespace Hexagon
+
 namespace HexagonMCInstrInfo {
+
 size_t const innerLoopOffset = 0;
 int64_t const innerLoopMask = 1 << innerLoopOffset;
 
@@ -54,6 +86,8 @@ void addConstExtender(MCContext &Context, MCInstrInfo const &MCII, MCInst &MCB,
                       MCInst const &MCI);
 
 // Returns a iterator range of instructions in this bundle
+iterator_range<Hexagon::PacketIterator>
+bundleInstructions(MCInstrInfo const &MCII, MCInst const &MCI);
 iterator_range<MCInst::const_iterator> bundleInstructions(MCInst const &MCI);
 
 // Returns the number of instructions in the bundle
@@ -83,9 +117,9 @@ MCInst const *extenderForIndex(MCInst const &MCB, size_t Index);
 void extendIfNeeded(MCContext &Context, MCInstrInfo const &MCII, MCInst &MCB,
                     MCInst const &MCI);
 
-// Return memory access size
-HexagonII::MemAccessSize getAccessSize(MCInstrInfo const &MCII,
-                                       MCInst const &MCI);
+// Return memory access size in bytes
+unsigned getMemAccessSize(MCInstrInfo const &MCII, MCInst const &MCI);
+
 MCInstrDesc const &getDesc(MCInstrInfo const &MCII, MCInst const &MCI);
 
 // Return which duplex group this instruction belongs to
@@ -131,7 +165,6 @@ MCOperand const &getNewValueOperand(MCInstrInfo const &MCII, MCInst const &MCI);
 unsigned short getNewValueOp2(MCInstrInfo const &MCII, MCInst const &MCI);
 MCOperand const &getNewValueOperand2(MCInstrInfo const &MCII,
                                      MCInst const &MCI);
-int getSubTarget(MCInstrInfo const &MCII, MCInst const &MCI);
 
 // Return the Hexagon ISA class for the insn.
 unsigned getType(MCInstrInfo const &MCII, MCInst const &MCI);
@@ -180,6 +213,7 @@ bool isCompound(MCInstrInfo const &MCII, MCInst const &MCI);
 
 // Return whether the instruction needs to be constant extended.
 bool isConstExtended(MCInstrInfo const &MCII, MCInst const &MCI);
+bool isCVINew(MCInstrInfo const &MCII, MCInst const &MCI);
 
 // Is this double register suitable for use in a duplex subinst
 bool isDblRegForSubInst(unsigned Reg);
@@ -262,14 +296,14 @@ bool prefersSlot3(MCInstrInfo const &MCII, MCInst const &MCI);
 // Replace the instructions inside MCB, represented by Candidate
 void replaceDuplex(MCContext &Context, MCInst &MCI, DuplexCandidate Candidate);
 
-bool s23_2_reloc(MCExpr const &Expr);
+bool s27_2_reloc(MCExpr const &Expr);
 // Marks a bundle as endloop0
 void setInnerLoop(MCInst &MCI);
 void setMemReorderDisabled(MCInst &MCI);
 void setMemStoreReorderEnabled(MCInst &MCI);
 void setMustExtend(MCExpr const &Expr, bool Val = true);
 void setMustNotExtend(MCExpr const &Expr, bool Val = true);
-void setS23_2_reloc(MCExpr const &Expr, bool Val = true);
+void setS27_2_reloc(MCExpr const &Expr, bool Val = true);
 
 // Marks a bundle as endloop1
 void setOuterLoop(MCInst &MCI);
@@ -282,7 +316,9 @@ unsigned SubregisterBit(unsigned Consumer, unsigned Producer,
 // Attempt to find and replace compound pairs
 void tryCompound(MCInstrInfo const &MCII, MCSubtargetInfo const &STI,
                  MCContext &Context, MCInst &MCI);
-}
-}
+
+} // end namespace HexagonMCInstrInfo
+
+} // end namespace llvm
 
 #endif // LLVM_LIB_TARGET_HEXAGON_MCTARGETDESC_HEXAGONMCINSTRINFO_H

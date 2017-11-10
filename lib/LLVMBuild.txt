@@ -24,7 +24,7 @@ subdirectories =
  DebugInfo
  Demangle
  ExecutionEngine
- LibDriver
+ FuzzMutate
  LineEditor
  Linker
  IR
@@ -32,6 +32,7 @@ subdirectories =
  LTO
  MC
  Object
+ BinaryFormat
  ObjectYAML
  Option
  Passes
@@ -39,7 +40,10 @@ subdirectories =
  Support
  TableGen
  Target
+ Testing
+ ToolDrivers
  Transforms
+ WindowsManifest
 
 [component_0]
 type = Group

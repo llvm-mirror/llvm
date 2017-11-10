@@ -15,6 +15,7 @@
 #include "DwarfDebug.h"
 #include "DwarfExpression.h"
 #include "llvm/ADT/Twine.h"
+#include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/DIE.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -26,7 +27,6 @@
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/MachineLocation.h"
-#include "llvm/Support/Dwarf.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/Target/TargetMachine.h"
@@ -48,12 +48,19 @@ void AsmPrinter::EmitSLEB128(int64_t Value, const char *Desc) const {
 }
 
 /// EmitULEB128 - emit the specified unsigned leb128 value.
-void AsmPrinter::EmitULEB128(uint64_t Value, const char *Desc,
-                             unsigned PadTo) const {
+void AsmPrinter::EmitPaddedULEB128(uint64_t Value, unsigned PadTo,
+                                   const char *Desc) const {
   if (isVerbose() && Desc)
     OutStreamer->AddComment(Desc);
 
-  OutStreamer->EmitULEB128IntValue(Value, PadTo);
+  OutStreamer->EmitPaddedULEB128IntValue(Value, PadTo);
+}
+
+void AsmPrinter::EmitULEB128(uint64_t Value, const char *Desc) const {
+  if (isVerbose() && Desc)
+    OutStreamer->AddComment(Desc);
+
+  OutStreamer->EmitULEB128IntValue(Value);
 }
 
 static const char *DecodeDWARFEncoding(unsigned Encoding) {
@@ -211,6 +218,9 @@ void AsmPrinter::emitCFIInstruction(const MCCFIInstruction &Inst) const {
     break;
   case MCCFIInstruction::OpEscape:
     OutStreamer->EmitCFIEscape(Inst.getValues());
+    break;
+  case MCCFIInstruction::OpRestore:
+    OutStreamer->EmitCFIRestore(Inst.getRegister());
     break;
   }
 }

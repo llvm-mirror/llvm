@@ -237,7 +237,7 @@ define <16 x i8> @combine_pshufb_palignr(<16 x i8> %a0, <16 x i8> %a1) {
 ;
 ; AVX-LABEL: combine_pshufb_palignr:
 ; AVX:       # BB#0:
-; AVX-NEXT:    vpshufd {{.*#+}} xmm0 = xmm0[2,3,2,3]
+; AVX-NEXT:    vpermilps {{.*#+}} xmm0 = xmm0[2,3,2,3]
 ; AVX-NEXT:    retq
   %1 = shufflevector <16 x i8> %a0, <16 x i8> %a1, <16 x i32> <i32 8, i32 9, i32 10, i32 11, i32 12, i32 13, i32 14, i32 15, i32 16, i32 17, i32 18, i32 19, i32 20, i32 21, i32 22, i32 23>
   %2 = tail call <16 x i8> @llvm.x86.ssse3.pshuf.b.128(<16 x i8> %1, <16 x i8> <i8 0, i8 1, i8 2, i8 3, i8 4, i8 5, i8 6, i8 7, i8 0, i8 1, i8 2, i8 3, i8 4, i8 5, i8 6, i8 7>)
@@ -445,6 +445,21 @@ define <16 x i8> @combine_pshufb_not_as_pshufw(<16 x i8> %a0) {
   ret <16 x i8> %res1
 }
 
+define <16 x i8> @combine_vpshufb_as_pshuflw_not_pslld(<16 x i8> *%a0) {
+; SSE-LABEL: combine_vpshufb_as_pshuflw_not_pslld:
+; SSE:       # BB#0:
+; SSE-NEXT:    pshuflw {{.*#+}} xmm0 = mem[0,0,2,2,4,5,6,7]
+; SSE-NEXT:    retq
+;
+; AVX-LABEL: combine_vpshufb_as_pshuflw_not_pslld:
+; AVX:       # BB#0:
+; AVX-NEXT:    vpshuflw {{.*#+}} xmm0 = mem[0,0,2,2,4,5,6,7]
+; AVX-NEXT:    retq
+  %res0 = load <16 x i8>, <16 x i8> *%a0, align 16
+  %res1 = call <16 x i8> @llvm.x86.ssse3.pshuf.b.128(<16 x i8> %res0, <16 x i8> <i8 undef, i8 undef, i8 0, i8 1, i8 undef, i8 undef, i8 4, i8 5, i8 undef, i8 undef, i8 undef, i8 undef, i8 undef, i8 undef, i8 undef, i8 undef>)
+  ret <16 x i8> %res1
+}
+
 define <16 x i8> @combine_pshufb_as_unary_unpcklbw(<16 x i8> %a0) {
 ; SSE-LABEL: combine_pshufb_as_unary_unpcklbw:
 ; SSE:       # BB#0:
@@ -495,15 +510,15 @@ define <16 x i8> @combine_pshufb_as_unpackhi_undef(<16 x i8> %a0) {
 define <16 x i8> @combine_pshufb_as_unpacklo_zero(<16 x i8> %a0) {
 ; SSE-LABEL: combine_pshufb_as_unpacklo_zero:
 ; SSE:       # BB#0:
-; SSE-NEXT:    pxor %xmm1, %xmm1
-; SSE-NEXT:    punpckldq {{.*#+}} xmm1 = xmm1[0],xmm0[0],xmm1[1],xmm0[1]
-; SSE-NEXT:    movdqa %xmm1, %xmm0
+; SSE-NEXT:    xorps %xmm1, %xmm1
+; SSE-NEXT:    unpcklps {{.*#+}} xmm1 = xmm1[0],xmm0[0],xmm1[1],xmm0[1]
+; SSE-NEXT:    movaps %xmm1, %xmm0
 ; SSE-NEXT:    retq
 ;
 ; AVX-LABEL: combine_pshufb_as_unpacklo_zero:
 ; AVX:       # BB#0:
-; AVX-NEXT:    vpxor %xmm1, %xmm1, %xmm1
-; AVX-NEXT:    vpunpckldq {{.*#+}} xmm0 = xmm1[0],xmm0[0],xmm1[1],xmm0[1]
+; AVX-NEXT:    vxorps %xmm1, %xmm1, %xmm1
+; AVX-NEXT:    vunpcklps {{.*#+}} xmm0 = xmm1[0],xmm0[0],xmm1[1],xmm0[1]
 ; AVX-NEXT:    retq
   %1 = call <16 x i8> @llvm.x86.ssse3.pshuf.b.128(<16 x i8> %a0, <16 x i8> <i8 -1, i8 -1, i8 -1, i8 -1, i8 0, i8 1, i8 2, i8 3, i8 -1, i8 -1, i8 -1, i8 -1, i8 4, i8 5, i8 6, i8 7>)
   ret <16 x i8> %1
@@ -625,6 +640,64 @@ define <8 x i16> @shuffle_combine_unpack_insert(<8 x i16> %a0) {
   ret <8 x i16> %8
 }
 
+define <16 x i8> @shuffle_combine_packssdw_pshufb(<4 x i32> %a0) {
+; SSE-LABEL: shuffle_combine_packssdw_pshufb:
+; SSE:       # BB#0:
+; SSE-NEXT:    psrad $31, %xmm0
+; SSE-NEXT:    pshufb {{.*#+}} xmm0 = xmm0[13,12,9,8,5,4,1,0,13,12,9,8,5,4,1,0]
+; SSE-NEXT:    retq
+;
+; AVX-LABEL: shuffle_combine_packssdw_pshufb:
+; AVX:       # BB#0:
+; AVX-NEXT:    vpsrad $31, %xmm0, %xmm0
+; AVX-NEXT:    vpshufb {{.*#+}} xmm0 = xmm0[13,12,9,8,5,4,1,0,13,12,9,8,5,4,1,0]
+; AVX-NEXT:    retq
+  %1 = ashr <4 x i32> %a0, <i32 31, i32 31, i32 31, i32 31>
+  %2 = tail call <8 x i16> @llvm.x86.sse2.packssdw.128(<4 x i32> %1, <4 x i32> %1)
+  %3 = bitcast <8 x i16> %2 to <16 x i8>
+  %4 = tail call <16 x i8> @llvm.x86.ssse3.pshuf.b.128(<16 x i8> %3, <16 x i8> <i8 7, i8 6, i8 5, i8 4, i8 3, i8 2, i8 1, i8 0, i8 15, i8 14, i8 13, i8 12, i8 11, i8 10, i8 9, i8 8>)
+  ret <16 x i8> %4
+}
+declare <8 x i16> @llvm.x86.sse2.packssdw.128(<4 x i32>, <4 x i32>) nounwind readnone
+
+define <16 x i8> @shuffle_combine_packsswb_pshufb(<8 x i16> %a0, <8 x i16> %a1) {
+; SSE-LABEL: shuffle_combine_packsswb_pshufb:
+; SSE:       # BB#0:
+; SSE-NEXT:    psraw $15, %xmm0
+; SSE-NEXT:    pshufb {{.*#+}} xmm0 = xmm0[14,12,10,8,6,4,2,0,14,12,10,8,6,4,2,0]
+; SSE-NEXT:    retq
+;
+; AVX-LABEL: shuffle_combine_packsswb_pshufb:
+; AVX:       # BB#0:
+; AVX-NEXT:    vpsraw $15, %xmm0, %xmm0
+; AVX-NEXT:    vpshufb {{.*#+}} xmm0 = xmm0[14,12,10,8,6,4,2,0,14,12,10,8,6,4,2,0]
+; AVX-NEXT:    retq
+  %1 = ashr <8 x i16> %a0, <i16 15, i16 15, i16 15, i16 15, i16 15, i16 15, i16 15, i16 15>
+  %2 = ashr <8 x i16> %a1, <i16 15, i16 15, i16 15, i16 15, i16 15, i16 15, i16 15, i16 15>
+  %3 = tail call <16 x i8> @llvm.x86.sse2.packsswb.128(<8 x i16> %1, <8 x i16> %2)
+  %4 = tail call <16 x i8> @llvm.x86.ssse3.pshuf.b.128(<16 x i8> %3, <16 x i8> <i8 7, i8 6, i8 5, i8 4, i8 3, i8 2, i8 1, i8 0, i8 7, i8 6, i8 5, i8 4, i8 3, i8 2, i8 1, i8 0>)
+  ret <16 x i8> %4
+}
+declare <16 x i8> @llvm.x86.sse2.packsswb.128(<8 x i16>, <8 x i16>) nounwind readnone
+
+define <16 x i8> @shuffle_combine_packuswb_pshufb(<8 x i16> %a0, <8 x i16> %a1) {
+; SSE-LABEL: shuffle_combine_packuswb_pshufb:
+; SSE:       # BB#0:
+; SSE-NEXT:    pshufb {{.*#+}} xmm0 = xmm0[15,13,11,9,7,5,3,1,15,13,11,9,7,5,3,1]
+; SSE-NEXT:    retq
+;
+; AVX-LABEL: shuffle_combine_packuswb_pshufb:
+; AVX:       # BB#0:
+; AVX-NEXT:    vpshufb {{.*#+}} xmm0 = xmm0[15,13,11,9,7,5,3,1,15,13,11,9,7,5,3,1]
+; AVX-NEXT:    retq
+  %1 = lshr <8 x i16> %a0, <i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8>
+  %2 = lshr <8 x i16> %a1, <i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8>
+  %3 = tail call <16 x i8> @llvm.x86.sse2.packuswb.128(<8 x i16> %1, <8 x i16> %2)
+  %4 = tail call <16 x i8> @llvm.x86.ssse3.pshuf.b.128(<16 x i8> %3, <16 x i8> <i8 7, i8 6, i8 5, i8 4, i8 3, i8 2, i8 1, i8 0, i8 7, i8 6, i8 5, i8 4, i8 3, i8 2, i8 1, i8 0>)
+  ret <16 x i8> %4
+}
+declare <16 x i8> @llvm.x86.sse2.packuswb.128(<8 x i16>, <8 x i16>) nounwind readnone
+
 define <16 x i8> @constant_fold_pshufb() {
 ; SSE-LABEL: constant_fold_pshufb:
 ; SSE:       # BB#0:
@@ -672,4 +745,74 @@ define <16 x i8> @constant_fold_pshufb_2() {
 ; AVX512F-NEXT:    retq
   %1 = tail call <16 x i8> @llvm.x86.ssse3.pshuf.b.128(<16 x i8> <i8 2, i8 0, i8 0, i8 0, i8 0, i8 0, i8 0, i8 0, i8 0, i8 0, i8 0, i8 0, i8 0, i8 0, i8 0, i8 0>, <16 x i8> <i8 0, i8 undef, i8 undef, i8 undef, i8 undef, i8 undef, i8 undef, i8 undef, i8 undef, i8 undef, i8 undef, i8 undef, i8 undef, i8 undef, i8 undef, i8 undef>)
   ret <16 x i8> %1
+}
+
+define i32 @mask_zzz3_v16i8(<16 x i8> %a0) {
+; SSSE3-LABEL: mask_zzz3_v16i8:
+; SSSE3:       # BB#0:
+; SSSE3-NEXT:    pshufb {{.*#+}} xmm0 = zero,zero,zero,xmm0[14,u,u,u,u,u,u,u,u,u,u,u,u]
+; SSSE3-NEXT:    movd %xmm0, %eax
+; SSSE3-NEXT:    retq
+;
+; SSE41-LABEL: mask_zzz3_v16i8:
+; SSE41:       # BB#0:
+; SSE41-NEXT:    pshufb {{.*#+}} xmm0 = xmm0[u,u,u,u,u,u,u,u,u,u,u,u],zero,zero,zero,xmm0[14]
+; SSE41-NEXT:    pextrd $3, %xmm0, %eax
+; SSE41-NEXT:    retq
+;
+; AVX-LABEL: mask_zzz3_v16i8:
+; AVX:       # BB#0:
+; AVX-NEXT:    vpshufb {{.*#+}} xmm0 = xmm0[u,u,u,u,u,u,u,u,u,u,u,u],zero,zero,zero,xmm0[14]
+; AVX-NEXT:    vpextrd $3, %xmm0, %eax
+; AVX-NEXT:    retq
+  %1 = call <16 x i8> @llvm.x86.ssse3.pshuf.b.128(<16 x i8> %a0, <16 x i8> <i8 0, i8 2, i8 4, i8 6, i8 8, i8 10, i8 12, i8 14, i8 0, i8 2, i8 4, i8 6, i8 8, i8 10, i8 12, i8 14>)
+  %2 = bitcast <16 x i8> %1 to <4 x i32>
+  %3 = extractelement <4 x i32> %2, i32 3
+  %4 = and i32 %3, 4278190080
+  ret i32 %4
+}
+
+define i32 @mask_z1z3_v16i8(<16 x i8> %a0) {
+; SSSE3-LABEL: mask_z1z3_v16i8:
+; SSSE3:       # BB#0:
+; SSSE3-NEXT:    pshufb {{.*#+}} xmm0 = zero,xmm0[10],zero,xmm0[14,u,u,u,u,u,u,u,u,u,u,u,u]
+; SSSE3-NEXT:    movd %xmm0, %eax
+; SSSE3-NEXT:    retq
+;
+; SSE41-LABEL: mask_z1z3_v16i8:
+; SSE41:       # BB#0:
+; SSE41-NEXT:    pshufb {{.*#+}} xmm0 = xmm0[u,u,u,u,u,u,u,u,u,u,u,u],zero,xmm0[10],zero,xmm0[14]
+; SSE41-NEXT:    pextrd $3, %xmm0, %eax
+; SSE41-NEXT:    retq
+;
+; AVX-LABEL: mask_z1z3_v16i8:
+; AVX:       # BB#0:
+; AVX-NEXT:    vpshufb {{.*#+}} xmm0 = xmm0[u,u,u,u,u,u,u,u,u,u,u,u],zero,xmm0[10],zero,xmm0[14]
+; AVX-NEXT:    vpextrd $3, %xmm0, %eax
+; AVX-NEXT:    retq
+  %1 = call <16 x i8> @llvm.x86.ssse3.pshuf.b.128(<16 x i8> %a0, <16 x i8> <i8 0, i8 2, i8 4, i8 6, i8 8, i8 10, i8 12, i8 14, i8 0, i8 2, i8 4, i8 6, i8 8, i8 10, i8 12, i8 14>)
+  %2 = bitcast <16 x i8> %1 to <4 x i32>
+  %3 = extractelement <4 x i32> %2, i32 3
+  %4 = and i32 %3, 4278255360
+  ret i32 %4
+}
+
+define i32 @PR22415(double %a0) {
+; SSE-LABEL: PR22415:
+; SSE:       # BB#0:
+; SSE-NEXT:    pshufb {{.*#+}} xmm0 = xmm0[0,2,4],zero,xmm0[u,u,u,u,u,u,u,u,u,u,u,u]
+; SSE-NEXT:    movd %xmm0, %eax
+; SSE-NEXT:    retq
+;
+; AVX-LABEL: PR22415:
+; AVX:       # BB#0:
+; AVX-NEXT:    vpshufb {{.*#+}} xmm0 = xmm0[0,2,4],zero,xmm0[u,u,u,u,u,u,u,u,u,u,u,u]
+; AVX-NEXT:    vmovd %xmm0, %eax
+; AVX-NEXT:    retq
+  %1 = bitcast double %a0 to <8 x i8>
+  %2 = shufflevector <8 x i8> %1, <8 x i8> undef, <4 x i32> <i32 0, i32 2, i32 4, i32 undef>
+  %3 = shufflevector <4 x i8> %2, <4 x i8> undef, <3 x i32> <i32 0, i32 1, i32 2>
+  %4 = bitcast <3 x i8> %3 to i24
+  %5 = zext i24 %4 to i32
+  ret i32 %5
 }

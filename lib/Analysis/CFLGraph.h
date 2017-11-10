@@ -1,4 +1,4 @@
-//======- CFLGraph.h - Abstract stratified sets implementation. --------======//
+//===- CFLGraph.h - Abstract stratified sets implementation. -----*- C++-*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -6,20 +6,42 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
+//
 /// \file
 /// This file defines CFLGraph, an auxiliary data structure used by CFL-based
 /// alias analysis.
-///
+//
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_ANALYSIS_CFLGRAPH_H
-#define LLVM_ANALYSIS_CFLGRAPH_H
+#ifndef LLVM_LIB_ANALYSIS_CFLGRAPH_H
+#define LLVM_LIB_ANALYSIS_CFLGRAPH_H
 
 #include "AliasAnalysisSummary.h"
-#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/APInt.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/iterator_range.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
+#include "llvm/Analysis/TargetLibraryInfo.h"
+#include "llvm/IR/Argument.h"
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/CallSite.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/InstVisitor.h"
+#include "llvm/IR/InstrTypes.h"
+#include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/Operator.h"
+#include "llvm/IR/Type.h"
+#include "llvm/IR/Value.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/ErrorHandling.h"
+#include <cassert>
+#include <cstdint>
+#include <vector>
 
 namespace llvm {
 namespace cflaa {
@@ -36,14 +58,14 @@ namespace cflaa {
 /// I+1) and a reference edge to (X, I-1).
 class CFLGraph {
 public:
-  typedef InstantiatedValue Node;
+  using Node = InstantiatedValue;
 
   struct Edge {
     Node Other;
     int64_t Offset;
   };
 
-  typedef std::vector<Edge> EdgeList;
+  using EdgeList = std::vector<Edge>;
 
   struct NodeInfo {
     EdgeList Edges, ReverseEdges;
@@ -75,7 +97,8 @@ public:
   };
 
 private:
-  typedef DenseMap<Value *, ValueInfo> ValueMap;
+  using ValueMap = DenseMap<Value *, ValueInfo>;
+
   ValueMap ValueImpls;
 
   NodeInfo *getNode(Node N) {
@@ -86,7 +109,7 @@ private:
   }
 
 public:
-  typedef ValueMap::const_iterator const_value_iterator;
+  using const_value_iterator = ValueMap::const_iterator;
 
   bool addNode(Node N, AliasAttrs Attr = AliasAttrs()) {
     assert(N.Val != nullptr);
@@ -210,6 +233,11 @@ template <typename CFLAA> class CFLGraphBuilder {
 
     void addDerefEdge(Value *From, Value *To, bool IsRead) {
       assert(From != nullptr && To != nullptr);
+      // FIXME: This is subtly broken, due to how we model some instructions
+      // (e.g. extractvalue, extractelement) as loads. Since those take
+      // non-pointer operands, we'll entirely skip adding edges for those.
+      //
+      // addAssignEdge seems to have a similar issue with insertvalue, etc.
       if (!From->getType()->isPointerTy() || !To->getType()->isPointerTy())
         return;
       addNode(From);
@@ -400,8 +428,7 @@ template <typename CFLAA> class CFLGraphBuilder {
       // TODO: address other common library functions such as realloc(),
       // strdup(),
       // etc.
-      if (isMallocLikeFn(Inst, &TLI) || isCallocLikeFn(Inst, &TLI) ||
-          isFreeCall(Inst, &TLI))
+      if (isMallocOrCallocLikeFn(Inst, &TLI) || isFreeCall(Inst, &TLI))
         return;
 
       // TODO: Add support for noalias args/all the other fun function
@@ -430,7 +457,7 @@ template <typename CFLAA> class CFLGraphBuilder {
 
       if (Inst->getType()->isPointerTy()) {
         auto *Fn = CS.getCalledFunction();
-        if (Fn == nullptr || !Fn->doesNotAlias(0))
+        if (Fn == nullptr || !Fn->returnDoesNotAlias())
           // No need to call addNode() since we've added Inst at the
           // beginning of this function and we know it is not a global.
           Graph.addAttr(InstantiatedValue{Inst, 0}, getAttrUnknown());
@@ -493,10 +520,10 @@ template <typename CFLAA> class CFLGraphBuilder {
         addNode(Ptr, getAttrEscaped());
         break;
       }
-      case Instruction::IntToPtr: {
+      case Instruction::IntToPtr:
         addNode(CE, getAttrUnknown());
         break;
-      }
+
       case Instruction::BitCast:
       case Instruction::AddrSpaceCast:
       case Instruction::Trunc:
@@ -541,6 +568,7 @@ template <typename CFLAA> class CFLGraphBuilder {
       case Instruction::ExtractValue: {
         auto *Ptr = CE->getOperand(0);
         addLoadEdge(Ptr, CE);
+        break;
       }
       case Instruction::ShuffleVector: {
         auto *From1 = CE->getOperand(0);
@@ -567,11 +595,11 @@ template <typename CFLAA> class CFLGraphBuilder {
       case Instruction::LShr:
       case Instruction::AShr:
       case Instruction::ICmp:
-      case Instruction::FCmp: {
+      case Instruction::FCmp:
         addAssignEdge(CE->getOperand(0), CE);
         addAssignEdge(CE->getOperand(1), CE);
         break;
-      }
+
       default:
         llvm_unreachable("Unknown instruction type encountered!");
       }
@@ -636,7 +664,8 @@ public:
     return ReturnedValues;
   }
 };
-}
-}
 
-#endif
+} // end namespace cflaa
+} // end namespace llvm
+
+#endif // LLVM_LIB_ANALYSIS_CFLGRAPH_H

@@ -16,14 +16,22 @@
 #define LLVM_TRANSFORMS_UTILS_VALUEMAPPER_H
 
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/IR/ValueMap.h"
 #include "llvm/IR/ValueHandle.h"
+#include "llvm/IR/ValueMap.h"
 
 namespace llvm {
 
-class Value;
+class Constant;
+class Function;
+class GlobalAlias;
+class GlobalVariable;
 class Instruction;
-typedef ValueMap<const Value *, WeakVH> ValueToValueMapTy;
+class MDNode;
+class Metadata;
+class Type;
+class Value;
+
+using ValueToValueMapTy = ValueMap<const Value *, WeakTrackingVH>;
 
 /// This is a class that can be implemented by clients to remap types when
 /// cloning constants and instructions.
@@ -44,10 +52,10 @@ class ValueMaterializer {
   virtual void anchor(); // Out of line method.
 
 protected:
-  ~ValueMaterializer() = default;
   ValueMaterializer() = default;
   ValueMaterializer(const ValueMaterializer &) = default;
   ValueMaterializer &operator=(const ValueMaterializer &) = default;
+  ~ValueMaterializer() = default;
 
 public:
   /// This method can be implemented to generate a mapped Value on demand. For
@@ -91,7 +99,7 @@ enum RemapFlags {
   RF_NullMapMissingGlobalValues = 8,
 };
 
-static inline RemapFlags operator|(RemapFlags LHS, RemapFlags RHS) {
+inline RemapFlags operator|(RemapFlags LHS, RemapFlags RHS) {
   return RemapFlags(unsigned(LHS) | unsigned(RHS));
 }
 
@@ -116,7 +124,7 @@ static inline RemapFlags operator|(RemapFlags LHS, RemapFlags RHS) {
 /// - \a scheduleMapGlobalAliasee()
 /// - \a scheduleRemapFunction()
 ///
-/// Sometimes a callback needs a diferent mapping context.  Such a context can
+/// Sometimes a callback needs a different mapping context.  Such a context can
 /// be registered using \a registerAlternateMappingContext(), which takes an
 /// alternate \a ValueToValueMapTy and \a ValueMaterializer and returns a ID to
 /// pass into the schedule*() functions.

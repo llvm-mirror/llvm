@@ -1,5 +1,6 @@
 ; RUN: llc < %s | FileCheck %s --check-prefix=ASM
 ; RUN: llc < %s -filetype=obj | llvm-readobj - -codeview | FileCheck %s --check-prefix=OBJ
+; RUN: llc < %s -filetype=obj | obj2yaml | FileCheck %s --check-prefix=YAML
 
 ; C++ source to regenerate:
 ; $ cat t.cpp
@@ -80,13 +81,13 @@
 ; OBJ:       DisplayName: first
 ; OBJ:       LinkageName: ?first@@3HA
 ; OBJ:     }
-; OBJ:     ThreadLocalDataSym {
+; OBJ:     GlobalTLS {
 ; OBJ:       DataOffset: ?middle@@3PEBHEB+0x0
 ; OBJ:       Type: const int* (0x1001)
 ; OBJ:       DisplayName: middle
 ; OBJ:       LinkageName: ?middle@@3PEBHEB
 ; OBJ:     }
-; OBJ:     DataSym {
+; OBJ:     GlobalData {
 ; OBJ:       Kind: S_GDATA32 (0x110D)
 ; OBJ:       DataOffset: ?last@@3HA+0x0
 ; OBJ:       Type: int (0x74)
@@ -100,7 +101,7 @@
 ; OBJ:   Magic: 0x4
 ; OBJ:   Subsection [
 ; OBJ:     SubSectionType: Symbols (0xF1)
-; OBJ:     DataSym {
+; OBJ:     GlobalData {
 ; OBJ:       DataOffset: ?comdat@?$A@X@@2HB+0x0
 ; OBJ:       Type: const int (0x1000)
 ; OBJ:       DisplayName: comdat
@@ -108,6 +109,43 @@
 ; OBJ:     }
 ; OBJ:   ]
 ; OBJ: ]
+
+; YAML-LABEL:  - Name:            '.debug$S'
+; YAML:    Subsections:
+; YAML:      - !Symbols
+; YAML:        Records:
+; YAML:          - Kind:            S_COMPILE3
+; YAML:            Compile3Sym:
+; YAML:      - !Symbols
+; YAML:        Records:
+; YAML:          - Kind:            S_LDATA32
+; YAML:            DataSym:
+; YAML-NOT: Segment
+; YAML:              Type:            116
+; YAML-NOT: Segment
+; YAML:              DisplayName:     first
+; YAML-NOT: Segment
+; YAML:          - Kind:            S_GTHREAD32
+; YAML:            ThreadLocalDataSym:
+; YAML:              Type:            4097
+; YAML:              DisplayName:     middle
+; YAML:          - Kind:            S_GDATA32
+; YAML:            DataSym:
+; YAML-NOT: Segment
+; YAML:              Type:            116
+; YAML-NOT: Offset
+; YAML-NOT: Segment
+; YAML:              DisplayName:     last
+; YAML-NOT: Segment
+
+; The missing offsets are represented as relocations against this section.
+; YAML:    Relocations:
+; YAML:      - VirtualAddress:  92
+; YAML:        SymbolName:      '?first@@3HA'
+; YAML:        Type:            IMAGE_REL_AMD64_SECREL
+; YAML:      - VirtualAddress:  96
+; YAML:        SymbolName:      '?first@@3HA'
+; YAML:        Type:            IMAGE_REL_AMD64_SECTION
 
 ; ModuleID = 't.cpp'
 source_filename = "t.cpp"
@@ -125,13 +163,13 @@ $"\01?comdat@?$A@X@@2HB" = comdat any
 !llvm.module.flags = !{!20, !21, !22}
 !llvm.ident = !{!23}
 
-!0 = distinct !DIGlobalVariableExpression(var: !1)
+!0 = distinct !DIGlobalVariableExpression(var: !1, expr: !DIExpression())
 !1 = !DIGlobalVariable(name: "first", linkageName: "\01?first@@3HA", scope: !2, file: !3, line: 1, type: !9, isLocal: true, isDefinition: true)
 !2 = distinct !DICompileUnit(language: DW_LANG_C_plus_plus, file: !3, producer: "clang version 3.9.0 (trunk 271937)", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug, enums: !4, globals: !5)
 !3 = !DIFile(filename: "t.cpp", directory: "D:\5Csrc\5Cllvm\5Cbuild")
 !4 = !{}
 !5 = !{!0, !6, !15, !18}
-!6 = distinct !DIGlobalVariableExpression(var: !7)
+!6 = distinct !DIGlobalVariableExpression(var: !7, expr: !DIExpression())
 !7 = !DIGlobalVariable(name: "comdat", linkageName: "\01?comdat@?$A@X@@2HB", scope: !2, file: !3, line: 2, type: !8, isLocal: false, isDefinition: true, declaration: !10)
 !8 = !DIDerivedType(tag: DW_TAG_const_type, baseType: !9)
 !9 = !DIBasicType(name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
@@ -140,10 +178,10 @@ $"\01?comdat@?$A@X@@2HB" = comdat any
 !12 = !{!10}
 !13 = !{!14}
 !14 = !DITemplateTypeParameter(name: "T", type: null)
-!15 = distinct !DIGlobalVariableExpression(var: !16)
+!15 = distinct !DIGlobalVariableExpression(var: !16, expr: !DIExpression())
 !16 = !DIGlobalVariable(name: "middle", linkageName: "\01?middle@@3PEBHEB", scope: !2, file: !3, line: 3, type: !17, isLocal: false, isDefinition: true)
 !17 = !DIDerivedType(tag: DW_TAG_pointer_type, baseType: !8, size: 64, align: 64)
-!18 = distinct !DIGlobalVariableExpression(var: !19)
+!18 = distinct !DIGlobalVariableExpression(var: !19, expr: !DIExpression())
 !19 = !DIGlobalVariable(name: "last", linkageName: "\01?last@@3HA", scope: !2, file: !3, line: 4, type: !9, isLocal: false, isDefinition: true)
 !20 = !{i32 2, !"CodeView", i32 1}
 !21 = !{i32 2, !"Debug Info Version", i32 3}

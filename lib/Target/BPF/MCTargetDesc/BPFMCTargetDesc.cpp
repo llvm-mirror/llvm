@@ -11,9 +11,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "MCTargetDesc/BPFMCTargetDesc.h"
 #include "BPF.h"
 #include "InstPrinter/BPFInstPrinter.h"
-#include "MCTargetDesc/BPFMCTargetDesc.h"
 #include "MCTargetDesc/BPFMCAsmInfo.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
@@ -49,11 +49,13 @@ static MCSubtargetInfo *createBPFMCSubtargetInfo(const Triple &TT,
   return createBPFMCSubtargetInfoImpl(TT, CPU, FS);
 }
 
-static MCStreamer *createBPFMCStreamer(const Triple &T,
-                                       MCContext &Ctx, MCAsmBackend &MAB,
-                                       raw_pwrite_stream &OS, MCCodeEmitter *Emitter,
+static MCStreamer *createBPFMCStreamer(const Triple &T, MCContext &Ctx,
+                                       std::unique_ptr<MCAsmBackend> &&MAB,
+                                       raw_pwrite_stream &OS,
+                                       std::unique_ptr<MCCodeEmitter> &&Emitter,
                                        bool RelaxAll) {
-  return createELFStreamer(Ctx, MAB, OS, Emitter, RelaxAll);
+  return createELFStreamer(Ctx, std::move(MAB), OS, std::move(Emitter),
+                           RelaxAll);
 }
 
 static MCInstPrinter *createBPFMCInstPrinter(const Triple &T,

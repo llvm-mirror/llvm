@@ -13,6 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/Bitcode/BitcodeWriter.h"
 #include "llvm/IR/AutoUpgrade.h"
 #include "llvm/IR/DiagnosticInfo.h"
@@ -23,7 +24,6 @@
 #include "llvm/IR/Verifier.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/Linker/Linker.h"
-#include "llvm/Object/ModuleSummaryIndexObjectFile.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/ManagedStatic.h"
@@ -182,25 +182,30 @@ Module &ModuleLazyLoaderCache::operator()(const char *argv0,
 }
 } // anonymous namespace
 
-static void diagnosticHandler(const DiagnosticInfo &DI, void *C) {
-  unsigned Severity = DI.getSeverity();
-  switch (Severity) {
-  case DS_Error:
-    errs() << "ERROR: ";
-    break;
-  case DS_Warning:
-    if (SuppressWarnings)
-      return;
-    errs() << "WARNING: ";
-    break;
-  case DS_Remark:
-  case DS_Note:
-    llvm_unreachable("Only expecting warnings and errors");
-  }
+namespace {
+struct LLVMLinkDiagnosticHandler : public DiagnosticHandler {
+  bool handleDiagnostics(const DiagnosticInfo &DI) override {
+    unsigned Severity = DI.getSeverity();
+    switch (Severity) {
+    case DS_Error:
+      errs() << "ERROR: ";
+      break;
+    case DS_Warning:
+      if (SuppressWarnings)
+        return true;
+      errs() << "WARNING: ";
+      break;
+    case DS_Remark:
+    case DS_Note:
+      llvm_unreachable("Only expecting warnings and errors");
+    }
 
-  DiagnosticPrinterRawOStream DP(errs());
-  DI.print(DP);
-  errs() << '\n';
+    DiagnosticPrinterRawOStream DP(errs());
+    DI.print(DP);
+    errs() << '\n';
+    return true;
+  }
+};
 }
 
 /// Import any functions requested via the -import option.
@@ -300,7 +305,7 @@ static bool linkFiles(const char *argv0, LLVMContext &Context, Linker &L,
       // does not do the ThinLink that would normally determine what values to
       // promote.
       for (auto &I : *Index) {
-        for (auto &S : I.second) {
+        for (auto &S : I.second.SummaryList) {
           if (GlobalValue::isLocalLinkage(S->linkage()))
             S->setLinkage(GlobalValue::ExternalLinkage);
         }
@@ -347,8 +352,8 @@ int main(int argc, char **argv) {
   ExitOnErr.setBanner(std::string(argv[0]) + ": ");
 
   LLVMContext Context;
-  Context.setDiagnosticHandler(diagnosticHandler, nullptr, true);
-
+  Context.setDiagnosticHandler(
+    llvm::make_unique<LLVMLinkDiagnosticHandler>(), true);
   llvm_shutdown_obj Y;  // Call llvm_shutdown() on exit.
   cl::ParseCommandLineOptions(argc, argv, "llvm linker\n");
 
@@ -378,7 +383,7 @@ int main(int argc, char **argv) {
   if (DumpAsm) errs() << "Here's the assembly:\n" << *Composite;
 
   std::error_code EC;
-  tool_output_file Out(OutputFilename, EC, sys::fs::F_None);
+  ToolOutputFile Out(OutputFilename, EC, sys::fs::F_None);
   if (EC) {
     errs() << EC.message() << '\n';
     return 1;

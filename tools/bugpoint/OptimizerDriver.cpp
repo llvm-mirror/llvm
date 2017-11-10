@@ -47,19 +47,18 @@ static cl::opt<bool> PreserveBitcodeUseListOrder(
     cl::desc("Preserve use-list order when writing LLVM bitcode."),
     cl::init(true), cl::Hidden);
 
-namespace {
 // ChildOutput - This option captures the name of the child output file that
 // is set up by the parent bugpoint process
-cl::opt<std::string> ChildOutput("child-output", cl::ReallyHidden);
-cl::opt<std::string> OptCmd("opt-command", cl::init(""),
-                            cl::desc("Path to opt. (default: search path "
-                                     "for 'opt'.)"));
-}
+static cl::opt<std::string> ChildOutput("child-output", cl::ReallyHidden);
+static cl::opt<std::string>
+    OptCmd("opt-command", cl::init(""),
+           cl::desc("Path to opt. (default: search path "
+                    "for 'opt'.)"));
 
 /// writeProgramToFile - This writes the current "Program" to the named bitcode
 /// file.  If an error occurs, true is returned.
 ///
-static bool writeProgramToFileAux(tool_output_file &Out, const Module *M) {
+static bool writeProgramToFileAux(ToolOutputFile &Out, const Module *M) {
   WriteBitcodeToFile(M, Out.os(), PreserveBitcodeUseListOrder);
   Out.os().close();
   if (!Out.os().has_error()) {
@@ -71,14 +70,14 @@ static bool writeProgramToFileAux(tool_output_file &Out, const Module *M) {
 
 bool BugDriver::writeProgramToFile(const std::string &Filename, int FD,
                                    const Module *M) const {
-  tool_output_file Out(Filename, FD);
+  ToolOutputFile Out(Filename, FD);
   return writeProgramToFileAux(Out, M);
 }
 
 bool BugDriver::writeProgramToFile(const std::string &Filename,
                                    const Module *M) const {
   std::error_code EC;
-  tool_output_file Out(Filename, EC, sys::fs::F_None);
+  ToolOutputFile Out(Filename, EC, sys::fs::F_None);
   if (!EC)
     return writeProgramToFileAux(Out, M);
   return true;
@@ -155,7 +154,7 @@ bool BugDriver::runPasses(Module *Program,
     return 1;
   }
 
-  tool_output_file InFile(InputFilename, InputFD);
+  ToolOutputFile InFile(InputFilename, InputFD);
 
   WriteBitcodeToFile(Program, InFile.os(), PreserveBitcodeUseListOrder);
   InFile.os().close();
@@ -203,10 +202,11 @@ bool BugDriver::runPasses(Module *Program,
   } else
     Args.push_back(tool.c_str());
 
-  Args.push_back("-o");
-  Args.push_back(OutputFilename.c_str());
   for (unsigned i = 0, e = OptArgs.size(); i != e; ++i)
     Args.push_back(OptArgs[i].c_str());
+  Args.push_back("-disable-symbolication");
+  Args.push_back("-o");
+  Args.push_back(OutputFilename.c_str());
   std::vector<std::string> pass_args;
   for (unsigned i = 0, e = PluginLoader::getNumPlugins(); i != e; ++i) {
     pass_args.push_back(std::string("-load"));
@@ -230,13 +230,15 @@ bool BugDriver::runPasses(Module *Program,
         << " " << Args[i];
         errs() << "\n";);
 
-  // Redirect stdout and stderr to nowhere if SilencePasses is given
-  StringRef Nowhere;
-  const StringRef *Redirects[3] = {nullptr, &Nowhere, &Nowhere};
+  Optional<StringRef> Redirects[3] = {None, None, None};
+  // Redirect stdout and stderr to nowhere if SilencePasses is given.
+  if (SilencePasses) {
+    Redirects[1] = "";
+    Redirects[2] = "";
+  }
 
   std::string ErrMsg;
-  int result = sys::ExecuteAndWait(Prog, Args.data(), nullptr,
-                                   (SilencePasses ? Redirects : nullptr),
+  int result = sys::ExecuteAndWait(Prog, Args.data(), nullptr, Redirects,
                                    Timeout, MemoryLimit, &ErrMsg);
 
   // If we are supposed to delete the bitcode file or if the passes crashed,

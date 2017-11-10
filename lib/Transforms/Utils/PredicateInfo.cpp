@@ -19,7 +19,6 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/CFG.h"
-#include "llvm/Analysis/OrderedBasicBlock.h"
 #include "llvm/IR/AssemblyAnnotationWriter.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Dominators.h"
@@ -34,6 +33,7 @@
 #include "llvm/Support/DebugCounter.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Transforms/Scalar.h"
+#include "llvm/Transforms/Utils/OrderedInstructions.h"
 #include <algorithm>
 #define DEBUG_TYPE "predicateinfo"
 using namespace llvm;
@@ -49,9 +49,10 @@ INITIALIZE_PASS_END(PredicateInfoPrinterLegacyPass, "print-predicateinfo",
 static cl::opt<bool> VerifyPredicateInfo(
     "verify-predicateinfo", cl::init(false), cl::Hidden,
     cl::desc("Verify PredicateInfo in legacy printer pass."));
-namespace {
 DEBUG_COUNTER(RenameCounter, "predicateinfo-rename",
-              "Controls which variables are renamed with predicateinfo")
+              "Controls which variables are renamed with predicateinfo");
+
+namespace {
 // Given a predicate info that is a type of branching terminator, get the
 // branching block.
 const BasicBlock *getBranchBlock(const PredicateBase *PB) {
@@ -106,14 +107,27 @@ struct ValueDFS {
   bool EdgeOnly = false;
 };
 
+// Perform a strict weak ordering on instructions and arguments.
+static bool valueComesBefore(OrderedInstructions &OI, const Value *A,
+                             const Value *B) {
+  auto *ArgA = dyn_cast_or_null<Argument>(A);
+  auto *ArgB = dyn_cast_or_null<Argument>(B);
+  if (ArgA && !ArgB)
+    return true;
+  if (ArgB && !ArgA)
+    return false;
+  if (ArgA && ArgB)
+    return ArgA->getArgNo() < ArgB->getArgNo();
+  return OI.dominates(cast<Instruction>(A), cast<Instruction>(B));
+}
+
 // This compares ValueDFS structures, creating OrderedBasicBlocks where
 // necessary to compare uses/defs in the same block.  Doing so allows us to walk
 // the minimum number of instructions necessary to compute our def/use ordering.
 struct ValueDFS_Compare {
-  DenseMap<const BasicBlock *, std::unique_ptr<OrderedBasicBlock>> &OBBMap;
-  ValueDFS_Compare(
-      DenseMap<const BasicBlock *, std::unique_ptr<OrderedBasicBlock>> &OBBMap)
-      : OBBMap(OBBMap) {}
+  OrderedInstructions &OI;
+  ValueDFS_Compare(OrderedInstructions &OI) : OI(OI) {}
+
   bool operator()(const ValueDFS &A, const ValueDFS &B) const {
     if (&A == &B)
       return false;
@@ -196,25 +210,12 @@ struct ValueDFS_Compare {
     auto *ArgA = dyn_cast_or_null<Argument>(ADef);
     auto *ArgB = dyn_cast_or_null<Argument>(BDef);
 
-    if (ArgA && !ArgB)
-      return true;
-    if (ArgB && !ArgA)
-      return false;
-    if (ArgA && ArgB)
-      return ArgA->getArgNo() < ArgB->getArgNo();
+    if (ArgA || ArgB)
+      return valueComesBefore(OI, ArgA, ArgB);
 
     auto *AInst = getDefOrUser(ADef, A.U);
     auto *BInst = getDefOrUser(BDef, B.U);
-
-    auto *BB = AInst->getParent();
-    auto LookupResult = OBBMap.find(BB);
-    if (LookupResult != OBBMap.end())
-      return LookupResult->second->dominates(AInst, BInst);
-    else {
-      auto Result = OBBMap.insert({BB, make_unique<OrderedBasicBlock>(BB)});
-      return Result.first->second->dominates(AInst, BInst);
-    }
-    return std::tie(ADef, A.U) < std::tie(BDef, B.U);
+    return valueComesBefore(OI, AInst, BInst);
   }
 };
 
@@ -462,6 +463,9 @@ void PredicateInfo::buildPredicateInfo() {
     if (auto *BI = dyn_cast<BranchInst>(BranchBB->getTerminator())) {
       if (!BI->isConditional())
         continue;
+      // Can't insert conditional information if they all go to the same place.
+      if (BI->getSuccessor(0) == BI->getSuccessor(1))
+        continue;
       processBranch(BI, BranchBB, OpsToRename);
     } else if (auto *SI = dyn_cast<SwitchInst>(BranchBB->getTerminator())) {
       processSwitch(SI, BranchBB, OpsToRename);
@@ -543,8 +547,14 @@ Value *PredicateInfo::materializeStack(unsigned int &Counter,
 //
 // TODO: Use this algorithm to perform fast single-variable renaming in
 // promotememtoreg and memoryssa.
-void PredicateInfo::renameUses(SmallPtrSetImpl<Value *> &OpsToRename) {
-  ValueDFS_Compare Compare(OBBMap);
+void PredicateInfo::renameUses(SmallPtrSetImpl<Value *> &OpSet) {
+  // Sort OpsToRename since we are going to iterate it.
+  SmallVector<Value *, 8> OpsToRename(OpSet.begin(), OpSet.end());
+  auto Comparator = [&](const Value *A, const Value *B) {
+    return valueComesBefore(OI, A, B);
+  };
+  std::sort(OpsToRename.begin(), OpsToRename.end(), Comparator);
+  ValueDFS_Compare Compare(OI);
   // Compute liveness, and rename in O(uses) per Op.
   for (auto *Op : OpsToRename) {
     unsigned Counter = 0;
@@ -681,7 +691,7 @@ PredicateInfo::getValueInfo(Value *Operand) const {
 
 PredicateInfo::PredicateInfo(Function &F, DominatorTree &DT,
                              AssumptionCache &AC)
-    : F(F), DT(DT), AC(AC) {
+    : F(F), DT(DT), AC(AC), OI(&DT) {
   // Push an empty operand info so that we can detect 0 as not finding one
   ValueInfos.resize(1);
   buildPredicateInfo();

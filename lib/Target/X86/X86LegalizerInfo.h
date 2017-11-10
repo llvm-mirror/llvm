@@ -20,6 +20,7 @@
 namespace llvm {
 
 class X86Subtarget;
+class X86TargetMachine;
 
 /// This class provides the information for the target register banks.
 class X86LegalizerInfo : public LegalizerInfo {
@@ -27,15 +28,22 @@ private:
   /// Keep a reference to the X86Subtarget around so that we can
   /// make the right decision when generating code for different targets.
   const X86Subtarget &Subtarget;
+  const X86TargetMachine &TM;
 
 public:
-  X86LegalizerInfo(const X86Subtarget &STI);
+  X86LegalizerInfo(const X86Subtarget &STI, const X86TargetMachine &TM);
 
 private:
   void setLegalizerInfo32bit();
   void setLegalizerInfo64bit();
   void setLegalizerInfoSSE1();
   void setLegalizerInfoSSE2();
+  void setLegalizerInfoSSE41();
+  void setLegalizerInfoAVX();
+  void setLegalizerInfoAVX2();
+  void setLegalizerInfoAVX512();
+  void setLegalizerInfoAVX512DQ();
+  void setLegalizerInfoAVX512BW();
 };
-} // End llvm namespace.
+} // namespace llvm
 #endif

@@ -15,6 +15,7 @@
 #include "llvm/Support/Error.h"
 
 #include "llvm/DebugInfo/PDB/Native/PDBFile.h"
+#include "llvm/DebugInfo/PDB/Native/PDBStringTableBuilder.h"
 #include "llvm/DebugInfo/PDB/Native/RawConstants.h"
 #include "llvm/DebugInfo/PDB/PDBTypes.h"
 #include "llvm/Support/BinaryByteStream.h"
@@ -31,11 +32,13 @@ struct coff_section;
 namespace pdb {
 class DbiStream;
 struct DbiStreamHeader;
+class DbiModuleDescriptorBuilder;
 class PDBFile;
 
 class DbiStreamBuilder {
 public:
   DbiStreamBuilder(msf::MSFBuilder &Msf);
+  ~DbiStreamBuilder();
 
   DbiStreamBuilder(const DbiStreamBuilder &) = delete;
   DbiStreamBuilder &operator=(const DbiStreamBuilder &) = delete;
@@ -47,25 +50,30 @@ public:
   void setPdbDllRbld(uint16_t R);
   void setFlags(uint16_t F);
   void setMachineType(PDB_Machine M);
-  void setSectionContribs(ArrayRef<SectionContrib> SecMap);
   void setSectionMap(ArrayRef<SecMapEntry> SecMap);
 
   // Add given bytes as a new stream.
   Error addDbgStream(pdb::DbgHeaderType Type, ArrayRef<uint8_t> Data);
 
+  uint32_t addECName(StringRef Name);
+
   uint32_t calculateSerializedLength() const;
 
-  Error addModuleInfo(StringRef ObjFile, StringRef Module);
-  Error addModuleSourceFile(StringRef Module, StringRef File);
+  void setGlobalsStreamIndex(uint32_t Index);
+  void setPublicsStreamIndex(uint32_t Index);
+  void setSymbolRecordStreamIndex(uint32_t Index);
+
+  Expected<DbiModuleDescriptorBuilder &> addModuleInfo(StringRef ModuleName);
+  Error addModuleSourceFile(DbiModuleDescriptorBuilder &Module, StringRef File);
+  Expected<uint32_t> getSourceFileNameIndex(StringRef FileName);
 
   Error finalizeMsfLayout();
 
-  Error commit(const msf::MSFLayout &Layout, WritableBinaryStreamRef Buffer);
+  Error commit(const msf::MSFLayout &Layout, WritableBinaryStreamRef MsfBuffer);
 
-  // A helper function to create Section Contributions from COFF input
-  // section headers.
-  static std::vector<SectionContrib>
-  createSectionContribs(ArrayRef<llvm::object::coff_section> SecHdrs);
+  void addSectionContrib(const SectionContrib &SC) {
+    SectionContribs.emplace_back(SC);
+  }
 
   // A helper function to create a Section Map from a COFF section header.
   static std::vector<SecMapEntry>
@@ -74,25 +82,19 @@ public:
 private:
   struct DebugStream {
     ArrayRef<uint8_t> Data;
-    uint16_t StreamNumber = 0;
+    uint16_t StreamNumber = kInvalidStreamIndex;
   };
 
   Error finalize();
   uint32_t calculateModiSubstreamSize() const;
+  uint32_t calculateNamesOffset() const;
   uint32_t calculateSectionContribsStreamSize() const;
   uint32_t calculateSectionMapStreamSize() const;
   uint32_t calculateFileInfoSubstreamSize() const;
   uint32_t calculateNamesBufferSize() const;
   uint32_t calculateDbgStreamsSize() const;
 
-  Error generateModiSubstream();
   Error generateFileInfoSubstream();
-
-  struct ModuleInfo {
-    std::vector<StringRef> SourceFiles;
-    StringRef Obj;
-    StringRef Mod;
-  };
 
   msf::MSFBuilder &Msf;
   BumpPtrAllocator &Allocator;
@@ -104,18 +106,20 @@ private:
   uint16_t PdbDllRbld;
   uint16_t Flags;
   PDB_Machine MachineType;
+  uint32_t GlobalsStreamIndex = kInvalidStreamIndex;
+  uint32_t PublicsStreamIndex = kInvalidStreamIndex;
+  uint32_t SymRecordStreamIndex = kInvalidStreamIndex;
 
   const DbiStreamHeader *Header;
 
-  StringMap<std::unique_ptr<ModuleInfo>> ModuleInfos;
-  std::vector<ModuleInfo *> ModuleInfoList;
+  std::vector<std::unique_ptr<DbiModuleDescriptorBuilder>> ModiList;
 
   StringMap<uint32_t> SourceFileNames;
 
+  PDBStringTableBuilder ECNamesBuilder;
   WritableBinaryStreamRef NamesBuffer;
-  MutableBinaryByteStream ModInfoBuffer;
   MutableBinaryByteStream FileInfoBuffer;
-  ArrayRef<SectionContrib> SectionContribs;
+  std::vector<SectionContrib> SectionContribs;
   ArrayRef<SecMapEntry> SectionMap;
   llvm::SmallVector<DebugStream, (int)DbgHeaderType::Max> DbgStreams;
 };

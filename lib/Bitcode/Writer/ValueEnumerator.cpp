@@ -1,4 +1,4 @@
-//===-- ValueEnumerator.cpp - Number values and types for bitcode writer --===//
+//===- ValueEnumerator.cpp - Number values and types for bitcode writer ---===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -12,47 +12,77 @@
 //===----------------------------------------------------------------------===//
 
 #include "ValueEnumerator.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/SmallPtrSet.h"
-#include "llvm/IR/Constants.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/IR/Argument.h"
+#include "llvm/IR/Attributes.h"
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/Constant.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalAlias.h"
+#include "llvm/IR/GlobalIFunc.h"
+#include "llvm/IR/GlobalObject.h"
+#include "llvm/IR/GlobalValue.h"
+#include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Type.h"
+#include "llvm/IR/Use.h"
 #include "llvm/IR/UseListOrder.h"
+#include "llvm/IR/User.h"
+#include "llvm/IR/Value.h"
 #include "llvm/IR/ValueSymbolTable.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
+#include <cassert>
+#include <cstddef>
+#include <iterator>
+#include <tuple>
+#include <utility>
+#include <vector>
+
 using namespace llvm;
 
 namespace {
+
 struct OrderMap {
   DenseMap<const Value *, std::pair<unsigned, bool>> IDs;
-  unsigned LastGlobalConstantID;
-  unsigned LastGlobalValueID;
+  unsigned LastGlobalConstantID = 0;
+  unsigned LastGlobalValueID = 0;
 
-  OrderMap() : LastGlobalConstantID(0), LastGlobalValueID(0) {}
+  OrderMap() = default;
 
   bool isGlobalConstant(unsigned ID) const {
     return ID <= LastGlobalConstantID;
   }
+
   bool isGlobalValue(unsigned ID) const {
     return ID <= LastGlobalValueID && !isGlobalConstant(ID);
   }
 
   unsigned size() const { return IDs.size(); }
   std::pair<unsigned, bool> &operator[](const Value *V) { return IDs[V]; }
+
   std::pair<unsigned, bool> lookup(const Value *V) const {
     return IDs.lookup(V);
   }
+
   void index(const Value *V) {
     // Explicitly sequence get-size and insert-value operations to avoid UB.
     unsigned ID = IDs.size() + 1;
     IDs[V].first = ID;
   }
 };
-}
+
+} // end anonymous namespace
 
 static void orderValue(const Value *V, OrderMap &OM) {
   if (OM.lookup(V).first)
@@ -141,7 +171,7 @@ static void predictValueUseListOrderImpl(const Value *V, const Function *F,
                                          unsigned ID, const OrderMap &OM,
                                          UseListOrderStack &Stack) {
   // Predict use-list order for this one.
-  typedef std::pair<const Use *, unsigned> Entry;
+  using Entry = std::pair<const Use *, unsigned>;
   SmallVector<Entry, 64> List;
   for (const Use &U : V->uses())
     // Check if this user will be serialized.
@@ -314,10 +344,13 @@ ValueEnumerator::ValueEnumerator(const Module &M,
   // Remember what is the cutoff between globalvalue's and other constants.
   unsigned FirstConstant = Values.size();
 
-  // Enumerate the global variable initializers.
-  for (const GlobalVariable &GV : M.globals())
+  // Enumerate the global variable initializers and attributes.
+  for (const GlobalVariable &GV : M.globals()) {
     if (GV.hasInitializer())
       EnumerateValue(GV.getInitializer());
+    if (GV.hasAttributes())
+      EnumerateAttributes(GV.getAttributesAsList(AttributeList::FunctionIndex));
+  }
 
   // Enumerate the aliasees.
   for (const GlobalAlias &GA : M.aliases())
@@ -443,12 +476,10 @@ LLVM_DUMP_METHOD void ValueEnumerator::dump() const {
 
 void ValueEnumerator::print(raw_ostream &OS, const ValueMapType &Map,
                             const char *Name) const {
-
   OS << "Map Name: " << Name << "\n";
   OS << "Size: " << Map.size() << "\n";
   for (ValueMapType::const_iterator I = Map.begin(),
          E = Map.end(); I != E; ++I) {
-
     const Value *V = I->first;
     if (V->hasName())
       OS << "Value: " << V->getName();
@@ -473,7 +504,6 @@ void ValueEnumerator::print(raw_ostream &OS, const ValueMapType &Map,
 
 void ValueEnumerator::print(raw_ostream &OS, const MetadataMapType &Map,
                             const char *Name) const {
-
   OS << "Map Name: " << Name << "\n";
   OS << "Size: " << Map.size() << "\n";
   for (auto I = Map.begin(), E = Map.end(); I != E; ++I) {
@@ -514,7 +544,6 @@ void ValueEnumerator::OptimizeConstants(unsigned CstStart, unsigned CstEnd) {
   for (; CstStart != CstEnd; ++CstStart)
     ValueMap[Values[CstStart].first] = CstStart+1;
 }
-
 
 /// EnumerateValueSymbolTable - Insert all of the values in the specified symbol
 /// table into the values table.
@@ -887,23 +916,26 @@ void ValueEnumerator::EnumerateOperandType(const Value *V) {
   }
 }
 
-void ValueEnumerator::EnumerateAttributes(AttributeSet PAL) {
+void ValueEnumerator::EnumerateAttributes(AttributeList PAL) {
   if (PAL.isEmpty()) return;  // null is always 0.
 
   // Do a lookup.
-  unsigned &Entry = AttributeMap[PAL];
+  unsigned &Entry = AttributeListMap[PAL];
   if (Entry == 0) {
     // Never saw this before, add it.
-    Attribute.push_back(PAL);
-    Entry = Attribute.size();
+    AttributeLists.push_back(PAL);
+    Entry = AttributeLists.size();
   }
 
   // Do lookups for all attribute groups.
-  for (unsigned i = 0, e = PAL.getNumSlots(); i != e; ++i) {
-    AttributeSet AS = PAL.getSlotAttributes(i);
-    unsigned &Entry = AttributeGroupMap[AS];
+  for (unsigned i = PAL.index_begin(), e = PAL.index_end(); i != e; ++i) {
+    AttributeSet AS = PAL.getAttributes(i);
+    if (!AS.hasAttributes())
+      continue;
+    IndexAndAttrSet Pair = {i, AS};
+    unsigned &Entry = AttributeGroupMap[Pair];
     if (Entry == 0) {
-      AttributeGroups.push_back(AS);
+      AttributeGroups.push_back(Pair);
       Entry = AttributeGroups.size();
     }
   }

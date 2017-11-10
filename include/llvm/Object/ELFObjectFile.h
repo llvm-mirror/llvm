@@ -19,6 +19,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/ADT/iterator_range.h"
+#include "llvm/BinaryFormat/ELF.h"
 #include "llvm/MC/SubtargetFeature.h"
 #include "llvm/Object/Binary.h"
 #include "llvm/Object/ELF.h"
@@ -27,12 +28,11 @@
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Object/SymbolicFile.h"
 #include "llvm/Support/ARMAttributeParser.h"
+#include "llvm/Support/ARMBuildAttributes.h"
 #include "llvm/Support/Casting.h"
-#include "llvm/Support/ELF.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/ErrorOr.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include <cassert>
 #include <cstdint>
@@ -42,13 +42,11 @@ namespace llvm {
 namespace object {
 
 class elf_symbol_iterator;
-class ELFSymbolRef;
-class ELFRelocationRef;
 
 class ELFObjectFileBase : public ObjectFile {
-  friend class ELFSymbolRef;
-  friend class ELFSectionRef;
   friend class ELFRelocationRef;
+  friend class ELFSectionRef;
+  friend class ELFSymbolRef;
 
 protected:
   ELFObjectFileBase(unsigned int Type, MemoryBufferRef Source);
@@ -62,15 +60,16 @@ protected:
   virtual uint64_t getSectionFlags(DataRefImpl Sec) const = 0;
   virtual uint64_t getSectionOffset(DataRefImpl Sec) const = 0;
 
-  virtual ErrorOr<int64_t> getRelocationAddend(DataRefImpl Rel) const = 0;
+  virtual Expected<int64_t> getRelocationAddend(DataRefImpl Rel) const = 0;
 
 public:
-  typedef iterator_range<elf_symbol_iterator> elf_symbol_iterator_range;
+  using elf_symbol_iterator_range = iterator_range<elf_symbol_iterator>;
+
   virtual elf_symbol_iterator_range getDynamicSymbolIterators() const = 0;
 
   elf_symbol_iterator_range symbols() const;
 
-  static inline bool classof(const Binary *v) { return v->isELF(); }
+  static bool classof(const Binary *v) { return v->isELF(); }
 
   SubtargetFeatures getFeatures() const override;
 
@@ -167,7 +166,7 @@ public:
     return cast<ELFObjectFileBase>(RelocationRef::getObject());
   }
 
-  ErrorOr<int64_t> getAddend() const {
+  Expected<int64_t> getAddend() const {
     return getObject()->getRelocationAddend(getRawDataRefImpl());
   }
 };
@@ -201,14 +200,19 @@ template <class ELFT> class ELFObjectFile : public ELFObjectFileBase {
 public:
   LLVM_ELF_IMPORT_TYPES_ELFT(ELFT)
 
-  typedef typename ELFFile<ELFT>::uintX_t uintX_t;
+  using uintX_t = typename ELFFile<ELFT>::uintX_t;
 
-  typedef typename ELFFile<ELFT>::Elf_Sym Elf_Sym;
-  typedef typename ELFFile<ELFT>::Elf_Shdr Elf_Shdr;
-  typedef typename ELFFile<ELFT>::Elf_Ehdr Elf_Ehdr;
-  typedef typename ELFFile<ELFT>::Elf_Rel Elf_Rel;
-  typedef typename ELFFile<ELFT>::Elf_Rela Elf_Rela;
-  typedef typename ELFFile<ELFT>::Elf_Dyn Elf_Dyn;
+  using Elf_Sym = typename ELFFile<ELFT>::Elf_Sym;
+  using Elf_Shdr = typename ELFFile<ELFT>::Elf_Shdr;
+  using Elf_Ehdr = typename ELFFile<ELFT>::Elf_Ehdr;
+  using Elf_Rel = typename ELFFile<ELFT>::Elf_Rel;
+  using Elf_Rela = typename ELFFile<ELFT>::Elf_Rela;
+  using Elf_Dyn = typename ELFFile<ELFT>::Elf_Dyn;
+
+private:
+  ELFObjectFile(MemoryBufferRef Object, ELFFile<ELFT> EF,
+                const Elf_Shdr *DotDynSymSec, const Elf_Shdr *DotSymtabSec,
+                ArrayRef<Elf_Word> ShndxTable);
 
 protected:
   ELFFile<ELFT> EF;
@@ -235,6 +239,7 @@ protected:
   std::error_code getSectionName(DataRefImpl Sec,
                                  StringRef &Res) const override;
   uint64_t getSectionAddress(DataRefImpl Sec) const override;
+  uint64_t getSectionIndex(DataRefImpl Sec) const override;
   uint64_t getSectionSize(DataRefImpl Sec) const override;
   std::error_code getSectionContents(DataRefImpl Sec,
                                      StringRef &Res) const override;
@@ -327,7 +332,8 @@ protected:
   bool isDyldELFObject;
 
 public:
-  ELFObjectFile(MemoryBufferRef Object, std::error_code &EC);
+  ELFObjectFile(ELFObjectFile<ELFT> &&Other);
+  static Expected<ELFObjectFile<ELFT>> create(MemoryBufferRef Object);
 
   const Elf_Rel *getRel(DataRefImpl Rel) const;
   const Elf_Rela *getRela(DataRefImpl Rela) const;
@@ -352,7 +358,7 @@ public:
   section_iterator section_begin() const override;
   section_iterator section_end() const override;
 
-  ErrorOr<int64_t> getRelocationAddend(DataRefImpl Rel) const override;
+  Expected<int64_t> getRelocationAddend(DataRefImpl Rel) const override;
 
   uint8_t getBytesInAddress() const override;
   StringRef getFileFormatName() const override;
@@ -388,7 +394,7 @@ public:
   const ELFFile<ELFT> *getELFFile() const { return &EF; }
 
   bool isDyldType() const { return isDyldELFObject; }
-  static inline bool classof(const Binary *v) {
+  static bool classof(const Binary *v) {
     return v->getType() == getELFType(ELFT::TargetEndianness == support::little,
                                       ELFT::Is64Bits);
   }
@@ -398,10 +404,10 @@ public:
   bool isRelocatableObject() const override;
 };
 
-typedef ELFObjectFile<ELFType<support::little, false>> ELF32LEObjectFile;
-typedef ELFObjectFile<ELFType<support::little, true>> ELF64LEObjectFile;
-typedef ELFObjectFile<ELFType<support::big, false>> ELF32BEObjectFile;
-typedef ELFObjectFile<ELFType<support::big, true>> ELF64BEObjectFile;
+using ELF32LEObjectFile = ELFObjectFile<ELFType<support::little, false>>;
+using ELF64LEObjectFile = ELFObjectFile<ELFType<support::little, true>>;
+using ELF32BEObjectFile = ELFObjectFile<ELFType<support::big, false>>;
+using ELF64BEObjectFile = ELFObjectFile<ELFType<support::big, true>>;
 
 template <class ELFT>
 void ELFObjectFile<ELFT>::moveSymbolNext(DataRefImpl &Sym) const {
@@ -646,6 +652,17 @@ uint64_t ELFObjectFile<ELFT>::getSectionAddress(DataRefImpl Sec) const {
 }
 
 template <class ELFT>
+uint64_t ELFObjectFile<ELFT>::getSectionIndex(DataRefImpl Sec) const {
+  auto SectionsOrErr = EF.sections();
+  handleAllErrors(std::move(SectionsOrErr.takeError()),
+                  [](const ErrorInfoBase &) {
+                    llvm_unreachable("unable to get section index");
+                  });
+  const Elf_Shdr *First = SectionsOrErr->begin();
+  return getSection(Sec) - First;
+}
+
+template <class ELFT>
 uint64_t ELFObjectFile<ELFT>::getSectionSize(DataRefImpl Sec) const {
   return getSection(Sec)->sh_size;
 }
@@ -655,6 +672,10 @@ std::error_code
 ELFObjectFile<ELFT>::getSectionContents(DataRefImpl Sec,
                                         StringRef &Result) const {
   const Elf_Shdr *EShdr = getSection(Sec);
+  if (std::error_code EC =
+          checkOffset(getMemoryBufferRef(),
+                      (uintptr_t)base() + EShdr->sh_offset, EShdr->sh_size))
+    return EC;
   Result = StringRef((const char *)base() + EShdr->sh_offset, EShdr->sh_size);
   return std::error_code();
 }
@@ -800,10 +821,10 @@ void ELFObjectFile<ELFT>::getRelocationTypeName(
 }
 
 template <class ELFT>
-ErrorOr<int64_t>
+Expected<int64_t>
 ELFObjectFile<ELFT>::getRelocationAddend(DataRefImpl Rel) const {
   if (getRelSection(Rel)->sh_type != ELF::SHT_RELA)
-    return object_error::parse_failed;
+    return createError("Section is not SHT_RELA");
   return (int64_t)getRela(Rel)->r_addend;
 }
 
@@ -828,48 +849,62 @@ ELFObjectFile<ELFT>::getRela(DataRefImpl Rela) const {
 }
 
 template <class ELFT>
-ELFObjectFile<ELFT>::ELFObjectFile(MemoryBufferRef Object, std::error_code &EC)
-    : ELFObjectFileBase(
-          getELFType(ELFT::TargetEndianness == support::little, ELFT::Is64Bits),
-          Object),
-      EF(Data.getBuffer()) {
+Expected<ELFObjectFile<ELFT>>
+ELFObjectFile<ELFT>::create(MemoryBufferRef Object) {
+  auto EFOrErr = ELFFile<ELFT>::create(Object.getBuffer());
+  if (Error E = EFOrErr.takeError())
+    return std::move(E);
+  auto EF = std::move(*EFOrErr);
+
   auto SectionsOrErr = EF.sections();
-  if (!SectionsOrErr) {
-    EC = errorToErrorCode(SectionsOrErr.takeError());
-    return;
-  }
+  if (!SectionsOrErr)
+    return SectionsOrErr.takeError();
+
+  const Elf_Shdr *DotDynSymSec = nullptr;
+  const Elf_Shdr *DotSymtabSec = nullptr;
+  ArrayRef<Elf_Word> ShndxTable;
   for (const Elf_Shdr &Sec : *SectionsOrErr) {
     switch (Sec.sh_type) {
     case ELF::SHT_DYNSYM: {
-      if (DotDynSymSec) {
-        // More than one .dynsym!
-        EC = object_error::parse_failed;
-        return;
-      }
+      if (DotDynSymSec)
+        return createError("More than one dynamic symbol table!");
       DotDynSymSec = &Sec;
       break;
     }
     case ELF::SHT_SYMTAB: {
-      if (DotSymtabSec) {
-        // More than one .dynsym!
-        EC = object_error::parse_failed;
-        return;
-      }
+      if (DotSymtabSec)
+        return createError("More than one static symbol table!");
       DotSymtabSec = &Sec;
       break;
     }
     case ELF::SHT_SYMTAB_SHNDX: {
       auto TableOrErr = EF.getSHNDXTable(Sec);
-      if (!TableOrErr) {
-        EC = errorToErrorCode(TableOrErr.takeError());
-        return;
-      }
+      if (!TableOrErr)
+        return TableOrErr.takeError();
       ShndxTable = *TableOrErr;
       break;
     }
     }
   }
+  return ELFObjectFile<ELFT>(Object, EF, DotDynSymSec, DotSymtabSec,
+                             ShndxTable);
 }
+
+template <class ELFT>
+ELFObjectFile<ELFT>::ELFObjectFile(MemoryBufferRef Object, ELFFile<ELFT> EF,
+                                   const Elf_Shdr *DotDynSymSec,
+                                   const Elf_Shdr *DotSymtabSec,
+                                   ArrayRef<Elf_Word> ShndxTable)
+    : ELFObjectFileBase(
+          getELFType(ELFT::TargetEndianness == support::little, ELFT::Is64Bits),
+          Object),
+      EF(EF), DotDynSymSec(DotDynSymSec), DotSymtabSec(DotSymtabSec),
+      ShndxTable(ShndxTable) {}
+
+template <class ELFT>
+ELFObjectFile<ELFT>::ELFObjectFile(ELFObjectFile<ELFT> &&Other)
+    : ELFObjectFile(Other.Data, Other.EF, Other.DotDynSymSec,
+                    Other.DotSymtabSec, Other.ShndxTable) {}
 
 template <class ELFT>
 basic_symbol_iterator ELFObjectFile<ELFT>::symbol_begin() const {
@@ -979,9 +1014,7 @@ StringRef ELFObjectFile<ELFT>::getFileFormatName() const {
     case ELF::EM_WEBASSEMBLY:
       return "ELF64-wasm";
     case ELF::EM_AMDGPU:
-      return (EF.getHeader()->e_ident[ELF::EI_OSABI] == ELF::ELFOSABI_AMDGPU_HSA
-              && IsLittleEndian) ?
-             "ELF64-amdgpu-hsacobj" : "ELF64-amdgpu";
+      return "ELF64-amdgpu";
     case ELF::EM_BPF:
       return "ELF64-BPF";
     default:
@@ -1049,11 +1082,20 @@ unsigned ELFObjectFile<ELFT>::getArch() const {
     default: return Triple::UnknownArch;
     }
 
-  case ELF::EM_AMDGPU:
-    return (EF.getHeader()->e_ident[ELF::EI_CLASS] == ELF::ELFCLASS64
-         && EF.getHeader()->e_ident[ELF::EI_OSABI] == ELF::ELFOSABI_AMDGPU_HSA
-         && IsLittleEndian) ?
-      Triple::amdgcn : Triple::UnknownArch;
+  case ELF::EM_AMDGPU: {
+    if (!IsLittleEndian)
+      return Triple::UnknownArch;
+
+    unsigned EFlags = EF.getHeader()->e_flags;
+    switch (EFlags & ELF::EF_AMDGPU_ARCH) {
+    case ELF::EF_AMDGPU_ARCH_R600:
+      return Triple::r600;
+    case ELF::EF_AMDGPU_ARCH_GCN:
+      return Triple::amdgcn;
+    default:
+      return Triple::UnknownArch;
+    }
+  }
 
   case ELF::EM_BPF:
     return IsLittleEndian ? Triple::bpfel : Triple::bpfeb;

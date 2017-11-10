@@ -13,23 +13,47 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/ModuleSummaryAnalysis.h"
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/MapVector.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
-#include "llvm/ADT/Triple.h"
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/BlockFrequencyInfo.h"
-#include "llvm/Analysis/BlockFrequencyInfoImpl.h"
 #include "llvm/Analysis/BranchProbabilityInfo.h"
 #include "llvm/Analysis/IndirectCallPromotionAnalysis.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ProfileSummaryInfo.h"
 #include "llvm/Analysis/TypeMetadataUtils.h"
+#include "llvm/IR/Attributes.h"
+#include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CallSite.h"
+#include "llvm/IR/Constant.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/Dominators.h"
-#include "llvm/IR/InstIterator.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalAlias.h"
+#include "llvm/IR/GlobalValue.h"
+#include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
-#include "llvm/IR/ValueSymbolTable.h"
-#include "llvm/Object/IRObjectFile.h"
+#include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/Metadata.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/ModuleSummaryIndex.h"
+#include "llvm/IR/Use.h"
+#include "llvm/IR/User.h"
+#include "llvm/Object/ModuleSymbolTable.h"
+#include "llvm/Object/SymbolicFile.h"
 #include "llvm/Pass.h"
+#include "llvm/Support/Casting.h"
+#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <vector>
+
 using namespace llvm;
 
 #define DEBUG_TYPE "module-summary-analysis"
@@ -37,7 +61,8 @@ using namespace llvm;
 // Walk through the operands of a given User via worklist iteration and populate
 // the set of GlobalValue references encountered. Invoked either on an
 // Instruction or a GlobalVariable (which walks its initializer).
-static void findRefEdges(const User *CurUser, SetVector<ValueInfo> &RefEdges,
+static void findRefEdges(ModuleSummaryIndex &Index, const User *CurUser,
+                         SetVector<ValueInfo> &RefEdges,
                          SmallPtrSet<const User *, 8> &Visited) {
   SmallVector<const User *, 32> Worklist;
   Worklist.push_back(CurUser);
@@ -61,7 +86,7 @@ static void findRefEdges(const User *CurUser, SetVector<ValueInfo> &RefEdges,
         // the reference set unless it is a callee. Callees are handled
         // specially by WriteFunction and are added to a separate list.
         if (!(CS && CS.isCallee(&OI)))
-          RefEdges.insert(GV);
+          RefEdges.insert(Index.getOrInsertValueInfo(GV));
         continue;
       }
       Worklist.push_back(Operand);
@@ -173,7 +198,7 @@ static void addIntrinsicToSummary(
 static void
 computeFunctionSummary(ModuleSummaryIndex &Index, const Module &M,
                        const Function &F, BlockFrequencyInfo *BFI,
-                       ProfileSummaryInfo *PSI, bool HasLocalsInUsed,
+                       ProfileSummaryInfo *PSI, bool HasLocalsInUsedOrAsm,
                        DenseSet<GlobalValue::GUID> &CantBePromoted) {
   // Summary not currently supported for anonymous functions, they should
   // have been named.
@@ -190,15 +215,19 @@ computeFunctionSummary(ModuleSummaryIndex &Index, const Module &M,
   SetVector<FunctionSummary::ConstVCall> TypeTestAssumeConstVCalls,
       TypeCheckedLoadConstVCalls;
   ICallPromotionAnalysis ICallAnalysis;
+  SmallPtrSet<const User *, 8> Visited;
+
+  // Add personality function, prefix data and prologue data to function's ref
+  // list.
+  findRefEdges(Index, &F, RefEdges, Visited);
 
   bool HasInlineAsmMaybeReferencingInternal = false;
-  SmallPtrSet<const User *, 8> Visited;
   for (const BasicBlock &BB : F)
     for (const Instruction &I : BB) {
       if (isa<DbgInfoIntrinsic>(I))
         continue;
       ++NumInsts;
-      findRefEdges(&I, RefEdges, Visited);
+      findRefEdges(Index, &I, RefEdges, Visited);
       auto CS = ImmutableCallSite(&I);
       if (!CS)
         continue;
@@ -209,7 +238,7 @@ computeFunctionSummary(ModuleSummaryIndex &Index, const Module &M,
       // a local value from inline assembly to ensure we don't export a
       // reference (which would require renaming and promotion of the
       // referenced value).
-      if (HasLocalsInUsed && CI && CI->isInlineAsm())
+      if (HasLocalsInUsedOrAsm && CI && CI->isInlineAsm())
         HasInlineAsmMaybeReferencingInternal = true;
 
       auto *CalledValue = CS.getCalledValue();
@@ -231,7 +260,7 @@ computeFunctionSummary(ModuleSummaryIndex &Index, const Module &M,
         }
         // We should have named any anonymous globals
         assert(CalledFunction->hasName());
-        auto ScaledCount = BFI ? BFI->getBlockProfileCount(&BB) : None;
+        auto ScaledCount = PSI->getProfileCount(&I, BFI);
         auto Hotness = ScaledCount ? getHotness(ScaledCount.getValue(), PSI)
                                    : CalleeInfo::HotnessType::Unknown;
 
@@ -239,7 +268,9 @@ computeFunctionSummary(ModuleSummaryIndex &Index, const Module &M,
         // to record the call edge to the alias in that case. Eventually
         // an alias summary will be created to associate the alias and
         // aliasee.
-        CallGraphEdges[cast<GlobalValue>(CalledValue)].updateHotness(Hotness);
+        CallGraphEdges[Index.getOrInsertValueInfo(
+                           cast<GlobalValue>(CalledValue))]
+            .updateHotness(Hotness);
       } else {
         // Skip inline assembly calls.
         if (CI && CI->isInlineAsm())
@@ -254,15 +285,16 @@ computeFunctionSummary(ModuleSummaryIndex &Index, const Module &M,
             ICallAnalysis.getPromotionCandidatesForInstruction(
                 &I, NumVals, TotalCount, NumCandidates);
         for (auto &Candidate : CandidateProfileData)
-          CallGraphEdges[Candidate.Value].updateHotness(
-              getHotness(Candidate.Count, PSI));
+          CallGraphEdges[Index.getOrInsertValueInfo(Candidate.Value)]
+              .updateHotness(getHotness(Candidate.Count, PSI));
       }
     }
 
   // Explicit add hot edges to enforce importing for designated GUIDs for
   // sample PGO, to enable the same inlines as the profiled optimized binary.
   for (auto &I : F.getImportGUIDs())
-    CallGraphEdges[I].updateHotness(CalleeInfo::HotnessType::Hot);
+    CallGraphEdges[Index.getOrInsertValueInfo(I)].updateHotness(
+        CalleeInfo::HotnessType::Critical);
 
   bool NonRenamableLocal = isNonRenamableLocal(F);
   bool NotEligibleForImport =
@@ -271,11 +303,17 @@ computeFunctionSummary(ModuleSummaryIndex &Index, const Module &M,
       // FIXME: refactor this to use the same code that inliner is using.
       F.isVarArg();
   GlobalValueSummary::GVFlags Flags(F.getLinkage(), NotEligibleForImport,
-                                    /* LiveRoot = */ false);
+                                    /* Live = */ false);
+  FunctionSummary::FFlags FunFlags{
+      F.hasFnAttribute(Attribute::ReadNone),
+      F.hasFnAttribute(Attribute::ReadOnly),
+      F.hasFnAttribute(Attribute::NoRecurse),
+      F.returnDoesNotAlias(),
+  };
   auto FuncSummary = llvm::make_unique<FunctionSummary>(
-      Flags, NumInsts, RefEdges.takeVector(), CallGraphEdges.takeVector(),
-      TypeTests.takeVector(), TypeTestAssumeVCalls.takeVector(),
-      TypeCheckedLoadVCalls.takeVector(),
+      Flags, NumInsts, FunFlags, RefEdges.takeVector(),
+      CallGraphEdges.takeVector(), TypeTests.takeVector(),
+      TypeTestAssumeVCalls.takeVector(), TypeCheckedLoadVCalls.takeVector(),
       TypeTestAssumeConstVCalls.takeVector(),
       TypeCheckedLoadConstVCalls.takeVector());
   if (NonRenamableLocal)
@@ -288,10 +326,10 @@ computeVariableSummary(ModuleSummaryIndex &Index, const GlobalVariable &V,
                        DenseSet<GlobalValue::GUID> &CantBePromoted) {
   SetVector<ValueInfo> RefEdges;
   SmallPtrSet<const User *, 8> Visited;
-  findRefEdges(&V, RefEdges, Visited);
+  findRefEdges(Index, &V, RefEdges, Visited);
   bool NonRenamableLocal = isNonRenamableLocal(V);
   GlobalValueSummary::GVFlags Flags(V.getLinkage(), NonRenamableLocal,
-                                    /* LiveRoot = */ false);
+                                    /* Live = */ false);
   auto GVarSummary =
       llvm::make_unique<GlobalVarSummary>(Flags, RefEdges.takeVector());
   if (NonRenamableLocal)
@@ -304,8 +342,8 @@ computeAliasSummary(ModuleSummaryIndex &Index, const GlobalAlias &A,
                     DenseSet<GlobalValue::GUID> &CantBePromoted) {
   bool NonRenamableLocal = isNonRenamableLocal(A);
   GlobalValueSummary::GVFlags Flags(A.getLinkage(), NonRenamableLocal,
-                                    /* LiveRoot = */ false);
-  auto AS = llvm::make_unique<AliasSummary>(Flags, ArrayRef<ValueInfo>{});
+                                    /* Live = */ false);
+  auto AS = llvm::make_unique<AliasSummary>(Flags);
   auto *Aliasee = A.getBaseObject();
   auto *AliaseeSummary = Index.getGlobalValueSummary(*Aliasee);
   assert(AliaseeSummary && "Alias expects aliasee summary to be parsed");
@@ -317,18 +355,16 @@ computeAliasSummary(ModuleSummaryIndex &Index, const GlobalAlias &A,
 
 // Set LiveRoot flag on entries matching the given value name.
 static void setLiveRoot(ModuleSummaryIndex &Index, StringRef Name) {
-  auto SummaryList =
-      Index.findGlobalValueSummaryList(GlobalValue::getGUID(Name));
-  if (SummaryList == Index.end())
-    return;
-  for (auto &Summary : SummaryList->second)
-    Summary->setLiveRoot();
+  if (ValueInfo VI = Index.getValueInfo(GlobalValue::getGUID(Name)))
+    for (auto &Summary : VI.getSummaryList())
+      Summary->setLive(true);
 }
 
 ModuleSummaryIndex llvm::buildModuleSummaryIndex(
     const Module &M,
     std::function<BlockFrequencyInfo *(const Function &F)> GetBFICallback,
     ProfileSummaryInfo *PSI) {
+  assert(PSI);
   ModuleSummaryIndex Index;
 
   // Identify the local values in the llvm.used and llvm.compiler.used sets,
@@ -350,6 +386,58 @@ ModuleSummaryIndex llvm::buildModuleSummaryIndex(
     }
   }
 
+  bool HasLocalInlineAsmSymbol = false;
+  if (!M.getModuleInlineAsm().empty()) {
+    // Collect the local values defined by module level asm, and set up
+    // summaries for these symbols so that they can be marked as NoRename,
+    // to prevent export of any use of them in regular IR that would require
+    // renaming within the module level asm. Note we don't need to create a
+    // summary for weak or global defs, as they don't need to be flagged as
+    // NoRename, and defs in module level asm can't be imported anyway.
+    // Also, any values used but not defined within module level asm should
+    // be listed on the llvm.used or llvm.compiler.used global and marked as
+    // referenced from there.
+    ModuleSymbolTable::CollectAsmSymbols(
+        M, [&](StringRef Name, object::BasicSymbolRef::Flags Flags) {
+          // Symbols not marked as Weak or Global are local definitions.
+          if (Flags & (object::BasicSymbolRef::SF_Weak |
+                       object::BasicSymbolRef::SF_Global))
+            return;
+          HasLocalInlineAsmSymbol = true;
+          GlobalValue *GV = M.getNamedValue(Name);
+          if (!GV)
+            return;
+          assert(GV->isDeclaration() && "Def in module asm already has definition");
+          GlobalValueSummary::GVFlags GVFlags(GlobalValue::InternalLinkage,
+                                              /* NotEligibleToImport = */ true,
+                                              /* Live = */ true);
+          CantBePromoted.insert(GlobalValue::getGUID(Name));
+          // Create the appropriate summary type.
+          if (Function *F = dyn_cast<Function>(GV)) {
+            std::unique_ptr<FunctionSummary> Summary =
+                llvm::make_unique<FunctionSummary>(
+                    GVFlags, 0,
+                    FunctionSummary::FFlags{
+                        F->hasFnAttribute(Attribute::ReadNone),
+                        F->hasFnAttribute(Attribute::ReadOnly),
+                        F->hasFnAttribute(Attribute::NoRecurse),
+                        F->returnDoesNotAlias()},
+                    ArrayRef<ValueInfo>{}, ArrayRef<FunctionSummary::EdgeTy>{},
+                    ArrayRef<GlobalValue::GUID>{},
+                    ArrayRef<FunctionSummary::VFuncId>{},
+                    ArrayRef<FunctionSummary::VFuncId>{},
+                    ArrayRef<FunctionSummary::ConstVCall>{},
+                    ArrayRef<FunctionSummary::ConstVCall>{});
+            Index.addGlobalValueSummary(Name, std::move(Summary));
+          } else {
+            std::unique_ptr<GlobalVarSummary> Summary =
+                llvm::make_unique<GlobalVarSummary>(GVFlags,
+                                                    ArrayRef<ValueInfo>{});
+            Index.addGlobalValueSummary(Name, std::move(Summary));
+          }
+        });
+  }
+
   // Compute summaries for all functions defined in module, and save in the
   // index.
   for (auto &F : M) {
@@ -367,7 +455,8 @@ ModuleSummaryIndex llvm::buildModuleSummaryIndex(
       BFI = BFIPtr.get();
     }
 
-    computeFunctionSummary(Index, M, F, BFI, PSI, !LocalsUsed.empty(),
+    computeFunctionSummary(Index, M, F, BFI, PSI,
+                           !LocalsUsed.empty() || HasLocalInlineAsmSymbol,
                            CantBePromoted);
   }
 
@@ -399,65 +488,27 @@ ModuleSummaryIndex llvm::buildModuleSummaryIndex(
   setLiveRoot(Index, "llvm.global_dtors");
   setLiveRoot(Index, "llvm.global.annotations");
 
-  if (!M.getModuleInlineAsm().empty()) {
-    // Collect the local values defined by module level asm, and set up
-    // summaries for these symbols so that they can be marked as NoRename,
-    // to prevent export of any use of them in regular IR that would require
-    // renaming within the module level asm. Note we don't need to create a
-    // summary for weak or global defs, as they don't need to be flagged as
-    // NoRename, and defs in module level asm can't be imported anyway.
-    // Also, any values used but not defined within module level asm should
-    // be listed on the llvm.used or llvm.compiler.used global and marked as
-    // referenced from there.
-    ModuleSymbolTable::CollectAsmSymbols(
-        M, [&M, &Index, &CantBePromoted](StringRef Name,
-                                         object::BasicSymbolRef::Flags Flags) {
-          // Symbols not marked as Weak or Global are local definitions.
-          if (Flags & (object::BasicSymbolRef::SF_Weak |
-                       object::BasicSymbolRef::SF_Global))
-            return;
-          GlobalValue *GV = M.getNamedValue(Name);
-          if (!GV)
-            return;
-          assert(GV->isDeclaration() && "Def in module asm already has definition");
-          GlobalValueSummary::GVFlags GVFlags(GlobalValue::InternalLinkage,
-                                              /* NotEligibleToImport */ true,
-                                              /* LiveRoot */ true);
-          CantBePromoted.insert(GlobalValue::getGUID(Name));
-          // Create the appropriate summary type.
-          if (isa<Function>(GV)) {
-            std::unique_ptr<FunctionSummary> Summary =
-                llvm::make_unique<FunctionSummary>(
-                    GVFlags, 0, ArrayRef<ValueInfo>{},
-                    ArrayRef<FunctionSummary::EdgeTy>{},
-                    ArrayRef<GlobalValue::GUID>{},
-                    ArrayRef<FunctionSummary::VFuncId>{},
-                    ArrayRef<FunctionSummary::VFuncId>{},
-                    ArrayRef<FunctionSummary::ConstVCall>{},
-                    ArrayRef<FunctionSummary::ConstVCall>{});
-            Index.addGlobalValueSummary(Name, std::move(Summary));
-          } else {
-            std::unique_ptr<GlobalVarSummary> Summary =
-                llvm::make_unique<GlobalVarSummary>(GVFlags,
-                                                    ArrayRef<ValueInfo>{});
-            Index.addGlobalValueSummary(Name, std::move(Summary));
-          }
-        });
-  }
+  bool IsThinLTO = true;
+  if (auto *MD =
+          mdconst::extract_or_null<ConstantInt>(M.getModuleFlag("ThinLTO")))
+    IsThinLTO = MD->getZExtValue();
 
   for (auto &GlobalList : Index) {
-    assert(GlobalList.second.size() == 1 &&
+    // Ignore entries for references that are undefined in the current module.
+    if (GlobalList.second.SummaryList.empty())
+      continue;
+
+    assert(GlobalList.second.SummaryList.size() == 1 &&
            "Expected module's index to have one summary per GUID");
-    auto &Summary = GlobalList.second[0];
+    auto &Summary = GlobalList.second.SummaryList[0];
+    if (!IsThinLTO) {
+      Summary->setNotEligibleToImport();
+      continue;
+    }
+
     bool AllRefsCanBeExternallyReferenced =
         llvm::all_of(Summary->refs(), [&](const ValueInfo &VI) {
-          // If a global value definition references an unnamed global,
-          // be conservative. They're valid IR so we don't want to crash
-          // when we encounter any of them but they're infrequent enough
-          // that we don't bother optimizing them.
-          if (!VI.getValue()->hasName())
-            return false;
-          return !CantBePromoted.count(VI.getValue()->getGUID());
+          return !CantBePromoted.count(VI.getGUID());
         });
     if (!AllRefsCanBeExternallyReferenced) {
       Summary->setNotEligibleToImport();
@@ -467,9 +518,7 @@ ModuleSummaryIndex llvm::buildModuleSummaryIndex(
     if (auto *FuncSummary = dyn_cast<FunctionSummary>(Summary.get())) {
       bool AllCallsCanBeExternallyReferenced = llvm::all_of(
           FuncSummary->calls(), [&](const FunctionSummary::EdgeTy &Edge) {
-            auto GUID = Edge.first.isGUID() ? Edge.first.getGUID()
-                                            : Edge.first.getValue()->getGUID();
-            return !CantBePromoted.count(GUID);
+            return !CantBePromoted.count(Edge.first.getGUID());
           });
       if (!AllCallsCanBeExternallyReferenced)
         Summary->setNotEligibleToImport();
@@ -495,6 +544,7 @@ ModuleSummaryIndexAnalysis::run(Module &M, ModuleAnalysisManager &AM) {
 }
 
 char ModuleSummaryIndexWrapperPass::ID = 0;
+
 INITIALIZE_PASS_BEGIN(ModuleSummaryIndexWrapperPass, "module-summary-analysis",
                       "Module Summary Analysis", false, true)
 INITIALIZE_PASS_DEPENDENCY(BlockFrequencyInfoWrapperPass)

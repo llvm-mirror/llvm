@@ -1,6 +1,6 @@
-; RUN: llc -march=amdgcn -verify-machineinstrs < %s | FileCheck -check-prefixes=GCN,SI,FUNC %s
-; RUN: llc -march=amdgcn -mcpu=tonga -verify-machineinstrs < %s | FileCheck -check-prefixes=GCN,VI,FUNC %s
-; RUN: llc -march=r600 -mcpu=cypress -verify-machineinstrs < %s | FileCheck -check-prefixes=EG,FUNC %s
+; RUN:  llc -amdgpu-scalarize-global-loads=false  -march=amdgcn -verify-machineinstrs < %s | FileCheck -check-prefixes=GCN,SI,FUNC %s
+; RUN:  llc -amdgpu-scalarize-global-loads=false  -march=amdgcn -mcpu=tonga -verify-machineinstrs < %s | FileCheck -check-prefixes=GCN,VI,FUNC %s
+; RUN:  llc -amdgpu-scalarize-global-loads=false  -march=r600 -mcpu=cypress -verify-machineinstrs < %s | FileCheck -check-prefixes=EG,FUNC %s
 
 ; FUNC-LABEL: {{^}}s_uaddo_i64_zext:
 ; GCN: s_add_u32
@@ -9,7 +9,7 @@
 
 ; EG: ADDC_UINT
 ; EG: ADDC_UINT
-define void @s_uaddo_i64_zext(i64 addrspace(1)* %out, i64 %a, i64 %b) #0 {
+define amdgpu_kernel void @s_uaddo_i64_zext(i64 addrspace(1)* %out, i64 %a, i64 %b) #0 {
   %uadd = call { i64, i1 } @llvm.uadd.with.overflow.i64(i64 %a, i64 %b)
   %val = extractvalue { i64, i1 } %uadd, 0
   %carry = extractvalue { i64, i1 } %uadd, 1
@@ -27,7 +27,7 @@ define void @s_uaddo_i64_zext(i64 addrspace(1)* %out, i64 %a, i64 %b) #0 {
 
 ; EG: ADDC_UINT
 ; EG: ADD_INT
-define void @s_uaddo_i32(i32 addrspace(1)* %out, i1 addrspace(1)* %carryout, i32 %a, i32 %b) #0 {
+define amdgpu_kernel void @s_uaddo_i32(i32 addrspace(1)* %out, i1 addrspace(1)* %carryout, i32 %a, i32 %b) #0 {
   %uadd = call { i32, i1 } @llvm.uadd.with.overflow.i32(i32 %a, i32 %b)
   %val = extractvalue { i32, i1 } %uadd, 0
   %carry = extractvalue { i32, i1 } %uadd, 1
@@ -42,7 +42,7 @@ define void @s_uaddo_i32(i32 addrspace(1)* %out, i1 addrspace(1)* %carryout, i32
 
 ; EG: ADDC_UINT
 ; EG: ADD_INT
-define void @v_uaddo_i32(i32 addrspace(1)* %out, i1 addrspace(1)* %carryout, i32 addrspace(1)* %a.ptr, i32 addrspace(1)* %b.ptr) #0 {
+define amdgpu_kernel void @v_uaddo_i32(i32 addrspace(1)* %out, i1 addrspace(1)* %carryout, i32 addrspace(1)* %a.ptr, i32 addrspace(1)* %b.ptr) #0 {
   %tid = call i32 @llvm.amdgcn.workitem.id.x()
   %tid.ext = sext i32 %tid to i64
   %a.gep = getelementptr inbounds i32, i32 addrspace(1)* %a.ptr
@@ -58,12 +58,12 @@ define void @v_uaddo_i32(i32 addrspace(1)* %out, i1 addrspace(1)* %carryout, i32
 }
 
 ; FUNC-LABEL: {{^}}v_uaddo_i32_novcc:
-; GCN: v_add_i32_e64 v{{[0-9]+}}, [[COND:s\[[0-9]+:[0-9]+\]]], v{{[0-9]+}}, v{{[0-9]+}}
-; GCN: v_cndmask_b32_e64 v{{[0-9]+}}, 0, 1, [[COND]]
+; GCN: v_add_i32_e32 v{{[0-9]+}}, vcc, v{{[0-9]+}}, v{{[0-9]+}}
+; GCN: v_cndmask_b32_e64 v{{[0-9]+}}, 0, 1, vcc
 
 ; EG: ADDC_UINT
 ; EG: ADD_INT
-define void @v_uaddo_i32_novcc(i32 addrspace(1)* %out, i1 addrspace(1)* %carryout, i32 addrspace(1)* %a.ptr, i32 addrspace(1)* %b.ptr) #0 {
+define amdgpu_kernel void @v_uaddo_i32_novcc(i32 addrspace(1)* %out, i1 addrspace(1)* %carryout, i32 addrspace(1)* %a.ptr, i32 addrspace(1)* %b.ptr) #0 {
   %tid = call i32 @llvm.amdgcn.workitem.id.x()
   %tid.ext = sext i32 %tid to i64
   %a.gep = getelementptr inbounds i32, i32 addrspace(1)* %a.ptr
@@ -85,7 +85,7 @@ define void @v_uaddo_i32_novcc(i32 addrspace(1)* %out, i1 addrspace(1)* %carryou
 
 ; EG: ADDC_UINT
 ; EG: ADD_INT
-define void @s_uaddo_i64(i64 addrspace(1)* %out, i1 addrspace(1)* %carryout, i64 %a, i64 %b) #0 {
+define amdgpu_kernel void @s_uaddo_i64(i64 addrspace(1)* %out, i1 addrspace(1)* %carryout, i64 %a, i64 %b) #0 {
   %uadd = call { i64, i1 } @llvm.uadd.with.overflow.i64(i64 %a, i64 %b)
   %val = extractvalue { i64, i1 } %uadd, 0
   %carry = extractvalue { i64, i1 } %uadd, 1
@@ -100,7 +100,7 @@ define void @s_uaddo_i64(i64 addrspace(1)* %out, i1 addrspace(1)* %carryout, i64
 
 ; EG: ADDC_UINT
 ; EG: ADD_INT
-define void @v_uaddo_i64(i64 addrspace(1)* %out, i1 addrspace(1)* %carryout, i64 addrspace(1)* %a.ptr, i64 addrspace(1)* %b.ptr) #0 {
+define amdgpu_kernel void @v_uaddo_i64(i64 addrspace(1)* %out, i1 addrspace(1)* %carryout, i64 addrspace(1)* %a.ptr, i64 addrspace(1)* %b.ptr) #0 {
   %tid = call i32 @llvm.amdgcn.workitem.id.x()
   %tid.ext = sext i32 %tid to i64
   %a.gep = getelementptr inbounds i64, i64 addrspace(1)* %a.ptr
@@ -118,7 +118,7 @@ define void @v_uaddo_i64(i64 addrspace(1)* %out, i1 addrspace(1)* %carryout, i64
 ; FUNC-LABEL: {{^}}v_uaddo_i16:
 ; VI: v_add_u16_e32
 ; VI: v_cmp_lt_u16_e32
-define void @v_uaddo_i16(i16 addrspace(1)* %out, i1 addrspace(1)* %carryout, i16 addrspace(1)* %a.ptr, i16 addrspace(1)* %b.ptr) #0 {
+define amdgpu_kernel void @v_uaddo_i16(i16 addrspace(1)* %out, i1 addrspace(1)* %carryout, i16 addrspace(1)* %a.ptr, i16 addrspace(1)* %b.ptr) #0 {
   %tid = call i32 @llvm.amdgcn.workitem.id.x()
   %tid.ext = sext i32 %tid to i64
   %a.gep = getelementptr inbounds i16, i16 addrspace(1)* %a.ptr

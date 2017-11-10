@@ -20,12 +20,15 @@ def HasAddr32 : Predicate<"!Subtarget->hasAddr64()">;
 def HasAddr64 : Predicate<"Subtarget->hasAddr64()">;
 def HasSIMD128 : Predicate<"Subtarget->hasSIMD128()">,
                            AssemblerPredicate<"FeatureSIMD128", "simd128">;
+def HasAtomics : Predicate<"Subtarget->hasAtomics()">,
+                           AssemblerPredicate<"FeatureAtomics", "atomics">;
 
 //===----------------------------------------------------------------------===//
 // WebAssembly-specific DAG Node Types.
 //===----------------------------------------------------------------------===//
 
-def SDT_WebAssemblyCallSeqStart : SDCallSeqStart<[SDTCisVT<0, iPTR>]>;
+def SDT_WebAssemblyCallSeqStart : SDCallSeqStart<[SDTCisVT<0, iPTR>,
+                                                  SDTCisVT<1, iPTR>]>;
 def SDT_WebAssemblyCallSeqEnd :
     SDCallSeqEnd<[SDTCisVT<0, iPTR>, SDTCisVT<1, iPTR>]>;
 def SDT_WebAssemblyCall0    : SDTypeProfile<0, -1, [SDTCisPtrTy<0>]>;

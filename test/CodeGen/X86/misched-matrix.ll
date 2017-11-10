@@ -1,10 +1,10 @@
-; RUN: llc < %s -march=x86-64 -mcpu=core2 -pre-RA-sched=source -enable-misched \
+; RUN: llc < %s -mtriple=x86_64-- -mcpu=core2 -pre-RA-sched=source -enable-misched \
 ; RUN:          -misched-topdown -verify-machineinstrs \
 ; RUN:     | FileCheck %s -check-prefix=TOPDOWN
-; RUN: llc < %s -march=x86-64 -mcpu=core2 -pre-RA-sched=source -enable-misched \
+; RUN: llc < %s -mtriple=x86_64-- -mcpu=core2 -pre-RA-sched=source -enable-misched \
 ; RUN:          -misched=ilpmin -verify-machineinstrs \
 ; RUN:     | FileCheck %s -check-prefix=ILPMIN
-; RUN: llc < %s -march=x86-64 -mcpu=core2 -pre-RA-sched=source -enable-misched \
+; RUN: llc < %s -mtriple=x86_64-- -mcpu=core2 -pre-RA-sched=source -enable-misched \
 ; RUN:          -misched=ilpmax -verify-machineinstrs \
 ; RUN:     | FileCheck %s -check-prefix=ILPMAX
 ;
@@ -17,9 +17,9 @@
 ;
 ; TOPDOWN-LABEL: %for.body
 ; TOPDOWN: movl %{{.*}}, (
-; TOPDOWN: imull {{[0-9]*}}(
+; TOPDOWN-NOT: imull {{[0-9]*}}(
 ; TOPDOWN: movl %{{.*}}, 4(
-; TOPDOWN: imull {{[0-9]*}}(
+; TOPDOWN-NOT: imull {{[0-9]*}}(
 ; TOPDOWN: movl %{{.*}}, 8(
 ; TOPDOWN: movl %{{.*}}, 12(
 ; TOPDOWN-LABEL: %for.end

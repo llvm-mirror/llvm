@@ -8,9 +8,9 @@
 ; CHECK-LABEL: test:
 ; CHECK: st %r2
 ; CHECK: brasl %r14, gen
-; CHECK-DAG: lhr %r2, %r2
-; CHECK-DAG: lbr %[[REG1:r[0-9]+]], %r3
-; CHECK: ar %r2, %[[REG1]]
+; CHECK-DAG: lhr %{{r[0,2]+}}, %r2
+; CHECK-DAG: lbr %{{r[0,2]+}}, %r3
+; CHECK: ar %r2, %r0
 ; CHECK-O0-LABEL: test
 ; CHECK-O0: st %r2
 ; CHECK-O0: brasl %r14, gen
@@ -189,11 +189,11 @@ define void @consume_i1_ret() {
   %v6 = extractvalue { i1, i1, i1, i1 } %call, 2
   %v7 = extractvalue { i1, i1, i1, i1 } %call, 3
   %val = zext i1 %v3 to i32
-  store i32 %val, i32* @var
+  store volatile i32 %val, i32* @var
   %val2 = zext i1 %v5 to i32
-  store i32 %val2, i32* @var
+  store volatile i32 %val2, i32* @var
   %val3 = zext i1 %v6 to i32
-  store i32 %val3, i32* @var
+  store volatile i32 %val3, i32* @var
   %val4 = zext i1 %v7 to i32
   store i32 %val4, i32* @var
   ret void

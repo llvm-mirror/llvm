@@ -14,10 +14,10 @@
 #include "SparcMCAsmInfo.h"
 #include "SparcMCExpr.h"
 #include "llvm/ADT/Triple.h"
+#include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCTargetOptions.h"
-#include "llvm/Support/Dwarf.h"
 
 using namespace llvm;
 
@@ -28,7 +28,7 @@ SparcELFMCAsmInfo::SparcELFMCAsmInfo(const Triple &TheTriple) {
   IsLittleEndian = (TheTriple.getArch() == Triple::sparcel);
 
   if (isV9) {
-    PointerSize = CalleeSaveStackSlotSize = 8;
+    CodePointerSize = CalleeSaveStackSlotSize = 8;
   }
 
   Data16bitsDirective = "\t.half\t";

@@ -109,6 +109,9 @@ protected:
   MCSection *DwarfLineDWOSection;
   MCSection *DwarfLocDWOSection;
   MCSection *DwarfStrOffDWOSection;
+
+  /// The DWARF v5 string offset and address table sections.
+  MCSection *DwarfStrOffSection;
   MCSection *DwarfAddrSection;
 
   // These are for Fission DWP files.
@@ -119,6 +122,9 @@ protected:
   MCSection *DwarfGnuPubNamesSection;
   /// Section for newer gnu pubtypes.
   MCSection *DwarfGnuPubTypesSection;
+
+  // Section for Swift AST
+  MCSection *DwarfSwiftASTSection;
 
   MCSection *COFFDebugSymbolsSection;
   MCSection *COFFDebugTypesSection;
@@ -188,8 +194,8 @@ protected:
   MCSection *SXDataSection;
 
 public:
-  void InitMCObjectFileInfo(const Triple &TT, bool PIC, CodeModel::Model CM,
-                            MCContext &ctx);
+  void InitMCObjectFileInfo(const Triple &TT, bool PIC, MCContext &ctx,
+                            bool LargeCodeModel = false);
 
   bool getSupportsWeakOmittedEHFrame() const {
     return SupportsWeakOmittedEHFrame;
@@ -260,9 +266,11 @@ public:
   MCSection *getDwarfLineDWOSection() const { return DwarfLineDWOSection; }
   MCSection *getDwarfLocDWOSection() const { return DwarfLocDWOSection; }
   MCSection *getDwarfStrOffDWOSection() const { return DwarfStrOffDWOSection; }
+  MCSection *getDwarfStrOffSection() const { return DwarfStrOffSection; }
   MCSection *getDwarfAddrSection() const { return DwarfAddrSection; }
   MCSection *getDwarfCUIndexSection() const { return DwarfCUIndexSection; }
   MCSection *getDwarfTUIndexSection() const { return DwarfTUIndexSection; }
+  MCSection *getDwarfSwiftASTSection() const { return DwarfSwiftASTSection; }
 
   MCSection *getCOFFDebugSymbolsSection() const {
     return COFFDebugSymbolsSection;
@@ -346,12 +354,11 @@ public:
 private:
   Environment Env;
   bool PositionIndependent;
-  CodeModel::Model CMModel;
   MCContext *Ctx;
   Triple TT;
 
   void initMachOMCObjectFileInfo(const Triple &T);
-  void initELFMCObjectFileInfo(const Triple &T);
+  void initELFMCObjectFileInfo(const Triple &T, bool Large);
   void initCOFFMCObjectFileInfo(const Triple &T);
   void initWasmMCObjectFileInfo(const Triple &T);
 

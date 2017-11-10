@@ -43,7 +43,7 @@ define [1 x double] @constant() {
   ; The key problem here is that we may fail to create an MBB referenced by a
   ; PHI. If so, we cannot complete the G_PHI and mustn't try or bad things
   ; happen.
-; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: cannot select: G_STORE %vreg4, %vreg2; mem:ST4[%addr] GPR:%vreg4,%vreg2 (in function: pending_phis)
+; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: cannot select: G_STORE %vreg6, %vreg2; mem:ST4[%addr] GPR:%vreg6,%vreg2 (in function: pending_phis)
 ; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for pending_phis
 ; FALLBACK-WITH-REPORT-OUT-LABEL: pending_phis:
 define i32 @pending_phis(i1 %tst, i32 %val, i32* %addr) {
@@ -71,21 +71,11 @@ define void @odd_type(i42* %addr) {
   ret void
 }
 
-  ; RegBankSelect crashed when given invalid mappings, and AArch64's
-  ; implementation produce valid-but-nonsense mappings for G_SEQUENCE.
-; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to map instruction
-; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for sequence_mapping
-; FALLBACK-WITH-REPORT-OUT-LABEL: sequence_mapping:
-define void @sequence_mapping([2 x i64] %in) {
-  ret void
-}
-
-  ; Legalizer was asserting when it enountered an unexpected default action.
-; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to map instruction
-; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for legal_default
-; FALLBACK-WITH-REPORT-LABEL: legal_default:
-define void @legal_default([8 x i8] %in) {
-  insertvalue { [4 x i8], [8 x i8], [4 x i8] } undef, [8 x i8] %in, 1
+; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: %vreg1<def>(<7 x s32>) = G_LOAD %vreg0; mem:LD28[%addr](align=32) (in function: odd_vector)
+; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for odd_vector
+; FALLBACK-WITH-REPORT-OUT-LABEL: odd_vector:
+define void @odd_vector(<7 x i32>* %addr) {
+  %vec = load <7 x i32>, <7 x i32>* %addr
   ret void
 }
 
@@ -137,4 +127,43 @@ broken:
 
 continue:
   ret void
+}
+
+; Check that we fallback on invoke translation failures.
+; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: %vreg0<def>(s128) = G_FCONSTANT quad 2
+; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for test_quad_dump
+; FALLBACK-WITH-REPORT-OUT-LABEL: test_quad_dump:
+define fp128 @test_quad_dump() {
+  ret fp128 0xL00000000000000004000000000000000
+}
+
+; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: %vreg0<def>(p0) = G_EXTRACT_VECTOR_ELT %vreg1, %vreg2; (in function: vector_of_pointers_extractelement)
+; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for vector_of_pointers_extractelement
+; FALLBACK-WITH-REPORT-OUT-LABEL: vector_of_pointers_extractelement:
+@var = global <2 x i16*> zeroinitializer
+define void @vector_of_pointers_extractelement() {
+  br label %end
+
+block:
+  %dummy = extractelement <2 x i16*> %vec, i32 0
+  ret void
+
+end:
+  %vec = load <2 x i16*>, <2 x i16*>* undef
+  br label %block
+}
+
+; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: %vreg0<def>(<2 x p0>) = G_INSERT_VECTOR_ELT %vreg1, %vreg2, %vreg3; (in function: vector_of_pointers_insertelement
+; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for vector_of_pointers_insertelement
+; FALLBACK-WITH-REPORT-OUT-LABEL: vector_of_pointers_insertelement:
+define void @vector_of_pointers_insertelement() {
+  br label %end
+
+block:
+  %dummy = insertelement <2 x i16*> %vec, i16* null, i32 0
+  ret void
+
+end:
+  %vec = load <2 x i16*>, <2 x i16*>* undef
+  br label %block
 }

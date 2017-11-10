@@ -67,7 +67,22 @@ enum : uint64_t {
   SCALAR_STORE = UINT64_C(1) << 39,
   FIXED_SIZE = UINT64_C(1) << 40,
   VOPAsmPrefer32Bit = UINT64_C(1) << 41,
-  HasFPClamp = UINT64_C(1) << 42
+  VOP3_OPSEL = UINT64_C(1) << 42,
+  maybeAtomic = UINT64_C(1) << 43,
+  F16_ZFILL = UINT64_C(1) << 44,
+
+  // Is a clamp on FP type.
+  FPClamp = UINT64_C(1) << 45,
+
+  // Is an integer clamp
+  IntClamp = UINT64_C(1) << 46,
+
+  // Clamps lo component of register.
+  ClampLo = UINT64_C(1) << 47,
+
+  // Clamps hi component of register.
+  // ClampLo and ClampHi set for packed clamp.
+  ClampHi = UINT64_C(1) << 48
 };
 
 // v_cmp_class_* etc. use a 10-bit mask for what operation is checked.
@@ -118,6 +133,10 @@ namespace AMDGPU {
     // Operand for source modifiers for VOP instructions
     OPERAND_INPUT_MODS,
 
+    // Operand for SDWA instructions
+    OPERAND_SDWA_SRC,
+    OPERAND_SDWA_VOPC_DST,
+
     /// Operand with 32-bit immediate that uses the constant bus.
     OPERAND_KIMM32,
     OPERAND_KIMM16
@@ -133,7 +152,8 @@ namespace SISrcMods {
    SEXT = 1 << 0,  // Integer sign-extend modifier
    NEG_HI = ABS,   // Floating-point negate high packed component modifier.
    OP_SEL_0 = 1 << 2,
-   OP_SEL_1 = 1 << 3
+   OP_SEL_1 = 1 << 3,
+   DST_OP_SEL = 1 << 3 // VOP3 dst op_sel (share mask with OP_SEL_1)
   };
 }
 
@@ -160,7 +180,8 @@ namespace AMDGPUAsmVariants {
     DEFAULT = 0,
     VOP3 = 1,
     SDWA = 2,
-    DPP = 3
+    SDWA9 = 3,
+    DPP = 4
   };
 }
 
@@ -248,6 +269,7 @@ enum Id { // HwRegCode, (6) [5:0]
   ID_LDS_ALLOC = 6,
   ID_IB_STS = 7,
   ID_SYMBOLIC_LAST_ = 8,
+  ID_MEM_BASES = 15,
   ID_SHIFT_ = 0,
   ID_WIDTH_ = 6,
   ID_MASK_ = (((1 << ID_WIDTH_) - 1) << ID_SHIFT_)
@@ -257,17 +279,63 @@ enum Offset { // Offset, (5) [10:6]
   OFFSET_DEFAULT_ = 0,
   OFFSET_SHIFT_ = 6,
   OFFSET_WIDTH_ = 5,
-  OFFSET_MASK_ = (((1 << OFFSET_WIDTH_) - 1) << OFFSET_SHIFT_)
+  OFFSET_MASK_ = (((1 << OFFSET_WIDTH_) - 1) << OFFSET_SHIFT_),
+
+  OFFSET_SRC_SHARED_BASE = 16,
+  OFFSET_SRC_PRIVATE_BASE = 0
 };
 
 enum WidthMinusOne { // WidthMinusOne, (5) [15:11]
   WIDTH_M1_DEFAULT_ = 31,
   WIDTH_M1_SHIFT_ = 11,
   WIDTH_M1_WIDTH_ = 5,
-  WIDTH_M1_MASK_ = (((1 << WIDTH_M1_WIDTH_) - 1) << WIDTH_M1_SHIFT_)
+  WIDTH_M1_MASK_ = (((1 << WIDTH_M1_WIDTH_) - 1) << WIDTH_M1_SHIFT_),
+
+  WIDTH_M1_SRC_SHARED_BASE = 15,
+  WIDTH_M1_SRC_PRIVATE_BASE = 15
 };
 
 } // namespace Hwreg
+
+namespace Swizzle { // Encoding of swizzle macro used in ds_swizzle_b32.
+
+enum Id { // id of symbolic names
+  ID_QUAD_PERM = 0,
+  ID_BITMASK_PERM,
+  ID_SWAP,
+  ID_REVERSE,
+  ID_BROADCAST
+};
+
+enum EncBits {
+
+  // swizzle mode encodings
+
+  QUAD_PERM_ENC         = 0x8000,
+  QUAD_PERM_ENC_MASK    = 0xFF00,
+
+  BITMASK_PERM_ENC      = 0x0000,
+  BITMASK_PERM_ENC_MASK = 0x8000,
+
+  // QUAD_PERM encodings
+
+  LANE_MASK             = 0x3,
+  LANE_MAX              = LANE_MASK,
+  LANE_SHIFT            = 2,
+  LANE_NUM              = 4,
+
+  // BITMASK_PERM encodings
+
+  BITMASK_MASK          = 0x1F,
+  BITMASK_MAX           = BITMASK_MASK,
+  BITMASK_WIDTH         = 5,
+
+  BITMASK_AND_SHIFT     = 0,
+  BITMASK_OR_SHIFT      = 5,
+  BITMASK_XOR_SHIFT     = 10
+};
+
+} // namespace Swizzle
 
 namespace SDWA {
 
@@ -287,6 +355,18 @@ enum DstUnused {
   UNUSED_PRESERVE = 2,
 };
 
+enum SDWA9EncValues{
+  SRC_SGPR_MASK = 0x100,
+  SRC_VGPR_MASK = 0xFF,
+  VOPC_DST_VCC_MASK = 0x80,
+  VOPC_DST_SGPR_MASK = 0x7F,
+
+  SRC_VGPR_MIN = 0,
+  SRC_VGPR_MAX = 255,
+  SRC_SGPR_MIN = 256,
+  SRC_SGPR_MAX = 357,
+};
+
 } // namespace SDWA
 } // namespace AMDGPU
 
@@ -295,6 +375,9 @@ enum DstUnused {
 #define   S_00B02C_EXTRA_LDS_SIZE(x)                                  (((x) & 0xFF) << 8)
 #define R_00B128_SPI_SHADER_PGM_RSRC1_VS                                0x00B128
 #define R_00B228_SPI_SHADER_PGM_RSRC1_GS                                0x00B228
+#define R_00B328_SPI_SHADER_PGM_RSRC1_ES                                0x00B328
+#define R_00B428_SPI_SHADER_PGM_RSRC1_HS                                0x00B428
+#define R_00B528_SPI_SHADER_PGM_RSRC1_LS                                0x00B528
 #define R_00B848_COMPUTE_PGM_RSRC1                                      0x00B848
 #define   S_00B028_VGPRS(x)                                           (((x) & 0x3F) << 0)
 #define   S_00B028_SGPRS(x)                                           (((x) & 0x0F) << 6)

@@ -36,7 +36,7 @@
 ; GCN: BB0_3:
 ; GCN: buffer_store_dword
 ; GCN: s_endpgm
-define void @sink_ubfe_i32(i32 addrspace(1)* %out, i32 %arg1) #0 {
+define amdgpu_kernel void @sink_ubfe_i32(i32 addrspace(1)* %out, i32 %arg1) #0 {
 entry:
   %shr = lshr i32 %arg1, 8
   br i1 undef, label %bb0, label %bb1
@@ -76,7 +76,7 @@ ret:
 ; OPT: ret
 
 ; GCN-LABEL: {{^}}sink_sbfe_i32:
-define void @sink_sbfe_i32(i32 addrspace(1)* %out, i32 %arg1) #0 {
+define amdgpu_kernel void @sink_sbfe_i32(i32 addrspace(1)* %out, i32 %arg1) #0 {
 entry:
   %shr = ashr i32 %arg1, 8
   br i1 undef, label %bb0, label %bb1
@@ -134,7 +134,7 @@ ret:
 ; GCN: BB2_3:
 ; GCN: buffer_store_short
 ; GCN: s_endpgm
-define void @sink_ubfe_i16(i16 addrspace(1)* %out, i16 %arg1) #0 {
+define amdgpu_kernel void @sink_ubfe_i16(i16 addrspace(1)* %out, i16 %arg1) #0 {
 entry:
   %shr = lshr i16 %arg1, 4
   br i1 undef, label %bb0, label %bb1
@@ -176,18 +176,17 @@ ret:
 ; OPT: ret
 
 ; GCN-LABEL: {{^}}sink_ubfe_i64_span_midpoint:
-; GCN: s_cbranch_scc1 BB3_2
 
-; GCN: s_lshr_b64 s{{\[}}[[LO:[0-9]+]]:{{[0-9]+}}], s{{\[[0-9]+:[0-9]+\]}}, 30
-; GCN: s_and_b32 s{{[0-9]+}}, s[[LO]], 0xff
+; GCN: v_alignbit_b32 v[[LO:[0-9]+]], s{{[0-9]+}}, v{{[0-9]+}}, 30
+; GCN: s_cbranch_scc1 BB3_2
+; GCN: v_and_b32_e32 v{{[0-9]+}}, 0xff, v[[LO]]
 
 ; GCN: BB3_2:
-; GCN: s_lshr_b64 s{{\[}}[[LO:[0-9]+]]:{{[0-9]+}}], s{{\[[0-9]+:[0-9]+\]}}, 30
-; GCN: s_and_b32 s{{[0-9]+}}, s[[LO]], 0x7f
+; GCN: v_and_b32_e32 v{{[0-9]+}}, 0x7f, v[[LO]]
 
 ; GCN: BB3_3:
 ; GCN: buffer_store_dwordx2
-define void @sink_ubfe_i64_span_midpoint(i64 addrspace(1)* %out, i64 %arg1) #0 {
+define amdgpu_kernel void @sink_ubfe_i64_span_midpoint(i64 addrspace(1)* %out, i64 %arg1) #0 {
 entry:
   %shr = lshr i64 %arg1, 30
   br i1 undef, label %bb0, label %bb1
@@ -236,7 +235,7 @@ ret:
 
 ; GCN: BB4_3:
 ; GCN: buffer_store_dwordx2
-define void @sink_ubfe_i64_low32(i64 addrspace(1)* %out, i64 %arg1) #0 {
+define amdgpu_kernel void @sink_ubfe_i64_low32(i64 addrspace(1)* %out, i64 %arg1) #0 {
 entry:
   %shr = lshr i64 %arg1, 15
   br i1 undef, label %bb0, label %bb1
@@ -283,7 +282,7 @@ ret:
 
 ; GCN: BB5_3:
 ; GCN: buffer_store_dwordx2
-define void @sink_ubfe_i64_high32(i64 addrspace(1)* %out, i64 %arg1) #0 {
+define amdgpu_kernel void @sink_ubfe_i64_high32(i64 addrspace(1)* %out, i64 %arg1) #0 {
 entry:
   %shr = lshr i64 %arg1, 35
   br i1 undef, label %bb0, label %bb1

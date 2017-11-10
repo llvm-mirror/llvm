@@ -3,7 +3,7 @@
 ; RUN: llc -mtriple=thumb-eabi -arm-atomic-cfg-tidy=0 -mcpu=arm1156t2-s -mattr=+thumb2 %s -o - | FileCheck -check-prefix=T2 %s
 ; RUN: llc -mtriple=thumbv8-eabi -arm-atomic-cfg-tidy=0 %s -o - | FileCheck -check-prefix=V8 %s
 
-; FIXME: The -march=thumb test doesn't change if -disable-peephole is specified.
+; FIXME: The -mtriple=thumb test doesn't change if -disable-peephole is specified.
 
 %struct.Foo = type { i8* }
 
@@ -171,8 +171,8 @@ define i32 @test_tst_assessment(i32 %a, i32 %b) {
 ;
 ; V8-LABEL: test_tst_assessment:
 ; V8:       @ BB#0:
-; V8-NEXT:    lsls r1, r1, #31
 ; V8-NEXT:    and r0, r0, #1
+; V8-NEXT:    lsls r1, r1, #31
 ; V8-NEXT:    it ne
 ; V8-NEXT:    subne r0, #1
 ; V8-NEXT:    bx lr

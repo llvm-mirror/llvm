@@ -76,7 +76,11 @@ def t2_so_imm_notSext16_XFORM : SDNodeXForm<imm, [{
 // t2_so_imm - Match a 32-bit immediate operand, which is an
 // 8-bit immediate rotated by an arbitrary number of bits, or an 8-bit
 // immediate splatted into multiple bytes of the word.
-def t2_so_imm_asmoperand : ImmAsmOperand { let Name = "T2SOImm"; }
+def t2_so_imm_asmoperand : AsmOperandClass {
+  let Name = "T2SOImm";
+  let RenderMethod = "addImmOperands";
+
+}
 def t2_so_imm : Operand<i32>, ImmLeaf<i32, [{
     return ARM_AM::getT2SOImmVal(Imm) != -1;
   }]> {
@@ -110,15 +114,14 @@ def t2_so_imm_notSext : Operand<i32>, PatLeaf<(imm), [{
 
 // t2_so_imm_neg - Match an immediate that is a negation of a t2_so_imm.
 def t2_so_imm_neg_asmoperand : AsmOperandClass { let Name = "T2SOImmNeg"; }
-def t2_so_imm_neg : Operand<i32>, PatLeaf<(imm), [{
-  int64_t Value = -(int)N->getZExtValue();
-  return Value && ARM_AM::getT2SOImmVal(Value) != -1;
+def t2_so_imm_neg : Operand<i32>, ImmLeaf<i32, [{
+  return Imm && ARM_AM::getT2SOImmVal(-(uint32_t)Imm) != -1;
 }], t2_so_imm_neg_XFORM> {
   let ParserMatchClass = t2_so_imm_neg_asmoperand;
 }
 
-/// imm0_4095 predicate - True if the 32-bit immediate is in the range [0.4095].
-def imm0_4095_asmoperand: ImmAsmOperand { let Name = "Imm0_4095"; }
+/// imm0_4095 predicate - True if the 32-bit immediate is in the range [0,4095].
+def imm0_4095_asmoperand: ImmAsmOperand<0,4095> { let Name = "Imm0_4095"; }
 def imm0_4095 : Operand<i32>, ImmLeaf<i32, [{
   return Imm >= 0 && Imm < 4096;
 }]> {
@@ -1990,6 +1993,10 @@ def : Thumb2DSPPat<(add rGPR:$Rn,
 def : Thumb2DSPPat<(add rGPR:$Rn,
                             (sext_inreg (rotr rGPR:$Rm, rot_imm:$rot), i16)),
             (t2SXTAH rGPR:$Rn, rGPR:$Rm, rot_imm:$rot)>;
+def : Thumb2DSPPat<(int_arm_sxtb16 rGPR:$Rn),
+                   (t2SXTB16 rGPR:$Rn, 0)>;
+def : Thumb2DSPPat<(int_arm_sxtab16 rGPR:$Rn, rGPR:$Rm),
+                   (t2SXTAB16 rGPR:$Rn, rGPR:$Rm, 0)>;
 
 
 // A simple right-shift can also be used in most cases (the exception is the
@@ -2023,6 +2030,9 @@ def : Thumb2DSPPat<(and (rotr rGPR:$Rm, rot_imm:$rot), 0x0000FFFF),
 def : Thumb2DSPPat<(and (rotr rGPR:$Rm, rot_imm:$rot), 0x00FF00FF),
                        (t2UXTB16 rGPR:$Rm, rot_imm:$rot)>;
 
+def : Thumb2DSPPat<(int_arm_uxtb16 rGPR:$Rm),
+                   (t2UXTB16 rGPR:$Rm, 0)>;
+
 // FIXME: This pattern incorrectly assumes the shl operator is a rotate.
 //        The transformation should probably be done as a combiner action
 //        instead so we can include a check for masking back in the upper
@@ -2050,6 +2060,8 @@ def : Thumb2DSPPat<(add rGPR:$Rn, (and (srl rGPR:$Rm, rot_imm:$rot),
 def : Thumb2DSPPat<(add rGPR:$Rn, (and (srl rGPR:$Rm, imm8_or_16:$rot),
                                             0xFFFF)),
                        (t2UXTAH rGPR:$Rn, rGPR:$Rm, rot_imm:$rot)>;
+def : Thumb2DSPPat<(int_arm_uxtab16 rGPR:$Rn, rGPR:$Rm),
+                      (t2UXTAB16 rGPR:$Rn, rGPR:$Rm, 0)>;
 }
 
 
@@ -2079,6 +2091,19 @@ defm t2ADC  : T2I_adde_sube_irs<0b1010, "adc", ARMadde, 1>;
 defm t2SBC  : T2I_adde_sube_irs<0b1011, "sbc", ARMsube>;
 }
 
+def : t2InstSubst<"adc${s}${p} $rd, $rn, $imm",
+                 (t2SBCri rGPR:$rd, rGPR:$rn, t2_so_imm_not:$imm, pred:$p, s_cc_out:$s)>;
+def : t2InstSubst<"sbc${s}${p} $rd, $rn, $imm",
+                 (t2ADCri rGPR:$rd, rGPR:$rn, t2_so_imm_not:$imm, pred:$p, s_cc_out:$s)>;
+
+def : t2InstSubst<"add${s}${p}.w $rd, $rn, $imm",
+                 (t2SUBri GPRnopc:$rd, GPRnopc:$rn, t2_so_imm_neg:$imm, pred:$p, s_cc_out:$s)>;
+def : t2InstSubst<"addw${p} $rd, $rn, $imm",
+                 (t2SUBri12 GPRnopc:$rd, GPR:$rn, t2_so_imm_neg:$imm, pred:$p)>;
+def : t2InstSubst<"sub${s}${p}.w $rd, $rn, $imm",
+                 (t2ADDri GPRnopc:$rd, GPRnopc:$rn, t2_so_imm_neg:$imm, pred:$p, s_cc_out:$s)>;
+def : t2InstSubst<"subw${p} $rd, $rn, $imm",
+                 (t2ADDri12 GPRnopc:$rd, GPR:$rn, t2_so_imm_neg:$imm, pred:$p)>;
 // RSB
 defm t2RSB  : T2I_rbin_irs  <0b1110, "rsb", sub>;
 
@@ -2121,10 +2146,9 @@ def : T2Pat<(ARMadde    rGPR:$src, t2_so_imm_not:$imm, CPSR),
 def : T2Pat<(ARMadde    rGPR:$src, imm0_65535_neg:$imm, CPSR),
             (t2SBCrr    rGPR:$src, (t2MOVi16 (imm_not_XFORM imm:$imm)))>;
 
-// Select Bytes -- for disassembly only
-
 def t2SEL : T2ThreeReg<(outs GPR:$Rd), (ins GPR:$Rn, GPR:$Rm),
-                NoItinerary, "sel", "\t$Rd, $Rn, $Rm", []>,
+                NoItinerary, "sel", "\t$Rd, $Rn, $Rm",
+                [(set GPR:$Rd, (int_arm_sel GPR:$Rn, GPR:$Rm))]>,
           Requires<[IsThumb2, HasDSP]> {
   let Inst{31-27} = 0b11111;
   let Inst{26-24} = 0b010;
@@ -2138,9 +2162,7 @@ def t2SEL : T2ThreeReg<(outs GPR:$Rd), (ins GPR:$Rn, GPR:$Rm),
 // A6.3.13, A6.3.14, A6.3.15 Parallel addition and subtraction (signed/unsigned)
 // And Miscellaneous operations -- for disassembly only
 class T2I_pam<bits<3> op22_20, bits<4> op7_4, string opc,
-              list<dag> pat = [/* For disassembly only; pattern left blank */],
-              dag iops = (ins rGPR:$Rn, rGPR:$Rm),
-              string asm = "\t$Rd, $Rn, $Rm">
+              list<dag> pat, dag iops, string asm>
   : T2I<(outs rGPR:$Rd), iops, NoItinerary, opc, asm, pat>,
     Requires<[IsThumb2, HasDSP]> {
   let Inst{31-27} = 0b11111;
@@ -2158,60 +2180,72 @@ class T2I_pam<bits<3> op22_20, bits<4> op7_4, string opc,
   let Inst{3-0}   = Rm;
 }
 
-// Saturating add/subtract -- for disassembly only
+class T2I_pam_intrinsics<bits<3> op22_20, bits<4> op7_4, string opc,
+                         Intrinsic intrinsic>
+  : T2I_pam<op22_20, op7_4, opc,
+    [(set rGPR:$Rd, (intrinsic rGPR:$Rn, rGPR:$Rm))],
+    (ins rGPR:$Rn, rGPR:$Rm), "\t$Rd, $Rn, $Rm">;
 
-def t2QADD    : T2I_pam<0b000, 0b1000, "qadd",
-                        [(set rGPR:$Rd, (int_arm_qadd rGPR:$Rn, rGPR:$Rm))],
-                        (ins rGPR:$Rm, rGPR:$Rn), "\t$Rd, $Rm, $Rn">;
-def t2QADD16  : T2I_pam<0b001, 0b0001, "qadd16">;
-def t2QADD8   : T2I_pam<0b000, 0b0001, "qadd8">;
-def t2QASX    : T2I_pam<0b010, 0b0001, "qasx">;
-def t2QDADD   : T2I_pam<0b000, 0b1001, "qdadd", [],
-                        (ins rGPR:$Rm, rGPR:$Rn), "\t$Rd, $Rm, $Rn">;
-def t2QDSUB   : T2I_pam<0b000, 0b1011, "qdsub", [],
-                        (ins rGPR:$Rm, rGPR:$Rn), "\t$Rd, $Rm, $Rn">;
-def t2QSAX    : T2I_pam<0b110, 0b0001, "qsax">;
-def t2QSUB    : T2I_pam<0b000, 0b1010, "qsub",
-                        [(set rGPR:$Rd, (int_arm_qsub rGPR:$Rn, rGPR:$Rm))],
-                        (ins rGPR:$Rm, rGPR:$Rn), "\t$Rd, $Rm, $Rn">;
-def t2QSUB16  : T2I_pam<0b101, 0b0001, "qsub16">;
-def t2QSUB8   : T2I_pam<0b100, 0b0001, "qsub8">;
-def t2UQADD16 : T2I_pam<0b001, 0b0101, "uqadd16">;
-def t2UQADD8  : T2I_pam<0b000, 0b0101, "uqadd8">;
-def t2UQASX   : T2I_pam<0b010, 0b0101, "uqasx">;
-def t2UQSAX   : T2I_pam<0b110, 0b0101, "uqsax">;
-def t2UQSUB16 : T2I_pam<0b101, 0b0101, "uqsub16">;
-def t2UQSUB8  : T2I_pam<0b100, 0b0101, "uqsub8">;
+class T2I_pam_intrinsics_rev<bits<3> op22_20, bits<4> op7_4, string opc>
+  : T2I_pam<op22_20, op7_4, opc, [],
+    (ins rGPR:$Rm, rGPR:$Rn), "\t$Rd, $Rm, $Rn">;
 
-// Signed/Unsigned add/subtract -- for disassembly only
+// Saturating add/subtract
+def t2QADD16  : T2I_pam_intrinsics<0b001, 0b0001, "qadd16", int_arm_qadd16>;
+def t2QADD8   : T2I_pam_intrinsics<0b000, 0b0001, "qadd8", int_arm_qadd8>;
+def t2QASX    : T2I_pam_intrinsics<0b010, 0b0001, "qasx", int_arm_qasx>;
+def t2UQSUB8  : T2I_pam_intrinsics<0b100, 0b0101, "uqsub8", int_arm_uqsub8>;
+def t2QSAX    : T2I_pam_intrinsics<0b110, 0b0001, "qsax", int_arm_qsax>;
+def t2QSUB16  : T2I_pam_intrinsics<0b101, 0b0001, "qsub16", int_arm_qsub16>;
+def t2QSUB8   : T2I_pam_intrinsics<0b100, 0b0001, "qsub8", int_arm_qsub8>;
+def t2UQADD16 : T2I_pam_intrinsics<0b001, 0b0101, "uqadd16", int_arm_uqadd16>;
+def t2UQADD8  : T2I_pam_intrinsics<0b000, 0b0101, "uqadd8", int_arm_uqadd8>;
+def t2UQASX   : T2I_pam_intrinsics<0b010, 0b0101, "uqasx", int_arm_uqasx>;
+def t2UQSAX   : T2I_pam_intrinsics<0b110, 0b0101, "uqsax", int_arm_uqsax>;
+def t2UQSUB16 : T2I_pam_intrinsics<0b101, 0b0101, "uqsub16", int_arm_uqsub16>;
+def t2QADD    : T2I_pam_intrinsics_rev<0b000, 0b1000, "qadd">;
+def t2QSUB    : T2I_pam_intrinsics_rev<0b000, 0b1010, "qsub">;
+def t2QDADD   : T2I_pam_intrinsics_rev<0b000, 0b1001, "qdadd">;
+def t2QDSUB   : T2I_pam_intrinsics_rev<0b000, 0b1011, "qdsub">;
 
-def t2SASX    : T2I_pam<0b010, 0b0000, "sasx">;
-def t2SADD16  : T2I_pam<0b001, 0b0000, "sadd16">;
-def t2SADD8   : T2I_pam<0b000, 0b0000, "sadd8">;
-def t2SSAX    : T2I_pam<0b110, 0b0000, "ssax">;
-def t2SSUB16  : T2I_pam<0b101, 0b0000, "ssub16">;
-def t2SSUB8   : T2I_pam<0b100, 0b0000, "ssub8">;
-def t2UASX    : T2I_pam<0b010, 0b0100, "uasx">;
-def t2UADD16  : T2I_pam<0b001, 0b0100, "uadd16">;
-def t2UADD8   : T2I_pam<0b000, 0b0100, "uadd8">;
-def t2USAX    : T2I_pam<0b110, 0b0100, "usax">;
-def t2USUB16  : T2I_pam<0b101, 0b0100, "usub16">;
-def t2USUB8   : T2I_pam<0b100, 0b0100, "usub8">;
+def : Thumb2DSPPat<(int_arm_qadd rGPR:$Rm, rGPR:$Rn),
+                   (t2QADD rGPR:$Rm, rGPR:$Rn)>;
+def : Thumb2DSPPat<(int_arm_qsub rGPR:$Rm, rGPR:$Rn),
+                   (t2QSUB rGPR:$Rm, rGPR:$Rn)>;
+def : Thumb2DSPPat<(int_arm_qadd(int_arm_qadd rGPR:$Rm, rGPR:$Rm), rGPR:$Rn),
+                   (t2QDADD rGPR:$Rm, rGPR:$Rn)>;
+def : Thumb2DSPPat<(int_arm_qsub rGPR:$Rm, (int_arm_qadd rGPR:$Rn, rGPR:$Rn)),
+                   (t2QDSUB rGPR:$Rm, rGPR:$Rn)>;
 
-// Signed/Unsigned halving add/subtract -- for disassembly only
+// Signed/Unsigned add/subtract
 
-def t2SHASX   : T2I_pam<0b010, 0b0010, "shasx">;
-def t2SHADD16 : T2I_pam<0b001, 0b0010, "shadd16">;
-def t2SHADD8  : T2I_pam<0b000, 0b0010, "shadd8">;
-def t2SHSAX   : T2I_pam<0b110, 0b0010, "shsax">;
-def t2SHSUB16 : T2I_pam<0b101, 0b0010, "shsub16">;
-def t2SHSUB8  : T2I_pam<0b100, 0b0010, "shsub8">;
-def t2UHASX   : T2I_pam<0b010, 0b0110, "uhasx">;
-def t2UHADD16 : T2I_pam<0b001, 0b0110, "uhadd16">;
-def t2UHADD8  : T2I_pam<0b000, 0b0110, "uhadd8">;
-def t2UHSAX   : T2I_pam<0b110, 0b0110, "uhsax">;
-def t2UHSUB16 : T2I_pam<0b101, 0b0110, "uhsub16">;
-def t2UHSUB8  : T2I_pam<0b100, 0b0110, "uhsub8">;
+def t2SASX    : T2I_pam_intrinsics<0b010, 0b0000, "sasx", int_arm_sasx>;
+def t2SADD16  : T2I_pam_intrinsics<0b001, 0b0000, "sadd16", int_arm_sadd16>;
+def t2SADD8   : T2I_pam_intrinsics<0b000, 0b0000, "sadd8", int_arm_sadd8>;
+def t2SSAX    : T2I_pam_intrinsics<0b110, 0b0000, "ssax", int_arm_ssax>;
+def t2SSUB16  : T2I_pam_intrinsics<0b101, 0b0000, "ssub16", int_arm_ssub16>;
+def t2SSUB8   : T2I_pam_intrinsics<0b100, 0b0000, "ssub8", int_arm_ssub8>;
+def t2UASX    : T2I_pam_intrinsics<0b010, 0b0100, "uasx", int_arm_uasx>;
+def t2UADD16  : T2I_pam_intrinsics<0b001, 0b0100, "uadd16", int_arm_uadd16>;
+def t2UADD8   : T2I_pam_intrinsics<0b000, 0b0100, "uadd8", int_arm_uadd8>;
+def t2USAX    : T2I_pam_intrinsics<0b110, 0b0100, "usax", int_arm_usax>;
+def t2USUB16  : T2I_pam_intrinsics<0b101, 0b0100, "usub16", int_arm_usub16>;
+def t2USUB8   : T2I_pam_intrinsics<0b100, 0b0100, "usub8", int_arm_usub8>;
+
+// Signed/Unsigned halving add/subtract
+
+def t2SHASX   : T2I_pam_intrinsics<0b010, 0b0010, "shasx", int_arm_shasx>;
+def t2SHADD16 : T2I_pam_intrinsics<0b001, 0b0010, "shadd16", int_arm_shadd16>;
+def t2SHADD8  : T2I_pam_intrinsics<0b000, 0b0010, "shadd8", int_arm_shadd8>;
+def t2SHSAX   : T2I_pam_intrinsics<0b110, 0b0010, "shsax", int_arm_shsax>;
+def t2SHSUB16 : T2I_pam_intrinsics<0b101, 0b0010, "shsub16", int_arm_shsub16>;
+def t2SHSUB8  : T2I_pam_intrinsics<0b100, 0b0010, "shsub8", int_arm_shsub8>;
+def t2UHASX   : T2I_pam_intrinsics<0b010, 0b0110, "uhasx", int_arm_uhasx>;
+def t2UHADD16 : T2I_pam_intrinsics<0b001, 0b0110, "uhadd16", int_arm_uhadd16>;
+def t2UHADD8  : T2I_pam_intrinsics<0b000, 0b0110, "uhadd8", int_arm_uhadd8>;
+def t2UHSAX   : T2I_pam_intrinsics<0b110, 0b0110, "uhsax", int_arm_uhsax>;
+def t2UHSUB16 : T2I_pam_intrinsics<0b101, 0b0110, "uhsub16", int_arm_uhsub16>;
+def t2UHSUB8  : T2I_pam_intrinsics<0b100, 0b0110, "uhsub8", int_arm_uhsub8>;
 
 // Helper class for disassembly only
 // A6.3.16 & A6.3.17
@@ -2239,86 +2273,77 @@ class T2FourReg_mac<bit long, bits<3> op22_20, bits<4> op7_4, dag oops,
 // Unsigned Sum of Absolute Differences [and Accumulate].
 def t2USAD8   : T2ThreeReg_mac<0, 0b111, 0b0000, (outs rGPR:$Rd),
                                            (ins rGPR:$Rn, rGPR:$Rm),
-                        NoItinerary, "usad8", "\t$Rd, $Rn, $Rm", []>,
+                        NoItinerary, "usad8", "\t$Rd, $Rn, $Rm",
+                        [(set rGPR:$Rd, (int_arm_usad8 rGPR:$Rn, rGPR:$Rm))]>,
           Requires<[IsThumb2, HasDSP]> {
   let Inst{15-12} = 0b1111;
 }
 def t2USADA8  : T2FourReg_mac<0, 0b111, 0b0000, (outs rGPR:$Rd),
                        (ins rGPR:$Rn, rGPR:$Rm, rGPR:$Ra), NoItinerary,
-                        "usada8", "\t$Rd, $Rn, $Rm, $Ra", []>,
+                        "usada8", "\t$Rd, $Rn, $Rm, $Ra",
+          [(set rGPR:$Rd, (int_arm_usada8 rGPR:$Rn, rGPR:$Rm, rGPR:$Ra))]>,
           Requires<[IsThumb2, HasDSP]>;
 
 // Signed/Unsigned saturate.
-class T2SatI<dag oops, dag iops, InstrItinClass itin,
-           string opc, string asm, list<dag> pattern>
-  : T2I<oops, iops, itin, opc, asm, pattern> {
+let hasSideEffects = 1 in
+class T2SatI<dag iops, string opc, string asm>
+  : T2I<(outs rGPR:$Rd), iops, NoItinerary, opc, asm, []> {
   bits<4> Rd;
   bits<4> Rn;
   bits<5> sat_imm;
-  bits<7> sh;
+  bits<6> sh;
 
-  let Inst{11-8}  = Rd;
+  let Inst{31-24} = 0b11110011;
+  let Inst{21} = sh{5};
+  let Inst{20} = 0;
   let Inst{19-16} = Rn;
-  let Inst{4-0}   = sat_imm;
-  let Inst{21}    = sh{5};
+  let Inst{15} = 0;
   let Inst{14-12} = sh{4-2};
-  let Inst{7-6}   = sh{1-0};
+  let Inst{11-8}  = Rd;
+  let Inst{7-6} = sh{1-0};
+  let Inst{5} = 0;
+  let Inst{4-0}   = sat_imm;
 }
 
-def t2SSAT: T2SatI<
-              (outs rGPR:$Rd),
-              (ins imm1_32:$sat_imm, rGPR:$Rn, t2_shift_imm:$sh),
-              NoItinerary, "ssat", "\t$Rd, $sat_imm, $Rn$sh", []>,
-              Requires<[IsThumb2]> {
-  let Inst{31-27} = 0b11110;
-  let Inst{25-22} = 0b1100;
-  let Inst{20} = 0;
-  let Inst{15} = 0;
+def t2SSAT: T2SatI<(ins imm1_32:$sat_imm, rGPR:$Rn, t2_shift_imm:$sh),
+                   "ssat", "\t$Rd, $sat_imm, $Rn$sh">,
+                   Requires<[IsThumb2]> {
+  let Inst{23-22} = 0b00;
   let Inst{5}  = 0;
 }
 
-def t2SSAT16: T2SatI<
-                (outs rGPR:$Rd), (ins imm1_16:$sat_imm, rGPR:$Rn), NoItinerary,
-                "ssat16", "\t$Rd, $sat_imm, $Rn", []>,
-                Requires<[IsThumb2, HasDSP]> {
-  let Inst{31-27} = 0b11110;
-  let Inst{25-22} = 0b1100;
-  let Inst{20} = 0;
-  let Inst{15} = 0;
-  let Inst{21} = 1;        // sh = '1'
-  let Inst{14-12} = 0b000; // imm3 = '000'
-  let Inst{7-6} = 0b00;    // imm2 = '00'
-  let Inst{5-4} = 0b00;
-}
-
-def t2USAT: T2SatI<
-               (outs rGPR:$Rd),
-               (ins imm0_31:$sat_imm, rGPR:$Rn, t2_shift_imm:$sh),
-                NoItinerary, "usat", "\t$Rd, $sat_imm, $Rn$sh", []>,
-                Requires<[IsThumb2]> {
-  let Inst{31-27} = 0b11110;
-  let Inst{25-22} = 0b1110;
-  let Inst{20} = 0;
-  let Inst{15} = 0;
-}
-
-def t2USAT16: T2SatI<(outs rGPR:$Rd), (ins imm0_15:$sat_imm, rGPR:$Rn),
-                     NoItinerary,
-                     "usat16", "\t$Rd, $sat_imm, $Rn", []>,
+def t2SSAT16: T2SatI<(ins imm1_16:$sat_imm, rGPR:$Rn),
+                     "ssat16", "\t$Rd, $sat_imm, $Rn">,
                      Requires<[IsThumb2, HasDSP]> {
-  let Inst{31-22} = 0b1111001110;
-  let Inst{20} = 0;
-  let Inst{15} = 0;
-  let Inst{21} = 1;        // sh = '1'
-  let Inst{14-12} = 0b000; // imm3 = '000'
-  let Inst{7-6} = 0b00;    // imm2 = '00'
-  let Inst{5-4} = 0b00;
+  let Inst{23-22} = 0b00;
+  let sh = 0b100000;
+  let Inst{4} = 0;
 }
 
-def : T2Pat<(int_arm_ssat GPR:$a, imm1_32:$pos), (t2SSAT imm1_32:$pos, GPR:$a, 0)>;
-def : T2Pat<(int_arm_usat GPR:$a, imm0_31:$pos), (t2USAT imm0_31:$pos, GPR:$a, 0)>;
+def t2USAT: T2SatI<(ins imm0_31:$sat_imm, rGPR:$Rn, t2_shift_imm:$sh),
+                    "usat", "\t$Rd, $sat_imm, $Rn$sh">,
+                    Requires<[IsThumb2]> {
+  let Inst{23-22} = 0b10;
+}
+
+def t2USAT16: T2SatI<(ins imm0_15:$sat_imm, rGPR:$Rn),
+                     "usat16", "\t$Rd, $sat_imm, $Rn">,
+                     Requires<[IsThumb2, HasDSP]> {
+  let Inst{23-22} = 0b10;
+  let sh = 0b100000;
+  let Inst{4} = 0;
+}
+
 def : T2Pat<(ARMssatnoshift GPRnopc:$Rn, imm0_31:$imm),
              (t2SSAT imm0_31:$imm, GPRnopc:$Rn, 0)>;
+def : T2Pat<(int_arm_ssat GPR:$a, imm1_32:$pos),
+            (t2SSAT imm1_32:$pos, GPR:$a, 0)>;
+def : T2Pat<(int_arm_usat GPR:$a, imm0_31:$pos),
+            (t2USAT imm0_31:$pos, GPR:$a, 0)>;
+def : T2Pat<(int_arm_ssat16 GPR:$a, imm1_16:$pos),
+            (t2SSAT16 imm1_16:$pos, GPR:$a)>;
+def : T2Pat<(int_arm_usat16 GPR:$a, imm0_15:$pos),
+            (t2USAT16 imm0_15:$pos, GPR:$a)>;
 
 //===----------------------------------------------------------------------===//
 //  Shift and rotate Instructions.
@@ -2603,8 +2628,12 @@ def t2MLS: T2FourRegMLA<0b0001, "mls",
 // Extra precision multiplies with low / high results
 let hasSideEffects = 0 in {
 let isCommutable = 1 in {
-def t2SMULL : T2MulLong<0b000, 0b0000, "smull", []>;
-def t2UMULL : T2MulLong<0b010, 0b0000, "umull", []>;
+def t2SMULL : T2MulLong<0b000, 0b0000, "smull",
+                        [(set rGPR:$RdLo, rGPR:$RdHi,
+                              (smullohi rGPR:$Rn, rGPR:$Rm))]>;
+def t2UMULL : T2MulLong<0b010, 0b0000, "umull",
+                        [(set rGPR:$RdLo, rGPR:$RdHi,
+                              (umullohi rGPR:$Rn, rGPR:$Rm))]>;
 } // isCommutable
 
 // Multiply + accumulate
@@ -2676,8 +2705,10 @@ def t2SMULTB : T2ThreeRegSMUL<0b001, 0b10, "smultb",
 def t2SMULTT : T2ThreeRegSMUL<0b001, 0b11, "smultt",
              [(set rGPR:$Rd, (mul (sra rGPR:$Rn, (i32 16)),
                                    (sra rGPR:$Rm, (i32 16))))]>;
-def t2SMULWB : T2ThreeRegSMUL<0b011, 0b00, "smulwb", []>;
-def t2SMULWT : T2ThreeRegSMUL<0b011, 0b01, "smulwt", []>;
+def t2SMULWB : T2ThreeRegSMUL<0b011, 0b00, "smulwb",
+             [(set rGPR:$Rd, (ARMsmulwb rGPR:$Rn, rGPR:$Rm))]>;
+def t2SMULWT : T2ThreeRegSMUL<0b011, 0b01, "smulwt",
+             [(set rGPR:$Rd, (ARMsmulwt rGPR:$Rn, rGPR:$Rm))]>;
 
 def : Thumb2DSPPat<(mul sext_16_node:$Rm, sext_16_node:$Rn),
                    (t2SMULBB rGPR:$Rm, rGPR:$Rn)>;
@@ -2685,6 +2716,18 @@ def : Thumb2DSPPat<(mul sext_16_node:$Rn, (sra rGPR:$Rm, (i32 16))),
                    (t2SMULBT rGPR:$Rn, rGPR:$Rm)>;
 def : Thumb2DSPPat<(mul (sra rGPR:$Rn, (i32 16)), sext_16_node:$Rm),
                    (t2SMULTB rGPR:$Rn, rGPR:$Rm)>;
+def : Thumb2DSPPat<(int_arm_smulbb rGPR:$Rn, rGPR:$Rm),
+                   (t2SMULBB rGPR:$Rn, rGPR:$Rm)>;
+def : Thumb2DSPPat<(int_arm_smulbt rGPR:$Rn, rGPR:$Rm),
+                   (t2SMULBT rGPR:$Rn, rGPR:$Rm)>;
+def : Thumb2DSPPat<(int_arm_smultb rGPR:$Rn, rGPR:$Rm),
+                   (t2SMULTB rGPR:$Rn, rGPR:$Rm)>;
+def : Thumb2DSPPat<(int_arm_smultt rGPR:$Rn, rGPR:$Rm),
+                   (t2SMULTT rGPR:$Rn, rGPR:$Rm)>;
+def : Thumb2DSPPat<(int_arm_smulwb rGPR:$Rn, rGPR:$Rm),
+                   (t2SMULWB rGPR:$Rn, rGPR:$Rm)>;
+def : Thumb2DSPPat<(int_arm_smulwt rGPR:$Rn, rGPR:$Rm),
+                   (t2SMULWT rGPR:$Rn, rGPR:$Rm)>;
 
 class T2FourRegSMLA<bits<3> op22_20, bits<2> op5_4, string opc,
                     list<dag> pattern>
@@ -2712,8 +2755,10 @@ def t2SMLATB : T2FourRegSMLA<0b001, 0b10, "smlatb",
 def t2SMLATT : T2FourRegSMLA<0b001, 0b11, "smlatt",
              [(set rGPR:$Rd, (add rGPR:$Ra, (mul (sra rGPR:$Rn, (i32 16)),
                                                  (sra rGPR:$Rm, (i32 16)))))]>;
-def t2SMLAWB : T2FourRegSMLA<0b011, 0b00, "smlawb", []>;
-def t2SMLAWT : T2FourRegSMLA<0b011, 0b01, "smlawt", []>;
+def t2SMLAWB : T2FourRegSMLA<0b011, 0b00, "smlawb",
+             [(set rGPR:$Rd, (add rGPR:$Ra, (ARMsmulwb rGPR:$Rn, rGPR:$Rm)))]>;
+def t2SMLAWT : T2FourRegSMLA<0b011, 0b01, "smlawt",
+             [(set rGPR:$Rd, (add rGPR:$Ra, (ARMsmulwt rGPR:$Rn, rGPR:$Rm)))]>;
 
 def : Thumb2DSPMulPat<(add rGPR:$Ra, (mul sext_16_node:$Rn, sext_16_node:$Rm)),
                       (t2SMLABB rGPR:$Rn, rGPR:$Rm, rGPR:$Ra)>;
@@ -2724,53 +2769,76 @@ def : Thumb2DSPMulPat<(add rGPR:$Ra,
                         (mul (sra rGPR:$Rn, (i32 16)), sext_16_node:$Rm)),
                       (t2SMLATB rGPR:$Rn, rGPR:$Rm, rGPR:$Ra)>;
 
-class T2SMLAL<bits<3> op22_20, bits<4> op7_4, string opc, list<dag> pattern>
-  : T2FourReg_mac<1, op22_20, op7_4,
-                  (outs rGPR:$Ra, rGPR:$Rd),
-                  (ins rGPR:$Rn, rGPR:$Rm),
-                  IIC_iMAC64, opc, "\t$Ra, $Rd, $Rn, $Rm", []>,
-                  Requires<[IsThumb2, HasDSP]>,
-    Sched<[WriteMAC64Lo, WriteMAC64Hi, ReadMUL, ReadMUL, ReadMAC, ReadMAC]>;
+def : Thumb2DSPPat<(int_arm_smlabb GPR:$a, GPR:$b, GPR:$acc),
+                   (t2SMLABB GPR:$a, GPR:$b, GPR:$acc)>;
+def : Thumb2DSPPat<(int_arm_smlabt GPR:$a, GPR:$b, GPR:$acc),
+                   (t2SMLABT GPR:$a, GPR:$b, GPR:$acc)>;
+def : Thumb2DSPPat<(int_arm_smlatb GPR:$a, GPR:$b, GPR:$acc),
+                   (t2SMLATB GPR:$a, GPR:$b, GPR:$acc)>;
+def : Thumb2DSPPat<(int_arm_smlatt GPR:$a, GPR:$b, GPR:$acc),
+                   (t2SMLATT GPR:$a, GPR:$b, GPR:$acc)>;
+def : Thumb2DSPPat<(int_arm_smlawb GPR:$a, GPR:$b, GPR:$acc),
+                   (t2SMLAWB GPR:$a, GPR:$b, GPR:$acc)>;
+def : Thumb2DSPPat<(int_arm_smlawt GPR:$a, GPR:$b, GPR:$acc),
+                   (t2SMLAWT GPR:$a, GPR:$b, GPR:$acc)>;
 
 // Halfword multiple accumulate long: SMLAL<x><y>
-def t2SMLALBB : T2SMLAL<0b100, 0b1000, "smlalbb", []>;
-def t2SMLALBT : T2SMLAL<0b100, 0b1001, "smlalbt", []>;
-def t2SMLALTB : T2SMLAL<0b100, 0b1010, "smlaltb", []>;
-def t2SMLALTT : T2SMLAL<0b100, 0b1011, "smlaltt", []>;
+def t2SMLALBB : T2MlaLong<0b100, 0b1000, "smlalbb">,
+                          Requires<[IsThumb2, HasDSP]>;
+def t2SMLALBT : T2MlaLong<0b100, 0b1001, "smlalbt">,
+                          Requires<[IsThumb2, HasDSP]>;
+def t2SMLALTB : T2MlaLong<0b100, 0b1010, "smlaltb">,
+                          Requires<[IsThumb2, HasDSP]>;
+def t2SMLALTT : T2MlaLong<0b100, 0b1011, "smlaltt">,
+                          Requires<[IsThumb2, HasDSP]>;
 
-class T2DualHalfMul<bits<3> op22_20, bits<4> op7_4, string opc>
+def : Thumb2DSPPat<(ARMsmlalbb GPR:$Rn, GPR:$Rm, GPR:$RLo, GPR:$RHi),
+                   (t2SMLALBB $Rn, $Rm, $RLo, $RHi)>;
+def : Thumb2DSPPat<(ARMsmlalbt GPR:$Rn, GPR:$Rm, GPR:$RLo, GPR:$RHi),
+                   (t2SMLALBT $Rn, $Rm, $RLo, $RHi)>;
+def : Thumb2DSPPat<(ARMsmlaltb GPR:$Rn, GPR:$Rm, GPR:$RLo, GPR:$RHi),
+                   (t2SMLALTB $Rn, $Rm, $RLo, $RHi)>;
+def : Thumb2DSPPat<(ARMsmlaltt GPR:$Rn, GPR:$Rm, GPR:$RLo, GPR:$RHi),
+                   (t2SMLALTT $Rn, $Rm, $RLo, $RHi)>;
+
+class T2DualHalfMul<bits<3> op22_20, bits<4> op7_4, string opc,
+                    Intrinsic intrinsic>
   : T2ThreeReg_mac<0, op22_20, op7_4,
                    (outs rGPR:$Rd),
                    (ins rGPR:$Rn, rGPR:$Rm),
-                   IIC_iMAC32, opc, "\t$Rd, $Rn, $Rm", []>,
+                   IIC_iMAC32, opc, "\t$Rd, $Rn, $Rm",
+                   [(set rGPR:$Rd, (intrinsic rGPR:$Rn, rGPR:$Rm))]>,
                    Requires<[IsThumb2, HasDSP]>,
    Sched<[WriteMAC32, ReadMUL, ReadMUL, ReadMAC]> {
   let Inst{15-12} = 0b1111;
 }
 
 // Dual halfword multiple: SMUAD, SMUSD, SMLAD, SMLSD, SMLALD, SMLSLD
-def t2SMUAD: T2DualHalfMul<0b010, 0b0000, "smuad">;
-def t2SMUADX: T2DualHalfMul<0b010, 0b0001, "smuadx">;
-def t2SMUSD: T2DualHalfMul<0b100, 0b0000, "smusd">;
-def t2SMUSDX: T2DualHalfMul<0b100, 0b0001, "smusdx">;
+def t2SMUAD: T2DualHalfMul<0b010, 0b0000, "smuad", int_arm_smuad>;
+def t2SMUADX: T2DualHalfMul<0b010, 0b0001, "smuadx", int_arm_smuadx>;
+def t2SMUSD: T2DualHalfMul<0b100, 0b0000, "smusd", int_arm_smusd>;
+def t2SMUSDX: T2DualHalfMul<0b100, 0b0001, "smusdx", int_arm_smusdx>;
 
-class T2DualHalfMulAdd<bits<3> op22_20, bits<4> op7_4, string opc>
+class T2DualHalfMulAdd<bits<3> op22_20, bits<4> op7_4, string opc,
+                       Intrinsic intrinsic>
   : T2FourReg_mac<0, op22_20, op7_4,
                   (outs rGPR:$Rd),
                   (ins rGPR:$Rn, rGPR:$Rm, rGPR:$Ra),
-                  IIC_iMAC32, opc, "\t$Rd, $Rn, $Rm, $Ra", []>,
+                  IIC_iMAC32, opc, "\t$Rd, $Rn, $Rm, $Ra",
+                  [(set rGPR:$Rd, (intrinsic rGPR:$Rn, rGPR:$Rm, rGPR:$Ra))]>,
                   Requires<[IsThumb2, HasDSP]>;
 
-def t2SMLAD   : T2DualHalfMulAdd<0b010, 0b0000, "smlad">;
-def t2SMLADX  : T2DualHalfMulAdd<0b010, 0b0001, "smladx">;
-def t2SMLSD   : T2DualHalfMulAdd<0b100, 0b0000, "smlsd">;
-def t2SMLSDX  : T2DualHalfMulAdd<0b100, 0b0001, "smlsdx">;
+def t2SMLAD   : T2DualHalfMulAdd<0b010, 0b0000, "smlad", int_arm_smlad>;
+def t2SMLADX  : T2DualHalfMulAdd<0b010, 0b0001, "smladx", int_arm_smladx>;
+def t2SMLSD   : T2DualHalfMulAdd<0b100, 0b0000, "smlsd", int_arm_smlsd>;
+def t2SMLSDX  : T2DualHalfMulAdd<0b100, 0b0001, "smlsdx", int_arm_smlsdx>;
 
 class T2DualHalfMulAddLong<bits<3> op22_20, bits<4> op7_4, string opc>
   : T2FourReg_mac<1, op22_20, op7_4,
                   (outs rGPR:$Ra, rGPR:$Rd),
-                  (ins rGPR:$Rn, rGPR:$Rm),
+                  (ins rGPR:$Rn, rGPR:$Rm, rGPR:$RLo, rGPR:$RHi),
                   IIC_iMAC64, opc, "\t$Ra, $Rd, $Rn, $Rm", []>,
+                  RegConstraint<"$Ra = $RLo, $Rd = $RHi">,
                   Requires<[IsThumb2, HasDSP]>,
     Sched<[WriteMAC64Lo, WriteMAC64Hi, ReadMUL, ReadMUL, ReadMAC, ReadMAC]>;
 
@@ -2779,6 +2847,15 @@ def t2SMLALDX : T2DualHalfMulAddLong<0b100, 0b1101, "smlaldx">;
 def t2SMLSLD  : T2DualHalfMulAddLong<0b101, 0b1100, "smlsld">;
 def t2SMLSLDX : T2DualHalfMulAddLong<0b101, 0b1101, "smlsldx">;
 
+def : Thumb2DSPPat<(ARMSmlald rGPR:$Rn, rGPR:$Rm, rGPR:$RLo, rGPR:$RHi),
+                   (t2SMLALD rGPR:$Rn, rGPR:$Rm, rGPR:$RLo, rGPR:$RHi)>;
+def : Thumb2DSPPat<(ARMSmlaldx rGPR:$Rn, rGPR:$Rm, rGPR:$RLo, rGPR:$RHi),
+                   (t2SMLALDX rGPR:$Rn, rGPR:$Rm, rGPR:$RLo, rGPR:$RHi)>;
+def : Thumb2DSPPat<(ARMSmlsld rGPR:$Rn, rGPR:$Rm, rGPR:$RLo, rGPR:$RHi),
+                   (t2SMLSLD rGPR:$Rn, rGPR:$Rm, rGPR:$RLo, rGPR:$RHi)>;
+def : Thumb2DSPPat<(ARMSmlsldx rGPR:$Rn, rGPR:$Rm, rGPR:$RLo, rGPR:$RHi),
+                   (t2SMLSLDX rGPR:$Rn, rGPR:$Rm, rGPR:$RLo, rGPR:$RHi)>;
+
 //===----------------------------------------------------------------------===//
 //  Division Instructions.
 //  Signed and unsigned division on v7-M
@@ -2786,7 +2863,7 @@ def t2SMLSLDX : T2DualHalfMulAddLong<0b101, 0b1101, "smlsldx">;
 def t2SDIV : T2ThreeReg<(outs rGPR:$Rd), (ins rGPR:$Rn, rGPR:$Rm), IIC_iDIV,
                  "sdiv", "\t$Rd, $Rn, $Rm",
                  [(set rGPR:$Rd, (sdiv rGPR:$Rn, rGPR:$Rm))]>,
-                 Requires<[HasDivide, IsThumb, HasV8MBaseline]>,
+                 Requires<[HasDivideInThumb, IsThumb, HasV8MBaseline]>,
              Sched<[WriteDIV]> {
   let Inst{31-27} = 0b11111;
   let Inst{26-21} = 0b011100;
@@ -2798,7 +2875,7 @@ def t2SDIV : T2ThreeReg<(outs rGPR:$Rd), (ins rGPR:$Rn, rGPR:$Rm), IIC_iDIV,
 def t2UDIV : T2ThreeReg<(outs rGPR:$Rd), (ins rGPR:$Rn, rGPR:$Rm), IIC_iDIV,
                  "udiv", "\t$Rd, $Rn, $Rm",
                  [(set rGPR:$Rd, (udiv rGPR:$Rn, rGPR:$Rm))]>,
-                 Requires<[HasDivide, IsThumb, HasV8MBaseline]>,
+                 Requires<[HasDivideInThumb, IsThumb, HasV8MBaseline]>,
              Sched<[WriteDIV]> {
   let Inst{31-27} = 0b11111;
   let Inst{26-21} = 0b011101;
@@ -3417,7 +3494,8 @@ def t2B   : T2I<(outs), (ins thumb_br_target:$target), IIC_Br,
   let AsmMatchConverter = "cvtThumbBranches";
 }
 
-let Size = 4, isNotDuplicable = 1, isIndirectBranch = 1 in {
+let Size = 4, isNotDuplicable = 1, isBranch = 1, isTerminator = 1,
+    isBarrier = 1, isIndirectBranch = 1 in {
 
 // available in both v8-M.Baseline and Thumb2 targets
 def t2BR_JT : t2basePseudoInst<(outs),
@@ -3886,6 +3964,7 @@ multiclass t2LdStCop<bits<4> op31_28, bit load, bit Dbit, string asm, list<dag> 
   }
 }
 
+let DecoderNamespace = "Thumb2CoProc" in {
 defm t2LDC   : t2LdStCop<0b1110, 1, 0, "ldc", [(int_arm_ldc imm:$cop, imm:$CRd, addrmode5:$addr)]>;
 defm t2LDCL  : t2LdStCop<0b1110, 1, 1, "ldcl", [(int_arm_ldcl imm:$cop, imm:$CRd, addrmode5:$addr)]>;
 defm t2LDC2  : t2LdStCop<0b1111, 1, 0, "ldc2", [(int_arm_ldc2 imm:$cop, imm:$CRd, addrmode5:$addr)]>, Requires<[PreV8,IsThumb2]>;
@@ -3895,6 +3974,7 @@ defm t2STC   : t2LdStCop<0b1110, 0, 0, "stc", [(int_arm_stc imm:$cop, imm:$CRd, 
 defm t2STCL  : t2LdStCop<0b1110, 0, 1, "stcl", [(int_arm_stcl imm:$cop, imm:$CRd, addrmode5:$addr)]>;
 defm t2STC2  : t2LdStCop<0b1111, 0, 0, "stc2", [(int_arm_stc2 imm:$cop, imm:$CRd, addrmode5:$addr)]>, Requires<[PreV8,IsThumb2]>;
 defm t2STC2L : t2LdStCop<0b1111, 0, 1, "stc2l", [(int_arm_stc2l imm:$cop, imm:$CRd, addrmode5:$addr)]>, Requires<[PreV8,IsThumb2]>;
+}
 
 
 //===----------------------------------------------------------------------===//
@@ -4047,6 +4127,8 @@ class t2MovRCopro<bits<4> Op, string opc, bit direction, dag oops, dag iops,
   let Inst{7-5}   = opc2;
   let Inst{3-0}   = CRm;
   let Inst{19-16} = CRn;
+
+  let DecoderNamespace = "Thumb2CoProc";
 }
 
 class t2MovRRCopro<bits<4> Op, string opc, bit direction, dag oops, dag iops,
@@ -4067,6 +4149,8 @@ class t2MovRRCopro<bits<4> Op, string opc, bit direction, dag oops, dag iops,
   let Inst{11-8}  = cop;
   let Inst{7-4}   = opc1;
   let Inst{3-0}   = CRm;
+
+  let DecoderNamespace = "Thumb2CoProc";
 }
 
 /* from ARM core register to coprocessor */
@@ -4165,6 +4249,7 @@ def t2CDP : T2Cop<0b1110, (outs), (ins p_imm:$cop, imm0_15:$opc1,
   let Inst{23-20} = opc1;
 
   let Predicates = [IsThumb2, PreV8];
+  let DecoderNamespace = "Thumb2CoProc";
 }
 
 def t2CDP2 : T2Cop<0b1111, (outs), (ins p_imm:$cop, imm0_15:$opc1,
@@ -4190,6 +4275,7 @@ def t2CDP2 : T2Cop<0b1111, (outs), (ins p_imm:$cop, imm0_15:$opc1,
   let Inst{23-20} = opc1;
 
   let Predicates = [IsThumb2, PreV8];
+  let DecoderNamespace = "Thumb2CoProc";
 }
 
 
@@ -4362,26 +4448,26 @@ def : t2InstAlias<"add${s}${p} $Rdn, $ShiftedRm",
                            pred:$p, cc_out:$s)>;
 
 // add w/ negative immediates is just a sub.
-def : t2InstAlias<"add${s}${p} $Rd, $Rn, $imm",
+def : t2InstSubst<"add${s}${p} $Rd, $Rn, $imm",
         (t2SUBri GPRnopc:$Rd, GPRnopc:$Rn, t2_so_imm_neg:$imm, pred:$p,
                  cc_out:$s)>;
-def : t2InstAlias<"add${p} $Rd, $Rn, $imm",
+def : t2InstSubst<"add${p} $Rd, $Rn, $imm",
            (t2SUBri12 GPRnopc:$Rd, GPR:$Rn, imm0_4095_neg:$imm, pred:$p)>;
-def : t2InstAlias<"add${s}${p} $Rdn, $imm",
+def : t2InstSubst<"add${s}${p} $Rdn, $imm",
       (t2SUBri GPRnopc:$Rdn, GPRnopc:$Rdn, t2_so_imm_neg:$imm, pred:$p,
                cc_out:$s)>;
-def : t2InstAlias<"add${p} $Rdn, $imm",
+def : t2InstSubst<"add${p} $Rdn, $imm",
            (t2SUBri12 GPRnopc:$Rdn, GPRnopc:$Rdn, imm0_4095_neg:$imm, pred:$p)>;
 
-def : t2InstAlias<"add${s}${p}.w $Rd, $Rn, $imm",
+def : t2InstSubst<"add${s}${p}.w $Rd, $Rn, $imm",
         (t2SUBri GPRnopc:$Rd, GPRnopc:$Rn, t2_so_imm_neg:$imm, pred:$p,
                  cc_out:$s)>;
-def : t2InstAlias<"addw${p} $Rd, $Rn, $imm",
+def : t2InstSubst<"addw${p} $Rd, $Rn, $imm",
            (t2SUBri12 GPRnopc:$Rd, GPR:$Rn, imm0_4095_neg:$imm, pred:$p)>;
-def : t2InstAlias<"add${s}${p}.w $Rdn, $imm",
+def : t2InstSubst<"add${s}${p}.w $Rdn, $imm",
       (t2SUBri GPRnopc:$Rdn, GPRnopc:$Rdn, t2_so_imm_neg:$imm, pred:$p,
                cc_out:$s)>;
-def : t2InstAlias<"addw${p} $Rdn, $imm",
+def : t2InstSubst<"addw${p} $Rdn, $imm",
            (t2SUBri12 GPRnopc:$Rdn, GPRnopc:$Rdn, imm0_4095_neg:$imm, pred:$p)>;
 
 
@@ -4612,34 +4698,47 @@ def : t2InstAlias<"sxth${p} $Rd, $Rm$rot",
 
 // "mov Rd, t2_so_imm_not" can be handled via "mvn" in assembly, just like
 // for isel.
-def : t2InstAlias<"mov${p} $Rd, $imm",
+def : t2InstSubst<"mov${p} $Rd, $imm",
                   (t2MVNi rGPR:$Rd, t2_so_imm_not:$imm, pred:$p, zero_reg)>;
-def : t2InstAlias<"mvn${p} $Rd, $imm",
-                  (t2MOVi rGPR:$Rd, t2_so_imm_not:$imm, pred:$p, zero_reg)>;
+def : t2InstSubst<"mvn${s}${p} $Rd, $imm",
+                  (t2MOVi rGPR:$Rd, t2_so_imm_not:$imm, pred:$p, s_cc_out:$s)>;
 // Same for AND <--> BIC
-def : t2InstAlias<"bic${s}${p} $Rd, $Rn, $imm",
+def : t2InstSubst<"bic${s}${p} $Rd, $Rn, $imm",
                   (t2ANDri rGPR:$Rd, rGPR:$Rn, t2_so_imm_not:$imm,
                            pred:$p, cc_out:$s)>;
-def : t2InstAlias<"bic${s}${p} $Rdn, $imm",
+def : t2InstSubst<"bic${s}${p} $Rdn, $imm",
                   (t2ANDri rGPR:$Rdn, rGPR:$Rdn, t2_so_imm_not:$imm,
                            pred:$p, cc_out:$s)>;
-def : t2InstAlias<"and${s}${p} $Rd, $Rn, $imm",
+def : t2InstSubst<"and${s}${p} $Rd, $Rn, $imm",
                   (t2BICri rGPR:$Rd, rGPR:$Rn, t2_so_imm_not:$imm,
                            pred:$p, cc_out:$s)>;
-def : t2InstAlias<"and${s}${p} $Rdn, $imm",
+def : t2InstSubst<"and${s}${p} $Rdn, $imm",
                   (t2BICri rGPR:$Rdn, rGPR:$Rdn, t2_so_imm_not:$imm,
                            pred:$p, cc_out:$s)>;
+// And ORR <--> ORN
+def : t2InstSubst<"orn${s}${p} $Rd, $Rn, $imm",
+                  (t2ORRri rGPR:$Rd, rGPR:$Rn, t2_so_imm_not:$imm,
+                           pred:$p, cc_out:$s)>;
+def : t2InstSubst<"orn${s}${p} $Rdn, $imm",
+                  (t2ORRri rGPR:$Rdn, rGPR:$Rdn, t2_so_imm_not:$imm,
+                           pred:$p, cc_out:$s)>;
+def : t2InstSubst<"orr${s}${p} $Rd, $Rn, $imm",
+                  (t2ORNri rGPR:$Rd, rGPR:$Rn, t2_so_imm_not:$imm,
+                           pred:$p, cc_out:$s)>;
+def : t2InstSubst<"orr${s}${p} $Rdn, $imm",
+                  (t2ORNri rGPR:$Rdn, rGPR:$Rdn, t2_so_imm_not:$imm,
+                           pred:$p, cc_out:$s)>;
 // Likewise, "add Rd, t2_so_imm_neg" -> sub
-def : t2InstAlias<"add${s}${p} $Rd, $Rn, $imm",
+def : t2InstSubst<"add${s}${p} $Rd, $Rn, $imm",
                   (t2SUBri GPRnopc:$Rd, GPRnopc:$Rn, t2_so_imm_neg:$imm,
                            pred:$p, cc_out:$s)>;
-def : t2InstAlias<"add${s}${p} $Rd, $imm",
+def : t2InstSubst<"add${s}${p} $Rd, $imm",
                   (t2SUBri GPRnopc:$Rd, GPRnopc:$Rd, t2_so_imm_neg:$imm,
                            pred:$p, cc_out:$s)>;
 // Same for CMP <--> CMN via t2_so_imm_neg
-def : t2InstAlias<"cmp${p} $Rd, $imm",
+def : t2InstSubst<"cmp${p} $Rd, $imm",
                   (t2CMNri rGPR:$Rd, t2_so_imm_neg:$imm, pred:$p)>;
-def : t2InstAlias<"cmn${p} $Rd, $imm",
+def : t2InstSubst<"cmn${p} $Rd, $imm",
                   (t2CMPri rGPR:$Rd, t2_so_imm_neg:$imm, pred:$p)>;
 
 
@@ -4664,6 +4763,16 @@ def t2MOVsr: t2AsmPseudo<"mov${p} $Rd, $shift",
                          (ins rGPR:$Rd, so_reg_reg:$shift, pred:$p)>;
 def t2MOVSsr: t2AsmPseudo<"movs${p} $Rd, $shift",
                           (ins rGPR:$Rd, so_reg_reg:$shift, pred:$p)>;
+
+// Aliases for the above with the .w qualifier
+def : t2InstAlias<"mov${p}.w $Rd, $shift",
+                  (t2MOVsi rGPR:$Rd, t2_so_reg:$shift, pred:$p)>;
+def : t2InstAlias<"movs${p}.w $Rd, $shift",
+                  (t2MOVSsi rGPR:$Rd, t2_so_reg:$shift, pred:$p)>;
+def : t2InstAlias<"mov${p}.w $Rd, $shift",
+                  (t2MOVsr rGPR:$Rd, so_reg_reg:$shift, pred:$p)>;
+def : t2InstAlias<"movs${p}.w $Rd, $shift",
+                  (t2MOVSsr rGPR:$Rd, so_reg_reg:$shift, pred:$p)>;
 
 // ADR w/o the .w suffix
 def : t2InstAlias<"adr${p} $Rd, $addr",
@@ -4698,7 +4807,7 @@ def : t2InstAlias<"add${p} $Rd, pc, $imm",
 // Pseudo instruction ldr Rt, =immediate
 def t2LDRConstPool
   : t2AsmPseudo<"ldr${p} $Rt, $immediate",
-                (ins GPRnopc:$Rt, const_pool_asm_imm:$immediate, pred:$p)>;
+                (ins GPR:$Rt, const_pool_asm_imm:$immediate, pred:$p)>;
 // Version w/ the .w suffix.
 def : t2InstAlias<"ldr${p}.w $Rt, $immediate",
                   (t2LDRConstPool GPRnopc:$Rt,

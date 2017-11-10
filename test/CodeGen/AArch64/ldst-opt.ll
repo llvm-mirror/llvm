@@ -1531,7 +1531,7 @@ define void @merge_zr64_unalign(<2 x i64>* %p) {
 ; CHECK-LABEL: merge_zr64_unalign:
 ; CHECK: // %entry
 ; NOSTRICTALIGN-NEXT: stp xzr, xzr, [x{{[0-9]+}}]
-; STRICTALIGN: strb wzr,
+; STRICTALIGN: strb
 ; STRICTALIGN: strb
 ; STRICTALIGN: strb
 ; STRICTALIGN: strb
@@ -1607,4 +1607,77 @@ define void @merge_zr64_4vecd(<4 x double>* %p) {
 entry:
   store <4 x double> zeroinitializer, <4 x double>* %p
   ret void
+}
+
+; Verify that non-consecutive merges do not generate q0
+define void @merge_multiple_128bit_stores(i64* %p) {
+; CHECK-LABEL: merge_multiple_128bit_stores
+; CHECK: // %entry
+; NOSTRICTALIGN-NEXT: movi v[[REG:[0-9]]].2d, #0000000000000000
+; NOSTRICTALIGN-NEXT: str q0, [x0]
+; NOSTRICTALIGN-NEXT: stur q0, [x0, #24]
+; NOSTRICTALIGN-NEXT: str q0, [x0, #48]
+; STRICTALIGN-NEXT: stp xzr, xzr, [x0]
+; STRICTALIGN-NEXT: stp xzr, xzr, [x0, #24]
+; STRICTALIGN-NEXT: stp xzr, xzr, [x0, #48]
+; CHECK-NEXT: ret
+entry:
+  store i64 0, i64* %p
+  %p1 = getelementptr i64, i64* %p, i64 1
+  store i64 0, i64* %p1
+  %p3 = getelementptr i64, i64* %p, i64 3
+  store i64 0, i64* %p3
+  %p4 = getelementptr i64, i64* %p, i64 4
+  store i64 0, i64* %p4
+  %p6 = getelementptr i64, i64* %p, i64 6
+  store i64 0, i64* %p6
+  %p7 = getelementptr i64, i64* %p, i64 7
+  store i64 0, i64* %p7
+  ret void
+}
+
+; Verify that large stores generate stp q
+define void @merge_multiple_128bit_stores_consec(i64* %p) {
+; CHECK-LABEL: merge_multiple_128bit_stores_consec
+; CHECK: // %entry
+; NOSTRICTALIGN-NEXT: movi v[[REG:[0-9]]].2d, #0000000000000000
+; NOSTRICTALIGN-NEXT: stp q[[REG]], q[[REG]], [x{{[0-9]+}}]
+; NOSTRICTALIGN-NEXT: stp q[[REG]], q[[REG]], [x{{[0-9]+}}, #32]
+; STRICTALIGN-NEXT: stp	 xzr, xzr, [x0]
+; STRICTALIGN-NEXT: stp	 xzr, xzr, [x0, #16]
+; STRICTALIGN-NEXT: stp	 xzr, xzr, [x0, #32]
+; STRICTALIGN-NEXT: stp  xzr, xzr, [x0, #48]
+; CHECK-NEXT: ret
+entry:
+  store i64 0, i64* %p
+  %p1 = getelementptr i64, i64* %p, i64 1
+  store i64 0, i64* %p1
+  %p2 = getelementptr i64, i64* %p, i64 2
+  store i64 0, i64* %p2
+  %p3 = getelementptr i64, i64* %p, i64 3
+  store i64 0, i64* %p3
+  %p4 = getelementptr i64, i64* %p, i64 4
+  store i64 0, i64* %p4
+  %p5 = getelementptr i64, i64* %p, i64 5
+  store i64 0, i64* %p5
+  %p6 = getelementptr i64, i64* %p, i64 6
+  store i64 0, i64* %p6
+  %p7 = getelementptr i64, i64* %p, i64 7
+  store i64 0, i64* %p7
+  ret void
+}
+
+; Check for bug 34674 where invalid add of xzr was being generated.
+; CHECK-LABEL: bug34674:
+; CHECK: // %entry
+; CHECK-NEXT: mov [[ZREG:x[0-9]+]], xzr
+; CHECK-DAG: stp [[ZREG]], [[ZREG]], [x0]
+; CHECK-DAG: add x{{[0-9]+}}, [[ZREG]], #1
+define i64 @bug34674(<2 x i64>* %p) {
+entry:
+  store <2 x i64> zeroinitializer, <2 x i64>* %p
+  %p2 = bitcast <2 x i64>* %p to i64*
+  %ld = load i64, i64* %p2
+  %add = add i64 %ld, 1
+  ret i64 %add
 }

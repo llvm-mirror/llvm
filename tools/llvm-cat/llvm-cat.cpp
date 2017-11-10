@@ -1,4 +1,4 @@
-//===-- llvm-cat.cpp - LLVM module concatenation utility ------------------===//
+//===- llvm-cat.cpp - LLVM module concatenation utility -------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -13,11 +13,23 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/Bitcode/BitcodeWriter.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/SourceMgr.h"
+#include "llvm/Support/raw_ostream.h"
+#include <algorithm>
+#include <memory>
+#include <string>
+#include <system_error>
+#include <vector>
 
 using namespace llvm;
 
@@ -40,16 +52,21 @@ int main(int argc, char **argv) {
   SmallVector<char, 0> Buffer;
   BitcodeWriter Writer(Buffer);
   if (BinaryCat) {
-    for (std::string InputFilename : InputFilenames) {
+    for (const auto &InputFilename : InputFilenames) {
       std::unique_ptr<MemoryBuffer> MB = ExitOnErr(
           errorOrToExpected(MemoryBuffer::getFileOrSTDIN(InputFilename)));
       std::vector<BitcodeModule> Mods = ExitOnErr(getBitcodeModuleList(*MB));
-      for (auto &BitcodeMod : Mods)
+      for (auto &BitcodeMod : Mods) {
         Buffer.insert(Buffer.end(), BitcodeMod.getBuffer().begin(),
                       BitcodeMod.getBuffer().end());
+        Writer.copyStrtab(BitcodeMod.getStrtab());
+      }
     }
   } else {
-    for (std::string InputFilename : InputFilenames) {
+    // The string table does not own strings added to it, some of which are
+    // owned by the modules; keep them alive until we write the string table.
+    std::vector<std::unique_ptr<Module>> OwnedMods;
+    for (const auto &InputFilename : InputFilenames) {
       SMDiagnostic Err;
       std::unique_ptr<Module> M = parseIRFile(InputFilename, Err, Context);
       if (!M) {
@@ -57,14 +74,16 @@ int main(int argc, char **argv) {
         return 1;
       }
       Writer.writeModule(M.get());
+      OwnedMods.push_back(std::move(M));
     }
+    Writer.writeStrtab();
   }
 
   std::error_code EC;
   raw_fd_ostream OS(OutputFilename, EC, sys::fs::OpenFlags::F_None);
   if (EC) {
-    llvm::errs() << argv[0] << ": cannot open " << OutputFilename
-                 << " for writing: " << EC.message();
+    errs() << argv[0] << ": cannot open " << OutputFilename << " for writing: "
+           << EC.message();
     return 1;
   }
 

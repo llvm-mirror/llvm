@@ -1,4 +1,4 @@
-//===-- HexagonSubtarget.h - Define Subtarget for the Hexagon ---*- C++ -*-===//
+//===- HexagonSubtarget.h - Define Subtarget for the Hexagon ----*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -14,13 +14,20 @@
 #ifndef LLVM_LIB_TARGET_HEXAGON_HEXAGONSUBTARGET_H
 #define LLVM_LIB_TARGET_HEXAGON_HEXAGONSUBTARGET_H
 
+#include "HexagonDepArch.h"
 #include "HexagonFrameLowering.h"
 #include "HexagonISelLowering.h"
 #include "HexagonInstrInfo.h"
+#include "HexagonRegisterInfo.h"
 #include "HexagonSelectionDAGInfo.h"
-#include "llvm/Target/TargetMachine.h"
+#include "llvm/ADT/SmallSet.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/CodeGen/ScheduleDAGMutation.h"
+#include "llvm/MC/MCInstrItineraries.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
+#include <memory>
 #include <string>
+#include <vector>
 
 #define GET_SUBTARGETINFO_HEADER
 #include "HexagonGenSubtargetInfo.inc"
@@ -30,34 +37,50 @@
 
 namespace llvm {
 
+class MachineInstr;
+class SDep;
+class SUnit;
+class TargetMachine;
+class Triple;
+
 class HexagonSubtarget : public HexagonGenSubtargetInfo {
   virtual void anchor();
 
-  bool UseMemOps, UseHVXOps, UseHVXDblOps;
+  bool UseMemOps, UseHVX64BOps, UseHVX128BOps;
   bool UseLongCalls;
   bool ModeIEEERndNear;
 
 public:
-#include "HexagonDepArch.h"
-
-  HexagonArchEnum HexagonArchVersion;
+  Hexagon::ArchEnum HexagonArchVersion;
+  Hexagon::ArchEnum HexagonHVXVersion = Hexagon::ArchEnum::V4;
   /// True if the target should use Back-Skip-Back scheduling. This is the
   /// default for V60.
   bool UseBSBScheduling;
 
-  class HexagonDAGMutation : public ScheduleDAGMutation {
-  public:
+  struct UsrOverflowMutation : public ScheduleDAGMutation {
+    void apply(ScheduleDAGInstrs *DAG) override;
+  };
+  struct HVXMemLatencyMutation : public ScheduleDAGMutation {
+    void apply(ScheduleDAGInstrs *DAG) override;
+  };
+  struct CallMutation : public ScheduleDAGMutation {
+    void apply(ScheduleDAGInstrs *DAG) override;
+  private:
+    bool shouldTFRICallBind(const HexagonInstrInfo &HII,
+          const SUnit &Inst1, const SUnit &Inst2) const;
+  };
+  struct BankConflictMutation : public ScheduleDAGMutation {
     void apply(ScheduleDAGInstrs *DAG) override;
   };
 
 private:
   std::string CPUString;
   HexagonInstrInfo InstrInfo;
+  HexagonRegisterInfo RegInfo;
   HexagonTargetLowering TLInfo;
   HexagonSelectionDAGInfo TSInfo;
   HexagonFrameLowering FrameLowering;
   InstrItineraryData InstrItins;
-  void initializeEnvironment();
 
 public:
   HexagonSubtarget(const Triple &TT, StringRef CPU, StringRef FS,
@@ -70,7 +93,7 @@ public:
   }
   const HexagonInstrInfo *getInstrInfo() const override { return &InstrInfo; }
   const HexagonRegisterInfo *getRegisterInfo() const override {
-    return &InstrInfo.getRegisterInfo();
+    return &RegInfo;
   }
   const HexagonTargetLowering *getTargetLowering() const override {
     return &TLInfo;
@@ -90,23 +113,41 @@ public:
   void ParseSubtargetFeatures(StringRef CPU, StringRef FS);
 
   bool useMemOps() const { return UseMemOps; }
-  bool hasV5TOps() const { return getHexagonArchVersion() >= V5; }
-  bool hasV5TOpsOnly() const { return getHexagonArchVersion() == V5; }
-  bool hasV55TOps() const { return getHexagonArchVersion() >= V55; }
-  bool hasV55TOpsOnly() const { return getHexagonArchVersion() == V55; }
-  bool hasV60TOps() const { return getHexagonArchVersion() >= V60; }
-  bool hasV60TOpsOnly() const { return getHexagonArchVersion() == V60; }
-  bool hasV62TOps() const { return getHexagonArchVersion() >= V62; }
-  bool hasV62TOpsOnly() const { return getHexagonArchVersion() == V62; }
+  bool hasV5TOps() const {
+    return getHexagonArchVersion() >= Hexagon::ArchEnum::V5;
+  }
+  bool hasV5TOpsOnly() const {
+    return getHexagonArchVersion() == Hexagon::ArchEnum::V5;
+  }
+  bool hasV55TOps() const {
+    return getHexagonArchVersion() >= Hexagon::ArchEnum::V55;
+  }
+  bool hasV55TOpsOnly() const {
+    return getHexagonArchVersion() == Hexagon::ArchEnum::V55;
+  }
+  bool hasV60TOps() const {
+    return getHexagonArchVersion() >= Hexagon::ArchEnum::V60;
+  }
+  bool hasV60TOpsOnly() const {
+    return getHexagonArchVersion() == Hexagon::ArchEnum::V60;
+  }
+  bool hasV62TOps() const {
+    return getHexagonArchVersion() >= Hexagon::ArchEnum::V62;
+  }
+  bool hasV62TOpsOnly() const {
+    return getHexagonArchVersion() == Hexagon::ArchEnum::V62;
+  }
 
   bool modeIEEERndNear() const { return ModeIEEERndNear; }
-  bool useHVXOps() const { return UseHVXOps; }
-  bool useHVXDblOps() const { return UseHVXOps && UseHVXDblOps; }
-  bool useHVXSglOps() const { return UseHVXOps && !UseHVXDblOps; }
+  bool useHVXOps() const { return HexagonHVXVersion > Hexagon::ArchEnum::V4; }
+  bool useHVX128BOps() const { return useHVXOps() && UseHVX128BOps; }
+  bool useHVX64BOps() const { return useHVXOps() && UseHVX64BOps; }
   bool useLongCalls() const { return UseLongCalls; }
+  bool usePredicatedCalls() const;
 
   bool useBSBScheduling() const { return UseBSBScheduling; }
   bool enableMachineScheduler() const override;
+
   // Always use the TargetLowering default scheduler.
   // FIXME: This will use the vliw scheduler which is probably just hurting
   // compiler time and will be removed eventually anyway.
@@ -123,7 +164,8 @@ public:
   unsigned getSmallDataThreshold() const {
     return Hexagon_SMALL_DATA_THRESHOLD;
   }
-  const HexagonArchEnum &getHexagonArchVersion() const {
+
+  const Hexagon::ArchEnum &getHexagonArchVersion() const {
     return HexagonArchVersion;
   }
 
@@ -146,13 +188,12 @@ private:
   // Helper function responsible for increasing the latency only.
   void updateLatency(MachineInstr &SrcInst, MachineInstr &DstInst, SDep &Dep)
       const;
-  void changeLatency(SUnit *Src, SmallVector<SDep, 4> &Deps, SUnit *Dst,
-      unsigned Lat) const;
-  bool isBestZeroLatency(SUnit *Src, SUnit *Dst, const HexagonInstrInfo *TII)
-      const;
-  void changePhiLatency(MachineInstr &SrcInst, SUnit *Dst, SDep &Dep) const;
+  void restoreLatency(SUnit *Src, SUnit *Dst) const;
+  void changeLatency(SUnit *Src, SUnit *Dst, unsigned Lat) const;
+  bool isBestZeroLatency(SUnit *Src, SUnit *Dst, const HexagonInstrInfo *TII,
+      SmallSet<SUnit*, 4> &ExclSrc, SmallSet<SUnit*, 4> &ExclDst) const;
 };
 
 } // end namespace llvm
 
-#endif
+#endif // LLVM_LIB_TARGET_HEXAGON_HEXAGONSUBTARGET_H

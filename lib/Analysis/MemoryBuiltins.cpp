@@ -1,4 +1,4 @@
-//===------ MemoryBuiltins.cpp - Identify calls to memory builtins --------===//
+//===- MemoryBuiltins.cpp - Identify calls to memory builtins -------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -13,20 +13,39 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/MemoryBuiltins.h"
+#include "llvm/ADT/APInt.h"
+#include "llvm/ADT/None.h"
+#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/Analysis/TargetFolder.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
+#include "llvm/IR/Argument.h"
+#include "llvm/IR/Attributes.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalAlias.h"
 #include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
-#include "llvm/IR/Intrinsics.h"
-#include "llvm/IR/Metadata.h"
-#include "llvm/IR/Module.h"
+#include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/Operator.h"
+#include "llvm/IR/Type.h"
+#include "llvm/IR/Value.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/Local.h"
+#include <cassert>
+#include <cstdint>
+#include <iterator>
+#include <utility>
+
 using namespace llvm;
 
 #define DEBUG_TYPE "memory-builtins"
@@ -37,6 +56,7 @@ enum AllocType : uint8_t {
   CallocLike         = 1<<2, // allocates + bzero
   ReallocLike        = 1<<3, // reallocates
   StrDupLike         = 1<<4,
+  MallocOrCallocLike = MallocLike | CallocLike,
   AllocLike          = MallocLike | CallocLike | StrDupLike,
   AnyAlloc           = AllocLike | ReallocLike
 };
@@ -77,8 +97,8 @@ static const std::pair<LibFunc, AllocFnsTy> AllocationFnData[] = {
   // TODO: Handle "int posix_memalign(void **, size_t, size_t)"
 };
 
-static Function *getCalledFunction(const Value *V, bool LookThroughBitCast,
-                                   bool &IsNoBuiltin) {
+static const Function *getCalledFunction(const Value *V, bool LookThroughBitCast,
+                                         bool &IsNoBuiltin) {
   // Don't care about intrinsics in this case.
   if (isa<IntrinsicInst>(V))
     return nullptr;
@@ -86,13 +106,13 @@ static Function *getCalledFunction(const Value *V, bool LookThroughBitCast,
   if (LookThroughBitCast)
     V = V->stripPointerCasts();
 
-  CallSite CS(const_cast<Value*>(V));
+  ImmutableCallSite CS(V);
   if (!CS.getInstruction())
     return nullptr;
 
   IsNoBuiltin = CS.isNoBuiltin();
 
-  Function *Callee = CS.getCalledFunction();
+  const Function *Callee = CS.getCalledFunction();
   if (!Callee || !Callee->isDeclaration())
     return nullptr;
   return Callee;
@@ -183,9 +203,8 @@ static Optional<AllocFnsTy> getAllocationSize(const Value *V,
 
 static bool hasNoAliasAttr(const Value *V, bool LookThroughBitCast) {
   ImmutableCallSite CS(LookThroughBitCast ? V->stripPointerCasts() : V);
-  return CS && CS.paramHasAttr(AttributeSet::ReturnIndex, Attribute::NoAlias);
+  return CS && CS.hasRetAttr(Attribute::NoAlias);
 }
-
 
 /// \brief Tests if a value is a call or invoke to a library function that
 /// allocates or reallocates memory (either malloc, calloc, realloc, or strdup
@@ -217,6 +236,14 @@ bool llvm::isMallocLikeFn(const Value *V, const TargetLibraryInfo *TLI,
 bool llvm::isCallocLikeFn(const Value *V, const TargetLibraryInfo *TLI,
                           bool LookThroughBitCast) {
   return getAllocationData(V, CallocLike, TLI, LookThroughBitCast).hasValue();
+}
+
+/// \brief Tests if a value is a call or invoke to a library function that
+/// allocates memory similiar to malloc or calloc.
+bool llvm::isMallocOrCallocLikeFn(const Value *V, const TargetLibraryInfo *TLI,
+                                  bool LookThroughBitCast) {
+  return getAllocationData(V, MallocOrCallocLike, TLI,
+                           LookThroughBitCast).hasValue();
 }
 
 /// \brief Tests if a value is a call or invoke to a library function that
@@ -314,14 +341,12 @@ Value *llvm::getMallocArraySize(CallInst *CI, const DataLayout &DL,
   return computeArraySize(CI, DL, TLI, LookThroughSExt);
 }
 
-
 /// extractCallocCall - Returns the corresponding CallInst if the instruction
 /// is a calloc call.
 const CallInst *llvm::extractCallocCall(const Value *I,
                                         const TargetLibraryInfo *TLI) {
   return isCallocLikeFn(I, TLI) ? cast<CallInst>(I) : nullptr;
 }
-
 
 /// isFreeCall - Returns non-null if the value is a call to the builtin free()
 const CallInst *llvm::isFreeCall(const Value *I, const TargetLibraryInfo *TLI) {
@@ -378,8 +403,6 @@ const CallInst *llvm::isFreeCall(const Value *I, const TargetLibraryInfo *TLI) {
   return CI;
 }
 
-
-
 //===----------------------------------------------------------------------===//
 //  Utility functions to compute size of objects.
 //
@@ -391,13 +414,11 @@ static APInt getSizeWithOverflow(const SizeOffsetType &Data) {
 
 /// \brief Compute the size of the object pointed by Ptr. Returns true and the
 /// object size in Size if successful, and false otherwise.
-/// If RoundToAlign is true, then Size is rounded up to the aligment of allocas,
-/// byval arguments, and global variables.
+/// If RoundToAlign is true, then Size is rounded up to the alignment of
+/// allocas, byval arguments, and global variables.
 bool llvm::getObjectSize(const Value *Ptr, uint64_t &Size, const DataLayout &DL,
-                         const TargetLibraryInfo *TLI, bool RoundToAlign,
-                         llvm::ObjSizeMode Mode) {
-  ObjectSizeOffsetVisitor Visitor(DL, TLI, Ptr->getContext(),
-                                  RoundToAlign, Mode);
+                         const TargetLibraryInfo *TLI, ObjectSizeOpts Opts) {
+  ObjectSizeOffsetVisitor Visitor(DL, TLI, Ptr->getContext(), Opts);
   SizeOffsetType Data = Visitor.compute(const_cast<Value*>(Ptr));
   if (!Visitor.bothKnown(Data))
     return false;
@@ -414,19 +435,23 @@ ConstantInt *llvm::lowerObjectSizeCall(IntrinsicInst *ObjectSize,
          "ObjectSize must be a call to llvm.objectsize!");
 
   bool MaxVal = cast<ConstantInt>(ObjectSize->getArgOperand(1))->isZero();
-  ObjSizeMode Mode;
+  ObjectSizeOpts EvalOptions;
   // Unless we have to fold this to something, try to be as accurate as
   // possible.
   if (MustSucceed)
-    Mode = MaxVal ? ObjSizeMode::Max : ObjSizeMode::Min;
+    EvalOptions.EvalMode =
+        MaxVal ? ObjectSizeOpts::Mode::Max : ObjectSizeOpts::Mode::Min;
   else
-    Mode = ObjSizeMode::Exact;
+    EvalOptions.EvalMode = ObjectSizeOpts::Mode::Exact;
+
+  EvalOptions.NullIsUnknownSize =
+      cast<ConstantInt>(ObjectSize->getArgOperand(2))->isOne();
 
   // FIXME: Does it make sense to just return a failure value if the size won't
   // fit in the output and `!MustSucceed`?
   uint64_t Size;
   auto *ResultType = cast<IntegerType>(ObjectSize->getType());
-  if (getObjectSize(ObjectSize->getArgOperand(0), Size, DL, TLI, false, Mode) &&
+  if (getObjectSize(ObjectSize->getArgOperand(0), Size, DL, TLI, EvalOptions) &&
       isUIntN(ResultType->getBitWidth(), Size))
     return ConstantInt::get(ResultType, Size);
 
@@ -441,9 +466,8 @@ STATISTIC(ObjectVisitorArgument,
 STATISTIC(ObjectVisitorLoad,
           "Number of load instructions with unsolved size and offset");
 
-
 APInt ObjectSizeOffsetVisitor::align(APInt Size, uint64_t Align) {
-  if (RoundToAlign && Align)
+  if (Options.RoundToAlign && Align)
     return APInt(IntTyBits, alignTo(Size.getZExtValue(), Align));
   return Size;
 }
@@ -451,9 +475,8 @@ APInt ObjectSizeOffsetVisitor::align(APInt Size, uint64_t Align) {
 ObjectSizeOffsetVisitor::ObjectSizeOffsetVisitor(const DataLayout &DL,
                                                  const TargetLibraryInfo *TLI,
                                                  LLVMContext &Context,
-                                                 bool RoundToAlign,
-                                                 ObjSizeMode Mode)
-    : DL(DL), TLI(TLI), RoundToAlign(RoundToAlign), Mode(Mode) {
+                                                 ObjectSizeOpts Options)
+    : DL(DL), TLI(TLI), Options(Options) {
   // Pointer size must be rechecked for each object visited since it could have
   // a different address space.
 }
@@ -495,6 +518,22 @@ SizeOffsetType ObjectSizeOffsetVisitor::compute(Value *V) {
   return unknown();
 }
 
+/// When we're compiling N-bit code, and the user uses parameters that are
+/// greater than N bits (e.g. uint64_t on a 32-bit build), we can run into
+/// trouble with APInt size issues. This function handles resizing + overflow
+/// checks for us. Check and zext or trunc \p I depending on IntTyBits and
+/// I's value.
+bool ObjectSizeOffsetVisitor::CheckedZextOrTrunc(APInt &I) {
+  // More bits than we can handle. Checking the bit width isn't necessary, but
+  // it's faster than checking active bits, and should give `false` in the
+  // vast majority of cases.
+  if (I.getBitWidth() > IntTyBits && I.getActiveBits() > IntTyBits)
+    return false;
+  if (I.getBitWidth() != IntTyBits)
+    I = I.zextOrTrunc(IntTyBits);
+  return true;
+}
+
 SizeOffsetType ObjectSizeOffsetVisitor::visitAllocaInst(AllocaInst &I) {
   if (!I.getAllocatedType()->isSized())
     return unknown();
@@ -505,8 +544,14 @@ SizeOffsetType ObjectSizeOffsetVisitor::visitAllocaInst(AllocaInst &I) {
 
   Value *ArraySize = I.getArraySize();
   if (const ConstantInt *C = dyn_cast<ConstantInt>(ArraySize)) {
-    Size *= C->getValue().zextOrSelf(IntTyBits);
-    return std::make_pair(align(Size, I.getAlignment()), Zero);
+    APInt NumElems = C->getValue();
+    if (!CheckedZextOrTrunc(NumElems))
+      return unknown();
+
+    bool Overflow;
+    Size = Size.umul_ov(NumElems, Overflow);
+    return Overflow ? unknown() : std::make_pair(align(Size, I.getAlignment()),
+                                                 Zero);
   }
   return unknown();
 }
@@ -551,21 +596,6 @@ SizeOffsetType ObjectSizeOffsetVisitor::visitCallSite(CallSite CS) {
   if (!Arg)
     return unknown();
 
-  // When we're compiling N-bit code, and the user uses parameters that are
-  // greater than N bits (e.g. uint64_t on a 32-bit build), we can run into
-  // trouble with APInt size issues. This function handles resizing + overflow
-  // checks for us.
-  auto CheckedZextOrTrunc = [&](APInt &I) {
-    // More bits than we can handle. Checking the bit width isn't necessary, but
-    // it's faster than checking active bits, and should give `false` in the
-    // vast majority of cases.
-    if (I.getBitWidth() > IntTyBits && I.getActiveBits() > IntTyBits)
-      return false;
-    if (I.getBitWidth() != IntTyBits)
-      I = I.zextOrTrunc(IntTyBits);
-    return true;
-  };
-
   APInt Size = Arg->getValue();
   if (!CheckedZextOrTrunc(Size))
     return unknown();
@@ -596,7 +626,9 @@ SizeOffsetType ObjectSizeOffsetVisitor::visitCallSite(CallSite CS) {
 }
 
 SizeOffsetType
-ObjectSizeOffsetVisitor::visitConstantPointerNull(ConstantPointerNull&) {
+ObjectSizeOffsetVisitor::visitConstantPointerNull(ConstantPointerNull& CPN) {
+  if (Options.NullIsUnknownSize && CPN.getType()->getAddressSpace() == 0)
+    return unknown();
   return std::make_pair(Zero, Zero);
 }
 
@@ -663,12 +695,12 @@ SizeOffsetType ObjectSizeOffsetVisitor::visitSelectInst(SelectInst &I) {
     if (TrueResult == FalseResult) {
       return TrueSide;
     }
-    if (Mode == ObjSizeMode::Min) {
+    if (Options.EvalMode == ObjectSizeOpts::Mode::Min) {
       if (TrueResult.slt(FalseResult))
         return TrueSide;
       return FalseSide;
     }
-    if (Mode == ObjSizeMode::Max) {
+    if (Options.EvalMode == ObjectSizeOpts::Mode::Max) {
       if (TrueResult.sgt(FalseResult))
         return TrueSide;
       return FalseSide;
@@ -719,7 +751,10 @@ SizeOffsetEvalType ObjectSizeOffsetEvaluator::compute(Value *V) {
 }
 
 SizeOffsetEvalType ObjectSizeOffsetEvaluator::compute_(Value *V) {
-  ObjectSizeOffsetVisitor Visitor(DL, TLI, Context, RoundToAlign);
+  ObjectSizeOpts ObjSizeOptions;
+  ObjSizeOptions.RoundToAlign = RoundToAlign;
+
+  ObjectSizeOffsetVisitor Visitor(DL, TLI, Context, ObjSizeOptions);
   SizeOffsetType Const = Visitor.compute(V);
   if (Visitor.bothKnown(Const))
     return std::make_pair(ConstantInt::get(Context, Const.first),

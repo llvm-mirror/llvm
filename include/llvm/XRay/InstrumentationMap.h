@@ -38,7 +38,7 @@ Expected<InstrumentationMap> loadInstrumentationMap(StringRef Filename);
 struct SledEntry {
   /// Each entry here represents the kinds of supported instrumentation map
   /// entries.
-  enum class FunctionKinds { ENTRY, EXIT, TAIL };
+  enum class FunctionKinds { ENTRY, EXIT, TAIL, LOG_ARGS_ENTER, CUSTOM_EVENT };
 
   /// The address of the sled.
   uint64_t Address;
@@ -59,6 +59,7 @@ struct YAMLXRaySledEntry {
   yaml::Hex64 Function;
   SledEntry::FunctionKinds Kind;
   bool AlwaysInstrument;
+  std::string FunctionName;
 };
 
 /// The InstrumentationMap represents the computed function id's and indicated
@@ -105,6 +106,10 @@ template <> struct ScalarEnumerationTraits<xray::SledEntry::FunctionKinds> {
     IO.enumCase(Kind, "function-enter", xray::SledEntry::FunctionKinds::ENTRY);
     IO.enumCase(Kind, "function-exit", xray::SledEntry::FunctionKinds::EXIT);
     IO.enumCase(Kind, "tail-exit", xray::SledEntry::FunctionKinds::TAIL);
+    IO.enumCase(Kind, "log-args-enter",
+                xray::SledEntry::FunctionKinds::LOG_ARGS_ENTER);
+    IO.enumCase(Kind, "custom-event",
+                xray::SledEntry::FunctionKinds::CUSTOM_EVENT);
   }
 };
 
@@ -115,6 +120,7 @@ template <> struct MappingTraits<xray::YAMLXRaySledEntry> {
     IO.mapRequired("function", Entry.Function);
     IO.mapRequired("kind", Entry.Kind);
     IO.mapRequired("always-instrument", Entry.AlwaysInstrument);
+    IO.mapOptional("function-name", Entry.FunctionName);
   }
 
   static constexpr bool flow = true;

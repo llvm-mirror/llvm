@@ -18,13 +18,11 @@
 ; TOVMEM-DAG: s_mov_b32 [[M0_COPY:s[0-9]+]], m0
 ; TOVMEM-DAG: v_mov_b32_e32 [[SPILL_VREG:v[0-9]+]], [[M0_COPY]]
 ; TOVMEM: buffer_store_dword [[SPILL_VREG]], off, s{{\[[0-9]+:[0-9]+\]}}, s{{[0-9]+}} offset:4 ; 4-byte Folded Spill
-; TOVMEM: s_waitcnt vmcnt(0)
 
 ; TOSMEM-DAG: s_mov_b32 [[M0_COPY:s[0-9]+]], m0
 ; TOSMEM: s_add_u32 m0, s3, 0x100{{$}}
 ; TOSMEM-NOT: [[M0_COPY]]
 ; TOSMEM: s_buffer_store_dword [[M0_COPY]], s{{\[}}[[LO]]:[[HI]]], m0 ; 4-byte Folded Spill
-; TOSMEM: s_waitcnt lgkmcnt(0)
 
 ; GCN: s_cbranch_scc1 [[ENDIF:BB[0-9]+_[0-9]+]]
 
@@ -43,7 +41,7 @@
 ; TOSMEM: s_mov_b32 m0, [[M0_RESTORE]]
 
 ; GCN: s_add_i32 s{{[0-9]+}}, m0, 1
-define void @spill_m0(i32 %cond, i32 addrspace(1)* %out) #0 {
+define amdgpu_kernel void @spill_m0(i32 %cond, i32 addrspace(1)* %out) #0 {
 entry:
   %m0 = call i32 asm sideeffect "s_mov_b32 m0, 0", "={M0}"() #0
   %cmp0 = icmp eq i32 %cond, 0
@@ -68,20 +66,21 @@ endif:
 
 ; TOSMEM-NOT: s_m0
 ; TOSMEM: s_add_u32 m0, s7, 0x100
-; TOSMEM-NEXT: s_buffer_store_dword s{{[0-9]+}}, s{{\[[0-9]+:[0-9]+\]}}, m0 ; 4-byte Folded Spill
-; TOSMEM-NOT: m0
+; TOSMEM-NEXT: s_buffer_store_dwordx2 s{{\[[0-9]+:[0-9]+\]}}, s{{\[[0-9]+:[0-9]+\]}}, m0 ; 8-byte Folded Spill
+; FIXME: RegScavenger::isRegUsed() always returns true if m0 is reserved, so we have to save and restore it
+; FIXME-TOSMEM-NOT: m0
 
-; TOSMEM-NOT: m0
-; TOSMEM: s_add_u32 m0, s7, 0x200
-; TOSMEM: s_buffer_store_dwordx2 s{{\[[0-9]+:[0-9]+\]}}, s{{\[[0-9]+:[0-9]+\]}}, m0 ; 8-byte Folded Spill
-; TOSMEM-NOT: m0
+; FIXME-TOSMEM-NOT: m0
+; TOSMEM: s_add_u32 m0, s7, 0x300
+; TOSMEM: s_buffer_store_dword s{{[0-9]+}}, s{{\[[0-9]+:[0-9]+\]}}, m0 ; 4-byte Folded Spill
+; FIXME-TOSMEM-NOT: m0
 
 ; TOSMEM: s_mov_b64 exec,
 ; TOSMEM: s_cbranch_execz
 ; TOSMEM: s_branch
 
 ; TOSMEM: BB{{[0-9]+_[0-9]+}}:
-; TOSMEM-NEXT: s_add_u32 m0, s7, 0x200
+; TOSMEM: s_add_u32 m0, s7, 0x400
 ; TOSMEM-NEXT: s_buffer_load_dwordx2 s{{\[[0-9]+:[0-9]+\]}}, s{{\[[0-9]+:[0-9]+\]}}, m0 ; 8-byte Folded Reload
 
 
@@ -120,23 +119,23 @@ endif:                                            ; preds = %else, %if
 
 ; GCN: ; clobber m0
 
-; TOSMEM: s_mov_b32 vcc_hi, m0
+; TOSMEM: s_mov_b32 s2, m0
 ; TOSMEM: s_add_u32 m0, s3, 0x100
 ; TOSMEM-NEXT: s_buffer_store_dwordx2 s{{\[[0-9]+:[0-9]+\]}}, s{{\[[0-9]+:[0-9]+\]}}, m0 ; 8-byte Folded Spill
-; TOSMEM: s_mov_b32 m0, vcc_hi
+; TOSMEM: s_mov_b32 m0, s2
 
 ; TOSMEM: s_mov_b64 exec,
 ; TOSMEM: s_cbranch_execz
 ; TOSMEM: s_branch
 
 ; TOSMEM: BB{{[0-9]+_[0-9]+}}:
-; TOSMEM-NEXT: s_add_u32 m0, s3, 0x100
+; TOSMEM: s_add_u32 m0, s3, 0x100
 ; TOSMEM-NEXT: s_buffer_load_dwordx2 s{{\[[0-9]+:[0-9]+\]}}, s{{\[[0-9]+:[0-9]+\]}}, m0 ; 8-byte Folded Reload
 
 ; GCN-NOT: v_readlane_b32 m0
 ; GCN-NOT: s_buffer_store_dword m0
 ; GCN-NOT: s_buffer_load_dword m0
-define void @m0_unavailable_spill(i32 %m0.arg) #0 {
+define amdgpu_kernel void @m0_unavailable_spill(i32 %m0.arg) #0 {
 main_body:
   %m0 = call i32 asm sideeffect "; def $0, 1", "={M0}"() #0
   %tmp = call float @llvm.amdgcn.interp.mov(i32 2, i32 0, i32 0, i32 %m0.arg)
@@ -159,29 +158,30 @@ endif:
 ; GCN-LABEL: {{^}}restore_m0_lds:
 ; TOSMEM: s_load_dwordx2 [[REG:s\[[0-9]+:[0-9]+\]]]
 ; TOSMEM: s_cmp_eq_u32
-; TOSMEM-NOT: m0
+; FIXME: RegScavenger::isRegUsed() always returns true if m0 is reserved, so we have to save and restore it
+; FIXME-TOSMEM-NOT: m0
 ; TOSMEM: s_add_u32 m0, s3, 0x100
 ; TOSMEM: s_buffer_store_dwordx2 [[REG]], s[88:91], m0 ; 8-byte Folded Spill
-; TOSMEM-NOT: m0
+; FIXME-TOSMEM-NOT: m0
 ; TOSMEM: s_add_u32 m0, s3, 0x300
 ; TOSMEM: s_buffer_store_dword s{{[0-9]+}}, s[88:91], m0 ; 4-byte Folded Spill
-; TOSMEM-NOT: m0
+; FIXME-TOSMEM-NOT: m0
 ; TOSMEM: s_cbranch_scc1
 
 ; TOSMEM: s_mov_b32 m0, -1
 
-; TOSMEM: s_mov_b32 vcc_hi, m0
+; TOSMEM: s_mov_b32 s0, m0
 ; TOSMEM: s_add_u32 m0, s3, 0x100
 ; TOSMEM: s_buffer_load_dwordx2 s{{\[[0-9]+:[0-9]+\]}}, s[88:91], m0 ; 8-byte Folded Reload
-; TOSMEM: s_mov_b32 m0, vcc_hi
+; TOSMEM: s_mov_b32 m0, s0
 ; TOSMEM: s_waitcnt lgkmcnt(0)
 
 ; TOSMEM: ds_write_b64
 
-; TOSMEM-NOT: m0
+; FIXME-TOSMEM-NOT: m0
 ; TOSMEM: s_add_u32 m0, s3, 0x300
 ; TOSMEM: s_buffer_load_dword s0, s[88:91], m0 ; 4-byte Folded Reload
-; TOSMEM-NOT: m0
+; FIXME-TOSMEM-NOT: m0
 ; TOSMEM: s_waitcnt lgkmcnt(0)
 ; TOSMEM-NOT: m0
 ; TOSMEM: s_mov_b32 m0, s0
@@ -189,7 +189,7 @@ endif:
 
 ; TOSMEM: s_dcache_wb
 ; TOSMEM: s_endpgm
-define void @restore_m0_lds(i32 %arg) {
+define amdgpu_kernel void @restore_m0_lds(i32 %arg) {
   %m0 = call i32 asm sideeffect "s_mov_b32 m0, 0", "={M0}"() #0
   %sval = load volatile i64, i64 addrspace(2)* undef
   %cmp = icmp eq i32 %arg, 0

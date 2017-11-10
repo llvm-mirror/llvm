@@ -17,11 +17,12 @@
 #include "MCTargetDesc/HexagonMCInstrInfo.h"
 #include "MCTargetDesc/HexagonMCTargetDesc.h"
 #include "MCTargetDesc/HexagonShuffler.h"
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
+#include "llvm/BinaryFormat/ELF.h"
 #include "llvm/MC/MCAssembler.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDirectives.h"
@@ -42,13 +43,12 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/ELF.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/MathExtras.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/SMLoc.h"
 #include "llvm/Support/TargetRegistry.h"
+#include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <cassert>
 #include <cctype>
@@ -96,7 +96,6 @@ class HexagonAsmParser : public MCTargetAsmParser {
 
   MCAsmParser &Parser;
   MCAssembler *Assembler;
-  MCInstrInfo const &MCII;
   MCInst MCB;
   bool InBrackets;
 
@@ -155,8 +154,8 @@ class HexagonAsmParser : public MCTargetAsmParser {
 public:
   HexagonAsmParser(const MCSubtargetInfo &_STI, MCAsmParser &_Parser,
                    const MCInstrInfo &MII, const MCTargetOptions &Options)
-    : MCTargetAsmParser(Options, _STI), Parser(_Parser),
-      MCII (MII), MCB(HexagonMCInstrInfo::createBundle()), InBrackets(false) {
+    : MCTargetAsmParser(Options, _STI, MII), Parser(_Parser),
+      MCB(HexagonMCInstrInfo::createBundle()), InBrackets(false) {
     setAvailableFeatures(ComputeAvailableFeatures(getSTI().getFeatureBits()));
 
     MCAsmParserExtension::Initialize(_Parser);
@@ -307,7 +306,7 @@ public:
   bool iss31_1Imm() const { return true; }
   bool iss30_2Imm() const { return true; }
   bool iss29_3Imm() const { return true; }
-  bool iss23_2Imm() const { return CheckImmRange(23, 2, true, true, false); }
+  bool iss27_2Imm() const { return CheckImmRange(27, 2, true, true, false); }
   bool iss10_0Imm() const { return CheckImmRange(10, 0, true, false, false); }
   bool iss10_6Imm() const { return CheckImmRange(10, 6, true, false, false); }
   bool iss9_0Imm() const { return CheckImmRange(9, 0, true, false, false); }
@@ -320,10 +319,6 @@ public:
   bool iss4_1Imm() const { return CheckImmRange(4, 1, true, false, false); }
   bool iss4_2Imm() const { return CheckImmRange(4, 2, true, false, false); }
   bool iss4_3Imm() const { return CheckImmRange(4, 3, true, false, false); }
-  bool iss4_6Imm() const { return CheckImmRange(4, 0, true, false, false); }
-  bool iss4_7Imm() const { return CheckImmRange(4, 0, true, false, false); }
-  bool iss3_7Imm() const { return CheckImmRange(3, 0, true, false, false); }
-  bool iss3_6Imm() const { return CheckImmRange(3, 0, true, false, false); }
   bool iss3_0Imm() const { return CheckImmRange(3, 0, true, false, false); }
 
   bool isu64_0Imm() const { return CheckImmRange(64, 0, false, true, true); }
@@ -406,20 +401,6 @@ public:
     addImmOperands(Inst, N);
   }
 
-  void adds4_6ImmOperands(MCInst &Inst, unsigned N) const {
-    assert(N == 1 && "Invalid number of operands!");
-    const MCConstantExpr *CE =
-        dyn_cast<MCConstantExpr>(&HexagonMCInstrInfo::getExpr(*getImm()));
-    Inst.addOperand(MCOperand::createImm(CE->getValue() * 64));
-  }
-
-  void adds3_6ImmOperands(MCInst &Inst, unsigned N) const {
-    assert(N == 1 && "Invalid number of operands!");
-    const MCConstantExpr *CE =
-        dyn_cast<MCConstantExpr>(&HexagonMCInstrInfo::getExpr(*getImm()));
-    Inst.addOperand(MCOperand::createImm(CE->getValue() * 64));
-  }
-
   StringRef getToken() const {
     assert(Kind == Token && "Invalid access!");
     return StringRef(Tok.Data, Tok.Length);
@@ -477,94 +458,16 @@ bool HexagonAsmParser::finishBundle(SMLoc IDLoc, MCStreamer &Out) {
   DEBUG(MCB.dump_pretty(dbgs()));
   DEBUG(dbgs() << "--\n");
 
+  MCB.setLoc(IDLoc);
   // Check the bundle for errors.
   const MCRegisterInfo *RI = getContext().getRegisterInfo();
-  HexagonMCChecker Check(MCII, getSTI(), MCB, MCB, *RI);
+  HexagonMCChecker Check(getContext(), MII, getSTI(), MCB, *RI);
 
-  bool CheckOk = HexagonMCInstrInfo::canonicalizePacket(MCII, getSTI(),
+  bool CheckOk = HexagonMCInstrInfo::canonicalizePacket(MII, getSTI(),
                                                         getContext(), MCB,
                                                         &Check);
 
-  while (Check.getNextErrInfo()) {
-    unsigned Reg = Check.getErrRegister();
-    Twine R(RI->getName(Reg));
-
-    uint64_t Err = Check.getError();
-    if (Err != HexagonMCErrInfo::CHECK_SUCCESS) {
-      if (HexagonMCErrInfo::CHECK_ERROR_BRANCHES & Err)
-        return Error(
-            IDLoc,
-            "unconditional branch cannot precede another branch in packet");
-
-      if (HexagonMCErrInfo::CHECK_ERROR_NEWP & Err ||
-          HexagonMCErrInfo::CHECK_ERROR_NEWV & Err)
-        return Error(IDLoc, "register `" + R +
-                                "' used with `.new' "
-                                "but not validly modified in the same packet");
-
-      if (HexagonMCErrInfo::CHECK_ERROR_REGISTERS & Err)
-        return Error(IDLoc, "register `" + R + "' modified more than once");
-
-      if (HexagonMCErrInfo::CHECK_ERROR_READONLY & Err)
-        return Error(IDLoc, "cannot write to read-only register `" + R + "'");
-
-      if (HexagonMCErrInfo::CHECK_ERROR_LOOP & Err)
-        return Error(IDLoc, "loop-setup and some branch instructions "
-                            "cannot be in the same packet");
-
-      if (HexagonMCErrInfo::CHECK_ERROR_ENDLOOP & Err) {
-        Twine N(HexagonMCInstrInfo::isInnerLoop(MCB) ? '0' : '1');
-        return Error(IDLoc,
-                     "packet marked with `:endloop" + N + "' " +
-                         "cannot contain instructions that modify register " +
-                         "`" + R + "'");
-      }
-
-      if (HexagonMCErrInfo::CHECK_ERROR_SOLO & Err)
-        return Error(
-            IDLoc,
-            "instruction cannot appear in packet with other instructions");
-
-      if (HexagonMCErrInfo::CHECK_ERROR_NOSLOTS & Err)
-        return Error(IDLoc, "too many slots used in packet");
-
-      if (Err & HexagonMCErrInfo::CHECK_ERROR_SHUFFLE) {
-        uint64_t Erm = Check.getShuffleError();
-
-        if (HexagonShuffler::SHUFFLE_ERROR_INVALID == Erm)
-          return Error(IDLoc, "invalid instruction packet");
-        else if (HexagonShuffler::SHUFFLE_ERROR_STORES == Erm)
-          return Error(IDLoc, "invalid instruction packet: too many stores");
-        else if (HexagonShuffler::SHUFFLE_ERROR_LOADS == Erm)
-          return Error(IDLoc, "invalid instruction packet: too many loads");
-        else if (HexagonShuffler::SHUFFLE_ERROR_BRANCHES == Erm)
-          return Error(IDLoc, "too many branches in packet");
-        else if (HexagonShuffler::SHUFFLE_ERROR_NOSLOTS == Erm)
-          return Error(IDLoc, "invalid instruction packet: out of slots");
-        else if (HexagonShuffler::SHUFFLE_ERROR_SLOTS == Erm)
-          return Error(IDLoc, "invalid instruction packet: slot error");
-        else if (HexagonShuffler::SHUFFLE_ERROR_ERRATA2 == Erm)
-          return Error(IDLoc, "v60 packet violation");
-        else if (HexagonShuffler::SHUFFLE_ERROR_STORE_LOAD_CONFLICT == Erm)
-          return Error(IDLoc, "slot 0 instruction does not allow slot 1 store");
-        else
-          return Error(IDLoc, "unknown error in instruction packet");
-      }
-    }
-
-    unsigned Warn = Check.getWarning();
-    if (Warn != HexagonMCErrInfo::CHECK_SUCCESS) {
-      if (HexagonMCErrInfo::CHECK_WARN_CURRENT & Warn)
-        Warning(IDLoc, "register `" + R + "' used with `.cur' "
-                                          "but not used in the same packet");
-      else if (HexagonMCErrInfo::CHECK_WARN_TEMPORARY & Warn)
-        Warning(IDLoc, "register `" + R + "' used with `.tmp' "
-                                          "but not used in the same packet");
-    }
-  }
-
   if (CheckOk) {
-    MCB.setLoc(IDLoc);
     if (HexagonMCInstrInfo::bundleSize(MCB) == 0) {
       assert(!HexagonMCInstrInfo::isInnerLoop(MCB));
       assert(!HexagonMCInstrInfo::isOuterLoop(MCB));
@@ -704,7 +607,7 @@ bool HexagonAsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
                           MatchingInlineAsm))
     return true;
   HexagonMCInstrInfo::extendIfNeeded(
-      getParser().getContext(), MCII, MCB, *SubInst);
+      getParser().getContext(), MII, MCB, *SubInst);
   MCB.addOperand(MCOperand::createInst(SubInst));
   if (!InBrackets)
     return finishBundle(IDLoc, Out);
@@ -1388,13 +1291,13 @@ int HexagonAsmParser::processInstruction(MCInst &Inst,
   case Hexagon::A2_iconst: {
     Inst.setOpcode(Hexagon::A2_addi);
     MCOperand Reg = Inst.getOperand(0);
-    MCOperand S16 = Inst.getOperand(1);
-    HexagonMCInstrInfo::setMustNotExtend(*S16.getExpr());
-    HexagonMCInstrInfo::setS23_2_reloc(*S16.getExpr());
+    MCOperand S27 = Inst.getOperand(1);
+    HexagonMCInstrInfo::setMustNotExtend(*S27.getExpr());
+    HexagonMCInstrInfo::setS27_2_reloc(*S27.getExpr());
     Inst.clear();
     Inst.addOperand(Reg);
     Inst.addOperand(MCOperand::createReg(Hexagon::R0));
-    Inst.addOperand(S16);
+    Inst.addOperand(S27);
     break;
   }
   case Hexagon::M4_mpyrr_addr:
@@ -1509,6 +1412,7 @@ int HexagonAsmParser::processInstruction(MCInst &Inst,
   // Translate a "$Rx =  CONST32(#imm)" to "$Rx = memw(gp+#LABEL) "
   case Hexagon::CONST32:
     is32bit = true;
+    LLVM_FALLTHROUGH;
   // Translate a "$Rx:y =  CONST64(#imm)" to "$Rx:y = memd(gp+#LABEL) "
   case Hexagon::CONST64:
     // FIXME: need better way to detect AsmStreamer (upstream removed getKind())

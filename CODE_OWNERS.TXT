@@ -41,8 +41,12 @@ E: andrey.churbanov@intel.com
 D: OpenMP runtime library
 
 N: Greg Clayton
-E: gclayton@apple.com
+E: clayborg@gmail.com
 D: LLDB
+
+N: Pete Couperus
+E: petecoup@synopsys.com
+D: ARC backend (lib/Target/ARC/*)
 
 N: Sanjoy Das
 E: sanjoy@playingwithpointers.com
@@ -61,7 +65,7 @@ E: qcolombet@apple.com
 D: Loop Strength Reduction, Register allocators
 
 N: Simon Dardis
-E: simon.dardis@imgtec.com
+E: simon.dardis@mips.com
 D: MIPS Backend (lib/Target/Mips/*)
 
 N: Duncan P. N. Exon Smith
@@ -70,7 +74,7 @@ D: Branch weights and BlockFrequencyInfo
 
 N: Hal Finkel
 E: hfinkel@anl.gov
-D: BBVectorize, the loop reroller, alias analysis and the PowerPC target
+D: The loop reroller, alias analysis and the PowerPC target
 
 N: Dan Gohman
 E: sunfish@mozilla.com
@@ -195,6 +199,7 @@ D: MemorySanitizer (LLVM part)
 
 N: Craig Topper
 E: craig.topper@gmail.com
+E: craig.topper@intel.com
 D: X86 Backend
 
 N: Ulrich Weigand

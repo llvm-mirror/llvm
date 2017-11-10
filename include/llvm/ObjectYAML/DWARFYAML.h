@@ -16,8 +16,11 @@
 #ifndef LLVM_OBJECTYAML_DWARFYAML_H
 #define LLVM_OBJECTYAML_DWARFYAML_H
 
-#include "llvm/ObjectYAML/YAML.h"
-#include "llvm/Support/Dwarf.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/BinaryFormat/Dwarf.h"
+#include "llvm/Support/YAMLTraits.h"
+#include <cstdint>
+#include <vector>
 
 namespace llvm {
 namespace DWARFYAML {
@@ -76,13 +79,11 @@ struct PubEntry {
 };
 
 struct PubSection {
-  PubSection() : IsGNUStyle(false) {}
-
   InitialLength Length;
   uint16_t Version;
   uint32_t UnitOffset;
   uint32_t UnitSize;
-  bool IsGNUStyle;
+  bool IsGNUStyle = false;
   std::vector<PubEntry> Entries;
 };
 
@@ -158,12 +159,10 @@ struct Data {
   bool isEmpty() const;
 };
 
-} // namespace llvm::DWARFYAML
-} // namespace llvm
+} // end namespace DWARFYAML
+} // end namespace llvm
 
-LLVM_YAML_IS_SEQUENCE_VECTOR(uint8_t)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::yaml::Hex64)
-LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::StringRef)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::yaml::Hex8)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::DWARFYAML::AttributeAbbrev)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::DWARFYAML::Abbrev)
@@ -236,12 +235,12 @@ template <> struct MappingTraits<DWARFYAML::InitialLength> {
   static void mapping(IO &IO, DWARFYAML::InitialLength &DWARF);
 };
 
-#define HANDLE_DW_TAG(unused, name)                                            \
+#define HANDLE_DW_TAG(unused, name, unused2, unused3)                          \
   io.enumCase(value, "DW_TAG_" #name, dwarf::DW_TAG_##name);
 
 template <> struct ScalarEnumerationTraits<dwarf::Tag> {
   static void enumeration(IO &io, dwarf::Tag &value) {
-#include "llvm/Support/Dwarf.def"
+#include "llvm/BinaryFormat/Dwarf.def"
     io.enumFallback<Hex16>(value);
   }
 };
@@ -251,7 +250,7 @@ template <> struct ScalarEnumerationTraits<dwarf::Tag> {
 
 template <> struct ScalarEnumerationTraits<dwarf::LineNumberOps> {
   static void enumeration(IO &io, dwarf::LineNumberOps &value) {
-#include "llvm/Support/Dwarf.def"
+#include "llvm/BinaryFormat/Dwarf.def"
     io.enumFallback<Hex8>(value);
   }
 };
@@ -261,27 +260,27 @@ template <> struct ScalarEnumerationTraits<dwarf::LineNumberOps> {
 
 template <> struct ScalarEnumerationTraits<dwarf::LineNumberExtendedOps> {
   static void enumeration(IO &io, dwarf::LineNumberExtendedOps &value) {
-#include "llvm/Support/Dwarf.def"
+#include "llvm/BinaryFormat/Dwarf.def"
     io.enumFallback<Hex16>(value);
   }
 };
 
-#define HANDLE_DW_AT(unused, name)                                             \
+#define HANDLE_DW_AT(unused, name, unused2, unused3)                           \
   io.enumCase(value, "DW_AT_" #name, dwarf::DW_AT_##name);
 
 template <> struct ScalarEnumerationTraits<dwarf::Attribute> {
   static void enumeration(IO &io, dwarf::Attribute &value) {
-#include "llvm/Support/Dwarf.def"
+#include "llvm/BinaryFormat/Dwarf.def"
     io.enumFallback<Hex16>(value);
   }
 };
 
-#define HANDLE_DW_FORM(unused, name)                                           \
+#define HANDLE_DW_FORM(unused, name, unused2, unused3)                         \
   io.enumCase(value, "DW_FORM_" #name, dwarf::DW_FORM_##name);
 
 template <> struct ScalarEnumerationTraits<dwarf::Form> {
   static void enumeration(IO &io, dwarf::Form &value) {
-#include "llvm/Support/Dwarf.def"
+#include "llvm/BinaryFormat/Dwarf.def"
     io.enumFallback<Hex16>(value);
   }
 };
@@ -291,7 +290,7 @@ template <> struct ScalarEnumerationTraits<dwarf::Form> {
 
 template <> struct ScalarEnumerationTraits<dwarf::UnitType> {
   static void enumeration(IO &io, dwarf::UnitType &value) {
-#include "llvm/Support/Dwarf.def"
+#include "llvm/BinaryFormat/Dwarf.def"
     io.enumFallback<Hex8>(value);
   }
 };
@@ -304,7 +303,7 @@ template <> struct ScalarEnumerationTraits<dwarf::Constants> {
   }
 };
 
-} // namespace llvm::yaml
-} // namespace llvm
+} // end namespace yaml
+} // end namespace llvm
 
-#endif
+#endif // LLVM_OBJECTYAML_DWARFYAML_H

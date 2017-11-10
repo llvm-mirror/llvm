@@ -11,11 +11,11 @@
 #define LLVM_MC_MCASSEMBLER_H
 
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/iterator.h"
 #include "llvm/ADT/iterator_range.h"
-#include "llvm/ADT/SmallPtrSet.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/StringRef.h"
 #include "llvm/MC/MCDirectives.h"
 #include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCFixup.h"
@@ -60,36 +60,36 @@ class MCAssembler {
   friend class MCAsmLayout;
 
 public:
-  typedef std::vector<MCSection *> SectionListType;
-  typedef std::vector<const MCSymbol *> SymbolDataListType;
+  using SectionListType = std::vector<MCSection *>;
+  using SymbolDataListType = std::vector<const MCSymbol *>;
 
-  typedef pointee_iterator<SectionListType::const_iterator> const_iterator;
-  typedef pointee_iterator<SectionListType::iterator> iterator;
+  using const_iterator = pointee_iterator<SectionListType::const_iterator>;
+  using iterator = pointee_iterator<SectionListType::iterator>;
 
-  typedef pointee_iterator<SymbolDataListType::const_iterator>
-  const_symbol_iterator;
-  typedef pointee_iterator<SymbolDataListType::iterator> symbol_iterator;
+  using const_symbol_iterator =
+      pointee_iterator<SymbolDataListType::const_iterator>;
+  using symbol_iterator = pointee_iterator<SymbolDataListType::iterator>;
 
-  typedef iterator_range<symbol_iterator> symbol_range;
-  typedef iterator_range<const_symbol_iterator> const_symbol_range;
+  using symbol_range = iterator_range<symbol_iterator>;
+  using const_symbol_range = iterator_range<const_symbol_iterator>;
 
-  typedef std::vector<IndirectSymbolData>::const_iterator
-      const_indirect_symbol_iterator;
-  typedef std::vector<IndirectSymbolData>::iterator indirect_symbol_iterator;
+  using const_indirect_symbol_iterator =
+      std::vector<IndirectSymbolData>::const_iterator;
+  using indirect_symbol_iterator = std::vector<IndirectSymbolData>::iterator;
 
-  typedef std::vector<DataRegionData>::const_iterator
-      const_data_region_iterator;
-  typedef std::vector<DataRegionData>::iterator data_region_iterator;
+  using const_data_region_iterator =
+      std::vector<DataRegionData>::const_iterator;
+  using data_region_iterator = std::vector<DataRegionData>::iterator;
 
   /// MachO specific deployment target version info.
   // A Major version of 0 indicates that no version information was supplied
   // and so the corresponding load command should not be emitted.
-  typedef struct {
+  using VersionMinInfoType = struct {
     MCVersionMinType Kind;
     unsigned Major;
     unsigned Minor;
     unsigned Update;
-  } VersionMinInfoType;
+  };
 
 private:
   MCContext &Context;
@@ -183,6 +183,8 @@ private:
 
   bool relaxInstruction(MCAsmLayout &Layout, MCRelaxableFragment &IF);
 
+  bool relaxPaddingFragment(MCAsmLayout &Layout, MCPaddingFragment &PF);
+
   bool relaxLEB(MCAsmLayout &Layout, MCLEBFragment &IF);
 
   bool relaxDwarfLineAddr(MCAsmLayout &Layout, MCDwarfLineAddrFragment &DF);
@@ -195,8 +197,8 @@ private:
   /// finishLayout - Finalize a layout, including fragment lowering.
   void finishLayout(MCAsmLayout &Layout);
 
-  std::pair<uint64_t, bool> handleFixup(const MCAsmLayout &Layout,
-                                        MCFragment &F, const MCFixup &Fixup);
+  std::tuple<MCValue, uint64_t, bool>
+  handleFixup(const MCAsmLayout &Layout, MCFragment &F, const MCFixup &Fixup);
 
 public:
   /// Construct a new assembler instance.
@@ -413,7 +415,7 @@ public:
 
   /// @}
 
-  void dump();
+  void dump() const;
 };
 
 /// \brief Compute the amount of padding required before the fragment \p F to

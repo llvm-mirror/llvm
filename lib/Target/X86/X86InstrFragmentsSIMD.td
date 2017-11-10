@@ -146,8 +146,11 @@ def X86fpextRnd  : SDNode<"X86ISD::VFPEXTS_RND",
                                              SDTCisSameSizeAs<0, 2>,
                                              SDTCisVT<3, i32>]>>;
 
-def X86vshldq  : SDNode<"X86ISD::VSHLDQ",    SDTIntShiftOp>;
-def X86vshrdq  : SDNode<"X86ISD::VSRLDQ",    SDTIntShiftOp>;
+def X86vshiftimm : SDTypeProfile<1, 2, [SDTCisVec<0>, SDTCisSameAs<0,1>,
+                                        SDTCisVT<2, i8>, SDTCisInt<0>]>;
+
+def X86vshldq  : SDNode<"X86ISD::VSHLDQ",    X86vshiftimm>;
+def X86vshrdq  : SDNode<"X86ISD::VSRLDQ",    X86vshiftimm>;
 def X86cmpp    : SDNode<"X86ISD::CMPP",      SDTX86VFCMP>;
 def X86pcmpeq  : SDNode<"X86ISD::PCMPEQ", SDTIntBinOp, [SDNPCommutative]>;
 def X86pcmpgt  : SDNode<"X86ISD::PCMPGT", SDTIntBinOp>;
@@ -164,15 +167,16 @@ def X86CmpMaskCC :
                        SDTCisSameNumEltsAs<0, 1>, SDTCisVT<3, i8>]>;
 def X86CmpMaskCCRound :
       SDTypeProfile<1, 4, [SDTCisVec<0>,SDTCVecEltisVT<0, i1>,
-                       SDTCisVec<1>, SDTCisSameAs<2, 1>,
+                       SDTCisVec<1>, SDTCisFP<1>, SDTCisSameAs<2, 1>,
                        SDTCisSameNumEltsAs<0, 1>, SDTCisVT<3, i8>,
                        SDTCisVT<4, i32>]>;
 def X86CmpMaskCCScalar :
-      SDTypeProfile<1, 3, [SDTCisInt<0>, SDTCisSameAs<1, 2>, SDTCisVT<3, i8>]>;
+      SDTypeProfile<1, 3, [SDTCisInt<0>, SDTCisFP<1>, SDTCisSameAs<1, 2>,
+                           SDTCisVT<3, i8>]>;
 
 def X86CmpMaskCCScalarRound :
-      SDTypeProfile<1, 4, [SDTCisInt<0>, SDTCisSameAs<1, 2>, SDTCisVT<3, i8>,
-                           SDTCisVT<4, i32>]>;
+      SDTypeProfile<1, 4, [SDTCisInt<0>, SDTCisFP<1>, SDTCisSameAs<1, 2>,
+                           SDTCisVT<3, i8>, SDTCisVT<4, i32>]>;
 
 def X86cmpm     : SDNode<"X86ISD::CMPM",     X86CmpMaskCC>;
 def X86cmpmRnd  : SDNode<"X86ISD::CMPM_RND", X86CmpMaskCCRound>;
@@ -180,23 +184,22 @@ def X86cmpmu    : SDNode<"X86ISD::CMPMU",    X86CmpMaskCC>;
 def X86cmpms    : SDNode<"X86ISD::FSETCCM",   X86CmpMaskCCScalar>;
 def X86cmpmsRnd : SDNode<"X86ISD::FSETCCM_RND",   X86CmpMaskCCScalarRound>;
 
-def X86vshl    : SDNode<"X86ISD::VSHL",
-                        SDTypeProfile<1, 2, [SDTCisVec<0>, SDTCisSameAs<0,1>,
-                                      SDTCisVec<2>]>>;
-def X86vsrl    : SDNode<"X86ISD::VSRL",
-                        SDTypeProfile<1, 2, [SDTCisVec<0>, SDTCisSameAs<0,1>,
-                                      SDTCisVec<2>]>>;
-def X86vsra    : SDNode<"X86ISD::VSRA",
-                        SDTypeProfile<1, 2, [SDTCisVec<0>, SDTCisSameAs<0,1>,
-                                      SDTCisVec<2>]>>;
+def X86vshiftuniform : SDTypeProfile<1, 2, [SDTCisVec<0>, SDTCisSameAs<0,1>,
+                                            SDTCisVec<2>, SDTCisInt<0>,
+                                            SDTCisInt<1>]>;
 
-def X86vsrav   : SDNode<"X86ISD::VSRAV" ,
-                        SDTypeProfile<1, 2, [SDTCisVec<0>, SDTCisSameAs<0,1>,
-                                             SDTCisSameAs<0,2>]>>;
+def X86vshl    : SDNode<"X86ISD::VSHL", X86vshiftuniform>;
+def X86vsrl    : SDNode<"X86ISD::VSRL", X86vshiftuniform>;
+def X86vsra    : SDNode<"X86ISD::VSRA", X86vshiftuniform>;
 
-def X86vshli   : SDNode<"X86ISD::VSHLI", SDTIntShiftOp>;
-def X86vsrli   : SDNode<"X86ISD::VSRLI", SDTIntShiftOp>;
-def X86vsrai   : SDNode<"X86ISD::VSRAI", SDTIntShiftOp>;
+def X86vshiftvariable : SDTypeProfile<1, 2, [SDTCisVec<0>, SDTCisSameAs<0,1>,
+                                             SDTCisSameAs<0,2>, SDTCisInt<0>]>;
+
+def X86vsrav   : SDNode<"X86ISD::VSRAV", X86vshiftvariable>;
+
+def X86vshli   : SDNode<"X86ISD::VSHLI", X86vshiftimm>;
+def X86vsrli   : SDNode<"X86ISD::VSRLI", X86vshiftimm>;
+def X86vsrai   : SDNode<"X86ISD::VSRAI", X86vshiftimm>;
 
 def X86kshiftl : SDNode<"X86ISD::KSHIFTL",
                         SDTypeProfile<1, 2, [SDTCVecEltisVT<0, i1>,
@@ -207,31 +210,20 @@ def X86kshiftr : SDNode<"X86ISD::KSHIFTR",
                                              SDTCisSameAs<0, 1>,
                                              SDTCisVT<2, i8>]>>;
 
-def X86vrotli  : SDNode<"X86ISD::VROTLI", SDTIntShiftOp>;
-def X86vrotri  : SDNode<"X86ISD::VROTRI", SDTIntShiftOp>;
+def X86vrotli  : SDNode<"X86ISD::VROTLI", X86vshiftimm>;
+def X86vrotri  : SDNode<"X86ISD::VROTRI", X86vshiftimm>;
 
-def X86vprot   : SDNode<"X86ISD::VPROT",
-                        SDTypeProfile<1, 2, [SDTCisVec<0>, SDTCisSameAs<0,1>,
-                                             SDTCisSameAs<0,2>]>>;
-def X86vproti  : SDNode<"X86ISD::VPROTI",
-                        SDTypeProfile<1, 2, [SDTCisVec<0>, SDTCisSameAs<0,1>,
-                                             SDTCisVT<2, i8>]>>;
-
-def X86vpshl   : SDNode<"X86ISD::VPSHL",
-                        SDTypeProfile<1, 2, [SDTCisVec<0>, SDTCisSameAs<0,1>,
-                                             SDTCisSameAs<0,2>]>>;
-def X86vpsha   : SDNode<"X86ISD::VPSHA",
-                        SDTypeProfile<1, 2, [SDTCisVec<0>, SDTCisSameAs<0,1>,
-                                             SDTCisSameAs<0,2>]>>;
+def X86vpshl   : SDNode<"X86ISD::VPSHL", X86vshiftvariable>;
+def X86vpsha   : SDNode<"X86ISD::VPSHA", X86vshiftvariable>;
 
 def X86vpcom   : SDNode<"X86ISD::VPCOM",
                         SDTypeProfile<1, 3, [SDTCisVec<0>, SDTCisSameAs<0,1>,
                                              SDTCisSameAs<0,2>,
-                                             SDTCisVT<3, i8>]>>;
+                                             SDTCisVT<3, i8>, SDTCisInt<0>]>>;
 def X86vpcomu  : SDNode<"X86ISD::VPCOMU",
                         SDTypeProfile<1, 3, [SDTCisVec<0>, SDTCisSameAs<0,1>,
                                              SDTCisSameAs<0,2>,
-                                             SDTCisVT<3, i8>]>>;
+                                             SDTCisVT<3, i8>, SDTCisInt<0>]>>;
 def X86vpermil2 : SDNode<"X86ISD::VPERMIL2",
                         SDTypeProfile<1, 4, [SDTCisVec<0>, SDTCisSameAs<0,1>,
                                              SDTCisSameAs<0,2>,
@@ -267,14 +259,8 @@ def X86testnm  : SDNode<"X86ISD::TESTNM", SDTX86Testm, [SDNPCommutative]>;
 def X86movmsk : SDNode<"X86ISD::MOVMSK",
                         SDTypeProfile<1, 1, [SDTCisVT<0, i32>, SDTCisVec<1>]>>;
 
-def X86select  : SDNode<"X86ISD::SELECT",
-                        SDTypeProfile<1, 3, [SDTCVecEltisVT<1, i1>,
-                                             SDTCisSameAs<0, 2>,
-                                             SDTCisSameAs<2, 3>,
-                                             SDTCisSameNumEltsAs<0, 1>]>>;
-
 def X86selects : SDNode<"X86ISD::SELECTS",
-                        SDTypeProfile<1, 3, [SDTCisVT<1, i1>,
+                        SDTypeProfile<1, 3, [SDTCisVT<1, v1i1>,
                                              SDTCisSameAs<0, 2>,
                                              SDTCisSameAs<2, 3>]>>;
 
@@ -352,10 +338,13 @@ def SDTFmaRound : SDTypeProfile<1, 4, [SDTCisSameAs<0,1>,
                            SDTCisSameAs<1,2>, SDTCisSameAs<1,3>,
                            SDTCisFP<0>, SDTCisVT<4, i32>]>;
 
-def X86PAlignr : SDNode<"X86ISD::PALIGNR", SDTShuff3OpI>;
+def X86PAlignr : SDNode<"X86ISD::PALIGNR",
+                        SDTypeProfile<1, 3, [SDTCVecEltisVT<0, i8>,
+                                             SDTCisSameAs<0,1>,
+                                             SDTCisSameAs<0,2>,
+                                             SDTCisVT<3, i8>]>>;
 def X86VAlign  : SDNode<"X86ISD::VALIGN", SDTShuff3OpI>;
 
-def X86Abs      : SDNode<"X86ISD::ABS", SDTIntUnaryOp>;
 def X86Conflict : SDNode<"X86ISD::CONFLICT", SDTIntUnaryOp>;
 
 def X86PShufd  : SDNode<"X86ISD::PSHUFD", SDTShuff2OpI>;
@@ -442,7 +431,7 @@ def X86Vfpclass    : SDNode<"X86ISD::VFPCLASS",
                                             SDTCisSameNumEltsAs<0,1>,
                                             SDTCisVT<2, i32>]>, []>;
 def X86Vfpclasss   : SDNode<"X86ISD::VFPCLASSS",
-                       SDTypeProfile<1, 2, [SDTCisVT<0, i1>,
+                       SDTypeProfile<1, 2, [SDTCisVT<0, v1i1>,
                                             SDTCisFP<1>, SDTCisVT<2, i32>]>,[]>;
 
 def X86SubVBroadcast : SDNode<"X86ISD::SUBV_BROADCAST",
@@ -452,7 +441,7 @@ def X86SubVBroadcast : SDNode<"X86ISD::SUBV_BROADCAST",
 def X86VBroadcast : SDNode<"X86ISD::VBROADCAST", SDTVBroadcast>;
 def X86VBroadcastm : SDNode<"X86ISD::VBROADCASTM", SDTVBroadcastm>;
 def X86Vextract   : SDNode<"X86ISD::VEXTRACT",  SDTypeProfile<1, 2,
-                              [SDTCisEltOfVec<0, 1>, SDTCisVec<1>,
+                              [SDTCisVec<1>,
                                SDTCisPtrTy<2>]>, []>;
 
 def X86Blendi    : SDNode<"X86ISD::BLENDI",   SDTBlend>;
@@ -478,19 +467,19 @@ def X86fsqrtRnds    : SDNode<"X86ISD::FSQRTS_RND", SDTFPBinOpRound>;
 def X86fgetexpRnd   : SDNode<"X86ISD::FGETEXP_RND", SDTFPUnaryOpRound>;
 def X86fgetexpRnds  : SDNode<"X86ISD::FGETEXPS_RND", SDTFPBinOpRound>;
 
-def X86Fmadd     : SDNode<"X86ISD::FMADD",     SDTFPTernaryOp>;
-def X86Fnmadd    : SDNode<"X86ISD::FNMADD",    SDTFPTernaryOp>;
-def X86Fmsub     : SDNode<"X86ISD::FMSUB",     SDTFPTernaryOp>;
-def X86Fnmsub    : SDNode<"X86ISD::FNMSUB",    SDTFPTernaryOp>;
-def X86Fmaddsub  : SDNode<"X86ISD::FMADDSUB",  SDTFPTernaryOp>;
-def X86Fmsubadd  : SDNode<"X86ISD::FMSUBADD",  SDTFPTernaryOp>;
+def X86Fmadd     : SDNode<"ISD::FMA",          SDTFPTernaryOp, [SDNPCommutative]>;
+def X86Fnmadd    : SDNode<"X86ISD::FNMADD",    SDTFPTernaryOp, [SDNPCommutative]>;
+def X86Fmsub     : SDNode<"X86ISD::FMSUB",     SDTFPTernaryOp, [SDNPCommutative]>;
+def X86Fnmsub    : SDNode<"X86ISD::FNMSUB",    SDTFPTernaryOp, [SDNPCommutative]>;
+def X86Fmaddsub  : SDNode<"X86ISD::FMADDSUB",  SDTFPTernaryOp, [SDNPCommutative]>;
+def X86Fmsubadd  : SDNode<"X86ISD::FMSUBADD",  SDTFPTernaryOp, [SDNPCommutative]>;
 
-def X86FmaddRnd     : SDNode<"X86ISD::FMADD_RND",     SDTFmaRound>;
-def X86FnmaddRnd    : SDNode<"X86ISD::FNMADD_RND",    SDTFmaRound>;
-def X86FmsubRnd     : SDNode<"X86ISD::FMSUB_RND",     SDTFmaRound>;
-def X86FnmsubRnd    : SDNode<"X86ISD::FNMSUB_RND",    SDTFmaRound>;
-def X86FmaddsubRnd  : SDNode<"X86ISD::FMADDSUB_RND",  SDTFmaRound>;
-def X86FmsubaddRnd  : SDNode<"X86ISD::FMSUBADD_RND",  SDTFmaRound>;
+def X86FmaddRnd     : SDNode<"X86ISD::FMADD_RND",     SDTFmaRound, [SDNPCommutative]>;
+def X86FnmaddRnd    : SDNode<"X86ISD::FNMADD_RND",    SDTFmaRound, [SDNPCommutative]>;
+def X86FmsubRnd     : SDNode<"X86ISD::FMSUB_RND",     SDTFmaRound, [SDNPCommutative]>;
+def X86FnmsubRnd    : SDNode<"X86ISD::FNMSUB_RND",    SDTFmaRound, [SDNPCommutative]>;
+def X86FmaddsubRnd  : SDNode<"X86ISD::FMADDSUB_RND",  SDTFmaRound, [SDNPCommutative]>;
+def X86FmsubaddRnd  : SDNode<"X86ISD::FMSUBADD_RND",  SDTFmaRound, [SDNPCommutative]>;
 
 // Scalar FMA intrinsics with passthru bits in operand 1.
 def X86FmaddRnds1   : SDNode<"X86ISD::FMADDS1_RND",     SDTFmaRound>;
@@ -499,15 +488,15 @@ def X86FmsubRnds1   : SDNode<"X86ISD::FMSUBS1_RND",     SDTFmaRound>;
 def X86FnmsubRnds1  : SDNode<"X86ISD::FNMSUBS1_RND",    SDTFmaRound>;
 
 // Scalar FMA intrinsics with passthru bits in operand 3.
-def X86FmaddRnds3   : SDNode<"X86ISD::FMADDS3_RND",     SDTFmaRound>;
-def X86FnmaddRnds3  : SDNode<"X86ISD::FNMADDS3_RND",    SDTFmaRound>;
-def X86FmsubRnds3   : SDNode<"X86ISD::FMSUBS3_RND",     SDTFmaRound>;
-def X86FnmsubRnds3  : SDNode<"X86ISD::FNMSUBS3_RND",    SDTFmaRound>;
+def X86FmaddRnds3   : SDNode<"X86ISD::FMADDS3_RND",     SDTFmaRound, [SDNPCommutative]>;
+def X86FnmaddRnds3  : SDNode<"X86ISD::FNMADDS3_RND",    SDTFmaRound, [SDNPCommutative]>;
+def X86FmsubRnds3   : SDNode<"X86ISD::FMSUBS3_RND",     SDTFmaRound, [SDNPCommutative]>;
+def X86FnmsubRnds3  : SDNode<"X86ISD::FNMSUBS3_RND",    SDTFmaRound, [SDNPCommutative]>;
 
 def SDTIFma : SDTypeProfile<1, 3, [SDTCisInt<0>, SDTCisSameAs<0,1>,
                            SDTCisSameAs<1,2>, SDTCisSameAs<1,3>]>;
-def x86vpmadd52l     : SDNode<"X86ISD::VPMADD52L",     SDTIFma>;
-def x86vpmadd52h     : SDNode<"X86ISD::VPMADD52H",     SDTIFma>;
+def x86vpmadd52l     : SDNode<"X86ISD::VPMADD52L",     SDTIFma, [SDNPCommutative]>;
+def x86vpmadd52h     : SDNode<"X86ISD::VPMADD52H",     SDTIFma, [SDNPCommutative]>;
 
 def X86rsqrt28   : SDNode<"X86ISD::RSQRT28",  SDTFPUnaryOpRound>;
 def X86rcp28     : SDNode<"X86ISD::RCP28",    SDTFPUnaryOpRound>;
@@ -642,96 +631,84 @@ def sdmem : Operand<v2f64> {
 // SSE pattern fragments
 //===----------------------------------------------------------------------===//
 
+// Vector load wrappers to prevent folding of non-temporal aligned loads on
+// supporting targets.
+def vecload : PatFrag<(ops node:$ptr), (load node:$ptr), [{
+  return !useNonTemporalLoad(cast<LoadSDNode>(N));
+}]>;
+
 // 128-bit load pattern fragments
 // NOTE: all 128-bit integer vector loads are promoted to v2i64
-def loadv4f32    : PatFrag<(ops node:$ptr), (v4f32 (load node:$ptr))>;
-def loadv2f64    : PatFrag<(ops node:$ptr), (v2f64 (load node:$ptr))>;
-def loadv2i64    : PatFrag<(ops node:$ptr), (v2i64 (load node:$ptr))>;
+def loadv4f32    : PatFrag<(ops node:$ptr), (v4f32 (vecload node:$ptr))>;
+def loadv2f64    : PatFrag<(ops node:$ptr), (v2f64 (vecload node:$ptr))>;
+def loadv2i64    : PatFrag<(ops node:$ptr), (v2i64 (vecload node:$ptr))>;
 
 // 256-bit load pattern fragments
 // NOTE: all 256-bit integer vector loads are promoted to v4i64
-def loadv8f32    : PatFrag<(ops node:$ptr), (v8f32 (load node:$ptr))>;
-def loadv4f64    : PatFrag<(ops node:$ptr), (v4f64 (load node:$ptr))>;
-def loadv4i64    : PatFrag<(ops node:$ptr), (v4i64 (load node:$ptr))>;
+def loadv8f32    : PatFrag<(ops node:$ptr), (v8f32 (vecload node:$ptr))>;
+def loadv4f64    : PatFrag<(ops node:$ptr), (v4f64 (vecload node:$ptr))>;
+def loadv4i64    : PatFrag<(ops node:$ptr), (v4i64 (vecload node:$ptr))>;
 
 // 512-bit load pattern fragments
-def loadv16f32   : PatFrag<(ops node:$ptr), (v16f32 (load node:$ptr))>;
-def loadv8f64    : PatFrag<(ops node:$ptr), (v8f64 (load node:$ptr))>;
-def loadv8i64    : PatFrag<(ops node:$ptr), (v8i64 (load node:$ptr))>;
+def loadv16f32   : PatFrag<(ops node:$ptr), (v16f32 (vecload node:$ptr))>;
+def loadv8f64    : PatFrag<(ops node:$ptr), (v8f64 (vecload node:$ptr))>;
+def loadv8i64    : PatFrag<(ops node:$ptr), (v8i64 (vecload node:$ptr))>;
 
 // 128-/256-/512-bit extload pattern fragments
 def extloadv2f32 : PatFrag<(ops node:$ptr), (v2f64 (extloadvf32 node:$ptr))>;
 def extloadv4f32 : PatFrag<(ops node:$ptr), (v4f64 (extloadvf32 node:$ptr))>;
 def extloadv8f32 : PatFrag<(ops node:$ptr), (v8f64 (extloadvf32 node:$ptr))>;
 
-// Like 'store', but always requires 128-bit vector alignment.
+// Like 'store', but always requires vector size alignment.
 def alignedstore : PatFrag<(ops node:$val, node:$ptr),
                            (store node:$val, node:$ptr), [{
-  return cast<StoreSDNode>(N)->getAlignment() >= 16;
-}]>;
-
-// Like 'store', but always requires 256-bit vector alignment.
-def alignedstore256 : PatFrag<(ops node:$val, node:$ptr),
-                              (store node:$val, node:$ptr), [{
-  return cast<StoreSDNode>(N)->getAlignment() >= 32;
-}]>;
-
-// Like 'store', but always requires 512-bit vector alignment.
-def alignedstore512 : PatFrag<(ops node:$val, node:$ptr),
-                              (store node:$val, node:$ptr), [{
-  return cast<StoreSDNode>(N)->getAlignment() >= 64;
+  auto *St = cast<StoreSDNode>(N);
+  return St->getAlignment() >= St->getMemoryVT().getStoreSize();
 }]>;
 
 // Like 'load', but always requires 128-bit vector alignment.
-def alignedload : PatFrag<(ops node:$ptr), (load node:$ptr), [{
-  return cast<LoadSDNode>(N)->getAlignment() >= 16;
-}]>;
-
-// Like 'load', but always requires 256-bit vector alignment.
-def alignedload256 : PatFrag<(ops node:$ptr), (load node:$ptr), [{
-  return cast<LoadSDNode>(N)->getAlignment() >= 32;
-}]>;
-
-// Like 'load', but always requires 512-bit vector alignment.
-def alignedload512 : PatFrag<(ops node:$ptr), (load node:$ptr), [{
-  return cast<LoadSDNode>(N)->getAlignment() >= 64;
+def alignedvecload : PatFrag<(ops node:$ptr), (load node:$ptr), [{
+  auto *Ld = cast<LoadSDNode>(N);
+  return Ld->getAlignment() >= Ld->getMemoryVT().getStoreSize() &&
+         !useNonTemporalLoad(cast<LoadSDNode>(N));
 }]>;
 
 // 128-bit aligned load pattern fragments
 // NOTE: all 128-bit integer vector loads are promoted to v2i64
 def alignedloadv4f32 : PatFrag<(ops node:$ptr),
-                               (v4f32 (alignedload node:$ptr))>;
+                               (v4f32 (alignedvecload node:$ptr))>;
 def alignedloadv2f64 : PatFrag<(ops node:$ptr),
-                               (v2f64 (alignedload node:$ptr))>;
+                               (v2f64 (alignedvecload node:$ptr))>;
 def alignedloadv2i64 : PatFrag<(ops node:$ptr),
-                               (v2i64 (alignedload node:$ptr))>;
+                               (v2i64 (alignedvecload node:$ptr))>;
 
 // 256-bit aligned load pattern fragments
 // NOTE: all 256-bit integer vector loads are promoted to v4i64
 def alignedloadv8f32 : PatFrag<(ops node:$ptr),
-                               (v8f32 (alignedload256 node:$ptr))>;
+                               (v8f32 (alignedvecload node:$ptr))>;
 def alignedloadv4f64 : PatFrag<(ops node:$ptr),
-                               (v4f64 (alignedload256 node:$ptr))>;
+                               (v4f64 (alignedvecload node:$ptr))>;
 def alignedloadv4i64 : PatFrag<(ops node:$ptr),
-                               (v4i64 (alignedload256 node:$ptr))>;
+                               (v4i64 (alignedvecload node:$ptr))>;
 
 // 512-bit aligned load pattern fragments
 def alignedloadv16f32 : PatFrag<(ops node:$ptr),
-                                (v16f32 (alignedload512 node:$ptr))>;
+                                (v16f32 (alignedvecload node:$ptr))>;
 def alignedloadv8f64  : PatFrag<(ops node:$ptr),
-                                (v8f64  (alignedload512 node:$ptr))>;
+                                (v8f64  (alignedvecload node:$ptr))>;
 def alignedloadv8i64  : PatFrag<(ops node:$ptr),
-                                (v8i64  (alignedload512 node:$ptr))>;
+                                (v8i64  (alignedvecload node:$ptr))>;
 
-// Like 'load', but uses special alignment checks suitable for use in
+// Like 'vecload', but uses special alignment checks suitable for use in
 // memory operands in most SSE instructions, which are required to
 // be naturally aligned on some targets but not on others.  If the subtarget
 // allows unaligned accesses, match any load, though this may require
 // setting a feature bit in the processor (on startup, for example).
 // Opteron 10h and later implement such a feature.
-def memop : PatFrag<(ops node:$ptr), (load node:$ptr), [{
-  return    Subtarget->hasSSEUnalignedMem()
-         || cast<LoadSDNode>(N)->getAlignment() >= 16;
+def memop : PatFrag<(ops node:$ptr), (vecload node:$ptr), [{
+  auto *Ld = cast<LoadSDNode>(N);
+  return Subtarget->hasSSEUnalignedMem() ||
+         Ld->getAlignment() >= Ld->getMemoryVT().getStoreSize();
 }]>;
 
 // 128-bit memop pattern fragments
@@ -740,24 +717,8 @@ def memopv4f32 : PatFrag<(ops node:$ptr), (v4f32 (memop node:$ptr))>;
 def memopv2f64 : PatFrag<(ops node:$ptr), (v2f64 (memop node:$ptr))>;
 def memopv2i64 : PatFrag<(ops node:$ptr), (v2i64 (memop node:$ptr))>;
 
-// These are needed to match a scalar memop that is used in a vector-only
-// math instruction such as the FP logical ops: andps, andnps, orps, xorps.
-// The memory operand is required to be a 128-bit load, so it must be converted
-// from a vector to a scalar.
-def memopfsf32_128 : PatFrag<(ops node:$ptr),
-  (f32 (extractelt (memopv4f32 node:$ptr), (iPTR 0)))>;
-def memopfsf64_128 : PatFrag<(ops node:$ptr),
-  (f64 (extractelt (memopv2f64 node:$ptr), (iPTR 0)))>;
-
-
-// SSSE3 uses MMX registers for some instructions. They aren't aligned on a
-// 16-byte boundary.
-// FIXME: 8 byte alignment for mmx reads is not required
-def memop64 : PatFrag<(ops node:$ptr), (load node:$ptr), [{
-  return cast<LoadSDNode>(N)->getAlignment() >= 8;
-}]>;
-
-def memopmmx  : PatFrag<(ops node:$ptr), (x86mmx  (memop64 node:$ptr))>;
+def X86masked_gather  : SDNode<"X86ISD::MGATHER",  SDTMaskedGather,
+                       [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
 
 def mgatherv4i32 : PatFrag<(ops node:$src1, node:$src2, node:$src3),
   (masked_gather node:$src1, node:$src2, node:$src3) , [{
@@ -780,6 +741,15 @@ def mgatherv2i64 : PatFrag<(ops node:$src1, node:$src2, node:$src3),
   if (MaskedGatherSDNode *Mgt = dyn_cast<MaskedGatherSDNode>(N))
     return (Mgt->getIndex().getValueType() == MVT::v2i64 ||
             Mgt->getBasePtr().getValueType() == MVT::v2i64);
+  return false;
+}]>;
+def X86mgatherv2i64 : PatFrag<(ops node:$src1, node:$src2, node:$src3),
+  (X86masked_gather node:$src1, node:$src2, node:$src3) , [{
+  if (X86MaskedGatherSDNode *Mgt = dyn_cast<X86MaskedGatherSDNode>(N))
+    return (Mgt->getIndex().getValueType() == MVT::v2i64 ||
+            Mgt->getBasePtr().getValueType() == MVT::v2i64) &&
+           (Mgt->getMemoryVT() == MVT::v2i32 ||
+            Mgt->getMemoryVT() == MVT::v2f32);
   return false;
 }]>;
 def mgatherv4i64 : PatFrag<(ops node:$src1, node:$src2, node:$src3),
@@ -911,53 +881,48 @@ def BYTE_imm  : SDNodeXForm<imm, [{
 // EXTRACT_get_vextract128_imm xform function: convert extract_subvector index
 // to VEXTRACTF128/VEXTRACTI128 imm.
 def EXTRACT_get_vextract128_imm : SDNodeXForm<extract_subvector, [{
-  return getI8Imm(X86::getExtractVEXTRACT128Immediate(N), SDLoc(N));
+  return getExtractVEXTRACTImmediate(N, 128, SDLoc(N));
 }]>;
 
 // INSERT_get_vinsert128_imm xform function: convert insert_subvector index to
 // VINSERTF128/VINSERTI128 imm.
 def INSERT_get_vinsert128_imm : SDNodeXForm<insert_subvector, [{
-  return getI8Imm(X86::getInsertVINSERT128Immediate(N), SDLoc(N));
+  return getInsertVINSERTImmediate(N, 128, SDLoc(N));
 }]>;
 
 // EXTRACT_get_vextract256_imm xform function: convert extract_subvector index
 // to VEXTRACTF64x4 imm.
 def EXTRACT_get_vextract256_imm : SDNodeXForm<extract_subvector, [{
-  return getI8Imm(X86::getExtractVEXTRACT256Immediate(N), SDLoc(N));
+  return getExtractVEXTRACTImmediate(N, 256, SDLoc(N));
 }]>;
 
 // INSERT_get_vinsert256_imm xform function: convert insert_subvector index to
 // VINSERTF64x4 imm.
 def INSERT_get_vinsert256_imm : SDNodeXForm<insert_subvector, [{
-  return getI8Imm(X86::getInsertVINSERT256Immediate(N), SDLoc(N));
+  return getInsertVINSERTImmediate(N, 256, SDLoc(N));
 }]>;
 
 def vextract128_extract : PatFrag<(ops node:$bigvec, node:$index),
                                    (extract_subvector node:$bigvec,
-                                                      node:$index), [{
-  return X86::isVEXTRACT128Index(N);
-}], EXTRACT_get_vextract128_imm>;
+                                                      node:$index), [{}],
+                                  EXTRACT_get_vextract128_imm>;
 
 def vinsert128_insert : PatFrag<(ops node:$bigvec, node:$smallvec,
                                       node:$index),
                                  (insert_subvector node:$bigvec, node:$smallvec,
-                                                   node:$index), [{
-  return X86::isVINSERT128Index(N);
-}], INSERT_get_vinsert128_imm>;
-
+                                                   node:$index), [{}],
+                                INSERT_get_vinsert128_imm>;
 
 def vextract256_extract : PatFrag<(ops node:$bigvec, node:$index),
                                    (extract_subvector node:$bigvec,
-                                                      node:$index), [{
-  return X86::isVEXTRACT256Index(N);
-}], EXTRACT_get_vextract256_imm>;
+                                                      node:$index), [{}],
+                                  EXTRACT_get_vextract256_imm>;
 
 def vinsert256_insert : PatFrag<(ops node:$bigvec, node:$smallvec,
                                       node:$index),
                                  (insert_subvector node:$bigvec, node:$smallvec,
-                                                   node:$index), [{
-  return X86::isVINSERT256Index(N);
-}], INSERT_get_vinsert256_imm>;
+                                                   node:$index), [{}],
+                                INSERT_get_vinsert256_imm>;
 
 def X86mload : PatFrag<(ops node:$src1, node:$src2, node:$src3),
                          (masked_load node:$src1, node:$src2, node:$src3), [{
@@ -1119,9 +1084,4 @@ def masked_truncstore_s_vi32 : PatFrag<(ops node:$src1, node:$src2, node:$src3),
 def masked_truncstore_us_vi32 : PatFrag<(ops node:$src1, node:$src2, node:$src3),
                                (X86MTruncUSStore node:$src1, node:$src2, node:$src3), [{
   return cast<MaskedTruncUSStoreSDNode>(N)->getMemoryVT().getScalarType() == MVT::i32;
-}]>;
-
-def assertzext_i1 :
-  PatFrag<(ops node:$src), (assertzext node:$src), [{
-    return cast<VTSDNode>(N->getOperand(1))->getVT() == MVT::i1;
 }]>;

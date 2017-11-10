@@ -1,4 +1,4 @@
-//===-- HexagonTargetTransformInfo.cpp - Hexagon specific TTI pass --------===//
+//===- HexagonTargetTransformInfo.cpp - Hexagon specific TTI pass ---------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -14,12 +14,21 @@
 //===----------------------------------------------------------------------===//
 
 #include "HexagonTargetTransformInfo.h"
+#include "HexagonSubtarget.h"
+#include "llvm/Analysis/TargetTransformInfo.h"
+#include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instructions.h"
-#include "llvm/Support/Debug.h"
+#include "llvm/IR/User.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/CommandLine.h"
 
 using namespace llvm;
 
 #define DEBUG_TYPE "hexagontti"
+
+static cl::opt<bool> EmitLookupTables("hexagon-emit-lookup-tables",
+  cl::init(true), cl::Hidden,
+  cl::desc("Control lookup table emission on Hexagon target"));
 
 TargetTransformInfo::PopcntSupportKind
 HexagonTTIImpl::getPopcntSupport(unsigned IntTyWidthInBit) const {
@@ -29,7 +38,7 @@ HexagonTTIImpl::getPopcntSupport(unsigned IntTyWidthInBit) const {
 }
 
 // The Hexagon target can unroll loops with run-time trip counts.
-void HexagonTTIImpl::getUnrollingPreferences(Loop *L,
+void HexagonTTIImpl::getUnrollingPreferences(Loop *L, ScalarEvolution &SE,
                                              TTI::UnrollingPreferences &UP) {
   UP.Runtime = UP.Partial = true;
 }
@@ -46,8 +55,9 @@ unsigned HexagonTTIImpl::getCacheLineSize() const {
   return getST()->getL1CacheLineSize();
 }
 
-int HexagonTTIImpl::getUserCost(const User *U) {
-  auto isCastFoldedIntoLoad = [] (const CastInst *CI) -> bool {
+int HexagonTTIImpl::getUserCost(const User *U,
+                                ArrayRef<const Value *> Operands) {
+  auto isCastFoldedIntoLoad = [](const CastInst *CI) -> bool {
     if (!CI->isIntegerCast())
       return false;
     const LoadInst *LI = dyn_cast<const LoadInst>(CI->getOperand(0));
@@ -67,5 +77,9 @@ int HexagonTTIImpl::getUserCost(const User *U) {
   if (const CastInst *CI = dyn_cast<const CastInst>(U))
     if (isCastFoldedIntoLoad(CI))
       return TargetTransformInfo::TCC_Free;
-  return BaseT::getUserCost(U);
+  return BaseT::getUserCost(U, Operands);
+}
+
+bool HexagonTTIImpl::shouldBuildLookupTables() const {
+   return EmitLookupTables;
 }

@@ -12,7 +12,7 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/Support/Dwarf.h"
+#include "llvm/BinaryFormat/Dwarf.h"
 #include <cstdint>
 #include <vector>
 
@@ -69,7 +69,7 @@ private:
 public:
   DWARFDebugPubTable(StringRef Data, bool LittleEndian, bool GnuStyle);
 
-  void dump(StringRef Name, raw_ostream &OS) const;
+  void dump(raw_ostream &OS) const;
 
   ArrayRef<Set> getData() { return Sets; }
 };

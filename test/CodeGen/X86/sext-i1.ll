@@ -51,8 +51,10 @@ define i32 @t3() nounwind readonly {
 ;
 ; X64-LABEL: t3:
 ; X64:       # BB#0: # %entry
-; X64-NEXT:    cmpl $1, %eax
-; X64-NEXT:    sbbq %rax, %rax
+; X64-NEXT:    xorl %eax, %eax
+; X64-NEXT:    testl %eax, %eax
+; X64-NEXT:    sete %al
+; X64-NEXT:    negq %rax
 ; X64-NEXT:    cmpq %rax, %rax
 ; X64-NEXT:    xorl %eax, %eax
 ; X64-NEXT:    retq
@@ -75,13 +77,11 @@ if.end:
 define i32 @t4(i64 %x) nounwind readnone ssp {
 ; X32-LABEL: t4:
 ; X32:       # BB#0:
-; X32-NEXT:    movl {{[0-9]+}}(%esp), %eax
-; X32-NEXT:    orl {{[0-9]+}}(%esp), %eax
-; X32-NEXT:    movl $-1, %eax
-; X32-NEXT:    je .LBB3_2
-; X32-NEXT:  # BB#1:
+; X32-NEXT:    movl {{[0-9]+}}(%esp), %ecx
 ; X32-NEXT:    xorl %eax, %eax
-; X32-NEXT:  .LBB3_2:
+; X32-NEXT:    orl {{[0-9]+}}(%esp), %ecx
+; X32-NEXT:    sete %al
+; X32-NEXT:    negl %eax
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: t4:
@@ -144,8 +144,8 @@ define i32 @select_0_or_1s_zeroext(i1 zeroext %cond) {
 ;
 ; X64-LABEL: select_0_or_1s_zeroext:
 ; X64:       # BB#0:
-; X64-NEXT:    movzbl %dil, %eax
-; X64-NEXT:    decl %eax
+; X64-NEXT:    # kill: %EDI<def> %EDI<kill> %RDI<def>
+; X64-NEXT:    leal -1(%rdi), %eax
 ; X64-NEXT:    retq
   %not = xor i1 %cond, 1
   %sext = sext i1 %not to i32
@@ -165,9 +165,8 @@ define i32 @select_0_or_1s_signext(i1 signext %cond) {
 ;
 ; X64-LABEL: select_0_or_1s_signext:
 ; X64:       # BB#0:
-; X64-NEXT:    andb $1, %dil
-; X64-NEXT:    movzbl %dil, %eax
-; X64-NEXT:    decl %eax
+; X64-NEXT:    notl %edi
+; X64-NEXT:    movl %edi, %eax
 ; X64-NEXT:    retq
   %not = xor i1 %cond, 1
   %sext = sext i1 %not to i32

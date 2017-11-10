@@ -12,6 +12,8 @@
 
 #include "llvm/Support/DataTypes.h"
 
+#include <memory>
+
 namespace llvm {
 
 class MCAsmBackend;
@@ -55,6 +57,7 @@ extern const unsigned VR32Regs[32];
 extern const unsigned VR64Regs[32];
 extern const unsigned VR128Regs[32];
 extern const unsigned AR32Regs[16];
+extern const unsigned CR64Regs[16];
 
 // Return the 0-based number of the first architectural register that
 // contains the given LLVM register.   E.g. R1D -> 1.
@@ -90,7 +93,8 @@ MCAsmBackend *createSystemZMCAsmBackend(const Target &T,
                                         const Triple &TT, StringRef CPU,
                                         const MCTargetOptions &Options);
 
-MCObjectWriter *createSystemZObjectWriter(raw_pwrite_stream &OS, uint8_t OSABI);
+std::unique_ptr<MCObjectWriter> createSystemZObjectWriter(raw_pwrite_stream &OS,
+                                                          uint8_t OSABI);
 } // end namespace llvm
 
 // Defines symbolic names for SystemZ registers.

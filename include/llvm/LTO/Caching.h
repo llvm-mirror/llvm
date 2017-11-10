@@ -24,14 +24,20 @@ namespace lto {
 /// This type defines the callback to add a pre-existing native object file
 /// (e.g. in a cache).
 ///
-/// File callbacks must be thread safe.
-typedef std::function<void(unsigned Task, StringRef Path)> AddFileFn;
+/// Path is generally expected to be a valid path for the file at the point when
+/// the AddBufferFn function is called, but clients should prefer to access MB
+/// directly in order to avoid a potential race condition.
+///
+/// Buffer callbacks must be thread safe.
+typedef std::function<void(unsigned Task, std::unique_ptr<MemoryBuffer> MB,
+                           StringRef Path)>
+    AddBufferFn;
 
 /// Create a local file system cache which uses the given cache directory and
 /// file callback. This function also creates the cache directory if it does not
 /// already exist.
 Expected<NativeObjectCache> localCache(StringRef CacheDirectoryPath,
-                                       AddFileFn AddFile);
+                                       AddBufferFn AddBuffer);
 
 } // namespace lto
 } // namespace llvm

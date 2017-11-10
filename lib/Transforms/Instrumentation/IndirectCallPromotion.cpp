@@ -1,4 +1,4 @@
-//===-- IndirectCallPromotion.cpp - Promote indirect calls to direct calls ===//
+//===- IndirectCallPromotion.cpp - Optimizations based on value profiling -===//
 //
 //                      The LLVM Compiler Infrastructure
 //
@@ -14,11 +14,15 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/Twine.h"
 #include "llvm/Analysis/IndirectCallPromotionAnalysis.h"
 #include "llvm/Analysis/IndirectCallSiteVisitor.h"
+#include "llvm/Analysis/OptimizationRemarkEmitter.h"
+#include "llvm/Analysis/ProfileSummaryInfo.h"
+#include "llvm/IR/Attributes.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -32,19 +36,22 @@
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/IR/Type.h"
+#include "llvm/IR/Value.h"
 #include "llvm/Pass.h"
-#include "llvm/PassRegistry.h"
-#include "llvm/PassSupport.h"
 #include "llvm/ProfileData/InstrProf.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Instrumentation.h"
 #include "llvm/Transforms/PGOInstrumentation.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include <cassert>
 #include <cstdint>
+#include <memory>
+#include <string>
+#include <utility>
 #include <vector>
 
 using namespace llvm;
@@ -65,13 +72,13 @@ static cl::opt<bool> DisableICP("disable-icp", cl::init(false), cl::Hidden,
 // For debug use only.
 static cl::opt<unsigned>
     ICPCutOff("icp-cutoff", cl::init(0), cl::Hidden, cl::ZeroOrMore,
-              cl::desc("Max number of promotions for this compilaiton"));
+              cl::desc("Max number of promotions for this compilation"));
 
 // If ICPCSSkip is non zero, the first ICPCSSkip callsites will be skipped.
 // For debug use only.
 static cl::opt<unsigned>
     ICPCSSkip("icp-csskip", cl::init(0), cl::Hidden, cl::ZeroOrMore,
-              cl::desc("Skip Callsite up to this number for this compilaiton"));
+              cl::desc("Skip Callsite up to this number for this compilation"));
 
 // Set if the pass is called in LTO optimization. The difference for LTO mode
 // is the pass won't prefix the source module name to the internal linkage
@@ -107,6 +114,7 @@ static cl::opt<bool>
                  cl::desc("Dump IR after transformation happens"));
 
 namespace {
+
 class PGOIndirectCallPromotionLegacyPass : public ModulePass {
 public:
   static char ID;
@@ -115,6 +123,10 @@ public:
       : ModulePass(ID), InLTO(InLTO), SamplePGO(SamplePGO) {
     initializePGOIndirectCallPromotionLegacyPassPass(
         *PassRegistry::getPassRegistry());
+  }
+
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
+    AU.addRequired<ProfileSummaryInfoWrapperPass>();
   }
 
   StringRef getPassName() const override { return "PGOIndirectCallPromotion"; }
@@ -130,13 +142,20 @@ private:
   // the promoted direct call.
   bool SamplePGO;
 };
+
 } // end anonymous namespace
 
 char PGOIndirectCallPromotionLegacyPass::ID = 0;
-INITIALIZE_PASS(PGOIndirectCallPromotionLegacyPass, "pgo-icall-prom",
-                "Use PGO instrumentation profile to promote indirect calls to "
-                "direct calls.",
-                false, false)
+
+INITIALIZE_PASS_BEGIN(PGOIndirectCallPromotionLegacyPass, "pgo-icall-prom",
+                      "Use PGO instrumentation profile to promote indirect "
+                      "calls to direct calls.",
+                      false, false)
+INITIALIZE_PASS_DEPENDENCY(ProfileSummaryInfoWrapperPass)
+INITIALIZE_PASS_END(PGOIndirectCallPromotionLegacyPass, "pgo-icall-prom",
+                    "Use PGO instrumentation profile to promote indirect "
+                    "calls to direct calls.",
+                    false, false)
 
 ModulePass *llvm::createPGOIndirectCallPromotionLegacyPass(bool InLTO,
                                                            bool SamplePGO) {
@@ -144,6 +163,7 @@ ModulePass *llvm::createPGOIndirectCallPromotionLegacyPass(bool InLTO,
 }
 
 namespace {
+
 // The class for main data structure to promote indirect calls to conditional
 // direct calls.
 class ICallPromotionFunc {
@@ -157,14 +177,13 @@ private:
 
   bool SamplePGO;
 
-  // Test if we can legally promote this direct-call of Target.
-  bool isPromotionLegal(Instruction *Inst, uint64_t Target, Function *&F,
-                        const char **Reason = nullptr);
+  OptimizationRemarkEmitter &ORE;
 
   // A struct that records the direct target and it's call count.
   struct PromotionCandidate {
     Function *TargetFunction;
     uint64_t Count;
+
     PromotionCandidate(Function *F, uint64_t C) : TargetFunction(F), Count(C) {}
   };
 
@@ -183,17 +202,16 @@ private:
                         const std::vector<PromotionCandidate> &Candidates,
                         uint64_t &TotalCount);
 
-  // Noncopyable
-  ICallPromotionFunc(const ICallPromotionFunc &other) = delete;
-  ICallPromotionFunc &operator=(const ICallPromotionFunc &other) = delete;
-
 public:
   ICallPromotionFunc(Function &Func, Module *Modu, InstrProfSymtab *Symtab,
-                     bool SamplePGO)
-      : F(Func), M(Modu), Symtab(Symtab), SamplePGO(SamplePGO) {}
+                     bool SamplePGO, OptimizationRemarkEmitter &ORE)
+      : F(Func), M(Modu), Symtab(Symtab), SamplePGO(SamplePGO), ORE(ORE) {}
+  ICallPromotionFunc(const ICallPromotionFunc &) = delete;
+  ICallPromotionFunc &operator=(const ICallPromotionFunc &) = delete;
 
-  bool processFunction();
+  bool processFunction(ProfileSummaryInfo *PSI);
 };
+
 } // end anonymous namespace
 
 bool llvm::isLegalToPromote(Instruction *Inst, Function *F,
@@ -239,17 +257,6 @@ bool llvm::isLegalToPromote(Instruction *Inst, Function *F,
   return true;
 }
 
-bool ICallPromotionFunc::isPromotionLegal(Instruction *Inst, uint64_t Target,
-                                          Function *&TargetFunction,
-                                          const char **Reason) {
-  TargetFunction = Symtab->getFunction(Target);
-  if (TargetFunction == nullptr) {
-    *Reason = "Cannot find the target";
-    return false;
-  }
-  return isLegalToPromote(Inst, TargetFunction, Reason);
-}
-
 // Indirect-call promotion heuristic. The direct targets are sorted based on
 // the count. Stop at the first target that is not promoted.
 std::vector<ICallPromotionFunc::PromotionCandidate>
@@ -276,28 +283,52 @@ ICallPromotionFunc::getPromotionCandidatesForCallSite(
 
     if (ICPInvokeOnly && dyn_cast<CallInst>(Inst)) {
       DEBUG(dbgs() << " Not promote: User options.\n");
+      ORE.emit([&]() {
+        return OptimizationRemarkMissed(DEBUG_TYPE, "UserOptions", Inst)
+               << " Not promote: User options";
+      });
       break;
     }
     if (ICPCallOnly && dyn_cast<InvokeInst>(Inst)) {
       DEBUG(dbgs() << " Not promote: User option.\n");
+      ORE.emit([&]() {
+        return OptimizationRemarkMissed(DEBUG_TYPE, "UserOptions", Inst)
+               << " Not promote: User options";
+      });
       break;
     }
     if (ICPCutOff != 0 && NumOfPGOICallPromotion >= ICPCutOff) {
       DEBUG(dbgs() << " Not promote: Cutoff reached.\n");
+      ORE.emit([&]() {
+        return OptimizationRemarkMissed(DEBUG_TYPE, "CutOffReached", Inst)
+               << " Not promote: Cutoff reached";
+      });
       break;
     }
-    Function *TargetFunction = nullptr;
+
+    Function *TargetFunction = Symtab->getFunction(Target);
+    if (TargetFunction == nullptr) {
+      DEBUG(dbgs() << " Not promote: Cannot find the target\n");
+      ORE.emit([&]() {
+        return OptimizationRemarkMissed(DEBUG_TYPE, "UnableToFindTarget", Inst)
+               << "Cannot promote indirect call: target not found";
+      });
+      break;
+    }
+
     const char *Reason = nullptr;
-    if (!isPromotionLegal(Inst, Target, TargetFunction, &Reason)) {
-      StringRef TargetFuncName = Symtab->getFuncName(Target);
-      DEBUG(dbgs() << " Not promote: " << Reason << "\n");
-      emitOptimizationRemarkMissed(
-          F.getContext(), "pgo-icall-prom", F, Inst->getDebugLoc(),
-          Twine("Cannot promote indirect call to ") +
-              (TargetFuncName.empty() ? Twine(Target) : Twine(TargetFuncName)) +
-              Twine(" with count of ") + Twine(Count) + ": " + Reason);
+    if (!isLegalToPromote(Inst, TargetFunction, &Reason)) {
+      using namespace ore;
+
+      ORE.emit([&]() {
+        return OptimizationRemarkMissed(DEBUG_TYPE, "UnableToPromote", Inst)
+               << "Cannot promote indirect call to "
+               << NV("TargetFunction", TargetFunction) << " with count of "
+               << NV("Count", Count) << ": " << Reason;
+      });
       break;
     }
+
     Ret.push_back(PromotionCandidate(TargetFunction, Count));
     TotalCount -= Count;
   }
@@ -447,11 +478,13 @@ static Instruction *insertCallRetCast(const Instruction *Inst,
 // MergeBB is the bottom BB of the if-then-else-diamond after the
 // transformation. For invoke instruction, the edges from DirectCallBB and
 // IndirectCallBB to MergeBB are removed before this call (during
-// createIfThenElse).
+// createIfThenElse). Stores the pointer to the Instruction that cast
+// the direct call in \p CastInst.
 static Instruction *createDirectCallInst(const Instruction *Inst,
                                          Function *DirectCallee,
                                          BasicBlock *DirectCallBB,
-                                         BasicBlock *MergeBB) {
+                                         BasicBlock *MergeBB,
+                                         Instruction *&CastInst) {
   Instruction *NewInst = Inst->clone();
   if (CallInst *CI = dyn_cast<CallInst>(NewInst)) {
     CI->setCalledFunction(DirectCallee);
@@ -485,13 +518,17 @@ static Instruction *createDirectCallInst(const Instruction *Inst,
     }
   }
 
-  return insertCallRetCast(Inst, NewInst, DirectCallee);
+  CastInst = insertCallRetCast(Inst, NewInst, DirectCallee);
+  return NewInst;
 }
 
 // Create a PHI to unify the return values of calls.
 static void insertCallRetPHI(Instruction *Inst, Instruction *CallResult,
                              Function *DirectCallee) {
   if (Inst->getType()->isVoidTy())
+    return;
+
+  if (Inst->use_empty())
     return;
 
   BasicBlock *RetValBB = CallResult->getParent();
@@ -529,7 +566,8 @@ static void insertCallRetPHI(Instruction *Inst, Instruction *CallResult,
 Instruction *llvm::promoteIndirectCall(Instruction *Inst,
                                        Function *DirectCallee, uint64_t Count,
                                        uint64_t TotalCount,
-                                       bool AttachProfToDirectCall) {
+                                       bool AttachProfToDirectCall,
+                                       OptimizationRemarkEmitter *ORE) {
   assert(DirectCallee != nullptr);
   BasicBlock *BB = Inst->getParent();
   // Just to suppress the non-debug build warning.
@@ -541,15 +579,17 @@ Instruction *llvm::promoteIndirectCall(Instruction *Inst,
   createIfThenElse(Inst, DirectCallee, Count, TotalCount, &DirectCallBB,
                    &IndirectCallBB, &MergeBB);
 
+  // If the return type of the NewInst is not the same as the Inst, a CastInst
+  // is needed for type casting. Otherwise CastInst is the same as NewInst.
+  Instruction *CastInst = nullptr;
   Instruction *NewInst =
-      createDirectCallInst(Inst, DirectCallee, DirectCallBB, MergeBB);
+      createDirectCallInst(Inst, DirectCallee, DirectCallBB, MergeBB, CastInst);
 
   if (AttachProfToDirectCall) {
     SmallVector<uint32_t, 1> Weights;
     Weights.push_back(Count);
     MDBuilder MDB(NewInst->getContext());
-    dyn_cast<Instruction>(NewInst->stripPointerCasts())
-        ->setMetadata(LLVMContext::MD_prof, MDB.createBranchWeights(Weights));
+    NewInst->setMetadata(LLVMContext::MD_prof, MDB.createBranchWeights(Weights));
   }
 
   // Move Inst from MergeBB to IndirectCallBB.
@@ -571,18 +611,23 @@ Instruction *llvm::promoteIndirectCall(Instruction *Inst,
     // We don't need to update the operand from NormalDest for DirectCallBB.
     // Pass nullptr here.
     fixupPHINodeForNormalDest(Inst, II->getNormalDest(), MergeBB,
-                              IndirectCallBB, NewInst);
+                              IndirectCallBB, CastInst);
   }
 
-  insertCallRetPHI(Inst, NewInst, DirectCallee);
+  insertCallRetPHI(Inst, CastInst, DirectCallee);
 
   DEBUG(dbgs() << "\n== Basic Blocks After ==\n");
   DEBUG(dbgs() << *BB << *DirectCallBB << *IndirectCallBB << *MergeBB << "\n");
 
-  emitOptimizationRemark(
-      BB->getContext(), "pgo-icall-prom", *BB->getParent(), Inst->getDebugLoc(),
-      Twine("Promote indirect call to ") + DirectCallee->getName() +
-          " with count " + Twine(Count) + " out of " + Twine(TotalCount));
+  using namespace ore;
+
+  if (ORE)
+    ORE->emit([&]() {
+      return OptimizationRemark(DEBUG_TYPE, "Promoted", Inst)
+             << "Promote indirect call to " << NV("DirectCallee", DirectCallee)
+             << " with count " << NV("Count", Count) << " out of "
+             << NV("TotalCount", TotalCount);
+    });
   return NewInst;
 }
 
@@ -594,7 +639,8 @@ uint32_t ICallPromotionFunc::tryToPromote(
 
   for (auto &C : Candidates) {
     uint64_t Count = C.Count;
-    promoteIndirectCall(Inst, C.TargetFunction, Count, TotalCount, SamplePGO);
+    promoteIndirectCall(Inst, C.TargetFunction, Count, TotalCount, SamplePGO,
+                        &ORE);
     assert(TotalCount >= Count);
     TotalCount -= Count;
     NumOfPGOICallPromotion++;
@@ -605,7 +651,7 @@ uint32_t ICallPromotionFunc::tryToPromote(
 
 // Traverse all the indirect-call callsite and get the value profile
 // annotation to perform indirect-call promotion.
-bool ICallPromotionFunc::processFunction() {
+bool ICallPromotionFunc::processFunction(ProfileSummaryInfo *PSI) {
   bool Changed = false;
   ICallPromotionAnalysis ICallAnalysis;
   for (auto &I : findIndirectCallSites(F)) {
@@ -613,7 +659,8 @@ bool ICallPromotionFunc::processFunction() {
     uint64_t TotalCount;
     auto ICallProfDataRef = ICallAnalysis.getPromotionCandidatesForInstruction(
         I, NumVals, TotalCount, NumCandidates);
-    if (!NumCandidates)
+    if (!NumCandidates ||
+        (PSI && PSI->hasProfileSummary() && !PSI->isHotCount(TotalCount)))
       continue;
     auto PromotionCandidates = getPromotionCandidatesForCallSite(
         I, ICallProfDataRef, TotalCount, NumCandidates);
@@ -635,19 +682,38 @@ bool ICallPromotionFunc::processFunction() {
 }
 
 // A wrapper function that does the actual work.
-static bool promoteIndirectCalls(Module &M, bool InLTO, bool SamplePGO) {
+static bool promoteIndirectCalls(Module &M, ProfileSummaryInfo *PSI,
+                                 bool InLTO, bool SamplePGO,
+                                 ModuleAnalysisManager *AM = nullptr) {
   if (DisableICP)
     return false;
   InstrProfSymtab Symtab;
-  Symtab.create(M, InLTO);
+  if (Error E = Symtab.create(M, InLTO)) {
+    std::string SymtabFailure = toString(std::move(E));
+    DEBUG(dbgs() << "Failed to create symtab: " << SymtabFailure << "\n");
+    (void)SymtabFailure;
+    return false;
+  }
   bool Changed = false;
   for (auto &F : M) {
     if (F.isDeclaration())
       continue;
     if (F.hasFnAttribute(Attribute::OptimizeNone))
       continue;
-    ICallPromotionFunc ICallPromotion(F, &M, &Symtab, SamplePGO);
-    bool FuncChanged = ICallPromotion.processFunction();
+
+    std::unique_ptr<OptimizationRemarkEmitter> OwnedORE;
+    OptimizationRemarkEmitter *ORE;
+    if (AM) {
+      auto &FAM =
+          AM->getResult<FunctionAnalysisManagerModuleProxy>(M).getManager();
+      ORE = &FAM.getResult<OptimizationRemarkEmitterAnalysis>(F);
+    } else {
+      OwnedORE = llvm::make_unique<OptimizationRemarkEmitter>(&F);
+      ORE = OwnedORE.get();
+    }
+
+    ICallPromotionFunc ICallPromotion(F, &M, &Symtab, SamplePGO, *ORE);
+    bool FuncChanged = ICallPromotion.processFunction(PSI);
     if (ICPDUMPAFTER && FuncChanged) {
       DEBUG(dbgs() << "\n== IR Dump After =="; F.print(dbgs()));
       DEBUG(dbgs() << "\n");
@@ -662,15 +728,20 @@ static bool promoteIndirectCalls(Module &M, bool InLTO, bool SamplePGO) {
 }
 
 bool PGOIndirectCallPromotionLegacyPass::runOnModule(Module &M) {
+  ProfileSummaryInfo *PSI =
+      getAnalysis<ProfileSummaryInfoWrapperPass>().getPSI();
+
   // Command-line option has the priority for InLTO.
-  return promoteIndirectCalls(M, InLTO | ICPLTOMode,
+  return promoteIndirectCalls(M, PSI, InLTO | ICPLTOMode,
                               SamplePGO | ICPSamplePGOMode);
 }
 
 PreservedAnalyses PGOIndirectCallPromotion::run(Module &M,
                                                 ModuleAnalysisManager &AM) {
-  if (!promoteIndirectCalls(M, InLTO | ICPLTOMode,
-                            SamplePGO | ICPSamplePGOMode))
+  ProfileSummaryInfo *PSI = &AM.getResult<ProfileSummaryAnalysis>(M);
+
+  if (!promoteIndirectCalls(M, PSI, InLTO | ICPLTOMode,
+                            SamplePGO | ICPSamplePGOMode, &AM))
     return PreservedAnalyses::all();
 
   return PreservedAnalyses::none();

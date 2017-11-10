@@ -40,10 +40,39 @@ class TypeDeserializer : public TypeVisitorCallbacks {
 public:
   TypeDeserializer() = default;
 
+  template <typename T> static Error deserializeAs(CVType &CVT, T &Record) {
+    Record.Kind = static_cast<TypeRecordKind>(CVT.kind());
+    MappingInfo I(CVT.content());
+    if (auto EC = I.Mapping.visitTypeBegin(CVT))
+      return EC;
+    if (auto EC = I.Mapping.visitKnownRecord(CVT, Record))
+      return EC;
+    if (auto EC = I.Mapping.visitTypeEnd(CVT))
+      return EC;
+    return Error::success();
+  }
+
+  template <typename T>
+  static Expected<T> deserializeAs(ArrayRef<uint8_t> Data) {
+    const RecordPrefix *Prefix =
+        reinterpret_cast<const RecordPrefix *>(Data.data());
+    TypeRecordKind K =
+        static_cast<TypeRecordKind>(uint16_t(Prefix->RecordKind));
+    T Record(K);
+    CVType CVT(static_cast<TypeLeafKind>(K), Data);
+    if (auto EC = deserializeAs<T>(CVT, Record))
+      return std::move(EC);
+    return Record;
+  }
+
   Error visitTypeBegin(CVType &Record) override {
     assert(!Mapping && "Already in a type mapping!");
     Mapping = llvm::make_unique<MappingInfo>(Record.content());
     return Mapping->Mapping.visitTypeBegin(Record);
+  }
+
+  Error visitTypeBegin(CVType &Record, TypeIndex Index) override {
+    return visitTypeBegin(Record);
   }
 
   Error visitTypeEnd(CVType &Record) override {
@@ -60,7 +89,7 @@ public:
 #define MEMBER_RECORD(EnumName, EnumVal, Name)
 #define TYPE_RECORD_ALIAS(EnumName, EnumVal, Name, AliasName)
 #define MEMBER_RECORD_ALIAS(EnumName, EnumVal, Name, AliasName)
-#include "TypeRecords.def"
+#include "llvm/DebugInfo/CodeView/CodeViewTypes.def"
 
 private:
   template <typename RecordType>
@@ -112,7 +141,7 @@ public:
   }
 #define TYPE_RECORD_ALIAS(EnumName, EnumVal, Name, AliasName)
 #define MEMBER_RECORD_ALIAS(EnumName, EnumVal, Name, AliasName)
-#include "TypeRecords.def"
+#include "llvm/DebugInfo/CodeView/CodeViewTypes.def"
 
 private:
   template <typename RecordType>

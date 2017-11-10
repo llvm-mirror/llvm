@@ -32,8 +32,8 @@
 #include "llvm/MC/MCValue.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/TargetRegistry.h"
+#include "llvm/Support/raw_ostream.h"
 #include <cassert>
 #include <vector>
 
@@ -62,10 +62,12 @@ private:
   void EmitDataRegionEnd();
 
 public:
-  MCMachOStreamer(MCContext &Context, MCAsmBackend &MAB, raw_pwrite_stream &OS,
-                  MCCodeEmitter *Emitter, bool DWARFMustBeAtTheEnd, bool label)
-      : MCObjectStreamer(Context, MAB, OS, Emitter), LabelSections(label),
-        DWARFMustBeAtTheEnd(DWARFMustBeAtTheEnd), CreatedADWARFSection(false) {}
+  MCMachOStreamer(MCContext &Context, std::unique_ptr<MCAsmBackend> MAB,
+                  raw_pwrite_stream &OS, std::unique_ptr<MCCodeEmitter> Emitter,
+                  bool DWARFMustBeAtTheEnd, bool label)
+      : MCObjectStreamer(Context, std::move(MAB), OS, std::move(Emitter)),
+        LabelSections(label), DWARFMustBeAtTheEnd(DWARFMustBeAtTheEnd),
+        CreatedADWARFSection(false) {}
 
   /// state management
   void reset() override {
@@ -142,7 +144,7 @@ static bool canGoAfterDWARF(const MCSectionMachO &MSec) {
 void MCMachOStreamer::ChangeSection(MCSection *Section,
                                     const MCExpr *Subsection) {
   // Change the section normally.
-  bool Created = MCObjectStreamer::changeSectionImpl(Section, Subsection);
+  bool Created = changeSectionImpl(Section, Subsection);
   const MCSectionMachO &MSec = *cast<MCSectionMachO>(Section);
   StringRef SegName = MSec.getSegmentName();
   if (SegName == "__DWARF")
@@ -483,12 +485,15 @@ void MCMachOStreamer::FinishImpl() {
   this->MCObjectStreamer::FinishImpl();
 }
 
-MCStreamer *llvm::createMachOStreamer(MCContext &Context, MCAsmBackend &MAB,
-                                      raw_pwrite_stream &OS, MCCodeEmitter *CE,
+MCStreamer *llvm::createMachOStreamer(MCContext &Context,
+                                      std::unique_ptr<MCAsmBackend> &&MAB,
+                                      raw_pwrite_stream &OS,
+                                      std::unique_ptr<MCCodeEmitter> &&CE,
                                       bool RelaxAll, bool DWARFMustBeAtTheEnd,
                                       bool LabelSections) {
-  MCMachOStreamer *S = new MCMachOStreamer(Context, MAB, OS, CE,
-                                           DWARFMustBeAtTheEnd, LabelSections);
+  MCMachOStreamer *S =
+      new MCMachOStreamer(Context, std::move(MAB), OS, std::move(CE),
+                          DWARFMustBeAtTheEnd, LabelSections);
   const Triple &TT = Context.getObjectFileInfo()->getTargetTriple();
   if (TT.isOSDarwin()) {
     unsigned Major, Minor, Update;

@@ -1,6 +1,7 @@
 import errno
 import itertools
 import math
+import numbers
 import os
 import platform
 import signal
@@ -8,46 +9,122 @@ import subprocess
 import sys
 import threading
 
-def to_bytes(str):
-    # Encode to UTF-8 to get binary data.
-    if isinstance(str, bytes):
-        return str
-    return str.encode('utf-8')
 
-def to_string(bytes):
-    if isinstance(bytes, str):
-        return bytes
-    return to_bytes(bytes)
+def norm_path(path):
+    path = os.path.realpath(path)
+    path = os.path.normpath(path)
+    path = os.path.normcase(path)
+    return path
 
-def convert_string(bytes):
+
+def is_string(value):
     try:
-        return to_string(bytes.decode('utf-8'))
-    except AttributeError: # 'str' object has no attribute 'decode'.
-        return str(bytes)
-    except UnicodeError:
-        return str(bytes)
+        # Python 2 and Python 3 are different here.
+        return isinstance(value, basestring)
+    except NameError:
+        return isinstance(value, str)
+
+
+def pythonize_bool(value):
+    if value is None:
+        return False
+    if type(value) is bool:
+        return value
+    if isinstance(value, numbers.Number):
+        return value != 0
+    if is_string(value):
+        if value.lower() in ('1', 'true', 'on', 'yes'):
+            return True
+        if value.lower() in ('', '0', 'false', 'off', 'no'):
+            return False
+    raise ValueError('"{}" is not a valid boolean'.format(value))
+
+
+def make_word_regex(word):
+    return r'\b' + word + r'\b'
+
+
+def to_bytes(s):
+    """Return the parameter as type 'bytes', possibly encoding it.
+
+    In Python2, the 'bytes' type is the same as 'str'. In Python3, they
+    are distinct.
+
+    """
+    if isinstance(s, bytes):
+        # In Python2, this branch is taken for both 'str' and 'bytes'.
+        # In Python3, this branch is taken only for 'bytes'.
+        return s
+    # In Python2, 's' is a 'unicode' object.
+    # In Python3, 's' is a 'str' object.
+    # Encode to UTF-8 to get 'bytes' data.
+    return s.encode('utf-8')
+
+
+def to_string(b):
+    """Return the parameter as type 'str', possibly encoding it.
+
+    In Python2, the 'str' type is the same as 'bytes'. In Python3, the
+    'str' type is (essentially) Python2's 'unicode' type, and 'bytes' is
+    distinct.
+
+    """
+    if isinstance(b, str):
+        # In Python2, this branch is taken for types 'str' and 'bytes'.
+        # In Python3, this branch is taken only for 'str'.
+        return b
+    if isinstance(b, bytes):
+        # In Python2, this branch is never taken ('bytes' is handled as 'str').
+        # In Python3, this is true only for 'bytes'.
+        try:
+            return b.decode('utf-8')
+        except UnicodeDecodeError:
+            # If the value is not valid Unicode, return the default
+            # repr-line encoding.
+            return str(b)
+
+    # By this point, here's what we *don't* have:
+    #
+    #  - In Python2:
+    #    - 'str' or 'bytes' (1st branch above)
+    #  - In Python3:
+    #    - 'str' (1st branch above)
+    #    - 'bytes' (2nd branch above)
+    #
+    # The last type we might expect is the Python2 'unicode' type. There is no
+    # 'unicode' type in Python3 (all the Python3 cases were already handled). In
+    # order to get a 'str' object, we need to encode the 'unicode' object.
+    try:
+        return b.encode('utf-8')
+    except AttributeError:
+        raise TypeError('not sure how to convert %s to %s' % (type(b), str))
+
 
 def detectCPUs():
-    """
-    Detects the number of CPUs on a system. Cribbed from pp.
+    """Detects the number of CPUs on a system.
+
+    Cribbed from pp.
+
     """
     # Linux, Unix and MacOS:
-    if hasattr(os, "sysconf"):
-        if "SC_NPROCESSORS_ONLN" in os.sysconf_names:
+    if hasattr(os, 'sysconf'):
+        if 'SC_NPROCESSORS_ONLN' in os.sysconf_names:
             # Linux & Unix:
-            ncpus = os.sysconf("SC_NPROCESSORS_ONLN")
+            ncpus = os.sysconf('SC_NPROCESSORS_ONLN')
             if isinstance(ncpus, int) and ncpus > 0:
                 return ncpus
-        else: # OSX:
-            return int(capture(['sysctl', '-n', 'hw.ncpu']))
+        else:  # OSX:
+            return int(subprocess.check_output(['sysctl', '-n', 'hw.ncpu'],
+                                               stderr=subprocess.STDOUT))
     # Windows:
-    if "NUMBER_OF_PROCESSORS" in os.environ:
-        ncpus = int(os.environ["NUMBER_OF_PROCESSORS"])
+    if 'NUMBER_OF_PROCESSORS' in os.environ:
+        ncpus = int(os.environ['NUMBER_OF_PROCESSORS'])
         if ncpus > 0:
             # With more than 32 processes, process creation often fails with
             # "Too many open files".  FIXME: Check if there's a better fix.
             return min(ncpus, 32)
-    return 1 # Default
+    return 1  # Default
+
 
 def mkdir_p(path):
     """mkdir_p(path) - Make the "path" directory, if it does not exist; this
@@ -67,31 +144,58 @@ def mkdir_p(path):
         if e.errno != errno.EEXIST:
             raise
 
-def capture(args, env=None):
-    """capture(command) - Run the given command (or argv list) in a shell and
-    return the standard output. Raises a CalledProcessError if the command
-    exits with a non-zero status."""
-    p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                         env=env)
-    out, err = p.communicate()
-    out = convert_string(out)
-    err = convert_string(err)
-    if p.returncode != 0:
-        raise subprocess.CalledProcessError(cmd=args,
-                                            returncode=p.returncode,
-                                            output="{}\n{}".format(out, err))
-    return out
 
-def which(command, paths = None):
+def listdir_files(dirname, suffixes=None, exclude_filenames=None):
+    """Yields files in a directory.
+
+    Filenames that are not excluded by rules below are yielded one at a time, as
+    basenames (i.e., without dirname).
+
+    Files starting with '.' are always skipped.
+
+    If 'suffixes' is not None, then only filenames ending with one of its
+    members will be yielded. These can be extensions, like '.exe', or strings,
+    like 'Test'. (It is a lexicographic check; so an empty sequence will yield
+    nothing, but a single empty string will yield all filenames.)
+
+    If 'exclude_filenames' is not None, then none of the file basenames in it
+    will be yielded.
+
+    If specified, the containers for 'suffixes' and 'exclude_filenames' must
+    support membership checking for strs.
+
+    Args:
+        dirname: a directory path.
+        suffixes: (optional) a sequence of strings (set, list, etc.).
+        exclude_filenames: (optional) a sequence of strings.
+
+    Yields:
+        Filenames as returned by os.listdir (generally, str).
+
+    """
+    if exclude_filenames is None:
+        exclude_filenames = set()
+    if suffixes is None:
+        suffixes = {''}
+    for filename in os.listdir(dirname):
+        if (os.path.isdir(os.path.join(dirname, filename)) or
+            filename.startswith('.') or
+            filename in exclude_filenames or
+                not any(filename.endswith(sfx) for sfx in suffixes)):
+            continue
+        yield filename
+
+
+def which(command, paths=None):
     """which(command, [paths]) - Look up the given command in the paths string
     (or the PATH environment variable, if unspecified)."""
 
     if paths is None:
-        paths = os.environ.get('PATH','')
+        paths = os.environ.get('PATH', '')
 
     # Check for absolute match first.
     if os.path.isfile(command):
-        return command
+        return os.path.normpath(command)
 
     # Would be nice if Python had a lib function for this.
     if not paths:
@@ -109,9 +213,10 @@ def which(command, paths = None):
         for ext in pathext:
             p = os.path.join(path, command + ext)
             if os.path.exists(p) and not os.path.isdir(p):
-                return p
+                return os.path.normpath(p)
 
     return None
+
 
 def checkToolsPath(dir, tools):
     for tool in tools:
@@ -119,16 +224,18 @@ def checkToolsPath(dir, tools):
             return False
     return True
 
+
 def whichTools(tools, paths):
     for path in paths.split(os.pathsep):
         if checkToolsPath(path, tools):
             return path
     return None
 
-def printHistogram(items, title = 'Items'):
-    items.sort(key = lambda item: item[1])
 
-    maxValue = max([v for _,v in items])
+def printHistogram(items, title='Items'):
+    items.sort(key=lambda item: item[1])
+
+    maxValue = max([v for _, v in items])
 
     # Select first "nice" bar height that produces more than 10 bars.
     power = int(math.ceil(math.log(maxValue, 10)))
@@ -141,33 +248,34 @@ def printHistogram(items, title = 'Items'):
             power -= 1
 
     histo = [set() for i in range(N)]
-    for name,v in items:
-        bin = min(int(N * v/maxValue), N-1)
+    for name, v in items:
+        bin = min(int(N * v / maxValue), N - 1)
         histo[bin].add(name)
 
     barW = 40
     hr = '-' * (barW + 34)
     print('\nSlowest %s:' % title)
     print(hr)
-    for name,value in items[-20:]:
+    for name, value in items[-20:]:
         print('%.2fs: %s' % (value, name))
     print('\n%s Times:' % title)
     print(hr)
     pDigits = int(math.ceil(math.log(maxValue, 10)))
-    pfDigits = max(0, 3-pDigits)
+    pfDigits = max(0, 3 - pDigits)
     if pfDigits:
         pDigits += pfDigits + 1
     cDigits = int(math.ceil(math.log(len(items), 10)))
-    print("[%s] :: [%s] :: [%s]" % ('Range'.center((pDigits+1)*2 + 3),
+    print('[%s] :: [%s] :: [%s]' % ('Range'.center((pDigits + 1) * 2 + 3),
                                     'Percentage'.center(barW),
-                                    'Count'.center(cDigits*2 + 1)))
+                                    'Count'.center(cDigits * 2 + 1)))
     print(hr)
-    for i,row in enumerate(histo):
+    for i, row in enumerate(histo):
         pct = float(len(row)) / len(items)
         w = int(barW * pct)
-        print("[%*.*fs,%*.*fs) :: [%s%s] :: [%*d/%*d]" % (
-            pDigits, pfDigits, i*barH, pDigits, pfDigits, (i+1)*barH,
-            '*'*w, ' '*(barW-w), cDigits, len(row), cDigits, len(items)))
+        print('[%*.*fs,%*.*fs) :: [%s%s] :: [%*d/%*d]' % (
+            pDigits, pfDigits, i * barH, pDigits, pfDigits, (i + 1) * barH,
+            '*' * w, ' ' * (barW - w), cDigits, len(row), cDigits, len(items)))
+
 
 class ExecuteCommandTimeoutException(Exception):
     def __init__(self, msg, out, err, exitCode):
@@ -180,27 +288,30 @@ class ExecuteCommandTimeoutException(Exception):
         self.err = err
         self.exitCode = exitCode
 
+
 # Close extra file handles on UNIX (on Windows this cannot be done while
 # also redirecting input).
 kUseCloseFDs = not (platform.system() == 'Windows')
+
+
 def executeCommand(command, cwd=None, env=None, input=None, timeout=0):
-    """
-        Execute command ``command`` (list of arguments or string)
-        with
-        * working directory ``cwd`` (str), use None to use the current
-          working directory
-        * environment ``env`` (dict), use None for none
-        * Input to the command ``input`` (str), use string to pass
-          no input.
-        * Max execution time ``timeout`` (int) seconds. Use 0 for no timeout.
+    """Execute command ``command`` (list of arguments or string) with.
 
-        Returns a tuple (out, err, exitCode) where
-        * ``out`` (str) is the standard output of running the command
-        * ``err`` (str) is the standard error of running the command
-        * ``exitCode`` (int) is the exitCode of running the command
+    * working directory ``cwd`` (str), use None to use the current
+      working directory
+    * environment ``env`` (dict), use None for none
+    * Input to the command ``input`` (str), use string to pass
+      no input.
+    * Max execution time ``timeout`` (int) seconds. Use 0 for no timeout.
 
-        If the timeout is hit an ``ExecuteCommandTimeoutException``
-        is raised.
+    Returns a tuple (out, err, exitCode) where
+    * ``out`` (str) is the standard output of running the command
+    * ``err`` (str) is the standard error of running the command
+    * ``exitCode`` (int) is the exitCode of running the command
+
+    If the timeout is hit an ``ExecuteCommandTimeoutException``
+    is raised.
+
     """
     if input is not None:
         input = to_bytes(input)
@@ -226,15 +337,15 @@ def executeCommand(command, cwd=None, env=None, input=None, timeout=0):
             timerObject = threading.Timer(timeout, killProcess)
             timerObject.start()
 
-        out,err = p.communicate(input=input)
+        out, err = p.communicate(input=input)
         exitCode = p.wait()
     finally:
         if timerObject != None:
             timerObject.cancel()
 
     # Ensure the resulting output is always of string type.
-    out = convert_string(out)
-    err = convert_string(err)
+    out = to_string(out)
+    err = to_string(err)
 
     if hitTimeOut[0]:
         raise ExecuteCommandTimeoutException(
@@ -242,13 +353,14 @@ def executeCommand(command, cwd=None, env=None, input=None, timeout=0):
             out=out,
             err=err,
             exitCode=exitCode
-            )
+        )
 
     # Detect Ctrl-C in subprocess.
     if exitCode == -signal.SIGINT:
         raise KeyboardInterrupt
 
     return out, err, exitCode
+
 
 def usePlatformSdkOnDarwin(config, lit_config):
     # On Darwin, support relocatable SDKs by providing Clang with a
@@ -267,15 +379,30 @@ def usePlatformSdkOnDarwin(config, lit_config):
             lit_config.note('using SDKROOT: %r' % sdk_path)
             config.environment['SDKROOT'] = sdk_path
 
-def killProcessAndChildren(pid):
-    """
-    This function kills a process with ``pid`` and all its
-    running children (recursively). It is currently implemented
-    using the psutil module which provides a simple platform
-    neutral implementation.
 
-    TODO: Reimplement this without using psutil so we can
-          remove our dependency on it.
+def findPlatformSdkVersionOnMacOS(config, lit_config):
+    if 'darwin' in config.target_triple:
+        try:
+            cmd = subprocess.Popen(['xcrun', '--show-sdk-version', '--sdk', 'macosx'],
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            out, err = cmd.communicate()
+            out = out.strip()
+            res = cmd.wait()
+        except OSError:
+            res = -1
+        if res == 0 and out:
+            return out
+    return None
+
+
+def killProcessAndChildren(pid):
+    """This function kills a process with ``pid`` and all its running children
+    (recursively). It is currently implemented using the psutil module which
+    provides a simple platform neutral implementation.
+
+    TODO: Reimplement this without using psutil so we can       remove
+    our dependency on it.
+
     """
     import psutil
     try:

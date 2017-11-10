@@ -75,8 +75,8 @@
 #define STATVFS_F_FRSIZE(vfs) vfs.f_frsize
 #else
 #if defined(__OpenBSD__) || defined(__FreeBSD__)
-#include <sys/param.h>
 #include <sys/mount.h>
+#include <sys/param.h>
 #elif defined(__linux__)
 #if defined(HAVE_LINUX_MAGIC_H)
 #include <linux/magic.h>
@@ -108,10 +108,9 @@ using namespace llvm;
 namespace llvm {
 namespace sys  {
 namespace fs {
-#if defined(__FreeBSD__) || defined (__NetBSD__) || defined(__Bitrig__) || \
-    defined(__OpenBSD__) || defined(__minix) || defined(__FreeBSD_kernel__) || \
-    defined(__linux__) || defined(__CYGWIN__) || defined(__DragonFly__) || \
-    defined(_AIX)
+#if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) ||     \
+    defined(__minix) || defined(__FreeBSD_kernel__) || defined(__linux__) ||   \
+    defined(__CYGWIN__) || defined(__DragonFly__) || defined(_AIX)
 static int
 test_dir(char ret[PATH_MAX], const char *dir, const char *bin)
 {
@@ -180,9 +179,9 @@ std::string getMainExecutable(const char *argv0, void *MainAddr) {
     if (realpath(exe_path, link_path))
       return link_path;
   }
-#elif defined(__FreeBSD__) || defined (__NetBSD__) || defined(__Bitrig__) || \
-      defined(__OpenBSD__) || defined(__minix) || defined(__DragonFly__) || \
-      defined(__FreeBSD_kernel__) || defined(_AIX)
+#elif defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) ||   \
+    defined(__minix) || defined(__DragonFly__) ||                              \
+    defined(__FreeBSD_kernel__) || defined(_AIX)
   char exe_path[PATH_MAX];
 
   if (getprogpath(exe_path, argv0) != NULL)
@@ -218,16 +217,20 @@ std::string getMainExecutable(const char *argv0, void *MainAddr) {
   return "";
 }
 
-TimePoint<> file_status::getLastAccessedTime() const {
+TimePoint<> basic_file_status::getLastAccessedTime() const {
   return toTimePoint(fs_st_atime);
 }
 
-TimePoint<> file_status::getLastModificationTime() const {
+TimePoint<> basic_file_status::getLastModificationTime() const {
   return toTimePoint(fs_st_mtime);
 }
 
 UniqueID file_status::getUniqueID() const {
   return UniqueID(fs_st_dev, fs_st_ino);
+}
+
+uint32_t file_status::getLinkCount() const {
+  return fs_st_nlinks;
 }
 
 ErrorOr<space_info> disk_space(const Twine &Path) {
@@ -377,6 +380,11 @@ static bool is_local_impl(struct STATVFS &Vfs) {
 #elif defined(__CYGWIN__)
   // Cygwin doesn't expose this information; would need to use Win32 API.
   return false;
+#elif defined(__sun)
+  // statvfs::f_basetype contains a null-terminated FSType name of the mounted target
+  StringRef fstype(Vfs.f_basetype);
+  // NFS is the only non-local fstype??
+  return !fstype.equals("nfs");
 #else
   return !!(STATVFS_F_FLAG(Vfs) & MNT_LOCAL);
 #endif
@@ -417,14 +425,15 @@ std::error_code resize_file(int FD, uint64_t Size) {
 #if defined(HAVE_POSIX_FALLOCATE)
   // If we have posix_fallocate use it. Unlike ftruncate it always allocates
   // space, so we get an error if the disk is full.
-  if (int Err = ::posix_fallocate(FD, 0, Size))
-    return std::error_code(Err, std::generic_category());
-#else
+  if (int Err = ::posix_fallocate(FD, 0, Size)) {
+    if (Err != EOPNOTSUPP)
+      return std::error_code(Err, std::generic_category());
+  }
+#endif
   // Use ftruncate as a fallback. It may or may not allocate space. At least on
   // OS X with HFS+ it does.
   if (::ftruncate(FD, Size) == -1)
     return std::error_code(errno, std::generic_category());
-#endif
 
   return std::error_code();
 }
@@ -486,7 +495,8 @@ static void expandTildeExpr(SmallVectorImpl<char> &Path) {
     return;
 
   PathStr = PathStr.drop_front();
-  StringRef Expr = PathStr.take_until(path::is_separator);
+  StringRef Expr =
+      PathStr.take_until([](char c) { return path::is_separator(c); });
   StringRef Remainder = PathStr.substr(Expr.size() + 1);
   SmallString<128> Storage;
   if (Expr.empty()) {
@@ -547,11 +557,10 @@ static std::error_code fillStatus(int StatRet, const struct stat &Status,
   else if (S_ISLNK(Status.st_mode))
     Type = file_type::symlink_file;
 
-  perms Perms = static_cast<perms>(Status.st_mode);
-  Result =
-      file_status(Type, Perms, Status.st_dev, Status.st_ino, Status.st_atime,
-                  Status.st_mtime, Status.st_uid, Status.st_gid,
-                  Status.st_size);
+  perms Perms = static_cast<perms>(Status.st_mode) & all_perms;
+  Result = file_status(Type, Perms, Status.st_dev, Status.st_nlink,
+                       Status.st_ino, Status.st_atime, Status.st_mtime,
+                       Status.st_uid, Status.st_gid, Status.st_size);
 
   return std::error_code();
 }
@@ -569,6 +578,15 @@ std::error_code status(int FD, file_status &Result) {
   struct stat Status;
   int StatRet = ::fstat(FD, &Status);
   return fillStatus(StatRet, Status, Result);
+}
+
+std::error_code setPermissions(const Twine &Path, perms Permissions) {
+  SmallString<128> PathStorage;
+  StringRef P = Path.toNullTerminatedStringRef(PathStorage);
+
+  if (::chmod(P.begin(), Permissions))
+    return std::error_code(errno, std::generic_category());
+  return std::error_code();
 }
 
 std::error_code setLastModificationAndAccessTime(int FD, TimePoint<> Time) {
@@ -623,15 +641,9 @@ std::error_code mapped_file_region::init(int FD, uint64_t Offset,
   return std::error_code();
 }
 
-mapped_file_region::mapped_file_region(int fd, mapmode mode, uint64_t length,
+mapped_file_region::mapped_file_region(int fd, mapmode mode, size_t length,
                                        uint64_t offset, std::error_code &ec)
     : Size(length), Mapping() {
-  // Make sure that the requested size fits within SIZE_T.
-  if (length > std::numeric_limits<size_t>::max()) {
-    ec = make_error_code(errc::invalid_argument);
-    return;
-  }
-
   ec = init(fd, offset, mode);
   if (ec)
     Mapping = nullptr;
@@ -642,7 +654,7 @@ mapped_file_region::~mapped_file_region() {
     ::munmap(Mapping, Size);
 }
 
-uint64_t mapped_file_region::size() const {
+size_t mapped_file_region::size() const {
   assert(Mapping && "Mapping failed but used anyway!");
   return Size;
 }
@@ -701,6 +713,13 @@ std::error_code detail::directory_iterator_increment(detail::DirIterState &it) {
   return std::error_code();
 }
 
+ErrorOr<basic_file_status> directory_entry::status() const {
+  file_status s;
+  if (auto EC = fs::status(Path, s, FollowSymlinks))
+    return EC;
+  return s;
+}
+
 #if !defined(F_GETPATH)
 static bool hasProcSelfFD() {
   // If we have a /proc filesystem mounted, we can quickly establish the
@@ -718,10 +737,8 @@ std::error_code openFileForRead(const Twine &Name, int &ResultFD,
 #ifdef O_CLOEXEC
   OpenFlags |= O_CLOEXEC;
 #endif
-  while ((ResultFD = open(P.begin(), OpenFlags)) < 0) {
-    if (errno != EINTR)
-      return std::error_code(errno, std::generic_category());
-  }
+  if ((ResultFD = sys::RetryAfterSignal(-1, open, P.begin(), OpenFlags)) < 0)
+    return std::error_code(errno, std::generic_category());
 #ifndef O_CLOEXEC
   int r = fcntl(ResultFD, F_SETFD, FD_CLOEXEC);
   (void)r;
@@ -781,61 +798,12 @@ std::error_code openFileForWrite(const Twine &Name, int &ResultFD,
 
   SmallString<128> Storage;
   StringRef P = Name.toNullTerminatedStringRef(Storage);
-  while ((ResultFD = open(P.begin(), OpenFlags, Mode)) < 0) {
-    if (errno != EINTR)
-      return std::error_code(errno, std::generic_category());
-  }
+  if ((ResultFD = sys::RetryAfterSignal(-1, open, P.begin(), OpenFlags, Mode)) < 0)
+    return std::error_code(errno, std::generic_category());
 #ifndef O_CLOEXEC
   int r = fcntl(ResultFD, F_SETFD, FD_CLOEXEC);
   (void)r;
   assert(r == 0 && "fcntl(F_SETFD, FD_CLOEXEC) failed");
-#endif
-  return std::error_code();
-}
-
-std::error_code getPathFromOpenFD(int FD, SmallVectorImpl<char> &ResultPath) {
-  if (FD < 0)
-    return make_error_code(errc::bad_file_descriptor);
-
-#if defined(F_GETPATH)
-  // When F_GETPATH is availble, it is the quickest way to get
-  // the path from a file descriptor.
-  ResultPath.reserve(MAXPATHLEN);
-  if (::fcntl(FD, F_GETPATH, ResultPath.begin()) == -1)
-    return std::error_code(errno, std::generic_category());
-
-  ResultPath.set_size(strlen(ResultPath.begin()));
-#else
-  // If we have a /proc filesystem mounted, we can quickly establish the
-  // real name of the file with readlink. Otherwise, we don't know how to
-  // get the filename from a file descriptor. Give up.
-  if (!fs::hasProcSelfFD())
-    return make_error_code(errc::function_not_supported);
-
-  ResultPath.reserve(PATH_MAX);
-  char ProcPath[64];
-  snprintf(ProcPath, sizeof(ProcPath), "/proc/self/fd/%d", FD);
-  ssize_t CharCount = ::readlink(ProcPath, ResultPath.begin(), ResultPath.capacity());
-  if (CharCount < 0)
-      return std::error_code(errno, std::generic_category());
-
-  // Was the filename truncated?
-  if (static_cast<size_t>(CharCount) == ResultPath.capacity()) {
-    // Use lstat to get the size of the filename
-    struct stat sb;
-    if (::lstat(ProcPath, &sb) < 0)
-      return std::error_code(errno, std::generic_category());
-
-    ResultPath.reserve(sb.st_size + 1);
-    CharCount = ::readlink(ProcPath, ResultPath.begin(), ResultPath.capacity());
-    if (CharCount < 0)
-      return std::error_code(errno, std::generic_category());
-
-    // Test for race condition: did the link size change?
-    if (CharCount > sb.st_size)
-      return std::error_code(ENAMETOOLONG, std::generic_category());
-  }
-  ResultPath.set_size(static_cast<size_t>(CharCount));
 #endif
   return std::error_code();
 }
@@ -848,12 +816,11 @@ static std::error_code remove_directories_impl(const T &Entry,
   directory_iterator End;
   while (Begin != End) {
     auto &Item = *Begin;
-    file_status st;
-    EC = Item.status(st);
-    if (EC && !IgnoreErrors)
-      return EC;
+    ErrorOr<basic_file_status> st = Item.status();
+    if (!st && !IgnoreErrors)
+      return st.getError();
 
-    if (is_directory(st)) {
+    if (is_directory(*st)) {
       EC = remove_directories_impl(Item, IgnoreErrors);
       if (EC && !IgnoreErrors)
         return EC;
@@ -907,12 +874,18 @@ std::error_code real_path(const Twine &path, SmallVectorImpl<char> &dest,
 namespace path {
 
 bool home_directory(SmallVectorImpl<char> &result) {
-  if (char *RequestedDir = getenv("HOME")) {
-    result.clear();
-    result.append(RequestedDir, RequestedDir + strlen(RequestedDir));
-    return true;
+  char *RequestedDir = getenv("HOME");
+  if (!RequestedDir) {
+    struct passwd *pw = getpwuid(getuid());
+    if (pw && pw->pw_dir)
+      RequestedDir = pw->pw_dir;
   }
-  return false;
+  if (!RequestedDir)
+    return false;
+
+  result.clear();
+  result.append(RequestedDir, RequestedDir + strlen(RequestedDir));
+  return true;
 }
 
 static bool getDarwinConfDir(bool TempDir, SmallVectorImpl<char> &Result) {

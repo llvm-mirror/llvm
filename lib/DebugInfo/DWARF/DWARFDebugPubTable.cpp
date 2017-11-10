@@ -7,10 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/ADT/StringRef.h"
 #include "llvm/DebugInfo/DWARF/DWARFDebugPubTable.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/Support/DataExtractor.h"
-#include "llvm/Support/Dwarf.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cstdint>
@@ -44,8 +44,7 @@ DWARFDebugPubTable::DWARFDebugPubTable(StringRef Data, bool LittleEndian,
   }
 }
 
-void DWARFDebugPubTable::dump(StringRef Name, raw_ostream &OS) const {
-  OS << "\n." << Name << " contents: a\n";
+void DWARFDebugPubTable::dump(raw_ostream &OS) const {
   for (const Set &S : Sets) {
     OS << "length = " << format("0x%08x", S.Length);
     OS << " version = " << format("0x%04x", S.Version);

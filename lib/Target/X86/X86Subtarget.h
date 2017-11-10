@@ -20,7 +20,10 @@
 #include "X86SelectionDAGInfo.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Triple.h"
-#include "llvm/CodeGen/GlobalISel/GISelAccessor.h"
+#include "llvm/CodeGen/GlobalISel/CallLowering.h"
+#include "llvm/CodeGen/GlobalISel/InstructionSelector.h"
+#include "llvm/CodeGen/GlobalISel/LegalizerInfo.h"
+#include "llvm/CodeGen/GlobalISel/RegisterBankInfo.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/MC/MCInstrItineraries.h"
 #include "llvm/Target/TargetMachine.h"
@@ -58,7 +61,16 @@ protected:
   };
 
   enum X86ProcFamilyEnum {
-    Others, IntelAtom, IntelSLM
+    Others, 
+    IntelAtom,
+    IntelSLM,
+    IntelGLM,
+    IntelHaswell,
+    IntelBroadwell,
+    IntelSkylake,
+    IntelKNL,
+    IntelSKX,
+    IntelCannonlake
   };
 
   /// X86 processor family: Intel Atom, and others
@@ -124,6 +136,9 @@ protected:
   /// Target has TBM instructions.
   bool HasTBM;
 
+  /// Target has LWP instructions
+  bool HasLWP;
+
   /// True if the processor has the MOVBE instruction.
   bool HasMOVBE;
 
@@ -178,9 +193,6 @@ protected:
   /// Processor has Prefetch with intent to Write instruction
   bool HasPFPREFETCHWT1;
 
-  /// True if BT (bit test) of memory instructions are slow.
-  bool IsBTMemSlow;
-
   /// True if SHLD instructions are slow.
   bool IsSHLDSlow;
 
@@ -232,13 +244,19 @@ protected:
   /// True if SHLD based rotate is fast.
   bool HasFastSHLDRotate;
 
+  /// True if the processor supports macrofusion.
+  bool HasMacroFusion;
+
+  /// True if the processor has enhanced REP MOVSB/STOSB.
+  bool HasERMSB;
+
   /// True if the short functions should be padded to prevent
   /// a stall when returning too early.
   bool PadShortFunctions;
 
-  /// True if the Calls with memory reference should be converted
-  /// to a register-based indirect call.
-  bool CallRegIndirect;
+  /// True if two memory operand instructions should use a temporary register
+  /// instead.
+  bool SlowTwoMemOps;
 
   /// True if the LEA instruction inputs have to be ready at address generation
   /// (AG) time.
@@ -246,6 +264,11 @@ protected:
 
   /// True if the LEA instruction with certain arguments is slow
   bool SlowLEA;
+
+  /// True if the LEA instruction has all three source operands: base, index,
+  /// and offset or if the LEA instruction uses base and index registers where
+  /// the base is EBP, RBP,or R13
+  bool Slow3OpsLEA;
 
   /// True if INC and DEC instructions are slow when writing to flags
   bool SlowIncDec;
@@ -258,6 +281,9 @@ protected:
 
   /// Processor has AVX-512 Conflict Detection Instructions
   bool HasCDI;
+
+  /// Processor has AVX-512 population count Instructions
+  bool HasVPOPCNTDQ;
 
   /// Processor has AVX-512 Doubleword and Quadword instructions
   bool HasDQI;
@@ -300,10 +326,11 @@ protected:
   /// Instruction itineraries for scheduling
   InstrItineraryData InstrItins;
 
-  /// Gather the accessor points to GlobalISel-related APIs.
-  /// This is used to avoid ifndefs spreading around while GISel is
-  /// an optional library.
-  std::unique_ptr<GISelAccessor> GISel;
+  /// GlobalISel related APIs.
+  std::unique_ptr<CallLowering> CallLoweringInfo;
+  std::unique_ptr<LegalizerInfo> Legalizer;
+  std::unique_ptr<RegisterBankInfo> RegBankInfo;
+  std::unique_ptr<InstructionSelector> InstSelector;
 
 private:
   /// Override the stack alignment.
@@ -318,6 +345,10 @@ private:
   /// True if compiling for 16-bit, false for 32-bit or 64-bit.
   bool In16BitMode;
 
+  /// Contains the Overhead of gather\scatter instructions
+  int GatherOverhead;
+  int ScatterOverhead;
+
   X86SelectionDAGInfo TSInfo;
   // Ordering here is important. X86InstrInfo initializes X86RegisterInfo which
   // X86TargetLowering needs.
@@ -331,9 +362,6 @@ public:
   ///
   X86Subtarget(const Triple &TT, StringRef CPU, StringRef FS,
                const X86TargetMachine &TM, unsigned StackAlignOverride);
-
-  /// This object will take onwership of \p GISelAccessor.
-  void setGISelAccessor(GISelAccessor &GISel) { this->GISel.reset(&GISel); }
 
   const X86TargetLowering *getTargetLowering() const override {
     return &TLInfo;
@@ -435,11 +463,12 @@ public:
   bool hasPCLMUL() const { return HasPCLMUL; }
   // Prefer FMA4 to FMA - its better for commutation/memory folding and
   // has equal or better performance on all supported targets.
-  bool hasFMA() const { return HasFMA && !HasFMA4; }
+  bool hasFMA() const { return (HasFMA || hasAVX512()) && !HasFMA4; }
   bool hasFMA4() const { return HasFMA4; }
-  bool hasAnyFMA() const { return hasFMA() || hasFMA4() || hasAVX512(); }
+  bool hasAnyFMA() const { return hasFMA() || hasFMA4(); }
   bool hasXOP() const { return HasXOP; }
   bool hasTBM() const { return HasTBM; }
+  bool hasLWP() const { return HasLWP; }
   bool hasMOVBE() const { return HasMOVBE; }
   bool hasRDRAND() const { return HasRDRAND; }
   bool hasF16C() const { return HasF16C; }
@@ -457,11 +486,12 @@ public:
   bool hasLAHFSAHF() const { return HasLAHFSAHF; }
   bool hasMWAITX() const { return HasMWAITX; }
   bool hasCLZERO() const { return HasCLZERO; }
-  bool isBTMemSlow() const { return IsBTMemSlow; }
   bool isSHLDSlow() const { return IsSHLDSlow; }
   bool isPMULLDSlow() const { return IsPMULLDSlow; }
   bool isUnalignedMem16Slow() const { return IsUAMem16Slow; }
   bool isUnalignedMem32Slow() const { return IsUAMem32Slow; }
+  int getGatherOverhead() const { return GatherOverhead; }
+  int getScatterOverhead() const { return ScatterOverhead; }
   bool hasSSEUnalignedMem() const { return HasSSEUnalignedMem; }
   bool hasCmpxchg16b() const { return HasCmpxchg16b; }
   bool useLeaForSP() const { return UseLeaForSP; }
@@ -472,14 +502,18 @@ public:
   bool hasFastVectorFSQRT() const { return HasFastVectorFSQRT; }
   bool hasFastLZCNT() const { return HasFastLZCNT; }
   bool hasFastSHLDRotate() const { return HasFastSHLDRotate; }
+  bool hasMacroFusion() const { return HasMacroFusion; }
+  bool hasERMSB() const { return HasERMSB; }
   bool hasSlowDivide32() const { return HasSlowDivide32; }
   bool hasSlowDivide64() const { return HasSlowDivide64; }
   bool padShortFunctions() const { return PadShortFunctions; }
-  bool callRegIndirect() const { return CallRegIndirect; }
+  bool slowTwoMemOps() const { return SlowTwoMemOps; }
   bool LEAusesAG() const { return LEAUsesAG; }
   bool slowLEA() const { return SlowLEA; }
+  bool slow3OpsLEA() const { return Slow3OpsLEA; }
   bool slowIncDec() const { return SlowIncDec; }
   bool hasCDI() const { return HasCDI; }
+  bool hasVPOPCNTDQ() const { return HasVPOPCNTDQ; }
   bool hasPFI() const { return HasPFI; }
   bool hasERI() const { return HasERI; }
   bool hasDQI() const { return HasDQI; }
@@ -488,9 +522,13 @@ public:
   bool hasPKU() const { return HasPKU; }
   bool hasMPX() const { return HasMPX; }
   bool hasCLFLUSHOPT() const { return HasCLFLUSHOPT; }
+  bool hasCLWB() const { return HasCLWB; }
 
   bool isXRaySupported() const override { return is64Bit(); }
 
+  X86ProcFamilyEnum getProcFamily() const { return X86ProcFamily; }
+
+  /// TODO: to be removed later and replaced with suitable properties
   bool isAtom() const { return X86ProcFamily == IntelAtom; }
   bool isSLM() const { return X86ProcFamily == IntelSLM; }
   bool useSoftFloat() const { return UseSoftFloat; }
@@ -550,13 +588,9 @@ public:
 
   bool isOSWindows() const { return TargetTriple.isOSWindows(); }
 
-  bool isTargetWin64() const {
-    return In64BitMode && TargetTriple.isOSWindows();
-  }
+  bool isTargetWin64() const { return In64BitMode && isOSWindows(); }
 
-  bool isTargetWin32() const {
-    return !In64BitMode && (isTargetCygMing() || isTargetKnownWindowsMSVC());
-  }
+  bool isTargetWin32() const { return !In64BitMode && isOSWindows(); }
 
   bool isPICStyleGOT() const { return PICStyle == PICStyles::GOT; }
   bool isPICStyleRIPRel() const { return PICStyle == PICStyles::RIPRel; }
@@ -572,6 +606,7 @@ public:
     // On Win64, all these conventions just use the default convention.
     case CallingConv::C:
     case CallingConv::Fast:
+    case CallingConv::Swift:
     case CallingConv::X86_FastCall:
     case CallingConv::X86_StdCall:
     case CallingConv::X86_ThisCall:
@@ -579,7 +614,7 @@ public:
     case CallingConv::Intel_OCL_BI:
       return isTargetWin64();
     // This convention allows using the Win64 convention on other targets.
-    case CallingConv::X86_64_Win64:
+    case CallingConv::Win64:
       return true;
     // This convention allows using the SysV convention on Windows targets.
     case CallingConv::X86_64_SysV:
@@ -624,6 +659,9 @@ public:
   /// Enable the MachineScheduler pass for all X86 subtargets.
   bool enableMachineScheduler() const override { return true; }
 
+  // TODO: Update the regression tests and return true.
+  bool supportPrintSchedInfo() const override { return false; }
+
   bool enableEarlyIfConversion() const override;
 
   /// Return the instruction itineraries based on the subtarget selection.
@@ -634,6 +672,8 @@ public:
   AntiDepBreakMode getAntiDepBreakMode() const override {
     return TargetSubtargetInfo::ANTIDEP_CRITICAL;
   }
+
+  bool enableAdvancedRASplitCost() const override { return true; }
 };
 
 } // end namespace llvm

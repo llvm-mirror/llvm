@@ -175,11 +175,16 @@ struct LTOCodeGenerator {
   /// Calls \a verifyMergedModuleOnce().
   bool compileOptimized(ArrayRef<raw_pwrite_stream *> Out);
 
+  /// Enable the Freestanding mode: indicate that the optimizer should not
+  /// assume builtins are present on the target.
+  void setFreestanding(bool Enabled) { Freestanding = Enabled; }
+
   void setDiagnosticHandler(lto_diagnostic_handler_t, void *);
 
   LLVMContext &getContext() { return Context; }
 
   void resetMergedModule() { MergedModule.reset(); }
+  void DiagnosticHandler(const DiagnosticInfo &DI);
 
 private:
   void initializeLTOPasses();
@@ -199,10 +204,6 @@ private:
 
   bool determineTarget();
   std::unique_ptr<TargetMachine> createTargetMachine();
-
-  static void DiagnosticHandler(const DiagnosticInfo &DI, void *Context);
-
-  void DiagnosticHandler2(const DiagnosticInfo &DI);
 
   void emitError(const std::string &ErrMsg);
   void emitWarning(const std::string &ErrMsg);
@@ -236,7 +237,8 @@ private:
   bool ShouldEmbedUselists = false;
   bool ShouldRestoreGlobalsLinkage = false;
   TargetMachine::CodeGenFileType FileType = TargetMachine::CGFT_ObjectFile;
-  std::unique_ptr<tool_output_file> DiagnosticOutputFile;
+  std::unique_ptr<ToolOutputFile> DiagnosticOutputFile;
+  bool Freestanding = false;
 };
 }
 #endif

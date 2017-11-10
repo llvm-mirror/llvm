@@ -21,15 +21,9 @@
 
 namespace llvm {
 class raw_ostream;
-class DataLayout;
-class TargetRegisterClass;
-class Type;
 class MachineFunction;
 class MachineBasicBlock;
-class TargetFrameLowering;
-class TargetMachine;
 class BitVector;
-class Value;
 class AllocaInst;
 
 /// The CalleeSavedInfo class tracks the information need to locate where a
@@ -37,15 +31,30 @@ class AllocaInst;
 class CalleeSavedInfo {
   unsigned Reg;
   int FrameIdx;
+  /// Flag indicating whether the register is actually restored in the epilog.
+  /// In most cases, if a register is saved, it is also restored. There are
+  /// some situations, though, when this is not the case. For example, the
+  /// LR register on ARM is usually saved, but on exit from the function its
+  /// saved value may be loaded directly into PC. Since liveness tracking of
+  /// physical registers treats callee-saved registers are live outside of
+  /// the function, LR would be treated as live-on-exit, even though in these
+  /// scenarios it is not. This flag is added to indicate that the saved
+  /// register described by this object is not restored in the epilog.
+  /// The long-term solution is to model the liveness of callee-saved registers
+  /// by implicit uses on the return instructions, however, the required
+  /// changes in the ARM backend would be quite extensive.
+  bool Restored;
 
 public:
   explicit CalleeSavedInfo(unsigned R, int FI = 0)
-  : Reg(R), FrameIdx(FI) {}
+  : Reg(R), FrameIdx(FI), Restored(true) {}
 
   // Accessors.
   unsigned getReg()                        const { return Reg; }
   int getFrameIdx()                        const { return FrameIdx; }
   void setFrameIdx(int FI)                       { FrameIdx = FI; }
+  bool isRestored()                        const { return Restored; }
+  void setRestored(bool R)                       { Restored = R; }
 };
 
 /// The MachineFrameInfo class represents an abstract stack frame until
@@ -105,8 +114,16 @@ class MachineFrameInfo {
     /// and/or GC related) over a statepoint. We know that the address of the
     /// slot can't alias any LLVM IR value.  This is very similar to a Spill
     /// Slot, but is created by statepoint lowering is SelectionDAG, not the
-    /// register allocator. 
+    /// register allocator.
     bool isStatepointSpillSlot;
+
+    /// Identifier for stack memory type analagous to address space. If this is
+    /// non-0, the meaning is target defined. Offsets cannot be directly
+    /// compared between objects with different stack IDs. The object may not
+    /// necessarily reside in the same contiguous memory block as other stack
+    /// objects. Objects with differing stack IDs should not be merged or
+    /// replaced substituted for each other.
+    uint8_t StackID;
 
     /// If this stack object is originated from an Alloca instruction
     /// this value saves the original IR allocation. Can be NULL.
@@ -129,10 +146,11 @@ class MachineFrameInfo {
     bool isSExt;
 
     StackObject(uint64_t Sz, unsigned Al, int64_t SP, bool IM,
-                bool isSS, const AllocaInst *Val, bool A)
+                bool isSS, const AllocaInst *Val, bool Aliased, uint8_t ID = 0)
       : SPOffset(SP), Size(Sz), Alignment(Al), isImmutable(IM),
-        isSpillSlot(isSS), isStatepointSpillSlot(false), Alloca(Val),
-        PreAllocated(false), isAliased(A), isZExt(false), isSExt(false) {}
+        isSpillSlot(isSS), isStatepointSpillSlot(false), StackID(ID),
+        Alloca(Val),
+        PreAllocated(false), isAliased(Aliased), isZExt(false), isSExt(false) {}
   };
 
   /// The alignment of the stack.
@@ -226,7 +244,7 @@ class MachineFrameInfo {
   /// setup/destroy pseudo instructions (as defined in the TargetFrameInfo
   /// class).  This information is important for frame pointer elimination.
   /// It is only valid during and after prolog/epilog code insertion.
-  unsigned MaxCallFrameSize = 0;
+  unsigned MaxCallFrameSize = ~0u;
 
   /// The prolog/epilog code inserter fills in this vector with each
   /// callee saved register saved in the frame.  Beyond its use by the prolog/
@@ -526,12 +544,29 @@ public:
   bool hasTailCall() const { return HasTailCall; }
   void setHasTailCall() { HasTailCall = true; }
 
+  /// Computes the maximum size of a callframe and the AdjustsStack property.
+  /// This only works for targets defining
+  /// TargetInstrInfo::getCallFrameSetupOpcode(), getCallFrameDestroyOpcode(),
+  /// and getFrameSize().
+  /// This is usually computed by the prologue epilogue inserter but some
+  /// targets may call this to compute it earlier.
+  void computeMaxCallFrameSize(const MachineFunction &MF);
+
   /// Return the maximum size of a call frame that must be
   /// allocated for an outgoing function call.  This is only available if
   /// CallFrameSetup/Destroy pseudo instructions are used by the target, and
   /// then only during or after prolog/epilog code insertion.
   ///
-  unsigned getMaxCallFrameSize() const { return MaxCallFrameSize; }
+  unsigned getMaxCallFrameSize() const {
+    // TODO: Enable this assert when targets are fixed.
+    //assert(isMaxCallFrameSizeComputed() && "MaxCallFrameSize not computed yet");
+    if (!isMaxCallFrameSizeComputed())
+      return 0;
+    return MaxCallFrameSize;
+  }
+  bool isMaxCallFrameSizeComputed() const {
+    return MaxCallFrameSize != ~0u;
+  }
   void setMaxCallFrameSize(unsigned S) { MaxCallFrameSize = S; }
 
   /// Create a new object at a fixed location on the stack.
@@ -589,6 +624,18 @@ public:
     return Objects[ObjectIdx+NumFixedObjects].isStatepointSpillSlot;
   }
 
+  /// \see StackID
+  uint8_t getStackID(int ObjectIdx) const {
+    return Objects[ObjectIdx+NumFixedObjects].StackID;
+  }
+
+  /// \see StackID
+  void setStackID(int ObjectIdx, uint8_t ID) {
+    assert(unsigned(ObjectIdx+NumFixedObjects) < Objects.size() &&
+           "Invalid Object Idx!");
+    Objects[ObjectIdx+NumFixedObjects].StackID = ID;
+  }
+
   /// Returns true if the specified index corresponds to a dead object.
   bool isDeadObjectIndex(int ObjectIdx) const {
     assert(unsigned(ObjectIdx+NumFixedObjects) < Objects.size() &&
@@ -614,7 +661,7 @@ public:
   /// Create a new statically sized stack object, returning
   /// a nonnegative identifier to represent it.
   int CreateStackObject(uint64_t Size, unsigned Alignment, bool isSS,
-                        const AllocaInst *Alloca = nullptr);
+                        const AllocaInst *Alloca = nullptr, uint8_t ID = 0);
 
   /// Create a new statically sized stack object that represents a spill slot,
   /// returning a nonnegative identifier to represent it.
@@ -635,6 +682,8 @@ public:
   const std::vector<CalleeSavedInfo> &getCalleeSavedInfo() const {
     return CSInfo;
   }
+  /// \copydoc getCalleeSavedInfo()
+  std::vector<CalleeSavedInfo> &getCalleeSavedInfo() { return CSInfo; }
 
   /// Used by prolog/epilog inserter to set the function's callee saved
   /// information.

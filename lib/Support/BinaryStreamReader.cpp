@@ -13,9 +13,18 @@
 #include "llvm/Support/BinaryStreamRef.h"
 
 using namespace llvm;
+using endianness = llvm::support::endianness;
 
-BinaryStreamReader::BinaryStreamReader(BinaryStreamRef S)
-    : Stream(S), Offset(0) {}
+BinaryStreamReader::BinaryStreamReader(BinaryStreamRef Ref) : Stream(Ref) {}
+
+BinaryStreamReader::BinaryStreamReader(BinaryStream &Stream) : Stream(Stream) {}
+
+BinaryStreamReader::BinaryStreamReader(ArrayRef<uint8_t> Data,
+                                       endianness Endian)
+    : Stream(Data, Endian) {}
+
+BinaryStreamReader::BinaryStreamReader(StringRef Data, endianness Endian)
+    : Stream(Data, Endian) {}
 
 Error BinaryStreamReader::readLongestContiguousChunk(
     ArrayRef<uint8_t> &Buffer) {
@@ -33,28 +42,49 @@ Error BinaryStreamReader::readBytes(ArrayRef<uint8_t> &Buffer, uint32_t Size) {
 }
 
 Error BinaryStreamReader::readCString(StringRef &Dest) {
-  // TODO: This could be made more efficient by using readLongestContiguousChunk
-  // and searching for null terminators in the resulting buffer.
-
-  uint32_t Length = 0;
-  // First compute the length of the string by reading 1 byte at a time.
   uint32_t OriginalOffset = getOffset();
-  const char *C;
+  uint32_t FoundOffset = 0;
   while (true) {
-    if (auto EC = readObject(C))
+    uint32_t ThisOffset = getOffset();
+    ArrayRef<uint8_t> Buffer;
+    if (auto EC = readLongestContiguousChunk(Buffer))
       return EC;
-    if (*C == '\0')
+    StringRef S(reinterpret_cast<const char *>(Buffer.begin()), Buffer.size());
+    size_t Pos = S.find_first_of('\0');
+    if (LLVM_LIKELY(Pos != StringRef::npos)) {
+      FoundOffset = Pos + ThisOffset;
       break;
-    ++Length;
+    }
   }
-  // Now go back and request a reference for that many bytes.
-  uint32_t NewOffset = getOffset();
+  assert(FoundOffset >= OriginalOffset);
+
   setOffset(OriginalOffset);
+  size_t Length = FoundOffset - OriginalOffset;
 
   if (auto EC = readFixedString(Dest, Length))
     return EC;
 
-  // Now set the offset back to where it was after we calculated the length.
+  // Now set the offset back to after the null terminator.
+  setOffset(FoundOffset + 1);
+  return Error::success();
+}
+
+Error BinaryStreamReader::readWideString(ArrayRef<UTF16> &Dest) {
+  uint32_t Length = 0;
+  uint32_t OriginalOffset = getOffset();
+  const UTF16 *C;
+  while (true) {
+    if (auto EC = readObject(C))
+      return EC;
+    if (*C == 0x0000)
+      break;
+    ++Length;
+  }
+  uint32_t NewOffset = getOffset();
+  setOffset(OriginalOffset);
+
+  if (auto EC = readArray(Dest, Length))
+    return EC;
   setOffset(NewOffset);
   return Error::success();
 }
@@ -79,11 +109,22 @@ Error BinaryStreamReader::readStreamRef(BinaryStreamRef &Ref, uint32_t Length) {
   return Error::success();
 }
 
+Error BinaryStreamReader::readSubstream(BinarySubstreamRef &Stream,
+                                        uint32_t Size) {
+  Stream.Offset = getOffset();
+  return readStreamRef(Stream.StreamData, Size);
+}
+
 Error BinaryStreamReader::skip(uint32_t Amount) {
   if (Amount > bytesRemaining())
     return make_error<BinaryStreamError>(stream_error_code::stream_too_short);
   Offset += Amount;
   return Error::success();
+}
+
+Error BinaryStreamReader::padToAlignment(uint32_t Align) {
+  uint32_t NewOffset = alignTo(Offset, Align);
+  return skip(NewOffset - Offset);
 }
 
 uint8_t BinaryStreamReader::peek() const {
@@ -92,4 +133,17 @@ uint8_t BinaryStreamReader::peek() const {
   assert(!EC && "Cannot peek an empty buffer!");
   llvm::consumeError(std::move(EC));
   return Buffer[0];
+}
+
+std::pair<BinaryStreamReader, BinaryStreamReader>
+BinaryStreamReader::split(uint32_t Off) const {
+  assert(getLength() >= Off);
+
+  BinaryStreamRef First = Stream.drop_front(Offset);
+
+  BinaryStreamRef Second = First.drop_front(Off);
+  First = First.keep_front(Off);
+  BinaryStreamReader W1{First};
+  BinaryStreamReader W2{Second};
+  return std::make_pair(W1, W2);
 }

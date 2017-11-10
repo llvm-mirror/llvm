@@ -1,4 +1,4 @@
-; RUN: llc < %s -fast-isel -fast-isel-abort=1 -verify-machineinstrs -march=x86 -mattr=sse2 -no-integrated-as
+; RUN: llc < %s -fast-isel -fast-isel-abort=1 -verify-machineinstrs -mtriple=i686-- -mattr=sse2 -no-integrated-as
 ; RUN: llc < %s -fast-isel -fast-isel-abort=1 -verify-machineinstrs -mtriple=x86_64-apple-darwin10 -no-integrated-as
 
 ; This tests very minimal fast-isel functionality.
@@ -107,12 +107,12 @@ define void @crash_test1() nounwind ssp {
   ret void
 }
 
-declare void @llvm.lifetime.start(i64, i8* nocapture) nounwind
+declare void @llvm.lifetime.start.p0i8(i64, i8* nocapture) nounwind
 
 define i64* @life() nounwind {
   %a1 = alloca i64*, align 8
   %a2 = bitcast i64** %a1 to i8*
-  call void @llvm.lifetime.start(i64 -1, i8* %a2) nounwind      
+  call void @llvm.lifetime.start.p0i8(i64 -1, i8* %a2) nounwind      
   %a3 = load i64*, i64** %a1, align 8
   ret i64* %a3
 }

@@ -18,9 +18,9 @@ target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f3
 
 ;CHECK-LABEL: @function0(
 ;CHECK: load <4 x i32>
+;CHECK: icmp sgt <4 x i32>
 ;CHECK: mul <4 x i32>
 ;CHECK: add <4 x i32>
-;CHECK: icmp sle <4 x i32>
 ;CHECK: select <4 x i1>
 ;CHECK: ret i32
 define i32 @function0(i32* nocapture %a, i32* nocapture %b, i32 %start, i32 %end) nounwind uwtable ssp {
@@ -71,8 +71,8 @@ for.end:
 
 ;CHECK-LABEL: @reduction_func(
 ;CHECK: load <4 x i32>
-;CHECK: add <4 x i32>
 ;CHECK: icmp slt <4 x i32>
+;CHECK: add <4 x i32>
 ;CHECK: select <4 x i1>
 ;CHECK: ret i32
 define i32 @reduction_func(i32* nocapture %A, i32 %n) nounwind uwtable readonly ssp {
@@ -167,4 +167,31 @@ cond.end:
 
 for.end:
   ret i32 %or
+}
+
+; Handle PHI with single incoming value having a full mask.
+; PR34523
+
+; CHECK-LABEL: PR34523
+; CHECK: vector.body
+
+define void @PR34523() {
+bb1:
+  br label %bb2
+
+bb2:                                             ; preds = %bb4, %bb1
+  %i = phi i16 [ undef, %bb1 ], [ %_tmp2, %bb4 ]
+  br label %bb3
+
+bb3:                                             ; preds = %bb2
+  %_tmp1 = phi [1 x [1 x i32]]* [ undef, %bb2 ]
+  br label %bb4
+
+bb4:                                             ; preds = %bb3
+  %_tmp2 = add i16 %i, 1
+  %_tmp3 = icmp slt i16 %_tmp2, 2
+  br i1 %_tmp3, label %bb2, label %bb5
+
+bb5:                                             ; preds = %bb4
+  unreachable
 }

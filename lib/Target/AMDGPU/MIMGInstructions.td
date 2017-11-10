@@ -26,6 +26,7 @@ class MIMG_Helper <dag outs, dag ins, string asm,
   let isAsmParserOnly = !if(!eq(dns,""), 1, 0);
   let AsmMatchConverter = "cvtMIMG";
   let usesCustomInserter = 1;
+  let SchedRW = [WriteVMEM];
 }
 
 class MIMG_NoSampler_Helper <bits<7> op, string asm,
@@ -348,7 +349,7 @@ defm IMAGE_SAMPLE_C_CD_CL_O : MIMG_Sampler <0x0000006f, "image_sample_c_cd_cl_o"
 /********** ======================= **********/
 
 // Image + sampler
-class SampleRawPattern<SDPatternOperator name, MIMG opcode, ValueType vt> : Pat <
+class SampleRawPattern<SDPatternOperator name, MIMG opcode, ValueType vt> : GCNPat <
   (name vt:$addr, v8i32:$rsrc, v4i32:$sampler, i32:$dmask, i32:$unorm,
         i32:$r128, i32:$da, i32:$glc, i32:$slc, i32:$tfe, i32:$lwe),
   (opcode $addr, $rsrc, $sampler,
@@ -370,7 +371,7 @@ multiclass SampleRawPatterns<SDPatternOperator name, string opcode> {
 // 2. Handle v4i32 rsrc type (Register Class for the instruction to be SReg_128).
 // 3. Add A16 support when we pass address of half type.
 multiclass AMDGCNSamplePattern<SDPatternOperator name, MIMG opcode, ValueType dt, ValueType vt>  {
-  def : Pat<
+  def : GCNPat<
     (dt (name vt:$addr, v8i32:$rsrc, v4i32:$sampler, i32:$dmask, i1:$unorm, i1:$glc,
         i1:$slc, i1:$lwe, i1:$da)),
     (opcode $addr, $rsrc, $sampler,
@@ -395,7 +396,7 @@ multiclass AMDGCNSamplePatterns<SDPatternOperator name, string opcode> {
 }
 
 // Image only
-class ImagePattern<SDPatternOperator name, MIMG opcode, ValueType vt> : Pat <
+class ImagePattern<SDPatternOperator name, MIMG opcode, ValueType vt> : GCNPat <
   (name vt:$addr, v8i32:$rsrc, imm:$dmask, imm:$unorm,
         imm:$r128, imm:$da, imm:$glc, imm:$slc, imm:$tfe, imm:$lwe),
   (opcode $addr, $rsrc,
@@ -410,7 +411,7 @@ multiclass ImagePatterns<SDPatternOperator name, string opcode> {
 }
 
 multiclass ImageLoadPattern<SDPatternOperator name, MIMG opcode, ValueType dt, ValueType vt> {
-  def : Pat <
+  def : GCNPat <
     (dt (name vt:$addr, v8i32:$rsrc, i32:$dmask, i1:$glc, i1:$slc, i1:$lwe,
                 i1:$da)),
     (opcode $addr, $rsrc,
@@ -433,7 +434,7 @@ multiclass ImageLoadPatterns<SDPatternOperator name, string opcode> {
 }
 
 multiclass ImageStorePattern<SDPatternOperator name, MIMG opcode, ValueType dt, ValueType vt> {
-  def : Pat <
+  def : GCNPat <
     (name dt:$data, vt:$addr, v8i32:$rsrc, i32:$dmask, i1:$glc, i1:$slc,
           i1:$lwe, i1:$da),
     (opcode $data, $addr, $rsrc,
@@ -455,7 +456,7 @@ multiclass ImageStorePatterns<SDPatternOperator name, string opcode> {
   defm : ImageStoreDataPatterns<name, !cast<string>(opcode # _V4), v4f32>;
 }
 
-class ImageAtomicPattern<SDPatternOperator name, MIMG opcode, ValueType vt> : Pat <
+class ImageAtomicPattern<SDPatternOperator name, MIMG opcode, ValueType vt> : GCNPat <
   (name i32:$vdata, vt:$addr, v8i32:$rsrc, imm:$r128, imm:$da, imm:$slc),
   (opcode $vdata, $addr, $rsrc, 1, 1, 1, (as_i1imm $slc), (as_i1imm $r128), 0, 0, (as_i1imm $da))
 >;
@@ -466,7 +467,7 @@ multiclass ImageAtomicPatterns<SDPatternOperator name, string opcode> {
   def : ImageAtomicPattern<name, !cast<MIMG>(opcode # _V4), v4i32>;
 }
 
-class ImageAtomicCmpSwapPattern<MIMG opcode, ValueType vt> : Pat <
+class ImageAtomicCmpSwapPattern<MIMG opcode, ValueType vt> : GCNPat <
   (int_amdgcn_image_atomic_cmpswap i32:$vsrc, i32:$vcmp, vt:$addr, v8i32:$rsrc,
                                    imm:$r128, imm:$da, imm:$slc),
   (EXTRACT_SUBREG
@@ -474,106 +475,6 @@ class ImageAtomicCmpSwapPattern<MIMG opcode, ValueType vt> : Pat <
             $addr, $rsrc, 3, 1, 1, (as_i1imm $slc), (as_i1imm $r128), 0, 0, (as_i1imm $da)),
     sub0)
 >;
-
-// ======= SI Image Intrinsics ================
-
-// Image load
-defm : ImagePatterns<int_SI_image_load, "IMAGE_LOAD">;
-defm : ImagePatterns<int_SI_image_load_mip, "IMAGE_LOAD_MIP">;
-def : ImagePattern<int_SI_getresinfo, IMAGE_GET_RESINFO_V4_V1, i32>;
-
-// Basic sample
-defm : SampleRawPatterns<int_SI_image_sample,           "IMAGE_SAMPLE">;
-defm : SampleRawPatterns<int_SI_image_sample_cl,        "IMAGE_SAMPLE_CL">;
-defm : SampleRawPatterns<int_SI_image_sample_d,         "IMAGE_SAMPLE_D">;
-defm : SampleRawPatterns<int_SI_image_sample_d_cl,      "IMAGE_SAMPLE_D_CL">;
-defm : SampleRawPatterns<int_SI_image_sample_l,         "IMAGE_SAMPLE_L">;
-defm : SampleRawPatterns<int_SI_image_sample_b,         "IMAGE_SAMPLE_B">;
-defm : SampleRawPatterns<int_SI_image_sample_b_cl,      "IMAGE_SAMPLE_B_CL">;
-defm : SampleRawPatterns<int_SI_image_sample_lz,        "IMAGE_SAMPLE_LZ">;
-defm : SampleRawPatterns<int_SI_image_sample_cd,        "IMAGE_SAMPLE_CD">;
-defm : SampleRawPatterns<int_SI_image_sample_cd_cl,     "IMAGE_SAMPLE_CD_CL">;
-
-// Sample with comparison
-defm : SampleRawPatterns<int_SI_image_sample_c,         "IMAGE_SAMPLE_C">;
-defm : SampleRawPatterns<int_SI_image_sample_c_cl,      "IMAGE_SAMPLE_C_CL">;
-defm : SampleRawPatterns<int_SI_image_sample_c_d,       "IMAGE_SAMPLE_C_D">;
-defm : SampleRawPatterns<int_SI_image_sample_c_d_cl,    "IMAGE_SAMPLE_C_D_CL">;
-defm : SampleRawPatterns<int_SI_image_sample_c_l,       "IMAGE_SAMPLE_C_L">;
-defm : SampleRawPatterns<int_SI_image_sample_c_b,       "IMAGE_SAMPLE_C_B">;
-defm : SampleRawPatterns<int_SI_image_sample_c_b_cl,    "IMAGE_SAMPLE_C_B_CL">;
-defm : SampleRawPatterns<int_SI_image_sample_c_lz,      "IMAGE_SAMPLE_C_LZ">;
-defm : SampleRawPatterns<int_SI_image_sample_c_cd,      "IMAGE_SAMPLE_C_CD">;
-defm : SampleRawPatterns<int_SI_image_sample_c_cd_cl,   "IMAGE_SAMPLE_C_CD_CL">;
-
-// Sample with offsets
-defm : SampleRawPatterns<int_SI_image_sample_o,         "IMAGE_SAMPLE_O">;
-defm : SampleRawPatterns<int_SI_image_sample_cl_o,      "IMAGE_SAMPLE_CL_O">;
-defm : SampleRawPatterns<int_SI_image_sample_d_o,       "IMAGE_SAMPLE_D_O">;
-defm : SampleRawPatterns<int_SI_image_sample_d_cl_o,    "IMAGE_SAMPLE_D_CL_O">;
-defm : SampleRawPatterns<int_SI_image_sample_l_o,       "IMAGE_SAMPLE_L_O">;
-defm : SampleRawPatterns<int_SI_image_sample_b_o,       "IMAGE_SAMPLE_B_O">;
-defm : SampleRawPatterns<int_SI_image_sample_b_cl_o,    "IMAGE_SAMPLE_B_CL_O">;
-defm : SampleRawPatterns<int_SI_image_sample_lz_o,      "IMAGE_SAMPLE_LZ_O">;
-defm : SampleRawPatterns<int_SI_image_sample_cd_o,      "IMAGE_SAMPLE_CD_O">;
-defm : SampleRawPatterns<int_SI_image_sample_cd_cl_o,   "IMAGE_SAMPLE_CD_CL_O">;
-
-// Sample with comparison and offsets
-defm : SampleRawPatterns<int_SI_image_sample_c_o,       "IMAGE_SAMPLE_C_O">;
-defm : SampleRawPatterns<int_SI_image_sample_c_cl_o,    "IMAGE_SAMPLE_C_CL_O">;
-defm : SampleRawPatterns<int_SI_image_sample_c_d_o,     "IMAGE_SAMPLE_C_D_O">;
-defm : SampleRawPatterns<int_SI_image_sample_c_d_cl_o,  "IMAGE_SAMPLE_C_D_CL_O">;
-defm : SampleRawPatterns<int_SI_image_sample_c_l_o,     "IMAGE_SAMPLE_C_L_O">;
-defm : SampleRawPatterns<int_SI_image_sample_c_b_o,     "IMAGE_SAMPLE_C_B_O">;
-defm : SampleRawPatterns<int_SI_image_sample_c_b_cl_o,  "IMAGE_SAMPLE_C_B_CL_O">;
-defm : SampleRawPatterns<int_SI_image_sample_c_lz_o,    "IMAGE_SAMPLE_C_LZ_O">;
-defm : SampleRawPatterns<int_SI_image_sample_c_cd_o,    "IMAGE_SAMPLE_C_CD_O">;
-defm : SampleRawPatterns<int_SI_image_sample_c_cd_cl_o, "IMAGE_SAMPLE_C_CD_CL_O">;
-
-// Gather opcodes
-// Only the variants which make sense are defined.
-def : SampleRawPattern<int_SI_gather4,           IMAGE_GATHER4_V4_V2,        v2i32>;
-def : SampleRawPattern<int_SI_gather4,           IMAGE_GATHER4_V4_V4,        v4i32>;
-def : SampleRawPattern<int_SI_gather4_cl,        IMAGE_GATHER4_CL_V4_V4,     v4i32>;
-def : SampleRawPattern<int_SI_gather4_l,         IMAGE_GATHER4_L_V4_V4,      v4i32>;
-def : SampleRawPattern<int_SI_gather4_b,         IMAGE_GATHER4_B_V4_V4,      v4i32>;
-def : SampleRawPattern<int_SI_gather4_b_cl,      IMAGE_GATHER4_B_CL_V4_V4,   v4i32>;
-def : SampleRawPattern<int_SI_gather4_b_cl,      IMAGE_GATHER4_B_CL_V4_V8,   v8i32>;
-def : SampleRawPattern<int_SI_gather4_lz,        IMAGE_GATHER4_LZ_V4_V2,     v2i32>;
-def : SampleRawPattern<int_SI_gather4_lz,        IMAGE_GATHER4_LZ_V4_V4,     v4i32>;
-
-def : SampleRawPattern<int_SI_gather4_c,         IMAGE_GATHER4_C_V4_V4,      v4i32>;
-def : SampleRawPattern<int_SI_gather4_c_cl,      IMAGE_GATHER4_C_CL_V4_V4,   v4i32>;
-def : SampleRawPattern<int_SI_gather4_c_cl,      IMAGE_GATHER4_C_CL_V4_V8,   v8i32>;
-def : SampleRawPattern<int_SI_gather4_c_l,       IMAGE_GATHER4_C_L_V4_V4,    v4i32>;
-def : SampleRawPattern<int_SI_gather4_c_l,       IMAGE_GATHER4_C_L_V4_V8,    v8i32>;
-def : SampleRawPattern<int_SI_gather4_c_b,       IMAGE_GATHER4_C_B_V4_V4,    v4i32>;
-def : SampleRawPattern<int_SI_gather4_c_b,       IMAGE_GATHER4_C_B_V4_V8,    v8i32>;
-def : SampleRawPattern<int_SI_gather4_c_b_cl,    IMAGE_GATHER4_C_B_CL_V4_V8, v8i32>;
-def : SampleRawPattern<int_SI_gather4_c_lz,      IMAGE_GATHER4_C_LZ_V4_V4,   v4i32>;
-
-def : SampleRawPattern<int_SI_gather4_o,         IMAGE_GATHER4_O_V4_V4,      v4i32>;
-def : SampleRawPattern<int_SI_gather4_cl_o,      IMAGE_GATHER4_CL_O_V4_V4,   v4i32>;
-def : SampleRawPattern<int_SI_gather4_cl_o,      IMAGE_GATHER4_CL_O_V4_V8,   v8i32>;
-def : SampleRawPattern<int_SI_gather4_l_o,       IMAGE_GATHER4_L_O_V4_V4,    v4i32>;
-def : SampleRawPattern<int_SI_gather4_l_o,       IMAGE_GATHER4_L_O_V4_V8,    v8i32>;
-def : SampleRawPattern<int_SI_gather4_b_o,       IMAGE_GATHER4_B_O_V4_V4,    v4i32>;
-def : SampleRawPattern<int_SI_gather4_b_o,       IMAGE_GATHER4_B_O_V4_V8,    v8i32>;
-def : SampleRawPattern<int_SI_gather4_b_cl_o,    IMAGE_GATHER4_B_CL_O_V4_V8, v8i32>;
-def : SampleRawPattern<int_SI_gather4_lz_o,      IMAGE_GATHER4_LZ_O_V4_V4,   v4i32>;
-
-def : SampleRawPattern<int_SI_gather4_c_o,       IMAGE_GATHER4_C_O_V4_V4,    v4i32>;
-def : SampleRawPattern<int_SI_gather4_c_o,       IMAGE_GATHER4_C_O_V4_V8,    v8i32>;
-def : SampleRawPattern<int_SI_gather4_c_cl_o,    IMAGE_GATHER4_C_CL_O_V4_V8, v8i32>;
-def : SampleRawPattern<int_SI_gather4_c_l_o,     IMAGE_GATHER4_C_L_O_V4_V8,  v8i32>;
-def : SampleRawPattern<int_SI_gather4_c_b_o,     IMAGE_GATHER4_C_B_O_V4_V8,  v8i32>;
-def : SampleRawPattern<int_SI_gather4_c_b_cl_o,  IMAGE_GATHER4_C_B_CL_O_V4_V8, v8i32>;
-def : SampleRawPattern<int_SI_gather4_c_lz_o,    IMAGE_GATHER4_C_LZ_O_V4_V4, v4i32>;
-def : SampleRawPattern<int_SI_gather4_c_lz_o,    IMAGE_GATHER4_C_LZ_O_V4_V8, v8i32>;
-
-def : SampleRawPattern<int_SI_getlod, IMAGE_GET_LOD_V4_V1, i32>;
-def : SampleRawPattern<int_SI_getlod, IMAGE_GET_LOD_V4_V2, v2i32>;
-def : SampleRawPattern<int_SI_getlod, IMAGE_GET_LOD_V4_V4, v4i32>;
 
 // ======= amdgcn Image Intrinsics ==============
 
@@ -683,34 +584,34 @@ defm : ImageAtomicPatterns<int_amdgcn_image_atomic_inc, "IMAGE_ATOMIC_INC">;
 defm : ImageAtomicPatterns<int_amdgcn_image_atomic_dec, "IMAGE_ATOMIC_DEC">;
 
 /* SIsample for simple 1D texture lookup */
-def : Pat <
+def : GCNPat <
   (SIsample i32:$addr, v8i32:$rsrc, v4i32:$sampler, imm),
   (IMAGE_SAMPLE_V4_V1 $addr, $rsrc, $sampler, 0xf, 0, 0, 0, 0, 0, 0, 0)
 >;
 
-class SamplePattern<SDNode name, MIMG opcode, ValueType vt> : Pat <
+class SamplePattern<SDNode name, MIMG opcode, ValueType vt> : GCNPat <
     (name vt:$addr, v8i32:$rsrc, v4i32:$sampler, imm),
     (opcode $addr, $rsrc, $sampler, 0xf, 0, 0, 0, 0, 0, 0, 0)
 >;
 
-class SampleRectPattern<SDNode name, MIMG opcode, ValueType vt> : Pat <
+class SampleRectPattern<SDNode name, MIMG opcode, ValueType vt> : GCNPat <
     (name vt:$addr, v8i32:$rsrc, v4i32:$sampler, TEX_RECT),
     (opcode $addr, $rsrc, $sampler, 0xf, 1, 0, 0, 0, 0, 0, 0)
 >;
 
-class SampleArrayPattern<SDNode name, MIMG opcode, ValueType vt> : Pat <
+class SampleArrayPattern<SDNode name, MIMG opcode, ValueType vt> : GCNPat <
     (name vt:$addr, v8i32:$rsrc, v4i32:$sampler, TEX_ARRAY),
     (opcode $addr, $rsrc, $sampler, 0xf, 0, 0, 0, 0, 0, 0, 1)
 >;
 
 class SampleShadowPattern<SDNode name, MIMG opcode,
-                          ValueType vt> : Pat <
+                          ValueType vt> : GCNPat <
     (name vt:$addr, v8i32:$rsrc, v4i32:$sampler, TEX_SHADOW),
     (opcode $addr, $rsrc, $sampler, 0xf, 0, 0, 0, 0, 0, 0, 0)
 >;
 
 class SampleShadowArrayPattern<SDNode name, MIMG opcode,
-                               ValueType vt> : Pat <
+                               ValueType vt> : GCNPat <
     (name vt:$addr, v8i32:$rsrc, v4i32:$sampler, TEX_SHADOW_ARRAY),
     (opcode $addr, $rsrc, $sampler, 0xf, 0, 0, 0, 0, 0, 0, 1)
 >;

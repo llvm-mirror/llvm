@@ -7,12 +7,12 @@
 //
 //===----------------------------------------------------------------------===//
 /// \file
-/// \brief This file provides an implementation of debug counters.  Debug counters
-/// are a tool that let you narrow down a miscompilation to a specific thing
-/// happening.
+/// \brief This file provides an implementation of debug counters.  Debug
+/// counters are a tool that let you narrow down a miscompilation to a specific
+/// thing happening.
 ///
 /// To give a use case: Imagine you have a file, very large, and you
-/// are trying to understand the minimal transformation that breaks it.  Bugpoint
+/// are trying to understand the minimal transformation that breaks it. Bugpoint
 /// and bisection is often helpful here in narrowing it down to a specific pass,
 /// but it's still a very large file, and a very complicated pass to try to
 /// debug.  That is where debug counting steps in.  You can instrument the pass
@@ -100,11 +100,32 @@ public:
 #endif // NDEBUG
   }
 
-  // Dump or print the current counter set.
-  LLVM_DUMP_METHOD void dump() { print(dbgs()); }
+  // Return true if a given counter had values set (either programatically or on
+  // the command line).  This will return true even if those values are
+  // currently in a state where the counter will always execute.
+  static bool isCounterSet(unsigned ID) {
+    return instance().Counters.count(ID);
+  }
 
-  void print(raw_ostream &OS);
-  
+  // Return the skip and count for a counter. This only works for set counters.
+  static std::pair<int, int> getCounterValue(unsigned ID) {
+    auto &Us = instance();
+    auto Result = Us.Counters.find(ID);
+    assert(Result != Us.Counters.end() && "Asking about a non-set counter");
+    return Result->second;
+  }
+
+  // Set a registered counter to a given value.
+  static void setCounterValue(unsigned ID, const std::pair<int, int> &Val) {
+    auto &Us = instance();
+    Us.Counters[ID] = Val;
+  }
+
+  // Dump or print the current counter set into llvm::dbgs().
+  LLVM_DUMP_METHOD void dump() const;
+
+  void print(raw_ostream &OS) const;
+
   // Get the counter ID for a given named counter, or return 0 if none is found.
   unsigned getCounterId(const std::string &Name) const {
     return RegisteredCounters.idFor(Name);
@@ -138,7 +159,7 @@ private:
 
 #define DEBUG_COUNTER(VARNAME, COUNTERNAME, DESC)                              \
   static const unsigned VARNAME =                                              \
-      DebugCounter::registerCounter(COUNTERNAME, DESC);
+      DebugCounter::registerCounter(COUNTERNAME, DESC)
 
 } // namespace llvm
 #endif

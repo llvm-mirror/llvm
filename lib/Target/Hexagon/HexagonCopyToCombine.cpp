@@ -13,7 +13,6 @@
 //===----------------------------------------------------------------------===//
 #include "HexagonInstrInfo.h"
 #include "HexagonSubtarget.h"
-#include "llvm/PassSupport.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
@@ -22,6 +21,7 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/PassSupport.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -161,7 +161,6 @@ static bool isCombinableInstType(MachineInstr &MI, const HexagonInstrInfo *TII,
   }
 
   case Hexagon::V6_vassign:
-  case Hexagon::V6_vassign_128B:
     return true;
 
   default:
@@ -231,8 +230,7 @@ static bool isEvenReg(unsigned Reg) {
   assert(TargetRegisterInfo::isPhysicalRegister(Reg));
   if (Hexagon::IntRegsRegClass.contains(Reg))
     return (Reg - Hexagon::R0) % 2 == 0;
-  if (Hexagon::VectorRegsRegClass.contains(Reg) ||
-      Hexagon::VectorRegs128BRegClass.contains(Reg))
+  if (Hexagon::HvxVRRegClass.contains(Reg))
     return (Reg - Hexagon::V0) % 2 == 0;
   llvm_unreachable("Invalid register");
 }
@@ -253,7 +251,8 @@ static bool isUnsafeToMoveAcross(MachineInstr &MI, unsigned UseReg,
                                  const TargetRegisterInfo *TRI) {
   return (UseReg && (MI.modifiesRegister(UseReg, TRI))) ||
          MI.modifiesRegister(DestReg, TRI) || MI.readsRegister(DestReg, TRI) ||
-         MI.hasUnmodeledSideEffects() || MI.isInlineAsm() || MI.isDebugValue();
+         MI.hasUnmodeledSideEffects() || MI.isInlineAsm() ||
+         MI.isMetaInstruction();
 }
 
 static unsigned UseReg(const MachineOperand& MO) {
@@ -460,6 +459,8 @@ HexagonCopyToCombine::findPotentialNewifiableTFRs(MachineBasicBlock &BB) {
 }
 
 bool HexagonCopyToCombine::runOnMachineFunction(MachineFunction &MF) {
+  if (skipFunction(*MF.getFunction()))
+    return false;
 
   if (IsCombinesDisabled) return false;
 
@@ -590,12 +591,9 @@ void HexagonCopyToCombine::combine(MachineInstr &I1, MachineInstr &I2,
   if (Hexagon::IntRegsRegClass.contains(LoRegDef)) {
     SuperRC = &Hexagon::DoubleRegsRegClass;
     SubLo = Hexagon::isub_lo;
-  } else if (Hexagon::VectorRegsRegClass.contains(LoRegDef)) {
+  } else if (Hexagon::HvxVRRegClass.contains(LoRegDef)) {
     assert(ST->useHVXOps());
-    if (ST->useHVXSglOps())
-      SuperRC = &Hexagon::VecDblRegsRegClass;
-    else
-      SuperRC = &Hexagon::VecDblRegs128BRegClass;
+    SuperRC = &Hexagon::HvxWRRegClass;
     SubLo = Hexagon::vsub_lo;
   } else
     llvm_unreachable("Unexpected register class");
@@ -872,12 +870,9 @@ void HexagonCopyToCombine::emitCombineRR(MachineBasicBlock::iterator &InsertPt,
   unsigned NewOpc;
   if (Hexagon::DoubleRegsRegClass.contains(DoubleDestReg)) {
     NewOpc = Hexagon::A2_combinew;
-  } else if (Hexagon::VecDblRegsRegClass.contains(DoubleDestReg)) {
+  } else if (Hexagon::HvxWRRegClass.contains(DoubleDestReg)) {
     assert(ST->useHVXOps());
-    if (ST->useHVXSglOps())
-      NewOpc = Hexagon::V6_vcombine;
-    else
-      NewOpc = Hexagon::V6_vcombine_128B;
+    NewOpc = Hexagon::V6_vcombine;
   } else
     llvm_unreachable("Unexpected register");
 

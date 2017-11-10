@@ -12,8 +12,8 @@
 //===----------------------------------------------------------------------===//
 //
 
-#include "MCTargetDesc/MipsFixupKinds.h"
 #include "MCTargetDesc/MipsAsmBackend.h"
+#include "MCTargetDesc/MipsFixupKinds.h"
 #include "MCTargetDesc/MipsMCExpr.h"
 #include "MCTargetDesc/MipsMCTargetDesc.h"
 #include "llvm/MC/MCAsmBackend.h"
@@ -24,6 +24,7 @@
 #include "llvm/MC/MCFixupKindInfo.h"
 #include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCSubtargetInfo.h"
+#include "llvm/MC/MCTargetOptions.h"
 #include "llvm/MC/MCValue.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Format.h"
@@ -34,7 +35,7 @@ using namespace llvm;
 
 // Prepare value for the target space for it
 static unsigned adjustFixupValue(const MCFixup &Fixup, uint64_t Value,
-                                 MCContext *Ctx = nullptr) {
+                                 MCContext &Ctx) {
 
   unsigned Kind = Fixup.getKind();
 
@@ -74,8 +75,8 @@ static unsigned adjustFixupValue(const MCFixup &Fixup, uint64_t Value,
     // address range. Forcing a signed division because Value can be negative.
     Value = (int64_t)Value / 4;
     // We now check if Value can be encoded as a 16-bit signed immediate.
-    if (!isInt<16>(Value) && Ctx) {
-      Ctx->reportError(Fixup.getLoc(), "out of range PC16 fixup");
+    if (!isInt<16>(Value)) {
+      Ctx.reportError(Fixup.getLoc(), "out of range PC16 fixup");
       return 0;
     }
     break;
@@ -84,8 +85,8 @@ static unsigned adjustFixupValue(const MCFixup &Fixup, uint64_t Value,
     // Forcing a signed division because Value can be negative.
     Value = (int64_t)Value / 4;
     // We now check if Value can be encoded as a 19-bit signed immediate.
-    if (!isInt<19>(Value) && Ctx) {
-      Ctx->reportError(Fixup.getLoc(), "out of range PC19 fixup");
+    if (!isInt<19>(Value)) {
+      Ctx.reportError(Fixup.getLoc(), "out of range PC19 fixup");
       return 0;
     }
     break;
@@ -121,8 +122,8 @@ static unsigned adjustFixupValue(const MCFixup &Fixup, uint64_t Value,
     // Forcing a signed division because Value can be negative.
     Value = (int64_t) Value / 2;
     // We now check if Value can be encoded as a 7-bit signed immediate.
-    if (!isInt<7>(Value) && Ctx) {
-      Ctx->reportError(Fixup.getLoc(), "out of range PC7 fixup");
+    if (!isInt<7>(Value)) {
+      Ctx.reportError(Fixup.getLoc(), "out of range PC7 fixup");
       return 0;
     }
     break;
@@ -131,8 +132,8 @@ static unsigned adjustFixupValue(const MCFixup &Fixup, uint64_t Value,
     // Forcing a signed division because Value can be negative.
     Value = (int64_t) Value / 2;
     // We now check if Value can be encoded as a 10-bit signed immediate.
-    if (!isInt<10>(Value) && Ctx) {
-      Ctx->reportError(Fixup.getLoc(), "out of range PC10 fixup");
+    if (!isInt<10>(Value)) {
+      Ctx.reportError(Fixup.getLoc(), "out of range PC10 fixup");
       return 0;
     }
     break;
@@ -141,8 +142,8 @@ static unsigned adjustFixupValue(const MCFixup &Fixup, uint64_t Value,
     // Forcing a signed division because Value can be negative.
     Value = (int64_t)Value / 2;
     // We now check if Value can be encoded as a 16-bit signed immediate.
-    if (!isInt<16>(Value) && Ctx) {
-      Ctx->reportError(Fixup.getLoc(), "out of range PC16 fixup");
+    if (!isInt<16>(Value)) {
+      Ctx.reportError(Fixup.getLoc(), "out of range PC16 fixup");
       return 0;
     }
     break;
@@ -150,21 +151,21 @@ static unsigned adjustFixupValue(const MCFixup &Fixup, uint64_t Value,
     // Forcing a signed division because Value can be negative.
     Value = (int64_t)Value / 8;
     // We now check if Value can be encoded as a 18-bit signed immediate.
-    if (!isInt<18>(Value) && Ctx) {
-      Ctx->reportError(Fixup.getLoc(), "out of range PC18 fixup");
+    if (!isInt<18>(Value)) {
+      Ctx.reportError(Fixup.getLoc(), "out of range PC18 fixup");
       return 0;
     }
     break;
   case Mips::fixup_MICROMIPS_PC18_S3:
     // Check alignment.
-    if ((Value & 7) && Ctx) {
-      Ctx->reportError(Fixup.getLoc(), "out of range PC18 fixup");
+    if ((Value & 7)) {
+      Ctx.reportError(Fixup.getLoc(), "out of range PC18 fixup");
     }
     // Forcing a signed division because Value can be negative.
     Value = (int64_t)Value / 8;
     // We now check if Value can be encoded as a 18-bit signed immediate.
-    if (!isInt<18>(Value) && Ctx) {
-      Ctx->reportError(Fixup.getLoc(), "out of range PC18 fixup");
+    if (!isInt<18>(Value)) {
+      Ctx.reportError(Fixup.getLoc(), "out of range PC18 fixup");
       return 0;
     }
     break;
@@ -172,8 +173,8 @@ static unsigned adjustFixupValue(const MCFixup &Fixup, uint64_t Value,
     // Forcing a signed division because Value can be negative.
     Value = (int64_t) Value / 4;
     // We now check if Value can be encoded as a 21-bit signed immediate.
-    if (!isInt<21>(Value) && Ctx) {
-      Ctx->reportError(Fixup.getLoc(), "out of range PC21 fixup");
+    if (!isInt<21>(Value)) {
+      Ctx.reportError(Fixup.getLoc(), "out of range PC21 fixup");
       return 0;
     }
     break;
@@ -181,8 +182,8 @@ static unsigned adjustFixupValue(const MCFixup &Fixup, uint64_t Value,
     // Forcing a signed division because Value can be negative.
     Value = (int64_t) Value / 4;
     // We now check if Value can be encoded as a 26-bit signed immediate.
-    if (!isInt<26>(Value) && Ctx) {
-      Ctx->reportError(Fixup.getLoc(), "out of range PC26 fixup");
+    if (!isInt<26>(Value)) {
+      Ctx.reportError(Fixup.getLoc(), "out of range PC26 fixup");
       return 0;
     }
     break;
@@ -190,8 +191,8 @@ static unsigned adjustFixupValue(const MCFixup &Fixup, uint64_t Value,
     // Forcing a signed division because Value can be negative.
     Value = (int64_t)Value / 2;
     // We now check if Value can be encoded as a 26-bit signed immediate.
-    if (!isInt<26>(Value) && Ctx) {
-      Ctx->reportFatalError(Fixup.getLoc(), "out of range PC26 fixup");
+    if (!isInt<26>(Value)) {
+      Ctx.reportFatalError(Fixup.getLoc(), "out of range PC26 fixup");
       return 0;
     }
     break;
@@ -199,8 +200,8 @@ static unsigned adjustFixupValue(const MCFixup &Fixup, uint64_t Value,
     // Forcing a signed division because Value can be negative.
     Value = (int64_t)Value / 2;
     // We now check if Value can be encoded as a 21-bit signed immediate.
-    if (!isInt<21>(Value) && Ctx) {
-      Ctx->reportError(Fixup.getLoc(), "out of range PC21 fixup");
+    if (!isInt<21>(Value)) {
+      Ctx.reportError(Fixup.getLoc(), "out of range PC21 fixup");
       return 0;
     }
     break;
@@ -209,10 +210,9 @@ static unsigned adjustFixupValue(const MCFixup &Fixup, uint64_t Value,
   return Value;
 }
 
-MCObjectWriter *
+std::unique_ptr<MCObjectWriter>
 MipsAsmBackend::createObjectWriter(raw_pwrite_stream &OS) const {
-  return createMipsELFObjectWriter(OS,
-    MCELFObjectTargetWriter::getOSABI(OSType), IsLittle, Is64Bit);
+  return createMipsELFObjectWriter(OS, TheTriple, IsN32);
 }
 
 // Little-endian fixup data byte ordering:
@@ -235,11 +235,13 @@ static unsigned calculateMMLEIndex(unsigned i) {
 /// ApplyFixup - Apply the \p Value for given \p Fixup into the provided
 /// data fragment, at the offset specified by the fixup and following the
 /// fixup kind as appropriate.
-void MipsAsmBackend::applyFixup(const MCFixup &Fixup, char *Data,
-                                unsigned DataSize, uint64_t Value,
-                                bool IsPCRel) const {
+void MipsAsmBackend::applyFixup(const MCAssembler &Asm, const MCFixup &Fixup,
+                                const MCValue &Target,
+                                MutableArrayRef<char> Data, uint64_t Value,
+                                bool IsResolved) const {
   MCFixupKind Kind = Fixup.getKind();
-  Value = adjustFixupValue(Fixup, Value);
+  MCContext &Ctx = Asm.getContext();
+  Value = adjustFixupValue(Fixup, Value, Ctx);
 
   if (!Value)
     return; // Doesn't change encoding.
@@ -366,6 +368,7 @@ getFixupKindInfo(MCFixupKind Kind) const {
     { "fixup_MICROMIPS_TLS_LDM",         0,     16,   0 },
     { "fixup_MICROMIPS_TLS_DTPREL_HI16", 0,     16,   0 },
     { "fixup_MICROMIPS_TLS_DTPREL_LO16", 0,     16,   0 },
+    { "fixup_MICROMIPS_GOTTPREL",        0,     16,   0 },
     { "fixup_MICROMIPS_TLS_TPREL_HI16",  0,     16,   0 },
     { "fixup_MICROMIPS_TLS_TPREL_LO16",  0,     16,   0 },
     { "fixup_Mips_SUB",                  0,     64,   0 },
@@ -437,6 +440,7 @@ getFixupKindInfo(MCFixupKind Kind) const {
     { "fixup_MICROMIPS_TLS_LDM",         16,     16,   0 },
     { "fixup_MICROMIPS_TLS_DTPREL_HI16", 16,     16,   0 },
     { "fixup_MICROMIPS_TLS_DTPREL_LO16", 16,     16,   0 },
+    { "fixup_MICROMIPS_GOTTPREL",        16,     16,   0 },
     { "fixup_MICROMIPS_TLS_TPREL_HI16",  16,     16,   0 },
     { "fixup_MICROMIPS_TLS_TPREL_LO16",  16,     16,   0 },
     { "fixup_Mips_SUB",                   0,     64,   0 },
@@ -471,52 +475,9 @@ bool MipsAsmBackend::writeNopData(uint64_t Count, MCObjectWriter *OW) const {
   return true;
 }
 
-/// processFixupValue - Target hook to process the literal value of a fixup
-/// if necessary.
-void MipsAsmBackend::processFixupValue(const MCAssembler &Asm,
-                                       const MCAsmLayout &Layout,
-                                       const MCFixup &Fixup,
-                                       const MCFragment *DF,
-                                       const MCValue &Target,
-                                       uint64_t &Value,
-                                       bool &IsResolved) {
-  // At this point we'll ignore the value returned by adjustFixupValue as
-  // we are only checking if the fixup can be applied correctly. We have
-  // access to MCContext from here which allows us to report a fatal error
-  // with *possibly* a source code location.
-  // The caller will also ignore any changes we make to Value
-  // (recordRelocation() overwrites it with it's own calculation).
-  (void)adjustFixupValue(Fixup, Value, &Asm.getContext());
-}
-
-// MCAsmBackend
-MCAsmBackend *llvm::createMipsAsmBackendEL32(const Target &T,
-                                             const MCRegisterInfo &MRI,
-                                             const Triple &TT, StringRef CPU,
-                                             const MCTargetOptions &Options) {
-  return new MipsAsmBackend(T, TT.getOS(), /*IsLittle*/ true,
-                            /*Is64Bit*/ false);
-}
-
-MCAsmBackend *llvm::createMipsAsmBackendEB32(const Target &T,
-                                             const MCRegisterInfo &MRI,
-                                             const Triple &TT, StringRef CPU,
-                                             const MCTargetOptions &Options) {
-  return new MipsAsmBackend(T, TT.getOS(), /*IsLittle*/ false,
-                            /*Is64Bit*/ false);
-}
-
-MCAsmBackend *llvm::createMipsAsmBackendEL64(const Target &T,
-                                             const MCRegisterInfo &MRI,
-                                             const Triple &TT, StringRef CPU,
-                                             const MCTargetOptions &Options) {
-  return new MipsAsmBackend(T, TT.getOS(), /*IsLittle*/ true, /*Is64Bit*/ true);
-}
-
-MCAsmBackend *llvm::createMipsAsmBackendEB64(const Target &T,
-                                             const MCRegisterInfo &MRI,
-                                             const Triple &TT, StringRef CPU,
-                                             const MCTargetOptions &Options) {
-  return new MipsAsmBackend(T, TT.getOS(), /*IsLittle*/ false,
-                            /*Is64Bit*/ true);
+MCAsmBackend *llvm::createMipsAsmBackend(const Target &T,
+                                         const MCRegisterInfo &MRI,
+                                         const Triple &TT, StringRef CPU,
+                                         const MCTargetOptions &Options) {
+  return new MipsAsmBackend(T, MRI, TT, CPU, Options.ABIName == "n32");
 }

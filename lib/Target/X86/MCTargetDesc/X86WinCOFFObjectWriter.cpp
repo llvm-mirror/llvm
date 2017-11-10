@@ -9,11 +9,13 @@
 
 #include "MCTargetDesc/X86FixupKinds.h"
 #include "MCTargetDesc/X86MCTargetDesc.h"
+#include "llvm/BinaryFormat/COFF.h"
+#include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCFixup.h"
+#include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCValue.h"
 #include "llvm/MC/MCWinCOFFObjectWriter.h"
-#include "llvm/Support/COFF.h"
 #include "llvm/Support/ErrorHandling.h"
 
 using namespace llvm;
@@ -25,8 +27,8 @@ public:
   X86WinCOFFObjectWriter(bool Is64Bit);
   ~X86WinCOFFObjectWriter() override = default;
 
-  unsigned getRelocType(const MCValue &Target, const MCFixup &Fixup,
-                        bool IsCrossSection,
+  unsigned getRelocType(MCContext &Ctx, const MCValue &Target,
+                        const MCFixup &Fixup, bool IsCrossSection,
                         const MCAsmBackend &MAB) const override;
 };
 
@@ -36,11 +38,19 @@ X86WinCOFFObjectWriter::X86WinCOFFObjectWriter(bool Is64Bit)
     : MCWinCOFFObjectTargetWriter(Is64Bit ? COFF::IMAGE_FILE_MACHINE_AMD64
                                           : COFF::IMAGE_FILE_MACHINE_I386) {}
 
-unsigned X86WinCOFFObjectWriter::getRelocType(const MCValue &Target,
+unsigned X86WinCOFFObjectWriter::getRelocType(MCContext &Ctx,
+                                              const MCValue &Target,
                                               const MCFixup &Fixup,
                                               bool IsCrossSection,
                                               const MCAsmBackend &MAB) const {
-  unsigned FixupKind = IsCrossSection ? FK_PCRel_4 : Fixup.getKind();
+  unsigned FixupKind = Fixup.getKind();
+  if (IsCrossSection) {
+    if (FixupKind != FK_Data_4 && FixupKind != llvm::X86::reloc_signed_4byte) {
+      Ctx.reportError(Fixup.getLoc(), "Cannot represent this expression");
+      return COFF::IMAGE_REL_AMD64_ADDR32;
+    }
+    FixupKind = FK_PCRel_4;
+  }
 
   MCSymbolRefExpr::VariantKind Modifier = Target.isAbsolute() ?
     MCSymbolRefExpr::VK_None : Target.getSymA()->getKind();
@@ -95,8 +105,8 @@ unsigned X86WinCOFFObjectWriter::getRelocType(const MCValue &Target,
     llvm_unreachable("Unsupported COFF machine type.");
 }
 
-MCObjectWriter *llvm::createX86WinCOFFObjectWriter(raw_pwrite_stream &OS,
-                                                   bool Is64Bit) {
-  MCWinCOFFObjectTargetWriter *MOTW = new X86WinCOFFObjectWriter(Is64Bit);
-  return createWinCOFFObjectWriter(MOTW, OS);
+std::unique_ptr<MCObjectWriter>
+llvm::createX86WinCOFFObjectWriter(raw_pwrite_stream &OS, bool Is64Bit) {
+  auto MOTW = llvm::make_unique<X86WinCOFFObjectWriter>(Is64Bit);
+  return createWinCOFFObjectWriter(std::move(MOTW), OS);
 }

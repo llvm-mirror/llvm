@@ -1,3 +1,4 @@
+; XFAIL: *
 target datalayout = "E-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v128:128:128-n32:64"
 target triple = "powerpc64-unknown-linux-gnu"
 ; RUN: llc -verify-machineinstrs -O2 -ppc-asm-full-reg-names -mcpu=pwr7 -ppc-gen-isel=false < %s | FileCheck %s --implicit-check-not isel
@@ -12,7 +13,7 @@ entry:
 ; CHECK-LABEL: @testExpandISELToIfElse
 ; CHECK: addi r5, r3, 1
 ; CHECK-NEXT: cmpwi cr0, r3, 0
-; CHECK-NEXT: bc 12, 1, [[TRUE:.LBB[0-9]+]]
+; CHECK-NEXT: bc 12, gt, [[TRUE:.LBB[0-9]+]]
 ; CHECK: ori r3, r4, 0
 ; CHECK-NEXT: b [[SUCCESSOR:.LBB[0-9]+]]
 ; CHECK-NEXT:  [[TRUE]]
@@ -32,7 +33,7 @@ entry:
 
 ; CHECK-LABEL: @testExpandISELToIf
 ; CHECK: cmpwi	 r3, 0
-; CHECK-NEXT: bc 12, 1, [[TRUE:.LBB[0-9]+]]
+; CHECK-NEXT: bc 12, gt, [[TRUE:.LBB[0-9]+]]
 ; CHECK-NEXT: blr
 ; CHECK-NEXT:  [[TRUE]]
 ; CHECK-NEXT: addi r3, r4, 0
@@ -48,7 +49,7 @@ entry:
 
 ; CHECK-LABEL: @testExpandISELToElse
 ; CHECK: cmpwi	 r3, 0
-; CHECK-NEXT: bclr 12, 1, 0
+; CHECK-NEXT: bclr 12, gt, 0
 ; CHECK: ori r3, r4, 0
 ; CHECK-NEXT: blr
 }
@@ -95,7 +96,7 @@ entry:
 
 ; CHECK-LABEL: @testExpandISELsTo2ORIs2ADDIs
 ; CHECK: cmpwi r7, 0
-; CHECK-NEXT: bc 12, 1, [[TRUE:.LBB[0-9]+]]
+; CHECK-NEXT: bc 12, gt, [[TRUE:.LBB[0-9]+]]
 ; CHECK: ori r3, r4, 0
 ; CHECK-NEXT: ori r12, r6, 0
 ; CHECK-NEXT: b [[SUCCESSOR:.LBB[0-9]+]]
@@ -121,7 +122,7 @@ entry:
 
 ; CHECK-LABEL: @testExpandISELsTo2ORIs1ADDI
 ; CHECK: cmpwi cr0, r7, 0
-; CHECK-NEXT: bc 12, 1, [[TRUE:.LBB[0-9]+]]
+; CHECK-NEXT: bc 12, gt, [[TRUE:.LBB[0-9]+]]
 ; CHECK: ori r3, r4, 0
 ; CHECK-NEXT: ori r12, r6, 0
 ; CHECK-NEXT: b [[SUCCESSOR:.LBB[0-9]+]]
@@ -148,7 +149,7 @@ entry:
 
 ; CHECK-LABEL: @testExpandISELsTo1ORI1ADDI
 ; CHECK: cmpwi cr0, r7, 0
-; CHECK-NEXT: bc 12, 1, [[TRUE:.LBB[0-9]+]]
+; CHECK-NEXT: bc 12, gt, [[TRUE:.LBB[0-9]+]]
 ; CHECK: ori r5, r6, 0
 ; CHECK-NEXT: b [[SUCCESSOR:.LBB[0-9]+]]
 ; CHECK-NEXT: [[TRUE]]
@@ -176,7 +177,7 @@ entry:
 
 ; CHECK-LABEL: @testExpandISELsTo0ORI2ADDIs
 ; CHECK: cmpwi cr0, r7, 0
-; CHECK-NEXT: bc 12, 1, [[TRUE:.LBB[0-9]+]]
+; CHECK-NEXT: bc 12, gt, [[TRUE:.LBB[0-9]+]]
 ; CHECK-NEXT: b [[SUCCESSOR:.LBB[0-9]+]]
 ; CHECK-NEXT:  [[TRUE]]
 ; CHECK-NEXT: addi r4, r3, 0
@@ -212,13 +213,12 @@ cleanup:
   ret i32 %retval.0
 
 ; CHECK-LABEL: @testComplexISEL
-; CHECK: bc 12, 2, [[TRUE:.LBB[0-9]+]]
-; CHECK-NEXT: b [[SUCCESSOR:.LBB[0-9]+]]
-; CHECK-NEXT:  [[TRUE]]
-; CHECK-NEXT: addi r3, r12, 0
-; CHECK-NEXT: [[SUCCESSOR]]
-; CHECK-NEXT: clrldi r3, r3, 32
-; CHECK-NEXT: blr
+; CHECK-DAG: [[LI:r[0-9]+]], 1
+; CHECK-DAG: cmplwi [[LD:r[0-9]+]], 0
+; CHECK: bnelr cr0
+; CHECK: xor [[XOR:r[0-9]+]]
+; CHECK: cntlzd [[CZ:r[0-9]+]], [[XOR]]
+; CHECK: rldicl [[SH:r[0-9]+]], [[CZ]], 58, 63
 }
 
 !1 = !{!2, !2, i64 0}

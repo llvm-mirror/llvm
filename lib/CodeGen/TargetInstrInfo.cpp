@@ -67,6 +67,11 @@ void TargetInstrInfo::insertNoop(MachineBasicBlock &MBB,
   llvm_unreachable("Target didn't implement insertNoop!");
 }
 
+static bool isAsmComment(const char *Str, const MCAsmInfo &MAI) {
+  return strncmp(Str, MAI.getCommentString().data(),
+                 MAI.getCommentString().size()) == 0;
+}
+
 /// Measure the specified inline asm to determine an approximation of its
 /// length.
 /// Comments (which run till the next SeparatorString or newline) do not
@@ -75,29 +80,46 @@ void TargetInstrInfo::insertNoop(MachineBasicBlock &MBB,
 /// multiple instructions separated by SeparatorString or newlines.
 /// Variable-length instructions are not handled here; this function
 /// may be overloaded in the target code to do that.
+/// We implement a special case of the .space directive which takes only a
+/// single integer argument in base 10 that is the size in bytes. This is a
+/// restricted form of the GAS directive in that we only interpret
+/// simple--i.e. not a logical or arithmetic expression--size values without
+/// the optional fill value. This is primarily used for creating arbitrary
+/// sized inline asm blocks for testing purposes.
 unsigned TargetInstrInfo::getInlineAsmLength(const char *Str,
                                              const MCAsmInfo &MAI) const {
   // Count the number of instructions in the asm.
-  bool atInsnStart = true;
-  unsigned InstCount = 0;
+  bool AtInsnStart = true;
+  unsigned Length = 0;
   for (; *Str; ++Str) {
     if (*Str == '\n' || strncmp(Str, MAI.getSeparatorString(),
                                 strlen(MAI.getSeparatorString())) == 0) {
-      atInsnStart = true;
-    } else if (strncmp(Str, MAI.getCommentString().data(),
-                       MAI.getCommentString().size()) == 0) {
+      AtInsnStart = true;
+    } else if (isAsmComment(Str, MAI)) {
       // Stop counting as an instruction after a comment until the next
       // separator.
-      atInsnStart = false;
+      AtInsnStart = false;
     }
 
-    if (atInsnStart && !std::isspace(static_cast<unsigned char>(*Str))) {
-      ++InstCount;
-      atInsnStart = false;
+    if (AtInsnStart && !std::isspace(static_cast<unsigned char>(*Str))) {
+      unsigned AddLength = MAI.getMaxInstLength();
+      if (strncmp(Str, ".space", 6) == 0) {
+        char *EStr;
+        int SpaceSize;
+        SpaceSize = strtol(Str + 6, &EStr, 10);
+        SpaceSize = SpaceSize < 0 ? 0 : SpaceSize;
+        while (*EStr != '\n' && std::isspace(static_cast<unsigned char>(*EStr)))
+          ++EStr;
+        if (*EStr == '\0' || *EStr == '\n' ||
+            isAsmComment(EStr, MAI)) // Successfully parsed .space argument
+          AddLength = SpaceSize;
+      }
+      Length += AddLength;
+      AtInsnStart = false;
     }
   }
 
-  return InstCount * MAI.getMaxInstLength();
+  return Length;
 }
 
 /// ReplaceTailWithBranchTo - Delete the instruction OldInst and everything
@@ -169,7 +191,7 @@ MachineInstr *TargetInstrInfo::commuteInstructionImpl(MachineInstr &MI,
   MachineInstr *CommutedMI = nullptr;
   if (NewMI) {
     // Create a new instruction.
-    MachineFunction &MF = *MI.getParent()->getParent();
+    MachineFunction &MF = *MI.getMF();
     CommutedMI = MF.CloneMachineInstr(&MI);
   } else {
     CommutedMI = &MI;
@@ -345,12 +367,12 @@ bool TargetInstrInfo::getStackSlotRange(const TargetRegisterClass *RC,
                                         unsigned SubIdx, unsigned &Size,
                                         unsigned &Offset,
                                         const MachineFunction &MF) const {
+  const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
   if (!SubIdx) {
-    Size = RC->getSize();
+    Size = TRI->getSpillSize(*RC);
     Offset = 0;
     return true;
   }
-  const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
   unsigned BitSize = TRI->getSubRegIdxSize(SubIdx);
   // Convert bit size to byte size to be consistent with
   // MCRegisterClass::getSize().
@@ -364,10 +386,10 @@ bool TargetInstrInfo::getStackSlotRange(const TargetRegisterClass *RC,
   Size = BitSize /= 8;
   Offset = (unsigned)BitOffset / 8;
 
-  assert(RC->getSize() >= (Offset + Size) && "bad subregister range");
+  assert(TRI->getSpillSize(*RC) >= (Offset + Size) && "bad subregister range");
 
   if (!MF.getDataLayout().isLittleEndian()) {
-    Offset = RC->getSize() - (Offset + Size);
+    Offset = TRI->getSpillSize(*RC) - (Offset + Size);
   }
   return true;
 }
@@ -388,10 +410,11 @@ bool TargetInstrInfo::produceSameValue(const MachineInstr &MI0,
   return MI0.isIdenticalTo(MI1, MachineInstr::IgnoreVRegDefs);
 }
 
-MachineInstr *TargetInstrInfo::duplicate(MachineInstr &Orig,
-                                         MachineFunction &MF) const {
+MachineInstr &TargetInstrInfo::duplicate(MachineBasicBlock &MBB,
+    MachineBasicBlock::iterator InsertBefore, const MachineInstr &Orig) const {
   assert(!Orig.isNotDuplicable() && "Instruction cannot be duplicated");
-  return MF.CloneMachineInstr(&Orig);
+  MachineFunction &MF = *MBB.getParent();
+  return MF.CloneMachineInstrBundle(MBB, InsertBefore, Orig);
 }
 
 // If the COPY instruction in MI can be folded to a stack operation, return
@@ -415,7 +438,7 @@ static const TargetRegisterClass *canFoldCopy(const MachineInstr &MI,
   assert(TargetRegisterInfo::isVirtualRegister(FoldReg) &&
          "Cannot fold physregs");
 
-  const MachineRegisterInfo &MRI = MI.getParent()->getParent()->getRegInfo();
+  const MachineRegisterInfo &MRI = MI.getMF()->getRegInfo();
   const TargetRegisterClass *RC = MRI.getRegClass(FoldReg);
 
   if (TargetRegisterInfo::isPhysicalRegister(LiveOp.getReg()))
@@ -428,8 +451,8 @@ static const TargetRegisterClass *canFoldCopy(const MachineInstr &MI,
   return nullptr;
 }
 
-void TargetInstrInfo::getNoopForMachoTarget(MCInst &NopInst) const {
-  llvm_unreachable("Not a MachO target");
+void TargetInstrInfo::getNoop(MCInst &NopInst) const {
+  llvm_unreachable("Not implemented");
 }
 
 static MachineInstr *foldPatchpoint(MachineFunction &MF, MachineInstr &MI,
@@ -495,21 +518,13 @@ static MachineInstr *foldPatchpoint(MachineFunction &MF, MachineInstr &MI,
   return NewMI;
 }
 
-/// foldMemoryOperand - Attempt to fold a load or store of the specified stack
-/// slot into the specified machine instruction for the specified operand(s).
-/// If this is possible, a new instruction is returned with the specified
-/// operand folded, otherwise NULL is returned. The client is responsible for
-/// removing the old instruction and adding the new one in the instruction
-/// stream.
 MachineInstr *TargetInstrInfo::foldMemoryOperand(MachineInstr &MI,
                                                  ArrayRef<unsigned> Ops, int FI,
                                                  LiveIntervals *LIS) const {
   auto Flags = MachineMemOperand::MONone;
-  for (unsigned i = 0, e = Ops.size(); i != e; ++i)
-    if (MI.getOperand(Ops[i]).isDef())
-      Flags |= MachineMemOperand::MOStore;
-    else
-      Flags |= MachineMemOperand::MOLoad;
+  for (unsigned OpIdx : Ops)
+    Flags |= MI.getOperand(OpIdx).isDef() ? MachineMemOperand::MOStore
+                                          : MachineMemOperand::MOLoad;
 
   MachineBasicBlock *MBB = MI.getParent();
   assert(MBB && "foldMemoryOperand needs an inserted instruction");
@@ -525,10 +540,10 @@ MachineInstr *TargetInstrInfo::foldMemoryOperand(MachineInstr &MI,
   if (Flags & MachineMemOperand::MOStore) {
     MemSize = MFI.getObjectSize(FI);
   } else {
-    for (unsigned Idx : Ops) {
+    for (unsigned OpIdx : Ops) {
       int64_t OpSize = MFI.getObjectSize(FI);
 
-      if (auto SubReg = MI.getOperand(Idx).getSubReg()) {
+      if (auto SubReg = MI.getOperand(OpIdx).getSubReg()) {
         unsigned SubRegSize = TRI->getSubRegIdxSize(SubReg);
         if (SubRegSize > 0 && !(SubRegSize % 8))
           OpSize = SubRegSize / 8;
@@ -588,6 +603,54 @@ MachineInstr *TargetInstrInfo::foldMemoryOperand(MachineInstr &MI,
   else
     loadRegFromStackSlot(*MBB, Pos, MO.getReg(), FI, RC, TRI);
   return &*--Pos;
+}
+
+MachineInstr *TargetInstrInfo::foldMemoryOperand(MachineInstr &MI,
+                                                 ArrayRef<unsigned> Ops,
+                                                 MachineInstr &LoadMI,
+                                                 LiveIntervals *LIS) const {
+  assert(LoadMI.canFoldAsLoad() && "LoadMI isn't foldable!");
+#ifndef NDEBUG
+  for (unsigned OpIdx : Ops)
+    assert(MI.getOperand(OpIdx).isUse() && "Folding load into def!");
+#endif
+
+  MachineBasicBlock &MBB = *MI.getParent();
+  MachineFunction &MF = *MBB.getParent();
+
+  // Ask the target to do the actual folding.
+  MachineInstr *NewMI = nullptr;
+  int FrameIndex = 0;
+
+  if ((MI.getOpcode() == TargetOpcode::STACKMAP ||
+       MI.getOpcode() == TargetOpcode::PATCHPOINT ||
+       MI.getOpcode() == TargetOpcode::STATEPOINT) &&
+      isLoadFromStackSlot(LoadMI, FrameIndex)) {
+    // Fold stackmap/patchpoint.
+    NewMI = foldPatchpoint(MF, MI, Ops, FrameIndex, *this);
+    if (NewMI)
+      NewMI = &*MBB.insert(MI, NewMI);
+  } else {
+    // Ask the target to do the actual folding.
+    NewMI = foldMemoryOperandImpl(MF, MI, Ops, MI, LoadMI, LIS);
+  }
+
+  if (!NewMI)
+    return nullptr;
+
+  // Copy the memoperands from the load to the folded instruction.
+  if (MI.memoperands_empty()) {
+    NewMI->setMemRefs(LoadMI.memoperands_begin(), LoadMI.memoperands_end());
+  } else {
+    // Handle the rare case of folding multiple loads.
+    NewMI->setMemRefs(MI.memoperands_begin(), MI.memoperands_end());
+    for (MachineInstr::mmo_iterator I = LoadMI.memoperands_begin(),
+                                    E = LoadMI.memoperands_end();
+         I != E; ++I) {
+      NewMI->addMemOperand(MF, *I);
+    }
+  }
+  return NewMI;
 }
 
 bool TargetInstrInfo::hasReassociableOperands(
@@ -685,11 +748,13 @@ bool TargetInstrInfo::getMachineCombinerPatterns(
 
   return false;
 }
+
 /// Return true when a code sequence can improve loop throughput.
 bool
 TargetInstrInfo::isThroughputPattern(MachineCombinerPattern Pattern) const {
   return false;
 }
+
 /// Attempt the reassociation transformation to reduce critical path length.
 /// See the above comments before getMachineCombinerPatterns().
 void TargetInstrInfo::reassociateOps(
@@ -698,7 +763,7 @@ void TargetInstrInfo::reassociateOps(
     SmallVectorImpl<MachineInstr *> &InsInstrs,
     SmallVectorImpl<MachineInstr *> &DelInstrs,
     DenseMap<unsigned, unsigned> &InstrIdxForVirtReg) const {
-  MachineFunction *MF = Root.getParent()->getParent();
+  MachineFunction *MF = Root.getMF();
   MachineRegisterInfo &MRI = MF->getRegInfo();
   const TargetInstrInfo *TII = MF->getSubtarget().getInstrInfo();
   const TargetRegisterInfo *TRI = MF->getSubtarget().getRegisterInfo();
@@ -781,7 +846,7 @@ void TargetInstrInfo::genAlternativeCodeSequence(
     SmallVectorImpl<MachineInstr *> &InsInstrs,
     SmallVectorImpl<MachineInstr *> &DelInstrs,
     DenseMap<unsigned, unsigned> &InstIdxForVirtReg) const {
-  MachineRegisterInfo &MRI = Root.getParent()->getParent()->getRegInfo();
+  MachineRegisterInfo &MRI = Root.getMF()->getRegInfo();
 
   // Select the previous instruction in the sequence based on the input pattern.
   MachineInstr *Prev = nullptr;
@@ -803,59 +868,9 @@ void TargetInstrInfo::genAlternativeCodeSequence(
   reassociateOps(Root, *Prev, Pattern, InsInstrs, DelInstrs, InstIdxForVirtReg);
 }
 
-/// foldMemoryOperand - Same as the previous version except it allows folding
-/// of any load and store from / to any address, not just from a specific
-/// stack slot.
-MachineInstr *TargetInstrInfo::foldMemoryOperand(MachineInstr &MI,
-                                                 ArrayRef<unsigned> Ops,
-                                                 MachineInstr &LoadMI,
-                                                 LiveIntervals *LIS) const {
-  assert(LoadMI.canFoldAsLoad() && "LoadMI isn't foldable!");
-#ifndef NDEBUG
-  for (unsigned i = 0, e = Ops.size(); i != e; ++i)
-    assert(MI.getOperand(Ops[i]).isUse() && "Folding load into def!");
-#endif
-  MachineBasicBlock &MBB = *MI.getParent();
-  MachineFunction &MF = *MBB.getParent();
-
-  // Ask the target to do the actual folding.
-  MachineInstr *NewMI = nullptr;
-  int FrameIndex = 0;
-
-  if ((MI.getOpcode() == TargetOpcode::STACKMAP ||
-       MI.getOpcode() == TargetOpcode::PATCHPOINT ||
-       MI.getOpcode() == TargetOpcode::STATEPOINT) &&
-      isLoadFromStackSlot(LoadMI, FrameIndex)) {
-    // Fold stackmap/patchpoint.
-    NewMI = foldPatchpoint(MF, MI, Ops, FrameIndex, *this);
-    if (NewMI)
-      NewMI = &*MBB.insert(MI, NewMI);
-  } else {
-    // Ask the target to do the actual folding.
-    NewMI = foldMemoryOperandImpl(MF, MI, Ops, MI, LoadMI, LIS);
-  }
-
-  if (!NewMI) return nullptr;
-
-  // Copy the memoperands from the load to the folded instruction.
-  if (MI.memoperands_empty()) {
-    NewMI->setMemRefs(LoadMI.memoperands_begin(), LoadMI.memoperands_end());
-  }
-  else {
-    // Handle the rare case of folding multiple loads.
-    NewMI->setMemRefs(MI.memoperands_begin(), MI.memoperands_end());
-    for (MachineInstr::mmo_iterator I = LoadMI.memoperands_begin(),
-                                    E = LoadMI.memoperands_end();
-         I != E; ++I) {
-      NewMI->addMemOperand(MF, *I);
-    }
-  }
-  return NewMI;
-}
-
 bool TargetInstrInfo::isReallyTriviallyReMaterializableGeneric(
     const MachineInstr &MI, AliasAnalysis *AA) const {
-  const MachineFunction &MF = *MI.getParent()->getParent();
+  const MachineFunction &MF = *MI.getMF();
   const MachineRegisterInfo &MRI = MF.getRegInfo();
 
   // Remat clients assume operand 0 is the defined register.
@@ -933,7 +948,7 @@ bool TargetInstrInfo::isReallyTriviallyReMaterializableGeneric(
 }
 
 int TargetInstrInfo::getSPAdjust(const MachineInstr &MI) const {
-  const MachineFunction *MF = MI.getParent()->getParent();
+  const MachineFunction *MF = MI.getMF();
   const TargetFrameLowering *TFI = MF->getSubtarget().getFrameLowering();
   bool StackGrowsDown =
     TFI->getStackGrowthDirection() == TargetFrameLowering::StackGrowsDown;
@@ -941,12 +956,10 @@ int TargetInstrInfo::getSPAdjust(const MachineInstr &MI) const {
   unsigned FrameSetupOpcode = getCallFrameSetupOpcode();
   unsigned FrameDestroyOpcode = getCallFrameDestroyOpcode();
 
-  if (MI.getOpcode() != FrameSetupOpcode &&
-      MI.getOpcode() != FrameDestroyOpcode)
+  if (!isFrameInstr(MI))
     return 0;
 
-  int SPAdj = MI.getOperand(0).getImm();
-  SPAdj = TFI->alignSPAdjust(SPAdj);
+  int SPAdj = TFI->alignSPAdjust(getFrameSize(MI));
 
   if ((!StackGrowsDown && MI.getOpcode() == FrameSetupOpcode) ||
       (StackGrowsDown && MI.getOpcode() == FrameDestroyOpcode))

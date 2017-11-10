@@ -11,18 +11,19 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/Analysis/VectorUtils.h"
 #include "llvm/ADT/EquivalenceClasses.h"
 #include "llvm/Analysis/DemandedBits.h"
 #include "llvm/Analysis/LoopInfo.h"
-#include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include "llvm/Analysis/ScalarEvolution.h"
+#include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
-#include "llvm/Analysis/VectorUtils.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/GetElementPtrTypeIterator.h"
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/PatternMatch.h"
 #include "llvm/IR/Value.h"
-#include "llvm/IR/Constants.h"
 
 using namespace llvm;
 using namespace llvm::PatternMatch;
@@ -300,7 +301,7 @@ const llvm::Value *llvm::getSplatValue(const Value *V) {
   auto *InsertEltInst =
     dyn_cast<InsertElementInst>(ShuffleInst->getOperand(0));
   if (!InsertEltInst || !isa<ConstantInt>(InsertEltInst->getOperand(2)) ||
-      !cast<ConstantInt>(InsertEltInst->getOperand(2))->isNullValue())
+      !cast<ConstantInt>(InsertEltInst->getOperand(2))->isZero())
     return nullptr;
 
   return InsertEltInst->getOperand(1);

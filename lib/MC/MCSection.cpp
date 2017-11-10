@@ -7,10 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/MC/MCSection.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCFragment.h"
-#include "llvm/MC/MCSection.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -86,7 +86,7 @@ MCSection::getSubsectionInsertionPoint(unsigned Subsection) {
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
-LLVM_DUMP_METHOD void MCSection::dump() {
+LLVM_DUMP_METHOD void MCSection::dump() const {
   raw_ostream &OS = errs();
 
   OS << "<MCSection";

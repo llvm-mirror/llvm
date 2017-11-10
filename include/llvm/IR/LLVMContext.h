@@ -1,4 +1,4 @@
-//===-- llvm/LLVMContext.h - Class for managing "global" state --*- C++ -*-===//
+//===- llvm/LLVMContext.h - Class for managing "global" state ---*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -16,6 +16,7 @@
 #define LLVM_IR_LLVMCONTEXT_H
 
 #include "llvm-c/Types.h"
+#include "llvm/IR/DiagnosticHandler.h"
 #include "llvm/Support/CBindingWrapping.h"
 #include "llvm/Support/Options.h"
 #include <cstdint>
@@ -37,8 +38,28 @@ class StringRef;
 class Twine;
 
 namespace yaml {
+
 class Output;
+
 } // end namespace yaml
+
+namespace SyncScope {
+
+typedef uint8_t ID;
+
+/// Known synchronization scope IDs, which always have the same value.  All
+/// synchronization scope IDs that LLVM has special knowledge of are listed
+/// here.  Additionally, this scheme allows LLVM to efficiently check for
+/// specific synchronization scope ID without comparing strings.
+enum {
+  /// Synchronized with respect to signal handlers executing in the same thread.
+  SingleThread = 0,
+
+  /// Synchronized with respect to all concurrently executing threads.
+  System = 1
+};
+
+} // end namespace SyncScope
 
 /// This is an important class for using LLVM in a threaded context.  It
 /// (opaquely) owns and manages the core "global" data of LLVM's core
@@ -78,6 +99,8 @@ public:
     MD_type = 19,                     // "type"
     MD_section_prefix = 20,           // "section_prefix"
     MD_absolute_symbol = 21,          // "absolute_symbol"
+    MD_associated = 22,               // "associated"
+    MD_callees = 23,                  // "callees"
   };
 
   /// Known operand bundle tag IDs, which always have the same value.  All
@@ -108,6 +131,16 @@ public:
   /// tag registered with an LLVMContext has an unique ID.
   uint32_t getOperandBundleTagID(StringRef Tag) const;
 
+  /// getOrInsertSyncScopeID - Maps synchronization scope name to
+  /// synchronization scope ID.  Every synchronization scope registered with
+  /// LLVMContext has unique ID except pre-defined ones.
+  SyncScope::ID getOrInsertSyncScopeID(StringRef SSN);
+
+  /// getSyncScopeNames - Populates client supplied SmallVector with
+  /// synchronization scope names registered with LLVMContext.  Synchronization
+  /// scope names are ordered by increasing synchronization scope IDs.
+  void getSyncScopeNames(SmallVectorImpl<StringRef> &SSNs) const;
+
   /// Define the GC for a function
   void setGC(const Function &Fn, std::string GCName);
 
@@ -133,17 +166,12 @@ public:
   void enableDebugTypeODRUniquing();
   void disableDebugTypeODRUniquing();
 
-  typedef void (*InlineAsmDiagHandlerTy)(const SMDiagnostic&, void *Context,
-                                         unsigned LocCookie);
-
-  /// Defines the type of a diagnostic handler.
-  /// \see LLVMContext::setDiagnosticHandler.
-  /// \see LLVMContext::diagnose.
-  typedef void (*DiagnosticHandlerTy)(const DiagnosticInfo &DI, void *Context);
+  using InlineAsmDiagHandlerTy = void (*)(const SMDiagnostic&, void *Context,
+                                          unsigned LocCookie);
 
   /// Defines the type of a yield callback.
   /// \see LLVMContext::setYieldCallback.
-  typedef void (*YieldCallbackTy)(LLVMContext *Context, void *OpaqueHandle);
+  using YieldCallbackTy = void (*)(LLVMContext *Context, void *OpaqueHandle);
 
   /// setInlineAsmDiagnosticHandler - This method sets a handler that is invoked
   /// when problems with inline asm are detected by the backend.  The first
@@ -163,32 +191,58 @@ public:
   /// setInlineAsmDiagnosticHandler.
   void *getInlineAsmDiagnosticContext() const;
 
-  /// setDiagnosticHandler - This method sets a handler that is invoked
-  /// when the backend needs to report anything to the user.  The first
-  /// argument is a function pointer and the second is a context pointer that
-  /// gets passed into the DiagHandler.  The third argument should be set to
+  /// setDiagnosticHandlerCallBack - This method sets a handler call back
+  /// that is invoked when the backend needs to report anything to the user.
+  /// The first argument is a function pointer and the second is a context pointer
+  /// that gets passed into the DiagHandler.  The third argument should be set to
   /// true if the handler only expects enabled diagnostics.
   ///
   /// LLVMContext doesn't take ownership or interpret either of these
   /// pointers.
-  void setDiagnosticHandler(DiagnosticHandlerTy DiagHandler,
-                            void *DiagContext = nullptr,
+  void setDiagnosticHandlerCallBack(
+      DiagnosticHandler::DiagnosticHandlerTy DiagHandler,
+      void *DiagContext = nullptr, bool RespectFilters = false);
+
+  /// setDiagnosticHandler - This method sets unique_ptr to object of DiagnosticHandler
+  /// to provide custom diagnostic handling. The first argument is unique_ptr of object
+  /// of type DiagnosticHandler or a derived of that.   The third argument should be
+  /// set to true if the handler only expects enabled diagnostics.
+  ///
+  /// Ownership of this pointer is moved to LLVMContextImpl.
+  void setDiagnosticHandler(std::unique_ptr<DiagnosticHandler> &&DH,
                             bool RespectFilters = false);
 
-  /// getDiagnosticHandler - Return the diagnostic handler set by
-  /// setDiagnosticHandler.
-  DiagnosticHandlerTy getDiagnosticHandler() const;
+  /// getDiagnosticHandlerCallBack - Return the diagnostic handler call back set by
+  /// setDiagnosticHandlerCallBack.
+  DiagnosticHandler::DiagnosticHandlerTy getDiagnosticHandlerCallBack() const;
 
   /// getDiagnosticContext - Return the diagnostic context set by
   /// setDiagnosticContext.
   void *getDiagnosticContext() const;
 
+  /// getDiagHandlerPtr - Returns const raw pointer of DiagnosticHandler set by
+  /// setDiagnosticHandler.
+  const DiagnosticHandler *getDiagHandlerPtr() const;
+
+  /// getDiagnosticHandler - transfers owenership of DiagnosticHandler unique_ptr
+  /// to caller.
+  std::unique_ptr<DiagnosticHandler> getDiagnosticHandler();
+
   /// \brief Return if a code hotness metric should be included in optimization
   /// diagnostics.
-  bool getDiagnosticHotnessRequested() const;
+  bool getDiagnosticsHotnessRequested() const;
   /// \brief Set if a code hotness metric should be included in optimization
   /// diagnostics.
-  void setDiagnosticHotnessRequested(bool Requested);
+  void setDiagnosticsHotnessRequested(bool Requested);
+
+  /// \brief Return the minimum hotness value a diagnostic would need in order
+  /// to be included in optimization diagnostics. If there is no minimum, this
+  /// returns None.
+  uint64_t getDiagnosticsHotnessThreshold() const;
+
+  /// \brief Set the minimum hotness value a diagnostic needs in order to be
+  /// included in optimization diagnostics.
+  void setDiagnosticsHotnessThreshold(uint64_t Threshold);
 
   /// \brief Return the YAML file used by the backend to save optimization
   /// diagnostics.  If null, diagnostics are not saved in a file but only

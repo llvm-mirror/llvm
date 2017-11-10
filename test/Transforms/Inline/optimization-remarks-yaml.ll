@@ -1,8 +1,41 @@
-; RUN: opt < %s -S -inline -pass-remarks-missed=inline -pass-remarks-with-hotness \
+; RUN: opt < %s -S -inline -pass-remarks-missed=inline \
+; RUN:     -pass-remarks-with-hotness -pass-remarks-hotness-threshold 15 \
 ; RUN:     -pass-remarks-output=%t 2>&1 | FileCheck %s
 ; RUN: cat %t | FileCheck -check-prefix=YAML %s
 ; RUN: opt < %s -S -inline -pass-remarks-with-hotness -pass-remarks-output=%t
 ; RUN: cat %t | FileCheck -check-prefix=YAML %s
+;
+; Verify that remarks that don't meet the hotness threshold are not output.
+; RUN: opt < %s -S -inline -pass-remarks-missed=inline \
+; RUN:     -pass-remarks-with-hotness -pass-remarks-hotness-threshold 100 \
+; RUN:     -pass-remarks-output=%t.threshold 2>&1 | \
+; RUN:     FileCheck -check-prefix=THRESHOLD %s
+; RUN: test ! -s %t.threshold
+; RUN: opt < %s -S -inline \
+; RUN:     -pass-remarks-with-hotness -pass-remarks-hotness-threshold 100 \
+; RUN:     -pass-remarks-output=%t.threshold
+; The remarks output file should be empty.
+; RUN: test ! -s %t.threshold
+
+; NewPM:
+; RUN: opt < %s -S -passes=inline -pass-remarks-missed=inline \
+; RUN:     -pass-remarks-with-hotness -pass-remarks-hotness-threshold 15 \
+; RUN:     -pass-remarks-output=%t 2>&1 | FileCheck %s -check-prefix=CHECK_NEW
+; RUN: test ! -s %t
+; RUN: opt < %s -S -passes=inline -pass-remarks-with-hotness -pass-remarks-output=%t
+; RUN: test ! -s %t
+;
+; Verify that remarks that don't meet the hotness threshold are not output.
+; RUN: opt < %s -S -passes=inline -pass-remarks-missed=inline \
+; RUN:     -pass-remarks-with-hotness -pass-remarks-hotness-threshold 100 \
+; RUN:     -pass-remarks-output=%t.threshold 2>&1 | \
+; RUN:     FileCheck -check-prefix=THRESHOLD %s
+; RUN: test ! -s %t.threshold
+; RUN: opt < %s -S -passes=inline \
+; RUN:     -pass-remarks-with-hotness -pass-remarks-hotness-threshold 100 \
+; RUN:     -pass-remarks-output=%t.threshold
+; The remarks output file should be empty.
+; RUN: test ! -s %t.threshold
 
 ; Check the YAML file generated for inliner remarks for this program:
 ;
@@ -42,6 +75,12 @@
 ; YAML-NEXT:     DebugLoc:        { File: /tmp/s.c, Line: 4, Column: 0 }
 ; YAML-NEXT:   - String: ' because its definition is unavailable'
 ; YAML-NEXT: ...
+
+; No remarks should be output, since none meet the threshold.
+; THRESHOLD-NOT: remark
+
+; NewPM does not output this kind of "missed" remark.
+; CHECK_NEW-NOT: remark
 
 ; ModuleID = '/tmp/s.c'
 source_filename = "/tmp/s.c"

@@ -105,12 +105,6 @@ public:
   // Return whether the target has an explicit NOP encoding.
   bool hasNOP() const;
 
-  virtual void getNoopForElfTarget(MCInst &NopInst) const {
-    getNoopForMachoTarget(NopInst);
-  }
-
-  bool isTailCall(const MachineInstr &Inst) const override;
-
   // Return the non-pre/post incrementing version of 'Opc'. Return 0
   // if there is not such an opcode.
   virtual unsigned getUnindexedOpcode(unsigned Opc) const = 0;
@@ -165,6 +159,24 @@ public:
 
   bool isPredicable(const MachineInstr &MI) const override;
 
+  // CPSR defined in instruction
+  static bool isCPSRDefined(const MachineInstr &MI);
+  bool isAddrMode3OpImm(const MachineInstr &MI, unsigned Op) const;
+  bool isAddrMode3OpMinusReg(const MachineInstr &MI, unsigned Op) const;
+
+  // Load, scaled register offset
+  bool isLdstScaledReg(const MachineInstr &MI, unsigned Op) const;
+  // Load, scaled register offset, not plus LSL2
+  bool isLdstScaledRegNotPlusLsl2(const MachineInstr &MI, unsigned Op) const;
+  // Minus reg for ldstso addr mode
+  bool isLdstSoMinusReg(const MachineInstr &MI, unsigned Op) const;
+  // Scaled register offset in address mode 2
+  bool isAm2ScaledReg(const MachineInstr &MI, unsigned Op) const;
+  // Load multiple, base reg in list
+  bool isLDMBaseRegInList(const MachineInstr &MI) const;
+  // get LDM variable defs size
+  unsigned getLDMVariableDefsSize(const MachineInstr &MI) const;
+
   /// GetInstSize - Returns the size of the specified MachineInstr.
   ///
   unsigned getInstSizeInBytes(const MachineInstr &MI) const override;
@@ -208,8 +220,9 @@ public:
                      const MachineInstr &Orig,
                      const TargetRegisterInfo &TRI) const override;
 
-  MachineInstr *duplicate(MachineInstr &Orig,
-                          MachineFunction &MF) const override;
+  MachineInstr &
+  duplicate(MachineBasicBlock &MBB, MachineBasicBlock::iterator InsertBefore,
+            const MachineInstr &Orig) const override;
 
   const MachineInstrBuilder &AddDReg(MachineInstrBuilder &MIB, unsigned Reg,
                                      unsigned SubIdx, unsigned State,
@@ -406,6 +419,19 @@ public:
   /// Returns true if the instruction has a shift by immediate that can be
   /// executed in one cycle less.
   bool isSwiftFastImmShift(const MachineInstr *MI) const;
+
+  /// Returns predicate register associated with the given frame instruction.
+  unsigned getFramePred(const MachineInstr &MI) const {
+    assert(isFrameInstr(MI));
+    // Operands of ADJCALLSTACKDOWN/ADJCALLSTACKUP:
+    // - argument declared in the pattern:
+    // 0 - frame size
+    // 1 - arg of CALLSEQ_START/CALLSEQ_END
+    // 2 - predicate code (like ARMCC::AL)
+    // - added by predOps:
+    // 3 - predicate reg
+    return MI.getOperand(3).getReg();
+  }
 };
 
 /// Get the operands corresponding to the given \p Pred value. By default, the

@@ -14,11 +14,14 @@
 def SDT_CMPFP0  : SDTypeProfile<0, 2, [SDTCisFP<0>, SDTCisVT<1, i32>]>;
 def SDT_VMOVDRR : SDTypeProfile<1, 2, [SDTCisVT<0, f64>, SDTCisVT<1, i32>,
                                        SDTCisSameAs<1, 2>]>;
+def SDT_VMOVRRD : SDTypeProfile<2, 1, [SDTCisVT<0, i32>, SDTCisSameAs<0, 1>,
+                                       SDTCisVT<2, f64>]>;
 
 def arm_fmstat : SDNode<"ARMISD::FMSTAT",  SDTNone, [SDNPInGlue, SDNPOutGlue]>;
 def arm_cmpfp  : SDNode<"ARMISD::CMPFP",   SDT_ARMFCmp, [SDNPOutGlue]>;
 def arm_cmpfp0 : SDNode<"ARMISD::CMPFPw0", SDT_CMPFP0, [SDNPOutGlue]>;
 def arm_fmdrr  : SDNode<"ARMISD::VMOVDRR", SDT_VMOVDRR>;
+def arm_fmrrd  : SDNode<"ARMISD::VMOVRRD", SDT_VMOVRRD>;
 
 //===----------------------------------------------------------------------===//
 // Operand Definitions.
@@ -1054,7 +1057,7 @@ let hasSideEffects = 0 in {
 def VMOVRRD  : AVConv3I<0b11000101, 0b1011,
                         (outs GPR:$Rt, GPR:$Rt2), (ins DPR:$Dm),
                         IIC_fpMOVDI, "vmov", "\t$Rt, $Rt2, $Dm",
-                 [/* FIXME: Can't write pattern for multiple result instr*/]>,
+                 [(set GPR:$Rt, GPR:$Rt2, (arm_fmrrd DPR:$Dm))]>,
                Sched<[WriteFPMOV]> {
   // Instruction operands.
   bits<5> Dm;
@@ -1558,6 +1561,15 @@ def VTOUIRH : AVConv1IsH_Encode<0b11101, 0b11, 0b1100, 0b1001,
 }
 }
 
+// v8.3-a Javascript Convert to Signed fixed-point
+def VJCVT : AVConv1IsD_Encode<0b11101, 0b11, 0b1001, 0b1011,
+                                (outs SPR:$Sd), (ins DPR:$Dm),
+                                IIC_fpCVTDI, "vjcvt", ".s32.f64\t$Sd, $Dm",
+                                []>,
+            Requires<[HasFPARMv8, HasV8_3a]> {
+  let Inst{7} = 1; // Z bit
+}
+
 // Convert between floating-point and fixed-point
 // Data type for fixed-point naming convention:
 //   S16 (U=0, sx=0) -> SH
@@ -1859,10 +1871,19 @@ def VNMLAH : AHbI<0b11100, 0b01, 1, 0,
                 RegConstraint<"$Sdin = $Sd">,
                 Requires<[HasFullFP16,UseFPVMLx,DontUseFusedMAC]>;
 
+// (-(a * b) - dst) -> -(dst + (a * b))
 def : Pat<(fsub_mlx (fneg (fmul_su DPR:$a, (f64 DPR:$b))), DPR:$dstin),
           (VNMLAD DPR:$dstin, DPR:$a, DPR:$b)>,
           Requires<[HasVFP2,HasDPVFP,UseFPVMLx,DontUseFusedMAC]>;
 def : Pat<(fsub_mlx (fneg (fmul_su SPR:$a, SPR:$b)), SPR:$dstin),
+          (VNMLAS SPR:$dstin, SPR:$a, SPR:$b)>,
+          Requires<[HasVFP2,DontUseNEONForFP,UseFPVMLx,DontUseFusedMAC]>;
+
+// (-dst - (a * b)) -> -(dst + (a * b))
+def : Pat<(fsub_mlx (fneg DPR:$dstin), (fmul_su DPR:$a, (f64 DPR:$b))),
+          (VNMLAD DPR:$dstin, DPR:$a, DPR:$b)>,
+          Requires<[HasVFP2,HasDPVFP,UseFPVMLx,DontUseFusedMAC]>;
+def : Pat<(fsub_mlx (fneg SPR:$dstin), (fmul_su SPR:$a, SPR:$b)),
           (VNMLAS SPR:$dstin, SPR:$a, SPR:$b)>,
           Requires<[HasVFP2,DontUseNEONForFP,UseFPVMLx,DontUseFusedMAC]>;
 
@@ -1955,7 +1976,8 @@ def VFMSD : ADbI<0b11101, 0b10, 1, 0,
                  [(set DPR:$Dd, (fadd_mlx (fneg (fmul_su DPR:$Dn,DPR:$Dm)),
                                           (f64 DPR:$Ddin)))]>,
               RegConstraint<"$Ddin = $Dd">,
-              Requires<[HasVFP4,HasDPVFP,UseFusedMAC]>;
+              Requires<[HasVFP4,HasDPVFP,UseFusedMAC]>,
+              Sched<[WriteFPMAC64, ReadFPMAC, ReadFPMUL, ReadFPMUL]>;
 
 def VFMSS : ASbIn<0b11101, 0b10, 1, 0,
                   (outs SPR:$Sd), (ins SPR:$Sdin, SPR:$Sn, SPR:$Sm),
@@ -1963,7 +1985,8 @@ def VFMSS : ASbIn<0b11101, 0b10, 1, 0,
                   [(set SPR:$Sd, (fadd_mlx (fneg (fmul_su SPR:$Sn, SPR:$Sm)),
                                            SPR:$Sdin))]>,
               RegConstraint<"$Sdin = $Sd">,
-              Requires<[HasVFP4,DontUseNEONForFP,UseFusedMAC]> {
+              Requires<[HasVFP4,DontUseNEONForFP,UseFusedMAC]>,
+              Sched<[WriteFPMAC32, ReadFPMAC, ReadFPMUL, ReadFPMUL]> {
   // Some single precision VFP instructions may be executed on both NEON and
   // VFP pipelines.
 }
@@ -1973,7 +1996,8 @@ def VFMSH : AHbI<0b11101, 0b10, 1, 0,
                   IIC_fpFMAC16, "vfms", ".f16\t$Sd, $Sn, $Sm",
                   []>,
               RegConstraint<"$Sdin = $Sd">,
-              Requires<[HasFullFP16,UseFusedMAC]>;
+              Requires<[HasFullFP16,UseFusedMAC]>,
+              Sched<[WriteFPMAC32, ReadFPMAC, ReadFPMUL, ReadFPMUL]>;
 
 def : Pat<(fsub_mlx DPR:$dstin, (fmul_su DPR:$a, (f64 DPR:$b))),
           (VFMSD DPR:$dstin, DPR:$a, DPR:$b)>,
@@ -2004,7 +2028,8 @@ def VFNMAD : ADbI<0b11101, 0b01, 1, 0,
                   [(set DPR:$Dd,(fsub_mlx (fneg (fmul_su DPR:$Dn,DPR:$Dm)),
                                           (f64 DPR:$Ddin)))]>,
                 RegConstraint<"$Ddin = $Dd">,
-                Requires<[HasVFP4,HasDPVFP,UseFusedMAC]>;
+                Requires<[HasVFP4,HasDPVFP,UseFusedMAC]>,
+                Sched<[WriteFPMAC64, ReadFPMAC, ReadFPMUL, ReadFPMUL]>;
 
 def VFNMAS : ASbI<0b11101, 0b01, 1, 0,
                   (outs SPR:$Sd), (ins SPR:$Sdin, SPR:$Sn, SPR:$Sm),
@@ -2012,7 +2037,8 @@ def VFNMAS : ASbI<0b11101, 0b01, 1, 0,
                   [(set SPR:$Sd, (fsub_mlx (fneg (fmul_su SPR:$Sn, SPR:$Sm)),
                                            SPR:$Sdin))]>,
                 RegConstraint<"$Sdin = $Sd">,
-                Requires<[HasVFP4,DontUseNEONForFP,UseFusedMAC]> {
+                Requires<[HasVFP4,DontUseNEONForFP,UseFusedMAC]>,
+                Sched<[WriteFPMAC32, ReadFPMAC, ReadFPMUL, ReadFPMUL]> {
   // Some single precision VFP instructions may be executed on both NEON and
   // VFP pipelines.
 }
@@ -2022,7 +2048,8 @@ def VFNMAH : AHbI<0b11101, 0b01, 1, 0,
                   IIC_fpFMAC16, "vfnma", ".f16\t$Sd, $Sn, $Sm",
                   []>,
                 RegConstraint<"$Sdin = $Sd">,
-                Requires<[HasFullFP16,UseFusedMAC]>;
+                Requires<[HasFullFP16,UseFusedMAC]>,
+                Sched<[WriteFPMAC32, ReadFPMAC, ReadFPMUL, ReadFPMUL]>;
 
 def : Pat<(fsub_mlx (fneg (fmul_su DPR:$a, (f64 DPR:$b))), DPR:$dstin),
           (VFNMAD DPR:$dstin, DPR:$a, DPR:$b)>,
@@ -2053,14 +2080,16 @@ def VFNMSD : ADbI<0b11101, 0b01, 0, 0,
                   [(set DPR:$Dd, (fsub_mlx (fmul_su DPR:$Dn, DPR:$Dm),
                                            (f64 DPR:$Ddin)))]>,
                RegConstraint<"$Ddin = $Dd">,
-               Requires<[HasVFP4,HasDPVFP,UseFusedMAC]>;
+               Requires<[HasVFP4,HasDPVFP,UseFusedMAC]>,
+               Sched<[WriteFPMAC64, ReadFPMAC, ReadFPMUL, ReadFPMUL]>;
 
 def VFNMSS : ASbI<0b11101, 0b01, 0, 0,
                   (outs SPR:$Sd), (ins SPR:$Sdin, SPR:$Sn, SPR:$Sm),
                   IIC_fpFMAC32, "vfnms", ".f32\t$Sd, $Sn, $Sm",
              [(set SPR:$Sd, (fsub_mlx (fmul_su SPR:$Sn, SPR:$Sm), SPR:$Sdin))]>,
                          RegConstraint<"$Sdin = $Sd">,
-                  Requires<[HasVFP4,DontUseNEONForFP,UseFusedMAC]> {
+                  Requires<[HasVFP4,DontUseNEONForFP,UseFusedMAC]>,
+                  Sched<[WriteFPMAC32, ReadFPMAC, ReadFPMUL, ReadFPMUL]> {
   // Some single precision VFP instructions may be executed on both NEON and
   // VFP pipelines.
 }
@@ -2070,7 +2099,8 @@ def VFNMSH : AHbI<0b11101, 0b01, 0, 0,
                   IIC_fpFMAC16, "vfnms", ".f16\t$Sd, $Sn, $Sm",
              []>,
                          RegConstraint<"$Sdin = $Sd">,
-                  Requires<[HasFullFP16,UseFusedMAC]>;
+                  Requires<[HasFullFP16,UseFusedMAC]>,
+                  Sched<[WriteFPMAC32, ReadFPMAC, ReadFPMUL, ReadFPMUL]>;
 
 def : Pat<(fsub_mlx (fmul_su DPR:$a, (f64 DPR:$b)), DPR:$dstin),
           (VFNMSD DPR:$dstin, DPR:$a, DPR:$b)>,
@@ -2148,28 +2178,32 @@ let Defs = [CPSR], Uses = [FPSCR_NZCV], Rt = 0b1111 /* apsr_nzcv */ in
 def FMSTAT : MovFromVFP<0b0001 /* fpscr */, (outs), (ins),
                         "vmrs", "\tAPSR_nzcv, fpscr", [(arm_fmstat)]>;
 
-// Application level FPSCR -> GPR
-let hasSideEffects = 1, Uses = [FPSCR] in
-def VMRS : MovFromVFP<0b0001 /* fpscr */, (outs GPR:$Rt), (ins),
-                      "vmrs", "\t$Rt, fpscr",
-                      [(set GPR:$Rt, (int_arm_get_fpscr))]>;
+let DecoderMethod = "DecodeForVMRSandVMSR" in {
+ // Application level FPSCR -> GPR
+ let hasSideEffects = 1, Uses = [FPSCR] in
+ def VMRS :  MovFromVFP<0b0001 /* fpscr */, (outs GPRnopc:$Rt), (ins),
+                        "vmrs", "\t$Rt, fpscr",
+                        [(set GPRnopc:$Rt, (int_arm_get_fpscr))]>;
 
-// System level FPEXC, FPSID -> GPR
-let Uses = [FPSCR] in {
-  def VMRS_FPEXC : MovFromVFP<0b1000 /* fpexc */, (outs GPR:$Rt), (ins),
-                              "vmrs", "\t$Rt, fpexc", []>;
-  def VMRS_FPSID : MovFromVFP<0b0000 /* fpsid */, (outs GPR:$Rt), (ins),
-                              "vmrs", "\t$Rt, fpsid", []>;
-  def VMRS_MVFR0 : MovFromVFP<0b0111 /* mvfr0 */, (outs GPR:$Rt), (ins),
+ // System level FPEXC, FPSID -> GPR
+ let Uses = [FPSCR] in {
+   def VMRS_FPEXC : MovFromVFP<0b1000 /* fpexc */, (outs GPRnopc:$Rt), (ins),
+                               "vmrs", "\t$Rt, fpexc", []>;
+   def VMRS_FPSID : MovFromVFP<0b0000 /* fpsid */, (outs GPRnopc:$Rt), (ins),
+                               "vmrs", "\t$Rt, fpsid", []>;
+   def VMRS_MVFR0 : MovFromVFP<0b0111 /* mvfr0 */, (outs GPRnopc:$Rt), (ins),
                               "vmrs", "\t$Rt, mvfr0", []>;
-  def VMRS_MVFR1 : MovFromVFP<0b0110 /* mvfr1 */, (outs GPR:$Rt), (ins),
-                              "vmrs", "\t$Rt, mvfr1", []>;
-  def VMRS_MVFR2 : MovFromVFP<0b0101 /* mvfr2 */, (outs GPR:$Rt), (ins),
-                              "vmrs", "\t$Rt, mvfr2", []>, Requires<[HasFPARMv8]>;
-  def VMRS_FPINST : MovFromVFP<0b1001 /* fpinst */, (outs GPR:$Rt), (ins),
-                              "vmrs", "\t$Rt, fpinst", []>;
-  def VMRS_FPINST2 : MovFromVFP<0b1010 /* fpinst2 */, (outs GPR:$Rt), (ins),
-                                "vmrs", "\t$Rt, fpinst2", []>;
+   def VMRS_MVFR1 : MovFromVFP<0b0110 /* mvfr1 */, (outs GPRnopc:$Rt), (ins),
+                               "vmrs", "\t$Rt, mvfr1", []>;
+   let Predicates = [HasFPARMv8] in {
+     def VMRS_MVFR2 : MovFromVFP<0b0101 /* mvfr2 */, (outs GPRnopc:$Rt), (ins),
+                                 "vmrs", "\t$Rt, mvfr2", []>;
+   }
+   def VMRS_FPINST : MovFromVFP<0b1001 /* fpinst */, (outs GPRnopc:$Rt), (ins),
+                                "vmrs", "\t$Rt, fpinst", []>;
+   def VMRS_FPINST2 : MovFromVFP<0b1010 /* fpinst2 */, (outs GPRnopc:$Rt),
+                                 (ins), "vmrs", "\t$Rt, fpinst2", []>;
+ }
 }
 
 //===----------------------------------------------------------------------===//
@@ -2193,21 +2227,23 @@ class MovToVFP<bits<4> opc19_16, dag oops, dag iops, string opc, string asm,
   let Inst{4}     = 1;
 }
 
-let Defs = [FPSCR] in {
-  // Application level GPR -> FPSCR
-  def VMSR : MovToVFP<0b0001 /* fpscr */, (outs), (ins GPR:$src),
-                      "vmsr", "\tfpscr, $src", [(int_arm_set_fpscr GPR:$src)]>;
-  // System level GPR -> FPEXC
-  def VMSR_FPEXC : MovToVFP<0b1000 /* fpexc */, (outs), (ins GPR:$src),
-                      "vmsr", "\tfpexc, $src", []>;
-  // System level GPR -> FPSID
-  def VMSR_FPSID : MovToVFP<0b0000 /* fpsid */, (outs), (ins GPR:$src),
-                      "vmsr", "\tfpsid, $src", []>;
-
-  def VMSR_FPINST : MovToVFP<0b1001 /* fpinst */, (outs), (ins GPR:$src),
+let DecoderMethod = "DecodeForVMRSandVMSR" in {
+ let Defs = [FPSCR] in {
+   // Application level GPR -> FPSCR
+   def VMSR : MovToVFP<0b0001 /* fpscr */, (outs), (ins GPRnopc:$src),
+                       "vmsr", "\tfpscr, $src",
+                       [(int_arm_set_fpscr GPRnopc:$src)]>;
+   // System level GPR -> FPEXC
+   def VMSR_FPEXC : MovToVFP<0b1000 /* fpexc */, (outs), (ins GPRnopc:$src),
+                               "vmsr", "\tfpexc, $src", []>;
+   // System level GPR -> FPSID
+   def VMSR_FPSID : MovToVFP<0b0000 /* fpsid */, (outs), (ins GPRnopc:$src),
+                             "vmsr", "\tfpsid, $src", []>;
+   def VMSR_FPINST : MovToVFP<0b1001 /* fpinst */, (outs), (ins GPRnopc:$src),
                               "vmsr", "\tfpinst, $src", []>;
-  def VMSR_FPINST2 : MovToVFP<0b1010 /* fpinst2 */, (outs), (ins GPR:$src),
-                                "vmsr", "\tfpinst2, $src", []>;
+   def VMSR_FPINST2 : MovToVFP<0b1010 /* fpinst2 */, (outs), (ins GPRnopc:$src),
+                               "vmsr", "\tfpinst2, $src", []>;
+ }
 }
 
 //===----------------------------------------------------------------------===//

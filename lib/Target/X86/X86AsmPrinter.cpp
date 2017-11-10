@@ -15,8 +15,10 @@
 #include "X86AsmPrinter.h"
 #include "InstPrinter/X86ATTInstPrinter.h"
 #include "MCTargetDesc/X86BaseInfo.h"
+#include "MCTargetDesc/X86TargetStreamer.h"
 #include "X86InstrInfo.h"
 #include "X86MachineFunctionInfo.h"
+#include "llvm/BinaryFormat/COFF.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineModuleInfoImpls.h"
 #include "llvm/CodeGen/MachineValueType.h"
@@ -34,11 +36,14 @@
 #include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
-#include "llvm/Support/COFF.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TargetRegistry.h"
 using namespace llvm;
+
+X86AsmPrinter::X86AsmPrinter(TargetMachine &TM,
+                             std::unique_ptr<MCStreamer> Streamer)
+    : AsmPrinter(TM, std::move(Streamer)), SM(*this), FM(*this) {}
 
 //===----------------------------------------------------------------------===//
 // Primitive Helper Functions.
@@ -51,8 +56,11 @@ bool X86AsmPrinter::runOnMachineFunction(MachineFunction &MF) {
 
   SMShadowTracker.startFunction(MF);
   CodeEmitter.reset(TM.getTarget().createMCCodeEmitter(
-      *MF.getSubtarget().getInstrInfo(), *MF.getSubtarget().getRegisterInfo(),
+      *Subtarget->getInstrInfo(), *Subtarget->getRegisterInfo(),
       MF.getContext()));
+
+  EmitFPOData =
+      Subtarget->isTargetWin32() && MF.getMMI().getModule()->getCodeViewFlag();
 
   SetupMachineFunction(MF);
 
@@ -72,8 +80,28 @@ bool X86AsmPrinter::runOnMachineFunction(MachineFunction &MF) {
   // Emit the XRay table for this function.
   emitXRayTable();
 
+  EmitFPOData = false;
+
   // We didn't modify anything.
   return false;
+}
+
+void X86AsmPrinter::EmitFunctionBodyStart() {
+  if (EmitFPOData) {
+    X86TargetStreamer *XTS =
+        static_cast<X86TargetStreamer *>(OutStreamer->getTargetStreamer());
+    unsigned ParamsSize =
+        MF->getInfo<X86MachineFunctionInfo>()->getArgumentStackSize();
+    XTS->emitFPOProc(CurrentFnSym, ParamsSize);
+  }
+}
+
+void X86AsmPrinter::EmitFunctionBodyEnd() {
+  if (EmitFPOData) {
+    X86TargetStreamer *XTS =
+        static_cast<X86TargetStreamer *>(OutStreamer->getTargetStreamer());
+    XTS->emitFPOEndProc();
+  }
 }
 
 /// printSymbolOperand - Print a raw symbol reference operand.  This handles

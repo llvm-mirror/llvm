@@ -85,6 +85,7 @@ define i32 @main() #0 {
   store i32 3, i32* %4, align 4
   store i32 4, i32* %5, align 4
   store i32 1, i32* @x, align 4
+  call void asm sideeffect "", "~{memory},~{dirflag},~{fpsr},~{flags}"()
   ; CHECK: callq [[OFUNC2]]
   store i32 1, i32* %2, align 4
   store i32 2, i32* %3, align 4
@@ -95,14 +96,14 @@ define i32 @main() #0 {
 
 attributes #0 = { noredzone nounwind ssp uwtable "no-frame-pointer-elim"="true" }
 
-; CHECK-LABEL: l_OUTLINED_FUNCTION_1:
+; CHECK-LABEL: l_OUTLINED_FUNCTION_{{[0-9]+}}:
 ; CHECK:      movl  $1, -{{[0-9]+}}(%rbp)
 ; CHECK-NEXT: movl  $2, -{{[0-9]+}}(%rbp)
 ; CHECK-NEXT: movl  $3, -{{[0-9]+}}(%rbp)
 ; CHECK-NEXT: movl  $4, -{{[0-9]+}}(%rbp)
 ; CHECK-NEXT: retq
 
-; CHECK-LABEL: l_OUTLINED_FUNCTION_0:
+; CHECK-LABEL: l_OUTLINED_FUNCTION_{{[0-9]+}}:
 ; CHECK:      movl  $1, -{{[0-9]+}}(%rbp)
 ; CHECK-NEXT: movl  $2, -{{[0-9]+}}(%rbp)
 ; CHECK-NEXT: movl  $3, -{{[0-9]+}}(%rbp)

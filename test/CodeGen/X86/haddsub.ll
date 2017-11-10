@@ -397,3 +397,4 @@ define <2 x float> @haddps_v2f32(<4 x float> %v0) {
   %res1 = insertelement <2 x float> %res0, float %op1, i32 1
   ret <2 x float> %res1
 }
+

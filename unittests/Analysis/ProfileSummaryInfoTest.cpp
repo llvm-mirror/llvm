@@ -7,11 +7,11 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/Analysis/ProfileSummaryInfo.h"
 #include "llvm/Analysis/BlockFrequencyInfo.h"
 #include "llvm/Analysis/BlockFrequencyInfoImpl.h"
 #include "llvm/Analysis/BranchProbabilityInfo.h"
 #include "llvm/Analysis/LoopInfo.h"
-#include "llvm/Analysis/ProfileSummaryInfo.h"
 #include "llvm/AsmParser/Parser.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CallSite.h"
@@ -102,6 +102,9 @@ TEST_F(ProfileSummaryInfoTest, TestNoProfile) {
   Function *F = M->getFunction("f");
 
   ProfileSummaryInfo PSI = buildPSI(M.get());
+  EXPECT_FALSE(PSI.hasProfileSummary());
+  EXPECT_FALSE(PSI.hasSampleProfile());
+  EXPECT_FALSE(PSI.hasInstrumentationProfile());
   // In the absence of profiles, is{Hot|Cold}X methods should always return
   // false.
   EXPECT_FALSE(PSI.isHotCount(1000));
@@ -130,6 +133,7 @@ TEST_F(ProfileSummaryInfoTest, TestCommon) {
   Function *H = M->getFunction("h");
 
   ProfileSummaryInfo PSI = buildPSI(M.get());
+  EXPECT_TRUE(PSI.hasProfileSummary());
   EXPECT_TRUE(PSI.isHotCount(400));
   EXPECT_TRUE(PSI.isColdCount(2));
   EXPECT_FALSE(PSI.isColdCount(100));
@@ -144,6 +148,8 @@ TEST_F(ProfileSummaryInfoTest, InstrProf) {
   auto M = makeLLVMModule("InstrProf");
   Function *F = M->getFunction("f");
   ProfileSummaryInfo PSI = buildPSI(M.get());
+  EXPECT_TRUE(PSI.hasProfileSummary());
+  EXPECT_TRUE(PSI.hasInstrumentationProfile());
 
   BasicBlock &BB0 = F->getEntryBlock();
   BasicBlock *BB1 = BB0.getTerminator()->getSuccessor(0);
@@ -161,6 +167,12 @@ TEST_F(ProfileSummaryInfoTest, InstrProf) {
   CallSite CS2(CI2);
 
   EXPECT_TRUE(PSI.isHotCallSite(CS1, &BFI));
+  EXPECT_FALSE(PSI.isHotCallSite(CS2, &BFI));
+
+  // Test that adding an MD_prof metadata with a hot count on CS2 does not
+  // change its hotness as it has no effect in instrumented profiling.
+  MDBuilder MDB(M->getContext());
+  CI2->setMetadata(llvm::LLVMContext::MD_prof, MDB.createBranchWeights({400}));
   EXPECT_FALSE(PSI.isHotCallSite(CS2, &BFI));
 }
 
@@ -168,6 +180,8 @@ TEST_F(ProfileSummaryInfoTest, SampleProf) {
   auto M = makeLLVMModule("SampleProfile");
   Function *F = M->getFunction("f");
   ProfileSummaryInfo PSI = buildPSI(M.get());
+  EXPECT_TRUE(PSI.hasProfileSummary());
+  EXPECT_TRUE(PSI.hasSampleProfile());
 
   BasicBlock &BB0 = F->getEntryBlock();
   BasicBlock *BB1 = BB0.getTerminator()->getSuccessor(0);
@@ -182,14 +196,18 @@ TEST_F(ProfileSummaryInfoTest, SampleProf) {
 
   CallSite CS1(BB1->getFirstNonPHI());
   auto *CI2 = BB2->getFirstNonPHI();
+  // Manually attach branch weights metadata to the call instruction.
+  SmallVector<uint32_t, 1> Weights;
+  Weights.push_back(1000);
+  MDBuilder MDB(M->getContext());
+  CI2->setMetadata(LLVMContext::MD_prof, MDB.createBranchWeights(Weights));
   CallSite CS2(CI2);
 
-  EXPECT_TRUE(PSI.isHotCallSite(CS1, &BFI));
-  EXPECT_FALSE(PSI.isHotCallSite(CS2, &BFI));
+  EXPECT_FALSE(PSI.isHotCallSite(CS1, &BFI));
+  EXPECT_TRUE(PSI.isHotCallSite(CS2, &BFI));
 
   // Test that CS2 is considered hot when it gets an MD_prof metadata with
   // weights that exceed the hot count threshold.
-  MDBuilder MDB(M->getContext());
   CI2->setMetadata(llvm::LLVMContext::MD_prof, MDB.createBranchWeights({400}));
   EXPECT_TRUE(PSI.isHotCallSite(CS2, &BFI));
 }

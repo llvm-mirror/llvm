@@ -15,17 +15,22 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/MC/MCDirectives.h"
 #include "llvm/MC/MCFixup.h"
+#include "llvm/MC/MCFragment.h"
 #include <cstdint>
+#include <memory>
 
 namespace llvm {
 
 class MCAsmLayout;
 class MCAssembler;
 class MCCFIInstruction;
+class MCCodePadder;
 struct MCFixupKindInfo;
 class MCFragment;
 class MCInst;
+class MCObjectStreamer;
 class MCObjectWriter;
+struct MCCodePaddingContext;
 class MCRelaxableFragment;
 class MCSubtargetInfo;
 class MCValue;
@@ -33,8 +38,11 @@ class raw_pwrite_stream;
 
 /// Generic interface to target specific assembler backends.
 class MCAsmBackend {
+  std::unique_ptr<MCCodePadder> CodePadder;
+
 protected: // Can only create subclasses.
   MCAsmBackend();
+  MCAsmBackend(std::unique_ptr<MCCodePadder> TargetCodePadder);
 
 public:
   MCAsmBackend(const MCAsmBackend &) = delete;
@@ -46,7 +54,8 @@ public:
 
   /// Create a new MCObjectWriter instance for use by the assembler backend to
   /// emit the final object file.
-  virtual MCObjectWriter *createObjectWriter(raw_pwrite_stream &OS) const = 0;
+  virtual std::unique_ptr<MCObjectWriter>
+  createObjectWriter(raw_pwrite_stream &OS) const = 0;
 
   /// \name Target Fixup Interfaces
   /// @{
@@ -60,20 +69,20 @@ public:
   /// Get information on a fixup kind.
   virtual const MCFixupKindInfo &getFixupKindInfo(MCFixupKind Kind) const;
 
-  /// Target hook to adjust the literal value of a fixup if necessary.
-  /// IsResolved signals whether the caller believes a relocation is needed; the
-  /// target can modify the value. The default does nothing.
-  virtual void processFixupValue(const MCAssembler &Asm,
-                                 const MCAsmLayout &Layout,
-                                 const MCFixup &Fixup, const MCFragment *DF,
-                                 const MCValue &Target, uint64_t &Value,
-                                 bool &IsResolved) {}
+  /// Hook to check if a relocation is needed for some target specific reason.
+  virtual bool shouldForceRelocation(const MCAssembler &Asm,
+                                     const MCFixup &Fixup,
+                                     const MCValue &Target) {
+    return false;
+  }
 
   /// Apply the \p Value for given \p Fixup into the provided data fragment, at
   /// the offset specified by the fixup and following the fixup kind as
-  /// appropriate.
-  virtual void applyFixup(const MCFixup &Fixup, char *Data, unsigned DataSize,
-                          uint64_t Value, bool IsPCRel) const = 0;
+  /// appropriate. Errors (such as an out of range fixup value) should be
+  /// reported via \p Ctx.
+  virtual void applyFixup(const MCAssembler &Asm, const MCFixup &Fixup,
+                          const MCValue &Target, MutableArrayRef<char> Data,
+                          uint64_t Value, bool IsResolved) const = 0;
 
   /// @}
 
@@ -132,6 +141,40 @@ public:
       generateCompactUnwindEncoding(ArrayRef<MCCFIInstruction>) const {
     return 0;
   }
+
+  /// Handles all target related code padding when starting to write a new
+  /// basic block to an object file.
+  ///
+  /// \param OS The streamer used for writing the padding data and function.
+  /// \param Context the context of the padding, Embeds the basic block's
+  /// parameters.
+  void handleCodePaddingBasicBlockStart(MCObjectStreamer *OS,
+                                        const MCCodePaddingContext &Context);
+  /// Handles all target related code padding after writing a block to an object
+  /// file.
+  ///
+  /// \param Context the context of the padding, Embeds the basic block's
+  /// parameters.
+  void handleCodePaddingBasicBlockEnd(const MCCodePaddingContext &Context);
+  /// Handles all target related code padding before writing a new instruction
+  /// to an object file.
+  ///
+  /// \param Inst the instruction.
+  void handleCodePaddingInstructionBegin(const MCInst &Inst);
+  /// Handles all target related code padding after writing an instruction to an
+  /// object file.
+  ///
+  /// \param Inst the instruction.
+  void handleCodePaddingInstructionEnd(const MCInst &Inst);
+
+  /// Relaxes a fragment (changes the size of the padding) according to target
+  /// requirements. The new size computation is done w.r.t a layout.
+  ///
+  /// \param PF The fragment to relax.
+  /// \param Layout Code layout information.
+  ///
+  /// \returns true iff any relaxation occured.
+  bool relaxFragment(MCPaddingFragment *PF, MCAsmLayout &Layout);
 };
 
 } // end namespace llvm

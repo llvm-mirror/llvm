@@ -12,11 +12,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/ADT/iterator_range.h"
-#include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/ScheduleDAG.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/iterator_range.h"
+#include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/ScheduleHazardRecognizer.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
 #include "llvm/Support/CommandLine.h"
@@ -65,6 +65,41 @@ void ScheduleDAG::clearDAG() {
 const MCInstrDesc *ScheduleDAG::getNodeDesc(const SDNode *Node) const {
   if (!Node || !Node->isMachineOpcode()) return nullptr;
   return &TII->get(Node->getMachineOpcode());
+}
+
+LLVM_DUMP_METHOD
+raw_ostream &SDep::print(raw_ostream &OS, const TargetRegisterInfo *TRI) const {
+  switch (getKind()) {
+  case Data:   OS << "Data"; break;
+  case Anti:   OS << "Anti"; break;
+  case Output: OS << "Out "; break;
+  case Order:  OS << "Ord "; break;
+  }
+
+  switch (getKind()) {
+  case Data:
+    OS << " Latency=" << getLatency();
+    if (TRI && isAssignedRegDep())
+      OS << " Reg=" << PrintReg(getReg(), TRI);
+    break;
+  case Anti:
+  case Output:
+    OS << " Latency=" << getLatency();
+    break;
+  case Order:
+    OS << " Latency=" << getLatency();
+    switch(Contents.OrdKind) {
+    case Barrier:      OS << " Barrier"; break;
+    case MayAliasMem:
+    case MustAliasMem: OS << " Memory"; break;
+    case Artificial:   OS << " Artificial"; break;
+    case Weak:         OS << " Weak"; break;
+    case Cluster:      OS << " Cluster"; break;
+    }
+    break;
+  }
+
+  return OS;
 }
 
 bool SUnit::addPred(const SDep &D, bool Required) {
@@ -302,16 +337,24 @@ void SUnit::biasCriticalPath() {
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 LLVM_DUMP_METHOD
-void SUnit::print(raw_ostream &OS, const ScheduleDAG *DAG) const {
-  if (this == &DAG->ExitSU)
-    OS << "ExitSU";
-  else if (this == &DAG->EntrySU)
+raw_ostream &SUnit::print(raw_ostream &OS,
+                          const SUnit *Entry, const SUnit *Exit) const {
+  if (this == Entry)
     OS << "EntrySU";
+  else if (this == Exit)
+    OS << "ExitSU";
   else
     OS << "SU(" << NodeNum << ")";
+  return OS;
 }
 
-LLVM_DUMP_METHOD void SUnit::dump(const ScheduleDAG *G) const {
+LLVM_DUMP_METHOD
+raw_ostream &SUnit::print(raw_ostream &OS, const ScheduleDAG *G) const {
+  return print(OS, &G->EntrySU, &G->ExitSU);
+}
+
+LLVM_DUMP_METHOD
+void SUnit::dump(const ScheduleDAG *G) const {
   print(dbgs(), G);
   dbgs() << ": ";
   G->dumpNode(this);
@@ -333,40 +376,18 @@ LLVM_DUMP_METHOD void SUnit::dumpAll(const ScheduleDAG *G) const {
 
   if (Preds.size() != 0) {
     dbgs() << "  Predecessors:\n";
-    for (const SDep &SuccDep : Preds) {
-      dbgs() << "   ";
-      switch (SuccDep.getKind()) {
-      case SDep::Data:   dbgs() << "data "; break;
-      case SDep::Anti:   dbgs() << "anti "; break;
-      case SDep::Output: dbgs() << "out  "; break;
-      case SDep::Order:  dbgs() << "ord  "; break;
-      }
-      SuccDep.getSUnit()->print(dbgs(), G);
-      if (SuccDep.isArtificial())
-        dbgs() << " *";
-      dbgs() << ": Latency=" << SuccDep.getLatency();
-      if (SuccDep.isAssignedRegDep())
-        dbgs() << " Reg=" << PrintReg(SuccDep.getReg(), G->TRI);
-      dbgs() << "\n";
+    for (const SDep &Dep : Preds) {
+      dbgs() << "    ";
+      Dep.getSUnit()->print(dbgs(), G); dbgs() << ": ";
+      Dep.print(dbgs(), G->TRI); dbgs() << '\n';
     }
   }
   if (Succs.size() != 0) {
     dbgs() << "  Successors:\n";
-    for (const SDep &SuccDep : Succs) {
-      dbgs() << "   ";
-      switch (SuccDep.getKind()) {
-      case SDep::Data:   dbgs() << "data "; break;
-      case SDep::Anti:   dbgs() << "anti "; break;
-      case SDep::Output: dbgs() << "out  "; break;
-      case SDep::Order:  dbgs() << "ord  "; break;
-      }
-      SuccDep.getSUnit()->print(dbgs(), G);
-      if (SuccDep.isArtificial())
-        dbgs() << " *";
-      dbgs() << ": Latency=" << SuccDep.getLatency();
-      if (SuccDep.isAssignedRegDep())
-        dbgs() << " Reg=" << PrintReg(SuccDep.getReg(), G->TRI);
-      dbgs() << "\n";
+    for (const SDep &Dep : Succs) {
+      dbgs() << "    ";
+      Dep.getSUnit()->print(dbgs(), G); dbgs() << ": ";
+      Dep.print(dbgs(), G->TRI); dbgs() << '\n';
     }
   }
 }
@@ -546,6 +567,87 @@ void ScheduleDAGTopologicalSort::DFS(const SUnit *SU, int UpperBound,
       }
     }
   } while (!WorkList.empty());
+}
+
+std::vector<int> ScheduleDAGTopologicalSort::GetSubGraph(const SUnit &StartSU,
+                                                         const SUnit &TargetSU,
+                                                         bool &Success) {
+  std::vector<const SUnit*> WorkList;
+  int LowerBound = Node2Index[StartSU.NodeNum];
+  int UpperBound = Node2Index[TargetSU.NodeNum];
+  bool Found = false;
+  BitVector VisitedBack;
+  std::vector<int> Nodes;
+
+  if (LowerBound > UpperBound) {
+    Success = false;
+    return Nodes;
+  }
+
+  WorkList.reserve(SUnits.size());
+  Visited.reset();
+
+  // Starting from StartSU, visit all successors up
+  // to UpperBound.
+  WorkList.push_back(&StartSU);
+  do {
+    const SUnit *SU = WorkList.back();
+    WorkList.pop_back();
+    for (int I = SU->Succs.size()-1; I >= 0; --I) {
+      const SUnit *Succ = SU->Succs[I].getSUnit();
+      unsigned s = Succ->NodeNum;
+      // Edges to non-SUnits are allowed but ignored (e.g. ExitSU).
+      if (Succ->isBoundaryNode())
+        continue;
+      if (Node2Index[s] == UpperBound) {
+        Found = true;
+        continue;
+      }
+      // Visit successors if not already and in affected region.
+      if (!Visited.test(s) && Node2Index[s] < UpperBound) {
+        Visited.set(s);
+        WorkList.push_back(Succ);
+      }
+    }
+  } while (!WorkList.empty());
+
+  if (!Found) {
+    Success = false;
+    return Nodes;
+  }
+
+  WorkList.clear();
+  VisitedBack.resize(SUnits.size());
+  Found = false;
+
+  // Starting from TargetSU, visit all predecessors up
+  // to LowerBound. SUs that are visited by the two
+  // passes are added to Nodes.
+  WorkList.push_back(&TargetSU);
+  do {
+    const SUnit *SU = WorkList.back();
+    WorkList.pop_back();
+    for (int I = SU->Preds.size()-1; I >= 0; --I) {
+      const SUnit *Pred = SU->Preds[I].getSUnit();
+      unsigned s = Pred->NodeNum;
+      // Edges to non-SUnits are allowed but ignored (e.g. EntrySU).
+      if (Pred->isBoundaryNode())
+        continue;
+      if (Node2Index[s] == LowerBound) {
+        Found = true;
+        continue;
+      }
+      if (!VisitedBack.test(s) && Visited.test(s)) {
+        VisitedBack.set(s);
+        WorkList.push_back(Pred);
+        Nodes.push_back(s);
+      }
+    }
+  } while (!WorkList.empty());
+
+  assert(Found && "Error in SUnit Graph!");
+  Success = true;
+  return Nodes;
 }
 
 void ScheduleDAGTopologicalSort::Shift(BitVector& Visited, int LowerBound,

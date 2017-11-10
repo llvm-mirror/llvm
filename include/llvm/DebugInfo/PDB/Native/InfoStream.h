@@ -10,7 +10,9 @@
 #ifndef LLVM_DEBUGINFO_PDB_RAW_PDBINFOSTREAM_H
 #define LLVM_DEBUGINFO_PDB_RAW_PDBINFOSTREAM_H
 
+#include "llvm/ADT/BitmaskEnum.h"
 #include "llvm/ADT/StringMap.h"
+#include "llvm/DebugInfo/CodeView/GUID.h"
 #include "llvm/DebugInfo/MSF/MappedBlockStream.h"
 #include "llvm/DebugInfo/PDB/Native/NamedStreamMap.h"
 #include "llvm/DebugInfo/PDB/Native/RawConstants.h"
@@ -32,12 +34,21 @@ public:
 
   Error reload();
 
+  uint32_t getStreamSize() const;
+
+  bool containsIdStream() const;
   PdbRaw_ImplVer getVersion() const;
   uint32_t getSignature() const;
   uint32_t getAge() const;
-  PDB_UniqueId getGuid() const;
+  codeview::GUID getGuid() const;
+  uint32_t getNamedStreamMapByteSize() const;
+
+  PdbRaw_Features getFeatures() const;
+  ArrayRef<PdbRaw_FeatureSig> getFeatureSignatures() const;
 
   const NamedStreamMap &getNamedStreams() const;
+
+  BinarySubstreamRef getNamedStreamsBuffer() const;
 
   uint32_t getNamedStreamIndex(llvm::StringRef Name) const;
   iterator_range<StringMapConstIterator<uint32_t>> named_streams() const;
@@ -61,7 +72,14 @@ private:
   // Due to the aforementioned limitations with `Signature`, this is a new
   // signature present on VC70 and higher PDBs which is guaranteed to be
   // universally unique.
-  PDB_UniqueId Guid;
+  codeview::GUID Guid;
+
+  BinarySubstreamRef SubNamedStreams;
+
+  std::vector<PdbRaw_FeatureSig> FeatureSignatures;
+  PdbRaw_Features Features = PdbFeatureNone;
+
+  uint32_t NamedStreamMapByteSize = 0;
 
   NamedStreamMap NamedStreams;
 };

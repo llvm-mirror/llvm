@@ -8,8 +8,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "MCTargetDesc/SystemZMCTargetDesc.h"
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
@@ -61,6 +61,7 @@ enum RegisterKind {
   VR64Reg,
   VR128Reg,
   AR32Reg,
+  CR64Reg,
 };
 
 enum MemoryKind {
@@ -262,6 +263,9 @@ public:
   bool isMemDisp20(MemoryKind MemKind, RegisterKind RegKind) const {
     return isMem(MemKind, RegKind) && inRange(Mem.Disp, -524288, 524287);
   }
+  bool isMemDisp12Len4(RegisterKind RegKind) const {
+    return isMemDisp12(BDLMem, RegKind) && inRange(Mem.Length.Imm, 1, 0x10);
+  }
   bool isMemDisp12Len8(RegisterKind RegKind) const {
     return isMemDisp12(BDLMem, RegKind) && inRange(Mem.Length.Imm, 1, 0x100);
   }
@@ -270,6 +274,10 @@ public:
   SMLoc getStartLoc() const override { return StartLoc; }
   SMLoc getEndLoc() const override { return EndLoc; }
   void print(raw_ostream &OS) const override;
+
+  /// getLocRange - Get the range between the first and last token of this
+  /// operand.
+  SMRange getLocRange() const { return SMRange(StartLoc, EndLoc); }
 
   // Used by the TableGen code to add particular types of operand
   // to an instruction.
@@ -340,6 +348,7 @@ public:
   bool isVF128() const { return false; }
   bool isVR128() const { return isReg(VR128Reg); }
   bool isAR32() const { return isReg(AR32Reg); }
+  bool isCR64() const { return isReg(CR64Reg); }
   bool isAnyReg() const { return (isReg() || isImm(0, 15)); }
   bool isBDAddr32Disp12() const { return isMemDisp12(BDMem, ADDR32Reg); }
   bool isBDAddr32Disp20() const { return isMemDisp20(BDMem, ADDR32Reg); }
@@ -347,6 +356,7 @@ public:
   bool isBDAddr64Disp20() const { return isMemDisp20(BDMem, ADDR64Reg); }
   bool isBDXAddr64Disp12() const { return isMemDisp12(BDXMem, ADDR64Reg); }
   bool isBDXAddr64Disp20() const { return isMemDisp20(BDXMem, ADDR64Reg); }
+  bool isBDLAddr64Disp12Len4() const { return isMemDisp12Len4(ADDR64Reg); }
   bool isBDLAddr64Disp12Len8() const { return isMemDisp12Len8(ADDR64Reg); }
   bool isBDRAddr64Disp12() const { return isMemDisp12(BDRMem, ADDR64Reg); }
   bool isBDVAddr64Disp12() const { return isMemDisp12(BDVMem, ADDR64Reg); }
@@ -375,7 +385,8 @@ private:
     RegGR,
     RegFP,
     RegV,
-    RegAR
+    RegAR,
+    RegCR
   };
   struct Register {
     RegisterGroup Group;
@@ -414,7 +425,7 @@ public:
   SystemZAsmParser(const MCSubtargetInfo &sti, MCAsmParser &parser,
                    const MCInstrInfo &MII,
                    const MCTargetOptions &Options)
-    : MCTargetAsmParser(Options, sti), Parser(parser) {
+    : MCTargetAsmParser(Options, sti, MII), Parser(parser) {
     MCAsmParserExtension::Initialize(Parser);
 
     // Alias the .word directive to .short.
@@ -483,6 +494,9 @@ public:
   OperandMatchResultTy parseAR32(OperandVector &Operands) {
     return parseRegister(Operands, RegAR, SystemZMC::AR32Regs, AR32Reg);
   }
+  OperandMatchResultTy parseCR64(OperandVector &Operands) {
+    return parseRegister(Operands, RegCR, SystemZMC::CR64Regs, CR64Reg);
+  }
   OperandMatchResultTy parseAnyReg(OperandVector &Operands) {
     return parseAnyRegister(Operands);
   }
@@ -529,6 +543,7 @@ public:
 #define GET_REGISTER_MATCHER
 #define GET_SUBTARGET_FEATURE_NAME
 #define GET_MATCHER_IMPLEMENTATION
+#define GET_MNEMONIC_SPELL_CHECKER
 #include "SystemZGenAsmMatcher.inc"
 
 // Used for the .insn directives; contains information needed to parse the
@@ -644,6 +659,8 @@ bool SystemZAsmParser::parseRegister(Register &Reg) {
     Reg.Group = RegV;
   else if (Prefix == 'a' && Reg.Num < 16)
     Reg.Group = RegAR;
+  else if (Prefix == 'c' && Reg.Num < 16)
+    Reg.Group = RegCR;
   else
     return Error(Reg.StartLoc, "invalid register");
 
@@ -736,6 +753,10 @@ SystemZAsmParser::parseAnyRegister(OperandVector &Operands) {
     else if (Reg.Group == RegAR) {
       Kind = AR32Reg;
       RegNo = SystemZMC::AR32Regs[Reg.Num];
+    }
+    else if (Reg.Group == RegCR) {
+      Kind = CR64Reg;
+      RegNo = SystemZMC::CR64Regs[Reg.Num];
     }
     else {
       return MatchOperand_ParseFail;
@@ -1052,6 +1073,8 @@ bool SystemZAsmParser::ParseRegister(unsigned &RegNo, SMLoc &StartLoc,
     RegNo = SystemZMC::VR128Regs[Reg.Num];
   else if (Reg.Group == RegAR)
     RegNo = SystemZMC::AR32Regs[Reg.Num];
+  else if (Reg.Group == RegCR)
+    RegNo = SystemZMC::CR64Regs[Reg.Num];
   StartLoc = Reg.StartLoc;
   EndLoc = Reg.EndLoc;
   return false;
@@ -1146,6 +1169,9 @@ bool SystemZAsmParser::parseOperand(OperandVector &Operands,
   return false;
 }
 
+static std::string SystemZMnemonicSpellCheck(StringRef S, uint64_t FBS,
+                                             unsigned VariantID = 0);
+
 bool SystemZAsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
                                                OperandVector &Operands,
                                                MCStreamer &Out,
@@ -1191,8 +1217,13 @@ bool SystemZAsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     return Error(ErrorLoc, "invalid operand for instruction");
   }
 
-  case Match_MnemonicFail:
-    return Error(IDLoc, "invalid instruction");
+  case Match_MnemonicFail: {
+    uint64_t FBS = ComputeAvailableFeatures(getSTI().getFeatureBits());
+    std::string Suggestion = SystemZMnemonicSpellCheck(
+      ((SystemZOperand &)*Operands[0]).getToken(), FBS);
+    return Error(IDLoc, "invalid instruction" + Suggestion,
+                 ((SystemZOperand &)*Operands[0]).getLocRange());
+  }
   }
 
   llvm_unreachable("Unexpected match type");

@@ -246,14 +246,14 @@ define void @test_zero_v8f32(<8 x float>* %dst) {
 ;
 ; AVX-LABEL: test_zero_v8f32:
 ; AVX:       # BB#0:
-; AVX-NEXT:    vxorps %ymm0, %ymm0, %ymm0
+; AVX-NEXT:    vxorps %xmm0, %xmm0, %xmm0
 ; AVX-NEXT:    vmovntps %ymm0, (%rdi)
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
 ;
 ; VLX-LABEL: test_zero_v8f32:
 ; VLX:       # BB#0:
-; VLX-NEXT:    vpxor %ymm0, %ymm0, %ymm0
+; VLX-NEXT:    vpxor %xmm0, %xmm0, %xmm0
 ; VLX-NEXT:    vmovntdq %ymm0, (%rdi)
 ; VLX-NEXT:    vzeroupper
 ; VLX-NEXT:    retq
@@ -271,14 +271,14 @@ define void @test_zero_v8i32(<8 x i32>* %dst) {
 ;
 ; AVX-LABEL: test_zero_v8i32:
 ; AVX:       # BB#0:
-; AVX-NEXT:    vxorps %ymm0, %ymm0, %ymm0
+; AVX-NEXT:    vxorps %xmm0, %xmm0, %xmm0
 ; AVX-NEXT:    vmovntps %ymm0, (%rdi)
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
 ;
 ; VLX-LABEL: test_zero_v8i32:
 ; VLX:       # BB#0:
-; VLX-NEXT:    vpxor %ymm0, %ymm0, %ymm0
+; VLX-NEXT:    vpxor %xmm0, %xmm0, %xmm0
 ; VLX-NEXT:    vmovntdq %ymm0, (%rdi)
 ; VLX-NEXT:    vzeroupper
 ; VLX-NEXT:    retq
@@ -296,14 +296,14 @@ define void @test_zero_v4f64(<4 x double>* %dst) {
 ;
 ; AVX-LABEL: test_zero_v4f64:
 ; AVX:       # BB#0:
-; AVX-NEXT:    vxorps %ymm0, %ymm0, %ymm0
+; AVX-NEXT:    vxorps %xmm0, %xmm0, %xmm0
 ; AVX-NEXT:    vmovntps %ymm0, (%rdi)
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
 ;
 ; VLX-LABEL: test_zero_v4f64:
 ; VLX:       # BB#0:
-; VLX-NEXT:    vpxor %ymm0, %ymm0, %ymm0
+; VLX-NEXT:    vpxor %xmm0, %xmm0, %xmm0
 ; VLX-NEXT:    vmovntdq %ymm0, (%rdi)
 ; VLX-NEXT:    vzeroupper
 ; VLX-NEXT:    retq
@@ -321,14 +321,14 @@ define void @test_zero_v4i64(<4 x i64>* %dst) {
 ;
 ; AVX-LABEL: test_zero_v4i64:
 ; AVX:       # BB#0:
-; AVX-NEXT:    vxorps %ymm0, %ymm0, %ymm0
+; AVX-NEXT:    vxorps %xmm0, %xmm0, %xmm0
 ; AVX-NEXT:    vmovntps %ymm0, (%rdi)
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
 ;
 ; VLX-LABEL: test_zero_v4i64:
 ; VLX:       # BB#0:
-; VLX-NEXT:    vpxor %ymm0, %ymm0, %ymm0
+; VLX-NEXT:    vpxor %xmm0, %xmm0, %xmm0
 ; VLX-NEXT:    vmovntdq %ymm0, (%rdi)
 ; VLX-NEXT:    vzeroupper
 ; VLX-NEXT:    retq
@@ -346,14 +346,14 @@ define void @test_zero_v16i16(<16 x i16>* %dst) {
 ;
 ; AVX-LABEL: test_zero_v16i16:
 ; AVX:       # BB#0:
-; AVX-NEXT:    vxorps %ymm0, %ymm0, %ymm0
+; AVX-NEXT:    vxorps %xmm0, %xmm0, %xmm0
 ; AVX-NEXT:    vmovntps %ymm0, (%rdi)
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
 ;
 ; VLX-LABEL: test_zero_v16i16:
 ; VLX:       # BB#0:
-; VLX-NEXT:    vpxor %ymm0, %ymm0, %ymm0
+; VLX-NEXT:    vpxor %xmm0, %xmm0, %xmm0
 ; VLX-NEXT:    vmovntdq %ymm0, (%rdi)
 ; VLX-NEXT:    vzeroupper
 ; VLX-NEXT:    retq
@@ -371,14 +371,14 @@ define void @test_zero_v32i8(<32 x i8>* %dst) {
 ;
 ; AVX-LABEL: test_zero_v32i8:
 ; AVX:       # BB#0:
-; AVX-NEXT:    vxorps %ymm0, %ymm0, %ymm0
+; AVX-NEXT:    vxorps %xmm0, %xmm0, %xmm0
 ; AVX-NEXT:    vmovntps %ymm0, (%rdi)
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
 ;
 ; VLX-LABEL: test_zero_v32i8:
 ; VLX:       # BB#0:
-; VLX-NEXT:    vpxor %ymm0, %ymm0, %ymm0
+; VLX-NEXT:    vpxor %xmm0, %xmm0, %xmm0
 ; VLX-NEXT:    vmovntdq %ymm0, (%rdi)
 ; VLX-NEXT:    vzeroupper
 ; VLX-NEXT:    retq
@@ -541,19 +541,19 @@ define void @test_extract_i32(<4 x i32> %arg, i32* %dst) {
 ;
 ; SSE41-LABEL: test_extract_i32:
 ; SSE41:       # BB#0:
-; SSE41-NEXT:    pextrd $1, %xmm0, %eax
+; SSE41-NEXT:    extractps $1, %xmm0, %eax
 ; SSE41-NEXT:    movntil %eax, (%rdi)
 ; SSE41-NEXT:    retq
 ;
 ; AVX-LABEL: test_extract_i32:
 ; AVX:       # BB#0:
-; AVX-NEXT:    vpextrd $1, %xmm0, %eax
+; AVX-NEXT:    vextractps $1, %xmm0, %eax
 ; AVX-NEXT:    movntil %eax, (%rdi)
 ; AVX-NEXT:    retq
 ;
 ; VLX-LABEL: test_extract_i32:
 ; VLX:       # BB#0:
-; VLX-NEXT:    vpextrd $1, %xmm0, %eax
+; VLX-NEXT:    vextractps $1, %xmm0, %eax
 ; VLX-NEXT:    movntil %eax, (%rdi)
 ; VLX-NEXT:    retq
   %1 = extractelement <4 x i32> %arg, i32 1
@@ -596,14 +596,14 @@ define void @test_extract_i64(<2 x i64> %arg, i64* %dst) {
 ; SSE2-LABEL: test_extract_i64:
 ; SSE2:       # BB#0:
 ; SSE2-NEXT:    pshufd {{.*#+}} xmm0 = xmm0[2,3,0,1]
-; SSE2-NEXT:    movd %xmm0, %rax
+; SSE2-NEXT:    movq %xmm0, %rax
 ; SSE2-NEXT:    movntiq %rax, (%rdi)
 ; SSE2-NEXT:    retq
 ;
 ; SSE4A-LABEL: test_extract_i64:
 ; SSE4A:       # BB#0:
 ; SSE4A-NEXT:    pshufd {{.*#+}} xmm0 = xmm0[2,3,0,1]
-; SSE4A-NEXT:    movd %xmm0, %rax
+; SSE4A-NEXT:    movq %xmm0, %rax
 ; SSE4A-NEXT:    movntiq %rax, (%rdi)
 ; SSE4A-NEXT:    retq
 ;

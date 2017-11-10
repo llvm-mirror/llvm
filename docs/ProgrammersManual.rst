@@ -32,7 +32,7 @@ to know when working in the LLVM infrastructure, and the second describes the
 Core LLVM classes.  In the future this manual will be extended with information
 describing how to use extension libraries, such as dominator information, CFG
 traversal routines, and useful utilities like the ``InstVisitor`` (`doxygen
-<http://llvm.org/doxygen/InstVisitor_8h-source.html>`__) template.
+<http://llvm.org/doxygen/InstVisitor_8h_source.html>`__) template.
 
 .. _general:
 
@@ -108,7 +108,7 @@ they don't have some drawbacks (primarily stemming from the fact that
 ``dynamic_cast<>`` only works on classes that have a v-table).  Because they are
 used so often, you must know what they do and how they work.  All of these
 templates are defined in the ``llvm/Support/Casting.h`` (`doxygen
-<http://llvm.org/doxygen/Casting_8h-source.html>`__) file (note that you very
+<http://llvm.org/doxygen/Casting_8h_source.html>`__) file (note that you very
 rarely have to include this file directly).
 
 ``isa<>``:
@@ -225,7 +225,7 @@ and clients can call it using any one of:
 Similarly, APIs which need to return a string may return a ``StringRef``
 instance, which can be used directly or converted to an ``std::string`` using
 the ``str`` member function.  See ``llvm/ADT/StringRef.h`` (`doxygen
-<http://llvm.org/doxygen/classllvm_1_1StringRef_8h-source.html>`__) for more
+<http://llvm.org/doxygen/StringRef_8h_source.html>`__) for more
 information.
 
 You should rarely use the ``StringRef`` class directly, because it contains
@@ -441,6 +441,15 @@ the program where they can be handled appropriately. Handling the error may be
 as simple as reporting the issue to the user, or it may involve attempts at
 recovery.
 
+.. note::
+
+   While it would be ideal to use this error handling scheme throughout
+   LLVM, there are places where this hasn't been practical to apply. In
+   situations where you absolutely must emit a non-programmatic error and
+   the ``Error`` model isn't workable you can call ``report_fatal_error``,
+   which will call installed error handlers, print a message, and exit the
+   program.
+
 Recoverable errors are modeled using LLVM's ``Error`` scheme. This scheme
 represents errors using function return values, similar to classic C integer
 error codes, or C++'s ``std::error_code``. However, the ``Error`` class is
@@ -486,7 +495,7 @@ that inherits from the ErrorInfo utility, E.g.:
 
   Error printFormattedFile(StringRef Path) {
     if (<check for valid format>)
-      return make_error<InvalidObjectFile>(Path);
+      return make_error<BadFileFormat>(Path);
     // print file contents.
     return Error::success();
   }
@@ -776,22 +785,21 @@ readability.
 Using cantFail to simplify safe callsites
 """""""""""""""""""""""""""""""""""""""""
 
-Some functions may only fail for a subset of their inputs. For such functions
-call-sites using known-safe inputs can assume that the result will be a success
-value.
+Some functions may only fail for a subset of their inputs, so calls using known
+safe inputs can be assumed to succeed.
 
 The cantFail functions encapsulate this by wrapping an assertion that their
 argument is a success value and, in the case of Expected<T>, unwrapping the
-T value from the Expected<T> argument:
+T value:
 
 .. code-block:: c++
 
-  Error mayFail(int X);
-  Expected<int> mayFail2(int X);
+  Error onlyFailsForSomeXValues(int X);
+  Expected<int> onlyFailsForSomeXValues2(int X);
 
   void foo() {
-    cantFail(mayFail(KnownSafeValue));
-    int Y = cantFail(mayFail2(KnownSafeValue));
+    cantFail(onlyFailsForSomeXValues(KnownSafeValue));
+    int Y = cantFail(onlyFailsForSomeXValues2(KnownSafeValue));
     ...
   }
 
@@ -801,8 +809,8 @@ terminate the program on an error input, cantFile simply asserts that the result
 is success. In debug builds this will result in an assertion failure if an error
 is encountered. In release builds the behavior of cantFail for failure values is
 undefined. As such, care must be taken in the use of cantFail: clients must be
-certain that a cantFail wrapped call really can not fail under any
-circumstances.
+certain that a cantFail wrapped call really can not fail with the given
+arguments.
 
 Use of the cantFail functions should be rare in library code, but they are
 likely to be of more use in tool and unit-test code where inputs and/or
@@ -974,7 +982,7 @@ The ``function_ref`` class template
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The ``function_ref``
-(`doxygen <http://llvm.org/docs/doxygen/html/classllvm_1_1function__ref_3_01Ret_07Params_8_8_8_08_4.html>`__) class
+(`doxygen <http://llvm.org/doxygen/classllvm_1_1function__ref_3_01Ret_07Params_8_8_8_08_4.html>`__) class
 template represents a reference to a callable object, templated over the type
 of the callable. This is a good choice for passing a callback to a function,
 if you don't need to hold onto the callback after the function returns. In this
@@ -1024,7 +1032,7 @@ you don't want them to always be noisy.  A standard compromise is to comment
 them out, allowing you to enable them if you need them in the future.
 
 The ``llvm/Support/Debug.h`` (`doxygen
-<http://llvm.org/doxygen/Debug_8h-source.html>`__) file provides a macro named
+<http://llvm.org/doxygen/Debug_8h_source.html>`__) file provides a macro named
 ``DEBUG()`` that is a much nicer solution to this problem.  Basically, you can
 put arbitrary code into the argument of the ``DEBUG`` macro, and it is only
 executed if '``opt``' (or any other tool) is run with the '``-debug``' command
@@ -1121,7 +1129,7 @@ The ``Statistic`` class & ``-stats`` option
 -------------------------------------------
 
 The ``llvm/ADT/Statistic.h`` (`doxygen
-<http://llvm.org/doxygen/Statistic_8h-source.html>`__) file provides a class
+<http://llvm.org/doxygen/Statistic_8h_source.html>`__) file provides a class
 named ``Statistic`` that is used as a unified way to keep track of what the LLVM
 compiler is doing and how effective various optimizations are.  It is useful to
 see what optimizations are contributing to making a particular program run
@@ -1225,7 +1233,7 @@ Define your DebugCounter like this:
 .. code-block:: c++
 
   DEBUG_COUNTER(DeleteAnInstruction, "passname-delete-instruction",
-		"Controls which instructions get delete").
+		"Controls which instructions get delete");
 
 The ``DEBUG_COUNTER`` macro defines a static variable, whose name
 is specified by the first argument.  The name of the counter
@@ -2106,7 +2114,7 @@ is stored in the same allocation as the Value of a pair).
 StringMap also provides query methods that take byte ranges, so it only ever
 copies a string if a value is inserted into the table.
 
-StringMap iteratation order, however, is not guaranteed to be deterministic, so
+StringMap iteration order, however, is not guaranteed to be deterministic, so
 any uses which require that should instead use a std::map.
 
 .. _dss_indexmap:
@@ -2819,7 +2827,7 @@ Replacing individual instructions
 """""""""""""""""""""""""""""""""
 
 Including "`llvm/Transforms/Utils/BasicBlockUtils.h
-<http://llvm.org/doxygen/BasicBlockUtils_8h-source.html>`_" permits use of two
+<http://llvm.org/doxygen/BasicBlockUtils_8h_source.html>`_" permits use of two
 very useful replace functions: ``ReplaceInstWithValue`` and
 ``ReplaceInstWithInst``.
 
@@ -2915,7 +2923,7 @@ is easier to read and write than the equivalent
   FunctionType *ft = FunctionType::get(Type::Int8Ty, params, false);
 
 See the `class comment
-<http://llvm.org/doxygen/TypeBuilder_8h-source.html#l00001>`_ for more details.
+<http://llvm.org/doxygen/TypeBuilder_8h_source.html#l00001>`_ for more details.
 
 .. _threading:
 
@@ -3336,7 +3344,7 @@ The Core LLVM Class Hierarchy Reference
 
 ``#include "llvm/IR/Type.h"``
 
-header source: `Type.h <http://llvm.org/doxygen/Type_8h-source.html>`_
+header source: `Type.h <http://llvm.org/doxygen/Type_8h_source.html>`_
 
 doxygen info: `Type Clases <http://llvm.org/doxygen/classllvm_1_1Type.html>`_
 
@@ -3440,7 +3448,7 @@ The ``Module`` class
 
 ``#include "llvm/IR/Module.h"``
 
-header source: `Module.h <http://llvm.org/doxygen/Module_8h-source.html>`_
+header source: `Module.h <http://llvm.org/doxygen/Module_8h_source.html>`_
 
 doxygen info: `Module Class <http://llvm.org/doxygen/classllvm_1_1Module.html>`_
 
@@ -3527,7 +3535,7 @@ The ``Value`` class
 
 ``#include "llvm/IR/Value.h"``
 
-header source: `Value.h <http://llvm.org/doxygen/Value_8h-source.html>`_
+header source: `Value.h <http://llvm.org/doxygen/Value_8h_source.html>`_
 
 doxygen info: `Value Class <http://llvm.org/doxygen/classllvm_1_1Value.html>`_
 
@@ -3618,7 +3626,7 @@ The ``User`` class
 
 ``#include "llvm/IR/User.h"``
 
-header source: `User.h <http://llvm.org/doxygen/User_8h-source.html>`_
+header source: `User.h <http://llvm.org/doxygen/User_8h_source.html>`_
 
 doxygen info: `User Class <http://llvm.org/doxygen/classllvm_1_1User.html>`_
 
@@ -3665,7 +3673,7 @@ The ``Instruction`` class
 ``#include "llvm/IR/Instruction.h"``
 
 header source: `Instruction.h
-<http://llvm.org/doxygen/Instruction_8h-source.html>`_
+<http://llvm.org/doxygen/Instruction_8h_source.html>`_
 
 doxygen info: `Instruction Class
 <http://llvm.org/doxygen/classllvm_1_1Instruction.html>`_
@@ -3813,7 +3821,7 @@ The ``GlobalValue`` class
 ``#include "llvm/IR/GlobalValue.h"``
 
 header source: `GlobalValue.h
-<http://llvm.org/doxygen/GlobalValue_8h-source.html>`_
+<http://llvm.org/doxygen/GlobalValue_8h_source.html>`_
 
 doxygen info: `GlobalValue Class
 <http://llvm.org/doxygen/classllvm_1_1GlobalValue.html>`_
@@ -3871,7 +3879,7 @@ The ``Function`` class
 
 ``#include "llvm/IR/Function.h"``
 
-header source: `Function.h <http://llvm.org/doxygen/Function_8h-source.html>`_
+header source: `Function.h <http://llvm.org/doxygen/Function_8h_source.html>`_
 
 doxygen info: `Function Class
 <http://llvm.org/doxygen/classllvm_1_1Function.html>`_
@@ -3980,7 +3988,7 @@ The ``GlobalVariable`` class
 ``#include "llvm/IR/GlobalVariable.h"``
 
 header source: `GlobalVariable.h
-<http://llvm.org/doxygen/GlobalVariable_8h-source.html>`_
+<http://llvm.org/doxygen/GlobalVariable_8h_source.html>`_
 
 doxygen info: `GlobalVariable Class
 <http://llvm.org/doxygen/classllvm_1_1GlobalVariable.html>`_
@@ -4038,7 +4046,7 @@ The ``BasicBlock`` class
 ``#include "llvm/IR/BasicBlock.h"``
 
 header source: `BasicBlock.h
-<http://llvm.org/doxygen/BasicBlock_8h-source.html>`_
+<http://llvm.org/doxygen/BasicBlock_8h_source.html>`_
 
 doxygen info: `BasicBlock Class
 <http://llvm.org/doxygen/classllvm_1_1BasicBlock.html>`_

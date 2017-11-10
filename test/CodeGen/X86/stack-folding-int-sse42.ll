@@ -302,19 +302,27 @@ define <16 x i8> @stack_fold_pavgb(<16 x i8> %a0, <16 x i8> %a1) {
   ;CHECK-LABEL: stack_fold_pavgb
   ;CHECK:       pavgb {{-?[0-9]*}}(%rsp), {{%xmm[0-9][0-9]*}} {{.*#+}} 16-byte Folded Reload
   %1 = tail call <2 x i64> asm sideeffect "nop", "=x,~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15},~{flags}"()
-  %2 = call <16 x i8> @llvm.x86.sse2.pavg.b(<16 x i8> %a0, <16 x i8> %a1)
-  ret <16 x i8> %2
+  %2 = zext <16 x i8> %a0 to <16 x i16>
+  %3 = zext <16 x i8> %a1 to <16 x i16>
+  %4 = add <16 x i16> %2, %3
+  %5 = add <16 x i16> %4, <i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1>
+  %6 = lshr <16 x i16> %5, <i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1>
+  %7 = trunc <16 x i16> %6 to <16 x i8>
+  ret <16 x i8> %7
 }
-declare <16 x i8> @llvm.x86.sse2.pavg.b(<16 x i8>, <16 x i8>) nounwind readnone
 
 define <8 x i16> @stack_fold_pavgw(<8 x i16> %a0, <8 x i16> %a1) {
   ;CHECK-LABEL: stack_fold_pavgw
   ;CHECK:       pavgw {{-?[0-9]*}}(%rsp), {{%xmm[0-9][0-9]*}} {{.*#+}} 16-byte Folded Reload
   %1 = tail call <2 x i64> asm sideeffect "nop", "=x,~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15},~{flags}"()
-  %2 = call <8 x i16> @llvm.x86.sse2.pavg.w(<8 x i16> %a0, <8 x i16> %a1)
-  ret <8 x i16> %2
+  %2 = zext <8 x i16> %a0 to <8 x i32>
+  %3 = zext <8 x i16> %a1 to <8 x i32>
+  %4 = add <8 x i32> %2, %3
+  %5 = add <8 x i32> %4, <i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1>
+  %6 = lshr <8 x i32> %5, <i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1>
+  %7 = trunc <8 x i32> %6 to <8 x i16>
+  ret <8 x i16> %7
 }
-declare <8 x i16> @llvm.x86.sse2.pavg.w(<8 x i16>, <8 x i16>) nounwind readnone
 
 define <16 x i8> @stack_fold_pblendvb(<16 x i8> %a0, <16 x i8> %a1, <16 x i8> %c) {
   ;CHECK-LABEL: stack_fold_pblendvb
@@ -453,6 +461,21 @@ declare <16 x i8> @llvm.x86.sse42.pcmpistrm128(<16 x i8>, <16 x i8>, i8) nounwin
 
 ; TODO stack_fold_pextrb
 
+; We can't naively fold pextrw as it only writes to a 16-bit memory location
+; even though it can store to a 32-bit register.
+define i16 @stack_fold_pextrw(<8 x i16> %a0) {
+; CHECK-LABEL: stack_fold_pextrw
+; CHECK:       pextrw $1, {{%xmm[0-9][0-9]*}}, %[[GPR32:(e[a-z]+|r[0-9]+d)]]
+; CHECK:       movl %[[GPR32]], {{-?[0-9]*}}(%rsp) {{.*#+}} 4-byte Spill
+; CHECK:       movl {{-?[0-9]*}}(%rsp), %eax {{.*#+}} 4-byte Reload
+entry:
+; add forces execution domain
+  %add = add <8 x i16> %a0, <i16 1, i16 2, i16 3, i16 4, i16 5, i16 6, i16 7, i16 8>
+  %extract = extractelement <8 x i16> %add, i32 1
+  %asm = tail call <2 x i64> asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
+  ret i16 %extract
+}
+
 define i32 @stack_fold_pextrd(<4 x i32> %a0) {
   ;CHECK-LABEL: stack_fold_pextrd
   ;CHECK:       pextrd $1, {{%xmm[0-9][0-9]*}}, {{-?[0-9]*}}(%rsp) {{.*#+}} 4-byte Folded Spill
@@ -472,8 +495,6 @@ define i64 @stack_fold_pextrq(<2 x i64> %a0) {
   %2 = tail call <2 x i64> asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
   ret i64 %1
 }
-
-; TODO stack_fold_pextrw
 
 define <4 x i32> @stack_fold_phaddd(<4 x i32> %a0, <4 x i32> %a1) {
   ;CHECK-LABEL: stack_fold_phaddd

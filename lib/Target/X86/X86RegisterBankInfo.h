@@ -21,13 +21,21 @@
 
 namespace llvm {
 
+class LLT;
+
 class X86GenRegisterBankInfo : public RegisterBankInfo {
 protected:
+#define GET_TARGET_REGBANK_CLASS
+#include "X86GenRegisterBank.inc"
+#define GET_TARGET_REGBANK_INFO_CLASS
+#include "X86GenRegisterBankInfo.def"
+
   static RegisterBankInfo::PartialMapping PartMappings[];
   static RegisterBankInfo::ValueMapping ValMappings[];
 
-#define GET_TARGET_REGBANK_CLASS
-#include "X86GenRegisterBank.inc"
+  static PartialMappingIdx getPartialMappingIdx(const LLT &Ty, bool isFP);
+  static const RegisterBankInfo::ValueMapping *
+  getValueMapping(PartialMappingIdx Idx, unsigned NumOperands);
 };
 
 class TargetRegisterInfo;
@@ -38,8 +46,21 @@ private:
   /// Get an instruction mapping.
   /// \return An InstructionMappings with a statically allocated
   /// OperandsMapping.
-  static InstructionMapping getOperandsMapping(const MachineInstr &MI,
-                                               bool isFP);
+  const InstructionMapping &getSameOperandsMapping(const MachineInstr &MI,
+                                                   bool isFP) const;
+
+  /// Track the bank of each instruction operand(register)
+  static void
+  getInstrPartialMappingIdxs(const MachineInstr &MI,
+                             const MachineRegisterInfo &MRI, const bool isFP,
+                             SmallVectorImpl<PartialMappingIdx> &OpRegBankIdx);
+
+  /// Construct the instruction ValueMapping from PartialMappingIdxs
+  /// \return true if mapping succeeded.
+  static bool
+  getInstrValueMapping(const MachineInstr &MI,
+                       const SmallVectorImpl<PartialMappingIdx> &OpRegBankIdx,
+                       SmallVectorImpl<const ValueMapping *> &OpdsMapping);
 
 public:
   X86RegisterBankInfo(const TargetRegisterInfo &TRI);
@@ -47,8 +68,15 @@ public:
   const RegisterBank &
   getRegBankFromRegClass(const TargetRegisterClass &RC) const override;
 
-  InstructionMapping getInstrMapping(const MachineInstr &MI) const override;
+  InstructionMappings
+  getInstrAlternativeMappings(const MachineInstr &MI) const override;
+
+  /// See RegisterBankInfo::applyMapping.
+  void applyMappingImpl(const OperandsMapper &OpdMapper) const override;
+
+  const InstructionMapping &
+  getInstrMapping(const MachineInstr &MI) const override;
 };
 
-} // End llvm namespace.
+} // namespace llvm
 #endif

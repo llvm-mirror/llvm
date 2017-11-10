@@ -221,6 +221,22 @@ define i32 @test12(i32 %A) {
   ret i32 %C
 }
 
+;; ((A >>s 6) << 6 === (A & FFFFFFC0)
+define i8 @shishi(i8 %x) {
+; CHECK-LABEL: @shishi(
+; CHECK-NEXT:    [[A:%.*]] = ashr i8 [[X:%.*]], 6
+; CHECK-NEXT:    [[B:%.*]] = and i8 [[X]], -64
+; CHECK-NEXT:    [[EXTRA_USE_OF_A:%.*]] = mul nsw i8 [[A]], 5
+; CHECK-NEXT:    [[R:%.*]] = sdiv i8 [[EXTRA_USE_OF_A]], [[B]]
+; CHECK-NEXT:    ret i8 [[R]]
+;
+  %a = ashr i8 %x, 6
+  %b = shl i8 %a, 6
+  %extra_use_of_a = mul i8 %a, 5
+  %r = sdiv i8 %extra_use_of_a, %b
+  ret i8 %r
+}
+
 ;; This transformation is deferred to DAGCombine:
 ;; (A >> 3) << 4 === (A & -8) * 2
 ;; The shl may be valuable to scalar evolution.
@@ -1049,12 +1065,11 @@ define i8 @test53_no_nuw(i8 %x) {
 }
 
 ; (X << C1) >>u C2  --> X << (C1 - C2) & (-1 >> C2)
-; FIXME: Demanded bits should change the mask constant as it does for the scalar case.
 
 define <2 x i8> @test53_no_nuw_splat_vec(<2 x i8> %x) {
 ; CHECK-LABEL: @test53_no_nuw_splat_vec(
 ; CHECK-NEXT:    [[TMP1:%.*]] = shl <2 x i8> %x, <i8 2, i8 2>
-; CHECK-NEXT:    [[B:%.*]] = and <2 x i8> [[TMP1]], <i8 127, i8 127>
+; CHECK-NEXT:    [[B:%.*]] = and <2 x i8> [[TMP1]], <i8 124, i8 124>
 ; CHECK-NEXT:    ret <2 x i8> [[B]]
 ;
   %A = shl <2 x i8> %x, <i8 3, i8 3>
@@ -1074,6 +1089,17 @@ define i32 @test54(i32 %x) {
   ret i32 %and
 }
 
+define <2 x i32> @test54_splat_vec(<2 x i32> %x) {
+; CHECK-LABEL: @test54_splat_vec(
+; CHECK-NEXT:    [[TMP1:%.*]] = shl <2 x i32> %x, <i32 3, i32 3>
+; CHECK-NEXT:    [[AND:%.*]] = and <2 x i32> [[TMP1]], <i32 16, i32 16>
+; CHECK-NEXT:    ret <2 x i32> [[AND]]
+;
+  %shr2 = lshr <2 x i32> %x, <i32 1, i32 1>
+  %shl = shl <2 x i32> %shr2, <i32 4, i32 4>
+  %and = and <2 x i32> %shl, <i32 16, i32 16>
+  ret <2 x i32> %and
+}
 
 define i32 @test55(i32 %x) {
 ; CHECK-LABEL: @test55(
@@ -1100,7 +1126,6 @@ define i32 @test56(i32 %x) {
   ret i32 %or
 }
 
-
 define i32 @test57(i32 %x) {
 ; CHECK-LABEL: @test57(
 ; CHECK-NEXT:    [[SHR1:%.*]] = lshr i32 %x, 1
@@ -1114,7 +1139,6 @@ define i32 @test57(i32 %x) {
   ret i32 %or
 }
 
-
 define i32 @test58(i32 %x) {
 ; CHECK-LABEL: @test58(
 ; CHECK-NEXT:    [[TMP1:%.*]] = ashr i32 %x, 3
@@ -1127,6 +1151,17 @@ define i32 @test58(i32 %x) {
   ret i32 %or
 }
 
+define <2 x i32> @test58_splat_vec(<2 x i32> %x) {
+; CHECK-LABEL: @test58_splat_vec(
+; CHECK-NEXT:    [[TMP1:%.*]] = ashr <2 x i32> %x, <i32 3, i32 3>
+; CHECK-NEXT:    [[OR:%.*]] = or <2 x i32> [[TMP1]], <i32 1, i32 1>
+; CHECK-NEXT:    ret <2 x i32> [[OR]]
+;
+  %shr = ashr <2 x i32> %x, <i32 4, i32 4>
+  %shl = shl <2 x i32> %shr, <i32 1, i32 1>
+  %or = or <2 x i32> %shl, <i32 1, i32 1>
+  ret <2 x i32> %or
+}
 
 define i32 @test59(i32 %x) {
 ; CHECK-LABEL: @test59(
@@ -1257,8 +1292,7 @@ define i64 @test_64(i32 %t) {
 
 define <2 x i64> @test_64_splat_vec(<2 x i32> %t) {
 ; CHECK-LABEL: @test_64_splat_vec(
-; CHECK-NEXT:    [[AND:%.*]] = and <2 x i32> %t, <i32 16777215, i32 16777215>
-; CHECK-NEXT:    [[TMP1:%.*]] = shl nuw <2 x i32> [[AND]], <i32 8, i32 8>
+; CHECK-NEXT:    [[TMP1:%.*]] = shl <2 x i32> %t, <i32 8, i32 8>
 ; CHECK-NEXT:    [[SHL:%.*]] = zext <2 x i32> [[TMP1]] to <2 x i64>
 ; CHECK-NEXT:    ret <2 x i64> [[SHL]]
 ;
@@ -1268,3 +1302,33 @@ define <2 x i64> @test_64_splat_vec(<2 x i32> %t) {
   ret <2 x i64> %shl
 }
 
+define <2 x i8> @ashr_demanded_bits_splat(<2 x i8> %x) {
+; CHECK-LABEL: @ashr_demanded_bits_splat(
+; CHECK-NEXT:    [[SHR:%.*]] = ashr <2 x i8> %x, <i8 7, i8 7>
+; CHECK-NEXT:    ret <2 x i8> [[SHR]]
+;
+  %and = and <2 x i8> %x, <i8 128, i8 128>
+  %shr = ashr <2 x i8> %and, <i8 7, i8 7>
+  ret <2 x i8> %shr
+}
+
+define <2 x i8> @lshr_demanded_bits_splat(<2 x i8> %x) {
+; CHECK-LABEL: @lshr_demanded_bits_splat(
+; CHECK-NEXT:    [[SHR:%.*]] = lshr <2 x i8> %x, <i8 7, i8 7>
+; CHECK-NEXT:    ret <2 x i8> [[SHR]]
+;
+  %and = and <2 x i8> %x, <i8 128, i8 128>
+  %shr = lshr <2 x i8> %and, <i8 7, i8 7>
+  ret <2 x i8> %shr
+}
+
+; Make sure known bits works correctly with non power of 2 bit widths.
+define i7 @test65(i7 %a, i7 %b) {
+; CHECK-LABEL: @test65(
+; CHECK-NEXT:    ret i7 0
+;
+  %shiftamt = and i7 %b, 6 ; this ensures the shift amount is even and less than the bit width.
+  %x = lshr i7 42, %shiftamt ; 42 has a zero in every even numbered bit and a one in every odd bit.
+  %y = and i7 %x, 1 ; this extracts the lsb which should be 0 because we shifted an even number of bits and all even bits of the shift input are 0.
+  ret i7 %y
+}

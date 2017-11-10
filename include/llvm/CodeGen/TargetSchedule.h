@@ -16,6 +16,7 @@
 #ifndef LLVM_CODEGEN_TARGETSCHEDULE_H
 #define LLVM_CODEGEN_TARGETSCHEDULE_H
 
+#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/MC/MCInstrItineraries.h"
 #include "llvm/MC/MCSchedule.h"
@@ -55,6 +56,9 @@ public:
   /// Return the MCSchedClassDesc for this instruction.
   const MCSchedClassDesc *resolveSchedClass(const MachineInstr *MI) const;
 
+  /// \brief TargetSubtargetInfo getter.
+  const TargetSubtargetInfo *getSubtargetInfo() const { return STI; }
+
   /// \brief TargetInstrInfo getter.
   const TargetInstrInfo *getInstrInfo() const { return TII; }
 
@@ -91,6 +95,13 @@ public:
   /// \brief Maximum number of micro-ops that may be scheduled per cycle.
   unsigned getIssueWidth() const { return SchedModel.IssueWidth; }
 
+  /// \brief Return true if new group must begin.
+  bool mustBeginGroup(const MachineInstr *MI,
+                          const MCSchedClassDesc *SC = nullptr) const;
+  /// \brief Return true if current group must end.
+  bool mustEndGroup(const MachineInstr *MI,
+                          const MCSchedClassDesc *SC = nullptr) const;
+
   /// \brief Return the number of issue slots required for this MI.
   unsigned getNumMicroOps(const MachineInstr *MI,
                           const MCSchedClassDesc *SC = nullptr) const;
@@ -105,7 +116,7 @@ public:
     return SchedModel.getProcResource(PIdx);
   }
 
-#ifndef NDEBUG
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
   const char *getResourceName(unsigned PIdx) const {
     if (!PIdx)
       return "MOps";
@@ -113,7 +124,7 @@ public:
   }
 #endif
 
-  typedef const MCWriteProcResEntry *ProcResIter;
+  using ProcResIter = const MCWriteProcResEntry *;
 
   // \brief Get an iterator into the processor resources consumed by this
   // scheduling class.
@@ -176,11 +187,16 @@ public:
                                bool UseDefaultDefLatency = true) const;
   unsigned computeInstrLatency(unsigned Opcode) const;
 
+
   /// \brief Output dependency latency of a pair of defs of the same register.
   ///
   /// This is typically one cycle.
   unsigned computeOutputLatency(const MachineInstr *DefMI, unsigned DefIdx,
                                 const MachineInstr *DepMI) const;
+
+  /// \brief Compute the reciprocal throughput of the given instruction.
+  Optional<double> computeInstrRThroughput(const MachineInstr *MI) const;
+  Optional<double> computeInstrRThroughput(unsigned Opcode) const;
 };
 
 } // end namespace llvm

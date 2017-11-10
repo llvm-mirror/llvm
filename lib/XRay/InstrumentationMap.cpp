@@ -11,6 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/XRay/InstrumentationMap.h"
 #include "llvm/ADT/None.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
@@ -22,7 +23,6 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/YAMLTraits.h"
-#include "llvm/XRay/InstrumentationMap.h"
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -104,7 +104,8 @@ loadELF64(StringRef Filename, object::OwningBinary<object::ObjectFile> &ObjFile,
     static constexpr SledEntry::FunctionKinds Kinds[] = {
         SledEntry::FunctionKinds::ENTRY, SledEntry::FunctionKinds::EXIT,
         SledEntry::FunctionKinds::TAIL,
-    };
+        SledEntry::FunctionKinds::LOG_ARGS_ENTER,
+        SledEntry::FunctionKinds::CUSTOM_EVENT};
     if (Kind >= sizeof(Kinds))
       return errorCodeToError(
           std::make_error_code(std::errc::executable_format_error));

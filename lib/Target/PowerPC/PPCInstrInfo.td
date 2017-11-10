@@ -32,8 +32,12 @@ def SDT_PPCstxsix : SDTypeProfile<0, 3, [
 def SDT_PPCVexts  : SDTypeProfile<1, 2, [
   SDTCisVT<0, f64>, SDTCisVT<1, f64>, SDTCisPtrTy<2>
 ]>;
+def SDT_PPCSExtVElems  : SDTypeProfile<1, 1, [
+  SDTCisVec<0>, SDTCisVec<1>
+]>;
 
-def SDT_PPCCallSeqStart : SDCallSeqStart<[ SDTCisVT<0, i32> ]>;
+def SDT_PPCCallSeqStart : SDCallSeqStart<[ SDTCisVT<0, i32>,
+                                           SDTCisVT<1, i32> ]>;
 def SDT_PPCCallSeqEnd   : SDCallSeqEnd<[ SDTCisVT<0, i32>,
                                          SDTCisVT<1, i32> ]>;
 def SDT_PPCvperm   : SDTypeProfile<1, 3, [
@@ -45,10 +49,18 @@ def SDT_PPCVecSplat : SDTypeProfile<1, 2, [ SDTCisVec<0>,
 ]>;
 
 def SDT_PPCVecShift : SDTypeProfile<1, 3, [ SDTCisVec<0>,
-  SDTCisVec<1>, SDTCisVec<2>, SDTCisInt<3>
+  SDTCisVec<1>, SDTCisVec<2>, SDTCisPtrTy<3>
 ]>;
 
 def SDT_PPCVecInsert : SDTypeProfile<1, 3, [ SDTCisVec<0>,
+  SDTCisVec<1>, SDTCisVec<2>, SDTCisInt<3>
+]>;
+
+def SDT_PPCVecReverse: SDTypeProfile<1, 1, [ SDTCisVec<0>,
+  SDTCisVec<1>
+]>;
+
+def SDT_PPCxxpermdi: SDTypeProfile<1, 3, [ SDTCisVec<0>,
   SDTCisVec<1>, SDTCisVec<2>, SDTCisInt<3>
 ]>;
 
@@ -122,6 +134,7 @@ def PPClxsizx : SDNode<"PPCISD::LXSIZX", SDT_PPCLxsizx,
 def PPCstxsix : SDNode<"PPCISD::STXSIX", SDT_PPCstxsix,
                        [SDNPHasChain, SDNPMayStore]>;
 def PPCVexts  : SDNode<"PPCISD::VEXTS", SDT_PPCVexts, []>;
+def PPCSExtVElems  : SDNode<"PPCISD::SExtVElems", SDT_PPCSExtVElems, []>;
 
 // Extract FPSCR (not modeled at the DAG level).
 def PPCmffs   : SDNode<"PPCISD::MFFS",
@@ -168,7 +181,9 @@ def PPCaddiDtprelL   : SDNode<"PPCISD::ADDI_DTPREL_L", SDTIntBinOp>;
 
 def PPCvperm     : SDNode<"PPCISD::VPERM", SDT_PPCvperm, []>;
 def PPCxxsplt    : SDNode<"PPCISD::XXSPLT", SDT_PPCVecSplat, []>;
-def PPCxxinsert  : SDNode<"PPCISD::XXINSERT", SDT_PPCVecInsert, []>;
+def PPCvecinsert : SDNode<"PPCISD::VECINSERT", SDT_PPCVecInsert, []>;
+def PPCxxreverse : SDNode<"PPCISD::XXREVERSE", SDT_PPCVecReverse, []>;
+def PPCxxpermdi  : SDNode<"PPCISD::XXPERMDI", SDT_PPCxxpermdi, []>;
 def PPCvecshl    : SDNode<"PPCISD::VECSHL", SDT_PPCVecShift, []>;
 
 def PPCqvfperm   : SDNode<"PPCISD::QVFPERM", SDT_PPCqvfperm, []>;
@@ -388,6 +403,25 @@ def unaligned4store : PatFrag<(ops node:$val, node:$ptr),
 }]>;
 def unaligned4sextloadi32 : PatFrag<(ops node:$ptr), (sextloadi32 node:$ptr), [{
   return cast<LoadSDNode>(N)->getAlignment() < 4;
+}]>;
+
+// This is a somewhat weaker condition than actually checking for 16-byte
+// alignment. It is simply checking that the displacement can be represented
+// as an immediate that is a multiple of 16 (i.e. the requirements for DQ-Form
+// instructions).
+def quadwOffsetLoad : PatFrag<(ops node:$ptr), (load node:$ptr), [{
+  return isOffsetMultipleOf(N, 16);
+}]>;
+def quadwOffsetStore : PatFrag<(ops node:$val, node:$ptr),
+                               (store node:$val, node:$ptr), [{
+  return isOffsetMultipleOf(N, 16);
+}]>;
+def nonQuadwOffsetLoad : PatFrag<(ops node:$ptr), (load node:$ptr), [{
+  return !isOffsetMultipleOf(N, 16);
+}]>;
+def nonQuadwOffsetStore : PatFrag<(ops node:$val, node:$ptr),
+                                  (store node:$val, node:$ptr), [{
+  return !isOffsetMultipleOf(N, 16);
 }]>;
 
 //===----------------------------------------------------------------------===//
@@ -800,7 +834,8 @@ def pred : Operand<OtherVT> {
 def iaddr  : ComplexPattern<iPTR, 2, "SelectAddrImm",    [], []>;
 def xaddr  : ComplexPattern<iPTR, 2, "SelectAddrIdx",    [], []>;
 def xoaddr : ComplexPattern<iPTR, 2, "SelectAddrIdxOnly",[], []>;
-def ixaddr : ComplexPattern<iPTR, 2, "SelectAddrImmX4",  [], []>; // "std"
+def ixaddr : ComplexPattern<iPTR, 2, "SelectAddrImmX4",  [], []>;  // "std"
+def iqaddr : ComplexPattern<iPTR, 2, "SelectAddrImmX16",  [], []>; // "stxv"
 
 // The address in a single register. This is used with the SjLj
 // pseudo-instructions.
@@ -1022,6 +1057,20 @@ multiclass XSForm_1rc<bits<6> opcode, bits<9> xo, dag OOL, dag IOL,
   }
 }
 
+multiclass XSForm_1r<bits<6> opcode, bits<9> xo, dag OOL, dag IOL,
+                    string asmbase, string asmstr, InstrItinClass itin,
+                    list<dag> pattern> {
+  let BaseName = asmbase in {
+    def NAME : XSForm_1<opcode, xo, OOL, IOL,
+                       !strconcat(asmbase, !strconcat(" ", asmstr)), itin,
+                       pattern>, RecFormRel;
+    let Defs = [CR0] in
+    def o    : XSForm_1<opcode, xo, OOL, IOL,
+                       !strconcat(asmbase, !strconcat(". ", asmstr)), itin,
+                       []>, isDOT, RecFormRel;
+  }
+}
+
 multiclass XForm_26r<bits<6> opcode, bits<10> xo, dag OOL, dag IOL,
                     string asmbase, string asmstr, InstrItinClass itin,
                     list<dag> pattern> {
@@ -1099,9 +1148,11 @@ multiclass AForm_3r<bits<6> opcode, bits<5> xo, dag OOL, dag IOL,
 
 let hasCtrlDep = 1 in {
 let Defs = [R1], Uses = [R1] in {
-def ADJCALLSTACKDOWN : Pseudo<(outs), (ins u16imm:$amt), "#ADJCALLSTACKDOWN $amt",
-                              [(callseq_start timm:$amt)]>;
-def ADJCALLSTACKUP   : Pseudo<(outs), (ins u16imm:$amt1, u16imm:$amt2), "#ADJCALLSTACKUP $amt1 $amt2",
+def ADJCALLSTACKDOWN : Pseudo<(outs), (ins u16imm:$amt1, u16imm:$amt2),
+                              "#ADJCALLSTACKDOWN $amt1 $amt2",
+                              [(callseq_start timm:$amt1, timm:$amt2)]>;
+def ADJCALLSTACKUP   : Pseudo<(outs), (ins u16imm:$amt1, u16imm:$amt2),
+                              "#ADJCALLSTACKUP $amt1 $amt2",
                               [(callseq_end timm:$amt1, timm:$amt2)]>;
 }
 
@@ -1220,9 +1271,15 @@ let isBranch = 1, isTerminator = 1, hasCtrlDep = 1, PPC970_Unit = 7 in {
   // FIXME: should be able to write a pattern for PPCcondbranch, but can't use
   // a two-value operand where a dag node expects two operands. :(
   let isCodeGenOnly = 1 in {
-    def BCC : BForm<16, 0, 0, (outs), (ins pred:$cond, condbrtarget:$dst),
-                    "b${cond:cc}${cond:pm} ${cond:reg}, $dst"
-                    /*[(PPCcondbranch crrc:$crS, imm:$opc, bb:$dst)]*/>;
+    class BCC_class : BForm<16, 0, 0, (outs), (ins pred:$cond, condbrtarget:$dst),
+                            "b${cond:cc}${cond:pm} ${cond:reg}, $dst"
+                            /*[(PPCcondbranch crrc:$crS, imm:$opc, bb:$dst)]*/>;
+    def BCC : BCC_class;
+
+    // The same as BCC, except that it's not a terminator. Used for introducing
+    // control flow dependency without creating new blocks.
+    let isTerminator = 0 in def CTRL_DEP : BCC_class;
+
     def BCCA : BForm<16, 1, 0, (outs), (ins pred:$cond, abscondbrtarget:$dst),
                      "b${cond:cc}a${cond:pm} ${cond:reg}, $dst">;
 
@@ -2528,8 +2585,45 @@ let Uses = [RM] in {
   let Defs = [CR1] in
   def MFFSo : XForm_42<63, 583, (outs f8rc:$rT), (ins),
                       "mffs. $rT", IIC_IntMFFS, []>, isDOT;
+
+  def MFFSCE : X_FRT5_XO2_XO3_XO10<63, 0, 1, 583, (outs f8rc:$rT), (ins),
+                                  "mffsce $rT", IIC_IntMFFS, []>,
+               PPC970_DGroup_Single, PPC970_Unit_FPU;
+
+  def MFFSCDRN : X_FRT5_XO2_XO3_FRB5_XO10<63, 2, 4, 583, (outs f8rc:$rT),
+                                         (ins f8rc:$FRB), "mffscdrn $rT, $FRB",
+                                         IIC_IntMFFS, []>,
+                 PPC970_DGroup_Single, PPC970_Unit_FPU;
+
+  def MFFSCDRNI : X_FRT5_XO2_XO3_DRM3_XO10<63, 2, 5, 583, (outs f8rc:$rT),
+                                          (ins u3imm:$DRM),
+                                          "mffscdrni $rT, $DRM",
+                                          IIC_IntMFFS, []>,
+                  PPC970_DGroup_Single, PPC970_Unit_FPU;
+
+  def MFFSCRN : X_FRT5_XO2_XO3_FRB5_XO10<63, 2, 6, 583, (outs f8rc:$rT),
+                                        (ins f8rc:$FRB), "mffscrn $rT, $FRB",
+                                        IIC_IntMFFS, []>,
+                PPC970_DGroup_Single, PPC970_Unit_FPU;
+
+  def MFFSCRNI : X_FRT5_XO2_XO3_RM2_X10<63, 2, 7, 583, (outs f8rc:$rT),
+                                       (ins u2imm:$RM), "mffscrni $rT, $RM",
+                                       IIC_IntMFFS, []>,
+                 PPC970_DGroup_Single, PPC970_Unit_FPU;
+
+  def MFFSL  : X_FRT5_XO2_XO3_XO10<63, 3, 0, 583, (outs f8rc:$rT), (ins),
+                                  "mffsl $rT", IIC_IntMFFS, []>,
+               PPC970_DGroup_Single, PPC970_Unit_FPU;
 }
 
+let Predicates = [IsISA3_0] in {
+def MODSW : XForm_8<31, 779, (outs gprc:$rT), (ins gprc:$rA, gprc:$rB),
+                        "modsw $rT, $rA, $rB", IIC_IntDivW,
+                        [(set i32:$rT, (srem i32:$rA, i32:$rB))]>;
+def MODUW : XForm_8<31, 267, (outs gprc:$rT), (ins gprc:$rA, gprc:$rB),
+                        "moduw $rT, $rA, $rB", IIC_IntDivW,
+                        [(set i32:$rT, (urem i32:$rA, i32:$rB))]>;
+}
 
 let PPC970_Unit = 1, hasSideEffects = 0 in {  // FXU Operations.
 // XO-Form instructions.  Arithmetic instructions that can set overflow bit
@@ -3857,6 +3951,7 @@ class PPCAsmPseudo<string asm, dag iops>
   let AsmString = asm;
   let isAsmParserOnly = 1;
   let isPseudo = 1;
+  let hasNoSchedulingInfo = 1;
 }
 
 def : InstAlias<"sc", (SC 0)>;
@@ -4157,13 +4252,17 @@ def CLRLSLDI : PPCAsmPseudo<"clrlsldi $rA, $rS, $b, $n",
                             (ins g8rc:$rA, g8rc:$rS, u6imm:$b, u6imm:$n)>;
 def CLRLSLDIo : PPCAsmPseudo<"clrlsldi. $rA, $rS, $b, $n",
                              (ins g8rc:$rA, g8rc:$rS, u6imm:$b, u6imm:$n)>;
+def SUBPCIS : PPCAsmPseudo<"subpcis $RT, $D", (ins g8rc:$RT, s16imm:$D)>;
 
 def : InstAlias<"rotldi $rA, $rS, $n", (RLDICL g8rc:$rA, g8rc:$rS, u6imm:$n, 0)>;
 def : InstAlias<"rotldi. $rA, $rS, $n", (RLDICLo g8rc:$rA, g8rc:$rS, u6imm:$n, 0)>;
 def : InstAlias<"rotld $rA, $rS, $rB", (RLDCL g8rc:$rA, g8rc:$rS, gprc:$rB, 0)>;
 def : InstAlias<"rotld. $rA, $rS, $rB", (RLDCLo g8rc:$rA, g8rc:$rS, gprc:$rB, 0)>;
 def : InstAlias<"clrldi $rA, $rS, $n", (RLDICL g8rc:$rA, g8rc:$rS, 0, u6imm:$n)>;
+def : InstAlias<"clrldi $rA, $rS, $n",
+                (RLDICL_32_64 g8rc:$rA, gprc:$rS, 0, u6imm:$n)>;
 def : InstAlias<"clrldi. $rA, $rS, $n", (RLDICLo g8rc:$rA, g8rc:$rS, 0, u6imm:$n)>;
+def : InstAlias<"lnia $RT", (ADDPCIS g8rc:$RT, 0)>;
 
 def RLWINMbm : PPCAsmPseudo<"rlwinm $rA, $rS, $n, $b",
                             (ins g8rc:$rA, g8rc:$rS, u5imm:$n, i32imm:$b)>;
@@ -4421,3 +4520,153 @@ def MSGSYNC : XForm_0<31, 886, (outs), (ins), "msgsync", IIC_SprMSGSYNC, []>;
 def STOP : XForm_0<19, 370, (outs), (ins), "stop", IIC_SprSTOP, []>;
 
 } // IsISA3_0
+
+// Fast 32-bit reverse bits algorithm:
+// Step 1: 1-bit swap (swap odd 1-bit and even 1-bit):
+// n = ((n >> 1) & 0x55555555) | ((n << 1) & 0xAAAAAAAA);
+// Step 2: 2-bit swap (swap odd 2-bit and even 2-bit):
+// n = ((n >> 2) & 0x33333333) | ((n << 2) & 0xCCCCCCCC);
+// Step 3: 4-bit swap (swap odd 4-bit and even 4-bit):
+// n = ((n >> 4) & 0x0F0F0F0F) | ((n << 4) & 0xF0F0F0F0);
+// Step 4: byte reverse (Suppose n = [B1,B2,B3,B4]):
+// Step 4.1: Put B4,B2 in the right position (rotate left 3 bytes):
+// n' = (n rotl 24);  After which n' = [B4, B1, B2, B3]
+// Step 4.2: Insert B3 to the right position:
+// n' = rlwimi n', n, 8, 8, 15;  After which n' = [B4, B3, B2, B3]
+// Step 4.3: Insert B1 to the right position:
+// n' = rlwimi n', n, 8, 24, 31;  After which n' = [B4, B3, B2, B1]
+def MaskValues {
+  dag Lo1 = (ORI (LIS 0x5555), 0x5555);
+  dag Hi1 = (ORI (LIS 0xAAAA), 0xAAAA);
+  dag Lo2 = (ORI (LIS 0x3333), 0x3333);
+  dag Hi2 = (ORI (LIS 0xCCCC), 0xCCCC);
+  dag Lo4 = (ORI (LIS 0x0F0F), 0x0F0F);
+  dag Hi4 = (ORI (LIS 0xF0F0), 0xF0F0);
+}
+
+def Shift1 {
+  dag Right = (RLWINM $A, 31, 1, 31);
+  dag Left = (RLWINM $A, 1, 0, 30);
+}
+
+def Swap1 {
+  dag Bit = (OR (AND Shift1.Right, MaskValues.Lo1),
+   (AND Shift1.Left, MaskValues.Hi1));
+}
+
+def Shift2 {
+  dag Right = (RLWINM Swap1.Bit, 30, 2, 31);
+  dag Left = (RLWINM Swap1.Bit, 2, 0, 29);
+}
+
+def Swap2 {
+  dag Bits = (OR (AND Shift2.Right, MaskValues.Lo2),
+                 (AND Shift2.Left, MaskValues.Hi2));
+}
+
+def Shift4 {
+  dag Right = (RLWINM Swap2.Bits, 28, 4, 31);
+  dag Left = (RLWINM Swap2.Bits, 4, 0, 27);
+}
+
+def Swap4 {
+  dag Bits = (OR (AND Shift4.Right, MaskValues.Lo4),
+                 (AND Shift4.Left, MaskValues.Hi4));
+}
+
+def Rotate {
+  dag Left3Bytes = (RLWINM Swap4.Bits, 24, 0, 31);
+}
+
+def RotateInsertByte3 {
+  dag Left = (RLWIMI Rotate.Left3Bytes, Swap4.Bits, 8, 8, 15);
+}
+
+def RotateInsertByte1 {
+  dag Left = (RLWIMI RotateInsertByte3.Left, Swap4.Bits, 8, 24, 31);
+}
+
+def : Pat<(i32 (bitreverse i32:$A)),
+  (RLDICL_32 RotateInsertByte1.Left, 0, 32)>;
+
+// Fast 64-bit reverse bits algorithm:
+// Step 1: 1-bit swap (swap odd 1-bit and even 1-bit):
+// n = ((n >> 1) & 0x5555555555555555) | ((n << 1) & 0xAAAAAAAAAAAAAAAA);
+// Step 2: 2-bit swap (swap odd 2-bit and even 2-bit):
+// n = ((n >> 2) & 0x3333333333333333) | ((n << 2) & 0xCCCCCCCCCCCCCCCC);
+// Step 3: 4-bit swap (swap odd 4-bit and even 4-bit):
+// n = ((n >> 4) & 0x0F0F0F0F0F0F0F0F) | ((n << 4) & 0xF0F0F0F0F0F0F0F0);
+// Step 4: byte reverse (Suppose n = [B0,B1,B2,B3,B4,B5,B6,B7]):
+// Apply the same byte reverse algorithm mentioned above for the fast 32-bit
+// reverse to both the high 32 bit and low 32 bit of the 64 bit value. And
+// then OR them together to get the final result.
+def MaskValues64 {
+  dag Lo1 = (i64 (INSERT_SUBREG (i64 (IMPLICIT_DEF)), MaskValues.Lo1, sub_32));
+  dag Hi1 = (i64 (INSERT_SUBREG (i64 (IMPLICIT_DEF)), MaskValues.Hi1, sub_32));
+  dag Lo2 = (i64 (INSERT_SUBREG (i64 (IMPLICIT_DEF)), MaskValues.Lo2, sub_32));
+  dag Hi2 = (i64 (INSERT_SUBREG (i64 (IMPLICIT_DEF)), MaskValues.Hi2, sub_32));
+  dag Lo4 = (i64 (INSERT_SUBREG (i64 (IMPLICIT_DEF)), MaskValues.Lo4, sub_32));
+  dag Hi4 = (i64 (INSERT_SUBREG (i64 (IMPLICIT_DEF)), MaskValues.Hi4, sub_32));
+}
+
+def DWMaskValues {
+  dag Lo1 = (ORI8 (ORIS8 (RLDICR MaskValues64.Lo1, 32, 31), 0x5555), 0x5555);
+  dag Hi1 = (ORI8 (ORIS8 (RLDICR MaskValues64.Hi1, 32, 31), 0xAAAA), 0xAAAA);
+  dag Lo2 = (ORI8 (ORIS8 (RLDICR MaskValues64.Lo2, 32, 31), 0x3333), 0x3333);
+  dag Hi2 = (ORI8 (ORIS8 (RLDICR MaskValues64.Hi2, 32, 31), 0xCCCC), 0xCCCC);
+  dag Lo4 = (ORI8 (ORIS8 (RLDICR MaskValues64.Lo4, 32, 31), 0x0F0F), 0x0F0F);
+  dag Hi4 = (ORI8 (ORIS8 (RLDICR MaskValues64.Hi4, 32, 31), 0xF0F0), 0xF0F0);
+}
+
+def DWSwapInByte {
+  dag Swap1 = (OR8 (AND8 (RLDICL $A, 63, 1), DWMaskValues.Lo1),
+                   (AND8 (RLDICR $A, 1, 62), DWMaskValues.Hi1));
+  dag Swap2 = (OR8 (AND8 (RLDICL DWSwapInByte.Swap1, 62, 2), DWMaskValues.Lo2),
+                   (AND8 (RLDICR DWSwapInByte.Swap1, 2, 61), DWMaskValues.Hi2));
+  dag Swap4 = (OR8 (AND8 (RLDICL DWSwapInByte.Swap2, 60, 4), DWMaskValues.Lo4),
+                   (AND8 (RLDICR DWSwapInByte.Swap2, 4, 59), DWMaskValues.Hi4));
+}
+
+// Intra-byte swap is done, now start inter-byte swap.
+def DWBytes4567 {
+  dag Word = (i32 (EXTRACT_SUBREG DWSwapInByte.Swap4, sub_32));
+}
+
+def DWBytes7456 {
+  dag Word = (RLWINM DWBytes4567.Word, 24, 0, 31);
+}
+
+def DWBytes7656 {
+  dag Word = (RLWIMI DWBytes7456.Word, DWBytes4567.Word, 8, 8, 15);
+}
+
+// B7 B6 B5 B4 in the right order
+def DWBytes7654 {
+  dag Word = (RLWIMI DWBytes7656.Word, DWBytes4567.Word, 8, 24, 31);
+  dag DWord =
+    (i64 (INSERT_SUBREG (i64 (IMPLICIT_DEF)), DWBytes7654.Word, sub_32));
+}
+
+def DWBytes0123 {
+  dag Word = (i32 (EXTRACT_SUBREG (RLDICL DWSwapInByte.Swap4, 32, 32), sub_32));
+}
+
+def DWBytes3012 {
+  dag Word = (RLWINM DWBytes0123.Word, 24, 0, 31);
+}
+
+def DWBytes3212 {
+  dag Word = (RLWIMI DWBytes3012.Word, DWBytes0123.Word, 8, 8, 15);
+}
+
+// B3 B2 B1 B0 in the right order
+def DWBytes3210 {
+  dag Word = (RLWIMI DWBytes3212.Word, DWBytes0123.Word, 8, 24, 31);
+  dag DWord =
+    (i64 (INSERT_SUBREG (i64 (IMPLICIT_DEF)), DWBytes3210.Word, sub_32));
+}
+
+// Now both high word and low word are reversed, next
+// swap the high word and low word.
+def : Pat<(i64 (bitreverse i64:$A)),
+  (OR8 (RLDICR DWBytes7654.DWord, 32, 31), DWBytes3210.DWord)>;

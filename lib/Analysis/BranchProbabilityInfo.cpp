@@ -1,4 +1,4 @@
-//===-- BranchProbabilityInfo.cpp - Branch Probability Analysis -----------===//
+//===- BranchProbabilityInfo.cpp - Branch Probability Analysis ------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -13,23 +13,51 @@
 
 #include "llvm/Analysis/BranchProbabilityInfo.h"
 #include "llvm/ADT/PostOrderIterator.h"
+#include "llvm/ADT/SCCIterator.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/Analysis/LoopInfo.h"
+#include "llvm/Analysis/TargetLibraryInfo.h"
+#include "llvm/IR/Attributes.h"
+#include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/InstrTypes.h"
+#include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Metadata.h"
+#include "llvm/IR/PassManager.h"
+#include "llvm/IR/Type.h"
+#include "llvm/IR/Value.h"
+#include "llvm/Pass.h"
+#include "llvm/Support/BranchProbability.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
+#include <cassert>
+#include <cstdint>
+#include <iterator>
+#include <utility>
 
 using namespace llvm;
 
 #define DEBUG_TYPE "branch-prob"
 
+static cl::opt<bool> PrintBranchProb(
+    "print-bpi", cl::init(false), cl::Hidden,
+    cl::desc("Print the branch probability info."));
+
+cl::opt<std::string> PrintBranchProbFuncName(
+    "print-bpi-func-name", cl::Hidden,
+    cl::desc("The option to specify the name of the function "
+             "whose branch probability info is printed."));
+
 INITIALIZE_PASS_BEGIN(BranchProbabilityInfoWrapperPass, "branch-prob",
                       "Branch Probability Analysis", false, true)
 INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(TargetLibraryInfoWrapperPass)
 INITIALIZE_PASS_END(BranchProbabilityInfoWrapperPass, "branch-prob",
                     "Branch Probability Analysis", false, true)
 
@@ -58,19 +86,12 @@ char BranchProbabilityInfoWrapperPass::ID = 0;
 static const uint32_t LBH_TAKEN_WEIGHT = 124;
 static const uint32_t LBH_NONTAKEN_WEIGHT = 4;
 
-/// \brief Unreachable-terminating branch taken weight.
+/// \brief Unreachable-terminating branch taken probability.
 ///
-/// This is the weight for a branch being taken to a block that terminates
+/// This is the probability for a branch being taken to a block that terminates
 /// (eventually) in unreachable. These are predicted as unlikely as possible.
-static const uint32_t UR_TAKEN_WEIGHT = 1;
-
-/// \brief Unreachable-terminating branch not-taken weight.
-///
-/// This is the weight for a branch not being taken toward a block that
-/// terminates (eventually) in unreachable. Such a branch is essentially never
-/// taken. Set the weight to an absurdly high value so that nested loops don't
-/// easily subsume it.
-static const uint32_t UR_NONTAKEN_WEIGHT = 1024*1024 - 1;
+/// All reachable probability will equally share the remaining part.
+static const BranchProbability UR_TAKEN_PROB = BranchProbability::getRaw(1);
 
 /// \brief Weight for a branch taken going into a cold block.
 ///
@@ -108,11 +129,9 @@ static const uint32_t IH_TAKEN_WEIGHT = 1024 * 1024 - 1;
 /// instruction. This is essentially never taken.
 static const uint32_t IH_NONTAKEN_WEIGHT = 1;
 
-/// \brief Calculate edge weights for successors lead to unreachable.
-///
-/// Predict that a successor which leads necessarily to an
-/// unreachable-terminated block as extremely unlikely.
-bool BranchProbabilityInfo::calcUnreachableHeuristics(const BasicBlock *BB) {
+/// \brief Add \p BB to PostDominatedByUnreachable set if applicable.
+void
+BranchProbabilityInfo::updatePostDominatedByUnreachable(const BasicBlock *BB) {
   const TerminatorInst *TI = BB->getTerminator();
   if (TI->getNumSuccessors() == 0) {
     if (isa<UnreachableInst>(TI) ||
@@ -122,38 +141,84 @@ bool BranchProbabilityInfo::calcUnreachableHeuristics(const BasicBlock *BB) {
         // never execute.
         BB->getTerminatingDeoptimizeCall())
       PostDominatedByUnreachable.insert(BB);
-    return false;
+    return;
   }
+
+  // If the terminator is an InvokeInst, check only the normal destination block
+  // as the unwind edge of InvokeInst is also very unlikely taken.
+  if (auto *II = dyn_cast<InvokeInst>(TI)) {
+    if (PostDominatedByUnreachable.count(II->getNormalDest()))
+      PostDominatedByUnreachable.insert(BB);
+    return;
+  }
+
+  for (auto *I : successors(BB))
+    // If any of successor is not post dominated then BB is also not.
+    if (!PostDominatedByUnreachable.count(I))
+      return;
+
+  PostDominatedByUnreachable.insert(BB);
+}
+
+/// \brief Add \p BB to PostDominatedByColdCall set if applicable.
+void
+BranchProbabilityInfo::updatePostDominatedByColdCall(const BasicBlock *BB) {
+  assert(!PostDominatedByColdCall.count(BB));
+  const TerminatorInst *TI = BB->getTerminator();
+  if (TI->getNumSuccessors() == 0)
+    return;
+
+  // If all of successor are post dominated then BB is also done.
+  if (llvm::all_of(successors(BB), [&](const BasicBlock *SuccBB) {
+        return PostDominatedByColdCall.count(SuccBB);
+      })) {
+    PostDominatedByColdCall.insert(BB);
+    return;
+  }
+
+  // If the terminator is an InvokeInst, check only the normal destination
+  // block as the unwind edge of InvokeInst is also very unlikely taken.
+  if (auto *II = dyn_cast<InvokeInst>(TI))
+    if (PostDominatedByColdCall.count(II->getNormalDest())) {
+      PostDominatedByColdCall.insert(BB);
+      return;
+    }
+
+  // Otherwise, if the block itself contains a cold function, add it to the
+  // set of blocks post-dominated by a cold call.
+  for (auto &I : *BB)
+    if (const CallInst *CI = dyn_cast<CallInst>(&I))
+      if (CI->hasFnAttr(Attribute::Cold)) {
+        PostDominatedByColdCall.insert(BB);
+        return;
+      }
+}
+
+/// \brief Calculate edge weights for successors lead to unreachable.
+///
+/// Predict that a successor which leads necessarily to an
+/// unreachable-terminated block as extremely unlikely.
+bool BranchProbabilityInfo::calcUnreachableHeuristics(const BasicBlock *BB) {
+  const TerminatorInst *TI = BB->getTerminator();
+  assert(TI->getNumSuccessors() > 1 && "expected more than one successor!");
+
+  // Return false here so that edge weights for InvokeInst could be decided
+  // in calcInvokeHeuristics().
+  if (isa<InvokeInst>(TI))
+    return false;
 
   SmallVector<unsigned, 4> UnreachableEdges;
   SmallVector<unsigned, 4> ReachableEdges;
 
-  for (succ_const_iterator I = succ_begin(BB), E = succ_end(BB); I != E; ++I) {
+  for (succ_const_iterator I = succ_begin(BB), E = succ_end(BB); I != E; ++I)
     if (PostDominatedByUnreachable.count(*I))
       UnreachableEdges.push_back(I.getSuccessorIndex());
     else
       ReachableEdges.push_back(I.getSuccessorIndex());
-  }
 
-  // If all successors are in the set of blocks post-dominated by unreachable,
-  // this block is too.
-  if (UnreachableEdges.size() == TI->getNumSuccessors())
-    PostDominatedByUnreachable.insert(BB);
-
-  // Skip probabilities if this block has a single successor or if all were
-  // reachable.
-  if (TI->getNumSuccessors() == 1 || UnreachableEdges.empty())
+  // Skip probabilities if all were reachable.
+  if (UnreachableEdges.empty())
     return false;
-
-  // If the terminator is an InvokeInst, check only the normal destination block
-  // as the unwind edge of InvokeInst is also very unlikely taken.
-  if (auto *II = dyn_cast<InvokeInst>(TI))
-    if (PostDominatedByUnreachable.count(II->getNormalDest())) {
-      PostDominatedByUnreachable.insert(BB);
-      // Return false here so that edge weights for InvokeInst could be decided
-      // in calcInvokeHeuristics().
-      return false;
-    }
 
   if (ReachableEdges.empty()) {
     BranchProbability Prob(1, UnreachableEdges.size());
@@ -162,12 +227,10 @@ bool BranchProbabilityInfo::calcUnreachableHeuristics(const BasicBlock *BB) {
     return true;
   }
 
-  auto UnreachableProb = BranchProbability::getBranchProbability(
-      UR_TAKEN_WEIGHT, (UR_TAKEN_WEIGHT + UR_NONTAKEN_WEIGHT) *
-                           uint64_t(UnreachableEdges.size()));
-  auto ReachableProb = BranchProbability::getBranchProbability(
-      UR_NONTAKEN_WEIGHT,
-      (UR_TAKEN_WEIGHT + UR_NONTAKEN_WEIGHT) * uint64_t(ReachableEdges.size()));
+  auto UnreachableProb = UR_TAKEN_PROB;
+  auto ReachableProb =
+      (BranchProbability::getOne() - UR_TAKEN_PROB * UnreachableEdges.size()) /
+      ReachableEdges.size();
 
   for (unsigned SuccIdx : UnreachableEdges)
     setEdgeProbability(BB, SuccIdx, UnreachableProb);
@@ -178,12 +241,13 @@ bool BranchProbabilityInfo::calcUnreachableHeuristics(const BasicBlock *BB) {
 }
 
 // Propagate existing explicit probabilities from either profile data or
-// 'expect' intrinsic processing.
+// 'expect' intrinsic processing. Examine metadata against unreachable
+// heuristic. The probability of the edge coming to unreachable block is
+// set to min of metadata and unreachable heuristic.
 bool BranchProbabilityInfo::calcMetadataWeights(const BasicBlock *BB) {
   const TerminatorInst *TI = BB->getTerminator();
-  if (TI->getNumSuccessors() == 1)
-    return false;
-  if (!isa<BranchInst>(TI) && !isa<SwitchInst>(TI))
+  assert(TI->getNumSuccessors() > 1 && "expected more than one successor!");
+  if (!(isa<BranchInst>(TI) || isa<SwitchInst>(TI) || isa<IndirectBrInst>(TI)))
     return false;
 
   MDNode *WeightsNode = TI->getMetadata(LLVMContext::MD_prof);
@@ -203,6 +267,8 @@ bool BranchProbabilityInfo::calcMetadataWeights(const BasicBlock *BB) {
   // be scaled to fit in 32 bits.
   uint64_t WeightSum = 0;
   SmallVector<uint32_t, 2> Weights;
+  SmallVector<unsigned, 2> UnreachableIdxs;
+  SmallVector<unsigned, 2> ReachableIdxs;
   Weights.reserve(TI->getNumSuccessors());
   for (unsigned i = 1, e = WeightsNode->getNumOperands(); i != e; ++i) {
     ConstantInt *Weight =
@@ -213,6 +279,10 @@ bool BranchProbabilityInfo::calcMetadataWeights(const BasicBlock *BB) {
            "Too many bits for uint32_t");
     Weights.push_back(Weight->getZExtValue());
     WeightSum += Weights.back();
+    if (PostDominatedByUnreachable.count(TI->getSuccessor(i - 1)))
+      UnreachableIdxs.push_back(i - 1);
+    else
+      ReachableIdxs.push_back(i - 1);
   }
   assert(Weights.size() == TI->getNumSuccessors() && "Checked above");
 
@@ -221,22 +291,49 @@ bool BranchProbabilityInfo::calcMetadataWeights(const BasicBlock *BB) {
   uint64_t ScalingFactor =
       (WeightSum > UINT32_MAX) ? WeightSum / UINT32_MAX + 1 : 1;
 
-  WeightSum = 0;
-  for (unsigned i = 0, e = TI->getNumSuccessors(); i != e; ++i) {
-    Weights[i] /= ScalingFactor;
-    WeightSum += Weights[i];
+  if (ScalingFactor > 1) {
+    WeightSum = 0;
+    for (unsigned i = 0, e = TI->getNumSuccessors(); i != e; ++i) {
+      Weights[i] /= ScalingFactor;
+      WeightSum += Weights[i];
+    }
   }
-
-  if (WeightSum == 0) {
-    for (unsigned i = 0, e = TI->getNumSuccessors(); i != e; ++i)
-      setEdgeProbability(BB, i, {1, e});
-  } else {
-    for (unsigned i = 0, e = TI->getNumSuccessors(); i != e; ++i)
-      setEdgeProbability(BB, i, {Weights[i], static_cast<uint32_t>(WeightSum)});
-  }
-
   assert(WeightSum <= UINT32_MAX &&
          "Expected weights to scale down to 32 bits");
+
+  if (WeightSum == 0 || ReachableIdxs.size() == 0) {
+    for (unsigned i = 0, e = TI->getNumSuccessors(); i != e; ++i)
+      Weights[i] = 1;
+    WeightSum = TI->getNumSuccessors();
+  }
+
+  // Set the probability.
+  SmallVector<BranchProbability, 2> BP;
+  for (unsigned i = 0, e = TI->getNumSuccessors(); i != e; ++i)
+    BP.push_back({ Weights[i], static_cast<uint32_t>(WeightSum) });
+
+  // Examine the metadata against unreachable heuristic.
+  // If the unreachable heuristic is more strong then we use it for this edge.
+  if (UnreachableIdxs.size() > 0 && ReachableIdxs.size() > 0) {
+    auto ToDistribute = BranchProbability::getZero();
+    auto UnreachableProb = UR_TAKEN_PROB;
+    for (auto i : UnreachableIdxs)
+      if (UnreachableProb < BP[i]) {
+        ToDistribute += BP[i] - UnreachableProb;
+        BP[i] = UnreachableProb;
+      }
+
+    // If we modified the probability of some edges then we must distribute
+    // the difference between reachable blocks.
+    if (ToDistribute > BranchProbability::getZero()) {
+      BranchProbability PerEdge = ToDistribute / ReachableIdxs.size();
+      for (auto i : ReachableIdxs)
+        BP[i] += PerEdge;
+    }
+  }
+
+  for (unsigned i = 0, e = TI->getNumSuccessors(); i != e; ++i)
+    setEdgeProbability(BB, i, BP[i]);
 
   return true;
 }
@@ -251,7 +348,11 @@ bool BranchProbabilityInfo::calcMetadataWeights(const BasicBlock *BB) {
 /// Return false, otherwise.
 bool BranchProbabilityInfo::calcColdCallHeuristics(const BasicBlock *BB) {
   const TerminatorInst *TI = BB->getTerminator();
-  if (TI->getNumSuccessors() == 0)
+  assert(TI->getNumSuccessors() > 1 && "expected more than one successor!");
+
+  // Return false here so that edge weights for InvokeInst could be decided
+  // in calcInvokeHeuristics().
+  if (isa<InvokeInst>(TI))
     return false;
 
   // Determine which successors are post-dominated by a cold block.
@@ -263,34 +364,8 @@ bool BranchProbabilityInfo::calcColdCallHeuristics(const BasicBlock *BB) {
     else
       NormalEdges.push_back(I.getSuccessorIndex());
 
-  // If all successors are in the set of blocks post-dominated by cold calls,
-  // this block is in the set post-dominated by cold calls.
-  if (ColdEdges.size() == TI->getNumSuccessors())
-    PostDominatedByColdCall.insert(BB);
-  else {
-    // Otherwise, if the block itself contains a cold function, add it to the
-    // set of blocks postdominated by a cold call.
-    assert(!PostDominatedByColdCall.count(BB));
-    for (BasicBlock::const_iterator I = BB->begin(), E = BB->end(); I != E; ++I)
-      if (const CallInst *CI = dyn_cast<CallInst>(I))
-        if (CI->hasFnAttr(Attribute::Cold)) {
-          PostDominatedByColdCall.insert(BB);
-          break;
-        }
-  }
-
-  if (auto *II = dyn_cast<InvokeInst>(TI)) {
-    // If the terminator is an InvokeInst, consider only the normal destination
-    // block.
-    if (PostDominatedByColdCall.count(II->getNormalDest()))
-      PostDominatedByColdCall.insert(BB);
-    // Return false here so that edge weights for InvokeInst could be decided
-    // in calcInvokeHeuristics().
-    return false;
-  }
-
-  // Skip probabilities if this block has a single successor.
-  if (TI->getNumSuccessors() == 1 || ColdEdges.empty())
+  // Skip probabilities if no cold edges.
+  if (ColdEdges.empty())
     return false;
 
   if (NormalEdges.empty()) {
@@ -350,25 +425,73 @@ bool BranchProbabilityInfo::calcPointerHeuristics(const BasicBlock *BB) {
   return true;
 }
 
+static int getSCCNum(const BasicBlock *BB,
+                     const BranchProbabilityInfo::SccInfo &SccI) {
+  auto SccIt = SccI.SccNums.find(BB);
+  if (SccIt == SccI.SccNums.end())
+    return -1;
+  return SccIt->second;
+}
+
+// Consider any block that is an entry point to the SCC as a header.
+static bool isSCCHeader(const BasicBlock *BB, int SccNum,
+                        BranchProbabilityInfo::SccInfo &SccI) {
+  assert(getSCCNum(BB, SccI) == SccNum);
+
+  // Lazily compute the set of headers for a given SCC and cache the results
+  // in the SccHeaderMap.
+  if (SccI.SccHeaders.size() <= static_cast<unsigned>(SccNum))
+    SccI.SccHeaders.resize(SccNum + 1);
+  auto &HeaderMap = SccI.SccHeaders[SccNum];
+  bool Inserted;
+  BranchProbabilityInfo::SccHeaderMap::iterator HeaderMapIt;
+  std::tie(HeaderMapIt, Inserted) = HeaderMap.insert(std::make_pair(BB, false));
+  if (Inserted) {
+    bool IsHeader = llvm::any_of(make_range(pred_begin(BB), pred_end(BB)),
+                                 [&](const BasicBlock *Pred) {
+                                   return getSCCNum(Pred, SccI) != SccNum;
+                                 });
+    HeaderMapIt->second = IsHeader;
+    return IsHeader;
+  } else
+    return HeaderMapIt->second;
+}
+
 // Calculate Edge Weights using "Loop Branch Heuristics". Predict backedges
 // as taken, exiting edges as not-taken.
 bool BranchProbabilityInfo::calcLoopBranchHeuristics(const BasicBlock *BB,
-                                                     const LoopInfo &LI) {
+                                                     const LoopInfo &LI,
+                                                     SccInfo &SccI) {
+  int SccNum;
   Loop *L = LI.getLoopFor(BB);
-  if (!L)
-    return false;
+  if (!L) {
+    SccNum = getSCCNum(BB, SccI);
+    if (SccNum < 0)
+      return false;
+  }
 
   SmallVector<unsigned, 8> BackEdges;
   SmallVector<unsigned, 8> ExitingEdges;
   SmallVector<unsigned, 8> InEdges; // Edges from header to the loop.
 
   for (succ_const_iterator I = succ_begin(BB), E = succ_end(BB); I != E; ++I) {
-    if (!L->contains(*I))
-      ExitingEdges.push_back(I.getSuccessorIndex());
-    else if (L->getHeader() == *I)
-      BackEdges.push_back(I.getSuccessorIndex());
-    else
-      InEdges.push_back(I.getSuccessorIndex());
+    // Use LoopInfo if we have it, otherwise fall-back to SCC info to catch
+    // irreducible loops.
+    if (L) {
+      if (!L->contains(*I))
+        ExitingEdges.push_back(I.getSuccessorIndex());
+      else if (L->getHeader() == *I)
+        BackEdges.push_back(I.getSuccessorIndex());
+      else
+        InEdges.push_back(I.getSuccessorIndex());
+    } else {
+      if (getSCCNum(*I, SccI) != SccNum)
+        ExitingEdges.push_back(I.getSuccessorIndex());
+      else if (isSCCHeader(*I, SccNum, SccI))
+        BackEdges.push_back(I.getSuccessorIndex());
+      else
+        InEdges.push_back(I.getSuccessorIndex());
+    }
   }
 
   if (BackEdges.empty() && ExitingEdges.empty())
@@ -410,7 +533,8 @@ bool BranchProbabilityInfo::calcLoopBranchHeuristics(const BasicBlock *BB,
   return true;
 }
 
-bool BranchProbabilityInfo::calcZeroHeuristics(const BasicBlock *BB) {
+bool BranchProbabilityInfo::calcZeroHeuristics(const BasicBlock *BB,
+                                               const TargetLibraryInfo *TLI) {
   const BranchInst *BI = dyn_cast<BranchInst>(BB->getTerminator());
   if (!BI || !BI->isConditional())
     return false;
@@ -430,11 +554,40 @@ bool BranchProbabilityInfo::calcZeroHeuristics(const BasicBlock *BB) {
   if (Instruction *LHS = dyn_cast<Instruction>(CI->getOperand(0)))
     if (LHS->getOpcode() == Instruction::And)
       if (ConstantInt *AndRHS = dyn_cast<ConstantInt>(LHS->getOperand(1)))
-        if (AndRHS->getUniqueInteger().isPowerOf2())
+        if (AndRHS->getValue().isPowerOf2())
           return false;
 
+  // Check if the LHS is the return value of a library function
+  LibFunc Func = NumLibFuncs;
+  if (TLI)
+    if (CallInst *Call = dyn_cast<CallInst>(CI->getOperand(0)))
+      if (Function *CalledFn = Call->getCalledFunction())
+        TLI->getLibFunc(*CalledFn, Func);
+
   bool isProb;
-  if (CV->isZero()) {
+  if (Func == LibFunc_strcasecmp ||
+      Func == LibFunc_strcmp ||
+      Func == LibFunc_strncasecmp ||
+      Func == LibFunc_strncmp ||
+      Func == LibFunc_memcmp) {
+    // strcmp and similar functions return zero, negative, or positive, if the
+    // first string is equal, less, or greater than the second. We consider it
+    // likely that the strings are not equal, so a comparison with zero is
+    // probably false, but also a comparison with any other number is also
+    // probably false given that what exactly is returned for nonzero values is
+    // not specified. Any kind of comparison other than equality we know
+    // nothing about.
+    switch (CI->getPredicate()) {
+    case CmpInst::ICMP_EQ:
+      isProb = false;
+      break;
+    case CmpInst::ICMP_NE:
+      isProb = true;
+      break;
+    default:
+      return false;
+    }
+  } else if (CV->isZero()) {
     switch (CI->getPredicate()) {
     case CmpInst::ICMP_EQ:
       // X == 0   ->  Unlikely
@@ -459,7 +612,7 @@ bool BranchProbabilityInfo::calcZeroHeuristics(const BasicBlock *BB) {
     // InstCombine canonicalizes X <= 0 into X < 1.
     // X <= 0   ->  Unlikely
     isProb = false;
-  } else if (CV->isAllOnesValue()) {
+  } else if (CV->isMinusOne()) {
     switch (CI->getPredicate()) {
     case CmpInst::ICMP_EQ:
       // X == -1  ->  Unlikely
@@ -643,7 +796,6 @@ raw_ostream &
 BranchProbabilityInfo::printEdgeProbability(raw_ostream &OS,
                                             const BasicBlock *Src,
                                             const BasicBlock *Dst) const {
-
   const BranchProbability Prob = getEdgeProbability(Src, Dst);
   OS << "edge " << Src->getName() << " -> " << Dst->getName()
      << " probability is " << Prob
@@ -660,28 +812,55 @@ void BranchProbabilityInfo::eraseBlock(const BasicBlock *BB) {
   }
 }
 
-void BranchProbabilityInfo::calculate(const Function &F, const LoopInfo &LI) {
+void BranchProbabilityInfo::calculate(const Function &F, const LoopInfo &LI,
+                                      const TargetLibraryInfo *TLI) {
   DEBUG(dbgs() << "---- Branch Probability Info : " << F.getName()
                << " ----\n\n");
   LastF = &F; // Store the last function we ran on for printing.
   assert(PostDominatedByUnreachable.empty());
   assert(PostDominatedByColdCall.empty());
 
+  // Record SCC numbers of blocks in the CFG to identify irreducible loops.
+  // FIXME: We could only calculate this if the CFG is known to be irreducible
+  // (perhaps cache this info in LoopInfo if we can easily calculate it there?).
+  int SccNum = 0;
+  SccInfo SccI;
+  for (scc_iterator<const Function *> It = scc_begin(&F); !It.isAtEnd();
+       ++It, ++SccNum) {
+    // Ignore single-block SCCs since they either aren't loops or LoopInfo will
+    // catch them.
+    const std::vector<const BasicBlock *> &Scc = *It;
+    if (Scc.size() == 1)
+      continue;
+
+    DEBUG(dbgs() << "BPI: SCC " << SccNum << ":");
+    for (auto *BB : Scc) {
+      DEBUG(dbgs() << " " << BB->getName());
+      SccI.SccNums[BB] = SccNum;
+    }
+    DEBUG(dbgs() << "\n");
+  }
+
   // Walk the basic blocks in post-order so that we can build up state about
   // the successors of a block iteratively.
   for (auto BB : post_order(&F.getEntryBlock())) {
     DEBUG(dbgs() << "Computing probabilities for " << BB->getName() << "\n");
-    if (calcUnreachableHeuristics(BB))
+    updatePostDominatedByUnreachable(BB);
+    updatePostDominatedByColdCall(BB);
+    // If there is no at least two successors, no sense to set probability.
+    if (BB->getTerminator()->getNumSuccessors() < 2)
       continue;
     if (calcMetadataWeights(BB))
       continue;
+    if (calcUnreachableHeuristics(BB))
+      continue;
     if (calcColdCallHeuristics(BB))
       continue;
-    if (calcLoopBranchHeuristics(BB, LI))
+    if (calcLoopBranchHeuristics(BB, LI, SccI))
       continue;
     if (calcPointerHeuristics(BB))
       continue;
-    if (calcZeroHeuristics(BB))
+    if (calcZeroHeuristics(BB, TLI))
       continue;
     if (calcFloatingPointHeuristics(BB))
       continue;
@@ -690,17 +869,25 @@ void BranchProbabilityInfo::calculate(const Function &F, const LoopInfo &LI) {
 
   PostDominatedByUnreachable.clear();
   PostDominatedByColdCall.clear();
+
+  if (PrintBranchProb &&
+      (PrintBranchProbFuncName.empty() ||
+       F.getName().equals(PrintBranchProbFuncName))) {
+    print(dbgs());
+  }
 }
 
 void BranchProbabilityInfoWrapperPass::getAnalysisUsage(
     AnalysisUsage &AU) const {
   AU.addRequired<LoopInfoWrapperPass>();
+  AU.addRequired<TargetLibraryInfoWrapperPass>();
   AU.setPreservesAll();
 }
 
 bool BranchProbabilityInfoWrapperPass::runOnFunction(Function &F) {
   const LoopInfo &LI = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
-  BPI.calculate(F, LI);
+  const TargetLibraryInfo &TLI = getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
+  BPI.calculate(F, LI, &TLI);
   return false;
 }
 
@@ -715,7 +902,7 @@ AnalysisKey BranchProbabilityAnalysis::Key;
 BranchProbabilityInfo
 BranchProbabilityAnalysis::run(Function &F, FunctionAnalysisManager &AM) {
   BranchProbabilityInfo BPI;
-  BPI.calculate(F, AM.getResult<LoopAnalysis>(F));
+  BPI.calculate(F, AM.getResult<LoopAnalysis>(F), &AM.getResult<TargetLibraryAnalysis>(F));
   return BPI;
 }
 

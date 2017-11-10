@@ -33,7 +33,7 @@ using namespace llvm;
 AMDGPUInstructionSelector::AMDGPUInstructionSelector(
     const SISubtarget &STI, const AMDGPURegisterBankInfo &RBI)
     : InstructionSelector(), TII(*STI.getInstrInfo()),
-      TRI(*STI.getRegisterInfo()), RBI(RBI) {}
+      TRI(*STI.getRegisterInfo()), RBI(RBI), AMDGPUASI(STI.getAMDGPUAS()) {}
 
 MachineOperand
 AMDGPUInstructionSelector::getSubOperand64(MachineOperand &MO,
@@ -126,9 +126,10 @@ bool AMDGPUInstructionSelector::selectG_STORE(MachineInstr &I) const {
   MachineInstr *Flat = BuildMI(*BB, &I, DL, TII.get(AMDGPU::FLAT_STORE_DWORD))
           .add(I.getOperand(1))
           .add(I.getOperand(0))
-          .addImm(0)
-          .addImm(0)
-          .addImm(0);
+          .addImm(0)  // offset
+          .addImm(0)  // glc
+          .addImm(0); // slc
+
 
   // Now that we selected an opcode, we need to constrain the register
   // operands to use appropriate classes.
@@ -291,7 +292,7 @@ bool AMDGPUInstructionSelector::selectSMRD(MachineInstr &I,
   if (!I.hasOneMemOperand())
     return false;
 
-  if ((*I.memoperands_begin())->getAddrSpace() != AMDGPUAS::CONSTANT_ADDRESS)
+  if ((*I.memoperands_begin())->getAddrSpace() != AMDGPUASI.CONSTANT_ADDRESS)
     return false;
 
   if (!isInstrUniform(I))
@@ -392,9 +393,9 @@ bool AMDGPUInstructionSelector::selectG_LOAD(MachineInstr &I) const {
   MachineInstr *Flat = BuildMI(*BB, &I, DL, TII.get(Opcode))
                                .add(I.getOperand(0))
                                .addReg(PtrReg)
-                               .addImm(0)
-                               .addImm(0)
-                               .addImm(0);
+                               .addImm(0)  // offset
+                               .addImm(0)  // glc
+                               .addImm(0); // slc
 
   bool Ret = constrainSelectedInstRegOperands(*Flat, TII, TRI, RBI);
   I.eraseFromParent();

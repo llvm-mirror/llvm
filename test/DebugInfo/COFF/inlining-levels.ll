@@ -18,14 +18,14 @@
 
 ; OBJ: Subsection [
 ; OBJ:   SubSectionType: Symbols (0xF1)
-; OBJ:   ProcStart {
-; OBJ:   InlineSite {
+; OBJ:   {{.*}}Proc{{.*}}Sym {
+; OBJ:   InlineSiteSym {
 ; OBJ:     Inlinee: h (0x1002)
 ; OBJ:   }
-; OBJ:   InlineSite {
+; OBJ:   InlineSiteSym {
 ; OBJ:     Inlinee: g (0x1003)
 ; OBJ:   }
-; OBJ:   InlineSite {
+; OBJ:   InlineSiteSym {
 ; OBJ:     Inlinee: f (0x1004)
 ; OBJ:   }
 ; OBJ:   InlineSiteEnd {
@@ -59,7 +59,7 @@ attributes #0 = { norecurse nounwind uwtable "disable-tail-calls"="false" "less-
 !llvm.module.flags = !{!8, !9, !10}
 !llvm.ident = !{!11}
 
-!0 = !DIGlobalVariableExpression(var: !1)
+!0 = !DIGlobalVariableExpression(var: !1, expr: !DIExpression())
 !1 = !DIGlobalVariable(name: "x", linkageName: "\01?x@@3HC", scope: !2, file: !3, line: 1, type: !6, isLocal: false, isDefinition: true)
 !2 = distinct !DICompileUnit(language: DW_LANG_C_plus_plus, file: !3, producer: "clang version 3.9.0 ", isOptimized: true, runtimeVersion: 0, emissionKind: FullDebug, enums: !4, globals: !5)
 !3 = !DIFile(filename: "t.cpp", directory: "D:\5Csrc\5Cllvm\5Cbuild")

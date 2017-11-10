@@ -20,6 +20,7 @@
 #include "llvm/Support/Error.h"
 #include <cstdint>
 #include <type_traits>
+#include <utility>
 
 namespace llvm {
 
@@ -31,7 +32,20 @@ namespace llvm {
 class BinaryStreamWriter {
 public:
   BinaryStreamWriter() = default;
-  explicit BinaryStreamWriter(WritableBinaryStreamRef Stream);
+  explicit BinaryStreamWriter(WritableBinaryStreamRef Ref);
+  explicit BinaryStreamWriter(WritableBinaryStream &Stream);
+  explicit BinaryStreamWriter(MutableArrayRef<uint8_t> Data,
+                              llvm::support::endianness Endian);
+
+  BinaryStreamWriter(const BinaryStreamWriter &Other)
+      : Stream(Other.Stream), Offset(Other.Offset) {}
+
+  BinaryStreamWriter &operator=(const BinaryStreamWriter &Other) {
+    Stream = Other.Stream;
+    Offset = Other.Offset;
+    return *this;
+  }
+
   virtual ~BinaryStreamWriter() {}
 
   /// Write the bytes specified in \p Buffer to the underlying stream.
@@ -150,10 +164,14 @@ public:
     return writeStreamRef(Array.getUnderlyingStream());
   }
 
+  /// Splits the Writer into two Writers at a given offset.
+  std::pair<BinaryStreamWriter, BinaryStreamWriter> split(uint32_t Off) const;
+
   void setOffset(uint32_t Off) { Offset = Off; }
   uint32_t getOffset() const { return Offset; }
   uint32_t getLength() const { return Stream.getLength(); }
   uint32_t bytesRemaining() const { return getLength() - getOffset(); }
+  Error padToAlignment(uint32_t Align);
 
 protected:
   WritableBinaryStreamRef Stream;

@@ -14,8 +14,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/CodeGen/GlobalISel/Legalizer.h"
+#include "llvm/ADT/SetVector.h"
+#include "llvm/CodeGen/GlobalISel/LegalizerCombiner.h"
 #include "llvm/CodeGen/GlobalISel/LegalizerHelper.h"
-#include "llvm/CodeGen/GlobalISel/Legalizer.h"
 #include "llvm/CodeGen/GlobalISel/Utils.h"
 #include "llvm/CodeGen/MachineOptimizationRemarkEmitter.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
@@ -23,6 +24,8 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
+
+#include <iterator>
 
 #define DEBUG_TYPE "legalizer"
 
@@ -49,100 +52,6 @@ void Legalizer::getAnalysisUsage(AnalysisUsage &AU) const {
 void Legalizer::init(MachineFunction &MF) {
 }
 
-bool Legalizer::combineExtracts(MachineInstr &MI, MachineRegisterInfo &MRI,
-                                const TargetInstrInfo &TII) {
-  bool Changed = false;
-  if (MI.getOpcode() != TargetOpcode::G_EXTRACT)
-    return Changed;
-
-  unsigned NumDefs = (MI.getNumOperands() - 1) / 2;
-  unsigned SrcReg = MI.getOperand(NumDefs).getReg();
-  MachineInstr &SeqI = *MRI.def_instr_begin(SrcReg);
-  if (SeqI.getOpcode() != TargetOpcode::G_SEQUENCE)
-      return Changed;
-
-  unsigned NumSeqSrcs = (SeqI.getNumOperands() - 1) / 2;
-  bool AllDefsReplaced = true;
-
-  // Try to match each register extracted with a corresponding insertion formed
-  // by the G_SEQUENCE.
-  for (unsigned Idx = 0, SeqIdx = 0; Idx < NumDefs; ++Idx) {
-    MachineOperand &ExtractMO = MI.getOperand(Idx);
-    assert(ExtractMO.isReg() && ExtractMO.isDef() &&
-           "unexpected extract operand");
-
-    unsigned ExtractReg = ExtractMO.getReg();
-    unsigned ExtractPos = MI.getOperand(NumDefs + Idx + 1).getImm();
-
-    while (SeqIdx < NumSeqSrcs &&
-           SeqI.getOperand(2 * SeqIdx + 2).getImm() < ExtractPos)
-      ++SeqIdx;
-
-    if (SeqIdx == NumSeqSrcs) {
-      AllDefsReplaced = false;
-      continue;
-    }
-
-    unsigned OrigReg = SeqI.getOperand(2 * SeqIdx + 1).getReg();
-    if (SeqI.getOperand(2 * SeqIdx + 2).getImm() != ExtractPos ||
-        MRI.getType(OrigReg) != MRI.getType(ExtractReg)) {
-      AllDefsReplaced = false;
-      continue;
-    }
-
-    assert(!TargetRegisterInfo::isPhysicalRegister(OrigReg) &&
-           "unexpected physical register in G_SEQUENCE");
-
-    // Finally we can replace the uses.
-    MRI.replaceRegWith(ExtractReg, OrigReg);
-  }
-
-  if (AllDefsReplaced) {
-    // If SeqI was the next instruction in the BB and we removed it, we'd break
-    // the outer iteration.
-    assert(std::next(MachineBasicBlock::iterator(MI)) != SeqI &&
-           "G_SEQUENCE does not dominate G_EXTRACT");
-
-    MI.eraseFromParent();
-
-    if (MRI.use_empty(SrcReg))
-      SeqI.eraseFromParent();
-    Changed = true;
-  }
-
-  return Changed;
-}
-
-bool Legalizer::combineMerges(MachineInstr &MI, MachineRegisterInfo &MRI,
-                              const TargetInstrInfo &TII) {
-  if (MI.getOpcode() != TargetOpcode::G_UNMERGE_VALUES)
-    return false;
-
-  unsigned NumDefs = MI.getNumOperands() - 1;
-  unsigned SrcReg = MI.getOperand(NumDefs).getReg();
-  MachineInstr &MergeI = *MRI.def_instr_begin(SrcReg);
-  if (MergeI.getOpcode() != TargetOpcode::G_MERGE_VALUES)
-    return false;
-
-  if (MergeI.getNumOperands() - 1 != NumDefs)
-    return false;
-
-  // FIXME: is a COPY appropriate if the types mismatch? We know both registers
-  // are allocatable by now.
-  if (MRI.getType(MI.getOperand(0).getReg()) !=
-      MRI.getType(MergeI.getOperand(1).getReg()))
-    return false;
-
-  for (unsigned Idx = 0; Idx < NumDefs; ++Idx)
-    MRI.replaceRegWith(MI.getOperand(Idx).getReg(),
-                       MergeI.getOperand(Idx + 1).getReg());
-
-  MI.eraseFromParent();
-  if (MRI.use_empty(MergeI.getOperand(0).getReg()))
-    MergeI.eraseFromParent();
-  return true;
-}
-
 bool Legalizer::runOnMachineFunction(MachineFunction &MF) {
   // If the ISel pipeline failed, do not bother running that pass.
   if (MF.getProperties().hasProperty(
@@ -161,7 +70,10 @@ bool Legalizer::runOnMachineFunction(MachineFunction &MF) {
   // convergence for performance reasons.
   bool Changed = false;
   MachineBasicBlock::iterator NextMI;
-  for (auto &MBB : MF)
+  using VecType = SmallSetVector<MachineInstr *, 8>;
+  VecType WorkList;
+  VecType CombineList;
+  for (auto &MBB : MF) {
     for (auto MI = MBB.begin(); MI != MBB.end(); MI = NextMI) {
       // Get the next Instruction before we try to legalize, because there's a
       // good chance MI will be deleted.
@@ -171,31 +83,93 @@ bool Legalizer::runOnMachineFunction(MachineFunction &MF) {
       // and are assumed to be legal.
       if (!isPreISelGenericOpcode(MI->getOpcode()))
         continue;
+      unsigned NumNewInsns = 0;
+      WorkList.clear();
+      CombineList.clear();
+      Helper.MIRBuilder.recordInsertions([&](MachineInstr *MI) {
+        // Only legalize pre-isel generic instructions.
+        // Legalization process could generate Target specific pseudo
+        // instructions with generic types. Don't record them
+        if (isPreISelGenericOpcode(MI->getOpcode())) {
+          ++NumNewInsns;
+          WorkList.insert(MI);
+          CombineList.insert(MI);
+        }
+      });
+      WorkList.insert(&*MI);
+      LegalizerCombiner C(Helper.MIRBuilder, MF.getRegInfo(),
+                          Helper.getLegalizerInfo());
+      bool Changed = false;
+      LegalizerHelper::LegalizeResult Res;
+      do {
+        assert(!WorkList.empty() && "Expecting illegal ops");
+        while (!WorkList.empty()) {
+          NumNewInsns = 0;
+          MachineInstr *CurrInst = WorkList.pop_back_val();
+          Res = Helper.legalizeInstrStep(*CurrInst);
+          // Error out if we couldn't legalize this instruction. We may want to
+          // fall back to DAG ISel instead in the future.
+          if (Res == LegalizerHelper::UnableToLegalize) {
+            Helper.MIRBuilder.stopRecordingInsertions();
+            if (Res == LegalizerHelper::UnableToLegalize) {
+              reportGISelFailure(MF, TPC, MORE, "gisel-legalize",
+                                 "unable to legalize instruction", *CurrInst);
+              return false;
+            }
+          }
+          Changed |= Res == LegalizerHelper::Legalized;
+          // If CurrInst was legalized, there's a good chance that it might have
+          // been erased. So remove it from the Combine List.
+          if (Res == LegalizerHelper::Legalized)
+            CombineList.remove(CurrInst);
 
-      auto Res = Helper.legalizeInstr(*MI);
+#ifndef NDEBUG
+          if (NumNewInsns)
+            for (unsigned I = WorkList.size() - NumNewInsns,
+                          E = WorkList.size();
+                 I != E; ++I)
+              DEBUG(dbgs() << ".. .. New MI: " << *WorkList[I];);
+#endif
+        }
+        // Do the combines.
+        while (!CombineList.empty()) {
+          NumNewInsns = 0;
+          MachineInstr *CurrInst = CombineList.pop_back_val();
+          SmallVector<MachineInstr *, 4> DeadInstructions;
+          Changed |= C.tryCombineInstruction(*CurrInst, DeadInstructions);
+          for (auto *DeadMI : DeadInstructions) {
+            DEBUG(dbgs() << ".. Erasing Dead Instruction " << *DeadMI);
+            CombineList.remove(DeadMI);
+            WorkList.remove(DeadMI);
+            DeadMI->eraseFromParent();
+          }
+#ifndef NDEBUG
+          if (NumNewInsns)
+            for (unsigned I = CombineList.size() - NumNewInsns,
+                          E = CombineList.size();
+                 I != E; ++I)
+              DEBUG(dbgs() << ".. .. Combine New MI: " << *CombineList[I];);
+#endif
+        }
+      } while (!WorkList.empty());
 
-      // Error out if we couldn't legalize this instruction. We may want to fall
-      // back to DAG ISel instead in the future.
-      if (Res == LegalizerHelper::UnableToLegalize) {
-        reportGISelFailure(MF, TPC, MORE, "gisel-legalize",
-                           "unable to legalize instruction", *MI);
-        return false;
-      }
-
-      Changed |= Res == LegalizerHelper::Legalized;
+      Helper.MIRBuilder.stopRecordingInsertions();
     }
-
+  }
 
   MachineRegisterInfo &MRI = MF.getRegInfo();
-  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
+  MachineIRBuilder MIRBuilder(MF);
+  LegalizerCombiner C(MIRBuilder, MRI, Helper.getLegalizerInfo());
   for (auto &MBB : MF) {
     for (auto MI = MBB.begin(); MI != MBB.end(); MI = NextMI) {
       // Get the next Instruction before we try to legalize, because there's a
       // good chance MI will be deleted.
+      // TOOD: Perhaps move this to a combiner pass later?.
       NextMI = std::next(MI);
-
-      Changed |= combineExtracts(*MI, MRI, TII);
-      Changed |= combineMerges(*MI, MRI, TII);
+      SmallVector<MachineInstr *, 4> DeadInsts;
+      Changed |= C.tryCombineMerges(*MI, DeadInsts);
+      for (auto *DeadMI : DeadInsts)
+        DeadMI->eraseFromParent();
     }
   }
 

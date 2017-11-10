@@ -17,6 +17,7 @@ define i32 @main() #0 !dbg !11 {
   call void @llvm.dbg.value(metadata i32 10, i64 0, metadata !15, metadata !16), !dbg !17
   store i32 4, i32* %5, align 4
   store i32 0, i32* @x, align 4, !dbg !24
+  call void asm sideeffect "", "~{memory},~{dirflag},~{fpsr},~{flags}"()
   ; This is the same sequence of instructions without a debug value. It should be outlined
   ; in the same way.
   ; CHECK: callq l_OUTLINED_FUNCTION_0
@@ -47,7 +48,7 @@ attributes #0 = { noredzone nounwind ssp uwtable "no-frame-pointer-elim"="true" 
 !llvm.module.flags = !{!7, !8, !9}
 !llvm.ident = !{!10}
 
-!0 = !DIGlobalVariableExpression(var: !1)
+!0 = !DIGlobalVariableExpression(var: !1, expr: !DIExpression())
 !1 = distinct !DIGlobalVariable(name: "x", scope: !2, file: !3, line: 2, type: !6, isLocal: false, isDefinition: true)
 !2 = distinct !DICompileUnit(language: DW_LANG_C99, file: !3, producer: "clang version 5.0.0", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug, enums: !4, globals: !5)
 !3 = !DIFile(filename: "debug-test.c", directory: "dir")

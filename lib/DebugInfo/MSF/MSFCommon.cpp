@@ -1,4 +1,4 @@
-//===- MSFCommon.cpp - Common types and functions for MSF files -*- C++ -*-===//
+//===- MSFCommon.cpp - Common types and functions for MSF files -----------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -9,6 +9,10 @@
 
 #include "llvm/DebugInfo/MSF/MSFCommon.h"
 #include "llvm/DebugInfo/MSF/MSFError.h"
+#include "llvm/Support/Endian.h"
+#include "llvm/Support/Error.h"
+#include <cstdint>
+#include <cstring>
 
 using namespace llvm;
 using namespace llvm::msf;
@@ -54,4 +58,28 @@ Error llvm::msf::validateSuperBlock(const SuperBlock &SB) {
         "The free block map isn't at block 1 or block 2.");
 
   return Error::success();
+}
+
+MSFStreamLayout llvm::msf::getFpmStreamLayout(const MSFLayout &Msf,
+                                              bool IncludeUnusedFpmData,
+                                              bool AltFpm) {
+  MSFStreamLayout FL;
+  uint32_t NumFpmIntervals = getNumFpmIntervals(Msf, IncludeUnusedFpmData);
+  support::ulittle32_t FpmBlock = Msf.SB->FreeBlockMapBlock;
+  assert(FpmBlock == 1 || FpmBlock == 2);
+  if (AltFpm) {
+    // If they requested the alternate FPM, then 2 becomes 1 and 1 becomes 2.
+    FpmBlock = 3U - FpmBlock;
+  }
+  for (uint32_t I = 0; I < NumFpmIntervals; ++I) {
+    FL.Blocks.push_back(FpmBlock);
+    FpmBlock += msf::getFpmIntervalLength(Msf);
+  }
+
+  if (IncludeUnusedFpmData)
+    FL.Length = NumFpmIntervals * Msf.SB->BlockSize;
+  else
+    FL.Length = divideCeil(Msf.SB->NumBlocks, 8);
+
+  return FL;
 }

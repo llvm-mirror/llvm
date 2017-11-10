@@ -18,9 +18,9 @@
 
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/GraphTraits.h"
-#include "llvm/ADT/iterator.h"
 #include "llvm/ADT/PointerIntPair.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/iterator.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Target/TargetLowering.h"
@@ -52,14 +52,14 @@ class TargetRegisterInfo;
     /// These are the different kinds of scheduling dependencies.
     enum Kind {
       Data,        ///< Regular data dependence (aka true-dependence).
-      Anti,        ///< A register anti-dependedence (aka WAR).
+      Anti,        ///< A register anti-dependence (aka WAR).
       Output,      ///< A register output-dependence (aka WAW).
       Order        ///< Any other ordering dependency.
     };
 
     // Strong dependencies must be respected by the scheduler. Artificial
     // dependencies may be removed only if they are redundant with another
-    // strong depedence.
+    // strong dependence.
     //
     // Weak dependencies may be violated by the scheduling strategy, but only if
     // the strategy can prove it is correct to do so.
@@ -235,6 +235,9 @@ class TargetRegisterInfo;
              "SDep::Output edge cannot use the zero register!");
       Contents.Reg = Reg;
     }
+
+    raw_ostream &print(raw_ostream &O,
+                       const TargetRegisterInfo *TRI = nullptr) const;
   };
 
   template <>
@@ -342,7 +345,7 @@ class TargetRegisterInfo;
     /// BoundaryNodes can have DAG edges, including Data edges, but they do not
     /// correspond to schedulable entities (e.g. instructions) and do not have a
     /// valid ID. Consequently, always check for boundary nodes before accessing
-    /// an assoicative data structure keyed on node ID.
+    /// an associative data structure keyed on node ID.
     bool isBoundaryNode() const { return NodeNum == BoundaryID; }
 
     /// Assigns the representative SDNode for this SUnit. This may be used
@@ -458,7 +461,10 @@ class TargetRegisterInfo;
 
     void dump(const ScheduleDAG *G) const;
     void dumpAll(const ScheduleDAG *G) const;
-    void print(raw_ostream &O, const ScheduleDAG *G) const;
+    raw_ostream &print(raw_ostream &O,
+                       const SUnit *N = nullptr,
+                       const SUnit *X = nullptr) const;
+    raw_ostream &print(raw_ostream &O, const ScheduleDAG *G) const;
 
   private:
     void ComputeDepth();
@@ -714,6 +720,14 @@ class TargetRegisterInfo;
 
     /// Creates the initial topological ordering from the DAG to be scheduled.
     void InitDAGTopologicalSorting();
+
+    /// Returns an array of SUs that are both in the successor
+    /// subtree of StartSU and in the predecessor subtree of TargetSU.
+    /// StartSU and TargetSU are not in the array.
+    /// Success is false if TargetSU is not in the successor subtree of
+    /// StartSU, else it is true.
+    std::vector<int> GetSubGraph(const SUnit &StartSU, const SUnit &TargetSU,
+                                 bool &Success);
 
     /// Checks if \p SU is reachable from \p TargetSU.
     bool IsReachable(const SUnit *SU, const SUnit *TargetSU);

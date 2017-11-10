@@ -21,6 +21,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/ADT/Twine.h"
+#include "llvm/BinaryFormat/ELF.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCAssembler.h"
@@ -43,12 +44,11 @@
 #include "llvm/Support/ARMBuildAttributes.h"
 #include "llvm/Support/ARMEHABI.h"
 #include "llvm/Support/Casting.h"
-#include "llvm/Support/ELF.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/LEB128.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/TargetParser.h"
+#include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <cassert>
 #include <climits>
@@ -92,9 +92,9 @@ class ARMTargetAsmStreamer : public ARMTargetStreamer {
   void emitTextAttribute(unsigned Attribute, StringRef String) override;
   void emitIntTextAttribute(unsigned Attribute, unsigned IntValue,
                             StringRef StringValue) override;
-  void emitArch(unsigned Arch) override;
+  void emitArch(ARM::ArchKind Arch) override;
   void emitArchExtension(unsigned ArchExt) override;
-  void emitObjectArch(unsigned Arch) override;
+  void emitObjectArch(ARM::ArchKind Arch) override;
   void emitFPU(unsigned FPU) override;
   void emitInst(uint32_t Inst, char Suffix = '\0') override;
   void finishAttributeSection() override;
@@ -218,7 +218,7 @@ void ARMTargetAsmStreamer::emitIntTextAttribute(unsigned Attribute,
   OS << "\n";
 }
 
-void ARMTargetAsmStreamer::emitArch(unsigned Arch) {
+void ARMTargetAsmStreamer::emitArch(ARM::ArchKind Arch) {
   OS << "\t.arch\t" << ARM::getArchName(Arch) << "\n";
 }
 
@@ -226,7 +226,7 @@ void ARMTargetAsmStreamer::emitArchExtension(unsigned ArchExt) {
   OS << "\t.arch_extension\t" << ARM::getArchExtName(ArchExt) << "\n";
 }
 
-void ARMTargetAsmStreamer::emitObjectArch(unsigned Arch) {
+void ARMTargetAsmStreamer::emitObjectArch(ARM::ArchKind Arch) {
   OS << "\t.object_arch\t" << ARM::getArchName(Arch) << '\n';
 }
 
@@ -303,8 +303,8 @@ private:
 
   StringRef CurrentVendor;
   unsigned FPU = ARM::FK_INVALID;
-  unsigned Arch = ARM::AK_INVALID;
-  unsigned EmittedArch = ARM::AK_INVALID;
+  ARM::ArchKind Arch = ARM::ArchKind::INVALID;
+  ARM::ArchKind EmittedArch = ARM::ArchKind::INVALID;
   SmallVector<AttributeItem, 64> Contents;
 
   MCSection *AttributeSection = nullptr;
@@ -404,8 +404,8 @@ private:
   void emitTextAttribute(unsigned Attribute, StringRef String) override;
   void emitIntTextAttribute(unsigned Attribute, unsigned IntValue,
                             StringRef StringValue) override;
-  void emitArch(unsigned Arch) override;
-  void emitObjectArch(unsigned Arch) override;
+  void emitArch(ARM::ArchKind Arch) override;
+  void emitObjectArch(ARM::ArchKind Arch) override;
   void emitFPU(unsigned FPU) override;
   void emitInst(uint32_t Inst, char Suffix = '\0') override;
   void finishAttributeSection() override;
@@ -440,9 +440,11 @@ class ARMELFStreamer : public MCELFStreamer {
 public:
   friend class ARMTargetELFStreamer;
 
-  ARMELFStreamer(MCContext &Context, MCAsmBackend &TAB, raw_pwrite_stream &OS,
-                 MCCodeEmitter *Emitter, bool IsThumb)
-      : MCELFStreamer(Context, TAB, OS, Emitter), IsThumb(IsThumb) {
+  ARMELFStreamer(MCContext &Context, std::unique_ptr<MCAsmBackend> TAB,
+                 raw_pwrite_stream &OS, std::unique_ptr<MCCodeEmitter> Emitter,
+                 bool IsThumb)
+      : MCELFStreamer(Context, std::move(TAB), OS, std::move(Emitter)),
+        IsThumb(IsThumb) {
     EHReset();
   }
 
@@ -464,20 +466,21 @@ public:
   void emitUnwindRaw(int64_t Offset, const SmallVectorImpl<uint8_t> &Opcodes);
 
   void ChangeSection(MCSection *Section, const MCExpr *Subsection) override {
-    // We have to keep track of the mapping symbol state of any sections we
-    // use. Each one should start off as EMS_None, which is provided as the
-    // default constructor by DenseMap::lookup.
-    LastMappingSymbols[getPreviousSection().first] = LastEMS;
-    LastEMS = LastMappingSymbols.lookup(Section);
-
+    LastMappingSymbols[getCurrentSection().first] = std::move(LastEMSInfo);
     MCELFStreamer::ChangeSection(Section, Subsection);
+    auto LastMappingSymbol = LastMappingSymbols.find(Section);
+    if (LastMappingSymbol != LastMappingSymbols.end()) {
+      LastEMSInfo = std::move(LastMappingSymbol->second);
+      return;
+    }
+    LastEMSInfo.reset(new ElfMappingSymbolInfo(SMLoc(), nullptr, 0));
   }
 
   /// This function is the one used to emit instruction data into the ELF
   /// streamer. We override it to add the appropriate mapping symbol if
   /// necessary.
-  void EmitInstruction(const MCInst& Inst,
-                       const MCSubtargetInfo &STI) override {
+  void EmitInstruction(const MCInst &Inst, const MCSubtargetInfo &STI,
+                       bool) override {
     if (IsThumb)
       EmitThumbMappingSymbol();
     else
@@ -532,15 +535,25 @@ public:
     MCELFStreamer::EmitBytes(Data);
   }
 
+  void FlushPendingMappingSymbol() {
+    if (!LastEMSInfo->hasInfo())
+      return;
+    ElfMappingSymbolInfo *EMS = LastEMSInfo.get();
+    EmitMappingSymbol("$d", EMS->Loc, EMS->F, EMS->Offset);
+    EMS->resetInfo();
+  }
+
   /// This is one of the functions used to emit data into an ELF section, so the
   /// ARM streamer overrides it to add the appropriate mapping symbol ($d) if
   /// necessary.
   void EmitValueImpl(const MCExpr *Value, unsigned Size, SMLoc Loc) override {
-    if (const MCSymbolRefExpr *SRE = dyn_cast_or_null<MCSymbolRefExpr>(Value))
+    if (const MCSymbolRefExpr *SRE = dyn_cast_or_null<MCSymbolRefExpr>(Value)) {
       if (SRE->getKind() == MCSymbolRefExpr::VK_ARM_SBREL && !(Size == 4)) {
         getContext().reportError(Loc, "relocated expression must be 32-bit");
         return;
       }
+      getOrCreateDataFragment();
+    }
 
     EmitDataMappingSymbol();
     MCELFStreamer::EmitValueImpl(Value, Size, Loc);
@@ -573,22 +586,54 @@ private:
     EMS_Data
   };
 
+  struct ElfMappingSymbolInfo {
+    explicit ElfMappingSymbolInfo(SMLoc Loc, MCFragment *F, uint64_t O)
+        : Loc(Loc), F(F), Offset(O), State(EMS_None) {}
+    void resetInfo() {
+      F = nullptr;
+      Offset = 0;
+    }
+    bool hasInfo() { return F != nullptr; }
+    SMLoc Loc;
+    MCFragment *F;
+    uint64_t Offset;
+    ElfMappingSymbol State;
+  };
+
   void EmitDataMappingSymbol() {
-    if (LastEMS == EMS_Data) return;
+    if (LastEMSInfo->State == EMS_Data)
+      return;
+    else if (LastEMSInfo->State == EMS_None) {
+      // This is a tentative symbol, it won't really be emitted until it's
+      // actually needed.
+      ElfMappingSymbolInfo *EMS = LastEMSInfo.get();
+      auto *DF = dyn_cast_or_null<MCDataFragment>(getCurrentFragment());
+      if (!DF)
+        return;
+      EMS->Loc = SMLoc();
+      EMS->F = getCurrentFragment();
+      EMS->Offset = DF->getContents().size();
+      LastEMSInfo->State = EMS_Data;
+      return;
+    }
     EmitMappingSymbol("$d");
-    LastEMS = EMS_Data;
+    LastEMSInfo->State = EMS_Data;
   }
 
   void EmitThumbMappingSymbol() {
-    if (LastEMS == EMS_Thumb) return;
+    if (LastEMSInfo->State == EMS_Thumb)
+      return;
+    FlushPendingMappingSymbol();
     EmitMappingSymbol("$t");
-    LastEMS = EMS_Thumb;
+    LastEMSInfo->State = EMS_Thumb;
   }
 
   void EmitARMMappingSymbol() {
-    if (LastEMS == EMS_ARM) return;
+    if (LastEMSInfo->State == EMS_ARM)
+      return;
+    FlushPendingMappingSymbol();
     EmitMappingSymbol("$a");
-    LastEMS = EMS_ARM;
+    LastEMSInfo->State = EMS_ARM;
   }
 
   void EmitMappingSymbol(StringRef Name) {
@@ -599,6 +644,17 @@ private:
     Symbol->setType(ELF::STT_NOTYPE);
     Symbol->setBinding(ELF::STB_LOCAL);
     Symbol->setExternal(false);
+  }
+
+  void EmitMappingSymbol(StringRef Name, SMLoc Loc, MCFragment *F,
+                         uint64_t Offset) {
+    auto *Symbol = cast<MCSymbolELF>(getContext().getOrCreateSymbol(
+        Name + "." + Twine(MappingSymbolCounter++)));
+    EmitLabel(Symbol, Loc, F);
+    Symbol->setType(ELF::STT_NOTYPE);
+    Symbol->setBinding(ELF::STB_LOCAL);
+    Symbol->setExternal(false);
+    Symbol->setOffset(Offset);
   }
 
   void EmitThumbFunc(MCSymbol *Func) override {
@@ -626,8 +682,10 @@ private:
   bool IsThumb;
   int64_t MappingSymbolCounter = 0;
 
-  DenseMap<const MCSection *, ElfMappingSymbol> LastMappingSymbols;
-  ElfMappingSymbol LastEMS = EMS_None;
+  DenseMap<const MCSection *, std::unique_ptr<ElfMappingSymbolInfo>>
+      LastMappingSymbols;
+
+  std::unique_ptr<ElfMappingSymbolInfo> LastEMSInfo;
 
   // ARM Exception Handling Frame Information
   MCSymbol *ExTab;
@@ -720,11 +778,11 @@ void ARMTargetELFStreamer::emitIntTextAttribute(unsigned Attribute,
                     /* OverwriteExisting= */ true);
 }
 
-void ARMTargetELFStreamer::emitArch(unsigned Value) {
+void ARMTargetELFStreamer::emitArch(ARM::ArchKind Value) {
   Arch = Value;
 }
 
-void ARMTargetELFStreamer::emitObjectArch(unsigned Value) {
+void ARMTargetELFStreamer::emitObjectArch(ARM::ArchKind Value) {
   EmittedArch = Value;
 }
 
@@ -735,7 +793,7 @@ void ARMTargetELFStreamer::emitArchDefaultAttributes() {
                    ARM::getCPUAttr(Arch),
                    false);
 
-  if (EmittedArch == ARM::AK_INVALID)
+  if (EmittedArch == ARM::ArchKind::INVALID)
     setAttributeItem(CPU_arch,
                      ARM::getArchAttr(Arch),
                      false);
@@ -745,58 +803,58 @@ void ARMTargetELFStreamer::emitArchDefaultAttributes() {
                      false);
 
   switch (Arch) {
-  case ARM::AK_ARMV2:
-  case ARM::AK_ARMV2A:
-  case ARM::AK_ARMV3:
-  case ARM::AK_ARMV3M:
-  case ARM::AK_ARMV4:
+  case ARM::ArchKind::ARMV2:
+  case ARM::ArchKind::ARMV2A:
+  case ARM::ArchKind::ARMV3:
+  case ARM::ArchKind::ARMV3M:
+  case ARM::ArchKind::ARMV4:
     setAttributeItem(ARM_ISA_use, Allowed, false);
     break;
 
-  case ARM::AK_ARMV4T:
-  case ARM::AK_ARMV5T:
-  case ARM::AK_ARMV5TE:
-  case ARM::AK_ARMV6:
+  case ARM::ArchKind::ARMV4T:
+  case ARM::ArchKind::ARMV5T:
+  case ARM::ArchKind::ARMV5TE:
+  case ARM::ArchKind::ARMV6:
     setAttributeItem(ARM_ISA_use, Allowed, false);
     setAttributeItem(THUMB_ISA_use, Allowed, false);
     break;
 
-  case ARM::AK_ARMV6T2:
+  case ARM::ArchKind::ARMV6T2:
     setAttributeItem(ARM_ISA_use, Allowed, false);
     setAttributeItem(THUMB_ISA_use, AllowThumb32, false);
     break;
 
-  case ARM::AK_ARMV6K:
-  case ARM::AK_ARMV6KZ:
+  case ARM::ArchKind::ARMV6K:
+  case ARM::ArchKind::ARMV6KZ:
     setAttributeItem(ARM_ISA_use, Allowed, false);
     setAttributeItem(THUMB_ISA_use, Allowed, false);
     setAttributeItem(Virtualization_use, AllowTZ, false);
     break;
 
-  case ARM::AK_ARMV6M:
+  case ARM::ArchKind::ARMV6M:
     setAttributeItem(THUMB_ISA_use, Allowed, false);
     break;
 
-  case ARM::AK_ARMV7A:
+  case ARM::ArchKind::ARMV7A:
     setAttributeItem(CPU_arch_profile, ApplicationProfile, false);
     setAttributeItem(ARM_ISA_use, Allowed, false);
     setAttributeItem(THUMB_ISA_use, AllowThumb32, false);
     break;
 
-  case ARM::AK_ARMV7R:
+  case ARM::ArchKind::ARMV7R:
     setAttributeItem(CPU_arch_profile, RealTimeProfile, false);
     setAttributeItem(ARM_ISA_use, Allowed, false);
     setAttributeItem(THUMB_ISA_use, AllowThumb32, false);
     break;
 
-  case ARM::AK_ARMV7M:
+  case ARM::ArchKind::ARMV7M:
     setAttributeItem(CPU_arch_profile, MicroControllerProfile, false);
     setAttributeItem(THUMB_ISA_use, AllowThumb32, false);
     break;
 
-  case ARM::AK_ARMV8A:
-  case ARM::AK_ARMV8_1A:
-  case ARM::AK_ARMV8_2A:
+  case ARM::ArchKind::ARMV8A:
+  case ARM::ArchKind::ARMV8_1A:
+  case ARM::ArchKind::ARMV8_2A:
     setAttributeItem(CPU_arch_profile, ApplicationProfile, false);
     setAttributeItem(ARM_ISA_use, Allowed, false);
     setAttributeItem(THUMB_ISA_use, AllowThumb32, false);
@@ -804,26 +862,26 @@ void ARMTargetELFStreamer::emitArchDefaultAttributes() {
     setAttributeItem(Virtualization_use, AllowTZVirtualization, false);
     break;
 
-  case ARM::AK_ARMV8MBaseline:
-  case ARM::AK_ARMV8MMainline:
+  case ARM::ArchKind::ARMV8MBaseline:
+  case ARM::ArchKind::ARMV8MMainline:
     setAttributeItem(THUMB_ISA_use, AllowThumbDerived, false);
     setAttributeItem(CPU_arch_profile, MicroControllerProfile, false);
     break;
 
-  case ARM::AK_IWMMXT:
+  case ARM::ArchKind::IWMMXT:
     setAttributeItem(ARM_ISA_use, Allowed, false);
     setAttributeItem(THUMB_ISA_use, Allowed, false);
     setAttributeItem(WMMX_arch, AllowWMMXv1, false);
     break;
 
-  case ARM::AK_IWMMXT2:
+  case ARM::ArchKind::IWMMXT2:
     setAttributeItem(ARM_ISA_use, Allowed, false);
     setAttributeItem(THUMB_ISA_use, Allowed, false);
     setAttributeItem(WMMX_arch, AllowWMMXv2, false);
     break;
 
   default:
-    report_fatal_error("Unknown Arch: " + Twine(Arch));
+    report_fatal_error("Unknown Arch: " + Twine(ARM::getArchName(Arch)));
     break;
   }
 }
@@ -1001,7 +1059,7 @@ void ARMTargetELFStreamer::finishAttributeSection() {
   if (FPU != ARM::FK_INVALID)
     emitFPUDefaultAttributes();
 
-  if (Arch != ARM::AK_INVALID)
+  if (Arch != ARM::ArchKind::INVALID)
     emitArchDefaultAttributes();
 
   if (Contents.empty())
@@ -1113,6 +1171,8 @@ void ARMELFStreamer::reset() {
   ATS.reset();
   MappingSymbolCounter = 0;
   MCELFStreamer::reset();
+  LastMappingSymbols.clear();
+  LastEMSInfo.reset();
   // MCELFStreamer clear's the assembler's e_flags. However, for
   // arm we manually set the ABI version on streamer creation, so
   // do the same here
@@ -1139,7 +1199,8 @@ inline void ARMELFStreamer::SwitchToEHSection(StringRef Prefix,
   if (Group)
     Flags |= ELF::SHF_GROUP;
   MCSectionELF *EHSection = getContext().getELFSection(
-      EHSecName, Type, Flags, 0, Group, FnSection.getUniqueID(), &FnSection);
+      EHSecName, Type, Flags, 0, Group, FnSection.getUniqueID(),
+      static_cast<const MCSymbolELF *>(&Fn));
 
   assert(EHSection && "Failed to get the required EH section");
 
@@ -1428,19 +1489,21 @@ MCTargetStreamer *createARMObjectTargetStreamer(MCStreamer &S,
   return new ARMTargetStreamer(S);
 }
 
-MCELFStreamer *createARMELFStreamer(MCContext &Context, MCAsmBackend &TAB,
+MCELFStreamer *createARMELFStreamer(MCContext &Context,
+                                    std::unique_ptr<MCAsmBackend> TAB,
                                     raw_pwrite_stream &OS,
-                                    MCCodeEmitter *Emitter, bool RelaxAll,
-                                    bool IsThumb) {
-    ARMELFStreamer *S = new ARMELFStreamer(Context, TAB, OS, Emitter, IsThumb);
-    // FIXME: This should eventually end up somewhere else where more
-    // intelligent flag decisions can be made. For now we are just maintaining
-    // the status quo for ARM and setting EF_ARM_EABI_VER5 as the default.
-    S->getAssembler().setELFHeaderEFlags(ELF::EF_ARM_EABI_VER5);
+                                    std::unique_ptr<MCCodeEmitter> Emitter,
+                                    bool RelaxAll, bool IsThumb) {
+  ARMELFStreamer *S = new ARMELFStreamer(Context, std::move(TAB), OS,
+                                         std::move(Emitter), IsThumb);
+  // FIXME: This should eventually end up somewhere else where more
+  // intelligent flag decisions can be made. For now we are just maintaining
+  // the status quo for ARM and setting EF_ARM_EABI_VER5 as the default.
+  S->getAssembler().setELFHeaderEFlags(ELF::EF_ARM_EABI_VER5);
 
-    if (RelaxAll)
-      S->getAssembler().setRelaxAll(true);
-    return S;
+  if (RelaxAll)
+    S->getAssembler().setRelaxAll(true);
+  return S;
 }
 
 } // end namespace llvm

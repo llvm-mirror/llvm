@@ -1,4 +1,5 @@
-; RUN: llc -mtriple=thumb-eabi %s -verify-machineinstrs -o - | FileCheck %s
+; RUN: llc -mtriple=thumb-eabi %s -verify-machineinstrs -o - | \
+; RUN:    FileCheck %s -check-prefix CHECK --check-prefix CHECK-EABI
 ; RUN: llc -mtriple=thumb-apple-darwin %s -verify-machineinstrs -o - | \
 ; RUN:    FileCheck %s -check-prefix CHECK -check-prefix CHECK-DARWIN
 
@@ -172,10 +173,12 @@ entry:
         %retval = load i64, i64* %a          ; <i64> [#uses=1]
         ret i64 %retval
 ; CHECK-LABEL: f10:
-; CHECK: sub sp, #8
+; CHECK-EABI: sub sp, #8
+; CHECK-DARWIN: add r7, sp, #4
 ; CHECK: ldr r0, [sp]
 ; CHECK: ldr r1, [sp, #4]
-; CHECK: add sp, #8
+; CHECK-EABI: add sp, #8
+; CHECK-DARWIN: mov sp, r4
 }
 
 define i64 @f11(i64 %x, i64 %y) {
@@ -194,3 +197,46 @@ entry:
 ; CHECK: movs r1, r3
 }
 
+; "sub 2147483648" has to be lowered into "add -2147483648"
+define i64 @f12(i64 %x, i64 %y) {
+entry:
+        %tmp1 = sub i64 %x, 2147483648
+        ret i64 %tmp1
+; CHECK-LABEL: f12:
+; CHECK: movs r2, #1
+; CHECK: lsls r2, r2, #31
+; CHECK: movs r3, #0
+; CHECK: adds r0, r0, r2
+; CHECK: sbcs r1, r3
+}
+
+declare void @f13(i64 %x)
+
+define void @f14(i1 %x, i64 %y) #0 {
+; CHECK-LABEL: f14:
+entry:
+  %a = add i64 %y, 47
+  call void @f13(i64 %a)
+; CHECK: bl
+  br i1 %x, label %if.end, label %if.then
+
+if.then:
+  call void @f13(i64 %y)
+; CHECK: bl
+  br label %if.end
+
+if.end:
+  %b = add i64 %y, 45
+  call void @f13(i64 %b)
+; CHECK: adds
+; CHECK: adcs
+; CHECK: bl
+  %c = add i64 %y, 47
+  call void @f13(i64 %c)
+; CHECK: adds
+; CHECK-NEXT: adcs
+; CHECK: bl
+  ret void
+}
+
+attributes #0 = { optsize }

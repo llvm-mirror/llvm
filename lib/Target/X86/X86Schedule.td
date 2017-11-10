@@ -77,6 +77,10 @@ defm WriteFVarBlend  : X86SchedWritePair; // Fp vector variable blends.
 // FMA Scheduling helper class.
 class FMASC { X86FoldableSchedWrite Sched = WriteFAdd; }
 
+// Horizontal Add/Sub (float and integer)
+defm WriteFHAdd  : X86SchedWritePair;
+defm WritePHAdd : X86SchedWritePair;
+
 // Vector integer operations.
 defm WriteVecALU   : X86SchedWritePair; // Vector integer ALU op, no logicals.
 defm WriteVecShift : X86SchedWritePair; // Vector integer shifts.
@@ -295,6 +299,7 @@ def IIC_SSE_SHUFP : InstrItinClass;
 def IIC_SSE_PSHUF_RI : InstrItinClass;
 def IIC_SSE_PSHUF_MI : InstrItinClass;
 
+def IIC_SSE_PACK : InstrItinClass;
 def IIC_SSE_UNPCK : InstrItinClass;
 
 def IIC_SSE_MOVMSK : InstrItinClass;
@@ -497,6 +502,7 @@ def IIC_IN_RI : InstrItinClass;
 def IIC_OUT_RR : InstrItinClass;
 def IIC_OUT_IR : InstrItinClass;
 def IIC_INS : InstrItinClass;
+def IIC_LWP : InstrItinClass;
 def IIC_MOV_REG_DR : InstrItinClass;
 def IIC_MOV_DR_REG : InstrItinClass;
 def IIC_MOV_REG_CR : InstrItinClass;
@@ -657,6 +663,10 @@ def GenericPostRAModel : GenericX86Model {
 include "X86ScheduleAtom.td"
 include "X86SchedSandyBridge.td"
 include "X86SchedHaswell.td"
+include "X86SchedBroadwell.td"
 include "X86ScheduleSLM.td"
+include "X86ScheduleZnver1.td"
 include "X86ScheduleBtVer2.td"
+include "X86SchedSkylakeClient.td"
+include "X86SchedSkylakeServer.td"
 

@@ -14,8 +14,8 @@ def f64Imm : Operand<f64> { let ParserMatchClass = f64ImmOperand; }
 def s8_0Imm64Pred  : PatLeaf<(i64 imm), [{ return isInt<8>(N->getSExtValue()); }]>;
 def s9_0ImmOperand : AsmOperandClass { let Name = "s9_0Imm"; }
 def s9_0Imm : Operand<i32> { let ParserMatchClass = s9_0ImmOperand; }
-def s23_2ImmOperand : AsmOperandClass { let Name = "s23_2Imm"; let RenderMethod = "addSignedImmOperands"; }
-def s23_2Imm : Operand<i32> { let ParserMatchClass = s23_2ImmOperand; }
+def s27_2ImmOperand : AsmOperandClass { let Name = "s27_2Imm"; let RenderMethod = "addSignedImmOperands"; }
+def s27_2Imm : Operand<i32> { let ParserMatchClass = s27_2ImmOperand; }
 def r32_0ImmPred  : PatLeaf<(i32 imm), [{
   int64_t v = (int64_t)N->getSExtValue();
   return isInt<32>(v);
@@ -28,18 +28,6 @@ def u64_0ImmOperand : AsmOperandClass { let Name = "u64_0Imm"; let RenderMethod 
 def u64_0Imm : Operand<i64> { let ParserMatchClass = u64_0ImmOperand; }
 def n1ConstOperand : AsmOperandClass { let Name = "n1Const"; }
 def n1Const : Operand<i32> { let ParserMatchClass = n1ConstOperand; }
-
-// This complex pattern exists only to create a machine instruction operand
-// of type "frame index". There doesn't seem to be a way to do that directly
-// in the patterns.
-def AddrFI : ComplexPattern<i32, 1, "SelectAddrFI", [frameindex], []>;
-
-// These complex patterns are not strictly necessary, since global address
-// folding will happen during DAG combining. For distinguishing between GA
-// and GP, pat frags with HexagonCONST32 and HexagonCONST32_GP can be used.
-def AddrGA : ComplexPattern<i32, 1, "SelectAddrGA", [], []>;
-def AddrGP : ComplexPattern<i32, 1, "SelectAddrGP", [], []>;
-
 
 def bblabel : Operand<i32>;
 def bbl     : SDNode<"ISD::BasicBlock", SDTPtrLeaf, [], "BasicBlockSDNode">;

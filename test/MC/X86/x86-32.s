@@ -528,9 +528,9 @@ sysretl
 
 // rdar://8018260
 testl	%ecx, -24(%ebp)
-// CHECK: testl	-24(%ebp), %ecx
+// CHECK: testl	%ecx, -24(%ebp)
 testl	-24(%ebp), %ecx
-// CHECK: testl	-24(%ebp), %ecx
+// CHECK: testl	%ecx, -24(%ebp)
 
 
 // rdar://8407242
@@ -1097,3 +1097,15 @@ data16
 // CHECK: lgdtl 4(%eax)
 // CHECK:  encoding: [0x0f,0x01,0x50,0x04]
 data16 lgdt 4(%eax)
+
+// CHECK: rdpid %eax
+// CHECK: encoding: [0xf3,0x0f,0xc7,0xf8]
+rdpid %eax
+
+// CHECK: ptwritel 3735928559(%ebx,%ecx,8)
+// CHECK:  encoding: [0xf3,0x0f,0xae,0xa4,0xcb,0xef,0xbe,0xad,0xde]
+ptwritel 0xdeadbeef(%ebx,%ecx,8)
+
+// CHECK: ptwritel %eax
+// CHECK:  encoding: [0xf3,0x0f,0xae,0xe0]
+ptwritel %eax

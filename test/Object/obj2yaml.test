@@ -4,8 +4,8 @@ RUN: obj2yaml %p/Inputs/trivial-object-test.elf-mipsel | FileCheck %s --check-pr
 RUN: obj2yaml %p/Inputs/trivial-object-test.elf-mips64el | FileCheck %s --check-prefix ELF-MIPS64EL
 RUN: obj2yaml %p/Inputs/trivial-object-test.elf-x86-64 | FileCheck %s --check-prefix ELF-X86-64
 RUN: obj2yaml %p/Inputs/trivial-object-test.elf-avr | FileCheck %s --check-prefix ELF-AVR
-RUN: obj2yaml %p/Inputs/unwind-section.elf-x86-64 \
-RUN:   | FileCheck %s --check-prefix ELF-X86-64-UNWIND
+RUN: obj2yaml %p/Inputs/trivial-object-test.wasm | FileCheck %s --check-prefix WASM
+RUN: obj2yaml %p/Inputs/unwind-section.elf-x86-64 | FileCheck %s --check-prefix ELF-X86-64-UNWIND
 
 COFF-I386: header:
 COFF-I386-NEXT:  Machine: IMAGE_FILE_MACHINE_I386
@@ -268,19 +268,26 @@ ELF-MIPSEL-NEXT:     - Name:            '$.str'
 ELF-MIPSEL-NEXT:       Type:            STT_OBJECT
 ELF-MIPSEL-NEXT:       Section:         .rodata.str1.1
 ELF-MIPSEL-NEXT:       Size:            0x000000000000000D
-ELF-MIPSEL-NEXT:     - Type:            STT_SECTION
+ELF-MIPSEL-NEXT:     - Name:            .text
+ELF-MIPSEL-NEXT:       Type:            STT_SECTION
 ELF-MIPSEL-NEXT:       Section:         .text
-ELF-MIPSEL-NEXT:     - Type:            STT_SECTION
+ELF-MIPSEL-NEXT:     - Name:            .data
+ELF-MIPSEL-NEXT:       Type:            STT_SECTION
 ELF-MIPSEL-NEXT:       Section:         .data
-ELF-MIPSEL-NEXT:     - Type:            STT_SECTION
+ELF-MIPSEL-NEXT:     - Name:            .bss
+ELF-MIPSEL-NEXT:       Type:            STT_SECTION
 ELF-MIPSEL-NEXT:       Section:         .bss
-ELF-MIPSEL-NEXT:     - Type:            STT_SECTION
+ELF-MIPSEL-NEXT:     - Name:            .mdebug.abi32
+ELF-MIPSEL-NEXT:       Type:            STT_SECTION
 ELF-MIPSEL-NEXT:       Section:         .mdebug.abi32
-ELF-MIPSEL-NEXT:     - Type:            STT_SECTION
+ELF-MIPSEL-NEXT:     - Name:            .rodata.str1.1
+ELF-MIPSEL-NEXT:       Type:            STT_SECTION
 ELF-MIPSEL-NEXT:       Section:         .rodata.str1.1
-ELF-MIPSEL-NEXT:     - Type:            STT_SECTION
+ELF-MIPSEL-NEXT:     - Name:            .reginfo
+ELF-MIPSEL-NEXT:       Type:            STT_SECTION
 ELF-MIPSEL-NEXT:       Section:         .reginfo
-ELF-MIPSEL-NEXT:     - Type:            STT_SECTION
+ELF-MIPSEL-NEXT:     - Name:            .MIPS.abiflags
+ELF-MIPSEL-NEXT:       Type:            STT_SECTION
 ELF-MIPSEL-NEXT:       Section:         .MIPS.abiflags
 ELF-MIPSEL-NEXT:   Global:
 ELF-MIPSEL-NEXT:     - Name:            main
@@ -336,17 +343,22 @@ ELF-MIPS64EL-NEXT:     AddressAlign:    0x0000000000000004
 ELF-MIPS64EL-NEXT:     Content:         ''
 ELF-MIPS64EL-NEXT: Symbols:
 ELF-MIPS64EL-NEXT:   Local:
-ELF-MIPS64EL-NEXT:     - Type:            STT_SECTION
+ELF-MIPS64EL-NEXT:     - Name:            .text
+ELF-MIPS64EL-NEXT:       Type:            STT_SECTION
 ELF-MIPS64EL-NEXT:       Section:         .text
-ELF-MIPS64EL-NEXT:     - Type:            STT_SECTION
+ELF-MIPS64EL-NEXT:     - Name:            .data
+ELF-MIPS64EL-NEXT:       Type:            STT_SECTION
 ELF-MIPS64EL-NEXT:       Section:         .data
-ELF-MIPS64EL-NEXT:     - Type:            STT_SECTION
+ELF-MIPS64EL-NEXT:     - Name:            .bss
+ELF-MIPS64EL-NEXT:       Type:            STT_SECTION
 ELF-MIPS64EL-NEXT:       Section:         .bss
 ELF-MIPS64EL-NEXT:     - Name:            bar
 ELF-MIPS64EL-NEXT:       Section:         .data
-ELF-MIPS64EL-NEXT:     - Type:            STT_SECTION
+ELF-MIPS64EL-NEXT:     - Name:            .MIPS.options
+ELF-MIPS64EL-NEXT:       Type:            STT_SECTION
 ELF-MIPS64EL-NEXT:       Section:         .MIPS.options
-ELF-MIPS64EL-NEXT:     - Type:            STT_SECTION
+ELF-MIPS64EL-NEXT:     - Name:            .pdr
+ELF-MIPS64EL-NEXT:       Type:            STT_SECTION
 ELF-MIPS64EL-NEXT:       Section:         .pdr
 ELF-MIPS64EL-NEXT:   Global:
 ELF-MIPS64EL-NEXT:     - Name:            zed
@@ -382,7 +394,7 @@ ELF-X86-64-NEXT:     AddressAlign:    0x0000000000000008
 ELF-X86-64-NEXT:     Info:            .text
 ELF-X86-64-NEXT:     Relocations:
 ELF-X86-64-NEXT:       - Offset:          0x000000000000000D
-ELF-X86-64-NEXT:         Symbol:          ''
+ELF-X86-64-NEXT:         Symbol:          .rodata.str1.1
 ELF-X86-64-NEXT:         Type:            R_X86_64_32S
 ELF-X86-64-NEXT:       - Offset:          0x0000000000000012
 ELF-X86-64-NEXT:         Symbol:          puts
@@ -396,11 +408,14 @@ ELF-X86-64-NEXT: Symbols:
 ELF-X86-64-NEXT:   Local:
 ELF-X86-64-NEXT:     - Name:            trivial-object-test.s
 ELF-X86-64-NEXT:       Type:            STT_FILE
-ELF-X86-64-NEXT:     - Type:            STT_SECTION
+ELF-X86-64-NEXT:     - Name:            .text
+ELF-X86-64-NEXT:       Type:            STT_SECTION
 ELF-X86-64-NEXT:       Section:         .text
-ELF-X86-64-NEXT:     - Type:            STT_SECTION
+ELF-X86-64-NEXT:     - Name:            .rodata.str1.1
+ELF-X86-64-NEXT:       Type:            STT_SECTION
 ELF-X86-64-NEXT:       Section:         .rodata.str1.1
-ELF-X86-64-NEXT:     - Type:            STT_SECTION
+ELF-X86-64-NEXT:     - Name:            .note.GNU-stack
+ELF-X86-64-NEXT:       Type:            STT_SECTION
 ELF-X86-64-NEXT:       Section:         .note.GNU-stack
 ELF-X86-64-NEXT:   Global:
 ELF-X86-64-NEXT:     - Name:            main
@@ -411,13 +426,13 @@ ELF-X86-64-NEXT:     - Name:            SomeOtherFunction
 ELF-X86-64-NEXT:     - Name:            puts
 
 
-ELF-AVR:      FileHeader:      
+ELF-AVR:      FileHeader:
 ELF-AVR-NEXT:   Class:           ELFCLASS32
 ELF-AVR-NEXT:   Data:            ELFDATA2LSB
 ELF-AVR-NEXT:   Type:            ET_EXEC
 ELF-AVR-NEXT:   Machine:         EM_AVR
 ELF-AVR-NEXT:   Flags:           [ EF_AVR_ARCH_AVR2 ]
-ELF-AVR-NEXT: Sections:        
+ELF-AVR-NEXT: Sections:
 ELF-AVR-NEXT:   - Name:            .text
 ELF-AVR-NEXT:     Type:            SHT_PROGBITS
 ELF-AVR-NEXT:     Flags:           [ SHF_ALLOC, SHF_EXECINSTR ]
@@ -429,18 +444,20 @@ ELF-AVR-NEXT:     Flags:           [ SHF_WRITE, SHF_ALLOC ]
 ELF-AVR-NEXT:     Address:         0x0000000000800060
 ELF-AVR-NEXT:     AddressAlign:    0x0000000000000001
 ELF-AVR-NEXT:     Content:         ''
-ELF-AVR-NEXT: Symbols:         
-ELF-AVR-NEXT:   Local:           
-ELF-AVR-NEXT:     - Type:            STT_SECTION
+ELF-AVR-NEXT: Symbols:
+ELF-AVR-NEXT:   Local:
+ELF-AVR-NEXT:     - Name:           .text
+ELF-AVR-NEXT:       Type:            STT_SECTION
 ELF-AVR-NEXT:       Section:         .text
-ELF-AVR-NEXT:     - Type:            STT_SECTION
+ELF-AVR-NEXT:     - Name:           .data
+ELF-AVR-NEXT:       Type:            STT_SECTION
 ELF-AVR-NEXT:       Section:         .data
 ELF-AVR-NEXT:       Value:           0x0000000000800060
 ELF-AVR-NEXT:     - Name:            a.o
 ELF-AVR-NEXT:       Type:            STT_FILE
 ELF-AVR-NEXT:     - Name:            main
 ELF-AVR-NEXT:       Section:         .text
-ELF-AVR-NEXT:   Global:          
+ELF-AVR-NEXT:   Global:
 ELF-AVR-NEXT:     - Name:            __trampolines_start
 ELF-AVR-NEXT:       Section:         .text
 ELF-AVR-NEXT:     - Name:            _etext
@@ -470,6 +487,17 @@ ELF-AVR-NEXT:     - Name:            _end
 ELF-AVR-NEXT:       Section:         .data
 ELF-AVR-NEXT:       Value:           0x0000000000800060
 
+WASM:      --- !WASM
+WASM-NEXT: FileHeader:
+WASM-NEXT:   Version:         0x00000001
+WASM:      - Type:            EXPORT
+WASM-NEXT:   Exports:         
+WASM-NEXT:     - Name:            main
+WASM-NEXT:       Kind:            FUNCTION
+WASM-NEXT:       Index:           2
+WASM-NEXT:     - Name:            var
+WASM-NEXT:       Kind:            GLOBAL
+WASM-NEXT:       Index:           1
 
 ELF-X86-64-UNWIND:      - Name:            .eh_frame
 ELF-X86-64-UNWIND-NEXT:   Type:            SHT_X86_64_UNWIND
@@ -478,4 +506,4 @@ ELF-X86-64-UNWIND-NEXT:   AddressAlign:    0x0000000000000001
 ELF-X86-64-UNWIND-NEXT:   Content:         ''
 
 RUN: not obj2yaml %t.blah 2>&1 | FileCheck --check-prefix=ENOENT %s
-ENOENT: Error: '{{[Nn]}}o such file or directory'
+ENOENT: Error reading file: {{.*}}.blah: {{[Nn]}}o such file or directory

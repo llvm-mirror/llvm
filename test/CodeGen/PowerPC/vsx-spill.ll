@@ -23,9 +23,12 @@ entry:
 ; CHECK-REG: blr
 
 ; CHECK-FISL: @foo1
-; CHECK-FISL: lis 0, -1
-; CHECK-FISL: ori 0, 0, 65384
-; CHECK-FISL: stxsdx 1, 1, 0
+; CHECK-FISL-NOT: lis
+; CHECK-FISL-NOT: ori
+; CHECK-FISL: li 3, -152
+; CHECK-FISL-NOT: lis
+; CHECK-FISL-NOT: ori
+; CHECK-FISL: stxsdx 1, 1, 3
 ; CHECK-FISL: blr
 
 ; CHECK-P9-REG: @foo1
@@ -54,8 +57,8 @@ entry:
 
 ; CHECK-FISL: @foo2
 ; CHECK-FISL: xsadddp [[R1:[0-9]+]], 1, 1
-; CHECK-FISL: stxsdx [[R1]], [[R1]], 0
-; CHECK-FISL: lxsdx [[R1]], [[R1]], 0
+; CHECK-FISL: stxsdx [[R1]], [[R1]], 3
+; CHECK-FISL: lxsdx [[R1]], [[R1]], 3
 ; CHECK-FISL: blr
 
 ; CHECK-P9-REG: @foo2

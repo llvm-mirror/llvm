@@ -4,7 +4,9 @@
 
 ; SUMMARY:     GlobalValueMap:
 ; SUMMARY-NEXT:  42:
-; SUMMARY-NEXT:    - TypeTests:
+; SUMMARY-NEXT:    - Linkage:             0
+; SUMMARY-NEXT:      NotEligibleToImport: false
+; SUMMARY-NEXT:      Live:                true
 ; SUMMARY-NEXT:      TypeTestAssumeVCalls:
 ; SUMMARY-NEXT:        - GUID:            123
 ; SUMMARY-NEXT:          Offset:          0
@@ -19,21 +21,21 @@
 ; SUMMARY-NEXT:        - VFunc:
 ; SUMMARY-NEXT:            GUID:            123
 ; SUMMARY-NEXT:            Offset:          4
-; SUMMARY-NEXT:          Args:
-; SUMMARY-NEXT:            - 12
-; SUMMARY-NEXT:            - 24
+; SUMMARY-NEXT:          Args: [ 12, 24 ]
 ; SUMMARY-NEXT:      TypeCheckedLoadConstVCalls:
 ; SUMMARY-NEXT:        - VFunc:
 ; SUMMARY-NEXT:            GUID:            456
 ; SUMMARY-NEXT:            Offset:          8
-; SUMMARY-NEXT:          Args:
-; SUMMARY-NEXT:            - 24
-; SUMMARY-NEXT:            - 12
+; SUMMARY-NEXT:          Args: [ 24, 12 ]
 ; SUMMARY-NEXT: TypeIdMap:
 ; SUMMARY-NEXT:   typeid1:
 ; SUMMARY-NEXT:     TTRes:
 ; SUMMARY-NEXT:       Kind:            Unsat
 ; SUMMARY-NEXT:       SizeM1BitWidth:  0
+; SUMMARY-NEXT:       AlignLog2:       0
+; SUMMARY-NEXT:       SizeM1:          0
+; SUMMARY-NEXT:       BitMask:         0
+; SUMMARY-NEXT:       InlineBits:      0
 ; SUMMARY-NEXT:     WPDRes:
 ; SUMMARY-NEXT:       0:
 ; SUMMARY-NEXT:         Kind:            Indir
@@ -46,12 +48,18 @@
 ; SUMMARY-NEXT:           :
 ; SUMMARY-NEXT:             Kind:            UniformRetVal
 ; SUMMARY-NEXT:             Info:            12
+; SUMMARY-NEXT:             Byte:            0
+; SUMMARY-NEXT:             Bit:             0
 ; SUMMARY-NEXT:           12:
 ; SUMMARY-NEXT:             Kind:            UniformRetVal
 ; SUMMARY-NEXT:             Info:            24
+; SUMMARY-NEXT:             Byte:            0
+; SUMMARY-NEXT:             Bit:             0
 ; SUMMARY-NEXT:           12,24:
 ; SUMMARY-NEXT:             Kind:            UniformRetVal
 ; SUMMARY-NEXT:             Info:            48
+; SUMMARY-NEXT:             Byte:            0
+; SUMMARY-NEXT:             Bit:             0
 
 target datalayout = "e-p:32:32"
 

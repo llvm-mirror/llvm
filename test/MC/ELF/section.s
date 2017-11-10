@@ -1,4 +1,5 @@
 // RUN: llvm-mc -filetype=obj -triple x86_64-pc-linux-gnu %s -o - | llvm-readobj -s | FileCheck %s
+// RUN: llvm-mc -filetype=asm -triple x86_64-pc-linux-gnu %s -o - |  FileCheck %s --check-prefix=ASM
 
 // Test that these names are accepted.
 
@@ -162,9 +163,12 @@ bar:
 .Lshf_metadata_target2_2:
         .quad 0
 
-.section .shf_metadata1,"am",@progbits,.Lshf_metadata_target2_1
-.section .shf_metadata2,"am",@progbits,.Lshf_metadata_target2_2
-.section .shf_metadata3,"am",@progbits,.shf_metadata_target1
+.section .shf_metadata1,"ao",@progbits,.Lshf_metadata_target2_1
+.section .shf_metadata2,"ao",@progbits,.Lshf_metadata_target2_2
+.section .shf_metadata3,"ao",@progbits,.shf_metadata_target1
+// ASM: .section .shf_metadata1,"ao",@progbits,.Lshf_metadata_target2_1
+// ASM: .section .shf_metadata2,"ao",@progbits,.Lshf_metadata_target2_2
+// ASM: .section .shf_metadata3,"ao",@progbits,.shf_metadata_target1
 
 // CHECK:      Section {
 // CHECK:        Index: 22
@@ -216,3 +220,62 @@ bar:
 // CHECK-NEXT:   Size:
 // CHECK-NEXT:   Link:    22
 // CHECK-NEXT:   Info:    0
+
+.section	.text.foo
+// CHECK:        Section {
+// CHECK:          Name: .text.foo
+// CHECK-NEXT:     Type: SHT_PROGBITS
+// CHECK-NEXT:     Flags [
+// CHECK-NEXT:       SHF_ALLOC
+// CHECK-NEXT:       SHF_EXECINSTR
+// CHECK-NEXT:     ]
+
+.section .bss
+// CHECK:        Section {
+// CHECK:          Name: .bss
+// CHECK-NEXT:     Type: SHT_NOBITS
+// CHECK-NEXT:     Flags [
+// CHECK-NEXT:       SHF_ALLOC
+// CHECK-NEXT:       SHF_WRITE
+// CHECK-NEXT:     ]
+
+.section .bss.foo
+// CHECK:        Section {
+// CHECK:          Name: .bss.foo
+// CHECK-NEXT:     Type: SHT_NOBITS
+// CHECK-NEXT:     Flags [
+// CHECK-NEXT:       SHF_ALLOC
+// CHECK-NEXT:       SHF_WRITE
+// CHECK-NEXT:     ]
+
+.section .tbss
+// CHECK:        Section {
+// CHECK:          Name: .tbss
+// CHECK-NEXT:     Type: SHT_NOBITS
+// CHECK-NEXT:     Flags [
+// CHECK-NEXT:       SHF_ALLOC
+// CHECK-NEXT:       SHF_TLS
+// CHECK-NEXT:       SHF_WRITE
+// CHECK-NEXT:     ]
+
+.section .tbss.foo
+// CHECK:        Section {
+// CHECK:          Name: .tbss.foo
+// CHECK-NEXT:     Type: SHT_NOBITS
+// CHECK-NEXT:     Flags [
+// CHECK-NEXT:       SHF_ALLOC
+// CHECK-NEXT:       SHF_TLS
+// CHECK-NEXT:       SHF_WRITE
+// CHECK-NEXT:     ]
+
+// Test SHT_LLVM_ODRTAB
+
+.section .odrtab,"e",@llvm_odrtab
+// ASM: .section .odrtab,"e",@llvm_odrtab
+
+// CHECK:        Section {
+// CHECK:          Name: .odrtab
+// CHECK-NEXT:     Type: SHT_LLVM_ODRTAB
+// CHECK-NEXT:     Flags [
+// CHECK-NEXT:       SHF_EXCLUDE
+// CHECK-NEXT:     ]

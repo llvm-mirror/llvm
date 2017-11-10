@@ -1,4 +1,4 @@
-//=- llvm/CodeGen/MachineDominators.h - Machine Dom Calculation --*- C++ -*-==//
+//==- llvm/CodeGen/MachineDominators.h - Machine Dom Calculation -*- C++ -*-==//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -16,24 +16,29 @@
 #define LLVM_CODEGEN_MACHINEDOMINATORS_H
 
 #include "llvm/ADT/SmallSet.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
-#include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
+#include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/Support/GenericDomTree.h"
 #include "llvm/Support/GenericDomTreeConstruction.h"
+#include <cassert>
 #include <memory>
+#include <vector>
 
 namespace llvm {
 
-template<>
-inline void DominatorTreeBase<MachineBasicBlock>::addRoot(MachineBasicBlock* MBB) {
+template <>
+inline void DominatorTreeBase<MachineBasicBlock, false>::addRoot(
+    MachineBasicBlock *MBB) {
   this->Roots.push_back(MBB);
 }
 
 extern template class DomTreeNodeBase<MachineBasicBlock>;
-extern template class DominatorTreeBase<MachineBasicBlock>;
+extern template class DominatorTreeBase<MachineBasicBlock, false>; // DomTree
+extern template class DominatorTreeBase<MachineBasicBlock, true>; // PostDomTree
 
-typedef DomTreeNodeBase<MachineBasicBlock> MachineDomTreeNode;
+using MachineDomTreeNode = DomTreeNodeBase<MachineBasicBlock>;
 
 //===-------------------------------------
 /// DominatorTree Class - Concrete subclass of DominatorTreeBase that is used to
@@ -52,6 +57,7 @@ class MachineDominatorTree : public MachineFunctionPass {
   /// The splitting of a critical edge is local and thus, it is possible
   /// to apply several of those changes at the same time.
   mutable SmallVector<CriticalEdge, 32> CriticalEdgesToSplit;
+
   /// \brief Remember all the basic blocks that are inserted during
   /// edge splitting.
   /// Invariant: NewBBs == all the basic blocks contained in the NewBB
@@ -61,7 +67,7 @@ class MachineDominatorTree : public MachineFunctionPass {
   mutable SmallSet<MachineBasicBlock *, 32> NewBBs;
 
   /// The DominatorTreeBase that is used to compute a normal dominator tree
-  std::unique_ptr<DominatorTreeBase<MachineBasicBlock>> DT;
+  std::unique_ptr<DomTreeBase<MachineBasicBlock>> DT;
 
   /// \brief Apply all the recorded critical edges to the DT.
   /// This updates the underlying DT information in a way that uses
@@ -75,9 +81,8 @@ public:
 
   MachineDominatorTree();
 
-  DominatorTreeBase<MachineBasicBlock> &getBase() {
-    if (!DT)
-      DT.reset(new DominatorTreeBase<MachineBasicBlock>(false));
+  DomTreeBase<MachineBasicBlock> &getBase() {
+    if (!DT) DT.reset(new DomTreeBase<MachineBasicBlock>());
     applySplitCriticalEdges();
     return *DT;
   }
@@ -88,7 +93,7 @@ public:
   /// multiple blocks if we are computing post dominators.  For forward
   /// dominators, this will always be a single block (the entry node).
   ///
-  inline const std::vector<MachineBasicBlock*> &getRoots() const {
+  inline const SmallVectorImpl<MachineBasicBlock*> &getRoots() const {
     applySplitCriticalEdges();
     return DT->getRoots();
   }
@@ -259,8 +264,8 @@ public:
 
 template <class Node, class ChildIterator>
 struct MachineDomTreeGraphTraitsBase {
-  typedef Node *NodeRef;
-  typedef ChildIterator ChildIteratorType;
+  using NodeRef = Node *;
+  using ChildIteratorType = ChildIterator;
 
   static NodeRef getEntryNode(NodeRef N) { return N; }
   static ChildIteratorType child_begin(NodeRef N) { return N->begin(); }
@@ -287,6 +292,6 @@ template <> struct GraphTraits<MachineDominatorTree*>
   }
 };
 
-}
+} // end namespace llvm
 
-#endif
+#endif // LLVM_CODEGEN_MACHINEDOMINATORS_H

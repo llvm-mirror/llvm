@@ -12,11 +12,11 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ProfileData/InstrProfWriter.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/ProfileSummary.h"
 #include "llvm/ProfileData/InstrProf.h"
-#include "llvm/ProfileData/InstrProfWriter.h"
 #include "llvm/ProfileData/ProfileCommon.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/EndianStream.h"
@@ -69,8 +69,7 @@ public:
           write(P[K].D[I]);
       }
     } else {
-      raw_string_ostream &SOStream =
-          static_cast<llvm::raw_string_ostream &>(OS);
+      raw_string_ostream &SOStream = static_cast<raw_string_ostream &>(OS);
       std::string &Data = SOStream.str(); // with flush
       for (int K = 0; K < NItems; K++) {
         for (int I = 0; I < P[K].N; I++) {
@@ -91,14 +90,14 @@ public:
 
 class InstrProfRecordWriterTrait {
 public:
-  typedef StringRef key_type;
-  typedef StringRef key_type_ref;
+  using key_type = StringRef;
+  using key_type_ref = StringRef;
 
-  typedef const InstrProfWriter::ProfilingData *const data_type;
-  typedef const InstrProfWriter::ProfilingData *const data_type_ref;
+  using data_type = const InstrProfWriter::ProfilingData *const;
+  using data_type_ref = const InstrProfWriter::ProfilingData *const;
 
-  typedef uint64_t hash_value_type;
-  typedef uint64_t offset_type;
+  using hash_value_type = uint64_t;
+  using offset_type = uint64_t;
 
   support::endianness ValueProfDataEndianness = support::little;
   InstrProfSummaryBuilder *SummaryBuilder;
@@ -177,38 +176,46 @@ void InstrProfWriter::setOutputSparse(bool Sparse) {
   this->Sparse = Sparse;
 }
 
-Error InstrProfWriter::addRecord(InstrProfRecord &&I, uint64_t Weight) {
-  auto &ProfileDataMap = FunctionData[I.Name];
+void InstrProfWriter::addRecord(NamedInstrProfRecord &&I, uint64_t Weight,
+                                function_ref<void(Error)> Warn) {
+  auto Name = I.Name;
+  auto Hash = I.Hash;
+  addRecord(Name, Hash, std::move(I), Weight, Warn);
+}
+
+void InstrProfWriter::addRecord(StringRef Name, uint64_t Hash,
+                                InstrProfRecord &&I, uint64_t Weight,
+                                function_ref<void(Error)> Warn) {
+  auto &ProfileDataMap = FunctionData[Name];
 
   bool NewFunc;
   ProfilingData::iterator Where;
   std::tie(Where, NewFunc) =
-      ProfileDataMap.insert(std::make_pair(I.Hash, InstrProfRecord()));
+      ProfileDataMap.insert(std::make_pair(Hash, InstrProfRecord()));
   InstrProfRecord &Dest = Where->second;
+
+  auto MapWarn = [&](instrprof_error E) {
+    Warn(make_error<InstrProfError>(E));
+  };
 
   if (NewFunc) {
     // We've never seen a function with this name and hash, add it.
     Dest = std::move(I);
-    // Fix up the name to avoid dangling reference.
-    Dest.Name = FunctionData.find(Dest.Name)->getKey();
     if (Weight > 1)
-      Dest.scale(Weight);
+      Dest.scale(Weight, MapWarn);
   } else {
     // We're updating a function we've seen before.
-    Dest.merge(I, Weight);
+    Dest.merge(I, Weight, MapWarn);
   }
 
   Dest.sortValueData();
-
-  return Dest.takeError();
 }
 
-Error InstrProfWriter::mergeRecordsFromWriter(InstrProfWriter &&IPW) {
+void InstrProfWriter::mergeRecordsFromWriter(InstrProfWriter &&IPW,
+                                             function_ref<void(Error)> Warn) {
   for (auto &I : IPW.FunctionData)
     for (auto &Func : I.getValue())
-      if (Error E = addRecord(std::move(Func.second), 1))
-        return E;
-  return Error::success();
+      addRecord(I.getKey(), Func.first, std::move(Func.second), 1, Warn);
 }
 
 bool InstrProfWriter::shouldEncodeData(const ProfilingData &PD) {
@@ -324,11 +331,12 @@ static const char *ValueProfKindStr[] = {
 #include "llvm/ProfileData/InstrProfData.inc"
 };
 
-void InstrProfWriter::writeRecordInText(const InstrProfRecord &Func,
+void InstrProfWriter::writeRecordInText(StringRef Name, uint64_t Hash,
+                                        const InstrProfRecord &Func,
                                         InstrProfSymtab &Symtab,
                                         raw_fd_ostream &OS) {
-  OS << Func.Name << "\n";
-  OS << "# Func Hash:\n" << Func.Hash << "\n";
+  OS << Name << "\n";
+  OS << "# Func Hash:\n" << Hash << "\n";
   OS << "# Num Counters:\n" << Func.Counts.size() << "\n";
   OS << "# Counter Values:\n";
   for (uint64_t Count : Func.Counts)
@@ -363,17 +371,19 @@ void InstrProfWriter::writeRecordInText(const InstrProfRecord &Func,
   OS << "\n";
 }
 
-void InstrProfWriter::writeText(raw_fd_ostream &OS) {
+Error InstrProfWriter::writeText(raw_fd_ostream &OS) {
   if (ProfileKind == PF_IRLevel)
     OS << "# IR level Instrumentation Flag\n:ir\n";
   InstrProfSymtab Symtab;
   for (const auto &I : FunctionData)
     if (shouldEncodeData(I.getValue()))
-      Symtab.addFuncName(I.getKey());
+      if (Error E = Symtab.addFuncName(I.getKey()))
+        return E;
   Symtab.finalizeSymtab();
 
   for (const auto &I : FunctionData)
     if (shouldEncodeData(I.getValue()))
       for (const auto &Func : I.getValue())
-        writeRecordInText(Func.second, Symtab, OS);
+        writeRecordInText(I.getKey(), Func.first, Func.second, Symtab, OS);
+  return Error::success();
 }

@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "ARMSubtarget.h"
 #include "Thumb1InstrInfo.h"
+#include "ARMSubtarget.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineMemOperand.h"
@@ -24,8 +24,8 @@ using namespace llvm;
 Thumb1InstrInfo::Thumb1InstrInfo(const ARMSubtarget &STI)
     : ARMBaseInstrInfo(STI), RI() {}
 
-/// getNoopForMachoTarget - Return the noop instruction to use for a noop.
-void Thumb1InstrInfo::getNoopForMachoTarget(MCInst &NopInst) const {
+/// Return the noop instruction to use for a noop.
+void Thumb1InstrInfo::getNoop(MCInst &NopInst) const {
   NopInst.setOpcode(ARM::tMOVr);
   NopInst.addOperand(MCOperand::createReg(ARM::R8));
   NopInst.addOperand(MCOperand::createReg(ARM::R8));

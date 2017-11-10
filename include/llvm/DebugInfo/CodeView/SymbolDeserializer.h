@@ -24,9 +24,9 @@ namespace codeview {
 class SymbolVisitorDelegate;
 class SymbolDeserializer : public SymbolVisitorCallbacks {
   struct MappingInfo {
-    explicit MappingInfo(ArrayRef<uint8_t> RecordData)
+    MappingInfo(ArrayRef<uint8_t> RecordData, CodeViewContainer Container)
         : Stream(RecordData, llvm::support::little), Reader(Stream),
-          Mapping(Reader) {}
+          Mapping(Reader, Container) {}
 
     BinaryByteStream Stream;
     BinaryStreamReader Reader;
@@ -34,12 +34,36 @@ class SymbolDeserializer : public SymbolVisitorCallbacks {
   };
 
 public:
-  explicit SymbolDeserializer(SymbolVisitorDelegate *Delegate)
-      : Delegate(Delegate) {}
+  template <typename T> static Error deserializeAs(CVSymbol Symbol, T &Record) {
+    // If we're just deserializing one record, then don't worry about alignment
+    // as there's nothing that comes after.
+    SymbolDeserializer S(nullptr, CodeViewContainer::ObjectFile);
+    if (auto EC = S.visitSymbolBegin(Symbol))
+      return EC;
+    if (auto EC = S.visitKnownRecord(Symbol, Record))
+      return EC;
+    if (auto EC = S.visitSymbolEnd(Symbol))
+      return EC;
+    return Error::success();
+  }
+  template <typename T> static Expected<T> deserializeAs(CVSymbol Symbol) {
+    T Record(Symbol.kind());
+    if (auto EC = deserializeAs<T>(Symbol, Record))
+      return std::move(EC);
+    return Record;
+  }
+
+  explicit SymbolDeserializer(SymbolVisitorDelegate *Delegate,
+                              CodeViewContainer Container)
+      : Delegate(Delegate), Container(Container) {}
+
+  Error visitSymbolBegin(CVSymbol &Record, uint32_t Offset) override {
+    return visitSymbolBegin(Record);
+  }
 
   Error visitSymbolBegin(CVSymbol &Record) override {
     assert(!Mapping && "Already in a symbol mapping!");
-    Mapping = llvm::make_unique<MappingInfo>(Record.content());
+    Mapping = llvm::make_unique<MappingInfo>(Record.content(), Container);
     return Mapping->Mapping.visitSymbolBegin(Record);
   }
   Error visitSymbolEnd(CVSymbol &Record) override {
@@ -54,7 +78,7 @@ public:
     return visitKnownRecordImpl(CVR, Record);                                  \
   }
 #define SYMBOL_RECORD_ALIAS(EnumName, EnumVal, Name, AliasName)
-#include "CVSymbolTypes.def"
+#include "llvm/DebugInfo/CodeView/CodeViewSymbols.def"
 
 private:
   template <typename T> Error visitKnownRecordImpl(CVSymbol &CVR, T &Record) {
@@ -67,6 +91,7 @@ private:
   }
 
   SymbolVisitorDelegate *Delegate;
+  CodeViewContainer Container;
   std::unique_ptr<MappingInfo> Mapping;
 };
 }

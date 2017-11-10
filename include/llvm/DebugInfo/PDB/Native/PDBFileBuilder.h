@@ -15,8 +15,8 @@
 #include "llvm/ADT/Optional.h"
 #include "llvm/DebugInfo/PDB/Native/NamedStreamMap.h"
 #include "llvm/DebugInfo/PDB/Native/PDBFile.h"
+#include "llvm/DebugInfo/PDB/Native/PDBStringTableBuilder.h"
 #include "llvm/DebugInfo/PDB/Native/RawConstants.h"
-#include "llvm/DebugInfo/PDB/Native/StringTableBuilder.h"
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/Error.h"
@@ -31,11 +31,13 @@ class MSFBuilder;
 namespace pdb {
 class DbiStreamBuilder;
 class InfoStreamBuilder;
+class GSIStreamBuilder;
 class TpiStreamBuilder;
 
 class PDBFileBuilder {
 public:
   explicit PDBFileBuilder(BumpPtrAllocator &Allocator);
+  ~PDBFileBuilder();
   PDBFileBuilder(const PDBFileBuilder &) = delete;
   PDBFileBuilder &operator=(const PDBFileBuilder &) = delete;
 
@@ -46,23 +48,29 @@ public:
   DbiStreamBuilder &getDbiBuilder();
   TpiStreamBuilder &getTpiBuilder();
   TpiStreamBuilder &getIpiBuilder();
-  StringTableBuilder &getStringTableBuilder();
+  PDBStringTableBuilder &getStringTableBuilder();
+  GSIStreamBuilder &getGsiBuilder();
 
   Error commit(StringRef Filename);
 
-private:
+  Expected<uint32_t> getNamedStreamIndex(StringRef Name) const;
   Error addNamedStream(StringRef Name, uint32_t Size);
+
+private:
   Expected<msf::MSFLayout> finalizeMsfLayout();
+
+  void commitFpm(WritableBinaryStream &MsfBuffer, const msf::MSFLayout &Layout);
 
   BumpPtrAllocator &Allocator;
 
   std::unique_ptr<msf::MSFBuilder> Msf;
   std::unique_ptr<InfoStreamBuilder> Info;
   std::unique_ptr<DbiStreamBuilder> Dbi;
+  std::unique_ptr<GSIStreamBuilder> Gsi;
   std::unique_ptr<TpiStreamBuilder> Tpi;
   std::unique_ptr<TpiStreamBuilder> Ipi;
 
-  StringTableBuilder Strings;
+  PDBStringTableBuilder Strings;
   NamedStreamMap NamedStreams;
 };
 }

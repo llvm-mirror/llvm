@@ -21,25 +21,23 @@
 
 namespace llvm {
 
-template <typename NodeTy> class SymbolTableListTraits;
-
 /// This class represents an incoming formal argument to a Function. A formal
 /// argument, since it is ``formal'', does not contain an actual value but
 /// instead represents the type, argument number, and attributes of an argument
 /// for a specific function. When used in the body of said function, the
 /// argument of course represents the value of the actual argument that the
 /// function was called with.
-class Argument : public Value, public ilist_node<Argument> {
-  virtual void anchor();
+class Argument final : public Value {
   Function *Parent;
+  unsigned ArgNo;
 
-  friend class SymbolTableListTraits<Argument>;
+  friend class Function;
   void setParent(Function *parent);
 
 public:
-  /// If \p F is specified, the argument is inserted at the end of the argument
-  /// list for \p F.
-  explicit Argument(Type *Ty, const Twine &Name = "", Function *F = nullptr);
+  /// Argument constructor.
+  explicit Argument(Type *Ty, const Twine &Name = "", Function *F = nullptr,
+                    unsigned ArgNo = 0);
 
   inline const Function *getParent() const { return Parent; }
   inline       Function *getParent()       { return Parent; }
@@ -47,7 +45,10 @@ public:
   /// Return the index of this formal argument in its containing function.
   ///
   /// For example in "void foo(int a, float b)" a is 0 and b is 1.
-  unsigned getArgNo() const;
+  unsigned getArgNo() const {
+    assert(Parent && "can't get number of unparented arg");
+    return ArgNo;
+  }
 
   /// Return true if this argument has the nonnull attribute. Also returns true
   /// if at least one byte is known to be dereferenceable and the pointer is in
@@ -106,24 +107,20 @@ public:
   bool hasSExtAttr() const;
 
   /// Add attributes to an argument.
-  void addAttr(AttributeSet AS);
+  void addAttrs(AttrBuilder &B);
 
-  void addAttr(Attribute::AttrKind Kind) {
-    addAttr(AttributeSet::get(getContext(), getArgNo() + 1, Kind));
-  }
+  void addAttr(Attribute::AttrKind Kind);
+
+  void addAttr(Attribute Attr);
 
   /// Remove attributes from an argument.
-  void removeAttr(AttributeSet AS);
-
-  void removeAttr(Attribute::AttrKind Kind) {
-    removeAttr(AttributeSet::get(getContext(), getArgNo() + 1, Kind));
-  }
+  void removeAttr(Attribute::AttrKind Kind);
 
   /// Check if an argument has a given attribute.
   bool hasAttribute(Attribute::AttrKind Kind) const;
 
   /// Method for support type inquiry through isa, cast, and dyn_cast.
-  static inline bool classof(const Value *V) {
+  static bool classof(const Value *V) {
     return V->getValueID() == ArgumentVal;
   }
 };

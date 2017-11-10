@@ -29,6 +29,7 @@
 extern "C" {
 #endif
 
+typedef struct LLVMOpaqueSharedModule *LLVMSharedModuleRef;
 typedef struct LLVMOrcOpaqueJITStack *LLVMOrcJITStackRef;
 typedef uint32_t LLVMOrcModuleHandle;
 typedef uint64_t LLVMOrcTargetAddress;
@@ -37,6 +38,33 @@ typedef uint64_t (*LLVMOrcLazyCompileCallbackFn)(LLVMOrcJITStackRef JITStack,
                                                  void *CallbackCtx);
 
 typedef enum { LLVMOrcErrSuccess = 0, LLVMOrcErrGeneric } LLVMOrcErrorCode;
+
+/**
+ * Turn an LLVMModuleRef into an LLVMSharedModuleRef.
+ *
+ * The JIT uses shared ownership for LLVM modules, since it is generally
+ * difficult to know when the JIT will be finished with a module (and the JIT
+ * has no way of knowing when a user may be finished with one).
+ *
+ * Calling this method with an LLVMModuleRef creates a shared-pointer to the
+ * module, and returns a reference to this shared pointer.
+ *
+ * The shared module should be disposed when finished with by calling
+ * LLVMOrcDisposeSharedModule (not LLVMDisposeModule). The Module will be
+ * deleted when the last shared pointer owner relinquishes it.
+ */
+
+LLVMSharedModuleRef LLVMOrcMakeSharedModule(LLVMModuleRef Mod);
+
+/**
+ * Dispose of a shared module.
+ *
+ * The module should not be accessed after this call. The module will be
+ * deleted once all clients (including the JIT itself) have released their
+ * shared pointers.
+ */
+
+void LLVMOrcDisposeSharedModuleRef(LLVMSharedModuleRef SharedMod);
 
 /**
  * Create an ORC JIT stack.
@@ -72,8 +100,9 @@ void LLVMOrcDisposeMangledSymbol(char *MangledSymbol);
 /**
  * Create a lazy compile callback.
  */
-LLVMOrcTargetAddress
+LLVMOrcErrorCode
 LLVMOrcCreateLazyCompileCallback(LLVMOrcJITStackRef JITStack,
+                                 LLVMOrcTargetAddress *RetAddr,
                                  LLVMOrcLazyCompileCallbackFn Callback,
                                  void *CallbackCtx);
 
@@ -94,26 +123,36 @@ LLVMOrcErrorCode LLVMOrcSetIndirectStubPointer(LLVMOrcJITStackRef JITStack,
 /**
  * Add module to be eagerly compiled.
  */
-LLVMOrcModuleHandle
-LLVMOrcAddEagerlyCompiledIR(LLVMOrcJITStackRef JITStack, LLVMModuleRef Mod,
+LLVMOrcErrorCode
+LLVMOrcAddEagerlyCompiledIR(LLVMOrcJITStackRef JITStack,
+                            LLVMOrcModuleHandle *RetHandle,
+                            LLVMSharedModuleRef Mod,
                             LLVMOrcSymbolResolverFn SymbolResolver,
                             void *SymbolResolverCtx);
 
 /**
  * Add module to be lazily compiled one function at a time.
  */
-LLVMOrcModuleHandle
-LLVMOrcAddLazilyCompiledIR(LLVMOrcJITStackRef JITStack, LLVMModuleRef Mod,
+LLVMOrcErrorCode
+LLVMOrcAddLazilyCompiledIR(LLVMOrcJITStackRef JITStack,
+                           LLVMOrcModuleHandle *RetHandle,
+                           LLVMSharedModuleRef Mod,
                            LLVMOrcSymbolResolverFn SymbolResolver,
                            void *SymbolResolverCtx);
 
 /**
  * Add an object file.
+ *
+ * This method takes ownership of the given memory buffer and attempts to add
+ * it to the JIT as an object file.
+ * Clients should *not* dispose of the 'Obj' argument: the JIT will manage it
+ * from this call onwards.
  */
-LLVMOrcModuleHandle LLVMOrcAddObjectFile(LLVMOrcJITStackRef JITStack,
-                                         LLVMObjectFileRef Obj,
-                                         LLVMOrcSymbolResolverFn SymbolResolver,
-                                         void *SymbolResolverCtx);
+LLVMOrcErrorCode LLVMOrcAddObjectFile(LLVMOrcJITStackRef JITStack,
+                                      LLVMOrcModuleHandle *RetHandle,
+                                      LLVMMemoryBufferRef Obj,
+                                      LLVMOrcSymbolResolverFn SymbolResolver,
+                                      void *SymbolResolverCtx);
 
 /**
  * Remove a module set from the JIT.
@@ -121,18 +160,20 @@ LLVMOrcModuleHandle LLVMOrcAddObjectFile(LLVMOrcJITStackRef JITStack,
  * This works for all modules that can be added via OrcAdd*, including object
  * files.
  */
-void LLVMOrcRemoveModule(LLVMOrcJITStackRef JITStack, LLVMOrcModuleHandle H);
+LLVMOrcErrorCode LLVMOrcRemoveModule(LLVMOrcJITStackRef JITStack,
+                                     LLVMOrcModuleHandle H);
 
 /**
  * Get symbol address from JIT instance.
  */
-LLVMOrcTargetAddress LLVMOrcGetSymbolAddress(LLVMOrcJITStackRef JITStack,
-                                             const char *SymbolName);
+LLVMOrcErrorCode LLVMOrcGetSymbolAddress(LLVMOrcJITStackRef JITStack,
+                                         LLVMOrcTargetAddress *RetAddr,
+                                         const char *SymbolName);
 
 /**
  * Dispose of an ORC JIT stack.
  */
-void LLVMOrcDisposeInstance(LLVMOrcJITStackRef JITStack);
+LLVMOrcErrorCode LLVMOrcDisposeInstance(LLVMOrcJITStackRef JITStack);
 
 #ifdef __cplusplus
 }

@@ -160,12 +160,19 @@ class MCInst {
   unsigned Opcode = 0;
   SMLoc Loc;
   SmallVector<MCOperand, 8> Operands;
+  // These flags could be used to pass some info from one target subcomponent
+  // to another, for example, from disassembler to asm printer. The values of
+  // the flags have any sense on target level only (e.g. prefixes on x86).
+  unsigned Flags = 0;
 
 public:
   MCInst() = default;
 
   void setOpcode(unsigned Op) { Opcode = Op; }
   unsigned getOpcode() const { return Opcode; }
+
+  void setFlags(unsigned F) { Flags = F; }
+  unsigned getFlags() const { return Flags; }
 
   void setLoc(SMLoc loc) { Loc = loc; }
   SMLoc getLoc() const { return Loc; }
@@ -176,8 +183,9 @@ public:
 
   void addOperand(const MCOperand &Op) { Operands.push_back(Op); }
 
-  typedef SmallVectorImpl<MCOperand>::iterator iterator;
-  typedef SmallVectorImpl<MCOperand>::const_iterator const_iterator;
+  using iterator = SmallVectorImpl<MCOperand>::iterator;
+  using const_iterator = SmallVectorImpl<MCOperand>::const_iterator;
+
   void clear() { Operands.clear(); }
   void erase(iterator I) { Operands.erase(I); }
   size_t size() const { return Operands.size(); }

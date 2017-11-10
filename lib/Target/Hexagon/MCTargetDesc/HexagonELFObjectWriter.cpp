@@ -11,6 +11,7 @@
 #include "MCTargetDesc/HexagonFixupKinds.h"
 #include "llvm/MC/MCAssembler.h"
 #include "llvm/MC/MCELFObjectWriter.h"
+#include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCValue.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
@@ -284,12 +285,22 @@ unsigned HexagonELFObjectWriter::getRelocType(MCContext &Ctx,
     return ELF::R_HEX_TPREL_11_X;
   case fixup_Hexagon_23_REG:
     return ELF::R_HEX_23_REG;
+  case fixup_Hexagon_27_REG:
+    return ELF::R_HEX_27_REG;
+  case fixup_Hexagon_GD_PLT_B22_PCREL_X:
+    return ELF::R_HEX_GD_PLT_B22_PCREL_X;
+  case fixup_Hexagon_GD_PLT_B32_PCREL_X:
+    return ELF::R_HEX_GD_PLT_B32_PCREL_X;
+  case fixup_Hexagon_LD_PLT_B22_PCREL_X:
+    return ELF::R_HEX_LD_PLT_B22_PCREL_X;
+  case fixup_Hexagon_LD_PLT_B32_PCREL_X:
+    return ELF::R_HEX_LD_PLT_B32_PCREL_X;
   }
 }
 
-MCObjectWriter *llvm::createHexagonELFObjectWriter(raw_pwrite_stream &OS,
-                                                   uint8_t OSABI,
-                                                   StringRef CPU) {
-  MCELFObjectTargetWriter *MOTW = new HexagonELFObjectWriter(OSABI, CPU);
-  return createELFObjectWriter(MOTW, OS, /*IsLittleEndian*/ true);
+std::unique_ptr<MCObjectWriter>
+llvm::createHexagonELFObjectWriter(raw_pwrite_stream &OS, uint8_t OSABI,
+                                   StringRef CPU) {
+  auto MOTW = llvm::make_unique<HexagonELFObjectWriter>(OSABI, CPU);
+  return createELFObjectWriter(std::move(MOTW), OS, /*IsLittleEndian*/ true);
 }

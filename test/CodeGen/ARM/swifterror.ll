@@ -1,5 +1,6 @@
 ; RUN: llc -verify-machineinstrs < %s -mtriple=armv7-apple-ios | FileCheck --check-prefix=CHECK-APPLE --check-prefix=CHECK-ARMV7 %s
 ; RUN: llc -verify-machineinstrs -O0 < %s -mtriple=armv7-apple-ios | FileCheck --check-prefix=CHECK-O0 %s
+; RUN: llc -verify-machineinstrs < %s -mtriple=armv7-linux-androideabi | FileCheck --check-prefix=CHECK-ANDROID %s
 
 declare i8* @malloc(i64)
 declare void @free(i8*)
@@ -420,10 +421,10 @@ define swiftcc void @swifterror_reg_clobber(%swift_error** nocapture %err) {
 ; CHECK-ARMV7-DAG:  str     r8, [s[[STK1:.*]]]
 ; CHECK-ARMV7-DAG:  str     r10, [s[[STK2:.*]]]
 ; Store arguments.
-; CHECK-ARMV7:  mov     r6, r3
-; CHECK-ARMV7:  mov     r4, r2
-; CHECK-ARMV7:  mov     r11, r1
-; CHECK-ARMV7:  mov     r5, r0
+; CHECK-ARMV7-DAG:  mov     r6, r3
+; CHECK-ARMV7-DAG:  mov     r4, r2
+; CHECK-ARMV7-DAG:  mov     r11, r1
+; CHECK-ARMV7-DAG:  mov     r5, r0
 ; Setup call.
 ; CHECK-ARMV7:  mov     r0, #1
 ; CHECK-ARMV7:  mov     r1, #2
@@ -435,10 +436,10 @@ define swiftcc void @swifterror_reg_clobber(%swift_error** nocapture %err) {
 ; Restore original arguments.
 ; CHECK-ARMV7-DAG:  ldr     r10, [s[[STK2]]]
 ; CHECK-ARMV7-DAG:  ldr     r8, [s[[STK1]]]
-; CHECK-ARMV7:  mov     r0, r5
-; CHECK-ARMV7:  mov     r1, r11
-; CHECK-ARMV7:  mov     r2, r4
-; CHECK-ARMV7:  mov     r3, r6
+; CHECK-ARMV7-DAG:  mov     r0, r5
+; CHECK-ARMV7-DAG:  mov     r1, r11
+; CHECK-ARMV7-DAG:  mov     r2, r4
+; CHECK-ARMV7-DAG:  mov     r3, r6
 ; CHECK-ARMV7:  bl      _params_in_reg2
 ; CHECK-ARMV7:  pop     {r4, r5, r6, r7, r10, r11, pc}
 define swiftcc void @params_in_reg(i32, i32, i32, i32, i8* swiftself, %swift_error** nocapture swifterror %err) {
@@ -469,25 +470,25 @@ declare swiftcc void @params_in_reg2(i32, i32, i32, i32, i8* swiftself, %swift_e
 ; CHECK-ARMV7:  mov     r8, #0
 ; CHECK-ARMV7:  bl      _params_in_reg2
 ; Restore original arguments.
-; CHECK-ARMV7:  ldr     r3, [s[[STK2]]]
-; CHECK-ARMV7:  ldr     r10, [s[[STK1]]]
+; CHECK-ARMV7-DAG:  ldr     r3, [s[[STK2]]]
+; CHECK-ARMV7-DAG:  ldr     r10, [s[[STK1]]]
 ; Store %error_ptr_ref;
-; CHECK-ARMV7:  str     r8, [s[[STK3:.*]]]
+; CHECK-ARMV7-DAG:  str     r8, [s[[STK3:.*]]]
 ; Restore original arguments.
-; CHECK-ARMV7:  mov     r0, r5
-; CHECK-ARMV7:  mov     r1, r11
-; CHECK-ARMV7:  mov     r2, r4
-; CHECK-ARMV7:  mov     r8, r6
+; CHECK-ARMV7-DAG:  mov     r0, r5
+; CHECK-ARMV7-DAG:  mov     r1, r11
+; CHECK-ARMV7-DAG:  mov     r2, r4
+; CHECK-ARMV7-DAG:  mov     r8, r6
 ; CHECK-ARMV7:  bl      _params_and_return_in_reg2
 ; Store swifterror return %err;
-; CHECK-ARMV7:  str     r8, [s[[STK1]]]
+; CHECK-ARMV7-DAG:  str     r8, [s[[STK1]]]
 ; Load swifterror value %error_ptr_ref.
-; CHECK-ARMV7:  ldr     r8, [s[[STK3]]]
+; CHECK-ARMV7-DAG:  ldr     r8, [s[[STK3]]]
 ; Save return values.
-; CHECK-ARMV7:  mov     r4, r0
-; CHECK-ARMV7:  mov     r5, r1
-; CHECK-ARMV7:  mov     r6, r2
-; CHECK-ARMV7:  mov     r11, r3
+; CHECK-ARMV7-DAG:  mov     r4, r0
+; CHECK-ARMV7-DAG:  mov     r5, r1
+; CHECK-ARMV7-DAG:  mov     r6, r2
+; CHECK-ARMV7-DAG:  mov     r11, r3
 ; Setup call.
 ; CHECK-ARMV7:  mov     r0, #1
 ; CHECK-ARMV7:  mov     r1, #2
@@ -496,13 +497,58 @@ declare swiftcc void @params_in_reg2(i32, i32, i32, i32, i8* swiftself, %swift_e
 ; CHECK-ARMV7:  mov     r10, #0
 ; CHECK-ARMV7:  bl      _params_in_reg2
 ; Load swifterror %err;
-; CHECK-ARMV7:  ldr     r8, [s[[STK1]]]
+; CHECK-ARMV7-DAG:  ldr     r8, [s[[STK1]]]
 ; Restore return values for returning.
-; CHECK-ARMV7:  mov     r0, r4
-; CHECK-ARMV7:  mov     r1, r5
-; CHECK-ARMV7:  mov     r2, r6
-; CHECK-ARMV7:  mov     r3, r11
+; CHECK-ARMV7-DAG:  mov     r0, r4
+; CHECK-ARMV7-DAG:  mov     r1, r5
+; CHECK-ARMV7-DAG:  mov     r2, r6
+; CHECK-ARMV7-DAG:  mov     r3, r11
 ; CHECK-ARMV7:  pop     {r4, r5, r6, r7, r10, r11, pc}
+
+; CHECK-ANDROID-LABEL: params_and_return_in_reg
+; CHECK-ANDROID:  push    {r4, r5, r6, r7, r9, r10, r11, lr}
+; CHECK-ANDROID:  sub     sp, sp, #16
+; CHECK-ANDROID:  str     r8, [sp, #4]            @ 4-byte Spill
+; CHECK-ANDROID:  mov     r11, r10
+; CHECK-ANDROID:  mov     r6, r3
+; CHECK-ANDROID:  mov     r7, r2
+; CHECK-ANDROID:  mov     r4, r1
+; CHECK-ANDROID:  mov     r5, r0
+; CHECK-ANDROID:  mov     r0, #1
+; CHECK-ANDROID:  mov     r1, #2
+; CHECK-ANDROID:  mov     r2, #3
+; CHECK-ANDROID:  mov     r3, #4
+; CHECK-ANDROID:  mov     r10, #0
+; CHECK-ANDROID:  mov     r8, #0
+; CHECK-ANDROID:  bl      params_in_reg2
+; CHECK-ANDROID:  mov     r9, r8
+; CHECK-ANDROID:  ldr     r8, [sp, #4]            @ 4-byte Reload
+; CHECK-ANDROID:  mov     r0, r5
+; CHECK-ANDROID:  mov     r1, r4
+; CHECK-ANDROID:  mov     r2, r7
+; CHECK-ANDROID:  mov     r3, r6
+; CHECK-ANDROID:  mov     r10, r11
+; CHECK-ANDROID:  bl      params_and_return_in_reg2
+; CHECK-ANDROID:  mov     r4, r0
+; CHECK-ANDROID:  mov     r5, r1
+; CHECK-ANDROID:  mov     r6, r2
+; CHECK-ANDROID:  mov     r7, r3
+; CHECK-ANDROID:  mov     r11, r8
+; CHECK-ANDROID:  mov     r0, #1
+; CHECK-ANDROID:  mov     r1, #2
+; CHECK-ANDROID:  mov     r2, #3
+; CHECK-ANDROID:  mov     r3, #4
+; CHECK-ANDROID:  mov     r10, #0
+; CHECK-ANDROID:  mov     r8, r9
+; CHECK-ANDROID:  bl      params_in_reg2
+; CHECK-ANDROID:  mov     r0, r4
+; CHECK-ANDROID:  mov     r1, r5
+; CHECK-ANDROID:  mov     r2, r6
+; CHECK-ANDROID:  mov     r3, r7
+; CHECK-ANDROID:  mov     r8, r11
+; CHECK-ANDROID:  add     sp, sp, #16
+; CHECK-ANDROID:  pop	{r4, r5, r6, r7, r9, r10, r11, pc}
+
 define swiftcc { i32, i32, i32, i32} @params_and_return_in_reg(i32, i32, i32, i32, i8* swiftself, %swift_error** nocapture swifterror %err) {
   %error_ptr_ref = alloca swifterror %swift_error*, align 8
   store %swift_error* null, %swift_error** %error_ptr_ref
@@ -522,9 +568,45 @@ declare void @acallee(i8*)
 ; CHECK-APPLE: tailcall_from_swifterror:
 ; CHECK-APPLE-NOT: b _acallee
 ; CHECK-APPLE: bl _acallee
+; CHECK-ANDROID: tailcall_from_swifterror:
+; CHECK-ANDROID-NOT: b acallee
+; CHECK-ANDROID: bl acallee
 
 define swiftcc void @tailcall_from_swifterror(%swift_error** swifterror %error_ptr_ref) {
 entry:
   tail call void @acallee(i8* null)
   ret void
+}
+
+
+declare swiftcc void @foo2(%swift_error** swifterror)
+
+; Make sure we properly assign registers during fast-isel.
+; CHECK-O0-LABEL: testAssign
+; CHECK-O0: mov     r8, #0
+; CHECK-O0: bl      _foo2
+; CHECK-O0: str     r8, [s[[STK:p.*]]]
+; CHECK-O0: ldr     r0, [s[[STK]]]
+; CHECK-O0: pop
+
+; CHECK-APPLE-LABEL: testAssign
+; CHECK-APPLE:  mov     r8, #0
+; CHECK-APPLE:  bl      _foo2
+; CHECK-APPLE:  mov     r0, r8
+
+; CHECK-ANDROID-LABEL: testAssign
+; CHECK-ANDROID:  mov     r8, #0
+; CHECK-ANDROID:  bl      foo2
+; CHECK-ANDROID:  mov     r0, r8
+
+define swiftcc %swift_error* @testAssign(i8* %error_ref) {
+entry:
+  %error_ptr = alloca swifterror %swift_error*
+  store %swift_error* null, %swift_error** %error_ptr
+  call swiftcc void @foo2(%swift_error** swifterror %error_ptr)
+  br label %a
+
+a:
+  %error = load %swift_error*, %swift_error** %error_ptr
+  ret %swift_error* %error
 }

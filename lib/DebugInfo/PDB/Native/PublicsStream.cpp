@@ -23,7 +23,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/DebugInfo/PDB/Native/PublicsStream.h"
-#include "GSI.h"
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/DebugInfo/CodeView/SymbolRecord.h"
 #include "llvm/DebugInfo/MSF/MappedBlockStream.h"
@@ -41,27 +40,18 @@ using namespace llvm::msf;
 using namespace llvm::support;
 using namespace llvm::pdb;
 
-// This is PSGSIHDR struct defined in
-// https://github.com/Microsoft/microsoft-pdb/blob/master/PDB/dbi/gsi.h
-struct PublicsStream::HeaderInfo {
-  ulittle32_t SymHash;
-  ulittle32_t AddrMap;
-  ulittle32_t NumThunks;
-  ulittle32_t SizeOfThunk;
-  ulittle16_t ISectThunkTable;
-  char Padding[2];
-  ulittle32_t OffThunkTable;
-  ulittle32_t NumSections;
-};
-
-PublicsStream::PublicsStream(PDBFile &File,
-                             std::unique_ptr<MappedBlockStream> Stream)
-    : Pdb(File), Stream(std::move(Stream)) {}
+PublicsStream::PublicsStream(std::unique_ptr<MappedBlockStream> Stream)
+    : Stream(std::move(Stream)) {}
 
 PublicsStream::~PublicsStream() = default;
 
 uint32_t PublicsStream::getSymHash() const { return Header->SymHash; }
-uint32_t PublicsStream::getAddrMap() const { return Header->AddrMap; }
+uint16_t PublicsStream::getThunkTableSection() const {
+  return Header->ISectThunkTable;
+}
+uint32_t PublicsStream::getThunkTableOffset() const {
+  return Header->OffThunkTable;
+}
 
 // Publics stream contains fixed-size headers and a serialized hash table.
 // This implementation is not complete yet. It reads till the end of the
@@ -72,24 +62,19 @@ Error PublicsStream::reload() {
   BinaryStreamReader Reader(*Stream);
 
   // Check stream size.
-  if (Reader.bytesRemaining() < sizeof(HeaderInfo) + sizeof(GSIHashHeader))
+  if (Reader.bytesRemaining() <
+      sizeof(PublicsStreamHeader) + sizeof(GSIHashHeader))
     return make_error<RawError>(raw_error_code::corrupt_file,
                                 "Publics Stream does not contain a header.");
 
-  // Read PSGSIHDR and GSIHashHdr structs.
+  // Read PSGSIHDR struct.
   if (Reader.readObject(Header))
     return make_error<RawError>(raw_error_code::corrupt_file,
                                 "Publics Stream does not contain a header.");
 
-  if (auto EC = readGSIHashHeader(HashHdr, Reader))
-    return EC;
-
-  if (auto EC = readGSIHashRecords(HashRecords, HashHdr, Reader))
-    return EC;
-
-  if (auto EC = readGSIHashBuckets(HashBuckets, HashHdr, Reader))
-    return EC;
-  NumBuckets = HashBuckets.size();
+  // Read the hash table.
+  if (auto E = PublicsTable.read(Reader))
+    return E;
 
   // Something called "address map" follows.
   uint32_t NumAddressMapEntries = Header->AddrMap / sizeof(uint32_t);
@@ -105,27 +90,15 @@ Error PublicsStream::reload() {
                                            "Could not read a thunk map."));
 
   // Something called "section map" follows.
-  if (auto EC = Reader.readArray(SectionOffsets, Header->NumSections))
-    return joinErrors(std::move(EC),
-                      make_error<RawError>(raw_error_code::corrupt_file,
-                                           "Could not read a section map."));
+  if (Reader.bytesRemaining() > 0) {
+    if (auto EC = Reader.readArray(SectionOffsets, Header->NumSections))
+      return joinErrors(std::move(EC),
+                        make_error<RawError>(raw_error_code::corrupt_file,
+                                             "Could not read a section map."));
+  }
 
   if (Reader.bytesRemaining() > 0)
     return make_error<RawError>(raw_error_code::corrupt_file,
                                 "Corrupted publics stream.");
   return Error::success();
 }
-
-iterator_range<codeview::CVSymbolArray::Iterator>
-PublicsStream::getSymbols(bool *HadError) const {
-  auto SymbolS = Pdb.getPDBSymbolStream();
-  if (SymbolS.takeError()) {
-    codeview::CVSymbolArray::Iterator Iter;
-    return make_range(Iter, Iter);
-  }
-  SymbolStream &SS = SymbolS.get();
-
-  return SS.getSymbols(HadError);
-}
-
-Error PublicsStream::commit() { return Error::success(); }

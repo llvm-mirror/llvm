@@ -1,6 +1,4 @@
 ; Test -sanitizer-coverage-experimental-tracing
-; RUN: opt < %s -sancov -sanitizer-coverage-level=2 -sanitizer-coverage-experimental-tracing  -S | FileCheck %s --check-prefix=CHECK1
-; RUN: opt < %s -sancov -sanitizer-coverage-level=3 -sanitizer-coverage-experimental-tracing  -S | FileCheck %s --check-prefix=CHECK3
 ; RUN: opt < %s -sancov -sanitizer-coverage-level=3 -sanitizer-coverage-trace-pc  -S | FileCheck %s --check-prefix=CHECK_PC
 ; RUN: opt < %s -sancov -sanitizer-coverage-level=3 -sanitizer-coverage-trace-pc-guard  -S | FileCheck %s --check-prefix=CHECK_PC_GUARD
 ; RUN: opt < %s -sancov -sanitizer-coverage-level=3 -sanitizer-coverage-trace-pc-guard  -S -mtriple=x86_64-apple-macosx | FileCheck %s --check-prefix=CHECK_PC_GUARD_DARWIN
@@ -20,18 +18,11 @@ entry:
   ret void
 }
 
-; CHECK1-LABEL: define void @foo
-; CHECK1: call void @__sanitizer_cov_trace_func_enter
-; CHECK1: call void @__sanitizer_cov_trace_basic_block
-; CHECK1-NOT: call void @__sanitizer_cov_trace_basic_block
-; CHECK1: ret void
+define available_externally void @external_bar(i32* %a) sanitize_address {
+entry:
+  ret void
+}
 
-; CHECK3-LABEL: define void @foo
-; CHECK3: call void @__sanitizer_cov_trace_func_enter
-; CHECK3: call void @__sanitizer_cov_trace_basic_block
-; CHECK3: call void @__sanitizer_cov_trace_basic_block
-; CHECK3-NOT: call void @__sanitizer_cov_trace_basic_block
-; CHECK3: ret void
 
 ; CHECK_PC-LABEL: define void @foo
 ; CHECK_PC: call void @__sanitizer_cov_trace_pc
@@ -41,12 +32,17 @@ entry:
 ; CHECK_PC: ret void
 ; CHECK_PC-NOT: call void @__sanitizer_cov_module_init
 
+; CHECK_PC_GUARD: section "__sancov_guards", align 4
 ; CHECK_PC_GUARD-LABEL: define void @foo
 ; CHECK_PC_GUARD: call void @__sanitizer_cov_trace_pc_guard
 ; CHECK_PC_GUARD: call void @__sanitizer_cov_trace_pc_guard
 ; CHECK_PC_GUARD: call void @__sanitizer_cov_trace_pc_guard
 ; CHECK_PC_GUARD-NOT: call void @__sanitizer_cov_trace_pc
 ; CHECK_PC_GUARD: ret void
+; CHECK_PC_GUARD-LABEL: @external_bar
+; CHECK_PC_GUARD-NOT: call void @__sanitizer_cov_trace_pc
+; CHECK_PC_GUARD: ret void
+
 ; CHECK_PC_GUARD: call void @__sanitizer_cov_trace_pc_guard_init(i32* bitcast (i32** @__start___sancov_guards to i32*), i32* bitcast (i32** @__stop___sancov_guards to i32*))
 
 ; CHECK_PC_GUARD_DARWIN-LABEL: define void @foo

@@ -116,6 +116,13 @@ const unsigned SystemZMC::AR32Regs[16] = {
   SystemZ::A12, SystemZ::A13, SystemZ::A14, SystemZ::A15
 };
 
+const unsigned SystemZMC::CR64Regs[16] = {
+  SystemZ::C0, SystemZ::C1, SystemZ::C2, SystemZ::C3,
+  SystemZ::C4, SystemZ::C5, SystemZ::C6, SystemZ::C7,
+  SystemZ::C8, SystemZ::C9, SystemZ::C10, SystemZ::C11,
+  SystemZ::C12, SystemZ::C13, SystemZ::C14, SystemZ::C15
+};
+
 unsigned SystemZMC::getFirstReg(unsigned Reg) {
   static unsigned Map[SystemZ::NUM_TARGET_REGS];
   static bool Initialized = false;
@@ -166,43 +173,6 @@ createSystemZMCSubtargetInfo(const Triple &TT, StringRef CPU, StringRef FS) {
   return createSystemZMCSubtargetInfoImpl(TT, CPU, FS);
 }
 
-static void adjustCodeGenOpts(const Triple &TT, Reloc::Model RM,
-                              CodeModel::Model &CM) {
-  // For SystemZ we define the models as follows:
-  //
-  // Small:  BRASL can call any function and will use a stub if necessary.
-  //         Locally-binding symbols will always be in range of LARL.
-  //
-  // Medium: BRASL can call any function and will use a stub if necessary.
-  //         GOT slots and locally-defined text will always be in range
-  //         of LARL, but other symbols might not be.
-  //
-  // Large:  Equivalent to Medium for now.
-  //
-  // Kernel: Equivalent to Medium for now.
-  //
-  // This means that any PIC module smaller than 4GB meets the
-  // requirements of Small, so Small seems like the best default there.
-  //
-  // All symbols bind locally in a non-PIC module, so the choice is less
-  // obvious.  There are two cases:
-  //
-  // - When creating an executable, PLTs and copy relocations allow
-  //   us to treat external symbols as part of the executable.
-  //   Any executable smaller than 4GB meets the requirements of Small,
-  //   so that seems like the best default.
-  //
-  // - When creating JIT code, stubs will be in range of BRASL if the
-  //   image is less than 4GB in size.  GOT entries will likewise be
-  //   in range of LARL.  However, the JIT environment has no equivalent
-  //   of copy relocs, so locally-binding data symbols might not be in
-  //   the range of LARL.  We need the Medium model in that case.
-  if (CM == CodeModel::Default)
-    CM = CodeModel::Small;
-  else if (CM == CodeModel::JITDefault)
-    CM = RM == Reloc::PIC_ ? CodeModel::Small : CodeModel::Medium;
-}
-
 static MCInstPrinter *createSystemZMCInstPrinter(const Triple &T,
                                                  unsigned SyntaxVariant,
                                                  const MCAsmInfo &MAI,
@@ -215,10 +185,6 @@ extern "C" void LLVMInitializeSystemZTargetMC() {
   // Register the MCAsmInfo.
   TargetRegistry::RegisterMCAsmInfo(getTheSystemZTarget(),
                                     createSystemZMCAsmInfo);
-
-  // Register the adjustCodeGenOpts.
-  TargetRegistry::registerMCAdjustCodeGenOpts(getTheSystemZTarget(),
-                                              adjustCodeGenOpts);
 
   // Register the MCCodeEmitter.
   TargetRegistry::RegisterMCCodeEmitter(getTheSystemZTarget(),

@@ -1,7 +1,7 @@
 ; REQUIRES: object-emission
 ;
 ; RUN: llc -mtriple=x86_64-unknown-linux-gnu -O0 -filetype=obj < %s > %t
-; RUN: llvm-dwarfdump %t | FileCheck %s
+; RUN: llvm-dwarfdump -v -debug-info %t | FileCheck %s
 
 ; Test case derived from compiling the following source with clang -g:
 ;
@@ -23,23 +23,25 @@
 ; }
 
 ; CHECK: debug_info contents
-; 0x74 is DW_OP_breg4, showing that the parameter is accessed indirectly
-; (with a zero offset) from the register parameter
-; CHECK: DW_AT_location [DW_FORM_data4]	([[F_LOC:0x[0-9]*]])
+; The parameter is accessed indirectly (with a zero offset) from the second
+; register parameter. RDI is consumed by 'sret'.
+; CHECK: DW_TAG_subprogram
+; CHECK: DW_AT_name{{.*}} = "func"
+; CHECK: DW_TAG_formal_parameter
+; CHECK: DW_AT_location {{.*}} (DW_OP_breg4 RSI+0, DW_OP_deref)
 ; CHECK-NOT: DW_TAG
 ; CHECK: DW_AT_name{{.*}} = "f"
-;
-; CHECK: DW_AT_location{{.*}}([[G_LOC:0x[0-9]*]])
+
+; CHECK: DW_TAG_subprogram
+; CHECK: DW_AT_name{{.*}} = "func2"
+; CHECK: DW_TAG_formal_parameter
+; CHECK: DW_AT_location{{.*}}(DW_OP_fbreg +23)
+; CHECK: DW_TAG_formal_parameter
+; CHECK: DW_AT_location{{.*}}(
+; CHECK-NEXT: {{.*}}: DW_OP_breg4 RSI+0, DW_OP_deref
+; CHECK-NEXT: {{.*}}: DW_OP_breg7 RSP+8, DW_OP_deref, DW_OP_deref)
 ; CHECK-NOT: DW_TAG
 ; CHECK: DW_AT_name{{.*}} = "g"
-;
-; CHECK: debug_loc contents
-; CHECK:         [[F_LOC]]: Beginning
-; CHECK-NEXT:               Ending
-; CHECK-NEXT: Location description: 74 00
-; CHECK:         [[G_LOC]]: Beginning
-; CHECK-NEXT:               Ending
-; CHECK-NEXT: Location description: 74 00
 
 %"struct.pr14763::foo" = type { i8 }
 
@@ -77,11 +79,10 @@ if.end:                                           ; preds = %if.then, %entry
   ret void, !dbg !32
 }
 
-declare void @_ZN7pr147634sinkEPv(i8*) #2
+declare void @_ZN7pr147634sinkEPv(i8*)
 
-attributes #0 = { uwtable "less-precise-fpmad"="false" "no-frame-pointer-elim"="true" "no-frame-pointer-elim-non-leaf"="true" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "unsafe-fp-math"="false" "use-soft-float"="false" }
+attributes #0 = { uwtable }
 attributes #1 = { nounwind readnone }
-attributes #2 = { "less-precise-fpmad"="false" "no-frame-pointer-elim"="true" "no-frame-pointer-elim-non-leaf"="true" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "unsafe-fp-math"="false" "use-soft-float"="false" }
 
 !llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!21, !33}
@@ -90,7 +91,7 @@ attributes #2 = { "less-precise-fpmad"="false" "no-frame-pointer-elim"="true" "n
 !1 = !DIFile(filename: "pass.cpp", directory: "/tmp")
 !2 = !{}
 !4 = distinct !DISubprogram(name: "func", linkageName: "_ZN7pr147634funcENS_3fooE", line: 6, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, unit: !0, scopeLine: 6, file: !1, scope: !5, type: !6, variables: !2)
-!5 = !DINamespace(name: "pr14763", line: 1, file: !1, scope: null)
+!5 = !DINamespace(name: "pr14763", scope: null)
 !6 = !DISubroutineType(types: !7)
 !7 = !{!8, !8}
 !8 = !DICompositeType(tag: DW_TAG_structure_type, name: "foo", line: 2, size: 8, align: 8, file: !1, scope: !5, elements: !9)

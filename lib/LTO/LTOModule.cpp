@@ -14,12 +14,12 @@
 
 #include "llvm/LTO/legacy/LTOModule.h"
 #include "llvm/ADT/Triple.h"
+#include "llvm/Analysis/ObjectUtils.h"
 #include "llvm/Bitcode/BitcodeReader.h"
-#include "llvm/CodeGen/Analysis.h"
-#include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DiagnosticPrinter.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Mangler.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
 #include "llvm/MC/MCExpr.h"
@@ -60,9 +60,13 @@ LTOModule::~LTOModule() {}
 /// isBitcodeFile - Returns 'true' if the file (or memory contents) is LLVM
 /// bitcode.
 bool LTOModule::isBitcodeFile(const void *Mem, size_t Length) {
-  ErrorOr<MemoryBufferRef> BCData = IRObjectFile::findBitcodeInMemBuffer(
+  Expected<MemoryBufferRef> BCData = IRObjectFile::findBitcodeInMemBuffer(
       MemoryBufferRef(StringRef((const char *)Mem, Length), "<mem>"));
-  return bool(BCData);
+  if (!BCData) {
+    consumeError(BCData.takeError());
+    return false;
+  }
+  return true;
 }
 
 bool LTOModule::isBitcodeFile(StringRef Path) {
@@ -71,28 +75,32 @@ bool LTOModule::isBitcodeFile(StringRef Path) {
   if (!BufferOrErr)
     return false;
 
-  ErrorOr<MemoryBufferRef> BCData = IRObjectFile::findBitcodeInMemBuffer(
+  Expected<MemoryBufferRef> BCData = IRObjectFile::findBitcodeInMemBuffer(
       BufferOrErr.get()->getMemBufferRef());
-  return bool(BCData);
+  if (!BCData) {
+    consumeError(BCData.takeError());
+    return false;
+  }
+  return true;
 }
 
 bool LTOModule::isThinLTO() {
-  // Right now the detection is only based on the summary presence. We may want
-  // to add a dedicated flag at some point.
-  Expected<bool> Result = hasGlobalValueSummary(MBRef);
+  Expected<BitcodeLTOInfo> Result = getBitcodeLTOInfo(MBRef);
   if (!Result) {
     logAllUnhandledErrors(Result.takeError(), errs(), "");
     return false;
   }
-  return *Result;
+  return Result->IsThinLTO;
 }
 
 bool LTOModule::isBitcodeForTarget(MemoryBuffer *Buffer,
                                    StringRef TriplePrefix) {
-  ErrorOr<MemoryBufferRef> BCOrErr =
+  Expected<MemoryBufferRef> BCOrErr =
       IRObjectFile::findBitcodeInMemBuffer(Buffer->getMemBufferRef());
-  if (!BCOrErr)
+  if (!BCOrErr) {
+    consumeError(BCOrErr.takeError());
     return false;
+  }
   LLVMContext Context;
   ErrorOr<std::string> TripleOrErr =
       expectedToErrorOrAndEmitErrors(Context, getBitcodeTargetTriple(*BCOrErr));
@@ -102,10 +110,12 @@ bool LTOModule::isBitcodeForTarget(MemoryBuffer *Buffer,
 }
 
 std::string LTOModule::getProducerString(MemoryBuffer *Buffer) {
-  ErrorOr<MemoryBufferRef> BCOrErr =
+  Expected<MemoryBufferRef> BCOrErr =
       IRObjectFile::findBitcodeInMemBuffer(Buffer->getMemBufferRef());
-  if (!BCOrErr)
+  if (!BCOrErr) {
+    consumeError(BCOrErr.takeError());
     return "";
+  }
   LLVMContext Context;
   ErrorOr<std::string> ProducerOrErr = expectedToErrorOrAndEmitErrors(
       Context, getBitcodeProducerString(*BCOrErr));
@@ -176,11 +186,11 @@ LTOModule::createInLocalContext(std::unique_ptr<LLVMContext> Context,
 static ErrorOr<std::unique_ptr<Module>>
 parseBitcodeFileImpl(MemoryBufferRef Buffer, LLVMContext &Context,
                      bool ShouldBeLazy) {
-
   // Find the buffer.
-  ErrorOr<MemoryBufferRef> MBOrErr =
+  Expected<MemoryBufferRef> MBOrErr =
       IRObjectFile::findBitcodeInMemBuffer(Buffer);
-  if (std::error_code EC = MBOrErr.getError()) {
+  if (Error E = MBOrErr.takeError()) {
+    std::error_code EC = errorToErrorCode(std::move(E));
     Context.emitError(EC.message());
     return EC;
   }
@@ -637,10 +647,10 @@ void LTOModule::parseMetadata() {
   raw_string_ostream OS(LinkerOpts);
 
   // Linker Options
-  if (Metadata *Val = getModule().getModuleFlag("Linker Options")) {
-    MDNode *LinkerOptions = cast<MDNode>(Val);
+  if (NamedMDNode *LinkerOptions =
+          getModule().getNamedMetadata("llvm.linker.options")) {
     for (unsigned i = 0, e = LinkerOptions->getNumOperands(); i != e; ++i) {
-      MDNode *MDOptions = cast<MDNode>(LinkerOptions->getOperand(i));
+      MDNode *MDOptions = LinkerOptions->getOperand(i);
       for (unsigned ii = 0, ie = MDOptions->getNumOperands(); ii != ie; ++ii) {
         MDString *MDOption = cast<MDString>(MDOptions->getOperand(ii));
         OS << " " << MDOption->getString();

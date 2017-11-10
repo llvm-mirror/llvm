@@ -86,7 +86,7 @@ public:
   virtual void recordRelocation(MCAssembler &Asm, const MCAsmLayout &Layout,
                                 const MCFragment *Fragment,
                                 const MCFixup &Fixup, MCValue Target,
-                                bool &IsPCRel, uint64_t &FixedValue) = 0;
+                                uint64_t &FixedValue) = 0;
 
   /// Check whether the difference (A - B) between two symbol references is
   /// fully resolved.
@@ -108,11 +108,6 @@ public:
                                                       const MCFragment &FB,
                                                       bool InSet,
                                                       bool IsPCRel) const;
-
-  /// True if this symbol (which is a variable) is weak. This is not
-  /// just STB_WEAK, but more generally whether or not we can evaluate
-  /// past it.
-  virtual bool isWeak(const MCSymbol &Sym) const;
 
   /// Write the object file.
   ///

@@ -1,4 +1,4 @@
-//===-- MipsSEFrameLowering.cpp - Mips32/64 Frame Information -------------===//
+//===- MipsSEFrameLowering.cpp - Mips32/64 Frame Information --------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -11,10 +11,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "MipsSEFrameLowering.h"
 #include "MCTargetDesc/MipsABIInfo.h"
 #include "MipsMachineFunction.h"
 #include "MipsRegisterInfo.h"
-#include "MipsSEFrameLowering.h"
 #include "MipsSEInstrInfo.h"
 #include "MipsSubtarget.h"
 #include "llvm/ADT/BitVector.h"
@@ -71,7 +71,7 @@ public:
   bool expand();
 
 private:
-  typedef MachineBasicBlock::iterator Iter;
+  using Iter = MachineBasicBlock::iterator;
 
   bool expandInstr(MachineBasicBlock &MBB, Iter I);
   void expandLoadCCond(MachineBasicBlock &MBB, Iter I);
@@ -260,7 +260,8 @@ bool ExpandPseudo::expandCopyACC(MachineBasicBlock &MBB, Iter I,
   //  copy dst_hi, $vr1
 
   unsigned Dst = I->getOperand(0).getReg(), Src = I->getOperand(1).getReg();
-  unsigned VRegSize = RegInfo.getMinimalPhysRegClass(Dst)->getSize() / 2;
+  const TargetRegisterClass *DstRC = RegInfo.getMinimalPhysRegClass(Dst);
+  unsigned VRegSize = RegInfo.getRegSizeInBits(*DstRC) / 16;
   const TargetRegisterClass *RC = RegInfo.intRegClass(VRegSize);
   unsigned VR0 = MRI.createVirtualRegister(RC);
   unsigned VR1 = MRI.createVirtualRegister(RC);
@@ -389,7 +390,7 @@ bool ExpandPseudo::expandExtractElementF64(MachineBasicBlock &MBB,
 }
 
 MipsSEFrameLowering::MipsSEFrameLowering(const MipsSubtarget &STI)
-    : MipsFrameLowering(STI, STI.stackAlignment()) {}
+    : MipsFrameLowering(STI, STI.getStackAlignment()) {}
 
 void MipsSEFrameLowering::emitPrologue(MachineFunction &MF,
                                        MachineBasicBlock &MBB) const {
@@ -423,7 +424,6 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF,
 
   MachineModuleInfo &MMI = MF.getMMI();
   const MCRegisterInfo *MRI = MMI.getContext().getRegisterInfo();
-  MachineLocation DstML, SrcML;
 
   // Adjust stack.
   TII.adjustStackPtr(SP, -StackSize, MBB, MBBI);
@@ -858,6 +858,7 @@ void MipsSEFrameLowering::determineCalleeSaves(MachineFunction &MF,
                                                BitVector &SavedRegs,
                                                RegScavenger *RS) const {
   TargetFrameLowering::determineCalleeSaves(MF, SavedRegs, RS);
+  const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
   MipsFunctionInfo *MipsFI = MF.getInfo<MipsFunctionInfo>();
   MipsABIInfo ABI = STI.getABI();
   unsigned FP = ABI.GetFramePtr();
@@ -883,10 +884,11 @@ void MipsSEFrameLowering::determineCalleeSaves(MachineFunction &MF,
   if (ExpandPseudo(MF).expand()) {
     // The spill slot should be half the size of the accumulator. If target is
     // mips64, it should be 64-bit, otherwise it should be 32-bt.
-    const TargetRegisterClass *RC = STI.hasMips64() ?
-      &Mips::GPR64RegClass : &Mips::GPR32RegClass;
-    int FI = MF.getFrameInfo().CreateStackObject(RC->getSize(),
-                                                  RC->getAlignment(), false);
+    const TargetRegisterClass &RC = STI.hasMips64() ?
+      Mips::GPR64RegClass : Mips::GPR32RegClass;
+    int FI = MF.getFrameInfo().CreateStackObject(TRI->getSpillSize(RC),
+                                                 TRI->getSpillAlignment(RC),
+                                                 false);
     RS->addScavengingFrameIndex(FI);
   }
 
@@ -897,10 +899,11 @@ void MipsSEFrameLowering::determineCalleeSaves(MachineFunction &MF,
   if (isInt<16>(MaxSPOffset))
     return;
 
-  const TargetRegisterClass *RC =
-      ABI.ArePtrs64bit() ? &Mips::GPR64RegClass : &Mips::GPR32RegClass;
-  int FI = MF.getFrameInfo().CreateStackObject(RC->getSize(),
-                                                RC->getAlignment(), false);
+  const TargetRegisterClass &RC =
+      ABI.ArePtrs64bit() ? Mips::GPR64RegClass : Mips::GPR32RegClass;
+  int FI = MF.getFrameInfo().CreateStackObject(TRI->getSpillSize(RC),
+                                               TRI->getSpillAlignment(RC),
+                                               false);
   RS->addScavengingFrameIndex(FI);
 }
 

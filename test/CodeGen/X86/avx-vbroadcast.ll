@@ -114,7 +114,7 @@ define <8 x i32> @B3(i32* %ptr, i32* %ptr2) nounwind uwtable readnone ssp {
 ; X32-NEXT:    movl (%ecx), %ecx
 ; X32-NEXT:    vmovd %ecx, %xmm0
 ; X32-NEXT:    movl %ecx, (%eax)
-; X32-NEXT:    vpermilps {{.*#+}} xmm0 = xmm0[0,0,0,0]
+; X32-NEXT:    vpshufd {{.*#+}} xmm0 = xmm0[0,0,0,0]
 ; X32-NEXT:    vinsertf128 $1, %xmm0, %ymm0, %ymm0
 ; X32-NEXT:    retl
 ;
@@ -123,7 +123,7 @@ define <8 x i32> @B3(i32* %ptr, i32* %ptr2) nounwind uwtable readnone ssp {
 ; X64-NEXT:    movl (%rdi), %eax
 ; X64-NEXT:    vmovd %eax, %xmm0
 ; X64-NEXT:    movl %eax, (%rsi)
-; X64-NEXT:    vpermilps {{.*#+}} xmm0 = xmm0[0,0,0,0]
+; X64-NEXT:    vpshufd {{.*#+}} xmm0 = xmm0[0,0,0,0]
 ; X64-NEXT:    vinsertf128 $1, %xmm0, %ymm0, %ymm0
 ; X64-NEXT:    retq
 entry:
@@ -386,12 +386,12 @@ define <4 x i32> @load_splat_4i32_4i32_1111(<4 x i32>* %ptr) nounwind uwtable re
 ; X32-LABEL: load_splat_4i32_4i32_1111:
 ; X32:       ## BB#0: ## %entry
 ; X32-NEXT:    movl {{[0-9]+}}(%esp), %eax
-; X32-NEXT:    vpshufd {{.*#+}} xmm0 = mem[1,1,1,1]
+; X32-NEXT:    vpermilps {{.*#+}} xmm0 = mem[1,1,1,1]
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: load_splat_4i32_4i32_1111:
 ; X64:       ## BB#0: ## %entry
-; X64-NEXT:    vpshufd {{.*#+}} xmm0 = mem[1,1,1,1]
+; X64-NEXT:    vpermilps {{.*#+}} xmm0 = mem[1,1,1,1]
 ; X64-NEXT:    retq
 entry:
   %ld = load <4 x i32>, <4 x i32>* %ptr
@@ -488,12 +488,12 @@ define <2 x i64> @load_splat_2i64_2i64_1111(<2 x i64>* %ptr) nounwind uwtable re
 ; X32-LABEL: load_splat_2i64_2i64_1111:
 ; X32:       ## BB#0: ## %entry
 ; X32-NEXT:    movl {{[0-9]+}}(%esp), %eax
-; X32-NEXT:    vpshufd {{.*#+}} xmm0 = mem[2,3,2,3]
+; X32-NEXT:    vpermilps {{.*#+}} xmm0 = mem[2,3,2,3]
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: load_splat_2i64_2i64_1111:
 ; X64:       ## BB#0: ## %entry
-; X64-NEXT:    vpshufd {{.*#+}} xmm0 = mem[2,3,2,3]
+; X64-NEXT:    vpermilps {{.*#+}} xmm0 = mem[2,3,2,3]
 ; X64-NEXT:    retq
 entry:
   %ld = load <2 x i64>, <2 x i64>* %ptr
@@ -602,8 +602,8 @@ define <2 x i64> @G(i64* %ptr) nounwind uwtable readnone ssp {
 ;
 ; X64-LABEL: G:
 ; X64:       ## BB#0: ## %entry
-; X64-NEXT:    vmovq {{.*#+}} xmm0 = mem[0],zero
-; X64-NEXT:    vpshufd {{.*#+}} xmm0 = xmm0[0,1,0,1]
+; X64-NEXT:    vmovsd {{.*#+}} xmm0 = mem[0],zero
+; X64-NEXT:    vpermilps {{.*#+}} xmm0 = xmm0[0,1,0,1]
 ; X64-NEXT:    retq
 entry:
   %q = load i64, i64* %ptr, align 8
@@ -645,12 +645,12 @@ entry:
 define <4 x i32> @H(<4 x i32> %a) {
 ; X32-LABEL: H:
 ; X32:       ## BB#0: ## %entry
-; X32-NEXT:    vpshufd {{.*#+}} xmm0 = xmm0[1,1,2,3]
+; X32-NEXT:    vpermilps {{.*#+}} xmm0 = xmm0[1,1,2,3]
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: H:
 ; X64:       ## BB#0: ## %entry
-; X64-NEXT:    vpshufd {{.*#+}} xmm0 = xmm0[1,1,2,3]
+; X64-NEXT:    vpermilps {{.*#+}} xmm0 = xmm0[1,1,2,3]
 ; X64-NEXT:    retq
 entry:
   %x = shufflevector <4 x i32> %a, <4 x i32> undef, <4 x i32> <i32 1, i32 undef, i32 undef, i32 undef>
@@ -831,6 +831,42 @@ define <4 x double> @splat_concat4(double* %p) {
   ret <4 x double> %6
 }
 
+; PR34041
+define <4 x double> @broadcast_shuffle_1000(double* %p) {
+; X32-LABEL: broadcast_shuffle_1000:
+; X32:       ## BB#0:
+; X32-NEXT:    movl {{[0-9]+}}(%esp), %eax
+; X32-NEXT:    vbroadcastsd (%eax), %ymm0
+; X32-NEXT:    retl
+;
+; X64-LABEL: broadcast_shuffle_1000:
+; X64:       ## BB#0:
+; X64-NEXT:    vbroadcastsd (%rdi), %ymm0
+; X64-NEXT:    retq
+  %1 = load double, double* %p
+  %2 = insertelement <2 x double> undef, double %1, i32 0
+  %3 = shufflevector <2 x double> %2, <2 x double> undef, <4 x i32> <i32 1, i32 0, i32 0, i32 0>
+  ret <4 x double> %3
+}
+
+define <4 x double> @broadcast_shuffle1032(double* %p) {
+; X32-LABEL: broadcast_shuffle1032:
+; X32:       ## BB#0:
+; X32-NEXT:    movl {{[0-9]+}}(%esp), %eax
+; X32-NEXT:    vbroadcastsd (%eax), %ymm0
+; X32-NEXT:    retl
+;
+; X64-LABEL: broadcast_shuffle1032:
+; X64:       ## BB#0:
+; X64-NEXT:    vbroadcastsd (%rdi), %ymm0
+; X64-NEXT:    retq
+  %1 = load double, double* %p
+  %2 = insertelement <2 x double> undef, double %1, i32 1
+  %3 = insertelement <2 x double> undef, double %1, i32 0
+  %4 = shufflevector <2 x double> %2, <2 x double> %3, <4 x i32> <i32 1, i32 0, i32 3, i32 2>
+  ret <4 x double> %4
+}
+
 ;
 ; When VBROADCAST replaces an existing load, ensure it still respects lifetime dependencies.
 ;
@@ -878,15 +914,15 @@ define float @broadcast_lifetime() nounwind {
   %3 = bitcast <4 x float>* %1 to i8*
   %4 = bitcast <4 x float>* %2 to i8*
 
-  call void @llvm.lifetime.start(i64 16, i8* %3)
+  call void @llvm.lifetime.start.p0i8(i64 16, i8* %3)
   call void @gfunc(<4 x float>* %1)
   %5 = load <4 x float>, <4 x float>* %1, align 16
-  call void @llvm.lifetime.end(i64 16, i8* %3)
+  call void @llvm.lifetime.end.p0i8(i64 16, i8* %3)
 
-  call void @llvm.lifetime.start(i64 16, i8* %4)
+  call void @llvm.lifetime.start.p0i8(i64 16, i8* %4)
   call void @gfunc(<4 x float>* %2)
   %6 = load <4 x float>, <4 x float>* %2, align 16
-  call void @llvm.lifetime.end(i64 16, i8* %4)
+  call void @llvm.lifetime.end.p0i8(i64 16, i8* %4)
 
   %7 = extractelement <4 x float> %5, i32 1
   %8 = extractelement <4 x float> %6, i32 1
@@ -895,5 +931,5 @@ define float @broadcast_lifetime() nounwind {
 }
 
 declare void @gfunc(<4 x float>*)
-declare void @llvm.lifetime.start(i64, i8*)
-declare void @llvm.lifetime.end(i64, i8*)
+declare void @llvm.lifetime.start.p0i8(i64, i8*)
+declare void @llvm.lifetime.end.p0i8(i64, i8*)

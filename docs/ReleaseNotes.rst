@@ -1,12 +1,12 @@
 ========================
-LLVM 5.0.0 Release Notes
+LLVM 6.0.0 Release Notes
 ========================
 
 .. contents::
     :local:
 
 .. warning::
-   These are in-progress notes for the upcoming LLVM 5 release.
+   These are in-progress notes for the upcoming LLVM 6 release.
    Release notes for previous releases can be found on
    `the Download Page <http://releases.llvm.org/download.html>`_.
 
@@ -40,7 +40,11 @@ Non-comprehensive list of changes in this release
    functionality, or simply have a lot to talk about), see the `NOTE` below
    for adding a new subsection.
 
-* ... next change ...
+* The ``Redirects`` argument of ``llvm::sys::ExecuteAndWait`` and
+  ``llvm::sys::ExecuteNoWait`` was changed to an ``ArrayRef`` of optional
+  ``StringRef``'s to make it safer and more convenient to use.
+
+* Note..
 
 .. NOTE
    If you would like to document a larger change, then you can add a
@@ -93,7 +97,13 @@ Changes to the OCaml bindings
  During this release ...
 
 
-External Open Source Projects Using LLVM 5
+Changes to the C API
+--------------------
+
+ During this release ...
+
+
+External Open Source Projects Using LLVM 6
 ==========================================
 
 * A project...

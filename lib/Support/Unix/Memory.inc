@@ -27,7 +27,7 @@
 #if defined(__mips__)
 #  if defined(__OpenBSD__)
 #    include <mips64/sysarch.h>
-#  else
+#  elif !defined(__FreeBSD__)
 #    include <sys/cachectl.h>
 #  endif
 #endif
@@ -195,6 +195,10 @@ Memory::AllocateRWX(size_t NumBytes, const MemoryBlock* NearBlock,
 #if defined(__APPLE__) && (defined(__arm__) || defined(__arm64__))
   void *pa = ::mmap(start, PageSize*NumPages, PROT_READ|PROT_EXEC,
                     flags, fd, 0);
+#elif defined(__NetBSD__) && defined(PROT_MPROTECT)
+  void *pa =
+      ::mmap(start, PageSize * NumPages,
+             PROT_READ | PROT_WRITE | PROT_MPROTECT(PROT_EXEC), flags, fd, 0);
 #else
   void *pa = ::mmap(start, PageSize*NumPages, PROT_READ|PROT_WRITE|PROT_EXEC,
                     flags, fd, 0);

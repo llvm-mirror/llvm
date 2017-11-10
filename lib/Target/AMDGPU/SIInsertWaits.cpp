@@ -1,4 +1,4 @@
-//===-- SILowerControlFlow.cpp - Use predicates for control flow ----------===//
+//===- SILowerControlFlow.cpp - Use predicates for control flow -----------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -33,15 +33,14 @@
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/IR/DebugLoc.h"
+#include "llvm/MC/MCInstrDesc.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
-#include <new>
 #include <utility>
 
 #define DEBUG_TYPE "si-insert-waits"
@@ -51,23 +50,23 @@ using namespace llvm;
 namespace {
 
 /// \brief One variable for each of the hardware counters
-typedef union {
+using Counters = union {
   struct {
     unsigned VM;
     unsigned EXP;
     unsigned LGKM;
   } Named;
   unsigned Array[3];
-} Counters;
+};
 
-typedef enum {
+using InstType = enum {
   OTHER,
   SMEM,
   VMEM
-} InstType;
+};
 
-typedef Counters RegCounters[512];
-typedef std::pair<unsigned, unsigned> RegInterval;
+using RegCounters =  Counters[512];
+using RegInterval = std::pair<unsigned, unsigned>;
 
 class SIInsertWaits : public MachineFunctionPass {
 private:
@@ -216,8 +215,8 @@ Counters SIInsertWaits::getHwCounts(MachineInstr &MI) {
 
         // XXX - What if this is a write into a super register?
         const TargetRegisterClass *RC = TII->getOpRegClass(MI, 0);
-        unsigned Size = RC->getSize();
-        Result.Named.LGKM = Size > 4 ? 2 : 1;
+        unsigned Size = TRI->getRegSizeInBits(*RC);
+        Result.Named.LGKM = Size > 32 ? 2 : 1;
       } else {
         // s_dcache_inv etc. do not have a a destination register. Assume we
         // want a wait on these.
@@ -289,12 +288,12 @@ bool SIInsertWaits::isOpRelevant(MachineOperand &Op) {
 
 RegInterval SIInsertWaits::getRegInterval(const TargetRegisterClass *RC,
                                           const MachineOperand &Reg) const {
-  unsigned Size = RC->getSize();
-  assert(Size >= 4);
+  unsigned Size = TRI->getRegSizeInBits(*RC);
+  assert(Size >= 32);
 
   RegInterval Result;
   Result.first = TRI->getEncodingValue(Reg.getReg());
-  Result.second = Result.first + Size / 4;
+  Result.second = Result.first + Size / 32;
 
   return Result;
 }
@@ -409,7 +408,6 @@ bool SIInsertWaits::insertWait(MachineBasicBlock &MBB,
 
       // Adjust the value to the real hardware possibilities.
       Counts.Array[i] = std::min(Value, HardwareLimits.Array[i]);
-
     } else
       Counts.Array[i] = 0;
 
@@ -568,12 +566,10 @@ bool SIInsertWaits::runOnMachineFunction(MachineFunction &MF) {
 
   for (MachineFunction::iterator BI = MF.begin(), BE = MF.end();
        BI != BE; ++BI) {
-
     MachineBasicBlock &MBB = *BI;
 
     for (MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end();
          I != E; ++I) {
-
       if (!HaveScalarStores && TII->isScalarStore(*I))
         HaveScalarStores = true;
 
@@ -630,7 +626,7 @@ bool SIInsertWaits::runOnMachineFunction(MachineFunction &MF) {
       // but we also want to wait for any other outstanding transfers before
       // signalling other hardware blocks
       if ((I->getOpcode() == AMDGPU::S_BARRIER &&
-               ST->needWaitcntBeforeBarrier()) ||
+               !ST->hasAutoWaitcntBeforeBarrier()) ||
            I->getOpcode() == AMDGPU::S_SENDMSG ||
            I->getOpcode() == AMDGPU::S_SENDMSGHALT)
         Required = LastIssued;
@@ -648,7 +644,7 @@ bool SIInsertWaits::runOnMachineFunction(MachineFunction &MF) {
       handleSendMsg(MBB, I);
 
       if (I->getOpcode() == AMDGPU::S_ENDPGM ||
-          I->getOpcode() == AMDGPU::SI_RETURN)
+          I->getOpcode() == AMDGPU::SI_RETURN_TO_EPILOG)
         EndPgmBlocks.push_back(&MBB);
     }
 
@@ -671,7 +667,6 @@ bool SIInsertWaits::runOnMachineFunction(MachineFunction &MF) {
 
       for (MachineBasicBlock::iterator I = MBB->begin(), E = MBB->end();
            I != E; ++I) {
-
         if (I->getOpcode() == AMDGPU::S_DCACHE_WB)
           SeenDCacheWB = true;
         else if (TII->isScalarStore(*I))
@@ -679,7 +674,7 @@ bool SIInsertWaits::runOnMachineFunction(MachineFunction &MF) {
 
         // FIXME: It would be better to insert this before a waitcnt if any.
         if ((I->getOpcode() == AMDGPU::S_ENDPGM ||
-             I->getOpcode() == AMDGPU::SI_RETURN) && !SeenDCacheWB) {
+             I->getOpcode() == AMDGPU::SI_RETURN_TO_EPILOG) && !SeenDCacheWB) {
           Changes = true;
           BuildMI(*MBB, I, I->getDebugLoc(), TII->get(AMDGPU::S_DCACHE_WB));
         }
@@ -689,6 +684,20 @@ bool SIInsertWaits::runOnMachineFunction(MachineFunction &MF) {
 
   for (MachineInstr *I : RemoveMI)
     I->eraseFromParent();
+
+  if (!MFI->isEntryFunction()) {
+    // Wait for any outstanding memory operations that the input registers may
+    // depend on. We can't track them and it's better to to the wait after the
+    // costly call sequence.
+
+    // TODO: Could insert earlier and schedule more liberally with operations
+    // that only use caller preserved registers.
+    MachineBasicBlock &EntryBB = MF.front();
+    BuildMI(EntryBB, EntryBB.getFirstNonPHI(), DebugLoc(), TII->get(AMDGPU::S_WAITCNT))
+      .addImm(0);
+
+    Changes = true;
+  }
 
   return Changes;
 }

@@ -11,7 +11,7 @@ s_mov_b32 s0, global
 
 // Use a token with the same name as a global
 ds_gws_init v2 gds
-// VI: ds_gws_init v2 gds ; encoding: [0x00,0x00,0x33,0xd8,0x02,0x00,0x00,0x00]
+// VI: ds_gws_init v2 gds ; encoding: [0x00,0x00,0x33,0xd9,0x00,0x02,0x00,0x00]
 
 // Use a global with the same name as a token
 s_mov_b32 s0, gds
@@ -39,3 +39,10 @@ s_mov_b32 s0, foo+2
 .set foo, 512
 s_mov_b32 s0, foo+2
 // VI: s_mov_b32 s0, 514 ; encoding: [0xff,0x00,0x80,0xbe,0x02,0x02,0x00,0x00]
+
+BB1:
+v_nop_e64
+BB2:
+s_sub_u32 vcc_lo, vcc_lo, (BB2+4)-BB1
+// VI: s_sub_u32 vcc_lo, vcc_lo, (BB2+4)-BB1 ; encoding: [0x6a,0xff,0xea,0x80,A,A,A,A]
+// VI-NEXT: ;   fixup A - offset: 4, value: (BB2+4)-BB1, kind: FK_Data_4

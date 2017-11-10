@@ -69,13 +69,13 @@ define i32 @test3() {
 ; CHECK-LABEL: test3:
 ; CHECK: ldr [[TEMP:r[0-7]]],
 ; CHECK: add sp, [[TEMP]]
-; CHECK: ldr [[TEMP]],
-; CHECK: add [[TEMP]], sp
-; CHECK: ldr [[TEMP:r[0-7]]],
-; CHECK: add sp, [[TEMP]]
+; CHECK: ldr [[TEMP2:r[0-7]]],
+; CHECK: add [[TEMP2]], sp
+; CHECK: ldr [[TEMP3:r[0-7]]],
+; CHECK: add sp, [[TEMP3]]
     %retval = alloca i32, align 4
     %tmp = alloca i32, align 4
-    %a = alloca [805306369 x i8], align 16
+    %a = alloca [805306369 x i8], align 4
     store i32 0, i32* %tmp
     %tmp1 = load i32, i32* %tmp
     ret i32 %tmp1
@@ -85,13 +85,13 @@ define i32 @test3_nofpelim() "no-frame-pointer-elim"="true" {
 ; CHECK-LABEL: test3_nofpelim:
 ; CHECK: ldr [[TEMP:r[0-7]]],
 ; CHECK: add sp, [[TEMP]]
-; CHECK: ldr [[TEMP]],
-; CHECK: add [[TEMP]], sp
+; CHECK: ldr [[TEMP2:r[0-7]]],
+; CHECK: add [[TEMP2]], sp
 ; CHECK: subs r4, r7,
 ; CHECK: mov sp, r4
     %retval = alloca i32, align 4
     %tmp = alloca i32, align 4
-    %a = alloca [805306369 x i8], align 16
+    %a = alloca [805306369 x i8], align 8
     store i32 0, i32* %tmp
     %tmp1 = load i32, i32* %tmp
     ret i32 %tmp1

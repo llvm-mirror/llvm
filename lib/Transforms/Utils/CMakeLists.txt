@@ -7,7 +7,6 @@ add_llvm_library(LLVMTransformUtils
   BypassSlowDivision.cpp
   CloneFunction.cpp
   CloneModule.cpp
-  CmpInstAnalysis.cpp
   CodeExtractor.cpp
   CtorUtils.cpp
   DemoteRegToStack.cpp
@@ -34,11 +33,10 @@ add_llvm_library(LLVMTransformUtils
   LowerMemIntrinsics.cpp
   LowerSwitch.cpp
   Mem2Reg.cpp
-  MemorySSA.cpp
-  MemorySSAUpdater.cpp
   MetaRenamer.cpp
   ModuleUtils.cpp
   NameAnonGlobals.cpp
+  OrderedInstructions.cpp
   PredicateInfo.cpp
   PromoteMemoryToRegister.cpp
   StripGCRelocates.cpp

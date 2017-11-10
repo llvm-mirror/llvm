@@ -394,11 +394,22 @@ RuntimeLibcallSignatures[RTLIB::UNKNOWN_LIBCALL] = {
 /* MEMMOVE */ iPTR_func_iPTR_iPTR_iPTR,
 
 // ELEMENT-WISE ATOMIC MEMORY
-/* MEMCPY_ELEMENT_ATOMIC_1 */ iPTR_func_iPTR_iPTR_iPTR,
-/* MEMCPY_ELEMENT_ATOMIC_2 */ iPTR_func_iPTR_iPTR_iPTR,
-/* MEMCPY_ELEMENT_ATOMIC_4 */ iPTR_func_iPTR_iPTR_iPTR,
-/* MEMCPY_ELEMENT_ATOMIC_8 */ iPTR_func_iPTR_iPTR_iPTR,
-/* MEMCPY_ELEMENT_ATOMIC_16 */ iPTR_func_iPTR_iPTR_iPTR,
+/* MEMCPY_ELEMENT_UNORDERED_ATOMIC_1 */ unsupported,
+/* MEMCPY_ELEMENT_UNORDERED_ATOMIC_2 */ unsupported,
+/* MEMCPY_ELEMENT_UNORDERED_ATOMIC_4 */ unsupported,
+/* MEMCPY_ELEMENT_UNORDERED_ATOMIC_8 */ unsupported,
+/* MEMCPY_ELEMENT_UNORDERED_ATOMIC_16 */ unsupported,
+/* MEMMOVE_ELEMENT_UNORDERED_ATOMIC_1 */ unsupported,
+/* MEMMOVE_ELEMENT_UNORDERED_ATOMIC_2 */ unsupported,
+/* MEMMOVE_ELEMENT_UNORDERED_ATOMIC_4 */ unsupported,
+/* MEMMOVE_ELEMENT_UNORDERED_ATOMIC_8 */ unsupported,
+/* MEMMOVE_ELEMENT_UNORDERED_ATOMIC_16 */ unsupported,
+
+/* MEMSET_ELEMENT_UNORDERED_ATOMIC_1 */ unsupported,
+/* MEMSET_ELEMENT_UNORDERED_ATOMIC_2 */ unsupported,
+/* MEMSET_ELEMENT_UNORDERED_ATOMIC_4 */ unsupported,
+/* MEMSET_ELEMENT_UNORDERED_ATOMIC_8 */ unsupported,
+/* MEMSET_ELEMENT_UNORDERED_ATOMIC_16 */ unsupported,
 
 // EXCEPTION HANDLING
 /* UNWIND_RESUME */ unsupported,
@@ -839,11 +850,21 @@ RuntimeLibcallNames[RTLIB::UNKNOWN_LIBCALL] = {
 /* MEMCPY */ "memcpy",
 /* MEMMOVE */ "memset",
 /* MEMSET */ "memmove",
-/* MEMCPY_ELEMENT_ATOMIC_1 */ "MEMCPY_ELEMENT_ATOMIC_1",
-/* MEMCPY_ELEMENT_ATOMIC_2 */ "MEMCPY_ELEMENT_ATOMIC_2",
-/* MEMCPY_ELEMENT_ATOMIC_4 */ "MEMCPY_ELEMENT_ATOMIC_4",
-/* MEMCPY_ELEMENT_ATOMIC_8 */ "MEMCPY_ELEMENT_ATOMIC_8",
-/* MEMCPY_ELEMENT_ATOMIC_16 */ "MEMCPY_ELEMENT_ATOMIC_16",
+/* MEMCPY_ELEMENT_UNORDERED_ATOMIC_1 */ nullptr,
+/* MEMCPY_ELEMENT_UNORDERED_ATOMIC_2 */ nullptr,
+/* MEMCPY_ELEMENT_UNORDERED_ATOMIC_4 */ nullptr,
+/* MEMCPY_ELEMENT_UNORDERED_ATOMIC_8 */ nullptr,
+/* MEMCPY_ELEMENT_UNORDERED_ATOMIC_16 */ nullptr,
+/* MEMMOVE_ELEMENT_UNORDERED_ATOMIC_1 */ nullptr,
+/* MEMMOVE_ELEMENT_UNORDERED_ATOMIC_2 */ nullptr,
+/* MEMMOVE_ELEMENT_UNORDERED_ATOMIC_4 */ nullptr,
+/* MEMMOVE_ELEMENT_UNORDERED_ATOMIC_8 */ nullptr,
+/* MEMMOVE_ELEMENT_UNORDERED_ATOMIC_16 */ nullptr,
+/* MEMSET_ELEMENT_UNORDERED_ATOMIC_1 */ nullptr,
+/* MEMSET_ELEMENT_UNORDERED_ATOMIC_2 */ nullptr,
+/* MEMSET_ELEMENT_UNORDERED_ATOMIC_4 */ nullptr,
+/* MEMSET_ELEMENT_UNORDERED_ATOMIC_8 */ nullptr,
+/* MEMSET_ELEMENT_UNORDERED_ATOMIC_16 */ nullptr,
 /* UNWIND_RESUME */ "_Unwind_Resume",
 /* SYNC_VAL_COMPARE_AND_SWAP_1 */ "__sync_val_compare_and_swap_1",
 /* SYNC_VAL_COMPARE_AND_SWAP_2 */ "__sync_val_compare_and_swap_2",
@@ -971,10 +992,8 @@ RuntimeLibcallNames[RTLIB::UNKNOWN_LIBCALL] = {
 };
 
 void llvm::GetSignature(const WebAssemblySubtarget &Subtarget,
-                        RTLIB::Libcall LC,
-                        SmallVectorImpl<unsigned> &Rets,
-                        SmallVectorImpl<unsigned> &Params)
-{
+                        RTLIB::Libcall LC, SmallVectorImpl<wasm::ValType> &Rets,
+                        SmallVectorImpl<wasm::ValType> &Params) {
   assert(Rets.empty());
   assert(Params.empty());
 
@@ -986,315 +1005,313 @@ void llvm::GetSignature(const WebAssemblySubtarget &Subtarget,
   case func:
     break;
   case f32_func_f32:
-    Rets.push_back(unsigned(WebAssembly::ExprType::F32));
-    Params.push_back(unsigned(WebAssembly::ExprType::F32));
+    Rets.push_back(wasm::ValType::F32);
+    Params.push_back(wasm::ValType::F32);
     break;
   case f32_func_f64:
-    Rets.push_back(unsigned(WebAssembly::ExprType::F32));
-    Params.push_back(unsigned(WebAssembly::ExprType::F64));
+    Rets.push_back(wasm::ValType::F32);
+    Params.push_back(wasm::ValType::F64);
     break;
   case f32_func_i32:
-    Rets.push_back(unsigned(WebAssembly::ExprType::F32));
-    Params.push_back(unsigned(WebAssembly::ExprType::I32));
+    Rets.push_back(wasm::ValType::F32);
+    Params.push_back(wasm::ValType::I32);
     break;
   case f32_func_i64:
-    Rets.push_back(unsigned(WebAssembly::ExprType::F32));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
+    Rets.push_back(wasm::ValType::F32);
+    Params.push_back(wasm::ValType::I64);
     break;
   case f32_func_i16:
-    Rets.push_back(unsigned(WebAssembly::ExprType::F32));
-    Params.push_back(unsigned(WebAssembly::ExprType::I32));
+    Rets.push_back(wasm::ValType::F32);
+    Params.push_back(wasm::ValType::I32);
     break;
   case f64_func_f32:
-    Rets.push_back(unsigned(WebAssembly::ExprType::F64));
-    Params.push_back(unsigned(WebAssembly::ExprType::F32));
+    Rets.push_back(wasm::ValType::F64);
+    Params.push_back(wasm::ValType::F32);
     break;
   case f64_func_f64:
-    Rets.push_back(unsigned(WebAssembly::ExprType::F64));
-    Params.push_back(unsigned(WebAssembly::ExprType::F64));
+    Rets.push_back(wasm::ValType::F64);
+    Params.push_back(wasm::ValType::F64);
     break;
   case f64_func_i32:
-    Rets.push_back(unsigned(WebAssembly::ExprType::F64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I32));
+    Rets.push_back(wasm::ValType::F64);
+    Params.push_back(wasm::ValType::I32);
     break;
   case f64_func_i64:
-    Rets.push_back(unsigned(WebAssembly::ExprType::F64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
+    Rets.push_back(wasm::ValType::F64);
+    Params.push_back(wasm::ValType::I64);
     break;
   case i32_func_f32:
-    Rets.push_back(unsigned(WebAssembly::ExprType::I32));
-    Params.push_back(unsigned(WebAssembly::ExprType::F32));
+    Rets.push_back(wasm::ValType::I32);
+    Params.push_back(wasm::ValType::F32);
     break;
   case i32_func_f64:
-    Rets.push_back(unsigned(WebAssembly::ExprType::I32));
-    Params.push_back(unsigned(WebAssembly::ExprType::F64));
+    Rets.push_back(wasm::ValType::I32);
+    Params.push_back(wasm::ValType::F64);
     break;
   case i32_func_i32:
-    Rets.push_back(unsigned(WebAssembly::ExprType::I32));
-    Params.push_back(unsigned(WebAssembly::ExprType::I32));
+    Rets.push_back(wasm::ValType::I32);
+    Params.push_back(wasm::ValType::I32);
     break;
   case i64_func_f32:
-    Rets.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::F32));
+    Rets.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::F32);
     break;
   case i64_func_f64:
-    Rets.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::F64));
+    Rets.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::F64);
     break;
   case i64_func_i64:
-    Rets.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
+    Rets.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::I64);
     break;
   case f32_func_f32_f32:
-    Rets.push_back(unsigned(WebAssembly::ExprType::F32));
-    Params.push_back(unsigned(WebAssembly::ExprType::F32));
-    Params.push_back(unsigned(WebAssembly::ExprType::F32));
+    Rets.push_back(wasm::ValType::F32);
+    Params.push_back(wasm::ValType::F32);
+    Params.push_back(wasm::ValType::F32);
     break;
   case f32_func_f32_i32:
-    Rets.push_back(unsigned(WebAssembly::ExprType::F32));
-    Params.push_back(unsigned(WebAssembly::ExprType::F32));
-    Params.push_back(unsigned(WebAssembly::ExprType::I32));
+    Rets.push_back(wasm::ValType::F32);
+    Params.push_back(wasm::ValType::F32);
+    Params.push_back(wasm::ValType::I32);
     break;
   case f32_func_i64_i64:
-    Rets.push_back(unsigned(WebAssembly::ExprType::F32));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
+    Rets.push_back(wasm::ValType::F32);
+    Params.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::I64);
     break;
   case f64_func_f64_f64:
-    Rets.push_back(unsigned(WebAssembly::ExprType::F64));
-    Params.push_back(unsigned(WebAssembly::ExprType::F64));
-    Params.push_back(unsigned(WebAssembly::ExprType::F64));
+    Rets.push_back(wasm::ValType::F64);
+    Params.push_back(wasm::ValType::F64);
+    Params.push_back(wasm::ValType::F64);
     break;
   case f64_func_f64_i32:
-    Rets.push_back(unsigned(WebAssembly::ExprType::F64));
-    Params.push_back(unsigned(WebAssembly::ExprType::F64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I32));
+    Rets.push_back(wasm::ValType::F64);
+    Params.push_back(wasm::ValType::F64);
+    Params.push_back(wasm::ValType::I32);
     break;
   case f64_func_i64_i64:
-    Rets.push_back(unsigned(WebAssembly::ExprType::F64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
+    Rets.push_back(wasm::ValType::F64);
+    Params.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::I64);
     break;
   case i16_func_f32:
-    Rets.push_back(unsigned(WebAssembly::ExprType::I32));
-    Params.push_back(unsigned(WebAssembly::ExprType::F32));
+    Rets.push_back(wasm::ValType::I32);
+    Params.push_back(wasm::ValType::F32);
     break;
   case i8_func_i8_i8:
-    Rets.push_back(unsigned(WebAssembly::ExprType::I32));
-    Params.push_back(unsigned(WebAssembly::ExprType::I32));
-    Params.push_back(unsigned(WebAssembly::ExprType::I32));
+    Rets.push_back(wasm::ValType::I32);
+    Params.push_back(wasm::ValType::I32);
+    Params.push_back(wasm::ValType::I32);
     break;
   case func_f32_iPTR_iPTR:
-    Params.push_back(unsigned(WebAssembly::ExprType::F32));
-    Params.push_back(unsigned(iPTR));
-    Params.push_back(unsigned(iPTR));
+    Params.push_back(wasm::ValType::F32);
+    Params.push_back(wasm::ValType(iPTR));
+    Params.push_back(wasm::ValType(iPTR));
     break;
   case func_f64_iPTR_iPTR:
-    Params.push_back(unsigned(WebAssembly::ExprType::F64));
-    Params.push_back(unsigned(iPTR));
-    Params.push_back(unsigned(iPTR));
+    Params.push_back(wasm::ValType::F64);
+    Params.push_back(wasm::ValType(iPTR));
+    Params.push_back(wasm::ValType(iPTR));
     break;
   case i16_func_i16_i16:
-    Rets.push_back(unsigned(WebAssembly::ExprType::I32));
-    Params.push_back(unsigned(WebAssembly::ExprType::I32));
-    Params.push_back(unsigned(WebAssembly::ExprType::I32));
+    Rets.push_back(wasm::ValType::I32);
+    Params.push_back(wasm::ValType::I32);
+    Params.push_back(wasm::ValType::I32);
     break;
   case i32_func_f32_f32:
-    Rets.push_back(unsigned(WebAssembly::ExprType::I32));
-    Params.push_back(unsigned(WebAssembly::ExprType::F32));
-    Params.push_back(unsigned(WebAssembly::ExprType::F32));
+    Rets.push_back(wasm::ValType::I32);
+    Params.push_back(wasm::ValType::F32);
+    Params.push_back(wasm::ValType::F32);
     break;
   case i32_func_f64_f64:
-    Rets.push_back(unsigned(WebAssembly::ExprType::I32));
-    Params.push_back(unsigned(WebAssembly::ExprType::F64));
-    Params.push_back(unsigned(WebAssembly::ExprType::F64));
+    Rets.push_back(wasm::ValType::I32);
+    Params.push_back(wasm::ValType::F64);
+    Params.push_back(wasm::ValType::F64);
     break;
   case i32_func_i32_i32:
-    Rets.push_back(unsigned(WebAssembly::ExprType::I32));
-    Params.push_back(unsigned(WebAssembly::ExprType::I32));
-    Params.push_back(unsigned(WebAssembly::ExprType::I32));
+    Rets.push_back(wasm::ValType::I32);
+    Params.push_back(wasm::ValType::I32);
+    Params.push_back(wasm::ValType::I32);
     break;
   case i64_func_i64_i64:
-    Rets.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
+    Rets.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::I64);
     break;
   case i64_i64_func_f32:
 #if 0 // TODO: Enable this when wasm gets multiple-return-value support.
-    Rets.push_back(unsigned(WebAssembly::ExprType::I64));
-    Rets.push_back(unsigned(WebAssembly::ExprType::I64));
+    Rets.push_back(wasm::ValType::I64);
+    Rets.push_back(wasm::ValType::I64);
 #else
-    Params.push_back(unsigned(iPTR));
+    Params.push_back(wasm::ValType(iPTR));
 #endif
-    Params.push_back(unsigned(WebAssembly::ExprType::F32));
+    Params.push_back(wasm::ValType::F32);
     break;
   case i64_i64_func_f64:
 #if 0 // TODO: Enable this when wasm gets multiple-return-value support.
-    Rets.push_back(unsigned(WebAssembly::ExprType::I64));
-    Rets.push_back(unsigned(WebAssembly::ExprType::I64));
+    Rets.push_back(wasm::ValType::I64);
+    Rets.push_back(wasm::ValType::I64);
 #else
-    Params.push_back(unsigned(iPTR));
+    Params.push_back(wasm::ValType(iPTR));
 #endif
-    Params.push_back(unsigned(WebAssembly::ExprType::F64));
+    Params.push_back(wasm::ValType::F64);
     break;
   case i16_i16_func_i16_i16:
 #if 0 // TODO: Enable this when wasm gets multiple-return-value support.
-    Rets.push_back(unsigned(WebAssembly::ExprType::I32));
-    Rets.push_back(unsigned(WebAssembly::ExprType::I32));
+    Rets.push_back(wasm::ValType::I32);
+    Rets.push_back(wasm::ValType::I32);
 #else
-    Params.push_back(unsigned(iPTR));
+    Params.push_back(wasm::ValType(iPTR));
 #endif
-    Params.push_back(unsigned(WebAssembly::ExprType::I32));
-    Params.push_back(unsigned(WebAssembly::ExprType::I32));
+    Params.push_back(wasm::ValType::I32);
+    Params.push_back(wasm::ValType::I32);
     break;
   case i32_i32_func_i32_i32:
 #if 0 // TODO: Enable this when wasm gets multiple-return-value support.
-    Rets.push_back(unsigned(WebAssembly::ExprType::I32));
-    Rets.push_back(unsigned(WebAssembly::ExprType::I32));
+    Rets.push_back(wasm::ValType::I32);
+    Rets.push_back(wasm::ValType::I32);
 #else
-    Params.push_back(unsigned(iPTR));
+    Params.push_back(wasm::ValType(iPTR));
 #endif
-    Params.push_back(unsigned(WebAssembly::ExprType::I32));
-    Params.push_back(unsigned(WebAssembly::ExprType::I32));
+    Params.push_back(wasm::ValType::I32);
+    Params.push_back(wasm::ValType::I32);
     break;
   case i64_i64_func_i64_i64:
 #if 0 // TODO: Enable this when wasm gets multiple-return-value support.
-    Rets.push_back(unsigned(WebAssembly::ExprType::I64));
-    Rets.push_back(unsigned(WebAssembly::ExprType::I64));
+    Rets.push_back(wasm::ValType::I64);
+    Rets.push_back(wasm::ValType::I64);
 #else
-    Params.push_back(unsigned(iPTR));
+    Params.push_back(wasm::ValType(iPTR));
 #endif
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
+    Params.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::I64);
     break;
   case i64_i64_func_i64_i64_i64_i64:
 #if 0 // TODO: Enable this when wasm gets multiple-return-value support.
-    Rets.push_back(unsigned(WebAssembly::ExprType::I64));
-    Rets.push_back(unsigned(WebAssembly::ExprType::I64));
+    Rets.push_back(wasm::ValType::I64);
+    Rets.push_back(wasm::ValType::I64);
 #else
-    Params.push_back(unsigned(iPTR));
+    Params.push_back(wasm::ValType(iPTR));
 #endif
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
+    Params.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::I64);
     break;
   case i64_i64_i64_i64_func_i64_i64_i64_i64:
 #if 0 // TODO: Enable this when wasm gets multiple-return-value support.
-    Rets.push_back(unsigned(WebAssembly::ExprType::I64));
-    Rets.push_back(unsigned(WebAssembly::ExprType::I64));
-    Rets.push_back(unsigned(WebAssembly::ExprType::I64));
-    Rets.push_back(unsigned(WebAssembly::ExprType::I64));
+    Rets.push_back(wasm::ValType::I64);
+    Rets.push_back(wasm::ValType::I64);
+    Rets.push_back(wasm::ValType::I64);
+    Rets.push_back(wasm::ValType::I64);
 #else
-    Params.push_back(unsigned(iPTR));
+    Params.push_back(wasm::ValType(iPTR));
 #endif
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
+    Params.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::I64);
     break;
   case i64_i64_func_i64_i64_i32:
 #if 0 // TODO: Enable this when wasm gets multiple-return-value support.
-    Rets.push_back(unsigned(WebAssembly::ExprType::I64));
-    Rets.push_back(unsigned(WebAssembly::ExprType::I64));
-    Rets.push_back(unsigned(WebAssembly::ExprType::I64));
-    Rets.push_back(unsigned(WebAssembly::ExprType::I64));
+    Rets.push_back(wasm::ValType::I64);
+    Rets.push_back(wasm::ValType::I64);
+    Rets.push_back(wasm::ValType::I64);
+    Rets.push_back(wasm::ValType::I64);
 #else
-    Params.push_back(unsigned(iPTR));
+    Params.push_back(wasm::ValType(iPTR));
 #endif
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I32));
+    Params.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::I32);
     break;
   case iPTR_func_iPTR_i32_iPTR:
-    Rets.push_back(unsigned(iPTR));
-    Params.push_back(unsigned(iPTR));
-    Params.push_back(unsigned(WebAssembly::ExprType::I32));
-    Params.push_back(unsigned(iPTR));
+    Rets.push_back(wasm::ValType(iPTR));
+    Params.push_back(wasm::ValType(iPTR));
+    Params.push_back(wasm::ValType::I32);
+    Params.push_back(wasm::ValType(iPTR));
     break;
   case iPTR_func_iPTR_iPTR_iPTR:
-    Rets.push_back(unsigned(iPTR));
-    Params.push_back(unsigned(iPTR));
-    Params.push_back(unsigned(iPTR));
-    Params.push_back(unsigned(iPTR));
+    Rets.push_back(wasm::ValType(iPTR));
+    Params.push_back(wasm::ValType(iPTR));
+    Params.push_back(wasm::ValType(iPTR));
+    Params.push_back(wasm::ValType(iPTR));
     break;
   case f32_func_f32_f32_f32:
-    Rets.push_back(unsigned(WebAssembly::ExprType::F32));
-    Params.push_back(unsigned(WebAssembly::ExprType::F32));
-    Params.push_back(unsigned(WebAssembly::ExprType::F32));
-    Params.push_back(unsigned(WebAssembly::ExprType::F32));
+    Rets.push_back(wasm::ValType::F32);
+    Params.push_back(wasm::ValType::F32);
+    Params.push_back(wasm::ValType::F32);
+    Params.push_back(wasm::ValType::F32);
     break;
   case f64_func_f64_f64_f64:
-    Rets.push_back(unsigned(WebAssembly::ExprType::F64));
-    Params.push_back(unsigned(WebAssembly::ExprType::F64));
-    Params.push_back(unsigned(WebAssembly::ExprType::F64));
-    Params.push_back(unsigned(WebAssembly::ExprType::F64));
+    Rets.push_back(wasm::ValType::F64);
+    Params.push_back(wasm::ValType::F64);
+    Params.push_back(wasm::ValType::F64);
+    Params.push_back(wasm::ValType::F64);
     break;
   case func_i64_i64_iPTR_iPTR:
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(iPTR));
-    Params.push_back(unsigned(iPTR));
+    Params.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType(iPTR));
+    Params.push_back(wasm::ValType(iPTR));
     break;
   case func_iPTR_f32:
-    Params.push_back(unsigned(iPTR));
-    Params.push_back(unsigned(WebAssembly::ExprType::F32));
+    Params.push_back(wasm::ValType(iPTR));
+    Params.push_back(wasm::ValType::F32);
     break;
   case func_iPTR_f64:
-    Params.push_back(unsigned(iPTR));
-    Params.push_back(unsigned(WebAssembly::ExprType::F64));
+    Params.push_back(wasm::ValType(iPTR));
+    Params.push_back(wasm::ValType::F64);
     break;
   case func_iPTR_i32:
-    Params.push_back(unsigned(iPTR));
-    Params.push_back(unsigned(WebAssembly::ExprType::I32));
+    Params.push_back(wasm::ValType(iPTR));
+    Params.push_back(wasm::ValType::I32);
     break;
   case func_iPTR_i64:
-    Params.push_back(unsigned(iPTR));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
+    Params.push_back(wasm::ValType(iPTR));
+    Params.push_back(wasm::ValType::I64);
     break;
   case func_iPTR_i64_i64:
-    Params.push_back(unsigned(iPTR));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
+    Params.push_back(wasm::ValType(iPTR));
+    Params.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::I64);
     break;
   case func_iPTR_i64_i64_i64_i64:
-    Params.push_back(unsigned(iPTR));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
+    Params.push_back(wasm::ValType(iPTR));
+    Params.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::I64);
     break;
   case func_iPTR_i64_i64_i64_i64_i64_i64:
-    Params.push_back(unsigned(iPTR));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
+    Params.push_back(wasm::ValType(iPTR));
+    Params.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::I64);
     break;
   case i32_func_i64_i64:
-    Rets.push_back(unsigned(WebAssembly::ExprType::I32));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
+    Rets.push_back(wasm::ValType::I32);
+    Params.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::I64);
     break;
   case i32_func_i64_i64_i64_i64:
-    Rets.push_back(unsigned(WebAssembly::ExprType::I32));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
-    Params.push_back(unsigned(WebAssembly::ExprType::I64));
+    Rets.push_back(wasm::ValType::I32);
+    Params.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::I64);
+    Params.push_back(wasm::ValType::I64);
     break;
   case unsupported:
     llvm_unreachable("unsupported runtime library signature");
   }
 }
 
-void llvm::GetSignature(const WebAssemblySubtarget &Subtarget,
-                        const char *Name,
-                        SmallVectorImpl<unsigned> &Rets,
-                        SmallVectorImpl<unsigned> &Params)
-{
+void llvm::GetSignature(const WebAssemblySubtarget &Subtarget, const char *Name,
+                        SmallVectorImpl<wasm::ValType> &Rets,
+                        SmallVectorImpl<wasm::ValType> &Params) {
   assert(strcmp(RuntimeLibcallNames[RTLIB::DEOPTIMIZE], "__llvm_deoptimize") ==
          0);
 

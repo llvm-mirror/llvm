@@ -1,4 +1,4 @@
-; RUN: llc -march=amdgcn -verify-machineinstrs -stress-regalloc=6 < %s | FileCheck %s
+; RUN:  llc -amdgpu-scalarize-global-loads=false  -march=amdgcn -verify-machineinstrs -stress-regalloc=6 < %s | FileCheck %s
 
 ; Inline spiller can decide to move a spill as early as possible in the basic block.
 ; It will skip phis and label, but we also need to make sure it skips instructions
@@ -13,7 +13,7 @@
 ; CHECK-NEXT: s_or_b64 exec
 ; CHECK: buffer_
 
-define void @spill_cfg_position(i32 addrspace(1)* nocapture %arg) {
+define amdgpu_kernel void @spill_cfg_position(i32 addrspace(1)* nocapture %arg) {
 bb:
   %tmp1 = tail call i32 @llvm.amdgcn.workitem.id.x() #0
   %tmp14 = load i32, i32 addrspace(1)* %arg, align 4

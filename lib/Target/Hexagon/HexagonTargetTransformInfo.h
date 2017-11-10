@@ -1,4 +1,4 @@
-//===-- HexagonTargetTransformInfo.cpp - Hexagon specific TTI pass --------===//
+//==- HexagonTargetTransformInfo.cpp - Hexagon specific TTI pass -*- C++ -*-==//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -17,16 +17,24 @@
 #define LLVM_LIB_TARGET_HEXAGON_HEXAGONTARGETTRANSFORMINFO_H
 
 #include "Hexagon.h"
+#include "HexagonSubtarget.h"
 #include "HexagonTargetMachine.h"
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/CodeGen/BasicTTIImpl.h"
-#include "llvm/Target/TargetLowering.h"
+#include "llvm/IR/Function.h"
 
 namespace llvm {
 
+class Loop;
+class ScalarEvolution;
+class User;
+class Value;
+
 class HexagonTTIImpl : public BasicTTIImplBase<HexagonTTIImpl> {
-  typedef BasicTTIImplBase<HexagonTTIImpl> BaseT;
-  typedef TargetTransformInfo TTI;
+  using BaseT = BasicTTIImplBase<HexagonTTIImpl>;
+  using TTI = TargetTransformInfo;
+
   friend BaseT;
 
   const HexagonSubtarget *ST;
@@ -46,7 +54,8 @@ public:
   TTI::PopcntSupportKind getPopcntSupport(unsigned IntTyWidthInBit) const;
 
   // The Hexagon target can unroll loops with run-time trip counts.
-  void getUnrollingPreferences(Loop *L, TTI::UnrollingPreferences &UP);
+  void getUnrollingPreferences(Loop *L, ScalarEvolution &SE,
+                               TTI::UnrollingPreferences &UP);
 
   // L1 cache prefetch.
   unsigned getPrefetchDistance() const;
@@ -61,9 +70,12 @@ public:
 
   /// @}
 
-  int getUserCost(const User *U);
+  int getUserCost(const User *U, ArrayRef<const Value *> Operands);
+
+  // Hexagon specific decision to generate a lookup table.
+  bool shouldBuildLookupTables() const;
 };
 
 } // end namespace llvm
 
-#endif
+#endif // LLVM_LIB_TARGET_HEXAGON_HEXAGONTARGETTRANSFORMINFO_H

@@ -1,4 +1,4 @@
-//===-- MipsHazardSchedule.cpp - Workaround pipeline hazards --------------===//
+//===- MipsHazardSchedule.cpp - Workaround pipeline hazards ---------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -36,7 +36,7 @@
 ///
 /// A) A previous pass has created a compact branch directly.
 /// B) Transforming a delay slot branch into compact branch. This case can be
-///    difficult to process as lookahead for hazards is insufficent, as
+///    difficult to process as lookahead for hazards is insufficient, as
 ///    backwards delay slot fillling can also produce hazards in previously
 ///    processed instuctions.
 ///
@@ -44,15 +44,15 @@
 
 #include "Mips.h"
 #include "MipsInstrInfo.h"
-#include "MipsSEInstrInfo.h"
-#include "MipsTargetMachine.h"
+#include "MipsSubtarget.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/CodeGen/MachineBasicBlock.h"
+#include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
-#include "llvm/IR/Function.h"
-#include "llvm/Target/TargetInstrInfo.h"
-#include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetRegisterInfo.h"
+#include <algorithm>
+#include <iterator>
+#include <utility>
 
 using namespace llvm;
 
@@ -62,11 +62,10 @@ STATISTIC(NumInsertedNops, "Number of nops inserted");
 
 namespace {
 
-typedef MachineBasicBlock::iterator Iter;
-typedef MachineBasicBlock::reverse_iterator ReverseIter;
+using Iter = MachineBasicBlock::iterator;
+using ReverseIter = MachineBasicBlock::reverse_iterator;
 
 class MipsHazardSchedule : public MachineFunctionPass {
-
 public:
   MipsHazardSchedule() : MachineFunctionPass(ID) {}
 
@@ -83,8 +82,9 @@ private:
   static char ID;
 };
 
-char MipsHazardSchedule::ID = 0;
 } // end of anonymous namespace
+
+char MipsHazardSchedule::ID = 0;
 
 /// Returns a pass that clears pipeline hazards.
 FunctionPass *llvm::createMipsHazardSchedule() {
@@ -103,23 +103,24 @@ static Iter getNextMachineInstrInBB(Iter Position) {
 
 // Find the next real instruction from the current position, looking through
 // basic block boundaries.
-static Iter getNextMachineInstr(Iter Position, MachineBasicBlock *Parent) {
+static std::pair<Iter, bool> getNextMachineInstr(Iter Position, MachineBasicBlock * Parent) {
   if (Position == Parent->end()) {
-    MachineBasicBlock *Succ = Parent->getNextNode();
-    if (Succ != nullptr && Parent->isSuccessor(Succ)) {
-      Position = Succ->begin();
-      Parent = Succ;
-    } else {
-      llvm_unreachable(
-          "Should have identified the end of the function earlier!");
-    }
+    do {
+      MachineBasicBlock *Succ = Parent->getNextNode();
+      if (Succ != nullptr && Parent->isSuccessor(Succ)) {
+        Position = Succ->begin();
+        Parent = Succ;
+      } else {
+        return std::make_pair(Position, true);
+      }
+    } while (Parent->empty());
   }
 
   Iter Instr = getNextMachineInstrInBB(Position);
   if (Instr == Parent->end()) {
     return getNextMachineInstr(Instr, Parent);
   }
-  return Instr;
+  return std::make_pair(Instr, false);
 }
 
 bool MipsHazardSchedule::runOnMachineFunction(MachineFunction &MF) {
@@ -145,7 +146,9 @@ bool MipsHazardSchedule::runOnMachineFunction(MachineFunction &MF) {
       bool LastInstInFunction =
           std::next(I) == FI->end() && std::next(FI) == MF.end();
       if (!LastInstInFunction) {
-        Inst = getNextMachineInstr(std::next(I), &*FI);
+        std::pair<Iter, bool> Res = getNextMachineInstr(std::next(I), &*FI);
+        LastInstInFunction |= Res.second;
+        Inst = Res.first;
       }
 
       if (LastInstInFunction || !TII->SafeInForbiddenSlot(*Inst)) {

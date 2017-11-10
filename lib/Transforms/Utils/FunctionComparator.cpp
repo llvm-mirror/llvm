@@ -13,13 +13,41 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/Utils/FunctionComparator.h"
+#include "llvm/ADT/APFloat.h"
+#include "llvm/ADT/APInt.h"
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/Hashing.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallSet.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/IR/Attributes.h"
+#include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CallSite.h"
-#include "llvm/IR/Instructions.h"
+#include "llvm/IR/Constant.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/InlineAsm.h"
+#include "llvm/IR/InstrTypes.h"
+#include "llvm/IR/Instruction.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Operator.h"
+#include "llvm/IR/Type.h"
+#include "llvm/IR/Value.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <utility>
 
 using namespace llvm;
 
@@ -74,14 +102,16 @@ int FunctionComparator::cmpMem(StringRef L, StringRef R) const {
   return L.compare(R);
 }
 
-int FunctionComparator::cmpAttrs(const AttributeSet L,
-                                 const AttributeSet R) const {
-  if (int Res = cmpNumbers(L.getNumSlots(), R.getNumSlots()))
+int FunctionComparator::cmpAttrs(const AttributeList L,
+                                 const AttributeList R) const {
+  if (int Res = cmpNumbers(L.getNumAttrSets(), R.getNumAttrSets()))
     return Res;
 
-  for (unsigned i = 0, e = L.getNumSlots(); i != e; ++i) {
-    AttributeSet::iterator LI = L.begin(i), LE = L.end(i), RI = R.begin(i),
-                           RE = R.end(i);
+  for (unsigned i = L.index_begin(), e = L.index_end(); i != e; ++i) {
+    AttributeSet LAS = L.getAttributes(i);
+    AttributeSet RAS = R.getAttributes(i);
+    AttributeSet::iterator LI = LAS.begin(), LE = LAS.end();
+    AttributeSet::iterator RI = RAS.begin(), RE = RAS.end();
     for (; LI != LE && RI != RE; ++LI, ++RI) {
       Attribute LA = *LI;
       Attribute RA = *RI;
@@ -158,7 +188,6 @@ int FunctionComparator::cmpOperandBundlesSchema(const Instruction *L,
 /// For more details see declaration comments.
 int FunctionComparator::cmpConstants(const Constant *L,
                                      const Constant *R) const {
-
   Type *TyL = L->getType();
   Type *TyR = R->getType();
 
@@ -224,8 +253,8 @@ int FunctionComparator::cmpConstants(const Constant *L,
   if (!L->isNullValue() && R->isNullValue())
     return -1;
 
-  auto GlobalValueL = const_cast<GlobalValue*>(dyn_cast<GlobalValue>(L));
-  auto GlobalValueR = const_cast<GlobalValue*>(dyn_cast<GlobalValue>(R));
+  auto GlobalValueL = const_cast<GlobalValue *>(dyn_cast<GlobalValue>(L));
+  auto GlobalValueR = const_cast<GlobalValue *>(dyn_cast<GlobalValue>(R));
   if (GlobalValueL && GlobalValueR) {
     return cmpGlobalValues(GlobalValueL, GlobalValueR);
   }
@@ -399,10 +428,9 @@ int FunctionComparator::cmpTypes(Type *TyL, Type *TyR) const {
   case Type::TokenTyID:
     return 0;
 
-  case Type::PointerTyID: {
+  case Type::PointerTyID:
     assert(PTyL && PTyR && "Both types must be pointers here.");
     return cmpNumbers(PTyL->getAddressSpace(), PTyR->getAddressSpace());
-  }
 
   case Type::StructTyID: {
     StructType *STyL = cast<StructType>(TyL);
@@ -511,8 +539,8 @@ int FunctionComparator::cmpOperations(const Instruction *L,
     if (int Res =
             cmpOrderings(LI->getOrdering(), cast<LoadInst>(R)->getOrdering()))
       return Res;
-    if (int Res =
-            cmpNumbers(LI->getSynchScope(), cast<LoadInst>(R)->getSynchScope()))
+    if (int Res = cmpNumbers(LI->getSyncScopeID(),
+                             cast<LoadInst>(R)->getSyncScopeID()))
       return Res;
     return cmpRangeMetadata(LI->getMetadata(LLVMContext::MD_range),
         cast<LoadInst>(R)->getMetadata(LLVMContext::MD_range));
@@ -527,7 +555,8 @@ int FunctionComparator::cmpOperations(const Instruction *L,
     if (int Res =
             cmpOrderings(SI->getOrdering(), cast<StoreInst>(R)->getOrdering()))
       return Res;
-    return cmpNumbers(SI->getSynchScope(), cast<StoreInst>(R)->getSynchScope());
+    return cmpNumbers(SI->getSyncScopeID(),
+                      cast<StoreInst>(R)->getSyncScopeID());
   }
   if (const CmpInst *CI = dyn_cast<CmpInst>(L))
     return cmpNumbers(CI->getPredicate(), cast<CmpInst>(R)->getPredicate());
@@ -582,7 +611,8 @@ int FunctionComparator::cmpOperations(const Instruction *L,
     if (int Res =
             cmpOrderings(FI->getOrdering(), cast<FenceInst>(R)->getOrdering()))
       return Res;
-    return cmpNumbers(FI->getSynchScope(), cast<FenceInst>(R)->getSynchScope());
+    return cmpNumbers(FI->getSyncScopeID(),
+                      cast<FenceInst>(R)->getSyncScopeID());
   }
   if (const AtomicCmpXchgInst *CXI = dyn_cast<AtomicCmpXchgInst>(L)) {
     if (int Res = cmpNumbers(CXI->isVolatile(),
@@ -599,8 +629,8 @@ int FunctionComparator::cmpOperations(const Instruction *L,
             cmpOrderings(CXI->getFailureOrdering(),
                          cast<AtomicCmpXchgInst>(R)->getFailureOrdering()))
       return Res;
-    return cmpNumbers(CXI->getSynchScope(),
-                      cast<AtomicCmpXchgInst>(R)->getSynchScope());
+    return cmpNumbers(CXI->getSyncScopeID(),
+                      cast<AtomicCmpXchgInst>(R)->getSyncScopeID());
   }
   if (const AtomicRMWInst *RMWI = dyn_cast<AtomicRMWInst>(L)) {
     if (int Res = cmpNumbers(RMWI->getOperation(),
@@ -612,8 +642,8 @@ int FunctionComparator::cmpOperations(const Instruction *L,
     if (int Res = cmpOrderings(RMWI->getOrdering(),
                              cast<AtomicRMWInst>(R)->getOrdering()))
       return Res;
-    return cmpNumbers(RMWI->getSynchScope(),
-                      cast<AtomicRMWInst>(R)->getSynchScope());
+    return cmpNumbers(RMWI->getSyncScopeID(),
+                      cast<AtomicRMWInst>(R)->getSyncScopeID());
   }
   if (const PHINode *PNL = dyn_cast<PHINode>(L)) {
     const PHINode *PNR = cast<PHINode>(R);
@@ -633,7 +663,6 @@ int FunctionComparator::cmpOperations(const Instruction *L,
 // Read method declaration comments for more details.
 int FunctionComparator::cmpGEPs(const GEPOperator *GEPL,
                                 const GEPOperator *GEPR) const {
-
   unsigned int ASL = GEPL->getPointerAddressSpace();
   unsigned int ASR = GEPR->getPointerAddressSpace();
 
@@ -865,15 +894,19 @@ namespace {
 // buffer.
 class HashAccumulator64 {
   uint64_t Hash;
+
 public:
   // Initialize to random constant, so the state isn't zero.
   HashAccumulator64() { Hash = 0x6acaa36bef8325c5ULL; }
+
   void add(uint64_t V) {
-     Hash = llvm::hashing::detail::hash_16_bytes(Hash, V);
+     Hash = hashing::detail::hash_16_bytes(Hash, V);
   }
+
   // No finishing is required, because the entire hash value is used.
   uint64_t getHash() { return Hash; }
 };
+
 } // end anonymous namespace
 
 // A function hash is calculated by considering only the number of arguments and
@@ -915,5 +948,3 @@ FunctionComparator::FunctionHash FunctionComparator::functionHash(Function &F) {
   }
   return H.getHash();
 }
-
-

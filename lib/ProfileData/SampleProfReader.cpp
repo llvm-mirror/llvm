@@ -211,7 +211,7 @@ std::error_code SampleProfileReaderText::read() {
           InlineStack.pop_back();
         }
         FunctionSamples &FSamples = InlineStack.back()->functionSamplesAt(
-            LineLocation(LineOffset, Discriminator));
+            LineLocation(LineOffset, Discriminator))[FName];
         FSamples.setName(FName);
         MergeResult(Result, FSamples.addTotalSamples(NumSamples));
         InlineStack.push_back(&FSamples);
@@ -363,8 +363,8 @@ SampleProfileReaderBinary::readProfile(FunctionSamples &FProfile) {
     if (std::error_code EC = FName.getError())
       return EC;
 
-    FunctionSamples &CalleeProfile =
-        FProfile.functionSamplesAt(LineLocation(*LineOffset, *Discriminator));
+    FunctionSamples &CalleeProfile = FProfile.functionSamplesAt(
+        LineLocation(*LineOffset, *Discriminator))[*FName];
     CalleeProfile.setName(*FName);
     if (std::error_code EC = readProfile(CalleeProfile))
       return EC;
@@ -636,7 +636,7 @@ std::error_code SampleProfileReaderGCC::readOneFunctionProfile(
     uint32_t LineOffset = Offset >> 16;
     uint32_t Discriminator = Offset & 0xffff;
     FProfile = &CallerProfile->functionSamplesAt(
-        LineLocation(LineOffset, Discriminator));
+        LineLocation(LineOffset, Discriminator))[Name];
   }
   FProfile->setName(Name);
 
@@ -759,8 +759,6 @@ setupMemoryBuffer(const Twine &Filename) {
 ///
 /// \param Filename The file to open.
 ///
-/// \param Reader The reader to instantiate according to \p Filename's format.
-///
 /// \param C The LLVM context to use to emit diagnostics.
 ///
 /// \returns an error code indicating the status of the created reader.
@@ -775,8 +773,6 @@ SampleProfileReader::create(const Twine &Filename, LLVMContext &C) {
 /// \brief Create a sample profile reader based on the format of the input data.
 ///
 /// \param B The memory buffer to create the reader from (assumes ownership).
-///
-/// \param Reader The reader to instantiate according to \p Filename's format.
 ///
 /// \param C The LLVM context to use to emit diagnostics.
 ///

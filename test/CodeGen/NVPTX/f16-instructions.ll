@@ -1,14 +1,15 @@
 ; ## Full FP16 support enabled by default.
 ; RUN: llc < %s -mtriple=nvptx64-nvidia-cuda -mcpu=sm_53 -asm-verbose=false \
-; RUN:          -O0 -disable-post-ra -disable-fp-elim \
+; RUN:          -O0 -disable-post-ra -disable-fp-elim -verify-machineinstrs \
 ; RUN: | FileCheck -check-prefixes CHECK,CHECK-F16 %s
 ; ## FP16 support explicitly disabled.
 ; RUN: llc < %s -mtriple=nvptx64-nvidia-cuda -mcpu=sm_53 -asm-verbose=false \
 ; RUN:          -O0 -disable-post-ra -disable-fp-elim --nvptx-no-f16-math \
+; RUN:           -verify-machineinstrs \
 ; RUN: | FileCheck -check-prefixes CHECK,CHECK-NOF16 %s
 ; ## FP16 is not supported by hardware.
 ; RUN: llc < %s -O0 -mtriple=nvptx64-nvidia-cuda -mcpu=sm_52 -asm-verbose=false \
-; RUN:          -disable-post-ra -disable-fp-elim \
+; RUN:          -disable-post-ra -disable-fp-elim -verify-machineinstrs \
 ; RUN: | FileCheck -check-prefixes CHECK,CHECK-NOF16 %s
 
 target datalayout = "e-m:o-i64:64-i128:128-n32:64-S128"
@@ -34,6 +35,21 @@ define half @test_ret_const() #0 {
 define half @test_fadd(half %a, half %b) #0 {
   %r = fadd half %a, %b
   ret half %r
+}
+
+; CHECK-LABEL: test_fadd_v1f16(
+; CHECK-DAG:  ld.param.b16    [[A:%h[0-9]+]], [test_fadd_v1f16_param_0];
+; CHECK-DAG:  ld.param.b16    [[B:%h[0-9]+]], [test_fadd_v1f16_param_1];
+; CHECK-F16-NEXT:   add.rn.f16     [[R:%h[0-9]+]], [[A]], [[B]];
+; CHECK-NOF16-DAG:  cvt.f32.f16    [[A32:%f[0-9]+]], [[A]]
+; CHECK-NOF16-DAG:  cvt.f32.f16    [[B32:%f[0-9]+]], [[B]]
+; CHECK-NOF16-NEXT: add.rn.f32     [[R32:%f[0-9]+]], [[A32]], [[B32]];
+; CHECK-NOF16-NEXT: cvt.rn.f16.f32 [[R:%h[0-9]+]], [[R32]]
+; CHECK-NEXT: st.param.b16    [func_retval0+0], [[R]];
+; CHECK-NEXT: ret;
+define <1 x half> @test_fadd_v1f16(<1 x half> %a, <1 x half> %b) #0 {
+  %r = fadd <1 x half> %a, %b
+  ret <1 x half> %r
 }
 
 ; Check that we can lower fadd with immediate arguments.

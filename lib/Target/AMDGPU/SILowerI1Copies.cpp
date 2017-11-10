@@ -21,8 +21,8 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Target/TargetMachine.h"
 
@@ -121,11 +121,14 @@ bool SILowerI1Copies::runOnMachineFunction(MachineFunction &MF) {
           }
         }
 
+        unsigned int TmpSrc = MRI.createVirtualRegister(&AMDGPU::SReg_64_XEXECRegClass);
+        BuildMI(MBB, &MI, DL, TII->get(AMDGPU::COPY), TmpSrc)
+            .add(Src);
         BuildMI(MBB, &MI, DL, TII->get(AMDGPU::V_CNDMASK_B32_e64))
             .add(Dst)
             .addImm(0)
             .addImm(-1)
-            .add(Src);
+            .addReg(TmpSrc);
         MI.eraseFromParent();
       } else if (TRI->getCommonSubClass(DstRC, &AMDGPU::SGPR_64RegClass) &&
                  SrcRC == &AMDGPU::VReg_1RegClass) {

@@ -15,10 +15,12 @@
 #define LLVM_OBJECT_IROBJECTFILE_H
 
 #include "llvm/ADT/PointerUnion.h"
+#include "llvm/Object/IRSymtab.h"
 #include "llvm/Object/ModuleSymbolTable.h"
 #include "llvm/Object/SymbolicFile.h"
 
 namespace llvm {
+class BitcodeModule;
 class Mangler;
 class Module;
 class GlobalValue;
@@ -44,24 +46,37 @@ public:
 
   StringRef getTargetTriple() const;
 
-  static inline bool classof(const Binary *v) {
+  static bool classof(const Binary *v) {
     return v->isIR();
   }
 
   /// \brief Finds and returns bitcode embedded in the given object file, or an
   /// error code if not found.
-  static ErrorOr<MemoryBufferRef> findBitcodeInObject(const ObjectFile &Obj);
+  static Expected<MemoryBufferRef> findBitcodeInObject(const ObjectFile &Obj);
 
   /// \brief Finds and returns bitcode in the given memory buffer (which may
   /// be either a bitcode file or a native object file with embedded bitcode),
   /// or an error code if not found.
-  static ErrorOr<MemoryBufferRef>
+  static Expected<MemoryBufferRef>
   findBitcodeInMemBuffer(MemoryBufferRef Object);
 
   static Expected<std::unique_ptr<IRObjectFile>> create(MemoryBufferRef Object,
                                                         LLVMContext &Context);
 };
+
+/// The contents of a bitcode file and its irsymtab. Any underlying data
+/// for the irsymtab are owned by Symtab and Strtab.
+struct IRSymtabFile {
+  std::vector<BitcodeModule> Mods;
+  SmallVector<char, 0> Symtab, Strtab;
+  irsymtab::Reader TheReader;
+};
+
+/// Reads a bitcode file, creating its irsymtab if necessary.
+Expected<IRSymtabFile> readIRSymtab(MemoryBufferRef MBRef);
+
 }
+
 }
 
 #endif

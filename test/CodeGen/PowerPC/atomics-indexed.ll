@@ -1,7 +1,7 @@
-; RUN: llc < %s -mtriple=powerpc-apple-darwin -march=ppc32 -verify-machineinstrs | FileCheck %s --check-prefix=CHECK --check-prefix=PPC32
+; RUN: llc < %s -mtriple=powerpc-apple-darwin -verify-machineinstrs | FileCheck %s --check-prefix=CHECK --check-prefix=PPC32
 ; FIXME: -verify-machineinstrs currently fail on ppc64 (mismatched register/instruction).
 ; This is already checked for in Atomics-64.ll
-; RUN: llc < %s -mtriple=powerpc-apple-darwin -march=ppc64 | FileCheck %s --check-prefix=CHECK --check-prefix=PPC64
+; RUN: llc < %s -mtriple=powerpc64-apple-darwin | FileCheck %s --check-prefix=CHECK --check-prefix=PPC64
 
 ; In this file, we check that atomic load/store can make use of the indexed
 ; versions of the instructions.
@@ -10,16 +10,22 @@
 define i8 @load_x_i8_seq_cst([100000 x i8]* %mem) {
 ; CHECK-LABEL: load_x_i8_seq_cst
 ; CHECK: sync
-; CHECK: lbzx
-; CHECK: lwsync
+; CHECK: lbzx [[VAL:r[0-9]+]]
+; CHECK-PPC32: lwsync
+; CHECK-PPC64: cmpw [[CR:cr[0-9]+]], [[VAL]], [[VAL]]
+; CHECK-PPC64: bne- [[CR]], .+4
+; CHECK-PPC64: isync
   %ptr = getelementptr inbounds [100000 x i8], [100000 x i8]* %mem, i64 0, i64 90000
   %val = load atomic i8, i8* %ptr seq_cst, align 1
   ret i8 %val
 }
 define i16 @load_x_i16_acquire([100000 x i16]* %mem) {
 ; CHECK-LABEL: load_x_i16_acquire
-; CHECK: lhzx
-; CHECK: lwsync
+; CHECK: lhzx [[VAL:r[0-9]+]]
+; CHECK-PPC32: lwsync
+; CHECK-PPC64: cmpw [[CR:cr[0-9]+]], [[VAL]], [[VAL]]
+; CHECK-PPC64: bne- [[CR]], .+4
+; CHECK-PPC64: isync
   %ptr = getelementptr inbounds [100000 x i16], [100000 x i16]* %mem, i64 0, i64 90000
   %val = load atomic i16, i16* %ptr acquire, align 2
   ret i16 %val

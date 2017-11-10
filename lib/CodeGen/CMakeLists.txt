@@ -4,7 +4,6 @@ add_llvm_library(LLVMCodeGen
   Analysis.cpp
   AtomicExpandPass.cpp
   BasicTargetTransformInfo.cpp
-  BranchCoalescing.cpp
   BranchFolding.cpp
   BranchRelaxation.cpp
   BuiltinGCs.cpp
@@ -23,6 +22,7 @@ add_llvm_library(LLVMCodeGen
   ExecutionDepsFix.cpp
   ExpandISelPseudos.cpp
   ExpandPostRAPseudos.cpp
+  ExpandReductions.cpp
   FaultMaps.cpp
   FEntryInserter.cpp
   FuncletLayout.cpp
@@ -48,6 +48,7 @@ add_llvm_library(LLVMCodeGen
   LivePhysRegs.cpp
   LiveRangeCalc.cpp
   LiveRangeEdit.cpp
+  LiveRangeShrink.cpp
   LiveRegMatrix.cpp
   LiveRegUnits.cpp
   LiveStackAnalysis.cpp
@@ -65,6 +66,7 @@ add_llvm_library(LLVMCodeGen
   MachineCSE.cpp
   MachineDominanceFrontier.cpp
   MachineDominators.cpp
+  MachineFrameInfo.cpp
   MachineFunction.cpp
   MachineFunctionPass.cpp
   MachineFunctionPrinterPass.cpp
@@ -89,6 +91,7 @@ add_llvm_library(LLVMCodeGen
   PatchableFunction.cpp
   MIRPrinter.cpp
   MIRPrintingPass.cpp
+  MacroFusion.cpp
   OptimizePHIs.cpp
   ParallelCG.cpp
   PeepholeOptimizer.cpp
@@ -117,6 +120,7 @@ add_llvm_library(LLVMCodeGen
   SafeStack.cpp
   SafeStackColoring.cpp
   SafeStackLayout.cpp
+  ScalarizeMaskedMemIntrin.cpp
   ScheduleDAG.cpp
   ScheduleDAGInstrs.cpp
   ScheduleDAGPrinter.cpp

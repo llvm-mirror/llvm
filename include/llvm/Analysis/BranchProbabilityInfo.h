@@ -1,4 +1,4 @@
-//===--- BranchProbabilityInfo.h - Branch Probability Analysis --*- C++ -*-===//
+//===- BranchProbabilityInfo.h - Branch Probability Analysis ----*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -15,18 +15,28 @@
 #define LLVM_ANALYSIS_BRANCHPROBABILITYINFO_H
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseMapInfo.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/IR/ValueHandle.h"
-#include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/BranchProbability.h"
+#include "llvm/Support/Casting.h"
+#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <utility>
 
 namespace llvm {
+
+class Function;
 class LoopInfo;
 class raw_ostream;
+class TargetLibraryInfo;
+class Value;
 
 /// \brief Analysis providing branch probability information.
 ///
@@ -42,15 +52,20 @@ class raw_ostream;
 /// value 10.
 class BranchProbabilityInfo {
 public:
-  BranchProbabilityInfo() {}
-  BranchProbabilityInfo(const Function &F, const LoopInfo &LI) {
-    calculate(F, LI);
+  BranchProbabilityInfo() = default;
+
+  BranchProbabilityInfo(const Function &F, const LoopInfo &LI,
+                        const TargetLibraryInfo *TLI = nullptr) {
+    calculate(F, LI, TLI);
   }
 
   BranchProbabilityInfo(BranchProbabilityInfo &&Arg)
       : Probs(std::move(Arg.Probs)), LastF(Arg.LastF),
         PostDominatedByUnreachable(std::move(Arg.PostDominatedByUnreachable)),
         PostDominatedByColdCall(std::move(Arg.PostDominatedByColdCall)) {}
+
+  BranchProbabilityInfo(const BranchProbabilityInfo &) = delete;
+  BranchProbabilityInfo &operator=(const BranchProbabilityInfo &) = delete;
 
   BranchProbabilityInfo &operator=(BranchProbabilityInfo &&RHS) {
     releaseMemory();
@@ -116,19 +131,27 @@ public:
     return IsLikely ? LikelyProb : LikelyProb.getCompl();
   }
 
-  void calculate(const Function &F, const LoopInfo &LI);
+  void calculate(const Function &F, const LoopInfo &LI,
+                 const TargetLibraryInfo *TLI = nullptr);
 
   /// Forget analysis results for the given basic block.
   void eraseBlock(const BasicBlock *BB);
 
-private:
-  void operator=(const BranchProbabilityInfo &) = delete;
-  BranchProbabilityInfo(const BranchProbabilityInfo &) = delete;
+  // Use to track SCCs for handling irreducible loops.
+  using SccMap = DenseMap<const BasicBlock *, int>;
+  using SccHeaderMap = DenseMap<const BasicBlock *, bool>;
+  using SccHeaderMaps = std::vector<SccHeaderMap>;
+  struct SccInfo {
+    SccMap SccNums;
+    SccHeaderMaps SccHeaders;
+  };
 
+private:
   // We need to store CallbackVH's in order to correctly handle basic block
   // removal.
   class BasicBlockCallbackVH final : public CallbackVH {
     BranchProbabilityInfo *BPI;
+
     void deleted() override {
       assert(BPI != nullptr);
       BPI->eraseBlock(cast<BasicBlock>(getValPtr()));
@@ -136,14 +159,15 @@ private:
     }
 
   public:
-    BasicBlockCallbackVH(const Value *V, BranchProbabilityInfo *BPI=nullptr)
+    BasicBlockCallbackVH(const Value *V, BranchProbabilityInfo *BPI = nullptr)
         : CallbackVH(const_cast<Value *>(V)), BPI(BPI) {}
   };
+
   DenseSet<BasicBlockCallbackVH, DenseMapInfo<Value*>> Handles;
 
   // Since we allow duplicate edges from one basic block to another, we use
   // a pair (PredBlock and an index in the successors) to specify an edge.
-  typedef std::pair<const BasicBlock *, unsigned> Edge;
+  using Edge = std::pair<const BasicBlock *, unsigned>;
 
   // Default weight value. Used when we don't have information about the edge.
   // TODO: DEFAULT_WEIGHT makes sense during static predication, when none of
@@ -164,12 +188,15 @@ private:
   /// \brief Track the set of blocks that always lead to a cold call.
   SmallPtrSet<const BasicBlock *, 16> PostDominatedByColdCall;
 
+  void updatePostDominatedByUnreachable(const BasicBlock *BB);
+  void updatePostDominatedByColdCall(const BasicBlock *BB);
   bool calcUnreachableHeuristics(const BasicBlock *BB);
   bool calcMetadataWeights(const BasicBlock *BB);
   bool calcColdCallHeuristics(const BasicBlock *BB);
   bool calcPointerHeuristics(const BasicBlock *BB);
-  bool calcLoopBranchHeuristics(const BasicBlock *BB, const LoopInfo &LI);
-  bool calcZeroHeuristics(const BasicBlock *BB);
+  bool calcLoopBranchHeuristics(const BasicBlock *BB, const LoopInfo &LI,
+                                SccInfo &SccI);
+  bool calcZeroHeuristics(const BasicBlock *BB, const TargetLibraryInfo *TLI);
   bool calcFloatingPointHeuristics(const BasicBlock *BB);
   bool calcInvokeHeuristics(const BasicBlock *BB);
 };
@@ -178,11 +205,12 @@ private:
 class BranchProbabilityAnalysis
     : public AnalysisInfoMixin<BranchProbabilityAnalysis> {
   friend AnalysisInfoMixin<BranchProbabilityAnalysis>;
+
   static AnalysisKey Key;
 
 public:
-  /// \brief Provide the result typedef for this analysis pass.
-  typedef BranchProbabilityInfo Result;
+  /// \brief Provide the result type for this analysis pass.
+  using Result = BranchProbabilityInfo;
 
   /// \brief Run the analysis pass over a function and produce BPI.
   BranchProbabilityInfo run(Function &F, FunctionAnalysisManager &AM);
@@ -195,6 +223,7 @@ class BranchProbabilityPrinterPass
 
 public:
   explicit BranchProbabilityPrinterPass(raw_ostream &OS) : OS(OS) {}
+
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
 };
 
@@ -219,6 +248,6 @@ public:
   void print(raw_ostream &OS, const Module *M = nullptr) const override;
 };
 
-}
+} // end namespace llvm
 
-#endif
+#endif // LLVM_ANALYSIS_BRANCHPROBABILITYINFO_H

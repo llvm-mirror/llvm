@@ -12,8 +12,8 @@ define void @knownbits_zext_in_reg(i8*) nounwind {
 ; X32-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; X32-NEXT:    movzbl (%eax), %eax
 ; X32-NEXT:    imull $101, %eax, %eax
-; X32-NEXT:    andl $16384, %eax # imm = 0x4000
 ; X32-NEXT:    shrl $14, %eax
+; X32-NEXT:    movzwl %ax, %eax
 ; X32-NEXT:    movzbl %al, %eax
 ; X32-NEXT:    vmovd %eax, %xmm0
 ; X32-NEXT:    vpshufb {{.*#+}} xmm0 = zero,zero,zero,zero,xmm0[0],zero,zero,zero,zero,zero,zero,zero,zero,zero,zero,zero
@@ -50,8 +50,8 @@ define void @knownbits_zext_in_reg(i8*) nounwind {
 ; X64:       # BB#0: # %BB
 ; X64-NEXT:    movzbl (%rdi), %eax
 ; X64-NEXT:    imull $101, %eax, %eax
-; X64-NEXT:    andl $16384, %eax # imm = 0x4000
 ; X64-NEXT:    shrl $14, %eax
+; X64-NEXT:    movzwl %ax, %eax
 ; X64-NEXT:    movzbl %al, %eax
 ; X64-NEXT:    vmovd %eax, %xmm0
 ; X64-NEXT:    vpshufb {{.*#+}} xmm0 = zero,zero,zero,zero,xmm0[0],zero,zero,zero,zero,zero,zero,zero,zero,zero,zero,zero
@@ -173,8 +173,8 @@ define {i32, i1} @knownbits_uaddo_saddo(i64 %a0, i64 %a1) nounwind {
 ; X32-NEXT:    pushl %ebx
 ; X32-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; X32-NEXT:    movl {{[0-9]+}}(%esp), %ecx
-; X32-NEXT:    leal (%ecx,%eax), %edx
-; X32-NEXT:    cmpl %ecx, %edx
+; X32-NEXT:    movl %ecx, %edx
+; X32-NEXT:    addl %eax, %edx
 ; X32-NEXT:    setb %bl
 ; X32-NEXT:    testl %eax, %eax
 ; X32-NEXT:    setns %al
@@ -226,19 +226,19 @@ define {i32, i1} @knownbits_usubo_ssubo(i64 %a0, i64 %a1) nounwind {
 ; X32-NEXT:    movl {{[0-9]+}}(%esp), %ecx
 ; X32-NEXT:    movl %ecx, %edx
 ; X32-NEXT:    subl %eax, %edx
-; X32-NEXT:    setns %bl
-; X32-NEXT:    cmpl %edx, %ecx
-; X32-NEXT:    setb %dh
-; X32-NEXT:    testl %ecx, %ecx
-; X32-NEXT:    setns %cl
-; X32-NEXT:    cmpb %bl, %cl
-; X32-NEXT:    setne %ch
+; X32-NEXT:    setb %bl
 ; X32-NEXT:    testl %eax, %eax
 ; X32-NEXT:    setns %al
+; X32-NEXT:    testl %ecx, %ecx
+; X32-NEXT:    setns %cl
 ; X32-NEXT:    cmpb %al, %cl
+; X32-NEXT:    setne %al
+; X32-NEXT:    testl %edx, %edx
+; X32-NEXT:    setns %dl
+; X32-NEXT:    cmpb %dl, %cl
 ; X32-NEXT:    setne %dl
-; X32-NEXT:    andb %ch, %dl
-; X32-NEXT:    orb %dh, %dl
+; X32-NEXT:    andb %al, %dl
+; X32-NEXT:    orb %bl, %dl
 ; X32-NEXT:    xorl %eax, %eax
 ; X32-NEXT:    popl %ebx
 ; X32-NEXT:    retl

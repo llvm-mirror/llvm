@@ -28,7 +28,7 @@ class FunctionType;
 class PointerType;
 template <class ConstantClass> class ConstantUniqueMap;
 
-class InlineAsm : public Value {
+class InlineAsm final : public Value {
 public:
   enum AsmDialect {
     AD_ATT,
@@ -48,7 +48,6 @@ private:
   InlineAsm(FunctionType *Ty, const std::string &AsmString,
             const std::string &Constraints, bool hasSideEffects,
             bool isAlignStack, AsmDialect asmDialect);
-  ~InlineAsm() override;
 
   /// When the ConstantUniqueMap merges two types and makes two InlineAsms
   /// identical, it destroys one of them with this method.
@@ -95,14 +94,14 @@ public:
     isClobber           // '~x'
   };
 
-  typedef std::vector<std::string> ConstraintCodeVector;
+  using ConstraintCodeVector = std::vector<std::string>;
 
   struct SubConstraintInfo {
     /// MatchingInput - If this is not -1, this is an output constraint where an
     /// input constraint is required to match it (e.g. "0").  The value is the
     /// constraint number that matches this one (for example, if this is
     /// constraint #0 and constraint #4 has the value "0", this will be 4).
-    signed char MatchingInput = -1;
+    int MatchingInput = -1;
 
     /// Code - The constraint code, either the register name (in braces) or the
     /// constraint letter/number.
@@ -112,9 +111,9 @@ public:
     SubConstraintInfo() = default;
   };
 
-  typedef std::vector<SubConstraintInfo> SubConstraintInfoVector;
+  using SubConstraintInfoVector = std::vector<SubConstraintInfo>;
   struct ConstraintInfo;
-  typedef std::vector<ConstraintInfo> ConstraintInfoVector;
+  using ConstraintInfoVector = std::vector<ConstraintInfo>;
 
   struct ConstraintInfo {
     /// Type - The basic type of the constraint: input/output/clobber
@@ -129,7 +128,7 @@ public:
     /// input constraint is required to match it (e.g. "0").  The value is the
     /// constraint number that matches this one (for example, if this is
     /// constraint #0 and constraint #4 has the value "0", this will be 4).
-    signed char MatchingInput = -1;
+    int MatchingInput = -1;
 
     /// hasMatchingInput - Return true if this is an output constraint that has
     /// a matching input constraint.
@@ -184,7 +183,7 @@ public:
   }
 
   // Methods for support type inquiry through isa, cast, and dyn_cast:
-  static inline bool classof(const Value *V) {
+  static bool classof(const Value *V) {
     return V->getValueID() == Value::InlineAsmVal;
   }
 

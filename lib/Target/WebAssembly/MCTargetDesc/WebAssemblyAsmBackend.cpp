@@ -12,8 +12,8 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "MCTargetDesc/WebAssemblyMCTargetDesc.h"
 #include "MCTargetDesc/WebAssemblyFixupKinds.h"
+#include "MCTargetDesc/WebAssemblyMCTargetDesc.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCAssembler.h"
 #include "llvm/MC/MCDirectives.h"
@@ -37,10 +37,12 @@ public:
       : MCAsmBackend(), Is64Bit(Is64Bit) {}
   ~WebAssemblyAsmBackendELF() override {}
 
-  void applyFixup(const MCFixup &Fixup, char *Data, unsigned DataSize,
+  void applyFixup(const MCAssembler &Asm, const MCFixup &Fixup,
+                  const MCValue &Target, MutableArrayRef<char> Data,
                   uint64_t Value, bool IsPCRel) const override;
 
-  MCObjectWriter *createObjectWriter(raw_pwrite_stream &OS) const override;
+  std::unique_ptr<MCObjectWriter>
+  createObjectWriter(raw_pwrite_stream &OS) const override;
 
   // No instruction requires relaxation
   bool fixupNeedsRelaxation(const MCFixup &Fixup, uint64_t Value,
@@ -77,10 +79,12 @@ public:
 
   const MCFixupKindInfo &getFixupKindInfo(MCFixupKind Kind) const override;
 
-  void applyFixup(const MCFixup &Fixup, char *Data, unsigned DataSize,
+  void applyFixup(const MCAssembler &Asm, const MCFixup &Fixup,
+                  const MCValue &Target, MutableArrayRef<char> Data,
                   uint64_t Value, bool IsPCRel) const override;
 
-  MCObjectWriter *createObjectWriter(raw_pwrite_stream &OS) const override;
+  std::unique_ptr<MCObjectWriter>
+  createObjectWriter(raw_pwrite_stream &OS) const override;
 
   // No instruction requires relaxation
   bool fixupNeedsRelaxation(const MCFixup &Fixup, uint64_t Value,
@@ -105,9 +109,11 @@ bool WebAssemblyAsmBackendELF::writeNopData(uint64_t Count,
   return true;
 }
 
-void WebAssemblyAsmBackendELF::applyFixup(const MCFixup &Fixup, char *Data,
-                                          unsigned DataSize, uint64_t Value,
-                                          bool IsPCRel) const {
+void WebAssemblyAsmBackendELF::applyFixup(const MCAssembler &Asm,
+                                          const MCFixup &Fixup,
+                                          const MCValue &Target,
+                                          MutableArrayRef<char> Data,
+                                          uint64_t Value, bool IsPCRel) const {
   const MCFixupKindInfo &Info = getFixupKindInfo(Fixup.getKind());
   assert(Info.Flags == 0 && "WebAssembly does not use MCFixupKindInfo flags");
 
@@ -119,7 +125,7 @@ void WebAssemblyAsmBackendELF::applyFixup(const MCFixup &Fixup, char *Data,
   Value <<= Info.TargetOffset;
 
   unsigned Offset = Fixup.getOffset();
-  assert(Offset + NumBytes <= DataSize && "Invalid fixup offset!");
+  assert(Offset + NumBytes <= Data.size() && "Invalid fixup offset!");
 
   // For each byte of the fragment that the fixup touches, mask in the
   // bits from the fixup value.
@@ -127,7 +133,7 @@ void WebAssemblyAsmBackendELF::applyFixup(const MCFixup &Fixup, char *Data,
     Data[Offset + i] |= uint8_t((Value >> (i * 8)) & 0xff);
 }
 
-MCObjectWriter *
+std::unique_ptr<MCObjectWriter>
 WebAssemblyAsmBackendELF::createObjectWriter(raw_pwrite_stream &OS) const {
   return createWebAssemblyELFObjectWriter(OS, Is64Bit, 0);
 }
@@ -163,9 +169,11 @@ bool WebAssemblyAsmBackend::writeNopData(uint64_t Count,
   return true;
 }
 
-void WebAssemblyAsmBackend::applyFixup(const MCFixup &Fixup, char *Data,
-                                       unsigned DataSize, uint64_t Value,
-                                       bool IsPCRel) const {
+void WebAssemblyAsmBackend::applyFixup(const MCAssembler &Asm,
+                                       const MCFixup &Fixup,
+                                       const MCValue &Target,
+                                       MutableArrayRef<char> Data,
+                                       uint64_t Value, bool IsPCRel) const {
   const MCFixupKindInfo &Info = getFixupKindInfo(Fixup.getKind());
   assert(Info.Flags == 0 && "WebAssembly does not use MCFixupKindInfo flags");
 
@@ -177,7 +185,7 @@ void WebAssemblyAsmBackend::applyFixup(const MCFixup &Fixup, char *Data,
   Value <<= Info.TargetOffset;
 
   unsigned Offset = Fixup.getOffset();
-  assert(Offset + NumBytes <= DataSize && "Invalid fixup offset!");
+  assert(Offset + NumBytes <= Data.size() && "Invalid fixup offset!");
 
   // For each byte of the fragment that the fixup touches, mask in the
   // bits from the fixup value.
@@ -185,7 +193,7 @@ void WebAssemblyAsmBackend::applyFixup(const MCFixup &Fixup, char *Data,
     Data[Offset + i] |= uint8_t((Value >> (i * 8)) & 0xff);
 }
 
-MCObjectWriter *
+std::unique_ptr<MCObjectWriter>
 WebAssemblyAsmBackend::createObjectWriter(raw_pwrite_stream &OS) const {
   return createWebAssemblyWasmObjectWriter(OS, Is64Bit);
 }

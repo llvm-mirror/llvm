@@ -10,8 +10,8 @@
 #ifndef LLVM_LIB_TARGET_AMDGPU_AMDGPUMACHINEFUNCTION_H
 #define LLVM_LIB_TARGET_AMDGPU_AMDGPUMACHINEFUNCTION_H
 
-#include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/CodeGen/MachineFunction.h"
 
 namespace llvm {
 
@@ -30,7 +30,10 @@ class AMDGPUMachineFunction : public MachineFunctionInfo {
   /// Start of implicit kernel args
   unsigned ABIArgOffset;
 
-  bool IsKernel;
+  // Kernels + shaders. i.e. functions called by the driver and not not called
+  // by other functions.
+  bool IsEntryFunction;
+
   bool NoSignedZerosFPMath;
 
 public:
@@ -67,8 +70,8 @@ public:
     return LDSSize;
   }
 
-  bool isKernel() const {
-    return IsKernel;
+  bool isEntryFunction() const {
+    return IsEntryFunction;
   }
 
   bool hasNoSignedZerosFPMath() const {

@@ -11,10 +11,19 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "MCTargetDesc/X86BaseInfo.h"
+#include "X86.h"
+
+#include "X86CallLowering.h"
+#include "X86LegalizerInfo.h"
+#include "X86RegisterBankInfo.h"
 #include "X86Subtarget.h"
+#include "MCTargetDesc/X86BaseInfo.h"
 #include "X86TargetMachine.h"
 #include "llvm/ADT/Triple.h"
+#include "llvm/CodeGen/GlobalISel/CallLowering.h"
+#include "llvm/CodeGen/GlobalISel/InstructionSelect.h"
+#include "llvm/CodeGen/GlobalISel/Legalizer.h"
+#include "llvm/CodeGen/GlobalISel/RegBankSelect.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/ConstantRange.h"
 #include "llvm/IR/Function.h"
@@ -138,13 +147,24 @@ X86Subtarget::classifyGlobalFunctionReference(const GlobalValue *GV,
   if (TM.shouldAssumeDSOLocal(M, GV))
     return X86II::MO_NO_FLAG;
 
-  assert(!isTargetCOFF());
+  if (isTargetCOFF()) {
+    assert(GV->hasDLLImportStorageClass() &&
+           "shouldAssumeDSOLocal gave inconsistent answer");
+    return X86II::MO_DLLIMPORT;
+  }
 
-  if (isTargetELF())
+  const Function *F = dyn_cast_or_null<Function>(GV);
+
+  if (isTargetELF()) {
+    if (is64Bit() && F && (CallingConv::X86_RegCall == F->getCallingConv()))
+      // According to psABI, PLT stub clobbers XMM8-XMM15.
+      // In Regcall calling convention those registers are used for passing
+      // parameters. Thus we need to prevent lazy binding in Regcall.
+      return X86II::MO_GOTPCREL;
     return X86II::MO_PLT;
+  }
 
   if (is64Bit()) {
-    auto *F = dyn_cast_or_null<Function>(GV);
     if (F && F->hasFnAttribute(Attribute::NonLazyBind))
       // If the function is marked as non-lazy, generate an indirect call
       // which loads from the GOT directly. This avoids runtime overhead
@@ -170,9 +190,12 @@ const char *X86Subtarget::getBZeroEntry() const {
 }
 
 bool X86Subtarget::hasSinCos() const {
-  return getTargetTriple().isMacOSX() &&
-    !getTargetTriple().isMacOSXVersionLT(10, 9) &&
-    is64Bit();
+  if (getTargetTriple().isMacOSX()) {
+    return !getTargetTriple().isMacOSXVersionLT(10, 9) && is64Bit();
+  } else if (getTargetTriple().isOSFuchsia()) {
+    return true;
+  }
+  return false;
 }
 
 /// Return true if the subtarget allows calls to immediate address.
@@ -244,6 +267,17 @@ void X86Subtarget::initSubtargetFeatures(StringRef CPU, StringRef FS) {
   else if (isTargetDarwin() || isTargetLinux() || isTargetSolaris() ||
            isTargetKFreeBSD() || In64BitMode)
     stackAlignment = 16;
+ 
+  // Gather is available since Haswell (AVX2 set). So technically, we can generate Gathers 
+  // on all AVX2 processors. But the overhead on HSW is high. Skylake Client processor has
+  // faster Gathers than HSW and performance is similar to Skylake Server (AVX-512). 
+  // The specified overhead is relative to the Load operation."2" is the number provided 
+  // by Intel architects, This parameter is used for cost estimation of Gather Op and 
+  // comparison with other alternatives.
+  if (X86ProcFamily == IntelSkylake || hasAVX512())
+    GatherOverhead = 2;
+  if (hasAVX512())
+    ScatterOverhead = 2;
 }
 
 void X86Subtarget::initializeEnvironment() {
@@ -265,6 +299,7 @@ void X86Subtarget::initializeEnvironment() {
   HasFMA4 = false;
   HasXOP = false;
   HasTBM = false;
+  HasLWP = false;
   HasMOVBE = false;
   HasRDRAND = false;
   HasF16C = false;
@@ -279,6 +314,7 @@ void X86Subtarget::initializeEnvironment() {
   HasCDI = false;
   HasPFI = false;
   HasDQI = false;
+  HasVPOPCNTDQ = false;
   HasBWI = false;
   HasVLX = false;
   HasADX = false;
@@ -290,7 +326,9 @@ void X86Subtarget::initializeEnvironment() {
   HasMWAITX = false;
   HasCLZERO = false;
   HasMPX = false;
-  IsBTMemSlow = false;
+  HasSGX = false;
+  HasCLFLUSHOPT = false;
+  HasCLWB = false;
   IsPMULLDSlow = false;
   IsSHLDSlow = false;
   IsUAMem16Slow = false;
@@ -303,17 +341,23 @@ void X86Subtarget::initializeEnvironment() {
   HasFastVectorFSQRT = false;
   HasFastLZCNT = false;
   HasFastSHLDRotate = false;
+  HasMacroFusion = false;
+  HasERMSB = false;
   HasSlowDivide32 = false;
   HasSlowDivide64 = false;
   PadShortFunctions = false;
-  CallRegIndirect = false;
+  SlowTwoMemOps = false;
   LEAUsesAG = false;
   SlowLEA = false;
+  Slow3OpsLEA = false;
   SlowIncDec = false;
   stackAlignment = 4;
   // FIXME: this is a known good value for Yonah. How about others?
   MaxInlineSizeThreshold = 128;
   UseSoftFloat = false;
+  X86ProcFamily = Others;
+  GatherOverhead = 1024;
+  ScatterOverhead = 1024;
 }
 
 X86Subtarget &X86Subtarget::initializeSubtargetDependencies(StringRef CPU,
@@ -334,8 +378,8 @@ X86Subtarget::X86Subtarget(const Triple &TT, StringRef CPU, StringRef FS,
                   TargetTriple.getEnvironment() != Triple::CODE16),
       In16BitMode(TargetTriple.getArch() == Triple::x86 &&
                   TargetTriple.getEnvironment() == Triple::CODE16),
-      InstrInfo(initializeSubtargetDependencies(CPU, FS)),
-      TLInfo(TM, *this), FrameLowering(*this, getStackAlignment()) {
+      InstrInfo(initializeSubtargetDependencies(CPU, FS)), TLInfo(TM, *this),
+      FrameLowering(*this, getStackAlignment()) {
   // Determine the PICStyle based on the target selected.
   if (!isPositionIndependent())
     setPICStyle(PICStyles::None);
@@ -347,26 +391,29 @@ X86Subtarget::X86Subtarget(const Triple &TT, StringRef CPU, StringRef FS,
     setPICStyle(PICStyles::StubPIC);
   else if (isTargetELF())
     setPICStyle(PICStyles::GOT);
+
+  CallLoweringInfo.reset(new X86CallLowering(*getTargetLowering()));
+  Legalizer.reset(new X86LegalizerInfo(*this, TM));
+
+  auto *RBI = new X86RegisterBankInfo(*getRegisterInfo());
+  RegBankInfo.reset(RBI);
+  InstSelector.reset(createX86InstructionSelector(TM, *this, *RBI));
 }
 
 const CallLowering *X86Subtarget::getCallLowering() const {
-  assert(GISel && "Access to GlobalISel APIs not set");
-  return GISel->getCallLowering();
+  return CallLoweringInfo.get();
 }
 
 const InstructionSelector *X86Subtarget::getInstructionSelector() const {
-  assert(GISel && "Access to GlobalISel APIs not set");
-  return GISel->getInstructionSelector();
+  return InstSelector.get();
 }
 
 const LegalizerInfo *X86Subtarget::getLegalizerInfo() const {
-  assert(GISel && "Access to GlobalISel APIs not set");
-  return GISel->getLegalizerInfo();
+  return Legalizer.get();
 }
 
 const RegisterBankInfo *X86Subtarget::getRegBankInfo() const {
-  assert(GISel && "Access to GlobalISel APIs not set");
-  return GISel->getRegBankInfo();
+  return RegBankInfo.get();
 }
 
 bool X86Subtarget::enableEarlyIfConversion() const {

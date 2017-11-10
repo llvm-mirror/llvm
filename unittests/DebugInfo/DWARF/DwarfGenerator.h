@@ -138,7 +138,7 @@ public:
 /// contained inside this class.
 class CompileUnit {
   Generator &DG;
-  DIEUnit DU;
+  BasicDIEUnit DU;
 
 public:
   CompileUnit(Generator &D, uint16_t V, uint8_t A)
@@ -215,6 +215,7 @@ public:
 
   BumpPtrAllocator &getAllocator() { return Allocator; }
   AsmPrinter *getAsmPrinter() const { return Asm.get(); }
+  MCContext *getMCContext() const { return MC.get(); }
   DIEAbbrevSet &getAbbrevSet() { return Abbreviations; }
   DwarfStringPool &getStringPool() { return *StringPool; }
 

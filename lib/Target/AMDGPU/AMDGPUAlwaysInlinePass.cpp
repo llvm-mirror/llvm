@@ -9,7 +9,7 @@
 //
 /// \file
 /// This pass marks all internal functions as always_inline and creates
-/// duplicates of all other functions a marks the duplicates as always_inline.
+/// duplicates of all other functions and marks the duplicates as always_inline.
 //
 //===----------------------------------------------------------------------===//
 
@@ -21,16 +21,28 @@ using namespace llvm;
 
 namespace {
 
+static cl::opt<bool> StressCalls(
+  "amdgpu-stress-function-calls",
+  cl::Hidden,
+  cl::desc("Force all functions to be noinline"),
+  cl::init(false));
+
 class AMDGPUAlwaysInline : public ModulePass {
-  static char ID;
+  bool GlobalOpt;
 
 public:
-  AMDGPUAlwaysInline() : ModulePass(ID) { }
+  static char ID;
+
+  AMDGPUAlwaysInline(bool GlobalOpt = false) :
+    ModulePass(ID), GlobalOpt(GlobalOpt) { }
   bool runOnModule(Module &M) override;
   StringRef getPassName() const override { return "AMDGPU Always Inline Pass"; }
 };
 
 } // End anonymous namespace
+
+INITIALIZE_PASS(AMDGPUAlwaysInline, "amdgpu-always-inline",
+                "AMDGPU Inline All Functions", false, false)
 
 char AMDGPUAlwaysInline::ID = 0;
 
@@ -45,13 +57,19 @@ bool AMDGPUAlwaysInline::runOnModule(Module &M) {
     }
   }
 
-  for (GlobalAlias* A : AliasesToRemove) {
-    A->eraseFromParent();
+  if (GlobalOpt) {
+    for (GlobalAlias* A : AliasesToRemove) {
+      A->eraseFromParent();
+    }
   }
+
+  auto NewAttr = StressCalls ? Attribute::NoInline : Attribute::AlwaysInline;
+  auto IncompatAttr
+    = StressCalls ? Attribute::AlwaysInline : Attribute::NoInline;
 
   for (Function &F : M) {
     if (!F.hasLocalLinkage() && !F.isDeclaration() && !F.use_empty() &&
-        !F.hasFnAttribute(Attribute::NoInline))
+        !F.hasFnAttribute(IncompatAttr))
       FuncsToClone.push_back(&F);
   }
 
@@ -63,13 +81,13 @@ bool AMDGPUAlwaysInline::runOnModule(Module &M) {
   }
 
   for (Function &F : M) {
-    if (F.hasLocalLinkage() && !F.hasFnAttribute(Attribute::NoInline)) {
-      F.addFnAttr(Attribute::AlwaysInline);
+    if (F.hasLocalLinkage() && !F.hasFnAttribute(IncompatAttr)) {
+      F.addFnAttr(NewAttr);
     }
   }
   return false;
 }
 
-ModulePass *llvm::createAMDGPUAlwaysInlinePass() {
-  return new AMDGPUAlwaysInline();
+ModulePass *llvm::createAMDGPUAlwaysInlinePass(bool GlobalOpt) {
+  return new AMDGPUAlwaysInline(GlobalOpt);
 }

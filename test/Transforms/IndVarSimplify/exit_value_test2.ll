@@ -3,19 +3,18 @@
 
 ; Check IndVarSimplify should not replace exit value because or else
 ; udiv will be introduced by expand and the cost will be high.
-;
-; CHECK-LABEL: @_Z3fooPKcjj(
-; CHECK-NOT: udiv
 
 declare void @_Z3mixRjj(i32* dereferenceable(4), i32)
-declare void @llvm.lifetime.start(i64, i8* nocapture)
-declare void @llvm.lifetime.end(i64, i8* nocapture)
+declare void @llvm.lifetime.start.p0i8(i64, i8* nocapture)
+declare void @llvm.lifetime.end.p0i8(i64, i8* nocapture)
 
 define i32 @_Z3fooPKcjj(i8* nocapture readonly %s, i32 %len, i32 %c) {
+; CHECK-LABEL: @_Z3fooPKcjj(
+; CHECK-NOT: udiv
 entry:
   %a = alloca i32, align 4
   %tmp = bitcast i32* %a to i8*
-  call void @llvm.lifetime.start(i64 4, i8* %tmp)
+  call void @llvm.lifetime.start.p0i8(i64 4, i8* %tmp)
   store i32 -1640531527, i32* %a, align 4
   %cmp8 = icmp ugt i32 %len, 11
   br i1 %cmp8, label %while.body.lr.ph, label %while.end
@@ -47,6 +46,29 @@ while.end:                                        ; preds = %while.cond.while.en
   %keylen.0.lcssa = phi i32 [ %sub.lcssa, %while.cond.while.end_crit_edge ], [ %len, %entry ]
   call void @_Z3mixRjj(i32* dereferenceable(4) %a, i32 %keylen.0.lcssa)
   %tmp4 = load i32, i32* %a, align 4
-  call void @llvm.lifetime.end(i64 4, i8* %tmp)
+  call void @llvm.lifetime.end.p0i8(i64 4, i8* %tmp)
   ret i32 %tmp4
+}
+
+define i32 @zero_backedge_count_test(i32 %unknown_init, i32* %unknown_mem) {
+; CHECK-LABEL: @zero_backedge_count_test(
+entry:
+  br label %loop
+
+loop:
+  %iv = phi i32 [ 0, %entry], [ %iv.inc, %loop ]
+  %unknown_phi = phi i32 [ %unknown_init, %entry ], [ %unknown_next, %loop ]
+  %iv.inc = add i32 %iv, 1
+  %be_taken = icmp ne i32 %iv.inc, 1
+  %unknown_next = load volatile i32, i32* %unknown_mem
+  br i1 %be_taken, label %loop, label %leave
+
+leave:
+; We can fold %unknown_phi even though the backedge value for it is completely
+; unknown, since we can prove that the loop's backedge taken count is 0.
+
+; CHECK: leave:
+; CHECK: ret i32 %unknown_init
+  %exit_val = phi i32 [ %unknown_phi, %loop ]
+  ret i32 %exit_val
 }

@@ -14,6 +14,9 @@
 //===----------------------------------
 // Atomic fences
 //===----------------------------------
+let AddedComplexity = 15, Size = 0 in
+def CompilerBarrier : Pseudo<(outs), (ins i32imm:$ordering),
+                             [(atomic_fence imm:$ordering, 0)]>, Sched<[]>;
 def : Pat<(atomic_fence (i64 4), (imm)), (DMB (i32 0x9))>;
 def : Pat<(atomic_fence (imm), (imm)), (DMB (i32 0xb))>;
 
@@ -402,3 +405,19 @@ def CMP_SWAP_128 : Pseudo<(outs GPR64:$RdLo, GPR64:$RdHi, GPR32:$scratch),
                           (ins GPR64:$addr, GPR64:$desiredLo, GPR64:$desiredHi,
                                GPR64:$newLo, GPR64:$newHi), []>,
                    Sched<[WriteAtomic]>;
+
+// v8.1 Atomic instructions:
+let Predicates = [HasLSE] in {
+  defm : LDOPregister_patterns<"LDADD", "atomic_load_add">;
+  defm : LDOPregister_patterns<"LDSET", "atomic_load_or">;
+  defm : LDOPregister_patterns<"LDEOR", "atomic_load_xor">;
+  defm : LDOPregister_patterns<"LDSMAX", "atomic_load_max">;
+  defm : LDOPregister_patterns<"LDSMIN", "atomic_load_min">;
+  defm : LDOPregister_patterns<"LDUMAX", "atomic_load_umax">;
+  defm : LDOPregister_patterns<"LDUMIN", "atomic_load_umin">;
+  defm : LDOPregister_patterns<"SWP", "atomic_swap">;
+  defm : LDOPregister_patterns_mod<"LDADD", "atomic_load_sub", "SUB">;
+  defm : LDOPregister_patterns_mod<"LDCLR", "atomic_load_and", "ORN">;
+  defm : CASregister_patterns<"CAS", "atomic_cmp_swap">;
+}
+

@@ -245,3 +245,47 @@ define <4 x i32> @and_or_zext_v4i16(<4 x i16> %a0) {
   %3 = and <4 x i32> %2, <i32 65536, i32 65536, i32 65536, i32 65536>
   ret <4 x i32> %3
 }
+
+;
+; known sign bits folding
+;
+
+define <8 x i16> @ashr_mask1_v8i16(<8 x i16> %a0) {
+; CHECK-LABEL: ashr_mask1_v8i16:
+; CHECK:       # BB#0:
+; CHECK-NEXT:    psrlw $15, %xmm0
+; CHECK-NEXT:    retq
+  %1 = ashr <8 x i16> %a0, <i16 15, i16 15, i16 15, i16 15, i16 15, i16 15, i16 15, i16 15>
+  %2 = and <8 x i16> %1, <i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1>
+  ret <8 x i16> %2
+}
+
+define <4 x i32> @ashr_mask7_v4i32(<4 x i32> %a0) {
+; CHECK-LABEL: ashr_mask7_v4i32:
+; CHECK:       # BB#0:
+; CHECK-NEXT:    psrad $31, %xmm0
+; CHECK-NEXT:    psrld $29, %xmm0
+; CHECK-NEXT:    retq
+  %1 = ashr <4 x i32> %a0, <i32 31, i32 31, i32 31, i32 31>
+  %2 = and <4 x i32> %1, <i32 7, i32 7, i32 7, i32 7>
+  ret <4 x i32> %2
+}
+
+;
+; SimplifyDemandedBits
+;
+
+; PR34620 - redundant PAND after vector shift of a byte vector (PSRLW)
+define <16 x i8> @PR34620(<16 x i8> %a0, <16 x i8> %a1) {
+; CHECK-LABEL: PR34620:
+; CHECK:       # BB#0:
+; CHECK-NEXT:    psrlw $1, %xmm0
+; CHECK-NEXT:    pand {{.*}}(%rip), %xmm0
+; CHECK-NEXT:    pand {{.*}}(%rip), %xmm0
+; CHECK-NEXT:    paddb %xmm1, %xmm0
+; CHECK-NEXT:    retq
+  %1 = lshr <16 x i8> %a0, <i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1>
+  %2 = and <16 x i8> %1, <i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1, i8 1>
+  %3 = add <16 x i8> %2, %a1
+  ret <16 x i8> %3
+}

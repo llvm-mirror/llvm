@@ -1,4 +1,4 @@
-//===-- BypassSlowDivision.cpp - Bypass slow division ---------------------===//
+//===- BypassSlowDivision.cpp - Bypass slow division ----------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -17,25 +17,32 @@
 
 #include "llvm/Transforms/Utils/BypassSlowDivision.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/None.h"
+#include "llvm/ADT/Optional.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/Analysis/ValueTracking.h"
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/Type.h"
+#include "llvm/IR/Value.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/KnownBits.h"
 #include "llvm/Transforms/Utils/Local.h"
+#include <cassert>
+#include <cstdint>
 
 using namespace llvm;
 
 #define DEBUG_TYPE "bypass-slow-division"
 
 namespace {
-  struct DivOpInfo {
-    bool SignedOp;
-    Value *Dividend;
-    Value *Divisor;
-
-    DivOpInfo(bool InSignedOp, Value *InDividend, Value *InDivisor)
-      : SignedOp(InSignedOp), Dividend(InDividend), Divisor(InDivisor) {}
-  };
 
   struct QuotRemPair {
     Value *Quotient;
@@ -53,45 +60,19 @@ namespace {
     Value *Quotient = nullptr;
     Value *Remainder = nullptr;
   };
-}
 
-namespace llvm {
-  template<>
-  struct DenseMapInfo<DivOpInfo> {
-    static bool isEqual(const DivOpInfo &Val1, const DivOpInfo &Val2) {
-      return Val1.SignedOp == Val2.SignedOp &&
-             Val1.Dividend == Val2.Dividend &&
-             Val1.Divisor == Val2.Divisor;
-    }
+using DivCacheTy = DenseMap<DivRemMapKey, QuotRemPair>;
+using BypassWidthsTy = DenseMap<unsigned, unsigned>;
+using VisitedSetTy = SmallPtrSet<Instruction *, 4>;
 
-    static DivOpInfo getEmptyKey() {
-      return DivOpInfo(false, nullptr, nullptr);
-    }
-
-    static DivOpInfo getTombstoneKey() {
-      return DivOpInfo(true, nullptr, nullptr);
-    }
-
-    static unsigned getHashValue(const DivOpInfo &Val) {
-      return (unsigned)(reinterpret_cast<uintptr_t>(Val.Dividend) ^
-                        reinterpret_cast<uintptr_t>(Val.Divisor)) ^
-                        (unsigned)Val.SignedOp;
-    }
-  };
-
-  typedef DenseMap<DivOpInfo, QuotRemPair> DivCacheTy;
-  typedef DenseMap<unsigned, unsigned> BypassWidthsTy;
-}
-
-namespace {
 enum ValueRange {
   /// Operand definitely fits into BypassType. No runtime checks are needed.
-  VALRNG_SHORT,
+  VALRNG_KNOWN_SHORT,
   /// A runtime check is required, as value range is unknown.
   VALRNG_UNKNOWN,
   /// Operand is unlikely to fit into BypassType. The bypassing should be
   /// disabled.
-  VALRNG_LONG
+  VALRNG_LIKELY_LONG
 };
 
 class FastDivInsertionTask {
@@ -100,7 +81,8 @@ class FastDivInsertionTask {
   IntegerType *BypassType = nullptr;
   BasicBlock *MainBB = nullptr;
 
-  ValueRange getValueRange(Value *Op);
+  bool isHashLikeValue(Value *V, VisitedSetTy &Visited);
+  ValueRange getValueRange(Value *Op, VisitedSetTy &Visited);
   QuotRemWithBB createSlowBB(BasicBlock *Successor);
   QuotRemWithBB createFastBB(BasicBlock *Successor);
   QuotRemPair createDivRemPhiNodes(QuotRemWithBB &LHS, QuotRemWithBB &RHS,
@@ -112,17 +94,21 @@ class FastDivInsertionTask {
     return SlowDivOrRem->getOpcode() == Instruction::SDiv ||
            SlowDivOrRem->getOpcode() == Instruction::SRem;
   }
+
   bool isDivisionOp() {
     return SlowDivOrRem->getOpcode() == Instruction::SDiv ||
            SlowDivOrRem->getOpcode() == Instruction::UDiv;
   }
+
   Type *getSlowType() { return SlowDivOrRem->getType(); }
 
 public:
   FastDivInsertionTask(Instruction *I, const BypassWidthsTy &BypassWidths);
+
   Value *getReplacement(DivCacheTy &Cache);
 };
-} // anonymous namespace
+
+} // end anonymous namespace
 
 FastDivInsertionTask::FastDivInsertionTask(Instruction *I,
                                            const BypassWidthsTy &BypassWidths) {
@@ -171,7 +157,7 @@ Value *FastDivInsertionTask::getReplacement(DivCacheTy &Cache) {
   // Then, look for a value in Cache.
   Value *Dividend = SlowDivOrRem->getOperand(0);
   Value *Divisor = SlowDivOrRem->getOperand(1);
-  DivOpInfo Key(isSignedOp(), Dividend, Divisor);
+  DivRemMapKey Key(isSignedOp(), Dividend, Divisor);
   auto CacheI = Cache.find(Key);
 
   if (CacheI == Cache.end()) {
@@ -187,8 +173,64 @@ Value *FastDivInsertionTask::getReplacement(DivCacheTy &Cache) {
   return isDivisionOp() ? Value.Quotient : Value.Remainder;
 }
 
+/// \brief Check if a value looks like a hash.
+///
+/// The routine is expected to detect values computed using the most common hash
+/// algorithms. Typically, hash computations end with one of the following
+/// instructions:
+///
+/// 1) MUL with a constant wider than BypassType
+/// 2) XOR instruction
+///
+/// And even if we are wrong and the value is not a hash, it is still quite
+/// unlikely that such values will fit into BypassType.
+///
+/// To detect string hash algorithms like FNV we have to look through PHI-nodes.
+/// It is implemented as a depth-first search for values that look neither long
+/// nor hash-like.
+bool FastDivInsertionTask::isHashLikeValue(Value *V, VisitedSetTy &Visited) {
+  Instruction *I = dyn_cast<Instruction>(V);
+  if (!I)
+    return false;
+
+  switch (I->getOpcode()) {
+  case Instruction::Xor:
+    return true;
+  case Instruction::Mul: {
+    // After Constant Hoisting pass, long constants may be represented as
+    // bitcast instructions. As a result, some constants may look like an
+    // instruction at first, and an additional check is necessary to find out if
+    // an operand is actually a constant.
+    Value *Op1 = I->getOperand(1);
+    ConstantInt *C = dyn_cast<ConstantInt>(Op1);
+    if (!C && isa<BitCastInst>(Op1))
+      C = dyn_cast<ConstantInt>(cast<BitCastInst>(Op1)->getOperand(0));
+    return C && C->getValue().getMinSignedBits() > BypassType->getBitWidth();
+  }
+  case Instruction::PHI:
+    // Stop IR traversal in case of a crazy input code. This limits recursion
+    // depth.
+    if (Visited.size() >= 16)
+      return false;
+    // Do not visit nodes that have been visited already. We return true because
+    // it means that we couldn't find any value that doesn't look hash-like.
+    if (Visited.find(I) != Visited.end())
+      return true;
+    Visited.insert(I);
+    return llvm::all_of(cast<PHINode>(I)->incoming_values(), [&](Value *V) {
+      // Ignore undef values as they probably don't affect the division
+      // operands.
+      return getValueRange(V, Visited) == VALRNG_LIKELY_LONG ||
+             isa<UndefValue>(V);
+    });
+  default:
+    return false;
+  }
+}
+
 /// Check if an integer value fits into our bypass type.
-ValueRange FastDivInsertionTask::getValueRange(Value *V) {
+ValueRange FastDivInsertionTask::getValueRange(Value *V,
+                                               VisitedSetTy &Visited) {
   unsigned ShortLen = BypassType->getBitWidth();
   unsigned LongLen = V->getType()->getIntegerBitWidth();
 
@@ -196,15 +238,22 @@ ValueRange FastDivInsertionTask::getValueRange(Value *V) {
   unsigned HiBits = LongLen - ShortLen;
 
   const DataLayout &DL = SlowDivOrRem->getModule()->getDataLayout();
-  APInt Zeros(LongLen, 0), Ones(LongLen, 0);
+  KnownBits Known(LongLen);
 
-  computeKnownBits(V, Zeros, Ones, DL);
+  computeKnownBits(V, Known, DL);
 
-  if (Zeros.countLeadingOnes() >= HiBits)
-    return VALRNG_SHORT;
+  if (Known.countMinLeadingZeros() >= HiBits)
+    return VALRNG_KNOWN_SHORT;
 
-  if (Ones.countLeadingZeros() < HiBits)
-    return VALRNG_LONG;
+  if (Known.countMaxLeadingZeros() < HiBits)
+    return VALRNG_LIKELY_LONG;
+
+  // Long integer divisions are often used in hashtable implementations. It's
+  // not worth bypassing such divisions because hash values are extremely
+  // unlikely to have enough leading zeros. The call below tries to detect
+  // values that are unlikely to fit BypassType (including hashes).
+  if (isHashLikeValue(V, Visited))
+    return VALRNG_LIKELY_LONG;
 
   return VALRNG_UNKNOWN;
 }
@@ -308,16 +357,18 @@ Optional<QuotRemPair> FastDivInsertionTask::insertFastDivAndRem() {
     return None;
   }
 
-  ValueRange DividendRange = getValueRange(Dividend);
-  if (DividendRange == VALRNG_LONG)
+  VisitedSetTy SetL;
+  ValueRange DividendRange = getValueRange(Dividend, SetL);
+  if (DividendRange == VALRNG_LIKELY_LONG)
     return None;
 
-  ValueRange DivisorRange = getValueRange(Divisor);
-  if (DivisorRange == VALRNG_LONG)
+  VisitedSetTy SetR;
+  ValueRange DivisorRange = getValueRange(Divisor, SetR);
+  if (DivisorRange == VALRNG_LIKELY_LONG)
     return None;
 
-  bool DividendShort = (DividendRange == VALRNG_SHORT);
-  bool DivisorShort = (DivisorRange == VALRNG_SHORT);
+  bool DividendShort = (DividendRange == VALRNG_KNOWN_SHORT);
+  bool DivisorShort = (DivisorRange == VALRNG_KNOWN_SHORT);
 
   if (DividendShort && DivisorShort) {
     // If both operands are known to be short then just replace the long

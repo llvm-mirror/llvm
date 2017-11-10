@@ -92,6 +92,8 @@ class Option<list<string> prefixes, string name, OptionKind kind> {
   int NumArgs = 0;
   string HelpText = ?;
   string MetaVarName = ?;
+  string Values = ?;
+  code ValuesCode = ?;
   list<OptionFlag> Flags = [];
   OptionGroup Group = ?;
   Option Alias = ?;
@@ -126,6 +128,8 @@ class Flags<list<OptionFlag> flags> { list<OptionFlag> Flags = flags; }
 class Group<OptionGroup group> { OptionGroup Group = group; }
 class HelpText<string text> { string HelpText = text; }
 class MetaVarName<string name> { string MetaVarName = name; }
+class Values<string value> { string Values = value; }
+class ValuesCode<code valuecode> { code ValuesCode = valuecode; }
 
 // Predefined options.
 

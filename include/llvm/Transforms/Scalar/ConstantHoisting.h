@@ -1,4 +1,4 @@
-//===-- ConstantHoisting.h - Prepare code for expensive constants ---------===//
+//==- ConstantHoisting.h - Prepare code for expensive constants --*- C++ -*-==//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -31,40 +31,53 @@
 // This optimization is only applied to integer constants in instructions and
 // simple (this means not nested) constant cast expressions. For example:
 // %0 = load i64* inttoptr (i64 big_constant to i64*)
+//
 //===----------------------------------------------------------------------===//
 
 #ifndef LLVM_TRANSFORMS_SCALAR_CONSTANTHOISTING_H
 #define LLVM_TRANSFORMS_SCALAR_CONSTANTHOISTING_H
 
-#include "llvm/Analysis/TargetTransformInfo.h"
-#include "llvm/IR/Dominators.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/PassManager.h"
+#include <algorithm>
+#include <vector>
 
 namespace llvm {
+
+class BasicBlock;
+class BlockFrequencyInfo;
+class Constant;
+class ConstantInt;
+class DominatorTree;
+class Function;
+class Instruction;
+class TargetTransformInfo;
 
 /// A private "module" namespace for types and utilities used by
 /// ConstantHoisting. These are implementation details and should not be used by
 /// clients.
 namespace consthoist {
+
 /// \brief Keeps track of the user of a constant and the operand index where the
 /// constant is used.
 struct ConstantUser {
   Instruction *Inst;
   unsigned OpndIdx;
 
-  ConstantUser(Instruction *Inst, unsigned Idx) : Inst(Inst), OpndIdx(Idx) { }
+  ConstantUser(Instruction *Inst, unsigned Idx) : Inst(Inst), OpndIdx(Idx) {}
 };
 
-typedef SmallVector<ConstantUser, 8> ConstantUseListType;
+using ConstantUseListType = SmallVector<ConstantUser, 8>;
 
 /// \brief Keeps track of a constant candidate and its uses.
 struct ConstantCandidate {
   ConstantUseListType Uses;
   ConstantInt *ConstInt;
-  unsigned CumulativeCost;
+  unsigned CumulativeCost = 0;
 
-  ConstantCandidate(ConstantInt *ConstInt)
-    : ConstInt(ConstInt), CumulativeCost(0) { }
+  ConstantCandidate(ConstantInt *ConstInt) : ConstInt(ConstInt) {}
 
   /// \brief Add the user to the use list and update the cost.
   void addUser(Instruction *Inst, unsigned Idx, unsigned Cost) {
@@ -80,17 +93,18 @@ struct RebasedConstantInfo {
   Constant *Offset;
 
   RebasedConstantInfo(ConstantUseListType &&Uses, Constant *Offset)
-    : Uses(std::move(Uses)), Offset(Offset) { }
+    : Uses(std::move(Uses)), Offset(Offset) {}
 };
 
-typedef SmallVector<RebasedConstantInfo, 4> RebasedConstantListType;
+using RebasedConstantListType = SmallVector<RebasedConstantInfo, 4>;
 
 /// \brief A base constant and all its rebased constants.
 struct ConstantInfo {
   ConstantInt *BaseConstant;
   RebasedConstantListType RebasedConstants;
 };
-}
+
+} // end namespace consthoist
 
 class ConstantHoistingPass : public PassInfoMixin<ConstantHoistingPass> {
 public:
@@ -98,7 +112,7 @@ public:
 
   // Glue for old PM.
   bool runImpl(Function &F, TargetTransformInfo &TTI, DominatorTree &DT,
-               BasicBlock &Entry);
+               BlockFrequencyInfo *BFI, BasicBlock &Entry);
 
   void releaseMemory() {
     ConstantVec.clear();
@@ -107,11 +121,12 @@ public:
   }
 
 private:
-  typedef DenseMap<ConstantInt *, unsigned> ConstCandMapType;
-  typedef std::vector<consthoist::ConstantCandidate> ConstCandVecType;
+  using ConstCandMapType = DenseMap<ConstantInt *, unsigned>;
+  using ConstCandVecType = std::vector<consthoist::ConstantCandidate>;
 
   const TargetTransformInfo *TTI;
   DominatorTree *DT;
+  BlockFrequencyInfo *BFI;
   BasicBlock *Entry;
 
   /// Keeps track of constant candidates found in the function.
@@ -124,11 +139,13 @@ private:
   SmallVector<consthoist::ConstantInfo, 8> ConstantVec;
 
   Instruction *findMatInsertPt(Instruction *Inst, unsigned Idx = ~0U) const;
-  Instruction *findConstantInsertionPoint(
-      const consthoist::ConstantInfo &ConstInfo) const;
+  SmallPtrSet<Instruction *, 8>
+  findConstantInsertionPoint(const consthoist::ConstantInfo &ConstInfo) const;
   void collectConstantCandidates(ConstCandMapType &ConstCandMap,
                                  Instruction *Inst, unsigned Idx,
                                  ConstantInt *ConstInt);
+  void collectConstantCandidates(ConstCandMapType &ConstCandMap,
+                                 Instruction *Inst, unsigned Idx);
   void collectConstantCandidates(ConstCandMapType &ConstCandMap,
                                  Instruction *Inst);
   void collectConstantCandidates(Function &Fn);
@@ -144,6 +161,7 @@ private:
   void deleteDeadCastInst() const;
   bool optimizeConstants(Function &Fn);
 };
-}
+
+} // end namespace llvm
 
 #endif // LLVM_TRANSFORMS_SCALAR_CONSTANTHOISTING_H

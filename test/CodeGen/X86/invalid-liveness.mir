@@ -1,4 +1,4 @@
-# RUN: not llc -march=x86 -run-pass liveintervals -o - %s 2>&1 | FileCheck %s
+# RUN: not llc -mtriple=i686-- -run-pass liveintervals -o - %s 2>&1 | FileCheck %s
 # REQUIRES: asserts
 
 --- |
@@ -16,12 +16,10 @@ registers:
   - { id: 0, class: gr32 }
 body: |
   bb.0:
-    successors: %bb.2, %bb.3
     JG_1 %bb.2, implicit %eflags
     JMP_1 %bb.3
 
   bb.2:
-    successors: %bb.3
     %0 = IMPLICIT_DEF
     JMP_1 %bb.3
 

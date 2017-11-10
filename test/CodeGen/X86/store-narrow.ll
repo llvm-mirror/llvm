@@ -1,9 +1,8 @@
 ; rdar://7860110
-; RUN: llc -asm-verbose=false < %s | FileCheck %s -check-prefix=X64
-; RUN: llc -march=x86 -asm-verbose=false -fixup-byte-word-insts=1 < %s | FileCheck %s -check-prefix=X32 -check-prefix=X32-BWON
-; RUN: llc -march=x86 -asm-verbose=false -fixup-byte-word-insts=0 < %s | FileCheck %s -check-prefix=X32 -check-prefix=X32-BWOFF
+; RUN: llc -mtriple=x86_64-apple-darwin10.2 -asm-verbose=false < %s | FileCheck %s -check-prefix=X64
+; RUN: llc -mtriple=i686-apple-darwin10.2 -asm-verbose=false -fixup-byte-word-insts=1 < %s | FileCheck %s -check-prefix=X32 -check-prefix=X32-BWON
+; RUN: llc -mtriple=i686-apple-darwin10.2 -asm-verbose=false -fixup-byte-word-insts=0 < %s | FileCheck %s -check-prefix=X32 -check-prefix=X32-BWOFF
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128-n8:16:32:64"
-target triple = "x86_64-apple-darwin10.2"
 
 define void @test1(i32* nocapture %a0, i8 zeroext %a1) nounwind ssp {
 entry:
@@ -134,10 +133,7 @@ entry:
 @g_16 = internal global i32 -1
 
 ; X64-LABEL: test8:
-; X64-NEXT: movl _g_16(%rip), %eax
-; X64-NEXT: movl $0, _g_16(%rip)
-; X64-NEXT: orl  $1, %eax
-; X64-NEXT: movl %eax, _g_16(%rip)
+; X64-NEXT: orb  $1, _g_16(%rip)
 ; X64-NEXT: ret
 define void @test8() nounwind {
   %tmp = load i32, i32* @g_16

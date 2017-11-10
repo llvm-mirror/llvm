@@ -44,9 +44,13 @@ static cl::opt<bool>
 DisableGVNLoadPRE("disable-gvn-loadpre", cl::init(false),
   cl::desc("Do not run the GVN load PRE pass"));
 
-static cl::opt<bool>
-DisableLTOVectorization("disable-lto-vectorization", cl::init(false),
-  cl::desc("Do not run loop or slp vectorization during LTO"));
+static cl::opt<bool> DisableLTOVectorization(
+    "disable-lto-vectorization", cl::init(false),
+    cl::desc("Do not run loop or slp vectorization during LTO"));
+
+static cl::opt<bool> EnableFreestanding(
+    "lto-freestanding", cl::init(false),
+    cl::desc("Enable Freestanding (disable builtins / TLI) during LTO"));
 
 #ifdef NDEBUG
 static bool VerifyByDefault = false;
@@ -71,20 +75,23 @@ static bool parsedOptions = false;
 
 static LLVMContext *LTOContext = nullptr;
 
-static void diagnosticHandler(const DiagnosticInfo &DI, void *Context) {
-  if (DI.getSeverity() != DS_Error) {
-    DiagnosticPrinterRawOStream DP(errs());
-    DI.print(DP);
-    errs() << '\n';
-    return;
+struct LTOToolDiagnosticHandler : public DiagnosticHandler {
+  bool handleDiagnostics(const DiagnosticInfo &DI) override {
+    if (DI.getSeverity() != DS_Error) {
+      DiagnosticPrinterRawOStream DP(errs());
+      DI.print(DP);
+      errs() << '\n';
+      return true;
+    }
+    sLastErrorString = "";
+    {
+      raw_string_ostream Stream(sLastErrorString);
+      DiagnosticPrinterRawOStream DP(Stream);
+      DI.print(DP);
+    }
+    return true;
   }
-  sLastErrorString = "";
-  {
-    raw_string_ostream Stream(sLastErrorString);
-    DiagnosticPrinterRawOStream DP(Stream);
-    DI.print(DP);
-  }
-}
+};
 
 // Initialize the configured targets if they have not been initialized.
 static void lto_initialize() {
@@ -104,7 +111,8 @@ static void lto_initialize() {
 
     static LLVMContext Context;
     LTOContext = &Context;
-    LTOContext->setDiagnosticHandler(diagnosticHandler, nullptr, true);
+    LTOContext->setDiagnosticHandler(
+        llvm::make_unique<LTOToolDiagnosticHandler>(), true);
     initialized = true;
   }
 }
@@ -159,6 +167,7 @@ static void lto_add_attrs(lto_code_gen_t cg) {
   if (OptLevel < '0' || OptLevel > '3')
     report_fatal_error("Optimization level must be between 0 and 3");
   CG->setOptLevel(OptLevel - '0');
+  CG->setFreestanding(EnableFreestanding);
 }
 
 extern const char* lto_get_version() {
@@ -267,9 +276,10 @@ lto_module_t lto_module_create_in_local_context(const void *mem, size_t length,
   lto_initialize();
   llvm::TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
 
-  // Create a local context. Ownership will be transfered to LTOModule.
+  // Create a local context. Ownership will be transferred to LTOModule.
   std::unique_ptr<LLVMContext> Context = llvm::make_unique<LLVMContext>();
-  Context->setDiagnosticHandler(diagnosticHandler, nullptr, true);
+  Context->setDiagnosticHandler(llvm::make_unique<LTOToolDiagnosticHandler>(),
+                                true);
 
   ErrorOr<std::unique_ptr<LTOModule>> M = LTOModule::createInLocalContext(
       std::move(Context), mem, length, Options, StringRef(path));
@@ -464,6 +474,7 @@ thinlto_code_gen_t thinlto_create_codegen(void) {
   lto_initialize();
   ThinLTOCodeGenerator *CodeGen = new ThinLTOCodeGenerator();
   CodeGen->setTargetOptions(InitTargetOptionsFromCodeGenFlags());
+  CodeGen->setFreestanding(EnableFreestanding);
 
   if (OptLevel.getNumOccurrences()) {
     if (OptLevel < '0' || OptLevel > '3')

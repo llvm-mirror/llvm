@@ -143,7 +143,7 @@ multiclass SS3I_unop_rm_int_mm<bits<8> opc, string OpcodeStr,
   def rm64 : MMXSS38I<opc, MRMSrcMem, (outs VR64:$dst), (ins i64mem:$src),
                    !strconcat(OpcodeStr, "\t{$src, $dst|$dst, $src}"),
                    [(set VR64:$dst,
-                     (IntId64 (bitconvert (memopmmx addr:$src))))],
+                     (IntId64 (bitconvert (load_mmx addr:$src))))],
                    itins.rm>, Sched<[itins.Sched.Folded]>;
 }
 
@@ -163,7 +163,7 @@ multiclass SS3I_binop_rm_int_mm<bits<8> opc, string OpcodeStr,
         !strconcat(OpcodeStr, "\t{$src2, $dst|$dst, $src2}"),
        [(set VR64:$dst,
          (IntId64 VR64:$src1,
-          (bitconvert (memopmmx addr:$src2))))], itins.rm>,
+          (bitconvert (load_mmx addr:$src2))))], itins.rm>,
       Sched<[itins.Sched.Folded, ReadAfterLd]>;
 }
 }
@@ -248,7 +248,8 @@ def MMX_MOVD64grr : MMXI<0x7E, MRMDestReg, (outs GR32:$dst), (ins VR64:$src),
                          "movd\t{$src, $dst|$dst, $src}",
                          [(set GR32:$dst,
                           (MMX_X86movd2w (x86mmx VR64:$src)))],
-                          IIC_MMX_MOV_REG_MM>, Sched<[WriteMove]>;
+                          IIC_MMX_MOV_REG_MM>, Sched<[WriteMove]>,
+                          FoldGenData<"MMX_MOVD64rr">;
 
 let isBitcast = 1 in
 def MMX_MOVD64to64rr : MMXRI<0x6E, MRMSrcReg, (outs VR64:$dst), (ins GR64:$src),
@@ -277,7 +278,7 @@ def MMX_MOVQ64rr : MMXI<0x6F, MRMSrcReg, (outs VR64:$dst), (ins VR64:$src),
 let isCodeGenOnly = 1, ForceDisassemble = 1, hasSideEffects = 0 in {
 def MMX_MOVQ64rr_REV : MMXI<0x7F, MRMDestReg, (outs VR64:$dst), (ins VR64:$src),
                         "movq\t{$src, $dst|$dst, $src}", [],
-                        IIC_MMX_MOVQ_RR>;
+                        IIC_MMX_MOVQ_RR>, FoldGenData<"MMX_MOVQ64rr">;
 }
 } // SchedRW
 
@@ -647,4 +648,16 @@ def : Pat<(f64 (bitconvert (x86mmx VR64:$src))),
           (MMX_MOVQ2FR64rr VR64:$src)>;
 def : Pat<(x86mmx (bitconvert (f64 FR64:$src))),
           (MMX_MOVFR642Qrr FR64:$src)>;
+def : Pat<(x86mmx (MMX_X86movdq2q
+                   (bc_v2i64 (v4i32 (int_x86_sse2_cvtps2dq VR128:$src))))),
+          (MMX_CVTPS2PIirr VR128:$src)>;
+def : Pat<(x86mmx (MMX_X86movdq2q
+                   (bc_v2i64 (v4i32 (fp_to_sint (v4f32 VR128:$src)))))),
+          (MMX_CVTTPS2PIirr VR128:$src)>;
+def : Pat<(x86mmx (MMX_X86movdq2q
+                   (bc_v2i64 (v4i32 (X86cvtp2Int (v2f64 VR128:$src)))))),
+          (MMX_CVTPD2PIirr VR128:$src)>;
+def : Pat<(x86mmx (MMX_X86movdq2q
+                   (bc_v2i64 (v4i32 (X86cvttp2si (v2f64 VR128:$src)))))),
+          (MMX_CVTTPD2PIirr VR128:$src)>;
 }

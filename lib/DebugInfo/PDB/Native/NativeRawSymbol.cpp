@@ -1,4 +1,4 @@
-//===- NativeRawSymbol.cpp - Native implementation of IPDBRawSymbol -*- C++ -*-===//
+//===- NativeRawSymbol.cpp - Native implementation of IPDBRawSymbol -------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -8,21 +8,13 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/DebugInfo/PDB/Native/NativeRawSymbol.h"
-#include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/DebugInfo/PDB/Native/InfoStream.h"
-#include "llvm/DebugInfo/PDB/IPDBEnumChildren.h"
-#include "llvm/DebugInfo/PDB/Native/PDBFile.h"
-#include "llvm/DebugInfo/PDB/PDBExtras.h"
-#include "llvm/DebugInfo/PDB/Native/NativeSession.h"
-#include "llvm/Support/ConvertUTF.h"
-#include "llvm/Support/raw_ostream.h"
+#include "llvm/DebugInfo/PDB/PDBSymbolTypeBuiltin.h"
 
 using namespace llvm;
 using namespace llvm::pdb;
 
-NativeRawSymbol::NativeRawSymbol(NativeSession &PDBSession)
-  : Session(PDBSession) {}
+NativeRawSymbol::NativeRawSymbol(NativeSession &PDBSession, SymIndexId SymbolId)
+    : Session(PDBSession), SymbolId(SymbolId) {}
 
 void NativeRawSymbol::dump(raw_ostream &OS, int Indent) const {}
 
@@ -48,7 +40,7 @@ NativeRawSymbol::findInlineFramesByRVA(uint32_t RVA) const {
   return nullptr;
 }
 
-void NativeRawSymbol::getDataBytes(llvm::SmallVector<uint8_t, 32> &bytes) const {
+void NativeRawSymbol::getDataBytes(SmallVector<uint8_t, 32> &bytes) const {
   bytes.clear();
 }
 
@@ -65,11 +57,6 @@ uint32_t NativeRawSymbol::getAddressSection() const {
 }
 
 uint32_t NativeRawSymbol::getAge() const {
-  auto &File = Session.getPDBFile();
-  auto IS = File.getPDBInfoStream();
-  if (IS)
-    return IS->getAge();
-  consumeError(IS.takeError());
   return 0;
 }
 
@@ -113,7 +100,7 @@ uint32_t NativeRawSymbol::getClassParentId() const {
 }
 
 std::string NativeRawSymbol::getCompilerName() const {
-  return 0;
+  return {};
 }
 
 uint32_t NativeRawSymbol::getCount() const {
@@ -140,7 +127,7 @@ uint32_t NativeRawSymbol::getLexicalParentId() const {
 }
 
 std::string NativeRawSymbol::getLibraryName() const {
-  return "";
+  return {};
 }
 
 uint32_t NativeRawSymbol::getLiveRangeStartAddressOffset() const {
@@ -168,7 +155,7 @@ uint32_t NativeRawSymbol::getMemorySpaceKind() const {
 }
 
 std::string NativeRawSymbol::getName() const {
-  return 0;
+  return {};
 }
 
 uint32_t NativeRawSymbol::getNumberOfAcceleratorPointerTags() const {
@@ -192,7 +179,7 @@ uint32_t NativeRawSymbol::getNumberOfRows() const {
 }
 
 std::string NativeRawSymbol::getObjectFileName() const {
-  return "";
+  return {};
 }
 
 uint32_t NativeRawSymbol::getOemId() const {
@@ -244,7 +231,7 @@ uint32_t NativeRawSymbol::getSlot() const {
 }
 
 std::string NativeRawSymbol::getSourceFileName() const {
-  return 0;
+  return {};
 }
 
 uint32_t NativeRawSymbol::getStride() const {
@@ -255,13 +242,9 @@ uint32_t NativeRawSymbol::getSubTypeId() const {
   return 0;
 }
 
-std::string NativeRawSymbol::getSymbolsFileName() const {
-  return Session.getPDBFile().getFilePath();
-}
+std::string NativeRawSymbol::getSymbolsFileName() const { return {}; }
 
-uint32_t NativeRawSymbol::getSymIndexId() const {
-  return 0;
-}
+uint32_t NativeRawSymbol::getSymIndexId() const { return SymbolId; }
 
 uint32_t NativeRawSymbol::getTargetOffset() const {
   return 0;
@@ -300,7 +283,7 @@ uint32_t NativeRawSymbol::getUavSlot() const {
 }
 
 std::string NativeRawSymbol::getUndecoratedName() const {
-  return 0;
+  return {};
 }
 
 uint32_t NativeRawSymbol::getUnmodifiedTypeId() const {
@@ -327,6 +310,11 @@ uint32_t NativeRawSymbol::getVirtualTableShapeId() const {
   return 0;
 }
 
+std::unique_ptr<PDBSymbolTypeBuiltin>
+NativeRawSymbol::getVirtualBaseTableType() const {
+  return nullptr;
+}
+
 PDB_DataKind NativeRawSymbol::getDataKind() const {
   return PDB_DataKind::Unknown;
 }
@@ -335,14 +323,7 @@ PDB_SymType NativeRawSymbol::getSymTag() const {
   return PDB_SymType::None;
 }
 
-PDB_UniqueId NativeRawSymbol::getGuid() const {
-  auto &File = Session.getPDBFile();
-  auto IS = File.getPDBInfoStream();
-  if (IS)
-    return IS->getGuid();
-  consumeError(IS.takeError());
-  return PDB_UniqueId{{0}};
-}
+codeview::GUID NativeRawSymbol::getGuid() const { return codeview::GUID{{0}}; }
 
 int32_t NativeRawSymbol::getOffset() const {
   return 0;
@@ -709,5 +690,5 @@ bool NativeRawSymbol::wasInlined() const {
 }
 
 std::string NativeRawSymbol::getUnused() const {
-  return "";
+  return {};
 }

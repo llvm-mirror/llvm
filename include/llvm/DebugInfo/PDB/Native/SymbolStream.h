@@ -27,6 +27,12 @@ public:
   ~SymbolStream();
   Error reload();
 
+  const codeview::CVSymbolArray &getSymbolArray() const {
+    return SymbolRecords;
+  }
+
+  codeview::CVSymbol readRecord(uint32_t Offset) const;
+
   iterator_range<codeview::CVSymbolArray::Iterator>
   getSymbols(bool *HadError) const;
 

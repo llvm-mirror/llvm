@@ -1,4 +1,4 @@
-//===-- IndirectionUtils.h - Utilities for adding indirections --*- C++ -*-===//
+//===- IndirectionUtils.h - Utilities for adding indirections ---*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -18,9 +18,6 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/ExecutionEngine/JITSymbol.h"
-#include "llvm/IR/IRBuilder.h"
-#include "llvm/IR/Mangler.h"
-#include "llvm/IR/Module.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/Memory.h"
 #include "llvm/Support/Process.h"
@@ -36,12 +33,23 @@
 #include <vector>
 
 namespace llvm {
+
+class Constant;
+class Function;
+class FunctionType;
+class GlobalAlias;
+class GlobalVariable;
+class Module;
+class PointerType;
+class Triple;
+class Value;
+
 namespace orc {
 
 /// @brief Target-independent base class for compile callback management.
 class JITCompileCallbackManager {
 public:
-  typedef std::function<JITTargetAddress()> CompileFtor;
+  using CompileFtor = std::function<JITTargetAddress()>;
 
   /// @brief Handle to a newly created compile callback. Can be used to get an
   ///        IR constant representing the address of the trampoline, and to set
@@ -97,10 +105,13 @@ public:
   }
 
   /// @brief Reserve a compile callback.
-  CompileCallbackInfo getCompileCallback() {
-    JITTargetAddress TrampolineAddr = getAvailableTrampolineAddr();
-    auto &Compile = this->ActiveTrampolines[TrampolineAddr];
-    return CompileCallbackInfo(TrampolineAddr, Compile);
+  Expected<CompileCallbackInfo> getCompileCallback() {
+    if (auto TrampolineAddrOrErr = getAvailableTrampolineAddr()) {
+      const auto &TrampolineAddr = *TrampolineAddrOrErr;
+      auto &Compile = this->ActiveTrampolines[TrampolineAddr];
+      return CompileCallbackInfo(TrampolineAddr, Compile);
+    } else
+      return TrampolineAddrOrErr.takeError();
   }
 
   /// @brief Get a CompileCallbackInfo for an existing callback.
@@ -125,14 +136,15 @@ public:
 protected:
   JITTargetAddress ErrorHandlerAddress;
 
-  typedef std::map<JITTargetAddress, CompileFtor> TrampolineMapT;
+  using TrampolineMapT = std::map<JITTargetAddress, CompileFtor>;
   TrampolineMapT ActiveTrampolines;
   std::vector<JITTargetAddress> AvailableTrampolines;
 
 private:
-  JITTargetAddress getAvailableTrampolineAddr() {
+  Expected<JITTargetAddress> getAvailableTrampolineAddr() {
     if (this->AvailableTrampolines.empty())
-      grow();
+      if (auto Err = grow())
+        return std::move(Err);
     assert(!this->AvailableTrampolines.empty() &&
            "Failed to grow available trampolines.");
     JITTargetAddress TrampolineAddr = this->AvailableTrampolines.back();
@@ -141,7 +153,7 @@ private:
   }
 
   // Create new trampolines - to be implemented in subclasses.
-  virtual void grow() = 0;
+  virtual Error grow() = 0;
 
   virtual void anchor();
 };
@@ -155,7 +167,6 @@ public:
   ///                            process to be used if a compile callback fails.
   LocalJITCompileCallbackManager(JITTargetAddress ErrorHandlerAddress)
       : JITCompileCallbackManager(ErrorHandlerAddress) {
-
     /// Set up the resolver block.
     std::error_code EC;
     ResolverBlock = sys::OwningMemoryBlock(sys::Memory::allocateMappedMemory(
@@ -181,7 +192,7 @@ private:
             reinterpret_cast<uintptr_t>(TrampolineId)));
   }
 
-  void grow() override {
+  Error grow() override {
     assert(this->AvailableTrampolines.empty() && "Growing prematurely?");
 
     std::error_code EC;
@@ -189,7 +200,8 @@ private:
         sys::OwningMemoryBlock(sys::Memory::allocateMappedMemory(
             sys::Process::getPageSize(), nullptr,
             sys::Memory::MF_READ | sys::Memory::MF_WRITE, EC));
-    assert(!EC && "Failed to allocate trampoline block");
+    if (EC)
+      return errorCodeToError(EC);
 
     unsigned NumTrampolines =
         (sys::Process::getPageSize() - TargetT::PointerSize) /
@@ -204,12 +216,13 @@ private:
           static_cast<JITTargetAddress>(reinterpret_cast<uintptr_t>(
               TrampolineMem + (I * TargetT::TrampolineSize))));
 
-    EC = sys::Memory::protectMappedMemory(TrampolineBlock.getMemoryBlock(),
-                                          sys::Memory::MF_READ |
-                                              sys::Memory::MF_EXEC);
-    assert(!EC && "Failed to mprotect trampoline block");
+    if (auto EC = sys::Memory::protectMappedMemory(
+                    TrampolineBlock.getMemoryBlock(),
+                    sys::Memory::MF_READ | sys::Memory::MF_EXEC))
+      return errorCodeToError(EC);
 
     TrampolineBlocks.push_back(std::move(TrampolineBlock));
+    return Error::success();
   }
 
   sys::OwningMemoryBlock ResolverBlock;
@@ -220,7 +233,7 @@ private:
 class IndirectStubsManager {
 public:
   /// @brief Map type for initializing the manager. See init.
-  typedef StringMap<std::pair<JITTargetAddress, JITSymbolFlags>> StubInitsMap;
+  using StubInitsMap = StringMap<std::pair<JITTargetAddress, JITSymbolFlags>>;
 
   virtual ~IndirectStubsManager() = default;
 
@@ -336,7 +349,7 @@ private:
   }
 
   std::vector<typename TargetT::IndirectStubsInfo> IndirectStubsInfos;
-  typedef std::pair<uint16_t, uint16_t> StubKey;
+  using StubKey = std::pair<uint16_t, uint16_t>;
   std::vector<StubKey> FreeStubs;
   StringMap<std::pair<StubKey, JITSymbolFlags>> StubIndexes;
 };
@@ -432,6 +445,7 @@ void cloneModuleFlagsMetadata(Module &Dst, const Module &Src,
                               ValueToValueMapTy &VMap);
 
 } // end namespace orc
+
 } // end namespace llvm
 
 #endif // LLVM_EXECUTIONENGINE_ORC_INDIRECTIONUTILS_H

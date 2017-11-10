@@ -10,7 +10,7 @@
 // This file is part of the X86 Disassembler Emitter.
 // It contains the implementation of a single recognizable instruction.
 // Documentation for the disassembler emitter in general can be found in
-//  X86DisasemblerEmitter.h.
+//  X86DisassemblerEmitter.h.
 //
 //===----------------------------------------------------------------------===//
 
@@ -21,129 +21,6 @@
 #include <string>
 
 using namespace llvm;
-
-#define MRM_MAPPING     \
-  MAP(C0, 64)           \
-  MAP(C1, 65)           \
-  MAP(C2, 66)           \
-  MAP(C3, 67)           \
-  MAP(C4, 68)           \
-  MAP(C5, 69)           \
-  MAP(C6, 70)           \
-  MAP(C7, 71)           \
-  MAP(C8, 72)           \
-  MAP(C9, 73)           \
-  MAP(CA, 74)           \
-  MAP(CB, 75)           \
-  MAP(CC, 76)           \
-  MAP(CD, 77)           \
-  MAP(CE, 78)           \
-  MAP(CF, 79)           \
-  MAP(D0, 80)           \
-  MAP(D1, 81)           \
-  MAP(D2, 82)           \
-  MAP(D3, 83)           \
-  MAP(D4, 84)           \
-  MAP(D5, 85)           \
-  MAP(D6, 86)           \
-  MAP(D7, 87)           \
-  MAP(D8, 88)           \
-  MAP(D9, 89)           \
-  MAP(DA, 90)           \
-  MAP(DB, 91)           \
-  MAP(DC, 92)           \
-  MAP(DD, 93)           \
-  MAP(DE, 94)           \
-  MAP(DF, 95)           \
-  MAP(E0, 96)           \
-  MAP(E1, 97)           \
-  MAP(E2, 98)           \
-  MAP(E3, 99)           \
-  MAP(E4, 100)          \
-  MAP(E5, 101)          \
-  MAP(E6, 102)          \
-  MAP(E7, 103)          \
-  MAP(E8, 104)          \
-  MAP(E9, 105)          \
-  MAP(EA, 106)          \
-  MAP(EB, 107)          \
-  MAP(EC, 108)          \
-  MAP(ED, 109)          \
-  MAP(EE, 110)          \
-  MAP(EF, 111)          \
-  MAP(F0, 112)          \
-  MAP(F1, 113)          \
-  MAP(F2, 114)          \
-  MAP(F3, 115)          \
-  MAP(F4, 116)          \
-  MAP(F5, 117)          \
-  MAP(F6, 118)          \
-  MAP(F7, 119)          \
-  MAP(F8, 120)          \
-  MAP(F9, 121)          \
-  MAP(FA, 122)          \
-  MAP(FB, 123)          \
-  MAP(FC, 124)          \
-  MAP(FD, 125)          \
-  MAP(FE, 126)          \
-  MAP(FF, 127)
-
-// A clone of X86 since we can't depend on something that is generated.
-namespace X86Local {
-  enum {
-    Pseudo        = 0,
-    RawFrm        = 1,
-    AddRegFrm     = 2,
-    RawFrmMemOffs = 3,
-    RawFrmSrc     = 4,
-    RawFrmDst     = 5,
-    RawFrmDstSrc  = 6,
-    RawFrmImm8    = 7,
-    RawFrmImm16   = 8,
-    MRMDestMem     = 32,
-    MRMSrcMem      = 33,
-    MRMSrcMem4VOp3 = 34,
-    MRMSrcMemOp4   = 35,
-    MRMXm = 39,
-    MRM0m = 40, MRM1m = 41, MRM2m = 42, MRM3m = 43,
-    MRM4m = 44, MRM5m = 45, MRM6m = 46, MRM7m = 47,
-    MRMDestReg     = 48,
-    MRMSrcReg      = 49,
-    MRMSrcReg4VOp3 = 50,
-    MRMSrcRegOp4   = 51,
-    MRMXr = 55,
-    MRM0r = 56, MRM1r = 57, MRM2r = 58, MRM3r = 59,
-    MRM4r = 60, MRM5r = 61, MRM6r = 62, MRM7r = 63,
-#define MAP(from, to) MRM_##from = to,
-    MRM_MAPPING
-#undef MAP
-  };
-
-  enum {
-    OB = 0, TB = 1, T8 = 2, TA = 3, XOP8 = 4, XOP9 = 5, XOPA = 6
-  };
-
-  enum {
-    PS = 1, PD = 2, XS = 3, XD = 4
-  };
-
-  enum {
-    VEX = 1, XOP = 2, EVEX = 3
-  };
-
-  enum {
-    OpSize16 = 1, OpSize32 = 2
-  };
-
-  enum {
-    AdSize16 = 1, AdSize32 = 2, AdSize64 = 3
-  };
-
-  enum {
-    VEX_W0 = 0, VEX_W1 = 1, VEX_WIG = 2
-  };
-}
-
 using namespace X86Disassembler;
 
 /// byteFromBitsInit - Extracts a value at most 8 bits in width from a BitsInit.
@@ -223,6 +100,9 @@ RecognizableInstr::RecognizableInstr(DisassemblerTables &tables,
 
   HasVEX_LPrefix   = Rec->getValueAsBit("hasVEX_L");
 
+  EncodeRC = HasEVEX_B &&
+             (Form == X86Local::MRMDestReg || Form == X86Local::MRMSrcReg);
+
   // Check for 64-bit inst which does not require REX
   Is32Bit = false;
   Is64Bit = false;
@@ -284,7 +164,7 @@ InstructionContext RecognizableInstr::insnContext() const {
       llvm_unreachable("Don't support VEX.L if EVEX_L2 is enabled");
     }
     // VEX_L & VEX_W
-    if (HasVEX_LPrefix && VEX_WPrefix == X86Local::VEX_W1) {
+    if (!EncodeRC && HasVEX_LPrefix && VEX_WPrefix == X86Local::VEX_W1) {
       if (OpPrefix == X86Local::PD)
         insnContext = EVEX_KB(IC_EVEX_L_W_OPSIZE);
       else if (OpPrefix == X86Local::XS)
@@ -297,7 +177,7 @@ InstructionContext RecognizableInstr::insnContext() const {
         errs() << "Instruction does not use a prefix: " << Name << "\n";
         llvm_unreachable("Invalid prefix");
       }
-    } else if (HasVEX_LPrefix) {
+    } else if (!EncodeRC && HasVEX_LPrefix) {
       // VEX_L
       if (OpPrefix == X86Local::PD)
         insnContext = EVEX_KB(IC_EVEX_L_OPSIZE);
@@ -311,8 +191,8 @@ InstructionContext RecognizableInstr::insnContext() const {
         errs() << "Instruction does not use a prefix: " << Name << "\n";
         llvm_unreachable("Invalid prefix");
       }
-    }
-    else if (HasEVEX_L2Prefix && VEX_WPrefix == X86Local::VEX_W1) {
+    } else if (!EncodeRC && HasEVEX_L2Prefix &&
+               VEX_WPrefix == X86Local::VEX_W1) {
       // EVEX_L2 & VEX_W
       if (OpPrefix == X86Local::PD)
         insnContext = EVEX_KB(IC_EVEX_L2_W_OPSIZE);
@@ -326,7 +206,7 @@ InstructionContext RecognizableInstr::insnContext() const {
         errs() << "Instruction does not use a prefix: " << Name << "\n";
         llvm_unreachable("Invalid prefix");
       }
-    } else if (HasEVEX_L2Prefix) {
+    } else if (!EncodeRC && HasEVEX_L2Prefix) {
       // EVEX_L2
       if (OpPrefix == X86Local::PD)
         insnContext = EVEX_KB(IC_EVEX_L2_OPSIZE);
@@ -490,7 +370,7 @@ void RecognizableInstr::handleOperand(bool optional, unsigned &operandIndex,
     ++operandIndex;
   }
 
-  const std::string &typeName = (*Operands)[operandIndex].Rec->getName();
+  StringRef typeName = (*Operands)[operandIndex].Rec->getName();
 
   OperandEncoding encoding = encodingFromString(typeName, OpSize);
   // Adjust the encoding type for an operand based on the instruction.
@@ -668,7 +548,7 @@ void RecognizableInstr::emitInstructionSpecifier() {
     break;
   case X86Local::MRMSrcReg4VOp3:
     assert(numPhysicalOperands == 3 &&
-           "Unexpected number of operands for MRMSrcRegFrm");
+           "Unexpected number of operands for MRMSrcReg4VOp3Frm");
     HANDLE_OPERAND(roRegister)
     HANDLE_OPERAND(rmRegister)
     HANDLE_OPERAND(vvvvRegister)
@@ -708,7 +588,7 @@ void RecognizableInstr::emitInstructionSpecifier() {
     break;
   case X86Local::MRMSrcMem4VOp3:
     assert(numPhysicalOperands == 3 &&
-           "Unexpected number of operands for MRMSrcMemFrm");
+           "Unexpected number of operands for MRMSrcMem4VOp3Frm");
     HANDLE_OPERAND(roRegister)
     HANDLE_OPERAND(memory)
     HANDLE_OPERAND(vvvvRegister)
@@ -890,7 +770,7 @@ void RecognizableInstr::emitDecodePath(DisassemblerTables &tables) const {
     case X86Local::MRM6m:      case X86Local::MRM7m:
       filter = new ExtendedFilter(false, Form - X86Local::MRM0m);
       break;
-    MRM_MAPPING
+    X86_INSTR_MRM_MAPPING
       filter = new ExactFilter(0xC0 + Form - X86Local::MRM_C0);   \
       break;
     } // switch (Form)
@@ -919,17 +799,14 @@ void RecognizableInstr::emitDecodePath(DisassemblerTables &tables) const {
     for (currentOpcode = opcodeToSet;
          currentOpcode < opcodeToSet + 8;
          ++currentOpcode)
-      tables.setTableFields(opcodeType,
-                            insnContext(),
-                            currentOpcode,
-                            *filter,
-                            UID, Is32Bit, IgnoresVEX_L, AddressSize);
+      tables.setTableFields(opcodeType, insnContext(), currentOpcode, *filter,
+                            UID, Is32Bit, OpPrefix == 0,
+                            IgnoresVEX_L || EncodeRC,
+                            VEX_WPrefix == X86Local::VEX_WIG, AddressSize);
   } else {
-    tables.setTableFields(opcodeType,
-                          insnContext(),
-                          opcodeToSet,
-                          *filter,
-                          UID, Is32Bit, IgnoresVEX_L, AddressSize);
+    tables.setTableFields(opcodeType, insnContext(), opcodeToSet, *filter, UID,
+                          Is32Bit, OpPrefix == 0, IgnoresVEX_L || EncodeRC,
+                          VEX_WPrefix == X86Local::VEX_WIG, AddressSize);
   }
 
   delete filter;
@@ -1052,19 +929,19 @@ OperandType RecognizableInstr::typeFromString(const std::string &s,
   TYPE("VK64",                TYPE_VK)
   TYPE("VK64WM",              TYPE_VK)
   TYPE("GR32_NOAX",           TYPE_Rv)
-  TYPE("vx64mem",             TYPE_M)
-  TYPE("vx128mem",            TYPE_M)
-  TYPE("vx256mem",            TYPE_M)
-  TYPE("vy128mem",            TYPE_M)
-  TYPE("vy256mem",            TYPE_M)
-  TYPE("vx64xmem",            TYPE_M)
-  TYPE("vx128xmem",           TYPE_M)
-  TYPE("vx256xmem",           TYPE_M)
-  TYPE("vy128xmem",           TYPE_M)
-  TYPE("vy256xmem",           TYPE_M)
-  TYPE("vy512mem",            TYPE_M)
-  TYPE("vz256xmem",           TYPE_M)
-  TYPE("vz512mem",            TYPE_M)
+  TYPE("vx64mem",             TYPE_MVSIBX)
+  TYPE("vx128mem",            TYPE_MVSIBX)
+  TYPE("vx256mem",            TYPE_MVSIBX)
+  TYPE("vy128mem",            TYPE_MVSIBY)
+  TYPE("vy256mem",            TYPE_MVSIBY)
+  TYPE("vx64xmem",            TYPE_MVSIBX)
+  TYPE("vx128xmem",           TYPE_MVSIBX)
+  TYPE("vx256xmem",           TYPE_MVSIBX)
+  TYPE("vy128xmem",           TYPE_MVSIBY)
+  TYPE("vy256xmem",           TYPE_MVSIBY)
+  TYPE("vy512mem",            TYPE_MVSIBY)
+  TYPE("vz256xmem",           TYPE_MVSIBZ)
+  TYPE("vz512mem",            TYPE_MVSIBZ)
   TYPE("BNDR",                TYPE_BNDR)
   errs() << "Unhandled type string " << s << "\n";
   llvm_unreachable("Unhandled type string");
@@ -1085,7 +962,7 @@ RecognizableInstr::immediateEncodingFromString(const std::string &s,
   ENCODING("XOPCC",           ENCODING_IB)
   ENCODING("AVXCC",           ENCODING_IB)
   ENCODING("AVX512ICC",       ENCODING_IB)
-  ENCODING("AVX512RC",        ENCODING_IB)
+  ENCODING("AVX512RC",        ENCODING_IRC)
   ENCODING("i16imm",          ENCODING_Iv)
   ENCODING("i16i8imm",        ENCODING_IB)
   ENCODING("i32imm",          ENCODING_Iv)

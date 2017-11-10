@@ -23,10 +23,10 @@
 //
 // The scalar TBAA metadata format is very simple. TBAA MDNodes have up to
 // three fields, e.g.:
-//   !0 = metadata !{ metadata !"an example type tree" }
-//   !1 = metadata !{ metadata !"int", metadata !0 }
-//   !2 = metadata !{ metadata !"float", metadata !0 }
-//   !3 = metadata !{ metadata !"const float", metadata !2, i64 1 }
+//   !0 = !{ !"an example type tree" }
+//   !1 = !{ !"int", !0 }
+//   !2 = !{ !"float", !0 }
+//   !3 = !{ !"const float", !2, i64 1 }
 //
 // The first field is an identity field. It can be any value, usually
 // an MDString, which uniquely identifies the type. The most important
@@ -58,7 +58,7 @@
 //
 // The struct type node has a name and a list of pairs, one pair for each member
 // of the struct. The first element of each pair is a type node (a struct type
-// node or a sclar type node), specifying the type of the member, the second
+// node or a scalar type node), specifying the type of the member, the second
 // element of each pair is the offset of the member.
 //
 // Given an example
@@ -74,13 +74,13 @@
 // instruction. The base type is !4 (struct B), the access type is !2 (scalar
 // type short) and the offset is 4.
 //
-// !0 = metadata !{metadata !"Simple C/C++ TBAA"}
-// !1 = metadata !{metadata !"omnipotent char", metadata !0} // Scalar type node
-// !2 = metadata !{metadata !"short", metadata !1}           // Scalar type node
-// !3 = metadata !{metadata !"A", metadata !2, i64 0}        // Struct type node
-// !4 = metadata !{metadata !"B", metadata !2, i64 0, metadata !3, i64 4}
+// !0 = !{!"Simple C/C++ TBAA"}
+// !1 = !{!"omnipotent char", !0} // Scalar type node
+// !2 = !{!"short", !1}           // Scalar type node
+// !3 = !{!"A", !2, i64 0}        // Struct type node
+// !4 = !{!"B", !2, i64 0, !3, i64 4}
 //                                                           // Struct type node
-// !5 = metadata !{metadata !4, metadata !2, i64 4}          // Path tag node
+// !5 = !{!4, !2, i64 4}          // Path tag node
 //
 // The struct type nodes and the scalar type nodes form a type DAG.
 //         Root (!0)
@@ -123,10 +123,20 @@
 
 #include "llvm/Analysis/TypeBasedAliasAnalysis.h"
 #include "llvm/ADT/SetVector.h"
+#include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/Analysis/MemoryLocation.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Instruction.h"
 #include "llvm/IR/LLVMContext.h"
-#include "llvm/IR/Module.h"
+#include "llvm/IR/Metadata.h"
+#include "llvm/Pass.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/ErrorHandling.h"
+#include <cassert>
+#include <cstdint>
+
 using namespace llvm;
 
 // A handy option for disabling TBAA functionality. The same effect can also be
@@ -135,15 +145,16 @@ using namespace llvm;
 static cl::opt<bool> EnableTBAA("enable-tbaa", cl::init(true));
 
 namespace {
+
 /// This is a simple wrapper around an MDNode which provides a higher-level
 /// interface by hiding the details of how alias analysis information is encoded
 /// in its operands.
 template<typename MDNodeTy>
 class TBAANodeImpl {
-  MDNodeTy *Node;
+  MDNodeTy *Node = nullptr;
 
 public:
-  TBAANodeImpl() : Node(nullptr) {}
+  TBAANodeImpl() = default;
   explicit TBAANodeImpl(MDNodeTy *N) : Node(N) {}
 
   /// getNode - Get the MDNode for this TBAANode.
@@ -176,8 +187,8 @@ public:
 /// \name Specializations of \c TBAANodeImpl for const and non const qualified
 /// \c MDNode.
 /// @{
-typedef TBAANodeImpl<const MDNode> TBAANode;
-typedef TBAANodeImpl<MDNode> MutableTBAANode;
+using TBAANode = TBAANodeImpl<const MDNode>;
+using MutableTBAANode = TBAANodeImpl<MDNode>;
 /// @}
 
 /// This is a simple wrapper around an MDNode which provides a
@@ -197,12 +208,15 @@ public:
   MDNodeTy *getBaseType() const {
     return dyn_cast_or_null<MDNode>(Node->getOperand(0));
   }
+
   MDNodeTy *getAccessType() const {
     return dyn_cast_or_null<MDNode>(Node->getOperand(1));
   }
+
   uint64_t getOffset() const {
     return mdconst::extract<ConstantInt>(Node->getOperand(2))->getZExtValue();
   }
+
   /// Test if this TBAAStructTagNode represents a type for objects
   /// which are not modified (by any means) in the context where this
   /// AliasAnalysis is relevant.
@@ -219,8 +233,8 @@ public:
 /// \name Specializations of \c TBAAStructTagNodeImpl for const and non const
 /// qualified \c MDNods.
 /// @{
-typedef TBAAStructTagNodeImpl<const MDNode> TBAAStructTagNode;
-typedef TBAAStructTagNodeImpl<MDNode> MutableTBAAStructTagNode;
+using TBAAStructTagNode = TBAAStructTagNodeImpl<const MDNode>;
+using MutableTBAAStructTagNode = TBAAStructTagNodeImpl<MDNode>;
 /// @}
 
 /// This is a simple wrapper around an MDNode which provides a
@@ -228,10 +242,10 @@ typedef TBAAStructTagNodeImpl<MDNode> MutableTBAAStructTagNode;
 /// information is encoded in its operands.
 class TBAAStructTypeNode {
   /// This node should be created with createTBAAStructTypeNode.
-  const MDNode *Node;
+  const MDNode *Node = nullptr;
 
 public:
-  TBAAStructTypeNode() : Node(nullptr) {}
+  TBAAStructTypeNode() = default;
   explicit TBAAStructTypeNode(const MDNode *N) : Node(N) {}
 
   /// Get the MDNode for this TBAAStructTypeNode.
@@ -283,7 +297,8 @@ public:
     return TBAAStructTypeNode(P);
   }
 };
-}
+
+} // end anonymous namespace
 
 /// Check the first operand of the tbaa tag node, if it is a MDNode, we treat
 /// it as struct-path aware TBAA format, otherwise, we treat it as scalar TBAA

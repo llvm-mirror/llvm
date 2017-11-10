@@ -28,8 +28,8 @@ class SparcTargetMachine : public LLVMTargetMachine {
 public:
   SparcTargetMachine(const Target &T, const Triple &TT, StringRef CPU,
                      StringRef FS, const TargetOptions &Options,
-                     Optional<Reloc::Model> RM, CodeModel::Model CM,
-                     CodeGenOpt::Level OL, bool is64bit);
+                     Optional<Reloc::Model> RM, Optional<CodeModel::Model> CM,
+                     CodeGenOpt::Level OL, bool JIT, bool is64bit);
   ~SparcTargetMachine() override;
 
   const SparcSubtarget *getSubtargetImpl() const { return &Subtarget; }
@@ -40,6 +40,10 @@ public:
   TargetLoweringObjectFile *getObjFileLowering() const override {
     return TLOF.get();
   }
+
+  bool isMachineVerifierClean() const override {
+    return false;
+  }
 };
 
 /// Sparc 32-bit target machine
@@ -49,8 +53,8 @@ class SparcV8TargetMachine : public SparcTargetMachine {
 public:
   SparcV8TargetMachine(const Target &T, const Triple &TT, StringRef CPU,
                        StringRef FS, const TargetOptions &Options,
-                       Optional<Reloc::Model> RM, CodeModel::Model CM,
-                       CodeGenOpt::Level OL);
+                       Optional<Reloc::Model> RM, Optional<CodeModel::Model> CM,
+                       CodeGenOpt::Level OL, bool JIT);
 };
 
 /// Sparc 64-bit target machine
@@ -60,8 +64,8 @@ class SparcV9TargetMachine : public SparcTargetMachine {
 public:
   SparcV9TargetMachine(const Target &T, const Triple &TT, StringRef CPU,
                        StringRef FS, const TargetOptions &Options,
-                       Optional<Reloc::Model> RM, CodeModel::Model CM,
-                       CodeGenOpt::Level OL);
+                       Optional<Reloc::Model> RM, Optional<CodeModel::Model> CM,
+                       CodeGenOpt::Level OL, bool JIT);
 };
 
 class SparcelTargetMachine : public SparcTargetMachine {
@@ -70,8 +74,8 @@ class SparcelTargetMachine : public SparcTargetMachine {
 public:
   SparcelTargetMachine(const Target &T, const Triple &TT, StringRef CPU,
                        StringRef FS, const TargetOptions &Options,
-                       Optional<Reloc::Model> RM, CodeModel::Model CM,
-                       CodeGenOpt::Level OL);
+                       Optional<Reloc::Model> RM, Optional<CodeModel::Model> CM,
+                       CodeGenOpt::Level OL, bool JIT);
 };
 
 } // end namespace llvm

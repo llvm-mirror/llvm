@@ -20,7 +20,7 @@
 #include "llvm/Analysis/CodeMetrics.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/LoopInfo.h"
-#include "llvm/Analysis/OptimizationDiagnosticInfo.h"
+#include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionAliasAnalysis.h"
 #include "llvm/Analysis/ScalarEvolutionExpander.h"
@@ -120,9 +120,7 @@ public:
     AU.addPreserved<LoopInfoWrapperPass>();
     AU.addRequired<OptimizationRemarkEmitterWrapperPass>();
     AU.addRequired<ScalarEvolutionWrapperPass>();
-    // FIXME: For some reason, preserving SE here breaks LSR (even if
-    // this pass changes nothing).
-    // AU.addPreserved<ScalarEvolutionWrapperPass>();
+    AU.addPreserved<ScalarEvolutionWrapperPass>();
     AU.addRequired<TargetTransformInfoWrapperPass>();
   }
 
@@ -329,8 +327,10 @@ bool LoopDataPrefetch::runOnLoop(Loop *L) {
       ++NumPrefetches;
       DEBUG(dbgs() << "  Access: " << *PtrValue << ", SCEV: " << *LSCEV
                    << "\n");
-      ORE->emit(OptimizationRemark(DEBUG_TYPE, "Prefetched", MemI)
-                << "prefetched memory access");
+      ORE->emit([&]() {
+        return OptimizationRemark(DEBUG_TYPE, "Prefetched", MemI)
+               << "prefetched memory access";
+      });
 
       MadeChange = true;
     }

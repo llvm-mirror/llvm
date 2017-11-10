@@ -1092,7 +1092,7 @@ Function *FunctionAST::codegen() {
   TheFunction->eraseFromParent();
 
   if (P.isBinaryOp())
-    BinopPrecedence.erase(Proto->getOperatorName());
+    BinopPrecedence.erase(P.getOperatorName());
   return nullptr;
 }
 
@@ -1144,13 +1144,11 @@ static void HandleTopLevelExpression() {
       auto H = TheJIT->addModule(std::move(TheModule));
       InitializeModule();
 
-      // Search the JIT for the __anon_expr symbol.
-      auto ExprSymbol = TheJIT->findSymbol("__anon_expr");
-      assert(ExprSymbol && "Function not found");
-
-      // Get the symbol's address and cast it to the right type (takes no
-      // arguments, returns a double) so we can call it as a native function.
-      double (*FP)() = (double (*)())(intptr_t)ExprSymbol.getAddress();
+      // Get the anonymous expression's address and cast it to the right type,
+      // double(*)(), so we can call it as a native function.
+      double (*FP)() =
+        (double (*)())(intptr_t)TheJIT->getSymbolAddress("__anon_expr");
+      assert(FP && "Failed to codegen function");
       fprintf(stderr, "Evaluated to %f\n", FP());
 
       // Delete the anonymous expression module from the JIT.

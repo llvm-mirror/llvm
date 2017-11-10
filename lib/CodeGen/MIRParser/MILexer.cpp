@@ -1,4 +1,4 @@
-//===- MILexer.cpp - Machine instructions lexer implementation ----------===//
+//===- MILexer.cpp - Machine instructions lexer implementation ------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -12,27 +12,33 @@
 //===----------------------------------------------------------------------===//
 
 #include "MILexer.h"
+#include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/None.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringSwitch.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
+#include <algorithm>
+#include <cassert>
 #include <cctype>
+#include <string>
 
 using namespace llvm;
 
 namespace {
 
-typedef function_ref<void(StringRef::iterator Loc, const Twine &)>
-    ErrorCallbackType;
+using ErrorCallbackType =
+    function_ref<void(StringRef::iterator Loc, const Twine &)>;
 
 /// This class provides a way to iterate and get characters from the source
 /// string.
 class Cursor {
-  const char *Ptr;
-  const char *End;
+  const char *Ptr = nullptr;
+  const char *End = nullptr;
 
 public:
-  Cursor(NoneType) : Ptr(nullptr), End(nullptr) {}
+  Cursor(NoneType) {}
 
   explicit Cursor(StringRef Str) {
     Ptr = Str.data();
@@ -210,6 +216,7 @@ static MIToken::TokenKind getIdentifierKind(StringRef Identifier) {
       .Case("def_cfa_register", MIToken::kw_cfi_def_cfa_register)
       .Case("def_cfa_offset", MIToken::kw_cfi_def_cfa_offset)
       .Case("def_cfa", MIToken::kw_cfi_def_cfa)
+      .Case("restore", MIToken::kw_cfi_restore)
       .Case("blockaddress", MIToken::kw_blockaddress)
       .Case("intrinsic", MIToken::kw_intrinsic)
       .Case("target-index", MIToken::kw_target_index)
@@ -365,6 +372,14 @@ static Cursor maybeLexIRValue(Cursor C, MIToken &Token,
   return lexName(C, Token, MIToken::NamedIRValue, Rule.size(), ErrorCallback);
 }
 
+static Cursor maybeLexStringConstant(Cursor C, MIToken &Token,
+                                     ErrorCallbackType ErrorCallback) {
+  if (C.peek() != '"')
+    return None;
+  return lexName(C, Token, MIToken::StringConstant, /*PrefixLength=*/0,
+                 ErrorCallback);
+}
+
 static Cursor lexVirtualRegister(Cursor C, MIToken &Token) {
   auto Range = C;
   C.advance(); // Skip '%'
@@ -482,6 +497,7 @@ static MIToken::TokenKind getMetadataKeywordKind(StringRef Identifier) {
       .Case("!alias.scope", MIToken::md_alias_scope)
       .Case("!noalias", MIToken::md_noalias)
       .Case("!range", MIToken::md_range)
+      .Case("!DIExpression", MIToken::md_diexpr)
       .Default(MIToken::Error);
 }
 
@@ -629,6 +645,8 @@ StringRef llvm::lexMIToken(StringRef Source, MIToken &Token,
   if (Cursor R = maybeLexNewline(C, Token))
     return R.remaining();
   if (Cursor R = maybeLexEscapedIRValue(C, Token, ErrorCallback))
+    return R.remaining();
+  if (Cursor R = maybeLexStringConstant(C, Token, ErrorCallback))
     return R.remaining();
 
   Token.reset(MIToken::Error, C.remaining());

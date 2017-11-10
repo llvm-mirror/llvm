@@ -25,6 +25,7 @@
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/CFG.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IntrinsicInst.h"
@@ -58,13 +59,14 @@ class LoopRotate {
   AssumptionCache *AC;
   DominatorTree *DT;
   ScalarEvolution *SE;
+  const SimplifyQuery &SQ;
 
 public:
   LoopRotate(unsigned MaxHeaderSize, LoopInfo *LI,
              const TargetTransformInfo *TTI, AssumptionCache *AC,
-             DominatorTree *DT, ScalarEvolution *SE)
-      : MaxHeaderSize(MaxHeaderSize), LI(LI), TTI(TTI), AC(AC), DT(DT), SE(SE) {
-  }
+             DominatorTree *DT, ScalarEvolution *SE, const SimplifyQuery &SQ)
+      : MaxHeaderSize(MaxHeaderSize), LI(LI), TTI(TTI), AC(AC), DT(DT), SE(SE),
+        SQ(SQ) {}
   bool processLoop(Loop *L);
 
 private:
@@ -140,37 +142,29 @@ static void RewriteUsesOfClonedInstructions(BasicBlock *OrigHeader,
 
     // Replace MetadataAsValue(ValueAsMetadata(OrigHeaderVal)) uses in debug
     // intrinsics.
-    LLVMContext &C = OrigHeader->getContext();
-    if (auto *VAM = ValueAsMetadata::getIfExists(OrigHeaderVal)) {
-      if (auto *MAV = MetadataAsValue::getIfExists(C, VAM)) {
-        for (auto UI = MAV->use_begin(), E = MAV->use_end(); UI != E;) {
-          // Grab the use before incrementing the iterator. Otherwise, altering
-          // the Use will invalidate the iterator.
-          Use &U = *UI++;
-          DbgInfoIntrinsic *UserInst = dyn_cast<DbgInfoIntrinsic>(U.getUser());
-          if (!UserInst)
-            continue;
+    SmallVector<DbgValueInst *, 1> DbgValues;
+    llvm::findDbgValues(DbgValues, OrigHeaderVal);
+    for (auto &DbgValue : DbgValues) {
+      // The original users in the OrigHeader are already using the original
+      // definitions.
+      BasicBlock *UserBB = DbgValue->getParent();
+      if (UserBB == OrigHeader)
+        continue;
 
-          // The original users in the OrigHeader are already using the original
-          // definitions.
-          BasicBlock *UserBB = UserInst->getParent();
-          if (UserBB == OrigHeader)
-            continue;
-
-          // Users in the OrigPreHeader need to use the value to which the
-          // original definitions are mapped and anything else can be handled by
-          // the SSAUpdater. To avoid adding PHINodes, check if the value is
-          // available in UserBB, if not substitute undef.
-          Value *NewVal;
-          if (UserBB == OrigPreheader)
-            NewVal = OrigPreHeaderVal;
-          else if (SSA.HasValueForBlock(UserBB))
-            NewVal = SSA.GetValueInMiddleOfBlock(UserBB);
-          else
-            NewVal = UndefValue::get(OrigHeaderVal->getType());
-          U = MetadataAsValue::get(C, ValueAsMetadata::get(NewVal));
-        }
-      }
+      // Users in the OrigPreHeader need to use the value to which the
+      // original definitions are mapped and anything else can be handled by
+      // the SSAUpdater. To avoid adding PHINodes, check if the value is
+      // available in UserBB, if not substitute undef.
+      Value *NewVal;
+      if (UserBB == OrigPreheader)
+        NewVal = OrigPreHeaderVal;
+      else if (SSA.HasValueForBlock(UserBB))
+        NewVal = SSA.GetValueInMiddleOfBlock(UserBB);
+      else
+        NewVal = UndefValue::get(OrigHeaderVal->getType());
+      DbgValue->setOperand(0,
+                           MetadataAsValue::get(OrigHeaderVal->getContext(),
+                                                ValueAsMetadata::get(NewVal)));
     }
   }
 }
@@ -311,11 +305,25 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
   for (; PHINode *PN = dyn_cast<PHINode>(I); ++I)
     ValueMap[PN] = PN->getIncomingValueForBlock(OrigPreheader);
 
-  const DataLayout &DL = L->getHeader()->getModule()->getDataLayout();
-
   // For the rest of the instructions, either hoist to the OrigPreheader if
   // possible or create a clone in the OldPreHeader if not.
   TerminatorInst *LoopEntryBranch = OrigPreheader->getTerminator();
+
+  // Record all debug intrinsics preceding LoopEntryBranch to avoid duplication.
+  using DbgIntrinsicHash =
+      std::pair<std::pair<Value *, DILocalVariable *>, DIExpression *>;
+  auto makeHash = [](DbgInfoIntrinsic *D) -> DbgIntrinsicHash {
+    return {{D->getVariableLocation(), D->getVariable()}, D->getExpression()};
+  };
+  SmallDenseSet<DbgIntrinsicHash, 8> DbgIntrinsics;
+  for (auto I = std::next(OrigPreheader->rbegin()), E = OrigPreheader->rend();
+       I != E; ++I) {
+    if (auto *DII = dyn_cast<DbgInfoIntrinsic>(&*I))
+      DbgIntrinsics.insert(makeHash(DII));
+    else
+      break;
+  }
+
   while (I != E) {
     Instruction *Inst = &*I++;
 
@@ -339,17 +347,23 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
     RemapInstruction(C, ValueMap,
                      RF_NoModuleLevelChanges | RF_IgnoreMissingLocals);
 
+    // Avoid inserting the same intrinsic twice.
+    if (auto *DII = dyn_cast<DbgInfoIntrinsic>(C))
+      if (DbgIntrinsics.count(makeHash(DII))) {
+        C->deleteValue();
+        continue;
+      }
+
     // With the operands remapped, see if the instruction constant folds or is
     // otherwise simplifyable.  This commonly occurs because the entry from PHI
     // nodes allows icmps and other instructions to fold.
-    // FIXME: Provide TLI, DT, AC to SimplifyInstruction.
-    Value *V = SimplifyInstruction(C, DL);
+    Value *V = SimplifyInstruction(C, SQ);
     if (V && LI->replacementPreservesLCSSAForm(C, V)) {
       // If so, then delete the temporary instruction and stick the folded value
       // in the map.
       ValueMap[Inst] = V;
       if (!C->mayHaveSideEffects()) {
-        delete C;
+        C->deleteValue();
         C = nullptr;
       }
     } else {
@@ -397,6 +411,17 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
   L->moveToHeader(NewHeader);
   assert(L->getHeader() == NewHeader && "Latch block is our new header");
 
+  // Inform DT about changes to the CFG.
+  if (DT) {
+    // The OrigPreheader branches to the NewHeader and Exit now. Then, inform
+    // the DT about the removed edge to the OrigHeader (that got removed).
+    SmallVector<DominatorTree::UpdateType, 3> Updates;
+    Updates.push_back({DominatorTree::Insert, OrigPreheader, Exit});
+    Updates.push_back({DominatorTree::Insert, OrigPreheader, NewHeader});
+    Updates.push_back({DominatorTree::Delete, OrigPreheader, OrigHeader});
+    DT->applyUpdates(Updates);
+  }
+
   // At this point, we've finished our major CFG changes.  As part of cloning
   // the loop into the preheader we've simplified instructions and the
   // duplicated conditional branch may now be branching on a constant.  If it is
@@ -410,26 +435,7 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
       PHBI->getSuccessor(cast<ConstantInt>(PHBI->getCondition())->isZero()) !=
           NewHeader) {
     // The conditional branch can't be folded, handle the general case.
-    // Update DominatorTree to reflect the CFG change we just made.  Then split
-    // edges as necessary to preserve LoopSimplify form.
-    if (DT) {
-      // Everything that was dominated by the old loop header is now dominated
-      // by the original loop preheader. Conceptually the header was merged
-      // into the preheader, even though we reuse the actual block as a new
-      // loop latch.
-      DomTreeNode *OrigHeaderNode = DT->getNode(OrigHeader);
-      SmallVector<DomTreeNode *, 8> HeaderChildren(OrigHeaderNode->begin(),
-                                                   OrigHeaderNode->end());
-      DomTreeNode *OrigPreheaderNode = DT->getNode(OrigPreheader);
-      for (unsigned I = 0, E = HeaderChildren.size(); I != E; ++I)
-        DT->changeImmediateDominator(HeaderChildren[I], OrigPreheaderNode);
-
-      assert(DT->getNode(Exit)->getIDom() == OrigPreheaderNode);
-      assert(DT->getNode(NewHeader)->getIDom() == OrigPreheaderNode);
-
-      // Update OrigHeader to be dominated by the new header block.
-      DT->changeImmediateDominator(OrigHeader, OrigLatch);
-    }
+    // Split edges as necessary to preserve LoopSimplify form.
 
     // Right now OrigPreHeader has two successors, NewHeader and ExitBlock, and
     // thus is not a preheader anymore.
@@ -469,40 +475,7 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
     PHBI->eraseFromParent();
 
     // With our CFG finalized, update DomTree if it is available.
-    if (DT) {
-      // Update OrigHeader to be dominated by the new header block.
-      DT->changeImmediateDominator(NewHeader, OrigPreheader);
-      DT->changeImmediateDominator(OrigHeader, OrigLatch);
-
-      // Brute force incremental dominator tree update. Call
-      // findNearestCommonDominator on all CFG predecessors of each child of the
-      // original header.
-      DomTreeNode *OrigHeaderNode = DT->getNode(OrigHeader);
-      SmallVector<DomTreeNode *, 8> HeaderChildren(OrigHeaderNode->begin(),
-                                                   OrigHeaderNode->end());
-      bool Changed;
-      do {
-        Changed = false;
-        for (unsigned I = 0, E = HeaderChildren.size(); I != E; ++I) {
-          DomTreeNode *Node = HeaderChildren[I];
-          BasicBlock *BB = Node->getBlock();
-
-          pred_iterator PI = pred_begin(BB);
-          BasicBlock *NearestDom = *PI;
-          for (pred_iterator PE = pred_end(BB); PI != PE; ++PI)
-            NearestDom = DT->findNearestCommonDominator(NearestDom, *PI);
-
-          // Remember if this changes the DomTree.
-          if (Node->getIDom()->getBlock() != NearestDom) {
-            DT->changeImmediateDominator(BB, NearestDom);
-            Changed = true;
-          }
-        }
-
-        // If the dominator changed, this may have an effect on other
-        // predecessors, continue until we reach a fixpoint.
-      } while (Changed);
-    }
+    if (DT) DT->deleteEdge(OrigPreheader, Exit);
   }
 
   assert(L->getLoopPreheader() && "Invalid loop preheader after loop rotation");
@@ -671,7 +644,10 @@ PreservedAnalyses LoopRotatePass::run(Loop &L, LoopAnalysisManager &AM,
                                       LoopStandardAnalysisResults &AR,
                                       LPMUpdater &) {
   int Threshold = EnableHeaderDuplication ? DefaultRotationThreshold : 0;
-  LoopRotate LR(Threshold, &AR.LI, &AR.TTI, &AR.AC, &AR.DT, &AR.SE);
+  const DataLayout &DL = L.getHeader()->getModule()->getDataLayout();
+  const SimplifyQuery SQ = getBestSimplifyQuery(AR, DL);
+  LoopRotate LR(Threshold, &AR.LI, &AR.TTI, &AR.AC, &AR.DT, &AR.SE,
+                SQ);
 
   bool Changed = LR.processLoop(&L);
   if (!Changed)
@@ -714,7 +690,8 @@ public:
     auto *DT = DTWP ? &DTWP->getDomTree() : nullptr;
     auto *SEWP = getAnalysisIfAvailable<ScalarEvolutionWrapperPass>();
     auto *SE = SEWP ? &SEWP->getSE() : nullptr;
-    LoopRotate LR(MaxHeaderSize, LI, TTI, AC, DT, SE);
+    const SimplifyQuery SQ = getBestSimplifyQuery(*this, F);
+    LoopRotate LR(MaxHeaderSize, LI, TTI, AC, DT, SE, SQ);
     return LR.processLoop(L);
   }
 };

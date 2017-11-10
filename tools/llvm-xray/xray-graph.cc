@@ -19,7 +19,6 @@
 
 #include "xray-graph.h"
 #include "xray-registry.h"
-#include "llvm/ADT/ArrayRef.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/XRay/InstrumentationMap.h"
@@ -98,7 +97,7 @@ static cl::opt<GraphRenderer::StatType> GraphVertexLabel(
     cl::value_desc("field"), cl::sub(GraphC),
     cl::init(GraphRenderer::StatType::NONE),
     cl::values(clEnumValN(GraphRenderer::StatType::NONE, "none",
-                          "Do not label Edges"),
+                          "Do not label Vertices"),
                clEnumValN(GraphRenderer::StatType::COUNT, "count",
                           "function call counts"),
                clEnumValN(GraphRenderer::StatType::MIN, "min",
@@ -123,7 +122,7 @@ static cl::opt<GraphRenderer::StatType> GraphEdgeColorType(
     cl::value_desc("field"), cl::sub(GraphC),
     cl::init(GraphRenderer::StatType::NONE),
     cl::values(clEnumValN(GraphRenderer::StatType::NONE, "none",
-                          "Do not label Edges"),
+                          "Do not color Edges"),
                clEnumValN(GraphRenderer::StatType::COUNT, "count",
                           "function call counts"),
                clEnumValN(GraphRenderer::StatType::MIN, "min",
@@ -148,7 +147,7 @@ static cl::opt<GraphRenderer::StatType> GraphVertexColorType(
     cl::value_desc("field"), cl::sub(GraphC),
     cl::init(GraphRenderer::StatType::NONE),
     cl::values(clEnumValN(GraphRenderer::StatType::NONE, "none",
-                          "Do not label Edges"),
+                          "Do not color vertices"),
                clEnumValN(GraphRenderer::StatType::COUNT, "count",
                           "function call counts"),
                clEnumValN(GraphRenderer::StatType::MIN, "min",
@@ -209,13 +208,15 @@ Error GraphRenderer::accountRecord(const XRayRecord &Record) {
 
   auto &ThreadStack = PerThreadFunctionStack[Record.TId];
   switch (Record.Type) {
-  case RecordTypes::ENTER: {
-    if (G.count(Record.FuncId) == 0)
+  case RecordTypes::ENTER:
+  case RecordTypes::ENTER_ARG: {
+    if (Record.FuncId != 0 && G.count(Record.FuncId) == 0)
       G[Record.FuncId].SymbolName = FuncIdHelper.SymbolOrNumber(Record.FuncId);
     ThreadStack.push_back({Record.FuncId, Record.TSC});
     break;
   }
-  case RecordTypes::EXIT: {
+  case RecordTypes::EXIT:
+  case RecordTypes::TAIL_EXIT: {
     // FIXME: Refactor this and the account subcommand to reduce code
     // duplication
     if (ThreadStack.size() == 0 || ThreadStack.back().FuncId != Record.FuncId) {
@@ -259,7 +260,7 @@ Error GraphRenderer::accountRecord(const XRayRecord &Record) {
 
 template <typename U>
 void GraphRenderer::getStats(U begin, U end, GraphRenderer::TimeStat &S) {
-  assert(begin != end);
+  if (begin == end) return;
   std::ptrdiff_t MedianOff = S.Count / 2;
   std::nth_element(begin, begin + MedianOff, end);
   S.Median = *(begin + MedianOff);
@@ -287,9 +288,7 @@ void GraphRenderer::calculateEdgeStatistics() {
   for (auto &E : G.edges()) {
     auto &A = E.second;
     assert(!A.Timings.empty());
-    assert((A.Timings[0] > 0));
     getStats(A.Timings.begin(), A.Timings.end(), A.S);
-    assert(A.S.Sum > 0);
     updateMaxStats(A.S, G.GraphEdgeMax);
   }
 }
@@ -297,15 +296,12 @@ void GraphRenderer::calculateEdgeStatistics() {
 void GraphRenderer::calculateVertexStatistics() {
   std::vector<uint64_t> TempTimings;
   for (auto &V : G.vertices()) {
-    assert((V.first == 0 || G[V.first].S.Sum != 0) &&
-           "Every non-root vertex should have at least one call");
     if (V.first != 0) {
       for (auto &E : G.inEdges(V.first)) {
         auto &A = E.second;
         TempTimings.insert(TempTimings.end(), A.Timings.begin(),
                            A.Timings.end());
       }
-      assert(!TempTimings.empty() && TempTimings[0] > 0);
       getStats(TempTimings.begin(), TempTimings.end(), G[V.first].S);
       updateMaxStats(G[V.first].S, G.GraphVertexMax);
       TempTimings.clear();
@@ -317,12 +313,9 @@ void GraphRenderer::calculateVertexStatistics() {
 // TimeStat element.
 static void normalizeTimeStat(GraphRenderer::TimeStat &S,
                               double CycleFrequency) {
-  S.Min /= CycleFrequency;
-  S.Median /= CycleFrequency;
-  S.Max /= CycleFrequency;
-  S.Sum /= CycleFrequency;
-  S.Pct90 /= CycleFrequency;
-  S.Pct99 /= CycleFrequency;
+  int64_t OldCount = S.Count;
+  S = S / CycleFrequency;
+  S.Count = OldCount;
 }
 
 // Normalises the statistics in the graph for a given TSC frequency.
@@ -342,32 +335,22 @@ void GraphRenderer::normalizeStatistics(double CycleFrequency) {
 
 // Returns a string containing the value of statistic field T
 std::string
-GraphRenderer::TimeStat::getAsString(GraphRenderer::StatType T) const {
+GraphRenderer::TimeStat::getString(GraphRenderer::StatType T) const {
   std::string St;
   raw_string_ostream S{St};
+  double TimeStat::*DoubleStatPtrs[] = {&TimeStat::Min,   &TimeStat::Median,
+                                        &TimeStat::Pct90, &TimeStat::Pct99,
+                                        &TimeStat::Max,   &TimeStat::Sum};
   switch (T) {
+  case GraphRenderer::StatType::NONE:
+    break;
   case GraphRenderer::StatType::COUNT:
     S << Count;
     break;
-  case GraphRenderer::StatType::MIN:
-    S << Min;
-    break;
-  case GraphRenderer::StatType::MED:
-    S << Median;
-    break;
-  case GraphRenderer::StatType::PCT90:
-    S << Pct90;
-    break;
-  case GraphRenderer::StatType::PCT99:
-    S << Pct99;
-    break;
-  case GraphRenderer::StatType::MAX:
-    S << Max;
-    break;
-  case GraphRenderer::StatType::SUM:
-    S << Sum;
-    break;
-  case GraphRenderer::StatType::NONE:
+  default:
+    S << (*this).*
+             DoubleStatPtrs[static_cast<int>(T) -
+                            static_cast<int>(GraphRenderer::StatType::MIN)];
     break;
   }
   return S.str();
@@ -375,38 +358,25 @@ GraphRenderer::TimeStat::getAsString(GraphRenderer::StatType T) const {
 
 // Returns the quotient between the property T of this and another TimeStat as
 // a double
-double GraphRenderer::TimeStat::compare(StatType T, const TimeStat &O) const {
+double GraphRenderer::TimeStat::getDouble(StatType T) const {
   double retval = 0;
+  double TimeStat::*DoubleStatPtrs[] = {&TimeStat::Min,   &TimeStat::Median,
+                                        &TimeStat::Pct90, &TimeStat::Pct99,
+                                        &TimeStat::Max,   &TimeStat::Sum};
   switch (T) {
-  case GraphRenderer::StatType::COUNT:
-    retval = static_cast<double>(Count) / static_cast<double>(O.Count);
-    break;
-  case GraphRenderer::StatType::MIN:
-    retval = Min / O.Min;
-    break;
-  case GraphRenderer::StatType::MED:
-    retval = Median / O.Median;
-    break;
-  case GraphRenderer::StatType::PCT90:
-    retval = Pct90 / O.Pct90;
-    break;
-  case GraphRenderer::StatType::PCT99:
-    retval = Pct99 / O.Pct99;
-    break;
-  case GraphRenderer::StatType::MAX:
-    retval = Max / O.Max;
-    break;
-  case GraphRenderer::StatType::SUM:
-    retval = Sum / O.Sum;
-    break;
   case GraphRenderer::StatType::NONE:
     retval = 0.0;
     break;
+  case GraphRenderer::StatType::COUNT:
+    retval = static_cast<double>(Count);
+    break;
+  default:
+    retval =
+        (*this).*DoubleStatPtrs[static_cast<int>(T) -
+                                static_cast<int>(GraphRenderer::StatType::MIN)];
+    break;
   }
-  return std::sqrt(
-      retval); // the square root here provides more dynamic contrast for
-               // low runtime edges, giving better separation and
-               // coloring lower down the call stack.
+  return retval;
 }
 
 // Outputs a DOT format version of the Graph embedded in the GraphRenderer
@@ -415,17 +385,8 @@ double GraphRenderer::TimeStat::compare(StatType T, const TimeStat &O) const {
 // annotations.
 //
 // FIXME: output more information, better presented.
-void GraphRenderer::exportGraphAsDOT(raw_ostream &OS, const XRayFileHeader &H,
-                                     StatType ET, StatType EC, StatType VT,
-                                     StatType VC) {
-  G.GraphEdgeMax = {};
-  G.GraphVertexMax = {};
-  calculateEdgeStatistics();
-  calculateVertexStatistics();
-
-  if (H.CycleFrequency)
-    normalizeStatistics(H.CycleFrequency);
-
+void GraphRenderer::exportGraphAsDOT(raw_ostream &OS, StatType ET, StatType EC,
+                                     StatType VT, StatType VC) {
   OS << "digraph xray {\n";
 
   if (VT != StatType::NONE)
@@ -434,9 +395,11 @@ void GraphRenderer::exportGraphAsDOT(raw_ostream &OS, const XRayFileHeader &H,
   for (const auto &E : G.edges()) {
     const auto &S = E.second.S;
     OS << "F" << E.first.first << " -> "
-       << "F" << E.first.second << " [label=\"" << S.getAsString(ET) << "\"";
+       << "F" << E.first.second << " [label=\"" << S.getString(ET) << "\"";
     if (EC != StatType::NONE)
-      OS << " color=\"" << CHelper.getColorString(S.compare(EC, G.GraphEdgeMax))
+      OS << " color=\""
+         << CHelper.getColorString(
+                std::sqrt(S.getDouble(EC) / G.GraphEdgeMax.getDouble(EC)))
          << "\"";
     OS << "];\n";
   }
@@ -449,26 +412,20 @@ void GraphRenderer::exportGraphAsDOT(raw_ostream &OS, const XRayFileHeader &H,
        << (VA.SymbolName.size() > 40 ? VA.SymbolName.substr(0, 40) + "..."
                                      : VA.SymbolName);
     if (VT != StatType::NONE)
-      OS << "|" << VA.S.getAsString(VT) << "}\"";
+      OS << "|" << VA.S.getString(VT) << "}\"";
     else
       OS << "\"";
     if (VC != StatType::NONE)
-      OS << " color=\"" << CHelper.getColorString(VA.S.compare(VC, G.GraphVertexMax))
+      OS << " color=\""
+         << CHelper.getColorString(
+                std::sqrt(VA.S.getDouble(VC) / G.GraphVertexMax.getDouble(VC)))
          << "\"";
     OS << "];\n";
   }
   OS << "}\n";
 }
 
-// Here we register and implement the llvm-xray graph subcommand.
-// The bulk of this code reads in the options, opens the required files, uses
-// those files to create a context for analysing the xray trace, then there is a
-// short loop which actually analyses the trace, generates the graph and then
-// outputs it as a DOT.
-//
-// FIXME: include additional filtering and annalysis passes to provide more
-// specific useful information.
-static CommandRegistration Unused(&GraphC, []() -> Error {
+Expected<GraphRenderer> GraphRenderer::Factory::getGraphRenderer() {
   InstrumentationMap Map;
   if (!GraphInstrMap.empty()) {
     auto InstrumentationMapOrError = loadInstrumentationMap(GraphInstrMap);
@@ -482,30 +439,16 @@ static CommandRegistration Unused(&GraphC, []() -> Error {
   }
 
   const auto &FunctionAddresses = Map.getFunctionAddresses();
+
   symbolize::LLVMSymbolizer::Options Opts(
       symbolize::FunctionNameKind::LinkageName, true, true, false, "");
   symbolize::LLVMSymbolizer Symbolizer(Opts);
-  llvm::xray::FuncIdConversionHelper FuncIdHelper(GraphInstrMap, Symbolizer,
-                                                  FunctionAddresses);
-  xray::GraphRenderer GR(FuncIdHelper, GraphDeduceSiblingCalls);
-  std::error_code EC;
-  raw_fd_ostream OS(GraphOutput, EC, sys::fs::OpenFlags::F_Text);
-  if (EC)
-    return make_error<StringError>(
-        Twine("Cannot open file '") + GraphOutput + "' for writing.", EC);
-
-  auto TraceOrErr = loadTraceFile(GraphInput, true);
-  if (!TraceOrErr)
-    return joinErrors(
-        make_error<StringError>(Twine("Failed loading input file '") +
-                                    GraphInput + "'",
-                                make_error_code(llvm::errc::invalid_argument)),
-        TraceOrErr.takeError());
-
-  auto &Trace = *TraceOrErr;
   const auto &Header = Trace.getFileHeader();
 
-  // Here we generate the call graph from entries we find in the trace.
+  llvm::xray::FuncIdConversionHelper FuncIdHelper(InstrMap, Symbolizer,
+                                                  FunctionAddresses);
+
+  xray::GraphRenderer GR(FuncIdHelper, DeduceSiblingCalls);
   for (const auto &Record : Trace) {
     auto E = GR.accountRecord(Record);
     if (!E)
@@ -528,7 +471,53 @@ static CommandRegistration Unused(&GraphC, []() -> Error {
     handleAllErrors(std::move(E),
                     [&](const ErrorInfoBase &E) { E.log(errs()); });
   }
-  GR.exportGraphAsDOT(OS, Header, GraphEdgeLabel, GraphEdgeColorType,
-                      GraphVertexLabel, GraphVertexColorType);
+
+  GR.G.GraphEdgeMax = {};
+  GR.G.GraphVertexMax = {};
+  GR.calculateEdgeStatistics();
+  GR.calculateVertexStatistics();
+
+  if (Header.CycleFrequency)
+    GR.normalizeStatistics(Header.CycleFrequency);
+
+  return GR;
+}
+
+// Here we register and implement the llvm-xray graph subcommand.
+// The bulk of this code reads in the options, opens the required files, uses
+// those files to create a context for analysing the xray trace, then there is a
+// short loop which actually analyses the trace, generates the graph and then
+// outputs it as a DOT.
+//
+// FIXME: include additional filtering and annalysis passes to provide more
+// specific useful information.
+static CommandRegistration Unused(&GraphC, []() -> Error {
+  GraphRenderer::Factory F;
+
+  F.KeepGoing = GraphKeepGoing;
+  F.DeduceSiblingCalls = GraphDeduceSiblingCalls;
+  F.InstrMap = GraphInstrMap;
+
+  auto TraceOrErr = loadTraceFile(GraphInput, true);
+
+  if (!TraceOrErr)
+    return make_error<StringError>(
+        Twine("Failed loading input file '") + GraphInput + "'",
+        make_error_code(llvm::errc::invalid_argument));
+
+  F.Trace = std::move(*TraceOrErr);
+  auto GROrError = F.getGraphRenderer();
+  if (!GROrError)
+    return GROrError.takeError();
+  auto &GR = *GROrError;
+
+  std::error_code EC;
+  raw_fd_ostream OS(GraphOutput, EC, sys::fs::OpenFlags::F_Text);
+  if (EC)
+    return make_error<StringError>(
+        Twine("Cannot open file '") + GraphOutput + "' for writing.", EC);
+
+  GR.exportGraphAsDOT(OS, GraphEdgeLabel, GraphEdgeColorType, GraphVertexLabel,
+                      GraphVertexColorType);
   return Error::success();
 });

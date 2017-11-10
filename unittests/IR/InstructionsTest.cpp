@@ -21,6 +21,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/NoFolder.h"
 #include "llvm/IR/Operator.h"
+#include "gmock/gmock-matchers.h"
 #include "gtest/gtest.h"
 #include <memory>
 
@@ -405,8 +406,8 @@ TEST(InstructionsTest, FPMathOperator) {
   EXPECT_TRUE(isa<FPMathOperator>(V1));
   FPMathOperator *O1 = cast<FPMathOperator>(V1);
   EXPECT_EQ(O1->getFPAccuracy(), 1.0);
-  delete V1;
-  delete I;
+  V1->deleteValue();
+  I->deleteValue();
 }
 
 
@@ -517,7 +518,8 @@ TEST(InstructionsTest, CloneCall) {
   {
     AttrBuilder AB;
     AB.addAttribute(Attribute::ReadOnly);
-    Call->setAttributes(AttributeSet::get(C, AttributeSet::FunctionIndex, AB));
+    Call->setAttributes(
+        AttributeList::get(C, AttributeList::FunctionIndex, AB));
     std::unique_ptr<CallInst> Clone(cast<CallInst>(Call->clone()));
     EXPECT_TRUE(Clone->onlyReadsMemory());
   }
@@ -535,7 +537,7 @@ TEST(InstructionsTest, AlterCallBundles) {
   Call->setTailCallKind(CallInst::TailCallKind::TCK_NoTail);
   AttrBuilder AB;
   AB.addAttribute(Attribute::Cold);
-  Call->setAttributes(AttributeSet::get(C, AttributeSet::FunctionIndex, AB));
+  Call->setAttributes(AttributeList::get(C, AttributeList::FunctionIndex, AB));
   Call->setDebugLoc(DebugLoc(MDNode::get(C, None)));
 
   OperandBundleDef NewBundle("after", ConstantInt::get(Int32Ty, 7));
@@ -563,7 +565,8 @@ TEST(InstructionsTest, AlterInvokeBundles) {
       Callee, NormalDest.get(), UnwindDest.get(), Args, OldBundle, "result"));
   AttrBuilder AB;
   AB.addAttribute(Attribute::Cold);
-  Invoke->setAttributes(AttributeSet::get(C, AttributeSet::FunctionIndex, AB));
+  Invoke->setAttributes(
+      AttributeList::get(C, AttributeList::FunctionIndex, AB));
   Invoke->setDebugLoc(DebugLoc(MDNode::get(C, None)));
 
   OperandBundleDef NewBundle("after", ConstantInt::get(Int32Ty, 7));
@@ -673,6 +676,75 @@ TEST(InstructionsTest, GEPIndices) {
   EXPECT_EQ(CGEPI->idx_end(), CGEPI->indices().end());
 
   delete GEPI;
+}
+
+TEST(InstructionsTest, SwitchInst) {
+  LLVMContext C;
+
+  std::unique_ptr<BasicBlock> BB1, BB2, BB3;
+  BB1.reset(BasicBlock::Create(C));
+  BB2.reset(BasicBlock::Create(C));
+  BB3.reset(BasicBlock::Create(C));
+
+  // We create block 0 after the others so that it gets destroyed first and
+  // clears the uses of the other basic blocks.
+  std::unique_ptr<BasicBlock> BB0(BasicBlock::Create(C));
+
+  auto *Int32Ty = Type::getInt32Ty(C);
+
+  SwitchInst *SI =
+      SwitchInst::Create(UndefValue::get(Int32Ty), BB0.get(), 3, BB0.get());
+  SI->addCase(ConstantInt::get(Int32Ty, 1), BB1.get());
+  SI->addCase(ConstantInt::get(Int32Ty, 2), BB2.get());
+  SI->addCase(ConstantInt::get(Int32Ty, 3), BB3.get());
+
+  auto CI = SI->case_begin();
+  ASSERT_NE(CI, SI->case_end());
+  EXPECT_EQ(1, CI->getCaseValue()->getSExtValue());
+  EXPECT_EQ(BB1.get(), CI->getCaseSuccessor());
+  EXPECT_EQ(2, (CI + 1)->getCaseValue()->getSExtValue());
+  EXPECT_EQ(BB2.get(), (CI + 1)->getCaseSuccessor());
+  EXPECT_EQ(3, (CI + 2)->getCaseValue()->getSExtValue());
+  EXPECT_EQ(BB3.get(), (CI + 2)->getCaseSuccessor());
+  EXPECT_EQ(CI + 1, std::next(CI));
+  EXPECT_EQ(CI + 2, std::next(CI, 2));
+  EXPECT_EQ(CI + 3, std::next(CI, 3));
+  EXPECT_EQ(SI->case_end(), CI + 3);
+  EXPECT_EQ(0, CI - CI);
+  EXPECT_EQ(1, (CI + 1) - CI);
+  EXPECT_EQ(2, (CI + 2) - CI);
+  EXPECT_EQ(3, SI->case_end() - CI);
+  EXPECT_EQ(3, std::distance(CI, SI->case_end()));
+
+  auto CCI = const_cast<const SwitchInst *>(SI)->case_begin();
+  SwitchInst::ConstCaseIt CCE = SI->case_end();
+  ASSERT_NE(CCI, SI->case_end());
+  EXPECT_EQ(1, CCI->getCaseValue()->getSExtValue());
+  EXPECT_EQ(BB1.get(), CCI->getCaseSuccessor());
+  EXPECT_EQ(2, (CCI + 1)->getCaseValue()->getSExtValue());
+  EXPECT_EQ(BB2.get(), (CCI + 1)->getCaseSuccessor());
+  EXPECT_EQ(3, (CCI + 2)->getCaseValue()->getSExtValue());
+  EXPECT_EQ(BB3.get(), (CCI + 2)->getCaseSuccessor());
+  EXPECT_EQ(CCI + 1, std::next(CCI));
+  EXPECT_EQ(CCI + 2, std::next(CCI, 2));
+  EXPECT_EQ(CCI + 3, std::next(CCI, 3));
+  EXPECT_EQ(CCE, CCI + 3);
+  EXPECT_EQ(0, CCI - CCI);
+  EXPECT_EQ(1, (CCI + 1) - CCI);
+  EXPECT_EQ(2, (CCI + 2) - CCI);
+  EXPECT_EQ(3, CCE - CCI);
+  EXPECT_EQ(3, std::distance(CCI, CCE));
+
+  // Make sure that the const iterator is compatible with a const auto ref.
+  const auto &Handle = *CCI;
+  EXPECT_EQ(1, Handle.getCaseValue()->getSExtValue());
+  EXPECT_EQ(BB1.get(), Handle.getCaseSuccessor());
+}
+
+TEST(InstructionsTest, CommuteShuffleMask) {
+  SmallVector<int, 16> Indices({-1, 0, 7});
+  ShuffleVectorInst::commuteShuffleMask(Indices, 4);
+  EXPECT_THAT(Indices, testing::ContainerEq(ArrayRef<int>({-1, 4, 3})));
 }
 
 } // end anonymous namespace

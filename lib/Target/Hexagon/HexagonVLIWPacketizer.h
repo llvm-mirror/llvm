@@ -1,18 +1,33 @@
-#ifndef HEXAGONVLIWPACKETIZER_H
-#define HEXAGONVLIWPACKETIZER_H
+//===- HexagonPacketizer.h - VLIW packetizer --------------------*- C++ -*-===//
+//
+//                     The LLVM Compiler Infrastructure
+//
+// This file is distributed under the University of Illinois Open Source
+// License. See LICENSE.TXT for details.
+//
+//===----------------------------------------------------------------------===//
+
+#ifndef LLVM_LIB_TARGET_HEXAGON_HEXAGONVLIWPACKETIZER_H
+#define LLVM_LIB_TARGET_HEXAGON_HEXAGONVLIWPACKETIZER_H
 
 #include "llvm/CodeGen/DFAPacketizer.h"
-#include "llvm/CodeGen/MachineBranchProbabilityInfo.h"
+#include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/ScheduleDAG.h"
-#include "llvm/CodeGen/ScheduleDAGInstrs.h"
+#include <vector>
 
 namespace llvm {
+
 class HexagonInstrInfo;
 class HexagonRegisterInfo;
+class MachineBranchProbabilityInfo;
+class MachineFunction;
+class MachineInstr;
+class MachineLoopInfo;
+class TargetRegisterClass;
 
 class HexagonPacketizerList : public VLIWPacketizerList {
   // Vector of instructions assigned to the packet that has just been created.
-  std::vector<MachineInstr*> OldPacketMIs;
+  std::vector<MachineInstr *> OldPacketMIs;
 
   // Has the instruction been promoted to a dot-new instruction.
   bool PromotedToDotNew;
@@ -22,6 +37,9 @@ class HexagonPacketizerList : public VLIWPacketizerList {
 
   // Has the feeder instruction been glued to new value jump.
   bool GlueToNewValueJump;
+
+  // This holds the offset value, when pruning the dependences.
+  int64_t ChangedOffset;
 
   // Check if there is a dependence between some instruction already in this
   // packet and this instruction.
@@ -34,6 +52,10 @@ class HexagonPacketizerList : public VLIWPacketizerList {
   // Track MIs with ignored dependence.
   std::vector<MachineInstr*> IgnoreDepMIs;
 
+  // Set to true if the packet contains an instruction that stalls with an
+  // instruction from the previous packet.
+  bool PacketStalls = false;
+
 protected:
   /// \brief A handle to the branch probability pass.
   const MachineBranchProbabilityInfo *MBPI;
@@ -44,7 +66,6 @@ private:
   const HexagonRegisterInfo *HRI;
 
 public:
-  // Ctor.
   HexagonPacketizerList(MachineFunction &MF, MachineLoopInfo &MLI,
                         AliasAnalysis *AA,
                         const MachineBranchProbabilityInfo *MBPI);
@@ -99,14 +120,18 @@ protected:
   bool demoteToDotOld(MachineInstr &MI);
   bool useCallersSP(MachineInstr &MI);
   void useCalleesSP(MachineInstr &MI);
+  bool updateOffset(SUnit *SUI, SUnit *SUJ);
+  void undoChangedOffset(MachineInstr &MI);
   bool arePredicatesComplements(MachineInstr &MI1, MachineInstr &MI2);
   bool restrictingDepExistInPacket(MachineInstr&, unsigned);
   bool isNewifiable(const MachineInstr &MI, const TargetRegisterClass *NewRC);
   bool isCurifiable(MachineInstr &MI);
   bool cannotCoexist(const MachineInstr &MI, const MachineInstr &MJ);
-  inline bool isPromotedToDotNew() const {
+
+  bool isPromotedToDotNew() const {
     return PromotedToDotNew;
   }
+
   bool tryAllocateResourcesForConstExt(bool Reserve);
   bool canReserveResourcesForConstExt();
   void reserveResourcesForConstExt();
@@ -116,6 +141,7 @@ protected:
   bool hasV4SpecificDependence(const MachineInstr &I, const MachineInstr &J);
   bool producesStall(const MachineInstr &MI);
 };
-} // namespace llvm
-#endif // HEXAGONVLIWPACKETIZER_H
 
+} // end namespace llvm
+
+#endif // LLVM_LIB_TARGET_HEXAGON_HEXAGONVLIWPACKETIZER_H

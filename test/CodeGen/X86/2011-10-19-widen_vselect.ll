@@ -27,7 +27,6 @@ define void @complex_inreg_work(<2 x float> %a, <2 x float> %b) {
 ; X32:       # BB#0: # %entry
 ; X32-NEXT:    movaps %xmm0, %xmm2
 ; X32-NEXT:    cmpordps %xmm0, %xmm0
-; X32-NEXT:    pslld $31, %xmm0
 ; X32-NEXT:    blendvps %xmm0, %xmm2, %xmm1
 ; X32-NEXT:    extractps $1, %xmm1, (%eax)
 ; X32-NEXT:    movss %xmm1, (%eax)
@@ -37,7 +36,6 @@ define void @complex_inreg_work(<2 x float> %a, <2 x float> %b) {
 ; X64:       # BB#0: # %entry
 ; X64-NEXT:    movaps %xmm0, %xmm2
 ; X64-NEXT:    cmpordps %xmm0, %xmm0
-; X64-NEXT:    pslld $31, %xmm0
 ; X64-NEXT:    blendvps %xmm0, %xmm2, %xmm1
 ; X64-NEXT:    movlps %xmm1, (%rax)
 ; X64-NEXT:    retq
@@ -51,9 +49,9 @@ entry:
 define void @zero_test() {
 ; X32-LABEL: zero_test:
 ; X32:       # BB#0: # %entry
-; X32-NEXT:    pxor %xmm0, %xmm0
-; X32-NEXT:    pextrd $1, %xmm0, (%eax)
-; X32-NEXT:    movd %xmm0, (%eax)
+; X32-NEXT:    xorps %xmm0, %xmm0
+; X32-NEXT:    extractps $1, %xmm0, (%eax)
+; X32-NEXT:    movss %xmm0, (%eax)
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: zero_test:
@@ -71,14 +69,12 @@ define void @full_test() {
 ; X32-LABEL: full_test:
 ; X32:       # BB#0: # %entry
 ; X32-NEXT:    subl $60, %esp
-; X32-NEXT:  .Lcfi0:
 ; X32-NEXT:    .cfi_def_cfa_offset 64
 ; X32-NEXT:    movsd {{.*#+}} xmm2 = mem[0],zero
 ; X32-NEXT:    cvttps2dq %xmm2, %xmm0
 ; X32-NEXT:    cvtdq2ps %xmm0, %xmm1
 ; X32-NEXT:    xorps %xmm0, %xmm0
 ; X32-NEXT:    cmpltps %xmm2, %xmm0
-; X32-NEXT:    pslld $31, %xmm0
 ; X32-NEXT:    movaps {{.*#+}} xmm3 = <1,1,u,u>
 ; X32-NEXT:    addps %xmm1, %xmm3
 ; X32-NEXT:    movaps %xmm1, %xmm4
@@ -86,10 +82,11 @@ define void @full_test() {
 ; X32-NEXT:    cmpeqps %xmm2, %xmm1
 ; X32-NEXT:    movaps %xmm1, %xmm0
 ; X32-NEXT:    blendvps %xmm0, %xmm2, %xmm4
-; X32-NEXT:    extractps $1, %xmm4, {{[0-9]+}}(%esp)
 ; X32-NEXT:    movss %xmm4, {{[0-9]+}}(%esp)
-; X32-NEXT:    movsd {{.*#+}} xmm0 = mem[0],zero
-; X32-NEXT:    movsd %xmm0, {{[0-9]+}}(%esp)
+; X32-NEXT:    movshdup {{.*#+}} xmm0 = xmm4[1,1,3,3]
+; X32-NEXT:    movss %xmm0, {{[0-9]+}}(%esp)
+; X32-NEXT:    movss %xmm4, {{[0-9]+}}(%esp)
+; X32-NEXT:    movss %xmm0, {{[0-9]+}}(%esp)
 ; X32-NEXT:    addl $60, %esp
 ; X32-NEXT:    retl
 ;

@@ -19,8 +19,6 @@
 
 using namespace llvm;
 
-DEFINE_SIMPLE_CONVERSION_FUNCTIONS(DIBuilder, LLVMDIBuilderRef)
-
 LLVMDIBuilderRef LLVMNewDIBuilder(LLVMModuleRef mref) {
   Module *m = unwrap(mref);
   return wrap(new DIBuilder(*m));
@@ -29,25 +27,6 @@ LLVMDIBuilderRef LLVMNewDIBuilder(LLVMModuleRef mref) {
 void LLVMDIBuilderDestroy(LLVMDIBuilderRef dref) {
   DIBuilder *d = unwrap(dref);
   delete d;
-}
-
-void LLVMDIBuilderFinalize(LLVMDIBuilderRef dref) { unwrap(dref)->finalize(); }
-
-LLVMMetadataRef LLVMDIBuilderCreateCompileUnit(LLVMDIBuilderRef Dref,
-                                               unsigned Lang, const char *File,
-                                               const char *Dir,
-                                               const char *Producer,
-                                               int Optimized, const char *Flags,
-                                               unsigned RuntimeVersion) {
-  DIBuilder *D = unwrap(Dref);
-  return wrap(D->createCompileUnit(Lang, D->createFile(File, Dir), Producer,
-                                   Optimized, Flags, RuntimeVersion));
-}
-
-LLVMMetadataRef LLVMDIBuilderCreateFile(LLVMDIBuilderRef Dref, const char *File,
-                                        const char *Dir) {
-  DIBuilder *D = unwrap(Dref);
-  return wrap(D->createFile(File, Dir));
 }
 
 LLVMMetadataRef LLVMDIBuilderCreateLexicalBlock(LLVMDIBuilderRef Dref,
@@ -239,7 +218,7 @@ LLVMValueRef LLVMDIBuilderInsertDeclareAtEnd(LLVMDIBuilderRef Dref,
 }
 
 LLVMValueRef LLVMDIBuilderInsertValueAtEnd(LLVMDIBuilderRef Dref,
-                                           LLVMValueRef Val, uint64_t Offset,
+                                           LLVMValueRef Val,
                                            LLVMMetadataRef VarInfo,
                                            LLVMMetadataRef Expr,
                                            LLVMBasicBlockRef Block) {
@@ -249,7 +228,7 @@ LLVMValueRef LLVMDIBuilderInsertValueAtEnd(LLVMDIBuilderRef Dref,
 
   DIBuilder *D = unwrap(Dref);
   Instruction *Instr = D->insertDbgValueIntrinsic(
-      unwrap(Val), Offset, unwrap<DILocalVariable>(VarInfo),
-      unwrap<DIExpression>(Expr), /* DebugLoc */ nullptr, unwrap(Block));
+      unwrap(Val), unwrap<DILocalVariable>(VarInfo), unwrap<DIExpression>(Expr),
+      /* DebugLoc */ nullptr, unwrap(Block));
   return wrap(Instr);
 }

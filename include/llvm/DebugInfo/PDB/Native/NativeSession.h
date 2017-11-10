@@ -7,11 +7,17 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_DEBUGINFO_PDB_RAW_RAWSESSION_H
-#define LLVM_DEBUGINFO_PDB_RAW_RAWSESSION_H
+#ifndef LLVM_DEBUGINFO_PDB_NATIVE_NATIVESESSION_H
+#define LLVM_DEBUGINFO_PDB_NATIVE_NATIVESESSION_H
 
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/DebugInfo/CodeView/TypeIndex.h"
+#include "llvm/DebugInfo/PDB/IPDBRawSymbol.h"
 #include "llvm/DebugInfo/PDB/IPDBSession.h"
+#include "llvm/DebugInfo/PDB/Native/DbiModuleDescriptor.h"
+#include "llvm/DebugInfo/PDB/Native/NativeBuiltinSymbol.h"
+#include "llvm/DebugInfo/PDB/Native/NativeRawSymbol.h"
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/Error.h"
 
@@ -25,10 +31,21 @@ public:
                 std::unique_ptr<BumpPtrAllocator> Allocator);
   ~NativeSession() override;
 
-  static Error createFromPdb(StringRef Path,
+  static Error createFromPdb(std::unique_ptr<MemoryBuffer> MB,
                              std::unique_ptr<IPDBSession> &Session);
   static Error createFromExe(StringRef Path,
                              std::unique_ptr<IPDBSession> &Session);
+
+  std::unique_ptr<PDBSymbolCompiland>
+  createCompilandSymbol(DbiModuleDescriptor MI);
+
+  std::unique_ptr<PDBSymbolTypeEnum>
+  createEnumSymbol(codeview::TypeIndex Index);
+
+  std::unique_ptr<IPDBEnumSymbols>
+  createTypeEnumerator(codeview::TypeLeafKind Kind);
+
+  SymIndexId findSymbolByTypeIndex(codeview::TypeIndex TI);
 
   uint64_t getLoadAddress() const override;
   void setLoadAddress(uint64_t Address) override;
@@ -71,6 +88,8 @@ public:
 private:
   std::unique_ptr<PDBFile> Pdb;
   std::unique_ptr<BumpPtrAllocator> Allocator;
+  std::vector<std::unique_ptr<NativeRawSymbol>> SymbolCache;
+  DenseMap<codeview::TypeIndex, SymIndexId> TypeIndexToSymbolId;
 };
 }
 }

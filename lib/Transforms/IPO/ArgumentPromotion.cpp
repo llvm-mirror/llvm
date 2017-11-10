@@ -1,4 +1,4 @@
-//===-- ArgumentPromotion.cpp - Promote by-reference arguments ------------===//
+//===- ArgumentPromotion.cpp - Promote by-reference arguments -------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -31,30 +31,59 @@
 
 #include "llvm/Transforms/IPO/ArgumentPromotion.h"
 #include "llvm/ADT/DepthFirstIterator.h"
+#include "llvm/ADT/None.h"
 #include "llvm/ADT/Optional.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/ADT/Twine.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/BasicAliasAnalysis.h"
+#include "llvm/Analysis/CGSCCPassManager.h"
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/Analysis/CallGraphSCCPass.h"
 #include "llvm/Analysis/LazyCallGraph.h"
 #include "llvm/Analysis/Loads.h"
+#include "llvm/Analysis/MemoryLocation.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
+#include "llvm/IR/Argument.h"
+#include "llvm/IR/Attributes.h"
+#include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
-#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/InstrTypes.h"
+#include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
-#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/PassManager.h"
+#include "llvm/IR/Type.h"
+#include "llvm/IR/Use.h"
+#include "llvm/IR/User.h"
+#include "llvm/IR/Value.h"
+#include "llvm/Pass.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/IPO.h"
+#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <functional>
+#include <iterator>
+#include <map>
 #include <set>
+#include <string>
+#include <utility>
+#include <vector>
+
 using namespace llvm;
 
 #define DEBUG_TYPE "argpromotion"
@@ -65,7 +94,7 @@ STATISTIC(NumByValArgsPromoted, "Number of byval arguments promoted");
 STATISTIC(NumArgumentsDead, "Number of dead pointer args eliminated");
 
 /// A vector used to hold the indices of a single GEP instruction
-typedef std::vector<uint64_t> IndicesVector;
+using IndicesVector = std::vector<uint64_t>;
 
 /// DoPromotion - This method actually performs the promotion of the specified
 /// arguments, and returns the new function.  At this point, we know that it's
@@ -75,13 +104,12 @@ doPromotion(Function *F, SmallPtrSetImpl<Argument *> &ArgsToPromote,
             SmallPtrSetImpl<Argument *> &ByValArgsToTransform,
             Optional<function_ref<void(CallSite OldCS, CallSite NewCS)>>
                 ReplaceCallSite) {
-
   // Start by computing a new prototype for the function, which is the same as
   // the old function, but has modified arguments.
   FunctionType *FTy = F->getFunctionType();
   std::vector<Type *> Params;
 
-  typedef std::set<std::pair<Type *, IndicesVector>> ScalarizeTable;
+  using ScalarizeTable = std::set<std::pair<Type *, IndicesVector>>;
 
   // ScalarizedElements - If we are promoting a pointer that has elements
   // accessed out of it, keep track of which elements are accessed so that we
@@ -89,7 +117,6 @@ doPromotion(Function *F, SmallPtrSetImpl<Argument *> &ArgsToPromote,
   //
   // Arguments that are directly loaded will have a zero element value here, to
   // handle cases where there are both a direct load and GEP accesses.
-  //
   std::map<Argument *, ScalarizeTable> ScalarizedElements;
 
   // OriginalLoads - Keep track of a representative load instruction from the
@@ -102,36 +129,32 @@ doPromotion(Function *F, SmallPtrSetImpl<Argument *> &ArgsToPromote,
   // Attribute - Keep track of the parameter attributes for the arguments
   // that we are *not* promoting. For the ones that we do promote, the parameter
   // attributes are lost
-  SmallVector<AttributeSet, 8> AttributesVec;
-  const AttributeSet &PAL = F->getAttributes();
-
-  // Add any return attributes.
-  if (PAL.hasAttributes(AttributeSet::ReturnIndex))
-    AttributesVec.push_back(
-        AttributeSet::get(F->getContext(), PAL.getRetAttributes()));
+  SmallVector<AttributeSet, 8> ArgAttrVec;
+  AttributeList PAL = F->getAttributes();
 
   // First, determine the new argument list
-  unsigned ArgIndex = 1;
+  unsigned ArgNo = 0;
   for (Function::arg_iterator I = F->arg_begin(), E = F->arg_end(); I != E;
-       ++I, ++ArgIndex) {
+       ++I, ++ArgNo) {
     if (ByValArgsToTransform.count(&*I)) {
       // Simple byval argument? Just add all the struct element types.
       Type *AgTy = cast<PointerType>(I->getType())->getElementType();
       StructType *STy = cast<StructType>(AgTy);
       Params.insert(Params.end(), STy->element_begin(), STy->element_end());
+      ArgAttrVec.insert(ArgAttrVec.end(), STy->getNumElements(),
+                        AttributeSet());
       ++NumByValArgsPromoted;
     } else if (!ArgsToPromote.count(&*I)) {
       // Unchanged argument
       Params.push_back(I->getType());
-      AttributeSet attrs = PAL.getParamAttributes(ArgIndex);
-      if (attrs.hasAttributes(ArgIndex)) {
-        AttrBuilder B(attrs, ArgIndex);
-        AttributesVec.push_back(
-            AttributeSet::get(F->getContext(), Params.size(), B));
-      }
+      ArgAttrVec.push_back(PAL.getParamAttributes(ArgNo));
     } else if (I->use_empty()) {
       // Dead argument (which are always marked as promotable)
       ++NumArgumentsDead;
+
+      // There may be remaining metadata uses of the argument for things like
+      // llvm.dbg.value. Replace them with undef.
+      I->replaceAllUsesWith(UndefValue::get(I->getType()));
     } else {
       // Okay, this is being promoted. This means that the only uses are loads
       // or GEPs which are only used by loads
@@ -173,6 +196,7 @@ doPromotion(Function *F, SmallPtrSetImpl<Argument *> &ArgsToPromote,
         Params.push_back(GetElementPtrInst::getIndexedType(
             cast<PointerType>(I->getType()->getScalarType())->getElementType(),
             ArgIndex.second));
+        ArgAttrVec.push_back(AttributeSet());
         assert(Params.back());
       }
 
@@ -182,11 +206,6 @@ doPromotion(Function *F, SmallPtrSetImpl<Argument *> &ArgsToPromote,
         ++NumAggregatesPromoted;
     }
   }
-
-  // Add any function attributes.
-  if (PAL.hasAttributes(AttributeSet::FunctionIndex))
-    AttributesVec.push_back(
-        AttributeSet::get(FTy->getContext(), PAL.getFnAttributes()));
 
   Type *RetTy = FTy->getReturnType();
 
@@ -206,8 +225,9 @@ doPromotion(Function *F, SmallPtrSetImpl<Argument *> &ArgsToPromote,
 
   // Recompute the parameter attributes list based on the new arguments for
   // the function.
-  NF->setAttributes(AttributeSet::get(F->getContext(), AttributesVec));
-  AttributesVec.clear();
+  NF->setAttributes(AttributeList::get(F->getContext(), PAL.getFnAttributes(),
+                                       PAL.getRetAttributes(), ArgAttrVec));
+  ArgAttrVec.clear();
 
   F->getParent()->getFunctionList().insert(F->getIterator(), NF);
   NF->takeName(F);
@@ -220,27 +240,17 @@ doPromotion(Function *F, SmallPtrSetImpl<Argument *> &ArgsToPromote,
     CallSite CS(F->user_back());
     assert(CS.getCalledFunction() == F);
     Instruction *Call = CS.getInstruction();
-    const AttributeSet &CallPAL = CS.getAttributes();
-
-    // Add any return attributes.
-    if (CallPAL.hasAttributes(AttributeSet::ReturnIndex))
-      AttributesVec.push_back(
-          AttributeSet::get(F->getContext(), CallPAL.getRetAttributes()));
+    const AttributeList &CallPAL = CS.getAttributes();
 
     // Loop over the operands, inserting GEP and loads in the caller as
     // appropriate.
     CallSite::arg_iterator AI = CS.arg_begin();
-    ArgIndex = 1;
+    ArgNo = 0;
     for (Function::arg_iterator I = F->arg_begin(), E = F->arg_end(); I != E;
-         ++I, ++AI, ++ArgIndex)
+         ++I, ++AI, ++ArgNo)
       if (!ArgsToPromote.count(&*I) && !ByValArgsToTransform.count(&*I)) {
         Args.push_back(*AI); // Unmodified argument
-
-        if (CallPAL.hasAttributes(ArgIndex)) {
-          AttrBuilder B(CallPAL, ArgIndex);
-          AttributesVec.push_back(
-              AttributeSet::get(F->getContext(), Args.size(), B));
-        }
+        ArgAttrVec.push_back(CallPAL.getParamAttributes(ArgNo));
       } else if (ByValArgsToTransform.count(&*I)) {
         // Emit a GEP and load for each element of the struct.
         Type *AgTy = cast<PointerType>(I->getType())->getElementType();
@@ -253,6 +263,7 @@ doPromotion(Function *F, SmallPtrSetImpl<Argument *> &ArgsToPromote,
               STy, *AI, Idxs, (*AI)->getName() + "." + Twine(i), Call);
           // TODO: Tell AA about the new values?
           Args.push_back(new LoadInst(Idx, Idx->getName() + ".val", Call));
+          ArgAttrVec.push_back(AttributeSet());
         }
       } else if (!I->use_empty()) {
         // Non-dead argument: insert GEPs and loads as appropriate.
@@ -267,7 +278,7 @@ doPromotion(Function *F, SmallPtrSetImpl<Argument *> &ArgsToPromote,
           if (!ArgIndex.second.empty()) {
             Ops.reserve(ArgIndex.second.size());
             Type *ElTy = V->getType();
-            for (unsigned long II : ArgIndex.second) {
+            for (auto II : ArgIndex.second) {
               // Use i32 to index structs, and i64 for others (pointers/arrays).
               // This satisfies GEP constraints.
               Type *IdxTy =
@@ -295,59 +306,54 @@ doPromotion(Function *F, SmallPtrSetImpl<Argument *> &ArgsToPromote,
           newLoad->setAAMetadata(AAInfo);
 
           Args.push_back(newLoad);
+          ArgAttrVec.push_back(AttributeSet());
         }
       }
 
     // Push any varargs arguments on the list.
-    for (; AI != CS.arg_end(); ++AI, ++ArgIndex) {
+    for (; AI != CS.arg_end(); ++AI, ++ArgNo) {
       Args.push_back(*AI);
-      if (CallPAL.hasAttributes(ArgIndex)) {
-        AttrBuilder B(CallPAL, ArgIndex);
-        AttributesVec.push_back(
-            AttributeSet::get(F->getContext(), Args.size(), B));
-      }
+      ArgAttrVec.push_back(CallPAL.getParamAttributes(ArgNo));
     }
-
-    // Add any function attributes.
-    if (CallPAL.hasAttributes(AttributeSet::FunctionIndex))
-      AttributesVec.push_back(
-          AttributeSet::get(Call->getContext(), CallPAL.getFnAttributes()));
 
     SmallVector<OperandBundleDef, 1> OpBundles;
     CS.getOperandBundlesAsDefs(OpBundles);
 
-    Instruction *New;
+    CallSite NewCS;
     if (InvokeInst *II = dyn_cast<InvokeInst>(Call)) {
-      New = InvokeInst::Create(NF, II->getNormalDest(), II->getUnwindDest(),
-                               Args, OpBundles, "", Call);
-      cast<InvokeInst>(New)->setCallingConv(CS.getCallingConv());
-      cast<InvokeInst>(New)->setAttributes(
-          AttributeSet::get(II->getContext(), AttributesVec));
+      NewCS = InvokeInst::Create(NF, II->getNormalDest(), II->getUnwindDest(),
+                                 Args, OpBundles, "", Call);
     } else {
-      New = CallInst::Create(NF, Args, OpBundles, "", Call);
-      cast<CallInst>(New)->setCallingConv(CS.getCallingConv());
-      cast<CallInst>(New)->setAttributes(
-          AttributeSet::get(New->getContext(), AttributesVec));
-      cast<CallInst>(New)->setTailCallKind(
-          cast<CallInst>(Call)->getTailCallKind());
+      auto *NewCall = CallInst::Create(NF, Args, OpBundles, "", Call);
+      NewCall->setTailCallKind(cast<CallInst>(Call)->getTailCallKind());
+      NewCS = NewCall;
     }
-    New->setDebugLoc(Call->getDebugLoc());
+    NewCS.setCallingConv(CS.getCallingConv());
+    NewCS.setAttributes(
+        AttributeList::get(F->getContext(), CallPAL.getFnAttributes(),
+                           CallPAL.getRetAttributes(), ArgAttrVec));
+    NewCS->setDebugLoc(Call->getDebugLoc());
+    uint64_t W;
+    if (Call->extractProfTotalWeight(W))
+      NewCS->setProfWeight(W);
     Args.clear();
-    AttributesVec.clear();
+    ArgAttrVec.clear();
 
     // Update the callgraph to know that the callsite has been transformed.
     if (ReplaceCallSite)
-      (*ReplaceCallSite)(CS, CallSite(New));
+      (*ReplaceCallSite)(CS, NewCS);
 
     if (!Call->use_empty()) {
-      Call->replaceAllUsesWith(New);
-      New->takeName(Call);
+      Call->replaceAllUsesWith(NewCS.getInstruction());
+      NewCS->takeName(Call);
     }
 
     // Finally, remove the old call from the program, reducing the use-count of
     // F.
     Call->eraseFromParent();
   }
+
+  const DataLayout &DL = F->getParent()->getDataLayout();
 
   // Since we have now created the new function, splice the body of the old
   // function right into the new function, leaving the old rotting hulk of the
@@ -356,7 +362,6 @@ doPromotion(Function *F, SmallPtrSetImpl<Argument *> &ArgsToPromote,
 
   // Loop over the argument list, transferring uses of the old arguments over to
   // the new arguments, also transferring over the names as well.
-  //
   for (Function::arg_iterator I = F->arg_begin(), E = F->arg_end(),
                               I2 = NF->arg_begin();
        I != E; ++I) {
@@ -376,7 +381,8 @@ doPromotion(Function *F, SmallPtrSetImpl<Argument *> &ArgsToPromote,
 
       // Just add all the struct element types.
       Type *AgTy = cast<PointerType>(I->getType())->getElementType();
-      Value *TheAlloca = new AllocaInst(AgTy, nullptr, "", InsertPt);
+      Value *TheAlloca = new AllocaInst(AgTy, DL.getAllocaAddrSpace(), nullptr,
+                                        I->getParamAlignment(), "", InsertPt);
       StructType *STy = cast<StructType>(AgTy);
       Value *Idxs[2] = {ConstantInt::get(Type::getInt32Ty(F->getContext()), 0),
                         nullptr};
@@ -557,7 +563,7 @@ static void markIndicesSafe(const IndicesVector &ToMark,
 /// arguments passed in.
 static bool isSafeToPromoteArgument(Argument *Arg, bool isByValOrInAlloca,
                                     AAResults &AAR, unsigned MaxElements) {
-  typedef std::set<IndicesVector> GEPIndicesSet;
+  using GEPIndicesSet = std::set<IndicesVector>;
 
   // Quick exit for unused arguments
   if (Arg->use_empty())
@@ -734,7 +740,6 @@ static bool isSafeToPromoteArgument(Argument *Arg, bool isByValOrInAlloca,
 
 /// \brief Checks if a type could have padding bytes.
 static bool isDenselyPacked(Type *type, const DataLayout &DL) {
-
   // There is no size information, so be conservative.
   if (!type->isSized())
     return false;
@@ -769,7 +774,6 @@ static bool isDenselyPacked(Type *type, const DataLayout &DL) {
 
 /// \brief Checks if the padding bytes of an argument could be accessed.
 static bool canPaddingBeAccessed(Argument *arg) {
-
   assert(arg->hasByValAttr());
 
   // Track all the pointers to the argument to make sure they are not captured.
@@ -808,7 +812,6 @@ static bool canPaddingBeAccessed(Argument *arg) {
 /// are any promotable arguments and if it is safe to promote the function (for
 /// example, all callers are direct).  If safe to promote some arguments, it
 /// calls the DoPromotion method.
-///
 static Function *
 promoteArguments(Function *F, function_ref<AAResults &(Function &F)> AARGetter,
                  unsigned MaxElements,
@@ -863,17 +866,12 @@ promoteArguments(Function *F, function_ref<AAResults &(Function &F)> AARGetter,
     // avoiding a register copy.
     if (PtrArg->hasStructRetAttr()) {
       unsigned ArgNo = PtrArg->getArgNo();
-      F->setAttributes(
-          F->getAttributes()
-              .removeAttribute(F->getContext(), ArgNo + 1, Attribute::StructRet)
-              .addAttribute(F->getContext(), ArgNo + 1, Attribute::NoAlias));
+      F->removeParamAttr(ArgNo, Attribute::StructRet);
+      F->addParamAttr(ArgNo, Attribute::NoAlias);
       for (Use &U : F->uses()) {
         CallSite CS(U.getUser());
-        CS.setAttributes(
-            CS.getAttributes()
-                .removeAttribute(F->getContext(), ArgNo + 1,
-                                 Attribute::StructRet)
-                .addAttribute(F->getContext(), ArgNo + 1, Attribute::NoAlias));
+        CS.removeParamAttr(ArgNo, Attribute::StructRet);
+        CS.addParamAttr(ArgNo, Attribute::NoAlias);
       }
     }
 
@@ -989,9 +987,17 @@ PreservedAnalyses ArgumentPromotionPass::run(LazyCallGraph::SCC &C,
 }
 
 namespace {
+
 /// ArgPromotion - The 'by reference' to 'by value' argument promotion pass.
-///
 struct ArgPromotion : public CallGraphSCCPass {
+  // Pass identification, replacement for typeid
+  static char ID;
+
+  explicit ArgPromotion(unsigned MaxElements = 3)
+      : CallGraphSCCPass(ID), MaxElements(MaxElements) {
+    initializeArgPromotionPass(*PassRegistry::getPassRegistry());
+  }
+
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequired<AssumptionCacheTracker>();
     AU.addRequired<TargetLibraryInfoWrapperPass>();
@@ -1000,21 +1006,20 @@ struct ArgPromotion : public CallGraphSCCPass {
   }
 
   bool runOnSCC(CallGraphSCC &SCC) override;
-  static char ID; // Pass identification, replacement for typeid
-  explicit ArgPromotion(unsigned MaxElements = 3)
-      : CallGraphSCCPass(ID), MaxElements(MaxElements) {
-    initializeArgPromotionPass(*PassRegistry::getPassRegistry());
-  }
 
 private:
   using llvm::Pass::doInitialization;
+
   bool doInitialization(CallGraph &CG) override;
+
   /// The maximum number of elements to expand, or 0 for unlimited.
   unsigned MaxElements;
 };
-}
+
+} // end anonymous namespace
 
 char ArgPromotion::ID = 0;
+
 INITIALIZE_PASS_BEGIN(ArgPromotion, "argpromotion",
                       "Promote 'by reference' arguments to scalars", false,
                       false)

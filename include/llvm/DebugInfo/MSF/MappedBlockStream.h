@@ -1,5 +1,4 @@
-//===- MappedBlockStream.h - Discontiguous stream data in an MSF -*- C++
-//-*-===//
+//==- MappedBlockStream.h - Discontiguous stream data in an MSF --*- C++ -*-==//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -13,15 +12,14 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/DebugInfo/MSF/MSFStreamLayout.h"
+#include "llvm/DebugInfo/MSF/MSFCommon.h"
 #include "llvm/Support/Allocator.h"
-#include "llvm/Support/BinaryStream.h"
 #include "llvm/Support/BinaryStream.h"
 #include "llvm/Support/BinaryStreamRef.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/Error.h"
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 namespace llvm {
@@ -41,23 +39,26 @@ struct MSFLayout;
 /// of bytes.
 class MappedBlockStream : public BinaryStream {
   friend class WritableMappedBlockStream;
+
 public:
   static std::unique_ptr<MappedBlockStream>
-  createStream(uint32_t BlockSize, uint32_t NumBlocks,
-               const MSFStreamLayout &Layout, BinaryStreamRef MsfData);
+  createStream(uint32_t BlockSize, const MSFStreamLayout &Layout,
+               BinaryStreamRef MsfData, BumpPtrAllocator &Allocator);
 
   static std::unique_ptr<MappedBlockStream>
   createIndexedStream(const MSFLayout &Layout, BinaryStreamRef MsfData,
-                      uint32_t StreamIndex);
+                      uint32_t StreamIndex, BumpPtrAllocator &Allocator);
 
   static std::unique_ptr<MappedBlockStream>
-  createFpmStream(const MSFLayout &Layout, BinaryStreamRef MsfData);
+  createFpmStream(const MSFLayout &Layout, BinaryStreamRef MsfData,
+                  BumpPtrAllocator &Allocator);
 
   static std::unique_ptr<MappedBlockStream>
-  createDirectoryStream(const MSFLayout &Layout, BinaryStreamRef MsfData);
+  createDirectoryStream(const MSFLayout &Layout, BinaryStreamRef MsfData,
+                        BumpPtrAllocator &Allocator);
 
-  llvm::support::endianness getEndian() const override {
-    return llvm::support::little;
+  support::endianness getEndian() const override {
+    return support::little;
   }
 
   Error readBytes(uint32_t Offset, uint32_t Size,
@@ -67,20 +68,17 @@ public:
 
   uint32_t getLength() override;
 
-  uint32_t getNumBytesCopied() const;
-
-  llvm::BumpPtrAllocator &getAllocator() { return Pool; }
+  BumpPtrAllocator &getAllocator() { return Allocator; }
 
   void invalidateCache();
 
   uint32_t getBlockSize() const { return BlockSize; }
-  uint32_t getNumBlocks() const { return NumBlocks; }
+  uint32_t getNumBlocks() const { return StreamLayout.Blocks.size(); }
   uint32_t getStreamLength() const { return StreamLayout.Length; }
 
 protected:
-  MappedBlockStream(uint32_t BlockSize, uint32_t NumBlocks,
-                    const MSFStreamLayout &StreamLayout,
-                    BinaryStreamRef MsfData);
+  MappedBlockStream(uint32_t BlockSize, const MSFStreamLayout &StreamLayout,
+                    BinaryStreamRef MsfData, BumpPtrAllocator &Allocator);
 
 private:
   const MSFStreamLayout &getStreamLayout() const { return StreamLayout; }
@@ -91,34 +89,43 @@ private:
                            ArrayRef<uint8_t> &Buffer);
 
   const uint32_t BlockSize;
-  const uint32_t NumBlocks;
   const MSFStreamLayout StreamLayout;
   BinaryStreamRef MsfData;
 
-  typedef MutableArrayRef<uint8_t> CacheEntry;
-  llvm::BumpPtrAllocator Pool;
+  using CacheEntry = MutableArrayRef<uint8_t>;
+
+  // We just store the allocator by reference.  We use this to allocate
+  // contiguous memory for things like arrays or strings that cross a block
+  // boundary, and this memory is expected to outlive the stream.  For example,
+  // someone could create a stream, read some stuff, then close the stream, and
+  // we would like outstanding references to fields to remain valid since the
+  // entire file is mapped anyway.  Because of that, the user must supply the
+  // allocator to allocate broken records from.
+  BumpPtrAllocator &Allocator;
   DenseMap<uint32_t, std::vector<CacheEntry>> CacheMap;
 };
 
 class WritableMappedBlockStream : public WritableBinaryStream {
 public:
   static std::unique_ptr<WritableMappedBlockStream>
-  createStream(uint32_t BlockSize, uint32_t NumBlocks,
-               const MSFStreamLayout &Layout, WritableBinaryStreamRef MsfData);
+  createStream(uint32_t BlockSize, const MSFStreamLayout &Layout,
+               WritableBinaryStreamRef MsfData, BumpPtrAllocator &Allocator);
 
   static std::unique_ptr<WritableMappedBlockStream>
   createIndexedStream(const MSFLayout &Layout, WritableBinaryStreamRef MsfData,
-                      uint32_t StreamIndex);
+                      uint32_t StreamIndex, BumpPtrAllocator &Allocator);
 
   static std::unique_ptr<WritableMappedBlockStream>
   createDirectoryStream(const MSFLayout &Layout,
-                        WritableBinaryStreamRef MsfData);
+                        WritableBinaryStreamRef MsfData,
+                        BumpPtrAllocator &Allocator);
 
   static std::unique_ptr<WritableMappedBlockStream>
-  createFpmStream(const MSFLayout &Layout, WritableBinaryStreamRef MsfData);
+  createFpmStream(const MSFLayout &Layout, WritableBinaryStreamRef MsfData,
+                  BumpPtrAllocator &Allocator, bool AltFpm = false);
 
-  llvm::support::endianness getEndian() const override {
-    return llvm::support::little;
+  support::endianness getEndian() const override {
+    return support::little;
   }
 
   Error readBytes(uint32_t Offset, uint32_t Size,
@@ -134,18 +141,19 @@ public:
   const MSFStreamLayout &getStreamLayout() const {
     return ReadInterface.getStreamLayout();
   }
+
   uint32_t getBlockSize() const { return ReadInterface.getBlockSize(); }
   uint32_t getNumBlocks() const { return ReadInterface.getNumBlocks(); }
   uint32_t getStreamLength() const { return ReadInterface.getStreamLength(); }
 
 protected:
-  WritableMappedBlockStream(uint32_t BlockSize, uint32_t NumBlocks,
+  WritableMappedBlockStream(uint32_t BlockSize,
                             const MSFStreamLayout &StreamLayout,
-                            WritableBinaryStreamRef MsfData);
+                            WritableBinaryStreamRef MsfData,
+                            BumpPtrAllocator &Allocator);
 
 private:
   MappedBlockStream ReadInterface;
-
   WritableBinaryStreamRef WriteInterface;
 };
 

@@ -26,8 +26,8 @@ define <16 x float> @shuffle_v16f32_08_08_08_08_08_08_08_08_08_08_08_08_08_08_08
 define <16 x float> @shuffle_v16f32_08_08_08_08_08_08_08_08_08_08_08_08_08_08_08_08_bc(<16 x i32> %a, <16 x i32> %b) {
 ; ALL-LABEL: shuffle_v16f32_08_08_08_08_08_08_08_08_08_08_08_08_08_08_08_08_bc:
 ; ALL:       # BB#0:
-; ALL-NEXT:    vextracti32x4 $2, %zmm0, %xmm0
-; ALL-NEXT:    vpbroadcastd %xmm0, %zmm0
+; ALL-NEXT:    vextractf32x4 $2, %zmm0, %xmm0
+; ALL-NEXT:    vbroadcastss %xmm0, %zmm0
 ; ALL-NEXT:    retq
   %tmp0 = bitcast <16 x i32> %a to <16 x float>
   %tmp1 = bitcast <16 x i32> %b to <16 x float>
@@ -47,7 +47,7 @@ define <16 x float> @shuffle_v16f32_00_10_01_11_04_14_05_15_08_18_09_19_0c_1c_0d
 define <16 x float> @shuffle_v16f32_00_zz_01_zz_04_zz_05_zz_08_zz_09_zz_0c_zz_0d_zz(<16 x float> %a, <16 x float> %b) {
 ; ALL-LABEL: shuffle_v16f32_00_zz_01_zz_04_zz_05_zz_08_zz_09_zz_0c_zz_0d_zz:
 ; ALL:       # BB#0:
-; ALL-NEXT:    vxorps %zmm1, %zmm1, %zmm1
+; ALL-NEXT:    vxorps %xmm1, %xmm1, %xmm1
 ; ALL-NEXT:    vunpcklps {{.*#+}} zmm0 = zmm0[0],zmm1[0],zmm0[1],zmm1[1],zmm0[4],zmm1[4],zmm0[5],zmm1[5],zmm0[8],zmm1[8],zmm0[9],zmm1[9],zmm0[12],zmm1[12],zmm0[13],zmm1[13]
 ; ALL-NEXT:    retq
   %shuffle = shufflevector <16 x float> %a, <16 x float> zeroinitializer, <16 x i32><i32 0, i32 16, i32 1, i32 16, i32 4, i32 16, i32 5, i32 16, i32 8, i32 16, i32 9, i32 16, i32 12, i32 16, i32 13, i32 16>
@@ -63,10 +63,20 @@ define <16 x float> @shuffle_v16f32_vunpcklps_swap(<16 x float> %a, <16 x float>
   ret <16 x float> %shuffle
 }
 
+; PR34382
+define <16 x float> @shuffle_v16f32_01_01_03_00_06_04_05_07_08_08_09_09_15_14_14_12(<16 x float> %a0) {
+; ALL-LABEL: shuffle_v16f32_01_01_03_00_06_04_05_07_08_08_09_09_15_14_14_12:
+; ALL:       # BB#0:
+; ALL-NEXT:    vpermilps {{.*#+}} zmm0 = zmm0[1,1,3,0,6,4,5,7,8,8,9,9,15,14,14,12]
+; ALL-NEXT:    retq
+  %shuffle = shufflevector <16 x float> %a0, <16 x float> undef, <16 x i32> <i32 1, i32 1, i32 3, i32 0, i32 6, i32 4, i32 5, i32 7, i32 8, i32 8, i32 9, i32 9, i32 15, i32 14, i32 14, i32 12>
+  ret <16 x float> %shuffle
+}
+
 define <16 x i32> @shuffle_v16i32_00_10_01_11_04_14_05_15_08_18_09_19_0c_1c_0d_1d(<16 x i32> %a, <16 x i32> %b) {
 ; ALL-LABEL: shuffle_v16i32_00_10_01_11_04_14_05_15_08_18_09_19_0c_1c_0d_1d:
 ; ALL:       # BB#0:
-; ALL-NEXT:    vpunpckldq {{.*#+}} zmm0 = zmm0[0],zmm1[0],zmm0[1],zmm1[1],zmm0[4],zmm1[4],zmm0[5],zmm1[5],zmm0[8],zmm1[8],zmm0[9],zmm1[9],zmm0[12],zmm1[12],zmm0[13],zmm1[13]
+; ALL-NEXT:    vunpcklps {{.*#+}} zmm0 = zmm0[0],zmm1[0],zmm0[1],zmm1[1],zmm0[4],zmm1[4],zmm0[5],zmm1[5],zmm0[8],zmm1[8],zmm0[9],zmm1[9],zmm0[12],zmm1[12],zmm0[13],zmm1[13]
 ; ALL-NEXT:    retq
   %shuffle = shufflevector <16 x i32> %a, <16 x i32> %b, <16 x i32><i32 0, i32 16, i32 1, i32 17, i32 4, i32 20, i32 5, i32 21, i32 8, i32 24, i32 9, i32 25, i32 12, i32 28, i32 13, i32 29>
   ret <16 x i32> %shuffle
@@ -75,8 +85,8 @@ define <16 x i32> @shuffle_v16i32_00_10_01_11_04_14_05_15_08_18_09_19_0c_1c_0d_1
 define <16 x i32> @shuffle_v16i32_zz_10_zz_11_zz_14_zz_15_zz_18_zz_19_zz_1c_zz_1d(<16 x i32> %a, <16 x i32> %b) {
 ; ALL-LABEL: shuffle_v16i32_zz_10_zz_11_zz_14_zz_15_zz_18_zz_19_zz_1c_zz_1d:
 ; ALL:       # BB#0:
-; ALL-NEXT:    vpxord %zmm0, %zmm0, %zmm0
-; ALL-NEXT:    vpunpckldq {{.*#+}} zmm0 = zmm0[0],zmm1[0],zmm0[1],zmm1[1],zmm0[4],zmm1[4],zmm0[5],zmm1[5],zmm0[8],zmm1[8],zmm0[9],zmm1[9],zmm0[12],zmm1[12],zmm0[13],zmm1[13]
+; ALL-NEXT:    vxorps %xmm0, %xmm0, %xmm0
+; ALL-NEXT:    vunpcklps {{.*#+}} zmm0 = zmm0[0],zmm1[0],zmm0[1],zmm1[1],zmm0[4],zmm1[4],zmm0[5],zmm1[5],zmm0[8],zmm1[8],zmm0[9],zmm1[9],zmm0[12],zmm1[12],zmm0[13],zmm1[13]
 ; ALL-NEXT:    retq
   %shuffle = shufflevector <16 x i32> zeroinitializer, <16 x i32> %b, <16 x i32><i32 15, i32 16, i32 13, i32 17, i32 11, i32 20, i32 9, i32 21, i32 7, i32 24, i32 5, i32 25, i32 3, i32 28, i32 1, i32 29>
   ret <16 x i32> %shuffle
@@ -94,7 +104,7 @@ define <16 x float> @shuffle_v16f32_02_12_03_13_06_16_07_17_0a_1a_0b_1b_0e_1e_0f
 define <16 x float> @shuffle_v16f32_zz_12_zz_13_zz_16_zz_17_zz_1a_zz_1b_zz_1e_zz_1f(<16 x float> %a, <16 x float> %b) {
 ; ALL-LABEL: shuffle_v16f32_zz_12_zz_13_zz_16_zz_17_zz_1a_zz_1b_zz_1e_zz_1f:
 ; ALL:       # BB#0:
-; ALL-NEXT:    vxorps %zmm0, %zmm0, %zmm0
+; ALL-NEXT:    vxorps %xmm0, %xmm0, %xmm0
 ; ALL-NEXT:    vunpckhps {{.*#+}} zmm0 = zmm0[2],zmm1[2],zmm0[3],zmm1[3],zmm0[6],zmm1[6],zmm0[7],zmm1[7],zmm0[10],zmm1[10],zmm0[11],zmm1[11],zmm0[14],zmm1[14],zmm0[15],zmm1[15]
 ; ALL-NEXT:    retq
   %shuffle = shufflevector <16 x float> zeroinitializer, <16 x float> %b, <16 x i32><i32 0, i32 18, i32 0, i32 19, i32 4, i32 22, i32 4, i32 23, i32 6, i32 26, i32 6, i32 27, i32 8, i32 30, i32 8, i32 31>
@@ -158,8 +168,8 @@ define <16 x i32> @shuffle_v16i32_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_0
 define <16 x i32> @shuffle_v16i32_04_04_04_04_04_04_04_04_04_04_04_04_04_04_04_04(<16 x i32> %a, <16 x i32> %b) {
 ; ALL-LABEL: shuffle_v16i32_04_04_04_04_04_04_04_04_04_04_04_04_04_04_04_04:
 ; ALL:       # BB#0:
-; ALL-NEXT:    vextracti32x4 $1, %zmm0, %xmm0
-; ALL-NEXT:    vpbroadcastd %xmm0, %zmm0
+; ALL-NEXT:    vextractf128 $1, %ymm0, %xmm0
+; ALL-NEXT:    vbroadcastss %xmm0, %zmm0
 ; ALL-NEXT:    retq
   %shuffle = shufflevector <16 x i32> %a, <16 x i32> %b, <16 x i32><i32 4, i32 4, i32 4, i32 4, i32 4, i32 4, i32 4, i32 4, i32 4, i32 4, i32 4, i32 4, i32 4, i32 4, i32 4, i32 4>
   ret <16 x i32> %shuffle
@@ -168,7 +178,7 @@ define <16 x i32> @shuffle_v16i32_04_04_04_04_04_04_04_04_04_04_04_04_04_04_04_0
 define <16 x i32> @shuffle_v16i32_02_12_03_13_06_16_07_17_0a_1a_0b_1b_0e_1e_0f_1f(<16 x i32> %a, <16 x i32> %b) {
 ; ALL-LABEL: shuffle_v16i32_02_12_03_13_06_16_07_17_0a_1a_0b_1b_0e_1e_0f_1f:
 ; ALL:       # BB#0:
-; ALL-NEXT:    vpunpckhdq {{.*#+}} zmm0 = zmm0[2],zmm1[2],zmm0[3],zmm1[3],zmm0[6],zmm1[6],zmm0[7],zmm1[7],zmm0[10],zmm1[10],zmm0[11],zmm1[11],zmm0[14],zmm1[14],zmm0[15],zmm1[15]
+; ALL-NEXT:    vunpckhps {{.*#+}} zmm0 = zmm0[2],zmm1[2],zmm0[3],zmm1[3],zmm0[6],zmm1[6],zmm0[7],zmm1[7],zmm0[10],zmm1[10],zmm0[11],zmm1[11],zmm0[14],zmm1[14],zmm0[15],zmm1[15]
 ; ALL-NEXT:    retq
   %shuffle = shufflevector <16 x i32> %a, <16 x i32> %b, <16 x i32><i32 2, i32 18, i32 3, i32 19, i32 6, i32 22, i32 7, i32 23, i32 10, i32 26, i32 11, i32 27, i32 14, i32 30, i32 15, i32 31>
   ret <16 x i32> %shuffle
@@ -177,8 +187,8 @@ define <16 x i32> @shuffle_v16i32_02_12_03_13_06_16_07_17_0a_1a_0b_1b_0e_1e_0f_1
 define <16 x i32> @shuffle_v16i32_02_zz_03_zz_06_zz_07_zz_0a_zz_0b_zz_0e_zz_0f_zz(<16 x i32> %a, <16 x i32> %b) {
 ; ALL-LABEL: shuffle_v16i32_02_zz_03_zz_06_zz_07_zz_0a_zz_0b_zz_0e_zz_0f_zz:
 ; ALL:       # BB#0:
-; ALL-NEXT:    vpxord %zmm1, %zmm1, %zmm1
-; ALL-NEXT:    vpunpckhdq {{.*#+}} zmm0 = zmm0[2],zmm1[2],zmm0[3],zmm1[3],zmm0[6],zmm1[6],zmm0[7],zmm1[7],zmm0[10],zmm1[10],zmm0[11],zmm1[11],zmm0[14],zmm1[14],zmm0[15],zmm1[15]
+; ALL-NEXT:    vxorps %xmm1, %xmm1, %xmm1
+; ALL-NEXT:    vunpckhps {{.*#+}} zmm0 = zmm0[2],zmm1[2],zmm0[3],zmm1[3],zmm0[6],zmm1[6],zmm0[7],zmm1[7],zmm0[10],zmm1[10],zmm0[11],zmm1[11],zmm0[14],zmm1[14],zmm0[15],zmm1[15]
 ; ALL-NEXT:    retq
   %shuffle = shufflevector <16 x i32> %a, <16 x i32> zeroinitializer, <16 x i32><i32 2, i32 30, i32 3, i32 28, i32 6, i32 26, i32 7, i32 24, i32 10, i32 22, i32 11, i32 20, i32 14, i32 18, i32 15, i32 16>
   ret <16 x i32> %shuffle
@@ -212,8 +222,8 @@ define <16 x float> @shuffle_v16f32_02_05_u_u_07_u_0a_01_00_05_u_04_07_u_0a_01(<
 define <16 x i32> @shuffle_v16i32_02_05_u_u_07_u_0a_01_00_05_u_04_07_u_0a_01(<16 x i32> %a)  {
 ; ALL-LABEL: shuffle_v16i32_02_05_u_u_07_u_0a_01_00_05_u_04_07_u_0a_01:
 ; ALL:       # BB#0:
-; ALL-NEXT:    vmovdqa32 {{.*#+}} zmm1 = <2,5,u,u,7,u,10,1,0,5,u,4,7,u,10,1>
-; ALL-NEXT:    vpermd %zmm0, %zmm1, %zmm0
+; ALL-NEXT:    vmovaps {{.*#+}} zmm1 = <2,5,u,u,7,u,10,1,0,5,u,4,7,u,10,1>
+; ALL-NEXT:    vpermps %zmm0, %zmm1, %zmm0
 ; ALL-NEXT:    retq
   %c = shufflevector <16 x i32> %a, <16 x i32> undef, <16 x i32> <i32 2, i32 5, i32 undef, i32 undef, i32 7, i32 undef, i32 10, i32 1,  i32 0, i32 5, i32 undef, i32 4, i32 7, i32 undef, i32 10, i32 1>
   ret <16 x i32> %c
@@ -264,19 +274,42 @@ define <16 x i32> @shuffle_v16i32_load_0f_1f_0e_16_0d_1d_04_1e_0b_1b_0a_1a_09_19
 define <16 x i32> @shuffle_v16i32_0_1_2_19_u_u_u_u_u_u_u_u_u_u_u_u(<16 x i32> %a, <16 x i32> %b)  {
 ; ALL-LABEL: shuffle_v16i32_0_1_2_19_u_u_u_u_u_u_u_u_u_u_u_u:
 ; ALL:       # BB#0:
-; ALL-NEXT:    movw $8, %ax
-; ALL-NEXT:    kmovw %eax, %k1
-; ALL-NEXT:    vmovdqa32 %zmm1, %zmm0 {%k1}
+; ALL-NEXT:    vblendps {{.*#+}} xmm0 = xmm0[0,1,2],xmm1[3]
 ; ALL-NEXT:    retq
   %c = shufflevector <16 x i32> %a, <16 x i32> %b, <16 x i32> <i32 0, i32 1, i32 2, i32 19, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef>
   ret <16 x i32> %c
 }
 
+;FIXME: can do better with vpcompress
+define <8 x i32> @test_v16i32_1_3_5_7_9_11_13_15(<16 x i32> %v) {
+; ALL-LABEL: test_v16i32_1_3_5_7_9_11_13_15:
+; ALL:       # BB#0:
+; ALL-NEXT:    vextractf64x4 $1, %zmm0, %ymm1
+; ALL-NEXT:    vshufps {{.*#+}} ymm0 = ymm0[1,3],ymm1[1,3],ymm0[5,7],ymm1[5,7]
+; ALL-NEXT:    vpermpd {{.*#+}} ymm0 = ymm0[0,2,1,3]
+; ALL-NEXT:    retq
+  %res = shufflevector <16 x i32> %v, <16 x i32> undef, <8 x i32> <i32 1, i32 3, i32 5, i32 7, i32 9, i32 11, i32 13, i32 15>
+  ret <8 x i32> %res
+}
+
+;FIXME: can do better with vpcompress
+define <4 x i32> @test_v16i32_0_1_2_12 (<16 x i32> %v) {
+; ALL-LABEL: test_v16i32_0_1_2_12:
+; ALL:       # BB#0:
+; ALL-NEXT:    vextractf64x4 $1, %zmm0, %ymm1
+; ALL-NEXT:    vextractf128 $1, %ymm1, %xmm1
+; ALL-NEXT:    vbroadcastss %xmm1, %xmm1
+; ALL-NEXT:    vblendps {{.*#+}} xmm0 = xmm0[0,1,2],xmm1[3]
+; ALL-NEXT:    vzeroupper
+; ALL-NEXT:    retq
+  %res = shufflevector <16 x i32> %v, <16 x i32> undef, <4 x i32> <i32 0, i32 1, i32 2, i32 12>
+  ret <4 x i32> %res
+}
+
 define <8 x float> @shuffle_v16f32_extract_256(float* %RET, float* %a) {
 ; ALL-LABEL: shuffle_v16f32_extract_256:
 ; ALL:       # BB#0:
-; ALL-NEXT:    vmovups (%rsi), %zmm0
-; ALL-NEXT:    vextractf32x8 $1, %zmm0, %ymm0
+; ALL-NEXT:    vmovups 32(%rsi), %ymm0
 ; ALL-NEXT:    retq
   %ptr_a = bitcast float* %a to <16 x float>*
   %v_a = load <16 x float>, <16 x float>* %ptr_a, align 4
@@ -284,10 +317,38 @@ define <8 x float> @shuffle_v16f32_extract_256(float* %RET, float* %a) {
   ret <8 x float> %v2
 }
 
+;FIXME: can do better with vcompressp
+define <8 x float> @test_v16f32_0_1_2_3_4_6_7_10 (<16 x float> %v) {
+; ALL-LABEL: test_v16f32_0_1_2_3_4_6_7_10:
+; ALL:       # BB#0:
+; ALL-NEXT:    vextractf64x4 $1, %zmm0, %ymm1
+; ALL-NEXT:    vmovsldup {{.*#+}} xmm1 = xmm1[0,0,2,2]
+; ALL-NEXT:    vinsertf128 $1, %xmm1, %ymm0, %ymm1
+; ALL-NEXT:    vpermilps {{.*#+}} ymm0 = ymm0[0,1,2,3,4,6,7,u]
+; ALL-NEXT:    vblendps {{.*#+}} ymm0 = ymm0[0,1,2,3,4,5,6],ymm1[7]
+; ALL-NEXT:    retq
+  %res = shufflevector <16 x float> %v, <16 x float> undef, <8 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 6, i32 7, i32 10>
+  ret <8 x float> %res
+}
+
+;FIXME: can do better with vcompressp
+define <4 x float> @test_v16f32_0_1_3_6 (<16 x float> %v) {
+; ALL-LABEL: test_v16f32_0_1_3_6:
+; ALL:       # BB#0:
+; ALL-NEXT:    vpermilps {{.*#+}} xmm1 = xmm0[0,1,3,3]
+; ALL-NEXT:    vextractf128 $1, %ymm0, %xmm0
+; ALL-NEXT:    vpermilpd {{.*#+}} xmm0 = xmm0[1,0]
+; ALL-NEXT:    vinsertps {{.*#+}} xmm0 = xmm1[0,1,2],xmm0[0]
+; ALL-NEXT:    vzeroupper
+; ALL-NEXT:    retq
+  %res = shufflevector <16 x float> %v, <16 x float> undef, <4 x i32> <i32 0, i32 1, i32 3, i32 6>
+  ret <4 x float> %res
+}
+
 define <16 x i32> @shuffle_v16i16_1_0_0_0_5_4_4_4_9_8_8_8_13_12_12_12(<16 x i32> %a, <16 x i32> %b)  {
 ; ALL-LABEL: shuffle_v16i16_1_0_0_0_5_4_4_4_9_8_8_8_13_12_12_12:
 ; ALL:       # BB#0:
-; ALL-NEXT:    vpshufd {{.*#+}} zmm0 = zmm0[1,0,0,0,5,4,4,4,9,8,8,8,13,12,12,12]
+; ALL-NEXT:    vpermilps {{.*#+}} zmm0 = zmm0[1,0,0,0,5,4,4,4,9,8,8,8,13,12,12,12]
 ; ALL-NEXT:    retq
   %c = shufflevector <16 x i32> %a, <16 x i32> %b, <16 x i32> <i32 1, i32 0, i32 0, i32 0, i32 5, i32 4, i32 4, i32 4, i32 9, i32 8, i32 8, i32 8, i32 13, i32 12, i32 12, i32 12>
   ret <16 x i32> %c
@@ -296,7 +357,7 @@ define <16 x i32> @shuffle_v16i16_1_0_0_0_5_4_4_4_9_8_8_8_13_12_12_12(<16 x i32>
 define <16 x i32> @shuffle_v16i16_3_3_0_0_7_7_4_4_11_11_8_8_15_15_12_12(<16 x i32> %a, <16 x i32> %b)  {
 ; ALL-LABEL: shuffle_v16i16_3_3_0_0_7_7_4_4_11_11_8_8_15_15_12_12:
 ; ALL:       # BB#0:
-; ALL-NEXT:    vpshufd {{.*#+}} zmm0 = zmm0[2,3,0,1,6,7,4,5,10,11,8,9,14,15,12,13]
+; ALL-NEXT:    vpermilps {{.*#+}} zmm0 = zmm0[2,3,0,1,6,7,4,5,10,11,8,9,14,15,12,13]
 ; ALL-NEXT:    retq
   %c = shufflevector <16 x i32> %a, <16 x i32> %b, <16 x i32> <i32 2, i32 3, i32 0, i32 1, i32 6, i32 7, i32 4, i32 5, i32 10, i32 11, i32 8, i32 9, i32 14, i32 15, i32 12, i32 13>
   ret <16 x i32> %c
@@ -397,13 +458,30 @@ define <16 x i32> @shuffle_v8i32_17_16_01_00_21_20_05_04_25_24_09_08_29_28_13_12
   ret <16 x i32> %shuffle
 }
 
-define <16 x i32> @mask_shuffle_v16i32_02_03_04_05_06_07_08_09_10_11_12_13_14_15_00_01(<16 x i32> %a, <16 x i32> %passthru, i16 %mask) {
-; ALL-LABEL: mask_shuffle_v16i32_02_03_04_05_06_07_08_09_10_11_12_13_14_15_00_01:
+define <16 x float> @shuffle_v8f32_v16f32_04_04_04_04_04_04_04_04_04_04_04_04_04_04_04_04(<8 x float> %a) {
+; ALL-LABEL: shuffle_v8f32_v16f32_04_04_04_04_04_04_04_04_04_04_04_04_04_04_04_04:
 ; ALL:       # BB#0:
-; ALL-NEXT:    kmovw %edi, %k1
-; ALL-NEXT:    valignd {{.*#+}} zmm1 {%k1} = zmm0[2,3,4,5,6,7,8,9,10,11,12,13,14,15,0,1]
-; ALL-NEXT:    vmovdqa64 %zmm1, %zmm0
+; ALL-NEXT:    vextractf128 $1, %ymm0, %xmm0
+; ALL-NEXT:    vbroadcastss %xmm0, %zmm0
 ; ALL-NEXT:    retq
+  %shuffle = shufflevector <8 x float> %a, <8 x float> undef, <16 x i32> <i32 4, i32 4, i32 4, i32 4, i32 4, i32 4, i32 4, i32 4, i32 4, i32 4, i32 4, i32 4, i32 4, i32 4, i32 4, i32 4>
+  ret <16 x float> %shuffle
+}
+
+define <16 x i32> @mask_shuffle_v16i32_02_03_04_05_06_07_08_09_10_11_12_13_14_15_00_01(<16 x i32> %a, <16 x i32> %passthru, i16 %mask) {
+; AVX512F-LABEL: mask_shuffle_v16i32_02_03_04_05_06_07_08_09_10_11_12_13_14_15_00_01:
+; AVX512F:       # BB#0:
+; AVX512F-NEXT:    kmovw %edi, %k1
+; AVX512F-NEXT:    valignd {{.*#+}} zmm1 {%k1} = zmm0[2,3,4,5,6,7,8,9,10,11,12,13,14,15,0,1]
+; AVX512F-NEXT:    vmovdqa64 %zmm1, %zmm0
+; AVX512F-NEXT:    retq
+;
+; AVX512BW-LABEL: mask_shuffle_v16i32_02_03_04_05_06_07_08_09_10_11_12_13_14_15_00_01:
+; AVX512BW:       # BB#0:
+; AVX512BW-NEXT:    kmovd %edi, %k1
+; AVX512BW-NEXT:    valignd {{.*#+}} zmm1 {%k1} = zmm0[2,3,4,5,6,7,8,9,10,11,12,13,14,15,0,1]
+; AVX512BW-NEXT:    vmovdqa64 %zmm1, %zmm0
+; AVX512BW-NEXT:    retq
   %shuffle = shufflevector <16 x i32> %a, <16 x i32> undef, <16 x i32><i32 2, i32 3, i32 4, i32 5, i32 6, i32 7, i32 8, i32 9, i32 10, i32 11, i32 12, i32 13, i32 14, i32 15, i32 0, i32 1>
   %mask.cast = bitcast i16 %mask to <16 x i1>
   %res = select <16 x i1> %mask.cast, <16 x i32> %shuffle, <16 x i32> %passthru
@@ -411,12 +489,19 @@ define <16 x i32> @mask_shuffle_v16i32_02_03_04_05_06_07_08_09_10_11_12_13_14_15
 }
 
 define <16 x i32> @mask_shuffle_v16i32_02_03_04_05_06_07_08_09_10_11_12_13_14_15_16_17(<16 x i32> %a, <16 x i32> %b, <16 x i32> %passthru, i16 %mask) {
-; ALL-LABEL: mask_shuffle_v16i32_02_03_04_05_06_07_08_09_10_11_12_13_14_15_16_17:
-; ALL:       # BB#0:
-; ALL-NEXT:    kmovw %edi, %k1
-; ALL-NEXT:    valignd {{.*#+}} zmm2 {%k1} = zmm0[2,3,4,5,6,7,8,9,10,11,12,13,14,15],zmm1[0,1]
-; ALL-NEXT:    vmovdqa64 %zmm2, %zmm0
-; ALL-NEXT:    retq
+; AVX512F-LABEL: mask_shuffle_v16i32_02_03_04_05_06_07_08_09_10_11_12_13_14_15_16_17:
+; AVX512F:       # BB#0:
+; AVX512F-NEXT:    kmovw %edi, %k1
+; AVX512F-NEXT:    valignd {{.*#+}} zmm2 {%k1} = zmm0[2,3,4,5,6,7,8,9,10,11,12,13,14,15],zmm1[0,1]
+; AVX512F-NEXT:    vmovdqa64 %zmm2, %zmm0
+; AVX512F-NEXT:    retq
+;
+; AVX512BW-LABEL: mask_shuffle_v16i32_02_03_04_05_06_07_08_09_10_11_12_13_14_15_16_17:
+; AVX512BW:       # BB#0:
+; AVX512BW-NEXT:    kmovd %edi, %k1
+; AVX512BW-NEXT:    valignd {{.*#+}} zmm2 {%k1} = zmm0[2,3,4,5,6,7,8,9,10,11,12,13,14,15],zmm1[0,1]
+; AVX512BW-NEXT:    vmovdqa64 %zmm2, %zmm0
+; AVX512BW-NEXT:    retq
   %shuffle = shufflevector <16 x i32> %a, <16 x i32> %b, <16 x i32><i32 2, i32 3, i32 4, i32 5, i32 6, i32 7, i32 8, i32 9, i32 10, i32 11, i32 12, i32 13, i32 14, i32 15, i32 16, i32 17>
   %mask.cast = bitcast i16 %mask to <16 x i1>
   %res = select <16 x i1> %mask.cast, <16 x i32> %shuffle, <16 x i32> %passthru
@@ -424,11 +509,17 @@ define <16 x i32> @mask_shuffle_v16i32_02_03_04_05_06_07_08_09_10_11_12_13_14_15
 }
 
 define <16 x i32> @maskz_shuffle_v16i32_02_03_04_05_06_07_08_09_10_11_12_13_14_15_00_01(<16 x i32> %a, i16 %mask) {
-; ALL-LABEL: maskz_shuffle_v16i32_02_03_04_05_06_07_08_09_10_11_12_13_14_15_00_01:
-; ALL:       # BB#0:
-; ALL-NEXT:    kmovw %edi, %k1
-; ALL-NEXT:    valignd {{.*#+}} zmm0 {%k1} {z} = zmm0[2,3,4,5,6,7,8,9,10,11,12,13,14,15,0,1]
-; ALL-NEXT:    retq
+; AVX512F-LABEL: maskz_shuffle_v16i32_02_03_04_05_06_07_08_09_10_11_12_13_14_15_00_01:
+; AVX512F:       # BB#0:
+; AVX512F-NEXT:    kmovw %edi, %k1
+; AVX512F-NEXT:    valignd {{.*#+}} zmm0 {%k1} {z} = zmm0[2,3,4,5,6,7,8,9,10,11,12,13,14,15,0,1]
+; AVX512F-NEXT:    retq
+;
+; AVX512BW-LABEL: maskz_shuffle_v16i32_02_03_04_05_06_07_08_09_10_11_12_13_14_15_00_01:
+; AVX512BW:       # BB#0:
+; AVX512BW-NEXT:    kmovd %edi, %k1
+; AVX512BW-NEXT:    valignd {{.*#+}} zmm0 {%k1} {z} = zmm0[2,3,4,5,6,7,8,9,10,11,12,13,14,15,0,1]
+; AVX512BW-NEXT:    retq
   %shuffle = shufflevector <16 x i32> %a, <16 x i32> undef, <16 x i32><i32 2, i32 3, i32 4, i32 5, i32 6, i32 7, i32 8, i32 9, i32 10, i32 11, i32 12, i32 13, i32 14, i32 15, i32 0, i32 1>
   %mask.cast = bitcast i16 %mask to <16 x i1>
   %res = select <16 x i1> %mask.cast, <16 x i32> %shuffle, <16 x i32> zeroinitializer
@@ -436,11 +527,17 @@ define <16 x i32> @maskz_shuffle_v16i32_02_03_04_05_06_07_08_09_10_11_12_13_14_1
 }
 
 define <16 x i32> @maskz_shuffle_v16i32_02_03_04_05_06_07_08_09_10_11_12_13_14_15_16_17(<16 x i32> %a, <16 x i32> %b, i16 %mask) {
-; ALL-LABEL: maskz_shuffle_v16i32_02_03_04_05_06_07_08_09_10_11_12_13_14_15_16_17:
-; ALL:       # BB#0:
-; ALL-NEXT:    kmovw %edi, %k1
-; ALL-NEXT:    valignd {{.*#+}} zmm0 {%k1} {z} = zmm0[2,3,4,5,6,7,8,9,10,11,12,13,14,15],zmm1[0,1]
-; ALL-NEXT:    retq
+; AVX512F-LABEL: maskz_shuffle_v16i32_02_03_04_05_06_07_08_09_10_11_12_13_14_15_16_17:
+; AVX512F:       # BB#0:
+; AVX512F-NEXT:    kmovw %edi, %k1
+; AVX512F-NEXT:    valignd {{.*#+}} zmm0 {%k1} {z} = zmm0[2,3,4,5,6,7,8,9,10,11,12,13,14,15],zmm1[0,1]
+; AVX512F-NEXT:    retq
+;
+; AVX512BW-LABEL: maskz_shuffle_v16i32_02_03_04_05_06_07_08_09_10_11_12_13_14_15_16_17:
+; AVX512BW:       # BB#0:
+; AVX512BW-NEXT:    kmovd %edi, %k1
+; AVX512BW-NEXT:    valignd {{.*#+}} zmm0 {%k1} {z} = zmm0[2,3,4,5,6,7,8,9,10,11,12,13,14,15],zmm1[0,1]
+; AVX512BW-NEXT:    retq
   %shuffle = shufflevector <16 x i32> %a, <16 x i32> %b, <16 x i32><i32 2, i32 3, i32 4, i32 5, i32 6, i32 7, i32 8, i32 9, i32 10, i32 11, i32 12, i32 13, i32 14, i32 15, i32 16, i32 17>
   %mask.cast = bitcast i16 %mask to <16 x i1>
   %res = select <16 x i1> %mask.cast, <16 x i32> %shuffle, <16 x i32> zeroinitializer
@@ -510,12 +607,19 @@ define <16 x i32> @test_vshufi32x4_512_mask(<16 x i32> %x, <16 x i32> %x1, <16 x
 }
 
 define <16 x float> @mask_shuffle_v16f32_00_01_02_03_04_05_06_07_16_17_18_19_20_21_22_23(<16 x float> %a, <16 x float> %b, <16 x float> %passthru, i16 %mask) {
-; ALL-LABEL: mask_shuffle_v16f32_00_01_02_03_04_05_06_07_16_17_18_19_20_21_22_23:
-; ALL:       # BB#0:
-; ALL-NEXT:    kmovw %edi, %k1
-; ALL-NEXT:    vinsertf32x8 $1, %ymm1, %zmm0, %zmm2 {%k1}
-; ALL-NEXT:    vmovaps %zmm2, %zmm0
-; ALL-NEXT:    retq
+; AVX512F-LABEL: mask_shuffle_v16f32_00_01_02_03_04_05_06_07_16_17_18_19_20_21_22_23:
+; AVX512F:       # BB#0:
+; AVX512F-NEXT:    kmovw %edi, %k1
+; AVX512F-NEXT:    vinsertf32x8 $1, %ymm1, %zmm0, %zmm2 {%k1}
+; AVX512F-NEXT:    vmovaps %zmm2, %zmm0
+; AVX512F-NEXT:    retq
+;
+; AVX512BW-LABEL: mask_shuffle_v16f32_00_01_02_03_04_05_06_07_16_17_18_19_20_21_22_23:
+; AVX512BW:       # BB#0:
+; AVX512BW-NEXT:    kmovd %edi, %k1
+; AVX512BW-NEXT:    vinsertf32x8 $1, %ymm1, %zmm0, %zmm2 {%k1}
+; AVX512BW-NEXT:    vmovaps %zmm2, %zmm0
+; AVX512BW-NEXT:    retq
   %shuffle = shufflevector <16 x float> %a, <16 x float> %b, <16 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7, i32 16, i32 17, i32 18, i32 19, i32 20, i32 21, i32 22, i32 23>
   %mask.cast = bitcast i16 %mask to <16 x i1>
   %res = select <16 x i1> %mask.cast, <16 x float> %shuffle, <16 x float> %passthru
@@ -523,12 +627,19 @@ define <16 x float> @mask_shuffle_v16f32_00_01_02_03_04_05_06_07_16_17_18_19_20_
 }
 
 define <16 x float> @mask_shuffle_v16f32_00_01_02_03_16_17_18_19_08_09_10_11_12_13_14_15(<16 x float> %a, <16 x float> %b, <16 x float> %passthru, i16 %mask) {
-; ALL-LABEL: mask_shuffle_v16f32_00_01_02_03_16_17_18_19_08_09_10_11_12_13_14_15:
-; ALL:       # BB#0:
-; ALL-NEXT:    kmovw %edi, %k1
-; ALL-NEXT:    vinsertf32x4 $1, %xmm1, %zmm0, %zmm2 {%k1}
-; ALL-NEXT:    vmovaps %zmm2, %zmm0
-; ALL-NEXT:    retq
+; AVX512F-LABEL: mask_shuffle_v16f32_00_01_02_03_16_17_18_19_08_09_10_11_12_13_14_15:
+; AVX512F:       # BB#0:
+; AVX512F-NEXT:    kmovw %edi, %k1
+; AVX512F-NEXT:    vinsertf32x4 $1, %xmm1, %zmm0, %zmm2 {%k1}
+; AVX512F-NEXT:    vmovaps %zmm2, %zmm0
+; AVX512F-NEXT:    retq
+;
+; AVX512BW-LABEL: mask_shuffle_v16f32_00_01_02_03_16_17_18_19_08_09_10_11_12_13_14_15:
+; AVX512BW:       # BB#0:
+; AVX512BW-NEXT:    kmovd %edi, %k1
+; AVX512BW-NEXT:    vinsertf32x4 $1, %xmm1, %zmm0, %zmm2 {%k1}
+; AVX512BW-NEXT:    vmovaps %zmm2, %zmm0
+; AVX512BW-NEXT:    retq
   %shuffle = shufflevector <16 x float> %a, <16 x float> %b, <16 x i32> <i32 0, i32 1, i32 2, i32 3, i32 16, i32 17, i32 18, i32 19, i32 8, i32 9, i32 10, i32 11, i32 12, i32 13, i32 14, i32 15>
   %mask.cast = bitcast i16 %mask to <16 x i1>
   %res = select <16 x i1> %mask.cast, <16 x float> %shuffle, <16 x float> %passthru
@@ -536,12 +647,19 @@ define <16 x float> @mask_shuffle_v16f32_00_01_02_03_16_17_18_19_08_09_10_11_12_
 }
 
 define <16 x i32> @mask_shuffle_v16i32_00_01_02_03_04_05_06_07_16_17_18_19_20_21_22_23(<16 x i32> %a, <16 x i32> %b, <16 x i32> %passthru, i16 %mask) {
-; ALL-LABEL: mask_shuffle_v16i32_00_01_02_03_04_05_06_07_16_17_18_19_20_21_22_23:
-; ALL:       # BB#0:
-; ALL-NEXT:    kmovw %edi, %k1
-; ALL-NEXT:    vinserti32x8 $1, %ymm1, %zmm0, %zmm2 {%k1}
-; ALL-NEXT:    vmovdqa64 %zmm2, %zmm0
-; ALL-NEXT:    retq
+; AVX512F-LABEL: mask_shuffle_v16i32_00_01_02_03_04_05_06_07_16_17_18_19_20_21_22_23:
+; AVX512F:       # BB#0:
+; AVX512F-NEXT:    kmovw %edi, %k1
+; AVX512F-NEXT:    vinserti32x8 $1, %ymm1, %zmm0, %zmm2 {%k1}
+; AVX512F-NEXT:    vmovdqa64 %zmm2, %zmm0
+; AVX512F-NEXT:    retq
+;
+; AVX512BW-LABEL: mask_shuffle_v16i32_00_01_02_03_04_05_06_07_16_17_18_19_20_21_22_23:
+; AVX512BW:       # BB#0:
+; AVX512BW-NEXT:    kmovd %edi, %k1
+; AVX512BW-NEXT:    vinserti32x8 $1, %ymm1, %zmm0, %zmm2 {%k1}
+; AVX512BW-NEXT:    vmovdqa64 %zmm2, %zmm0
+; AVX512BW-NEXT:    retq
   %shuffle = shufflevector <16 x i32> %a, <16 x i32> %b, <16 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7, i32 16, i32 17, i32 18, i32 19, i32 20, i32 21, i32 22, i32 23>
   %mask.cast = bitcast i16 %mask to <16 x i1>
   %res = select <16 x i1> %mask.cast, <16 x i32> %shuffle, <16 x i32> %passthru
@@ -549,12 +667,19 @@ define <16 x i32> @mask_shuffle_v16i32_00_01_02_03_04_05_06_07_16_17_18_19_20_21
 }
 
 define <16 x i32> @mask_shuffle_v16i32_00_01_02_03_16_17_18_19_08_09_10_11_12_13_14_15(<16 x i32> %a, <16 x i32> %b, <16 x i32> %passthru, i16 %mask) {
-; ALL-LABEL: mask_shuffle_v16i32_00_01_02_03_16_17_18_19_08_09_10_11_12_13_14_15:
-; ALL:       # BB#0:
-; ALL-NEXT:    kmovw %edi, %k1
-; ALL-NEXT:    vinserti32x4 $1, %xmm1, %zmm0, %zmm2 {%k1}
-; ALL-NEXT:    vmovdqa64 %zmm2, %zmm0
-; ALL-NEXT:    retq
+; AVX512F-LABEL: mask_shuffle_v16i32_00_01_02_03_16_17_18_19_08_09_10_11_12_13_14_15:
+; AVX512F:       # BB#0:
+; AVX512F-NEXT:    kmovw %edi, %k1
+; AVX512F-NEXT:    vinserti32x4 $1, %xmm1, %zmm0, %zmm2 {%k1}
+; AVX512F-NEXT:    vmovdqa64 %zmm2, %zmm0
+; AVX512F-NEXT:    retq
+;
+; AVX512BW-LABEL: mask_shuffle_v16i32_00_01_02_03_16_17_18_19_08_09_10_11_12_13_14_15:
+; AVX512BW:       # BB#0:
+; AVX512BW-NEXT:    kmovd %edi, %k1
+; AVX512BW-NEXT:    vinserti32x4 $1, %xmm1, %zmm0, %zmm2 {%k1}
+; AVX512BW-NEXT:    vmovdqa64 %zmm2, %zmm0
+; AVX512BW-NEXT:    retq
   %shuffle = shufflevector <16 x i32> %a, <16 x i32> %b, <16 x i32> <i32 0, i32 1, i32 2, i32 3, i32 16, i32 17, i32 18, i32 19, i32 8, i32 9, i32 10, i32 11, i32 12, i32 13, i32 14, i32 15>
   %mask.cast = bitcast i16 %mask to <16 x i1>
   %res = select <16 x i1> %mask.cast, <16 x i32> %shuffle, <16 x i32> %passthru
@@ -565,8 +690,8 @@ define <16 x i32> @mask_shuffle_v4i32_v16i32_00_01_02_03_00_01_02_03_00_01_02_03
 ; ALL-LABEL: mask_shuffle_v4i32_v16i32_00_01_02_03_00_01_02_03_00_01_02_03_00_01_02_03:
 ; ALL:       # BB#0:
 ; ALL-NEXT:    # kill: %XMM0<def> %XMM0<kill> %YMM0<def>
-; ALL-NEXT:    vinserti128 $1, %xmm0, %ymm0, %ymm0
-; ALL-NEXT:    vinserti32x8 $1, %ymm0, %zmm0, %zmm0
+; ALL-NEXT:    vinsertf128 $1, %xmm0, %ymm0, %ymm0
+; ALL-NEXT:    vinsertf64x4 $1, %ymm0, %zmm0, %zmm0
 ; ALL-NEXT:    retq
   %res = shufflevector <4 x i32> %a, <4 x i32> undef, <16 x i32> <i32 0, i32 1, i32 2, i32 3, i32 0, i32 1, i32 2, i32 3, i32 0, i32 1, i32 2, i32 3, i32 0, i32 1, i32 2, i32 3>
   ret <16 x i32> %res
@@ -577,7 +702,7 @@ define <16 x float> @mask_shuffle_v4f32_v16f32_00_01_02_03_00_01_02_03_00_01_02_
 ; ALL:       # BB#0:
 ; ALL-NEXT:    # kill: %XMM0<def> %XMM0<kill> %YMM0<def>
 ; ALL-NEXT:    vinsertf128 $1, %xmm0, %ymm0, %ymm0
-; ALL-NEXT:    vinsertf32x8 $1, %ymm0, %zmm0, %zmm0
+; ALL-NEXT:    vinsertf64x4 $1, %ymm0, %zmm0, %zmm0
 ; ALL-NEXT:    retq
   %res = shufflevector <4 x float> %a, <4 x float> undef, <16 x i32> <i32 0, i32 1, i32 2, i32 3, i32 0, i32 1, i32 2, i32 3, i32 0, i32 1, i32 2, i32 3, i32 0, i32 1, i32 2, i32 3>
   ret <16 x float> %res

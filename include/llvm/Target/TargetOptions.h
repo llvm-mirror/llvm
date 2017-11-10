@@ -99,16 +99,16 @@ namespace llvm {
   class TargetOptions {
   public:
     TargetOptions()
-        : PrintMachineCode(false), LessPreciseFPMADOption(false),
-          UnsafeFPMath(false), NoInfsFPMath(false), NoNaNsFPMath(false),
-          NoTrappingFPMath(false), NoSignedZerosFPMath(false),
+        : PrintMachineCode(false), UnsafeFPMath(false), NoInfsFPMath(false),
+          NoNaNsFPMath(false), NoTrappingFPMath(false),
+          NoSignedZerosFPMath(false),
           HonorSignDependentRoundingFPMathOption(false), NoZerosInBSS(false),
           GuaranteedTailCallOpt(false), StackSymbolOrdering(true),
           EnableFastISel(false), UseInitArray(false),
-          DisableIntegratedAS(false), CompressDebugSections(false),
-          RelaxELFRelocations(false), FunctionSections(false),
-          DataSections(false), UniqueSectionNames(true), TrapUnreachable(false),
-          EmulatedTLS(false), EnableIPRA(false) {}
+          DisableIntegratedAS(false), RelaxELFRelocations(false),
+          FunctionSections(false), DataSections(false),
+          UniqueSectionNames(true), TrapUnreachable(false), EmulatedTLS(false),
+          EnableIPRA(false) {}
 
     /// PrintMachineCode - This flag is enabled when the -print-machineinstrs
     /// option is specified on the command line, and should enable debugging
@@ -119,20 +119,11 @@ namespace llvm {
     /// optimization should be disabled for the given machine function.
     bool DisableFramePointerElim(const MachineFunction &MF) const;
 
-    /// LessPreciseFPMAD - This flag is enabled when the
-    /// -enable-fp-mad is specified on the command line.  When this flag is off
-    /// (the default), the code generator is not allowed to generate mad
-    /// (multiply add) if the result is "less precise" than doing those
-    /// operations individually.
-    unsigned LessPreciseFPMADOption : 1;
-    bool LessPreciseFPMAD() const;
-
     /// UnsafeFPMath - This flag is enabled when the
     /// -enable-unsafe-fp-math flag is specified on the command line.  When
     /// this flag is off (the default), the code generator is not allowed to
     /// produce results that are "less precise" than IEEE allows.  This includes
     /// use of X86 instructions like FSIN and FCOS instead of libcalls.
-    /// UnsafeFPMath implies LessPreciseFPMAD.
     unsigned UnsafeFPMath : 1;
 
     /// NoInfsFPMath - This flag is enabled when the
@@ -203,7 +194,7 @@ namespace llvm {
     unsigned DisableIntegratedAS : 1;
 
     /// Compress DWARF debug sections.
-    unsigned CompressDebugSections : 1;
+    DebugCompressionType CompressDebugSections = DebugCompressionType::None;
 
     unsigned RelaxELFRelocations : 1;
 
@@ -271,43 +262,6 @@ namespace llvm {
     /// Machine level options.
     MCTargetOptions MCOptions;
   };
-
-// Comparison operators:
-
-
-inline bool operator==(const TargetOptions &LHS,
-                       const TargetOptions &RHS) {
-#define ARE_EQUAL(X) LHS.X == RHS.X
-  return
-    ARE_EQUAL(UnsafeFPMath) &&
-    ARE_EQUAL(NoInfsFPMath) &&
-    ARE_EQUAL(NoNaNsFPMath) &&
-    ARE_EQUAL(NoTrappingFPMath) &&
-    ARE_EQUAL(NoSignedZerosFPMath) &&
-    ARE_EQUAL(HonorSignDependentRoundingFPMathOption) &&
-    ARE_EQUAL(NoZerosInBSS) &&
-    ARE_EQUAL(GuaranteedTailCallOpt) &&
-    ARE_EQUAL(StackAlignmentOverride) &&
-    ARE_EQUAL(EnableFastISel) &&
-    ARE_EQUAL(UseInitArray) &&
-    ARE_EQUAL(TrapUnreachable) &&
-    ARE_EQUAL(EmulatedTLS) &&
-    ARE_EQUAL(FloatABIType) &&
-    ARE_EQUAL(AllowFPOpFusion) &&
-    ARE_EQUAL(ThreadModel) &&
-    ARE_EQUAL(EABIVersion) &&
-    ARE_EQUAL(DebuggerTuning) &&
-    ARE_EQUAL(FPDenormalMode) &&
-    ARE_EQUAL(ExceptionModel) &&
-    ARE_EQUAL(MCOptions) &&
-    ARE_EQUAL(EnableIPRA);
-#undef ARE_EQUAL
-}
-
-inline bool operator!=(const TargetOptions &LHS,
-                       const TargetOptions &RHS) {
-  return !(LHS == RHS);
-}
 
 } // End llvm namespace
 

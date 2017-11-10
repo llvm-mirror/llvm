@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "BPF.h"
 #include "BPFInstPrinter.h"
+#include "BPF.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
@@ -89,6 +89,8 @@ void BPFInstPrinter::printImm64Operand(const MCInst *MI, unsigned OpNo,
   const MCOperand &Op = MI->getOperand(OpNo);
   if (Op.isImm())
     O << (uint64_t)Op.getImm();
+  else if (Op.isExpr())
+    printExpr(Op.getExpr(), O);
   else
     O << Op;
 }

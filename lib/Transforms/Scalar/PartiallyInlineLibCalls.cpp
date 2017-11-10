@@ -32,10 +32,6 @@ static bool optimizeSQRT(CallInst *Call, Function *CalledFunc,
   if (Call->onlyReadsMemory())
     return false;
 
-  // The call must have the expected result type.
-  if (!Call->getType()->isFloatingPointTy())
-    return false;
-
   // Do the following transformation:
   //
   // (before)
@@ -66,7 +62,7 @@ static bool optimizeSQRT(CallInst *Call, Function *CalledFunc,
   // Add attribute "readnone" so that backend can use a native sqrt instruction
   // for this call. Insert a FP compare instruction and a conditional branch
   // at the end of CurrBB.
-  Call->addAttribute(AttributeSet::FunctionIndex, Attribute::ReadNone);
+  Call->addAttribute(AttributeList::FunctionIndex, Attribute::ReadNone);
   CurrBB.getTerminator()->eraseFromParent();
   Builder.SetInsertPoint(&CurrBB);
   Value *FCmp = Builder.CreateFCmpOEQ(Call, Call);
@@ -96,11 +92,14 @@ static bool runPartiallyInlineLibCalls(Function &F, TargetLibraryInfo *TLI,
       if (!Call || !(CalledFunc = Call->getCalledFunction()))
         continue;
 
+      if (Call->isNoBuiltin())
+        continue;
+
       // Skip if function either has local linkage or is not a known library
       // function.
       LibFunc LF;
-      if (CalledFunc->hasLocalLinkage() || !CalledFunc->hasName() ||
-          !TLI->getLibFunc(CalledFunc->getName(), LF))
+      if (CalledFunc->hasLocalLinkage() ||
+          !TLI->getLibFunc(*CalledFunc, LF) || !TLI->has(LF))
         continue;
 
       switch (LF) {

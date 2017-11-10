@@ -16,12 +16,12 @@ namespace llvm {
 
 using namespace sys;
 
-const char detail::unit<std::ratio<3600>>::value[] = "h";
-const char detail::unit<std::ratio<60>>::value[] = "m";
-const char detail::unit<std::ratio<1>>::value[] = "s";
-const char detail::unit<std::milli>::value[] = "ms";
-const char detail::unit<std::micro>::value[] = "us";
-const char detail::unit<std::nano>::value[] = "ns";
+const char llvm::detail::unit<std::ratio<3600>>::value[] = "h";
+const char llvm::detail::unit<std::ratio<60>>::value[] = "m";
+const char llvm::detail::unit<std::ratio<1>>::value[] = "s";
+const char llvm::detail::unit<std::milli>::value[] = "ms";
+const char llvm::detail::unit<std::micro>::value[] = "us";
+const char llvm::detail::unit<std::nano>::value[] = "ns";
 
 static inline struct tm getStructTM(TimePoint<> TP) {
   struct tm Storage;
@@ -49,6 +49,46 @@ raw_ostream &operator<<(raw_ostream &OS, TimePoint<> TP) {
             << format("%.9lu",
                       long((TP.time_since_epoch() % std::chrono::seconds(1))
                                .count()));
+}
+
+void format_provider<TimePoint<>>::format(const TimePoint<> &T, raw_ostream &OS,
+                                          StringRef Style) {
+  using namespace std::chrono;
+  TimePoint<seconds> Truncated = time_point_cast<seconds>(T);
+  auto Fractional = T - Truncated;
+  struct tm LT = getStructTM(Truncated);
+  // Handle extensions first. strftime mangles unknown %x on some platforms.
+  if (Style.empty()) Style = "%Y-%m-%d %H:%M:%S.%N";
+  std::string Format;
+  raw_string_ostream FStream(Format);
+  for (unsigned I = 0; I < Style.size(); ++I) {
+    if (Style[I] == '%' && Style.size() > I + 1) switch (Style[I + 1]) {
+        case 'L':  // Milliseconds, from Ruby.
+          FStream << llvm::format(
+              "%.3lu", duration_cast<milliseconds>(Fractional).count());
+          ++I;
+          continue;
+        case 'f':  // Microseconds, from Python.
+          FStream << llvm::format(
+              "%.6lu", duration_cast<microseconds>(Fractional).count());
+          ++I;
+          continue;
+        case 'N':  // Nanoseconds, from date(1).
+          FStream << llvm::format(
+              "%.6lu", duration_cast<nanoseconds>(Fractional).count());
+          ++I;
+          continue;
+        case '%':  // Consume %%, so %%f parses as (%%)f not %(%f)
+          FStream << "%%";
+          ++I;
+          continue;
+      }
+    FStream << Style[I];
+  }
+  FStream.flush();
+  char Buffer[256];  // Should be enough for anywhen.
+  size_t Len = strftime(Buffer, sizeof(Buffer), Format.c_str(), &LT);
+  OS << (Len ? Buffer : "BAD-DATE-FORMAT");
 }
 
 } // namespace llvm

@@ -1,11 +1,12 @@
-; RUN: llc -mtriple=amdgcn--amdhsa -mcpu=fiji -verify-machineinstrs < %s | FileCheck %s
+; RUN: llc -mtriple=amdgcn-amd-amdhsa -mcpu=gfx803 < %s | FileCheck --check-prefix=CHECK %s
+; RUN: llc -mtriple=amdgcn-amd-amdhsa -mcpu=gfx803 -filetype=obj -o - < %s | llvm-readobj -elf-output-style=GNU -notes | FileCheck --check-prefix=HSAMD %s
 
 ; CHECK-LABEL: {{^}}min_64_max_64:
 ; CHECK: SGPRBlocks: 0
 ; CHECK: VGPRBlocks: 0
 ; CHECK: NumSGPRsForWavesPerEU: 1
 ; CHECK: NumVGPRsForWavesPerEU: 1
-define void @min_64_max_64() #0 {
+define amdgpu_kernel void @min_64_max_64() #0 {
 entry:
   ret void
 }
@@ -16,7 +17,7 @@ attributes #0 = {"amdgpu-flat-work-group-size"="64,64"}
 ; CHECK: VGPRBlocks: 0
 ; CHECK: NumSGPRsForWavesPerEU: 1
 ; CHECK: NumVGPRsForWavesPerEU: 1
-define void @min_64_max_128() #1 {
+define amdgpu_kernel void @min_64_max_128() #1 {
 entry:
   ret void
 }
@@ -27,7 +28,7 @@ attributes #1 = {"amdgpu-flat-work-group-size"="64,128"}
 ; CHECK: VGPRBlocks: 0
 ; CHECK: NumSGPRsForWavesPerEU: 1
 ; CHECK: NumVGPRsForWavesPerEU: 1
-define void @min_128_max_128() #2 {
+define amdgpu_kernel void @min_128_max_128() #2 {
 entry:
   ret void
 }
@@ -36,10 +37,10 @@ attributes #2 = {"amdgpu-flat-work-group-size"="128,128"}
 ; CHECK-LABEL: {{^}}min_1024_max_2048
 ; CHECK: SGPRBlocks: 1
 ; CHECK: VGPRBlocks: 7
-; CHECK: NumSGPRsForWavesPerEU: 13
+; CHECK: NumSGPRsForWavesPerEU: 12
 ; CHECK: NumVGPRsForWavesPerEU: 32
 @var = addrspace(1) global float 0.0
-define void @min_1024_max_2048() #3 {
+define amdgpu_kernel void @min_1024_max_2048() #3 {
   %val0 = load volatile float, float addrspace(1)* @var
   %val1 = load volatile float, float addrspace(1)* @var
   %val2 = load volatile float, float addrspace(1)* @var
@@ -127,3 +128,15 @@ define void @min_1024_max_2048() #3 {
   ret void
 }
 attributes #3 = {"amdgpu-flat-work-group-size"="1024,2048"}
+
+; HSAMD: NT_AMD_AMDGPU_HSA_METADATA (HSA Metadata)
+; HSAMD: Version: [ 1, 0 ]
+; HSAMD: Kernels:
+; HSAMD: - Name:                 min_64_max_64
+; HSAMD:   MaxFlatWorkGroupSize: 64
+; HSAMD: - Name:                 min_64_max_128
+; HSAMD:   MaxFlatWorkGroupSize: 128
+; HSAMD: - Name:                 min_128_max_128
+; HSAMD:   MaxFlatWorkGroupSize: 128
+; HSAMD: - Name:                 min_1024_max_2048
+; HSAMD:   MaxFlatWorkGroupSize: 2048

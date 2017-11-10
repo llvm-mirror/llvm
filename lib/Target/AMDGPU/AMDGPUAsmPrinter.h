@@ -15,6 +15,9 @@
 #ifndef LLVM_LIB_TARGET_AMDGPU_AMDGPUASMPRINTER_H
 #define LLVM_LIB_TARGET_AMDGPU_AMDGPUASMPRINTER_H
 
+#include "AMDGPU.h"
+#include "AMDKernelCodeT.h"
+#include "MCTargetDesc/AMDGPUHSAMetadataStreamer.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include <cstddef>
@@ -26,10 +29,28 @@
 
 namespace llvm {
 
+class AMDGPUTargetStreamer;
 class MCOperand;
+class SISubtarget;
 
 class AMDGPUAsmPrinter final : public AsmPrinter {
 private:
+  // Track resource usage for callee functions.
+  struct SIFunctionResourceInfo {
+    // Track the number of explicitly used VGPRs. Special registers reserved at
+    // the end are tracked separately.
+    int32_t NumVGPR = 0;
+    int32_t NumExplicitSGPR = 0;
+    uint32_t PrivateSegmentSize = 0;
+    bool UsesVCC = false;
+    bool UsesFlatScratch = false;
+    bool HasDynamicallySizedStack = false;
+    bool HasRecursion = false;
+
+    int32_t getTotalNumSGPRs(const SISubtarget &ST) const;
+  };
+
+  // Track resource usage for kernels / entry functions.
   struct SIProgramInfo {
     // Fields set in PGM_RSRC1 pm4 packet.
     uint32_t VGPRBlocks = 0;
@@ -52,7 +73,7 @@ private:
 
     uint32_t NumVGPR = 0;
     uint32_t NumSGPR = 0;
-    uint32_t LDSSize;
+    uint32_t LDSSize = 0;
     bool FlatUsed = false;
 
     // Number of SGPRs that meets number of waves per execution unit request.
@@ -80,32 +101,64 @@ private:
     uint16_t DebuggerPrivateSegmentBufferSGPR =
         std::numeric_limits<uint16_t>::max();
 
+    // Whether there is recursion, dynamic allocas, indirect calls or some other
+    // reason there may be statically unknown stack usage.
+    bool DynamicCallStack = false;
+
     // Bonus information for debugging.
     bool VCCUsed = false;
-    uint64_t CodeLen = 0;
 
     SIProgramInfo() = default;
   };
 
-  void getSIProgramInfo(SIProgramInfo &Out, const MachineFunction &MF) const;
+  SIProgramInfo CurrentProgramInfo;
+  DenseMap<const Function *, SIFunctionResourceInfo> CallGraphResourceInfo;
+
+  AMDGPU::HSAMD::MetadataStreamer HSAMetadataStream;
+  std::map<uint32_t, uint32_t> PALMetadataMap;
+
+  uint64_t getFunctionCodeSize(const MachineFunction &MF) const;
+  SIFunctionResourceInfo analyzeResourceUsage(const MachineFunction &MF) const;
+
+  void readPALMetadata(Module &M);
+  void getSIProgramInfo(SIProgramInfo &Out, const MachineFunction &MF);
+  void getAmdKernelCode(amd_kernel_code_t &Out, const SIProgramInfo &KernelInfo,
+                        const MachineFunction &MF) const;
   void findNumUsedRegistersSI(const MachineFunction &MF,
                               unsigned &NumSGPR,
                               unsigned &NumVGPR) const;
 
+  AMDGPU::HSAMD::Kernel::CodeProps::Metadata getHSACodeProps(
+      const MachineFunction &MF,
+      const SIProgramInfo &ProgramInfo) const;
+  AMDGPU::HSAMD::Kernel::DebugProps::Metadata getHSADebugProps(
+      const MachineFunction &MF,
+      const SIProgramInfo &ProgramInfo) const;
+
   /// \brief Emit register usage information so that the GPU driver
   /// can correctly setup the GPU state.
   void EmitProgramInfoR600(const MachineFunction &MF);
-  void EmitProgramInfoSI(const MachineFunction &MF, const SIProgramInfo &KernelInfo);
-  void EmitAmdKernelCodeT(const MachineFunction &MF,
-                          const SIProgramInfo &KernelInfo) const;
+  void EmitProgramInfoSI(const MachineFunction &MF,
+                         const SIProgramInfo &KernelInfo);
+  void EmitPALMetadata(const MachineFunction &MF,
+                       const SIProgramInfo &KernelInfo);
+  void emitCommonFunctionComments(uint32_t NumVGPR,
+                                  uint32_t NumSGPR,
+                                  uint32_t ScratchSize,
+                                  uint64_t CodeSize);
 
 public:
   explicit AMDGPUAsmPrinter(TargetMachine &TM,
                             std::unique_ptr<MCStreamer> Streamer);
 
-  bool runOnMachineFunction(MachineFunction &MF) override;
-
   StringRef getPassName() const override;
+
+  const MCSubtargetInfo* getSTI() const;
+
+  AMDGPUTargetStreamer* getTargetStreamer() const;
+
+  bool doFinalization(Module &M) override;
+  bool runOnMachineFunction(MachineFunction &MF) override;
 
   /// \brief Wrapper for MCInstLowering.lowerOperand() for the tblgen'erated
   /// pseudo lowering.
@@ -132,6 +185,8 @@ public:
 
   void EmitStartOfAsmFile(Module &M) override;
 
+  void EmitEndOfAsmFile(Module &M) override;
+
   bool isBlockOnlyReachableByFallthrough(
     const MachineBasicBlock *MBB) const override;
 
@@ -142,6 +197,7 @@ public:
 protected:
   std::vector<std::string> DisasmLines, HexLines;
   size_t DisasmLineMaxLen;
+  AMDGPUAS AMDGPUASI;
 };
 
 } // end namespace llvm

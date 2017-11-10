@@ -22,7 +22,7 @@
 
 namespace llvm {
 namespace bitc {
-// The only top-level block type defined is for a module.
+// The only top-level block types are MODULE, IDENTIFICATION, STRTAB and SYMTAB.
 enum BlockIDs {
   // Blocks
   MODULE_BLOCK_ID = FIRST_APPLICATION_BLOCKID,
@@ -52,7 +52,15 @@ enum BlockIDs {
 
   OPERAND_BUNDLE_TAGS_BLOCK_ID,
 
-  METADATA_KIND_BLOCK_ID
+  METADATA_KIND_BLOCK_ID,
+
+  STRTAB_BLOCK_ID,
+
+  FULL_LTO_GLOBALVAL_SUMMARY_BLOCK_ID,
+
+  SYMTAB_BLOCK_ID,
+
+  SYNC_SCOPE_NAMES_BLOCK_ID,
 };
 
 /// Identification block contains a string that describes the producer details,
@@ -91,9 +99,6 @@ enum ModuleCodes {
 
   // ALIAS: [alias type, aliasee val#, linkage, visibility]
   MODULE_CODE_ALIAS_OLD = 9,
-
-  // MODULE_CODE_PURGEVALS: [numvals]
-  MODULE_CODE_PURGEVALS = 10,
 
   MODULE_CODE_GCNAME = 11, // GCNAME: [strchr x N]
   MODULE_CODE_COMDAT = 12, // COMDAT: [selection_kind, name]
@@ -169,6 +174,10 @@ enum OperandBundleTagCode {
   OPERAND_BUNDLE_TAG = 1, // TAG: [strchr x N]
 };
 
+enum SyncScopeNameCode {
+  SYNC_SCOPE_NAME = 1,
+};
+
 // Value symbol table codes.
 enum ValueSymtabCodes {
   VST_CODE_ENTRY = 1,   // VST_ENTRY: [valueid, namechar x N]
@@ -235,6 +244,18 @@ enum GlobalValueSummarySymtabCodes {
   // llvm.type.checked.load intrinsic with all constant integer arguments.
   // [typeid, offset, n x arg]
   FS_TYPE_CHECKED_LOAD_CONST_VCALL = 15,
+  // Assigns a GUID to a value ID. This normally appears only in combined
+  // summaries, but it can also appear in per-module summaries for PGO data.
+  // [valueid, guid]
+  FS_VALUE_GUID = 16,
+  // The list of local functions with CFI jump tables. Function names are
+  // strings in strtab.
+  // [n * name]
+  FS_CFI_FUNCTION_DEFS = 17,
+  // The list of external functions with CFI jump tables. Function names are
+  // strings in strtab.
+  // [n * name]
+  FS_CFI_FUNCTION_DECLS = 18,
 };
 
 enum MetadataCodes {
@@ -389,12 +410,6 @@ enum AtomicOrderingCodes {
   ORDERING_SEQCST = 6
 };
 
-/// Encoded SynchronizationScope values.
-enum AtomicSynchScopeCodes {
-  SYNCHSCOPE_SINGLETHREAD = 0,
-  SYNCHSCOPE_CROSSTHREAD = 1
-};
-
 /// Markers and flags for call instruction.
 enum CallMarkersFlags {
   CALL_TAIL = 0,
@@ -542,7 +557,9 @@ enum AttributeKindCodes {
   ATTR_KIND_INACCESSIBLEMEM_ONLY = 49,
   ATTR_KIND_INACCESSIBLEMEM_OR_ARGMEMONLY = 50,
   ATTR_KIND_ALLOC_SIZE = 51,
-  ATTR_KIND_WRITEONLY = 52
+  ATTR_KIND_WRITEONLY = 52,
+  ATTR_KIND_SPECULATABLE = 53,
+  ATTR_KIND_STRICT_FP = 54,
 };
 
 enum ComdatSelectionKindCodes {
@@ -551,6 +568,14 @@ enum ComdatSelectionKindCodes {
   COMDAT_SELECTION_KIND_LARGEST = 3,
   COMDAT_SELECTION_KIND_NO_DUPLICATES = 4,
   COMDAT_SELECTION_KIND_SAME_SIZE = 5,
+};
+
+enum StrtabCodes {
+  STRTAB_BLOB = 1,
+};
+
+enum SymtabCodes {
+  SYMTAB_BLOB = 1,
 };
 
 } // End bitc namespace

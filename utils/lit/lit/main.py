@@ -161,7 +161,11 @@ def main(builtinParameters = {}):
         main_with_tmp(builtinParameters)
     finally:
         if lit_tmp:
-            shutil.rmtree(lit_tmp)
+            try:
+                shutil.rmtree(lit_tmp)
+            except:
+                # FIXME: Re-try after timeout on Windows.
+                pass
 
 def main_with_tmp(builtinParameters):
     parser = argparse.ArgumentParser()
@@ -195,6 +199,12 @@ def main_with_tmp(builtinParameters):
     format_group.add_argument("-v", "--verbose", dest="showOutput",
                      help="Show test output for failures",
                      action="store_true", default=False)
+    format_group.add_argument("-vv", "--echo-all-commands",
+                     dest="echoAllCommands",
+                     action="store_true", default=False,
+                     help="Echo all commands as they are executed to stdout.\
+                     In case of failure, last command shown will be the\
+                     failing one.")
     format_group.add_argument("-a", "--show-all", dest="showAllOutput",
                      help="Display all commandlines and output",
                      action="store_true", default=False)
@@ -258,7 +268,8 @@ def main_with_tmp(builtinParameters):
     selection_group.add_argument("--filter", metavar="REGEX",
                      help=("Only run tests with paths matching the given "
                            "regular expression"),
-                     action="store", default=None)
+                     action="store",
+                     default=os.environ.get("LIT_FILTER"))
     selection_group.add_argument("--num-shards", dest="numShards", metavar="M",
                      help="Split testsuite into M pieces and only run one",
                      action="store", type=int,
@@ -278,12 +289,10 @@ def main_with_tmp(builtinParameters):
     debug_group.add_argument("--show-tests", dest="showTests",
                       help="Show all discovered tests",
                       action="store_true", default=False)
-    debug_group.add_argument("--use-processes", dest="useProcesses",
-                      help="Run tests in parallel with processes (not threads)",
-                      action="store_true", default=True)
-    debug_group.add_argument("--use-threads", dest="useProcesses",
-                      help="Run tests in parallel with threads (not processes)",
-                      action="store_false", default=True)
+    debug_group.add_argument("--single-process", dest="singleProcess",
+                      help="Don't run tests in parallel.  Intended for debugging "
+                      "single test failures",
+                      action="store_true", default=False)
 
     opts = parser.parse_args()
     args = opts.test_paths
@@ -300,6 +309,9 @@ def main_with_tmp(builtinParameters):
 
     if opts.maxFailures == 0:
         parser.error("Setting --max-failures to 0 does not have any effect.")
+
+    if opts.echoAllCommands:
+        opts.showOutput = True
 
     inputs = args
 
@@ -330,13 +342,15 @@ def main_with_tmp(builtinParameters):
         valgrindLeakCheck = opts.valgrindLeakCheck,
         valgrindArgs = opts.valgrindArgs,
         noExecute = opts.noExecute,
+        singleProcess = opts.singleProcess,
         debug = opts.debug,
         isWindows = isWindows,
         params = userParams,
         config_prefix = opts.configPrefix,
         maxIndividualTestTime = maxIndividualTestTime,
         maxFailures = opts.maxFailures,
-        parallelism_groups = {})
+        parallelism_groups = {},
+        echo_all_commands = opts.echoAllCommands)
 
     # Perform test discovery.
     run = lit.run.Run(litConfig,
@@ -480,8 +494,7 @@ def main_with_tmp(builtinParameters):
     startTime = time.time()
     display = TestingProgressDisplay(opts, len(run.tests), progressBar)
     try:
-        run.execute_tests(display, opts.numThreads, opts.maxTime,
-                          opts.useProcesses)
+        run.execute_tests(display, opts.numThreads, opts.maxTime)
     except KeyboardInterrupt:
         sys.exit(2)
     display.finish()

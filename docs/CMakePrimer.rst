@@ -112,33 +112,6 @@ In this example the ``extra_sources`` variable is only defined if you're
 targeting an Apple platform. For all other targets the ``extra_sources`` will be
 evaluated as empty before add_executable is given its arguments.
 
-One big "Gotcha" with variable dereferencing is that ``if`` commands implicitly
-dereference values. This has some unexpected results. For example:
-
-.. code-block:: cmake
-
-   if("${SOME_VAR}" STREQUAL "MSVC")
-
-In this code sample MSVC will be implicitly dereferenced, which will result in
-the if command comparing the value of the dereferenced variables ``SOME_VAR``
-and ``MSVC``. A common workaround to this solution is to prepend strings being
-compared with an ``x``.
-
-.. code-block:: cmake
-
-   if("x${SOME_VAR}" STREQUAL "xMSVC")
-
-This works because while ``MSVC`` is a defined variable, ``xMSVC`` is not. This
-pattern is uncommon, but it does occur in LLVM's CMake scripts.
-
-.. note::
-   
-   Once the LLVM project upgrades its minimum CMake version to 3.1 or later we
-   can prevent this behavior by setting CMP0054 to new. For more information on
-   CMake policies please see the cmake-policies manpage or the `cmake-policies
-   online documentation
-   <https://cmake.org/cmake/help/v3.4/manual/cmake-policies.7.html>`_.
-
 Lists
 -----
 
@@ -194,10 +167,9 @@ Other Types
 
 Variables that are cached or specified on the command line can have types
 associated with them. The variable's type is used by CMake's UI tool to display
-the right input field. The variable's type generally doesn't impact evaluation.
-One of the few examples is PATH variables, which CMake does have some special
-handling for. You can read more about the special handling in `CMake's set
-documentation
+the right input field. A variable's type generally doesn't impact evaluation,
+however CMake does have special handling for some variables such as PATH.
+You can read more about the special handling in `CMake's set documentation
 <https://cmake.org/cmake/help/v3.5/command/set.html#set-cache-entry>`_.
 
 Scope
@@ -230,7 +202,7 @@ Control Flow
 ============
 
 CMake features the same basic control flow constructs you would expect in any
-scripting language, but there are a few quarks because, as with everything in
+scripting language, but there are a few quirks because, as with everything in
 CMake, control flow constructs are commands.
 
 If, ElseIf, Else
@@ -361,21 +333,23 @@ When defining a CMake command handling arguments is very useful. The examples
 in this section will all use the CMake ``function`` block, but this all applies
 to the ``macro`` block as well.
 
-CMake commands can have named arguments, but all commands are implicitly
-variable argument. If the command has named arguments they are required and must
-be specified at every call site. Below is a trivial example of providing a
-wrapper function for CMake's built in function ``add_dependencies``.
+CMake commands can have named arguments that are requried at every call site. In
+addition, all commands will implicitly accept a variable number of extra
+arguments (In C parlance, all commands are varargs functions). When a command is
+invoked with extra arguments (beyond the named ones) CMake will store the full
+list of arguments (both named and unnamed) in a list named ``ARGV``, and the
+sublist of unnamed arguments in ``ARGN``. Below is a trivial example of
+providing a wrapper function for CMake's built in function ``add_dependencies``.
 
 .. code-block:: cmake
 
    function(add_deps target)
-     add_dependencies(${target} ${ARGV})
+     add_dependencies(${target} ${ARGN})
    endfunction()
 
 This example defines a new macro named ``add_deps`` which takes a required first
 argument, and just calls another function passing through the first argument and
-all trailing arguments. When variable arguments are present CMake defines them
-in a list named ``ARGV``, and the count of the arguments is defined in ``ARGN``.
+all trailing arguments.
 
 CMake provides a module ``CMakeParseArguments`` which provides an implementation
 of advanced argument parsing. We use this all over LLVM, and it is recommended

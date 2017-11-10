@@ -312,11 +312,9 @@ static void HandleVRSaveUpdate(MachineInstr &MI, const TargetInstrInfo &TII) {
 
   // Live in and live out values already must be in the mask, so don't bother
   // marking them.
-  for (MachineRegisterInfo::livein_iterator
-       I = MF->getRegInfo().livein_begin(),
-       E = MF->getRegInfo().livein_end(); I != E; ++I) {
-    unsigned RegNo = TRI->getEncodingValue(I->first);
-    if (VRRegNo[RegNo] == I->first)        // If this really is a vector reg.
+  for (std::pair<unsigned, unsigned> LI : MF->getRegInfo().liveins()) {
+    unsigned RegNo = TRI->getEncodingValue(LI.first);
+    if (VRRegNo[RegNo] == LI.first)        // If this really is a vector reg.
       UsedRegMask &= ~(1 << (31-RegNo));   // Doesn't need to be marked.
   }
 
@@ -435,22 +433,19 @@ unsigned PPCFrameLowering::determineFrameLayout(MachineFunction &MF,
 
   const PPCRegisterInfo *RegInfo = Subtarget.getRegisterInfo();
 
-  // If we are a leaf function, and use up to 224 bytes of stack space,
-  // don't have a frame pointer, calls, or dynamic alloca then we do not need
-  // to adjust the stack pointer (we fit in the Red Zone).
-  // The 32-bit SVR4 ABI has no Red Zone. However, it can still generate
-  // stackless code if all local vars are reg-allocated.
-  bool DisableRedZone = MF.getFunction()->hasFnAttribute(Attribute::NoRedZone);
   unsigned LR = RegInfo->getRARegister();
-  if (!DisableRedZone &&
-      (Subtarget.isPPC64() ||                      // 32-bit SVR4, no stack-
-       !Subtarget.isSVR4ABI() ||                   //   allocated locals.
-        FrameSize == 0) &&
-      FrameSize <= 224 &&                          // Fits in red zone.
-      !MFI.hasVarSizedObjects() &&                 // No dynamic alloca.
-      !MFI.adjustsStack() &&                       // No calls.
-      !MustSaveLR(MF, LR) &&
-      !RegInfo->hasBasePointer(MF)) { // No special alignment.
+  bool DisableRedZone = MF.getFunction()->hasFnAttribute(Attribute::NoRedZone);
+  bool CanUseRedZone = !MFI.hasVarSizedObjects() && // No dynamic alloca.
+                       !MFI.adjustsStack() &&       // No calls.
+                       !MustSaveLR(MF, LR) &&       // No need to save LR.
+                       !RegInfo->hasBasePointer(MF); // No special alignment.
+
+  // Note: for PPC32 SVR4ABI (Non-DarwinABI), we can still generate stackless
+  // code if all local vars are reg-allocated.
+  bool FitsInRedZone = FrameSize <= Subtarget.getRedZoneSize();
+
+  // Check whether we can skip adjusting the stack pointer (by using red zone)
+  if (!DisableRedZone && CanUseRedZone && FitsInRedZone) {
     // No need for frame
     if (UpdateMF)
       MFI.setStackSize(0);
@@ -521,7 +516,7 @@ void PPCFrameLowering::replaceFPWithRealFP(MachineFunction &MF) const {
   const PPCRegisterInfo *RegInfo = Subtarget.getRegisterInfo();
   bool HasBP = RegInfo->hasBasePointer(MF);
   unsigned BPReg  = HasBP ? (unsigned) RegInfo->getBaseRegister(MF) : FPReg;
-  unsigned BP8Reg = HasBP ? (unsigned) PPC::X30 : FPReg;
+  unsigned BP8Reg = HasBP ? (unsigned) PPC::X30 : FP8Reg;
 
   for (MachineFunction::iterator BI = MF.begin(), BE = MF.end();
        BI != BE; ++BI)
@@ -1459,8 +1454,7 @@ void PPCFrameLowering::emitEpilogue(MachineFunction &MF,
   }
 
   if (FI->usesPICBase())
-    BuildMI(MBB, MBBI, dl, LoadInst)
-      .addReg(PPC::R30)
+    BuildMI(MBB, MBBI, dl, LoadInst, PPC::R30)
       .addImm(PBPOffset)
       .addReg(RBReg);
 
@@ -1766,31 +1760,36 @@ void PPCFrameLowering::processFunctionBeforeFrameFinalized(MachineFunction &MF,
   // Check whether the frame pointer register is allocated. If so, make sure it
   // is spilled to the correct offset.
   if (needsFP(MF)) {
-    HasGPSaveArea = true;
-
     int FI = PFI->getFramePointerSaveIndex();
     assert(FI && "No Frame Pointer Save Slot!");
-
     MFI.setObjectOffset(FI, LowerBound + MFI.getObjectOffset(FI));
+    // FP is R31/X31, so no need to update MinGPR/MinG8R.
+    HasGPSaveArea = true;
   }
 
   if (PFI->usesPICBase()) {
-    HasGPSaveArea = true;
-
     int FI = PFI->getPICBasePointerSaveIndex();
     assert(FI && "No PIC Base Pointer Save Slot!");
-
     MFI.setObjectOffset(FI, LowerBound + MFI.getObjectOffset(FI));
+
+    MinGPR = std::min<unsigned>(MinGPR, PPC::R30);
+    HasGPSaveArea = true;
   }
 
   const PPCRegisterInfo *RegInfo = Subtarget.getRegisterInfo();
   if (RegInfo->hasBasePointer(MF)) {
-    HasGPSaveArea = true;
-
     int FI = PFI->getBasePointerSaveIndex();
     assert(FI && "No Base Pointer Save Slot!");
-
     MFI.setObjectOffset(FI, LowerBound + MFI.getObjectOffset(FI));
+
+    unsigned BP = RegInfo->getBaseRegister(MF);
+    if (PPC::G8RCRegClass.contains(BP)) {
+      MinG8R = std::min<unsigned>(MinG8R, BP);
+      HasG8SaveArea = true;
+    } else if (PPC::GPRCRegClass.contains(BP)) {
+      MinGPR = std::min<unsigned>(MinGPR, BP);
+      HasGPSaveArea = true;
+    }
   }
 
   // General register save area starts right below the Floating-point
@@ -1865,8 +1864,13 @@ void PPCFrameLowering::processFunctionBeforeFrameFinalized(MachineFunction &MF,
   }
 
   if (HasVRSaveArea) {
-    // Insert alignment padding, we need 16-byte alignment.
-    LowerBound = (LowerBound - 15) & ~(15);
+    // Insert alignment padding, we need 16-byte alignment. Note: for postive
+    // number the alignment formula is : y = (x + (n-1)) & (~(n-1)). But since
+    // we are using negative number here (the stack grows downward). We should
+    // use formula : y = x & (~(n-1)). Where x is the size before aligning, n
+    // is the alignment size ( n = 16 here) and y is the size after aligning.
+    assert(LowerBound <= 0 && "Expect LowerBound have a non-positive value!");
+    LowerBound &= ~(15);
 
     for (unsigned i = 0, e = VRegs.size(); i != e; ++i) {
       int FI = VRegs[i].getFrameIdx();
@@ -1898,12 +1902,13 @@ PPCFrameLowering::addScavengingSpillSlot(MachineFunction &MF,
   MachineFrameInfo &MFI = MF.getFrameInfo();
   if (MFI.hasVarSizedObjects() || spillsCR(MF) || spillsVRSAVE(MF) ||
       hasNonRISpills(MF) || (hasSpills(MF) && !isInt<16>(StackSize))) {
-    const TargetRegisterClass *GPRC = &PPC::GPRCRegClass;
-    const TargetRegisterClass *G8RC = &PPC::G8RCRegClass;
-    const TargetRegisterClass *RC = Subtarget.isPPC64() ? G8RC : GPRC;
-    RS->addScavengingFrameIndex(MFI.CreateStackObject(RC->getSize(),
-                                                      RC->getAlignment(),
-                                                      false));
+    const TargetRegisterClass &GPRC = PPC::GPRCRegClass;
+    const TargetRegisterClass &G8RC = PPC::G8RCRegClass;
+    const TargetRegisterClass &RC = Subtarget.isPPC64() ? G8RC : GPRC;
+    const TargetRegisterInfo &TRI = *Subtarget.getRegisterInfo();
+    unsigned Size = TRI.getSpillSize(RC);
+    unsigned Align = TRI.getSpillAlignment(RC);
+    RS->addScavengingFrameIndex(MFI.CreateStackObject(Size, Align, false));
 
     // Might we have over-aligned allocas?
     bool HasAlVars = MFI.hasVarSizedObjects() &&
@@ -1911,9 +1916,7 @@ PPCFrameLowering::addScavengingSpillSlot(MachineFunction &MF,
 
     // These kinds of spills might need two registers.
     if (spillsCR(MF) || spillsVRSAVE(MF) || HasAlVars)
-      RS->addScavengingFrameIndex(MFI.CreateStackObject(RC->getSize(),
-                                                        RC->getAlignment(),
-                                                        false));
+      RS->addScavengingFrameIndex(MFI.CreateStackObject(Size, Align, false));
 
   }
 }
@@ -2062,7 +2065,7 @@ eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
 bool
 PPCFrameLowering::restoreCalleeSavedRegisters(MachineBasicBlock &MBB,
                                         MachineBasicBlock::iterator MI,
-                                        const std::vector<CalleeSavedInfo> &CSI,
+                                        std::vector<CalleeSavedInfo> &CSI,
                                         const TargetRegisterInfo *TRI) const {
 
   // Currently, this function only handles SVR4 32- and 64-bit ABIs.

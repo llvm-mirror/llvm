@@ -13,14 +13,26 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/AssumptionCache.h"
-#include "llvm/IR/CallSite.h"
-#include "llvm/IR/Dominators.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/InstrTypes.h"
+#include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
-#include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/IR/PatternMatch.h"
-#include "llvm/Support/Debug.h"
+#include "llvm/Pass.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/raw_ostream.h"
+#include <algorithm>
+#include <cassert>
+#include <utility>
+
 using namespace llvm;
 using namespace llvm::PatternMatch;
 
@@ -29,15 +41,16 @@ static cl::opt<bool>
                           cl::desc("Enable verification of assumption cache"),
                           cl::init(false));
 
-SmallVector<WeakVH, 1> &AssumptionCache::getOrInsertAffectedValues(Value *V) {
+SmallVector<WeakTrackingVH, 1> &
+AssumptionCache::getOrInsertAffectedValues(Value *V) {
   // Try using find_as first to avoid creating extra value handles just for the
   // purpose of doing the lookup.
   auto AVI = AffectedValues.find_as(V);
   if (AVI != AffectedValues.end())
     return AVI->second;
 
-  auto AVIP = AffectedValues.insert({
-      AffectedValueCallbackVH(V, this), SmallVector<WeakVH, 1>()});
+  auto AVIP = AffectedValues.insert(
+      {AffectedValueCallbackVH(V, this), SmallVector<WeakTrackingVH, 1>()});
   return AVIP.first->second;
 }
 
@@ -83,18 +96,11 @@ void AssumptionCache::updateAffectedValues(CallInst *CI) {
         Value *B;
         ConstantInt *C;
         // (A & B) or (A | B) or (A ^ B).
-        if (match(V,
-                  m_CombineOr(m_And(m_Value(A), m_Value(B)),
-                    m_CombineOr(m_Or(m_Value(A), m_Value(B)),
-                                m_Xor(m_Value(A), m_Value(B)))))) {
+        if (match(V, m_BitwiseLogic(m_Value(A), m_Value(B)))) {
           AddAffected(A);
           AddAffected(B);
         // (A << C) or (A >>_s C) or (A >>_u C) where C is some constant.
-        } else if (match(V,
-                         m_CombineOr(m_Shl(m_Value(A), m_ConstantInt(C)),
-                           m_CombineOr(m_LShr(m_Value(A), m_ConstantInt(C)),
-                                       m_AShr(m_Value(A),
-                                              m_ConstantInt(C)))))) {
+        } else if (match(V, m_Shift(m_Value(A), m_ConstantInt(C)))) {
           AddAffected(A);
         }
       };
@@ -261,8 +267,9 @@ AssumptionCacheTracker::AssumptionCacheTracker() : ImmutablePass(ID) {
   initializeAssumptionCacheTrackerPass(*PassRegistry::getPassRegistry());
 }
 
-AssumptionCacheTracker::~AssumptionCacheTracker() {}
+AssumptionCacheTracker::~AssumptionCacheTracker() = default;
+
+char AssumptionCacheTracker::ID = 0;
 
 INITIALIZE_PASS(AssumptionCacheTracker, "assumption-cache-tracker",
                 "Assumption Cache Tracker", false, true)
-char AssumptionCacheTracker::ID = 0;

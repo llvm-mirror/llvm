@@ -40,6 +40,7 @@ namespace llvm {
 
 class FunctionPass;
 class ModulePass;
+class OptimizationRemarkEmitter;
 
 /// Instrumentation passes often insert conditional checks into entry blocks.
 /// Call this function before splitting the entry block to move instructions
@@ -88,6 +89,7 @@ ModulePass *
 createPGOInstrumentationUseLegacyPass(StringRef Filename = StringRef(""));
 ModulePass *createPGOIndirectCallPromotionLegacyPass(bool InLTO = false,
                                                      bool SamplePGO = false);
+FunctionPass *createPGOMemOPSizeOptLegacyPass();
 
 // Helper function to check if it is legal to promote indirect call \p Inst
 // to a direct call of function \p F. Stores the reason in \p Reason.
@@ -108,12 +110,16 @@ bool isLegalToPromote(Instruction *Inst, Function *F, const char **Reason);
 // Returns the promoted direct call instruction.
 Instruction *promoteIndirectCall(Instruction *Inst, Function *F, uint64_t Count,
                                  uint64_t TotalCount,
-                                 bool AttachProfToDirectCall);
+                                 bool AttachProfToDirectCall,
+                                 OptimizationRemarkEmitter *ORE);
 
 /// Options for the frontend instrumentation based profiling pass.
 struct InstrProfOptions {
   // Add the 'noredzone' attribute to added runtime library calls.
   bool NoRedZone = false;
+
+  // Do counter register promotion
+  bool DoCounterPromotion = false;
 
   // Name of the profile file to use as output
   std::string InstrProfileOutput;
@@ -130,7 +136,8 @@ FunctionPass *createAddressSanitizerFunctionPass(bool CompileKernel = false,
                                                  bool Recover = false,
                                                  bool UseAfterScope = false);
 ModulePass *createAddressSanitizerModulePass(bool CompileKernel = false,
-                                             bool Recover = false);
+                                             bool Recover = false,
+                                             bool UseGlobalsGC = true);
 
 // Insert MemorySanitizer instrumentation (detection of uninitialized reads)
 FunctionPass *createMemorySanitizerPass(int TrackOrigins = 0,
@@ -175,6 +182,10 @@ struct SanitizerCoverageOptions {
   bool Use8bitCounters = false;
   bool TracePC = false;
   bool TracePCGuard = false;
+  bool Inline8bitCounters = false;
+  bool PCTable = false;
+  bool NoPrune = false;
+  bool StackDepth = false;
 
   SanitizerCoverageOptions() = default;
 };

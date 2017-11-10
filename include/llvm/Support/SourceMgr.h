@@ -43,13 +43,14 @@ public:
   enum DiagKind {
     DK_Error,
     DK_Warning,
-    DK_Note
+    DK_Remark,
+    DK_Note,
   };
 
   /// Clients that want to handle their own diagnostics in a custom way can
   /// register a function pointer+context as a diagnostic handler.
   /// It gets called each time PrintMessage is invoked.
-  typedef void (*DiagHandlerTy)(const SMDiagnostic &, void *Context);
+  using DiagHandlerTy = void (*)(const SMDiagnostic &, void *Context);
 
 private:
   struct SrcBuffer {

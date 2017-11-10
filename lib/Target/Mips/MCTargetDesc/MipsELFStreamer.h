@@ -33,19 +33,16 @@ class MipsELFStreamer : public MCELFStreamer {
   SmallVector<MCSymbol*, 4> Labels;
 
 public:
-  MipsELFStreamer(MCContext &Context, MCAsmBackend &MAB, raw_pwrite_stream &OS,
-                  MCCodeEmitter *Emitter)
-      : MCELFStreamer(Context, MAB, OS, Emitter) {
-    RegInfoRecord = new MipsRegInfoRecord(this, Context);
-    MipsOptionRecords.push_back(
-        std::unique_ptr<MipsRegInfoRecord>(RegInfoRecord));
-  }
+  MipsELFStreamer(MCContext &Context, std::unique_ptr<MCAsmBackend> MAB,
+                  raw_pwrite_stream &OS,
+                  std::unique_ptr<MCCodeEmitter> Emitter);
 
   /// Overriding this function allows us to add arbitrary behaviour before the
   /// \p Inst is actually emitted. For example, we can inspect the operands and
   /// gather sufficient information that allows us to reason about the register
   /// usage for the translation unit.
-  void EmitInstruction(const MCInst &Inst, const MCSubtargetInfo &STI) override;
+  void EmitInstruction(const MCInst &Inst, const MCSubtargetInfo &STI,
+                       bool = false) override;
 
   /// Overriding this function allows us to record all labels that should be
   /// marked as microMIPS. Based on this data marking is done in
@@ -68,9 +65,11 @@ public:
   void createPendingLabelRelocs();
 };
 
-MCELFStreamer *createMipsELFStreamer(MCContext &Context, MCAsmBackend &MAB,
+MCELFStreamer *createMipsELFStreamer(MCContext &Context,
+                                     std::unique_ptr<MCAsmBackend> MAB,
                                      raw_pwrite_stream &OS,
-                                     MCCodeEmitter *Emitter, bool RelaxAll);
+                                     std::unique_ptr<MCCodeEmitter> Emitter,
+                                     bool RelaxAll);
 } // end namespace llvm
 
 #endif // LLVM_LIB_TARGET_MIPS_MCTARGETDESC_MIPSELFSTREAMER_H

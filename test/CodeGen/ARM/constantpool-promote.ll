@@ -1,15 +1,15 @@
-; RUN: llc -mtriple armv7--linux-gnueabihf -relocation-model=static < %s | FileCheck %s --check-prefixes=CHECK,CHECK-V7,CHECK-V7ARM
-; RUN: llc -mtriple armv7--linux-gnueabihf -relocation-model=pic < %s | FileCheck %s --check-prefixes=CHECK,CHECK-V7,CHECK-V7ARM
-; RUN: llc -mtriple armv7--linux-gnueabihf -relocation-model=ropi < %s | FileCheck %s --check-prefixes=CHECK,CHECK-V7,CHECK-V7ARM
-; RUN: llc -mtriple armv7--linux-gnueabihf -relocation-model=rwpi < %s | FileCheck %s --check-prefixes=CHECK,CHECK-V7,CHECK-V7ARM
-; RUN: llc -mtriple thumbv7--linux-gnueabihf -relocation-model=static < %s | FileCheck %s --check-prefixes=CHECK,CHECK-V7,CHECK-V7THUMB
-; RUN: llc -mtriple thumbv7--linux-gnueabihf -relocation-model=pic < %s | FileCheck %s --check-prefixes=CHECK,CHECK-V7,CHECK-V7THUMB
-; RUN: llc -mtriple thumbv7--linux-gnueabihf -relocation-model=ropi < %s | FileCheck %s --check-prefixes=CHECK,CHECK-V7,CHECK-V7THUMB
-; RUN: llc -mtriple thumbv7--linux-gnueabihf -relocation-model=rwpi < %s | FileCheck %s --check-prefixes=CHECK,CHECK-V7,CHECK-V7THUMB
-; RUN: llc -mtriple thumbv6m--linux-gnueabihf -relocation-model=static < %s | FileCheck %s --check-prefixes=CHECK,CHECK-V6M
-; RUN: llc -mtriple thumbv6m--linux-gnueabihf -relocation-model=pic < %s | FileCheck %s --check-prefixes=CHECK,CHECK-V6M
-; RUN: llc -mtriple thumbv6m--linux-gnueabihf -relocation-model=ropi < %s | FileCheck %s --check-prefixes=CHECK,CHECK-V6M
-; RUN: llc -mtriple thumbv6m--linux-gnueabihf -relocation-model=rwpi < %s | FileCheck %s --check-prefixes=CHECK,CHECK-V6M
+; RUN: llc -mtriple armv7--linux-gnueabihf -relocation-model=static -arm-promote-constant < %s | FileCheck %s --check-prefixes=CHECK,CHECK-V7,CHECK-V7ARM
+; RUN: llc -mtriple armv7--linux-gnueabihf -relocation-model=pic -arm-promote-constant < %s | FileCheck %s --check-prefixes=CHECK,CHECK-V7,CHECK-V7ARM
+; RUN: llc -mtriple armv7--linux-gnueabihf -relocation-model=ropi -arm-promote-constant < %s | FileCheck %s --check-prefixes=CHECK,CHECK-V7,CHECK-V7ARM
+; RUN: llc -mtriple armv7--linux-gnueabihf -relocation-model=rwpi -arm-promote-constant < %s | FileCheck %s --check-prefixes=CHECK,CHECK-V7,CHECK-V7ARM
+; RUN: llc -mtriple thumbv7--linux-gnueabihf -relocation-model=static -arm-promote-constant < %s | FileCheck %s --check-prefixes=CHECK,CHECK-V7,CHECK-V7THUMB
+; RUN: llc -mtriple thumbv7--linux-gnueabihf -relocation-model=pic -arm-promote-constant < %s | FileCheck %s --check-prefixes=CHECK,CHECK-V7,CHECK-V7THUMB
+; RUN: llc -mtriple thumbv7--linux-gnueabihf -relocation-model=ropi -arm-promote-constant < %s | FileCheck %s --check-prefixes=CHECK,CHECK-V7,CHECK-V7THUMB
+; RUN: llc -mtriple thumbv7--linux-gnueabihf -relocation-model=rwpi -arm-promote-constant < %s | FileCheck %s --check-prefixes=CHECK,CHECK-V7,CHECK-V7THUMB
+; RUN: llc -mtriple thumbv6m--linux-gnueabihf -relocation-model=static -arm-promote-constant < %s | FileCheck %s --check-prefixes=CHECK,CHECK-V6M
+; RUN: llc -mtriple thumbv6m--linux-gnueabihf -relocation-model=pic -arm-promote-constant < %s | FileCheck %s --check-prefixes=CHECK,CHECK-V6M
+; RUN: llc -mtriple thumbv6m--linux-gnueabihf -relocation-model=ropi -arm-promote-constant < %s | FileCheck %s --check-prefixes=CHECK,CHECK-V6M
+; RUN: llc -mtriple thumbv6m--linux-gnueabihf -relocation-model=rwpi -arm-promote-constant < %s | FileCheck %s --check-prefixes=CHECK,CHECK-V6M
 
 @.str = private unnamed_addr constant [2 x i8] c"s\00", align 1
 @.str1 = private unnamed_addr constant [69 x i8] c"this string is far too long to fit in a literal pool by far and away\00", align 1
@@ -21,6 +21,7 @@
 @.arr3 = private unnamed_addr constant [2 x i16*] [i16* null, i16* null], align 4
 @.ptr = private unnamed_addr constant [2 x i16*] [i16* getelementptr inbounds ([2 x i16], [2 x i16]* @.arr2, i32 0, i32 0), i16* null], align 2
 @.arr4 = private unnamed_addr constant [2 x i16] [i16 3, i16 4], align 16
+@.zerosize = private unnamed_addr constant [0 x i16] zeroinitializer, align 4
 
 ; CHECK-LABEL: @test1
 ; CHECK: adr r0, [[x:.*]]
@@ -136,6 +137,14 @@ entry:
 ; CHECK-NOT: adr
 define void @test9() #0 {
   tail call void @c(i16* getelementptr inbounds ([2 x i16], [2 x i16]* @.arr4, i32 0, i32 0)) #2
+  ret void
+}
+
+; Ensure that zero sized values are supported / not promoted.
+; CHECK-LABEL: @pr32130
+; CHECK-NOT: adr
+define void @pr32130() #0 {
+  tail call void @c(i16* getelementptr inbounds ([0 x i16], [0 x i16]* @.zerosize, i32 0, i32 0)) #2
   ret void
 }
 

@@ -28,6 +28,7 @@ class TestIntegratedTestKeywordParser(unittest.TestCase):
                                              quiet=False,
                                              useValgrind=False,
                                              valgrindLeakCheck=False,
+                                             singleProcess=False,
                                              valgrindArgs=[],
                                              noExecute=False,
                                              debug=False,
@@ -89,7 +90,7 @@ class TestIntegratedTestKeywordParser(unittest.TestCase):
         parsers = self.make_parsers()
         self.parse_test(parsers)
         list_parser = self.get_parser(parsers, 'MY_LIST:')
-        self.assertItemsEqual(list_parser.getValue(),
+        self.assertEqual(list_parser.getValue(),
                               ['one', 'two', 'three', 'four'])
 
     def test_commands(self):
@@ -106,7 +107,7 @@ class TestIntegratedTestKeywordParser(unittest.TestCase):
         self.parse_test(parsers)
         custom_parser = self.get_parser(parsers, 'MY_CUSTOM:')
         value = custom_parser.getValue()
-        self.assertItemsEqual(value, ['a', 'b', 'c'])
+        self.assertEqual(value, ['a', 'b', 'c'])
 
     def test_bad_keywords(self):
         def custom_parse(line_number, line, output):

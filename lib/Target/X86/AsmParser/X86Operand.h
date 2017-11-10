@@ -10,13 +10,14 @@
 #ifndef LLVM_LIB_TARGET_X86_ASMPARSER_X86OPERAND_H
 #define LLVM_LIB_TARGET_X86_ASMPARSER_X86OPERAND_H
 
+#include "MCTargetDesc/X86MCTargetDesc.h"
 #include "X86AsmParserCommon.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
-#include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCParser/MCParsedAsmOperand.h"
+#include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/SMLoc.h"
@@ -28,12 +29,7 @@ namespace llvm {
 /// X86Operand - Instances of this class represent a parsed X86 machine
 /// instruction.
 struct X86Operand : public MCParsedAsmOperand {
-  enum KindTy {
-    Token,
-    Register,
-    Immediate,
-    Memory
-  } Kind;
+  enum KindTy { Token, Register, Immediate, Memory, Prefix } Kind;
 
   SMLoc StartLoc, EndLoc;
   SMLoc OffsetOfLoc;
@@ -50,6 +46,10 @@ struct X86Operand : public MCParsedAsmOperand {
     unsigned RegNo;
   };
 
+  struct PrefOp {
+    unsigned Prefixes;
+  };
+
   struct ImmOp {
     const MCExpr *Val;
   };
@@ -62,6 +62,10 @@ struct X86Operand : public MCParsedAsmOperand {
     unsigned Scale;
     unsigned Size;
     unsigned ModeSize;
+
+    /// If the memory operand is unsized and there are multiple instruction
+    /// matches, prefer the one with this size.
+    unsigned FrontendSize;
   };
 
   union {
@@ -69,6 +73,7 @@ struct X86Operand : public MCParsedAsmOperand {
     struct RegOp Reg;
     struct ImmOp Imm;
     struct MemOp Mem;
+    struct PrefOp Pref;
   };
 
   X86Operand(KindTy K, SMLoc Start, SMLoc End)
@@ -107,6 +112,11 @@ struct X86Operand : public MCParsedAsmOperand {
     return Reg.RegNo;
   }
 
+  unsigned getPrefix() const {
+    assert(Kind == Prefix && "Invalid access!");
+    return Pref.Prefixes;
+  }
+
   const MCExpr *getImm() const {
     assert(Kind == Immediate && "Invalid access!");
     return Imm.Val;
@@ -135,6 +145,10 @@ struct X86Operand : public MCParsedAsmOperand {
   unsigned getMemModeSize() const {
     assert(Kind == Memory && "Invalid access!");
     return Mem.ModeSize;
+  }
+  unsigned getMemFrontendSize() const {
+    assert(Kind == Memory && "Invalid access!");
+    return Mem.FrontendSize;
   }
 
   bool isToken() const override {return Kind == Token; }
@@ -379,6 +393,7 @@ struct X86Operand : public MCParsedAsmOperand {
     return isMemOffs() && Mem.ModeSize == 64 && (!Mem.Size || Mem.Size == 64);
   }
 
+  bool isPrefix() const { return Kind == Prefix; }
   bool isReg() const override { return Kind == Register; }
 
   bool isGR32orGR64() const {
@@ -501,6 +516,13 @@ struct X86Operand : public MCParsedAsmOperand {
     return Res;
   }
 
+  static std::unique_ptr<X86Operand>
+  CreatePrefix(unsigned Prefixes, SMLoc StartLoc, SMLoc EndLoc) {
+    auto Res = llvm::make_unique<X86Operand>(Prefix, StartLoc, EndLoc);
+    Res->Pref.Prefixes = Prefixes;
+    return Res;
+  }
+
   static std::unique_ptr<X86Operand> CreateImm(const MCExpr *Val,
                                                SMLoc StartLoc, SMLoc EndLoc) {
     auto Res = llvm::make_unique<X86Operand>(Immediate, StartLoc, EndLoc);
@@ -512,7 +534,7 @@ struct X86Operand : public MCParsedAsmOperand {
   static std::unique_ptr<X86Operand>
   CreateMem(unsigned ModeSize, const MCExpr *Disp, SMLoc StartLoc, SMLoc EndLoc,
             unsigned Size = 0, StringRef SymName = StringRef(),
-            void *OpDecl = nullptr) {
+            void *OpDecl = nullptr, unsigned FrontendSize = 0) {
     auto Res = llvm::make_unique<X86Operand>(Memory, StartLoc, EndLoc);
     Res->Mem.SegReg   = 0;
     Res->Mem.Disp     = Disp;
@@ -521,6 +543,7 @@ struct X86Operand : public MCParsedAsmOperand {
     Res->Mem.Scale    = 1;
     Res->Mem.Size     = Size;
     Res->Mem.ModeSize = ModeSize;
+    Res->Mem.FrontendSize = FrontendSize;
     Res->SymName      = SymName;
     Res->OpDecl       = OpDecl;
     Res->AddressOf    = false;
@@ -532,7 +555,7 @@ struct X86Operand : public MCParsedAsmOperand {
   CreateMem(unsigned ModeSize, unsigned SegReg, const MCExpr *Disp,
             unsigned BaseReg, unsigned IndexReg, unsigned Scale, SMLoc StartLoc,
             SMLoc EndLoc, unsigned Size = 0, StringRef SymName = StringRef(),
-            void *OpDecl = nullptr) {
+            void *OpDecl = nullptr, unsigned FrontendSize = 0) {
     // We should never just have a displacement, that should be parsed as an
     // absolute memory operand.
     assert((SegReg || BaseReg || IndexReg) && "Invalid memory operand!");
@@ -548,6 +571,7 @@ struct X86Operand : public MCParsedAsmOperand {
     Res->Mem.Scale    = Scale;
     Res->Mem.Size     = Size;
     Res->Mem.ModeSize = ModeSize;
+    Res->Mem.FrontendSize = FrontendSize;
     Res->SymName      = SymName;
     Res->OpDecl       = OpDecl;
     Res->AddressOf    = false;

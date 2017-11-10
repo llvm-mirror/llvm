@@ -12,11 +12,13 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/CodeGen/LiveRegUnits.h"
+
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBundle.h"
 #include "llvm/CodeGen/MachineOperand.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 
@@ -65,7 +67,7 @@ void LiveRegUnits::stepBackward(const MachineInstr &MI) {
   }
 }
 
-void LiveRegUnits::accumulateBackward(const MachineInstr &MI) {
+void LiveRegUnits::accumulate(const MachineInstr &MI) {
   // Add defs, uses and regmask clobbers to the set.
   for (ConstMIBundleOperands O(MI); O.isValid(); ++O) {
     if (O->isReg()) {
@@ -81,46 +83,64 @@ void LiveRegUnits::accumulateBackward(const MachineInstr &MI) {
 }
 
 /// Add live-in registers of basic block \p MBB to \p LiveUnits.
-static void addLiveIns(LiveRegUnits &LiveUnits, const MachineBasicBlock &MBB) {
+static void addBlockLiveIns(LiveRegUnits &LiveUnits,
+                            const MachineBasicBlock &MBB) {
   for (const auto &LI : MBB.liveins())
     LiveUnits.addRegMasked(LI.PhysReg, LI.LaneMask);
 }
 
-static void addLiveOuts(LiveRegUnits &LiveUnits, const MachineBasicBlock &MBB) {
-  // To get the live-outs we simply merge the live-ins of all successors.
-  for (const MachineBasicBlock *Succ : MBB.successors())
-    addLiveIns(LiveUnits, *Succ);
+/// Adds all callee saved registers to \p LiveUnits.
+static void addCalleeSavedRegs(LiveRegUnits &LiveUnits,
+                               const MachineFunction &MF) {
+  const MachineRegisterInfo &MRI = MF.getRegInfo();
+  for (const MCPhysReg *CSR = MRI.getCalleeSavedRegs(); CSR && *CSR; ++CSR)
+    LiveUnits.addReg(*CSR);
 }
 
-/// Add pristine registers to the given \p LiveUnits. This function removes
-/// actually saved callee save registers when \p InPrologueEpilogue is false.
-static void removeSavedRegs(LiveRegUnits &LiveUnits, const MachineFunction &MF,
-                            const MachineFrameInfo &MFI,
-                            const TargetRegisterInfo &TRI) {
+void LiveRegUnits::addPristines(const MachineFunction &MF) {
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  if (!MFI.isCalleeSavedInfoValid())
+    return;
+  /// This function will usually be called on an empty object, handle this
+  /// as a special case.
+  if (empty()) {
+    /// Add all callee saved regs, then remove the ones that are saved and
+    /// restored.
+    addCalleeSavedRegs(*this, MF);
+    /// Remove the ones that are not saved/restored; they are pristine.
+    for (const CalleeSavedInfo &Info : MFI.getCalleeSavedInfo())
+      removeReg(Info.getReg());
+    return;
+  }
+  /// If a callee-saved register that is not pristine is already present
+  /// in the set, we should make sure that it stays in it. Precompute the
+  /// set of pristine registers in a separate object.
+  /// Add all callee saved regs, then remove the ones that are saved+restored.
+  LiveRegUnits Pristine(*TRI);
+  addCalleeSavedRegs(Pristine, MF);
+  /// Remove the ones that are not saved/restored; they are pristine.
   for (const CalleeSavedInfo &Info : MFI.getCalleeSavedInfo())
-    LiveUnits.removeReg(Info.getReg());
+    Pristine.removeReg(Info.getReg());
+  addUnits(Pristine.getBitVector());
 }
 
 void LiveRegUnits::addLiveOuts(const MachineBasicBlock &MBB) {
   const MachineFunction &MF = *MBB.getParent();
-  const MachineFrameInfo &MFI = MF.getFrameInfo();
-  if (MFI.isCalleeSavedInfoValid()) {
-    for (const MCPhysReg *I = TRI->getCalleeSavedRegs(&MF); *I; ++I)
-      addReg(*I);
-    if (!MBB.isReturnBlock())
-      removeSavedRegs(*this, MF, MFI, *TRI);
+  if (!MBB.succ_empty()) {
+    addPristines(MF);
+    // To get the live-outs we simply merge the live-ins of all successors.
+    for (const MachineBasicBlock *Succ : MBB.successors())
+      addBlockLiveIns(*this, *Succ);
+  } else if (MBB.isReturnBlock()) {
+    // For the return block: Add all callee saved registers.
+    const MachineFrameInfo &MFI = MF.getFrameInfo();
+    if (MFI.isCalleeSavedInfoValid())
+      addCalleeSavedRegs(*this, MF);
   }
-  ::addLiveOuts(*this, MBB);
 }
 
 void LiveRegUnits::addLiveIns(const MachineBasicBlock &MBB) {
   const MachineFunction &MF = *MBB.getParent();
-  const MachineFrameInfo &MFI = MF.getFrameInfo();
-  if (MFI.isCalleeSavedInfoValid()) {
-    for (const MCPhysReg *I = TRI->getCalleeSavedRegs(&MF); *I; ++I)
-      addReg(*I);
-    if (&MBB != &MF.front())
-      removeSavedRegs(*this, MF, MFI, *TRI);
-  }
-  ::addLiveIns(*this, MBB);
+  addPristines(MF);
+  addBlockLiveIns(*this, MBB);
 }

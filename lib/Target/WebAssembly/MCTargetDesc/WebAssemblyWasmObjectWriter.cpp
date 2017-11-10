@@ -13,14 +13,19 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "MCTargetDesc/WebAssemblyMCTargetDesc.h"
 #include "MCTargetDesc/WebAssemblyFixupKinds.h"
+#include "MCTargetDesc/WebAssemblyMCTargetDesc.h"
+#include "llvm/BinaryFormat/Wasm.h"
+#include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCFixup.h"
+#include "llvm/MC/MCFixupKindInfo.h"
+#include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCSymbolWasm.h"
 #include "llvm/MC/MCWasmObjectWriter.h"
+#include "llvm/MC/MCValue.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/Wasm.h"
+
 using namespace llvm;
 
 namespace {
@@ -29,8 +34,8 @@ public:
   explicit WebAssemblyWasmObjectWriter(bool Is64Bit);
 
 private:
-  unsigned getRelocType(MCContext &Ctx, const MCValue &Target,
-                        const MCFixup &Fixup, bool IsPCRel) const override;
+  unsigned getRelocType(const MCValue &Target,
+                        const MCFixup &Fixup) const override;
 };
 } // end anonymous namespace
 
@@ -39,45 +44,49 @@ WebAssemblyWasmObjectWriter::WebAssemblyWasmObjectWriter(bool Is64Bit)
 
 // Test whether the given expression computes a function address.
 static bool IsFunctionExpr(const MCExpr *Expr) {
-  if (const MCSymbolRefExpr *SyExp =
-          dyn_cast<MCSymbolRefExpr>(Expr))
+  if (auto SyExp = dyn_cast<MCSymbolRefExpr>(Expr))
     return cast<MCSymbolWasm>(SyExp->getSymbol()).isFunction();
 
-  if (const MCBinaryExpr *BinOp =
-          dyn_cast<MCBinaryExpr>(Expr))
+  if (auto BinOp = dyn_cast<MCBinaryExpr>(Expr))
     return IsFunctionExpr(BinOp->getLHS()) != IsFunctionExpr(BinOp->getRHS());
 
-  if (const MCUnaryExpr *UnOp =
-          dyn_cast<MCUnaryExpr>(Expr))
+  if (auto UnOp = dyn_cast<MCUnaryExpr>(Expr))
     return IsFunctionExpr(UnOp->getSubExpr());
 
   return false;
 }
 
-unsigned WebAssemblyWasmObjectWriter::getRelocType(MCContext &Ctx,
-                                                   const MCValue &Target,
-                                                   const MCFixup &Fixup,
-                                                   bool IsPCRel) const {
+static bool IsFunctionType(const MCValue &Target) {
+  const MCSymbolRefExpr *RefA = Target.getSymA();
+  return RefA && RefA->getKind() == MCSymbolRefExpr::VK_WebAssembly_TYPEINDEX;
+}
+
+unsigned
+WebAssemblyWasmObjectWriter::getRelocType(const MCValue &Target,
+                                          const MCFixup &Fixup) const {
   // WebAssembly functions are not allocated in the data address space. To
   // resolve a pointer to a function, we must use a special relocation type.
   bool IsFunction = IsFunctionExpr(Fixup.getValue());
 
-  assert(!IsPCRel);
   switch (unsigned(Fixup.getKind())) {
+  case WebAssembly::fixup_code_global_index:
+    return wasm::R_WEBASSEMBLY_GLOBAL_INDEX_LEB;
   case WebAssembly::fixup_code_sleb128_i32:
     if (IsFunction)
       return wasm::R_WEBASSEMBLY_TABLE_INDEX_SLEB;
-    return wasm::R_WEBASSEMBLY_GLOBAL_ADDR_SLEB;
+    return wasm::R_WEBASSEMBLY_MEMORY_ADDR_SLEB;
   case WebAssembly::fixup_code_sleb128_i64:
     llvm_unreachable("fixup_sleb128_i64 not implemented yet");
   case WebAssembly::fixup_code_uleb128_i32:
+    if (IsFunctionType(Target))
+      return wasm::R_WEBASSEMBLY_TYPE_INDEX_LEB;
     if (IsFunction)
       return wasm::R_WEBASSEMBLY_FUNCTION_INDEX_LEB;
-    return wasm::R_WEBASSEMBLY_GLOBAL_ADDR_LEB;
+    return wasm::R_WEBASSEMBLY_MEMORY_ADDR_LEB;
   case FK_Data_4:
     if (IsFunction)
       return wasm::R_WEBASSEMBLY_TABLE_INDEX_I32;
-    return wasm::R_WEBASSEMBLY_GLOBAL_ADDR_I32;
+    return wasm::R_WEBASSEMBLY_MEMORY_ADDR_I32;
   case FK_Data_8:
     llvm_unreachable("FK_Data_8 not implemented yet");
   default:
@@ -85,8 +94,9 @@ unsigned WebAssemblyWasmObjectWriter::getRelocType(MCContext &Ctx,
   }
 }
 
-MCObjectWriter *llvm::createWebAssemblyWasmObjectWriter(raw_pwrite_stream &OS,
-                                                        bool Is64Bit) {
-  MCWasmObjectTargetWriter *MOTW = new WebAssemblyWasmObjectWriter(Is64Bit);
-  return createWasmObjectWriter(MOTW, OS);
+std::unique_ptr<MCObjectWriter>
+llvm::createWebAssemblyWasmObjectWriter(raw_pwrite_stream &OS,
+                                        bool Is64Bit) {
+  auto MOTW = llvm::make_unique<WebAssemblyWasmObjectWriter>(Is64Bit);
+  return createWasmObjectWriter(std::move(MOTW), OS);
 }

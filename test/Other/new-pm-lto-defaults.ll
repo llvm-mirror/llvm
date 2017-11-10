@@ -4,7 +4,7 @@
 
 ; RUN: opt -disable-verify -debug-pass-manager \
 ; RUN:     -passes='lto<O1>' -S %s 2>&1 \
-; RUN:     | FileCheck %s --check-prefix=CHECK-O
+; RUN:     | FileCheck %s --check-prefix=CHECK-O --check-prefix=CHECK-O1
 ; RUN: opt -disable-verify -debug-pass-manager \
 ; RUN:     -passes='lto<O2>' -S  %s 2>&1 \
 ; RUN:     | FileCheck %s --check-prefix=CHECK-O --check-prefix=CHECK-O2
@@ -17,6 +17,10 @@
 ; RUN: opt -disable-verify -debug-pass-manager \
 ; RUN:     -passes='lto<Oz>' -S %s 2>&1 \
 ; RUN:     | FileCheck %s --check-prefix=CHECK-O --check-prefix=CHECK-O2
+; RUN: opt -disable-verify -debug-pass-manager \
+; RUN:     -passes='lto<O3>' -S  %s -passes-ep-peephole='no-op-function' 2>&1 \
+; RUN:     | FileCheck %s --check-prefix=CHECK-O --check-prefix=CHECK-O2 \
+; RUN:     --check-prefix=CHECK-EP-Peephole
 
 ; CHECK-O: Starting llvm::Module pass manager run.
 ; CHECK-O-NEXT: Running pass: PassManager<{{.*}}Module
@@ -26,10 +30,14 @@
 ; CHECK-O-NEXT: Running pass: InferFunctionAttrsPass
 ; CHECK-O-NEXT: Running analysis: TargetLibraryAnalysis
 ; CHECK-O2-NEXT: PGOIndirectCallPromotion
+; CHECK-O2-NEXT: Running analysis: ProfileSummaryAnalysis
+; CHECK-O2-NEXT: Running analysis: InnerAnalysisManagerProxy<{{.*}}Function
+; CHECK-O2-NEXT: Running analysis: OptimizationRemarkEmitterAnalysis
 ; CHECK-O2-NEXT: Running pass: IPSCCPPass
+; CHECK-O2-NEXT: Running pass: CalledValuePropagationPass
 ; CHECK-O-NEXT: Running pass: ModuleToPostOrderCGSCCPassAdaptor<{{.*}}PostOrderFunctionAttrsPass>
-; CHECK-O-NEXT: Running analysis: InnerAnalysisManagerProxy
-; CHECK-O-NEXT: Running analysis: InnerAnalysisManagerProxy
+; CHECK-O-NEXT: Running analysis: InnerAnalysisManagerProxy<{{.*}}SCC
+; CHECK-O1-NEXT: Running analysis: InnerAnalysisManagerProxy<{{.*}}Function
 ; CHECK-O-NEXT: Running analysis: LazyCallGraphAnalysis
 ; CHECK-O-NEXT: Running analysis: FunctionAnalysisManagerCGSCCProxy
 ; CHECK-O-NEXT: Running analysis: OuterAnalysisManagerProxy<{{.*}}LazyCallGraph{{.*}}>
@@ -45,13 +53,18 @@
 ; CHECK-O2-NEXT: Running analysis: AssumptionAnalysis
 ; CHECK-O2-NEXT: Running pass: ConstantMergePass
 ; CHECK-O2-NEXT: Running pass: DeadArgumentEliminationPass
-; CHECK-O2-NEXT: Running pass: ModuleToFunctionPassAdaptor<{{.*}}InstCombinePass>
+; CHECK-O2-NEXT: Running pass: ModuleToFunctionPassAdaptor<{{.*}}PassManager{{.*}}>
+; CHECK-O2-NEXT: Starting llvm::Function pass manager run.
+; CHECK-O2-NEXT: Running pass: InstCombinePass
+; CHECK-EP-Peephole-NEXT: Running pass: NoOpFunctionPass
+; CHECK-O2-NEXT: Finished llvm::Function pass manager run.
 ; CHECK-O2-NEXT: Running pass: ModuleToPostOrderCGSCCPassAdaptor<{{.*}}InlinerPass>
 ; CHECK-O2-NEXT: Running pass: GlobalOptPass
 ; CHECK-O2-NEXT: Running pass: GlobalDCEPass
 ; CHECK-O2-NEXT: Running pass: ModuleToFunctionPassAdaptor<{{.*}}PassManager{{.*}}>
 ; CHECK-O2-NEXT: Starting llvm::Function pass manager run.
 ; CHECK-O2-NEXT: Running pass: InstCombinePass
+; CHECK-EP-Peephole-NEXT: Running pass: NoOpFunctionPass
 ; CHECK-O2-NEXT: Running pass: JumpThreadingPass
 ; CHECK-O2-NEXT: Running analysis: LazyValueAnalysis
 ; CHECK-O2-NEXT: Running pass: SROA on foo
@@ -59,7 +72,6 @@
 ; CHECK-O2-NEXT: Running pass: ModuleToPostOrderCGSCCPassAdaptor<{{.*}}PostOrderFunctionAttrsPass>
 ; CHECK-O2-NEXT: Running pass: ModuleToFunctionPassAdaptor<{{.*}}PassManager{{.*}}>
 ; CHECK-O2-NEXT: Running analysis: MemoryDependenceAnalysis
-; CHECK-O2-NEXT: Running analysis: OptimizationRemarkEmitterAnalysis
 ; CHECK-O2-NEXT: Running analysis: TargetIRAnalysis
 ; CHECK-O2-NEXT: Running analysis: DemandedBitsAnalysis
 ; CHECK-O2-NEXT: Running pass: CrossDSOCFIPass

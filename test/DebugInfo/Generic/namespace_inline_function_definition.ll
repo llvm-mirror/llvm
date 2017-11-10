@@ -1,6 +1,6 @@
 ; REQUIRES: object-emission
 
-; RUN: %llc_dwarf -O0 -filetype=obj -dwarf-linkage-names=All < %s | llvm-dwarfdump -debug-dump=info - | FileCheck %s
+; RUN: %llc_dwarf -O0 -filetype=obj -dwarf-linkage-names=All < %s | llvm-dwarfdump -v -debug-info - | FileCheck %s
 
 ; Generate from clang with the following source. Note that the definition of
 ; the inline function follows its use to workaround another bug that should be
@@ -79,7 +79,7 @@ attributes #2 = { nounwind readnone }
 !7 = !{!8}
 !8 = !DIBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
 !9 = distinct !DISubprogram(name: "func", linkageName: "_ZN2ns4funcEi", line: 6, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, unit: !0, scopeLine: 6, file: !1, scope: !10, type: !11, variables: !2)
-!10 = !DINamespace(name: "ns", line: 1, file: !1, scope: null)
+!10 = !DINamespace(name: "ns", scope: null)
 !11 = !DISubroutineType(types: !12)
 !12 = !{!8, !8}
 !13 = !{i32 2, !"Dwarf Version", i32 4}

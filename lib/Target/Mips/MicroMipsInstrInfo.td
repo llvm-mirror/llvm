@@ -884,7 +884,8 @@ let DecoderNamespace = "MicroMips", Predicates = [InMicroMips] in {
   def EXT_MM : MMRel, ExtBase<"ext", GPR32Opnd, uimm5, uimm5_plus1, immZExt5,
                               immZExt5Plus1, MipsExt>, EXT_FM_MM<0x2c>;
   def INS_MM : MMRel, InsBase<"ins", GPR32Opnd, uimm5, uimm5_inssize_plus1,
-                              MipsIns>, EXT_FM_MM<0x0c>;
+                              immZExt5, immZExt5Plus1, MipsIns>,
+               EXT_FM_MM<0x0c>;
 
   /// Jump Instructions
   let DecoderMethod = "DecodeJumpTargetMM" in {
@@ -1005,20 +1006,14 @@ let DecoderNamespace = "MicroMips" in {
 // MicroMips arbitrary patterns that map to one or more instructions
 //===----------------------------------------------------------------------===//
 
-def : MipsPat<(i32 immLi16:$imm),
-              (LI16_MM immLi16:$imm)>;
-
-let AdditionalPredicates = [InMicroMips] in
-defm :  MaterializeImms<i32, ZERO, ADDiu_MM, LUi_MM, ORi_MM>;
-
-let Predicates = [InMicroMips] in {
+let AdditionalPredicates = [InMicroMips] in {
   def : MipsPat<(i32 immLi16:$imm),
                 (LI16_MM immLi16:$imm)>;
-  def : MipsPat<(i32 immSExt16:$imm),
-                (ADDiu_MM ZERO, immSExt16:$imm)>;
-  def : MipsPat<(i32 immZExt16:$imm),
-                (ORi_MM ZERO, immZExt16:$imm)>;
 
+  defm :  MaterializeImms<i32, ZERO, ADDiu_MM, LUi_MM, ORi_MM>;
+}
+
+let Predicates = [InMicroMips] in {
   def : MipsPat<(not GPRMM16:$in),
                 (NOT16_MM GPRMM16:$in)>;
   def : MipsPat<(not GPR32:$in),

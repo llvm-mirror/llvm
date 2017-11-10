@@ -104,8 +104,14 @@ a:
         dclo      $s2,$a2              # CHECK: dclo $18, $6   # encoding: [0x70,0xd2,0x90,0x25]
         dclz      $s0,$25              # CHECK: dclz $16, $25  # encoding: [0x73,0x30,0x80,0x24]
         deret
+        dext      $9,$6,3,7            # CHECK: dext $9, $6, 3, 7      # encoding: [0x7c,0xc9,0x30,0xc3]
+        dextm     $9,$6,3,39           # CHECK: dextm $9, $6, 3, 39    # encoding: [0x7c,0xc9,0x30,0xc1]
+        dextu     $9,$6,35,7           # CHECK: dextu $9, $6, 35, 7    # encoding: [0x7c,0xc9,0x30,0xc2]
         di        $s8                  # CHECK: di  $fp        # encoding: [0x41,0x7e,0x60,0x00]
         di                             # CHECK: di             # encoding: [0x41,0x60,0x60,0x00]
+        dins      $2,$3,4,28           # CHECK: dins  $2, $3, 4, 28    # encoding: [0x7c,0x62,0xf9,0x07]
+        dinsm     $2,$3,4,34           # CHECK: dinsm $2, $3, 4, 34    # encoding: [0x7c,0x62,0x29,0x05]
+        dinsu     $2,$3,34,16          # CHECK: dinsu $2, $3, 34, 16   # encoding: [0x7c,0x62,0x88,0x86]
         ddiv      $zero,$k0,$s3
         ddivu     $zero,$s0,$s1
         div       $zero,$25,$11
@@ -131,6 +137,8 @@ a:
         dsll      $zero,18             # CHECK: dsll $zero, $zero, 18       # encoding: [0x00,0x00,0x04,0xb8]
         dsll      $zero,$s4,18         # CHECK: dsll $zero, $20, 18         # encoding: [0x00,0x14,0x04,0xb8]
         dsll      $zero,$s4,$12        # CHECK: dsllv $zero, $20, $12       # encoding: [0x01,0x94,0x00,0x14]
+        dsll      $4, $5               # CHECK: dsllv $4, $4, $5            # encoding: [0x00,0xa4,0x20,0x14]
+        dsll      $4, $5, $5           # CHECK: dsllv $4, $5, $5            # encoding: [0x00,0xa5,0x20,0x14]
         dsll32    $zero,18             # CHECK: dsll32 $zero, $zero, 18     # encoding: [0x00,0x00,0x04,0xbc]
         dsll32    $zero,$zero,18       # CHECK: dsll32 $zero, $zero, 18     # encoding: [0x00,0x00,0x04,0xbc]
         dsllv     $zero,$s4,$12        # CHECK: dsllv $zero, $20, $12       # encoding: [0x01,0x94,0x00,0x14]
@@ -143,6 +151,8 @@ a:
         dsrl      $s3,23               # CHECK: dsrl $19, $19, 23           # encoding: [0x00,0x13,0x9d,0xfa]
         dsrl      $s3,$6,23            # CHECK: dsrl $19, $6, 23            # encoding: [0x00,0x06,0x9d,0xfa]
         dsrl      $s3,$6,$s4           # CHECK: dsrlv $19, $6, $20          # encoding: [0x02,0x86,0x98,0x16]
+        dsrl      $4, $5               # CHECK: dsrlv $4, $4, $5            # encoding: [0x00,0xa4,0x20,0x16]
+        dsrl      $4, $4, $5           # CHECK: dsrlv $4, $4, $5            # encoding: [0x00,0xa4,0x20,0x16]
         dsrl32    $s3,23               # CHECK: dsrl32 $19, $19, 23         # encoding: [0x00,0x13,0x9d,0xfe]
         dsrl32    $s3,$6,23            # CHECK: dsrl32 $19, $6, 23          # encoding: [0x00,0x06,0x9d,0xfe]
         dsrlv     $s3,$6,$s4           # CHECK: dsrlv $19, $6, $20          # encoding: [0x02,0x86,0x98,0x16]

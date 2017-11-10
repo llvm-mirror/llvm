@@ -27,10 +27,11 @@ static double convertToDoubleFromString(const char *Str) {
   return F.convertToDouble();
 }
 
-static std::string convertToString(double d, unsigned Prec, unsigned Pad) {
+static std::string convertToString(double d, unsigned Prec, unsigned Pad,
+                                   bool Tr = true) {
   llvm::SmallVector<char, 100> Buffer;
   llvm::APFloat F(d);
-  F.toString(Buffer, Prec, Pad);
+  F.toString(Buffer, Prec, Pad, Tr);
   return std::string(Buffer.data(), Buffer.size());
 }
 
@@ -551,7 +552,7 @@ TEST(APFloatTest, MaxNum) {
   EXPECT_EQ(2.0, maxnum(f1, f2).convertToDouble());
   EXPECT_EQ(2.0, maxnum(f2, f1).convertToDouble());
   EXPECT_EQ(1.0, maxnum(f1, nan).convertToDouble());
-  EXPECT_EQ(1.0, minnum(nan, f1).convertToDouble());
+  EXPECT_EQ(1.0, maxnum(nan, f1).convertToDouble());
 }
 
 TEST(APFloatTest, Denormal) {
@@ -744,7 +745,7 @@ TEST(APFloatTest, fromZeroDecimalLargeExponentString) {
   EXPECT_EQ(0.0,  APFloat(APFloat::IEEEdouble(), "000.0000e1234").convertToDouble());
   EXPECT_EQ(0.0,  APFloat(APFloat::IEEEdouble(), "000.0000e-1234").convertToDouble());
 
-  EXPECT_EQ(0.0,  APFloat(APFloat::IEEEdouble(), StringRef("0e1234\02", 6)).convertToDouble());
+  EXPECT_EQ(0.0,  APFloat(APFloat::IEEEdouble(), StringRef("0e1234" "\0" "2", 6)).convertToDouble());
 }
 
 TEST(APFloatTest, fromZeroHexadecimalString) {
@@ -949,6 +950,22 @@ TEST(APFloatTest, toString) {
   ASSERT_EQ("873.18340000000001", convertToString(873.1834, 0, 1));
   ASSERT_EQ("8.7318340000000001E+2", convertToString(873.1834, 0, 0));
   ASSERT_EQ("1.7976931348623157E+308", convertToString(1.7976931348623157E+308, 0, 0));
+  ASSERT_EQ("10", convertToString(10.0, 6, 3, false));
+  ASSERT_EQ("1.000000e+01", convertToString(10.0, 6, 0, false));
+  ASSERT_EQ("10100", convertToString(1.01E+4, 5, 2, false));
+  ASSERT_EQ("1.0100e+04", convertToString(1.01E+4, 4, 2, false));
+  ASSERT_EQ("1.01000e+04", convertToString(1.01E+4, 5, 1, false));
+  ASSERT_EQ("0.0101", convertToString(1.01E-2, 5, 2, false));
+  ASSERT_EQ("0.0101", convertToString(1.01E-2, 4, 2, false));
+  ASSERT_EQ("1.01000e-02", convertToString(1.01E-2, 5, 1, false));
+  ASSERT_EQ("0.78539816339744828",
+            convertToString(0.78539816339744830961, 0, 3, false));
+  ASSERT_EQ("4.94065645841246540e-324",
+            convertToString(4.9406564584124654e-324, 0, 3, false));
+  ASSERT_EQ("873.18340000000001", convertToString(873.1834, 0, 1, false));
+  ASSERT_EQ("8.73183400000000010e+02", convertToString(873.1834, 0, 0, false));
+  ASSERT_EQ("1.79769313486231570e+308",
+            convertToString(1.7976931348623157E+308, 0, 0, false));
 }
 
 TEST(APFloatTest, toInteger) {
@@ -1042,11 +1059,11 @@ TEST(APFloatTest, StringDecimalDeath) {
 
   EXPECT_DEATH(APFloat(APFloat::IEEEdouble(), StringRef("\0", 1)), "Invalid character in significand");
   EXPECT_DEATH(APFloat(APFloat::IEEEdouble(), StringRef("1\0", 2)), "Invalid character in significand");
-  EXPECT_DEATH(APFloat(APFloat::IEEEdouble(), StringRef("1\02", 3)), "Invalid character in significand");
-  EXPECT_DEATH(APFloat(APFloat::IEEEdouble(), StringRef("1\02e1", 5)), "Invalid character in significand");
+  EXPECT_DEATH(APFloat(APFloat::IEEEdouble(), StringRef("1" "\0" "2", 3)), "Invalid character in significand");
+  EXPECT_DEATH(APFloat(APFloat::IEEEdouble(), StringRef("1" "\0" "2e1", 5)), "Invalid character in significand");
   EXPECT_DEATH(APFloat(APFloat::IEEEdouble(), StringRef("1e\0", 3)), "Invalid character in exponent");
   EXPECT_DEATH(APFloat(APFloat::IEEEdouble(), StringRef("1e1\0", 4)), "Invalid character in exponent");
-  EXPECT_DEATH(APFloat(APFloat::IEEEdouble(), StringRef("1e1\02", 5)), "Invalid character in exponent");
+  EXPECT_DEATH(APFloat(APFloat::IEEEdouble(), StringRef("1e1" "\0" "2", 5)), "Invalid character in exponent");
 
   EXPECT_DEATH(APFloat(APFloat::IEEEdouble(), "1.0f"), "Invalid character in significand");
 
@@ -1132,11 +1149,11 @@ TEST(APFloatTest, StringHexadecimalDeath) {
 
   EXPECT_DEATH(APFloat(APFloat::IEEEdouble(), StringRef("0x\0", 3)), "Invalid character in significand");
   EXPECT_DEATH(APFloat(APFloat::IEEEdouble(), StringRef("0x1\0", 4)), "Invalid character in significand");
-  EXPECT_DEATH(APFloat(APFloat::IEEEdouble(), StringRef("0x1\02", 5)), "Invalid character in significand");
-  EXPECT_DEATH(APFloat(APFloat::IEEEdouble(), StringRef("0x1\02p1", 7)), "Invalid character in significand");
+  EXPECT_DEATH(APFloat(APFloat::IEEEdouble(), StringRef("0x1" "\0" "2", 5)), "Invalid character in significand");
+  EXPECT_DEATH(APFloat(APFloat::IEEEdouble(), StringRef("0x1" "\0" "2p1", 7)), "Invalid character in significand");
   EXPECT_DEATH(APFloat(APFloat::IEEEdouble(), StringRef("0x1p\0", 5)), "Invalid character in exponent");
   EXPECT_DEATH(APFloat(APFloat::IEEEdouble(), StringRef("0x1p1\0", 6)), "Invalid character in exponent");
-  EXPECT_DEATH(APFloat(APFloat::IEEEdouble(), StringRef("0x1p1\02", 7)), "Invalid character in exponent");
+  EXPECT_DEATH(APFloat(APFloat::IEEEdouble(), StringRef("0x1p1" "\0" "2", 7)), "Invalid character in exponent");
 
   EXPECT_DEATH(APFloat(APFloat::IEEEdouble(), "0x1p0f"), "Invalid character in exponent");
 
@@ -1332,6 +1349,24 @@ TEST(APFloatTest, isInteger) {
   EXPECT_TRUE(T.isInteger());
 }
 
+TEST(DoubleAPFloatTest, isInteger) {
+  APFloat F1(-0.0);
+  APFloat F2(-0.0);
+  llvm::detail::DoubleAPFloat T(APFloat::PPCDoubleDouble(), std::move(F1),
+                                std::move(F2));
+  EXPECT_TRUE(T.isInteger());
+  APFloat F3(3.14159);
+  APFloat F4(-0.0);
+  llvm::detail::DoubleAPFloat T2(APFloat::PPCDoubleDouble(), std::move(F3),
+                                std::move(F4));
+  EXPECT_FALSE(T2.isInteger());
+  APFloat F5(-0.0);
+  APFloat F6(3.14159);
+  llvm::detail::DoubleAPFloat T3(APFloat::PPCDoubleDouble(), std::move(F5),
+                                std::move(F6));
+  EXPECT_FALSE(T3.isInteger());
+}
+
 TEST(APFloatTest, getLargest) {
   EXPECT_EQ(3.402823466e+38f, APFloat::getLargest(APFloat::IEEEsingle()).convertToFloat());
   EXPECT_EQ(1.7976931348623158e+308, APFloat::getLargest(APFloat::IEEEdouble()).convertToDouble());
@@ -1420,16 +1455,16 @@ TEST(APFloatTest, getZero) {
   const unsigned NumGetZeroTests = 12;
   for (unsigned i = 0; i < NumGetZeroTests; ++i) {
     APFloat test = APFloat::getZero(*GetZeroTest[i].semantics,
-				    GetZeroTest[i].sign);
+                                    GetZeroTest[i].sign);
     const char *pattern = GetZeroTest[i].sign? "-0x0p+0" : "0x0p+0";
     APFloat expected = APFloat(*GetZeroTest[i].semantics,
-			       pattern);
+                               pattern);
     EXPECT_TRUE(test.isZero());
     EXPECT_TRUE(GetZeroTest[i].sign? test.isNegative() : !test.isNegative());
     EXPECT_TRUE(test.bitwiseIsEqual(expected));
     for (unsigned j = 0, je = GetZeroTest[i].bitPatternLength; j < je; ++j) {
       EXPECT_EQ(GetZeroTest[i].bitPattern[j],
-		test.bitcastToAPInt().getRawData()[j]);
+                test.bitcastToAPInt().getRawData()[j]);
     }
   }
 }
@@ -3190,6 +3225,84 @@ TEST(APFloatTest, frexp) {
   Frac = frexp(APFloat(APFloat::IEEEdouble(), "0x1.c60f120d9f87cp+51"), Exp, RM);
   EXPECT_EQ(52, Exp);
   EXPECT_TRUE(APFloat(APFloat::IEEEdouble(), "0x1.c60f120d9f87cp-1").bitwiseIsEqual(Frac));
+}
+
+TEST(APFloatTest, mod) {
+  {
+    APFloat f1(APFloat::IEEEdouble(), "1.5");
+    APFloat f2(APFloat::IEEEdouble(), "1.0");
+    APFloat expected(APFloat::IEEEdouble(), "0.5");
+    EXPECT_EQ(f1.mod(f2), APFloat::opOK);
+    EXPECT_TRUE(f1.bitwiseIsEqual(expected));
+  }
+  {
+    APFloat f1(APFloat::IEEEdouble(), "0.5");
+    APFloat f2(APFloat::IEEEdouble(), "1.0");
+    APFloat expected(APFloat::IEEEdouble(), "0.5");
+    EXPECT_EQ(f1.mod(f2), APFloat::opOK);
+    EXPECT_TRUE(f1.bitwiseIsEqual(expected));
+  }
+  {
+    APFloat f1(APFloat::IEEEdouble(), "0x1.3333333333333p-2"); // 0.3
+    APFloat f2(APFloat::IEEEdouble(), "0x1.47ae147ae147bp-7"); // 0.01
+    APFloat expected(APFloat::IEEEdouble(),
+                     "0x1.47ae147ae1471p-7"); // 0.009999999999999983
+    EXPECT_EQ(f1.mod(f2), APFloat::opOK);
+    EXPECT_TRUE(f1.bitwiseIsEqual(expected));
+  }
+  {
+    APFloat f1(APFloat::IEEEdouble(), "0x1p64"); // 1.8446744073709552e19
+    APFloat f2(APFloat::IEEEdouble(), "1.5");
+    APFloat expected(APFloat::IEEEdouble(), "1.0");
+    EXPECT_EQ(f1.mod(f2), APFloat::opOK);
+    EXPECT_TRUE(f1.bitwiseIsEqual(expected));
+  }
+  {
+    APFloat f1(APFloat::IEEEdouble(), "0x1p1000");
+    APFloat f2(APFloat::IEEEdouble(), "0x1p-1000");
+    APFloat expected(APFloat::IEEEdouble(), "0.0");
+    EXPECT_EQ(f1.mod(f2), APFloat::opOK);
+    EXPECT_TRUE(f1.bitwiseIsEqual(expected));
+  }
+  {
+    APFloat f1(APFloat::IEEEdouble(), "0.0");
+    APFloat f2(APFloat::IEEEdouble(), "1.0");
+    APFloat expected(APFloat::IEEEdouble(), "0.0");
+    EXPECT_EQ(f1.mod(f2), APFloat::opOK);
+    EXPECT_TRUE(f1.bitwiseIsEqual(expected));
+  }
+  {
+    APFloat f1(APFloat::IEEEdouble(), "1.0");
+    APFloat f2(APFloat::IEEEdouble(), "0.0");
+    EXPECT_EQ(f1.mod(f2), APFloat::opInvalidOp);
+    EXPECT_TRUE(f1.isNaN());
+  }
+  {
+    APFloat f1(APFloat::IEEEdouble(), "0.0");
+    APFloat f2(APFloat::IEEEdouble(), "0.0");
+    EXPECT_EQ(f1.mod(f2), APFloat::opInvalidOp);
+    EXPECT_TRUE(f1.isNaN());
+  }
+  {
+    APFloat f1 = APFloat::getInf(APFloat::IEEEdouble(), false);
+    APFloat f2(APFloat::IEEEdouble(), "1.0");
+    EXPECT_EQ(f1.mod(f2), APFloat::opInvalidOp);
+    EXPECT_TRUE(f1.isNaN());
+  }
+  {
+    APFloat f1(APFloat::IEEEdouble(), "-4.0");
+    APFloat f2(APFloat::IEEEdouble(), "-2.0");
+    APFloat expected(APFloat::IEEEdouble(), "-0.0");
+    EXPECT_EQ(f1.mod(f2), APFloat::opOK);
+    EXPECT_TRUE(f1.bitwiseIsEqual(expected));
+  }
+  {
+    APFloat f1(APFloat::IEEEdouble(), "-4.0");
+    APFloat f2(APFloat::IEEEdouble(), "2.0");
+    APFloat expected(APFloat::IEEEdouble(), "-0.0");
+    EXPECT_EQ(f1.mod(f2), APFloat::opOK);
+    EXPECT_TRUE(f1.bitwiseIsEqual(expected));
+  }
 }
 
 TEST(APFloatTest, PPCDoubleDoubleAddSpecial) {

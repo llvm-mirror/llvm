@@ -16,11 +16,13 @@
 #define LLVM_LIB_TARGET_AMDGPU_SIREGISTERINFO_H
 
 #include "AMDGPURegisterInfo.h"
+#include "MCTargetDesc/AMDGPUMCTargetDesc.h"
 #include "SIDefines.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 
 namespace llvm {
 
+class LiveIntervals;
 class MachineRegisterInfo;
 class SISubtarget;
 class SIMachineFunctionInfo;
@@ -57,7 +59,22 @@ public:
   unsigned reservedPrivateSegmentWaveByteOffsetReg(
     const MachineFunction &MF) const;
 
+  unsigned reservedStackPtrOffsetReg(const MachineFunction &MF) const;
+
   BitVector getReservedRegs(const MachineFunction &MF) const override;
+
+  const MCPhysReg *getCalleeSavedRegs(const MachineFunction *MF) const override;
+  const MCPhysReg *getCalleeSavedRegsViaCopy(const MachineFunction *MF) const;
+  const uint32_t *getCallPreservedMask(const MachineFunction &MF,
+                                       CallingConv::ID) const override;
+
+  // Stack access is very expensive. CSRs are also the high registers, and we
+  // want to minimize the number of used registers.
+  unsigned getCSRFirstUseCost() const override {
+    return 100;
+  }
+
+  unsigned getFrameRegister(const MachineFunction &MF) const override;
 
   bool requiresRegisterScavenging(const MachineFunction &Fn) const override;
 
@@ -102,6 +119,8 @@ public:
 
   bool eliminateSGPRToVGPRSpillFrameIndex(MachineBasicBlock::iterator MI,
                                           int FI, RegScavenger *RS) const;
+
+  StringRef getRegAsmName(unsigned Reg) const override;
 
   unsigned getHWRegIndex(unsigned Reg) const {
     return getEncodingValue(Reg) & 0xff;
@@ -168,30 +187,6 @@ public:
            OpType <= AMDGPU::OPERAND_SRC_LAST;
   }
 
-  enum PreloadedValue {
-    // SGPRS:
-    PRIVATE_SEGMENT_BUFFER = 0,
-    DISPATCH_PTR        =  1,
-    QUEUE_PTR           =  2,
-    KERNARG_SEGMENT_PTR =  3,
-    DISPATCH_ID         =  4,
-    FLAT_SCRATCH_INIT   =  5,
-    WORKGROUP_ID_X      = 10,
-    WORKGROUP_ID_Y      = 11,
-    WORKGROUP_ID_Z      = 12,
-    PRIVATE_SEGMENT_WAVE_BYTE_OFFSET = 14,
-
-    // VGPRS:
-    FIRST_VGPR_VALUE    = 15,
-    WORKITEM_ID_X       = FIRST_VGPR_VALUE,
-    WORKITEM_ID_Y       = 16,
-    WORKITEM_ID_Z       = 17
-  };
-
-  /// \brief Returns the physical register that \p Value is stored in.
-  unsigned getPreloadedValue(const MachineFunction &MF,
-                             enum PreloadedValue Value) const;
-
   unsigned findUnusedRegister(const MachineRegisterInfo &MRI,
                               const TargetRegisterClass *RC,
                               const MachineFunction &MF) const;
@@ -218,7 +213,8 @@ public:
                       unsigned SubReg,
                       const TargetRegisterClass *DstRC,
                       unsigned DstSubReg,
-                      const TargetRegisterClass *NewRC) const override;
+                      const TargetRegisterClass *NewRC,
+                      LiveIntervals &LIS) const override;
 
   unsigned getRegPressureLimit(const TargetRegisterClass *RC,
                                MachineFunction &MF) const override;
@@ -227,6 +223,11 @@ public:
                                   unsigned Idx) const override;
 
   const int *getRegUnitPressureSets(unsigned RegUnit) const override;
+
+  unsigned getReturnAddressReg(const MachineFunction &MF) const {
+    // Not a callee saved register.
+    return AMDGPU::SGPR30_SGPR31;
+  }
 
 private:
   void buildSpillLoadStore(MachineBasicBlock::iterator MI,

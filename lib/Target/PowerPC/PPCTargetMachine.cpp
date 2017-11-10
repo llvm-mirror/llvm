@@ -11,11 +11,11 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "PPCTargetMachine.h"
 #include "MCTargetDesc/PPCMCTargetDesc.h"
 #include "PPC.h"
 #include "PPCSubtarget.h"
 #include "PPCTargetObjectFile.h"
-#include "PPCTargetMachine.h"
 #include "PPCTargetTransformInfo.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
@@ -40,6 +40,10 @@
 
 using namespace llvm;
 
+
+static cl::opt<bool>
+    EnableBranchCoalescing("enable-ppc-branch-coalesce", cl::Hidden,
+                           cl::desc("enable coalescing of duplicate branches for PPC"));
 static cl::
 opt<bool> DisableCTRLoops("disable-ppc-ctrloops", cl::Hidden,
                         cl::desc("Disable CTR loops for PPC"));
@@ -86,13 +90,14 @@ EnableMachineCombinerPass("ppc-machine-combiner",
 
 extern "C" void LLVMInitializePowerPCTarget() {
   // Register the targets
-  RegisterTargetMachine<PPC32TargetMachine> A(getThePPC32Target());
-  RegisterTargetMachine<PPC64TargetMachine> B(getThePPC64Target());
-  RegisterTargetMachine<PPC64TargetMachine> C(getThePPC64LETarget());
+  RegisterTargetMachine<PPCTargetMachine> A(getThePPC32Target());
+  RegisterTargetMachine<PPCTargetMachine> B(getThePPC64Target());
+  RegisterTargetMachine<PPCTargetMachine> C(getThePPC64LETarget());
 
   PassRegistry &PR = *PassRegistry::getPassRegistry();
   initializePPCBoolRetToIntPass(PR);
   initializePPCExpandISELPass(PR);
+  initializePPCTLSDynamicCallPass(PR);
 }
 
 /// Return the datalayout string of a subtarget.
@@ -177,32 +182,45 @@ static PPCTargetMachine::PPCABI computeTargetABI(const Triple &TT,
   assert(Options.MCOptions.getABIName().empty() &&
          "Unknown target-abi option!");
 
-  if (!TT.isMacOSX()) {
-    switch (TT.getArch()) {
-    case Triple::ppc64le:
-      return PPCTargetMachine::PPC_ABI_ELFv2;
-    case Triple::ppc64:
-      return PPCTargetMachine::PPC_ABI_ELFv1;
-    default:
-      // Fallthrough.
-      ;
-    }
+  if (TT.isMacOSX())
+    return PPCTargetMachine::PPC_ABI_UNKNOWN;
+
+  switch (TT.getArch()) {
+  case Triple::ppc64le:
+    return PPCTargetMachine::PPC_ABI_ELFv2;
+  case Triple::ppc64:
+    return PPCTargetMachine::PPC_ABI_ELFv1;
+  default:
+    return PPCTargetMachine::PPC_ABI_UNKNOWN;
   }
-  return PPCTargetMachine::PPC_ABI_UNKNOWN;
 }
 
 static Reloc::Model getEffectiveRelocModel(const Triple &TT,
                                            Optional<Reloc::Model> RM) {
-  if (!RM.hasValue()) {
-    if (TT.getArch() == Triple::ppc64 || TT.getArch() == Triple::ppc64le) {
-      if (!TT.isOSBinFormatMachO() && !TT.isMacOSX())
-        return Reloc::PIC_;
-    }
-    if (TT.isOSDarwin())
-      return Reloc::DynamicNoPIC;
-    return Reloc::Static;
-  }
-  return *RM;
+  if (RM.hasValue())
+    return *RM;
+
+  // Darwin defaults to dynamic-no-pic.
+  if (TT.isOSDarwin())
+    return Reloc::DynamicNoPIC;
+
+  // Non-darwin 64-bit platforms are PIC by default.
+  if (TT.getArch() == Triple::ppc64 || TT.getArch() == Triple::ppc64le)
+    return Reloc::PIC_;
+
+  // 32-bit is static by default.
+  return Reloc::Static;
+}
+
+static CodeModel::Model getEffectiveCodeModel(const Triple &TT,
+                                              Optional<CodeModel::Model> CM,
+                                              bool JIT) {
+  if (CM)
+    return *CM;
+  if (!TT.isOSDarwin() && !JIT &&
+      (TT.getArch() == Triple::ppc64 || TT.getArch() == Triple::ppc64le))
+    return CodeModel::Medium;
+  return CodeModel::Small;
 }
 
 // The FeatureString here is a little subtle. We are modifying the feature
@@ -213,38 +231,18 @@ PPCTargetMachine::PPCTargetMachine(const Target &T, const Triple &TT,
                                    StringRef CPU, StringRef FS,
                                    const TargetOptions &Options,
                                    Optional<Reloc::Model> RM,
-                                   CodeModel::Model CM, CodeGenOpt::Level OL)
+                                   Optional<CodeModel::Model> CM,
+                                   CodeGenOpt::Level OL, bool JIT)
     : LLVMTargetMachine(T, getDataLayoutString(TT), TT, CPU,
                         computeFSAdditions(FS, OL, TT), Options,
-                        getEffectiveRelocModel(TT, RM), CM, OL),
+                        getEffectiveRelocModel(TT, RM),
+                        getEffectiveCodeModel(TT, CM, JIT), OL),
       TLOF(createTLOF(getTargetTriple())),
-      TargetABI(computeTargetABI(TT, Options)),
-      Subtarget(TargetTriple, CPU, computeFSAdditions(FS, OL, TT), *this) {
-
+      TargetABI(computeTargetABI(TT, Options)) {
   initAsmInfo();
 }
 
 PPCTargetMachine::~PPCTargetMachine() = default;
-
-void PPC32TargetMachine::anchor() {}
-
-PPC32TargetMachine::PPC32TargetMachine(const Target &T, const Triple &TT,
-                                       StringRef CPU, StringRef FS,
-                                       const TargetOptions &Options,
-                                       Optional<Reloc::Model> RM,
-                                       CodeModel::Model CM,
-                                       CodeGenOpt::Level OL)
-    : PPCTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL) {}
-
-void PPC64TargetMachine::anchor() {}
-
-PPC64TargetMachine::PPC64TargetMachine(const Target &T, const Triple &TT,
-                                       StringRef CPU, StringRef FS,
-                                       const TargetOptions &Options,
-                                       Optional<Reloc::Model> RM,
-                                       CodeModel::Model CM,
-                                       CodeGenOpt::Level OL)
-    : PPCTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL) {}
 
 const PPCSubtarget *
 PPCTargetMachine::getSubtargetImpl(const Function &F) const {
@@ -298,7 +296,7 @@ namespace {
 /// PPC Code Generator Pass Configuration Options.
 class PPCPassConfig : public TargetPassConfig {
 public:
-  PPCPassConfig(PPCTargetMachine *TM, PassManagerBase &PM)
+  PPCPassConfig(PPCTargetMachine &TM, PassManagerBase &PM)
     : TargetPassConfig(TM, PM) {}
 
   PPCTargetMachine &getPPCTargetMachine() const {
@@ -318,13 +316,13 @@ public:
 } // end anonymous namespace
 
 TargetPassConfig *PPCTargetMachine::createPassConfig(PassManagerBase &PM) {
-  return new PPCPassConfig(this, PM);
+  return new PPCPassConfig(*this, PM);
 }
 
 void PPCPassConfig::addIRPasses() {
   if (TM->getOptLevel() != CodeGenOpt::None)
     addPass(createPPCBoolRetToIntPass());
-  addPass(createAtomicExpandPass(&getPPCTargetMachine()));
+  addPass(createAtomicExpandPass());
 
   // For the BG/Q (or if explicitly requested), add explicit data prefetch
   // intrinsics.
@@ -356,7 +354,7 @@ bool PPCPassConfig::addPreISel() {
     addPass(createPPCLoopPreIncPrepPass(getPPCTargetMachine()));
 
   if (!DisableCTRLoops && getOptLevel() != CodeGenOpt::None)
-    addPass(createPPCCTRLoops(getPPCTargetMachine()));
+    addPass(createPPCCTRLoops());
 
   return false;
 }
@@ -372,7 +370,7 @@ bool PPCPassConfig::addILPOpts() {
 
 bool PPCPassConfig::addInstSelector() {
   // Install an instruction selector.
-  addPass(createPPCISelDag(getPPCTargetMachine()));
+  addPass(createPPCISelDag(getPPCTargetMachine(), getOptLevel()));
 
 #ifndef NDEBUG
   if (!DisableCTRLoops && getOptLevel() != CodeGenOpt::None)
@@ -384,6 +382,10 @@ bool PPCPassConfig::addInstSelector() {
 }
 
 void PPCPassConfig::addMachineSSAOptimization() {
+  // PPCBranchCoalescingPass need to be done before machine sinking
+  // since it merges empty blocks.
+  if (EnableBranchCoalescing && getOptLevel() != CodeGenOpt::None)
+    addPass(createPPCBranchCoalescingPass());
   TargetPassConfig::addMachineSSAOptimization();
   // For little endian, remove where possible the vector swap instructions
   // introduced at code generation to normalize vector element order.
@@ -408,7 +410,7 @@ void PPCPassConfig::addPreRegAlloc() {
   // FIXME: We probably don't need to run these for -fPIE.
   if (getPPCTargetMachine().isPositionIndependent()) {
     // FIXME: LiveVariables should not be necessary here!
-    // PPCTLSDYnamicCallPass uses LiveIntervals which previously dependet on
+    // PPCTLSDynamicCallPass uses LiveIntervals which previously dependent on
     // LiveVariables. This (unnecessary) dependency has been removed now,
     // however a stage-2 clang build fails without LiveVariables computed here.
     addPass(&LiveVariablesID, false);

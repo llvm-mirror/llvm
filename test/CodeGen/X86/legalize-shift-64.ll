@@ -76,24 +76,16 @@ define <2 x i64> @test5(<2 x i64> %A, <2 x i64> %B) {
 ; CHECK-LABEL: test5:
 ; CHECK:       # BB#0:
 ; CHECK-NEXT:    pushl %ebp
-; CHECK-NEXT:  .Lcfi0:
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    pushl %ebx
-; CHECK-NEXT:  .Lcfi1:
 ; CHECK-NEXT:    .cfi_def_cfa_offset 12
 ; CHECK-NEXT:    pushl %edi
-; CHECK-NEXT:  .Lcfi2:
 ; CHECK-NEXT:    .cfi_def_cfa_offset 16
 ; CHECK-NEXT:    pushl %esi
-; CHECK-NEXT:  .Lcfi3:
 ; CHECK-NEXT:    .cfi_def_cfa_offset 20
-; CHECK-NEXT:  .Lcfi4:
 ; CHECK-NEXT:    .cfi_offset %esi, -20
-; CHECK-NEXT:  .Lcfi5:
 ; CHECK-NEXT:    .cfi_offset %edi, -16
-; CHECK-NEXT:  .Lcfi6:
 ; CHECK-NEXT:    .cfi_offset %ebx, -12
-; CHECK-NEXT:  .Lcfi7:
 ; CHECK-NEXT:    .cfi_offset %ebp, -8
 ; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; CHECK-NEXT:    movb {{[0-9]+}}(%esp), %cl
@@ -138,18 +130,14 @@ define i32 @test6() {
 ; CHECK-LABEL: test6:
 ; CHECK:       # BB#0:
 ; CHECK-NEXT:    pushl %ebp
-; CHECK-NEXT:  .Lcfi8:
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
-; CHECK-NEXT:  .Lcfi9:
 ; CHECK-NEXT:    .cfi_offset %ebp, -8
 ; CHECK-NEXT:    movl %esp, %ebp
-; CHECK-NEXT:  .Lcfi10:
 ; CHECK-NEXT:    .cfi_def_cfa_register %ebp
 ; CHECK-NEXT:    andl $-8, %esp
 ; CHECK-NEXT:    subl $16, %esp
 ; CHECK-NEXT:    movl $1, {{[0-9]+}}(%esp)
-; CHECK-NEXT:    movl $0, {{[0-9]+}}(%esp)
-; CHECK-NEXT:    movl $1, (%esp)
+; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; CHECK-NEXT:    movl $1, %eax
 ; CHECK-NEXT:    xorl %ecx, %ecx
 ; CHECK-NEXT:    shldl $32, %eax, %ecx
@@ -175,9 +163,8 @@ define i32 @test6() {
 ; CHECK-NEXT:    retl
   %x = alloca i32, align 4
   %t = alloca i64, align 8
-  store i32 1, i32* %x, align 4
-  store i64 1, i64* %t, align 8  ;; DEAD
-  %load = load i32, i32* %x, align 4
+  store volatile i32 1, i32* %x, align 4
+  %load = load volatile i32, i32* %x, align 4
   %shl = shl i32 %load, 8
   %add = add i32 %shl, -224
   %sh_prom = zext i32 %add to i64

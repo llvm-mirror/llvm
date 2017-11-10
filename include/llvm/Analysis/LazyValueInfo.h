@@ -93,12 +93,25 @@ public:
   Constant *getConstantOnEdge(Value *V, BasicBlock *FromBB, BasicBlock *ToBB,
                               Instruction *CxtI = nullptr);
 
+  /// Return the ConstantRage constraint that is known to hold for the
+  /// specified value on the specified edge. This may be only be called
+  /// on integer-typed Values.
+  ConstantRange getConstantRangeOnEdge(Value *V, BasicBlock *FromBB,
+                                       BasicBlock *ToBB,
+                                       Instruction *CxtI = nullptr);
+
   /// Inform the analysis cache that we have threaded an edge from
   /// PredBB to OldSucc to be from PredBB to NewSucc instead.
   void threadEdge(BasicBlock *PredBB, BasicBlock *OldSucc, BasicBlock *NewSucc);
 
   /// Inform the analysis cache that we have erased a block.
   void eraseBlock(BasicBlock *BB);
+
+  /// Print the \LazyValueInfo Analysis.
+  /// We pass in the DTree that is required for identifying which basic blocks
+  /// we can solve/print for, in the LVIPrinter. The DT is optional
+  /// in LVI, so we need to pass it here as an argument.
+  void printLVI(Function &F, DominatorTree &DTree, raw_ostream &OS);
 
   // For old PM pass. Delete once LazyValueInfoWrapperPass is gone.
   void releaseMemory();

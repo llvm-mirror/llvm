@@ -13,18 +13,18 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/Support/SourceMgr.h"
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/ErrorOr.h"
 #include "llvm/Support/Locale.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/SMLoc.h"
-#include "llvm/Support/SourceMgr.h"
+#include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
@@ -51,9 +51,7 @@ static LineNoCacheTy *getCache(void *Ptr) {
 }
 
 SourceMgr::~SourceMgr() {
-  // Delete the line # cache if allocated.
-  if (LineNoCacheTy *Cache = getCache(LineNoCache))
-    delete Cache;
+  delete getCache(LineNoCache);
 }
 
 unsigned SourceMgr::AddIncludeFile(const std::string &Filename,
@@ -385,6 +383,11 @@ void SMDiagnostic::print(const char *ProgName, raw_ostream &S, bool ShowColors,
       if (ShowColors)
         S.changeColor(raw_ostream::BLACK, true);
       S << "note: ";
+      break;
+    case SourceMgr::DK_Remark:
+      if (ShowColors)
+        S.changeColor(raw_ostream::BLUE, true);
+      S << "remark: ";
       break;
     }
 

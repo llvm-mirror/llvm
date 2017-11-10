@@ -14,15 +14,27 @@
 #ifndef LLVM_ANALYSIS_SCALAREVOLUTIONEXPRESSIONS_H
 #define LLVM_ANALYSIS_SCALAREVOLUTIONEXPRESSIONS_H
 
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/FoldingSet.h"
 #include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/Analysis/ScalarEvolution.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/Value.h"
+#include "llvm/IR/ValueHandle.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/ErrorHandling.h"
+#include <cassert>
+#include <cstddef>
 
 namespace llvm {
-  class ConstantInt;
-  class ConstantRange;
-  class DominatorTree;
+
+class APInt;
+class Constant;
+class ConstantRange;
+class Loop;
+class Type;
 
   enum SCEVTypes {
     // These should be ordered in terms of increasing complexity to make the
@@ -37,8 +49,10 @@ namespace llvm {
     friend class ScalarEvolution;
 
     ConstantInt *V;
+
     SCEVConstant(const FoldingSetNodeIDRef ID, ConstantInt *v) :
       SCEV(ID, scConstant), V(v) {}
+
   public:
     ConstantInt *getValue() const { return V; }
     const APInt &getAPInt() const { return getValue()->getValue(); }
@@ -46,7 +60,7 @@ namespace llvm {
     Type *getType() const { return V->getType(); }
 
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
-    static inline bool classof(const SCEV *S) {
+    static bool classof(const SCEV *S) {
       return S->getSCEVType() == scConstant;
     }
   };
@@ -65,7 +79,7 @@ namespace llvm {
     Type *getType() const { return Ty; }
 
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
-    static inline bool classof(const SCEV *S) {
+    static bool classof(const SCEV *S) {
       return S->getSCEVType() == scTruncate ||
              S->getSCEVType() == scZeroExtend ||
              S->getSCEVType() == scSignExtend;
@@ -82,7 +96,7 @@ namespace llvm {
 
   public:
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
-    static inline bool classof(const SCEV *S) {
+    static bool classof(const SCEV *S) {
       return S->getSCEVType() == scTruncate;
     }
   };
@@ -97,7 +111,7 @@ namespace llvm {
 
   public:
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
-    static inline bool classof(const SCEV *S) {
+    static bool classof(const SCEV *S) {
       return S->getSCEVType() == scZeroExtend;
     }
   };
@@ -112,11 +126,10 @@ namespace llvm {
 
   public:
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
-    static inline bool classof(const SCEV *S) {
+    static bool classof(const SCEV *S) {
       return S->getSCEVType() == scSignExtend;
     }
   };
-
 
   /// This node is a base class providing common functionality for
   /// n'ary operators.
@@ -135,13 +148,15 @@ namespace llvm {
 
   public:
     size_t getNumOperands() const { return NumOperands; }
+
     const SCEV *getOperand(unsigned i) const {
       assert(i < NumOperands && "Operand index out of range!");
       return Operands[i];
     }
 
-    typedef const SCEV *const *op_iterator;
-    typedef iterator_range<op_iterator> op_range;
+    using op_iterator = const SCEV *const *;
+    using op_range = iterator_range<op_iterator>;
+
     op_iterator op_begin() const { return Operands; }
     op_iterator op_end() const { return Operands + NumOperands; }
     op_range operands() const {
@@ -167,7 +182,7 @@ namespace llvm {
     }
 
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
-    static inline bool classof(const SCEV *S) {
+    static bool classof(const SCEV *S) {
       return S->getSCEVType() == scAddExpr ||
              S->getSCEVType() == scMulExpr ||
              S->getSCEVType() == scSMaxExpr ||
@@ -185,7 +200,7 @@ namespace llvm {
 
   public:
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
-    static inline bool classof(const SCEV *S) {
+    static bool classof(const SCEV *S) {
       return S->getSCEVType() == scAddExpr ||
              S->getSCEVType() == scMulExpr ||
              S->getSCEVType() == scSMaxExpr ||
@@ -198,15 +213,13 @@ namespace llvm {
     }
   };
 
-
   /// This node represents an addition of some number of SCEVs.
   class SCEVAddExpr : public SCEVCommutativeExpr {
     friend class ScalarEvolution;
 
     SCEVAddExpr(const FoldingSetNodeIDRef ID,
                 const SCEV *const *O, size_t N)
-      : SCEVCommutativeExpr(ID, scAddExpr, O, N) {
-    }
+      : SCEVCommutativeExpr(ID, scAddExpr, O, N) {}
 
   public:
     Type *getType() const {
@@ -217,11 +230,10 @@ namespace llvm {
     }
 
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
-    static inline bool classof(const SCEV *S) {
+    static bool classof(const SCEV *S) {
       return S->getSCEVType() == scAddExpr;
     }
   };
-
 
   /// This node represents multiplication of some number of SCEVs.
   class SCEVMulExpr : public SCEVCommutativeExpr {
@@ -229,16 +241,14 @@ namespace llvm {
 
     SCEVMulExpr(const FoldingSetNodeIDRef ID,
                 const SCEV *const *O, size_t N)
-      : SCEVCommutativeExpr(ID, scMulExpr, O, N) {
-    }
+      : SCEVCommutativeExpr(ID, scMulExpr, O, N) {}
 
   public:
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
-    static inline bool classof(const SCEV *S) {
+    static bool classof(const SCEV *S) {
       return S->getSCEVType() == scMulExpr;
     }
   };
-
 
   /// This class represents a binary unsigned division operation.
   class SCEVUDivExpr : public SCEV {
@@ -246,6 +256,7 @@ namespace llvm {
 
     const SCEV *LHS;
     const SCEV *RHS;
+
     SCEVUDivExpr(const FoldingSetNodeIDRef ID, const SCEV *lhs, const SCEV *rhs)
       : SCEV(ID, scUDivExpr), LHS(lhs), RHS(rhs) {}
 
@@ -263,11 +274,10 @@ namespace llvm {
     }
 
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
-    static inline bool classof(const SCEV *S) {
+    static bool classof(const SCEV *S) {
       return S->getSCEVType() == scUDivExpr;
     }
   };
-
 
   /// This node represents a polynomial recurrence on the trip count
   /// of the specified loop.  This is the primary focus of the
@@ -345,7 +355,7 @@ namespace llvm {
     }
 
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
-    static inline bool classof(const SCEV *S) {
+    static bool classof(const SCEV *S) {
       return S->getSCEVType() == scAddRecExpr;
     }
   };
@@ -363,11 +373,10 @@ namespace llvm {
 
   public:
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
-    static inline bool classof(const SCEV *S) {
+    static bool classof(const SCEV *S) {
       return S->getSCEVType() == scSMaxExpr;
     }
   };
-
 
   /// This class represents an unsigned maximum selection.
   class SCEVUMaxExpr : public SCEVCommutativeExpr {
@@ -382,7 +391,7 @@ namespace llvm {
 
   public:
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
-    static inline bool classof(const SCEV *S) {
+    static bool classof(const SCEV *S) {
       return S->getSCEVType() == scUMaxExpr;
     }
   };
@@ -392,10 +401,6 @@ namespace llvm {
   /// "bottom" value for the analysis.
   class SCEVUnknown final : public SCEV, private CallbackVH {
     friend class ScalarEvolution;
-
-    // Implement CallbackVH.
-    void deleted() override;
-    void allUsesReplacedWith(Value *New) override;
 
     /// The parent ScalarEvolution value. This is used to update the
     /// parent's maps when the value associated with a SCEVUnknown is
@@ -409,6 +414,10 @@ namespace llvm {
     SCEVUnknown(const FoldingSetNodeIDRef ID, Value *V,
                 ScalarEvolution *se, SCEVUnknown *next) :
       SCEV(ID, scUnknown), CallbackVH(V), SE(se), Next(next) {}
+
+    // Implement CallbackVH.
+    void deleted() override;
+    void allUsesReplacedWith(Value *New) override;
 
   public:
     Value *getValue() const { return getValPtr(); }
@@ -428,7 +437,7 @@ namespace llvm {
     Type *getType() const { return getValPtr()->getType(); }
 
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
-    static inline bool classof(const SCEV *S) {
+    static bool classof(const SCEV *S) {
       return S->getSCEVType() == scUnknown;
     }
   };
@@ -490,6 +499,7 @@ namespace llvm {
       if (Visited.insert(S).second && Visitor.follow(S))
         Worklist.push_back(S);
     }
+
   public:
     SCEVTraversal(SV& V): Visitor(V) {}
 
@@ -595,58 +605,82 @@ namespace llvm {
 
     const SCEV *visitTruncateExpr(const SCEVTruncateExpr *Expr) {
       const SCEV *Operand = ((SC*)this)->visit(Expr->getOperand());
-      return SE.getTruncateExpr(Operand, Expr->getType());
+      return Operand == Expr->getOperand()
+                 ? Expr
+                 : SE.getTruncateExpr(Operand, Expr->getType());
     }
 
     const SCEV *visitZeroExtendExpr(const SCEVZeroExtendExpr *Expr) {
       const SCEV *Operand = ((SC*)this)->visit(Expr->getOperand());
-      return SE.getZeroExtendExpr(Operand, Expr->getType());
+      return Operand == Expr->getOperand()
+                 ? Expr
+                 : SE.getZeroExtendExpr(Operand, Expr->getType());
     }
 
     const SCEV *visitSignExtendExpr(const SCEVSignExtendExpr *Expr) {
       const SCEV *Operand = ((SC*)this)->visit(Expr->getOperand());
-      return SE.getSignExtendExpr(Operand, Expr->getType());
+      return Operand == Expr->getOperand()
+                 ? Expr
+                 : SE.getSignExtendExpr(Operand, Expr->getType());
     }
 
     const SCEV *visitAddExpr(const SCEVAddExpr *Expr) {
       SmallVector<const SCEV *, 2> Operands;
-      for (int i = 0, e = Expr->getNumOperands(); i < e; ++i)
-        Operands.push_back(((SC*)this)->visit(Expr->getOperand(i)));
-      return SE.getAddExpr(Operands);
+      bool Changed = false;
+      for (auto *Op : Expr->operands()) {
+        Operands.push_back(((SC*)this)->visit(Op));
+        Changed |= Op != Operands.back();
+      }
+      return !Changed ? Expr : SE.getAddExpr(Operands);
     }
 
     const SCEV *visitMulExpr(const SCEVMulExpr *Expr) {
       SmallVector<const SCEV *, 2> Operands;
-      for (int i = 0, e = Expr->getNumOperands(); i < e; ++i)
-        Operands.push_back(((SC*)this)->visit(Expr->getOperand(i)));
-      return SE.getMulExpr(Operands);
+      bool Changed = false;
+      for (auto *Op : Expr->operands()) {
+        Operands.push_back(((SC*)this)->visit(Op));
+        Changed |= Op != Operands.back();
+      }
+      return !Changed ? Expr : SE.getMulExpr(Operands);
     }
 
     const SCEV *visitUDivExpr(const SCEVUDivExpr *Expr) {
-      return SE.getUDivExpr(((SC*)this)->visit(Expr->getLHS()),
-                            ((SC*)this)->visit(Expr->getRHS()));
+      auto *LHS = ((SC *)this)->visit(Expr->getLHS());
+      auto *RHS = ((SC *)this)->visit(Expr->getRHS());
+      bool Changed = LHS != Expr->getLHS() || RHS != Expr->getRHS();
+      return !Changed ? Expr : SE.getUDivExpr(LHS, RHS);
     }
 
     const SCEV *visitAddRecExpr(const SCEVAddRecExpr *Expr) {
       SmallVector<const SCEV *, 2> Operands;
-      for (int i = 0, e = Expr->getNumOperands(); i < e; ++i)
-        Operands.push_back(((SC*)this)->visit(Expr->getOperand(i)));
-      return SE.getAddRecExpr(Operands, Expr->getLoop(),
-                              Expr->getNoWrapFlags());
+      bool Changed = false;
+      for (auto *Op : Expr->operands()) {
+        Operands.push_back(((SC*)this)->visit(Op));
+        Changed |= Op != Operands.back();
+      }
+      return !Changed ? Expr
+                      : SE.getAddRecExpr(Operands, Expr->getLoop(),
+                                         Expr->getNoWrapFlags());
     }
 
     const SCEV *visitSMaxExpr(const SCEVSMaxExpr *Expr) {
       SmallVector<const SCEV *, 2> Operands;
-      for (int i = 0, e = Expr->getNumOperands(); i < e; ++i)
-        Operands.push_back(((SC*)this)->visit(Expr->getOperand(i)));
-      return SE.getSMaxExpr(Operands);
+      bool Changed = false;
+      for (auto *Op : Expr->operands()) {
+        Operands.push_back(((SC *)this)->visit(Op));
+        Changed |= Op != Operands.back();
+      }
+      return !Changed ? Expr : SE.getSMaxExpr(Operands);
     }
 
     const SCEV *visitUMaxExpr(const SCEVUMaxExpr *Expr) {
       SmallVector<const SCEV *, 2> Operands;
-      for (int i = 0, e = Expr->getNumOperands(); i < e; ++i)
-        Operands.push_back(((SC*)this)->visit(Expr->getOperand(i)));
-      return SE.getUMaxExpr(Operands);
+      bool Changed = false;
+      for (auto *Op : Expr->operands()) {
+        Operands.push_back(((SC*)this)->visit(Op));
+        Changed |= Op != Operands.back();
+      }
+      return !Changed ? Expr : SE.getUMaxExpr(Operands);
     }
 
     const SCEV *visitUnknown(const SCEVUnknown *Expr) {
@@ -658,7 +692,7 @@ namespace llvm {
     }
   };
 
-  typedef DenseMap<const Value*, Value*> ValueToValueMap;
+  using ValueToValueMap = DenseMap<const Value *, Value *>;
 
   /// The SCEVParameterRewriter takes a scalar evolution expression and updates
   /// the SCEVUnknown components following the Map (Value -> Value).
@@ -690,21 +724,21 @@ namespace llvm {
     bool InterpretConsts;
   };
 
-  typedef DenseMap<const Loop*, const SCEV*> LoopToScevMapT;
+  using LoopToScevMapT = DenseMap<const Loop *, const SCEV *>;
 
   /// The SCEVLoopAddRecRewriter takes a scalar evolution expression and applies
   /// the Map (Loop -> SCEV) to all AddRecExprs.
   class SCEVLoopAddRecRewriter
       : public SCEVRewriteVisitor<SCEVLoopAddRecRewriter> {
   public:
+    SCEVLoopAddRecRewriter(ScalarEvolution &SE, LoopToScevMapT &M)
+        : SCEVRewriteVisitor(SE), Map(M) {}
+
     static const SCEV *rewrite(const SCEV *Scev, LoopToScevMapT &Map,
                                ScalarEvolution &SE) {
       SCEVLoopAddRecRewriter Rewriter(SE, Map);
       return Rewriter.visit(Scev);
     }
-
-    SCEVLoopAddRecRewriter(ScalarEvolution &SE, LoopToScevMapT &M)
-        : SCEVRewriteVisitor(SE), Map(M) {}
 
     const SCEV *visitAddRecExpr(const SCEVAddRecExpr *Expr) {
       SmallVector<const SCEV *, 2> Operands;
@@ -724,6 +758,7 @@ namespace llvm {
   private:
     LoopToScevMapT &Map;
   };
-}
 
-#endif
+} // end namespace llvm
+
+#endif // LLVM_ANALYSIS_SCALAREVOLUTIONEXPRESSIONS_H

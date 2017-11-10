@@ -251,7 +251,6 @@ namespace {
 struct PPCOperand;
 
 class PPCAsmParser : public MCTargetAsmParser {
-  const MCInstrInfo &MII;
   bool IsPPC64;
   bool IsDarwin;
 
@@ -298,7 +297,7 @@ class PPCAsmParser : public MCTargetAsmParser {
 public:
   PPCAsmParser(const MCSubtargetInfo &STI, MCAsmParser &,
                const MCInstrInfo &MII, const MCTargetOptions &Options)
-    : MCTargetAsmParser(Options, STI), MII(MII) {
+    : MCTargetAsmParser(Options, STI, MII) {
     // Check for 64-bit vs. 32-bit pointer mode.
     const Triple &TheTriple = STI.getTargetTriple();
     IsPPC64 = (TheTriple.getArch() == Triple::ppc64 ||
@@ -1135,6 +1134,15 @@ void PPCAsmParser::ProcessInstruction(MCInst &Inst,
     TmpInst.addOperand(Inst.getOperand(1));
     TmpInst.addOperand(MCOperand::createImm(N));
     TmpInst.addOperand(MCOperand::createImm(63 - N));
+    Inst = TmpInst;
+    break;
+  }
+  case PPC::SUBPCIS: {
+    MCInst TmpInst;
+    int64_t N = Inst.getOperand(1).getImm();
+    TmpInst.setOpcode(PPC::ADDPCIS);
+    TmpInst.addOperand(Inst.getOperand(0));
+    TmpInst.addOperand(MCOperand::createImm(-N));
     Inst = TmpInst;
     break;
   }

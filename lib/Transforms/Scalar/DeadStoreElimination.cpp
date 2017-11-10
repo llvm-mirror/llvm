@@ -16,31 +16,55 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/Scalar/DeadStoreElimination.h"
+#include "llvm/ADT/APInt.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/CaptureTracking.h"
 #include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/Analysis/MemoryDependenceAnalysis.h"
+#include "llvm/Analysis/MemoryLocation.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
+#include "llvm/IR/Argument.h"
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/CallSite.h"
+#include "llvm/IR/Constant.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
-#include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/InstrTypes.h"
+#include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/PassManager.h"
+#include "llvm/IR/Value.h"
 #include "llvm/Pass.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/Local.h"
+#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <cstddef>
+#include <iterator>
 #include <map>
+#include <utility>
+
 using namespace llvm;
 
 #define DEBUG_TYPE "dse"
@@ -49,18 +73,23 @@ STATISTIC(NumRedundantStores, "Number of redundant stores deleted");
 STATISTIC(NumFastStores, "Number of stores deleted");
 STATISTIC(NumFastOther , "Number of other instrs removed");
 STATISTIC(NumCompletePartials, "Number of stores dead by later partials");
+STATISTIC(NumModifiedStores, "Number of stores modified");
 
 static cl::opt<bool>
 EnablePartialOverwriteTracking("enable-dse-partial-overwrite-tracking",
   cl::init(true), cl::Hidden,
   cl::desc("Enable partial-overwrite tracking in DSE"));
 
+static cl::opt<bool>
+EnablePartialStoreMerging("enable-dse-partial-store-merging",
+  cl::init(true), cl::Hidden,
+  cl::desc("Enable partial store merging in DSE"));
 
 //===----------------------------------------------------------------------===//
 // Helper functions
 //===----------------------------------------------------------------------===//
-typedef std::map<int64_t, int64_t> OverlapIntervalsTy;
-typedef DenseMap<Instruction *, OverlapIntervalsTy> InstOverlapIntervalsTy;
+using OverlapIntervalsTy = std::map<int64_t, int64_t>;
+using InstOverlapIntervalsTy = DenseMap<Instruction *, OverlapIntervalsTy>;
 
 /// Delete this instruction.  Before we do, go through and zero out all the
 /// operands of this instruction.  If any of them become dead, delete them and
@@ -209,7 +238,6 @@ static bool isRemovable(Instruction *I) {
     case Intrinsic::init_trampoline:
       // Always safe to remove init_trampoline.
       return true;
-
     case Intrinsic::memset:
     case Intrinsic::memmove:
     case Intrinsic::memcpy:
@@ -223,7 +251,6 @@ static bool isRemovable(Instruction *I) {
 
   return false;
 }
-
 
 /// Returns true if the end of this instruction can be safely shortened in
 /// length.
@@ -287,19 +314,24 @@ static uint64_t getPointerSize(const Value *V, const DataLayout &DL,
 }
 
 namespace {
-enum OverwriteResult {
-  OverwriteBegin,
-  OverwriteComplete,
-  OverwriteEnd,
-  OverwriteUnknown
-};
-}
 
-/// Return 'OverwriteComplete' if a store to the 'Later' location completely
-/// overwrites a store to the 'Earlier' location, 'OverwriteEnd' if the end of
-/// the 'Earlier' location is completely overwritten by 'Later',
-/// 'OverwriteBegin' if the beginning of the 'Earlier' location is overwritten
-/// by 'Later', or 'OverwriteUnknown' if nothing can be determined.
+enum OverwriteResult {
+  OW_Begin,
+  OW_Complete,
+  OW_End,
+  OW_PartialEarlierWithFullLater,
+  OW_Unknown
+};
+
+} // end anonymous namespace
+
+/// Return 'OW_Complete' if a store to the 'Later' location completely
+/// overwrites a store to the 'Earlier' location, 'OW_End' if the end of the
+/// 'Earlier' location is completely overwritten by 'Later', 'OW_Begin' if the
+/// beginning of the 'Earlier' location is overwritten by 'Later'.
+/// 'OW_PartialEarlierWithFullLater' means that an earlier (big) store was
+/// overwritten by a latter (smaller) store which doesn't write outside the big
+/// store's memory locations. Returns 'OW_Unknown' if nothing can be determined.
 static OverwriteResult isOverwrite(const MemoryLocation &Later,
                                    const MemoryLocation &Earlier,
                                    const DataLayout &DL,
@@ -310,7 +342,7 @@ static OverwriteResult isOverwrite(const MemoryLocation &Later,
   // If we don't know the sizes of either access, then we can't do a comparison.
   if (Later.Size == MemoryLocation::UnknownSize ||
       Earlier.Size == MemoryLocation::UnknownSize)
-    return OverwriteUnknown;
+    return OW_Unknown;
 
   const Value *P1 = Earlier.Ptr->stripPointerCasts();
   const Value *P2 = Later.Ptr->stripPointerCasts();
@@ -320,7 +352,7 @@ static OverwriteResult isOverwrite(const MemoryLocation &Later,
   if (P1 == P2) {
     // Make sure that the Later size is >= the Earlier size.
     if (Later.Size >= Earlier.Size)
-      return OverwriteComplete;
+      return OW_Complete;
   }
 
   // Check to see if the later store is to the entire object (either a global,
@@ -332,13 +364,13 @@ static OverwriteResult isOverwrite(const MemoryLocation &Later,
   // If we can't resolve the same pointers to the same object, then we can't
   // analyze them at all.
   if (UO1 != UO2)
-    return OverwriteUnknown;
+    return OW_Unknown;
 
   // If the "Later" store is to a recognizable object, get its size.
   uint64_t ObjectSize = getPointerSize(UO2, DL, TLI);
   if (ObjectSize != MemoryLocation::UnknownSize)
     if (ObjectSize == Later.Size && ObjectSize >= Earlier.Size)
-      return OverwriteComplete;
+      return OW_Complete;
 
   // Okay, we have stores to two completely different pointers.  Try to
   // decompose the pointer into a "base + constant_offset" form.  If the base
@@ -350,7 +382,7 @@ static OverwriteResult isOverwrite(const MemoryLocation &Later,
 
   // If the base pointers still differ, we have two completely different stores.
   if (BP1 != BP2)
-    return OverwriteUnknown;
+    return OW_Unknown;
 
   // The later store completely overlaps the earlier store if:
   //
@@ -370,7 +402,7 @@ static OverwriteResult isOverwrite(const MemoryLocation &Later,
   if (EarlierOff >= LaterOff &&
       Later.Size >= Earlier.Size &&
       uint64_t(EarlierOff - LaterOff) + Earlier.Size <= Later.Size)
-    return OverwriteComplete;
+    return OW_Complete;
 
   // We may now overlap, although the overlap is not complete. There might also
   // be other incomplete overlaps, and together, they might cover the complete
@@ -428,8 +460,21 @@ static OverwriteResult isOverwrite(const MemoryLocation &Later,
                       ") Composite Later [" <<
                       ILI->second << ", " << ILI->first << ")\n");
       ++NumCompletePartials;
-      return OverwriteComplete;
+      return OW_Complete;
     }
+  }
+
+  // Check for an earlier store which writes to all the memory locations that
+  // the later store writes to.
+  if (EnablePartialStoreMerging && LaterOff >= EarlierOff &&
+      int64_t(EarlierOff + Earlier.Size) > LaterOff &&
+      uint64_t(LaterOff - EarlierOff) + Later.Size <= Earlier.Size) {
+    DEBUG(dbgs() << "DSE: Partial overwrite an earlier load [" << EarlierOff
+                 << ", " << int64_t(EarlierOff + Earlier.Size)
+                 << ") by a later store [" << LaterOff << ", "
+                 << int64_t(LaterOff + Later.Size) << ")\n");
+    // TODO: Maybe come up with a better name?
+    return OW_PartialEarlierWithFullLater;
   }
 
   // Another interesting case is if the later store overwrites the end of the
@@ -443,7 +488,7 @@ static OverwriteResult isOverwrite(const MemoryLocation &Later,
   if (!EnablePartialOverwriteTracking &&
       (LaterOff > EarlierOff && LaterOff < int64_t(EarlierOff + Earlier.Size) &&
        int64_t(LaterOff + Later.Size) >= int64_t(EarlierOff + Earlier.Size)))
-    return OverwriteEnd;
+    return OW_End;
 
   // Finally, we also need to check if the later store overwrites the beginning
   // of the earlier store.
@@ -458,11 +503,11 @@ static OverwriteResult isOverwrite(const MemoryLocation &Later,
       (LaterOff <= EarlierOff && int64_t(LaterOff + Later.Size) > EarlierOff)) {
     assert(int64_t(LaterOff + Later.Size) <
                int64_t(EarlierOff + Earlier.Size) &&
-           "Expect to be handled as OverwriteComplete");
-    return OverwriteBegin;
+           "Expect to be handled as OW_Complete");
+    return OW_Begin;
   }
   // Otherwise, they don't completely overlap.
-  return OverwriteUnknown;
+  return OW_Unknown;
 }
 
 /// If 'Inst' might be a self read (i.e. a noop copy of a
@@ -845,7 +890,7 @@ static bool tryToShorten(Instruction *EarlierWrite, int64_t &EarlierOffset,
   if (!IsOverwriteEnd)
     LaterOffset = int64_t(LaterOffset + LaterSize);
 
-  if (!(llvm::isPowerOf2_64(LaterOffset) && EarlierWriteAlign <= LaterOffset) &&
+  if (!(isPowerOf2_64(LaterOffset) && EarlierWriteAlign <= LaterOffset) &&
       !((EarlierWriteAlign != 0) && LaterOffset % EarlierWriteAlign == 0))
     return false;
 
@@ -909,7 +954,7 @@ static bool tryToShortenBegin(Instruction *EarlierWrite,
 
   if (LaterStart <= EarlierStart && LaterStart + LaterSize > EarlierStart) {
     assert(LaterStart + LaterSize < EarlierStart + EarlierSize &&
-           "Should have been handled as OverwriteComplete");
+           "Should have been handled as OW_Complete");
     if (tryToShorten(EarlierWrite, EarlierStart, EarlierSize, LaterStart,
                      LaterSize, false)) {
       IntervalMap.erase(OII);
@@ -1099,13 +1144,15 @@ static bool eliminateDeadStores(BasicBlock &BB, AliasAnalysis *AA,
       // If we find a write that is a) removable (i.e., non-volatile), b) is
       // completely obliterated by the store to 'Loc', and c) which we know that
       // 'Inst' doesn't load from, then we can remove it.
+      // Also try to merge two stores if a later one only touches memory written
+      // to by the earlier one.
       if (isRemovable(DepWrite) &&
           !isPossibleSelfRead(Inst, Loc, DepWrite, *TLI, *AA)) {
         int64_t InstWriteOffset, DepWriteOffset;
         OverwriteResult OR =
             isOverwrite(Loc, DepLoc, DL, *TLI, DepWriteOffset, InstWriteOffset,
                         DepWrite, IOL);
-        if (OR == OverwriteComplete) {
+        if (OR == OW_Complete) {
           DEBUG(dbgs() << "DSE: Remove Dead Store:\n  DEAD: "
                 << *DepWrite << "\n  KILLER: " << *Inst << '\n');
 
@@ -1117,17 +1164,83 @@ static bool eliminateDeadStores(BasicBlock &BB, AliasAnalysis *AA,
           // We erased DepWrite; start over.
           InstDep = MD->getDependency(Inst);
           continue;
-        } else if ((OR == OverwriteEnd && isShortenableAtTheEnd(DepWrite)) ||
-                   ((OR == OverwriteBegin &&
+        } else if ((OR == OW_End && isShortenableAtTheEnd(DepWrite)) ||
+                   ((OR == OW_Begin &&
                      isShortenableAtTheBeginning(DepWrite)))) {
           assert(!EnablePartialOverwriteTracking && "Do not expect to perform "
                                                     "when partial-overwrite "
                                                     "tracking is enabled");
           int64_t EarlierSize = DepLoc.Size;
           int64_t LaterSize = Loc.Size;
-          bool IsOverwriteEnd = (OR == OverwriteEnd);
+          bool IsOverwriteEnd = (OR == OW_End);
           MadeChange |= tryToShorten(DepWrite, DepWriteOffset, EarlierSize,
                                     InstWriteOffset, LaterSize, IsOverwriteEnd);
+        } else if (EnablePartialStoreMerging &&
+                   OR == OW_PartialEarlierWithFullLater) {
+          auto *Earlier = dyn_cast<StoreInst>(DepWrite);
+          auto *Later = dyn_cast<StoreInst>(Inst);
+          if (Earlier && isa<ConstantInt>(Earlier->getValueOperand()) &&
+              Later && isa<ConstantInt>(Later->getValueOperand())) {
+            // If the store we find is:
+            //   a) partially overwritten by the store to 'Loc'
+            //   b) the later store is fully contained in the earlier one and
+            //   c) they both have a constant value
+            // Merge the two stores, replacing the earlier store's value with a
+            // merge of both values.
+            // TODO: Deal with other constant types (vectors, etc), and probably
+            // some mem intrinsics (if needed)
+
+            APInt EarlierValue =
+                cast<ConstantInt>(Earlier->getValueOperand())->getValue();
+            APInt LaterValue =
+                cast<ConstantInt>(Later->getValueOperand())->getValue();
+            unsigned LaterBits = LaterValue.getBitWidth();
+            assert(EarlierValue.getBitWidth() > LaterValue.getBitWidth());
+            LaterValue = LaterValue.zext(EarlierValue.getBitWidth());
+
+            // Offset of the smaller store inside the larger store
+            unsigned BitOffsetDiff = (InstWriteOffset - DepWriteOffset) * 8;
+            unsigned LShiftAmount =
+                DL.isBigEndian()
+                    ? EarlierValue.getBitWidth() - BitOffsetDiff - LaterBits
+                    : BitOffsetDiff;
+            APInt Mask =
+                APInt::getBitsSet(EarlierValue.getBitWidth(), LShiftAmount,
+                                  LShiftAmount + LaterBits);
+            // Clear the bits we'll be replacing, then OR with the smaller
+            // store, shifted appropriately.
+            APInt Merged =
+                (EarlierValue & ~Mask) | (LaterValue << LShiftAmount);
+            DEBUG(dbgs() << "DSE: Merge Stores:\n  Earlier: " << *DepWrite
+                         << "\n  Later: " << *Inst
+                         << "\n  Merged Value: " << Merged << '\n');
+
+            auto *SI = new StoreInst(
+                ConstantInt::get(Earlier->getValueOperand()->getType(), Merged),
+                Earlier->getPointerOperand(), false, Earlier->getAlignment(),
+                Earlier->getOrdering(), Earlier->getSyncScopeID(), DepWrite);
+
+            unsigned MDToKeep[] = {LLVMContext::MD_dbg, LLVMContext::MD_tbaa,
+                                   LLVMContext::MD_alias_scope,
+                                   LLVMContext::MD_noalias,
+                                   LLVMContext::MD_nontemporal};
+            SI->copyMetadata(*DepWrite, MDToKeep);
+            ++NumModifiedStores;
+
+            // Remove earlier, wider, store
+            size_t Idx = InstrOrdering.lookup(DepWrite);
+            InstrOrdering.erase(DepWrite);
+            InstrOrdering.insert(std::make_pair(SI, Idx));
+
+            // Delete the old stores and now-dead instructions that feed them.
+            deleteDeadInstruction(Inst, &BBI, *MD, *TLI, IOL, &InstrOrdering);
+            deleteDeadInstruction(DepWrite, &BBI, *MD, *TLI, IOL,
+                                  &InstrOrdering);
+            MadeChange = true;
+
+            // We erased DepWrite and Inst (Loc); start over.
+            break;
+          }
         }
       }
 
@@ -1195,9 +1308,12 @@ PreservedAnalyses DSEPass::run(Function &F, FunctionAnalysisManager &AM) {
 }
 
 namespace {
+
 /// A legacy pass for the legacy pass manager that wraps \c DSEPass.
 class DSELegacyPass : public FunctionPass {
 public:
+  static char ID; // Pass identification, replacement for typeid
+
   DSELegacyPass() : FunctionPass(ID) {
     initializeDSELegacyPassPass(*PassRegistry::getPassRegistry());
   }
@@ -1226,12 +1342,12 @@ public:
     AU.addPreserved<GlobalsAAWrapperPass>();
     AU.addPreserved<MemoryDependenceWrapperPass>();
   }
-
-  static char ID; // Pass identification, replacement for typeid
 };
+
 } // end anonymous namespace
 
 char DSELegacyPass::ID = 0;
+
 INITIALIZE_PASS_BEGIN(DSELegacyPass, "dse", "Dead Store Elimination", false,
                       false)
 INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)

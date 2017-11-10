@@ -9,11 +9,12 @@
 
 #include "MCTargetDesc/SystemZMCFixups.h"
 #include "MCTargetDesc/SystemZMCTargetDesc.h"
+#include "llvm/BinaryFormat/ELF.h"
 #include "llvm/MC/MCELFObjectWriter.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCFixup.h"
+#include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCValue.h"
-#include "llvm/Support/ELF.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <cassert>
 #include <cstdint>
@@ -160,8 +161,8 @@ unsigned SystemZObjectWriter::getRelocType(MCContext &Ctx,
   }
 }
 
-MCObjectWriter *llvm::createSystemZObjectWriter(raw_pwrite_stream &OS,
-                                                uint8_t OSABI) {
-  MCELFObjectTargetWriter *MOTW = new SystemZObjectWriter(OSABI);
-  return createELFObjectWriter(MOTW, OS, /*IsLittleEndian=*/false);
+std::unique_ptr<MCObjectWriter>
+llvm::createSystemZObjectWriter(raw_pwrite_stream &OS, uint8_t OSABI) {
+  return createELFObjectWriter(llvm::make_unique<SystemZObjectWriter>(OSABI),
+                               OS, /*IsLittleEndian=*/false);
 }

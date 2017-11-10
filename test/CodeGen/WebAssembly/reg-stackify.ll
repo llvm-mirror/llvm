@@ -357,7 +357,9 @@ bb17:                                             ; preds = %bb13, %bb8
 bb21:                                             ; preds = %bb17, %bb5
   %tmp22 = phi double [ %tmp, %bb5 ], [ %tmp9, %bb17 ]
   %tmp23 = fadd double %tmp6, 1.000000e+00
-  br label %bb5
+  br i1 %arg4, label %exit, label %bb5
+exit:
+  ret void
 }
 
 ; Don't move calls past loads
@@ -448,7 +450,7 @@ bb10:                                             ; preds = %bb9, %bb
 
 ; CHECK-LABEL: stackpointer_dependency:
 ; CHECK:      call {{.+}}, stackpointer_callee@FUNCTION,
-; CHECK-NEXT: set_global 0,
+; CHECK-NEXT: set_global __stack_pointer,
 declare i32 @stackpointer_callee(i8* readnone, i8* readnone)
 declare i8* @llvm.frameaddress(i32)
 define i32 @stackpointer_dependency(i8* readnone) {

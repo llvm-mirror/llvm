@@ -13,9 +13,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/IPO/CrossDSOCFI.h"
-#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/EquivalenceClasses.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/ADT/Triple.h"
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
@@ -81,7 +82,7 @@ ConstantInt *CrossDSOCFI::extractNumericTypeId(MDNode *MD) {
 void CrossDSOCFI::buildCFICheck(Module &M) {
   // FIXME: verify that __cfi_check ends up near the end of the code section,
   // but before the jump slots created in LowerTypeTests.
-  llvm::DenseSet<uint64_t> TypeIds;
+  SetVector<uint64_t> TypeIds;
   SmallVector<MDNode *, 2> Types;
   for (GlobalObject &GO : M.global_objects()) {
     Types.clear();
@@ -95,12 +96,31 @@ void CrossDSOCFI::buildCFICheck(Module &M) {
     }
   }
 
+  NamedMDNode *CfiFunctionsMD = M.getNamedMetadata("cfi.functions");
+  if (CfiFunctionsMD) {
+    for (auto Func : CfiFunctionsMD->operands()) {
+      assert(Func->getNumOperands() >= 2);
+      for (unsigned I = 2; I < Func->getNumOperands(); ++I)
+        if (ConstantInt *TypeId =
+                extractNumericTypeId(cast<MDNode>(Func->getOperand(I).get())))
+          TypeIds.insert(TypeId->getZExtValue());
+    }
+  }
+
   LLVMContext &Ctx = M.getContext();
   Constant *C = M.getOrInsertFunction(
       "__cfi_check", Type::getVoidTy(Ctx), Type::getInt64Ty(Ctx),
-      Type::getInt8PtrTy(Ctx), Type::getInt8PtrTy(Ctx), nullptr);
+      Type::getInt8PtrTy(Ctx), Type::getInt8PtrTy(Ctx));
   Function *F = dyn_cast<Function>(C);
+  // Take over the existing function. The frontend emits a weak stub so that the
+  // linker knows about the symbol; this pass replaces the function body.
+  F->deleteBody();
   F->setAlignment(4096);
+
+  Triple T(M.getTargetTriple());
+  if (T.isARM() || T.isThumb())
+    F->addFnAttr("target-features", "+thumb-mode");
+
   auto args = F->arg_begin();
   Value &CallSiteTypeId = *(args++);
   CallSiteTypeId.setName("CallSiteTypeId");
@@ -117,7 +137,7 @@ void CrossDSOCFI::buildCFICheck(Module &M) {
   IRBuilder<> IRBFail(TrapBB);
   Constant *CFICheckFailFn = M.getOrInsertFunction(
       "__cfi_check_fail", Type::getVoidTy(Ctx), Type::getInt8PtrTy(Ctx),
-      Type::getInt8PtrTy(Ctx), nullptr);
+      Type::getInt8PtrTy(Ctx));
   IRBFail.CreateCall(CFICheckFailFn, {&CFICheckFailData, &Addr});
   IRBFail.CreateBr(ExitBB);
 

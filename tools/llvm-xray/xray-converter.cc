@@ -86,7 +86,7 @@ void TraceConverter::exportAsYAML(const Trace &Records, raw_ostream &OS) {
     Trace.Records.push_back({R.RecordType, R.CPU, R.Type, R.FuncId,
                              Symbolize ? FuncIdHelper.SymbolOrNumber(R.FuncId)
                                        : llvm::to_string(R.FuncId),
-                             R.TSC, R.TId});
+                             R.TSC, R.TId, R.CallArgs});
   }
   Output Out(OS, nullptr, 0);
   Out << Trace;
@@ -123,10 +123,14 @@ void TraceConverter::exportAsRAWv1(const Trace &Records, raw_ostream &OS) {
     Writer.write(static_cast<uint8_t>(R.CPU));
     switch (R.Type) {
     case RecordTypes::ENTER:
+    case RecordTypes::ENTER_ARG:
       Writer.write(uint8_t{0});
       break;
     case RecordTypes::EXIT:
       Writer.write(uint8_t{1});
+      break;
+    case RecordTypes::TAIL_EXIT:
+      Writer.write(uint8_t{2});
       break;
     }
     Writer.write(R.FuncId);

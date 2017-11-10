@@ -16,11 +16,13 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/Optional.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/EHPersonalities.h"
+#include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstrTypes.h"
@@ -42,6 +44,7 @@ class PredIteratorCache;
 class ScalarEvolution;
 class SCEV;
 class TargetLibraryInfo;
+class TargetTransformInfo;
 
 /// \brief Captures loop safety information.
 /// It keep information for loop & its header may throw exception.
@@ -182,9 +185,14 @@ public:
   /// Returns true if Phi is a first-order recurrence. A first-order recurrence
   /// is a non-reduction recurrence relation in which the value of the
   /// recurrence in the current loop iteration equals a value defined in the
-  /// previous iteration.
-  static bool isFirstOrderRecurrence(PHINode *Phi, Loop *TheLoop,
-                                     DominatorTree *DT);
+  /// previous iteration. \p SinkAfter includes pairs of instructions where the
+  /// first will be rescheduled to appear after the second if/when the loop is
+  /// vectorized. It may be augmented with additional pairs if needed in order
+  /// to handle Phi as a first-order recurrence.
+  static bool
+  isFirstOrderRecurrence(PHINode *Phi, Loop *TheLoop,
+                         DenseMap<Instruction *, Instruction *> &SinkAfter,
+                         DominatorTree *DT);
 
   RecurrenceKind getRecurrenceKind() { return Kind; }
 
@@ -360,6 +368,14 @@ private:
 BasicBlock *InsertPreheaderForLoop(Loop *L, DominatorTree *DT, LoopInfo *LI,
                                    bool PreserveLCSSA);
 
+/// Ensure that all exit blocks of the loop are dedicated exits.
+///
+/// For any loop exit block with non-loop predecessors, we split the loop
+/// predecessors to use a dedicated loop exit block. We update the dominator
+/// tree and loop info if provided, and will preserve LCSSA if requested.
+bool formDedicatedExitBlocks(Loop *L, DominatorTree *DT, LoopInfo *LI,
+                             bool PreserveLCSSA);
+
 /// Ensures LCSSA form for every instruction from the Worklist in the scope of
 /// innermost containing loop.
 ///
@@ -423,20 +439,40 @@ bool hoistRegion(DomTreeNode *, AliasAnalysis *, LoopInfo *, DominatorTree *,
                  TargetLibraryInfo *, Loop *, AliasSetTracker *,
                  LoopSafetyInfo *, OptimizationRemarkEmitter *ORE);
 
+/// This function deletes dead loops. The caller of this function needs to
+/// guarantee that the loop is infact dead.
+/// The function requires a bunch or prerequisites to be present:
+///   - The loop needs to be in LCSSA form
+///   - The loop needs to have a Preheader
+///   - A unique dedicated exit block must exist
+///
+/// This also updates the relevant analysis information in \p DT, \p SE, and \p
+/// LI if pointers to those are provided.
+/// It also updates the loop PM if an updater struct is provided.
+
+void deleteDeadLoop(Loop *L, DominatorTree *DT, ScalarEvolution *SE,
+                    LoopInfo *LI);
+
 /// \brief Try to promote memory values to scalars by sinking stores out of
 /// the loop and moving loads to before the loop.  We do this by looping over
 /// the stores in the loop, looking for stores to Must pointers which are
-/// loop invariant. It takes AliasSet, Loop exit blocks vector, loop exit blocks
-/// insertion point vector, PredIteratorCache, LoopInfo, DominatorTree, Loop,
-/// AliasSet information for all instructions of the loop and loop safety
-/// information as arguments. Diagnostics is emitted via \p ORE. It returns
-/// changed status.
-bool promoteLoopAccessesToScalars(AliasSet &, SmallVectorImpl<BasicBlock *> &,
+/// loop invariant. It takes a set of must-alias values, Loop exit blocks
+/// vector, loop exit blocks insertion point vector, PredIteratorCache,
+/// LoopInfo, DominatorTree, Loop, AliasSet information for all instructions
+/// of the loop and loop safety information as arguments.
+/// Diagnostics is emitted via \p ORE. It returns changed status.
+bool promoteLoopAccessesToScalars(const SmallSetVector<Value *, 8> &,
+                                  SmallVectorImpl<BasicBlock *> &,
                                   SmallVectorImpl<Instruction *> &,
                                   PredIteratorCache &, LoopInfo *,
                                   DominatorTree *, const TargetLibraryInfo *,
                                   Loop *, AliasSetTracker *, LoopSafetyInfo *,
                                   OptimizationRemarkEmitter *);
+
+/// Does a BFS from a given node to all of its children inside a given loop.
+/// The returned vector of nodes includes the starting point.
+SmallVector<DomTreeNode *, 16> collectChildrenInLoop(DomTreeNode *N,
+                                                     const Loop *CurLoop);
 
 /// \brief Computes safety information for a loop
 /// checks loop body & header for the possibility of may throw
@@ -488,6 +524,38 @@ bool canSinkOrHoistInst(Instruction &I, AAResults *AA, DominatorTree *DT,
                         Loop *CurLoop, AliasSetTracker *CurAST,
                         LoopSafetyInfo *SafetyInfo,
                         OptimizationRemarkEmitter *ORE = nullptr);
+
+/// Generates a vector reduction using shufflevectors to reduce the value.
+Value *getShuffleReduction(IRBuilder<> &Builder, Value *Src, unsigned Op,
+                           RecurrenceDescriptor::MinMaxRecurrenceKind
+                               MinMaxKind = RecurrenceDescriptor::MRK_Invalid,
+                           ArrayRef<Value *> RedOps = ArrayRef<Value *>());
+
+/// Create a target reduction of the given vector. The reduction operation
+/// is described by the \p Opcode parameter. min/max reductions require
+/// additional information supplied in \p Flags.
+/// The target is queried to determine if intrinsics or shuffle sequences are
+/// required to implement the reduction.
+Value *
+createSimpleTargetReduction(IRBuilder<> &B, const TargetTransformInfo *TTI,
+                            unsigned Opcode, Value *Src,
+                            TargetTransformInfo::ReductionFlags Flags =
+                                TargetTransformInfo::ReductionFlags(),
+                            ArrayRef<Value *> RedOps = ArrayRef<Value *>());
+
+/// Create a generic target reduction using a recurrence descriptor \p Desc
+/// The target is queried to determine if intrinsics or shuffle sequences are
+/// required to implement the reduction.
+Value *createTargetReduction(IRBuilder<> &B, const TargetTransformInfo *TTI,
+                             RecurrenceDescriptor &Desc, Value *Src,
+                             bool NoNaN = false);
+
+/// Get the intersection (logical and) of all of the potential IR flags
+/// of each scalar operation (VL) that will be converted into a vector (I).
+/// If OpValue is non-null, we only consider operations similar to OpValue
+/// when intersecting.
+/// Flag set: NSW, NUW, exact, and all of fast-math.
+void propagateIRFlags(Value *I, ArrayRef<Value *> VL, Value *OpValue = nullptr);
 
 } // end namespace llvm
 

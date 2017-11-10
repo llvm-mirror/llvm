@@ -16,9 +16,9 @@
 #define LLVM_CODEGEN_LIVEREGUNITS_H
 
 #include "llvm/ADT/BitVector.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 #include "llvm/MC/LaneBitmask.h"
 #include "llvm/MC/MCRegisterInfo.h"
+#include "llvm/Target/TargetRegisterInfo.h"
 #include <cstdint>
 
 namespace llvm {
@@ -51,7 +51,7 @@ public:
   void clear() { Units.reset(); }
 
   /// Returns true if the set is empty.
-  bool empty() const { return Units.empty(); }
+  bool empty() const { return Units.none(); }
 
   /// Adds register units covered by physical register \p Reg.
   void addReg(unsigned Reg) {
@@ -93,12 +93,14 @@ public:
   }
 
   /// Updates liveness when stepping backwards over the instruction \p MI.
+  /// This removes all register units defined or clobbered in \p MI and then
+  /// adds the units used (as in use operands) in \p MI.
   void stepBackward(const MachineInstr &MI);
 
-  /// Mark all register units live during instruction \p MI.
-  /// This can be used to accumulate live/unoccupied registers over a range of
-  /// instructions.
-  void accumulateBackward(const MachineInstr &MI);
+  /// Adds all register units used, defined or clobbered in \p MI.
+  /// This is useful when walking over a range of instruction to find registers
+  /// unused over the whole range.
+  void accumulate(const MachineInstr &MI);
 
   /// Adds registers living out of block \p MBB.
   /// Live out registers are the union of the live-in registers of the successor
@@ -121,6 +123,11 @@ public:
   const BitVector &getBitVector() const {
     return Units;
   }
+
+private:
+  /// Adds pristine registers. Pristine registers are callee saved registers
+  /// that are unused in the function.
+  void addPristines(const MachineFunction &MF);
 };
 
 } // end namespace llvm

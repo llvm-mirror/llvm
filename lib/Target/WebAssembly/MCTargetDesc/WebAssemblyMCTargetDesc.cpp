@@ -41,15 +41,6 @@ static MCAsmInfo *createMCAsmInfo(const MCRegisterInfo & /*MRI*/,
   return new WebAssemblyMCAsmInfo(TT);
 }
 
-static void adjustCodeGenOpts(const Triple & /*TT*/, Reloc::Model /*RM*/,
-                              CodeModel::Model &CM) {
-  CodeModel::Model M = (CM == CodeModel::Default || CM == CodeModel::JITDefault)
-                           ? CodeModel::Large
-                           : CM;
-  if (M != CodeModel::Large)
-    report_fatal_error("Non-large code models are not supported yet");
-}
-
 static MCInstrInfo *createMCInstrInfo() {
   MCInstrInfo *X = new MCInstrInfo();
   InitWebAssemblyMCInstrInfo(X);
@@ -74,7 +65,7 @@ static MCInstPrinter *createMCInstPrinter(const Triple & /*T*/,
 static MCCodeEmitter *createCodeEmitter(const MCInstrInfo &MCII,
                                         const MCRegisterInfo & /*MRI*/,
                                         MCContext &Ctx) {
-  return createWebAssemblyMCCodeEmitter(MCII, Ctx);
+  return createWebAssemblyMCCodeEmitter(MCII);
 }
 
 static MCAsmBackend *createAsmBackend(const Target & /*T*/,
@@ -115,9 +106,6 @@ extern "C" void LLVMInitializeWebAssemblyTargetMC() {
     // Register the MC instruction info.
     TargetRegistry::RegisterMCInstrInfo(*T, createMCInstrInfo);
 
-    // Register the MC codegen info.
-    TargetRegistry::registerMCAdjustCodeGenOpts(*T, adjustCodeGenOpts);
-
     // Register the MC register info.
     TargetRegistry::RegisterMCRegInfo(*T, createMCRegisterInfo);
 
@@ -141,12 +129,12 @@ extern "C" void LLVMInitializeWebAssemblyTargetMC() {
   }
 }
 
-WebAssembly::ValType WebAssembly::toValType(const MVT &Ty) {
+wasm::ValType WebAssembly::toValType(const MVT &Ty) {
   switch (Ty.SimpleTy) {
-  case MVT::i32: return WebAssembly::ValType::I32;
-  case MVT::i64: return WebAssembly::ValType::I64;
-  case MVT::f32: return WebAssembly::ValType::F32;
-  case MVT::f64: return WebAssembly::ValType::F64;
+  case MVT::i32: return wasm::ValType::I32;
+  case MVT::i64: return wasm::ValType::I64;
+  case MVT::f32: return wasm::ValType::F32;
+  case MVT::f64: return wasm::ValType::F64;
   default: llvm_unreachable("unexpected type");
   }
 }

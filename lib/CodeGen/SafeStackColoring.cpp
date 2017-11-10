@@ -1,4 +1,4 @@
-//===-- SafeStackColoring.cpp - SafeStack frame coloring -------*- C++ -*--===//
+//===- SafeStackColoring.cpp - SafeStack frame coloring -------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -8,21 +8,35 @@
 //===----------------------------------------------------------------------===//
 
 #include "SafeStackColoring.h"
-
+#include "llvm/ADT/BitVector.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DepthFirstIterator.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
+#include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/User.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/raw_ostream.h"
+#include <cassert>
+#include <tuple>
+#include <utility>
 
 using namespace llvm;
 using namespace llvm::safestack;
 
 #define DEBUG_TYPE "safestackcoloring"
 
+// Disabled by default due to PR32143.
 static cl::opt<bool> ClColoring("safe-stack-coloring",
                                 cl::desc("enable safe stack coloring"),
-                                cl::Hidden, cl::init(true));
+                                cl::Hidden, cl::init(false));
 
 const StackColoring::LiveRange &StackColoring::getLiveRange(AllocaInst *AI) {
   const auto IT = AllocaNumbering.find(AI);

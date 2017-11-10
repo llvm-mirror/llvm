@@ -51,12 +51,6 @@ enum LCOMMType { NoAlignment, ByteAlignment, Log2Alignment };
 
 } // end namespace LCOMM
 
-enum class DebugCompressionType {
-  DCT_None,    // no compression
-  DCT_Zlib,    // zlib style complession
-  DCT_ZlibGnu  // zlib-gnu style compression
-};
-
 /// This class is intended to be used as a base class for asm
 /// properties and features specific to the target.
 class MCAsmInfo {
@@ -65,8 +59,8 @@ protected:
   // Properties to be set by the target writer, used to configure asm printer.
   //
 
-  /// Pointer size in bytes.  Default is 4.
-  unsigned PointerSize = 4;
+  /// Code pointer size in bytes.  Default is 4.
+  unsigned CodePointerSize = 4;
 
   /// Size of the stack slot reserved for callee-saved registers, in bytes.
   /// Default is same as pointer size.
@@ -366,7 +360,7 @@ protected:
   bool PreserveAsmComments;
 
   /// Compress DWARF debug sections. Defaults to no compression.
-  DebugCompressionType CompressDebugSections = DebugCompressionType::DCT_None;
+  DebugCompressionType CompressDebugSections = DebugCompressionType::None;
 
   /// True if the integrated assembler should interpret 'a >> b' constant
   /// expressions as logical rather than arithmetic.
@@ -384,8 +378,8 @@ public:
   explicit MCAsmInfo();
   virtual ~MCAsmInfo();
 
-  /// Get the pointer size in bytes.
-  unsigned getPointerSize() const { return PointerSize; }
+  /// Get the code pointer size in bytes.
+  unsigned getCodePointerSize() const { return CodePointerSize; }
 
   /// Get the callee-saved register stack slot
   /// size in bytes.

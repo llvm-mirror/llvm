@@ -8,12 +8,20 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/CallGraph.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/CallSite.h"
-#include "llvm/IR/Instructions.h"
-#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/PassManager.h"
+#include "llvm/Pass.h"
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
+#include <algorithm>
+#include <cassert>
+
 using namespace llvm;
 
 //===----------------------------------------------------------------------===//
@@ -21,23 +29,18 @@ using namespace llvm;
 //
 
 CallGraph::CallGraph(Module &M)
-    : M(M), Root(nullptr), ExternalCallingNode(getOrInsertFunction(nullptr)),
+    : M(M), ExternalCallingNode(getOrInsertFunction(nullptr)),
       CallsExternalNode(llvm::make_unique<CallGraphNode>(nullptr)) {
   // Add every function to the call graph.
   for (Function &F : M)
     addToCallGraph(&F);
-
-  // If we didn't find a main function, use the external call graph node
-  if (!Root)
-    Root = ExternalCallingNode;
 }
 
 CallGraph::CallGraph(CallGraph &&Arg)
-    : M(Arg.M), FunctionMap(std::move(Arg.FunctionMap)), Root(Arg.Root),
+    : M(Arg.M), FunctionMap(std::move(Arg.FunctionMap)),
       ExternalCallingNode(Arg.ExternalCallingNode),
       CallsExternalNode(std::move(Arg.CallsExternalNode)) {
   Arg.FunctionMap.clear();
-  Arg.Root = nullptr;
   Arg.ExternalCallingNode = nullptr;
 }
 
@@ -57,21 +60,9 @@ CallGraph::~CallGraph() {
 void CallGraph::addToCallGraph(Function *F) {
   CallGraphNode *Node = getOrInsertFunction(F);
 
-  // If this function has external linkage, anything could call it.
-  if (!F->hasLocalLinkage()) {
-    ExternalCallingNode->addCalledFunction(CallSite(), Node);
-
-    // Found the entry point?
-    if (F->getName() == "main") {
-      if (Root) // Found multiple external mains?  Don't pick one.
-        Root = ExternalCallingNode;
-      else
-        Root = Node; // Found a main, keep track of it!
-    }
-  }
-
-  // If this function has its address taken, anything could call it.
-  if (F->hasAddressTaken())
+  // If this function has external linkage or has its address taken, anything
+  // could call it.
+  if (!F->hasLocalLinkage() || F->hasAddressTaken())
     ExternalCallingNode->addCalledFunction(CallSite(), Node);
 
   // If this function is not defined in this translation unit, it could call
@@ -96,13 +87,6 @@ void CallGraph::addToCallGraph(Function *F) {
 }
 
 void CallGraph::print(raw_ostream &OS) const {
-  OS << "CallGraph Root is: ";
-  if (Function *F = Root->getFunction())
-    OS << F->getName() << "\n";
-  else {
-    OS << "<<null function: 0x" << Root << ">>\n";
-  }
-
   // Print in a deterministic order by sorting CallGraphNodes by name.  We do
   // this here to avoid slowing down the non-printing fast path.
 
@@ -149,7 +133,6 @@ Function *CallGraph::removeFunctionFromModule(CallGraphNode *CGN) {
 /// This does not rescan the body of the function, so it is suitable when
 /// splicing the body of the old function to the new while also updating all
 /// callers from old to new.
-///
 void CallGraph::spliceFunction(const Function *From, const Function *To) {
   assert(FunctionMap.count(From) && "No CallGraphNode for function!");
   assert(!FunctionMap.count(To) &&
@@ -280,7 +263,7 @@ CallGraphWrapperPass::CallGraphWrapperPass() : ModulePass(ID) {
   initializeCallGraphWrapperPassPass(*PassRegistry::getPassRegistry());
 }
 
-CallGraphWrapperPass::~CallGraphWrapperPass() {}
+CallGraphWrapperPass::~CallGraphWrapperPass() = default;
 
 void CallGraphWrapperPass::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.setPreservesAll();
@@ -315,8 +298,10 @@ void CallGraphWrapperPass::dump() const { print(dbgs(), nullptr); }
 #endif
 
 namespace {
+
 struct CallGraphPrinterLegacyPass : public ModulePass {
   static char ID; // Pass ID, replacement for typeid
+
   CallGraphPrinterLegacyPass() : ModulePass(ID) {
     initializeCallGraphPrinterLegacyPassPass(*PassRegistry::getPassRegistry());
   }
@@ -325,12 +310,14 @@ struct CallGraphPrinterLegacyPass : public ModulePass {
     AU.setPreservesAll();
     AU.addRequiredTransitive<CallGraphWrapperPass>();
   }
+
   bool runOnModule(Module &M) override {
     getAnalysis<CallGraphWrapperPass>().print(errs(), &M);
     return false;
   }
 };
-}
+
+} // end anonymous namespace
 
 char CallGraphPrinterLegacyPass::ID = 0;
 

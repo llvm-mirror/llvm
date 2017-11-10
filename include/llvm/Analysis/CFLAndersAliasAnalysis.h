@@ -1,4 +1,4 @@
-//=- CFLAndersAliasAnalysis.h - Unification-based Alias Analysis ---*- C++-*-=//
+//==- CFLAndersAliasAnalysis.h - Unification-based Alias Analysis -*- C++-*-==//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -18,26 +18,32 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/Analysis/AliasAnalysis.h"
-#include "llvm/IR/Function.h"
-#include "llvm/IR/ValueHandle.h"
+#include "llvm/Analysis/CFLAliasAnalysisUtils.h"
+#include "llvm/IR/PassManager.h"
 #include "llvm/Pass.h"
 #include <forward_list>
+#include <memory>
 
 namespace llvm {
 
+class Function;
+class MemoryLocation;
 class TargetLibraryInfo;
 
 namespace cflaa {
+
 struct AliasSummary;
-}
+
+} // end namespace cflaa
 
 class CFLAndersAAResult : public AAResultBase<CFLAndersAAResult> {
   friend AAResultBase<CFLAndersAAResult>;
+
   class FunctionInfo;
 
 public:
-  explicit CFLAndersAAResult(const TargetLibraryInfo &);
-  CFLAndersAAResult(CFLAndersAAResult &&);
+  explicit CFLAndersAAResult(const TargetLibraryInfo &TLI);
+  CFLAndersAAResult(CFLAndersAAResult &&RHS);
   ~CFLAndersAAResult();
 
   /// Handle invalidation events from the new pass manager.
@@ -46,8 +52,9 @@ public:
                   FunctionAnalysisManager::Invalidator &) {
     return false;
   }
+
   /// Evict the given function from cache
-  void evict(const Function &Fn);
+  void evict(const Function *Fn);
 
   /// \brief Get the alias summary for the given function
   /// Return nullptr if the summary is not found or not available
@@ -57,27 +64,6 @@ public:
   AliasResult alias(const MemoryLocation &, const MemoryLocation &);
 
 private:
-  struct FunctionHandle final : public CallbackVH {
-    FunctionHandle(Function *Fn, CFLAndersAAResult *Result)
-        : CallbackVH(Fn), Result(Result) {
-      assert(Fn != nullptr);
-      assert(Result != nullptr);
-    }
-
-    void deleted() override { removeSelfFromCache(); }
-    void allUsesReplacedWith(Value *) override { removeSelfFromCache(); }
-
-  private:
-    CFLAndersAAResult *Result;
-
-    void removeSelfFromCache() {
-      assert(Result != nullptr);
-      auto *Val = getValPtr();
-      Result->evict(*cast<Function>(Val));
-      setValPtr(nullptr);
-    }
-  };
-
   /// \brief Ensures that the given function is available in the cache.
   /// Returns the appropriate entry from the cache.
   const Optional<FunctionInfo> &ensureCached(const Function &);
@@ -97,7 +83,7 @@ private:
   /// that simply has empty sets.
   DenseMap<const Function *, Optional<FunctionInfo>> Cache;
 
-  std::forward_list<FunctionHandle> Handles;
+  std::forward_list<cflaa::FunctionHandle<CFLAndersAAResult>> Handles;
 };
 
 /// Analysis pass providing a never-invalidated alias analysis result.
@@ -106,10 +92,11 @@ private:
 /// in particular to leverage invalidation to trigger re-computation.
 class CFLAndersAA : public AnalysisInfoMixin<CFLAndersAA> {
   friend AnalysisInfoMixin<CFLAndersAA>;
+
   static AnalysisKey Key;
 
 public:
-  typedef CFLAndersAAResult Result;
+  using Result = CFLAndersAAResult;
 
   CFLAndersAAResult run(Function &F, FunctionAnalysisManager &AM);
 };
@@ -130,12 +117,10 @@ public:
   void getAnalysisUsage(AnalysisUsage &AU) const override;
 };
 
-//===--------------------------------------------------------------------===//
-//
 // createCFLAndersAAWrapperPass - This pass implements a set-based approach to
 // alias analysis.
-//
 ImmutablePass *createCFLAndersAAWrapperPass();
-}
 
-#endif
+} // end namespace llvm
+
+#endif // LLVM_ANALYSIS_CFLANDERSALIASANALYSIS_H

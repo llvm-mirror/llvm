@@ -34,10 +34,15 @@ void InfoStreamBuilder::setSignature(uint32_t S) { Sig = S; }
 
 void InfoStreamBuilder::setAge(uint32_t A) { Age = A; }
 
-void InfoStreamBuilder::setGuid(PDB_UniqueId G) { Guid = G; }
+void InfoStreamBuilder::setGuid(GUID G) { Guid = G; }
+
+void InfoStreamBuilder::addFeature(PdbRaw_FeatureSig Sig) {
+  Features.push_back(Sig);
+}
 
 Error InfoStreamBuilder::finalizeMsfLayout() {
-  uint32_t Length = sizeof(InfoStreamHeader) + NamedStreams.finalize();
+  uint32_t Length = sizeof(InfoStreamHeader) + NamedStreams.finalize() +
+                    (Features.size() + 1) * sizeof(uint32_t);
   if (auto EC = Msf.setStreamSize(StreamPDB, Length))
     return EC;
   return Error::success();
@@ -45,8 +50,8 @@ Error InfoStreamBuilder::finalizeMsfLayout() {
 
 Error InfoStreamBuilder::commit(const msf::MSFLayout &Layout,
                                 WritableBinaryStreamRef Buffer) const {
-  auto InfoS =
-      WritableMappedBlockStream::createIndexedStream(Layout, Buffer, StreamPDB);
+  auto InfoS = WritableMappedBlockStream::createIndexedStream(
+      Layout, Buffer, StreamPDB, Msf.getAllocator());
   BinaryStreamWriter Writer(*InfoS);
 
   InfoStreamHeader H;
@@ -57,5 +62,13 @@ Error InfoStreamBuilder::commit(const msf::MSFLayout &Layout,
   if (auto EC = Writer.writeObject(H))
     return EC;
 
-  return NamedStreams.commit(Writer);
+  if (auto EC = NamedStreams.commit(Writer))
+    return EC;
+  if (auto EC = Writer.writeInteger(0))
+    return EC;
+  for (auto E : Features) {
+    if (auto EC = Writer.writeEnum(E))
+      return EC;
+  }
+  return Error::success();
 }

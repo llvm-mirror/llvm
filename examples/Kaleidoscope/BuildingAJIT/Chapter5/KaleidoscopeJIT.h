@@ -1,4 +1,4 @@
-//===----- KaleidoscopeJIT.h - A simple JIT for Kaleidoscope ----*- C++ -*-===//
+//===- KaleidoscopeJIT.h - A simple JIT for Kaleidoscope --------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -20,9 +20,8 @@
 #include "llvm/ADT/Triple.h"
 #include "llvm/ExecutionEngine/ExecutionEngine.h"
 #include "llvm/ExecutionEngine/JITSymbol.h"
-#include "llvm/ExecutionEngine/RuntimeDyld.h"
-#include "llvm/ExecutionEngine/Orc/CompileOnDemandLayer.h"
 #include "llvm/ExecutionEngine/Orc/CompileUtils.h"
+#include "llvm/ExecutionEngine/Orc/IndirectionUtils.h"
 #include "llvm/ExecutionEngine/Orc/IRCompileLayer.h"
 #include "llvm/ExecutionEngine/Orc/IRTransformLayer.h"
 #include "llvm/ExecutionEngine/Orc/LambdaResolver.h"
@@ -73,17 +72,17 @@ namespace llvm {
 namespace orc {
 
 // Typedef the remote-client API.
-typedef remote::OrcRemoteTargetClient<FDRPCChannel> MyRemote;
+using MyRemote = remote::OrcRemoteTargetClient;
 
 class KaleidoscopeJIT {
 private:
   std::unique_ptr<TargetMachine> TM;
   const DataLayout DL;
-  RTDyldObjectLinkingLayer<> ObjectLayer;
-  IRCompileLayer<decltype(ObjectLayer)> CompileLayer;
+  RTDyldObjectLinkingLayer ObjectLayer;
+  IRCompileLayer<decltype(ObjectLayer), SimpleCompiler> CompileLayer;
 
-  typedef std::function<std::unique_ptr<Module>(std::unique_ptr<Module>)>
-    OptimizeFunction;
+  using OptimizeFunction =
+      std::function<std::shared_ptr<Module>(std::shared_ptr<Module>)>;
 
   IRTransformLayer<decltype(CompileLayer), OptimizeFunction> OptimizeLayer;
 
@@ -92,15 +91,18 @@ private:
   MyRemote &Remote;
 
 public:
-  typedef decltype(OptimizeLayer)::ModuleSetHandleT ModuleHandle;
+  using ModuleHandle = decltype(OptimizeLayer)::ModuleHandleT;
 
   KaleidoscopeJIT(MyRemote &Remote)
       : TM(EngineBuilder().selectTarget(Triple(Remote.getTargetTriple()), "",
                                         "", SmallVector<std::string, 0>())),
         DL(TM->createDataLayout()),
+        ObjectLayer([&Remote]() {
+            return cantFail(Remote.createRemoteMemoryManager());
+          }),
         CompileLayer(ObjectLayer, SimpleCompiler(*TM)),
         OptimizeLayer(CompileLayer,
-                      [this](std::unique_ptr<Module> M) {
+                      [this](std::shared_ptr<Module> M) {
                         return optimizeModule(std::move(M));
                       }),
         Remote(Remote) {
@@ -111,20 +113,13 @@ public:
       exit(1);
     }
     CompileCallbackMgr = &*CCMgrOrErr;
-    std::unique_ptr<MyRemote::RCIndirectStubsManager> ISM;
-    if (auto Err = Remote.createIndirectStubsManager(ISM)) {
-      logAllUnhandledErrors(std::move(Err), errs(),
-                            "Error creating indirect stubs manager:");
-      exit(1);
-    }
-    IndirectStubsMgr = std::move(ISM);
+    IndirectStubsMgr = cantFail(Remote.createIndirectStubsManager());
     llvm::sys::DynamicLibrary::LoadLibraryPermanently(nullptr);
   }
 
   TargetMachine &getTargetMachine() { return *TM; }
 
   ModuleHandle addModule(std::unique_ptr<Module> M) {
-
     // Build our symbol resolver:
     // Lambda 1: Look back into the JIT itself to find symbols that are part of
     //           the same "logical dylib".
@@ -148,28 +143,16 @@ public:
           return JITSymbol(nullptr);
         });
 
-    std::unique_ptr<MyRemote::RCMemoryManager> MemMgr;
-    if (auto Err = Remote.createRemoteMemoryManager(MemMgr)) {
-      logAllUnhandledErrors(std::move(Err), errs(),
-                            "Error creating remote memory manager:");
-      exit(1);
-    }
-
-    // Build a singleton module set to hold our module.
-    std::vector<std::unique_ptr<Module>> Ms;
-    Ms.push_back(std::move(M));
-
     // Add the set to the JIT with the resolver we created above and a newly
     // created SectionMemoryManager.
-    return OptimizeLayer.addModuleSet(std::move(Ms),
-                                      std::move(MemMgr),
-                                      std::move(Resolver));
+    return cantFail(OptimizeLayer.addModule(std::move(M),
+                                            std::move(Resolver)));
   }
 
   Error addFunctionAST(std::unique_ptr<FunctionAST> FnAST) {
     // Create a CompileCallback - this is the re-entry point into the compiler
     // for functions that haven't been compiled yet.
-    auto CCInfo = CompileCallbackMgr->getCompileCallback();
+    auto CCInfo = cantFail(CompileCallbackMgr->getCompileCallback());
 
     // Create an indirect stub. This serves as the functions "canonical
     // definition" - an unchanging (constant address) entry point to the
@@ -209,7 +192,7 @@ public:
         addModule(std::move(M));
         auto Sym = findSymbol(SharedFnAST->getName() + "$impl");
         assert(Sym && "Couldn't find compiled function?");
-        JITTargetAddress SymAddr = Sym.getAddress();
+        JITTargetAddress SymAddr = cantFail(Sym.getAddress());
         if (auto Err =
               IndirectStubsMgr->updatePointer(mangle(SharedFnAST->getName()),
                                               SymAddr)) {
@@ -233,7 +216,7 @@ public:
   }
 
   void removeModule(ModuleHandle H) {
-    OptimizeLayer.removeModuleSet(H);
+    cantFail(OptimizeLayer.removeModule(H));
   }
 
 private:
@@ -244,7 +227,7 @@ private:
     return MangledNameStream.str();
   }
 
-  std::unique_ptr<Module> optimizeModule(std::unique_ptr<Module> M) {
+  std::shared_ptr<Module> optimizeModule(std::shared_ptr<Module> M) {
     // Create a function pass manager.
     auto FPM = llvm::make_unique<legacy::FunctionPassManager>(M.get());
 

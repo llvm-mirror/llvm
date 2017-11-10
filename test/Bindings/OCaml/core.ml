@@ -1,12 +1,12 @@
-(* RUN: cp %s %T/core.ml
- * RUN: %ocamlc -g -w +A -package llvm.analysis -package llvm.bitwriter -linkpkg %T/core.ml -o %t
- * RUN: %t %t.bc
- * RUN: %ocamlopt -g -w +A -package llvm.analysis -package llvm.bitwriter -linkpkg %T/core.ml -o %t
- * RUN: %t %t.bc
- * RUN: llvm-dis < %t.bc > %t.ll
- * RUN: FileCheck %s < %t.ll
+(* RUN: rm -rf %t && mkdir -p %t && cp %s %t/core.ml
+ * RUN: %ocamlc -g -w +A -package llvm.analysis -package llvm.bitwriter -linkpkg %t/core.ml -o %t/executable
+ * RUN: %t/executable %t/bitcode.bc
+ * RUN: %ocamlopt -g -w +A -package llvm.analysis -package llvm.bitwriter -linkpkg %t/core.ml -o %t/executable
+ * RUN: %t/executable %t/bitcode.bc
+ * RUN: llvm-dis < %t/bitcode.bc > %t/dis.ll
+ * RUN: FileCheck %s < %t/dis.ll
  * Do a second pass for things that shouldn't be anywhere.
- * RUN: FileCheck -check-prefix=CHECK-NOWHERE %s < %t.ll
+ * RUN: FileCheck -check-prefix=CHECK-NOWHERE %s < %t/dis.ll
  * XFAIL: vg_leak
  *)
 
@@ -65,6 +65,16 @@ let suite name f =
 
 let filename = Sys.argv.(1)
 let m = create_module context filename
+
+(*===-- Contained types  --------------------------------------------------===*)
+
+let test_contained_types () =
+  let pointer_i32 = pointer_type i32_type in
+  insist (i32_type = (Array.get (subtypes pointer_i32) 0));
+
+  let ar = struct_type context [| i32_type; i8_type |] in
+  insist (i32_type = (Array.get (subtypes ar)) 0);
+  insist (i8_type = (Array.get (subtypes ar)) 1)
 
 
 (*===-- Conversion --------------------------------------------------------===*)
@@ -1533,6 +1543,7 @@ let test_writer () =
 (*===-- Driver ------------------------------------------------------------===*)
 
 let _ =
+  suite "contained types"  test_contained_types;
   suite "conversion"       test_conversion;
   suite "target"           test_target;
   suite "constants"        test_constants;

@@ -1,4 +1,4 @@
-//===-- ShadowStackGCLowering.cpp - Custom lowering for shadow-stack gc ---===//
+//===- ShadowStackGCLowering.cpp - Custom lowering for shadow-stack gc ----===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -16,30 +16,46 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/CodeGen/Passes.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
-#include "llvm/CodeGen/GCStrategy.h"
-#include "llvm/IR/CallSite.h"
+#include "llvm/CodeGen/Passes.h"
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/Constant.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalValue.h"
+#include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Type.h"
+#include "llvm/IR/Value.h"
+#include "llvm/Pass.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Transforms/Utils/EscapeEnumerator.h"
+#include <cassert>
+#include <cstddef>
+#include <string>
+#include <utility>
+#include <vector>
 
 using namespace llvm;
 
-#define DEBUG_TYPE "shadowstackgclowering"
+#define DEBUG_TYPE "shadow-stack-gc-lowering"
 
 namespace {
 
 class ShadowStackGCLowering : public FunctionPass {
   /// RootChain - This is the global linked-list that contains the chain of GC
   /// roots.
-  GlobalVariable *Head;
+  GlobalVariable *Head = nullptr;
 
   /// StackEntryTy - Abstract type of a link in the shadow stack.
-  ///
-  StructType *StackEntryTy;
-  StructType *FrameMapTy;
+  StructType *StackEntryTy = nullptr;
+  StructType *FrameMapTy = nullptr;
 
   /// Roots - GC roots in the current function. Each is a pair of the
   /// intrinsic call and its corresponding alloca.
@@ -47,6 +63,7 @@ class ShadowStackGCLowering : public FunctionPass {
 
 public:
   static char ID;
+
   ShadowStackGCLowering();
 
   bool doInitialization(Module &M) override;
@@ -57,6 +74,7 @@ private:
   Constant *GetFrameMap(Function &F);
   Type *GetConcreteStackEntryType(Function &F);
   void CollectRoots(Function &F);
+
   static GetElementPtrInst *CreateGEP(LLVMContext &Context, IRBuilder<> &B,
                                       Type *Ty, Value *BasePtr, int Idx1,
                                       const char *Name);
@@ -64,21 +82,20 @@ private:
                                       Type *Ty, Value *BasePtr, int Idx1, int Idx2,
                                       const char *Name);
 };
-}
 
-INITIALIZE_PASS_BEGIN(ShadowStackGCLowering, "shadow-stack-gc-lowering",
+} // end anonymous namespace
+
+char ShadowStackGCLowering::ID = 0;
+
+INITIALIZE_PASS_BEGIN(ShadowStackGCLowering, DEBUG_TYPE,
                       "Shadow Stack GC Lowering", false, false)
 INITIALIZE_PASS_DEPENDENCY(GCModuleInfo)
-INITIALIZE_PASS_END(ShadowStackGCLowering, "shadow-stack-gc-lowering",
+INITIALIZE_PASS_END(ShadowStackGCLowering, DEBUG_TYPE,
                     "Shadow Stack GC Lowering", false, false)
 
 FunctionPass *llvm::createShadowStackGCLoweringPass() { return new ShadowStackGCLowering(); }
 
-char ShadowStackGCLowering::ID = 0;
-
-ShadowStackGCLowering::ShadowStackGCLowering()
-  : FunctionPass(ID), Head(nullptr), StackEntryTy(nullptr),
-    FrameMapTy(nullptr) {
+ShadowStackGCLowering::ShadowStackGCLowering() : FunctionPass(ID) {
   initializeShadowStackGCLoweringPass(*PassRegistry::getPassRegistry());
 }
 

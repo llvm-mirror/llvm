@@ -648,7 +648,7 @@ bool ReduceSimplifyCFG::TestBlocks(std::vector<const BasicBlock *> &BBs) {
         ++BBIt;
         continue;
       }
-      SimplifyCFG(&*BBIt++, TTI, 1);
+      simplifyCFG(&*BBIt++, TTI);
     }
   // Verify we didn't break anything
   std::vector<std::string> Passes;
@@ -1113,7 +1113,7 @@ static Error DebugACrash(BugDriver &BD,
       BD.EmitProgressBitcode(BD.getProgram(), "reduced-blocks");
   }
 
-  if (!DisableSimplifyCFG & !BugpointIsInterrupted) {
+  if (!DisableSimplifyCFG && !BugpointIsInterrupted) {
     std::vector<const BasicBlock *> Blocks;
     for (Function &F : *BD.getProgram())
       for (BasicBlock &BB : F)

@@ -49,6 +49,9 @@ def CC_AArch64_AAPCS : CallingConv<[
   // Pass SwiftSelf in a callee saved register.
   CCIfSwiftSelf<CCIfType<[i64], CCAssignToRegWithShadow<[X20], [W20]>>>,
 
+  // A SwiftError is passed in X21.
+  CCIfSwiftError<CCIfType<[i64], CCAssignToRegWithShadow<[X21], [W21]>>>,
+
   CCIfConsecutiveRegs<CCCustom<"CC_AArch64_Custom_Block">>,
 
   // Handle i1, i8, i16, i32, i64, f32, f64 and v2f64 by passing in registers,
@@ -116,6 +119,13 @@ def RetCC_AArch64_AAPCS : CallingConv<[
                               [Q0, Q1, Q2, Q3, Q4, Q5, Q6, Q7]>>,
   CCIfType<[f128, v2i64, v4i32, v8i16, v16i8, v4f32, v2f64, v8f16],
       CCAssignToReg<[Q0, Q1, Q2, Q3, Q4, Q5, Q6, Q7]>>
+]>;
+
+// Vararg functions on windows pass floats in integer registers
+def CC_AArch64_Win64_VarArg : CallingConv<[
+  CCIfType<[f16, f32],    CCPromoteToType<f64>>,
+  CCIfType<[f64], CCBitConvertToType<i64>>,
+  CCDelegateTo<CC_AArch64_AAPCS>
 ]>;
 
 

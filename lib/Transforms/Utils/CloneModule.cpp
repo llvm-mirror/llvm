@@ -12,12 +12,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Transforms/Utils/Cloning.h"
+#include "llvm-c/Core.h"
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Module.h"
+#include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
-#include "llvm-c/Core.h"
 using namespace llvm;
 
 static void copyComdat(GlobalObject *Dst, const GlobalObject *Src) {
@@ -96,7 +96,7 @@ std::unique_ptr<Module> llvm::CloneModule(
       else
         GV = new GlobalVariable(
             *New, I->getValueType(), false, GlobalValue::ExternalLinkage,
-            (Constant *)nullptr, I->getName(), (GlobalVariable *)nullptr,
+            nullptr, I->getName(), nullptr,
             I->getThreadLocalMode(), I->getType()->getAddressSpace());
       VMap[&*I] = GV;
       // We do not copy attributes (mainly because copying between different
@@ -132,7 +132,8 @@ std::unique_ptr<Module> llvm::CloneModule(
     SmallVector<std::pair<unsigned, MDNode *>, 1> MDs;
     I->getAllMetadata(MDs);
     for (auto MD : MDs)
-      GV->addMetadata(MD.first, *MapMetadata(MD.second, VMap));
+      GV->addMetadata(MD.first,
+                      *MapMetadata(MD.second, VMap, RF_MoveDistinctMDs));
 
     copyComdat(GV, &*I);
   }

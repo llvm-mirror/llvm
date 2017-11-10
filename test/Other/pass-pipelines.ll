@@ -24,7 +24,7 @@
 ; CHECK-O2: Dead Argument Elimination
 ; CHECK-O2-NEXT: FunctionPass Manager
 ; CHECK-O2-NOT: Manager
-; Very carefully asert the CGSCC pass pipeline as it is fragile and unusually
+; Very carefully assert the CGSCC pass pipeline as it is fragile and unusually
 ; susceptible to phase ordering issues.
 ; CHECK-O2: CallGraph Construction
 ; CHECK-O2-NEXT: Globals Alias Analysis
@@ -55,13 +55,15 @@
 ; Next we break out of the main Function passes inside the CGSCC pipeline with
 ; a barrier pass.
 ; CHECK-O2: A No-Op Barrier Pass
-; Reduce the size of the IR ASAP after the inliner.
 ; CHECK-O2-NEXT: Eliminate Available Externally
 ; Inferring function attribute should be right after the CGSCC pipeline, before
 ; any other optimizations/analyses.
 ; CHECK-O2-NEXT: CallGraph
 ; CHECK-O2-NEXT: Deduce function attributes in RPO
 ; CHECK-O2-NOT: Manager
+; Reduce the size of the IR ASAP after the inliner.
+; CHECK-O2-NEXT: Global Variable Optimizer
+; CHECK-O2: Dead Global Elimination
 ; Next is the late function pass pipeline.
 ; CHECK-O2: FunctionPass Manager
 ; CHECK-O2-NOT: Manager
@@ -85,6 +87,7 @@
 ; CHECK-O2: FunctionPass Manager
 ; CHECK-O2: Loop Pass Manager
 ; CHECK-O2-NEXT: Loop Sink
+; CHECK-O2: Simplify the CFG
 ; CHECK-O2-NOT: Manager
 ;
 ; FIXME: There really shouldn't be another pass manager, especially one that

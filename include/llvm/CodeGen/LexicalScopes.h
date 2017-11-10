@@ -31,12 +31,13 @@ namespace llvm {
 class MachineBasicBlock;
 class MachineFunction;
 class MachineInstr;
+class MDNode;
 
 //===----------------------------------------------------------------------===//
 /// InsnRange - This is used to track range of instructions with identical
 /// lexical scope.
 ///
-typedef std::pair<const MachineInstr *, const MachineInstr *> InsnRange;
+using InsnRange = std::pair<const MachineInstr *, const MachineInstr *>;
 
 //===----------------------------------------------------------------------===//
 /// LexicalScope - This class is used to track scope information.
@@ -195,7 +196,7 @@ public:
   }
 
   /// dump - Print data structures to dbgs().
-  void dump();
+  void dump() const;
 
   /// getOrCreateAbstractScope - Find or create an abstract lexical scope.
   LexicalScope *getOrCreateAbstractScope(const DILocalScope *Scope);

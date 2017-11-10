@@ -45,9 +45,21 @@ using namespace llvm;
 
 #define DEBUG_TYPE "simplifycfg"
 
-static cl::opt<unsigned>
-UserBonusInstThreshold("bonus-inst-threshold", cl::Hidden, cl::init(1),
-   cl::desc("Control the number of bonus instructions (default = 1)"));
+static cl::opt<unsigned> UserBonusInstThreshold(
+    "bonus-inst-threshold", cl::Hidden, cl::init(1),
+    cl::desc("Control the number of bonus instructions (default = 1)"));
+
+static cl::opt<bool> UserKeepLoops(
+    "keep-loops", cl::Hidden, cl::init(true),
+    cl::desc("Preserve canonical loop structure (default = true)"));
+
+static cl::opt<bool> UserSwitchToLookup(
+    "switch-to-lookup", cl::Hidden, cl::init(false),
+    cl::desc("Convert switches to lookup tables (default = false)"));
+
+static cl::opt<bool> UserForwardSwitchCond(
+    "forward-switch-cond", cl::Hidden, cl::init(false),
+    cl::desc("Forward switch condition to phi ops (default = false)"));
 
 STATISTIC(NumSimpl, "Number of blocks simplified");
 
@@ -129,8 +141,7 @@ static bool mergeEmptyReturnBlocks(Function &F) {
 /// Call SimplifyCFG on all the blocks in the function,
 /// iterating until no more changes are made.
 static bool iterativelySimplifyCFG(Function &F, const TargetTransformInfo &TTI,
-                                   AssumptionCache *AC,
-                                   unsigned BonusInstThreshold) {
+                                   const SimplifyCFGOptions &Options) {
   bool Changed = false;
   bool LocalChange = true;
 
@@ -145,7 +156,7 @@ static bool iterativelySimplifyCFG(Function &F, const TargetTransformInfo &TTI,
 
     // Loop over all of the basic blocks and remove them if they are unneeded.
     for (Function::iterator BBIt = F.begin(); BBIt != F.end(); ) {
-      if (SimplifyCFG(&*BBIt++, TTI, BonusInstThreshold, AC, &LoopHeaders)) {
+      if (simplifyCFG(&*BBIt++, TTI, Options, &LoopHeaders)) {
         LocalChange = true;
         ++NumSimpl;
       }
@@ -156,10 +167,10 @@ static bool iterativelySimplifyCFG(Function &F, const TargetTransformInfo &TTI,
 }
 
 static bool simplifyFunctionCFG(Function &F, const TargetTransformInfo &TTI,
-                                AssumptionCache *AC, int BonusInstThreshold) {
+                                const SimplifyCFGOptions &Options) {
   bool EverChanged = removeUnreachableBlocks(F);
   EverChanged |= mergeEmptyReturnBlocks(F);
-  EverChanged |= iterativelySimplifyCFG(F, TTI, AC, BonusInstThreshold);
+  EverChanged |= iterativelySimplifyCFG(F, TTI, Options);
 
   // If neither pass changed anything, we're done.
   if (!EverChanged) return false;
@@ -173,25 +184,34 @@ static bool simplifyFunctionCFG(Function &F, const TargetTransformInfo &TTI,
     return true;
 
   do {
-    EverChanged = iterativelySimplifyCFG(F, TTI, AC, BonusInstThreshold);
+    EverChanged = iterativelySimplifyCFG(F, TTI, Options);
     EverChanged |= removeUnreachableBlocks(F);
   } while (EverChanged);
 
   return true;
 }
 
-SimplifyCFGPass::SimplifyCFGPass()
-    : BonusInstThreshold(UserBonusInstThreshold) {}
-
-SimplifyCFGPass::SimplifyCFGPass(int BonusInstThreshold)
-    : BonusInstThreshold(BonusInstThreshold) {}
+// Command-line settings override compile-time settings.
+SimplifyCFGPass::SimplifyCFGPass(const SimplifyCFGOptions &Opts) {
+  Options.BonusInstThreshold = UserBonusInstThreshold.getNumOccurrences()
+                                   ? UserBonusInstThreshold
+                                   : Opts.BonusInstThreshold;
+  Options.ForwardSwitchCondToPhi = UserForwardSwitchCond.getNumOccurrences()
+                                       ? UserForwardSwitchCond
+                                       : Opts.ForwardSwitchCondToPhi;
+  Options.ConvertSwitchToLookupTable = UserSwitchToLookup.getNumOccurrences()
+                                           ? UserSwitchToLookup
+                                           : Opts.ConvertSwitchToLookupTable;
+  Options.NeedCanonicalLoop = UserKeepLoops.getNumOccurrences()
+                                  ? UserKeepLoops
+                                  : Opts.NeedCanonicalLoop;
+}
 
 PreservedAnalyses SimplifyCFGPass::run(Function &F,
                                        FunctionAnalysisManager &AM) {
   auto &TTI = AM.getResult<TargetIRAnalysis>(F);
-  auto &AC = AM.getResult<AssumptionAnalysis>(F);
-
-  if (!simplifyFunctionCFG(F, TTI, &AC, BonusInstThreshold))
+  Options.AC = &AM.getResult<AssumptionAnalysis>(F);
+  if (!simplifyFunctionCFG(F, TTI, Options))
     return PreservedAnalyses::all();
   PreservedAnalyses PA;
   PA.preserve<GlobalsAA>();
@@ -200,27 +220,42 @@ PreservedAnalyses SimplifyCFGPass::run(Function &F,
 
 namespace {
 struct CFGSimplifyPass : public FunctionPass {
-  static char ID; // Pass identification, replacement for typeid
-  unsigned BonusInstThreshold;
+  static char ID;
+  SimplifyCFGOptions Options;
   std::function<bool(const Function &)> PredicateFtor;
 
-  CFGSimplifyPass(int T = -1,
+  CFGSimplifyPass(unsigned Threshold = 1, bool ForwardSwitchCond = false,
+                  bool ConvertSwitch = false, bool KeepLoops = true,
                   std::function<bool(const Function &)> Ftor = nullptr)
       : FunctionPass(ID), PredicateFtor(std::move(Ftor)) {
-    BonusInstThreshold = (T == -1) ? UserBonusInstThreshold : unsigned(T);
+
     initializeCFGSimplifyPassPass(*PassRegistry::getPassRegistry());
+
+    // Check for command-line overrides of options for debug/customization.
+    Options.BonusInstThreshold = UserBonusInstThreshold.getNumOccurrences()
+                                    ? UserBonusInstThreshold
+                                    : Threshold;
+
+    Options.ForwardSwitchCondToPhi = UserForwardSwitchCond.getNumOccurrences()
+                                         ? UserForwardSwitchCond
+                                         : ForwardSwitchCond;
+
+    Options.ConvertSwitchToLookupTable = UserSwitchToLookup.getNumOccurrences()
+                                             ? UserSwitchToLookup
+                                             : ConvertSwitch;
+
+    Options.NeedCanonicalLoop =
+        UserKeepLoops.getNumOccurrences() ? UserKeepLoops : KeepLoops;
   }
+
   bool runOnFunction(Function &F) override {
     if (skipFunction(F) || (PredicateFtor && !PredicateFtor(F)))
       return false;
 
-    AssumptionCache *AC =
-        &getAnalysis<AssumptionCacheTracker>().getAssumptionCache(F);
-    const TargetTransformInfo &TTI =
-        getAnalysis<TargetTransformInfoWrapperPass>().getTTI(F);
-    return simplifyFunctionCFG(F, TTI, AC, BonusInstThreshold);
+    Options.AC = &getAnalysis<AssumptionCacheTracker>().getAssumptionCache(F);
+    auto &TTI = getAnalysis<TargetTransformInfoWrapperPass>().getTTI(F);
+    return simplifyFunctionCFG(F, TTI, Options);
   }
-
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequired<AssumptionCacheTracker>();
     AU.addRequired<TargetTransformInfoWrapperPass>();
@@ -239,7 +274,9 @@ INITIALIZE_PASS_END(CFGSimplifyPass, "simplifycfg", "Simplify the CFG", false,
 
 // Public interface to the CFGSimplification pass
 FunctionPass *
-llvm::createCFGSimplificationPass(int Threshold,
+llvm::createCFGSimplificationPass(unsigned Threshold, bool ForwardSwitchCond,
+                                  bool ConvertSwitch, bool KeepLoops,
                                   std::function<bool(const Function &)> Ftor) {
-  return new CFGSimplifyPass(Threshold, std::move(Ftor));
+  return new CFGSimplifyPass(Threshold, ForwardSwitchCond, ConvertSwitch,
+                             KeepLoops, std::move(Ftor));
 }

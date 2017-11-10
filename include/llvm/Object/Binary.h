@@ -14,10 +14,13 @@
 #ifndef LLVM_OBJECT_BINARY_H
 #define LLVM_OBJECT_BINARY_H
 
+#include "llvm/ADT/Triple.h"
 #include "llvm/Object/Error.h"
-#include "llvm/Support/ErrorOr.h"
-#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include <algorithm>
+#include <memory>
+#include <utility>
 
 namespace llvm {
 
@@ -28,9 +31,6 @@ namespace object {
 
 class Binary {
 private:
-  Binary() = delete;
-  Binary(const Binary &other) = delete;
-
   unsigned int TypeID;
 
 protected:
@@ -43,7 +43,8 @@ protected:
     ID_MachOUniversalBinary,
     ID_COFFImportFile,
     ID_IR,                 // LLVM IR
-    ID_ModuleSummaryIndex, // Module summary index
+
+    ID_WinRes, // Windows resource (.res) file.
 
     // Object and children.
     ID_StartObjects,
@@ -79,6 +80,8 @@ protected:
   }
 
 public:
+  Binary() = delete;
+  Binary(const Binary &other) = delete;
   virtual ~Binary();
 
   StringRef getData() const;
@@ -93,9 +96,7 @@ public:
     return TypeID > ID_StartObjects && TypeID < ID_EndObjects;
   }
 
-  bool isSymbolic() const {
-    return isIR() || isObject();
-  }
+  bool isSymbolic() const { return isIR() || isObject() || isCOFFImportFile(); }
 
   bool isArchive() const {
     return TypeID == ID_Archive;
@@ -127,11 +128,31 @@ public:
     return TypeID == ID_IR;
   }
 
-  bool isModuleSummaryIndex() const { return TypeID == ID_ModuleSummaryIndex; }
-
   bool isLittleEndian() const {
     return !(TypeID == ID_ELF32B || TypeID == ID_ELF64B ||
              TypeID == ID_MachO32B || TypeID == ID_MachO64B);
+  }
+
+  bool isWinRes() const { return TypeID == ID_WinRes; }
+
+  Triple::ObjectFormatType getTripleObjectFormat() const {
+    if (isCOFF())
+      return Triple::COFF;
+    if (isMachO())
+      return Triple::MachO;
+    if (isELF())
+      return Triple::ELF;
+    return Triple::UnknownObjectFormat;
+  }
+
+  static std::error_code checkOffset(MemoryBufferRef M, uintptr_t Addr,
+                                     const uint64_t Size) {
+    if (Addr + Size < Addr || Addr + Size < Size ||
+        Addr + Size > uintptr_t(M.getBufferEnd()) ||
+        Addr < uintptr_t(M.getBufferStart())) {
+      return object_error::unexpected_eof;
+    }
+    return std::error_code();
   }
 };
 
@@ -162,7 +183,7 @@ OwningBinary<T>::OwningBinary(std::unique_ptr<T> Bin,
                               std::unique_ptr<MemoryBuffer> Buf)
     : Bin(std::move(Bin)), Buf(std::move(Buf)) {}
 
-template <typename T> OwningBinary<T>::OwningBinary() {}
+template <typename T> OwningBinary<T>::OwningBinary() = default;
 
 template <typename T>
 OwningBinary<T>::OwningBinary(OwningBinary &&Other)
@@ -190,7 +211,9 @@ template <typename T> const T* OwningBinary<T>::getBinary() const {
 }
 
 Expected<OwningBinary<Binary>> createBinary(StringRef Path);
-}
-}
 
-#endif
+} // end namespace object
+
+} // end namespace llvm
+
+#endif // LLVM_OBJECT_BINARY_H

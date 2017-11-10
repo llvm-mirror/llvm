@@ -19,13 +19,14 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/None.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/Twine.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constant.h"
@@ -53,6 +54,7 @@
 #include <cstdint>
 #include <iterator>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -233,7 +235,7 @@ void ReplaceableMetadataImpl::replaceAllUsesWith(Metadata *MD) {
     return;
 
   // Copy out uses since UseMap will get touched below.
-  typedef std::pair<void *, std::pair<OwnerTy, uint64_t>> UseTy;
+  using UseTy = std::pair<void *, std::pair<OwnerTy, uint64_t>>;
   SmallVector<UseTy, 8> Uses(UseMap.begin(), UseMap.end());
   std::sort(Uses.begin(), Uses.end(), [](const UseTy &L, const UseTy &R) {
     return L.second.second < R.second.second;
@@ -286,7 +288,7 @@ void ReplaceableMetadataImpl::resolveAllUses(bool ResolveUsers) {
   }
 
   // Copy out uses since UseMap could get touched below.
-  typedef std::pair<void *, std::pair<OwnerTy, uint64_t>> UseTy;
+  using UseTy = std::pair<void *, std::pair<OwnerTy, uint64_t>>;
   SmallVector<UseTy, 8> Uses(UseMap.begin(), UseMap.end());
   std::sort(Uses.begin(), Uses.end(), [](const UseTy &L, const UseTy &R) {
     return L.second.second < R.second.second;
@@ -758,8 +760,8 @@ static T *uniquifyImpl(T *N, DenseSet<T *, InfoT> &Store) {
 }
 
 template <class NodeTy> struct MDNode::HasCachedHash {
-  typedef char Yes[1];
-  typedef char No[2];
+  using Yes = char[1];
+  using No = char[2];
   template <class U, U Val> struct SFINAE {};
 
   template <class U>
@@ -967,7 +969,7 @@ static void addRange(SmallVectorImpl<ConstantInt *> &EndPoints,
 
 MDNode *MDNode::getMostGenericRange(MDNode *A, MDNode *B) {
   // Given two ranges, we want to compute the union of the ranges. This
-  // is slightly complitade by having to combine the intervals and merge
+  // is slightly complicated by having to combine the intervals and merge
   // the ones that overlap.
 
   if (!A || !B)
@@ -976,7 +978,7 @@ MDNode *MDNode::getMostGenericRange(MDNode *A, MDNode *B) {
   if (A == B)
     return A;
 
-  // First, walk both lists in older of the lower boundary of each interval.
+  // First, walk both lists in order of the lower boundary of each interval.
   // At each step, try to merge the new interval to the last one we adedd.
   SmallVector<ConstantInt *, 4> EndPoints;
   int AI = 0;
@@ -1337,17 +1339,26 @@ bool Instruction::extractProfTotalWeight(uint64_t &TotalVal) const {
     return false;
 
   auto *ProfDataName = dyn_cast<MDString>(ProfileData->getOperand(0));
-  if (!ProfDataName || !ProfDataName->getString().equals("branch_weights"))
+  if (!ProfDataName)
     return false;
 
-  TotalVal = 0;
-  for (unsigned i = 1; i < ProfileData->getNumOperands(); i++) {
-    auto *V = mdconst::dyn_extract<ConstantInt>(ProfileData->getOperand(i));
-    if (!V)
-      return false;
-    TotalVal += V->getValue().getZExtValue();
+  if (ProfDataName->getString().equals("branch_weights")) {
+    TotalVal = 0;
+    for (unsigned i = 1; i < ProfileData->getNumOperands(); i++) {
+      auto *V = mdconst::dyn_extract<ConstantInt>(ProfileData->getOperand(i));
+      if (!V)
+        return false;
+      TotalVal += V->getValue().getZExtValue();
+    }
+    return true;
+  } else if (ProfDataName->getString().equals("VP") &&
+             ProfileData->getNumOperands() > 3) {
+    TotalVal = mdconst::dyn_extract<ConstantInt>(ProfileData->getOperand(2))
+                   ->getValue()
+                   .getZExtValue();
+    return true;
   }
-  return true;
+  return false;
 }
 
 void Instruction::clearMetadataHashEntries() {
@@ -1420,7 +1431,6 @@ void GlobalObject::setMetadata(StringRef Kind, MDNode *N) {
 MDNode *GlobalObject::getMetadata(unsigned KindID) const {
   SmallVector<MDNode *, 1> MDs;
   getMetadata(KindID, MDs);
-  assert(MDs.size() <= 1 && "Expected at most one metadata attachment");
   if (MDs.empty())
     return nullptr;
   return MDs[0];
@@ -1461,7 +1471,7 @@ void GlobalObject::copyMetadata(const GlobalObject *Other, unsigned Offset) {
       if (E)
         OrigElements = E->getElements();
       std::vector<uint64_t> Elements(OrigElements.size() + 2);
-      Elements[0] = dwarf::DW_OP_plus;
+      Elements[0] = dwarf::DW_OP_plus_uconst;
       Elements[1] = Offset;
       std::copy(OrigElements.begin(), OrigElements.end(), Elements.begin() + 2);
       E = DIExpression::get(getContext(), Elements);
@@ -1475,7 +1485,7 @@ void GlobalObject::addTypeMetadata(unsigned Offset, Metadata *TypeID) {
   addMetadata(
       LLVMContext::MD_type,
       *MDTuple::get(getContext(),
-                    {ConstantAsMetadata::get(llvm::ConstantInt::get(
+                    {ConstantAsMetadata::get(ConstantInt::get(
                          Type::getInt64Ty(getContext()), Offset)),
                      TypeID}));
 }

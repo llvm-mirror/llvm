@@ -1,5 +1,5 @@
-; RUN: llc -march=amdgcn -mattr=-fp64-fp16-denormals -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=SI %s
-; RUN: llc -march=amdgcn -mcpu=fiji -mattr=-fp64-fp16-denormals,-flat-for-global -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=VI %s
+; RUN:  llc -amdgpu-scalarize-global-loads=false  -march=amdgcn -mcpu=tahiti -mattr=-fp64-fp16-denormals -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=SI %s
+; RUN:  llc -amdgpu-scalarize-global-loads=false  -march=amdgcn -mcpu=fiji -mattr=-fp64-fp16-denormals,-flat-for-global -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=VI %s
 
 ; GCN-LABEL: {{^}}mac_f16:
 ; GCN: {{buffer|flat}}_load_ushort v[[A_F16:[0-9]+]]
@@ -8,13 +8,13 @@
 ; SI:  v_cvt_f32_f16_e32 v[[A_F32:[0-9]+]], v[[A_F16]]
 ; SI:  v_cvt_f32_f16_e32 v[[B_F32:[0-9]+]], v[[B_F16]]
 ; SI:  v_cvt_f32_f16_e32 v[[C_F32:[0-9]+]], v[[C_F16]]
-; SI:  v_mac_f32_e32 v[[C_F32]], v[[B_F32]], v[[A_F32]]
+; SI:  v_mac_f32_e32 v[[C_F32]], v[[A_F32]], v[[B_F32]]
 ; SI:  v_cvt_f16_f32_e32 v[[R_F16:[0-9]+]], v[[C_F32]]
 ; SI:  buffer_store_short v[[R_F16]]
-; VI:  v_mac_f16_e32 v[[C_F16]], v[[B_F16]], v[[A_F16]]
+; VI:  v_mac_f16_e32 v[[C_F16]], v[[A_F16]], v[[B_F16]]
 ; VI:  buffer_store_short v[[C_F16]]
 ; GCN: s_endpgm
-define void @mac_f16(
+define amdgpu_kernel void @mac_f16(
     half addrspace(1)* %r,
     half addrspace(1)* %a,
     half addrspace(1)* %b,
@@ -38,7 +38,7 @@ entry:
 ; VI:  v_mad_f16 v{{[0-9]}}, v{{[0-9]+}}, v{{[0-9]+}}, [[ADD:v[0-9]+]]
 ; VI:  v_mac_f16_e32 [[ADD]], v{{[0-9]+}}, v{{[0-9]+}}
 ; GCN: s_endpgm
-define void @mac_f16_same_add(
+define amdgpu_kernel void @mac_f16_same_add(
     half addrspace(1)* %r0,
     half addrspace(1)* %r1,
     half addrspace(1)* %a,
@@ -73,7 +73,7 @@ entry:
 ; VI-NOT: v_mac_f16
 ; VI:     v_mad_f16 v{{[0-9]+}}, -v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}}
 ; GCN:    s_endpgm
-define void @mac_f16_neg_a(
+define amdgpu_kernel void @mac_f16_neg_a(
     half addrspace(1)* %r,
     half addrspace(1)* %a,
     half addrspace(1)* %b,
@@ -100,7 +100,7 @@ entry:
 ; VI-NOT: v_mac_f16
 ; VI:     v_mad_f16 v{{[0-9]+}}, -v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}}
 ; GCN:    s_endpgm
-define void @mac_f16_neg_b(
+define amdgpu_kernel void @mac_f16_neg_b(
     half addrspace(1)* %r,
     half addrspace(1)* %a,
     half addrspace(1)* %b,
@@ -127,7 +127,7 @@ entry:
 ; VI-NOT: v_mac_f16
 ; VI:     v_mad_f16 v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}}, -v{{[0-9]+}}
 ; GCN:    s_endpgm
-define void @mac_f16_neg_c(
+define amdgpu_kernel void @mac_f16_neg_c(
     half addrspace(1)* %r,
     half addrspace(1)* %a,
     half addrspace(1)* %b,
@@ -147,11 +147,11 @@ entry:
 
 ; GCN-LABEL: {{^}}mac_f16_neg_a_safe_fp_math:
 ; SI:  v_sub_f32_e32 v[[NEG_A:[0-9]+]], 0, v{{[0-9]+}}
-; SI:  v_mac_f32_e32 v{{[0-9]+}}, v{{[0-9]+}}, v[[NEG_A]]
+; SI:  v_mac_f32_e32 v{{[0-9]+}}, v[[NEG_A]], v{{[0-9]+}}
 ; VI:  v_sub_f16_e32 v[[NEG_A:[0-9]+]], 0, v{{[0-9]+}}
-; VI:  v_mac_f16_e32 v{{[0-9]+}}, v{{[0-9]+}}, v[[NEG_A]]
+; VI:  v_mac_f16_e32 v{{[0-9]+}}, v[[NEG_A]], v{{[0-9]+}}
 ; GCN: s_endpgm
-define void @mac_f16_neg_a_safe_fp_math(
+define amdgpu_kernel void @mac_f16_neg_a_safe_fp_math(
     half addrspace(1)* %r,
     half addrspace(1)* %a,
     half addrspace(1)* %b,
@@ -171,11 +171,11 @@ entry:
 
 ; GCN-LABEL: {{^}}mac_f16_neg_b_safe_fp_math:
 ; SI:  v_sub_f32_e32 v[[NEG_A:[0-9]+]], 0, v{{[0-9]+}}
-; SI:  v_mac_f32_e32 v{{[0-9]+}}, v[[NEG_A]], v{{[0-9]+}}
+; SI:  v_mac_f32_e32 v{{[0-9]+}}, v{{[0-9]+}}, v[[NEG_A]]
 ; VI:  v_sub_f16_e32 v[[NEG_A:[0-9]+]], 0, v{{[0-9]+}}
-; VI:  v_mac_f16_e32 v{{[0-9]+}}, v[[NEG_A]], v{{[0-9]+}}
+; VI:  v_mac_f16_e32 v{{[0-9]+}}, v{{[0-9]+}}, v[[NEG_A]]
 ; GCN: s_endpgm
-define void @mac_f16_neg_b_safe_fp_math(
+define amdgpu_kernel void @mac_f16_neg_b_safe_fp_math(
     half addrspace(1)* %r,
     half addrspace(1)* %a,
     half addrspace(1)* %b,
@@ -199,7 +199,7 @@ entry:
 ; VI:  v_sub_f16_e32 v[[NEG_A:[0-9]+]], 0, v{{[0-9]+}}
 ; VI:  v_mac_f16_e32 v[[NEG_A]], v{{[0-9]+}}, v{{[0-9]+}}
 ; GCN: s_endpgm
-define void @mac_f16_neg_c_safe_fp_math(
+define amdgpu_kernel void @mac_f16_neg_c_safe_fp_math(
     half addrspace(1)* %r,
     half addrspace(1)* %a,
     half addrspace(1)* %b,
@@ -226,7 +226,7 @@ entry:
 ; VI-NOT: v_mac_f16
 ; VI:     v_mad_f16 v{{[0-9]+}}, -v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]}}
 ; GCN:    s_endpgm
-define void @mac_f16_neg_a_nsz_fp_math(
+define amdgpu_kernel void @mac_f16_neg_a_nsz_fp_math(
     half addrspace(1)* %r,
     half addrspace(1)* %a,
     half addrspace(1)* %b,
@@ -253,7 +253,7 @@ entry:
 ; VI-NOT: v_mac_f16
 ; VI:     v_mad_f16 v{{[0-9]+}}, -v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]}}
 ; GCN:    s_endpgm
-define void @mac_f16_neg_b_nsz_fp_math(
+define amdgpu_kernel void @mac_f16_neg_b_nsz_fp_math(
     half addrspace(1)* %r,
     half addrspace(1)* %a,
     half addrspace(1)* %b,
@@ -280,7 +280,7 @@ entry:
 ; VI-NOT: v_mac_f16
 ; VI:     v_mad_f16 v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}}, -v{{[0-9]}}
 ; GCN:    s_endpgm
-define void @mac_f16_neg_c_nsz_fp_math(
+define amdgpu_kernel void @mac_f16_neg_c_nsz_fp_math(
     half addrspace(1)* %r,
     half addrspace(1)* %a,
     half addrspace(1)* %b,
@@ -302,36 +302,43 @@ entry:
 ; GCN: {{buffer|flat}}_load_dword v[[A_V2_F16:[0-9]+]]
 ; GCN: {{buffer|flat}}_load_dword v[[B_V2_F16:[0-9]+]]
 ; GCN: {{buffer|flat}}_load_dword v[[C_V2_F16:[0-9]+]]
-; GCN: v_lshrrev_b32_e32 v[[A_F16_1:[0-9]+]], 16, v[[A_V2_F16]]
-; GCN: v_lshrrev_b32_e32 v[[B_F16_1:[0-9]+]], 16, v[[B_V2_F16]]
-; GCN: v_lshrrev_b32_e32 v[[C_F16_1:[0-9]+]], 16, v[[C_V2_F16]]
+
 ; SI:  v_cvt_f32_f16_e32 v[[A_F32_0:[0-9]+]], v[[A_V2_F16]]
-; SI:  v_cvt_f32_f16_e32 v[[B_F32_0:[0-9]+]], v[[B_V2_F16]]
-; SI:  v_cvt_f32_f16_e32 v[[C_F32_0:[0-9]+]], v[[C_V2_F16]]
+; SI:  v_lshrrev_b32_e32 v[[A_F16_1:[0-9]+]], 16, v[[A_V2_F16]]
 ; SI:  v_cvt_f32_f16_e32 v[[A_F32_1:[0-9]+]], v[[A_F16_1]]
+; SI:  v_lshrrev_b32_e32 v[[B_F16_1:[0-9]+]], 16, v[[B_V2_F16]]
 ; SI:  v_cvt_f32_f16_e32 v[[B_F32_1:[0-9]+]], v[[B_F16_1]]
+; SI:  v_cvt_f32_f16_e32 v[[B_F32_0:[0-9]+]], v[[B_V2_F16]]
+; SI:  v_lshrrev_b32_e32 v[[C_F16_1:[0-9]+]], 16, v[[C_V2_F16]]
 ; SI:  v_cvt_f32_f16_e32 v[[C_F32_1:[0-9]+]], v[[C_F16_1]]
-; SI:  v_mac_f32_e32 v[[C_F32_0]], v[[B_F32_0]], v[[A_F32_0]]
-; SI:  v_cvt_f16_f32_e32 v[[R_F16_0:[0-9]+]], v[[C_F32_0]]
-; SI:  v_mac_f32_e32 v[[C_F32_1]], v[[B_F32_1]], v[[A_F32_1]]
-; SI:  v_cvt_f16_f32_e32 v[[R_F16_1:[0-9]+]], v[[C_F32_1]]
-; SI:  v_and_b32_e32 v[[R_F16_LO:[0-9]+]], 0xffff, v[[R_F16_0]]
+; SI-DAG:  v_cvt_f32_f16_e32 v[[C_F32_0:[0-9]+]], v[[C_V2_F16]]
+; SI-DAG:  v_mac_f32_e32 v[[C_F32_0]], v[[A_F32_0]], v[[B_F32_0]]
+; SI-DAG:  v_cvt_f16_f32_e32 v[[R_F16_LO:[0-9]+]], v[[C_F32_0]]
+; SI-DAG:  v_mac_f32_e32 v[[C_F32_1]], v[[A_F32_1]], v[[B_F32_1]]
+; SI-DAG:  v_cvt_f16_f32_e32 v[[R_F16_1:[0-9]+]], v[[C_F32_1]]
 ; SI:  v_lshlrev_b32_e32 v[[R_F16_HI:[0-9]+]], 16, v[[R_F16_1]]
-; VI:  v_mac_f16_e32 v[[C_V2_F16]], v[[B_V2_F16]], v[[A_V2_F16]]
-; VI:  v_mac_f16_e32 v[[C_F16_1]], v[[B_F16_1]], v[[A_F16_1]]
-; VI:  v_and_b32_e32 v[[R_F16_LO:[0-9]+]], 0xffff, v[[C_V2_F16]]
-; VI:  v_lshlrev_b32_e32 v[[R_F16_HI:[0-9]+]], 16, v[[C_F16_1]]
-; GCN: v_or_b32_e32 v[[R_V2_F16:[0-9]+]], v[[R_F16_HI]], v[[R_F16_LO]]
+; VI-NOT: and
+; SI:  v_or_b32_e32 v[[R_V2_F16:[0-9]+]], v[[R_F16_LO]], v[[R_F16_HI]]
+
+; VI-DAG: v_lshrrev_b32_e32 v[[C_F16_1:[0-9]+]], 16, v[[C_V2_F16]]
+; VI-DAG: v_mac_f16_sdwa v[[C_F16_1]], v[[A_V2_F16]], v[[B_V2_F16]] dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1 src1_sel:WORD_1
+; VI-DAG: v_mac_f16_e32 v[[C_V2_F16]], v[[A_V2_F16]], v[[B_V2_F16]]
+; VI-DAG: v_lshlrev_b32_e32 v[[R_F16_HI:[0-9]+]], 16, v[[C_F16_1]]
+; VI-NOT: and
+; VI:  v_or_b32_e32 v[[R_V2_F16:[0-9]+]], v[[C_V2_F16]], v[[R_F16_HI]]
+
 ; GCN: {{buffer|flat}}_store_dword v[[R_V2_F16]]
 ; GCN: s_endpgm
-define void @mac_v2f16(
+define amdgpu_kernel void @mac_v2f16(
     <2 x half> addrspace(1)* %r,
     <2 x half> addrspace(1)* %a,
     <2 x half> addrspace(1)* %b,
     <2 x half> addrspace(1)* %c) #0 {
 entry:
   %a.val = load <2 x half>, <2 x half> addrspace(1)* %a
+  call void @llvm.amdgcn.s.barrier() #2
   %b.val = load <2 x half>, <2 x half> addrspace(1)* %b
+  call void @llvm.amdgcn.s.barrier() #2
   %c.val = load <2 x half>, <2 x half> addrspace(1)* %c
 
   %t.val = fmul <2 x half> %a.val, %b.val
@@ -342,16 +349,18 @@ entry:
 }
 
 ; GCN-LABEL: {{^}}mac_v2f16_same_add:
-; SI:  v_mad_f32 v{{[0-9]}}, v{{[0-9]+}}, v{{[0-9]+}}, [[ADD0:v[0-9]+]]
-; SI:  v_mad_f32 v{{[0-9]}}, v{{[0-9]+}}, v{{[0-9]+}}, [[ADD1:v[0-9]+]]
-; SI:  v_mac_f32_e32 [[ADD0]], v{{[0-9]+}}, v{{[0-9]+}}
-; SI:  v_mac_f32_e32 [[ADD1]], v{{[0-9]+}}, v{{[0-9]+}}
-; VI:  v_mad_f16 v{{[0-9]}}, v{{[0-9]+}}, v{{[0-9]+}}, [[ADD0:v[0-9]+]]
-; VI:  v_mad_f16 v{{[0-9]}}, v{{[0-9]+}}, v{{[0-9]+}}, [[ADD1:v[0-9]+]]
-; VI:  v_mac_f16_e32 [[ADD0]], v{{[0-9]+}}, v{{[0-9]+}}
-; VI:  v_mac_f16_e32 [[ADD1]], v{{[0-9]+}}, v{{[0-9]+}}
+; SI:  v_mad_f32 v{{[0-9]}}, v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}}
+; SI:  v_mad_f32 v{{[0-9]}}, v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}}
+; SI:  v_mac_f32_e32 v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}}
+; SI:  v_mac_f32_e32 v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}}
+
+; VI-DAG:  v_mac_f16_sdwa v{{[0-9]}}, v{{[0-9]+}}, v{{[0-9]+}} dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1 src1_sel:WORD_1
+; VI-DAG:  v_mad_f16 v{{[0-9]}}, v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}}
+; VI-DAG:  v_mac_f16_sdwa v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}} dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1 src1_sel:WORD_1
+; VI-DAG:  v_mac_f16_e32 v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}}
+
 ; GCN: s_endpgm
-define void @mac_v2f16_same_add(
+define amdgpu_kernel void @mac_v2f16_same_add(
     <2 x half> addrspace(1)* %r0,
     <2 x half> addrspace(1)* %r1,
     <2 x half> addrspace(1)* %a,
@@ -388,7 +397,7 @@ entry:
 ; VI:     v_mad_f16 v{{[0-9]+}}, -v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}}
 ; VI:     v_mad_f16 v{{[0-9]+}}, -v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}}
 ; GCN:    s_endpgm
-define void @mac_v2f16_neg_a(
+define amdgpu_kernel void @mac_v2f16_neg_a(
     <2 x half> addrspace(1)* %r,
     <2 x half> addrspace(1)* %a,
     <2 x half> addrspace(1)* %b,
@@ -417,7 +426,7 @@ entry:
 ; VI:     v_mad_f16 v{{[0-9]+}}, -v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}}
 ; VI:     v_mad_f16 v{{[0-9]+}}, -v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}}
 ; GCN:    s_endpgm
-define void @mac_v2f16_neg_b(
+define amdgpu_kernel void @mac_v2f16_neg_b(
     <2 x half> addrspace(1)* %r,
     <2 x half> addrspace(1)* %a,
     <2 x half> addrspace(1)* %b,
@@ -450,7 +459,7 @@ entry:
 ; VI:     v_mad_f16 v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}}, -v{{[0-9]+}}
 ; VI:     v_mad_f16 v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}}, -v{{[0-9]+}}
 ; GCN:    s_endpgm
-define void @mac_v2f16_neg_c(
+define amdgpu_kernel void @mac_v2f16_neg_c(
     <2 x half> addrspace(1)* %r,
     <2 x half> addrspace(1)* %a,
     <2 x half> addrspace(1)* %b,
@@ -469,16 +478,20 @@ entry:
 }
 
 ; GCN-LABEL: {{^}}mac_v2f16_neg_a_safe_fp_math:
+
 ; SI:  v_sub_f32_e32 v[[NEG_A0:[0-9]+]], 0, v{{[0-9]+}}
 ; SI:  v_sub_f32_e32 v[[NEG_A1:[0-9]+]], 0, v{{[0-9]+}}
-; SI:  v_mac_f32_e32 v{{[0-9]+}}, v{{[0-9]+}}, v[[NEG_A0]]
-; SI:  v_mac_f32_e32 v{{[0-9]+}}, v{{[0-9]+}}, v[[NEG_A1]]
-; VI:  v_sub_f16_e32 v[[NEG_A0:[0-9]+]], 0, v{{[0-9]+}}
-; VI:  v_sub_f16_e32 v[[NEG_A1:[0-9]+]], 0, v{{[0-9]+}}
-; VI:  v_mac_f16_e32 v{{[0-9]+}}, v{{[0-9]+}}, v[[NEG_A0]]
-; VI:  v_mac_f16_e32 v{{[0-9]+}}, v{{[0-9]+}}, v[[NEG_A1]]
+; SI-DAG:  v_mac_f32_e32 v{{[0-9]+}}, v[[NEG_A0]], v{{[0-9]+}}
+; SI-DAG:  v_mac_f32_e32 v{{[0-9]+}}, v[[NEG_A1]], v{{[0-9]+}}
+
+; VI-DAG:  v_mov_b32_e32 [[ZERO:v[0-9]+]], 0
+; VI-DAG:  v_sub_f16_e32 v[[NEG_A1:[0-9]+]], 0, v{{[0-9]+}}
+; VI-DAG:  v_sub_f16_sdwa v[[NEG_A0:[0-9]+]], [[ZERO]], v{{[0-9]+}} dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:DWORD src1_sel:WORD_1
+; VI-DAG:  v_mac_f16_sdwa v{{[0-9]+}}, v[[NEG_A0]], v{{[0-9]+}} dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:DWORD src1_sel:WORD_1
+; VI-DAG:  v_mac_f16_e32 v{{[0-9]+}}, v[[NEG_A1]], v{{[0-9]+}}
+
 ; GCN: s_endpgm
-define void @mac_v2f16_neg_a_safe_fp_math(
+define amdgpu_kernel void @mac_v2f16_neg_a_safe_fp_math(
     <2 x half> addrspace(1)* %r,
     <2 x half> addrspace(1)* %a,
     <2 x half> addrspace(1)* %b,
@@ -497,16 +510,20 @@ entry:
 }
 
 ; GCN-LABEL: {{^}}mac_v2f16_neg_b_safe_fp_math:
+
 ; SI:  v_sub_f32_e32 v[[NEG_A0:[0-9]+]], 0, v{{[0-9]+}}
 ; SI:  v_sub_f32_e32 v[[NEG_A1:[0-9]+]], 0, v{{[0-9]+}}
-; SI:  v_mac_f32_e32 v{{[0-9]+}}, v[[NEG_A0]], v{{[0-9]+}}
-; SI:  v_mac_f32_e32 v{{[0-9]+}}, v[[NEG_A1]], v{{[0-9]+}}
-; VI:  v_sub_f16_e32 v[[NEG_A0:[0-9]+]], 0, v{{[0-9]+}}
+; SI-DAG:  v_mac_f32_e32 v{{[0-9]+}}, v{{[0-9]+}}, v[[NEG_A0]]
+; SI-DAG:  v_mac_f32_e32 v{{[0-9]+}}, v{{[0-9]+}}, v[[NEG_A1]]
+
+; VI:  v_mov_b32_e32 [[ZERO:v[0-9]+]], 0
 ; VI:  v_sub_f16_e32 v[[NEG_A1:[0-9]+]], 0, v{{[0-9]+}}
-; VI:  v_mac_f16_e32 v{{[0-9]+}}, v[[NEG_A0]], v{{[0-9]+}}
-; VI:  v_mac_f16_e32 v{{[0-9]+}}, v[[NEG_A1]], v{{[0-9]+}}
+; VI:  v_sub_f16_sdwa v[[NEG_A0:[0-9]+]], [[ZERO]], v{{[0-9]+}} dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:DWORD src1_sel:WORD_1
+; VI-DAG:  v_mac_f16_sdwa v{{[0-9]+}}, v{{[0-9]+}}, v[[NEG_A0]] dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1 src1_sel:DWORD
+; VI-DAG:  v_mac_f16_e32 v{{[0-9]+}}, v{{[0-9]+}}, v[[NEG_A1]]
+
 ; GCN: s_endpgm
-define void @mac_v2f16_neg_b_safe_fp_math(
+define amdgpu_kernel void @mac_v2f16_neg_b_safe_fp_math(
     <2 x half> addrspace(1)* %r,
     <2 x half> addrspace(1)* %a,
     <2 x half> addrspace(1)* %b,
@@ -525,16 +542,20 @@ entry:
 }
 
 ; GCN-LABEL: {{^}}mac_v2f16_neg_c_safe_fp_math:
+
 ; SI:  v_sub_f32_e32 v[[NEG_A0:[0-9]+]], 0, v{{[0-9]+}}
 ; SI:  v_sub_f32_e32 v[[NEG_A1:[0-9]+]], 0, v{{[0-9]+}}
-; SI:  v_mac_f32_e32 v[[NEG_A0]], v{{[0-9]+}}, v{{[0-9]+}}
-; SI:  v_mac_f32_e32 v[[NEG_A1]], v{{[0-9]+}}, v{{[0-9]+}}
-; VI:  v_sub_f16_e32 v[[NEG_A0:[0-9]+]], 0, v{{[0-9]+}}
+; SI-DAG:  v_mac_f32_e32 v[[NEG_A0]], v{{[0-9]+}}, v{{[0-9]+}}
+; SI-DAG:  v_mac_f32_e32 v[[NEG_A1]], v{{[0-9]+}}, v{{[0-9]+}}
+
+; VI:  v_mov_b32_e32 [[ZERO:v[0-9]+]], 0
 ; VI:  v_sub_f16_e32 v[[NEG_A1:[0-9]+]], 0, v{{[0-9]+}}
-; VI:  v_mac_f16_e32 v[[NEG_A0]], v{{[0-9]+}}, v{{[0-9]+}}
-; VI:  v_mac_f16_e32 v[[NEG_A1]], v{{[0-9]+}}, v{{[0-9]+}}
+; VI:  v_sub_f16_sdwa v[[NEG_A0:[0-9]+]], [[ZERO]], v{{[0-9]+}} dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:DWORD src1_sel:WORD_1
+; VI-DAG:  v_mac_f16_sdwa v[[NEG_A0]], v{{[0-9]+}}, v{{[0-9]+}} dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1 src1_sel:WORD_1
+; VI-DAG:  v_mac_f16_e32 v[[NEG_A1]], v{{[0-9]+}}, v{{[0-9]+}}
+
 ; GCN: s_endpgm
-define void @mac_v2f16_neg_c_safe_fp_math(
+define amdgpu_kernel void @mac_v2f16_neg_c_safe_fp_math(
     <2 x half> addrspace(1)* %r,
     <2 x half> addrspace(1)* %a,
     <2 x half> addrspace(1)* %b,
@@ -567,7 +588,7 @@ entry:
 ; VI:     v_mad_f16 v{{[0-9]+}}, -v{{[0-9]+}}, v{{[0-9]+}}, v{{[-0-9]}}
 ; VI:     v_mad_f16 v{{[0-9]+}}, -v{{[0-9]+}}, v{{[0-9]+}}, v{{[-0-9]}}
 ; GCN:    s_endpgm
-define void @mac_v2f16_neg_a_nsz_fp_math(
+define amdgpu_kernel void @mac_v2f16_neg_a_nsz_fp_math(
     <2 x half> addrspace(1)* %r,
     <2 x half> addrspace(1)* %a,
     <2 x half> addrspace(1)* %b,
@@ -600,7 +621,7 @@ entry:
 ; VI:     v_mad_f16 v{{[0-9]+}}, -v{{[0-9]+}}, v{{[0-9]+}}, v{{[-0-9]}}
 ; VI:     v_mad_f16 v{{[0-9]+}}, -v{{[0-9]+}}, v{{[0-9]+}}, v{{[-0-9]}}
 ; GCN:    s_endpgm
-define void @mac_v2f16_neg_b_nsz_fp_math(
+define amdgpu_kernel void @mac_v2f16_neg_b_nsz_fp_math(
     <2 x half> addrspace(1)* %r,
     <2 x half> addrspace(1)* %a,
     <2 x half> addrspace(1)* %b,
@@ -633,7 +654,7 @@ entry:
 ; VI:     v_mad_f16 v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}}, -v{{[-0-9]}}
 ; VI:     v_mad_f16 v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}}, -v{{[-0-9]}}
 ; GCN:    s_endpgm
-define void @mac_v2f16_neg_c_nsz_fp_math(
+define amdgpu_kernel void @mac_v2f16_neg_c_nsz_fp_math(
     <2 x half> addrspace(1)* %r,
     <2 x half> addrspace(1)* %a,
     <2 x half> addrspace(1)* %b,
@@ -651,5 +672,8 @@ entry:
   ret void
 }
 
+declare void @llvm.amdgcn.s.barrier() #2
+
 attributes #0 = { nounwind "no-signed-zeros-fp-math"="false" }
 attributes #1 = { nounwind "no-signed-zeros-fp-math"="true" }
+attributes #2 = { nounwind convergent }

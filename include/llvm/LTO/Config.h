@@ -39,12 +39,15 @@ struct Config {
   std::string CPU;
   TargetOptions Options;
   std::vector<std::string> MAttrs;
-  Reloc::Model RelocModel = Reloc::PIC_;
-  CodeModel::Model CodeModel = CodeModel::Default;
+  Optional<Reloc::Model> RelocModel = Reloc::PIC_;
+  Optional<CodeModel::Model> CodeModel = None;
   CodeGenOpt::Level CGOptLevel = CodeGenOpt::Default;
   TargetMachine::CodeGenFileType CGFileType = TargetMachine::CGFT_ObjectFile;
   unsigned OptLevel = 2;
   bool DisableVerify = false;
+
+  /// Use the new pass manager
+  bool UseNewPM = false;
 
   /// Disable entirely the optimizer, including importing for ThinLTO
   bool CodeGenOnly = false;
@@ -75,6 +78,9 @@ struct Config {
 
   /// Whether to emit optimization remarks with hotness informations.
   bool RemarksWithHotness = false;
+
+  /// Whether to emit the pass manager debuggging informations.
+  bool DebugPassManager = false;
 
   bool ShouldDiscardValueNames = true;
   DiagnosticHandlerFunction DiagHandler;
@@ -165,20 +171,27 @@ struct Config {
                      bool UseInputModulePath = false);
 };
 
+struct LTOLLVMDiagnosticHandler : public DiagnosticHandler {
+  DiagnosticHandlerFunction *Fn;
+  LTOLLVMDiagnosticHandler(DiagnosticHandlerFunction *DiagHandlerFn)
+      : Fn(DiagHandlerFn) {}
+  bool handleDiagnostics(const DiagnosticInfo &DI) override {
+    (*Fn)(DI);
+    return true;
+  }
+};
 /// A derived class of LLVMContext that initializes itself according to a given
 /// Config object. The purpose of this class is to tie ownership of the
 /// diagnostic handler to the context, as opposed to the Config object (which
 /// may be ephemeral).
+// FIXME: This should not be required as diagnostic handler is not callback.
 struct LTOLLVMContext : LLVMContext {
-  static void funcDiagHandler(const DiagnosticInfo &DI, void *Context) {
-    auto *Fn = static_cast<DiagnosticHandlerFunction *>(Context);
-    (*Fn)(DI);
-  }
 
   LTOLLVMContext(const Config &C) : DiagHandler(C.DiagHandler) {
     setDiscardValueNames(C.ShouldDiscardValueNames);
     enableDebugTypeODRUniquing();
-    setDiagnosticHandler(funcDiagHandler, &DiagHandler, true);
+    setDiagnosticHandler(
+        llvm::make_unique<LTOLLVMDiagnosticHandler>(&DiagHandler), true);
   }
   DiagnosticHandlerFunction DiagHandler;
 };

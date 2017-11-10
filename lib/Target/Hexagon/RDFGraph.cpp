@@ -1,4 +1,4 @@
-//===--- RDFGraph.cpp -----------------------------------------------------===//
+//===- RDFGraph.cpp -------------------------------------------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -10,8 +10,10 @@
 // Target-independent, SSA-based data flow graph for register data flow (RDF).
 //
 #include "RDFGraph.h"
-#include "llvm/ADT/SetVector.h"
+#include "RDFRegisters.h"
+#include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineDominanceFrontier.h"
 #include "llvm/CodeGen/MachineDominators.h"
@@ -23,16 +25,19 @@
 #include "llvm/MC/LaneBitmask.h"
 #include "llvm/MC/MCInstrDesc.h"
 #include "llvm/MC/MCRegisterInfo.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetRegisterInfo.h"
+#include "llvm/Target/TargetSubtargetInfo.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
 #include <iterator>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -201,7 +206,7 @@ namespace {
   struct PrintListV {
     PrintListV(const NodeList &L, const DataFlowGraph &G) : List(L), G(G) {}
 
-    typedef T Type;
+    using Type = T;
     const NodeList &List;
     const DataFlowGraph &G;
   };
@@ -898,25 +903,29 @@ void DataFlowGraph::build(unsigned Options) {
   NodeList Blocks = Func.Addr->members(*this);
 
   // Collect information about block references.
-  BlockRefsMap RefM;
-  buildBlockRefs(EA, RefM);
+  RegisterSet AllRefs;
+  for (NodeAddr<BlockNode*> BA : Blocks)
+    for (NodeAddr<InstrNode*> IA : BA.Addr->members(*this))
+      for (NodeAddr<RefNode*> RA : IA.Addr->members(*this))
+        AllRefs.insert(RA.Addr->getRegRef(*this));
 
   // Collect function live-ins and entry block live-ins.
   MachineRegisterInfo &MRI = MF.getRegInfo();
   MachineBasicBlock &EntryB = *EA.Addr->getCode();
   assert(EntryB.pred_empty() && "Function entry block has predecessors");
-  for (auto I = MRI.livein_begin(), E = MRI.livein_end(); I != E; ++I)
-    LiveIns.insert(RegisterRef(I->first));
+  for (std::pair<unsigned,unsigned> P : MRI.liveins())
+    LiveIns.insert(RegisterRef(P.first));
   if (MRI.tracksLiveness()) {
     for (auto I : EntryB.liveins())
       LiveIns.insert(RegisterRef(I.PhysReg, I.LaneMask));
   }
 
   // Add function-entry phi nodes for the live-in registers.
-  for (std::pair<RegisterId,LaneBitmask> P : LiveIns) {
+  //for (std::pair<RegisterId,LaneBitmask> P : LiveIns) {
+  for (auto I = LiveIns.rr_begin(), E = LiveIns.rr_end(); I != E; ++I) {
+    RegisterRef RR = *I;
     NodeAddr<PhiNode*> PA = newPhi(EA);
     uint16_t PhiFlags = NodeAttrs::PhiRef | NodeAttrs::Preserving;
-    RegisterRef RR(P.first, P.second);
     NodeAddr<DefNode*> DA = newDef(PA, RR, PhiFlags);
     PA.Addr->addMember(DA, *this);
   }
@@ -958,9 +967,9 @@ void DataFlowGraph::build(unsigned Options) {
   // of references that will require phi definitions in that block.
   BlockRefsMap PhiM;
   for (NodeAddr<BlockNode*> BA : Blocks)
-    recordDefsForDF(PhiM, RefM, BA);
+    recordDefsForDF(PhiM, BA);
   for (NodeAddr<BlockNode*> BA : Blocks)
-    buildPhis(PhiM, RefM, BA);
+    buildPhis(PhiM, AllRefs, BA);
 
   // Link all the refs. This will recursively traverse the dominator tree.
   DefStackMap DM;
@@ -993,9 +1002,9 @@ RegisterRef DataFlowGraph::restrictRef(RegisterRef AR, RegisterRef BR) const {
     return M.any() ? RegisterRef(AR.Reg, M) : RegisterRef();
   }
 #ifndef NDEBUG
-  RegisterRef NAR = PRI.normalize(AR);
-  RegisterRef NBR = PRI.normalize(BR);
-  assert(NAR.Reg != NBR.Reg);
+//  RegisterRef NAR = PRI.normalize(AR);
+//  RegisterRef NBR = PRI.normalize(BR);
+//  assert(NAR.Reg != NBR.Reg);
 #endif
   // This isn't strictly correct, because the overlap may happen in the
   // part masked out.
@@ -1288,20 +1297,7 @@ void DataFlowGraph::buildStmt(NodeAddr<BlockNode*> BA, MachineInstr &In) {
     return true;
   };
 
-  // Collect a set of registers that this instruction implicitly uses
-  // or defines. Implicit operands from an instruction will be ignored
-  // unless they are listed here.
-  RegisterSet ImpUses, ImpDefs;
-  if (const uint16_t *ImpD = In.getDesc().getImplicitDefs())
-    while (uint16_t R = *ImpD++)
-      ImpDefs.insert(RegisterRef(R));
-  if (const uint16_t *ImpU = In.getDesc().getImplicitUses())
-    while (uint16_t R = *ImpU++)
-      ImpUses.insert(RegisterRef(R));
-
   bool IsCall = isCall(In);
-  bool NeedsImplicit = IsCall || In.isInlineAsm() || In.isReturn();
-  bool IsPredicated = TII.isPredicated(In);
   unsigned NumOps = In.getNumOperands();
 
   // Avoid duplicate implicit defs. This will not detect cases of implicit
@@ -1363,8 +1359,6 @@ void DataFlowGraph::buildStmt(NodeAddr<BlockNode*> BA, MachineInstr &In) {
     if (!R || !TargetRegisterInfo::isPhysicalRegister(R) || DoneDefs.test(R))
       continue;
     RegisterRef RR = makeRegRef(Op);
-    if (!NeedsImplicit && !ImpDefs.count(RR))
-      continue;
     uint16_t Flags = NodeAttrs::None;
     if (TOI.isPreserving(In, OpN)) {
       Flags |= NodeAttrs::Preserving;
@@ -1393,14 +1387,6 @@ void DataFlowGraph::buildStmt(NodeAddr<BlockNode*> BA, MachineInstr &In) {
     unsigned R = Op.getReg();
     if (!R || !TargetRegisterInfo::isPhysicalRegister(R))
       continue;
-    RegisterRef RR = makeRegRef(Op);
-    // Add implicit uses on return and call instructions, and on predicated
-    // instructions regardless of whether or not they appear in the instruction
-    // descriptor's list.
-    bool Implicit = Op.isImplicit();
-    bool TakeImplicit = NeedsImplicit || IsPredicated;
-    if (Implicit && !TakeImplicit && !ImpUses.count(RR))
-      continue;
     uint16_t Flags = NodeAttrs::None;
     if (Op.isUndef())
       Flags |= NodeAttrs::Undef;
@@ -1411,29 +1397,9 @@ void DataFlowGraph::buildStmt(NodeAddr<BlockNode*> BA, MachineInstr &In) {
   }
 }
 
-// Build a map that for each block will have the set of all references from
-// that block, and from all blocks dominated by it.
-void DataFlowGraph::buildBlockRefs(NodeAddr<BlockNode*> BA,
-      BlockRefsMap &RefM) {
-  RegisterSet &Refs = RefM[BA.Id];
-  MachineDomTreeNode *N = MDT.getNode(BA.Addr->getCode());
-  assert(N);
-  for (auto I : *N) {
-    MachineBasicBlock *SB = I->getBlock();
-    NodeAddr<BlockNode*> SBA = findBlock(SB);
-    buildBlockRefs(SBA, RefM);
-    const RegisterSet &RefsS = RefM[SBA.Id];
-    Refs.insert(RefsS.begin(), RefsS.end());
-  }
-
-  for (NodeAddr<InstrNode*> IA : BA.Addr->members(*this))
-    for (NodeAddr<RefNode*> RA : IA.Addr->members(*this))
-      Refs.insert(RA.Addr->getRegRef(*this));
-}
-
 // Scan all defs in the block node BA and record in PhiM the locations of
 // phi nodes corresponding to these defs.
-void DataFlowGraph::recordDefsForDF(BlockRefsMap &PhiM, BlockRefsMap &RefM,
+void DataFlowGraph::recordDefsForDF(BlockRefsMap &PhiM,
       NodeAddr<BlockNode*> BA) {
   // Check all defs from block BA and record them in each block in BA's
   // iterated dominance frontier. This information will later be used to
@@ -1463,14 +1429,6 @@ void DataFlowGraph::recordDefsForDF(BlockRefsMap &PhiM, BlockRefsMap &RefM,
       IDF.insert(F->second.begin(), F->second.end());
   }
 
-  // Get the register references that are reachable from this block.
-  RegisterSet &Refs = RefM[BA.Id];
-  for (auto DB : IDF) {
-    NodeAddr<BlockNode*> DBA = findBlock(DB);
-    const RegisterSet &RefsD = RefM[DBA.Id];
-    Refs.insert(RefsD.begin(), RefsD.end());
-  }
-
   // Finally, add the set of defs to each block in the iterated dominance
   // frontier.
   for (auto DB : IDF) {
@@ -1481,7 +1439,7 @@ void DataFlowGraph::recordDefsForDF(BlockRefsMap &PhiM, BlockRefsMap &RefM,
 
 // Given the locations of phi nodes in the map PhiM, create the phi nodes
 // that are located in the block node BA.
-void DataFlowGraph::buildPhis(BlockRefsMap &PhiM, BlockRefsMap &RefM,
+void DataFlowGraph::buildPhis(BlockRefsMap &PhiM, RegisterSet &AllRefs,
       NodeAddr<BlockNode*> BA) {
   // Check if this blocks has any DF defs, i.e. if there are any defs
   // that this block is in the iterated dominance frontier of.
@@ -1505,9 +1463,8 @@ void DataFlowGraph::buildPhis(BlockRefsMap &PhiM, BlockRefsMap &RefM,
     MaxDF.insert(MaxCoverIn(I, HasDF->second));
 
   std::vector<RegisterRef> MaxRefs;
-  RegisterSet &RefB = RefM[BA.Id];
   for (RegisterRef I : MaxDF)
-    MaxRefs.push_back(MaxCoverIn(I, RefB));
+    MaxRefs.push_back(MaxCoverIn(I, AllRefs));
 
   // Now, for each R in MaxRefs, get the alias closure of R. If the closure
   // only has R in it, create a phi a def for R. Otherwise, create a phi,

@@ -1,4 +1,4 @@
-; RUN: llc -march=amdgcn -verify-machineinstrs < %s | FileCheck -check-prefix=SI %s
+; RUN: llc -march=amdgcn -mcpu=tahiti -verify-machineinstrs < %s | FileCheck -check-prefix=SI %s
 
 declare i32 @llvm.amdgcn.workitem.id.x() #1
 
@@ -9,7 +9,7 @@ declare i32 @llvm.amdgcn.workitem.id.x() #1
 ; SI: v_add_i32_e32 [[RESULT:v[0-9]+]], vcc, 36, [[REG]]
 ; SI: buffer_store_dword [[RESULT]]
 ; SI: s_endpgm
-define void @shl_2_add_9_i32(i32 addrspace(1)* %out, i32 addrspace(1)* %in) #0 {
+define amdgpu_kernel void @shl_2_add_9_i32(i32 addrspace(1)* %out, i32 addrspace(1)* %in) #0 {
   %tid.x = tail call i32 @llvm.amdgcn.workitem.id.x() #1
   %ptr = getelementptr i32, i32 addrspace(1)* %in, i32 %tid.x
   %val = load i32, i32 addrspace(1)* %ptr, align 4
@@ -25,7 +25,7 @@ define void @shl_2_add_9_i32(i32 addrspace(1)* %out, i32 addrspace(1)* %in) #0 {
 ; SI-DAG: buffer_store_dword [[ADDREG]]
 ; SI-DAG: buffer_store_dword [[SHLREG]]
 ; SI: s_endpgm
-define void @shl_2_add_9_i32_2_add_uses(i32 addrspace(1)* %out0, i32 addrspace(1)* %out1, i32 addrspace(1)* %in) #0 {
+define amdgpu_kernel void @shl_2_add_9_i32_2_add_uses(i32 addrspace(1)* %out0, i32 addrspace(1)* %out1, i32 addrspace(1)* %in) #0 {
   %tid.x = tail call i32 @llvm.amdgcn.workitem.id.x() #1
   %ptr = getelementptr i32, i32 addrspace(1)* %in, i32 %tid.x
   %val = load i32, i32 addrspace(1)* %ptr, align 4
@@ -43,7 +43,7 @@ define void @shl_2_add_9_i32_2_add_uses(i32 addrspace(1)* %out0, i32 addrspace(1
 ; SI: v_add_i32_e32 [[RESULT:v[0-9]+]], vcc, 0xf9c, [[REG]]
 ; SI: buffer_store_dword [[RESULT]]
 ; SI: s_endpgm
-define void @shl_2_add_999_i32(i32 addrspace(1)* %out, i32 addrspace(1)* %in) #0 {
+define amdgpu_kernel void @shl_2_add_999_i32(i32 addrspace(1)* %out, i32 addrspace(1)* %in) #0 {
   %tid.x = tail call i32 @llvm.amdgcn.workitem.id.x() #1
   %ptr = getelementptr i32, i32 addrspace(1)* %in, i32 %tid.x
   %val = load i32, i32 addrspace(1)* %ptr, align 4
@@ -56,12 +56,12 @@ define void @shl_2_add_999_i32(i32 addrspace(1)* %out, i32 addrspace(1)* %in) #0
 ; FUNC-LABEL: {{^}}test_add_shl_add_constant:
 ; SI-DAG: s_load_dword [[X:s[0-9]+]], s{{\[[0-9]+:[0-9]+\]}}, 0xb
 ; SI-DAG: s_load_dword [[Y:s[0-9]+]], s{{\[[0-9]+:[0-9]+\]}}, 0xc
-; SI: s_lshl_b32 [[SHL3:s[0-9]+]], [[X]], 3
+; SI-DAG: s_lshl_b32 [[SHL3:s[0-9]+]], [[X]], 3
 ; SI: s_add_i32 [[RESULT:s[0-9]+]], [[SHL3]], [[Y]]
 ; SI: s_addk_i32 [[RESULT]], 0x3d8
 ; SI: v_mov_b32_e32 [[VRESULT:v[0-9]+]], [[RESULT]]
 ; SI: buffer_store_dword [[VRESULT]]
-define void @test_add_shl_add_constant(i32 addrspace(1)* %out, i32 %x, i32 %y) #0 {
+define amdgpu_kernel void @test_add_shl_add_constant(i32 addrspace(1)* %out, i32 %x, i32 %y) #0 {
   %add.0 = add i32 %x, 123
   %shl = shl i32 %add.0, 3
   %add.1 = add i32 %shl, %y
@@ -78,7 +78,7 @@ define void @test_add_shl_add_constant(i32 addrspace(1)* %out, i32 %x, i32 %y) #
 ; SI: v_mov_b32_e32 [[VRESULT:v[0-9]+]], [[TMP]]
 ; SI: buffer_store_dword [[VRESULT]]
 
-define void @test_add_shl_add_constant_inv(i32 addrspace(1)* %out, i32 %x, i32 %y) #0 {
+define amdgpu_kernel void @test_add_shl_add_constant_inv(i32 addrspace(1)* %out, i32 %x, i32 %y) #0 {
   %add.0 = add i32 %x, 123
   %shl = shl i32 %add.0, 3
   %add.1 = add i32 %y, %shl

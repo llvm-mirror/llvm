@@ -11,13 +11,16 @@ from .base import TestFormat
 kIsWindows = sys.platform in ['win32', 'cygwin']
 
 class GoogleTest(TestFormat):
-    def __init__(self, test_sub_dir, test_suffix):
-        self.test_sub_dir = os.path.normcase(str(test_sub_dir)).split(';')
-        self.test_suffix = str(test_suffix)
+    def __init__(self, test_sub_dirs, test_suffix):
+        self.test_sub_dirs = os.path.normcase(str(test_sub_dirs)).split(';')
 
         # On Windows, assume tests will also end in '.exe'.
+        exe_suffix = str(test_suffix)
         if kIsWindows:
-            self.test_suffix += '.exe'
+            exe_suffix += '.exe'
+
+        # Also check for .py files for testing purposes.
+        self.test_suffixes = {exe_suffix, test_suffix + '.py'}
 
     def getGTestTests(self, path, litConfig, localConfig):
         """getGTestTests(path) - [name]
@@ -29,20 +32,27 @@ class GoogleTest(TestFormat):
           litConfig: LitConfig instance
           localConfig: TestingConfig instance"""
 
+        list_test_cmd = self.maybeAddPythonToCmd([path, '--gtest_list_tests'])
+
         try:
-            lines = lit.util.capture([path, '--gtest_list_tests'],
-                                     env=localConfig.environment)
-            if kIsWindows:
-              lines = lines.replace('\r', '')
-            lines = lines.split('\n')
-        except Exception as exc:
-            out = exc.output if isinstance(exc, subprocess.CalledProcessError) else ''
-            litConfig.warning("unable to discover google-tests in %r: %s. Process output: %s"
-                              % (path, sys.exc_info()[1], out))
+            output = subprocess.check_output(list_test_cmd,
+                                             env=localConfig.environment)
+        except subprocess.CalledProcessError as exc:
+            litConfig.warning(
+                "unable to discover google-tests in %r: %s. Process output: %s"
+                % (path, sys.exc_info()[1], exc.output))
             raise StopIteration
 
         nested_tests = []
-        for ln in lines:
+        for ln in output.splitlines(False):  # Don't keep newlines.
+            ln = lit.util.to_string(ln)
+
+            if 'Running main() from gtest_main.cc' in ln:
+                # Upstream googletest prints this to stdout prior to running
+                # tests. LLVM removed that print statement in r61540, but we
+                # handle it here in case upstream googletest is being used.
+                continue
+
             # The test name list includes trailing comments beginning with
             # a '#' on some lines, so skip those. We don't support test names
             # that use escaping to embed '#' into their name as the names come
@@ -50,12 +60,6 @@ class GoogleTest(TestFormat):
             # uninteresting to support.
             ln = ln.split('#', 1)[0].rstrip()
             if not ln.lstrip():
-                continue
-
-            if 'Running main() from gtest_main.cc' in ln:
-                # Upstream googletest prints this to stdout prior to running
-                # tests. LLVM removed that print statement in r61540, but we
-                # handle it here in case upstream googletest is being used.
                 continue
 
             index = 0
@@ -75,38 +79,22 @@ class GoogleTest(TestFormat):
             else:
                 yield ''.join(nested_tests) + ln
 
-    # Note: path_in_suite should not include the executable name.
-    def getTestsInExecutable(self, testSuite, path_in_suite, execpath,
-                             litConfig, localConfig):
-        if not execpath.endswith(self.test_suffix):
-            return
-        (dirname, basename) = os.path.split(execpath)
-        # Discover the tests in this executable.
-        for testname in self.getGTestTests(execpath, litConfig, localConfig):
-            testPath = path_in_suite + (basename, testname)
-            yield lit.Test.Test(testSuite, testPath, localConfig, file_path=execpath)
-
     def getTestsInDirectory(self, testSuite, path_in_suite,
                             litConfig, localConfig):
         source_path = testSuite.getSourcePath(path_in_suite)
-        for filename in os.listdir(source_path):
-            filepath = os.path.join(source_path, filename)
-            if os.path.isdir(filepath):
-                # Iterate over executables in a directory.
-                if not os.path.normcase(filename) in self.test_sub_dir:
-                    continue
-                dirpath_in_suite = path_in_suite + (filename, )
-                for subfilename in os.listdir(filepath):
-                    execpath = os.path.join(filepath, subfilename)
-                    for test in self.getTestsInExecutable(
-                            testSuite, dirpath_in_suite, execpath,
-                            litConfig, localConfig):
-                      yield test
-            elif ('.' in self.test_sub_dir):
-                for test in self.getTestsInExecutable(
-                        testSuite, path_in_suite, filepath,
-                        litConfig, localConfig):
-                    yield test
+        for subdir in self.test_sub_dirs:
+            dir_path = os.path.join(source_path, subdir)
+            if not os.path.isdir(dir_path):
+                continue
+            for fn in lit.util.listdir_files(dir_path,
+                                             suffixes=self.test_suffixes):
+                # Discover the tests in this executable.
+                execpath = os.path.join(source_path, subdir, fn)
+                testnames = self.getGTestTests(execpath, litConfig, localConfig)
+                for testname in testnames:
+                    testPath = path_in_suite + (subdir, fn, testname)
+                    yield lit.Test.Test(testSuite, testPath, localConfig,
+                                        file_path=execpath)
 
     def execute(self, test, litConfig):
         testPath,testName = os.path.split(test.getSourcePath())
@@ -117,6 +105,7 @@ class GoogleTest(TestFormat):
             testName = namePrefix + '/' + testName
 
         cmd = [testPath, '--gtest_filter=' + testName]
+        cmd = self.maybeAddPythonToCmd(cmd)
         if litConfig.useValgrind:
             cmd = litConfig.valgrindArgs + cmd
 
@@ -143,3 +132,14 @@ class GoogleTest(TestFormat):
             return lit.Test.UNRESOLVED, msg
 
         return lit.Test.PASS,''
+
+    def maybeAddPythonToCmd(self, cmd):
+        """Insert the python exe into the command if cmd[0] ends in .py
+
+        We cannot rely on the system to interpret shebang lines for us on
+        Windows, so add the python executable to the command if this is a .py
+        script.
+        """
+        if cmd[0].endswith('.py'):
+            return [sys.executable] + cmd
+        return cmd

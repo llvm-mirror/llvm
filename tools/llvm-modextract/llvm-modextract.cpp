@@ -54,14 +54,17 @@ int main(int argc, char **argv) {
   }
 
   std::error_code EC;
-  std::unique_ptr<tool_output_file> Out(
-      new tool_output_file(OutputFilename, EC, sys::fs::F_None));
+  std::unique_ptr<ToolOutputFile> Out(
+      new ToolOutputFile(OutputFilename, EC, sys::fs::F_None));
   ExitOnErr(errorCodeToError(EC));
 
   if (BinaryExtract) {
-    SmallVector<char, 0> Header;
-    BitcodeWriter Writer(Header);
-    Out->os() << Header << Ms[ModuleIndex].getBuffer();
+    SmallVector<char, 0> Result;
+    BitcodeWriter Writer(Result);
+    Result.append(Ms[ModuleIndex].getBuffer().begin(),
+                  Ms[ModuleIndex].getBuffer().end());
+    Writer.copyStrtab(Ms[ModuleIndex].getStrtab());
+    Out->os() << Result;
     Out->keep();
     return 0;
   }

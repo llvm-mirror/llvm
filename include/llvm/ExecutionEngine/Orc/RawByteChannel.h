@@ -10,20 +10,14 @@
 #ifndef LLVM_EXECUTIONENGINE_ORC_RAWBYTECHANNEL_H
 #define LLVM_EXECUTIONENGINE_ORC_RAWBYTECHANNEL_H
 
-#include "OrcError.h"
-#include "RPCSerialization.h"
-#include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ExecutionEngine/Orc/RPCSerialization.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/Error.h"
-#include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <string>
-#include <tuple>
 #include <type_traits>
-#include <vector>
 
 namespace llvm {
 namespace orc {
@@ -32,7 +26,7 @@ namespace rpc {
 /// Interface for byte-streams to be used with RPC.
 class RawByteChannel {
 public:
-  virtual ~RawByteChannel() {}
+  virtual ~RawByteChannel() = default;
 
   /// Read Size bytes from the stream into *Dst.
   virtual Error readBytes(char *Dst, unsigned Size) = 0;
@@ -121,11 +115,19 @@ class SerializationTraits<ChannelT, bool, bool,
                               RawByteChannel, ChannelT>::value>::type> {
 public:
   static Error serialize(ChannelT &C, bool V) {
-    return C.appendBytes(reinterpret_cast<const char *>(&V), 1);
+    uint8_t Tmp = V ? 1 : 0;
+    if (auto Err =
+          C.appendBytes(reinterpret_cast<const char *>(&Tmp), 1))
+      return Err;
+    return Error::success();
   }
 
   static Error deserialize(ChannelT &C, bool &V) {
-    return C.readBytes(reinterpret_cast<char *>(&V), 1);
+    uint8_t Tmp = 0;
+    if (auto Err = C.readBytes(reinterpret_cast<char *>(&Tmp), 1))
+      return Err;
+    V = Tmp != 0;
+    return Error::success();
   }
 };
 
