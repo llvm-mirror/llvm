@@ -2,6 +2,7 @@
 ; RUN: llc < %s -mtriple=x86_64-unknown-unknown -print-schedule -mcpu=x86-64 -mattr=+f16c | FileCheck %s --check-prefix=CHECK --check-prefix=GENERIC
 ; RUN: llc < %s -mtriple=x86_64-unknown-unknown -print-schedule -mcpu=ivybridge | FileCheck %s --check-prefix=CHECK --check-prefix=IVY
 ; RUN: llc < %s -mtriple=x86_64-unknown-unknown -print-schedule -mcpu=haswell | FileCheck %s --check-prefix=CHECK --check-prefix=HASWELL
+; RUN: llc < %s -mtriple=x86_64-unknown-unknown -print-schedule -mcpu=broadwell | FileCheck %s --check-prefix=CHECK --check-prefix=BROADWELL
 ; RUN: llc < %s -mtriple=x86_64-unknown-unknown -print-schedule -mcpu=skylake | FileCheck %s --check-prefix=CHECK --check-prefix=SKYLAKE
 ; RUN: llc < %s -mtriple=x86_64-unknown-unknown -print-schedule -mcpu=btver2 | FileCheck %s --check-prefix=CHECK --check-prefix=BTVER2
 ; RUN: llc < %s -mtriple=x86_64-unknown-unknown -print-schedule -mcpu=znver1 | FileCheck %s --check-prefix=CHECK --check-prefix=ZNVER1
@@ -28,12 +29,19 @@ define <4 x float> @test_vcvtph2ps_128(<8 x i16> %a0, <8 x i16> *%a1) {
 ; HASWELL-NEXT:    vaddps %xmm0, %xmm1, %xmm0 # sched: [3:1.00]
 ; HASWELL-NEXT:    retq # sched: [2:1.00]
 ;
+; BROADWELL-LABEL: test_vcvtph2ps_128:
+; BROADWELL:       # BB#0:
+; BROADWELL-NEXT:    vcvtph2ps (%rdi), %xmm1 # sched: [6:1.00]
+; BROADWELL-NEXT:    vcvtph2ps %xmm0, %xmm0 # sched: [2:1.00]
+; BROADWELL-NEXT:    vaddps %xmm0, %xmm1, %xmm0 # sched: [3:1.00]
+; BROADWELL-NEXT:    retq # sched: [7:1.00]
+;
 ; SKYLAKE-LABEL: test_vcvtph2ps_128:
 ; SKYLAKE:       # BB#0:
-; SKYLAKE-NEXT:    vcvtph2ps (%rdi), %xmm1 # sched: [4:0.50]
+; SKYLAKE-NEXT:    vcvtph2ps (%rdi), %xmm1 # sched: [9:0.50]
 ; SKYLAKE-NEXT:    vcvtph2ps %xmm0, %xmm0 # sched: [5:1.00]
 ; SKYLAKE-NEXT:    vaddps %xmm0, %xmm1, %xmm0 # sched: [4:0.50]
-; SKYLAKE-NEXT:    retq # sched: [2:1.00]
+; SKYLAKE-NEXT:    retq # sched: [7:1.00]
 ;
 ; BTVER2-LABEL: test_vcvtph2ps_128:
 ; BTVER2:       # BB#0:
@@ -78,17 +86,24 @@ define <8 x float> @test_vcvtph2ps_256(<8 x i16> %a0, <8 x i16> *%a1) {
 ; HASWELL-NEXT:    vaddps %ymm0, %ymm1, %ymm0 # sched: [3:1.00]
 ; HASWELL-NEXT:    retq # sched: [2:1.00]
 ;
+; BROADWELL-LABEL: test_vcvtph2ps_256:
+; BROADWELL:       # BB#0:
+; BROADWELL-NEXT:    vcvtph2ps (%rdi), %ymm1 # sched: [6:1.00]
+; BROADWELL-NEXT:    vcvtph2ps %xmm0, %ymm0 # sched: [2:1.00]
+; BROADWELL-NEXT:    vaddps %ymm0, %ymm1, %ymm0 # sched: [3:1.00]
+; BROADWELL-NEXT:    retq # sched: [7:1.00]
+;
 ; SKYLAKE-LABEL: test_vcvtph2ps_256:
 ; SKYLAKE:       # BB#0:
-; SKYLAKE-NEXT:    vcvtph2ps (%rdi), %ymm1 # sched: [4:0.50]
+; SKYLAKE-NEXT:    vcvtph2ps (%rdi), %ymm1 # sched: [10:0.50]
 ; SKYLAKE-NEXT:    vcvtph2ps %xmm0, %ymm0 # sched: [7:1.00]
 ; SKYLAKE-NEXT:    vaddps %ymm0, %ymm1, %ymm0 # sched: [4:0.50]
-; SKYLAKE-NEXT:    retq # sched: [2:1.00]
+; SKYLAKE-NEXT:    retq # sched: [7:1.00]
 ;
 ; BTVER2-LABEL: test_vcvtph2ps_256:
 ; BTVER2:       # BB#0:
-; BTVER2-NEXT:    vcvtph2ps (%rdi), %ymm1 # sched: [8:1.00]
-; BTVER2-NEXT:    vcvtph2ps %xmm0, %ymm0 # sched: [3:1.00]
+; BTVER2-NEXT:    vcvtph2ps (%rdi), %ymm1 # sched: [8:2.00]
+; BTVER2-NEXT:    vcvtph2ps %xmm0, %ymm0 # sched: [3:2.00]
 ; BTVER2-NEXT:    vaddps %ymm0, %ymm1, %ymm0 # sched: [3:2.00]
 ; BTVER2-NEXT:    retq # sched: [4:1.00]
 ;
@@ -125,16 +140,22 @@ define <8 x i16> @test_vcvtps2ph_128(<4 x float> %a0, <4 x float> %a1, <4 x i16>
 ; HASWELL-NEXT:    vcvtps2ph $0, %xmm1, (%rdi) # sched: [4:1.00]
 ; HASWELL-NEXT:    retq # sched: [2:1.00]
 ;
+; BROADWELL-LABEL: test_vcvtps2ph_128:
+; BROADWELL:       # BB#0:
+; BROADWELL-NEXT:    vcvtps2ph $0, %xmm0, %xmm0 # sched: [4:1.00]
+; BROADWELL-NEXT:    vcvtps2ph $0, %xmm1, (%rdi) # sched: [4:1.00]
+; BROADWELL-NEXT:    retq # sched: [7:1.00]
+;
 ; SKYLAKE-LABEL: test_vcvtps2ph_128:
 ; SKYLAKE:       # BB#0:
 ; SKYLAKE-NEXT:    vcvtps2ph $0, %xmm0, %xmm0 # sched: [5:1.00]
-; SKYLAKE-NEXT:    vcvtps2ph $0, %xmm1, (%rdi) # sched: [5:1.00]
-; SKYLAKE-NEXT:    retq # sched: [2:1.00]
+; SKYLAKE-NEXT:    vcvtps2ph $0, %xmm1, (%rdi) # sched: [6:1.00]
+; SKYLAKE-NEXT:    retq # sched: [7:1.00]
 ;
 ; BTVER2-LABEL: test_vcvtps2ph_128:
 ; BTVER2:       # BB#0:
 ; BTVER2-NEXT:    vcvtps2ph $0, %xmm0, %xmm0 # sched: [3:1.00]
-; BTVER2-NEXT:    vcvtps2ph $0, %xmm1, (%rdi) # sched: [8:1.00]
+; BTVER2-NEXT:    vcvtps2ph $0, %xmm1, (%rdi) # sched: [3:1.00]
 ; BTVER2-NEXT:    retq # sched: [4:1.00]
 ;
 ; ZNVER1-LABEL: test_vcvtps2ph_128:
@@ -172,17 +193,24 @@ define <8 x i16> @test_vcvtps2ph_256(<8 x float> %a0, <8 x float> %a1, <8 x i16>
 ; HASWELL-NEXT:    vzeroupper # sched: [4:1.00]
 ; HASWELL-NEXT:    retq # sched: [2:1.00]
 ;
+; BROADWELL-LABEL: test_vcvtps2ph_256:
+; BROADWELL:       # BB#0:
+; BROADWELL-NEXT:    vcvtps2ph $0, %ymm0, %xmm0 # sched: [6:1.00]
+; BROADWELL-NEXT:    vcvtps2ph $0, %ymm1, (%rdi) # sched: [4:1.00]
+; BROADWELL-NEXT:    vzeroupper # sched: [4:1.00]
+; BROADWELL-NEXT:    retq # sched: [7:1.00]
+;
 ; SKYLAKE-LABEL: test_vcvtps2ph_256:
 ; SKYLAKE:       # BB#0:
 ; SKYLAKE-NEXT:    vcvtps2ph $0, %ymm0, %xmm0 # sched: [7:1.00]
-; SKYLAKE-NEXT:    vcvtps2ph $0, %ymm1, (%rdi) # sched: [7:1.00]
+; SKYLAKE-NEXT:    vcvtps2ph $0, %ymm1, (%rdi) # sched: [8:1.00]
 ; SKYLAKE-NEXT:    vzeroupper # sched: [4:1.00]
-; SKYLAKE-NEXT:    retq # sched: [2:1.00]
+; SKYLAKE-NEXT:    retq # sched: [7:1.00]
 ;
 ; BTVER2-LABEL: test_vcvtps2ph_256:
 ; BTVER2:       # BB#0:
-; BTVER2-NEXT:    vcvtps2ph $0, %ymm0, %xmm0 # sched: [3:1.00]
-; BTVER2-NEXT:    vcvtps2ph $0, %ymm1, (%rdi) # sched: [8:1.00]
+; BTVER2-NEXT:    vcvtps2ph $0, %ymm0, %xmm0 # sched: [6:2.00]
+; BTVER2-NEXT:    vcvtps2ph $0, %ymm1, (%rdi) # sched: [11:2.00]
 ; BTVER2-NEXT:    retq # sched: [4:1.00]
 ;
 ; ZNVER1-LABEL: test_vcvtps2ph_256:

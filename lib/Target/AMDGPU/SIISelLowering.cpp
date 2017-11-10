@@ -2449,7 +2449,7 @@ MachineBasicBlock *SITargetLowering::splitKillBlock(MachineInstr &MI,
 
   if (SplitPoint == BB->end()) {
     // Don't bother with a new block.
-    MI.setDesc(TII->get(AMDGPU::SI_KILL_TERMINATOR));
+    MI.setDesc(TII->getKillTerminatorFromPseudo(MI.getOpcode()));
     return BB;
   }
 
@@ -2463,7 +2463,7 @@ MachineBasicBlock *SITargetLowering::splitKillBlock(MachineInstr &MI,
   SplitBB->transferSuccessorsAndUpdatePHIs(BB);
   BB->addSuccessor(SplitBB);
 
-  MI.setDesc(TII->get(AMDGPU::SI_KILL_TERMINATOR));
+  MI.setDesc(TII->getKillTerminatorFromPseudo(MI.getOpcode()));
   return SplitBB;
 }
 
@@ -3017,7 +3017,8 @@ MachineBasicBlock *SITargetLowering::EmitInstrWithCustomInserter(
   case AMDGPU::SI_INDIRECT_DST_V8:
   case AMDGPU::SI_INDIRECT_DST_V16:
     return emitIndirectDst(MI, *BB, *getSubtarget());
-  case AMDGPU::SI_KILL:
+  case AMDGPU::SI_KILL_F32_COND_IMM_PSEUDO:
+  case AMDGPU::SI_KILL_I1_PSEUDO:
     return splitKillBlock(MI, BB);
   case AMDGPU::V_CNDMASK_B64_PSEUDO: {
     MachineRegisterInfo &MRI = BB->getParent()->getRegInfo();
@@ -3105,6 +3106,10 @@ MachineBasicBlock *SITargetLowering::EmitInstrWithCustomInserter(
   default:
     return AMDGPUTargetLowering::EmitInstrWithCustomInserter(MI, BB);
   }
+}
+
+bool SITargetLowering::hasBitPreservingFPLogic(EVT VT) const {
+  return isTypeLegal(VT.getScalarType());
 }
 
 bool SITargetLowering::enableAggressiveFMAFusion(EVT VT) const {
@@ -6503,8 +6508,7 @@ SDNode *SITargetLowering::legalizeTargetIndependentNode(SDNode *Node,
                                      Node->getOperand(i)), 0));
   }
 
-  DAG.UpdateNodeOperands(Node, Ops);
-  return Node;
+  return DAG.UpdateNodeOperands(Node, Ops);
 }
 
 /// \brief Fold the instructions after selecting them.

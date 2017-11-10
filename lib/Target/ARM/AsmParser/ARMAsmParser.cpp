@@ -64,6 +64,8 @@
 #include <utility>
 #include <vector>
 
+#define DEBUG_TYPE "asm-parser"
+
 using namespace llvm;
 
 namespace {
@@ -84,11 +86,6 @@ static cl::opt<ImplicitItModeTy> ImplicitItMode(
 
 static cl::opt<bool> AddBuildAttributes("arm-add-build-attributes",
                                         cl::init(false));
-
-cl::opt<bool>
-DevDiags("arm-asm-parser-dev-diags", cl::init(false),
-         cl::desc("Use extended diagnostics, which include implementation "
-                  "details useful for development"));
 
 enum VectorLaneTy { NoLanes, AllLanes, IndexedLane };
 
@@ -5100,7 +5097,7 @@ bool ARMAsmParser::parseMemRegOffsetShift(ARM_AM::ShiftOpc &St,
   SMLoc Loc = Parser.getTok().getLoc();
   const AsmToken &Tok = Parser.getTok();
   if (Tok.isNot(AsmToken::Identifier))
-    return true;
+    return Error(Loc, "illegal shift operator");
   StringRef ShiftName = Tok.getString();
   if (ShiftName == "lsl" || ShiftName == "LSL" ||
       ShiftName == "asl" || ShiftName == "ASL")
@@ -9043,7 +9040,8 @@ unsigned ARMAsmParser::MatchInstruction(OperandVector &Operands, MCInst &Inst,
   return PlainMatchResult;
 }
 
-std::string ARMMnemonicSpellCheck(StringRef S, uint64_t FBS);
+static std::string ARMMnemonicSpellCheck(StringRef S, uint64_t FBS,
+                                         unsigned VariantID = 0);
 
 static const char *getSubtargetFeatureName(uint64_t Val);
 bool ARMAsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
@@ -10123,6 +10121,7 @@ extern "C" void LLVMInitializeARMAsmParser() {
 #define GET_REGISTER_MATCHER
 #define GET_SUBTARGET_FEATURE_NAME
 #define GET_MATCHER_IMPLEMENTATION
+#define GET_MNEMONIC_SPELL_CHECKER
 #include "ARMGenAsmMatcher.inc"
 
 // Some diagnostics need to vary with subtarget features, so they are handled
@@ -10200,18 +10199,16 @@ ARMAsmParser::FilterNearMisses(SmallVectorImpl<NearMissInfo> &NearMissesIn,
 
       NearMissMessage Message;
       Message.Loc = OperandLoc;
-      raw_svector_ostream OS(Message.Message);
       if (OperandDiag) {
-        OS << OperandDiag;
+        Message.Message = OperandDiag;
       } else if (I.getOperandClass() == InvalidMatchClass) {
-        OS << "too many operands for instruction";
+        Message.Message = "too many operands for instruction";
       } else {
-        OS << "invalid operand for instruction";
-        if (DevDiags) {
-          OS << " class" << I.getOperandClass() << ", error "
-             << I.getOperandError() << ", opcode "
-             << MII.getName(I.getOpcode());
-        }
+        Message.Message = "invalid operand for instruction";
+        DEBUG(dbgs() << "Missing diagnostic string for operand class " <<
+              getMatchClassName((MatchClassKind)I.getOperandClass())
+              << I.getOperandClass() << ", error " << I.getOperandError()
+              << ", opcode " << MII.getName(I.getOpcode()) << "\n");
       }
       NearMissesOut.emplace_back(Message);
       break;

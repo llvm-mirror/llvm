@@ -1,4 +1,4 @@
-//===-- LoopUnroll.cpp - Loop unroller pass -------------------------------===//
+//===- LoopUnroll.cpp - Loop unroller pass --------------------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -13,30 +13,55 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/Scalar/LoopUnrollPass.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseMapInfo.h"
+#include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/None.h"
+#include "llvm/ADT/Optional.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/CodeMetrics.h"
-#include "llvm/Analysis/GlobalsModRef.h"
-#include "llvm/Analysis/InstructionSimplify.h"
+#include "llvm/Analysis/LoopAnalysisManager.h"
+#include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/LoopUnrollAnalyzer.h"
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/ProfileSummaryInfo.h"
 #include "llvm/Analysis/ScalarEvolution.h"
-#include "llvm/Analysis/ScalarEvolutionExpressions.h"
-#include "llvm/IR/DataLayout.h"
+#include "llvm/Analysis/TargetTransformInfo.h"
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/CFG.h"
+#include "llvm/IR/Constant.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Dominators.h"
-#include "llvm/IR/InstVisitor.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Instruction.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Metadata.h"
+#include "llvm/IR/PassManager.h"
+#include "llvm/Pass.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/LoopPassManager.h"
+#include "llvm/Transforms/Utils/LoopSimplify.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
 #include "llvm/Transforms/Utils/UnrollLoop.h"
-#include <climits>
+#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <limits>
+#include <string>
+#include <tuple>
 #include <utility>
 
 using namespace llvm;
@@ -135,7 +160,7 @@ static cl::opt<bool> UnrollRevisitChildLoops(
 /// A magic value for use with the Threshold parameter to indicate
 /// that the loop unroll should be performed regardless of how much
 /// code expansion would result.
-static const unsigned NoThreshold = UINT_MAX;
+static const unsigned NoThreshold = std::numeric_limits<unsigned>::max();
 
 /// Gather the various unrolling parameters based on the defaults, compiler
 /// flags, TTI overrides and user specified parameters.
@@ -155,8 +180,8 @@ static TargetTransformInfo::UnrollingPreferences gatherUnrollingPreferences(
   UP.Count = 0;
   UP.PeelCount = 0;
   UP.DefaultUnrollRuntimeCount = 8;
-  UP.MaxCount = UINT_MAX;
-  UP.FullUnrollMaxCount = UINT_MAX;
+  UP.MaxCount = std::numeric_limits<unsigned>::max();
+  UP.FullUnrollMaxCount = std::numeric_limits<unsigned>::max();
   UP.BEInsns = 2;
   UP.Partial = false;
   UP.Runtime = false;
@@ -222,6 +247,7 @@ static TargetTransformInfo::UnrollingPreferences gatherUnrollingPreferences(
 }
 
 namespace {
+
 /// A struct to densely store the state of an instruction after unrolling at
 /// each iteration.
 ///
@@ -237,25 +263,27 @@ struct UnrolledInstState {
 
 /// Hashing and equality testing for a set of the instruction states.
 struct UnrolledInstStateKeyInfo {
-  typedef DenseMapInfo<Instruction *> PtrInfo;
-  typedef DenseMapInfo<std::pair<Instruction *, int>> PairInfo;
+  using PtrInfo = DenseMapInfo<Instruction *>;
+  using PairInfo = DenseMapInfo<std::pair<Instruction *, int>>;
+
   static inline UnrolledInstState getEmptyKey() {
     return {PtrInfo::getEmptyKey(), 0, 0, 0};
   }
+
   static inline UnrolledInstState getTombstoneKey() {
     return {PtrInfo::getTombstoneKey(), 0, 0, 0};
   }
+
   static inline unsigned getHashValue(const UnrolledInstState &S) {
     return PairInfo::getHashValue({S.I, S.Iteration});
   }
+
   static inline bool isEqual(const UnrolledInstState &LHS,
                              const UnrolledInstState &RHS) {
     return PairInfo::isEqual({LHS.I, LHS.Iteration}, {RHS.I, RHS.Iteration});
   }
 };
-}
 
-namespace {
 struct EstimatedUnrollCost {
   /// \brief The estimated cost after unrolling.
   unsigned UnrolledCost;
@@ -264,7 +292,8 @@ struct EstimatedUnrollCost {
   /// rolled form.
   unsigned RolledDynamicCost;
 };
-}
+
+} // end anonymous namespace
 
 /// \brief Figure out if the loop is worth full unrolling.
 ///
@@ -286,7 +315,8 @@ analyzeLoopUnrollCost(const Loop *L, unsigned TripCount, DominatorTree &DT,
   // We want to be able to scale offsets by the trip count and add more offsets
   // to them without checking for overflows, and we already don't want to
   // analyze *massive* trip counts, so we force the max to be reasonably small.
-  assert(UnrollMaxIterationsCountToAnalyze < (INT_MAX / 2) &&
+  assert(UnrollMaxIterationsCountToAnalyze <
+             (unsigned)(std::numeric_limits<int>::max() / 2) &&
          "The unroll iterations max is too large!");
 
   // Only analyze inner loops. We can't properly estimate cost of nested loops
@@ -649,43 +679,6 @@ static unsigned UnrollCountPragmaValue(const Loop *L) {
   return 0;
 }
 
-// Remove existing unroll metadata and add unroll disable metadata to
-// indicate the loop has already been unrolled.  This prevents a loop
-// from being unrolled more than is directed by a pragma if the loop
-// unrolling pass is run more than once (which it generally is).
-static void SetLoopAlreadyUnrolled(Loop *L) {
-  MDNode *LoopID = L->getLoopID();
-  // First remove any existing loop unrolling metadata.
-  SmallVector<Metadata *, 4> MDs;
-  // Reserve first location for self reference to the LoopID metadata node.
-  MDs.push_back(nullptr);
-
-  if (LoopID) {
-    for (unsigned i = 1, ie = LoopID->getNumOperands(); i < ie; ++i) {
-      bool IsUnrollMetadata = false;
-      MDNode *MD = dyn_cast<MDNode>(LoopID->getOperand(i));
-      if (MD) {
-        const MDString *S = dyn_cast<MDString>(MD->getOperand(0));
-        IsUnrollMetadata = S && S->getString().startswith("llvm.loop.unroll.");
-      }
-      if (!IsUnrollMetadata)
-        MDs.push_back(LoopID->getOperand(i));
-    }
-  }
-
-  // Add unroll(disable) metadata to disable future unrolling.
-  LLVMContext &Context = L->getHeader()->getContext();
-  SmallVector<Metadata *, 1> DisableOperands;
-  DisableOperands.push_back(MDString::get(Context, "llvm.loop.unroll.disable"));
-  MDNode *DisableNode = MDNode::get(Context, DisableOperands);
-  MDs.push_back(DisableNode);
-
-  MDNode *NewLoopID = MDNode::get(Context, MDs);
-  // Set operand 0 to refer to the loop id itself.
-  NewLoopID->replaceOperandWith(0, NewLoopID);
-  L->setLoopID(NewLoopID);
-}
-
 // Computes the boosting factor for complete unrolling.
 // If fully unrolling the loop would save a lot of RolledDynamicCost, it would
 // be beneficial to fully unroll the loop even if unrolledcost is large. We
@@ -693,7 +686,7 @@ static void SetLoopAlreadyUnrolled(Loop *L) {
 // the unroll threshold.
 static unsigned getFullUnrollBoostingFactor(const EstimatedUnrollCost &Cost,
                                             unsigned MaxPercentThresholdBoost) {
-  if (Cost.RolledDynamicCost >= UINT_MAX / 100)
+  if (Cost.RolledDynamicCost >= std::numeric_limits<unsigned>::max() / 100)
     return 100;
   else if (Cost.UnrolledCost != 0)
     // The boosting factor is RolledDynamicCost / UnrolledCost
@@ -928,7 +921,9 @@ static bool computeUnrollCount(
                     "multiple, "
                  << TripMultiple << ".  Reducing unroll count from "
                  << OrigCount << " to " << UP.Count << ".\n");
+
     using namespace ore;
+
     if (PragmaCount > 0 && !UP.AllowRemainder)
       ORE->emit([&]() {
         return OptimizationRemarkMissed(DEBUG_TYPE,
@@ -964,7 +959,7 @@ static LoopUnrollResult tryToUnrollLoop(
                << "] Loop %" << L->getHeader()->getName() << "\n");
   if (HasUnrollDisablePragma(L))
     return LoopUnrollResult::Unmodified;
-  if (!L->isLoopSimplifyForm()) { 
+  if (!L->isLoopSimplifyForm()) {
     DEBUG(
         dbgs() << "  Not unrolling loop which is not in loop-simplify form.\n");
     return LoopUnrollResult::Unmodified;
@@ -1068,15 +1063,25 @@ static LoopUnrollResult tryToUnrollLoop(
   // we had, so we don't want to unroll or peel again.
   if (UnrollResult != LoopUnrollResult::FullyUnrolled &&
       (IsCountSetExplicitly || UP.PeelCount))
-    SetLoopAlreadyUnrolled(L);
+    L->setLoopAlreadyUnrolled();
 
   return UnrollResult;
 }
 
 namespace {
+
 class LoopUnroll : public LoopPass {
 public:
   static char ID; // Pass ID, replacement for typeid
+
+  int OptLevel;
+  Optional<unsigned> ProvidedCount;
+  Optional<unsigned> ProvidedThreshold;
+  Optional<bool> ProvidedAllowPartial;
+  Optional<bool> ProvidedRuntime;
+  Optional<bool> ProvidedUpperBound;
+  Optional<bool> ProvidedAllowPeeling;
+
   LoopUnroll(int OptLevel = 2, Optional<unsigned> Threshold = None,
              Optional<unsigned> Count = None,
              Optional<bool> AllowPartial = None, Optional<bool> Runtime = None,
@@ -1088,14 +1093,6 @@ public:
         ProvidedAllowPeeling(AllowPeeling) {
     initializeLoopUnrollPass(*PassRegistry::getPassRegistry());
   }
-
-  int OptLevel;
-  Optional<unsigned> ProvidedCount;
-  Optional<unsigned> ProvidedThreshold;
-  Optional<bool> ProvidedAllowPartial;
-  Optional<bool> ProvidedRuntime;
-  Optional<bool> ProvidedUpperBound;
-  Optional<bool> ProvidedAllowPeeling;
 
   bool runOnLoop(Loop *L, LPPassManager &LPM) override {
     if (skipLoop(L))
@@ -1128,7 +1125,6 @@ public:
 
   /// This transformation requires natural loop information & requires that
   /// loop preheaders be inserted into the CFG...
-  ///
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequired<AssumptionCacheTracker>();
     AU.addRequired<TargetTransformInfoWrapperPass>();
@@ -1137,9 +1133,11 @@ public:
     getLoopAnalysisUsage(AU);
   }
 };
-}
+
+} // end anonymous namespace
 
 char LoopUnroll::ID = 0;
+
 INITIALIZE_PASS_BEGIN(LoopUnroll, "loop-unroll", "Unroll loops", false, false)
 INITIALIZE_PASS_DEPENDENCY(AssumptionCacheTracker)
 INITIALIZE_PASS_DEPENDENCY(LoopPass)
@@ -1162,7 +1160,7 @@ Pass *llvm::createLoopUnrollPass(int OptLevel, int Threshold, int Count,
 }
 
 Pass *llvm::createSimpleLoopUnrollPass(int OptLevel) {
-  return llvm::createLoopUnrollPass(OptLevel, -1, -1, 0, 0, 0, 0);
+  return createLoopUnrollPass(OptLevel, -1, -1, 0, 0, 0, 0);
 }
 
 PreservedAnalyses LoopFullUnrollPass::run(Loop &L, LoopAnalysisManager &AM,

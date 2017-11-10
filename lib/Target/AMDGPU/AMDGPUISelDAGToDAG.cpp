@@ -169,7 +169,6 @@ private:
   bool SelectSMRDSgpr(SDValue Addr, SDValue &SBase, SDValue &Offset) const;
   bool SelectSMRDBufferImm(SDValue Addr, SDValue &Offset) const;
   bool SelectSMRDBufferImm32(SDValue Addr, SDValue &Offset) const;
-  bool SelectSMRDBufferSgpr(SDValue Addr, SDValue &Offset) const;
   bool SelectMOVRELOffset(SDValue Index, SDValue &Base, SDValue &Offset) const;
 
   bool SelectVOP3Mods_NNaN(SDValue In, SDValue &Src, SDValue &SrcMods) const;
@@ -789,7 +788,7 @@ void AMDGPUDAGToDAGISel::SelectFMA_W_CHAIN(SDNode *N) {
 
 void AMDGPUDAGToDAGISel::SelectFMUL_W_CHAIN(SDNode *N) {
   SDLoc SL(N);
-  //	src0_modifiers, src0,  src1_modifiers, src1, clamp, omod
+  //    src0_modifiers, src0,  src1_modifiers, src1, clamp, omod
   SDValue Ops[8];
 
   SelectVOP3Mods0(N->getOperand(1), Ops[1], Ops[0], Ops[4], Ops[5]);
@@ -1466,13 +1465,6 @@ bool AMDGPUDAGToDAGISel::SelectSMRDBufferImm32(SDValue Addr,
   return !Imm && isa<ConstantSDNode>(Offset);
 }
 
-bool AMDGPUDAGToDAGISel::SelectSMRDBufferSgpr(SDValue Addr,
-                                              SDValue &Offset) const {
-  bool Imm;
-  return SelectSMRDOffset(Addr, Offset, Imm) && !Imm &&
-         !isa<ConstantSDNode>(Offset);
-}
-
 bool AMDGPUDAGToDAGISel::SelectMOVRELOffset(SDValue Index,
                                             SDValue &Base,
                                             SDValue &Offset) const {
@@ -1712,7 +1704,7 @@ void AMDGPUDAGToDAGISel::SelectATOMIC_CMP_SWAP(SDNode *N) {
 
   MachineSDNode *CmpSwap = nullptr;
   if (Subtarget->hasAddr64()) {
-    SDValue SRsrc, VAddr, SOffset, Offset, GLC, SLC;
+    SDValue SRsrc, VAddr, SOffset, Offset, SLC;
 
     if (SelectMUBUFAddr64(Mem->getBasePtr(), SRsrc, VAddr, SOffset, Offset, SLC)) {
       unsigned Opcode = Is32 ? AMDGPU::BUFFER_ATOMIC_CMPSWAP_ADDR64_RTN :
@@ -1982,14 +1974,30 @@ bool AMDGPUDAGToDAGISel::SelectVOP3PMadMixModsImpl(SDValue In, SDValue &Src,
     assert(Src.getValueType() == MVT::f16);
     Src = stripBitcast(Src);
 
+    // Be careful about folding modifiers if we already have an abs. fneg is
+    // applied last, so we don't want to apply an earlier fneg.
+    if ((Mods & SISrcMods::ABS) == 0) {
+      unsigned ModsTmp;
+      SelectVOP3ModsImpl(Src, Src, ModsTmp);
+
+      if ((ModsTmp & SISrcMods::NEG) != 0)
+        Mods ^= SISrcMods::NEG;
+
+      if ((ModsTmp & SISrcMods::ABS) != 0)
+        Mods |= SISrcMods::ABS;
+    }
+
     // op_sel/op_sel_hi decide the source type and source.
     // If the source's op_sel_hi is set, it indicates to do a conversion from fp16.
     // If the sources's op_sel is set, it picks the high half of the source
     // register.
 
     Mods |= SISrcMods::OP_SEL_1;
-    if (isExtractHiElt(Src, Src))
+    if (isExtractHiElt(Src, Src)) {
       Mods |= SISrcMods::OP_SEL_0;
+
+      // TODO: Should we try to look for neg/abs here?
+    }
 
     return true;
   }

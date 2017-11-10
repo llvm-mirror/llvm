@@ -593,7 +593,7 @@ def Int_MemBarrier : I<0, Pseudo, (outs), (ins),
 // ImmOpc8 corresponds to the mi8 version of the instruction
 // ImmMod corresponds to the instruction format of the mi and mi8 versions
 multiclass LOCK_ArithBinOp<bits<8> RegOpc, bits<8> ImmOpc, bits<8> ImmOpc8,
-                           Format ImmMod, SDPatternOperator Op, string mnemonic> {
+                           Format ImmMod, SDNode Op, string mnemonic> {
 let Defs = [EFLAGS], mayLoad = 1, mayStore = 1, isCodeGenOnly = 1,
     SchedRW = [WriteALULd, WriteRMW] in {
 
@@ -696,32 +696,52 @@ defm LOCK_AND : LOCK_ArithBinOp<0x20, 0x80, 0x83, MRM4m, X86lock_and, "and">;
 defm LOCK_XOR : LOCK_ArithBinOp<0x30, 0x80, 0x83, MRM6m, X86lock_xor, "xor">;
 
 multiclass LOCK_ArithUnOp<bits<8> Opc8, bits<8> Opc, Format Form,
-                          int Increment, string mnemonic> {
+                          string frag, string mnemonic> {
 let Defs = [EFLAGS], mayLoad = 1, mayStore = 1, isCodeGenOnly = 1,
     SchedRW = [WriteALULd, WriteRMW] in {
 def NAME#8m  : I<Opc8, Form, (outs), (ins i8mem :$dst),
                  !strconcat(mnemonic, "{b}\t$dst"),
-                 [(set EFLAGS, (X86lock_add addr:$dst, (i8 Increment)))],
+                 [(set EFLAGS, (!cast<PatFrag>(frag # "_8") addr:$dst))],
                   IIC_UNARY_MEM>, LOCK;
 def NAME#16m : I<Opc, Form, (outs), (ins i16mem:$dst),
                  !strconcat(mnemonic, "{w}\t$dst"),
-                 [(set EFLAGS, (X86lock_add addr:$dst, (i16 Increment)))],
+                 [(set EFLAGS, (!cast<PatFrag>(frag # "_16") addr:$dst))],
                  IIC_UNARY_MEM>, OpSize16, LOCK;
 def NAME#32m : I<Opc, Form, (outs), (ins i32mem:$dst),
                  !strconcat(mnemonic, "{l}\t$dst"),
-                 [(set EFLAGS, (X86lock_add addr:$dst, (i32 Increment)))],
+                 [(set EFLAGS, (!cast<PatFrag>(frag # "_32") addr:$dst))],
                  IIC_UNARY_MEM>, OpSize32, LOCK;
 def NAME#64m : RI<Opc, Form, (outs), (ins i64mem:$dst),
                   !strconcat(mnemonic, "{q}\t$dst"),
-                  [(set EFLAGS, (X86lock_add addr:$dst, (i64 Increment)))],
+                  [(set EFLAGS, (!cast<PatFrag>(frag # "_64") addr:$dst))],
                   IIC_UNARY_MEM>, LOCK;
 }
 }
 
-let Predicates = [UseIncDec] in {
-defm LOCK_INC    : LOCK_ArithUnOp<0xFE, 0xFF, MRM0m,  1, "inc">;
-defm LOCK_DEC    : LOCK_ArithUnOp<0xFE, 0xFF, MRM1m, -1, "dec">;
+multiclass unary_atomic_intrin<SDNode atomic_op> {
+  def _8 : PatFrag<(ops node:$ptr),
+                   (atomic_op  node:$ptr), [{
+    return cast<MemIntrinsicSDNode>(N)->getMemoryVT() == MVT::i8;
+  }]>;
+  def _16 : PatFrag<(ops node:$ptr),
+                    (atomic_op node:$ptr), [{
+    return cast<MemIntrinsicSDNode>(N)->getMemoryVT() == MVT::i16;
+  }]>;
+  def _32 : PatFrag<(ops node:$ptr),
+                    (atomic_op node:$ptr), [{
+    return cast<MemIntrinsicSDNode>(N)->getMemoryVT() == MVT::i32;
+  }]>;
+  def _64 : PatFrag<(ops node:$ptr),
+                    (atomic_op node:$ptr), [{
+    return cast<MemIntrinsicSDNode>(N)->getMemoryVT() == MVT::i64;
+  }]>;
 }
+
+defm X86lock_inc : unary_atomic_intrin<X86lock_inc>;
+defm X86lock_dec : unary_atomic_intrin<X86lock_dec>;
+
+defm LOCK_INC    : LOCK_ArithUnOp<0xFE, 0xFF, MRM0m, "X86lock_inc", "inc">;
+defm LOCK_DEC    : LOCK_ArithUnOp<0xFE, 0xFF, MRM1m, "X86lock_dec", "dec">;
 
 // Atomic compare and swap.
 multiclass LCMPXCHG_UnOp<bits<8> Opc, Format Form, string mnemonic,

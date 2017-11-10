@@ -114,6 +114,17 @@ static TLSModel::Model getSelectedTLSModel(const GlobalValue *GV) {
 
 bool TargetMachine::shouldAssumeDSOLocal(const Module &M,
                                          const GlobalValue *GV) const {
+  // If the IR producer requested that this GV be treated as dso local, obey.
+  if (GV && GV->isDSOLocal())
+    return true;
+
+  // According to the llvm language reference, we should be able to just return
+  // false in here if we have a GV, as we know it is dso_preemptable.
+  // At this point in time, the various IR producers have not been transitioned
+  // to always produce a dso_local when it is possible to do so. As a result we
+  // still have some pre-dso_local logic in here to improve the quality of the
+  // generated code:
+
   Reloc::Model RM = getRelocationModel();
   const Triple &TT = getTargetTriple();
 
@@ -127,6 +138,15 @@ bool TargetMachine::shouldAssumeDSOLocal(const Module &M,
   // without GOT tables in older clang versions; Keep this behaviour.
   if (TT.isOSBinFormatCOFF() || (TT.isOSWindows() && TT.isOSBinFormatMachO()))
     return true;
+
+  // Most PIC code sequences that assume that a symbol is local cannot
+  // produce a 0 if it turns out the symbol is undefined. While this
+  // is ABI and relocation depended, it seems worth it to handle it
+  // here.
+  // FIXME: this is probably not ELF specific.
+  if (GV && isPositionIndependent() && TT.isOSBinFormatELF() &&
+      GV->hasExternalWeakLinkage())
+    return false;
 
   if (GV && (GV->hasLocalLinkage() || !GV->hasDefaultVisibility()))
     return true;
@@ -148,9 +168,8 @@ bool TargetMachine::shouldAssumeDSOLocal(const Module &M,
       return true;
 
     bool IsTLS = GV && GV->isThreadLocal();
-    bool IsAccessViaCopyRelocs = Options.MCOptions.MCPIECopyRelocations && GV &&
-                                 isa<GlobalVariable>(GV) &&
-                                 !GV->hasExternalWeakLinkage();
+    bool IsAccessViaCopyRelocs =
+        Options.MCOptions.MCPIECopyRelocations && GV && isa<GlobalVariable>(GV);
     Triple::ArchType Arch = TT.getArch();
     bool IsPPC =
         Arch == Triple::ppc || Arch == Triple::ppc64 || Arch == Triple::ppc64le;

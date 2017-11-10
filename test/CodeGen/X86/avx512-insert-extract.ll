@@ -324,11 +324,10 @@ define i16 @test16(i1 *%addr, i16 %a) {
 ;
 ; SKX-LABEL: test16:
 ; SKX:       ## BB#0:
-; SKX-NEXT:    movb (%rdi), %al
-; SKX-NEXT:    kmovd %esi, %k0
-; SKX-NEXT:    kmovd %eax, %k1
-; SKX-NEXT:    vpmovm2d %k1, %zmm0
-; SKX-NEXT:    vpmovm2d %k0, %zmm1
+; SKX-NEXT:    kmovb (%rdi), %k0
+; SKX-NEXT:    kmovd %esi, %k1
+; SKX-NEXT:    vpmovm2d %k0, %zmm0
+; SKX-NEXT:    vpmovm2d %k1, %zmm1
 ; SKX-NEXT:    vmovdqa32 {{.*#+}} zmm2 = [0,1,2,3,4,5,6,7,8,9,16,11,12,13,14,15]
 ; SKX-NEXT:    vpermi2d %zmm0, %zmm1, %zmm2
 ; SKX-NEXT:    vpmovd2m %zmm2, %k0
@@ -362,11 +361,10 @@ define i8 @test17(i1 *%addr, i8 %a) {
 ;
 ; SKX-LABEL: test17:
 ; SKX:       ## BB#0:
-; SKX-NEXT:    movb (%rdi), %al
-; SKX-NEXT:    kmovd %esi, %k0
-; SKX-NEXT:    kmovd %eax, %k1
-; SKX-NEXT:    vpmovm2q %k1, %zmm0
-; SKX-NEXT:    vpmovm2q %k0, %zmm1
+; SKX-NEXT:    kmovb (%rdi), %k0
+; SKX-NEXT:    kmovd %esi, %k1
+; SKX-NEXT:    vpmovm2q %k0, %zmm0
+; SKX-NEXT:    vpmovm2q %k1, %zmm1
 ; SKX-NEXT:    vmovdqa64 {{.*#+}} zmm2 = [0,1,2,3,8,5,6,7]
 ; SKX-NEXT:    vpermi2q %zmm0, %zmm1, %zmm2
 ; SKX-NEXT:    vpmovq2m %zmm2, %k0
@@ -424,9 +422,9 @@ define i64 @extract_v2i64(<2 x i64> %x, i64* %dst) {
 define i32 @extract_v16i32(<16 x i32> %x, i32* %dst) {
 ; CHECK-LABEL: extract_v16i32:
 ; CHECK:       ## BB#0:
-; CHECK-NEXT:    vpextrd $1, %xmm0, %eax
-; CHECK-NEXT:    vextracti128 $1, %ymm0, %xmm0
-; CHECK-NEXT:    vpextrd $1, %xmm0, (%rdi)
+; CHECK-NEXT:    vextractps $1, %xmm0, %eax
+; CHECK-NEXT:    vextractf128 $1, %ymm0, %xmm0
+; CHECK-NEXT:    vextractps $1, %xmm0, (%rdi)
 ; CHECK-NEXT:    vzeroupper
 ; CHECK-NEXT:    retq
   %r1 = extractelement <16 x i32> %x, i32 1
@@ -438,9 +436,9 @@ define i32 @extract_v16i32(<16 x i32> %x, i32* %dst) {
 define i32 @extract_v8i32(<8 x i32> %x, i32* %dst) {
 ; CHECK-LABEL: extract_v8i32:
 ; CHECK:       ## BB#0:
-; CHECK-NEXT:    vpextrd $1, %xmm0, %eax
-; CHECK-NEXT:    vextracti128 $1, %ymm0, %xmm0
-; CHECK-NEXT:    vpextrd $1, %xmm0, (%rdi)
+; CHECK-NEXT:    vextractps $1, %xmm0, %eax
+; CHECK-NEXT:    vextractf128 $1, %ymm0, %xmm0
+; CHECK-NEXT:    vextractps $1, %xmm0, (%rdi)
 ; CHECK-NEXT:    vzeroupper
 ; CHECK-NEXT:    retq
   %r1 = extractelement <8 x i32> %x, i32 1
@@ -452,8 +450,8 @@ define i32 @extract_v8i32(<8 x i32> %x, i32* %dst) {
 define i32 @extract_v4i32(<4 x i32> %x, i32* %dst) {
 ; CHECK-LABEL: extract_v4i32:
 ; CHECK:       ## BB#0:
-; CHECK-NEXT:    vpextrd $1, %xmm0, %eax
-; CHECK-NEXT:    vpextrd $3, %xmm0, (%rdi)
+; CHECK-NEXT:    vextractps $1, %xmm0, %eax
+; CHECK-NEXT:    vextractps $3, %xmm0, (%rdi)
 ; CHECK-NEXT:    retq
   %r1 = extractelement <4 x i32> %x, i32 1
   %r2 = extractelement <4 x i32> %x, i32 3

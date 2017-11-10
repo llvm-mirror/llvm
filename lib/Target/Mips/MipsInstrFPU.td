@@ -448,11 +448,14 @@ let isPseudo = 1, isCodeGenOnly = 1 in {
   def PseudoCVT_D64_L : ABSS_FT<"", FGR64Opnd, GPR64Opnd, II_CVT>;
 }
 
-def FABS_S : MMRel, ABSS_FT<"abs.s", FGR32Opnd, FGR32Opnd, II_ABS, fabs>,
-             ABSS_FM<0x5, 16>;
+let AdditionalPredicates = [NotInMicroMips] in {
+  def FABS_S : MMRel, ABSS_FT<"abs.s", FGR32Opnd, FGR32Opnd, II_ABS, fabs>,
+               ABSS_FM<0x5, 16>;
+  defm FABS : ABSS_M<"abs.d", II_ABS, fabs>, ABSS_FM<0x5, 17>;
+}
+
 def FNEG_S : MMRel, ABSS_FT<"neg.s", FGR32Opnd, FGR32Opnd, II_NEG, fneg>,
              ABSS_FM<0x7, 16>;
-defm FABS : ABSS_M<"abs.d", II_ABS, fabs>, ABSS_FM<0x5, 17>;
 defm FNEG : ABSS_M<"neg.d", II_NEG, fneg>, ABSS_FM<0x7, 17>;
 
 def FSQRT_S : MMRel, StdMMR6Rel, ABSS_FT<"sqrt.s", FGR32Opnd, FGR32Opnd,
@@ -641,17 +644,17 @@ let AdditionalPredicates = [NoNaNsFPMath, HasMadd4],
 def MIPS_BRANCH_F  : PatLeaf<(i32 0)>;
 def MIPS_BRANCH_T  : PatLeaf<(i32 1)>;
 
-def BC1F : MMRel, BC1F_FT<"bc1f", brtarget, II_BC1F, MIPS_BRANCH_F>,
-           BC1F_FM<0, 0>, ISA_MIPS1_NOT_32R6_64R6;
-def BC1FL : MMRel, BC1XL_FT<"bc1fl", brtarget, II_BC1FL>,
-            BC1F_FM<1, 0>, ISA_MIPS2_NOT_32R6_64R6;
-def BC1T : MMRel, BC1F_FT<"bc1t", brtarget, II_BC1T, MIPS_BRANCH_T>,
-           BC1F_FM<0, 1>, ISA_MIPS1_NOT_32R6_64R6;
-def BC1TL : MMRel, BC1XL_FT<"bc1tl", brtarget, II_BC1TL>,
-            BC1F_FM<1, 1>, ISA_MIPS2_NOT_32R6_64R6;
+let AdditionalPredicates = [NotInMicroMips] in {
+  def BC1F : MMRel, BC1F_FT<"bc1f", brtarget, II_BC1F, MIPS_BRANCH_F>,
+             BC1F_FM<0, 0>, ISA_MIPS1_NOT_32R6_64R6;
+  def BC1FL : MMRel, BC1XL_FT<"bc1fl", brtarget, II_BC1FL>,
+              BC1F_FM<1, 0>, ISA_MIPS2_NOT_32R6_64R6;
+  def BC1T : MMRel, BC1F_FT<"bc1t", brtarget, II_BC1T, MIPS_BRANCH_T>,
+             BC1F_FM<0, 1>, ISA_MIPS1_NOT_32R6_64R6;
+  def BC1TL : MMRel, BC1XL_FT<"bc1tl", brtarget, II_BC1TL>,
+              BC1F_FM<1, 1>, ISA_MIPS2_NOT_32R6_64R6;
 
 /// Floating Point Compare
-let AdditionalPredicates = [NotInMicroMips] in {
   def FCMP_S32 : MMRel, CEQS_FT<"s", FGR32, II_C_CC_S, MipsFPCmp>, CEQS_FM<16>,
                  ISA_MIPS1_NOT_32R6_64R6 {
 

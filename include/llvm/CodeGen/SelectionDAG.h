@@ -336,6 +336,14 @@ private:
         .getRawSubclassData();
   }
 
+  template <typename SDNodeTy>
+  static uint16_t getSyntheticNodeSubclassData(unsigned Opc, unsigned Order,
+                                                SDVTList VTs, EVT MemoryVT,
+                                                MachineMemOperand *MMO) {
+    return SDNodeTy(Opc, Order, DebugLoc(), VTs, MemoryVT, MMO)
+         .getRawSubclassData();
+  }
+
   void createOperands(SDNode *Node, ArrayRef<SDValue> Vals) {
     assert(!Node->OperandList && "Node already has operands");
     SDUse *Ops = OperandRecycler.allocate(
@@ -1285,6 +1293,10 @@ public:
   SDDbgInfo::DbgIterator ByvalParmDbgEnd()   {
     return DbgInfo->ByvalParmDbgEnd();
   }
+
+  /// To be invoked on an SDNode that is slated to be erased. This
+  /// function mirrors \c llvm::salvageDebugInfo.
+  void salvageDebugInfo(SDNode &N);
 
   void dump() const;
 

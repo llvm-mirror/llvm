@@ -33,6 +33,7 @@
 #include <cassert>
 #include <cstdint>
 #include <iterator>
+#include <map>
 #include <memory>
 #include <string>
 #include <system_error>
@@ -296,7 +297,7 @@ namespace {
 /// An instantiation set is a collection of functions that have the same source
 /// code, ie, template functions specializations.
 class FunctionInstantiationSetCollector {
-  using MapT = DenseMap<LineColPair, std::vector<const FunctionRecord *>>;
+  using MapT = std::map<LineColPair, std::vector<const FunctionRecord *>>;
   MapT InstantiatedFunctions;
 
 public:
@@ -669,6 +670,59 @@ CoverageData CoverageMapping::getCoverageForExpansion(
   ExpansionCoverage.Segments = SegmentBuilder::buildSegments(Regions);
 
   return ExpansionCoverage;
+}
+
+LineCoverageStats::LineCoverageStats(
+    ArrayRef<const CoverageSegment *> LineSegments,
+    const CoverageSegment *WrappedSegment, unsigned Line)
+    : ExecutionCount(0), HasMultipleRegions(false), Mapped(false), Line(Line),
+      LineSegments(LineSegments), WrappedSegment(WrappedSegment) {
+  // Find the minimum number of regions which start in this line.
+  unsigned MinRegionCount = 0;
+  auto isStartOfRegion = [](const CoverageSegment *S) {
+    return !S->IsGapRegion && S->HasCount && S->IsRegionEntry;
+  };
+  for (unsigned I = 0; I < LineSegments.size() && MinRegionCount < 2; ++I)
+    if (isStartOfRegion(LineSegments[I]))
+      ++MinRegionCount;
+
+  bool StartOfSkippedRegion = !LineSegments.empty() &&
+                              !LineSegments.front()->HasCount &&
+                              LineSegments.front()->IsRegionEntry;
+
+  HasMultipleRegions = MinRegionCount > 1;
+  Mapped =
+      !StartOfSkippedRegion &&
+      ((WrappedSegment && WrappedSegment->HasCount) || (MinRegionCount > 0));
+
+  if (!Mapped)
+    return;
+
+  // Pick the max count from the non-gap, region entry segments. If there
+  // aren't any, use the wrapped count.
+  if (!MinRegionCount) {
+    ExecutionCount = WrappedSegment->Count;
+    return;
+  }
+  for (const auto *LS : LineSegments)
+    if (isStartOfRegion(LS))
+      ExecutionCount = std::max(ExecutionCount, LS->Count);
+}
+
+LineCoverageIterator &LineCoverageIterator::operator++() {
+  if (Next == CD.end()) {
+    Stats = LineCoverageStats();
+    Ended = true;
+    return *this;
+  }
+  if (Segments.size())
+    WrappedSegment = Segments.back();
+  Segments.clear();
+  while (Next != CD.end() && Next->Line == Line)
+    Segments.push_back(&*Next++);
+  Stats = LineCoverageStats(Segments, WrappedSegment, Line);
+  ++Line;
+  return *this;
 }
 
 static std::string getCoverageMapErrString(coveragemap_error Err) {

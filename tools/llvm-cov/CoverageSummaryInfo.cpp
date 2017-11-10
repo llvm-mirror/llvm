@@ -17,50 +17,6 @@
 using namespace llvm;
 using namespace coverage;
 
-LineCoverageStats::LineCoverageStats(
-    ArrayRef<const coverage::CoverageSegment *> LineSegments,
-    const coverage::CoverageSegment *WrappedSegment) {
-  // Find the minimum number of regions which start in this line.
-  unsigned MinRegionCount = 0;
-  auto isStartOfRegion = [](const coverage::CoverageSegment *S) {
-    return !S->IsGapRegion && S->HasCount && S->IsRegionEntry;
-  };
-  for (unsigned I = 0; I < LineSegments.size() && MinRegionCount < 2; ++I)
-    if (isStartOfRegion(LineSegments[I]))
-      ++MinRegionCount;
-
-  bool StartOfSkippedRegion = !LineSegments.empty() &&
-                              !LineSegments.front()->HasCount &&
-                              LineSegments.front()->IsRegionEntry;
-
-  ExecutionCount = 0;
-  HasMultipleRegions = MinRegionCount > 1;
-  Mapped =
-      !StartOfSkippedRegion &&
-      ((WrappedSegment && WrappedSegment->HasCount) || (MinRegionCount > 0));
-
-  if (!Mapped)
-    return;
-
-  // Pick the max count among regions which start and end on this line, to
-  // avoid erroneously using the wrapped count, and to avoid picking region
-  // counts which come from deferred regions.
-  if (LineSegments.size() > 1) {
-    for (unsigned I = 0; I < LineSegments.size() - 1; ++I) {
-      if (!LineSegments[I]->IsGapRegion)
-        ExecutionCount = std::max(ExecutionCount, LineSegments[I]->Count);
-    }
-    return;
-  }
-
-  // If a non-gap region starts here, use its count. Otherwise use the wrapped
-  // count.
-  if (MinRegionCount == 1)
-    ExecutionCount = LineSegments[0]->Count;
-  else
-    ExecutionCount = WrappedSegment->Count;
-}
-
 FunctionCoverageSummary
 FunctionCoverageSummary::get(const CoverageMapping &CM,
                              const coverage::FunctionRecord &Function) {
@@ -77,27 +33,12 @@ FunctionCoverageSummary::get(const CoverageMapping &CM,
   // Compute the line coverage
   size_t NumLines = 0, CoveredLines = 0;
   CoverageData CD = CM.getCoverageForFunction(Function);
-  auto NextSegment = CD.begin();
-  auto EndSegment = CD.end();
-  const coverage::CoverageSegment *WrappedSegment = nullptr;
-  SmallVector<const coverage::CoverageSegment *, 4> LineSegments;
-  unsigned Line = NextSegment->Line;
-  while (NextSegment != EndSegment) {
-    // Gather the segments on this line and the wrapped segment.
-    if (LineSegments.size())
-      WrappedSegment = LineSegments.back();
-    LineSegments.clear();
-    while (NextSegment != EndSegment && NextSegment->Line == Line)
-      LineSegments.push_back(&*NextSegment++);
-
-    LineCoverageStats LCS{LineSegments, WrappedSegment};
-    if (LCS.isMapped()) {
-      ++NumLines;
-      if (LCS.ExecutionCount)
-        ++CoveredLines;
-    }
-
-    ++Line;
+  for (const auto &LCS : getLineCoverageStats(CD)) {
+    if (!LCS.isMapped())
+      continue;
+    ++NumLines;
+    if (LCS.getExecutionCount())
+      ++CoveredLines;
   }
 
   return FunctionCoverageSummary(

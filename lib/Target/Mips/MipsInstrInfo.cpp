@@ -157,24 +157,23 @@ unsigned MipsInstrInfo::removeBranch(MachineBasicBlock &MBB,
   assert(!BytesRemoved && "code size not handled");
 
   MachineBasicBlock::reverse_iterator I = MBB.rbegin(), REnd = MBB.rend();
-  unsigned removed;
-
-  // Skip all the debug instructions.
-  while (I != REnd && I->isDebugValue())
-    ++I;
-
-  if (I == REnd)
-    return 0;
-
-  MachineBasicBlock::iterator FirstBr = ++I.getReverse();
+  unsigned removed = 0;
 
   // Up to 2 branches are removed.
   // Note that indirect branches are not removed.
-  for (removed = 0; I != REnd && removed < 2; ++I, ++removed)
+  while (I != REnd && removed < 2) {
+    // Skip past debug instructions.
+    if (I->isDebugValue()) {
+      ++I;
+      continue;
+    }
     if (!getAnalyzableBrOpc(I->getOpcode()))
       break;
-
-  MBB.erase((--I).getReverse(), FirstBr);
+    // Remove the branch.
+    I->eraseFromParent();
+    I = MBB.rbegin();
+    ++removed;
+  }
 
   return removed;
 }
@@ -218,7 +217,13 @@ MipsInstrInfo::BranchType MipsInstrInfo::analyzeBranch(
   unsigned SecondLastOpc = 0;
   MachineInstr *SecondLastInst = nullptr;
 
-  if (++I != REnd) {
+  // Skip past any debug instruction to see if the second last actual
+  // is a branch.
+  ++I;
+  while (I != REnd && I->isDebugValue())
+    ++I;
+
+  if (I != REnd) {
     SecondLastInst = &*I;
     SecondLastOpc = getAnalyzableBrOpc(SecondLastInst->getOpcode());
 

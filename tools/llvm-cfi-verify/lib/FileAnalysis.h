@@ -10,7 +10,9 @@
 #ifndef LLVM_CFI_VERIFY_FILE_ANALYSIS_H
 #define LLVM_CFI_VERIFY_FILE_ANALYSIS_H
 
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/BinaryFormat/ELF.h"
+#include "llvm/DebugInfo/DWARF/DWARFContext.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDisassembler/MCDisassembler.h"
@@ -65,6 +67,12 @@ public:
   FileAnalysis(const FileAnalysis &) = delete;
   FileAnalysis(FileAnalysis &&Other) = default;
 
+  // Check whether the provided instruction is CFI protected in this file.
+  // Returns false if this instruction doesn't exist in this file, if it's not
+  // an indirect control flow instruction, or isn't CFI protected. Returns true
+  // otherwise.
+  bool isIndirectInstructionCFIProtected(uint64_t Address) const;
+
   // Returns the instruction at the provided address. Returns nullptr if there
   // is no instruction at the provided address.
   const Instr *getInstruction(uint64_t Address) const;
@@ -113,6 +121,18 @@ public:
   const MCInstrInfo *getMCInstrInfo() const;
   const MCInstrAnalysis *getMCInstrAnalysis() const;
 
+  // Returns true if this class is using DWARF line tables for elimination.
+  bool hasLineTableInfo() const;
+
+  // Returns the line table information for the range {Address +-
+  // DWARFSearchRange}. Returns an empty table if the address has no valid line
+  // table information, or this analysis object has DWARF handling disabled.
+  DILineInfoTable getLineInfoForAddressRange(uint64_t Address);
+
+  // Returns whether the provided address has valid line information for
+  // instructions in the range of Address +- DWARFSearchRange.
+  bool hasValidLineInfoForAddressRange(uint64_t Address);
+
 protected:
   // Construct a blank object with the provided triple and features. Used in
   // testing, where a sub class will dependency inject protected methods to
@@ -155,13 +175,17 @@ private:
   std::unique_ptr<const MCInstrAnalysis> MIA;
   std::unique_ptr<MCInstPrinter> Printer;
 
+  // DWARF debug information.
+  std::unique_ptr<DWARFContext> DWARF;
+
   // A mapping between the virtual memory address to the instruction metadata
-  // struct.
+  // struct. TODO(hctim): Reimplement this as a sorted vector to avoid per-
+  // insertion allocation.
   std::map<uint64_t, Instr> Instructions;
 
   // Contains a mapping between a specific address, and a list of instructions
   // that use this address as a branch target (including call instructions).
-  std::unordered_map<uint64_t, std::vector<uint64_t>> StaticBranchTargetings;
+  DenseMap<uint64_t, std::vector<uint64_t>> StaticBranchTargetings;
 
   // A list of addresses of indirect control flow instructions.
   std::set<uint64_t> IndirectInstructions;
@@ -170,6 +194,9 @@ private:
 class UnsupportedDisassembly : public ErrorInfo<UnsupportedDisassembly> {
 public:
   static char ID;
+  std::string Text;
+
+  UnsupportedDisassembly(StringRef Text);
 
   void log(raw_ostream &OS) const override;
   std::error_code convertToErrorCode() const override;

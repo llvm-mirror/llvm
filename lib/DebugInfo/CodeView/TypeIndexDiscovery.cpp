@@ -404,6 +404,7 @@ static bool discoverTypeIndices(ArrayRef<uint8_t> Content, SymbolKind Kind,
     break;
   case SymbolKind::S_CALLERS:
   case SymbolKind::S_CALLEES:
+  case SymbolKind::S_INLINEES:
     // The record is a count followed by an array of type indices.
     Count = *reinterpret_cast<const ulittle32_t *>(Content.data());
     Refs.push_back({TiRefKind::IndexRef, 4, Count}); // Callees
@@ -412,8 +413,7 @@ static bool discoverTypeIndices(ArrayRef<uint8_t> Content, SymbolKind Kind,
     Refs.push_back({TiRefKind::IndexRef, 8, 1}); // ID of inlinee
     break;
   case SymbolKind::S_HEAPALLOCSITE:
-    // FIXME: It's not clear if this is a type or item reference.
-    Refs.push_back({TiRefKind::IndexRef, 8, 1}); // signature
+    Refs.push_back({TiRefKind::TypeRef, 8, 1}); // UDT allocated
     break;
 
   // Defranges don't have types, just registers and code offsets.
@@ -434,6 +434,8 @@ static bool discoverTypeIndices(ArrayRef<uint8_t> Content, SymbolKind Kind,
   case SymbolKind::S_ENVBLOCK:
   case SymbolKind::S_BLOCK32:
   case SymbolKind::S_FRAMEPROC:
+  case SymbolKind::S_THUNK32:
+  case SymbolKind::S_FRAMECOOKIE:
     break;
   // Scope ending symbols.
   case SymbolKind::S_END:

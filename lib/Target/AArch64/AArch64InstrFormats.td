@@ -500,14 +500,14 @@ let DiagnosticType = "LogicalSecondSource" in {
     let Name = "LogicalImm64Not";
   }
 }
-def logical_imm32 : Operand<i32>, PatLeaf<(imm), [{
-  return AArch64_AM::isLogicalImmediate(N->getZExtValue(), 32);
+def logical_imm32 : Operand<i32>, IntImmLeaf<i32, [{
+  return AArch64_AM::isLogicalImmediate(Imm.getZExtValue(), 32);
 }], logical_imm32_XFORM> {
   let PrintMethod = "printLogicalImm32";
   let ParserMatchClass = LogicalImm32Operand;
 }
-def logical_imm64 : Operand<i64>, PatLeaf<(imm), [{
-  return AArch64_AM::isLogicalImmediate(N->getZExtValue(), 64);
+def logical_imm64 : Operand<i64>, IntImmLeaf<i64, [{
+  return AArch64_AM::isLogicalImmediate(Imm.getZExtValue(), 64);
 }], logical_imm64_XFORM> {
   let PrintMethod = "printLogicalImm64";
   let ParserMatchClass = LogicalImm64Operand;
@@ -754,8 +754,8 @@ class arith_extended_reg32to64<ValueType Ty> : Operand<Ty>,
 
 // Floating-point immediate.
 def fpimm16 : Operand<f16>,
-              PatLeaf<(f16 fpimm), [{
-      return AArch64_AM::getFP16Imm(N->getValueAPF()) != -1;
+              FPImmLeaf<f16, [{
+      return AArch64_AM::getFP16Imm(Imm) != -1;
     }], SDNodeXForm<fpimm, [{
       APFloat InVal = N->getValueAPF();
       uint32_t enc = AArch64_AM::getFP16Imm(InVal);
@@ -765,8 +765,8 @@ def fpimm16 : Operand<f16>,
   let PrintMethod = "printFPImmOperand";
 }
 def fpimm32 : Operand<f32>,
-              PatLeaf<(f32 fpimm), [{
-      return AArch64_AM::getFP32Imm(N->getValueAPF()) != -1;
+              FPImmLeaf<f32, [{
+      return AArch64_AM::getFP32Imm(Imm) != -1;
     }], SDNodeXForm<fpimm, [{
       APFloat InVal = N->getValueAPF();
       uint32_t enc = AArch64_AM::getFP32Imm(InVal);
@@ -776,8 +776,8 @@ def fpimm32 : Operand<f32>,
   let PrintMethod = "printFPImmOperand";
 }
 def fpimm64 : Operand<f64>,
-              PatLeaf<(f64 fpimm), [{
-      return AArch64_AM::getFP64Imm(N->getValueAPF()) != -1;
+              FPImmLeaf<f64, [{
+      return AArch64_AM::getFP64Imm(Imm) != -1;
     }], SDNodeXForm<fpimm, [{
       APFloat InVal = N->getValueAPF();
       uint32_t enc = AArch64_AM::getFP64Imm(InVal);
@@ -792,8 +792,8 @@ def fpimm8 : Operand<i32> {
   let PrintMethod = "printFPImmOperand";
 }
 
-def fpimm0 : PatLeaf<(fpimm), [{
-  return N->isExactlyValue(+0.0);
+def fpimm0 : FPImmLeaf<fAny, [{
+  return Imm.isExactlyValue(+0.0);
 }]>;
 
 // Vector lane operands
@@ -847,10 +847,9 @@ def VectorIndexD : Operand<i64>, ImmLeaf<i64, [{
 // aaaaaaaa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff gggggggg hhhhhhhh
 // are encoded as the eight bit value 'abcdefgh'.
 def simdimmtype10 : Operand<i32>,
-                    PatLeaf<(f64 fpimm), [{
-      return AArch64_AM::isAdvSIMDModImmType10(N->getValueAPF()
-                                               .bitcastToAPInt()
-                                               .getZExtValue());
+                    FPImmLeaf<f64, [{
+      return AArch64_AM::isAdvSIMDModImmType10(
+                 Imm.bitcastToAPInt().getZExtValue());
     }], SDNodeXForm<fpimm, [{
       APFloat InVal = N->getValueAPF();
       uint32_t enc = AArch64_AM::encodeAdvSIMDModImmType10(N->getValueAPF()
@@ -2517,6 +2516,22 @@ def am_indexed32 : ComplexPattern<i64, 2, "SelectAddrModeIndexed32", []>;
 def am_indexed64 : ComplexPattern<i64, 2, "SelectAddrModeIndexed64", []>;
 def am_indexed128 : ComplexPattern<i64, 2, "SelectAddrModeIndexed128", []>;
 
+def gi_am_indexed8 :
+    GIComplexOperandMatcher<s64, "selectAddrModeIndexed<8>">,
+    GIComplexPatternEquiv<am_indexed8>;
+def gi_am_indexed16 :
+    GIComplexOperandMatcher<s64, "selectAddrModeIndexed<16>">,
+    GIComplexPatternEquiv<am_indexed16>;
+def gi_am_indexed32 :
+    GIComplexOperandMatcher<s64, "selectAddrModeIndexed<32>">,
+    GIComplexPatternEquiv<am_indexed32>;
+def gi_am_indexed64 :
+    GIComplexOperandMatcher<s64, "selectAddrModeIndexed<64>">,
+    GIComplexPatternEquiv<am_indexed64>;
+def gi_am_indexed128 :
+    GIComplexOperandMatcher<s64, "selectAddrModeIndexed<128>">,
+    GIComplexPatternEquiv<am_indexed128>;
+
 class UImm12OffsetOperand<int Scale> : AsmOperandClass {
   let Name = "UImm12Offset" # Scale;
   let RenderMethod = "addUImm12OffsetOperands<" # Scale # ">";
@@ -2577,6 +2592,23 @@ multiclass LoadUI<bits<2> sz, bit V, bits<2> opc, RegisterClass regtype,
 }
 
 multiclass StoreUI<bits<2> sz, bit V, bits<2> opc, RegisterClass regtype,
+             Operand indextype, string asm, list<dag> pattern> {
+  let AddedComplexity = 10, mayLoad = 0, mayStore = 1, hasSideEffects = 0 in
+  def ui : BaseLoadStoreUI<sz, V, opc, (outs),
+                           (ins regtype:$Rt, GPR64sp:$Rn, indextype:$offset),
+                           asm, pattern>,
+           Sched<[WriteST]>;
+
+  def : InstAlias<asm # "\t$Rt, [$Rn]",
+                  (!cast<Instruction>(NAME # "ui") regtype:$Rt, GPR64sp:$Rn, 0)>;
+}
+
+// Same as StoreUI, but take a RegisterOperand. This is used by GlobalISel to
+// substitute zero-registers automatically.
+//
+// TODO: Roll out zero-register subtitution to GPR32/GPR64 and fold this back
+//       into StoreUI.
+multiclass StoreUIz<bits<2> sz, bit V, bits<2> opc, RegisterOperand regtype,
              Operand indextype, string asm, list<dag> pattern> {
   let AddedComplexity = 10, mayLoad = 0, mayStore = 1, hasSideEffects = 0 in
   def ui : BaseLoadStoreUI<sz, V, opc, (outs),
@@ -3146,6 +3178,23 @@ def am_unscaled16 : ComplexPattern<i64, 2, "SelectAddrModeUnscaled16", []>;
 def am_unscaled32 : ComplexPattern<i64, 2, "SelectAddrModeUnscaled32", []>;
 def am_unscaled64 : ComplexPattern<i64, 2, "SelectAddrModeUnscaled64", []>;
 def am_unscaled128 :ComplexPattern<i64, 2, "SelectAddrModeUnscaled128", []>;
+
+def gi_am_unscaled8 :
+    GIComplexOperandMatcher<s64, "selectAddrModeUnscaled8">,
+    GIComplexPatternEquiv<am_unscaled8>;
+def gi_am_unscaled16 :
+    GIComplexOperandMatcher<s64, "selectAddrModeUnscaled16">,
+    GIComplexPatternEquiv<am_unscaled16>;
+def gi_am_unscaled32 :
+    GIComplexOperandMatcher<s64, "selectAddrModeUnscaled32">,
+    GIComplexPatternEquiv<am_unscaled32>;
+def gi_am_unscaled64 :
+    GIComplexOperandMatcher<s64, "selectAddrModeUnscaled64">,
+    GIComplexPatternEquiv<am_unscaled64>;
+def gi_am_unscaled128 :
+    GIComplexOperandMatcher<s64, "selectAddrModeUnscaled128">,
+    GIComplexPatternEquiv<am_unscaled128>;
+
 
 class BaseLoadStoreUnscale<bits<2> sz, bit V, bits<2> opc, dag oops, dag iops,
                            string asm, list<dag> pattern>

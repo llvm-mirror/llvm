@@ -8,8 +8,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "FileAnalysis.h"
+#include "GraphBuilder.h"
 
 #include "llvm/BinaryFormat/ELF.h"
+#include "llvm/DebugInfo/DWARF/DWARFContext.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDisassembler/MCDisassembler.h"
@@ -41,6 +43,19 @@ using Instr = llvm::cfi_verify::FileAnalysis::Instr;
 namespace llvm {
 namespace cfi_verify {
 
+static cl::opt<bool> IgnoreDWARF(
+    "ignore-dwarf",
+    cl::desc(
+        "Ignore all DWARF data. This relaxes the requirements for all "
+        "statically linked libraries to have been compiled with '-g', but "
+        "will result in false positives for 'CFI unprotected' instructions."),
+    cl::init(false));
+
+cl::opt<unsigned long long> DWARFSearchRange(
+    "dwarf-search-range",
+    cl::desc("Address search range used to determine if instruction is valid."),
+    cl::init(0x10));
+
 Expected<FileAnalysis> FileAnalysis::Create(StringRef Filename) {
   // Open the filename provided.
   Expected<object::OwningBinary<object::Binary>> BinaryOrErr =
@@ -54,7 +69,7 @@ Expected<FileAnalysis> FileAnalysis::Create(StringRef Filename) {
 
   Analysis.Object = dyn_cast<object::ObjectFile>(Analysis.Binary.getBinary());
   if (!Analysis.Object)
-    return make_error<UnsupportedDisassembly>();
+    return make_error<UnsupportedDisassembly>("Failed to cast object");
 
   Analysis.ObjectTriple = Analysis.Object->makeTriple();
   Analysis.Features = Analysis.Object->getFeatures();
@@ -75,6 +90,32 @@ FileAnalysis::FileAnalysis(object::OwningBinary<object::Binary> Binary)
 FileAnalysis::FileAnalysis(const Triple &ObjectTriple,
                            const SubtargetFeatures &Features)
     : ObjectTriple(ObjectTriple), Features(Features) {}
+
+bool FileAnalysis::isIndirectInstructionCFIProtected(uint64_t Address) const {
+  const Instr *InstrMetaPtr = getInstruction(Address);
+  if (!InstrMetaPtr)
+    return false;
+
+  const auto &InstrDesc = MII->get(InstrMetaPtr->Instruction.getOpcode());
+
+  if (!InstrDesc.mayAffectControlFlow(InstrMetaPtr->Instruction, *RegisterInfo))
+    return false;
+
+  if (!usesRegisterOperand(*InstrMetaPtr))
+    return false;
+
+  auto Flows = GraphBuilder::buildFlowGraph(*this, Address);
+
+  if (!Flows.OrphanedNodes.empty())
+    return false;
+
+  for (const auto &BranchNode : Flows.ConditionalBranchNodes) {
+    if (!BranchNode.CFIProtection)
+      return false;
+  }
+
+  return true;
+}
 
 const Instr *
 FileAnalysis::getPrevInstructionSequential(const Instr &InstrMeta) const {
@@ -224,31 +265,29 @@ Error FileAnalysis::initialiseDisassemblyMembers() {
   ObjectTarget =
       TargetRegistry::lookupTarget(ArchName, ObjectTriple, ErrorString);
   if (!ObjectTarget)
-    return make_error<StringError>(Twine("Couldn't find target \"") +
-                                       ObjectTriple.getTriple() +
-                                       "\", failed with error: " + ErrorString,
-                                   inconvertibleErrorCode());
+    return make_error<UnsupportedDisassembly>(
+        (Twine("Couldn't find target \"") + ObjectTriple.getTriple() +
+         "\", failed with error: " + ErrorString)
+            .str());
 
   RegisterInfo.reset(ObjectTarget->createMCRegInfo(TripleName));
   if (!RegisterInfo)
-    return make_error<StringError>("Failed to initialise RegisterInfo.",
-                                   inconvertibleErrorCode());
+    return make_error<UnsupportedDisassembly>(
+        "Failed to initialise RegisterInfo.");
 
   AsmInfo.reset(ObjectTarget->createMCAsmInfo(*RegisterInfo, TripleName));
   if (!AsmInfo)
-    return make_error<StringError>("Failed to initialise AsmInfo.",
-                                   inconvertibleErrorCode());
+    return make_error<UnsupportedDisassembly>("Failed to initialise AsmInfo.");
 
   SubtargetInfo.reset(ObjectTarget->createMCSubtargetInfo(
       TripleName, MCPU, Features.getString()));
   if (!SubtargetInfo)
-    return make_error<StringError>("Failed to initialise SubtargetInfo.",
-                                   inconvertibleErrorCode());
+    return make_error<UnsupportedDisassembly>(
+        "Failed to initialise SubtargetInfo.");
 
   MII.reset(ObjectTarget->createMCInstrInfo());
   if (!MII)
-    return make_error<StringError>("Failed to initialise MII.",
-                                   inconvertibleErrorCode());
+    return make_error<UnsupportedDisassembly>("Failed to initialise MII.");
 
   Context.reset(new MCContext(AsmInfo.get(), RegisterInfo.get(), &MOFI));
 
@@ -256,8 +295,8 @@ Error FileAnalysis::initialiseDisassemblyMembers() {
       ObjectTarget->createMCDisassembler(*SubtargetInfo, *Context));
 
   if (!Disassembler)
-    return make_error<StringError>("No disassembler available for target",
-                                   inconvertibleErrorCode());
+    return make_error<UnsupportedDisassembly>(
+        "No disassembler available for target");
 
   MIA.reset(ObjectTarget->createMCInstrAnalysis(MII.get()));
 
@@ -269,6 +308,28 @@ Error FileAnalysis::initialiseDisassemblyMembers() {
 }
 
 Error FileAnalysis::parseCodeSections() {
+  if (!IgnoreDWARF) {
+    DWARF.reset(DWARFContext::create(*Object).release());
+    if (!DWARF)
+      return make_error<StringError>("Could not create DWARF information.",
+                                     inconvertibleErrorCode());
+
+    bool LineInfoValid = false;
+
+    for (auto &Unit : DWARF->compile_units()) {
+      const auto &LineTable = DWARF->getLineTableForUnit(Unit.get());
+      if (LineTable && !LineTable->Rows.empty()) {
+        LineInfoValid = true;
+        break;
+      }
+    }
+
+    if (!LineInfoValid)
+      return make_error<StringError>(
+          "DWARF line information missing. Did you compile with '-g'?",
+          inconvertibleErrorCode());
+  }
+
   for (const object::SectionRef &Section : Object->sections()) {
     // Ensure only executable sections get analysed.
     if (!(object::ELFSectionRef(Section).getFlags() & ELF::SHF_EXECINSTR))
@@ -285,6 +346,19 @@ Error FileAnalysis::parseCodeSections() {
   }
   return Error::success();
 }
+
+DILineInfoTable FileAnalysis::getLineInfoForAddressRange(uint64_t Address) {
+  if (!hasLineTableInfo())
+    return DILineInfoTable();
+
+  return DWARF->getLineInfoForAddressRange(Address, DWARFSearchRange);
+}
+
+bool FileAnalysis::hasValidLineInfoForAddressRange(uint64_t Address) {
+  return !getLineInfoForAddressRange(Address).empty();
+}
+
+bool FileAnalysis::hasLineTableInfo() const { return DWARF != nullptr; }
 
 void FileAnalysis::parseSectionContents(ArrayRef<uint8_t> SectionBytes,
                                         uint64_t SectionAddress) {
@@ -305,6 +379,11 @@ void FileAnalysis::parseSectionContents(ArrayRef<uint8_t> SectionBytes,
     InstrMeta.VMAddress = VMAddress;
     InstrMeta.InstructionSize = InstructionSize;
     InstrMeta.Valid = ValidInstruction;
+
+    // Check if this instruction exists in the range of the DWARF metadata.
+    if (hasLineTableInfo() && !hasValidLineInfoForAddressRange(VMAddress))
+      continue;
+
     addInstruction(InstrMeta);
 
     if (!ValidInstruction)
@@ -341,9 +420,11 @@ void FileAnalysis::addInstruction(const Instr &Instruction) {
   }
 }
 
+UnsupportedDisassembly::UnsupportedDisassembly(StringRef Text) : Text(Text) {}
+
 char UnsupportedDisassembly::ID;
 void UnsupportedDisassembly::log(raw_ostream &OS) const {
-  OS << "Dissassembling of non-objects not currently supported.\n";
+  OS << "Could not initialise disassembler: " << Text;
 }
 
 std::error_code UnsupportedDisassembly::convertToErrorCode() const {

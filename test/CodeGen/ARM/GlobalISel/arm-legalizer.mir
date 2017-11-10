@@ -48,9 +48,6 @@
 
   define void @test_brcond() { ret void }
 
-  define void @test_fadd_s32() #0 { ret void }
-  define void @test_fadd_s64() #0 { ret void }
-
   @a_global = global i32 42
   define void @test_global_variable() { ret void }
 
@@ -71,10 +68,10 @@ body:             |
   bb.0:
     liveins: %r0
 
-    %0(s8) = COPY %r0
+    %0(s8) = G_CONSTANT i8 42
     %1(s32) = G_SEXT %0
     ; G_SEXT with s8 is legal, so we should find it unchanged in the output
-    ; CHECK: {{%[0-9]+}}(s32) = G_SEXT {{%[0-9]+}}
+    ; CHECK: {{%[0-9]+}}:_(s32) = G_SEXT {{%[0-9]+}}
     %r0 = COPY %1(s32)
     BX_RET 14, _, implicit %r0
 ...
@@ -93,10 +90,10 @@ body:             |
   bb.0:
     liveins: %r0
 
-    %0(s16) = COPY %r0
+    %0(s16) = G_CONSTANT i16 42
     %1(s32) = G_ZEXT %0
     ; G_ZEXT with s16 is legal, so we should find it unchanged in the output
-    ; CHECK: {{%[0-9]+}}(s32) = G_ZEXT {{%[0-9]+}}
+    ; CHECK: {{%[0-9]+}}:_(s32) = G_ZEXT {{%[0-9]+}}
     %r0 = COPY %1(s32)
     BX_RET 14, _, implicit %r0
 ...
@@ -112,18 +109,20 @@ registers:
   - { id: 0, class: _ }
   - { id: 1, class: _ }
   - { id: 2, class: _ }
+  - { id: 3, class: _ }
 body:             |
   bb.0:
     liveins: %r0, %r1
 
-    %0(s8) = COPY %r0
-    %1(s8) = COPY %r1
+    %0(s8) = G_CONSTANT i8 12
+    %1(s8) = G_CONSTANT i8 30
     %2(s8) = G_ADD %0, %1
     ; G_ADD with s8 should widen
-    ; CHECK-NOT: {{%[0-9]+}}(s8) = G_ADD {{%[0-9]+, %[0-9]+}}
-    ; CHECK: {{%[0-9]+}}(s32) = G_ADD {{%[0-9]+, %[0-9]+}}
-    ; CHECK-NOT: {{%[0-9]+}}(s8) = G_ADD {{%[0-9]+, %[0-9]+}}
-    %r0 = COPY %2(s8)
+    ; CHECK-NOT: {{%[0-9]+}}:_(s8) = G_ADD {{%[0-9]+, %[0-9]+}}
+    ; CHECK: {{%[0-9]+}}:_(s32) = G_ADD {{%[0-9]+, %[0-9]+}}
+    ; CHECK-NOT: {{%[0-9]+}}:_(s8) = G_ADD {{%[0-9]+, %[0-9]+}}
+    %3(s32) = G_SEXT %2(s8)
+    %r0 = COPY %3(s32)
     BX_RET 14, _, implicit %r0
 ...
 ---
@@ -138,18 +137,20 @@ registers:
   - { id: 0, class: _ }
   - { id: 1, class: _ }
   - { id: 2, class: _ }
+  - { id: 3, class: _ }
 body:             |
   bb.0:
     liveins: %r0, %r1
 
-    %0(s16) = COPY %r0
-    %1(s16) = COPY %r1
+    %0(s16) = G_CONSTANT i16 32
+    %1(s16) = G_CONSTANT i16 10
     %2(s16) = G_ADD %0, %1
     ; G_ADD with s16 should widen
-    ; CHECK-NOT: {{%[0-9]+}}(s16) = G_ADD {{%[0-9]+, %[0-9]+}}
-    ; CHECK: {{%[0-9]+}}(s32) = G_ADD {{%[0-9]+, %[0-9]+}}
-    ; CHECK-NOT: {{%[0-9]+}}(s16) = G_ADD {{%[0-9]+, %[0-9]+}}
-    %r0 = COPY %2(s16)
+    ; CHECK-NOT: {{%[0-9]+}}:_(s16) = G_ADD {{%[0-9]+, %[0-9]+}}
+    ; CHECK: {{%[0-9]+}}:_(s32) = G_ADD {{%[0-9]+, %[0-9]+}}
+    ; CHECK-NOT: {{%[0-9]+}}:_(s16) = G_ADD {{%[0-9]+, %[0-9]+}}
+    %3(s32) = G_SEXT %2(s16)
+    %r0 = COPY %3(s32)
     BX_RET 14, _, implicit %r0
 
 ...
@@ -173,7 +174,7 @@ body:             |
     %1(s32) = COPY %r1
     %2(s32) = G_ADD %0, %1
     ; G_ADD with s32 is legal, so we should find it unchanged in the output
-    ; CHECK: {{%[0-9]+}}(s32) = G_ADD {{%[0-9]+, %[0-9]+}}
+    ; CHECK: {{%[0-9]+}}:_(s32) = G_ADD {{%[0-9]+, %[0-9]+}}
     %r0 = COPY %2(s32)
     BX_RET 14, _, implicit %r0
 
@@ -190,18 +191,20 @@ registers:
   - { id: 0, class: _ }
   - { id: 1, class: _ }
   - { id: 2, class: _ }
+  - { id: 3, class: _ }
 body:             |
   bb.0:
     liveins: %r0, %r1
 
-    %0(s8) = COPY %r0
-    %1(s8) = COPY %r1
+    %0(s8) = G_CONSTANT i8 48
+    %1(s8) = G_CONSTANT i8 6
     %2(s8) = G_SUB %0, %1
     ; G_SUB with s8 should widen
-    ; CHECK-NOT: {{%[0-9]+}}(s8) = G_SUB {{%[0-9]+, %[0-9]+}}
-    ; CHECK: {{%[0-9]+}}(s32) = G_SUB {{%[0-9]+, %[0-9]+}}
-    ; CHECK-NOT: {{%[0-9]+}}(s8) = G_SUB {{%[0-9]+, %[0-9]+}}
-    %r0 = COPY %2(s8)
+    ; CHECK-NOT: {{%[0-9]+}}:_(s8) = G_SUB {{%[0-9]+, %[0-9]+}}
+    ; CHECK: {{%[0-9]+}}:_(s32) = G_SUB {{%[0-9]+, %[0-9]+}}
+    ; CHECK-NOT: {{%[0-9]+}}:_(s8) = G_SUB {{%[0-9]+, %[0-9]+}}
+    %3(s32) = G_SEXT %2(s8)
+    %r0 = COPY %3(s32)
     BX_RET 14, _, implicit %r0
 ...
 ---
@@ -216,18 +219,20 @@ registers:
   - { id: 0, class: _ }
   - { id: 1, class: _ }
   - { id: 2, class: _ }
+  - { id: 3, class: _ }
 body:             |
   bb.0:
     liveins: %r0, %r1
 
-    %0(s16) = COPY %r0
-    %1(s16) = COPY %r1
+    %0(s16) = G_CONSTANT i16 58
+    %1(s16) = G_CONSTANT i16 16
     %2(s16) = G_SUB %0, %1
     ; G_SUB with s16 should widen
-    ; CHECK-NOT: {{%[0-9]+}}(s16) = G_SUB {{%[0-9]+, %[0-9]+}}
-    ; CHECK: {{%[0-9]+}}(s32) = G_SUB {{%[0-9]+, %[0-9]+}}
-    ; CHECK-NOT: {{%[0-9]+}}(s16) = G_SUB {{%[0-9]+, %[0-9]+}}
-    %r0 = COPY %2(s16)
+    ; CHECK-NOT: {{%[0-9]+}}:_(s16) = G_SUB {{%[0-9]+, %[0-9]+}}
+    ; CHECK: {{%[0-9]+}}:_(s32) = G_SUB {{%[0-9]+, %[0-9]+}}
+    ; CHECK-NOT: {{%[0-9]+}}:_(s16) = G_SUB {{%[0-9]+, %[0-9]+}}
+    %3(s32) = G_SEXT %2(s16)
+    %r0 = COPY %3(s32)
     BX_RET 14, _, implicit %r0
 
 ...
@@ -251,7 +256,7 @@ body:             |
     %1(s32) = COPY %r1
     %2(s32) = G_SUB %0, %1
     ; G_SUB with s32 is legal, so we should find it unchanged in the output
-    ; CHECK: {{%[0-9]+}}(s32) = G_SUB {{%[0-9]+, %[0-9]+}}
+    ; CHECK: {{%[0-9]+}}:_(s32) = G_SUB {{%[0-9]+, %[0-9]+}}
     %r0 = COPY %2(s32)
     BX_RET 14, _, implicit %r0
 
@@ -268,18 +273,20 @@ registers:
   - { id: 0, class: _ }
   - { id: 1, class: _ }
   - { id: 2, class: _ }
+  - { id: 3, class: _ }
 body:             |
   bb.0:
     liveins: %r0, %r1
 
-    %0(s8) = COPY %r0
-    %1(s8) = COPY %r1
+    %0(s8) = G_CONSTANT i8 7
+    %1(s8) = G_CONSTANT i8 6
     %2(s8) = G_MUL %0, %1
     ; G_MUL with s8 should widen
-    ; CHECK-NOT: {{%[0-9]+}}(s8) = G_MUL {{%[0-9]+, %[0-9]+}}
-    ; CHECK: {{%[0-9]+}}(s32) = G_MUL {{%[0-9]+, %[0-9]+}}
-    ; CHECK-NOT: {{%[0-9]+}}(s8) = G_MUL {{%[0-9]+, %[0-9]+}}
-    %r0 = COPY %2(s8)
+    ; CHECK-NOT: {{%[0-9]+}}:_(s8) = G_MUL {{%[0-9]+, %[0-9]+}}
+    ; CHECK: {{%[0-9]+}}:_(s32) = G_MUL {{%[0-9]+, %[0-9]+}}
+    ; CHECK-NOT: {{%[0-9]+}}:_(s8) = G_MUL {{%[0-9]+, %[0-9]+}}
+    %3(s32) = G_SEXT %2(s8)
+    %r0 = COPY %3(s32)
     BX_RET 14, _, implicit %r0
 ...
 ---
@@ -294,18 +301,20 @@ registers:
   - { id: 0, class: _ }
   - { id: 1, class: _ }
   - { id: 2, class: _ }
+  - { id: 3, class: _ }
 body:             |
   bb.0:
     liveins: %r0, %r1
 
-    %0(s16) = COPY %r0
-    %1(s16) = COPY %r1
+    %0(s16) = G_CONSTANT i16 3
+    %1(s16) = G_CONSTANT i16 14
     %2(s16) = G_MUL %0, %1
     ; G_MUL with s16 should widen
-    ; CHECK-NOT: {{%[0-9]+}}(s16) = G_MUL {{%[0-9]+, %[0-9]+}}
-    ; CHECK: {{%[0-9]+}}(s32) = G_MUL {{%[0-9]+, %[0-9]+}}
-    ; CHECK-NOT: {{%[0-9]+}}(s16) = G_MUL {{%[0-9]+, %[0-9]+}}
-    %r0 = COPY %2(s16)
+    ; CHECK-NOT: {{%[0-9]+}}:_(s16) = G_MUL {{%[0-9]+, %[0-9]+}}
+    ; CHECK: {{%[0-9]+}}:_(s32) = G_MUL {{%[0-9]+, %[0-9]+}}
+    ; CHECK-NOT: {{%[0-9]+}}:_(s16) = G_MUL {{%[0-9]+, %[0-9]+}}
+    %3(s32) = G_SEXT %2(s16)
+    %r0 = COPY %3(s32)
     BX_RET 14, _, implicit %r0
 
 ...
@@ -329,7 +338,7 @@ body:             |
     %1(s32) = COPY %r1
     %2(s32) = G_MUL %0, %1
     ; G_MUL with s32 is legal, so we should find it unchanged in the output
-    ; CHECK: {{%[0-9]+}}(s32) = G_MUL {{%[0-9]+, %[0-9]+}}
+    ; CHECK: {{%[0-9]+}}:_(s32) = G_MUL {{%[0-9]+, %[0-9]+}}
     %r0 = COPY %2(s32)
     BX_RET 14, _, implicit %r0
 
@@ -346,18 +355,20 @@ registers:
   - { id: 0, class: _ }
   - { id: 1, class: _ }
   - { id: 2, class: _ }
+  - { id: 3, class: _ }
 body:             |
   bb.0:
     liveins: %r0, %r1
 
-    %0(s8) = COPY %r0
-    %1(s8) = COPY %r1
+    %0(s8) = G_CONSTANT i8 46
+    %1(s8) = G_CONSTANT i8 58
     %2(s8) = G_AND %0, %1
     ; G_AND with s8 should widen
-    ; CHECK-NOT: {{%[0-9]+}}(s8) = G_AND {{%[0-9]+, %[0-9]+}}
-    ; CHECK: {{%[0-9]+}}(s32) = G_AND {{%[0-9]+, %[0-9]+}}
-    ; CHECK-NOT: {{%[0-9]+}}(s8) = G_AND {{%[0-9]+, %[0-9]+}}
-    %r0 = COPY %2(s8)
+    ; CHECK-NOT: {{%[0-9]+}}:_(s8) = G_AND {{%[0-9]+, %[0-9]+}}
+    ; CHECK: {{%[0-9]+}}:_(s32) = G_AND {{%[0-9]+, %[0-9]+}}
+    ; CHECK-NOT: {{%[0-9]+}}:_(s8) = G_AND {{%[0-9]+, %[0-9]+}}
+    %3(s32) = G_SEXT %2(s8)
+    %r0 = COPY %3(s32)
     BX_RET 14, _, implicit %r0
 ...
 ---
@@ -372,18 +383,20 @@ registers:
   - { id: 0, class: _ }
   - { id: 1, class: _ }
   - { id: 2, class: _ }
+  - { id: 3, class: _ }
 body:             |
   bb.0:
     liveins: %r0, %r1
 
-    %0(s16) = COPY %r0
-    %1(s16) = COPY %r1
+    %0(s16) = G_CONSTANT i16 43
+    %1(s16) = G_CONSTANT i16 106
     %2(s16) = G_AND %0, %1
     ; G_AND with s16 should widen
-    ; CHECK-NOT: {{%[0-9]+}}(s16) = G_AND {{%[0-9]+, %[0-9]+}}
-    ; CHECK: {{%[0-9]+}}(s32) = G_AND {{%[0-9]+, %[0-9]+}}
-    ; CHECK-NOT: {{%[0-9]+}}(s16) = G_AND {{%[0-9]+, %[0-9]+}}
-    %r0 = COPY %2(s16)
+    ; CHECK-NOT: {{%[0-9]+}}:_(s16) = G_AND {{%[0-9]+, %[0-9]+}}
+    ; CHECK: {{%[0-9]+}}:_(s32) = G_AND {{%[0-9]+, %[0-9]+}}
+    ; CHECK-NOT: {{%[0-9]+}}:_(s16) = G_AND {{%[0-9]+, %[0-9]+}}
+    %3(s32) = G_SEXT %2(s16)
+    %r0 = COPY %3(s32)
     BX_RET 14, _, implicit %r0
 
 ...
@@ -407,7 +420,7 @@ body:             |
     %1(s32) = COPY %r1
     %2(s32) = G_AND %0, %1
     ; G_AND with s32 is legal, so we should find it unchanged in the output
-    ; CHECK: {{%[0-9]+}}(s32) = G_AND {{%[0-9]+, %[0-9]+}}
+    ; CHECK: {{%[0-9]+}}:_(s32) = G_AND {{%[0-9]+, %[0-9]+}}
     %r0 = COPY %2(s32)
     BX_RET 14, _, implicit %r0
 
@@ -424,18 +437,20 @@ registers:
   - { id: 0, class: _ }
   - { id: 1, class: _ }
   - { id: 2, class: _ }
+  - { id: 3, class: _ }
 body:             |
   bb.0:
     liveins: %r0, %r1
 
-    %0(s8) = COPY %r0
-    %1(s8) = COPY %r1
+    %0(s8) = G_CONSTANT i8 32
+    %1(s8) = G_CONSTANT i8 10
     %2(s8) = G_OR %0, %1
     ; G_OR with s8 should widen
-    ; CHECK-NOT: {{%[0-9]+}}(s8) = G_OR {{%[0-9]+, %[0-9]+}}
-    ; CHECK: {{%[0-9]+}}(s32) = G_OR {{%[0-9]+, %[0-9]+}}
-    ; CHECK-NOT: {{%[0-9]+}}(s8) = G_OR {{%[0-9]+, %[0-9]+}}
-    %r0 = COPY %2(s8)
+    ; CHECK-NOT: {{%[0-9]+}}:_(s8) = G_OR {{%[0-9]+, %[0-9]+}}
+    ; CHECK: {{%[0-9]+}}:_(s32) = G_OR {{%[0-9]+, %[0-9]+}}
+    ; CHECK-NOT: {{%[0-9]+}}:_(s8) = G_OR {{%[0-9]+, %[0-9]+}}
+    %3(s32) = G_SEXT %2(s8)
+    %r0 = COPY %3(s32)
     BX_RET 14, _, implicit %r0
 ...
 ---
@@ -450,18 +465,20 @@ registers:
   - { id: 0, class: _ }
   - { id: 1, class: _ }
   - { id: 2, class: _ }
+  - { id: 3, class: _ }
 body:             |
   bb.0:
     liveins: %r0, %r1
 
-    %0(s16) = COPY %r0
-    %1(s16) = COPY %r1
+    %0(s16) = G_CONSTANT i16 34
+    %1(s16) = G_CONSTANT i16 10
     %2(s16) = G_OR %0, %1
     ; G_OR with s16 should widen
-    ; CHECK-NOT: {{%[0-9]+}}(s16) = G_OR {{%[0-9]+, %[0-9]+}}
-    ; CHECK: {{%[0-9]+}}(s32) = G_OR {{%[0-9]+, %[0-9]+}}
-    ; CHECK-NOT: {{%[0-9]+}}(s16) = G_OR {{%[0-9]+, %[0-9]+}}
-    %r0 = COPY %2(s16)
+    ; CHECK-NOT: {{%[0-9]+}}:_(s16) = G_OR {{%[0-9]+, %[0-9]+}}
+    ; CHECK: {{%[0-9]+}}:_(s32) = G_OR {{%[0-9]+, %[0-9]+}}
+    ; CHECK-NOT: {{%[0-9]+}}:_(s16) = G_OR {{%[0-9]+, %[0-9]+}}
+    %3(s32) = G_SEXT %2(s16)
+    %r0 = COPY %3(s32)
     BX_RET 14, _, implicit %r0
 
 ...
@@ -485,7 +502,7 @@ body:             |
     %1(s32) = COPY %r1
     %2(s32) = G_OR %0, %1
     ; G_OR with s32 is legal, so we should find it unchanged in the output
-    ; CHECK: {{%[0-9]+}}(s32) = G_OR {{%[0-9]+, %[0-9]+}}
+    ; CHECK: {{%[0-9]+}}:_(s32) = G_OR {{%[0-9]+, %[0-9]+}}
     %r0 = COPY %2(s32)
     BX_RET 14, _, implicit %r0
 
@@ -502,18 +519,20 @@ registers:
   - { id: 0, class: _ }
   - { id: 1, class: _ }
   - { id: 2, class: _ }
+  - { id: 3, class: _ }
 body:             |
   bb.0:
     liveins: %r0, %r1
 
-    %0(s8) = COPY %r0
-    %1(s8) = COPY %r1
+    %0(s8) = G_CONSTANT i8 10
+    %1(s8) = G_CONSTANT i8 32
     %2(s8) = G_XOR %0, %1
     ; G_XOR with s8 should widen
-    ; CHECK-NOT: {{%[0-9]+}}(s8) = G_XOR {{%[0-9]+, %[0-9]+}}
-    ; CHECK: {{%[0-9]+}}(s32) = G_XOR {{%[0-9]+, %[0-9]+}}
-    ; CHECK-NOT: {{%[0-9]+}}(s8) = G_XOR {{%[0-9]+, %[0-9]+}}
-    %r0 = COPY %2(s8)
+    ; CHECK-NOT: {{%[0-9]+}}:_(s8) = G_XOR {{%[0-9]+, %[0-9]+}}
+    ; CHECK: {{%[0-9]+}}:_(s32) = G_XOR {{%[0-9]+, %[0-9]+}}
+    ; CHECK-NOT: {{%[0-9]+}}:_(s8) = G_XOR {{%[0-9]+, %[0-9]+}}
+    %3(s32) = G_SEXT %2(s8)
+    %r0 = COPY %3(s32)
     BX_RET 14, _, implicit %r0
 ...
 ---
@@ -528,18 +547,20 @@ registers:
   - { id: 0, class: _ }
   - { id: 1, class: _ }
   - { id: 2, class: _ }
+  - { id: 3, class: _ }
 body:             |
   bb.0:
     liveins: %r0, %r1
 
-    %0(s16) = COPY %r0
-    %1(s16) = COPY %r1
+    %0(s16) = G_CONSTANT i16 40
+    %1(s16) = G_CONSTANT i16 2
     %2(s16) = G_XOR %0, %1
     ; G_XOR with s16 should widen
-    ; CHECK-NOT: {{%[0-9]+}}(s16) = G_XOR {{%[0-9]+, %[0-9]+}}
-    ; CHECK: {{%[0-9]+}}(s32) = G_XOR {{%[0-9]+, %[0-9]+}}
-    ; CHECK-NOT: {{%[0-9]+}}(s16) = G_XOR {{%[0-9]+, %[0-9]+}}
-    %r0 = COPY %2(s16)
+    ; CHECK-NOT: {{%[0-9]+}}:_(s16) = G_XOR {{%[0-9]+, %[0-9]+}}
+    ; CHECK: {{%[0-9]+}}:_(s32) = G_XOR {{%[0-9]+, %[0-9]+}}
+    ; CHECK-NOT: {{%[0-9]+}}:_(s16) = G_XOR {{%[0-9]+, %[0-9]+}}
+    %3(s32) = G_SEXT %2(s16)
+    %r0 = COPY %3(s32)
     BX_RET 14, _, implicit %r0
 
 ...
@@ -563,7 +584,7 @@ body:             |
     %1(s32) = COPY %r1
     %2(s32) = G_XOR %0, %1
     ; G_XOR with s32 is legal, so we should find it unchanged in the output
-    ; CHECK: {{%[0-9]+}}(s32) = G_XOR {{%[0-9]+, %[0-9]+}}
+    ; CHECK: {{%[0-9]+}}:_(s32) = G_XOR {{%[0-9]+, %[0-9]+}}
     %r0 = COPY %2(s32)
     BX_RET 14, _, implicit %r0
 
@@ -588,7 +609,7 @@ body:             |
     %1(s32) = COPY %r1
     %2(s32) = G_LSHR %0, %1
     ; G_LSHR with s32 is legal, so we should find it unchanged in the output
-    ; CHECK: {{%[0-9]+}}(s32) = G_LSHR {{%[0-9]+, %[0-9]+}}
+    ; CHECK: {{%[0-9]+}}:_(s32) = G_LSHR {{%[0-9]+, %[0-9]+}}
     %r0 = COPY %2(s32)
     BX_RET 14, _, implicit %r0
 
@@ -613,7 +634,7 @@ body:             |
     %1(s32) = COPY %r1
     %2(s32) = G_ASHR %0, %1
     ; G_ASHR with s32 is legal, so we should find it unchanged in the output
-    ; CHECK: {{%[0-9]+}}(s32) = G_ASHR {{%[0-9]+, %[0-9]+}}
+    ; CHECK: {{%[0-9]+}}:_(s32) = G_ASHR {{%[0-9]+, %[0-9]+}}
     %r0 = COPY %2(s32)
     BX_RET 14, _, implicit %r0
 
@@ -638,7 +659,7 @@ body:             |
     %1(s32) = COPY %r1
     %2(s32) = G_SHL %0, %1
     ; G_SHL with s32 is legal, so we should find it unchanged in the output
-    ; CHECK: {{%[0-9]+}}(s32) = G_SHL {{%[0-9]+, %[0-9]+}}
+    ; CHECK: {{%[0-9]+}}:_(s32) = G_SHL {{%[0-9]+, %[0-9]+}}
     %r0 = COPY %2(s32)
     BX_RET 14, _, implicit %r0
 
@@ -666,8 +687,8 @@ body:             |
     liveins: %r0, %r1, %r2, %r3
 
     ; This is legal, so we should find it unchanged in the output
-    ; CHECK: [[FIVREG:%[0-9]+]](p0) = G_FRAME_INDEX %fixed-stack.[[FRAME_INDEX]]
-    ; CHECK: {{%[0-9]+}}(s32) = G_LOAD [[FIVREG]](p0) :: (load 4)
+    ; CHECK: [[FIVREG:%[0-9]+]]:_(p0) = G_FRAME_INDEX %fixed-stack.[[FRAME_INDEX]]
+    ; CHECK: {{%[0-9]+}}:_(s32) = G_LOAD [[FIVREG]](p0) :: (load 4)
     %0(p0) = G_FRAME_INDEX %fixed-stack.2
     %1(s32) = G_LOAD %0(p0) :: (load 4)
     BX_RET 14, _
@@ -693,12 +714,12 @@ body:             |
     liveins: %r0, %r1, %r2, %r3
 
     ; These are all legal, so we should find them unchanged in the output
-    ; CHECK-DAG: {{%[0-9]+}}(s64) = G_LOAD %0
-    ; CHECK-DAG: {{%[0-9]+}}(s32) = G_LOAD %0
-    ; CHECK-DAG: {{%[0-9]+}}(s16) = G_LOAD %0
-    ; CHECK-DAG: {{%[0-9]+}}(s8) = G_LOAD %0
-    ; CHECK-DAG: {{%[0-9]+}}(s1) = G_LOAD %0
-    ; CHECK-DAG: {{%[0-9]+}}(p0) = G_LOAD %0
+    ; CHECK-DAG: {{%[0-9]+}}:_(s64) = G_LOAD %0
+    ; CHECK-DAG: {{%[0-9]+}}:_(s32) = G_LOAD %0
+    ; CHECK-DAG: {{%[0-9]+}}:_(s16) = G_LOAD %0
+    ; CHECK-DAG: {{%[0-9]+}}:_(s8) = G_LOAD %0
+    ; CHECK-DAG: {{%[0-9]+}}:_(s1) = G_LOAD %0
+    ; CHECK-DAG: {{%[0-9]+}}:_(p0) = G_LOAD %0
     %0(p0) = COPY %r0
     %1(s32) = G_LOAD %0(p0) :: (load 4)
     %2(s16) = G_LOAD %0(p0) :: (load 2)
@@ -740,11 +761,11 @@ body:             |
     G_STORE %1(s64), %0(p0) :: (store 8)
     %2(s32) = COPY %r2
     G_STORE %2(s32), %0(p0) :: (store 4)
-    %3(s16) = COPY %r3
+    %3(s16) = G_CONSTANT i16 42
     G_STORE %3(s16), %0(p0) :: (store 2)
-    %4(s8) = COPY %r4
+    %4(s8) = G_CONSTANT i8 21
     G_STORE %4(s8), %0(p0) :: (store 1)
-    %5(s1) = COPY %r5
+    %5(s1) = G_CONSTANT i1 1
     G_STORE %5(s1), %0(p0) :: (store 1)
     %6(p0) = COPY %r6
     G_STORE %6(p0), %0(p0) :: (store 4)
@@ -769,7 +790,7 @@ body:             |
     %0(p0) = COPY %r0
     %1(s32) = COPY %r1
 
-    ; CHECK: {{%[0-9]+}}(p0) = G_GEP {{%[0-9]+}}, {{%[0-9]+}}(s32)
+    ; CHECK: {{%[0-9]+}}:_(p0) = G_GEP {{%[0-9]+}}, {{%[0-9]+}}(s32)
     %2(p0) = G_GEP %0, %1(s32)
 
     %r0 = COPY %2(p0)
@@ -791,24 +812,24 @@ registers:
 body:             |
   bb.0:
     %0(s32) = G_CONSTANT 42
-    ; CHECK: {{%[0-9]+}}(s32) = G_CONSTANT 42
+    ; CHECK: {{%[0-9]+}}:_(s32) = G_CONSTANT 42
 
     %1(s16) = G_CONSTANT i16 21
     ; CHECK-NOT: G_CONSTANT i16
-    ; CHECK: [[EXT:%[0-9]+]](s32) = G_CONSTANT i32 21
-    ; CHECK: {{%[0-9]+}}(s16) = G_TRUNC [[EXT]](s32)
+    ; CHECK: [[EXT:%[0-9]+]]:_(s32) = G_CONSTANT i32 21
+    ; CHECK: {{%[0-9]+}}:_(s16) = G_TRUNC [[EXT]](s32)
     ; CHECK-NOT: G_CONSTANT i16
 
     %2(s8) = G_CONSTANT i8 10
     ; CHECK-NOT: G_CONSTANT i8
-    ; CHECK: [[EXT:%[0-9]+]](s32) = G_CONSTANT i32 10
-    ; CHECK: {{%[0-9]+}}(s8) = G_TRUNC [[EXT]](s32)
+    ; CHECK: [[EXT:%[0-9]+]]:_(s32) = G_CONSTANT i32 10
+    ; CHECK: {{%[0-9]+}}:_(s8) = G_TRUNC [[EXT]](s32)
     ; CHECK-NOT: G_CONSTANT i8
 
     %3(s1) = G_CONSTANT i1 1
     ; CHECK-NOT: G_CONSTANT i1
-    ; CHECK: [[EXT:%[0-9]+]](s32) = G_CONSTANT i32 -1
-    ; CHECK: {{%[0-9]+}}(s1) = G_TRUNC [[EXT]](s32)
+    ; CHECK: [[EXT:%[0-9]+]]:_(s32) = G_CONSTANT i32 -1
+    ; CHECK: {{%[0-9]+}}:_(s1) = G_TRUNC [[EXT]](s32)
     ; CHECK-NOT: G_CONSTANT i1
 
     %r0 = COPY %0(s32)
@@ -831,12 +852,12 @@ body:             |
   bb.0:
     liveins: %r0, %r1
 
-    %0(s8) = COPY %r0
-    %1(s8) = COPY %r1
+    %0(s8) = G_CONSTANT i8 42
+    %1(s8) = G_CONSTANT i8 43
     %2(s1) = G_ICMP intpred(ne), %0(s8), %1
     ; G_ICMP with s8 should widen
-    ; CHECK: {{%[0-9]+}}(s1) = G_ICMP intpred(ne), {{%[0-9]+}}(s32), {{%[0-9]+}}
-    ; CHECK-NOT: {{%[0-9]+}}(s1) = G_ICMP intpred(ne), {{%[0-9]+}}(s8), {{%[0-9]+}}
+    ; CHECK: {{%[0-9]+}}:_(s1) = G_ICMP intpred(ne), {{%[0-9]+}}(s32), {{%[0-9]+}}
+    ; CHECK-NOT: {{%[0-9]+}}:_(s1) = G_ICMP intpred(ne), {{%[0-9]+}}(s8), {{%[0-9]+}}
     %3(s32) = G_ZEXT %2(s1)
     %r0 = COPY %3(s32)
     BX_RET 14, _, implicit %r0
@@ -858,12 +879,12 @@ body:             |
   bb.0:
     liveins: %r0, %r1
 
-    %0(s16) = COPY %r0
-    %1(s16) = COPY %r1
+    %0(s16) = G_CONSTANT i16 42
+    %1(s16) = G_CONSTANT i16 46
     %2(s1) = G_ICMP intpred(slt), %0(s16), %1
     ; G_ICMP with s16 should widen
-    ; CHECK: {{%[0-9]+}}(s1) = G_ICMP intpred(slt), {{%[0-9]+}}(s32), {{%[0-9]+}}
-    ; CHECK-NOT: {{%[0-9]+}}(s1) = G_ICMP intpred(slt), {{%[0-9]+}}(s16), {{%[0-9]+}}
+    ; CHECK: {{%[0-9]+}}:_(s1) = G_ICMP intpred(slt), {{%[0-9]+}}(s32), {{%[0-9]+}}
+    ; CHECK-NOT: {{%[0-9]+}}:_(s1) = G_ICMP intpred(slt), {{%[0-9]+}}(s16), {{%[0-9]+}}
     %3(s32) = G_ZEXT %2(s1)
     %r0 = COPY %3(s32)
     BX_RET 14, _, implicit %r0
@@ -889,7 +910,7 @@ body:             |
     %1(s32) = COPY %r1
     %2(s1) = G_ICMP intpred(eq), %0(s32), %1
     ; G_ICMP with s32 is legal, so we should find it unchanged in the output
-    ; CHECK: {{%[0-9]+}}(s1) = G_ICMP intpred(eq), {{%[0-9]+}}(s32), {{%[0-9]+}}
+    ; CHECK: {{%[0-9]+}}:_(s1) = G_ICMP intpred(eq), {{%[0-9]+}}(s32), {{%[0-9]+}}
     %3(s32) = G_ZEXT %2(s1)
     %r0 = COPY %3(s32)
     BX_RET 14, _, implicit %r0
@@ -913,10 +934,10 @@ body:             |
 
     %0(s32) = COPY %r0
     %1(s32) = COPY %r1
-    %2(s1) = COPY %r2
+    %2(s1) = G_CONSTANT i1 1
     %3(s32) = G_SELECT %2(s1), %0, %1
     ; G_SELECT with s32 is legal, so we should find it unchanged in the output
-    ; CHECK: {{%[0-9]+}}(s32) = G_SELECT {{%[0-9]+}}(s1), {{%[0-9]+}}, {{%[0-9]+}}
+    ; CHECK: {{%[0-9]+}}:_(s32) = G_SELECT {{%[0-9]+}}(s1), {{%[0-9]+}}, {{%[0-9]+}}
     %r0 = COPY %3(s32)
     BX_RET 14, _, implicit %r0
 ...
@@ -939,10 +960,10 @@ body:             |
 
     %0(p0) = COPY %r0
     %1(p0) = COPY %r1
-    %2(s1) = COPY %r2
+    %2(s1) = G_CONSTANT i1 0
     %3(p0) = G_SELECT %2(s1), %0, %1
     ; G_SELECT with p0 is legal, so we should find it unchanged in the output
-    ; CHECK: {{%[0-9]+}}(p0) = G_SELECT {{%[0-9]+}}(s1), {{%[0-9]+}}, {{%[0-9]+}}
+    ; CHECK: {{%[0-9]+}}:_(p0) = G_SELECT {{%[0-9]+}}(s1), {{%[0-9]+}}, {{%[0-9]+}}
     %r0 = COPY %3(p0)
     BX_RET 14, _, implicit %r0
 ...
@@ -981,56 +1002,6 @@ body:             |
 
 ...
 ---
-name:            test_fadd_s32
-# CHECK-LABEL: name: test_fadd_s32
-legalized:       false
-# CHECK: legalized: true
-regBankSelected: false
-selected:        false
-tracksRegLiveness: true
-registers:
-  - { id: 0, class: _ }
-  - { id: 1, class: _ }
-  - { id: 2, class: _ }
-body:             |
-  bb.0:
-    liveins: %r0, %r1
-
-    %0(s32) = COPY %r0
-    %1(s32) = COPY %r1
-    %2(s32) = G_FADD %0, %1
-    ; G_FADD with s32 is legal, so we should find it unchanged in the output
-    ; CHECK: {{%[0-9]+}}(s32) = G_FADD {{%[0-9]+, %[0-9]+}}
-    %r0 = COPY %2(s32)
-    BX_RET 14, _, implicit %r0
-
-...
----
-name:            test_fadd_s64
-# CHECK-LABEL: name: test_fadd_s64
-legalized:       false
-# CHECK: legalized: true
-regBankSelected: false
-selected:        false
-tracksRegLiveness: true
-registers:
-  - { id: 0, class: _ }
-  - { id: 1, class: _ }
-  - { id: 2, class: _ }
-body:             |
-  bb.0:
-    liveins: %d0, %d1
-
-    %0(s64) = COPY %d0
-    %1(s64) = COPY %d1
-    %2(s64) = G_FADD %0, %1
-    ; G_FADD with s64 is legal, so we should find it unchanged in the output
-    ; CHECK: {{%[0-9]+}}(s64) = G_FADD {{%[0-9]+, %[0-9]+}}
-    %d0 = COPY %2(s64)
-    BX_RET 14, _, implicit %d0
-
-...
----
 name:            test_global_variable
 # CHECK-LABEL: name: test_global_variable
 legalized:       false
@@ -1048,7 +1019,7 @@ body:             |
     %0(s32) = COPY %r0
     %1(p0) = G_GLOBAL_VALUE @a_global
     ; G_GLOBAL_VALUE is legal, so we should find it unchanged in the output
-    ; CHECK: {{%[0-9]+}}(p0) = G_GLOBAL_VALUE @a_global
+    ; CHECK: {{%[0-9]+}}:_(p0) = G_GLOBAL_VALUE @a_global
     %r0 = COPY %1(p0)
     BX_RET 14, _, implicit %r0
 

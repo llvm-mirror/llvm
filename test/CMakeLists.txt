@@ -8,7 +8,9 @@ llvm_canonicalize_cmake_booleans(
   HAVE_LIBXAR
   LLVM_ENABLE_DIA_SDK
   LLVM_ENABLE_FFI
-  BUILD_SHARED_LIBS)
+  BUILD_SHARED_LIBS
+  LLVM_LINK_LLVM_DYLIB
+  )
 
 configure_lit_site_cfg(
   ${CMAKE_CURRENT_SOURCE_DIR}/lit.site.cfg.py.in
@@ -45,6 +47,7 @@ set(LLVM_TEST_DEPENDS
           llvm-bcanalyzer
           llvm-c-test
           llvm-cat
+          llvm-cfi-verify
           llvm-cxxfilt
           llvm-config
           llvm-cov

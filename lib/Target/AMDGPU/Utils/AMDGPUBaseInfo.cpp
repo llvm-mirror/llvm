@@ -147,6 +147,25 @@ IsaVersion getIsaVersion(const FeatureBitset &Features) {
   return {7, 0, 0};
 }
 
+void streamIsaVersion(const MCSubtargetInfo *STI, raw_ostream &Stream) {
+  auto TargetTriple = STI->getTargetTriple();
+  auto ISAVersion = IsaInfo::getIsaVersion(STI->getFeatureBits());
+
+  Stream << TargetTriple.getArchName() << '-'
+         << TargetTriple.getVendorName() << '-'
+         << TargetTriple.getOSName() << '-'
+         << TargetTriple.getEnvironmentName() << '-'
+         << "gfx"
+         << ISAVersion.Major
+         << ISAVersion.Minor
+         << ISAVersion.Stepping;
+  Stream.flush();
+}
+
+bool hasCodeObjectV3(const FeatureBitset &Features) {
+  return Features.test(FeatureCodeObjectV3);
+}
+
 unsigned getWavefrontSize(const FeatureBitset &Features) {
   if (Features.test(FeatureWavefrontSize16))
     return 16;
@@ -337,16 +356,16 @@ void initDefaultAMDKernelCodeT(amd_kernel_code_t &Header,
   Header.private_segment_alignment = 4;
 }
 
-bool isGroupSegment(const GlobalValue *GV, AMDGPUAS AS) {
-  return GV->getType()->getAddressSpace() == AS.LOCAL_ADDRESS;
+bool isGroupSegment(const GlobalValue *GV) {
+  return GV->getType()->getAddressSpace() == AMDGPUAS::LOCAL_ADDRESS;
 }
 
-bool isGlobalSegment(const GlobalValue *GV, AMDGPUAS AS) {
-  return GV->getType()->getAddressSpace() == AS.GLOBAL_ADDRESS;
+bool isGlobalSegment(const GlobalValue *GV) {
+  return GV->getType()->getAddressSpace() == AMDGPUAS::GLOBAL_ADDRESS;
 }
 
-bool isReadOnlySegment(const GlobalValue *GV, AMDGPUAS AS) {
-  return GV->getType()->getAddressSpace() == AS.CONSTANT_ADDRESS;
+bool isReadOnlySegment(const GlobalValue *GV) {
+  return GV->getType()->getAddressSpace() == AMDGPUAS::CONSTANT_ADDRESS;
 }
 
 bool shouldEmitConstantsToTextSection(const Triple &TT) {
@@ -796,29 +815,6 @@ bool isLegalSMRDImmOffset(const MCSubtargetInfo &ST, int64_t ByteOffset) {
 } // end namespace AMDGPU
 
 } // end namespace llvm
-
-const unsigned AMDGPUAS::MAX_COMMON_ADDRESS;
-const unsigned AMDGPUAS::GLOBAL_ADDRESS;
-const unsigned AMDGPUAS::LOCAL_ADDRESS;
-const unsigned AMDGPUAS::PARAM_D_ADDRESS;
-const unsigned AMDGPUAS::PARAM_I_ADDRESS;
-const unsigned AMDGPUAS::CONSTANT_BUFFER_0;
-const unsigned AMDGPUAS::CONSTANT_BUFFER_1;
-const unsigned AMDGPUAS::CONSTANT_BUFFER_2;
-const unsigned AMDGPUAS::CONSTANT_BUFFER_3;
-const unsigned AMDGPUAS::CONSTANT_BUFFER_4;
-const unsigned AMDGPUAS::CONSTANT_BUFFER_5;
-const unsigned AMDGPUAS::CONSTANT_BUFFER_6;
-const unsigned AMDGPUAS::CONSTANT_BUFFER_7;
-const unsigned AMDGPUAS::CONSTANT_BUFFER_8;
-const unsigned AMDGPUAS::CONSTANT_BUFFER_9;
-const unsigned AMDGPUAS::CONSTANT_BUFFER_10;
-const unsigned AMDGPUAS::CONSTANT_BUFFER_11;
-const unsigned AMDGPUAS::CONSTANT_BUFFER_12;
-const unsigned AMDGPUAS::CONSTANT_BUFFER_13;
-const unsigned AMDGPUAS::CONSTANT_BUFFER_14;
-const unsigned AMDGPUAS::CONSTANT_BUFFER_15;
-const unsigned AMDGPUAS::UNKNOWN_ADDRESS_SPACE;
 
 namespace llvm {
 namespace AMDGPU {

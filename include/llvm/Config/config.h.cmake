@@ -113,6 +113,12 @@
 /* Define to 1 if you have the `pthread' library (-lpthread). */
 #cmakedefine HAVE_LIBPTHREAD ${HAVE_LIBPTHREAD}
 
+/* Define to 1 if you have the `pthread_getname_np' function. */
+#cmakedefine HAVE_PTHREAD_GETNAME_NP ${HAVE_PTHREAD_GETNAME_NP}
+
+/* Define to 1 if you have the `pthread_setname_np' function. */
+#cmakedefine HAVE_PTHREAD_SETNAME_NP ${HAVE_PTHREAD_SETNAME_NP}
+
 /* Define to 1 if you have the `shell32' library (-lshell32). */
 #cmakedefine HAVE_LIBSHELL32 ${HAVE_LIBSHELL32}
 
@@ -352,6 +358,9 @@
 
 /* Has gcc/MSVC atomic intrinsics */
 #cmakedefine01 LLVM_HAS_ATOMICS
+
+/* Define if LLVM_ENABLE_DUMP is enabled */
+#cmakedefine LLVM_ENABLE_DUMP
 
 /* Host triple LLVM will be executed on */
 #cmakedefine LLVM_HOST_TRIPLE "${LLVM_HOST_TRIPLE}"

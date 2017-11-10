@@ -234,7 +234,8 @@ static void dumpAttribute(raw_ostream &OS, const DWARFDie &Die,
   else if (Attr == DW_AT_decl_line || Attr == DW_AT_call_line)
     OS << *formValue.getAsUnsignedConstant();
   else if (Attr == DW_AT_location || Attr == DW_AT_frame_base ||
-           Attr == DW_AT_data_member_location)
+           Attr == DW_AT_data_member_location ||
+           Attr == DW_AT_GNU_call_site_value)
     dumpLocation(OS, formValue, U, sizeof(BaseIndent) + Indent + 4, DumpOpts);
   else
     formValue.dump(OS, DumpOpts);
@@ -507,6 +508,12 @@ DWARFDie DWARFDie::getParent() const {
 DWARFDie DWARFDie::getSibling() const {
   if (isValid())
     return U->getSibling(Die);
+  return DWARFDie();
+}
+
+DWARFDie DWARFDie::getFirstChild() const {
+  if (isValid())
+    return U->getFirstChild(Die);
   return DWARFDie();
 }
 

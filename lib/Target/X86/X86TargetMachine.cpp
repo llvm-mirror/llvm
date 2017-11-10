@@ -58,8 +58,10 @@ namespace llvm {
 
 void initializeWinEHStatePassPass(PassRegistry &);
 void initializeFixupLEAPassPass(PassRegistry &);
+void initializeX86CallFrameOptimizationPass(PassRegistry &);
 void initializeX86CmovConverterPassPass(PassRegistry &);
 void initializeX86ExecutionDepsFixPass(PassRegistry &);
+void initializeX86DomainReassignmentPass(PassRegistry &);
 
 } // end namespace llvm
 
@@ -74,8 +76,10 @@ extern "C" void LLVMInitializeX86Target() {
   initializeFixupBWInstPassPass(PR);
   initializeEvexToVexInstPassPass(PR);
   initializeFixupLEAPassPass(PR);
+  initializeX86CallFrameOptimizationPass(PR);
   initializeX86CmovConverterPassPass(PR);
   initializeX86ExecutionDepsFixPass(PR);
+  initializeX86DomainReassignmentPass(PR);
 }
 
 static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
@@ -314,6 +318,7 @@ public:
   bool addGlobalInstructionSelect() override;
   bool addILPOpts() override;
   bool addPreISel() override;
+  void addMachineSSAOptimization() override;
   void addPreRegAlloc() override;
   void addPostRegAlloc() override;
   void addPreEmitPass() override;
@@ -406,6 +411,10 @@ void X86PassConfig::addPreRegAlloc() {
   }
 
   addPass(createX86WinAllocaExpander());
+}
+void X86PassConfig::addMachineSSAOptimization() {
+  addPass(createX86DomainReassignmentPass());
+  TargetPassConfig::addMachineSSAOptimization();
 }
 
 void X86PassConfig::addPostRegAlloc() {

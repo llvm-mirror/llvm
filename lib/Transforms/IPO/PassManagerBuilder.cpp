@@ -418,6 +418,14 @@ void PassManagerBuilder::populateModulePassManager(
     else if (GlobalExtensionsNotEmpty() || !Extensions.empty())
       MPM.add(createBarrierNoopPass());
 
+    if (PerformThinLTO) {
+      // Drop available_externally and unreferenced globals. This is necessary
+      // with ThinLTO in order to avoid leaving undefined references to dead
+      // globals in the object file.
+      MPM.add(createEliminateAvailableExternallyPass());
+      MPM.add(createGlobalDCEPass());
+    }
+
     addExtensionsToPM(EP_EnabledOnOptLevel0, MPM);
 
     // Rename anon globals to be able to export them in the summary.
@@ -460,6 +468,7 @@ void PassManagerBuilder::populateModulePassManager(
   addExtensionsToPM(EP_ModuleOptimizerEarly, MPM);
 
   MPM.add(createIPSCCPPass());          // IP SCCP
+  MPM.add(createCalledValuePropagationPass());
   MPM.add(createGlobalOptimizerPass()); // Optimize out global vars
   // Promote any localized global vars.
   MPM.add(createPromoteMemoryToRegisterPass());
@@ -624,7 +633,9 @@ void PassManagerBuilder::populateModulePassManager(
   }
 
   addExtensionsToPM(EP_Peephole, MPM);
-  MPM.add(createLateCFGSimplificationPass()); // Switches to lookup tables
+  // Switches to lookup tables and other transforms that may not be considered
+  // canonical by other IR passes.
+  MPM.add(createCFGSimplificationPass(1, true, true, false));
   addInstructionCombiningPass(MPM);
 
   if (!DisableUnrollLoops) {
@@ -703,6 +714,10 @@ void PassManagerBuilder::addLTOOptimizationPasses(legacy::PassManagerBase &PM) {
     // opens opportunities for globalopt (and inlining) by substituting function
     // pointers passed as arguments to direct uses of functions.
     PM.add(createIPSCCPPass());
+
+    // Attach metadata to indirect call sites indicating the set of functions
+    // they may target at run-time. This should follow IPSCCP.
+    PM.add(createCalledValuePropagationPass());
   }
 
   // Infer attributes about definitions. The readnone attribute in particular is

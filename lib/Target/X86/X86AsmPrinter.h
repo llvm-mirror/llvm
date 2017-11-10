@@ -14,6 +14,7 @@
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/FaultMaps.h"
 #include "llvm/CodeGen/StackMaps.h"
+#include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/Target/TargetMachine.h"
 
 // Implemented in X86MCInstLower.cpp
@@ -119,6 +120,7 @@ public:
   void EmitInstruction(const MachineInstr *MI) override;
 
   void EmitBasicBlockEnd(const MachineBasicBlock &MBB) override {
+    AsmPrinter::EmitBasicBlockEnd(MBB);
     SMShadowTracker.emitShadowPadding(*OutStreamer, getSubtargetInfo());
   }
 
@@ -135,6 +137,7 @@ public:
   bool doInitialization(Module &M) override {
     SMShadowTracker.reset(0);
     SM.reset();
+    FM.reset();
     return AsmPrinter::doInitialization(M);
   }
 

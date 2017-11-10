@@ -34,6 +34,7 @@
 #include "llvm/Object/Error.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Object/StackMapParser.h"
+#include "llvm/Support/AMDGPUMetadata.h"
 #include "llvm/Support/ARMAttributeParser.h"
 #include "llvm/Support/ARMBuildAttributes.h"
 #include "llvm/Support/Casting.h"
@@ -155,8 +156,6 @@ public:
   void printMipsABIFlags() override;
   void printMipsReginfo() override;
   void printMipsOptions() override;
-
-  void printAMDGPUCodeObjectMetadata() override;
 
   void printStackMap() const override;
 
@@ -1357,8 +1356,11 @@ template <typename ELFT>
 void ELFDumper<ELFT>::parseDynamicTable(
     ArrayRef<const Elf_Phdr *> LoadSegments) {
   auto toMappedAddr = [&](uint64_t VAddr) -> const uint8_t * {
-    const Elf_Phdr *const *I = std::upper_bound(
-        LoadSegments.begin(), LoadSegments.end(), VAddr, compareAddr<ELFT>);
+    const Elf_Phdr *const *I =
+        std::upper_bound(LoadSegments.begin(), LoadSegments.end(), VAddr,
+                         [](uint64_t VAddr, const Elf_Phdr_Impl<ELFT> *Phdr) {
+                           return VAddr < Phdr->p_vaddr;
+                         });
     if (I == LoadSegments.begin())
       report_fatal_error("Virtual address is not in any segment");
     --I;
@@ -1514,6 +1516,10 @@ static const char *getTypeString(unsigned Arch, uint64_t Type) {
     }
   }
   switch (Type) {
+  LLVM_READOBJ_TYPE_CASE(ANDROID_REL);
+  LLVM_READOBJ_TYPE_CASE(ANDROID_RELSZ);
+  LLVM_READOBJ_TYPE_CASE(ANDROID_RELA);
+  LLVM_READOBJ_TYPE_CASE(ANDROID_RELASZ);
   LLVM_READOBJ_TYPE_CASE(BIND_NOW);
   LLVM_READOBJ_TYPE_CASE(DEBUG);
   LLVM_READOBJ_TYPE_CASE(FINI);
@@ -1716,6 +1722,8 @@ void ELFDumper<ELFT>::printValue(uint64_t Type, uint64_t Value) {
   case DT_INIT_ARRAYSZ:
   case DT_FINI_ARRAYSZ:
   case DT_PREINIT_ARRAYSZ:
+  case DT_ANDROID_RELSZ:
+  case DT_ANDROID_RELASZ:
     OS << Value << " (bytes)";
     break;
   case DT_NEEDED:
@@ -2353,36 +2361,6 @@ template <class ELFT> void ELFDumper<ELFT>::printMipsOptions() {
   }
 }
 
-template <class ELFT> void ELFDumper<ELFT>::printAMDGPUCodeObjectMetadata() {
-  const Elf_Shdr *Shdr = findSectionByName(*Obj, ".note");
-  if (!Shdr) {
-    W.startLine() << "There is no .note section in the file.\n";
-    return;
-  }
-  ArrayRef<uint8_t> Sec = unwrapOrError(Obj->getSectionContents(Shdr));
-
-  const uint32_t CodeObjectMetadataNoteType = 10;
-  for (auto I = reinterpret_cast<const Elf_Word *>(&Sec[0]),
-       E = I + Sec.size()/4; I != E;) {
-    uint32_t NameSZ = I[0];
-    uint32_t DescSZ = I[1];
-    uint32_t Type = I[2];
-    I += 3;
-
-    StringRef Name;
-    if (NameSZ) {
-      Name = StringRef(reinterpret_cast<const char *>(I), NameSZ - 1);
-      I += alignTo<4>(NameSZ)/4;
-    }
-
-    if (Name == "AMD" && Type == CodeObjectMetadataNoteType) {
-      StringRef Desc(reinterpret_cast<const char *>(I), DescSZ);
-      W.printString(Desc);
-    }
-    I += alignTo<4>(DescSZ)/4;
-  }
-}
-
 template <class ELFT> void ELFDumper<ELFT>::printStackMap() const {
   const Elf_Shdr *StackMapSection = nullptr;
   for (const auto &Sec : unwrapOrError(Obj->sections())) {
@@ -2622,7 +2600,9 @@ static inline void printRelocHeader(raw_ostream &OS, bool Is64, bool IsRela) {
 template <class ELFT> void GNUStyle<ELFT>::printRelocations(const ELFO *Obj) {
   bool HasRelocSections = false;
   for (const Elf_Shdr &Sec : unwrapOrError(Obj->sections())) {
-    if (Sec.sh_type != ELF::SHT_REL && Sec.sh_type != ELF::SHT_RELA)
+    if (Sec.sh_type != ELF::SHT_REL && Sec.sh_type != ELF::SHT_RELA &&
+        Sec.sh_type != ELF::SHT_ANDROID_REL &&
+        Sec.sh_type != ELF::SHT_ANDROID_RELA)
       continue;
     HasRelocSections = true;
     StringRef Name = unwrapOrError(Obj->getSectionName(&Sec));
@@ -2631,9 +2611,12 @@ template <class ELFT> void GNUStyle<ELFT>::printRelocations(const ELFO *Obj) {
     OS << "\nRelocation section '" << Name << "' at offset 0x"
        << to_hexString(Offset, false) << " contains " << Entries
        << " entries:\n";
-    printRelocHeader(OS,  ELFT::Is64Bits, (Sec.sh_type == ELF::SHT_RELA));
+    printRelocHeader(OS, ELFT::Is64Bits,
+                     Sec.sh_type == ELF::SHT_RELA ||
+                         Sec.sh_type == ELF::SHT_ANDROID_RELA);
     const Elf_Shdr *SymTab = unwrapOrError(Obj->getSection(Sec.sh_link));
-    if (Sec.sh_type == ELF::SHT_REL) {
+    switch (Sec.sh_type) {
+    case ELF::SHT_REL:
       for (const auto &R : unwrapOrError(Obj->rels(&Sec))) {
         Elf_Rela Rela;
         Rela.r_offset = R.r_offset;
@@ -2641,9 +2624,16 @@ template <class ELFT> void GNUStyle<ELFT>::printRelocations(const ELFO *Obj) {
         Rela.r_addend = 0;
         printRelocation(Obj, SymTab, Rela, false);
       }
-    } else {
+      break;
+    case ELF::SHT_RELA:
       for (const auto &R : unwrapOrError(Obj->relas(&Sec)))
         printRelocation(Obj, SymTab, R, true);
+      break;
+    case ELF::SHT_ANDROID_REL:
+    case ELF::SHT_ANDROID_RELA:
+      for (const auto &R : unwrapOrError(Obj->android_relas(&Sec)))
+        printRelocation(Obj, SymTab, R, Sec.sh_type == ELF::SHT_ANDROID_RELA);
+      break;
     }
   }
   if (!HasRelocSections)
@@ -3393,7 +3383,7 @@ static std::string getGNUNoteTypeName(const uint32_t NT) {
   std::string string;
   raw_string_ostream OS(string);
   OS << format("Unknown note type (0x%08x)", NT);
-  return string;
+  return OS.str();
 }
 
 static std::string getFreeBSDNoteTypeName(const uint32_t NT) {
@@ -3421,7 +3411,30 @@ static std::string getFreeBSDNoteTypeName(const uint32_t NT) {
   std::string string;
   raw_string_ostream OS(string);
   OS << format("Unknown note type (0x%08x)", NT);
-  return string;
+  return OS.str();
+}
+
+static std::string getAMDGPUNoteTypeName(const uint32_t NT) {
+  static const struct {
+    uint32_t ID;
+    const char *Name;
+  } Notes[] = {
+    {ELF::NT_AMD_AMDGPU_HSA_METADATA,
+     "NT_AMD_AMDGPU_HSA_METADATA (HSA Metadata)"},
+    {ELF::NT_AMD_AMDGPU_ISA,
+     "NT_AMD_AMDGPU_ISA (ISA Version)"},
+    {ELF::NT_AMD_AMDGPU_PAL_METADATA,
+     "NT_AMD_AMDGPU_PAL_METADATA (PAL Metadata)"}
+  };
+
+  for (const auto &Note : Notes)
+    if (Note.ID == NT)
+      return std::string(Note.Name);
+
+  std::string string;
+  raw_string_ostream OS(string);
+  OS << format("Unknown note type (0x%08x)", NT);
+  return OS.str();
 }
 
 template <typename ELFT>
@@ -3464,6 +3477,39 @@ static void printGNUNote(raw_ostream &OS, uint32_t NoteType,
   OS << '\n';
 }
 
+template <typename ELFT>
+static void printAMDGPUNote(raw_ostream &OS, uint32_t NoteType,
+                            ArrayRef<typename ELFFile<ELFT>::Elf_Word> Words,
+                            size_t Size) {
+  switch (NoteType) {
+  default:
+    return;
+    case ELF::NT_AMD_AMDGPU_HSA_METADATA:
+      OS << "    HSA Metadata:\n"
+         << StringRef(reinterpret_cast<const char *>(Words.data()), Size);
+      break;
+    case ELF::NT_AMD_AMDGPU_ISA:
+      OS << "    ISA Version:\n"
+         << "        "
+         << StringRef(reinterpret_cast<const char *>(Words.data()), Size);
+      break;
+    case ELF::NT_AMD_AMDGPU_PAL_METADATA:
+      const uint32_t *PALMetadataBegin = reinterpret_cast<const uint32_t *>(Words.data());
+      const uint32_t *PALMetadataEnd = PALMetadataBegin + Size;
+      std::vector<uint32_t> PALMetadata(PALMetadataBegin, PALMetadataEnd);
+      std::string PALMetadataString;
+      auto Error = AMDGPU::PALMD::toString(PALMetadata, PALMetadataString);
+      OS << "    PAL Metadata:\n";
+      if (Error) {
+        OS << "        Invalid";
+        return;
+      }
+      OS << PALMetadataString;
+      break;
+  }
+  OS.flush();
+}
+
 template <class ELFT>
 void GNUStyle<ELFT>::printNotes(const ELFFile<ELFT> *Obj) {
   const Elf_Ehdr *e = Obj->getHeader();
@@ -3504,6 +3550,9 @@ void GNUStyle<ELFT>::printNotes(const ELFFile<ELFT> *Obj) {
         printGNUNote<ELFT>(OS, Type, Descriptor, DescriptorSize);
       } else if (Name == "FreeBSD") {
         OS << getFreeBSDNoteTypeName(Type) << '\n';
+      } else if (Name == "AMD") {
+        OS << getAMDGPUNoteTypeName(Type) << '\n';
+        printAMDGPUNote<ELFT>(OS, Type, Descriptor, DescriptorSize);
       } else {
         OS << "Unknown note type: (" << format_hex(Type, 10) << ')';
       }
@@ -3622,7 +3671,9 @@ template <class ELFT> void LLVMStyle<ELFT>::printRelocations(const ELFO *Obj) {
   for (const Elf_Shdr &Sec : unwrapOrError(Obj->sections())) {
     ++SectionNumber;
 
-    if (Sec.sh_type != ELF::SHT_REL && Sec.sh_type != ELF::SHT_RELA)
+    if (Sec.sh_type != ELF::SHT_REL && Sec.sh_type != ELF::SHT_RELA &&
+        Sec.sh_type != ELF::SHT_ANDROID_REL &&
+        Sec.sh_type != ELF::SHT_ANDROID_RELA)
       continue;
 
     StringRef Name = unwrapOrError(Obj->getSectionName(&Sec));
@@ -3653,6 +3704,11 @@ void LLVMStyle<ELFT>::printRelocations(const Elf_Shdr *Sec, const ELFO *Obj) {
     break;
   case ELF::SHT_RELA:
     for (const Elf_Rela &R : unwrapOrError(Obj->relas(Sec)))
+      printRelocation(Obj, R, SymTab);
+    break;
+  case ELF::SHT_ANDROID_REL:
+  case ELF::SHT_ANDROID_RELA:
+    for (const Elf_Rela &R : unwrapOrError(Obj->android_relas(Sec)))
       printRelocation(Obj, R, SymTab);
     break;
   }

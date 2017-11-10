@@ -84,6 +84,23 @@ entry:
   ret void
 }
 
+; GCN-LABEL: {{^}}smrd_hazard:
+; GCN-DAG: s_mov_b32 s3, 3
+; GCN-DAG: s_mov_b32 s2, 2
+; GCN-DAG: s_mov_b32 s1, 1
+; GCN-DAG: s_mov_b32 s0, 0
+; SI-NEXT: nop 3
+; GCN-NEXT: s_buffer_load_dword s0, s[0:3], 0x0
+define amdgpu_ps float @smrd_hazard(<4 x i32> inreg %desc) #0 {
+main_body:
+  %d0 = insertelement <4 x i32> undef, i32 0, i32 0
+  %d1 = insertelement <4 x i32> %d0, i32 1, i32 1
+  %d2 = insertelement <4 x i32> %d1, i32 2, i32 2
+  %d3 = insertelement <4 x i32> %d2, i32 3, i32 3
+  %r = call float @llvm.SI.load.const.v4i32(<4 x i32> %d3, i32 0)
+  ret float %r
+}
+
 ; SMRD load using the load.const.v4i32 intrinsic with an immediate offset
 ; GCN-LABEL: {{^}}smrd_load_const0:
 ; SICI: s_buffer_load_dword s{{[0-9]}}, s[{{[0-9]:[0-9]}}], 0x4 ; encoding: [0x04
@@ -156,6 +173,22 @@ main_body:
   %tmp21 = call float @llvm.SI.load.const.v4i32(<4 x i32> %tmp20, i32 1048576)
   call void @llvm.amdgcn.exp.f32(i32 0, i32 15, float %tmp21, float %tmp21, float %tmp21, float %tmp21, i1 true, i1 true) #0
   ret void
+}
+
+; GCN-LABEL: {{^}}smrd_sgpr_offset:
+; GCN: s_buffer_load_dword s{{[0-9]}}, s[0:3], s4
+define amdgpu_ps float @smrd_sgpr_offset(<4 x i32> inreg %desc, i32 inreg %offset) #0 {
+main_body:
+  %r = call float @llvm.SI.load.const.v4i32(<4 x i32> %desc, i32 %offset)
+  ret float %r
+}
+
+; GCN-LABEL: {{^}}smrd_vgpr_offset:
+; GCN: buffer_load_dword v{{[0-9]}}, v0, s[0:3], 0 offen ;
+define amdgpu_ps float @smrd_vgpr_offset(<4 x i32> inreg %desc, i32 %offset) #0 {
+main_body:
+  %r = call float @llvm.SI.load.const.v4i32(<4 x i32> %desc, i32 %offset)
+  ret float %r
 }
 
 declare void @llvm.amdgcn.exp.f32(i32, i32, float, float, float, float, i1, i1) #0

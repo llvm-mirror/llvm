@@ -764,12 +764,12 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::VUCOMISSrr,      X86::VUCOMISSrm,          0 },
 
     // AVX 256-bit foldable instructions
-    { X86::VCVTDQ2PDYrr,    X86::VCVTDQ2PDYrm,        TB_NO_REVERSE },
+    { X86::VCVTDQ2PDYrr,    X86::VCVTDQ2PDYrm,        0 },
     { X86::VCVTDQ2PSYrr,    X86::VCVTDQ2PSYrm,        0 },
     { X86::VCVTPD2DQYrr,    X86::VCVTPD2DQYrm,        0 },
     { X86::VCVTPD2PSYrr,    X86::VCVTPD2PSYrm,        0 },
     { X86::VCVTPS2DQYrr,    X86::VCVTPS2DQYrm,        0 },
-    { X86::VCVTPS2PDYrr,    X86::VCVTPS2PDYrm,        TB_NO_REVERSE },
+    { X86::VCVTPS2PDYrr,    X86::VCVTPS2PDYrm,        0 },
     { X86::VCVTTPD2DQYrr,   X86::VCVTTPD2DQYrm,       0 },
     { X86::VCVTTPS2DQYrr,   X86::VCVTTPS2DQYrm,       0 },
     { X86::VMOVAPDYrr,      X86::VMOVAPDYrm,          TB_ALIGN_32 },
@@ -929,6 +929,9 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     // AVX-512 foldable instructions
     { X86::VBROADCASTSSZr,   X86::VBROADCASTSSZm,     TB_NO_REVERSE },
     { X86::VBROADCASTSDZr,   X86::VBROADCASTSDZm,     TB_NO_REVERSE },
+    { X86::VCVTDQ2PDZrr,     X86::VCVTDQ2PDZrm,       0 },
+    { X86::VCVTPD2PSZrr,     X86::VCVTPD2PSZrm,       0 },
+    { X86::VCVTUDQ2PDZrr,    X86::VCVTUDQ2PDZrm,      0 },
     { X86::VMOV64toPQIZrr,   X86::VMOVQI2PQIZrm,      0 },
     { X86::VMOV64toSDZrr,    X86::VMOV64toSDZrm,      0 },
     { X86::VMOVDI2PDIZrr,    X86::VMOVDI2PDIZrm,      0 },
@@ -988,6 +991,9 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     // AVX-512 foldable instructions (256-bit versions)
     { X86::VBROADCASTSSZ256r,    X86::VBROADCASTSSZ256m,    TB_NO_REVERSE },
     { X86::VBROADCASTSDZ256r,    X86::VBROADCASTSDZ256m,    TB_NO_REVERSE },
+    { X86::VCVTDQ2PDZ256rr,      X86::VCVTDQ2PDZ256rm,      0 },
+    { X86::VCVTPD2PSZ256rr,      X86::VCVTPD2PSZ256rm,      0 },
+    { X86::VCVTUDQ2PDZ256rr,     X86::VCVTUDQ2PDZ256rm,     0 },
     { X86::VMOVAPDZ256rr,        X86::VMOVAPDZ256rm,        TB_ALIGN_32 },
     { X86::VMOVAPSZ256rr,        X86::VMOVAPSZ256rm,        TB_ALIGN_32 },
     { X86::VMOVDQA32Z256rr,      X86::VMOVDQA32Z256rm,      TB_ALIGN_32 },
@@ -1039,6 +1045,9 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
 
     // AVX-512 foldable instructions (128-bit versions)
     { X86::VBROADCASTSSZ128r,    X86::VBROADCASTSSZ128m,    TB_NO_REVERSE },
+    { X86::VCVTDQ2PDZ128rr,      X86::VCVTDQ2PDZ128rm,      TB_NO_REVERSE },
+    { X86::VCVTPD2PSZ128rr,      X86::VCVTPD2PSZ128rm,      0 },
+    { X86::VCVTUDQ2PDZ128rr,     X86::VCVTUDQ2PDZ128rm,     TB_NO_REVERSE },
     { X86::VMOVAPDZ128rr,        X86::VMOVAPDZ128rm,        TB_ALIGN_16 },
     { X86::VMOVAPSZ128rr,        X86::VMOVAPSZ128rm,        TB_ALIGN_16 },
     { X86::VMOVDQA32Z128rr,      X86::VMOVDQA32Z128rm,      TB_ALIGN_16 },
@@ -7843,7 +7852,8 @@ bool X86InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     MIB->getOperand(0).setReg(SrcReg);
     return Expand2AddrUndef(MIB, get(X86::VPXORDZrr));
   }
-  case X86::AVX512_256_SET0: {
+  case X86::AVX512_256_SET0:
+  case X86::AVX512_512_SET0: {
     bool HasVLX = Subtarget.hasVLX();
     unsigned SrcReg = MIB->getOperand(0).getReg();
     const TargetRegisterInfo *TRI = &getRegisterInfo();
@@ -7852,18 +7862,6 @@ bool X86InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
       MIB->getOperand(0).setReg(XReg);
       Expand2AddrUndef(MIB,
                        get(HasVLX ? X86::VPXORDZ128rr : X86::VXORPSrr));
-      MIB.addReg(SrcReg, RegState::ImplicitDefine);
-      return true;
-    }
-    return Expand2AddrUndef(MIB, get(X86::VPXORDZrr));
-  }
-  case X86::AVX512_512_SET0: {
-    const TargetRegisterInfo *TRI = &getRegisterInfo();
-    unsigned SrcReg = MIB->getOperand(0).getReg();
-    if (TRI->getEncodingValue(SrcReg) < 16) {
-      unsigned XReg = TRI->getSubReg(SrcReg, X86::sub_xmm);
-      MIB->getOperand(0).setReg(XReg);
-      Expand2AddrUndef(MIB, get(X86::VXORPSrr));
       MIB.addReg(SrcReg, RegState::ImplicitDefine);
       return true;
     }
@@ -7953,326 +7951,6 @@ bool X86InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     return true;
   }
   return false;
-}
-
-static void addOperands(MachineInstrBuilder &MIB, ArrayRef<MachineOperand> MOs,
-                        int PtrOffset = 0) {
-  unsigned NumAddrOps = MOs.size();
-
-  if (NumAddrOps < 4) {
-    // FrameIndex only - add an immediate offset (whether its zero or not).
-    for (unsigned i = 0; i != NumAddrOps; ++i)
-      MIB.add(MOs[i]);
-    addOffset(MIB, PtrOffset);
-  } else {
-    // General Memory Addressing - we need to add any offset to an existing
-    // offset.
-    assert(MOs.size() == 5 && "Unexpected memory operand list length");
-    for (unsigned i = 0; i != NumAddrOps; ++i) {
-      const MachineOperand &MO = MOs[i];
-      if (i == 3 && PtrOffset != 0) {
-        MIB.addDisp(MO, PtrOffset);
-      } else {
-        MIB.add(MO);
-      }
-    }
-  }
-}
-
-static MachineInstr *FuseTwoAddrInst(MachineFunction &MF, unsigned Opcode,
-                                     ArrayRef<MachineOperand> MOs,
-                                     MachineBasicBlock::iterator InsertPt,
-                                     MachineInstr &MI,
-                                     const TargetInstrInfo &TII) {
-  // Create the base instruction with the memory operand as the first part.
-  // Omit the implicit operands, something BuildMI can't do.
-  MachineInstr *NewMI =
-      MF.CreateMachineInstr(TII.get(Opcode), MI.getDebugLoc(), true);
-  MachineInstrBuilder MIB(MF, NewMI);
-  addOperands(MIB, MOs);
-
-  // Loop over the rest of the ri operands, converting them over.
-  unsigned NumOps = MI.getDesc().getNumOperands() - 2;
-  for (unsigned i = 0; i != NumOps; ++i) {
-    MachineOperand &MO = MI.getOperand(i + 2);
-    MIB.add(MO);
-  }
-  for (unsigned i = NumOps + 2, e = MI.getNumOperands(); i != e; ++i) {
-    MachineOperand &MO = MI.getOperand(i);
-    MIB.add(MO);
-  }
-
-  MachineBasicBlock *MBB = InsertPt->getParent();
-  MBB->insert(InsertPt, NewMI);
-
-  return MIB;
-}
-
-static MachineInstr *FuseInst(MachineFunction &MF, unsigned Opcode,
-                              unsigned OpNo, ArrayRef<MachineOperand> MOs,
-                              MachineBasicBlock::iterator InsertPt,
-                              MachineInstr &MI, const TargetInstrInfo &TII,
-                              int PtrOffset = 0) {
-  // Omit the implicit operands, something BuildMI can't do.
-  MachineInstr *NewMI =
-      MF.CreateMachineInstr(TII.get(Opcode), MI.getDebugLoc(), true);
-  MachineInstrBuilder MIB(MF, NewMI);
-
-  for (unsigned i = 0, e = MI.getNumOperands(); i != e; ++i) {
-    MachineOperand &MO = MI.getOperand(i);
-    if (i == OpNo) {
-      assert(MO.isReg() && "Expected to fold into reg operand!");
-      addOperands(MIB, MOs, PtrOffset);
-    } else {
-      MIB.add(MO);
-    }
-  }
-
-  MachineBasicBlock *MBB = InsertPt->getParent();
-  MBB->insert(InsertPt, NewMI);
-
-  return MIB;
-}
-
-static MachineInstr *MakeM0Inst(const TargetInstrInfo &TII, unsigned Opcode,
-                                ArrayRef<MachineOperand> MOs,
-                                MachineBasicBlock::iterator InsertPt,
-                                MachineInstr &MI) {
-  MachineInstrBuilder MIB = BuildMI(*InsertPt->getParent(), InsertPt,
-                                    MI.getDebugLoc(), TII.get(Opcode));
-  addOperands(MIB, MOs);
-  return MIB.addImm(0);
-}
-
-MachineInstr *X86InstrInfo::foldMemoryOperandCustom(
-    MachineFunction &MF, MachineInstr &MI, unsigned OpNum,
-    ArrayRef<MachineOperand> MOs, MachineBasicBlock::iterator InsertPt,
-    unsigned Size, unsigned Align) const {
-  switch (MI.getOpcode()) {
-  case X86::INSERTPSrr:
-  case X86::VINSERTPSrr:
-  case X86::VINSERTPSZrr:
-    // Attempt to convert the load of inserted vector into a fold load
-    // of a single float.
-    if (OpNum == 2) {
-      unsigned Imm = MI.getOperand(MI.getNumOperands() - 1).getImm();
-      unsigned ZMask = Imm & 15;
-      unsigned DstIdx = (Imm >> 4) & 3;
-      unsigned SrcIdx = (Imm >> 6) & 3;
-
-      const TargetRegisterInfo &TRI = *MF.getSubtarget().getRegisterInfo();
-      const TargetRegisterClass *RC = getRegClass(MI.getDesc(), OpNum, &RI, MF);
-      unsigned RCSize = TRI.getRegSizeInBits(*RC) / 8;
-      if (Size <= RCSize && 4 <= Align) {
-        int PtrOffset = SrcIdx * 4;
-        unsigned NewImm = (DstIdx << 4) | ZMask;
-        unsigned NewOpCode =
-            (MI.getOpcode() == X86::VINSERTPSZrr) ? X86::VINSERTPSZrm :
-            (MI.getOpcode() == X86::VINSERTPSrr)  ? X86::VINSERTPSrm  :
-                                                    X86::INSERTPSrm;
-        MachineInstr *NewMI =
-            FuseInst(MF, NewOpCode, OpNum, MOs, InsertPt, MI, *this, PtrOffset);
-        NewMI->getOperand(NewMI->getNumOperands() - 1).setImm(NewImm);
-        return NewMI;
-      }
-    }
-    break;
-  case X86::MOVHLPSrr:
-  case X86::VMOVHLPSrr:
-  case X86::VMOVHLPSZrr:
-    // Move the upper 64-bits of the second operand to the lower 64-bits.
-    // To fold the load, adjust the pointer to the upper and use (V)MOVLPS.
-    // TODO: In most cases AVX doesn't have a 8-byte alignment requirement.
-    if (OpNum == 2) {
-      const TargetRegisterInfo &TRI = *MF.getSubtarget().getRegisterInfo();
-      const TargetRegisterClass *RC = getRegClass(MI.getDesc(), OpNum, &RI, MF);
-      unsigned RCSize = TRI.getRegSizeInBits(*RC) / 8;
-      if (Size <= RCSize && 8 <= Align) {
-        unsigned NewOpCode =
-            (MI.getOpcode() == X86::VMOVHLPSZrr) ? X86::VMOVLPSZ128rm :
-            (MI.getOpcode() == X86::VMOVHLPSrr)  ? X86::VMOVLPSrm     :
-                                                   X86::MOVLPSrm;
-        MachineInstr *NewMI =
-            FuseInst(MF, NewOpCode, OpNum, MOs, InsertPt, MI, *this, 8);
-        return NewMI;
-      }
-    }
-    break;
-  };
-
-  return nullptr;
-}
-
-MachineInstr *X86InstrInfo::foldMemoryOperandImpl(
-    MachineFunction &MF, MachineInstr &MI, unsigned OpNum,
-    ArrayRef<MachineOperand> MOs, MachineBasicBlock::iterator InsertPt,
-    unsigned Size, unsigned Align, bool AllowCommute) const {
-  const DenseMap<unsigned,
-                 std::pair<uint16_t, uint16_t> > *OpcodeTablePtr = nullptr;
-  bool isSlowTwoMemOps = Subtarget.slowTwoMemOps();
-  bool isTwoAddrFold = false;
-
-  // For CPUs that favor the register form of a call or push,
-  // do not fold loads into calls or pushes, unless optimizing for size
-  // aggressively.
-  if (isSlowTwoMemOps && !MF.getFunction()->optForMinSize() &&
-      (MI.getOpcode() == X86::CALL32r || MI.getOpcode() == X86::CALL64r ||
-       MI.getOpcode() == X86::PUSH16r || MI.getOpcode() == X86::PUSH32r ||
-       MI.getOpcode() == X86::PUSH64r))
-    return nullptr;
-
-  unsigned NumOps = MI.getDesc().getNumOperands();
-  bool isTwoAddr =
-      NumOps > 1 && MI.getDesc().getOperandConstraint(1, MCOI::TIED_TO) != -1;
-
-  // FIXME: AsmPrinter doesn't know how to handle
-  // X86II::MO_GOT_ABSOLUTE_ADDRESS after folding.
-  if (MI.getOpcode() == X86::ADD32ri &&
-      MI.getOperand(2).getTargetFlags() == X86II::MO_GOT_ABSOLUTE_ADDRESS)
-    return nullptr;
-
-  MachineInstr *NewMI = nullptr;
-
-  // Attempt to fold any custom cases we have.
-  if (MachineInstr *CustomMI =
-          foldMemoryOperandCustom(MF, MI, OpNum, MOs, InsertPt, Size, Align))
-    return CustomMI;
-
-  // Folding a memory location into the two-address part of a two-address
-  // instruction is different than folding it other places.  It requires
-  // replacing the *two* registers with the memory location.
-  if (isTwoAddr && NumOps >= 2 && OpNum < 2 && MI.getOperand(0).isReg() &&
-      MI.getOperand(1).isReg() &&
-      MI.getOperand(0).getReg() == MI.getOperand(1).getReg()) {
-    OpcodeTablePtr = &RegOp2MemOpTable2Addr;
-    isTwoAddrFold = true;
-  } else if (OpNum == 0) {
-    if (MI.getOpcode() == X86::MOV32r0) {
-      NewMI = MakeM0Inst(*this, X86::MOV32mi, MOs, InsertPt, MI);
-      if (NewMI)
-        return NewMI;
-    }
-
-    OpcodeTablePtr = &RegOp2MemOpTable0;
-  } else if (OpNum == 1) {
-    OpcodeTablePtr = &RegOp2MemOpTable1;
-  } else if (OpNum == 2) {
-    OpcodeTablePtr = &RegOp2MemOpTable2;
-  } else if (OpNum == 3) {
-    OpcodeTablePtr = &RegOp2MemOpTable3;
-  } else if (OpNum == 4) {
-    OpcodeTablePtr = &RegOp2MemOpTable4;
-  }
-
-  // If table selected...
-  if (OpcodeTablePtr) {
-    // Find the Opcode to fuse
-    auto I = OpcodeTablePtr->find(MI.getOpcode());
-    if (I != OpcodeTablePtr->end()) {
-      unsigned Opcode = I->second.first;
-      unsigned MinAlign = (I->second.second & TB_ALIGN_MASK) >> TB_ALIGN_SHIFT;
-      if (Align < MinAlign)
-        return nullptr;
-      bool NarrowToMOV32rm = false;
-      if (Size) {
-        const TargetRegisterInfo &TRI = *MF.getSubtarget().getRegisterInfo();
-        const TargetRegisterClass *RC = getRegClass(MI.getDesc(), OpNum,
-                                                    &RI, MF);
-        unsigned RCSize = TRI.getRegSizeInBits(*RC) / 8;
-        if (Size < RCSize) {
-          // Check if it's safe to fold the load. If the size of the object is
-          // narrower than the load width, then it's not.
-          if (Opcode != X86::MOV64rm || RCSize != 8 || Size != 4)
-            return nullptr;
-          // If this is a 64-bit load, but the spill slot is 32, then we can do
-          // a 32-bit load which is implicitly zero-extended. This likely is
-          // due to live interval analysis remat'ing a load from stack slot.
-          if (MI.getOperand(0).getSubReg() || MI.getOperand(1).getSubReg())
-            return nullptr;
-          Opcode = X86::MOV32rm;
-          NarrowToMOV32rm = true;
-        }
-      }
-
-      if (isTwoAddrFold)
-        NewMI = FuseTwoAddrInst(MF, Opcode, MOs, InsertPt, MI, *this);
-      else
-        NewMI = FuseInst(MF, Opcode, OpNum, MOs, InsertPt, MI, *this);
-
-      if (NarrowToMOV32rm) {
-        // If this is the special case where we use a MOV32rm to load a 32-bit
-        // value and zero-extend the top bits. Change the destination register
-        // to a 32-bit one.
-        unsigned DstReg = NewMI->getOperand(0).getReg();
-        if (TargetRegisterInfo::isPhysicalRegister(DstReg))
-          NewMI->getOperand(0).setReg(RI.getSubReg(DstReg, X86::sub_32bit));
-        else
-          NewMI->getOperand(0).setSubReg(X86::sub_32bit);
-      }
-      return NewMI;
-    }
-  }
-
-  // If the instruction and target operand are commutable, commute the
-  // instruction and try again.
-  if (AllowCommute) {
-    unsigned CommuteOpIdx1 = OpNum, CommuteOpIdx2 = CommuteAnyOperandIndex;
-    if (findCommutedOpIndices(MI, CommuteOpIdx1, CommuteOpIdx2)) {
-      bool HasDef = MI.getDesc().getNumDefs();
-      unsigned Reg0 = HasDef ? MI.getOperand(0).getReg() : 0;
-      unsigned Reg1 = MI.getOperand(CommuteOpIdx1).getReg();
-      unsigned Reg2 = MI.getOperand(CommuteOpIdx2).getReg();
-      bool Tied1 =
-          0 == MI.getDesc().getOperandConstraint(CommuteOpIdx1, MCOI::TIED_TO);
-      bool Tied2 =
-          0 == MI.getDesc().getOperandConstraint(CommuteOpIdx2, MCOI::TIED_TO);
-
-      // If either of the commutable operands are tied to the destination
-      // then we can not commute + fold.
-      if ((HasDef && Reg0 == Reg1 && Tied1) ||
-          (HasDef && Reg0 == Reg2 && Tied2))
-        return nullptr;
-
-      MachineInstr *CommutedMI =
-          commuteInstruction(MI, false, CommuteOpIdx1, CommuteOpIdx2);
-      if (!CommutedMI) {
-        // Unable to commute.
-        return nullptr;
-      }
-      if (CommutedMI != &MI) {
-        // New instruction. We can't fold from this.
-        CommutedMI->eraseFromParent();
-        return nullptr;
-      }
-
-      // Attempt to fold with the commuted version of the instruction.
-      NewMI = foldMemoryOperandImpl(MF, MI, CommuteOpIdx2, MOs, InsertPt,
-                                    Size, Align, /*AllowCommute=*/false);
-      if (NewMI)
-        return NewMI;
-
-      // Folding failed again - undo the commute before returning.
-      MachineInstr *UncommutedMI =
-          commuteInstruction(MI, false, CommuteOpIdx1, CommuteOpIdx2);
-      if (!UncommutedMI) {
-        // Unable to commute.
-        return nullptr;
-      }
-      if (UncommutedMI != &MI) {
-        // New instruction. It doesn't need to be kept.
-        UncommutedMI->eraseFromParent();
-        return nullptr;
-      }
-
-      // Return here to prevent duplicate fuse failure report.
-      return nullptr;
-    }
-  }
-
-  // No fusion
-  if (PrintFailedFusing && !MI.isCopy())
-    dbgs() << "We failed to fuse operand " << OpNum << " in " << MI;
-  return nullptr;
 }
 
 /// Return true for all instructions that only update
@@ -8545,6 +8223,331 @@ void X86InstrInfo::breakPartialRegDependency(
   }
 }
 
+static void addOperands(MachineInstrBuilder &MIB, ArrayRef<MachineOperand> MOs,
+                        int PtrOffset = 0) {
+  unsigned NumAddrOps = MOs.size();
+
+  if (NumAddrOps < 4) {
+    // FrameIndex only - add an immediate offset (whether its zero or not).
+    for (unsigned i = 0; i != NumAddrOps; ++i)
+      MIB.add(MOs[i]);
+    addOffset(MIB, PtrOffset);
+  } else {
+    // General Memory Addressing - we need to add any offset to an existing
+    // offset.
+    assert(MOs.size() == 5 && "Unexpected memory operand list length");
+    for (unsigned i = 0; i != NumAddrOps; ++i) {
+      const MachineOperand &MO = MOs[i];
+      if (i == 3 && PtrOffset != 0) {
+        MIB.addDisp(MO, PtrOffset);
+      } else {
+        MIB.add(MO);
+      }
+    }
+  }
+}
+
+static MachineInstr *FuseTwoAddrInst(MachineFunction &MF, unsigned Opcode,
+                                     ArrayRef<MachineOperand> MOs,
+                                     MachineBasicBlock::iterator InsertPt,
+                                     MachineInstr &MI,
+                                     const TargetInstrInfo &TII) {
+  // Create the base instruction with the memory operand as the first part.
+  // Omit the implicit operands, something BuildMI can't do.
+  MachineInstr *NewMI =
+      MF.CreateMachineInstr(TII.get(Opcode), MI.getDebugLoc(), true);
+  MachineInstrBuilder MIB(MF, NewMI);
+  addOperands(MIB, MOs);
+
+  // Loop over the rest of the ri operands, converting them over.
+  unsigned NumOps = MI.getDesc().getNumOperands() - 2;
+  for (unsigned i = 0; i != NumOps; ++i) {
+    MachineOperand &MO = MI.getOperand(i + 2);
+    MIB.add(MO);
+  }
+  for (unsigned i = NumOps + 2, e = MI.getNumOperands(); i != e; ++i) {
+    MachineOperand &MO = MI.getOperand(i);
+    MIB.add(MO);
+  }
+
+  MachineBasicBlock *MBB = InsertPt->getParent();
+  MBB->insert(InsertPt, NewMI);
+
+  return MIB;
+}
+
+static MachineInstr *FuseInst(MachineFunction &MF, unsigned Opcode,
+                              unsigned OpNo, ArrayRef<MachineOperand> MOs,
+                              MachineBasicBlock::iterator InsertPt,
+                              MachineInstr &MI, const TargetInstrInfo &TII,
+                              int PtrOffset = 0) {
+  // Omit the implicit operands, something BuildMI can't do.
+  MachineInstr *NewMI =
+      MF.CreateMachineInstr(TII.get(Opcode), MI.getDebugLoc(), true);
+  MachineInstrBuilder MIB(MF, NewMI);
+
+  for (unsigned i = 0, e = MI.getNumOperands(); i != e; ++i) {
+    MachineOperand &MO = MI.getOperand(i);
+    if (i == OpNo) {
+      assert(MO.isReg() && "Expected to fold into reg operand!");
+      addOperands(MIB, MOs, PtrOffset);
+    } else {
+      MIB.add(MO);
+    }
+  }
+
+  MachineBasicBlock *MBB = InsertPt->getParent();
+  MBB->insert(InsertPt, NewMI);
+
+  return MIB;
+}
+
+static MachineInstr *MakeM0Inst(const TargetInstrInfo &TII, unsigned Opcode,
+                                ArrayRef<MachineOperand> MOs,
+                                MachineBasicBlock::iterator InsertPt,
+                                MachineInstr &MI) {
+  MachineInstrBuilder MIB = BuildMI(*InsertPt->getParent(), InsertPt,
+                                    MI.getDebugLoc(), TII.get(Opcode));
+  addOperands(MIB, MOs);
+  return MIB.addImm(0);
+}
+
+MachineInstr *X86InstrInfo::foldMemoryOperandCustom(
+    MachineFunction &MF, MachineInstr &MI, unsigned OpNum,
+    ArrayRef<MachineOperand> MOs, MachineBasicBlock::iterator InsertPt,
+    unsigned Size, unsigned Align) const {
+  switch (MI.getOpcode()) {
+  case X86::INSERTPSrr:
+  case X86::VINSERTPSrr:
+  case X86::VINSERTPSZrr:
+    // Attempt to convert the load of inserted vector into a fold load
+    // of a single float.
+    if (OpNum == 2) {
+      unsigned Imm = MI.getOperand(MI.getNumOperands() - 1).getImm();
+      unsigned ZMask = Imm & 15;
+      unsigned DstIdx = (Imm >> 4) & 3;
+      unsigned SrcIdx = (Imm >> 6) & 3;
+
+      const TargetRegisterInfo &TRI = *MF.getSubtarget().getRegisterInfo();
+      const TargetRegisterClass *RC = getRegClass(MI.getDesc(), OpNum, &RI, MF);
+      unsigned RCSize = TRI.getRegSizeInBits(*RC) / 8;
+      if (Size <= RCSize && 4 <= Align) {
+        int PtrOffset = SrcIdx * 4;
+        unsigned NewImm = (DstIdx << 4) | ZMask;
+        unsigned NewOpCode =
+            (MI.getOpcode() == X86::VINSERTPSZrr) ? X86::VINSERTPSZrm :
+            (MI.getOpcode() == X86::VINSERTPSrr)  ? X86::VINSERTPSrm  :
+                                                    X86::INSERTPSrm;
+        MachineInstr *NewMI =
+            FuseInst(MF, NewOpCode, OpNum, MOs, InsertPt, MI, *this, PtrOffset);
+        NewMI->getOperand(NewMI->getNumOperands() - 1).setImm(NewImm);
+        return NewMI;
+      }
+    }
+    break;
+  case X86::MOVHLPSrr:
+  case X86::VMOVHLPSrr:
+  case X86::VMOVHLPSZrr:
+    // Move the upper 64-bits of the second operand to the lower 64-bits.
+    // To fold the load, adjust the pointer to the upper and use (V)MOVLPS.
+    // TODO: In most cases AVX doesn't have a 8-byte alignment requirement.
+    if (OpNum == 2) {
+      const TargetRegisterInfo &TRI = *MF.getSubtarget().getRegisterInfo();
+      const TargetRegisterClass *RC = getRegClass(MI.getDesc(), OpNum, &RI, MF);
+      unsigned RCSize = TRI.getRegSizeInBits(*RC) / 8;
+      if (Size <= RCSize && 8 <= Align) {
+        unsigned NewOpCode =
+            (MI.getOpcode() == X86::VMOVHLPSZrr) ? X86::VMOVLPSZ128rm :
+            (MI.getOpcode() == X86::VMOVHLPSrr)  ? X86::VMOVLPSrm     :
+                                                   X86::MOVLPSrm;
+        MachineInstr *NewMI =
+            FuseInst(MF, NewOpCode, OpNum, MOs, InsertPt, MI, *this, 8);
+        return NewMI;
+      }
+    }
+    break;
+  };
+
+  return nullptr;
+}
+
+MachineInstr *X86InstrInfo::foldMemoryOperandImpl(
+    MachineFunction &MF, MachineInstr &MI, unsigned OpNum,
+    ArrayRef<MachineOperand> MOs, MachineBasicBlock::iterator InsertPt,
+    unsigned Size, unsigned Align, bool AllowCommute) const {
+  const DenseMap<unsigned,
+                 std::pair<uint16_t, uint16_t> > *OpcodeTablePtr = nullptr;
+  bool isSlowTwoMemOps = Subtarget.slowTwoMemOps();
+  bool isTwoAddrFold = false;
+
+  // For CPUs that favor the register form of a call or push,
+  // do not fold loads into calls or pushes, unless optimizing for size
+  // aggressively.
+  if (isSlowTwoMemOps && !MF.getFunction()->optForMinSize() &&
+      (MI.getOpcode() == X86::CALL32r || MI.getOpcode() == X86::CALL64r ||
+       MI.getOpcode() == X86::PUSH16r || MI.getOpcode() == X86::PUSH32r ||
+       MI.getOpcode() == X86::PUSH64r))
+    return nullptr;
+
+  // Avoid partial register update stalls unless optimizing for size.
+  // TODO: we should block undef reg update as well.
+  if (!MF.getFunction()->optForSize() && hasPartialRegUpdate(MI.getOpcode()))
+    return nullptr;
+
+  unsigned NumOps = MI.getDesc().getNumOperands();
+  bool isTwoAddr =
+      NumOps > 1 && MI.getDesc().getOperandConstraint(1, MCOI::TIED_TO) != -1;
+
+  // FIXME: AsmPrinter doesn't know how to handle
+  // X86II::MO_GOT_ABSOLUTE_ADDRESS after folding.
+  if (MI.getOpcode() == X86::ADD32ri &&
+      MI.getOperand(2).getTargetFlags() == X86II::MO_GOT_ABSOLUTE_ADDRESS)
+    return nullptr;
+
+  MachineInstr *NewMI = nullptr;
+
+  // Attempt to fold any custom cases we have.
+  if (MachineInstr *CustomMI =
+          foldMemoryOperandCustom(MF, MI, OpNum, MOs, InsertPt, Size, Align))
+    return CustomMI;
+
+  // Folding a memory location into the two-address part of a two-address
+  // instruction is different than folding it other places.  It requires
+  // replacing the *two* registers with the memory location.
+  if (isTwoAddr && NumOps >= 2 && OpNum < 2 && MI.getOperand(0).isReg() &&
+      MI.getOperand(1).isReg() &&
+      MI.getOperand(0).getReg() == MI.getOperand(1).getReg()) {
+    OpcodeTablePtr = &RegOp2MemOpTable2Addr;
+    isTwoAddrFold = true;
+  } else if (OpNum == 0) {
+    if (MI.getOpcode() == X86::MOV32r0) {
+      NewMI = MakeM0Inst(*this, X86::MOV32mi, MOs, InsertPt, MI);
+      if (NewMI)
+        return NewMI;
+    }
+
+    OpcodeTablePtr = &RegOp2MemOpTable0;
+  } else if (OpNum == 1) {
+    OpcodeTablePtr = &RegOp2MemOpTable1;
+  } else if (OpNum == 2) {
+    OpcodeTablePtr = &RegOp2MemOpTable2;
+  } else if (OpNum == 3) {
+    OpcodeTablePtr = &RegOp2MemOpTable3;
+  } else if (OpNum == 4) {
+    OpcodeTablePtr = &RegOp2MemOpTable4;
+  }
+
+  // If table selected...
+  if (OpcodeTablePtr) {
+    // Find the Opcode to fuse
+    auto I = OpcodeTablePtr->find(MI.getOpcode());
+    if (I != OpcodeTablePtr->end()) {
+      unsigned Opcode = I->second.first;
+      unsigned MinAlign = (I->second.second & TB_ALIGN_MASK) >> TB_ALIGN_SHIFT;
+      if (Align < MinAlign)
+        return nullptr;
+      bool NarrowToMOV32rm = false;
+      if (Size) {
+        const TargetRegisterInfo &TRI = *MF.getSubtarget().getRegisterInfo();
+        const TargetRegisterClass *RC = getRegClass(MI.getDesc(), OpNum,
+                                                    &RI, MF);
+        unsigned RCSize = TRI.getRegSizeInBits(*RC) / 8;
+        if (Size < RCSize) {
+          // Check if it's safe to fold the load. If the size of the object is
+          // narrower than the load width, then it's not.
+          if (Opcode != X86::MOV64rm || RCSize != 8 || Size != 4)
+            return nullptr;
+          // If this is a 64-bit load, but the spill slot is 32, then we can do
+          // a 32-bit load which is implicitly zero-extended. This likely is
+          // due to live interval analysis remat'ing a load from stack slot.
+          if (MI.getOperand(0).getSubReg() || MI.getOperand(1).getSubReg())
+            return nullptr;
+          Opcode = X86::MOV32rm;
+          NarrowToMOV32rm = true;
+        }
+      }
+
+      if (isTwoAddrFold)
+        NewMI = FuseTwoAddrInst(MF, Opcode, MOs, InsertPt, MI, *this);
+      else
+        NewMI = FuseInst(MF, Opcode, OpNum, MOs, InsertPt, MI, *this);
+
+      if (NarrowToMOV32rm) {
+        // If this is the special case where we use a MOV32rm to load a 32-bit
+        // value and zero-extend the top bits. Change the destination register
+        // to a 32-bit one.
+        unsigned DstReg = NewMI->getOperand(0).getReg();
+        if (TargetRegisterInfo::isPhysicalRegister(DstReg))
+          NewMI->getOperand(0).setReg(RI.getSubReg(DstReg, X86::sub_32bit));
+        else
+          NewMI->getOperand(0).setSubReg(X86::sub_32bit);
+      }
+      return NewMI;
+    }
+  }
+
+  // If the instruction and target operand are commutable, commute the
+  // instruction and try again.
+  if (AllowCommute) {
+    unsigned CommuteOpIdx1 = OpNum, CommuteOpIdx2 = CommuteAnyOperandIndex;
+    if (findCommutedOpIndices(MI, CommuteOpIdx1, CommuteOpIdx2)) {
+      bool HasDef = MI.getDesc().getNumDefs();
+      unsigned Reg0 = HasDef ? MI.getOperand(0).getReg() : 0;
+      unsigned Reg1 = MI.getOperand(CommuteOpIdx1).getReg();
+      unsigned Reg2 = MI.getOperand(CommuteOpIdx2).getReg();
+      bool Tied1 =
+          0 == MI.getDesc().getOperandConstraint(CommuteOpIdx1, MCOI::TIED_TO);
+      bool Tied2 =
+          0 == MI.getDesc().getOperandConstraint(CommuteOpIdx2, MCOI::TIED_TO);
+
+      // If either of the commutable operands are tied to the destination
+      // then we can not commute + fold.
+      if ((HasDef && Reg0 == Reg1 && Tied1) ||
+          (HasDef && Reg0 == Reg2 && Tied2))
+        return nullptr;
+
+      MachineInstr *CommutedMI =
+          commuteInstruction(MI, false, CommuteOpIdx1, CommuteOpIdx2);
+      if (!CommutedMI) {
+        // Unable to commute.
+        return nullptr;
+      }
+      if (CommutedMI != &MI) {
+        // New instruction. We can't fold from this.
+        CommutedMI->eraseFromParent();
+        return nullptr;
+      }
+
+      // Attempt to fold with the commuted version of the instruction.
+      NewMI = foldMemoryOperandImpl(MF, MI, CommuteOpIdx2, MOs, InsertPt,
+                                    Size, Align, /*AllowCommute=*/false);
+      if (NewMI)
+        return NewMI;
+
+      // Folding failed again - undo the commute before returning.
+      MachineInstr *UncommutedMI =
+          commuteInstruction(MI, false, CommuteOpIdx1, CommuteOpIdx2);
+      if (!UncommutedMI) {
+        // Unable to commute.
+        return nullptr;
+      }
+      if (UncommutedMI != &MI) {
+        // New instruction. It doesn't need to be kept.
+        UncommutedMI->eraseFromParent();
+        return nullptr;
+      }
+
+      // Return here to prevent duplicate fuse failure report.
+      return nullptr;
+    }
+  }
+
+  // No fusion
+  if (PrintFailedFusing && !MI.isCopy())
+    dbgs() << "We failed to fuse operand " << OpNum << " in " << MI;
+  return nullptr;
+}
+
 MachineInstr *
 X86InstrInfo::foldMemoryOperandImpl(MachineFunction &MF, MachineInstr &MI,
                                     ArrayRef<unsigned> Ops,
@@ -8556,6 +8559,7 @@ X86InstrInfo::foldMemoryOperandImpl(MachineFunction &MF, MachineInstr &MI,
 
   // Unless optimizing for size, don't fold to avoid partial
   // register update stalls
+  // TODO: we should block undef reg update as well.
   if (!MF.getFunction()->optForSize() && hasPartialRegUpdate(MI.getOpcode()))
     return nullptr;
 
@@ -8754,6 +8758,7 @@ MachineInstr *X86InstrInfo::foldMemoryOperandImpl(
   if (NoFusing) return nullptr;
 
   // Avoid partial register update stalls unless optimizing for size.
+  // TODO: we should block undef reg update as well.
   if (!MF.getFunction()->optForSize() && hasPartialRegUpdate(MI.getOpcode()))
     return nullptr;
 
@@ -9442,6 +9447,8 @@ static const uint16_t ReplaceableInstrs[][3] = {
   { X86::UNPCKLPSrr, X86::UNPCKLPSrr, X86::PUNPCKLDQrr },
   { X86::UNPCKHPSrm, X86::UNPCKHPSrm, X86::PUNPCKHDQrm },
   { X86::UNPCKHPSrr, X86::UNPCKHPSrr, X86::PUNPCKHDQrr },
+  { X86::EXTRACTPSmr, X86::EXTRACTPSmr, X86::PEXTRDmr },
+  { X86::EXTRACTPSrr, X86::EXTRACTPSrr, X86::PEXTRDrr },
   // AVX 128-bit support
   { X86::VMOVAPSmr,  X86::VMOVAPDmr,  X86::VMOVDQAmr  },
   { X86::VMOVAPSrm,  X86::VMOVAPDrm,  X86::VMOVDQArm  },
@@ -9470,6 +9477,8 @@ static const uint16_t ReplaceableInstrs[][3] = {
   { X86::VUNPCKLPSrr, X86::VUNPCKLPSrr, X86::VPUNPCKLDQrr },
   { X86::VUNPCKHPSrm, X86::VUNPCKHPSrm, X86::VPUNPCKHDQrm },
   { X86::VUNPCKHPSrr, X86::VUNPCKHPSrr, X86::VPUNPCKHDQrr },
+  { X86::VEXTRACTPSmr, X86::VEXTRACTPSmr, X86::VPEXTRDmr },
+  { X86::VEXTRACTPSrr, X86::VEXTRACTPSrr, X86::VPEXTRDrr },
   // AVX 256-bit support
   { X86::VMOVAPSYmr,   X86::VMOVAPDYmr,   X86::VMOVDQAYmr  },
   { X86::VMOVAPSYrm,   X86::VMOVAPDYrm,   X86::VMOVDQAYrm  },
@@ -9568,6 +9577,8 @@ static const uint16_t ReplaceableInstrs[][3] = {
   { X86::VUNPCKLPSZrr,       X86::VUNPCKLPSZrr,       X86::VPUNPCKLDQZrr },
   { X86::VUNPCKHPSZrm,       X86::VUNPCKHPSZrm,       X86::VPUNPCKHDQZrm },
   { X86::VUNPCKHPSZrr,       X86::VUNPCKHPSZrr,       X86::VPUNPCKHDQZrr },
+  { X86::VEXTRACTPSZmr,      X86::VEXTRACTPSZmr,      X86::VPEXTRDZmr },
+  { X86::VEXTRACTPSZrr,      X86::VEXTRACTPSZrr,      X86::VPEXTRDZrr },
 };
 
 static const uint16_t ReplaceableInstrsAVX2[][3] = {
@@ -10778,7 +10789,7 @@ llvm::createCleanupLocalDynamicTLSPass() { return new LDTLSCleanup(); }
 ///
 /// * Call construction overhead: 1 (call instruction)
 /// * Frame construction overhead: 1 (return instruction)
-/// 
+///
 /// \p MachineOutlinerTailCall implies that the function is being tail called.
 /// A jump is emitted instead of a call, and the return is already present in
 /// the outlined sequence. That is,
@@ -10808,7 +10819,7 @@ X86InstrInfo::getOutlininingCandidateInfo(
                                MachineOutlinerTailCall, // Type of call.
                                MachineOutlinerTailCall // Type of frame.
                               );
-  
+
   return MachineOutlinerInfo(1, 1, MachineOutlinerDefault,
                              MachineOutlinerDefault);
 }
@@ -10821,12 +10832,12 @@ bool X86InstrInfo::isFunctionSafeToOutlineFrom(MachineFunction &MF,
   // with the stack.
   if (!F->hasFnAttribute(Attribute::NoRedZone))
       return false;
-  
+
   // If we *don't* want to outline from things that could potentially be deduped
   // then return false.
   if (!OutlineFromLinkOnceODRs && F->hasLinkOnceODRLinkage())
       return false;
-  
+
   // This function is viable for outlining, so return true.
   return true;
 }

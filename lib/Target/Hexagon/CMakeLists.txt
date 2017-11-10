@@ -20,6 +20,7 @@ add_llvm_target(HexagonCodeGen
   HexagonBranchRelaxation.cpp
   HexagonCFGOptimizer.cpp
   HexagonCommonGEP.cpp
+  HexagonConstExtenders.cpp
   HexagonConstPropagation.cpp
   HexagonCopyToCombine.cpp
   HexagonEarlyIfConv.cpp
@@ -67,3 +68,4 @@ add_subdirectory(AsmParser)
 add_subdirectory(TargetInfo)
 add_subdirectory(MCTargetDesc)
 add_subdirectory(Disassembler)
+

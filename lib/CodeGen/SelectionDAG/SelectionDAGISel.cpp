@@ -494,10 +494,9 @@ bool SelectionDAGISel::runOnMachineFunction(MachineFunction &mf) {
 
   DenseMap<unsigned, unsigned> LiveInMap;
   if (!FuncInfo->ArgDbgValues.empty())
-    for (MachineRegisterInfo::livein_iterator LI = RegInfo->livein_begin(),
-           E = RegInfo->livein_end(); LI != E; ++LI)
-      if (LI->second)
-        LiveInMap.insert(std::make_pair(LI->first, LI->second));
+    for (std::pair<unsigned, unsigned> LI : RegInfo->liveins())
+      if (LI.second)
+        LiveInMap.insert(LI);
 
   // Insert DBG_VALUE instructions for function arguments to the entry block.
   for (unsigned i = 0, e = FuncInfo->ArgDbgValues.size(); i != e; ++i) {
@@ -3551,6 +3550,7 @@ void SelectionDAGISel::SelectCodeCommon(SDNode *NodeToMatch,
                "NodeToMatch was removed partway through selection");
         SelectionDAG::DAGNodeDeletedListener NDL(*CurDAG, [&](SDNode *N,
                                                               SDNode *E) {
+          CurDAG->salvageDebugInfo(*N);
           auto &Chain = ChainNodesMatched;
           assert((!E || !is_contained(Chain, N)) &&
                  "Chain node replaced during MorphNode");

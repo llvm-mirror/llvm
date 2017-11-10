@@ -193,9 +193,6 @@ protected:
   /// Processor has Prefetch with intent to Write instruction
   bool HasPFPREFETCHWT1;
 
-  /// True if BT (bit test) of memory instructions are slow.
-  bool IsBTMemSlow;
-
   /// True if SHLD instructions are slow.
   bool IsSHLDSlow;
 
@@ -489,7 +486,6 @@ public:
   bool hasLAHFSAHF() const { return HasLAHFSAHF; }
   bool hasMWAITX() const { return HasMWAITX; }
   bool hasCLZERO() const { return HasCLZERO; }
-  bool isBTMemSlow() const { return IsBTMemSlow; }
   bool isSHLDSlow() const { return IsSHLDSlow; }
   bool isPMULLDSlow() const { return IsPMULLDSlow; }
   bool isUnalignedMem16Slow() const { return IsUAMem16Slow; }
@@ -676,6 +672,8 @@ public:
   AntiDepBreakMode getAntiDepBreakMode() const override {
     return TargetSubtargetInfo::ANTIDEP_CRITICAL;
   }
+
+  bool enableAdvancedRASplitCost() const override { return true; }
 };
 
 } // end namespace llvm

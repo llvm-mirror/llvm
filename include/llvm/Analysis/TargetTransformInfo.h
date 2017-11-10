@@ -489,6 +489,13 @@ public:
   /// would typically be allowed using throughput or size cost models.
   bool hasDivRemOp(Type *DataType, bool IsSigned) const;
 
+  /// Return true if the given instruction (assumed to be a memory access
+  /// instruction) has a volatile variant. If that's the case then we can avoid
+  /// addrspacecast to generic AS for volatile loads/stores. Default
+  /// implementation returns false, which prevents address space inference for
+  /// volatile loads/stores.
+  bool hasVolatileVariant(Instruction *I, unsigned AddrSpace) const;
+
   /// Return true if target doesn't mind addresses in vectors.
   bool prefersVectorizedAddressing() const;
 
@@ -547,8 +554,13 @@ public:
   /// \brief Don't restrict interleaved unrolling to small loops.
   bool enableAggressiveInterleaving(bool LoopHasReductions) const;
 
-  /// \brief Enable inline expansion of memcmp
-  bool enableMemCmpExpansion(unsigned &MaxLoadSize) const;
+  /// \brief If not nullptr, enable inline expansion of memcmp. IsZeroCmp is
+  /// true if this is the expansion of memcmp(p1, p2, s) == 0.
+  struct MemCmpExpansionOptions {
+    // The list of available load sizes (in bytes), sorted in decreasing order.
+    SmallVector<unsigned, 8> LoadSizes;
+  };
+  const MemCmpExpansionOptions *enableMemCmpExpansion(bool IsZeroCmp) const;
 
   /// \brief Enable matching of interleaved access groups.
   bool enableInterleavedAccessVectorization() const;
@@ -967,6 +979,7 @@ public:
   virtual bool isLegalMaskedScatter(Type *DataType) = 0;
   virtual bool isLegalMaskedGather(Type *DataType) = 0;
   virtual bool hasDivRemOp(Type *DataType, bool IsSigned) = 0;
+  virtual bool hasVolatileVariant(Instruction *I, unsigned AddrSpace) = 0;
   virtual bool prefersVectorizedAddressing() = 0;
   virtual int getScalingFactorCost(Type *Ty, GlobalValue *BaseGV,
                                    int64_t BaseOffset, bool HasBaseReg,
@@ -985,7 +998,8 @@ public:
                                                     unsigned VF) = 0;
   virtual bool supportsEfficientVectorElementLoadStore() = 0;
   virtual bool enableAggressiveInterleaving(bool LoopHasReductions) = 0;
-  virtual bool enableMemCmpExpansion(unsigned &MaxLoadSize) = 0;
+  virtual const MemCmpExpansionOptions *enableMemCmpExpansion(
+      bool IsZeroCmp) const = 0;
   virtual bool enableInterleavedAccessVectorization() = 0;
   virtual bool isFPVectorizationPotentiallyUnsafe() = 0;
   virtual bool allowsMisalignedMemoryAccesses(LLVMContext &Context,
@@ -1192,6 +1206,9 @@ public:
   bool hasDivRemOp(Type *DataType, bool IsSigned) override {
     return Impl.hasDivRemOp(DataType, IsSigned);
   }
+  bool hasVolatileVariant(Instruction *I, unsigned AddrSpace) override {
+    return Impl.hasVolatileVariant(I, AddrSpace);
+  }
   bool prefersVectorizedAddressing() override {
     return Impl.prefersVectorizedAddressing();
   }
@@ -1235,8 +1252,9 @@ public:
   bool enableAggressiveInterleaving(bool LoopHasReductions) override {
     return Impl.enableAggressiveInterleaving(LoopHasReductions);
   }
-  bool enableMemCmpExpansion(unsigned &MaxLoadSize) override {
-    return Impl.enableMemCmpExpansion(MaxLoadSize);
+  const MemCmpExpansionOptions *enableMemCmpExpansion(
+      bool IsZeroCmp) const override {
+    return Impl.enableMemCmpExpansion(IsZeroCmp);
   }
   bool enableInterleavedAccessVectorization() override {
     return Impl.enableInterleavedAccessVectorization();

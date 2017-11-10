@@ -63,6 +63,7 @@
 #include "llvm/Transforms/GCOVProfiler.h"
 #include "llvm/Transforms/IPO/AlwaysInliner.h"
 #include "llvm/Transforms/IPO/ArgumentPromotion.h"
+#include "llvm/Transforms/IPO/CalledValuePropagation.h"
 #include "llvm/Transforms/IPO/ConstantMerge.h"
 #include "llvm/Transforms/IPO/CrossDSOCFI.h"
 #include "llvm/Transforms/IPO/DeadArgumentElimination.h"
@@ -362,6 +363,12 @@ PassBuilder::buildFunctionSimplificationPipeline(OptimizationLevel Level,
 
   invokePeepholeEPCallbacks(FPM, Level);
 
+  // For PGO use pipeline, try to optimize memory intrinsics such as memcpy
+  // using the size value profile. Don't perform this when optimizing for size.
+  if (PGOOpt && !PGOOpt->ProfileUseFile.empty() &&
+      !isOptimizingForSize(Level))
+    FPM.addPass(PGOMemOPSizeOpt());
+
   FPM.addPass(TailCallElimPass());
   FPM.addPass(SimplifyCFGPass());
 
@@ -573,6 +580,10 @@ PassBuilder::buildModuleSimplificationPipeline(OptimizationLevel Level,
   // FIXME: This position in the pipeline hasn't been carefully considered in
   // years, it should be re-analyzed.
   MPM.addPass(IPSCCPPass());
+
+  // Attach metadata to indirect call sites indicating the set of functions
+  // they may target at run-time. This should follow IPSCCP.
+  MPM.addPass(CalledValuePropagationPass());
 
   // Optimize globals to try and fold them into constants.
   MPM.addPass(GlobalOptPass());
@@ -915,6 +926,10 @@ ModulePassManager PassBuilder::buildLTODefaultPipeline(OptimizationLevel Level,
     // opens opportunities for globalopt (and inlining) by substituting function
     // pointers passed as arguments to direct uses of functions.
    MPM.addPass(IPSCCPPass());
+
+   // Attach metadata to indirect call sites indicating the set of functions
+   // they may target at run-time. This should follow IPSCCP.
+   MPM.addPass(CalledValuePropagationPass());
   }
 
   // Now deduce any function attributes based in the current code.

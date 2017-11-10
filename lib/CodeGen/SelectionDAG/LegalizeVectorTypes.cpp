@@ -2941,7 +2941,7 @@ SDValue DAGTypeLegalizer::WidenVecRes_MLOAD(MaskedLoadSDNode *N) {
   SDValue Res = DAG.getMaskedLoad(WidenVT, dl, N->getChain(), N->getBasePtr(),
                                   Mask, Src0, N->getMemoryVT(),
                                   N->getMemOperand(), ExtType,
-	                                N->isExpandingLoad());
+                                        N->isExpandingLoad());
   // Legalize the chain result - switch anything that used the old chain to
   // use the new one.
   ReplaceValueWith(SDValue(N, 1), Res.getValue(1));
@@ -3101,7 +3101,8 @@ SDValue DAGTypeLegalizer::WidenVSELECTAndMask(SDNode *N) {
 
   // If this is a splitted VSELECT that was previously already handled, do
   // nothing.
-  if (Cond->getValueType(0).getScalarSizeInBits() != 1)
+  EVT CondVT = Cond->getValueType(0);
+  if (CondVT.getScalarSizeInBits() != 1)
     return SDValue();
 
   EVT VSelVT = N->getValueType(0);
@@ -3124,6 +3125,14 @@ SDValue DAGTypeLegalizer::WidenVSELECTAndMask(SDNode *N) {
       SetCCOpVT = TLI.getTypeToTransformTo(Ctx, SetCCOpVT);
     EVT SetCCResVT = getSetCCResultType(SetCCOpVT);
     if (SetCCResVT.getScalarSizeInBits() == 1)
+      return SDValue();
+  } else if (CondVT.getScalarType() == MVT::i1) {
+    // If there is support for an i1 vector mask (or only scalar i1 conditions),
+    // don't touch.
+    while (TLI.getTypeAction(Ctx, CondVT) != TargetLowering::TypeLegal)
+      CondVT = TLI.getTypeToTransformTo(Ctx, CondVT);
+
+    if (CondVT.getScalarType() == MVT::i1)
       return SDValue();
   }
 

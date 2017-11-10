@@ -131,7 +131,6 @@ void LTOCodeGenerator::initializeLTOPasses() {
   initializeMemCpyOptLegacyPassPass(R);
   initializeDCELegacyPassPass(R);
   initializeCFGSimplifyPassPass(R);
-  initializeLateCFGSimplifyPassPass(R);
 }
 
 void LTOCodeGenerator::setAsmUndefinedRefs(LTOModule *Mod) {
@@ -218,7 +217,7 @@ bool LTOCodeGenerator::writeMergedModules(StringRef Path) {
   ToolOutputFile Out(Path, EC, sys::fs::F_None);
   if (EC) {
     std::string ErrMsg = "could not open bitcode file for writing: ";
-    ErrMsg += Path;
+    ErrMsg += Path.str() + ": " + EC.message();
     emitError(ErrMsg);
     return false;
   }
@@ -229,7 +228,7 @@ bool LTOCodeGenerator::writeMergedModules(StringRef Path) {
 
   if (Out.os().has_error()) {
     std::string ErrMsg = "could not write bitcode file: ";
-    ErrMsg += Path;
+    ErrMsg += Path.str() + ": " + Out.os().error().message();
     emitError(ErrMsg);
     Out.os().clear_error();
     return false;
@@ -260,7 +259,9 @@ bool LTOCodeGenerator::compileOptimizedToFile(const char **Name) {
   bool genResult = compileOptimized(&objFile.os());
   objFile.os().close();
   if (objFile.os().has_error()) {
-    emitError((Twine("could not write object file: ") + Filename).str());
+    emitError((Twine("could not write object file: ") + Filename + ": " +
+               objFile.os().error().message())
+                  .str());
     objFile.os().clear_error();
     sys::fs::remove(Twine(Filename));
     return false;

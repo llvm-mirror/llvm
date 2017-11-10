@@ -136,20 +136,6 @@ public:
   }
 };
 
-/// \brief Coverage statistics for a single line.
-struct LineCoverageStats {
-  uint64_t ExecutionCount;
-  bool HasMultipleRegions;
-  bool Mapped;
-
-  LineCoverageStats(ArrayRef<const coverage::CoverageSegment *> LineSegments,
-                    const coverage::CoverageSegment *WrappedSegment);
-
-  bool isMapped() const { return Mapped; }
-
-  bool hasMultipleRegions() const { return HasMultipleRegions; }
-};
-
 /// \brief A summary of function's code coverage.
 struct FunctionCoverageSummary {
   std::string Name;

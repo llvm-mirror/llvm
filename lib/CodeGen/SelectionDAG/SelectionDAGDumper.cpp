@@ -401,7 +401,7 @@ static Printable PrintNodeId(const SDNode &Node) {
   });
 }
 
-#ifdef LLVM_ENABLE_DUMP
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 LLVM_DUMP_METHOD void SDNode::dump() const { dump(nullptr); }
 
 LLVM_DUMP_METHOD void SDNode::dump(const SelectionDAG *G) const {
@@ -421,6 +421,36 @@ void SDNode::print_types(raw_ostream &OS, const SelectionDAG *G) const {
 }
 
 void SDNode::print_details(raw_ostream &OS, const SelectionDAG *G) const {
+  if (getFlags().hasNoUnsignedWrap())
+    OS << " nuw";
+
+  if (getFlags().hasNoSignedWrap())
+    OS << " nsw";
+
+  if (getFlags().hasExact())
+    OS << " exact";
+
+  if (getFlags().hasUnsafeAlgebra())
+    OS << " unsafe";
+
+  if (getFlags().hasNoNaNs())
+    OS << " nnan";
+
+  if (getFlags().hasNoInfs())
+    OS << " ninf";
+
+  if (getFlags().hasNoSignedZeros())
+    OS << " nsz";
+
+  if (getFlags().hasAllowReciprocal())
+    OS << " arcp";
+
+  if (getFlags().hasAllowContract())
+    OS << " contract";
+
+  if (getFlags().hasVectorReduction())
+    OS << " vector-reduction";
+
   if (const MachineSDNode *MN = dyn_cast<MachineSDNode>(this)) {
     if (!MN->memoperands_empty()) {
       OS << "<";
@@ -604,7 +634,7 @@ static bool shouldPrintInline(const SDNode &Node) {
   return Node.getNumOperands() == 0;
 }
 
-#ifdef LLVM_ENABLE_DUMP
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 static void DumpNodes(const SDNode *N, unsigned indent, const SelectionDAG *G) {
   for (const SDValue &Op : N->op_values()) {
     if (shouldPrintInline(*Op.getNode()))
@@ -658,7 +688,7 @@ static bool printOperand(raw_ostream &OS, const SelectionDAG *G,
   }
 }
 
-#ifdef LLVM_ENABLE_DUMP
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 using VisitedSDNodeSet = SmallPtrSet<const SDNode *, 32>;
 
 static void DumpNodesr(raw_ostream &OS, const SDNode *N, unsigned indent,
@@ -731,7 +761,7 @@ void SDNode::printrFull(raw_ostream &OS, const SelectionDAG *G) const {
   printrWithDepth(OS, G, 10);
 }
 
-#ifdef LLVM_ENABLE_DUMP
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 LLVM_DUMP_METHOD
 void SDNode::dumprWithDepth(const SelectionDAG *G, unsigned depth) const {
   printrWithDepth(dbgs(), G, depth);

@@ -646,7 +646,7 @@ PreservedAnalyses GVN::run(Function &F, FunctionAnalysisManager &AM) {
   return PA;
 }
 
-#ifdef LLVM_ENABLE_DUMP
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 LLVM_DUMP_METHOD void GVN::dump(DenseMap<uint32_t, Value*>& d) const {
   errs() << "{\n";
   for (DenseMap<uint32_t, Value*>::iterator I = d.begin(),
@@ -1198,8 +1198,7 @@ bool GVN::PerformLoadPRE(LoadInst *LI, AvailValInBlkVect &ValuesPerBlock,
   if (!CanDoPRE) {
     while (!NewInsts.empty()) {
       Instruction *I = NewInsts.pop_back_val();
-      if (MD) MD->removeInstruction(I);
-      I->eraseFromParent();
+      markInstructionForDeletion(I);
     }
     // HINT: Don't revert the edge-splitting as following transformation may
     // also need to split these critical edges.
@@ -2098,17 +2097,26 @@ bool GVN::processBlock(BasicBlock *BB) {
     if (!AtStart)
       --BI;
 
-    for (SmallVectorImpl<Instruction *>::iterator I = InstrsToErase.begin(),
-         E = InstrsToErase.end(); I != E; ++I) {
-      DEBUG(dbgs() << "GVN removed: " << **I << '\n');
-      if (MD) MD->removeInstruction(*I);
-      DEBUG(verifyRemoved(*I));
-      (*I)->eraseFromParent();
+    bool InvalidateImplicitCF = false;
+    const Instruction *MaybeFirstICF = FirstImplicitControlFlowInsts.lookup(BB);
+    for (auto *I : InstrsToErase) {
+      assert(I->getParent() == BB && "Removing instruction from wrong block?");
+      DEBUG(dbgs() << "GVN removed: " << *I << '\n');
+      if (MD) MD->removeInstruction(I);
+      DEBUG(verifyRemoved(I));
+      if (MaybeFirstICF == I) {
+        // We have erased the first ICF in block. The map needs to be updated.
+        InvalidateImplicitCF = true;
+        // Do not keep dangling pointer on the erased instruction.
+        MaybeFirstICF = nullptr;
+      }
+      I->eraseFromParent();
     }
 
-    if (!InstrsToErase.empty())
-      OI->invalidateBlock(BB);
+    OI->invalidateBlock(BB);
     InstrsToErase.clear();
+    if (InvalidateImplicitCF)
+      fillImplicitControlFlowInfo(BB);
 
     if (AtStart)
       BI = BB->begin();
@@ -2302,8 +2310,14 @@ bool GVN::performScalarPRE(Instruction *CurInst) {
   if (MD)
     MD->removeInstruction(CurInst);
   DEBUG(verifyRemoved(CurInst));
-  CurInst->eraseFromParent();
+  bool InvalidateImplicitCF =
+      FirstImplicitControlFlowInsts.lookup(CurInst->getParent()) == CurInst;
+  // FIXME: Intended to be markInstructionForDeletion(CurInst), but it causes
+  // some assertion failures.
   OI->invalidateBlock(CurrentBlock);
+  CurInst->eraseFromParent();
+  if (InvalidateImplicitCF)
+    fillImplicitControlFlowInfo(CurrentBlock);
   ++NumGVNInstr;
 
   return true;
@@ -2370,7 +2384,9 @@ bool GVN::iterateOnFunction(Function &F) {
   // RPOT walks the graph in its constructor and will not be invalidated during
   // processBlock.
   ReversePostOrderTraversal<Function *> RPOT(&F);
-  fillImplicitControlFlowInfo(RPOT);
+
+  for (BasicBlock *BB : RPOT)
+    fillImplicitControlFlowInfo(BB);
   for (BasicBlock *BB : RPOT)
     Changed |= processBlock(BB);
 
@@ -2386,7 +2402,10 @@ void GVN::cleanupGlobalSets() {
 }
 
 void
-GVN::fillImplicitControlFlowInfo(ReversePostOrderTraversal<Function *> &RPOT) {
+GVN::fillImplicitControlFlowInfo(BasicBlock *BB) {
+  // Make sure that all marked instructions are actually deleted by this point,
+  // so that we don't need to care about omitting them.
+  assert(InstrsToErase.empty() && "Filling before removed all marked insns?");
   auto MayNotTransferExecutionToSuccessor = [&](const Instruction *I) {
     // If a block's instruction doesn't always pass the control to its successor
     // instruction, mark the block as having implicit control flow. We use them
@@ -2414,13 +2433,13 @@ GVN::fillImplicitControlFlowInfo(ReversePostOrderTraversal<Function *> &RPOT) {
     }
     return true;
   };
+  FirstImplicitControlFlowInsts.erase(BB);
 
-  for (BasicBlock *BB : RPOT)
-    for (auto &I : *BB)
-      if (MayNotTransferExecutionToSuccessor(&I)) {
-        FirstImplicitControlFlowInsts[BB] = &I;
-        break;
-      }
+  for (auto &I : *BB)
+    if (MayNotTransferExecutionToSuccessor(&I)) {
+      FirstImplicitControlFlowInsts[BB] = &I;
+      break;
+    }
 }
 
 /// Verify that the specified instruction does not occur in our

@@ -339,10 +339,12 @@ enum ProcessorTypes {
   AMD_BTVER1,
   AMD_BTVER2,
   AMDFAM17H,
+  INTEL_KNM,
   // Entries below this are not in libgcc/compiler-rt.
   INTEL_i386,
   INTEL_i486,
   INTEL_PENTIUM,
+  INTEL_PENTIUM_MMX,
   INTEL_PENTIUM_PRO,
   INTEL_PENTIUM_II,
   INTEL_PENTIUM_III,
@@ -377,7 +379,6 @@ enum ProcessorSubtypes {
   INTEL_COREI7_SKYLAKE,
   INTEL_COREI7_SKYLAKE_AVX512,
   // Entries below this are not in libgcc/compiler-rt.
-  INTEL_PENTIUM_MMX,
   INTEL_CORE2_65,
   INTEL_CORE2_45,
   AMDPENTIUM_K6,
@@ -586,42 +587,14 @@ getIntelProcessorTypeAndSubtype(unsigned Family, unsigned Model,
     *Type = INTEL_i386;
     break;
   case 4:
-    switch (Model) {
-    case 0: // Intel486 DX processors
-    case 1: // Intel486 DX processors
-    case 2: // Intel486 SX processors
-    case 3: // Intel487 processors, IntelDX2 OverDrive processors,
-            // IntelDX2 processors
-    case 4: // Intel486 SL processor
-    case 5: // IntelSX2 processors
-    case 7: // Write-Back Enhanced IntelDX2 processors
-    case 8: // IntelDX4 OverDrive processors, IntelDX4 processors
-    default:
-      *Type = INTEL_i486;
-      break;
-    }
+    *Type = INTEL_i486;
     break;
   case 5:
-    switch (Model) {
-    case 1: // Pentium OverDrive processor for Pentium processor (60, 66),
-            // Pentium processors (60, 66)
-    case 2: // Pentium OverDrive processor for Pentium processor (75, 90,
-            // 100, 120, 133), Pentium processors (75, 90, 100, 120, 133,
-            // 150, 166, 200)
-    case 3: // Pentium OverDrive processors for Intel486 processor-based
-            // systems
-      *Type = INTEL_PENTIUM;
-      break;
-    case 4: // Pentium OverDrive processor with MMX technology for Pentium
-            // processor (75, 90, 100, 120, 133), Pentium processor with
-            // MMX technology (166, 200)
-      *Type = INTEL_PENTIUM;
-      *Subtype = INTEL_PENTIUM_MMX;
-      break;
-    default:
-      *Type = INTEL_PENTIUM;
+    if (Features & (1 << FEATURE_MMX)) {
+      *Type = INTEL_PENTIUM_MMX;
       break;
     }
+    *Type = INTEL_PENTIUM;
     break;
   case 6:
     switch (Model) {
@@ -758,6 +731,9 @@ getIntelProcessorTypeAndSubtype(unsigned Family, unsigned Model,
       break; // "goldmont"
     case 0x57:
       *Type = INTEL_KNL; // knl
+      break;
+    case 0x85:
+      *Type = INTEL_KNM; // knm
       break;
 
     default: // Unknown family 6 CPU, try to guess.
@@ -1114,9 +1090,9 @@ StringRef sys::getHostCPUName() {
     case INTEL_i486:
       return "i486";
     case INTEL_PENTIUM:
-      if (Subtype == INTEL_PENTIUM_MMX)
-        return "pentium-mmx";
       return "pentium";
+    case INTEL_PENTIUM_MMX:
+      return "pentium-mmx";
     case INTEL_PENTIUM_PRO:
       return "pentiumpro";
     case INTEL_PENTIUM_II:
@@ -1167,6 +1143,8 @@ StringRef sys::getHostCPUName() {
       return "goldmont";
     case INTEL_KNL:
       return "knl";
+    case INTEL_KNM:
+      return "knm";
     case INTEL_X86_64:
       return "x86-64";
     case INTEL_NOCONA:

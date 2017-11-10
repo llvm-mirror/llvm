@@ -651,7 +651,7 @@ void ScheduleDAGSDNodes::computeOperandLatency(SDNode *Def, SDNode *Use,
 
 void ScheduleDAGSDNodes::dumpNode(const SUnit *SU) const {
   // Cannot completely remove virtual function even in release mode.
-#ifdef LLVM_ENABLE_DUMP
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
   if (!SU->getNode()) {
     dbgs() << "PHYS REG COPY\n";
     return;
@@ -671,7 +671,7 @@ void ScheduleDAGSDNodes::dumpNode(const SUnit *SU) const {
 #endif
 }
 
-#ifdef LLVM_ENABLE_DUMP
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 void ScheduleDAGSDNodes::dumpSchedule() const {
   for (unsigned i = 0, e = Sequence.size(); i != e; i++) {
     if (SUnit *SU = Sequence[i])
@@ -709,18 +709,17 @@ ProcessSDDbgValues(SDNode *N, SelectionDAG *DAG, InstrEmitter &Emitter,
   // source order number as N.
   MachineBasicBlock *BB = Emitter.getBlock();
   MachineBasicBlock::iterator InsertPos = Emitter.getInsertPos();
-  ArrayRef<SDDbgValue*> DVs = DAG->GetDbgValues(N);
-  for (unsigned i = 0, e = DVs.size(); i != e; ++i) {
-    if (DVs[i]->isInvalidated())
+  for (auto DV : DAG->GetDbgValues(N)) {
+    if (DV->isInvalidated())
       continue;
-    unsigned DVOrder = DVs[i]->getOrder();
+    unsigned DVOrder = DV->getOrder();
     if (!Order || DVOrder == Order) {
-      MachineInstr *DbgMI = Emitter.EmitDbgValue(DVs[i], VRBaseMap);
+      MachineInstr *DbgMI = Emitter.EmitDbgValue(DV, VRBaseMap);
       if (DbgMI) {
         Orders.push_back({DVOrder, DbgMI});
         BB->insert(InsertPos, DbgMI);
       }
-      DVs[i]->setIsInvalidated();
+      DV->setIsInvalidated();
     }
   }
 }

@@ -827,6 +827,17 @@ bool AMDGPUTargetLowering::isZExtFree(SDValue Val, EVT VT2) const {
   return isZExtFree(Val.getValueType(), VT2);
 }
 
+// v_mad_mix* support a conversion from f16 to f32.
+//
+// There is only one special case when denormals are enabled we don't currently,
+// where this is OK to use.
+bool AMDGPUTargetLowering::isFPExtFoldable(unsigned Opcode,
+                                           EVT DestVT, EVT SrcVT) const {
+  return Opcode == ISD::FMAD && Subtarget->hasMadMixInsts() &&
+         DestVT.getScalarType() == MVT::f32 && !Subtarget->hasFP32Denormals() &&
+         SrcVT.getScalarType() == MVT::f16;
+}
+
 bool AMDGPUTargetLowering::isNarrowingProfitable(EVT SrcVT, EVT DestVT) const {
   // There aren't really 64-bit registers, but pairs of 32-bit ones and only a
   // limited number of native 64-bit operations. Shrinking an operation to fit
@@ -2197,9 +2208,8 @@ SDValue AMDGPUTargetLowering::LowerCTLZ_CTTZ(SDValue Op, SelectionDAG &DAG) cons
   EVT SetCCVT = getSetCCResultType(DAG.getDataLayout(),
                                    *DAG.getContext(), MVT::i32);
 
-  SDValue ZeroOrOne = isCtlzOpc(Op.getOpcode()) ? Zero : One;
   SDValue HiOrLo = isCtlzOpc(Op.getOpcode()) ? Hi : Lo;
-  SDValue Hi0orLo0 = DAG.getSetCC(SL, SetCCVT, HiOrLo, ZeroOrOne, ISD::SETEQ);
+  SDValue Hi0orLo0 = DAG.getSetCC(SL, SetCCVT, HiOrLo, Zero, ISD::SETEQ);
 
   SDValue OprLo = DAG.getNode(ISDOpc, SL, MVT::i32, Lo);
   SDValue OprHi = DAG.getNode(ISDOpc, SL, MVT::i32, Hi);
@@ -2222,7 +2232,7 @@ SDValue AMDGPUTargetLowering::LowerCTLZ_CTTZ(SDValue Op, SelectionDAG &DAG) cons
     // FIXME: DAG combines turn what should be an s_and_b64 into a v_or_b32,
     // which we probably don't want.
     SDValue LoOrHi = isCtlzOpc(Op.getOpcode()) ? Lo : Hi;
-    SDValue Lo0OrHi0 = DAG.getSetCC(SL, SetCCVT, LoOrHi, ZeroOrOne, ISD::SETEQ);
+    SDValue Lo0OrHi0 = DAG.getSetCC(SL, SetCCVT, LoOrHi, Zero, ISD::SETEQ);
     SDValue SrcIsZero = DAG.getNode(ISD::AND, SL, SetCCVT, Lo0OrHi0, Hi0orLo0);
 
     // TODO: If i64 setcc is half rate, it can result in 1 fewer instruction

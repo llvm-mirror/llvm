@@ -83,12 +83,6 @@ const unsigned MaxDepth = 6;
 static cl::opt<unsigned> DomConditionsMaxUses("dom-conditions-max-uses",
                                               cl::Hidden, cl::init(20));
 
-// This optimization is known to cause performance regressions is some cases,
-// keep it under a temporary flag for now.
-static cl::opt<bool>
-DontImproveNonNegativePhiBits("dont-improve-non-negative-phi-bits",
-                              cl::Hidden, cl::init(true));
-
 /// Returns the bitwidth of the given scalar or pointer type. For vector types,
 /// returns the element type's bitwidth.
 static unsigned getBitWidth(Type *Ty, const DataLayout &DL) {
@@ -789,14 +783,14 @@ static void computeKnownBitsFromAssume(const Value *V, KnownBits &Known,
   }
 }
 
-// Compute known bits from a shift operator, including those with a
-// non-constant shift amount. Known is the outputs of this function. Known2 is a
-// pre-allocated temporary with the/ same bit width as Known. KZF and KOF are
-// operator-specific functors that, given the known-zero or known-one bits
-// respectively, and a shift amount, compute the implied known-zero or known-one
-// bits of the shift operator's result respectively for that shift amount. The
-// results from calling KZF and KOF are conservatively combined for all
-// permitted shift amounts.
+/// Compute known bits from a shift operator, including those with a
+/// non-constant shift amount. Known is the output of this function. Known2 is a
+/// pre-allocated temporary with the same bit width as Known. KZF and KOF are
+/// operator-specific functors that, given the known-zero or known-one bits
+/// respectively, and a shift amount, compute the implied known-zero or
+/// known-one bits of the shift operator's result respectively for that shift
+/// amount. The results from calling KZF and KOF are conservatively combined for
+/// all permitted shift amounts.
 static void computeKnownBitsFromShiftOperator(
     const Operator *I, KnownBits &Known, KnownBits &Known2,
     unsigned Depth, const Query &Q,
@@ -847,8 +841,7 @@ static void computeKnownBitsFromShiftOperator(
   // Early exit if we can't constrain any well-defined shift amount.
   if (!(ShiftAmtKZ & (PowerOf2Ceil(BitWidth) - 1)) &&
       !(ShiftAmtKO & (PowerOf2Ceil(BitWidth) - 1))) {
-    ShifterOperandIsNonZero =
-        isKnownNonZero(I->getOperand(1), Depth + 1, Q);
+    ShifterOperandIsNonZero = isKnownNonZero(I->getOperand(1), Depth + 1, Q);
     if (!*ShifterOperandIsNonZero)
       return;
   }
@@ -1095,7 +1088,7 @@ static void computeKnownBitsFromOperator(const Operator *I, KnownBits &Known,
     break;
   }
   case Instruction::LShr: {
-    // (ushr X, C1) & C2 == 0   iff  (-1 >> C1) & C2 == 0
+    // (lshr X, C1) & C2 == 0   iff  (-1 >> C1) & C2 == 0
     auto KZF = [](const APInt &KnownZero, unsigned ShiftAmt) {
       APInt KZResult = KnownZero.lshr(ShiftAmt);
       // High bits known zero.
@@ -1289,9 +1282,6 @@ static void computeKnownBitsFromOperator(const Operator *I, KnownBits &Known,
 
           Known.Zero.setLowBits(std::min(Known2.countMinTrailingZeros(),
                                          Known3.countMinTrailingZeros()));
-
-          if (DontImproveNonNegativePhiBits)
-            break;
 
           auto *OverflowOp = dyn_cast<OverflowingBinaryOperator>(LU);
           if (OverflowOp && OverflowOp->hasNoSignedWrap()) {
@@ -1517,9 +1507,8 @@ void computeKnownBits(const Value *V, KnownBits &Known, unsigned Depth,
     // We know that CDS must be a vector of integers. Take the intersection of
     // each element.
     Known.Zero.setAllBits(); Known.One.setAllBits();
-    APInt Elt(BitWidth, 0);
     for (unsigned i = 0, e = CDS->getNumElements(); i != e; ++i) {
-      Elt = CDS->getElementAsInteger(i);
+      APInt Elt = CDS->getElementAsAPInt(i);
       Known.Zero &= ~Elt;
       Known.One &= Elt;
     }
@@ -1530,7 +1519,6 @@ void computeKnownBits(const Value *V, KnownBits &Known, unsigned Depth,
     // We know that CV must be a vector of integers. Take the intersection of
     // each element.
     Known.Zero.setAllBits(); Known.One.setAllBits();
-    APInt Elt(BitWidth, 0);
     for (unsigned i = 0, e = CV->getNumOperands(); i != e; ++i) {
       Constant *Element = CV->getAggregateElement(i);
       auto *ElementCI = dyn_cast_or_null<ConstantInt>(Element);
@@ -1538,7 +1526,7 @@ void computeKnownBits(const Value *V, KnownBits &Known, unsigned Depth,
         Known.resetAll();
         return;
       }
-      Elt = ElementCI->getValue();
+      const APInt &Elt = ElementCI->getValue();
       Known.Zero &= ~Elt;
       Known.One &= Elt;
     }
@@ -2109,11 +2097,7 @@ static unsigned computeNumSignBitsVectorConstant(const Value *V,
     if (!Elt)
       return 0;
 
-    // If the sign bit is 1, flip the bits, so we always count leading zeros.
-    APInt EltVal = Elt->getValue();
-    if (EltVal.isNegative())
-      EltVal = ~EltVal;
-    MinSignBits = std::min(MinSignBits, EltVal.countLeadingZeros());
+    MinSignBits = std::min(MinSignBits, Elt->getValue().getNumSignBits());
   }
 
   return MinSignBits;
@@ -4079,21 +4063,19 @@ static SelectPatternResult matchFastFloatClamp(CmpInst::Predicate Pred,
   return {SPF_UNKNOWN, SPNB_NA, false};
 }
 
-/// Match non-obvious integer minimum and maximum sequences.
-static SelectPatternResult matchMinMax(CmpInst::Predicate Pred,
-                                       Value *CmpLHS, Value *CmpRHS,
-                                       Value *TrueVal, Value *FalseVal,
-                                       Value *&LHS, Value *&RHS) {
-  // Assume success. If there's no match, callers should not use these anyway.
-  LHS = TrueVal;
-  RHS = FalseVal;
-
-  // Recognize variations of:
-  // CLAMP(v,l,h) ==> ((v) < (l) ? (l) : ((v) > (h) ? (h) : (v)))
+/// Recognize variations of:
+///   CLAMP(v,l,h) ==> ((v) < (l) ? (l) : ((v) > (h) ? (h) : (v)))
+static SelectPatternResult matchClamp(CmpInst::Predicate Pred,
+                                      Value *CmpLHS, Value *CmpRHS,
+                                      Value *TrueVal, Value *FalseVal) {
+  // Swap the select operands and predicate to match the patterns below.
+  if (CmpRHS != TrueVal) {
+    Pred = ICmpInst::getSwappedPredicate(Pred);
+    std::swap(TrueVal, FalseVal);
+  }
   const APInt *C1;
   if (CmpRHS == TrueVal && match(CmpRHS, m_APInt(C1))) {
     const APInt *C2;
-
     // (X <s C1) ? C1 : SMIN(X, C2) ==> SMAX(SMIN(X, C2), C1)
     if (match(FalseVal, m_SMin(m_Specific(CmpLHS), m_APInt(C2))) &&
         C1->slt(*C2) && Pred == CmpInst::ICMP_SLT)
@@ -4114,6 +4096,21 @@ static SelectPatternResult matchMinMax(CmpInst::Predicate Pred,
         C1->ugt(*C2) && Pred == CmpInst::ICMP_UGT)
       return {SPF_UMIN, SPNB_NA, false};
   }
+  return {SPF_UNKNOWN, SPNB_NA, false};
+}
+
+/// Match non-obvious integer minimum and maximum sequences.
+static SelectPatternResult matchMinMax(CmpInst::Predicate Pred,
+                                       Value *CmpLHS, Value *CmpRHS,
+                                       Value *TrueVal, Value *FalseVal,
+                                       Value *&LHS, Value *&RHS) {
+  // Assume success. If there's no match, callers should not use these anyway.
+  LHS = TrueVal;
+  RHS = FalseVal;
+
+  SelectPatternResult SPR = matchClamp(Pred, CmpLHS, CmpRHS, TrueVal, FalseVal);
+  if (SPR.Flavor != SelectPatternFlavor::SPF_UNKNOWN)
+    return SPR;
 
   if (Pred != CmpInst::ICMP_SGT && Pred != CmpInst::ICMP_SLT)
     return {SPF_UNKNOWN, SPNB_NA, false};
@@ -4132,6 +4129,7 @@ static SelectPatternResult matchMinMax(CmpInst::Predicate Pred,
       match(TrueVal, m_NSWSub(m_Specific(CmpLHS), m_Specific(CmpRHS))))
     return {Pred == CmpInst::ICMP_SGT ? SPF_SMAX : SPF_SMIN, SPNB_NA, false};
 
+  const APInt *C1;
   if (!match(CmpRHS, m_APInt(C1)))
     return {SPF_UNKNOWN, SPNB_NA, false};
 
@@ -4300,6 +4298,20 @@ static SelectPatternResult matchSelectPattern(CmpInst::Predicate Pred,
   return matchFastFloatClamp(Pred, CmpLHS, CmpRHS, TrueVal, FalseVal, LHS, RHS);
 }
 
+/// Helps to match a select pattern in case of a type mismatch.
+///
+/// The function processes the case when type of true and false values of a
+/// select instruction differs from type of the cmp instruction operands because
+/// of a cast instructon. The function checks if it is legal to move the cast
+/// operation after "select". If yes, it returns the new second value of
+/// "select" (with the assumption that cast is moved):
+/// 1. As operand of cast instruction when both values of "select" are same cast
+/// instructions.
+/// 2. As restored constant (by applying reverse cast operation) when the first
+/// value of the "select" is a cast operation and the second value is a
+/// constant.
+/// NOTE: We return only the new second value because the first value could be
+/// accessed as operand of cast instruction.
 static Value *lookThroughCast(CmpInst *CmpI, Value *V1, Value *V2,
                               Instruction::CastOps *CastOp) {
   auto *Cast1 = dyn_cast<CastInst>(V1);
@@ -4330,7 +4342,34 @@ static Value *lookThroughCast(CmpInst *CmpI, Value *V1, Value *V2,
       CastedTo = ConstantExpr::getTrunc(C, SrcTy, true);
     break;
   case Instruction::Trunc:
-    CastedTo = ConstantExpr::getIntegerCast(C, SrcTy, CmpI->isSigned());
+    Constant *CmpConst;
+    if (match(CmpI->getOperand(1), m_Constant(CmpConst)) &&
+        CmpConst->getType() == SrcTy) {
+      // Here we have the following case:
+      //
+      //   %cond = cmp iN %x, CmpConst
+      //   %tr = trunc iN %x to iK
+      //   %narrowsel = select i1 %cond, iK %t, iK C
+      //
+      // We can always move trunc after select operation:
+      //
+      //   %cond = cmp iN %x, CmpConst
+      //   %widesel = select i1 %cond, iN %x, iN CmpConst
+      //   %tr = trunc iN %widesel to iK
+      //
+      // Note that C could be extended in any way because we don't care about
+      // upper bits after truncation. It can't be abs pattern, because it would
+      // look like:
+      //
+      //   select i1 %cond, x, -x.
+      //
+      // So only min/max pattern could be matched. Such match requires widened C
+      // == CmpConst. That is why set widened C = CmpConst, condition trunc
+      // CmpConst == C is checked below.
+      CastedTo = CmpConst;
+    } else {
+      CastedTo = ConstantExpr::getIntegerCast(C, SrcTy, CmpI->isSigned());
+    }
     break;
   case Instruction::FPTrunc:
     CastedTo = ConstantExpr::getFPExtend(C, SrcTy, true);

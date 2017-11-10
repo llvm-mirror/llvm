@@ -1743,6 +1743,7 @@ IEEEFloat::opStatus IEEEFloat::remainder(const IEEEFloat &rhs) {
 IEEEFloat::opStatus IEEEFloat::mod(const IEEEFloat &rhs) {
   opStatus fs;
   fs = modSpecials(rhs);
+  unsigned int origSign = sign;
 
   while (isFiniteNonZero() && rhs.isFiniteNonZero() &&
          compareAbsoluteValue(rhs) != cmpLessThan) {
@@ -1754,6 +1755,8 @@ IEEEFloat::opStatus IEEEFloat::mod(const IEEEFloat &rhs) {
     fs = subtract(V, rmNearestTiesToEven);
     assert(fs==opOK);
   }
+  if (isZero())
+    sign = origSign; // fmod requires this
   return fs;
 }
 
@@ -4486,7 +4489,7 @@ void APFloat::print(raw_ostream &OS) const {
   OS << Buffer << "\n";
 }
 
-#ifdef LLVM_ENABLE_DUMP
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 LLVM_DUMP_METHOD void APFloat::dump() const { print(dbgs()); }
 #endif
 

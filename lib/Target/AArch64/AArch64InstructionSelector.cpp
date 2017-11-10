@@ -20,6 +20,7 @@
 #include "AArch64TargetMachine.h"
 #include "MCTargetDesc/AArch64AddressingModes.h"
 #include "llvm/CodeGen/GlobalISel/InstructionSelector.h"
+#include "llvm/CodeGen/GlobalISel/InstructionSelectorImpl.h"
 #include "llvm/CodeGen/GlobalISel/Utils.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -32,8 +33,6 @@
 #include "llvm/Support/raw_ostream.h"
 
 #define DEBUG_TYPE "aarch64-isel"
-
-#include "llvm/CodeGen/GlobalISel/InstructionSelectorImpl.h"
 
 using namespace llvm;
 
@@ -50,6 +49,7 @@ public:
                              const AArch64RegisterBankInfo &RBI);
 
   bool select(MachineInstr &I) const override;
+  static const char *getName() { return DEBUG_TYPE; }
 
 private:
   /// tblgen-erated 'select' implementation, used as the initial selector for
@@ -64,7 +64,33 @@ private:
   bool selectCompareBranch(MachineInstr &I, MachineFunction &MF,
                            MachineRegisterInfo &MRI) const;
 
-  ComplexRendererFn selectArithImmed(MachineOperand &Root) const;
+  ComplexRendererFns selectArithImmed(MachineOperand &Root) const;
+
+  ComplexRendererFns selectAddrModeUnscaled(MachineOperand &Root,
+                                            unsigned Size) const;
+
+  ComplexRendererFns selectAddrModeUnscaled8(MachineOperand &Root) const {
+    return selectAddrModeUnscaled(Root, 1);
+  }
+  ComplexRendererFns selectAddrModeUnscaled16(MachineOperand &Root) const {
+    return selectAddrModeUnscaled(Root, 2);
+  }
+  ComplexRendererFns selectAddrModeUnscaled32(MachineOperand &Root) const {
+    return selectAddrModeUnscaled(Root, 4);
+  }
+  ComplexRendererFns selectAddrModeUnscaled64(MachineOperand &Root) const {
+    return selectAddrModeUnscaled(Root, 8);
+  }
+  ComplexRendererFns selectAddrModeUnscaled128(MachineOperand &Root) const {
+    return selectAddrModeUnscaled(Root, 16);
+  }
+
+  ComplexRendererFns selectAddrModeIndexed(MachineOperand &Root,
+                                           unsigned Size) const;
+  template <int Width>
+  ComplexRendererFns selectAddrModeIndexed(MachineOperand &Root) const {
+    return selectAddrModeIndexed(Root, Width / 8);
+  }
 
   const AArch64TargetMachine &TM;
   const AArch64Subtarget &STI;
@@ -705,6 +731,11 @@ bool AArch64InstructionSelector::select(MachineInstr &I) const {
                      << " constant on bank: " << RB << ", expected: FPR\n");
         return false;
       }
+
+      // The case when we have 0.0 is covered by tablegen. Reject it here so we
+      // can be sure tablegen works correctly and isn't rescued by this code.
+      if (I.getOperand(1).getFPImm()->getValueAPF().isExactlyValue(0.0))
+        return false;
     } else {
       // s32 and s64 are covered by tablegen.
       if (Ty != p0) {
@@ -1342,7 +1373,7 @@ bool AArch64InstructionSelector::select(MachineInstr &I) const {
 /// SelectArithImmed - Select an immediate value that can be represented as
 /// a 12-bit value shifted left by either 0 or 12.  If so, return true with
 /// Val set to the 12-bit value and Shift set to the shifter operand.
-InstructionSelector::ComplexRendererFn
+InstructionSelector::ComplexRendererFns
 AArch64InstructionSelector::selectArithImmed(MachineOperand &Root) const {
   MachineInstr &MI = *Root.getParent();
   MachineBasicBlock &MBB = *MI.getParent();
@@ -1362,13 +1393,13 @@ AArch64InstructionSelector::selectArithImmed(MachineOperand &Root) const {
   else if (Root.isReg()) {
     MachineInstr *Def = MRI.getVRegDef(Root.getReg());
     if (Def->getOpcode() != TargetOpcode::G_CONSTANT)
-      return nullptr;
+      return None;
     MachineOperand &Op1 = Def->getOperand(1);
     if (!Op1.isCImm() || Op1.getCImm()->getBitWidth() > 64)
-      return nullptr;
+      return None;
     Immed = Op1.getCImm()->getZExtValue();
   } else
-    return nullptr;
+    return None;
 
   unsigned ShiftAmt;
 
@@ -1378,10 +1409,116 @@ AArch64InstructionSelector::selectArithImmed(MachineOperand &Root) const {
     ShiftAmt = 12;
     Immed = Immed >> 12;
   } else
-    return nullptr;
+    return None;
 
   unsigned ShVal = AArch64_AM::getShifterImm(AArch64_AM::LSL, ShiftAmt);
-  return [=](MachineInstrBuilder &MIB) { MIB.addImm(Immed).addImm(ShVal); };
+  return {{
+      [=](MachineInstrBuilder &MIB) { MIB.addImm(Immed); },
+      [=](MachineInstrBuilder &MIB) { MIB.addImm(ShVal); },
+  }};
+}
+
+/// Select a "register plus unscaled signed 9-bit immediate" address.  This
+/// should only match when there is an offset that is not valid for a scaled
+/// immediate addressing mode.  The "Size" argument is the size in bytes of the
+/// memory reference, which is needed here to know what is valid for a scaled
+/// immediate.
+InstructionSelector::ComplexRendererFns
+AArch64InstructionSelector::selectAddrModeUnscaled(MachineOperand &Root,
+                                                   unsigned Size) const {
+  MachineRegisterInfo &MRI =
+      Root.getParent()->getParent()->getParent()->getRegInfo();
+
+  if (!Root.isReg())
+    return None;
+
+  if (!isBaseWithConstantOffset(Root, MRI))
+    return None;
+
+  MachineInstr *RootDef = MRI.getVRegDef(Root.getReg());
+  if (!RootDef)
+    return None;
+
+  MachineOperand &OffImm = RootDef->getOperand(2);
+  if (!OffImm.isReg())
+    return None;
+  MachineInstr *RHS = MRI.getVRegDef(OffImm.getReg());
+  if (!RHS || RHS->getOpcode() != TargetOpcode::G_CONSTANT)
+    return None;
+  int64_t RHSC;
+  MachineOperand &RHSOp1 = RHS->getOperand(1);
+  if (!RHSOp1.isCImm() || RHSOp1.getCImm()->getBitWidth() > 64)
+    return None;
+  RHSC = RHSOp1.getCImm()->getSExtValue();
+
+  // If the offset is valid as a scaled immediate, don't match here.
+  if ((RHSC & (Size - 1)) == 0 && RHSC >= 0 && RHSC < (0x1000 << Log2_32(Size)))
+    return None;
+  if (RHSC >= -256 && RHSC < 256) {
+    MachineOperand &Base = RootDef->getOperand(1);
+    return {{
+        [=](MachineInstrBuilder &MIB) { MIB.add(Base); },
+        [=](MachineInstrBuilder &MIB) { MIB.addImm(RHSC); },
+    }};
+  }
+  return None;
+}
+
+/// Select a "register plus scaled unsigned 12-bit immediate" address.  The
+/// "Size" argument is the size in bytes of the memory reference, which
+/// determines the scale.
+InstructionSelector::ComplexRendererFns
+AArch64InstructionSelector::selectAddrModeIndexed(MachineOperand &Root,
+                                                  unsigned Size) const {
+  MachineRegisterInfo &MRI =
+      Root.getParent()->getParent()->getParent()->getRegInfo();
+
+  if (!Root.isReg())
+    return None;
+
+  MachineInstr *RootDef = MRI.getVRegDef(Root.getReg());
+  if (!RootDef)
+    return None;
+
+  if (RootDef->getOpcode() == TargetOpcode::G_FRAME_INDEX) {
+    return {{
+        [=](MachineInstrBuilder &MIB) { MIB.add(RootDef->getOperand(1)); },
+        [=](MachineInstrBuilder &MIB) { MIB.addImm(0); },
+    }};
+  }
+
+  if (isBaseWithConstantOffset(Root, MRI)) {
+    MachineOperand &LHS = RootDef->getOperand(1);
+    MachineOperand &RHS = RootDef->getOperand(2);
+    MachineInstr *LHSDef = MRI.getVRegDef(LHS.getReg());
+    MachineInstr *RHSDef = MRI.getVRegDef(RHS.getReg());
+    if (LHSDef && RHSDef) {
+      int64_t RHSC = (int64_t)RHSDef->getOperand(1).getCImm()->getZExtValue();
+      unsigned Scale = Log2_32(Size);
+      if ((RHSC & (Size - 1)) == 0 && RHSC >= 0 && RHSC < (0x1000 << Scale)) {
+        if (LHSDef->getOpcode() == TargetOpcode::G_FRAME_INDEX)
+          return {{
+              [=](MachineInstrBuilder &MIB) { MIB.add(LHSDef->getOperand(1)); },
+              [=](MachineInstrBuilder &MIB) { MIB.addImm(RHSC >> Scale); },
+          }};
+
+        return {{
+            [=](MachineInstrBuilder &MIB) { MIB.add(LHS); },
+            [=](MachineInstrBuilder &MIB) { MIB.addImm(RHSC >> Scale); },
+        }};
+      }
+    }
+  }
+
+  // Before falling back to our general case, check if the unscaled
+  // instructions can handle this. If so, that's preferable.
+  if (selectAddrModeUnscaled(Root, Size).hasValue())
+    return None;
+
+  return {{
+      [=](MachineInstrBuilder &MIB) { MIB.add(Root); },
+      [=](MachineInstrBuilder &MIB) { MIB.addImm(0); },
+  }};
 }
 
 namespace llvm {
