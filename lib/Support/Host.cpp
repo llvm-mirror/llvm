@@ -351,12 +351,14 @@ enum ProcessorTypes {
   INTEL_PENTIUM_IV,
   INTEL_PENTIUM_M,
   INTEL_CORE_DUO,
-  INTEL_X86_64,
   INTEL_NOCONA,
   INTEL_PRESCOTT,
   AMD_i486,
   AMDPENTIUM,
-  AMDATHLON,
+  AMD_ATHLON,
+  AMD_ATHLON_XP,
+  AMD_K8,
+  AMD_K8SSE3,
   INTEL_GOLDMONT,
   CPU_TYPE_MAX
 };
@@ -385,10 +387,6 @@ enum ProcessorSubtypes {
   AMDPENTIUM_K62,
   AMDPENTIUM_K63,
   AMDPENTIUM_GEODE,
-  AMDATHLON_CLASSIC,
-  AMDATHLON_XP,
-  AMDATHLON_K8,
-  AMDATHLON_K8SSE3,
   CPU_SUBTYPE_MAX
 };
 
@@ -794,8 +792,13 @@ getIntelProcessorTypeAndSubtype(unsigned Family, unsigned Model,
         break;
       }
       if (Features2 & (1 << (FEATURE_EM64T - 32))) {
-        *Type = INTEL_X86_64;
-        break; // x86-64
+        *Type = INTEL_CORE2; // "core2"
+        *Subtype = INTEL_CORE2_65;
+        break;
+      }
+      if (Features & (1 << FEATURE_SSE3)) {
+        *Type = INTEL_CORE_DUO;
+        break;
       }
       if (Features & (1 << FEATURE_SSE2)) {
         *Type = INTEL_PENTIUM_M;
@@ -814,40 +817,15 @@ getIntelProcessorTypeAndSubtype(unsigned Family, unsigned Model,
     }
     break;
   case 15: {
-    switch (Model) {
-    case 0: // Pentium 4 processor, Intel Xeon processor. All processors are
-            // model 00h and manufactured using the 0.18 micron process.
-    case 1: // Pentium 4 processor, Intel Xeon processor, Intel Xeon
-            // processor MP, and Intel Celeron processor. All processors are
-            // model 01h and manufactured using the 0.18 micron process.
-    case 2: // Pentium 4 processor, Mobile Intel Pentium 4 processor - M,
-            // Intel Xeon processor, Intel Xeon processor MP, Intel Celeron
-            // processor, and Mobile Intel Celeron processor. All processors
-            // are model 02h and manufactured using the 0.13 micron process.
-      *Type = ((Features2 & (1 << (FEATURE_EM64T - 32))) ? INTEL_X86_64
-                                                         : INTEL_PENTIUM_IV);
-      break;
-
-    case 3: // Pentium 4 processor, Intel Xeon processor, Intel Celeron D
-            // processor. All processors are model 03h and manufactured using
-            // the 90 nm process.
-    case 4: // Pentium 4 processor, Pentium 4 processor Extreme Edition,
-            // Pentium D processor, Intel Xeon processor, Intel Xeon
-            // processor MP, Intel Celeron D processor. All processors are
-            // model 04h and manufactured using the 90 nm process.
-    case 6: // Pentium 4 processor, Pentium D processor, Pentium processor
-            // Extreme Edition, Intel Xeon processor, Intel Xeon processor
-            // MP, Intel Celeron D processor. All processors are model 06h
-            // and manufactured using the 65 nm process.
-      *Type = ((Features2 & (1 << (FEATURE_EM64T - 32))) ? INTEL_NOCONA
-                                                         : INTEL_PRESCOTT);
-      break;
-
-    default:
-      *Type = ((Features2 & (1 << (FEATURE_EM64T - 32))) ? INTEL_X86_64
-                                                         : INTEL_PENTIUM_IV);
+    if (Features2 & (1 << (FEATURE_EM64T - 32))) {
+      *Type = INTEL_NOCONA;
       break;
     }
+    if (Features & (1 << FEATURE_SSE3)) {
+      *Type = INTEL_PRESCOTT;
+      break;
+    }
+    *Type = INTEL_PENTIUM_IV;
     break;
   }
   default:
@@ -885,20 +863,18 @@ static void getAMDProcessorTypeAndSubtype(unsigned Family, unsigned Model,
     }
     break;
   case 6:
-    *Type = AMDATHLON;
     if (Features & (1 << FEATURE_SSE)) {
-      *Subtype = AMDATHLON_XP;
+      *Type = AMD_ATHLON_XP;
       break; // "athlon-xp"
     }
-    *Subtype = AMDATHLON_CLASSIC;
+    *Type = AMD_ATHLON;
     break; // "athlon"
   case 15:
-    *Type = AMDATHLON;
     if (Features & (1 << FEATURE_SSE3)) {
-      *Subtype = AMDATHLON_K8SSE3;
+      *Type = AMD_K8SSE3;
       break; // "k8-sse3"
     }
-    *Subtype = AMDATHLON_K8;
+    *Type = AMD_K8;
     break; // "k8"
   case 16:
     *Type = AMDFAM10H; // "amdfam10"
@@ -1078,8 +1054,8 @@ StringRef sys::getHostCPUName() {
   detectX86FamilyModel(EAX, &Family, &Model);
   getAvailableFeatures(ECX, EDX, MaxLeaf, &Features, &Features2);
 
-  unsigned Type;
-  unsigned Subtype;
+  unsigned Type = 0;
+  unsigned Subtype = 0;
 
   if (Vendor == SIG_INTEL) {
     getIntelProcessorTypeAndSubtype(Family, Model, Brand_id, Features,
@@ -1145,8 +1121,6 @@ StringRef sys::getHostCPUName() {
       return "knl";
     case INTEL_KNM:
       return "knm";
-    case INTEL_X86_64:
-      return "x86-64";
     case INTEL_NOCONA:
       return "nocona";
     case INTEL_PRESCOTT:
@@ -1172,19 +1146,14 @@ StringRef sys::getHostCPUName() {
       default:
         return "pentium";
       }
-    case AMDATHLON:
-      switch (Subtype) {
-      case AMDATHLON_CLASSIC:
-        return "athlon";
-      case AMDATHLON_XP:
-        return "athlon-xp";
-      case AMDATHLON_K8:
-        return "k8";
-      case AMDATHLON_K8SSE3:
-        return "k8-sse3";
-      default:
-        llvm_unreachable("Unexpected subtype!");
-      }
+    case AMD_ATHLON:
+      return "athlon";
+    case AMD_ATHLON_XP:
+      return "athlon-xp";
+    case AMD_K8:
+      return "k8";
+    case AMD_K8SSE3:
+      return "k8-sse3";
     case AMDFAM10H:
       return "amdfam10";
     case AMD_BTVER1:

@@ -955,6 +955,8 @@ static uint64_t getEncodedGVSummaryFlags(GlobalValueSummary::GVFlags Flags) {
 
   RawFlags |= Flags.NotEligibleToImport; // bool
   RawFlags |= (Flags.Live << 1);
+  RawFlags |= (Flags.DSOLocal << 2);
+
   // Linkage don't need to be remapped at that time for the summary. Any future
   // change to the getEncodedLinkage() function will need to be taken into
   // account here as well.
@@ -1319,8 +1321,8 @@ static uint64_t getOptimizationFlags(const Value *V) {
     if (PEO->isExact())
       Flags |= 1 << bitc::PEO_EXACT;
   } else if (const auto *FPMO = dyn_cast<FPMathOperator>(V)) {
-    if (FPMO->hasUnsafeAlgebra())
-      Flags |= FastMathFlags::UnsafeAlgebra;
+    if (FPMO->hasAllowReassoc())
+      Flags |= FastMathFlags::AllowReassoc;
     if (FPMO->hasNoNaNs())
       Flags |= FastMathFlags::NoNaNs;
     if (FPMO->hasNoInfs())
@@ -1331,6 +1333,8 @@ static uint64_t getOptimizationFlags(const Value *V) {
       Flags |= FastMathFlags::AllowReciprocal;
     if (FPMO->hasAllowContract())
       Flags |= FastMathFlags::AllowContract;
+    if (FPMO->hasApproxFunc())
+      Flags |= FastMathFlags::ApproxFunc;
   }
 
   return Flags;
