@@ -12,16 +12,18 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/CodeGen/MIRPrinter.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/None.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallBitVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/CodeGen/GlobalISel/RegisterBank.h"
+#include "llvm/CodeGen/MIRYamlMapping.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -31,19 +33,18 @@
 #include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/CodeGen/MIRPrinter.h"
-#include "llvm/CodeGen/MIRYamlMapping.h"
 #include "llvm/CodeGen/PseudoSourceValue.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalValue.h"
+#include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
-#include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/ModuleSlotTracker.h"
 #include "llvm/IR/Value.h"
@@ -57,9 +58,8 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/LowLevelTypeImpl.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/YAMLTraits.h"
-#include "llvm/Target/TargetInstrInfo.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetIntrinsicInfo.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetRegisterInfo.h"
@@ -162,8 +162,8 @@ public:
   void printStackObjectReference(int FrameIndex);
   void printOffset(int64_t Offset);
   void printTargetFlags(const MachineOperand &Op);
-  void print(const MachineOperand &Op, const TargetRegisterInfo *TRI,
-             unsigned I, bool ShouldPrintRegisterTies,
+  void print(const MachineInstr &MI, unsigned OpIdx,
+             const TargetRegisterInfo *TRI, bool ShouldPrintRegisterTies,
              LLT TypeToPrint, bool IsDef = false);
   void print(const LLVMContext &Context, const TargetInstrInfo &TII,
              const MachineMemOperand &Op);
@@ -734,7 +734,7 @@ void MIPrinter::print(const MachineInstr &MI) {
        ++I) {
     if (I)
       OS << ", ";
-    print(MI.getOperand(I), TRI, I, ShouldPrintRegisterTies,
+    print(MI, I, TRI, ShouldPrintRegisterTies,
           getTypeToPrint(MI, I, PrintedTypes, MRI),
           /*IsDef=*/true);
   }
@@ -751,7 +751,7 @@ void MIPrinter::print(const MachineInstr &MI) {
   for (; I < E; ++I) {
     if (NeedComma)
       OS << ", ";
-    print(MI.getOperand(I), TRI, I, ShouldPrintRegisterTies,
+    print(MI, I, TRI, ShouldPrintRegisterTies,
           getTypeToPrint(MI, I, PrintedTypes, MRI));
     NeedComma = true;
   }
@@ -923,9 +923,11 @@ static const char *getTargetIndexName(const MachineFunction &MF, int Index) {
   return nullptr;
 }
 
-void MIPrinter::print(const MachineOperand &Op, const TargetRegisterInfo *TRI,
-                      unsigned I, bool ShouldPrintRegisterTies, LLT TypeToPrint,
+void MIPrinter::print(const MachineInstr &MI, unsigned OpIdx,
+                      const TargetRegisterInfo *TRI,
+                      bool ShouldPrintRegisterTies, LLT TypeToPrint,
                       bool IsDef) {
+  const MachineOperand &Op = MI.getOperand(OpIdx);
   printTargetFlags(Op);
   switch (Op.getType()) {
   case MachineOperand::MO_Register: {
@@ -959,13 +961,16 @@ void MIPrinter::print(const MachineOperand &Op, const TargetRegisterInfo *TRI,
       }
     }
     if (ShouldPrintRegisterTies && Op.isTied() && !Op.isDef())
-      OS << "(tied-def " << Op.getParent()->findTiedOperandIdx(I) << ")";
+      OS << "(tied-def " << Op.getParent()->findTiedOperandIdx(OpIdx) << ")";
     if (TypeToPrint.isValid())
       OS << '(' << TypeToPrint << ')';
     break;
   }
   case MachineOperand::MO_Immediate:
-    OS << Op.getImm();
+    if (MI.isOperandSubregIdx(OpIdx))
+      OS << "%subreg." << TRI->getSubRegIndexName(Op.getImm());
+    else
+      OS << Op.getImm();
     break;
   case MachineOperand::MO_CImmediate:
     Op.getCImm()->printAsOperand(OS, /*PrintType=*/true, MST);

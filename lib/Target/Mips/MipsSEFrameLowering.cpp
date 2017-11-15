@@ -29,6 +29,7 @@
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/RegisterScavenging.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/Function.h"
 #include "llvm/MC/MCDwarf.h"
@@ -37,7 +38,6 @@
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
-#include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
 #include <cassert>
@@ -893,10 +893,12 @@ void MipsSEFrameLowering::determineCalleeSaves(MachineFunction &MF,
   }
 
   // Set scavenging frame index if necessary.
-  uint64_t MaxSPOffset = MF.getInfo<MipsFunctionInfo>()->getIncomingArgSize() +
-    estimateStackSize(MF);
+  uint64_t MaxSPOffset = estimateStackSize(MF);
 
-  if (isInt<16>(MaxSPOffset))
+  // MSA has a minimum offset of 10 bits signed. If there is a variable
+  // sized object on the stack, the estimation cannot account for it.
+  if (isIntN(STI.hasMSA() ? 10 : 16, MaxSPOffset) &&
+      !MF.getFrameInfo().hasVarSizedObjects())
     return;
 
   const TargetRegisterClass &RC =

@@ -212,6 +212,8 @@ def HasMicroMips64r6 : Predicate<"Subtarget->inMicroMips64r6Mode()">,
                        AssemblerPredicate<"FeatureMicroMips,FeatureMips64r6">;
 def InMips16Mode :    Predicate<"Subtarget->inMips16Mode()">,
                       AssemblerPredicate<"FeatureMips16">;
+def NotInMips16Mode : Predicate<"!Subtarget->inMips16Mode()">,
+                      AssemblerPredicate<"!FeatureMips16">;
 def HasCnMips    :    Predicate<"Subtarget->hasCnMips()">,
                       AssemblerPredicate<"FeatureCnMips">;
 def NotCnMips    :    Predicate<"!Subtarget->hasCnMips()">,
@@ -1544,7 +1546,7 @@ let isCall = 1, isTerminator = 1, isReturn = 1, isBarrier = 1, hasDelaySlot = 1,
     PseudoInstExpansion<(JumpInst Opnd:$target)>;
 
   class TailCallReg<RegisterOperand RO> :
-    MipsPseudo<(outs), (ins RO:$rs), [(MipsTailCall RO:$rs)], II_JR>;
+    PseudoSE<(outs), (ins RO:$rs), [(MipsTailCall RO:$rs)], II_JR>;
 }
 
 class BAL_BR_Pseudo<Instruction RealInst> :
@@ -1726,12 +1728,13 @@ class ExtBase<string opstr, RegisterOperand RO, Operand PosOpnd,
          [(set RO:$rt, (Op RO:$rs, PosImm:$pos, SizeImm:$size))], II_EXT,
          FrmR, opstr>, ISA_MIPS32R2;
 
+// 'ins' and its' 64 bit variants are matched by C++ code.
 class InsBase<string opstr, RegisterOperand RO, Operand PosOpnd,
-              Operand SizeOpnd, PatFrag PosImm, PatFrag SizeImm,
-              SDPatternOperator Op = null_frag>:
+              Operand SizeOpnd, PatFrag PosImm, PatFrag SizeImm>:
   InstSE<(outs RO:$rt), (ins RO:$rs, PosOpnd:$pos, SizeOpnd:$size, RO:$src),
          !strconcat(opstr, " $rt, $rs, $pos, $size"),
-         [(set RO:$rt, (Op RO:$rs, PosImm:$pos, SizeImm:$size, RO:$src))],
+         [(set RO:$rt, (null_frag RO:$rs, PosImm:$pos, SizeImm:$size,
+                                  RO:$src))],
          II_INS, FrmR, opstr>, ISA_MIPS32R2 {
   let Constraints = "$src = $rt";
 }
@@ -2086,7 +2089,7 @@ def BLTZALL : MMRel, BGEZAL_FT<"bltzall", brtarget, GPR32Opnd>,
               BGEZAL_FM<0x12>, ISA_MIPS2_NOT_32R6_64R6;
 def BAL_BR : BAL_BR_Pseudo<BGEZAL>;
 
-let Predicates = [NotInMicroMips] in { 
+let AdditionalPredicates = [NotInMips16Mode, NotInMicroMips] in {
   def TAILCALL : TailCall<J, jmptarget>;
 }
 
@@ -2103,6 +2106,7 @@ class PseudoIndirectBranchBase<RegisterOperand RO> :
   let isBranch = 1;
   let isIndirectBranch = 1;
   bit isCTI = 1;
+  let Predicates = [NotInMips16Mode];
 }
 
 def PseudoIndirectBranch : PseudoIndirectBranchBase<GPR32Opnd>;
@@ -2236,7 +2240,7 @@ let AdditionalPredicates = [NotInMicroMips] in {
             EXT_FM<0>;
   def INS : MMRel, StdMMR6Rel, InsBase<"ins", GPR32Opnd, uimm5,
                                        uimm5_inssize_plus1, immZExt5,
-                                       immZExt5Plus1, MipsIns>,
+                                       immZExt5Plus1>,
             EXT_FM<4>;
 }
 /// Move Control Registers From/To CPU Registers
@@ -2776,10 +2780,12 @@ def : MipsPat<(MipsJmpLink (i32 texternalsym:$dst)),
 //              (JALR GPR32:$dst)>;
 
 // Tail call
-def : MipsPat<(MipsTailCall (iPTR tglobaladdr:$dst)),
-              (TAILCALL tglobaladdr:$dst)>;
-def : MipsPat<(MipsTailCall (iPTR texternalsym:$dst)),
-              (TAILCALL texternalsym:$dst)>;
+let AdditionalPredicates = [NotInMicroMips] in {
+  def : MipsPat<(MipsTailCall (iPTR tglobaladdr:$dst)),
+                (TAILCALL tglobaladdr:$dst)>;
+  def : MipsPat<(MipsTailCall (iPTR texternalsym:$dst)),
+                (TAILCALL texternalsym:$dst)>;
+}
 // hi/lo relocs
 multiclass MipsHiLoRelocs<Instruction Lui, Instruction Addiu,
                           Register ZeroReg, RegisterOperand GPROpnd> {

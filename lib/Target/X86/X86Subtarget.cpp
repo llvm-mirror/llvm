@@ -161,6 +161,8 @@ X86Subtarget::classifyGlobalFunctionReference(const GlobalValue *GV,
       // In Regcall calling convention those registers are used for passing
       // parameters. Thus we need to prevent lazy binding in Regcall.
       return X86II::MO_GOTPCREL;
+    if (F && F->hasFnAttribute(Attribute::NonLazyBind) && is64Bit())
+      return X86II::MO_GOTPCREL;
     return X86II::MO_PLT;
   }
 

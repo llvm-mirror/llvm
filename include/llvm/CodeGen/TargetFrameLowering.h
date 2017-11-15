@@ -1,4 +1,4 @@
-//===-- llvm/Target/TargetFrameLowering.h ---------------------------*- C++ -*-===//
+//===-- llvm/CodeGen/TargetFrameLowering.h ---------------------------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_TARGET_TARGETFRAMELOWERING_H
-#define LLVM_TARGET_TARGETFRAMELOWERING_H
+#ifndef LLVM_CODEGEN_TARGETFRAMELOWERING_H
+#define LLVM_CODEGEN_TARGETFRAMELOWERING_H
 
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include <utility>
@@ -341,6 +341,14 @@ public:
           return false;
     return true;
   }
+
+  /// Return initial CFA offset value i.e. the one valid at the beginning of the
+  /// function (before any stack operations).
+  virtual int getInitialCFAOffset(const MachineFunction &MF) const;
+
+  /// Return initial CFA register value i.e. the one valid at the beginning of
+  /// the function (before any stack operations).
+  virtual unsigned getInitialCFARegister(const MachineFunction &MF) const;
 };
 
 } // End llvm namespace

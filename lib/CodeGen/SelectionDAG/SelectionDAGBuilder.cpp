@@ -55,6 +55,8 @@
 #include "llvm/CodeGen/SelectionDAGNodes.h"
 #include "llvm/CodeGen/SelectionDAGTargetInfo.h"
 #include "llvm/CodeGen/StackMaps.h"
+#include "llvm/CodeGen/TargetFrameLowering.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/CodeGen/WinEHFuncInfo.h"
 #include "llvm/IR/Argument.h"
@@ -98,8 +100,6 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetFrameLowering.h"
-#include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetIntrinsicInfo.h"
 #include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetMachine.h"
@@ -2585,7 +2585,7 @@ static bool isVectorReductionOp(const User *I) {
   case Instruction::FAdd:
   case Instruction::FMul:
     if (const FPMathOperator *FPOp = dyn_cast<const FPMathOperator>(Inst))
-      if (FPOp->getFastMathFlags().unsafeAlgebra())
+      if (FPOp->getFastMathFlags().isFast())
         break;
     LLVM_FALLTHROUGH;
   default:
@@ -2631,7 +2631,7 @@ static bool isVectorReductionOp(const User *I) {
 
       if (Inst->getOpcode() == OpCode || isa<PHINode>(U)) {
         if (const FPMathOperator *FPOp = dyn_cast<const FPMathOperator>(Inst))
-          if (!isa<PHINode>(FPOp) && !FPOp->getFastMathFlags().unsafeAlgebra())
+          if (!isa<PHINode>(FPOp) && !FPOp->getFastMathFlags().isFast())
             return false;
         UsersToVisit.push_back(U);
       } else if (const ShuffleVectorInst *ShufInst =
@@ -2725,7 +2725,7 @@ void SelectionDAGBuilder::visitBinary(const User &I, unsigned OpCode) {
   Flags.setNoInfs(FMF.noInfs());
   Flags.setNoNaNs(FMF.noNaNs());
   Flags.setNoSignedZeros(FMF.noSignedZeros());
-  Flags.setUnsafeAlgebra(FMF.unsafeAlgebra());
+  Flags.setUnsafeAlgebra(FMF.isFast());
 
   SDValue BinNodeValue = DAG.getNode(OpCode, getCurSDLoc(), Op1.getValueType(),
                                      Op1, Op2, Flags);
@@ -3862,7 +3862,7 @@ void SelectionDAGBuilder::visitMaskedStore(const CallInst &I,
 //
 // When the first GEP operand is a single pointer - it is the uniform base we
 // are looking for. If first operand of the GEP is a splat vector - we
-// extract the spalt value and use it as a uniform base.
+// extract the splat value and use it as a uniform base.
 // In all other cases the function returns 'false'.
 static bool getUniformBase(const Value* &Ptr, SDValue& Base, SDValue& Index,
                            SelectionDAGBuilder* SDB) {
@@ -4828,12 +4828,6 @@ bool SelectionDAGBuilder::EmitFuncArgumentDbgValue(
   MachineFunction &MF = DAG.getMachineFunction();
   const TargetInstrInfo *TII = DAG.getSubtarget().getInstrInfo();
 
-  // Ignore inlined function arguments here.
-  //
-  // FIXME: Should we be checking DL->inlinedAt() to determine this?
-  if (!Variable->getScope()->getSubprogram()->describes(MF.getFunction()))
-    return false;
-
   bool IsIndirect = false;
   Optional<MachineOperand> Op;
   // Some arguments' frame index is recorded during argument lowering.
@@ -4873,11 +4867,13 @@ bool SelectionDAGBuilder::EmitFuncArgumentDbgValue(
           for (unsigned E = I + RegCount; I != E; ++I) {
             // The vregs are guaranteed to be allocated in sequence.
             Op = MachineOperand::CreateReg(VMI->second + I, false);
-            auto *FragmentExpr = DIExpression::createFragmentExpression(
+            auto FragmentExpr = DIExpression::createFragmentExpression(
                 Expr, Offset, RegisterSize);
+            if (!FragmentExpr)
+              continue;
             FuncInfo.ArgDbgValues.push_back(
                 BuildMI(MF, DL, TII->get(TargetOpcode::DBG_VALUE), IsDbgDeclare,
-                        Op->getReg(), Variable, FragmentExpr));
+                        Op->getReg(), Variable, *FragmentExpr));
             Offset += RegisterSize;
           }
         }
@@ -7959,13 +7955,13 @@ void SelectionDAGBuilder::visitVectorReduce(const CallInst &I,
 
   switch (Intrinsic) {
   case Intrinsic::experimental_vector_reduce_fadd:
-    if (FMF.unsafeAlgebra())
+    if (FMF.isFast())
       Res = DAG.getNode(ISD::VECREDUCE_FADD, dl, VT, Op2);
     else
       Res = DAG.getNode(ISD::VECREDUCE_STRICT_FADD, dl, VT, Op1, Op2);
     break;
   case Intrinsic::experimental_vector_reduce_fmul:
-    if (FMF.unsafeAlgebra())
+    if (FMF.isFast())
       Res = DAG.getNode(ISD::VECREDUCE_FMUL, dl, VT, Op2);
     else
       Res = DAG.getNode(ISD::VECREDUCE_STRICT_FMUL, dl, VT, Op1, Op2);

@@ -109,6 +109,7 @@ define zeroext i32 @test_vpcmpeqb_v16i1_v32i1_mask(<2 x i64> %__a, <2 x i64> %__
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -227,6 +228,7 @@ define zeroext i32 @test_vpcmpeqb_v16i1_v32i1_mask_mem(<2 x i64> %__a, <2 x i64>
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -348,6 +350,7 @@ define zeroext i32 @test_masked_vpcmpeqb_v16i1_v32i1_mask(i16 zeroext %__u, <2 x
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -470,6 +473,7 @@ define zeroext i32 @test_masked_vpcmpeqb_v16i1_v32i1_mask_mem(i16 zeroext %__u, 
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -597,6 +601,7 @@ define zeroext i64 @test_vpcmpeqb_v16i1_v64i1_mask(<2 x i64> %__a, <2 x i64> %__
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -720,6 +725,7 @@ define zeroext i64 @test_vpcmpeqb_v16i1_v64i1_mask_mem(<2 x i64> %__a, <2 x i64>
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -846,6 +852,7 @@ define zeroext i64 @test_masked_vpcmpeqb_v16i1_v64i1_mask(i16 zeroext %__u, <2 x
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -973,6 +980,7 @@ define zeroext i64 @test_masked_vpcmpeqb_v16i1_v64i1_mask_mem(i16 zeroext %__u, 
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -1024,6 +1032,7 @@ define zeroext i64 @test_vpcmpeqb_v32i1_v64i1_mask(<4 x i64> %__a, <4 x i64> %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -1071,6 +1080,7 @@ define zeroext i64 @test_vpcmpeqb_v32i1_v64i1_mask_mem(<4 x i64> %__a, <4 x i64>
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -1129,6 +1139,7 @@ define zeroext i64 @test_masked_vpcmpeqb_v32i1_v64i1_mask(i32 zeroext %__u, <4 x
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -1188,6 +1199,7 @@ define zeroext i64 @test_masked_vpcmpeqb_v32i1_v64i1_mask_mem(i32 zeroext %__u, 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -1217,8 +1229,6 @@ define zeroext i16 @test_vpcmpeqw_v8i1_v16i1_mask(<2 x i64> %__a, <2 x i64> %__b
 ; NoVLX-NEXT:    vpmovsxwq %xmm0, %zmm0
 ; NoVLX-NEXT:    vpsllq $63, %zmm0, %zmm0
 ; NoVLX-NEXT:    vptestmq %zmm0, %zmm0, %k0
-; NoVLX-NEXT:    kxorw %k0, %k0, %k1
-; NoVLX-NEXT:    kunpckbw %k0, %k1, %k0
 ; NoVLX-NEXT:    kmovw %k0, %eax
 ; NoVLX-NEXT:    # kill: %AX<def> %AX<kill> %EAX<kill>
 ; NoVLX-NEXT:    vzeroupper
@@ -1246,8 +1256,6 @@ define zeroext i16 @test_vpcmpeqw_v8i1_v16i1_mask_mem(<2 x i64> %__a, <2 x i64>*
 ; NoVLX-NEXT:    vpmovsxwq %xmm0, %zmm0
 ; NoVLX-NEXT:    vpsllq $63, %zmm0, %zmm0
 ; NoVLX-NEXT:    vptestmq %zmm0, %zmm0, %k0
-; NoVLX-NEXT:    kxorw %k0, %k0, %k1
-; NoVLX-NEXT:    kunpckbw %k0, %k1, %k0
 ; NoVLX-NEXT:    kmovw %k0, %eax
 ; NoVLX-NEXT:    # kill: %AX<def> %AX<kill> %EAX<kill>
 ; NoVLX-NEXT:    vzeroupper
@@ -1278,8 +1286,6 @@ define zeroext i16 @test_masked_vpcmpeqw_v8i1_v16i1_mask(i8 zeroext %__u, <2 x i
 ; NoVLX-NEXT:    vpsllq $63, %zmm0, %zmm0
 ; NoVLX-NEXT:    kmovw %edi, %k1
 ; NoVLX-NEXT:    vptestmq %zmm0, %zmm0, %k0 {%k1}
-; NoVLX-NEXT:    kxorw %k0, %k0, %k1
-; NoVLX-NEXT:    kunpckbw %k0, %k1, %k0
 ; NoVLX-NEXT:    kmovw %k0, %eax
 ; NoVLX-NEXT:    # kill: %AX<def> %AX<kill> %EAX<kill>
 ; NoVLX-NEXT:    vzeroupper
@@ -1311,8 +1317,6 @@ define zeroext i16 @test_masked_vpcmpeqw_v8i1_v16i1_mask_mem(i8 zeroext %__u, <2
 ; NoVLX-NEXT:    vpsllq $63, %zmm0, %zmm0
 ; NoVLX-NEXT:    kmovw %edi, %k1
 ; NoVLX-NEXT:    vptestmq %zmm0, %zmm0, %k0 {%k1}
-; NoVLX-NEXT:    kxorw %k0, %k0, %k1
-; NoVLX-NEXT:    kunpckbw %k0, %k1, %k0
 ; NoVLX-NEXT:    kmovw %k0, %eax
 ; NoVLX-NEXT:    # kill: %AX<def> %AX<kill> %EAX<kill>
 ; NoVLX-NEXT:    vzeroupper
@@ -1392,6 +1396,7 @@ define zeroext i32 @test_vpcmpeqw_v8i1_v32i1_mask(<2 x i64> %__a, <2 x i64> %__b
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -1465,6 +1470,7 @@ define zeroext i32 @test_vpcmpeqw_v8i1_v32i1_mask_mem(<2 x i64> %__a, <2 x i64>*
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -1541,6 +1547,7 @@ define zeroext i32 @test_masked_vpcmpeqw_v8i1_v32i1_mask(i8 zeroext %__u, <2 x i
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -1618,6 +1625,7 @@ define zeroext i32 @test_masked_vpcmpeqw_v8i1_v32i1_mask_mem(i8 zeroext %__u, <2
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -1700,6 +1708,7 @@ define zeroext i64 @test_vpcmpeqw_v8i1_v64i1_mask(<2 x i64> %__a, <2 x i64> %__b
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -1778,6 +1787,7 @@ define zeroext i64 @test_vpcmpeqw_v8i1_v64i1_mask_mem(<2 x i64> %__a, <2 x i64>*
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -1859,6 +1869,7 @@ define zeroext i64 @test_masked_vpcmpeqw_v8i1_v64i1_mask(i8 zeroext %__u, <2 x i
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -1941,6 +1952,7 @@ define zeroext i64 @test_masked_vpcmpeqw_v8i1_v64i1_mask_mem(i8 zeroext %__u, <2
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -2064,6 +2076,7 @@ define zeroext i32 @test_vpcmpeqw_v16i1_v32i1_mask(<4 x i64> %__a, <4 x i64> %__
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -2183,6 +2196,7 @@ define zeroext i32 @test_vpcmpeqw_v16i1_v32i1_mask_mem(<4 x i64> %__a, <4 x i64>
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -2305,6 +2319,7 @@ define zeroext i32 @test_masked_vpcmpeqw_v16i1_v32i1_mask(i16 zeroext %__u, <4 x
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -2428,6 +2443,7 @@ define zeroext i32 @test_masked_vpcmpeqw_v16i1_v32i1_mask_mem(i16 zeroext %__u, 
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -2556,6 +2572,7 @@ define zeroext i64 @test_vpcmpeqw_v16i1_v64i1_mask(<4 x i64> %__a, <4 x i64> %__
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -2680,6 +2697,7 @@ define zeroext i64 @test_vpcmpeqw_v16i1_v64i1_mask_mem(<4 x i64> %__a, <4 x i64>
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -2807,6 +2825,7 @@ define zeroext i64 @test_masked_vpcmpeqw_v16i1_v64i1_mask(i16 zeroext %__u, <4 x
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -2935,6 +2954,7 @@ define zeroext i64 @test_masked_vpcmpeqw_v16i1_v64i1_mask_mem(i16 zeroext %__u, 
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -3288,6 +3308,7 @@ define zeroext i64 @test_vpcmpeqw_v32i1_v64i1_mask(<8 x i64> %__a, <8 x i64> %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -3552,6 +3573,7 @@ define zeroext i64 @test_vpcmpeqw_v32i1_v64i1_mask_mem(<8 x i64> %__a, <8 x i64>
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -3912,6 +3934,7 @@ define zeroext i64 @test_masked_vpcmpeqw_v32i1_v64i1_mask(i32 zeroext %__u, <8 x
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -4188,6 +4211,7 @@ define zeroext i64 @test_masked_vpcmpeqw_v32i1_v64i1_mask_mem(i32 zeroext %__u, 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -5051,6 +5075,7 @@ define zeroext i32 @test_vpcmpeqd_v4i1_v32i1_mask(<2 x i64> %__a, <2 x i64> %__b
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -5092,6 +5117,7 @@ define zeroext i32 @test_vpcmpeqd_v4i1_v32i1_mask_mem(<2 x i64> %__a, <2 x i64>*
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -5153,6 +5179,7 @@ define zeroext i32 @test_masked_vpcmpeqd_v4i1_v32i1_mask(i8 zeroext %__u, <2 x i
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -5216,6 +5243,7 @@ define zeroext i32 @test_masked_vpcmpeqd_v4i1_v32i1_mask_mem(i8 zeroext %__u, <2
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -5263,6 +5291,7 @@ define zeroext i32 @test_vpcmpeqd_v4i1_v32i1_mask_mem_b(<2 x i64> %__a, i32* %__
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -5326,6 +5355,7 @@ define zeroext i32 @test_masked_vpcmpeqd_v4i1_v32i1_mask_mem_b(i8 zeroext %__u, 
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -5379,6 +5409,7 @@ define zeroext i64 @test_vpcmpeqd_v4i1_v64i1_mask(<2 x i64> %__a, <2 x i64> %__b
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -5426,6 +5457,7 @@ define zeroext i64 @test_vpcmpeqd_v4i1_v64i1_mask_mem(<2 x i64> %__a, <2 x i64>*
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -5493,6 +5525,7 @@ define zeroext i64 @test_masked_vpcmpeqd_v4i1_v64i1_mask(i8 zeroext %__u, <2 x i
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -5562,6 +5595,7 @@ define zeroext i64 @test_masked_vpcmpeqd_v4i1_v64i1_mask_mem(i8 zeroext %__u, <2
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -5615,6 +5649,7 @@ define zeroext i64 @test_vpcmpeqd_v4i1_v64i1_mask_mem_b(<2 x i64> %__a, i32* %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -5684,6 +5719,7 @@ define zeroext i64 @test_masked_vpcmpeqd_v4i1_v64i1_mask_mem_b(i8 zeroext %__u, 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -5957,6 +5993,7 @@ define zeroext i32 @test_vpcmpeqd_v8i1_v32i1_mask(<4 x i64> %__a, <4 x i64> %__b
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -6030,6 +6067,7 @@ define zeroext i32 @test_vpcmpeqd_v8i1_v32i1_mask_mem(<4 x i64> %__a, <4 x i64>*
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -6106,6 +6144,7 @@ define zeroext i32 @test_masked_vpcmpeqd_v8i1_v32i1_mask(i8 zeroext %__u, <4 x i
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -6183,6 +6222,7 @@ define zeroext i32 @test_masked_vpcmpeqd_v8i1_v32i1_mask_mem(i8 zeroext %__u, <4
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -6260,6 +6300,7 @@ define zeroext i32 @test_vpcmpeqd_v8i1_v32i1_mask_mem_b(<4 x i64> %__a, i32* %__
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -6337,6 +6378,7 @@ define zeroext i32 @test_masked_vpcmpeqd_v8i1_v32i1_mask_mem_b(i8 zeroext %__u, 
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -6420,6 +6462,7 @@ define zeroext i64 @test_vpcmpeqd_v8i1_v64i1_mask(<4 x i64> %__a, <4 x i64> %__b
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -6498,6 +6541,7 @@ define zeroext i64 @test_vpcmpeqd_v8i1_v64i1_mask_mem(<4 x i64> %__a, <4 x i64>*
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -6579,6 +6623,7 @@ define zeroext i64 @test_masked_vpcmpeqd_v8i1_v64i1_mask(i8 zeroext %__u, <4 x i
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -6661,6 +6706,7 @@ define zeroext i64 @test_masked_vpcmpeqd_v8i1_v64i1_mask_mem(i8 zeroext %__u, <4
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -6743,6 +6789,7 @@ define zeroext i64 @test_vpcmpeqd_v8i1_v64i1_mask_mem_b(<4 x i64> %__a, i32* %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -6825,6 +6872,7 @@ define zeroext i64 @test_masked_vpcmpeqd_v8i1_v64i1_mask_mem_b(i8 zeroext %__u, 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -6946,6 +6994,7 @@ define zeroext i32 @test_vpcmpeqd_v16i1_v32i1_mask(<8 x i64> %__a, <8 x i64> %__
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -7062,6 +7111,7 @@ define zeroext i32 @test_vpcmpeqd_v16i1_v32i1_mask_mem(<8 x i64> %__a, <8 x i64>
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -7181,6 +7231,7 @@ define zeroext i32 @test_masked_vpcmpeqd_v16i1_v32i1_mask(i16 zeroext %__u, <8 x
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -7301,6 +7352,7 @@ define zeroext i32 @test_masked_vpcmpeqd_v16i1_v32i1_mask_mem(i16 zeroext %__u, 
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -7421,6 +7473,7 @@ define zeroext i32 @test_vpcmpeqd_v16i1_v32i1_mask_mem_b(<8 x i64> %__a, i32* %_
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -7541,6 +7594,7 @@ define zeroext i32 @test_masked_vpcmpeqd_v16i1_v32i1_mask_mem_b(i16 zeroext %__u
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -7667,6 +7721,7 @@ define zeroext i64 @test_vpcmpeqd_v16i1_v64i1_mask(<8 x i64> %__a, <8 x i64> %__
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -7788,6 +7843,7 @@ define zeroext i64 @test_vpcmpeqd_v16i1_v64i1_mask_mem(<8 x i64> %__a, <8 x i64>
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -7912,6 +7968,7 @@ define zeroext i64 @test_masked_vpcmpeqd_v16i1_v64i1_mask(i16 zeroext %__u, <8 x
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -8037,6 +8094,7 @@ define zeroext i64 @test_masked_vpcmpeqd_v16i1_v64i1_mask_mem(i16 zeroext %__u, 
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -8162,6 +8220,7 @@ define zeroext i64 @test_vpcmpeqd_v16i1_v64i1_mask_mem_b(<8 x i64> %__a, i32* %_
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -8287,6 +8346,7 @@ define zeroext i64 @test_masked_vpcmpeqd_v16i1_v64i1_mask_mem_b(i16 zeroext %__u
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -9131,6 +9191,7 @@ define zeroext i32 @test_vpcmpeqq_v2i1_v32i1_mask(<2 x i64> %__a, <2 x i64> %__b
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -9172,6 +9233,7 @@ define zeroext i32 @test_vpcmpeqq_v2i1_v32i1_mask_mem(<2 x i64> %__a, <2 x i64>*
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -9225,6 +9287,7 @@ define zeroext i32 @test_masked_vpcmpeqq_v2i1_v32i1_mask(i8 zeroext %__u, <2 x i
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -9280,6 +9343,7 @@ define zeroext i32 @test_masked_vpcmpeqq_v2i1_v32i1_mask_mem(i8 zeroext %__u, <2
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -9327,6 +9391,7 @@ define zeroext i32 @test_vpcmpeqq_v2i1_v32i1_mask_mem_b(<2 x i64> %__a, i64* %__
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -9382,6 +9447,7 @@ define zeroext i32 @test_masked_vpcmpeqq_v2i1_v32i1_mask_mem_b(i8 zeroext %__u, 
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -9435,6 +9501,7 @@ define zeroext i64 @test_vpcmpeqq_v2i1_v64i1_mask(<2 x i64> %__a, <2 x i64> %__b
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -9482,6 +9549,7 @@ define zeroext i64 @test_vpcmpeqq_v2i1_v64i1_mask_mem(<2 x i64> %__a, <2 x i64>*
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -9541,6 +9609,7 @@ define zeroext i64 @test_masked_vpcmpeqq_v2i1_v64i1_mask(i8 zeroext %__u, <2 x i
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -9602,6 +9671,7 @@ define zeroext i64 @test_masked_vpcmpeqq_v2i1_v64i1_mask_mem(i8 zeroext %__u, <2
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -9655,6 +9725,7 @@ define zeroext i64 @test_vpcmpeqq_v2i1_v64i1_mask_mem_b(<2 x i64> %__a, i64* %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -9716,6 +9787,7 @@ define zeroext i64 @test_masked_vpcmpeqq_v2i1_v64i1_mask_mem_b(i8 zeroext %__u, 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -10607,6 +10679,7 @@ define zeroext i32 @test_vpcmpeqq_v4i1_v32i1_mask(<4 x i64> %__a, <4 x i64> %__b
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -10650,6 +10723,7 @@ define zeroext i32 @test_vpcmpeqq_v4i1_v32i1_mask_mem(<4 x i64> %__a, <4 x i64>*
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -10713,6 +10787,7 @@ define zeroext i32 @test_masked_vpcmpeqq_v4i1_v32i1_mask(i8 zeroext %__u, <4 x i
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -10778,6 +10853,7 @@ define zeroext i32 @test_masked_vpcmpeqq_v4i1_v32i1_mask_mem(i8 zeroext %__u, <4
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -10827,6 +10903,7 @@ define zeroext i32 @test_vpcmpeqq_v4i1_v32i1_mask_mem_b(<4 x i64> %__a, i64* %__
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -10892,6 +10969,7 @@ define zeroext i32 @test_masked_vpcmpeqq_v4i1_v32i1_mask_mem_b(i8 zeroext %__u, 
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -10947,6 +11025,7 @@ define zeroext i64 @test_vpcmpeqq_v4i1_v64i1_mask(<4 x i64> %__a, <4 x i64> %__b
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -10996,6 +11075,7 @@ define zeroext i64 @test_vpcmpeqq_v4i1_v64i1_mask_mem(<4 x i64> %__a, <4 x i64>*
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -11065,6 +11145,7 @@ define zeroext i64 @test_masked_vpcmpeqq_v4i1_v64i1_mask(i8 zeroext %__u, <4 x i
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -11136,6 +11217,7 @@ define zeroext i64 @test_masked_vpcmpeqq_v4i1_v64i1_mask_mem(i8 zeroext %__u, <4
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -11191,6 +11273,7 @@ define zeroext i64 @test_vpcmpeqq_v4i1_v64i1_mask_mem_b(<4 x i64> %__a, i64* %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -11262,6 +11345,7 @@ define zeroext i64 @test_masked_vpcmpeqq_v4i1_v64i1_mask_mem_b(i8 zeroext %__u, 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -11509,6 +11593,7 @@ define zeroext i32 @test_vpcmpeqq_v8i1_v32i1_mask(<8 x i64> %__a, <8 x i64> %__b
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -11580,6 +11665,7 @@ define zeroext i32 @test_vpcmpeqq_v8i1_v32i1_mask_mem(<8 x i64> %__a, <8 x i64>*
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -11654,6 +11740,7 @@ define zeroext i32 @test_masked_vpcmpeqq_v8i1_v32i1_mask(i8 zeroext %__u, <8 x i
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -11729,6 +11816,7 @@ define zeroext i32 @test_masked_vpcmpeqq_v8i1_v32i1_mask_mem(i8 zeroext %__u, <8
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -11804,6 +11892,7 @@ define zeroext i32 @test_vpcmpeqq_v8i1_v32i1_mask_mem_b(<8 x i64> %__a, i64* %__
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -11879,6 +11968,7 @@ define zeroext i32 @test_masked_vpcmpeqq_v8i1_v32i1_mask_mem_b(i8 zeroext %__u, 
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -11960,6 +12050,7 @@ define zeroext i64 @test_vpcmpeqq_v8i1_v64i1_mask(<8 x i64> %__a, <8 x i64> %__b
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -12036,6 +12127,7 @@ define zeroext i64 @test_vpcmpeqq_v8i1_v64i1_mask_mem(<8 x i64> %__a, <8 x i64>*
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -12115,6 +12207,7 @@ define zeroext i64 @test_masked_vpcmpeqq_v8i1_v64i1_mask(i8 zeroext %__u, <8 x i
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -12195,6 +12288,7 @@ define zeroext i64 @test_masked_vpcmpeqq_v8i1_v64i1_mask_mem(i8 zeroext %__u, <8
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -12275,6 +12369,7 @@ define zeroext i64 @test_vpcmpeqq_v8i1_v64i1_mask_mem_b(<8 x i64> %__a, i64* %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -12355,6 +12450,7 @@ define zeroext i64 @test_masked_vpcmpeqq_v8i1_v64i1_mask_mem_b(i8 zeroext %__u, 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -12478,6 +12574,7 @@ define zeroext i32 @test_vpcmpsgtb_v16i1_v32i1_mask(<2 x i64> %__a, <2 x i64> %_
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -12596,6 +12693,7 @@ define zeroext i32 @test_vpcmpsgtb_v16i1_v32i1_mask_mem(<2 x i64> %__a, <2 x i64
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -12717,6 +12815,7 @@ define zeroext i32 @test_masked_vpcmpsgtb_v16i1_v32i1_mask(i16 zeroext %__u, <2 
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -12839,6 +12938,7 @@ define zeroext i32 @test_masked_vpcmpsgtb_v16i1_v32i1_mask_mem(i16 zeroext %__u,
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -12966,6 +13066,7 @@ define zeroext i64 @test_vpcmpsgtb_v16i1_v64i1_mask(<2 x i64> %__a, <2 x i64> %_
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -13089,6 +13190,7 @@ define zeroext i64 @test_vpcmpsgtb_v16i1_v64i1_mask_mem(<2 x i64> %__a, <2 x i64
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -13215,6 +13317,7 @@ define zeroext i64 @test_masked_vpcmpsgtb_v16i1_v64i1_mask(i16 zeroext %__u, <2 
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -13342,6 +13445,7 @@ define zeroext i64 @test_masked_vpcmpsgtb_v16i1_v64i1_mask_mem(i16 zeroext %__u,
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -13393,6 +13497,7 @@ define zeroext i64 @test_vpcmpsgtb_v32i1_v64i1_mask(<4 x i64> %__a, <4 x i64> %_
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -13440,6 +13545,7 @@ define zeroext i64 @test_vpcmpsgtb_v32i1_v64i1_mask_mem(<4 x i64> %__a, <4 x i64
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -13498,6 +13604,7 @@ define zeroext i64 @test_masked_vpcmpsgtb_v32i1_v64i1_mask(i32 zeroext %__u, <4 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -13557,6 +13664,7 @@ define zeroext i64 @test_masked_vpcmpsgtb_v32i1_v64i1_mask_mem(i32 zeroext %__u,
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -13586,8 +13694,6 @@ define zeroext i16 @test_vpcmpsgtw_v8i1_v16i1_mask(<2 x i64> %__a, <2 x i64> %__
 ; NoVLX-NEXT:    vpmovsxwq %xmm0, %zmm0
 ; NoVLX-NEXT:    vpsllq $63, %zmm0, %zmm0
 ; NoVLX-NEXT:    vptestmq %zmm0, %zmm0, %k0
-; NoVLX-NEXT:    kxorw %k0, %k0, %k1
-; NoVLX-NEXT:    kunpckbw %k0, %k1, %k0
 ; NoVLX-NEXT:    kmovw %k0, %eax
 ; NoVLX-NEXT:    # kill: %AX<def> %AX<kill> %EAX<kill>
 ; NoVLX-NEXT:    vzeroupper
@@ -13615,8 +13721,6 @@ define zeroext i16 @test_vpcmpsgtw_v8i1_v16i1_mask_mem(<2 x i64> %__a, <2 x i64>
 ; NoVLX-NEXT:    vpmovsxwq %xmm0, %zmm0
 ; NoVLX-NEXT:    vpsllq $63, %zmm0, %zmm0
 ; NoVLX-NEXT:    vptestmq %zmm0, %zmm0, %k0
-; NoVLX-NEXT:    kxorw %k0, %k0, %k1
-; NoVLX-NEXT:    kunpckbw %k0, %k1, %k0
 ; NoVLX-NEXT:    kmovw %k0, %eax
 ; NoVLX-NEXT:    # kill: %AX<def> %AX<kill> %EAX<kill>
 ; NoVLX-NEXT:    vzeroupper
@@ -13647,8 +13751,6 @@ define zeroext i16 @test_masked_vpcmpsgtw_v8i1_v16i1_mask(i8 zeroext %__u, <2 x 
 ; NoVLX-NEXT:    vpsllq $63, %zmm0, %zmm0
 ; NoVLX-NEXT:    kmovw %edi, %k1
 ; NoVLX-NEXT:    vptestmq %zmm0, %zmm0, %k0 {%k1}
-; NoVLX-NEXT:    kxorw %k0, %k0, %k1
-; NoVLX-NEXT:    kunpckbw %k0, %k1, %k0
 ; NoVLX-NEXT:    kmovw %k0, %eax
 ; NoVLX-NEXT:    # kill: %AX<def> %AX<kill> %EAX<kill>
 ; NoVLX-NEXT:    vzeroupper
@@ -13680,8 +13782,6 @@ define zeroext i16 @test_masked_vpcmpsgtw_v8i1_v16i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    vpsllq $63, %zmm0, %zmm0
 ; NoVLX-NEXT:    kmovw %edi, %k1
 ; NoVLX-NEXT:    vptestmq %zmm0, %zmm0, %k0 {%k1}
-; NoVLX-NEXT:    kxorw %k0, %k0, %k1
-; NoVLX-NEXT:    kunpckbw %k0, %k1, %k0
 ; NoVLX-NEXT:    kmovw %k0, %eax
 ; NoVLX-NEXT:    # kill: %AX<def> %AX<kill> %EAX<kill>
 ; NoVLX-NEXT:    vzeroupper
@@ -13761,6 +13861,7 @@ define zeroext i32 @test_vpcmpsgtw_v8i1_v32i1_mask(<2 x i64> %__a, <2 x i64> %__
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -13834,6 +13935,7 @@ define zeroext i32 @test_vpcmpsgtw_v8i1_v32i1_mask_mem(<2 x i64> %__a, <2 x i64>
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -13910,6 +14012,7 @@ define zeroext i32 @test_masked_vpcmpsgtw_v8i1_v32i1_mask(i8 zeroext %__u, <2 x 
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -13987,6 +14090,7 @@ define zeroext i32 @test_masked_vpcmpsgtw_v8i1_v32i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -14069,6 +14173,7 @@ define zeroext i64 @test_vpcmpsgtw_v8i1_v64i1_mask(<2 x i64> %__a, <2 x i64> %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -14147,6 +14252,7 @@ define zeroext i64 @test_vpcmpsgtw_v8i1_v64i1_mask_mem(<2 x i64> %__a, <2 x i64>
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -14228,6 +14334,7 @@ define zeroext i64 @test_masked_vpcmpsgtw_v8i1_v64i1_mask(i8 zeroext %__u, <2 x 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -14310,6 +14417,7 @@ define zeroext i64 @test_masked_vpcmpsgtw_v8i1_v64i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -14433,6 +14541,7 @@ define zeroext i32 @test_vpcmpsgtw_v16i1_v32i1_mask(<4 x i64> %__a, <4 x i64> %_
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -14552,6 +14661,7 @@ define zeroext i32 @test_vpcmpsgtw_v16i1_v32i1_mask_mem(<4 x i64> %__a, <4 x i64
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -14674,6 +14784,7 @@ define zeroext i32 @test_masked_vpcmpsgtw_v16i1_v32i1_mask(i16 zeroext %__u, <4 
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -14797,6 +14908,7 @@ define zeroext i32 @test_masked_vpcmpsgtw_v16i1_v32i1_mask_mem(i16 zeroext %__u,
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -14925,6 +15037,7 @@ define zeroext i64 @test_vpcmpsgtw_v16i1_v64i1_mask(<4 x i64> %__a, <4 x i64> %_
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -15049,6 +15162,7 @@ define zeroext i64 @test_vpcmpsgtw_v16i1_v64i1_mask_mem(<4 x i64> %__a, <4 x i64
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -15176,6 +15290,7 @@ define zeroext i64 @test_masked_vpcmpsgtw_v16i1_v64i1_mask(i16 zeroext %__u, <4 
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -15304,6 +15419,7 @@ define zeroext i64 @test_masked_vpcmpsgtw_v16i1_v64i1_mask_mem(i16 zeroext %__u,
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -15657,6 +15773,7 @@ define zeroext i64 @test_vpcmpsgtw_v32i1_v64i1_mask(<8 x i64> %__a, <8 x i64> %_
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -15921,6 +16038,7 @@ define zeroext i64 @test_vpcmpsgtw_v32i1_v64i1_mask_mem(<8 x i64> %__a, <8 x i64
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -16281,6 +16399,7 @@ define zeroext i64 @test_masked_vpcmpsgtw_v32i1_v64i1_mask(i32 zeroext %__u, <8 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -16557,6 +16676,7 @@ define zeroext i64 @test_masked_vpcmpsgtw_v32i1_v64i1_mask_mem(i32 zeroext %__u,
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -17420,6 +17540,7 @@ define zeroext i32 @test_vpcmpsgtd_v4i1_v32i1_mask(<2 x i64> %__a, <2 x i64> %__
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -17461,6 +17582,7 @@ define zeroext i32 @test_vpcmpsgtd_v4i1_v32i1_mask_mem(<2 x i64> %__a, <2 x i64>
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -17522,6 +17644,7 @@ define zeroext i32 @test_masked_vpcmpsgtd_v4i1_v32i1_mask(i8 zeroext %__u, <2 x 
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -17585,6 +17708,7 @@ define zeroext i32 @test_masked_vpcmpsgtd_v4i1_v32i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -17632,6 +17756,7 @@ define zeroext i32 @test_vpcmpsgtd_v4i1_v32i1_mask_mem_b(<2 x i64> %__a, i32* %_
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -17695,6 +17820,7 @@ define zeroext i32 @test_masked_vpcmpsgtd_v4i1_v32i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -17748,6 +17874,7 @@ define zeroext i64 @test_vpcmpsgtd_v4i1_v64i1_mask(<2 x i64> %__a, <2 x i64> %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -17795,6 +17922,7 @@ define zeroext i64 @test_vpcmpsgtd_v4i1_v64i1_mask_mem(<2 x i64> %__a, <2 x i64>
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -17862,6 +17990,7 @@ define zeroext i64 @test_masked_vpcmpsgtd_v4i1_v64i1_mask(i8 zeroext %__u, <2 x 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -17931,6 +18060,7 @@ define zeroext i64 @test_masked_vpcmpsgtd_v4i1_v64i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -17984,6 +18114,7 @@ define zeroext i64 @test_vpcmpsgtd_v4i1_v64i1_mask_mem_b(<2 x i64> %__a, i32* %_
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -18053,6 +18184,7 @@ define zeroext i64 @test_masked_vpcmpsgtd_v4i1_v64i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -18326,6 +18458,7 @@ define zeroext i32 @test_vpcmpsgtd_v8i1_v32i1_mask(<4 x i64> %__a, <4 x i64> %__
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -18399,6 +18532,7 @@ define zeroext i32 @test_vpcmpsgtd_v8i1_v32i1_mask_mem(<4 x i64> %__a, <4 x i64>
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -18475,6 +18609,7 @@ define zeroext i32 @test_masked_vpcmpsgtd_v8i1_v32i1_mask(i8 zeroext %__u, <4 x 
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -18552,6 +18687,7 @@ define zeroext i32 @test_masked_vpcmpsgtd_v8i1_v32i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -18629,6 +18765,7 @@ define zeroext i32 @test_vpcmpsgtd_v8i1_v32i1_mask_mem_b(<4 x i64> %__a, i32* %_
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -18706,6 +18843,7 @@ define zeroext i32 @test_masked_vpcmpsgtd_v8i1_v32i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -18789,6 +18927,7 @@ define zeroext i64 @test_vpcmpsgtd_v8i1_v64i1_mask(<4 x i64> %__a, <4 x i64> %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -18867,6 +19006,7 @@ define zeroext i64 @test_vpcmpsgtd_v8i1_v64i1_mask_mem(<4 x i64> %__a, <4 x i64>
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -18948,6 +19088,7 @@ define zeroext i64 @test_masked_vpcmpsgtd_v8i1_v64i1_mask(i8 zeroext %__u, <4 x 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -19030,6 +19171,7 @@ define zeroext i64 @test_masked_vpcmpsgtd_v8i1_v64i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -19112,6 +19254,7 @@ define zeroext i64 @test_vpcmpsgtd_v8i1_v64i1_mask_mem_b(<4 x i64> %__a, i32* %_
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -19194,6 +19337,7 @@ define zeroext i64 @test_masked_vpcmpsgtd_v8i1_v64i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -19315,6 +19459,7 @@ define zeroext i32 @test_vpcmpsgtd_v16i1_v32i1_mask(<8 x i64> %__a, <8 x i64> %_
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -19431,6 +19576,7 @@ define zeroext i32 @test_vpcmpsgtd_v16i1_v32i1_mask_mem(<8 x i64> %__a, <8 x i64
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -19550,6 +19696,7 @@ define zeroext i32 @test_masked_vpcmpsgtd_v16i1_v32i1_mask(i16 zeroext %__u, <8 
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -19670,6 +19817,7 @@ define zeroext i32 @test_masked_vpcmpsgtd_v16i1_v32i1_mask_mem(i16 zeroext %__u,
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -19790,6 +19938,7 @@ define zeroext i32 @test_vpcmpsgtd_v16i1_v32i1_mask_mem_b(<8 x i64> %__a, i32* %
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -19910,6 +20059,7 @@ define zeroext i32 @test_masked_vpcmpsgtd_v16i1_v32i1_mask_mem_b(i16 zeroext %__
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -20036,6 +20186,7 @@ define zeroext i64 @test_vpcmpsgtd_v16i1_v64i1_mask(<8 x i64> %__a, <8 x i64> %_
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -20157,6 +20308,7 @@ define zeroext i64 @test_vpcmpsgtd_v16i1_v64i1_mask_mem(<8 x i64> %__a, <8 x i64
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -20281,6 +20433,7 @@ define zeroext i64 @test_masked_vpcmpsgtd_v16i1_v64i1_mask(i16 zeroext %__u, <8 
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -20406,6 +20559,7 @@ define zeroext i64 @test_masked_vpcmpsgtd_v16i1_v64i1_mask_mem(i16 zeroext %__u,
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -20531,6 +20685,7 @@ define zeroext i64 @test_vpcmpsgtd_v16i1_v64i1_mask_mem_b(<8 x i64> %__a, i32* %
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -20656,6 +20811,7 @@ define zeroext i64 @test_masked_vpcmpsgtd_v16i1_v64i1_mask_mem_b(i16 zeroext %__
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -21500,6 +21656,7 @@ define zeroext i32 @test_vpcmpsgtq_v2i1_v32i1_mask(<2 x i64> %__a, <2 x i64> %__
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -21541,6 +21698,7 @@ define zeroext i32 @test_vpcmpsgtq_v2i1_v32i1_mask_mem(<2 x i64> %__a, <2 x i64>
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -21594,6 +21752,7 @@ define zeroext i32 @test_masked_vpcmpsgtq_v2i1_v32i1_mask(i8 zeroext %__u, <2 x 
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -21649,6 +21808,7 @@ define zeroext i32 @test_masked_vpcmpsgtq_v2i1_v32i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -21696,6 +21856,7 @@ define zeroext i32 @test_vpcmpsgtq_v2i1_v32i1_mask_mem_b(<2 x i64> %__a, i64* %_
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -21751,6 +21912,7 @@ define zeroext i32 @test_masked_vpcmpsgtq_v2i1_v32i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -21804,6 +21966,7 @@ define zeroext i64 @test_vpcmpsgtq_v2i1_v64i1_mask(<2 x i64> %__a, <2 x i64> %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -21851,6 +22014,7 @@ define zeroext i64 @test_vpcmpsgtq_v2i1_v64i1_mask_mem(<2 x i64> %__a, <2 x i64>
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -21910,6 +22074,7 @@ define zeroext i64 @test_masked_vpcmpsgtq_v2i1_v64i1_mask(i8 zeroext %__u, <2 x 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -21971,6 +22136,7 @@ define zeroext i64 @test_masked_vpcmpsgtq_v2i1_v64i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -22024,6 +22190,7 @@ define zeroext i64 @test_vpcmpsgtq_v2i1_v64i1_mask_mem_b(<2 x i64> %__a, i64* %_
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -22085,6 +22252,7 @@ define zeroext i64 @test_masked_vpcmpsgtq_v2i1_v64i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -22976,6 +23144,7 @@ define zeroext i32 @test_vpcmpsgtq_v4i1_v32i1_mask(<4 x i64> %__a, <4 x i64> %__
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -23019,6 +23188,7 @@ define zeroext i32 @test_vpcmpsgtq_v4i1_v32i1_mask_mem(<4 x i64> %__a, <4 x i64>
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -23082,6 +23252,7 @@ define zeroext i32 @test_masked_vpcmpsgtq_v4i1_v32i1_mask(i8 zeroext %__u, <4 x 
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -23147,6 +23318,7 @@ define zeroext i32 @test_masked_vpcmpsgtq_v4i1_v32i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -23196,6 +23368,7 @@ define zeroext i32 @test_vpcmpsgtq_v4i1_v32i1_mask_mem_b(<4 x i64> %__a, i64* %_
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -23261,6 +23434,7 @@ define zeroext i32 @test_masked_vpcmpsgtq_v4i1_v32i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -23316,6 +23490,7 @@ define zeroext i64 @test_vpcmpsgtq_v4i1_v64i1_mask(<4 x i64> %__a, <4 x i64> %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -23365,6 +23540,7 @@ define zeroext i64 @test_vpcmpsgtq_v4i1_v64i1_mask_mem(<4 x i64> %__a, <4 x i64>
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -23434,6 +23610,7 @@ define zeroext i64 @test_masked_vpcmpsgtq_v4i1_v64i1_mask(i8 zeroext %__u, <4 x 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -23505,6 +23682,7 @@ define zeroext i64 @test_masked_vpcmpsgtq_v4i1_v64i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -23560,6 +23738,7 @@ define zeroext i64 @test_vpcmpsgtq_v4i1_v64i1_mask_mem_b(<4 x i64> %__a, i64* %_
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -23631,6 +23810,7 @@ define zeroext i64 @test_masked_vpcmpsgtq_v4i1_v64i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -23878,6 +24058,7 @@ define zeroext i32 @test_vpcmpsgtq_v8i1_v32i1_mask(<8 x i64> %__a, <8 x i64> %__
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -23949,6 +24130,7 @@ define zeroext i32 @test_vpcmpsgtq_v8i1_v32i1_mask_mem(<8 x i64> %__a, <8 x i64>
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -24023,6 +24205,7 @@ define zeroext i32 @test_masked_vpcmpsgtq_v8i1_v32i1_mask(i8 zeroext %__u, <8 x 
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -24098,6 +24281,7 @@ define zeroext i32 @test_masked_vpcmpsgtq_v8i1_v32i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -24173,6 +24357,7 @@ define zeroext i32 @test_vpcmpsgtq_v8i1_v32i1_mask_mem_b(<8 x i64> %__a, i64* %_
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -24248,6 +24433,7 @@ define zeroext i32 @test_masked_vpcmpsgtq_v8i1_v32i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -24329,6 +24515,7 @@ define zeroext i64 @test_vpcmpsgtq_v8i1_v64i1_mask(<8 x i64> %__a, <8 x i64> %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -24405,6 +24592,7 @@ define zeroext i64 @test_vpcmpsgtq_v8i1_v64i1_mask_mem(<8 x i64> %__a, <8 x i64>
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -24484,6 +24672,7 @@ define zeroext i64 @test_masked_vpcmpsgtq_v8i1_v64i1_mask(i8 zeroext %__u, <8 x 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -24564,6 +24753,7 @@ define zeroext i64 @test_masked_vpcmpsgtq_v8i1_v64i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -24644,6 +24834,7 @@ define zeroext i64 @test_vpcmpsgtq_v8i1_v64i1_mask_mem_b(<8 x i64> %__a, i64* %_
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -24724,6 +24915,7 @@ define zeroext i64 @test_masked_vpcmpsgtq_v8i1_v64i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -24849,6 +25041,7 @@ define zeroext i32 @test_vpcmpsgeb_v16i1_v32i1_mask(<2 x i64> %__a, <2 x i64> %_
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -24970,6 +25163,7 @@ define zeroext i32 @test_vpcmpsgeb_v16i1_v32i1_mask_mem(<2 x i64> %__a, <2 x i64
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -25093,6 +25287,7 @@ define zeroext i32 @test_masked_vpcmpsgeb_v16i1_v32i1_mask(i16 zeroext %__u, <2 
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -25218,6 +25413,7 @@ define zeroext i32 @test_masked_vpcmpsgeb_v16i1_v32i1_mask_mem(i16 zeroext %__u,
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -25347,6 +25543,7 @@ define zeroext i64 @test_vpcmpsgeb_v16i1_v64i1_mask(<2 x i64> %__a, <2 x i64> %_
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -25473,6 +25670,7 @@ define zeroext i64 @test_vpcmpsgeb_v16i1_v64i1_mask_mem(<2 x i64> %__a, <2 x i64
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -25601,6 +25799,7 @@ define zeroext i64 @test_masked_vpcmpsgeb_v16i1_v64i1_mask(i16 zeroext %__u, <2 
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -25731,6 +25930,7 @@ define zeroext i64 @test_masked_vpcmpsgeb_v16i1_v64i1_mask_mem(i16 zeroext %__u,
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -25784,6 +25984,7 @@ define zeroext i64 @test_vpcmpsgeb_v32i1_v64i1_mask(<4 x i64> %__a, <4 x i64> %_
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -25834,6 +26035,7 @@ define zeroext i64 @test_vpcmpsgeb_v32i1_v64i1_mask_mem(<4 x i64> %__a, <4 x i64
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -25894,6 +26096,7 @@ define zeroext i64 @test_masked_vpcmpsgeb_v32i1_v64i1_mask(i32 zeroext %__u, <4 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -25956,6 +26159,7 @@ define zeroext i64 @test_masked_vpcmpsgeb_v32i1_v64i1_mask_mem(i32 zeroext %__u,
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -25987,8 +26191,6 @@ define zeroext i16 @test_vpcmpsgew_v8i1_v16i1_mask(<2 x i64> %__a, <2 x i64> %__
 ; NoVLX-NEXT:    vpmovsxwq %xmm0, %zmm0
 ; NoVLX-NEXT:    vpsllq $63, %zmm0, %zmm0
 ; NoVLX-NEXT:    vptestmq %zmm0, %zmm0, %k0
-; NoVLX-NEXT:    kxorw %k0, %k0, %k1
-; NoVLX-NEXT:    kunpckbw %k0, %k1, %k0
 ; NoVLX-NEXT:    kmovw %k0, %eax
 ; NoVLX-NEXT:    # kill: %AX<def> %AX<kill> %EAX<kill>
 ; NoVLX-NEXT:    vzeroupper
@@ -26019,8 +26221,6 @@ define zeroext i16 @test_vpcmpsgew_v8i1_v16i1_mask_mem(<2 x i64> %__a, <2 x i64>
 ; NoVLX-NEXT:    vpmovsxwq %xmm0, %zmm0
 ; NoVLX-NEXT:    vpsllq $63, %zmm0, %zmm0
 ; NoVLX-NEXT:    vptestmq %zmm0, %zmm0, %k0
-; NoVLX-NEXT:    kxorw %k0, %k0, %k1
-; NoVLX-NEXT:    kunpckbw %k0, %k1, %k0
 ; NoVLX-NEXT:    kmovw %k0, %eax
 ; NoVLX-NEXT:    # kill: %AX<def> %AX<kill> %EAX<kill>
 ; NoVLX-NEXT:    vzeroupper
@@ -26053,8 +26253,6 @@ define zeroext i16 @test_masked_vpcmpsgew_v8i1_v16i1_mask(i8 zeroext %__u, <2 x 
 ; NoVLX-NEXT:    vpsllq $63, %zmm0, %zmm0
 ; NoVLX-NEXT:    kmovw %edi, %k1
 ; NoVLX-NEXT:    vptestmq %zmm0, %zmm0, %k0 {%k1}
-; NoVLX-NEXT:    kxorw %k0, %k0, %k1
-; NoVLX-NEXT:    kunpckbw %k0, %k1, %k0
 ; NoVLX-NEXT:    kmovw %k0, %eax
 ; NoVLX-NEXT:    # kill: %AX<def> %AX<kill> %EAX<kill>
 ; NoVLX-NEXT:    vzeroupper
@@ -26089,8 +26287,6 @@ define zeroext i16 @test_masked_vpcmpsgew_v8i1_v16i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    vpsllq $63, %zmm0, %zmm0
 ; NoVLX-NEXT:    kmovw %edi, %k1
 ; NoVLX-NEXT:    vptestmq %zmm0, %zmm0, %k0 {%k1}
-; NoVLX-NEXT:    kxorw %k0, %k0, %k1
-; NoVLX-NEXT:    kunpckbw %k0, %k1, %k0
 ; NoVLX-NEXT:    kmovw %k0, %eax
 ; NoVLX-NEXT:    # kill: %AX<def> %AX<kill> %EAX<kill>
 ; NoVLX-NEXT:    vzeroupper
@@ -26172,6 +26368,7 @@ define zeroext i32 @test_vpcmpsgew_v8i1_v32i1_mask(<2 x i64> %__a, <2 x i64> %__
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -26248,6 +26445,7 @@ define zeroext i32 @test_vpcmpsgew_v8i1_v32i1_mask_mem(<2 x i64> %__a, <2 x i64>
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -26326,6 +26524,7 @@ define zeroext i32 @test_masked_vpcmpsgew_v8i1_v32i1_mask(i8 zeroext %__u, <2 x 
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -26406,6 +26605,7 @@ define zeroext i32 @test_masked_vpcmpsgew_v8i1_v32i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -26490,6 +26690,7 @@ define zeroext i64 @test_vpcmpsgew_v8i1_v64i1_mask(<2 x i64> %__a, <2 x i64> %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -26571,6 +26772,7 @@ define zeroext i64 @test_vpcmpsgew_v8i1_v64i1_mask_mem(<2 x i64> %__a, <2 x i64>
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -26654,6 +26856,7 @@ define zeroext i64 @test_masked_vpcmpsgew_v8i1_v64i1_mask(i8 zeroext %__u, <2 x 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -26739,6 +26942,7 @@ define zeroext i64 @test_masked_vpcmpsgew_v8i1_v64i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -26864,6 +27068,7 @@ define zeroext i32 @test_vpcmpsgew_v16i1_v32i1_mask(<4 x i64> %__a, <4 x i64> %_
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -26986,6 +27191,7 @@ define zeroext i32 @test_vpcmpsgew_v16i1_v32i1_mask_mem(<4 x i64> %__a, <4 x i64
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -27110,6 +27316,7 @@ define zeroext i32 @test_masked_vpcmpsgew_v16i1_v32i1_mask(i16 zeroext %__u, <4 
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -27236,6 +27443,7 @@ define zeroext i32 @test_masked_vpcmpsgew_v16i1_v32i1_mask_mem(i16 zeroext %__u,
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -27366,6 +27574,7 @@ define zeroext i64 @test_vpcmpsgew_v16i1_v64i1_mask(<4 x i64> %__a, <4 x i64> %_
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -27493,6 +27702,7 @@ define zeroext i64 @test_vpcmpsgew_v16i1_v64i1_mask_mem(<4 x i64> %__a, <4 x i64
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -27622,6 +27832,7 @@ define zeroext i64 @test_masked_vpcmpsgew_v16i1_v64i1_mask(i16 zeroext %__u, <4 
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -27753,6 +27964,7 @@ define zeroext i64 @test_masked_vpcmpsgew_v16i1_v64i1_mask_mem(i16 zeroext %__u,
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -28109,6 +28321,7 @@ define zeroext i64 @test_vpcmpsgew_v32i1_v64i1_mask(<8 x i64> %__a, <8 x i64> %_
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -28378,6 +28591,7 @@ define zeroext i64 @test_vpcmpsgew_v32i1_v64i1_mask_mem(<8 x i64> %__a, <8 x i64
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -28741,6 +28955,7 @@ define zeroext i64 @test_masked_vpcmpsgew_v32i1_v64i1_mask(i32 zeroext %__u, <8 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -29022,6 +29237,7 @@ define zeroext i64 @test_masked_vpcmpsgew_v32i1_v64i1_mask_mem(i32 zeroext %__u,
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -29903,6 +30119,7 @@ define zeroext i32 @test_vpcmpsged_v4i1_v32i1_mask(<2 x i64> %__a, <2 x i64> %__
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -29947,6 +30164,7 @@ define zeroext i32 @test_vpcmpsged_v4i1_v32i1_mask_mem(<2 x i64> %__a, <2 x i64>
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -30008,6 +30226,7 @@ define zeroext i32 @test_masked_vpcmpsged_v4i1_v32i1_mask(i8 zeroext %__u, <2 x 
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -30072,6 +30291,7 @@ define zeroext i32 @test_masked_vpcmpsged_v4i1_v32i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -30121,6 +30341,7 @@ define zeroext i32 @test_vpcmpsged_v4i1_v32i1_mask_mem_b(<2 x i64> %__a, i32* %_
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -30184,6 +30405,7 @@ define zeroext i32 @test_masked_vpcmpsged_v4i1_v32i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -30239,6 +30461,7 @@ define zeroext i64 @test_vpcmpsged_v4i1_v64i1_mask(<2 x i64> %__a, <2 x i64> %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -30289,6 +30512,7 @@ define zeroext i64 @test_vpcmpsged_v4i1_v64i1_mask_mem(<2 x i64> %__a, <2 x i64>
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -30356,6 +30580,7 @@ define zeroext i64 @test_masked_vpcmpsged_v4i1_v64i1_mask(i8 zeroext %__u, <2 x 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -30426,6 +30651,7 @@ define zeroext i64 @test_masked_vpcmpsged_v4i1_v64i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -30481,6 +30707,7 @@ define zeroext i64 @test_vpcmpsged_v4i1_v64i1_mask_mem_b(<2 x i64> %__a, i32* %_
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -30550,6 +30777,7 @@ define zeroext i64 @test_masked_vpcmpsged_v4i1_v64i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -30823,6 +31051,7 @@ define zeroext i32 @test_vpcmpsged_v8i1_v32i1_mask(<4 x i64> %__a, <4 x i64> %__
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -30896,6 +31125,7 @@ define zeroext i32 @test_vpcmpsged_v8i1_v32i1_mask_mem(<4 x i64> %__a, <4 x i64>
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -30972,6 +31202,7 @@ define zeroext i32 @test_masked_vpcmpsged_v8i1_v32i1_mask(i8 zeroext %__u, <4 x 
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -31049,6 +31280,7 @@ define zeroext i32 @test_masked_vpcmpsged_v8i1_v32i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -31126,6 +31358,7 @@ define zeroext i32 @test_vpcmpsged_v8i1_v32i1_mask_mem_b(<4 x i64> %__a, i32* %_
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -31203,6 +31436,7 @@ define zeroext i32 @test_masked_vpcmpsged_v8i1_v32i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -31286,6 +31520,7 @@ define zeroext i64 @test_vpcmpsged_v8i1_v64i1_mask(<4 x i64> %__a, <4 x i64> %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -31364,6 +31599,7 @@ define zeroext i64 @test_vpcmpsged_v8i1_v64i1_mask_mem(<4 x i64> %__a, <4 x i64>
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -31445,6 +31681,7 @@ define zeroext i64 @test_masked_vpcmpsged_v8i1_v64i1_mask(i8 zeroext %__u, <4 x 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -31527,6 +31764,7 @@ define zeroext i64 @test_masked_vpcmpsged_v8i1_v64i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -31609,6 +31847,7 @@ define zeroext i64 @test_vpcmpsged_v8i1_v64i1_mask_mem_b(<4 x i64> %__a, i32* %_
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -31691,6 +31930,7 @@ define zeroext i64 @test_masked_vpcmpsged_v8i1_v64i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -31812,6 +32052,7 @@ define zeroext i32 @test_vpcmpsged_v16i1_v32i1_mask(<8 x i64> %__a, <8 x i64> %_
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -31928,6 +32169,7 @@ define zeroext i32 @test_vpcmpsged_v16i1_v32i1_mask_mem(<8 x i64> %__a, <8 x i64
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -32047,6 +32289,7 @@ define zeroext i32 @test_masked_vpcmpsged_v16i1_v32i1_mask(i16 zeroext %__u, <8 
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -32167,6 +32410,7 @@ define zeroext i32 @test_masked_vpcmpsged_v16i1_v32i1_mask_mem(i16 zeroext %__u,
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -32287,6 +32531,7 @@ define zeroext i32 @test_vpcmpsged_v16i1_v32i1_mask_mem_b(<8 x i64> %__a, i32* %
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -32407,6 +32652,7 @@ define zeroext i32 @test_masked_vpcmpsged_v16i1_v32i1_mask_mem_b(i16 zeroext %__
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -32533,6 +32779,7 @@ define zeroext i64 @test_vpcmpsged_v16i1_v64i1_mask(<8 x i64> %__a, <8 x i64> %_
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -32654,6 +32901,7 @@ define zeroext i64 @test_vpcmpsged_v16i1_v64i1_mask_mem(<8 x i64> %__a, <8 x i64
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -32778,6 +33026,7 @@ define zeroext i64 @test_masked_vpcmpsged_v16i1_v64i1_mask(i16 zeroext %__u, <8 
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -32903,6 +33152,7 @@ define zeroext i64 @test_masked_vpcmpsged_v16i1_v64i1_mask_mem(i16 zeroext %__u,
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -33028,6 +33278,7 @@ define zeroext i64 @test_vpcmpsged_v16i1_v64i1_mask_mem_b(<8 x i64> %__a, i32* %
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -33153,6 +33404,7 @@ define zeroext i64 @test_masked_vpcmpsged_v16i1_v64i1_mask_mem_b(i16 zeroext %__
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -34023,6 +34275,7 @@ define zeroext i32 @test_vpcmpsgeq_v2i1_v32i1_mask(<2 x i64> %__a, <2 x i64> %__
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -34067,6 +34320,7 @@ define zeroext i32 @test_vpcmpsgeq_v2i1_v32i1_mask_mem(<2 x i64> %__a, <2 x i64>
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -34120,6 +34374,7 @@ define zeroext i32 @test_masked_vpcmpsgeq_v2i1_v32i1_mask(i8 zeroext %__u, <2 x 
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -34176,6 +34431,7 @@ define zeroext i32 @test_masked_vpcmpsgeq_v2i1_v32i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -34225,6 +34481,7 @@ define zeroext i32 @test_vpcmpsgeq_v2i1_v32i1_mask_mem_b(<2 x i64> %__a, i64* %_
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -34280,6 +34537,7 @@ define zeroext i32 @test_masked_vpcmpsgeq_v2i1_v32i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -34335,6 +34593,7 @@ define zeroext i64 @test_vpcmpsgeq_v2i1_v64i1_mask(<2 x i64> %__a, <2 x i64> %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -34385,6 +34644,7 @@ define zeroext i64 @test_vpcmpsgeq_v2i1_v64i1_mask_mem(<2 x i64> %__a, <2 x i64>
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -34444,6 +34704,7 @@ define zeroext i64 @test_masked_vpcmpsgeq_v2i1_v64i1_mask(i8 zeroext %__u, <2 x 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -34506,6 +34767,7 @@ define zeroext i64 @test_masked_vpcmpsgeq_v2i1_v64i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -34561,6 +34823,7 @@ define zeroext i64 @test_vpcmpsgeq_v2i1_v64i1_mask_mem_b(<2 x i64> %__a, i64* %_
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -34622,6 +34885,7 @@ define zeroext i64 @test_masked_vpcmpsgeq_v2i1_v64i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -35543,6 +35807,7 @@ define zeroext i32 @test_vpcmpsgeq_v4i1_v32i1_mask(<4 x i64> %__a, <4 x i64> %__
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -35589,6 +35854,7 @@ define zeroext i32 @test_vpcmpsgeq_v4i1_v32i1_mask_mem(<4 x i64> %__a, <4 x i64>
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -35654,6 +35920,7 @@ define zeroext i32 @test_masked_vpcmpsgeq_v4i1_v32i1_mask(i8 zeroext %__u, <4 x 
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -35722,6 +35989,7 @@ define zeroext i32 @test_masked_vpcmpsgeq_v4i1_v32i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -35773,6 +36041,7 @@ define zeroext i32 @test_vpcmpsgeq_v4i1_v32i1_mask_mem_b(<4 x i64> %__a, i64* %_
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -35840,6 +36109,7 @@ define zeroext i32 @test_masked_vpcmpsgeq_v4i1_v32i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -35897,6 +36167,7 @@ define zeroext i64 @test_vpcmpsgeq_v4i1_v64i1_mask(<4 x i64> %__a, <4 x i64> %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -35949,6 +36220,7 @@ define zeroext i64 @test_vpcmpsgeq_v4i1_v64i1_mask_mem(<4 x i64> %__a, <4 x i64>
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -36020,6 +36292,7 @@ define zeroext i64 @test_masked_vpcmpsgeq_v4i1_v64i1_mask(i8 zeroext %__u, <4 x 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -36094,6 +36367,7 @@ define zeroext i64 @test_masked_vpcmpsgeq_v4i1_v64i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -36151,6 +36425,7 @@ define zeroext i64 @test_vpcmpsgeq_v4i1_v64i1_mask_mem_b(<4 x i64> %__a, i64* %_
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -36224,6 +36499,7 @@ define zeroext i64 @test_masked_vpcmpsgeq_v4i1_v64i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -36471,6 +36747,7 @@ define zeroext i32 @test_vpcmpsgeq_v8i1_v32i1_mask(<8 x i64> %__a, <8 x i64> %__
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -36542,6 +36819,7 @@ define zeroext i32 @test_vpcmpsgeq_v8i1_v32i1_mask_mem(<8 x i64> %__a, <8 x i64>
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -36616,6 +36894,7 @@ define zeroext i32 @test_masked_vpcmpsgeq_v8i1_v32i1_mask(i8 zeroext %__u, <8 x 
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -36691,6 +36970,7 @@ define zeroext i32 @test_masked_vpcmpsgeq_v8i1_v32i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -36766,6 +37046,7 @@ define zeroext i32 @test_vpcmpsgeq_v8i1_v32i1_mask_mem_b(<8 x i64> %__a, i64* %_
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -36841,6 +37122,7 @@ define zeroext i32 @test_masked_vpcmpsgeq_v8i1_v32i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -36922,6 +37204,7 @@ define zeroext i64 @test_vpcmpsgeq_v8i1_v64i1_mask(<8 x i64> %__a, <8 x i64> %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -36998,6 +37281,7 @@ define zeroext i64 @test_vpcmpsgeq_v8i1_v64i1_mask_mem(<8 x i64> %__a, <8 x i64>
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -37077,6 +37361,7 @@ define zeroext i64 @test_masked_vpcmpsgeq_v8i1_v64i1_mask(i8 zeroext %__u, <8 x 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -37157,6 +37442,7 @@ define zeroext i64 @test_masked_vpcmpsgeq_v8i1_v64i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -37237,6 +37523,7 @@ define zeroext i64 @test_vpcmpsgeq_v8i1_v64i1_mask_mem_b(<8 x i64> %__a, i64* %_
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -37317,6 +37604,7 @@ define zeroext i64 @test_masked_vpcmpsgeq_v8i1_v64i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -37443,6 +37731,7 @@ define zeroext i32 @test_vpcmpultb_v16i1_v32i1_mask(<2 x i64> %__a, <2 x i64> %_
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -37564,6 +37853,7 @@ define zeroext i32 @test_vpcmpultb_v16i1_v32i1_mask_mem(<2 x i64> %__a, <2 x i64
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -37688,6 +37978,7 @@ define zeroext i32 @test_masked_vpcmpultb_v16i1_v32i1_mask(i16 zeroext %__u, <2 
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -37813,6 +38104,7 @@ define zeroext i32 @test_masked_vpcmpultb_v16i1_v32i1_mask_mem(i16 zeroext %__u,
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -37943,6 +38235,7 @@ define zeroext i64 @test_vpcmpultb_v16i1_v64i1_mask(<2 x i64> %__a, <2 x i64> %_
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -38069,6 +38362,7 @@ define zeroext i64 @test_vpcmpultb_v16i1_v64i1_mask_mem(<2 x i64> %__a, <2 x i64
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -38198,6 +38492,7 @@ define zeroext i64 @test_masked_vpcmpultb_v16i1_v64i1_mask(i16 zeroext %__u, <2 
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -38328,6 +38623,7 @@ define zeroext i64 @test_masked_vpcmpultb_v16i1_v64i1_mask_mem(i16 zeroext %__u,
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -38382,6 +38678,7 @@ define zeroext i64 @test_vpcmpultb_v32i1_v64i1_mask(<4 x i64> %__a, <4 x i64> %_
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -38432,6 +38729,7 @@ define zeroext i64 @test_vpcmpultb_v32i1_v64i1_mask_mem(<4 x i64> %__a, <4 x i64
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -38493,6 +38791,7 @@ define zeroext i64 @test_masked_vpcmpultb_v32i1_v64i1_mask(i32 zeroext %__u, <4 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -38555,6 +38854,7 @@ define zeroext i64 @test_masked_vpcmpultb_v32i1_v64i1_mask_mem(i32 zeroext %__u,
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -38587,8 +38887,6 @@ define zeroext i16 @test_vpcmpultw_v8i1_v16i1_mask(<2 x i64> %__a, <2 x i64> %__
 ; NoVLX-NEXT:    vpmovsxwq %xmm0, %zmm0
 ; NoVLX-NEXT:    vpsllq $63, %zmm0, %zmm0
 ; NoVLX-NEXT:    vptestmq %zmm0, %zmm0, %k0
-; NoVLX-NEXT:    kxorw %k0, %k0, %k1
-; NoVLX-NEXT:    kunpckbw %k0, %k1, %k0
 ; NoVLX-NEXT:    kmovw %k0, %eax
 ; NoVLX-NEXT:    # kill: %AX<def> %AX<kill> %EAX<kill>
 ; NoVLX-NEXT:    vzeroupper
@@ -38619,8 +38917,6 @@ define zeroext i16 @test_vpcmpultw_v8i1_v16i1_mask_mem(<2 x i64> %__a, <2 x i64>
 ; NoVLX-NEXT:    vpmovsxwq %xmm0, %zmm0
 ; NoVLX-NEXT:    vpsllq $63, %zmm0, %zmm0
 ; NoVLX-NEXT:    vptestmq %zmm0, %zmm0, %k0
-; NoVLX-NEXT:    kxorw %k0, %k0, %k1
-; NoVLX-NEXT:    kunpckbw %k0, %k1, %k0
 ; NoVLX-NEXT:    kmovw %k0, %eax
 ; NoVLX-NEXT:    # kill: %AX<def> %AX<kill> %EAX<kill>
 ; NoVLX-NEXT:    vzeroupper
@@ -38654,8 +38950,6 @@ define zeroext i16 @test_masked_vpcmpultw_v8i1_v16i1_mask(i8 zeroext %__u, <2 x 
 ; NoVLX-NEXT:    vpsllq $63, %zmm0, %zmm0
 ; NoVLX-NEXT:    kmovw %edi, %k1
 ; NoVLX-NEXT:    vptestmq %zmm0, %zmm0, %k0 {%k1}
-; NoVLX-NEXT:    kxorw %k0, %k0, %k1
-; NoVLX-NEXT:    kunpckbw %k0, %k1, %k0
 ; NoVLX-NEXT:    kmovw %k0, %eax
 ; NoVLX-NEXT:    # kill: %AX<def> %AX<kill> %EAX<kill>
 ; NoVLX-NEXT:    vzeroupper
@@ -38690,8 +38984,6 @@ define zeroext i16 @test_masked_vpcmpultw_v8i1_v16i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    vpsllq $63, %zmm0, %zmm0
 ; NoVLX-NEXT:    kmovw %edi, %k1
 ; NoVLX-NEXT:    vptestmq %zmm0, %zmm0, %k0 {%k1}
-; NoVLX-NEXT:    kxorw %k0, %k0, %k1
-; NoVLX-NEXT:    kunpckbw %k0, %k1, %k0
 ; NoVLX-NEXT:    kmovw %k0, %eax
 ; NoVLX-NEXT:    # kill: %AX<def> %AX<kill> %EAX<kill>
 ; NoVLX-NEXT:    vzeroupper
@@ -38774,6 +39066,7 @@ define zeroext i32 @test_vpcmpultw_v8i1_v32i1_mask(<2 x i64> %__a, <2 x i64> %__
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -38850,6 +39143,7 @@ define zeroext i32 @test_vpcmpultw_v8i1_v32i1_mask_mem(<2 x i64> %__a, <2 x i64>
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -38929,6 +39223,7 @@ define zeroext i32 @test_masked_vpcmpultw_v8i1_v32i1_mask(i8 zeroext %__u, <2 x 
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -39009,6 +39304,7 @@ define zeroext i32 @test_masked_vpcmpultw_v8i1_v32i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -39094,6 +39390,7 @@ define zeroext i64 @test_vpcmpultw_v8i1_v64i1_mask(<2 x i64> %__a, <2 x i64> %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -39175,6 +39472,7 @@ define zeroext i64 @test_vpcmpultw_v8i1_v64i1_mask_mem(<2 x i64> %__a, <2 x i64>
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -39259,6 +39557,7 @@ define zeroext i64 @test_masked_vpcmpultw_v8i1_v64i1_mask(i8 zeroext %__u, <2 x 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -39344,6 +39643,7 @@ define zeroext i64 @test_masked_vpcmpultw_v8i1_v64i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -39470,6 +39770,7 @@ define zeroext i32 @test_vpcmpultw_v16i1_v32i1_mask(<4 x i64> %__a, <4 x i64> %_
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -39592,6 +39893,7 @@ define zeroext i32 @test_vpcmpultw_v16i1_v32i1_mask_mem(<4 x i64> %__a, <4 x i64
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -39717,6 +40019,7 @@ define zeroext i32 @test_masked_vpcmpultw_v16i1_v32i1_mask(i16 zeroext %__u, <4 
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -39843,6 +40146,7 @@ define zeroext i32 @test_masked_vpcmpultw_v16i1_v32i1_mask_mem(i16 zeroext %__u,
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -39974,6 +40278,7 @@ define zeroext i64 @test_vpcmpultw_v16i1_v64i1_mask(<4 x i64> %__a, <4 x i64> %_
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -40101,6 +40406,7 @@ define zeroext i64 @test_vpcmpultw_v16i1_v64i1_mask_mem(<4 x i64> %__a, <4 x i64
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -40231,6 +40537,7 @@ define zeroext i64 @test_masked_vpcmpultw_v16i1_v64i1_mask(i16 zeroext %__u, <4 
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -40362,6 +40669,7 @@ define zeroext i64 @test_masked_vpcmpultw_v16i1_v64i1_mask_mem(i16 zeroext %__u,
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -40720,6 +41028,7 @@ define zeroext i64 @test_vpcmpultw_v32i1_v64i1_mask(<8 x i64> %__a, <8 x i64> %_
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -40989,6 +41298,7 @@ define zeroext i64 @test_vpcmpultw_v32i1_v64i1_mask_mem(<8 x i64> %__a, <8 x i64
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -41354,6 +41664,7 @@ define zeroext i64 @test_masked_vpcmpultw_v32i1_v64i1_mask(i32 zeroext %__u, <8 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -41635,6 +41946,7 @@ define zeroext i64 @test_masked_vpcmpultw_v32i1_v64i1_mask_mem(i32 zeroext %__u,
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -42537,6 +42849,7 @@ define zeroext i32 @test_vpcmpultd_v4i1_v32i1_mask(<2 x i64> %__a, <2 x i64> %__
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -42581,6 +42894,7 @@ define zeroext i32 @test_vpcmpultd_v4i1_v32i1_mask_mem(<2 x i64> %__a, <2 x i64>
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -42645,6 +42959,7 @@ define zeroext i32 @test_masked_vpcmpultd_v4i1_v32i1_mask(i8 zeroext %__u, <2 x 
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -42711,6 +43026,7 @@ define zeroext i32 @test_masked_vpcmpultd_v4i1_v32i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -42761,6 +43077,7 @@ define zeroext i32 @test_vpcmpultd_v4i1_v32i1_mask_mem_b(<2 x i64> %__a, i32* %_
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -42827,6 +43144,7 @@ define zeroext i32 @test_masked_vpcmpultd_v4i1_v32i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -42883,6 +43201,7 @@ define zeroext i64 @test_vpcmpultd_v4i1_v64i1_mask(<2 x i64> %__a, <2 x i64> %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -42933,6 +43252,7 @@ define zeroext i64 @test_vpcmpultd_v4i1_v64i1_mask_mem(<2 x i64> %__a, <2 x i64>
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -43003,6 +43323,7 @@ define zeroext i64 @test_masked_vpcmpultd_v4i1_v64i1_mask(i8 zeroext %__u, <2 x 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -43075,6 +43396,7 @@ define zeroext i64 @test_masked_vpcmpultd_v4i1_v64i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -43131,6 +43453,7 @@ define zeroext i64 @test_vpcmpultd_v4i1_v64i1_mask_mem_b(<2 x i64> %__a, i32* %_
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -43203,6 +43526,7 @@ define zeroext i64 @test_masked_vpcmpultd_v4i1_v64i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -43476,6 +43800,7 @@ define zeroext i32 @test_vpcmpultd_v8i1_v32i1_mask(<4 x i64> %__a, <4 x i64> %__
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -43549,6 +43874,7 @@ define zeroext i32 @test_vpcmpultd_v8i1_v32i1_mask_mem(<4 x i64> %__a, <4 x i64>
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -43625,6 +43951,7 @@ define zeroext i32 @test_masked_vpcmpultd_v8i1_v32i1_mask(i8 zeroext %__u, <4 x 
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -43702,6 +44029,7 @@ define zeroext i32 @test_masked_vpcmpultd_v8i1_v32i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -43779,6 +44107,7 @@ define zeroext i32 @test_vpcmpultd_v8i1_v32i1_mask_mem_b(<4 x i64> %__a, i32* %_
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -43856,6 +44185,7 @@ define zeroext i32 @test_masked_vpcmpultd_v8i1_v32i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -43939,6 +44269,7 @@ define zeroext i64 @test_vpcmpultd_v8i1_v64i1_mask(<4 x i64> %__a, <4 x i64> %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -44017,6 +44348,7 @@ define zeroext i64 @test_vpcmpultd_v8i1_v64i1_mask_mem(<4 x i64> %__a, <4 x i64>
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -44098,6 +44430,7 @@ define zeroext i64 @test_masked_vpcmpultd_v8i1_v64i1_mask(i8 zeroext %__u, <4 x 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -44180,6 +44513,7 @@ define zeroext i64 @test_masked_vpcmpultd_v8i1_v64i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -44262,6 +44596,7 @@ define zeroext i64 @test_vpcmpultd_v8i1_v64i1_mask_mem_b(<4 x i64> %__a, i32* %_
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -44344,6 +44679,7 @@ define zeroext i64 @test_masked_vpcmpultd_v8i1_v64i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -44465,6 +44801,7 @@ define zeroext i32 @test_vpcmpultd_v16i1_v32i1_mask(<8 x i64> %__a, <8 x i64> %_
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -44581,6 +44918,7 @@ define zeroext i32 @test_vpcmpultd_v16i1_v32i1_mask_mem(<8 x i64> %__a, <8 x i64
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -44700,6 +45038,7 @@ define zeroext i32 @test_masked_vpcmpultd_v16i1_v32i1_mask(i16 zeroext %__u, <8 
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -44820,6 +45159,7 @@ define zeroext i32 @test_masked_vpcmpultd_v16i1_v32i1_mask_mem(i16 zeroext %__u,
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -44940,6 +45280,7 @@ define zeroext i32 @test_vpcmpultd_v16i1_v32i1_mask_mem_b(<8 x i64> %__a, i32* %
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -45060,6 +45401,7 @@ define zeroext i32 @test_masked_vpcmpultd_v16i1_v32i1_mask_mem_b(i16 zeroext %__
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -45186,6 +45528,7 @@ define zeroext i64 @test_vpcmpultd_v16i1_v64i1_mask(<8 x i64> %__a, <8 x i64> %_
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -45307,6 +45650,7 @@ define zeroext i64 @test_vpcmpultd_v16i1_v64i1_mask_mem(<8 x i64> %__a, <8 x i64
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -45431,6 +45775,7 @@ define zeroext i64 @test_masked_vpcmpultd_v16i1_v64i1_mask(i16 zeroext %__u, <8 
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -45556,6 +45901,7 @@ define zeroext i64 @test_masked_vpcmpultd_v16i1_v64i1_mask_mem(i16 zeroext %__u,
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -45681,6 +46027,7 @@ define zeroext i64 @test_vpcmpultd_v16i1_v64i1_mask_mem_b(<8 x i64> %__a, i32* %
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -45806,6 +46153,7 @@ define zeroext i64 @test_masked_vpcmpultd_v16i1_v64i1_mask_mem_b(i16 zeroext %__
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -46707,6 +47055,7 @@ define zeroext i32 @test_vpcmpultq_v2i1_v32i1_mask(<2 x i64> %__a, <2 x i64> %__
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -46751,6 +47100,7 @@ define zeroext i32 @test_vpcmpultq_v2i1_v32i1_mask_mem(<2 x i64> %__a, <2 x i64>
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -46807,6 +47157,7 @@ define zeroext i32 @test_masked_vpcmpultq_v2i1_v32i1_mask(i8 zeroext %__u, <2 x 
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -46865,6 +47216,7 @@ define zeroext i32 @test_masked_vpcmpultq_v2i1_v32i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -46915,6 +47267,7 @@ define zeroext i32 @test_vpcmpultq_v2i1_v32i1_mask_mem_b(<2 x i64> %__a, i64* %_
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -46973,6 +47326,7 @@ define zeroext i32 @test_masked_vpcmpultq_v2i1_v32i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -47029,6 +47383,7 @@ define zeroext i64 @test_vpcmpultq_v2i1_v64i1_mask(<2 x i64> %__a, <2 x i64> %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -47079,6 +47434,7 @@ define zeroext i64 @test_vpcmpultq_v2i1_v64i1_mask_mem(<2 x i64> %__a, <2 x i64>
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -47141,6 +47497,7 @@ define zeroext i64 @test_masked_vpcmpultq_v2i1_v64i1_mask(i8 zeroext %__u, <2 x 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -47205,6 +47562,7 @@ define zeroext i64 @test_masked_vpcmpultq_v2i1_v64i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -47261,6 +47619,7 @@ define zeroext i64 @test_vpcmpultq_v2i1_v64i1_mask_mem_b(<2 x i64> %__a, i64* %_
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -47325,6 +47684,7 @@ define zeroext i64 @test_masked_vpcmpultq_v2i1_v64i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -48255,6 +48615,7 @@ define zeroext i32 @test_vpcmpultq_v4i1_v32i1_mask(<4 x i64> %__a, <4 x i64> %__
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -48301,6 +48662,7 @@ define zeroext i32 @test_vpcmpultq_v4i1_v32i1_mask_mem(<4 x i64> %__a, <4 x i64>
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -48367,6 +48729,7 @@ define zeroext i32 @test_masked_vpcmpultq_v4i1_v32i1_mask(i8 zeroext %__u, <4 x 
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -48435,6 +48798,7 @@ define zeroext i32 @test_masked_vpcmpultq_v4i1_v32i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -48487,6 +48851,7 @@ define zeroext i32 @test_vpcmpultq_v4i1_v32i1_mask_mem_b(<4 x i64> %__a, i64* %_
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -48555,6 +48920,7 @@ define zeroext i32 @test_masked_vpcmpultq_v4i1_v32i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -48613,6 +48979,7 @@ define zeroext i64 @test_vpcmpultq_v4i1_v64i1_mask(<4 x i64> %__a, <4 x i64> %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -48665,6 +49032,7 @@ define zeroext i64 @test_vpcmpultq_v4i1_v64i1_mask_mem(<4 x i64> %__a, <4 x i64>
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -48737,6 +49105,7 @@ define zeroext i64 @test_masked_vpcmpultq_v4i1_v64i1_mask(i8 zeroext %__u, <4 x 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -48811,6 +49180,7 @@ define zeroext i64 @test_masked_vpcmpultq_v4i1_v64i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -48869,6 +49239,7 @@ define zeroext i64 @test_vpcmpultq_v4i1_v64i1_mask_mem_b(<4 x i64> %__a, i64* %_
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -48943,6 +49314,7 @@ define zeroext i64 @test_masked_vpcmpultq_v4i1_v64i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -49190,6 +49562,7 @@ define zeroext i32 @test_vpcmpultq_v8i1_v32i1_mask(<8 x i64> %__a, <8 x i64> %__
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -49261,6 +49634,7 @@ define zeroext i32 @test_vpcmpultq_v8i1_v32i1_mask_mem(<8 x i64> %__a, <8 x i64>
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -49335,6 +49709,7 @@ define zeroext i32 @test_masked_vpcmpultq_v8i1_v32i1_mask(i8 zeroext %__u, <8 x 
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -49410,6 +49785,7 @@ define zeroext i32 @test_masked_vpcmpultq_v8i1_v32i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -49485,6 +49861,7 @@ define zeroext i32 @test_vpcmpultq_v8i1_v32i1_mask_mem_b(<8 x i64> %__a, i64* %_
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -49560,6 +49937,7 @@ define zeroext i32 @test_masked_vpcmpultq_v8i1_v32i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -49641,6 +50019,7 @@ define zeroext i64 @test_vpcmpultq_v8i1_v64i1_mask(<8 x i64> %__a, <8 x i64> %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -49717,6 +50096,7 @@ define zeroext i64 @test_vpcmpultq_v8i1_v64i1_mask_mem(<8 x i64> %__a, <8 x i64>
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -49796,6 +50176,7 @@ define zeroext i64 @test_masked_vpcmpultq_v8i1_v64i1_mask(i8 zeroext %__u, <8 x 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -49876,6 +50257,7 @@ define zeroext i64 @test_masked_vpcmpultq_v8i1_v64i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -49956,6 +50338,7 @@ define zeroext i64 @test_vpcmpultq_v8i1_v64i1_mask_mem_b(<8 x i64> %__a, i64* %_
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -50036,6 +50419,7 @@ define zeroext i64 @test_masked_vpcmpultq_v8i1_v64i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -50829,6 +51213,7 @@ define zeroext i32 @test_vcmpoeqps_v4i1_v32i1_mask(<2 x i64> %__a, <2 x i64> %__
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -50870,6 +51255,7 @@ define zeroext i32 @test_vcmpoeqps_v4i1_v32i1_mask_mem(<2 x i64> %__a, <2 x i64>
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -50913,6 +51299,7 @@ define zeroext i32 @test_vcmpoeqps_v4i1_v32i1_mask_mem_b(<2 x i64> %__a, float* 
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -50964,6 +51351,7 @@ define zeroext i32 @test_masked_vcmpoeqps_v4i1_v32i1_mask(i4 zeroext %__u, <2 x 
 ; NoVLX-NEXT:    movl {{[0-9]+}}(%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -51015,6 +51403,7 @@ define zeroext i32 @test_masked_vcmpoeqps_v4i1_v32i1_mask_mem(i4 zeroext %__u, <
 ; NoVLX-NEXT:    movl {{[0-9]+}}(%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -51068,6 +51457,7 @@ define zeroext i32 @test_masked_vcmpoeqps_v4i1_v32i1_mask_mem_b(i4 zeroext %__u,
 ; NoVLX-NEXT:    movl {{[0-9]+}}(%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -51121,6 +51511,7 @@ define zeroext i64 @test_vcmpoeqps_v4i1_v64i1_mask(<2 x i64> %__a, <2 x i64> %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -51168,6 +51559,7 @@ define zeroext i64 @test_vcmpoeqps_v4i1_v64i1_mask_mem(<2 x i64> %__a, <2 x i64>
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -51217,6 +51609,7 @@ define zeroext i64 @test_vcmpoeqps_v4i1_v64i1_mask_mem_b(<2 x i64> %__a, float* 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -51274,6 +51667,7 @@ define zeroext i64 @test_masked_vcmpoeqps_v4i1_v64i1_mask(i4 zeroext %__u, <2 x 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -51331,6 +51725,7 @@ define zeroext i64 @test_masked_vcmpoeqps_v4i1_v64i1_mask_mem(i4 zeroext %__u, <
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -51390,6 +51785,7 @@ define zeroext i64 @test_masked_vcmpoeqps_v4i1_v64i1_mask_mem_b(i4 zeroext %__u,
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -51663,6 +52059,7 @@ define zeroext i32 @test_vcmpoeqps_v8i1_v32i1_mask(<4 x i64> %__a, <4 x i64> %__
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -51736,6 +52133,7 @@ define zeroext i32 @test_vcmpoeqps_v8i1_v32i1_mask_mem(<4 x i64> %__a, <4 x i64>
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -51810,6 +52208,7 @@ define zeroext i32 @test_vcmpoeqps_v8i1_v32i1_mask_mem_b(<4 x i64> %__a, float* 
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -51887,6 +52286,7 @@ define zeroext i32 @test_masked_vcmpoeqps_v8i1_v32i1_mask(i8 zeroext %__u, <4 x 
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -51964,6 +52364,7 @@ define zeroext i32 @test_masked_vcmpoeqps_v8i1_v32i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -52042,6 +52443,7 @@ define zeroext i32 @test_masked_vcmpoeqps_v8i1_v32i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -52126,6 +52528,7 @@ define zeroext i64 @test_vcmpoeqps_v8i1_v64i1_mask(<4 x i64> %__a, <4 x i64> %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -52204,6 +52607,7 @@ define zeroext i64 @test_vcmpoeqps_v8i1_v64i1_mask_mem(<4 x i64> %__a, <4 x i64>
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -52283,6 +52687,7 @@ define zeroext i64 @test_vcmpoeqps_v8i1_v64i1_mask_mem_b(<4 x i64> %__a, float* 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -52365,6 +52770,7 @@ define zeroext i64 @test_masked_vcmpoeqps_v8i1_v64i1_mask(i8 zeroext %__u, <4 x 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -52447,6 +52853,7 @@ define zeroext i64 @test_masked_vcmpoeqps_v8i1_v64i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -52530,6 +52937,7 @@ define zeroext i64 @test_masked_vcmpoeqps_v8i1_v64i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -52652,6 +53060,7 @@ define zeroext i32 @test_vcmpoeqps_v16i1_v32i1_mask(<8 x i64> %__a, <8 x i64> %_
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -52768,6 +53177,7 @@ define zeroext i32 @test_vcmpoeqps_v16i1_v32i1_mask_mem(<8 x i64> %__a, <8 x i64
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -52885,6 +53295,7 @@ define zeroext i32 @test_vcmpoeqps_v16i1_v32i1_mask_mem_b(<8 x i64> %__a, float*
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -53005,6 +53416,7 @@ define zeroext i32 @test_masked_vcmpoeqps_v16i1_v32i1_mask(i16 zeroext %__u, <8 
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -53125,6 +53537,7 @@ define zeroext i32 @test_masked_vcmpoeqps_v16i1_v32i1_mask_mem(i16 zeroext %__u,
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -53246,6 +53659,7 @@ define zeroext i32 @test_masked_vcmpoeqps_v16i1_v32i1_mask_mem_b(i16 zeroext %__
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -53414,6 +53828,7 @@ define zeroext i64 @test_vcmpoeqps_v16i1_v64i1_mask(<8 x i64> %__a, <8 x i64> %_
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -53535,6 +53950,7 @@ define zeroext i64 @test_vcmpoeqps_v16i1_v64i1_mask_mem(<8 x i64> %__a, <8 x i64
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -53657,6 +54073,7 @@ define zeroext i64 @test_vcmpoeqps_v16i1_v64i1_mask_mem_b(<8 x i64> %__a, float*
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -53782,6 +54199,7 @@ define zeroext i64 @test_masked_vcmpoeqps_v16i1_v64i1_mask(i16 zeroext %__u, <8 
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -53907,6 +54325,7 @@ define zeroext i64 @test_masked_vcmpoeqps_v16i1_v64i1_mask_mem(i16 zeroext %__u,
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -54033,6 +54452,7 @@ define zeroext i64 @test_masked_vcmpoeqps_v16i1_v64i1_mask_mem_b(i16 zeroext %__
 ; NoVLX-NEXT:    popq %r14
 ; NoVLX-NEXT:    popq %r15
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -54886,6 +55306,7 @@ define zeroext i32 @test_vcmpoeqpd_v2i1_v32i1_mask(<2 x i64> %__a, <2 x i64> %__
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -54927,6 +55348,7 @@ define zeroext i32 @test_vcmpoeqpd_v2i1_v32i1_mask_mem(<2 x i64> %__a, <2 x i64>
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -54970,6 +55392,7 @@ define zeroext i32 @test_vcmpoeqpd_v2i1_v32i1_mask_mem_b(<2 x i64> %__a, double*
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -55020,6 +55443,7 @@ define zeroext i32 @test_masked_vcmpoeqpd_v2i1_v32i1_mask(i2 zeroext %__u, <2 x 
 ; NoVLX-NEXT:    movl {{[0-9]+}}(%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -55070,6 +55494,7 @@ define zeroext i32 @test_masked_vcmpoeqpd_v2i1_v32i1_mask_mem(i2 zeroext %__u, <
 ; NoVLX-NEXT:    movl {{[0-9]+}}(%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -55122,6 +55547,7 @@ define zeroext i32 @test_masked_vcmpoeqpd_v2i1_v32i1_mask_mem_b(i2 zeroext %__u,
 ; NoVLX-NEXT:    movl {{[0-9]+}}(%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -55175,6 +55601,7 @@ define zeroext i64 @test_vcmpoeqpd_v2i1_v64i1_mask(<2 x i64> %__a, <2 x i64> %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -55222,6 +55649,7 @@ define zeroext i64 @test_vcmpoeqpd_v2i1_v64i1_mask_mem(<2 x i64> %__a, <2 x i64>
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -55271,6 +55699,7 @@ define zeroext i64 @test_vcmpoeqpd_v2i1_v64i1_mask_mem_b(<2 x i64> %__a, double*
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -55327,6 +55756,7 @@ define zeroext i64 @test_masked_vcmpoeqpd_v2i1_v64i1_mask(i2 zeroext %__u, <2 x 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -55383,6 +55813,7 @@ define zeroext i64 @test_masked_vcmpoeqpd_v2i1_v64i1_mask_mem(i2 zeroext %__u, <
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -55441,6 +55872,7 @@ define zeroext i64 @test_masked_vcmpoeqpd_v2i1_v64i1_mask_mem_b(i2 zeroext %__u,
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -56260,6 +56692,7 @@ define zeroext i32 @test_vcmpoeqpd_v4i1_v32i1_mask(<4 x i64> %__a, <4 x i64> %__
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -56303,6 +56736,7 @@ define zeroext i32 @test_vcmpoeqpd_v4i1_v32i1_mask_mem(<4 x i64> %__a, <4 x i64>
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -56348,6 +56782,7 @@ define zeroext i32 @test_vcmpoeqpd_v4i1_v32i1_mask_mem_b(<4 x i64> %__a, double*
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -56401,6 +56836,7 @@ define zeroext i32 @test_masked_vcmpoeqpd_v4i1_v32i1_mask(i4 zeroext %__u, <4 x 
 ; NoVLX-NEXT:    movl {{[0-9]+}}(%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -56454,6 +56890,7 @@ define zeroext i32 @test_masked_vcmpoeqpd_v4i1_v32i1_mask_mem(i4 zeroext %__u, <
 ; NoVLX-NEXT:    movl {{[0-9]+}}(%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -56509,6 +56946,7 @@ define zeroext i32 @test_masked_vcmpoeqpd_v4i1_v32i1_mask_mem_b(i4 zeroext %__u,
 ; NoVLX-NEXT:    movl {{[0-9]+}}(%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -56564,6 +57002,7 @@ define zeroext i64 @test_vcmpoeqpd_v4i1_v64i1_mask(<4 x i64> %__a, <4 x i64> %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -56613,6 +57052,7 @@ define zeroext i64 @test_vcmpoeqpd_v4i1_v64i1_mask_mem(<4 x i64> %__a, <4 x i64>
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -56664,6 +57104,7 @@ define zeroext i64 @test_vcmpoeqpd_v4i1_v64i1_mask_mem_b(<4 x i64> %__a, double*
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -56723,6 +57164,7 @@ define zeroext i64 @test_masked_vcmpoeqpd_v4i1_v64i1_mask(i4 zeroext %__u, <4 x 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -56782,6 +57224,7 @@ define zeroext i64 @test_masked_vcmpoeqpd_v4i1_v64i1_mask_mem(i4 zeroext %__u, <
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -56843,6 +57286,7 @@ define zeroext i64 @test_masked_vcmpoeqpd_v4i1_v64i1_mask_mem_b(i4 zeroext %__u,
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -57146,6 +57590,7 @@ define zeroext i32 @test_vcmpoeqpd_v8i1_v32i1_mask(<8 x i64> %__a, <8 x i64> %__
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -57217,6 +57662,7 @@ define zeroext i32 @test_vcmpoeqpd_v8i1_v32i1_mask_mem(<8 x i64> %__a, <8 x i64>
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -57289,6 +57735,7 @@ define zeroext i32 @test_vcmpoeqpd_v8i1_v32i1_mask_mem_b(<8 x i64> %__a, double*
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -57364,6 +57811,7 @@ define zeroext i32 @test_masked_vcmpoeqpd_v8i1_v32i1_mask(i8 zeroext %__u, <8 x 
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -57439,6 +57887,7 @@ define zeroext i32 @test_masked_vcmpoeqpd_v8i1_v32i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -57515,6 +57964,7 @@ define zeroext i32 @test_masked_vcmpoeqpd_v8i1_v32i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    movl (%rsp), %eax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -57647,6 +58097,7 @@ define zeroext i64 @test_vcmpoeqpd_v8i1_v64i1_mask(<8 x i64> %__a, <8 x i64> %__
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -57723,6 +58174,7 @@ define zeroext i64 @test_vcmpoeqpd_v8i1_v64i1_mask_mem(<8 x i64> %__a, <8 x i64>
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -57800,6 +58252,7 @@ define zeroext i64 @test_vcmpoeqpd_v8i1_v64i1_mask_mem_b(<8 x i64> %__a, double*
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -57880,6 +58333,7 @@ define zeroext i64 @test_masked_vcmpoeqpd_v8i1_v64i1_mask(i8 zeroext %__u, <8 x 
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -57960,6 +58414,7 @@ define zeroext i64 @test_masked_vcmpoeqpd_v8i1_v64i1_mask_mem(i8 zeroext %__u, <
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:
@@ -58041,6 +58496,7 @@ define zeroext i64 @test_masked_vcmpoeqpd_v8i1_v64i1_mask_mem_b(i8 zeroext %__u,
 ; NoVLX-NEXT:    orq %rcx, %rax
 ; NoVLX-NEXT:    movq %rbp, %rsp
 ; NoVLX-NEXT:    popq %rbp
+; NoVLX-NEXT:   .cfi_def_cfa %rsp, 8
 ; NoVLX-NEXT:    vzeroupper
 ; NoVLX-NEXT:    retq
 entry:

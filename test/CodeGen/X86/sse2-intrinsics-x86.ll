@@ -1592,10 +1592,15 @@ define <2 x double> @test_x86_sse2_sqrt_pd(<2 x double> %a0) {
 ; SSE-NEXT:    sqrtpd %xmm0, %xmm0 ## encoding: [0x66,0x0f,0x51,0xc0]
 ; SSE-NEXT:    retl ## encoding: [0xc3]
 ;
-; VCHECK-LABEL: test_x86_sse2_sqrt_pd:
-; VCHECK:       ## BB#0:
-; VCHECK-NEXT:    vsqrtpd %xmm0, %xmm0 ## encoding: [0xc5,0xf9,0x51,0xc0]
-; VCHECK-NEXT:    retl ## encoding: [0xc3]
+; AVX2-LABEL: test_x86_sse2_sqrt_pd:
+; AVX2:       ## BB#0:
+; AVX2-NEXT:    vsqrtpd %xmm0, %xmm0 ## encoding: [0xc5,0xf9,0x51,0xc0]
+; AVX2-NEXT:    retl ## encoding: [0xc3]
+;
+; SKX-LABEL: test_x86_sse2_sqrt_pd:
+; SKX:       ## BB#0:
+; SKX-NEXT:    vsqrtpd %xmm0, %xmm0 ## EVEX TO VEX Compression encoding: [0xc5,0xf9,0x51,0xc0]
+; SKX-NEXT:    retl ## encoding: [0xc3]
   %res = call <2 x double> @llvm.x86.sse2.sqrt.pd(<2 x double> %a0) ; <<2 x double>> [#uses=1]
   ret <2 x double> %res
 }
@@ -1608,10 +1613,15 @@ define <2 x double> @test_x86_sse2_sqrt_sd(<2 x double> %a0) {
 ; SSE-NEXT:    sqrtsd %xmm0, %xmm0 ## encoding: [0xf2,0x0f,0x51,0xc0]
 ; SSE-NEXT:    retl ## encoding: [0xc3]
 ;
-; VCHECK-LABEL: test_x86_sse2_sqrt_sd:
-; VCHECK:       ## BB#0:
-; VCHECK-NEXT:    vsqrtsd %xmm0, %xmm0, %xmm0 ## encoding: [0xc5,0xfb,0x51,0xc0]
-; VCHECK-NEXT:    retl ## encoding: [0xc3]
+; AVX2-LABEL: test_x86_sse2_sqrt_sd:
+; AVX2:       ## BB#0:
+; AVX2-NEXT:    vsqrtsd %xmm0, %xmm0, %xmm0 ## encoding: [0xc5,0xfb,0x51,0xc0]
+; AVX2-NEXT:    retl ## encoding: [0xc3]
+;
+; SKX-LABEL: test_x86_sse2_sqrt_sd:
+; SKX:       ## BB#0:
+; SKX-NEXT:    vsqrtsd %xmm0, %xmm0, %xmm0 ## EVEX TO VEX Compression encoding: [0xc5,0xfb,0x51,0xc0]
+; SKX-NEXT:    retl ## encoding: [0xc3]
   %res = call <2 x double> @llvm.x86.sse2.sqrt.sd(<2 x double> %a0) ; <<2 x double>> [#uses=1]
   ret <2 x double> %res
 }
@@ -1637,7 +1647,7 @@ define <2 x double> @test_x86_sse2_sqrt_sd_vec_load(<2 x double>* %a0) {
 ; SKX:       ## BB#0:
 ; SKX-NEXT:    movl {{[0-9]+}}(%esp), %eax ## encoding: [0x8b,0x44,0x24,0x04]
 ; SKX-NEXT:    vmovapd (%eax), %xmm0 ## EVEX TO VEX Compression encoding: [0xc5,0xf9,0x28,0x00]
-; SKX-NEXT:    vsqrtsd %xmm0, %xmm0, %xmm0 ## encoding: [0xc5,0xfb,0x51,0xc0]
+; SKX-NEXT:    vsqrtsd %xmm0, %xmm0, %xmm0 ## EVEX TO VEX Compression encoding: [0xc5,0xfb,0x51,0xc0]
 ; SKX-NEXT:    retl ## encoding: [0xc3]
   %a1 = load <2 x double>, <2 x double>* %a0, align 16
   %res = call <2 x double> @llvm.x86.sse2.sqrt.sd(<2 x double> %a1) ; <<2 x double>> [#uses=1]

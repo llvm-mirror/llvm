@@ -14,15 +14,15 @@
 #ifndef LLVM_LIB_TARGET_AMDGPU_SIMACHINEFUNCTIONINFO_H
 #define LLVM_LIB_TARGET_AMDGPU_SIMACHINEFUNCTIONINFO_H
 
-#include "AMDGPUMachineFunction.h"
 #include "AMDGPUArgumentUsageInfo.h"
+#include "AMDGPUMachineFunction.h"
 #include "SIRegisterInfo.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/PseudoSourceValue.h"
-#include "llvm/Target/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <array>
@@ -87,9 +87,6 @@ public:
 /// This class keeps track of the SPI_SP_INPUT_ADDR config register, which
 /// tells the hardware which interpolation parameters to load.
 class SIMachineFunctionInfo final : public AMDGPUMachineFunction {
-  // FIXME: This should be removed and getPreloadedValue moved here.
-  friend class SIRegisterInfo;
-
   unsigned TIDReg = AMDGPU::NoRegister;
 
   // Registers that may be reserved for spilling purposes. These may be the same
@@ -143,7 +140,6 @@ class SIMachineFunctionInfo final : public AMDGPUMachineFunction {
 
 private:
   unsigned LDSWaveSpillSize = 0;
-  unsigned ScratchOffsetReg;
   unsigned NumUserSGPRs = 0;
   unsigned NumSystemSGPRs = 0;
 

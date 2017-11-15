@@ -631,7 +631,8 @@ def ADDIUSP_MM : AddImmUSP<"addiusp">, ADDIUSP_FM_MM16;
 def MFHI16_MM : MoveFromHILOMM<"mfhi", GPR32Opnd, AC0>, MFHILO_FM_MM16<0x10>;
 def MFLO16_MM : MoveFromHILOMM<"mflo", GPR32Opnd, AC0>, MFHILO_FM_MM16<0x12>;
 def MOVE16_MM : MoveMM16<"move", GPR32Opnd>, MOVE_FM_MM16<0x03>;
-def MOVEP_MM : MovePMM16<"movep", GPRMM16OpndMoveP>, MOVEP_FM_MM16;
+def MOVEP_MM : MovePMM16<"movep", GPRMM16OpndMoveP>, MOVEP_FM_MM16,
+               ISA_MICROMIPS_NOT_32R6_64R6;
 def LI16_MM : LoadImmMM16<"li16", li16_imm, GPRMM16Opnd>, LI_FM_MM16,
               IsAsCheapAsAMove;
 def JALR16_MM : JumpLinkRegMM16<"jalr", GPR32Opnd>, JALR_FM_MM16<0x0e>,
@@ -884,7 +885,7 @@ let DecoderNamespace = "MicroMips", Predicates = [InMicroMips] in {
   def EXT_MM : MMRel, ExtBase<"ext", GPR32Opnd, uimm5, uimm5_plus1, immZExt5,
                               immZExt5Plus1, MipsExt>, EXT_FM_MM<0x2c>;
   def INS_MM : MMRel, InsBase<"ins", GPR32Opnd, uimm5, uimm5_inssize_plus1,
-                              immZExt5, immZExt5Plus1, MipsIns>,
+                              immZExt5, immZExt5Plus1>,
                EXT_FM_MM<0x0c>;
 
   /// Jump Instructions
@@ -1061,12 +1062,12 @@ let Predicates = [InMicroMips] in {
                 (LW_MM addr:$addr)>;
   def : MipsPat<(subc GPR32:$lhs, GPR32:$rhs),
                 (SUBu_MM GPR32:$lhs, GPR32:$rhs)>;
-
-  def : MipsPat<(MipsTailCall (iPTR tglobaladdr:$dst)),
-                (TAILCALL_MM tglobaladdr:$dst)>, ISA_MIPS1_NOT_32R6_64R6;
-  def : MipsPat<(MipsTailCall (iPTR texternalsym:$dst)),
-                (TAILCALL_MM texternalsym:$dst)>, ISA_MIPS1_NOT_32R6_64R6;
 }
+
+def : MipsPat<(MipsTailCall (iPTR tglobaladdr:$dst)),
+              (TAILCALL_MM tglobaladdr:$dst)>, ISA_MICROMIPS32_NOT_MIPS32R6;
+def : MipsPat<(MipsTailCall (iPTR texternalsym:$dst)),
+              (TAILCALL_MM texternalsym:$dst)>, ISA_MICROMIPS32_NOT_MIPS32R6;
 
 let AddedComplexity = 40 in {
   def : MipsPat<(i32 (sextloadi16 addrRegImm:$a)),

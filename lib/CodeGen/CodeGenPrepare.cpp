@@ -113,6 +113,12 @@ STATISTIC(NumCastUses, "Number of uses of Cast expressions replaced with uses "
                        "of sunken Casts");
 STATISTIC(NumMemoryInsts, "Number of memory instructions whose address "
                           "computations were sunk");
+STATISTIC(NumMemoryInstsPhiCreated,
+          "Number of phis created when address "
+          "computations were sunk to memory instructions");
+STATISTIC(NumMemoryInstsSelectCreated,
+          "Number of select created when address "
+          "computations were sunk to memory instructions");
 STATISTIC(NumExtsMoved,  "Number of [s|z]ext instructions combined with loads");
 STATISTIC(NumExtUses,    "Number of uses of [s|z]ext instructions optimized");
 STATISTIC(NumAndsAdded,
@@ -122,12 +128,6 @@ STATISTIC(NumRetsDup,    "Number of return instructions duplicated");
 STATISTIC(NumDbgValueMoved, "Number of debug value instructions moved");
 STATISTIC(NumSelectsExpanded, "Number of selects turned into branches");
 STATISTIC(NumStoreExtractExposed, "Number of store(extractelement) exposed");
-
-STATISTIC(NumMemCmpCalls, "Number of memcmp calls");
-STATISTIC(NumMemCmpNotConstant, "Number of memcmp calls without constant size");
-STATISTIC(NumMemCmpGreaterThanMax,
-          "Number of memcmp calls with size greater than max size");
-STATISTIC(NumMemCmpInlined, "Number of inlined memcmp calls");
 
 static cl::opt<bool> DisableBranchOpts(
   "disable-cgp-branch-opts", cl::Hidden, cl::init(false),
@@ -189,10 +189,18 @@ EnableTypePromotionMerge("cgp-type-promotion-merge", cl::Hidden,
     cl::desc("Enable merging of redundant sexts when one is dominating"
     " the other."), cl::init(true));
 
-static cl::opt<unsigned> MemCmpNumLoadsPerBlock(
-    "memcmp-num-loads-per-block", cl::Hidden, cl::init(1),
-    cl::desc("The number of loads per basic block for inline expansion of "
-             "memcmp that is only being compared against zero."));
+static cl::opt<bool> DisableComplexAddrModes(
+    "disable-complex-addr-modes", cl::Hidden, cl::init(true),
+    cl::desc("Disables combining addressing modes with different parts "
+             "in optimizeMemoryInst."));
+
+static cl::opt<bool>
+AddrSinkNewPhis("addr-sink-new-phis", cl::Hidden, cl::init(false),
+                cl::desc("Allow creation of Phis in Address sinking."));
+
+static cl::opt<bool>
+AddrSinkNewSelects("addr-sink-new-select", cl::Hidden, cl::init(false),
+                   cl::desc("Allow creation of selects in Address sinking."));
 
 namespace {
 
@@ -1182,6 +1190,7 @@ static bool SinkCast(CastInst *CI) {
 
   // If we removed all uses, nuke the cast.
   if (CI->use_empty()) {
+    salvageDebugInfo(*CI);
     CI->eraseFromParent();
     MadeChange = true;
   }
@@ -1697,699 +1706,6 @@ static bool despeculateCountZeros(IntrinsicInst *CountZeros,
   return true;
 }
 
-namespace {
-
-// This class provides helper functions to expand a memcmp library call into an
-// inline expansion.
-class MemCmpExpansion {
-  struct ResultBlock {
-    BasicBlock *BB = nullptr;
-    PHINode *PhiSrc1 = nullptr;
-    PHINode *PhiSrc2 = nullptr;
-
-    ResultBlock() = default;
-  };
-
-  CallInst *const CI;
-  ResultBlock ResBlock;
-  const uint64_t Size;
-  unsigned MaxLoadSize;
-  uint64_t NumLoadsNonOneByte;
-  const uint64_t NumLoadsPerBlock;
-  std::vector<BasicBlock *> LoadCmpBlocks;
-  BasicBlock *EndBlock;
-  PHINode *PhiRes;
-  const bool IsUsedForZeroCmp;
-  const DataLayout &DL;
-  IRBuilder<> Builder;
-  // Represents the decomposition in blocks of the expansion. For example,
-  // comparing 33 bytes on X86+sse can be done with 2x16-byte loads and
-  // 1x1-byte load, which would be represented as [{16, 0}, {16, 16}, {32, 1}.
-  // TODO(courbet): Involve the target more in this computation. On X86, 7
-  // bytes can be done more efficiently with two overlaping 4-byte loads than
-  // covering the interval with [{4, 0},{2, 4},{1, 6}}.
-  struct LoadEntry {
-    LoadEntry(unsigned LoadSize, uint64_t Offset)
-        : LoadSize(LoadSize), Offset(Offset) {
-      assert(Offset % LoadSize == 0 && "invalid load entry");
-    }
-
-    uint64_t getGEPIndex() const { return Offset / LoadSize; }
-
-    // The size of the load for this block, in bytes.
-    const unsigned LoadSize;
-    // The offset of this load WRT the base pointer, in bytes.
-    const uint64_t Offset;
-  };
-  SmallVector<LoadEntry, 8> LoadSequence;
-
-  void createLoadCmpBlocks();
-  void createResultBlock();
-  void setupResultBlockPHINodes();
-  void setupEndBlockPHINodes();
-  Value *getCompareLoadPairs(unsigned BlockIndex, unsigned &LoadIndex);
-  void emitLoadCompareBlock(unsigned BlockIndex);
-  void emitLoadCompareBlockMultipleLoads(unsigned BlockIndex,
-                                         unsigned &LoadIndex);
-  void emitLoadCompareByteBlock(unsigned BlockIndex, unsigned GEPIndex);
-  void emitMemCmpResultBlock();
-  Value *getMemCmpExpansionZeroCase();
-  Value *getMemCmpEqZeroOneBlock();
-  Value *getMemCmpOneBlock();
-
- public:
-  MemCmpExpansion(CallInst *CI, uint64_t Size,
-                  const TargetTransformInfo::MemCmpExpansionOptions &Options,
-                  unsigned MaxNumLoads, const bool IsUsedForZeroCmp,
-                  unsigned NumLoadsPerBlock, const DataLayout &DL);
-
-  unsigned getNumBlocks();
-  uint64_t getNumLoads() const { return LoadSequence.size(); }
-
-  Value *getMemCmpExpansion();
-};
-
-} // end anonymous namespace
-
-// Initialize the basic block structure required for expansion of memcmp call
-// with given maximum load size and memcmp size parameter.
-// This structure includes:
-// 1. A list of load compare blocks - LoadCmpBlocks.
-// 2. An EndBlock, split from original instruction point, which is the block to
-// return from.
-// 3. ResultBlock, block to branch to for early exit when a
-// LoadCmpBlock finds a difference.
-MemCmpExpansion::MemCmpExpansion(
-    CallInst *const CI, uint64_t Size,
-    const TargetTransformInfo::MemCmpExpansionOptions &Options,
-    const unsigned MaxNumLoads, const bool IsUsedForZeroCmp,
-    const unsigned NumLoadsPerBlock, const DataLayout &TheDataLayout)
-    : CI(CI),
-      Size(Size),
-      MaxLoadSize(0),
-      NumLoadsNonOneByte(0),
-      NumLoadsPerBlock(NumLoadsPerBlock),
-      IsUsedForZeroCmp(IsUsedForZeroCmp),
-      DL(TheDataLayout),
-      Builder(CI) {
-  assert(Size > 0 && "zero blocks");
-  // Scale the max size down if the target can load more bytes than we need.
-  size_t LoadSizeIndex = 0;
-  while (LoadSizeIndex < Options.LoadSizes.size() &&
-         Options.LoadSizes[LoadSizeIndex] > Size) {
-    ++LoadSizeIndex;
-  }
-  this->MaxLoadSize = Options.LoadSizes[LoadSizeIndex];
-  // Compute the decomposition.
-  uint64_t CurSize = Size;
-  uint64_t Offset = 0;
-  while (CurSize && LoadSizeIndex < Options.LoadSizes.size()) {
-    const unsigned LoadSize = Options.LoadSizes[LoadSizeIndex];
-    assert(LoadSize > 0 && "zero load size");
-    const uint64_t NumLoadsForThisSize = CurSize / LoadSize;
-    if (LoadSequence.size() + NumLoadsForThisSize > MaxNumLoads) {
-      // Do not expand if the total number of loads is larger than what the
-      // target allows. Note that it's important that we exit before completing
-      // the expansion to avoid using a ton of memory to store the expansion for
-      // large sizes.
-      LoadSequence.clear();
-      return;
-    }
-    if (NumLoadsForThisSize > 0) {
-      for (uint64_t I = 0; I < NumLoadsForThisSize; ++I) {
-        LoadSequence.push_back({LoadSize, Offset});
-        Offset += LoadSize;
-      }
-      if (LoadSize > 1) {
-        ++NumLoadsNonOneByte;
-      }
-      CurSize = CurSize % LoadSize;
-    }
-    ++LoadSizeIndex;
-  }
-  assert(LoadSequence.size() <= MaxNumLoads && "broken invariant");
-}
-
-unsigned MemCmpExpansion::getNumBlocks() {
-  if (IsUsedForZeroCmp)
-    return getNumLoads() / NumLoadsPerBlock +
-           (getNumLoads() % NumLoadsPerBlock != 0 ? 1 : 0);
-  return getNumLoads();
-}
-
-void MemCmpExpansion::createLoadCmpBlocks() {
-  for (unsigned i = 0; i < getNumBlocks(); i++) {
-    BasicBlock *BB = BasicBlock::Create(CI->getContext(), "loadbb",
-                                        EndBlock->getParent(), EndBlock);
-    LoadCmpBlocks.push_back(BB);
-  }
-}
-
-void MemCmpExpansion::createResultBlock() {
-  ResBlock.BB = BasicBlock::Create(CI->getContext(), "res_block",
-                                   EndBlock->getParent(), EndBlock);
-}
-
-// This function creates the IR instructions for loading and comparing 1 byte.
-// It loads 1 byte from each source of the memcmp parameters with the given
-// GEPIndex. It then subtracts the two loaded values and adds this result to the
-// final phi node for selecting the memcmp result.
-void MemCmpExpansion::emitLoadCompareByteBlock(unsigned BlockIndex,
-                                               unsigned GEPIndex) {
-  Value *Source1 = CI->getArgOperand(0);
-  Value *Source2 = CI->getArgOperand(1);
-
-  Builder.SetInsertPoint(LoadCmpBlocks[BlockIndex]);
-  Type *LoadSizeType = Type::getInt8Ty(CI->getContext());
-  // Cast source to LoadSizeType*.
-  if (Source1->getType() != LoadSizeType)
-    Source1 = Builder.CreateBitCast(Source1, LoadSizeType->getPointerTo());
-  if (Source2->getType() != LoadSizeType)
-    Source2 = Builder.CreateBitCast(Source2, LoadSizeType->getPointerTo());
-
-  // Get the base address using the GEPIndex.
-  if (GEPIndex != 0) {
-    Source1 = Builder.CreateGEP(LoadSizeType, Source1,
-                                ConstantInt::get(LoadSizeType, GEPIndex));
-    Source2 = Builder.CreateGEP(LoadSizeType, Source2,
-                                ConstantInt::get(LoadSizeType, GEPIndex));
-  }
-
-  Value *LoadSrc1 = Builder.CreateLoad(LoadSizeType, Source1);
-  Value *LoadSrc2 = Builder.CreateLoad(LoadSizeType, Source2);
-
-  LoadSrc1 = Builder.CreateZExt(LoadSrc1, Type::getInt32Ty(CI->getContext()));
-  LoadSrc2 = Builder.CreateZExt(LoadSrc2, Type::getInt32Ty(CI->getContext()));
-  Value *Diff = Builder.CreateSub(LoadSrc1, LoadSrc2);
-
-  PhiRes->addIncoming(Diff, LoadCmpBlocks[BlockIndex]);
-
-  if (BlockIndex < (LoadCmpBlocks.size() - 1)) {
-    // Early exit branch if difference found to EndBlock. Otherwise, continue to
-    // next LoadCmpBlock,
-    Value *Cmp = Builder.CreateICmp(ICmpInst::ICMP_NE, Diff,
-                                    ConstantInt::get(Diff->getType(), 0));
-    BranchInst *CmpBr =
-        BranchInst::Create(EndBlock, LoadCmpBlocks[BlockIndex + 1], Cmp);
-    Builder.Insert(CmpBr);
-  } else {
-    // The last block has an unconditional branch to EndBlock.
-    BranchInst *CmpBr = BranchInst::Create(EndBlock);
-    Builder.Insert(CmpBr);
-  }
-}
-
-/// Generate an equality comparison for one or more pairs of loaded values.
-/// This is used in the case where the memcmp() call is compared equal or not
-/// equal to zero.
-Value *MemCmpExpansion::getCompareLoadPairs(unsigned BlockIndex,
-                                            unsigned &LoadIndex) {
-  assert(LoadIndex < getNumLoads() &&
-         "getCompareLoadPairs() called with no remaining loads");
-  std::vector<Value *> XorList, OrList;
-  Value *Diff;
-
-  const unsigned NumLoads =
-      std::min(getNumLoads() - LoadIndex, NumLoadsPerBlock);
-
-  // For a single-block expansion, start inserting before the memcmp call.
-  if (LoadCmpBlocks.empty())
-    Builder.SetInsertPoint(CI);
-  else
-    Builder.SetInsertPoint(LoadCmpBlocks[BlockIndex]);
-
-  Value *Cmp = nullptr;
-  // If we have multiple loads per block, we need to generate a composite
-  // comparison using xor+or. The type for the combinations is the largest load
-  // type.
-  IntegerType *const MaxLoadType =
-      NumLoads == 1 ? nullptr
-                    : IntegerType::get(CI->getContext(), MaxLoadSize * 8);
-  for (unsigned i = 0; i < NumLoads; ++i, ++LoadIndex) {
-    const LoadEntry &CurLoadEntry = LoadSequence[LoadIndex];
-
-    IntegerType *LoadSizeType =
-        IntegerType::get(CI->getContext(), CurLoadEntry.LoadSize * 8);
-
-    Value *Source1 = CI->getArgOperand(0);
-    Value *Source2 = CI->getArgOperand(1);
-
-    // Cast source to LoadSizeType*.
-    if (Source1->getType() != LoadSizeType)
-      Source1 = Builder.CreateBitCast(Source1, LoadSizeType->getPointerTo());
-    if (Source2->getType() != LoadSizeType)
-      Source2 = Builder.CreateBitCast(Source2, LoadSizeType->getPointerTo());
-
-    // Get the base address using a GEP.
-    if (CurLoadEntry.Offset != 0) {
-      Source1 = Builder.CreateGEP(
-          LoadSizeType, Source1,
-          ConstantInt::get(LoadSizeType, CurLoadEntry.getGEPIndex()));
-      Source2 = Builder.CreateGEP(
-          LoadSizeType, Source2,
-          ConstantInt::get(LoadSizeType, CurLoadEntry.getGEPIndex()));
-    }
-
-    // Get a constant or load a value for each source address.
-    Value *LoadSrc1 = nullptr;
-    if (auto *Source1C = dyn_cast<Constant>(Source1))
-      LoadSrc1 = ConstantFoldLoadFromConstPtr(Source1C, LoadSizeType, DL);
-    if (!LoadSrc1)
-      LoadSrc1 = Builder.CreateLoad(LoadSizeType, Source1);
-
-    Value *LoadSrc2 = nullptr;
-    if (auto *Source2C = dyn_cast<Constant>(Source2))
-      LoadSrc2 = ConstantFoldLoadFromConstPtr(Source2C, LoadSizeType, DL);
-    if (!LoadSrc2)
-      LoadSrc2 = Builder.CreateLoad(LoadSizeType, Source2);
-
-    if (NumLoads != 1) {
-      if (LoadSizeType != MaxLoadType) {
-        LoadSrc1 = Builder.CreateZExt(LoadSrc1, MaxLoadType);
-        LoadSrc2 = Builder.CreateZExt(LoadSrc2, MaxLoadType);
-      }
-      // If we have multiple loads per block, we need to generate a composite
-      // comparison using xor+or.
-      Diff = Builder.CreateXor(LoadSrc1, LoadSrc2);
-      Diff = Builder.CreateZExt(Diff, MaxLoadType);
-      XorList.push_back(Diff);
-    } else {
-      // If there's only one load per block, we just compare the loaded values.
-      Cmp = Builder.CreateICmpNE(LoadSrc1, LoadSrc2);
-    }
-  }
-
-  auto pairWiseOr = [&](std::vector<Value *> &InList) -> std::vector<Value *> {
-    std::vector<Value *> OutList;
-    for (unsigned i = 0; i < InList.size() - 1; i = i + 2) {
-      Value *Or = Builder.CreateOr(InList[i], InList[i + 1]);
-      OutList.push_back(Or);
-    }
-    if (InList.size() % 2 != 0)
-      OutList.push_back(InList.back());
-    return OutList;
-  };
-
-  if (!Cmp) {
-    // Pairwise OR the XOR results.
-    OrList = pairWiseOr(XorList);
-
-    // Pairwise OR the OR results until one result left.
-    while (OrList.size() != 1) {
-      OrList = pairWiseOr(OrList);
-    }
-    Cmp = Builder.CreateICmpNE(OrList[0], ConstantInt::get(Diff->getType(), 0));
-  }
-
-  return Cmp;
-}
-
-void MemCmpExpansion::emitLoadCompareBlockMultipleLoads(unsigned BlockIndex,
-                                                        unsigned &LoadIndex) {
-  Value *Cmp = getCompareLoadPairs(BlockIndex, LoadIndex);
-
-  BasicBlock *NextBB = (BlockIndex == (LoadCmpBlocks.size() - 1))
-                           ? EndBlock
-                           : LoadCmpBlocks[BlockIndex + 1];
-  // Early exit branch if difference found to ResultBlock. Otherwise,
-  // continue to next LoadCmpBlock or EndBlock.
-  BranchInst *CmpBr = BranchInst::Create(ResBlock.BB, NextBB, Cmp);
-  Builder.Insert(CmpBr);
-
-  // Add a phi edge for the last LoadCmpBlock to Endblock with a value of 0
-  // since early exit to ResultBlock was not taken (no difference was found in
-  // any of the bytes).
-  if (BlockIndex == LoadCmpBlocks.size() - 1) {
-    Value *Zero = ConstantInt::get(Type::getInt32Ty(CI->getContext()), 0);
-    PhiRes->addIncoming(Zero, LoadCmpBlocks[BlockIndex]);
-  }
-}
-
-// This function creates the IR intructions for loading and comparing using the
-// given LoadSize. It loads the number of bytes specified by LoadSize from each
-// source of the memcmp parameters. It then does a subtract to see if there was
-// a difference in the loaded values. If a difference is found, it branches
-// with an early exit to the ResultBlock for calculating which source was
-// larger. Otherwise, it falls through to the either the next LoadCmpBlock or
-// the EndBlock if this is the last LoadCmpBlock. Loading 1 byte is handled with
-// a special case through emitLoadCompareByteBlock. The special handling can
-// simply subtract the loaded values and add it to the result phi node.
-void MemCmpExpansion::emitLoadCompareBlock(unsigned BlockIndex) {
-  // There is one load per block in this case, BlockIndex == LoadIndex.
-  const LoadEntry &CurLoadEntry = LoadSequence[BlockIndex];
-
-  if (CurLoadEntry.LoadSize == 1) {
-    MemCmpExpansion::emitLoadCompareByteBlock(BlockIndex,
-                                              CurLoadEntry.getGEPIndex());
-    return;
-  }
-
-  Type *LoadSizeType =
-      IntegerType::get(CI->getContext(), CurLoadEntry.LoadSize * 8);
-  Type *MaxLoadType = IntegerType::get(CI->getContext(), MaxLoadSize * 8);
-  assert(CurLoadEntry.LoadSize <= MaxLoadSize && "Unexpected load type");
-
-  Value *Source1 = CI->getArgOperand(0);
-  Value *Source2 = CI->getArgOperand(1);
-
-  Builder.SetInsertPoint(LoadCmpBlocks[BlockIndex]);
-  // Cast source to LoadSizeType*.
-  if (Source1->getType() != LoadSizeType)
-    Source1 = Builder.CreateBitCast(Source1, LoadSizeType->getPointerTo());
-  if (Source2->getType() != LoadSizeType)
-    Source2 = Builder.CreateBitCast(Source2, LoadSizeType->getPointerTo());
-
-  // Get the base address using a GEP.
-  if (CurLoadEntry.Offset != 0) {
-    Source1 = Builder.CreateGEP(
-        LoadSizeType, Source1,
-        ConstantInt::get(LoadSizeType, CurLoadEntry.getGEPIndex()));
-    Source2 = Builder.CreateGEP(
-        LoadSizeType, Source2,
-        ConstantInt::get(LoadSizeType, CurLoadEntry.getGEPIndex()));
-  }
-
-  // Load LoadSizeType from the base address.
-  Value *LoadSrc1 = Builder.CreateLoad(LoadSizeType, Source1);
-  Value *LoadSrc2 = Builder.CreateLoad(LoadSizeType, Source2);
-
-  if (DL.isLittleEndian()) {
-    Function *Bswap = Intrinsic::getDeclaration(CI->getModule(),
-                                                Intrinsic::bswap, LoadSizeType);
-    LoadSrc1 = Builder.CreateCall(Bswap, LoadSrc1);
-    LoadSrc2 = Builder.CreateCall(Bswap, LoadSrc2);
-  }
-
-  if (LoadSizeType != MaxLoadType) {
-    LoadSrc1 = Builder.CreateZExt(LoadSrc1, MaxLoadType);
-    LoadSrc2 = Builder.CreateZExt(LoadSrc2, MaxLoadType);
-  }
-
-  // Add the loaded values to the phi nodes for calculating memcmp result only
-  // if result is not used in a zero equality.
-  if (!IsUsedForZeroCmp) {
-    ResBlock.PhiSrc1->addIncoming(LoadSrc1, LoadCmpBlocks[BlockIndex]);
-    ResBlock.PhiSrc2->addIncoming(LoadSrc2, LoadCmpBlocks[BlockIndex]);
-  }
-
-  Value *Cmp = Builder.CreateICmp(ICmpInst::ICMP_EQ, LoadSrc1, LoadSrc2);
-  BasicBlock *NextBB = (BlockIndex == (LoadCmpBlocks.size() - 1))
-                           ? EndBlock
-                           : LoadCmpBlocks[BlockIndex + 1];
-  // Early exit branch if difference found to ResultBlock. Otherwise, continue
-  // to next LoadCmpBlock or EndBlock.
-  BranchInst *CmpBr = BranchInst::Create(NextBB, ResBlock.BB, Cmp);
-  Builder.Insert(CmpBr);
-
-  // Add a phi edge for the last LoadCmpBlock to Endblock with a value of 0
-  // since early exit to ResultBlock was not taken (no difference was found in
-  // any of the bytes).
-  if (BlockIndex == LoadCmpBlocks.size() - 1) {
-    Value *Zero = ConstantInt::get(Type::getInt32Ty(CI->getContext()), 0);
-    PhiRes->addIncoming(Zero, LoadCmpBlocks[BlockIndex]);
-  }
-}
-
-// This function populates the ResultBlock with a sequence to calculate the
-// memcmp result. It compares the two loaded source values and returns -1 if
-// src1 < src2 and 1 if src1 > src2.
-void MemCmpExpansion::emitMemCmpResultBlock() {
-  // Special case: if memcmp result is used in a zero equality, result does not
-  // need to be calculated and can simply return 1.
-  if (IsUsedForZeroCmp) {
-    BasicBlock::iterator InsertPt = ResBlock.BB->getFirstInsertionPt();
-    Builder.SetInsertPoint(ResBlock.BB, InsertPt);
-    Value *Res = ConstantInt::get(Type::getInt32Ty(CI->getContext()), 1);
-    PhiRes->addIncoming(Res, ResBlock.BB);
-    BranchInst *NewBr = BranchInst::Create(EndBlock);
-    Builder.Insert(NewBr);
-    return;
-  }
-  BasicBlock::iterator InsertPt = ResBlock.BB->getFirstInsertionPt();
-  Builder.SetInsertPoint(ResBlock.BB, InsertPt);
-
-  Value *Cmp = Builder.CreateICmp(ICmpInst::ICMP_ULT, ResBlock.PhiSrc1,
-                                  ResBlock.PhiSrc2);
-
-  Value *Res =
-      Builder.CreateSelect(Cmp, ConstantInt::get(Builder.getInt32Ty(), -1),
-                           ConstantInt::get(Builder.getInt32Ty(), 1));
-
-  BranchInst *NewBr = BranchInst::Create(EndBlock);
-  Builder.Insert(NewBr);
-  PhiRes->addIncoming(Res, ResBlock.BB);
-}
-
-void MemCmpExpansion::setupResultBlockPHINodes() {
-  Type *MaxLoadType = IntegerType::get(CI->getContext(), MaxLoadSize * 8);
-  Builder.SetInsertPoint(ResBlock.BB);
-  // Note: this assumes one load per block.
-  ResBlock.PhiSrc1 =
-      Builder.CreatePHI(MaxLoadType, NumLoadsNonOneByte, "phi.src1");
-  ResBlock.PhiSrc2 =
-      Builder.CreatePHI(MaxLoadType, NumLoadsNonOneByte, "phi.src2");
-}
-
-void MemCmpExpansion::setupEndBlockPHINodes() {
-  Builder.SetInsertPoint(&EndBlock->front());
-  PhiRes = Builder.CreatePHI(Type::getInt32Ty(CI->getContext()), 2, "phi.res");
-}
-
-Value *MemCmpExpansion::getMemCmpExpansionZeroCase() {
-  unsigned LoadIndex = 0;
-  // This loop populates each of the LoadCmpBlocks with the IR sequence to
-  // handle multiple loads per block.
-  for (unsigned I = 0; I < getNumBlocks(); ++I) {
-    emitLoadCompareBlockMultipleLoads(I, LoadIndex);
-  }
-
-  emitMemCmpResultBlock();
-  return PhiRes;
-}
-
-/// A memcmp expansion that compares equality with 0 and only has one block of
-/// load and compare can bypass the compare, branch, and phi IR that is required
-/// in the general case.
-Value *MemCmpExpansion::getMemCmpEqZeroOneBlock() {
-  unsigned LoadIndex = 0;
-  Value *Cmp = getCompareLoadPairs(0, LoadIndex);
-  assert(LoadIndex == getNumLoads() && "some entries were not consumed");
-  return Builder.CreateZExt(Cmp, Type::getInt32Ty(CI->getContext()));
-}
-
-/// A memcmp expansion that only has one block of load and compare can bypass
-/// the compare, branch, and phi IR that is required in the general case.
-Value *MemCmpExpansion::getMemCmpOneBlock() {
-  assert(NumLoadsPerBlock == 1 && "Only handles one load pair per block");
-
-  Type *LoadSizeType = IntegerType::get(CI->getContext(), Size * 8);
-  Value *Source1 = CI->getArgOperand(0);
-  Value *Source2 = CI->getArgOperand(1);
-
-  // Cast source to LoadSizeType*.
-  if (Source1->getType() != LoadSizeType)
-    Source1 = Builder.CreateBitCast(Source1, LoadSizeType->getPointerTo());
-  if (Source2->getType() != LoadSizeType)
-    Source2 = Builder.CreateBitCast(Source2, LoadSizeType->getPointerTo());
-
-  // Load LoadSizeType from the base address.
-  Value *LoadSrc1 = Builder.CreateLoad(LoadSizeType, Source1);
-  Value *LoadSrc2 = Builder.CreateLoad(LoadSizeType, Source2);
-
-  if (DL.isLittleEndian() && Size != 1) {
-    Function *Bswap = Intrinsic::getDeclaration(CI->getModule(),
-                                                Intrinsic::bswap, LoadSizeType);
-    LoadSrc1 = Builder.CreateCall(Bswap, LoadSrc1);
-    LoadSrc2 = Builder.CreateCall(Bswap, LoadSrc2);
-  }
-
-  if (Size < 4) {
-    // The i8 and i16 cases don't need compares. We zext the loaded values and
-    // subtract them to get the suitable negative, zero, or positive i32 result.
-    LoadSrc1 = Builder.CreateZExt(LoadSrc1, Builder.getInt32Ty());
-    LoadSrc2 = Builder.CreateZExt(LoadSrc2, Builder.getInt32Ty());
-    return Builder.CreateSub(LoadSrc1, LoadSrc2);
-  }
-
-  // The result of memcmp is negative, zero, or positive, so produce that by
-  // subtracting 2 extended compare bits: sub (ugt, ult).
-  // If a target prefers to use selects to get -1/0/1, they should be able
-  // to transform this later. The inverse transform (going from selects to math)
-  // may not be possible in the DAG because the selects got converted into
-  // branches before we got there.
-  Value *CmpUGT = Builder.CreateICmpUGT(LoadSrc1, LoadSrc2);
-  Value *CmpULT = Builder.CreateICmpULT(LoadSrc1, LoadSrc2);
-  Value *ZextUGT = Builder.CreateZExt(CmpUGT, Builder.getInt32Ty());
-  Value *ZextULT = Builder.CreateZExt(CmpULT, Builder.getInt32Ty());
-  return Builder.CreateSub(ZextUGT, ZextULT);
-}
-
-// This function expands the memcmp call into an inline expansion and returns
-// the memcmp result.
-Value *MemCmpExpansion::getMemCmpExpansion() {
-  // A memcmp with zero-comparison with only one block of load and compare does
-  // not need to set up any extra blocks. This case could be handled in the DAG,
-  // but since we have all of the machinery to flexibly expand any memcpy here,
-  // we choose to handle this case too to avoid fragmented lowering.
-  if ((!IsUsedForZeroCmp && NumLoadsPerBlock != 1) || getNumBlocks() != 1) {
-    BasicBlock *StartBlock = CI->getParent();
-    EndBlock = StartBlock->splitBasicBlock(CI, "endblock");
-    setupEndBlockPHINodes();
-    createResultBlock();
-
-    // If return value of memcmp is not used in a zero equality, we need to
-    // calculate which source was larger. The calculation requires the
-    // two loaded source values of each load compare block.
-    // These will be saved in the phi nodes created by setupResultBlockPHINodes.
-    if (!IsUsedForZeroCmp) setupResultBlockPHINodes();
-
-    // Create the number of required load compare basic blocks.
-    createLoadCmpBlocks();
-
-    // Update the terminator added by splitBasicBlock to branch to the first
-    // LoadCmpBlock.
-    StartBlock->getTerminator()->setSuccessor(0, LoadCmpBlocks[0]);
-  }
-
-  Builder.SetCurrentDebugLocation(CI->getDebugLoc());
-
-  if (IsUsedForZeroCmp)
-    return getNumBlocks() == 1 ? getMemCmpEqZeroOneBlock()
-                               : getMemCmpExpansionZeroCase();
-
-  // TODO: Handle more than one load pair per block in getMemCmpOneBlock().
-  if (getNumBlocks() == 1 && NumLoadsPerBlock == 1) return getMemCmpOneBlock();
-
-  for (unsigned I = 0; I < getNumBlocks(); ++I) {
-    emitLoadCompareBlock(I);
-  }
-
-  emitMemCmpResultBlock();
-  return PhiRes;
-}
-
-// This function checks to see if an expansion of memcmp can be generated.
-// It checks for constant compare size that is less than the max inline size.
-// If an expansion cannot occur, returns false to leave as a library call.
-// Otherwise, the library call is replaced with a new IR instruction sequence.
-/// We want to transform:
-/// %call = call signext i32 @memcmp(i8* %0, i8* %1, i64 15)
-/// To:
-/// loadbb:
-///  %0 = bitcast i32* %buffer2 to i8*
-///  %1 = bitcast i32* %buffer1 to i8*
-///  %2 = bitcast i8* %1 to i64*
-///  %3 = bitcast i8* %0 to i64*
-///  %4 = load i64, i64* %2
-///  %5 = load i64, i64* %3
-///  %6 = call i64 @llvm.bswap.i64(i64 %4)
-///  %7 = call i64 @llvm.bswap.i64(i64 %5)
-///  %8 = sub i64 %6, %7
-///  %9 = icmp ne i64 %8, 0
-///  br i1 %9, label %res_block, label %loadbb1
-/// res_block:                                        ; preds = %loadbb2,
-/// %loadbb1, %loadbb
-///  %phi.src1 = phi i64 [ %6, %loadbb ], [ %22, %loadbb1 ], [ %36, %loadbb2 ]
-///  %phi.src2 = phi i64 [ %7, %loadbb ], [ %23, %loadbb1 ], [ %37, %loadbb2 ]
-///  %10 = icmp ult i64 %phi.src1, %phi.src2
-///  %11 = select i1 %10, i32 -1, i32 1
-///  br label %endblock
-/// loadbb1:                                          ; preds = %loadbb
-///  %12 = bitcast i32* %buffer2 to i8*
-///  %13 = bitcast i32* %buffer1 to i8*
-///  %14 = bitcast i8* %13 to i32*
-///  %15 = bitcast i8* %12 to i32*
-///  %16 = getelementptr i32, i32* %14, i32 2
-///  %17 = getelementptr i32, i32* %15, i32 2
-///  %18 = load i32, i32* %16
-///  %19 = load i32, i32* %17
-///  %20 = call i32 @llvm.bswap.i32(i32 %18)
-///  %21 = call i32 @llvm.bswap.i32(i32 %19)
-///  %22 = zext i32 %20 to i64
-///  %23 = zext i32 %21 to i64
-///  %24 = sub i64 %22, %23
-///  %25 = icmp ne i64 %24, 0
-///  br i1 %25, label %res_block, label %loadbb2
-/// loadbb2:                                          ; preds = %loadbb1
-///  %26 = bitcast i32* %buffer2 to i8*
-///  %27 = bitcast i32* %buffer1 to i8*
-///  %28 = bitcast i8* %27 to i16*
-///  %29 = bitcast i8* %26 to i16*
-///  %30 = getelementptr i16, i16* %28, i16 6
-///  %31 = getelementptr i16, i16* %29, i16 6
-///  %32 = load i16, i16* %30
-///  %33 = load i16, i16* %31
-///  %34 = call i16 @llvm.bswap.i16(i16 %32)
-///  %35 = call i16 @llvm.bswap.i16(i16 %33)
-///  %36 = zext i16 %34 to i64
-///  %37 = zext i16 %35 to i64
-///  %38 = sub i64 %36, %37
-///  %39 = icmp ne i64 %38, 0
-///  br i1 %39, label %res_block, label %loadbb3
-/// loadbb3:                                          ; preds = %loadbb2
-///  %40 = bitcast i32* %buffer2 to i8*
-///  %41 = bitcast i32* %buffer1 to i8*
-///  %42 = getelementptr i8, i8* %41, i8 14
-///  %43 = getelementptr i8, i8* %40, i8 14
-///  %44 = load i8, i8* %42
-///  %45 = load i8, i8* %43
-///  %46 = zext i8 %44 to i32
-///  %47 = zext i8 %45 to i32
-///  %48 = sub i32 %46, %47
-///  br label %endblock
-/// endblock:                                         ; preds = %res_block,
-/// %loadbb3
-///  %phi.res = phi i32 [ %48, %loadbb3 ], [ %11, %res_block ]
-///  ret i32 %phi.res
-static bool expandMemCmp(CallInst *CI, const TargetTransformInfo *TTI,
-                         const TargetLowering *TLI, const DataLayout *DL) {
-  NumMemCmpCalls++;
-
-  // Early exit from expansion if -Oz.
-  if (CI->getFunction()->optForMinSize())
-    return false;
-
-  // Early exit from expansion if size is not a constant.
-  ConstantInt *SizeCast = dyn_cast<ConstantInt>(CI->getArgOperand(2));
-  if (!SizeCast) {
-    NumMemCmpNotConstant++;
-    return false;
-  }
-  const uint64_t SizeVal = SizeCast->getZExtValue();
-
-  if (SizeVal == 0) {
-    return false;
-  }
-
-  // TTI call to check if target would like to expand memcmp. Also, get the
-  // available load sizes.
-  const bool IsUsedForZeroCmp = isOnlyUsedInZeroEqualityComparison(CI);
-  const auto *const Options = TTI->enableMemCmpExpansion(IsUsedForZeroCmp);
-  if (!Options) return false;
-
-  const unsigned MaxNumLoads =
-      TLI->getMaxExpandSizeMemcmp(CI->getFunction()->optForSize());
-
-  MemCmpExpansion Expansion(CI, SizeVal, *Options, MaxNumLoads,
-                            IsUsedForZeroCmp, MemCmpNumLoadsPerBlock, *DL);
-
-  // Don't expand if this will require more loads than desired by the target.
-  if (Expansion.getNumLoads() == 0) {
-    NumMemCmpGreaterThanMax++;
-    return false;
-  }
-
-  NumMemCmpInlined++;
-
-  Value *Res = Expansion.getMemCmpExpansion();
-
-  // Replace call with result of expansion and erase call.
-  CI->replaceAllUsesWith(Res);
-  CI->eraseFromParent();
-
-  return true;
-}
-
 bool CodeGenPrepare::optimizeCallInst(CallInst *CI, bool &ModifiedDT) {
   BasicBlock *BB = CI->getParent();
 
@@ -2542,12 +1858,6 @@ bool CodeGenPrepare::optimizeCallInst(CallInst *CI, bool &ModifiedDT) {
     return true;
   }
 
-  LibFunc Func;
-  if (TLInfo->getLibFunc(ImmutableCallSite(CI), Func) &&
-      Func == LibFunc_memcmp && expandMemCmp(CI, TTI, TLI, DL)) {
-    ModifiedDT = true;
-    return true;
-  }
   return false;
 }
 
@@ -3377,8 +2687,65 @@ private:
                              Value *PromotedOperand) const;
 };
 
+/// \brief Keep track of simplification of Phi nodes.
+/// Accept the set of all phi nodes and erase phi node from this set
+/// if it is simplified.
+class SimplificationTracker {
+  DenseMap<Value *, Value *> Storage;
+  const SimplifyQuery &SQ;
+  SmallPtrSetImpl<PHINode *> &AllPhiNodes;
+  SmallPtrSetImpl<SelectInst *> &AllSelectNodes;
+
+public:
+  SimplificationTracker(const SimplifyQuery &sq,
+                        SmallPtrSetImpl<PHINode *> &APN,
+                        SmallPtrSetImpl<SelectInst *> &ASN)
+      : SQ(sq), AllPhiNodes(APN), AllSelectNodes(ASN) {}
+
+  Value *Get(Value *V) {
+    do {
+      auto SV = Storage.find(V);
+      if (SV == Storage.end())
+        return V;
+      V = SV->second;
+    } while (true);
+  }
+
+  Value *Simplify(Value *Val) {
+    SmallVector<Value *, 32> WorkList;
+    SmallPtrSet<Value *, 32> Visited;
+    WorkList.push_back(Val);
+    while (!WorkList.empty()) {
+      auto P = WorkList.pop_back_val();
+      if (!Visited.insert(P).second)
+        continue;
+      if (auto *PI = dyn_cast<Instruction>(P))
+        if (Value *V = SimplifyInstruction(cast<Instruction>(PI), SQ)) {
+          for (auto *U : PI->users())
+            WorkList.push_back(cast<Value>(U));
+          Put(PI, V);
+          PI->replaceAllUsesWith(V);
+          if (auto *PHI = dyn_cast<PHINode>(PI))
+            AllPhiNodes.erase(PHI);
+          if (auto *Select = dyn_cast<SelectInst>(PI))
+            AllSelectNodes.erase(Select);
+          PI->eraseFromParent();
+        }
+    }
+    return Get(Val);
+  }
+
+  void Put(Value *From, Value *To) {
+    Storage.insert({ From, To });
+  }
+};
+
 /// \brief A helper class for combining addressing modes.
 class AddressingModeCombiner {
+  typedef std::pair<Value *, BasicBlock *> ValueInBB;
+  typedef DenseMap<ValueInBB, Value *> FoldAddrToValueMapping;
+  typedef std::pair<PHINode *, PHINode *> PHIPair;
+
 private:
   /// The addressing modes we've collected.
   SmallVector<ExtAddrMode, 16> AddrModes;
@@ -3389,7 +2756,19 @@ private:
   /// Are the AddrModes that we have all just equal to their original values?
   bool AllAddrModesTrivial = true;
 
+  /// Common Type for all different fields in addressing modes.
+  Type *CommonType;
+
+  /// SimplifyQuery for simplifyInstruction utility.
+  const SimplifyQuery &SQ;
+
+  /// Original Address.
+  ValueInBB Original;
+
 public:
+  AddressingModeCombiner(const SimplifyQuery &_SQ, ValueInBB OriginalValue)
+      : CommonType(nullptr), SQ(_SQ), Original(OriginalValue) {}
+
   /// \brief Get the combined AddrMode
   const ExtAddrMode &getAddrMode() const {
     return AddrModes[0];
@@ -3457,12 +2836,356 @@ public:
     if (AllAddrModesTrivial)
       return false;
 
-    // TODO: Combine multiple AddrModes by inserting a select or phi for the
-    // field in which the AddrModes differ.
-    return false;
+    if (DisableComplexAddrModes)
+      return false;
+
+    // For now we support only different base registers.
+    // TODO: enable others.
+    if (DifferentField != ExtAddrMode::BaseRegField)
+      return false;
+
+    // Build a map between <original value, basic block where we saw it> to
+    // value of base register.
+    FoldAddrToValueMapping Map;
+    initializeMap(Map);
+
+    Value *CommonValue = findCommon(Map);
+    if (CommonValue)
+      AddrModes[0].BaseReg = CommonValue;
+    return CommonValue != nullptr;
+  }
+
+private:
+  /// \brief Initialize Map with anchor values. For address seen in some BB
+  /// we set the value of different field saw in this address.
+  /// If address is not an instruction than basic block is set to null.
+  /// At the same time we find a common type for different field we will
+  /// use to create new Phi/Select nodes. Keep it in CommonType field.
+  void initializeMap(FoldAddrToValueMapping &Map) {
+    // Keep track of keys where the value is null. We will need to replace it
+    // with constant null when we know the common type.
+    SmallVector<ValueInBB, 2> NullValue;
+    for (auto &AM : AddrModes) {
+      BasicBlock *BB = nullptr;
+      if (Instruction *I = dyn_cast<Instruction>(AM.OriginalValue))
+        BB = I->getParent();
+
+      // For now we support only base register as different field.
+      // TODO: Enable others.
+      Value *DV = AM.BaseReg;
+      if (DV) {
+        if (CommonType)
+          assert(CommonType == DV->getType() && "Different types detected!");
+        else
+          CommonType = DV->getType();
+        Map[{ AM.OriginalValue, BB }] = DV;
+      } else {
+        NullValue.push_back({ AM.OriginalValue, BB });
+      }
+    }
+    assert(CommonType && "At least one non-null value must be!");
+    for (auto VIBB : NullValue)
+      Map[VIBB] = Constant::getNullValue(CommonType);
+  }
+
+  /// \brief We have mapping between value A and basic block where value A
+  /// seen to other value B where B was a field in addressing mode represented
+  /// by A. Also we have an original value C representin an address in some
+  /// basic block. Traversing from C through phi and selects we ended up with
+  /// A's in a map. This utility function tries to find a value V which is a
+  /// field in addressing mode C and traversing through phi nodes and selects
+  /// we will end up in corresponded values B in a map.
+  /// The utility will create a new Phi/Selects if needed.
+  // The simple example looks as follows:
+  // BB1:
+  //   p1 = b1 + 40
+  //   br cond BB2, BB3
+  // BB2:
+  //   p2 = b2 + 40
+  //   br BB3
+  // BB3:
+  //   p = phi [p1, BB1], [p2, BB2]
+  //   v = load p
+  // Map is
+  //   <p1, BB1> -> b1
+  //   <p2, BB2> -> b2
+  // Request is
+  //   <p, BB3> -> ?
+  // The function tries to find or build phi [b1, BB1], [b2, BB2] in BB3
+  Value *findCommon(FoldAddrToValueMapping &Map) {
+    // Tracks of new created Phi nodes.
+    SmallPtrSet<PHINode *, 32> NewPhiNodes;
+    // Tracks of new created Select nodes.
+    SmallPtrSet<SelectInst *, 32> NewSelectNodes;
+    // Tracks the simplification of new created phi nodes. The reason we use
+    // this mapping is because we will add new created Phi nodes in AddrToBase.
+    // Simplification of Phi nodes is recursive, so some Phi node may
+    // be simplified after we added it to AddrToBase.
+    // Using this mapping we can find the current value in AddrToBase.
+    SimplificationTracker ST(SQ, NewPhiNodes, NewSelectNodes);
+
+    // First step, DFS to create PHI nodes for all intermediate blocks.
+    // Also fill traverse order for the second step.
+    SmallVector<ValueInBB, 32> TraverseOrder;
+    InsertPlaceholders(Map, TraverseOrder, NewPhiNodes, NewSelectNodes);
+
+    // Second Step, fill new nodes by merged values and simplify if possible.
+    FillPlaceholders(Map, TraverseOrder, ST);
+
+    if (!AddrSinkNewSelects && NewSelectNodes.size() > 0) {
+      DestroyNodes(NewPhiNodes);
+      DestroyNodes(NewSelectNodes);
+      return nullptr;
+    }
+
+    // Now we'd like to match New Phi nodes to existed ones.
+    unsigned PhiNotMatchedCount = 0;
+    if (!MatchPhiSet(NewPhiNodes, ST, AddrSinkNewPhis, PhiNotMatchedCount)) {
+      DestroyNodes(NewPhiNodes);
+      DestroyNodes(NewSelectNodes);
+      return nullptr;
+    }
+
+    auto *Result = ST.Get(Map.find(Original)->second);
+    if (Result) {
+      NumMemoryInstsPhiCreated += NewPhiNodes.size() + PhiNotMatchedCount;
+      NumMemoryInstsSelectCreated += NewSelectNodes.size();
+    }
+    return Result;
+  }
+
+  /// \brief Destroy nodes from a set.
+  template <typename T> void DestroyNodes(SmallPtrSetImpl<T *> &Instructions) {
+    // For safe erasing, replace the Phi with dummy value first.
+    auto Dummy = UndefValue::get(CommonType);
+    for (auto I : Instructions) {
+      I->replaceAllUsesWith(Dummy);
+      I->eraseFromParent();
+    }
+  }
+
+  /// \brief Try to match PHI node to Candidate.
+  /// Matcher tracks the matched Phi nodes.
+  bool MatchPhiNode(PHINode *PHI, PHINode *Candidate,
+                    DenseSet<PHIPair> &Matcher,
+                    SmallPtrSetImpl<PHINode *> &PhiNodesToMatch) {
+    SmallVector<PHIPair, 8> WorkList;
+    Matcher.insert({ PHI, Candidate });
+    WorkList.push_back({ PHI, Candidate });
+    SmallSet<PHIPair, 8> Visited;
+    while (!WorkList.empty()) {
+      auto Item = WorkList.pop_back_val();
+      if (!Visited.insert(Item).second)
+        continue;
+      // We iterate over all incoming values to Phi to compare them.
+      // If values are different and both of them Phi and the first one is a
+      // Phi we added (subject to match) and both of them is in the same basic
+      // block then we can match our pair if values match. So we state that
+      // these values match and add it to work list to verify that.
+      for (auto B : Item.first->blocks()) {
+        Value *FirstValue = Item.first->getIncomingValueForBlock(B);
+        Value *SecondValue = Item.second->getIncomingValueForBlock(B);
+        if (FirstValue == SecondValue)
+          continue;
+
+        PHINode *FirstPhi = dyn_cast<PHINode>(FirstValue);
+        PHINode *SecondPhi = dyn_cast<PHINode>(SecondValue);
+
+        // One of them is not Phi or
+        // The first one is not Phi node from the set we'd like to match or
+        // Phi nodes from different basic blocks then
+        // we will not be able to match.
+        if (!FirstPhi || !SecondPhi || !PhiNodesToMatch.count(FirstPhi) ||
+            FirstPhi->getParent() != SecondPhi->getParent())
+          return false;
+
+        // If we already matched them then continue.
+        if (Matcher.count({ FirstPhi, SecondPhi }))
+          continue;
+        // So the values are different and does not match. So we need them to
+        // match.
+        Matcher.insert({ FirstPhi, SecondPhi });
+        // But me must check it.
+        WorkList.push_back({ FirstPhi, SecondPhi });
+      }
+    }
+    return true;
+  }
+
+  /// \brief For the given set of PHI nodes try to find their equivalents.
+  /// Returns false if this matching fails and creation of new Phi is disabled.
+  bool MatchPhiSet(SmallPtrSetImpl<PHINode *> &PhiNodesToMatch,
+                   SimplificationTracker &ST, bool AllowNewPhiNodes,
+                   unsigned &PhiNotMatchedCount) {
+    DenseSet<PHIPair> Matched;
+    SmallPtrSet<PHINode *, 8> WillNotMatch;
+    while (PhiNodesToMatch.size()) {
+      PHINode *PHI = *PhiNodesToMatch.begin();
+
+      // Add us, if no Phi nodes in the basic block we do not match.
+      WillNotMatch.clear();
+      WillNotMatch.insert(PHI);
+
+      // Traverse all Phis until we found equivalent or fail to do that.
+      bool IsMatched = false;
+      for (auto &P : PHI->getParent()->phis()) {
+        if (&P == PHI)
+          continue;
+        if ((IsMatched = MatchPhiNode(PHI, &P, Matched, PhiNodesToMatch)))
+          break;
+        // If it does not match, collect all Phi nodes from matcher.
+        // if we end up with no match, them all these Phi nodes will not match
+        // later.
+        for (auto M : Matched)
+          WillNotMatch.insert(M.first);
+        Matched.clear();
+      }
+      if (IsMatched) {
+        // Replace all matched values and erase them.
+        for (auto MV : Matched) {
+          MV.first->replaceAllUsesWith(MV.second);
+          PhiNodesToMatch.erase(MV.first);
+          ST.Put(MV.first, MV.second);
+          MV.first->eraseFromParent();
+        }
+        Matched.clear();
+        continue;
+      }
+      // If we are not allowed to create new nodes then bail out.
+      if (!AllowNewPhiNodes)
+        return false;
+      // Just remove all seen values in matcher. They will not match anything.
+      PhiNotMatchedCount += WillNotMatch.size();
+      for (auto *P : WillNotMatch)
+        PhiNodesToMatch.erase(P);
+    }
+    return true;
+  }
+  /// \brief Fill the placeholder with values from predecessors and simplify it.
+  void FillPlaceholders(FoldAddrToValueMapping &Map,
+                        SmallVectorImpl<ValueInBB> &TraverseOrder,
+                        SimplificationTracker &ST) {
+    while (!TraverseOrder.empty()) {
+      auto Current = TraverseOrder.pop_back_val();
+      assert(Map.find(Current) != Map.end() && "No node to fill!!!");
+      Value *CurrentValue = Current.first;
+      BasicBlock *CurrentBlock = Current.second;
+      Value *V = Map[Current];
+
+      if (SelectInst *Select = dyn_cast<SelectInst>(V)) {
+        // CurrentValue also must be Select.
+        auto *CurrentSelect = cast<SelectInst>(CurrentValue);
+        auto *TrueValue = CurrentSelect->getTrueValue();
+        ValueInBB TrueItem = { TrueValue, isa<Instruction>(TrueValue)
+                                              ? CurrentBlock
+                                              : nullptr };
+        assert(Map.find(TrueItem) != Map.end() && "No True Value!");
+        Select->setTrueValue(Map[TrueItem]);
+        auto *FalseValue = CurrentSelect->getFalseValue();
+        ValueInBB FalseItem = { FalseValue, isa<Instruction>(FalseValue)
+                                                ? CurrentBlock
+                                                : nullptr };
+        assert(Map.find(FalseItem) != Map.end() && "No False Value!");
+        Select->setFalseValue(Map[FalseItem]);
+      } else {
+        // Must be a Phi node then.
+        PHINode *PHI = cast<PHINode>(V);
+        // Fill the Phi node with values from predecessors.
+        bool IsDefinedInThisBB =
+            cast<Instruction>(CurrentValue)->getParent() == CurrentBlock;
+        auto *CurrentPhi = dyn_cast<PHINode>(CurrentValue);
+        for (auto B : predecessors(CurrentBlock)) {
+          Value *PV = IsDefinedInThisBB
+                          ? CurrentPhi->getIncomingValueForBlock(B)
+                          : CurrentValue;
+          ValueInBB item = { PV, isa<Instruction>(PV) ? B : nullptr };
+          assert(Map.find(item) != Map.end() && "No predecessor Value!");
+          PHI->addIncoming(ST.Get(Map[item]), B);
+        }
+      }
+      // Simplify if possible.
+      Map[Current] = ST.Simplify(V);
+    }
+  }
+
+  /// Starting from value recursively iterates over predecessors up to known
+  /// ending values represented in a map. For each traversed block inserts
+  /// a placeholder Phi or Select.
+  /// Reports all new created Phi/Select nodes by adding them to set.
+  /// Also reports and order in what basic blocks have been traversed.
+  void InsertPlaceholders(FoldAddrToValueMapping &Map,
+                          SmallVectorImpl<ValueInBB> &TraverseOrder,
+                          SmallPtrSetImpl<PHINode *> &NewPhiNodes,
+                          SmallPtrSetImpl<SelectInst *> &NewSelectNodes) {
+    SmallVector<ValueInBB, 32> Worklist;
+    assert((isa<PHINode>(Original.first) || isa<SelectInst>(Original.first)) &&
+           "Address must be a Phi or Select node");
+    auto *Dummy = UndefValue::get(CommonType);
+    Worklist.push_back(Original);
+    while (!Worklist.empty()) {
+      auto Current = Worklist.pop_back_val();
+      // If value is not an instruction it is something global, constant,
+      // parameter and we can say that this value is observable in any block.
+      // Set block to null to denote it.
+      // Also please take into account that it is how we build anchors.
+      if (!isa<Instruction>(Current.first))
+        Current.second = nullptr;
+      // if it is already visited or it is an ending value then skip it.
+      if (Map.find(Current) != Map.end())
+        continue;
+      TraverseOrder.push_back(Current);
+
+      Value *CurrentValue = Current.first;
+      BasicBlock *CurrentBlock = Current.second;
+      // CurrentValue must be a Phi node or select. All others must be covered
+      // by anchors.
+      Instruction *CurrentI = cast<Instruction>(CurrentValue);
+      bool IsDefinedInThisBB = CurrentI->getParent() == CurrentBlock;
+
+      unsigned PredCount =
+          std::distance(pred_begin(CurrentBlock), pred_end(CurrentBlock));
+      // if Current Value is not defined in this basic block we are interested
+      // in values in predecessors.
+      if (!IsDefinedInThisBB) {
+        assert(PredCount && "Unreachable block?!");
+        PHINode *PHI = PHINode::Create(CommonType, PredCount, "sunk_phi",
+                                       &CurrentBlock->front());
+        Map[Current] = PHI;
+        NewPhiNodes.insert(PHI);
+        // Add all predecessors in work list.
+        for (auto B : predecessors(CurrentBlock))
+          Worklist.push_back({ CurrentValue, B });
+        continue;
+      }
+      // Value is defined in this basic block.
+      if (SelectInst *OrigSelect = dyn_cast<SelectInst>(CurrentI)) {
+        // Is it OK to get metadata from OrigSelect?!
+        // Create a Select placeholder with dummy value.
+        SelectInst *Select =
+            SelectInst::Create(OrigSelect->getCondition(), Dummy, Dummy,
+                               OrigSelect->getName(), OrigSelect, OrigSelect);
+        Map[Current] = Select;
+        NewSelectNodes.insert(Select);
+        // We are interested in True and False value in this basic block.
+        Worklist.push_back({ OrigSelect->getTrueValue(), CurrentBlock });
+        Worklist.push_back({ OrigSelect->getFalseValue(), CurrentBlock });
+      } else {
+        // It must be a Phi node then.
+        auto *CurrentPhi = cast<PHINode>(CurrentI);
+        // Create new Phi node for merge of bases.
+        assert(PredCount && "Unreachable block?!");
+        PHINode *PHI = PHINode::Create(CommonType, PredCount, "sunk_phi",
+                                       &CurrentBlock->front());
+        Map[Current] = PHI;
+        NewPhiNodes.insert(PHI);
+
+        // Add all predecessors in work list.
+        for (auto B : predecessors(CurrentBlock))
+          Worklist.push_back({ CurrentPhi->getIncomingValueForBlock(B), B });
+      }
+    }
   }
 };
-
 } // end anonymous namespace
 
 /// Try adding ScaleReg*Scale to the current addressing mode.
@@ -4555,7 +4278,8 @@ bool CodeGenPrepare::optimizeMemoryInst(Instruction *MemoryInst, Value *Addr,
   // the graph are compatible.
   bool PhiOrSelectSeen = false;
   SmallVector<Instruction*, 16> AddrModeInsts;
-  AddressingModeCombiner AddrModes;
+  const SimplifyQuery SQ(*DL, TLInfo);
+  AddressingModeCombiner AddrModes(SQ, { Addr, MemoryInst->getParent() });
   TypePromotionTransaction TPT(RemovedInsts);
   TypePromotionTransaction::ConstRestorationPt LastKnownGood =
       TPT.getRestorationPoint();
@@ -6715,7 +6439,7 @@ bool CodeGenPrepare::placeDbgValues(Function &F) {
       Instruction *Insn = &*BI++;
       DbgValueInst *DVI = dyn_cast<DbgValueInst>(Insn);
       // Leave dbg.values that refer to an alloca alone. These
-      // instrinsics describe the address of a variable (= the alloca)
+      // intrinsics describe the address of a variable (= the alloca)
       // being taken.  They should not be moved next to the alloca
       // (and to the beginning of the scope), but rather stay close to
       // where said address is used.
