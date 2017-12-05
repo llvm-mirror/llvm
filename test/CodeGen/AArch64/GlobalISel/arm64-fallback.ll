@@ -40,10 +40,10 @@ define [1 x double] @constant() {
   ret [1 x double] [double 1.0]
 }
 
-  ; The key problem here is that we may fail to create an MBB referenced by a
-  ; PHI. If so, we cannot complete the G_PHI and mustn't try or bad things
-  ; happen.
-; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: cannot select: G_STORE %vreg6, %vreg2; mem:ST4[%addr] GPR:%vreg6,%vreg2 (in function: pending_phis)
+; The key problem here is that we may fail to create an MBB referenced by a
+; PHI. If so, we cannot complete the G_PHI and mustn't try or bad things
+; happen.
+; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to translate constant: [1 x double] (in function: pending_phis)
 ; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for pending_phis
 ; FALLBACK-WITH-REPORT-OUT-LABEL: pending_phis:
 define i32 @pending_phis(i1 %tst, i32 %val, i32* %addr) {
@@ -54,7 +54,7 @@ end:
   ret i32 %res
 
 true:
-  store atomic i32 42, i32* %addr seq_cst, align 4
+  %t = extractvalue [1 x double] [double 1.0], 0
   br label %end
 
 false:
@@ -63,7 +63,7 @@ false:
 }
 
   ; General legalizer inability to handle types whose size wasn't a power of 2.
-; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: G_STORE %vreg1, %vreg0; mem:ST6[%addr](align=8) (in function: odd_type)
+; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: G_STORE %1, %0; mem:ST6[%addr](align=8) (in function: odd_type)
 ; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for odd_type
 ; FALLBACK-WITH-REPORT-OUT-LABEL: odd_type:
 define void @odd_type(i42* %addr) {
@@ -72,7 +72,7 @@ define void @odd_type(i42* %addr) {
   ret void
 }
 
-; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: G_STORE %vreg1, %vreg0; mem:ST28[%addr](align=32) (in function: odd_vector)
+; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: G_STORE %1, %0; mem:ST28[%addr](align=32) (in function: odd_vector)
 ; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for odd_vector
 ; FALLBACK-WITH-REPORT-OUT-LABEL: odd_vector:
 define void @odd_vector(<7 x i32>* %addr) {
@@ -88,16 +88,6 @@ define void @odd_vector(<7 x i32>* %addr) {
 ; FALLBACK-WITH-REPORT-LABEL: sequence_sizes:
 define i128 @sequence_sizes([8 x i8] %in) {
   ret i128 undef
-}
-
-; Just to make sure we don't accidentally emit a normal load/store.
-; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: cannot select: %vreg2<def>(s64) = G_LOAD %vreg0; mem:LD8[%addr] GPR:%vreg2,%vreg0 (in function: atomic_ops)
-; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for atomic_ops
-; FALLBACK-WITH-REPORT-LABEL: atomic_ops:
-define i64 @atomic_ops(i64* %addr) {
-  store atomic i64 0, i64* %addr unordered, align 8
-  %res = load atomic i64, i64* %addr seq_cst, align 8
-  ret i64 %res
 }
 
 ; Make sure we don't mess up metadata arguments.
@@ -132,14 +122,14 @@ continue:
 }
 
 ; Check that we fallback on invoke translation failures.
-; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: %vreg0<def>(s128) = G_FCONSTANT quad 2
+; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: %0<def>(s128) = G_FCONSTANT quad 2
 ; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for test_quad_dump
 ; FALLBACK-WITH-REPORT-OUT-LABEL: test_quad_dump:
 define fp128 @test_quad_dump() {
   ret fp128 0xL00000000000000004000000000000000
 }
 
-; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: %vreg0<def>(p0) = G_EXTRACT_VECTOR_ELT %vreg1, %vreg2; (in function: vector_of_pointers_extractelement)
+; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: %0<def>(p0) = G_EXTRACT_VECTOR_ELT %1, %2; (in function: vector_of_pointers_extractelement)
 ; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for vector_of_pointers_extractelement
 ; FALLBACK-WITH-REPORT-OUT-LABEL: vector_of_pointers_extractelement:
 @var = global <2 x i16*> zeroinitializer
@@ -156,7 +146,7 @@ end:
   br label %block
 }
 
-; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: G_STORE %vreg0, %vreg4; mem:ST16[undef] (in function: vector_of_pointers_insertelement)
+; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: G_STORE %0, %4; mem:ST16[undef] (in function: vector_of_pointers_insertelement)
 ; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for vector_of_pointers_insertelement
 ; FALLBACK-WITH-REPORT-OUT-LABEL: vector_of_pointers_insertelement:
 define void @vector_of_pointers_insertelement() {
@@ -172,7 +162,7 @@ end:
   br label %block
 }
 
-; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: G_STORE %vreg1, %vreg3; mem:ST12[undef](align=4) (in function: nonpow2_insertvalue_narrowing)
+; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: G_STORE %1, %3; mem:ST12[undef](align=4) (in function: nonpow2_insertvalue_narrowing)
 ; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for nonpow2_insertvalue_narrowing
 ; FALLBACK-WITH-REPORT-OUT-LABEL: nonpow2_insertvalue_narrowing:
 %struct96 = type { float, float, float }
@@ -182,7 +172,7 @@ define void @nonpow2_insertvalue_narrowing(float %a) {
   ret void
 }
 
-; FALLBACK-WITH-REPORT-ERR remark: <unknown>:0:0: unable to legalize instruction: G_STORE %vreg3, %vreg4; mem:ST12[undef](align=16) (in function: nonpow2_add_narrowing)
+; FALLBACK-WITH-REPORT-ERR remark: <unknown>:0:0: unable to legalize instruction: G_STORE %3, %4; mem:ST12[undef](align=16) (in function: nonpow2_add_narrowing)
 ; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for nonpow2_add_narrowing
 ; FALLBACK-WITH-REPORT-OUT-LABEL: nonpow2_add_narrowing:
 define void @nonpow2_add_narrowing() {
@@ -193,7 +183,7 @@ define void @nonpow2_add_narrowing() {
   ret void
 }
 
-; FALLBACK-WITH-REPORT-ERR remark: <unknown>:0:0: unable to legalize instruction: G_STORE %vreg3, %vreg4; mem:ST12[undef](align=16) (in function: nonpow2_add_narrowing)
+; FALLBACK-WITH-REPORT-ERR remark: <unknown>:0:0: unable to legalize instruction: G_STORE %3, %4; mem:ST12[undef](align=16) (in function: nonpow2_add_narrowing)
 ; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for nonpow2_or_narrowing
 ; FALLBACK-WITH-REPORT-OUT-LABEL: nonpow2_or_narrowing:
 define void @nonpow2_or_narrowing() {
@@ -204,7 +194,7 @@ define void @nonpow2_or_narrowing() {
   ret void
 }
 
-; FALLBACK-WITH-REPORT-ERR remark: <unknown>:0:0: unable to legalize instruction: G_STORE %vreg0, %vreg1; mem:ST12[undef](align=16) (in function: nonpow2_load_narrowing)
+; FALLBACK-WITH-REPORT-ERR remark: <unknown>:0:0: unable to legalize instruction: G_STORE %0, %1; mem:ST12[undef](align=16) (in function: nonpow2_load_narrowing)
 ; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for nonpow2_load_narrowing
 ; FALLBACK-WITH-REPORT-OUT-LABEL: nonpow2_load_narrowing:
 define void @nonpow2_load_narrowing() {
@@ -213,7 +203,7 @@ define void @nonpow2_load_narrowing() {
   ret void
 }
 
-; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: G_STORE %vreg3, %vreg0; mem:ST12[%c](align=16) (in function: nonpow2_store_narrowing
+; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: G_STORE %3, %0; mem:ST12[%c](align=16) (in function: nonpow2_store_narrowing
 ; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for nonpow2_store_narrowing
 ; FALLBACK-WITH-REPORT-OUT-LABEL: nonpow2_store_narrowing:
 define void @nonpow2_store_narrowing(i96* %c) {
@@ -223,7 +213,7 @@ define void @nonpow2_store_narrowing(i96* %c) {
   ret void
 }
 
-; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: G_STORE %vreg0, %vreg1; mem:ST12[undef](align=16) (in function: nonpow2_constant_narrowing)
+; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: G_STORE %0, %1; mem:ST12[undef](align=16) (in function: nonpow2_constant_narrowing)
 ; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for nonpow2_constant_narrowing
 ; FALLBACK-WITH-REPORT-OUT-LABEL: nonpow2_constant_narrowing:
 define void @nonpow2_constant_narrowing() {
@@ -233,8 +223,8 @@ define void @nonpow2_constant_narrowing() {
 
 ; Currently can't handle vector lengths that aren't an exact multiple of
 ; natively supported vector lengths. Test that the fall-back works for those.
-; FALLBACK-WITH-REPORT-ERR-G_IMPLICIT_DEF-LEGALIZABLE: (FIXME: this is what is expected once we can legalize non-pow-of-2 G_IMPLICIT_DEF) remark: <unknown>:0:0: unable to legalize instruction: %vreg1<def>(<7 x s64>) = G_ADD %vreg0, %vreg0; (in function: nonpow2_vector_add_fewerelements
-; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: %vreg2<def>(s64) = G_EXTRACT_VECTOR_ELT %vreg1, %vreg3; (in function: nonpow2_vector_add_fewerelements)
+; FALLBACK-WITH-REPORT-ERR-G_IMPLICIT_DEF-LEGALIZABLE: (FIXME: this is what is expected once we can legalize non-pow-of-2 G_IMPLICIT_DEF) remark: <unknown>:0:0: unable to legalize instruction: %1<def>(<7 x s64>) = G_ADD %0, %0; (in function: nonpow2_vector_add_fewerelements
+; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: %2<def>(s64) = G_EXTRACT_VECTOR_ELT %1, %3; (in function: nonpow2_vector_add_fewerelements)
 ; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for nonpow2_vector_add_fewerelements
 ; FALLBACK-WITH-REPORT-OUT-LABEL: nonpow2_vector_add_fewerelements:
 define void @nonpow2_vector_add_fewerelements() {

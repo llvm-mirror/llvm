@@ -162,8 +162,8 @@ exit:
 ; SI: [[LABEL_LOOP:BB[0-9]+_[0-9]+]]:
 ; SI: buffer_load_dword
 ; SI-DAG: buffer_store_dword
-; SI-DAG: v_cmp_eq_u32_e32 vcc, 0x100
-; SI: s_cbranch_vccz [[LABEL_LOOP]]
+; SI-DAG: s_cmpk_eq_i32 s{{[0-9]+}}, 0x100
+; SI: s_cbranch_scc0 [[LABEL_LOOP]]
 ; SI: [[LABEL_EXIT]]:
 ; SI: s_endpgm
 
@@ -192,7 +192,7 @@ exit:
 
 ; Load loop limit from buffer
 ; Branch to exit if uniformly not taken
-; SI: ; BB#0:
+; SI: ; %bb.0:
 ; SI: buffer_load_dword [[VBOUND:v[0-9]+]]
 ; SI: v_cmp_lt_i32_e32 vcc
 ; SI: s_and_saveexec_b64 [[OUTER_CMP_SREG:s\[[0-9]+:[0-9]+\]]], vcc

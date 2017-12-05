@@ -915,7 +915,7 @@ bool HexagonGenInsert::findRecordInsertForms(unsigned VR,
 void HexagonGenInsert::collectInBlock(MachineBasicBlock *B,
       OrderedRegisterList &AVs) {
   if (isDebug())
-    dbgs() << "visiting block BB#" << B->getNumber() << "\n";
+    dbgs() << "visiting block " << printMBBReference(*B) << "\n";
 
   // First, check if this block is reachable at all. If not, the bit tracker
   // will not have any information about registers in it.
@@ -1106,10 +1106,10 @@ void HexagonGenInsert::pruneCoveredSets(unsigned VR) {
 
   // Now, remove those whose sets of potentially removable registers are
   // contained in another IF candidate for VR. For example, given these
-  // candidates for vreg45,
-  //   %vreg45:
-  //     (%vreg44,%vreg41,#9,#8), { %vreg42 }
-  //     (%vreg43,%vreg41,#9,#8), { %vreg42 %vreg44 }
+  // candidates for %45,
+  //   %45:
+  //     (%44,%41,#9,#8), { %42 }
+  //     (%43,%41,#9,#8), { %42 %44 }
   // remove the first one, since it is contained in the second one.
   for (unsigned i = 0, n = LL.size(); i < n; ) {
     const RegisterSet &RMi = LL[i].second;

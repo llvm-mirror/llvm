@@ -295,6 +295,8 @@ MachineInstrBuilder MachineIRBuilder::buildLoad(unsigned Res, unsigned Addr,
                                                 MachineMemOperand &MMO) {
   assert(MRI->getType(Res).isValid() && "invalid operand type");
   assert(MRI->getType(Addr).isPointer() && "invalid operand type");
+  assert(MMO.getOrdering() == AtomicOrdering::NotAtomic &&
+         "invalid atomic ordering");
 
   return buildInstr(TargetOpcode::G_LOAD)
       .addDef(Res)
@@ -306,8 +308,38 @@ MachineInstrBuilder MachineIRBuilder::buildStore(unsigned Val, unsigned Addr,
                                                  MachineMemOperand &MMO) {
   assert(MRI->getType(Val).isValid() && "invalid operand type");
   assert(MRI->getType(Addr).isPointer() && "invalid operand type");
+  assert(MMO.getOrdering() == AtomicOrdering::NotAtomic &&
+         "invalid atomic ordering");
 
   return buildInstr(TargetOpcode::G_STORE)
+      .addUse(Val)
+      .addUse(Addr)
+      .addMemOperand(&MMO);
+}
+
+MachineInstrBuilder MachineIRBuilder::buildAtomicLoad(unsigned Res,
+                                                      unsigned Addr,
+                                                      MachineMemOperand &MMO) {
+  assert(MRI->getType(Res).isValid() && "invalid operand type");
+  assert(MRI->getType(Addr).isPointer() && "invalid operand type");
+  assert(MMO.getOrdering() != AtomicOrdering::NotAtomic &&
+         "invalid atomic ordering");
+
+  return buildInstr(TargetOpcode::G_ATOMIC_LOAD)
+      .addDef(Res)
+      .addUse(Addr)
+      .addMemOperand(&MMO);
+}
+
+MachineInstrBuilder MachineIRBuilder::buildAtomicStore(unsigned Val,
+                                                       unsigned Addr,
+                                                       MachineMemOperand &MMO) {
+  assert(MRI->getType(Val).isValid() && "invalid operand type");
+  assert(MRI->getType(Addr).isPointer() && "invalid operand type");
+  assert(MMO.getOrdering() != AtomicOrdering::NotAtomic &&
+         "invalid atomic ordering");
+
+  return buildInstr(TargetOpcode::G_ATOMIC_STORE)
       .addUse(Val)
       .addUse(Addr)
       .addMemOperand(&MMO);
@@ -656,6 +688,31 @@ MachineInstrBuilder MachineIRBuilder::buildExtractVectorElement(unsigned Res,
       .addDef(Res)
       .addUse(Val)
       .addUse(Idx);
+}
+
+MachineInstrBuilder
+MachineIRBuilder::buildAtomicCmpXchg(unsigned OldValRes, unsigned Addr,
+                                     unsigned CmpVal, unsigned NewVal,
+                                     MachineMemOperand &MMO) {
+#ifndef NDEBUG
+  LLT OldValResTy = MRI->getType(OldValRes);
+  LLT AddrTy = MRI->getType(Addr);
+  LLT CmpValTy = MRI->getType(CmpVal);
+  LLT NewValTy = MRI->getType(NewVal);
+  assert(OldValResTy.isScalar() && "invalid operand type");
+  assert(AddrTy.isPointer() && "invalid operand type");
+  assert(CmpValTy.isValid() && "invalid operand type");
+  assert(NewValTy.isValid() && "invalid operand type");
+  assert(OldValResTy == CmpValTy && "type mismatch");
+  assert(OldValResTy == NewValTy && "type mismatch");
+#endif
+
+  return buildInstr(TargetOpcode::G_ATOMIC_CMPXCHG)
+      .addDef(OldValRes)
+      .addUse(Addr)
+      .addUse(CmpVal)
+      .addUse(NewVal)
+      .addMemOperand(&MMO);
 }
 
 void MachineIRBuilder::validateTruncExt(unsigned Dst, unsigned Src,

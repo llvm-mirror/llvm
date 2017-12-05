@@ -75,7 +75,8 @@
 
 using namespace llvm;
 
-static cl::opt<bool> SimplifyMIR("simplify-mir",
+static cl::opt<bool> SimplifyMIR(
+    "simplify-mir", cl::Hidden,
     cl::desc("Leave out unnecessary information when printing MIR"));
 
 namespace {
@@ -156,7 +157,6 @@ public:
   void print(const MachineBasicBlock &MBB);
 
   void print(const MachineInstr &MI);
-  void printMBBReference(const MachineBasicBlock &MBB);
   void printIRBlockReference(const BasicBlock &BB);
   void printIRValueReference(const Value &V);
   void printStackObjectReference(int FrameIndex);
@@ -192,23 +192,10 @@ template <> struct BlockScalarTraits<Module> {
 } // end namespace yaml
 } // end namespace llvm
 
-static void printRegMIR(unsigned Reg, raw_ostream &OS,
-                        const TargetRegisterInfo *TRI) {
-  // TODO: Print Stack Slots.
-  if (!Reg)
-    OS << '_';
-  else if (TargetRegisterInfo::isVirtualRegister(Reg))
-    OS << '%' << TargetRegisterInfo::virtReg2Index(Reg);
-  else if (Reg < TRI->getNumRegs())
-    OS << '%' << StringRef(TRI->getName(Reg)).lower();
-  else
-    llvm_unreachable("Can't print this kind of register yet");
-}
-
 static void printRegMIR(unsigned Reg, yaml::StringValue &Dest,
                         const TargetRegisterInfo *TRI) {
   raw_string_ostream OS(Dest.Value);
-  printRegMIR(Reg, OS, TRI);
+  OS << printReg(Reg, TRI);
 }
 
 void MIRPrinter::print(const MachineFunction &MF) {
@@ -262,7 +249,7 @@ static void printCustomRegMask(const uint32_t *RegMask, raw_ostream &OS,
     if (RegMask[I / 32] & (1u << (I % 32))) {
       if (IsRegInRegMaskFound)
         OS << ',';
-      printRegMIR(I, OS, TRI);
+      OS << printReg(I, TRI);
       IsRegInRegMaskFound = true;
     }
   }
@@ -350,13 +337,11 @@ void MIRPrinter::convert(ModuleSlotTracker &MST,
   YamlMFI.HasMustTailInVarArgFunc = MFI.hasMustTailInVarArgFunc();
   if (MFI.getSavePoint()) {
     raw_string_ostream StrOS(YamlMFI.SavePoint.Value);
-    MIPrinter(StrOS, MST, RegisterMaskIds, StackObjectOperandMapping)
-        .printMBBReference(*MFI.getSavePoint());
+    StrOS << printMBBReference(*MFI.getSavePoint());
   }
   if (MFI.getRestorePoint()) {
     raw_string_ostream StrOS(YamlMFI.RestorePoint.Value);
-    MIPrinter(StrOS, MST, RegisterMaskIds, StackObjectOperandMapping)
-        .printMBBReference(*MFI.getRestorePoint());
+    StrOS << printMBBReference(*MFI.getRestorePoint());
   }
 }
 
@@ -505,8 +490,7 @@ void MIRPrinter::convert(ModuleSlotTracker &MST,
     Entry.ID = ID++;
     for (const auto *MBB : Table.MBBs) {
       raw_string_ostream StrOS(Str);
-      MIPrinter(StrOS, MST, RegisterMaskIds, StackObjectOperandMapping)
-          .printMBBReference(*MBB);
+      StrOS << printMBBReference(*MBB);
       Entry.Blocks.push_back(StrOS.str());
       Str.clear();
     }
@@ -628,7 +612,7 @@ void MIPrinter::print(const MachineBasicBlock &MBB) {
     for (auto I = MBB.succ_begin(), E = MBB.succ_end(); I != E; ++I) {
       if (I != MBB.succ_begin())
         OS << ", ";
-      printMBBReference(**I);
+      OS << printMBBReference(**I);
       if (!SimplifyMIR || !canPredictProbs)
         OS << '('
            << format("0x%08" PRIx32, MBB.getSuccProbability(I).getNumerator())
@@ -648,7 +632,7 @@ void MIPrinter::print(const MachineBasicBlock &MBB) {
       if (!First)
         OS << ", ";
       First = false;
-      printRegMIR(LI.PhysReg, OS, &TRI);
+      OS << printReg(LI.PhysReg, &TRI);
       if (!LI.LaneMask.all())
         OS << ":0x" << PrintLaneMask(LI.LaneMask);
     }
@@ -773,14 +757,6 @@ void MIPrinter::print(const MachineInstr &MI) {
       print(Context, *TII, *Op);
       NeedComma = true;
     }
-  }
-}
-
-void MIPrinter::printMBBReference(const MachineBasicBlock &MBB) {
-  OS << "%bb." << MBB.getNumber();
-  if (const auto *BB = MBB.getBasicBlock()) {
-    if (BB->hasName())
-      OS << '.' << BB->getName();
   }
 }
 
@@ -949,7 +925,7 @@ void MIPrinter::print(const MachineInstr &MI, unsigned OpIdx,
       OS << "early-clobber ";
     if (Op.isDebug())
       OS << "debug-use ";
-    printRegMIR(Reg, OS, TRI);
+    OS << printReg(Reg, TRI);
     // Print the sub register.
     if (Op.getSubReg() != 0)
       OS << '.' << TRI->getSubRegIndexName(Op.getSubReg());
@@ -979,7 +955,7 @@ void MIPrinter::print(const MachineInstr &MI, unsigned OpIdx,
     Op.getFPImm()->printAsOperand(OS, /*PrintType=*/true, MST);
     break;
   case MachineOperand::MO_MachineBasicBlock:
-    printMBBReference(*Op.getMBB());
+    OS << printMBBReference(*Op.getMBB());
     break;
   case MachineOperand::MO_FrameIndex:
     printStackObjectReference(Op.getIndex());
@@ -1041,7 +1017,7 @@ void MIPrinter::print(const MachineInstr &MI, unsigned OpIdx,
       if (RegMask[Reg / 32] & (1U << (Reg % 32))) {
         if (IsCommaNeeded)
           OS << ", ";
-        printRegMIR(Reg, OS, TRI);
+        OS << printReg(Reg, TRI);
         IsCommaNeeded = true;
       }
     }
@@ -1212,7 +1188,7 @@ static void printCFIRegister(unsigned DwarfReg, raw_ostream &OS,
     OS << "<badreg>";
     return;
   }
-  printRegMIR(Reg, OS, TRI);
+  OS << printReg(Reg, TRI);
 }
 
 void MIPrinter::print(const MCCFIInstruction &CFI,

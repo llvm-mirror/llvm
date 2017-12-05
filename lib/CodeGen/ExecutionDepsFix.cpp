@@ -200,7 +200,7 @@ void ExecutionDepsFix::enterBasicBlock(MachineBasicBlock *MBB) {
         LiveRegs[rx].Def = -1;
       }
     }
-    DEBUG(dbgs() << "BB#" << MBB->getNumber() << ": entry\n");
+    DEBUG(dbgs() << printMBBReference(*MBB) << ": entry\n");
     return;
   }
 
@@ -246,7 +246,7 @@ void ExecutionDepsFix::enterBasicBlock(MachineBasicBlock *MBB) {
     }
   }
   DEBUG(
-      dbgs() << "BB#" << MBB->getNumber()
+      dbgs() << printMBBReference(*MBB)
              << (!isBlockDone(MBB) ? ": incomplete\n" : ": all preds known\n"));
 }
 
@@ -394,7 +394,7 @@ void ExecutionDepsFix::processDefs(MachineInstr *MI, bool breakDependency,
       continue;
     for (int rx : regIndices(MO.getReg())) {
       // This instruction explicitly defines rx.
-      DEBUG(dbgs() << TRI->getName(RC->getRegister(rx)) << ":\t" << CurInstr
+      DEBUG(dbgs() << printReg(RC->getRegister(rx), TRI) << ":\t" << CurInstr
                    << '\t' << *MI);
 
       if (breakDependency) {

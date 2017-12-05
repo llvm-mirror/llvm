@@ -277,8 +277,13 @@ MCDwarfLineTableHeader::Emit(MCStreamer *MCOS, MCDwarfLineTableParams Params,
   emitAbsValue(*MCOS,
                MakeStartMinusEndExpr(*MCOS, *LineStartSym, *LineEndSym, 4), 4);
 
-  // Next 2 bytes is the Version, which is Dwarf 2.
-  MCOS->EmitIntValue(2, 2);
+  // Next 2 bytes is the Version.
+  unsigned LineTableVersion = context.getDwarfVersion();
+  // FIXME: Right now the compiler doesn't support line table V5. Until it's
+  // supported keep generating line table V4, when Dwarf Info version V5 is used.  
+  if (LineTableVersion >= 5) 
+    LineTableVersion = 4; 
+  MCOS->EmitIntValue(LineTableVersion, 2);
 
   // Create a symbol for the end of the prologue (to be set when we get there).
   MCSymbol *ProEndSym = context.createTempSymbol(); // Lprologue_end
@@ -293,6 +298,11 @@ MCDwarfLineTableHeader::Emit(MCStreamer *MCOS, MCDwarfLineTableParams Params,
 
   // Parameters of the state machine, are next.
   MCOS->EmitIntValue(context.getAsmInfo()->getMinInstAlignment(), 1);
+  // maximum_operations_per_instruction 
+  // For non-VLIW architectures this field is always 1.
+  // FIXME: VLIW architectures need to update this field accordingly.
+  if (context.getDwarfVersion() >= 4)
+    MCOS->EmitIntValue(1, 1);
   MCOS->EmitIntValue(DWARF2_LINE_DEFAULT_IS_STMT, 1);
   MCOS->EmitIntValue(Params.DWARF2LineBase, 1);
   MCOS->EmitIntValue(Params.DWARF2LineRange, 1);
@@ -1057,8 +1067,8 @@ void FrameEmitterImpl::EmitCFIInstruction(const MCCFIInstruction &Instr) {
     unsigned Reg1 = Instr.getRegister();
     unsigned Reg2 = Instr.getRegister2();
     if (!IsEH) {
-      Reg1 = MRI->getDwarfRegNum(MRI->getLLVMRegNum(Reg1, true), false);
-      Reg2 = MRI->getDwarfRegNum(MRI->getLLVMRegNum(Reg2, true), false);
+      Reg1 = MRI->getDwarfRegNumFromDwarfEHRegNum(Reg1);
+      Reg2 = MRI->getDwarfRegNumFromDwarfEHRegNum(Reg2);
     }
     Streamer.EmitIntValue(dwarf::DW_CFA_register, 1);
     Streamer.EmitULEB128IntValue(Reg1);
@@ -1094,7 +1104,7 @@ void FrameEmitterImpl::EmitCFIInstruction(const MCCFIInstruction &Instr) {
   case MCCFIInstruction::OpDefCfa: {
     unsigned Reg = Instr.getRegister();
     if (!IsEH)
-      Reg = MRI->getDwarfRegNum(MRI->getLLVMRegNum(Reg, true), false);
+      Reg = MRI->getDwarfRegNumFromDwarfEHRegNum(Reg);
     Streamer.EmitIntValue(dwarf::DW_CFA_def_cfa, 1);
     Streamer.EmitULEB128IntValue(Reg);
     CFAOffset = -Instr.getOffset();
@@ -1105,7 +1115,7 @@ void FrameEmitterImpl::EmitCFIInstruction(const MCCFIInstruction &Instr) {
   case MCCFIInstruction::OpDefCfaRegister: {
     unsigned Reg = Instr.getRegister();
     if (!IsEH)
-      Reg = MRI->getDwarfRegNum(MRI->getLLVMRegNum(Reg, true), false);
+      Reg = MRI->getDwarfRegNumFromDwarfEHRegNum(Reg);
     Streamer.EmitIntValue(dwarf::DW_CFA_def_cfa_register, 1);
     Streamer.EmitULEB128IntValue(Reg);
 
@@ -1118,7 +1128,7 @@ void FrameEmitterImpl::EmitCFIInstruction(const MCCFIInstruction &Instr) {
 
     unsigned Reg = Instr.getRegister();
     if (!IsEH)
-      Reg = MRI->getDwarfRegNum(MRI->getLLVMRegNum(Reg, true), false);
+      Reg = MRI->getDwarfRegNumFromDwarfEHRegNum(Reg);
 
     int Offset = Instr.getOffset();
     if (IsRelative)
@@ -1154,7 +1164,7 @@ void FrameEmitterImpl::EmitCFIInstruction(const MCCFIInstruction &Instr) {
   case MCCFIInstruction::OpRestore: {
     unsigned Reg = Instr.getRegister();
     if (!IsEH)
-      Reg = MRI->getDwarfRegNum(MRI->getLLVMRegNum(Reg, true), false);
+      Reg = MRI->getDwarfRegNumFromDwarfEHRegNum(Reg);
     Streamer.EmitIntValue(dwarf::DW_CFA_restore | Reg, 1);
     return;
   }
