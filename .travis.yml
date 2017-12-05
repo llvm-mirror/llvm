@@ -35,12 +35,19 @@ install:
   
   # Install command timeout
   - pip install command-timeout
+  
+  # Prefix ccache
+  - local ccache_dir=$HOME/ccache_compilers
+  - mkdir -p $ccache_dir
+  - ln -s /usr/bin/ccache $ccache_dir/clang
+  - ln -s /usr/bin/ccache $ccache_dir/clang++
+  - export PATH=$ccache_dir:$PATH
+  
+  - which clang
 
 script:
   - mkdir -p build
   - cd build
-  - export CC=clang
-  - export CXX=clang++
   - cmake -DCMAKE_CXX_COMPILER="ccache" -DCMAKE_C_COMPILER="ccache" ..
   - command-timeout 2400 make -j4 check-llvm
 
