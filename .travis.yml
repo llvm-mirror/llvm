@@ -11,8 +11,8 @@ cache:
     
 env:
   - USE_CCACHE=1
-  - CCACHE_MAXSIZE=200M
-  - CCACHE_CPP2=1  
+    CCACHE_MAXSIZE=200M
+    CCACHE_CPP2=1  
 
 install:
   - wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh;
