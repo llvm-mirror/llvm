@@ -24,7 +24,7 @@ script:
   - cd build
   - cmake -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DCMAKE_Fortran_COMPILER=flang ..
   - make -j4
-  - make check-flang
+  - make check-llvm
 
 notifications:
     email: false
