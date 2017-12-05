@@ -27,7 +27,14 @@ install:
         cmake
 
   - source activate test-environment
-  - export PATH=/usr/lib/ccache:$PATH
+  
+  # Prefix ccache as the clang compiler
+  - export USE_CCACHE=1
+  - export CCACHE_MAXSIZE=200M
+  - export CCACHE_CPP2=1
+  - mkdir -p $HOME/ccache-links
+  - ln -s ccache $HOME/ccache-links/clang
+  - export PATH=$HOME/ccache-links:$PATH
 
 script:
   - mkdir -p build
