@@ -33,18 +33,13 @@ install:
 
   - source activate test-environment
   
-  # Prefix ccache as the clang compiler
-  - mkdir -p $HOME/ccache-links
-  - ln -s ccache $HOME/ccache-links/clang
-  - export PATH=$HOME/ccache-links:$PATH
-  
   # Install command timeout
   - pip install command-timeout
 
 script:
   - mkdir -p build
   - cd build
-  - cmake -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DCMAKE_Fortran_COMPILER=flang ..
+  - cmake -DCMAKE_CXX_COMPILER="ccache clang" -DCMAKE_C_COMPILER="ccache clang++" ..
   - command-timeout 2400 make -j4 check-llvm
 
 notifications:
