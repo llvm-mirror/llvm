@@ -48,7 +48,7 @@ install:
 script:
   - mkdir -p build
   - cd build
-  - cmake -DCMAKE_CXX_COMPILER="ccache" -DCMAKE_C_COMPILER="ccache" ..
+  - cmake -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang ..
   - command-timeout 2400 make -j4 check-llvm
 
 notifications:
