@@ -8,6 +8,11 @@ addons:
 cache:
   directories:
     - $HOME/.ccache
+    
+env:
+  - USE_CCACHE=1
+  - CCACHE_MAXSIZE=200M
+  - CCACHE_CPP2=1  
 
 install:
   - wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh;
@@ -29,19 +34,18 @@ install:
   - source activate test-environment
   
   # Prefix ccache as the clang compiler
-  - export USE_CCACHE=1
-  - export CCACHE_MAXSIZE=200M
-  - export CCACHE_CPP2=1
   - mkdir -p $HOME/ccache-links
   - ln -s ccache $HOME/ccache-links/clang
   - export PATH=$HOME/ccache-links:$PATH
+  
+  # Install command timeout
+  - pip install command-timeout
 
 script:
   - mkdir -p build
   - cd build
   - cmake -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DCMAKE_Fortran_COMPILER=flang ..
-  - make -j4
-  - make check-llvm
+  - command-timeout 2400 make -j4 check-llvm
 
 notifications:
     email: false
