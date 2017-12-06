@@ -1,0 +1,55 @@
+language: c
+
+addons:
+  apt:
+    packages:
+    - ccache
+
+cache:
+  directories:
+    - $HOME/.ccache
+    
+env:
+  - USE_CCACHE=1
+    CCACHE_MAXSIZE=200M
+    CCACHE_CPP2=1  
+
+install:
+  - wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh;
+  - bash miniconda.sh -b -p $HOME/miniconda
+  - export PATH="$HOME/miniconda/bin:$PATH"
+  - hash -r
+  - conda config --set always_yes yes --set changeps1 no
+  - conda config --add channels conda-forge --force
+  - conda update -q conda
+  - conda info -a
+
+  - conda create -q -n test-environment
+        flang-meta 
+        llvmdev
+        clangdev
+        openmp
+        cmake
+
+  - source activate test-environment
+  
+  # Install command timeout
+  - pip install command-timeout
+  
+  # Prefix ccache
+  - mkdir -p $HOME/ccache_compilers
+  - ln -s /usr/bin/ccache $HOME/ccache_compilers/clang
+  - ln -s /usr/bin/ccache $HOME/ccache_compilers/clang++
+  - export PATH=$HOME/ccache_compilers:$PATH
+  
+  - which clang
+
+script:
+  - mkdir -p build
+  - cd build
+  - cmake -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang ..
+  - command-timeout 2400 make -j4 check-llvm
+
+notifications:
+    email: false
+
