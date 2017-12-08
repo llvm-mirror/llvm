@@ -505,14 +505,6 @@ namespace {
     bool isLegalNarrowLoad(LoadSDNode *LoadN, ISD::LoadExtType ExtType,
                            EVT &ExtVT, unsigned ShAmt = 0);
 
-    /// Used by BackwardsPropagateMask to find suitable loads.
-    bool SearchForAndLoads(SDNode *N, SmallPtrSetImpl<LoadSDNode*> &Loads,
-                           ConstantSDNode *Mask, SDNode *&UncombinedNode);
-
-    /// Attempt to propagate a given AND node back to load leaves so that they
-    /// can be combined into narrow loads.
-    bool BackwardsPropagateMask(SDNode *N, SelectionDAG &DAG);
-
     /// Helper function for MergeConsecutiveStores which merges the
     /// component store chains.
     SDValue getMergeStoreChains(SmallVectorImpl<MemOpLink> &StoreNodes,
@@ -3789,111 +3781,6 @@ bool DAGCombiner::isLegalNarrowLoad(LoadSDNode *LoadN, ISD::LoadExtType ExtType,
   return true;
 }
 
-bool DAGCombiner::SearchForAndLoads(SDNode *N,
-                                    SmallPtrSetImpl<LoadSDNode*> &Loads,
-                                    ConstantSDNode *Mask,
-                                    SDNode *&NodeToMask) {
-  // Recursively search for the operands, looking for loads which can be
-  // narrowed.
-  for (unsigned i = 0, e = N->getNumOperands(); i < e; ++i) {
-    SDValue Op = N->getOperand(i);
-
-    // Constants should already be fixed up...
-    if (isa<ConstantSDNode>(Op))
-      continue;
-
-    if (!Op.hasOneUse() || Op.getValueType().isVector())
-      return false;
-
-    switch(Op.getOpcode()) {
-    case ISD::LOAD: {
-      auto *Load = cast<LoadSDNode>(Op);
-      EVT ExtVT;
-      if (isAndLoadExtLoad(Mask, Load, Load->getValueType(0), ExtVT) &&
-          isLegalNarrowLoad(Load, ISD::ZEXTLOAD, ExtVT)) {
-        Loads.insert(Load);
-        continue;
-      }
-      return false;
-    }
-    case ISD::ZERO_EXTEND:
-    case ISD::ANY_EXTEND:
-    case ISD::AssertZext: {
-      unsigned ActiveBits = Mask->getAPIntValue().countTrailingOnes();
-      EVT ExtVT = EVT::getIntegerVT(*DAG.getContext(), ActiveBits);
-      EVT VT = Op.getOpcode() == ISD::AssertZext ?
-        cast<VTSDNode>(Op.getOperand(1))->getVT() :
-        Op.getOperand(0).getValueType();
-
-      // We can accept extending nodes if the mask is wider or an equal
-      // width to the original type.
-      if (ExtVT.bitsGE(VT))
-        continue;
-      break;
-    }
-    case ISD::OR:
-    case ISD::XOR:
-    case ISD::AND:
-      if (!SearchForAndLoads(Op.getNode(), Loads, Mask, NodeToMask))
-        return false;
-      continue;
-    }
-
-    // Allow one node which will masked along with any loads found.
-    if (NodeToMask)
-      return false;
-    NodeToMask = Op.getNode();
-  }
-  return true;
-}
-
-bool DAGCombiner::BackwardsPropagateMask(SDNode *N, SelectionDAG &DAG) {
-  auto *Mask = dyn_cast<ConstantSDNode>(N->getOperand(1));
-  if (!Mask)
-    return false;
-
-  if (!Mask->getAPIntValue().isMask())
-    return false;
-
-  // No need to do anything if the and directly uses a load.
-  if (isa<LoadSDNode>(N->getOperand(0)))
-    return false;
-
-  SmallPtrSet<LoadSDNode*, 8> Loads;
-  SDNode *FixupNode = nullptr;
-  if (SearchForAndLoads(N, Loads, Mask, FixupNode)) {
-    if (Loads.size() == 0)
-      return false;
-
-    SDValue MaskOp = N->getOperand(1);
-
-    // If it exists, fixup the single node we allow in the tree that needs
-    // masking.
-    if (FixupNode) {
-      SDValue And = DAG.getNode(ISD::AND, SDLoc(FixupNode),
-                                FixupNode->getValueType(0),
-                                SDValue(FixupNode, 0), MaskOp);
-      DAG.ReplaceAllUsesOfValueWith(SDValue(FixupNode, 0), And);
-      DAG.UpdateNodeOperands(And.getNode(), SDValue(FixupNode, 0),
-                             MaskOp);
-    }
-
-    for (auto *Load : Loads) {
-      SDValue And = DAG.getNode(ISD::AND, SDLoc(Load), Load->getValueType(0),
-                                SDValue(Load, 0), MaskOp);
-      DAG.ReplaceAllUsesOfValueWith(SDValue(Load, 0), And);
-      DAG.UpdateNodeOperands(And.getNode(), SDValue(Load, 0), MaskOp);
-      SDValue NewLoad = ReduceLoadWidth(And.getNode());
-      assert(NewLoad &&
-             "Shouldn't be masking the load if it can't be narrowed");
-      CombineTo(Load, NewLoad, NewLoad.getValue(1));
-    }
-    DAG.ReplaceAllUsesWith(N, N->getOperand(0).getNode());
-    return true;
-  }
-  return false;
-}
-
 SDValue DAGCombiner::visitAND(SDNode *N) {
   SDValue N0 = N->getOperand(0);
   SDValue N1 = N->getOperand(1);
@@ -4091,16 +3978,6 @@ SDValue DAGCombiner::visitAND(SDNode *N) {
 
       AddToWorklist(N);
       CombineTo(LN0, Res, Res.getValue(1));
-      return SDValue(N, 0);
-    }
-  }
-
-  if (Level >= AfterLegalizeTypes) {
-    // Attempt to propagate the AND back up to the leaves which, if they're
-    // loads, can be combined to narrow loads and the AND node can be removed.
-    // Perform after legalization so that extend nodes will already be
-    // combined into the loads.
-    if (BackwardsPropagateMask(N, DAG)) {
       return SDValue(N, 0);
     }
   }
@@ -12765,15 +12642,14 @@ bool DAGCombiner::MergeStoresOfConstantsOrVecElts(
           if (ElementSizeBits != Val.getValueSizeInBits()) {
             EVT IntMemVT =
                 EVT::getIntegerVT(*DAG.getContext(), MemVT.getSizeInBits());
-            if (auto *CFP = dyn_cast<ConstantFPSDNode>(Val))
-              Val = DAG.getConstant(
-                  CFP->getValueAPF().bitcastToAPInt().zextOrTrunc(
-                      ElementSizeBits),
-                  SDLoc(CFP), IntMemVT);
-            else if (auto *C = dyn_cast<ConstantSDNode>(Val))
-              Val = DAG.getConstant(
-                  C->getAPIntValue().zextOrTrunc(ElementSizeBits),
-                  SDLoc(C), IntMemVT);
+            if (isa<ConstantFPSDNode>(Val)) {
+              // Not clear how to truncate FP values.
+              return false;
+            } else if (auto *C = dyn_cast<ConstantSDNode>(Val))
+              Val = DAG.getConstant(C->getAPIntValue()
+                                        .zextOrTrunc(Val.getValueSizeInBits())
+                                        .zextOrTrunc(ElementSizeBits),
+                                    SDLoc(C), IntMemVT);
           }
           // Make sure correctly size type is the correct type.
           Val = DAG.getBitcast(MemVT, Val);
@@ -12836,9 +12712,17 @@ bool DAGCombiner::MergeStoresOfConstantsOrVecElts(
       SDValue Val = St->getValue();
       StoreInt <<= ElementSizeBits;
       if (ConstantSDNode *C = dyn_cast<ConstantSDNode>(Val)) {
-        StoreInt |= C->getAPIntValue().zextOrTrunc(SizeInBits);
+        StoreInt |= C->getAPIntValue()
+                        .zextOrTrunc(ElementSizeBits)
+                        .zextOrTrunc(SizeInBits);
       } else if (ConstantFPSDNode *C = dyn_cast<ConstantFPSDNode>(Val)) {
-        StoreInt |= C->getValueAPF().bitcastToAPInt().zextOrTrunc(SizeInBits);
+        StoreInt |= C->getValueAPF()
+                        .bitcastToAPInt()
+                        .zextOrTrunc(ElementSizeBits)
+                        .zextOrTrunc(SizeInBits);
+        // If fp truncation is necessary give up for now.
+        if (MemVT.getSizeInBits() != ElementSizeBits)
+          return false;
       } else {
         llvm_unreachable("Invalid constant element type");
       }
@@ -13188,7 +13072,7 @@ bool DAGCombiner::MergeConsecutiveStores(StoreSDNode *St) {
           // Find a legal type for the vector store.
           unsigned Elts = (i + 1) * NumMemElts;
           EVT Ty = EVT::getVectorVT(Context, MemVT.getScalarType(), Elts);
-          if (TLI.isTypeLegal(Ty) &&
+          if (TLI.isTypeLegal(Ty) && TLI.isTypeLegal(MemVT) &&
               TLI.canMergeStoresTo(FirstStoreAS, Ty, DAG) &&
               TLI.allowsMemoryAccess(Context, DL, Ty, FirstStoreAS,
                                      FirstStoreAlign, &IsFast) &&
@@ -15844,6 +15728,84 @@ static SDValue combineShuffleOfSplat(ArrayRef<int> UserMask,
                               NewMask);
 }
 
+/// If the shuffle mask is taking exactly one element from the first vector
+/// operand and passing through all other elements from the second vector
+/// operand, return the index of the mask element that is choosing an element
+/// from the first operand. Otherwise, return -1.
+static int getShuffleMaskIndexOfOneElementFromOp0IntoOp1(ArrayRef<int> Mask) {
+  int MaskSize = Mask.size();
+  int EltFromOp0 = -1;
+  // TODO: This does not match if there are undef elements in the shuffle mask.
+  // Should we ignore undefs in the shuffle mask instead? The trade-off is
+  // removing an instruction (a shuffle), but losing the knowledge that some
+  // vector lanes are not needed.
+  for (int i = 0; i != MaskSize; ++i) {
+    if (Mask[i] >= 0 && Mask[i] < MaskSize) {
+      // We're looking for a shuffle of exactly one element from operand 0.
+      if (EltFromOp0 != -1)
+        return -1;
+      EltFromOp0 = i;
+    } else if (Mask[i] != i + MaskSize) {
+      // Nothing from operand 1 can change lanes.
+      return -1;
+    }
+  }
+  return EltFromOp0;
+}
+
+/// If a shuffle inserts exactly one element from a source vector operand into
+/// another vector operand and we can access the specified element as a scalar,
+/// then we can eliminate the shuffle.
+static SDValue replaceShuffleOfInsert(ShuffleVectorSDNode *Shuf,
+                                      SelectionDAG &DAG) {
+  // First, check if we are taking one element of a vector and shuffling that
+  // element into another vector.
+  ArrayRef<int> Mask = Shuf->getMask();
+  SmallVector<int, 16> CommutedMask(Mask.begin(), Mask.end());
+  SDValue Op0 = Shuf->getOperand(0);
+  SDValue Op1 = Shuf->getOperand(1);
+  int ShufOp0Index = getShuffleMaskIndexOfOneElementFromOp0IntoOp1(Mask);
+  if (ShufOp0Index == -1) {
+    // Commute mask and check again.
+    ShuffleVectorSDNode::commuteMask(CommutedMask);
+    ShufOp0Index = getShuffleMaskIndexOfOneElementFromOp0IntoOp1(CommutedMask);
+    if (ShufOp0Index == -1)
+      return SDValue();
+    // Commute operands to match the commuted shuffle mask.
+    std::swap(Op0, Op1);
+    Mask = CommutedMask;
+  }
+
+  // The shuffle inserts exactly one element from operand 0 into operand 1.
+  // Now see if we can access that element as a scalar via a real insert element
+  // instruction.
+  // TODO: We can try harder to locate the element as a scalar. Examples: it
+  // could be an operand of SCALAR_TO_VECTOR, BUILD_VECTOR, or a constant.
+  assert(Mask[ShufOp0Index] >= 0 && Mask[ShufOp0Index] < (int)Mask.size() &&
+         "Shuffle mask value must be from operand 0");
+  if (Op0.getOpcode() != ISD::INSERT_VECTOR_ELT)
+    return SDValue();
+
+  auto *InsIndexC = dyn_cast<ConstantSDNode>(Op0.getOperand(2));
+  if (!InsIndexC || InsIndexC->getSExtValue() != Mask[ShufOp0Index])
+    return SDValue();
+
+  // There's an existing insertelement with constant insertion index, so we
+  // don't need to check the legality/profitability of a replacement operation
+  // that differs at most in the constant value. The target should be able to
+  // lower any of those in a similar way. If not, legalization will expand this
+  // to a scalar-to-vector plus shuffle.
+  //
+  // Note that the shuffle may move the scalar from the position that the insert
+  // element used. Therefore, our new insert element occurs at the shuffle's
+  // mask index value, not the insert's index value.
+  // shuffle (insertelt v1, x, C), v2, mask --> insertelt v2, x, C'
+  SDValue NewInsIndex = DAG.getConstant(ShufOp0Index, SDLoc(Shuf),
+                                        Op0.getOperand(2).getValueType());
+  return DAG.getNode(ISD::INSERT_VECTOR_ELT, SDLoc(Shuf), Op0.getValueType(),
+                     Op1, Op0.getOperand(1), NewInsIndex);
+}
+
 SDValue DAGCombiner::visitVECTOR_SHUFFLE(SDNode *N) {
   EVT VT = N->getValueType(0);
   unsigned NumElts = VT.getVectorNumElements();
@@ -15893,6 +15855,9 @@ SDValue DAGCombiner::visitVECTOR_SHUFFLE(SDNode *N) {
   // Simplify shuffle mask if a referenced element is UNDEF.
   if (SDValue V = simplifyShuffleMask(SVN, N0, N1, DAG))
     return V;
+
+  if (SDValue InsElt = replaceShuffleOfInsert(SVN, DAG))
+    return InsElt;
 
   // A shuffle of a single vector that is a splat can always be folded.
   if (auto *N0Shuf = dyn_cast<ShuffleVectorSDNode>(N0))

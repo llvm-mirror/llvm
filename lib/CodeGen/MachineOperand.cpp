@@ -15,10 +15,11 @@
 #include "llvm/Analysis/Loads.h"
 #include "llvm/CodeGen/MIRPrinter.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/Target/TargetIntrinsicInfo.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/ModuleSlotTracker.h"
+#include "llvm/Target/TargetIntrinsicInfo.h"
+#include "llvm/Target/TargetMachine.h"
 
 using namespace llvm;
 
@@ -29,6 +30,18 @@ static cl::opt<int>
                                  "unlimited = -1"),
                         cl::init(32), cl::Hidden);
 
+static const MachineFunction *getMFIfAvailable(const MachineOperand &MO) {
+  if (const MachineInstr *MI = MO.getParent())
+    if (const MachineBasicBlock *MBB = MI->getParent())
+      if (const MachineFunction *MF = MBB->getParent())
+        return MF;
+  return nullptr;
+}
+static MachineFunction *getMFIfAvailable(MachineOperand &MO) {
+  return const_cast<MachineFunction *>(
+      getMFIfAvailable(const_cast<const MachineOperand &>(MO)));
+}
+
 void MachineOperand::setReg(unsigned Reg) {
   if (getReg() == Reg)
     return; // No change.
@@ -36,15 +49,13 @@ void MachineOperand::setReg(unsigned Reg) {
   // Otherwise, we have to change the register.  If this operand is embedded
   // into a machine function, we need to update the old and new register's
   // use/def lists.
-  if (MachineInstr *MI = getParent())
-    if (MachineBasicBlock *MBB = MI->getParent())
-      if (MachineFunction *MF = MBB->getParent()) {
-        MachineRegisterInfo &MRI = MF->getRegInfo();
-        MRI.removeRegOperandFromUseList(this);
-        SmallContents.RegNo = Reg;
-        MRI.addRegOperandToUseList(this);
-        return;
-      }
+  if (MachineFunction *MF = getMFIfAvailable(*this)) {
+    MachineRegisterInfo &MRI = MF->getRegInfo();
+    MRI.removeRegOperandFromUseList(this);
+    SmallContents.RegNo = Reg;
+    MRI.addRegOperandToUseList(this);
+    return;
+  }
 
   // Otherwise, just change the register, no problem.  :)
   SmallContents.RegNo = Reg;
@@ -80,15 +91,13 @@ void MachineOperand::setIsDef(bool Val) {
   if (IsDef == Val)
     return;
   // MRI may keep uses and defs in different list positions.
-  if (MachineInstr *MI = getParent())
-    if (MachineBasicBlock *MBB = MI->getParent())
-      if (MachineFunction *MF = MBB->getParent()) {
-        MachineRegisterInfo &MRI = MF->getRegInfo();
-        MRI.removeRegOperandFromUseList(this);
-        IsDef = Val;
-        MRI.addRegOperandToUseList(this);
-        return;
-      }
+  if (MachineFunction *MF = getMFIfAvailable(*this)) {
+    MachineRegisterInfo &MRI = MF->getRegInfo();
+    MRI.removeRegOperandFromUseList(this);
+    IsDef = Val;
+    MRI.addRegOperandToUseList(this);
+    return;
+  }
   IsDef = Val;
 }
 
@@ -98,12 +107,8 @@ void MachineOperand::removeRegFromUses() {
   if (!isReg() || !isOnRegUseList())
     return;
 
-  if (MachineInstr *MI = getParent()) {
-    if (MachineBasicBlock *MBB = MI->getParent()) {
-      if (MachineFunction *MF = MBB->getParent())
-        MF->getRegInfo().removeRegOperandFromUseList(this);
-    }
-  }
+  if (MachineFunction *MF = getMFIfAvailable(*this))
+    MF->getRegInfo().removeRegOperandFromUseList(this);
 }
 
 /// ChangeToImmediate - Replace this operand with a new immediate operand of
@@ -180,10 +185,8 @@ void MachineOperand::ChangeToRegister(unsigned Reg, bool isDef, bool isImp,
                                       bool isKill, bool isDead, bool isUndef,
                                       bool isDebug) {
   MachineRegisterInfo *RegInfo = nullptr;
-  if (MachineInstr *MI = getParent())
-    if (MachineBasicBlock *MBB = MI->getParent())
-      if (MachineFunction *MF = MBB->getParent())
-        RegInfo = &MF->getRegInfo();
+  if (MachineFunction *MF = getMFIfAvailable(*this))
+    RegInfo = &MF->getRegInfo();
   // If this operand is already a register operand, remove it from the
   // register's use/def lists.
   bool WasReg = isReg();
@@ -257,13 +260,17 @@ bool MachineOperand::isIdenticalTo(const MachineOperand &Other) const {
     if (RegMask == OtherRegMask)
       return true;
 
-    // Calculate the size of the RegMask
-    const MachineFunction *MF = getParent()->getMF();
-    const TargetRegisterInfo *TRI = MF->getSubtarget().getRegisterInfo();
-    unsigned RegMaskSize = (TRI->getNumRegs() + 31) / 32;
+    if (const MachineFunction *MF = getMFIfAvailable(*this)) {
+      // Calculate the size of the RegMask
+      const TargetRegisterInfo *TRI = MF->getSubtarget().getRegisterInfo();
+      unsigned RegMaskSize = (TRI->getNumRegs() + 31) / 32;
 
-    // Deep compare of the two RegMasks
-    return std::equal(RegMask, RegMask + RegMaskSize, OtherRegMask);
+      // Deep compare of the two RegMasks
+      return std::equal(RegMask, RegMask + RegMaskSize, OtherRegMask);
+    }
+    // We don't know the size of the RegMask, so we can't deep compare the two
+    // reg masks.
+    return false;
   }
   case MachineOperand::MO_MCSymbol:
     return getMCSymbol() == Other.getMCSymbol();
@@ -327,80 +334,83 @@ hash_code llvm::hash_value(const MachineOperand &MO) {
   llvm_unreachable("Invalid machine operand type");
 }
 
+// Try to crawl up to the machine function and get TRI and IntrinsicInfo from
+// it.
+static void tryToGetTargetInfo(const MachineOperand &MO,
+                               const TargetRegisterInfo *&TRI,
+                               const TargetIntrinsicInfo *&IntrinsicInfo) {
+  if (const MachineFunction *MF = getMFIfAvailable(MO)) {
+    TRI = MF->getSubtarget().getRegisterInfo();
+    IntrinsicInfo = MF->getTarget().getIntrinsicInfo();
+  }
+}
+
 void MachineOperand::print(raw_ostream &OS, const TargetRegisterInfo *TRI,
                            const TargetIntrinsicInfo *IntrinsicInfo) const {
+  tryToGetTargetInfo(*this, TRI, IntrinsicInfo);
   ModuleSlotTracker DummyMST(nullptr);
-  print(OS, DummyMST, TRI, IntrinsicInfo);
+  print(OS, DummyMST, LLT{}, /*PrintDef=*/false,
+        /*ShouldPrintRegisterTies=*/true,
+        /*TiedOperandIdx=*/0, TRI, IntrinsicInfo);
 }
 
 void MachineOperand::print(raw_ostream &OS, ModuleSlotTracker &MST,
+                           LLT TypeToPrint, bool PrintDef,
+                           bool ShouldPrintRegisterTies,
+                           unsigned TiedOperandIdx,
                            const TargetRegisterInfo *TRI,
                            const TargetIntrinsicInfo *IntrinsicInfo) const {
   switch (getType()) {
-  case MachineOperand::MO_Register:
-    OS << printReg(getReg(), TRI, getSubReg());
-
-    if (isDef() || isKill() || isDead() || isImplicit() || isUndef() ||
-        isInternalRead() || isEarlyClobber() || isTied()) {
-      OS << '<';
-      bool NeedComma = false;
-      if (isDef()) {
-        if (NeedComma)
-          OS << ',';
-        if (isEarlyClobber())
-          OS << "earlyclobber,";
-        if (isImplicit())
-          OS << "imp-";
-        OS << "def";
-        NeedComma = true;
-        // <def,read-undef> only makes sense when getSubReg() is set.
-        // Don't clutter the output otherwise.
-        if (isUndef() && getSubReg())
-          OS << ",read-undef";
-      } else if (isImplicit()) {
-        OS << "imp-use";
-        NeedComma = true;
-      }
-
-      if (isKill()) {
-        if (NeedComma)
-          OS << ',';
-        OS << "kill";
-        NeedComma = true;
-      }
-      if (isDead()) {
-        if (NeedComma)
-          OS << ',';
-        OS << "dead";
-        NeedComma = true;
-      }
-      if (isUndef() && isUse()) {
-        if (NeedComma)
-          OS << ',';
-        OS << "undef";
-        NeedComma = true;
-      }
-      if (isInternalRead()) {
-        if (NeedComma)
-          OS << ',';
-        OS << "internal";
-        NeedComma = true;
-      }
-      if (isTied()) {
-        if (NeedComma)
-          OS << ',';
-        OS << "tied";
-        if (TiedTo != 15)
-          OS << unsigned(TiedTo - 1);
-      }
-      OS << '>';
+  case MachineOperand::MO_Register: {
+    unsigned Reg = getReg();
+    if (isImplicit())
+      OS << (isDef() ? "implicit-def " : "implicit ");
+    else if (PrintDef && isDef())
+      // Print the 'def' flag only when the operand is defined after '='.
+      OS << "def ";
+    if (isInternalRead())
+      OS << "internal ";
+    if (isDead())
+      OS << "dead ";
+    if (isKill())
+      OS << "killed ";
+    if (isUndef())
+      OS << "undef ";
+    if (isEarlyClobber())
+      OS << "early-clobber ";
+    if (isDebug())
+      OS << "debug-use ";
+    OS << printReg(Reg, TRI);
+    // Print the sub register.
+    if (unsigned SubReg = getSubReg()) {
+      if (TRI)
+        OS << '.' << TRI->getSubRegIndexName(SubReg);
+      else
+        OS << ".subreg" << SubReg;
     }
+    // Print the register class / bank.
+    if (TargetRegisterInfo::isVirtualRegister(Reg)) {
+      if (const MachineFunction *MF = getMFIfAvailable(*this)) {
+        const MachineRegisterInfo &MRI = MF->getRegInfo();
+        if (!PrintDef || MRI.def_empty(Reg)) {
+          OS << ':';
+          OS << printRegClassOrBank(Reg, MRI, TRI);
+        }
+      }
+    }
+    // Print ties.
+    if (ShouldPrintRegisterTies && isTied() && !isDef())
+      OS << "(tied-def " << TiedOperandIdx << ")";
+    // Print types.
+    if (TypeToPrint.isValid())
+      OS << '(' << TypeToPrint << ')';
     break;
+  }
   case MachineOperand::MO_Immediate:
     OS << getImm();
     break;
   case MachineOperand::MO_CImmediate:
-    getCImm()->getValue().print(OS, false);
+    getCImm()->printAsOperand(OS, /*PrintType=*/true, MST);
     break;
   case MachineOperand::MO_FPImmediate:
     if (getFPImm()->getType()->isFloatTy()) {
@@ -469,23 +479,27 @@ void MachineOperand::print(raw_ostream &OS, ModuleSlotTracker &MST,
     OS << '>';
     break;
   case MachineOperand::MO_RegisterMask: {
-    unsigned NumRegsInMask = 0;
-    unsigned NumRegsEmitted = 0;
     OS << "<regmask";
-    for (unsigned i = 0; i < TRI->getNumRegs(); ++i) {
-      unsigned MaskWord = i / 32;
-      unsigned MaskBit = i % 32;
-      if (getRegMask()[MaskWord] & (1 << MaskBit)) {
-        if (PrintRegMaskNumRegs < 0 ||
-            NumRegsEmitted <= static_cast<unsigned>(PrintRegMaskNumRegs)) {
-          OS << " " << printReg(i, TRI);
-          NumRegsEmitted++;
+    if (TRI) {
+      unsigned NumRegsInMask = 0;
+      unsigned NumRegsEmitted = 0;
+      for (unsigned i = 0; i < TRI->getNumRegs(); ++i) {
+        unsigned MaskWord = i / 32;
+        unsigned MaskBit = i % 32;
+        if (getRegMask()[MaskWord] & (1 << MaskBit)) {
+          if (PrintRegMaskNumRegs < 0 ||
+              NumRegsEmitted <= static_cast<unsigned>(PrintRegMaskNumRegs)) {
+            OS << " " << printReg(i, TRI);
+            NumRegsEmitted++;
+          }
+          NumRegsInMask++;
         }
-        NumRegsInMask++;
       }
+      if (NumRegsEmitted != NumRegsInMask)
+        OS << " and " << (NumRegsInMask - NumRegsEmitted) << " more...";
+    } else {
+      OS << " ...";
     }
-    if (NumRegsEmitted != NumRegsInMask)
-      OS << " and " << (NumRegsInMask - NumRegsEmitted) << " more...";
     OS << ">";
     break;
   }
