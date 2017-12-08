@@ -385,16 +385,12 @@ option(LLVM_ENABLE_LLD "Use lld as C and C++ linker." OFF)
 option(LLVM_ENABLE_PEDANTIC "Compile with pedantic enabled." ON)
 option(LLVM_ENABLE_WERROR "Fail and stop if a warning is triggered." OFF)
 
-option(LLVM_ENABLE_DUMP "Enable dump functions in release builds" OFF)
+option(LLVM_ENABLE_DUMP "Enable dump functions even when assertions are disabled" OFF)
 
 if( NOT uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG" )
   option(LLVM_ENABLE_ASSERTIONS "Enable assertions" OFF)
 else()
   option(LLVM_ENABLE_ASSERTIONS "Enable assertions" ON)
-endif()
-
-if( LLVM_ENABLE_ASSERTIONS )
-  set(LLVM_ENABLE_DUMP ON)
 endif()
 
 option(LLVM_ENABLE_EXPENSIVE_CHECKS "Enable expensive checks" OFF)
@@ -989,6 +985,7 @@ if(LLVM_DISTRIBUTION_COMPONENTS)
 
   add_custom_target(distribution)
   add_custom_target(install-distribution)
+  add_custom_target(install-distribution-stripped)
   foreach(target ${LLVM_DISTRIBUTION_COMPONENTS})
     if(TARGET ${target})
       add_dependencies(distribution ${target})
@@ -1000,6 +997,14 @@ if(LLVM_DISTRIBUTION_COMPONENTS)
       add_dependencies(install-distribution install-${target})
     else()
       message(SEND_ERROR "Specified distribution component '${target}' doesn't have an install target")
+    endif()
+
+    if(TARGET install-${target}-stripped)
+      add_dependencies(install-distribution-stripped install-${target}-stripped)
+    else()
+      message(SEND_ERROR "Specified distribution component '${target}' doesn't have an install-stripped target."
+                         " Its installation target creation should be changed to use add_llvm_install_targets,"
+                         " or you should manually create the 'install-${target}-stripped' target.")
     endif()
   endforeach()
 endif()
