@@ -6172,6 +6172,11 @@ let Predicates = [UseSSE41] in {
 // SSE4.1 - Packed Bit Test
 //===----------------------------------------------------------------------===//
 
+let Sched = WriteVecLogic in 
+def SSE_PTEST : OpndItins<
+  IIC_SSE_INTALU_P_RR, IIC_SSE_INTALU_P_RM
+>;
+
 // ptest instruction we'll lower to this in X86ISelLowering primarily from
 // the intel intrinsic that corresponds to this.
 let Defs = [EFLAGS], Predicates = [HasAVX] in {
@@ -6960,7 +6965,7 @@ multiclass pseudo_pcmpistrm<string asm, PatFrag ld_frag> {
                        (bc_v16i8 (ld_frag addr:$src2)), imm:$src3))]>;
 }
 
-let Defs = [EFLAGS], usesCustomInserter = 1 in {
+let Defs = [EFLAGS], usesCustomInserter = 1, hasNoSchedulingInfo = 1 in {
   defm VPCMPISTRM128 : pseudo_pcmpistrm<"#VPCMPISTRM128", loadv2i64>,
                          Requires<[HasAVX]>, VEX_WIG;
   defm PCMPISTRM128 : pseudo_pcmpistrm<"#PCMPISTRM128", memopv2i64>,
@@ -6997,7 +7002,7 @@ multiclass pseudo_pcmpestrm<string asm, PatFrag ld_frag> {
                        (bc_v16i8 (ld_frag addr:$src3)), EDX, imm:$src5))]>;
 }
 
-let Defs = [EFLAGS], Uses = [EAX, EDX], usesCustomInserter = 1 in {
+let Defs = [EFLAGS], Uses = [EAX, EDX], usesCustomInserter = 1, hasNoSchedulingInfo = 1 in {
   defm VPCMPESTRM128 : pseudo_pcmpestrm<"#VPCMPESTRM128", loadv2i64>,
                          Requires<[HasAVX]>;
   defm PCMPESTRM128 : pseudo_pcmpestrm<"#PCMPESTRM128", memopv2i64>,
@@ -7034,7 +7039,7 @@ multiclass pseudo_pcmpistri<string asm, PatFrag ld_frag> {
                               (bc_v16i8 (ld_frag addr:$src2)), imm:$src3))]>;
 }
 
-let Defs = [EFLAGS], usesCustomInserter = 1 in {
+let Defs = [EFLAGS], usesCustomInserter = 1, hasNoSchedulingInfo = 1 in {
   defm VPCMPISTRI : pseudo_pcmpistri<"#VPCMPISTRI", loadv2i64>,
                       Requires<[HasAVX]>, VEX_WIG;
   defm PCMPISTRI  : pseudo_pcmpistri<"#PCMPISTRI", memopv2i64>,
@@ -7072,7 +7077,7 @@ multiclass pseudo_pcmpestri<string asm, PatFrag ld_frag> {
        imm:$src5))]>;
 }
 
-let Defs = [EFLAGS], Uses = [EAX, EDX], usesCustomInserter = 1 in {
+let Defs = [EFLAGS], Uses = [EAX, EDX], hasNoSchedulingInfo = 1, usesCustomInserter = 1 in {
   defm VPCMPESTRI : pseudo_pcmpestri<"#VPCMPESTRI", loadv2i64>,
                       Requires<[HasAVX]>;
   defm PCMPESTRI  : pseudo_pcmpestri<"#PCMPESTRI", memopv2i64>,
@@ -7150,8 +7155,9 @@ let Constraints = "$src1 = $dst" in {
 // SHA-NI Instructions
 //===----------------------------------------------------------------------===//
 
+// FIXME: Is there a better scheduler itinerary for SHA than WriteVecIMul?
 multiclass SHAI_binop<bits<8> Opc, string OpcodeStr, Intrinsic IntId,
-                      bit UsesXMM0 = 0> {
+                      OpndItins itins, bit UsesXMM0 = 0> {
   def rr : I<Opc, MRMSrcReg, (outs VR128:$dst),
              (ins VR128:$src1, VR128:$src2),
              !if(UsesXMM0,
@@ -7159,7 +7165,8 @@ multiclass SHAI_binop<bits<8> Opc, string OpcodeStr, Intrinsic IntId,
                  !strconcat(OpcodeStr, "\t{$src2, $dst|$dst, $src2}")),
              [!if(UsesXMM0,
                   (set VR128:$dst, (IntId VR128:$src1, VR128:$src2, XMM0)),
-                  (set VR128:$dst, (IntId VR128:$src1, VR128:$src2)))]>, T8;
+                  (set VR128:$dst, (IntId VR128:$src1, VR128:$src2)))], itins.rr>,
+             T8, Sched<[itins.Sched]>;
 
   def rm : I<Opc, MRMSrcMem, (outs VR128:$dst),
              (ins VR128:$src1, i128mem:$src2),
@@ -7170,7 +7177,8 @@ multiclass SHAI_binop<bits<8> Opc, string OpcodeStr, Intrinsic IntId,
                   (set VR128:$dst, (IntId VR128:$src1,
                     (bc_v4i32 (memopv2i64 addr:$src2)), XMM0)),
                   (set VR128:$dst, (IntId VR128:$src1,
-                    (bc_v4i32 (memopv2i64 addr:$src2)))))]>, T8;
+                    (bc_v4i32 (memopv2i64 addr:$src2)))))], itins.rm>, T8,
+             Sched<[itins.Sched.Folded, ReadAfterLd]>;
 }
 
 let Constraints = "$src1 = $dst", Predicates = [HasSHA] in {
@@ -7179,24 +7187,32 @@ let Constraints = "$src1 = $dst", Predicates = [HasSHA] in {
                          "sha1rnds4\t{$src3, $src2, $dst|$dst, $src2, $src3}",
                          [(set VR128:$dst,
                            (int_x86_sha1rnds4 VR128:$src1, VR128:$src2,
-                            (i8 imm:$src3)))]>, TA;
+                            (i8 imm:$src3)))], IIC_SSE_INTMUL_P_RR>, TA,
+                         Sched<[WriteVecIMul]>;
   def SHA1RNDS4rmi : Ii8<0xCC, MRMSrcMem, (outs VR128:$dst),
                          (ins VR128:$src1, i128mem:$src2, u8imm:$src3),
                          "sha1rnds4\t{$src3, $src2, $dst|$dst, $src2, $src3}",
                          [(set VR128:$dst,
                            (int_x86_sha1rnds4 VR128:$src1,
                             (bc_v4i32 (memopv2i64 addr:$src2)),
-                            (i8 imm:$src3)))]>, TA;
+                            (i8 imm:$src3)))], IIC_SSE_INTMUL_P_RM>, TA,
+                         Sched<[WriteVecIMulLd, ReadAfterLd]>;
 
-  defm SHA1NEXTE : SHAI_binop<0xC8, "sha1nexte", int_x86_sha1nexte>;
-  defm SHA1MSG1  : SHAI_binop<0xC9, "sha1msg1", int_x86_sha1msg1>;
-  defm SHA1MSG2  : SHAI_binop<0xCA, "sha1msg2", int_x86_sha1msg2>;
+  defm SHA1NEXTE : SHAI_binop<0xC8, "sha1nexte", int_x86_sha1nexte,
+                              SSE_INTMUL_ITINS_P>;
+  defm SHA1MSG1  : SHAI_binop<0xC9, "sha1msg1", int_x86_sha1msg1,
+                              SSE_INTMUL_ITINS_P>;
+  defm SHA1MSG2  : SHAI_binop<0xCA, "sha1msg2", int_x86_sha1msg2,
+                              SSE_INTMUL_ITINS_P>;
 
   let Uses=[XMM0] in
-  defm SHA256RNDS2 : SHAI_binop<0xCB, "sha256rnds2", int_x86_sha256rnds2, 1>;
+  defm SHA256RNDS2 : SHAI_binop<0xCB, "sha256rnds2", int_x86_sha256rnds2,
+                                SSE_INTMUL_ITINS_P, 1>;
 
-  defm SHA256MSG1 : SHAI_binop<0xCC, "sha256msg1", int_x86_sha256msg1>;
-  defm SHA256MSG2 : SHAI_binop<0xCD, "sha256msg2", int_x86_sha256msg2>;
+  defm SHA256MSG1 : SHAI_binop<0xCC, "sha256msg1", int_x86_sha256msg1,
+                               SSE_INTMUL_ITINS_P>;
+  defm SHA256MSG2 : SHAI_binop<0xCD, "sha256msg2", int_x86_sha256msg2,
+                               SSE_INTMUL_ITINS_P>;
 }
 
 // Aliases with explicit %xmm0
