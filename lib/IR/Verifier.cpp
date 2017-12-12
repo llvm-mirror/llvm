@@ -862,6 +862,14 @@ void Verifier::visitDISubrange(const DISubrange &N) {
   AssertDI(N.getCount() >= -1, "invalid subrange count", &N);
 }
 
+void Verifier::visitDIFortranSubrange(const DIFortranSubrange &N) {
+  AssertDI(N.getTag() == dwarf::DW_TAG_subrange_type, "invalid tag", &N);
+  AssertDI(N.getLowerBound() ? (N.getLowerBoundExp() != nullptr) : true,
+           "no lower bound", &N);
+  AssertDI(N.getUpperBound() ? (N.getUpperBoundExp() != nullptr) : true,
+           "no upper bound", &N);
+}
+
 void Verifier::visitDIEnumerator(const DIEnumerator &N) {
   AssertDI(N.getTag() == dwarf::DW_TAG_enumerator, "invalid tag", &N);
 }
@@ -870,6 +878,11 @@ void Verifier::visitDIBasicType(const DIBasicType &N) {
   AssertDI(N.getTag() == dwarf::DW_TAG_base_type ||
                N.getTag() == dwarf::DW_TAG_unspecified_type ||
                N.getTag() == dwarf::DW_TAG_string_type,
+           "invalid tag", &N);
+}
+
+void Verifier::visitDIStringType(const DIStringType &N) {
+  AssertDI( N.getTag() == dwarf::DW_TAG_string_type,
            "invalid tag", &N);
 }
 
@@ -950,6 +963,22 @@ void Verifier::visitDICompositeType(const DICompositeType &N) {
     AssertDI(N.getFile() && !N.getFile()->getFilename().empty(),
              "class/union requires a filename", &N, N.getFile());
   }
+}
+
+void Verifier::visitDIFortranArrayType(const DIFortranArrayType &N) {
+  // Common scope checks.
+  visitDIScope(N);
+
+  AssertDI(N.getTag() == dwarf::DW_TAG_array_type, "invalid tag", &N);
+
+  AssertDI(isScope(N.getRawScope()), "invalid scope", &N, N.getRawScope());
+  AssertDI(isType(N.getRawBaseType()), "invalid base type", &N,
+           N.getRawBaseType());
+
+  AssertDI(!N.getRawElements() || isa<MDTuple>(N.getRawElements()),
+           "invalid composite elements", &N, N.getRawElements());
+  AssertDI(!hasConflictingReferenceFlags(N.getFlags()),
+           "invalid reference flags", &N);
 }
 
 void Verifier::visitDISubroutineType(const DISubroutineType &N) {
