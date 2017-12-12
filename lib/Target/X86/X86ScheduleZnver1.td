@@ -140,6 +140,9 @@ defm : ZnWriteResPair<WriteALU,   ZnALU, 1>;
 defm : ZnWriteResPair<WriteShift, ZnALU, 1>;
 defm : ZnWriteResPair<WriteJump,  ZnALU, 1>;
 
+// Treat misc copies as a move.
+def : InstRW<[WriteMove], (instrs COPY)>;
+
 // IDIV
 def : WriteRes<WriteIDiv, [ZnALU2, ZnDivider]> {
   let Latency = 41;
@@ -742,7 +745,7 @@ def : InstRW<[ZnWriteFILD], (instregex "ILD_F(16|32|64)m")>;
 def ZnWriteFIST : SchedWriteRes<[ZnAGU, ZnFPU23]> {
   let Latency = 12;
 }
-def : InstRW<[ZnWriteFIST], (instregex "IST_(F|FP)(16|32)m")>;
+def : InstRW<[ZnWriteFIST], (instregex "IS(T|TT)_(F|FP)(16|32|64)m")>;
 
 def ZnWriteFPU13 : SchedWriteRes<[ZnAGU, ZnFPU13]> {
   let Latency = 8;
@@ -1629,8 +1632,8 @@ def ZnWriteFMADDr : SchedWriteRes<[ZnFPU03]> {
 }
 def : InstRW<[ZnWriteFMADDr],
     (instregex
-    "VF(N?)M(ADD|SUB|ADDSUB|SUBADD)P(S|D)(r213|r132|r231)r(Y)?",
-    "VF(N?)M(ADD|SUB)S(S|D)(r132|r231|r213)r",
+    "VF(N?)M(ADD|SUB|ADDSUB|SUBADD)P(S|D)(213|132|231)(Y)?r",
+    "VF(N?)M(ADD|SUB)(132|231|213)S(S|D)r",
     "VF(N?)M(ADD|SUB)S(S|D)4rr(_REV|_Int)?",
     "VF(N?)M(ADD|SUB)P(S|D)4rr(Y)?(_REV)?")>;
 
@@ -1641,8 +1644,8 @@ def ZnWriteFMADDm : SchedWriteRes<[ZnAGU, ZnFPU03]> {
 }
 def : InstRW<[ZnWriteFMADDm],
     (instregex
-    "VF(N?)M(ADD|SUB|ADDSUB|SUBADD)P(S|D)(r213|r132|r231)m(Y)?",
-    "VF(N?)M(ADD|SUB)S(S|D)(r132|r231|r213)m",
+    "VF(N?)M(ADD|SUB|ADDSUB|SUBADD)(213|132|231)P(S|D)(Y)?m",
+    "VF(N?)M(ADD|SUB)(132|231|213)S(S|D)m",
     "VF(N?)M(ADD|SUB)S(S|D)4(rm|mr)(_Int)?",
     "VF(N?)M(ADD|SUB)P(S|D)4(rm|mr)(Y)?")>;
 
