@@ -808,10 +808,13 @@ MetadataLoader::MetadataLoaderImpl::lazyLoadModuleMetadataBlock() {
       case bitc::METADATA_LOCATION:
       case bitc::METADATA_GENERIC_DEBUG:
       case bitc::METADATA_SUBRANGE:
+      case bitc::METADATA_FORTRAN_SUBRANGE:
       case bitc::METADATA_ENUMERATOR:
       case bitc::METADATA_BASIC_TYPE:
+      case bitc::METADATA_STRING_TYPE:
       case bitc::METADATA_DERIVED_TYPE:
       case bitc::METADATA_COMPOSITE_TYPE:
+      case bitc::METADATA_FORTRAN_ARRAY_TYPE:
       case bitc::METADATA_SUBROUTINE_TYPE:
       case bitc::METADATA_MODULE:
       case bitc::METADATA_FILE:
@@ -1189,6 +1192,20 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
     NextMetadataNo++;
     break;
   }
+  case bitc::METADATA_FORTRAN_SUBRANGE: {
+    if (Record.size() != 8)
+      return error("Invalid record");
+
+    IsDistinct = Record[0];
+    MetadataList.assignValue(
+        GET_OR_DISTINCT(DIFortranSubrange,
+                        (Context, Record[1], Record[2], Record[3],
+                         getMDOrNull(Record[4]), getMDOrNull(Record[5]),
+                         getMDOrNull(Record[6]), getMDOrNull(Record[7]))),
+        NextMetadataNo);
+    NextMetadataNo++;
+    break;
+  }
   case bitc::METADATA_ENUMERATOR: {
     if (Record.size() != 3)
       return error("Invalid record");
@@ -1210,6 +1227,20 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
         GET_OR_DISTINCT(DIBasicType,
                         (Context, Record[1], getMDString(Record[2]), Record[3],
                          Record[4], Record[5])),
+        NextMetadataNo);
+    NextMetadataNo++;
+    break;
+  }
+  case bitc::METADATA_STRING_TYPE: {
+    if (Record.size() != 6)
+      return error("Invalid record");
+
+    IsDistinct = Record[0];
+    MetadataList.assignValue(
+        GET_OR_DISTINCT(DIStringType,
+                        (Context, Record[1], getMDString(Record[2]),
+                         getMDOrNull(Record[3]), getMDOrNull(Record[4]),
+                         Record[5], Record[6], Record[7])),
         NextMetadataNo);
     NextMetadataNo++;
     break;
@@ -1300,6 +1331,38 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
     if (!IsNotUsedInTypeRef && Identifier)
       MetadataList.addTypeRef(*Identifier, *cast<DICompositeType>(CT));
 
+    MetadataList.assignValue(CT, NextMetadataNo);
+    NextMetadataNo++;
+    break;
+  }
+  case bitc::METADATA_FORTRAN_ARRAY_TYPE: {
+    if (Record.size() != 12)
+      return error("Invalid record");
+
+    // If we have a UUID and this is not a forward declaration, lookup the
+    // mapping.
+    IsDistinct = Record[0] & 0x1;
+    unsigned Tag = Record[1];
+    MDString *Name = getMDString(Record[2]);
+    Metadata *File = getMDOrNull(Record[3]);
+    unsigned Line = Record[4];
+    Metadata *Scope = getDITypeRefOrNull(Record[5]);
+    Metadata *BaseType = nullptr;
+    uint64_t SizeInBits = Record[7];
+    if (Record[8] > (uint64_t)std::numeric_limits<uint32_t>::max())
+      return error("Alignment value is too large");
+    uint32_t AlignInBits = Record[8];
+    uint64_t OffsetInBits = 0;
+    DINode::DIFlags Flags = static_cast<DINode::DIFlags>(Record[10]);
+    Metadata *Elements = nullptr;
+    BaseType = getDITypeRefOrNull(Record[6]);
+    OffsetInBits = Record[9];
+    Elements = getMDOrNull(Record[11]);
+    DIFortranArrayType *CT =
+      GET_OR_DISTINCT(DIFortranArrayType,
+                      (Context, Tag, Name, File, Line, Scope, BaseType,
+                       SizeInBits, AlignInBits, OffsetInBits, Flags,
+                       Elements));
     MetadataList.assignValue(CT, NextMetadataNo);
     NextMetadataNo++;
     break;

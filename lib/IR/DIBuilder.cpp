@@ -254,6 +254,12 @@ DIBasicType *DIBuilder::createBasicType(StringRef Name, uint64_t SizeInBits,
                           0, Encoding);
 }
 
+DIStringType *DIBuilder::createStringType(StringRef Name, uint64_t SizeInBits) {
+  assert(!Name.empty() && "Unable to create type without name");
+  return DIStringType::get(VMContext, dwarf::DW_TAG_string_type, Name,
+                           SizeInBits, 0);
+}
+
 DIDerivedType *DIBuilder::createQualifiedType(unsigned Tag, DIType *FromTy) {
   return DIDerivedType::get(VMContext, Tag, "", nullptr, 0, nullptr, FromTy, 0,
                             0, 0, None, DINode::FlagZero);
@@ -487,6 +493,15 @@ DICompositeType *DIBuilder::createArrayType(uint64_t Size,
   return R;
 }
 
+DIFortranArrayType *DIBuilder::createFortranArrayType(
+    uint64_t Size, uint32_t AlignInBits, DIType *Ty, DINodeArray Subscripts) {
+  auto *R = DIFortranArrayType::get(VMContext, dwarf::DW_TAG_array_type, "",
+                                    nullptr, 0, nullptr, Ty, Size, AlignInBits,
+                                    0, DINode::FlagZero, Subscripts);
+  trackIfUnresolved(R);
+  return R;
+}
+
 DICompositeType *DIBuilder::createVectorType(uint64_t Size,
                                              uint32_t AlignInBits, DIType *Ty,
                                              DINodeArray Subscripts) {
@@ -580,6 +595,12 @@ DITypeRefArray DIBuilder::getOrCreateTypeArray(ArrayRef<Metadata *> Elements) {
 
 DISubrange *DIBuilder::getOrCreateSubrange(int64_t Lo, int64_t Count) {
   return DISubrange::get(VMContext, Count, Lo);
+}
+
+DIFortranSubrange *DIBuilder::getOrCreateFortranSubrange(
+    int64_t CLB, int64_t CUB, bool NUB, Metadata *LB, Metadata *LBE,
+    Metadata *UB, Metadata *UBE) {
+  return DIFortranSubrange::get(VMContext, CLB, CUB, NUB, LB, LBE, UB, UBE);
 }
 
 static void checkGlobalVariableScope(DIScope *Context) {

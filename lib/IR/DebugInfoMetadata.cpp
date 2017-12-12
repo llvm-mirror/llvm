@@ -253,6 +253,15 @@ DISubrange *DISubrange::getImpl(LLVMContext &Context, int64_t Count, int64_t Lo,
   DEFINE_GETIMPL_STORE_NO_OPS(DISubrange, (Count, Lo));
 }
 
+DIFortranSubrange *DIFortranSubrange::getImpl(
+    LLVMContext &Context, int64_t CLB, int64_t CUB, bool NUB, Metadata *LB,
+    Metadata *LBE, Metadata *UB, Metadata *UBE, StorageType Storage,
+    bool ShouldCreate) {
+  DEFINE_GETIMPL_LOOKUP(DIFortranSubrange, (CLB, CUB, NUB, LB, LBE, UB, UBE));
+  Metadata *Ops[] = {LB, LBE, UB, UBE};
+  DEFINE_GETIMPL_STORE(DIFortranSubrange, (CLB, CUB, NUB), Ops);
+}
+
 DIEnumerator *DIEnumerator::getImpl(LLVMContext &Context, int64_t Value,
                                     MDString *Name, StorageType Storage,
                                     bool ShouldCreate) {
@@ -271,6 +280,21 @@ DIBasicType *DIBasicType::getImpl(LLVMContext &Context, unsigned Tag,
                         (Tag, Name, SizeInBits, AlignInBits, Encoding));
   Metadata *Ops[] = {nullptr, nullptr, Name};
   DEFINE_GETIMPL_STORE(DIBasicType, (Tag, SizeInBits, AlignInBits, Encoding),
+                       Ops);
+}
+
+DIStringType *DIStringType::getImpl(LLVMContext &Context, unsigned Tag,
+                                    MDString *Name, Metadata *StringLength,
+                                    Metadata *StringLengthExp,
+                                    uint64_t SizeInBits, uint32_t AlignInBits,
+                                    unsigned Encoding, StorageType Storage,
+                                    bool ShouldCreate) {
+  assert(isCanonical(Name) && "Expected canonical MDString");
+  DEFINE_GETIMPL_LOOKUP(DIStringType,
+                        (Tag, Name, StringLength, StringLengthExp, SizeInBits,
+                         AlignInBits, Encoding));
+  Metadata *Ops[] = {nullptr, nullptr, Name, StringLength, StringLengthExp};
+  DEFINE_GETIMPL_STORE(DIStringType, (Tag, SizeInBits, AlignInBits, Encoding),
                        Ops);
 }
 
@@ -310,6 +334,22 @@ DICompositeType *DICompositeType::getImpl(
   DEFINE_GETIMPL_STORE(DICompositeType, (Tag, Line, RuntimeLang, SizeInBits,
                                          AlignInBits, OffsetInBits, Flags),
                        Ops);
+}
+
+DIFortranArrayType *DIFortranArrayType::getImpl(
+    LLVMContext &Context, unsigned Tag, MDString *Name, Metadata *File,
+    unsigned Line, Metadata *Scope, Metadata *BaseType, uint64_t SizeInBits,
+    uint32_t AlignInBits, uint64_t OffsetInBits, DIFlags Flags,
+    Metadata *Elements, StorageType Storage, bool ShouldCreate) {
+  assert(isCanonical(Name) && "Expected canonical MDString");
+
+  // Keep this in sync with buildODRType.
+  DEFINE_GETIMPL_LOOKUP(
+      DIFortranArrayType, (Tag, Name, File, Line, Scope, BaseType, SizeInBits,
+                           AlignInBits, OffsetInBits, Flags, Elements));
+  Metadata *Ops[] = {File, Scope, Name, BaseType, Elements};
+  DEFINE_GETIMPL_STORE(DIFortranArrayType, (Tag, Line, SizeInBits, AlignInBits,
+                                            OffsetInBits, Flags), Ops);
 }
 
 DICompositeType *DICompositeType::buildODRType(
@@ -650,6 +690,7 @@ unsigned DIExpression::ExprOperand::getSize() const {
     return 3;
   case dwarf::DW_OP_constu:
   case dwarf::DW_OP_plus_uconst:
+  case dwarf::DW_OP_deref_size:
     return 2;
   default:
     return 1;
@@ -697,6 +738,7 @@ bool DIExpression::isValid() const {
     case dwarf::DW_OP_mul:
     case dwarf::DW_OP_deref:
     case dwarf::DW_OP_xderef:
+    case dwarf::DW_OP_deref_size:
       break;
     }
   }
