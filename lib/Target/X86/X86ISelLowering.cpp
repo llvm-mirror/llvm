@@ -5013,6 +5013,10 @@ static SDValue insert1BitVector(SDValue Op, SelectionDAG &DAG,
   if (!isa<ConstantSDNode>(Idx))
     return SDValue();
 
+  // Inserting undef is a nop. We can just return the original vector.
+  if (SubVec.isUndef())
+    return Vec;
+
   unsigned IdxVal = cast<ConstantSDNode>(Idx)->getZExtValue();
   if (IdxVal == 0 && Vec.isUndef()) // the operation is legal
     return Op;
@@ -5020,19 +5024,21 @@ static SDValue insert1BitVector(SDValue Op, SelectionDAG &DAG,
   MVT OpVT = Op.getSimpleValueType();
   unsigned NumElems = OpVT.getVectorNumElements();
 
+  SDValue ZeroIdx = DAG.getIntPtrConstant(0, dl);
+
+  // Extend to natively supported kshift.
+  MVT WideOpVT = OpVT;
+  if ((!Subtarget.hasDQI() && NumElems == 8) || NumElems < 8)
+    WideOpVT = Subtarget.hasDQI() ? MVT::v8i1 : MVT::v16i1;
+
   // Inserting into the lsbs of a zero vector is legal. ISel will insert shifts
   // if necessary.
   if (IdxVal == 0 && ISD::isBuildVectorAllZeros(Vec.getNode())) {
-    if ((!Subtarget.hasDQI() && NumElems == 8) || (NumElems < 8)) {
-      // Need to promote to v16i1, do the insert, then extract back.
-      Op = DAG.getNode(ISD::INSERT_SUBVECTOR, dl, MVT::v16i1, 
-                       getZeroVector(MVT::v16i1, Subtarget, DAG, dl),
-                       SubVec, Idx);
-      return DAG.getNode(ISD::EXTRACT_SUBVECTOR, dl, OpVT, Op,
-                         DAG.getIntPtrConstant(0, dl));
-    }
-
-    return Op;
+    // May need to promote to a legal type.
+    Op = DAG.getNode(ISD::INSERT_SUBVECTOR, dl, WideOpVT,
+                     getZeroVector(WideOpVT, Subtarget, DAG, dl),
+                     SubVec, Idx);
+    return DAG.getNode(ISD::EXTRACT_SUBVECTOR, dl, OpVT, Op, ZeroIdx);
   }
 
   MVT SubVecVT = SubVec.getSimpleValueType();
@@ -5042,30 +5048,32 @@ static SDValue insert1BitVector(SDValue Op, SelectionDAG &DAG,
          IdxVal % SubVecVT.getSizeInBits() == 0 &&
          "Unexpected index value in INSERT_SUBVECTOR");
 
-  // extend to natively supported kshift
-  MVT MinVT = Subtarget.hasDQI() ? MVT::v8i1 : MVT::v16i1;
-  MVT WideOpVT = OpVT;
-  if (OpVT.getSizeInBits() < MinVT.getStoreSizeInBits())
-    WideOpVT = MinVT;
-
-  SDValue ZeroIdx = DAG.getIntPtrConstant(0, dl);
   SDValue Undef = DAG.getUNDEF(WideOpVT);
-  SDValue WideSubVec = DAG.getNode(ISD::INSERT_SUBVECTOR, dl, WideOpVT,
-                                   Undef, SubVec, ZeroIdx);
 
-  // Extract sub-vector if require.
-  auto ExtractSubVec = [&](SDValue V) {
-    return (WideOpVT == OpVT) ? V : DAG.getNode(ISD::EXTRACT_SUBVECTOR, dl,
-                                                OpVT, V, ZeroIdx);
-  };
+  if (IdxVal == 0) {
+    // Zero lower bits of the Vec
+    SDValue ShiftBits = DAG.getConstant(SubVecNumElems, dl, MVT::i8);
+    Vec = DAG.getNode(ISD::INSERT_SUBVECTOR, dl, WideOpVT, Undef, Vec,
+                      ZeroIdx);
+    Vec = DAG.getNode(X86ISD::KSHIFTR, dl, WideOpVT, Vec, ShiftBits);
+    Vec = DAG.getNode(X86ISD::KSHIFTL, dl, WideOpVT, Vec, ShiftBits);
+    // Merge them together, SubVec should be zero extended.
+    SubVec = DAG.getNode(ISD::INSERT_SUBVECTOR, dl, WideOpVT,
+                         getZeroVector(WideOpVT, Subtarget, DAG, dl),
+                         SubVec, ZeroIdx);
+    Vec = DAG.getNode(ISD::OR, dl, WideOpVT, Vec, SubVec);
+    return DAG.getNode(ISD::EXTRACT_SUBVECTOR, dl, OpVT, Op,
+                       ZeroIdx);
+  }
+
+  SubVec = DAG.getNode(ISD::INSERT_SUBVECTOR, dl, WideOpVT,
+                       Undef, SubVec, ZeroIdx);
 
   if (Vec.isUndef()) {
-    if (IdxVal != 0) {
-      SDValue ShiftBits = DAG.getConstant(IdxVal, dl, MVT::i8);
-      WideSubVec = DAG.getNode(X86ISD::KSHIFTL, dl, WideOpVT, WideSubVec,
-                               ShiftBits);
-    }
-    return ExtractSubVec(WideSubVec);
+    assert(IdxVal != 0 && "Unexpected index");
+    Op = DAG.getNode(X86ISD::KSHIFTL, dl, WideOpVT, SubVec,
+                     DAG.getConstant(IdxVal, dl, MVT::i8));
+    return DAG.getNode(ISD::EXTRACT_SUBVECTOR, dl, OpVT, Op, ZeroIdx);
   }
 
   if (ISD::isBuildVectorAllZeros(Vec.getNode())) {
@@ -5073,47 +5081,60 @@ static SDValue insert1BitVector(SDValue Op, SelectionDAG &DAG,
     NumElems = WideOpVT.getVectorNumElements();
     unsigned ShiftLeft = NumElems - SubVecNumElems;
     unsigned ShiftRight = NumElems - SubVecNumElems - IdxVal;
-    Vec = DAG.getNode(X86ISD::KSHIFTL, dl, WideOpVT, WideSubVec,
-                      DAG.getConstant(ShiftLeft, dl, MVT::i8));
-    Vec = DAG.getNode(X86ISD::KSHIFTR, dl, WideOpVT, Vec,
-                      DAG.getConstant(ShiftRight, dl, MVT::i8));
-    return ExtractSubVec(Vec);
-  }
-
-  if (IdxVal == 0) {
-    // Zero lower bits of the Vec
-    SDValue ShiftBits = DAG.getConstant(SubVecNumElems, dl, MVT::i8);
-    Vec = DAG.getNode(ISD::INSERT_SUBVECTOR, dl, WideOpVT, Undef, Vec, ZeroIdx);
-    Vec = DAG.getNode(X86ISD::KSHIFTR, dl, WideOpVT, Vec, ShiftBits);
-    Vec = DAG.getNode(X86ISD::KSHIFTL, dl, WideOpVT, Vec, ShiftBits);
-    // Merge them together, SubVec should be zero extended.
-    WideSubVec = DAG.getNode(ISD::INSERT_SUBVECTOR, dl, WideOpVT,
-                             getZeroVector(WideOpVT, Subtarget, DAG, dl),
-                             SubVec, ZeroIdx);
-    Vec =  DAG.getNode(ISD::OR, dl, WideOpVT, Vec, WideSubVec);
-    return ExtractSubVec(Vec);
+    SubVec = DAG.getNode(X86ISD::KSHIFTL, dl, WideOpVT, SubVec,
+                         DAG.getConstant(ShiftLeft, dl, MVT::i8));
+    Op = DAG.getNode(X86ISD::KSHIFTR, dl, WideOpVT, Op,
+                     DAG.getConstant(ShiftRight, dl, MVT::i8));
+    return DAG.getNode(ISD::EXTRACT_SUBVECTOR, dl, OpVT, Op, ZeroIdx);
   }
 
   // Simple case when we put subvector in the upper part
   if (IdxVal + SubVecNumElems == NumElems) {
-    // Zero upper bits of the Vec
-    WideSubVec = DAG.getNode(X86ISD::KSHIFTL, dl, WideOpVT, WideSubVec,
-                             DAG.getConstant(IdxVal, dl, MVT::i8));
-    SDValue ShiftBits = DAG.getConstant(SubVecNumElems, dl, MVT::i8);
-    Vec = DAG.getNode(ISD::INSERT_SUBVECTOR, dl, WideOpVT, Undef, Vec, ZeroIdx);
-    Vec = DAG.getNode(X86ISD::KSHIFTL, dl, WideOpVT, Vec, ShiftBits);
-    Vec = DAG.getNode(X86ISD::KSHIFTR, dl, WideOpVT, Vec, ShiftBits);
-    Vec = DAG.getNode(ISD::OR, dl, WideOpVT, Vec, WideSubVec);
-    return ExtractSubVec(Vec);
+    SubVec = DAG.getNode(X86ISD::KSHIFTL, dl, WideOpVT, SubVec,
+                         DAG.getConstant(IdxVal, dl, MVT::i8));
+    if (SubVecNumElems * 2 == NumElems) {
+      // Special case, use legal zero extending insert_subvector. This allows
+      // isel to opimitize when bits are known zero.
+      Vec = DAG.getNode(ISD::EXTRACT_SUBVECTOR, dl, SubVecVT, Vec, ZeroIdx);
+      Vec = DAG.getNode(ISD::INSERT_SUBVECTOR, dl, WideOpVT,
+                        getZeroVector(WideOpVT, Subtarget, DAG, dl),
+                        Vec, ZeroIdx);
+    } else {
+      // Otherwise use explicit shifts to zero the bits.
+      Vec = DAG.getNode(ISD::INSERT_SUBVECTOR, dl, WideOpVT,
+                        Undef, Vec, ZeroIdx);
+      NumElems = WideOpVT.getVectorNumElements();
+      SDValue ShiftBits = DAG.getConstant(NumElems - IdxVal, dl, MVT::i8);
+      Vec = DAG.getNode(X86ISD::KSHIFTL, dl, WideOpVT, Vec, ShiftBits);
+      Vec = DAG.getNode(X86ISD::KSHIFTR, dl, WideOpVT, Vec, ShiftBits);
+    }
+    Op = DAG.getNode(ISD::OR, dl, WideOpVT, Vec, SubVec);
+    return DAG.getNode(ISD::EXTRACT_SUBVECTOR, dl, OpVT, Op, ZeroIdx);
   }
-  // Subvector should be inserted in the middle - use shuffle
-  WideSubVec = DAG.getNode(ISD::INSERT_SUBVECTOR, dl, OpVT, Undef,
-                           SubVec, ZeroIdx);
-  SmallVector<int, 64> Mask;
-  for (unsigned i = 0; i < NumElems; ++i)
-    Mask.push_back(i >= IdxVal && i < IdxVal + SubVecNumElems ?
-                    i : i + NumElems);
-  return DAG.getVectorShuffle(OpVT, dl, WideSubVec, Vec, Mask);
+
+  // Inserting into the middle is more complicated.
+
+  NumElems = WideOpVT.getVectorNumElements();
+
+  // Widen the vector if needed.
+  Vec = DAG.getNode(ISD::INSERT_SUBVECTOR, dl, WideOpVT, Undef, Vec, ZeroIdx);
+  // Move the current value of the bit to be replace to the lsbs.
+  Op = DAG.getNode(X86ISD::KSHIFTR, dl, WideOpVT, Vec,
+                   DAG.getConstant(IdxVal, dl, MVT::i8));
+  // Xor with the new bit.
+  Op = DAG.getNode(ISD::XOR, dl, WideOpVT, Op, SubVec);
+  // Shift to MSB, filling bottom bits with 0.
+  unsigned ShiftLeft = NumElems - SubVecNumElems;
+  Op = DAG.getNode(X86ISD::KSHIFTL, dl, WideOpVT, Op,
+                   DAG.getConstant(ShiftLeft, dl, MVT::i8));
+  // Shift to the final position, filling upper bits with 0.
+  unsigned ShiftRight = NumElems - SubVecNumElems - IdxVal;
+  Op = DAG.getNode(X86ISD::KSHIFTR, dl, WideOpVT, Op,
+                       DAG.getConstant(ShiftRight, dl, MVT::i8));
+  // Xor with original vector leaving the new value.
+  Op = DAG.getNode(ISD::XOR, dl, WideOpVT, Vec, Op);
+  // Reduce to original width if needed.
+  return DAG.getNode(ISD::EXTRACT_SUBVECTOR, dl, OpVT, Op, ZeroIdx);
 }
 
 /// Concat two 128-bit vectors into a 256 bit vector using VINSERTF128
@@ -7064,10 +7085,10 @@ X86TargetLowering::LowerBUILD_VECTORvXi1(SDValue Op, SelectionDAG &DAG) const {
 
   SDLoc dl(Op);
   if (ISD::isBuildVectorAllZeros(Op.getNode()))
-    return DAG.getTargetConstant(0, dl, VT);
+    return Op;
 
   if (ISD::isBuildVectorAllOnes(Op.getNode()))
-    return DAG.getTargetConstant(1, dl, VT);
+    return Op;
 
   if (ISD::isBuildVectorOfConstantSDNodes(Op.getNode())) {
     if (VT == MVT::v64i1 && !Subtarget.is64Bit()) {
@@ -7478,6 +7499,8 @@ static SDValue lowerToAddSubOrFMAddSub(const BuildVectorSDNode *BV,
 
   // Try to generate X86ISD::FMADDSUB node here.
   SDValue Opnd2;
+  // TODO: According to coverage reports, the FMADDSUB transform is not
+  // triggered by any tests.
   if (isFMAddSub(Subtarget, DAG, Opnd0, Opnd1, Opnd2))
     return DAG.getNode(X86ISD::FMADDSUB, DL, VT, Opnd0, Opnd1, Opnd2);
 
@@ -7823,6 +7846,8 @@ X86TargetLowering::LowerBUILD_VECTOR(SDValue Op, SelectionDAG &DAG) const {
     return VectorConstant;
 
   BuildVectorSDNode *BV = cast<BuildVectorSDNode>(Op.getNode());
+  // TODO: Support FMSUBADD here if we ever get tests for the FMADDSUB
+  // transform here.
   if (SDValue AddSub = lowerToAddSubOrFMAddSub(BV, Subtarget, DAG))
     return AddSub;
   if (SDValue HorizontalOp = LowerToHorizontalOp(BV, Subtarget, DAG))
@@ -8257,9 +8282,9 @@ static SDValue LowerCONCAT_VECTORSvXi1(SDValue Op,
                                        SelectionDAG & DAG) {
   SDLoc dl(Op);
   MVT ResVT = Op.getSimpleValueType();
-  unsigned NumOfOperands = Op.getNumOperands();
+  unsigned NumOperands = Op.getNumOperands();
 
-  assert(isPowerOf2_32(NumOfOperands) &&
+  assert(NumOperands > 1 && isPowerOf2_32(NumOperands) &&
          "Unexpected number of operands in CONCAT_VECTORS");
 
   // If this node promotes - by concatenating zeroes - the type of the result
@@ -8273,73 +8298,58 @@ static SDValue LowerCONCAT_VECTORSvXi1(SDValue Op,
                        ZeroC);
   }
 
-  SDValue Undef = DAG.getUNDEF(ResVT);
-  if (NumOfOperands > 2) {
-    // Specialize the cases when all, or all but one, of the operands are undef.
-    unsigned NumOfDefinedOps = 0;
-    unsigned OpIdx = 0;
-    for (unsigned i = 0; i < NumOfOperands; i++)
-      if (!Op.getOperand(i).isUndef()) {
-        NumOfDefinedOps++;
-        OpIdx = i;
-      }
-    if (NumOfDefinedOps == 0)
-      return Undef;
-    if (NumOfDefinedOps == 1) {
-      unsigned SubVecNumElts =
-        Op.getOperand(OpIdx).getValueType().getVectorNumElements();
-      SDValue IdxVal = DAG.getIntPtrConstant(SubVecNumElts * OpIdx, dl);
-      return DAG.getNode(ISD::INSERT_SUBVECTOR, dl, ResVT, Undef,
-                         Op.getOperand(OpIdx), IdxVal);
+  unsigned NumZero = 0;
+  unsigned NumNonZero = 0;
+  uint64_t NonZeros = 0;
+  for (unsigned i = 0; i != NumOperands; ++i) {
+    SDValue SubVec = Op.getOperand(i);
+    if (SubVec.isUndef())
+      continue;
+    if (ISD::isBuildVectorAllZeros(SubVec.getNode()))
+      ++NumZero;
+    else {
+      assert(i < sizeof(NonZeros) * CHAR_BIT); // Ensure the shift is in range.
+      NonZeros |= (uint64_t)1 << i;
+      ++NumNonZero;
     }
+  }
 
+
+  // If there are zero or one non-zeros we can handle this very simply.
+  if (NumNonZero <= 1) {
+    SDValue Vec = NumZero ? getZeroVector(ResVT, Subtarget, DAG, dl)
+                          : DAG.getUNDEF(ResVT);
+    if (!NumNonZero)
+      return Vec;
+    unsigned Idx = countTrailingZeros(NonZeros);
+    SDValue SubVec = Op.getOperand(Idx);
+    unsigned SubVecNumElts = SubVec.getSimpleValueType().getVectorNumElements();
+    return DAG.getNode(ISD::INSERT_SUBVECTOR, dl, ResVT, Vec, SubVec,
+                       DAG.getIntPtrConstant(Idx * SubVecNumElts, dl));
+  }
+
+  if (NumOperands > 2) {
     MVT HalfVT = MVT::getVectorVT(ResVT.getVectorElementType(),
                                   ResVT.getVectorNumElements()/2);
-    SmallVector<SDValue, 2> Ops;
-    for (unsigned i = 0; i < NumOfOperands/2; i++)
-      Ops.push_back(Op.getOperand(i));
-    SDValue Lo = DAG.getNode(ISD::CONCAT_VECTORS, dl, HalfVT, Ops);
-    Ops.clear();
-    for (unsigned i = NumOfOperands/2; i < NumOfOperands; i++)
-      Ops.push_back(Op.getOperand(i));
-    SDValue Hi = DAG.getNode(ISD::CONCAT_VECTORS, dl, HalfVT, Ops);
+    ArrayRef<SDUse> Ops = Op->ops();
+    SDValue Lo = DAG.getNode(ISD::CONCAT_VECTORS, dl, HalfVT,
+                             Ops.slice(0, NumOperands/2));
+    SDValue Hi = DAG.getNode(ISD::CONCAT_VECTORS, dl, HalfVT,
+                             Ops.slice(NumOperands/2));
     return DAG.getNode(ISD::CONCAT_VECTORS, dl, ResVT, Lo, Hi);
   }
 
-  // 2 operands
-  SDValue V1 = Op.getOperand(0);
-  SDValue V2 = Op.getOperand(1);
-  unsigned NumElems = ResVT.getVectorNumElements();
-  assert(V1.getValueType() == V2.getValueType() &&
-         V1.getValueType().getVectorNumElements() == NumElems/2 &&
-         "Unexpected operands in CONCAT_VECTORS");
+  assert(NumNonZero == 2 && "Simple cases not handled?");
 
-  // If this can be done with a subreg insert do that first.
-  SDValue ZeroIdx = DAG.getIntPtrConstant(0, dl);
-  if (V2.isUndef())
-    return DAG.getNode(ISD::INSERT_SUBVECTOR, dl, ResVT, Undef, V1, ZeroIdx);
-
-  if (ResVT.getSizeInBits() >= 16)
+  if (ResVT.getVectorNumElements() >= 16)
     return Op; // The operation is legal with KUNPCK
 
-  bool IsZeroV1 = ISD::isBuildVectorAllZeros(V1.getNode());
-  bool IsZeroV2 = ISD::isBuildVectorAllZeros(V2.getNode());
-  SDValue ZeroVec = getZeroVector(ResVT, Subtarget, DAG, dl);
-  if (IsZeroV1 && IsZeroV2)
-    return ZeroVec;
-
-  if (IsZeroV2)
-    return DAG.getNode(ISD::INSERT_SUBVECTOR, dl, ResVT, ZeroVec, V1, ZeroIdx);
-
-  SDValue IdxVal = DAG.getIntPtrConstant(NumElems/2, dl);
-  if (V1.isUndef())
-    return DAG.getNode(ISD::INSERT_SUBVECTOR, dl, ResVT, Undef, V2, IdxVal);
-
-  if (IsZeroV1)
-    return DAG.getNode(ISD::INSERT_SUBVECTOR, dl, ResVT, ZeroVec, V2, IdxVal);
-
-  V1 = DAG.getNode(ISD::INSERT_SUBVECTOR, dl, ResVT, Undef, V1, ZeroIdx);
-  return DAG.getNode(ISD::INSERT_SUBVECTOR, dl, ResVT, V1, V2, IdxVal);
+  SDValue Vec = DAG.getNode(ISD::INSERT_SUBVECTOR, dl, ResVT,
+                            DAG.getUNDEF(ResVT), Op.getOperand(0),
+                            DAG.getIntPtrConstant(0, dl));
+  unsigned NumElems = ResVT.getVectorNumElements();
+  return DAG.getNode(ISD::INSERT_SUBVECTOR, dl, ResVT, Vec, Op.getOperand(1),
+                     DAG.getIntPtrConstant(NumElems/2, dl));
 }
 
 static SDValue LowerCONCAT_VECTORS(SDValue Op,
@@ -19523,9 +19533,9 @@ static SDValue getMaskNode(SDValue Mask, MVT MaskVT,
                            const SDLoc &dl) {
 
   if (isAllOnesConstant(Mask))
-    return DAG.getTargetConstant(1, dl, MaskVT);
+    return DAG.getConstant(1, dl, MaskVT);
   if (X86::isZeroNode(Mask))
-    return DAG.getTargetConstant(0, dl, MaskVT);
+    return DAG.getConstant(0, dl, MaskVT);
 
   if (MaskVT.bitsGT(Mask.getSimpleValueType())) {
     // Mask should be extended
@@ -20113,7 +20123,7 @@ SDValue X86TargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op,
                                      Mask.getSimpleValueType().getSizeInBits());
        SDValue FPclass = DAG.getNode(IntrData->Opc0, dl, MaskVT, Src1, Imm);
        SDValue FPclassMask = getVectorMaskingNode(FPclass, Mask,
-                                                 DAG.getTargetConstant(0, dl, MaskVT),
+                                                 DAG.getConstant(0, dl, MaskVT),
                                                  Subtarget, DAG);
        SDValue Res = DAG.getNode(ISD::INSERT_SUBVECTOR, dl, BitcastVT,
                                  DAG.getUNDEF(BitcastVT), FPclassMask,
@@ -20126,7 +20136,7 @@ SDValue X86TargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op,
       SDValue Mask = Op.getOperand(3);
       SDValue FPclass = DAG.getNode(IntrData->Opc0, dl, MVT::v1i1, Src1, Imm);
       SDValue FPclassMask = getScalarMaskingNode(FPclass, Mask,
-        DAG.getTargetConstant(0, dl, MVT::i1), Subtarget, DAG);
+        DAG.getConstant(0, dl, MVT::i1), Subtarget, DAG);
       return DAG.getNode(X86ISD::VEXTRACT, dl, MVT::i8, FPclassMask,
                          DAG.getIntPtrConstant(0, dl));
     }
@@ -20170,8 +20180,7 @@ SDValue X86TargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op,
                           Op.getOperand(2));
       }
       SDValue CmpMask = getVectorMaskingNode(Cmp, Mask,
-                                             DAG.getTargetConstant(0, dl,
-                                                                   MaskVT),
+                                             DAG.getConstant(0, dl, MaskVT),
                                              Subtarget, DAG);
       SDValue Res = DAG.getNode(ISD::INSERT_SUBVECTOR, dl, BitcastVT,
                                 DAG.getUNDEF(BitcastVT), CmpMask,
@@ -20195,8 +20204,7 @@ SDValue X86TargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op,
         Cmp = DAG.getNode(IntrData->Opc0, dl, MVT::v1i1, Src1, Src2, CC);
 
       SDValue CmpMask = getScalarMaskingNode(Cmp, Mask,
-                                             DAG.getTargetConstant(0, dl,
-                                                                   MVT::i1),
+                                             DAG.getConstant(0, dl, MVT::i1),
                                              Subtarget, DAG);
       return DAG.getNode(X86ISD::VEXTRACT, dl, MVT::i8, CmpMask,
                          DAG.getIntPtrConstant(0, dl));
@@ -33062,6 +33070,124 @@ static SDValue combineAndMaskToShift(SDNode *N, SelectionDAG &DAG,
   return DAG.getBitcast(N->getValueType(0), Shift);
 }
 
+// Get the index node from the lowered DAG of a GEP IR instruction with one
+// indexing dimension.
+static SDValue getIndexFromUnindexedLoad(LoadSDNode *Ld) {
+  if (Ld->isIndexed())
+    return SDValue();
+
+  SDValue Base = Ld->getBasePtr();
+
+  if (Base.getOpcode() != ISD::ADD)
+    return SDValue();
+
+  SDValue ShiftedIndex = Base.getOperand(0);
+
+  if (ShiftedIndex.getOpcode() != ISD::SHL)
+    return SDValue();
+
+  return ShiftedIndex.getOperand(0);
+
+}
+
+static bool hasBZHI(const X86Subtarget &Subtarget, MVT VT) {
+  if (Subtarget.hasBMI2() && VT.isScalarInteger()) {
+    switch (VT.getSizeInBits()) {
+    default: return false;
+    case 64: return Subtarget.is64Bit() ? true : false;
+    case 32: return true;
+    }
+  }
+  return false;
+}
+
+// This function recognizes cases where X86 bzhi instruction can replace and
+// 'and-load' sequence.
+// In case of loading integer value from an array of constants which is defined
+// as follows:
+//
+//   int array[SIZE] = {0x0, 0x1, 0x3, 0x7, 0xF ..., 2^(SIZE-1) - 1}
+//
+// then applying a bitwise and on the result with another input.
+// It's equivalent to performing bzhi (zero high bits) on the input, with the
+// same index of the load.
+static SDValue combineAndLoadToBZHI(SDNode *Node, SelectionDAG &DAG,
+    const X86Subtarget &Subtarget) {
+  MVT VT = Node->getSimpleValueType(0);
+  SDLoc dl(Node);
+
+  // Check if subtarget has BZHI instruction for the node's type
+  if (!hasBZHI(Subtarget, VT))
+    return SDValue();
+
+  // Try matching the pattern for both operands.
+  for (unsigned i = 0; i < 2; i++) {
+    SDValue N = Node->getOperand(i);
+    LoadSDNode *Ld = dyn_cast<LoadSDNode>(N.getNode());
+
+     // continue if the operand is not a load instruction
+    if (!Ld)
+      return SDValue();
+
+    const Value *MemOp = Ld->getMemOperand()->getValue();
+
+    if (!MemOp)
+      return SDValue();
+
+    if (const GetElementPtrInst *GEP = dyn_cast<GetElementPtrInst>(MemOp)) {
+      if (GlobalVariable *GV = dyn_cast<GlobalVariable>(GEP->getOperand(0))) {
+        if (GV->isConstant() && GV->hasDefinitiveInitializer()) {
+
+          Constant *Init = GV->getInitializer();
+          Type *Ty = Init->getType();
+          if (!isa<ConstantDataArray>(Init) ||
+              !Ty->getArrayElementType()->isIntegerTy() ||
+              Ty->getArrayElementType()->getScalarSizeInBits() !=
+                  VT.getSizeInBits() ||
+              Ty->getArrayNumElements() >
+                  Ty->getArrayElementType()->getScalarSizeInBits())
+            continue;
+
+          // Check if the array's constant elements are suitable to our case.
+          uint64_t ArrayElementCount = Init->getType()->getArrayNumElements();
+          bool ConstantsMatch = true;
+          for (uint64_t j = 0; j < ArrayElementCount; j++) {
+            ConstantInt *Elem =
+                dyn_cast<ConstantInt>(Init->getAggregateElement(j));
+            if (Elem->getZExtValue() != (((uint64_t)1 << j) - 1)) {
+              ConstantsMatch = false;
+              break;
+            }
+          }
+          if (!ConstantsMatch)
+            continue;
+
+          // Do the transformation (For 32-bit type):
+          // -> (and (load arr[idx]), inp)
+          // <- (and (srl 0xFFFFFFFF, (sub 32, idx)))
+          //    that will be replaced with one bzhi instruction.
+          SDValue Inp = (i == 0) ? Node->getOperand(1) : Node->getOperand(0);
+          SDValue SizeC = DAG.getConstant(VT.getSizeInBits(), dl, VT);
+
+          // Get the Node which indexes into the array.
+          SDValue Index = getIndexFromUnindexedLoad(Ld);
+          if (!Index)
+            return SDValue();
+          Index = DAG.getZExtOrTrunc(Index, dl, VT);
+
+          SDValue Sub = DAG.getNode(ISD::SUB, dl, VT, SizeC, Index);
+
+          SDValue AllOnes = DAG.getAllOnesConstant(dl, VT);
+          SDValue LShr = DAG.getNode(ISD::SRL, dl, VT, AllOnes, Sub);
+
+          return DAG.getNode(ISD::AND, dl, VT, Inp, LShr);
+        }
+      }
+    }
+  }
+  return SDValue();
+}
+
 static SDValue combineAnd(SDNode *N, SelectionDAG &DAG,
                           TargetLowering::DAGCombinerInfo &DCI,
                           const X86Subtarget &Subtarget) {
@@ -33089,6 +33215,9 @@ static SDValue combineAnd(SDNode *N, SelectionDAG &DAG,
 
   if (SDValue ShiftRight = combineAndMaskToShift(N, DAG, Subtarget))
     return ShiftRight;
+
+  if (SDValue R = combineAndLoadToBZHI(N, DAG, Subtarget))
+    return R;
 
   // Attempt to recursively combine a bitmask AND with shuffles.
   if (VT.isVector() && (VT.getScalarSizeInBits() % 8) == 0) {
@@ -34349,28 +34478,10 @@ static SDValue combineStore(SDNode *N, SelectionDAG &DAG,
       isa<LoadSDNode>(St->getValue()) &&
       !cast<LoadSDNode>(St->getValue())->isVolatile() &&
       St->getChain().hasOneUse() && !St->isVolatile()) {
-    SDNode* LdVal = St->getValue().getNode();
-    LoadSDNode *Ld = nullptr;
-    int TokenFactorIndex = -1;
+    LoadSDNode *Ld = cast<LoadSDNode>(St->getValue().getNode());
     SmallVector<SDValue, 8> Ops;
-    SDNode* ChainVal = St->getChain().getNode();
-    // Must be a store of a load.  We currently handle two cases:  the load
-    // is a direct child, and it's under an intervening TokenFactor.  It is
-    // possible to dig deeper under nested TokenFactors.
-    if (ChainVal == LdVal)
-      Ld = cast<LoadSDNode>(St->getChain());
-    else if (St->getValue().hasOneUse() &&
-             ChainVal->getOpcode() == ISD::TokenFactor) {
-      for (unsigned i = 0, e = ChainVal->getNumOperands(); i != e; ++i) {
-        if (ChainVal->getOperand(i).getNode() == LdVal) {
-          TokenFactorIndex = i;
-          Ld = cast<LoadSDNode>(St->getValue());
-        } else
-          Ops.push_back(ChainVal->getOperand(i));
-      }
-    }
 
-    if (!Ld || !ISD::isNormalLoad(Ld))
+    if (!ISD::isNormalLoad(Ld))
       return SDValue();
 
     // If this is not the MMX case, i.e. we are just turning i64 load/store
@@ -34387,17 +34498,12 @@ static SDValue combineStore(SDNode *N, SelectionDAG &DAG,
     if (Subtarget.is64Bit() || F64IsLegal) {
       MVT LdVT = Subtarget.is64Bit() ? MVT::i64 : MVT::f64;
       SDValue NewLd = DAG.getLoad(LdVT, LdDL, Ld->getChain(), Ld->getBasePtr(),
-                                  Ld->getPointerInfo(), Ld->getAlignment(),
-                                  Ld->getMemOperand()->getFlags());
+                                  Ld->getMemOperand());
+
       // Make sure new load is placed in same chain order.
-      SDValue NewChain = DAG.makeEquivalentMemoryOrdering(Ld, NewLd);
-      if (TokenFactorIndex >= 0) {
-        Ops.push_back(NewChain);
-        NewChain = DAG.getNode(ISD::TokenFactor, LdDL, MVT::Other, Ops);
-      }
-      return DAG.getStore(NewChain, StDL, NewLd, St->getBasePtr(),
-                          St->getPointerInfo(), St->getAlignment(),
-                          St->getMemOperand()->getFlags());
+      DAG.makeEquivalentMemoryOrdering(Ld, NewLd);
+      return DAG.getStore(St->getChain(), StDL, NewLd, St->getBasePtr(),
+                          St->getMemOperand());
     }
 
     // Otherwise, lower to two pairs of 32-bit loads / stores.
@@ -34412,23 +34518,19 @@ static SDValue combineStore(SDNode *N, SelectionDAG &DAG,
                                MinAlign(Ld->getAlignment(), 4),
                                Ld->getMemOperand()->getFlags());
     // Make sure new loads are placed in same chain order.
-    SDValue NewChain = DAG.makeEquivalentMemoryOrdering(Ld, LoLd);
-    NewChain = DAG.makeEquivalentMemoryOrdering(Ld, HiLd);
-
-    if (TokenFactorIndex >= 0) {
-      Ops.push_back(NewChain);
-      NewChain = DAG.getNode(ISD::TokenFactor, LdDL, MVT::Other, Ops);
-    }
+    DAG.makeEquivalentMemoryOrdering(Ld, LoLd);
+    DAG.makeEquivalentMemoryOrdering(Ld, HiLd);
 
     LoAddr = St->getBasePtr();
     HiAddr = DAG.getMemBasePlusOffset(LoAddr, 4, StDL);
 
     SDValue LoSt =
-        DAG.getStore(NewChain, StDL, LoLd, LoAddr, St->getPointerInfo(),
+        DAG.getStore(St->getChain(), StDL, LoLd, LoAddr, St->getPointerInfo(),
                      St->getAlignment(), St->getMemOperand()->getFlags());
-    SDValue HiSt = DAG.getStore(
-        NewChain, StDL, HiLd, HiAddr, St->getPointerInfo().getWithOffset(4),
-        MinAlign(St->getAlignment(), 4), St->getMemOperand()->getFlags());
+    SDValue HiSt = DAG.getStore(St->getChain(), StDL, HiLd, HiAddr,
+                                St->getPointerInfo().getWithOffset(4),
+                                MinAlign(St->getAlignment(), 4),
+                                St->getMemOperand()->getFlags());
     return DAG.getNode(ISD::TokenFactor, StDL, MVT::Other, LoSt, HiSt);
   }
 

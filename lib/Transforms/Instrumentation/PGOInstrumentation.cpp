@@ -462,7 +462,7 @@ struct PGOEdge {
   bool Removed = false;
   bool IsCritical = false;
 
-  PGOEdge(const BasicBlock *Src, const BasicBlock *Dest, unsigned W = 1)
+  PGOEdge(const BasicBlock *Src, const BasicBlock *Dest, uint64_t W = 1)
       : SrcBB(Src), DestBB(Dest), Weight(W) {}
 
   // Return the information string of an edge.
@@ -716,6 +716,9 @@ BasicBlock *FuncPGOInstrumentation<Edge, BBInfo>::getInstrBB(Edge *E) {
 static void instrumentOneFunc(
     Function &F, Module *M, BranchProbabilityInfo *BPI, BlockFrequencyInfo *BFI,
     std::unordered_multimap<Comdat *, GlobalValue *> &ComdatMembers) {
+  // Split indirectbr critical edges here before computing the MST rather than
+  // later in getInstrBB() to avoid invalidating it.
+  SplitIndirectBrCriticalEdges(F, BPI, BFI);
   FuncPGOInstrumentation<PGOEdge, BBInfo> FuncInfo(F, ComdatMembers, true, BPI,
                                                    BFI);
   unsigned NumCounters = FuncInfo.getNumCounters();
@@ -776,7 +779,7 @@ struct PGOUseEdge : public PGOEdge {
   bool CountValid = false;
   uint64_t CountValue = 0;
 
-  PGOUseEdge(const BasicBlock *Src, const BasicBlock *Dest, unsigned W = 1)
+  PGOUseEdge(const BasicBlock *Src, const BasicBlock *Dest, uint64_t W = 1)
       : PGOEdge(Src, Dest, W) {}
 
   // Set edge count value
@@ -1463,6 +1466,9 @@ static bool annotateAllFunctions(
       continue;
     auto *BPI = LookupBPI(F);
     auto *BFI = LookupBFI(F);
+    // Split indirectbr critical edges here before computing the MST rather than
+    // later in getInstrBB() to avoid invalidating it.
+    SplitIndirectBrCriticalEdges(F, BPI, BFI);
     PGOUseFunc Func(F, &M, ComdatMembers, BPI, BFI);
     if (!Func.readCounters(PGOReader.get()))
       continue;

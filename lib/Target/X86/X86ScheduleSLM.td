@@ -32,7 +32,6 @@ def SLMModel : SchedMachineModel {
 let SchedModel = SLMModel in {
 
 // Silvermont has 5 reservation stations for micro-ops
-
 def IEC_RSV0 : ProcResource<1>;
 def IEC_RSV1 : ProcResource<1>;
 def FPC_RSV0 : ProcResource<1> { let BufferSize = 1; }
@@ -77,6 +76,9 @@ def : WriteRes<WriteStore, [IEC_RSV01, MEC_RSV]>;
 def : WriteRes<WriteLoad,  [MEC_RSV]> { let Latency = 3; }
 def : WriteRes<WriteMove,  [IEC_RSV01]>;
 def : WriteRes<WriteZero,  []>;
+
+// Treat misc copies as a move.
+def : InstRW<[WriteMove], (instrs COPY)>;
 
 defm : SMWriteResPair<WriteALU,   IEC_RSV01, 1>;
 defm : SMWriteResPair<WriteIMul,  IEC_RSV1,  3>;
