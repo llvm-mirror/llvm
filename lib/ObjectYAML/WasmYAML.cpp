@@ -60,6 +60,7 @@ static void sectionMapping(IO &IO, WasmYAML::LinkingSection &Section) {
   IO.mapRequired("DataSize", Section.DataSize);
   IO.mapOptional("SymbolInfo", Section.SymbolInfos);
   IO.mapOptional("SegmentInfo", Section.SegmentInfos);
+  IO.mapOptional("InitFunctions", Section.InitFunctions);
 }
 
 static void sectionMapping(IO &IO, WasmYAML::CustomSection &Section) {
@@ -359,10 +360,38 @@ void MappingTraits<WasmYAML::DataSegment>::mapping(
   IO.mapRequired("Content", Segment.Content);
 }
 
+void MappingTraits<WasmYAML::InitFunction>::mapping(
+    IO &IO, WasmYAML::InitFunction &Init) {
+  IO.mapRequired("Priority", Init.Priority);
+  IO.mapRequired("FunctionIndex", Init.FunctionIndex);
+}
+
 void MappingTraits<WasmYAML::SymbolInfo>::mapping(IO &IO,
                                                   WasmYAML::SymbolInfo &Info) {
   IO.mapRequired("Name", Info.Name);
   IO.mapRequired("Flags", Info.Flags);
+}
+
+void ScalarBitSetTraits<WasmYAML::LimitFlags>::bitset(
+    IO &IO, WasmYAML::LimitFlags &Value) {
+#define BCase(X) IO.bitSetCase(Value, #X, wasm::WASM_LIMITS_FLAG_##X)
+  BCase(HAS_MAX);
+#undef BCase
+}
+
+void ScalarBitSetTraits<WasmYAML::SegmentFlags>::bitset(
+    IO &IO, WasmYAML::SegmentFlags &Value) {
+}
+
+void ScalarBitSetTraits<WasmYAML::SymbolFlags>::bitset(
+    IO &IO, WasmYAML::SymbolFlags &Value) {
+#define BCaseMask(M, X) IO.maskedBitSetCase(Value, #X, wasm::WASM_SYMBOL_##X, wasm::WASM_SYMBOL_##M)
+  //BCaseMask(BINDING_MASK, BINDING_GLOBAL);
+  BCaseMask(BINDING_MASK, BINDING_WEAK);
+  BCaseMask(BINDING_MASK, BINDING_LOCAL);
+  //BCaseMask(VISIBILITY_MASK, VISIBILITY_DEFAULT);
+  BCaseMask(VISIBILITY_MASK, VISIBILITY_HIDDEN);
+#undef BCaseMask
 }
 
 void ScalarEnumerationTraits<WasmYAML::ValueType>::enumeration(

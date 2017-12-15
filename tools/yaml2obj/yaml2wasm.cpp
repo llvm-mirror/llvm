@@ -12,8 +12,6 @@
 ///
 //===----------------------------------------------------------------------===//
 //
-#include "yaml2obj.h"
-#include "llvm/Object/Wasm.h"
 #include "llvm/ObjectYAML/ObjectYAML.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/LEB128.h"
@@ -158,10 +156,20 @@ int WasmWriter::writeSectionContent(raw_ostream &OS, WasmYAML::LinkingSection &S
     encodeULEB128(wasm::WASM_SEGMENT_INFO, OS);
     encodeULEB128(Section.SegmentInfos.size(), SubSection.GetStream());
     for (const WasmYAML::SegmentInfo &SegmentInfo : Section.SegmentInfos) {
-      encodeULEB128(SegmentInfo.Index, SubSection.GetStream());
       writeStringRef(SegmentInfo.Name, SubSection.GetStream());
       encodeULEB128(SegmentInfo.Alignment, SubSection.GetStream());
       encodeULEB128(SegmentInfo.Flags, SubSection.GetStream());
+    }
+    SubSection.Done();
+  }
+
+  // INIT_FUNCS subsection
+  if (Section.InitFunctions.size()) {
+    encodeULEB128(wasm::WASM_INIT_FUNCS, OS);
+    encodeULEB128(Section.InitFunctions.size(), SubSection.GetStream());
+    for (const WasmYAML::InitFunction &Func : Section.InitFunctions) {
+      encodeULEB128(Func.Priority, SubSection.GetStream());
+      encodeULEB128(Func.FunctionIndex, SubSection.GetStream());
     }
     SubSection.Done();
   }

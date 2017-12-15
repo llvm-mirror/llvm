@@ -161,7 +161,6 @@ public:
   void printIRValueReference(const Value &V);
   void printStackObjectReference(int FrameIndex);
   void printOffset(int64_t Offset);
-  void printTargetFlags(const MachineOperand &Op);
   void print(const MachineInstr &MI, unsigned OpIdx,
              const TargetRegisterInfo *TRI, bool ShouldPrintRegisterTies,
              LLT TypeToPrint, bool PrintDef = true);
@@ -759,13 +758,8 @@ void MIPrinter::printStackObjectReference(int FrameIndex) {
   assert(ObjectInfo != StackObjectOperandMapping.end() &&
          "Invalid frame index");
   const FrameIndexOperand &Operand = ObjectInfo->second;
-  if (Operand.IsFixed) {
-    OS << "%fixed-stack." << Operand.ID;
-    return;
-  }
-  OS << "%stack." << Operand.ID;
-  if (!Operand.Name.empty())
-    OS << '.' << Operand.Name;
+  MachineOperand::printStackObjectReference(OS, Operand.ID, Operand.IsFixed,
+                                            Operand.Name);
 }
 
 void MIPrinter::printOffset(int64_t Offset) {
@@ -778,91 +772,30 @@ void MIPrinter::printOffset(int64_t Offset) {
   OS << " + " << Offset;
 }
 
-static const char *getTargetFlagName(const TargetInstrInfo *TII, unsigned TF) {
-  auto Flags = TII->getSerializableDirectMachineOperandTargetFlags();
-  for (const auto &I : Flags) {
-    if (I.first == TF) {
-      return I.second;
-    }
-  }
-  return nullptr;
-}
-
-void MIPrinter::printTargetFlags(const MachineOperand &Op) {
-  if (!Op.getTargetFlags())
-    return;
-  const auto *TII = Op.getParent()->getMF()->getSubtarget().getInstrInfo();
-  assert(TII && "expected instruction info");
-  auto Flags = TII->decomposeMachineOperandsTargetFlags(Op.getTargetFlags());
-  OS << "target-flags(";
-  const bool HasDirectFlags = Flags.first;
-  const bool HasBitmaskFlags = Flags.second;
-  if (!HasDirectFlags && !HasBitmaskFlags) {
-    OS << "<unknown>) ";
-    return;
-  }
-  if (HasDirectFlags) {
-    if (const auto *Name = getTargetFlagName(TII, Flags.first))
-      OS << Name;
-    else
-      OS << "<unknown target flag>";
-  }
-  if (!HasBitmaskFlags) {
-    OS << ") ";
-    return;
-  }
-  bool IsCommaNeeded = HasDirectFlags;
-  unsigned BitMask = Flags.second;
-  auto BitMasks = TII->getSerializableBitmaskMachineOperandTargetFlags();
-  for (const auto &Mask : BitMasks) {
-    // Check if the flag's bitmask has the bits of the current mask set.
-    if ((BitMask & Mask.first) == Mask.first) {
-      if (IsCommaNeeded)
-        OS << ", ";
-      IsCommaNeeded = true;
-      OS << Mask.second;
-      // Clear the bits which were serialized from the flag's bitmask.
-      BitMask &= ~(Mask.first);
-    }
-  }
-  if (BitMask) {
-    // When the resulting flag's bitmask isn't zero, we know that we didn't
-    // serialize all of the bit flags.
-    if (IsCommaNeeded)
-      OS << ", ";
-    OS << "<unknown bitmask target flag>";
-  }
-  OS << ") ";
-}
-
-static const char *getTargetIndexName(const MachineFunction &MF, int Index) {
-  const auto *TII = MF.getSubtarget().getInstrInfo();
-  assert(TII && "expected instruction info");
-  auto Indices = TII->getSerializableTargetIndices();
-  for (const auto &I : Indices) {
-    if (I.first == Index) {
-      return I.second;
-    }
-  }
-  return nullptr;
-}
-
 void MIPrinter::print(const MachineInstr &MI, unsigned OpIdx,
                       const TargetRegisterInfo *TRI,
                       bool ShouldPrintRegisterTies, LLT TypeToPrint,
                       bool PrintDef) {
   const MachineOperand &Op = MI.getOperand(OpIdx);
-  printTargetFlags(Op);
   switch (Op.getType()) {
   case MachineOperand::MO_Immediate:
     if (MI.isOperandSubregIdx(OpIdx)) {
+      MachineOperand::printTargetFlags(OS, Op);
       MachineOperand::printSubregIdx(OS, Op.getImm(), TRI);
       break;
     }
     LLVM_FALLTHROUGH;
   case MachineOperand::MO_Register:
   case MachineOperand::MO_CImmediate:
-  case MachineOperand::MO_MachineBasicBlock: {
+  case MachineOperand::MO_MachineBasicBlock:
+  case MachineOperand::MO_ConstantPoolIndex:
+  case MachineOperand::MO_TargetIndex:
+  case MachineOperand::MO_JumpTableIndex:
+  case MachineOperand::MO_ExternalSymbol:
+  case MachineOperand::MO_GlobalAddress:
+  case MachineOperand::MO_RegisterLiveOut:
+  case MachineOperand::MO_Metadata:
+  case MachineOperand::MO_MCSymbol: {
     unsigned TiedOperandIdx = 0;
     if (ShouldPrintRegisterTies && Op.isReg() && Op.isTied() && !Op.isDef())
       TiedOperandIdx = Op.getParent()->findTiedOperandIdx(OpIdx);
@@ -876,38 +809,6 @@ void MIPrinter::print(const MachineInstr &MI, unsigned OpIdx,
     break;
   case MachineOperand::MO_FrameIndex:
     printStackObjectReference(Op.getIndex());
-    break;
-  case MachineOperand::MO_ConstantPoolIndex:
-    OS << "%const." << Op.getIndex();
-    printOffset(Op.getOffset());
-    break;
-  case MachineOperand::MO_TargetIndex:
-    OS << "target-index(";
-    if (const auto *Name =
-            getTargetIndexName(*Op.getParent()->getMF(), Op.getIndex()))
-      OS << Name;
-    else
-      OS << "<unknown>";
-    OS << ')';
-    printOffset(Op.getOffset());
-    break;
-  case MachineOperand::MO_JumpTableIndex:
-    OS << "%jump-table." << Op.getIndex();
-    break;
-  case MachineOperand::MO_ExternalSymbol: {
-    StringRef Name = Op.getSymbolName();
-    OS << '$';
-    if (Name.empty()) {
-      OS << "\"\"";
-    } else {
-      printLLVMNameWithoutPrefix(OS, Name);
-    }
-    printOffset(Op.getOffset());
-    break;
-  }
-  case MachineOperand::MO_GlobalAddress:
-    Op.getGlobal()->printAsOperand(OS, /*PrintType=*/false, MST);
-    printOffset(Op.getOffset());
     break;
   case MachineOperand::MO_BlockAddress:
     OS << "blockaddress(";
@@ -926,27 +827,6 @@ void MIPrinter::print(const MachineInstr &MI, unsigned OpIdx,
       printCustomRegMask(Op.getRegMask(), OS, TRI);
     break;
   }
-  case MachineOperand::MO_RegisterLiveOut: {
-    const uint32_t *RegMask = Op.getRegLiveOut();
-    OS << "liveout(";
-    bool IsCommaNeeded = false;
-    for (unsigned Reg = 0, E = TRI->getNumRegs(); Reg < E; ++Reg) {
-      if (RegMask[Reg / 32] & (1U << (Reg % 32))) {
-        if (IsCommaNeeded)
-          OS << ", ";
-        OS << printReg(Reg, TRI);
-        IsCommaNeeded = true;
-      }
-    }
-    OS << ")";
-    break;
-  }
-  case MachineOperand::MO_Metadata:
-    Op.getMetadata()->printAsOperand(OS, MST);
-    break;
-  case MachineOperand::MO_MCSymbol:
-    OS << "<mcsymbol " << *Op.getMCSymbol() << ">";
-    break;
   case MachineOperand::MO_CFIIndex: {
     const MachineFunction &MF = *Op.getParent()->getMF();
     print(MF.getFrameInstructions()[Op.getCFIIndex()], TRI);
@@ -1113,41 +993,95 @@ void MIPrinter::print(const MCCFIInstruction &CFI,
   switch (CFI.getOperation()) {
   case MCCFIInstruction::OpSameValue:
     OS << "same_value ";
-    if (CFI.getLabel())
-      OS << "<mcsymbol> ";
+    if (MCSymbol *Label = CFI.getLabel())
+      MachineOperand::printSymbol(OS, *Label);
     printCFIRegister(CFI.getRegister(), OS, TRI);
+    break;
+  case MCCFIInstruction::OpRememberState:
+    OS << "remember_state ";
+    if (MCSymbol *Label = CFI.getLabel())
+      MachineOperand::printSymbol(OS, *Label);
+    break;
+  case MCCFIInstruction::OpRestoreState:
+    OS << "restore_state ";
+    if (MCSymbol *Label = CFI.getLabel())
+      MachineOperand::printSymbol(OS, *Label);
     break;
   case MCCFIInstruction::OpOffset:
     OS << "offset ";
-    if (CFI.getLabel())
-      OS << "<mcsymbol> ";
+    if (MCSymbol *Label = CFI.getLabel())
+      MachineOperand::printSymbol(OS, *Label);
     printCFIRegister(CFI.getRegister(), OS, TRI);
     OS << ", " << CFI.getOffset();
     break;
   case MCCFIInstruction::OpDefCfaRegister:
     OS << "def_cfa_register ";
-    if (CFI.getLabel())
-      OS << "<mcsymbol> ";
+    if (MCSymbol *Label = CFI.getLabel())
+      MachineOperand::printSymbol(OS, *Label);
     printCFIRegister(CFI.getRegister(), OS, TRI);
     break;
   case MCCFIInstruction::OpDefCfaOffset:
     OS << "def_cfa_offset ";
-    if (CFI.getLabel())
-      OS << "<mcsymbol> ";
+    if (MCSymbol *Label = CFI.getLabel())
+      MachineOperand::printSymbol(OS, *Label);
     OS << CFI.getOffset();
     break;
   case MCCFIInstruction::OpDefCfa:
     OS << "def_cfa ";
-    if (CFI.getLabel())
-      OS << "<mcsymbol> ";
+    if (MCSymbol *Label = CFI.getLabel())
+      MachineOperand::printSymbol(OS, *Label);
     printCFIRegister(CFI.getRegister(), OS, TRI);
     OS << ", " << CFI.getOffset();
     break;
+  case MCCFIInstruction::OpRelOffset:
+    OS << "rel_offset ";
+    if (MCSymbol *Label = CFI.getLabel())
+      MachineOperand::printSymbol(OS, *Label);
+    printCFIRegister(CFI.getRegister(), OS, TRI);
+    OS << ", " << CFI.getOffset();
+    break;
+  case MCCFIInstruction::OpAdjustCfaOffset:
+    OS << "adjust_cfa_offset ";
+    if (MCSymbol *Label = CFI.getLabel())
+      MachineOperand::printSymbol(OS, *Label);
+    OS << CFI.getOffset();
+    break;
   case MCCFIInstruction::OpRestore:
     OS << "restore ";
-    if (CFI.getLabel())
-      OS << "<mcsymbol> ";
+    if (MCSymbol *Label = CFI.getLabel())
+      MachineOperand::printSymbol(OS, *Label);
     printCFIRegister(CFI.getRegister(), OS, TRI);
+    break;
+  case MCCFIInstruction::OpEscape: {
+    OS << "escape ";
+    if (MCSymbol *Label = CFI.getLabel())
+      MachineOperand::printSymbol(OS, *Label);
+    if (!CFI.getValues().empty()) {
+      size_t e = CFI.getValues().size() - 1;
+      for (size_t i = 0; i < e; ++i)
+        OS << format("0x%02x", uint8_t(CFI.getValues()[i])) << ", ";
+      OS << format("0x%02x", uint8_t(CFI.getValues()[e])) << ", ";
+    }
+    break;
+  }
+  case MCCFIInstruction::OpUndefined:
+    OS << "undefined ";
+    if (MCSymbol *Label = CFI.getLabel())
+      MachineOperand::printSymbol(OS, *Label);
+    printCFIRegister(CFI.getRegister(), OS, TRI);
+    break;
+  case MCCFIInstruction::OpRegister:
+    OS << "register ";
+    if (MCSymbol *Label = CFI.getLabel())
+      MachineOperand::printSymbol(OS, *Label);
+    printCFIRegister(CFI.getRegister(), OS, TRI);
+    OS << ", ";
+    printCFIRegister(CFI.getRegister2(), OS, TRI);
+    break;
+  case MCCFIInstruction::OpWindowSave:
+    OS << "window_save ";
+    if (MCSymbol *Label = CFI.getLabel())
+      MachineOperand::printSymbol(OS, *Label);
     break;
   default:
     // TODO: Print the other CFI Operations.
