@@ -1041,7 +1041,7 @@ ARMTargetLowering::ARMTargetLowering(const TargetMachine &TM,
   if (!Subtarget->isThumb1Only())
     setOperationAction(ISD::SETCCE, MVT::i32, Custom);
 
-  setOperationAction(ISD::BRCOND,    MVT::Other, Expand);
+  setOperationAction(ISD::BRCOND,    MVT::Other, Custom);
   setOperationAction(ISD::BR_CC,     MVT::i32,   Custom);
   setOperationAction(ISD::BR_CC,     MVT::f32,   Custom);
   setOperationAction(ISD::BR_CC,     MVT::f64,   Custom);
@@ -1084,20 +1084,11 @@ ARMTargetLowering::ARMTargetLowering(const TargetMachine &TM,
     }
   }
 
-  // Combine sin / cos into one node or libcall if possible.
-  if (Subtarget->hasSinCos()) {
-    setLibcallName(RTLIB::SINCOS_F32, "sincosf");
-    setLibcallName(RTLIB::SINCOS_F64, "sincos");
-    if (Subtarget->isTargetWatchABI()) {
-      setLibcallCallingConv(RTLIB::SINCOS_F32, CallingConv::ARM_AAPCS_VFP);
-      setLibcallCallingConv(RTLIB::SINCOS_F64, CallingConv::ARM_AAPCS_VFP);
-    }
-    if (Subtarget->isTargetIOS() || Subtarget->isTargetWatchOS()) {
-      // For iOS, we don't want to the normal expansion of a libcall to
-      // sincos. We want to issue a libcall to __sincos_stret.
-      setOperationAction(ISD::FSINCOS, MVT::f64, Custom);
-      setOperationAction(ISD::FSINCOS, MVT::f32, Custom);
-    }
+  // Use __sincos_stret if available.
+  if (getLibcallName(RTLIB::SINCOS_STRET_F32) != nullptr &&
+      getLibcallName(RTLIB::SINCOS_STRET_F64) != nullptr) {
+    setOperationAction(ISD::FSINCOS, MVT::f64, Custom);
+    setOperationAction(ISD::FSINCOS, MVT::f32, Custom);
   }
 
   // FP-ARMv8 implements a lot of rounding-like FP operations.
@@ -1255,6 +1246,7 @@ const char *ARMTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case ARMISD::CMOV:          return "ARMISD::CMOV";
 
   case ARMISD::SSAT:          return "ARMISD::SSAT";
+  case ARMISD::USAT:          return "ARMISD::USAT";
 
   case ARMISD::SRL_FLAG:      return "ARMISD::SRL_FLAG";
   case ARMISD::SRA_FLAG:      return "ARMISD::SRA_FLAG";
@@ -1773,7 +1765,7 @@ ARMTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   bool isStructRet    = (Outs.empty()) ? false : Outs[0].Flags.isSRet();
   bool isThisReturn   = false;
   bool isSibCall      = false;
-  auto Attr = MF.getFunction()->getFnAttribute("disable-tail-calls");
+  auto Attr = MF.getFunction().getFnAttribute("disable-tail-calls");
 
   // Disable tail calls if they're not supported.
   if (!Subtarget->supportsTailCall() || Attr.getValueAsString() == "true")
@@ -1782,7 +1774,7 @@ ARMTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   if (isTailCall) {
     // Check if it's really possible to do a tail call.
     isTailCall = IsEligibleForTailCallOptimization(Callee, CallConv,
-                    isVarArg, isStructRet, MF.getFunction()->hasStructRetAttr(),
+                    isVarArg, isStructRet, MF.getFunction().hasStructRetAttr(),
                                                    Outs, OutVals, Ins, DAG);
     if (!isTailCall && CLI.CS && CLI.CS.isMustTailCall())
       report_fatal_error("failed to perform tail call elimination on a call "
@@ -1981,7 +1973,7 @@ ARMTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   bool isDirect = false;
 
   const TargetMachine &TM = getTargetMachine();
-  const Module *Mod = MF.getFunction()->getParent();
+  const Module *Mod = MF.getFunction().getParent();
   const GlobalValue *GV = nullptr;
   if (GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(Callee))
     GV = G->getGlobal();
@@ -2033,7 +2025,7 @@ ARMTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     auto *GV = cast<GlobalAddressSDNode>(Callee)->getGlobal();
     auto *BB = CLI.CS.getParent();
     bool PreferIndirect =
-        Subtarget->isThumb() && MF.getFunction()->optForMinSize() &&
+        Subtarget->isThumb() && MF.getFunction().optForMinSize() &&
         count_if(GV->users(), [&BB](const User *U) {
           return isa<Instruction>(U) && cast<Instruction>(U)->getParent() == BB;
         }) > 2;
@@ -2105,7 +2097,7 @@ ARMTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
       CallOpc = ARMISD::CALL_NOLINK;
     else if (doesNotRet && isDirect && Subtarget->hasRetAddrStack() &&
              // Emit regular call when code size is the priority
-             !MF.getFunction()->optForMinSize())
+             !MF.getFunction().optForMinSize())
       // "mov lr, pc; b _foo" to avoid confusing the RSP
       CallOpc = ARMISD::CALL_NOLINK;
     else
@@ -2280,8 +2272,8 @@ ARMTargetLowering::IsEligibleForTailCallOptimization(SDValue Callee,
                                     const SmallVectorImpl<ISD::InputArg> &Ins,
                                                      SelectionDAG& DAG) const {
   MachineFunction &MF = DAG.getMachineFunction();
-  const Function *CallerF = MF.getFunction();
-  CallingConv::ID CallerCC = CallerF->getCallingConv();
+  const Function &CallerF = MF.getFunction();
+  CallingConv::ID CallerCC = CallerF.getCallingConv();
 
   assert(Subtarget->supportsTailCall());
 
@@ -2298,7 +2290,7 @@ ARMTargetLowering::IsEligibleForTailCallOptimization(SDValue Callee,
   // Exception-handling functions need a special set of instructions to indicate
   // a return to the hardware. Tail-calling another function would probably
   // break this.
-  if (CallerF->hasFnAttribute("interrupt"))
+  if (CallerF.hasFnAttribute("interrupt"))
     return false;
 
   // Also avoid sibcall optimization if either caller or callee uses struct
@@ -2410,9 +2402,9 @@ ARMTargetLowering::CanLowerReturn(CallingConv::ID CallConv,
 static SDValue LowerInterruptReturn(SmallVectorImpl<SDValue> &RetOps,
                                     const SDLoc &DL, SelectionDAG &DAG) {
   const MachineFunction &MF = DAG.getMachineFunction();
-  const Function *F = MF.getFunction();
+  const Function &F = MF.getFunction();
 
-  StringRef IntKind = F->getFnAttribute("interrupt").getValueAsString();
+  StringRef IntKind = F.getFnAttribute("interrupt").getValueAsString();
 
   // See ARM ARM v7 B1.8.3. On exception entry LR is set to a possibly offset
   // version of the "preferred return address". These offsets affect the return
@@ -2553,7 +2545,7 @@ ARMTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
   //
   // M-class CPUs actually use a normal return sequence with a special
   // (hardware-provided) value in LR, so the normal code path works.
-  if (DAG.getMachineFunction().getFunction()->hasFnAttribute("interrupt") &&
+  if (DAG.getMachineFunction().getFunction().hasFnAttribute("interrupt") &&
       !Subtarget->isMClass()) {
     if (Subtarget->isThumb1Only())
       report_fatal_error("interrupt attribute is not supported in Thumb1");
@@ -2691,7 +2683,7 @@ SDValue ARMTargetLowering::LowerConstantPool(SDValue Op,
     auto T = const_cast<Type*>(CP->getType());
     auto C = const_cast<Constant*>(CP->getConstVal());
     auto M = const_cast<Module*>(DAG.getMachineFunction().
-                                 getFunction()->getParent());
+                                 getFunction().getParent());
     auto GV = new GlobalVariable(
                     *M, T, /*isConst=*/true, GlobalVariable::InternalLinkage, C,
                     Twine(DAG.getDataLayout().getPrivateGlobalPrefix()) + "CP" +
@@ -2800,7 +2792,7 @@ ARMTargetLowering::LowerGlobalTLSAddressDarwin(SDValue Op,
   // trashed: R0 (it takes an argument), LR (it's a call) and CPSR (let's not be
   // silly).
   auto TRI =
-      getTargetMachine().getSubtargetImpl(*F.getFunction())->getRegisterInfo();
+      getTargetMachine().getSubtargetImpl(F.getFunction())->getRegisterInfo();
   auto ARI = static_cast<const ARMRegisterInfo *>(TRI);
   const uint32_t *Mask = ARI->getTLSCallPreservedMask(DAG.getMachineFunction());
 
@@ -3055,7 +3047,7 @@ static SDValue promoteToConstantPool(const GlobalValue *GV, SelectionDAG &DAG,
   // This is a win if the constant is only used in one function (so it doesn't
   // need to be duplicated) or duplicating the constant wouldn't increase code
   // size (implying the constant is no larger than 4 bytes).
-  const Function *F = DAG.getMachineFunction().getFunction();
+  const Function &F = DAG.getMachineFunction().getFunction();
   
   // We rely on this decision to inline being idemopotent and unrelated to the
   // use-site. We know that if we inline a variable at one use site, we'll
@@ -3113,7 +3105,7 @@ static SDValue promoteToConstantPool(const GlobalValue *GV, SelectionDAG &DAG,
   // in multiple functions but it no larger than a pointer. We also check if
   // GVar has constant (non-ConstantExpr) users. If so, it essentially has its
   // address taken.
-  if (!allUsersAreInFunction(GVar, F) &&
+  if (!allUsersAreInFunction(GVar, &F) &&
       !(Size <= 4 && allUsersAreInFunctions(GVar)))
     return SDValue();
 
@@ -3322,7 +3314,7 @@ ARMTargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op, SelectionDAG &DAG,
     bool IsPositionIndependent = isPositionIndependent();
     unsigned PCAdj = IsPositionIndependent ? (Subtarget->isThumb() ? 4 : 8) : 0;
     ARMConstantPoolValue *CPV =
-      ARMConstantPoolConstant::Create(MF.getFunction(), ARMPCLabelIndex,
+      ARMConstantPoolConstant::Create(&MF.getFunction(), ARMPCLabelIndex,
                                       ARMCP::CPLSDA, PCAdj);
     CPAddr = DAG.getTargetConstantPool(CPV, PtrVT, 4);
     CPAddr = DAG.getNode(ARMISD::Wrapper, dl, MVT::i32, CPAddr);
@@ -3598,7 +3590,7 @@ SDValue ARMTargetLowering::LowerFormalArguments(
 
   SmallVector<SDValue, 16> ArgValues;
   SDValue ArgValue;
-  Function::const_arg_iterator CurOrigArg = MF.getFunction()->arg_begin();
+  Function::const_arg_iterator CurOrigArg = MF.getFunction().arg_begin();
   unsigned CurArgIdx = 0;
 
   // Initially ArgRegsSaveSize is zero.
@@ -3902,6 +3894,10 @@ ARMTargetLowering::duplicateCmp(SDValue Cmp, SelectionDAG &DAG) const {
   return DAG.getNode(ARMISD::FMSTAT, DL, MVT::Glue, Cmp);
 }
 
+// This function returns three things: the arithmetic computation itself
+// (Value), a comparison (OverflowCmp), and a condition code (ARMcc).  The
+// comparison and the condition code define the case in which the arithmetic
+// computation *does not* overflow.
 std::pair<SDValue, SDValue>
 ARMTargetLowering::getARMXALUOOp(SDValue Op, SelectionDAG &DAG,
                                  SDValue &ARMcc) const {
@@ -3927,7 +3923,11 @@ ARMTargetLowering::getARMXALUOOp(SDValue Op, SelectionDAG &DAG,
     break;
   case ISD::UADDO:
     ARMcc = DAG.getConstant(ARMCC::HS, dl, MVT::i32);
-    Value = DAG.getNode(ISD::ADD, dl, Op.getValueType(), LHS, RHS);
+    // We use ADDC here to correspond to its use in LowerUnsignedALUO.
+    // We do not use it in the USUBO case as Value may not be used.
+    Value = DAG.getNode(ARMISD::ADDC, dl,
+                        DAG.getVTList(Op.getValueType(), MVT::i32), LHS, RHS)
+                .getValue(0);
     OverflowCmp = DAG.getNode(ARMISD::CMP, dl, MVT::Glue, Value, LHS);
     break;
   case ISD::SSUBO:
@@ -4205,7 +4205,7 @@ static bool isUpperSaturate(const SDValue LHS, const SDValue RHS,
           ((K == LHS && K == TrueVal) || (K == RHS && K == FalseVal)));
 }
 
-// Check if two chained conditionals could be converted into SSAT.
+// Check if two chained conditionals could be converted into SSAT or USAT.
 //
 // SSAT can replace a set of two conditional selectors that bound a number to an
 // interval of type [k, ~k] when k + 1 is a power of 2. Here are some examples:
@@ -4216,10 +4216,14 @@ static bool isUpperSaturate(const SDValue LHS, const SDValue RHS,
 //     x < k ? (x < -k ? -k : x) : k
 //     etc.
 //
+// USAT works similarily to SSAT but bounds on the interval [0, k] where k + 1 is
+// a power of 2.
+//
 // It returns true if the conversion can be done, false otherwise.
-// Additionally, the variable is returned in parameter V and the constant in K.
+// Additionally, the variable is returned in parameter V, the constant in K and
+// usat is set to true if the conditional represents an unsigned saturation
 static bool isSaturatingConditional(const SDValue &Op, SDValue &V,
-                                    uint64_t &K) {
+                                    uint64_t &K, bool &usat) {
   SDValue LHS1 = Op.getOperand(0);
   SDValue RHS1 = Op.getOperand(1);
   SDValue TrueVal1 = Op.getOperand(2);
@@ -4286,13 +4290,23 @@ static bool isSaturatingConditional(const SDValue &Op, SDValue &V,
   int64_t Val1 = cast<ConstantSDNode>(*K1)->getSExtValue();
   int64_t Val2 = cast<ConstantSDNode>(*K2)->getSExtValue();
   int64_t PosVal = std::max(Val1, Val2);
+  int64_t NegVal = std::min(Val1, Val2);
 
   if (((Val1 > Val2 && UpperCheckOp == &Op) ||
        (Val1 < Val2 && UpperCheckOp == &Op2)) &&
-      Val1 == ~Val2 && isPowerOf2_64(PosVal + 1)) {
+      isPowerOf2_64(PosVal + 1)) {
+
+    // Handle the difference between USAT (unsigned) and SSAT (signed) saturation
+    if (Val1 == ~Val2)
+      usat = false;
+    else if (NegVal == 0)
+      usat = true;
+    else
+      return false;
 
     V = V2;
     K = (uint64_t)PosVal; // At this point, PosVal is guaranteed to be positive
+
     return true;
   }
 
@@ -4306,10 +4320,16 @@ SDValue ARMTargetLowering::LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const {
   // Try to convert two saturating conditional selects into a single SSAT
   SDValue SatValue;
   uint64_t SatConstant;
+  bool SatUSat;
   if (((!Subtarget->isThumb() && Subtarget->hasV6Ops()) || Subtarget->isThumb2()) &&
-      isSaturatingConditional(Op, SatValue, SatConstant))
-    return DAG.getNode(ARMISD::SSAT, dl, VT, SatValue,
-                       DAG.getConstant(countTrailingOnes(SatConstant), dl, VT));
+      isSaturatingConditional(Op, SatValue, SatConstant, SatUSat)) {
+    if (SatUSat)
+      return DAG.getNode(ARMISD::USAT, dl, VT, SatValue,
+                         DAG.getConstant(countTrailingOnes(SatConstant), dl, VT));
+    else
+      return DAG.getNode(ARMISD::SSAT, dl, VT, SatValue,
+                         DAG.getConstant(countTrailingOnes(SatConstant), dl, VT));
+  }
 
   SDValue LHS = Op.getOperand(0);
   SDValue RHS = Op.getOperand(1);
@@ -4506,6 +4526,39 @@ ARMTargetLowering::OptimizeVFPBrcond(SDValue Op, SelectionDAG &DAG) const {
   return SDValue();
 }
 
+SDValue ARMTargetLowering::LowerBRCOND(SDValue Op, SelectionDAG &DAG) const {
+  SDValue Chain = Op.getOperand(0);
+  SDValue Cond = Op.getOperand(1);
+  SDValue Dest = Op.getOperand(2);
+  SDLoc dl(Op);
+
+  // Optimize {s|u}{add|sub}.with.overflow feeding into a branch instruction.
+  unsigned Opc = Cond.getOpcode();
+  if (Cond.getResNo() == 1 && (Opc == ISD::SADDO || Opc == ISD::UADDO ||
+                               Opc == ISD::SSUBO || Opc == ISD::USUBO)) {
+    // Only lower legal XALUO ops.
+    if (!DAG.getTargetLoweringInfo().isTypeLegal(Cond->getValueType(0)))
+      return SDValue();
+
+    // The actual operation with overflow check.
+    SDValue Value, OverflowCmp;
+    SDValue ARMcc;
+    std::tie(Value, OverflowCmp) = getARMXALUOOp(Cond, DAG, ARMcc);
+
+    // Reverse the condition code.
+    ARMCC::CondCodes CondCode =
+        (ARMCC::CondCodes)cast<const ConstantSDNode>(ARMcc)->getZExtValue();
+    CondCode = ARMCC::getOppositeCondition(CondCode);
+    ARMcc = DAG.getConstant(CondCode, SDLoc(ARMcc), MVT::i32);
+    SDValue CCR = DAG.getRegister(ARM::CPSR, MVT::i32);
+
+    return DAG.getNode(ARMISD::BRCOND, dl, MVT::Other, Chain, Dest, ARMcc, CCR,
+                       OverflowCmp);
+  }
+
+  return SDValue();
+}
+
 SDValue ARMTargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
   SDValue Chain = Op.getOperand(0);
   ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(1))->get();
@@ -4524,6 +4577,33 @@ SDValue ARMTargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
       RHS = DAG.getConstant(0, dl, LHS.getValueType());
       CC = ISD::SETNE;
     }
+  }
+
+  // Optimize {s|u}{add|sub}.with.overflow feeding into a branch instruction.
+  unsigned Opc = LHS.getOpcode();
+  if (LHS.getResNo() == 1 && (isOneConstant(RHS) || isNullConstant(RHS)) &&
+      (Opc == ISD::SADDO || Opc == ISD::UADDO || Opc == ISD::SSUBO ||
+       Opc == ISD::USUBO) && (CC == ISD::SETEQ || CC == ISD::SETNE)) {
+    // Only lower legal XALUO ops.
+    if (!DAG.getTargetLoweringInfo().isTypeLegal(LHS->getValueType(0)))
+      return SDValue();
+
+    // The actual operation with overflow check.
+    SDValue Value, OverflowCmp;
+    SDValue ARMcc;
+    std::tie(Value, OverflowCmp) = getARMXALUOOp(LHS.getValue(0), DAG, ARMcc);
+
+    if ((CC == ISD::SETNE) != isOneConstant(RHS)) {
+      // Reverse the condition code.
+      ARMCC::CondCodes CondCode =
+          (ARMCC::CondCodes)cast<const ConstantSDNode>(ARMcc)->getZExtValue();
+      CondCode = ARMCC::getOppositeCondition(CondCode);
+      ARMcc = DAG.getConstant(CondCode, SDLoc(ARMcc), MVT::i32);
+    }
+    SDValue CCR = DAG.getRegister(ARM::CPSR, MVT::i32);
+
+    return DAG.getNode(ARMISD::BRCOND, dl, MVT::Other, Chain, Dest, ARMcc, CCR,
+                       OverflowCmp);
   }
 
   if (LHS.getValueType() == MVT::i32) {
@@ -7523,10 +7603,9 @@ SDValue ARMTargetLowering::LowerFSINCOS(SDValue Op, SelectionDAG &DAG) const {
   Entry.IsZExt = false;
   Args.push_back(Entry);
 
-  const char *LibcallName =
-      (ArgVT == MVT::f64) ? "__sincos_stret" : "__sincosf_stret";
   RTLIB::Libcall LC =
-      (ArgVT == MVT::f64) ? RTLIB::SINCOS_F64 : RTLIB::SINCOS_F32;
+      (ArgVT == MVT::f64) ? RTLIB::SINCOS_STRET_F64 : RTLIB::SINCOS_STRET_F32;
+  const char *LibcallName = getLibcallName(LC);
   CallingConv::ID CC = getLibcallCallingConv(LC);
   SDValue Callee = DAG.getExternalSymbol(LibcallName, getPointerTy(DL));
 
@@ -7754,9 +7833,9 @@ static SDValue LowerFPOWI(SDValue Op, const ARMSubtarget &Subtarget,
   SDValue InChain = DAG.getEntryNode();
   SDValue TCChain = InChain;
 
-  const auto *F = DAG.getMachineFunction().getFunction();
+  const Function &F = DAG.getMachineFunction().getFunction();
   bool IsTC = TLI.isInTailCallPosition(DAG, Op.getNode(), TCChain) &&
-              F->getReturnType() == LCRTy;
+              F.getReturnType() == LCRTy;
   if (IsTC)
     InChain = TCChain;
 
@@ -7782,6 +7861,7 @@ SDValue ARMTargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
   case ISD::GlobalTLSAddress: return LowerGlobalTLSAddress(Op, DAG);
   case ISD::SELECT:        return LowerSELECT(Op, DAG);
   case ISD::SELECT_CC:     return LowerSELECT_CC(Op, DAG);
+  case ISD::BRCOND:        return LowerBRCOND(Op, DAG);
   case ISD::BR_CC:         return LowerBR_CC(Op, DAG);
   case ISD::BR_JT:         return LowerBR_JT(Op, DAG);
   case ISD::VASTART:       return LowerVASTART(Op, DAG);
@@ -7954,7 +8034,7 @@ void ARMTargetLowering::SetupEntryBlockForSjLj(MachineInstr &MI,
   MachineRegisterInfo *MRI = &MF->getRegInfo();
   MachineConstantPool *MCP = MF->getConstantPool();
   ARMFunctionInfo *AFI = MF->getInfo<ARMFunctionInfo>();
-  const Function *F = MF->getFunction();
+  const Function &F = MF->getFunction();
 
   bool isThumb = Subtarget->isThumb();
   bool isThumb2 = Subtarget->isThumb2();
@@ -7962,7 +8042,7 @@ void ARMTargetLowering::SetupEntryBlockForSjLj(MachineInstr &MI,
   unsigned PCLabelId = AFI->createPICLabelUId();
   unsigned PCAdj = (isThumb || isThumb2) ? 4 : 8;
   ARMConstantPoolValue *CPV =
-    ARMConstantPoolMBB::Create(F->getContext(), DispatchBB, PCLabelId, PCAdj);
+    ARMConstantPoolMBB::Create(F.getContext(), DispatchBB, PCLabelId, PCAdj);
   unsigned CPI = MCP->getConstantPoolIndex(CPV, 4);
 
   const TargetRegisterClass *TRC = isThumb ? &ARM::tGPRRegClass
@@ -8248,7 +8328,7 @@ void ARMTargetLowering::EmitSjLjDispatchBlock(MachineInstr &MI,
           .add(predOps(ARMCC::AL));
     } else {
       MachineConstantPool *ConstantPool = MF->getConstantPool();
-      Type *Int32Ty = Type::getInt32Ty(MF->getFunction()->getContext());
+      Type *Int32Ty = Type::getInt32Ty(MF->getFunction().getContext());
       const Constant *C = ConstantInt::get(Int32Ty, NumLPads);
 
       // MachineConstantPool wants an explicit alignment.
@@ -8349,7 +8429,7 @@ void ARMTargetLowering::EmitSjLjDispatchBlock(MachineInstr &MI,
           .add(predOps(ARMCC::AL));
     } else {
       MachineConstantPool *ConstantPool = MF->getConstantPool();
-      Type *Int32Ty = Type::getInt32Ty(MF->getFunction()->getContext());
+      Type *Int32Ty = Type::getInt32Ty(MF->getFunction().getContext());
       const Constant *C = ConstantInt::get(Int32Ty, NumLPads);
 
       // MachineConstantPool wants an explicit alignment.
@@ -8645,7 +8725,7 @@ ARMTargetLowering::EmitStructByval(MachineInstr &MI,
     UnitSize = 2;
   } else {
     // Check whether we can use NEON instructions.
-    if (!MF->getFunction()->hasFnAttribute(Attribute::NoImplicitFloat) &&
+    if (!MF->getFunction().hasFnAttribute(Attribute::NoImplicitFloat) &&
         Subtarget->hasNEON()) {
       if ((Align % 16 == 0) && SizeVal >= 16)
         UnitSize = 16;
@@ -8751,7 +8831,7 @@ ARMTargetLowering::EmitStructByval(MachineInstr &MI,
           .add(predOps(ARMCC::AL));
   } else {
     MachineConstantPool *ConstantPool = MF->getConstantPool();
-    Type *Int32Ty = Type::getInt32Ty(MF->getFunction()->getContext());
+    Type *Int32Ty = Type::getInt32Ty(MF->getFunction().getContext());
     const Constant *C = ConstantInt::get(Int32Ty, LoopSize);
 
     // MachineConstantPool wants an explicit alignment.
@@ -12417,11 +12497,11 @@ EVT ARMTargetLowering::getOptimalMemOpType(uint64_t Size,
                                            bool IsMemset, bool ZeroMemset,
                                            bool MemcpyStrSrc,
                                            MachineFunction &MF) const {
-  const Function *F = MF.getFunction();
+  const Function &F = MF.getFunction();
 
   // See if we can use NEON instructions for this...
   if ((!IsMemset || ZeroMemset) && Subtarget->hasNEON() &&
-      !F->hasFnAttribute(Attribute::NoImplicitFloat)) {
+      !F.hasFnAttribute(Attribute::NoImplicitFloat)) {
     bool Fast;
     if (Size >= 16 &&
         (memOpAlign(SrcAlign, DstAlign, 16) ||
@@ -13751,7 +13831,7 @@ Instruction *ARMTargetLowering::emitLeadingFence(IRBuilder<> &Builder,
   case AtomicOrdering::SequentiallyConsistent:
     if (!Inst->hasAtomicStore())
       return nullptr; // Nothing to do
-    /*FALLTHROUGH*/
+    LLVM_FALLTHROUGH;
   case AtomicOrdering::Release:
   case AtomicOrdering::AcquireRelease:
     if (Subtarget->preferISHSTBarriers())
@@ -14364,7 +14444,7 @@ void ARMTargetLowering::insertCopiesSplitCSR(
     // fine for CXX_FAST_TLS since the C++-style TLS access functions should be
     // nounwind. If we want to generalize this later, we may need to emit
     // CFI pseudo-instructions.
-    assert(Entry->getParent()->getFunction()->hasFnAttribute(
+    assert(Entry->getParent()->getFunction().hasFnAttribute(
                Attribute::NoUnwind) &&
            "Function should be nounwind in insertCopiesSplitCSR!");
     Entry->addLiveIn(*I);

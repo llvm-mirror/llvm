@@ -55,7 +55,7 @@ FixedPointRegToImm("ppc-reg-to-imm-fixed-point", cl::Hidden, cl::init(true),
                             "convert reg-reg instructions to reg-imm"));
 
 static cl::opt<bool>
-ConvertRegReg("ppc-convert-rr-to-ri", cl::Hidden, cl::init(true),
+ConvertRegReg("ppc-convert-rr-to-ri", cl::Hidden, cl::init(false),
               cl::desc("Convert eligible reg+reg instructions to reg+imm"));
 
 static cl::opt<bool>
@@ -106,7 +106,7 @@ public:
 
   // Main entry point for this pass.
   bool runOnMachineFunction(MachineFunction &MF) override {
-    if (skipFunction(*MF.getFunction()))
+    if (skipFunction(MF.getFunction()))
       return false;
     initialize(MF);
     return simplifyCode();
@@ -1025,9 +1025,6 @@ bool PPCMIPeephole::eliminateRedundantTOCSaves(
 //   bge    0, .LBB0_4
 
 bool PPCMIPeephole::eliminateRedundantCompare(void) {
-  // FIXME: this transformation is causing miscompiles. Disabling it for now
-  // until we can resolve the issue.
-  return false;
   bool Simplified = false;
 
   for (MachineBasicBlock &MBB2 : *MF) {
@@ -1087,10 +1084,21 @@ bool PPCMIPeephole::eliminateRedundantCompare(void) {
       // we replace it with a signed comparison if the comparison
       // to be merged is a signed comparison.
       // In other cases of opcode mismatch, we cannot optimize this.
-      if (isEqOrNe(BI2) &&
+
+      // We cannot change opcode when comparing against an immediate
+      // if the most significant bit of the immediate is one
+      // due to the difference in sign extension.
+      auto CmpAgainstImmWithSignBit = [](MachineInstr *I) {
+        if (!I->getOperand(2).isImm())
+          return false;
+        int16_t Imm = (int16_t)I->getOperand(2).getImm();
+        return Imm < 0;
+      };
+
+      if (isEqOrNe(BI2) && !CmpAgainstImmWithSignBit(CMPI2) &&
           CMPI1->getOpcode() == getSignedCmpOpCode(CMPI2->getOpcode()))
         NewOpCode = CMPI1->getOpcode();
-      else if (isEqOrNe(BI1) &&
+      else if (isEqOrNe(BI1) && !CmpAgainstImmWithSignBit(CMPI1) &&
                getSignedCmpOpCode(CMPI1->getOpcode()) == CMPI2->getOpcode())
         NewOpCode = CMPI2->getOpcode();
       else continue;

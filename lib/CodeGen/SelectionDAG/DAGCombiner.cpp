@@ -161,7 +161,7 @@ namespace {
     DAGCombiner(SelectionDAG &D, AliasAnalysis *AA, CodeGenOpt::Level OL)
         : DAG(D), TLI(D.getTargetLoweringInfo()), Level(BeforeLegalizeTypes),
           OptLevel(OL), AA(AA) {
-      ForCodeSize = DAG.getMachineFunction().getFunction()->optForSize();
+      ForCodeSize = DAG.getMachineFunction().getFunction().optForSize();
 
       MaximumLegalStoreInBits = 0;
       for (MVT VT : MVT::all_valuetypes())
@@ -504,6 +504,14 @@ namespace {
     /// width reduced to ExtVT.
     bool isLegalNarrowLoad(LoadSDNode *LoadN, ISD::LoadExtType ExtType,
                            EVT &ExtVT, unsigned ShAmt = 0);
+
+    /// Used by BackwardsPropagateMask to find suitable loads.
+    bool SearchForAndLoads(SDNode *N, SmallPtrSetImpl<LoadSDNode*> &Loads,
+                           SmallPtrSetImpl<SDNode*> &NodeWithConsts,
+                           ConstantSDNode *Mask, SDNode *&UncombinedNode);
+    /// Attempt to propagate a given AND node back to load leaves so that they
+    /// can be combined into narrow loads.
+    bool BackwardsPropagateMask(SDNode *N, SelectionDAG &DAG);
 
     /// Helper function for MergeConsecutiveStores which merges the
     /// component store chains.
@@ -2933,7 +2941,7 @@ SDValue DAGCombiner::visitSDIV(SDNode *N) {
   // If integer divide is expensive and we satisfy the requirements, emit an
   // alternate sequence.  Targets may check function attributes for size/speed
   // trade-offs.
-  AttributeList Attr = DAG.getMachineFunction().getFunction()->getAttributes();
+  AttributeList Attr = DAG.getMachineFunction().getFunction().getAttributes();
   if (N1C && !TLI.isIntDivCheap(N->getValueType(0), Attr))
     if (SDValue Op = BuildSDIV(N))
       return Op;
@@ -3004,7 +3012,7 @@ SDValue DAGCombiner::visitUDIV(SDNode *N) {
   }
 
   // fold (udiv x, c) -> alternate
-  AttributeList Attr = DAG.getMachineFunction().getFunction()->getAttributes();
+  AttributeList Attr = DAG.getMachineFunction().getFunction().getAttributes();
   if (N1C && !TLI.isIntDivCheap(N->getValueType(0), Attr))
     if (SDValue Op = BuildUDIV(N))
       return Op;
@@ -3063,7 +3071,7 @@ SDValue DAGCombiner::visitREM(SDNode *N) {
     }
   }
 
-  AttributeList Attr = DAG.getMachineFunction().getFunction()->getAttributes();
+  AttributeList Attr = DAG.getMachineFunction().getFunction().getAttributes();
 
   // If X/C can be simplified by the division-by-constant logic, lower
   // X%C to the equivalent of X-X/C*C.
@@ -3780,6 +3788,16 @@ bool DAGCombiner::isLegalNarrowLoad(LoadSDNode *LoadN, ISD::LoadExtType ExtType,
   if (LoadN->getNumValues() > 2)
     return false;
 
+  // Only allow byte offsets.
+  if (ShAmt % 8)
+    return false;
+
+  // Ensure that this isn't going to produce an unsupported unaligned access.
+  if (ShAmt && !TLI.allowsMemoryAccess(*DAG.getContext(), DAG.getDataLayout(),
+                                       ExtVT, LoadN->getAddressSpace(),
+                                       ShAmt / 8))
+    return false;
+
   // If the load that we're shrinking is an extload and we're not just
   // discarding the extension we can't simply shrink the load. Bail.
   // TODO: It would be possible to merge the extensions in some cases.
@@ -3796,6 +3814,132 @@ bool DAGCombiner::isLegalNarrowLoad(LoadSDNode *LoadN, ISD::LoadExtType ExtType,
     return false;
 
   return true;
+}
+
+bool DAGCombiner::SearchForAndLoads(SDNode *N,
+                                    SmallPtrSetImpl<LoadSDNode*> &Loads,
+                                    SmallPtrSetImpl<SDNode*> &NodesWithConsts,
+                                    ConstantSDNode *Mask,
+                                    SDNode *&NodeToMask) {
+  // Recursively search for the operands, looking for loads which can be
+  // narrowed.
+  for (unsigned i = 0, e = N->getNumOperands(); i < e; ++i) {
+    SDValue Op = N->getOperand(i);
+
+    if (Op.getValueType().isVector())
+      return false;
+
+    // Some constants may need fixing up later if they are too large.
+    if (auto *C = dyn_cast<ConstantSDNode>(Op)) {
+      if ((N->getOpcode() == ISD::OR || N->getOpcode() == ISD::XOR) &&
+          (Mask->getAPIntValue() & C->getAPIntValue()) != C->getAPIntValue())
+        NodesWithConsts.insert(N);
+      continue;
+    }
+
+    if (!Op.hasOneUse())
+      return false;
+
+    switch(Op.getOpcode()) {
+    case ISD::LOAD: {
+      auto *Load = cast<LoadSDNode>(Op);
+      EVT ExtVT;
+      if (isAndLoadExtLoad(Mask, Load, Load->getValueType(0), ExtVT) &&
+          isLegalNarrowLoad(Load, ISD::ZEXTLOAD, ExtVT)) {
+        // Only add this load if we can make it more narrow.
+        if (ExtVT.bitsLT(Load->getMemoryVT()))
+          Loads.insert(Load);
+        continue;
+      }
+      return false;
+    }
+    case ISD::ZERO_EXTEND:
+    case ISD::ANY_EXTEND:
+    case ISD::AssertZext: {
+      unsigned ActiveBits = Mask->getAPIntValue().countTrailingOnes();
+      EVT ExtVT = EVT::getIntegerVT(*DAG.getContext(), ActiveBits);
+      EVT VT = Op.getOpcode() == ISD::AssertZext ?
+        cast<VTSDNode>(Op.getOperand(1))->getVT() :
+        Op.getOperand(0).getValueType();
+
+      // We can accept extending nodes if the mask is wider or an equal
+      // width to the original type.
+      if (ExtVT.bitsGE(VT))
+        continue;
+      break;
+    }
+    case ISD::OR:
+    case ISD::XOR:
+    case ISD::AND:
+      if (!SearchForAndLoads(Op.getNode(), Loads, NodesWithConsts, Mask,
+                             NodeToMask))
+        return false;
+      continue;
+    }
+
+    // Allow one node which will masked along with any loads found.
+    if (NodeToMask)
+      return false;
+    NodeToMask = Op.getNode();
+  }
+  return true;
+}
+
+bool DAGCombiner::BackwardsPropagateMask(SDNode *N, SelectionDAG &DAG) {
+  auto *Mask = dyn_cast<ConstantSDNode>(N->getOperand(1));
+  if (!Mask)
+    return false;
+
+  if (!Mask->getAPIntValue().isMask())
+    return false;
+
+  // No need to do anything if the and directly uses a load.
+  if (isa<LoadSDNode>(N->getOperand(0)))
+    return false;
+
+  SmallPtrSet<LoadSDNode*, 8> Loads;
+  SmallPtrSet<SDNode*, 2> NodesWithConsts;
+  SDNode *FixupNode = nullptr;
+  if (SearchForAndLoads(N, Loads, NodesWithConsts, Mask, FixupNode)) {
+    if (Loads.size() == 0)
+      return false;
+
+    SDValue MaskOp = N->getOperand(1);
+
+    // If it exists, fixup the single node we allow in the tree that needs
+    // masking.
+    if (FixupNode) {
+      SDValue And = DAG.getNode(ISD::AND, SDLoc(FixupNode),
+                                FixupNode->getValueType(0),
+                                SDValue(FixupNode, 0), MaskOp);
+      DAG.ReplaceAllUsesOfValueWith(SDValue(FixupNode, 0), And);
+      DAG.UpdateNodeOperands(And.getNode(), SDValue(FixupNode, 0),
+                             MaskOp);
+    }
+
+    // Narrow any constants that need it.
+    for (auto *LogicN : NodesWithConsts) {
+      auto *C = cast<ConstantSDNode>(LogicN->getOperand(1));
+      SDValue And = DAG.getNode(ISD::AND, SDLoc(C), C->getValueType(0),
+                                SDValue(C, 0), MaskOp);
+      DAG.UpdateNodeOperands(LogicN, LogicN->getOperand(0), And);
+    }
+
+    // Create narrow loads.
+    for (auto *Load : Loads) {
+      SDValue And = DAG.getNode(ISD::AND, SDLoc(Load), Load->getValueType(0),
+                                SDValue(Load, 0), MaskOp);
+      DAG.ReplaceAllUsesOfValueWith(SDValue(Load, 0), And);
+      DAG.UpdateNodeOperands(And.getNode(), SDValue(Load, 0), MaskOp);
+      SDValue NewLoad = ReduceLoadWidth(And.getNode());
+      assert(NewLoad &&
+             "Shouldn't be masking the load if it can't be narrowed");
+      CombineTo(Load, NewLoad, NewLoad.getValue(1));
+    }
+    DAG.ReplaceAllUsesWith(N, N->getOperand(0).getNode());
+    return true;
+  }
+  return false;
 }
 
 SDValue DAGCombiner::visitAND(SDNode *N) {
@@ -3854,10 +3998,12 @@ SDValue DAGCombiner::visitAND(SDNode *N) {
   if (SDValue RAND = ReassociateOps(ISD::AND, SDLoc(N), N0, N1))
     return RAND;
   // fold (and (or x, C), D) -> D if (C & D) == D
-  if (N1C && N0.getOpcode() == ISD::OR)
-    if (ConstantSDNode *ORI = isConstOrConstSplat(N0.getOperand(1)))
-      if (N1C->getAPIntValue().isSubsetOf(ORI->getAPIntValue()))
-        return N1;
+  auto MatchSubset = [](ConstantSDNode *LHS, ConstantSDNode *RHS) {
+    return RHS->getAPIntValue().isSubsetOf(LHS->getAPIntValue());
+  };
+  if (N0.getOpcode() == ISD::OR &&
+      matchBinaryPredicate(N0.getOperand(1), N1, MatchSubset))
+    return N1;
   // fold (and (any_ext V), c) -> (zero_ext V) if 'and' only clears top bits.
   if (N1C && N0.getOpcode() == ISD::ANY_EXTEND) {
     SDValue N0Op0 = N0.getOperand(0);
@@ -3995,6 +4141,16 @@ SDValue DAGCombiner::visitAND(SDNode *N) {
 
       AddToWorklist(N);
       CombineTo(LN0, Res, Res.getValue(1));
+      return SDValue(N, 0);
+    }
+  }
+
+  if (Level >= AfterLegalizeTypes) {
+    // Attempt to propagate the AND back up to the leaves which, if they're
+    // loads, can be combined to narrow loads and the AND node can be removed.
+    // Perform after legalization so that extend nodes will already be
+    // combined into the loads.
+    if (BackwardsPropagateMask(N, DAG)) {
       return SDValue(N, 0);
     }
   }
@@ -4531,16 +4687,16 @@ SDValue DAGCombiner::visitOR(SDNode *N) {
 
   // Canonicalize (or (and X, c1), c2) -> (and (or X, c2), c1|c2)
   // iff (c1 & c2) != 0.
-  if (N1C && N0.getOpcode() == ISD::AND && N0.getNode()->hasOneUse()) {
-    if (ConstantSDNode *C1 = dyn_cast<ConstantSDNode>(N0.getOperand(1))) {
-      if (C1->getAPIntValue().intersects(N1C->getAPIntValue())) {
-        if (SDValue COR =
-                DAG.FoldConstantArithmetic(ISD::OR, SDLoc(N1), VT, N1C, C1))
-          return DAG.getNode(
-              ISD::AND, SDLoc(N), VT,
-              DAG.getNode(ISD::OR, SDLoc(N0), VT, N0.getOperand(0), N1), COR);
-        return SDValue();
-      }
+  auto MatchIntersect = [](ConstantSDNode *LHS, ConstantSDNode *RHS) {
+    return LHS->getAPIntValue().intersects(RHS->getAPIntValue());
+  };
+  if (N0.getOpcode() == ISD::AND && N0.getNode()->hasOneUse() &&
+      matchBinaryPredicate(N0.getOperand(1), N1, MatchIntersect)) {
+    if (SDValue COR = DAG.FoldConstantArithmetic(
+            ISD::OR, SDLoc(N1), VT, N1.getNode(), N0.getOperand(1).getNode())) {
+      SDValue IOR = DAG.getNode(ISD::OR, SDLoc(N0), VT, N0.getOperand(0), N1);
+      AddToWorklist(IOR.getNode());
+      return DAG.getNode(ISD::AND, SDLoc(N), VT, COR, IOR);
     }
   }
 
@@ -5235,21 +5391,6 @@ SDValue DAGCombiner::visitXOR(SDNode *N) {
     SDValue NotX = DAG.getNOT(SDLoc(X), X, VT);
     AddToWorklist(NotX.getNode());
     return DAG.getNode(ISD::AND, SDLoc(N), VT, NotX, N1);
-  }
-  // fold (xor (xor x, c1), c2) -> (xor x, (xor c1, c2))
-  if (N1C && N0.getOpcode() == ISD::XOR) {
-    if (const ConstantSDNode *N00C = getAsNonOpaqueConstant(N0.getOperand(0))) {
-      SDLoc DL(N);
-      return DAG.getNode(ISD::XOR, DL, VT, N0.getOperand(1),
-                         DAG.getConstant(N1C->getAPIntValue() ^
-                                         N00C->getAPIntValue(), DL, VT));
-    }
-    if (const ConstantSDNode *N01C = getAsNonOpaqueConstant(N0.getOperand(1))) {
-      SDLoc DL(N);
-      return DAG.getNode(ISD::XOR, DL, VT, N0.getOperand(0),
-                         DAG.getConstant(N1C->getAPIntValue() ^
-                                         N01C->getAPIntValue(), DL, VT));
-    }
   }
 
   // fold Y = sra (X, size(X)-1); xor (add (X, Y), Y) -> (abs X)
@@ -8130,6 +8271,22 @@ SDValue DAGCombiner::ReduceLoadWidth(SDNode *N) {
       // then the result of the shift+trunc is zero/undef (handled elsewhere).
       if (ShAmt >= cast<LoadSDNode>(N0)->getMemoryVT().getSizeInBits())
         return SDValue();
+
+      // If the SRL is only used by a masking AND, we may be able to adjust
+      // the ExtVT to make the AND redundant.
+      SDNode *Mask = *(N->use_begin());
+      if (Mask->getOpcode() == ISD::AND &&
+          isa<ConstantSDNode>(Mask->getOperand(1))) {
+        const APInt &ShiftMask =
+          cast<ConstantSDNode>(Mask->getOperand(1))->getAPIntValue();
+        if (ShiftMask.isMask()) {
+          EVT MaskedVT = EVT::getIntegerVT(*DAG.getContext(),
+                                           ShiftMask.countTrailingOnes());
+          // Recompute the type.
+          if (TLI.isLoadExtLegal(ExtType, N0.getValueType(), MaskedVT))
+            ExtVT = MaskedVT;
+        }
+      }
     }
   }
 
@@ -10057,7 +10214,7 @@ SDValue DAGCombiner::visitFMUL(SDNode *N) {
       case ISD::SETLT:
       case ISD::SETLE:
         std::swap(TrueOpnd, FalseOpnd);
-        // Fall through
+        LLVM_FALLTHROUGH;
       case ISD::SETOGT:
       case ISD::SETUGT:
       case ISD::SETOGE:
@@ -12940,7 +13097,7 @@ bool DAGCombiner::MergeConsecutiveStores(StoreSDNode *St) {
   if (MemVT.getSizeInBits() * 2 > MaximumLegalStoreInBits)
     return false;
 
-  bool NoVectors = DAG.getMachineFunction().getFunction()->hasFnAttribute(
+  bool NoVectors = DAG.getMachineFunction().getFunction().hasFnAttribute(
       Attribute::NoImplicitFloat);
 
   // This function cannot currently deal with non-byte-sized memory sizes.
@@ -13640,30 +13797,30 @@ SDValue DAGCombiner::visitSTORE(SDNode *N) {
     }
   }
 
-  if (StoreSDNode *ST1 = dyn_cast<StoreSDNode>(Chain)) {
-    if (ST->isUnindexed() && !ST->isVolatile() && ST1->isUnindexed() &&
-        !ST1->isVolatile() && ST1->getBasePtr() == Ptr &&
-        ST->getMemoryVT() == ST1->getMemoryVT()) {
-      // If this is a store followed by a store with the same value to the same
-      // location, then the store is dead/noop.
-      if (ST1->getValue() == Value) {
-        // The store is dead, remove it.
-        return Chain;
-      }
+  // Deal with elidable overlapping chained stores.
+  if (StoreSDNode *ST1 = dyn_cast<StoreSDNode>(Chain))
+    if (OptLevel != CodeGenOpt::None && ST->isUnindexed() &&
+        ST1->isUnindexed() && !ST1->isVolatile() && ST1->hasOneUse() &&
+        !ST1->getBasePtr().isUndef() && !ST->isVolatile()) {
+      BaseIndexOffset STBasePtr = BaseIndexOffset::match(ST->getBasePtr(), DAG);
+      BaseIndexOffset ST1BasePtr =
+          BaseIndexOffset::match(ST1->getBasePtr(), DAG);
+      unsigned STBytes = ST->getMemoryVT().getStoreSize();
+      unsigned ST1Bytes = ST1->getMemoryVT().getStoreSize();
+      int64_t PtrDiff;
+      // If this is a store who's preceeding store to a subset of the same
+      // memory and no one other node is chained to that store we can
+      // effectively drop the store. Do not remove stores to undef as they may
+      // be used as data sinks.
 
-      // If this is a store who's preceeding store to the same location
-      // and no one other node is chained to that store we can effectively
-      // drop the store. Do not remove stores to undef as they may be used as
-      // data sinks.
-      if (OptLevel != CodeGenOpt::None && ST1->hasOneUse() &&
-          !ST1->getBasePtr().isUndef()) {
-        // ST1 is fully overwritten and can be elided. Combine with it's chain
-        // value.
+      if (((ST->getBasePtr() == ST1->getBasePtr()) &&
+           (ST->getValue() == ST1->getValue())) ||
+          (STBasePtr.equalBaseIndex(ST1BasePtr, DAG, PtrDiff) &&
+           (0 <= PtrDiff) && (PtrDiff + ST1Bytes <= STBytes))) {
         CombineTo(ST1, ST1->getChain());
-        return SDValue();
+        return SDValue(N, 0);
       }
     }
-  }
 
   // If this is an FP_ROUND or TRUNC followed by a store, fold this into a
   // truncating store.  We can do this even if this is already a truncstore.
@@ -16986,7 +17143,7 @@ SDValue DAGCombiner::SimplifySetCC(EVT VT, SDValue N0, SDValue N1,
 SDValue DAGCombiner::BuildSDIV(SDNode *N) {
   // when optimising for minimum size, we don't want to expand a div to a mul
   // and a shift.
-  if (DAG.getMachineFunction().getFunction()->optForMinSize())
+  if (DAG.getMachineFunction().getFunction().optForMinSize())
     return SDValue();
 
   ConstantSDNode *C = isConstOrConstSplat(N->getOperand(1));
@@ -17032,7 +17189,7 @@ SDValue DAGCombiner::BuildSDIVPow2(SDNode *N) {
 SDValue DAGCombiner::BuildUDIV(SDNode *N) {
   // when optimising for minimum size, we don't want to expand a div to a mul
   // and a shift.
-  if (DAG.getMachineFunction().getFunction()->optForMinSize())
+  if (DAG.getMachineFunction().getFunction().optForMinSize())
     return SDValue();
 
   ConstantSDNode *C = isConstOrConstSplat(N->getOperand(1));

@@ -91,6 +91,8 @@ struct WasmLocalDecl {
 struct WasmFunction {
   std::vector<WasmLocalDecl> Locals;
   ArrayRef<uint8_t> Body;
+  uint32_t CodeSectionOffset;
+  uint32_t Size;
 };
 
 struct WasmDataSegment {
@@ -206,7 +208,7 @@ const unsigned WASM_SYMBOL_VISIBILITY_HIDDEN  = 0x4;
 #define WASM_RELOC(name, value) name = value,
 
 enum : unsigned {
-#include "WasmRelocs/WebAssembly.def"
+#include "WasmRelocs.def"
 };
 
 #undef WASM_RELOC

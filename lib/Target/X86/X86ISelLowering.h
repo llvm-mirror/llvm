@@ -453,9 +453,6 @@ namespace llvm {
       // Broadcast subvector to vector.
       SUBV_BROADCAST,
 
-      // Extract vector element.
-      VEXTRACT,
-
       /// SSE4A Extraction and Insertion.
       EXTRQI, INSERTQI,
 
@@ -1228,8 +1225,8 @@ namespace llvm {
                         const SDLoc &dl, SelectionDAG &DAG) const override;
 
     bool supportSplitCSR(MachineFunction *MF) const override {
-      return MF->getFunction()->getCallingConv() == CallingConv::CXX_FAST_TLS &&
-          MF->getFunction()->hasFnAttribute(Attribute::NoUnwind);
+      return MF->getFunction().getCallingConv() == CallingConv::CXX_FAST_TLS &&
+          MF->getFunction().hasFnAttribute(Attribute::NoUnwind);
     }
     void initializeSplitCSR(MachineBasicBlock *Entry) const override;
     void insertCopiesSplitCSR(

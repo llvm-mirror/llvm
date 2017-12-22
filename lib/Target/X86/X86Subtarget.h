@@ -228,6 +228,10 @@ protected:
   /// the stack pointer. This is an optimization for Intel Atom processors.
   bool UseLeaForSP;
 
+  /// True if its preferable to combine to a single shuffle using a variable
+  /// mask over multiple fixed shuffles.
+  bool HasFastVariableShuffle;
+
   /// True if there is no performance penalty to writing only the lower parts
   /// of a YMM or ZMM register without clearing the upper part.
   bool HasFastPartialYMMorZMMWrite;
@@ -527,6 +531,9 @@ public:
   bool hasSSEUnalignedMem() const { return HasSSEUnalignedMem; }
   bool hasCmpxchg16b() const { return HasCmpxchg16b; }
   bool useLeaForSP() const { return UseLeaForSP; }
+  bool hasFastVariableShuffle() const {
+    return HasFastVariableShuffle;
+  }
   bool hasFastPartialYMMorZMMWrite() const {
     return HasFastPartialYMMorZMMWrite;
   }
@@ -681,17 +688,6 @@ public:
 
   /// Return true if the subtarget allows calls to immediate address.
   bool isLegalToCallImmediateAddr() const;
-
-  /// This function returns the name of a function which has an interface
-  /// like the non-standard bzero function, if such a function exists on
-  /// the current subtarget and it is considered prefereable over
-  /// memset with zero passed as the second argument. Otherwise it
-  /// returns null.
-  const char *getBZeroEntry() const;
-
-  /// This function returns true if the target has sincos() routine in its
-  /// compiler runtime or math libraries.
-  bool hasSinCos() const;
 
   /// Enable the MachineScheduler pass for all X86 subtargets.
   bool enableMachineScheduler() const override { return true; }

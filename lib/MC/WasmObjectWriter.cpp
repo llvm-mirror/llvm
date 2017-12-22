@@ -1116,7 +1116,7 @@ void WasmObjectWriter::writeObject(MCAssembler &Asm,
       continue;
 
     // If the symbol is not defined in this translation unit, import it.
-    if (!WS.isDefined(/*SetUsed=*/false)) {
+    if (!WS.isDefined(/*SetUsed=*/false) || WS.isVariable()) {
       WasmImport Import;
       Import.ModuleName = WS.getModuleName();
       Import.FieldName = WS.getName();
@@ -1132,8 +1132,7 @@ void WasmObjectWriter::writeObject(MCAssembler &Asm,
         Import.IsMutable = false;
         SymbolIndices[&WS] = NumGlobalImports;
 
-        // If this global is the stack pointer, make it mutable and remember it
-        // so that we can emit metadata for it.
+        // If this global is the stack pointer, make it mutable.
         if (WS.getName() == "__stack_pointer")
           Import.IsMutable = true;
 
@@ -1289,7 +1288,7 @@ void WasmObjectWriter::writeObject(MCAssembler &Asm,
     uint32_t Index = SymbolIndices.find(ResolvedSym)->second;
     DEBUG(dbgs() << "  -> index:" << Index << "\n");
 
-    SymbolIndices[&WS] = Index;
+    //SymbolIndices[&WS] = Index;
     WasmExport Export;
     Export.FieldName = WS.getName();
     Export.Index = Index;

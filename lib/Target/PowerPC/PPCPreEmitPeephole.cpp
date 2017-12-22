@@ -35,7 +35,7 @@ STATISTIC(NumRemovedInPreEmit,
           "Number of instructions deleted in pre-emit peephole");
 
 static cl::opt<bool>
-RunPreEmitPeephole("ppc-late-peephole", cl::Hidden, cl::init(true),
+RunPreEmitPeephole("ppc-late-peephole", cl::Hidden, cl::init(false),
                    cl::desc("Run pre-emit peephole optimizations."));
 
 namespace {
@@ -56,7 +56,7 @@ namespace {
     }
 
     bool runOnMachineFunction(MachineFunction &MF) override {
-      if (skipFunction(*MF.getFunction()) || !RunPreEmitPeephole)
+      if (skipFunction(MF.getFunction()) || !RunPreEmitPeephole)
         return false;
       bool Changed = false;
       const PPCInstrInfo *TII = MF.getSubtarget<PPCSubtarget>().getInstrInfo();

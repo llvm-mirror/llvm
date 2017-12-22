@@ -45,7 +45,7 @@
 #include "llvm/CodeGen/LiveInterval.h"
 #include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/LiveRangeEdit.h"
-#include "llvm/CodeGen/LiveStackAnalysis.h"
+#include "llvm/CodeGen/LiveStacks.h"
 #include "llvm/CodeGen/MachineBlockFrequencyInfo.h"
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -799,7 +799,7 @@ bool RegAllocPBQP::runOnMachineFunction(MachineFunction &MF) {
   findVRegIntervalsToAlloc(MF, LIS);
 
 #ifndef NDEBUG
-  const Function &F = *MF.getFunction();
+  const Function &F = MF.getFunction();
   std::string FullyQualifiedName =
     F.getParent()->getModuleIdentifier() + "." + F.getName().str();
 #endif
