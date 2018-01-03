@@ -81,6 +81,11 @@ void Section::writeSection(FileOutputBuffer &Out) const {
   std::copy(std::begin(Contents), std::end(Contents), Buf);
 }
 
+void OwnedDataSection::writeSection(FileOutputBuffer &Out) const {
+  uint8_t *Buf = Out.getBufferStart() + Offset;
+  std::copy(std::begin(Data), std::end(Data), Buf);
+}
+
 void StringTableSection::addString(StringRef Name) {
   StrTabBuilder.add(Name);
   Size = StrTabBuilder.getSize();
@@ -136,7 +141,8 @@ uint16_t Symbol::getShndx() const {
 
 void SymbolTableSection::addSymbol(StringRef Name, uint8_t Bind, uint8_t Type,
                                    SectionBase *DefinedIn, uint64_t Value,
-                                   uint16_t Shndx, uint64_t Sz) {
+                                   uint8_t Visibility, uint16_t Shndx,
+                                   uint64_t Sz) {
   Symbol Sym;
   Sym.Name = Name;
   Sym.Binding = Bind;
@@ -149,6 +155,7 @@ void SymbolTableSection::addSymbol(StringRef Name, uint8_t Bind, uint8_t Type,
       Sym.ShndxType = SYMBOL_SIMPLE_INDEX;
   }
   Sym.Value = Value;
+  Sym.Visibility = Visibility;
   Sym.Size = Sz;
   Sym.Index = Symbols.size();
   Symbols.emplace_back(llvm::make_unique<Symbol>(Sym));
@@ -216,6 +223,7 @@ void SymbolTableSectionImpl<ELFT>::writeSection(FileOutputBuffer &Out) const {
     Sym->st_name = Symbol->NameIndex;
     Sym->st_value = Symbol->Value;
     Sym->st_size = Symbol->Size;
+    Sym->st_other = Symbol->Visibility;
     Sym->setBinding(Symbol->Binding);
     Sym->setType(Symbol->Type);
     Sym->st_shndx = Symbol->getShndx();
@@ -227,10 +235,9 @@ template <class SymTabType>
 void RelocSectionWithSymtabBase<SymTabType>::removeSectionReferences(
     const SectionBase *Sec) {
   if (Symbols == Sec) {
-    error("Symbol table " + Symbols->Name +
-          " cannot be removed because it is "
-          "referenced by the relocation "
-          "section " +
+    error("Symbol table " + Symbols->Name + " cannot be removed because it is "
+                                            "referenced by the relocation "
+                                            "section " +
           this->Name);
   }
 }
@@ -245,9 +252,9 @@ void RelocSectionWithSymtabBase<SymTabType>::initialize(
           " is not a symbol table"));
 
   if (Info != SHN_UNDEF)
-    setSection(SecTable.getSection(Info, "Info field value " + Twine(Info) +
-                                             " in section " + Name +
-                                             " is invalid"));
+    setSection(SecTable.getSection(Info,
+                                   "Info field value " + Twine(Info) +
+                                       " in section " + Name + " is invalid"));
   else
     setSection(nullptr);
 }
@@ -294,9 +301,8 @@ void DynamicRelocationSection::writeSection(FileOutputBuffer &Out) const {
 
 void SectionWithStrTab::removeSectionReferences(const SectionBase *Sec) {
   if (StrTab == Sec) {
-    error("String table " + StrTab->Name +
-          " cannot be removed because it is "
-          "referenced by the section " +
+    error("String table " + StrTab->Name + " cannot be removed because it is "
+                                           "referenced by the section " +
           this->Name);
   }
 }
@@ -306,9 +312,9 @@ bool SectionWithStrTab::classof(const SectionBase *S) {
 }
 
 void SectionWithStrTab::initialize(SectionTableRef SecTable) {
-  auto StrTab =
-      SecTable.getSection(Link, "Link field value " + Twine(Link) +
-                                    " in section " + Name + " is invalid");
+  auto StrTab = SecTable.getSection(Link,
+                                    "Link field value " + Twine(Link) +
+                                        " in section " + Name + " is invalid");
   if (StrTab->Type != SHT_STRTAB) {
     error("Link field value " + Twine(Link) + " in section " + Name +
           " is not a string table");
@@ -416,13 +422,13 @@ void Object<ELFT>::initSymbolTable(const object::ELFFile<ELFT> &ElfFile,
       }
     } else if (Sym.st_shndx != SHN_UNDEF) {
       DefSection = SecTable.getSection(
-          Sym.st_shndx, "Symbol '" + Name +
-                            "' is defined in invalid section with index " +
-                            Twine(Sym.st_shndx));
+          Sym.st_shndx,
+          "Symbol '" + Name + "' is defined in invalid section with index " +
+              Twine(Sym.st_shndx));
     }
 
     SymTab->addSymbol(Name, Sym.getBinding(), Sym.getType(), DefSection,
-                      Sym.getValue(), Sym.st_shndx, Sym.st_size);
+                      Sym.getValue(), Sym.st_other, Sym.st_shndx, Sym.st_size);
   }
 }
 
@@ -676,6 +682,13 @@ void Object<ELFT>::removeSections(
   }
   // Now finally get rid of them all togethor.
   Sections.erase(Iter, std::end(Sections));
+}
+
+template <class ELFT>
+void Object<ELFT>::addSection(StringRef SecName, ArrayRef<uint8_t> Data) {
+  auto Sec = llvm::make_unique<OwnedDataSection>(SecName, Data);
+  Sec->OriginalOffset = ~0ULL;
+  Sections.push_back(std::move(Sec));
 }
 
 template <class ELFT> void ELFObject<ELFT>::sortSections() {

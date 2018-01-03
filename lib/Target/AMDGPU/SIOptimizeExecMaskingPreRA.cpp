@@ -23,7 +23,7 @@
 #include "AMDGPU.h"
 #include "AMDGPUSubtarget.h"
 #include "SIInstrInfo.h"
-#include "llvm/CodeGen/LiveIntervalAnalysis.h"
+#include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 
 using namespace llvm;
@@ -103,7 +103,7 @@ static MachineInstr* getOrExecSource(const MachineInstr &MI,
 }
 
 bool SIOptimizeExecMaskingPreRA::runOnMachineFunction(MachineFunction &MF) {
-  if (skipFunction(*MF.getFunction()))
+  if (skipFunction(MF.getFunction()))
     return false;
 
   const SISubtarget &ST = MF.getSubtarget<SISubtarget>();

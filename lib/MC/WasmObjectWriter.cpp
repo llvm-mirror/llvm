@@ -15,13 +15,11 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/BinaryFormat/Wasm.h"
 #include "llvm/MC/MCAsmBackend.h"
-#include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCAsmLayout.h"
 #include "llvm/MC/MCAssembler.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCFixupKindInfo.h"
-#include "llvm/MC/MCObjectFileInfo.h"
 #include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCSectionWasm.h"
 #include "llvm/MC/MCSymbolWasm.h"
@@ -286,7 +284,8 @@ private:
   void writeDataRelocSection();
   void writeLinkingMetaDataSection(
       ArrayRef<WasmDataSegment> Segments, uint32_t DataSize,
-      SmallVector<std::pair<StringRef, uint32_t>, 4> SymbolFlags);
+      const SmallVector<std::pair<StringRef, uint32_t>, 4> &SymbolFlags,
+      const SmallVector<std::pair<uint16_t, uint32_t>, 2> &InitFuncs);
 
   uint32_t getProvisionalValue(const WasmRelocationEntry &RelEntry);
   void applyRelocations(ArrayRef<WasmRelocationEntry> Relocations,
@@ -367,6 +366,10 @@ void WasmObjectWriter::recordRelocation(MCAssembler &Asm,
   uint64_t C = Target.getConstant();
   uint64_t FixupOffset = Layout.getFragmentOffset(Fragment) + Fixup.getOffset();
   MCContext &Ctx = Asm.getContext();
+
+  // The .init_array isn't translated as data, so don't do relocations in it.
+  if (FixupSection.getSectionName().startswith(".init_array"))
+    return;
 
   if (const MCSymbolRefExpr *RefB = Target.getSymB()) {
     assert(RefB->getKind() == MCSymbolRefExpr::VK_None &&
@@ -550,7 +553,7 @@ uint32_t WasmObjectWriter::getRelocationIndexValue(
   case wasm::R_WEBASSEMBLY_TABLE_INDEX_SLEB:
   case wasm::R_WEBASSEMBLY_TABLE_INDEX_I32:
     if (!IndirectSymbolIndices.count(RelEntry.Symbol))
-      report_fatal_error("symbol not found table index space: " +
+      report_fatal_error("symbol not found in table index space: " +
                          RelEntry.Symbol->getName());
     return IndirectSymbolIndices[RelEntry.Symbol];
   case wasm::R_WEBASSEMBLY_FUNCTION_INDEX_LEB:
@@ -559,7 +562,7 @@ uint32_t WasmObjectWriter::getRelocationIndexValue(
   case wasm::R_WEBASSEMBLY_MEMORY_ADDR_SLEB:
   case wasm::R_WEBASSEMBLY_MEMORY_ADDR_I32:
     if (!SymbolIndices.count(RelEntry.Symbol))
-      report_fatal_error("symbol not found function/global index space: " +
+      report_fatal_error("symbol not found in function/global index space: " +
                          RelEntry.Symbol->getName());
     return SymbolIndices[RelEntry.Symbol];
   case wasm::R_WEBASSEMBLY_TYPE_INDEX_LEB:
@@ -907,7 +910,8 @@ void WasmObjectWriter::writeDataRelocSection() {
 
 void WasmObjectWriter::writeLinkingMetaDataSection(
     ArrayRef<WasmDataSegment> Segments, uint32_t DataSize,
-    SmallVector<std::pair<StringRef, uint32_t>, 4> SymbolFlags) {
+    const SmallVector<std::pair<StringRef, uint32_t>, 4> &SymbolFlags,
+    const SmallVector<std::pair<uint16_t, uint32_t>, 2> &InitFuncs) {
   SectionBookkeeping Section;
   startSection(Section, wasm::WASM_SEC_CUSTOM, "linking");
   SectionBookkeeping SubSection;
@@ -935,6 +939,16 @@ void WasmObjectWriter::writeLinkingMetaDataSection(
       writeString(Segment.Name);
       encodeULEB128(Segment.Alignment, getStream());
       encodeULEB128(Segment.Flags, getStream());
+    }
+    endSection(SubSection);
+  }
+
+  if (!InitFuncs.empty()) {
+    startSection(SubSection, wasm::WASM_INIT_FUNCS);
+    encodeULEB128(InitFuncs.size(), getStream());
+    for (auto &StartFunc : InitFuncs) {
+      encodeULEB128(StartFunc.first, getStream()); // priority
+      encodeULEB128(StartFunc.second, getStream()); // function index
     }
     endSection(SubSection);
   }
@@ -979,32 +993,10 @@ void WasmObjectWriter::writeObject(MCAssembler &Asm,
   SmallVector<WasmImport, 4> Imports;
   SmallVector<WasmExport, 4> Exports;
   SmallVector<std::pair<StringRef, uint32_t>, 4> SymbolFlags;
-  SmallPtrSet<const MCSymbolWasm *, 4> IsAddressTaken;
+  SmallVector<std::pair<uint16_t, uint32_t>, 2> InitFuncs;
   unsigned NumFuncImports = 0;
   SmallVector<WasmDataSegment, 4> DataSegments;
   uint32_t DataSize = 0;
-
-  // Populate the IsAddressTaken set.
-  for (const WasmRelocationEntry &RelEntry : CodeRelocations) {
-    switch (RelEntry.Type) {
-    case wasm::R_WEBASSEMBLY_TABLE_INDEX_SLEB:
-    case wasm::R_WEBASSEMBLY_MEMORY_ADDR_SLEB:
-      IsAddressTaken.insert(RelEntry.Symbol);
-      break;
-    default:
-      break;
-    }
-  }
-  for (const WasmRelocationEntry &RelEntry : DataRelocations) {
-    switch (RelEntry.Type) {
-    case wasm::R_WEBASSEMBLY_TABLE_INDEX_I32:
-    case wasm::R_WEBASSEMBLY_MEMORY_ADDR_I32:
-      IsAddressTaken.insert(RelEntry.Symbol);
-      break;
-    default:
-      break;
-    }
-  }
 
   // In the special .global_variables section, we've encoded global
   // variables used by the function. Translate them into the Globals
@@ -1101,7 +1093,7 @@ void WasmObjectWriter::writeObject(MCAssembler &Asm,
       continue;
 
     // If the symbol is not defined in this translation unit, import it.
-    if (!WS.isDefined(/*SetUsed=*/false)) {
+    if (!WS.isDefined(/*SetUsed=*/false) || WS.isVariable()) {
       WasmImport Import;
       Import.ModuleName = WS.getModuleName();
       Import.FieldName = WS.getName();
@@ -1117,8 +1109,7 @@ void WasmObjectWriter::writeObject(MCAssembler &Asm,
         Import.IsMutable = false;
         SymbolIndices[&WS] = NumGlobalImports;
 
-        // If this global is the stack pointer, make it mutable and remember it
-        // so that we can emit metadata for it.
+        // If this global is the stack pointer, make it mutable.
         if (WS.getName() == "__stack_pointer")
           Import.IsMutable = true;
 
@@ -1132,6 +1123,10 @@ void WasmObjectWriter::writeObject(MCAssembler &Asm,
   for (MCSection &Sec : Asm) {
     auto &Section = static_cast<MCSectionWasm &>(Sec);
     if (!Section.isWasmData())
+      continue;
+
+    // .init_array sections are handled specially elsewhere.
+    if (cast<MCSectionWasm>(Sec).getSectionName().startswith(".init_array"))
       continue;
 
     DataSize = alignTo(DataSize, Section.getAlignment());
@@ -1199,14 +1194,7 @@ void WasmObjectWriter::writeObject(MCAssembler &Asm,
       }
 
       DEBUG(dbgs() << "  -> function index: " << Index << "\n");
-
-      // If needed, prepare the function to be called indirectly.
-      if (IsAddressTaken.count(&WS) != 0) {
-        IndirectSymbolIndices[&WS] = TableElems.size();
-        DEBUG(dbgs() << "  -> adding to table: " << TableElems.size() << "\n");
-        TableElems.push_back(Index);
-      }
-    } else {
+   } else {
       if (WS.isTemporary() && !WS.getSize())
         continue;
 
@@ -1270,7 +1258,6 @@ void WasmObjectWriter::writeObject(MCAssembler &Asm,
     uint32_t Index = SymbolIndices.find(ResolvedSym)->second;
     DEBUG(dbgs() << "  -> index:" << Index << "\n");
 
-    SymbolIndices[&WS] = Index;
     WasmExport Export;
     Export.FieldName = WS.getName();
     Export.Index = Index;
@@ -1285,12 +1272,84 @@ void WasmObjectWriter::writeObject(MCAssembler &Asm,
       SymbolFlags.emplace_back(WS.getName(), wasm::WASM_SYMBOL_BINDING_LOCAL);
   }
 
-  // Add types for indirect function calls.
-  for (const WasmRelocationEntry &Fixup : CodeRelocations) {
-    if (Fixup.Type != wasm::R_WEBASSEMBLY_TYPE_INDEX_LEB)
-      continue;
+  {
+    auto HandleReloc = [&](const WasmRelocationEntry &Rel) {
+      // Functions referenced by a relocation need to prepared to be called
+      // indirectly.
+      const MCSymbolWasm& WS = *Rel.Symbol;
+      if (WS.isFunction() && IndirectSymbolIndices.count(&WS) == 0) {
+        switch (Rel.Type) {
+        case wasm::R_WEBASSEMBLY_TABLE_INDEX_I32:
+        case wasm::R_WEBASSEMBLY_TABLE_INDEX_SLEB:
+        case wasm::R_WEBASSEMBLY_MEMORY_ADDR_I32:
+        case wasm::R_WEBASSEMBLY_MEMORY_ADDR_SLEB: {
+          uint32_t Index = SymbolIndices.find(&WS)->second;
+          IndirectSymbolIndices[&WS] = TableElems.size();
+          DEBUG(dbgs() << "  -> adding to table: " << TableElems.size() << "\n");
+          TableElems.push_back(Index);
+          registerFunctionType(WS);
+          break;
+        }
+        default:
+          break;
+        }
+      }
+    };
 
-    registerFunctionType(*Fixup.Symbol);
+    for (const WasmRelocationEntry &RelEntry : CodeRelocations)
+      HandleReloc(RelEntry);
+    for (const WasmRelocationEntry &RelEntry : DataRelocations)
+      HandleReloc(RelEntry);
+  }
+
+  // Translate .init_array section contents into start functions.
+  for (const MCSection &S : Asm) {
+    const auto &WS = static_cast<const MCSectionWasm &>(S);
+    if (WS.getSectionName().startswith(".fini_array"))
+      report_fatal_error(".fini_array sections are unsupported");
+    if (!WS.getSectionName().startswith(".init_array"))
+      continue;
+    if (WS.getFragmentList().empty())
+      continue;
+    if (WS.getFragmentList().size() != 2)
+      report_fatal_error("only one .init_array section fragment supported");
+    const MCFragment &AlignFrag = *WS.begin();
+    if (AlignFrag.getKind() != MCFragment::FT_Align)
+      report_fatal_error(".init_array section should be aligned");
+    if (cast<MCAlignFragment>(AlignFrag).getAlignment() != (is64Bit() ? 8 : 4))
+      report_fatal_error(".init_array section should be aligned for pointers");
+    const MCFragment &Frag = *std::next(WS.begin());
+    if (Frag.hasInstructions() || Frag.getKind() != MCFragment::FT_Data)
+      report_fatal_error("only data supported in .init_array section");
+    uint16_t Priority = UINT16_MAX;
+    if (WS.getSectionName().size() != 11) {
+      if (WS.getSectionName()[11] != '.')
+        report_fatal_error(".init_array section priority should start with '.'");
+      if (WS.getSectionName().substr(12).getAsInteger(10, Priority))
+        report_fatal_error("invalid .init_array section priority");
+    }
+    const auto &DataFrag = cast<MCDataFragment>(Frag);
+    const SmallVectorImpl<char> &Contents = DataFrag.getContents();
+    for (const uint8_t *p = (const uint8_t *)Contents.data(),
+                     *end = (const uint8_t *)Contents.data() + Contents.size();
+         p != end; ++p) {
+      if (*p != 0)
+        report_fatal_error("non-symbolic data in .init_array section");
+    }
+    for (const MCFixup &Fixup : DataFrag.getFixups()) {
+      assert(Fixup.getKind() == MCFixup::getKindForSize(is64Bit() ? 8 : 4, false));
+      const MCExpr *Expr = Fixup.getValue();
+      auto *Sym = dyn_cast<MCSymbolRefExpr>(Expr);
+      if (!Sym)
+        report_fatal_error("fixups in .init_array should be symbol references");
+      if (Sym->getKind() != MCSymbolRefExpr::VK_WebAssembly_FUNCTION)
+        report_fatal_error("symbols in .init_array should be for functions");
+      auto I = SymbolIndices.find(cast<MCSymbolWasm>(&Sym->getSymbol()));
+      if (I == SymbolIndices.end())
+        report_fatal_error("symbols in .init_array should be defined");
+      uint32_t Index = I->second;
+      InitFuncs.push_back(std::make_pair(Priority, Index));
+    }
   }
 
   // Write out the Wasm header.
@@ -1303,14 +1362,14 @@ void WasmObjectWriter::writeObject(MCAssembler &Asm,
   // Skip the "memory" section; we import the memory instead.
   writeGlobalSection();
   writeExportSection(Exports);
-  // TODO: Start Section
   writeElemSection(TableElems);
   writeCodeSection(Asm, Layout, Functions);
   writeDataSection(DataSegments);
   writeNameSection(Functions, Imports, NumFuncImports);
   writeCodeRelocSection();
   writeDataRelocSection();
-  writeLinkingMetaDataSection(DataSegments, DataSize, SymbolFlags);
+  writeLinkingMetaDataSection(DataSegments, DataSize, SymbolFlags,
+                              InitFuncs);
 
   // TODO: Translate the .comment section to the output.
   // TODO: Translate debug sections to the output.

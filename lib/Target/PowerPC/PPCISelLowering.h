@@ -586,8 +586,8 @@ namespace llvm {
 
     bool supportSplitCSR(MachineFunction *MF) const override {
       return
-        MF->getFunction()->getCallingConv() == CallingConv::CXX_FAST_TLS &&
-        MF->getFunction()->hasFnAttribute(Attribute::NoUnwind);
+        MF->getFunction().getCallingConv() == CallingConv::CXX_FAST_TLS &&
+        MF->getFunction().hasFnAttribute(Attribute::NoUnwind);
     }
 
     void initializeSplitCSR(MachineBasicBlock *Entry) const override;
@@ -773,6 +773,7 @@ namespace llvm {
 
     bool getTgtMemIntrinsic(IntrinsicInfo &Info,
                             const CallInst &I,
+                            MachineFunction &MF,
                             unsigned Intrinsic) const override;
 
     /// getOptimalMemOpType - Returns the target specific optimal type for load

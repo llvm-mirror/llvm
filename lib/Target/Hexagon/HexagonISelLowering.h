@@ -70,6 +70,7 @@ namespace HexagonISD {
       EH_RETURN,
       DCFETCH,
       READCYCLE,
+      VZERO,
 
       OP_END
     };
@@ -103,6 +104,7 @@ namespace HexagonISD {
         const SmallVectorImpl<ISD::InputArg> &Ins, SelectionDAG& DAG) const;
 
     bool getTgtMemIntrinsic(IntrinsicInfo &Info, const CallInst &I,
+                            MachineFunction &MF,
                             unsigned Intrinsic) const override;
 
     bool isTruncateFree(Type *Ty1, Type *Ty2) const override;
@@ -121,6 +123,8 @@ namespace HexagonISD {
         unsigned DefinedValues) const override;
 
     bool isShuffleMaskLegal(ArrayRef<int> Mask, EVT VT) const override;
+    TargetLoweringBase::LegalizeTypeAction getPreferredVectorAction(EVT VT)
+        const override;
 
     SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
     const char *getTargetNodeName(unsigned Opcode) const override;
@@ -280,6 +284,9 @@ namespace HexagonISD {
     }
 
   private:
+    bool getBuildVectorConstInts(ArrayRef<SDValue> Values, MVT VecTy,
+                                 SelectionDAG &DAG,
+                                 MutableArrayRef<ConstantInt*> Consts) const;
     SDValue buildVector32(ArrayRef<SDValue> Elem, const SDLoc &dl, MVT VecTy,
                           SelectionDAG &DAG) const;
     SDValue buildVector64(ArrayRef<SDValue> Elem, const SDLoc &dl, MVT VecTy,
@@ -298,6 +305,7 @@ namespace HexagonISD {
       SDNode *N = DAG.getMachineNode(MachineOpc, dl, Ty, Ops);
       return SDValue(N, 0);
     }
+    SDValue getZero(const SDLoc &dl, MVT Ty, SelectionDAG &DAG) const;
 
     using VectorPair = std::pair<SDValue, SDValue>;
     using TypePair = std::pair<MVT, MVT>;
@@ -341,12 +349,21 @@ namespace HexagonISD {
     SDValue getByteShuffle(const SDLoc &dl, SDValue Op0, SDValue Op1,
                            ArrayRef<int> Mask, SelectionDAG &DAG) const;
 
+    MVT getVecBoolVT() const;
+
+    SDValue buildHvxVectorSingle(ArrayRef<SDValue> Values, const SDLoc &dl,
+                                 MVT VecTy, SelectionDAG &DAG) const;
+    SDValue buildHvxVectorPred(ArrayRef<SDValue> Values, const SDLoc &dl,
+                               MVT VecTy, SelectionDAG &DAG) const;
+
     SDValue LowerHvxBuildVector(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerHvxExtractElement(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerHvxInsertElement(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerHvxExtractSubvector(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerHvxInsertSubvector(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerHvxMul(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerHvxSetCC(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerHvxExtend(SDValue Op, SelectionDAG &DAG) const;
 
     std::pair<const TargetRegisterClass*, uint8_t>
     findRepresentativeClass(const TargetRegisterInfo *TRI, MVT VT)

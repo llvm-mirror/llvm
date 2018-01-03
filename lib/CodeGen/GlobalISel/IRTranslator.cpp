@@ -124,8 +124,8 @@ unsigned IRTranslator::getOrCreateVReg(const Value &Val) {
     bool Success = translate(*CV, VReg);
     if (!Success) {
       OptimizationRemarkMissed R("gisel-irtranslator", "GISelFailure",
-                                 MF->getFunction()->getSubprogram(),
-                                 &MF->getFunction()->getEntryBlock());
+                                 MF->getFunction().getSubprogram(),
+                                 &MF->getFunction().getEntryBlock());
       R << "unable to translate constant: " << ore::NV("Type", Val.getType());
       reportTranslationError(*MF, *TPC, *ORE, R);
       return VReg;
@@ -591,7 +591,7 @@ void IRTranslator::getStackGuard(unsigned DstReg,
   MIB.addDef(DstReg);
 
   auto &TLI = *MF->getSubtarget().getTargetLowering();
-  Value *Global = TLI.getSDagStackGuard(*MF->getFunction()->getParent());
+  Value *Global = TLI.getSDagStackGuard(*MF->getFunction().getParent());
   if (!Global)
     return;
 
@@ -815,7 +815,14 @@ bool IRTranslator::translateCall(const User &U, MachineIRBuilder &MIRBuilder) {
   if (CI.isInlineAsm())
     return translateInlineAsm(CI, MIRBuilder);
 
-  if (!F || !F->isIntrinsic()) {
+  Intrinsic::ID ID = Intrinsic::not_intrinsic;
+  if (F && F->isIntrinsic()) {
+    ID = F->getIntrinsicID();
+    if (TII && ID == Intrinsic::not_intrinsic)
+      ID = static_cast<Intrinsic::ID>(TII->getIntrinsicID(F));
+  }
+
+  if (!F || !F->isIntrinsic() || ID == Intrinsic::not_intrinsic) {
     unsigned Res = CI.getType()->isVoidTy() ? 0 : getOrCreateVReg(CI);
     SmallVector<unsigned, 8> Args;
     for (auto &Arg: CI.arg_operands())
@@ -826,10 +833,6 @@ bool IRTranslator::translateCall(const User &U, MachineIRBuilder &MIRBuilder) {
       return getOrCreateVReg(*CI.getCalledValue());
     });
   }
-
-  Intrinsic::ID ID = F->getIntrinsicID();
-  if (TII && ID == Intrinsic::not_intrinsic)
-    ID = static_cast<Intrinsic::ID>(TII->getIntrinsicID(F));
 
   assert(ID != Intrinsic::not_intrinsic && "unknown intrinsic");
 
@@ -851,14 +854,10 @@ bool IRTranslator::translateCall(const User &U, MachineIRBuilder &MIRBuilder) {
   const TargetLowering &TLI = *MF->getSubtarget().getTargetLowering();
   TargetLowering::IntrinsicInfo Info;
   // TODO: Add a GlobalISel version of getTgtMemIntrinsic.
-  if (TLI.getTgtMemIntrinsic(Info, CI, ID)) {
-    MachineMemOperand::Flags Flags =
-        Info.vol ? MachineMemOperand::MOVolatile : MachineMemOperand::MONone;
-    Flags |=
-        Info.readMem ? MachineMemOperand::MOLoad : MachineMemOperand::MOStore;
+  if (TLI.getTgtMemIntrinsic(Info, CI, *MF, ID)) {
     uint64_t Size = Info.memVT.getStoreSize();
     MIB.addMemOperand(MF->getMachineMemOperand(MachinePointerInfo(Info.ptrVal),
-                                               Flags, Size, Info.align));
+                                               Info.flags, Size, Info.align));
   }
 
   return true;
@@ -929,7 +928,7 @@ bool IRTranslator::translateLandingPad(const User &U,
   // If there aren't registers to copy the values into (e.g., during SjLj
   // exceptions), then don't bother.
   auto &TLI = *MF->getSubtarget().getTargetLowering();
-  const Constant *PersonalityFn = MF->getFunction()->getPersonalityFn();
+  const Constant *PersonalityFn = MF->getFunction().getPersonalityFn();
   if (TLI.getExceptionPointerRegister(PersonalityFn) == 0 &&
       TLI.getExceptionSelectorRegister(PersonalityFn) == 0)
     return true;
@@ -1240,7 +1239,7 @@ void IRTranslator::finalizeFunction() {
 
 bool IRTranslator::runOnMachineFunction(MachineFunction &CurMF) {
   MF = &CurMF;
-  const Function &F = *MF->getFunction();
+  const Function &F = MF->getFunction();
   if (F.empty())
     return false;
   CLI = MF->getSubtarget().getCallLowering();
@@ -1256,8 +1255,7 @@ bool IRTranslator::runOnMachineFunction(MachineFunction &CurMF) {
   if (!DL->isLittleEndian()) {
     // Currently we don't properly handle big endian code.
     OptimizationRemarkMissed R("gisel-irtranslator", "GISelFailure",
-                               MF->getFunction()->getSubprogram(),
-                               &MF->getFunction()->getEntryBlock());
+                               F.getSubprogram(), &F.getEntryBlock());
     R << "unable to translate in big endian mode";
     reportTranslationError(*MF, *TPC, *ORE, R);
   }
@@ -1293,8 +1291,7 @@ bool IRTranslator::runOnMachineFunction(MachineFunction &CurMF) {
   }
   if (!CLI->lowerFormalArguments(EntryBuilder, F, VRegArgs)) {
     OptimizationRemarkMissed R("gisel-irtranslator", "GISelFailure",
-                               MF->getFunction()->getSubprogram(),
-                               &MF->getFunction()->getEntryBlock());
+                               F.getSubprogram(), &F.getEntryBlock());
     R << "unable to lower arguments: " << ore::NV("Prototype", F.getType());
     reportTranslationError(*MF, *TPC, *ORE, R);
     return false;

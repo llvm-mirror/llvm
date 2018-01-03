@@ -28,7 +28,6 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetMachine.h"
 
 using namespace llvm;
 
@@ -329,10 +328,10 @@ void GCMachineCodeAnalysis::FindStackOffsets(MachineFunction &MF) {
 
 bool GCMachineCodeAnalysis::runOnMachineFunction(MachineFunction &MF) {
   // Quick exit for functions that do not use GC.
-  if (!MF.getFunction()->hasGC())
+  if (!MF.getFunction().hasGC())
     return false;
 
-  FI = &getAnalysis<GCModuleInfo>().getFunctionInfo(*MF.getFunction());
+  FI = &getAnalysis<GCModuleInfo>().getFunctionInfo(MF.getFunction());
   MMI = &getAnalysis<MachineModuleInfo>();
   TII = MF.getSubtarget().getInstrInfo();
 

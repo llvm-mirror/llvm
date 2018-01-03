@@ -29,6 +29,7 @@ class MCContext;
 class MCInstrInfo;
 class MCObjectWriter;
 class MCRegisterInfo;
+class MCSubtargetInfo;
 class MCTargetOptions;
 class Target;
 class Triple;
@@ -43,8 +44,8 @@ MCCodeEmitter *createPPCMCCodeEmitter(const MCInstrInfo &MCII,
                                       const MCRegisterInfo &MRI,
                                       MCContext &Ctx);
 
-MCAsmBackend *createPPCAsmBackend(const Target &T, const MCRegisterInfo &MRI,
-                                  const Triple &TT, StringRef CPU,
+MCAsmBackend *createPPCAsmBackend(const Target &T, const MCSubtargetInfo &STI,
+                                  const MCRegisterInfo &MRI,
                                   const MCTargetOptions &Options);
 
 /// Construct an PPC ELF object writer.
@@ -101,6 +102,7 @@ static inline bool isRunOfOnes(unsigned Val, unsigned &MB, unsigned &ME) {
 // Defines symbolic names for the PowerPC instructions.
 //
 #define GET_INSTRINFO_ENUM
+#define GET_INSTRINFO_SCHED_ENUM
 #include "PPCGenInstrInfo.inc"
 
 #define GET_SUBTARGETINFO_ENUM

@@ -22,7 +22,6 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include <sstream>
 
 #define DEBUG_TYPE "legalizer"
 
@@ -137,7 +136,7 @@ LegalizerHelper::LegalizeResult
 LegalizerHelper::libcall(MachineInstr &MI) {
   LLT LLTy = MRI.getType(MI.getOperand(0).getReg());
   unsigned Size = LLTy.getSizeInBits();
-  auto &Ctx = MIRBuilder.getMF().getFunction()->getContext();
+  auto &Ctx = MIRBuilder.getMF().getFunction().getContext();
 
   MIRBuilder.setInstr(MI);
 
@@ -411,7 +410,7 @@ LegalizerHelper::LegalizeResult LegalizerHelper::narrowScalar(MachineInstr &MI,
       return UnableToLegalize;
     int NumParts = SizeOp0 / NarrowSize;
     const APInt &Cst = MI.getOperand(1).getCImm()->getValue();
-    LLVMContext &Ctx = MIRBuilder.getMF().getFunction()->getContext();
+    LLVMContext &Ctx = MIRBuilder.getMF().getFunction().getContext();
 
     SmallVector<unsigned, 2> DstRegs;
     for (int i = 0; i < NumParts; ++i) {
@@ -814,7 +813,21 @@ LegalizerHelper::lower(MachineInstr &MI, unsigned TypeIdx, LLT Ty) {
 
     unsigned Zero = MRI.createGenericVirtualRegister(Ty);
     MIRBuilder.buildConstant(Zero, 0);
-    MIRBuilder.buildICmp(CmpInst::ICMP_NE, Overflow, HiPart, Zero);
+
+    // For *signed* multiply, overflow is detected by checking:
+    // (hi != (lo >> bitwidth-1))
+    if (Opcode == TargetOpcode::G_SMULH) {
+      unsigned Shifted = MRI.createGenericVirtualRegister(Ty);
+      unsigned ShiftAmt = MRI.createGenericVirtualRegister(Ty);
+      MIRBuilder.buildConstant(ShiftAmt, Ty.getSizeInBits() - 1);
+      MIRBuilder.buildInstr(TargetOpcode::G_ASHR)
+        .addDef(Shifted)
+        .addUse(Res)
+        .addUse(ShiftAmt);
+      MIRBuilder.buildICmp(CmpInst::ICMP_NE, Overflow, HiPart, Shifted);
+    } else {
+      MIRBuilder.buildICmp(CmpInst::ICMP_NE, Overflow, HiPart, Zero);
+    }
     MI.eraseFromParent();
     return Legalized;
   }
@@ -825,7 +838,7 @@ LegalizerHelper::lower(MachineInstr &MI, unsigned TypeIdx, LLT Ty) {
       return UnableToLegalize;
     unsigned Res = MI.getOperand(0).getReg();
     Type *ZeroTy;
-    LLVMContext &Ctx = MIRBuilder.getMF().getFunction()->getContext();
+    LLVMContext &Ctx = MIRBuilder.getMF().getFunction().getContext();
     switch (Ty.getSizeInBits()) {
     case 16:
       ZeroTy = Type::getHalfTy(Ctx);
@@ -835,6 +848,9 @@ LegalizerHelper::lower(MachineInstr &MI, unsigned TypeIdx, LLT Ty) {
       break;
     case 64:
       ZeroTy = Type::getDoubleTy(Ctx);
+      break;
+    case 128:
+      ZeroTy = Type::getFP128Ty(Ctx);
       break;
     default:
       llvm_unreachable("unexpected floating-point type");

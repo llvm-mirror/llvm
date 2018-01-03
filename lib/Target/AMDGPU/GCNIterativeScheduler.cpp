@@ -14,7 +14,7 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/CodeGen/LiveIntervalAnalysis.h"
+#include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/RegisterPressure.h"
@@ -566,7 +566,7 @@ void GCNIterativeScheduler::scheduleILP(
   bool TryMaximizeOccupancy) {
   const auto &ST = MF.getSubtarget<SISubtarget>();
   auto TgtOcc = std::min(ST.getOccupancyWithLocalMemSize(MF),
-                         ST.getWavesPerEU(*MF.getFunction()).second);
+                         ST.getWavesPerEU(MF.getFunction()).second);
 
   sortRegionsByPressure(TgtOcc);
   auto Occ = Regions.front()->MaxPressure.getOccupancy(ST);

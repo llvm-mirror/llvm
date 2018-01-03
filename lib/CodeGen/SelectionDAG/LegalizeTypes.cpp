@@ -17,10 +17,8 @@
 #include "SDNodeDbgValue.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/CodeGen/MachineFunction.h"
-#include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/DataLayout.h"
-#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
@@ -226,7 +224,7 @@ bool DAGTypeLegalizer::run() {
     assert(N->getNodeId() == ReadyToProcess &&
            "Node should be ready if on worklist!");
 
-    DEBUG(dbgs() << "Legalizing node: "; N->dump());
+    DEBUG(dbgs() << "Legalizing node: "; N->dump(&DAG));
     if (IgnoreNodeResults(N)) {
       DEBUG(dbgs() << "Ignoring node results\n");
       goto ScanOperands;
@@ -298,7 +296,7 @@ ScanOperands:
         continue;
 
       const auto Op = N->getOperand(i);
-      DEBUG(dbgs() << "Analyzing operand: "; Op.dump());
+      DEBUG(dbgs() << "Analyzing operand: "; Op.dump(&DAG));
       EVT OpVT = Op.getValueType();
       switch (getTypeAction(OpVT)) {
       case TargetLowering::TypeLegal:
@@ -447,7 +445,7 @@ NodeDone:
         if (!isTypeLegal(Node.getValueType(i)) &&
             !TLI.isTypeLegal(Node.getValueType(i))) {
           dbgs() << "Result type " << i << " illegal: ";
-          Node.dump();
+          Node.dump(&DAG);
           Failed = true;
         }
 
@@ -457,7 +455,7 @@ NodeDone:
           !isTypeLegal(Node.getOperand(i).getValueType()) &&
           !TLI.isTypeLegal(Node.getOperand(i).getValueType())) {
         dbgs() << "Operand type " << i << " illegal: ";
-        Node.getOperand(i).dump();
+        Node.getOperand(i).dump(&DAG);
         Failed = true;
       }
 

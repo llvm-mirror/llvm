@@ -19,7 +19,6 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm-c/Support.h"
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -689,7 +688,9 @@ static bool EatsUnboundedNumberOfValues(const Option *O) {
          O->getNumOccurrencesFlag() == cl::OneOrMore;
 }
 
-static bool isWhitespace(char C) { return strchr(" \t\n\r\f\v", C); }
+static bool isWhitespace(char C) {
+  return C == ' ' || C == '\t' || C == '\r' || C == '\n';
+}
 
 static bool isQuote(char C) { return C == '\"' || C == '\''; }
 
@@ -710,17 +711,19 @@ void cl::TokenizeGNUCommandLine(StringRef Src, StringSaver &Saver,
         break;
     }
 
+    char C = Src[I];
+
     // Backslash escapes the next character.
-    if (I + 1 < E && Src[I] == '\\') {
+    if (I + 1 < E && C == '\\') {
       ++I; // Skip the escape.
       Token.push_back(Src[I]);
       continue;
     }
 
     // Consume a quoted string.
-    if (isQuote(Src[I])) {
-      char Quote = Src[I++];
-      while (I != E && Src[I] != Quote) {
+    if (isQuote(C)) {
+      ++I;
+      while (I != E && Src[I] != C) {
         // Backslash escapes the next character.
         if (Src[I] == '\\' && I + 1 != E)
           ++I;
@@ -733,7 +736,7 @@ void cl::TokenizeGNUCommandLine(StringRef Src, StringSaver &Saver,
     }
 
     // End the token if this is whitespace.
-    if (isWhitespace(Src[I])) {
+    if (isWhitespace(C)) {
       if (!Token.empty())
         NewArgv.push_back(Saver.save(StringRef(Token)).data());
       Token.clear();
@@ -741,7 +744,7 @@ void cl::TokenizeGNUCommandLine(StringRef Src, StringSaver &Saver,
     }
 
     // This is a normal character.  Append it.
-    Token.push_back(Src[I]);
+    Token.push_back(C);
   }
 
   // Append the last token after hitting EOF with no whitespace.
@@ -799,25 +802,27 @@ void cl::TokenizeWindowsCommandLine(StringRef Src, StringSaver &Saver,
   // end of the source string.
   enum { INIT, UNQUOTED, QUOTED } State = INIT;
   for (size_t I = 0, E = Src.size(); I != E; ++I) {
+    char C = Src[I];
+
     // INIT state indicates that the current input index is at the start of
     // the string or between tokens.
     if (State == INIT) {
-      if (isWhitespace(Src[I])) {
+      if (isWhitespace(C)) {
         // Mark the end of lines in response files
-        if (MarkEOLs && Src[I] == '\n')
+        if (MarkEOLs && C == '\n')
           NewArgv.push_back(nullptr);
         continue;
       }
-      if (Src[I] == '"') {
+      if (C == '"') {
         State = QUOTED;
         continue;
       }
-      if (Src[I] == '\\') {
+      if (C == '\\') {
         I = parseBackslash(Src, I, Token);
         State = UNQUOTED;
         continue;
       }
-      Token.push_back(Src[I]);
+      Token.push_back(C);
       State = UNQUOTED;
       continue;
     }
@@ -826,38 +831,38 @@ void cl::TokenizeWindowsCommandLine(StringRef Src, StringSaver &Saver,
     // quotes.
     if (State == UNQUOTED) {
       // Whitespace means the end of the token.
-      if (isWhitespace(Src[I])) {
+      if (isWhitespace(C)) {
         NewArgv.push_back(Saver.save(StringRef(Token)).data());
         Token.clear();
         State = INIT;
         // Mark the end of lines in response files
-        if (MarkEOLs && Src[I] == '\n')
+        if (MarkEOLs && C == '\n')
           NewArgv.push_back(nullptr);
         continue;
       }
-      if (Src[I] == '"') {
+      if (C == '"') {
         State = QUOTED;
         continue;
       }
-      if (Src[I] == '\\') {
+      if (C == '\\') {
         I = parseBackslash(Src, I, Token);
         continue;
       }
-      Token.push_back(Src[I]);
+      Token.push_back(C);
       continue;
     }
 
     // QUOTED state means that it's reading a token quoted by double quotes.
     if (State == QUOTED) {
-      if (Src[I] == '"') {
+      if (C == '"') {
         State = UNQUOTED;
         continue;
       }
-      if (Src[I] == '\\') {
+      if (C == '\\') {
         I = parseBackslash(Src, I, Token);
         continue;
       }
-      Token.push_back(Src[I]);
+      Token.push_back(C);
     }
   }
   // Append the last token after hitting EOF with no whitespace.
@@ -866,6 +871,45 @@ void cl::TokenizeWindowsCommandLine(StringRef Src, StringSaver &Saver,
   // Mark the end of response files
   if (MarkEOLs)
     NewArgv.push_back(nullptr);
+}
+
+void cl::tokenizeConfigFile(StringRef Source, StringSaver &Saver,
+                            SmallVectorImpl<const char *> &NewArgv,
+                            bool MarkEOLs) {
+  for (const char *Cur = Source.begin(); Cur != Source.end();) {
+    SmallString<128> Line;
+    // Check for comment line.
+    if (isWhitespace(*Cur)) {
+      while (Cur != Source.end() && isWhitespace(*Cur))
+        ++Cur;
+      continue;
+    }
+    if (*Cur == '#') {
+      while (Cur != Source.end() && *Cur != '\n')
+        ++Cur;
+      continue;
+    }
+    // Find end of the current line.
+    const char *Start = Cur;
+    for (const char *End = Source.end(); Cur != End; ++Cur) {
+      if (*Cur == '\\') {
+        if (Cur + 1 != End) {
+          ++Cur;
+          if (*Cur == '\n' ||
+              (*Cur == '\r' && (Cur + 1 != End) && Cur[1] == '\n')) {
+            Line.append(Start, Cur - 1);
+            if (*Cur == '\r')
+              ++Cur;
+            Start = Cur + 1;
+          }
+        }
+      } else if (*Cur == '\n')
+        break;
+    }
+    // Tokenize line.
+    Line.append(Start, Cur);
+    cl::TokenizeGNUCommandLine(Line, Saver, NewArgv, MarkEOLs);
+  }
 }
 
 // It is called byte order marker but the UTF-8 BOM is actually not affected
@@ -970,6 +1014,15 @@ bool cl::ExpandResponseFiles(StringSaver &Saver, TokenizerCallback Tokenizer,
     Argv.insert(Argv.begin() + I, ExpandedArgv.begin(), ExpandedArgv.end());
   }
   return AllExpanded;
+}
+
+bool cl::readConfigFile(StringRef CfgFile, StringSaver &Saver,
+                        SmallVectorImpl<const char *> &Argv) {
+  if (!ExpandResponseFile(CfgFile, Saver, cl::tokenizeConfigFile, Argv,
+                          /*MarkEOLs*/ false, /*RelativeNames*/ true))
+    return false;
+  return ExpandResponseFiles(Saver, cl::tokenizeConfigFile, Argv,
+                             /*MarkEOLs*/ false, /*RelativeNames*/ true);
 }
 
 /// ParseEnvironmentOptions - An alternative entry point to the

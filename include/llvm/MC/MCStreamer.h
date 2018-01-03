@@ -95,6 +95,17 @@ public:
   virtual void prettyPrintAsm(MCInstPrinter &InstPrinter, raw_ostream &OS,
                               const MCInst &Inst, const MCSubtargetInfo &STI);
 
+  virtual void emitDwarfFileDirective(StringRef Directive);
+
+  /// Update streamer for a new active section.
+  ///
+  /// This is called by PopSection and SwitchSection, if the current
+  /// section changes.
+  virtual void changeSection(const MCSection *CurSection, MCSection *Section,
+                             const MCExpr *SubSection, raw_ostream &OS);
+
+  virtual void emitValue(const MCExpr *Value);
+
   virtual void finish();
 };
 
@@ -421,9 +432,16 @@ public:
   /// \brief Note in the output the specified region \p Kind.
   virtual void EmitDataRegion(MCDataRegionType Kind) {}
 
-  /// \brief Specify the MachO minimum deployment target version.
-  virtual void EmitVersionMin(MCVersionMinType, unsigned Major, unsigned Minor,
-                              unsigned Update) {}
+  /// \brief Specify the Mach-O minimum deployment target version.
+  virtual void EmitVersionMin(MCVersionMinType Type, unsigned Major,
+                              unsigned Minor, unsigned Update) {}
+
+  /// Emit/Specify Mach-O build version command.
+  /// \p Platform should be one of MachO::PlatformType.
+  virtual void EmitBuildVersion(unsigned Platform, unsigned Major,
+                                unsigned Minor, unsigned Update) {}
+
+  void EmitVersionForTarget(const Triple &Target);
 
   /// \brief Note in the output that the specified \p Func is a Thumb mode
   /// function (ARM target only).

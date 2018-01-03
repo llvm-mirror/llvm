@@ -3905,6 +3905,7 @@ static bool collectValuesToDemote(Value *V, SmallPtrSetImpl<Value *> &Expr,
   // seed additional demotion, we save the truncated value.
   case Instruction::Trunc:
     Roots.push_back(I->getOperand(0));
+    break;
   case Instruction::ZExt:
   case Instruction::SExt:
     break;
@@ -4421,7 +4422,8 @@ bool SLPVectorizerPass::tryToVectorizePair(Value *A, Value *B, BoUpSLP &R) {
 
 bool SLPVectorizerPass::tryToVectorizeList(ArrayRef<Value *> VL, BoUpSLP &R,
                                            ArrayRef<Value *> BuildVector,
-                                           bool AllowReorder) {
+                                           bool AllowReorder,
+                                           bool NeedExtraction) {
   if (VL.size() < 2)
     return false;
 
@@ -4515,11 +4517,12 @@ bool SLPVectorizerPass::tryToVectorizeList(ArrayRef<Value *> VL, BoUpSLP &R,
                    << "\n");
       ArrayRef<Value *> Ops = VL.slice(I, OpsWidth);
 
+      ArrayRef<Value *> EmptyArray;
       ArrayRef<Value *> BuildVectorSlice;
       if (!BuildVector.empty())
         BuildVectorSlice = BuildVector.slice(I, OpsWidth);
 
-      R.buildTree(Ops, BuildVectorSlice);
+      R.buildTree(Ops, NeedExtraction ? EmptyArray : BuildVectorSlice);
       // TODO: check if we can allow reordering for more cases.
       if (AllowReorder && R.shouldReorder()) {
         // Conceptually, there is nothing actually preventing us from trying to
@@ -5709,7 +5712,9 @@ bool SLPVectorizerPass::vectorizeInsertValueInst(InsertValueInst *IVI,
     return false;
 
   DEBUG(dbgs() << "SLP: array mappable to vector: " << *IVI << "\n");
-  return tryToVectorizeList(BuildVectorOpds, R, BuildVector, false);
+  // Aggregate value is unlikely to be processed in vector register, we need to
+  // extract scalars into scalar registers, so NeedExtraction is set true.
+  return tryToVectorizeList(BuildVectorOpds, R, BuildVector, false, true);
 }
 
 bool SLPVectorizerPass::vectorizeInsertElementInst(InsertElementInst *IEI,

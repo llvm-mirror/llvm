@@ -3359,10 +3359,10 @@ SDValue MipsTargetLowering::LowerFormalArguments(
   MipsCCState CCInfo(CallConv, IsVarArg, DAG.getMachineFunction(), ArgLocs,
                      *DAG.getContext());
   CCInfo.AllocateStack(ABI.GetCalleeAllocdArgSizeInBytes(CallConv), 1);
-  const Function *Func = DAG.getMachineFunction().getFunction();
-  Function::const_arg_iterator FuncArg = Func->arg_begin();
+  const Function &Func = DAG.getMachineFunction().getFunction();
+  Function::const_arg_iterator FuncArg = Func.arg_begin();
 
-  if (Func->hasFnAttribute("interrupt") && !Func->arg_empty())
+  if (Func.hasFnAttribute("interrupt") && !Func.arg_empty())
     report_fatal_error(
         "Functions with the interrupt attribute cannot have arguments!");
 
@@ -3600,7 +3600,7 @@ MipsTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
   // the sret argument into $v0 for the return. We saved the argument into
   // a virtual register in the entry block, so now we copy the value out
   // and into $v0.
-  if (MF.getFunction()->hasStructRetAttr()) {
+  if (MF.getFunction().hasStructRetAttr()) {
     MipsFunctionInfo *MipsFI = MF.getInfo<MipsFunctionInfo>();
     unsigned Reg = MipsFI->getSRetReturnReg();
 
@@ -3622,7 +3622,7 @@ MipsTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
     RetOps.push_back(Flag);
 
   // ISRs must use "eret".
-  if (DAG.getMachineFunction().getFunction()->hasFnAttribute("interrupt"))
+  if (DAG.getMachineFunction().getFunction().hasFnAttribute("interrupt"))
     return LowerInterruptReturn(RetOps, DL, DAG);
 
   // Standard return on Mips is a "jr $ra"
@@ -3863,13 +3863,17 @@ MipsTargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
     case 'c': // register suitable for indirect jump
       if (VT == MVT::i32)
         return std::make_pair((unsigned)Mips::T9, &Mips::GPR32RegClass);
-      assert(VT == MVT::i64 && "Unexpected type.");
-      return std::make_pair((unsigned)Mips::T9_64, &Mips::GPR64RegClass);
-    case 'l': // register suitable for indirect jump
+      if (VT == MVT::i64)
+        return std::make_pair((unsigned)Mips::T9_64, &Mips::GPR64RegClass);
+      // This will generate an error message
+      return std::make_pair(0U, nullptr);
+    case 'l': // use the `lo` register to store values
+              // that are no bigger than a word
       if (VT == MVT::i32)
         return std::make_pair((unsigned)Mips::LO0, &Mips::LO32RegClass);
       return std::make_pair((unsigned)Mips::LO0_64, &Mips::LO64RegClass);
-    case 'x': // register suitable for indirect jump
+    case 'x': // use the concatenated `hi` and `lo` registers
+              // to store doubleword values
       // Fixme: Not triggering the use of both hi and low
       // This will generate an error message
       return std::make_pair(0U, nullptr);

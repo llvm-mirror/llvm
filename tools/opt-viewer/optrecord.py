@@ -79,7 +79,11 @@ class Remark(yaml.YAMLObject):
     def _reduce_memory(self):
         self.Pass = intern(self.Pass)
         self.Name = intern(self.Name)
-        self.Function = intern(self.Function)
+        try:
+            # Can't intern unicode strings.
+            self.Function = intern(self.Function)
+        except:
+            pass
 
         def _reduce_memory_dict(old_dict):
             new_dict = dict()
@@ -151,12 +155,12 @@ class Remark(yaml.YAMLObject):
         assert(len(mapping) == 1)
         (key, value) = list(mapping.items())[0]
 
-        if key == 'Caller' or key == 'Callee':
+        if key == 'Caller' or key == 'Callee' or key == 'DirectCallee':
             value = cgi.escape(self.demangle(value))
 
         if dl and key != 'Caller':
             dl_dict = dict(list(dl))
-            return "<a href={}>{}</a>".format(
+            return u"<a href={}>{}</a>".format(
                 make_link(dl_dict['File'], dl_dict['Line']), value)
         else:
             return value

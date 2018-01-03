@@ -240,6 +240,10 @@ INITIALIZE_PASS_END(ShrinkWrap, DEBUG_TYPE, "Shrink Wrap Pass", false, false)
 
 bool ShrinkWrap::useOrDefCSROrFI(const MachineInstr &MI,
                                  RegScavenger *RS) const {
+  // Ignore DBG_VALUE and other meta instructions that must not affect codegen.
+  if (MI.isMetaInstruction())
+    return false;
+
   if (MI.getOpcode() == FrameSetupOpcode ||
       MI.getOpcode() == FrameDestroyOpcode) {
     DEBUG(dbgs() << "Frame instruction: " << MI << '\n');
@@ -445,7 +449,7 @@ static bool isIrreducibleCFG(const MachineFunction &MF,
 }
 
 bool ShrinkWrap::runOnMachineFunction(MachineFunction &MF) {
-  if (skipFunction(*MF.getFunction()) || MF.empty() || !isShrinkWrapEnabled(MF))
+  if (skipFunction(MF.getFunction()) || MF.empty() || !isShrinkWrapEnabled(MF))
     return false;
 
   DEBUG(dbgs() << "**** Analysing " << MF.getName() << '\n');
@@ -565,10 +569,10 @@ bool ShrinkWrap::isShrinkWrapEnabled(const MachineFunction &MF) {
            // of the crash. Since a crash can happen anywhere, the
            // frame must be lowered before anything else happen for the
            // sanitizers to be able to get a correct stack frame.
-           !(MF.getFunction()->hasFnAttribute(Attribute::SanitizeAddress) ||
-             MF.getFunction()->hasFnAttribute(Attribute::SanitizeThread) ||
-             MF.getFunction()->hasFnAttribute(Attribute::SanitizeMemory) ||
-             MF.getFunction()->hasFnAttribute(Attribute::SanitizeHWAddress));
+           !(MF.getFunction().hasFnAttribute(Attribute::SanitizeAddress) ||
+             MF.getFunction().hasFnAttribute(Attribute::SanitizeThread) ||
+             MF.getFunction().hasFnAttribute(Attribute::SanitizeMemory) ||
+             MF.getFunction().hasFnAttribute(Attribute::SanitizeHWAddress));
   // If EnableShrinkWrap is set, it takes precedence on whatever the
   // target sets. The rational is that we assume we want to test
   // something related to shrink-wrapping.

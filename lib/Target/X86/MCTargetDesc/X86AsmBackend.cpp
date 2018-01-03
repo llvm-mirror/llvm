@@ -20,12 +20,9 @@
 #include "llvm/MC/MCMachObjectWriter.h"
 #include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCRegisterInfo.h"
-#include "llvm/MC/MCSectionCOFF.h"
-#include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 
@@ -81,7 +78,7 @@ public:
               CPU != "i586" && CPU != "pentium" && CPU != "pentium-mmx" &&
               CPU != "i686" && CPU != "k6" && CPU != "k6-2" && CPU != "k6-3" &&
               CPU != "geode" && CPU != "winchip-c6" && CPU != "winchip2" &&
-              CPU != "c3" && CPU != "c3-2" && CPU != "lakemont";
+              CPU != "c3" && CPU != "c3-2" && CPU != "lakemont" && CPU != "";
   }
 
   unsigned getNumFixupKinds() const override {
@@ -846,10 +843,11 @@ public:
 } // end anonymous namespace
 
 MCAsmBackend *llvm::createX86_32AsmBackend(const Target &T,
+                                           const MCSubtargetInfo &STI,
                                            const MCRegisterInfo &MRI,
-                                           const Triple &TheTriple,
-                                           StringRef CPU,
                                            const MCTargetOptions &Options) {
+  const Triple &TheTriple = STI.getTargetTriple();
+  StringRef CPU = STI.getCPU();
   if (TheTriple.isOSBinFormatMachO())
     return new DarwinX86_32AsmBackend(T, MRI, CPU);
 
@@ -865,10 +863,11 @@ MCAsmBackend *llvm::createX86_32AsmBackend(const Target &T,
 }
 
 MCAsmBackend *llvm::createX86_64AsmBackend(const Target &T,
+                                           const MCSubtargetInfo &STI,
                                            const MCRegisterInfo &MRI,
-                                           const Triple &TheTriple,
-                                           StringRef CPU,
                                            const MCTargetOptions &Options) {
+  const Triple &TheTriple = STI.getTargetTriple();
+  StringRef CPU = STI.getCPU();
   if (TheTriple.isOSBinFormatMachO()) {
     MachO::CPUSubTypeX86 CS =
         StringSwitch<MachO::CPUSubTypeX86>(TheTriple.getArchName())

@@ -30,7 +30,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/CodeGen/LexicalScopes.h"
 #include "llvm/CodeGen/LiveInterval.h"
-#include "llvm/CodeGen/LiveIntervalAnalysis.h"
+#include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -242,8 +242,11 @@ public:
     // We are storing a MachineOperand outside a MachineInstr.
     locations.back().clearParent();
     // Don't store def operands.
-    if (locations.back().isReg())
+    if (locations.back().isReg()) {
+      if (locations.back().isDef())
+        locations.back().setIsDead(false);
       locations.back().setIsUse();
+    }
     return locations.size() - 1;
   }
 
@@ -833,7 +836,7 @@ static void removeDebugValues(MachineFunction &mf) {
 bool LiveDebugVariables::runOnMachineFunction(MachineFunction &mf) {
   if (!EnableLDV)
     return false;
-  if (!mf.getFunction()->getSubprogram()) {
+  if (!mf.getFunction().getSubprogram()) {
     removeDebugValues(mf);
     return false;
   }

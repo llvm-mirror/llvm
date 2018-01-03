@@ -772,7 +772,30 @@ SDValue DAGTypeLegalizer::PromoteIntRes_UADDSUBO(SDNode *N, unsigned ResNo) {
 SDValue DAGTypeLegalizer::PromoteIntRes_ADDSUBCARRY(SDNode *N, unsigned ResNo) {
   if (ResNo == 1)
     return PromoteIntRes_Overflow(N);
-  llvm_unreachable("Not implemented");
+
+  // We need to sign-extend the operands so the carry value computed by the
+  // wide operation will be equivalent to the carry value computed by the
+  // narrow operation.
+  // An ADDCARRY can generate carry only if any of the operands has its
+  // most significant bit set. Sign extension propagates the most significant
+  // bit into the higher bits which means the extra bit that the narrow
+  // addition would need (i.e. the carry) will be propagated through the higher
+  // bits of the wide addition.
+  // A SUBCARRY can generate borrow only if LHS < RHS and this property will be
+  // preserved by sign extension.
+  SDValue LHS = SExtPromotedInteger(N->getOperand(0));
+  SDValue RHS = SExtPromotedInteger(N->getOperand(1));
+
+  EVT ValueVTs[] = {LHS.getValueType(), N->getValueType(1)};
+
+  // Do the arithmetic in the wide type.
+  SDValue Res = DAG.getNode(N->getOpcode(), SDLoc(N), DAG.getVTList(ValueVTs),
+                            LHS, RHS, N->getOperand(2));
+
+  // Update the users of the original carry/borrow value.
+  ReplaceValueWith(SDValue(N, 1), Res.getValue(1));
+
+  return SDValue(Res.getNode(), 0);
 }
 
 SDValue DAGTypeLegalizer::PromoteIntRes_XMULO(SDNode *N, unsigned ResNo) {
@@ -3466,7 +3489,6 @@ SDValue DAGTypeLegalizer::PromoteIntRes_CONCAT_VECTORS(SDNode *N) {
   EVT NOutVT = TLI.getTypeToTransformTo(*DAG.getContext(), OutVT);
   assert(NOutVT.isVector() && "This type must be promoted to a vector type");
 
-  EVT InElemTy = OutVT.getVectorElementType();
   EVT OutElemTy = NOutVT.getVectorElementType();
 
   unsigned NumElem = N->getOperand(0).getValueType().getVectorNumElements();
@@ -3475,15 +3497,36 @@ SDValue DAGTypeLegalizer::PromoteIntRes_CONCAT_VECTORS(SDNode *N) {
   assert(NumElem * NumOperands == NumOutElem &&
          "Unexpected number of elements");
 
+  // If the input type is legal and we can promote it to a legal type with the
+  // same element size, go ahead do that to create a new concat.
+  if (getTypeAction(N->getOperand(0).getValueType()) ==
+      TargetLowering::TypeLegal) {
+    EVT InPromotedTy = EVT::getVectorVT(*DAG.getContext(), OutElemTy, NumElem);
+    if (TLI.isTypeLegal(InPromotedTy)) {
+      SmallVector<SDValue, 8> Ops(NumOperands);
+      for (unsigned i = 0; i < NumOperands; ++i) {
+        Ops[i] = DAG.getNode(ISD::ANY_EXTEND, dl, InPromotedTy,
+                             N->getOperand(i));
+      }
+      return DAG.getNode(ISD::CONCAT_VECTORS, dl, NOutVT, Ops);
+    }
+  }
+
   // Take the elements from the first vector.
   SmallVector<SDValue, 8> Ops(NumOutElem);
   for (unsigned i = 0; i < NumOperands; ++i) {
     SDValue Op = N->getOperand(i);
+    if (getTypeAction(Op.getValueType()) == TargetLowering::TypePromoteInteger)
+      Op = GetPromotedInteger(Op);
+    EVT SclrTy = Op.getValueType().getVectorElementType();
+    assert(NumElem == Op.getValueType().getVectorNumElements() &&
+           "Unexpected number of elements");
+
     for (unsigned j = 0; j < NumElem; ++j) {
       SDValue Ext = DAG.getNode(
-          ISD::EXTRACT_VECTOR_ELT, dl, InElemTy, Op,
+          ISD::EXTRACT_VECTOR_ELT, dl, SclrTy, Op,
           DAG.getConstant(j, dl, TLI.getVectorIdxTy(DAG.getDataLayout())));
-      Ops[i * NumElem + j] = DAG.getNode(ISD::ANY_EXTEND, dl, OutElemTy, Ext);
+      Ops[i * NumElem + j] = DAG.getAnyExtOrTrunc(Ext, dl, OutElemTy);
     }
   }
 

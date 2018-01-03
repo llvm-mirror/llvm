@@ -11,7 +11,6 @@
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/BinaryFormat/Dwarf.h"
-#include "llvm/DebugInfo/DWARF/DWARFContext.h"
 #include "llvm/DebugInfo/DWARF/DWARFRelocMap.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Format.h"
@@ -84,6 +83,7 @@ bool DWARFAcceleratorTable::validateForms() {
            !FormValue.isFormClass(DWARFFormValue::FC_Flag)) ||
           FormValue.getForm() == dwarf::DW_FORM_sdata)
         return false;
+      break;
     default:
       break;
     }

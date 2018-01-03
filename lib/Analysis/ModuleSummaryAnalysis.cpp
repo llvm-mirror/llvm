@@ -306,7 +306,9 @@ computeFunctionSummary(ModuleSummaryIndex &Index, const Module &M,
       NonRenamableLocal || HasInlineAsmMaybeReferencingInternal ||
       // Inliner doesn't handle variadic functions.
       // FIXME: refactor this to use the same code that inliner is using.
-      F.isVarArg();
+      F.isVarArg() ||
+      // Don't try to import functions with noinline attribute.
+      F.getAttributes().hasFnAttribute(Attribute::NoInline);
   GlobalValueSummary::GVFlags Flags(F.getLinkage(), NotEligibleForImport,
                                     /* Live = */ false, F.isDSOLocal());
   FunctionSummary::FFlags FunFlags{
@@ -454,7 +456,7 @@ ModuleSummaryIndex llvm::buildModuleSummaryIndex(
     std::unique_ptr<BlockFrequencyInfo> BFIPtr;
     if (GetBFICallback)
       BFI = GetBFICallback(F);
-    else if (F.getEntryCount().hasValue()) {
+    else if (F.hasProfileData()) {
       LoopInfo LI{DominatorTree(const_cast<Function &>(F))};
       BranchProbabilityInfo BPI{F, LI};
       BFIPtr = llvm::make_unique<BlockFrequencyInfo>(F, BPI, LI);

@@ -37,7 +37,7 @@ static unsigned getMaxWaves(unsigned SGPRs, unsigned VGPRs,
                                       ST.getOccupancyWithNumVGPRs(VGPRs));
   return std::min(MinRegOccupancy,
                   ST.getOccupancyWithLocalMemSize(MFI->getLDSSize(),
-                                                  *MF.getFunction()));
+                                                  MF.getFunction()));
 }
 
 void GCNMaxOccupancySchedStrategy::initialize(ScheduleDAGMI *DAG) {
@@ -315,7 +315,7 @@ GCNScheduleDAGMILive::GCNScheduleDAGMILive(MachineSchedContext *C,
   ST(MF.getSubtarget<SISubtarget>()),
   MFI(*MF.getInfo<SIMachineFunctionInfo>()),
   StartingOccupancy(ST.getOccupancyWithLocalMemSize(MFI.getLDSSize(),
-                                                    *MF.getFunction())),
+                                                    MF.getFunction())),
   MinOccupancy(StartingOccupancy), Stage(0), RegionIdx(0) {
 
   DEBUG(dbgs() << "Starting occupancy is " << StartingOccupancy << ".\n");
@@ -394,7 +394,8 @@ void GCNScheduleDAGMILive::schedule() {
     if (MI->getIterator() != RegionEnd) {
       BB->remove(MI);
       BB->insert(RegionEnd, MI);
-      LIS->handleMove(*MI, true);
+      if (!MI->isDebugValue())
+        LIS->handleMove(*MI, true);
     }
     // Reset read-undef flags and update them later.
     for (auto &Op : MI->operands())
@@ -402,13 +403,15 @@ void GCNScheduleDAGMILive::schedule() {
         Op.setIsUndef(false);
     RegisterOperands RegOpers;
     RegOpers.collect(*MI, *TRI, MRI, ShouldTrackLaneMasks, false);
-    if (ShouldTrackLaneMasks) {
-      // Adjust liveness and add missing dead+read-undef flags.
-      SlotIndex SlotIdx = LIS->getInstructionIndex(*MI).getRegSlot();
-      RegOpers.adjustLaneLiveness(*LIS, MRI, SlotIdx, MI);
-    } else {
-      // Adjust for missing dead-def flags.
-      RegOpers.detectDeadDefs(*MI, *LIS);
+    if (!MI->isDebugValue()) {
+      if (ShouldTrackLaneMasks) {
+        // Adjust liveness and add missing dead+read-undef flags.
+        SlotIndex SlotIdx = LIS->getInstructionIndex(*MI).getRegSlot();
+        RegOpers.adjustLaneLiveness(*LIS, MRI, SlotIdx, MI);
+      } else {
+        // Adjust for missing dead-def flags.
+        RegOpers.detectDeadDefs(*MI, *LIS);
+      }
     }
     RegionEnd = MI->getIterator();
     ++RegionEnd;

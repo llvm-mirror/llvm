@@ -14,10 +14,10 @@
 #include "llvm/Object/WindowsResource.h"
 #include "llvm/Object/COFF.h"
 #include "llvm/Support/FileOutputBuffer.h"
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/MathExtras.h"
 #include <ctime>
 #include <queue>
-#include <sstream>
 #include <system_error>
 
 using namespace llvm;
@@ -561,10 +561,9 @@ void WindowsResourceCOFFWriter::writeSymbolTable() {
 
   // Now write a symbol for each relocation.
   for (unsigned i = 0; i < Data.size(); i++) {
-    char RelocationName[9];
-    sprintf(RelocationName, "$R%06X", DataOffsets[i]);
+    auto RelocationName = formatv("$R{0:X-6}", i & 0xffffff).sstr<COFF::NameSize>();
     Symbol = reinterpret_cast<coff_symbol16 *>(BufferStart + CurrentOffset);
-    strncpy(Symbol->Name.ShortName, RelocationName, (size_t)COFF::NameSize);
+    memcpy(Symbol->Name.ShortName, RelocationName.data(), (size_t) COFF::NameSize);
     Symbol->Value = DataOffsets[i];
     Symbol->SectionNumber = 2;
     Symbol->Type = COFF::IMAGE_SYM_DTYPE_NULL;

@@ -49,6 +49,28 @@ void MCTargetStreamer::emitLabel(MCSymbol *Symbol) {}
 
 void MCTargetStreamer::finish() {}
 
+void MCTargetStreamer::changeSection(const MCSection *CurSection,
+                                     MCSection *Section,
+                                     const MCExpr *Subsection,
+                                     raw_ostream &OS) {
+  Section->PrintSwitchToSection(
+      *Streamer.getContext().getAsmInfo(),
+      Streamer.getContext().getObjectFileInfo()->getTargetTriple(), OS,
+      Subsection);
+}
+
+void MCTargetStreamer::emitDwarfFileDirective(StringRef Directive) {
+  Streamer.EmitRawText(Directive);
+}
+
+void MCTargetStreamer::emitValue(const MCExpr *Value) {
+  SmallString<128> Str;
+  raw_svector_ostream OS(Str);
+
+  Value->print(OS, Streamer.getContext().getAsmInfo());
+  Streamer.EmitRawText(OS.str());
+}
+
 void MCTargetStreamer::emitAssignment(MCSymbol *Symbol, const MCExpr *Value) {}
 
 MCStreamer::MCStreamer(MCContext &Ctx)
@@ -958,4 +980,33 @@ MCSymbol *MCStreamer::endSection(MCSection *Section) {
   SwitchSection(Section);
   EmitLabel(Sym);
   return Sym;
+}
+
+void MCStreamer::EmitVersionForTarget(const Triple &Target) {
+  if (!Target.isOSBinFormatMachO() || !Target.isOSDarwin())
+    return;
+  // Do we even know the version?
+  if (Target.getOSMajorVersion() == 0)
+    return;
+
+  unsigned Major;
+  unsigned Minor;
+  unsigned Update;
+  MCVersionMinType VersionType;
+  if (Target.isWatchOS()) {
+    VersionType = MCVM_WatchOSVersionMin;
+    Target.getWatchOSVersion(Major, Minor, Update);
+  } else if (Target.isTvOS()) {
+    VersionType = MCVM_TvOSVersionMin;
+    Target.getiOSVersion(Major, Minor, Update);
+  } else if (Target.isMacOSX()) {
+    VersionType = MCVM_OSXVersionMin;
+    if (!Target.getMacOSXVersion(Major, Minor, Update))
+      Major = 0;
+  } else {
+    VersionType = MCVM_IOSVersionMin;
+    Target.getiOSVersion(Major, Minor, Update);
+  }
+  if (Major != 0)
+    EmitVersionMin(VersionType, Major, Minor, Update);
 }

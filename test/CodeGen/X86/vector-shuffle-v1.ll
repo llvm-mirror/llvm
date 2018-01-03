@@ -16,7 +16,6 @@ define <2 x i1> @shuf2i1_1_0(<2 x i1> %a) {
 ; AVX512VL-NEXT:    vpcmpeqd %xmm0, %xmm0, %xmm0
 ; AVX512VL-NEXT:    vmovdqa64 %xmm0, %xmm1 {%k1} {z}
 ; AVX512VL-NEXT:    vpshufd {{.*#+}} xmm1 = xmm1[2,3,0,1]
-; AVX512VL-NEXT:    vpsllq $63, %xmm1, %xmm1
 ; AVX512VL-NEXT:    vptestmq %xmm1, %xmm1, %k1
 ; AVX512VL-NEXT:    vmovdqa64 %xmm0, %xmm0 {%k1} {z}
 ; AVX512VL-NEXT:    retq
@@ -48,11 +47,9 @@ define <2 x i1> @shuf2i1_1_2(<2 x i1> %a) {
 ; AVX512VL-NEXT:    vptestmq %xmm0, %xmm0, %k1
 ; AVX512VL-NEXT:    vpcmpeqd %xmm0, %xmm0, %xmm0
 ; AVX512VL-NEXT:    vmovdqa64 %xmm0, %xmm1 {%k1} {z}
-; AVX512VL-NEXT:    movb $1, %al
-; AVX512VL-NEXT:    kmovw %eax, %k1
-; AVX512VL-NEXT:    vmovdqa64 %xmm0, %xmm2 {%k1} {z}
+; AVX512VL-NEXT:    movq $-1, %rax
+; AVX512VL-NEXT:    vmovq %rax, %xmm2
 ; AVX512VL-NEXT:    vpalignr {{.*#+}} xmm1 = xmm1[8,9,10,11,12,13,14,15],xmm2[0,1,2,3,4,5,6,7]
-; AVX512VL-NEXT:    vpsllq $63, %xmm1, %xmm1
 ; AVX512VL-NEXT:    vptestmq %xmm1, %xmm1, %k1
 ; AVX512VL-NEXT:    vmovdqa64 %xmm0, %xmm0 {%k1} {z}
 ; AVX512VL-NEXT:    retq
@@ -61,9 +58,8 @@ define <2 x i1> @shuf2i1_1_2(<2 x i1> %a) {
 ; VL_BW_DQ:       # %bb.0:
 ; VL_BW_DQ-NEXT:    vpsllq $63, %xmm0, %xmm0
 ; VL_BW_DQ-NEXT:    vptestmq %xmm0, %xmm0, %k0
-; VL_BW_DQ-NEXT:    movb $1, %al
-; VL_BW_DQ-NEXT:    kmovd %eax, %k1
-; VL_BW_DQ-NEXT:    vpmovm2q %k1, %xmm0
+; VL_BW_DQ-NEXT:    movq $-1, %rax
+; VL_BW_DQ-NEXT:    vmovq %rax, %xmm0
 ; VL_BW_DQ-NEXT:    vpmovm2q %k0, %xmm1
 ; VL_BW_DQ-NEXT:    vpalignr {{.*#+}} xmm0 = xmm1[8,9,10,11,12,13,14,15],xmm0[0,1,2,3,4,5,6,7]
 ; VL_BW_DQ-NEXT:    vpmovq2m %xmm0, %k0
@@ -87,7 +83,6 @@ define <4 x i1> @shuf4i1_3_2_10(<4 x i1> %a) {
 ; AVX512VL-NEXT:    vpcmpeqd %xmm0, %xmm0, %xmm0
 ; AVX512VL-NEXT:    vmovdqa32 %xmm0, %xmm1 {%k1} {z}
 ; AVX512VL-NEXT:    vpshufd {{.*#+}} xmm1 = xmm1[3,2,1,0]
-; AVX512VL-NEXT:    vpslld $31, %xmm1, %xmm1
 ; AVX512VL-NEXT:    vptestmd %xmm1, %xmm1, %k1
 ; AVX512VL-NEXT:    vmovdqa32 %xmm0, %xmm0 {%k1} {z}
 ; AVX512VL-NEXT:    retq
@@ -112,7 +107,6 @@ define <8 x i1> @shuf8i1_3_6_1_0_3_7_7_0(<8 x i64> %a, <8 x i64> %b, <8 x i64> %
 ; AVX512F-NEXT:    vpternlogq $255, %zmm0, %zmm0, %zmm0 {%k1} {z}
 ; AVX512F-NEXT:    vmovdqa64 {{.*#+}} zmm1 = [3,6,1,0,3,7,7,0]
 ; AVX512F-NEXT:    vpermq %zmm0, %zmm1, %zmm0
-; AVX512F-NEXT:    vpsllq $63, %zmm0, %zmm0
 ; AVX512F-NEXT:    vptestmq %zmm0, %zmm0, %k1
 ; AVX512F-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k1} {z}
 ; AVX512F-NEXT:    vpmovdw %zmm0, %ymm0
@@ -123,12 +117,11 @@ define <8 x i1> @shuf8i1_3_6_1_0_3_7_7_0(<8 x i64> %a, <8 x i64> %b, <8 x i64> %
 ; AVX512VL-LABEL: shuf8i1_3_6_1_0_3_7_7_0:
 ; AVX512VL:       # %bb.0:
 ; AVX512VL-NEXT:    vpcmpeqq %zmm2, %zmm0, %k1
-; AVX512VL-NEXT:    vpternlogq $255, %zmm0, %zmm0, %zmm0 {%k1} {z}
-; AVX512VL-NEXT:    vmovdqa64 {{.*#+}} zmm1 = [3,6,1,0,3,7,7,0]
-; AVX512VL-NEXT:    vpermq %zmm0, %zmm1, %zmm0
-; AVX512VL-NEXT:    vpsllq $63, %zmm0, %zmm0
-; AVX512VL-NEXT:    vptestmq %zmm0, %zmm0, %k1
 ; AVX512VL-NEXT:    vpcmpeqd %ymm0, %ymm0, %ymm0
+; AVX512VL-NEXT:    vmovdqa32 %ymm0, %ymm1 {%k1} {z}
+; AVX512VL-NEXT:    vmovdqa {{.*#+}} ymm2 = [3,6,1,0,3,7,7,0]
+; AVX512VL-NEXT:    vpermd %ymm1, %ymm2, %ymm1
+; AVX512VL-NEXT:    vptestmd %ymm1, %ymm1, %k1
 ; AVX512VL-NEXT:    vmovdqa32 %ymm0, %ymm0 {%k1} {z}
 ; AVX512VL-NEXT:    vpmovdw %ymm0, %xmm0
 ; AVX512VL-NEXT:    vzeroupper
@@ -137,10 +130,10 @@ define <8 x i1> @shuf8i1_3_6_1_0_3_7_7_0(<8 x i64> %a, <8 x i64> %b, <8 x i64> %
 ; VL_BW_DQ-LABEL: shuf8i1_3_6_1_0_3_7_7_0:
 ; VL_BW_DQ:       # %bb.0:
 ; VL_BW_DQ-NEXT:    vpcmpeqq %zmm2, %zmm0, %k0
-; VL_BW_DQ-NEXT:    vpmovm2q %k0, %zmm0
-; VL_BW_DQ-NEXT:    vmovdqa64 {{.*#+}} zmm1 = [3,6,1,0,3,7,7,0]
-; VL_BW_DQ-NEXT:    vpermq %zmm0, %zmm1, %zmm0
-; VL_BW_DQ-NEXT:    vpmovq2m %zmm0, %k0
+; VL_BW_DQ-NEXT:    vpmovm2d %k0, %ymm0
+; VL_BW_DQ-NEXT:    vmovdqa {{.*#+}} ymm1 = [3,6,1,0,3,7,7,0]
+; VL_BW_DQ-NEXT:    vpermd %ymm0, %ymm1, %ymm0
+; VL_BW_DQ-NEXT:    vpmovd2m %ymm0, %k0
 ; VL_BW_DQ-NEXT:    vpmovm2w %k0, %xmm0
 ; VL_BW_DQ-NEXT:    vzeroupper
 ; VL_BW_DQ-NEXT:    retq
@@ -159,8 +152,7 @@ define <16 x i1> @shuf16i1_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0(<16 x i32> %a, <1
 ; AVX512F-NEXT:    vpternlogd $255, %zmm1, %zmm1, %zmm1 {%k1} {z}
 ; AVX512F-NEXT:    vmovdqa32 {{.*#+}} zmm2 = [3,6,22,12,3,7,7,0,3,6,1,13,3,21,7,0]
 ; AVX512F-NEXT:    vpermi2d %zmm0, %zmm1, %zmm2
-; AVX512F-NEXT:    vpslld $31, %zmm2, %zmm0
-; AVX512F-NEXT:    vptestmd %zmm0, %zmm0, %k1
+; AVX512F-NEXT:    vptestmd %zmm2, %zmm2, %k1
 ; AVX512F-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k1} {z}
 ; AVX512F-NEXT:    vpmovdb %zmm0, %xmm0
 ; AVX512F-NEXT:    vzeroupper
@@ -174,8 +166,7 @@ define <16 x i1> @shuf16i1_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0(<16 x i32> %a, <1
 ; AVX512VL-NEXT:    vpternlogd $255, %zmm1, %zmm1, %zmm1 {%k1} {z}
 ; AVX512VL-NEXT:    vmovdqa32 {{.*#+}} zmm2 = [3,6,22,12,3,7,7,0,3,6,1,13,3,21,7,0]
 ; AVX512VL-NEXT:    vpermi2d %zmm0, %zmm1, %zmm2
-; AVX512VL-NEXT:    vpslld $31, %zmm2, %zmm0
-; AVX512VL-NEXT:    vptestmd %zmm0, %zmm0, %k1
+; AVX512VL-NEXT:    vptestmd %zmm2, %zmm2, %k1
 ; AVX512VL-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k1} {z}
 ; AVX512VL-NEXT:    vpmovdb %zmm0, %xmm0
 ; AVX512VL-NEXT:    vzeroupper
@@ -250,12 +241,12 @@ define <8 x i1> @shuf8i1_u_2_u_u_2_u_2_u(i8 %a) {
 ; AVX512VL-LABEL: shuf8i1_u_2_u_u_2_u_2_u:
 ; AVX512VL:       # %bb.0:
 ; AVX512VL-NEXT:    kmovw %edi, %k1
-; AVX512VL-NEXT:    vpternlogq $255, %zmm0, %zmm0, %zmm0 {%k1} {z}
-; AVX512VL-NEXT:    vextracti128 $1, %ymm0, %xmm0
-; AVX512VL-NEXT:    vpbroadcastq %xmm0, %zmm0
-; AVX512VL-NEXT:    vpsllq $63, %zmm0, %zmm0
-; AVX512VL-NEXT:    vptestmq %zmm0, %zmm0, %k1
 ; AVX512VL-NEXT:    vpcmpeqd %ymm0, %ymm0, %ymm0
+; AVX512VL-NEXT:    vmovdqa32 %ymm0, %ymm1 {%k1} {z}
+; AVX512VL-NEXT:    vpshufd {{.*#+}} xmm1 = xmm1[2,2,3,3]
+; AVX512VL-NEXT:    vpbroadcastq %xmm1, %ymm1
+; AVX512VL-NEXT:    vpslld $31, %ymm1, %ymm1
+; AVX512VL-NEXT:    vptestmd %ymm1, %ymm1, %k1
 ; AVX512VL-NEXT:    vmovdqa32 %ymm0, %ymm0 {%k1} {z}
 ; AVX512VL-NEXT:    vpmovdw %ymm0, %xmm0
 ; AVX512VL-NEXT:    vzeroupper
@@ -264,10 +255,10 @@ define <8 x i1> @shuf8i1_u_2_u_u_2_u_2_u(i8 %a) {
 ; VL_BW_DQ-LABEL: shuf8i1_u_2_u_u_2_u_2_u:
 ; VL_BW_DQ:       # %bb.0:
 ; VL_BW_DQ-NEXT:    kmovd %edi, %k0
-; VL_BW_DQ-NEXT:    vpmovm2q %k0, %zmm0
-; VL_BW_DQ-NEXT:    vextracti128 $1, %ymm0, %xmm0
-; VL_BW_DQ-NEXT:    vpbroadcastq %xmm0, %zmm0
-; VL_BW_DQ-NEXT:    vpmovq2m %zmm0, %k0
+; VL_BW_DQ-NEXT:    vpmovm2d %k0, %ymm0
+; VL_BW_DQ-NEXT:    vpshufd {{.*#+}} xmm0 = xmm0[2,2,3,3]
+; VL_BW_DQ-NEXT:    vpbroadcastq %xmm0, %ymm0
+; VL_BW_DQ-NEXT:    vpmovd2m %ymm0, %k0
 ; VL_BW_DQ-NEXT:    vpmovm2w %k0, %xmm0
 ; VL_BW_DQ-NEXT:    vzeroupper
 ; VL_BW_DQ-NEXT:    retq
@@ -294,12 +285,14 @@ define i8 @shuf8i1_10_2_9_u_3_u_2_u(i8 %a) {
 ; AVX512VL-LABEL: shuf8i1_10_2_9_u_3_u_2_u:
 ; AVX512VL:       # %bb.0:
 ; AVX512VL-NEXT:    kmovw %edi, %k1
-; AVX512VL-NEXT:    vpternlogq $255, %zmm0, %zmm0, %zmm0 {%k1} {z}
+; AVX512VL-NEXT:    vpcmpeqd %ymm0, %ymm0, %ymm0
+; AVX512VL-NEXT:    vmovdqa32 %ymm0, %ymm0 {%k1} {z}
+; AVX512VL-NEXT:    vpshufd {{.*#+}} xmm0 = xmm0[3,2,2,3]
+; AVX512VL-NEXT:    vpermq {{.*#+}} ymm0 = ymm0[0,1,0,1]
 ; AVX512VL-NEXT:    vpxor %xmm1, %xmm1, %xmm1
-; AVX512VL-NEXT:    vmovdqa64 {{.*#+}} zmm2 = <8,2,10,u,3,u,2,u>
-; AVX512VL-NEXT:    vpermi2q %zmm1, %zmm0, %zmm2
-; AVX512VL-NEXT:    vpsllq $63, %zmm2, %zmm0
-; AVX512VL-NEXT:    vptestmq %zmm0, %zmm0, %k0
+; AVX512VL-NEXT:    vpblendd {{.*#+}} ymm0 = ymm1[0],ymm0[1],ymm1[2],ymm0[3,4,5,6,7]
+; AVX512VL-NEXT:    vpslld $31, %ymm0, %ymm0
+; AVX512VL-NEXT:    vptestmd %ymm0, %ymm0, %k0
 ; AVX512VL-NEXT:    kmovw %k0, %eax
 ; AVX512VL-NEXT:    # kill: def %al killed %al killed %eax
 ; AVX512VL-NEXT:    vzeroupper
@@ -308,11 +301,12 @@ define i8 @shuf8i1_10_2_9_u_3_u_2_u(i8 %a) {
 ; VL_BW_DQ-LABEL: shuf8i1_10_2_9_u_3_u_2_u:
 ; VL_BW_DQ:       # %bb.0:
 ; VL_BW_DQ-NEXT:    kmovd %edi, %k0
-; VL_BW_DQ-NEXT:    vpmovm2q %k0, %zmm0
+; VL_BW_DQ-NEXT:    vpmovm2d %k0, %ymm0
+; VL_BW_DQ-NEXT:    vpshufd {{.*#+}} xmm0 = xmm0[3,2,2,3]
+; VL_BW_DQ-NEXT:    vpermq {{.*#+}} ymm0 = ymm0[0,1,0,1]
 ; VL_BW_DQ-NEXT:    vpxor %xmm1, %xmm1, %xmm1
-; VL_BW_DQ-NEXT:    vmovdqa64 {{.*#+}} zmm2 = <8,2,10,u,3,u,2,u>
-; VL_BW_DQ-NEXT:    vpermi2q %zmm1, %zmm0, %zmm2
-; VL_BW_DQ-NEXT:    vpmovq2m %zmm2, %k0
+; VL_BW_DQ-NEXT:    vpblendd {{.*#+}} ymm0 = ymm1[0],ymm0[1],ymm1[2],ymm0[3,4,5,6,7]
+; VL_BW_DQ-NEXT:    vpmovd2m %ymm0, %k0
 ; VL_BW_DQ-NEXT:    kmovd %k0, %eax
 ; VL_BW_DQ-NEXT:    # kill: def %al killed %al killed %eax
 ; VL_BW_DQ-NEXT:    vzeroupper
@@ -339,10 +333,11 @@ define i8 @shuf8i1_0_1_4_5_u_u_u_u(i8 %a) {
 ; AVX512VL-LABEL: shuf8i1_0_1_4_5_u_u_u_u:
 ; AVX512VL:       # %bb.0:
 ; AVX512VL-NEXT:    kmovw %edi, %k1
-; AVX512VL-NEXT:    vpternlogq $255, %zmm0, %zmm0, %zmm0 {%k1} {z}
-; AVX512VL-NEXT:    vshufi64x2 {{.*#+}} zmm0 = zmm0[0,1,4,5,0,1,0,1]
-; AVX512VL-NEXT:    vpsllq $63, %zmm0, %zmm0
-; AVX512VL-NEXT:    vptestmq %zmm0, %zmm0, %k0
+; AVX512VL-NEXT:    vpcmpeqd %ymm0, %ymm0, %ymm0
+; AVX512VL-NEXT:    vmovdqa32 %ymm0, %ymm0 {%k1} {z}
+; AVX512VL-NEXT:    vpermq {{.*#+}} ymm0 = ymm0[0,2,2,3]
+; AVX512VL-NEXT:    vpslld $31, %ymm0, %ymm0
+; AVX512VL-NEXT:    vptestmd %ymm0, %ymm0, %k0
 ; AVX512VL-NEXT:    kmovw %k0, %eax
 ; AVX512VL-NEXT:    # kill: def %al killed %al killed %eax
 ; AVX512VL-NEXT:    vzeroupper
@@ -351,9 +346,9 @@ define i8 @shuf8i1_0_1_4_5_u_u_u_u(i8 %a) {
 ; VL_BW_DQ-LABEL: shuf8i1_0_1_4_5_u_u_u_u:
 ; VL_BW_DQ:       # %bb.0:
 ; VL_BW_DQ-NEXT:    kmovd %edi, %k0
-; VL_BW_DQ-NEXT:    vpmovm2q %k0, %zmm0
-; VL_BW_DQ-NEXT:    vshufi64x2 {{.*#+}} zmm0 = zmm0[0,1,4,5,0,1,0,1]
-; VL_BW_DQ-NEXT:    vpmovq2m %zmm0, %k0
+; VL_BW_DQ-NEXT:    vpmovm2d %k0, %ymm0
+; VL_BW_DQ-NEXT:    vpermq {{.*#+}} ymm0 = ymm0[0,2,2,3]
+; VL_BW_DQ-NEXT:    vpmovd2m %ymm0, %k0
 ; VL_BW_DQ-NEXT:    kmovd %k0, %eax
 ; VL_BW_DQ-NEXT:    # kill: def %al killed %al killed %eax
 ; VL_BW_DQ-NEXT:    vzeroupper
@@ -372,8 +367,7 @@ define i8 @shuf8i1_9_6_1_0_3_7_7_0(i8 %a) {
 ; AVX512F-NEXT:    vpxor %xmm1, %xmm1, %xmm1
 ; AVX512F-NEXT:    vmovdqa64 {{.*#+}} zmm2 = [8,6,1,0,3,7,7,0]
 ; AVX512F-NEXT:    vpermi2q %zmm1, %zmm0, %zmm2
-; AVX512F-NEXT:    vpsllq $63, %zmm2, %zmm0
-; AVX512F-NEXT:    vptestmq %zmm0, %zmm0, %k0
+; AVX512F-NEXT:    vptestmq %zmm2, %zmm2, %k0
 ; AVX512F-NEXT:    kmovw %k0, %eax
 ; AVX512F-NEXT:    # kill: def %al killed %al killed %eax
 ; AVX512F-NEXT:    vzeroupper
@@ -382,12 +376,12 @@ define i8 @shuf8i1_9_6_1_0_3_7_7_0(i8 %a) {
 ; AVX512VL-LABEL: shuf8i1_9_6_1_0_3_7_7_0:
 ; AVX512VL:       # %bb.0:
 ; AVX512VL-NEXT:    kmovw %edi, %k1
-; AVX512VL-NEXT:    vpternlogq $255, %zmm0, %zmm0, %zmm0 {%k1} {z}
+; AVX512VL-NEXT:    vpcmpeqd %ymm0, %ymm0, %ymm0
+; AVX512VL-NEXT:    vmovdqa32 %ymm0, %ymm0 {%k1} {z}
 ; AVX512VL-NEXT:    vpxor %xmm1, %xmm1, %xmm1
-; AVX512VL-NEXT:    vmovdqa64 {{.*#+}} zmm2 = [8,6,1,0,3,7,7,0]
-; AVX512VL-NEXT:    vpermi2q %zmm1, %zmm0, %zmm2
-; AVX512VL-NEXT:    vpsllq $63, %zmm2, %zmm0
-; AVX512VL-NEXT:    vptestmq %zmm0, %zmm0, %k0
+; AVX512VL-NEXT:    vmovdqa {{.*#+}} ymm2 = [8,6,1,0,3,7,7,0]
+; AVX512VL-NEXT:    vpermi2d %ymm1, %ymm0, %ymm2
+; AVX512VL-NEXT:    vptestmd %ymm2, %ymm2, %k0
 ; AVX512VL-NEXT:    kmovw %k0, %eax
 ; AVX512VL-NEXT:    # kill: def %al killed %al killed %eax
 ; AVX512VL-NEXT:    vzeroupper
@@ -396,11 +390,11 @@ define i8 @shuf8i1_9_6_1_0_3_7_7_0(i8 %a) {
 ; VL_BW_DQ-LABEL: shuf8i1_9_6_1_0_3_7_7_0:
 ; VL_BW_DQ:       # %bb.0:
 ; VL_BW_DQ-NEXT:    kmovd %edi, %k0
-; VL_BW_DQ-NEXT:    vpmovm2q %k0, %zmm0
+; VL_BW_DQ-NEXT:    vpmovm2d %k0, %ymm0
 ; VL_BW_DQ-NEXT:    vpxor %xmm1, %xmm1, %xmm1
-; VL_BW_DQ-NEXT:    vmovdqa64 {{.*#+}} zmm2 = [8,6,1,0,3,7,7,0]
-; VL_BW_DQ-NEXT:    vpermi2q %zmm1, %zmm0, %zmm2
-; VL_BW_DQ-NEXT:    vpmovq2m %zmm2, %k0
+; VL_BW_DQ-NEXT:    vmovdqa {{.*#+}} ymm2 = [8,6,1,0,3,7,7,0]
+; VL_BW_DQ-NEXT:    vpermi2d %ymm1, %ymm0, %ymm2
+; VL_BW_DQ-NEXT:    vpmovd2m %ymm2, %k0
 ; VL_BW_DQ-NEXT:    kmovd %k0, %eax
 ; VL_BW_DQ-NEXT:    # kill: def %al killed %al killed %eax
 ; VL_BW_DQ-NEXT:    vzeroupper
@@ -419,8 +413,7 @@ define i8 @shuf8i1_9_6_1_10_3_7_7_0(i8 %a) {
 ; AVX512F-NEXT:    vmovdqa64 {{.*#+}} zmm1 = [9,1,2,10,4,5,6,7]
 ; AVX512F-NEXT:    vpxor %xmm2, %xmm2, %xmm2
 ; AVX512F-NEXT:    vpermt2q %zmm0, %zmm1, %zmm2
-; AVX512F-NEXT:    vpsllq $63, %zmm2, %zmm0
-; AVX512F-NEXT:    vptestmq %zmm0, %zmm0, %k0
+; AVX512F-NEXT:    vptestmq %zmm2, %zmm2, %k0
 ; AVX512F-NEXT:    kmovw %k0, %eax
 ; AVX512F-NEXT:    # kill: def %al killed %al killed %eax
 ; AVX512F-NEXT:    vzeroupper
@@ -429,12 +422,12 @@ define i8 @shuf8i1_9_6_1_10_3_7_7_0(i8 %a) {
 ; AVX512VL-LABEL: shuf8i1_9_6_1_10_3_7_7_0:
 ; AVX512VL:       # %bb.0:
 ; AVX512VL-NEXT:    kmovw %edi, %k1
-; AVX512VL-NEXT:    vpternlogq $255, %zmm0, %zmm0, %zmm0 {%k1} {z}
-; AVX512VL-NEXT:    vmovdqa64 {{.*#+}} zmm1 = [9,1,2,10,4,5,6,7]
-; AVX512VL-NEXT:    vpxor %xmm2, %xmm2, %xmm2
-; AVX512VL-NEXT:    vpermt2q %zmm0, %zmm1, %zmm2
-; AVX512VL-NEXT:    vpsllq $63, %zmm2, %zmm0
-; AVX512VL-NEXT:    vptestmq %zmm0, %zmm0, %k0
+; AVX512VL-NEXT:    vpcmpeqd %ymm0, %ymm0, %ymm0
+; AVX512VL-NEXT:    vmovdqa32 %ymm0, %ymm0 {%k1} {z}
+; AVX512VL-NEXT:    vpshufd {{.*#+}} xmm0 = xmm0[1,1,2,2]
+; AVX512VL-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; AVX512VL-NEXT:    vpblendd {{.*#+}} ymm0 = ymm0[0],ymm1[1,2],ymm0[3],ymm1[4,5,6,7]
+; AVX512VL-NEXT:    vptestmd %ymm0, %ymm0, %k0
 ; AVX512VL-NEXT:    kmovw %k0, %eax
 ; AVX512VL-NEXT:    # kill: def %al killed %al killed %eax
 ; AVX512VL-NEXT:    vzeroupper
@@ -443,11 +436,11 @@ define i8 @shuf8i1_9_6_1_10_3_7_7_0(i8 %a) {
 ; VL_BW_DQ-LABEL: shuf8i1_9_6_1_10_3_7_7_0:
 ; VL_BW_DQ:       # %bb.0:
 ; VL_BW_DQ-NEXT:    kmovd %edi, %k0
-; VL_BW_DQ-NEXT:    vpmovm2q %k0, %zmm0
-; VL_BW_DQ-NEXT:    vmovdqa64 {{.*#+}} zmm1 = [9,1,2,10,4,5,6,7]
-; VL_BW_DQ-NEXT:    vpxor %xmm2, %xmm2, %xmm2
-; VL_BW_DQ-NEXT:    vpermt2q %zmm0, %zmm1, %zmm2
-; VL_BW_DQ-NEXT:    vpmovq2m %zmm2, %k0
+; VL_BW_DQ-NEXT:    vpmovm2d %k0, %ymm0
+; VL_BW_DQ-NEXT:    vpshufd {{.*#+}} xmm0 = xmm0[1,1,2,2]
+; VL_BW_DQ-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; VL_BW_DQ-NEXT:    vpblendd {{.*#+}} ymm0 = ymm0[0],ymm1[1,2],ymm0[3],ymm1[4,5,6,7]
+; VL_BW_DQ-NEXT:    vpmovd2m %ymm0, %k0
 ; VL_BW_DQ-NEXT:    kmovd %k0, %eax
 ; VL_BW_DQ-NEXT:    # kill: def %al killed %al killed %eax
 ; VL_BW_DQ-NEXT:    vzeroupper
@@ -462,14 +455,11 @@ define i8 @shuf8i1__9_6_1_10_3_7_7_1(i8 %a) {
 ; AVX512F-LABEL: shuf8i1__9_6_1_10_3_7_7_1:
 ; AVX512F:       # %bb.0:
 ; AVX512F-NEXT:    kmovw %edi, %k1
-; AVX512F-NEXT:    movb $51, %al
-; AVX512F-NEXT:    kmovw %eax, %k2
-; AVX512F-NEXT:    vpternlogq $255, %zmm0, %zmm0, %zmm0 {%k2} {z}
-; AVX512F-NEXT:    vpternlogq $255, %zmm1, %zmm1, %zmm1 {%k1} {z}
-; AVX512F-NEXT:    vmovdqa64 {{.*#+}} zmm2 = [9,6,1,0,3,7,7,1]
-; AVX512F-NEXT:    vpermi2q %zmm1, %zmm0, %zmm2
-; AVX512F-NEXT:    vpsllq $63, %zmm2, %zmm0
-; AVX512F-NEXT:    vptestmq %zmm0, %zmm0, %k0
+; AVX512F-NEXT:    vpternlogq $255, %zmm0, %zmm0, %zmm0 {%k1} {z}
+; AVX512F-NEXT:    vmovdqa64 {{.*#+}} zmm1 = [9,6,1,0,3,7,7,1]
+; AVX512F-NEXT:    vmovdqa64 {{.*#+}} zmm2 = [18446744073709551615,18446744073709551615,0,0,18446744073709551615,18446744073709551615,0,0]
+; AVX512F-NEXT:    vpermt2q %zmm0, %zmm1, %zmm2
+; AVX512F-NEXT:    vptestmq %zmm2, %zmm2, %k0
 ; AVX512F-NEXT:    kmovw %k0, %eax
 ; AVX512F-NEXT:    # kill: def %al killed %al killed %eax
 ; AVX512F-NEXT:    vzeroupper
@@ -478,14 +468,11 @@ define i8 @shuf8i1__9_6_1_10_3_7_7_1(i8 %a) {
 ; AVX512VL-LABEL: shuf8i1__9_6_1_10_3_7_7_1:
 ; AVX512VL:       # %bb.0:
 ; AVX512VL-NEXT:    kmovw %edi, %k1
-; AVX512VL-NEXT:    movb $51, %al
-; AVX512VL-NEXT:    kmovw %eax, %k2
-; AVX512VL-NEXT:    vpternlogq $255, %zmm0, %zmm0, %zmm0 {%k2} {z}
-; AVX512VL-NEXT:    vpternlogq $255, %zmm1, %zmm1, %zmm1 {%k1} {z}
-; AVX512VL-NEXT:    vmovdqa64 {{.*#+}} zmm2 = [9,6,1,0,3,7,7,1]
-; AVX512VL-NEXT:    vpermi2q %zmm1, %zmm0, %zmm2
-; AVX512VL-NEXT:    vpsllq $63, %zmm2, %zmm0
-; AVX512VL-NEXT:    vptestmq %zmm0, %zmm0, %k0
+; AVX512VL-NEXT:    vpcmpeqd %ymm0, %ymm0, %ymm0
+; AVX512VL-NEXT:    vmovdqa32 %ymm0, %ymm0 {%k1} {z}
+; AVX512VL-NEXT:    vpshufd {{.*#+}} xmm0 = xmm0[1,1,2,3]
+; AVX512VL-NEXT:    vpblendd {{.*#+}} ymm0 = ymm0[0],mem[1,2,3,4,5,6,7]
+; AVX512VL-NEXT:    vptestmd %ymm0, %ymm0, %k0
 ; AVX512VL-NEXT:    kmovw %k0, %eax
 ; AVX512VL-NEXT:    # kill: def %al killed %al killed %eax
 ; AVX512VL-NEXT:    vzeroupper
@@ -494,11 +481,10 @@ define i8 @shuf8i1__9_6_1_10_3_7_7_1(i8 %a) {
 ; VL_BW_DQ-LABEL: shuf8i1__9_6_1_10_3_7_7_1:
 ; VL_BW_DQ:       # %bb.0:
 ; VL_BW_DQ-NEXT:    kmovd %edi, %k0
-; VL_BW_DQ-NEXT:    vpmovm2q %k0, %zmm0
-; VL_BW_DQ-NEXT:    vmovdqa64 {{.*#+}} zmm1 = [9,6,1,0,3,7,7,1]
-; VL_BW_DQ-NEXT:    vmovdqa64 {{.*#+}} zmm2 = [18446744073709551615,18446744073709551615,0,0,18446744073709551615,18446744073709551615,0,0]
-; VL_BW_DQ-NEXT:    vpermt2q %zmm0, %zmm1, %zmm2
-; VL_BW_DQ-NEXT:    vpmovq2m %zmm2, %k0
+; VL_BW_DQ-NEXT:    vpmovm2d %k0, %ymm0
+; VL_BW_DQ-NEXT:    vpshufd {{.*#+}} xmm0 = xmm0[1,1,2,3]
+; VL_BW_DQ-NEXT:    vpblendd {{.*#+}} ymm0 = ymm0[0],mem[1,2,3,4,5,6,7]
+; VL_BW_DQ-NEXT:    vpmovd2m %ymm0, %k0
 ; VL_BW_DQ-NEXT:    kmovd %k0, %eax
 ; VL_BW_DQ-NEXT:    # kill: def %al killed %al killed %eax
 ; VL_BW_DQ-NEXT:    vzeroupper
@@ -519,8 +505,7 @@ define i8 @shuf8i1_9_6_1_10_3_7_7_0_all_ones(<8 x i1> %a) {
 ; AVX512F-NEXT:    vmovdqa64 {{.*#+}} zmm1 = [9,1,2,3,4,5,6,7]
 ; AVX512F-NEXT:    vpternlogd $255, %zmm2, %zmm2, %zmm2
 ; AVX512F-NEXT:    vpermt2q %zmm0, %zmm1, %zmm2
-; AVX512F-NEXT:    vpsllq $63, %zmm2, %zmm0
-; AVX512F-NEXT:    vptestmq %zmm0, %zmm0, %k0
+; AVX512F-NEXT:    vptestmq %zmm2, %zmm2, %k0
 ; AVX512F-NEXT:    kmovw %k0, %eax
 ; AVX512F-NEXT:    # kill: def %al killed %al killed %eax
 ; AVX512F-NEXT:    vzeroupper
@@ -528,15 +513,14 @@ define i8 @shuf8i1_9_6_1_10_3_7_7_0_all_ones(<8 x i1> %a) {
 ;
 ; AVX512VL-LABEL: shuf8i1_9_6_1_10_3_7_7_0_all_ones:
 ; AVX512VL:       # %bb.0:
-; AVX512VL-NEXT:    vpmovsxwq %xmm0, %zmm0
-; AVX512VL-NEXT:    vpsllq $63, %zmm0, %zmm0
-; AVX512VL-NEXT:    vptestmq %zmm0, %zmm0, %k1
-; AVX512VL-NEXT:    vpternlogq $255, %zmm0, %zmm0, %zmm0 {%k1} {z}
-; AVX512VL-NEXT:    vmovdqa64 {{.*#+}} zmm1 = [9,1,2,3,4,5,6,7]
-; AVX512VL-NEXT:    vpternlogd $255, %zmm2, %zmm2, %zmm2
-; AVX512VL-NEXT:    vpermt2q %zmm0, %zmm1, %zmm2
-; AVX512VL-NEXT:    vpsllq $63, %zmm2, %zmm0
-; AVX512VL-NEXT:    vptestmq %zmm0, %zmm0, %k0
+; AVX512VL-NEXT:    vpmovsxwd %xmm0, %ymm0
+; AVX512VL-NEXT:    vpslld $31, %ymm0, %ymm0
+; AVX512VL-NEXT:    vptestmd %ymm0, %ymm0, %k1
+; AVX512VL-NEXT:    vpcmpeqd %ymm0, %ymm0, %ymm0
+; AVX512VL-NEXT:    vmovdqa32 %ymm0, %ymm1 {%k1} {z}
+; AVX512VL-NEXT:    vpshufd {{.*#+}} xmm1 = xmm1[1,1,2,3]
+; AVX512VL-NEXT:    vpblendd {{.*#+}} ymm0 = ymm1[0],ymm0[1,2,3,4,5,6,7]
+; AVX512VL-NEXT:    vptestmd %ymm0, %ymm0, %k0
 ; AVX512VL-NEXT:    kmovw %k0, %eax
 ; AVX512VL-NEXT:    # kill: def %al killed %al killed %eax
 ; AVX512VL-NEXT:    vzeroupper
@@ -546,11 +530,11 @@ define i8 @shuf8i1_9_6_1_10_3_7_7_0_all_ones(<8 x i1> %a) {
 ; VL_BW_DQ:       # %bb.0:
 ; VL_BW_DQ-NEXT:    vpsllw $15, %xmm0, %xmm0
 ; VL_BW_DQ-NEXT:    vpmovw2m %xmm0, %k0
-; VL_BW_DQ-NEXT:    vpmovm2q %k0, %zmm0
-; VL_BW_DQ-NEXT:    vmovdqa64 {{.*#+}} zmm1 = [9,1,2,3,4,5,6,7]
-; VL_BW_DQ-NEXT:    vpternlogd $255, %zmm2, %zmm2, %zmm2
-; VL_BW_DQ-NEXT:    vpermt2q %zmm0, %zmm1, %zmm2
-; VL_BW_DQ-NEXT:    vpmovq2m %zmm2, %k0
+; VL_BW_DQ-NEXT:    vpmovm2d %k0, %ymm0
+; VL_BW_DQ-NEXT:    vpshufd {{.*#+}} xmm0 = xmm0[1,1,2,3]
+; VL_BW_DQ-NEXT:    vpcmpeqd %ymm1, %ymm1, %ymm1
+; VL_BW_DQ-NEXT:    vpblendd {{.*#+}} ymm0 = ymm0[0],ymm1[1,2,3,4,5,6,7]
+; VL_BW_DQ-NEXT:    vpmovd2m %ymm0, %k0
 ; VL_BW_DQ-NEXT:    kmovd %k0, %eax
 ; VL_BW_DQ-NEXT:    # kill: def %al killed %al killed %eax
 ; VL_BW_DQ-NEXT:    vzeroupper
@@ -567,7 +551,6 @@ define i16 @shuf16i1_0_0_0_0_0_0_0_0_0_0_0_0_0_0_0_0(i16 %a) {
 ; AVX512F-NEXT:    kmovw %edi, %k1
 ; AVX512F-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k1} {z}
 ; AVX512F-NEXT:    vpbroadcastd %xmm0, %zmm0
-; AVX512F-NEXT:    vpslld $31, %zmm0, %zmm0
 ; AVX512F-NEXT:    vptestmd %zmm0, %zmm0, %k0
 ; AVX512F-NEXT:    kmovw %k0, %eax
 ; AVX512F-NEXT:    # kill: def %ax killed %ax killed %eax
@@ -579,7 +562,6 @@ define i16 @shuf16i1_0_0_0_0_0_0_0_0_0_0_0_0_0_0_0_0(i16 %a) {
 ; AVX512VL-NEXT:    kmovw %edi, %k1
 ; AVX512VL-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k1} {z}
 ; AVX512VL-NEXT:    vpbroadcastd %xmm0, %zmm0
-; AVX512VL-NEXT:    vpslld $31, %zmm0, %zmm0
 ; AVX512VL-NEXT:    vptestmd %zmm0, %zmm0, %k0
 ; AVX512VL-NEXT:    kmovw %k0, %eax
 ; AVX512VL-NEXT:    # kill: def %ax killed %ax killed %eax

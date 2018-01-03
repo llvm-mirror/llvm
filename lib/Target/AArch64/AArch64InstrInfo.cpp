@@ -26,9 +26,9 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineMemOperand.h"
-#include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/StackMaps.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
@@ -2836,7 +2836,7 @@ MachineInstr *AArch64InstrInfo::foldMemoryOperandImpl(
   // In this case we can still safely fold away the COPY and generate the
   // following spill code:
   //
-  //   STRXui %xzr, <fi#0>
+  //   STRXui %xzr, %stack.0
   //
   // This also eliminates spilled cross register class COPYs (e.g. between x and
   // d regs) of the same size.  For example:
@@ -2892,7 +2892,7 @@ MachineInstr *AArch64InstrInfo::foldMemoryOperandImpl(
     // where the physical register source can be widened and stored to the full
     // virtual reg destination stack slot, in this case producing:
     //
-    //   STRXui %xzr, <fi#0>
+    //   STRXui %xzr, %stack.0
     //
     if (IsSpill && DstMO.isUndef() &&
         TargetRegisterInfo::isPhysicalRegister(SrcReg)) {
@@ -2940,7 +2940,7 @@ MachineInstr *AArch64InstrInfo::foldMemoryOperandImpl(
     // where we can load the full virtual reg source stack slot, into the subreg
     // destination, in this case producing:
     //
-    //   LDRWui %0:sub_32<def,read-undef>, <fi#0>
+    //   LDRWui %0:sub_32<def,read-undef>, %stack.0
     //
     if (IsFill && SrcMO.getSubReg() == 0 && DstMO.isUndef()) {
       const TargetRegisterClass *FillRC;
@@ -3673,15 +3673,6 @@ static bool getFMAPatterns(MachineInstr &Root,
     }
     break;
   case AArch64::FSUBv2f32:
-    if (canCombineWithFMUL(MBB, Root.getOperand(1),
-                           AArch64::FMULv2i32_indexed)) {
-      Patterns.push_back(MachineCombinerPattern::FMLSv2i32_indexed_OP1);
-      Found = true;
-    } else if (canCombineWithFMUL(MBB, Root.getOperand(1),
-                                  AArch64::FMULv2f32)) {
-      Patterns.push_back(MachineCombinerPattern::FMLSv2f32_OP1);
-      Found = true;
-    }
     if (canCombineWithFMUL(MBB, Root.getOperand(2),
                            AArch64::FMULv2i32_indexed)) {
       Patterns.push_back(MachineCombinerPattern::FMLSv2i32_indexed_OP2);
@@ -3691,17 +3682,17 @@ static bool getFMAPatterns(MachineInstr &Root,
       Patterns.push_back(MachineCombinerPattern::FMLSv2f32_OP2);
       Found = true;
     }
-    break;
-  case AArch64::FSUBv2f64:
     if (canCombineWithFMUL(MBB, Root.getOperand(1),
-                           AArch64::FMULv2i64_indexed)) {
-      Patterns.push_back(MachineCombinerPattern::FMLSv2i64_indexed_OP1);
+                           AArch64::FMULv2i32_indexed)) {
+      Patterns.push_back(MachineCombinerPattern::FMLSv2i32_indexed_OP1);
       Found = true;
     } else if (canCombineWithFMUL(MBB, Root.getOperand(1),
-                                  AArch64::FMULv2f64)) {
-      Patterns.push_back(MachineCombinerPattern::FMLSv2f64_OP1);
+                                  AArch64::FMULv2f32)) {
+      Patterns.push_back(MachineCombinerPattern::FMLSv2f32_OP1);
       Found = true;
     }
+    break;
+  case AArch64::FSUBv2f64:
     if (canCombineWithFMUL(MBB, Root.getOperand(2),
                            AArch64::FMULv2i64_indexed)) {
       Patterns.push_back(MachineCombinerPattern::FMLSv2i64_indexed_OP2);
@@ -3711,17 +3702,17 @@ static bool getFMAPatterns(MachineInstr &Root,
       Patterns.push_back(MachineCombinerPattern::FMLSv2f64_OP2);
       Found = true;
     }
-    break;
-  case AArch64::FSUBv4f32:
     if (canCombineWithFMUL(MBB, Root.getOperand(1),
-                           AArch64::FMULv4i32_indexed)) {
-      Patterns.push_back(MachineCombinerPattern::FMLSv4i32_indexed_OP1);
+                           AArch64::FMULv2i64_indexed)) {
+      Patterns.push_back(MachineCombinerPattern::FMLSv2i64_indexed_OP1);
       Found = true;
     } else if (canCombineWithFMUL(MBB, Root.getOperand(1),
-                                  AArch64::FMULv4f32)) {
-      Patterns.push_back(MachineCombinerPattern::FMLSv4f32_OP1);
+                                  AArch64::FMULv2f64)) {
+      Patterns.push_back(MachineCombinerPattern::FMLSv2f64_OP1);
       Found = true;
     }
+    break;
+  case AArch64::FSUBv4f32:
     if (canCombineWithFMUL(MBB, Root.getOperand(2),
                            AArch64::FMULv4i32_indexed)) {
       Patterns.push_back(MachineCombinerPattern::FMLSv4i32_indexed_OP2);
@@ -3729,6 +3720,15 @@ static bool getFMAPatterns(MachineInstr &Root,
     } else if (canCombineWithFMUL(MBB, Root.getOperand(2),
                                   AArch64::FMULv4f32)) {
       Patterns.push_back(MachineCombinerPattern::FMLSv4f32_OP2);
+      Found = true;
+    }
+    if (canCombineWithFMUL(MBB, Root.getOperand(1),
+                           AArch64::FMULv4i32_indexed)) {
+      Patterns.push_back(MachineCombinerPattern::FMLSv4i32_indexed_OP1);
+      Found = true;
+    } else if (canCombineWithFMUL(MBB, Root.getOperand(1),
+                                  AArch64::FMULv4f32)) {
+      Patterns.push_back(MachineCombinerPattern::FMLSv4f32_OP1);
       Found = true;
     }
     break;
@@ -4641,55 +4641,55 @@ AArch64InstrInfo::getSerializableMachineMemOperandTargetFlags() const {
   return makeArrayRef(TargetFlags);
 }
 
-/// Constants defining how certain sequences should be outlined.
-/// This encompasses how an outlined function should be called, and what kind of
-/// frame should be emitted for that outlined function.
-///
-/// \p MachineOutlinerDefault implies that the function should be called with
-/// a save and restore of LR to the stack.
-///
-/// That is,
-///
-/// I1     Save LR                    OUTLINED_FUNCTION:
-/// I2 --> BL OUTLINED_FUNCTION       I1
-/// I3     Restore LR                 I2
-///                                   I3
-///                                   RET
-///
-/// * Call construction overhead: 3 (save + BL + restore)
-/// * Frame construction overhead: 1 (ret)
-/// * Requires stack fixups? Yes
-///
-/// \p MachineOutlinerTailCall implies that the function is being created from
-/// a sequence of instructions ending in a return.
-///
-/// That is,
-///
-/// I1                             OUTLINED_FUNCTION:
-/// I2 --> B OUTLINED_FUNCTION     I1
-/// RET                            I2
-///                                RET
-///
-/// * Call construction overhead: 1 (B)
-/// * Frame construction overhead: 0 (Return included in sequence)
-/// * Requires stack fixups? No
-///
-/// \p MachineOutlinerNoLRSave implies that the function should be called using
-/// a BL instruction, but doesn't require LR to be saved and restored. This
-/// happens when LR is known to be dead.
-///
-/// That is,
-///
-/// I1                                OUTLINED_FUNCTION:
-/// I2 --> BL OUTLINED_FUNCTION       I1
-/// I3                                I2
-///                                   I3
-///                                   RET
-///
-/// * Call construction overhead: 1 (BL)
-/// * Frame construction overhead: 1 (RET)
-/// * Requires stack fixups? No
-///
+  /// Constants defining how certain sequences should be outlined.
+  /// This encompasses how an outlined function should be called, and what kind of
+  /// frame should be emitted for that outlined function.
+  ///
+  /// \p MachineOutlinerDefault implies that the function should be called with
+  /// a save and restore of LR to the stack.
+  ///
+  /// That is,
+  ///
+  /// I1     Save LR                    OUTLINED_FUNCTION:
+  /// I2 --> BL OUTLINED_FUNCTION       I1
+  /// I3     Restore LR                 I2
+  ///                                   I3
+  ///                                   RET
+  ///
+  /// * Call construction overhead: 3 (save + BL + restore)
+  /// * Frame construction overhead: 1 (ret)
+  /// * Requires stack fixups? Yes
+  ///
+  /// \p MachineOutlinerTailCall implies that the function is being created from
+  /// a sequence of instructions ending in a return.
+  ///
+  /// That is,
+  ///
+  /// I1                             OUTLINED_FUNCTION:
+  /// I2 --> B OUTLINED_FUNCTION     I1
+  /// RET                            I2
+  ///                                RET
+  ///
+  /// * Call construction overhead: 1 (B)
+  /// * Frame construction overhead: 0 (Return included in sequence)
+  /// * Requires stack fixups? No
+  ///
+  /// \p MachineOutlinerNoLRSave implies that the function should be called using
+  /// a BL instruction, but doesn't require LR to be saved and restored. This
+  /// happens when LR is known to be dead.
+  ///
+  /// That is,
+  ///
+  /// I1                                OUTLINED_FUNCTION:
+  /// I2 --> BL OUTLINED_FUNCTION       I1
+  /// I3                                I2
+  ///                                   I3
+  ///                                   RET
+  ///
+  /// * Call construction overhead: 1 (BL)
+  /// * Frame construction overhead: 1 (RET)
+  /// * Requires stack fixups? No
+  ///
 enum MachineOutlinerClass {
   MachineOutlinerDefault,  /// Emit a save, restore, call, and return.
   MachineOutlinerTailCall, /// Only emit a branch.
@@ -4706,9 +4706,8 @@ bool AArch64InstrInfo::canOutlineWithoutLRSave(
   // Get liveness information from the end of the block to the end of the
   // prospective outlined region.
   std::for_each(MBB.rbegin(),
-               (MachineBasicBlock::reverse_iterator)CallInsertionPt,
-               [&LRU](MachineInstr &MI) {LRU.stepBackward(MI);}
-               );
+                (MachineBasicBlock::reverse_iterator)CallInsertionPt,
+                [&LRU](MachineInstr &MI) { LRU.stepBackward(MI); });
 
   // If the link register is available at this point, then we can safely outline
   // the region without saving/restoring LR. Otherwise, we must emit a save and
@@ -4766,23 +4765,23 @@ AArch64InstrInfo::getOutlininingCandidateInfo(
                              FrameID);
 }
 
-bool AArch64InstrInfo::isFunctionSafeToOutlineFrom(MachineFunction &MF,
-                                           bool OutlineFromLinkOnceODRs) const {
-  const Function *F = MF.getFunction();
+bool AArch64InstrInfo::isFunctionSafeToOutlineFrom(
+    MachineFunction &MF, bool OutlineFromLinkOnceODRs) const {
+  const Function &F = MF.getFunction();
 
   // If F uses a redzone, then don't outline from it because it might mess up
   // the stack.
-  if (!F->hasFnAttribute(Attribute::NoRedZone))
+  if (!F.hasFnAttribute(Attribute::NoRedZone))
     return false;
 
   // If anyone is using the address of this function, don't outline from it.
-  if (F->hasAddressTaken())
+  if (F.hasAddressTaken())
     return false;
 
   // Can F be deduplicated by the linker? If it can, don't outline from it.
-  if (!OutlineFromLinkOnceODRs && F->hasLinkOnceODRLinkage())
+  if (!OutlineFromLinkOnceODRs && F.hasLinkOnceODRLinkage())
     return false;
-  
+
   return true;
 }
 
@@ -4813,8 +4812,7 @@ AArch64InstrInfo::getOutliningType(MachineInstr &MI) const {
 
   // Outline calls without stack parameters or aggregate parameters.
   if (MI.isCall()) {
-    assert(MF->getFunction() && "MF doesn't have a function?");
-    const Module *M = MF->getFunction()->getParent();
+    const Module *M = MF->getFunction().getParent();
     assert(M && "No module?");
 
     // Get the function associated with the call. Look at each operand and find
@@ -4838,7 +4836,7 @@ AArch64InstrInfo::getOutliningType(MachineInstr &MI) const {
 
     // We have a function we have information about. Check it if it's something
     // can safely outline.
-  
+
     // If the callee is vararg, it passes parameters on the stack. Don't touch
     // it.
     // FIXME: Functions like printf are very common and we should be able to
@@ -4865,12 +4863,12 @@ AArch64InstrInfo::getOutliningType(MachineInstr &MI) const {
 
     // We don't know what's going on with the callee at all. Don't touch it.
     if (!CalleeMF)
-      return MachineOutlinerInstrType::Illegal;   
+      return MachineOutlinerInstrType::Illegal;
 
     // Does it pass anything on the stack? If it does, don't outline it.
     if (CalleeMF->getInfo<AArch64FunctionInfo>()->getBytesInStackArgArea() != 0)
       return MachineOutlinerInstrType::Illegal;
-    
+
     // It doesn't, so it's safe to outline and we're done.
     return MachineOutlinerInstrType::Legal;
   }
@@ -4912,9 +4910,8 @@ AArch64InstrInfo::getOutliningType(MachineInstr &MI) const {
       // Find the minimum/maximum offset for this instruction and check if
       // fixing it up would be in range.
       int64_t MinOffset, MaxOffset; // Unscaled offsets for the instruction.
-      unsigned Scale; // The scale to multiply the offsets by.
-      getMemOpInfo(MI.getOpcode(), Scale, DummyWidth, MinOffset,
-                   MaxOffset);
+      unsigned Scale;               // The scale to multiply the offsets by.
+      getMemOpInfo(MI.getOpcode(), Scale, DummyWidth, MinOffset, MaxOffset);
 
       // TODO: We should really test what happens if an instruction overflows.
       // This is tricky to test with IR tests, but when the outliner is moved
@@ -4922,8 +4919,8 @@ AArch64InstrInfo::getOutliningType(MachineInstr &MI) const {
       Offset += 16; // Update the offset to what it would be if we outlined.
       if (Offset < MinOffset * Scale || Offset > MaxOffset * Scale)
         return MachineOutlinerInstrType::Illegal;
-        
-      // It's in range, so we can outline it.      
+
+      // It's in range, so we can outline it.
       return MachineOutlinerInstrType::Legal;
     }
 
@@ -4966,40 +4963,36 @@ void AArch64InstrInfo::insertOutlinerEpilogue(
     MachineBasicBlock &MBB, MachineFunction &MF,
     const MachineOutlinerInfo &MInfo) const {
 
-  bool ContainsCalls = false;
-
-  for (MachineInstr &MI : MBB) {
-    if (MI.isCall()) {
-      ContainsCalls = true;
-      break;
-    }
-  }
-
-  if (ContainsCalls) {
+  // Is there a call in the outlined range?
+  if (std::any_of(MBB.instr_begin(), MBB.instr_end(),
+                  [](MachineInstr &MI) { return MI.isCall(); })) {
     // Fix up the instructions in the range, since we're going to modify the
     // stack.
     fixupPostOutline(MBB);
+
+    // LR has to be a live in so that we can save it.
+    MBB.addLiveIn(AArch64::LR);
 
     MachineBasicBlock::iterator It = MBB.begin();
     MachineBasicBlock::iterator Et = MBB.end();
 
     if (MInfo.FrameConstructionID == MachineOutlinerTailCall)
       Et = std::prev(MBB.end());
-    
+
     // Insert a save before the outlined region
     MachineInstr *STRXpre = BuildMI(MF, DebugLoc(), get(AArch64::STRXpre))
-                              .addReg(AArch64::SP, RegState::Define)
-                              .addReg(AArch64::LR)
-                              .addReg(AArch64::SP)
-                              .addImm(-16);
+                                .addReg(AArch64::SP, RegState::Define)
+                                .addReg(AArch64::LR)
+                                .addReg(AArch64::SP)
+                                .addImm(-16);
     It = MBB.insert(It, STRXpre);
 
     // Insert a restore before the terminator for the function.
     MachineInstr *LDRXpost = BuildMI(MF, DebugLoc(), get(AArch64::LDRXpost))
-                               .addReg(AArch64::SP, RegState::Define)
-                               .addReg(AArch64::LR, RegState::Define)
-                               .addReg(AArch64::SP)
-                               .addImm(16);
+                                 .addReg(AArch64::SP, RegState::Define)
+                                 .addReg(AArch64::LR, RegState::Define)
+                                 .addReg(AArch64::SP)
+                                 .addImm(16);
     Et = MBB.insert(Et, LDRXpost);
   }
 

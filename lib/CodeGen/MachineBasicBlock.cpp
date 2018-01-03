@@ -13,7 +13,7 @@
 
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/ADT/SmallPtrSet.h"
-#include "llvm/CodeGen/LiveIntervalAnalysis.h"
+#include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/LiveVariables.h"
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -267,8 +267,8 @@ void MachineBasicBlock::print(raw_ostream &OS, const SlotIndexes *Indexes)
        << " is null\n";
     return;
   }
-  const Function *F = MF->getFunction();
-  const Module *M = F ? F->getParent() : nullptr;
+  const Function &F = MF->getFunction();
+  const Module *M = F.getParent();
   ModuleSlotTracker MST(M);
   print(OS, MST, Indexes);
 }

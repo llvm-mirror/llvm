@@ -448,7 +448,7 @@ void IntrinsicEmitter::EmitGenerator(const CodeGenIntrinsicTable &Ints,
 
     // If the entry fit in the table, just emit it.
     if (FixedEncodings[i] != ~0U) {
-      OS << "0x" << utohexstr(FixedEncodings[i]) << ", ";
+      OS << "0x" << Twine::utohexstr(FixedEncodings[i]) << ", ";
       continue;
     }
 
@@ -717,6 +717,7 @@ void IntrinsicEmitter::EmitAttributes(const CodeGenIntrinsicTable &Ints,
         if (addComma)
           OS << ",";
         OS << "Attribute::InaccessibleMemOrArgMemOnly";
+        break;
       case CodeGenIntrinsic::ReadWriteMem:
         break;
       }

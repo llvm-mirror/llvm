@@ -11,12 +11,10 @@
 |*                                                                            *|
 \*===----------------------------------------------------------------------===*/
 
-#include "llvm-c-test.h"
 #include "llvm-c/DebugInfo.h"
-#include <string.h>
 #include <stdio.h>
 
-int llvm_test_dibuilder() {
+int llvm_test_dibuilder(void) {
   LLVMModuleRef M = LLVMModuleCreateWithName("debuginfo.c");
   LLVMDIBuilderRef DIB = LLVMCreateDIBuilder(M);
 
