@@ -326,10 +326,14 @@ protected:
 
 private:
   void constructTypeDIE(DIE &Buffer, const DIBasicType *BTy);
+  void constructTypeDIE(DIE &Buffer, const DIStringType *BTy);
+  void constructTypeDIE(DIE &Buffer, const DIFortranArrayType *ATy);
   void constructTypeDIE(DIE &Buffer, const DIDerivedType *DTy);
   void constructTypeDIE(DIE &Buffer, const DISubroutineType *DTy);
   void constructSubrangeDIE(DIE &Buffer, const DISubrange *SR, DIE *IndexTy);
+  void constructFortranSubrangeDIE(DIE &Buffer, const DIFortranSubrange *SR);
   void constructArrayTypeDIE(DIE &Buffer, const DICompositeType *CTy);
+  void constructArrayTypeDIE(DIE &Buffer, const DIFortranArrayType *ATy);
   void constructEnumTypeDIE(DIE &Buffer, const DICompositeType *CTy);
   void constructMemberDIE(DIE &Buffer, const DIDerivedType *DT);
   void constructTemplateTypeParameterDIE(DIE &Buffer,

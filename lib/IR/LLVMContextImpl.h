@@ -336,6 +336,42 @@ template <> struct MDNodeKeyImpl<DISubrange> {
   unsigned getHashValue() const { return hash_combine(Count, LowerBound); }
 };
 
+template <> struct MDNodeKeyImpl<DIFortranSubrange> {
+  int64_t CLBound;
+  int64_t CUBound;
+  bool NoUBound;
+  Metadata *LowerBound;
+  Metadata *LowerBoundExp;
+  Metadata *UpperBound;
+  Metadata *UpperBoundExp;
+
+  MDNodeKeyImpl(int64_t CLB, int64_t CUB, bool NUB, Metadata *LB, Metadata *LBE,
+                Metadata *UB, Metadata *UBE)
+      : CLBound(CLB), CUBound(CUB), NoUBound(NUB), LowerBound(LB),
+        LowerBoundExp(LBE), UpperBound(UB), UpperBoundExp(UBE) {}
+  MDNodeKeyImpl(const DIFortranSubrange *N)
+      : CLBound(N->getCLowerBound()), CUBound(N->getCUpperBound()),
+        NoUBound(N->noUpperBound()), LowerBound(N->getRawLowerBound()),
+        LowerBoundExp(N->getRawLowerBoundExpression()),
+        UpperBound(N->getRawUpperBound()),
+        UpperBoundExp(N->getRawUpperBoundExpression()) {}
+
+  bool isKeyOf(const DIFortranSubrange *RHS) const {
+    return CLBound == RHS->getCLowerBound() &&
+      CUBound == RHS->getCUpperBound() &&
+      NoUBound == RHS->noUpperBound() &&
+      LowerBound == RHS->getRawLowerBound() &&
+      LowerBoundExp == RHS->getRawLowerBoundExpression() &&
+      UpperBound == RHS->getRawUpperBound() &&
+      UpperBoundExp == RHS->getRawUpperBoundExpression();
+  }
+
+  unsigned getHashValue() const {
+    return hash_combine(CLBound, CUBound, NoUBound, UpperBound, UpperBoundExp,
+                        LowerBound, LowerBoundExp);
+  }
+};
+
 template <> struct MDNodeKeyImpl<DIEnumerator> {
   int64_t Value;
   MDString *Name;
@@ -373,6 +409,39 @@ template <> struct MDNodeKeyImpl<DIBasicType> {
            Encoding == RHS->getEncoding();
   }
 
+  unsigned getHashValue() const {
+    return hash_combine(Tag, Name, SizeInBits, AlignInBits, Encoding);
+  }
+};
+
+template <> struct MDNodeKeyImpl<DIStringType> {
+  unsigned Tag;
+  MDString *Name;
+  Metadata *StringLength;
+  Metadata *StringLengthExp;
+  uint64_t SizeInBits;
+  uint32_t AlignInBits;
+  unsigned Encoding;
+
+  MDNodeKeyImpl(unsigned Tag, MDString *Name, Metadata *StringLength,
+                Metadata *StringLengthExp, uint64_t SizeInBits,
+                uint32_t AlignInBits, unsigned Encoding)
+      : Tag(Tag), Name(Name), StringLength(StringLength),
+        StringLengthExp(StringLengthExp), SizeInBits(SizeInBits),
+        AlignInBits(AlignInBits), Encoding(Encoding) {}
+  MDNodeKeyImpl(const DIStringType *N)
+      : Tag(N->getTag()), Name(N->getRawName()),
+        StringLength(N->getRawStringLength()),
+        StringLengthExp(N->getRawStringLengthExp()),
+        SizeInBits(N->getSizeInBits()),
+        AlignInBits(N->getAlignInBits()), Encoding(N->getEncoding()) {}
+
+  bool isKeyOf(const DIStringType *RHS) const {
+    return Tag == RHS->getTag() && Name == RHS->getRawName() &&
+           SizeInBits == RHS->getSizeInBits() &&
+           AlignInBits == RHS->getAlignInBits() &&
+           Encoding == RHS->getEncoding();
+  }
   unsigned getHashValue() const {
     return hash_combine(Tag, Name, SizeInBits, AlignInBits, Encoding);
   }
@@ -527,6 +596,52 @@ template <> struct MDNodeKeyImpl<DICompositeType> {
     // collision because of the full check above.
     return hash_combine(Name, File, Line, BaseType, Scope, Elements,
                         TemplateParams);
+  }
+};
+
+template <> struct MDNodeKeyImpl<DIFortranArrayType> {
+  unsigned Tag;
+  MDString *Name;
+  Metadata *File;
+  unsigned Line;
+  Metadata *Scope;
+  Metadata *BaseType;
+  uint64_t SizeInBits;
+  uint64_t OffsetInBits;
+  uint32_t AlignInBits;
+  unsigned Flags;
+  Metadata *Elements;
+
+  MDNodeKeyImpl(unsigned Tag, MDString *Name, Metadata *File, unsigned Line,
+                Metadata *Scope, Metadata *BaseType, uint64_t SizeInBits,
+                uint32_t AlignInBits, uint64_t OffsetInBits, unsigned Flags,
+                Metadata *Elements)
+      : Tag(Tag), Name(Name), File(File), Line(Line), Scope(Scope),
+        BaseType(BaseType), SizeInBits(SizeInBits), OffsetInBits(OffsetInBits),
+        AlignInBits(AlignInBits), Flags(Flags), Elements(Elements) {}
+  MDNodeKeyImpl(const DIFortranArrayType *N)
+      : Tag(N->getTag()), Name(N->getRawName()), File(N->getRawFile()),
+        Line(N->getLine()), Scope(N->getRawScope()),
+        BaseType(N->getRawBaseType()), SizeInBits(N->getSizeInBits()),
+        OffsetInBits(N->getOffsetInBits()), AlignInBits(N->getAlignInBits()),
+        Flags(N->getFlags()), Elements(N->getRawElements()) {}
+
+  bool isKeyOf(const DIFortranArrayType *RHS) const {
+    return Tag == RHS->getTag() && Name == RHS->getRawName() &&
+           File == RHS->getRawFile() && Line == RHS->getLine() &&
+           Scope == RHS->getRawScope() && BaseType == RHS->getRawBaseType() &&
+           SizeInBits == RHS->getSizeInBits() &&
+           AlignInBits == RHS->getAlignInBits() &&
+           OffsetInBits == RHS->getOffsetInBits() && Flags == RHS->getFlags() &&
+           Elements == RHS->getRawElements();
+  }
+
+  unsigned getHashValue() const {
+    // Intentionally computes the hash on a subset of the operands for
+    // performance reason. The subset has to be significant enough to avoid
+    // collision "most of the time". There is no correctness issue in case of
+    // collision because of the full check above.
+    return hash_combine(Name, File, Line, BaseType, Scope, Elements);
   }
 };
 
