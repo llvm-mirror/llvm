@@ -157,17 +157,21 @@ class DebugLocStream::ListBuilder {
   DbgVariable &V;
   const MachineInstr &MI;
   size_t ListIndex;
+  bool Finalized;
 
 public:
   ListBuilder(DebugLocStream &Locs, DwarfCompileUnit &CU, AsmPrinter &Asm,
               DbgVariable &V, const MachineInstr &MI)
-      : Locs(Locs), Asm(Asm), V(V), MI(MI), ListIndex(Locs.startList(&CU)) {}
+      : Locs(Locs), Asm(Asm), V(V), MI(MI), ListIndex(Locs.startList(&CU)),
+        Finalized(false) {}
+
+  void finalize();
 
   /// Finalize the list.
   ///
   /// If the list is empty, delete it.  Otherwise, finalize it by creating a
   /// temp symbol in \a Asm and setting up the \a DbgVariable.
-  ~ListBuilder();
+  ~ListBuilder() { finalize(); }
 
   DebugLocStream &getLocs() { return Locs; }
 };
