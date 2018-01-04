@@ -880,9 +880,10 @@ bool InductionDescriptor::isFPInductionPHI(PHINode *Phi, const Loop *TheLoop,
 /// If we are able to find such sequence, we return the instructions
 /// we found, namely %casted_phi and the instructions on its use-def chain up
 /// to the phi (not including the phi).
-bool getCastsForInductionPHI(
-    PredicatedScalarEvolution &PSE, const SCEVUnknown *PhiScev,
-    const SCEVAddRecExpr *AR, SmallVectorImpl<Instruction *> &CastInsts) {
+static bool getCastsForInductionPHI(PredicatedScalarEvolution &PSE,
+                                    const SCEVUnknown *PhiScev,
+                                    const SCEVAddRecExpr *AR,
+                                    SmallVectorImpl<Instruction *> &CastInsts) {
 
   assert(CastInsts.empty() && "CastInsts is expected to be empty.");
   auto *PN = cast<PHINode>(PhiScev->getValue());
@@ -1320,13 +1321,12 @@ void llvm::deleteDeadLoop(Loop *L, DominatorTree *DT = nullptr,
 
   // Rewrite phis in the exit block to get their inputs from the Preheader
   // instead of the exiting block.
-  BasicBlock::iterator BI = ExitBlock->begin();
-  while (PHINode *P = dyn_cast<PHINode>(BI)) {
+  for (PHINode &P : ExitBlock->phis()) {
     // Set the zero'th element of Phi to be from the preheader and remove all
     // other incoming values. Given the loop has dedicated exits, all other
     // incoming values must be from the exiting blocks.
     int PredIndex = 0;
-    P->setIncomingBlock(PredIndex, Preheader);
+    P.setIncomingBlock(PredIndex, Preheader);
     // Removes all incoming values from all other exiting blocks (including
     // duplicate values from an exiting block).
     // Nuke all entries except the zero'th entry which is the preheader entry.
@@ -1334,13 +1334,12 @@ void llvm::deleteDeadLoop(Loop *L, DominatorTree *DT = nullptr,
     // below, to keep the indices valid for deletion (removeIncomingValues
     // updates getNumIncomingValues and shifts all values down into the operand
     // being deleted).
-    for (unsigned i = 0, e = P->getNumIncomingValues() - 1; i != e; ++i)
-      P->removeIncomingValue(e - i, false);
+    for (unsigned i = 0, e = P.getNumIncomingValues() - 1; i != e; ++i)
+      P.removeIncomingValue(e - i, false);
 
-    assert((P->getNumIncomingValues() == 1 &&
-            P->getIncomingBlock(PredIndex) == Preheader) &&
+    assert((P.getNumIncomingValues() == 1 &&
+            P.getIncomingBlock(PredIndex) == Preheader) &&
            "Should have exactly one value and that's from the preheader!");
-    ++BI;
   }
 
   // Disconnect the loop body by branching directly to its exit.

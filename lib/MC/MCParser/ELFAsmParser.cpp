@@ -423,13 +423,17 @@ bool ELFAsmParser::parseGroup(StringRef &GroupName) {
   if (L.isNot(AsmToken::Comma))
     return TokError("expected group name");
   Lex();
-  if (getParser().parseIdentifier(GroupName))
-    return true;
+  if (L.is(AsmToken::Integer)) {
+    GroupName = getTok().getString();
+    Lex();
+  } else if (getParser().parseIdentifier(GroupName)) {
+    return TokError("invalid group name");
+  }
   if (L.is(AsmToken::Comma)) {
     Lex();
     StringRef Linkage;
     if (getParser().parseIdentifier(Linkage))
-      return true;
+      return TokError("invalid linkage");
     if (Linkage != "comdat")
       return TokError("Linkage must be 'comdat'");
   }
@@ -443,7 +447,7 @@ bool ELFAsmParser::parseMetadataSym(MCSymbolELF *&Associated) {
   Lex();
   StringRef Name;
   if (getParser().parseIdentifier(Name))
-    return true;
+    return TokError("invalid metadata symbol");
   Associated = dyn_cast_or_null<MCSymbolELF>(getContext().lookupSymbol(Name));
   if (!Associated || !Associated->isInSection())
     return TokError("symbol is not in a section: " + Name);

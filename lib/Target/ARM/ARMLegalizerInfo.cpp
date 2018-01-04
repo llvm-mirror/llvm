@@ -126,6 +126,12 @@ ARMLegalizerInfo::ARMLegalizerInfo(const ARMSubtarget &ST) {
     setAction({Op, s32}, Legal);
   }
 
+  setAction({G_INTTOPTR, p0}, Legal);
+  setAction({G_INTTOPTR, 1, s32}, Legal);
+
+  setAction({G_PTRTOINT, s32}, Legal);
+  setAction({G_PTRTOINT, 1, p0}, Legal);
+
   for (unsigned Op : {G_ASHR, G_LSHR, G_SHL})
     setAction({Op, s32}, Legal);
 
@@ -138,7 +144,13 @@ ARMLegalizerInfo::ARMLegalizerInfo(const ARMSubtarget &ST) {
 
   setAction({G_BRCOND, s1}, Legal);
 
+  for (auto Ty : {s32, p0})
+    setAction({G_PHI, Ty}, Legal);
+  setLegalizeScalarToDifferentSizeStrategy(
+      G_PHI, 0, widenToLargerTypesUnsupportedOtherwise);
+
   setAction({G_CONSTANT, s32}, Legal);
+  setAction({G_CONSTANT, p0}, Legal);
   setLegalizeScalarToDifferentSizeStrategy(G_CONSTANT, 0, widen_1_8_16);
 
   setAction({G_ICMP, s1}, Legal);
@@ -154,6 +166,8 @@ ARMLegalizerInfo::ARMLegalizerInfo(const ARMSubtarget &ST) {
 
     setAction({G_LOAD, s64}, Legal);
     setAction({G_STORE, s64}, Legal);
+
+    setAction({G_PHI, s64}, Legal);
 
     setAction({G_FCMP, s1}, Legal);
     setAction({G_FCMP, 1, s32}, Legal);

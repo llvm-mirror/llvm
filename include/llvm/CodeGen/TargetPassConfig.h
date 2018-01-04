@@ -218,9 +218,6 @@ public:
   /// Return true if the optimized regalloc pipeline is enabled.
   bool getOptimizeRegAlloc() const;
 
-  /// Return true if shrink wrapping is enabled.
-  bool getEnableShrinkWrap() const;
-
   /// Return true if the default global register allocator is in use and
   /// has not be overriden on the command line with '-regalloc=...'
   bool usingDefaultRegAlloc() const;
@@ -325,9 +322,9 @@ public:
   virtual bool isGlobalISelEnabled() const;
 
   /// Check whether or not GlobalISel should abort on error.
-  /// When this is disable, GlobalISel will fall back on SDISel instead of
+  /// When this is disabled, GlobalISel will fall back on SDISel instead of
   /// erroring out.
-  virtual bool isGlobalISelAbortEnabled() const;
+  bool isGlobalISelAbortEnabled() const;
 
   /// Check whether or not a diagnostic should be emitted when GlobalISel
   /// uses the fallback path. In other words, it will emit a diagnostic
