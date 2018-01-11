@@ -17,7 +17,7 @@
 
 #include "NVPTX.h"
 #include "llvm/CodeGen/SelectionDAG.h"
-#include "llvm/Target/TargetLowering.h"
+#include "llvm/CodeGen/TargetLowering.h"
 
 namespace llvm {
 namespace NVPTXISD {
@@ -448,6 +448,7 @@ public:
   const char *getTargetNodeName(unsigned Opcode) const override;
 
   bool getTgtMemIntrinsic(IntrinsicInfo &Info, const CallInst &I,
+                          MachineFunction &MF,
                           unsigned Intrinsic) const override;
 
   /// isLegalAddressingMode - Return true if the addressing mode represented

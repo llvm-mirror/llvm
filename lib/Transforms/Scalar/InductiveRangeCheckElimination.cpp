@@ -228,7 +228,8 @@ public:
   /// check is redundant and can be constant-folded away.  The induction
   /// variable is not required to be the canonical {0,+,1} induction variable.
   Optional<Range> computeSafeIterationSpace(ScalarEvolution &SE,
-                                            const SCEVAddRecExpr *IndVar) const;
+                                            const SCEVAddRecExpr *IndVar,
+                                            bool IsLatchSigned) const;
 
   /// Parse out a set of inductive range checks from \p BI and append them to \p
   /// Checks.
@@ -367,37 +368,12 @@ void InductiveRangeCheck::extractRangeChecksFromCond(
   if (!Visited.insert(Condition).second)
     return;
 
+  // TODO: Do the same for OR, XOR, NOT etc?
   if (match(Condition, m_And(m_Value(), m_Value()))) {
-    SmallVector<InductiveRangeCheck, 8> SubChecks;
     extractRangeChecksFromCond(L, SE, cast<User>(Condition)->getOperandUse(0),
-                               SubChecks, Visited);
+                               Checks, Visited);
     extractRangeChecksFromCond(L, SE, cast<User>(Condition)->getOperandUse(1),
-                               SubChecks, Visited);
-
-    if (SubChecks.size() == 2) {
-      // Handle a special case where we know how to merge two checks separately
-      // checking the upper and lower bounds into a full range check.
-      const auto &RChkA = SubChecks[0];
-      const auto &RChkB = SubChecks[1];
-      if ((RChkA.End == RChkB.End || !RChkA.End || !RChkB.End) &&
-          RChkA.Begin == RChkB.Begin && RChkA.Step == RChkB.Step &&
-          RChkA.IsSigned == RChkB.IsSigned) {
-        // If RChkA.Kind == RChkB.Kind then we just found two identical checks.
-        // But if one of them is a RANGE_CHECK_LOWER and the other is a
-        // RANGE_CHECK_UPPER (only possibility if they're different) then
-        // together they form a RANGE_CHECK_BOTH.
-        SubChecks[0].Kind =
-            (InductiveRangeCheck::RangeCheckKind)(RChkA.Kind | RChkB.Kind);
-        SubChecks[0].End = RChkA.End ? RChkA.End : RChkB.End;
-        SubChecks[0].CheckUse = &ConditionUse;
-        SubChecks[0].IsSigned = RChkA.IsSigned;
-
-        // We updated one of the checks in place, now erase the other.
-        SubChecks.pop_back();
-      }
-    }
-
-    Checks.insert(Checks.end(), SubChecks.begin(), SubChecks.end());
+                               Checks, Visited);
     return;
   }
 
@@ -1198,13 +1174,9 @@ void LoopConstrainer::cloneLoop(LoopConstrainer::ClonedLoop &Result,
       if (OriginalLoop.contains(SBB))
         continue; // not an exit block
 
-      for (Instruction &I : *SBB) {
-        auto *PN = dyn_cast<PHINode>(&I);
-        if (!PN)
-          break;
-
-        Value *OldIncoming = PN->getIncomingValueForBlock(OriginalBB);
-        PN->addIncoming(GetClonedValue(OldIncoming), ClonedBB);
+      for (PHINode &PN : SBB->phis()) {
+        Value *OldIncoming = PN.getIncomingValueForBlock(OriginalBB);
+        PN.addIncoming(GetClonedValue(OldIncoming), ClonedBB);
       }
     }
   }
@@ -1351,16 +1323,12 @@ LoopConstrainer::RewrittenRangeInfo LoopConstrainer::changeIterationSpaceEnd(
   // We emit PHI nodes into `RRI.PseudoExit' that compute the "latest" value of
   // each of the PHI nodes in the loop header.  This feeds into the initial
   // value of the same PHI nodes if/when we continue execution.
-  for (Instruction &I : *LS.Header) {
-    auto *PN = dyn_cast<PHINode>(&I);
-    if (!PN)
-      break;
-
-    PHINode *NewPHI = PHINode::Create(PN->getType(), 2, PN->getName() + ".copy",
+  for (PHINode &PN : LS.Header->phis()) {
+    PHINode *NewPHI = PHINode::Create(PN.getType(), 2, PN.getName() + ".copy",
                                       BranchToContinuation);
 
-    NewPHI->addIncoming(PN->getIncomingValueForBlock(Preheader), Preheader);
-    NewPHI->addIncoming(PN->getIncomingValueForBlock(LS.Latch),
+    NewPHI->addIncoming(PN.getIncomingValueForBlock(Preheader), Preheader);
+    NewPHI->addIncoming(PN.getIncomingValueForBlock(LS.Latch),
                         RRI.ExitSelector);
     RRI.PHIValuesAtPseudoExit.push_back(NewPHI);
   }
@@ -1372,12 +1340,8 @@ LoopConstrainer::RewrittenRangeInfo LoopConstrainer::changeIterationSpaceEnd(
 
   // The latch exit now has a branch from `RRI.ExitSelector' instead of
   // `LS.Latch'.  The PHI nodes need to be updated to reflect that.
-  for (Instruction &I : *LS.LatchExit) {
-    if (PHINode *PN = dyn_cast<PHINode>(&I))
-      replacePHIBlock(PN, LS.Latch, RRI.ExitSelector);
-    else
-      break;
-  }
+  for (PHINode &PN : LS.LatchExit->phis())
+    replacePHIBlock(&PN, LS.Latch, RRI.ExitSelector);
 
   return RRI;
 }
@@ -1386,15 +1350,10 @@ void LoopConstrainer::rewriteIncomingValuesForPHIs(
     LoopStructure &LS, BasicBlock *ContinuationBlock,
     const LoopConstrainer::RewrittenRangeInfo &RRI) const {
   unsigned PHIIndex = 0;
-  for (Instruction &I : *LS.Header) {
-    auto *PN = dyn_cast<PHINode>(&I);
-    if (!PN)
-      break;
-
-    for (unsigned i = 0, e = PN->getNumIncomingValues(); i < e; ++i)
-      if (PN->getIncomingBlock(i) == ContinuationBlock)
-        PN->setIncomingValue(i, RRI.PHIValuesAtPseudoExit[PHIIndex++]);
-  }
+  for (PHINode &PN : LS.Header->phis())
+    for (unsigned i = 0, e = PN.getNumIncomingValues(); i < e; ++i)
+      if (PN.getIncomingBlock(i) == ContinuationBlock)
+        PN.setIncomingValue(i, RRI.PHIValuesAtPseudoExit[PHIIndex++]);
 
   LS.IndVarStart = RRI.IndVarEnd;
 }
@@ -1405,14 +1364,9 @@ BasicBlock *LoopConstrainer::createPreheader(const LoopStructure &LS,
   BasicBlock *Preheader = BasicBlock::Create(Ctx, Tag, &F, LS.Header);
   BranchInst::Create(LS.Header, Preheader);
 
-  for (Instruction &I : *LS.Header) {
-    auto *PN = dyn_cast<PHINode>(&I);
-    if (!PN)
-      break;
-
-    for (unsigned i = 0, e = PN->getNumIncomingValues(); i < e; ++i)
-      replacePHIBlock(PN, OldPreheader, Preheader);
-  }
+  for (PHINode &PN : LS.Header->phis())
+    for (unsigned i = 0, e = PN.getNumIncomingValues(); i < e; ++i)
+      replacePHIBlock(&PN, OldPreheader, Preheader);
 
   return Preheader;
 }
@@ -1501,6 +1455,13 @@ bool LoopConstrainer::run() {
       ExitPreLoopAtSCEV = SE.getAddExpr(*SR.HighLimit, MinusOneS);
     }
 
+    if (!isSafeToExpandAt(ExitPreLoopAtSCEV, InsertPt, SE)) {
+      DEBUG(dbgs() << "irce: could not prove that it is safe to expand the"
+                   << " preloop exit limit " << *ExitPreLoopAtSCEV
+                   << " at block " << InsertPt->getParent()->getName() << "\n");
+      return false;
+    }
+
     ExitPreLoopAt = Expander.expandCodeFor(ExitPreLoopAtSCEV, IVTy, InsertPt);
     ExitPreLoopAt->setName("exit.preloop.at");
   }
@@ -1518,6 +1479,13 @@ bool LoopConstrainer::run() {
         return false;
       }
       ExitMainLoopAtSCEV = SE.getAddExpr(*SR.LowLimit, MinusOneS);
+    }
+
+    if (!isSafeToExpandAt(ExitMainLoopAtSCEV, InsertPt, SE)) {
+      DEBUG(dbgs() << "irce: could not prove that it is safe to expand the"
+                   << " main loop exit limit " << *ExitMainLoopAtSCEV
+                   << " at block " << InsertPt->getParent()->getName() << "\n");
+      return false;
     }
 
     ExitMainLoopAt = Expander.expandCodeFor(ExitMainLoopAtSCEV, IVTy, InsertPt);
@@ -1610,7 +1578,8 @@ bool LoopConstrainer::run() {
 /// range, returns None.
 Optional<InductiveRangeCheck::Range>
 InductiveRangeCheck::computeSafeIterationSpace(
-    ScalarEvolution &SE, const SCEVAddRecExpr *IndVar) const {
+    ScalarEvolution &SE, const SCEVAddRecExpr *IndVar,
+    bool IsLatchSigned) const {
   // IndVar is of the form "A + B * I" (where "I" is the canonical induction
   // variable, that may or may not exist as a real llvm::Value in the loop) and
   // this inductive range check is a range check on the "C + D * I" ("C" is
@@ -1621,21 +1590,15 @@ InductiveRangeCheck::computeSafeIterationSpace(
   //
   //   0 <= M + 1 * IndVar < L given L >= 0  (i.e. N == 1)
   //
-  // The inequality is satisfied by -M <= IndVar < (L - M) [^1].  All additions
-  // and subtractions are twos-complement wrapping and comparisons are signed.
-  //
-  // Proof:
-  //
-  //   If there exists IndVar such that -M <= IndVar < (L - M) then it follows
-  //   that -M <= (-M + L) [== Eq. 1].  Since L >= 0, if (-M + L) sign-overflows
-  //   then (-M + L) < (-M).  Hence by [Eq. 1], (-M + L) could not have
-  //   overflown.
-  //
-  //   This means IndVar = t + (-M) for t in [0, L).  Hence (IndVar + M) = t.
-  //   Hence 0 <= (IndVar + M) < L
-
-  // [^1]: Note that the solution does _not_ apply if L < 0; consider values M =
-  // 127, IndVar = 126 and L = -2 in an i8 world.
+  // Here L stands for upper limit of the safe iteration space.
+  // The inequality is satisfied by (0 - M) <= IndVar < (L - M). To avoid
+  // overflows when calculating (0 - M) and (L - M) we, depending on type of
+  // IV's iteration space, limit the calculations by borders of the iteration
+  // space. For example, if IndVar is unsigned, (0 - M) overflows for any M > 0.
+  // If we figured out that "anything greater than (-M) is safe", we strengthen
+  // this to "everything greater than 0 is safe", assuming that values between
+  // -M and 0 just do not exist in unsigned iteration space, and we don't want
+  // to deal with overflown values.
 
   if (!IndVar->isAffine())
     return None;
@@ -1652,22 +1615,65 @@ InductiveRangeCheck::computeSafeIterationSpace(
     return None;
 
   assert(!D->getValue()->isZero() && "Recurrence with zero step?");
+  unsigned BitWidth = cast<IntegerType>(IndVar->getType())->getBitWidth();
+  const SCEV *SIntMax = SE.getConstant(APInt::getSignedMaxValue(BitWidth));
 
+  // Substract Y from X so that it does not go through border of the IV
+  // iteration space. Mathematically, it is equivalent to:
+  //
+  //    ClampedSubstract(X, Y) = min(max(X - Y, INT_MIN), INT_MAX).        [1]
+  //
+  // In [1], 'X - Y' is a mathematical substraction (result is not bounded to
+  // any width of bit grid). But after we take min/max, the result is
+  // guaranteed to be within [INT_MIN, INT_MAX].
+  //
+  // In [1], INT_MAX and INT_MIN are respectively signed and unsigned max/min
+  // values, depending on type of latch condition that defines IV iteration
+  // space.
+  auto ClampedSubstract = [&](const SCEV *X, const SCEV *Y) {
+    assert(SE.isKnownNonNegative(X) &&
+           "We can only substract from values in [0; SINT_MAX]!");
+    if (IsLatchSigned) {
+      // X is a number from signed range, Y is interpreted as signed.
+      // Even if Y is SINT_MAX, (X - Y) does not reach SINT_MIN. So the only
+      // thing we should care about is that we didn't cross SINT_MAX.
+      // So, if Y is positive, we substract Y safely.
+      //   Rule 1: Y > 0 ---> Y.
+      // If 0 <= -Y <= (SINT_MAX - X), we substract Y safely.
+      //   Rule 2: Y >=s (X - SINT_MAX) ---> Y.
+      // If 0 <= (SINT_MAX - X) < -Y, we can only substract (X - SINT_MAX).
+      //   Rule 3: Y <s (X - SINT_MAX) ---> (X - SINT_MAX).
+      // It gives us smax(Y, X - SINT_MAX) to substract in all cases.
+      const SCEV *XMinusSIntMax = SE.getMinusSCEV(X, SIntMax);
+      return SE.getMinusSCEV(X, SE.getSMaxExpr(Y, XMinusSIntMax),
+                             SCEV::FlagNSW);
+    } else
+      // X is a number from unsigned range, Y is interpreted as signed.
+      // Even if Y is SINT_MIN, (X - Y) does not reach UINT_MAX. So the only
+      // thing we should care about is that we didn't cross zero.
+      // So, if Y is negative, we substract Y safely.
+      //   Rule 1: Y <s 0 ---> Y.
+      // If 0 <= Y <= X, we substract Y safely.
+      //   Rule 2: Y <=s X ---> Y.
+      // If 0 <= X < Y, we should stop at 0 and can only substract X.
+      //   Rule 3: Y >s X ---> X.
+      // It gives us smin(X, Y) to substract in all cases.
+      return SE.getMinusSCEV(X, SE.getSMinExpr(X, Y), SCEV::FlagNUW);
+  };
   const SCEV *M = SE.getMinusSCEV(C, A);
-  const SCEV *Begin = SE.getNegativeSCEV(M);
-  const SCEV *UpperLimit = nullptr;
+  const SCEV *Zero = SE.getZero(M->getType());
+  const SCEV *Begin = ClampedSubstract(Zero, M);
+  const SCEV *L = nullptr;
 
   // We strengthen "0 <= I" to "0 <= I < INT_SMAX" and "I < L" to "0 <= I < L".
   // We can potentially do much better here.
-  if (const SCEV *L = getEnd())
-    UpperLimit = L;
+  if (const SCEV *EndLimit = getEnd())
+    L = EndLimit;
   else {
     assert(Kind == InductiveRangeCheck::RANGE_CHECK_LOWER && "invariant!");
-    unsigned BitWidth = cast<IntegerType>(IndVar->getType())->getBitWidth();
-    UpperLimit = SE.getConstant(APInt::getSignedMaxValue(BitWidth));
+    L = SIntMax;
   }
-
-  const SCEV *End = SE.getMinusSCEV(UpperLimit, M);
+  const SCEV *End = ClampedSubstract(L, M);
   return InductiveRangeCheck::Range(Begin, End);
 }
 
@@ -1787,10 +1793,6 @@ bool InductiveRangeCheckElimination::runOnLoop(Loop *L, LPPassManager &LPM) {
   Instruction *ExprInsertPt = Preheader->getTerminator();
 
   SmallVector<InductiveRangeCheck, 4> RangeChecksToEliminate;
-  auto RangeIsNonNegative = [&](InductiveRangeCheck::Range &R) {
-    return SE.isKnownNonNegative(R.getBegin()) &&
-           SE.isKnownNonNegative(R.getEnd());
-  };
   // Basing on the type of latch predicate, we interpret the IV iteration range
   // as signed or unsigned range. We use different min/max functions (signed or
   // unsigned) when intersecting this range with safe iteration ranges implied
@@ -1800,25 +1802,9 @@ bool InductiveRangeCheckElimination::runOnLoop(Loop *L, LPPassManager &LPM) {
 
   IRBuilder<> B(ExprInsertPt);
   for (InductiveRangeCheck &IRC : RangeChecks) {
-    auto Result = IRC.computeSafeIterationSpace(SE, IndVar);
+    auto Result = IRC.computeSafeIterationSpace(SE, IndVar,
+                                                LS.IsSignedPredicate);
     if (Result.hasValue()) {
-      // Intersecting a signed and an unsigned ranges may produce incorrect
-      // results because we can use neither signed nor unsigned min/max for
-      // reliably correct intersection if a range contains negative values
-      // which are either actually negative or big positive. Intersection is
-      // safe in two following cases:
-      // 1. Both ranges are signed/unsigned, then we use signed/unsigned min/max
-      //    respectively for their intersection;
-      // 2. IRC safe iteration space only contains values from [0, SINT_MAX].
-      //    The interpretation of these values is unambiguous.
-      // We take the type of IV iteration range as a reference (we will
-      // intersect it with the resulting range of all IRC's later in
-      // calculateSubRanges). Only ranges of IRC of the same type are considered
-      // for removal unless we prove that its range doesn't contain ambiguous
-      // values.
-      if (IRC.isSigned() != LS.IsSignedPredicate &&
-          !RangeIsNonNegative(Result.getValue()))
-        continue;
       auto MaybeSafeIterRange =
           IntersectRange(SE, SafeIterRange, Result.getValue());
       if (MaybeSafeIterRange.hasValue()) {

@@ -26,6 +26,9 @@
 #include "llvm/CodeGen/RuntimeLibcalls.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
+#include "llvm/CodeGen/TargetFrameLowering.h"
+#include "llvm/CodeGen/TargetLowering.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/Constants.h"
@@ -40,11 +43,8 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/CodeGen/TargetFrameLowering.h"
-#include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -624,13 +624,23 @@ void SelectionDAGLegalize::LegalizeStoreOps(SDNode *Node) {
       assert(!StVT.isVector() &&
              "Vector Stores are handled in LegalizeVectorOps");
 
+      SDValue Result;
+
       // TRUNCSTORE:i16 i32 -> STORE i16
-      assert(TLI.isTypeLegal(StVT) &&
-             "Do not know how to expand this store!");
-      Value = DAG.getNode(ISD::TRUNCATE, dl, StVT, Value);
-      SDValue Result =
-          DAG.getStore(Chain, dl, Value, Ptr, ST->getPointerInfo(),
-                       Alignment, MMOFlags, AAInfo);
+      if (TLI.isTypeLegal(StVT)) {
+        Value = DAG.getNode(ISD::TRUNCATE, dl, StVT, Value);
+        Result = DAG.getStore(Chain, dl, Value, Ptr, ST->getPointerInfo(),
+                              Alignment, MMOFlags, AAInfo);
+      } else {
+        // The in-memory type isn't legal. Truncate to the type it would promote
+        // to, and then do a truncstore.
+        Value = DAG.getNode(ISD::TRUNCATE, dl,
+                            TLI.getTypeToTransformTo(*DAG.getContext(), StVT),
+                            Value);
+        Result = DAG.getTruncStore(Chain, dl, Value, Ptr, ST->getPointerInfo(),
+                                   StVT, Alignment, MMOFlags, AAInfo);
+      }
+
       ReplaceNode(SDValue(Node, 0), Result);
       break;
     }
@@ -2004,10 +2014,10 @@ SDValue SelectionDAGLegalize::ExpandLibCall(RTLIB::Libcall LC, SDNode *Node,
   // isTailCall may be true since the callee does not reference caller stack
   // frame. Check if it's in the right position and that the return types match.
   SDValue TCChain = InChain;
-  const Function *F = DAG.getMachineFunction().getFunction();
+  const Function &F = DAG.getMachineFunction().getFunction();
   bool isTailCall =
       TLI.isInTailCallPosition(DAG, Node, TCChain) &&
-      (RetTy == F->getReturnType() || F->getReturnType()->isVoidTy());
+      (RetTy == F.getReturnType() || F.getReturnType()->isVoidTy());
   if (isTailCall)
     InChain = TCChain;
 

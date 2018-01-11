@@ -17,7 +17,7 @@
 
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/SelectionDAG.h"
-#include "llvm/Target/TargetLowering.h"
+#include "llvm/CodeGen/TargetLowering.h"
 #include "llvm/Target/TargetOptions.h"
 
 namespace llvm {
@@ -214,7 +214,7 @@ namespace llvm {
       // FP vector get exponent.
       FGETEXP_RND, FGETEXPS_RND,
       // Extract Normalized Mantissas.
-      VGETMANT, VGETMANTS,
+      VGETMANT, VGETMANT_RND, VGETMANTS, VGETMANTS_RND,
       // FP Scale.
       SCALEF,
       SCALEFS,
@@ -335,6 +335,9 @@ namespace llvm {
       // Vector integer comparisons, the result is in a mask vector.
       PCMPEQM, PCMPGTM,
 
+      // v8i16 Horizontal minimum and position.
+      PHMINPOS,
+
       MULTISHIFT,
 
       /// Vector comparison generating mask bits for fp and
@@ -390,6 +393,11 @@ namespace llvm {
       PSHUFHW,
       PSHUFLW,
       SHUFP,
+      // VBMI2 Concat & Shift.
+      VSHLD,
+      VSHRD,
+      VSHLDV,
+      VSHRDV,
       //Shuffle Packed Values at 128-bit granularity.
       SHUF128,
       MOVDDUP,
@@ -426,11 +434,13 @@ namespace llvm {
       VFIXUPIMM,
       VFIXUPIMMS,
       // Range Restriction Calculation For Packed Pairs of Float32/64 values.
-      VRANGE,
+      VRANGE, VRANGE_RND, VRANGES, VRANGES_RND,
       // Reduce - Perform Reduction Transformation on scalar\packed FP.
-      VREDUCE, VREDUCES,
+      VREDUCE, VREDUCE_RND, VREDUCES, VREDUCES_RND,
       // RndScale - Round FP Values To Include A Given Number Of Fraction Bits.
-      VRNDSCALE, VRNDSCALES,
+      // Also used by the legacy (V)ROUND intrinsics where we mask out the
+      // scaling part of the immediate.
+      VRNDSCALE, VRNDSCALE_RND, VRNDSCALES, VRNDSCALES_RND,
       // Tests Types Of a FP Values for packed types.
       VFPCLASS,
       // Tests Types Of a FP Values for scalar types.
@@ -442,9 +452,6 @@ namespace llvm {
       VBROADCASTM,
       // Broadcast subvector to vector.
       SUBV_BROADCAST,
-
-      // Extract vector element.
-      VEXTRACT,
 
       /// SSE4A Extraction and Insertion.
       EXTRQI, INSERTQI,
@@ -473,6 +480,12 @@ namespace llvm {
       // op0 x op1 + op2.
       VPMADD52L, VPMADD52H,
 
+      // VNNI
+      VPDPBUSD,
+      VPDPBUSDS,
+      VPDPWSSD,
+      VPDPWSSDS,
+
       // FMA nodes.
       // We use the target independent ISD::FMA for the non-inverted case.
       FNMADD,
@@ -488,6 +501,9 @@ namespace llvm {
       FNMSUB_RND,
       FMADDSUB_RND,
       FMSUBADD_RND,
+
+      // FMA4 specific scalar intrinsics bits that zero the non-scalar bits.
+      FMADD4S, FNMADD4S, FMSUB4S, FNMSUB4S,
 
       // Scalar intrinsic FMA.
       FMADDS1, FMADDS3,
@@ -505,6 +521,9 @@ namespace llvm {
       // Compress and expand.
       COMPRESS,
       EXPAND,
+
+      // Bits shuffle
+      VPSHUFBITQMB,
 
       // Convert Unsigned/Integer to Floating-Point Value with rounding mode.
       SINT_TO_FP_RND, UINT_TO_FP_RND,
@@ -565,6 +584,9 @@ namespace llvm {
       // Conversions between float and half-float.
       CVTPS2PH, CVTPH2PS, CVTPH2PS_RND,
 
+      // Galois Field Arithmetic Instructions
+      GF2P8AFFINEINVQB, GF2P8AFFINEQB, GF2P8MULB,
+
       // LWP insert record.
       LWPINS,
 
@@ -623,8 +645,8 @@ namespace llvm {
       // Vector truncating masked store with unsigned/signed saturation
       VMTRUNCSTOREUS, VMTRUNCSTORES,
 
-      // X86 specific gather
-      MGATHER
+      // X86 specific gather and scatter
+      MGATHER, MSCATTER,
 
       // WARNING: Do not add anything in the end unless you want the node to
       // have memop! In fact, starting from FIRST_TARGET_MEMORY_OPCODE all
@@ -662,7 +684,7 @@ namespace llvm {
     void markLibCallAttributes(MachineFunction *MF, unsigned CC,
                                ArgListTy &Args) const override;
 
-    MVT getScalarShiftAmountTy(const DataLayout &, EVT) const override {
+    MVT getScalarShiftAmountTy(const DataLayout &, EVT VT) const override {
       return MVT::i8;
     }
 
@@ -807,6 +829,11 @@ namespace llvm {
     /// Vector-sized comparisons are fast using PCMPEQ + PMOVMSK or PTEST.
     MVT hasFastEqualityCompare(unsigned NumBits) const override;
 
+    /// Allow multiple load pairs per block for smaller and faster code.
+    unsigned getMemcmpEqZeroLoadsPerBlock() const override {
+      return 2;
+    }
+
     /// Return the value type to use for ISD::SETCC.
     EVT getSetCCResultType(const DataLayout &DL, LLVMContext &Context,
                            EVT VT) const override;
@@ -940,6 +967,7 @@ namespace llvm {
     /// true and stores the intrinsic information into the IntrinsicInfo that was
     /// passed to the function.
     bool getTgtMemIntrinsic(IntrinsicInfo &Info, const CallInst &I,
+                            MachineFunction &MF,
                             unsigned Intrinsic) const override;
 
     /// Returns true if the target can instruction select the
@@ -1000,6 +1028,8 @@ namespace llvm {
       return NumElem > 2;
     }
 
+    bool isLoadBitCastBeneficial(EVT LoadVT, EVT BitcastVT) const override;
+
     /// Intel processors have a unified instruction and data cache
     const char * getClearCacheBuiltinName() const override {
       return nullptr; // nothing to do, move along.
@@ -1030,9 +1060,13 @@ namespace llvm {
     Value *getIRStackGuard(IRBuilder<> &IRB) const override;
 
     bool useLoadStackGuardNode() const override;
+    bool useStackGuardXorFP() const override;
     void insertSSPDeclarations(Module &M) const override;
     Value *getSDagStackGuard(const Module &M) const override;
     Value *getSSPStackGuardCheck(const Module &M) const override;
+    SDValue emitStackGuardXorFP(SelectionDAG &DAG, SDValue Val,
+                                const SDLoc &DL) const override;
+
 
     /// Return true if the target stores SafeStack pointer at a fixed offset in
     /// some non-standard address space, and populates the address space and
@@ -1140,11 +1174,8 @@ namespace llvm {
                                                bool isReplace) const;
 
     SDValue LowerBUILD_VECTOR(SDValue Op, SelectionDAG &DAG) const;
-    SDValue LowerBUILD_VECTORvXi1(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerVSELECT(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerEXTRACT_VECTOR_ELT(SDValue Op, SelectionDAG &DAG) const;
-    SDValue ExtractBitFromMaskVector(SDValue Op, SelectionDAG &DAG) const;
-    SDValue InsertBitToMaskVector(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerINSERT_VECTOR_ELT(SDValue Op, SelectionDAG &DAG) const;
 
     unsigned getGlobalWrapperKind(const GlobalValue *GV = nullptr) const;
@@ -1158,9 +1189,6 @@ namespace llvm {
 
     SDValue LowerSINT_TO_FP(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerUINT_TO_FP(SDValue Op, SelectionDAG &DAG) const;
-    SDValue LowerUINT_TO_FP_i64(SDValue Op, SelectionDAG &DAG) const;
-    SDValue LowerUINT_TO_FP_i32(SDValue Op, SelectionDAG &DAG) const;
-    SDValue lowerUINT_TO_FP_vec(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerTRUNCATE(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFP_TO_INT(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSETCC(SDValue Op, SelectionDAG &DAG) const;
@@ -1200,8 +1228,8 @@ namespace llvm {
                         const SDLoc &dl, SelectionDAG &DAG) const override;
 
     bool supportSplitCSR(MachineFunction *MF) const override {
-      return MF->getFunction()->getCallingConv() == CallingConv::CXX_FAST_TLS &&
-          MF->getFunction()->hasFnAttribute(Attribute::NoUnwind);
+      return MF->getFunction().getCallingConv() == CallingConv::CXX_FAST_TLS &&
+          MF->getFunction().hasFnAttribute(Attribute::NoUnwind);
     }
     void initializeSplitCSR(MachineBasicBlock *Entry) const override;
     void insertCopiesSplitCSR(
@@ -1403,16 +1431,48 @@ namespace llvm {
     }
   };
 
-  // X86 specific Gather node.
-  class X86MaskedGatherSDNode : public MaskedGatherScatterSDNode {
+  // X86 specific Gather/Scatter nodes.
+  // The class has the same order of operands as MaskedGatherScatterSDNode for
+  // convenience.
+  class X86MaskedGatherScatterSDNode : public MemSDNode {
   public:
-    X86MaskedGatherSDNode(unsigned Order,
-                          const DebugLoc &dl, SDVTList VTs, EVT MemVT,
-                          MachineMemOperand *MMO)
-      : MaskedGatherScatterSDNode(X86ISD::MGATHER, Order, dl, VTs, MemVT, MMO)
-    {}
+    X86MaskedGatherScatterSDNode(unsigned Opc, unsigned Order,
+                                 const DebugLoc &dl, SDVTList VTs, EVT MemVT,
+                                 MachineMemOperand *MMO)
+        : MemSDNode(Opc, Order, dl, VTs, MemVT, MMO) {}
+
+    const SDValue &getBasePtr() const { return getOperand(3); }
+    const SDValue &getIndex()   const { return getOperand(4); }
+    const SDValue &getMask()    const { return getOperand(2); }
+    const SDValue &getValue()   const { return getOperand(1); }
+
+    static bool classof(const SDNode *N) {
+      return N->getOpcode() == X86ISD::MGATHER ||
+             N->getOpcode() == X86ISD::MSCATTER;
+    }
+  };
+
+  class X86MaskedGatherSDNode : public X86MaskedGatherScatterSDNode {
+  public:
+    X86MaskedGatherSDNode(unsigned Order, const DebugLoc &dl, SDVTList VTs,
+                          EVT MemVT, MachineMemOperand *MMO)
+        : X86MaskedGatherScatterSDNode(X86ISD::MGATHER, Order, dl, VTs, MemVT,
+                                       MMO) {}
+
     static bool classof(const SDNode *N) {
       return N->getOpcode() == X86ISD::MGATHER;
+    }
+  };
+
+  class X86MaskedScatterSDNode : public X86MaskedGatherScatterSDNode {
+  public:
+    X86MaskedScatterSDNode(unsigned Order, const DebugLoc &dl, SDVTList VTs,
+                           EVT MemVT, MachineMemOperand *MMO)
+        : X86MaskedGatherScatterSDNode(X86ISD::MSCATTER, Order, dl, VTs, MemVT,
+                                       MMO) {}
+
+    static bool classof(const SDNode *N) {
+      return N->getOpcode() == X86ISD::MSCATTER;
     }
   };
 

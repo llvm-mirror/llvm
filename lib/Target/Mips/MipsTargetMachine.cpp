@@ -200,7 +200,7 @@ MipsTargetMachine::getSubtargetImpl(const Function &F) const {
 void MipsTargetMachine::resetSubtarget(MachineFunction *MF) {
   DEBUG(dbgs() << "resetSubtarget\n");
 
-  Subtarget = const_cast<MipsSubtarget *>(getSubtargetImpl(*MF->getFunction()));
+  Subtarget = const_cast<MipsSubtarget *>(getSubtargetImpl(MF->getFunction()));
   MF->setSubtarget(Subtarget);
 }
 
@@ -259,17 +259,16 @@ void MipsPassConfig::addPreRegAlloc() {
   addPass(createMipsOptimizePICCallPass());
 }
 
-TargetIRAnalysis MipsTargetMachine::getTargetIRAnalysis() {
-  return TargetIRAnalysis([this](const Function &F) {
-    if (Subtarget->allowMixed16_32()) {
-      DEBUG(errs() << "No Target Transform Info Pass Added\n");
-      // FIXME: This is no longer necessary as the TTI returned is per-function.
-      return TargetTransformInfo(F.getParent()->getDataLayout());
-    }
+TargetTransformInfo
+MipsTargetMachine::getTargetTransformInfo(const Function &F) {
+  if (Subtarget->allowMixed16_32()) {
+    DEBUG(errs() << "No Target Transform Info Pass Added\n");
+    // FIXME: This is no longer necessary as the TTI returned is per-function.
+    return TargetTransformInfo(F.getParent()->getDataLayout());
+  }
 
-    DEBUG(errs() << "Target Transform Info Pass Added\n");
-    return TargetTransformInfo(BasicTTIImpl(this, F));
-  });
+  DEBUG(errs() << "Target Transform Info Pass Added\n");
+  return TargetTransformInfo(BasicTTIImpl(this, F));
 }
 
 // Implemented by targets that want to run passes immediately before
@@ -278,12 +277,11 @@ TargetIRAnalysis MipsTargetMachine::getTargetIRAnalysis() {
 void MipsPassConfig::addPreEmitPass() {
   addPass(createMicroMipsSizeReductionPass());
 
-  // The delay slot filler pass can potientially create forbidden slot (FS)
-  // hazards for MIPSR6 which the hazard schedule pass (HSP) will fix. Any
-  // (new) pass that creates compact branches after the HSP must handle FS
-  // hazards itself or be pipelined before the HSP.
+  // The delay slot filler and the long branch passes can potientially create
+  // forbidden slot/ hazards for MIPSR6 which the hazard schedule pass will
+  // fix. Any new pass must come before the hazard schedule pass.
   addPass(createMipsDelaySlotFillerPass());
-  addPass(createMipsHazardSchedule());
   addPass(createMipsLongBranchPass());
+  addPass(createMipsHazardSchedule());
   addPass(createMipsConstantIslandPass());
 }

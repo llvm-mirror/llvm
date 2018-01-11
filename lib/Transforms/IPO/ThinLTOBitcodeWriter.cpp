@@ -19,7 +19,6 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/Pass.h"
-#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/ScopedPrinter.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/IPO.h"
@@ -40,9 +39,17 @@ void promoteInternals(Module &ExportM, Module &ImportM, StringRef ModuleId,
       continue;
 
     auto Name = ExportGV.getName();
-    GlobalValue *ImportGV = ImportM.getNamedValue(Name);
-    if ((!ImportGV || ImportGV->use_empty()) && !PromoteExtra.count(&ExportGV))
-      continue;
+    GlobalValue *ImportGV = nullptr;
+    if (!PromoteExtra.count(&ExportGV)) {
+      ImportGV = ImportM.getNamedValue(Name);
+      if (!ImportGV)
+        continue;
+      ImportGV->removeDeadConstantUsers();
+      if (ImportGV->use_empty()) {
+        ImportGV->eraseFromParent();
+        continue;
+      }
+    }
 
     std::string NewName = (Name + ModuleId).str();
 
@@ -83,8 +90,7 @@ void promoteTypeIds(Module &M, StringRef ModuleId) {
     if (isa<MDNode>(MD) && cast<MDNode>(MD)->isDistinct()) {
       Metadata *&GlobalMD = LocalToGlobal[MD];
       if (!GlobalMD) {
-        std::string NewName =
-            (to_string(LocalToGlobal.size()) + ModuleId).str();
+        std::string NewName = (Twine(LocalToGlobal.size()) + ModuleId).str();
         GlobalMD = MDString::get(M.getContext(), NewName);
       }
 

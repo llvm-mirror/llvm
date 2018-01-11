@@ -23,8 +23,8 @@
 #include "llvm/CodeGen/GlobalISel/InstructionSelector.h"
 #include "llvm/CodeGen/GlobalISel/LegalizerInfo.h"
 #include "llvm/CodeGen/GlobalISel/RegisterBankInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/DataLayout.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <string>
 
 #define GET_SUBTARGETINFO_HEADER
@@ -86,6 +86,7 @@ protected:
 
   // HasZeroCycleZeroing - Has zero-cycle zeroing instructions.
   bool HasZeroCycleZeroing = false;
+  bool HasZeroCycleZeroingFPWorkaround = false;
 
   // StrictAlign - Disallow unaligned memory accesses.
   bool StrictAlign = false;
@@ -197,6 +198,10 @@ public:
 
   bool hasZeroCycleZeroing() const { return HasZeroCycleZeroing; }
 
+  bool hasZeroCycleZeroingFPWorkaround() const {
+    return HasZeroCycleZeroingFPWorkaround;
+  }
+
   bool requiresStrictAlign() const { return StrictAlign; }
 
   bool isXRaySupported() const override { return true; }
@@ -303,13 +308,6 @@ public:
 
   unsigned char classifyGlobalFunctionReference(const GlobalValue *GV,
                                                 const TargetMachine &TM) const;
-
-  /// This function returns the name of a function which has an interface
-  /// like the non-standard bzero function, if such a function exists on
-  /// the current subtarget and it is considered prefereable over
-  /// memset with zero passed as the second argument. Otherwise it
-  /// returns null.
-  const char *getBZeroEntry() const;
 
   void overrideSchedPolicy(MachineSchedPolicy &Policy,
                            unsigned NumRegionInstrs) const override;

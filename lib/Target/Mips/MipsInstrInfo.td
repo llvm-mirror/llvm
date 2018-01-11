@@ -208,8 +208,6 @@ def NotMips64r6  :    Predicate<"!Subtarget->hasMips64r6()">,
                       AssemblerPredicate<"!FeatureMips64r6">;
 def HasMicroMips32r6 : Predicate<"Subtarget->inMicroMips32r6Mode()">,
                        AssemblerPredicate<"FeatureMicroMips,FeatureMips32r6">;
-def HasMicroMips64r6 : Predicate<"Subtarget->inMicroMips64r6Mode()">,
-                       AssemblerPredicate<"FeatureMicroMips,FeatureMips64r6">;
 def InMips16Mode :    Predicate<"Subtarget->inMips16Mode()">,
                       AssemblerPredicate<"FeatureMips16">;
 def NotInMips16Mode : Predicate<"!Subtarget->inMips16Mode()">,
@@ -313,9 +311,6 @@ class ISA_MICROMIPS { list<Predicate> InsnPredicates = [InMicroMips]; }
 class ISA_MICROMIPS32R6 {
   list<Predicate> InsnPredicates = [HasMicroMips32r6];
 }
-class ISA_MICROMIPS64R6 {
-  list<Predicate> InsnPredicates = [HasMicroMips64r6];
-}
 class ISA_MICROMIPS32_NOT_MIPS32R6 {
   list<Predicate> InsnPredicates = [InMicroMips, NotMips32r6];
 }
@@ -393,8 +388,8 @@ class ASE_MT {
 
 // Class used for separating microMIPSr6 and microMIPS (r3) instruction.
 // It can be used only on instructions that doesn't inherit PredicateControl.
-class ISA_MICROMIPS_NOT_32R6_64R6 : PredicateControl {
-  let InsnPredicates = [InMicroMips, NotMips32r6, NotMips64r6];
+class ISA_MICROMIPS_NOT_32R6 : PredicateControl {
+  let InsnPredicates = [InMicroMips, NotMips32r6];
 }
 
 class ASE_NOT_DSP {
@@ -1488,9 +1483,9 @@ class JumpFJ<DAGOperand opnd, string opstr, SDPatternOperator operator,
 }
 
 // Unconditional branch
-class UncondBranch<Instruction BEQInst> :
+class UncondBranch<Instruction BEQInst, DAGOperand opnd> :
   PseudoSE<(outs), (ins brtarget:$offset), [(br bb:$offset)], II_B>,
-  PseudoInstExpansion<(BEQInst ZERO, ZERO, brtarget:$offset)> {
+  PseudoInstExpansion<(BEQInst ZERO, ZERO, opnd:$offset)> {
   let isBranch = 1;
   let isTerminator = 1;
   let isBarrier = 1;
@@ -1724,7 +1719,7 @@ class ExtBase<string opstr, RegisterOperand RO, Operand PosOpnd,
               Operand SizeOpnd, PatFrag PosImm, PatFrag SizeImm,
               SDPatternOperator Op = null_frag> :
   InstSE<(outs RO:$rt), (ins RO:$rs, PosOpnd:$pos, SizeOpnd:$size),
-         !strconcat(opstr, " $rt, $rs, $pos, $size"),
+         !strconcat(opstr, "\t$rt, $rs, $pos, $size"),
          [(set RO:$rt, (Op RO:$rs, PosImm:$pos, SizeImm:$size))], II_EXT,
          FrmR, opstr>, ISA_MIPS32R2;
 
@@ -1732,7 +1727,7 @@ class ExtBase<string opstr, RegisterOperand RO, Operand PosOpnd,
 class InsBase<string opstr, RegisterOperand RO, Operand PosOpnd,
               Operand SizeOpnd, PatFrag PosImm, PatFrag SizeImm>:
   InstSE<(outs RO:$rt), (ins RO:$rs, PosOpnd:$pos, SizeOpnd:$size, RO:$src),
-         !strconcat(opstr, " $rt, $rs, $pos, $size"),
+         !strconcat(opstr, "\t$rt, $rs, $pos, $size"),
          [(set RO:$rt, (null_frag RO:$rs, PosImm:$pos, SizeImm:$size,
                                   RO:$src))],
          II_INS, FrmR, opstr>, ISA_MIPS32R2 {
@@ -2045,7 +2040,7 @@ def SC : SCBase<"sc", GPR32Opnd>, LW_FM<0x38>, PTR_32, ISA_MIPS2_NOT_32R6_64R6;
 
 /// Jump and Branch Instructions
 def J       : MMRel, JumpFJ<jmptarget, "j", br, bb, "j">, FJ<2>,
-              AdditionalRequires<[RelocNotPIC]>, IsBranch;
+              AdditionalRequires<[RelocNotPIC, NotInMicroMips]>, IsBranch;
 def JR      : MMRel, IndirectBranch<"jr", GPR32Opnd>, MTLO_FM<8>, ISA_MIPS1_NOT_32R6_64R6; 
 def BEQ     : MMRel, CBranch<"beq", brtarget, seteq, GPR32Opnd>, BEQ_FM<4>;
 def BEQL    : MMRel, CBranchLikely<"beql", brtarget, GPR32Opnd>,
@@ -2069,7 +2064,8 @@ def BLTZ    : MMRel, CBranchZero<"bltz", brtarget, setlt, GPR32Opnd>,
               BGEZ_FM<1, 0>;
 def BLTZL   : MMRel, CBranchZeroLikely<"bltzl", brtarget, GPR32Opnd>,
               BGEZ_FM<1, 2>, ISA_MIPS2_NOT_32R6_64R6;
-def B       : UncondBranch<BEQ>;
+def B       : UncondBranch<BEQ, brtarget>,
+              AdditionalRequires<[NotInMicroMips]>;
 
 def JAL  : MMRel, JumpLink<"jal", calltarget>, FJ<3>;
 let AdditionalPredicates = [NotInMicroMips] in {
@@ -3012,10 +3008,6 @@ include "MicroMipsInstrFPU.td"
 // Micromips r6
 include "MicroMips32r6InstrFormats.td"
 include "MicroMips32r6InstrInfo.td"
-
-// Micromips64 r6
-include "MicroMips64r6InstrFormats.td"
-include "MicroMips64r6InstrInfo.td"
 
 // Micromips DSP
 include "MicroMipsDSPInstrFormats.td"

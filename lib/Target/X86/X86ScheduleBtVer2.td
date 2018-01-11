@@ -135,6 +135,30 @@ def : WriteRes<WriteLEA, [JALU01]>;
 
 defm : JWriteResIntPair<WriteShift, JALU01, 1>;
 
+def WriteSHLDrri : SchedWriteRes<[JALU01]> {
+  let Latency = 3;
+  let ResourceCycles = [6];
+  let NumMicroOps = 6;
+}
+def: InstRW<[WriteSHLDrri], (instregex "SHLD(16|32|64)rri8")>;
+def: InstRW<[WriteSHLDrri], (instregex "SHRD(16|32|64)rri8")>;
+
+def WriteSHLDrrCL : SchedWriteRes<[JALU01]> {
+  let Latency = 4;
+  let ResourceCycles = [8];
+  let NumMicroOps = 7;
+}
+def: InstRW<[WriteSHLDrrCL], (instregex "SHLD(16|32|64)rrCL")>;
+def: InstRW<[WriteSHLDrrCL], (instregex "SHRD(16|32|64)rrCL")>;
+
+def WriteSHLDm : SchedWriteRes<[JLAGU, JALU01]> {
+  let Latency = 9;
+  let ResourceCycles = [1, 22];
+  let NumMicroOps = 8;
+}
+def: InstRW<[WriteSHLDm], (instregex "SHLD(16|32|64)mr(i8|CL)")>;
+def: InstRW<[WriteSHLDm], (instregex "SHRD(16|32|64)mr(i8|CL)")>;
+
 ////////////////////////////////////////////////////////////////////////////////
 // Loads, stores, and moves, not folded with other operations.
 // FIXME: Split x86 and SSE load/store/moves
@@ -142,7 +166,10 @@ defm : JWriteResIntPair<WriteShift, JALU01, 1>;
 
 def : WriteRes<WriteLoad,  [JLAGU]> { let Latency = 5; }
 def : WriteRes<WriteStore, [JSAGU]>;
-def : WriteRes<WriteMove,  [JAny]>;
+def : WriteRes<WriteMove,  [JALU01]>;
+
+// Treat misc copies as a move.
+def : InstRW<[WriteMove], (instrs COPY)>;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Idioms that clear a register, like xorps %xmm0, %xmm0.
@@ -168,6 +195,7 @@ defm : JWriteResIntPair<WriteJump,  JALU01, 1>;
 
 defm : JWriteResFpuPair<WriteFAdd,        JFPU0,  3>;
 defm : JWriteResFpuPair<WriteFMul,        JFPU1,  2>;
+defm : JWriteResFpuPair<WriteFMA,         JFPU1,  2>; // NOTE: Doesn't exist on Jaguar.
 defm : JWriteResFpuPair<WriteFRcp,        JFPU1,  2>;
 defm : JWriteResFpuPair<WriteFRsqrt,      JFPU1,  2>;
 defm : JWriteResFpuPair<WriteFShuffle,   JFPU01,  1>;
@@ -199,11 +227,13 @@ defm : JWriteResFpuPair<WriteCvtF2F,    JFPU1,  3>; // Float -> Float size conve
 
 def : WriteRes<WriteFVarBlend, [JFPU01]> {
   let Latency = 2;
-  let ResourceCycles = [2];
+  let ResourceCycles = [4];
+  let NumMicroOps = 3;
 }
 def : WriteRes<WriteFVarBlendLd, [JLAGU, JFPU01]> {
   let Latency = 7;
-  let ResourceCycles = [1, 2];
+  let ResourceCycles = [1, 4];
+  let NumMicroOps = 3;
 }
 
 // Vector integer operations.
@@ -217,21 +247,20 @@ defm : JWriteResFpuPair<WriteShuffle256, JFPU01, 1>;
 
 def : WriteRes<WriteVarBlend, [JFPU01]> {
   let Latency = 2;
-  let ResourceCycles = [2];
+  let ResourceCycles = [4];
+  let NumMicroOps = 3;
 }
 def : WriteRes<WriteVarBlendLd, [JLAGU, JFPU01]> {
   let Latency = 7;
-  let ResourceCycles = [1, 2];
+  let ResourceCycles = [1, 4];
+  let NumMicroOps = 3;
 }
 
 // FIXME: why do we need to define AVX2 resource on CPU that doesn't have AVX2?
-def : WriteRes<WriteVarVecShift, [JFPU01]> {
-  let Latency = 1;
-  let ResourceCycles = [1];
-}
+def : WriteRes<WriteVarVecShift, [JFPU01]> {}
 def : WriteRes<WriteVarVecShiftLd, [JLAGU, JFPU01]> {
   let Latency = 6;
-  let ResourceCycles = [1, 1];
+  let ResourceCycles = [1, 2];
 }
 
 def : WriteRes<WriteMPSAD, [JFPU0]> {
@@ -249,43 +278,49 @@ def : WriteRes<WriteMPSADLd, [JLAGU, JFPU0]> {
 // FIXME: approximate latencies + pipe dependencies
 ////////////////////////////////////////////////////////////////////////////////
 
-def : WriteRes<WritePCmpIStrM, [JFPU01]> {
-  let Latency = 7;
-  let ResourceCycles = [2];
+def : WriteRes<WritePCmpIStrM, [JFPU1,JFPU0]> {
+  let Latency = 8;
+  let ResourceCycles = [2, 2];
+  let NumMicroOps = 3;
 }
-def : WriteRes<WritePCmpIStrMLd, [JLAGU, JFPU01]> {
-  let Latency = 12;
-  let ResourceCycles = [1, 2];
+def : WriteRes<WritePCmpIStrMLd, [JLAGU, JFPU1, JFPU0]> {
+  let Latency = 13;
+  let ResourceCycles = [1, 2, 2];
+  let NumMicroOps = 3;
 }
 
 // Packed Compare Explicit Length Strings, Return Mask
-def : WriteRes<WritePCmpEStrM, [JFPU01]> {
-  let Latency = 13;
-  let ResourceCycles = [5];
+def : WriteRes<WritePCmpEStrM, [JFPU1, JLAGU, JFPU01,JFPU1, JFPU0]> {
+  let Latency = 14;
+  let ResourceCycles = [5, 5, 5, 5, 5];
+  let NumMicroOps = 9;
 }
-def : WriteRes<WritePCmpEStrMLd, [JLAGU, JFPU01]> {
-  let Latency = 18;
-  let ResourceCycles = [1, 5];
+def : WriteRes<WritePCmpEStrMLd, [JLAGU, JFPU1, JLAGU, JFPU01,JFPU1, JFPU0]> {
+  let Latency = 19;
+  let ResourceCycles = [1, 5, 5, 5, 5, 5];
+  let NumMicroOps = 9;
 }
 
 // Packed Compare Implicit Length Strings, Return Index
-def : WriteRes<WritePCmpIStrI, [JFPU01]> {
-  let Latency = 6;
-  let ResourceCycles = [2];
+def : WriteRes<WritePCmpIStrI, [JFPU1, JFPU0]> {
+  let Latency = 7;
+  let ResourceCycles = [2, 2];
 }
-def : WriteRes<WritePCmpIStrILd, [JLAGU, JFPU01]> {
-  let Latency = 11;
-  let ResourceCycles = [1, 2];
+def : WriteRes<WritePCmpIStrILd, [JLAGU, JFPU1, JFPU0]> {
+  let Latency = 12;
+  let ResourceCycles = [1, 2, 2];
 }
 
 // Packed Compare Explicit Length Strings, Return Index
-def : WriteRes<WritePCmpEStrI, [JFPU01]> {
-  let Latency = 13;
-  let ResourceCycles = [5];
+def : WriteRes<WritePCmpEStrI, [JFPU1, JLAGU, JFPU01,JFPU1, JFPU0]> {
+  let Latency = 14;
+  let ResourceCycles = [5, 5, 5, 5, 5];
+  let NumMicroOps = 9;
 }
-def : WriteRes<WritePCmpEStrILd, [JLAGU, JFPU01]> {
-  let Latency = 18;
-  let ResourceCycles = [1, 5];
+def : WriteRes<WritePCmpEStrILd, [JLAGU, JFPU1, JLAGU, JFPU01,JFPU1, JFPU0]> {
+  let Latency = 19;
+  let ResourceCycles = [1, 5, 5, 5, 5, 5];
+  let NumMicroOps = 9;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -654,17 +689,31 @@ def : InstRW<[WriteVMOVMSK], (instregex "VMOVMSKP(D|S)(Y)?rr")>;
 // and ALU0 in the integer unit is occupied instead.
 def WriteVTESTY: SchedWriteRes<[JFPU01, JFPU0]> {
   let Latency = 4;
-  let ResourceCycles = [4, 2];
+  let ResourceCycles = [2, 2];
+  let NumMicroOps = 3;
 }
 def : InstRW<[WriteVTESTY], (instregex "VTESTP(S|D)Yrr")>;
 def : InstRW<[WriteVTESTY], (instregex "VPTESTYrr")>;
 
 def WriteVTESTYLd: SchedWriteRes<[JLAGU, JFPU01, JFPU0]> {
   let Latency = 9;
-  let ResourceCycles = [1, 4, 2];
+  let ResourceCycles = [1, 2, 2];
+  let NumMicroOps = 3;
 }
 def : InstRW<[WriteVTESTYLd], (instregex "VTESTP(S|D)Yrm")>;
 def : InstRW<[WriteVTESTYLd], (instregex "VPTESTYrm")>;
+
+def WriteVTEST: SchedWriteRes<[JFPU0]> {
+  let Latency = 3;
+}
+def : InstRW<[WriteVTEST], (instregex "VTESTP(S|D)rr")>;
+def : InstRW<[WriteVTEST], (instregex "VPTESTrr")>;
+
+def WriteVTESTLd: SchedWriteRes<[JLAGU, JFPU0]> {
+  let Latency = 8;
+}
+def : InstRW<[WriteVTESTLd], (instregex "VTESTP(S|D)rm")>;
+def : InstRW<[WriteVTESTLd], (instregex "VPTESTrm")>;
 
 def WriteVSQRTYPD: SchedWriteRes<[JFPU1]> {
   let Latency = 54;

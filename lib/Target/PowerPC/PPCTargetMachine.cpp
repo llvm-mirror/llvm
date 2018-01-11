@@ -23,6 +23,7 @@
 #include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/CodeGen/TargetLoweringObjectFile.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/DataLayout.h"
@@ -31,7 +32,6 @@
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/TargetRegistry.h"
-#include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/Transforms/Scalar.h"
 #include <cassert>
@@ -88,6 +88,10 @@ EnableMachineCombinerPass("ppc-machine-combiner",
                           cl::desc("Enable the machine combiner pass"),
                           cl::init(true), cl::Hidden);
 
+static cl::opt<bool>
+  ReduceCRLogical("ppc-reduce-cr-logicals",
+                  cl::desc("Expand eligible cr-logical binary ops to branches"),
+                  cl::init(false), cl::Hidden);
 extern "C" void LLVMInitializePowerPCTarget() {
   // Register the targets
   RegisterTargetMachine<PPCTargetMachine> A(getThePPC32Target());
@@ -97,7 +101,9 @@ extern "C" void LLVMInitializePowerPCTarget() {
   PassRegistry &PR = *PassRegistry::getPassRegistry();
   initializePPCBoolRetToIntPass(PR);
   initializePPCExpandISELPass(PR);
+  initializePPCPreEmitPeepholePass(PR);
   initializePPCTLSDynamicCallPass(PR);
+  initializePPCMIPeepholePass(PR);
 }
 
 /// Return the datalayout string of a subtarget.
@@ -392,6 +398,9 @@ void PPCPassConfig::addMachineSSAOptimization() {
   if (TM->getTargetTriple().getArch() == Triple::ppc64le &&
       !DisableVSXSwapRemoval)
     addPass(createPPCVSXSwapRemovalPass());
+  // Reduce the number of cr-logical ops.
+  if (ReduceCRLogical && getOptLevel() != CodeGenOpt::None)
+    addPass(createPPCReduceCRLogicalsPass());
   // Target-specific peephole cleanups performed after instruction
   // selection.
   if (!DisableMIPeephole) {
@@ -433,6 +442,7 @@ void PPCPassConfig::addPreSched2() {
 }
 
 void PPCPassConfig::addPreEmitPass() {
+  addPass(createPPCPreEmitPeepholePass());
   addPass(createPPCExpandISELPass());
 
   if (getOptLevel() != CodeGenOpt::None)
@@ -441,8 +451,7 @@ void PPCPassConfig::addPreEmitPass() {
   addPass(createPPCBranchSelectionPass(), false);
 }
 
-TargetIRAnalysis PPCTargetMachine::getTargetIRAnalysis() {
-  return TargetIRAnalysis([this](const Function &F) {
-    return TargetTransformInfo(PPCTTIImpl(this, F));
-  });
+TargetTransformInfo
+PPCTargetMachine::getTargetTransformInfo(const Function &F) {
+  return TargetTransformInfo(PPCTTIImpl(this, F));
 }

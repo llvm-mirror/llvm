@@ -811,7 +811,7 @@ def BUFFER_WBINVL1_SC : MUBUF_Invalidate <"buffer_wbinvl1_sc",
 let SubtargetPredicate = HasD16LoadStore in {
 
 defm BUFFER_LOAD_UBYTE_D16 : MUBUF_Pseudo_Loads <
-  "buffer_load_ubyte_d16", VGPR_32, i32
+  "buffer_load_ubyte_d16", VGPR_32, i32, null_frag, 1
 >;
 
 defm BUFFER_LOAD_UBYTE_D16_HI : MUBUF_Pseudo_Loads <
@@ -819,7 +819,7 @@ defm BUFFER_LOAD_UBYTE_D16_HI : MUBUF_Pseudo_Loads <
 >;
 
 defm BUFFER_LOAD_SBYTE_D16 : MUBUF_Pseudo_Loads <
-  "buffer_load_sbyte_d16", VGPR_32, i32
+  "buffer_load_sbyte_d16", VGPR_32, i32, null_frag, 1
 >;
 
 defm BUFFER_LOAD_SBYTE_D16_HI : MUBUF_Pseudo_Loads <
@@ -827,7 +827,7 @@ defm BUFFER_LOAD_SBYTE_D16_HI : MUBUF_Pseudo_Loads <
 >;
 
 defm BUFFER_LOAD_SHORT_D16 : MUBUF_Pseudo_Loads <
-  "buffer_load_short_d16", VGPR_32, i32
+  "buffer_load_short_d16", VGPR_32, i32, null_frag, 1
 >;
 
 defm BUFFER_LOAD_SHORT_D16_HI : MUBUF_Pseudo_Loads <
@@ -966,12 +966,12 @@ multiclass MUBUF_StoreIntrinsicPat<SDPatternOperator name, ValueType vt,
   >;
 }
 
-defm : MUBUF_StoreIntrinsicPat<int_amdgcn_buffer_store_format, f32, "BUFFER_STORE_FORMAT_X">;
-defm : MUBUF_StoreIntrinsicPat<int_amdgcn_buffer_store_format, v2f32, "BUFFER_STORE_FORMAT_XY">;
-defm : MUBUF_StoreIntrinsicPat<int_amdgcn_buffer_store_format, v4f32, "BUFFER_STORE_FORMAT_XYZW">;
-defm : MUBUF_StoreIntrinsicPat<int_amdgcn_buffer_store, f32, "BUFFER_STORE_DWORD">;
-defm : MUBUF_StoreIntrinsicPat<int_amdgcn_buffer_store, v2f32, "BUFFER_STORE_DWORDX2">;
-defm : MUBUF_StoreIntrinsicPat<int_amdgcn_buffer_store, v4f32, "BUFFER_STORE_DWORDX4">;
+defm : MUBUF_StoreIntrinsicPat<SIbuffer_store_format, f32, "BUFFER_STORE_FORMAT_X">;
+defm : MUBUF_StoreIntrinsicPat<SIbuffer_store_format, v2f32, "BUFFER_STORE_FORMAT_XY">;
+defm : MUBUF_StoreIntrinsicPat<SIbuffer_store_format, v4f32, "BUFFER_STORE_FORMAT_XYZW">;
+defm : MUBUF_StoreIntrinsicPat<SIbuffer_store, f32, "BUFFER_STORE_DWORD">;
+defm : MUBUF_StoreIntrinsicPat<SIbuffer_store, v2f32, "BUFFER_STORE_DWORDX2">;
+defm : MUBUF_StoreIntrinsicPat<SIbuffer_store, v4f32, "BUFFER_STORE_DWORDX4">;
 
 //===----------------------------------------------------------------------===//
 // buffer_atomic patterns
@@ -1013,19 +1013,19 @@ multiclass BufferAtomicPatterns<SDPatternOperator name, string opcode> {
   >;
 }
 
-defm : BufferAtomicPatterns<int_amdgcn_buffer_atomic_swap, "BUFFER_ATOMIC_SWAP">;
-defm : BufferAtomicPatterns<int_amdgcn_buffer_atomic_add, "BUFFER_ATOMIC_ADD">;
-defm : BufferAtomicPatterns<int_amdgcn_buffer_atomic_sub, "BUFFER_ATOMIC_SUB">;
-defm : BufferAtomicPatterns<int_amdgcn_buffer_atomic_smin, "BUFFER_ATOMIC_SMIN">;
-defm : BufferAtomicPatterns<int_amdgcn_buffer_atomic_umin, "BUFFER_ATOMIC_UMIN">;
-defm : BufferAtomicPatterns<int_amdgcn_buffer_atomic_smax, "BUFFER_ATOMIC_SMAX">;
-defm : BufferAtomicPatterns<int_amdgcn_buffer_atomic_umax, "BUFFER_ATOMIC_UMAX">;
-defm : BufferAtomicPatterns<int_amdgcn_buffer_atomic_and, "BUFFER_ATOMIC_AND">;
-defm : BufferAtomicPatterns<int_amdgcn_buffer_atomic_or, "BUFFER_ATOMIC_OR">;
-defm : BufferAtomicPatterns<int_amdgcn_buffer_atomic_xor, "BUFFER_ATOMIC_XOR">;
+defm : BufferAtomicPatterns<SIbuffer_atomic_swap, "BUFFER_ATOMIC_SWAP">;
+defm : BufferAtomicPatterns<SIbuffer_atomic_add, "BUFFER_ATOMIC_ADD">;
+defm : BufferAtomicPatterns<SIbuffer_atomic_sub, "BUFFER_ATOMIC_SUB">;
+defm : BufferAtomicPatterns<SIbuffer_atomic_smin, "BUFFER_ATOMIC_SMIN">;
+defm : BufferAtomicPatterns<SIbuffer_atomic_umin, "BUFFER_ATOMIC_UMIN">;
+defm : BufferAtomicPatterns<SIbuffer_atomic_smax, "BUFFER_ATOMIC_SMAX">;
+defm : BufferAtomicPatterns<SIbuffer_atomic_umax, "BUFFER_ATOMIC_UMAX">;
+defm : BufferAtomicPatterns<SIbuffer_atomic_and, "BUFFER_ATOMIC_AND">;
+defm : BufferAtomicPatterns<SIbuffer_atomic_or, "BUFFER_ATOMIC_OR">;
+defm : BufferAtomicPatterns<SIbuffer_atomic_xor, "BUFFER_ATOMIC_XOR">;
 
 def : GCNPat<
-  (int_amdgcn_buffer_atomic_cmpswap
+  (SIbuffer_atomic_cmpswap
       i32:$data, i32:$cmp, v4i32:$rsrc, 0,
       (MUBUFIntrinsicOffset i32:$soffset, i16:$offset),
       imm:$slc),
@@ -1037,7 +1037,7 @@ def : GCNPat<
 >;
 
 def : GCNPat<
-  (int_amdgcn_buffer_atomic_cmpswap
+  (SIbuffer_atomic_cmpswap
       i32:$data, i32:$cmp, v4i32:$rsrc, i32:$vindex,
       (MUBUFIntrinsicOffset i32:$soffset, i16:$offset),
       imm:$slc),
@@ -1049,7 +1049,7 @@ def : GCNPat<
 >;
 
 def : GCNPat<
-  (int_amdgcn_buffer_atomic_cmpswap
+  (SIbuffer_atomic_cmpswap
       i32:$data, i32:$cmp, v4i32:$rsrc, 0,
       (MUBUFIntrinsicVOffset i32:$soffset, i16:$offset, i32:$voffset),
       imm:$slc),
@@ -1061,7 +1061,7 @@ def : GCNPat<
 >;
 
 def : GCNPat<
-  (int_amdgcn_buffer_atomic_cmpswap
+  (SIbuffer_atomic_cmpswap
       i32:$data, i32:$cmp, v4i32:$rsrc, i32:$vindex,
       (MUBUFIntrinsicVOffset i32:$soffset, i16:$offset, i32:$voffset),
       imm:$slc),
@@ -1169,6 +1169,36 @@ multiclass MUBUFScratchLoadPat_Hi16 <MUBUF_Pseudo InstrOffen,
   >;
 }
 
+multiclass MUBUFScratchLoadPat_Lo16 <MUBUF_Pseudo InstrOffen,
+                                     MUBUF_Pseudo InstrOffset,
+                                     ValueType vt, PatFrag ld> {
+  def : GCNPat <
+    (build_vector (vt (ld (MUBUFScratchOffen v4i32:$srsrc, i32:$vaddr,
+                                             i32:$soffset, u16imm:$offset))),
+                  (vt (Hi16Elt vt:$hi))),
+    (v2i16 (InstrOffen $vaddr, $srsrc, $soffset, $offset, 0, 0, 0, $hi))
+  >;
+
+  def : GCNPat <
+    (build_vector (f16 (bitconvert (vt (ld (MUBUFScratchOffen v4i32:$srsrc, i32:$vaddr,
+                                                              i32:$soffset, u16imm:$offset))))),
+                  (f16 (Hi16Elt f16:$hi))),
+    (v2f16 (InstrOffen $vaddr, $srsrc, $soffset, $offset, 0, 0, 0, $hi))
+  >;
+
+  def : GCNPat <
+    (build_vector (vt (ld (MUBUFScratchOffset v4i32:$srsrc, i32:$soffset, u16imm:$offset))),
+                  (vt (Hi16Elt vt:$hi))),
+    (v2i16 (InstrOffset $srsrc, $soffset, $offset, 0, 0, 0, $hi))
+  >;
+
+  def : GCNPat <
+    (build_vector (f16 (bitconvert (vt (ld (MUBUFScratchOffset v4i32:$srsrc, i32:$soffset, u16imm:$offset))))),
+                  (f16 (Hi16Elt f16:$hi))),
+    (v2f16 (InstrOffset $srsrc, $soffset, $offset, 0, 0, 0, $hi))
+  >;
+}
+
 defm : MUBUFScratchLoadPat <BUFFER_LOAD_SBYTE_OFFEN, BUFFER_LOAD_SBYTE_OFFSET, i32, sextloadi8_private>;
 defm : MUBUFScratchLoadPat <BUFFER_LOAD_UBYTE_OFFEN, BUFFER_LOAD_UBYTE_OFFSET, i32, az_extloadi8_private>;
 defm : MUBUFScratchLoadPat <BUFFER_LOAD_SBYTE_OFFEN, BUFFER_LOAD_SBYTE_OFFSET, i16, sextloadi8_private>;
@@ -1184,6 +1214,10 @@ let OtherPredicates = [HasD16LoadStore] in {
 defm : MUBUFScratchLoadPat_Hi16<BUFFER_LOAD_SHORT_D16_HI_OFFEN, BUFFER_LOAD_SHORT_D16_HI_OFFSET, i16, load_private>;
 defm : MUBUFScratchLoadPat_Hi16<BUFFER_LOAD_UBYTE_D16_HI_OFFEN, BUFFER_LOAD_UBYTE_D16_HI_OFFSET, i16, az_extloadi8_private>;
 defm : MUBUFScratchLoadPat_Hi16<BUFFER_LOAD_SBYTE_D16_HI_OFFEN, BUFFER_LOAD_SBYTE_D16_HI_OFFSET, i16, sextloadi8_private>;
+
+defm : MUBUFScratchLoadPat_Lo16<BUFFER_LOAD_SHORT_D16_OFFEN, BUFFER_LOAD_SHORT_D16_OFFSET, i16, load_private>;
+defm : MUBUFScratchLoadPat_Lo16<BUFFER_LOAD_UBYTE_D16_OFFEN, BUFFER_LOAD_UBYTE_D16_OFFSET, i16, az_extloadi8_private>;
+defm : MUBUFScratchLoadPat_Lo16<BUFFER_LOAD_SBYTE_D16_OFFEN, BUFFER_LOAD_SBYTE_D16_OFFSET, i16, sextloadi8_private>;
 }
 
 // BUFFER_LOAD_DWORD*, addr64=0

@@ -16,18 +16,17 @@
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
-#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/MachineTraceMetrics.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSchedule.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 
 using namespace llvm;
 
@@ -282,9 +281,16 @@ bool MachineCombiner::improvesCriticalPathLen(
   // of the original code sequence. This may allow the transform to proceed
   // even if the instruction depths (data dependency cycles) become worse.
 
-  unsigned NewRootLatency = getLatency(Root, NewRoot, BlockTrace);
-  unsigned RootLatency = 0;
+  // Account for the latency of the inserted and deleted instructions by
+  // adding up their latencies. This assumes that the inserted and deleted
+  // instructions are dependent instruction chains, which might not hold
+  // in all cases.
+  unsigned NewRootLatency = 0;
+  for (unsigned i = 0; i < InsInstrs.size() - 1; i++)
+    NewRootLatency += TSchedModel.computeInstrLatency(InsInstrs[i]);
+  NewRootLatency += getLatency(Root, NewRoot, BlockTrace);
 
+  unsigned RootLatency = 0;
   for (auto I : DelInstrs)
     RootLatency += TSchedModel.computeInstrLatency(I);
 
@@ -542,7 +548,7 @@ bool MachineCombiner::runOnMachineFunction(MachineFunction &MF) {
   MLI = &getAnalysis<MachineLoopInfo>();
   Traces = &getAnalysis<MachineTraceMetrics>();
   MinInstr = nullptr;
-  OptSize = MF.getFunction()->optForSize();
+  OptSize = MF.getFunction().optForSize();
 
   DEBUG(dbgs() << getPassName() << ": " << MF.getName() << '\n');
   if (!TII->useMachineCombiner()) {

@@ -27,21 +27,21 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineOperand.h"
+#include "llvm/CodeGen/TargetFrameLowering.h"
+#include "llvm/CodeGen/TargetLoweringObjectFile.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/GlobalVariable.h"
-#include "llvm/MC/MachineLocation.h"
 #include "llvm/MC/MCSection.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
+#include "llvm/MC/MachineLocation.h"
 #include "llvm/Support/Casting.h"
-#include "llvm/CodeGen/TargetFrameLowering.h"
-#include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -638,6 +638,7 @@ void DwarfCompileUnit::constructAbstractSubprogramScopeDIE(
   auto *SP = cast<DISubprogram>(Scope->getScopeNode());
 
   DIE *ContextDIE;
+  DwarfCompileUnit *ContextCU = this;
 
   if (includeMinimalInlineScopes())
     ContextDIE = &getUnitDie();
@@ -648,18 +649,23 @@ void DwarfCompileUnit::constructAbstractSubprogramScopeDIE(
   else if (auto *SPDecl = SP->getDeclaration()) {
     ContextDIE = &getUnitDie();
     getOrCreateSubprogramDIE(SPDecl);
-  } else
+  } else {
     ContextDIE = getOrCreateContextDIE(resolve(SP->getScope()));
+    // The scope may be shared with a subprogram that has already been
+    // constructed in another CU, in which case we need to construct this
+    // subprogram in the same CU.
+    ContextCU = DD->lookupCU(ContextDIE->getUnitDie());
+  }
 
   // Passing null as the associated node because the abstract definition
   // shouldn't be found by lookup.
-  AbsDef = &createAndAddDIE(dwarf::DW_TAG_subprogram, *ContextDIE, nullptr);
-  applySubprogramAttributesToDefinition(SP, *AbsDef);
+  AbsDef = &ContextCU->createAndAddDIE(dwarf::DW_TAG_subprogram, *ContextDIE, nullptr);
+  ContextCU->applySubprogramAttributesToDefinition(SP, *AbsDef);
 
-  if (!includeMinimalInlineScopes())
-    addUInt(*AbsDef, dwarf::DW_AT_inline, None, dwarf::DW_INL_inlined);
-  if (DIE *ObjectPointer = createAndAddScopeChildren(Scope, *AbsDef))
-    addDIEEntry(*AbsDef, dwarf::DW_AT_object_pointer, *ObjectPointer);
+  if (!ContextCU->includeMinimalInlineScopes())
+    ContextCU->addUInt(*AbsDef, dwarf::DW_AT_inline, None, dwarf::DW_INL_inlined);
+  if (DIE *ObjectPointer = ContextCU->createAndAddScopeChildren(Scope, *AbsDef))
+    ContextCU->addDIEEntry(*AbsDef, dwarf::DW_AT_object_pointer, *ObjectPointer);
 }
 
 DIE *DwarfCompileUnit::constructImportedEntityDIE(

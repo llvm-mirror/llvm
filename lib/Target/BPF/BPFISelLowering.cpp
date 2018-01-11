@@ -36,7 +36,7 @@ using namespace llvm;
 static void fail(const SDLoc &DL, SelectionDAG &DAG, const Twine &Msg) {
   MachineFunction &MF = DAG.getMachineFunction();
   DAG.getContext()->diagnose(
-      DiagnosticInfoUnsupported(*MF.getFunction(), Msg, DL.getDebugLoc()));
+      DiagnosticInfoUnsupported(MF.getFunction(), Msg, DL.getDebugLoc()));
 }
 
 static void fail(const SDLoc &DL, SelectionDAG &DAG, const char *Msg,
@@ -48,7 +48,7 @@ static void fail(const SDLoc &DL, SelectionDAG &DAG, const char *Msg,
   Val->print(OS);
   OS.flush();
   DAG.getContext()->diagnose(
-      DiagnosticInfoUnsupported(*MF.getFunction(), Str, DL.getDebugLoc()));
+      DiagnosticInfoUnsupported(MF.getFunction(), Str, DL.getDebugLoc()));
 }
 
 BPFTargetLowering::BPFTargetLowering(const TargetMachine &TM,
@@ -227,7 +227,7 @@ SDValue BPFTargetLowering::LowerFormalArguments(
     }
   }
 
-  if (IsVarArg || MF.getFunction()->hasStructRetAttr()) {
+  if (IsVarArg || MF.getFunction().hasStructRetAttr()) {
     fail(DL, DAG, "functions with VarArgs or StructRet are not supported");
   }
 
@@ -329,14 +329,6 @@ SDValue BPFTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   // turn it into a TargetGlobalAddress node so that legalize doesn't hack it.
   // Likewise ExternalSymbol -> TargetExternalSymbol.
   if (GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(Callee)) {
-    auto GV = G->getGlobal();
-    fail(CLI.DL, DAG,
-         "A call to global function '" + StringRef(GV->getName())
-         + "' is not supported. "
-         + (GV->isDeclaration() ?
-           "Only calls to predefined BPF helpers are allowed." :
-           "Please use __attribute__((always_inline) to make sure"
-           " this function is inlined."));
     Callee = DAG.getTargetGlobalAddress(G->getGlobal(), CLI.DL, PtrVT,
                                         G->getOffset(), 0);
   } else if (ExternalSymbolSDNode *E = dyn_cast<ExternalSymbolSDNode>(Callee)) {
@@ -390,7 +382,7 @@ BPFTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
   // CCState - Info about the registers and stack slot.
   CCState CCInfo(CallConv, IsVarArg, MF, RVLocs, *DAG.getContext());
 
-  if (MF.getFunction()->getReturnType()->isAggregateType()) {
+  if (MF.getFunction().getReturnType()->isAggregateType()) {
     fail(DL, DAG, "only integer returns supported");
     return DAG.getNode(Opc, DL, MVT::Other, Chain);
   }

@@ -16,6 +16,7 @@
 #define LLVM_ANALYSIS_BLOCKFREQUENCYINFOIMPL_H
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/GraphTraits.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/PostOrderIterator.h"
@@ -1155,35 +1156,55 @@ bool BlockFrequencyInfoImpl<BT>::computeMassInLoop(LoopData &Loop) {
     DEBUG(dbgs() << "isIrreducible = true\n");
     Distribution Dist;
     unsigned NumHeadersWithWeight = 0;
+    Optional<uint64_t> MinHeaderWeight;
+    DenseSet<uint32_t> HeadersWithoutWeight;
+    HeadersWithoutWeight.reserve(Loop.NumHeaders);
     for (uint32_t H = 0; H < Loop.NumHeaders; ++H) {
       auto &HeaderNode = Loop.Nodes[H];
       const BlockT *Block = getBlock(HeaderNode);
       IsIrrLoopHeader.set(Loop.Nodes[H].Index);
       Optional<uint64_t> HeaderWeight = Block->getIrrLoopHeaderWeight();
-      if (!HeaderWeight)
+      if (!HeaderWeight) {
+        DEBUG(dbgs() << "Missing irr loop header metadata on "
+              << getBlockName(HeaderNode) << "\n");
+        HeadersWithoutWeight.insert(H);
         continue;
+      }
       DEBUG(dbgs() << getBlockName(HeaderNode)
             << " has irr loop header weight " << HeaderWeight.getValue()
             << "\n");
       NumHeadersWithWeight++;
       uint64_t HeaderWeightValue = HeaderWeight.getValue();
-      if (HeaderWeightValue)
+      if (!MinHeaderWeight || HeaderWeightValue < MinHeaderWeight)
+        MinHeaderWeight = HeaderWeightValue;
+      if (HeaderWeightValue) {
         Dist.addLocal(HeaderNode, HeaderWeightValue);
-    }
-    if (NumHeadersWithWeight != Loop.NumHeaders) {
-      // Not all headers have a weight metadata. Distribute weight evenly.
-      Dist = Distribution();
-      for (uint32_t H = 0; H < Loop.NumHeaders; ++H) {
-        auto &HeaderNode = Loop.Nodes[H];
-        Dist.addLocal(HeaderNode, 1);
       }
+    }
+    // As a heuristic, if some headers don't have a weight, give them the
+    // minimium weight seen (not to disrupt the existing trends too much by
+    // using a weight that's in the general range of the other headers' weights,
+    // and the minimum seems to perform better than the average.)
+    // FIXME: better update in the passes that drop the header weight.
+    // If no headers have a weight, give them even weight (use weight 1).
+    if (!MinHeaderWeight)
+      MinHeaderWeight = 1;
+    for (uint32_t H : HeadersWithoutWeight) {
+      auto &HeaderNode = Loop.Nodes[H];
+      assert(!getBlock(HeaderNode)->getIrrLoopHeaderWeight() &&
+             "Shouldn't have a weight metadata");
+      uint64_t MinWeight = MinHeaderWeight.getValue();
+      DEBUG(dbgs() << "Giving weight " << MinWeight
+            << " to " << getBlockName(HeaderNode) << "\n");
+      if (MinWeight)
+        Dist.addLocal(HeaderNode, MinWeight);
     }
     distributeIrrLoopHeaderMass(Dist);
     for (const BlockNode &M : Loop.Nodes)
       if (!propagateMassToSuccessors(&Loop, M))
         llvm_unreachable("unhandled irreducible control flow");
-    if (NumHeadersWithWeight != Loop.NumHeaders)
-      // Not all headers have a weight metadata. Adjust header mass.
+    if (NumHeadersWithWeight == 0)
+      // No headers have a metadata. Adjust header mass.
       adjustLoopHeaderMass(Loop);
   } else {
     Working[Loop.getHeader().Index].getMass() = BlockMass::getFull();
@@ -1293,9 +1314,12 @@ BlockFrequencyInfoImpl<BT>::propagateMassToSuccessors(LoopData *OuterLoop,
       return false;
   } else {
     const BlockT *BB = getBlock(Node);
-    for (const auto Succ : children<const BlockT *>(BB))
-      if (!addToDist(Dist, OuterLoop, Node, getNode(Succ),
-                     getWeightFromBranchProb(BPI->getEdgeProbability(BB, Succ))))
+    for (auto SI = GraphTraits<const BlockT *>::child_begin(BB),
+              SE = GraphTraits<const BlockT *>::child_end(BB);
+         SI != SE; ++SI)
+      if (!addToDist(
+              Dist, OuterLoop, Node, getNode(*SI),
+              getWeightFromBranchProb(BPI->getEdgeProbability(BB, SI))))
         // Irreducible backedge.
         return false;
   }
@@ -1317,7 +1341,7 @@ raw_ostream &BlockFrequencyInfoImpl<BT>::print(raw_ostream &OS) const {
         << ", int = " << getBlockFreq(&BB).getFrequency();
     if (Optional<uint64_t> ProfileCount =
         BlockFrequencyInfoImplBase::getBlockProfileCount(
-            *F->getFunction(), getNode(&BB)))
+            F->getFunction(), getNode(&BB)))
       OS << ", count = " << ProfileCount.getValue();
     if (Optional<uint64_t> IrrLoopHeaderWeight =
         BB.getIrrLoopHeaderWeight())

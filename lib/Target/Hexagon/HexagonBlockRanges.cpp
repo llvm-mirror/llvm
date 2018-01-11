@@ -17,10 +17,10 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -368,7 +368,7 @@ void HexagonBlockRanges::computeInitialLiveRanges(InstrIndexMap &IndexMap,
       }
     }
     // Defs and clobbers can overlap, e.g.
-    // %D0<def,dead> = COPY %vreg5, %R0<imp-def>, %R1<imp-def>
+    // dead %d0 = COPY %5, implicit-def %r0, implicit-def %r1
     for (RegisterRef R : Defs)
       Clobbers.erase(R);
 
@@ -531,7 +531,7 @@ raw_ostream &llvm::operator<<(raw_ostream &OS,
                               const HexagonBlockRanges::PrintRangeMap &P) {
   for (auto &I : P.Map) {
     const HexagonBlockRanges::RangeList &RL = I.second;
-    OS << PrintReg(I.first.Reg, &P.TRI, I.first.Sub) << " -> " << RL << "\n";
+    OS << printReg(I.first.Reg, &P.TRI, I.first.Sub) << " -> " << RL << "\n";
   }
   return OS;
 }

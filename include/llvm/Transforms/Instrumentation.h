@@ -22,20 +22,6 @@
 #include <string>
 #include <vector>
 
-#if defined(__GNUC__) && defined(__linux__) && !defined(ANDROID)
-inline void *getDFSanArgTLSPtrForJIT() {
-  extern __thread __attribute__((tls_model("initial-exec")))
-    void *__dfsan_arg_tls;
-  return (void *)&__dfsan_arg_tls;
-}
-
-inline void *getDFSanRetValTLSPtrForJIT() {
-  extern __thread __attribute__((tls_model("initial-exec")))
-    void *__dfsan_retval_tls;
-  return (void *)&__dfsan_retval_tls;
-}
-#endif
-
 namespace llvm {
 
 class FunctionPass;
@@ -91,9 +77,12 @@ ModulePass *createPGOIndirectCallPromotionLegacyPass(bool InLTO = false,
                                                      bool SamplePGO = false);
 FunctionPass *createPGOMemOPSizeOptLegacyPass();
 
-// Helper function to check if it is legal to promote indirect call \p Inst
-// to a direct call of function \p F. Stores the reason in \p Reason.
-bool isLegalToPromote(Instruction *Inst, Function *F, const char **Reason);
+// The pgo-specific indirect call promotion function declared below is used by
+// the pgo-driven indirect call promotion and sample profile passes. It's a
+// wrapper around llvm::promoteCall, et al. that additionally computes !prof
+// metadata. We place it in a pgo namespace so it's not confused with the
+// generic utilities.
+namespace pgo {
 
 // Helper function that transforms Inst (either an indirect-call instruction, or
 // an invoke instruction , to a conditional call to F. This is like:
@@ -112,6 +101,7 @@ Instruction *promoteIndirectCall(Instruction *Inst, Function *F, uint64_t Count,
                                  uint64_t TotalCount,
                                  bool AttachProfToDirectCall,
                                  OptimizationRemarkEmitter *ORE);
+} // namespace pgo
 
 /// Options for the frontend instrumentation based profiling pass.
 struct InstrProfOptions {
@@ -142,6 +132,8 @@ ModulePass *createAddressSanitizerModulePass(bool CompileKernel = false,
 // Insert MemorySanitizer instrumentation (detection of uninitialized reads)
 FunctionPass *createMemorySanitizerPass(int TrackOrigins = 0,
                                         bool Recover = false);
+
+FunctionPass *createHWAddressSanitizerPass(bool Recover = false);
 
 // Insert ThreadSanitizer (race detection) instrumentation
 FunctionPass *createThreadSanitizerPass();
@@ -193,18 +185,6 @@ struct SanitizerCoverageOptions {
 // Insert SanitizerCoverage instrumentation.
 ModulePass *createSanitizerCoverageModulePass(
     const SanitizerCoverageOptions &Options = SanitizerCoverageOptions());
-
-#if defined(__GNUC__) && defined(__linux__) && !defined(ANDROID)
-inline ModulePass *createDataFlowSanitizerPassForJIT(
-    const std::vector<std::string> &ABIListFiles = std::vector<std::string>()) {
-  return createDataFlowSanitizerPass(ABIListFiles, getDFSanArgTLSPtrForJIT,
-                                     getDFSanRetValTLSPtrForJIT);
-}
-#endif
-
-// BoundsChecking - This pass instruments the code to perform run-time bounds
-// checking on loads, stores, and other memory intrinsics.
-FunctionPass *createBoundsCheckingPass();
 
 /// \brief Calculate what to divide by to scale counts.
 ///

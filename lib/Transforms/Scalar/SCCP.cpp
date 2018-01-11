@@ -523,10 +523,8 @@ private:
       DEBUG(dbgs() << "Marking Edge Executable: " << Source->getName()
             << " -> " << Dest->getName() << '\n');
 
-      PHINode *PN;
-      for (BasicBlock::iterator I = Dest->begin();
-           (PN = dyn_cast<PHINode>(I)); ++I)
-        visitPHINode(*PN);
+      for (PHINode &PN : Dest->phis())
+        visitPHINode(PN);
     }
   }
 
@@ -1615,8 +1613,15 @@ static bool tryToReplaceWithConstantRange(SCCPSolver &Solver, Value *V) {
     if (!Icmp || !Solver.isBlockExecutable(Icmp->getParent()))
       continue;
 
-    auto A = Solver.getLatticeValueFor(Icmp->getOperand(0));
-    auto B = Solver.getLatticeValueFor(Icmp->getOperand(1));
+    auto getIcmpLatticeValue = [&](Value *Op) {
+      if (auto *C = dyn_cast<Constant>(Op))
+        return ValueLatticeElement::get(C);
+      return Solver.getLatticeValueFor(Op);
+    };
+
+    ValueLatticeElement A = getIcmpLatticeValue(Icmp->getOperand(0));
+    ValueLatticeElement B = getIcmpLatticeValue(Icmp->getOperand(1));
+
     Constant *C = nullptr;
     if (A.satisfiesPredicate(Icmp->getPredicate(), B))
       C = ConstantInt::getTrue(Icmp->getType());
@@ -1866,8 +1871,10 @@ static bool runIPSCCP(Module &M, const DataLayout &DL,
     if (Solver.isBlockExecutable(&F.front()))
       for (Function::arg_iterator AI = F.arg_begin(), E = F.arg_end(); AI != E;
            ++AI) {
-        if (!AI->use_empty() && tryToReplaceWithConstant(Solver, &*AI))
+        if (!AI->use_empty() && tryToReplaceWithConstant(Solver, &*AI)) {
           ++IPNumArgsElimed;
+          continue;
+        }
 
         if (!AI->use_empty() && tryToReplaceWithConstantRange(Solver, &*AI))
           ++IPNumRangeInfoUsed;
@@ -1920,9 +1927,32 @@ static bool runIPSCCP(Module &M, const DataLayout &DL,
         if (!I) continue;
 
         bool Folded = ConstantFoldTerminator(I->getParent());
-        assert(Folded &&
-              "Expect TermInst on constantint or blockaddress to be folded");
-        (void) Folded;
+        if (!Folded) {
+          // The constant folder may not have been able to fold the terminator
+          // if this is a branch or switch on undef.  Fold it manually as a
+          // branch to the first successor.
+#ifndef NDEBUG
+          if (auto *BI = dyn_cast<BranchInst>(I)) {
+            assert(BI->isConditional() && isa<UndefValue>(BI->getCondition()) &&
+                   "Branch should be foldable!");
+          } else if (auto *SI = dyn_cast<SwitchInst>(I)) {
+            assert(isa<UndefValue>(SI->getCondition()) && "Switch should fold");
+          } else {
+            llvm_unreachable("Didn't fold away reference to block!");
+          }
+#endif
+
+          // Make this an uncond branch to the first successor.
+          TerminatorInst *TI = I->getParent()->getTerminator();
+          BranchInst::Create(TI->getSuccessor(0), TI);
+
+          // Remove entries in successor phi nodes to remove edges.
+          for (unsigned i = 1, e = TI->getNumSuccessors(); i != e; ++i)
+            TI->getSuccessor(i)->removePredecessor(TI->getParent());
+
+          // Remove the old terminator.
+          TI->eraseFromParent();
+        }
       }
 
       // Finally, delete the basic block.

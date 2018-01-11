@@ -278,6 +278,12 @@ TEST(TargetParserTest, testARMCPU) {
                          "7-S"));
 }
 
+TEST(TargetParserTest, testInvalidARMArch) {
+  auto InvalidArchStrings = {"armv", "armv99", "noarm"};
+  for (const char* InvalidArch : InvalidArchStrings)
+    EXPECT_EQ(ARM::parseArch(InvalidArch), ARM::ArchKind::INVALID);
+}
+
 bool testARMArch(StringRef Arch, StringRef DefaultCPU, StringRef SubArch,
                  unsigned ArchAttr) {
   ARM::ArchKind AK = ARM::parseArch(Arch);
@@ -784,6 +790,10 @@ TEST(TargetParserTest, testAArch64Extension) {
   EXPECT_FALSE(testAArch64Extension("cyclone",
                                     AArch64::ArchKind::INVALID, "ras"));
   EXPECT_FALSE(testAArch64Extension("exynos-m1",
+                                    AArch64::ArchKind::INVALID, "ras"));
+  EXPECT_FALSE(testAArch64Extension("exynos-m2",
+                                    AArch64::ArchKind::INVALID, "ras"));
+  EXPECT_FALSE(testAArch64Extension("exynos-m3",
                                     AArch64::ArchKind::INVALID, "ras"));
   EXPECT_TRUE(testAArch64Extension("falkor",
                                    AArch64::ArchKind::INVALID, "rdm"));

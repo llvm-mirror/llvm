@@ -12,10 +12,10 @@
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/CodeGen/BasicTTIImpl.h"
+#include "llvm/CodeGen/CostTable.h"
+#include "llvm/CodeGen/TargetLowering.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Target/CostTable.h"
-#include "llvm/Target/TargetLowering.h"
 #include <algorithm>
 using namespace llvm;
 
@@ -277,7 +277,7 @@ int AArch64TTIImpl::getCastInstrCost(unsigned Opcode, Type *Dst, Type *Src,
       // same as the second operand. In this case, we will generate a "long"
       // version of the widening instruction.
       if (auto *Cast = dyn_cast<CastInst>(SingleUser->getOperand(1)))
-        if (I->getOpcode() == Cast->getOpcode() &&
+        if (I->getOpcode() == unsigned(Cast->getOpcode()) &&
             cast<CastInst>(I)->getSrcTy() == Cast->getSrcTy())
           return 0;
     }

@@ -33,6 +33,8 @@
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
 #include "llvm/CodeGen/StackMaps.h"
+#include "llvm/CodeGen/TargetLowering.h"
+#include "llvm/CodeGen/TargetOpcodes.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Instruction.h"
@@ -41,9 +43,7 @@
 #include "llvm/IR/Statepoint.h"
 #include "llvm/IR/Type.h"
 #include "llvm/Support/Casting.h"
-#include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetOpcodes.h"
 #include "llvm/Target/TargetOptions.h"
 #include <cassert>
 #include <cstddef>
@@ -96,7 +96,7 @@ StatepointLoweringState::allocateStackSlot(EVT ValueType,
   NumSlotsAllocatedForStatepoints++;
   MachineFrameInfo &MFI = Builder.DAG.getMachineFunction().getFrameInfo();
 
-  unsigned SpillSize = ValueType.getSizeInBits() / 8;
+  unsigned SpillSize = ValueType.getStoreSize();
   assert((SpillSize * 8) == ValueType.getSizeInBits() && "Size not in bytes?");
 
   // First look for a previously created stack slot which is not in

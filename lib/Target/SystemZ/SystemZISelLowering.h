@@ -18,7 +18,7 @@
 #include "SystemZ.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/SelectionDAG.h"
-#include "llvm/Target/TargetLowering.h"
+#include "llvm/CodeGen/TargetLowering.h"
 
 namespace llvm {
 namespace SystemZISD {
@@ -426,6 +426,8 @@ public:
       switch(ConstraintCode[0]) {
       default:
         break;
+      case 'o':
+        return InlineAsm::Constraint_o;
       case 'Q':
         return InlineAsm::Constraint_Q;
       case 'R':

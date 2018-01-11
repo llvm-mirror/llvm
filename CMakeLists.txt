@@ -18,7 +18,7 @@ cmake_policy(SET CMP0056 NEW)
 cmake_policy(SET CMP0057 NEW)
 
 if(NOT DEFINED LLVM_VERSION_MAJOR)
-  set(LLVM_VERSION_MAJOR 6)
+  set(LLVM_VERSION_MAJOR 7)
 endif()
 if(NOT DEFINED LLVM_VERSION_MINOR)
   set(LLVM_VERSION_MINOR 0)
@@ -110,7 +110,7 @@ endif()
 # LLVM_EXTERNAL_${project}_SOURCE_DIR using LLVM_ALL_PROJECTS
 # This allows an easy way of setting up a build directory for llvm and another
 # one for llvm+clang+... using the same sources.
-set(LLVM_ALL_PROJECTS "clang;libcxx;libcxxabi;lldb;compiler-rt;lld;polly")
+set(LLVM_ALL_PROJECTS "clang;libcxx;libcxxabi;lldb;compiler-rt;lld;polly;debuginfo-tests")
 set(LLVM_ENABLE_PROJECTS "" CACHE STRING
 	"Semicolon-separated list of projects to build (${LLVM_ALL_PROJECTS}), or \"all\".")
 if( LLVM_ENABLE_PROJECTS STREQUAL "all" )
@@ -167,6 +167,10 @@ if(LLVM_DEPENDENCY_DEBUGGING)
 endif()
 
 option(LLVM_ENABLE_DAGISEL_COV "Debug: Prints tablegen patterns that were used for selecting" OFF)
+option(LLVM_ENABLE_GISEL_COV "Enable collection of GlobalISel rule coverage" OFF)
+if(LLVM_ENABLE_GISEL_COV)
+  set(LLVM_GISEL_COV_PREFIX "${CMAKE_BINARY_DIR}/gisel-coverage-" CACHE STRING "Provide a filename prefix to collect the GlobalISel rule coverage")
+endif()
 
 # Add path for custom modules
 set(CMAKE_MODULE_PATH
@@ -347,7 +351,7 @@ set(LLVM_TARGET_ARCH "host"
 
 option(LLVM_ENABLE_TERMINFO "Use terminfo database if available." ON)
 
-option(LLVM_ENABLE_LIBXML2 "Use libxml2 if available." ON)
+set(LLVM_ENABLE_LIBXML2 "ON" CACHE STRING "Use libxml2 if available. Can be ON, OFF, or FORCE_ON")
 
 option(LLVM_ENABLE_LIBEDIT "Use libedit if available." ON)
 
@@ -381,16 +385,12 @@ option(LLVM_ENABLE_LLD "Use lld as C and C++ linker." OFF)
 option(LLVM_ENABLE_PEDANTIC "Compile with pedantic enabled." ON)
 option(LLVM_ENABLE_WERROR "Fail and stop if a warning is triggered." OFF)
 
-option(LLVM_ENABLE_DUMP "Enable dump functions in release builds" OFF)
+option(LLVM_ENABLE_DUMP "Enable dump functions even when assertions are disabled" OFF)
 
 if( NOT uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG" )
   option(LLVM_ENABLE_ASSERTIONS "Enable assertions" OFF)
 else()
   option(LLVM_ENABLE_ASSERTIONS "Enable assertions" ON)
-endif()
-
-if( LLVM_ENABLE_ASSERTIONS )
-  set(LLVM_ENABLE_DUMP ON)
 endif()
 
 option(LLVM_ENABLE_EXPENSIVE_CHECKS "Enable expensive checks" OFF)
@@ -678,9 +678,13 @@ foreach(t ${LLVM_TARGETS_TO_BUILD})
 
   list(FIND LLVM_ALL_TARGETS ${t} idx)
   list(FIND LLVM_EXPERIMENTAL_TARGETS_TO_BUILD ${t} idy)
+  # At this point, LLVMBUILDTOOL already checked all the targets passed in
+  # LLVM_TARGETS_TO_BUILD and LLVM_EXPERIMENTAL_TARGETS_TO_BUILD, so
+  # this test just makes sure that any experimental targets were passed via
+  # LLVM_EXPERIMENTAL_TARGETS_TO_BUILD, not LLVM_TARGETS_TO_BUILD.
   if( idx LESS 0 AND idy LESS 0 )
-    message(FATAL_ERROR "The target `${t}' does not exist.
-    It should be one of\n${LLVM_ALL_TARGETS}")
+    message(FATAL_ERROR "The target `${t}' is experimental and must be passed "
+      "via LLVM_EXPERIMENTAL_TARGETS_TO_BUILD.")
   else()
     set(LLVM_ENUM_TARGETS "${LLVM_ENUM_TARGETS}LLVM_TARGET(${t})\n")
   endif()
@@ -971,11 +975,8 @@ if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
   set_target_properties(llvm-headers PROPERTIES FOLDER "Misc")
 
   if (NOT CMAKE_CONFIGURATION_TYPES)
-    add_custom_target(install-llvm-headers
-                      DEPENDS llvm-headers
-                      COMMAND "${CMAKE_COMMAND}"
-                              -DCMAKE_INSTALL_COMPONENT=llvm-headers
-                              -P "${CMAKE_BINARY_DIR}/cmake_install.cmake")
+    add_llvm_install_targets(install-llvm-headers
+                             COMPONENT llvm-headers)
   endif()
 endif()
 
@@ -988,6 +989,7 @@ if(LLVM_DISTRIBUTION_COMPONENTS)
 
   add_custom_target(distribution)
   add_custom_target(install-distribution)
+  add_custom_target(install-distribution-stripped)
   foreach(target ${LLVM_DISTRIBUTION_COMPONENTS})
     if(TARGET ${target})
       add_dependencies(distribution ${target})
@@ -1000,11 +1002,19 @@ if(LLVM_DISTRIBUTION_COMPONENTS)
     else()
       message(SEND_ERROR "Specified distribution component '${target}' doesn't have an install target")
     endif()
+
+    if(TARGET install-${target}-stripped)
+      add_dependencies(install-distribution-stripped install-${target}-stripped)
+    else()
+      message(SEND_ERROR "Specified distribution component '${target}' doesn't have an install-stripped target."
+                         " Its installation target creation should be changed to use add_llvm_install_targets,"
+                         " or you should manually create the 'install-${target}-stripped' target.")
+    endif()
   endforeach()
 endif()
 
 # This allows us to deploy the Universal CRT DLLs by passing -DCMAKE_INSTALL_UCRT_LIBRARIES=ON to CMake
-if (MSVC)
+if (MSVC AND CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
   include(InstallRequiredSystemLibraries)
 endif()
 

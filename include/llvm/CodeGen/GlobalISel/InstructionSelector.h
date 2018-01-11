@@ -17,8 +17,9 @@
 #define LLVM_CODEGEN_GLOBALISEL_INSTRUCTIONSELECTOR_H
 
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Optional.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/CodeGenCoverage.h"
 #include <bitset>
 #include <cstddef>
 #include <cstdint>
@@ -33,6 +34,7 @@ class APFloat;
 class LLT;
 class MachineInstr;
 class MachineInstrBuilder;
+class MachineFunction;
 class MachineOperand;
 class MachineRegisterInfo;
 class RegisterBankInfo;
@@ -109,9 +111,12 @@ enum {
   /// - InsnID - Instruction ID
   /// - The predicate to test
   GIM_CheckAPFloatImmPredicate,
-  /// Check a memory operation is non-atomic.
+  /// Check a memory operation has the specified atomic ordering.
   /// - InsnID - Instruction ID
-  GIM_CheckNonAtomic,
+  /// - Ordering - The AtomicOrdering value
+  GIM_CheckAtomicOrdering,
+  GIM_CheckAtomicOrderingOrStrongerThan,
+  GIM_CheckAtomicOrderingWeakerThan,
 
   /// Check the type for the specified operand
   /// - InsnID - Instruction ID
@@ -262,6 +267,10 @@ enum {
 
   /// A successful emission
   GIR_Done,
+
+  /// Increment the rule coverage counter.
+  /// - RuleID - The ID of the rule that was covered.
+  GIR_Coverage,
 };
 
 enum {
@@ -273,10 +282,6 @@ enum {
 /// Provides the logic to select generic machine instructions.
 class InstructionSelector {
 public:
-  using I64ImmediatePredicateFn = bool (*)(int64_t);
-  using APIntImmediatePredicateFn = bool (*)(const APInt &);
-  using APFloatImmediatePredicateFn = bool (*)(const APFloat &);
-
   virtual ~InstructionSelector() = default;
 
   /// Select the (possibly generic) instruction \p I to only use target-specific
@@ -289,7 +294,7 @@ public:
   ///   if returns true:
   ///     for I in all mutated/inserted instructions:
   ///       !isPreISelGenericOpcode(I.getOpcode())
-  virtual bool select(MachineInstr &I) const = 0;
+  virtual bool select(MachineInstr &I, CodeGenCoverage &CoverageInfo) const = 0;
 
 protected:
   using ComplexRendererFns =
@@ -310,9 +315,6 @@ public:
   struct MatcherInfoTy {
     const LLT *TypeObjects;
     const PredicateBitset *FeatureBitsets;
-    const I64ImmediatePredicateFn *I64ImmPredicateFns;
-    const APIntImmediatePredicateFn *APIntImmPredicateFns;
-    const APFloatImmediatePredicateFn *APFloatImmPredicateFns;
     const ComplexMatcherMemFn *ComplexPredicates;
   };
 
@@ -328,8 +330,18 @@ protected:
       const MatcherInfoTy<PredicateBitset, ComplexMatcherMemFn> &MatcherInfo,
       const int64_t *MatchTable, const TargetInstrInfo &TII,
       MachineRegisterInfo &MRI, const TargetRegisterInfo &TRI,
-      const RegisterBankInfo &RBI,
-      const PredicateBitset &AvailableFeatures) const;
+      const RegisterBankInfo &RBI, const PredicateBitset &AvailableFeatures,
+      CodeGenCoverage &CoverageInfo) const;
+
+  virtual bool testImmPredicate_I64(unsigned, int64_t) const {
+    llvm_unreachable("Subclasses must override this to use tablegen");
+  }
+  virtual bool testImmPredicate_APInt(unsigned, const APInt &) const {
+    llvm_unreachable("Subclasses must override this to use tablegen");
+  }
+  virtual bool testImmPredicate_APFloat(unsigned, const APFloat &) const {
+    llvm_unreachable("Subclasses must override this to use tablegen");
+  }
 
   /// Constrain a register operand of an instruction \p I to a specified
   /// register class. This could involve inserting COPYs before (for uses) or
@@ -364,7 +376,10 @@ protected:
   bool isBaseWithConstantOffset(const MachineOperand &Root,
                                 const MachineRegisterInfo &MRI) const;
 
-  bool isObviouslySafeToFold(MachineInstr &MI) const;
+  /// Return true if MI can obviously be folded into IntoMI.
+  /// MI and IntoMI do not need to be in the same basic blocks, but MI must
+  /// preceed IntoMI.
+  bool isObviouslySafeToFold(MachineInstr &MI, MachineInstr &IntoMI) const;
 };
 
 } // end namespace llvm

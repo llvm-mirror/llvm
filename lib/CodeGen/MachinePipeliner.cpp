@@ -73,7 +73,7 @@
 #include "llvm/Analysis/MemoryLocation.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/CodeGen/DFAPacketizer.h"
-#include "llvm/CodeGen/LiveIntervalAnalysis.h"
+#include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -90,6 +90,9 @@
 #include "llvm/CodeGen/ScheduleDAGInstrs.h"
 #include "llvm/CodeGen/ScheduleDAGMutation.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetOpcodes.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/Function.h"
@@ -103,9 +106,6 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetOpcodes.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <algorithm>
 #include <cassert>
 #include <climits>
@@ -729,13 +729,13 @@ INITIALIZE_PASS_END(MachinePipeliner, DEBUG_TYPE,
 
 /// The "main" function for implementing Swing Modulo Scheduling.
 bool MachinePipeliner::runOnMachineFunction(MachineFunction &mf) {
-  if (skipFunction(*mf.getFunction()))
+  if (skipFunction(mf.getFunction()))
     return false;
 
   if (!EnableSWP)
     return false;
 
-  if (mf.getFunction()->getAttributes().hasAttribute(
+  if (mf.getFunction().getAttributes().hasAttribute(
           AttributeList::FunctionIndex, Attribute::OptimizeForSize) &&
       !EnableSWPOptSize.getPosition())
     return false;
@@ -808,11 +808,9 @@ bool MachinePipeliner::canPipelineLoop(MachineLoop &L) {
   // because we don't know how to maintain subreg information in the
   // VMap structure.
   MachineBasicBlock *MBB = L.getHeader();
-  for (MachineBasicBlock::iterator BBI = MBB->instr_begin(),
-                                   BBE = MBB->getFirstNonPHI();
-       BBI != BBE; ++BBI)
-    for (unsigned i = 1; i != BBI->getNumOperands(); i += 2)
-      if (BBI->getOperand(i).getSubReg() != 0)
+  for (auto &PHI : MBB->phis())
+    for (unsigned i = 1; i != PHI.getNumOperands(); i += 2)
+      if (PHI.getOperand(i).getSubReg() != 0)
         return false;
 
   return true;
@@ -2924,10 +2922,8 @@ void SwingSchedulerDAG::splitLifetimes(MachineBasicBlock *KernelBB,
                                        MBBVectorTy &EpilogBBs,
                                        SMSchedule &Schedule) {
   const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
-  for (MachineBasicBlock::iterator BBI = KernelBB->instr_begin(),
-                                   BBF = KernelBB->getFirstNonPHI();
-       BBI != BBF; ++BBI) {
-    unsigned Def = BBI->getOperand(0).getReg();
+  for (auto &PHI : KernelBB->phis()) {
+    unsigned Def = PHI.getOperand(0).getReg();
     // Check for any Phi definition that used as an operand of another Phi
     // in the same block.
     for (MachineRegisterInfo::use_instr_iterator I = MRI.use_instr_begin(Def),
@@ -2935,7 +2931,7 @@ void SwingSchedulerDAG::splitLifetimes(MachineBasicBlock *KernelBB,
          I != E; ++I) {
       if (I->isPHI() && I->getParent() == KernelBB) {
         // Get the loop carried definition.
-        unsigned LCDef = getLoopPhiReg(*BBI, KernelBB);
+        unsigned LCDef = getLoopPhiReg(PHI, KernelBB);
         if (!LCDef)
           continue;
         MachineInstr *MI = MRI.getVRegDef(LCDef);
@@ -3249,13 +3245,11 @@ void SwingSchedulerDAG::rewritePhiValues(MachineBasicBlock *NewBB,
                                          SMSchedule &Schedule,
                                          ValueMapTy *VRMap,
                                          InstrMapTy &InstrMap) {
-  for (MachineBasicBlock::iterator BBI = BB->instr_begin(),
-                                   BBE = BB->getFirstNonPHI();
-       BBI != BBE; ++BBI) {
+  for (auto &PHI : BB->phis()) {
     unsigned InitVal = 0;
     unsigned LoopVal = 0;
-    getPhiRegs(*BBI, BB, InitVal, LoopVal);
-    unsigned PhiDef = BBI->getOperand(0).getReg();
+    getPhiRegs(PHI, BB, InitVal, LoopVal);
+    unsigned PhiDef = PHI.getOperand(0).getReg();
 
     unsigned PhiStage =
         (unsigned)Schedule.stageScheduled(getSUnit(MRI.getVRegDef(PhiDef)));
@@ -3269,7 +3263,7 @@ void SwingSchedulerDAG::rewritePhiValues(MachineBasicBlock *NewBB,
           getPrevMapVal(StageNum - np, PhiStage, LoopVal, LoopStage, VRMap, BB);
       if (!NewVal)
         NewVal = InitVal;
-      rewriteScheduledInstr(NewBB, Schedule, InstrMap, StageNum - np, np, &*BBI,
+      rewriteScheduledInstr(NewBB, Schedule, InstrMap, StageNum - np, np, &PHI,
                             PhiDef, NewVal);
     }
   }

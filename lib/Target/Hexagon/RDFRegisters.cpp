@@ -12,11 +12,11 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineOperand.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/MC/LaneBitmask.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 #include <cassert>
 #include <cstdint>
 #include <set>
@@ -365,7 +365,7 @@ RegisterRef RegisterAggr::makeRegRef() const {
 void RegisterAggr::print(raw_ostream &OS) const {
   OS << '{';
   for (int U = Units.find_first(); U >= 0; U = Units.find_next(U))
-    OS << ' ' << PrintRegUnit(U, &PRI.getTRI());
+    OS << ' ' << printRegUnit(U, &PRI.getTRI());
   OS << " }";
 }
 

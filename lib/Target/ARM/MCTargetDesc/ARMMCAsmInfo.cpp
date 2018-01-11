@@ -86,7 +86,7 @@ void ARMCOFFMCAsmInfoMicrosoft::anchor() { }
 
 ARMCOFFMCAsmInfoMicrosoft::ARMCOFFMCAsmInfoMicrosoft() {
   AlignmentIsInBytes = false;
-
+  ExceptionsType = ExceptionHandling::WinEH;
   PrivateGlobalPrefix = "$M";
   PrivateLabelPrefix = "$M";
   CommentString = ";";
@@ -105,10 +105,10 @@ ARMCOFFMCAsmInfoGNU::ARMCOFFMCAsmInfoGNU() {
   PrivateLabelPrefix = ".L";
 
   SupportsDebugInformation = true;
-  ExceptionsType = ExceptionHandling::None;
+  ExceptionsType = ExceptionHandling::DwarfCFI;
   UseParensForSymbolVariant = true;
 
-  UseIntegratedAssembler = false;
-  DwarfRegNumForCFI = true;
+  UseIntegratedAssembler = true;
+  DwarfRegNumForCFI = false;
 }
 

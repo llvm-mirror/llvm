@@ -139,6 +139,8 @@ def ARMcmov          : SDNode<"ARMISD::CMOV", SDT_ARMCMov,
 
 def ARMssatnoshift   : SDNode<"ARMISD::SSAT", SDTIntSatNoShOp, []>;
 
+def ARMusatnoshift   : SDNode<"ARMISD::USAT", SDTIntSatNoShOp, []>;
+
 def ARMbrcond        : SDNode<"ARMISD::BRCOND", SDT_ARMBrcond,
                               [SDNPHasChain, SDNPInGlue, SDNPOutGlue]>;
 
@@ -278,6 +280,9 @@ def HasDSP           : Predicate<"Subtarget->hasDSP()">,
 def HasDB            : Predicate<"Subtarget->hasDataBarrier()">,
                                  AssemblerPredicate<"FeatureDB",
                                                     "data-barriers">;
+def HasDFB           : Predicate<"Subtarget->hasFullDataBarrier()">,
+                                 AssemblerPredicate<"FeatureDFB",
+                                                    "full-data-barrier">;
 def HasV7Clrex  : Predicate<"Subtarget->hasV7Clrex()">,
                             AssemblerPredicate<"FeatureV7Clrex",
                                                "v7 clrex">;
@@ -332,6 +337,8 @@ def UseNegativeImmediates :
 let RecomputePerFunction = 1 in {
   def UseMovt          : Predicate<"Subtarget->useMovt(*MF)">;
   def DontUseMovt      : Predicate<"!Subtarget->useMovt(*MF)">;
+  def UseMovtInPic          : Predicate<"Subtarget->useMovt(*MF) && Subtarget->allowPositionIndependentMovt()">;
+  def DontUseMovtInPic      : Predicate<"!Subtarget->useMovt(*MF) || !Subtarget->allowPositionIndependentMovt()">;
 }
 def UseFPVMLx        : Predicate<"Subtarget->useFPVMLx()">;
 def UseMulOps        : Predicate<"Subtarget->useMulOps()">;
@@ -524,7 +531,10 @@ def reglist : Operand<i32> {
 
 def GPRPairOp : RegisterOperand<GPRPair, "printGPRPairOperand">;
 
-def DPRRegListAsmOperand : AsmOperandClass { let Name = "DPRRegList"; }
+def DPRRegListAsmOperand : AsmOperandClass {
+  let Name = "DPRRegList";
+  let DiagnosticType = "DPR_RegList";
+}
 def dpr_reglist : Operand<i32> {
   let EncoderMethod = "getRegisterListOpValue";
   let ParserMatchClass = DPRRegListAsmOperand;
@@ -532,7 +542,10 @@ def dpr_reglist : Operand<i32> {
   let DecoderMethod = "DecodeDPRRegListOperand";
 }
 
-def SPRRegListAsmOperand : AsmOperandClass { let Name = "SPRRegList"; }
+def SPRRegListAsmOperand : AsmOperandClass {
+  let Name = "SPRRegList";
+  let DiagnosticString = "operand must be a list of registers in range [s0, s31]";
+}
 def spr_reglist : Operand<i32> {
   let EncoderMethod = "getRegisterListOpValue";
   let ParserMatchClass = SPRRegListAsmOperand;
@@ -967,21 +980,6 @@ def postidx_reg : MemOperand {
   let PrintMethod = "printPostIdxRegOperand";
   let ParserMatchClass = PostIdxRegAsmOperand;
   let MIOperandInfo = (ops GPRnopc, i32imm);
-}
-
-
-// addrmode2 := reg +/- imm12
-//           := reg +/- reg shop imm
-//
-// FIXME: addrmode2 should be refactored the rest of the way to always
-// use explicit imm vs. reg versions above (addrmode_imm12 and ldst_so_reg).
-def AddrMode2AsmOperand : AsmOperandClass { let Name = "AddrMode2"; }
-def addrmode2 : MemOperand,
-                ComplexPattern<i32, 3, "SelectAddrMode2", []> {
-  let EncoderMethod = "getAddrMode2OpValue";
-  let PrintMethod = "printAddrMode2Operand";
-  let ParserMatchClass = AddrMode2AsmOperand;
-  let MIOperandInfo = (ops GPR:$base, GPR:$offsreg, i32imm:$offsimm);
 }
 
 def PostIdxRegShiftedAsmOperand : AsmOperandClass {
@@ -2378,12 +2376,15 @@ let isBranch = 1, isTerminator = 1 in {
                       0, IIC_Br,
                       [(ARMbrjt GPR:$target, tjumptable:$jt)]>,
                       Sched<[WriteBr]>;
-    // FIXME: This shouldn't use the generic "addrmode2," but rather be split
-    // into i12 and rs suffixed versions.
-    def BR_JTm : ARMPseudoInst<(outs),
-                     (ins addrmode2:$target, i32imm:$jt),
+    def BR_JTm_i12 : ARMPseudoInst<(outs),
+                     (ins addrmode_imm12:$target, i32imm:$jt),
                      0, IIC_Br,
-                     [(ARMbrjt (i32 (load addrmode2:$target)),
+                     [(ARMbrjt (i32 (load addrmode_imm12:$target)),
+                               tjumptable:$jt)]>, Sched<[WriteBrTbl]>;
+    def BR_JTm_rs : ARMPseudoInst<(outs),
+                     (ins ldst_so_reg:$target, i32imm:$jt),
+                     0, IIC_Br,
+                     [(ARMbrjt (i32 (load ldst_so_reg:$target)),
                                tjumptable:$jt)]>, Sched<[WriteBrTbl]>;
     def BR_JTadd : ARMPseudoInst<(outs),
                    (ins GPR:$target, GPR:$idx, i32imm:$jt),
@@ -3836,6 +3837,8 @@ def : ARMV6Pat<(int_arm_usat GPRnopc:$a, imm0_31:$pos),
                (USAT imm0_31:$pos, GPRnopc:$a, 0)>;
 def : ARMPat<(ARMssatnoshift GPRnopc:$Rn, imm0_31:$imm),
              (SSAT imm0_31:$imm, GPRnopc:$Rn, 0)>;
+def : ARMPat<(ARMusatnoshift GPRnopc:$Rn, imm0_31:$imm),
+             (USAT imm0_31:$imm, GPRnopc:$Rn, 0)>;
 def : ARMV6Pat<(int_arm_ssat16 GPRnopc:$a, imm1_16:$pos),
                (SSAT16 imm1_16:$pos, GPRnopc:$a)>;
 def : ARMV6Pat<(int_arm_usat16 GPRnopc:$a, imm0_15:$pos),
@@ -5644,26 +5647,26 @@ let isReMaterializable = 1 in {
 def MOV_ga_pcrel : PseudoInst<(outs GPR:$dst), (ins i32imm:$addr),
                               IIC_iMOVix2addpc,
                         [(set GPR:$dst, (ARMWrapperPIC tglobaladdr:$addr))]>,
-                        Requires<[IsARM, UseMovt]>;
+                        Requires<[IsARM, UseMovtInPic]>;
 
 def LDRLIT_ga_pcrel : PseudoInst<(outs GPR:$dst), (ins i32imm:$addr),
                                  IIC_iLoadiALU,
                                  [(set GPR:$dst,
                                        (ARMWrapperPIC tglobaladdr:$addr))]>,
-                      Requires<[IsARM, DontUseMovt]>;
+                      Requires<[IsARM, DontUseMovtInPic]>;
 
 let AddedComplexity = 10 in
 def LDRLIT_ga_pcrel_ldr : PseudoInst<(outs GPR:$dst), (ins i32imm:$addr),
                               NoItinerary,
                               [(set GPR:$dst,
                                     (load (ARMWrapperPIC tglobaladdr:$addr)))]>,
-                          Requires<[IsARM, DontUseMovt]>;
+                          Requires<[IsARM, DontUseMovtInPic]>;
 
 let AddedComplexity = 10 in
 def MOV_ga_pcrel_ldr : PseudoInst<(outs GPR:$dst), (ins i32imm:$addr),
                                 IIC_iMOVix2ld,
                     [(set GPR:$dst, (load (ARMWrapperPIC tglobaladdr:$addr)))]>,
-                    Requires<[IsARM, UseMovt]>;
+                    Requires<[IsARM, UseMovtInPic]>;
 } // isReMaterializable
 
 // The many different faces of TLS access.
@@ -5676,15 +5679,15 @@ def : Pat<(ARMWrapper tglobaltlsaddr:$src),
       Requires<[IsARM, DontUseMovt]>;
 
 def : Pat<(ARMWrapperPIC tglobaltlsaddr:$addr),
-          (MOV_ga_pcrel tglobaltlsaddr:$addr)>, Requires<[IsARM, UseMovt]>;
+          (MOV_ga_pcrel tglobaltlsaddr:$addr)>, Requires<[IsARM, UseMovtInPic]>;
 
 def : Pat<(ARMWrapperPIC tglobaltlsaddr:$addr),
           (LDRLIT_ga_pcrel tglobaltlsaddr:$addr)>,
-      Requires<[IsARM, DontUseMovt]>;
+      Requires<[IsARM, DontUseMovtInPic]>;
 let AddedComplexity = 10 in
 def : Pat<(load (ARMWrapperPIC tglobaltlsaddr:$addr)),
           (MOV_ga_pcrel_ldr tglobaltlsaddr:$addr)>,
-      Requires<[IsARM, UseMovt]>;
+      Requires<[IsARM, UseMovtInPic]>;
 
 
 // ConstantPool, GlobalAddress, and JumpTable
@@ -5850,6 +5853,8 @@ include "ARMInstrNEON.td"
 def : InstAlias<"dmb", (DMB 0xf), 0>, Requires<[IsARM, HasDB]>;
 def : InstAlias<"dsb", (DSB 0xf), 0>, Requires<[IsARM, HasDB]>;
 def : InstAlias<"isb", (ISB 0xf), 0>, Requires<[IsARM, HasDB]>;
+// Armv8-R 'Data Full Barrier'
+def : InstAlias<"dfb", (DSB 0xc), 1>, Requires<[IsARM, HasDFB]>;
 
 // System instructions
 def : MnemonicAlias<"swi", "svc">;

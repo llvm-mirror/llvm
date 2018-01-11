@@ -34,7 +34,7 @@
 ; GCN-NEXT: s_andn2_b64 exec, exec, [[OR_BREAK]]
 ; GCN-NEXT: s_cbranch_execnz [[INNER_LOOP]]
 
-; GCN: ; BB#{{[0-9]+}}: ; %Flow1{{$}}
+; GCN: ; %bb.{{[0-9]+}}: ; %Flow1{{$}}
 ; GCN-NEXT: ; in Loop: Header=[[OUTER_LOOP]] Depth=1
 
 ; Ensure copy is eliminated
@@ -66,9 +66,10 @@ ENDIF:                                            ; preds = %LOOP
 
 ; OPT-LABEL: define amdgpu_kernel void @multi_if_break_loop(
 ; OPT: llvm.amdgcn.break
+; OPT: llvm.amdgcn.break
+; OPT: llvm.amdgcn.if.break
+; OPT: llvm.amdgcn.if.break
 ; OPT: llvm.amdgcn.loop
-; OPT: llvm.amdgcn.if.break
-; OPT: llvm.amdgcn.if.break
 ; OPT: llvm.amdgcn.end.cf
 
 ; GCN-LABEL: {{^}}multi_if_break_loop:

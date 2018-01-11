@@ -47,7 +47,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/Vectorize/LoopVectorize.h"
-#include "VPlan.h"
+#include "LoopVectorizationPlanner.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
@@ -279,12 +279,7 @@ createMissedAnalysis(const char *PassName, StringRef RemarkName, Loop *TheLoop,
 
 namespace {
 
-class LoopVectorizationLegality;
-class LoopVectorizationCostModel;
 class LoopVectorizationRequirements;
-class VPInterleaveRecipe;
-class VPReplicateRecipe;
-class VPWidenIntOrFpInductionRecipe;
 
 } // end anonymous namespace
 
@@ -447,11 +442,6 @@ public:
   /// new unrolled loop, where UF is the unroll factor.
   using VectorParts = SmallVector<Value *, 2>;
 
-  /// A helper function that computes the predicate of the block BB, assuming
-  /// that the header block of the loop is set to True. It returns the *entry*
-  /// mask for the block BB.
-  VectorParts createBlockInMask(BasicBlock *BB);
-
   /// Vectorize a single PHINode in a block. This method handles the induction
   /// variable canonicalization. It supports both VF = 1 for unrolled loops and
   /// arbitrary length vectors.
@@ -504,6 +494,15 @@ public:
   /// Try to vectorize the interleaved access group that \p Instr belongs to.
   void vectorizeInterleaveGroup(Instruction *Instr);
 
+  /// Vectorize Load and Store instructions, optionally masking the vector
+  /// operations if \p BlockInMask is non-null.
+  void vectorizeMemoryInstruction(Instruction *Instr,
+                                  VectorParts *BlockInMask = nullptr);
+
+  /// \brief Set the debug location in the builder using the debug location in
+  /// the instruction.
+  void setDebugLocFromInst(IRBuilder<> &B, const Value *Ptr);
+
 protected:
   friend class LoopVectorizationPlanner;
 
@@ -515,12 +514,6 @@ protected:
   /// in the new unrolled loop, where UF is the unroll factor and VF is the
   /// vectorization factor.
   using ScalarParts = SmallVector<SmallVector<Value *, 4>, 2>;
-
-  // When we if-convert we need to create edge masks. We have to cache values
-  // so that we don't end up with exponential recursion/IR.
-  using EdgeMaskCacheTy =
-      DenseMap<std::pair<BasicBlock *, BasicBlock *>, VectorParts>;
-  using BlockMaskCacheTy = DenseMap<BasicBlock *, VectorParts>;
 
   /// Set up the values of the IVs correctly when exiting the vector loop.
   void fixupIVUsers(PHINode *OrigPhi, const InductionDescriptor &II,
@@ -556,16 +549,9 @@ protected:
   /// represented as.
   void truncateToMinimalBitwidths();
 
-  /// A helper function that computes the predicate of the edge between SRC
-  /// and DST.
-  VectorParts createEdgeMask(BasicBlock *Src, BasicBlock *Dst);
-
   /// Insert the new loop to the loop hierarchy and pass manager
   /// and update the analysis passes.
   void updateAnalysis();
-
-  /// Vectorize Load and Store instructions,
-  virtual void vectorizeMemoryInstruction(Instruction *Instr);
 
   /// Create a broadcast instruction. This method generates a broadcast
   /// instruction (shuffle) for loop invariant values and for the induction
@@ -603,6 +589,20 @@ protected:
 
   /// Returns true if we should generate a scalar version of \p IV.
   bool needsScalarInduction(Instruction *IV) const;
+
+  /// If there is a cast involved in the induction variable \p ID, which should 
+  /// be ignored in the vectorized loop body, this function records the 
+  /// VectorLoopValue of the respective Phi also as the VectorLoopValue of the 
+  /// cast. We had already proved that the casted Phi is equal to the uncasted 
+  /// Phi in the vectorized loop (under a runtime guard), and therefore 
+  /// there is no need to vectorize the cast - the same value can be used in the 
+  /// vector loop for both the Phi and the cast. 
+  /// If \p VectorLoopValue is a scalarized value, \p Lane is also specified,
+  /// Otherwise, \p VectorLoopValue is a widened/vectorized value.
+  void recordVectorLoopValueForInductionCast (const InductionDescriptor &ID,
+                                              Value *VectorLoopValue, 
+                                              unsigned Part, 
+                                              unsigned Lane = UINT_MAX);
 
   /// Generate a shuffle sequence that will reverse the vector Vec.
   virtual Value *reverseVector(Value *Vec);
@@ -646,10 +646,6 @@ protected:
   /// \brief Similar to the previous function but it adds the metadata to a
   /// vector of instructions.
   void addMetadata(ArrayRef<Value *> To, Instruction *From);
-
-  /// \brief Set the debug location in the builder using the debug location in
-  /// the instruction.
-  void setDebugLocFromInst(IRBuilder<> &B, const Value *Ptr);
 
   /// The original loop.
   Loop *OrigLoop;
@@ -735,9 +731,6 @@ protected:
 
   /// Store instructions that were predicated.
   SmallVector<Instruction *, 4> PredicatedInstructions;
-
-  EdgeMaskCacheTy EdgeMaskCache;
-  BlockMaskCacheTy BlockMaskCache;
 
   /// Trip count of the original loop.
   Value *TripCount = nullptr;
@@ -851,7 +844,7 @@ void InnerLoopVectorizer::addMetadata(ArrayRef<Value *> To,
   }
 }
 
-namespace {
+namespace llvm {
 
 /// \brief The group of interleaved loads/stores sharing the same stride and
 /// close to each other.
@@ -955,6 +948,19 @@ public:
   Instruction *getInsertPos() const { return InsertPos; }
   void setInsertPos(Instruction *Inst) { InsertPos = Inst; }
 
+  /// Add metadata (e.g. alias info) from the instructions in this group to \p
+  /// NewInst.
+  ///
+  /// FIXME: this function currently does not add noalias metadata a'la
+  /// addNewMedata.  To do that we need to compute the intersection of the
+  /// noalias info from all members.
+  void addMetadata(Instruction *NewInst) const {
+    SmallVector<Value *, 4> VL;
+    std::transform(Members.begin(), Members.end(), std::back_inserter(VL),
+                   [](std::pair<int, Instruction *> p) { return p.second; });
+    propagateMetadata(NewInst, VL);
+  }
+
 private:
   unsigned Factor; // Interleave Factor.
   bool Reverse;
@@ -976,6 +982,9 @@ private:
   //      store i32 %odd               // Insert Position
   Instruction *InsertPos;
 };
+} // end namespace llvm
+
+namespace {
 
 /// \brief Drive the analysis of interleaved memory accesses in the loop.
 ///
@@ -1507,7 +1516,7 @@ static void emitMissedWarning(Function *F, Loop *L,
   }
 }
 
-namespace {
+namespace llvm {
 
 /// LoopVectorizationLegality checks if it is legal to vectorize a loop, and
 /// to what vectorization factor.
@@ -1569,7 +1578,17 @@ public:
   /// Returns the widest induction type.
   Type *getWidestInductionType() { return WidestIndTy; }
 
-  /// Returns True if V is an induction variable in this loop.
+  /// Returns True if V is a Phi node of an induction variable in this loop.
+  bool isInductionPhi(const Value *V);
+
+  /// Returns True if V is a cast that is part of an induction def-use chain,
+  /// and had been proven to be redundant under a runtime guard (in other
+  /// words, the cast has the same SCEV expression as the induction phi).
+  bool isCastedInductionVariable(const Value *V);
+
+  /// Returns True if V can be considered as an induction variable in this 
+  /// loop. V can be the induction phi, or some redundant cast in the def-use
+  /// chain of the inducion phi.
   bool isInductionVariable(const Value *V);
 
   /// Returns True if PN is a reduction variable in this loop.
@@ -1590,6 +1609,8 @@ public:
   /// 0 - Stride is unknown or non-consecutive.
   /// 1 - Address is consecutive.
   /// -1 - Address is consecutive, and decreasing.
+  /// NOTE: This method must only be used before modifying the original scalar
+  /// loop. Do not use after invoking 'createVectorizedLoopSkeleton' (PR34965).
   int isConsecutivePtr(Value *Ptr);
 
   /// Returns true if the value V is uniform within the loop.
@@ -1780,6 +1801,12 @@ private:
   /// variables can be pointers.
   InductionList Inductions;
 
+  /// Holds all the casts that participate in the update chain of the induction 
+  /// variables, and that have been proven to be redundant (possibly under a 
+  /// runtime guard). These casts can be ignored when creating the vectorized 
+  /// loop body.
+  SmallPtrSet<Instruction *, 4> InductionCastsToIgnore;
+
   /// Holds the phi nodes that are first-order recurrences.
   RecurrenceSet FirstOrderRecurrences;
 
@@ -1830,15 +1857,6 @@ public:
   /// \return An upper bound for the vectorization factor, or None if
   /// vectorization should be avoided up front.
   Optional<unsigned> computeMaxVF(bool OptForSize);
-
-  /// Information about vectorization costs
-  struct VectorizationFactor {
-    // Vector width with best cost
-    unsigned Width;
-
-    // Cost of the loop with that width
-    unsigned Cost;
-  };
 
   /// \return The most profitable vectorization factor and the cost of that VF.
   /// This method checks every power of two up to MaxVF. If UserVF is not ZERO
@@ -1938,7 +1956,8 @@ public:
   /// Decision that was taken during cost calculation for memory instruction.
   enum InstWidening {
     CM_Unknown,
-    CM_Widen,
+    CM_Widen,         // For consecutive accesses with stride +1.
+    CM_Widen_Reverse, // For consecutive accesses with stride -1.
     CM_Interleave,
     CM_GatherScatter,
     CM_Scalarize
@@ -2013,7 +2032,7 @@ public:
       return false;
 
     // If the truncated value is not an induction variable, return false.
-    return Legal->isInductionVariable(Op);
+    return Legal->isInductionPhi(Op);
   }
 
   /// Collects the instructions to scalarize for each predicated instruction in
@@ -2196,139 +2215,6 @@ public:
 
   /// Values to ignore in the cost model when VF > 1.
   SmallPtrSet<const Value *, 16> VecValuesToIgnore;
-};
-
-} // end anonymous namespace
-
-namespace llvm {
-
-/// InnerLoopVectorizer vectorizes loops which contain only one basic
-/// LoopVectorizationPlanner - drives the vectorization process after having
-/// passed Legality checks.
-/// The planner builds and optimizes the Vectorization Plans which record the
-/// decisions how to vectorize the given loop. In particular, represent the
-/// control-flow of the vectorized version, the replication of instructions that
-/// are to be scalarized, and interleave access groups.
-class LoopVectorizationPlanner {
-  /// The loop that we evaluate.
-  Loop *OrigLoop;
-
-  /// Loop Info analysis.
-  LoopInfo *LI;
-
-  /// Target Library Info.
-  const TargetLibraryInfo *TLI;
-
-  /// Target Transform Info.
-  const TargetTransformInfo *TTI;
-
-  /// The legality analysis.
-  LoopVectorizationLegality *Legal;
-
-  /// The profitablity analysis.
-  LoopVectorizationCostModel &CM;
-
-  SmallVector<std::unique_ptr<VPlan>, 4> VPlans;
-
-  unsigned BestVF = 0;
-  unsigned BestUF = 0;
-
-public:
-  LoopVectorizationPlanner(Loop *L, LoopInfo *LI, const TargetLibraryInfo *TLI,
-                           const TargetTransformInfo *TTI,
-                           LoopVectorizationLegality *Legal,
-                           LoopVectorizationCostModel &CM)
-      : OrigLoop(L), LI(LI), TLI(TLI), TTI(TTI), Legal(Legal), CM(CM) {}
-
-  /// Plan how to best vectorize, return the best VF and its cost.
-  LoopVectorizationCostModel::VectorizationFactor plan(bool OptForSize,
-                                                       unsigned UserVF);
-
-  /// Finalize the best decision and dispose of all other VPlans.
-  void setBestPlan(unsigned VF, unsigned UF);
-
-  /// Generate the IR code for the body of the vectorized loop according to the
-  /// best selected VPlan.
-  void executePlan(InnerLoopVectorizer &LB, DominatorTree *DT);
-
-  void printPlans(raw_ostream &O) {
-    for (const auto &Plan : VPlans)
-      O << *Plan;
-  }
-
-protected:
-  /// Collect the instructions from the original loop that would be trivially
-  /// dead in the vectorized loop if generated.
-  void collectTriviallyDeadInstructions(
-      SmallPtrSetImpl<Instruction *> &DeadInstructions);
-
-  /// A range of powers-of-2 vectorization factors with fixed start and
-  /// adjustable end. The range includes start and excludes end, e.g.,:
-  /// [1, 9) = {1, 2, 4, 8}
-  struct VFRange {
-    // A power of 2.
-    const unsigned Start;
-
-    // Need not be a power of 2. If End <= Start range is empty.
-    unsigned End;
-  };
-
-  /// Test a \p Predicate on a \p Range of VF's. Return the value of applying
-  /// \p Predicate on Range.Start, possibly decreasing Range.End such that the
-  /// returned value holds for the entire \p Range.
-  bool getDecisionAndClampRange(const std::function<bool(unsigned)> &Predicate,
-                                VFRange &Range);
-
-  /// Build VPlans for power-of-2 VF's between \p MinVF and \p MaxVF inclusive,
-  /// according to the information gathered by Legal when it checked if it is
-  /// legal to vectorize the loop.
-  void buildVPlans(unsigned MinVF, unsigned MaxVF);
-
-private:
-  /// Check if \I belongs to an Interleave Group within the given VF \p Range,
-  /// \return true in the first returned value if so and false otherwise.
-  /// Build a new VPInterleaveGroup Recipe if \I is the primary member of an IG
-  /// for \p Range.Start, and provide it as the second returned value.
-  /// Note that if \I is an adjunct member of an IG for \p Range.Start, the
-  /// \return value is <true, nullptr>, as it is handled by another recipe.
-  /// \p Range.End may be decreased to ensure same decision from \p Range.Start
-  /// to \p Range.End.
-  VPInterleaveRecipe *tryToInterleaveMemory(Instruction *I, VFRange &Range);
-
-  /// Check if an induction recipe should be constructed for \I within the given
-  /// VF \p Range. If so build and return it. If not, return null. \p Range.End
-  /// may be decreased to ensure same decision from \p Range.Start to
-  /// \p Range.End.
-  VPWidenIntOrFpInductionRecipe *tryToOptimizeInduction(Instruction *I,
-                                                        VFRange &Range);
-
-  /// Check if \p I can be widened within the given VF \p Range. If \p I can be
-  /// widened for \p Range.Start, check if the last recipe of \p VPBB can be
-  /// extended to include \p I or else build a new VPWidenRecipe for it and
-  /// append it to \p VPBB. Return true if \p I can be widened for Range.Start,
-  /// false otherwise. Range.End may be decreased to ensure same decision from
-  /// \p Range.Start to \p Range.End.
-  bool tryToWiden(Instruction *I, VPBasicBlock *VPBB, VFRange &Range);
-
-  /// Build a VPReplicationRecipe for \p I and enclose it within a Region if it
-  /// is predicated. \return \p VPBB augmented with this new recipe if \p I is
-  /// not predicated, otherwise \return a new VPBasicBlock that succeeds the new
-  /// Region. Update the packing decision of predicated instructions if they
-  /// feed \p I. Range.End may be decreased to ensure same recipe behavior from
-  /// \p Range.Start to \p Range.End.
-  VPBasicBlock *handleReplication(
-      Instruction *I, VFRange &Range, VPBasicBlock *VPBB,
-      DenseMap<Instruction *, VPReplicateRecipe *> &PredInst2Recipe);
-
-  /// Create a replicating region for instruction \p I that requires
-  /// predication. \p PredRecipe is a VPReplicateRecipe holding \p I.
-  VPRegionBlock *createReplicateRegion(Instruction *I,
-                                       VPRecipeBase *PredRecipe);
-
-  /// Build a VPlan according to the information gathered by Legal. \return a
-  /// VPlan for vectorization factors \p Range.Start and up to \p Range.End
-  /// exclusive, possibly decreasing \p Range.End.
-  std::unique_ptr<VPlan> buildVPlan(VFRange &Range);
 };
 
 } // end namespace llvm
@@ -2549,6 +2435,7 @@ void InnerLoopVectorizer::createVectorIntOrFpInductionPHI(
   Instruction *LastInduction = VecInd;
   for (unsigned Part = 0; Part < UF; ++Part) {
     VectorLoopValueMap.setVectorValue(EntryVal, Part, LastInduction);
+    recordVectorLoopValueForInductionCast(II, LastInduction, Part);
     if (isa<TruncInst>(EntryVal))
       addMetadata(LastInduction, EntryVal);
     LastInduction = cast<Instruction>(addFastMathFlag(
@@ -2580,6 +2467,22 @@ bool InnerLoopVectorizer::needsScalarInduction(Instruction *IV) const {
     return (OrigLoop->contains(I) && shouldScalarizeInstruction(I));
   };
   return llvm::any_of(IV->users(), isScalarInst);
+}
+
+void InnerLoopVectorizer::recordVectorLoopValueForInductionCast(
+    const InductionDescriptor &ID, Value *VectorLoopVal, unsigned Part,
+    unsigned Lane) {
+  const SmallVectorImpl<Instruction *> &Casts = ID.getCastInsts();
+  if (Casts.empty())
+    return;
+  // Only the first Cast instruction in the Casts vector is of interest.
+  // The rest of the Casts (if exist) have no uses outside the
+  // induction update chain itself.
+  Instruction *CastInst = *Casts.begin();
+  if (Lane < UINT_MAX)
+    VectorLoopValueMap.setScalarValue(CastInst, {Part, Lane}, VectorLoopVal);
+  else
+    VectorLoopValueMap.setVectorValue(CastInst, Part, VectorLoopVal);
 }
 
 void InnerLoopVectorizer::widenIntOrFpInduction(PHINode *IV, TruncInst *Trunc) {
@@ -2662,6 +2565,7 @@ void InnerLoopVectorizer::widenIntOrFpInduction(PHINode *IV, TruncInst *Trunc) {
       Value *EntryPart =
           getStepVector(Broadcasted, VF * Part, Step, ID.getInductionOpcode());
       VectorLoopValueMap.setVectorValue(EntryVal, Part, EntryPart);
+      recordVectorLoopValueForInductionCast(ID, EntryPart, Part);
       if (Trunc)
         addMetadata(EntryPart, Trunc);
     }
@@ -2769,6 +2673,7 @@ void InnerLoopVectorizer::buildScalarSteps(Value *ScalarIV, Value *Step,
       auto *Mul = addFastMathFlag(Builder.CreateBinOp(MulOp, StartIdx, Step));
       auto *Add = addFastMathFlag(Builder.CreateBinOp(AddOp, ScalarIV, Mul));
       VectorLoopValueMap.setScalarValue(EntryVal, {Part, Lane}, Add);
+      recordVectorLoopValueForInductionCast(ID, Add, Part, Lane);
     }
   }
 }
@@ -3006,7 +2911,7 @@ void InnerLoopVectorizer::vectorizeInterleaveGroup(Instruction *Instr) {
     for (unsigned Part = 0; Part < UF; Part++) {
       auto *NewLoad = Builder.CreateAlignedLoad(
           NewPtrs[Part], Group->getAlignment(), "wide.vec");
-      addMetadata(NewLoad, Instr);
+      Group->addMetadata(NewLoad);
       NewLoads.push_back(NewLoad);
     }
 
@@ -3074,11 +2979,13 @@ void InnerLoopVectorizer::vectorizeInterleaveGroup(Instruction *Instr) {
 
     Instruction *NewStoreInstr =
         Builder.CreateAlignedStore(IVec, NewPtrs[Part], Group->getAlignment());
-    addMetadata(NewStoreInstr, Instr);
+
+    Group->addMetadata(NewStoreInstr);
   }
 }
 
-void InnerLoopVectorizer::vectorizeMemoryInstruction(Instruction *Instr) {
+void InnerLoopVectorizer::vectorizeMemoryInstruction(Instruction *Instr,
+                                                     VectorParts *BlockInMask) {
   // Attempt to issue a wide load.
   LoadInst *LI = dyn_cast<LoadInst>(Instr);
   StoreInst *SI = dyn_cast<StoreInst>(Instr);
@@ -3105,8 +3012,9 @@ void InnerLoopVectorizer::vectorizeMemoryInstruction(Instruction *Instr) {
 
   // Determine if the pointer operand of the access is either consecutive or
   // reverse consecutive.
-  int ConsecutiveStride = Legal->isConsecutivePtr(Ptr);
-  bool Reverse = ConsecutiveStride < 0;
+  bool Reverse = (Decision == LoopVectorizationCostModel::CM_Widen_Reverse);
+  bool ConsecutiveStride =
+      Reverse || (Decision == LoopVectorizationCostModel::CM_Widen);
   bool CreateGatherScatter =
       (Decision == LoopVectorizationCostModel::CM_GatherScatter);
 
@@ -3119,7 +3027,11 @@ void InnerLoopVectorizer::vectorizeMemoryInstruction(Instruction *Instr) {
   if (ConsecutiveStride)
     Ptr = getOrCreateScalarValue(Ptr, {0, 0});
 
-  VectorParts Mask = createBlockInMask(Instr->getParent());
+  VectorParts Mask;
+  bool isMaskRequired = BlockInMask;
+  if (isMaskRequired)
+    Mask = *BlockInMask;
+
   // Handle Stores:
   if (SI) {
     assert(!Legal->isUniform(SI->getPointerOperand()) &&
@@ -3130,7 +3042,7 @@ void InnerLoopVectorizer::vectorizeMemoryInstruction(Instruction *Instr) {
       Instruction *NewSI = nullptr;
       Value *StoredVal = getOrCreateVectorValue(SI->getValueOperand(), Part);
       if (CreateGatherScatter) {
-        Value *MaskPart = Legal->isMaskRequired(SI) ? Mask[Part] : nullptr;
+        Value *MaskPart = isMaskRequired ? Mask[Part] : nullptr;
         Value *VectorGep = getOrCreateVectorValue(Ptr, Part);
         NewSI = Builder.CreateMaskedScatter(StoredVal, VectorGep, Alignment,
                                             MaskPart);
@@ -3152,14 +3064,14 @@ void InnerLoopVectorizer::vectorizeMemoryInstruction(Instruction *Instr) {
               Builder.CreateGEP(nullptr, Ptr, Builder.getInt32(-Part * VF));
           PartPtr =
               Builder.CreateGEP(nullptr, PartPtr, Builder.getInt32(1 - VF));
-          if (Mask[Part]) // The reverse of a null all-one mask is a null mask.
+          if (isMaskRequired) // Reverse of a null all-one mask is a null mask.
             Mask[Part] = reverseVector(Mask[Part]);
         }
 
         Value *VecPtr =
             Builder.CreateBitCast(PartPtr, DataTy->getPointerTo(AddressSpace));
 
-        if (Legal->isMaskRequired(SI) && Mask[Part])
+        if (isMaskRequired)
           NewSI = Builder.CreateMaskedStore(StoredVal, VecPtr, Alignment,
                                             Mask[Part]);
         else
@@ -3176,7 +3088,7 @@ void InnerLoopVectorizer::vectorizeMemoryInstruction(Instruction *Instr) {
   for (unsigned Part = 0; Part < UF; ++Part) {
     Value *NewLI;
     if (CreateGatherScatter) {
-      Value *MaskPart = Legal->isMaskRequired(LI) ? Mask[Part] : nullptr;
+      Value *MaskPart = isMaskRequired ? Mask[Part] : nullptr;
       Value *VectorGep = getOrCreateVectorValue(Ptr, Part);
       NewLI = Builder.CreateMaskedGather(VectorGep, Alignment, MaskPart,
                                          nullptr, "wide.masked.gather");
@@ -3191,13 +3103,13 @@ void InnerLoopVectorizer::vectorizeMemoryInstruction(Instruction *Instr) {
         // wide load needs to start at the last vector element.
         PartPtr = Builder.CreateGEP(nullptr, Ptr, Builder.getInt32(-Part * VF));
         PartPtr = Builder.CreateGEP(nullptr, PartPtr, Builder.getInt32(1 - VF));
-        if (Mask[Part]) // The reverse of a null all-one mask is a null mask.
+        if (isMaskRequired) // Reverse of a null all-one mask is a null mask.
           Mask[Part] = reverseVector(Mask[Part]);
       }
 
       Value *VecPtr =
           Builder.CreateBitCast(PartPtr, DataTy->getPointerTo(AddressSpace));
-      if (Legal->isMaskRequired(LI) && Mask[Part])
+      if (isMaskRequired)
         NewLI = Builder.CreateMaskedLoad(VecPtr, Alignment, Mask[Part],
                                          UndefValue::get(DataTy),
                                          "wide.masked.load");
@@ -4057,15 +3969,12 @@ void InnerLoopVectorizer::fixCrossIterationPHIs() {
   // the currently empty PHI nodes. At this point every instruction in the
   // original loop is widened to a vector form so we can use them to construct
   // the incoming edges.
-  for (Instruction &I : *OrigLoop->getHeader()) {
-    PHINode *Phi = dyn_cast<PHINode>(&I);
-    if (!Phi)
-      break;
+  for (PHINode &Phi : OrigLoop->getHeader()->phis()) {
     // Handle first-order recurrences and reductions that need to be fixed.
-    if (Legal->isFirstOrderRecurrence(Phi))
-      fixFirstOrderRecurrence(Phi);
-    else if (Legal->isReductionVariable(Phi))
-      fixReduction(Phi);
+    if (Legal->isFirstOrderRecurrence(&Phi))
+      fixFirstOrderRecurrence(&Phi);
+    else if (Legal->isReductionVariable(&Phi))
+      fixReduction(&Phi);
   }
 }
 
@@ -4230,12 +4139,9 @@ void InnerLoopVectorizer::fixFirstOrderRecurrence(PHINode *Phi) {
   // vector recurrence we extracted in the middle block. Since the loop is in
   // LCSSA form, we just need to find the phi node for the original scalar
   // recurrence in the exit block, and then add an edge for the middle block.
-  for (auto &I : *LoopExitBlock) {
-    auto *LCSSAPhi = dyn_cast<PHINode>(&I);
-    if (!LCSSAPhi)
-      break;
-    if (LCSSAPhi->getIncomingValue(0) == Phi) {
-      LCSSAPhi->addIncoming(ExtractForPhiUsedOutsideLoop, LoopMiddleBlock);
+  for (PHINode &LCSSAPhi : LoopExitBlock->phis()) {
+    if (LCSSAPhi.getIncomingValue(0) == Phi) {
+      LCSSAPhi.addIncoming(ExtractForPhiUsedOutsideLoop, LoopMiddleBlock);
       break;
     }
   }
@@ -4392,21 +4298,15 @@ void InnerLoopVectorizer::fixReduction(PHINode *Phi) {
   // inside and outside of the scalar remainder loop.
   // We know that the loop is in LCSSA form. We need to update the
   // PHI nodes in the exit blocks.
-  for (BasicBlock::iterator LEI = LoopExitBlock->begin(),
-         LEE = LoopExitBlock->end();
-       LEI != LEE; ++LEI) {
-    PHINode *LCSSAPhi = dyn_cast<PHINode>(LEI);
-    if (!LCSSAPhi)
-      break;
-
+  for (PHINode &LCSSAPhi : LoopExitBlock->phis()) {
     // All PHINodes need to have a single entry edge, or two if
     // we already fixed them.
-    assert(LCSSAPhi->getNumIncomingValues() < 3 && "Invalid LCSSA PHI");
+    assert(LCSSAPhi.getNumIncomingValues() < 3 && "Invalid LCSSA PHI");
 
     // We found a reduction value exit-PHI. Update it with the
     // incoming bypass edge.
-    if (LCSSAPhi->getIncomingValue(0) == LoopExitInst)
-      LCSSAPhi->addIncoming(ReducedPartRdx, LoopMiddleBlock);
+    if (LCSSAPhi.getIncomingValue(0) == LoopExitInst)
+      LCSSAPhi.addIncoming(ReducedPartRdx, LoopMiddleBlock);
   } // end of the LCSSA phi scan.
 
     // Fix the scalar loop reduction variable with the incoming reduction sum
@@ -4421,14 +4321,11 @@ void InnerLoopVectorizer::fixReduction(PHINode *Phi) {
 }
 
 void InnerLoopVectorizer::fixLCSSAPHIs() {
-  for (Instruction &LEI : *LoopExitBlock) {
-    auto *LCSSAPhi = dyn_cast<PHINode>(&LEI);
-    if (!LCSSAPhi)
-      break;
-    if (LCSSAPhi->getNumIncomingValues() == 1) {
-      assert(OrigLoop->isLoopInvariant(LCSSAPhi->getIncomingValue(0)) &&
+  for (PHINode &LCSSAPhi : LoopExitBlock->phis()) {
+    if (LCSSAPhi.getNumIncomingValues() == 1) {
+      assert(OrigLoop->isLoopInvariant(LCSSAPhi.getIncomingValue(0)) &&
              "Incoming value isn't loop invariant");
-      LCSSAPhi->addIncoming(LCSSAPhi->getIncomingValue(0), LoopMiddleBlock);
+      LCSSAPhi.addIncoming(LCSSAPhi.getIncomingValue(0), LoopMiddleBlock);
     }
   }
 }
@@ -4497,79 +4394,11 @@ void InnerLoopVectorizer::sinkScalarOperands(Instruction *PredInst) {
   } while (Changed);
 }
 
-InnerLoopVectorizer::VectorParts
-InnerLoopVectorizer::createEdgeMask(BasicBlock *Src, BasicBlock *Dst) {
-  assert(is_contained(predecessors(Dst), Src) && "Invalid edge");
-
-  // Look for cached value.
-  std::pair<BasicBlock *, BasicBlock *> Edge(Src, Dst);
-  EdgeMaskCacheTy::iterator ECEntryIt = EdgeMaskCache.find(Edge);
-  if (ECEntryIt != EdgeMaskCache.end())
-    return ECEntryIt->second;
-
-  VectorParts SrcMask = createBlockInMask(Src);
-
-  // The terminator has to be a branch inst!
-  BranchInst *BI = dyn_cast<BranchInst>(Src->getTerminator());
-  assert(BI && "Unexpected terminator found");
-
-  if (!BI->isConditional())
-    return EdgeMaskCache[Edge] = SrcMask;
-
-  VectorParts EdgeMask(UF);
-  for (unsigned Part = 0; Part < UF; ++Part) {
-    auto *EdgeMaskPart = getOrCreateVectorValue(BI->getCondition(), Part);
-    if (BI->getSuccessor(0) != Dst)
-      EdgeMaskPart = Builder.CreateNot(EdgeMaskPart);
-
-    if (SrcMask[Part]) // Otherwise block in-mask is all-one, no need to AND.
-      EdgeMaskPart = Builder.CreateAnd(EdgeMaskPart, SrcMask[Part]);
-
-    EdgeMask[Part] = EdgeMaskPart;
-  }
-
-  return EdgeMaskCache[Edge] = EdgeMask;
-}
-
-InnerLoopVectorizer::VectorParts
-InnerLoopVectorizer::createBlockInMask(BasicBlock *BB) {
-  assert(OrigLoop->contains(BB) && "Block is not a part of a loop");
-
-  // Look for cached value.
-  BlockMaskCacheTy::iterator BCEntryIt = BlockMaskCache.find(BB);
-  if (BCEntryIt != BlockMaskCache.end())
-    return BCEntryIt->second;
-
-  // All-one mask is modelled as no-mask following the convention for masked
-  // load/store/gather/scatter. Initialize BlockMask to no-mask.
-  VectorParts BlockMask(UF);
-  for (unsigned Part = 0; Part < UF; ++Part)
-    BlockMask[Part] = nullptr;
-
-  // Loop incoming mask is all-one.
-  if (OrigLoop->getHeader() == BB)
-    return BlockMaskCache[BB] = BlockMask;
-
-  // This is the block mask. We OR all incoming edges.
-  for (auto *Predecessor : predecessors(BB)) {
-    VectorParts EdgeMask = createEdgeMask(Predecessor, BB);
-    if (!EdgeMask[0]) // Mask of predecessor is all-one so mask of block is too.
-      return BlockMaskCache[BB] = EdgeMask;
-
-    if (!BlockMask[0]) { // BlockMask has its initialized nullptr value.
-      BlockMask = EdgeMask;
-      continue;
-    }
-
-    for (unsigned Part = 0; Part < UF; ++Part)
-      BlockMask[Part] = Builder.CreateOr(BlockMask[Part], EdgeMask[Part]);
-  }
-
-  return BlockMaskCache[BB] = BlockMask;
-}
-
 void InnerLoopVectorizer::widenPHIInstruction(Instruction *PN, unsigned UF,
                                               unsigned VF) {
+  assert(PN->getParent() == OrigLoop->getHeader() &&
+         "Non-header phis should have been handled elsewhere");
+
   PHINode *P = cast<PHINode>(PN);
   // In order to support recurrences we need to be able to vectorize Phi nodes.
   // Phi nodes have cycles, so we need to vectorize them in two stages. This is
@@ -4588,43 +4417,6 @@ void InnerLoopVectorizer::widenPHIInstruction(Instruction *PN, unsigned UF,
   }
 
   setDebugLocFromInst(Builder, P);
-  // Check for PHI nodes that are lowered to vector selects.
-  if (P->getParent() != OrigLoop->getHeader()) {
-    // We know that all PHIs in non-header blocks are converted into
-    // selects, so we don't have to worry about the insertion order and we
-    // can just use the builder.
-    // At this point we generate the predication tree. There may be
-    // duplications since this is a simple recursive scan, but future
-    // optimizations will clean it up.
-
-    unsigned NumIncoming = P->getNumIncomingValues();
-
-    // Generate a sequence of selects of the form:
-    // SELECT(Mask3, In3,
-    //      SELECT(Mask2, In2,
-    //                   ( ...)))
-    VectorParts Entry(UF);
-    for (unsigned In = 0; In < NumIncoming; In++) {
-      VectorParts Cond =
-          createEdgeMask(P->getIncomingBlock(In), P->getParent());
-
-      for (unsigned Part = 0; Part < UF; ++Part) {
-        Value *In0 = getOrCreateVectorValue(P->getIncomingValue(In), Part);
-        assert((Cond[Part] || NumIncoming == 1) &&
-               "Multiple predecessors with one predecessor having a full mask");
-        if (In == 0)
-          Entry[Part] = In0; // Initialize with the first incoming value.
-        else
-          // Select between the current value and the previous incoming edge
-          // based on the incoming mask.
-          Entry[Part] = Builder.CreateSelect(Cond[Part], In0, Entry[Part],
-                                             "predphi");
-      }
-    }
-    for (unsigned Part = 0; Part < UF; ++Part)
-      VectorLoopValueMap.setVectorValue(P, Part, Entry[Part]);
-    return;
-  }
 
   // This PHINode must be an induction variable.
   // Make sure that we know about it.
@@ -4848,10 +4640,6 @@ void InnerLoopVectorizer::widenInstruction(Instruction &I) {
     break;
   }
 
-  case Instruction::Store:
-  case Instruction::Load:
-    vectorizeMemoryInstruction(&I);
-    break;
   case Instruction::ZExt:
   case Instruction::SExt:
   case Instruction::FPToUI:
@@ -4956,7 +4744,7 @@ void InnerLoopVectorizer::widenInstruction(Instruction &I) {
   }
 
   default:
-    // All other instructions are scalarized.
+    // This instruction is not vectorized by simple widening.
     DEBUG(dbgs() << "LV: Found an unhandled instruction: " << I);
     llvm_unreachable("Unhandled instruction!");
   } // end of switch.
@@ -4983,11 +4771,8 @@ void InnerLoopVectorizer::updateAnalysis() {
 /// Phi nodes with constant expressions that can trap are not safe to if
 /// convert.
 static bool canIfConvertPHINodes(BasicBlock *BB) {
-  for (Instruction &I : *BB) {
-    auto *Phi = dyn_cast<PHINode>(&I);
-    if (!Phi)
-      return true;
-    for (Value *V : Phi->incoming_values())
+  for (PHINode &Phi : BB->phis()) {
+    for (Value *V : Phi.incoming_values())
       if (auto *C = dyn_cast<Constant>(V))
         if (C->canTrap())
           return false;
@@ -5051,13 +4836,13 @@ bool LoopVectorizationLegality::canVectorize() {
   bool Result = true;
   
   bool DoExtraAnalysis = ORE->allowExtraAnalysis(DEBUG_TYPE);
-  if (DoExtraAnalysis)
   // We must have a loop in canonical form. Loops with indirectbr in them cannot
   // be canonicalized.
   if (!TheLoop->getLoopPreheader()) {
+    DEBUG(dbgs() << "LV: Loop doesn't have a legal pre-header.\n");
     ORE->emit(createMissedAnalysis("CFGNotUnderstood")
               << "loop control flow is not understood by vectorizer");
-  if (DoExtraAnalysis)
+    if (DoExtraAnalysis)
       Result = false;
     else
       return false;
@@ -5221,6 +5006,15 @@ void LoopVectorizationLegality::addInductionPhi(
     PHINode *Phi, const InductionDescriptor &ID,
     SmallPtrSetImpl<Value *> &AllowedExit) {
   Inductions[Phi] = ID;
+
+  // In case this induction also comes with casts that we know we can ignore
+  // in the vectorized loop body, record them here. All casts could be recorded
+  // here for ignoring, but suffices to record only the first (as it is the
+  // only one that may bw used outside the cast sequence).
+  const SmallVectorImpl<Instruction *> &Casts = ID.getCastInsts();
+  if (!Casts.empty())
+    InductionCastsToIgnore.insert(*Casts.begin());
+
   Type *PhiTy = Phi->getType();
   const DataLayout &DL = Phi->getModule()->getDataLayout();
 
@@ -5708,6 +5502,7 @@ void LoopVectorizationCostModel::collectLoopUniforms(unsigned VF) {
            "Widening decision should be ready at this moment");
 
     return (WideningDecision == CM_Widen ||
+            WideningDecision == CM_Widen_Reverse ||
             WideningDecision == CM_Interleave);
   };
   // Iterate over the instructions in the loop, and collect all
@@ -5850,13 +5645,22 @@ bool LoopVectorizationLegality::canVectorizeMemory() {
   return true;
 }
 
-bool LoopVectorizationLegality::isInductionVariable(const Value *V) {
+bool LoopVectorizationLegality::isInductionPhi(const Value *V) {
   Value *In0 = const_cast<Value *>(V);
   PHINode *PN = dyn_cast_or_null<PHINode>(In0);
   if (!PN)
     return false;
 
   return Inductions.count(PN);
+}
+
+bool LoopVectorizationLegality::isCastedInductionVariable(const Value *V) {
+  auto *Inst = dyn_cast<Instruction>(V);
+  return (Inst && InductionCastsToIgnore.count(Inst));
+}
+
+bool LoopVectorizationLegality::isInductionVariable(const Value *V) {
+  return isInductionPhi(V) || isCastedInductionVariable(V);
 }
 
 bool LoopVectorizationLegality::isFirstOrderRecurrence(const PHINode *Phi) {
@@ -6356,7 +6160,7 @@ LoopVectorizationCostModel::computeFeasibleMaxVF(bool OptForSize,
   return MaxVF;
 }
 
-LoopVectorizationCostModel::VectorizationFactor
+VectorizationFactor
 LoopVectorizationCostModel::selectVectorizationFactor(unsigned MaxVF) {
   float Cost = expectedCost(1).first;
 #ifndef NDEBUG
@@ -6929,7 +6733,8 @@ LoopVectorizationCostModel::expectedCost(unsigned VF) {
         continue;
 
       // Skip ignored values.
-      if (ValuesToIgnore.count(&I))
+      if (ValuesToIgnore.count(&I) ||
+          (VF > 1 && VecValuesToIgnore.count(&I)))
         continue;
 
       VectorizationCostTy C = getInstructionCost(&I, VF);
@@ -6968,14 +6773,16 @@ LoopVectorizationCostModel::expectedCost(unsigned VF) {
 static const SCEV *getAddressAccessSCEV(
               Value *Ptr,
               LoopVectorizationLegality *Legal,
-              ScalarEvolution *SE,
+              PredicatedScalarEvolution &PSE,
               const Loop *TheLoop) {
+
   auto *Gep = dyn_cast<GetElementPtrInst>(Ptr);
   if (!Gep)
     return nullptr;
 
   // We are looking for a gep with all loop invariant indices except for one
   // which should be an induction variable.
+  auto SE = PSE.getSE();
   unsigned NumOperands = Gep->getNumOperands();
   for (unsigned i = 1; i < NumOperands; ++i) {
     Value *Opd = Gep->getOperand(i);
@@ -6985,7 +6792,7 @@ static const SCEV *getAddressAccessSCEV(
   }
 
   // Now we know we have a GEP ptr, %inv, %ind, %inv. return the Ptr SCEV.
-  return SE->getSCEV(Ptr);
+  return PSE.getSCEV(Ptr);
 }
 
 static bool isStrideMul(Instruction *I, LoopVectorizationLegality *Legal) {
@@ -7005,7 +6812,7 @@ unsigned LoopVectorizationCostModel::getMemInstScalarizationCost(Instruction *I,
 
   // Figure out whether the access is strided and get the stride value
   // if it's known in compile time
-  const SCEV *PtrSCEV = getAddressAccessSCEV(Ptr, Legal, SE, TheLoop);
+  const SCEV *PtrSCEV = getAddressAccessSCEV(Ptr, Legal, PSE, TheLoop);
 
   // Get the cost of the scalar memory instruction and address computation.
   unsigned Cost = VF * TTI.getAddressComputationCost(PtrTy, SE, PtrSCEV);
@@ -7165,7 +6972,12 @@ void LoopVectorizationCostModel::setCostBasedWideningDecision(unsigned VF) {
       // We assume that widening is the best solution when possible.
       if (Legal->memoryInstructionCanBeWidened(&I, VF)) {
         unsigned Cost = getConsecutiveMemOpCost(&I, VF);
-        setWideningDecision(&I, VF, CM_Widen, Cost);
+        int ConsecutiveStride = Legal->isConsecutivePtr(getPointerOperand(&I));
+        assert((ConsecutiveStride == 1 || ConsecutiveStride == -1) &&
+               "Expected consecutive stride.");
+        InstWidening Decision =
+            ConsecutiveStride == 1 ? CM_Widen : CM_Widen_Reverse;
+        setWideningDecision(&I, VF, Decision, Cost);
         continue;
       }
 
@@ -7255,7 +7067,8 @@ void LoopVectorizationCostModel::setCostBasedWideningDecision(unsigned VF) {
       // by cost functions, but since this involves the task of finding out
       // if the loaded register is involved in an address computation, it is
       // instead changed here when we know this is the case.
-      if (getWideningDecision(I, VF) == CM_Widen)
+      InstWidening Decision = getWideningDecision(I, VF);
+      if (Decision == CM_Widen || Decision == CM_Widen_Reverse)
         // Scalarize a widened load of address.
         setWideningDecision(I, VF, CM_Scalarize,
                             (VF * getMemoryInstructionCost(I, 1)));
@@ -7559,13 +7372,19 @@ void LoopVectorizationCostModel::collectValuesToIgnore() {
     SmallPtrSetImpl<Instruction *> &Casts = RedDes.getCastInsts();
     VecValuesToIgnore.insert(Casts.begin(), Casts.end());
   }
+  // Ignore type-casting instructions we identified during induction
+  // detection.
+  for (auto &Induction : *Legal->getInductionVars()) {
+    InductionDescriptor &IndDes = Induction.second;
+    const SmallVectorImpl<Instruction *> &Casts = IndDes.getCastInsts();
+    VecValuesToIgnore.insert(Casts.begin(), Casts.end());
+  }
 }
 
-LoopVectorizationCostModel::VectorizationFactor
+VectorizationFactor
 LoopVectorizationPlanner::plan(bool OptForSize, unsigned UserVF) {
   // Width 1 means no vectorize, cost 0 means uncomputed cost.
-  const LoopVectorizationCostModel::VectorizationFactor NoVectorization = {1U,
-                                                                           0U};
+  const VectorizationFactor NoVectorization = {1U, 0U};
   Optional<unsigned> MaybeMaxVF = CM.computeMaxVF(OptForSize);
   if (!MaybeMaxVF.hasValue()) // Cases considered too costly to vectorize.
     return NoVectorization;
@@ -7608,7 +7427,7 @@ void LoopVectorizationPlanner::setBestPlan(unsigned VF, unsigned UF) {
   BestVF = VF;
   BestUF = UF;
 
-  erase_if(VPlans, [VF](const std::unique_ptr<VPlan> &Plan) {
+  erase_if(VPlans, [VF](const VPlanPtr &Plan) {
     return !Plan->hasVF(VF);
   });
   assert(VPlans.size() == 1 && "Best VF has not a single VPlan.");
@@ -7619,8 +7438,11 @@ void LoopVectorizationPlanner::executePlan(InnerLoopVectorizer &ILV,
   // Perform the actual loop transformation.
 
   // 1. Create a new empty loop. Unlink the old loop and connect the new one.
-  VPTransformState State{
-      BestVF, BestUF, LI, DT, ILV.Builder, ILV.VectorLoopValueMap, &ILV};
+  VPCallbackILV CallbackILV(ILV);
+
+  VPTransformState State{BestVF, BestUF,      LI,
+                         DT,     ILV.Builder, ILV.VectorLoopValueMap,
+                         &ILV,   CallbackILV};
   State.CFG.PrevBB = ILV.createVectorizedLoopSkeleton();
 
   //===------------------------------------------------===//
@@ -7661,6 +7483,18 @@ void LoopVectorizationPlanner::collectTriviallyDeadInstructions(
           return U == Ind || DeadInstructions.count(cast<Instruction>(U));
         }))
       DeadInstructions.insert(IndUpdate);
+
+    // We record as "Dead" also the type-casting instructions we had identified 
+    // during induction analysis. We don't need any handling for them in the
+    // vectorized loop because we have proven that, under a proper runtime 
+    // test guarding the vectorized loop, the value of the phi, and the casted 
+    // value of the phi, are the same. The last instruction in this casting chain
+    // will get its scalar/vector/widened def from the scalar/vector/widened def 
+    // of the respective phi node. Any other casts in the induction def-use chain
+    // have no other uses outside the phi update chain, and will be ignored.
+    InductionDescriptor &IndDes = Induction.second;
+    const SmallVectorImpl<Instruction *> &Casts = IndDes.getCastInsts();
+    DeadInstructions.insert(Casts.begin(), Casts.end());
   }
 }
 
@@ -7719,259 +7553,6 @@ static void AddRuntimeUnrollDisableMetaData(Loop *L) {
   }
 }
 
-namespace {
-
-/// VPWidenRecipe is a recipe for producing a copy of vector type for each
-/// Instruction in its ingredients independently, in order. This recipe covers
-/// most of the traditional vectorization cases where each ingredient transforms
-/// into a vectorized version of itself.
-class VPWidenRecipe : public VPRecipeBase {
-private:
-  /// Hold the ingredients by pointing to their original BasicBlock location.
-  BasicBlock::iterator Begin;
-  BasicBlock::iterator End;
-
-public:
-  VPWidenRecipe(Instruction *I) : VPRecipeBase(VPWidenSC) {
-    End = I->getIterator();
-    Begin = End++;
-  }
-
-  ~VPWidenRecipe() override = default;
-
-  /// Method to support type inquiry through isa, cast, and dyn_cast.
-  static inline bool classof(const VPRecipeBase *V) {
-    return V->getVPRecipeID() == VPRecipeBase::VPWidenSC;
-  }
-
-  /// Produce widened copies of all Ingredients.
-  void execute(VPTransformState &State) override {
-    for (auto &Instr : make_range(Begin, End))
-      State.ILV->widenInstruction(Instr);
-  }
-
-  /// Augment the recipe to include Instr, if it lies at its End.
-  bool appendInstruction(Instruction *Instr) {
-    if (End != Instr->getIterator())
-      return false;
-    End++;
-    return true;
-  }
-
-  /// Print the recipe.
-  void print(raw_ostream &O, const Twine &Indent) const override {
-    O << " +\n" << Indent << "\"WIDEN\\l\"";
-    for (auto &Instr : make_range(Begin, End))
-      O << " +\n" << Indent << "\"  " << VPlanIngredient(&Instr) << "\\l\"";
-  }
-};
-
-/// A recipe for handling phi nodes of integer and floating-point inductions,
-/// producing their vector and scalar values.
-class VPWidenIntOrFpInductionRecipe : public VPRecipeBase {
-private:
-  PHINode *IV;
-  TruncInst *Trunc;
-
-public:
-  VPWidenIntOrFpInductionRecipe(PHINode *IV, TruncInst *Trunc = nullptr)
-      : VPRecipeBase(VPWidenIntOrFpInductionSC), IV(IV), Trunc(Trunc) {}
-  ~VPWidenIntOrFpInductionRecipe() override = default;
-
-  /// Method to support type inquiry through isa, cast, and dyn_cast.
-  static inline bool classof(const VPRecipeBase *V) {
-    return V->getVPRecipeID() == VPRecipeBase::VPWidenIntOrFpInductionSC;
-  }
-
-  /// Generate the vectorized and scalarized versions of the phi node as
-  /// needed by their users.
-  void execute(VPTransformState &State) override {
-    assert(!State.Instance && "Int or FP induction being replicated.");
-    State.ILV->widenIntOrFpInduction(IV, Trunc);
-  }
-
-  /// Print the recipe.
-  void print(raw_ostream &O, const Twine &Indent) const override {
-    O << " +\n" << Indent << "\"WIDEN-INDUCTION";
-    if (Trunc) {
-      O << "\\l\"";
-      O << " +\n" << Indent << "\"  " << VPlanIngredient(IV) << "\\l\"";
-      O << " +\n" << Indent << "\"  " << VPlanIngredient(Trunc) << "\\l\"";
-    } else
-      O << " " << VPlanIngredient(IV) << "\\l\"";
-  }
-};
-
-/// A recipe for handling all phi nodes except for integer and FP inductions.
-class VPWidenPHIRecipe : public VPRecipeBase {
-private:
-  PHINode *Phi;
-
-public:
-  VPWidenPHIRecipe(PHINode *Phi) : VPRecipeBase(VPWidenPHISC), Phi(Phi) {}
-  ~VPWidenPHIRecipe() override = default;
-
-  /// Method to support type inquiry through isa, cast, and dyn_cast.
-  static inline bool classof(const VPRecipeBase *V) {
-    return V->getVPRecipeID() == VPRecipeBase::VPWidenPHISC;
-  }
-
-  /// Generate the phi/select nodes.
-  void execute(VPTransformState &State) override {
-    State.ILV->widenPHIInstruction(Phi, State.UF, State.VF);
-  }
-
-  /// Print the recipe.
-  void print(raw_ostream &O, const Twine &Indent) const override {
-    O << " +\n" << Indent << "\"WIDEN-PHI " << VPlanIngredient(Phi) << "\\l\"";
-  }
-};
-
-/// VPInterleaveRecipe is a recipe for transforming an interleave group of load
-/// or stores into one wide load/store and shuffles.
-class VPInterleaveRecipe : public VPRecipeBase {
-private:
-  const InterleaveGroup *IG;
-
-public:
-  VPInterleaveRecipe(const InterleaveGroup *IG)
-      : VPRecipeBase(VPInterleaveSC), IG(IG) {}
-  ~VPInterleaveRecipe() override = default;
-
-  /// Method to support type inquiry through isa, cast, and dyn_cast.
-  static inline bool classof(const VPRecipeBase *V) {
-    return V->getVPRecipeID() == VPRecipeBase::VPInterleaveSC;
-  }
-
-  /// Generate the wide load or store, and shuffles.
-  void execute(VPTransformState &State) override {
-    assert(!State.Instance && "Interleave group being replicated.");
-    State.ILV->vectorizeInterleaveGroup(IG->getInsertPos());
-  }
-
-  /// Print the recipe.
-  void print(raw_ostream &O, const Twine &Indent) const override;
-
-  const InterleaveGroup *getInterleaveGroup() { return IG; }
-};
-
-/// VPReplicateRecipe replicates a given instruction producing multiple scalar
-/// copies of the original scalar type, one per lane, instead of producing a
-/// single copy of widened type for all lanes. If the instruction is known to be
-/// uniform only one copy, per lane zero, will be generated.
-class VPReplicateRecipe : public VPRecipeBase {
-private:
-  /// The instruction being replicated.
-  Instruction *Ingredient;
-
-  /// Indicator if only a single replica per lane is needed.
-  bool IsUniform;
-
-  /// Indicator if the replicas are also predicated.
-  bool IsPredicated;
-
-  /// Indicator if the scalar values should also be packed into a vector.
-  bool AlsoPack;
-
-public:
-  VPReplicateRecipe(Instruction *I, bool IsUniform, bool IsPredicated = false)
-      : VPRecipeBase(VPReplicateSC), Ingredient(I), IsUniform(IsUniform),
-        IsPredicated(IsPredicated) {
-    // Retain the previous behavior of predicateInstructions(), where an
-    // insert-element of a predicated instruction got hoisted into the
-    // predicated basic block iff it was its only user. This is achieved by
-    // having predicated instructions also pack their values into a vector by
-    // default unless they have a replicated user which uses their scalar value.
-    AlsoPack = IsPredicated && !I->use_empty();
-  }
-
-  ~VPReplicateRecipe() override = default;
-
-  /// Method to support type inquiry through isa, cast, and dyn_cast.
-  static inline bool classof(const VPRecipeBase *V) {
-    return V->getVPRecipeID() == VPRecipeBase::VPReplicateSC;
-  }
-
-  /// Generate replicas of the desired Ingredient. Replicas will be generated
-  /// for all parts and lanes unless a specific part and lane are specified in
-  /// the \p State.
-  void execute(VPTransformState &State) override;
-
-  void setAlsoPack(bool Pack) { AlsoPack = Pack; }
-
-  /// Print the recipe.
-  void print(raw_ostream &O, const Twine &Indent) const override {
-    O << " +\n"
-      << Indent << "\"" << (IsUniform ? "CLONE " : "REPLICATE ")
-      << VPlanIngredient(Ingredient);
-    if (AlsoPack)
-      O << " (S->V)";
-    O << "\\l\"";
-  }
-};
-
-/// A recipe for generating conditional branches on the bits of a mask.
-class VPBranchOnMaskRecipe : public VPRecipeBase {
-private:
-  /// The input IR basic block used to obtain the mask providing the condition
-  /// bits for the branch.
-  BasicBlock *MaskedBasicBlock;
-
-public:
-  VPBranchOnMaskRecipe(BasicBlock *BB)
-      : VPRecipeBase(VPBranchOnMaskSC), MaskedBasicBlock(BB) {}
-
-  /// Method to support type inquiry through isa, cast, and dyn_cast.
-  static inline bool classof(const VPRecipeBase *V) {
-    return V->getVPRecipeID() == VPRecipeBase::VPBranchOnMaskSC;
-  }
-
-  /// Generate the extraction of the appropriate bit from the block mask and the
-  /// conditional branch.
-  void execute(VPTransformState &State) override;
-
-  /// Print the recipe.
-  void print(raw_ostream &O, const Twine &Indent) const override {
-    O << " +\n"
-      << Indent << "\"BRANCH-ON-MASK-OF " << MaskedBasicBlock->getName()
-      << "\\l\"";
-  }
-};
-
-/// VPPredInstPHIRecipe is a recipe for generating the phi nodes needed when
-/// control converges back from a Branch-on-Mask. The phi nodes are needed in
-/// order to merge values that are set under such a branch and feed their uses.
-/// The phi nodes can be scalar or vector depending on the users of the value.
-/// This recipe works in concert with VPBranchOnMaskRecipe.
-class VPPredInstPHIRecipe : public VPRecipeBase {
-private:
-  Instruction *PredInst;
-
-public:
-  /// Construct a VPPredInstPHIRecipe given \p PredInst whose value needs a phi
-  /// nodes after merging back from a Branch-on-Mask.
-  VPPredInstPHIRecipe(Instruction *PredInst)
-      : VPRecipeBase(VPPredInstPHISC), PredInst(PredInst) {}
-  ~VPPredInstPHIRecipe() override = default;
-
-  /// Method to support type inquiry through isa, cast, and dyn_cast.
-  static inline bool classof(const VPRecipeBase *V) {
-    return V->getVPRecipeID() == VPRecipeBase::VPPredInstPHISC;
-  }
-
-  /// Generates phi nodes for live-outs as needed to retain SSA form.
-  void execute(VPTransformState &State) override;
-
-  /// Print the recipe.
-  void print(raw_ostream &O, const Twine &Indent) const override {
-    O << " +\n"
-      << Indent << "\"PHI-PREDICATED-INSTRUCTION " << VPlanIngredient(PredInst)
-      << "\\l\"";
-  }
-};
-
-} // end anonymous namespace
-
 bool LoopVectorizationPlanner::getDecisionAndClampRange(
     const std::function<bool(unsigned)> &Predicate, VFRange &Range) {
   assert(Range.End > Range.Start && "Trying to test an empty VF range.");
@@ -7992,11 +7573,91 @@ bool LoopVectorizationPlanner::getDecisionAndClampRange(
 /// vectorization decision can potentially shorten this sub-range during
 /// buildVPlan().
 void LoopVectorizationPlanner::buildVPlans(unsigned MinVF, unsigned MaxVF) {
+
+  // Collect conditions feeding internal conditional branches; they need to be
+  // represented in VPlan for it to model masking.
+  SmallPtrSet<Value *, 1> NeedDef;
+
+  auto *Latch = OrigLoop->getLoopLatch();
+  for (BasicBlock *BB : OrigLoop->blocks()) {
+    if (BB == Latch)
+      continue;
+    BranchInst *Branch = dyn_cast<BranchInst>(BB->getTerminator());
+    if (Branch && Branch->isConditional())
+      NeedDef.insert(Branch->getCondition());
+  }
+
   for (unsigned VF = MinVF; VF < MaxVF + 1;) {
     VFRange SubRange = {VF, MaxVF + 1};
-    VPlans.push_back(buildVPlan(SubRange));
+    VPlans.push_back(buildVPlan(SubRange, NeedDef));
     VF = SubRange.End;
   }
+}
+
+VPValue *LoopVectorizationPlanner::createEdgeMask(BasicBlock *Src,
+                                                  BasicBlock *Dst,
+                                                  VPlanPtr &Plan) {
+  assert(is_contained(predecessors(Dst), Src) && "Invalid edge");
+
+  // Look for cached value.
+  std::pair<BasicBlock *, BasicBlock *> Edge(Src, Dst);
+  EdgeMaskCacheTy::iterator ECEntryIt = EdgeMaskCache.find(Edge);
+  if (ECEntryIt != EdgeMaskCache.end())
+    return ECEntryIt->second;
+
+  VPValue *SrcMask = createBlockInMask(Src, Plan);
+
+  // The terminator has to be a branch inst!
+  BranchInst *BI = dyn_cast<BranchInst>(Src->getTerminator());
+  assert(BI && "Unexpected terminator found");
+
+  if (!BI->isConditional())
+    return EdgeMaskCache[Edge] = SrcMask;
+
+  VPValue *EdgeMask = Plan->getVPValue(BI->getCondition());
+  assert(EdgeMask && "No Edge Mask found for condition");
+
+  if (BI->getSuccessor(0) != Dst)
+    EdgeMask = Builder.createNot(EdgeMask);
+
+  if (SrcMask) // Otherwise block in-mask is all-one, no need to AND.
+    EdgeMask = Builder.createAnd(EdgeMask, SrcMask);
+
+  return EdgeMaskCache[Edge] = EdgeMask;
+}
+
+VPValue *LoopVectorizationPlanner::createBlockInMask(BasicBlock *BB,
+                                                     VPlanPtr &Plan) {
+  assert(OrigLoop->contains(BB) && "Block is not a part of a loop");
+
+  // Look for cached value.
+  BlockMaskCacheTy::iterator BCEntryIt = BlockMaskCache.find(BB);
+  if (BCEntryIt != BlockMaskCache.end())
+    return BCEntryIt->second;
+
+  // All-one mask is modelled as no-mask following the convention for masked
+  // load/store/gather/scatter. Initialize BlockMask to no-mask.
+  VPValue *BlockMask = nullptr;
+
+  // Loop incoming mask is all-one.
+  if (OrigLoop->getHeader() == BB)
+    return BlockMaskCache[BB] = BlockMask;
+
+  // This is the block mask. We OR all incoming edges.
+  for (auto *Predecessor : predecessors(BB)) {
+    VPValue *EdgeMask = createEdgeMask(Predecessor, BB, Plan);
+    if (!EdgeMask) // Mask of predecessor is all-one so mask of block is too.
+      return BlockMaskCache[BB] = EdgeMask;
+
+    if (!BlockMask) { // BlockMask has its initialized nullptr value.
+      BlockMask = EdgeMask;
+      continue;
+    }
+
+    BlockMask = Builder.createOr(BlockMask, EdgeMask);
+  }
+
+  return BlockMaskCache[BB] = BlockMask;
 }
 
 VPInterleaveRecipe *
@@ -8024,6 +7685,37 @@ LoopVectorizationPlanner::tryToInterleaveMemory(Instruction *I,
          "Generating a recipe for an adjunct member of an interleave group");
 
   return new VPInterleaveRecipe(IG);
+}
+
+VPWidenMemoryInstructionRecipe *
+LoopVectorizationPlanner::tryToWidenMemory(Instruction *I, VFRange &Range,
+                                           VPlanPtr &Plan) {
+  if (!isa<LoadInst>(I) && !isa<StoreInst>(I))
+    return nullptr;
+
+  auto willWiden = [&](unsigned VF) -> bool {
+    if (VF == 1)
+      return false;
+    if (CM.isScalarAfterVectorization(I, VF) ||
+        CM.isProfitableToScalarize(I, VF))
+      return false;
+    LoopVectorizationCostModel::InstWidening Decision =
+        CM.getWideningDecision(I, VF);
+    assert(Decision != LoopVectorizationCostModel::CM_Unknown &&
+           "CM decision should be taken at this point.");
+    assert(Decision != LoopVectorizationCostModel::CM_Interleave &&
+           "Interleave memory opportunity should be caught earlier.");
+    return Decision != LoopVectorizationCostModel::CM_Scalarize;
+  };
+
+  if (!getDecisionAndClampRange(willWiden, Range))
+    return nullptr;
+
+  VPValue *Mask = nullptr;
+  if (Legal->isMaskRequired(I))
+    Mask = createBlockInMask(I->getParent(), Plan);
+
+  return new VPWidenMemoryInstructionRecipe(*I, Mask);
 }
 
 VPWidenIntOrFpInductionRecipe *
@@ -8058,6 +7750,31 @@ LoopVectorizationPlanner::tryToOptimizeInduction(Instruction *I,
     return new VPWidenIntOrFpInductionRecipe(cast<PHINode>(I->getOperand(0)),
                                              cast<TruncInst>(I));
   return nullptr;
+}
+
+VPBlendRecipe *
+LoopVectorizationPlanner::tryToBlend(Instruction *I, VPlanPtr &Plan) {
+  PHINode *Phi = dyn_cast<PHINode>(I);
+  if (!Phi || Phi->getParent() == OrigLoop->getHeader())
+    return nullptr;
+
+  // We know that all PHIs in non-header blocks are converted into selects, so
+  // we don't have to worry about the insertion order and we can just use the
+  // builder. At this point we generate the predication tree. There may be
+  // duplications since this is a simple recursive scan, but future
+  // optimizations will clean it up.
+
+  SmallVector<VPValue *, 2> Masks;
+  unsigned NumIncoming = Phi->getNumIncomingValues();
+  for (unsigned In = 0; In < NumIncoming; In++) {
+    VPValue *EdgeMask =
+      createEdgeMask(Phi->getIncomingBlock(In), Phi->getParent(), Plan);
+    assert((EdgeMask || NumIncoming == 1) &&
+           "Multiple predecessors with one having a full mask");
+    if (EdgeMask)
+      Masks.push_back(EdgeMask);
+  }
+  return new VPBlendRecipe(Phi, Masks);
 }
 
 bool LoopVectorizationPlanner::tryToWiden(Instruction *I, VPBasicBlock *VPBB,
@@ -8117,7 +7834,7 @@ bool LoopVectorizationPlanner::tryToWiden(Instruction *I, VPBasicBlock *VPBB,
   if (CallInst *CI = dyn_cast<CallInst>(I)) {
     Intrinsic::ID ID = getVectorIntrinsicIDForCall(CI, TLI);
     if (ID && (ID == Intrinsic::assume || ID == Intrinsic::lifetime_end ||
-               ID == Intrinsic::lifetime_start))
+               ID == Intrinsic::lifetime_start || ID == Intrinsic::sideeffect))
       return false;
   }
 
@@ -8138,13 +7855,10 @@ bool LoopVectorizationPlanner::tryToWiden(Instruction *I, VPBasicBlock *VPBB,
       return UseVectorIntrinsic || !NeedToScalarize;
     }
     if (isa<LoadInst>(I) || isa<StoreInst>(I)) {
-      LoopVectorizationCostModel::InstWidening Decision =
-          CM.getWideningDecision(I, VF);
-      assert(Decision != LoopVectorizationCostModel::CM_Unknown &&
-             "CM decision should be taken at this point.");
-      assert(Decision != LoopVectorizationCostModel::CM_Interleave &&
-             "Interleave memory opportunity should be caught earlier.");
-      return Decision != LoopVectorizationCostModel::CM_Scalarize;
+      assert(CM.getWideningDecision(I, VF) ==
+                 LoopVectorizationCostModel::CM_Scalarize &&
+             "Memory widening decisions should have been taken care by now");
+      return false;
     }
     return true;
   };
@@ -8166,7 +7880,8 @@ bool LoopVectorizationPlanner::tryToWiden(Instruction *I, VPBasicBlock *VPBB,
 
 VPBasicBlock *LoopVectorizationPlanner::handleReplication(
     Instruction *I, VFRange &Range, VPBasicBlock *VPBB,
-    DenseMap<Instruction *, VPReplicateRecipe *> &PredInst2Recipe) {
+    DenseMap<Instruction *, VPReplicateRecipe *> &PredInst2Recipe,
+    VPlanPtr &Plan) {
   bool IsUniform = getDecisionAndClampRange(
       [&](unsigned VF) { return CM.isUniformAfterVectorization(I, VF); },
       Range);
@@ -8193,20 +7908,25 @@ VPBasicBlock *LoopVectorizationPlanner::handleReplication(
          "VPBB has successors when handling predicated replication.");
   // Record predicated instructions for above packing optimizations.
   PredInst2Recipe[I] = Recipe;
-  VPBlockBase *Region = VPBB->setOneSuccessor(createReplicateRegion(I, Recipe));
+  VPBlockBase *Region =
+    VPBB->setOneSuccessor(createReplicateRegion(I, Recipe, Plan));
   return cast<VPBasicBlock>(Region->setOneSuccessor(new VPBasicBlock()));
 }
 
 VPRegionBlock *
 LoopVectorizationPlanner::createReplicateRegion(Instruction *Instr,
-                                                VPRecipeBase *PredRecipe) {
+                                                VPRecipeBase *PredRecipe,
+                                                VPlanPtr &Plan) {
   // Instructions marked for predication are replicated and placed under an
   // if-then construct to prevent side-effects.
+
+  // Generate recipes to compute the block mask for this region.
+  VPValue *BlockInMask = createBlockInMask(Instr->getParent(), Plan);
 
   // Build the triangular if-then region.
   std::string RegionName = (Twine("pred.") + Instr->getOpcodeName()).str();
   assert(Instr->getParent() && "Predicated instruction not in any basic block");
-  auto *BOMRecipe = new VPBranchOnMaskRecipe(Instr->getParent());
+  auto *BOMRecipe = new VPBranchOnMaskRecipe(BlockInMask);
   auto *Entry = new VPBasicBlock(Twine(RegionName) + ".entry", BOMRecipe);
   auto *PHIRecipe =
       Instr->getType()->isVoidTy() ? nullptr : new VPPredInstPHIRecipe(Instr);
@@ -8222,7 +7942,11 @@ LoopVectorizationPlanner::createReplicateRegion(Instruction *Instr,
   return Region;
 }
 
-std::unique_ptr<VPlan> LoopVectorizationPlanner::buildVPlan(VFRange &Range) {
+LoopVectorizationPlanner::VPlanPtr
+LoopVectorizationPlanner::buildVPlan(VFRange &Range,
+                                     const SmallPtrSetImpl<Value *> &NeedDef) {
+  EdgeMaskCache.clear();
+  BlockMaskCache.clear();
   DenseMap<Instruction *, Instruction *> &SinkAfter = Legal->getSinkAfter();
   DenseMap<Instruction *, Instruction *> SinkAfterInverse;
 
@@ -8244,6 +7968,10 @@ std::unique_ptr<VPlan> LoopVectorizationPlanner::buildVPlan(VFRange &Range) {
   VPBasicBlock *VPBB = new VPBasicBlock("Pre-Entry");
   auto Plan = llvm::make_unique<VPlan>(VPBB);
 
+  // Represent values that will have defs inside VPlan.
+  for (Value *V : NeedDef)
+    Plan->addVPValue(V);
+
   // Scan the body of the loop in a topological order to visit each basic block
   // after having visited its predecessor basic blocks.
   LoopBlocksDFS DFS(OrigLoop);
@@ -8256,6 +7984,7 @@ std::unique_ptr<VPlan> LoopVectorizationPlanner::buildVPlan(VFRange &Range) {
     auto *FirstVPBBForBB = new VPBasicBlock(BB->getName());
     VPBB->setOneSuccessor(FirstVPBBForBB);
     VPBB = FirstVPBBForBB;
+    Builder.setInsertPoint(VPBB);
 
     std::vector<Instruction *> Ingredients;
 
@@ -8313,8 +8042,18 @@ std::unique_ptr<VPlan> LoopVectorizationPlanner::buildVPlan(VFRange &Range) {
         continue;
       }
 
+      // Check if Instr is a memory operation that should be widened.
+      if ((Recipe = tryToWidenMemory(Instr, Range, Plan))) {
+        VPBB->appendRecipe(Recipe);
+        continue;
+      }
+
       // Check if Instr should form some PHI recipe.
       if ((Recipe = tryToOptimizeInduction(Instr, Range))) {
+        VPBB->appendRecipe(Recipe);
+        continue;
+      }
+      if ((Recipe = tryToBlend(Instr, Plan))) {
         VPBB->appendRecipe(Recipe);
         continue;
       }
@@ -8332,7 +8071,7 @@ std::unique_ptr<VPlan> LoopVectorizationPlanner::buildVPlan(VFRange &Range) {
       // Otherwise, if all widening options failed, Instruction is to be
       // replicated. This may create a successor for VPBB.
       VPBasicBlock *NextVPBB =
-          handleReplication(Instr, Range, VPBB, PredInst2Recipe);
+        handleReplication(Instr, Range, VPBB, PredInst2Recipe, Plan);
       if (NextVPBB != VPBB) {
         VPBB = NextVPBB;
         VPBB->setName(BB->hasName() ? BB->getName() + "." + Twine(VPBBsForBB++)
@@ -8366,6 +8105,11 @@ std::unique_ptr<VPlan> LoopVectorizationPlanner::buildVPlan(VFRange &Range) {
   return Plan;
 }
 
+Value* LoopVectorizationPlanner::VPCallbackILV::
+getOrCreateVectorValues(Value *V, unsigned Part) {
+      return ILV.getOrCreateVectorValue(V, Part);
+}
+
 void VPInterleaveRecipe::print(raw_ostream &O, const Twine &Indent) const {
   O << " +\n"
     << Indent << "\"INTERLEAVE-GROUP with factor " << IG->getFactor() << " at ";
@@ -8375,6 +8119,64 @@ void VPInterleaveRecipe::print(raw_ostream &O, const Twine &Indent) const {
     if (Instruction *I = IG->getMember(i))
       O << " +\n"
         << Indent << "\"  " << VPlanIngredient(I) << " " << i << "\\l\"";
+}
+
+void VPWidenRecipe::execute(VPTransformState &State) {
+  for (auto &Instr : make_range(Begin, End))
+    State.ILV->widenInstruction(Instr);
+}
+
+void VPWidenIntOrFpInductionRecipe::execute(VPTransformState &State) {
+  assert(!State.Instance && "Int or FP induction being replicated.");
+  State.ILV->widenIntOrFpInduction(IV, Trunc);
+}
+
+void VPWidenPHIRecipe::execute(VPTransformState &State) {
+  State.ILV->widenPHIInstruction(Phi, State.UF, State.VF);
+}
+
+void VPBlendRecipe::execute(VPTransformState &State) {
+  State.ILV->setDebugLocFromInst(State.Builder, Phi);
+  // We know that all PHIs in non-header blocks are converted into
+  // selects, so we don't have to worry about the insertion order and we
+  // can just use the builder.
+  // At this point we generate the predication tree. There may be
+  // duplications since this is a simple recursive scan, but future
+  // optimizations will clean it up.
+
+  unsigned NumIncoming = Phi->getNumIncomingValues();
+
+  assert((User || NumIncoming == 1) &&
+         "Multiple predecessors with predecessors having a full mask");
+  // Generate a sequence of selects of the form:
+  // SELECT(Mask3, In3,
+  //      SELECT(Mask2, In2,
+  //                   ( ...)))
+  InnerLoopVectorizer::VectorParts Entry(State.UF);
+  for (unsigned In = 0; In < NumIncoming; ++In) {
+    for (unsigned Part = 0; Part < State.UF; ++Part) {
+      // We might have single edge PHIs (blocks) - use an identity
+      // 'select' for the first PHI operand.
+      Value *In0 =
+          State.ILV->getOrCreateVectorValue(Phi->getIncomingValue(In), Part);
+      if (In == 0)
+        Entry[Part] = In0; // Initialize with the first incoming value.
+      else {
+        // Select between the current value and the previous incoming edge
+        // based on the incoming mask.
+        Value *Cond = State.get(User->getOperand(In), Part);
+        Entry[Part] =
+            State.Builder.CreateSelect(Cond, In0, Entry[Part], "predphi");
+      }
+    }
+  }
+  for (unsigned Part = 0; Part < State.UF; ++Part)
+    State.ValueMap.setVectorValue(Phi, Part, Entry[Part]);
+}
+
+void VPInterleaveRecipe::execute(VPTransformState &State) {
+  assert(!State.Instance && "Interleave group being replicated.");
+  State.ILV->vectorizeInterleaveGroup(IG->getInsertPos());
 }
 
 void VPReplicateRecipe::execute(VPTransformState &State) {
@@ -8408,14 +8210,16 @@ void VPBranchOnMaskRecipe::execute(VPTransformState &State) {
   unsigned Part = State.Instance->Part;
   unsigned Lane = State.Instance->Lane;
 
-  auto Cond = State.ILV->createBlockInMask(MaskedBasicBlock);
-
-  Value *ConditionBit = Cond[Part];
-  if (!ConditionBit) // Block in mask is all-one.
+  Value *ConditionBit = nullptr;
+  if (!User) // Block in mask is all-one.
     ConditionBit = State.Builder.getTrue();
-  else if (ConditionBit->getType()->isVectorTy())
-    ConditionBit = State.Builder.CreateExtractElement(
-        ConditionBit, State.Builder.getInt32(Lane));
+  else {
+    VPValue *BlockInMask = User->getOperand(0);
+    ConditionBit = State.get(BlockInMask, Part);
+    if (ConditionBit->getType()->isVectorTy())
+      ConditionBit = State.Builder.CreateExtractElement(
+          ConditionBit, State.Builder.getInt32(Lane));
+  }
 
   // Replace the temporary unreachable terminator with a new conditional branch,
   // whose two destinations will be set later when they are created.
@@ -8425,9 +8229,6 @@ void VPBranchOnMaskRecipe::execute(VPTransformState &State) {
   auto *CondBr = BranchInst::Create(State.CFG.PrevBB, nullptr, ConditionBit);
   CondBr->setSuccessor(0, nullptr);
   ReplaceInstWithInst(CurrentTerminator, CondBr);
-
-  DEBUG(dbgs() << "\nLV: vectorizing BranchOnMask recipe "
-               << MaskedBasicBlock->getName());
 }
 
 void VPPredInstPHIRecipe::execute(VPTransformState &State) {
@@ -8459,6 +8260,18 @@ void VPPredInstPHIRecipe::execute(VPTransformState &State) {
     Phi->addIncoming(ScalarPredInst, PredicatedBB);
     State.ValueMap.resetScalarValue(PredInst, *State.Instance, Phi);
   }
+}
+
+void VPWidenMemoryInstructionRecipe::execute(VPTransformState &State) {
+  if (!User)
+    return State.ILV->vectorizeMemoryInstruction(&Instr);
+
+  // Last (and currently only) operand is a mask.
+  InnerLoopVectorizer::VectorParts MaskValues(State.UF);
+  VPValue *Mask = User->getOperand(User->getNumOperands() - 1);
+  for (unsigned Part = 0; Part < State.UF; ++Part)
+    MaskValues[Part] = State.get(Mask, Part);
+  State.ILV->vectorizeMemoryInstruction(&Instr, &MaskValues);
 }
 
 bool LoopVectorizePass::processLoop(Loop *L) {
@@ -8585,8 +8398,7 @@ bool LoopVectorizePass::processLoop(Loop *L) {
   unsigned UserVF = Hints.getWidth();
 
   // Plan how to best vectorize, return the best VF and its cost.
-  LoopVectorizationCostModel::VectorizationFactor VF =
-      LVP.plan(OptForSize, UserVF);
+  VectorizationFactor VF = LVP.plan(OptForSize, UserVF);
 
   // Select the interleave count.
   unsigned IC = CM.selectInterleaveCount(OptForSize, VF.Width, VF.Cost);
@@ -8801,7 +8613,7 @@ PreservedAnalyses LoopVectorizePass::run(Function &F,
     auto &LAM = AM.getResult<LoopAnalysisManagerFunctionProxy>(F).getManager();
     std::function<const LoopAccessInfo &(Loop &)> GetLAA =
         [&](Loop &L) -> const LoopAccessInfo & {
-      LoopStandardAnalysisResults AR = {AA, AC, DT, LI, SE, TLI, TTI};
+      LoopStandardAnalysisResults AR = {AA, AC, DT, LI, SE, TLI, TTI, nullptr};
       return LAM.getResult<LoopAccessAnalysis>(L, AR);
     };
     bool Changed =

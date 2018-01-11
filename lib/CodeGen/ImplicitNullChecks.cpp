@@ -45,6 +45,9 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/PseudoSourceValue.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetOpcodes.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/LLVMContext.h"
@@ -52,9 +55,6 @@
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/Target/TargetOpcodes.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <cassert>
 #include <cstdint>
 #include <iterator>
@@ -63,13 +63,13 @@ using namespace llvm;
 
 static cl::opt<int> PageSize("imp-null-check-page-size",
                              cl::desc("The page size of the target in bytes"),
-                             cl::init(4096));
+                             cl::init(4096), cl::Hidden);
 
 static cl::opt<unsigned> MaxInstsToConsider(
     "imp-null-max-insts-to-consider",
     cl::desc("The max number of instructions to consider hoisting loads over "
              "(the algorithm is quadratic over this number)"),
-    cl::init(8));
+    cl::Hidden, cl::init(8));
 
 #define DEBUG_TYPE "implicit-null-checks"
 
@@ -421,7 +421,7 @@ bool ImplicitNullChecks::canHoistInst(MachineInstr *FaultingMI,
     //    test %rcx, %rcx
     //    je _null_block
     //  _non_null_block:
-    //    %rdx<def> = INST
+    //    %rdx = INST
     //    ...
     //
     // This restriction does not apply to the faulting load inst because in
@@ -498,7 +498,7 @@ bool ImplicitNullChecks::analyzeBlockForNullChecks(
 
   // Starting with a code fragment like:
   //
-  //   test %RAX, %RAX
+  //   test %rax, %rax
   //   jne LblNotNull
   //
   //  LblNull:
@@ -508,13 +508,13 @@ bool ImplicitNullChecks::analyzeBlockForNullChecks(
   //   Inst0
   //   Inst1
   //   ...
-  //   Def = Load (%RAX + <offset>)
+  //   Def = Load (%rax + <offset>)
   //   ...
   //
   //
   // we want to end up with
   //
-  //   Def = FaultingLoad (%RAX + <offset>), LblNull
+  //   Def = FaultingLoad (%rax + <offset>), LblNull
   //   jmp LblNotNull ;; explicit or fallthrough
   //
   //  LblNotNull:
@@ -528,11 +528,11 @@ bool ImplicitNullChecks::analyzeBlockForNullChecks(
   //
   // To see why this is legal, consider the two possibilities:
   //
-  //  1. %RAX is null: since we constrain <offset> to be less than PageSize, the
+  //  1. %rax is null: since we constrain <offset> to be less than PageSize, the
   //     load instruction dereferences the null page, causing a segmentation
   //     fault.
   //
-  //  2. %RAX is not null: in this case we know that the load cannot fault, as
+  //  2. %rax is not null: in this case we know that the load cannot fault, as
   //     otherwise the load would've faulted in the original program too and the
   //     original program would've been undefined.
   //

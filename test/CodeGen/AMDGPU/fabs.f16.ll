@@ -1,6 +1,6 @@
-; RUN: llc -mtriple=amdgcn--amdhsa -mcpu=kaveri -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=CI %s
-; RUN: llc -mtriple=amdgcn--amdhsa -mcpu=tonga -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=VI %s
-; RUN: llc -mtriple=amdgcn--amdhsa -mcpu=gfx901 -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=GFX9 %s
+; RUN: llc -mtriple=amdgcn--amdhsa -mcpu=kaveri -verify-machineinstrs < %s | FileCheck -enable-var-scope -check-prefix=GCN -check-prefix=CI %s
+; RUN: llc -mtriple=amdgcn--amdhsa -mcpu=tonga -verify-machineinstrs < %s | FileCheck -enable-var-scope -check-prefix=GCN -check-prefix=VI %s
+; RUN: llc -mtriple=amdgcn--amdhsa -mcpu=gfx900 -verify-machineinstrs < %s | FileCheck -enable-var-scope -check-prefix=GCN -check-prefix=GFX9 %s
 
 ; DAGCombiner will transform:
 ; (fabs (f16 bitcast (i16 a))) => (f16 bitcast (and (i16 a), 0x7FFFFFFF))
@@ -20,7 +20,7 @@ define amdgpu_kernel void @s_fabs_free_f16(half addrspace(1)* %out, i16 %in) {
 
 ; GCN-LABEL: {{^}}s_fabs_f16:
 ; CI: flat_load_ushort [[VAL:v[0-9]+]],
-; CI: v_and_b32_e32 [[CVT0:v[0-9]+]], 0x7fff, [[VAL]]
+; CI: v_and_b32_e32 [[RESULT:v[0-9]+]], 0x7fff, [[VAL]]
 ; CI: flat_store_short v{{\[[0-9]+:[0-9]+\]}}, [[RESULT]]
 define amdgpu_kernel void @s_fabs_f16(half addrspace(1)* %out, half %in) {
   %fabs = call half @llvm.fabs.f16(half %in)
@@ -127,8 +127,7 @@ define amdgpu_kernel void @fabs_free_v2f16(<2 x half> addrspace(1)* %out, i32 %i
 ; CI: v_mul_f32_e64 v{{[0-9]+}}, |v{{[0-9]+}}|, v{{[0-9]+}}
 ; CI: v_cvt_f16_f32
 
-; VI: v_lshrrev_b32_e32 v{{[0-9]+}}, 16,
-; VI: v_mul_f16_sdwa v{{[0-9]+}}, |v{{[0-9]+}}|, v{{[0-9]+}} dst_sel:WORD_1 dst_unused:UNUSED_PAD src0_sel:WORD_1 src1_sel:DWORD
+; VI: v_mul_f16_sdwa v{{[0-9]+}}, |v{{[0-9]+}}|, v{{[0-9]+}} dst_sel:WORD_1 dst_unused:UNUSED_PAD src0_sel:WORD_1 src1_sel:WORD_1
 ; VI: v_mul_f16_e64 v{{[0-9]+}}, |v{{[0-9]+}}|, v{{[0-9]+}}
 
 ; GFX9: v_and_b32_e32 [[FABS:v[0-9]+]], 0x7fff7fff, [[VAL]]

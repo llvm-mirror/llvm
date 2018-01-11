@@ -27,13 +27,13 @@
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/Function.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 #include <cassert>
 
 using namespace llvm;
@@ -235,7 +235,7 @@ void VZeroUpperInserter::processBasicBlock(MachineBasicBlock &MBB) {
     // If the call has no RegMask, skip it as well. It usually happens on
     // helper function calls (such as '_chkstk', '_ftol2') where standard
     // calling convention is not used (RegMask is not used to mark register
-    // clobbered and register usage (def/imp-def/use) is well-defined and
+    // clobbered and register usage (def/implicit-def/use) is well-defined and
     // explicitly specified.
     if (IsCall && !callHasRegMask(MI))
       continue;
@@ -285,7 +285,7 @@ bool VZeroUpperInserter::runOnMachineFunction(MachineFunction &MF) {
   TII = ST.getInstrInfo();
   MachineRegisterInfo &MRI = MF.getRegInfo();
   EverMadeChange = false;
-  IsX86INTR = MF.getFunction()->getCallingConv() == CallingConv::X86_INTR;
+  IsX86INTR = MF.getFunction().getCallingConv() == CallingConv::X86_INTR;
 
   bool FnHasLiveInYmmOrZmm = checkFnHasLiveInYmmOrZmm(MRI);
 

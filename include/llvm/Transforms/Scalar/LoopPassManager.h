@@ -217,6 +217,19 @@ public:
     // shouldn't impact anything.
   }
 
+  /// Restart the current loop.
+  ///
+  /// Loop passes should call this method to indicate the current loop has been
+  /// sufficiently changed that it should be re-visited from the begining of
+  /// the loop pass pipeline rather than continuing.
+  void revisitCurrentLoop() {
+    // Tell the currently in-flight pipeline to stop running.
+    SkipCurrentLoop = true;
+
+    // And insert ourselves back into the worklist.
+    Worklist.insert(CurrentL);
+  }
+
 private:
   template <typename LoopPassT> friend class llvm::FunctionToLoopPassAdaptor;
 
@@ -251,7 +264,8 @@ template <typename LoopPassT>
 class FunctionToLoopPassAdaptor
     : public PassInfoMixin<FunctionToLoopPassAdaptor<LoopPassT>> {
 public:
-  explicit FunctionToLoopPassAdaptor(LoopPassT Pass) : Pass(std::move(Pass)) {
+  explicit FunctionToLoopPassAdaptor(LoopPassT Pass, bool DebugLogging = false)
+      : Pass(std::move(Pass)), LoopCanonicalizationFPM(DebugLogging) {
     LoopCanonicalizationFPM.addPass(LoopSimplifyPass());
     LoopCanonicalizationFPM.addPass(LCSSAPass());
   }
@@ -272,13 +286,17 @@ public:
       return PA;
 
     // Get the analysis results needed by loop passes.
+    MemorySSA *MSSA = EnableMSSALoopDependency
+                          ? (&AM.getResult<MemorySSAAnalysis>(F).getMSSA())
+                          : nullptr;
     LoopStandardAnalysisResults LAR = {AM.getResult<AAManager>(F),
                                        AM.getResult<AssumptionAnalysis>(F),
                                        AM.getResult<DominatorTreeAnalysis>(F),
                                        AM.getResult<LoopAnalysis>(F),
                                        AM.getResult<ScalarEvolutionAnalysis>(F),
                                        AM.getResult<TargetLibraryAnalysis>(F),
-                                       AM.getResult<TargetIRAnalysis>(F)};
+                                       AM.getResult<TargetIRAnalysis>(F),
+                                       MSSA};
 
     // Setup the loop analysis manager from its proxy. It is important that
     // this is only done when there are loops to process and we have built the
@@ -346,6 +364,8 @@ public:
     PA.preserve<DominatorTreeAnalysis>();
     PA.preserve<LoopAnalysis>();
     PA.preserve<ScalarEvolutionAnalysis>();
+    // FIXME: Uncomment this when all loop passes preserve MemorySSA
+    // PA.preserve<MemorySSAAnalysis>();
     // FIXME: What we really want to do here is preserve an AA category, but
     // that concept doesn't exist yet.
     PA.preserve<AAManager>();
@@ -365,8 +385,8 @@ private:
 /// adaptor.
 template <typename LoopPassT>
 FunctionToLoopPassAdaptor<LoopPassT>
-createFunctionToLoopPassAdaptor(LoopPassT Pass) {
-  return FunctionToLoopPassAdaptor<LoopPassT>(std::move(Pass));
+createFunctionToLoopPassAdaptor(LoopPassT Pass, bool DebugLogging = false) {
+  return FunctionToLoopPassAdaptor<LoopPassT>(std::move(Pass), DebugLogging);
 }
 
 /// \brief Pass for printing a loop's contents as textual IR.

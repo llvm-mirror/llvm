@@ -33,6 +33,10 @@
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetLowering.h"
+#include "llvm/CodeGen/TargetOpcodes.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/MC/MCInstrDesc.h"
 #include "llvm/MC/MCRegisterInfo.h"
@@ -43,10 +47,6 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetLowering.h"
-#include "llvm/Target/TargetOpcodes.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -346,9 +346,8 @@ static void GetCostForDef(const ScheduleDAGSDNodes::RegDefIter &RegDefPos,
 
 /// Schedule - Schedule the DAG using list scheduling.
 void ScheduleDAGRRList::Schedule() {
-  DEBUG(dbgs()
-        << "********** List Scheduling BB#" << BB->getNumber()
-        << " '" << BB->getName() << "' **********\n");
+  DEBUG(dbgs() << "********** List Scheduling " << printMBBReference(*BB)
+               << " '" << BB->getName() << "' **********\n");
 
   CurCycle = 0;
   IssueCount = 0;
@@ -1430,10 +1429,12 @@ SUnit *ScheduleDAGRRList::PickNodeToScheduleBottomUp() {
       SmallVector<unsigned, 4> LRegs;
       if (!DelayForLiveRegsBottomUp(CurSU, LRegs))
         break;
-      DEBUG(dbgs() << "    Interfering reg " <<
-            (LRegs[0] == TRI->getNumRegs() ? "CallResource"
-             : TRI->getName(LRegs[0]))
-             << " SU #" << CurSU->NodeNum << '\n');
+      DEBUG(dbgs() << "    Interfering reg ";
+            if (LRegs[0] == TRI->getNumRegs())
+              dbgs() << "CallResource";
+            else
+              dbgs() << printReg(LRegs[0], TRI);
+            dbgs() << " SU #" << CurSU->NodeNum << '\n');
       std::pair<LRegsMapT::iterator, bool> LRegsPair =
         LRegsMap.insert(std::make_pair(CurSU, LRegs));
       if (LRegsPair.second) {

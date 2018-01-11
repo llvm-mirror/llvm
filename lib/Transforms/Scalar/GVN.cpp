@@ -1299,7 +1299,10 @@ static void reportLoadElim(LoadInst *LI, Value *AvailableValue,
 /// non-local by performing PHI construction.
 bool GVN::processNonLocalLoad(LoadInst *LI) {
   // non-local speculations are not allowed under asan.
-  if (LI->getParent()->getParent()->hasFnAttribute(Attribute::SanitizeAddress))
+  if (LI->getParent()->getParent()->hasFnAttribute(
+          Attribute::SanitizeAddress) ||
+      LI->getParent()->getParent()->hasFnAttribute(
+          Attribute::SanitizeHWAddress))
     return false;
 
   // Step 1: Find the non-local dependencies of the load.
@@ -2255,6 +2258,20 @@ bool GVN::performScalarPRE(Instruction *CurInst) {
   Instruction *PREInstr = nullptr;
 
   if (NumWithout != 0) {
+    if (!isSafeToSpeculativelyExecute(CurInst)) {
+      // It is only valid to insert a new instruction if the current instruction
+      // is always executed. An instruction with implicit control flow could
+      // prevent us from doing it. If we cannot speculate the execution, then
+      // PRE should be prohibited.
+      auto It = FirstImplicitControlFlowInsts.find(CurrentBlock);
+      if (It != FirstImplicitControlFlowInsts.end()) {
+        assert(It->second->getParent() == CurrentBlock &&
+               "Implicit control flow map broken?");
+        if (OI->dominates(It->second, CurInst))
+          return false;
+      }
+    }
+
     // Don't do PRE across indirect branch.
     if (isa<IndirectBrInst>(PREPred->getTerminator()))
       return false;
@@ -2288,9 +2305,12 @@ bool GVN::performScalarPRE(Instruction *CurInst) {
       PHINode::Create(CurInst->getType(), predMap.size(),
                       CurInst->getName() + ".pre-phi", &CurrentBlock->front());
   for (unsigned i = 0, e = predMap.size(); i != e; ++i) {
-    if (Value *V = predMap[i].first)
+    if (Value *V = predMap[i].first) {
+      // If we use an existing value in this phi, we have to patch the original
+      // value because the phi will be used to replace a later value.
+      patchReplacementInstruction(CurInst, V);
       Phi->addIncoming(V, predMap[i].second);
-    else
+    } else
       Phi->addIncoming(PREInstr, PREPred);
   }
 

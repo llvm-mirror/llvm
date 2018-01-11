@@ -2336,6 +2336,8 @@ def t2USAT16: T2SatI<(ins imm0_15:$sat_imm, rGPR:$Rn),
 
 def : T2Pat<(ARMssatnoshift GPRnopc:$Rn, imm0_31:$imm),
              (t2SSAT imm0_31:$imm, GPRnopc:$Rn, 0)>;
+def : T2Pat<(ARMusatnoshift GPRnopc:$Rn, imm0_31:$imm),
+             (t2USAT imm0_31:$imm, GPRnopc:$Rn, 0)>;
 def : T2Pat<(int_arm_ssat GPR:$a, imm1_32:$pos),
             (t2SSAT imm1_32:$pos, GPR:$a, 0)>;
 def : T2Pat<(int_arm_usat GPR:$a, imm0_31:$pos),
@@ -3843,13 +3845,13 @@ let isReMaterializable = 1 in {
 def t2MOV_ga_pcrel : PseudoInst<(outs rGPR:$dst), (ins i32imm:$addr),
                                 IIC_iMOVix2addpc,
                           [(set rGPR:$dst, (ARMWrapperPIC tglobaladdr:$addr))]>,
-                          Requires<[IsThumb, HasV8MBaseline, UseMovt]>;
+                          Requires<[IsThumb, HasV8MBaseline, UseMovtInPic]>;
 
 }
 
 def : T2Pat<(ARMWrapperPIC tglobaltlsaddr :$dst),
             (t2MOV_ga_pcrel tglobaltlsaddr:$dst)>,
-      Requires<[IsThumb2, UseMovt]>;
+      Requires<[IsThumb2, UseMovtInPic]>;
 def : T2Pat<(ARMWrapper tglobaltlsaddr:$dst),
             (t2MOVi32imm tglobaltlsaddr:$dst)>,
       Requires<[IsThumb2, UseMovt]>;
@@ -4506,6 +4508,8 @@ def : t2InstAlias<"tst${p} $Rn, $Rm",
 def : InstAlias<"dmb${p}", (t2DMB 0xf, pred:$p), 0>, Requires<[HasDB]>;
 def : InstAlias<"dsb${p}", (t2DSB 0xf, pred:$p), 0>, Requires<[HasDB]>;
 def : InstAlias<"isb${p}", (t2ISB 0xf, pred:$p), 0>, Requires<[HasDB]>;
+// Armv8-R 'Data Full Barrier'
+def : InstAlias<"dfb${p}", (t2DSB 0xc, pred:$p), 1>, Requires<[HasDFB]>;
 
 // Alias for LDR, LDRB, LDRH, LDRSB, and LDRSH without the ".w" optional
 // width specifier.

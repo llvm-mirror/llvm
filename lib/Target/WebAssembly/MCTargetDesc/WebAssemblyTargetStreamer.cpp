@@ -108,10 +108,6 @@ void WebAssemblyTargetAsmStreamer::emitGlobal(
   }
 }
 
-void WebAssemblyTargetAsmStreamer::emitStackPointer(uint32_t Index) {
-  OS << "\t.stack_pointer\t" << Index << '\n';
-}
-
 void WebAssemblyTargetAsmStreamer::emitEndFunc() { OS << "\t.endfunc\n"; }
 
 void WebAssemblyTargetAsmStreamer::emitIndirectFunctionType(
@@ -155,11 +151,6 @@ void WebAssemblyTargetELFStreamer::emitLocal(ArrayRef<MVT> Types) {
 void WebAssemblyTargetELFStreamer::emitGlobal(
     ArrayRef<wasm::Global> Globals) {
   llvm_unreachable(".globalvar encoding not yet implemented");
-}
-
-void WebAssemblyTargetELFStreamer::emitStackPointer(
-    uint32_t Index) {
-  llvm_unreachable(".stack_pointer encoding not yet implemented");
 }
 
 void WebAssemblyTargetELFStreamer::emitEndFunc() {
@@ -238,14 +229,6 @@ void WebAssemblyTargetWasmStreamer::emitGlobal(
   Streamer.PopSection();
 }
 
-void WebAssemblyTargetWasmStreamer::emitStackPointer(uint32_t Index) {
-  Streamer.PushSection();
-  Streamer.SwitchSection(Streamer.getContext().getWasmSection(
-      ".stack_pointer", SectionKind::getMetadata()));
-  Streamer.EmitIntValue(Index, 4);
-  Streamer.PopSection();
-}
-
 void WebAssemblyTargetWasmStreamer::emitEndFunc() {
   llvm_unreachable(".end_func is not needed for direct wasm output");
 }
@@ -277,4 +260,5 @@ void WebAssemblyTargetWasmStreamer::emitIndirectFunctionType(
 }
 
 void WebAssemblyTargetWasmStreamer::emitGlobalImport(StringRef name) {
+  llvm_unreachable(".global_import is not needed for direct wasm output");
 }

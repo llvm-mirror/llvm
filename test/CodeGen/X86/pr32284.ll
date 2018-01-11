@@ -8,7 +8,7 @@
 
 define void @foo() {
 ; X86-O0-LABEL: foo:
-; X86-O0:       # BB#0: # %entry
+; X86-O0:       # %bb.0: # %entry
 ; X86-O0-NEXT:    xorl %eax, %eax
 ; X86-O0-NEXT:    movl %eax, %ecx
 ; X86-O0-NEXT:    xorl %eax, %eax
@@ -36,7 +36,7 @@ define void @foo() {
 ; X86-O0-NEXT:    retq
 ;
 ; X64-LABEL: foo:
-; X64:       # BB#0: # %entry
+; X64:       # %bb.0: # %entry
 ; X64-NEXT:    movzbl {{.*}}(%rip), %eax
 ; X64-NEXT:    testb %al, %al
 ; X64-NEXT:    setne -{{[0-9]+}}(%rsp)
@@ -50,7 +50,7 @@ define void @foo() {
 ; X64-NEXT:    retq
 ;
 ; 686-O0-LABEL: foo:
-; 686-O0:       # BB#0: # %entry
+; 686-O0:       # %bb.0: # %entry
 ; 686-O0-NEXT:    subl $8, %esp
 ; 686-O0-NEXT:    .cfi_def_cfa_offset 12
 ; 686-O0-NEXT:    movb c, %al
@@ -71,11 +71,10 @@ define void @foo() {
 ; 686-O0-NEXT:    movzbl %al, %ecx
 ; 686-O0-NEXT:    movl %ecx, (%esp)
 ; 686-O0-NEXT:    addl $8, %esp
-; 686-O0-NEXT:    .cfi_def_cfa_offset 4
 ; 686-O0-NEXT:    retl
 ;
 ; 686-LABEL: foo:
-; 686:       # BB#0: # %entry
+; 686:       # %bb.0: # %entry
 ; 686-NEXT:    subl $8, %esp
 ; 686-NEXT:    .cfi_def_cfa_offset 12
 ; 686-NEXT:    movzbl c, %eax
@@ -89,7 +88,6 @@ define void @foo() {
 ; 686-NEXT:    setle %dl
 ; 686-NEXT:    movl %edx, {{[0-9]+}}(%esp)
 ; 686-NEXT:    addl $8, %esp
-; 686-NEXT:    .cfi_def_cfa_offset 4
 ; 686-NEXT:    retl
 entry:
   %a = alloca i8, align 1
@@ -122,7 +120,7 @@ entry:
 
 define void @f1() {
 ; X86-O0-LABEL: f1:
-; X86-O0:       # BB#0: # %entry
+; X86-O0:       # %bb.0: # %entry
 ; X86-O0-NEXT:    movabsq $8381627093, %rax # imm = 0x1F3957AD5
 ; X86-O0-NEXT:    movslq var_5, %rcx
 ; X86-O0-NEXT:    addq %rax, %rcx
@@ -158,7 +156,7 @@ define void @f1() {
 ; X86-O0-NEXT:    retq
 ;
 ; X64-LABEL: f1:
-; X64:       # BB#0: # %entry
+; X64:       # %bb.0: # %entry
 ; X64-NEXT:    movslq {{.*}}(%rip), %rax
 ; X64-NEXT:    xorl %ecx, %ecx
 ; X64-NEXT:    cmpq $-1, %rax
@@ -178,7 +176,7 @@ define void @f1() {
 ; X64-NEXT:    retq
 ;
 ; 686-O0-LABEL: f1:
-; 686-O0:       # BB#0: # %entry
+; 686-O0:       # %bb.0: # %entry
 ; 686-O0-NEXT:    pushl %ebp
 ; 686-O0-NEXT:    .cfi_def_cfa_offset 8
 ; 686-O0-NEXT:    pushl %ebx
@@ -187,8 +185,8 @@ define void @f1() {
 ; 686-O0-NEXT:    .cfi_def_cfa_offset 16
 ; 686-O0-NEXT:    pushl %esi
 ; 686-O0-NEXT:    .cfi_def_cfa_offset 20
-; 686-O0-NEXT:    subl $36, %esp
-; 686-O0-NEXT:    .cfi_def_cfa_offset 56
+; 686-O0-NEXT:    subl $24, %esp
+; 686-O0-NEXT:    .cfi_def_cfa_offset 44
 ; 686-O0-NEXT:    .cfi_offset %esi, -20
 ; 686-O0-NEXT:    .cfi_offset %edi, -16
 ; 686-O0-NEXT:    .cfi_offset %ebx, -12
@@ -196,57 +194,46 @@ define void @f1() {
 ; 686-O0-NEXT:    movl var_5, %eax
 ; 686-O0-NEXT:    movl %eax, %ecx
 ; 686-O0-NEXT:    sarl $31, %ecx
-; 686-O0-NEXT:    movl %eax, %edx
-; 686-O0-NEXT:    andl %ecx, %edx
+; 686-O0-NEXT:    xorl $208307499, %eax # imm = 0xC6A852B
+; 686-O0-NEXT:    xorl $-2, %ecx
+; 686-O0-NEXT:    orl %ecx, %eax
+; 686-O0-NEXT:    setne {{[0-9]+}}(%esp)
+; 686-O0-NEXT:    movl var_5, %ecx
+; 686-O0-NEXT:    movl %ecx, %edx
 ; 686-O0-NEXT:    subl $-1, %edx
 ; 686-O0-NEXT:    sete %bl
-; 686-O0-NEXT:    movl %eax, %esi
-; 686-O0-NEXT:    xorl $208307499, %esi # imm = 0xC6A852B
+; 686-O0-NEXT:    movzbl %bl, %esi
 ; 686-O0-NEXT:    movl %ecx, %edi
-; 686-O0-NEXT:    xorl $-2, %edi
-; 686-O0-NEXT:    orl %edi, %esi
-; 686-O0-NEXT:    setne {{[0-9]+}}(%esp)
-; 686-O0-NEXT:    movl %eax, %edi
-; 686-O0-NEXT:    subl $-1, %edi
-; 686-O0-NEXT:    sete %bh
-; 686-O0-NEXT:    movzbl %bh, %ebp
-; 686-O0-NEXT:    movl %eax, {{[0-9]+}}(%esp) # 4-byte Spill
-; 686-O0-NEXT:    xorl %eax, %eax
-; 686-O0-NEXT:    movl %eax, {{[0-9]+}}(%esp) # 4-byte Spill
-; 686-O0-NEXT:    movl {{[0-9]+}}(%esp), %eax # 4-byte Reload
-; 686-O0-NEXT:    addl $7093, %eax # imm = 0x1BB5
-; 686-O0-NEXT:    movl %eax, {{[0-9]+}}(%esp) # 4-byte Spill
-; 686-O0-NEXT:    movl {{[0-9]+}}(%esp), %eax # 4-byte Reload
-; 686-O0-NEXT:    adcxl %eax, %ecx
-; 686-O0-NEXT:    movl {{[0-9]+}}(%esp), %eax # 4-byte Reload
-; 686-O0-NEXT:    subl %ebp, %eax
-; 686-O0-NEXT:    sbbl $0, %ecx
-; 686-O0-NEXT:    setl %bh
-; 686-O0-NEXT:    movzbl %bh, %ebp
-; 686-O0-NEXT:    movl %ebp, var_57
+; 686-O0-NEXT:    sarl $31, %edi
+; 686-O0-NEXT:    xorl %ebp, %ebp
+; 686-O0-NEXT:    addl $7093, %ecx # imm = 0x1BB5
+; 686-O0-NEXT:    adcxl %ebp, %edi
+; 686-O0-NEXT:    subl %esi, %ecx
+; 686-O0-NEXT:    sbbl $0, %edi
+; 686-O0-NEXT:    setl %bl
+; 686-O0-NEXT:    movzbl %bl, %esi
+; 686-O0-NEXT:    movl %esi, var_57
 ; 686-O0-NEXT:    movl $0, var_57+4
+; 686-O0-NEXT:    movl var_5, %esi
+; 686-O0-NEXT:    subl $-1, %esi
+; 686-O0-NEXT:    sete %bl
 ; 686-O0-NEXT:    movzbl %bl, %ebp
 ; 686-O0-NEXT:    movl %ebp, _ZN8struct_210member_2_0E
 ; 686-O0-NEXT:    movl $0, _ZN8struct_210member_2_0E+4
-; 686-O0-NEXT:    movl %edi, {{[0-9]+}}(%esp) # 4-byte Spill
 ; 686-O0-NEXT:    movl %eax, {{[0-9]+}}(%esp) # 4-byte Spill
-; 686-O0-NEXT:    movl %edx, {{[0-9]+}}(%esp) # 4-byte Spill
 ; 686-O0-NEXT:    movl %ecx, {{[0-9]+}}(%esp) # 4-byte Spill
+; 686-O0-NEXT:    movl %edx, {{[0-9]+}}(%esp) # 4-byte Spill
+; 686-O0-NEXT:    movl %edi, {{[0-9]+}}(%esp) # 4-byte Spill
 ; 686-O0-NEXT:    movl %esi, (%esp) # 4-byte Spill
-; 686-O0-NEXT:    addl $36, %esp
-; 686-O0-NEXT:    .cfi_def_cfa_offset 20
+; 686-O0-NEXT:    addl $24, %esp
 ; 686-O0-NEXT:    popl %esi
-; 686-O0-NEXT:    .cfi_def_cfa_offset 16
 ; 686-O0-NEXT:    popl %edi
-; 686-O0-NEXT:    .cfi_def_cfa_offset 12
 ; 686-O0-NEXT:    popl %ebx
-; 686-O0-NEXT:    .cfi_def_cfa_offset 8
 ; 686-O0-NEXT:    popl %ebp
-; 686-O0-NEXT:    .cfi_def_cfa_offset 4
 ; 686-O0-NEXT:    retl
 ;
 ; 686-LABEL: f1:
-; 686:       # BB#0: # %entry
+; 686:       # %bb.0: # %entry
 ; 686-NEXT:    pushl %edi
 ; 686-NEXT:    .cfi_def_cfa_offset 8
 ; 686-NEXT:    pushl %esi
@@ -284,11 +271,8 @@ define void @f1() {
 ; 686-NEXT:    movl %eax, _ZN8struct_210member_2_0E
 ; 686-NEXT:    movl $0, _ZN8struct_210member_2_0E+4
 ; 686-NEXT:    addl $1, %esp
-; 686-NEXT:    .cfi_def_cfa_offset 12
 ; 686-NEXT:    popl %esi
-; 686-NEXT:    .cfi_def_cfa_offset 8
 ; 686-NEXT:    popl %edi
-; 686-NEXT:    .cfi_def_cfa_offset 4
 ; 686-NEXT:    retl
 entry:
   %a = alloca i8, align 1
@@ -323,8 +307,8 @@ entry:
 
 define void @f2() {
 ; X86-O0-LABEL: f2:
-; X86-O0:       # BB#0: # %entry
-; X86-O0-NEXT:    # implicit-def: %RAX
+; X86-O0:       # %bb.0: # %entry
+; X86-O0-NEXT:    # implicit-def: %rax
 ; X86-O0-NEXT:    movzbl var_7, %ecx
 ; X86-O0-NEXT:    cmpb $0, var_7
 ; X86-O0-NEXT:    setne %dl
@@ -351,7 +335,7 @@ define void @f2() {
 ; X86-O0-NEXT:    retq
 ;
 ; X64-LABEL: f2:
-; X64:       # BB#0: # %entry
+; X64:       # %bb.0: # %entry
 ; X64-NEXT:    movzbl {{.*}}(%rip), %eax
 ; X64-NEXT:    xorl %ecx, %ecx
 ; X64-NEXT:    testl %eax, %eax
@@ -368,7 +352,7 @@ define void @f2() {
 ; X64-NEXT:    retq
 ;
 ; 686-O0-LABEL: f2:
-; 686-O0:       # BB#0: # %entry
+; 686-O0:       # %bb.0: # %entry
 ; 686-O0-NEXT:    pushl %edi
 ; 686-O0-NEXT:    .cfi_def_cfa_offset 8
 ; 686-O0-NEXT:    pushl %esi
@@ -377,7 +361,7 @@ define void @f2() {
 ; 686-O0-NEXT:    .cfi_def_cfa_offset 14
 ; 686-O0-NEXT:    .cfi_offset %esi, -12
 ; 686-O0-NEXT:    .cfi_offset %edi, -8
-; 686-O0-NEXT:    # implicit-def: %EAX
+; 686-O0-NEXT:    # implicit-def: %eax
 ; 686-O0-NEXT:    movzbl var_7, %ecx
 ; 686-O0-NEXT:    cmpb $0, var_7
 ; 686-O0-NEXT:    setne %dl
@@ -402,15 +386,12 @@ define void @f2() {
 ; 686-O0-NEXT:    movw %cx, %di
 ; 686-O0-NEXT:    movw %di, (%eax)
 ; 686-O0-NEXT:    addl $2, %esp
-; 686-O0-NEXT:    .cfi_def_cfa_offset 12
 ; 686-O0-NEXT:    popl %esi
-; 686-O0-NEXT:    .cfi_def_cfa_offset 8
 ; 686-O0-NEXT:    popl %edi
-; 686-O0-NEXT:    .cfi_def_cfa_offset 4
 ; 686-O0-NEXT:    retl
 ;
 ; 686-LABEL: f2:
-; 686:       # BB#0: # %entry
+; 686:       # %bb.0: # %entry
 ; 686-NEXT:    subl $2, %esp
 ; 686-NEXT:    .cfi_def_cfa_offset 6
 ; 686-NEXT:    movzbl var_7, %eax
@@ -427,7 +408,6 @@ define void @f2() {
 ; 686-NEXT:    sete %dl
 ; 686-NEXT:    movw %dx, (%eax)
 ; 686-NEXT:    addl $2, %esp
-; 686-NEXT:    .cfi_def_cfa_offset 4
 ; 686-NEXT:    retl
 entry:
   %a = alloca i16, align 2
@@ -461,7 +441,7 @@ entry:
 
 define void @f3() #0 {
 ; X86-O0-LABEL: f3:
-; X86-O0:       # BB#0: # %entry
+; X86-O0:       # %bb.0: # %entry
 ; X86-O0-NEXT:    movl var_13, %eax
 ; X86-O0-NEXT:    xorl $-1, %eax
 ; X86-O0-NEXT:    movl %eax, %eax
@@ -497,7 +477,7 @@ define void @f3() #0 {
 ; X86-O0-NEXT:    retq
 ;
 ; X64-LABEL: f3:
-; X64:       # BB#0: # %entry
+; X64:       # %bb.0: # %entry
 ; X64-NEXT:    movl {{.*}}(%rip), %eax
 ; X64-NEXT:    movl $4294967295, %ecx # imm = 0xFFFFFFFF
 ; X64-NEXT:    xorq %rax, %rcx
@@ -513,7 +493,7 @@ define void @f3() #0 {
 ; X64-NEXT:    retq
 ;
 ; 686-O0-LABEL: f3:
-; 686-O0:       # BB#0: # %entry
+; 686-O0:       # %bb.0: # %entry
 ; 686-O0-NEXT:    pushl %ebp
 ; 686-O0-NEXT:    .cfi_def_cfa_offset 8
 ; 686-O0-NEXT:    .cfi_offset %ebp, -8
@@ -537,20 +517,20 @@ define void @f3() #0 {
 ; 686-O0-NEXT:    andl %edi, %eax
 ; 686-O0-NEXT:    movb %al, %dl
 ; 686-O0-NEXT:    movzbl %dl, %eax
-; 686-O0-NEXT:    movl %ecx, %esi
-; 686-O0-NEXT:    orl %eax, %esi
-; 686-O0-NEXT:    movl %esi, (%esp)
+; 686-O0-NEXT:    orl %eax, %ecx
+; 686-O0-NEXT:    movl %ecx, (%esp)
 ; 686-O0-NEXT:    movl $0, {{[0-9]+}}(%esp)
-; 686-O0-NEXT:    movl %ecx, var_46
+; 686-O0-NEXT:    movl var_13, %eax
+; 686-O0-NEXT:    notl %eax
+; 686-O0-NEXT:    movl %eax, var_46
 ; 686-O0-NEXT:    leal -8(%ebp), %esp
 ; 686-O0-NEXT:    popl %esi
 ; 686-O0-NEXT:    popl %edi
 ; 686-O0-NEXT:    popl %ebp
-; 686-O0-NEXT:    .cfi_def_cfa %esp, 4
 ; 686-O0-NEXT:    retl
 ;
 ; 686-LABEL: f3:
-; 686:       # BB#0: # %entry
+; 686:       # %bb.0: # %entry
 ; 686-NEXT:    pushl %ebp
 ; 686-NEXT:    .cfi_def_cfa_offset 8
 ; 686-NEXT:    .cfi_offset %ebp, -8
@@ -573,7 +553,6 @@ define void @f3() #0 {
 ; 686-NEXT:    movl %ecx, var_46
 ; 686-NEXT:    movl %ebp, %esp
 ; 686-NEXT:    popl %ebp
-; 686-NEXT:    .cfi_def_cfa %esp, 4
 ; 686-NEXT:    retl
 entry:
   %a = alloca i64, align 8

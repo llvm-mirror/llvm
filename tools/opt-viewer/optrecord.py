@@ -26,11 +26,6 @@ except:
 
 import optpmap
 
-
-p = subprocess.Popen(['c++filt', '-n'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-p_lock = Lock()
-
-
 try:
     dict.iteritems
 except AttributeError:
@@ -47,13 +42,6 @@ else:
         return d.iteritems()
 
 
-def demangle(name):
-    with p_lock:
-        p.stdin.write((name + '\n').encode('utf-8'))
-        p.stdin.flush()
-        return p.stdout.readline().rstrip().decode('utf-8')
-
-
 def html_file_name(filename):
     return filename.replace('/', '_').replace('#', '_') + ".html"
 
@@ -66,6 +54,21 @@ class Remark(yaml.YAMLObject):
     # Work-around for http://pyyaml.org/ticket/154.
     yaml_loader = Loader
 
+    default_demangler = 'c++filt -n'
+    demangler_proc = None
+
+    @classmethod
+    def set_demangler(cls, demangler):
+        cls.demangler_proc = subprocess.Popen(demangler.split(), stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        cls.demangler_lock = Lock()
+
+    @classmethod
+    def demangle(cls, name):
+        with cls.demangler_lock:
+            cls.demangler_proc.stdin.write((name + '\n').encode('utf-8'))
+            cls.demangler_proc.stdin.flush()
+            return cls.demangler_proc.stdout.readline().rstrip().decode('utf-8')
+
     # Intern all strings since we have lot of duplication across filenames,
     # remark text.
     #
@@ -76,7 +79,11 @@ class Remark(yaml.YAMLObject):
     def _reduce_memory(self):
         self.Pass = intern(self.Pass)
         self.Name = intern(self.Name)
-        self.Function = intern(self.Function)
+        try:
+            # Can't intern unicode strings.
+            self.Function = intern(self.Function)
+        except:
+            pass
 
         def _reduce_memory_dict(old_dict):
             new_dict = dict()
@@ -133,7 +140,7 @@ class Remark(yaml.YAMLObject):
 
     @property
     def DemangledFunctionName(self):
-        return demangle(self.Function)
+        return self.demangle(self.Function)
 
     @property
     def Link(self):
@@ -148,15 +155,41 @@ class Remark(yaml.YAMLObject):
         assert(len(mapping) == 1)
         (key, value) = list(mapping.items())[0]
 
-        if key == 'Caller' or key == 'Callee':
-            value = cgi.escape(demangle(value))
+        if key == 'Caller' or key == 'Callee' or key == 'DirectCallee':
+            value = cgi.escape(self.demangle(value))
 
         if dl and key != 'Caller':
             dl_dict = dict(list(dl))
-            return "<a href={}>{}</a>".format(
+            return u"<a href={}>{}</a>".format(
                 make_link(dl_dict['File'], dl_dict['Line']), value)
         else:
             return value
+
+    # Return a cached dictionary for the arguments.  The key for each entry is
+    # the argument key (e.g. 'Callee' for inlining remarks.  The value is a
+    # list containing the value (e.g. for 'Callee' the function) and
+    # optionally a DebugLoc.
+    def getArgDict(self):
+        if hasattr(self, 'ArgDict'):
+            return self.ArgDict
+        self.ArgDict = {}
+        for arg in self.Args:
+            if len(arg) == 2:
+                if arg[0][0] == 'DebugLoc':
+                    dbgidx = 0
+                else:
+                    assert(arg[1][0] == 'DebugLoc')
+                    dbgidx = 1
+
+                key = arg[1 - dbgidx][0]
+                entry = (arg[1 - dbgidx][1], arg[dbgidx][1])
+            else:
+                arg = arg[0]
+                key = arg[0]
+                entry = (arg[1], )
+
+            self.ArgDict[key] = entry
+        return self.ArgDict
 
     def getDiffPrefix(self):
         if hasattr(self, 'Added'):
@@ -259,6 +292,8 @@ def get_remarks(input_file):
 def gather_results(filenames, num_jobs, should_print_progress):
     if should_print_progress:
         print('Reading YAML files...')
+    if not Remark.demangler_proc:
+        Remark.set_demangler(Remark.default_demangler)
     remarks = optpmap.pmap(
         get_remarks, filenames, num_jobs, should_print_progress)
     max_hotness = max(entry[0] for entry in remarks)

@@ -32,7 +32,10 @@
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetLowering.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSchedule.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Pass.h"
@@ -41,9 +44,6 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetLowering.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <algorithm>
 #include <cassert>
 #include <functional>
@@ -337,7 +337,7 @@ INITIALIZE_PASS_DEPENDENCY(MachineBranchProbabilityInfo)
 INITIALIZE_PASS_END(IfConverter, DEBUG_TYPE, "If Converter", false, false)
 
 bool IfConverter::runOnMachineFunction(MachineFunction &MF) {
-  if (skipFunction(*MF.getFunction()) || (PredicateFtor && !PredicateFtor(MF)))
+  if (skipFunction(MF.getFunction()) || (PredicateFtor && !PredicateFtor(MF)))
     return false;
 
   const TargetSubtargetInfo &ST = MF.getSubtarget();
@@ -406,12 +406,12 @@ bool IfConverter::runOnMachineFunction(MachineFunction &MF) {
       case ICSimpleFalse: {
         bool isFalse = Kind == ICSimpleFalse;
         if ((isFalse && DisableSimpleF) || (!isFalse && DisableSimple)) break;
-        DEBUG(dbgs() << "Ifcvt (Simple" << (Kind == ICSimpleFalse ?
-                                            " false" : "")
-                     << "): BB#" << BBI.BB->getNumber() << " ("
-                     << ((Kind == ICSimpleFalse)
-                         ? BBI.FalseBB->getNumber()
-                         : BBI.TrueBB->getNumber()) << ") ");
+        DEBUG(dbgs() << "Ifcvt (Simple"
+                     << (Kind == ICSimpleFalse ? " false" : "")
+                     << "): " << printMBBReference(*BBI.BB) << " ("
+                     << ((Kind == ICSimpleFalse) ? BBI.FalseBB->getNumber()
+                                                 : BBI.TrueBB->getNumber())
+                     << ") ");
         RetVal = IfConvertSimple(BBI, Kind);
         DEBUG(dbgs() << (RetVal ? "succeeded!" : "failed!") << "\n");
         if (RetVal) {
@@ -435,9 +435,9 @@ bool IfConverter::runOnMachineFunction(MachineFunction &MF) {
           DEBUG(dbgs() << " false");
         if (isRev)
           DEBUG(dbgs() << " rev");
-        DEBUG(dbgs() << "): BB#" << BBI.BB->getNumber() << " (T:"
-                     << BBI.TrueBB->getNumber() << ",F:"
-                     << BBI.FalseBB->getNumber() << ") ");
+        DEBUG(dbgs() << "): " << printMBBReference(*BBI.BB)
+                     << " (T:" << BBI.TrueBB->getNumber()
+                     << ",F:" << BBI.FalseBB->getNumber() << ") ");
         RetVal = IfConvertTriangle(BBI, Kind);
         DEBUG(dbgs() << (RetVal ? "succeeded!" : "failed!") << "\n");
         if (RetVal) {
@@ -453,9 +453,9 @@ bool IfConverter::runOnMachineFunction(MachineFunction &MF) {
       }
       case ICDiamond:
         if (DisableDiamond) break;
-        DEBUG(dbgs() << "Ifcvt (Diamond): BB#" << BBI.BB->getNumber() << " (T:"
-                     << BBI.TrueBB->getNumber() << ",F:"
-                     << BBI.FalseBB->getNumber() << ") ");
+        DEBUG(dbgs() << "Ifcvt (Diamond): " << printMBBReference(*BBI.BB)
+                     << " (T:" << BBI.TrueBB->getNumber()
+                     << ",F:" << BBI.FalseBB->getNumber() << ") ");
         RetVal = IfConvertDiamond(BBI, Kind, NumDups, NumDups2,
                                   Token->TClobbersPred,
                                   Token->FClobbersPred);
@@ -464,10 +464,9 @@ bool IfConverter::runOnMachineFunction(MachineFunction &MF) {
         break;
       case ICForkedDiamond:
         if (DisableForkedDiamond) break;
-        DEBUG(dbgs() << "Ifcvt (Forked Diamond): BB#"
-                     << BBI.BB->getNumber() << " (T:"
-                     << BBI.TrueBB->getNumber() << ",F:"
-                     << BBI.FalseBB->getNumber() << ") ");
+        DEBUG(dbgs() << "Ifcvt (Forked Diamond): " << printMBBReference(*BBI.BB)
+                     << " (T:" << BBI.TrueBB->getNumber()
+                     << ",F:" << BBI.FalseBB->getNumber() << ") ");
         RetVal = IfConvertForkedDiamond(BBI, Kind, NumDups, NumDups2,
                                       Token->TClobbersPred,
                                       Token->FClobbersPred);

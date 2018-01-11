@@ -24,13 +24,11 @@
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/BinaryFormat/COFF.h"
-#include "llvm/BinaryFormat/ELF.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/CodeGen/MachineModuleInfoImpls.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
-#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Mangler.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
@@ -41,7 +39,6 @@
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstBuilder.h"
 #include "llvm/MC/MCObjectStreamer.h"
-#include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/Support/ARMBuildAttributes.h"
@@ -51,7 +48,6 @@
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
-#include <cctype>
 using namespace llvm;
 
 #define DEBUG_TYPE "asm-printer"
@@ -113,7 +109,7 @@ bool ARMAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
   Subtarget = &MF.getSubtarget<ARMSubtarget>();
 
   SetupMachineFunction(MF);
-  const Function* F = MF.getFunction();
+  const Function &F = MF.getFunction();
   const TargetMachine& TM = MF.getTarget();
 
   // Collect all globals that had their storage promoted to a constant pool.
@@ -124,13 +120,13 @@ bool ARMAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
   
   // Calculate this function's optimization goal.
   unsigned OptimizationGoal;
-  if (F->hasFnAttribute(Attribute::OptimizeNone))
+  if (F.hasFnAttribute(Attribute::OptimizeNone))
     // For best debugging illusion, speed and small size sacrificed
     OptimizationGoal = 6;
-  else if (F->optForMinSize())
+  else if (F.optForMinSize())
     // Aggressively for small size, speed and debug illusion sacrificed
     OptimizationGoal = 4;
-  else if (F->optForSize())
+  else if (F.optForSize())
     // For small size, but speed and debugging illusion preserved
     OptimizationGoal = 3;
   else if (TM.getOptLevel() == CodeGenOpt::Aggressive)
@@ -150,7 +146,7 @@ bool ARMAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
     OptimizationGoals = 0;
 
   if (Subtarget->isTargetCOFF()) {
-    bool Internal = F->hasInternalLinkage();
+    bool Internal = F.hasInternalLinkage();
     COFF::SymbolStorageClass Scl = Internal ? COFF::IMAGE_SYM_CLASS_STATIC
                                             : COFF::IMAGE_SYM_CLASS_EXTERNAL;
     int Type = COFF::IMAGE_SYM_DTYPE_FUNCTION << COFF::SCT_COMPLEX_TYPE_SHIFT;
@@ -1542,7 +1538,6 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     EmitJumpTableTBInst(MI, MI->getOpcode() == ARM::JUMPTABLE_TBB ? 1 : 2);
     return;
   case ARM::t2BR_JT: {
-    // Lower and emit the instruction itself, then the jump table following it.
     EmitToStreamer(*OutStreamer, MCInstBuilder(ARM::tMOVr)
       .addReg(ARM::PC)
       .addReg(MI->getOperand(0).getReg())
@@ -1651,7 +1646,6 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
   }
   case ARM::tBR_JTr:
   case ARM::BR_JTr: {
-    // Lower and emit the instruction itself, then the jump table following it.
     // mov pc, target
     MCInst TmpInst;
     unsigned Opc = MI->getOpcode() == ARM::BR_JTr ?
@@ -1668,23 +1662,27 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     EmitToStreamer(*OutStreamer, TmpInst);
     return;
   }
-  case ARM::BR_JTm: {
-    // Lower and emit the instruction itself, then the jump table following it.
+  case ARM::BR_JTm_i12: {
     // ldr pc, target
     MCInst TmpInst;
-    if (MI->getOperand(1).getReg() == 0) {
-      // literal offset
-      TmpInst.setOpcode(ARM::LDRi12);
-      TmpInst.addOperand(MCOperand::createReg(ARM::PC));
-      TmpInst.addOperand(MCOperand::createReg(MI->getOperand(0).getReg()));
-      TmpInst.addOperand(MCOperand::createImm(MI->getOperand(2).getImm()));
-    } else {
-      TmpInst.setOpcode(ARM::LDRrs);
-      TmpInst.addOperand(MCOperand::createReg(ARM::PC));
-      TmpInst.addOperand(MCOperand::createReg(MI->getOperand(0).getReg()));
-      TmpInst.addOperand(MCOperand::createReg(MI->getOperand(1).getReg()));
-      TmpInst.addOperand(MCOperand::createImm(0));
-    }
+    TmpInst.setOpcode(ARM::LDRi12);
+    TmpInst.addOperand(MCOperand::createReg(ARM::PC));
+    TmpInst.addOperand(MCOperand::createReg(MI->getOperand(0).getReg()));
+    TmpInst.addOperand(MCOperand::createImm(MI->getOperand(2).getImm()));
+    // Add predicate operands.
+    TmpInst.addOperand(MCOperand::createImm(ARMCC::AL));
+    TmpInst.addOperand(MCOperand::createReg(0));
+    EmitToStreamer(*OutStreamer, TmpInst);
+    return;
+  }
+  case ARM::BR_JTm_rs: {
+    // ldr pc, target
+    MCInst TmpInst;
+    TmpInst.setOpcode(ARM::LDRrs);
+    TmpInst.addOperand(MCOperand::createReg(ARM::PC));
+    TmpInst.addOperand(MCOperand::createReg(MI->getOperand(0).getReg()));
+    TmpInst.addOperand(MCOperand::createReg(MI->getOperand(1).getReg()));
+    TmpInst.addOperand(MCOperand::createImm(MI->getOperand(2).getImm()));
     // Add predicate operands.
     TmpInst.addOperand(MCOperand::createImm(ARMCC::AL));
     TmpInst.addOperand(MCOperand::createReg(0));
@@ -1692,7 +1690,6 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     return;
   }
   case ARM::BR_JTadd: {
-    // Lower and emit the instruction itself, then the jump table following it.
     // add pc, target, idx
     EmitToStreamer(*OutStreamer, MCInstBuilder(ARM::ADDrr)
       .addReg(ARM::PC)

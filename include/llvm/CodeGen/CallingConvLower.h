@@ -18,9 +18,9 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/TargetCallingConv.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/MC/MCRegisterInfo.h"
-#include "llvm/Target/TargetCallingConv.h"
 
 namespace llvm {
 
@@ -201,6 +201,7 @@ private:
   unsigned MaxStackArgAlign;
   SmallVector<uint32_t, 16> UsedRegs;
   SmallVector<CCValAssign, 4> PendingLocs;
+  SmallVector<ISD::ArgFlagsTy, 4> PendingArgFlags;
 
   // ByValInfo and SmallVector<ByValInfo, 4> ByValRegs:
   //
@@ -506,6 +507,11 @@ public:
   // Get list of pending assignments
   SmallVectorImpl<CCValAssign> &getPendingLocs() {
     return PendingLocs;
+  }
+
+  // Get a list of argflags for pending assignments.
+  SmallVectorImpl<ISD::ArgFlagsTy> &getPendingArgFlags() {
+    return PendingArgFlags;
   }
 
   /// Compute the remaining unused register parameters that would be used for

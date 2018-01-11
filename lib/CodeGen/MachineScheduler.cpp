@@ -22,7 +22,7 @@
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/CodeGen/LiveInterval.h"
-#include "llvm/CodeGen/LiveIntervalAnalysis.h"
+#include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -43,8 +43,11 @@
 #include "llvm/CodeGen/ScheduleHazardRecognizer.h"
 #include "llvm/CodeGen/SlotIndexes.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetLowering.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSchedule.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/MC/LaneBitmask.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
@@ -53,9 +56,6 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/GraphWriter.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetLowering.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -98,7 +98,7 @@ static cl::opt<unsigned> MISchedCutoff("misched-cutoff", cl::Hidden,
 static cl::opt<std::string> SchedOnlyFunc("misched-only-func", cl::Hidden,
   cl::desc("Only schedule this function"));
 static cl::opt<unsigned> SchedOnlyBlock("misched-only-block", cl::Hidden,
-  cl::desc("Only schedule this MBB#"));
+                                        cl::desc("Only schedule this MBB#"));
 #else
 static bool ViewMISchedDAGs = false;
 #endif // NDEBUG
@@ -351,7 +351,7 @@ ScheduleDAGInstrs *PostMachineScheduler::createPostMachineScheduler() {
 /// design would be to split blocks at scheduling boundaries, but LLVM has a
 /// general bias against block splitting purely for implementation simplicity.
 bool MachineScheduler::runOnMachineFunction(MachineFunction &mf) {
-  if (skipFunction(*mf.getFunction()))
+  if (skipFunction(mf.getFunction()))
     return false;
 
   if (EnableMachineSched.getNumOccurrences()) {
@@ -389,7 +389,7 @@ bool MachineScheduler::runOnMachineFunction(MachineFunction &mf) {
 }
 
 bool PostMachineScheduler::runOnMachineFunction(MachineFunction &mf) {
-  if (skipFunction(*mf.getFunction()))
+  if (skipFunction(mf.getFunction()))
     return false;
 
   if (EnablePostRAMachineSched.getNumOccurrences()) {
@@ -548,15 +548,14 @@ void MachineSchedulerBase::scheduleRegions(ScheduleDAGInstrs &Scheduler,
         continue;
       }
       DEBUG(dbgs() << "********** MI Scheduling **********\n");
-      DEBUG(dbgs() << MF->getName()
-            << ":BB#" << MBB->getNumber() << " " << MBB->getName()
-            << "\n  From: " << *I << "    To: ";
+      DEBUG(dbgs() << MF->getName() << ":" << printMBBReference(*MBB) << " "
+                   << MBB->getName() << "\n  From: " << *I << "    To: ";
             if (RegionEnd != MBB->end()) dbgs() << *RegionEnd;
             else dbgs() << "End";
             dbgs() << " RegionInstrs: " << NumRegionInstrs << '\n');
       if (DumpCriticalPathLength) {
         errs() << MF->getName();
-        errs() << ":BB# " << MBB->getNumber();
+        errs() << ":%bb. " << MBB->getNumber();
         errs() << " " << MBB->getName() << " \n";
       }
 
@@ -823,11 +822,11 @@ void ScheduleDAGMI::schedule() {
   placeDebugValues();
 
   DEBUG({
-      unsigned BBNum = begin()->getParent()->getNumber();
-      dbgs() << "*** Final schedule for BB#" << BBNum << " ***\n";
-      dumpSchedule();
-      dbgs() << '\n';
-    });
+    dbgs() << "*** Final schedule for "
+           << printMBBReference(*begin()->getParent()) << " ***\n";
+    dumpSchedule();
+    dbgs() << '\n';
+  });
 }
 
 /// Apply each ScheduleDAGMutation step in order.
@@ -1054,7 +1053,10 @@ void ScheduleDAGMILive::initRegPressure() {
     dumpRegSetPressure(BotRPTracker.getRegSetPressureAtPos(), TRI);
   );
 
-  assert(BotRPTracker.getPos() == RegionEnd && "Can't find the region bottom");
+  assert((BotRPTracker.getPos() == RegionEnd ||
+          (RegionEnd->isDebugValue() &&
+           BotRPTracker.getPos() == priorNonDebug(RegionEnd, RegionBegin))) &&
+         "Can't find the region bottom");
 
   // Cache the list of excess pressure sets in this region. This will also track
   // the max pressure in the scheduled code for these sets.
@@ -1130,7 +1132,7 @@ void ScheduleDAGMILive::updatePressureDiffs(
         PDiff.addPressureChange(Reg, Decrement, &MRI);
         DEBUG(
           dbgs() << "  UpdateRegP: SU(" << SU.NodeNum << ") "
-                 << PrintReg(Reg, TRI) << ':' << PrintLaneMask(P.LaneMask)
+                 << printReg(Reg, TRI) << ':' << PrintLaneMask(P.LaneMask)
                  << ' ' << *SU.getInstr();
           dbgs() << "              to ";
           PDiff.dump(*TRI);
@@ -1138,7 +1140,7 @@ void ScheduleDAGMILive::updatePressureDiffs(
       }
     } else {
       assert(P.LaneMask.any());
-      DEBUG(dbgs() << "  LiveReg: " << PrintVRegOrUnit(Reg, TRI) << "\n");
+      DEBUG(dbgs() << "  LiveReg: " << printVRegOrUnit(Reg, TRI) << "\n");
       // This may be called before CurrentBottom has been initialized. However,
       // BotRPTracker must have a valid position. We want the value live into the
       // instruction or live out of the block, so ask for the previous
@@ -1261,11 +1263,11 @@ void ScheduleDAGMILive::schedule() {
   placeDebugValues();
 
   DEBUG({
-      unsigned BBNum = begin()->getParent()->getNumber();
-      dbgs() << "*** Final schedule for BB#" << BBNum << " ***\n";
-      dumpSchedule();
-      dbgs() << '\n';
-    });
+    dbgs() << "*** Final schedule for "
+           << printMBBReference(*begin()->getParent()) << " ***\n";
+    dumpSchedule();
+    dbgs() << '\n';
+  });
 }
 
 /// Build the DAG and setup three register pressure trackers.
@@ -1460,7 +1462,8 @@ void ScheduleDAGMILive::scheduleMI(SUnit *SU, bool IsTopNode) {
         RegOpers.detectDeadDefs(*MI, *LIS);
       }
 
-      BotRPTracker.recedeSkipDebugValues();
+      if (BotRPTracker.getPos() != CurrentBottom)
+        BotRPTracker.recedeSkipDebugValues();
       SmallVector<RegisterMaskPair, 8> LiveUses;
       BotRPTracker.recede(RegOpers, &LiveUses);
       assert(BotRPTracker.getPos() == CurrentBottom && "out of sync");

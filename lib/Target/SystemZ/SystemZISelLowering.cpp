@@ -1844,11 +1844,14 @@ static void adjustSubwordCmp(SelectionDAG &DAG, const SDLoc &DL,
                               ISD::SEXTLOAD :
                               ISD::ZEXTLOAD);
   if (C.Op0.getValueType() != MVT::i32 ||
-      Load->getExtensionType() != ExtType)
+      Load->getExtensionType() != ExtType) {
     C.Op0 = DAG.getExtLoad(ExtType, SDLoc(Load), MVT::i32, Load->getChain(),
                            Load->getBasePtr(), Load->getPointerInfo(),
                            Load->getMemoryVT(), Load->getAlignment(),
                            Load->getMemOperand()->getFlags());
+    // Update the chain uses.
+    DAG.ReplaceAllUsesOfValueWith(SDValue(Load, 1), C.Op0.getValue(1));
+  }
 
   // Make sure that the second operand is an i32 with the right value.
   if (C.Op1.getValueType() != MVT::i32 ||
@@ -2198,6 +2201,7 @@ static void adjustForTestUnderMask(SelectionDAG &DAG, const SDLoc &DL,
       NewC.Op0.getOpcode() == ISD::SHL &&
       isSimpleShift(NewC.Op0, ShiftVal) &&
       (MaskVal >> ShiftVal != 0) &&
+      ((CmpVal >> ShiftVal) << ShiftVal) == CmpVal &&
       (NewCCMask = getTestUnderMaskCond(BitSize, NewC.CCMask,
                                         MaskVal >> ShiftVal,
                                         CmpVal >> ShiftVal,
@@ -2208,6 +2212,7 @@ static void adjustForTestUnderMask(SelectionDAG &DAG, const SDLoc &DL,
              NewC.Op0.getOpcode() == ISD::SRL &&
              isSimpleShift(NewC.Op0, ShiftVal) &&
              (MaskVal << ShiftVal != 0) &&
+             ((CmpVal << ShiftVal) >> ShiftVal) == CmpVal &&
              (NewCCMask = getTestUnderMaskCond(BitSize, NewC.CCMask,
                                                MaskVal << ShiftVal,
                                                CmpVal << ShiftVal,
@@ -2940,9 +2945,13 @@ SDValue SystemZTargetLowering::lowerBITCAST(SDValue Op,
   // but we need this case for bitcasts that are created during lowering
   // and which are then lowered themselves.
   if (auto *LoadN = dyn_cast<LoadSDNode>(In))
-    if (ISD::isNormalLoad(LoadN))
-      return DAG.getLoad(ResVT, DL, LoadN->getChain(), LoadN->getBasePtr(),
-                         LoadN->getMemOperand());
+    if (ISD::isNormalLoad(LoadN)) {
+      SDValue NewLoad = DAG.getLoad(ResVT, DL, LoadN->getChain(),
+                                    LoadN->getBasePtr(), LoadN->getMemOperand());
+      // Update the chain uses.
+      DAG.ReplaceAllUsesOfValueWith(SDValue(LoadN, 1), NewLoad.getValue(1));
+      return NewLoad;
+    }
 
   if (InVT == MVT::i32 && ResVT == MVT::f32) {
     SDValue In64;
@@ -3030,8 +3039,8 @@ SDValue SystemZTargetLowering::
 lowerDYNAMIC_STACKALLOC(SDValue Op, SelectionDAG &DAG) const {
   const TargetFrameLowering *TFI = Subtarget.getFrameLowering();
   MachineFunction &MF = DAG.getMachineFunction();
-  bool RealignOpt = !MF.getFunction()-> hasFnAttribute("no-realign-stack");
-  bool StoreBackchain = MF.getFunction()->hasFnAttribute("backchain");
+  bool RealignOpt = !MF.getFunction().hasFnAttribute("no-realign-stack");
+  bool StoreBackchain = MF.getFunction().hasFnAttribute("backchain");
 
   SDValue Chain = Op.getOperand(0);
   SDValue Size  = Op.getOperand(1);
@@ -3563,7 +3572,7 @@ SDValue SystemZTargetLowering::lowerSTACKRESTORE(SDValue Op,
                                                  SelectionDAG &DAG) const {
   MachineFunction &MF = DAG.getMachineFunction();
   MF.getInfo<SystemZMachineFunctionInfo>()->setManipulatesSP(true);
-  bool StoreBackchain = MF.getFunction()->hasFnAttribute("backchain");
+  bool StoreBackchain = MF.getFunction().hasFnAttribute("backchain");
 
   SDValue Chain = Op.getOperand(0);
   SDValue NewSP = Op.getOperand(1);

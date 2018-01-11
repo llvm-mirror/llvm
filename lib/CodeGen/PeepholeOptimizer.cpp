@@ -82,6 +82,9 @@
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetOpcodes.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/MC/LaneBitmask.h"
 #include "llvm/MC/MCInstrDesc.h"
 #include "llvm/Pass.h"
@@ -89,9 +92,6 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetOpcodes.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <cassert>
 #include <cstdint>
 #include <memory>
@@ -1453,10 +1453,10 @@ bool PeepholeOptimizer::foldImmediate(
 // only the first copy is considered.
 //
 // e.g.
-// %vreg1 = COPY %vreg0
-// %vreg2 = COPY %vreg0:sub1
+// %1 = COPY %0
+// %2 = COPY %0:sub1
 //
-// Should replace %vreg2 uses with %vreg1:sub1
+// Should replace %2 uses with %1:sub1
 bool PeepholeOptimizer::foldRedundantCopy(
     MachineInstr *MI, SmallSet<unsigned, 4> &CopySrcRegs,
     DenseMap<unsigned, MachineInstr *> &CopyMIs) {
@@ -1516,7 +1516,7 @@ bool PeepholeOptimizer::foldRedundantNAPhysCopy(
   unsigned DstReg = MI->getOperand(0).getReg();
   unsigned SrcReg = MI->getOperand(1).getReg();
   if (isNAPhysCopy(SrcReg) && TargetRegisterInfo::isVirtualRegister(DstReg)) {
-    // %vreg = COPY %PHYSREG
+    // %vreg = COPY %physreg
     // Avoid using a datastructure which can track multiple live non-allocatable
     // phys->virt copies since LLVM doesn't seem to do this.
     NAPhysToVirtMIs.insert({SrcReg, MI});
@@ -1526,7 +1526,7 @@ bool PeepholeOptimizer::foldRedundantNAPhysCopy(
   if (!(TargetRegisterInfo::isVirtualRegister(SrcReg) && isNAPhysCopy(DstReg)))
     return false;
 
-  // %PHYSREG = COPY %vreg
+  // %physreg = COPY %vreg
   auto PrevCopy = NAPhysToVirtMIs.find(DstReg);
   if (PrevCopy == NAPhysToVirtMIs.end()) {
     // We can't remove the copy: there was an intervening clobber of the
@@ -1621,16 +1621,16 @@ bool PeepholeOptimizer::findTargetRecurrence(
 /// from the phi. For example, if there is a recurrence of
 ///
 /// LoopHeader:
-///   %vreg1 = phi(%vreg0, %vreg100)
+///   %1 = phi(%0, %100)
 /// LoopLatch:
-///   %vreg0<def, tied1> = ADD %vreg2<def, tied0>, %vreg1
+///   %0<def, tied1> = ADD %2<def, tied0>, %1
 ///
-/// , the fact that vreg0 and vreg2 are in the same tied operands set makes
+/// , the fact that %0 and %2 are in the same tied operands set makes
 /// the coalescing of copy instruction generated from the phi in
-/// LoopHeader(i.e. %vreg1 = COPY %vreg0) impossible, because %vreg1 and
-/// %vreg2 have overlapping live range. This introduces additional move
-/// instruction to the final assembly. However, if we commute %vreg2 and
-/// %vreg1 of ADD instruction, the redundant move instruction can be
+/// LoopHeader(i.e. %1 = COPY %0) impossible, because %1 and
+/// %2 have overlapping live range. This introduces additional move
+/// instruction to the final assembly. However, if we commute %2 and
+/// %1 of ADD instruction, the redundant move instruction can be
 /// avoided.
 bool PeepholeOptimizer::optimizeRecurrence(MachineInstr &PHI) {
   SmallSet<unsigned, 2> TargetRegs;
@@ -1662,7 +1662,7 @@ bool PeepholeOptimizer::optimizeRecurrence(MachineInstr &PHI) {
 }
 
 bool PeepholeOptimizer::runOnMachineFunction(MachineFunction &MF) {
-  if (skipFunction(*MF.getFunction()))
+  if (skipFunction(MF.getFunction()))
     return false;
 
   DEBUG(dbgs() << "********** PEEPHOLE OPTIMIZER **********\n");
@@ -1696,8 +1696,8 @@ bool PeepholeOptimizer::runOnMachineFunction(MachineFunction &MF) {
     // Track when a non-allocatable physical register is copied to a virtual
     // register so that useless moves can be removed.
     //
-    // %PHYSREG is the map index; MI is the last valid `%vreg = COPY %PHYSREG`
-    // without any intervening re-definition of %PHYSREG.
+    // %physreg is the map index; MI is the last valid `%vreg = COPY %physreg`
+    // without any intervening re-definition of %physreg.
     DenseMap<unsigned, MachineInstr *> NAPhysToVirtMIs;
 
     // Set of virtual registers that are copied from.

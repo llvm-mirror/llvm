@@ -578,7 +578,7 @@ private:
 
   // Returns true when the values are flowing out to each edge.
   bool valueAnticipable(CHIArgs C, TerminatorInst *TI) const {
-    if (TI->getNumSuccessors() > std::distance(C.begin(), C.end()))
+    if (TI->getNumSuccessors() > (unsigned)std::distance(C.begin(), C.end()))
       return false; // Not enough args in this CHI.
 
     for (auto CHI : C) {
@@ -648,7 +648,7 @@ private:
           // track in a CHI. In the PDom walk, there can be values in the
           // stack which are not control dependent e.g., nested loop.
           if (si != RenameStack.end() && si->second.size() &&
-              DT->dominates(Pred, si->second.back()->getParent())) {
+              DT->properlyDominates(Pred, si->second.back()->getParent())) {
             C.Dest = BB;                     // Assign the edge
             C.I = si->second.pop_back_val(); // Assign the argument
             DEBUG(dbgs() << "\nCHI Inserted in BB: " << C.Dest->getName()
@@ -795,8 +795,8 @@ private:
       for (auto IDFB : IDFBlocks) { // TODO: Prune out useless CHI insertions.
         for (unsigned i = 0; i < V.size(); ++i) {
           CHIArg C = {VN, nullptr, nullptr};
-          if (DT->dominates(IDFB, V[i]->getParent())) { // Ignore spurious PDFs.
-            // InValue[V[i]->getParent()].push_back(std::make_pair(VN, V[i]));
+           // Ignore spurious PDFs.
+          if (DT->properlyDominates(IDFB, V[i]->getParent())) {
             OutValue[IDFB].push_back(C);
             DEBUG(dbgs() << "\nInsertion a CHI for BB: " << IDFB->getName()
                          << ", for Insn: " << *V[i]);
@@ -1110,7 +1110,8 @@ private:
         else if (auto *Call = dyn_cast<CallInst>(&I1)) {
           if (auto *Intr = dyn_cast<IntrinsicInst>(Call)) {
             if (isa<DbgInfoIntrinsic>(Intr) ||
-                Intr->getIntrinsicID() == Intrinsic::assume)
+                Intr->getIntrinsicID() == Intrinsic::assume ||
+                Intr->getIntrinsicID() == Intrinsic::sideeffect)
               continue;
           }
           if (Call->mayHaveSideEffects())

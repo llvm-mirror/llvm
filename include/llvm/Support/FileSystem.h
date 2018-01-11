@@ -31,6 +31,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/Chrono.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/ErrorOr.h"
 #include "llvm/Support/MD5.h"
@@ -665,6 +666,29 @@ bool status_known(const basic_file_status &s);
 ///          platform-specific error_code.
 std::error_code status_known(const Twine &path, bool &result);
 
+enum OpenFlags : unsigned {
+  F_None = 0,
+
+  /// F_Excl - When opening a file, this flag makes raw_fd_ostream
+  /// report an error if the file already exists.
+  F_Excl = 1,
+
+  /// F_Append - When opening a file, if it already exists append to the
+  /// existing file instead of returning an error.  This may not be specified
+  /// with F_Excl.
+  F_Append = 2,
+
+  /// The file should be opened in text mode on platforms that make this
+  /// distinction.
+  F_Text = 4,
+
+  /// Open the file for read and write.
+  F_RW = 8,
+
+  /// Delete the file on close. Only makes a difference on windows.
+  F_Delete = 16
+};
+
 /// @brief Create a uniquely named file.
 ///
 /// Generates a unique path suitable for a temporary file and then opens it as a
@@ -688,11 +712,50 @@ std::error_code status_known(const Twine &path, bool &result);
 ///          otherwise a platform-specific error_code.
 std::error_code createUniqueFile(const Twine &Model, int &ResultFD,
                                  SmallVectorImpl<char> &ResultPath,
-                                 unsigned Mode = all_read | all_write);
+                                 unsigned Mode = all_read | all_write,
+                                 sys::fs::OpenFlags Flags = sys::fs::F_RW);
 
 /// @brief Simpler version for clients that don't want an open file.
 std::error_code createUniqueFile(const Twine &Model,
                                  SmallVectorImpl<char> &ResultPath);
+
+/// Represents a temporary file.
+///
+/// The temporary file must be eventually discarded or given a final name and
+/// kept.
+///
+/// The destructor doesn't implicitly discard because there is no way to
+/// properly handle errors in a destructor.
+class TempFile {
+  bool Done = false;
+  TempFile(StringRef Name, int FD);
+
+public:
+  /// This creates a temporary file with createUniqueFile and schedules it for
+  /// deletion with sys::RemoveFileOnSignal.
+  static Expected<TempFile> create(const Twine &Model,
+                                   unsigned Mode = all_read | all_write);
+  TempFile(TempFile &&Other);
+  TempFile &operator=(TempFile &&Other);
+
+  // Name of the temporary file.
+  std::string TmpName;
+
+  // The open file descriptor.
+  int FD = -1;
+
+  // Keep this with the given name.
+  Error keep(const Twine &Name);
+
+  // Keep this with the temporary name.
+  Error keep();
+
+  // Delete the file.
+  Error discard();
+
+  // This checks that keep or delete was called.
+  ~TempFile();
+};
 
 /// @brief Create a file in the system temporary directory.
 ///
@@ -704,7 +767,8 @@ std::error_code createUniqueFile(const Twine &Model,
 /// running the assembler.
 std::error_code createTemporaryFile(const Twine &Prefix, StringRef Suffix,
                                     int &ResultFD,
-                                    SmallVectorImpl<char> &ResultPath);
+                                    SmallVectorImpl<char> &ResultPath,
+                                    sys::fs::OpenFlags Flags = sys::fs::F_RW);
 
 /// @brief Simpler version for clients that don't want an open file.
 std::error_code createTemporaryFile(const Twine &Prefix, StringRef Suffix,
@@ -712,26 +776,6 @@ std::error_code createTemporaryFile(const Twine &Prefix, StringRef Suffix,
 
 std::error_code createUniqueDirectory(const Twine &Prefix,
                                       SmallVectorImpl<char> &ResultPath);
-
-enum OpenFlags : unsigned {
-  F_None = 0,
-
-  /// F_Excl - When opening a file, this flag makes raw_fd_ostream
-  /// report an error if the file already exists.
-  F_Excl = 1,
-
-  /// F_Append - When opening a file, if it already exists append to the
-  /// existing file instead of returning an error.  This may not be specified
-  /// with F_Excl.
-  F_Append = 2,
-
-  /// The file should be opened in text mode on platforms that make this
-  /// distinction.
-  F_Text = 4,
-
-  /// Open the file for read and write.
-  F_RW = 8
-};
 
 inline OpenFlags operator|(OpenFlags A, OpenFlags B) {
   return OpenFlags(unsigned(A) | unsigned(B));

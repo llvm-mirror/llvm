@@ -19,9 +19,9 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/MC/MCStreamer.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 
 using namespace llvm;
 
@@ -163,7 +163,8 @@ uint64_t DebugHandlerBase::getBaseTypeSize(const DITypeRef TyRef) {
 
   DIType *BaseType = DDTy->getBaseType().resolve();
 
-  assert(BaseType && "Unexpected invalid base type");
+  if (!BaseType)
+    return 0;
 
   // If this is a derived type, go ahead and get the base type, unless it's a
   // reference then it's just the size of the field. Pointer types have no need
@@ -179,7 +180,7 @@ static bool hasDebugInfo(const MachineModuleInfo *MMI,
                          const MachineFunction *MF) {
   if (!MMI->hasDebugInfo())
     return false;
-  auto *SP = MF->getFunction()->getSubprogram();
+  auto *SP = MF->getFunction().getSubprogram();
   if (!SP)
     return false;
   assert(SP->getUnit());
@@ -223,7 +224,7 @@ void DebugHandlerBase::beginFunction(const MachineFunction *MF) {
     // label, so arguments are visible when breaking at function entry.
     const DILocalVariable *DIVar = Ranges.front().first->getDebugVariable();
     if (DIVar->isParameter() &&
-        getDISubprogram(DIVar->getScope())->describes(MF->getFunction())) {
+        getDISubprogram(DIVar->getScope())->describes(&MF->getFunction())) {
       LabelsBeforeInsn[Ranges.front().first] = Asm->getFunctionBegin();
       if (Ranges.front().first->getDebugExpression()->isFragment()) {
         // Mark all non-overlapping initial fragments.

@@ -55,7 +55,7 @@
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCTargetOptions.h"
-#include "llvm/MC/MCTargetOptionsCommandFlags.h"
+#include "llvm/MC/MCTargetOptionsCommandFlags.def"
 #include "llvm/Object/MachO.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Object/SymbolicFile.h"
@@ -555,7 +555,7 @@ class DwarfStreamer {
   /// @}
 
   /// The file we stream the linked Dwarf to.
-  std::unique_ptr<ToolOutputFile> OutFile;
+  raw_fd_ostream &OutFile;
 
   uint32_t RangesSectionSize;
   uint32_t LocSectionSize;
@@ -569,11 +569,8 @@ class DwarfStreamer {
                              const std::vector<CompileUnit::AccelInfo> &Names);
 
 public:
-  /// Actually create the streamer and the ouptut file.
-  ///
-  /// This could be done directly in the constructor, but it feels
-  /// more natural to handle errors through return value.
-  bool init(Triple TheTriple, StringRef OutputFilename);
+  DwarfStreamer(raw_fd_ostream &OutFile) : OutFile(OutFile) {}
+  bool init(Triple TheTriple);
 
   /// Dump the file to the disk.
   bool finish(const DebugMap &);
@@ -650,7 +647,7 @@ public:
 
 } // end anonymous namespace
 
-bool DwarfStreamer::init(Triple TheTriple, StringRef OutputFilename) {
+bool DwarfStreamer::init(Triple TheTriple) {
   std::string ErrorStr;
   std::string TripleName;
   StringRef Context = "dwarf streamer init";
@@ -675,8 +672,12 @@ bool DwarfStreamer::init(Triple TheTriple, StringRef OutputFilename) {
   MC.reset(new MCContext(MAI.get(), MRI.get(), MOFI.get()));
   MOFI->InitMCObjectFileInfo(TheTriple, /*PIC*/ false, *MC);
 
+  MSTI.reset(TheTarget->createMCSubtargetInfo(TripleName, "", ""));
+  if (!MSTI)
+    return error("no subtarget info for target " + TripleName, Context);
+
   MCTargetOptions Options;
-  MAB = TheTarget->createMCAsmBackend(*MRI, TripleName, "", Options);
+  MAB = TheTarget->createMCAsmBackend(*MSTI, *MRI, Options);
   if (!MAB)
     return error("no asm backend for target " + TripleName, Context);
 
@@ -684,24 +685,13 @@ bool DwarfStreamer::init(Triple TheTriple, StringRef OutputFilename) {
   if (!MII)
     return error("no instr info info for target " + TripleName, Context);
 
-  MSTI.reset(TheTarget->createMCSubtargetInfo(TripleName, "", ""));
-  if (!MSTI)
-    return error("no subtarget info for target " + TripleName, Context);
-
   MCE = TheTarget->createMCCodeEmitter(*MII, *MRI, *MC);
   if (!MCE)
     return error("no code emitter for target " + TripleName, Context);
 
-  // Create the output file.
-  std::error_code EC;
-  OutFile =
-      llvm::make_unique<ToolOutputFile>(OutputFilename, EC, sys::fs::F_None);
-  if (EC)
-    return error(Twine(OutputFilename) + ": " + EC.message(), Context);
-
   MCTargetOptions MCOptions = InitMCTargetOptionsFromFlags();
   MS = TheTarget->createMCObjectStreamer(
-      TheTriple, *MC, std::unique_ptr<MCAsmBackend>(MAB), OutFile->os(),
+      TheTriple, *MC, std::unique_ptr<MCAsmBackend>(MAB), OutFile,
       std::unique_ptr<MCCodeEmitter>(MCE), *MSTI, MCOptions.MCRelaxAll,
       MCOptions.MCIncrementalLinkerCompatible,
       /*DWARFMustBeAtTheEnd*/ false);
@@ -729,13 +719,9 @@ bool DwarfStreamer::init(Triple TheTriple, StringRef OutputFilename) {
 bool DwarfStreamer::finish(const DebugMap &DM) {
   bool Result = true;
   if (DM.getTriple().isOSDarwin() && !DM.getBinaryPath().empty())
-    Result = MachOUtils::generateDsymCompanion(DM, *MS, OutFile->os());
+    Result = MachOUtils::generateDsymCompanion(DM, *MS, OutFile);
   else
     MS->Finish();
-
-  // Declare success.
-  OutFile->keep();
-
   return Result;
 }
 
@@ -1210,9 +1196,8 @@ namespace {
 /// first step when we start processing a DebugMapObject.
 class DwarfLinker {
 public:
-  DwarfLinker(StringRef OutputFilename, const LinkOptions &Options)
-      : OutputFilename(OutputFilename), Options(Options),
-        BinHolder(Options.Verbose) {}
+  DwarfLinker(raw_fd_ostream &OutFile, const LinkOptions &Options)
+      : OutFile(OutFile), Options(Options), BinHolder(Options.Verbose) {}
 
   /// Link the contents of the DebugMap.
   bool link(const DebugMap &);
@@ -1318,9 +1303,9 @@ private:
   /// Recursively add the debug info in this clang module .pcm
   /// file (and all the modules imported by it in a bottom-up fashion)
   /// to Units.
-  void loadClangModule(StringRef Filename, StringRef ModulePath,
-                       StringRef ModuleName, uint64_t DwoId,
-                       DebugMap &ModuleMap, unsigned Indent = 0);
+  Error loadClangModule(StringRef Filename, StringRef ModulePath,
+                        StringRef ModuleName, uint64_t DwoId,
+                        DebugMap &ModuleMap, unsigned Indent = 0);
 
   /// Flags passed to DwarfLinker::lookForDIEsToKeep
   enum TravesalFlags {
@@ -1535,7 +1520,7 @@ private:
   /// \defgroup Helpers Various helper methods.
   ///
   /// @{
-  bool createStreamer(const Triple &TheTriple, StringRef OutputFilename);
+  bool createStreamer(const Triple &TheTriple, raw_fd_ostream &OutFile);
 
   /// Attempt to load a debug object from disk.
   ErrorOr<const object::ObjectFile &> loadObject(BinaryHolder &BinaryHolder,
@@ -1543,7 +1528,7 @@ private:
                                                  const DebugMap &Map);
   /// @}
 
-  std::string OutputFilename;
+  raw_fd_ostream &OutFile;
   LinkOptions Options;
   BinaryHolder BinHolder;
   std::unique_ptr<DwarfStreamer> Streamer;
@@ -1876,12 +1861,12 @@ void DwarfLinker::reportWarning(const Twine &Warning,
 }
 
 bool DwarfLinker::createStreamer(const Triple &TheTriple,
-                                 StringRef OutputFilename) {
+                                 raw_fd_ostream &OutFile) {
   if (Options.NoOutput)
     return true;
 
-  Streamer = llvm::make_unique<DwarfStreamer>();
-  return Streamer->init(TheTriple, OutputFilename);
+  Streamer = llvm::make_unique<DwarfStreamer>(OutFile);
+  return Streamer->init(TheTriple);
 }
 
 /// Recursive helper to build the global DeclContext information and
@@ -3247,16 +3232,21 @@ void DwarfLinker::patchLineTableForUnit(CompileUnit &Unit,
   }
 
   // Finished extracting, now emit the line tables.
-  uint32_t PrologueEnd = *StmtList + 10 + LineTable.Prologue.PrologueLength;
-  // FIXME: LLVM hardcodes it's prologue values. We just copy the
+  // FIXME: LLVM hardcodes its prologue values. We just copy the
   // prologue over and that works because we act as both producer and
   // consumer. It would be nicer to have a real configurable line
   // table emitter.
-  if (LineTable.Prologue.getVersion() != 2 ||
+  if (LineTable.Prologue.getVersion() < 2 ||
+      LineTable.Prologue.getVersion() > 5 ||
       LineTable.Prologue.DefaultIsStmt != DWARF2_LINE_DEFAULT_IS_STMT ||
       LineTable.Prologue.OpcodeBase > 13)
     reportWarning("line table parameters mismatch. Cannot emit.");
   else {
+    uint32_t PrologueEnd = *StmtList + 10 + LineTable.Prologue.PrologueLength;
+    // DWARFv5 has an extra 2 bytes of information before the header_length
+    // field.
+    if (LineTable.Prologue.getVersion() == 5)
+      PrologueEnd += 2;
     StringRef LineData = OrigDwarf.getDWARFObj().getLineSection().Data;
     MCDwarfLineTableParams Params;
     Params.DWARF2LineOpcodeBase = LineTable.Prologue.OpcodeBase;
@@ -3425,7 +3415,11 @@ bool DwarfLinker::registerModuleReference(
   // Cyclic dependencies are disallowed by Clang, but we still
   // shouldn't run into an infinite loop, so mark it as processed now.
   ClangModules.insert({PCMfile, DwoId});
-  loadClangModule(PCMfile, PCMpath, Name, DwoId, ModuleMap, Indent + 2);
+  if (Error E = loadClangModule(PCMfile, PCMpath, Name, DwoId, ModuleMap,
+                                Indent + 2)) {
+    consumeError(std::move(E));
+    return false;
+  }
   return true;
 }
 
@@ -3444,9 +3438,9 @@ DwarfLinker::loadObject(BinaryHolder &BinaryHolder, DebugMapObject &Obj,
   return ErrOrObj;
 }
 
-void DwarfLinker::loadClangModule(StringRef Filename, StringRef ModulePath,
-                                  StringRef ModuleName, uint64_t DwoId,
-                                  DebugMap &ModuleMap, unsigned Indent) {
+Error DwarfLinker::loadClangModule(StringRef Filename, StringRef ModulePath,
+                                   StringRef ModuleName, uint64_t DwoId,
+                                   DebugMap &ModuleMap, unsigned Indent) {
   SmallString<80> Path(Options.PrependPath);
   if (sys::path::is_relative(Filename))
     sys::path::append(Path, ModulePath, Filename);
@@ -3488,7 +3482,7 @@ void DwarfLinker::loadClangModule(StringRef Filename, StringRef ModulePath,
         }
       }
     }
-    return;
+    return Error::success();
   }
 
   std::unique_ptr<CompileUnit> Unit;
@@ -3503,9 +3497,12 @@ void DwarfLinker::loadClangModule(StringRef Filename, StringRef ModulePath,
     auto CUDie = CU->getUnitDIE(false);
     if (!registerModuleReference(CUDie, *CU, ModuleMap, Indent)) {
       if (Unit) {
-        errs() << Filename << ": Clang modules are expected to have exactly"
-               << " 1 compile unit.\n";
-        exitDsymutil(1);
+        std::string Err =
+            (Filename +
+             ": Clang modules are expected to have exactly 1 compile unit.\n")
+                .str();
+        errs() << Err;
+        return make_error<StringError>(Err, inconvertibleErrorCode());
       }
       // FIXME: Until PR27449 (https://llvm.org/bugs/show_bug.cgi?id=27449) is
       // fixed in clang, only warn about DWO_id mismatches in verbose mode.
@@ -3531,7 +3528,7 @@ void DwarfLinker::loadClangModule(StringRef Filename, StringRef ModulePath,
     }
   }
   if (!Unit->getOrigUnit().getUnitDIE().hasChildren())
-    return;
+    return Error::success();
   if (Options.Verbose) {
     outs().indent(Indent);
     outs() << "cloning .debug_info from " << Filename << "\n";
@@ -3541,6 +3538,7 @@ void DwarfLinker::loadClangModule(StringRef Filename, StringRef ModulePath,
   CompileUnits.push_back(std::move(Unit));
   DIECloner(*this, RelocMgr, DIEAlloc, CompileUnits, Options)
       .cloneAllCompileUnits(*DwarfContext);
+  return Error::success();
 }
 
 void DwarfLinker::DIECloner::cloneAllCompileUnits(DWARFContext &DwarfContext) {
@@ -3584,7 +3582,7 @@ void DwarfLinker::DIECloner::cloneAllCompileUnits(DWARFContext &DwarfContext) {
 }
 
 bool DwarfLinker::link(const DebugMap &Map) {
-  if (!createStreamer(Map.getTriple(), OutputFilename))
+  if (!createStreamer(Map.getTriple(), OutFile))
     return false;
 
   // Size of the DIEs (and headers) generated for the linked output.
@@ -3744,9 +3742,9 @@ bool error(const Twine &Error, const Twine &Context) {
   return false;
 }
 
-bool linkDwarf(StringRef OutputFilename, const DebugMap &DM,
+bool linkDwarf(raw_fd_ostream &OutFile, const DebugMap &DM,
                const LinkOptions &Options) {
-  DwarfLinker Linker(OutputFilename, Options);
+  DwarfLinker Linker(OutFile, Options);
   return Linker.link(DM);
 }
 

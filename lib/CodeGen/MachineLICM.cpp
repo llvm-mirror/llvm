@@ -35,7 +35,10 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/PseudoSourceValue.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetLowering.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSchedule.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/MC/MCInstrDesc.h"
 #include "llvm/MC/MCRegisterInfo.h"
@@ -44,9 +47,6 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetLowering.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <algorithm>
 #include <cassert>
 #include <limits>
@@ -280,7 +280,7 @@ static bool LoopIsOuterMostWithPredecessor(MachineLoop *CurLoop) {
 }
 
 bool MachineLICM::runOnMachineFunction(MachineFunction &MF) {
-  if (skipFunction(*MF.getFunction()))
+  if (skipFunction(MF.getFunction()))
     return false;
 
   Changed = FirstInLoop = false;
@@ -563,8 +563,8 @@ void MachineLICM::HoistPostRA(MachineInstr *MI, unsigned Def) {
 
   // Now move the instructions to the predecessor, inserting it before any
   // terminator instructions.
-  DEBUG(dbgs() << "Hoisting to BB#" << Preheader->getNumber() << " from BB#"
-               << MI->getParent()->getNumber() << ": " << *MI);
+  DEBUG(dbgs() << "Hoisting to " << printMBBReference(*Preheader) << " from "
+               << printMBBReference(*MI->getParent()) << ": " << *MI);
 
   // Splice the instruction to the preheader.
   MachineBasicBlock *MBB = MI->getParent();
@@ -601,14 +601,14 @@ bool MachineLICM::IsGuaranteedToExecute(MachineBasicBlock *BB) {
 }
 
 void MachineLICM::EnterScope(MachineBasicBlock *MBB) {
-  DEBUG(dbgs() << "Entering BB#" << MBB->getNumber() << '\n');
+  DEBUG(dbgs() << "Entering " << printMBBReference(*MBB) << '\n');
 
   // Remember livein register pressure.
   BackTrace.push_back(RegPressure);
 }
 
 void MachineLICM::ExitScope(MachineBasicBlock *MBB) {
-  DEBUG(dbgs() << "Exiting BB#" << MBB->getNumber() << '\n');
+  DEBUG(dbgs() << "Exiting " << printMBBReference(*MBB) << '\n');
   BackTrace.pop_back();
 }
 
@@ -1336,9 +1336,9 @@ bool MachineLICM::Hoist(MachineInstr *MI, MachineBasicBlock *Preheader) {
   DEBUG({
       dbgs() << "Hoisting " << *MI;
       if (MI->getParent()->getBasicBlock())
-        dbgs() << " from BB#" << MI->getParent()->getNumber();
+        dbgs() << " from " << printMBBReference(*MI->getParent());
       if (Preheader->getBasicBlock())
-        dbgs() << " to BB#" << Preheader->getNumber();
+        dbgs() << " to " << printMBBReference(*Preheader);
       dbgs() << "\n";
     });
 

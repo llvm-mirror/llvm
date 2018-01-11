@@ -26,10 +26,10 @@
 #include "llvm/CodeGen/GlobalISel/LegalizerInfo.h"
 #include "llvm/CodeGen/GlobalISel/RegisterBankInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/MC/MCInstrItineraries.h"
 #include "llvm/MC/MCSchedule.h"
 #include "llvm/Target/TargetOptions.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <memory>
 #include <string>
 
@@ -235,6 +235,10 @@ protected:
   /// HasDataBarrier - True if the subtarget supports DMB / DSB data barrier
   /// instructions.
   bool HasDataBarrier = false;
+
+  /// HasFullDataBarrier - True if the subtarget supports DFB data barrier
+  /// instruction.
+  bool HasFullDataBarrier = false;
 
   /// HasV7Clrex - True if the subtarget supports CLREX instructions
   bool HasV7Clrex = false;
@@ -544,6 +548,7 @@ public:
   bool hasDivideInThumbMode() const { return HasHardwareDivideInThumb; }
   bool hasDivideInARMMode() const { return HasHardwareDivideInARM; }
   bool hasDataBarrier() const { return HasDataBarrier; }
+  bool hasFullDataBarrier() const { return HasFullDataBarrier; }
   bool hasV7Clrex() const { return HasV7Clrex; }
   bool hasAcquireRelease() const { return HasAcquireRelease; }
 
@@ -712,10 +717,6 @@ public:
 
   unsigned getMispredictionPenalty() const;
 
-  /// This function returns true if the target has sincos() routine in its
-  /// compiler runtime or math libraries.
-  bool hasSinCos() const;
-
   /// Returns true if machine scheduler should be enabled.
   bool enableMachineScheduler() const override;
 
@@ -752,7 +753,7 @@ public:
   bool isGVIndirectSymbol(const GlobalValue *GV) const;
 
   /// Returns the constant pool modifier needed to access the GV.
-  ARMCP::ARMCPModifier getCPModifier(const GlobalValue *GV) const;
+  bool isGVInGOT(const GlobalValue *GV) const;
 
   /// True if fast-isel is used.
   bool useFastISel() const;
@@ -766,6 +767,13 @@ public:
     if (hasV4TOps())
       return ARM::BX_RET;
     return ARM::MOVPCLR;
+  }
+
+  /// Allow movt+movw for PIC global address calculation.
+  /// ELF does not have GOT relocations for movt+movw.
+  /// ROPI does not use GOT.
+  bool allowPositionIndependentMovt() const {
+    return isROPI() || !isTargetELF();
   }
 };
 

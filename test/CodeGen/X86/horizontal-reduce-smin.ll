@@ -15,7 +15,7 @@
 
 define i64 @test_reduce_v2i64(<2 x i64> %a0) {
 ; X86-SSE2-LABEL: test_reduce_v2i64:
-; X86-SSE2:       ## BB#0:
+; X86-SSE2:       ## %bb.0:
 ; X86-SSE2-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
 ; X86-SSE2-NEXT:    movdqa {{.*#+}} xmm2 = [2147483648,0,2147483648,0]
 ; X86-SSE2-NEXT:    movdqa %xmm0, %xmm3
@@ -38,7 +38,7 @@ define i64 @test_reduce_v2i64(<2 x i64> %a0) {
 ; X86-SSE2-NEXT:    retl
 ;
 ; X86-SSE42-LABEL: test_reduce_v2i64:
-; X86-SSE42:       ## BB#0:
+; X86-SSE42:       ## %bb.0:
 ; X86-SSE42-NEXT:    movdqa %xmm0, %xmm1
 ; X86-SSE42-NEXT:    pshufd {{.*#+}} xmm2 = xmm1[2,3,0,1]
 ; X86-SSE42-NEXT:    movdqa %xmm2, %xmm0
@@ -49,7 +49,7 @@ define i64 @test_reduce_v2i64(<2 x i64> %a0) {
 ; X86-SSE42-NEXT:    retl
 ;
 ; X86-AVX-LABEL: test_reduce_v2i64:
-; X86-AVX:       ## BB#0:
+; X86-AVX:       ## %bb.0:
 ; X86-AVX-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
 ; X86-AVX-NEXT:    vpcmpgtq %xmm0, %xmm1, %xmm2
 ; X86-AVX-NEXT:    vblendvpd %xmm2, %xmm0, %xmm1, %xmm0
@@ -58,7 +58,7 @@ define i64 @test_reduce_v2i64(<2 x i64> %a0) {
 ; X86-AVX-NEXT:    retl
 ;
 ; X64-SSE2-LABEL: test_reduce_v2i64:
-; X64-SSE2:       ## BB#0:
+; X64-SSE2:       ## %bb.0:
 ; X64-SSE2-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
 ; X64-SSE2-NEXT:    movdqa {{.*#+}} xmm2 = [2147483648,0,2147483648,0]
 ; X64-SSE2-NEXT:    movdqa %xmm0, %xmm3
@@ -79,7 +79,7 @@ define i64 @test_reduce_v2i64(<2 x i64> %a0) {
 ; X64-SSE2-NEXT:    retq
 ;
 ; X64-SSE42-LABEL: test_reduce_v2i64:
-; X64-SSE42:       ## BB#0:
+; X64-SSE42:       ## %bb.0:
 ; X64-SSE42-NEXT:    movdqa %xmm0, %xmm1
 ; X64-SSE42-NEXT:    pshufd {{.*#+}} xmm2 = xmm1[2,3,0,1]
 ; X64-SSE42-NEXT:    movdqa %xmm2, %xmm0
@@ -89,7 +89,7 @@ define i64 @test_reduce_v2i64(<2 x i64> %a0) {
 ; X64-SSE42-NEXT:    retq
 ;
 ; X64-AVX1-LABEL: test_reduce_v2i64:
-; X64-AVX1:       ## BB#0:
+; X64-AVX1:       ## %bb.0:
 ; X64-AVX1-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
 ; X64-AVX1-NEXT:    vpcmpgtq %xmm0, %xmm1, %xmm2
 ; X64-AVX1-NEXT:    vblendvpd %xmm2, %xmm0, %xmm1, %xmm0
@@ -97,7 +97,7 @@ define i64 @test_reduce_v2i64(<2 x i64> %a0) {
 ; X64-AVX1-NEXT:    retq
 ;
 ; X64-AVX2-LABEL: test_reduce_v2i64:
-; X64-AVX2:       ## BB#0:
+; X64-AVX2:       ## %bb.0:
 ; X64-AVX2-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
 ; X64-AVX2-NEXT:    vpcmpgtq %xmm0, %xmm1, %xmm2
 ; X64-AVX2-NEXT:    vblendvpd %xmm2, %xmm0, %xmm1, %xmm0
@@ -105,7 +105,7 @@ define i64 @test_reduce_v2i64(<2 x i64> %a0) {
 ; X64-AVX2-NEXT:    retq
 ;
 ; X64-AVX512-LABEL: test_reduce_v2i64:
-; X64-AVX512:       ## BB#0:
+; X64-AVX512:       ## %bb.0:
 ; X64-AVX512-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
 ; X64-AVX512-NEXT:    vpminsq %xmm1, %xmm0, %xmm0
 ; X64-AVX512-NEXT:    vmovq %xmm0, %rax
@@ -119,7 +119,7 @@ define i64 @test_reduce_v2i64(<2 x i64> %a0) {
 
 define i32 @test_reduce_v4i32(<4 x i32> %a0) {
 ; X86-SSE2-LABEL: test_reduce_v4i32:
-; X86-SSE2:       ## BB#0:
+; X86-SSE2:       ## %bb.0:
 ; X86-SSE2-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
 ; X86-SSE2-NEXT:    movdqa %xmm1, %xmm2
 ; X86-SSE2-NEXT:    pcmpgtd %xmm0, %xmm2
@@ -136,7 +136,7 @@ define i32 @test_reduce_v4i32(<4 x i32> %a0) {
 ; X86-SSE2-NEXT:    retl
 ;
 ; X86-SSE42-LABEL: test_reduce_v4i32:
-; X86-SSE42:       ## BB#0:
+; X86-SSE42:       ## %bb.0:
 ; X86-SSE42-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
 ; X86-SSE42-NEXT:    pminsd %xmm0, %xmm1
 ; X86-SSE42-NEXT:    pshufd {{.*#+}} xmm0 = xmm1[1,1,2,3]
@@ -145,7 +145,7 @@ define i32 @test_reduce_v4i32(<4 x i32> %a0) {
 ; X86-SSE42-NEXT:    retl
 ;
 ; X86-AVX-LABEL: test_reduce_v4i32:
-; X86-AVX:       ## BB#0:
+; X86-AVX:       ## %bb.0:
 ; X86-AVX-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
 ; X86-AVX-NEXT:    vpminsd %xmm1, %xmm0, %xmm0
 ; X86-AVX-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
@@ -154,7 +154,7 @@ define i32 @test_reduce_v4i32(<4 x i32> %a0) {
 ; X86-AVX-NEXT:    retl
 ;
 ; X64-SSE2-LABEL: test_reduce_v4i32:
-; X64-SSE2:       ## BB#0:
+; X64-SSE2:       ## %bb.0:
 ; X64-SSE2-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
 ; X64-SSE2-NEXT:    movdqa %xmm1, %xmm2
 ; X64-SSE2-NEXT:    pcmpgtd %xmm0, %xmm2
@@ -171,7 +171,7 @@ define i32 @test_reduce_v4i32(<4 x i32> %a0) {
 ; X64-SSE2-NEXT:    retq
 ;
 ; X64-SSE42-LABEL: test_reduce_v4i32:
-; X64-SSE42:       ## BB#0:
+; X64-SSE42:       ## %bb.0:
 ; X64-SSE42-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
 ; X64-SSE42-NEXT:    pminsd %xmm0, %xmm1
 ; X64-SSE42-NEXT:    pshufd {{.*#+}} xmm0 = xmm1[1,1,2,3]
@@ -180,7 +180,7 @@ define i32 @test_reduce_v4i32(<4 x i32> %a0) {
 ; X64-SSE42-NEXT:    retq
 ;
 ; X64-AVX-LABEL: test_reduce_v4i32:
-; X64-AVX:       ## BB#0:
+; X64-AVX:       ## %bb.0:
 ; X64-AVX-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
 ; X64-AVX-NEXT:    vpminsd %xmm1, %xmm0, %xmm0
 ; X64-AVX-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
@@ -198,54 +198,70 @@ define i32 @test_reduce_v4i32(<4 x i32> %a0) {
 }
 
 define i16 @test_reduce_v8i16(<8 x i16> %a0) {
-; X86-SSE-LABEL: test_reduce_v8i16:
-; X86-SSE:       ## BB#0:
-; X86-SSE-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X86-SSE-NEXT:    pminsw %xmm0, %xmm1
-; X86-SSE-NEXT:    pshufd {{.*#+}} xmm0 = xmm1[1,1,2,3]
-; X86-SSE-NEXT:    pminsw %xmm1, %xmm0
-; X86-SSE-NEXT:    movdqa %xmm0, %xmm1
-; X86-SSE-NEXT:    psrld $16, %xmm1
-; X86-SSE-NEXT:    pminsw %xmm0, %xmm1
-; X86-SSE-NEXT:    movd %xmm1, %eax
-; X86-SSE-NEXT:    ## kill: %AX<def> %AX<kill> %EAX<kill>
-; X86-SSE-NEXT:    retl
+; X86-SSE2-LABEL: test_reduce_v8i16:
+; X86-SSE2:       ## %bb.0:
+; X86-SSE2-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
+; X86-SSE2-NEXT:    pminsw %xmm0, %xmm1
+; X86-SSE2-NEXT:    pshufd {{.*#+}} xmm0 = xmm1[1,1,2,3]
+; X86-SSE2-NEXT:    pminsw %xmm1, %xmm0
+; X86-SSE2-NEXT:    movdqa %xmm0, %xmm1
+; X86-SSE2-NEXT:    psrld $16, %xmm1
+; X86-SSE2-NEXT:    pminsw %xmm0, %xmm1
+; X86-SSE2-NEXT:    movd %xmm1, %eax
+; X86-SSE2-NEXT:    ## kill: def %ax killed %ax killed %eax
+; X86-SSE2-NEXT:    retl
+;
+; X86-SSE42-LABEL: test_reduce_v8i16:
+; X86-SSE42:       ## %bb.0:
+; X86-SSE42-NEXT:    movdqa {{.*#+}} xmm1 = [32768,32768,32768,32768,32768,32768,32768,32768]
+; X86-SSE42-NEXT:    pxor %xmm1, %xmm0
+; X86-SSE42-NEXT:    phminposuw %xmm0, %xmm0
+; X86-SSE42-NEXT:    pxor %xmm1, %xmm0
+; X86-SSE42-NEXT:    movd %xmm0, %eax
+; X86-SSE42-NEXT:    ## kill: def %ax killed %ax killed %eax
+; X86-SSE42-NEXT:    retl
 ;
 ; X86-AVX-LABEL: test_reduce_v8i16:
-; X86-AVX:       ## BB#0:
-; X86-AVX-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X86-AVX-NEXT:    vpminsw %xmm1, %xmm0, %xmm0
-; X86-AVX-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
-; X86-AVX-NEXT:    vpminsw %xmm1, %xmm0, %xmm0
-; X86-AVX-NEXT:    vpsrld $16, %xmm0, %xmm1
-; X86-AVX-NEXT:    vpminsw %xmm1, %xmm0, %xmm0
+; X86-AVX:       ## %bb.0:
+; X86-AVX-NEXT:    vmovdqa {{.*#+}} xmm1 = [32768,32768,32768,32768,32768,32768,32768,32768]
+; X86-AVX-NEXT:    vpxor %xmm1, %xmm0, %xmm0
+; X86-AVX-NEXT:    vphminposuw %xmm0, %xmm0
+; X86-AVX-NEXT:    vpxor %xmm1, %xmm0, %xmm0
 ; X86-AVX-NEXT:    vmovd %xmm0, %eax
-; X86-AVX-NEXT:    ## kill: %AX<def> %AX<kill> %EAX<kill>
+; X86-AVX-NEXT:    ## kill: def %ax killed %ax killed %eax
 ; X86-AVX-NEXT:    retl
 ;
-; X64-SSE-LABEL: test_reduce_v8i16:
-; X64-SSE:       ## BB#0:
-; X64-SSE-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X64-SSE-NEXT:    pminsw %xmm0, %xmm1
-; X64-SSE-NEXT:    pshufd {{.*#+}} xmm0 = xmm1[1,1,2,3]
-; X64-SSE-NEXT:    pminsw %xmm1, %xmm0
-; X64-SSE-NEXT:    movdqa %xmm0, %xmm1
-; X64-SSE-NEXT:    psrld $16, %xmm1
-; X64-SSE-NEXT:    pminsw %xmm0, %xmm1
-; X64-SSE-NEXT:    movd %xmm1, %eax
-; X64-SSE-NEXT:    ## kill: %AX<def> %AX<kill> %EAX<kill>
-; X64-SSE-NEXT:    retq
+; X64-SSE2-LABEL: test_reduce_v8i16:
+; X64-SSE2:       ## %bb.0:
+; X64-SSE2-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
+; X64-SSE2-NEXT:    pminsw %xmm0, %xmm1
+; X64-SSE2-NEXT:    pshufd {{.*#+}} xmm0 = xmm1[1,1,2,3]
+; X64-SSE2-NEXT:    pminsw %xmm1, %xmm0
+; X64-SSE2-NEXT:    movdqa %xmm0, %xmm1
+; X64-SSE2-NEXT:    psrld $16, %xmm1
+; X64-SSE2-NEXT:    pminsw %xmm0, %xmm1
+; X64-SSE2-NEXT:    movd %xmm1, %eax
+; X64-SSE2-NEXT:    ## kill: def %ax killed %ax killed %eax
+; X64-SSE2-NEXT:    retq
+;
+; X64-SSE42-LABEL: test_reduce_v8i16:
+; X64-SSE42:       ## %bb.0:
+; X64-SSE42-NEXT:    movdqa {{.*#+}} xmm1 = [32768,32768,32768,32768,32768,32768,32768,32768]
+; X64-SSE42-NEXT:    pxor %xmm1, %xmm0
+; X64-SSE42-NEXT:    phminposuw %xmm0, %xmm0
+; X64-SSE42-NEXT:    pxor %xmm1, %xmm0
+; X64-SSE42-NEXT:    movd %xmm0, %eax
+; X64-SSE42-NEXT:    ## kill: def %ax killed %ax killed %eax
+; X64-SSE42-NEXT:    retq
 ;
 ; X64-AVX-LABEL: test_reduce_v8i16:
-; X64-AVX:       ## BB#0:
-; X64-AVX-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X64-AVX-NEXT:    vpminsw %xmm1, %xmm0, %xmm0
-; X64-AVX-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
-; X64-AVX-NEXT:    vpminsw %xmm1, %xmm0, %xmm0
-; X64-AVX-NEXT:    vpsrld $16, %xmm0, %xmm1
-; X64-AVX-NEXT:    vpminsw %xmm1, %xmm0, %xmm0
+; X64-AVX:       ## %bb.0:
+; X64-AVX-NEXT:    vmovdqa {{.*#+}} xmm1 = [32768,32768,32768,32768,32768,32768,32768,32768]
+; X64-AVX-NEXT:    vpxor %xmm1, %xmm0, %xmm0
+; X64-AVX-NEXT:    vphminposuw %xmm0, %xmm0
+; X64-AVX-NEXT:    vpxor %xmm1, %xmm0, %xmm0
 ; X64-AVX-NEXT:    vmovd %xmm0, %eax
-; X64-AVX-NEXT:    ## kill: %AX<def> %AX<kill> %EAX<kill>
+; X64-AVX-NEXT:    ## kill: def %ax killed %ax killed %eax
 ; X64-AVX-NEXT:    retq
   %1  = shufflevector <8 x i16> %a0, <8 x i16> undef, <8 x i32> <i32 4, i32 5, i32 6, i32 7, i32 undef, i32 undef, i32 undef, i32 undef>
   %2  = icmp slt <8 x i16> %a0, %1
@@ -262,7 +278,7 @@ define i16 @test_reduce_v8i16(<8 x i16> %a0) {
 
 define i8 @test_reduce_v16i8(<16 x i8> %a0) {
 ; X86-SSE2-LABEL: test_reduce_v16i8:
-; X86-SSE2:       ## BB#0:
+; X86-SSE2:       ## %bb.0:
 ; X86-SSE2-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
 ; X86-SSE2-NEXT:    movdqa %xmm1, %xmm2
 ; X86-SSE2-NEXT:    pcmpgtb %xmm0, %xmm2
@@ -290,41 +306,36 @@ define i8 @test_reduce_v16i8(<16 x i8> %a0) {
 ; X86-SSE2-NEXT:    pandn %xmm0, %xmm1
 ; X86-SSE2-NEXT:    por %xmm2, %xmm1
 ; X86-SSE2-NEXT:    movd %xmm1, %eax
-; X86-SSE2-NEXT:    ## kill: %AL<def> %AL<kill> %EAX<kill>
+; X86-SSE2-NEXT:    ## kill: def %al killed %al killed %eax
 ; X86-SSE2-NEXT:    retl
 ;
 ; X86-SSE42-LABEL: test_reduce_v16i8:
-; X86-SSE42:       ## BB#0:
-; X86-SSE42-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X86-SSE42-NEXT:    pminsb %xmm0, %xmm1
-; X86-SSE42-NEXT:    pshufd {{.*#+}} xmm0 = xmm1[1,1,2,3]
-; X86-SSE42-NEXT:    pminsb %xmm1, %xmm0
-; X86-SSE42-NEXT:    movdqa %xmm0, %xmm1
-; X86-SSE42-NEXT:    psrld $16, %xmm1
-; X86-SSE42-NEXT:    pminsb %xmm0, %xmm1
-; X86-SSE42-NEXT:    movdqa %xmm1, %xmm0
-; X86-SSE42-NEXT:    psrlw $8, %xmm0
-; X86-SSE42-NEXT:    pminsb %xmm1, %xmm0
+; X86-SSE42:       ## %bb.0:
+; X86-SSE42-NEXT:    movdqa {{.*#+}} xmm1 = [128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]
+; X86-SSE42-NEXT:    pxor %xmm1, %xmm0
+; X86-SSE42-NEXT:    movdqa %xmm0, %xmm2
+; X86-SSE42-NEXT:    psrlw $8, %xmm2
+; X86-SSE42-NEXT:    pminub %xmm0, %xmm2
+; X86-SSE42-NEXT:    phminposuw %xmm2, %xmm0
+; X86-SSE42-NEXT:    pxor %xmm1, %xmm0
 ; X86-SSE42-NEXT:    pextrb $0, %xmm0, %eax
-; X86-SSE42-NEXT:    ## kill: %AL<def> %AL<kill> %EAX<kill>
+; X86-SSE42-NEXT:    ## kill: def %al killed %al killed %eax
 ; X86-SSE42-NEXT:    retl
 ;
 ; X86-AVX-LABEL: test_reduce_v16i8:
-; X86-AVX:       ## BB#0:
-; X86-AVX-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X86-AVX-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
-; X86-AVX-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
-; X86-AVX-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
-; X86-AVX-NEXT:    vpsrld $16, %xmm0, %xmm1
-; X86-AVX-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
-; X86-AVX-NEXT:    vpsrlw $8, %xmm0, %xmm1
-; X86-AVX-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
+; X86-AVX:       ## %bb.0:
+; X86-AVX-NEXT:    vmovdqa {{.*#+}} xmm1 = [128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]
+; X86-AVX-NEXT:    vpxor %xmm1, %xmm0, %xmm0
+; X86-AVX-NEXT:    vpsrlw $8, %xmm0, %xmm2
+; X86-AVX-NEXT:    vpminub %xmm2, %xmm0, %xmm0
+; X86-AVX-NEXT:    vphminposuw %xmm0, %xmm0
+; X86-AVX-NEXT:    vpxor %xmm1, %xmm0, %xmm0
 ; X86-AVX-NEXT:    vpextrb $0, %xmm0, %eax
-; X86-AVX-NEXT:    ## kill: %AL<def> %AL<kill> %EAX<kill>
+; X86-AVX-NEXT:    ## kill: def %al killed %al killed %eax
 ; X86-AVX-NEXT:    retl
 ;
 ; X64-SSE2-LABEL: test_reduce_v16i8:
-; X64-SSE2:       ## BB#0:
+; X64-SSE2:       ## %bb.0:
 ; X64-SSE2-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
 ; X64-SSE2-NEXT:    movdqa %xmm1, %xmm2
 ; X64-SSE2-NEXT:    pcmpgtb %xmm0, %xmm2
@@ -352,37 +363,32 @@ define i8 @test_reduce_v16i8(<16 x i8> %a0) {
 ; X64-SSE2-NEXT:    pandn %xmm0, %xmm1
 ; X64-SSE2-NEXT:    por %xmm2, %xmm1
 ; X64-SSE2-NEXT:    movd %xmm1, %eax
-; X64-SSE2-NEXT:    ## kill: %AL<def> %AL<kill> %EAX<kill>
+; X64-SSE2-NEXT:    ## kill: def %al killed %al killed %eax
 ; X64-SSE2-NEXT:    retq
 ;
 ; X64-SSE42-LABEL: test_reduce_v16i8:
-; X64-SSE42:       ## BB#0:
-; X64-SSE42-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X64-SSE42-NEXT:    pminsb %xmm0, %xmm1
-; X64-SSE42-NEXT:    pshufd {{.*#+}} xmm0 = xmm1[1,1,2,3]
-; X64-SSE42-NEXT:    pminsb %xmm1, %xmm0
-; X64-SSE42-NEXT:    movdqa %xmm0, %xmm1
-; X64-SSE42-NEXT:    psrld $16, %xmm1
-; X64-SSE42-NEXT:    pminsb %xmm0, %xmm1
-; X64-SSE42-NEXT:    movdqa %xmm1, %xmm0
-; X64-SSE42-NEXT:    psrlw $8, %xmm0
-; X64-SSE42-NEXT:    pminsb %xmm1, %xmm0
+; X64-SSE42:       ## %bb.0:
+; X64-SSE42-NEXT:    movdqa {{.*#+}} xmm1 = [128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]
+; X64-SSE42-NEXT:    pxor %xmm1, %xmm0
+; X64-SSE42-NEXT:    movdqa %xmm0, %xmm2
+; X64-SSE42-NEXT:    psrlw $8, %xmm2
+; X64-SSE42-NEXT:    pminub %xmm0, %xmm2
+; X64-SSE42-NEXT:    phminposuw %xmm2, %xmm0
+; X64-SSE42-NEXT:    pxor %xmm1, %xmm0
 ; X64-SSE42-NEXT:    pextrb $0, %xmm0, %eax
-; X64-SSE42-NEXT:    ## kill: %AL<def> %AL<kill> %EAX<kill>
+; X64-SSE42-NEXT:    ## kill: def %al killed %al killed %eax
 ; X64-SSE42-NEXT:    retq
 ;
 ; X64-AVX-LABEL: test_reduce_v16i8:
-; X64-AVX:       ## BB#0:
-; X64-AVX-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X64-AVX-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
-; X64-AVX-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
-; X64-AVX-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
-; X64-AVX-NEXT:    vpsrld $16, %xmm0, %xmm1
-; X64-AVX-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
-; X64-AVX-NEXT:    vpsrlw $8, %xmm0, %xmm1
-; X64-AVX-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
+; X64-AVX:       ## %bb.0:
+; X64-AVX-NEXT:    vmovdqa {{.*#+}} xmm1 = [128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]
+; X64-AVX-NEXT:    vpxor %xmm1, %xmm0, %xmm0
+; X64-AVX-NEXT:    vpsrlw $8, %xmm0, %xmm2
+; X64-AVX-NEXT:    vpminub %xmm2, %xmm0, %xmm0
+; X64-AVX-NEXT:    vphminposuw %xmm0, %xmm0
+; X64-AVX-NEXT:    vpxor %xmm1, %xmm0, %xmm0
 ; X64-AVX-NEXT:    vpextrb $0, %xmm0, %eax
-; X64-AVX-NEXT:    ## kill: %AL<def> %AL<kill> %EAX<kill>
+; X64-AVX-NEXT:    ## kill: def %al killed %al killed %eax
 ; X64-AVX-NEXT:    retq
   %1  = shufflevector <16 x i8> %a0, <16 x i8> undef, <16 x i32> <i32 8, i32 9, i32 10, i32 11, i32 12, i32 13, i32 14, i32 15, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef>
   %2  = icmp slt <16 x i8> %a0, %1
@@ -406,7 +412,7 @@ define i8 @test_reduce_v16i8(<16 x i8> %a0) {
 
 define i64 @test_reduce_v4i64(<4 x i64> %a0) {
 ; X86-SSE2-LABEL: test_reduce_v4i64:
-; X86-SSE2:       ## BB#0:
+; X86-SSE2:       ## %bb.0:
 ; X86-SSE2-NEXT:    movdqa {{.*#+}} xmm2 = [2147483648,0,2147483648,0]
 ; X86-SSE2-NEXT:    movdqa %xmm0, %xmm3
 ; X86-SSE2-NEXT:    pxor %xmm2, %xmm3
@@ -444,7 +450,7 @@ define i64 @test_reduce_v4i64(<4 x i64> %a0) {
 ; X86-SSE2-NEXT:    retl
 ;
 ; X86-SSE42-LABEL: test_reduce_v4i64:
-; X86-SSE42:       ## BB#0:
+; X86-SSE42:       ## %bb.0:
 ; X86-SSE42-NEXT:    movdqa %xmm0, %xmm2
 ; X86-SSE42-NEXT:    movdqa %xmm1, %xmm0
 ; X86-SSE42-NEXT:    pcmpgtq %xmm2, %xmm0
@@ -458,7 +464,7 @@ define i64 @test_reduce_v4i64(<4 x i64> %a0) {
 ; X86-SSE42-NEXT:    retl
 ;
 ; X86-AVX1-LABEL: test_reduce_v4i64:
-; X86-AVX1:       ## BB#0:
+; X86-AVX1:       ## %bb.0:
 ; X86-AVX1-NEXT:    vextractf128 $1, %ymm0, %xmm1
 ; X86-AVX1-NEXT:    vpcmpgtq %xmm1, %xmm0, %xmm2
 ; X86-AVX1-NEXT:    vpcmpgtq %xmm0, %xmm1, %xmm3
@@ -476,7 +482,7 @@ define i64 @test_reduce_v4i64(<4 x i64> %a0) {
 ; X86-AVX1-NEXT:    retl
 ;
 ; X86-AVX2-LABEL: test_reduce_v4i64:
-; X86-AVX2:       ## BB#0:
+; X86-AVX2:       ## %bb.0:
 ; X86-AVX2-NEXT:    vextracti128 $1, %ymm0, %xmm1
 ; X86-AVX2-NEXT:    vpcmpgtq %ymm0, %ymm1, %ymm2
 ; X86-AVX2-NEXT:    vblendvpd %ymm2, %ymm0, %ymm1, %ymm0
@@ -489,7 +495,7 @@ define i64 @test_reduce_v4i64(<4 x i64> %a0) {
 ; X86-AVX2-NEXT:    retl
 ;
 ; X64-SSE2-LABEL: test_reduce_v4i64:
-; X64-SSE2:       ## BB#0:
+; X64-SSE2:       ## %bb.0:
 ; X64-SSE2-NEXT:    movdqa {{.*#+}} xmm2 = [2147483648,0,2147483648,0]
 ; X64-SSE2-NEXT:    movdqa %xmm0, %xmm3
 ; X64-SSE2-NEXT:    pxor %xmm2, %xmm3
@@ -525,7 +531,7 @@ define i64 @test_reduce_v4i64(<4 x i64> %a0) {
 ; X64-SSE2-NEXT:    retq
 ;
 ; X64-SSE42-LABEL: test_reduce_v4i64:
-; X64-SSE42:       ## BB#0:
+; X64-SSE42:       ## %bb.0:
 ; X64-SSE42-NEXT:    movdqa %xmm0, %xmm2
 ; X64-SSE42-NEXT:    movdqa %xmm1, %xmm0
 ; X64-SSE42-NEXT:    pcmpgtq %xmm2, %xmm0
@@ -538,7 +544,7 @@ define i64 @test_reduce_v4i64(<4 x i64> %a0) {
 ; X64-SSE42-NEXT:    retq
 ;
 ; X64-AVX1-LABEL: test_reduce_v4i64:
-; X64-AVX1:       ## BB#0:
+; X64-AVX1:       ## %bb.0:
 ; X64-AVX1-NEXT:    vextractf128 $1, %ymm0, %xmm1
 ; X64-AVX1-NEXT:    vpcmpgtq %xmm1, %xmm0, %xmm2
 ; X64-AVX1-NEXT:    vpcmpgtq %xmm0, %xmm1, %xmm3
@@ -555,7 +561,7 @@ define i64 @test_reduce_v4i64(<4 x i64> %a0) {
 ; X64-AVX1-NEXT:    retq
 ;
 ; X64-AVX2-LABEL: test_reduce_v4i64:
-; X64-AVX2:       ## BB#0:
+; X64-AVX2:       ## %bb.0:
 ; X64-AVX2-NEXT:    vextracti128 $1, %ymm0, %xmm1
 ; X64-AVX2-NEXT:    vpcmpgtq %ymm0, %ymm1, %ymm2
 ; X64-AVX2-NEXT:    vblendvpd %ymm2, %ymm0, %ymm1, %ymm0
@@ -567,7 +573,7 @@ define i64 @test_reduce_v4i64(<4 x i64> %a0) {
 ; X64-AVX2-NEXT:    retq
 ;
 ; X64-AVX512-LABEL: test_reduce_v4i64:
-; X64-AVX512:       ## BB#0:
+; X64-AVX512:       ## %bb.0:
 ; X64-AVX512-NEXT:    vextracti128 $1, %ymm0, %xmm1
 ; X64-AVX512-NEXT:    vpminsq %ymm1, %ymm0, %ymm0
 ; X64-AVX512-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
@@ -587,7 +593,7 @@ define i64 @test_reduce_v4i64(<4 x i64> %a0) {
 
 define i32 @test_reduce_v8i32(<8 x i32> %a0) {
 ; X86-SSE2-LABEL: test_reduce_v8i32:
-; X86-SSE2:       ## BB#0:
+; X86-SSE2:       ## %bb.0:
 ; X86-SSE2-NEXT:    movdqa %xmm1, %xmm2
 ; X86-SSE2-NEXT:    pcmpgtd %xmm0, %xmm2
 ; X86-SSE2-NEXT:    pand %xmm2, %xmm0
@@ -609,7 +615,7 @@ define i32 @test_reduce_v8i32(<8 x i32> %a0) {
 ; X86-SSE2-NEXT:    retl
 ;
 ; X86-SSE42-LABEL: test_reduce_v8i32:
-; X86-SSE42:       ## BB#0:
+; X86-SSE42:       ## %bb.0:
 ; X86-SSE42-NEXT:    pminsd %xmm1, %xmm0
 ; X86-SSE42-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
 ; X86-SSE42-NEXT:    pminsd %xmm0, %xmm1
@@ -619,7 +625,7 @@ define i32 @test_reduce_v8i32(<8 x i32> %a0) {
 ; X86-SSE42-NEXT:    retl
 ;
 ; X86-AVX1-LABEL: test_reduce_v8i32:
-; X86-AVX1:       ## BB#0:
+; X86-AVX1:       ## %bb.0:
 ; X86-AVX1-NEXT:    vextractf128 $1, %ymm0, %xmm1
 ; X86-AVX1-NEXT:    vpminsd %xmm1, %xmm0, %xmm0
 ; X86-AVX1-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
@@ -631,7 +637,7 @@ define i32 @test_reduce_v8i32(<8 x i32> %a0) {
 ; X86-AVX1-NEXT:    retl
 ;
 ; X86-AVX2-LABEL: test_reduce_v8i32:
-; X86-AVX2:       ## BB#0:
+; X86-AVX2:       ## %bb.0:
 ; X86-AVX2-NEXT:    vextracti128 $1, %ymm0, %xmm1
 ; X86-AVX2-NEXT:    vpminsd %ymm1, %ymm0, %ymm0
 ; X86-AVX2-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
@@ -643,7 +649,7 @@ define i32 @test_reduce_v8i32(<8 x i32> %a0) {
 ; X86-AVX2-NEXT:    retl
 ;
 ; X64-SSE2-LABEL: test_reduce_v8i32:
-; X64-SSE2:       ## BB#0:
+; X64-SSE2:       ## %bb.0:
 ; X64-SSE2-NEXT:    movdqa %xmm1, %xmm2
 ; X64-SSE2-NEXT:    pcmpgtd %xmm0, %xmm2
 ; X64-SSE2-NEXT:    pand %xmm2, %xmm0
@@ -665,7 +671,7 @@ define i32 @test_reduce_v8i32(<8 x i32> %a0) {
 ; X64-SSE2-NEXT:    retq
 ;
 ; X64-SSE42-LABEL: test_reduce_v8i32:
-; X64-SSE42:       ## BB#0:
+; X64-SSE42:       ## %bb.0:
 ; X64-SSE42-NEXT:    pminsd %xmm1, %xmm0
 ; X64-SSE42-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
 ; X64-SSE42-NEXT:    pminsd %xmm0, %xmm1
@@ -675,7 +681,7 @@ define i32 @test_reduce_v8i32(<8 x i32> %a0) {
 ; X64-SSE42-NEXT:    retq
 ;
 ; X64-AVX1-LABEL: test_reduce_v8i32:
-; X64-AVX1:       ## BB#0:
+; X64-AVX1:       ## %bb.0:
 ; X64-AVX1-NEXT:    vextractf128 $1, %ymm0, %xmm1
 ; X64-AVX1-NEXT:    vpminsd %xmm1, %xmm0, %xmm0
 ; X64-AVX1-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
@@ -687,7 +693,7 @@ define i32 @test_reduce_v8i32(<8 x i32> %a0) {
 ; X64-AVX1-NEXT:    retq
 ;
 ; X64-AVX2-LABEL: test_reduce_v8i32:
-; X64-AVX2:       ## BB#0:
+; X64-AVX2:       ## %bb.0:
 ; X64-AVX2-NEXT:    vextracti128 $1, %ymm0, %xmm1
 ; X64-AVX2-NEXT:    vpminsd %ymm1, %ymm0, %ymm0
 ; X64-AVX2-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
@@ -699,7 +705,7 @@ define i32 @test_reduce_v8i32(<8 x i32> %a0) {
 ; X64-AVX2-NEXT:    retq
 ;
 ; X64-AVX512-LABEL: test_reduce_v8i32:
-; X64-AVX512:       ## BB#0:
+; X64-AVX512:       ## %bb.0:
 ; X64-AVX512-NEXT:    vextracti128 $1, %ymm0, %xmm1
 ; X64-AVX512-NEXT:    vpminsd %ymm1, %ymm0, %ymm0
 ; X64-AVX512-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
@@ -723,106 +729,118 @@ define i32 @test_reduce_v8i32(<8 x i32> %a0) {
 }
 
 define i16 @test_reduce_v16i16(<16 x i16> %a0) {
-; X86-SSE-LABEL: test_reduce_v16i16:
-; X86-SSE:       ## BB#0:
-; X86-SSE-NEXT:    pminsw %xmm1, %xmm0
-; X86-SSE-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X86-SSE-NEXT:    pminsw %xmm0, %xmm1
-; X86-SSE-NEXT:    pshufd {{.*#+}} xmm0 = xmm1[1,1,2,3]
-; X86-SSE-NEXT:    pminsw %xmm1, %xmm0
-; X86-SSE-NEXT:    movdqa %xmm0, %xmm1
-; X86-SSE-NEXT:    psrld $16, %xmm1
-; X86-SSE-NEXT:    pminsw %xmm0, %xmm1
-; X86-SSE-NEXT:    movd %xmm1, %eax
-; X86-SSE-NEXT:    ## kill: %AX<def> %AX<kill> %EAX<kill>
-; X86-SSE-NEXT:    retl
+; X86-SSE2-LABEL: test_reduce_v16i16:
+; X86-SSE2:       ## %bb.0:
+; X86-SSE2-NEXT:    pminsw %xmm1, %xmm0
+; X86-SSE2-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
+; X86-SSE2-NEXT:    pminsw %xmm0, %xmm1
+; X86-SSE2-NEXT:    pshufd {{.*#+}} xmm0 = xmm1[1,1,2,3]
+; X86-SSE2-NEXT:    pminsw %xmm1, %xmm0
+; X86-SSE2-NEXT:    movdqa %xmm0, %xmm1
+; X86-SSE2-NEXT:    psrld $16, %xmm1
+; X86-SSE2-NEXT:    pminsw %xmm0, %xmm1
+; X86-SSE2-NEXT:    movd %xmm1, %eax
+; X86-SSE2-NEXT:    ## kill: def %ax killed %ax killed %eax
+; X86-SSE2-NEXT:    retl
+;
+; X86-SSE42-LABEL: test_reduce_v16i16:
+; X86-SSE42:       ## %bb.0:
+; X86-SSE42-NEXT:    pminsw %xmm1, %xmm0
+; X86-SSE42-NEXT:    movdqa {{.*#+}} xmm1 = [32768,32768,32768,32768,32768,32768,32768,32768]
+; X86-SSE42-NEXT:    pxor %xmm1, %xmm0
+; X86-SSE42-NEXT:    phminposuw %xmm0, %xmm0
+; X86-SSE42-NEXT:    pxor %xmm1, %xmm0
+; X86-SSE42-NEXT:    movd %xmm0, %eax
+; X86-SSE42-NEXT:    ## kill: def %ax killed %ax killed %eax
+; X86-SSE42-NEXT:    retl
 ;
 ; X86-AVX1-LABEL: test_reduce_v16i16:
-; X86-AVX1:       ## BB#0:
+; X86-AVX1:       ## %bb.0:
 ; X86-AVX1-NEXT:    vextractf128 $1, %ymm0, %xmm1
 ; X86-AVX1-NEXT:    vpminsw %xmm1, %xmm0, %xmm0
-; X86-AVX1-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X86-AVX1-NEXT:    vpminsw %xmm1, %xmm0, %xmm0
-; X86-AVX1-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
-; X86-AVX1-NEXT:    vpminsw %xmm1, %xmm0, %xmm0
-; X86-AVX1-NEXT:    vpsrld $16, %xmm0, %xmm1
-; X86-AVX1-NEXT:    vpminsw %xmm1, %xmm0, %xmm0
+; X86-AVX1-NEXT:    vmovdqa {{.*#+}} xmm1 = [32768,32768,32768,32768,32768,32768,32768,32768]
+; X86-AVX1-NEXT:    vpxor %xmm1, %xmm0, %xmm0
+; X86-AVX1-NEXT:    vphminposuw %xmm0, %xmm0
+; X86-AVX1-NEXT:    vpxor %xmm1, %xmm0, %xmm0
 ; X86-AVX1-NEXT:    vmovd %xmm0, %eax
-; X86-AVX1-NEXT:    ## kill: %AX<def> %AX<kill> %EAX<kill>
+; X86-AVX1-NEXT:    ## kill: def %ax killed %ax killed %eax
 ; X86-AVX1-NEXT:    vzeroupper
 ; X86-AVX1-NEXT:    retl
 ;
 ; X86-AVX2-LABEL: test_reduce_v16i16:
-; X86-AVX2:       ## BB#0:
+; X86-AVX2:       ## %bb.0:
 ; X86-AVX2-NEXT:    vextracti128 $1, %ymm0, %xmm1
-; X86-AVX2-NEXT:    vpminsw %ymm1, %ymm0, %ymm0
-; X86-AVX2-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X86-AVX2-NEXT:    vpminsw %ymm1, %ymm0, %ymm0
-; X86-AVX2-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
-; X86-AVX2-NEXT:    vpminsw %ymm1, %ymm0, %ymm0
-; X86-AVX2-NEXT:    vpsrld $16, %xmm0, %xmm1
-; X86-AVX2-NEXT:    vpminsw %ymm1, %ymm0, %ymm0
+; X86-AVX2-NEXT:    vpminsw %xmm1, %xmm0, %xmm0
+; X86-AVX2-NEXT:    vmovdqa {{.*#+}} xmm1 = [32768,32768,32768,32768,32768,32768,32768,32768]
+; X86-AVX2-NEXT:    vpxor %xmm1, %xmm0, %xmm0
+; X86-AVX2-NEXT:    vphminposuw %xmm0, %xmm0
+; X86-AVX2-NEXT:    vpxor %xmm1, %xmm0, %xmm0
 ; X86-AVX2-NEXT:    vmovd %xmm0, %eax
-; X86-AVX2-NEXT:    ## kill: %AX<def> %AX<kill> %EAX<kill>
+; X86-AVX2-NEXT:    ## kill: def %ax killed %ax killed %eax
 ; X86-AVX2-NEXT:    vzeroupper
 ; X86-AVX2-NEXT:    retl
 ;
-; X64-SSE-LABEL: test_reduce_v16i16:
-; X64-SSE:       ## BB#0:
-; X64-SSE-NEXT:    pminsw %xmm1, %xmm0
-; X64-SSE-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X64-SSE-NEXT:    pminsw %xmm0, %xmm1
-; X64-SSE-NEXT:    pshufd {{.*#+}} xmm0 = xmm1[1,1,2,3]
-; X64-SSE-NEXT:    pminsw %xmm1, %xmm0
-; X64-SSE-NEXT:    movdqa %xmm0, %xmm1
-; X64-SSE-NEXT:    psrld $16, %xmm1
-; X64-SSE-NEXT:    pminsw %xmm0, %xmm1
-; X64-SSE-NEXT:    movd %xmm1, %eax
-; X64-SSE-NEXT:    ## kill: %AX<def> %AX<kill> %EAX<kill>
-; X64-SSE-NEXT:    retq
+; X64-SSE2-LABEL: test_reduce_v16i16:
+; X64-SSE2:       ## %bb.0:
+; X64-SSE2-NEXT:    pminsw %xmm1, %xmm0
+; X64-SSE2-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
+; X64-SSE2-NEXT:    pminsw %xmm0, %xmm1
+; X64-SSE2-NEXT:    pshufd {{.*#+}} xmm0 = xmm1[1,1,2,3]
+; X64-SSE2-NEXT:    pminsw %xmm1, %xmm0
+; X64-SSE2-NEXT:    movdqa %xmm0, %xmm1
+; X64-SSE2-NEXT:    psrld $16, %xmm1
+; X64-SSE2-NEXT:    pminsw %xmm0, %xmm1
+; X64-SSE2-NEXT:    movd %xmm1, %eax
+; X64-SSE2-NEXT:    ## kill: def %ax killed %ax killed %eax
+; X64-SSE2-NEXT:    retq
+;
+; X64-SSE42-LABEL: test_reduce_v16i16:
+; X64-SSE42:       ## %bb.0:
+; X64-SSE42-NEXT:    pminsw %xmm1, %xmm0
+; X64-SSE42-NEXT:    movdqa {{.*#+}} xmm1 = [32768,32768,32768,32768,32768,32768,32768,32768]
+; X64-SSE42-NEXT:    pxor %xmm1, %xmm0
+; X64-SSE42-NEXT:    phminposuw %xmm0, %xmm0
+; X64-SSE42-NEXT:    pxor %xmm1, %xmm0
+; X64-SSE42-NEXT:    movd %xmm0, %eax
+; X64-SSE42-NEXT:    ## kill: def %ax killed %ax killed %eax
+; X64-SSE42-NEXT:    retq
 ;
 ; X64-AVX1-LABEL: test_reduce_v16i16:
-; X64-AVX1:       ## BB#0:
+; X64-AVX1:       ## %bb.0:
 ; X64-AVX1-NEXT:    vextractf128 $1, %ymm0, %xmm1
 ; X64-AVX1-NEXT:    vpminsw %xmm1, %xmm0, %xmm0
-; X64-AVX1-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X64-AVX1-NEXT:    vpminsw %xmm1, %xmm0, %xmm0
-; X64-AVX1-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
-; X64-AVX1-NEXT:    vpminsw %xmm1, %xmm0, %xmm0
-; X64-AVX1-NEXT:    vpsrld $16, %xmm0, %xmm1
-; X64-AVX1-NEXT:    vpminsw %xmm1, %xmm0, %xmm0
+; X64-AVX1-NEXT:    vmovdqa {{.*#+}} xmm1 = [32768,32768,32768,32768,32768,32768,32768,32768]
+; X64-AVX1-NEXT:    vpxor %xmm1, %xmm0, %xmm0
+; X64-AVX1-NEXT:    vphminposuw %xmm0, %xmm0
+; X64-AVX1-NEXT:    vpxor %xmm1, %xmm0, %xmm0
 ; X64-AVX1-NEXT:    vmovd %xmm0, %eax
-; X64-AVX1-NEXT:    ## kill: %AX<def> %AX<kill> %EAX<kill>
+; X64-AVX1-NEXT:    ## kill: def %ax killed %ax killed %eax
 ; X64-AVX1-NEXT:    vzeroupper
 ; X64-AVX1-NEXT:    retq
 ;
 ; X64-AVX2-LABEL: test_reduce_v16i16:
-; X64-AVX2:       ## BB#0:
+; X64-AVX2:       ## %bb.0:
 ; X64-AVX2-NEXT:    vextracti128 $1, %ymm0, %xmm1
-; X64-AVX2-NEXT:    vpminsw %ymm1, %ymm0, %ymm0
-; X64-AVX2-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X64-AVX2-NEXT:    vpminsw %ymm1, %ymm0, %ymm0
-; X64-AVX2-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
-; X64-AVX2-NEXT:    vpminsw %ymm1, %ymm0, %ymm0
-; X64-AVX2-NEXT:    vpsrld $16, %xmm0, %xmm1
-; X64-AVX2-NEXT:    vpminsw %ymm1, %ymm0, %ymm0
+; X64-AVX2-NEXT:    vpminsw %xmm1, %xmm0, %xmm0
+; X64-AVX2-NEXT:    vmovdqa {{.*#+}} xmm1 = [32768,32768,32768,32768,32768,32768,32768,32768]
+; X64-AVX2-NEXT:    vpxor %xmm1, %xmm0, %xmm0
+; X64-AVX2-NEXT:    vphminposuw %xmm0, %xmm0
+; X64-AVX2-NEXT:    vpxor %xmm1, %xmm0, %xmm0
 ; X64-AVX2-NEXT:    vmovd %xmm0, %eax
-; X64-AVX2-NEXT:    ## kill: %AX<def> %AX<kill> %EAX<kill>
+; X64-AVX2-NEXT:    ## kill: def %ax killed %ax killed %eax
 ; X64-AVX2-NEXT:    vzeroupper
 ; X64-AVX2-NEXT:    retq
 ;
 ; X64-AVX512-LABEL: test_reduce_v16i16:
-; X64-AVX512:       ## BB#0:
+; X64-AVX512:       ## %bb.0:
 ; X64-AVX512-NEXT:    vextracti128 $1, %ymm0, %xmm1
-; X64-AVX512-NEXT:    vpminsw %ymm1, %ymm0, %ymm0
-; X64-AVX512-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X64-AVX512-NEXT:    vpminsw %ymm1, %ymm0, %ymm0
-; X64-AVX512-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
-; X64-AVX512-NEXT:    vpminsw %ymm1, %ymm0, %ymm0
-; X64-AVX512-NEXT:    vpsrld $16, %xmm0, %xmm1
-; X64-AVX512-NEXT:    vpminsw %ymm1, %ymm0, %ymm0
+; X64-AVX512-NEXT:    vpminsw %xmm1, %xmm0, %xmm0
+; X64-AVX512-NEXT:    vmovdqa {{.*#+}} xmm1 = [32768,32768,32768,32768,32768,32768,32768,32768]
+; X64-AVX512-NEXT:    vpxor %xmm1, %xmm0, %xmm0
+; X64-AVX512-NEXT:    vphminposuw %xmm0, %xmm0
+; X64-AVX512-NEXT:    vpxor %xmm1, %xmm0, %xmm0
 ; X64-AVX512-NEXT:    vmovd %xmm0, %eax
-; X64-AVX512-NEXT:    ## kill: %AX<def> %AX<kill> %EAX<kill>
+; X64-AVX512-NEXT:    ## kill: def %ax killed %ax killed %eax
 ; X64-AVX512-NEXT:    vzeroupper
 ; X64-AVX512-NEXT:    retq
   %1  = shufflevector <16 x i16> %a0, <16 x i16> undef, <16 x i32> <i32 8, i32 9, i32 10, i32 11, i32 12, i32 13, i32 14, i32 15, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef>
@@ -843,7 +861,7 @@ define i16 @test_reduce_v16i16(<16 x i16> %a0) {
 
 define i8 @test_reduce_v32i8(<32 x i8> %a0) {
 ; X86-SSE2-LABEL: test_reduce_v32i8:
-; X86-SSE2:       ## BB#0:
+; X86-SSE2:       ## %bb.0:
 ; X86-SSE2-NEXT:    movdqa %xmm1, %xmm2
 ; X86-SSE2-NEXT:    pcmpgtb %xmm0, %xmm2
 ; X86-SSE2-NEXT:    pand %xmm2, %xmm0
@@ -876,62 +894,55 @@ define i8 @test_reduce_v32i8(<32 x i8> %a0) {
 ; X86-SSE2-NEXT:    pandn %xmm0, %xmm2
 ; X86-SSE2-NEXT:    por %xmm1, %xmm2
 ; X86-SSE2-NEXT:    movd %xmm2, %eax
-; X86-SSE2-NEXT:    ## kill: %AL<def> %AL<kill> %EAX<kill>
+; X86-SSE2-NEXT:    ## kill: def %al killed %al killed %eax
 ; X86-SSE2-NEXT:    retl
 ;
 ; X86-SSE42-LABEL: test_reduce_v32i8:
-; X86-SSE42:       ## BB#0:
+; X86-SSE42:       ## %bb.0:
 ; X86-SSE42-NEXT:    pminsb %xmm1, %xmm0
-; X86-SSE42-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X86-SSE42-NEXT:    pminsb %xmm0, %xmm1
-; X86-SSE42-NEXT:    pshufd {{.*#+}} xmm0 = xmm1[1,1,2,3]
-; X86-SSE42-NEXT:    pminsb %xmm1, %xmm0
-; X86-SSE42-NEXT:    movdqa %xmm0, %xmm1
-; X86-SSE42-NEXT:    psrld $16, %xmm1
-; X86-SSE42-NEXT:    pminsb %xmm0, %xmm1
-; X86-SSE42-NEXT:    movdqa %xmm1, %xmm0
-; X86-SSE42-NEXT:    psrlw $8, %xmm0
-; X86-SSE42-NEXT:    pminsb %xmm1, %xmm0
+; X86-SSE42-NEXT:    movdqa {{.*#+}} xmm1 = [128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]
+; X86-SSE42-NEXT:    pxor %xmm1, %xmm0
+; X86-SSE42-NEXT:    movdqa %xmm0, %xmm2
+; X86-SSE42-NEXT:    psrlw $8, %xmm2
+; X86-SSE42-NEXT:    pminub %xmm0, %xmm2
+; X86-SSE42-NEXT:    phminposuw %xmm2, %xmm0
+; X86-SSE42-NEXT:    pxor %xmm1, %xmm0
 ; X86-SSE42-NEXT:    pextrb $0, %xmm0, %eax
-; X86-SSE42-NEXT:    ## kill: %AL<def> %AL<kill> %EAX<kill>
+; X86-SSE42-NEXT:    ## kill: def %al killed %al killed %eax
 ; X86-SSE42-NEXT:    retl
 ;
 ; X86-AVX1-LABEL: test_reduce_v32i8:
-; X86-AVX1:       ## BB#0:
+; X86-AVX1:       ## %bb.0:
 ; X86-AVX1-NEXT:    vextractf128 $1, %ymm0, %xmm1
 ; X86-AVX1-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
-; X86-AVX1-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X86-AVX1-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
-; X86-AVX1-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
-; X86-AVX1-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
-; X86-AVX1-NEXT:    vpsrld $16, %xmm0, %xmm1
-; X86-AVX1-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
-; X86-AVX1-NEXT:    vpsrlw $8, %xmm0, %xmm1
-; X86-AVX1-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
+; X86-AVX1-NEXT:    vmovdqa {{.*#+}} xmm1 = [128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]
+; X86-AVX1-NEXT:    vpxor %xmm1, %xmm0, %xmm0
+; X86-AVX1-NEXT:    vpsrlw $8, %xmm0, %xmm2
+; X86-AVX1-NEXT:    vpminub %xmm2, %xmm0, %xmm0
+; X86-AVX1-NEXT:    vphminposuw %xmm0, %xmm0
+; X86-AVX1-NEXT:    vpxor %xmm1, %xmm0, %xmm0
 ; X86-AVX1-NEXT:    vpextrb $0, %xmm0, %eax
-; X86-AVX1-NEXT:    ## kill: %AL<def> %AL<kill> %EAX<kill>
+; X86-AVX1-NEXT:    ## kill: def %al killed %al killed %eax
 ; X86-AVX1-NEXT:    vzeroupper
 ; X86-AVX1-NEXT:    retl
 ;
 ; X86-AVX2-LABEL: test_reduce_v32i8:
-; X86-AVX2:       ## BB#0:
+; X86-AVX2:       ## %bb.0:
 ; X86-AVX2-NEXT:    vextracti128 $1, %ymm0, %xmm1
-; X86-AVX2-NEXT:    vpminsb %ymm1, %ymm0, %ymm0
-; X86-AVX2-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X86-AVX2-NEXT:    vpminsb %ymm1, %ymm0, %ymm0
-; X86-AVX2-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
-; X86-AVX2-NEXT:    vpminsb %ymm1, %ymm0, %ymm0
-; X86-AVX2-NEXT:    vpsrld $16, %xmm0, %xmm1
-; X86-AVX2-NEXT:    vpminsb %ymm1, %ymm0, %ymm0
-; X86-AVX2-NEXT:    vpsrlw $8, %xmm0, %xmm1
-; X86-AVX2-NEXT:    vpminsb %ymm1, %ymm0, %ymm0
+; X86-AVX2-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
+; X86-AVX2-NEXT:    vmovdqa {{.*#+}} xmm1 = [128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]
+; X86-AVX2-NEXT:    vpxor %xmm1, %xmm0, %xmm0
+; X86-AVX2-NEXT:    vpsrlw $8, %xmm0, %xmm2
+; X86-AVX2-NEXT:    vpminub %xmm2, %xmm0, %xmm0
+; X86-AVX2-NEXT:    vphminposuw %xmm0, %xmm0
+; X86-AVX2-NEXT:    vpxor %xmm1, %xmm0, %xmm0
 ; X86-AVX2-NEXT:    vpextrb $0, %xmm0, %eax
-; X86-AVX2-NEXT:    ## kill: %AL<def> %AL<kill> %EAX<kill>
+; X86-AVX2-NEXT:    ## kill: def %al killed %al killed %eax
 ; X86-AVX2-NEXT:    vzeroupper
 ; X86-AVX2-NEXT:    retl
 ;
 ; X64-SSE2-LABEL: test_reduce_v32i8:
-; X64-SSE2:       ## BB#0:
+; X64-SSE2:       ## %bb.0:
 ; X64-SSE2-NEXT:    movdqa %xmm1, %xmm2
 ; X64-SSE2-NEXT:    pcmpgtb %xmm0, %xmm2
 ; X64-SSE2-NEXT:    pand %xmm2, %xmm0
@@ -964,74 +975,65 @@ define i8 @test_reduce_v32i8(<32 x i8> %a0) {
 ; X64-SSE2-NEXT:    pandn %xmm0, %xmm2
 ; X64-SSE2-NEXT:    por %xmm1, %xmm2
 ; X64-SSE2-NEXT:    movd %xmm2, %eax
-; X64-SSE2-NEXT:    ## kill: %AL<def> %AL<kill> %EAX<kill>
+; X64-SSE2-NEXT:    ## kill: def %al killed %al killed %eax
 ; X64-SSE2-NEXT:    retq
 ;
 ; X64-SSE42-LABEL: test_reduce_v32i8:
-; X64-SSE42:       ## BB#0:
+; X64-SSE42:       ## %bb.0:
 ; X64-SSE42-NEXT:    pminsb %xmm1, %xmm0
-; X64-SSE42-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X64-SSE42-NEXT:    pminsb %xmm0, %xmm1
-; X64-SSE42-NEXT:    pshufd {{.*#+}} xmm0 = xmm1[1,1,2,3]
-; X64-SSE42-NEXT:    pminsb %xmm1, %xmm0
-; X64-SSE42-NEXT:    movdqa %xmm0, %xmm1
-; X64-SSE42-NEXT:    psrld $16, %xmm1
-; X64-SSE42-NEXT:    pminsb %xmm0, %xmm1
-; X64-SSE42-NEXT:    movdqa %xmm1, %xmm0
-; X64-SSE42-NEXT:    psrlw $8, %xmm0
-; X64-SSE42-NEXT:    pminsb %xmm1, %xmm0
+; X64-SSE42-NEXT:    movdqa {{.*#+}} xmm1 = [128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]
+; X64-SSE42-NEXT:    pxor %xmm1, %xmm0
+; X64-SSE42-NEXT:    movdqa %xmm0, %xmm2
+; X64-SSE42-NEXT:    psrlw $8, %xmm2
+; X64-SSE42-NEXT:    pminub %xmm0, %xmm2
+; X64-SSE42-NEXT:    phminposuw %xmm2, %xmm0
+; X64-SSE42-NEXT:    pxor %xmm1, %xmm0
 ; X64-SSE42-NEXT:    pextrb $0, %xmm0, %eax
-; X64-SSE42-NEXT:    ## kill: %AL<def> %AL<kill> %EAX<kill>
+; X64-SSE42-NEXT:    ## kill: def %al killed %al killed %eax
 ; X64-SSE42-NEXT:    retq
 ;
 ; X64-AVX1-LABEL: test_reduce_v32i8:
-; X64-AVX1:       ## BB#0:
+; X64-AVX1:       ## %bb.0:
 ; X64-AVX1-NEXT:    vextractf128 $1, %ymm0, %xmm1
 ; X64-AVX1-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
-; X64-AVX1-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X64-AVX1-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
-; X64-AVX1-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
-; X64-AVX1-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
-; X64-AVX1-NEXT:    vpsrld $16, %xmm0, %xmm1
-; X64-AVX1-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
-; X64-AVX1-NEXT:    vpsrlw $8, %xmm0, %xmm1
-; X64-AVX1-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
+; X64-AVX1-NEXT:    vmovdqa {{.*#+}} xmm1 = [128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]
+; X64-AVX1-NEXT:    vpxor %xmm1, %xmm0, %xmm0
+; X64-AVX1-NEXT:    vpsrlw $8, %xmm0, %xmm2
+; X64-AVX1-NEXT:    vpminub %xmm2, %xmm0, %xmm0
+; X64-AVX1-NEXT:    vphminposuw %xmm0, %xmm0
+; X64-AVX1-NEXT:    vpxor %xmm1, %xmm0, %xmm0
 ; X64-AVX1-NEXT:    vpextrb $0, %xmm0, %eax
-; X64-AVX1-NEXT:    ## kill: %AL<def> %AL<kill> %EAX<kill>
+; X64-AVX1-NEXT:    ## kill: def %al killed %al killed %eax
 ; X64-AVX1-NEXT:    vzeroupper
 ; X64-AVX1-NEXT:    retq
 ;
 ; X64-AVX2-LABEL: test_reduce_v32i8:
-; X64-AVX2:       ## BB#0:
+; X64-AVX2:       ## %bb.0:
 ; X64-AVX2-NEXT:    vextracti128 $1, %ymm0, %xmm1
-; X64-AVX2-NEXT:    vpminsb %ymm1, %ymm0, %ymm0
-; X64-AVX2-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X64-AVX2-NEXT:    vpminsb %ymm1, %ymm0, %ymm0
-; X64-AVX2-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
-; X64-AVX2-NEXT:    vpminsb %ymm1, %ymm0, %ymm0
-; X64-AVX2-NEXT:    vpsrld $16, %xmm0, %xmm1
-; X64-AVX2-NEXT:    vpminsb %ymm1, %ymm0, %ymm0
-; X64-AVX2-NEXT:    vpsrlw $8, %xmm0, %xmm1
-; X64-AVX2-NEXT:    vpminsb %ymm1, %ymm0, %ymm0
+; X64-AVX2-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
+; X64-AVX2-NEXT:    vmovdqa {{.*#+}} xmm1 = [128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]
+; X64-AVX2-NEXT:    vpxor %xmm1, %xmm0, %xmm0
+; X64-AVX2-NEXT:    vpsrlw $8, %xmm0, %xmm2
+; X64-AVX2-NEXT:    vpminub %xmm2, %xmm0, %xmm0
+; X64-AVX2-NEXT:    vphminposuw %xmm0, %xmm0
+; X64-AVX2-NEXT:    vpxor %xmm1, %xmm0, %xmm0
 ; X64-AVX2-NEXT:    vpextrb $0, %xmm0, %eax
-; X64-AVX2-NEXT:    ## kill: %AL<def> %AL<kill> %EAX<kill>
+; X64-AVX2-NEXT:    ## kill: def %al killed %al killed %eax
 ; X64-AVX2-NEXT:    vzeroupper
 ; X64-AVX2-NEXT:    retq
 ;
 ; X64-AVX512-LABEL: test_reduce_v32i8:
-; X64-AVX512:       ## BB#0:
+; X64-AVX512:       ## %bb.0:
 ; X64-AVX512-NEXT:    vextracti128 $1, %ymm0, %xmm1
-; X64-AVX512-NEXT:    vpminsb %ymm1, %ymm0, %ymm0
-; X64-AVX512-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X64-AVX512-NEXT:    vpminsb %ymm1, %ymm0, %ymm0
-; X64-AVX512-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
-; X64-AVX512-NEXT:    vpminsb %ymm1, %ymm0, %ymm0
-; X64-AVX512-NEXT:    vpsrld $16, %xmm0, %xmm1
-; X64-AVX512-NEXT:    vpminsb %ymm1, %ymm0, %ymm0
-; X64-AVX512-NEXT:    vpsrlw $8, %xmm0, %xmm1
-; X64-AVX512-NEXT:    vpminsb %ymm1, %ymm0, %ymm0
+; X64-AVX512-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
+; X64-AVX512-NEXT:    vmovdqa {{.*#+}} xmm1 = [128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]
+; X64-AVX512-NEXT:    vpxor %xmm1, %xmm0, %xmm0
+; X64-AVX512-NEXT:    vpsrlw $8, %xmm0, %xmm2
+; X64-AVX512-NEXT:    vpminub %xmm2, %xmm0, %xmm0
+; X64-AVX512-NEXT:    vphminposuw %xmm0, %xmm0
+; X64-AVX512-NEXT:    vpxor %xmm1, %xmm0, %xmm0
 ; X64-AVX512-NEXT:    vpextrb $0, %xmm0, %eax
-; X64-AVX512-NEXT:    ## kill: %AL<def> %AL<kill> %EAX<kill>
+; X64-AVX512-NEXT:    ## kill: def %al killed %al killed %eax
 ; X64-AVX512-NEXT:    vzeroupper
 ; X64-AVX512-NEXT:    retq
   %1  = shufflevector <32 x i8> %a0, <32 x i8> undef, <32 x i32> <i32 16, i32 17, i32 18, i32 19, i32 20, i32 21, i32 22, i32 23, i32 24, i32 25, i32 26, i32 27, i32 28, i32 29, i32 30, i32 31, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef>
@@ -1059,7 +1061,7 @@ define i8 @test_reduce_v32i8(<32 x i8> %a0) {
 
 define i64 @test_reduce_v8i64(<8 x i64> %a0) {
 ; X86-SSE2-LABEL: test_reduce_v8i64:
-; X86-SSE2:       ## BB#0:
+; X86-SSE2:       ## %bb.0:
 ; X86-SSE2-NEXT:    subl $28, %esp
 ; X86-SSE2-NEXT:    .cfi_def_cfa_offset 32
 ; X86-SSE2-NEXT:    movdqa %xmm2, %xmm6
@@ -1132,7 +1134,7 @@ define i64 @test_reduce_v8i64(<8 x i64> %a0) {
 ; X86-SSE2-NEXT:    retl
 ;
 ; X86-SSE42-LABEL: test_reduce_v8i64:
-; X86-SSE42:       ## BB#0:
+; X86-SSE42:       ## %bb.0:
 ; X86-SSE42-NEXT:    movdqa %xmm0, %xmm4
 ; X86-SSE42-NEXT:    movdqa %xmm3, %xmm5
 ; X86-SSE42-NEXT:    pcmpgtq %xmm1, %xmm5
@@ -1153,7 +1155,7 @@ define i64 @test_reduce_v8i64(<8 x i64> %a0) {
 ; X86-SSE42-NEXT:    retl
 ;
 ; X86-AVX1-LABEL: test_reduce_v8i64:
-; X86-AVX1:       ## BB#0:
+; X86-AVX1:       ## %bb.0:
 ; X86-AVX1-NEXT:    vextractf128 $1, %ymm0, %xmm2
 ; X86-AVX1-NEXT:    vextractf128 $1, %ymm1, %xmm3
 ; X86-AVX1-NEXT:    vpcmpgtq %xmm2, %xmm3, %xmm2
@@ -1177,7 +1179,7 @@ define i64 @test_reduce_v8i64(<8 x i64> %a0) {
 ; X86-AVX1-NEXT:    retl
 ;
 ; X86-AVX2-LABEL: test_reduce_v8i64:
-; X86-AVX2:       ## BB#0:
+; X86-AVX2:       ## %bb.0:
 ; X86-AVX2-NEXT:    vpcmpgtq %ymm0, %ymm1, %ymm2
 ; X86-AVX2-NEXT:    vblendvpd %ymm2, %ymm0, %ymm1, %ymm0
 ; X86-AVX2-NEXT:    vextractf128 $1, %ymm0, %xmm1
@@ -1192,7 +1194,7 @@ define i64 @test_reduce_v8i64(<8 x i64> %a0) {
 ; X86-AVX2-NEXT:    retl
 ;
 ; X64-SSE2-LABEL: test_reduce_v8i64:
-; X64-SSE2:       ## BB#0:
+; X64-SSE2:       ## %bb.0:
 ; X64-SSE2-NEXT:    movdqa {{.*#+}} xmm9 = [2147483648,0,2147483648,0]
 ; X64-SSE2-NEXT:    movdqa %xmm0, %xmm5
 ; X64-SSE2-NEXT:    pxor %xmm9, %xmm5
@@ -1258,7 +1260,7 @@ define i64 @test_reduce_v8i64(<8 x i64> %a0) {
 ; X64-SSE2-NEXT:    retq
 ;
 ; X64-SSE42-LABEL: test_reduce_v8i64:
-; X64-SSE42:       ## BB#0:
+; X64-SSE42:       ## %bb.0:
 ; X64-SSE42-NEXT:    movdqa %xmm0, %xmm4
 ; X64-SSE42-NEXT:    movdqa %xmm3, %xmm5
 ; X64-SSE42-NEXT:    pcmpgtq %xmm1, %xmm5
@@ -1278,7 +1280,7 @@ define i64 @test_reduce_v8i64(<8 x i64> %a0) {
 ; X64-SSE42-NEXT:    retq
 ;
 ; X64-AVX1-LABEL: test_reduce_v8i64:
-; X64-AVX1:       ## BB#0:
+; X64-AVX1:       ## %bb.0:
 ; X64-AVX1-NEXT:    vextractf128 $1, %ymm0, %xmm2
 ; X64-AVX1-NEXT:    vextractf128 $1, %ymm1, %xmm3
 ; X64-AVX1-NEXT:    vpcmpgtq %xmm2, %xmm3, %xmm2
@@ -1301,7 +1303,7 @@ define i64 @test_reduce_v8i64(<8 x i64> %a0) {
 ; X64-AVX1-NEXT:    retq
 ;
 ; X64-AVX2-LABEL: test_reduce_v8i64:
-; X64-AVX2:       ## BB#0:
+; X64-AVX2:       ## %bb.0:
 ; X64-AVX2-NEXT:    vpcmpgtq %ymm0, %ymm1, %ymm2
 ; X64-AVX2-NEXT:    vblendvpd %ymm2, %ymm0, %ymm1, %ymm0
 ; X64-AVX2-NEXT:    vextractf128 $1, %ymm0, %xmm1
@@ -1315,7 +1317,7 @@ define i64 @test_reduce_v8i64(<8 x i64> %a0) {
 ; X64-AVX2-NEXT:    retq
 ;
 ; X64-AVX512-LABEL: test_reduce_v8i64:
-; X64-AVX512:       ## BB#0:
+; X64-AVX512:       ## %bb.0:
 ; X64-AVX512-NEXT:    vextracti64x4 $1, %zmm0, %ymm1
 ; X64-AVX512-NEXT:    vpminsq %zmm1, %zmm0, %zmm0
 ; X64-AVX512-NEXT:    vextracti128 $1, %ymm0, %xmm1
@@ -1340,7 +1342,7 @@ define i64 @test_reduce_v8i64(<8 x i64> %a0) {
 
 define i32 @test_reduce_v16i32(<16 x i32> %a0) {
 ; X86-SSE2-LABEL: test_reduce_v16i32:
-; X86-SSE2:       ## BB#0:
+; X86-SSE2:       ## %bb.0:
 ; X86-SSE2-NEXT:    movdqa %xmm3, %xmm4
 ; X86-SSE2-NEXT:    pcmpgtd %xmm1, %xmm4
 ; X86-SSE2-NEXT:    movdqa %xmm2, %xmm5
@@ -1372,7 +1374,7 @@ define i32 @test_reduce_v16i32(<16 x i32> %a0) {
 ; X86-SSE2-NEXT:    retl
 ;
 ; X86-SSE42-LABEL: test_reduce_v16i32:
-; X86-SSE42:       ## BB#0:
+; X86-SSE42:       ## %bb.0:
 ; X86-SSE42-NEXT:    pminsd %xmm3, %xmm1
 ; X86-SSE42-NEXT:    pminsd %xmm2, %xmm0
 ; X86-SSE42-NEXT:    pminsd %xmm1, %xmm0
@@ -1384,7 +1386,7 @@ define i32 @test_reduce_v16i32(<16 x i32> %a0) {
 ; X86-SSE42-NEXT:    retl
 ;
 ; X86-AVX1-LABEL: test_reduce_v16i32:
-; X86-AVX1:       ## BB#0:
+; X86-AVX1:       ## %bb.0:
 ; X86-AVX1-NEXT:    vextractf128 $1, %ymm1, %xmm2
 ; X86-AVX1-NEXT:    vextractf128 $1, %ymm0, %xmm3
 ; X86-AVX1-NEXT:    vpminsd %xmm2, %xmm3, %xmm2
@@ -1399,7 +1401,7 @@ define i32 @test_reduce_v16i32(<16 x i32> %a0) {
 ; X86-AVX1-NEXT:    retl
 ;
 ; X86-AVX2-LABEL: test_reduce_v16i32:
-; X86-AVX2:       ## BB#0:
+; X86-AVX2:       ## %bb.0:
 ; X86-AVX2-NEXT:    vpminsd %ymm1, %ymm0, %ymm0
 ; X86-AVX2-NEXT:    vextracti128 $1, %ymm0, %xmm1
 ; X86-AVX2-NEXT:    vpminsd %ymm1, %ymm0, %ymm0
@@ -1412,7 +1414,7 @@ define i32 @test_reduce_v16i32(<16 x i32> %a0) {
 ; X86-AVX2-NEXT:    retl
 ;
 ; X64-SSE2-LABEL: test_reduce_v16i32:
-; X64-SSE2:       ## BB#0:
+; X64-SSE2:       ## %bb.0:
 ; X64-SSE2-NEXT:    movdqa %xmm3, %xmm4
 ; X64-SSE2-NEXT:    pcmpgtd %xmm1, %xmm4
 ; X64-SSE2-NEXT:    movdqa %xmm2, %xmm5
@@ -1444,7 +1446,7 @@ define i32 @test_reduce_v16i32(<16 x i32> %a0) {
 ; X64-SSE2-NEXT:    retq
 ;
 ; X64-SSE42-LABEL: test_reduce_v16i32:
-; X64-SSE42:       ## BB#0:
+; X64-SSE42:       ## %bb.0:
 ; X64-SSE42-NEXT:    pminsd %xmm3, %xmm1
 ; X64-SSE42-NEXT:    pminsd %xmm2, %xmm0
 ; X64-SSE42-NEXT:    pminsd %xmm1, %xmm0
@@ -1456,7 +1458,7 @@ define i32 @test_reduce_v16i32(<16 x i32> %a0) {
 ; X64-SSE42-NEXT:    retq
 ;
 ; X64-AVX1-LABEL: test_reduce_v16i32:
-; X64-AVX1:       ## BB#0:
+; X64-AVX1:       ## %bb.0:
 ; X64-AVX1-NEXT:    vextractf128 $1, %ymm1, %xmm2
 ; X64-AVX1-NEXT:    vextractf128 $1, %ymm0, %xmm3
 ; X64-AVX1-NEXT:    vpminsd %xmm2, %xmm3, %xmm2
@@ -1471,7 +1473,7 @@ define i32 @test_reduce_v16i32(<16 x i32> %a0) {
 ; X64-AVX1-NEXT:    retq
 ;
 ; X64-AVX2-LABEL: test_reduce_v16i32:
-; X64-AVX2:       ## BB#0:
+; X64-AVX2:       ## %bb.0:
 ; X64-AVX2-NEXT:    vpminsd %ymm1, %ymm0, %ymm0
 ; X64-AVX2-NEXT:    vextracti128 $1, %ymm0, %xmm1
 ; X64-AVX2-NEXT:    vpminsd %ymm1, %ymm0, %ymm0
@@ -1484,7 +1486,7 @@ define i32 @test_reduce_v16i32(<16 x i32> %a0) {
 ; X64-AVX2-NEXT:    retq
 ;
 ; X64-AVX512-LABEL: test_reduce_v16i32:
-; X64-AVX512:       ## BB#0:
+; X64-AVX512:       ## %bb.0:
 ; X64-AVX512-NEXT:    vextracti64x4 $1, %zmm0, %ymm1
 ; X64-AVX512-NEXT:    vpminsd %zmm1, %zmm0, %zmm0
 ; X64-AVX512-NEXT:    vextracti128 $1, %ymm0, %xmm1
@@ -1513,120 +1515,136 @@ define i32 @test_reduce_v16i32(<16 x i32> %a0) {
 }
 
 define i16 @test_reduce_v32i16(<32 x i16> %a0) {
-; X86-SSE-LABEL: test_reduce_v32i16:
-; X86-SSE:       ## BB#0:
-; X86-SSE-NEXT:    pminsw %xmm3, %xmm1
-; X86-SSE-NEXT:    pminsw %xmm2, %xmm0
-; X86-SSE-NEXT:    pminsw %xmm1, %xmm0
-; X86-SSE-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X86-SSE-NEXT:    pminsw %xmm0, %xmm1
-; X86-SSE-NEXT:    pshufd {{.*#+}} xmm0 = xmm1[1,1,2,3]
-; X86-SSE-NEXT:    pminsw %xmm1, %xmm0
-; X86-SSE-NEXT:    movdqa %xmm0, %xmm1
-; X86-SSE-NEXT:    psrld $16, %xmm1
-; X86-SSE-NEXT:    pminsw %xmm0, %xmm1
-; X86-SSE-NEXT:    movd %xmm1, %eax
-; X86-SSE-NEXT:    ## kill: %AX<def> %AX<kill> %EAX<kill>
-; X86-SSE-NEXT:    retl
+; X86-SSE2-LABEL: test_reduce_v32i16:
+; X86-SSE2:       ## %bb.0:
+; X86-SSE2-NEXT:    pminsw %xmm3, %xmm1
+; X86-SSE2-NEXT:    pminsw %xmm2, %xmm0
+; X86-SSE2-NEXT:    pminsw %xmm1, %xmm0
+; X86-SSE2-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
+; X86-SSE2-NEXT:    pminsw %xmm0, %xmm1
+; X86-SSE2-NEXT:    pshufd {{.*#+}} xmm0 = xmm1[1,1,2,3]
+; X86-SSE2-NEXT:    pminsw %xmm1, %xmm0
+; X86-SSE2-NEXT:    movdqa %xmm0, %xmm1
+; X86-SSE2-NEXT:    psrld $16, %xmm1
+; X86-SSE2-NEXT:    pminsw %xmm0, %xmm1
+; X86-SSE2-NEXT:    movd %xmm1, %eax
+; X86-SSE2-NEXT:    ## kill: def %ax killed %ax killed %eax
+; X86-SSE2-NEXT:    retl
+;
+; X86-SSE42-LABEL: test_reduce_v32i16:
+; X86-SSE42:       ## %bb.0:
+; X86-SSE42-NEXT:    pminsw %xmm3, %xmm1
+; X86-SSE42-NEXT:    pminsw %xmm2, %xmm0
+; X86-SSE42-NEXT:    pminsw %xmm1, %xmm0
+; X86-SSE42-NEXT:    movdqa {{.*#+}} xmm1 = [32768,32768,32768,32768,32768,32768,32768,32768]
+; X86-SSE42-NEXT:    pxor %xmm1, %xmm0
+; X86-SSE42-NEXT:    phminposuw %xmm0, %xmm0
+; X86-SSE42-NEXT:    pxor %xmm1, %xmm0
+; X86-SSE42-NEXT:    movd %xmm0, %eax
+; X86-SSE42-NEXT:    ## kill: def %ax killed %ax killed %eax
+; X86-SSE42-NEXT:    retl
 ;
 ; X86-AVX1-LABEL: test_reduce_v32i16:
-; X86-AVX1:       ## BB#0:
+; X86-AVX1:       ## %bb.0:
 ; X86-AVX1-NEXT:    vextractf128 $1, %ymm1, %xmm2
 ; X86-AVX1-NEXT:    vextractf128 $1, %ymm0, %xmm3
 ; X86-AVX1-NEXT:    vpminsw %xmm2, %xmm3, %xmm2
 ; X86-AVX1-NEXT:    vpminsw %xmm1, %xmm0, %xmm0
 ; X86-AVX1-NEXT:    vpminsw %xmm2, %xmm0, %xmm0
-; X86-AVX1-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X86-AVX1-NEXT:    vpminsw %xmm1, %xmm0, %xmm0
-; X86-AVX1-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
-; X86-AVX1-NEXT:    vpminsw %xmm1, %xmm0, %xmm0
-; X86-AVX1-NEXT:    vpsrld $16, %xmm0, %xmm1
-; X86-AVX1-NEXT:    vpminsw %xmm1, %xmm0, %xmm0
+; X86-AVX1-NEXT:    vmovdqa {{.*#+}} xmm1 = [32768,32768,32768,32768,32768,32768,32768,32768]
+; X86-AVX1-NEXT:    vpxor %xmm1, %xmm0, %xmm0
+; X86-AVX1-NEXT:    vphminposuw %xmm0, %xmm0
+; X86-AVX1-NEXT:    vpxor %xmm1, %xmm0, %xmm0
 ; X86-AVX1-NEXT:    vmovd %xmm0, %eax
-; X86-AVX1-NEXT:    ## kill: %AX<def> %AX<kill> %EAX<kill>
+; X86-AVX1-NEXT:    ## kill: def %ax killed %ax killed %eax
 ; X86-AVX1-NEXT:    vzeroupper
 ; X86-AVX1-NEXT:    retl
 ;
 ; X86-AVX2-LABEL: test_reduce_v32i16:
-; X86-AVX2:       ## BB#0:
+; X86-AVX2:       ## %bb.0:
 ; X86-AVX2-NEXT:    vpminsw %ymm1, %ymm0, %ymm0
 ; X86-AVX2-NEXT:    vextracti128 $1, %ymm0, %xmm1
-; X86-AVX2-NEXT:    vpminsw %ymm1, %ymm0, %ymm0
-; X86-AVX2-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X86-AVX2-NEXT:    vpminsw %ymm1, %ymm0, %ymm0
-; X86-AVX2-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
-; X86-AVX2-NEXT:    vpminsw %ymm1, %ymm0, %ymm0
-; X86-AVX2-NEXT:    vpsrld $16, %xmm0, %xmm1
-; X86-AVX2-NEXT:    vpminsw %ymm1, %ymm0, %ymm0
+; X86-AVX2-NEXT:    vpminsw %xmm1, %xmm0, %xmm0
+; X86-AVX2-NEXT:    vmovdqa {{.*#+}} xmm1 = [32768,32768,32768,32768,32768,32768,32768,32768]
+; X86-AVX2-NEXT:    vpxor %xmm1, %xmm0, %xmm0
+; X86-AVX2-NEXT:    vphminposuw %xmm0, %xmm0
+; X86-AVX2-NEXT:    vpxor %xmm1, %xmm0, %xmm0
 ; X86-AVX2-NEXT:    vmovd %xmm0, %eax
-; X86-AVX2-NEXT:    ## kill: %AX<def> %AX<kill> %EAX<kill>
+; X86-AVX2-NEXT:    ## kill: def %ax killed %ax killed %eax
 ; X86-AVX2-NEXT:    vzeroupper
 ; X86-AVX2-NEXT:    retl
 ;
-; X64-SSE-LABEL: test_reduce_v32i16:
-; X64-SSE:       ## BB#0:
-; X64-SSE-NEXT:    pminsw %xmm3, %xmm1
-; X64-SSE-NEXT:    pminsw %xmm2, %xmm0
-; X64-SSE-NEXT:    pminsw %xmm1, %xmm0
-; X64-SSE-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X64-SSE-NEXT:    pminsw %xmm0, %xmm1
-; X64-SSE-NEXT:    pshufd {{.*#+}} xmm0 = xmm1[1,1,2,3]
-; X64-SSE-NEXT:    pminsw %xmm1, %xmm0
-; X64-SSE-NEXT:    movdqa %xmm0, %xmm1
-; X64-SSE-NEXT:    psrld $16, %xmm1
-; X64-SSE-NEXT:    pminsw %xmm0, %xmm1
-; X64-SSE-NEXT:    movd %xmm1, %eax
-; X64-SSE-NEXT:    ## kill: %AX<def> %AX<kill> %EAX<kill>
-; X64-SSE-NEXT:    retq
+; X64-SSE2-LABEL: test_reduce_v32i16:
+; X64-SSE2:       ## %bb.0:
+; X64-SSE2-NEXT:    pminsw %xmm3, %xmm1
+; X64-SSE2-NEXT:    pminsw %xmm2, %xmm0
+; X64-SSE2-NEXT:    pminsw %xmm1, %xmm0
+; X64-SSE2-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
+; X64-SSE2-NEXT:    pminsw %xmm0, %xmm1
+; X64-SSE2-NEXT:    pshufd {{.*#+}} xmm0 = xmm1[1,1,2,3]
+; X64-SSE2-NEXT:    pminsw %xmm1, %xmm0
+; X64-SSE2-NEXT:    movdqa %xmm0, %xmm1
+; X64-SSE2-NEXT:    psrld $16, %xmm1
+; X64-SSE2-NEXT:    pminsw %xmm0, %xmm1
+; X64-SSE2-NEXT:    movd %xmm1, %eax
+; X64-SSE2-NEXT:    ## kill: def %ax killed %ax killed %eax
+; X64-SSE2-NEXT:    retq
+;
+; X64-SSE42-LABEL: test_reduce_v32i16:
+; X64-SSE42:       ## %bb.0:
+; X64-SSE42-NEXT:    pminsw %xmm3, %xmm1
+; X64-SSE42-NEXT:    pminsw %xmm2, %xmm0
+; X64-SSE42-NEXT:    pminsw %xmm1, %xmm0
+; X64-SSE42-NEXT:    movdqa {{.*#+}} xmm1 = [32768,32768,32768,32768,32768,32768,32768,32768]
+; X64-SSE42-NEXT:    pxor %xmm1, %xmm0
+; X64-SSE42-NEXT:    phminposuw %xmm0, %xmm0
+; X64-SSE42-NEXT:    pxor %xmm1, %xmm0
+; X64-SSE42-NEXT:    movd %xmm0, %eax
+; X64-SSE42-NEXT:    ## kill: def %ax killed %ax killed %eax
+; X64-SSE42-NEXT:    retq
 ;
 ; X64-AVX1-LABEL: test_reduce_v32i16:
-; X64-AVX1:       ## BB#0:
+; X64-AVX1:       ## %bb.0:
 ; X64-AVX1-NEXT:    vextractf128 $1, %ymm1, %xmm2
 ; X64-AVX1-NEXT:    vextractf128 $1, %ymm0, %xmm3
 ; X64-AVX1-NEXT:    vpminsw %xmm2, %xmm3, %xmm2
 ; X64-AVX1-NEXT:    vpminsw %xmm1, %xmm0, %xmm0
 ; X64-AVX1-NEXT:    vpminsw %xmm2, %xmm0, %xmm0
-; X64-AVX1-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X64-AVX1-NEXT:    vpminsw %xmm1, %xmm0, %xmm0
-; X64-AVX1-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
-; X64-AVX1-NEXT:    vpminsw %xmm1, %xmm0, %xmm0
-; X64-AVX1-NEXT:    vpsrld $16, %xmm0, %xmm1
-; X64-AVX1-NEXT:    vpminsw %xmm1, %xmm0, %xmm0
+; X64-AVX1-NEXT:    vmovdqa {{.*#+}} xmm1 = [32768,32768,32768,32768,32768,32768,32768,32768]
+; X64-AVX1-NEXT:    vpxor %xmm1, %xmm0, %xmm0
+; X64-AVX1-NEXT:    vphminposuw %xmm0, %xmm0
+; X64-AVX1-NEXT:    vpxor %xmm1, %xmm0, %xmm0
 ; X64-AVX1-NEXT:    vmovd %xmm0, %eax
-; X64-AVX1-NEXT:    ## kill: %AX<def> %AX<kill> %EAX<kill>
+; X64-AVX1-NEXT:    ## kill: def %ax killed %ax killed %eax
 ; X64-AVX1-NEXT:    vzeroupper
 ; X64-AVX1-NEXT:    retq
 ;
 ; X64-AVX2-LABEL: test_reduce_v32i16:
-; X64-AVX2:       ## BB#0:
+; X64-AVX2:       ## %bb.0:
 ; X64-AVX2-NEXT:    vpminsw %ymm1, %ymm0, %ymm0
 ; X64-AVX2-NEXT:    vextracti128 $1, %ymm0, %xmm1
-; X64-AVX2-NEXT:    vpminsw %ymm1, %ymm0, %ymm0
-; X64-AVX2-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X64-AVX2-NEXT:    vpminsw %ymm1, %ymm0, %ymm0
-; X64-AVX2-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
-; X64-AVX2-NEXT:    vpminsw %ymm1, %ymm0, %ymm0
-; X64-AVX2-NEXT:    vpsrld $16, %xmm0, %xmm1
-; X64-AVX2-NEXT:    vpminsw %ymm1, %ymm0, %ymm0
+; X64-AVX2-NEXT:    vpminsw %xmm1, %xmm0, %xmm0
+; X64-AVX2-NEXT:    vmovdqa {{.*#+}} xmm1 = [32768,32768,32768,32768,32768,32768,32768,32768]
+; X64-AVX2-NEXT:    vpxor %xmm1, %xmm0, %xmm0
+; X64-AVX2-NEXT:    vphminposuw %xmm0, %xmm0
+; X64-AVX2-NEXT:    vpxor %xmm1, %xmm0, %xmm0
 ; X64-AVX2-NEXT:    vmovd %xmm0, %eax
-; X64-AVX2-NEXT:    ## kill: %AX<def> %AX<kill> %EAX<kill>
+; X64-AVX2-NEXT:    ## kill: def %ax killed %ax killed %eax
 ; X64-AVX2-NEXT:    vzeroupper
 ; X64-AVX2-NEXT:    retq
 ;
 ; X64-AVX512-LABEL: test_reduce_v32i16:
-; X64-AVX512:       ## BB#0:
+; X64-AVX512:       ## %bb.0:
 ; X64-AVX512-NEXT:    vextracti64x4 $1, %zmm0, %ymm1
-; X64-AVX512-NEXT:    vpminsw %zmm1, %zmm0, %zmm0
+; X64-AVX512-NEXT:    vpminsw %ymm1, %ymm0, %ymm0
 ; X64-AVX512-NEXT:    vextracti128 $1, %ymm0, %xmm1
-; X64-AVX512-NEXT:    vpminsw %zmm1, %zmm0, %zmm0
-; X64-AVX512-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X64-AVX512-NEXT:    vpminsw %zmm1, %zmm0, %zmm0
-; X64-AVX512-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
-; X64-AVX512-NEXT:    vpminsw %zmm1, %zmm0, %zmm0
-; X64-AVX512-NEXT:    vpsrld $16, %xmm0, %xmm1
-; X64-AVX512-NEXT:    vpminsw %zmm1, %zmm0, %zmm0
+; X64-AVX512-NEXT:    vpminsw %xmm1, %xmm0, %xmm0
+; X64-AVX512-NEXT:    vmovdqa {{.*#+}} xmm1 = [32768,32768,32768,32768,32768,32768,32768,32768]
+; X64-AVX512-NEXT:    vpxor %xmm1, %xmm0, %xmm0
+; X64-AVX512-NEXT:    vphminposuw %xmm0, %xmm0
+; X64-AVX512-NEXT:    vpxor %xmm1, %xmm0, %xmm0
 ; X64-AVX512-NEXT:    vmovd %xmm0, %eax
-; X64-AVX512-NEXT:    ## kill: %AX<def> %AX<kill> %EAX<kill>
+; X64-AVX512-NEXT:    ## kill: def %ax killed %ax killed %eax
 ; X64-AVX512-NEXT:    vzeroupper
 ; X64-AVX512-NEXT:    retq
   %1  = shufflevector <32 x i16> %a0, <32 x i16> undef, <32 x i32> <i32 16, i32 17, i32 18, i32 19, i32 20, i32 21, i32 22, i32 23, i32 24, i32 25, i32 26, i32 27, i32 28, i32 29, i32 30, i32 31, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef>
@@ -1650,7 +1668,7 @@ define i16 @test_reduce_v32i16(<32 x i16> %a0) {
 
 define i8 @test_reduce_v64i8(<64 x i8> %a0) {
 ; X86-SSE2-LABEL: test_reduce_v64i8:
-; X86-SSE2:       ## BB#0:
+; X86-SSE2:       ## %bb.0:
 ; X86-SSE2-NEXT:    movdqa %xmm3, %xmm4
 ; X86-SSE2-NEXT:    pcmpgtb %xmm1, %xmm4
 ; X86-SSE2-NEXT:    movdqa %xmm2, %xmm5
@@ -1693,68 +1711,61 @@ define i8 @test_reduce_v64i8(<64 x i8> %a0) {
 ; X86-SSE2-NEXT:    pandn %xmm0, %xmm1
 ; X86-SSE2-NEXT:    por %xmm2, %xmm1
 ; X86-SSE2-NEXT:    movd %xmm1, %eax
-; X86-SSE2-NEXT:    ## kill: %AL<def> %AL<kill> %EAX<kill>
+; X86-SSE2-NEXT:    ## kill: def %al killed %al killed %eax
 ; X86-SSE2-NEXT:    retl
 ;
 ; X86-SSE42-LABEL: test_reduce_v64i8:
-; X86-SSE42:       ## BB#0:
+; X86-SSE42:       ## %bb.0:
 ; X86-SSE42-NEXT:    pminsb %xmm3, %xmm1
 ; X86-SSE42-NEXT:    pminsb %xmm2, %xmm0
 ; X86-SSE42-NEXT:    pminsb %xmm1, %xmm0
-; X86-SSE42-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X86-SSE42-NEXT:    pminsb %xmm0, %xmm1
-; X86-SSE42-NEXT:    pshufd {{.*#+}} xmm0 = xmm1[1,1,2,3]
-; X86-SSE42-NEXT:    pminsb %xmm1, %xmm0
-; X86-SSE42-NEXT:    movdqa %xmm0, %xmm1
-; X86-SSE42-NEXT:    psrld $16, %xmm1
-; X86-SSE42-NEXT:    pminsb %xmm0, %xmm1
-; X86-SSE42-NEXT:    movdqa %xmm1, %xmm0
-; X86-SSE42-NEXT:    psrlw $8, %xmm0
-; X86-SSE42-NEXT:    pminsb %xmm1, %xmm0
+; X86-SSE42-NEXT:    movdqa {{.*#+}} xmm1 = [128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]
+; X86-SSE42-NEXT:    pxor %xmm1, %xmm0
+; X86-SSE42-NEXT:    movdqa %xmm0, %xmm2
+; X86-SSE42-NEXT:    psrlw $8, %xmm2
+; X86-SSE42-NEXT:    pminub %xmm0, %xmm2
+; X86-SSE42-NEXT:    phminposuw %xmm2, %xmm0
+; X86-SSE42-NEXT:    pxor %xmm1, %xmm0
 ; X86-SSE42-NEXT:    pextrb $0, %xmm0, %eax
-; X86-SSE42-NEXT:    ## kill: %AL<def> %AL<kill> %EAX<kill>
+; X86-SSE42-NEXT:    ## kill: def %al killed %al killed %eax
 ; X86-SSE42-NEXT:    retl
 ;
 ; X86-AVX1-LABEL: test_reduce_v64i8:
-; X86-AVX1:       ## BB#0:
+; X86-AVX1:       ## %bb.0:
 ; X86-AVX1-NEXT:    vextractf128 $1, %ymm1, %xmm2
 ; X86-AVX1-NEXT:    vextractf128 $1, %ymm0, %xmm3
 ; X86-AVX1-NEXT:    vpminsb %xmm2, %xmm3, %xmm2
 ; X86-AVX1-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
 ; X86-AVX1-NEXT:    vpminsb %xmm2, %xmm0, %xmm0
-; X86-AVX1-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X86-AVX1-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
-; X86-AVX1-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
-; X86-AVX1-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
-; X86-AVX1-NEXT:    vpsrld $16, %xmm0, %xmm1
-; X86-AVX1-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
-; X86-AVX1-NEXT:    vpsrlw $8, %xmm0, %xmm1
-; X86-AVX1-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
+; X86-AVX1-NEXT:    vmovdqa {{.*#+}} xmm1 = [128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]
+; X86-AVX1-NEXT:    vpxor %xmm1, %xmm0, %xmm0
+; X86-AVX1-NEXT:    vpsrlw $8, %xmm0, %xmm2
+; X86-AVX1-NEXT:    vpminub %xmm2, %xmm0, %xmm0
+; X86-AVX1-NEXT:    vphminposuw %xmm0, %xmm0
+; X86-AVX1-NEXT:    vpxor %xmm1, %xmm0, %xmm0
 ; X86-AVX1-NEXT:    vpextrb $0, %xmm0, %eax
-; X86-AVX1-NEXT:    ## kill: %AL<def> %AL<kill> %EAX<kill>
+; X86-AVX1-NEXT:    ## kill: def %al killed %al killed %eax
 ; X86-AVX1-NEXT:    vzeroupper
 ; X86-AVX1-NEXT:    retl
 ;
 ; X86-AVX2-LABEL: test_reduce_v64i8:
-; X86-AVX2:       ## BB#0:
+; X86-AVX2:       ## %bb.0:
 ; X86-AVX2-NEXT:    vpminsb %ymm1, %ymm0, %ymm0
 ; X86-AVX2-NEXT:    vextracti128 $1, %ymm0, %xmm1
-; X86-AVX2-NEXT:    vpminsb %ymm1, %ymm0, %ymm0
-; X86-AVX2-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X86-AVX2-NEXT:    vpminsb %ymm1, %ymm0, %ymm0
-; X86-AVX2-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
-; X86-AVX2-NEXT:    vpminsb %ymm1, %ymm0, %ymm0
-; X86-AVX2-NEXT:    vpsrld $16, %xmm0, %xmm1
-; X86-AVX2-NEXT:    vpminsb %ymm1, %ymm0, %ymm0
-; X86-AVX2-NEXT:    vpsrlw $8, %xmm0, %xmm1
-; X86-AVX2-NEXT:    vpminsb %ymm1, %ymm0, %ymm0
+; X86-AVX2-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
+; X86-AVX2-NEXT:    vmovdqa {{.*#+}} xmm1 = [128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]
+; X86-AVX2-NEXT:    vpxor %xmm1, %xmm0, %xmm0
+; X86-AVX2-NEXT:    vpsrlw $8, %xmm0, %xmm2
+; X86-AVX2-NEXT:    vpminub %xmm2, %xmm0, %xmm0
+; X86-AVX2-NEXT:    vphminposuw %xmm0, %xmm0
+; X86-AVX2-NEXT:    vpxor %xmm1, %xmm0, %xmm0
 ; X86-AVX2-NEXT:    vpextrb $0, %xmm0, %eax
-; X86-AVX2-NEXT:    ## kill: %AL<def> %AL<kill> %EAX<kill>
+; X86-AVX2-NEXT:    ## kill: def %al killed %al killed %eax
 ; X86-AVX2-NEXT:    vzeroupper
 ; X86-AVX2-NEXT:    retl
 ;
 ; X64-SSE2-LABEL: test_reduce_v64i8:
-; X64-SSE2:       ## BB#0:
+; X64-SSE2:       ## %bb.0:
 ; X64-SSE2-NEXT:    movdqa %xmm3, %xmm4
 ; X64-SSE2-NEXT:    pcmpgtb %xmm1, %xmm4
 ; X64-SSE2-NEXT:    movdqa %xmm2, %xmm5
@@ -1797,82 +1808,73 @@ define i8 @test_reduce_v64i8(<64 x i8> %a0) {
 ; X64-SSE2-NEXT:    pandn %xmm0, %xmm1
 ; X64-SSE2-NEXT:    por %xmm2, %xmm1
 ; X64-SSE2-NEXT:    movd %xmm1, %eax
-; X64-SSE2-NEXT:    ## kill: %AL<def> %AL<kill> %EAX<kill>
+; X64-SSE2-NEXT:    ## kill: def %al killed %al killed %eax
 ; X64-SSE2-NEXT:    retq
 ;
 ; X64-SSE42-LABEL: test_reduce_v64i8:
-; X64-SSE42:       ## BB#0:
+; X64-SSE42:       ## %bb.0:
 ; X64-SSE42-NEXT:    pminsb %xmm3, %xmm1
 ; X64-SSE42-NEXT:    pminsb %xmm2, %xmm0
 ; X64-SSE42-NEXT:    pminsb %xmm1, %xmm0
-; X64-SSE42-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X64-SSE42-NEXT:    pminsb %xmm0, %xmm1
-; X64-SSE42-NEXT:    pshufd {{.*#+}} xmm0 = xmm1[1,1,2,3]
-; X64-SSE42-NEXT:    pminsb %xmm1, %xmm0
-; X64-SSE42-NEXT:    movdqa %xmm0, %xmm1
-; X64-SSE42-NEXT:    psrld $16, %xmm1
-; X64-SSE42-NEXT:    pminsb %xmm0, %xmm1
-; X64-SSE42-NEXT:    movdqa %xmm1, %xmm0
-; X64-SSE42-NEXT:    psrlw $8, %xmm0
-; X64-SSE42-NEXT:    pminsb %xmm1, %xmm0
+; X64-SSE42-NEXT:    movdqa {{.*#+}} xmm1 = [128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]
+; X64-SSE42-NEXT:    pxor %xmm1, %xmm0
+; X64-SSE42-NEXT:    movdqa %xmm0, %xmm2
+; X64-SSE42-NEXT:    psrlw $8, %xmm2
+; X64-SSE42-NEXT:    pminub %xmm0, %xmm2
+; X64-SSE42-NEXT:    phminposuw %xmm2, %xmm0
+; X64-SSE42-NEXT:    pxor %xmm1, %xmm0
 ; X64-SSE42-NEXT:    pextrb $0, %xmm0, %eax
-; X64-SSE42-NEXT:    ## kill: %AL<def> %AL<kill> %EAX<kill>
+; X64-SSE42-NEXT:    ## kill: def %al killed %al killed %eax
 ; X64-SSE42-NEXT:    retq
 ;
 ; X64-AVX1-LABEL: test_reduce_v64i8:
-; X64-AVX1:       ## BB#0:
+; X64-AVX1:       ## %bb.0:
 ; X64-AVX1-NEXT:    vextractf128 $1, %ymm1, %xmm2
 ; X64-AVX1-NEXT:    vextractf128 $1, %ymm0, %xmm3
 ; X64-AVX1-NEXT:    vpminsb %xmm2, %xmm3, %xmm2
 ; X64-AVX1-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
 ; X64-AVX1-NEXT:    vpminsb %xmm2, %xmm0, %xmm0
-; X64-AVX1-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X64-AVX1-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
-; X64-AVX1-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
-; X64-AVX1-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
-; X64-AVX1-NEXT:    vpsrld $16, %xmm0, %xmm1
-; X64-AVX1-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
-; X64-AVX1-NEXT:    vpsrlw $8, %xmm0, %xmm1
-; X64-AVX1-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
+; X64-AVX1-NEXT:    vmovdqa {{.*#+}} xmm1 = [128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]
+; X64-AVX1-NEXT:    vpxor %xmm1, %xmm0, %xmm0
+; X64-AVX1-NEXT:    vpsrlw $8, %xmm0, %xmm2
+; X64-AVX1-NEXT:    vpminub %xmm2, %xmm0, %xmm0
+; X64-AVX1-NEXT:    vphminposuw %xmm0, %xmm0
+; X64-AVX1-NEXT:    vpxor %xmm1, %xmm0, %xmm0
 ; X64-AVX1-NEXT:    vpextrb $0, %xmm0, %eax
-; X64-AVX1-NEXT:    ## kill: %AL<def> %AL<kill> %EAX<kill>
+; X64-AVX1-NEXT:    ## kill: def %al killed %al killed %eax
 ; X64-AVX1-NEXT:    vzeroupper
 ; X64-AVX1-NEXT:    retq
 ;
 ; X64-AVX2-LABEL: test_reduce_v64i8:
-; X64-AVX2:       ## BB#0:
+; X64-AVX2:       ## %bb.0:
 ; X64-AVX2-NEXT:    vpminsb %ymm1, %ymm0, %ymm0
 ; X64-AVX2-NEXT:    vextracti128 $1, %ymm0, %xmm1
-; X64-AVX2-NEXT:    vpminsb %ymm1, %ymm0, %ymm0
-; X64-AVX2-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X64-AVX2-NEXT:    vpminsb %ymm1, %ymm0, %ymm0
-; X64-AVX2-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
-; X64-AVX2-NEXT:    vpminsb %ymm1, %ymm0, %ymm0
-; X64-AVX2-NEXT:    vpsrld $16, %xmm0, %xmm1
-; X64-AVX2-NEXT:    vpminsb %ymm1, %ymm0, %ymm0
-; X64-AVX2-NEXT:    vpsrlw $8, %xmm0, %xmm1
-; X64-AVX2-NEXT:    vpminsb %ymm1, %ymm0, %ymm0
+; X64-AVX2-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
+; X64-AVX2-NEXT:    vmovdqa {{.*#+}} xmm1 = [128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]
+; X64-AVX2-NEXT:    vpxor %xmm1, %xmm0, %xmm0
+; X64-AVX2-NEXT:    vpsrlw $8, %xmm0, %xmm2
+; X64-AVX2-NEXT:    vpminub %xmm2, %xmm0, %xmm0
+; X64-AVX2-NEXT:    vphminposuw %xmm0, %xmm0
+; X64-AVX2-NEXT:    vpxor %xmm1, %xmm0, %xmm0
 ; X64-AVX2-NEXT:    vpextrb $0, %xmm0, %eax
-; X64-AVX2-NEXT:    ## kill: %AL<def> %AL<kill> %EAX<kill>
+; X64-AVX2-NEXT:    ## kill: def %al killed %al killed %eax
 ; X64-AVX2-NEXT:    vzeroupper
 ; X64-AVX2-NEXT:    retq
 ;
 ; X64-AVX512-LABEL: test_reduce_v64i8:
-; X64-AVX512:       ## BB#0:
+; X64-AVX512:       ## %bb.0:
 ; X64-AVX512-NEXT:    vextracti64x4 $1, %zmm0, %ymm1
-; X64-AVX512-NEXT:    vpminsb %zmm1, %zmm0, %zmm0
+; X64-AVX512-NEXT:    vpminsb %ymm1, %ymm0, %ymm0
 ; X64-AVX512-NEXT:    vextracti128 $1, %ymm0, %xmm1
-; X64-AVX512-NEXT:    vpminsb %zmm1, %zmm0, %zmm0
-; X64-AVX512-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; X64-AVX512-NEXT:    vpminsb %zmm1, %zmm0, %zmm0
-; X64-AVX512-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
-; X64-AVX512-NEXT:    vpminsb %zmm1, %zmm0, %zmm0
-; X64-AVX512-NEXT:    vpsrld $16, %xmm0, %xmm1
-; X64-AVX512-NEXT:    vpminsb %zmm1, %zmm0, %zmm0
-; X64-AVX512-NEXT:    vpsrlw $8, %xmm0, %xmm1
-; X64-AVX512-NEXT:    vpminsb %zmm1, %zmm0, %zmm0
+; X64-AVX512-NEXT:    vpminsb %xmm1, %xmm0, %xmm0
+; X64-AVX512-NEXT:    vmovdqa {{.*#+}} xmm1 = [128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]
+; X64-AVX512-NEXT:    vpxor %xmm1, %xmm0, %xmm0
+; X64-AVX512-NEXT:    vpsrlw $8, %xmm0, %xmm2
+; X64-AVX512-NEXT:    vpminub %xmm2, %xmm0, %xmm0
+; X64-AVX512-NEXT:    vphminposuw %xmm0, %xmm0
+; X64-AVX512-NEXT:    vpxor %xmm1, %xmm0, %xmm0
 ; X64-AVX512-NEXT:    vpextrb $0, %xmm0, %eax
-; X64-AVX512-NEXT:    ## kill: %AL<def> %AL<kill> %EAX<kill>
+; X64-AVX512-NEXT:    ## kill: def %al killed %al killed %eax
 ; X64-AVX512-NEXT:    vzeroupper
 ; X64-AVX512-NEXT:    retq
   %1  = shufflevector <64 x i8> %a0, <64 x i8> undef, <64 x i32> <i32 32, i32 33, i32 34, i32 35, i32 36, i32 37, i32 38, i32 39, i32 40, i32 41, i32 42, i32 43, i32 44, i32 45, i32 46, i32 47, i32 48, i32 49, i32 50, i32 51, i32 52, i32 53, i32 54, i32 55, i32 56, i32 57, i32 58, i32 59, i32 60, i32 61, i32 62, i32 63, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef>

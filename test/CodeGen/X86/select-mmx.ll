@@ -13,18 +13,18 @@
 define i64 @test47(i64 %arg)  {
 ;
 ; X64-LABEL: test47:
-; X64:       # BB#0:
+; X64:       # %bb.0:
 ; X64-NEXT:    xorl %eax, %eax
 ; X64-NEXT:    testq %rdi, %rdi
 ; X64-NEXT:    movl $7, %ecx
 ; X64-NEXT:    cmoveq %rcx, %rax
-; X64-NEXT:    movd %rax, %mm0
+; X64-NEXT:    movq %rax, %mm0
 ; X64-NEXT:    psllw %mm0, %mm0
-; X64-NEXT:    movd %mm0, %rax
+; X64-NEXT:    movq %mm0, %rax
 ; X64-NEXT:    retq
 ;
 ; I32-LABEL: test47:
-; I32:       # BB#0:
+; I32:       # %bb.0:
 ; I32-NEXT:    pushl %ebp
 ; I32-NEXT:    .cfi_def_cfa_offset 8
 ; I32-NEXT:    .cfi_offset %ebp, -8
@@ -36,7 +36,7 @@ define i64 @test47(i64 %arg)  {
 ; I32-NEXT:    orl 12(%ebp), %eax
 ; I32-NEXT:    movl $7, %eax
 ; I32-NEXT:    je .LBB0_2
-; I32-NEXT:  # BB#1:
+; I32-NEXT:  # %bb.1:
 ; I32-NEXT:    xorl %eax, %eax
 ; I32-NEXT:  .LBB0_2:
 ; I32-NEXT:    movl %eax, {{[0-9]+}}(%esp)
@@ -48,7 +48,6 @@ define i64 @test47(i64 %arg)  {
 ; I32-NEXT:    movl {{[0-9]+}}(%esp), %edx
 ; I32-NEXT:    movl %ebp, %esp
 ; I32-NEXT:    popl %ebp
-; I32-NEXT:   .cfi_def_cfa %esp, 4
 ; I32-NEXT:    retl
   %cond = icmp eq i64 %arg, 0
   %slct = select i1 %cond, x86_mmx bitcast (i64 7 to x86_mmx), x86_mmx bitcast (i64 0 to x86_mmx)
@@ -68,16 +67,16 @@ define i64 @test47(i64 %arg)  {
 define i64 @test49(i64 %arg, i64 %x, i64 %y) {
 ;
 ; X64-LABEL: test49:
-; X64:       # BB#0:
+; X64:       # %bb.0:
 ; X64-NEXT:    testq %rdi, %rdi
 ; X64-NEXT:    cmovneq %rdx, %rsi
-; X64-NEXT:    movd %rsi, %mm0
+; X64-NEXT:    movq %rsi, %mm0
 ; X64-NEXT:    psllw %mm0, %mm0
-; X64-NEXT:    movd %mm0, %rax
+; X64-NEXT:    movq %mm0, %rax
 ; X64-NEXT:    retq
 ;
 ; I32-LABEL: test49:
-; I32:       # BB#0:
+; I32:       # %bb.0:
 ; I32-NEXT:    pushl %ebp
 ; I32-NEXT:    .cfi_def_cfa_offset 8
 ; I32-NEXT:    .cfi_offset %ebp, -8
@@ -88,7 +87,7 @@ define i64 @test49(i64 %arg, i64 %x, i64 %y) {
 ; I32-NEXT:    movl 8(%ebp), %eax
 ; I32-NEXT:    orl 12(%ebp), %eax
 ; I32-NEXT:    je .LBB1_1
-; I32-NEXT:  # BB#2:
+; I32-NEXT:  # %bb.2:
 ; I32-NEXT:    leal 24(%ebp), %eax
 ; I32-NEXT:    jmp .LBB1_3
 ; I32-NEXT:  .LBB1_1:
@@ -101,7 +100,6 @@ define i64 @test49(i64 %arg, i64 %x, i64 %y) {
 ; I32-NEXT:    movl {{[0-9]+}}(%esp), %edx
 ; I32-NEXT:    movl %ebp, %esp
 ; I32-NEXT:    popl %ebp
-; I32-NEXT:   .cfi_def_cfa %esp, 4
 ; I32-NEXT:    retl
   %cond = icmp eq i64 %arg, 0
   %xmmx = bitcast i64 %x to x86_mmx

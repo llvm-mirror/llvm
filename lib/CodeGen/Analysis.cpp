@@ -14,8 +14,9 @@
 #include "llvm/CodeGen/Analysis.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/CodeGen/MachineFunction.h"
-#include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetLowering.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
@@ -25,8 +26,6 @@
 #include "llvm/IR/Module.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
-#include "llvm/Target/TargetLowering.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include "llvm/Transforms/Utils/GlobalStatus.h"
 
 using namespace llvm;
@@ -669,7 +668,7 @@ llvm::getFuncletMembership(const MachineFunction &MF) {
 
   int EntryBBNumber = MF.front().getNumber();
   bool IsSEH = isAsynchronousEHPersonality(
-      classifyEHPersonality(MF.getFunction()->getPersonalityFn()));
+      classifyEHPersonality(MF.getFunction().getPersonalityFn()));
 
   const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
   SmallVector<const MachineBasicBlock *, 16> FuncletBlocks;

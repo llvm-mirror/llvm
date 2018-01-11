@@ -30,27 +30,25 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/BinaryFormat/Magic.h"
 #include "llvm/Config/config.h"
+#include "llvm/DebugInfo/CodeView/AppendingTypeTableBuilder.h"
 #include "llvm/DebugInfo/CodeView/DebugChecksumsSubsection.h"
 #include "llvm/DebugInfo/CodeView/DebugInlineeLinesSubsection.h"
 #include "llvm/DebugInfo/CodeView/DebugLinesSubsection.h"
 #include "llvm/DebugInfo/CodeView/LazyRandomTypeCollection.h"
+#include "llvm/DebugInfo/CodeView/MergingTypeTableBuilder.h"
 #include "llvm/DebugInfo/CodeView/StringsAndChecksums.h"
 #include "llvm/DebugInfo/CodeView/TypeStreamMerger.h"
-#include "llvm/DebugInfo/CodeView/TypeTableBuilder.h"
 #include "llvm/DebugInfo/MSF/MSFBuilder.h"
 #include "llvm/DebugInfo/PDB/GenericError.h"
 #include "llvm/DebugInfo/PDB/IPDBEnumChildren.h"
 #include "llvm/DebugInfo/PDB/IPDBRawSymbol.h"
 #include "llvm/DebugInfo/PDB/IPDBSession.h"
 #include "llvm/DebugInfo/PDB/Native/DbiModuleDescriptorBuilder.h"
-#include "llvm/DebugInfo/PDB/Native/DbiStream.h"
 #include "llvm/DebugInfo/PDB/Native/DbiStreamBuilder.h"
-#include "llvm/DebugInfo/PDB/Native/InfoStream.h"
 #include "llvm/DebugInfo/PDB/Native/InfoStreamBuilder.h"
 #include "llvm/DebugInfo/PDB/Native/NativeSession.h"
 #include "llvm/DebugInfo/PDB/Native/PDBFile.h"
@@ -84,7 +82,6 @@
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include <set>
 
 using namespace llvm;
 using namespace llvm::codeview;
@@ -727,8 +724,9 @@ static void yamlToPdb(StringRef Path) {
   auto &TpiBuilder = Builder.getTpiBuilder();
   const auto &Tpi = YamlObj.TpiStream.getValueOr(DefaultTpiStream);
   TpiBuilder.setVersionHeader(Tpi.Version);
+  AppendingTypeTableBuilder TS(Allocator);
   for (const auto &R : Tpi.Records) {
-    CVType Type = R.toCodeViewRecord(Allocator);
+    CVType Type = R.toCodeViewRecord(TS);
     TpiBuilder.addTypeRecord(Type.RecordData, None);
   }
 
@@ -736,7 +734,7 @@ static void yamlToPdb(StringRef Path) {
   auto &IpiBuilder = Builder.getIpiBuilder();
   IpiBuilder.setVersionHeader(Ipi.Version);
   for (const auto &R : Ipi.Records) {
-    CVType Type = R.toCodeViewRecord(Allocator);
+    CVType Type = R.toCodeViewRecord(TS);
     IpiBuilder.addTypeRecord(Type.RecordData, None);
   }
 
@@ -988,8 +986,8 @@ static void dumpPretty(StringRef Path) {
 
 static void mergePdbs() {
   BumpPtrAllocator Allocator;
-  TypeTableBuilder MergedTpi(Allocator);
-  TypeTableBuilder MergedIpi(Allocator);
+  MergingTypeTableBuilder MergedTpi(Allocator);
+  MergingTypeTableBuilder MergedIpi(Allocator);
 
   // Create a Tpi and Ipi type table with all types from all input files.
   for (const auto &Path : opts::merge::InputFilenames) {
@@ -1019,11 +1017,11 @@ static void mergePdbs() {
 
   auto &DestTpi = Builder.getTpiBuilder();
   auto &DestIpi = Builder.getIpiBuilder();
-  MergedTpi.ForEachRecord([&DestTpi](TypeIndex TI, ArrayRef<uint8_t> Data) {
-    DestTpi.addTypeRecord(Data, None);
+  MergedTpi.ForEachRecord([&DestTpi](TypeIndex TI, const CVType &Type) {
+    DestTpi.addTypeRecord(Type.RecordData, None);
   });
-  MergedIpi.ForEachRecord([&DestIpi](TypeIndex TI, ArrayRef<uint8_t> Data) {
-    DestIpi.addTypeRecord(Data, None);
+  MergedIpi.ForEachRecord([&DestIpi](TypeIndex TI, const CVType &Type) {
+    DestIpi.addTypeRecord(Type.RecordData, None);
   });
   Builder.getInfoBuilder().addFeature(PdbRaw_FeatureSig::VC140);
 

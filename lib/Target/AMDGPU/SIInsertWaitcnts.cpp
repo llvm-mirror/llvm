@@ -1269,7 +1269,7 @@ void SIInsertWaitcnts::mergeInputScoreBrackets(MachineBasicBlock &Block) {
         BlockWaitcntBracketsMap[pred].get();
     bool Visited = BlockVisitedSet.find(pred) != BlockVisitedSet.end();
     if (!Visited || PredScoreBrackets->getWaitAtBeginning()) {
-      break;
+      continue;
     }
     for (enum InstCounterType T = VM_CNT; T < NUM_INST_CNTS;
          T = (enum InstCounterType)(T + 1)) {
@@ -1308,7 +1308,7 @@ void SIInsertWaitcnts::mergeInputScoreBrackets(MachineBasicBlock &Block) {
         BlockWaitcntBracketsMap[Pred].get();
     bool Visited = BlockVisitedSet.find(Pred) != BlockVisitedSet.end();
     if (!Visited || PredScoreBrackets->getWaitAtBeginning()) {
-      break;
+      continue;
     }
 
     int GDSSpan = PredScoreBrackets->getEventUB(GDS_GPR_LOCK) -
@@ -1355,7 +1355,7 @@ void SIInsertWaitcnts::mergeInputScoreBrackets(MachineBasicBlock &Block) {
   // Set the register scoreboard.
   for (MachineBasicBlock *Pred : Block.predecessors()) {
     if (BlockVisitedSet.find(Pred) == BlockVisitedSet.end()) {
-      break;
+      continue;
     }
 
     BlockWaitcntBrackets *PredScoreBrackets =
@@ -1469,7 +1469,7 @@ void SIInsertWaitcnts::mergeInputScoreBrackets(MachineBasicBlock &Block) {
   // the delayed nature of these operations.
   for (MachineBasicBlock *Pred : Block.predecessors()) {
     if (BlockVisitedSet.find(Pred) == BlockVisitedSet.end()) {
-      break;
+      continue;
     }
 
     BlockWaitcntBrackets *PredScoreBrackets =
@@ -1521,8 +1521,6 @@ void SIInsertWaitcnts::insertWaitcntInBlock(MachineFunction &MF,
     dbgs() << "Block" << Block.getNumber();
     ScoreBrackets->dump();
   });
-
-  bool InsertNOP = false;
 
   // Walk over the instructions.
   for (MachineBasicBlock::iterator Iter = Block.begin(), E = Block.end();
@@ -1622,58 +1620,6 @@ void SIInsertWaitcnts::insertWaitcntInBlock(MachineFunction &MF,
               AMDGPU::VCC)
           .addReg(AMDGPU::VCC);
       VCCZBugHandledSet.insert(&Inst);
-    }
-
-    if (ST->getGeneration() >= SISubtarget::VOLCANIC_ISLANDS) {
-
-      // This avoids a s_nop after a waitcnt has just been inserted.
-      if (!SWaitInst && InsertNOP) {
-        BuildMI(Block, Inst, DebugLoc(), TII->get(AMDGPU::S_NOP)).addImm(0);
-      }
-      InsertNOP = false;
-
-      // Any occurrence of consecutive VMEM or SMEM instructions forms a VMEM
-      // or SMEM clause, respectively.
-      //
-      // The temporary workaround is to break the clauses with S_NOP.
-      //
-      // The proper solution would be to allocate registers such that all source
-      // and destination registers don't overlap, e.g. this is illegal:
-      //   r0 = load r2
-      //   r2 = load r0
-      bool IsSMEM = false;
-      bool IsVMEM = false;
-      if (TII->isSMRD(Inst))
-        IsSMEM = true;
-      else if (TII->usesVM_CNT(Inst))
-        IsVMEM = true;
-
-      ++Iter;
-      if (Iter == E)
-        break;
-
-      MachineInstr &Next = *Iter;
-
-      // TODO: How about consecutive SMEM instructions?
-      //       The comments above says break the clause but the code does not.
-      // if ((TII->isSMRD(next) && isSMEM) ||
-      if (!IsSMEM && TII->usesVM_CNT(Next) && IsVMEM &&
-          // TODO: Enable this check when hasSoftClause is upstreamed.
-          // ST->hasSoftClauses() &&
-          ST->isXNACKEnabled()) {
-        // Insert a NOP to break the clause.
-        InsertNOP = true;
-        continue;
-      }
-
-      // There must be "S_NOP 0" between an instruction writing M0 and
-      // S_SENDMSG.
-      if ((Next.getOpcode() == AMDGPU::S_SENDMSG ||
-           Next.getOpcode() == AMDGPU::S_SENDMSGHALT) &&
-          Inst.definesRegister(AMDGPU::M0))
-        InsertNOP = true;
-
-      continue;
     }
 
     ++Iter;

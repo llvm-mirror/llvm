@@ -21,13 +21,9 @@
 #include "AArch64CallLowering.h"
 #include "AArch64LegalizerInfo.h"
 #include "AArch64RegisterBankInfo.h"
-#include "llvm/CodeGen/GlobalISel/IRTranslator.h"
 #include "llvm/CodeGen/GlobalISel/InstructionSelect.h"
-#include "llvm/CodeGen/GlobalISel/Legalizer.h"
-#include "llvm/CodeGen/GlobalISel/RegBankSelect.h"
 #include "llvm/CodeGen/MachineScheduler.h"
 #include "llvm/IR/GlobalValue.h"
-#include "llvm/Support/TargetRegistry.h"
 
 using namespace llvm;
 
@@ -154,7 +150,7 @@ AArch64Subtarget::AArch64Subtarget(const Triple &TT, const std::string &CPU,
       InstrInfo(initializeSubtargetDependencies(FS, CPU)), TSInfo(),
       TLInfo(TM, *this) {
   CallLoweringInfo.reset(new AArch64CallLowering(*getTargetLowering()));
-  Legalizer.reset(new AArch64LegalizerInfo());
+  Legalizer.reset(new AArch64LegalizerInfo(*this));
 
   auto *RBI = new AArch64RegisterBankInfo(*getRegisterInfo());
 
@@ -219,19 +215,6 @@ unsigned char AArch64Subtarget::classifyGlobalFunctionReference(
     return AArch64II::MO_GOT;
 
   return AArch64II::MO_NO_FLAG;
-}
-
-/// This function returns the name of a function which has an interface
-/// like the non-standard bzero function, if such a function exists on
-/// the current subtarget and it is considered prefereable over
-/// memset with zero passed as the second argument. Otherwise it
-/// returns null.
-const char *AArch64Subtarget::getBZeroEntry() const {
-  // Prefer bzero on Darwin only.
-  if(isTargetDarwin())
-    return "bzero";
-
-  return nullptr;
 }
 
 void AArch64Subtarget::overrideSchedPolicy(MachineSchedPolicy &Policy,

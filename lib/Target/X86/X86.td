@@ -137,7 +137,7 @@ def FeatureVPOPCNTDQ : SubtargetFeature<"avx512vpopcntdq", "HasVPOPCNTDQ",
 def FeaturePFI      : SubtargetFeature<"avx512pf", "HasPFI", "true",
                       "Enable AVX-512 PreFetch Instructions",
                                       [FeatureAVX512]>;
-def FeaturePREFETCHWT1  : SubtargetFeature<"prefetchwt1", "HasPFPREFETCHWT1",
+def FeaturePREFETCHWT1  : SubtargetFeature<"prefetchwt1", "HasPREFETCHWT1",
                                    "true",
                                    "Prefetch with Intent to Write and T1 Hint">;
 def FeatureDQI     : SubtargetFeature<"avx512dq", "HasDQI", "true",
@@ -152,14 +152,29 @@ def FeatureVLX     : SubtargetFeature<"avx512vl", "HasVLX", "true",
 def FeatureVBMI     : SubtargetFeature<"avx512vbmi", "HasVBMI", "true",
                       "Enable AVX-512 Vector Byte Manipulation Instructions",
                                       [FeatureBWI]>;
+def FeatureVBMI2    : SubtargetFeature<"avx512vbmi2", "HasVBMI2", "true",
+                      "Enable AVX-512 further Vector Byte Manipulation Instructions",
+                                      [FeatureBWI]>;
 def FeatureIFMA     : SubtargetFeature<"avx512ifma", "HasIFMA", "true",
                       "Enable AVX-512 Integer Fused Multiple-Add",
                                       [FeatureAVX512]>;
 def FeaturePKU   : SubtargetFeature<"pku", "HasPKU", "true",
                       "Enable protection keys">;
+def FeatureVNNI    : SubtargetFeature<"avx512vnni", "HasVNNI", "true",
+                          "Enable AVX-512 Vector Neural Network Instructions",
+                                      [FeatureAVX512]>;
+def FeatureBITALG  : SubtargetFeature<"avx512bitalg", "HasBITALG", "true",
+                       "Enable AVX-512 Bit Algorithms",
+                        [FeatureBWI]>;
 def FeaturePCLMUL  : SubtargetFeature<"pclmul", "HasPCLMUL", "true",
                          "Enable packed carry-less multiplication instructions",
                                [FeatureSSE2]>;
+def FeatureGFNI    : SubtargetFeature<"gfni", "HasGFNI", "true",
+                         "Enable Galois Field Arithmetic Instructions",
+                               [FeatureSSE2]>;
+def FeatureVPCLMULQDQ : SubtargetFeature<"vpclmulqdq", "HasVPCLMULQDQ", "true",
+                                         "Enable vpclmulqdq instructions",
+                                         [FeatureAVX, FeaturePCLMUL]>;
 def FeatureFMA4    : SubtargetFeature<"fma4", "HasFMA4", "true",
                                       "Enable four-operand fused multiple-add",
                                       [FeatureAVX, FeatureSSE4A]>;
@@ -172,6 +187,9 @@ def FeatureSSEUnalignedMem : SubtargetFeature<"sse-unaligned-mem",
 def FeatureAES     : SubtargetFeature<"aes", "HasAES", "true",
                                       "Enable AES instructions",
                                       [FeatureSSE2]>;
+def FeatureVAES    : SubtargetFeature<"vaes", "HasVAES", "true",
+                       "Promote selected AES instructions to AVX512/AVX registers",
+                        [FeatureAVX, FeatureAES]>;
 def FeatureTBM     : SubtargetFeature<"tbm", "HasTBM", "true",
                                       "Enable TBM instructions">;
 def FeatureLWP     : SubtargetFeature<"lwp", "HasLWP", "true",
@@ -195,6 +213,10 @@ def FeatureADX     : SubtargetFeature<"adx", "HasADX", "true",
 def FeatureSHA     : SubtargetFeature<"sha", "HasSHA", "true",
                                       "Enable SHA instructions",
                                       [FeatureSSE2]>;
+def FeatureSHSTK   : SubtargetFeature<"shstk", "HasSHSTK", "true",
+                       "Support CET Shadow-Stack instructions">;
+def FeatureIBT     : SubtargetFeature<"ibt", "HasIBT", "true",
+                       "Support CET Indirect-Branch-Tracking instructions">;
 def FeaturePRFCHW  : SubtargetFeature<"prfchw", "HasPRFCHW", "true",
                                       "Support PRFCHW instructions">;
 def FeatureRDSEED  : SubtargetFeature<"rdseed", "HasRDSEED", "true",
@@ -241,6 +263,12 @@ def FeatureSlowIncDec : SubtargetFeature<"slow-incdec", "SlowIncDec", "true",
 def FeatureSoftFloat
     : SubtargetFeature<"soft-float", "UseSoftFloat", "true",
                        "Use software floating point features.">;
+// On recent X86 (port bound) processors, its preferable to combine to a single shuffle
+// using a variable mask over multiple fixed shuffles.
+def FeatureFastVariableShuffle
+    : SubtargetFeature<"fast-variable-shuffle",
+                       "HasFastVariableShuffle",
+                       "true", "Shuffles with variable masks are fast">;
 // On some X86 processors, there is no performance hazard to writing only the
 // lower parts of a YMM or ZMM register without clearing the upper part.
 def FeatureFastPartialYMMorZMMWrite
@@ -293,11 +321,43 @@ def FeatureMacroFusion
     : SubtargetFeature<"macrofusion", "HasMacroFusion", "true",
                  "Various instructions can be fused with conditional branches">;
 
+// Gather is available since Haswell (AVX2 set). So technically, we can
+// generate Gathers on all AVX2 processors. But the overhead on HSW is high.
+// Skylake Client processor has faster Gathers than HSW and performance is
+// similar to Skylake Server (AVX-512).
+def FeatureHasFastGather
+    : SubtargetFeature<"fast-gather", "HasFastGather", "true",
+                       "Indicates if gather is reasonably fast.">;
+
+//===----------------------------------------------------------------------===//
+// Register File Description
+//===----------------------------------------------------------------------===//
+
+include "X86RegisterInfo.td"
+include "X86RegisterBanks.td"
+
+//===----------------------------------------------------------------------===//
+// Instruction Descriptions
+//===----------------------------------------------------------------------===//
+
+include "X86Schedule.td"
+include "X86InstrInfo.td"
+
+def X86InstrInfo : InstrInfo;
+
 //===----------------------------------------------------------------------===//
 // X86 processors supported.
 //===----------------------------------------------------------------------===//
 
-include "X86Schedule.td"
+include "X86ScheduleAtom.td"
+include "X86SchedSandyBridge.td"
+include "X86SchedHaswell.td"
+include "X86SchedBroadwell.td"
+include "X86ScheduleSLM.td"
+include "X86ScheduleZnver1.td"
+include "X86ScheduleBtVer2.td"
+include "X86SchedSkylakeClient.td"
+include "X86SchedSkylakeServer.td"
 
 def ProcIntelAtom : SubtargetFeature<"atom", "X86ProcFamily", "IntelAtom",
                     "Intel Atom processors">;
@@ -317,6 +377,8 @@ def ProcIntelSKX  : SubtargetFeature<"skx", "X86ProcFamily",
                     "IntelSKX", "Intel Skylake Server processors">;
 def ProcIntelCNL  : SubtargetFeature<"cannonlake", "X86ProcFamily",
                     "IntelCannonlake", "Intel Cannonlake processors">;
+def ProcIntelICL  : SubtargetFeature<"icelake", "X86ProcFamily",
+                    "IntelIcelake", "Intel Icelake processors">;
 
 class Proc<string Name, list<SubtargetFeature> Features>
  : ProcessorModel<Name, GenericModel, Features>;
@@ -564,7 +626,8 @@ def HSWFeatures : ProcessorFeatures<IVBFeatures.Value, [
   FeatureERMSB,
   FeatureFMA,
   FeatureLZCNT,
-  FeatureMOVBE
+  FeatureMOVBE,
+  FeatureFastVariableShuffle
 ]>;
 
 class HaswellProc<string Name> : ProcModel<Name, HaswellModel,
@@ -576,7 +639,8 @@ def : HaswellProc<"core-avx2">; // Legacy alias.
 
 def BDWFeatures : ProcessorFeatures<HSWFeatures.Value, [
   FeatureADX,
-  FeatureRDSEED
+  FeatureRDSEED,
+  FeaturePRFCHW
 ]>;
 class BroadwellProc<string Name> : ProcModel<Name, BroadwellModel,
                                              BDWFeatures.Value, [
@@ -596,7 +660,8 @@ def SKLFeatures : ProcessorFeatures<BDWFeatures.Value, [
 
 class SkylakeClientProc<string Name> : ProcModel<Name, SkylakeClientModel,
                                                  SKLFeatures.Value, [
-  ProcIntelSKL
+  ProcIntelSKL,
+  FeatureHasFastGather
 ]>;
 def : SkylakeClientProc<"skylake">;
 
@@ -612,7 +677,8 @@ def KNLFeatures : ProcessorFeatures<IVBFeatures.Value, [
   FeatureLZCNT,
   FeatureBMI,
   FeatureBMI2,
-  FeatureFMA
+  FeatureFMA,
+  FeaturePRFCHW
 ]>;
 
 // FIXME: define KNL model
@@ -620,7 +686,8 @@ class KnightsLandingProc<string Name> : ProcModel<Name, HaswellModel,
                                                   KNLFeatures.Value, [
   ProcIntelKNL,
   FeatureSlowTwoMemOps,
-  FeatureFastPartialYMMorZMMWrite
+  FeatureFastPartialYMMorZMMWrite,
+  FeatureHasFastGather
 ]>;
 def : KnightsLandingProc<"knl">;
 
@@ -629,6 +696,7 @@ class KnightsMillProc<string Name> : ProcModel<Name, HaswellModel,
   ProcIntelKNL,
   FeatureSlowTwoMemOps,
   FeatureFastPartialYMMorZMMWrite,
+  FeatureHasFastGather,
   FeatureVPOPCNTDQ
 ]>;
 def : KnightsMillProc<"knm">; // TODO Add AVX5124FMAPS/AVX5124VNNIW features
@@ -645,7 +713,8 @@ def SKXFeatures : ProcessorFeatures<SKLFeatures.Value, [
 
 class SkylakeServerProc<string Name> : ProcModel<Name, SkylakeServerModel,
                                                  SKXFeatures.Value, [
-  ProcIntelSKX
+  ProcIntelSKX,
+  FeatureHasFastGather
 ]>;
 def : SkylakeServerProc<"skylake-avx512">;
 def : SkylakeServerProc<"skx">; // Legacy alias.
@@ -656,11 +725,30 @@ def CNLFeatures : ProcessorFeatures<SKXFeatures.Value, [
   FeatureSHA
 ]>;
 
-class CannonlakeProc<string Name> : ProcModel<Name, HaswellModel,
+class CannonlakeProc<string Name> : ProcModel<Name, SkylakeServerModel,
                                               CNLFeatures.Value, [
-  ProcIntelCNL
+  ProcIntelCNL,
+  FeatureHasFastGather
 ]>;
 def : CannonlakeProc<"cannonlake">;
+
+def ICLFeatures : ProcessorFeatures<CNLFeatures.Value, [
+  FeatureBITALG,
+  FeatureVAES,
+  FeatureVBMI2,
+  FeatureVNNI,
+  FeatureVPCLMULQDQ,
+  FeatureVPOPCNTDQ,
+  FeatureGFNI,
+  FeatureCLWB
+]>;
+
+class IcelakeProc<string Name> : ProcModel<Name, SkylakeServerModel,
+                                           ICLFeatures.Value, [
+  ProcIntelICL,
+  FeatureHasFastGather
+]>;
+def : IcelakeProc<"icelake">;
 
 // AMD CPUs.
 
@@ -899,21 +987,6 @@ def : ProcessorModel<"x86-64", SandyBridgeModel, [
   FeatureSlowIncDec,
   FeatureMacroFusion
 ]>;
-
-//===----------------------------------------------------------------------===//
-// Register File Description
-//===----------------------------------------------------------------------===//
-
-include "X86RegisterInfo.td"
-include "X86RegisterBanks.td"
-
-//===----------------------------------------------------------------------===//
-// Instruction Descriptions
-//===----------------------------------------------------------------------===//
-
-include "X86InstrInfo.td"
-
-def X86InstrInfo : InstrInfo;
 
 //===----------------------------------------------------------------------===//
 // Calling Conventions

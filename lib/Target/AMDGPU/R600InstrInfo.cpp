@@ -30,9 +30,9 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -197,7 +197,7 @@ bool R600InstrInfo::usesVertexCache(unsigned Opcode) const {
 
 bool R600InstrInfo::usesVertexCache(const MachineInstr &MI) const {
   const MachineFunction *MF = MI.getParent()->getParent();
-  return !AMDGPU::isCompute(MF->getFunction()->getCallingConv()) &&
+  return !AMDGPU::isCompute(MF->getFunction().getCallingConv()) &&
          usesVertexCache(MI.getOpcode());
 }
 
@@ -207,7 +207,7 @@ bool R600InstrInfo::usesTextureCache(unsigned Opcode) const {
 
 bool R600InstrInfo::usesTextureCache(const MachineInstr &MI) const {
   const MachineFunction *MF = MI.getParent()->getParent();
-  return (AMDGPU::isCompute(MF->getFunction()->getCallingConv()) &&
+  return (AMDGPU::isCompute(MF->getFunction().getCallingConv()) &&
           usesVertexCache(MI.getOpcode())) ||
           usesTextureCache(MI.getOpcode());
 }
@@ -1492,4 +1492,22 @@ void R600InstrInfo::clearFlag(MachineInstr &MI, unsigned Operand,
     InstFlags &= ~(Flag << (NUM_MO_FLAGS * Operand));
     FlagOp.setImm(InstFlags);
   }
+}
+
+unsigned R600InstrInfo::getAddressSpaceForPseudoSourceKind(
+    PseudoSourceValue::PSVKind Kind) const {
+  switch (Kind) {
+  case PseudoSourceValue::Stack:
+  case PseudoSourceValue::FixedStack:
+    return AMDGPUASI.PRIVATE_ADDRESS;
+  case PseudoSourceValue::ConstantPool:
+  case PseudoSourceValue::GOT:
+  case PseudoSourceValue::JumpTable:
+  case PseudoSourceValue::GlobalValueCallEntry:
+  case PseudoSourceValue::ExternalSymbolCallEntry:
+  case PseudoSourceValue::TargetCustom:
+    return AMDGPUASI.CONSTANT_ADDRESS;
+  }
+  llvm_unreachable("Invalid pseudo source kind");
+  return AMDGPUASI.PRIVATE_ADDRESS;
 }

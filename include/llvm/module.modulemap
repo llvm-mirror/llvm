@@ -25,16 +25,15 @@ module LLVM_Backend {
     exclude header "CodeGen/LinkAllCodegenComponents.h"
 
     // These are intended for (repeated) textual inclusion.
+    textual header "CodeGen/CommandFlags.def"
     textual header "CodeGen/DIEValue.def"
     textual header "CodeGen/RuntimeLibcalls.def"
+    textual header "CodeGen/TargetOpcodes.def"
   }
 
   module Target {
     umbrella "Target"
     module * { export * }
-
-    // This is intended for (repeated) textual inclusion.
-    textual header "Target/TargetOpcodes.def"
   }
 }
 
@@ -62,7 +61,7 @@ module LLVM_BinaryFormat {
     textual header "BinaryFormat/ELFRelocs/SystemZ.def"
     textual header "BinaryFormat/ELFRelocs/x86_64.def"
     textual header "BinaryFormat/ELFRelocs/WebAssembly.def"
-    textual header "BinaryFormat/WasmRelocs/WebAssembly.def"
+    textual header "BinaryFormat/WasmRelocs.def"
 }
 
 module LLVM_Config { requires cplusplus umbrella "Config" module * { export * } }
@@ -94,11 +93,13 @@ module LLVM_DebugInfo_PDB {
   exclude header "DebugInfo/PDB/DIA/DIAEnumLineNumbers.h"
   exclude header "DebugInfo/PDB/DIA/DIAEnumSourceFiles.h"
   exclude header "DebugInfo/PDB/DIA/DIAEnumSymbols.h"
+  exclude header "DebugInfo/PDB/DIA/DIAEnumTables.h"
   exclude header "DebugInfo/PDB/DIA/DIALineNumber.h"
   exclude header "DebugInfo/PDB/DIA/DIARawSymbol.h"
   exclude header "DebugInfo/PDB/DIA/DIASession.h"
   exclude header "DebugInfo/PDB/DIA/DIASourceFile.h"
   exclude header "DebugInfo/PDB/DIA/DIASupport.h"
+  exclude header "DebugInfo/PDB/DIA/DIATable.h"
 }
 
 module LLVM_DebugInfo_PDB_DIA {
@@ -228,8 +229,7 @@ module LLVM_MC {
   umbrella "MC"
   module * { export * }
 
-  // Exclude this; it's fundamentally non-modular.
-  exclude header "MC/MCTargetOptionsCommandFlags.h"
+  textual header "MC/MCTargetOptionsCommandFlags.def"
 }
 
 // Used by llvm-tblgen
@@ -297,6 +297,7 @@ module LLVM_Utils {
     // These are intended for textual inclusion.
     textual header "Support/ARMTargetParser.def"
     textual header "Support/AArch64TargetParser.def"
+    textual header "Support/X86TargetParser.def"
   }
 
   // This part of the module is usable from both C and C++ code.

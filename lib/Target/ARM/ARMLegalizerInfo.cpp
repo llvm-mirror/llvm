@@ -17,10 +17,10 @@
 #include "llvm/CodeGen/GlobalISel/LegalizerHelper.h"
 #include "llvm/CodeGen/LowLevelType.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/TargetOpcodes.h"
 #include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Type.h"
-#include "llvm/Target/TargetOpcodes.h"
 
 using namespace llvm;
 
@@ -126,6 +126,12 @@ ARMLegalizerInfo::ARMLegalizerInfo(const ARMSubtarget &ST) {
     setAction({Op, s32}, Legal);
   }
 
+  setAction({G_INTTOPTR, p0}, Legal);
+  setAction({G_INTTOPTR, 1, s32}, Legal);
+
+  setAction({G_PTRTOINT, s32}, Legal);
+  setAction({G_PTRTOINT, 1, p0}, Legal);
+
   for (unsigned Op : {G_ASHR, G_LSHR, G_SHL})
     setAction({Op, s32}, Legal);
 
@@ -138,7 +144,13 @@ ARMLegalizerInfo::ARMLegalizerInfo(const ARMSubtarget &ST) {
 
   setAction({G_BRCOND, s1}, Legal);
 
+  for (auto Ty : {s32, p0})
+    setAction({G_PHI, Ty}, Legal);
+  setLegalizeScalarToDifferentSizeStrategy(
+      G_PHI, 0, widenToLargerTypesUnsupportedOtherwise);
+
   setAction({G_CONSTANT, s32}, Legal);
+  setAction({G_CONSTANT, p0}, Legal);
   setLegalizeScalarToDifferentSizeStrategy(G_CONSTANT, 0, widen_1_8_16);
 
   setAction({G_ICMP, s1}, Legal);
@@ -148,18 +160,25 @@ ARMLegalizerInfo::ARMLegalizerInfo(const ARMSubtarget &ST) {
     setAction({G_ICMP, 1, Ty}, Legal);
 
   if (!ST.useSoftFloat() && ST.hasVFP2()) {
-    for (unsigned BinOp : {G_FADD, G_FSUB})
+    for (unsigned BinOp : {G_FADD, G_FSUB, G_FMUL, G_FDIV})
       for (auto Ty : {s32, s64})
         setAction({BinOp, Ty}, Legal);
 
     setAction({G_LOAD, s64}, Legal);
     setAction({G_STORE, s64}, Legal);
 
+    setAction({G_PHI, s64}, Legal);
+
     setAction({G_FCMP, s1}, Legal);
     setAction({G_FCMP, 1, s32}, Legal);
     setAction({G_FCMP, 1, s64}, Legal);
+
+    setAction({G_MERGE_VALUES, s64}, Legal);
+    setAction({G_MERGE_VALUES, 1, s32}, Legal);
+    setAction({G_UNMERGE_VALUES, s32}, Legal);
+    setAction({G_UNMERGE_VALUES, 1, s64}, Legal);
   } else {
-    for (unsigned BinOp : {G_FADD, G_FSUB})
+    for (unsigned BinOp : {G_FADD, G_FSUB, G_FMUL, G_FDIV})
       for (auto Ty : {s32, s64})
         setAction({BinOp, Ty}, Libcall);
 
@@ -309,7 +328,7 @@ bool ARMLegalizerInfo::legalizeCustom(MachineInstr &MI,
 
     // Our divmod libcalls return a struct containing the quotient and the
     // remainder. We need to create a virtual register for it.
-    auto &Ctx = MIRBuilder.getMF().getFunction()->getContext();
+    auto &Ctx = MIRBuilder.getMF().getFunction().getContext();
     Type *ArgTy = Type::getInt32Ty(Ctx);
     StructType *RetTy = StructType::get(Ctx, {ArgTy, ArgTy}, /* Packed */ true);
     auto RetVal = MRI.createGenericVirtualRegister(
@@ -350,7 +369,7 @@ bool ARMLegalizerInfo::legalizeCustom(MachineInstr &MI,
       return true;
     }
 
-    auto &Ctx = MIRBuilder.getMF().getFunction()->getContext();
+    auto &Ctx = MIRBuilder.getMF().getFunction().getContext();
     assert((OpSize == 32 || OpSize == 64) && "Unsupported operand size");
     auto *ArgTy = OpSize == 32 ? Type::getFloatTy(Ctx) : Type::getDoubleTy(Ctx);
     auto *RetTy = Type::getInt32Ty(Ctx);

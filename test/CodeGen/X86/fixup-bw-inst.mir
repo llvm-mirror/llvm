@@ -10,9 +10,9 @@
   ;
   ; %0 is used in %if.end BB (before tail-duplication), so its
   ; corresponding super-register (EAX) is live-in into that BB (%if.end)
-  ; and also has an EAX<imp-def> flag. Make sure that we still change
+  ; and also has an implicit-def EAX flag. Make sure that we still change
   ; the movw into movzwl because EAX is not live before the load (which
-  ; can be seen by the fact that EAX<imp-use> flag is missing).
+  ; can be seen by the fact that implicit EAX flag is missing).
   entry:
     %tobool = icmp eq i16* %p, null
     br i1 %tobool, label %if.end, label %if.then
@@ -26,6 +26,12 @@
     ret i16 %i.0
   }
 
+  define i16 @test4() {
+  entry:
+    %t1 = zext i1 undef to i16
+    %t2 = or i16 undef, %t1
+    ret i16 %t2
+  }
 ...
 ---
 # CHECK-LABEL: name: test1
@@ -53,7 +59,7 @@ body:             |
   bb.0:
     liveins: %rax
 
-    %ax = MOV16rm killed %rax, 1, _, 0, _
+    %ax = MOV16rm killed %rax, 1, %noreg, 0, %noreg
     ; CHECK: %eax = MOVZX32rm16 killed %rax
 
     RETQ %ax
@@ -138,8 +144,8 @@ body:             |
   bb.2.if.then:
     liveins: %rdi
 
-    %ax = MOV16rm killed %rdi, 1, _, 0, _, implicit-def %eax :: (load 2 from %ir.p)
-    ; CHECK: %eax = MOVZX32rm16 killed %rdi, 1, _, 0, _, implicit-def %eax :: (load 2 from %ir.p)
+    %ax = MOV16rm killed %rdi, 1, %noreg, 0, %noreg, implicit-def %eax :: (load 2 from %ir.p)
+    ; CHECK: %eax = MOVZX32rm16 killed %rdi, 1, %noreg, 0, %noreg, implicit-def %eax :: (load 2 from %ir.p)
     %ax = KILL %ax, implicit killed %eax
     RETQ %ax
 
@@ -148,4 +154,48 @@ body:             |
     %ax = KILL %ax, implicit killed %eax
     RETQ %ax
 
+...
+---
+# CHECK-LABEL: name: test4
+name:            test4
+alignment:       4
+exposesReturnsTwice: false
+legalized:       false
+regBankSelected: false
+selected:        false
+tracksRegLiveness: true
+registers:
+liveins:
+  - { reg: '%r9d' }
+frameInfo:
+  isFrameAddressTaken: false
+  isReturnAddressTaken: false
+  hasStackMap:     false
+  hasPatchPoint:   false
+  stackSize:       0
+  offsetAdjustment: 0
+  maxAlignment:    0
+  adjustsStack:    false
+  hasCalls:        false
+  stackProtector:  ''
+  maxCallFrameSize: 0
+  hasOpaqueSPAdjustment: false
+  hasVAStart:      false
+  hasMustTailInVarArgFunc: false
+  savePoint:       ''
+  restorePoint:    ''
+fixedStack:
+stack:
+constants:
+# This code copies r10b into r9b and then uses r9w. We would like to promote
+# the copy to a 32-bit copy, but because r9w is used this is not acceptable.
+body:             |
+  bb.0.entry:
+    successors:
+    liveins: %r9d
+
+    %r9b = MOV8rr undef %r10b, implicit-def %r9d, implicit killed %r9d, implicit-def %eflags
+    ; CHECK-NOT: MOV32rr
+    %ax = OR16rr undef %ax, %r9w, implicit-def %eflags
+    RETQ %ax
 ...

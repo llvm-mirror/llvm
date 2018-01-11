@@ -227,21 +227,21 @@ attributes #0 = { nounwind }
 
 ; The following test failed because llvm had a bug where a structure like:
 ;
-; %vreg12<def> = CMOV_GR8 %vreg7, %vreg11 ... (lt)
-; %vreg13<def> = CMOV_GR8 %vreg12, %vreg11 ... (gt)
+; %12 = CMOV_GR8 %7, %11 ... (lt)
+; %13 = CMOV_GR8 %12, %11 ... (gt)
 ;
 ; was lowered to:
 ;
 ; The first two cmovs got expanded to:
-; BB#0:
-;   JL_1 BB#9
-; BB#7:
-;   JG_1 BB#9
-; BB#8:
-; BB#9:
-;   vreg12 = phi(vreg7, BB#8, vreg11, BB#0, vreg12, BB#7)
-;   vreg13 = COPY vreg12
-; Which was invalid as %vreg12 is not the same value as %vreg13
+; %bb.0:
+;   JL_1 %bb.9
+; %bb.7:
+;   JG_1 %bb.9
+; %bb.8:
+; %bb.9:
+;   %12 = phi(%7, %bb.8, %11, %bb.0, %12, %bb.7)
+;   %13 = COPY %12
+; Which was invalid as %12 is not the same value as %13
 
 ; CHECK-LABEL: no_cascade_opt:
 ; CMOV-DAG: cmpl %edx, %esi

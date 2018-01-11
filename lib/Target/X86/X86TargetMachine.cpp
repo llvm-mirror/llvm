@@ -11,13 +11,13 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "X86TargetMachine.h"
 #include "MCTargetDesc/X86MCTargetDesc.h"
 #include "X86.h"
 #include "X86CallLowering.h"
 #include "X86LegalizerInfo.h"
 #include "X86MacroFusion.h"
 #include "X86Subtarget.h"
-#include "X86TargetMachine.h"
 #include "X86TargetObjectFile.h"
 #include "X86TargetTransformInfo.h"
 #include "llvm/ADT/Optional.h"
@@ -34,6 +34,7 @@
 #include "llvm/CodeGen/GlobalISel/RegBankSelect.h"
 #include "llvm/CodeGen/MachineScheduler.h"
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/CodeGen/TargetLoweringObjectFile.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/DataLayout.h"
@@ -43,7 +44,6 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TargetRegistry.h"
-#include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/Target/TargetOptions.h"
 #include <memory>
 #include <string>
@@ -281,10 +281,9 @@ UseVZeroUpper("x86-use-vzeroupper", cl::Hidden,
 // X86 TTI query.
 //===----------------------------------------------------------------------===//
 
-TargetIRAnalysis X86TargetMachine::getTargetIRAnalysis() {
-  return TargetIRAnalysis([this](const Function &F) {
-    return TargetTransformInfo(X86TTIImpl(this, F));
-  });
+TargetTransformInfo
+X86TargetMachine::getTargetTransformInfo(const Function &F) {
+  return TargetTransformInfo(X86TTIImpl(this, F));
 }
 
 //===----------------------------------------------------------------------===//
@@ -436,11 +435,4 @@ void X86PassConfig::addPreEmitPass() {
     addPass(createX86FixupLEAs());
     addPass(createX86EvexToVexInsts());
   }
-
-  // Verify basic block incoming and outgoing cfa offset and register values and
-  // correct CFA calculation rule where needed by inserting appropriate CFI
-  // instructions.
-  const Triple &TT = TM->getTargetTriple();
-  if (!TT.isOSDarwin() && !TT.isOSWindows())
-    addPass(createCFIInstrInserter());
 }

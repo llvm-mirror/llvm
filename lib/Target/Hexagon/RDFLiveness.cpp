@@ -34,13 +34,13 @@
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/MC/LaneBitmask.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -62,7 +62,7 @@ namespace rdf {
   raw_ostream &operator<< (raw_ostream &OS, const Print<Liveness::RefMap> &P) {
     OS << '{';
     for (auto &I : P.Obj) {
-      OS << ' ' << PrintReg(I.first, &P.G.getTRI()) << '{';
+      OS << ' ' << printReg(I.first, &P.G.getTRI()) << '{';
       for (auto J = I.second.begin(), E = I.second.end(); J != E; ) {
         OS << Print<NodeId>(J->first, P.G) << PrintLaneMaskOpt(J->second);
         if (++J != E)
@@ -814,7 +814,7 @@ void Liveness::computeLiveIns() {
       for (auto I = B.livein_begin(), E = B.livein_end(); I != E; ++I)
         LV.push_back(RegisterRef(I->PhysReg, I->LaneMask));
       std::sort(LV.begin(), LV.end());
-      dbgs() << "BB#" << B.getNumber() << "\t rec = {";
+      dbgs() << printMBBReference(B) << "\t rec = {";
       for (auto I : LV)
         dbgs() << ' ' << Print<RegisterRef>(I, DFG);
       dbgs() << " }\n";
@@ -963,7 +963,7 @@ void Liveness::traverse(MachineBasicBlock *B, RefMap &LiveIn) {
   }
 
   if (Trace) {
-    dbgs() << "\n-- BB#" << B->getNumber() << ": " << __func__
+    dbgs() << "\n-- " << printMBBReference(*B) << ": " << __func__
            << " after recursion into: {";
     for (auto I : *N)
       dbgs() << ' ' << I->getBlock()->getNumber();

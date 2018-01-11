@@ -90,10 +90,13 @@ void WebAssemblyAsmPrinter::EmitEndOfAsmFile(Module &M) {
   }
   for (const auto &G : M.globals()) {
     if (!G.hasInitializer() && G.hasExternalLinkage()) {
-      uint16_t Size = M.getDataLayout().getTypeAllocSize(G.getValueType());
-      getTargetStreamer()->emitGlobalImport(G.getGlobalIdentifier());
-      OutStreamer->emitELFSize(getSymbol(&G),
-                               MCConstantExpr::create(Size, OutContext));
+      if (G.getValueType()->isSized()) {
+        uint16_t Size = M.getDataLayout().getTypeAllocSize(G.getValueType());
+        if (TM.getTargetTriple().isOSBinFormatELF())
+          getTargetStreamer()->emitGlobalImport(G.getGlobalIdentifier());
+        OutStreamer->emitELFSize(getSymbol(&G),
+                                 MCConstantExpr::create(Size, OutContext));
+      }
     }
   }
 }
@@ -111,7 +114,7 @@ void WebAssemblyAsmPrinter::EmitFunctionBodyStart() {
   getTargetStreamer()->emitParam(CurrentFnSym, MFI->getParams());
 
   SmallVector<MVT, 4> ResultVTs;
-  const Function &F(*MF->getFunction());
+  const Function &F = MF->getFunction();
 
   // Emit the function index.
   if (MDNode *Idx = F.getMetadata("wasm.index")) {
@@ -187,7 +190,7 @@ void WebAssemblyAsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
     if (isVerbose()) {
       OutStreamer->AddComment("fallthrough-return: $pop" +
-                              utostr(MFI->getWARegStackId(
+                              Twine(MFI->getWARegStackId(
                                   MFI->getWAReg(MI->getOperand(0).getReg()))));
       OutStreamer->AddBlankLine();
     }

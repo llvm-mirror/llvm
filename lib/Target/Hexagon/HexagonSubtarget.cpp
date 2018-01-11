@@ -92,8 +92,8 @@ static cl::opt<bool> EnableCheckBankConflict("hexagon-check-bank-conflict",
 
 HexagonSubtarget::HexagonSubtarget(const Triple &TT, StringRef CPU,
                                    StringRef FS, const TargetMachine &TM)
-    : HexagonGenSubtargetInfo(TT, CPU, FS),
-      CPUString(Hexagon_MC::selectHexagonCPU(TT, CPU)),
+    : HexagonGenSubtargetInfo(TT, CPU, FS), OptLevel(TM.getOptLevel()),
+      CPUString(Hexagon_MC::selectHexagonCPU(CPU)),
       InstrInfo(initializeSubtargetDependencies(CPU, FS)),
       RegInfo(getHwMode()), TLInfo(TM, *this),
       InstrItins(getInstrItineraryForCPU(CPUString)) {
@@ -110,6 +110,7 @@ HexagonSubtarget::initializeSubtargetDependencies(StringRef CPU, StringRef FS) {
       {"hexagonv55", Hexagon::ArchEnum::V55},
       {"hexagonv60", Hexagon::ArchEnum::V60},
       {"hexagonv62", Hexagon::ArchEnum::V62},
+      {"hexagonv65", Hexagon::ArchEnum::V65},
   };
 
   auto FoundIt = CpuTable.find(CPUString);
@@ -130,6 +131,11 @@ HexagonSubtarget::initializeSubtargetDependencies(StringRef CPU, StringRef FS) {
 
   if (OverrideLongCalls.getPosition())
     UseLongCalls = OverrideLongCalls;
+
+  FeatureBitset Features = getFeatureBits();
+  if (HexagonDisableDuplex)
+    setFeatureBits(Features.set(Hexagon::FeatureDuplex, false));
+  setFeatureBits(Hexagon_MC::completeHVXFeatures(Features));
 
   return *this;
 }
@@ -220,29 +226,29 @@ void HexagonSubtarget::CallMutation::apply(ScheduleDAGInstrs *DAG) {
              shouldTFRICallBind(HII, DAG->SUnits[su], DAG->SUnits[su+1]))
       DAG->SUnits[su].addPred(SDep(&DAG->SUnits[su-1], SDep::Barrier));
     // Prevent redundant register copies between two calls, which are caused by
-    // both the return value and the argument for the next call being in %R0.
+    // both the return value and the argument for the next call being in %r0.
     // Example:
     //   1: <call1>
-    //   2: %VregX = COPY %R0
-    //   3: <use of %VregX>
-    //   4: %R0 = ...
+    //   2: %vreg = COPY %r0
+    //   3: <use of %vreg>
+    //   4: %r0 = ...
     //   5: <call2>
     // The scheduler would often swap 3 and 4, so an additional register is
     // needed. This code inserts a Barrier dependence between 3 & 4 to prevent
-    // this. The same applies for %D0 and %V0/%W0, which are also handled.
+    // this. The same applies for %d0 and %v0/%w0, which are also handled.
     else if (SchedRetvalOptimization) {
       const MachineInstr *MI = DAG->SUnits[su].getInstr();
       if (MI->isCopy() && (MI->readsRegister(Hexagon::R0, &TRI) ||
                            MI->readsRegister(Hexagon::V0, &TRI)))  {
-        // %vregX = COPY %R0
+        // %vreg = COPY %r0
         VRegHoldingRet = MI->getOperand(0).getReg();
         RetRegister = MI->getOperand(1).getReg();
         LastUseOfRet = nullptr;
       } else if (VRegHoldingRet && MI->readsVirtualRegister(VRegHoldingRet))
-        // <use of %vregX>
+        // <use of %X>
         LastUseOfRet = &DAG->SUnits[su];
       else if (LastUseOfRet && MI->definesRegister(RetRegister, &TRI))
-        // %R0 = ...
+        // %r0 = ...
         DAG->SUnits[su].addPred(SDep(LastUseOfRet, SDep::Barrier));
     }
   }
@@ -292,6 +298,14 @@ void HexagonSubtarget::BankConflictMutation::apply(ScheduleDAGInstrs *DAG) {
       S1.addPred(A, true);
     }
   }
+}
+
+/// \brief Enable use of alias analysis during code generation (during MI
+/// scheduling, DAGCombine, etc.).
+bool HexagonSubtarget::useAA() const {
+  if (OptLevel != CodeGenOpt::None)
+    return true;
+  return false;
 }
 
 /// \brief Perform target specific adjustments to the latency of a schedule

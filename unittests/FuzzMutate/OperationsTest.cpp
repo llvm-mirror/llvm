@@ -8,11 +8,13 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/FuzzMutate/Operations.h"
+#include "llvm/AsmParser/Parser.h"
 #include "llvm/FuzzMutate/OpDescriptor.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/Support/SourceMgr.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include <iostream>
@@ -52,9 +54,25 @@ using testing::NotNull;
 using testing::PrintToString;
 using testing::SizeIs;
 
+namespace {
+std::unique_ptr<Module> parseAssembly(
+    const char *Assembly, LLVMContext &Context) {
+
+  SMDiagnostic Error;
+  std::unique_ptr<Module> M = parseAssemblyString(Assembly, Error, Context);
+
+  std::string ErrMsg;
+  raw_string_ostream OS(ErrMsg);
+  Error.print("", OS);
+
+  assert(M && !verifyModule(*M, &errs()));
+  return M;
+}
+
 MATCHER_P(TypesMatch, V, "has type " + PrintToString(V->getType())) {
   return arg->getType() == V->getType();
 }
+
 MATCHER_P(HasType, T, "") { return arg->getType() == T; }
 
 TEST(OperationsTest, SourcePreds) {
@@ -193,6 +211,35 @@ TEST(OperationsTest, SplitBlock) {
   EXPECT_FALSE(verifyModule(M, &errs()));
 }
 
+TEST(OperationsTest, SplitEHBlock) {
+  // Check that we will not try to branch back to the landingpad block using
+  // regular branch instruction
+
+  LLVMContext Ctx;
+  const char *SourceCode =
+      "declare i32* @f()"
+      "declare i32 @personality_function()"
+      "define i32* @test() personality i32 ()* @personality_function {\n"
+      "entry:\n"
+      "  %val = invoke i32* @f()\n"
+      "          to label %normal unwind label %exceptional\n"
+      "normal:\n"
+      "  ret i32* %val\n"
+      "exceptional:\n"
+      "  %landing_pad4 = landingpad token cleanup\n"
+      "  ret i32* undef\n"
+      "}";
+  auto M = parseAssembly(SourceCode, Ctx);
+
+  // Get the landingpad block
+  BasicBlock &BB = *std::next(M->getFunction("test")->begin(), 2);
+
+  fuzzerop::OpDescriptor Descr = fuzzerop::splitBlockDescriptor(1);
+
+  Descr.BuilderFunc({ConstantInt::getTrue(Ctx)},&*BB.getFirstInsertionPt());
+  ASSERT_TRUE(!verifyModule(*M, &errs()));
+}
+
 TEST(OperationsTest, SplitBlockWithPhis) {
   LLVMContext Ctx;
 
@@ -253,6 +300,33 @@ TEST(OperationsTest, GEP) {
   EXPECT_FALSE(verifyModule(M, &errs()));
 }
 
+
+TEST(OperationsTest, GEPPointerOperand) {
+  // Check that we only pick sized pointers for the GEP instructions
+
+  LLVMContext Ctx;
+  const char *SourceCode =
+      "declare void @f()\n"
+      "define void @test() {\n"
+      "  %v = bitcast void ()* @f to i64 (i8 addrspace(4)*)*\n"
+      "  %a = alloca i64, i32 10\n"
+      "  ret void\n"
+      "}";
+  auto M = parseAssembly(SourceCode, Ctx);
+
+  fuzzerop::OpDescriptor Descr = fuzzerop::gepDescriptor(1);
+
+  // Get first basic block of the test function
+  Function &F = *M->getFunction("test");
+  BasicBlock &BB = *F.begin();
+
+  // Don't match %v
+  ASSERT_FALSE(Descr.SourcePreds[0].matches({}, &*BB.begin()));
+
+  // Match %a
+  ASSERT_TRUE(Descr.SourcePreds[0].matches({}, &*std::next(BB.begin())));
+}
+
 TEST(OperationsTest, ExtractAndInsertValue) {
   LLVMContext Ctx;
 
@@ -262,6 +336,7 @@ TEST(OperationsTest, ExtractAndInsertValue) {
 
   Type *StructTy = StructType::create(Ctx, {Int8PtrTy, Int32Ty});
   Type *OpaqueTy = StructType::create(Ctx, "OpaqueStruct");
+  Type *ZeroSizedArrayTy = ArrayType::get(Int64Ty, 0);
   Type *ArrayTy = ArrayType::get(Int64Ty, 4);
   Type *VectorTy = VectorType::get(Int32Ty, 2);
 
@@ -272,16 +347,21 @@ TEST(OperationsTest, ExtractAndInsertValue) {
   Constant *SVal = UndefValue::get(StructTy);
   Constant *OVal = UndefValue::get(OpaqueTy);
   Constant *AVal = UndefValue::get(ArrayTy);
+  Constant *ZAVal = UndefValue::get(ZeroSizedArrayTy);
   Constant *VVal = UndefValue::get(VectorTy);
 
   EXPECT_TRUE(EVOp.SourcePreds[0].matches({}, SVal));
-  EXPECT_TRUE(EVOp.SourcePreds[0].matches({}, OVal));
+  EXPECT_FALSE(EVOp.SourcePreds[0].matches({}, OVal));
   EXPECT_TRUE(EVOp.SourcePreds[0].matches({}, AVal));
   EXPECT_FALSE(EVOp.SourcePreds[0].matches({}, VVal));
   EXPECT_TRUE(IVOp.SourcePreds[0].matches({}, SVal));
-  EXPECT_TRUE(IVOp.SourcePreds[0].matches({}, OVal));
+  EXPECT_FALSE(IVOp.SourcePreds[0].matches({}, OVal));
   EXPECT_TRUE(IVOp.SourcePreds[0].matches({}, AVal));
   EXPECT_FALSE(IVOp.SourcePreds[0].matches({}, VVal));
+
+  // Don't consider zero sized arrays as viable sources
+  EXPECT_FALSE(EVOp.SourcePreds[0].matches({}, ZAVal));
+  EXPECT_FALSE(IVOp.SourcePreds[0].matches({}, ZAVal));
 
   // Make sure we're range checking appropriately.
   EXPECT_TRUE(
@@ -320,4 +400,6 @@ TEST(OperationsTest, ExtractAndInsertValue) {
   EXPECT_THAT(
       IVOp.SourcePreds[2].generate({SVal, ConstantInt::get(Int32Ty, 0)}, {}),
       ElementsAre(ConstantInt::get(Int32Ty, 1)));
+}
+
 }

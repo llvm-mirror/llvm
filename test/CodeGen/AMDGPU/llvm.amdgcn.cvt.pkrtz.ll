@@ -1,6 +1,6 @@
 ; RUN: llc -march=amdgcn -verify-machineinstrs < %s | FileCheck -enable-var-scope -check-prefix=GCN -check-prefix=SI %s
 ; RUN: llc -march=amdgcn -mcpu=fiji -verify-machineinstrs < %s | FileCheck -enable-var-scope -check-prefix=GCN -check-prefix=GFX89 -check-prefix=VI %s
-; RUN: llc -march=amdgcn -mcpu=gfx901 -verify-machineinstrs < %s | FileCheck -enable-var-scope -check-prefix=GCN -check-prefix=GFX89 -check-prefix=GFX9 %s
+; RUN: llc -march=amdgcn -mcpu=gfx900 -verify-machineinstrs < %s | FileCheck -enable-var-scope -check-prefix=GCN -check-prefix=GFX89 -check-prefix=GFX9 %s
 
 ; GCN-LABEL: {{^}}s_cvt_pkrtz_v2f16_f32:
 ; GCN-DAG: s_load_dword [[X:s[0-9]+]], s[0:1], 0x{{b|2c}}
@@ -25,7 +25,7 @@ define amdgpu_kernel void @s_cvt_pkrtz_samereg_v2f16_f32(<2 x half> addrspace(1)
 
 ; FIXME: Folds to 0 on gfx9
 ; GCN-LABEL: {{^}}s_cvt_pkrtz_undef_undef:
-; GCN-NEXT: ; BB#0
+; GCN-NEXT: ; %bb.0
 ; SI-NEXT: s_endpgm
 ; VI-NEXT: s_endpgm
 ; GFX9: v_mov_b32_e32 v{{[0-9]+}}, 0{{$}}

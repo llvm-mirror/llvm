@@ -42,6 +42,7 @@
 #include "llvm/CodeGen/RuntimeLibcalls.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
+#include "llvm/CodeGen/TargetCallingConv.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/IR/Attributes.h"
@@ -71,7 +72,6 @@
 #include "llvm/Support/KnownBits.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetCallingConv.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
 #include <algorithm>
@@ -470,10 +470,9 @@ AArch64TargetLowering::AArch64TargetLowering(const TargetMachine &TM,
   if (Subtarget->hasPerfMon())
     setOperationAction(ISD::READCYCLECOUNTER, MVT::i64, Legal);
 
-  if (Subtarget->isTargetMachO()) {
-    // For iOS, we don't want to the normal expansion of a libcall to
-    // sincos. We want to issue a libcall to __sincos_stret to avoid memory
-    // traffic.
+  if (getLibcallName(RTLIB::SINCOS_STRET_F32) != nullptr &&
+      getLibcallName(RTLIB::SINCOS_STRET_F64) != nullptr) {
+    // Issue __sincos_stret if available.
     setOperationAction(ISD::FSINCOS, MVT::f64, Custom);
     setOperationAction(ISD::FSINCOS, MVT::f32, Custom);
   } else {
@@ -633,16 +632,16 @@ AArch64TargetLowering::AArch64TargetLowering(const TargetMachine &TM,
 
     // AArch64 doesn't have a direct vector ->f32 conversion instructions for
     // elements smaller than i32, so promote the input to i32 first.
-    setOperationAction(ISD::UINT_TO_FP, MVT::v4i8, Promote);
-    setOperationAction(ISD::SINT_TO_FP, MVT::v4i8, Promote);
-    setOperationAction(ISD::UINT_TO_FP, MVT::v4i16, Promote);
-    setOperationAction(ISD::SINT_TO_FP, MVT::v4i16, Promote);
+    setOperationPromotedToType(ISD::UINT_TO_FP, MVT::v4i8, MVT::v4i32);
+    setOperationPromotedToType(ISD::SINT_TO_FP, MVT::v4i8, MVT::v4i32);
+    setOperationPromotedToType(ISD::UINT_TO_FP, MVT::v4i16, MVT::v4i32);
+    setOperationPromotedToType(ISD::SINT_TO_FP, MVT::v4i16, MVT::v4i32);
     // i8 and i16 vector elements also need promotion to i32 for v8i8 or v8i16
     // -> v8f16 conversions.
-    setOperationAction(ISD::SINT_TO_FP, MVT::v8i8, Promote);
-    setOperationAction(ISD::UINT_TO_FP, MVT::v8i8, Promote);
-    setOperationAction(ISD::SINT_TO_FP, MVT::v8i16, Promote);
-    setOperationAction(ISD::UINT_TO_FP, MVT::v8i16, Promote);
+    setOperationPromotedToType(ISD::SINT_TO_FP, MVT::v8i8, MVT::v8i32);
+    setOperationPromotedToType(ISD::UINT_TO_FP, MVT::v8i8, MVT::v8i32);
+    setOperationPromotedToType(ISD::SINT_TO_FP, MVT::v8i16, MVT::v8i32);
+    setOperationPromotedToType(ISD::UINT_TO_FP, MVT::v8i16, MVT::v8i32);
     // Similarly, there is no direct i32 -> f64 vector conversion instruction.
     setOperationAction(ISD::SINT_TO_FP, MVT::v2i32, Custom);
     setOperationAction(ISD::UINT_TO_FP, MVT::v2i32, Custom);
@@ -2328,8 +2327,9 @@ SDValue AArch64TargetLowering::LowerFSINCOS(SDValue Op,
   Entry.IsZExt = false;
   Args.push_back(Entry);
 
-  const char *LibcallName =
-      (ArgVT == MVT::f64) ? "__sincos_stret" : "__sincosf_stret";
+  RTLIB::Libcall LC = ArgVT == MVT::f64 ? RTLIB::SINCOS_STRET_F64
+                                        : RTLIB::SINCOS_STRET_F32;
+  const char *LibcallName = getLibcallName(LC);
   SDValue Callee =
       DAG.getExternalSymbol(LibcallName, getPointerTy(DAG.getDataLayout()));
 
@@ -2731,7 +2731,7 @@ SDValue AArch64TargetLowering::LowerFormalArguments(
     SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const {
   MachineFunction &MF = DAG.getMachineFunction();
   MachineFrameInfo &MFI = MF.getFrameInfo();
-  bool IsWin64 = Subtarget->isCallingConvWin64(MF.getFunction()->getCallingConv());
+  bool IsWin64 = Subtarget->isCallingConvWin64(MF.getFunction().getCallingConv());
 
   // Assign locations to all of the incoming arguments.
   SmallVector<CCValAssign, 16> ArgLocs;
@@ -2745,7 +2745,7 @@ SDValue AArch64TargetLowering::LowerFormalArguments(
   // we use a special version of AnalyzeFormalArguments to pass in ValVT and
   // LocVT.
   unsigned NumArgs = Ins.size();
-  Function::const_arg_iterator CurOrigArg = MF.getFunction()->arg_begin();
+  Function::const_arg_iterator CurOrigArg = MF.getFunction().arg_begin();
   unsigned CurArgIdx = 0;
   for (unsigned i = 0; i != NumArgs; ++i) {
     MVT ValVT = Ins[i].VT;
@@ -2935,7 +2935,7 @@ void AArch64TargetLowering::saveVarArgRegisters(CCState &CCInfo,
   MachineFrameInfo &MFI = MF.getFrameInfo();
   AArch64FunctionInfo *FuncInfo = MF.getInfo<AArch64FunctionInfo>();
   auto PtrVT = getPointerTy(DAG.getDataLayout());
-  bool IsWin64 = Subtarget->isCallingConvWin64(MF.getFunction()->getCallingConv());
+  bool IsWin64 = Subtarget->isCallingConvWin64(MF.getFunction().getCallingConv());
 
   SmallVector<SDValue, 8> MemOps;
 
@@ -3087,15 +3087,15 @@ bool AArch64TargetLowering::isEligibleForTailCallOptimization(
     return false;
 
   MachineFunction &MF = DAG.getMachineFunction();
-  const Function *CallerF = MF.getFunction();
-  CallingConv::ID CallerCC = CallerF->getCallingConv();
+  const Function &CallerF = MF.getFunction();
+  CallingConv::ID CallerCC = CallerF.getCallingConv();
   bool CCMatch = CallerCC == CalleeCC;
 
   // Byval parameters hand the function a pointer directly into the stack area
   // we want to reuse during a tail call. Working around this *is* possible (see
   // X86) but less efficient and uglier in LowerCall.
-  for (Function::const_arg_iterator i = CallerF->arg_begin(),
-                                    e = CallerF->arg_end();
+  for (Function::const_arg_iterator i = CallerF.arg_begin(),
+                                    e = CallerF.arg_end();
        i != e; ++i)
     if (i->hasByValAttr())
       return false;
@@ -3795,7 +3795,8 @@ SDValue AArch64TargetLowering::LowerGlobalAddress(SDValue Op,
 SDValue
 AArch64TargetLowering::LowerDarwinGlobalTLSAddress(SDValue Op,
                                                    SelectionDAG &DAG) const {
-  assert(Subtarget->isTargetDarwin() && "TLS only supported on Darwin");
+  assert(Subtarget->isTargetDarwin() &&
+         "This function expects a Darwin target");
 
   SDLoc DL(Op);
   MVT PtrVT = getPointerTy(DAG.getDataLayout());
@@ -3884,9 +3885,6 @@ AArch64TargetLowering::LowerELFGlobalTLSAddress(SDValue Op,
 
   TLSModel::Model Model = getTargetMachine().getTLSModel(GA->getGlobal());
 
-  if (DAG.getTarget().Options.EmulatedTLS)
-    return LowerToTLSEmulatedModel(GA, DAG);
-
   if (!EnableAArch64ELFLocalDynamicTLSGeneration) {
     if (Model == TLSModel::LocalDynamic)
       Model = TLSModel::GeneralDynamic;
@@ -3972,6 +3970,10 @@ AArch64TargetLowering::LowerELFGlobalTLSAddress(SDValue Op,
 
 SDValue AArch64TargetLowering::LowerGlobalTLSAddress(SDValue Op,
                                                      SelectionDAG &DAG) const {
+  const GlobalAddressSDNode *GA = cast<GlobalAddressSDNode>(Op);
+  if (DAG.getTarget().Options.EmulatedTLS)
+    return LowerToTLSEmulatedModel(GA, DAG);
+
   if (Subtarget->isTargetDarwin())
     return LowerDarwinGlobalTLSAddress(Op, DAG);
   if (Subtarget->isTargetELF())
@@ -4004,9 +4006,8 @@ SDValue AArch64TargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
 
   // Optimize {s|u}{add|sub|mul}.with.overflow feeding into a branch
   // instruction.
-  if (isOverflowIntrOpRes(LHS) && isOneConstant(RHS)) {
-    assert((CC == ISD::SETEQ || CC == ISD::SETNE) &&
-           "Unexpected condition code.");
+  if (isOverflowIntrOpRes(LHS) && isOneConstant(RHS) &&
+      (CC == ISD::SETEQ || CC == ISD::SETNE)) {
     // Only lower legal XALUO ops.
     if (!DAG.getTargetLoweringInfo().isTypeLegal(LHS->getValueType(0)))
       return SDValue();
@@ -4184,7 +4185,7 @@ SDValue AArch64TargetLowering::LowerFCOPYSIGN(SDValue Op,
 }
 
 SDValue AArch64TargetLowering::LowerCTPOP(SDValue Op, SelectionDAG &DAG) const {
-  if (DAG.getMachineFunction().getFunction()->hasFnAttribute(
+  if (DAG.getMachineFunction().getFunction().hasFnAttribute(
           Attribute::NoImplicitFloat))
     return SDValue();
 
@@ -4667,7 +4668,7 @@ SDValue AArch64TargetLowering::LowerVASTART(SDValue Op,
                                             SelectionDAG &DAG) const {
   MachineFunction &MF = DAG.getMachineFunction();
 
-  if (Subtarget->isCallingConvWin64(MF.getFunction()->getCallingConv()))
+  if (Subtarget->isCallingConvWin64(MF.getFunction().getCallingConv()))
     return LowerWin64_VASTART(Op, DAG);
   else if (Subtarget->isTargetDarwin())
     return LowerDarwin_VASTART(Op, DAG);
@@ -7370,6 +7371,7 @@ SDValue AArch64TargetLowering::LowerVECREDUCE(SDValue Op,
 /// specified in the intrinsic calls.
 bool AArch64TargetLowering::getTgtMemIntrinsic(IntrinsicInfo &Info,
                                                const CallInst &I,
+                                               MachineFunction &MF,
                                                unsigned Intrinsic) const {
   auto &DL = I.getModule()->getDataLayout();
   switch (Intrinsic) {
@@ -7392,9 +7394,8 @@ bool AArch64TargetLowering::getTgtMemIntrinsic(IntrinsicInfo &Info,
     Info.ptrVal = I.getArgOperand(I.getNumArgOperands() - 1);
     Info.offset = 0;
     Info.align = 0;
-    Info.vol = false; // volatile loads with NEON intrinsics not supported
-    Info.readMem = true;
-    Info.writeMem = false;
+    // volatile loads with NEON intrinsics not supported
+    Info.flags = MachineMemOperand::MOLoad;
     return true;
   }
   case Intrinsic::aarch64_neon_st2:
@@ -7419,9 +7420,8 @@ bool AArch64TargetLowering::getTgtMemIntrinsic(IntrinsicInfo &Info,
     Info.ptrVal = I.getArgOperand(I.getNumArgOperands() - 1);
     Info.offset = 0;
     Info.align = 0;
-    Info.vol = false; // volatile stores with NEON intrinsics not supported
-    Info.readMem = false;
-    Info.writeMem = true;
+    // volatile stores with NEON intrinsics not supported
+    Info.flags = MachineMemOperand::MOStore;
     return true;
   }
   case Intrinsic::aarch64_ldaxr:
@@ -7432,9 +7432,7 @@ bool AArch64TargetLowering::getTgtMemIntrinsic(IntrinsicInfo &Info,
     Info.ptrVal = I.getArgOperand(0);
     Info.offset = 0;
     Info.align = DL.getABITypeAlignment(PtrTy->getElementType());
-    Info.vol = true;
-    Info.readMem = true;
-    Info.writeMem = false;
+    Info.flags = MachineMemOperand::MOLoad | MachineMemOperand::MOVolatile;
     return true;
   }
   case Intrinsic::aarch64_stlxr:
@@ -7445,9 +7443,7 @@ bool AArch64TargetLowering::getTgtMemIntrinsic(IntrinsicInfo &Info,
     Info.ptrVal = I.getArgOperand(1);
     Info.offset = 0;
     Info.align = DL.getABITypeAlignment(PtrTy->getElementType());
-    Info.vol = true;
-    Info.readMem = false;
-    Info.writeMem = true;
+    Info.flags = MachineMemOperand::MOStore | MachineMemOperand::MOVolatile;
     return true;
   }
   case Intrinsic::aarch64_ldaxp:
@@ -7457,9 +7453,7 @@ bool AArch64TargetLowering::getTgtMemIntrinsic(IntrinsicInfo &Info,
     Info.ptrVal = I.getArgOperand(0);
     Info.offset = 0;
     Info.align = 16;
-    Info.vol = true;
-    Info.readMem = true;
-    Info.writeMem = false;
+    Info.flags = MachineMemOperand::MOLoad | MachineMemOperand::MOVolatile;
     return true;
   case Intrinsic::aarch64_stlxp:
   case Intrinsic::aarch64_stxp:
@@ -7468,9 +7462,7 @@ bool AArch64TargetLowering::getTgtMemIntrinsic(IntrinsicInfo &Info,
     Info.ptrVal = I.getArgOperand(2);
     Info.offset = 0;
     Info.align = 16;
-    Info.vol = true;
-    Info.readMem = false;
-    Info.writeMem = true;
+    Info.flags = MachineMemOperand::MOStore | MachineMemOperand::MOVolatile;
     return true;
   default:
     break;
@@ -7917,9 +7909,9 @@ EVT AArch64TargetLowering::getOptimalMemOpType(uint64_t Size, unsigned DstAlign,
   // instruction to materialize the v2i64 zero and one store (with restrictive
   // addressing mode). Just do two i64 store of zero-registers.
   bool Fast;
-  const Function *F = MF.getFunction();
+  const Function &F = MF.getFunction();
   if (Subtarget->hasFPARMv8() && !IsMemset && Size >= 16 &&
-      !F->hasFnAttribute(Attribute::NoImplicitFloat) &&
+      !F.hasFnAttribute(Attribute::NoImplicitFloat) &&
       (memOpAlign(SrcAlign, DstAlign, 16) ||
        (allowsMisalignedMemoryAccesses(MVT::f128, 0, 1, &Fast) && Fast)))
     return MVT::f128;
@@ -8164,7 +8156,7 @@ SDValue
 AArch64TargetLowering::BuildSDIVPow2(SDNode *N, const APInt &Divisor,
                                      SelectionDAG &DAG,
                                      std::vector<SDNode *> *Created) const {
-  AttributeList Attr = DAG.getMachineFunction().getFunction()->getAttributes();
+  AttributeList Attr = DAG.getMachineFunction().getFunction().getAttributes();
   if (isIntDivCheap(N->getValueType(0), Attr))
     return SDValue(N,0); // Lower SDIV as SDIV
 
@@ -9561,8 +9553,6 @@ static SDValue replaceSplatVectorStore(SelectionDAG &DAG, StoreSDNode &St) {
 static SDValue splitStores(SDNode *N, TargetLowering::DAGCombinerInfo &DCI,
                            SelectionDAG &DAG,
                            const AArch64Subtarget *Subtarget) {
-  if (!DCI.isBeforeLegalize())
-    return SDValue();
 
   StoreSDNode *S = cast<StoreSDNode>(N);
   if (S->isVolatile() || S->isIndexed())
@@ -9587,7 +9577,7 @@ static SDValue splitStores(SDNode *N, TargetLowering::DAGCombinerInfo &DCI,
     return SDValue();
 
   // Don't split at -Oz.
-  if (DAG.getMachineFunction().getFunction()->optForMinSize())
+  if (DAG.getMachineFunction().getFunction().optForMinSize())
     return SDValue();
 
   // Don't split v2i64 vectors. Memcpy lowering produces those and splitting
@@ -10949,7 +10939,7 @@ void AArch64TargetLowering::insertCopiesSplitCSR(
     // fine for CXX_FAST_TLS since the C++-style TLS access functions should be
     // nounwind. If we want to generalize this later, we may need to emit
     // CFI pseudo-instructions.
-    assert(Entry->getParent()->getFunction()->hasFnAttribute(
+    assert(Entry->getParent()->getFunction().hasFnAttribute(
                Attribute::NoUnwind) &&
            "Function should be nounwind in insertCopiesSplitCSR!");
     Entry->addLiveIn(*I);

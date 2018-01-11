@@ -14,46 +14,46 @@
 ///  Register Class <vsrc> is the union of <vgpr> and <sgpr>
 ///
 /// BB0:
-///   %vreg0 <sgpr> = SCALAR_INST
-///   %vreg1 <vsrc> = COPY %vreg0 <sgpr>
+///   %0 <sgpr> = SCALAR_INST
+///   %1 <vsrc> = COPY %0 <sgpr>
 ///    ...
 ///    BRANCH %cond BB1, BB2
 ///  BB1:
-///    %vreg2 <vgpr> = VECTOR_INST
-///    %vreg3 <vsrc> = COPY %vreg2 <vgpr>
+///    %2 <vgpr> = VECTOR_INST
+///    %3 <vsrc> = COPY %2 <vgpr>
 ///  BB2:
-///    %vreg4 <vsrc> = PHI %vreg1 <vsrc>, <BB#0>, %vreg3 <vrsc>, <BB#1>
-///    %vreg5 <vgpr> = VECTOR_INST %vreg4 <vsrc>
+///    %4 <vsrc> = PHI %1 <vsrc>, <%bb.0>, %3 <vrsc>, <%bb.1>
+///    %5 <vgpr> = VECTOR_INST %4 <vsrc>
 ///
 ///
 /// The coalescer will begin at BB0 and eliminate its copy, then the resulting
 /// code will look like this:
 ///
 /// BB0:
-///   %vreg0 <sgpr> = SCALAR_INST
+///   %0 <sgpr> = SCALAR_INST
 ///    ...
 ///    BRANCH %cond BB1, BB2
 /// BB1:
-///   %vreg2 <vgpr> = VECTOR_INST
-///   %vreg3 <vsrc> = COPY %vreg2 <vgpr>
+///   %2 <vgpr> = VECTOR_INST
+///   %3 <vsrc> = COPY %2 <vgpr>
 /// BB2:
-///   %vreg4 <sgpr> = PHI %vreg0 <sgpr>, <BB#0>, %vreg3 <vsrc>, <BB#1>
-///   %vreg5 <vgpr> = VECTOR_INST %vreg4 <sgpr>
+///   %4 <sgpr> = PHI %0 <sgpr>, <%bb.0>, %3 <vsrc>, <%bb.1>
+///   %5 <vgpr> = VECTOR_INST %4 <sgpr>
 ///
 /// Now that the result of the PHI instruction is an SGPR, the register
-/// allocator is now forced to constrain the register class of %vreg3 to
+/// allocator is now forced to constrain the register class of %3 to
 /// <sgpr> so we end up with final code like this:
 ///
 /// BB0:
-///   %vreg0 <sgpr> = SCALAR_INST
+///   %0 <sgpr> = SCALAR_INST
 ///    ...
 ///    BRANCH %cond BB1, BB2
 /// BB1:
-///   %vreg2 <vgpr> = VECTOR_INST
-///   %vreg3 <sgpr> = COPY %vreg2 <vgpr>
+///   %2 <vgpr> = VECTOR_INST
+///   %3 <sgpr> = COPY %2 <vgpr>
 /// BB2:
-///   %vreg4 <sgpr> = PHI %vreg0 <sgpr>, <BB#0>, %vreg3 <sgpr>, <BB#1>
-///   %vreg5 <vgpr> = VECTOR_INST %vreg4 <sgpr>
+///   %4 <sgpr> = PHI %0 <sgpr>, <%bb.0>, %3 <sgpr>, <%bb.1>
+///   %5 <vgpr> = VECTOR_INST %4 <sgpr>
 ///
 /// Now this code contains an illegal copy from a VGPR to an SGPR.
 ///
@@ -81,13 +81,14 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/MachinePostDominators.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 #include <cassert>
 #include <cstdint>
 #include <iterator>
@@ -109,7 +110,12 @@ namespace {
 
 class SIFixSGPRCopies : public MachineFunctionPass {
   MachineDominatorTree *MDT;
-
+  MachinePostDominatorTree *MPDT;
+  DenseMap<MachineBasicBlock *, SetVector<MachineBasicBlock*>> PDF;
+  void computePDF(MachineFunction * MF);
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+  void printPDF();
+#endif
 public:
   static char ID;
 
@@ -122,6 +128,8 @@ public:
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequired<MachineDominatorTree>();
     AU.addPreserved<MachineDominatorTree>();
+    AU.addRequired<MachinePostDominatorTree>();
+    AU.addPreserved<MachinePostDominatorTree>();
     AU.setPreservesCFG();
     MachineFunctionPass::getAnalysisUsage(AU);
   }
@@ -409,12 +417,6 @@ bool searchPredecessors(const MachineBasicBlock *MBB,
   return false;
 }
 
-static bool predsHasDivergentTerminator(MachineBasicBlock *MBB,
-                                        const TargetRegisterInfo *TRI) {
-  return searchPredecessors(MBB, nullptr, [TRI](MachineBasicBlock *MBB) {
-           return hasTerminatorThatModifiesExec(*MBB, *TRI); });
-}
-
 // Checks if there is potential path From instruction To instruction.
 // If CutOff is specified and it sits in between of that path we ignore
 // a higher portion of the path and report it is not reachable.
@@ -513,8 +515,9 @@ static bool hoistAndMergeSGPRInits(unsigned Reg,
 
         if (MDT.dominates(MI1, MI2)) {
           if (!intereferes(MI2, MI1)) {
-            DEBUG(dbgs() << "Erasing from BB#" << MI2->getParent()->getNumber()
-                         << " " << *MI2);
+            DEBUG(dbgs() << "Erasing from "
+                         << printMBBReference(*MI2->getParent()) << " "
+                         << *MI2);
             MI2->eraseFromParent();
             Defs.erase(I2++);
             Changed = true;
@@ -522,8 +525,9 @@ static bool hoistAndMergeSGPRInits(unsigned Reg,
           }
         } else if (MDT.dominates(MI2, MI1)) {
           if (!intereferes(MI1, MI2)) {
-            DEBUG(dbgs() << "Erasing from BB#" << MI1->getParent()->getNumber()
-                         << " " << *MI1);
+            DEBUG(dbgs() << "Erasing from "
+                         << printMBBReference(*MI1->getParent()) << " "
+                         << *MI1);
             MI1->eraseFromParent();
             Defs.erase(I1++);
             Changed = true;
@@ -539,10 +543,11 @@ static bool hoistAndMergeSGPRInits(unsigned Reg,
 
           MachineBasicBlock::iterator I = MBB->getFirstNonPHI();
           if (!intereferes(MI1, I) && !intereferes(MI2, I)) {
-            DEBUG(dbgs() << "Erasing from BB#" << MI1->getParent()->getNumber()
-                         << " " << *MI1 << "and moving from BB#"
-                         << MI2->getParent()->getNumber() << " to BB#"
-                         << I->getParent()->getNumber() << " " << *MI2);
+            DEBUG(dbgs() << "Erasing from "
+                         << printMBBReference(*MI1->getParent()) << " " << *MI1
+                         << "and moving from "
+                         << printMBBReference(*MI2->getParent()) << " to "
+                         << printMBBReference(*I->getParent()) << " " << *MI2);
             I->getParent()->splice(I, MI2->getParent(), MI2);
             MI1->eraseFromParent();
             Defs.erase(I1++);
@@ -562,12 +567,47 @@ static bool hoistAndMergeSGPRInits(unsigned Reg,
   return Changed;
 }
 
+void SIFixSGPRCopies::computePDF(MachineFunction *MF) {
+  MachineFunction::iterator B = MF->begin();
+  MachineFunction::iterator E = MF->end();
+  for (; B != E; ++B) {
+    if (B->succ_size() > 1) {
+      for (auto S : B->successors()) {
+        MachineDomTreeNode *runner = MPDT->getNode(&*S);
+        MachineDomTreeNode *sentinel = MPDT->getNode(&*B)->getIDom();
+        while (runner && runner != sentinel) {
+          PDF[runner->getBlock()].insert(&*B);
+          runner = runner->getIDom();
+        }
+      }
+    }
+  }
+}
+
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+void SIFixSGPRCopies::printPDF() {
+  dbgs() << "\n######## PostDominanceFrontiers set #########\n";
+  for (auto &I : PDF) {
+    dbgs() << "PDF[ " << I.first->getNumber() << "] : ";
+    for (auto &J : I.second) {
+      dbgs() << J->getNumber() << ' ';
+    }
+    dbgs() << '\n';
+  }
+  dbgs() << "\n##############################################\n";
+}
+#endif
+
 bool SIFixSGPRCopies::runOnMachineFunction(MachineFunction &MF) {
   const SISubtarget &ST = MF.getSubtarget<SISubtarget>();
   MachineRegisterInfo &MRI = MF.getRegInfo();
   const SIRegisterInfo *TRI = ST.getRegisterInfo();
   const SIInstrInfo *TII = ST.getInstrInfo();
   MDT = &getAnalysis<MachineDominatorTree>();
+  MPDT = &getAnalysis<MachinePostDominatorTree>();
+  PDF.clear();
+  computePDF(&MF);
+  DEBUG(printPDF());
 
   SmallVector<MachineInstr *, 16> Worklist;
 
@@ -621,15 +661,27 @@ bool SIFixSGPRCopies::runOnMachineFunction(MachineFunction &MF) {
         if (!TRI->isSGPRClass(MRI.getRegClass(Reg)))
           break;
 
-        // We don't need to fix the PHI if the common dominator of the
-        // two incoming blocks terminates with a uniform branch.
+        // We don't need to fix the PHI if all the source blocks
+        // have no divergent control dependecies
         bool HasVGPROperand = phiHasVGPROperands(MI, MRI, TRI, TII);
-        if (MI.getNumExplicitOperands() == 5 && !HasVGPROperand) {
-          MachineBasicBlock *MBB0 = MI.getOperand(2).getMBB();
-          MachineBasicBlock *MBB1 = MI.getOperand(4).getMBB();
-
-          if (!predsHasDivergentTerminator(MBB0, TRI) &&
-              !predsHasDivergentTerminator(MBB1, TRI)) {
+        if (!HasVGPROperand) {
+          bool Uniform = true;
+          MachineBasicBlock * Join = MI.getParent();
+          for (auto &O : MI.explicit_operands()) {
+            if (O.isMBB()) {
+              MachineBasicBlock * Source = O.getMBB();
+              SetVector<MachineBasicBlock*> &SourcePDF = PDF[Source];
+              SetVector<MachineBasicBlock*> &JoinPDF   = PDF[Join];
+              SetVector<MachineBasicBlock*> CDList;
+              for (auto &I : SourcePDF) {
+                if (!JoinPDF.count(I) || /* back edge */MDT->dominates(Join, I)) {
+                  if (hasTerminatorThatModifiesExec(*I, *TRI))
+                    Uniform = false;
+                }
+              }
+            }
+          }
+          if (Uniform) {
             DEBUG(dbgs() << "Not fixing PHI for uniform branch: " << MI << '\n');
             break;
           }

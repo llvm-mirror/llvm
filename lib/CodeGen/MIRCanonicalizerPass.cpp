@@ -30,7 +30,6 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/Passes.h"
-#include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <queue>
@@ -261,10 +260,10 @@ static std::vector<MachineInstr *> populateCandidates(MachineBasicBlock *MBB) {
   return Candidates;
 }
 
-void doCandidateWalk(std::vector<TypedVReg> &VRegs,
-                     std::queue <TypedVReg> &RegQueue,
-                     std::vector<MachineInstr *> &VisitedMIs,
-                     const MachineBasicBlock *MBB) {
+static void doCandidateWalk(std::vector<TypedVReg> &VRegs,
+                            std::queue<TypedVReg> &RegQueue,
+                            std::vector<MachineInstr *> &VisitedMIs,
+                            const MachineBasicBlock *MBB) {
 
   const MachineFunction &MF = *MBB->getParent();
   const MachineRegisterInfo &MRI = MF.getRegInfo();

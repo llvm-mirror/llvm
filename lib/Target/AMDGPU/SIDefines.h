@@ -69,7 +69,7 @@ enum : uint64_t {
   VOPAsmPrefer32Bit = UINT64_C(1) << 41,
   VOP3_OPSEL = UINT64_C(1) << 42,
   maybeAtomic = UINT64_C(1) << 43,
-  F16_ZFILL = UINT64_C(1) << 44,
+  renamedInGFX9 = UINT64_C(1) << 44,
 
   // Is a clamp on FP type.
   FPClamp = UINT64_C(1) << 45,
@@ -82,7 +82,10 @@ enum : uint64_t {
 
   // Clamps hi component of register.
   // ClampLo and ClampHi set for packed clamp.
-  ClampHi = UINT64_C(1) << 48
+  ClampHi = UINT64_C(1) << 48,
+
+  // Is a packed VOP3P instruction.
+  IsPacked = UINT64_C(1) << 49
 };
 
 // v_cmp_class_* etc. use a 10-bit mask for what operation is checked.
@@ -191,8 +194,10 @@ namespace EncValues { // Encoding values of enum9/8/7 operands
 enum {
   SGPR_MIN = 0,
   SGPR_MAX = 101,
-  TTMP_MIN = 112,
-  TTMP_MAX = 123,
+  TTMP_VI_MIN = 112,
+  TTMP_VI_MAX = 123,
+  TTMP_GFX9_MIN = 108,
+  TTMP_GFX9_MAX = 123,
   INLINE_INTEGER_C_MIN = 128,
   INLINE_INTEGER_C_POSITIVE_MAX = 192, // 64
   INLINE_INTEGER_C_MAX = 208,
@@ -365,6 +370,8 @@ enum SDWA9EncValues{
   SRC_VGPR_MAX = 255,
   SRC_SGPR_MIN = 256,
   SRC_SGPR_MAX = 357,
+  SRC_TTMP_MIN = 364,
+  SRC_TTMP_MAX = 379,
 };
 
 } // namespace SDWA

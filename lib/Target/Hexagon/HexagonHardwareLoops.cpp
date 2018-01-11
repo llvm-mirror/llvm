@@ -42,6 +42,7 @@
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/Pass.h"
@@ -50,7 +51,6 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
@@ -357,7 +357,7 @@ namespace {
     }
 
     void print(raw_ostream &OS, const TargetRegisterInfo *TRI = nullptr) const {
-      if (isReg()) { OS << PrintReg(Contents.R.Reg, TRI, Contents.R.Sub); }
+      if (isReg()) { OS << printReg(Contents.R.Reg, TRI, Contents.R.Sub); }
       if (isImm()) { OS << Contents.ImmVal; }
     }
   };
@@ -377,7 +377,7 @@ FunctionPass *llvm::createHexagonHardwareLoops() {
 
 bool HexagonHardwareLoops::runOnMachineFunction(MachineFunction &MF) {
   DEBUG(dbgs() << "********* Hexagon Hardware Loops *********\n");
-  if (skipFunction(*MF.getFunction()))
+  if (skipFunction(MF.getFunction()))
     return false;
 
   bool Changed = false;
@@ -1011,7 +1011,7 @@ bool HexagonHardwareLoops::isInvalidLoopOperation(const MachineInstr *MI,
 bool HexagonHardwareLoops::containsInvalidInstruction(MachineLoop *L,
     bool IsInnerHWLoop) const {
   const std::vector<MachineBasicBlock *> &Blocks = L->getBlocks();
-  DEBUG(dbgs() << "\nhw_loop head, BB#" << Blocks[0]->getNumber(););
+  DEBUG(dbgs() << "\nhw_loop head, " << printMBBReference(*Blocks[0]));
   for (unsigned i = 0, e = Blocks.size(); i != e; ++i) {
     MachineBasicBlock *MBB = Blocks[i];
     for (MachineBasicBlock::iterator
@@ -1367,7 +1367,7 @@ bool HexagonHardwareLoops::isLoopFeeder(MachineLoop *L, MachineBasicBlock *A,
                                         LoopFeederMap &LoopFeederPhi) const {
   if (LoopFeederPhi.find(MO->getReg()) == LoopFeederPhi.end()) {
     const std::vector<MachineBasicBlock *> &Blocks = L->getBlocks();
-    DEBUG(dbgs() << "\nhw_loop head, BB#" << Blocks[0]->getNumber(););
+    DEBUG(dbgs() << "\nhw_loop head, " << printMBBReference(*Blocks[0]));
     // Ignore all BBs that form Loop.
     for (unsigned i = 0, e = Blocks.size(); i != e; ++i) {
       MachineBasicBlock *MBB = Blocks[i];
@@ -1622,8 +1622,8 @@ bool HexagonHardwareLoops::fixupInductionVariable(MachineLoop *L) {
   RegisterInductionSet IndRegs;
 
   // Look for induction patterns:
-  //   vreg1 = PHI ..., [ latch, vreg2 ]
-  //   vreg2 = ADD vreg1, imm
+  //   %1 = PHI ..., [ latch, %2 ]
+  //   %2 = ADD %1, imm
   using instr_iterator = MachineBasicBlock::instr_iterator;
 
   for (instr_iterator I = Header->instr_begin(), E = Header->instr_end();
@@ -1720,7 +1720,7 @@ bool HexagonHardwareLoops::fixupInductionVariable(MachineLoop *L) {
     MachineOperand &MO = PredDef->getOperand(i);
     if (MO.isReg()) {
       // Skip all implicit references.  In one case there was:
-      //   %vreg140<def> = FCMPUGT32_rr %vreg138, %vreg139, %USR<imp-use>
+      //   %140 = FCMPUGT32_rr %138, %139, implicit %usr
       if (MO.isImplicit())
         continue;
       if (MO.isUse()) {

@@ -1,9 +1,8 @@
-; XFAIL: *
 ; RUN: llc -verify-machineinstrs -mtriple=powerpc64-unknown-linux-gnu -O2 \
-; RUN:   -ppc-asm-full-reg-names -mcpu=pwr8 < %s | FileCheck %s \
+; RUN:   -ppc-gpr-icmps=all -ppc-asm-full-reg-names -mcpu=pwr8 < %s | FileCheck %s \
 ; RUN:  --implicit-check-not cmpw --implicit-check-not cmpd --implicit-check-not cmpl
 ; RUN: llc -verify-machineinstrs -mtriple=powerpc64le-unknown-linux-gnu -O2 \
-; RUN:   -ppc-asm-full-reg-names -mcpu=pwr8 < %s | FileCheck %s \
+; RUN:   -ppc-gpr-icmps=all -ppc-asm-full-reg-names -mcpu=pwr8 < %s | FileCheck %s \
 ; RUN:  --implicit-check-not cmpw --implicit-check-not cmpd --implicit-check-not cmpl
 
 @glob = common local_unnamed_addr global i8 0, align 1
@@ -107,7 +106,7 @@ entry:
   store i8 %conv3, i8* @glob
   ret void
 ; CHECK-LABEL: @test_igeuc_sext_z_store
-; CHECK: li [[REG1:r[0-9]+]], 255
+; CHECK: li [[REG1:r[0-9]+]], -1
 ; CHECK: stb [[REG1]]
 ; CHECK: blr
 }

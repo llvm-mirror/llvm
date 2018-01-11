@@ -49,6 +49,7 @@ def NoFP16Denormals : Predicate<"!Subtarget->hasFP16Denormals()">;
 def NoFP32Denormals : Predicate<"!Subtarget->hasFP32Denormals()">;
 def NoFP64Denormals : Predicate<"!Subtarget->hasFP64Denormals()">;
 def UnsafeFPMath : Predicate<"TM.Options.UnsafeFPMath">;
+def FMA : Predicate<"Subtarget->hasFMA()">;
 
 def InstFlag : OperandWithDefaultOps <i32, (ops (i32 0))>;
 def ADDRIndirect : ComplexPattern<iPTR, 2, "SelectADDRIndirect", [], []>;
@@ -132,6 +133,29 @@ def srl_oneuse : HasOneUseBinOp<srl>;
 def shl_oneuse : HasOneUseBinOp<shl>;
 
 def select_oneuse : HasOneUseTernaryOp<select>;
+
+def srl_16 : PatFrag<
+  (ops node:$src0), (srl_oneuse node:$src0, (i32 16))
+>;
+
+
+def hi_i16_elt : PatFrag<
+  (ops node:$src0), (i16 (trunc (i32 (srl_16 node:$src0))))
+>;
+
+
+def hi_f16_elt : PatLeaf<
+  (vt), [{
+  if (N->getOpcode() != ISD::BITCAST)
+    return false;
+  SDValue Tmp = N->getOperand(0);
+
+  if (Tmp.getOpcode() != ISD::SRL)
+    return false;
+    if (const auto *RHS = dyn_cast<ConstantSDNode>(Tmp.getOperand(1))
+      return RHS->getZExtValue() == 16;
+    return false;
+}]>;
 
 //===----------------------------------------------------------------------===//
 // PatLeafs for floating-point comparisons

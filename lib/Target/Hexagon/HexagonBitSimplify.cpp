@@ -26,6 +26,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/MC/MCInstrDesc.h"
 #include "llvm/Pass.h"
@@ -35,7 +36,6 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -173,7 +173,7 @@ namespace {
   raw_ostream &operator<< (raw_ostream &OS, const PrintRegSet &P) {
     OS << '{';
     for (unsigned R = P.RS.find_first(); R; R = P.RS.find_next(R))
-      OS << ' ' << PrintReg(R, P.TRI);
+      OS << ' ' << printReg(R, P.TRI);
     OS << " }";
     return OS;
   }
@@ -895,7 +895,7 @@ bool HexagonBitSimplify::getUsedBits(unsigned Opc, unsigned OpN,
 }
 
 // Calculate the register class that matches Reg:Sub. For example, if
-// vreg1 is a double register, then vreg1:isub_hi would match the "int"
+// %1 is a double register, then %1:isub_hi would match the "int"
 // register class.
 const TargetRegisterClass *HexagonBitSimplify::getFinalVRegClass(
       const BitTracker::RegisterRef &RR, MachineRegisterInfo &MRI) {
@@ -1246,11 +1246,11 @@ bool RedundantInstrElimination::computeUsedBits(unsigned Reg, BitVector &Bits) {
 // holds the bits for the entire register. To keep track of that, the
 // argument Begin indicates where in Bits is the lowest-significant bit
 // of the register used in operand OpN. For example, in instruction:
-//   vreg1 = S2_lsr_i_r vreg2:isub_hi, 10
+//   %1 = S2_lsr_i_r %2:isub_hi, 10
 // the operand 1 is a 32-bit register, which happens to be a subregister
-// of the 64-bit register vreg2, and that subregister starts at position 32.
+// of the 64-bit register %2, and that subregister starts at position 32.
 // In this case Begin=32, since Bits[32] would be the lowest-significant bit
-// of vreg2:isub_hi.
+// of %2:isub_hi.
 bool RedundantInstrElimination::computeUsedBits(const MachineInstr &MI,
       unsigned OpN, BitVector &Bits, uint16_t Begin) {
   unsigned Opc = MI.getOpcode();
@@ -1315,7 +1315,7 @@ bool RedundantInstrElimination::processBlock(MachineBasicBlock &B,
 
     if (MI->getOpcode() == TargetOpcode::COPY)
       continue;
-    if (MI->hasUnmodeledSideEffects() || MI->isInlineAsm())
+    if (MI->isPHI() || MI->hasUnmodeledSideEffects() || MI->isInlineAsm())
       continue;
     unsigned NumD = MI->getDesc().getNumDefs();
     if (NumD != 1)
@@ -1325,8 +1325,7 @@ bool RedundantInstrElimination::processBlock(MachineBasicBlock &B,
     if (!BT.has(RD.Reg))
       continue;
     const BitTracker::RegisterCell &DC = BT.lookup(RD.Reg);
-    auto At = MI->isPHI() ? B.getFirstNonPHI()
-                          : MachineBasicBlock::iterator(MI);
+    auto At = MachineBasicBlock::iterator(MI);
 
     // Find a source operand that is equal to the result.
     for (auto &Op : MI->uses()) {
@@ -1357,11 +1356,11 @@ bool RedundantInstrElimination::processBlock(MachineBasicBlock &B,
       // This pass can create copies between registers that don't have the
       // exact same values. Updating the tracker has to involve updating
       // all dependent cells. Example:
-      //   vreg1 = inst vreg2     ; vreg1 != vreg2, but used bits are equal
+      //   %1  = inst %2     ; %1 != %2, but used bits are equal
       //
-      //   vreg3 = copy vreg2     ; <- inserted
-      //     ... = vreg3          ; <- replaced from vreg2
-      // Indirectly, we can create a "copy" between vreg1 and vreg2 even
+      //   %3  = copy %2     ; <- inserted
+      //   ... = %3          ; <- replaced from %2
+      // Indirectly, we can create a "copy" between %1 and %2 even
       // though their exact values do not match.
       BT.visit(*CopyI);
       Changed = true;
@@ -2314,10 +2313,10 @@ bool BitSimplification::genBitSplit(MachineInstr *MI,
 
 // Check for tstbit simplification opportunity, where the bit being checked
 // can be tracked back to another register. For example:
-//   vreg2 = S2_lsr_i_r  vreg1, 5
-//   vreg3 = S2_tstbit_i vreg2, 0
+//   %2 = S2_lsr_i_r  %1, 5
+//   %3 = S2_tstbit_i %2, 0
 // =>
-//   vreg3 = S2_tstbit_i vreg1, 5
+//   %3 = S2_tstbit_i %1, 5
 bool BitSimplification::simplifyTstbit(MachineInstr *MI,
       BitTracker::RegisterRef RD, const BitTracker::RegisterCell &RC) {
   unsigned Opc = MI->getOpcode();
@@ -2454,7 +2453,7 @@ bool BitSimplification::simplifyExtractLow(MachineInstr *MI,
     return false;
 
   DEBUG({
-    dbgs() << __func__ << " on reg: " << PrintReg(RD.Reg, &HRI, RD.Sub)
+    dbgs() << __func__ << " on reg: " << printReg(RD.Reg, &HRI, RD.Sub)
            << ", MI: " << *MI;
     dbgs() << "Cell: " << RC << '\n';
     dbgs() << "Expected bitfield size: " << Len << " bits, "
@@ -2632,7 +2631,7 @@ bool BitSimplification::processBlock(MachineBasicBlock &B,
 }
 
 bool HexagonBitSimplify::runOnMachineFunction(MachineFunction &MF) {
-  if (skipFunction(*MF.getFunction()))
+  if (skipFunction(MF.getFunction()))
     return false;
 
   auto &HST = MF.getSubtarget<HexagonSubtarget>();
@@ -2978,7 +2977,7 @@ void HexagonLoopRescheduling::moveGroup(InstrGroup &G, MachineBasicBlock &LB,
 }
 
 bool HexagonLoopRescheduling::processLoop(LoopCand &C) {
-  DEBUG(dbgs() << "Processing loop in BB#" << C.LB->getNumber() << "\n");
+  DEBUG(dbgs() << "Processing loop in " << printMBBReference(*C.LB) << "\n");
   std::vector<PhiInfo> Phis;
   for (auto &I : *C.LB) {
     if (!I.isPHI())
@@ -3005,9 +3004,9 @@ bool HexagonLoopRescheduling::processLoop(LoopCand &C) {
   DEBUG({
     dbgs() << "Phis: {";
     for (auto &I : Phis) {
-      dbgs() << ' ' << PrintReg(I.DefR, HRI) << "=phi("
-             << PrintReg(I.PR.Reg, HRI, I.PR.Sub) << ":b" << I.PB->getNumber()
-             << ',' << PrintReg(I.LR.Reg, HRI, I.LR.Sub) << ":b"
+      dbgs() << ' ' << printReg(I.DefR, HRI) << "=phi("
+             << printReg(I.PR.Reg, HRI, I.PR.Sub) << ":b" << I.PB->getNumber()
+             << ',' << printReg(I.LR.Reg, HRI, I.LR.Sub) << ":b"
              << I.LB->getNumber() << ')';
     }
     dbgs() << " }\n";
@@ -3127,8 +3126,8 @@ bool HexagonLoopRescheduling::processLoop(LoopCand &C) {
     for (unsigned i = 0, n = Groups.size(); i < n; ++i) {
       InstrGroup &G = Groups[i];
       dbgs() << "Group[" << i << "] inp: "
-             << PrintReg(G.Inp.Reg, HRI, G.Inp.Sub)
-             << "  out: " << PrintReg(G.Out.Reg, HRI, G.Out.Sub) << "\n";
+             << printReg(G.Inp.Reg, HRI, G.Inp.Sub)
+             << "  out: " << printReg(G.Out.Reg, HRI, G.Out.Sub) << "\n";
       for (unsigned j = 0, m = G.Ins.size(); j < m; ++j)
         dbgs() << "  " << *G.Ins[j];
     }
@@ -3182,7 +3181,7 @@ bool HexagonLoopRescheduling::processLoop(LoopCand &C) {
 }
 
 bool HexagonLoopRescheduling::runOnMachineFunction(MachineFunction &MF) {
-  if (skipFunction(*MF.getFunction()))
+  if (skipFunction(MF.getFunction()))
     return false;
 
   auto &HST = MF.getSubtarget<HexagonSubtarget>();

@@ -309,23 +309,23 @@ bool TypeSetByHwMode::intersect(SetType &Out, const SetType &In) {
   return Changed;
 }
 
-void TypeSetByHwMode::validate() const {
+bool TypeSetByHwMode::validate() const {
 #ifndef NDEBUG
   if (empty())
-    return;
+    return true;
   bool AllEmpty = true;
   for (const auto &I : *this)
     AllEmpty &= I.second.empty();
-  assert(!AllEmpty &&
-          "type set is empty for each HW mode: type contradiction?");
+  return !AllEmpty;
 #endif
+  return true;
 }
 
 // --- TypeInfer
 
 bool TypeInfer::MergeInTypeInfo(TypeSetByHwMode &Out,
                                 const TypeSetByHwMode &In) {
-  ValidateOnExit _1(Out);
+  ValidateOnExit _1(Out, *this);
   In.validate();
   if (In.empty() || Out == In || TP.hasError())
     return false;
@@ -342,7 +342,7 @@ bool TypeInfer::MergeInTypeInfo(TypeSetByHwMode &Out,
 }
 
 bool TypeInfer::forceArbitrary(TypeSetByHwMode &Out) {
-  ValidateOnExit _1(Out);
+  ValidateOnExit _1(Out, *this);
   if (TP.hasError())
     return false;
   assert(!Out.empty() && "cannot pick from an empty set");
@@ -361,7 +361,7 @@ bool TypeInfer::forceArbitrary(TypeSetByHwMode &Out) {
 }
 
 bool TypeInfer::EnforceInteger(TypeSetByHwMode &Out) {
-  ValidateOnExit _1(Out);
+  ValidateOnExit _1(Out, *this);
   if (TP.hasError())
     return false;
   if (!Out.empty())
@@ -371,7 +371,7 @@ bool TypeInfer::EnforceInteger(TypeSetByHwMode &Out) {
 }
 
 bool TypeInfer::EnforceFloatingPoint(TypeSetByHwMode &Out) {
-  ValidateOnExit _1(Out);
+  ValidateOnExit _1(Out, *this);
   if (TP.hasError())
     return false;
   if (!Out.empty())
@@ -381,7 +381,7 @@ bool TypeInfer::EnforceFloatingPoint(TypeSetByHwMode &Out) {
 }
 
 bool TypeInfer::EnforceScalar(TypeSetByHwMode &Out) {
-  ValidateOnExit _1(Out);
+  ValidateOnExit _1(Out, *this);
   if (TP.hasError())
     return false;
   if (!Out.empty())
@@ -391,7 +391,7 @@ bool TypeInfer::EnforceScalar(TypeSetByHwMode &Out) {
 }
 
 bool TypeInfer::EnforceVector(TypeSetByHwMode &Out) {
-  ValidateOnExit _1(Out);
+  ValidateOnExit _1(Out, *this);
   if (TP.hasError())
     return false;
   if (!Out.empty())
@@ -401,7 +401,7 @@ bool TypeInfer::EnforceVector(TypeSetByHwMode &Out) {
 }
 
 bool TypeInfer::EnforceAny(TypeSetByHwMode &Out) {
-  ValidateOnExit _1(Out);
+  ValidateOnExit _1(Out, *this);
   if (TP.hasError() || !Out.empty())
     return false;
 
@@ -440,7 +440,7 @@ static Iter max_if(Iter B, Iter E, Pred P, Less L) {
 /// Make sure that for each type in Small, there exists a larger type in Big.
 bool TypeInfer::EnforceSmallerThan(TypeSetByHwMode &Small,
                                    TypeSetByHwMode &Big) {
-  ValidateOnExit _1(Small), _2(Big);
+  ValidateOnExit _1(Small, *this), _2(Big, *this);
   if (TP.hasError())
     return false;
   bool Changed = false;
@@ -545,7 +545,7 @@ bool TypeInfer::EnforceSmallerThan(TypeSetByHwMode &Small,
 ///    type T in Vec, such that U is the element type of T.
 bool TypeInfer::EnforceVectorEltTypeIs(TypeSetByHwMode &Vec,
                                        TypeSetByHwMode &Elem) {
-  ValidateOnExit _1(Vec), _2(Elem);
+  ValidateOnExit _1(Vec, *this), _2(Elem, *this);
   if (TP.hasError())
     return false;
   bool Changed = false;
@@ -586,7 +586,7 @@ bool TypeInfer::EnforceVectorEltTypeIs(TypeSetByHwMode &Vec,
 bool TypeInfer::EnforceVectorEltTypeIs(TypeSetByHwMode &Vec,
                                        const ValueTypeByHwMode &VVT) {
   TypeSetByHwMode Tmp(VVT);
-  ValidateOnExit _1(Vec), _2(Tmp);
+  ValidateOnExit _1(Vec, *this), _2(Tmp, *this);
   return EnforceVectorEltTypeIs(Vec, Tmp);
 }
 
@@ -595,7 +595,7 @@ bool TypeInfer::EnforceVectorEltTypeIs(TypeSetByHwMode &Vec,
 /// element type as T and at least as many elements as T.
 bool TypeInfer::EnforceVectorSubVectorTypeIs(TypeSetByHwMode &Vec,
                                              TypeSetByHwMode &Sub) {
-  ValidateOnExit _1(Vec), _2(Sub);
+  ValidateOnExit _1(Vec, *this), _2(Sub, *this);
   if (TP.hasError())
     return false;
 
@@ -661,7 +661,7 @@ bool TypeInfer::EnforceVectorSubVectorTypeIs(TypeSetByHwMode &Vec,
 ///    type T in V, such that T and U have the same number of elements
 ///    (reverse of 2).
 bool TypeInfer::EnforceSameNumElts(TypeSetByHwMode &V, TypeSetByHwMode &W) {
-  ValidateOnExit _1(V), _2(W);
+  ValidateOnExit _1(V, *this), _2(W, *this);
   if (TP.hasError())
     return false;
 
@@ -699,7 +699,7 @@ bool TypeInfer::EnforceSameNumElts(TypeSetByHwMode &V, TypeSetByHwMode &W) {
 /// 2. Ensure that for each type U in B, there exists a type T in A
 ///    such that T and U have equal size in bits (reverse of 1).
 bool TypeInfer::EnforceSameSize(TypeSetByHwMode &A, TypeSetByHwMode &B) {
-  ValidateOnExit _1(A), _2(B);
+  ValidateOnExit _1(A, *this), _2(B, *this);
   if (TP.hasError())
     return false;
   bool Changed = false;
@@ -730,7 +730,7 @@ bool TypeInfer::EnforceSameSize(TypeSetByHwMode &A, TypeSetByHwMode &B) {
 }
 
 void TypeInfer::expandOverloads(TypeSetByHwMode &VTS) {
-  ValidateOnExit _1(VTS);
+  ValidateOnExit _1(VTS, *this);
   TypeSetByHwMode Legal = getLegalTypes();
   bool HaveLegalDef = Legal.hasDefault();
 
@@ -806,6 +806,19 @@ TypeSetByHwMode TypeInfer::getLegalTypes() {
   return VTS;
 }
 
+#ifndef NDEBUG
+TypeInfer::ValidateOnExit::~ValidateOnExit() {
+  if (!VTS.validate()) {
+    dbgs() << "Type set is empty for each HW mode:\n"
+              "possible type contradiction in the pattern below "
+              "(use -print-records with llvm-tblgen to see all "
+              "expanded records).\n";
+    Infer.TP.dump();
+    llvm_unreachable(nullptr);
+  }
+}
+#endif
+
 //===----------------------------------------------------------------------===//
 // TreePredicateFn Implementation
 //===----------------------------------------------------------------------===//
@@ -818,32 +831,36 @@ TreePredicateFn::TreePredicateFn(TreePattern *N) : PatFragRec(N) {
 }
 
 bool TreePredicateFn::hasPredCode() const {
-  return isLoad() || isStore() ||
+  return isLoad() || isStore() || isAtomic() ||
          !PatFragRec->getRecord()->getValueAsString("PredicateCode").empty();
 }
 
 std::string TreePredicateFn::getPredCode() const {
   std::string Code = "";
 
+  if (!isLoad() && !isStore() && !isAtomic()) {
+    Record *MemoryVT = getMemoryVT();
+
+    if (MemoryVT)
+      PrintFatalError(getOrigPatFragRecord()->getRecord()->getLoc(),
+                      "MemoryVT requires IsLoad or IsStore");
+  }
+
   if (!isLoad() && !isStore()) {
     if (isUnindexed())
       PrintFatalError(getOrigPatFragRecord()->getRecord()->getLoc(),
                       "IsUnindexed requires IsLoad or IsStore");
 
-    Record *MemoryVT = getMemoryVT();
     Record *ScalarMemoryVT = getScalarMemoryVT();
 
-    if (MemoryVT)
-      PrintFatalError(getOrigPatFragRecord()->getRecord()->getLoc(),
-                      "MemoryVT requires IsLoad or IsStore");
     if (ScalarMemoryVT)
       PrintFatalError(getOrigPatFragRecord()->getRecord()->getLoc(),
                       "ScalarMemoryVT requires IsLoad or IsStore");
   }
 
-  if (isLoad() && isStore())
+  if (isLoad() + isStore() + isAtomic() > 1)
     PrintFatalError(getOrigPatFragRecord()->getRecord()->getLoc(),
-                    "IsLoad and IsStore are mutually exclusive");
+                    "IsLoad, IsStore, and IsAtomic are mutually exclusive");
 
   if (isLoad()) {
     if (!isUnindexed() && !isNonExtLoad() && !isAnyExtLoad() &&
@@ -879,6 +896,86 @@ std::string TreePredicateFn::getPredCode() const {
       PrintFatalError(getOrigPatFragRecord()->getRecord()->getLoc(),
                       "IsTruncStore requires IsStore");
   }
+
+  if (isAtomic()) {
+    if (getMemoryVT() == nullptr && !isAtomicOrderingMonotonic() &&
+        !isAtomicOrderingAcquire() && !isAtomicOrderingRelease() &&
+        !isAtomicOrderingAcquireRelease() &&
+        !isAtomicOrderingSequentiallyConsistent() &&
+        !isAtomicOrderingAcquireOrStronger() &&
+        !isAtomicOrderingReleaseOrStronger() &&
+        !isAtomicOrderingWeakerThanAcquire() &&
+        !isAtomicOrderingWeakerThanRelease())
+      PrintFatalError(getOrigPatFragRecord()->getRecord()->getLoc(),
+                      "IsAtomic cannot be used by itself");
+  } else {
+    if (isAtomicOrderingMonotonic())
+      PrintFatalError(getOrigPatFragRecord()->getRecord()->getLoc(),
+                      "IsAtomicOrderingMonotonic requires IsAtomic");
+    if (isAtomicOrderingAcquire())
+      PrintFatalError(getOrigPatFragRecord()->getRecord()->getLoc(),
+                      "IsAtomicOrderingAcquire requires IsAtomic");
+    if (isAtomicOrderingRelease())
+      PrintFatalError(getOrigPatFragRecord()->getRecord()->getLoc(),
+                      "IsAtomicOrderingRelease requires IsAtomic");
+    if (isAtomicOrderingAcquireRelease())
+      PrintFatalError(getOrigPatFragRecord()->getRecord()->getLoc(),
+                      "IsAtomicOrderingAcquireRelease requires IsAtomic");
+    if (isAtomicOrderingSequentiallyConsistent())
+      PrintFatalError(getOrigPatFragRecord()->getRecord()->getLoc(),
+                      "IsAtomicOrderingSequentiallyConsistent requires IsAtomic");
+    if (isAtomicOrderingAcquireOrStronger())
+      PrintFatalError(getOrigPatFragRecord()->getRecord()->getLoc(),
+                      "IsAtomicOrderingAcquireOrStronger requires IsAtomic");
+    if (isAtomicOrderingReleaseOrStronger())
+      PrintFatalError(getOrigPatFragRecord()->getRecord()->getLoc(),
+                      "IsAtomicOrderingReleaseOrStronger requires IsAtomic");
+    if (isAtomicOrderingWeakerThanAcquire())
+      PrintFatalError(getOrigPatFragRecord()->getRecord()->getLoc(),
+                      "IsAtomicOrderingWeakerThanAcquire requires IsAtomic");
+  }
+
+  if (isLoad() || isStore() || isAtomic()) {
+    StringRef SDNodeName =
+        isLoad() ? "LoadSDNode" : isStore() ? "StoreSDNode" : "AtomicSDNode";
+
+    Record *MemoryVT = getMemoryVT();
+
+    if (MemoryVT)
+      Code += ("if (cast<" + SDNodeName + ">(N)->getMemoryVT() != MVT::" +
+               MemoryVT->getName() + ") return false;\n")
+                  .str();
+  }
+
+  if (isAtomic() && isAtomicOrderingMonotonic())
+    Code += "if (cast<AtomicSDNode>(N)->getOrdering() != "
+            "AtomicOrdering::Monotonic) return false;\n";
+  if (isAtomic() && isAtomicOrderingAcquire())
+    Code += "if (cast<AtomicSDNode>(N)->getOrdering() != "
+            "AtomicOrdering::Acquire) return false;\n";
+  if (isAtomic() && isAtomicOrderingRelease())
+    Code += "if (cast<AtomicSDNode>(N)->getOrdering() != "
+            "AtomicOrdering::Release) return false;\n";
+  if (isAtomic() && isAtomicOrderingAcquireRelease())
+    Code += "if (cast<AtomicSDNode>(N)->getOrdering() != "
+            "AtomicOrdering::AcquireRelease) return false;\n";
+  if (isAtomic() && isAtomicOrderingSequentiallyConsistent())
+    Code += "if (cast<AtomicSDNode>(N)->getOrdering() != "
+            "AtomicOrdering::SequentiallyConsistent) return false;\n";
+
+  if (isAtomic() && isAtomicOrderingAcquireOrStronger())
+    Code += "if (!isAcquireOrStronger(cast<AtomicSDNode>(N)->getOrdering())) "
+            "return false;\n";
+  if (isAtomic() && isAtomicOrderingWeakerThanAcquire())
+    Code += "if (isAcquireOrStronger(cast<AtomicSDNode>(N)->getOrdering())) "
+            "return false;\n";
+
+  if (isAtomic() && isAtomicOrderingReleaseOrStronger())
+    Code += "if (!isReleaseOrStronger(cast<AtomicSDNode>(N)->getOrdering())) "
+            "return false;\n";
+  if (isAtomic() && isAtomicOrderingWeakerThanRelease())
+    Code += "if (isReleaseOrStronger(cast<AtomicSDNode>(N)->getOrdering())) "
+            "return false;\n";
 
   if (isLoad() || isStore()) {
     StringRef SDNodeName = isLoad() ? "LoadSDNode" : "StoreSDNode";
@@ -920,13 +1017,8 @@ std::string TreePredicateFn::getPredCode() const {
             " if (!cast<StoreSDNode>(N)->isTruncatingStore()) return false;\n";
     }
 
-    Record *MemoryVT = getMemoryVT();
     Record *ScalarMemoryVT = getScalarMemoryVT();
 
-    if (MemoryVT)
-      Code += ("if (cast<" + SDNodeName + ">(N)->getMemoryVT() != MVT::" +
-               MemoryVT->getName() + ") return false;\n")
-                  .str();
     if (ScalarMemoryVT)
       Code += ("if (cast<" + SDNodeName +
                ">(N)->getMemoryVT().getScalarType() != MVT::" +
@@ -978,6 +1070,9 @@ bool TreePredicateFn::isLoad() const {
 bool TreePredicateFn::isStore() const {
   return isPredefinedPredicateEqualTo("IsStore", true);
 }
+bool TreePredicateFn::isAtomic() const {
+  return isPredefinedPredicateEqualTo("IsAtomic", true);
+}
 bool TreePredicateFn::isUnindexed() const {
   return isPredefinedPredicateEqualTo("IsUnindexed", true);
 }
@@ -998,6 +1093,34 @@ bool TreePredicateFn::isNonTruncStore() const {
 }
 bool TreePredicateFn::isTruncStore() const {
   return isPredefinedPredicateEqualTo("IsTruncStore", true);
+}
+bool TreePredicateFn::isAtomicOrderingMonotonic() const {
+  return isPredefinedPredicateEqualTo("IsAtomicOrderingMonotonic", true);
+}
+bool TreePredicateFn::isAtomicOrderingAcquire() const {
+  return isPredefinedPredicateEqualTo("IsAtomicOrderingAcquire", true);
+}
+bool TreePredicateFn::isAtomicOrderingRelease() const {
+  return isPredefinedPredicateEqualTo("IsAtomicOrderingRelease", true);
+}
+bool TreePredicateFn::isAtomicOrderingAcquireRelease() const {
+  return isPredefinedPredicateEqualTo("IsAtomicOrderingAcquireRelease", true);
+}
+bool TreePredicateFn::isAtomicOrderingSequentiallyConsistent() const {
+  return isPredefinedPredicateEqualTo("IsAtomicOrderingSequentiallyConsistent",
+                                      true);
+}
+bool TreePredicateFn::isAtomicOrderingAcquireOrStronger() const {
+  return isPredefinedPredicateEqualTo("IsAtomicOrderingAcquireOrStronger", true);
+}
+bool TreePredicateFn::isAtomicOrderingWeakerThanAcquire() const {
+  return isPredefinedPredicateEqualTo("IsAtomicOrderingAcquireOrStronger", false);
+}
+bool TreePredicateFn::isAtomicOrderingReleaseOrStronger() const {
+  return isPredefinedPredicateEqualTo("IsAtomicOrderingReleaseOrStronger", true);
+}
+bool TreePredicateFn::isAtomicOrderingWeakerThanRelease() const {
+  return isPredefinedPredicateEqualTo("IsAtomicOrderingReleaseOrStronger", false);
 }
 Record *TreePredicateFn::getMemoryVT() const {
   Record *R = getOrigPatFragRecord()->getRecord();
@@ -1481,37 +1604,7 @@ SDNodeInfo::SDNodeInfo(Record *R, const CodeGenHwModes &CGH) : Def(R) {
   NumOperands = TypeProfile->getValueAsInt("NumOperands");
 
   // Parse the properties.
-  Properties = 0;
-  for (Record *Property : R->getValueAsListOfDefs("Properties")) {
-    if (Property->getName() == "SDNPCommutative") {
-      Properties |= 1 << SDNPCommutative;
-    } else if (Property->getName() == "SDNPAssociative") {
-      Properties |= 1 << SDNPAssociative;
-    } else if (Property->getName() == "SDNPHasChain") {
-      Properties |= 1 << SDNPHasChain;
-    } else if (Property->getName() == "SDNPOutGlue") {
-      Properties |= 1 << SDNPOutGlue;
-    } else if (Property->getName() == "SDNPInGlue") {
-      Properties |= 1 << SDNPInGlue;
-    } else if (Property->getName() == "SDNPOptInGlue") {
-      Properties |= 1 << SDNPOptInGlue;
-    } else if (Property->getName() == "SDNPMayStore") {
-      Properties |= 1 << SDNPMayStore;
-    } else if (Property->getName() == "SDNPMayLoad") {
-      Properties |= 1 << SDNPMayLoad;
-    } else if (Property->getName() == "SDNPSideEffect") {
-      Properties |= 1 << SDNPSideEffect;
-    } else if (Property->getName() == "SDNPMemOperand") {
-      Properties |= 1 << SDNPMemOperand;
-    } else if (Property->getName() == "SDNPVariadic") {
-      Properties |= 1 << SDNPVariadic;
-    } else {
-      PrintFatalError("Unknown SD Node property '" +
-                      Property->getName() + "' on node '" +
-                      R->getName() + "'!");
-    }
-  }
-
+  Properties = parseSDPatternOperatorProperties(R);
 
   // Parse the type constraints.
   std::vector<Record*> ConstraintList =
@@ -1780,7 +1873,7 @@ TreePatternNode *TreePatternNode::InlinePatternFragments(TreePattern &TP) {
   // Verify that we are passing the right number of operands.
   if (Frag->getNumArgs() != Children.size()) {
     TP.error("'" + Op->getName() + "' fragment requires " +
-             utostr(Frag->getNumArgs()) + " operands!");
+             Twine(Frag->getNumArgs()) + " operands!");
     return nullptr;
   }
 
@@ -1990,11 +2083,20 @@ bool TreePatternNode::NodeHasProperty(SDNP Property,
   if (isLeaf()) {
     if (const ComplexPattern *CP = getComplexPatternInfo(CGP))
       return CP->hasProperty(Property);
+
     return false;
   }
 
-  Record *Operator = getOperator();
-  if (!Operator->isSubClassOf("SDNode")) return false;
+  if (Property != SDNPHasChain) {
+    // The chain proprety is already present on the different intrinsic node
+    // types (intrinsic_w_chain, intrinsic_void), and is not explicitly listed
+    // on the intrinsic. Anything else is specific to the individual intrinsic.
+    if (const CodeGenIntrinsic *Int = getIntrinsicInfo(CGP))
+      return Int->hasProperty(Property);
+  }
+
+  if (!Operator->isSubClassOf("SDPatternOperator"))
+    return false;
 
   return CGP.getSDNodeInfo(Operator).hasProperty(Property);
 }
@@ -2093,7 +2195,7 @@ bool TreePatternNode::ApplyTypeConstraints(TreePattern &TP, bool NotRegisters) {
             SignBitAndAbove == 1)
           continue;
 
-        TP.error("Integer value '" + itostr(II->getValue()) +
+        TP.error("Integer value '" + Twine(II->getValue()) +
                  "' is out of range for type '" + getEnumName(VT) + "'!");
         break;
       }
@@ -2143,9 +2245,8 @@ bool TreePatternNode::ApplyTypeConstraints(TreePattern &TP, bool NotRegisters) {
       MadeChange |= UpdateNodeType(i, Int->IS.RetVTs[i], TP);
 
     if (getNumChildren() != NumParamVTs + 1) {
-      TP.error("Intrinsic '" + Int->Name + "' expects " +
-               utostr(NumParamVTs) + " operands, not " +
-               utostr(getNumChildren() - 1) + " operands!");
+      TP.error("Intrinsic '" + Int->Name + "' expects " + Twine(NumParamVTs) +
+               " operands, not " + Twine(getNumChildren() - 1) + " operands!");
       return false;
     }
 
@@ -2169,7 +2270,7 @@ bool TreePatternNode::ApplyTypeConstraints(TreePattern &TP, bool NotRegisters) {
     if (NI.getNumOperands() >= 0 &&
         getNumChildren() != (unsigned)NI.getNumOperands()) {
       TP.error(getOperator()->getName() + " node requires exactly " +
-               itostr(NI.getNumOperands()) + " operands!");
+               Twine(NI.getNumOperands()) + " operands!");
       return false;
     }
 
@@ -2238,7 +2339,7 @@ bool TreePatternNode::ApplyTypeConstraints(TreePattern &TP, bool NotRegisters) {
         TreePatternNode *SubIdxChild = getChild(I + 1);
         if (!isOperandClass(SubIdxChild, "SubRegIndex")) {
           TP.error("REG_SEQUENCE requires a SubRegIndex for operand " +
-                   itostr(I + 1) + "!");
+                   Twine(I + 1) + "!");
           return false;
         }
       }
@@ -2555,6 +2656,10 @@ TreePatternNode *TreePattern::ParseTreePattern(Init *TheInit, StringRef OpName){
   for (unsigned i = 0, e = Dag->getNumArgs(); i != e; ++i)
     Children.push_back(ParseTreePattern(Dag->getArg(i), Dag->getArgNameStr(i)));
 
+  // Get the actual number of results before Operator is converted to an intrinsic
+  // node (which is hard-coded to have either zero or one result).
+  unsigned NumResults = GetNumNodeResults(Operator, CDP);
+
   // If the operator is an intrinsic, then this is just syntactic sugar for for
   // (intrinsic_* <number>, ..children..).  Pick the right intrinsic node, and
   // convert the intrinsic name to a number.
@@ -2597,7 +2702,6 @@ TreePatternNode *TreePattern::ParseTreePattern(Init *TheInit, StringRef OpName){
     }
   }
 
-  unsigned NumResults = GetNumNodeResults(Operator, CDP);
   TreePatternNode *Result = new TreePatternNode(Operator, Children, NumResults);
   Result->setName(OpName);
 
@@ -2744,8 +2848,10 @@ void TreePattern::dump() const { print(errs()); }
 // CodeGenDAGPatterns implementation
 //
 
-CodeGenDAGPatterns::CodeGenDAGPatterns(RecordKeeper &R) :
-  Records(R), Target(R), LegalVTS(Target.getLegalValueTypes()) {
+CodeGenDAGPatterns::CodeGenDAGPatterns(RecordKeeper &R,
+                                       PatternRewriterFn PatternRewriter)
+    : Records(R), Target(R), LegalVTS(Target.getLegalValueTypes()),
+      PatternRewriter(PatternRewriter) {
 
   Intrinsics = CodeGenIntrinsicTable(Records, false);
   TgtIntrinsics = CodeGenIntrinsicTable(Records, true);
@@ -3410,7 +3516,7 @@ const DAGInstruction &CodeGenDAGPatterns::parseInstructionPattern(
     CGIOperandList::OperandInfo &Op = CGI.Operands[i];
     const std::string &OpName = Op.Name;
     if (OpName.empty())
-      I->error("Operand #" + utostr(i) + " in operands list has no name!");
+      I->error("Operand #" + Twine(i) + " in operands list has no name!");
 
     if (!InstInputsCheck.count(OpName)) {
       // If this is an operand with a DefaultOps set filled in, we can ignore
@@ -3536,6 +3642,8 @@ void CodeGenDAGPatterns::ParseInstructions() {
     TreePattern *I = TheInst.getPattern();
     if (!I) continue;  // No pattern.
 
+    if (PatternRewriter)
+      PatternRewriter(I);
     // FIXME: Assume only the first tree is the pattern. The others are clobber
     // nodes.
     TreePatternNode *Pattern = I->getTree(0);
@@ -3936,6 +4044,8 @@ void CodeGenDAGPatterns::ParsePatterns() {
         Temp.getOnlyTree()->hasPossibleType()) {
       ListInit *Preds = CurPattern->getValueAsListInit("Predicates");
       int Complexity = CurPattern->getValueAsInt("AddedComplexity");
+      if (PatternRewriter)
+        PatternRewriter(Pattern);
       AddPatternToMatch(
           Pattern,
           PatternToMatch(

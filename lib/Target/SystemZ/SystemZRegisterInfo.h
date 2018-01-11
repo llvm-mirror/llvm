@@ -11,7 +11,7 @@
 #define LLVM_LIB_TARGET_SYSTEMZ_SYSTEMZREGISTERINFO_H
 
 #include "SystemZ.h"
-#include "llvm/Target/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 
 #define GET_REGINFO_HEADER
 #include "SystemZGenRegisterInfo.inc"
@@ -43,6 +43,15 @@ public:
                      unsigned Kind=0) const override {
     return &SystemZ::ADDR64BitRegClass;
   }
+
+  bool getRegAllocationHints(unsigned VirtReg,
+                             ArrayRef<MCPhysReg> Order,
+                             SmallVectorImpl<MCPhysReg> &Hints,
+                             const MachineFunction &MF,
+                             const VirtRegMap *VRM,
+                             const LiveRegMatrix *Matrix) const override;
+
+  bool enableMultipleCopyHints() const override { return true; }
 
   // Override TargetRegisterInfo.h.
   bool requiresRegisterScavenging(const MachineFunction &MF) const override {

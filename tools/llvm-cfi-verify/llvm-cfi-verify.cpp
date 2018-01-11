@@ -18,6 +18,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "lib/FileAnalysis.h"
+#include "lib/GraphBuilder.h"
 
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/Support/CommandLine.h"
@@ -36,6 +37,10 @@ cl::opt<std::string> InputFilename(cl::Positional, cl::desc("<input file>"),
 cl::opt<std::string> BlacklistFilename(cl::Positional,
                                        cl::desc("[blacklist file]"),
                                        cl::init("-"));
+cl::opt<bool> PrintGraphs(
+    "print-graphs",
+    cl::desc("Print graphs around indirect CF instructions in DOT format."),
+    cl::init(false));
 
 ExitOnError ExitOnErr;
 
@@ -46,22 +51,27 @@ void printIndirectCFInstructions(FileAnalysis &Analysis,
   uint64_t ExpectedUnprotected = 0;
   uint64_t UnexpectedUnprotected = 0;
 
-  symbolize::LLVMSymbolizer &Symbolizer = Analysis.getSymbolizer();
+  std::map<unsigned, uint64_t> BlameCounter;
 
   for (uint64_t Address : Analysis.getIndirectInstructions()) {
     const auto &InstrMeta = Analysis.getInstructionOrDie(Address);
+    GraphResult Graph = GraphBuilder::buildFlowGraph(Analysis, Address);
 
-    bool CFIProtected = Analysis.isIndirectInstructionCFIProtected(Address);
+    CFIProtectionStatus ProtectionStatus =
+        Analysis.validateCFIProtection(Graph);
+    bool CFIProtected = (ProtectionStatus == CFIProtectionStatus::PROTECTED);
 
     if (CFIProtected)
       outs() << "P ";
     else
       outs() << "U ";
 
-    outs() << format_hex(Address, 2) << " | "
-           << Analysis.getMCInstrInfo()->getName(
-                  InstrMeta.Instruction.getOpcode())
-           << " \n";
+    outs() << format_hex(Address, 2) << " | ";
+    Analysis.printInstruction(InstrMeta, outs());
+    outs() << " \n";
+
+    if (PrintGraphs)
+      Graph.printToDOT(Analysis, outs());
 
     if (IgnoreDWARFFlag) {
       if (CFIProtected)
@@ -71,7 +81,7 @@ void printIndirectCFInstructions(FileAnalysis &Analysis,
       continue;
     }
 
-    auto InliningInfo = Symbolizer.symbolizeInlinedCode(InputFilename, Address);
+    auto InliningInfo = Analysis.symbolizeInlinedCode(Address);
     if (!InliningInfo || InliningInfo->getNumberOfFrames() == 0) {
       errs() << "Failed to symbolise " << format_hex(Address, 2)
              << " with line tables from " << InputFilename << "\n";
@@ -97,20 +107,20 @@ void printIndirectCFInstructions(FileAnalysis &Analysis,
       continue;
     }
 
-    bool MatchesBlacklistRule = false;
-    if (SpecialCaseList->inSection("cfi-icall", "src", LineInfo.FileName) ||
-        SpecialCaseList->inSection("cfi-vcall", "src", LineInfo.FileName)) {
-      outs() << "BLACKLIST MATCH, 'src'\n";
-      MatchesBlacklistRule = true;
+    unsigned BlameLine = 0;
+    for (auto &K : {"cfi-icall", "cfi-vcall"}) {
+      if (!BlameLine)
+        BlameLine =
+            SpecialCaseList->inSectionBlame(K, "src", LineInfo.FileName);
+      if (!BlameLine)
+        BlameLine =
+            SpecialCaseList->inSectionBlame(K, "fun", LineInfo.FunctionName);
     }
 
-    if (SpecialCaseList->inSection("cfi-icall", "fun", LineInfo.FunctionName) ||
-        SpecialCaseList->inSection("cfi-vcall", "fun", LineInfo.FunctionName)) {
-      outs() << "BLACKLIST MATCH, 'fun'\n";
-      MatchesBlacklistRule = true;
-    }
-
-    if (MatchesBlacklistRule) {
+    if (BlameLine) {
+      outs() << "Blacklist Match: " << BlacklistFilename << ":" << BlameLine
+             << "\n";
+      BlameCounter[BlameLine]++;
       if (CFIProtected) {
         UnexpectedProtected++;
         outs() << "====> Unexpected Protected\n";
@@ -149,6 +159,15 @@ void printIndirectCFInstructions(FileAnalysis &Analysis,
                     ((double)ExpectedUnprotected) / IndirectCFInstructions,
                     UnexpectedUnprotected,
                     ((double)UnexpectedUnprotected) / IndirectCFInstructions);
+
+  if (!SpecialCaseList)
+    return;
+
+  outs() << "Blacklist Results:\n";
+  for (const auto &KV : BlameCounter) {
+    outs() << "  " << BlacklistFilename << ":" << KV.first << " affects "
+           << KV.second << " indirect CF instructions.\n";
+  }
 }
 
 int main(int argc, char **argv) {

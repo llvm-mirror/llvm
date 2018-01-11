@@ -285,6 +285,19 @@ static bool isObjectSize(const Value *V, uint64_t Size, const DataLayout &DL,
       case Instruction::Shl:
         V = GetLinearExpression(BOp->getOperand(0), Scale, Offset, ZExtBits,
                                 SExtBits, DL, Depth + 1, AC, DT, NSW, NUW);
+
+        // We're trying to linearize an expression of the kind:
+        //   shl i8 -128, 36
+        // where the shift count exceeds the bitwidth of the type.
+        // We can't decompose this further (the expression would return
+        // a poison value).
+        if (Offset.getBitWidth() < RHS.getLimitedValue() ||
+            Scale.getBitWidth() < RHS.getLimitedValue()) {
+          Scale = 1;
+          Offset = 0;
+          return V;
+        }
+
         Offset <<= RHS.getLimitedValue();
         Scale <<= RHS.getLimitedValue();
         // the semantics of nsw and nuw for left shifts don't match those of
@@ -687,13 +700,13 @@ ModRefInfo BasicAAResult::getArgModRefInfo(ImmutableCallSite CS,
                                            unsigned ArgIdx) {
   // Checking for known builtin intrinsics and target library functions.
   if (isWriteOnlyParam(CS, ArgIdx, TLI))
-    return MRI_Mod;
+    return ModRefInfo::Mod;
 
   if (CS.paramHasAttr(ArgIdx, Attribute::ReadOnly))
-    return MRI_Ref;
+    return ModRefInfo::Ref;
 
   if (CS.paramHasAttr(ArgIdx, Attribute::ReadNone))
-    return MRI_NoModRef;
+    return ModRefInfo::NoModRef;
 
   return AAResultBase::getArgModRefInfo(CS, ArgIdx);
 }
@@ -770,7 +783,7 @@ ModRefInfo BasicAAResult::getModRefInfo(ImmutableCallSite CS,
   if (isa<AllocaInst>(Object))
     if (const CallInst *CI = dyn_cast<CallInst>(CS.getInstruction()))
       if (CI->isTailCall())
-        return MRI_NoModRef;
+        return ModRefInfo::NoModRef;
 
   // If the pointer is to a locally allocated object that does not escape,
   // then the call can not mod/ref the pointer unless the call takes the pointer
@@ -780,7 +793,8 @@ ModRefInfo BasicAAResult::getModRefInfo(ImmutableCallSite CS,
 
     // Optimistically assume that call doesn't touch Object and check this
     // assumption in the following loop.
-    ModRefInfo Result = MRI_NoModRef;
+    ModRefInfo Result = ModRefInfo::NoModRef;
+    bool IsMustAlias = true;
 
     unsigned OperandNo = 0;
     for (auto CI = CS.data_operands_begin(), CE = CS.data_operands_end();
@@ -802,29 +816,37 @@ ModRefInfo BasicAAResult::getModRefInfo(ImmutableCallSite CS,
       // is impossible to alias the pointer we're checking.
       AliasResult AR =
           getBestAAResults().alias(MemoryLocation(*CI), MemoryLocation(Object));
-
+      if (AR != MustAlias)
+        IsMustAlias = false;
       // Operand doesnt alias 'Object', continue looking for other aliases
       if (AR == NoAlias)
         continue;
       // Operand aliases 'Object', but call doesn't modify it. Strengthen
       // initial assumption and keep looking in case if there are more aliases.
       if (CS.onlyReadsMemory(OperandNo)) {
-        Result = static_cast<ModRefInfo>(Result | MRI_Ref);
+        Result = setRef(Result);
         continue;
       }
       // Operand aliases 'Object' but call only writes into it.
       if (CS.doesNotReadMemory(OperandNo)) {
-        Result = static_cast<ModRefInfo>(Result | MRI_Mod);
+        Result = setMod(Result);
         continue;
       }
       // This operand aliases 'Object' and call reads and writes into it.
-      Result = MRI_ModRef;
+      // Setting ModRef will not yield an early return below, MustAlias is not
+      // used further.
+      Result = ModRefInfo::ModRef;
       break;
     }
 
+    // No operand aliases, reset Must bit. Add below if at least one aliases
+    // and all aliases found are MustAlias.
+    if (isNoModRef(Result))
+      IsMustAlias = false;
+
     // Early return if we improved mod ref information
-    if (Result != MRI_ModRef)
-      return Result;
+    if (!isModAndRefSet(Result))
+      return IsMustAlias ? setMust(Result) : clearMust(Result);
   }
 
   // If the CallSite is to malloc or calloc, we can assume that it doesn't
@@ -832,13 +854,13 @@ ModRefInfo BasicAAResult::getModRefInfo(ImmutableCallSite CS,
   // routines do not read values visible in the IR.  TODO: Consider special
   // casing realloc and strdup routines which access only their arguments as
   // well.  Or alternatively, replace all of this with inaccessiblememonly once
-  // that's implemented fully. 
+  // that's implemented fully.
   auto *Inst = CS.getInstruction();
   if (isMallocOrCallocLikeFn(Inst, &TLI)) {
     // Be conservative if the accessed pointer may alias the allocation -
     // fallback to the generic handling below.
     if (getBestAAResults().alias(MemoryLocation(Inst), Loc) == NoAlias)
-      return MRI_NoModRef;
+      return ModRefInfo::NoModRef;
   }
 
   // The semantics of memcpy intrinsics forbid overlap between their respective
@@ -851,18 +873,18 @@ ModRefInfo BasicAAResult::getModRefInfo(ImmutableCallSite CS,
     if ((SrcAA = getBestAAResults().alias(MemoryLocation::getForSource(Inst),
                                           Loc)) == MustAlias)
       // Loc is exactly the memcpy source thus disjoint from memcpy dest.
-      return MRI_Ref;
+      return ModRefInfo::Ref;
     if ((DestAA = getBestAAResults().alias(MemoryLocation::getForDest(Inst),
                                            Loc)) == MustAlias)
       // The converse case.
-      return MRI_Mod;
+      return ModRefInfo::Mod;
 
     // It's also possible for Loc to alias both src and dest, or neither.
-    ModRefInfo rv = MRI_NoModRef;
+    ModRefInfo rv = ModRefInfo::NoModRef;
     if (SrcAA != NoAlias)
-      rv = static_cast<ModRefInfo>(rv | MRI_Ref);
+      rv = setRef(rv);
     if (DestAA != NoAlias)
-      rv = static_cast<ModRefInfo>(rv | MRI_Mod);
+      rv = setMod(rv);
     return rv;
   }
 
@@ -870,7 +892,7 @@ ModRefInfo BasicAAResult::getModRefInfo(ImmutableCallSite CS,
   // proper control dependencies will be maintained, it never aliases any
   // particular memory location.
   if (isIntrinsicCall(CS, Intrinsic::assume))
-    return MRI_NoModRef;
+    return ModRefInfo::NoModRef;
 
   // Like assumes, guard intrinsics are also marked as arbitrarily writing so
   // that proper control dependencies are maintained but they never mods any
@@ -880,7 +902,7 @@ ModRefInfo BasicAAResult::getModRefInfo(ImmutableCallSite CS,
   // heap state at the point the guard is issued needs to be consistent in case
   // the guard invokes the "deopt" continuation.
   if (isIntrinsicCall(CS, Intrinsic::experimental_guard))
-    return MRI_Ref;
+    return ModRefInfo::Ref;
 
   // Like assumes, invariant.start intrinsics were also marked as arbitrarily
   // writing so that proper control dependencies are maintained but they never
@@ -906,7 +928,7 @@ ModRefInfo BasicAAResult::getModRefInfo(ImmutableCallSite CS,
   // rules of invariant.start)  and print 40, while the first program always
   // prints 50.
   if (isIntrinsicCall(CS, Intrinsic::invariant_start))
-    return MRI_Ref;
+    return ModRefInfo::Ref;
 
   // The AAResultBase base class has some smarts, lets use them.
   return AAResultBase::getModRefInfo(CS, Loc);
@@ -919,7 +941,7 @@ ModRefInfo BasicAAResult::getModRefInfo(ImmutableCallSite CS1,
   // particular memory location.
   if (isIntrinsicCall(CS1, Intrinsic::assume) ||
       isIntrinsicCall(CS2, Intrinsic::assume))
-    return MRI_NoModRef;
+    return ModRefInfo::NoModRef;
 
   // Like assumes, guard intrinsics are also marked as arbitrarily writing so
   // that proper control dependencies are maintained but they never mod any
@@ -933,10 +955,14 @@ ModRefInfo BasicAAResult::getModRefInfo(ImmutableCallSite CS1,
   // possibilities for guard intrinsics.
 
   if (isIntrinsicCall(CS1, Intrinsic::experimental_guard))
-    return getModRefBehavior(CS2) & MRI_Mod ? MRI_Ref : MRI_NoModRef;
+    return isModSet(createModRefInfo(getModRefBehavior(CS2)))
+               ? ModRefInfo::Ref
+               : ModRefInfo::NoModRef;
 
   if (isIntrinsicCall(CS2, Intrinsic::experimental_guard))
-    return getModRefBehavior(CS1) & MRI_Mod ? MRI_Mod : MRI_NoModRef;
+    return isModSet(createModRefInfo(getModRefBehavior(CS1)))
+               ? ModRefInfo::Mod
+               : ModRefInfo::NoModRef;
 
   // The AAResultBase base class has some smarts, lets use them.
   return AAResultBase::getModRefInfo(CS1, CS2);

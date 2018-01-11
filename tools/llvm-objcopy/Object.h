@@ -126,6 +126,20 @@ public:
   void writeSection(FileOutputBuffer &Out) const override;
 };
 
+class OwnedDataSection : public SectionBase {
+private:
+  std::vector<uint8_t> Data;
+
+public:
+  OwnedDataSection(StringRef SecName, ArrayRef<uint8_t> Data)
+      : Data(std::begin(Data), std::end(Data)) {
+    Name = SecName;
+    Type = ELF::SHT_PROGBITS;
+    Size = Data.size();
+  }
+  void writeSection(FileOutputBuffer &Out) const override;
+};
+
 // There are two types of string tables that can exist, dynamic and not dynamic.
 // In the dynamic case the string table is allocated. Changing a dynamic string
 // table would mean altering virtual addresses and thus the memory image. So
@@ -179,6 +193,7 @@ struct Symbol {
   uint64_t Size;
   uint8_t Type;
   uint64_t Value;
+  uint8_t Visibility;
 
   uint16_t getShndx() const;
 };
@@ -193,11 +208,13 @@ protected:
 public:
   void setStrTab(StringTableSection *StrTab) { SymbolNames = StrTab; }
   void addSymbol(StringRef Name, uint8_t Bind, uint8_t Type,
-                 SectionBase *DefinedIn, uint64_t Value, uint16_t Shndx,
-                 uint64_t Sz);
+                 SectionBase *DefinedIn, uint64_t Value, uint8_t Visibility,
+                 uint16_t Shndx, uint64_t Sz);
   void addSymbolNames();
+  const SectionBase *getStrTab() const { return SymbolNames; }
   const Symbol *getSymbolByIndex(uint32_t Index) const;
   void removeSectionReferences(const SectionBase *Sec) override;
+  void localize(std::function<bool(const Symbol &)> ToLocalize);
   void initialize(SectionTableRef SecTable) override;
   void finalize() override;
 
@@ -368,8 +385,10 @@ public:
   Object(const object::ELFObjectFile<ELFT> &Obj);
   virtual ~Object() = default;
 
+  SymbolTableSection *getSymTab() const { return SymbolTable; }
   const SectionBase *getSectionHeaderStrTab() const { return SectionNames; }
   void removeSections(std::function<bool(const SectionBase &)> ToRemove);
+  void addSection(StringRef SecName, ArrayRef<uint8_t> Data);
   virtual size_t totalSize() const = 0;
   virtual void finalize() = 0;
   virtual void write(FileOutputBuffer &Out) const = 0;

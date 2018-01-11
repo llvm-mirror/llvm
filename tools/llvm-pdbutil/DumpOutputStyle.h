@@ -75,11 +75,14 @@ private:
   Error dumpSymbolStats();
   Error dumpUdtStats();
   Error dumpStringTable();
+  Error dumpStringTableFromPdb();
+  Error dumpStringTableFromObj();
   Error dumpLines();
   Error dumpInlineeLines();
   Error dumpXmi();
   Error dumpXme();
   Error dumpTpiStream(uint32_t StreamIdx);
+  Error dumpTypesFromObjectFile();
   Error dumpModules();
   Error dumpModuleFiles();
   Error dumpModuleSymsForPdb();

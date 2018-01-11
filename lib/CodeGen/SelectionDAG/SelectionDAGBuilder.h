@@ -24,6 +24,7 @@
 #include "llvm/CodeGen/MachineValueType.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
+#include "llvm/CodeGen/TargetLowering.h"
 #include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/DebugLoc.h"
@@ -32,7 +33,6 @@
 #include "llvm/Support/BranchProbability.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Target/TargetLowering.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -369,6 +369,10 @@ private:
                      MachineBasicBlock *SwitchMBB,
                      MachineBasicBlock *DefaultMBB);
 
+  /// Peel the top probability case if it exceeds the threshold
+  MachineBasicBlock *peelDominantCaseCluster(const SwitchInst &SI,
+                                             CaseClusterVector &Clusters,
+                                             BranchProbability &PeeledCaseProb);
 
   /// A class which encapsulates all of the information needed to generate a
   /// stack protector check and signals to isel via its state being initialized

@@ -142,9 +142,14 @@ OpDescriptor llvm::fuzzerop::splitBlockDescriptor(unsigned Weight) {
   auto buildSplitBlock = [](ArrayRef<Value *> Srcs, Instruction *Inst) {
     BasicBlock *Block = Inst->getParent();
     BasicBlock *Next = Block->splitBasicBlock(Inst, "BB");
+
+    // If it was an exception handling block, we are done.
+    if (Block->isEHPad())
+      return nullptr;
+
+    // Loop back on this block by replacing the unconditional forward branch
+    // with a conditional with a backedge.
     if (Block != &Block->getParent()->getEntryBlock()) {
-      // Loop back on this block by replacing the unconditional forward branch
-      // with a conditional with a backedge.
       BranchInst::Create(Block, Next, Srcs[0], Block->getTerminator());
       Block->getTerminator()->eraseFromParent();
 
@@ -172,7 +177,7 @@ OpDescriptor llvm::fuzzerop::gepDescriptor(unsigned Weight) {
   // TODO: Handle aggregates and vectors
   // TODO: Support multiple indices.
   // TODO: Try to avoid meaningless accesses.
-  return {Weight, {anyPtrType(), anyIntType()}, buildGEP};
+  return {Weight, {sizedPtrType(), anyIntType()}, buildGEP};
 }
 
 static uint64_t getAggregateNumElements(Type *T) {
@@ -216,8 +221,9 @@ OpDescriptor llvm::fuzzerop::extractValueDescriptor(unsigned Weight) {
 
 static SourcePred matchScalarInAggregate() {
   auto Pred = [](ArrayRef<Value *> Cur, const Value *V) {
-    if (isa<ArrayType>(Cur[0]->getType()))
-      return V->getType() == Cur[0]->getType();
+    if (auto *ArrayT = dyn_cast<ArrayType>(Cur[0]->getType()))
+      return V->getType() == ArrayT->getElementType();
+
     auto *STy = cast<StructType>(Cur[0]->getType());
     for (int I = 0, E = STy->getNumElements(); I < E; ++I)
       if (STy->getTypeAtIndex(I) == V->getType())
@@ -225,8 +231,9 @@ static SourcePred matchScalarInAggregate() {
     return false;
   };
   auto Make = [](ArrayRef<Value *> Cur, ArrayRef<Type *>) {
-    if (isa<ArrayType>(Cur[0]->getType()))
-      return makeConstantsWithType(Cur[0]->getType());
+    if (auto *ArrayT = dyn_cast<ArrayType>(Cur[0]->getType()))
+      return makeConstantsWithType(ArrayT->getElementType());
+
     std::vector<Constant *> Result;
     auto *STy = cast<StructType>(Cur[0]->getType());
     for (int I = 0, E = STy->getNumElements(); I < E; ++I)
@@ -240,9 +247,9 @@ static SourcePred validInsertValueIndex() {
   auto Pred = [](ArrayRef<Value *> Cur, const Value *V) {
     auto *CTy = cast<CompositeType>(Cur[0]->getType());
     if (auto *CI = dyn_cast<ConstantInt>(V))
-      if (CI->getBitWidth() == 32)
-        if (CTy->getTypeAtIndex(CI->getZExtValue()) == V->getType())
-          return true;
+      if (CI->getBitWidth() == 32 &&
+          CTy->getTypeAtIndex(CI->getZExtValue()) == Cur[1]->getType())
+        return true;
     return false;
   };
   auto Make = [](ArrayRef<Value *> Cur, ArrayRef<Type *> Ts) {

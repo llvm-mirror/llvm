@@ -93,11 +93,11 @@ static cl::opt<bool> DisablePartialLibcallInlining("disable-partial-libcall-inli
 static cl::opt<bool> EnableImplicitNullChecks(
     "enable-implicit-null-checks",
     cl::desc("Fold null checks into faulting memory operations"),
-    cl::init(false));
-static cl::opt<bool> EnableMergeICmps(
-    "enable-mergeicmps",
-    cl::desc("Merge ICmp chains into a single memcmp"),
-    cl::init(false));
+    cl::init(false), cl::Hidden);
+static cl::opt<bool>
+    EnableMergeICmps("enable-mergeicmps",
+                     cl::desc("Merge ICmp chains into a single memcmp"),
+                     cl::init(false), cl::Hidden);
 static cl::opt<bool> PrintLSR("print-lsr-output", cl::Hidden,
     cl::desc("Print LLVM IR produced by the loop-reduce pass"));
 static cl::opt<bool> PrintISelInput("print-isel-input", cl::Hidden,
@@ -127,10 +127,9 @@ static cl::opt<cl::boolOrDefault>
     EnableGlobalISel("global-isel", cl::Hidden,
                      cl::desc("Enable the \"global\" instruction selector"));
 
-static cl::opt<std::string>
-PrintMachineInstrs("print-machineinstrs", cl::ValueOptional,
-                   cl::desc("Print machine instrs"),
-                   cl::value_desc("pass-name"), cl::init("option-unspecified"));
+static cl::opt<std::string> PrintMachineInstrs(
+    "print-machineinstrs", cl::ValueOptional, cl::desc("Print machine instrs"),
+    cl::value_desc("pass-name"), cl::init("option-unspecified"), cl::Hidden);
 
 static cl::opt<int> EnableGlobalISelAbort(
     "global-isel-abort", cl::Hidden,
@@ -176,22 +175,22 @@ const char *StopBeforeOptName = "stop-before";
 static cl::opt<std::string>
     StartAfterOpt(StringRef(StartAfterOptName),
                   cl::desc("Resume compilation after a specific pass"),
-                  cl::value_desc("pass-name"), cl::init(""));
+                  cl::value_desc("pass-name"), cl::init(""), cl::Hidden);
 
 static cl::opt<std::string>
     StartBeforeOpt(StringRef(StartBeforeOptName),
                    cl::desc("Resume compilation before a specific pass"),
-                   cl::value_desc("pass-name"), cl::init(""));
+                   cl::value_desc("pass-name"), cl::init(""), cl::Hidden);
 
 static cl::opt<std::string>
     StopAfterOpt(StringRef(StopAfterOptName),
                  cl::desc("Stop compilation after a specific pass"),
-                 cl::value_desc("pass-name"), cl::init(""));
+                 cl::value_desc("pass-name"), cl::init(""), cl::Hidden);
 
 static cl::opt<std::string>
     StopBeforeOpt(StringRef(StopBeforeOptName),
                   cl::desc("Stop compilation before a specific pass"),
-                  cl::value_desc("pass-name"), cl::init(""));
+                  cl::value_desc("pass-name"), cl::init(""), cl::Hidden);
 
 /// Allow standard passes to be disabled by command line options. This supports
 /// simple binary flags that either suppress the pass or do nothing.
@@ -625,8 +624,8 @@ void TargetPassConfig::addIRPasses() {
   if (getOptLevel() != CodeGenOpt::None && !DisablePartialLibcallInlining)
     addPass(createPartiallyInlineLibCallsPass());
 
-  // Insert calls to mcount-like functions.
-  addPass(createCountingFunctionInserterPass());
+  // Instrument function entry and exit, e.g. with calls to mcount().
+  addPass(createPostInlineEntryExitInstrumenterPass());
 
   // Add scalarization of target's unsupported masked memory intrinsics pass.
   // the unsupported intrinsic will be replaced with a chain of basic blocks,
@@ -713,8 +712,11 @@ bool TargetPassConfig::addCoreISelPasses() {
 
   // Ask the target for an isel.
   // Enable GlobalISel if the target wants to, but allow that to be overriden.
+  // Explicitly enabling fast-isel should override implicitly enabled
+  // global-isel.
   if (EnableGlobalISel == cl::BOU_TRUE ||
-      (EnableGlobalISel == cl::BOU_UNSET && isGlobalISelEnabled())) {
+      (EnableGlobalISel == cl::BOU_UNSET && isGlobalISelEnabled() &&
+       EnableFastISelOption != cl::BOU_TRUE)) {
     if (addIRTranslator())
       return true;
 
@@ -767,10 +769,9 @@ bool TargetPassConfig::addISelPasses() {
 /// -regalloc=... command line option.
 static FunctionPass *useDefaultRegisterAllocator() { return nullptr; }
 static cl::opt<RegisterRegAlloc::FunctionPassCtor, false,
-               RegisterPassParser<RegisterRegAlloc> >
-RegAlloc("regalloc",
-         cl::init(&useDefaultRegisterAllocator),
-         cl::desc("Register allocator to use"));
+               RegisterPassParser<RegisterRegAlloc>>
+    RegAlloc("regalloc", cl::Hidden, cl::init(&useDefaultRegisterAllocator),
+             cl::desc("Register allocator to use"));
 
 /// Add the complete set of target-independent postISel code generator passes.
 ///
@@ -1135,7 +1136,12 @@ bool TargetPassConfig::isGlobalISelEnabled() const {
 }
 
 bool TargetPassConfig::isGlobalISelAbortEnabled() const {
-  return EnableGlobalISelAbort == 1;
+  if (EnableGlobalISelAbort.getNumOccurrences() > 0)
+    return EnableGlobalISelAbort == 1;
+
+  // When no abort behaviour is specified, we don't abort if the target says
+  // that GISel is enabled.
+  return !isGlobalISelEnabled();
 }
 
 bool TargetPassConfig::reportDiagnosticWhenGlobalISelFallback() const {

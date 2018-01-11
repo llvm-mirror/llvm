@@ -63,16 +63,20 @@ struct SimplifyCFGOptions {
   bool ForwardSwitchCondToPhi;
   bool ConvertSwitchToLookupTable;
   bool NeedCanonicalLoop;
+  bool SinkCommonInsts;
   AssumptionCache *AC;
 
   SimplifyCFGOptions(unsigned BonusThreshold = 1,
                      bool ForwardSwitchCond = false,
                      bool SwitchToLookup = false, bool CanonicalLoops = true,
+                     bool SinkCommon = false,
                      AssumptionCache *AssumpCache = nullptr)
       : BonusInstThreshold(BonusThreshold),
         ForwardSwitchCondToPhi(ForwardSwitchCond),
         ConvertSwitchToLookupTable(SwitchToLookup),
-        NeedCanonicalLoop(CanonicalLoops), AC(AssumpCache) {}
+        NeedCanonicalLoop(CanonicalLoops),
+        SinkCommonInsts(SinkCommon),
+        AC(AssumpCache) {}
 
   // Support 'builder' pattern to set members by name at construction time.
   SimplifyCFGOptions &bonusInstThreshold(int I) {
@@ -89,6 +93,10 @@ struct SimplifyCFGOptions {
   }
   SimplifyCFGOptions &needCanonicalLoops(bool B) {
     NeedCanonicalLoop = B;
+    return *this;
+  }
+  SimplifyCFGOptions &sinkCommonInsts(bool B) {
+    SinkCommonInsts = B;
     return *this;
   }
   SimplifyCFGOptions &setAssumptionCache(AssumptionCache *Cache) {
@@ -335,22 +343,27 @@ TinyPtrVector<DbgInfoIntrinsic *> FindDbgAddrUses(Value *V);
 /// Finds the llvm.dbg.value intrinsics describing a value.
 void findDbgValues(SmallVectorImpl<DbgValueInst *> &DbgValues, Value *V);
 
-/// Replaces llvm.dbg.declare instruction when the address it describes
-/// is replaced with a new value. If Deref is true, an additional DW_OP_deref is
-/// prepended to the expression. If Offset is non-zero, a constant displacement
-/// is added to the expression (after the optional Deref). Offset can be
-/// negative.
+/// Finds the debug info intrinsics describing a value.
+void findDbgUsers(SmallVectorImpl<DbgInfoIntrinsic *> &DbgInsts, Value *V);
+
+/// Replaces llvm.dbg.declare instruction when the address it
+/// describes is replaced with a new value. If Deref is true, an
+/// additional DW_OP_deref is prepended to the expression. If Offset
+/// is non-zero, a constant displacement is added to the expression
+/// (between the optional Deref operations). Offset can be negative.
 bool replaceDbgDeclare(Value *Address, Value *NewAddress,
                        Instruction *InsertBefore, DIBuilder &Builder,
-                       bool Deref, int Offset);
+                       bool DerefBefore, int Offset, bool DerefAfter);
 
 /// Replaces llvm.dbg.declare instruction when the alloca it describes
-/// is replaced with a new value. If Deref is true, an additional DW_OP_deref is
-/// prepended to the expression. If Offset is non-zero, a constant displacement
-/// is added to the expression (after the optional Deref). Offset can be
-/// negative. New llvm.dbg.declare is inserted immediately before AI.
+/// is replaced with a new value. If Deref is true, an additional
+/// DW_OP_deref is prepended to the expression. If Offset is non-zero,
+/// a constant displacement is added to the expression (between the
+/// optional Deref operations). Offset can be negative. The new
+/// llvm.dbg.declare is inserted immediately before AI.
 bool replaceDbgDeclareForAlloca(AllocaInst *AI, Value *NewAllocaAddress,
-                                DIBuilder &Builder, bool Deref, int Offset = 0);
+                                DIBuilder &Builder, bool DerefBefore,
+                                int Offset, bool DerefAfter);
 
 /// Replaces multiple llvm.dbg.value instructions when the alloca it describes
 /// is replaced with a new value. If Offset is non-zero, a constant displacement
@@ -445,7 +458,7 @@ void copyRangeMetadata(const DataLayout &DL, const LoadInst &OldLI, MDNode *N,
 //  Intrinsic pattern matching
 //
 
-/// Try and match a bswap or bitreverse idiom.
+/// Try to match a bswap or bitreverse idiom.
 ///
 /// If an idiom is matched, an intrinsic call is inserted before \c I. Any added
 /// instructions are returned in \c InsertedInsts. They will all have been added

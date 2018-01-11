@@ -140,7 +140,6 @@ namespace {
     bool runOnLoop(Loop *L, LPPassManager &LPM) override;
 
   private:
-    unsigned getStoreSizeInBytes(StoreInst *SI);
     int getSCEVStride(const SCEVAddRecExpr *StoreEv);
     bool isLegalStore(Loop *CurLoop, StoreInst *SI);
     void collectStores(Loop *CurLoop, BasicBlock *BB,
@@ -1051,14 +1050,11 @@ bool PolynomialMultiplyRecognize::promoteTypes(BasicBlock *LoopB,
   // Check if the exit values have types that are no wider than the type
   // that we want to promote to.
   unsigned DestBW = DestTy->getBitWidth();
-  for (Instruction &In : *ExitB) {
-    PHINode *P = dyn_cast<PHINode>(&In);
-    if (!P)
-      break;
-    if (P->getNumIncomingValues() != 1)
+  for (PHINode &P : ExitB->phis()) {
+    if (P.getNumIncomingValues() != 1)
       return false;
-    assert(P->getIncomingBlock(0) == LoopB);
-    IntegerType *T = dyn_cast<IntegerType>(P->getType());
+    assert(P.getIncomingBlock(0) == LoopB);
+    IntegerType *T = dyn_cast<IntegerType>(P.getType());
     if (!T || T->getBitWidth() > DestBW)
       return false;
   }
@@ -1847,13 +1843,6 @@ bool PolynomialMultiplyRecognize::recognize() {
   return true;
 }
 
-unsigned HexagonLoopIdiomRecognize::getStoreSizeInBytes(StoreInst *SI) {
-  uint64_t SizeInBits = DL->getTypeSizeInBits(SI->getValueOperand()->getType());
-  assert(((SizeInBits & 7) || (SizeInBits >> 32) == 0) &&
-         "Don't overflow unsigned.");
-  return (unsigned)SizeInBits >> 3;
-}
-
 int HexagonLoopIdiomRecognize::getSCEVStride(const SCEVAddRecExpr *S) {
   if (const SCEVConstant *SC = dyn_cast<SCEVConstant>(S->getOperand(1)))
     return SC->getAPInt().getSExtValue();
@@ -1885,7 +1874,7 @@ bool HexagonLoopIdiomRecognize::isLegalStore(Loop *CurLoop, StoreInst *SI) {
   int Stride = getSCEVStride(StoreEv);
   if (Stride == 0)
     return false;
-  unsigned StoreSize = getStoreSizeInBytes(SI);
+  unsigned StoreSize = DL->getTypeStoreSize(SI->getValueOperand()->getType());
   if (StoreSize != unsigned(std::abs(Stride)))
     return false;
 
@@ -1936,7 +1925,9 @@ mayLoopAccessLocation(Value *Ptr, ModRefInfo Access, Loop *L,
 
   for (auto *B : L->blocks())
     for (auto &I : *B)
-      if (Ignored.count(&I) == 0 && (AA.getModRefInfo(&I, StoreLoc) & Access))
+      if (Ignored.count(&I) == 0 &&
+          isModOrRefSet(
+              intersectModRef(AA.getModRefInfo(&I, StoreLoc), Access)))
         return true;
 
   return false;
@@ -1960,7 +1951,7 @@ bool HexagonLoopIdiomRecognize::processCopyingStore(Loop *CurLoop,
   Value *StorePtr = SI->getPointerOperand();
   auto *StoreEv = cast<SCEVAddRecExpr>(SE->getSCEV(StorePtr));
   unsigned Stride = getSCEVStride(StoreEv);
-  unsigned StoreSize = getStoreSizeInBytes(SI);
+  unsigned StoreSize = DL->getTypeStoreSize(SI->getValueOperand()->getType());
   if (Stride != StoreSize)
     return false;
 
@@ -2015,12 +2006,12 @@ CleanupAndExit:
 
   SmallPtrSet<Instruction*, 2> Ignore1;
   Ignore1.insert(SI);
-  if (mayLoopAccessLocation(StoreBasePtr, MRI_ModRef, CurLoop, BECount,
+  if (mayLoopAccessLocation(StoreBasePtr, ModRefInfo::ModRef, CurLoop, BECount,
                             StoreSize, *AA, Ignore1)) {
     // Check if the load is the offending instruction.
     Ignore1.insert(LI);
-    if (mayLoopAccessLocation(StoreBasePtr, MRI_ModRef, CurLoop, BECount,
-                              StoreSize, *AA, Ignore1)) {
+    if (mayLoopAccessLocation(StoreBasePtr, ModRefInfo::ModRef, CurLoop,
+                              BECount, StoreSize, *AA, Ignore1)) {
       // Still bad. Nothing we can do.
       goto CleanupAndExit;
     }
@@ -2062,8 +2053,8 @@ CleanupAndExit:
 
   SmallPtrSet<Instruction*, 2> Ignore2;
   Ignore2.insert(SI);
-  if (mayLoopAccessLocation(LoadBasePtr, MRI_Mod, CurLoop, BECount, StoreSize,
-                            *AA, Ignore2))
+  if (mayLoopAccessLocation(LoadBasePtr, ModRefInfo::Mod, CurLoop, BECount,
+                            StoreSize, *AA, Ignore2))
     goto CleanupAndExit;
 
   // Check the stride.

@@ -19,16 +19,16 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/LiveInterval.h"
-#include "llvm/CodeGen/LiveIntervalAnalysis.h"
+#include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/MachineScheduler.h"
 #include "llvm/CodeGen/RegisterPressure.h"
 #include "llvm/CodeGen/SlotIndexes.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 #include <algorithm>
 #include <cassert>
 #include <map>
@@ -595,11 +595,11 @@ void SIScheduleBlock::printDebug(bool full) {
            << LiveOutPressure[DAG->getVGPRSetID()] << "\n\n";
     dbgs() << "LiveIns:\n";
     for (unsigned Reg : LiveInRegs)
-      dbgs() << PrintVRegOrUnit(Reg, DAG->getTRI()) << ' ';
+      dbgs() << printVRegOrUnit(Reg, DAG->getTRI()) << ' ';
 
     dbgs() << "\nLiveOuts:\n";
     for (unsigned Reg : LiveOutRegs)
-      dbgs() << PrintVRegOrUnit(Reg, DAG->getTRI()) << ' ';
+      dbgs() << printVRegOrUnit(Reg, DAG->getTRI()) << ' ';
   }
 
   dbgs() << "\nInstructions:\n";
@@ -1635,7 +1635,7 @@ SIScheduleBlock *SIScheduleBlockScheduler::pickBlock() {
       dbgs() << Block->getID() << ' ';
     dbgs() << "\nCurrent Live:\n";
     for (unsigned Reg : LiveRegs)
-      dbgs() << PrintVRegOrUnit(Reg, DAG->getTRI()) << ' ';
+      dbgs() << printVRegOrUnit(Reg, DAG->getTRI()) << ' ';
     dbgs() << '\n';
     dbgs() << "Current VGPRs: " << VregCurrentUsage << '\n';
     dbgs() << "Current SGPRs: " << SregCurrentUsage << '\n';
@@ -2050,9 +2050,9 @@ void SIScheduleDAGMI::schedule()
   placeDebugValues();
 
   DEBUG({
-      unsigned BBNum = begin()->getParent()->getNumber();
-      dbgs() << "*** Final schedule for BB#" << BBNum << " ***\n";
-      dumpSchedule();
-      dbgs() << '\n';
-    });
+    dbgs() << "*** Final schedule for "
+           << printMBBReference(*begin()->getParent()) << " ***\n";
+    dumpSchedule();
+    dbgs() << '\n';
+  });
 }

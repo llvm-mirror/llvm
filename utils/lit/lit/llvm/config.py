@@ -223,12 +223,15 @@ class LLVMConfig(object):
             return True
 
         if re.match(r'^x86_64.*-apple', triple):
-            version_number = int(
-                re.search(r'version ([0-9]+)\.', version_string).group(1))
+            version_regex = re.search(r'version ([0-9]+)\.([0-9]+).([0-9]+)', version_string)
+            major_version_number = int(version_regex.group(1))
+            minor_version_number = int(version_regex.group(2))
+            patch_version_number = int(version_regex.group(3))
             if 'Apple LLVM' in version_string:
-                return version_number >= 9
+                # Apple LLVM doesn't yet support LSan
+                return False
             else:
-                return version_number >= 5
+                return major_version_number >= 5
 
         return False
 
@@ -316,7 +319,7 @@ class LLVMConfig(object):
                 return tool
 
         # Otherwise look in the path.
-        tool = lit.util.which(name, self.config.llvm_tools_dir)
+        tool = lit.util.which(name, self.config.environment['PATH'])
 
         if required and not tool:
             message = "couldn't find '{}' program".format(name)
@@ -367,10 +370,10 @@ class LLVMConfig(object):
         self.clear_environment(possibly_dangerous_env_vars)
 
         # Tweak the PATH to include the tools dir and the scripts dir.
-        paths = [self.config.llvm_tools_dir]
-        tools = getattr(self.config, 'clang_tools_dir', None)
-        if tools:
-            paths = paths + [tools]
+        # Put Clang first to avoid LLVM from overriding out-of-tree clang builds.
+        possible_paths = ['clang_tools_dir', 'llvm_tools_dir']
+        paths = [getattr(self.config, pp) for pp in possible_paths
+                 if getattr(self.config, pp, None)]
         self.with_environment('PATH', paths, append_path=True)
 
         paths = [self.config.llvm_shlib_dir, self.config.llvm_libs_dir]

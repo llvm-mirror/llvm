@@ -23,10 +23,9 @@
 #include "Error.h"
 #include "ObjDumper.h"
 #include "WindowsResourceDumper.h"
-#include "llvm/DebugInfo/CodeView/TypeTableBuilder.h"
+#include "llvm/DebugInfo/CodeView/MergingTypeTableBuilder.h"
 #include "llvm/Object/Archive.h"
 #include "llvm/Object/COFFImportFile.h"
-#include "llvm/Object/ELFObjectFile.h"
 #include "llvm/Object/MachOUniversal.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Object/WindowsResource.h"
@@ -41,9 +40,6 @@
 #include "llvm/Support/ScopedPrinter.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/TargetRegistry.h"
-#include "llvm/Support/TargetSelect.h"
-#include <string>
-#include <system_error>
 
 using namespace llvm;
 using namespace llvm::object;
@@ -353,8 +349,8 @@ struct ReadObjTypeTableBuilder {
       : Allocator(), IDTable(Allocator), TypeTable(Allocator) {}
 
   llvm::BumpPtrAllocator Allocator;
-  llvm::codeview::TypeTableBuilder IDTable;
-  llvm::codeview::TypeTableBuilder TypeTable;
+  llvm::codeview::MergingTypeTableBuilder IDTable;
+  llvm::codeview::MergingTypeTableBuilder TypeTable;
 };
 }
 static ReadObjTypeTableBuilder CVTypes;

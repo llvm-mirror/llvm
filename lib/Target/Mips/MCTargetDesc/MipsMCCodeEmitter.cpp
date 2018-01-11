@@ -86,18 +86,6 @@ static void LowerLargeShift(MCInst& Inst) {
   case Mips::DROTR:
     Inst.setOpcode(Mips::DROTR32);
     return;
-  case Mips::DSLL_MM64R6:
-    Inst.setOpcode(Mips::DSLL32_MM64R6);
-    return;
-  case Mips::DSRL_MM64R6:
-    Inst.setOpcode(Mips::DSRL32_MM64R6);
-    return;
-  case Mips::DSRA_MM64R6:
-    Inst.setOpcode(Mips::DSRA32_MM64R6);
-    return;
-  case Mips::DROTR_MM64R6:
-    Inst.setOpcode(Mips::DROTR32_MM64R6);
-    return;
   }
 }
 
@@ -178,10 +166,6 @@ encodeInstruction(const MCInst &MI, raw_ostream &OS,
   case Mips::DSRL:
   case Mips::DSRA:
   case Mips::DROTR:
-  case Mips::DSLL_MM64R6:
-  case Mips::DSRL_MM64R6:
-  case Mips::DSRA_MM64R6:
-  case Mips::DROTR_MM64R6:
     LowerLargeShift(TmpInst);
     break;
   // Compact branches, enforce encoding restrictions.
@@ -204,7 +188,7 @@ encodeInstruction(const MCInst &MI, raw_ostream &OS,
   // so we have to special check for them.
   unsigned Opcode = TmpInst.getOpcode();
   if ((Opcode != Mips::NOP) && (Opcode != Mips::SLL) &&
-      (Opcode != Mips::SLL_MM) && !Binary)
+      (Opcode != Mips::SLL_MM) && (Opcode != Mips::SLL_MMR6) && !Binary)
     llvm_unreachable("unimplemented opcode in encodeInstruction()");
 
   int NewOpcode = -1;

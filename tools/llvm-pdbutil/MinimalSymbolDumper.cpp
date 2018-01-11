@@ -10,6 +10,7 @@
 #include "MinimalSymbolDumper.h"
 
 #include "FormatUtil.h"
+#include "InputFile.h"
 #include "LinePrinter.h"
 
 #include "llvm/DebugInfo/CodeView/CVRecord.h"
@@ -18,6 +19,7 @@
 #include "llvm/DebugInfo/CodeView/LazyRandomTypeCollection.h"
 #include "llvm/DebugInfo/CodeView/SymbolRecord.h"
 #include "llvm/DebugInfo/CodeView/TypeRecord.h"
+#include "llvm/DebugInfo/PDB/Native/PDBStringTable.h"
 #include "llvm/Support/FormatVariadic.h"
 
 using namespace llvm;
@@ -337,7 +339,7 @@ Error MinimalSymbolDumper::visitSymbolEnd(CVSymbol &Record) {
 
 std::string MinimalSymbolDumper::typeOrIdIndex(codeview::TypeIndex TI,
                                                bool IsType) const {
-  if (TI.isSimple())
+  if (TI.isSimple() || TI.isDecoratedItemId())
     return formatv("{0}", TI).str();
   auto &Container = IsType ? Types : Ids;
   StringRef Name = Container.getTypeName(TI);
@@ -450,6 +452,17 @@ Error MinimalSymbolDumper::visitKnownRecord(CVSymbol &CVR,
 Error MinimalSymbolDumper::visitKnownRecord(CVSymbol &CVR, FileStaticSym &FS) {
   P.format(" `{0}`", FS.Name);
   AutoIndent Indent(P, 7);
+  if (SymGroup) {
+    Expected<StringRef> FileName =
+        SymGroup->getNameFromStringTable(FS.ModFilenameOffset);
+    if (FileName) {
+      P.formatLine("type = {0}, file name = {1} ({2}), flags = {3}",
+                   typeIndex(FS.Index), FS.ModFilenameOffset, *FileName,
+                   formatLocalSymFlags(P.getIndentLevel() + 9, FS.Flags));
+    }
+    return Error::success();
+  }
+
   P.formatLine("type = {0}, file name offset = {1}, flags = {2}",
                typeIndex(FS.Index), FS.ModFilenameOffset,
                formatLocalSymFlags(P.getIndentLevel() + 9, FS.Flags));

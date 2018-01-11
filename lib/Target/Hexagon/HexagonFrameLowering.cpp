@@ -38,6 +38,7 @@
 #include "llvm/CodeGen/MachinePostDominators.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/RegisterScavenging.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/Function.h"
@@ -53,7 +54,6 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -225,7 +225,7 @@ namespace {
 bool HexagonCallFrameInformation::runOnMachineFunction(MachineFunction &MF) {
   auto &HFI = *MF.getSubtarget<HexagonSubtarget>().getFrameLowering();
   bool NeedCFI = MF.getMMI().hasDebugInfo() ||
-                 MF.getFunction()->needsUnwindTableEntry();
+                 MF.getFunction().needsUnwindTableEntry();
 
   if (!NeedCFI)
     return false;
@@ -336,6 +336,8 @@ static bool needsStackFrame(const MachineBasicBlock &MBB, const BitVector &CSR,
   /// in the block.
 static bool hasTailCall(const MachineBasicBlock &MBB) {
     MachineBasicBlock::const_iterator I = MBB.getLastNonDebugInstr();
+    if (I == MBB.end())
+      return false;
     unsigned RetOpc = I->getOpcode();
     return RetOpc == Hexagon::PS_tailcall_i || RetOpc == Hexagon::PS_tailcall_r;
 }
@@ -373,17 +375,17 @@ static bool isRestoreCall(unsigned Opc) {
 }
 
 static inline bool isOptNone(const MachineFunction &MF) {
-    return MF.getFunction()->hasFnAttribute(Attribute::OptimizeNone) ||
+    return MF.getFunction().hasFnAttribute(Attribute::OptimizeNone) ||
            MF.getTarget().getOptLevel() == CodeGenOpt::None;
 }
 
 static inline bool isOptSize(const MachineFunction &MF) {
-    const Function &F = *MF.getFunction();
+    const Function &F = MF.getFunction();
     return F.optForSize() && !F.optForMinSize();
 }
 
 static inline bool isMinSize(const MachineFunction &MF) {
-    return MF.getFunction()->optForMinSize();
+    return MF.getFunction().optForMinSize();
 }
 
 /// Implements shrink-wrapping of the stack frame. By default, stack frame
@@ -443,7 +445,7 @@ void HexagonFrameLowering::findShrunkPrologEpilog(MachineFunction &MF,
   DEBUG({
     dbgs() << "Blocks needing SF: {";
     for (auto &B : SFBlocks)
-      dbgs() << " BB#" << B->getNumber();
+      dbgs() << " " << printMBBReference(*B);
     dbgs() << " }\n";
   });
   // No frame needed?
@@ -464,12 +466,16 @@ void HexagonFrameLowering::findShrunkPrologEpilog(MachineFunction &MF,
       break;
   }
   DEBUG({
-    dbgs() << "Computed dom block: BB#";
-    if (DomB) dbgs() << DomB->getNumber();
-    else      dbgs() << "<null>";
-    dbgs() << ", computed pdom block: BB#";
-    if (PDomB) dbgs() << PDomB->getNumber();
-    else       dbgs() << "<null>";
+    dbgs() << "Computed dom block: ";
+    if (DomB)
+      dbgs() << printMBBReference(*DomB);
+    else
+      dbgs() << "<null>";
+    dbgs() << ", computed pdom block: ";
+    if (PDomB)
+      dbgs() << printMBBReference(*PDomB);
+    else
+      dbgs() << "<null>";
     dbgs() << "\n";
   });
   if (!DomB || !PDomB)
@@ -632,7 +638,9 @@ void HexagonFrameLowering::insertEpilogueInBlock(MachineBasicBlock &MBB) const {
 
   // Handle EH_RETURN.
   if (RetOpc == Hexagon::EH_RETURN_JMPR) {
-    BuildMI(MBB, InsertPt, dl, HII.get(Hexagon::L2_deallocframe));
+    BuildMI(MBB, InsertPt, dl, HII.get(Hexagon::L2_deallocframe))
+        .addDef(Hexagon::D15)
+        .addReg(Hexagon::R30);
     BuildMI(MBB, InsertPt, dl, HII.get(Hexagon::A2_add), SP)
         .addReg(SP)
         .addReg(Hexagon::R28);
@@ -678,11 +686,15 @@ void HexagonFrameLowering::insertEpilogueInBlock(MachineBasicBlock &MBB) const {
   // otherwise just add deallocframe. The function could be returning via a
   // tail call.
   if (RetOpc != Hexagon::PS_jmpret || DisableDeallocRet) {
-    BuildMI(MBB, InsertPt, dl, HII.get(Hexagon::L2_deallocframe));
+    BuildMI(MBB, InsertPt, dl, HII.get(Hexagon::L2_deallocframe))
+      .addDef(Hexagon::D15)
+      .addReg(Hexagon::R30);
     return;
   }
   unsigned NewOpc = Hexagon::L4_return;
-  MachineInstr *NewI = BuildMI(MBB, RetI, dl, HII.get(NewOpc));
+  MachineInstr *NewI = BuildMI(MBB, RetI, dl, HII.get(NewOpc))
+      .addDef(Hexagon::D15)
+      .addReg(Hexagon::R30);
   // Transfer the function live-out registers.
   NewI->copyImplicitOps(MF, *RetI);
   MBB.erase(RetI);
@@ -705,10 +717,13 @@ void HexagonFrameLowering::insertAllocframe(MachineBasicBlock &MBB,
                                       MachineMemOperand::MOStore, 4, 4);
 
   DebugLoc dl = MBB.findDebugLoc(InsertPt);
+  unsigned SP = HRI.getStackRegister();
 
   if (NumBytes >= ALLOCFRAME_MAX) {
     // Emit allocframe(#0).
     BuildMI(MBB, InsertPt, dl, HII.get(Hexagon::S2_allocframe))
+      .addDef(SP)
+      .addReg(SP)
       .addImm(0)
       .addMemOperand(MMO);
 
@@ -719,6 +734,8 @@ void HexagonFrameLowering::insertAllocframe(MachineBasicBlock &MBB,
       .addImm(-int(NumBytes));
   } else {
     BuildMI(MBB, InsertPt, dl, HII.get(Hexagon::S2_allocframe))
+      .addDef(SP)
+      .addReg(SP)
       .addImm(NumBytes)
       .addMemOperand(MMO);
   }
@@ -943,7 +960,7 @@ void HexagonFrameLowering::insertCFIInstructionsAt(MachineBasicBlock &MBB,
 }
 
 bool HexagonFrameLowering::hasFP(const MachineFunction &MF) const {
-  if (MF.getFunction()->hasFnAttribute(Attribute::Naked))
+  if (MF.getFunction().hasFnAttribute(Attribute::Naked))
     return false;
 
   auto &MFI = MF.getFrameInfo();
@@ -1371,7 +1388,7 @@ static void dump_registers(BitVector &Regs, const TargetRegisterInfo &TRI) {
   dbgs() << '{';
   for (int x = Regs.find_first(); x >= 0; x = Regs.find_next(x)) {
     unsigned R = x;
-    dbgs() << ' ' << PrintReg(R, &TRI);
+    dbgs() << ' ' << printReg(R, &TRI);
   }
   dbgs() << " }";
 }
@@ -1379,8 +1396,7 @@ static void dump_registers(BitVector &Regs, const TargetRegisterInfo &TRI) {
 
 bool HexagonFrameLowering::assignCalleeSavedSpillSlots(MachineFunction &MF,
       const TargetRegisterInfo *TRI, std::vector<CalleeSavedInfo> &CSI) const {
-  DEBUG(dbgs() << __func__ << " on "
-               << MF.getFunction()->getName() << '\n');
+  DEBUG(dbgs() << __func__ << " on " << MF.getName() << '\n');
   MachineFrameInfo &MFI = MF.getFrameInfo();
   BitVector SRegs(Hexagon::NUM_TARGET_REGS);
 
@@ -1393,7 +1409,7 @@ bool HexagonFrameLowering::assignCalleeSavedSpillSlots(MachineFunction &MF,
   DEBUG(dbgs() << "Initial CS registers: {");
   for (unsigned i = 0, n = CSI.size(); i < n; ++i) {
     unsigned R = CSI[i].getReg();
-    DEBUG(dbgs() << ' ' << PrintReg(R, TRI));
+    DEBUG(dbgs() << ' ' << printReg(R, TRI));
     for (MCSubRegIterator SR(R, TRI, true); SR.isValid(); ++SR)
       SRegs[*SR] = true;
   }
@@ -1490,7 +1506,7 @@ bool HexagonFrameLowering::assignCalleeSavedSpillSlots(MachineFunction &MF,
     for (unsigned i = 0, n = CSI.size(); i < n; ++i) {
       int FI = CSI[i].getFrameIdx();
       int Off = MFI.getObjectOffset(FI);
-      dbgs() << ' ' << PrintReg(CSI[i].getReg(), TRI) << ":fi#" << FI << ":sp";
+      dbgs() << ' ' << printReg(CSI[i].getReg(), TRI) << ":fi#" << FI << ":sp";
       if (Off >= 0)
         dbgs() << '+';
       dbgs() << Off;
@@ -1503,7 +1519,7 @@ bool HexagonFrameLowering::assignCalleeSavedSpillSlots(MachineFunction &MF,
   bool MissedReg = false;
   for (int x = SRegs.find_first(); x >= 0; x = SRegs.find_next(x)) {
     unsigned R = x;
-    dbgs() << PrintReg(R, TRI) << ' ';
+    dbgs() << printReg(R, TRI) << ' ';
     MissedReg = true;
   }
   if (MissedReg)
@@ -2010,7 +2026,7 @@ void HexagonFrameLowering::optimizeSpillSlots(MachineFunction &MF,
     auto P = BlockIndexes.insert(
                 std::make_pair(&B, HexagonBlockRanges::InstrIndexMap(B)));
     auto &IndexMap = P.first->second;
-    DEBUG(dbgs() << "Index map for BB#" << B.getNumber() << "\n"
+    DEBUG(dbgs() << "Index map for " << printMBBReference(B) << "\n"
                  << IndexMap << '\n');
 
     for (auto &In : B) {
@@ -2129,7 +2145,8 @@ void HexagonFrameLowering::optimizeSpillSlots(MachineFunction &MF,
       else
         dbgs() << "<null>\n";
       for (auto &R : P.second.Map)
-        dbgs() << "  BB#" << R.first->getNumber() << " { " << R.second << "}\n";
+        dbgs() << "  " << printMBBReference(*R.first) << " { " << R.second
+               << "}\n";
     }
   });
 
@@ -2162,7 +2179,7 @@ void HexagonFrameLowering::optimizeSpillSlots(MachineFunction &MF,
       auto &FIs = P.second;
       if (FIs.empty())
         continue;
-      dbgs() << "  BB#" << P.first->getNumber() << ": {";
+      dbgs() << "  " << printMBBReference(*P.first) << ": {";
       for (auto I : FIs) {
         dbgs() << " fi#" << I;
         if (LoxFIs.count(I))
@@ -2183,7 +2200,7 @@ void HexagonFrameLowering::optimizeSpillSlots(MachineFunction &MF,
     HexagonBlockRanges::InstrIndexMap &IM = F->second;
     HexagonBlockRanges::RegToRangeMap LM = HBR.computeLiveMap(IM);
     HexagonBlockRanges::RegToRangeMap DM = HBR.computeDeadMap(IM, LM);
-    DEBUG(dbgs() << "BB#" << B.getNumber() << " dead map\n"
+    DEBUG(dbgs() << printMBBReference(B) << " dead map\n"
                  << HexagonBlockRanges::PrintRangeMap(DM, HRI));
 
     for (auto FI : BlockFIMap[&B]) {
@@ -2207,7 +2224,7 @@ void HexagonFrameLowering::optimizeSpillSlots(MachineFunction &MF,
         auto *RC = HII.getRegClass(SI.getDesc(), 2, &HRI, MF);
         // The this-> is needed to unconfuse MSVC.
         unsigned FoundR = this->findPhysReg(MF, Range, IM, DM, RC);
-        DEBUG(dbgs() << "Replacement reg:" << PrintReg(FoundR, &HRI) << '\n');
+        DEBUG(dbgs() << "Replacement reg:" << printReg(FoundR, &HRI) << '\n');
         if (FoundR == 0)
           continue;
 #ifndef NDEBUG

@@ -33,11 +33,13 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineMemOperand.h"
-#include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/PseudoSourceValue.h"
 #include "llvm/CodeGen/TargetFrameLowering.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetLowering.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/Function.h"
@@ -48,9 +50,6 @@
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetLowering.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -457,7 +456,7 @@ void LiveDebugValues::transferSpillInst(MachineInstr &MI,
   // Check if the register is the location of a debug value.
   for (unsigned ID : OpenRanges.getVarLocs()) {
     if (VarLocIDs[ID].isDescribedByReg() == Reg) {
-      DEBUG(dbgs() << "Spilling Register " << PrintReg(Reg, TRI) << '('
+      DEBUG(dbgs() << "Spilling Register " << printReg(Reg, TRI) << '('
                    << VarLocIDs[ID].Var.getVar()->getName() << ")\n");
 
       // Create a DBG_VALUE instruction to describe the Var in its spilled
@@ -704,12 +703,12 @@ bool LiveDebugValues::ExtendRanges(MachineFunction &MF) {
 }
 
 bool LiveDebugValues::runOnMachineFunction(MachineFunction &MF) {
-  if (!MF.getFunction()->getSubprogram())
+  if (!MF.getFunction().getSubprogram())
     // LiveDebugValues will already have removed all DBG_VALUEs.
     return false;
 
   // Skip functions from NoDebug compilation units.
-  if (MF.getFunction()->getSubprogram()->getUnit()->getEmissionKind() ==
+  if (MF.getFunction().getSubprogram()->getUnit()->getEmissionKind() ==
       DICompileUnit::NoDebug)
     return false;
 

@@ -29,14 +29,14 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/MachineSSAUpdater.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/Function.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <algorithm>
 #include <cassert>
 #include <iterator>
@@ -111,9 +111,10 @@ static void VerifyPHIs(MachineFunction &MF, bool CheckExtra) {
           }
         }
         if (!Found) {
-          dbgs() << "Malformed PHI in BB#" << MBB->getNumber() << ": " << *MI;
-          dbgs() << "  missing input from predecessor BB#"
-                 << PredBB->getNumber() << '\n';
+          dbgs() << "Malformed PHI in " << printMBBReference(*MBB) << ": "
+                 << *MI;
+          dbgs() << "  missing input from predecessor "
+                 << printMBBReference(*PredBB) << '\n';
           llvm_unreachable(nullptr);
         }
       }
@@ -121,15 +122,16 @@ static void VerifyPHIs(MachineFunction &MF, bool CheckExtra) {
       for (unsigned i = 1, e = MI->getNumOperands(); i != e; i += 2) {
         MachineBasicBlock *PHIBB = MI->getOperand(i + 1).getMBB();
         if (CheckExtra && !Preds.count(PHIBB)) {
-          dbgs() << "Warning: malformed PHI in BB#" << MBB->getNumber() << ": "
-                 << *MI;
-          dbgs() << "  extra input from predecessor BB#" << PHIBB->getNumber()
-                 << '\n';
+          dbgs() << "Warning: malformed PHI in " << printMBBReference(*MBB)
+                 << ": " << *MI;
+          dbgs() << "  extra input from predecessor "
+                 << printMBBReference(*PHIBB) << '\n';
           llvm_unreachable(nullptr);
         }
         if (PHIBB->getNumber() < 0) {
-          dbgs() << "Malformed PHI in BB#" << MBB->getNumber() << ": " << *MI;
-          dbgs() << "  non-existing BB#" << PHIBB->getNumber() << '\n';
+          dbgs() << "Malformed PHI in " << printMBBReference(*MBB) << ": "
+                 << *MI;
+          dbgs() << "  non-existing " << printMBBReference(*PHIBB) << '\n';
           llvm_unreachable(nullptr);
         }
       }
@@ -548,7 +550,7 @@ bool TailDuplicator::shouldTailDuplicate(bool IsSimple,
   unsigned MaxDuplicateCount;
   if (TailDupSize == 0 &&
       TailDuplicateSize.getNumOccurrences() == 0 &&
-      MF->getFunction()->optForSize())
+      MF->getFunction().optForSize())
     MaxDuplicateCount = 1;
   else if (TailDupSize == 0)
     MaxDuplicateCount = TailDuplicateSize;
@@ -603,8 +605,8 @@ bool TailDuplicator::shouldTailDuplicate(bool IsSimple,
     if (PreRegAlloc && MI.isCall())
       return false;
 
-    if (!MI.isPHI() && !MI.isMetaInstruction())
-        InstrCount += 1;
+    if (!MI.isPHI() && !MI.isDebugValue())
+      InstrCount += 1;
 
     if (InstrCount > MaxDuplicateCount)
       return false;
@@ -783,7 +785,8 @@ bool TailDuplicator::tailDuplicate(bool IsSimple, MachineBasicBlock *TailBB,
                                    MachineBasicBlock *ForcedLayoutPred,
                                    SmallVectorImpl<MachineBasicBlock *> &TDBBs,
                                    SmallVectorImpl<MachineInstr *> &Copies) {
-  DEBUG(dbgs() << "\n*** Tail-duplicating BB#" << TailBB->getNumber() << '\n');
+  DEBUG(dbgs() << "\n*** Tail-duplicating " << printMBBReference(*TailBB)
+               << '\n');
 
   DenseSet<unsigned> UsedByPhi;
   getRegsUsedByPHIs(*TailBB, &UsedByPhi);

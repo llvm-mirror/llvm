@@ -30,13 +30,11 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Error.h"
-#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include <functional>
 
 using Instr = llvm::cfi_verify::FileAnalysis::Instr;
 using LLVMSymbolizer = llvm::symbolize::LLVMSymbolizer;
@@ -53,6 +51,24 @@ static cl::opt<bool, true> IgnoreDWARFArg(
         "statically linked libraries to have been compiled with '-g', but "
         "will result in false positives for 'CFI unprotected' instructions."),
     cl::location(IgnoreDWARFFlag), cl::init(false));
+
+StringRef stringCFIProtectionStatus(CFIProtectionStatus Status) {
+  switch (Status) {
+  case CFIProtectionStatus::PROTECTED:
+    return "PROTECTED";
+  case CFIProtectionStatus::FAIL_NOT_INDIRECT_CF:
+    return "FAIL_NOT_INDIRECT_CF";
+  case CFIProtectionStatus::FAIL_ORPHANS:
+    return "FAIL_ORPHANS";
+  case CFIProtectionStatus::FAIL_BAD_CONDITIONAL_BRANCH:
+    return "FAIL_BAD_CONDITIONAL_BRANCH";
+  case CFIProtectionStatus::FAIL_REGISTER_CLOBBERED:
+    return "FAIL_REGISTER_CLOBBERED";
+  case CFIProtectionStatus::FAIL_INVALID_INSTRUCTION:
+    return "FAIL_INVALID_INSTRUCTION";
+  }
+  llvm_unreachable("Attempted to stringify an unknown enum value.");
+}
 
 Expected<FileAnalysis> FileAnalysis::Create(StringRef Filename) {
   // Open the filename provided.
@@ -88,32 +104,6 @@ FileAnalysis::FileAnalysis(object::OwningBinary<object::Binary> Binary)
 FileAnalysis::FileAnalysis(const Triple &ObjectTriple,
                            const SubtargetFeatures &Features)
     : ObjectTriple(ObjectTriple), Features(Features) {}
-
-bool FileAnalysis::isIndirectInstructionCFIProtected(uint64_t Address) const {
-  const Instr *InstrMetaPtr = getInstruction(Address);
-  if (!InstrMetaPtr)
-    return false;
-
-  const auto &InstrDesc = MII->get(InstrMetaPtr->Instruction.getOpcode());
-
-  if (!InstrDesc.mayAffectControlFlow(InstrMetaPtr->Instruction, *RegisterInfo))
-    return false;
-
-  if (!usesRegisterOperand(*InstrMetaPtr))
-    return false;
-
-  auto Flows = GraphBuilder::buildFlowGraph(*this, Address);
-
-  if (!Flows.OrphanedNodes.empty())
-    return false;
-
-  for (const auto &BranchNode : Flows.ConditionalBranchNodes) {
-    if (!BranchNode.CFIProtection)
-      return false;
-  }
-
-  return true;
-}
 
 const Instr *
 FileAnalysis::getPrevInstructionSequential(const Instr &InstrMeta) const {
@@ -254,7 +244,82 @@ const MCInstrAnalysis *FileAnalysis::getMCInstrAnalysis() const {
   return MIA.get();
 }
 
-LLVMSymbolizer &FileAnalysis::getSymbolizer() { return *Symbolizer; }
+Expected<DIInliningInfo> FileAnalysis::symbolizeInlinedCode(uint64_t Address) {
+  assert(Symbolizer != nullptr && "Symbolizer is invalid.");
+  return Symbolizer->symbolizeInlinedCode(Object->getFileName(), Address);
+}
+
+CFIProtectionStatus
+FileAnalysis::validateCFIProtection(const GraphResult &Graph) const {
+  const Instr *InstrMetaPtr = getInstruction(Graph.BaseAddress);
+  if (!InstrMetaPtr)
+    return CFIProtectionStatus::FAIL_INVALID_INSTRUCTION;
+
+  const auto &InstrDesc = MII->get(InstrMetaPtr->Instruction.getOpcode());
+  if (!InstrDesc.mayAffectControlFlow(InstrMetaPtr->Instruction, *RegisterInfo))
+    return CFIProtectionStatus::FAIL_NOT_INDIRECT_CF;
+
+  if (!usesRegisterOperand(*InstrMetaPtr))
+    return CFIProtectionStatus::FAIL_NOT_INDIRECT_CF;
+
+  if (!Graph.OrphanedNodes.empty())
+    return CFIProtectionStatus::FAIL_ORPHANS;
+
+  for (const auto &BranchNode : Graph.ConditionalBranchNodes) {
+    if (!BranchNode.CFIProtection)
+      return CFIProtectionStatus::FAIL_BAD_CONDITIONAL_BRANCH;
+  }
+
+  if (indirectCFOperandClobber(Graph) != Graph.BaseAddress)
+    return CFIProtectionStatus::FAIL_REGISTER_CLOBBERED;
+
+  return CFIProtectionStatus::PROTECTED;
+}
+
+uint64_t FileAnalysis::indirectCFOperandClobber(const GraphResult &Graph) const {
+  assert(Graph.OrphanedNodes.empty() && "Orphaned nodes should be empty.");
+
+  // Get the set of registers we must check to ensure they're not clobbered.
+  const Instr &IndirectCF = getInstructionOrDie(Graph.BaseAddress);
+  DenseSet<unsigned> RegisterNumbers;
+  for (const auto &Operand : IndirectCF.Instruction) {
+    if (Operand.isReg())
+      RegisterNumbers.insert(Operand.getReg());
+  }
+  assert(RegisterNumbers.size() && "Zero register operands on indirect CF.");
+
+  // Now check all branches to indirect CFs and ensure no clobbering happens.
+  for (const auto &Branch : Graph.ConditionalBranchNodes) {
+    uint64_t Node;
+    if (Branch.IndirectCFIsOnTargetPath)
+      Node = Branch.Target;
+    else
+      Node = Branch.Fallthrough;
+
+    while (Node != Graph.BaseAddress) {
+      const Instr &NodeInstr = getInstructionOrDie(Node);
+      const auto &InstrDesc = MII->get(NodeInstr.Instruction.getOpcode());
+
+      for (unsigned RegNum : RegisterNumbers) {
+        if (InstrDesc.hasDefOfPhysReg(NodeInstr.Instruction, RegNum,
+                                      *RegisterInfo))
+          return Node;
+      }
+
+      const auto &KV = Graph.IntermediateNodes.find(Node);
+      assert((KV != Graph.IntermediateNodes.end()) &&
+             "Could not get next node.");
+      Node = KV->second;
+    }
+  }
+
+  return Graph.BaseAddress;
+}
+
+void FileAnalysis::printInstruction(const Instr &InstrMeta,
+                                    raw_ostream &OS) const {
+  Printer->printInst(&InstrMeta.Instruction, OS, "", *SubtargetInfo.get());
+}
 
 Error FileAnalysis::initialiseDisassemblyMembers() {
   std::string TripleName = ObjectTriple.getTriple();
@@ -370,21 +435,6 @@ void FileAnalysis::parseSectionContents(ArrayRef<uint8_t> SectionBytes,
     InstrMeta.InstructionSize = InstructionSize;
     InstrMeta.Valid = ValidInstruction;
 
-    // Check if this instruction exists in the range of the DWARF metadata.
-    if (!IgnoreDWARFFlag) {
-      auto LineInfo =
-          Symbolizer->symbolizeCode(Object->getFileName(), VMAddress);
-      if (!LineInfo) {
-        handleAllErrors(LineInfo.takeError(), [](const ErrorInfoBase &E) {
-          errs() << "Symbolizer failed to get line: " << E.message() << "\n";
-        });
-        continue;
-      }
-
-      if (LineInfo->FileName == "<invalid>")
-        continue;
-    }
-
     addInstruction(InstrMeta);
 
     if (!ValidInstruction)
@@ -405,6 +455,21 @@ void FileAnalysis::parseSectionContents(ArrayRef<uint8_t> SectionBytes,
 
     if (!usesRegisterOperand(InstrMeta))
       continue;
+
+    // Check if this instruction exists in the range of the DWARF metadata.
+    if (!IgnoreDWARFFlag) {
+      auto LineInfo =
+          Symbolizer->symbolizeCode(Object->getFileName(), VMAddress);
+      if (!LineInfo) {
+        handleAllErrors(LineInfo.takeError(), [](const ErrorInfoBase &E) {
+          errs() << "Symbolizer failed to get line: " << E.message() << "\n";
+        });
+        continue;
+      }
+
+      if (LineInfo->FileName == "<invalid>")
+        continue;
+    }
 
     IndirectInstructions.insert(VMAddress);
   }

@@ -807,42 +807,43 @@ def NoAVX        : Predicate<"!Subtarget->hasAVX()">;
 def HasAVX       : Predicate<"Subtarget->hasAVX()">;
 def HasAVX2      : Predicate<"Subtarget->hasAVX2()">;
 def HasAVX1Only  : Predicate<"Subtarget->hasAVX() && !Subtarget->hasAVX2()">;
-def HasAVX512    : Predicate<"Subtarget->hasAVX512()">,
-                     AssemblerPredicate<"FeatureAVX512", "AVX-512 ISA">;
+def HasAVX512    : Predicate<"Subtarget->hasAVX512()">;
 def UseAVX       : Predicate<"Subtarget->hasAVX() && !Subtarget->hasAVX512()">;
 def UseAVX2      : Predicate<"Subtarget->hasAVX2() && !Subtarget->hasAVX512()">;
 def NoAVX512     : Predicate<"!Subtarget->hasAVX512()">;
-def HasCDI       : Predicate<"Subtarget->hasCDI()">,
-                     AssemblerPredicate<"FeatureCDI", "AVX-512 CD ISA">;
-def HasVPOPCNTDQ : Predicate<"Subtarget->hasVPOPCNTDQ()">,
-                   AssemblerPredicate<"FeatureVPOPCNTDQ", "AVX-512 VPOPCNTDQ ISA">;
-def HasPFI       : Predicate<"Subtarget->hasPFI()">,
-                     AssemblerPredicate<"FeaturePFI", "AVX-512 PF ISA">;
-def HasERI       : Predicate<"Subtarget->hasERI()">,
-                     AssemblerPredicate<"FeatureERI", "AVX-512 ER ISA">;
-def HasDQI       : Predicate<"Subtarget->hasDQI()">,
-                     AssemblerPredicate<"FeatureDQI", "AVX-512 DQ ISA">;
+def HasCDI       : Predicate<"Subtarget->hasCDI()">;
+def HasVPOPCNTDQ : Predicate<"Subtarget->hasVPOPCNTDQ()">;
+def HasPFI       : Predicate<"Subtarget->hasPFI()">;
+def HasERI       : Predicate<"Subtarget->hasERI()">;
+def HasDQI       : Predicate<"Subtarget->hasDQI()">;
 def NoDQI        : Predicate<"!Subtarget->hasDQI()">;
-def HasBWI       : Predicate<"Subtarget->hasBWI()">,
-                     AssemblerPredicate<"FeatureBWI", "AVX-512 BW ISA">;
+def HasBWI       : Predicate<"Subtarget->hasBWI()">;
 def NoBWI        : Predicate<"!Subtarget->hasBWI()">;
-def HasVLX       : Predicate<"Subtarget->hasVLX()">,
-                     AssemblerPredicate<"FeatureVLX", "AVX-512 VL ISA">;
+def HasVLX       : Predicate<"Subtarget->hasVLX()">;
 def NoVLX        : Predicate<"!Subtarget->hasVLX()">;
 def NoVLX_Or_NoBWI : Predicate<"!Subtarget->hasVLX() || !Subtarget->hasBWI()">;
 def NoVLX_Or_NoDQI : Predicate<"!Subtarget->hasVLX() || !Subtarget->hasDQI()">;
 def PKU        : Predicate<"Subtarget->hasPKU()">;
+def HasVNNI    : Predicate<"Subtarget->hasVNNI()">;
 
+def HasBITALG    : Predicate<"Subtarget->hasBITALG()">;
 def HasPOPCNT    : Predicate<"Subtarget->hasPOPCNT()">;
 def HasAES       : Predicate<"Subtarget->hasAES()">;
+def HasVAES      : Predicate<"Subtarget->hasVAES()">;
+def NoVLX_Or_NoVAES : Predicate<"!Subtarget->hasVLX() || !Subtarget->hasVAES()">;
 def HasFXSR      : Predicate<"Subtarget->hasFXSR()">;
 def HasXSAVE     : Predicate<"Subtarget->hasXSAVE()">;
 def HasXSAVEOPT  : Predicate<"Subtarget->hasXSAVEOPT()">;
 def HasXSAVEC    : Predicate<"Subtarget->hasXSAVEC()">;
 def HasXSAVES    : Predicate<"Subtarget->hasXSAVES()">;
 def HasPCLMUL    : Predicate<"Subtarget->hasPCLMUL()">;
+def NoVLX_Or_NoVPCLMULQDQ :
+                    Predicate<"!Subtarget->hasVLX() || !Subtarget->hasVPCLMULQDQ()">;
+def HasVPCLMULQDQ : Predicate<"Subtarget->hasVPCLMULQDQ()">;
+def HasGFNI      : Predicate<"Subtarget->hasGFNI()">;
 def HasFMA       : Predicate<"Subtarget->hasFMA()">;
 def HasFMA4      : Predicate<"Subtarget->hasFMA4()">;
+def NoFMA4       : Predicate<"!Subtarget->hasFMA4()">;
 def HasXOP       : Predicate<"Subtarget->hasXOP()">;
 def HasTBM       : Predicate<"Subtarget->hasTBM()">;
 def NoTBM        : Predicate<"!Subtarget->hasTBM()">;
@@ -855,22 +856,26 @@ def HasLZCNT     : Predicate<"Subtarget->hasLZCNT()">;
 def HasBMI       : Predicate<"Subtarget->hasBMI()">;
 def HasBMI2      : Predicate<"Subtarget->hasBMI2()">;
 def NoBMI2       : Predicate<"!Subtarget->hasBMI2()">;
-def HasVBMI      : Predicate<"Subtarget->hasVBMI()">,
-                     AssemblerPredicate<"FeatureVBMI", "AVX-512 VBMI ISA">;
-def HasIFMA      : Predicate<"Subtarget->hasIFMA()">,
-                     AssemblerPredicate<"FeatureIFMA", "AVX-512 IFMA ISA">;
+def HasVBMI      : Predicate<"Subtarget->hasVBMI()">;
+def HasVBMI2     : Predicate<"Subtarget->hasVBMI2()">;
+def HasIFMA      : Predicate<"Subtarget->hasIFMA()">;
 def HasRTM       : Predicate<"Subtarget->hasRTM()">;
 def HasADX       : Predicate<"Subtarget->hasADX()">;
 def HasSHA       : Predicate<"Subtarget->hasSHA()">;
 def HasPRFCHW    : Predicate<"Subtarget->hasPRFCHW()">;
 def HasRDSEED    : Predicate<"Subtarget->hasRDSEED()">;
+def HasSSEPrefetch : Predicate<"Subtarget->hasSSEPrefetch()">;
+def NoSSEPrefetch : Predicate<"!Subtarget->hasSSEPrefetch()">;
 def HasPrefetchW : Predicate<"Subtarget->hasPRFCHW()">;
+def HasPREFETCHWT1 : Predicate<"Subtarget->hasPREFETCHWT1()">;
 def HasLAHFSAHF  : Predicate<"Subtarget->hasLAHFSAHF()">;
 def HasMWAITX    : Predicate<"Subtarget->hasMWAITX()">;
 def HasCLZERO    : Predicate<"Subtarget->hasCLZERO()">;
 def FPStackf32   : Predicate<"!Subtarget->hasSSE1()">;
 def FPStackf64   : Predicate<"!Subtarget->hasSSE2()">;
 def HasMPX       : Predicate<"Subtarget->hasMPX()">;
+def HasSHSTK     : Predicate<"Subtarget->hasSHSTK()">;
+def HasIBT       : Predicate<"Subtarget->hasIBT()">;
 def HasCLFLUSHOPT : Predicate<"Subtarget->hasCLFLUSHOPT()">;
 def HasCLWB      : Predicate<"Subtarget->hasCLWB()">;
 def HasCmpxchg16b: Predicate<"Subtarget->hasCmpxchg16b()">;
@@ -906,11 +911,11 @@ def IsNotPIC     : Predicate<"!TM.isPositionIndependent()">;
 // the Function object through the <Target>Subtarget and objections were raised
 // to that (see post-commit review comments for r301750).
 let RecomputePerFunction = 1 in {
-  def OptForSize   : Predicate<"MF->getFunction()->optForSize()">;
-  def OptForMinSize : Predicate<"MF->getFunction()->optForMinSize()">;
-  def OptForSpeed  : Predicate<"!MF->getFunction()->optForSize()">;
+  def OptForSize   : Predicate<"MF->getFunction().optForSize()">;
+  def OptForMinSize : Predicate<"MF->getFunction().optForMinSize()">;
+  def OptForSpeed  : Predicate<"!MF->getFunction().optForSize()">;
   def UseIncDec : Predicate<"!Subtarget->slowIncDec() || "
-                            "MF->getFunction()->optForSize()">;
+                            "MF->getFunction().optForSize()">;
 }
 
 def CallImmAddr  : Predicate<"Subtarget->isLegalToCallImmediateAddr()">;
@@ -1112,14 +1117,16 @@ let hasSideEffects = 0, SchedRW = [WriteZero] in {
   def NOOPL : I<0x1f, MRMXm, (outs), (ins i32mem:$zero),
                 "nop{l}\t$zero", [], IIC_NOP>, TB, OpSize32;
   def NOOPQ : RI<0x1f, MRMXm, (outs), (ins i64mem:$zero),
-                "nop{q}\t$zero", [], IIC_NOP>, TB;
+                "nop{q}\t$zero", [], IIC_NOP>, TB,
+                Requires<[In64BitMode]>;
   // Also allow register so we can assemble/disassemble
   def NOOPWr : I<0x1f, MRMXr, (outs), (ins GR16:$zero),
                  "nop{w}\t$zero", [], IIC_NOP>, TB, OpSize16;
   def NOOPLr : I<0x1f, MRMXr, (outs), (ins GR32:$zero),
                  "nop{l}\t$zero", [], IIC_NOP>, TB, OpSize32;
   def NOOPQr : RI<0x1f, MRMXr, (outs), (ins GR64:$zero),
-                  "nop{q}\t$zero", [], IIC_NOP>, TB;
+                  "nop{q}\t$zero", [], IIC_NOP>, TB,
+                  Requires<[In64BitMode]>;
 }
 
 
@@ -1143,7 +1150,8 @@ def LEAVE64  : I<0xC9, RawFrm,
 //  Miscellaneous Instructions.
 //
 
-let isBarrier = 1, hasSideEffects = 1, usesCustomInserter = 1 in
+let isBarrier = 1, hasSideEffects = 1, usesCustomInserter = 1,
+    SchedRW = [WriteSystem] in
   def Int_eh_sjlj_setup_dispatch
     : PseudoI<(outs), (ins), [(X86eh_sjlj_setup_dispatch)]>;
 
@@ -1473,7 +1481,8 @@ def MOV32mi : Ii32<0xC7, MRM0m, (outs), (ins i32mem:$dst, i32imm:$src),
                    [(store (i32 imm32_su:$src), addr:$dst)], IIC_MOV_MEM>, OpSize32;
 def MOV64mi32 : RIi32S<0xC7, MRM0m, (outs), (ins i64mem:$dst, i64i32imm:$src),
                        "mov{q}\t{$src, $dst|$dst, $src}",
-                       [(store i64immSExt32_su:$src, addr:$dst)], IIC_MOV_MEM>;
+                       [(store i64immSExt32_su:$src, addr:$dst)], IIC_MOV_MEM>,
+                       Requires<[In64BitMode]>;
 } // SchedRW
 
 let hasSideEffects = 0 in {
@@ -1547,33 +1556,39 @@ def MOV32o16a : Ii16<0xA3, RawFrmMemOffs, (outs), (ins offset16_32:$dst),
 let mayLoad = 1 in {
 let Defs = [AL] in
 def MOV8ao64 : RIi64_NOREX<0xA0, RawFrmMemOffs, (outs), (ins offset64_8:$src),
-                     "movabs{b}\t{$src, %al|al, $src}", []>, AdSize64;
+                     "movabs{b}\t{$src, %al|al, $src}", [], IIC_MOV_MEM>,
+                     AdSize64;
 let Defs = [AX] in
 def MOV16ao64 : RIi64_NOREX<0xA1, RawFrmMemOffs, (outs), (ins offset64_16:$src),
-                     "movabs{w}\t{$src, %ax|ax, $src}", []>, OpSize16, AdSize64;
+                     "movabs{w}\t{$src, %ax|ax, $src}", [], IIC_MOV_MEM>,
+                     OpSize16, AdSize64;
 let Defs = [EAX] in
 def MOV32ao64 : RIi64_NOREX<0xA1, RawFrmMemOffs, (outs), (ins offset64_32:$src),
-                     "movabs{l}\t{$src, %eax|eax, $src}", []>, OpSize32,
-                     AdSize64;
+                     "movabs{l}\t{$src, %eax|eax, $src}", [], IIC_MOV_MEM>,
+                     OpSize32, AdSize64;
 let Defs = [RAX] in
 def MOV64ao64 : RIi64<0xA1, RawFrmMemOffs, (outs), (ins offset64_64:$src),
-                     "movabs{q}\t{$src, %rax|rax, $src}", []>, AdSize64;
+                     "movabs{q}\t{$src, %rax|rax, $src}", [], IIC_MOV_MEM>,
+                     AdSize64;
 }
 
 let mayStore = 1 in {
 let Uses = [AL] in
 def MOV8o64a : RIi64_NOREX<0xA2, RawFrmMemOffs, (outs), (ins offset64_8:$dst),
-                     "movabs{b}\t{%al, $dst|$dst, al}", []>, AdSize64;
+                     "movabs{b}\t{%al, $dst|$dst, al}", [], IIC_MOV_MEM>,
+                     AdSize64;
 let Uses = [AX] in
 def MOV16o64a : RIi64_NOREX<0xA3, RawFrmMemOffs, (outs), (ins offset64_16:$dst),
-                     "movabs{w}\t{%ax, $dst|$dst, ax}", []>, OpSize16, AdSize64;
+                     "movabs{w}\t{%ax, $dst|$dst, ax}", [], IIC_MOV_MEM>,
+                     OpSize16, AdSize64;
 let Uses = [EAX] in
 def MOV32o64a : RIi64_NOREX<0xA3, RawFrmMemOffs, (outs), (ins offset64_32:$dst),
-                     "movabs{l}\t{%eax, $dst|$dst, eax}", []>, OpSize32,
-                     AdSize64;
+                     "movabs{l}\t{%eax, $dst|$dst, eax}", [], IIC_MOV_MEM>,
+                     OpSize32, AdSize64;
 let Uses = [RAX] in
 def MOV64o64a : RIi64<0xA3, RawFrmMemOffs, (outs), (ins offset64_64:$dst),
-                     "movabs{q}\t{%rax, $dst|$dst, rax}", []>, AdSize64;
+                     "movabs{q}\t{%rax, $dst|$dst, rax}", [], IIC_MOV_MEM>,
+                     AdSize64;
 }
 } // hasSideEffects = 0
 
@@ -1727,7 +1742,8 @@ def BT32mi8 : Ii8<0xBA, MRM4m, (outs), (ins i32mem:$src1, i32i8imm:$src2),
 def BT64mi8 : RIi8<0xBA, MRM4m, (outs), (ins i64mem:$src1, i64i8imm:$src2),
                 "bt{q}\t{$src2, $src1|$src1, $src2}",
                 [(set EFLAGS, (X86bt (loadi64 addr:$src1),
-                                     i64immSExt8:$src2))], IIC_BT_MI>, TB;
+                                     i64immSExt8:$src2))], IIC_BT_MI>, TB,
+                Requires<[In64BitMode]>;
 } // SchedRW
 
 let hasSideEffects = 0 in {
@@ -1774,7 +1790,8 @@ def BTC32mi8 : Ii8<0xBA, MRM7m, (outs), (ins i32mem:$src1, i32i8imm:$src2),
                     "btc{l}\t{$src2, $src1|$src1, $src2}", [], IIC_BTX_MI>,
                     OpSize32, TB;
 def BTC64mi8 : RIi8<0xBA, MRM7m, (outs), (ins i64mem:$src1, i64i8imm:$src2),
-                    "btc{q}\t{$src2, $src1|$src1, $src2}", [], IIC_BTX_MI>, TB;
+                    "btc{q}\t{$src2, $src1|$src1, $src2}", [], IIC_BTX_MI>, TB,
+                    Requires<[In64BitMode]>;
 }
 
 let SchedRW = [WriteALU], Constraints = "$src1 = $dst" in {
@@ -1819,7 +1836,8 @@ def BTR32mi8 : Ii8<0xBA, MRM6m, (outs), (ins i32mem:$src1, i32i8imm:$src2),
                     "btr{l}\t{$src2, $src1|$src1, $src2}", [], IIC_BTX_MI>,
                     OpSize32, TB;
 def BTR64mi8 : RIi8<0xBA, MRM6m, (outs), (ins i64mem:$src1, i64i8imm:$src2),
-                    "btr{q}\t{$src2, $src1|$src1, $src2}", [], IIC_BTX_MI>, TB;
+                    "btr{q}\t{$src2, $src1|$src1, $src2}", [], IIC_BTX_MI>, TB,
+                    Requires<[In64BitMode]>;
 }
 
 let SchedRW = [WriteALU], Constraints = "$src1 = $dst" in {
@@ -1865,7 +1883,8 @@ def BTS32mi8 : Ii8<0xBA, MRM5m, (outs), (ins i32mem:$src1, i32i8imm:$src2),
                     "bts{l}\t{$src2, $src1|$src1, $src2}", [], IIC_BTX_MI>,
                     OpSize32, TB;
 def BTS64mi8 : RIi8<0xBA, MRM5m, (outs), (ins i64mem:$src1, i64i8imm:$src2),
-                    "bts{q}\t{$src2, $src1|$src1, $src2}", [], IIC_BTX_MI>, TB;
+                    "bts{q}\t{$src2, $src1|$src1, $src2}", [], IIC_BTX_MI>, TB,
+                    Requires<[In64BitMode]>;
 }
 } // hasSideEffects = 0
 } // Defs = [EFLAGS]
@@ -2012,34 +2031,37 @@ def CMPXCHG8B : I<0xC7, MRM1m, (outs), (ins i64mem:$dst),
 let Defs = [RAX, RDX, EFLAGS], Uses = [RAX, RBX, RCX, RDX] in
 def CMPXCHG16B : RI<0xC7, MRM1m, (outs), (ins i128mem:$dst),
                     "cmpxchg16b\t$dst", [], IIC_CMPXCHG_16B>,
-                    TB, Requires<[HasCmpxchg16b]>;
+                    TB, Requires<[HasCmpxchg16b, In64BitMode]>;
 } // SchedRW
 
 
 // Lock instruction prefix
+let SchedRW = [WriteMicrocoded] in
 def LOCK_PREFIX : I<0xF0, RawFrm, (outs),  (ins), "lock", []>;
 
+let SchedRW = [WriteNop] in {
+
 // Rex64 instruction prefix
-def REX64_PREFIX : I<0x48, RawFrm, (outs),  (ins), "rex64", []>,
+def REX64_PREFIX : I<0x48, RawFrm, (outs),  (ins), "rex64", [], IIC_NOP>,
                      Requires<[In64BitMode]>;
 
 // Data16 instruction prefix
-def DATA16_PREFIX : I<0x66, RawFrm, (outs),  (ins), "data16", []>,
+def DATA16_PREFIX : I<0x66, RawFrm, (outs),  (ins), "data16", [], IIC_NOP>,
                      Requires<[Not16BitMode]>;
 
 // Data instruction prefix
-def DATA32_PREFIX : I<0x66, RawFrm, (outs),  (ins), "data32", []>,
+def DATA32_PREFIX : I<0x66, RawFrm, (outs),  (ins), "data32", [], IIC_NOP>,
                      Requires<[In16BitMode]>;
+} // SchedRW
 
 // Repeat string operation instruction prefixes
-// These uses the DF flag in the EFLAGS register to inc or dec ECX
-let Defs = [ECX], Uses = [ECX,EFLAGS] in {
+// These use the DF flag in the EFLAGS register to inc or dec ECX
+let Defs = [ECX], Uses = [ECX,EFLAGS], SchedRW = [WriteMicrocoded] in {
 // Repeat (used with INS, OUTS, MOVS, LODS and STOS)
 def REP_PREFIX : I<0xF3, RawFrm, (outs),  (ins), "rep", []>;
 // Repeat while not equal (used with CMPS and SCAS)
 def REPNE_PREFIX : I<0xF2, RawFrm, (outs),  (ins), "repne", []>;
 }
-
 
 // String manipulation instructions
 let SchedRW = [WriteMicrocoded] in {
@@ -2186,31 +2208,35 @@ let Predicates = [HasMOVBE] in {
 //===----------------------------------------------------------------------===//
 // RDRAND Instruction
 //
-let Predicates = [HasRDRAND], Defs = [EFLAGS] in {
+let Predicates = [HasRDRAND], Defs = [EFLAGS], SchedRW = [WriteSystem] in {
   def RDRAND16r : I<0xC7, MRM6r, (outs GR16:$dst), (ins),
                     "rdrand{w}\t$dst",
-                    [(set GR16:$dst, EFLAGS, (X86rdrand))]>, OpSize16, PS;
+                    [(set GR16:$dst, EFLAGS, (X86rdrand))], IIC_RDRAND>,
+                    OpSize16, PS;
   def RDRAND32r : I<0xC7, MRM6r, (outs GR32:$dst), (ins),
                     "rdrand{l}\t$dst",
-                    [(set GR32:$dst, EFLAGS, (X86rdrand))]>, OpSize32, PS;
+                    [(set GR32:$dst, EFLAGS, (X86rdrand))], IIC_RDRAND>,
+                    OpSize32, PS;
   def RDRAND64r : RI<0xC7, MRM6r, (outs GR64:$dst), (ins),
                      "rdrand{q}\t$dst",
-                     [(set GR64:$dst, EFLAGS, (X86rdrand))]>, PS;
+                     [(set GR64:$dst, EFLAGS, (X86rdrand))], IIC_RDRAND>, PS;
 }
 
 //===----------------------------------------------------------------------===//
 // RDSEED Instruction
 //
-let Predicates = [HasRDSEED], Defs = [EFLAGS] in {
+let Predicates = [HasRDSEED], Defs = [EFLAGS], SchedRW = [WriteSystem] in {
   def RDSEED16r : I<0xC7, MRM7r, (outs GR16:$dst), (ins),
                     "rdseed{w}\t$dst",
-                    [(set GR16:$dst, EFLAGS, (X86rdseed))]>, OpSize16, PS;
+                    [(set GR16:$dst, EFLAGS, (X86rdseed))], IIC_RDSEED>,
+                    OpSize16, PS;
   def RDSEED32r : I<0xC7, MRM7r, (outs GR32:$dst), (ins),
                     "rdseed{l}\t$dst",
-                    [(set GR32:$dst, EFLAGS, (X86rdseed))]>, OpSize32, PS;
+                    [(set GR32:$dst, EFLAGS, (X86rdseed))], IIC_RDSEED>,
+                    OpSize32, PS;
   def RDSEED64r : RI<0xC7, MRM7r, (outs GR64:$dst), (ins),
                      "rdseed{q}\t$dst",
-                     [(set GR64:$dst, EFLAGS, (X86rdseed))]>, PS;
+                     [(set GR64:$dst, EFLAGS, (X86rdseed))], IIC_RDSEED>, PS;
 }
 
 //===----------------------------------------------------------------------===//
@@ -2219,30 +2245,33 @@ let Predicates = [HasRDSEED], Defs = [EFLAGS] in {
 let Predicates = [HasLZCNT], Defs = [EFLAGS] in {
   def LZCNT16rr : I<0xBD, MRMSrcReg, (outs GR16:$dst), (ins GR16:$src),
                     "lzcnt{w}\t{$src, $dst|$dst, $src}",
-                    [(set GR16:$dst, (ctlz GR16:$src)), (implicit EFLAGS)]>, XS,
-                    OpSize16;
+                    [(set GR16:$dst, (ctlz GR16:$src)), (implicit EFLAGS)],
+                    IIC_LZCNT_RR>, XS, OpSize16, Sched<[WriteIMul]>;
   def LZCNT16rm : I<0xBD, MRMSrcMem, (outs GR16:$dst), (ins i16mem:$src),
                     "lzcnt{w}\t{$src, $dst|$dst, $src}",
                     [(set GR16:$dst, (ctlz (loadi16 addr:$src))),
-                     (implicit EFLAGS)]>, XS, OpSize16;
+                     (implicit EFLAGS)], IIC_LZCNT_RM>, XS, OpSize16,
+                    Sched<[WriteIMulLd]>;
 
   def LZCNT32rr : I<0xBD, MRMSrcReg, (outs GR32:$dst), (ins GR32:$src),
                     "lzcnt{l}\t{$src, $dst|$dst, $src}",
-                    [(set GR32:$dst, (ctlz GR32:$src)), (implicit EFLAGS)]>, XS,
-                    OpSize32;
+                    [(set GR32:$dst, (ctlz GR32:$src)), (implicit EFLAGS)],
+                    IIC_LZCNT_RR>, XS, OpSize32, Sched<[WriteIMul]>;
   def LZCNT32rm : I<0xBD, MRMSrcMem, (outs GR32:$dst), (ins i32mem:$src),
                     "lzcnt{l}\t{$src, $dst|$dst, $src}",
                     [(set GR32:$dst, (ctlz (loadi32 addr:$src))),
-                     (implicit EFLAGS)]>, XS, OpSize32;
+                     (implicit EFLAGS)], IIC_LZCNT_RM>, XS, OpSize32,
+                    Sched<[WriteIMulLd]>;
 
   def LZCNT64rr : RI<0xBD, MRMSrcReg, (outs GR64:$dst), (ins GR64:$src),
                      "lzcnt{q}\t{$src, $dst|$dst, $src}",
-                     [(set GR64:$dst, (ctlz GR64:$src)), (implicit EFLAGS)]>,
-                     XS;
+                     [(set GR64:$dst, (ctlz GR64:$src)), (implicit EFLAGS)],
+                     IIC_LZCNT_RR>, XS, Sched<[WriteIMul]>;
   def LZCNT64rm : RI<0xBD, MRMSrcMem, (outs GR64:$dst), (ins i64mem:$src),
                      "lzcnt{q}\t{$src, $dst|$dst, $src}",
                      [(set GR64:$dst, (ctlz (loadi64 addr:$src))),
-                      (implicit EFLAGS)]>, XS;
+                      (implicit EFLAGS)], IIC_LZCNT_RM>, XS,
+                     Sched<[WriteIMulLd]>;
 }
 
 //===----------------------------------------------------------------------===//
@@ -2251,30 +2280,33 @@ let Predicates = [HasLZCNT], Defs = [EFLAGS] in {
 let Predicates = [HasBMI], Defs = [EFLAGS] in {
   def TZCNT16rr : I<0xBC, MRMSrcReg, (outs GR16:$dst), (ins GR16:$src),
                     "tzcnt{w}\t{$src, $dst|$dst, $src}",
-                    [(set GR16:$dst, (cttz GR16:$src)), (implicit EFLAGS)]>, XS,
-                    OpSize16;
+                    [(set GR16:$dst, (cttz GR16:$src)), (implicit EFLAGS)],
+                    IIC_TZCNT_RR>, XS, OpSize16, Sched<[WriteIMul]>;
   def TZCNT16rm : I<0xBC, MRMSrcMem, (outs GR16:$dst), (ins i16mem:$src),
                     "tzcnt{w}\t{$src, $dst|$dst, $src}",
                     [(set GR16:$dst, (cttz (loadi16 addr:$src))),
-                     (implicit EFLAGS)]>, XS, OpSize16;
+                     (implicit EFLAGS)], IIC_TZCNT_RM>, XS, OpSize16,
+                    Sched<[WriteIMulLd]>;
 
   def TZCNT32rr : I<0xBC, MRMSrcReg, (outs GR32:$dst), (ins GR32:$src),
                     "tzcnt{l}\t{$src, $dst|$dst, $src}",
-                    [(set GR32:$dst, (cttz GR32:$src)), (implicit EFLAGS)]>, XS,
-                    OpSize32;
+                    [(set GR32:$dst, (cttz GR32:$src)), (implicit EFLAGS)],
+                    IIC_TZCNT_RR>, XS, OpSize32, Sched<[WriteIMul]>;
   def TZCNT32rm : I<0xBC, MRMSrcMem, (outs GR32:$dst), (ins i32mem:$src),
                     "tzcnt{l}\t{$src, $dst|$dst, $src}",
                     [(set GR32:$dst, (cttz (loadi32 addr:$src))),
-                     (implicit EFLAGS)]>, XS, OpSize32;
+                     (implicit EFLAGS)], IIC_TZCNT_RM>, XS, OpSize32,
+                    Sched<[WriteIMulLd]>;
 
   def TZCNT64rr : RI<0xBC, MRMSrcReg, (outs GR64:$dst), (ins GR64:$src),
                      "tzcnt{q}\t{$src, $dst|$dst, $src}",
-                     [(set GR64:$dst, (cttz GR64:$src)), (implicit EFLAGS)]>,
-                     XS;
+                     [(set GR64:$dst, (cttz GR64:$src)), (implicit EFLAGS)],
+                     IIC_TZCNT_RR>, XS, Sched<[WriteIMul]>;
   def TZCNT64rm : RI<0xBC, MRMSrcMem, (outs GR64:$dst), (ins i64mem:$src),
                      "tzcnt{q}\t{$src, $dst|$dst, $src}",
                      [(set GR64:$dst, (cttz (loadi64 addr:$src))),
-                      (implicit EFLAGS)]>, XS;
+                      (implicit EFLAGS)], IIC_TZCNT_RM>, XS,
+                     Sched<[WriteIMulLd]>;
 }
 
 multiclass bmi_bls<string mnemonic, Format RegMRM, Format MemMRM,
@@ -2282,11 +2314,11 @@ multiclass bmi_bls<string mnemonic, Format RegMRM, Format MemMRM,
 let hasSideEffects = 0 in {
   def rr : I<0xF3, RegMRM, (outs RC:$dst), (ins RC:$src),
              !strconcat(mnemonic, "\t{$src, $dst|$dst, $src}"),
-             []>, T8PS, VEX_4V;
+             [], IIC_UNARY_REG>, T8PS, VEX_4V, Sched<[WriteALU]>;
   let mayLoad = 1 in
   def rm : I<0xF3, MemMRM, (outs RC:$dst), (ins x86memop:$src),
              !strconcat(mnemonic, "\t{$src, $dst|$dst, $src}"),
-             []>, T8PS, VEX_4V;
+             [], IIC_UNARY_MEM>, T8PS, VEX_4V, Sched<[WriteALULd, ReadAfterLd]>;
 }
 }
 
@@ -2321,18 +2353,18 @@ let Predicates = [HasBMI] in {
             (BLSI64rr GR64:$src)>;
 }
 
-
 multiclass bmi_bextr_bzhi<bits<8> opc, string mnemonic, RegisterClass RC,
                           X86MemOperand x86memop, Intrinsic Int,
                           PatFrag ld_frag> {
   def rr : I<opc, MRMSrcReg4VOp3, (outs RC:$dst), (ins RC:$src1, RC:$src2),
              !strconcat(mnemonic, "\t{$src2, $src1, $dst|$dst, $src1, $src2}"),
-             [(set RC:$dst, (Int RC:$src1, RC:$src2)), (implicit EFLAGS)]>,
-             T8PS, VEX;
+             [(set RC:$dst, (Int RC:$src1, RC:$src2)), (implicit EFLAGS)], IIC_BIN_NONMEM>,
+             T8PS, VEX, Sched<[WriteALU]>;
   def rm : I<opc, MRMSrcMem4VOp3, (outs RC:$dst), (ins x86memop:$src1, RC:$src2),
              !strconcat(mnemonic, "\t{$src2, $src1, $dst|$dst, $src1, $src2}"),
              [(set RC:$dst, (Int (ld_frag addr:$src1), RC:$src2)),
-              (implicit EFLAGS)]>, T8PS, VEX;
+              (implicit EFLAGS)], IIC_BIN_MEM>, T8PS, VEX,
+             Sched<[WriteALULd, ReadAfterLd]>;
 }
 
 let Predicates = [HasBMI], Defs = [EFLAGS] in {
@@ -2348,7 +2380,6 @@ let Predicates = [HasBMI2], Defs = [EFLAGS] in {
   defm BZHI64 : bmi_bextr_bzhi<0xF5, "bzhi{q}", GR64, i64mem,
                                int_x86_bmi_bzhi_64, loadi64>, VEX_W;
 }
-
 
 def CountTrailingOnes : SDNodeXForm<imm, [{
   // Count the trailing ones in the immediate.
@@ -2443,11 +2474,12 @@ multiclass bmi_pdep_pext<string mnemonic, RegisterClass RC,
                          PatFrag ld_frag> {
   def rr : I<0xF5, MRMSrcReg, (outs RC:$dst), (ins RC:$src1, RC:$src2),
              !strconcat(mnemonic, "\t{$src2, $src1, $dst|$dst, $src1, $src2}"),
-             [(set RC:$dst, (Int RC:$src1, RC:$src2))]>,
-             VEX_4V;
+             [(set RC:$dst, (Int RC:$src1, RC:$src2))], IIC_BIN_NONMEM>,
+             VEX_4V, Sched<[WriteALU]>;
   def rm : I<0xF5, MRMSrcMem, (outs RC:$dst), (ins RC:$src1, x86memop:$src2),
              !strconcat(mnemonic, "\t{$src2, $src1, $dst|$dst, $src1, $src2}"),
-             [(set RC:$dst, (Int RC:$src1, (ld_frag addr:$src2)))]>, VEX_4V;
+             [(set RC:$dst, (Int RC:$src1, (ld_frag addr:$src2)))],
+             IIC_BIN_MEM>, VEX_4V, Sched<[WriteALULd, ReadAfterLd]>;
 }
 
 let Predicates = [HasBMI2] in {
@@ -2473,14 +2505,14 @@ multiclass tbm_ternary_imm_intr<bits<8> opc, RegisterClass RC, string OpcodeStr,
   def ri : Ii32<opc,  MRMSrcReg, (outs RC:$dst), (ins RC:$src1, immtype:$cntl),
                 !strconcat(OpcodeStr,
                            "\t{$cntl, $src1, $dst|$dst, $src1, $cntl}"),
-                [(set RC:$dst, (Int RC:$src1, immoperator:$cntl))]>,
-           XOP, XOPA;
+                [(set RC:$dst, (Int RC:$src1, immoperator:$cntl))],
+           IIC_BIN_NONMEM>, XOP, XOPA, Sched<[WriteALU]>;
   def mi : Ii32<opc,  MRMSrcMem, (outs RC:$dst),
                 (ins x86memop:$src1, immtype:$cntl),
                 !strconcat(OpcodeStr,
                            "\t{$cntl, $src1, $dst|$dst, $src1, $cntl}"),
-                [(set RC:$dst, (Int (ld_frag addr:$src1), immoperator:$cntl))]>,
-           XOP, XOPA;
+                [(set RC:$dst, (Int (ld_frag addr:$src1), immoperator:$cntl))],
+           IIC_BIN_MEM>, XOP, XOPA, Sched<[WriteALULd, ReadAfterLd]>;
 }
 
 defm BEXTRI32 : tbm_ternary_imm_intr<0x10, GR32, "bextr", i32mem, loadi32,
@@ -2496,11 +2528,11 @@ multiclass tbm_binary_rm<bits<8> opc, Format FormReg, Format FormMem,
 let hasSideEffects = 0 in {
   def rr : I<opc,  FormReg, (outs RC:$dst), (ins RC:$src),
              !strconcat(OpcodeStr,"\t{$src, $dst|$dst, $src}"),
-             []>, XOP_4V, XOP9;
+             [], IIC_BIN_NONMEM>, XOP_4V, XOP9, Sched<[WriteALU]>;
   let mayLoad = 1 in
   def rm : I<opc,  FormMem, (outs RC:$dst), (ins x86memop:$src),
              !strconcat(OpcodeStr,"\t{$src, $dst|$dst, $src}"),
-             []>, XOP_4V, XOP9;
+             [], IIC_BIN_MEM>, XOP_4V, XOP9, Sched<[WriteALULd, ReadAfterLd]>;
 }
 }
 
@@ -2535,31 +2567,31 @@ let Predicates = [HasTBM] in {
 //===----------------------------------------------------------------------===//
 // Lightweight Profiling Instructions
 
-let Predicates = [HasLWP] in {
+let Predicates = [HasLWP], SchedRW = [WriteSystem] in {
 
 def LLWPCB : I<0x12, MRM0r, (outs), (ins GR32:$src), "llwpcb\t$src",
                [(int_x86_llwpcb GR32:$src)], IIC_LWP>,
-               XOP, XOP9, Requires<[Not64BitMode]>;
+               XOP, XOP9;
 def SLWPCB : I<0x12, MRM1r, (outs GR32:$dst), (ins), "slwpcb\t$dst",
                [(set GR32:$dst, (int_x86_slwpcb))], IIC_LWP>,
-               XOP, XOP9, Requires<[Not64BitMode]>;
+               XOP, XOP9;
 
 def LLWPCB64 : I<0x12, MRM0r, (outs), (ins GR64:$src), "llwpcb\t$src",
                  [(int_x86_llwpcb GR64:$src)], IIC_LWP>,
-                 XOP, XOP9, VEX_W, Requires<[In64BitMode]>;
+                 XOP, XOP9, VEX_W;
 def SLWPCB64 : I<0x12, MRM1r, (outs GR64:$dst), (ins), "slwpcb\t$dst",
                  [(set GR64:$dst, (int_x86_slwpcb))], IIC_LWP>,
-                 XOP, XOP9, VEX_W, Requires<[In64BitMode]>;
+                 XOP, XOP9, VEX_W;
 
 multiclass lwpins_intr<RegisterClass RC> {
   def rri : Ii32<0x12, MRM0r, (outs), (ins RC:$src0, GR32:$src1, i32imm:$cntl),
                  "lwpins\t{$cntl, $src1, $src0|$src0, $src1, $cntl}",
-                 [(set EFLAGS, (X86lwpins RC:$src0, GR32:$src1, imm:$cntl))]>,
+                 [(set EFLAGS, (X86lwpins RC:$src0, GR32:$src1, imm:$cntl))], IIC_LWP>,
                  XOP_4V, XOPA;
   let mayLoad = 1 in
   def rmi : Ii32<0x12, MRM0m, (outs), (ins RC:$src0, i32mem:$src1, i32imm:$cntl),
                  "lwpins\t{$cntl, $src1, $src0|$src0, $src1, $cntl}",
-                 [(set EFLAGS, (X86lwpins RC:$src0, (loadi32 addr:$src1), imm:$cntl))]>,
+                 [(set EFLAGS, (X86lwpins RC:$src0, (loadi32 addr:$src1), imm:$cntl))], IIC_LWP>,
                  XOP_4V, XOPA;
 }
 
@@ -2583,7 +2615,7 @@ multiclass lwpval_intr<RegisterClass RC, Intrinsic Int> {
 defm LWPVAL32 : lwpval_intr<GR32, int_x86_lwpval32>;
 defm LWPVAL64 : lwpval_intr<GR64, int_x86_lwpval64>, VEX_W;
 
-} // HasLWP
+} // HasLWP, SchedRW
 
 //===----------------------------------------------------------------------===//
 // MONITORX/MWAITX Instructions
@@ -2696,14 +2728,14 @@ let Predicates = [HasTBM] in {
 // Memory Instructions
 //
 
-let Predicates = [HasCLFLUSHOPT] in
+let Predicates = [HasCLFLUSHOPT], SchedRW = [WriteLoad] in
 def CLFLUSHOPT : I<0xAE, MRM7m, (outs), (ins i8mem:$src),
-                   "clflushopt\t$src", [(int_x86_clflushopt addr:$src)]>, PD;
+                   "clflushopt\t$src", [(int_x86_clflushopt addr:$src)],
+                   IIC_SSE_PREFETCH>, PD;
 
-let Predicates = [HasCLWB] in
+let Predicates = [HasCLWB], SchedRW = [WriteLoad] in
 def CLWB       : I<0xAE, MRM6m, (outs), (ins i8mem:$src), "clwb\t$src",
-                   [(int_x86_clwb addr:$src)]>, PD;
-
+                   [(int_x86_clwb addr:$src)], IIC_SSE_PREFETCH>, PD;
 
 //===----------------------------------------------------------------------===//
 // Subsystems.
@@ -3157,16 +3189,18 @@ def : InstAlias<"jmpl\t$seg, $off",  (FARJMP32i  i32imm:$off, i16imm:$seg)>, Req
 // Force mov without a suffix with a segment and mem to prefer the 'l' form of
 // the move.  All segment/mem forms are equivalent, this has the shortest
 // encoding.
-def : InstAlias<"mov\t{$mem, $seg|$seg, $mem}", (MOV32sm SEGMENT_REG:$seg, i32mem:$mem), 0>;
-def : InstAlias<"mov\t{$seg, $mem|$mem, $seg}", (MOV32ms i32mem:$mem, SEGMENT_REG:$seg), 0>;
+def : InstAlias<"mov\t{$mem, $seg|$seg, $mem}", (MOV16sm SEGMENT_REG:$seg, i16mem:$mem), 0>;
+def : InstAlias<"mov\t{$seg, $mem|$mem, $seg}", (MOV16ms i16mem:$mem, SEGMENT_REG:$seg), 0>;
 
 // Match 'movq <largeimm>, <reg>' as an alias for movabsq.
 def : InstAlias<"mov{q}\t{$imm, $reg|$reg, $imm}", (MOV64ri GR64:$reg, i64imm:$imm), 0>;
 
-// Match 'movq GR64, MMX' as an alias for movd.
-def : InstAlias<"movq\t{$src, $dst|$dst, $src}",
+// Match 'movd GR64, MMX' as an alias for movq to be compatible with gas,
+// which supports this due to an old AMD documentation bug when 64-bit mode was
+// created.
+def : InstAlias<"movd\t{$src, $dst|$dst, $src}",
                 (MMX_MOVD64to64rr VR64:$dst, GR64:$src), 0>;
-def : InstAlias<"movq\t{$src, $dst|$dst, $src}",
+def : InstAlias<"movd\t{$src, $dst|$dst, $src}",
                 (MMX_MOVD64from64rr GR64:$dst, VR64:$src), 0>;
 
 // movsx aliases

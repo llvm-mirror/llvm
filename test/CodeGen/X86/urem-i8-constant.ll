@@ -5,13 +5,13 @@
 
 define i8 @foo(i8 %tmp325) {
 ; CHECK-LABEL: foo:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    movzbl {{[0-9]+}}(%esp), %ecx
 ; CHECK-NEXT:    imull $111, %ecx, %eax
 ; CHECK-NEXT:    shrl $12, %eax
 ; CHECK-NEXT:    movzwl %ax, %eax
 ; CHECK-NEXT:    movb $37, %dl
-; CHECK-NEXT:    # kill: %AL<def> %AL<kill> %EAX<kill>
+; CHECK-NEXT:    # kill: def %al killed %al killed %eax
 ; CHECK-NEXT:    mulb %dl
 ; CHECK-NEXT:    subb %al, %cl
 ; CHECK-NEXT:    movl %ecx, %eax

@@ -28,7 +28,9 @@
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
+#include "llvm/CodeGen/TargetLowering.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/CallSite.h"
@@ -57,9 +59,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include <algorithm>
@@ -558,7 +558,7 @@ Value *SafeStack::moveStaticAllocasToUnsafeStack(
 
     // Replace alloc with the new location.
     replaceDbgDeclare(Arg, BasePointer, BasePointer->getNextNode(), DIB,
-                      /*Deref=*/false, -Offset);
+                      DIExpression::NoDeref, -Offset, DIExpression::NoDeref);
     Arg->replaceAllUsesWith(NewArg);
     IRB.SetInsertPoint(cast<Instruction>(NewArg)->getNextNode());
     IRB.CreateMemCpy(Off, Arg, Size, Arg->getParamAlignment());
@@ -573,7 +573,8 @@ Value *SafeStack::moveStaticAllocasToUnsafeStack(
     if (Size == 0)
       Size = 1; // Don't create zero-sized stack objects.
 
-    replaceDbgDeclareForAlloca(AI, BasePointer, DIB, /*Deref=*/false, -Offset);
+    replaceDbgDeclareForAlloca(AI, BasePointer, DIB, DIExpression::NoDeref,
+                               -Offset, DIExpression::NoDeref);
     replaceDbgValueForAlloca(AI, BasePointer, DIB, -Offset);
 
     // Replace uses of the alloca with the new location.
@@ -663,7 +664,8 @@ void SafeStack::moveDynamicAllocasToUnsafeStack(
     if (AI->hasName() && isa<Instruction>(NewAI))
       NewAI->takeName(AI);
 
-    replaceDbgDeclareForAlloca(AI, NewAI, DIB, /*Deref=*/false);
+    replaceDbgDeclareForAlloca(AI, NewAI, DIB, DIExpression::NoDeref, 0,
+                               DIExpression::NoDeref);
     AI->replaceAllUsesWith(NewAI);
     AI->eraseFromParent();
   }

@@ -1,4 +1,4 @@
-; RUN:  llc -amdgpu-scalarize-global-loads=false  -march=amdgcn -mcpu=gfx901 -mattr=-flat-for-global -verify-machineinstrs -enable-packed-inlinable-literals < %s | FileCheck -check-prefix=GFX9 -check-prefix=GCN %s
+; RUN:  llc -amdgpu-scalarize-global-loads=false  -march=amdgcn -mcpu=gfx900 -mattr=-flat-for-global -verify-machineinstrs -enable-packed-inlinable-literals < %s | FileCheck -check-prefix=GFX9 -check-prefix=GCN %s
 ; RUN:  llc -amdgpu-scalarize-global-loads=false  -march=amdgcn -mcpu=tonga -mattr=-flat-for-global -verify-machineinstrs < %s | FileCheck -check-prefix=VI -check-prefix=CIVI -check-prefix=GCN %s
 ; RUN:  llc -amdgpu-scalarize-global-loads=false  -march=amdgcn -mcpu=bonaire -verify-machineinstrs < %s | FileCheck -check-prefix=CI -check-prefix=CIVI -check-prefix=GCN %s
 
@@ -8,12 +8,12 @@
 ; GFX9: v_pk_max_i16 [[MAX:v[0-9]+]], [[VAL]], [[SUB]]
 ; GFX9: v_pk_add_u16 [[ADD:v[0-9]+]], [[MAX]], 2
 
-; VI: v_sub_i32_e32
-; VI-DAG: v_sub_i32_e32
+; VI: v_sub_u32_e32
+; VI-DAG: v_sub_u32_e32
 ; VI: v_max_i32_sdwa v{{[0-9]+}}, sext(v{{[0-9]+}}), sext(v{{[0-9]+}}) dst_sel:WORD_1 dst_unused:UNUSED_PAD src0_sel:WORD_0 src1_sel:WORD_0
 ; VI: v_max_i32_sdwa v{{[0-9]+}}, sext(v{{[0-9]+}}), sext(v{{[0-9]+}}) dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_0 src1_sel:WORD_0
-; VI: v_add_i32_e32
-; VI: v_add_i32_e32
+; VI: v_add_u32_e32
+; VI: v_add_u32_e32
 ; VI: v_or_b32_sdwa v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}} dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_0 src1_sel:DWORD
 
 ; CI: v_sub_i32_e32

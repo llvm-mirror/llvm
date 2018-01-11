@@ -63,17 +63,17 @@ multiclass MIMG_NoSampler <bits<7> op, string asm> {
 
 class MIMG_Store_Helper <bits<7> op, string asm,
                          RegisterClass data_rc,
-                         RegisterClass addr_rc> : MIMG_Helper <
+                         RegisterClass addr_rc,
+                         string dns = ""> : MIMG_Helper <
   (outs),
   (ins data_rc:$vdata, addr_rc:$vaddr, SReg_256:$srsrc,
        dmask:$dmask, unorm:$unorm, GLC:$glc, slc:$slc,
        r128:$r128, tfe:$tfe, lwe:$lwe, da:$da),
-  asm#" $vdata, $vaddr, $srsrc$dmask$unorm$glc$slc$r128$tfe$lwe$da"
-     >, MIMGe<op> {
+  asm#" $vdata, $vaddr, $srsrc$dmask$unorm$glc$slc$r128$tfe$lwe$da", dns>, MIMGe<op> {
   let ssamp = 0;
-  let mayLoad = 1; // TableGen requires this for matching with the intrinsics
+  let mayLoad = 0;
   let mayStore = 1;
-  let hasSideEffects = 1;
+  let hasSideEffects = 0;
   let hasPostISelHook = 0;
   let DisableWQM = 1;
 }
@@ -81,7 +81,8 @@ class MIMG_Store_Helper <bits<7> op, string asm,
 multiclass MIMG_Store_Addr_Helper <bits<7> op, string asm,
                                   RegisterClass data_rc,
                                   int channels> {
-  def _V1 : MIMG_Store_Helper <op, asm, data_rc, VGPR_32>,
+  def _V1 : MIMG_Store_Helper <op, asm, data_rc, VGPR_32,
+                               !if(!eq(channels, 1), "AMDGPU", "")>,
             MIMG_Mask<asm#"_V1", channels>;
   def _V2 : MIMG_Store_Helper <op, asm, data_rc, VReg_64>,
             MIMG_Mask<asm#"_V2", channels>;
@@ -102,10 +103,10 @@ class MIMG_Atomic_Helper <string asm, RegisterClass data_rc,
     (ins data_rc:$vdata, addr_rc:$vaddr, SReg_256:$srsrc,
          dmask:$dmask, unorm:$unorm, GLC:$glc, slc:$slc,
          r128:$r128, tfe:$tfe, lwe:$lwe, da:$da),
-    asm#" $vdst, $vaddr, $srsrc$dmask$unorm$glc$slc$r128$tfe$lwe$da"
-  > {
+    asm#" $vdst, $vaddr, $srsrc$dmask$unorm$glc$slc$r128$tfe$lwe$da"> {
+  let mayLoad = 1;
   let mayStore = 1;
-  let hasSideEffects = 1;
+  let hasSideEffects = 1; // FIXME: Remove this
   let hasPostISelHook = 0;
   let DisableWQM = 1;
   let Constraints = "$vdst = $vdata";
@@ -257,7 +258,11 @@ defm IMAGE_STORE : MIMG_Store <0x00000008, "image_store">;
 defm IMAGE_STORE_MIP : MIMG_Store <0x00000009, "image_store_mip">;
 //def IMAGE_STORE_PCK : MIMG_NoPattern_ <"image_store_pck", 0x0000000a>;
 //def IMAGE_STORE_MIP_PCK : MIMG_NoPattern_ <"image_store_mip_pck", 0x0000000b>;
+
+let mayLoad = 0, mayStore = 0 in {
 defm IMAGE_GET_RESINFO : MIMG_NoSampler <0x0000000e, "image_get_resinfo">;
+}
+
 defm IMAGE_ATOMIC_SWAP : MIMG_Atomic <mimg<0x0f, 0x10>, "image_atomic_swap">;
 defm IMAGE_ATOMIC_CMPSWAP : MIMG_Atomic <mimg<0x10, 0x11>, "image_atomic_cmpswap", VReg_64>;
 defm IMAGE_ATOMIC_ADD : MIMG_Atomic <mimg<0x11, 0x12>, "image_atomic_add">;
@@ -331,7 +336,11 @@ defm IMAGE_GATHER4_C_L_O    : MIMG_Gather <0x0000005c, "image_gather4_c_l_o">;
 defm IMAGE_GATHER4_C_B_O    : MIMG_Gather_WQM <0x0000005d, "image_gather4_c_b_o">;
 defm IMAGE_GATHER4_C_B_CL_O : MIMG_Gather_WQM <0x0000005e, "image_gather4_c_b_cl_o">;
 defm IMAGE_GATHER4_C_LZ_O   : MIMG_Gather <0x0000005f, "image_gather4_c_lz_o">;
+
+let mayLoad = 0, mayStore = 0 in {
 defm IMAGE_GET_LOD          : MIMG_Sampler_WQM <0x00000060, "image_get_lod">;
+}
+
 defm IMAGE_SAMPLE_CD        : MIMG_Sampler <0x00000068, "image_sample_cd">;
 defm IMAGE_SAMPLE_CD_CL     : MIMG_Sampler <0x00000069, "image_sample_cd_cl">;
 defm IMAGE_SAMPLE_C_CD      : MIMG_Sampler <0x0000006a, "image_sample_c_cd">;

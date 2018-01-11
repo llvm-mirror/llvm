@@ -172,6 +172,8 @@ BitVector SIRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   reserveRegisterTuples(Reserved, AMDGPU::TTMP6_TTMP7);
   reserveRegisterTuples(Reserved, AMDGPU::TTMP8_TTMP9);
   reserveRegisterTuples(Reserved, AMDGPU::TTMP10_TTMP11);
+  reserveRegisterTuples(Reserved, AMDGPU::TTMP12_TTMP13);
+  reserveRegisterTuples(Reserved, AMDGPU::TTMP14_TTMP15);
 
   const SISubtarget &ST = MF.getSubtarget<SISubtarget>();
 
@@ -435,6 +437,10 @@ static int getOffsetMUBUFStore(unsigned Opc) {
     return AMDGPU::BUFFER_STORE_DWORDX2_OFFSET;
   case AMDGPU::BUFFER_STORE_DWORDX4_OFFEN:
     return AMDGPU::BUFFER_STORE_DWORDX4_OFFSET;
+  case AMDGPU::BUFFER_STORE_SHORT_D16_HI_OFFEN:
+    return AMDGPU::BUFFER_STORE_SHORT_D16_HI_OFFSET;
+  case AMDGPU::BUFFER_STORE_BYTE_D16_HI_OFFEN:
+    return AMDGPU::BUFFER_STORE_BYTE_D16_HI_OFFSET;
   default:
     return -1;
   }
@@ -456,6 +462,18 @@ static int getOffsetMUBUFLoad(unsigned Opc) {
     return AMDGPU::BUFFER_LOAD_DWORDX2_OFFSET;
   case AMDGPU::BUFFER_LOAD_DWORDX4_OFFEN:
     return AMDGPU::BUFFER_LOAD_DWORDX4_OFFSET;
+  case AMDGPU::BUFFER_LOAD_UBYTE_D16_OFFEN:
+    return AMDGPU::BUFFER_LOAD_UBYTE_D16_OFFSET;
+  case AMDGPU::BUFFER_LOAD_UBYTE_D16_HI_OFFEN:
+    return AMDGPU::BUFFER_LOAD_UBYTE_D16_HI_OFFSET;
+  case AMDGPU::BUFFER_LOAD_SBYTE_D16_OFFEN:
+    return AMDGPU::BUFFER_LOAD_SBYTE_D16_OFFSET;
+  case AMDGPU::BUFFER_LOAD_SBYTE_D16_HI_OFFEN:
+    return AMDGPU::BUFFER_LOAD_SBYTE_D16_HI_OFFSET;
+  case AMDGPU::BUFFER_LOAD_SHORT_D16_OFFEN:
+    return AMDGPU::BUFFER_LOAD_SHORT_D16_OFFSET;
+  case AMDGPU::BUFFER_LOAD_SHORT_D16_HI_OFFEN:
+    return AMDGPU::BUFFER_LOAD_SHORT_D16_HI_OFFSET;
   default:
     return -1;
   }
@@ -479,7 +497,7 @@ static bool buildMUBUFOffsetLoadStore(const SIInstrInfo *TII,
     return false;
 
   const MachineOperand *Reg = TII->getNamedOperand(*MI, AMDGPU::OpName::vdata);
-  BuildMI(*MBB, MI, DL, TII->get(LoadStoreOp))
+  MachineInstrBuilder NewMI = BuildMI(*MBB, MI, DL, TII->get(LoadStoreOp))
     .add(*Reg)
     .add(*TII->getNamedOperand(*MI, AMDGPU::OpName::srsrc))
     .add(*TII->getNamedOperand(*MI, AMDGPU::OpName::soffset))
@@ -488,6 +506,11 @@ static bool buildMUBUFOffsetLoadStore(const SIInstrInfo *TII,
     .addImm(0) // slc
     .addImm(0) // tfe
     .setMemRefs(MI->memoperands_begin(), MI->memoperands_end());
+
+  const MachineOperand *VDataIn = TII->getNamedOperand(*MI,
+                                                       AMDGPU::OpName::vdata_in);
+  if (VDataIn)
+    NewMI.add(*VDataIn);
   return true;
 }
 
@@ -1050,8 +1073,6 @@ void SIRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
             .addImm(Log2_32(ST.getWavefrontSize()))
             .addReg(DiffReg);
         } else {
-          unsigned CarryOut
-            = MRI.createVirtualRegister(&AMDGPU::SReg_64_XEXECRegClass);
           unsigned ScaledReg
             = MRI.createVirtualRegister(&AMDGPU::VGPR_32RegClass);
 
@@ -1061,8 +1082,7 @@ void SIRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
 
           // TODO: Fold if use instruction is another add of a constant.
           if (AMDGPU::isInlinableLiteral32(Offset, ST.hasInv2PiInlineImm())) {
-            BuildMI(*MBB, MI, DL, TII->get(AMDGPU::V_ADD_I32_e64), ResultReg)
-              .addReg(CarryOut, RegState::Define | RegState::Dead)
+            TII->getAddNoCarry(*MBB, MI, DL, ResultReg)
               .addImm(Offset)
               .addReg(ScaledReg, RegState::Kill);
           } else {
@@ -1071,13 +1091,10 @@ void SIRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
 
             BuildMI(*MBB, MI, DL, TII->get(AMDGPU::S_MOV_B32), ConstOffsetReg)
               .addImm(Offset);
-            BuildMI(*MBB, MI, DL, TII->get(AMDGPU::V_ADD_I32_e64), ResultReg)
-              .addReg(CarryOut, RegState::Define | RegState::Dead)
+            TII->getAddNoCarry(*MBB, MI, DL, ResultReg)
               .addReg(ConstOffsetReg, RegState::Kill)
               .addReg(ScaledReg, RegState::Kill);
           }
-
-          MRI.setRegAllocationHint(CarryOut, 0, AMDGPU::VCC);
         }
 
         // Don't introduce an extra copy if we're just materializing in a mov.
@@ -1326,13 +1343,13 @@ bool SIRegisterInfo::shouldRewriteCopySrc(
   // class.
   //
   // e.g. if we have something like
-  // vreg0 = ...
-  // vreg1 = ...
-  // vreg2 = REG_SEQUENCE vreg0, sub0, vreg1, sub1, vreg2, sub2
-  // vreg3 = COPY vreg2, sub0
+  // %0 = ...
+  // %1 = ...
+  // %2 = REG_SEQUENCE %0, sub0, %1, sub1, %2, sub2
+  // %3 = COPY %2, sub0
   //
   // We want to look through the COPY to find:
-  //  => vreg3 = COPY vreg0
+  //  => %3 = COPY %0
 
   // Plain copy.
   return getCommonSubClass(DefRC, SrcRC) != nullptr;
@@ -1497,7 +1514,7 @@ unsigned SIRegisterInfo::getRegPressureLimit(const TargetRegisterClass *RC,
   const SIMachineFunctionInfo *MFI = MF.getInfo<SIMachineFunctionInfo>();
 
   unsigned Occupancy = ST.getOccupancyWithLocalMemSize(MFI->getLDSSize(),
-                                                       *MF.getFunction());
+                                                       MF.getFunction());
   switch (RC->getID()) {
   default:
     return AMDGPURegisterInfo::getRegPressureLimit(RC, MF);

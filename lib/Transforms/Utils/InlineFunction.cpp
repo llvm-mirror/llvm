@@ -1490,7 +1490,8 @@ static void updateCalleeCount(BlockFrequencyInfo *CallerBFI, BasicBlock *CallBB,
 /// exists in the instruction stream.  Similarly this will inline a recursive
 /// function by one level.
 bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
-                          AAResults *CalleeAAR, bool InsertLifetime) {
+                          AAResults *CalleeAAR, bool InsertLifetime,
+                          Function *ForwardVarArgsTo) {
   Instruction *TheCall = CS.getInstruction();
   assert(TheCall->getParent() && TheCall->getFunction()
          && "Instruction not in function!");
@@ -1499,9 +1500,9 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
   IFI.reset();
 
   Function *CalledFunc = CS.getCalledFunction();
-  if (!CalledFunc ||              // Can't inline external function or indirect
-      CalledFunc->isDeclaration() || // call, or call to a vararg function!
-      CalledFunc->getFunctionType()->isVarArg()) return false;
+  if (!CalledFunc ||               // Can't inline external function or indirect
+      CalledFunc->isDeclaration()) // call!
+    return false;
 
   // The inliner does not know how to inline through calls with operand bundles
   // in general ...
@@ -1627,9 +1628,6 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
     SmallVector<std::pair<Value*, Value*>, 4> ByValInit;
 
     auto &DL = Caller->getParent()->getDataLayout();
-
-    assert(CalledFunc->arg_size() == CS.arg_size() &&
-           "No varargs calls can be inlined!");
 
     // Calculate the vector of arguments to pass into the function cloner, which
     // matches up the formal to the actual argument values.
@@ -1808,7 +1806,16 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
     // Move any dbg.declares describing the allocas into the entry basic block.
     DIBuilder DIB(*Caller->getParent());
     for (auto &AI : IFI.StaticAllocas)
-      replaceDbgDeclareForAlloca(AI, AI, DIB, /*Deref=*/false);
+      replaceDbgDeclareForAlloca(AI, AI, DIB, DIExpression::NoDeref, 0,
+                                 DIExpression::NoDeref);
+  }
+
+  SmallVector<Value*,4> VarArgsToForward;
+  SmallVector<AttributeSet, 4> VarArgsAttrs;
+  for (unsigned i = CalledFunc->getFunctionType()->getNumParams();
+       i < CS.getNumArgOperands(); i++) {
+    VarArgsToForward.push_back(CS.getArgOperand(i));
+    VarArgsAttrs.push_back(CS.getAttributes().getParamAttributes(i));
   }
 
   bool InlinedMustTailCalls = false, InlinedDeoptimizeCalls = false;
@@ -1819,10 +1826,45 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
 
     for (Function::iterator BB = FirstNewBlock, E = Caller->end(); BB != E;
          ++BB) {
-      for (Instruction &I : *BB) {
+      for (auto II = BB->begin(); II != BB->end();) {
+        Instruction &I = *II++;
         CallInst *CI = dyn_cast<CallInst>(&I);
         if (!CI)
           continue;
+
+        // Forward varargs from inlined call site to calls to the
+        // ForwardVarArgsTo function, if requested, and to musttail calls.
+        if (!VarArgsToForward.empty() &&
+            ((ForwardVarArgsTo &&
+              CI->getCalledFunction() == ForwardVarArgsTo) ||
+             CI->isMustTailCall())) {
+          // Collect attributes for non-vararg parameters.
+          AttributeList Attrs = CI->getAttributes();
+          SmallVector<AttributeSet, 8> ArgAttrs;
+          if (!Attrs.isEmpty()) {
+            for (unsigned ArgNo = 0;
+                 ArgNo < CI->getFunctionType()->getNumParams(); ++ArgNo)
+              ArgAttrs.push_back(Attrs.getParamAttributes(ArgNo));
+          }
+
+          // Add VarArg attributes.
+          ArgAttrs.append(VarArgsAttrs.begin(), VarArgsAttrs.end());
+          Attrs = AttributeList::get(CI->getContext(), Attrs.getFnAttributes(),
+                                     Attrs.getRetAttributes(), ArgAttrs);
+          // Add VarArgs to existing parameters.
+          SmallVector<Value *, 6> Params(CI->arg_operands());
+          Params.append(VarArgsToForward.begin(), VarArgsToForward.end());
+          CallInst *NewCI =
+              CallInst::Create(CI->getCalledFunction() ? CI->getCalledFunction()
+                                                       : CI->getCalledValue(),
+                               Params, "", CI);
+          NewCI->setDebugLoc(CI->getDebugLoc());
+          NewCI->setAttributes(Attrs);
+          NewCI->setCallingConv(CI->getCallingConv());
+          CI->replaceAllUsesWith(NewCI);
+          CI->eraseFromParent();
+          CI = NewCI;
+        }
 
         if (Function *F = CI->getCalledFunction())
           InlinedDeoptimizeCalls |=
@@ -1842,7 +1884,8 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
         //    f ->          g -> musttail f  ==>  f ->          f
         //    f ->          g ->     tail f  ==>  f ->          f
         CallInst::TailCallKind ChildTCK = CI->getTailCallKind();
-        ChildTCK = std::min(CallSiteTailKind, ChildTCK);
+        if (ChildTCK != CallInst::TCK_NoTail)
+          ChildTCK = std::min(CallSiteTailKind, ChildTCK);
         CI->setTailCallKind(ChildTCK);
         InlinedMustTailCalls |= CI->isMustTailCall();
 

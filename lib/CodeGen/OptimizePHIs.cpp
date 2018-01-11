@@ -20,10 +20,9 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/Pass.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <cassert>
 
 using namespace llvm;
@@ -73,7 +72,7 @@ INITIALIZE_PASS(OptimizePHIs, DEBUG_TYPE,
                 "Optimize machine instruction PHIs", false, false)
 
 bool OptimizePHIs::runOnMachineFunction(MachineFunction &Fn) {
-  if (skipFunction(*Fn.getFunction()))
+  if (skipFunction(Fn.getFunction()))
     return false;
 
   MRI = &Fn.getRegInfo();
@@ -154,7 +153,7 @@ bool OptimizePHIs::IsDeadPHICycle(MachineInstr *MI, InstrSet &PHIsInCycle) {
   if (PHIsInCycle.size() == 16)
     return false;
 
-  for (MachineInstr &UseMI : MRI->use_instructions(DstReg)) {
+  for (MachineInstr &UseMI : MRI->use_nodbg_instructions(DstReg)) {
     if (!UseMI.isPHI() || !IsDeadPHICycle(&UseMI, PHIsInCycle))
       return false;
   }

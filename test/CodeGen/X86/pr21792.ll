@@ -8,7 +8,7 @@
 
 define void @func(<4 x float> %vx) {
 ; CHECK-LABEL: func:
-; CHECK:       # BB#0: # %entry
+; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    pushq %rax
 ; CHECK-NEXT:    .cfi_def_cfa_offset 16
 ; CHECK-NEXT:    pand {{.*}}(%rip), %xmm0
@@ -28,7 +28,6 @@ define void @func(<4 x float> %vx) {
 ; CHECK-NEXT:    leaq stuff+8(%r9), %r9
 ; CHECK-NEXT:    callq toto
 ; CHECK-NEXT:    popq %rax
-; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
 entry:
   %tmp2 = bitcast <4 x float> %vx to <2 x i64>

@@ -359,9 +359,6 @@
 /* Has gcc/MSVC atomic intrinsics */
 #cmakedefine01 LLVM_HAS_ATOMICS
 
-/* Define if LLVM_ENABLE_DUMP is enabled */
-#cmakedefine LLVM_ENABLE_DUMP
-
 /* Host triple LLVM will be executed on */
 #cmakedefine LLVM_HOST_TRIPLE "${LLVM_HOST_TRIPLE}"
 
@@ -436,5 +433,11 @@
 
 /* Define to a function implementing strdup */
 #cmakedefine strdup ${strdup}
+
+/* Whether GlobalISel rule coverage is being collected */
+#cmakedefine01 LLVM_GISEL_COV_ENABLED
+
+/* Define to the default GlobalISel coverage file prefix */
+#cmakedefine LLVM_GISEL_COV_PREFIX "${LLVM_GISEL_COV_PREFIX}"
 
 #endif

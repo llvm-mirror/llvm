@@ -45,6 +45,9 @@
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/MachineValueType.h"
+#include "llvm/CodeGen/TargetLowering.h"
+#include "llvm/CodeGen/TargetLoweringObjectFile.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/BasicBlock.h"
@@ -75,10 +78,7 @@
 #include "llvm/Support/Path.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetLowering.h"
-#include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 #include "llvm/Transforms/Utils/UnrollLoop.h"
 #include <cassert>
 #include <cstdint>
@@ -457,8 +457,8 @@ void NVPTXAsmPrinter::printReturnValStr(const Function *F, raw_ostream &O) {
 
 void NVPTXAsmPrinter::printReturnValStr(const MachineFunction &MF,
                                         raw_ostream &O) {
-  const Function *F = MF.getFunction();
-  printReturnValStr(F, O);
+  const Function &F = MF.getFunction();
+  printReturnValStr(&F, O);
 }
 
 // Return true if MBB is the header of a loop marked with
@@ -502,13 +502,13 @@ void NVPTXAsmPrinter::EmitFunctionEntryLabel() {
   raw_svector_ostream O(Str);
 
   if (!GlobalsEmitted) {
-    emitGlobals(*MF->getFunction()->getParent());
+    emitGlobals(*MF->getFunction().getParent());
     GlobalsEmitted = true;
   }
   
   // Set up
   MRI = &MF->getRegInfo();
-  F = MF->getFunction();
+  F = &MF->getFunction();
   emitLinkageDirective(F, O);
   if (isKernelFunction(*F))
     O << ".entry ";
@@ -536,7 +536,7 @@ void NVPTXAsmPrinter::EmitFunctionBodyStart() {
 
   SmallString<128> Str;
   raw_svector_ostream O(Str);
-  emitDemotedVars(MF->getFunction(), O);
+  emitDemotedVars(&MF->getFunction(), O);
   OutStreamer->EmitRawText(O.str());
 }
 
@@ -1708,8 +1708,8 @@ void NVPTXAsmPrinter::emitFunctionParamList(const Function *F, raw_ostream &O) {
 
 void NVPTXAsmPrinter::emitFunctionParamList(const MachineFunction &MF,
                                             raw_ostream &O) {
-  const Function *F = MF.getFunction();
-  emitFunctionParamList(F, O);
+  const Function &F = MF.getFunction();
+  emitFunctionParamList(&F, O);
 }
 
 void NVPTXAsmPrinter::setAndEmitFunctionVirtualRegisters(
@@ -1797,11 +1797,7 @@ void NVPTXAsmPrinter::printFPConstant(const ConstantFP *Fp, raw_ostream &O) {
     llvm_unreachable("unsupported fp type");
 
   APInt API = APF.bitcastToAPInt();
-  std::string hexstr(utohexstr(API.getZExtValue()));
-  O << lead;
-  if (hexstr.length() < numHex)
-    O << std::string(numHex - hexstr.length(), '0');
-  O << utohexstr(API.getZExtValue());
+  O << lead << format_hex_no_prefix(API.getZExtValue(), numHex, /*Upper=*/true);
 }
 
 void NVPTXAsmPrinter::printScalarConstant(const Constant *CPV, raw_ostream &O) {
@@ -2156,7 +2152,7 @@ NVPTXAsmPrinter::lowerConstantForGV(const Constant *CV, bool ProcessingGeneric) 
       raw_string_ostream OS(S);
       OS << "Unsupported expression in static initializer: ";
       CE->printAsOperand(OS, /*PrintType=*/false,
-                     !MF ? nullptr : MF->getFunction()->getParent());
+                     !MF ? nullptr : MF->getFunction().getParent());
       report_fatal_error(OS.str());
     }
 
@@ -2170,7 +2166,7 @@ NVPTXAsmPrinter::lowerConstantForGV(const Constant *CV, bool ProcessingGeneric) 
     raw_string_ostream OS(S);
     OS << "Unsupported expression in static initializer: ";
     CE->printAsOperand(OS, /*PrintType=*/ false,
-                       !MF ? nullptr : MF->getFunction()->getParent());
+                       !MF ? nullptr : MF->getFunction().getParent());
     report_fatal_error(OS.str());
   }
 

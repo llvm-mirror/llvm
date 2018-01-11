@@ -728,6 +728,23 @@ Instruction *InstCombiner::visitFMul(BinaryOperator &I) {
     }
   }
 
+  // sqrt(a) * sqrt(b) -> sqrt(a * b)
+  if (AllowReassociate &&
+      Op0->hasOneUse() && Op1->hasOneUse()) {
+    Value *Opnd0 = nullptr;
+    Value *Opnd1 = nullptr;
+    if (match(Op0, m_Intrinsic<Intrinsic::sqrt>(m_Value(Opnd0))) &&
+        match(Op1, m_Intrinsic<Intrinsic::sqrt>(m_Value(Opnd1)))) {
+      BuilderTy::FastMathFlagGuard Guard(Builder);
+      Builder.setFastMathFlags(I.getFastMathFlags());
+      Value *FMulVal = Builder.CreateFMul(Opnd0, Opnd1);
+      Value *Sqrt = Intrinsic::getDeclaration(I.getModule(), 
+                                              Intrinsic::sqrt, I.getType());
+      Value *SqrtCall = Builder.CreateCall(Sqrt, FMulVal);
+      return replaceInstUsesWith(I, SqrtCall);
+    }
+  }
+
   // Handle symmetric situation in a 2-iteration loop
   Value *Opnd0 = Op0;
   Value *Opnd1 = Op1;
@@ -1630,10 +1647,6 @@ Instruction *InstCombiner::visitFRem(BinaryOperator &I) {
   if (Value *V = SimplifyFRemInst(Op0, Op1, I.getFastMathFlags(),
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
-
-  // Handle cases involving: rem X, (select Cond, Y, Z)
-  if (simplifyDivRemOfSelectWithZeroOp(I))
-    return &I;
 
   return nullptr;
 }

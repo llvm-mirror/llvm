@@ -777,7 +777,8 @@ static GlobalValue *ExtractSymbol(const SCEV *&S, ScalarEvolution &SE) {
 
 /// Returns true if the specified instruction is using the specified value as an
 /// address.
-static bool isAddressUse(Instruction *Inst, Value *OperandVal) {
+static bool isAddressUse(const TargetTransformInfo &TTI,
+                         Instruction *Inst, Value *OperandVal) {
   bool isAddress = isa<LoadInst>(Inst);
   if (StoreInst *SI = dyn_cast<StoreInst>(Inst)) {
     if (SI->getPointerOperand() == OperandVal)
@@ -786,18 +787,24 @@ static bool isAddressUse(Instruction *Inst, Value *OperandVal) {
     // Addressing modes can also be folded into prefetches and a variety
     // of intrinsics.
     switch (II->getIntrinsicID()) {
-      default: break;
-      case Intrinsic::memset:
-      case Intrinsic::prefetch:
-        if (II->getArgOperand(0) == OperandVal)
+    case Intrinsic::memset:
+    case Intrinsic::prefetch:
+      if (II->getArgOperand(0) == OperandVal)
+        isAddress = true;
+      break;
+    case Intrinsic::memmove:
+    case Intrinsic::memcpy:
+      if (II->getArgOperand(0) == OperandVal ||
+          II->getArgOperand(1) == OperandVal)
+        isAddress = true;
+      break;
+    default: {
+      MemIntrinsicInfo IntrInfo;
+      if (TTI.getTgtMemIntrinsic(II, IntrInfo)) {
+        if (IntrInfo.PtrVal == OperandVal)
           isAddress = true;
-        break;
-      case Intrinsic::memmove:
-      case Intrinsic::memcpy:
-        if (II->getArgOperand(0) == OperandVal ||
-            II->getArgOperand(1) == OperandVal)
-          isAddress = true;
-        break;
+      }
+    }
     }
   } else if (AtomicRMWInst *RMW = dyn_cast<AtomicRMWInst>(Inst)) {
     if (RMW->getPointerOperand() == OperandVal)
@@ -810,7 +817,8 @@ static bool isAddressUse(Instruction *Inst, Value *OperandVal) {
 }
 
 /// Return the type of the memory being accessed.
-static MemAccessTy getAccessType(const Instruction *Inst) {
+static MemAccessTy getAccessType(const TargetTransformInfo &TTI,
+                                 Instruction *Inst) {
   MemAccessTy AccessTy(Inst->getType(), MemAccessTy::UnknownAddressSpace);
   if (const StoreInst *SI = dyn_cast<StoreInst>(Inst)) {
     AccessTy.MemTy = SI->getOperand(0)->getType();
@@ -821,6 +829,21 @@ static MemAccessTy getAccessType(const Instruction *Inst) {
     AccessTy.AddrSpace = RMW->getPointerAddressSpace();
   } else if (const AtomicCmpXchgInst *CmpX = dyn_cast<AtomicCmpXchgInst>(Inst)) {
     AccessTy.AddrSpace = CmpX->getPointerAddressSpace();
+  } else if (IntrinsicInst *II = dyn_cast<IntrinsicInst>(Inst)) {
+    switch (II->getIntrinsicID()) {
+    case Intrinsic::prefetch:
+      AccessTy.AddrSpace = II->getArgOperand(0)->getType()->getPointerAddressSpace();
+      break;
+    default: {
+      MemIntrinsicInfo IntrInfo;
+      if (TTI.getTgtMemIntrinsic(II, IntrInfo) && IntrInfo.PtrVal) {
+        AccessTy.AddrSpace
+          = IntrInfo.PtrVal->getType()->getPointerAddressSpace();
+      }
+
+      break;
+    }
+    }
   }
 
   // All pointers have the same requirements, so canonicalize them to an
@@ -834,12 +857,11 @@ static MemAccessTy getAccessType(const Instruction *Inst) {
 
 /// Return true if this AddRec is already a phi in its loop.
 static bool isExistingPhi(const SCEVAddRecExpr *AR, ScalarEvolution &SE) {
-  for (BasicBlock::iterator I = AR->getLoop()->getHeader()->begin();
-       PHINode *PN = dyn_cast<PHINode>(I); ++I) {
-    if (SE.isSCEVable(PN->getType()) &&
-        (SE.getEffectiveSCEVType(PN->getType()) ==
+  for (PHINode &PN : AR->getLoop()->getHeader()->phis()) {
+    if (SE.isSCEVable(PN.getType()) &&
+        (SE.getEffectiveSCEVType(PN.getType()) ==
          SE.getEffectiveSCEVType(AR->getType())) &&
-        SE.getSCEV(PN) == AR)
+        SE.getSCEV(&PN) == AR)
       return true;
   }
   return false;
@@ -1025,7 +1047,7 @@ private:
                            ScalarEvolution &SE, DominatorTree &DT,
                            SmallPtrSetImpl<const SCEV *> *LoserRegs);
 };
-  
+
 /// An operand value in an instruction which is to be replaced with some
 /// equivalent, possibly strength-reduced, replacement.
 struct LSRFixup {
@@ -1149,7 +1171,7 @@ public:
     if (f.Offset < MinOffset)
       MinOffset = f.Offset;
   }
-  
+
   bool HasFormulaWithSameRegs(const Formula &F) const;
   float getNotSelectedProbability(const SCEV *Reg) const;
   bool InsertFormula(const Formula &F, const Loop &L);
@@ -2362,7 +2384,7 @@ LSRInstance::OptimizeLoopTermCond() {
                 C->getValue().isMinSignedValue())
               goto decline_post_inc;
             // Check for possible scaled-address reuse.
-            MemAccessTy AccessTy = getAccessType(UI->getUser());
+            MemAccessTy AccessTy = getAccessType(TTI, UI->getUser());
             int64_t Scale = C->getSExtValue();
             if (TTI.isLegalAddressingMode(AccessTy.MemTy, /*BaseGV=*/nullptr,
                                           /*BaseOffset=*/0,
@@ -2970,7 +2992,7 @@ void LSRInstance::CollectChains() {
       // consider leaf IV Users. This effectively rediscovers a portion of
       // IVUsers analysis but in program order this time.
       if (SE.isSCEVable(I.getType()) && !isa<SCEVUnknown>(SE.getSCEV(&I)))
-        continue;
+          continue;
 
       // Remove this instruction from any NearUsers set it may be in.
       for (unsigned ChainIdx = 0, NChains = IVChainVec.size();
@@ -2990,15 +3012,14 @@ void LSRInstance::CollectChains() {
     } // Continue walking down the instructions.
   } // Continue walking down the domtree.
   // Visit phi backedges to determine if the chain can generate the IV postinc.
-  for (BasicBlock::iterator I = L->getHeader()->begin();
-       PHINode *PN = dyn_cast<PHINode>(I); ++I) {
-    if (!SE.isSCEVable(PN->getType()))
+  for (PHINode &PN : L->getHeader()->phis()) {
+    if (!SE.isSCEVable(PN.getType()))
       continue;
 
     Instruction *IncV =
-      dyn_cast<Instruction>(PN->getIncomingValueForBlock(L->getLoopLatch()));
+        dyn_cast<Instruction>(PN.getIncomingValueForBlock(L->getLoopLatch()));
     if (IncV)
-      ChainInstruction(PN, IncV, ChainUsersVec);
+      ChainInstruction(&PN, IncV, ChainUsersVec);
   }
   // Remove any unprofitable chains.
   unsigned ChainIdx = 0;
@@ -3032,13 +3053,13 @@ void LSRInstance::FinalizeChain(IVChain &Chain) {
 static bool canFoldIVIncExpr(const SCEV *IncExpr, Instruction *UserInst,
                              Value *Operand, const TargetTransformInfo &TTI) {
   const SCEVConstant *IncConst = dyn_cast<SCEVConstant>(IncExpr);
-  if (!IncConst || !isAddressUse(UserInst, Operand))
+  if (!IncConst || !isAddressUse(TTI, UserInst, Operand))
     return false;
 
   if (IncConst->getAPInt().getMinSignedBits() > 64)
     return false;
 
-  MemAccessTy AccessTy = getAccessType(UserInst);
+  MemAccessTy AccessTy = getAccessType(TTI, UserInst);
   int64_t IncOffset = IncConst->getValue()->getSExtValue();
   if (!isAlwaysFoldable(TTI, LSRUse::Address, AccessTy, /*BaseGV=*/nullptr,
                         IncOffset, /*HaseBaseReg=*/false))
@@ -3129,12 +3150,11 @@ void LSRInstance::GenerateIVChain(const IVChain &Chain, SCEVExpander &Rewriter,
   // If LSR created a new, wider phi, we may also replace its postinc. We only
   // do this if we also found a wide value for the head of the chain.
   if (isa<PHINode>(Chain.tailUserInst())) {
-    for (BasicBlock::iterator I = L->getHeader()->begin();
-         PHINode *Phi = dyn_cast<PHINode>(I); ++I) {
-      if (!isCompatibleIVType(Phi, IVSrc))
+    for (PHINode &Phi : L->getHeader()->phis()) {
+      if (!isCompatibleIVType(&Phi, IVSrc))
         continue;
       Instruction *PostIncV = dyn_cast<Instruction>(
-        Phi->getIncomingValueForBlock(L->getLoopLatch()));
+          Phi.getIncomingValueForBlock(L->getLoopLatch()));
       if (!PostIncV || (SE.getSCEV(PostIncV) != SE.getSCEV(IVSrc)))
         continue;
       Value *IVOper = IVSrc;
@@ -3145,7 +3165,7 @@ void LSRInstance::GenerateIVChain(const IVChain &Chain, SCEVExpander &Rewriter,
         Builder.SetCurrentDebugLocation(PostIncV->getDebugLoc());
         IVOper = Builder.CreatePointerCast(IVSrc, PostIncTy, "lsr.chain");
       }
-      Phi->replaceUsesOfWith(PostIncV, IVOper);
+      Phi.replaceUsesOfWith(PostIncV, IVOper);
       DeadInsts.emplace_back(PostIncV);
     }
   }
@@ -3165,14 +3185,14 @@ void LSRInstance::CollectFixupsAndInitialFormulae() {
 
     LSRUse::KindType Kind = LSRUse::Basic;
     MemAccessTy AccessTy;
-    if (isAddressUse(UserInst, U.getOperandValToReplace())) {
+    if (isAddressUse(TTI, UserInst, U.getOperandValToReplace())) {
       Kind = LSRUse::Address;
-      AccessTy = getAccessType(UserInst);
+      AccessTy = getAccessType(TTI, UserInst);
     }
 
     const SCEV *S = IU.getExpr(U);
     PostIncLoopSet TmpPostIncLoops = U.getPostIncLoops();
-    
+
     // Equality (== and !=) ICmps are special. We can rewrite (i == N) as
     // (N - i == 0), and this allows (N - i) to be the expression that we work
     // with rather than just N or i, so we can consider the register
@@ -4304,7 +4324,7 @@ void LSRInstance::NarrowSearchSpaceByCollapsingUnrolledCode() {
         LUThatHas->pushFixup(Fixup);
         DEBUG(dbgs() << "New fixup has offset " << Fixup.Offset << '\n');
       }
-      
+
       // Delete formulae from the new use which are no longer legal.
       bool Any = false;
       for (size_t i = 0, e = LUThatHas->Formulae.size(); i != e; ++i) {

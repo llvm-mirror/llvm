@@ -1,4 +1,4 @@
-; RUN: llc -mtriple=amdgcn--amdhsa -mcpu=gfx901 -mattr=-flat-for-global,-fp64-fp16-denormals -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=GFX9 %s
+; RUN: llc -mtriple=amdgcn--amdhsa -mcpu=gfx900 -mattr=-flat-for-global,-fp64-fp16-denormals -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=GFX9 %s
 ; RUN: llc -mtriple=amdgcn--amdhsa -mcpu=fiji -mattr=-flat-for-global -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=VI %s
 ; RUN: llc -mtriple=amdgcn--amdhsa -mcpu=kaveri -mattr=-flat-for-global -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=CI %s
 
@@ -87,7 +87,7 @@ define amdgpu_kernel void @v_pack_v2f16(i32 addrspace(1)* %in0, i32 addrspace(1)
 ; GFX9: v_and_b32_e32 [[ELT0:v[0-9]+]], 0xffff, [[VAL0]]
 ; GFX9: v_lshl_or_b32 [[PACKED:v[0-9]+]], [[VAL1]], 16, [[ELT0]]
 
-; GFX9: v_add_i32_e32 v{{[0-9]+}}, vcc, 9, [[PACKED]]
+; GFX9: v_add_u32_e32 v{{[0-9]+}}, 9, [[PACKED]]
 define amdgpu_kernel void @v_pack_v2f16_user(i32 addrspace(1)* %in0, i32 addrspace(1)* %in1) #0 {
   %tid = call i32 @llvm.amdgcn.workitem.id.x()
   %tid.ext = sext i32 %tid to i64

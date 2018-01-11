@@ -344,22 +344,110 @@ std::error_code is_local(const Twine &path, bool &result) {
   return is_local_internal(WidePath, result);
 }
 
+static std::error_code realPathFromHandle(HANDLE H,
+                                          SmallVectorImpl<wchar_t> &Buffer) {
+  DWORD CountChars = ::GetFinalPathNameByHandleW(
+      H, Buffer.begin(), Buffer.capacity() - 1, FILE_NAME_NORMALIZED);
+  if (CountChars > Buffer.capacity()) {
+    // The buffer wasn't big enough, try again.  In this case the return value
+    // *does* indicate the size of the null terminator.
+    Buffer.reserve(CountChars);
+    CountChars = ::GetFinalPathNameByHandleW(
+        H, Buffer.data(), Buffer.capacity() - 1, FILE_NAME_NORMALIZED);
+  }
+  if (CountChars == 0)
+    return mapWindowsError(GetLastError());
+  Buffer.set_size(CountChars);
+  return std::error_code();
+}
+
+static std::error_code realPathFromHandle(HANDLE H,
+                                          SmallVectorImpl<char> &RealPath) {
+  RealPath.clear();
+  SmallVector<wchar_t, MAX_PATH> Buffer;
+  if (std::error_code EC = realPathFromHandle(H, Buffer))
+    return EC;
+
+  const wchar_t *Data = Buffer.data();
+  DWORD CountChars = Buffer.size();
+  if (CountChars >= 4) {
+    if (0 == ::memcmp(Data, L"\\\\?\\", 8)) {
+      CountChars -= 4;
+      Data += 4;
+    }
+  }
+
+  // Convert the result from UTF-16 to UTF-8.
+  return UTF16ToUTF8(Data, CountChars, RealPath);
+}
+
 std::error_code is_local(int FD, bool &Result) {
   SmallVector<wchar_t, 128> FinalPath;
   HANDLE Handle = reinterpret_cast<HANDLE>(_get_osfhandle(FD));
 
-  size_t Len = 128;
-  do {
-    FinalPath.reserve(Len);
-    Len = ::GetFinalPathNameByHandleW(Handle, FinalPath.data(),
-                                      FinalPath.capacity() - 1, VOLUME_NAME_NT);
-    if (Len == 0)
-      return mapWindowsError(::GetLastError());
-  } while (Len > FinalPath.capacity());
-
-  FinalPath.set_size(Len);
+  if (std::error_code EC = realPathFromHandle(Handle, FinalPath))
+    return EC;
 
   return is_local_internal(FinalPath, Result);
+}
+
+static std::error_code setDeleteDisposition(HANDLE Handle, bool Delete) {
+  FILE_DISPOSITION_INFO Disposition;
+  Disposition.DeleteFile = Delete;
+  if (!SetFileInformationByHandle(Handle, FileDispositionInfo, &Disposition,
+                                  sizeof(Disposition)))
+    return mapWindowsError(::GetLastError());
+  return std::error_code();
+}
+
+static std::error_code removeFD(int FD) {
+  HANDLE Handle = reinterpret_cast<HANDLE>(_get_osfhandle(FD));
+  return setDeleteDisposition(Handle, true);
+}
+
+/// In order to handle temporary files we want the following properties
+///
+/// * The temporary file is deleted on crashes
+/// * We can use (read, rename, etc) the temporary file.
+/// * We can cancel the delete to keep the file.
+///
+/// Using FILE_DISPOSITION_INFO with DeleteFile=true will create a file that is
+/// deleted on close, but it has a few problems:
+///
+/// * The file cannot be used. An attempt to open or rename the file will fail.
+///   This makes the temporary file almost useless, as it cannot be part of
+///   any other CreateFileW call in the current or in another process.
+/// * It is not atomic. A crash just after CreateFileW or just after canceling
+///   the delete will leave the file on disk.
+///
+/// Using FILE_FLAG_DELETE_ON_CLOSE solves the first issues and the first part
+/// of the second one, but there is no way to cancel it in place. What works is
+/// to create a second handle to prevent the deletion, close the first one and
+/// then clear DeleteFile with SetFileInformationByHandle. This requires
+/// changing the handle and file descriptor the caller uses.
+static std::error_code cancelDeleteOnClose(int &FD) {
+  HANDLE Handle = reinterpret_cast<HANDLE>(_get_osfhandle(FD));
+  SmallVector<wchar_t, MAX_PATH> Name;
+  if (std::error_code EC = realPathFromHandle(Handle, Name))
+    return EC;
+  HANDLE NewHandle =
+      ::CreateFileW(Name.data(), GENERIC_READ | GENERIC_WRITE | DELETE,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+  if (NewHandle == INVALID_HANDLE_VALUE)
+    return mapWindowsError(::GetLastError());
+  if (close(FD))
+    return mapWindowsError(::GetLastError());
+
+  if (std::error_code EC = setDeleteDisposition(NewHandle, false))
+    return EC;
+
+  FD = ::_open_osfhandle(intptr_t(NewHandle), 0);
+  if (FD == -1) {
+    ::CloseHandle(NewHandle);
+    return mapWindowsError(ERROR_INVALID_HANDLE);
+  }
+  return std::error_code();
 }
 
 static std::error_code rename_internal(HANDLE FromHandle, const Twine &To,
@@ -389,29 +477,10 @@ static std::error_code rename_internal(HANDLE FromHandle, const Twine &To,
   return std::error_code();
 }
 
-std::error_code rename(const Twine &From, const Twine &To) {
-  // Convert to utf-16.
-  SmallVector<wchar_t, 128> WideFrom;
+static std::error_code rename_handle(HANDLE FromHandle, const Twine &To) {
   SmallVector<wchar_t, 128> WideTo;
-  if (std::error_code EC = widenPath(From, WideFrom))
-    return EC;
   if (std::error_code EC = widenPath(To, WideTo))
     return EC;
-
-  ScopedFileHandle FromHandle;
-  // Retry this a few times to defeat badly behaved file system scanners.
-  for (unsigned Retry = 0; Retry != 200; ++Retry) {
-    if (Retry != 0)
-      ::Sleep(10);
-    FromHandle =
-        ::CreateFileW(WideFrom.begin(), GENERIC_READ | DELETE,
-                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                      NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (FromHandle)
-      break;
-  }
-  if (!FromHandle)
-    return mapWindowsError(GetLastError());
 
   // We normally expect this loop to succeed after a few iterations. If it
   // requires more than 200 tries, it's more likely that the failures are due to
@@ -423,6 +492,9 @@ std::error_code rename(const Twine &From, const Twine &To) {
         std::error_code(ERROR_CALL_NOT_IMPLEMENTED, std::system_category())) {
       // Wine doesn't support SetFileInformationByHandle in rename_internal.
       // Fall back to MoveFileEx.
+      SmallVector<wchar_t, MAX_PATH> WideFrom;
+      if (std::error_code EC2 = realPathFromHandle(FromHandle, WideFrom))
+        return EC2;
       if (::MoveFileExW(WideFrom.begin(), WideTo.begin(),
                         MOVEFILE_REPLACE_EXISTING))
         return std::error_code();
@@ -498,6 +570,35 @@ std::error_code rename(const Twine &From, const Twine &To) {
 
   // The most likely root cause.
   return errc::permission_denied;
+}
+
+static std::error_code rename_fd(int FromFD, const Twine &To) {
+  HANDLE FromHandle = reinterpret_cast<HANDLE>(_get_osfhandle(FromFD));
+  return rename_handle(FromHandle, To);
+}
+
+std::error_code rename(const Twine &From, const Twine &To) {
+  // Convert to utf-16.
+  SmallVector<wchar_t, 128> WideFrom;
+  if (std::error_code EC = widenPath(From, WideFrom))
+    return EC;
+
+  ScopedFileHandle FromHandle;
+  // Retry this a few times to defeat badly behaved file system scanners.
+  for (unsigned Retry = 0; Retry != 200; ++Retry) {
+    if (Retry != 0)
+      ::Sleep(10);
+    FromHandle =
+        ::CreateFileW(WideFrom.begin(), GENERIC_READ | DELETE,
+                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                      NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (FromHandle)
+      break;
+  }
+  if (!FromHandle)
+    return mapWindowsError(GetLastError());
+
+  return rename_handle(FromHandle, To);
 }
 
 std::error_code resize_file(int FD, uint64_t Size) {
@@ -734,8 +835,8 @@ std::error_code mapped_file_region::init(int FD, uint64_t Offset,
 
   HANDLE FileMappingHandle =
       ::CreateFileMappingW(FileHandle, 0, flprotect,
-                           (Offset + Size) >> 32,
-                           (Offset + Size) & 0xffffffff,
+                           Hi_32(Size),
+                           Lo_32(Size),
                            0);
   if (FileMappingHandle == NULL) {
     std::error_code ec = mapWindowsError(GetLastError());
@@ -916,34 +1017,6 @@ ErrorOr<basic_file_status> directory_entry::status() const {
   return Status;
 }
 
-static std::error_code realPathFromHandle(HANDLE H,
-                                          SmallVectorImpl<char> &RealPath) {
-  RealPath.clear();
-  llvm::SmallVector<wchar_t, MAX_PATH> Buffer;
-  DWORD CountChars = ::GetFinalPathNameByHandleW(
-      H, Buffer.begin(), Buffer.capacity() - 1, FILE_NAME_NORMALIZED);
-  if (CountChars > Buffer.capacity()) {
-    // The buffer wasn't big enough, try again.  In this case the return value
-    // *does* indicate the size of the null terminator.
-    Buffer.reserve(CountChars);
-    CountChars = ::GetFinalPathNameByHandleW(
-        H, Buffer.data(), Buffer.capacity() - 1, FILE_NAME_NORMALIZED);
-  }
-  if (CountChars == 0)
-    return mapWindowsError(GetLastError());
-
-  const wchar_t *Data = Buffer.data();
-  if (CountChars >= 4) {
-    if (0 == ::memcmp(Data, L"\\\\?\\", 8)) {
-      CountChars -= 4;
-      Data += 4;
-    }
-  }
-
-  // Convert the result from UTF-16 to UTF-8.
-  return UTF16ToUTF8(Data, CountChars, RealPath);
-}
-
 static std::error_code directoryRealPath(const Twine &Name,
                                          SmallVectorImpl<char> &RealPath) {
   SmallVector<wchar_t, 128> PathUTF16;
@@ -1020,13 +1093,18 @@ std::error_code openFileForWrite(const Twine &Name, int &ResultFD,
     CreationDisposition = CREATE_ALWAYS;
 
   DWORD Access = GENERIC_WRITE;
+  DWORD Attributes = FILE_ATTRIBUTE_NORMAL;
   if (Flags & F_RW)
     Access |= GENERIC_READ;
+  if (Flags & F_Delete) {
+    Access |= DELETE;
+    Attributes |= FILE_FLAG_DELETE_ON_CLOSE;
+  }
 
   HANDLE H =
-      ::CreateFileW(PathUTF16.begin(), Access,
+      ::CreateFileW(PathUTF16.data(), Access,
                     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                    NULL, CreationDisposition, FILE_ATTRIBUTE_NORMAL, NULL);
+                    NULL, CreationDisposition, Attributes, NULL);
 
   if (H == INVALID_HANDLE_VALUE) {
     DWORD LastError = ::GetLastError();

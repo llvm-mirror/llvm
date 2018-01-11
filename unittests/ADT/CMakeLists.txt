@@ -16,6 +16,7 @@ set(ADTSources
   DenseMapTest.cpp
   DenseSetTest.cpp
   DepthFirstIteratorTest.cpp
+  EquivalenceClassesTest.cpp
   FoldingSet.cpp
   FunctionRefTest.cpp
   HashingTest.cpp
@@ -32,6 +33,7 @@ set(ADTSources
   IntrusiveRefCntPtrTest.cpp
   IteratorTest.cpp
   MakeUniqueTest.cpp
+  MappedIteratorTest.cpp
   MapVectorTest.cpp
   OptionalTest.cpp
   PackedVectorTest.cpp

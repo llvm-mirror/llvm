@@ -123,8 +123,8 @@ public:
   using AsmPrinterCtorTy = AsmPrinter *(*)(
       TargetMachine &TM, std::unique_ptr<MCStreamer> &&Streamer);
   using MCAsmBackendCtorTy = MCAsmBackend *(*)(const Target &T,
+                                               const MCSubtargetInfo &STI,
                                                const MCRegisterInfo &MRI,
-                                               const Triple &TT, StringRef CPU,
                                                const MCTargetOptions &Options);
   using MCAsmParserCtorTy = MCTargetAsmParser *(*)(
       const MCSubtargetInfo &STI, MCAsmParser &P, const MCInstrInfo &MII,
@@ -186,6 +186,10 @@ private:
 
   /// ShortDesc - A short description of the target.
   const char *ShortDesc;
+
+  /// BackendName - The name of the backend implementation. This must match the
+  /// name of the 'def X : Target ...' in TableGen.
+  const char *BackendName;
 
   /// HasJIT - Whether this target supports the JIT.
   bool HasJIT;
@@ -278,6 +282,9 @@ public:
 
   /// getShortDescription - Get a short description of the target.
   const char *getShortDescription() const { return ShortDesc; }
+
+  /// getBackendName - Get the backend name.
+  const char *getBackendName() const { return BackendName; }
 
   /// @}
   /// @name Feature Predicates
@@ -374,15 +381,12 @@ public:
   }
 
   /// createMCAsmBackend - Create a target specific assembly parser.
-  ///
-  /// \param TheTriple The target triple string.
-  MCAsmBackend *createMCAsmBackend(const MCRegisterInfo &MRI,
-                                   StringRef TheTriple, StringRef CPU,
-                                   const MCTargetOptions &Options)
-                                   const {
+  MCAsmBackend *createMCAsmBackend(const MCSubtargetInfo &STI,
+                                   const MCRegisterInfo &MRI,
+                                   const MCTargetOptions &Options) const {
     if (!MCAsmBackendCtorFn)
       return nullptr;
-    return MCAsmBackendCtorFn(*this, MRI, Triple(TheTriple), CPU, Options);
+    return MCAsmBackendCtorFn(*this, STI, MRI, Options);
   }
 
   /// createMCAsmParser - Create a target specific assembly parser.
@@ -645,10 +649,15 @@ struct TargetRegistry {
   /// @param Name - The target name. This should be a static string.
   /// @param ShortDesc - A short target description. This should be a static
   /// string.
+  /// @param BackendName - The name of the backend. This should be a static
+  /// string that is the same for all targets that share a backend
+  /// implementation and must match the name used in the 'def X : Target ...' in
+  /// TableGen.
   /// @param ArchMatchFn - The arch match checking function for this target.
   /// @param HasJIT - Whether the target supports JIT code
   /// generation.
   static void RegisterTarget(Target &T, const char *Name, const char *ShortDesc,
+                             const char *BackendName,
                              Target::ArchMatchFnTy ArchMatchFn,
                              bool HasJIT = false);
 
@@ -878,13 +887,15 @@ struct TargetRegistry {
 /// }
 /// extern "C" void LLVMInitializeFooTargetInfo() {
 ///   RegisterTarget<Triple::foo> X(getTheFooTarget(), "foo", "Foo
-///   description");
+///   description", "Foo" /* Backend Name */);
 /// }
 template <Triple::ArchType TargetArchType = Triple::UnknownArch,
           bool HasJIT = false>
 struct RegisterTarget {
-  RegisterTarget(Target &T, const char *Name, const char *Desc) {
-    TargetRegistry::RegisterTarget(T, Name, Desc, &getArchMatch, HasJIT);
+  RegisterTarget(Target &T, const char *Name, const char *Desc,
+                 const char *BackendName) {
+    TargetRegistry::RegisterTarget(T, Name, Desc, BackendName, &getArchMatch,
+                                   HasJIT);
   }
 
   static bool getArchMatch(Triple::ArchType Arch) {
@@ -1092,10 +1103,10 @@ template <class MCAsmBackendImpl> struct RegisterMCAsmBackend {
   }
 
 private:
-  static MCAsmBackend *Allocator(const Target &T, const MCRegisterInfo &MRI,
-                                 const Triple &TheTriple, StringRef CPU,
+  static MCAsmBackend *Allocator(const Target &T, const MCSubtargetInfo &STI,
+                                 const MCRegisterInfo &MRI,
                                  const MCTargetOptions &Options) {
-    return new MCAsmBackendImpl(T, MRI, TheTriple, CPU);
+    return new MCAsmBackendImpl(T, STI, MRI);
   }
 };
 

@@ -17,12 +17,11 @@
 #include "llvm/CodeGen/GlobalISel/CallLowering.h"
 #include "llvm/CodeGen/GlobalISel/LegalizerInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/TargetLowering.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetLowering.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 
-#include <sstream>
 
 #define DEBUG_TYPE "legalizer"
 
@@ -94,6 +93,12 @@ static RTLIB::Libcall getRTLibDesc(unsigned Opcode, unsigned Size) {
   case TargetOpcode::G_FSUB:
     assert((Size == 32 || Size == 64) && "Unsupported size");
     return Size == 64 ? RTLIB::SUB_F64 : RTLIB::SUB_F32;
+  case TargetOpcode::G_FMUL:
+    assert((Size == 32 || Size == 64) && "Unsupported size");
+    return Size == 64 ? RTLIB::MUL_F64 : RTLIB::MUL_F32;
+  case TargetOpcode::G_FDIV:
+    assert((Size == 32 || Size == 64) && "Unsupported size");
+    return Size == 64 ? RTLIB::DIV_F64 : RTLIB::DIV_F32;
   case TargetOpcode::G_FREM:
     return Size == 64 ? RTLIB::REM_F64 : RTLIB::REM_F32;
   case TargetOpcode::G_FPOW:
@@ -131,7 +136,7 @@ LegalizerHelper::LegalizeResult
 LegalizerHelper::libcall(MachineInstr &MI) {
   LLT LLTy = MRI.getType(MI.getOperand(0).getReg());
   unsigned Size = LLTy.getSizeInBits();
-  auto &Ctx = MIRBuilder.getMF().getFunction()->getContext();
+  auto &Ctx = MIRBuilder.getMF().getFunction().getContext();
 
   MIRBuilder.setInstr(MI);
 
@@ -150,6 +155,8 @@ LegalizerHelper::libcall(MachineInstr &MI) {
   }
   case TargetOpcode::G_FADD:
   case TargetOpcode::G_FSUB:
+  case TargetOpcode::G_FMUL:
+  case TargetOpcode::G_FDIV:
   case TargetOpcode::G_FPOW:
   case TargetOpcode::G_FREM: {
     Type *HLTy = Size == 64 ? Type::getDoubleTy(Ctx) : Type::getFloatTy(Ctx);
@@ -403,7 +410,7 @@ LegalizerHelper::LegalizeResult LegalizerHelper::narrowScalar(MachineInstr &MI,
       return UnableToLegalize;
     int NumParts = SizeOp0 / NarrowSize;
     const APInt &Cst = MI.getOperand(1).getCImm()->getValue();
-    LLVMContext &Ctx = MIRBuilder.getMF().getFunction()->getContext();
+    LLVMContext &Ctx = MIRBuilder.getMF().getFunction().getContext();
 
     SmallVector<unsigned, 2> DstRegs;
     for (int i = 0; i < NumParts; ++i) {
@@ -806,7 +813,21 @@ LegalizerHelper::lower(MachineInstr &MI, unsigned TypeIdx, LLT Ty) {
 
     unsigned Zero = MRI.createGenericVirtualRegister(Ty);
     MIRBuilder.buildConstant(Zero, 0);
-    MIRBuilder.buildICmp(CmpInst::ICMP_NE, Overflow, HiPart, Zero);
+
+    // For *signed* multiply, overflow is detected by checking:
+    // (hi != (lo >> bitwidth-1))
+    if (Opcode == TargetOpcode::G_SMULH) {
+      unsigned Shifted = MRI.createGenericVirtualRegister(Ty);
+      unsigned ShiftAmt = MRI.createGenericVirtualRegister(Ty);
+      MIRBuilder.buildConstant(ShiftAmt, Ty.getSizeInBits() - 1);
+      MIRBuilder.buildInstr(TargetOpcode::G_ASHR)
+        .addDef(Shifted)
+        .addUse(Res)
+        .addUse(ShiftAmt);
+      MIRBuilder.buildICmp(CmpInst::ICMP_NE, Overflow, HiPart, Shifted);
+    } else {
+      MIRBuilder.buildICmp(CmpInst::ICMP_NE, Overflow, HiPart, Zero);
+    }
     MI.eraseFromParent();
     return Legalized;
   }
@@ -817,7 +838,7 @@ LegalizerHelper::lower(MachineInstr &MI, unsigned TypeIdx, LLT Ty) {
       return UnableToLegalize;
     unsigned Res = MI.getOperand(0).getReg();
     Type *ZeroTy;
-    LLVMContext &Ctx = MIRBuilder.getMF().getFunction()->getContext();
+    LLVMContext &Ctx = MIRBuilder.getMF().getFunction().getContext();
     switch (Ty.getSizeInBits()) {
     case 16:
       ZeroTy = Type::getHalfTy(Ctx);
@@ -827,6 +848,9 @@ LegalizerHelper::lower(MachineInstr &MI, unsigned TypeIdx, LLT Ty) {
       break;
     case 64:
       ZeroTy = Type::getDoubleTy(Ctx);
+      break;
+    case 128:
+      ZeroTy = Type::getFP128Ty(Ctx);
       break;
     default:
       llvm_unreachable("unexpected floating-point type");
@@ -857,6 +881,18 @@ LegalizerHelper::lower(MachineInstr &MI, unsigned TypeIdx, LLT Ty) {
         .addDef(Res)
         .addUse(LHS)
         .addUse(Neg);
+    MI.eraseFromParent();
+    return Legalized;
+  }
+  case TargetOpcode::G_ATOMIC_CMPXCHG_WITH_SUCCESS: {
+    unsigned OldValRes = MI.getOperand(0).getReg();
+    unsigned SuccessRes = MI.getOperand(1).getReg();
+    unsigned Addr = MI.getOperand(2).getReg();
+    unsigned CmpVal = MI.getOperand(3).getReg();
+    unsigned NewVal = MI.getOperand(4).getReg();
+    MIRBuilder.buildAtomicCmpXchg(OldValRes, Addr, CmpVal, NewVal,
+                                  **MI.memoperands_begin());
+    MIRBuilder.buildICmp(CmpInst::ICMP_EQ, SuccessRes, OldValRes, CmpVal);
     MI.eraseFromParent();
     return Legalized;
   }

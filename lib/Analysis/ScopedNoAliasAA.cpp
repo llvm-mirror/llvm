@@ -48,7 +48,7 @@ using namespace llvm;
 // can also be achieved by stripping the associated metadata tags from IR, but
 // this option is sometimes more convenient.
 static cl::opt<bool> EnableScopedNoAlias("enable-scoped-noalias",
-                                         cl::init(true));
+                                         cl::init(true), cl::Hidden);
 
 namespace {
 
@@ -102,12 +102,12 @@ ModRefInfo ScopedNoAliasAAResult::getModRefInfo(ImmutableCallSite CS,
 
   if (!mayAliasInScopes(Loc.AATags.Scope, CS.getInstruction()->getMetadata(
                                               LLVMContext::MD_noalias)))
-    return MRI_NoModRef;
+    return ModRefInfo::NoModRef;
 
   if (!mayAliasInScopes(
           CS.getInstruction()->getMetadata(LLVMContext::MD_alias_scope),
           Loc.AATags.NoAlias))
-    return MRI_NoModRef;
+    return ModRefInfo::NoModRef;
 
   return AAResultBase::getModRefInfo(CS, Loc);
 }
@@ -120,12 +120,12 @@ ModRefInfo ScopedNoAliasAAResult::getModRefInfo(ImmutableCallSite CS1,
   if (!mayAliasInScopes(
           CS1.getInstruction()->getMetadata(LLVMContext::MD_alias_scope),
           CS2.getInstruction()->getMetadata(LLVMContext::MD_noalias)))
-    return MRI_NoModRef;
+    return ModRefInfo::NoModRef;
 
   if (!mayAliasInScopes(
           CS2.getInstruction()->getMetadata(LLVMContext::MD_alias_scope),
           CS1.getInstruction()->getMetadata(LLVMContext::MD_noalias)))
-    return MRI_NoModRef;
+    return ModRefInfo::NoModRef;
 
   return AAResultBase::getModRefInfo(CS1, CS2);
 }

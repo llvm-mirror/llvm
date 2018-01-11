@@ -146,10 +146,9 @@ public:
 };
 } // end anonymous namespace
 
-TargetIRAnalysis WebAssemblyTargetMachine::getTargetIRAnalysis() {
-  return TargetIRAnalysis([this](const Function &F) {
-    return TargetTransformInfo(WebAssemblyTTIImpl(this, F));
-  });
+TargetTransformInfo
+WebAssemblyTargetMachine::getTargetTransformInfo(const Function &F) {
+  return TargetTransformInfo(WebAssemblyTTIImpl(this, F));
 }
 
 TargetPassConfig *
@@ -174,6 +173,9 @@ void WebAssemblyPassConfig::addIRPasses() {
     // Expand some atomic operations. WebAssemblyTargetLowering has hooks which
     // control specifically what gets lowered.
     addPass(createAtomicExpandPass());
+
+  // Lower .llvm.global_dtors into .llvm_global_ctors with __cxa_atexit calls.
+  addPass(createWebAssemblyLowerGlobalDtors());
 
   // Fix function bitcasts, as WebAssembly requires caller and callee signatures
   // to match.

@@ -1,5 +1,5 @@
-; RUN: llc -march=amdgcn -mcpu=verde -amdgpu-early-ifcvt=0 -machine-sink-split-probability-threshold=0 -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=SI %s
-; RUN: llc -march=amdgcn -mcpu=tonga -mattr=-flat-for-global -amdgpu-early-ifcvt=0 -machine-sink-split-probability-threshold=0 -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=VI %s
+; RUN: llc -march=amdgcn -mcpu=verde -amdgpu-early-ifcvt=0 -machine-sink-split-probability-threshold=0 -verify-machineinstrs < %s | FileCheck -enable-var-scope -check-prefix=GCN -check-prefix=SI %s
+; RUN: llc -march=amdgcn -mcpu=tonga -mattr=-flat-for-global -amdgpu-early-ifcvt=0 -machine-sink-split-probability-threshold=0 -verify-machineinstrs < %s | FileCheck -enable-var-scope -check-prefix=GCN -check-prefix=VI %s
 
 ; GCN-LABEL: {{^}}uniform_if_scc:
 ; GCN-DAG: s_cmp_eq_u32 s{{[0-9]+}}, 0
@@ -401,7 +401,7 @@ exit:
 ; GCN: s_cmp_lt_i32 [[COND]], 1
 ; GCN: s_cbranch_scc1 BB[[FNNUM:[0-9]+]]_3
 
-; GCN: BB#1:
+; GCN: %bb.1:
 ; GCN-NOT: cmp
 ; GCN: buffer_load_dword
 ; GCN: buffer_store_dword
@@ -502,7 +502,7 @@ done:
 ; GCN: s_mov_b32 [[S_VAL]], 1
 
 ; GCN: [[IF_LABEL]]:
-; GCN: v_mov_b32_e32 [[V_VAL]], [[S_VAL]]
+; GCN: v_mov_b32_e32 [[V_VAL:v[0-9]+]], [[S_VAL]]
 ; GCN: buffer_store_dword [[V_VAL]]
 define amdgpu_kernel void @uniform_if_scc_i64_sgt(i64 %cond, i32 addrspace(1)* %out) {
 entry:
@@ -560,7 +560,7 @@ done:
 }
 
 ; GCN-LABEL: {{^}}move_to_valu_vgpr_operand_phi:
-; GCN: v_add_i32_e32
+; GCN: v_add_{{[iu]}}32_e32
 ; GCN: ds_write_b32
 define void @move_to_valu_vgpr_operand_phi(i32 addrspace(3)* %out) {
 bb0:

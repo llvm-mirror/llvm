@@ -22,6 +22,9 @@
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetLowering.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/Function.h"
 #include "llvm/MC/LaneBitmask.h"
 #include "llvm/MC/MCInstrDesc.h"
@@ -29,9 +32,6 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetLowering.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -247,7 +247,7 @@ raw_ostream &operator<< (raw_ostream &OS,
     if (T != MI.operands_end()) {
       OS << ' ';
       if (T->isMBB())
-        OS << "BB#" << T->getMBB()->getNumber();
+        OS << printMBBReference(*T->getMBB());
       else if (T->isGlobal())
         OS << T->getGlobal()->getName();
       else if (T->isSymbol())
@@ -284,13 +284,13 @@ raw_ostream &operator<< (raw_ostream &OS,
   auto PrintBBs = [&OS] (std::vector<int> Ns) -> void {
     unsigned N = Ns.size();
     for (int I : Ns) {
-      OS << "BB#" << I;
+      OS << "%bb." << I;
       if (--N)
         OS << ", ";
     }
   };
 
-  OS << Print<NodeId>(P.Obj.Id, P.G) << ": --- BB#" << BB->getNumber()
+  OS << Print<NodeId>(P.Obj.Id, P.G) << ": --- " << printMBBReference(*BB)
      << " --- preds(" << NP << "): ";
   for (MachineBasicBlock *B : BB->predecessors())
     Ns.push_back(B->getNumber());
@@ -766,7 +766,7 @@ unsigned DataFlowGraph::DefStack::nextDown(unsigned P) const {
 
 RegisterSet DataFlowGraph::getLandingPadLiveIns() const {
   RegisterSet LR;
-  const Function &F = *MF.getFunction();
+  const Function &F = MF.getFunction();
   const Constant *PF = F.hasPersonalityFn() ? F.getPersonalityFn()
                                             : nullptr;
   const TargetLowering &TLI = *MF.getSubtarget().getTargetLowering();
@@ -1123,8 +1123,8 @@ void DataFlowGraph::pushDefs(NodeAddr<InstrNode*> IA, DefStackMap &DefM) {
     if (!Defined.insert(RR.Reg).second) {
       MachineInstr *MI = NodeAddr<StmtNode*>(IA).Addr->getCode();
       dbgs() << "Multiple definitions of register: "
-             << Print<RegisterRef>(RR, *this) << " in\n  " << *MI
-             << "in BB#" << MI->getParent()->getNumber() << '\n';
+             << Print<RegisterRef>(RR, *this) << " in\n  " << *MI << "in "
+             << printMBBReference(*MI->getParent()) << '\n';
       llvm_unreachable(nullptr);
     }
 #endif

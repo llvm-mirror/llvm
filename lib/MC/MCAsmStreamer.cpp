@@ -22,17 +22,14 @@
 #include "llvm/MC/MCInstPrinter.h"
 #include "llvm/MC/MCObjectFileInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
-#include "llvm/MC/MCSectionCOFF.h"
 #include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCStreamer.h"
-#include "llvm/MC/MCSymbolELF.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/LEB128.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/Path.h"
-#include "llvm/Support/SourceMgr.h"
 #include <cctype>
 
 using namespace llvm;
@@ -140,6 +137,8 @@ public:
   void EmitDataRegion(MCDataRegionType Kind) override;
   void EmitVersionMin(MCVersionMinType Kind, unsigned Major, unsigned Minor,
                       unsigned Update) override;
+  void EmitBuildVersion(unsigned Platform, unsigned Major, unsigned Minor,
+                        unsigned Update) override;
   void EmitThumbFunc(MCSymbol *Func) override;
 
   void EmitAssignment(MCSymbol *Symbol, const MCExpr *Value) override;
@@ -406,9 +405,13 @@ void MCAsmStreamer::emitExplicitComments() {
 void MCAsmStreamer::ChangeSection(MCSection *Section,
                                   const MCExpr *Subsection) {
   assert(Section && "Cannot switch to a null section!");
-  Section->PrintSwitchToSection(
-      *MAI, getContext().getObjectFileInfo()->getTargetTriple(), OS,
-      Subsection);
+  if (MCTargetStreamer *TS = getTargetStreamer()) {
+    TS->changeSection(getCurrentSectionOnly(), Section, Subsection, OS);
+  } else {
+    Section->PrintSwitchToSection(
+        *MAI, getContext().getObjectFileInfo()->getTargetTriple(), OS,
+        Subsection);
+  }
 }
 
 void MCAsmStreamer::EmitLabel(MCSymbol *Symbol, SMLoc Loc) {
@@ -474,15 +477,39 @@ void MCAsmStreamer::EmitDataRegion(MCDataRegionType Kind) {
   EmitEOL();
 }
 
-void MCAsmStreamer::EmitVersionMin(MCVersionMinType Kind, unsigned Major,
-                                   unsigned Minor, unsigned Update) {
-  switch (Kind) {
-  case MCVM_WatchOSVersionMin:    OS << "\t.watchos_version_min"; break;
-  case MCVM_TvOSVersionMin:       OS << "\t.tvos_version_min"; break;
-  case MCVM_IOSVersionMin:        OS << "\t.ios_version_min"; break;
-  case MCVM_OSXVersionMin:        OS << "\t.macosx_version_min"; break;
+static const char *getVersionMinDirective(MCVersionMinType Type) {
+  switch (Type) {
+  case MCVM_WatchOSVersionMin: return ".watchos_version_min";
+  case MCVM_TvOSVersionMin:    return ".tvos_version_min";
+  case MCVM_IOSVersionMin:     return ".ios_version_min";
+  case MCVM_OSXVersionMin:     return ".macosx_version_min";
   }
-  OS << " " << Major << ", " << Minor;
+  llvm_unreachable("Invalid MC version min type");
+}
+
+void MCAsmStreamer::EmitVersionMin(MCVersionMinType Type, unsigned Major,
+                                   unsigned Minor, unsigned Update) {
+  OS << '\t' << getVersionMinDirective(Type) << ' ' << Major << ", " << Minor;
+  if (Update)
+    OS << ", " << Update;
+  EmitEOL();
+}
+
+static const char *getPlatformName(MachO::PlatformType Type) {
+  switch (Type) {
+  case MachO::PLATFORM_MACOS:    return "macos";
+  case MachO::PLATFORM_IOS:      return "ios";
+  case MachO::PLATFORM_TVOS:     return "tvos";
+  case MachO::PLATFORM_WATCHOS:  return "watchos";
+  case MachO::PLATFORM_BRIDGEOS: return "bridgeos";
+  }
+  llvm_unreachable("Invalid Mach-O platform type");
+}
+
+void MCAsmStreamer::EmitBuildVersion(unsigned Platform, unsigned Major,
+                                     unsigned Minor, unsigned Update) {
+  const char *PlatformName = getPlatformName((MachO::PlatformType)Platform);
+  OS << "\t.build_version " << PlatformName << ", " << Major << ", " << Minor;
   if (Update)
     OS << ", " << Update;
   EmitEOL();
@@ -773,10 +800,15 @@ void MCAsmStreamer::EmitBytes(StringRef Data) {
          "Cannot emit contents before setting section!");
   if (Data.empty()) return;
 
-  if (Data.size() == 1) {
-    OS << MAI->getData8bitsDirective();
-    OS << (unsigned)(unsigned char)Data[0];
-    EmitEOL();
+  // If only single byte is provided or no ascii or asciz directives is
+  // supported, emit as vector of 8bits data.
+  if (Data.size() == 1 ||
+      !(MAI->getAscizDirective() || MAI->getAsciiDirective())) {
+    const char *Directive = MAI->getData8bitsDirective();
+    for (const unsigned char C : Data.bytes()) {
+      OS << Directive << (unsigned)C;
+      EmitEOL();
+    }
     return;
   }
 
@@ -861,8 +893,12 @@ void MCAsmStreamer::EmitValueImpl(const MCExpr *Value, unsigned Size,
 
   assert(Directive && "Invalid size for machine code value!");
   OS << Directive;
-  Value->print(OS, MAI);
-  EmitEOL();
+  if (MCTargetStreamer *TS = getTargetStreamer()) {
+    TS->emitValue(Value);
+  } else {
+    Value->print(OS, MAI);
+    EmitEOL();
+  }
 }
 
 void MCAsmStreamer::EmitULEB128Value(const MCExpr *Value) {
@@ -1074,13 +1110,19 @@ unsigned MCAsmStreamer::EmitDwarfFileDirective(unsigned FileNo,
     }
   }
 
-  OS << "\t.file\t" << FileNo << ' ';
+  SmallString<128> Str;
+  raw_svector_ostream OS1(Str);
+  OS1 << "\t.file\t" << FileNo << ' ';
   if (!Directory.empty()) {
-    PrintQuotedString(Directory, OS);
-    OS << ' ';
+    PrintQuotedString(Directory, OS1);
+    OS1 << ' ';
   }
-  PrintQuotedString(Filename, OS);
-  EmitEOL();
+  PrintQuotedString(Filename, OS1);
+  if (MCTargetStreamer *TS = getTargetStreamer()) {
+    TS->emitDwarfFileDirective(OS1.str());
+  } else {
+    EmitRawText(OS1.str());
+  }
 
   return FileNo;
 }
@@ -1296,12 +1338,17 @@ void MCAsmStreamer::EmitCFIEndProcImpl(MCDwarfFrameInfo &Frame) {
 
 void MCAsmStreamer::EmitRegisterName(int64_t Register) {
   if (!MAI->useDwarfRegNumForCFI()) {
+    // User .cfi_* directives can use arbitrary DWARF register numbers, not
+    // just ones that map to LLVM register numbers and have known names.
+    // Fall back to using the original number directly if no name is known.
     const MCRegisterInfo *MRI = getContext().getRegisterInfo();
-    unsigned LLVMRegister = MRI->getLLVMRegNum(Register, true);
-    InstPrinter->printRegName(OS, LLVMRegister);
-  } else {
-    OS << Register;
+    int LLVMRegister = MRI->getLLVMRegNumFromEH(Register);
+    if (LLVMRegister != -1) {
+      InstPrinter->printRegName(OS, LLVMRegister);
+      return;
+    }
   }
+  OS << Register;
 }
 
 void MCAsmStreamer::EmitCFIDefCfa(int64_t Register, int64_t Offset) {

@@ -32,9 +32,10 @@ def GetLo8XForm : SDNodeXForm<imm, [{
 // PIC base construction.  This expands to code that looks like this:
 //     call  $next_inst
 //     popl %destreg"
-let hasSideEffects = 0, isNotDuplicable = 1, Uses = [ESP] in
+let hasSideEffects = 0, isNotDuplicable = 1, Uses = [ESP, SSP],
+    SchedRW = [WriteJump] in
   def MOVPC32r : Ii32<0xE8, Pseudo, (outs GR32:$reg), (ins i32imm:$label),
-                      "", []>;
+                      "", [], IIC_CALL_RI>;
 
 
 // ADJCALLSTACKDOWN/UP implicitly use/def ESP because they may be expanded into
@@ -42,16 +43,15 @@ let hasSideEffects = 0, isNotDuplicable = 1, Uses = [ESP] in
 // pointer before prolog-epilog rewriting occurs.
 // Pessimistically assume ADJCALLSTACKDOWN / ADJCALLSTACKUP will become
 // sub / add which can clobber EFLAGS.
-let Defs = [ESP, EFLAGS], Uses = [ESP] in {
+let Defs = [ESP, EFLAGS, SSP], Uses = [ESP, SSP], SchedRW = [WriteALU] in {
 def ADJCALLSTACKDOWN32 : I<0, Pseudo, (outs),
                            (ins i32imm:$amt1, i32imm:$amt2, i32imm:$amt3),
-                           "#ADJCALLSTACKDOWN",
-                           []>,
-                          Requires<[NotLP64]>;
+                           "#ADJCALLSTACKDOWN", [], IIC_ALU_NONMEM>,
+                           Requires<[NotLP64]>;
 def ADJCALLSTACKUP32   : I<0, Pseudo, (outs), (ins i32imm:$amt1, i32imm:$amt2),
                            "#ADJCALLSTACKUP",
-                           [(X86callseq_end timm:$amt1, timm:$amt2)]>,
-                          Requires<[NotLP64]>;
+                           [(X86callseq_end timm:$amt1, timm:$amt2)],
+                           IIC_ALU_NONMEM>, Requires<[NotLP64]>;
 }
 def : Pat<(X86callseq_start timm:$amt1, timm:$amt2),
        (ADJCALLSTACKDOWN32 i32imm:$amt1, i32imm:$amt2, 0)>, Requires<[NotLP64]>;
@@ -62,20 +62,20 @@ def : Pat<(X86callseq_start timm:$amt1, timm:$amt2),
 // pointer before prolog-epilog rewriting occurs.
 // Pessimistically assume ADJCALLSTACKDOWN / ADJCALLSTACKUP will become
 // sub / add which can clobber EFLAGS.
-let Defs = [RSP, EFLAGS], Uses = [RSP] in {
+let Defs = [RSP, EFLAGS, SSP], Uses = [RSP, SSP], SchedRW = [WriteALU] in {
 def ADJCALLSTACKDOWN64 : I<0, Pseudo, (outs),
                            (ins i32imm:$amt1, i32imm:$amt2, i32imm:$amt3),
                            "#ADJCALLSTACKDOWN",
-                           []>,
-                          Requires<[IsLP64]>;
+                           [], IIC_ALU_NONMEM>, Requires<[IsLP64]>;
 def ADJCALLSTACKUP64   : I<0, Pseudo, (outs), (ins i32imm:$amt1, i32imm:$amt2),
                            "#ADJCALLSTACKUP",
-                           [(X86callseq_end timm:$amt1, timm:$amt2)]>,
-                          Requires<[IsLP64]>;
+                           [(X86callseq_end timm:$amt1, timm:$amt2)],
+                           IIC_ALU_NONMEM>, Requires<[IsLP64]>;
 }
 def : Pat<(X86callseq_start timm:$amt1, timm:$amt2),
         (ADJCALLSTACKDOWN64 i32imm:$amt1, i32imm:$amt2, 0)>, Requires<[IsLP64]>;
 
+let SchedRW = [WriteSystem] in {
 
 // x86-64 va_start lowering magic.
 let usesCustomInserter = 1, Defs = [EFLAGS] in {
@@ -141,7 +141,19 @@ def WIN_ALLOCA_64 : I<0, Pseudo, (outs), (ins GR64:$size),
                      "# dynamic stack allocation",
                      [(X86WinAlloca GR64:$size)]>,
                      Requires<[In64BitMode]>;
+} // SchedRW
 
+// These instructions XOR the frame pointer into a GPR. They are used in some
+// stack protection schemes. These are post-RA pseudos because we only know the
+// frame register after register allocation.
+let Constraints = "$src = $dst", isPseudo = 1, Defs = [EFLAGS] in {
+  def XOR32_FP : I<0, Pseudo, (outs GR32:$dst), (ins GR32:$src),
+                  "xorl\t$$FP, $src", [], IIC_BIN_NONMEM>,
+                  Requires<[NotLP64]>, Sched<[WriteALU]>;
+  def XOR64_FP : I<0, Pseudo, (outs GR64:$dst), (ins GR64:$src),
+                  "xorq\t$$FP $src", [], IIC_BIN_NONMEM>,
+                  Requires<[In64BitMode]>, Sched<[WriteALU]>;
+}
 
 //===----------------------------------------------------------------------===//
 // EH Pseudo Instructions
@@ -207,17 +219,17 @@ let hasSideEffects = 1, isBarrier = 1, isCodeGenOnly = 1,
                           Requires<[In64BitMode]>;
   }
 }
-} // SchedRW
 
 let isBranch = 1, isTerminator = 1, isCodeGenOnly = 1 in {
   def EH_SjLj_Setup : I<0, Pseudo, (outs), (ins brtarget:$dst),
                         "#EH_SjLj_Setup\t$dst", []>;
 }
+} // SchedRW
 
 //===----------------------------------------------------------------------===//
 // Pseudo instructions used by unwind info.
 //
-let isPseudo = 1 in {
+let isPseudo = 1, SchedRW = [WriteSystem] in {
   def SEH_PushReg : I<0, Pseudo, (outs), (ins i32imm:$reg),
                             "#SEH_PushReg $reg", []>;
   def SEH_SaveReg : I<0, Pseudo, (outs), (ins i32imm:$reg, i32imm:$dst),
@@ -243,15 +255,15 @@ let isPseudo = 1 in {
 // This is lowered into a RET instruction by MCInstLower.  We need
 // this so that we don't have to have a MachineBasicBlock which ends
 // with a RET and also has successors.
-let isPseudo = 1 in {
+let isPseudo = 1, SchedRW = [WriteJumpLd] in {
 def MORESTACK_RET: I<0, Pseudo, (outs), (ins),
-                          "", []>;
+                          "", [], IIC_RET>;
 
 // This instruction is lowered to a RET followed by a MOV.  The two
 // instructions are not generated on a higher level since then the
 // verifier sees a MachineBasicBlock ending with a non-terminator.
 def MORESTACK_RET_RESTORE_R10 : I<0, Pseudo, (outs), (ins),
-                                  "", []>;
+                                  "", [], IIC_RET>;
 }
 
 //===----------------------------------------------------------------------===//
@@ -275,37 +287,40 @@ def : Pat<(i64 0), (SUBREG_TO_REG (i64 0), (MOV32r0), sub_32bit)>;
 
 let Predicates = [OptForSize, Not64BitMode],
     AddedComplexity = 10 in {
+  let SchedRW = [WriteALU] in {
   // Pseudo instructions for materializing 1 and -1 using XOR+INC/DEC,
   // which only require 3 bytes compared to MOV32ri which requires 5.
   let Defs = [EFLAGS], isReMaterializable = 1, isPseudo = 1 in {
     def MOV32r1 : I<0, Pseudo, (outs GR32:$dst), (ins), "",
-                        [(set GR32:$dst, 1)]>;
+                        [(set GR32:$dst, 1)], IIC_ALU_NONMEM>;
     def MOV32r_1 : I<0, Pseudo, (outs GR32:$dst), (ins), "",
-                        [(set GR32:$dst, -1)]>;
+                        [(set GR32:$dst, -1)], IIC_ALU_NONMEM>;
   }
+  } // SchedRW
 
   // MOV16ri is 4 bytes, so the instructions above are smaller.
   def : Pat<(i16 1), (EXTRACT_SUBREG (MOV32r1), sub_16bit)>;
   def : Pat<(i16 -1), (EXTRACT_SUBREG (MOV32r_1), sub_16bit)>;
 }
 
-let isReMaterializable = 1, isPseudo = 1, AddedComplexity = 5 in {
+let isReMaterializable = 1, isPseudo = 1, AddedComplexity = 5,
+    SchedRW = [WriteALU] in {
 // AddedComplexity higher than MOV64ri but lower than MOV32r0 and MOV32r1.
-// FIXME: Add itinerary class and Schedule.
 def MOV32ImmSExti8 : I<0, Pseudo, (outs GR32:$dst), (ins i32i8imm:$src), "",
-                       [(set GR32:$dst, i32immSExt8:$src)]>,
-                     Requires<[OptForMinSize, NotWin64WithoutFP]>;
+                       [(set GR32:$dst, i32immSExt8:$src)], IIC_ALU_NONMEM>,
+                       Requires<[OptForMinSize, NotWin64WithoutFP]>;
 def MOV64ImmSExti8 : I<0, Pseudo, (outs GR64:$dst), (ins i64i8imm:$src), "",
-                       [(set GR64:$dst, i64immSExt8:$src)]>,
-                     Requires<[OptForMinSize, NotWin64WithoutFP]>;
+                       [(set GR64:$dst, i64immSExt8:$src)], IIC_ALU_NONMEM>,
+                       Requires<[OptForMinSize, NotWin64WithoutFP]>;
 }
 
 // Materialize i64 constant where top 32-bits are zero. This could theoretically
 // use MOV32ri with a SUBREG_TO_REG to represent the zero-extension, however
 // that would make it more difficult to rematerialize.
 let isReMaterializable = 1, isAsCheapAsAMove = 1,
-    isPseudo = 1, hasSideEffects = 0 in
-def MOV32ri64 : I<0, Pseudo, (outs GR32:$dst), (ins i64i32imm:$src), "", []>;
+    isPseudo = 1, hasSideEffects = 0, SchedRW = [WriteALU] in
+def MOV32ri64 : I<0, Pseudo, (outs GR32:$dst), (ins i64i32imm:$src), "", [],
+                  IIC_ALU_NONMEM>;
 
 // This 64-bit pseudo-move can be used for both a 64-bit constant that is
 // actually the zero-extension of a 32-bit constant and for labels in the
@@ -448,6 +463,7 @@ let Defs = [RCX,RDI], isCodeGenOnly = 1 in {
 //===----------------------------------------------------------------------===//
 // Thread Local Storage Instructions
 //
+let SchedRW = [WriteSystem] in {
 
 // ELF TLS Support
 // All calls clobber the non-callee saved registers. ESP is marked as
@@ -458,7 +474,7 @@ let Defs = [EAX, ECX, EDX, FP0, FP1, FP2, FP3, FP4, FP5, FP6, FP7,
             MM0, MM1, MM2, MM3, MM4, MM5, MM6, MM7,
             XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7,
             XMM8, XMM9, XMM10, XMM11, XMM12, XMM13, XMM14, XMM15, EFLAGS],
-    usesCustomInserter = 1, Uses = [ESP] in {
+    usesCustomInserter = 1, Uses = [ESP, SSP] in {
 def TLS_addr32 : I<0, Pseudo, (outs), (ins i32mem:$sym),
                   "# TLS_addr32",
                   [(X86tlsaddr tls32addr:$sym)]>,
@@ -478,7 +494,7 @@ let Defs = [RAX, RCX, RDX, RSI, RDI, R8, R9, R10, R11,
             MM0, MM1, MM2, MM3, MM4, MM5, MM6, MM7,
             XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7,
             XMM8, XMM9, XMM10, XMM11, XMM12, XMM13, XMM14, XMM15, EFLAGS],
-    usesCustomInserter = 1, Uses = [RSP] in {
+    usesCustomInserter = 1, Uses = [RSP, SSP] in {
 def TLS_addr64 : I<0, Pseudo, (outs), (ins i64mem:$sym),
                    "# TLS_addr64",
                   [(X86tlsaddr tls64addr:$sym)]>,
@@ -494,7 +510,7 @@ def TLS_base_addr64 : I<0, Pseudo, (outs), (ins i64mem:$sym),
 // address of the variable is in %eax.  %ecx is trashed during the function
 // call.  All other registers are preserved.
 let Defs = [EAX, ECX, EFLAGS],
-    Uses = [ESP],
+    Uses = [ESP, SSP],
     usesCustomInserter = 1 in
 def TLSCall_32 : I<0, Pseudo, (outs), (ins i32mem:$sym),
                 "# TLSCall_32",
@@ -507,13 +523,13 @@ def TLSCall_32 : I<0, Pseudo, (outs), (ins i32mem:$sym),
 // On return the address of the variable is in %rax.  All other
 // registers are preserved.
 let Defs = [RAX, EFLAGS],
-    Uses = [RSP],
+    Uses = [RSP, SSP],
     usesCustomInserter = 1 in
 def TLSCall_64 : I<0, Pseudo, (outs), (ins i64mem:$sym),
                   "# TLSCall_64",
                   [(X86TLSCall addr:$sym)]>,
                   Requires<[In64BitMode]>;
-
+} // SchedRW
 
 //===----------------------------------------------------------------------===//
 // Conditional Move Pseudo Instructions
@@ -528,7 +544,7 @@ multiclass CMOVrr_PSEUDO<RegisterClass RC, ValueType VT> {
                                                 EFLAGS)))]>;
 }
 
-let usesCustomInserter = 1, Uses = [EFLAGS] in {
+let usesCustomInserter = 1, hasNoSchedulingInfo = 1, Uses = [EFLAGS] in {
   // X86 doesn't have 8-bit conditional moves. Use a customInserter to
   // emit control flow. An alternative to this is to mark i8 SELECT as Promote,
   // however that requires promoting the operands, and can induce additional
@@ -566,7 +582,7 @@ let usesCustomInserter = 1, Uses = [EFLAGS] in {
   defm _V16I1  : CMOVrr_PSEUDO<VK16, v16i1>;
   defm _V32I1  : CMOVrr_PSEUDO<VK32, v32i1>;
   defm _V64I1  : CMOVrr_PSEUDO<VK64, v64i1>;
-} // usesCustomInserter = 1, Uses = [EFLAGS]
+} // usesCustomInserter = 1, hasNoSchedulingInfo = 1, Uses = [EFLAGS]
 
 //===----------------------------------------------------------------------===//
 // Normal-Instructions-With-Lock-Prefix Pseudo Instructions
@@ -789,7 +805,7 @@ defm LCMPXCHG8B : LCMPXCHG_UnOp<0xC7, MRM1m, "cmpxchg8b",
 // register and the register allocator will ignore any use/def of
 // it. In other words, the register will not fix the clobbering of
 // RBX that will happen when setting the arguments for the instrucion.
-// 
+//
 // Unlike the actual related instuction, we mark that this one
 // defines EBX (instead of using EBX).
 // The rationale is that we will define RBX during the expansion of
@@ -917,7 +933,7 @@ multiclass RELEASE_BINOP_MI<SDNode op> {
         [(atomic_store_64 addr:$dst, (op
             (atomic_load_64 addr:$dst), GR64:$src))]>;
 }
-let Defs = [EFLAGS] in {
+let Defs = [EFLAGS], SchedRW = [WriteMicrocoded] in {
   defm RELEASE_ADD : RELEASE_BINOP_MI<add>;
   defm RELEASE_AND : RELEASE_BINOP_MI<and>;
   defm RELEASE_OR  : RELEASE_BINOP_MI<or>;
@@ -930,20 +946,20 @@ let Defs = [EFLAGS] in {
 // FIXME: imm version.
 // FIXME: Version that doesn't clobber $src, using AVX's VADDSS.
 // FIXME: This could also handle SIMD operations with *ps and *pd instructions.
-let usesCustomInserter = 1 in {
+let usesCustomInserter = 1, SchedRW = [WriteMicrocoded] in {
 multiclass RELEASE_FP_BINOP_MI<SDNode op> {
     def NAME#32mr : I<0, Pseudo, (outs), (ins i32mem:$dst, FR32:$src),
         "#BINOP "#NAME#"32mr PSEUDO!",
         [(atomic_store_32 addr:$dst,
-	   (i32 (bitconvert (op
+           (i32 (bitconvert (op
              (f32 (bitconvert (i32 (atomic_load_32 addr:$dst)))),
-	      FR32:$src))))]>, Requires<[HasSSE1]>;
+          FR32:$src))))]>, Requires<[HasSSE1]>;
     def NAME#64mr : I<0, Pseudo, (outs), (ins i64mem:$dst, FR64:$src),
         "#BINOP "#NAME#"64mr PSEUDO!",
         [(atomic_store_64 addr:$dst,
-	   (i64 (bitconvert (op
+           (i64 (bitconvert (op
              (f64 (bitconvert (i64 (atomic_load_64 addr:$dst)))),
-	      FR64:$src))))]>, Requires<[HasSSE2]>;
+          FR64:$src))))]>, Requires<[HasSSE2]>;
 }
 defm RELEASE_FADD : RELEASE_FP_BINOP_MI<fadd>;
 // FIXME: Add fsub, fmul, fdiv, ...
@@ -964,7 +980,7 @@ multiclass RELEASE_UNOP<dag dag8, dag dag16, dag dag32, dag dag64> {
         [(atomic_store_64 addr:$dst, dag64)]>;
 }
 
-let Defs = [EFLAGS], Predicates = [UseIncDec] in {
+let Defs = [EFLAGS], Predicates = [UseIncDec], SchedRW = [WriteMicrocoded] in {
   defm RELEASE_INC : RELEASE_UNOP<
       (add (atomic_load_8  addr:$dst), (i8 1)),
       (add (atomic_load_16 addr:$dst), (i16 1)),
@@ -994,18 +1010,19 @@ defm RELEASE_NOT : RELEASE_UNOP<
     (not (atomic_load_64 addr:$dst))>;
 */
 
+let SchedRW = [WriteMicrocoded] in {
 def RELEASE_MOV8mi : I<0, Pseudo, (outs), (ins i8mem:$dst, i8imm:$src),
-			"#RELEASE_MOV8mi PSEUDO!",
-			[(atomic_store_8 addr:$dst, (i8 imm:$src))]>;
+            "#RELEASE_MOV8mi PSEUDO!",
+            [(atomic_store_8 addr:$dst, (i8 imm:$src))]>;
 def RELEASE_MOV16mi : I<0, Pseudo, (outs), (ins i16mem:$dst, i16imm:$src),
-			"#RELEASE_MOV16mi PSEUDO!",
-			[(atomic_store_16 addr:$dst, (i16 imm:$src))]>;
+            "#RELEASE_MOV16mi PSEUDO!",
+            [(atomic_store_16 addr:$dst, (i16 imm:$src))]>;
 def RELEASE_MOV32mi : I<0, Pseudo, (outs), (ins i32mem:$dst, i32imm:$src),
-			"#RELEASE_MOV32mi PSEUDO!",
-			[(atomic_store_32 addr:$dst, (i32 imm:$src))]>;
+            "#RELEASE_MOV32mi PSEUDO!",
+            [(atomic_store_32 addr:$dst, (i32 imm:$src))]>;
 def RELEASE_MOV64mi32 : I<0, Pseudo, (outs), (ins i64mem:$dst, i64i32imm:$src),
-			"#RELEASE_MOV64mi32 PSEUDO!",
-			[(atomic_store_64 addr:$dst, i64immSExt32:$src)]>;
+            "#RELEASE_MOV64mi32 PSEUDO!",
+            [(atomic_store_64 addr:$dst, i64immSExt32:$src)]>;
 
 def RELEASE_MOV8mr  : I<0, Pseudo, (outs), (ins i8mem :$dst, GR8 :$src),
                         "#RELEASE_MOV8mr PSEUDO!",
@@ -1032,6 +1049,7 @@ def ACQUIRE_MOV32rm : I<0, Pseudo, (outs GR32:$dst), (ins i32mem:$src),
 def ACQUIRE_MOV64rm : I<0, Pseudo, (outs GR64:$dst), (ins i64mem:$src),
                       "#ACQUIRE_MOV64rm PSEUDO!",
                       [(set GR64:$dst, (atomic_load_64 addr:$src))]>;
+} // SchedRW
 
 //===----------------------------------------------------------------------===//
 // DAG Pattern Matching Rules

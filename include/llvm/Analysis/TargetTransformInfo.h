@@ -586,6 +586,12 @@ public:
   /// \brief Return true if the hardware has a fast square-root instruction.
   bool haveFastSqrt(Type *Ty) const;
 
+  /// Return true if it is faster to check if a floating-point value is NaN
+  /// (or not-NaN) versus a comparison against a constant FP zero value.
+  /// Targets should override this if materializing a 0.0 for comparison is
+  /// generally as cheap as checking for ordered/unordered.
+  bool isFCmpOrdCheaperThanFCmpZero(Type *Ty) const;
+
   /// \brief Return the expected cost of supporting the floating point operation
   /// of the specified type.
   int getFPOpCost(Type *Ty) const;
@@ -856,12 +862,6 @@ public:
                                          unsigned SrcAlign,
                                          unsigned DestAlign) const;
 
-  /// \returns True if we want to test the new memcpy lowering functionality in
-  /// Transform/Utils.
-  /// Temporary. Will be removed once we move to the new functionality and
-  /// remove the old.
-  bool useWideIRMemcpyLoopLowering() const;
-
   /// \returns True if the two functions have compatible attributes for inlining
   /// purposes.
   bool areInlineCompatible(const Function *Caller,
@@ -1009,6 +1009,7 @@ public:
                                               bool *Fast) = 0;
   virtual PopcntSupportKind getPopcntSupport(unsigned IntTyWidthInBit) = 0;
   virtual bool haveFastSqrt(Type *Ty) = 0;
+  virtual bool isFCmpOrdCheaperThanFCmpZero(Type *Ty) = 0;
   virtual int getFPOpCost(Type *Ty) = 0;
   virtual int getIntImmCodeSizeCost(unsigned Opc, unsigned Idx, const APInt &Imm,
                                     Type *Ty) = 0;
@@ -1272,6 +1273,10 @@ public:
     return Impl.getPopcntSupport(IntTyWidthInBit);
   }
   bool haveFastSqrt(Type *Ty) override { return Impl.haveFastSqrt(Ty); }
+
+  bool isFCmpOrdCheaperThanFCmpZero(Type *Ty) override {
+    return Impl.isFCmpOrdCheaperThanFCmpZero(Ty);
+  }
 
   int getFPOpCost(Type *Ty) override { return Impl.getFPOpCost(Ty); }
 

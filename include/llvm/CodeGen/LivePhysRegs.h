@@ -20,11 +20,11 @@
 /// register.
 ///
 /// X86 Example:
-/// %YMM0<def> = ...
-/// %XMM0<def> = ... (Kills %XMM0, all %XMM0s sub-registers, and %YMM0)
+/// %ymm0 = ...
+/// %xmm0 = ... (Kills %xmm0, all %xmm0s sub-registers, and %ymm0)
 ///
-/// %YMM0<def> = ...
-/// %XMM0<def> = ..., %YMM0<imp-use> (%YMM0 and all its sub-registers are alive)
+/// %ymm0 = ...
+/// %xmm0 = ..., implicit %ymm0 (%ymm0 and all its sub-registers are alive)
 //===----------------------------------------------------------------------===//
 
 #ifndef LLVM_CODEGEN_LIVEPHYSREGS_H
@@ -32,8 +32,8 @@
 
 #include "llvm/ADT/SparseSet.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 #include <cassert>
 #include <utility>
 

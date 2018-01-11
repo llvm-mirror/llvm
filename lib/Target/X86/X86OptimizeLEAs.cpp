@@ -33,6 +33,8 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/TargetOpcodes.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/Function.h"
@@ -42,8 +44,6 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetOpcodes.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 #include <cassert>
 #include <cstdint>
 #include <iterator>
@@ -568,6 +568,7 @@ MachineInstr *OptimizeLEAPass::replaceDebugValue(MachineInstr &MI,
 
   if (AddrDispShift != 0)
     Expr = DIExpression::prepend(Expr, DIExpression::NoDeref, AddrDispShift,
+                                 DIExpression::NoDeref,
                                  DIExpression::WithStackValue);
 
   // Replace DBG_VALUE instruction with modified version.
@@ -671,7 +672,7 @@ bool OptimizeLEAPass::removeRedundantLEAs(MemOpMap &LEAs) {
 bool OptimizeLEAPass::runOnMachineFunction(MachineFunction &MF) {
   bool Changed = false;
 
-  if (DisableX86LEAOpt || skipFunction(*MF.getFunction()))
+  if (DisableX86LEAOpt || skipFunction(MF.getFunction()))
     return false;
 
   MRI = &MF.getRegInfo();
@@ -695,7 +696,7 @@ bool OptimizeLEAPass::runOnMachineFunction(MachineFunction &MF) {
 
     // Remove redundant address calculations. Do it only for -Os/-Oz since only
     // a code size gain is expected from this part of the pass.
-    if (MF.getFunction()->optForSize())
+    if (MF.getFunction().optForSize())
       Changed |= removeRedundantAddrCalc(LEAs);
   }
 

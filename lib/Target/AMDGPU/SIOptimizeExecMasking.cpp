@@ -10,7 +10,7 @@
 #include "AMDGPU.h"
 #include "AMDGPUSubtarget.h"
 #include "SIInstrInfo.h"
-#include "llvm/CodeGen/LiveIntervalAnalysis.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
@@ -205,7 +205,7 @@ static bool isLiveOut(const MachineBasicBlock &MBB, unsigned Reg) {
 }
 
 bool SIOptimizeExecMasking::runOnMachineFunction(MachineFunction &MF) {
-  if (skipFunction(*MF.getFunction()))
+  if (skipFunction(MF.getFunction()))
     return false;
 
   const SISubtarget &ST = MF.getSubtarget<SISubtarget>();
@@ -276,10 +276,12 @@ bool SIOptimizeExecMasking::runOnMachineFunction(MachineFunction &MF) {
         break;
       }
 
+      bool ReadsCopyFromExec = J->readsRegister(CopyFromExec, TRI);
+
       if (J->modifiesRegister(CopyToExec, TRI)) {
         if (SaveExecInst) {
           DEBUG(dbgs() << "Multiple instructions modify "
-                << PrintReg(CopyToExec, TRI) << '\n');
+                << printReg(CopyToExec, TRI) << '\n');
           SaveExecInst = nullptr;
           break;
         }
@@ -288,7 +290,7 @@ bool SIOptimizeExecMasking::runOnMachineFunction(MachineFunction &MF) {
         if (SaveExecOp == AMDGPU::INSTRUCTION_LIST_END)
           break;
 
-        if (J->readsRegister(CopyFromExec, TRI)) {
+        if (ReadsCopyFromExec) {
           SaveExecInst = &*J;
           DEBUG(dbgs() << "Found save exec op: " << *SaveExecInst << '\n');
           continue;
@@ -296,6 +298,18 @@ bool SIOptimizeExecMasking::runOnMachineFunction(MachineFunction &MF) {
           DEBUG(dbgs() << "Instruction does not read exec copy: " << *J << '\n');
           break;
         }
+      } else if (ReadsCopyFromExec && !SaveExecInst) {
+        // Make sure no other instruction is trying to use this copy, before it
+        // will be rewritten by the saveexec, i.e. hasOneUse. There may have
+        // been another use, such as an inserted spill. For example:
+        //
+        // %sgpr0_sgpr1 = COPY %exec
+        // spill %sgpr0_sgpr1
+        // %sgpr2_sgpr3 = S_AND_B64 %sgpr0_sgpr1
+        //
+        DEBUG(dbgs() << "Found second use of save inst candidate: "
+              << *J << '\n');
+        break;
       }
 
       if (SaveExecInst && J->readsRegister(CopyToExec, TRI)) {

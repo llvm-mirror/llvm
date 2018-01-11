@@ -17,8 +17,8 @@
 /// %vgpr0 = V_MOV_B32_e32 0.0
 /// if (...) {
 ///   %vgpr1 = ...
-///   %vgpr2 = WWM %vgpr1<kill>
-///   ... = %vgpr2<kill>
+///   %vgpr2 = WWM killed %vgpr1
+///   ... = killed %vgpr2
 ///   %vgpr0 = V_MOV_B32_e32 1.0
 /// }
 /// ... = %vgpr0
@@ -57,10 +57,10 @@
 #include "SIRegisterInfo.h"
 #include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/ADT/SparseBitVector.h"
-#include "llvm/CodeGen/LiveIntervalAnalysis.h"
+#include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/Passes.h"
-#include "llvm/Target/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 
 using namespace llvm;
 

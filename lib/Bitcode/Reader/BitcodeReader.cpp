@@ -1156,6 +1156,7 @@ static uint64_t getRawAttributeMask(Attribute::AttrKind Val) {
   case Attribute::WriteOnly:       return 1ULL << 53;
   case Attribute::Speculatable:    return 1ULL << 54;
   case Attribute::StrictFP:        return 1ULL << 55;
+  case Attribute::SanitizeHWAddress: return 1ULL << 56;
   case Attribute::Dereferenceable:
     llvm_unreachable("dereferenceable attribute not supported in raw format");
     break;
@@ -1368,6 +1369,8 @@ static Attribute::AttrKind getAttrFromCode(uint64_t Code) {
     return Attribute::StructRet;
   case bitc::ATTR_KIND_SANITIZE_ADDRESS:
     return Attribute::SanitizeAddress;
+  case bitc::ATTR_KIND_SANITIZE_HWADDRESS:
+    return Attribute::SanitizeHWAddress;
   case bitc::ATTR_KIND_SANITIZE_THREAD:
     return Attribute::SanitizeThread;
   case bitc::ATTR_KIND_SANITIZE_MEMORY:
@@ -1825,10 +1828,10 @@ Expected<Value *> BitcodeReader::recordValue(SmallVectorImpl<uint64_t> &Record,
   auto *GO = dyn_cast<GlobalObject>(V);
   if (GO) {
     if (GO->getComdat() == reinterpret_cast<Comdat *>(1)) {
-      if (TT.isOSBinFormatMachO())
-        GO->setComdat(nullptr);
-      else
+      if (TT.supportsCOMDAT())
         GO->setComdat(TheModule->getOrInsertComdat(V->getName()));
+      else
+        GO->setComdat(nullptr);
     }
   }
   return V;
@@ -5199,6 +5202,7 @@ Error ModuleSummaryIndexBitcodeReader::parseEntireSummary(unsigned ID) {
       if (!AliaseeInModule)
         return error("Alias expects aliasee summary to be parsed");
       AS->setAliasee(AliaseeInModule);
+      AS->setAliaseeGUID(AliaseeGUID);
 
       auto GUID = getValueInfoFromValueId(ValueID);
       AS->setOriginalName(GUID.second);
@@ -5285,9 +5289,8 @@ Error ModuleSummaryIndexBitcodeReader::parseEntireSummary(unsigned ID) {
           getValueInfoFromValueId(AliaseeValueId).first.getGUID();
       auto AliaseeInModule =
           TheIndex.findSummaryInModule(AliaseeGUID, AS->modulePath());
-      if (!AliaseeInModule)
-        return error("Alias expects aliasee summary to be parsed");
       AS->setAliasee(AliaseeInModule);
+      AS->setAliaseeGUID(AliaseeGUID);
 
       ValueInfo VI = getValueInfoFromValueId(ValueID).first;
       LastSeenGUID = VI.getGUID();

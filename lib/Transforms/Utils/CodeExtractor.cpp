@@ -78,7 +78,8 @@ AggregateArgsOpt("aggregate-extracted-args", cl::Hidden,
                  cl::desc("Aggregate arguments to code-extracted functions"));
 
 /// \brief Test whether a block is valid for extraction.
-bool CodeExtractor::isBlockValidForExtraction(const BasicBlock &BB) {
+bool CodeExtractor::isBlockValidForExtraction(const BasicBlock &BB,
+                                              bool AllowVarArgs) {
   // Landing pads must be in the function where they were inserted for cleanup.
   if (BB.isEHPad())
     return false;
@@ -110,14 +111,19 @@ bool CodeExtractor::isBlockValidForExtraction(const BasicBlock &BB) {
     }
   }
 
-  // Don't hoist code containing allocas, invokes, or vastarts.
+  // Don't hoist code containing allocas or invokes. If explicitly requested,
+  // allow vastart.
   for (BasicBlock::const_iterator I = BB.begin(), E = BB.end(); I != E; ++I) {
     if (isa<AllocaInst>(I) || isa<InvokeInst>(I))
       return false;
     if (const CallInst *CI = dyn_cast<CallInst>(I))
       if (const Function *F = CI->getCalledFunction())
-        if (F->getIntrinsicID() == Intrinsic::vastart)
-          return false;
+        if (F->getIntrinsicID() == Intrinsic::vastart) {
+          if (AllowVarArgs)
+            continue;
+          else
+            return false;
+        }
   }
 
   return true;
@@ -125,7 +131,8 @@ bool CodeExtractor::isBlockValidForExtraction(const BasicBlock &BB) {
 
 /// \brief Build a set of blocks to extract if the input blocks are viable.
 static SetVector<BasicBlock *>
-buildExtractionBlockSet(ArrayRef<BasicBlock *> BBs, DominatorTree *DT) {
+buildExtractionBlockSet(ArrayRef<BasicBlock *> BBs, DominatorTree *DT,
+                        bool AllowVarArgs) {
   assert(!BBs.empty() && "The set of blocks to extract must be non-empty");
   SetVector<BasicBlock *> Result;
 
@@ -138,7 +145,7 @@ buildExtractionBlockSet(ArrayRef<BasicBlock *> BBs, DominatorTree *DT) {
 
     if (!Result.insert(BB))
       llvm_unreachable("Repeated basic blocks in extraction input");
-    if (!CodeExtractor::isBlockValidForExtraction(*BB)) {
+    if (!CodeExtractor::isBlockValidForExtraction(*BB, AllowVarArgs)) {
       Result.clear();
       return Result;
     }
@@ -160,15 +167,18 @@ buildExtractionBlockSet(ArrayRef<BasicBlock *> BBs, DominatorTree *DT) {
 
 CodeExtractor::CodeExtractor(ArrayRef<BasicBlock *> BBs, DominatorTree *DT,
                              bool AggregateArgs, BlockFrequencyInfo *BFI,
-                             BranchProbabilityInfo *BPI)
+                             BranchProbabilityInfo *BPI, bool AllowVarArgs)
     : DT(DT), AggregateArgs(AggregateArgs || AggregateArgsOpt), BFI(BFI),
-      BPI(BPI), Blocks(buildExtractionBlockSet(BBs, DT)) {}
+      BPI(BPI), AllowVarArgs(AllowVarArgs),
+      Blocks(buildExtractionBlockSet(BBs, DT, AllowVarArgs)) {}
 
 CodeExtractor::CodeExtractor(DominatorTree &DT, Loop &L, bool AggregateArgs,
                              BlockFrequencyInfo *BFI,
                              BranchProbabilityInfo *BPI)
     : DT(&DT), AggregateArgs(AggregateArgs || AggregateArgsOpt), BFI(BFI),
-      BPI(BPI), Blocks(buildExtractionBlockSet(L.getBlocks(), &DT)) {}
+      BPI(BPI), AllowVarArgs(false),
+      Blocks(buildExtractionBlockSet(L.getBlocks(), &DT,
+                                     /* AllowVarArgs */ false)) {}
 
 /// definedInRegion - Return true if the specified value is defined in the
 /// extracted region.
@@ -594,7 +604,8 @@ Function *CodeExtractor::constructFunction(const ValueSet &inputs,
     paramTy.push_back(PointerType::getUnqual(StructTy));
   }
   FunctionType *funcType =
-                  FunctionType::get(RetTy, paramTy, false);
+                  FunctionType::get(RetTy, paramTy,
+                                    AllowVarArgs && oldFunction->isVarArg());
 
   // Create the new function
   Function *newFunction = Function::Create(funcType,
@@ -609,16 +620,86 @@ Function *CodeExtractor::constructFunction(const ValueSet &inputs,
   if (oldFunction->hasUWTable())
     newFunction->setHasUWTable();
 
-  // Inherit all of the target dependent attributes.
+  // Inherit all of the target dependent attributes and white-listed
+  // target independent attributes.
   //  (e.g. If the extracted region contains a call to an x86.sse
   //  instruction we need to make sure that the extracted region has the
   //  "target-features" attribute allowing it to be lowered.
   // FIXME: This should be changed to check to see if a specific
   //           attribute can not be inherited.
-  AttrBuilder AB(oldFunction->getAttributes().getFnAttributes());
-  for (const auto &Attr : AB.td_attrs())
-    newFunction->addFnAttr(Attr.first, Attr.second);
+  for (const auto &Attr : oldFunction->getAttributes().getFnAttributes()) {
+    if (Attr.isStringAttribute()) {
+      if (Attr.getKindAsString() == "thunk")
+        continue;
+    } else
+      switch (Attr.getKindAsEnum()) {
+      // Those attributes cannot be propagated safely. Explicitly list them
+      // here so we get a warning if new attributes are added. This list also
+      // includes non-function attributes.
+      case Attribute::Alignment:
+      case Attribute::AllocSize:
+      case Attribute::ArgMemOnly:
+      case Attribute::Builtin:
+      case Attribute::ByVal:
+      case Attribute::Convergent:
+      case Attribute::Dereferenceable:
+      case Attribute::DereferenceableOrNull:
+      case Attribute::InAlloca:
+      case Attribute::InReg:
+      case Attribute::InaccessibleMemOnly:
+      case Attribute::InaccessibleMemOrArgMemOnly:
+      case Attribute::JumpTable:
+      case Attribute::Naked:
+      case Attribute::Nest:
+      case Attribute::NoAlias:
+      case Attribute::NoBuiltin:
+      case Attribute::NoCapture:
+      case Attribute::NoReturn:
+      case Attribute::None:
+      case Attribute::NonNull:
+      case Attribute::ReadNone:
+      case Attribute::ReadOnly:
+      case Attribute::Returned:
+      case Attribute::ReturnsTwice:
+      case Attribute::SExt:
+      case Attribute::Speculatable:
+      case Attribute::StackAlignment:
+      case Attribute::StructRet:
+      case Attribute::SwiftError:
+      case Attribute::SwiftSelf:
+      case Attribute::WriteOnly:
+      case Attribute::ZExt:
+      case Attribute::EndAttrKinds:
+        continue;
+      // Those attributes should be safe to propagate to the extracted function.
+      case Attribute::AlwaysInline:
+      case Attribute::Cold:
+      case Attribute::NoRecurse:
+      case Attribute::InlineHint:
+      case Attribute::MinSize:
+      case Attribute::NoDuplicate:
+      case Attribute::NoImplicitFloat:
+      case Attribute::NoInline:
+      case Attribute::NonLazyBind:
+      case Attribute::NoRedZone:
+      case Attribute::NoUnwind:
+      case Attribute::OptimizeNone:
+      case Attribute::OptimizeForSize:
+      case Attribute::SafeStack:
+      case Attribute::SanitizeAddress:
+      case Attribute::SanitizeMemory:
+      case Attribute::SanitizeThread:
+      case Attribute::SanitizeHWAddress:
+      case Attribute::StackProtect:
+      case Attribute::StackProtectReq:
+      case Attribute::StackProtectStrong:
+      case Attribute::StrictFP:
+      case Attribute::UWTable:
+        break;
+      }
 
+    newFunction->addFnAttr(Attr);
+  }
   newFunction->getBasicBlockList().push_back(newRootNode);
 
   // Create an iterator to name all of the arguments we inserted.
@@ -735,6 +816,14 @@ emitCallAndSwitchStatement(Function *newFunction, BasicBlock *codeReplacer,
   // Emit the call to the function
   CallInst *call = CallInst::Create(newFunction, params,
                                     NumExitBlocks > 1 ? "targetBlock" : "");
+  // Add debug location to the new call, if the original function has debug
+  // info. In that case, the terminator of the entry block of the extracted
+  // function contains the first debug location of the extracted function,
+  // set in extractCodeRegion.
+  if (codeReplacer->getParent()->getSubprogram()) {
+    if (auto DL = newFunction->getEntryBlock().getTerminator()->getDebugLoc())
+      call->setDebugLoc(DL);
+  }
   codeReplacer->getInstList().push_back(call);
 
   Function::arg_iterator OutputArgBegin = newFunction->arg_begin();
@@ -957,12 +1046,31 @@ Function *CodeExtractor::extractCodeRegion() {
   if (!isEligible())
     return nullptr;
 
-  ValueSet inputs, outputs, SinkingCands, HoistingCands;
-  BasicBlock *CommonExit = nullptr;
-
   // Assumption: this is a single-entry code region, and the header is the first
   // block in the region.
   BasicBlock *header = *Blocks.begin();
+  Function *oldFunction = header->getParent();
+
+  // For functions with varargs, check that varargs handling is only done in the
+  // outlined function, i.e vastart and vaend are only used in outlined blocks.
+  if (AllowVarArgs && oldFunction->getFunctionType()->isVarArg()) {
+    auto containsVarArgIntrinsic = [](Instruction &I) {
+      if (const CallInst *CI = dyn_cast<CallInst>(&I))
+        if (const Function *F = CI->getCalledFunction())
+          return F->getIntrinsicID() == Intrinsic::vastart ||
+                 F->getIntrinsicID() == Intrinsic::vaend;
+      return false;
+    };
+
+    for (auto &BB : *oldFunction) {
+      if (Blocks.count(&BB))
+        continue;
+      if (llvm::any_of(BB, containsVarArgIntrinsic))
+        return nullptr;
+    }
+  }
+  ValueSet inputs, outputs, SinkingCands, HoistingCands;
+  BasicBlock *CommonExit = nullptr;
 
   // Calculate the entry frequency of the new function before we change the root
   //   block.
@@ -984,8 +1092,6 @@ Function *CodeExtractor::extractCodeRegion() {
   // that the return is not in the region.
   splitReturnBlocks();
 
-  Function *oldFunction = header->getParent();
-
   // This takes place of the original loop
   BasicBlock *codeReplacer = BasicBlock::Create(header->getContext(), 
                                                 "codeRepl", oldFunction,
@@ -995,7 +1101,22 @@ Function *CodeExtractor::extractCodeRegion() {
   // head of the region, but the entry node of a function cannot have preds.
   BasicBlock *newFuncRoot = BasicBlock::Create(header->getContext(), 
                                                "newFuncRoot");
-  newFuncRoot->getInstList().push_back(BranchInst::Create(header));
+  auto *BranchI = BranchInst::Create(header);
+  // If the original function has debug info, we have to add a debug location
+  // to the new branch instruction from the artificial entry block.
+  // We use the debug location of the first instruction in the extracted
+  // blocks, as there is no other equivalent line in the source code.
+  if (oldFunction->getSubprogram()) {
+    any_of(Blocks, [&BranchI](const BasicBlock *BB) {
+      return any_of(*BB, [&BranchI](const Instruction &I) {
+        if (!I.getDebugLoc())
+          return false;
+        BranchI->setDebugLoc(I.getDebugLoc());
+        return true;
+      });
+    });
+  }
+  newFuncRoot->getInstList().push_back(BranchI);
 
   findAllocas(SinkingCands, HoistingCands, CommonExit);
   assert(HoistingCands.empty() || CommonExit);

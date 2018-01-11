@@ -34,10 +34,10 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <map>
 #include <set>
 
@@ -273,7 +273,7 @@ unsigned A15SDOptimizer::optimizeSDPattern(MachineInstr *MI) {
               MRI->getRegClass(MI->getOperand(1).getReg());
             if (TRC->hasSuperClassEq(MRI->getRegClass(FullReg))) {
               DEBUG(dbgs() << "Subreg copy is compatible - returning ");
-              DEBUG(dbgs() << PrintReg(FullReg) << "\n");
+              DEBUG(dbgs() << printReg(FullReg) << "\n");
               eraseInstrWithNoUses(MI);
               return FullReg;
             }
@@ -644,7 +644,7 @@ bool A15SDOptimizer::runOnInstruction(MachineInstr *MI) {
 
           DEBUG(dbgs() << "Replacing operand "
                        << **I << " with "
-                       << PrintReg(NewReg) << "\n");
+                       << printReg(NewReg) << "\n");
           (*I)->substVirtReg(NewReg, 0, *TRI);
         }
       }
@@ -655,7 +655,7 @@ bool A15SDOptimizer::runOnInstruction(MachineInstr *MI) {
 }
 
 bool A15SDOptimizer::runOnMachineFunction(MachineFunction &Fn) {
-  if (skipFunction(*Fn.getFunction()))
+  if (skipFunction(Fn.getFunction()))
     return false;
 
   const ARMSubtarget &STI = Fn.getSubtarget<ARMSubtarget>();

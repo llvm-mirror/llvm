@@ -186,7 +186,8 @@ namespace ISD {
     /// BUILD_PAIR - This is the opposite of EXTRACT_ELEMENT in some ways.
     /// Given two values of the same integer value type, this produces a value
     /// twice as big.  Like EXTRACT_ELEMENT, this can only be used before
-    /// legalization.
+    /// legalization. The lower part of the composite value should be in
+    /// element 0 and the upper part should be in element 1.
     BUILD_PAIR,
 
     /// MERGE_VALUES - This node takes multiple discrete operands and returns
@@ -838,7 +839,7 @@ namespace ISD {
   /// which do not reference a specific memory location should be less than
   /// this value. Those that do must not be less than this value, and can
   /// be used with SelectionDAG::getMemIntrinsicNode.
-  static const int FIRST_TARGET_MEMORY_OPCODE = BUILTIN_OP_END+300;
+  static const int FIRST_TARGET_MEMORY_OPCODE = BUILTIN_OP_END+400;
 
   //===--------------------------------------------------------------------===//
   /// MemIndexedMode enum - This enum defines the load / store indexed

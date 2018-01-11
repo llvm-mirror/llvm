@@ -65,7 +65,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/CodeGen/LiveInterval.h"
-#include "llvm/CodeGen/LiveIntervalAnalysis.h"
+#include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
@@ -74,13 +74,13 @@
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SlotIndexes.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 #include <cassert>
 #include <vector>
 
@@ -103,6 +103,7 @@ public:
   explicit PrintState(int State) : State(State) {}
 };
 
+#ifndef NDEBUG
 static raw_ostream &operator<<(raw_ostream &OS, const PrintState &PS) {
   if (PS.State & StateWQM)
     OS << "WQM";
@@ -119,6 +120,7 @@ static raw_ostream &operator<<(raw_ostream &OS, const PrintState &PS) {
 
   return OS;
 }
+#endif
 
 struct InstrInfo {
   char Needs = 0;
@@ -219,9 +221,11 @@ FunctionPass *llvm::createSIWholeQuadModePass() {
   return new SIWholeQuadMode;
 }
 
-void SIWholeQuadMode::printInfo() {
+#ifndef NDEBUG
+LLVM_DUMP_METHOD void SIWholeQuadMode::printInfo() {
   for (const auto &BII : Blocks) {
-    dbgs() << "\nBB#" << BII.first->getNumber() << ":\n"
+    dbgs() << "\n"
+           << printMBBReference(*BII.first) << ":\n"
            << "  InNeeds = " << PrintState(BII.second.InNeeds)
            << ", Needs = " << PrintState(BII.second.Needs)
            << ", OutNeeds = " << PrintState(BII.second.OutNeeds) << "\n\n";
@@ -236,6 +240,7 @@ void SIWholeQuadMode::printInfo() {
     }
   }
 }
+#endif
 
 void SIWholeQuadMode::markInstruction(MachineInstr &MI, char Flag,
                                       std::vector<WorkItem> &Worklist) {
@@ -302,7 +307,7 @@ void SIWholeQuadMode::markInstructionUses(const MachineInstr &MI, char Flag,
 char SIWholeQuadMode::scanInstructions(MachineFunction &MF,
                                        std::vector<WorkItem> &Worklist) {
   char GlobalFlags = 0;
-  bool WQMOutputs = MF.getFunction()->hasFnAttribute("amdgpu-ps-wqm-outputs");
+  bool WQMOutputs = MF.getFunction().hasFnAttribute("amdgpu-ps-wqm-outputs");
   SmallVector<MachineInstr *, 4> SetInactiveInstrs;
 
   // We need to visit the basic blocks in reverse post-order so that we visit
@@ -676,7 +681,7 @@ void SIWholeQuadMode::processBlock(MachineBasicBlock &MBB, unsigned LiveMaskReg,
   if (!isEntry && BI.Needs == StateWQM && BI.OutNeeds != StateExact)
     return;
 
-  DEBUG(dbgs() << "\nProcessing block BB#" << MBB.getNumber() << ":\n");
+  DEBUG(dbgs() << "\nProcessing block " << printMBBReference(MBB) << ":\n");
 
   unsigned SavedWQMReg = 0;
   unsigned SavedNonWWMReg = 0;
@@ -837,7 +842,7 @@ bool SIWholeQuadMode::runOnMachineFunction(MachineFunction &MF) {
   Blocks.clear();
   LiveMaskQueries.clear();
   LowerToCopyInstrs.clear();
-  CallingConv = MF.getFunction()->getCallingConv();
+  CallingConv = MF.getFunction().getCallingConv();
 
   const SISubtarget &ST = MF.getSubtarget<SISubtarget>();
 

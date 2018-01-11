@@ -181,11 +181,13 @@ Instruction *InstCombiner::visitExtractElementInst(ExtractElementInst &EI) {
   // If extracting a specified index from the vector, see if we can recursively
   // find a previously computed scalar that was inserted into the vector.
   if (ConstantInt *IdxC = dyn_cast<ConstantInt>(EI.getOperand(1))) {
-    unsigned IndexVal = IdxC->getZExtValue();
     unsigned VectorWidth = EI.getVectorOperandType()->getNumElements();
 
-    // InstSimplify handles cases where the index is invalid.
-    assert(IndexVal < VectorWidth);
+    // InstSimplify should handle cases where the index is invalid.
+    if (!IdxC->getValue().ule(VectorWidth))
+      return nullptr;
+
+    unsigned IndexVal = IdxC->getZExtValue();
 
     // This instruction only demands the single element from the input vector.
     // If the input vector has a single use, simplify it based on this use
@@ -610,12 +612,11 @@ static Instruction *foldInsSequenceIntoBroadcast(InsertElementInst &InsElt) {
   // Walk the chain backwards, keeping track of which indices we inserted into,
   // until we hit something that isn't an insert of the splatted value.
   while (CurrIE) {
-    ConstantInt *Idx = dyn_cast<ConstantInt>(CurrIE->getOperand(2));
+    auto *Idx = dyn_cast<ConstantInt>(CurrIE->getOperand(2));
     if (!Idx || CurrIE->getOperand(1) != SplatVal)
       return nullptr;
 
-    InsertElementInst *NextIE =
-      dyn_cast<InsertElementInst>(CurrIE->getOperand(0));
+    auto *NextIE = dyn_cast<InsertElementInst>(CurrIE->getOperand(0));
     // Check none of the intermediate steps have any additional uses, except
     // for the root insertelement instruction, which can be re-used, if it
     // inserts at position 0.
@@ -781,6 +782,10 @@ Instruction *InstCombiner::visitInsertElementInst(InsertElementInst &IE) {
   Value *VecOp    = IE.getOperand(0);
   Value *ScalarOp = IE.getOperand(1);
   Value *IdxOp    = IE.getOperand(2);
+
+  if (auto *V = SimplifyInsertElementInst(
+          VecOp, ScalarOp, IdxOp, SQ.getWithInstruction(&IE)))
+    return replaceInstUsesWith(IE, V);
 
   // Inserting an undef or into an undefined place, remove this.
   if (isa<UndefValue>(ScalarOp) || isa<UndefValue>(IdxOp))

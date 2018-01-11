@@ -10,7 +10,6 @@
 #include "llvm/CodeGen/SlotIndexes.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/MachineFunction.h"
-#include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -264,7 +263,7 @@ LLVM_DUMP_METHOD void SlotIndexes::dump() const {
   }
 
   for (unsigned i = 0, e = MBBRanges.size(); i != e; ++i)
-    dbgs() << "BB#" << i << "\t[" << MBBRanges[i].first << ';'
+    dbgs() << "%bb." << i << "\t[" << MBBRanges[i].first << ';'
            << MBBRanges[i].second << ")\n";
 }
 #endif

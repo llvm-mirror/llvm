@@ -192,8 +192,6 @@ template <> struct DenseMapInfo<MemoryLocOrCall> {
   }
 };
 
-enum class Reorderability { Always, IfNoAlias, Never };
-
 } // end namespace llvm
 
 /// This does one-way checks to see if Use could theoretically be hoisted above
@@ -202,22 +200,16 @@ enum class Reorderability { Always, IfNoAlias, Never };
 /// This assumes that, for the purposes of MemorySSA, Use comes directly after
 /// MayClobber, with no potentially clobbering operations in between them.
 /// (Where potentially clobbering ops are memory barriers, aliased stores, etc.)
-static Reorderability getLoadReorderability(const LoadInst *Use,
-                                            const LoadInst *MayClobber) {
+static bool areLoadsReorderable(const LoadInst *Use,
+                                const LoadInst *MayClobber) {
   bool VolatileUse = Use->isVolatile();
   bool VolatileClobber = MayClobber->isVolatile();
   // Volatile operations may never be reordered with other volatile operations.
   if (VolatileUse && VolatileClobber)
-    return Reorderability::Never;
-
-  // The lang ref allows reordering of volatile and non-volatile operations.
-  // Whether an aliasing nonvolatile load and volatile load can be reordered,
-  // though, is ambiguous. Because it may not be best to exploit this ambiguity,
-  // we only allow volatile/non-volatile reordering if the volatile and
-  // non-volatile operations don't alias.
-  Reorderability Result = VolatileUse || VolatileClobber
-                              ? Reorderability::IfNoAlias
-                              : Reorderability::Always;
+    return false;
+  // Otherwise, volatile doesn't matter here. From the language reference:
+  // 'optimizers may change the order of volatile operations relative to
+  // non-volatile operations.'"
 
   // If a load is seq_cst, it cannot be moved above other loads. If its ordering
   // is weaker, it can be moved above other loads. We just need to be sure that
@@ -229,9 +221,7 @@ static Reorderability getLoadReorderability(const LoadInst *Use,
   bool SeqCstUse = Use->getOrdering() == AtomicOrdering::SequentiallyConsistent;
   bool MayClobberIsAcquire = isAtLeastOrStrongerThan(MayClobber->getOrdering(),
                                                      AtomicOrdering::Acquire);
-  if (SeqCstUse || MayClobberIsAcquire)
-    return Reorderability::Never;
-  return Result;
+  return !(SeqCstUse || MayClobberIsAcquire);
 }
 
 static bool instructionClobbersQuery(MemoryDef *MD,
@@ -262,23 +252,14 @@ static bool instructionClobbersQuery(MemoryDef *MD,
 
   if (UseCS) {
     ModRefInfo I = AA.getModRefInfo(DefInst, UseCS);
-    return I != MRI_NoModRef;
+    return isModOrRefSet(I);
   }
 
-  if (auto *DefLoad = dyn_cast<LoadInst>(DefInst)) {
-    if (auto *UseLoad = dyn_cast<LoadInst>(UseInst)) {
-      switch (getLoadReorderability(UseLoad, DefLoad)) {
-      case Reorderability::Always:
-        return false;
-      case Reorderability::Never:
-        return true;
-      case Reorderability::IfNoAlias:
-        return !AA.isNoAlias(UseLoc, MemoryLocation::get(DefLoad));
-      }
-    }
-  }
+  if (auto *DefLoad = dyn_cast<LoadInst>(DefInst))
+    if (auto *UseLoad = dyn_cast<LoadInst>(UseInst))
+      return !areLoadsReorderable(UseLoad, DefLoad);
 
-  return AA.getModRefInfo(DefInst, UseLoc) & MRI_Mod;
+  return isModSet(AA.getModRefInfo(DefInst, UseLoc));
 }
 
 static bool instructionClobbersQuery(MemoryDef *MD, const MemoryUseOrDef *MU,
@@ -892,7 +873,6 @@ class MemorySSA::CachingWalker final : public MemorySSAWalker {
   bool AutoResetWalker = true;
 
   MemoryAccess *getClobberingMemoryAccess(MemoryAccess *, UpwardsMemoryQuery &);
-  void verifyRemoved(MemoryAccess *);
 
 public:
   CachingWalker(MemorySSA *, AliasAnalysis *, DominatorTree *);
@@ -1527,8 +1507,8 @@ MemoryUseOrDef *MemorySSA::createNewAccess(Instruction *I) {
   // Separate memory aliasing and ordering into two different chains so that we
   // can precisely represent both "what memory will this read/write/is clobbered
   // by" and "what instructions can I move this past".
-  bool Def = bool(ModRef & MRI_Mod) || isOrdered(I);
-  bool Use = bool(ModRef & MRI_Ref);
+  bool Def = isModSet(ModRef) || isOrdered(I);
+  bool Use = isRefSet(ModRef);
 
   // It's possible for an instruction to not modify memory at all. During
   // construction, we ignore them.

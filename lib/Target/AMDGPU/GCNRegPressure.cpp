@@ -12,18 +12,18 @@
 #include "SIRegisterInfo.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/LiveInterval.h"
-#include "llvm/CodeGen/LiveIntervalAnalysis.h"
+#include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/RegisterPressure.h"
 #include "llvm/CodeGen/SlotIndexes.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/MC/LaneBitmask.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 #include <algorithm>
 #include <cassert>
 
@@ -49,7 +49,7 @@ void llvm::printLivesAt(SlotIndex SI,
       for (const auto &S : LI.subranges()) {
         if (!S.liveAt(SI)) continue;
         if (firstTime) {
-          dbgs() << "  " << PrintReg(Reg, MRI.getTargetRegisterInfo())
+          dbgs() << "  " << printReg(Reg, MRI.getTargetRegisterInfo())
                  << '\n';
           firstTime = false;
         }
@@ -441,12 +441,12 @@ static void reportMismatch(const GCNRPTracker::LiveRegSet &LISLR,
   for (auto const &P : TrackedLR) {
     auto I = LISLR.find(P.first);
     if (I == LISLR.end()) {
-      dbgs() << "  " << PrintReg(P.first, TRI)
+      dbgs() << "  " << printReg(P.first, TRI)
              << ":L" << PrintLaneMask(P.second)
              << " isn't found in LIS reported set\n";
     }
     else if (I->second != P.second) {
-      dbgs() << "  " << PrintReg(P.first, TRI)
+      dbgs() << "  " << printReg(P.first, TRI)
         << " masks doesn't match: LIS reported "
         << PrintLaneMask(I->second)
         << ", tracked "
@@ -457,7 +457,7 @@ static void reportMismatch(const GCNRPTracker::LiveRegSet &LISLR,
   for (auto const &P : LISLR) {
     auto I = TrackedLR.find(P.first);
     if (I == TrackedLR.end()) {
-      dbgs() << "  " << PrintReg(P.first, TRI)
+      dbgs() << "  " << printReg(P.first, TRI)
              << ":L" << PrintLaneMask(P.second)
              << " isn't found in tracked set\n";
     }
@@ -495,7 +495,7 @@ void GCNRPTracker::printLiveRegs(raw_ostream &OS, const LiveRegSet& LiveRegs,
     unsigned Reg = TargetRegisterInfo::index2VirtReg(I);
     auto It = LiveRegs.find(Reg);
     if (It != LiveRegs.end() && It->second.any())
-      OS << ' ' << PrintVRegOrUnit(Reg, TRI) << ':'
+      OS << ' ' << printVRegOrUnit(Reg, TRI) << ':'
          << PrintLaneMask(It->second);
   }
   OS << '\n';

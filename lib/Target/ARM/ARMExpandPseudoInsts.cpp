@@ -606,8 +606,11 @@ void ARMExpandPseudo::ExpandVTBL(MachineBasicBlock::iterator &MBBI,
 
   // Transfer the destination register operand.
   MIB.add(MI.getOperand(OpIdx++));
-  if (IsExt)
-    MIB.add(MI.getOperand(OpIdx++));
+  if (IsExt) {
+    MachineOperand VdSrc(MI.getOperand(OpIdx++));
+    VdSrc.setIsRenamable(false);
+    MIB.add(VdSrc);
+  }
 
   bool SrcIsKill = MI.getOperand(OpIdx).isKill();
   unsigned SrcReg = MI.getOperand(OpIdx++).getReg();
@@ -616,7 +619,9 @@ void ARMExpandPseudo::ExpandVTBL(MachineBasicBlock::iterator &MBBI,
   MIB.addReg(D0);
 
   // Copy the other source register operand.
-  MIB.add(MI.getOperand(OpIdx++));
+  MachineOperand VmSrc(MI.getOperand(OpIdx++));
+  VmSrc.setIsRenamable(false);
+  MIB.add(VmSrc);
 
   // Copy the predicate operands.
   MIB.add(MI.getOperand(OpIdx++));
@@ -922,7 +927,7 @@ bool ARMExpandPseudo::ExpandCMP_SWAP_64(MachineBasicBlock &MBB,
   // .Lloadcmp:
   //     ldrexd rDestLo, rDestHi, [rAddr]
   //     cmp rDestLo, rDesiredLo
-  //     sbcs rTempReg<dead>, rDestHi, rDesiredHi
+  //     sbcs dead rTempReg, rDestHi, rDesiredHi
   //     bne .Ldone
   unsigned LDREXD = IsThumb ? ARM::t2LDREXD : ARM::LDREXD;
   MachineInstrBuilder MIB;
@@ -1254,7 +1259,7 @@ bool ARMExpandPseudo::ExpandMI(MachineBasicBlock &MBB,
         MachineConstantPool *MCP = MF->getConstantPool();
         unsigned PCLabelID = AFI->createPICLabelUId();
         MachineConstantPoolValue *CPV =
-            ARMConstantPoolSymbol::Create(MF->getFunction()->getContext(),
+            ARMConstantPoolSymbol::Create(MF->getFunction().getContext(),
                                           "__aeabi_read_tp", PCLabelID, 0);
         unsigned Reg = MI.getOperand(0).getReg();
         MIB = BuildMI(MBB, MBBI, MI.getDebugLoc(),
@@ -1311,6 +1316,7 @@ bool ARMExpandPseudo::ExpandMI(MachineBasicBlock &MBB,
       unsigned DstReg = MI.getOperand(0).getReg();
       bool DstIsDead = MI.getOperand(0).isDead();
       const MachineOperand &MO1 = MI.getOperand(1);
+      auto Flags = MO1.getTargetFlags();
       const GlobalValue *GV = MO1.getGlobal();
       bool IsARM =
           Opcode != ARM::tLDRLIT_ga_pcrel && Opcode != ARM::tLDRLIT_ga_abs;
@@ -1329,7 +1335,9 @@ bool ARMExpandPseudo::ExpandMI(MachineBasicBlock &MBB,
 
       if (IsPIC) {
         unsigned PCAdj = IsARM ? 8 : 4;
-        auto Modifier = STI->getCPModifier(GV);
+        auto Modifier = (Flags & ARMII::MO_GOT)
+                            ? ARMCP::GOT_PREL
+                            : ARMCP::no_modifier;
         ARMPCLabelIndex = AFI->createPICLabelUId();
         CPV = ARMConstantPoolConstant::Create(
             GV, ARMPCLabelIndex, ARMCP::CPValue, PCAdj, Modifier,
@@ -1461,7 +1469,9 @@ bool ARMExpandPseudo::ExpandMI(MachineBasicBlock &MBB,
       unsigned SrcReg = MI.getOperand(OpIdx++).getReg();
 
       // Copy the destination register.
-      MIB.add(MI.getOperand(OpIdx++));
+      MachineOperand Dst(MI.getOperand(OpIdx++));
+      Dst.setIsRenamable(false);
+      MIB.add(Dst);
 
       // Copy the predicate operands.
       MIB.add(MI.getOperand(OpIdx++));

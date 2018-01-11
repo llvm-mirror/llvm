@@ -18,6 +18,7 @@
 #include "CodeGenHwModes.h"
 #include "CodeGenIntrinsics.h"
 #include "CodeGenTarget.h"
+#include "SDNodeProperties.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringSet.h"
@@ -25,6 +26,7 @@
 #include "llvm/Support/MathExtras.h"
 #include <algorithm>
 #include <array>
+#include <functional>
 #include <map>
 #include <set>
 #include <vector>
@@ -233,7 +235,7 @@ struct TypeSetByHwMode : public InfoByHwMode<MachineValueTypeSet> {
   bool operator!=(const TypeSetByHwMode &VTS) const { return !(*this == VTS); }
 
   void dump() const;
-  void validate() const;
+  bool validate() const;
 
 private:
   /// Intersect two sets. Return true if anything has changed.
@@ -318,8 +320,13 @@ struct TypeInfer {
                        const TypeSetByHwMode::SetType &Legal);
 
   struct ValidateOnExit {
-    ValidateOnExit(TypeSetByHwMode &T) : VTS(T) {}
-    ~ValidateOnExit() { VTS.validate(); }
+    ValidateOnExit(TypeSetByHwMode &T, TypeInfer &TI) : Infer(TI), VTS(T) {}
+  #ifndef NDEBUG
+    ~ValidateOnExit();
+  #else
+    ~ValidateOnExit() {}  // Empty destructor with NDEBUG.
+  #endif
+    TypeInfer &Infer;
     TypeSetByHwMode &VTS;
   };
 
@@ -485,6 +492,8 @@ public:
   bool isLoad() const;
   // Is the desired predefined predicate for a store?
   bool isStore() const;
+  // Is the desired predefined predicate for an atomic?
+  bool isAtomic() const;
 
   /// Is this predicate the predefined unindexed load predicate?
   /// Is this predicate the predefined unindexed store predicate?
@@ -501,6 +510,27 @@ public:
   bool isNonTruncStore() const;
   /// Is this predicate the predefined truncating store predicate?
   bool isTruncStore() const;
+
+  /// Is this predicate the predefined monotonic atomic predicate?
+  bool isAtomicOrderingMonotonic() const;
+  /// Is this predicate the predefined acquire atomic predicate?
+  bool isAtomicOrderingAcquire() const;
+  /// Is this predicate the predefined release atomic predicate?
+  bool isAtomicOrderingRelease() const;
+  /// Is this predicate the predefined acquire-release atomic predicate?
+  bool isAtomicOrderingAcquireRelease() const;
+  /// Is this predicate the predefined sequentially consistent atomic predicate?
+  bool isAtomicOrderingSequentiallyConsistent() const;
+
+  /// Is this predicate the predefined acquire-or-stronger atomic predicate?
+  bool isAtomicOrderingAcquireOrStronger() const;
+  /// Is this predicate the predefined weaker-than-acquire atomic predicate?
+  bool isAtomicOrderingWeakerThanAcquire() const;
+
+  /// Is this predicate the predefined release-or-stronger atomic predicate?
+  bool isAtomicOrderingReleaseOrStronger() const;
+  /// Is this predicate the predefined weaker-than-release atomic predicate?
+  bool isAtomicOrderingWeakerThanRelease() const;
 
   /// If non-null, indicates that this predicate is a predefined memory VT
   /// predicate for a load/store and returns the ValueType record for the memory VT.
@@ -780,6 +810,7 @@ public:
   const std::vector<TreePatternNode*> &getTrees() const { return Trees; }
   unsigned getNumTrees() const { return Trees.size(); }
   TreePatternNode *getTree(unsigned i) const { return Trees[i]; }
+  void setTree(unsigned i, TreePatternNode *Tree) { Trees[i] = Tree; }
   TreePatternNode *getOnlyTree() const {
     assert(Trees.size() == 1 && "Doesn't have exactly one pattern!");
     return Trees[0];
@@ -1029,8 +1060,12 @@ class CodeGenDAGPatterns {
 
   TypeSetByHwMode LegalVTS;
 
+  using PatternRewriterFn = std::function<void (TreePattern *)>;
+  PatternRewriterFn PatternRewriter;
+
 public:
-  CodeGenDAGPatterns(RecordKeeper &R);
+  CodeGenDAGPatterns(RecordKeeper &R,
+                     PatternRewriterFn PatternRewriter = nullptr);
 
   CodeGenTarget &getTargetInfo() { return Target; }
   const CodeGenTarget &getTargetInfo() const { return Target; }
@@ -1175,6 +1210,7 @@ inline bool SDNodeInfo::ApplyTypeConstraints(TreePatternNode *N,
       MadeChange |= TypeConstraints[i].ApplyTypeConstraint(N, *this, TP);
     return MadeChange;
   }
+
 } // end namespace llvm
 
 #endif

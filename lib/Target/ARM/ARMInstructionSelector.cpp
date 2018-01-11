@@ -35,11 +35,11 @@ public:
   ARMInstructionSelector(const ARMBaseTargetMachine &TM, const ARMSubtarget &STI,
                          const ARMRegisterBankInfo &RBI);
 
-  bool select(MachineInstr &I) const override;
+  bool select(MachineInstr &I, CodeGenCoverage &CoverageInfo) const override;
   static const char *getName() { return DEBUG_TYPE; }
 
 private:
-  bool selectImpl(MachineInstr &I) const;
+  bool selectImpl(MachineInstr &I, CodeGenCoverage &CoverageInfo) const;
 
   struct CmpConstants;
   struct InsertInfo;
@@ -117,6 +117,30 @@ ARMInstructionSelector::ARMInstructionSelector(const ARMBaseTargetMachine &TM,
 {
 }
 
+static const TargetRegisterClass *guessRegClass(unsigned Reg,
+                                                MachineRegisterInfo &MRI,
+                                                const TargetRegisterInfo &TRI,
+                                                const RegisterBankInfo &RBI) {
+  const RegisterBank *RegBank = RBI.getRegBank(Reg, MRI, TRI);
+  assert(RegBank && "Can't get reg bank for virtual register");
+
+  const unsigned Size = MRI.getType(Reg).getSizeInBits();
+  assert((RegBank->getID() == ARM::GPRRegBankID ||
+          RegBank->getID() == ARM::FPRRegBankID) &&
+         "Unsupported reg bank");
+
+  if (RegBank->getID() == ARM::FPRRegBankID) {
+    if (Size == 32)
+      return &ARM::SPRRegClass;
+    else if (Size == 64)
+      return &ARM::DPRRegClass;
+    else
+      llvm_unreachable("Unsupported destination size");
+  }
+
+  return &ARM::GPRRegClass;
+}
+
 static bool selectCopy(MachineInstr &I, const TargetInstrInfo &TII,
                        MachineRegisterInfo &MRI, const TargetRegisterInfo &TRI,
                        const RegisterBankInfo &RBI) {
@@ -124,25 +148,7 @@ static bool selectCopy(MachineInstr &I, const TargetInstrInfo &TII,
   if (TargetRegisterInfo::isPhysicalRegister(DstReg))
     return true;
 
-  const RegisterBank *RegBank = RBI.getRegBank(DstReg, MRI, TRI);
-  (void)RegBank;
-  assert(RegBank && "Can't get reg bank for virtual register");
-
-  const unsigned DstSize = MRI.getType(DstReg).getSizeInBits();
-  assert((RegBank->getID() == ARM::GPRRegBankID ||
-          RegBank->getID() == ARM::FPRRegBankID) &&
-         "Unsupported reg bank");
-
-  const TargetRegisterClass *RC = &ARM::GPRRegClass;
-
-  if (RegBank->getID() == ARM::FPRRegBankID) {
-    if (DstSize == 32)
-      RC = &ARM::SPRRegClass;
-    else if (DstSize == 64)
-      RC = &ARM::DPRRegClass;
-    else
-      llvm_unreachable("Unsupported destination size");
-  }
+  const TargetRegisterClass *RC = guessRegClass(DstReg, MRI, TRI, RBI);
 
   // No need to constrain SrcReg. It will get constrained when
   // we hit another of its uses or its defs.
@@ -538,8 +544,12 @@ bool ARMInstructionSelector::selectGlobal(MachineInstrBuilder &MIB,
             : (Indirect ? ARM::LDRLIT_ga_pcrel_ldr : ARM::LDRLIT_ga_pcrel);
     MIB->setDesc(TII.get(Opc));
 
+    int TargetFlags = ARMII::MO_NO_FLAG;
     if (STI.isTargetDarwin())
-      MIB->getOperand(1).setTargetFlags(ARMII::MO_NONLAZY);
+      TargetFlags |= ARMII::MO_NONLAZY;
+    if (STI.isGVInGOT(GV))
+      TargetFlags |= ARMII::MO_GOT;
+    MIB->getOperand(1).setTargetFlags(TargetFlags);
 
     if (Indirect)
       MIB.addMemOperand(MF.getMachineMemOperand(
@@ -649,7 +659,8 @@ bool ARMInstructionSelector::selectShift(unsigned ShiftOpc,
   return constrainSelectedInstRegOperands(*MIB, TII, TRI, RBI);
 }
 
-bool ARMInstructionSelector::select(MachineInstr &I) const {
+bool ARMInstructionSelector::select(MachineInstr &I,
+                                    CodeGenCoverage &CoverageInfo) const {
   assert(I.getParent() && "Instruction should be in a basic block!");
   assert(I.getParent()->getParent() && "Instruction should be in a function!");
 
@@ -664,13 +675,14 @@ bool ARMInstructionSelector::select(MachineInstr &I) const {
     return true;
   }
 
-  if (selectImpl(I))
+  using namespace TargetOpcode;
+
+  if (selectImpl(I, CoverageInfo))
     return true;
 
   MachineInstrBuilder MIB{MF, I};
   bool isSExt = false;
 
-  using namespace TargetOpcode;
   switch (I.getOpcode()) {
   case G_SEXT:
     isSExt = true;
@@ -736,6 +748,31 @@ bool ARMInstructionSelector::select(MachineInstr &I) const {
     const auto &SrcRegBank = *RBI.getRegBank(SrcReg, MRI, TRI);
     const auto &DstRegBank = *RBI.getRegBank(DstReg, MRI, TRI);
 
+    if (SrcRegBank.getID() == ARM::FPRRegBankID) {
+      // This should only happen in the obscure case where we have put a 64-bit
+      // integer into a D register. Get it out of there and keep only the
+      // interesting part.
+      assert(I.getOpcode() == G_TRUNC && "Unsupported operand for G_ANYEXT");
+      assert(DstRegBank.getID() == ARM::GPRRegBankID &&
+             "Unsupported combination of register banks");
+      assert(MRI.getType(SrcReg).getSizeInBits() == 64 && "Unsupported size");
+      assert(MRI.getType(DstReg).getSizeInBits() <= 32 && "Unsupported size");
+
+      unsigned IgnoredBits = MRI.createVirtualRegister(&ARM::GPRRegClass);
+      auto InsertBefore = std::next(I.getIterator());
+      auto MovI =
+          BuildMI(MBB, InsertBefore, I.getDebugLoc(), TII.get(ARM::VMOVRRD))
+              .addDef(DstReg)
+              .addDef(IgnoredBits)
+              .addUse(SrcReg)
+              .add(predOps(ARMCC::AL));
+      if (!constrainSelectedInstRegOperands(*MovI, TII, TRI, RBI))
+        return false;
+
+      MIB->eraseFromParent();
+      return true;
+    }
+
     if (SrcRegBank.getID() != DstRegBank.getID()) {
       DEBUG(dbgs() << "G_TRUNC/G_ANYEXT operands on different register banks\n");
       return false;
@@ -743,6 +780,54 @@ bool ARMInstructionSelector::select(MachineInstr &I) const {
 
     if (SrcRegBank.getID() != ARM::GPRRegBankID) {
       DEBUG(dbgs() << "G_TRUNC/G_ANYEXT on non-GPR not supported yet\n");
+      return false;
+    }
+
+    I.setDesc(TII.get(COPY));
+    return selectCopy(I, TII, MRI, TRI, RBI);
+  }
+  case G_CONSTANT: {
+    if (!MRI.getType(I.getOperand(0).getReg()).isPointer()) {
+      // Non-pointer constants should be handled by TableGen.
+      DEBUG(dbgs() << "Unsupported constant type\n");
+      return false;
+    }
+
+    auto &Val = I.getOperand(1);
+    if (Val.isCImm()) {
+      if (!Val.getCImm()->isZero()) {
+        DEBUG(dbgs() << "Unsupported pointer constant value\n");
+        return false;
+      }
+      Val.ChangeToImmediate(0);
+    } else {
+      assert(Val.isImm() && "Unexpected operand for G_CONSTANT");
+      if (Val.getImm() != 0) {
+        DEBUG(dbgs() << "Unsupported pointer constant value\n");
+        return false;
+      }
+    }
+
+    I.setDesc(TII.get(ARM::MOVi));
+    MIB.add(predOps(ARMCC::AL)).add(condCodeOp());
+    break;
+  }
+  case G_INTTOPTR:
+  case G_PTRTOINT: {
+    auto SrcReg = I.getOperand(1).getReg();
+    auto DstReg = I.getOperand(0).getReg();
+
+    const auto &SrcRegBank = *RBI.getRegBank(SrcReg, MRI, TRI);
+    const auto &DstRegBank = *RBI.getRegBank(DstReg, MRI, TRI);
+
+    if (SrcRegBank.getID() != DstRegBank.getID()) {
+      DEBUG(dbgs()
+            << "G_INTTOPTR/G_PTRTOINT operands on different register banks\n");
+      return false;
+    }
+
+    if (SrcRegBank.getID() != ARM::GPRRegBankID) {
+      DEBUG(dbgs() << "G_INTTOPTR/G_PTRTOINT on non-GPR not supported yet\n");
       return false;
     }
 
@@ -792,28 +877,6 @@ bool ARMInstructionSelector::select(MachineInstr &I) const {
     I.setDesc(TII.get(ARM::ADDri));
     MIB.addImm(0).add(predOps(ARMCC::AL)).add(condCodeOp());
     break;
-  case G_CONSTANT: {
-    unsigned Reg = I.getOperand(0).getReg();
-
-    if (!validReg(MRI, Reg, 32, ARM::GPRRegBankID))
-      return false;
-
-    I.setDesc(TII.get(ARM::MOVi));
-    MIB.add(predOps(ARMCC::AL)).add(condCodeOp());
-
-    auto &Val = I.getOperand(1);
-    if (Val.isCImm()) {
-      if (Val.getCImm()->getBitWidth() > 32)
-        return false;
-      Val.ChangeToImmediate(Val.getCImm()->getZExtValue());
-    }
-
-    if (!Val.isImm()) {
-      return false;
-    }
-
-    break;
-  }
   case G_GLOBAL_VALUE:
     return selectGlobal(MIB, MRI);
   case G_STORE:
@@ -872,10 +935,21 @@ bool ARMInstructionSelector::select(MachineInstr &I) const {
     // Branch conditionally.
     auto Branch = BuildMI(*I.getParent(), I, I.getDebugLoc(), TII.get(ARM::Bcc))
                       .add(I.getOperand(1))
-                      .add(predOps(ARMCC::EQ, ARM::CPSR));
+                      .add(predOps(ARMCC::NE, ARM::CPSR));
     if (!constrainSelectedInstRegOperands(*Branch, TII, TRI, RBI))
       return false;
     I.eraseFromParent();
+    return true;
+  }
+  case G_PHI: {
+    I.setDesc(TII.get(PHI));
+
+    unsigned DstReg = I.getOperand(0).getReg();
+    const TargetRegisterClass *RC = guessRegClass(DstReg, MRI, TRI, RBI);
+    if (!RBI.constrainGenericRegister(DstReg, *RC, MRI)) {
+      break;
+    }
+
     return true;
   }
   default:

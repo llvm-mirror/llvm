@@ -16,7 +16,6 @@
 #include "llvm/Analysis/BranchProbabilityInfo.h"
 #include "llvm/Analysis/LazyBlockFrequencyInfo.h"
 #include "llvm/Analysis/LoopInfo.h"
-#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/LLVMContext.h"
@@ -75,11 +74,10 @@ void OptimizationRemarkEmitter::emit(
     DiagnosticInfoOptimizationBase &OptDiagBase) {
   auto &OptDiag = cast<DiagnosticInfoIROptimization>(OptDiagBase);
   computeHotness(OptDiag);
-  // If a diagnostic has a hotness value, then only emit it if its hotness
-  // meets the threshold.
-  if (OptDiag.getHotness() &&
-      *OptDiag.getHotness() <
-          F->getContext().getDiagnosticsHotnessThreshold()) {
+
+  // Only emit it if its hotness meets the threshold.
+  if (OptDiag.getHotness().getValueOr(0) <
+      F->getContext().getDiagnosticsHotnessThreshold()) {
     return;
   }
 

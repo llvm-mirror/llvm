@@ -29,6 +29,8 @@
 #include "llvm/CodeGen/MachineValueType.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
+#include "llvm/CodeGen/TargetCallingConv.h"
+#include "llvm/CodeGen/TargetLowering.h"
 #include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/Attributes.h"
@@ -49,8 +51,6 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetCallingConv.h"
-#include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
 #include <algorithm>
@@ -123,10 +123,10 @@ bool NVPTXTargetLowering::useF32FTZ(const MachineFunction &MF) const {
     // If nvptx-f32ftz is used on the command-line, always honor it
     return FtzEnabled;
   } else {
-    const Function *F = MF.getFunction();
+    const Function &F = MF.getFunction();
     // Otherwise, check for an nvptx-f32ftz attribute on the function
-    if (F->hasFnAttribute("nvptx-f32ftz"))
-      return F->getFnAttribute("nvptx-f32ftz").getValueAsString() == "true";
+    if (F.hasFnAttribute("nvptx-f32ftz"))
+      return F.getFnAttribute("nvptx-f32ftz").getValueAsString() == "true";
     else
       return false;
   }
@@ -1561,8 +1561,7 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
           Chain = DAG.getMemIntrinsicNode(
               Op, dl, DAG.getVTList(MVT::Other, MVT::Glue), StoreOperands,
               TheStoreType, MachinePointerInfo(), EltAlign,
-              /* Volatile */ false, /* ReadMem */ false,
-              /* WriteMem */ true, /* Size */ 0);
+              MachineMemOperand::MOStore);
           InFlag = Chain.getValue(1);
 
           // Cleanup.
@@ -1623,8 +1622,7 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
       Chain = DAG.getMemIntrinsicNode(NVPTXISD::StoreParam, dl, CopyParamVTs,
                                       CopyParamOps, elemtype,
                                       MachinePointerInfo(), /* Align */ 0,
-                                      /* Volatile */ false, /* ReadMem */ false,
-                                      /* WriteMem */ true, /* Size */ 0);
+                                      MachineMemOperand::MOStore);
 
       InFlag = Chain.getValue(1);
     }
@@ -1810,8 +1808,8 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
             DAG.getConstant(Offsets[VecIdx], dl, MVT::i32), InFlag};
         SDValue RetVal = DAG.getMemIntrinsicNode(
             Op, dl, DAG.getVTList(LoadVTs), LoadOperands, TheLoadType,
-            MachinePointerInfo(), EltAlign, /* Volatile */ false,
-            /* ReadMem */ true, /* WriteMem */ false, /* Size */ 0);
+            MachinePointerInfo(), EltAlign,
+            MachineMemOperand::MOLoad);
 
         for (unsigned j = 0; j < NumElts; ++j) {
           SDValue Ret = RetVal.getValue(j);
@@ -2331,7 +2329,7 @@ SDValue NVPTXTargetLowering::LowerFormalArguments(
   const DataLayout &DL = DAG.getDataLayout();
   auto PtrVT = getPointerTy(DAG.getDataLayout());
 
-  const Function *F = MF.getFunction();
+  const Function *F = &MF.getFunction();
   const AttributeList &PAL = F->getAttributes();
   const TargetLowering *TLI = STI.getTargetLowering();
 
@@ -2527,7 +2525,7 @@ NVPTXTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
                                  const SmallVectorImpl<SDValue> &OutVals,
                                  const SDLoc &dl, SelectionDAG &DAG) const {
   MachineFunction &MF = DAG.getMachineFunction();
-  Type *RetTy = MF.getFunction()->getReturnType();
+  Type *RetTy = MF.getFunction().getReturnType();
 
   bool isABI = (STI.getSmVersion() >= 20);
   assert(isABI && "Non-ABI compilation is not supported");
@@ -2596,8 +2594,7 @@ NVPTXTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
       Chain = DAG.getMemIntrinsicNode(Op, dl, DAG.getVTList(MVT::Other),
                                       StoreOperands, TheStoreType,
                                       MachinePointerInfo(), /* Align */ 1,
-                                      /* Volatile */ false, /* ReadMem */ false,
-                                      /* WriteMem */ true, /* Size */ 0);
+                                      MachineMemOperand::MOStore);
       // Cleanup vector state.
       StoreOperands.clear();
     }
@@ -3317,10 +3314,22 @@ static unsigned getOpcForSurfaceInstr(unsigned Intrinsic) {
 // of destination
 // pointer. In particular, the address space information.
 bool NVPTXTargetLowering::getTgtMemIntrinsic(
-    IntrinsicInfo &Info, const CallInst &I, unsigned Intrinsic) const {
+    IntrinsicInfo &Info, const CallInst &I,
+    MachineFunction &MF, unsigned Intrinsic) const {
   switch (Intrinsic) {
   default:
     return false;
+  case Intrinsic::nvvm_match_all_sync_i32p:
+  case Intrinsic::nvvm_match_all_sync_i64p:
+    Info.opc = ISD::INTRINSIC_W_CHAIN;
+    // memVT is bogus. These intrinsics have IntrInaccessibleMemOnly attribute
+    // in order to model data exchange with other threads, but perform no real
+    // memory accesses.
+    Info.memVT = MVT::i1;
+
+    // Our result depends on both our and other thread's arguments.
+    Info.flags = MachineMemOperand::MOLoad | MachineMemOperand::MOStore;
+    return true;
   case Intrinsic::nvvm_wmma_load_a_f16_col:
   case Intrinsic::nvvm_wmma_load_a_f16_row:
   case Intrinsic::nvvm_wmma_load_a_f16_col_stride:
@@ -3349,9 +3358,7 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
     Info.memVT = MVT::v8f16;
     Info.ptrVal = I.getArgOperand(0);
     Info.offset = 0;
-    Info.vol = false;
-    Info.readMem = true;
-    Info.writeMem = false;
+    Info.flags = MachineMemOperand::MOLoad;
     Info.align = 16;
     return true;
   }
@@ -3372,9 +3379,7 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
     Info.memVT = MVT::v4f16;
     Info.ptrVal = I.getArgOperand(0);
     Info.offset = 0;
-    Info.vol = false;
-    Info.readMem = true;
-    Info.writeMem = false;
+    Info.flags = MachineMemOperand::MOLoad;
     Info.align = 16;
     return true;
   }
@@ -3395,9 +3400,7 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
     Info.memVT = MVT::v8f32;
     Info.ptrVal = I.getArgOperand(0);
     Info.offset = 0;
-    Info.vol = false;
-    Info.readMem = true;
-    Info.writeMem = false;
+    Info.flags = MachineMemOperand::MOLoad;
     Info.align = 16;
     return true;
   }
@@ -3418,9 +3421,7 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
     Info.memVT = MVT::v4f16;
     Info.ptrVal = I.getArgOperand(0);
     Info.offset = 0;
-    Info.vol = false;
-    Info.readMem = false;
-    Info.writeMem = true;
+    Info.flags = MachineMemOperand::MOStore;
     Info.align = 16;
     return true;
   }
@@ -3441,9 +3442,7 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
     Info.memVT = MVT::v8f32;
     Info.ptrVal = I.getArgOperand(0);
     Info.offset = 0;
-    Info.vol = false;
-    Info.readMem = false;
-    Info.writeMem = true;
+    Info.flags = MachineMemOperand::MOStore;
     Info.align = 16;
     return true;
   }
@@ -3480,9 +3479,7 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
     Info.memVT = getValueType(DL, I.getType());
     Info.ptrVal = I.getArgOperand(0);
     Info.offset = 0;
-    Info.vol = false;
-    Info.readMem = true;
-    Info.writeMem = true;
+    Info.flags = MachineMemOperand::MOLoad | MachineMemOperand::MOStore;
     Info.align = 0;
     return true;
   }
@@ -3500,9 +3497,7 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
       Info.memVT = getValueType(DL, I.getType());
     Info.ptrVal = I.getArgOperand(0);
     Info.offset = 0;
-    Info.vol = false;
-    Info.readMem = true;
-    Info.writeMem = false;
+    Info.flags = MachineMemOperand::MOLoad;
     Info.align = cast<ConstantInt>(I.getArgOperand(1))->getZExtValue();
 
     return true;
@@ -3521,9 +3516,7 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
       Info.memVT = getValueType(DL, I.getType());
     Info.ptrVal = I.getArgOperand(0);
     Info.offset = 0;
-    Info.vol = false;
-    Info.readMem = true;
-    Info.writeMem = false;
+    Info.flags = MachineMemOperand::MOLoad;
     Info.align = cast<ConstantInt>(I.getArgOperand(1))->getZExtValue();
 
     return true;
@@ -3589,9 +3582,7 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
     Info.memVT = MVT::v4f32;
     Info.ptrVal = nullptr;
     Info.offset = 0;
-    Info.vol = false;
-    Info.readMem = true;
-    Info.writeMem = false;
+    Info.flags = MachineMemOperand::MOLoad;
     Info.align = 16;
     return true;
 
@@ -3711,9 +3702,7 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
     Info.memVT = MVT::v4i32;
     Info.ptrVal = nullptr;
     Info.offset = 0;
-    Info.vol = false;
-    Info.readMem = true;
-    Info.writeMem = false;
+    Info.flags = MachineMemOperand::MOLoad;
     Info.align = 16;
     return true;
 
@@ -3766,9 +3755,7 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
     Info.memVT = MVT::i8;
     Info.ptrVal = nullptr;
     Info.offset = 0;
-    Info.vol = false;
-    Info.readMem = true;
-    Info.writeMem = false;
+    Info.flags = MachineMemOperand::MOLoad;
     Info.align = 16;
     return true;
 
@@ -3821,9 +3808,7 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
     Info.memVT = MVT::i16;
     Info.ptrVal = nullptr;
     Info.offset = 0;
-    Info.vol = false;
-    Info.readMem = true;
-    Info.writeMem = false;
+    Info.flags = MachineMemOperand::MOLoad;
     Info.align = 16;
     return true;
 
@@ -3876,9 +3861,7 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
     Info.memVT = MVT::i32;
     Info.ptrVal = nullptr;
     Info.offset = 0;
-    Info.vol = false;
-    Info.readMem = true;
-    Info.writeMem = false;
+    Info.flags = MachineMemOperand::MOLoad;
     Info.align = 16;
     return true;
 
@@ -3916,9 +3899,7 @@ bool NVPTXTargetLowering::getTgtMemIntrinsic(
     Info.memVT = MVT::i64;
     Info.ptrVal = nullptr;
     Info.offset = 0;
-    Info.vol = false;
-    Info.readMem = true;
-    Info.writeMem = false;
+    Info.flags = MachineMemOperand::MOLoad;
     Info.align = 16;
     return true;
   }
@@ -4041,9 +4022,9 @@ bool NVPTXTargetLowering::allowUnsafeFPMath(MachineFunction &MF) const {
     return true;
 
   // Allow unsafe math if unsafe-fp-math attribute explicitly says so.
-  const Function *F = MF.getFunction();
-  if (F->hasFnAttribute("unsafe-fp-math")) {
-    Attribute Attr = F->getFnAttribute("unsafe-fp-math");
+  const Function &F = MF.getFunction();
+  if (F.hasFnAttribute("unsafe-fp-math")) {
+    Attribute Attr = F.getFnAttribute("unsafe-fp-math");
     StringRef Val = Attr.getValueAsString();
     if (Val == "true")
       return true;

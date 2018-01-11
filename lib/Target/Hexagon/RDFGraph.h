@@ -111,7 +111,7 @@
 //
 //   DFG dump:[
 //   f1: Function foo
-//   b2: === BB#0 === preds(0), succs(0):
+//   b2: === %bb.0 === preds(0), succs(0):
 //   p3: phi [d4<r0>(,d12,u9):]
 //   p5: phi [d6<r1>(,,u10):]
 //   s7: add [d8<r2>(,,u13):, u9<r0>(d4):, u10<r1>(d6):]
@@ -183,7 +183,7 @@
 //   This is typically used to prevent keeping registers artificially live
 //   in cases when they are defined via predicated instructions. For example:
 //     r0 = add-if-true cond, r10, r11                (1)
-//     r0 = add-if-false cond, r12, r13, r0<imp-use>  (2)
+//     r0 = add-if-false cond, r12, r13, implicit r0  (2)
 //     ... = r0                                       (3)
 //   Before (1), r0 is not intended to be live, and the use of r0 in (3) is
 //   not meant to be reached by any def preceding (1). However, since the

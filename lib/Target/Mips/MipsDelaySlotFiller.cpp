@@ -34,6 +34,8 @@
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/PseudoSourceValue.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/MC/MCInstrDesc.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Support/Casting.h"
@@ -41,8 +43,6 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <algorithm>
 #include <cassert>
 #include <iterator>
@@ -597,21 +597,14 @@ bool Filler::runOnMachineBasicBlock(MachineBasicBlock &MBB) {
   bool InMicroMipsMode = STI.inMicroMipsMode();
   const MipsInstrInfo *TII = STI.getInstrInfo();
 
-  if (InMicroMipsMode && STI.hasMips32r6()) {
-    // This is microMIPS32r6 or microMIPS64r6 processor. Delay slot for
-    // branching instructions is not needed.
-    return Changed;
-  }
-
   for (Iter I = MBB.begin(); I != MBB.end(); ++I) {
     if (!hasUnoccupiedSlot(&*I))
       continue;
 
-    ++FilledSlots;
-    Changed = true;
+    // Delay slot filling is disabled at -O0, or in microMIPS32R6.
+    if (!DisableDelaySlotFiller && (TM->getOptLevel() != CodeGenOpt::None) &&
+        !(InMicroMipsMode && STI.hasMips32r6())) {
 
-    // Delay slot filling is disabled at -O0.
-    if (!DisableDelaySlotFiller && (TM->getOptLevel() != CodeGenOpt::None)) {
       bool Filled = false;
 
       if (MipsCompactBranchPolicy.getValue() != CB_Always ||
@@ -643,6 +636,8 @@ bool Filler::runOnMachineBasicBlock(MachineBasicBlock &MBB) {
           // if it is in range.
           DSI->setDesc(TII->get(getEquivalentCallShort(DSI->getOpcode())));
         }
+        ++FilledSlots;
+        Changed = true;
         continue;
       }
     }
@@ -660,12 +655,15 @@ bool Filler::runOnMachineBasicBlock(MachineBasicBlock &MBB) {
          (STI.hasMips32r6() && MipsCompactBranchPolicy != CB_Never)) &&
         TII->getEquivalentCompactForm(I)) {
       I = replaceWithCompactBranch(MBB, I, I->getDebugLoc());
+      Changed = true;
       continue;
     }
 
     // Bundle the NOP to the instruction with the delay slot.
     BuildMI(MBB, std::next(I), I->getDebugLoc(), TII->get(Mips::NOP));
     MIBundleBuilder(MBB, I, std::next(I, 2));
+    ++FilledSlots;
+    Changed = true;
   }
 
   return Changed;

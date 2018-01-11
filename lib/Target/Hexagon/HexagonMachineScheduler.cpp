@@ -25,14 +25,14 @@
 #include "llvm/CodeGen/ScheduleDAG.h"
 #include "llvm/CodeGen/ScheduleHazardRecognizer.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetOpcodes.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSchedule.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/Function.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetOpcodes.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <algorithm>
 #include <cassert>
 #include <iomanip>
@@ -186,12 +186,10 @@ bool VLIWResourceModel::reserveResources(SUnit *SU) {
 /// after setting up the current scheduling region. [RegionBegin, RegionEnd)
 /// only includes instructions that have DAG nodes, not scheduling boundaries.
 void VLIWMachineScheduler::schedule() {
-  DEBUG(dbgs()
-        << "********** MI Converging Scheduling VLIW BB#" << BB->getNumber()
-        << " " << BB->getName()
-        << " in_func " << BB->getParent()->getFunction()->getName()
-        << " at loop depth "  << MLI->getLoopDepth(BB)
-        << " \n");
+  DEBUG(dbgs() << "********** MI Converging Scheduling VLIW "
+               << printMBBReference(*BB) << " " << BB->getName() << " in_func "
+               << BB->getParent()->getName() << " at loop depth "
+               << MLI->getLoopDepth(BB) << " \n");
 
   buildDAGWithRegPressure();
 
@@ -237,8 +235,8 @@ void VLIWMachineScheduler::schedule() {
   placeDebugValues();
 
   DEBUG({
-    unsigned BBNum = begin()->getParent()->getNumber();
-    dbgs() << "*** Final schedule for BB#" << BBNum << " ***\n";
+    dbgs() << "*** Final schedule for "
+           << printMBBReference(*begin()->getParent()) << " ***\n";
     dumpSchedule();
     dbgs() << '\n';
   });

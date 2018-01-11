@@ -27,13 +27,13 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineOperand.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/MC/MCInstrDesc.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <cassert>
 #include <cstdint>
 
@@ -461,7 +461,7 @@ bool HexagonOptAddrMode::changeAddAsl(NodeAddr<UseNode *> AddAslUN,
     DEBUG(dbgs() << "[InstrNode]: " << Print<NodeAddr<InstrNode *>>(UseIA, *DFG)
                  << "\n");
     MachineInstr *UseMI = UseIA.Addr->getCode();
-    DEBUG(dbgs() << "[MI <BB#" << UseMI->getParent()->getNumber()
+    DEBUG(dbgs() << "[MI <" << printMBBReference(*UseMI->getParent())
                  << ">]: " << *UseMI << "\n");
     const MCInstrDesc &UseMID = UseMI->getDesc();
     assert(HII->getAddrMode(*UseMI) == HexagonII::BaseImmOffset);
@@ -570,7 +570,7 @@ bool HexagonOptAddrMode::processBlock(NodeAddr<BlockNode *> BA) {
 
       NodeAddr<StmtNode *> OwnerN = UseN.Addr->getOwner(*DFG);
       MachineInstr *UseMI = OwnerN.Addr->getCode();
-      DEBUG(dbgs() << "\t\t[MI <BB#" << UseMI->getParent()->getNumber()
+      DEBUG(dbgs() << "\t\t[MI <" << printMBBReference(*UseMI->getParent())
                    << ">]: " << *UseMI << "\n");
 
       int UseMOnum = -1;
@@ -595,7 +595,7 @@ bool HexagonOptAddrMode::processBlock(NodeAddr<BlockNode *> BA) {
 }
 
 bool HexagonOptAddrMode::runOnMachineFunction(MachineFunction &MF) {
-  if (skipFunction(*MF.getFunction()))
+  if (skipFunction(MF.getFunction()))
     return false;
 
   bool Changed = false;

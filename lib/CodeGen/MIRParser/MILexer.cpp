@@ -208,15 +208,24 @@ static MIToken::TokenKind getIdentifierKind(StringRef Identifier) {
       .Case("internal", MIToken::kw_internal)
       .Case("early-clobber", MIToken::kw_early_clobber)
       .Case("debug-use", MIToken::kw_debug_use)
+      .Case("renamable", MIToken::kw_renamable)
       .Case("tied-def", MIToken::kw_tied_def)
       .Case("frame-setup", MIToken::kw_frame_setup)
       .Case("debug-location", MIToken::kw_debug_location)
       .Case("same_value", MIToken::kw_cfi_same_value)
       .Case("offset", MIToken::kw_cfi_offset)
+      .Case("rel_offset", MIToken::kw_cfi_rel_offset)
       .Case("def_cfa_register", MIToken::kw_cfi_def_cfa_register)
       .Case("def_cfa_offset", MIToken::kw_cfi_def_cfa_offset)
+      .Case("adjust_cfa_offset", MIToken::kw_cfi_adjust_cfa_offset)
+      .Case("escape", MIToken::kw_cfi_escape)
       .Case("def_cfa", MIToken::kw_cfi_def_cfa)
+      .Case("remember_state", MIToken::kw_cfi_remember_state)
       .Case("restore", MIToken::kw_cfi_restore)
+      .Case("restore_state", MIToken::kw_cfi_restore_state)
+      .Case("undefined", MIToken::kw_cfi_undefined)
+      .Case("register", MIToken::kw_cfi_register)
+      .Case("window_save", MIToken::kw_cfi_window_save)
       .Case("blockaddress", MIToken::kw_blockaddress)
       .Case("intrinsic", MIToken::kw_intrinsic)
       .Case("target-index", MIToken::kw_target_index)
@@ -277,6 +286,9 @@ static Cursor maybeLexMachineBasicBlock(Cursor C, MIToken &Token,
     C.advance();
   StringRef Number = NumberRange.upto(C);
   unsigned StringOffset = PrefixLength + Number.size(); // Drop '%bb.<id>'
+  // TODO: The format bb.<id>.<irname> is supported only when it's not a
+  // reference. Once we deprecate the format where the irname shows up, we
+  // should only lex forward if it is a reference.
   if (C.peek() == '.') {
     C.advance(); // Skip '.'
     ++StringOffset;

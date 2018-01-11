@@ -6,7 +6,7 @@ declare {i32, i1} @llvm.umul.with.overflow.i32(i32 %a, i32 %b)
 
 define zeroext i1 @a(i32 %x)  nounwind {
 ; X86-LABEL: a:
-; X86:       # BB#0:
+; X86:       # %bb.0:
 ; X86-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; X86-NEXT:    movl $3, %ecx
 ; X86-NEXT:    mull %ecx
@@ -14,7 +14,7 @@ define zeroext i1 @a(i32 %x)  nounwind {
 ; X86-NEXT:    retl
 ;
 ; X64-LABEL: a:
-; X64:       # BB#0:
+; X64:       # %bb.0:
 ; X64-NEXT:    movl $3, %ecx
 ; X64-NEXT:    movl %edi, %eax
 ; X64-NEXT:    mull %ecx
@@ -27,15 +27,15 @@ define zeroext i1 @a(i32 %x)  nounwind {
 
 define i32 @test2(i32 %a, i32 %b) nounwind readnone {
 ; X86-LABEL: test2:
-; X86:       # BB#0: # %entry
+; X86:       # %bb.0: # %entry
 ; X86-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; X86-NEXT:    addl {{[0-9]+}}(%esp), %eax
 ; X86-NEXT:    addl %eax, %eax
 ; X86-NEXT:    retl
 ;
 ; X64-LABEL: test2:
-; X64:       # BB#0: # %entry
-; X64-NEXT:    # kill: %EDI<def> %EDI<kill> %RDI<def>
+; X64:       # %bb.0: # %entry
+; X64-NEXT:    # kill: def %edi killed %edi def %rdi
 ; X64-NEXT:    addl %esi, %edi
 ; X64-NEXT:    leal (%rdi,%rdi), %eax
 ; X64-NEXT:    retq
@@ -48,7 +48,7 @@ entry:
 
 define i32 @test3(i32 %a, i32 %b) nounwind readnone {
 ; X86-LABEL: test3:
-; X86:       # BB#0: # %entry
+; X86:       # %bb.0: # %entry
 ; X86-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; X86-NEXT:    addl {{[0-9]+}}(%esp), %eax
 ; X86-NEXT:    movl $4, %ecx
@@ -56,9 +56,9 @@ define i32 @test3(i32 %a, i32 %b) nounwind readnone {
 ; X86-NEXT:    retl
 ;
 ; X64-LABEL: test3:
-; X64:       # BB#0: # %entry
-; X64-NEXT:    # kill: %ESI<def> %ESI<kill> %RSI<def>
-; X64-NEXT:    # kill: %EDI<def> %EDI<kill> %RDI<def>
+; X64:       # %bb.0: # %entry
+; X64-NEXT:    # kill: def %esi killed %esi def %rsi
+; X64-NEXT:    # kill: def %edi killed %edi def %rdi
 ; X64-NEXT:    leal (%rdi,%rsi), %eax
 ; X64-NEXT:    movl $4, %ecx
 ; X64-NEXT:    mull %ecx

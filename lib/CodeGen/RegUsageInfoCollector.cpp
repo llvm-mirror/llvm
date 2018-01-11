@@ -95,7 +95,7 @@ bool RegUsageInfoCollector::runOnMachineFunction(MachineFunction &MF) {
   unsigned RegMaskSize = (TRI->getNumRegs() + 31) / 32;
   RegMask.resize(RegMaskSize, 0xFFFFFFFF);
 
-  const Function *F = MF.getFunction();
+  const Function &F = MF.getFunction();
 
   PhysicalRegisterUsageInfo *PRUI = &getAnalysis<PhysicalRegisterUsageInfo>();
 
@@ -127,7 +127,7 @@ bool RegUsageInfoCollector::runOnMachineFunction(MachineFunction &MF) {
 
   if (!TargetFrameLowering::isSafeForNoCSROpt(F)) {
     const uint32_t *CallPreservedMask =
-        TRI->getCallPreservedMask(MF, F->getCallingConv());
+        TRI->getCallPreservedMask(MF, F.getCallingConv());
     if (CallPreservedMask) {
       // Set callee saved register as preserved.
       for (unsigned i = 0; i < RegMaskSize; ++i)
@@ -141,11 +141,11 @@ bool RegUsageInfoCollector::runOnMachineFunction(MachineFunction &MF) {
 
   for (unsigned PReg = 1, PRegE = TRI->getNumRegs(); PReg < PRegE; ++PReg)
     if (MachineOperand::clobbersPhysReg(&(RegMask[0]), PReg))
-      DEBUG(dbgs() << TRI->getName(PReg) << " ");
+      DEBUG(dbgs() << printReg(PReg, TRI) << " ");
 
   DEBUG(dbgs() << " \n----------------------------------------\n");
 
-  PRUI->storeUpdateRegUsageInfo(F, std::move(RegMask));
+  PRUI->storeUpdateRegUsageInfo(&F, std::move(RegMask));
 
   return false;
 }

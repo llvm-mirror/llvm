@@ -592,12 +592,8 @@ private:
   /// Create a ModelledPHI for each PHI in BB, adding to PHIs.
   void analyzeInitialPHIs(BasicBlock *BB, ModelledPHISet &PHIs,
                           SmallPtrSetImpl<Value *> &PHIContents) {
-    for (auto &I : *BB) {
-      auto *PN = dyn_cast<PHINode>(&I);
-      if (!PN)
-        return;
-
-      auto MPHI = ModelledPHI(PN);
+    for (PHINode &PN : BB->phis()) {
+      auto MPHI = ModelledPHI(&PN);
       PHIs.insert(MPHI);
       for (auto *V : MPHI.getValues())
         PHIContents.insert(V);
@@ -641,7 +637,7 @@ Optional<SinkingInstructionCandidate> GVNSink::analyzeInstructionForSinking(
   DenseMap<uint32_t, unsigned> VNums;
   for (auto *I : Insts) {
     uint32_t N = VN.lookupOrAdd(I);
-    DEBUG(dbgs() << " VN=" << utohexstr(N) << " for" << *I << "\n");
+    DEBUG(dbgs() << " VN=" << Twine::utohexstr(N) << " for" << *I << "\n");
     if (N == ~0U)
       return None;
     VNums[N]++;

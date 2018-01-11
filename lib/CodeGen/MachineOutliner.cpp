@@ -59,20 +59,17 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/Twine.h"
-#include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
-#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineOptimizationRemarkEmitter.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <functional>
 #include <map>
 #include <sstream>
@@ -939,17 +936,48 @@ unsigned MachineOutliner::findCandidates(
       SuffixTreeNode *M = ChildPair.second;
 
       if (M && M->IsInTree && M->isLeaf()) {
-        // Each sequence is over [StartIt, EndIt].
-        MachineBasicBlock::iterator StartIt = Mapper.InstrList[M->SuffixIdx];
-        MachineBasicBlock::iterator EndIt =
-            Mapper.InstrList[M->SuffixIdx + StringLen - 1];
-
-        CandidatesForRepeatedSeq.emplace_back(M->SuffixIdx, StringLen,
-                                              FunctionList.size());
-        RepeatedSequenceLocs.emplace_back(std::make_pair(StartIt, EndIt));
-
         // Never visit this leaf again.
         M->IsInTree = false;
+        unsigned StartIdx = M->SuffixIdx;
+        unsigned EndIdx = StartIdx + StringLen - 1;
+
+        // Trick: Discard some candidates that would be incompatible with the
+        // ones we've already found for this sequence. This will save us some
+        // work in candidate selection.
+        //
+        // If two candidates overlap, then we can't outline them both. This
+        // happens when we have candidates that look like, say
+        //
+        // AA (where each "A" is an instruction).
+        //
+        // We might have some portion of the module that looks like this:
+        // AAAAAA (6 A's) 
+        //
+        // In this case, there are 5 different copies of "AA" in this range, but
+        // at most 3 can be outlined. If only outlining 3 of these is going to
+        // be unbeneficial, then we ought to not bother.
+        //
+        // Note that two things DON'T overlap when they look like this:
+        // start1...end1 .... start2...end2
+        // That is, one must either
+        // * End before the other starts
+        // * Start after the other ends
+        if (std::all_of(CandidatesForRepeatedSeq.begin(),
+                        CandidatesForRepeatedSeq.end(),
+                        [&StartIdx, &EndIdx](const Candidate &C) {
+                          return (EndIdx < C.getStartIdx() ||
+                                  StartIdx > C.getEndIdx()); 
+                        })) {
+          // It doesn't overlap with anything, so we can outline it.
+          // Each sequence is over [StartIt, EndIt].
+          MachineBasicBlock::iterator StartIt = Mapper.InstrList[StartIdx];
+          MachineBasicBlock::iterator EndIt = Mapper.InstrList[EndIdx];
+
+          // Save the candidate and its location.
+          CandidatesForRepeatedSeq.emplace_back(StartIdx, StringLen,
+                                                FunctionList.size());
+          RepeatedSequenceLocs.emplace_back(std::make_pair(StartIt, EndIt));
+        }
       }
     }
 
@@ -961,8 +989,8 @@ unsigned MachineOutliner::findCandidates(
     std::vector<unsigned> Seq;
     for (unsigned i = Leaf->SuffixIdx; i < Leaf->SuffixIdx + StringLen; i++)
       Seq.push_back(ST.Str[i]);
-    OutlinedFunction OF(FunctionList.size(), Parent.OccurrenceCount, Seq,
-                        MInfo);
+    OutlinedFunction OF(FunctionList.size(), CandidatesForRepeatedSeq.size(),
+                        Seq, MInfo);
     unsigned Benefit = OF.getBenefit();
 
     // Is it better to outline this candidate than not?

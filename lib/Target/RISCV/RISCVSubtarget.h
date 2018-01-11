@@ -18,9 +18,9 @@
 #include "RISCVISelLowering.h"
 #include "RISCVInstrInfo.h"
 #include "llvm/CodeGen/SelectionDAGTargetInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 
 #define GET_SUBTARGETINFO_HEADER
 #include "RISCVGenSubtargetInfo.inc"
@@ -30,6 +30,11 @@ class StringRef;
 
 class RISCVSubtarget : public RISCVGenSubtargetInfo {
   virtual void anchor();
+  bool HasStdExtM = false;
+  bool HasStdExtA = false;
+  bool HasStdExtF = false;
+  bool HasStdExtD = false;
+  bool HasStdExtC = false;
   bool HasRV64 = false;
   unsigned XLen = 32;
   MVT XLenVT = MVT::i32;
@@ -66,6 +71,11 @@ public:
   const SelectionDAGTargetInfo *getSelectionDAGInfo() const override {
     return &TSInfo;
   }
+  bool hasStdExtM() const { return HasStdExtM; }
+  bool hasStdExtA() const { return HasStdExtA; }
+  bool hasStdExtF() const { return HasStdExtF; }
+  bool hasStdExtD() const { return HasStdExtD; }
+  bool hasStdExtC() const { return HasStdExtC; }
   bool is64Bit() const { return HasRV64; }
   MVT getXLenVT() const { return XLenVT; }
   unsigned getXLen() const { return XLen; }

@@ -570,10 +570,7 @@ SDValue DAGTypeLegalizer::PromoteIntRes_SELECT(SDNode *N) {
 
 SDValue DAGTypeLegalizer::PromoteIntRes_VSELECT(SDNode *N) {
   SDValue Mask = N->getOperand(0);
-  EVT OpTy = N->getOperand(1).getValueType();
 
-  // Promote all the way up to the canonical SetCC type.
-  Mask = PromoteTargetBoolean(Mask, OpTy);
   SDValue LHS = GetPromotedInteger(N->getOperand(1));
   SDValue RHS = GetPromotedInteger(N->getOperand(2));
   return DAG.getNode(ISD::VSELECT, SDLoc(N),
@@ -602,20 +599,9 @@ SDValue DAGTypeLegalizer::PromoteIntRes_SETCC(SDNode *N) {
   assert(SVT.isVector() == N->getOperand(0).getValueType().isVector() &&
          "Vector compare must return a vector result!");
 
-  SDValue LHS = N->getOperand(0);
-  SDValue RHS = N->getOperand(1);
-  if (LHS.getValueType() != RHS.getValueType()) {
-    if (getTypeAction(LHS.getValueType()) == TargetLowering::TypePromoteInteger &&
-        !LHS.getValueType().isVector())
-      LHS = GetPromotedInteger(LHS);
-    if (getTypeAction(RHS.getValueType()) == TargetLowering::TypePromoteInteger &&
-        !RHS.getValueType().isVector())
-      RHS = GetPromotedInteger(RHS);
-  }
-
   // Get the SETCC result using the canonical SETCC type.
-  SDValue SetCC = DAG.getNode(N->getOpcode(), dl, SVT, LHS, RHS,
-                              N->getOperand(2));
+  SDValue SetCC = DAG.getNode(N->getOpcode(), dl, SVT, N->getOperand(0),
+                              N->getOperand(1), N->getOperand(2));
 
   // Convert to the expected type.
   return DAG.getSExtOrTrunc(SetCC, dl, NVT);
@@ -775,7 +761,30 @@ SDValue DAGTypeLegalizer::PromoteIntRes_UADDSUBO(SDNode *N, unsigned ResNo) {
 SDValue DAGTypeLegalizer::PromoteIntRes_ADDSUBCARRY(SDNode *N, unsigned ResNo) {
   if (ResNo == 1)
     return PromoteIntRes_Overflow(N);
-  llvm_unreachable("Not implemented");
+
+  // We need to sign-extend the operands so the carry value computed by the
+  // wide operation will be equivalent to the carry value computed by the
+  // narrow operation.
+  // An ADDCARRY can generate carry only if any of the operands has its
+  // most significant bit set. Sign extension propagates the most significant
+  // bit into the higher bits which means the extra bit that the narrow
+  // addition would need (i.e. the carry) will be propagated through the higher
+  // bits of the wide addition.
+  // A SUBCARRY can generate borrow only if LHS < RHS and this property will be
+  // preserved by sign extension.
+  SDValue LHS = SExtPromotedInteger(N->getOperand(0));
+  SDValue RHS = SExtPromotedInteger(N->getOperand(1));
+
+  EVT ValueVTs[] = {LHS.getValueType(), N->getValueType(1)};
+
+  // Do the arithmetic in the wide type.
+  SDValue Res = DAG.getNode(N->getOpcode(), SDLoc(N), DAG.getVTList(ValueVTs),
+                            LHS, RHS, N->getOperand(2));
+
+  // Update the users of the original carry/borrow value.
+  ReplaceValueWith(SDValue(N, 1), Res.getValue(1));
+
+  return SDValue(Res.getNode(), 0);
 }
 
 SDValue DAGTypeLegalizer::PromoteIntRes_XMULO(SDNode *N, unsigned ResNo) {
@@ -1210,24 +1219,23 @@ SDValue DAGTypeLegalizer::PromoteIntOp_MSTORE(MaskedStoreSDNode *N,
     // When the data operand has illegal type, we should legalize the data
     // operand first. The mask will be promoted/splitted/widened according to
     // the data operand type.
-    if (TLI.isTypeLegal(DataVT))
+    if (TLI.isTypeLegal(DataVT)) {
       Mask = PromoteTargetBoolean(Mask, DataVT);
-    else {
-      if (getTypeAction(DataVT) == TargetLowering::TypePromoteInteger)
-        return PromoteIntOp_MSTORE(N, 3);
-
-      else if (getTypeAction(DataVT) == TargetLowering::TypeWidenVector)
-        return WidenVecOp_MSTORE(N, 3);
-
-      else {
-        assert (getTypeAction(DataVT) == TargetLowering::TypeSplitVector);
-        return SplitVecOp_MSTORE(N, 3);
-      }
+      // Update in place.
+      SmallVector<SDValue, 4> NewOps(N->op_begin(), N->op_end());
+      NewOps[2] = Mask;
+      return SDValue(DAG.UpdateNodeOperands(N, NewOps), 0);
     }
+
+    if (getTypeAction(DataVT) == TargetLowering::TypePromoteInteger)
+      return PromoteIntOp_MSTORE(N, 3);
+    if (getTypeAction(DataVT) == TargetLowering::TypeWidenVector)
+      return WidenVecOp_MSTORE(N, 3);
+    assert (getTypeAction(DataVT) == TargetLowering::TypeSplitVector);
+    return SplitVecOp_MSTORE(N, 3);
   } else { // Data operand
     assert(OpNo == 3 && "Unexpected operand for promotion");
     DataOp = GetPromotedInteger(DataOp);
-    Mask = PromoteTargetBoolean(Mask, DataOp.getValueType());
     TruncateStore = true;
   }
 
@@ -1254,6 +1262,9 @@ SDValue DAGTypeLegalizer::PromoteIntOp_MGATHER(MaskedGatherSDNode *N,
     // The Mask
     EVT DataVT = N->getValueType(0);
     NewOps[OpNo] = PromoteTargetBoolean(N->getOperand(OpNo), DataVT);
+  } else if (OpNo == 4) {
+    // Need to sign extend the index since the bits will likely be used.
+    NewOps[OpNo] = SExtPromotedInteger(N->getOperand(OpNo));
   } else
     NewOps[OpNo] = GetPromotedInteger(N->getOperand(OpNo));
 
@@ -1274,6 +1285,9 @@ SDValue DAGTypeLegalizer::PromoteIntOp_MSCATTER(MaskedScatterSDNode *N,
     // The Mask
     EVT DataVT = N->getValue().getValueType();
     NewOps[OpNo] = PromoteTargetBoolean(N->getOperand(OpNo), DataVT);
+  } else if (OpNo == 4) {
+    // Need to sign extend the index since the bits will likely be used.
+    NewOps[OpNo] = SExtPromotedInteger(N->getOperand(OpNo));
   } else
     NewOps[OpNo] = GetPromotedInteger(N->getOperand(OpNo));
   return SDValue(DAG.UpdateNodeOperands(N, NewOps), 0);
@@ -3228,8 +3242,7 @@ SDValue DAGTypeLegalizer::ExpandIntOp_STORE(StoreSDNode *N, unsigned OpNo) {
 
     // Increment the pointer to the other half.
     unsigned IncrementSize = NVT.getSizeInBits()/8;
-    Ptr = DAG.getNode(ISD::ADD, dl, Ptr.getValueType(), Ptr,
-                      DAG.getConstant(IncrementSize, dl, Ptr.getValueType()));
+    Ptr = DAG.getObjectPtrOffset(dl, Ptr, IncrementSize);
     Hi = DAG.getTruncStore(
         Ch, dl, Hi, Ptr, N->getPointerInfo().getWithOffset(IncrementSize), NEVT,
         MinAlign(Alignment, IncrementSize), MMOFlags, AAInfo);
@@ -3264,8 +3277,7 @@ SDValue DAGTypeLegalizer::ExpandIntOp_STORE(StoreSDNode *N, unsigned OpNo) {
                          MMOFlags, AAInfo);
 
   // Increment the pointer to the other half.
-  Ptr = DAG.getNode(ISD::ADD, dl, Ptr.getValueType(), Ptr,
-                    DAG.getConstant(IncrementSize, dl, Ptr.getValueType()));
+  Ptr = DAG.getObjectPtrOffset(dl, Ptr, IncrementSize);
   // Store the lowest ExcessBits bits in the second half.
   Lo = DAG.getTruncStore(Ch, dl, Lo, Ptr,
                          N->getPointerInfo().getWithOffset(IncrementSize),
@@ -3466,7 +3478,6 @@ SDValue DAGTypeLegalizer::PromoteIntRes_CONCAT_VECTORS(SDNode *N) {
   EVT NOutVT = TLI.getTypeToTransformTo(*DAG.getContext(), OutVT);
   assert(NOutVT.isVector() && "This type must be promoted to a vector type");
 
-  EVT InElemTy = OutVT.getVectorElementType();
   EVT OutElemTy = NOutVT.getVectorElementType();
 
   unsigned NumElem = N->getOperand(0).getValueType().getVectorNumElements();
@@ -3475,15 +3486,36 @@ SDValue DAGTypeLegalizer::PromoteIntRes_CONCAT_VECTORS(SDNode *N) {
   assert(NumElem * NumOperands == NumOutElem &&
          "Unexpected number of elements");
 
+  // If the input type is legal and we can promote it to a legal type with the
+  // same element size, go ahead do that to create a new concat.
+  if (getTypeAction(N->getOperand(0).getValueType()) ==
+      TargetLowering::TypeLegal) {
+    EVT InPromotedTy = EVT::getVectorVT(*DAG.getContext(), OutElemTy, NumElem);
+    if (TLI.isTypeLegal(InPromotedTy)) {
+      SmallVector<SDValue, 8> Ops(NumOperands);
+      for (unsigned i = 0; i < NumOperands; ++i) {
+        Ops[i] = DAG.getNode(ISD::ANY_EXTEND, dl, InPromotedTy,
+                             N->getOperand(i));
+      }
+      return DAG.getNode(ISD::CONCAT_VECTORS, dl, NOutVT, Ops);
+    }
+  }
+
   // Take the elements from the first vector.
   SmallVector<SDValue, 8> Ops(NumOutElem);
   for (unsigned i = 0; i < NumOperands; ++i) {
     SDValue Op = N->getOperand(i);
+    if (getTypeAction(Op.getValueType()) == TargetLowering::TypePromoteInteger)
+      Op = GetPromotedInteger(Op);
+    EVT SclrTy = Op.getValueType().getVectorElementType();
+    assert(NumElem == Op.getValueType().getVectorNumElements() &&
+           "Unexpected number of elements");
+
     for (unsigned j = 0; j < NumElem; ++j) {
       SDValue Ext = DAG.getNode(
-          ISD::EXTRACT_VECTOR_ELT, dl, InElemTy, Op,
+          ISD::EXTRACT_VECTOR_ELT, dl, SclrTy, Op,
           DAG.getConstant(j, dl, TLI.getVectorIdxTy(DAG.getDataLayout())));
-      Ops[i * NumElem + j] = DAG.getNode(ISD::ANY_EXTEND, dl, OutElemTy, Ext);
+      Ops[i * NumElem + j] = DAG.getAnyExtOrTrunc(Ext, dl, OutElemTy);
     }
   }
 

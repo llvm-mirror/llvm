@@ -40,6 +40,7 @@
 #include "llvm/CodeGen/SelectionDAGNodes.h"
 #include "llvm/CodeGen/SlotIndexes.h"
 #include "llvm/CodeGen/StackProtector.h"
+#include "llvm/CodeGen/TargetOpcodes.h"
 #include "llvm/CodeGen/WinEHFuncInfo.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DebugInfoMetadata.h"
@@ -54,7 +55,6 @@
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetOpcodes.h"
 #include <algorithm>
 #include <cassert>
 #include <limits>
@@ -739,7 +739,7 @@ unsigned StackColoring::collectMarkers(unsigned NumSlot) {
         } else {
           for (auto Slot : slots) {
             DEBUG(dbgs() << "Found a use of slot #" << Slot);
-            DEBUG(dbgs() << " at BB#" << MBB->getNumber() << " index ");
+            DEBUG(dbgs() << " at " << printMBBReference(*MBB) << " index ");
             DEBUG(Indexes->getInstructionIndex(MI).print(dbgs()));
             const AllocaInst *Allocation = MFI->getObjectAllocation(Slot);
             if (Allocation) {
@@ -1129,8 +1129,7 @@ void StackColoring::expungeSlotMap(DenseMap<int, int> &SlotRemap,
 
 bool StackColoring::runOnMachineFunction(MachineFunction &Func) {
   DEBUG(dbgs() << "********** Stack Coloring **********\n"
-               << "********** Function: "
-               << ((const Value*)Func.getFunction())->getName() << '\n');
+               << "********** Function: " << Func.getName() << '\n');
   MF = &Func;
   MFI = &MF->getFrameInfo();
   Indexes = &getAnalysis<SlotIndexes>();
@@ -1170,7 +1169,7 @@ bool StackColoring::runOnMachineFunction(MachineFunction &Func) {
   // Don't continue because there are not enough lifetime markers, or the
   // stack is too small, or we are told not to optimize the slots.
   if (NumMarkers < 2 || TotalSize < 16 || DisableColoring ||
-      skipFunction(*Func.getFunction())) {
+      skipFunction(Func.getFunction())) {
     DEBUG(dbgs()<<"Will not try to merge slots.\n");
     return removeAllMarkers();
   }

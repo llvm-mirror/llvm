@@ -23,6 +23,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCInstrDesc.h"
+#include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCSubtargetInfo.h"
@@ -39,7 +40,9 @@
 #include "MCTargetDesc/AMDGPUMCTargetDesc.h"
 
 #define GET_INSTRINFO_NAMED_OPS
+#define GET_INSTRMAP_INFO
 #include "AMDGPUGenInstrInfo.inc"
+#undef GET_INSTRMAP_INFO
 #undef GET_INSTRINFO_NAMED_OPS
 
 namespace {
@@ -100,15 +103,76 @@ static cl::opt<bool> EnablePackedInlinableLiterals(
 
 namespace AMDGPU {
 
+LLVM_READNONE
+static inline Channels indexToChannel(unsigned Channel) {
+  switch (Channel) {
+  case 1:
+    return AMDGPU::Channels_1;
+  case 2:
+    return AMDGPU::Channels_2;
+  case 3:
+    return AMDGPU::Channels_3;
+  case 4:
+    return AMDGPU::Channels_4;
+  default:
+    llvm_unreachable("invalid MIMG channel");
+  }
+}
+
+
+// FIXME: Need to handle d16 images correctly.
+static unsigned rcToChannels(unsigned RCID) {
+  switch (RCID) {
+  case AMDGPU::VGPR_32RegClassID:
+    return 1;
+  case AMDGPU::VReg_64RegClassID:
+    return 2;
+  case AMDGPU::VReg_96RegClassID:
+    return 3;
+  case AMDGPU::VReg_128RegClassID:
+    return 4;
+  default:
+    llvm_unreachable("invalid MIMG register class");
+  }
+}
+
+int getMaskedMIMGOp(const MCInstrInfo &MII, unsigned Opc, unsigned NewChannels) {
+  AMDGPU::Channels Channel = AMDGPU::indexToChannel(NewChannels);
+  unsigned OrigChannels = rcToChannels(MII.get(Opc).OpInfo[0].RegClass);
+  if (NewChannels == OrigChannels)
+    return Opc;
+
+  switch (OrigChannels) {
+  case 1:
+    return AMDGPU::getMaskedMIMGOp1(Opc, Channel);
+  case 2:
+    return AMDGPU::getMaskedMIMGOp2(Opc, Channel);
+  case 3:
+    return AMDGPU::getMaskedMIMGOp3(Opc, Channel);
+  case 4:
+    return AMDGPU::getMaskedMIMGOp4(Opc, Channel);
+  default:
+    llvm_unreachable("invalid MIMG channel");
+  }
+}
+
+// Wrapper for Tablegen'd function.  enum Subtarget is not defined in any
+// header files, so we need to wrap it in a function that takes unsigned
+// instead.
+int getMCOpcode(uint16_t Opcode, unsigned Gen) {
+  return getMCOpcodeGen(Opcode, static_cast<Subtarget>(Gen));
+}
+
 namespace IsaInfo {
 
 IsaVersion getIsaVersion(const FeatureBitset &Features) {
-  // SI.
+  // GCN GFX6 (Southern Islands (SI)).
   if (Features.test(FeatureISAVersion6_0_0))
     return {6, 0, 0};
   if (Features.test(FeatureISAVersion6_0_1))
     return {6, 0, 1};
-  // CI.
+
+  // GCN GFX7 (Sea Islands (CI)).
   if (Features.test(FeatureISAVersion7_0_0))
     return {7, 0, 0};
   if (Features.test(FeatureISAVersion7_0_1))
@@ -117,8 +181,10 @@ IsaVersion getIsaVersion(const FeatureBitset &Features) {
     return {7, 0, 2};
   if (Features.test(FeatureISAVersion7_0_3))
     return {7, 0, 3};
+  if (Features.test(FeatureISAVersion7_0_4))
+    return {7, 0, 4};
 
-  // VI.
+  // GCN GFX8 (Volcanic Islands (VI)).
   if (Features.test(FeatureISAVersion8_0_0))
     return {8, 0, 0};
   if (Features.test(FeatureISAVersion8_0_1))
@@ -127,20 +193,14 @@ IsaVersion getIsaVersion(const FeatureBitset &Features) {
     return {8, 0, 2};
   if (Features.test(FeatureISAVersion8_0_3))
     return {8, 0, 3};
-  if (Features.test(FeatureISAVersion8_0_4))
-    return {8, 0, 4};
   if (Features.test(FeatureISAVersion8_1_0))
     return {8, 1, 0};
 
-  // GFX9.
+  // GCN GFX9.
   if (Features.test(FeatureISAVersion9_0_0))
     return {9, 0, 0};
-  if (Features.test(FeatureISAVersion9_0_1))
-    return {9, 0, 1};
   if (Features.test(FeatureISAVersion9_0_2))
     return {9, 0, 2};
-  if (Features.test(FeatureISAVersion9_0_3))
-    return {9, 0, 3};
 
   if (!Features.test(FeatureGCN) || Features.test(FeatureSouthernIslands))
     return {0, 0, 0};
@@ -572,43 +632,71 @@ bool isRegIntersect(unsigned Reg0, unsigned Reg1, const MCRegisterInfo* TRI) {
   return false;
 }
 
-unsigned getMCReg(unsigned Reg, const MCSubtargetInfo &STI) {
-
-  switch(Reg) {
-  default: break;
-  case AMDGPU::FLAT_SCR:
-    assert(!isSI(STI));
-    return isCI(STI) ? AMDGPU::FLAT_SCR_ci : AMDGPU::FLAT_SCR_vi;
-
-  case AMDGPU::FLAT_SCR_LO:
-    assert(!isSI(STI));
-    return isCI(STI) ? AMDGPU::FLAT_SCR_LO_ci : AMDGPU::FLAT_SCR_LO_vi;
-
-  case AMDGPU::FLAT_SCR_HI:
-    assert(!isSI(STI));
-    return isCI(STI) ? AMDGPU::FLAT_SCR_HI_ci : AMDGPU::FLAT_SCR_HI_vi;
+#define MAP_REG2REG \
+  using namespace AMDGPU; \
+  switch(Reg) { \
+  default: return Reg; \
+  CASE_CI_VI(FLAT_SCR) \
+  CASE_CI_VI(FLAT_SCR_LO) \
+  CASE_CI_VI(FLAT_SCR_HI) \
+  CASE_VI_GFX9(TTMP0) \
+  CASE_VI_GFX9(TTMP1) \
+  CASE_VI_GFX9(TTMP2) \
+  CASE_VI_GFX9(TTMP3) \
+  CASE_VI_GFX9(TTMP4) \
+  CASE_VI_GFX9(TTMP5) \
+  CASE_VI_GFX9(TTMP6) \
+  CASE_VI_GFX9(TTMP7) \
+  CASE_VI_GFX9(TTMP8) \
+  CASE_VI_GFX9(TTMP9) \
+  CASE_VI_GFX9(TTMP10) \
+  CASE_VI_GFX9(TTMP11) \
+  CASE_VI_GFX9(TTMP12) \
+  CASE_VI_GFX9(TTMP13) \
+  CASE_VI_GFX9(TTMP14) \
+  CASE_VI_GFX9(TTMP15) \
+  CASE_VI_GFX9(TTMP0_TTMP1) \
+  CASE_VI_GFX9(TTMP2_TTMP3) \
+  CASE_VI_GFX9(TTMP4_TTMP5) \
+  CASE_VI_GFX9(TTMP6_TTMP7) \
+  CASE_VI_GFX9(TTMP8_TTMP9) \
+  CASE_VI_GFX9(TTMP10_TTMP11) \
+  CASE_VI_GFX9(TTMP12_TTMP13) \
+  CASE_VI_GFX9(TTMP14_TTMP15) \
+  CASE_VI_GFX9(TTMP0_TTMP1_TTMP2_TTMP3) \
+  CASE_VI_GFX9(TTMP4_TTMP5_TTMP6_TTMP7) \
+  CASE_VI_GFX9(TTMP8_TTMP9_TTMP10_TTMP11) \
+  CASE_VI_GFX9(TTMP12_TTMP13_TTMP14_TTMP15) \
+  CASE_VI_GFX9(TTMP0_TTMP1_TTMP2_TTMP3_TTMP4_TTMP5_TTMP6_TTMP7) \
+  CASE_VI_GFX9(TTMP4_TTMP5_TTMP6_TTMP7_TTMP8_TTMP9_TTMP10_TTMP11) \
+  CASE_VI_GFX9(TTMP8_TTMP9_TTMP10_TTMP11_TTMP12_TTMP13_TTMP14_TTMP15) \
+  CASE_VI_GFX9(TTMP0_TTMP1_TTMP2_TTMP3_TTMP4_TTMP5_TTMP6_TTMP7_TTMP8_TTMP9_TTMP10_TTMP11_TTMP12_TTMP13_TTMP14_TTMP15) \
   }
-  return Reg;
+
+#define CASE_CI_VI(node) \
+  assert(!isSI(STI)); \
+  case node: return isCI(STI) ? node##_ci : node##_vi;
+
+#define CASE_VI_GFX9(node) \
+  case node: return isGFX9(STI) ? node##_gfx9 : node##_vi;
+
+unsigned getMCReg(unsigned Reg, const MCSubtargetInfo &STI) {
+  MAP_REG2REG
 }
+
+#undef CASE_CI_VI
+#undef CASE_VI_GFX9
+
+#define CASE_CI_VI(node)   case node##_ci: case node##_vi:   return node;
+#define CASE_VI_GFX9(node) case node##_vi: case node##_gfx9: return node;
 
 unsigned mc2PseudoReg(unsigned Reg) {
-  switch (Reg) {
-  case AMDGPU::FLAT_SCR_ci:
-  case AMDGPU::FLAT_SCR_vi:
-    return FLAT_SCR;
-
-  case AMDGPU::FLAT_SCR_LO_ci:
-  case AMDGPU::FLAT_SCR_LO_vi:
-    return AMDGPU::FLAT_SCR_LO;
-
-  case AMDGPU::FLAT_SCR_HI_ci:
-  case AMDGPU::FLAT_SCR_HI_vi:
-    return AMDGPU::FLAT_SCR_HI;
-
-  default:
-    return Reg;
-  }
+  MAP_REG2REG
 }
+
+#undef CASE_CI_VI
+#undef CASE_VI_GFX9
+#undef MAP_REG2REG
 
 bool isSISrcOperand(const MCInstrDesc &Desc, unsigned OpNo) {
   assert(OpNo < Desc.NumOperands);
@@ -812,6 +900,7 @@ bool isLegalSMRDImmOffset(const MCSubtargetInfo &ST, int64_t ByteOffset) {
   return isGCN3Encoding(ST) ?
     isUInt<20>(EncodedOffset) : isUInt<8>(EncodedOffset);
 }
+
 } // end namespace AMDGPU
 
 } // end namespace llvm

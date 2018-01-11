@@ -32,6 +32,7 @@
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/Intrinsics.h"
@@ -41,7 +42,6 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -701,11 +701,8 @@ static SDValue performORCombine(SDNode *N, SelectionDAG &DAG,
   return SDValue();
 }
 
-static SDValue genConstMult(SDValue X, uint64_t C, const SDLoc &DL, EVT VT,
+static SDValue genConstMult(SDValue X, APInt C, const SDLoc &DL, EVT VT,
                             EVT ShiftTy, SelectionDAG &DAG) {
-  // Clear the upper (64 - VT.sizeInBits) bits.
-  C &= ((uint64_t)-1) >> (64 - VT.getSizeInBits());
-
   // Return 0.
   if (C == 0)
     return DAG.getConstant(0, DL, VT);
@@ -715,18 +712,19 @@ static SDValue genConstMult(SDValue X, uint64_t C, const SDLoc &DL, EVT VT,
     return X;
 
   // If c is power of 2, return (shl x, log2(c)).
-  if (isPowerOf2_64(C))
+  if (C.isPowerOf2())
     return DAG.getNode(ISD::SHL, DL, VT, X,
-                       DAG.getConstant(Log2_64(C), DL, ShiftTy));
+                       DAG.getConstant(C.logBase2(), DL, ShiftTy));
 
-  unsigned Log2Ceil = Log2_64_Ceil(C);
-  uint64_t Floor = 1LL << Log2_64(C);
-  uint64_t Ceil = Log2Ceil == 64 ? 0LL : 1LL << Log2Ceil;
+  unsigned BitWidth = C.getBitWidth();
+  APInt Floor = APInt(BitWidth, 1) << C.logBase2();
+  APInt Ceil = C.isNegative() ? APInt(BitWidth, 0) :
+                                APInt(BitWidth, 1) << C.ceilLogBase2();
 
   // If |c - floor_c| <= |c - ceil_c|,
   // where floor_c = pow(2, floor(log2(c))) and ceil_c = pow(2, ceil(log2(c))),
   // return (add constMult(x, floor_c), constMult(x, c - floor_c)).
-  if (C - Floor <= Ceil - C) {
+  if ((C - Floor).ule(Ceil - C)) {
     SDValue Op0 = genConstMult(X, Floor, DL, VT, ShiftTy, DAG);
     SDValue Op1 = genConstMult(X, C - Floor, DL, VT, ShiftTy, DAG);
     return DAG.getNode(ISD::ADD, DL, VT, Op0, Op1);
@@ -746,7 +744,7 @@ static SDValue performMULCombine(SDNode *N, SelectionDAG &DAG,
 
   if (ConstantSDNode *C = dyn_cast<ConstantSDNode>(N->getOperand(1)))
     if (!VT.isVector())
-      return genConstMult(N->getOperand(0), C->getZExtValue(), SDLoc(N), VT,
+      return genConstMult(N->getOperand(0), C->getAPIntValue(), SDLoc(N), VT,
                           TL->getScalarShiftAmountTy(DAG.getDataLayout(), VT),
                           DAG);
 

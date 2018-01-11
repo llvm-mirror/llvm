@@ -14,10 +14,10 @@
 #include "llvm/Object/WindowsResource.h"
 #include "llvm/Object/COFF.h"
 #include "llvm/Support/FileOutputBuffer.h"
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/MathExtras.h"
 #include <ctime>
 #include <queue>
-#include <sstream>
 #include <system_error>
 
 using namespace llvm;
@@ -441,19 +441,7 @@ std::unique_ptr<MemoryBuffer> WindowsResourceCOFFWriter::write() {
 void WindowsResourceCOFFWriter::writeCOFFHeader() {
   // Write the COFF header.
   auto *Header = reinterpret_cast<coff_file_header *>(BufferStart);
-  switch (MachineType) {
-  case COFF::IMAGE_FILE_MACHINE_ARMNT:
-    Header->Machine = COFF::IMAGE_FILE_MACHINE_ARMNT;
-    break;
-  case COFF::IMAGE_FILE_MACHINE_AMD64:
-    Header->Machine = COFF::IMAGE_FILE_MACHINE_AMD64;
-    break;
-  case COFF::IMAGE_FILE_MACHINE_I386:
-    Header->Machine = COFF::IMAGE_FILE_MACHINE_I386;
-    break;
-  default:
-    Header->Machine = COFF::IMAGE_FILE_MACHINE_UNKNOWN;
-  }
+  Header->Machine = MachineType;
   Header->NumberOfSections = 2;
   Header->TimeDateStamp = getTime();
   Header->PointerToSymbolTable = SymbolTableOffset;
@@ -573,10 +561,9 @@ void WindowsResourceCOFFWriter::writeSymbolTable() {
 
   // Now write a symbol for each relocation.
   for (unsigned i = 0; i < Data.size(); i++) {
-    char RelocationName[9];
-    sprintf(RelocationName, "$R%06X", DataOffsets[i]);
+    auto RelocationName = formatv("$R{0:X-6}", i & 0xffffff).sstr<COFF::NameSize>();
     Symbol = reinterpret_cast<coff_symbol16 *>(BufferStart + CurrentOffset);
-    strncpy(Symbol->Name.ShortName, RelocationName, (size_t)COFF::NameSize);
+    memcpy(Symbol->Name.ShortName, RelocationName.data(), (size_t) COFF::NameSize);
     Symbol->Value = DataOffsets[i];
     Symbol->SectionNumber = 2;
     Symbol->Type = COFF::IMAGE_SYM_DTYPE_NULL;
@@ -714,8 +701,11 @@ void WindowsResourceCOFFWriter::writeFirstSectionRelocations() {
     case COFF::IMAGE_FILE_MACHINE_I386:
       Reloc->Type = COFF::IMAGE_REL_I386_DIR32NB;
       break;
+    case COFF::IMAGE_FILE_MACHINE_ARM64:
+      Reloc->Type = COFF::IMAGE_REL_ARM64_ADDR32NB;
+      break;
     default:
-      Reloc->Type = 0;
+      llvm_unreachable("unknown machine type");
     }
     CurrentOffset += sizeof(coff_relocation);
   }

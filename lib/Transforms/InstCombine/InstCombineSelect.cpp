@@ -1551,6 +1551,18 @@ Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
         Value *NewCast = Builder.CreateCast(CastOp, NewSI, SelType);
         return replaceInstUsesWith(SI, NewCast);
       }
+
+      // MAX(~a, ~b) -> ~MIN(a, b)
+      // MIN(~a, ~b) -> ~MAX(a, b)
+      Value *A, *B;
+      if (match(LHS, m_Not(m_Value(A))) && match(RHS, m_Not(m_Value(B))) &&
+          (LHS->getNumUses() <= 2 || RHS->getNumUses() <= 2)) {
+        CmpInst::Predicate InvertedPred =
+            getCmpPredicateForMinMax(getInverseMinMaxSelectPattern(SPF));
+        Value *InvertedCmp = Builder.CreateICmp(InvertedPred, A, B);
+        Value *NewSel = Builder.CreateSelect(InvertedCmp, A, B);
+        return BinaryOperator::CreateNot(NewSel);
+      }
     }
 
     if (SPF) {
@@ -1568,28 +1580,6 @@ Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
         if (Instruction *R = foldSPFofSPF(cast<Instruction>(RHS),SPF2,LHS2,RHS2,
                                           SI, SPF, LHS))
           return R;
-    }
-
-    // MAX(~a, ~b) -> ~MIN(a, b)
-    if ((SPF == SPF_SMAX || SPF == SPF_UMAX) &&
-        IsFreeToInvert(LHS, LHS->hasNUses(2)) &&
-        IsFreeToInvert(RHS, RHS->hasNUses(2))) {
-      // For this transform to be profitable, we need to eliminate at least two
-      // 'not' instructions if we're going to add one 'not' instruction.
-      int NumberOfNots =
-          (LHS->hasNUses(2) && match(LHS, m_Not(m_Value()))) +
-          (RHS->hasNUses(2) && match(RHS, m_Not(m_Value()))) +
-          (SI.hasOneUse() && match(*SI.user_begin(), m_Not(m_Value())));
-
-      if (NumberOfNots >= 2) {
-        Value *NewLHS = Builder.CreateNot(LHS);
-        Value *NewRHS = Builder.CreateNot(RHS);
-        Value *NewCmp = SPF == SPF_SMAX ? Builder.CreateICmpSLT(NewLHS, NewRHS)
-                                        : Builder.CreateICmpULT(NewLHS, NewRHS);
-        Value *NewSI =
-            Builder.CreateNot(Builder.CreateSelect(NewCmp, NewLHS, NewRHS));
-        return replaceInstUsesWith(SI, NewSI);
-      }
     }
 
     // TODO.
@@ -1638,6 +1628,46 @@ Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
         Value *Or = Builder.CreateOr(CondVal, FalseSI->getCondition());
         SI.setOperand(0, Or);
         SI.setOperand(2, FalseSI->getFalseValue());
+        return &SI;
+      }
+    }
+  }
+
+  // Try to simplify a binop sandwiched between 2 selects with the same
+  // condition.
+  // select(C, binop(select(C, X, Y), W), Z) -> select(C, binop(X, W), Z)
+  BinaryOperator *TrueBO;
+  if (match(TrueVal, m_OneUse(m_BinOp(TrueBO)))) {
+    if (auto *TrueBOSI = dyn_cast<SelectInst>(TrueBO->getOperand(0))) {
+      if (TrueBOSI->getCondition() == CondVal) {
+        TrueBO->setOperand(0, TrueBOSI->getTrueValue());
+        Worklist.Add(TrueBO);
+        return &SI;
+      }
+    }
+    if (auto *TrueBOSI = dyn_cast<SelectInst>(TrueBO->getOperand(1))) {
+      if (TrueBOSI->getCondition() == CondVal) {
+        TrueBO->setOperand(1, TrueBOSI->getTrueValue());
+        Worklist.Add(TrueBO);
+        return &SI;
+      }
+    }
+  }
+
+  // select(C, Z, binop(select(C, X, Y), W)) -> select(C, Z, binop(Y, W))
+  BinaryOperator *FalseBO;
+  if (match(FalseVal, m_OneUse(m_BinOp(FalseBO)))) {
+    if (auto *FalseBOSI = dyn_cast<SelectInst>(FalseBO->getOperand(0))) {
+      if (FalseBOSI->getCondition() == CondVal) {
+        FalseBO->setOperand(0, FalseBOSI->getFalseValue());
+        Worklist.Add(FalseBO);
+        return &SI;
+      }
+    }
+    if (auto *FalseBOSI = dyn_cast<SelectInst>(FalseBO->getOperand(1))) {
+      if (FalseBOSI->getCondition() == CondVal) {
+        FalseBO->setOperand(1, FalseBOSI->getFalseValue());
+        Worklist.Add(FalseBO);
         return &SI;
       }
     }

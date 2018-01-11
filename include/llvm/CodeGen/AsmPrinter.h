@@ -114,7 +114,7 @@ public:
   using GOTEquivUsePair = std::pair<const GlobalVariable *, unsigned>;
   MapVector<const MCSymbol *, GOTEquivUsePair> GlobalGOTEquivs;
 
-  /// Enable print [latency:throughput] in output
+  /// Enable print [latency:throughput] in output.
   bool EnablePrintSchedInfo = false;
 
 private:
@@ -294,6 +294,8 @@ public:
   void emitCFIInstruction(const MachineInstr &MI);
 
   void emitFrameAlloc(const MachineInstr &MI);
+
+  void emitStackSizeSection(const MachineFunction &MF);
 
   enum CFIMoveType { CFI_M_None, CFI_M_EH, CFI_M_Debug };
   CFIMoveType needsCFIMoves() const;

@@ -22,46 +22,37 @@
 #include "llvm/DebugInfo/CodeView/DebugChecksumsSubsection.h"
 #include "llvm/DebugInfo/CodeView/DebugCrossExSubsection.h"
 #include "llvm/DebugInfo/CodeView/DebugCrossImpSubsection.h"
-#include "llvm/DebugInfo/CodeView/DebugFrameDataSubsection.h"
 #include "llvm/DebugInfo/CodeView/DebugInlineeLinesSubsection.h"
 #include "llvm/DebugInfo/CodeView/DebugLinesSubsection.h"
 #include "llvm/DebugInfo/CodeView/DebugStringTableSubsection.h"
-#include "llvm/DebugInfo/CodeView/DebugSubsectionVisitor.h"
 #include "llvm/DebugInfo/CodeView/DebugSymbolsSubsection.h"
-#include "llvm/DebugInfo/CodeView/DebugUnknownSubsection.h"
-#include "llvm/DebugInfo/CodeView/EnumTables.h"
 #include "llvm/DebugInfo/CodeView/Formatters.h"
 #include "llvm/DebugInfo/CodeView/LazyRandomTypeCollection.h"
 #include "llvm/DebugInfo/CodeView/Line.h"
 #include "llvm/DebugInfo/CodeView/SymbolDeserializer.h"
-#include "llvm/DebugInfo/CodeView/SymbolDumper.h"
 #include "llvm/DebugInfo/CodeView/SymbolVisitorCallbackPipeline.h"
 #include "llvm/DebugInfo/CodeView/SymbolVisitorCallbacks.h"
-#include "llvm/DebugInfo/CodeView/TypeDumpVisitor.h"
+#include "llvm/DebugInfo/CodeView/TypeHashing.h"
 #include "llvm/DebugInfo/CodeView/TypeIndexDiscovery.h"
-#include "llvm/DebugInfo/CodeView/TypeVisitorCallbackPipeline.h"
 #include "llvm/DebugInfo/MSF/MappedBlockStream.h"
 #include "llvm/DebugInfo/PDB/Native/DbiModuleDescriptor.h"
 #include "llvm/DebugInfo/PDB/Native/DbiStream.h"
-#include "llvm/DebugInfo/PDB/Native/EnumTables.h"
 #include "llvm/DebugInfo/PDB/Native/GlobalsStream.h"
 #include "llvm/DebugInfo/PDB/Native/ISectionContribVisitor.h"
 #include "llvm/DebugInfo/PDB/Native/InfoStream.h"
 #include "llvm/DebugInfo/PDB/Native/ModuleDebugStream.h"
 #include "llvm/DebugInfo/PDB/Native/PDBFile.h"
 #include "llvm/DebugInfo/PDB/Native/PublicsStream.h"
-#include "llvm/DebugInfo/PDB/Native/SymbolStream.h"
 #include "llvm/DebugInfo/PDB/Native/RawError.h"
+#include "llvm/DebugInfo/PDB/Native/SymbolStream.h"
 #include "llvm/DebugInfo/PDB/Native/TpiHashing.h"
 #include "llvm/DebugInfo/PDB/Native/TpiStream.h"
-#include "llvm/DebugInfo/PDB/PDBExtras.h"
 #include "llvm/Object/COFF.h"
 #include "llvm/Support/BinaryStreamReader.h"
 #include "llvm/Support/FormatAdapters.h"
 #include "llvm/Support/FormatVariadic.h"
 
 #include <cctype>
-#include <unordered_map>
 
 using namespace llvm;
 using namespace llvm::codeview;
@@ -135,16 +126,23 @@ Error DumpOutputStyle::dump() {
       return EC;
   }
 
-  if (opts::dump::DumpTypes || !opts::dump::DumpTypeIndex.empty() ||
-      opts::dump::DumpTypeExtras) {
-    if (auto EC = dumpTpiStream(StreamTPI))
-      return EC;
-  }
+  if (File.isObj()) {
+    if (opts::dump::DumpTypes || !opts::dump::DumpTypeIndex.empty() ||
+        opts::dump::DumpTypeExtras)
+      if (auto EC = dumpTypesFromObjectFile())
+        return EC;
+  } else {
+    if (opts::dump::DumpTypes || !opts::dump::DumpTypeIndex.empty() ||
+        opts::dump::DumpTypeExtras) {
+      if (auto EC = dumpTpiStream(StreamTPI))
+        return EC;
+    }
 
-  if (opts::dump::DumpIds || !opts::dump::DumpIdIndex.empty() ||
-      opts::dump::DumpIdExtras) {
-    if (auto EC = dumpTpiStream(StreamIPI))
-      return EC;
+    if (opts::dump::DumpIds || !opts::dump::DumpIdIndex.empty() ||
+        opts::dump::DumpIdExtras) {
+      if (auto EC = dumpTpiStream(StreamIPI))
+        return EC;
+    }
   }
 
   if (opts::dump::DumpGlobals) {
@@ -850,14 +848,7 @@ Error DumpOutputStyle::dumpXme() {
   return Error::success();
 }
 
-Error DumpOutputStyle::dumpStringTable() {
-  printHeader(P, "String Table");
-
-  if (File.isObj()) {
-    P.formatLine("Dumping string table is not supported for object files");
-    return Error::success();
-  }
-
+Error DumpOutputStyle::dumpStringTableFromPdb() {
   AutoIndent Indent(P);
   auto IS = getPdb().getStringTable();
   if (!IS) {
@@ -897,6 +888,36 @@ Error DumpOutputStyle::dumpStringTable() {
   return Error::success();
 }
 
+Error DumpOutputStyle::dumpStringTableFromObj() {
+  iterateModuleSubsections<DebugStringTableSubsectionRef>(
+      File, PrintScope{P, 4},
+      [&](uint32_t Modi, const SymbolGroup &Strings,
+          DebugStringTableSubsectionRef &Strings2) {
+        BinaryStreamRef StringTableBuffer = Strings2.getBuffer();
+        BinaryStreamReader Reader(StringTableBuffer);
+        while (Reader.bytesRemaining() > 0) {
+          StringRef Str;
+          uint32_t Offset = Reader.getOffset();
+          cantFail(Reader.readCString(Str));
+          if (Str.empty())
+            continue;
+
+          P.formatLine("{0} | {1}", fmt_align(Offset, AlignStyle::Right, 4),
+                       Str);
+        }
+      });
+  return Error::success();
+}
+
+Error DumpOutputStyle::dumpStringTable() {
+  printHeader(P, "String Table");
+
+  if (File.isPdb())
+    return dumpStringTableFromPdb();
+
+  return dumpStringTableFromObj();
+}
+
 static void buildDepSet(LazyRandomTypeCollection &Types,
                         ArrayRef<TypeIndex> Indices,
                         std::map<TypeIndex, CVType> &DepSet) {
@@ -913,15 +934,17 @@ static void buildDepSet(LazyRandomTypeCollection &Types,
   }
 }
 
-static void dumpFullTypeStream(LinePrinter &Printer,
-                               LazyRandomTypeCollection &Types,
-                               TpiStream &Stream, bool Bytes, bool Extras) {
-  Printer.formatLine("Showing {0:N} records", Stream.getNumTypeRecords());
-  uint32_t Width =
-      NumDigits(TypeIndex::FirstNonSimpleIndex + Stream.getNumTypeRecords());
+static void
+dumpFullTypeStream(LinePrinter &Printer, LazyRandomTypeCollection &Types,
+                   uint32_t NumTypeRecords, uint32_t NumHashBuckets,
+                   FixedStreamArray<support::ulittle32_t> HashValues,
+                   bool Bytes, bool Extras) {
+
+  Printer.formatLine("Showing {0:N} records", NumTypeRecords);
+  uint32_t Width = NumDigits(TypeIndex::FirstNonSimpleIndex + NumTypeRecords);
 
   MinimalTypeDumpVisitor V(Printer, Width + 2, Bytes, Extras, Types,
-                           Stream.getNumHashBuckets(), Stream.getHashValues());
+                           NumHashBuckets, HashValues);
 
   if (auto EC = codeview::visitTypeStream(Types, V)) {
     Printer.formatLine("An error occurred dumping type records: {0}",
@@ -967,6 +990,55 @@ static void dumpPartialTypeStream(LinePrinter &Printer,
   }
 }
 
+Error DumpOutputStyle::dumpTypesFromObjectFile() {
+  LazyRandomTypeCollection Types(100);
+
+  for (const auto &S : getObj().sections()) {
+    StringRef SectionName;
+    if (auto EC = S.getName(SectionName))
+      return errorCodeToError(EC);
+
+    if (SectionName != ".debug$T")
+      continue;
+    StringRef Contents;
+    if (auto EC = S.getContents(Contents))
+      return errorCodeToError(EC);
+
+    uint32_t Magic;
+    BinaryStreamReader Reader(Contents, llvm::support::little);
+    if (auto EC = Reader.readInteger(Magic))
+      return EC;
+    if (Magic != COFF::DEBUG_SECTION_MAGIC)
+      return make_error<StringError>("Invalid CodeView debug section.",
+                                     inconvertibleErrorCode());
+
+    Types.reset(Reader, 100);
+
+    if (opts::dump::DumpTypes) {
+      dumpFullTypeStream(P, Types, 0, 0, {}, opts::dump::DumpTypeData, false);
+    } else if (opts::dump::DumpTypeExtras) {
+      auto LocalHashes = LocallyHashedType::hashTypeCollection(Types);
+      auto GlobalHashes = GloballyHashedType::hashTypeCollection(Types);
+      assert(LocalHashes.size() == GlobalHashes.size());
+
+      P.formatLine("Local / Global hashes:");
+      TypeIndex TI(TypeIndex::FirstNonSimpleIndex);
+      for (const auto &H : zip(LocalHashes, GlobalHashes)) {
+        AutoIndent Indent2(P);
+        LocallyHashedType &L = std::get<0>(H);
+        GloballyHashedType &G = std::get<1>(H);
+
+        P.formatLine("TI: {0}, LocalHash: {1:X}, GlobalHash: {2}", TI, L, G);
+
+        ++TI;
+      }
+      P.NewLine();
+    }
+  }
+
+  return Error::success();
+}
+
 Error DumpOutputStyle::dumpTpiStream(uint32_t StreamIdx) {
   assert(StreamIdx == StreamTPI || StreamIdx == StreamIPI);
 
@@ -977,10 +1049,7 @@ Error DumpOutputStyle::dumpTpiStream(uint32_t StreamIdx) {
   }
 
   AutoIndent Indent(P);
-  if (File.isObj()) {
-    P.formatLine("Dumping types is not supported for object files");
-    return Error::success();
-  }
+  assert(!File.isObj());
 
   bool Present = false;
   bool DumpTypes = false;
@@ -1017,7 +1086,9 @@ Error DumpOutputStyle::dumpTpiStream(uint32_t StreamIdx) {
 
   if (DumpTypes || !Indices.empty()) {
     if (Indices.empty())
-      dumpFullTypeStream(P, Types, Stream, DumpBytes, DumpExtras);
+      dumpFullTypeStream(P, Types, Stream.getNumTypeRecords(),
+                         Stream.getNumHashBuckets(), Stream.getHashValues(),
+                         DumpBytes, DumpExtras);
     else {
       std::vector<TypeIndex> TiList(Indices.begin(), Indices.end());
       dumpPartialTypeStream(P, Types, Stream, TiList, DumpBytes, DumpExtras,
@@ -1076,6 +1147,7 @@ Error DumpOutputStyle::dumpModuleSymsForObj() {
       File, PrintScope{P, 2},
       [&](uint32_t Modi, const SymbolGroup &Strings,
           DebugSymbolsSubsectionRef &Symbols) {
+        Dumper.setSymbolGroup(&Strings);
         for (auto Symbol : Symbols) {
           if (auto EC = Visitor.visitSymbolRecord(Symbol)) {
             SymbolError = llvm::make_unique<Error>(std::move(EC));
@@ -1117,8 +1189,8 @@ Error DumpOutputStyle::dumpModuleSymsForPdb() {
 
         SymbolVisitorCallbackPipeline Pipeline;
         SymbolDeserializer Deserializer(nullptr, CodeViewContainer::Pdb);
-        MinimalSymbolDumper Dumper(P, opts::dump::DumpSymRecordBytes, Ids,
-                                   Types);
+        MinimalSymbolDumper Dumper(P, opts::dump::DumpSymRecordBytes, Strings,
+                                   Ids, Types);
 
         Pipeline.addCallbackToPipeline(Deserializer);
         Pipeline.addCallbackToPipeline(Dumper);

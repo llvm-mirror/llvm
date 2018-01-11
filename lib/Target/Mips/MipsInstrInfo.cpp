@@ -22,11 +22,11 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineOperand.h"
+#include "llvm/CodeGen/TargetOpcodes.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/MC/MCInstrDesc.h"
 #include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetOpcodes.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <cassert>
 
 using namespace llvm;
@@ -480,7 +480,7 @@ MipsInstrInfo::genInstrWithNewOpc(unsigned NewOpc,
   MIB = BuildMI(*I->getParent(), I, I->getDebugLoc(), get(NewOpc));
 
   // For MIPSR6 JI*C requires an immediate 0 as an operand, JIALC(64) an
-  // immediate 0 as an operand and requires the removal of it's %RA<imp-def>
+  // immediate 0 as an operand and requires the removal of it's implicit-def %ra
   // implicit operand as copying the implicit operations of the instructio we're
   // looking at will give us the correct flags.
   if (NewOpc == Mips::JIC || NewOpc == Mips::JIALC || NewOpc == Mips::JIC64 ||
@@ -538,15 +538,19 @@ bool MipsInstrInfo::findCommutedOpIndices(MachineInstr &MI, unsigned &SrcOpIdx1,
 }
 
 // ins, ext, dext*, dins have the following constraints:
-// 0 <= pos      <  X
-// 0 <  size     <= X
-// 0 <  pos+size <= x
+// X <= pos      <  Y
+// X <  size     <= Y
+// X <  pos+size <= Y
 //
-// dinsm and dinsm have the following contraints:
-// 0 <= pos      <  X
-// 0 <= size     <= X
-// 0 <  pos+size <= x
-
+// dinsm and dinsu have the following constraints:
+// X <= pos      <  Y
+// X <= size     <= Y
+// X <  pos+size <= Y
+//
+// The callee of verifyInsExtInstruction however gives the bounds of
+// dins[um] like the other (d)ins (d)ext(um) instructions, so that this
+// function doesn't have to vary it's behaviour based on the instruction
+// being checked.
 static bool verifyInsExtInstruction(const MachineInstr &MI, StringRef &ErrInfo,
                                     const int64_t PosLow, const int64_t PosHigh,
                                     const int64_t SizeLow,
@@ -593,28 +597,25 @@ bool MipsInstrInfo::verifyInstruction(const MachineInstr &MI,
     case Mips::INS:
     case Mips::INS_MM:
     case Mips::DINS:
-    case Mips::DINS_MM64R6:
       return verifyInsExtInstruction(MI, ErrInfo, 0, 32, 0, 32, 0, 32);
     case Mips::DINSM:
-    case Mips::DINSM_MM64R6:
-      // The ISA spec has a subtle difference here in that it says:
-      //  2 <= size <= 64 for 'dinsm', so we change the bounds so that it
-      // is in line with the rest of instructions.
+      // The ISA spec has a subtle difference difference between dinsm and dextm
+      // in that it says:
+      // 2 <= size <= 64 for 'dinsm' but 'dextm' has 32 < size <= 64.
+      // To make the bounds checks similar, the range 1 < size <= 64 is checked
+      // for 'dinsm'.
       return verifyInsExtInstruction(MI, ErrInfo, 0, 32, 1, 64, 32, 64);
     case Mips::DINSU:
-    case Mips::DINSU_MM64R6:
-      // The ISA spec has a subtle difference here in that it says:
-      //  2 <= size <= 64 for 'dinsm', so we change the bounds so that it
-      // is in line with the rest of instructions.
-      return verifyInsExtInstruction(MI, ErrInfo, 32, 64, 1, 32, 32, 64);
+      // The ISA spec has a subtle difference between dinsu and dextu in that
+      // the size range of dinsu is specified as 1 <= size <= 32 whereas size
+      // for dextu is 0 < size <= 32. The range checked for dinsu here is
+      // 0 < size <= 32, which is equivalent and similar to dextu.
+      return verifyInsExtInstruction(MI, ErrInfo, 32, 64, 0, 32, 32, 64);
     case Mips::DEXT:
-    case Mips::DEXT_MM64R6:
       return verifyInsExtInstruction(MI, ErrInfo, 0, 32, 0, 32, 0, 63);
     case Mips::DEXTM:
-    case Mips::DEXTM_MM64R6:
       return verifyInsExtInstruction(MI, ErrInfo, 0, 32, 32, 64, 32, 64);
     case Mips::DEXTU:
-    case Mips::DEXTU_MM64R6:
       return verifyInsExtInstruction(MI, ErrInfo, 32, 64, 0, 32, 32, 64);
     default:
       return true;

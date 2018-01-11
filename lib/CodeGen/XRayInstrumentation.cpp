@@ -24,11 +24,11 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/Pass.h"
 #include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 
 using namespace llvm;
 
@@ -142,7 +142,7 @@ void XRayInstrumentation::prependRetWithPatchableExit(
 }
 
 bool XRayInstrumentation::runOnMachineFunction(MachineFunction &MF) {
-  auto &F = *MF.getFunction();
+  auto &F = MF.getFunction();
   auto InstrAttr = F.getFnAttribute("function-instrument");
   bool AlwaysInstrument = !InstrAttr.hasAttribute(Attribute::None) &&
                           InstrAttr.isStringAttribute() &&
