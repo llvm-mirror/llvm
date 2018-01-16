@@ -304,9 +304,6 @@ namespace llvm {
       // Vector FP round.
       VFPROUND, VFPROUND_RND, VFPROUNDS_RND,
 
-      // Convert a vector to mask, set bits base on MSB.
-      CVT2MASK,
-
       // 128-bit vector logical left / right shift
       VSHLDQ, VSRLDQ,
 
@@ -828,6 +825,11 @@ namespace llvm {
 
     /// Vector-sized comparisons are fast using PCMPEQ + PMOVMSK or PTEST.
     MVT hasFastEqualityCompare(unsigned NumBits) const override;
+
+    /// Allow multiple load pairs per block for smaller and faster code.
+    unsigned getMemcmpEqZeroLoadsPerBlock() const override {
+      return 2;
+    }
 
     /// Return the value type to use for ISD::SETCC.
     EVT getSetCCResultType(const DataLayout &DL, LLVMContext &Context,
@@ -1440,6 +1442,7 @@ namespace llvm {
     const SDValue &getIndex()   const { return getOperand(4); }
     const SDValue &getMask()    const { return getOperand(2); }
     const SDValue &getValue()   const { return getOperand(1); }
+    const SDValue &getScale()   const { return getOperand(5); }
 
     static bool classof(const SDNode *N) {
       return N->getOpcode() == X86ISD::MGATHER ||

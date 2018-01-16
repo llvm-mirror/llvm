@@ -670,6 +670,9 @@ void MIPrinter::print(const MachineInstr &MI) {
     OS << " = ";
   if (MI.getFlag(MachineInstr::FrameSetup))
     OS << "frame-setup ";
+  else if (MI.getFlag(MachineInstr::FrameDestroy))
+    OS << "frame-destroy ";
+
   OS << TII->getName(MI.getOpcode());
   if (I < E)
     OS << ' ';
@@ -741,7 +744,7 @@ void MIPrinter::print(const MachineInstr &MI, unsigned OpIdx,
   case MachineOperand::MO_Immediate:
     if (MI.isOperandSubregIdx(OpIdx)) {
       MachineOperand::printTargetFlags(OS, Op);
-      MachineOperand::printSubregIdx(OS, Op.getImm(), TRI);
+      MachineOperand::printSubRegIdx(OS, Op.getImm(), TRI);
       break;
     }
     LLVM_FALLTHROUGH;
@@ -860,7 +863,7 @@ void MIPrinter::print(const LLVMContext &Context, const TargetInstrInfo &TII,
           OS, /*PrintType=*/false, MST);
       break;
     case PseudoSourceValue::ExternalSymbolCallEntry:
-      OS << "call-entry $";
+      OS << "call-entry &";
       printLLVMNameWithoutPrefix(
           OS, cast<ExternalSymbolPseudoSourceValue>(PVal)->getSymbol());
       break;

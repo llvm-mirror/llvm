@@ -807,36 +807,26 @@ def NoAVX        : Predicate<"!Subtarget->hasAVX()">;
 def HasAVX       : Predicate<"Subtarget->hasAVX()">;
 def HasAVX2      : Predicate<"Subtarget->hasAVX2()">;
 def HasAVX1Only  : Predicate<"Subtarget->hasAVX() && !Subtarget->hasAVX2()">;
-def HasAVX512    : Predicate<"Subtarget->hasAVX512()">,
-                     AssemblerPredicate<"FeatureAVX512", "AVX-512 ISA">;
+def HasAVX512    : Predicate<"Subtarget->hasAVX512()">;
 def UseAVX       : Predicate<"Subtarget->hasAVX() && !Subtarget->hasAVX512()">;
 def UseAVX2      : Predicate<"Subtarget->hasAVX2() && !Subtarget->hasAVX512()">;
 def NoAVX512     : Predicate<"!Subtarget->hasAVX512()">;
-def HasCDI       : Predicate<"Subtarget->hasCDI()">,
-                     AssemblerPredicate<"FeatureCDI", "AVX-512 CD ISA">;
-def HasVPOPCNTDQ : Predicate<"Subtarget->hasVPOPCNTDQ()">,
-                   AssemblerPredicate<"FeatureVPOPCNTDQ", "AVX-512 VPOPCNTDQ ISA">;
-def HasPFI       : Predicate<"Subtarget->hasPFI()">,
-                     AssemblerPredicate<"FeaturePFI", "AVX-512 PF ISA">;
-def HasERI       : Predicate<"Subtarget->hasERI()">,
-                     AssemblerPredicate<"FeatureERI", "AVX-512 ER ISA">;
-def HasDQI       : Predicate<"Subtarget->hasDQI()">,
-                     AssemblerPredicate<"FeatureDQI", "AVX-512 DQ ISA">;
+def HasCDI       : Predicate<"Subtarget->hasCDI()">;
+def HasVPOPCNTDQ : Predicate<"Subtarget->hasVPOPCNTDQ()">;
+def HasPFI       : Predicate<"Subtarget->hasPFI()">;
+def HasERI       : Predicate<"Subtarget->hasERI()">;
+def HasDQI       : Predicate<"Subtarget->hasDQI()">;
 def NoDQI        : Predicate<"!Subtarget->hasDQI()">;
-def HasBWI       : Predicate<"Subtarget->hasBWI()">,
-                     AssemblerPredicate<"FeatureBWI", "AVX-512 BW ISA">;
+def HasBWI       : Predicate<"Subtarget->hasBWI()">;
 def NoBWI        : Predicate<"!Subtarget->hasBWI()">;
-def HasVLX       : Predicate<"Subtarget->hasVLX()">,
-                     AssemblerPredicate<"FeatureVLX", "AVX-512 VL ISA">;
+def HasVLX       : Predicate<"Subtarget->hasVLX()">;
 def NoVLX        : Predicate<"!Subtarget->hasVLX()">;
 def NoVLX_Or_NoBWI : Predicate<"!Subtarget->hasVLX() || !Subtarget->hasBWI()">;
 def NoVLX_Or_NoDQI : Predicate<"!Subtarget->hasVLX() || !Subtarget->hasDQI()">;
 def PKU        : Predicate<"Subtarget->hasPKU()">;
-def HasVNNI    : Predicate<"Subtarget->hasVNNI()">,
-                     AssemblerPredicate<"FeatureVNNI", "AVX-512 VNNI ISA">;
+def HasVNNI    : Predicate<"Subtarget->hasVNNI()">;
 
-def HasBITALG    : Predicate<"Subtarget->hasBITALG()">,
-                     AssemblerPredicate<"FeatureBITALG", "AVX-512 BITALG ISA">;
+def HasBITALG    : Predicate<"Subtarget->hasBITALG()">;
 def HasPOPCNT    : Predicate<"Subtarget->hasPOPCNT()">;
 def HasAES       : Predicate<"Subtarget->hasAES()">;
 def HasVAES      : Predicate<"Subtarget->hasVAES()">;
@@ -866,12 +856,9 @@ def HasLZCNT     : Predicate<"Subtarget->hasLZCNT()">;
 def HasBMI       : Predicate<"Subtarget->hasBMI()">;
 def HasBMI2      : Predicate<"Subtarget->hasBMI2()">;
 def NoBMI2       : Predicate<"!Subtarget->hasBMI2()">;
-def HasVBMI      : Predicate<"Subtarget->hasVBMI()">,
-                     AssemblerPredicate<"FeatureVBMI", "AVX-512 VBMI ISA">;
-def HasVBMI2     : Predicate<"Subtarget->hasVBMI2()">,
-                     AssemblerPredicate<"FeatureVBMI2", "AVX-512 VBMI2 ISA">;
-def HasIFMA      : Predicate<"Subtarget->hasIFMA()">,
-                     AssemblerPredicate<"FeatureIFMA", "AVX-512 IFMA ISA">;
+def HasVBMI      : Predicate<"Subtarget->hasVBMI()">;
+def HasVBMI2     : Predicate<"Subtarget->hasVBMI2()">;
+def HasIFMA      : Predicate<"Subtarget->hasIFMA()">;
 def HasRTM       : Predicate<"Subtarget->hasRTM()">;
 def HasADX       : Predicate<"Subtarget->hasADX()">;
 def HasSHA       : Predicate<"Subtarget->hasSHA()">;
@@ -1389,7 +1376,8 @@ def MOVSW : I<0xA5, RawFrmDstSrc, (outs), (ins dstidx16:$dst, srcidx16:$src),
 def MOVSL : I<0xA5, RawFrmDstSrc, (outs), (ins dstidx32:$dst, srcidx32:$src),
               "movs{l|d}\t{$src, $dst|$dst, $src}", [], IIC_MOVS>, OpSize32;
 def MOVSQ : RI<0xA5, RawFrmDstSrc, (outs), (ins dstidx64:$dst, srcidx64:$src),
-               "movsq\t{$src, $dst|$dst, $src}", [], IIC_MOVS>;
+               "movsq\t{$src, $dst|$dst, $src}", [], IIC_MOVS>,
+               Requires<[In64BitMode]>;
 }
 
 // These uses the DF flag in the EFLAGS register to inc or dec EDI and ESI
@@ -1404,7 +1392,8 @@ def STOSL : I<0xAB, RawFrmDst, (outs), (ins dstidx32:$dst),
               "stos{l|d}\t{%eax, $dst|$dst, eax}", [], IIC_STOS>, OpSize32;
 let Defs = [RDI], Uses = [RAX,RDI,EFLAGS] in
 def STOSQ : RI<0xAB, RawFrmDst, (outs), (ins dstidx64:$dst),
-               "stosq\t{%rax, $dst|$dst, rax}", [], IIC_STOS>;
+               "stosq\t{%rax, $dst|$dst, rax}", [], IIC_STOS>,
+               Requires<[In64BitMode]>;
 
 // These uses the DF flag in the EFLAGS register to inc or dec EDI and ESI
 let Defs = [EDI,EFLAGS], Uses = [AL,EDI,EFLAGS] in
@@ -1418,7 +1407,8 @@ def SCASL : I<0xAF, RawFrmDst, (outs), (ins dstidx32:$dst),
               "scas{l|d}\t{$dst, %eax|eax, $dst}", [], IIC_SCAS>, OpSize32;
 let Defs = [EDI,EFLAGS], Uses = [RAX,EDI,EFLAGS] in
 def SCASQ : RI<0xAF, RawFrmDst, (outs), (ins dstidx64:$dst),
-               "scasq\t{$dst, %rax|rax, $dst}", [], IIC_SCAS>;
+               "scasq\t{$dst, %rax|rax, $dst}", [], IIC_SCAS>,
+               Requires<[In64BitMode]>;
 
 // These uses the DF flag in the EFLAGS register to inc or dec EDI and ESI
 let Defs = [EDI,ESI,EFLAGS], Uses = [EDI,ESI,EFLAGS] in {
@@ -1429,7 +1419,8 @@ def CMPSW : I<0xA7, RawFrmDstSrc, (outs), (ins dstidx16:$dst, srcidx16:$src),
 def CMPSL : I<0xA7, RawFrmDstSrc, (outs), (ins dstidx32:$dst, srcidx32:$src),
               "cmps{l|d}\t{$dst, $src|$src, $dst}", [], IIC_CMPS>, OpSize32;
 def CMPSQ : RI<0xA7, RawFrmDstSrc, (outs), (ins dstidx64:$dst, srcidx64:$src),
-               "cmpsq\t{$dst, $src|$src, $dst}", [], IIC_CMPS>;
+               "cmpsq\t{$dst, $src|$src, $dst}", [], IIC_CMPS>,
+               Requires<[In64BitMode]>;
 }
 } // SchedRW
 
@@ -1967,13 +1958,7 @@ def XCHG16ar : I<0x90, AddRegFrm, (outs), (ins GR16:$src),
 let Uses = [EAX], Defs = [EAX] in
 def XCHG32ar : I<0x90, AddRegFrm, (outs), (ins GR32:$src),
                   "xchg{l}\t{$src, %eax|eax, $src}", [], IIC_XCHG_REG>,
-                  OpSize32, Requires<[Not64BitMode]>;
-let Uses = [EAX], Defs = [EAX] in
-// Uses GR32_NOAX in 64-bit mode to prevent encoding using the 0x90 NOP encoding.
-// xchg %eax, %eax needs to clear upper 32-bits of RAX so is not a NOP.
-def XCHG32ar64 : I<0x90, AddRegFrm, (outs), (ins GR32_NOAX:$src),
-                   "xchg{l}\t{$src, %eax|eax, $src}", [], IIC_XCHG_REG>,
-                   OpSize32, Requires<[In64BitMode]>;
+                  OpSize32;
 let Uses = [RAX], Defs = [RAX] in
 def XCHG64ar : RI<0x90, AddRegFrm, (outs), (ins GR64:$src),
                   "xchg{q}\t{$src, %rax|rax, $src}", [], IIC_XCHG_REG>;
@@ -2090,7 +2075,8 @@ def LODSL : I<0xAD, RawFrmSrc, (outs), (ins srcidx32:$src),
               "lods{l|d}\t{$src, %eax|eax, $src}", [], IIC_LODS>, OpSize32;
 let Defs = [RAX,ESI], Uses = [ESI,EFLAGS] in
 def LODSQ : RI<0xAD, RawFrmSrc, (outs), (ins srcidx64:$src),
-               "lodsq\t{$src, %rax|rax, $src}", [], IIC_LODS>;
+               "lodsq\t{$src, %rax|rax, $src}", [], IIC_LODS>,
+               Requires<[In64BitMode]>;
 }
 
 let SchedRW = [WriteSystem] in {
@@ -2528,10 +2514,10 @@ multiclass tbm_ternary_imm_intr<bits<8> opc, RegisterClass RC, string OpcodeStr,
            IIC_BIN_MEM>, XOP, XOPA, Sched<[WriteALULd, ReadAfterLd]>;
 }
 
-defm BEXTRI32 : tbm_ternary_imm_intr<0x10, GR32, "bextr", i32mem, loadi32,
+defm BEXTRI32 : tbm_ternary_imm_intr<0x10, GR32, "bextr{l}", i32mem, loadi32,
                                      int_x86_tbm_bextri_u32, i32imm, imm>;
 let ImmT = Imm32S in
-defm BEXTRI64 : tbm_ternary_imm_intr<0x10, GR64, "bextr", i64mem, loadi64,
+defm BEXTRI64 : tbm_ternary_imm_intr<0x10, GR64, "bextr{q}", i64mem, loadi64,
                                      int_x86_tbm_bextri_u64, i64i32imm,
                                      i64immSExt32>, VEX_W;
 
@@ -2551,10 +2537,10 @@ let hasSideEffects = 0 in {
 
 multiclass tbm_binary_intr<bits<8> opc, string OpcodeStr,
                            Format FormReg, Format FormMem> {
-  defm NAME#32 : tbm_binary_rm<opc, FormReg, FormMem, GR32, OpcodeStr, i32mem,
-                               loadi32>;
-  defm NAME#64 : tbm_binary_rm<opc, FormReg, FormMem, GR64, OpcodeStr, i64mem,
-                               loadi64>, VEX_W;
+  defm NAME#32 : tbm_binary_rm<opc, FormReg, FormMem, GR32, OpcodeStr#"{l}",
+                               i32mem, loadi32>;
+  defm NAME#64 : tbm_binary_rm<opc, FormReg, FormMem, GR64, OpcodeStr#"{q}",
+                               i64mem, loadi64>, VEX_W;
 }
 
 defm BLCFILL : tbm_binary_intr<0x01, "blcfill", MRM1r, MRM1m>;
@@ -2988,10 +2974,10 @@ def : InstAlias<"bts\t{$imm, $mem|$mem, $imm}",
                 (BTS32mi8 i32mem:$mem, i32i8imm:$imm), 0>;
 
 // clr aliases.
-def : InstAlias<"clrb\t$reg", (XOR8rr  GR8 :$reg, GR8 :$reg), 0>;
-def : InstAlias<"clrw\t$reg", (XOR16rr GR16:$reg, GR16:$reg), 0>;
-def : InstAlias<"clrl\t$reg", (XOR32rr GR32:$reg, GR32:$reg), 0>;
-def : InstAlias<"clrq\t$reg", (XOR64rr GR64:$reg, GR64:$reg), 0>;
+def : InstAlias<"clr{b}\t$reg", (XOR8rr  GR8 :$reg, GR8 :$reg), 0>;
+def : InstAlias<"clr{w}\t$reg", (XOR16rr GR16:$reg, GR16:$reg), 0>;
+def : InstAlias<"clr{l}\t$reg", (XOR32rr GR32:$reg, GR32:$reg), 0>;
+def : InstAlias<"clr{q}\t$reg", (XOR64rr GR64:$reg, GR64:$reg), 0>;
 
 // lods aliases. Accept the destination being omitted because it's implicit
 // in the mnemonic, or the mnemonic suffix being omitted because it's implicit
@@ -3004,10 +2990,10 @@ def : InstAlias<"lods\t{$src, %al|al, $src}", (LODSB srcidx8:$src),  0>;
 def : InstAlias<"lods\t{$src, %ax|ax, $src}", (LODSW srcidx16:$src), 0>;
 def : InstAlias<"lods\t{$src, %eax|eax, $src}", (LODSL srcidx32:$src), 0>;
 def : InstAlias<"lods\t{$src, %rax|rax, $src}", (LODSQ srcidx64:$src), 0>, Requires<[In64BitMode]>;
-def : InstAlias<"lods\t$src", (LODSB srcidx8:$src),  0>;
-def : InstAlias<"lods\t$src", (LODSW srcidx16:$src), 0>;
-def : InstAlias<"lods\t$src", (LODSL srcidx32:$src), 0>;
-def : InstAlias<"lods\t$src", (LODSQ srcidx64:$src), 0>, Requires<[In64BitMode]>;
+def : InstAlias<"lods{b}\t$src", (LODSB srcidx8:$src),  0>;
+def : InstAlias<"lods{w}\t$src", (LODSW srcidx16:$src), 0>;
+def : InstAlias<"lods{l}\t$src", (LODSL srcidx32:$src), 0>;
+def : InstAlias<"lods{q}\t$src", (LODSQ srcidx64:$src), 0>, Requires<[In64BitMode]>;
 
 
 // stos aliases. Accept the source being omitted because it's implicit in
@@ -3021,10 +3007,10 @@ def : InstAlias<"stos\t{%al, $dst|$dst, al}", (STOSB dstidx8:$dst),  0>;
 def : InstAlias<"stos\t{%ax, $dst|$dst, ax}", (STOSW dstidx16:$dst), 0>;
 def : InstAlias<"stos\t{%eax, $dst|$dst, eax}", (STOSL dstidx32:$dst), 0>;
 def : InstAlias<"stos\t{%rax, $dst|$dst, rax}", (STOSQ dstidx64:$dst), 0>, Requires<[In64BitMode]>;
-def : InstAlias<"stos\t$dst", (STOSB dstidx8:$dst),  0>;
-def : InstAlias<"stos\t$dst", (STOSW dstidx16:$dst), 0>;
-def : InstAlias<"stos\t$dst", (STOSL dstidx32:$dst), 0>;
-def : InstAlias<"stos\t$dst", (STOSQ dstidx64:$dst), 0>, Requires<[In64BitMode]>;
+def : InstAlias<"stos{b}\t$dst", (STOSB dstidx8:$dst),  0>;
+def : InstAlias<"stos{w}\t$dst", (STOSW dstidx16:$dst), 0>;
+def : InstAlias<"stos{l}\t$dst", (STOSL dstidx32:$dst), 0>;
+def : InstAlias<"stos{q}\t$dst", (STOSQ dstidx64:$dst), 0>, Requires<[In64BitMode]>;
 
 
 // scas aliases. Accept the destination being omitted because it's implicit
@@ -3038,24 +3024,24 @@ def : InstAlias<"scas\t{$dst, %al|al, $dst}", (SCASB dstidx8:$dst),  0>;
 def : InstAlias<"scas\t{$dst, %ax|ax, $dst}", (SCASW dstidx16:$dst), 0>;
 def : InstAlias<"scas\t{$dst, %eax|eax, $dst}", (SCASL dstidx32:$dst), 0>;
 def : InstAlias<"scas\t{$dst, %rax|rax, $dst}", (SCASQ dstidx64:$dst), 0>, Requires<[In64BitMode]>;
-def : InstAlias<"scas\t$dst", (SCASB dstidx8:$dst),  0>;
-def : InstAlias<"scas\t$dst", (SCASW dstidx16:$dst), 0>;
-def : InstAlias<"scas\t$dst", (SCASL dstidx32:$dst), 0>;
-def : InstAlias<"scas\t$dst", (SCASQ dstidx64:$dst), 0>, Requires<[In64BitMode]>;
+def : InstAlias<"scas{b}\t$dst", (SCASB dstidx8:$dst),  0>;
+def : InstAlias<"scas{w}\t$dst", (SCASW dstidx16:$dst), 0>;
+def : InstAlias<"scas{l}\t$dst", (SCASL dstidx32:$dst), 0>;
+def : InstAlias<"scas{q}\t$dst", (SCASQ dstidx64:$dst), 0>, Requires<[In64BitMode]>;
 
 // cmps aliases. Mnemonic suffix being omitted because it's implicit
 // in the destination.
-def : InstAlias<"cmps\t{$dst, $src|$src, $dst}", (CMPSB dstidx8:$dst, srcidx8:$src),  0>;
-def : InstAlias<"cmps\t{$dst, $src|$src, $dst}", (CMPSW dstidx16:$dst, srcidx16:$src), 0>;
-def : InstAlias<"cmps\t{$dst, $src|$src, $dst}", (CMPSL dstidx32:$dst, srcidx32:$src), 0>;
-def : InstAlias<"cmps\t{$dst, $src|$src, $dst}", (CMPSQ dstidx64:$dst, srcidx64:$src), 0>, Requires<[In64BitMode]>;
+def : InstAlias<"cmps{b}\t{$dst, $src|$src, $dst}", (CMPSB dstidx8:$dst, srcidx8:$src),  0>;
+def : InstAlias<"cmps{w}\t{$dst, $src|$src, $dst}", (CMPSW dstidx16:$dst, srcidx16:$src), 0>;
+def : InstAlias<"cmps{l}\t{$dst, $src|$src, $dst}", (CMPSL dstidx32:$dst, srcidx32:$src), 0>;
+def : InstAlias<"cmps{q}\t{$dst, $src|$src, $dst}", (CMPSQ dstidx64:$dst, srcidx64:$src), 0>, Requires<[In64BitMode]>;
 
 // movs aliases. Mnemonic suffix being omitted because it's implicit
 // in the destination.
-def : InstAlias<"movs\t{$src, $dst|$dst, $src}", (MOVSB dstidx8:$dst, srcidx8:$src),  0>;
-def : InstAlias<"movs\t{$src, $dst|$dst, $src}", (MOVSW dstidx16:$dst, srcidx16:$src), 0>;
-def : InstAlias<"movs\t{$src, $dst|$dst, $src}", (MOVSL dstidx32:$dst, srcidx32:$src), 0>;
-def : InstAlias<"movs\t{$src, $dst|$dst, $src}", (MOVSQ dstidx64:$dst, srcidx64:$src), 0>, Requires<[In64BitMode]>;
+def : InstAlias<"movs{b}\t{$src, $dst|$dst, $src}", (MOVSB dstidx8:$dst, srcidx8:$src),  0>;
+def : InstAlias<"movs{w}\t{$src, $dst|$dst, $src}", (MOVSW dstidx16:$dst, srcidx16:$src), 0>;
+def : InstAlias<"movs{l}\t{$src, $dst|$dst, $src}", (MOVSL dstidx32:$dst, srcidx32:$src), 0>;
+def : InstAlias<"movs{q}\t{$src, $dst|$dst, $src}", (MOVSQ dstidx64:$dst, srcidx64:$src), 0>, Requires<[In64BitMode]>;
 
 // div and idiv aliases for explicit A register.
 def : InstAlias<"div{b}\t{$src, %al|al, $src}", (DIV8r  GR8 :$src)>;
@@ -3208,10 +3194,12 @@ def : InstAlias<"mov\t{$seg, $mem|$mem, $seg}", (MOV16ms i16mem:$mem, SEGMENT_RE
 // Match 'movq <largeimm>, <reg>' as an alias for movabsq.
 def : InstAlias<"mov{q}\t{$imm, $reg|$reg, $imm}", (MOV64ri GR64:$reg, i64imm:$imm), 0>;
 
-// Match 'movq GR64, MMX' as an alias for movd.
-def : InstAlias<"movq\t{$src, $dst|$dst, $src}",
+// Match 'movd GR64, MMX' as an alias for movq to be compatible with gas,
+// which supports this due to an old AMD documentation bug when 64-bit mode was
+// created.
+def : InstAlias<"movd\t{$src, $dst|$dst, $src}",
                 (MMX_MOVD64to64rr VR64:$dst, GR64:$src), 0>;
-def : InstAlias<"movq\t{$src, $dst|$dst, $src}",
+def : InstAlias<"movd\t{$src, $dst|$dst, $src}",
                 (MMX_MOVD64from64rr GR64:$dst, VR64:$src), 0>;
 
 // movsx aliases
@@ -3310,11 +3298,18 @@ def : InstAlias<"xchg{q}\t{$mem, $val|$val, $mem}",
 
 // xchg: We accept "xchgX <reg>, %eax" and "xchgX %eax, <reg>" as synonyms.
 def : InstAlias<"xchg{w}\t{%ax, $src|$src, ax}", (XCHG16ar GR16:$src), 0>;
-def : InstAlias<"xchg{l}\t{%eax, $src|$src, eax}",
-                (XCHG32ar GR32:$src), 0>, Requires<[Not64BitMode]>;
-def : InstAlias<"xchg{l}\t{%eax, $src|$src, eax}",
-                (XCHG32ar64 GR32_NOAX:$src), 0>, Requires<[In64BitMode]>;
+def : InstAlias<"xchg{l}\t{%eax, $src|$src, eax}", (XCHG32ar GR32:$src), 0>;
 def : InstAlias<"xchg{q}\t{%rax, $src|$src, rax}", (XCHG64ar GR64:$src), 0>;
+
+// In 64-bit mode, xchg %eax, %eax can't be encoded with the 0x90 opcode we
+// would get by default because it's defined as NOP. But xchg %eax, %eax implies
+// implicit zeroing of the upper 32 bits. So alias to the longer encoding.
+def : InstAlias<"xchg{l}\t{%eax, %eax|eax, eax}",
+                (XCHG32rr EAX, EAX), 0>, Requires<[In64BitMode]>;
+
+// xchg %rax, %rax is a nop in x86-64 and can be encoded as such. Without this
+// we emit an unneeded REX.w prefix.
+def : InstAlias<"xchg{q}\t{%rax, %rax|rax, rax}", (NOOP), 0>;
 
 // These aliases exist to get the parser to prioritize matching 8-bit
 // immediate encodings over matching the implicit ax/eax/rax encodings. By

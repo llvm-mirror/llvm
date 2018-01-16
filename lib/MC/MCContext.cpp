@@ -490,8 +490,10 @@ MCSectionWasm *MCContext::getWasmSection(const Twine &Section, SectionKind K,
                                          const Twine &Group, unsigned UniqueID,
                                          const char *BeginSymName) {
   MCSymbolWasm *GroupSym = nullptr;
-  if (!Group.isTriviallyEmpty() && !Group.str().empty())
+  if (!Group.isTriviallyEmpty() && !Group.str().empty()) {
     GroupSym = cast<MCSymbolWasm>(getOrCreateSymbol(Group));
+    GroupSym->setComdat(true);
+  }
 
   return getWasmSection(Section, K, GroupSym, UniqueID, BeginSymName);
 }
@@ -535,9 +537,10 @@ MCSubtargetInfo &MCContext::getSubtargetCopy(const MCSubtargetInfo &STI) {
 /// error and zero is returned and the client reports the error, else the
 /// allocated file number is returned.  The file numbers may be in any order.
 unsigned MCContext::getDwarfFile(StringRef Directory, StringRef FileName,
-                                 unsigned FileNumber, unsigned CUID) {
+                                 unsigned FileNumber, MD5::MD5Result *Checksum,
+                                 unsigned CUID) {
   MCDwarfLineTable &Table = MCDwarfLineTablesCUMap[CUID];
-  return Table.getFile(Directory, FileName, FileNumber);
+  return Table.getFile(Directory, FileName, Checksum, FileNumber);
 }
 
 /// isValidDwarfFileNumber - takes a dwarf file number and returns true if it

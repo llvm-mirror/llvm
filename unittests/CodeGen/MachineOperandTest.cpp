@@ -119,7 +119,7 @@ TEST(MachineOperandTest, PrintSubRegIndex) {
   std::string str;
   raw_string_ostream OS(str);
   ModuleSlotTracker DummyMST(nullptr);
-  MachineOperand::printSubregIdx(OS, MO.getImm(), nullptr);
+  MachineOperand::printSubRegIdx(OS, MO.getImm(), nullptr);
   ASSERT_TRUE(OS.str() == "%subreg.3");
 }
 
@@ -215,7 +215,7 @@ TEST(MachineOperandTest, PrintExternalSymbol) {
   {
     raw_string_ostream OS(str);
     MO.print(OS, /*TRI=*/nullptr, /*IntrinsicInfo=*/nullptr);
-    ASSERT_TRUE(OS.str() == "$foo");
+    ASSERT_TRUE(OS.str() == "&foo");
   }
 
   str.clear();
@@ -225,7 +225,7 @@ TEST(MachineOperandTest, PrintExternalSymbol) {
   {
     raw_string_ostream OS(str);
     MO.print(OS, /*TRI=*/nullptr, /*IntrinsicInfo=*/nullptr);
-    ASSERT_TRUE(OS.str() == "$foo + 12");
+    ASSERT_TRUE(OS.str() == "&foo + 12");
   }
 
   str.clear();
@@ -235,7 +235,7 @@ TEST(MachineOperandTest, PrintExternalSymbol) {
   {
     raw_string_ostream OS(str);
     MO.print(OS, /*TRI=*/nullptr, /*IntrinsicInfo=*/nullptr);
-    ASSERT_TRUE(OS.str() == "$foo - 12");
+    ASSERT_TRUE(OS.str() == "&foo - 12");
   }
 }
 

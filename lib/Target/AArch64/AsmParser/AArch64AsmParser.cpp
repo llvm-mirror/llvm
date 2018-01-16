@@ -470,50 +470,22 @@ public:
 
   bool isImm() const override { return Kind == k_Immediate; }
   bool isMem() const override { return false; }
-  bool isSImm9() const {
+
+  template <int Width> bool isSImm() const { return isSImmScaled<Width, 1>(); }
+
+  template <int Bits, int Scale> bool isSImmScaled() const {
     if (!isImm())
       return false;
     const MCConstantExpr *MCE = dyn_cast<MCConstantExpr>(getImm());
     if (!MCE)
       return false;
+
+    int64_t Shift = Bits - 1;
+    int64_t MinVal = (int64_t(1) << Shift) * -Scale;
+    int64_t MaxVal = ((int64_t(1) << Shift) - 1) * Scale;
+
     int64_t Val = MCE->getValue();
-    return (Val >= -256 && Val < 256);
-  }
-  bool isSImm10s8() const {
-    if (!isImm())
-      return false;
-    const MCConstantExpr *MCE = dyn_cast<MCConstantExpr>(getImm());
-    if (!MCE)
-      return false;
-    int64_t Val = MCE->getValue();
-    return (Val >= -4096 && Val < 4089 && (Val & 7) == 0);
-  }
-  bool isSImm7s4() const {
-    if (!isImm())
-      return false;
-    const MCConstantExpr *MCE = dyn_cast<MCConstantExpr>(getImm());
-    if (!MCE)
-      return false;
-    int64_t Val = MCE->getValue();
-    return (Val >= -256 && Val <= 252 && (Val & 3) == 0);
-  }
-  bool isSImm7s8() const {
-    if (!isImm())
-      return false;
-    const MCConstantExpr *MCE = dyn_cast<MCConstantExpr>(getImm());
-    if (!MCE)
-      return false;
-    int64_t Val = MCE->getValue();
-    return (Val >= -512 && Val <= 504 && (Val & 7) == 0);
-  }
-  bool isSImm7s16() const {
-    if (!isImm())
-      return false;
-    const MCConstantExpr *MCE = dyn_cast<MCConstantExpr>(getImm());
-    if (!MCE)
-      return false;
-    int64_t Val = MCE->getValue();
-    return (Val >= -1024 && Val <= 1008 && (Val & 15) == 0);
+    return Val >= MinVal && Val <= MaxVal && (Val % Scale) == 0;
   }
 
   bool isSymbolicUImm12Offset(const MCExpr *Expr, unsigned Scale) const {
@@ -1081,7 +1053,7 @@ public:
   // ambiguity in the matcher.
   template<int Width>
   bool isSImm9OffsetFB() const {
-    return isSImm9() && !isUImm12Offset<Width / 8>();
+    return isSImm<9>() && !isUImm12Offset<Width / 8>();
   }
 
   bool isAdrpLabel() const {
@@ -2808,6 +2780,36 @@ AArch64AsmParser::tryParseSVEPredicateVector(OperandVector &Operands) {
       AArch64Operand::CreateReg(RegNum, RegKind::SVEPredicateVector,
                                 ElementWidth, S, getLoc(), getContext()));
 
+  // Not all predicates are followed by a '/m' or '/z'.
+  MCAsmParser &Parser = getParser();
+  if (Parser.getTok().isNot(AsmToken::Slash))
+    return MatchOperand_Success;
+
+  // But when they do they shouldn't have an element type suffix.
+  if (!Kind.empty()) {
+    Error(S, "not expecting size suffix");
+    return MatchOperand_ParseFail;
+  }
+
+  // Add a literal slash as operand
+  Operands.push_back(
+      AArch64Operand::CreateToken("/" , false, getLoc(), getContext()));
+
+  Parser.Lex(); // Eat the slash.
+
+  // Zeroing or merging?
+  auto Pred = Parser.getTok().getString().lower();
+  if (Pred != "z" && Pred != "m") {
+    Error(getLoc(), "expecting 'm' or 'z' predication");
+    return MatchOperand_ParseFail;
+  }
+
+  // Add zero/merge token.
+  const char *ZM = Pred == "z" ? "z" : "m";
+  Operands.push_back(
+    AArch64Operand::CreateToken(ZM, false, getLoc(), getContext()));
+
+  Parser.Lex(); // Eat zero/merge token.
   return MatchOperand_Success;
 }
 
@@ -3514,6 +3516,8 @@ static std::string AArch64MnemonicSpellCheck(StringRef S, uint64_t FBS,
 bool AArch64AsmParser::showMatchError(SMLoc Loc, unsigned ErrCode,
                                       OperandVector &Operands) {
   switch (ErrCode) {
+  case Match_InvalidTiedOperand:
+    return Error(Loc, "operand must match destination register");
   case Match_MissingFeature:
     return Error(Loc,
                  "instruction requires a CPU feature not currently enabled");
@@ -4033,6 +4037,7 @@ bool AArch64AsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
 
     return showMatchError(ErrorLoc, MatchResult, Operands);
   }
+  case Match_InvalidTiedOperand:
   case Match_InvalidMemoryIndexed1:
   case Match_InvalidMemoryIndexed2:
   case Match_InvalidMemoryIndexed4:

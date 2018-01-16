@@ -417,10 +417,10 @@ def SLDT32r : I<0x00, MRM0r, (outs GR32:$dst), (ins),
 // LLDT is not interpreted specially in 64-bit mode because there is no sign
 //   extension.
 def SLDT64r : RI<0x00, MRM0r, (outs GR64:$dst), (ins),
-                 "sldt{q}\t$dst", [], IIC_SLDT>, TB;
+                 "sldt{q}\t$dst", [], IIC_SLDT>, TB, Requires<[In64BitMode]>;
 let mayStore = 1 in
 def SLDT64m : RI<0x00, MRM0m, (outs), (ins i16mem:$dst),
-                 "sldt{q}\t$dst", [], IIC_SLDT>, TB;
+                 "sldt{q}\t$dst", [], IIC_SLDT>, TB, Requires<[In64BitMode]>;
 
 def LGDT16m : I<0x01, MRM2m, (outs), (ins opaque48mem:$src),
               "lgdt{w}\t$src", [], IIC_LGDT>, TB, OpSize16, Requires<[Not64BitMode]>;
@@ -535,6 +535,11 @@ let SchedRW = [WriteSystem], Predicates = [HasSHSTK]  in{
                      [(int_x86_clrssbsy addr:$src)]>, XS;
   } // Defs SSP
 } // SchedRW && HasSHSTK
+
+let Predicates = [HasIBT]  in {
+    def ENDBR64 : I<0x1E, MRM_FA, (outs), (ins), "endbr64", []>, XS;
+    def ENDBR32 : I<0x1E, MRM_FB, (outs), (ins), "endbr32", []>, XS;
+} // HasIBT
 
 //===----------------------------------------------------------------------===//
 // XSAVE instructions

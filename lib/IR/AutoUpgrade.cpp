@@ -157,6 +157,10 @@ static bool ShouldUpgradeX86Intrinsic(Function *F, StringRef Name) {
       Name.startswith("avx512.mask.cmp.q") || // Added in 5.0
       Name.startswith("avx512.mask.cmp.w") || // Added in 5.0
       Name.startswith("avx512.mask.ucmp.") || // Added in 5.0
+      Name.startswith("avx512.cvtb2mask.") || // Added in 7.0
+      Name.startswith("avx512.cvtw2mask.") || // Added in 7.0
+      Name.startswith("avx512.cvtd2mask.") || // Added in 7.0
+      Name.startswith("avx512.cvtq2mask.") || // Added in 7.0
       Name == "avx512.mask.add.pd.128" || // Added in 4.0
       Name == "avx512.mask.add.pd.256" || // Added in 4.0
       Name == "avx512.mask.add.ps.128" || // Added in 4.0
@@ -829,9 +833,11 @@ static Value *upgradeIntMinMax(IRBuilder<> &Builder, CallInst &CI,
 // Applying mask on vector of i1's and make sure result is at least 8 bits wide.
 static Value *ApplyX86MaskOn1BitsVec(IRBuilder<> &Builder,Value *Vec, Value *Mask,
                                      unsigned NumElts) {
-  const auto *C = dyn_cast<Constant>(Mask);
-  if (!C || !C->isAllOnesValue())
-    Vec = Builder.CreateAnd(Vec, getX86MaskVec(Builder, Mask, NumElts));
+  if (Mask) {
+    const auto *C = dyn_cast<Constant>(Mask);
+    if (!C || !C->isAllOnesValue())
+      Vec = Builder.CreateAnd(Vec, getX86MaskVec(Builder, Mask, NumElts));
+  }
 
   if (NumElts < 8) {
     uint32_t Indices[8];
@@ -1064,11 +1070,23 @@ void llvm::UpgradeIntrinsicCall(CallInst *CI, Function *NewFn) {
       Rep = EmitX86Select(Builder, CI->getArgOperand(2), Rep,
                           CI->getArgOperand(1));
     } else if (IsX86 && (Name.startswith("avx512.kunpck"))) {
-      uint64_t Shift = CI->getType()->getScalarSizeInBits() / 2;
-      uint64_t And = (1ULL << Shift) - 1; 
-      Value* LowBits =  Builder.CreateAnd(CI->getArgOperand(0), And);
-      Value* HighBits =  Builder.CreateShl(CI->getArgOperand(1), Shift);
-      Rep = Builder.CreateOr(LowBits, HighBits);
+      unsigned NumElts = CI->getType()->getScalarSizeInBits();
+      Value *LHS = getX86MaskVec(Builder, CI->getArgOperand(0), NumElts);
+      Value *RHS = getX86MaskVec(Builder, CI->getArgOperand(1), NumElts);
+      uint32_t Indices[64];
+      for (unsigned i = 0; i != NumElts; ++i)
+        Indices[i] = i;
+
+      // First extract half of each vector. This gives better codegen than
+      // doing it in a single shuffle.
+      LHS = Builder.CreateShuffleVector(LHS, LHS,
+                                        makeArrayRef(Indices, NumElts / 2));
+      RHS = Builder.CreateShuffleVector(RHS, RHS,
+                                        makeArrayRef(Indices, NumElts / 2));
+      // Concat the vectors.
+      Rep = Builder.CreateShuffleVector(LHS, RHS,
+                                        makeArrayRef(Indices, NumElts));
+      Rep = Builder.CreateBitCast(Rep, CI->getType());
     } else if (IsX86 && (Name == "sse.add.ss" || Name == "sse2.add.sd")) {
       Type *I32Ty = Type::getInt32Ty(C);
       Value *Elt0 = Builder.CreateExtractElement(CI->getArgOperand(0),
@@ -1115,6 +1133,15 @@ void llvm::UpgradeIntrinsicCall(CallInst *CI, Function *NewFn) {
     } else if (IsX86 && Name.startswith("avx512.mask.ucmp")) {
       unsigned Imm = cast<ConstantInt>(CI->getArgOperand(2))->getZExtValue();
       Rep = upgradeMaskedCompare(Builder, *CI, Imm, false);
+    } else if (IsX86 && (Name.startswith("avx512.cvtb2mask.") ||
+                         Name.startswith("avx512.cvtw2mask.") ||
+                         Name.startswith("avx512.cvtd2mask.") ||
+                         Name.startswith("avx512.cvtq2mask."))) {
+      Value *Op = CI->getArgOperand(0);
+      Value *Zero = llvm::Constant::getNullValue(Op->getType());
+      Rep = Builder.CreateICmp(ICmpInst::ICMP_SLT, Op, Zero);
+      Rep = ApplyX86MaskOn1BitsVec(Builder, Rep, nullptr,
+                                   Op->getType()->getVectorNumElements());
     } else if(IsX86 && (Name == "ssse3.pabs.b.128" ||
                         Name == "ssse3.pabs.w.128" ||
                         Name == "ssse3.pabs.d.128" ||

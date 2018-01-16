@@ -440,7 +440,7 @@ static void printIRBlockReference(raw_ostream &OS, const BasicBlock &BB,
     OS << "<unknown>";
 }
 
-void MachineOperand::printSubregIdx(raw_ostream &OS, uint64_t Index,
+void MachineOperand::printSubRegIdx(raw_ostream &OS, uint64_t Index,
                                     const TargetRegisterInfo *TRI) {
   OS << "%subreg.";
   if (TRI)
@@ -752,7 +752,7 @@ void MachineOperand::print(raw_ostream &OS, ModuleSlotTracker &MST,
     break;
   case MachineOperand::MO_ExternalSymbol: {
     StringRef Name = getSymbolName();
-    OS << '$';
+    OS << '&';
     if (Name.empty()) {
       OS << "\"\"";
     } else {

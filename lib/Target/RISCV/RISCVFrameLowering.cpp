@@ -12,11 +12,13 @@
 //===----------------------------------------------------------------------===//
 
 #include "RISCVFrameLowering.h"
+#include "RISCVMachineFunctionInfo.h"
 #include "RISCVSubtarget.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/RegisterScavenging.h"
 
 using namespace llvm;
 
@@ -61,18 +63,34 @@ void RISCVFrameLowering::adjustReg(MachineBasicBlock &MBB,
                                    const DebugLoc &DL, unsigned DestReg,
                                    unsigned SrcReg, int64_t Val,
                                    MachineInstr::MIFlag Flag) const {
+  MachineRegisterInfo &MRI = MBB.getParent()->getRegInfo();
   const RISCVInstrInfo *TII = STI.getInstrInfo();
 
   if (DestReg == SrcReg && Val == 0)
     return;
 
-  if (!isInt<12>(Val))
-    report_fatal_error("adjustReg cannot yet handle adjustments >12 bits");
+  if (isInt<12>(Val)) {
+    BuildMI(MBB, MBBI, DL, TII->get(RISCV::ADDI), DestReg)
+        .addReg(SrcReg)
+        .addImm(Val)
+        .setMIFlag(Flag);
+  } else if (isInt<32>(Val)) {
+    unsigned Opc = RISCV::ADD;
+    bool isSub = Val < 0;
+    if (isSub) {
+      Val = -Val;
+      Opc = RISCV::SUB;
+    }
 
-  BuildMI(MBB, MBBI, DL, TII->get(RISCV::ADDI), DestReg)
-      .addReg(SrcReg)
-      .addImm(Val)
-      .setMIFlag(Flag);
+    unsigned ScratchReg = MRI.createVirtualRegister(&RISCV::GPRRegClass);
+    TII->movImm32(MBB, MBBI, DL, ScratchReg, Val, Flag);
+    BuildMI(MBB, MBBI, DL, TII->get(Opc), DestReg)
+        .addReg(SrcReg)
+        .addReg(ScratchReg, RegState::Kill)
+        .setMIFlag(Flag);
+  } else {
+    report_fatal_error("adjustReg cannot yet handle adjustments >32 bits");
+  }
 }
 
 // Returns the register used to hold the frame pointer.
@@ -91,6 +109,7 @@ void RISCVFrameLowering::emitPrologue(MachineFunction &MF,
   }
 
   MachineFrameInfo &MFI = MF.getFrameInfo();
+  auto *RVFI = MF.getInfo<RISCVMachineFunctionInfo>();
   MachineBasicBlock::iterator MBBI = MBB.begin();
 
   unsigned FPReg = getFPReg(STI);
@@ -124,7 +143,8 @@ void RISCVFrameLowering::emitPrologue(MachineFunction &MF,
   std::advance(MBBI, CSI.size());
 
   // Generate new FP.
-  adjustReg(MBB, MBBI, DL, FPReg, SPReg, StackSize, MachineInstr::FrameSetup);
+  adjustReg(MBB, MBBI, DL, FPReg, SPReg, StackSize - RVFI->getVarArgsSaveSize(),
+            MachineInstr::FrameSetup);
 }
 
 void RISCVFrameLowering::emitEpilogue(MachineFunction &MF,
@@ -137,6 +157,7 @@ void RISCVFrameLowering::emitEpilogue(MachineFunction &MF,
   MachineBasicBlock::iterator MBBI = MBB.getLastNonDebugInstr();
   const RISCVRegisterInfo *RI = STI.getRegisterInfo();
   MachineFrameInfo &MFI = MF.getFrameInfo();
+  auto *RVFI = MF.getInfo<RISCVMachineFunctionInfo>();
   DebugLoc DL = MBBI->getDebugLoc();
   unsigned FPReg = getFPReg(STI);
   unsigned SPReg = getSPReg(STI);
@@ -153,7 +174,8 @@ void RISCVFrameLowering::emitEpilogue(MachineFunction &MF,
   // necessary if the stack pointer was modified, meaning the stack size is
   // unknown.
   if (RI->needsStackRealignment(MF) || MFI.hasVarSizedObjects()) {
-    adjustReg(MBB, LastFrameDestroy, DL, SPReg, FPReg, -StackSize,
+    adjustReg(MBB, LastFrameDestroy, DL, SPReg, FPReg,
+              -StackSize + RVFI->getVarArgsSaveSize(),
               MachineInstr::FrameDestroy);
   }
 
@@ -166,6 +188,7 @@ int RISCVFrameLowering::getFrameIndexReference(const MachineFunction &MF,
                                                unsigned &FrameReg) const {
   const MachineFrameInfo &MFI = MF.getFrameInfo();
   const TargetRegisterInfo *RI = MF.getSubtarget().getRegisterInfo();
+  const auto *RVFI = MF.getInfo<RISCVMachineFunctionInfo>();
 
   // Callee-saved registers should be referenced relative to the stack
   // pointer (positive offset), otherwise use the frame pointer (negative
@@ -182,10 +205,13 @@ int RISCVFrameLowering::getFrameIndexReference(const MachineFunction &MF,
     MaxCSFI = CSI[CSI.size() - 1].getFrameIdx();
   }
 
-  FrameReg = RI->getFrameRegister(MF);
   if (FI >= MinCSFI && FI <= MaxCSFI) {
     FrameReg = RISCV::X2;
     Offset += MF.getFrameInfo().getStackSize();
+  } else {
+    FrameReg = RI->getFrameRegister(MF);
+    assert(hasFP(MF) && "Offset calculation incorrect if !hasFP");
+    Offset += RVFI->getVarArgsSaveSize();
   }
   return Offset;
 }
@@ -198,4 +224,22 @@ void RISCVFrameLowering::determineCalleeSaves(MachineFunction &MF,
   // unconditionally spill the frame pointer and return address.
   SavedRegs.set(RISCV::X1);
   SavedRegs.set(RISCV::X8);
+}
+
+void RISCVFrameLowering::processFunctionBeforeFrameFinalized(
+    MachineFunction &MF, RegScavenger *RS) const {
+  const TargetRegisterInfo *RegInfo = MF.getSubtarget().getRegisterInfo();
+  MachineFrameInfo &MFI = MF.getFrameInfo();
+  const TargetRegisterClass *RC = &RISCV::GPRRegClass;
+  // estimateStackSize has been observed to under-estimate the final stack
+  // size, so give ourselves wiggle-room by checking for stack size
+  // representable an 11-bit signed field rather than 12-bits.
+  // FIXME: It may be possible to craft a function with a small stack that
+  // still needs an emergency spill slot for branch relaxation. This case
+  // would currently be missed.
+  if (!isInt<11>(MFI.estimateStackSize(MF))) {
+    int RegScavFI = MFI.CreateStackObject(
+        RegInfo->getSpillSize(*RC), RegInfo->getSpillAlignment(*RC), false);
+    RS->addScavengingFrameIndex(RegScavFI);
+  }
 }
