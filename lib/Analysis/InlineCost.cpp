@@ -136,6 +136,7 @@ class CallAnalyzer : public InstVisitor<CallAnalyzer, bool> {
   bool HasReturn;
   bool HasIndirectBr;
   bool HasFrameEscape;
+  bool UsesVarArgs;
 
   /// Number of bytes allocated statically by the callee.
   uint64_t AllocatedSize;
@@ -280,7 +281,7 @@ public:
         IsCallerRecursive(false), IsRecursiveCall(false),
         ExposesReturnsTwice(false), HasDynamicAlloca(false),
         ContainsNoDuplicateCall(false), HasReturn(false), HasIndirectBr(false),
-        HasFrameEscape(false), AllocatedSize(0), NumInstructions(0),
+        HasFrameEscape(false), UsesVarArgs(false), AllocatedSize(0), NumInstructions(0),
         NumVectorInstructions(0), VectorBonus(0), SingleBBBonus(0),
         EnableLoadElimination(true), LoadEliminationCost(0), NumConstantArgs(0),
         NumConstantOffsetPtrArgs(0), NumAllocaArgs(0), NumConstantPtrCmps(0),
@@ -1233,6 +1234,10 @@ bool CallAnalyzer::visitCallSite(CallSite CS) {
       case Intrinsic::localescape:
         HasFrameEscape = true;
         return false;
+      case Intrinsic::vastart:
+      case Intrinsic::vaend:
+        UsesVarArgs = true;
+        return false;
       }
     }
 
@@ -1567,7 +1572,7 @@ bool CallAnalyzer::analyzeBlock(BasicBlock *BB,
     using namespace ore;
     // If the visit this instruction detected an uninlinable pattern, abort.
     if (IsRecursiveCall || ExposesReturnsTwice || HasDynamicAlloca ||
-        HasIndirectBr || HasFrameEscape) {
+        HasIndirectBr || HasFrameEscape || UsesVarArgs) {
       if (ORE)
         ORE->emit([&]() {
           return OptimizationRemarkMissed(DEBUG_TYPE, "NeverInline",
@@ -1954,6 +1959,19 @@ InlineCost llvm::getInlineCost(
   // Cannot inline indirect calls.
   if (!Callee)
     return llvm::InlineCost::getNever();
+
+  // Never inline calls with byval arguments that does not have the alloca
+  // address space. Since byval arguments can be replaced with a copy to an
+  // alloca, the inlined code would need to be adjusted to handle that the
+  // argument is in the alloca address space (so it is a little bit complicated
+  // to solve).
+  unsigned AllocaAS = Callee->getParent()->getDataLayout().getAllocaAddrSpace();
+  for (unsigned I = 0, E = CS.arg_size(); I != E; ++I)
+    if (CS.isByValArgument(I)) {
+      PointerType *PTy = cast<PointerType>(CS.getArgument(I)->getType());
+      if (PTy->getAddressSpace() != AllocaAS)
+        return llvm::InlineCost::getNever();
+    }
 
   // Calls to functions with always-inline attributes should be inlined
   // whenever possible.

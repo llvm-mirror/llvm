@@ -414,7 +414,9 @@ namespace llvm {
       return !getVolatileCst()->isZero();
     }
 
-    void setAlignment(Constant *A) { setArgOperand(ARG_ALIGN, A); }
+    void setAlignment(unsigned Align) {
+      setArgOperand(ARG_ALIGN, ConstantInt::get(getAlignmentType(), Align));
+    }
 
     void setVolatile(Constant *V) { setArgOperand(ARG_VOLATILE, V); }
 
@@ -462,11 +464,14 @@ namespace llvm {
 
   /// This class wraps the llvm.memcpy/memmove intrinsics.
   class MemTransferInst : public MemIntrinsic {
+  private:
+    enum { ARG_SOURCE = 1 };
+
   public:
     /// Return the arguments to the instruction.
-    Value *getRawSource() const { return const_cast<Value*>(getArgOperand(1)); }
-    const Use &getRawSourceUse() const { return getArgOperandUse(1); }
-    Use &getRawSourceUse() { return getArgOperandUse(1); }
+    Value *getRawSource() const { return const_cast<Value*>(getArgOperand(ARG_SOURCE)); }
+    const Use &getRawSourceUse() const { return getArgOperandUse(ARG_SOURCE); }
+    Use &getRawSourceUse() { return getArgOperandUse(ARG_SOURCE); }
 
     /// This is just like getRawSource, but it strips off any cast
     /// instructions that feed it, giving the original input.  The returned
@@ -480,7 +485,7 @@ namespace llvm {
     void setSource(Value *Ptr) {
       assert(getRawSource()->getType() == Ptr->getType() &&
              "setSource called with pointer of wrong type!");
-      setArgOperand(1, Ptr);
+      setArgOperand(ARG_SOURCE, Ptr);
     }
 
     // Methods for support type inquiry through isa, cast, and dyn_cast:

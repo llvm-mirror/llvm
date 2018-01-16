@@ -117,6 +117,14 @@ static cl::list<std::string> AddSection(
     "add-section",
     cl::desc("Make a section named <section> with the contents of <file>."),
     cl::value_desc("section=file"));
+static cl::opt<bool> LocalizeHidden(
+    "localize-hidden",
+    cl::desc(
+        "Mark all symbols that have hidden or internal visibility as local"));
+static cl::opt<std::string>
+    AddGnuDebugLink("add-gnu-debuglink",
+                    cl::desc("adds a .gnu_debuglink for <debug-file>"),
+                    cl::value_desc("debug-file"));
 
 using SectionPred = std::function<bool(const SectionBase &Sec)>;
 
@@ -179,6 +187,14 @@ template <class ELFT> void CopyBinary(const ELFObjectFile<ELFT> &ObjFile) {
 
   if (!SplitDWO.empty())
     SplitDWOToFile<ELFT>(ObjFile, SplitDWO.getValue());
+
+  // Localize:
+
+  if (LocalizeHidden) {
+    Obj->getSymTab()->localize([](const Symbol &Sym) {
+      return Sym.Visibility == STV_HIDDEN || Sym.Visibility == STV_INTERNAL;
+    });
+  }
 
   SectionPred RemovePred = [](const SectionBase &) { return false; };
 
@@ -304,6 +320,10 @@ template <class ELFT> void CopyBinary(const ELFObjectFile<ELFT> &ObjFile) {
       auto BufSize = Buf->getBufferSize();
       Obj->addSection(SecName, ArrayRef<uint8_t>(BufPtr, BufSize));
     }
+  }
+
+  if (!AddGnuDebugLink.empty()) {
+    Obj->addGnuDebugLink(AddGnuDebugLink);
   }
 
   Obj->finalize();

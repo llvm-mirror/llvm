@@ -1659,7 +1659,7 @@ bool ARMBaseInstrInfo::produceSameValue(const MachineInstr &MI0,
     }
 
     for (unsigned i = 3, e = MI0.getNumOperands(); i != e; ++i) {
-      // %12 = PICLDR %11, 0, pred:14, pred:%noreg
+      // %12 = PICLDR %11, 0, 14, %noreg
       const MachineOperand &MO0 = MI0.getOperand(i);
       const MachineOperand &MO1 = MI1.getOperand(i);
       if (!MO0.isIdenticalTo(MO1))
@@ -2277,9 +2277,9 @@ bool llvm::tryFoldSPUpdateIntoPushPop(const ARMSubtarget &Subtarget,
        --CurRegEnc) {
     unsigned CurReg = RegClass->getRegister(CurRegEnc);
     if (!IsPop) {
-      // Pushing any register is completely harmless, mark the
-      // register involved as undef since we don't care about it in
-      // the slightest.
+      // Pushing any register is completely harmless, mark the register involved
+      // as undef since we don't care about its value and must not restore it
+      // during stack unwinding.
       RegList.push_back(MachineOperand::CreateReg(CurReg, false, false,
                                                   false, false, true));
       --RegsNeeded;
@@ -3467,8 +3467,8 @@ bool ARMBaseInstrInfo::isLDMBaseRegInList(const MachineInstr &MI) const {
 }
 unsigned
 ARMBaseInstrInfo::getLDMVariableDefsSize(const MachineInstr &MI) const {
-  // ins GPR:$Rn, pred:$p (2xOp), reglist:$regs, variable_ops
-  // (outs GPR:$wb), (ins GPR:$Rn, pred:$p (2xOp), reglist:$regs, variable_ops)
+  // ins GPR:$Rn, $p (2xOp), reglist:$regs, variable_ops
+  // (outs GPR:$wb), (ins GPR:$Rn, $p (2xOp), reglist:$regs, variable_ops)
   return MI.getNumOperands() + 1 - MI.getDesc().getNumOperands();
 }
 
@@ -4864,12 +4864,14 @@ bool ARMBaseInstrInfo::getRegSequenceLikeInputs(
     // Populate the InputRegs accordingly.
     // rY
     const MachineOperand *MOReg = &MI.getOperand(1);
-    InputRegs.push_back(
-        RegSubRegPairAndIdx(MOReg->getReg(), MOReg->getSubReg(), ARM::ssub_0));
+    if (!MOReg->isUndef())
+      InputRegs.push_back(RegSubRegPairAndIdx(MOReg->getReg(),
+                                              MOReg->getSubReg(), ARM::ssub_0));
     // rZ
     MOReg = &MI.getOperand(2);
-    InputRegs.push_back(
-        RegSubRegPairAndIdx(MOReg->getReg(), MOReg->getSubReg(), ARM::ssub_1));
+    if (!MOReg->isUndef())
+      InputRegs.push_back(RegSubRegPairAndIdx(MOReg->getReg(),
+                                              MOReg->getSubReg(), ARM::ssub_1));
     return true;
   }
   llvm_unreachable("Target dependent opcode missing");
@@ -4888,6 +4890,8 @@ bool ARMBaseInstrInfo::getExtractSubregLikeInputs(
     // rX = EXTRACT_SUBREG dZ, ssub_0
     // rY = EXTRACT_SUBREG dZ, ssub_1
     const MachineOperand &MOReg = MI.getOperand(2);
+    if (MOReg.isUndef())
+      return false;
     InputReg.Reg = MOReg.getReg();
     InputReg.SubReg = MOReg.getSubReg();
     InputReg.SubIdx = DefIdx == 0 ? ARM::ssub_0 : ARM::ssub_1;
@@ -4907,6 +4911,8 @@ bool ARMBaseInstrInfo::getInsertSubregLikeInputs(
     // dX = VSETLNi32 dY, rZ, imm
     const MachineOperand &MOBaseReg = MI.getOperand(1);
     const MachineOperand &MOInsertedReg = MI.getOperand(2);
+    if (MOInsertedReg.isUndef())
+      return false;
     const MachineOperand &MOIndex = MI.getOperand(3);
     BaseReg.Reg = MOBaseReg.getReg();
     BaseReg.SubReg = MOBaseReg.getSubReg();

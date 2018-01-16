@@ -101,6 +101,7 @@ class function_ref<Ret(Params...)> {
 
 public:
   function_ref() = default;
+  function_ref(std::nullptr_t) {}
 
   template <typename Callable>
   function_ref(Callable &&callable,
@@ -859,6 +860,11 @@ auto remove_if(R &&Range, UnaryPredicate P) -> decltype(adl_begin(Range)) {
 template <typename R, typename OutputIt, typename UnaryPredicate>
 OutputIt copy_if(R &&Range, OutputIt Out, UnaryPredicate P) {
   return std::copy_if(adl_begin(Range), adl_end(Range), Out, P);
+}
+
+template <typename R, typename OutputIt>
+OutputIt copy(R &&Range, OutputIt Out) {
+  return std::copy(adl_begin(Range), adl_end(Range), Out);
 }
 
 /// Wrapper function around std::find to detect if an element exists
