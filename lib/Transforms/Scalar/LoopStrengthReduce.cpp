@@ -442,7 +442,7 @@ void Formula::initialMatch(const SCEV *S, Loop *L, ScalarEvolution &SE) {
   canonicalize(*L);
 }
 
-/// \brief Check whether or not this formula statisfies the canonical
+/// \brief Check whether or not this formula satisfies the canonical
 /// representation.
 /// \see Formula::BaseRegs.
 bool Formula::isCanonical(const Loop &L) const {
@@ -937,7 +937,7 @@ static bool isHighCostExpansion(const SCEV *S,
   return true;
 }
 
-/// If any of the instructions is the specified set are trivially dead, delete
+/// If any of the instructions in the specified set are trivially dead, delete
 /// them and see if this makes any of their operands subsequently dead.
 static bool
 DeleteTriviallyDeadInstructions(SmallVectorImpl<WeakTrackingVH> &DeadInsts) {
