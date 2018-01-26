@@ -439,7 +439,7 @@ multiclass AVX512_maskable_logic<bits<8> O, Format F, X86VectorVTInfo _,
 
 // Alias instruction that maps zero vector to pxor / xorp* for AVX-512.
 // This is expanded by ExpandPostRAPseudos to an xorps / vxorps, and then
-// swizzled by ExecutionDepsFix to pxor.
+// swizzled by ExecutionDomainFix to pxor.
 // We set canFoldAsLoad because this can be converted to a constant-pool
 // load of an all-zeros value if folding it would be beneficial.
 let isReMaterializable = 1, isAsCheapAsAMove = 1, canFoldAsLoad = 1,
@@ -2761,19 +2761,12 @@ let Predicates = [HasAVX512] in {
   defm : operation_gpr_mask_copy_lowering<VK32,  v32i1>;
   defm : operation_gpr_mask_copy_lowering<VK64,  v64i1>;
 
-  def : Pat<(X86kshiftr  (X86kshiftl (v1i1 (scalar_to_vector GR8:$src)), (i8 15)), (i8 15)) ,
-          (COPY_TO_REGCLASS
-                (KMOVWkr (AND32ri8 (INSERT_SUBREG (i32 (IMPLICIT_DEF)),
-                                            GR8:$src, sub_8bit), (i32 1))), VK1)>;
-  def : Pat<(X86kshiftr  (X86kshiftl (v16i1 (scalar_to_vector GR8:$src)), (i8 15)), (i8 15)) ,
+  def : Pat<(insert_subvector (v16i1 immAllZerosV),
+                              (v1i1 (scalar_to_vector GR8:$src)), (iPTR 0)),
             (COPY_TO_REGCLASS
-                (KMOVWkr (AND32ri8 (INSERT_SUBREG (i32 (IMPLICIT_DEF)),
-                                            GR8:$src, sub_8bit), (i32 1))), VK16)>;
-  def : Pat<(X86kshiftr  (X86kshiftl (v8i1 (scalar_to_vector GR8:$src)), (i8 15)), (i8 15)) ,
-         (COPY_TO_REGCLASS
-          (KMOVWkr (AND32ri8 (INSERT_SUBREG (i32 (IMPLICIT_DEF)),
-                                            GR8:$src, sub_8bit), (i32 1))), VK8)>;
-
+             (KMOVWkr (AND32ri8
+                       (INSERT_SUBREG (i32 (IMPLICIT_DEF)), GR8:$src, sub_8bit),
+                       (i32 1))), VK16)>;
 }
 
 // Mask unary operation
@@ -7662,19 +7655,19 @@ let Defs = [EFLAGS], Predicates = [HasAVX512] in {
                                     VEX_LIG, VEX_W, EVEX_CD8<64, CD8VT1>;
   }
   let isCodeGenOnly = 1 in {
-    defm Int_VUCOMISSZ  : sse12_ord_cmp_int<0x2E, VR128X, X86ucomi, v4f32, ssmem,
-                              sse_load_f32, "ucomiss", SSE_COMIS>, PS, EVEX, VEX_LIG,
-                              EVEX_CD8<32, CD8VT1>;
-    defm Int_VUCOMISDZ  : sse12_ord_cmp_int<0x2E, VR128X, X86ucomi, v2f64, sdmem,
-                              sse_load_f64, "ucomisd", SSE_COMIS>, PD, EVEX,
-                              VEX_LIG, VEX_W, EVEX_CD8<64, CD8VT1>;
+    defm VUCOMISSZ  : sse12_ord_cmp_int<0x2E, VR128X, X86ucomi, v4f32, ssmem,
+                          sse_load_f32, "ucomiss", SSE_COMIS>, PS, EVEX, VEX_LIG,
+                          EVEX_CD8<32, CD8VT1>;
+    defm VUCOMISDZ  : sse12_ord_cmp_int<0x2E, VR128X, X86ucomi, v2f64, sdmem,
+                          sse_load_f64, "ucomisd", SSE_COMIS>, PD, EVEX,
+                          VEX_LIG, VEX_W, EVEX_CD8<64, CD8VT1>;
 
-    defm Int_VCOMISSZ  : sse12_ord_cmp_int<0x2F, VR128X, X86comi, v4f32, ssmem,
-                              sse_load_f32, "comiss", SSE_COMIS>, PS, EVEX, VEX_LIG,
-                              EVEX_CD8<32, CD8VT1>;
-    defm Int_VCOMISDZ  : sse12_ord_cmp_int<0x2F, VR128X, X86comi, v2f64, sdmem,
-                              sse_load_f64, "comisd", SSE_COMIS>, PD, EVEX,
-                              VEX_LIG, VEX_W, EVEX_CD8<64, CD8VT1>;
+    defm VCOMISSZ  : sse12_ord_cmp_int<0x2F, VR128X, X86comi, v4f32, ssmem,
+                          sse_load_f32, "comiss", SSE_COMIS>, PS, EVEX, VEX_LIG,
+                          EVEX_CD8<32, CD8VT1>;
+    defm VCOMISDZ  : sse12_ord_cmp_int<0x2F, VR128X, X86comi, v2f64, sdmem,
+                          sse_load_f64, "comisd", SSE_COMIS>, PD, EVEX,
+                          VEX_LIG, VEX_W, EVEX_CD8<64, CD8VT1>;
   }
 }
 
@@ -8747,7 +8740,7 @@ defm VSCATTERPF1QPD: avx512_gather_scatter_prefetch<0xC7, MRM6m, "vscatterpf1qpd
 multiclass cvt_by_vec_width<bits<8> opc, X86VectorVTInfo Vec, string OpcodeStr > {
 def rr : AVX512XS8I<opc, MRMSrcReg, (outs Vec.RC:$dst), (ins Vec.KRC:$src),
                   !strconcat(OpcodeStr##Vec.Suffix, "\t{$src, $dst|$dst, $src}"),
-                  [(set Vec.RC:$dst, (Vec.VT (X86vsext Vec.KRC:$src)))],
+                  [(set Vec.RC:$dst, (Vec.VT (sext Vec.KRC:$src)))],
                   IIC_SSE_MOV_S_RR>, EVEX, Sched<[WriteMove]>;
 }
 
@@ -8812,6 +8805,16 @@ defm VPMOVD2M : avx512_convert_vector_to_mask<0x39, "vpmovd2m",
                                               avx512vl_i32_info, HasDQI>;
 defm VPMOVQ2M : avx512_convert_vector_to_mask<0x39, "vpmovq2m",
                                               avx512vl_i64_info, HasDQI>, VEX_W;
+
+// Patterns for handling sext from a mask register to v16i8/v16i16 when DQI
+// is available, but BWI is not. We can't handle this in lowering because
+// a target independent DAG combine likes to combine sext and trunc.
+let Predicates = [HasDQI, NoBWI] in {
+  def : Pat<(v16i8 (sext (v16i1 VK16:$src))),
+            (VPMOVDBZrr (v16i32 (VPMOVM2DZrr VK16:$src)))>;
+  def : Pat<(v16i16 (sext (v16i1 VK16:$src))),
+            (VPMOVDWZrr (v16i32 (VPMOVM2DZrr VK16:$src)))>;
+}
 
 //===----------------------------------------------------------------------===//
 // AVX-512 - COMPRESS and EXPAND
@@ -9754,7 +9757,7 @@ multiclass avx512_extract_elt_bw_m<bits<8> opc, string OpcodeStr, SDNode OpNode,
               OpcodeStr#"\t{$src2, $src1, $dst|$dst, $src1, $src2}",
               [(store (_.EltVT (trunc (OpNode (_.VT _.RC:$src1), imm:$src2))),
                        addr:$dst)]>,
-              EVEX, EVEX_CD8<_.EltSize, CD8VT1>, Sched<[WriteShuffleLd]>;
+              EVEX, EVEX_CD8<_.EltSize, CD8VT1>, Sched<[WriteShuffleLd, WriteRMW]>;
 }
 
 multiclass avx512_extract_elt_b<string OpcodeStr, X86VectorVTInfo _> {
@@ -9806,7 +9809,7 @@ multiclass avx512_extract_elt_dq<string OpcodeStr, X86VectorVTInfo _,
                 [(store (extractelt (_.VT _.RC:$src1),
                                     imm:$src2),addr:$dst)]>,
                 EVEX, EVEX_CD8<_.EltSize, CD8VT1>, TAPD,
-                Sched<[WriteShuffleLd]>;
+                Sched<[WriteShuffleLd, WriteRMW]>;
   }
 }
 

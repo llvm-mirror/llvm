@@ -149,6 +149,12 @@ def FeatureLSLFast : SubtargetFeature<
     "lsl-fast", "HasLSLFast", "true",
     "CPU has a fastpath logical shift of up to 3 places">;
 
+def FeatureAggressiveFMA :
+  SubtargetFeature<"aggressive-fma",
+                   "HasAggressiveFMA",
+                   "true",
+                   "Enable Aggressive FMA for floating-point.">;
+
 //===----------------------------------------------------------------------===//
 // Architectures.
 //
@@ -294,7 +300,6 @@ def ProcCyclone : SubtargetFeature<"cyclone", "ARMProcFamily", "Cyclone",
                                    FeatureFuseAES,
                                    FeatureNEON,
                                    FeaturePerfMon,
-                                   FeatureSlowMisaligned128Store,
                                    FeatureZCRegMove,
                                    FeatureZCZeroing,
                                    FeatureZCZeroingFPWorkaround
@@ -316,7 +321,7 @@ def ProcExynosM1 : SubtargetFeature<"exynosm1", "ARMProcFamily", "ExynosM1",
                                      FeatureZCZeroing]>;
 
 def ProcExynosM2 : SubtargetFeature<"exynosm2", "ARMProcFamily", "ExynosM1",
-                                    "Samsung Exynos-M2/M3 processors",
+                                    "Samsung Exynos-M2 processors",
                                     [FeatureSlowPaired128,
                                      FeatureCRC,
                                      FeatureCrypto,
@@ -327,6 +332,21 @@ def ProcExynosM2 : SubtargetFeature<"exynosm2", "ARMProcFamily", "ExynosM1",
                                      FeaturePerfMon,
                                      FeaturePostRAScheduler,
                                      FeatureSlowMisaligned128Store,
+                                     FeatureZCZeroing]>;
+
+def ProcExynosM3 : SubtargetFeature<"exynosm3", "ARMProcFamily", "ExynosM1",
+                                    "Samsung Exynos-M3 processors",
+                                    [FeatureCRC,
+                                     FeatureCrypto,
+                                     FeatureCustomCheapAsMoveHandling,
+                                     FeatureFPARMv8,
+                                     FeatureFuseAES,
+                                     FeatureFuseLiterals,
+                                     FeatureNEON,
+                                     FeaturePerfMon,
+                                     FeaturePostRAScheduler,
+                                     FeatureSlowMisaligned128Store,
+                                     FeatureSlowPaired128,
                                      FeatureZCZeroing]>;
 
 def ProcKryo    : SubtargetFeature<"kryo", "ARMProcFamily", "Kryo",
@@ -376,6 +396,7 @@ def ProcSaphira  : SubtargetFeature<"saphira", "ARMProcFamily", "Saphira",
 def ProcThunderX2T99  : SubtargetFeature<"thunderx2t99", "ARMProcFamily",
                                          "ThunderX2T99",
                                          "Cavium ThunderX2 processors", [
+                                          FeatureAggressiveFMA,
                                           FeatureCRC,
                                           FeatureCrypto,
                                           FeatureFPARMv8,
@@ -449,7 +470,7 @@ def : ProcessorModel<"cortex-a75", CortexA57Model, [ProcA75]>;
 def : ProcessorModel<"cyclone", CycloneModel, [ProcCyclone]>;
 def : ProcessorModel<"exynos-m1", ExynosM1Model, [ProcExynosM1]>;
 def : ProcessorModel<"exynos-m2", ExynosM1Model, [ProcExynosM2]>;
-def : ProcessorModel<"exynos-m3", ExynosM1Model, [ProcExynosM2]>;
+def : ProcessorModel<"exynos-m3", ExynosM1Model, [ProcExynosM3]>;
 def : ProcessorModel<"falkor", FalkorModel, [ProcFalkor]>;
 def : ProcessorModel<"saphira", FalkorModel, [ProcSaphira]>;
 def : ProcessorModel<"kryo", KryoModel, [ProcKryo]>;

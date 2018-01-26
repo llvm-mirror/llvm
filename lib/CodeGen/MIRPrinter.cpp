@@ -686,11 +686,11 @@ void MIPrinter::print(const MachineInstr &MI) {
     NeedComma = true;
   }
 
-  if (MI.getDebugLoc()) {
+  if (const DebugLoc &DL = MI.getDebugLoc()) {
     if (NeedComma)
       OS << ',';
     OS << " debug-location ";
-    MI.getDebugLoc()->printAsOperand(OS, MST);
+    DL->printAsOperand(OS, MST);
   }
 
   if (!MI.memoperands_empty()) {
@@ -892,6 +892,8 @@ void MIPrinter::print(const LLVMContext &Context, const TargetInstrInfo &TII,
     OS << ", !range ";
     Op.getRanges()->printAsOperand(OS, MST);
   }
+  if (unsigned AS = Op.getAddrSpace())
+    OS << ", addrspace " << AS;
   OS << ')';
 }
 

@@ -56,11 +56,22 @@
 ; RUN:     -passes='default<O3>' -S  %s 2>&1 \
 ; RUN:     | FileCheck %s --check-prefix=CHECK-O --check-prefix=CHECK-O3 \
 ; RUN:     --check-prefix=CHECK-EP-VECTORIZER-START
+; RUN: opt -disable-verify -debug-pass-manager \
+; RUN:     -passes-ep-pipeline-start='no-op-module' \
+; RUN:     -passes='default<O3>' -S  %s 2>&1 \
+; RUN:     | FileCheck %s --check-prefix=CHECK-O --check-prefix=CHECK-O3 \
+; RUN:     --check-prefix=CHECK-EP-PIPELINE-START
+; RUN: opt -disable-verify -debug-pass-manager \
+; RUN:     -passes-ep-pipeline-start='no-op-module' \
+; RUN:     -passes='lto-pre-link<O3>' -S  %s 2>&1 \
+; RUN:     | FileCheck %s --check-prefix=CHECK-O --check-prefix=CHECK-O3 \
+; RUN:     --check-prefix=CHECK-EP-PIPELINE-START
 
 ; CHECK-O: Starting llvm::Module pass manager run.
 ; CHECK-O-NEXT: Running pass: PassManager<{{.*}}Module{{.*}}>
 ; CHECK-O-NEXT: Starting llvm::Module pass manager run.
 ; CHECK-O-NEXT: Running pass: ForceFunctionAttrsPass
+; CHECK-EP-PIPELINE-START-NEXT: Running pass: NoOpModulePass
 ; CHECK-O-NEXT: Running pass: PassManager<{{.*}}Module{{.*}}>
 ; CHECK-O-NEXT: Starting llvm::Module pass manager run.
 ; CHECK-O-NEXT: Running pass: InferFunctionAttrsPass
@@ -115,6 +126,7 @@
 ; CHECK-O-NEXT: Running analysis: LazyValueAnalysis
 ; CHECK-O-NEXT: Running pass: CorrelatedValuePropagationPass
 ; CHECK-O-NEXT: Running pass: SimplifyCFGPass
+; CHECK-O3-NEXT: AggressiveInstCombinePass
 ; CHECK-O-NEXT: Running pass: InstCombinePass
 ; CHECK-O1-NEXT: Running pass: LibCallsShrinkWrapPass
 ; CHECK-O2-NEXT: Running pass: LibCallsShrinkWrapPass

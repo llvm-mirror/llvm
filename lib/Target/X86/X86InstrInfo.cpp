@@ -563,6 +563,8 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::CMP32rr,         X86::CMP32rm,             0 },
     { X86::CMP64rr,         X86::CMP64rm,             0 },
     { X86::CMP8rr,          X86::CMP8rm,              0 },
+    { X86::COMISDrr_Int,    X86::COMISDrm_Int,        TB_NO_REVERSE },
+    { X86::COMISSrr_Int,    X86::COMISSrm_Int,        TB_NO_REVERSE },
     { X86::CVTDQ2PDrr,      X86::CVTDQ2PDrm,          TB_NO_REVERSE },
     { X86::CVTDQ2PSrr,      X86::CVTDQ2PSrm,          TB_ALIGN_16 },
     { X86::CVTPD2DQrr,      X86::CVTPD2DQrm,          TB_ALIGN_16 },
@@ -595,10 +597,6 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::IMUL32rri8,      X86::IMUL32rmi8,          0 },
     { X86::IMUL64rri32,     X86::IMUL64rmi32,         0 },
     { X86::IMUL64rri8,      X86::IMUL64rmi8,          0 },
-    { X86::Int_COMISDrr,    X86::Int_COMISDrm,        TB_NO_REVERSE },
-    { X86::Int_COMISSrr,    X86::Int_COMISSrm,        TB_NO_REVERSE },
-    { X86::Int_UCOMISDrr,   X86::Int_UCOMISDrm,       TB_NO_REVERSE },
-    { X86::Int_UCOMISSrr,   X86::Int_UCOMISSrm,       TB_NO_REVERSE },
     { X86::MOV16rr,         X86::MOV16rm,             0 },
     { X86::MOV32rr,         X86::MOV32rm,             0 },
     { X86::MOV64rr,         X86::MOV64rm,             0 },
@@ -616,6 +614,7 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::MOVSLDUPrr,      X86::MOVSLDUPrm,          TB_ALIGN_16 },
     { X86::MOVSX16rr8,      X86::MOVSX16rm8,          0 },
     { X86::MOVSX32rr16,     X86::MOVSX32rm16,         0 },
+    { X86::MOVSX32_NOREXrr8, X86::MOVSX32_NOREXrm8,   0 },
     { X86::MOVSX32rr8,      X86::MOVSX32rm8,          0 },
     { X86::MOVSX64rr16,     X86::MOVSX64rm16,         0 },
     { X86::MOVSX64rr32,     X86::MOVSX64rm32,         0 },
@@ -627,6 +626,8 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::MOVZX32rr16,     X86::MOVZX32rm16,         0 },
     { X86::MOVZX32_NOREXrr8, X86::MOVZX32_NOREXrm8,   0 },
     { X86::MOVZX32rr8,      X86::MOVZX32rm8,          0 },
+    { X86::MOVZX64rr16,     X86::MOVZX64rm16,         0 },
+    { X86::MOVZX64rr8,      X86::MOVZX64rm8,          0 },
     { X86::PABSBrr,         X86::PABSBrm,             TB_ALIGN_16 },
     { X86::PABSDrr,         X86::PABSDrm,             TB_ALIGN_16 },
     { X86::PABSWrr,         X86::PABSWrm,             TB_ALIGN_16 },
@@ -634,7 +635,7 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::PCMPESTRM128rr,  X86::PCMPESTRM128rm,      TB_ALIGN_16 },
     { X86::PCMPISTRIrr,     X86::PCMPISTRIrm,         TB_ALIGN_16 },
     { X86::PCMPISTRM128rr,  X86::PCMPISTRM128rm,      TB_ALIGN_16 },
-    { X86::PHMINPOSUWrr128, X86::PHMINPOSUWrm128,     TB_ALIGN_16 },
+    { X86::PHMINPOSUWrr,    X86::PHMINPOSUWrm,        TB_ALIGN_16 },
     { X86::PMOVSXBDrr,      X86::PMOVSXBDrm,          TB_NO_REVERSE },
     { X86::PMOVSXBQrr,      X86::PMOVSXBQrm,          TB_NO_REVERSE },
     { X86::PMOVSXBWrr,      X86::PMOVSXBWrm,          TB_NO_REVERSE },
@@ -669,7 +670,9 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::SQRTSSr_Int,     X86::SQRTSSm_Int,         TB_NO_REVERSE },
     // FIXME: TEST*rr EAX,EAX ---> CMP [mem], 0
     { X86::UCOMISDrr,       X86::UCOMISDrm,           0 },
+    { X86::UCOMISDrr_Int,   X86::UCOMISDrm_Int,       TB_NO_REVERSE },
     { X86::UCOMISSrr,       X86::UCOMISSrm,           0 },
+    { X86::UCOMISSrr_Int,   X86::UCOMISSrm_Int,       TB_NO_REVERSE },
 
     // MMX version of foldable instructions
     { X86::MMX_CVTPD2PIirr,   X86::MMX_CVTPD2PIirm,   TB_ALIGN_16 },
@@ -678,9 +681,9 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::MMX_CVTTPD2PIirr,  X86::MMX_CVTTPD2PIirm,  TB_ALIGN_16 },
     { X86::MMX_CVTTPS2PIirr,  X86::MMX_CVTTPS2PIirm,  TB_NO_REVERSE },
     { X86::MMX_MOVD64to64rr,  X86::MMX_MOVQ64rm,      0 },
-    { X86::MMX_PABSBrr64,     X86::MMX_PABSBrm64,     0 },
-    { X86::MMX_PABSDrr64,     X86::MMX_PABSDrm64,     0 },
-    { X86::MMX_PABSWrr64,     X86::MMX_PABSWrm64,     0 },
+    { X86::MMX_PABSBrr,       X86::MMX_PABSBrm,       0 },
+    { X86::MMX_PABSDrr,       X86::MMX_PABSDrm,       0 },
+    { X86::MMX_PABSWrr,       X86::MMX_PABSWrm,       0 },
     { X86::MMX_PSHUFWri,      X86::MMX_PSHUFWmi,      0 },
 
     // 3DNow! version of foldable instructions
@@ -693,10 +696,8 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::PSWAPDrr,        X86::PSWAPDrm,            0 },
 
     // AVX 128-bit versions of foldable instructions
-    { X86::Int_VCOMISDrr,   X86::Int_VCOMISDrm,       TB_NO_REVERSE },
-    { X86::Int_VCOMISSrr,   X86::Int_VCOMISSrm,       TB_NO_REVERSE },
-    { X86::Int_VUCOMISDrr,  X86::Int_VUCOMISDrm,      TB_NO_REVERSE },
-    { X86::Int_VUCOMISSrr,  X86::Int_VUCOMISSrm,      TB_NO_REVERSE },
+    { X86::VCOMISDrr_Int,   X86::VCOMISDrm_Int,       TB_NO_REVERSE },
+    { X86::VCOMISSrr_Int,   X86::VCOMISSrm_Int,       TB_NO_REVERSE },
     { X86::VCVTTSD2SI64rr,  X86::VCVTTSD2SI64rm,      0 },
     { X86::VCVTTSD2SI64rr_Int,X86::VCVTTSD2SI64rm_Int,TB_NO_REVERSE },
     { X86::VCVTTSD2SIrr,    X86::VCVTTSD2SIrm,        0 },
@@ -738,7 +739,7 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::VPCMPESTRM128rr, X86::VPCMPESTRM128rm,     0 },
     { X86::VPCMPISTRIrr,    X86::VPCMPISTRIrm,        0 },
     { X86::VPCMPISTRM128rr, X86::VPCMPISTRM128rm,     0 },
-    { X86::VPHMINPOSUWrr128, X86::VPHMINPOSUWrm128,   0 },
+    { X86::VPHMINPOSUWrr,   X86::VPHMINPOSUWrm,      0 },
     { X86::VPERMILPDri,     X86::VPERMILPDmi,         0 },
     { X86::VPERMILPSri,     X86::VPERMILPSmi,         0 },
     { X86::VPMOVSXBDrr,     X86::VPMOVSXBDrm,         TB_NO_REVERSE },
@@ -766,7 +767,9 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::VTESTPDrr,       X86::VTESTPDrm,           0 },
     { X86::VTESTPSrr,       X86::VTESTPSrm,           0 },
     { X86::VUCOMISDrr,      X86::VUCOMISDrm,          0 },
+    { X86::VUCOMISDrr_Int,  X86::VUCOMISDrm_Int,      TB_NO_REVERSE },
     { X86::VUCOMISSrr,      X86::VUCOMISSrm,          0 },
+    { X86::VUCOMISSrr_Int,  X86::VUCOMISSrm_Int,      TB_NO_REVERSE },
 
     // AVX 256-bit foldable instructions
     { X86::VCVTDQ2PDYrr,    X86::VCVTDQ2PDYrm,        0 },
@@ -839,9 +842,9 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
 
     // XOP foldable instructions
     { X86::VFRCZPDrr,          X86::VFRCZPDrm,        0 },
-    { X86::VFRCZPDrrY,         X86::VFRCZPDrmY,       0 },
+    { X86::VFRCZPDYrr,         X86::VFRCZPDYrm,       0 },
     { X86::VFRCZPSrr,          X86::VFRCZPSrm,        0 },
-    { X86::VFRCZPSrrY,         X86::VFRCZPSrmY,       0 },
+    { X86::VFRCZPSYrr,         X86::VFRCZPSYrm,       0 },
     { X86::VFRCZSDrr,          X86::VFRCZSDrm,        0 },
     { X86::VFRCZSSrr,          X86::VFRCZSSrm,        0 },
     { X86::VPHADDBDrr,         X86::VPHADDBDrm,       0 },
@@ -1307,14 +1310,14 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::PCMPGTWrr,       X86::PCMPGTWrm,     TB_ALIGN_16 },
     { X86::PHADDDrr,        X86::PHADDDrm,      TB_ALIGN_16 },
     { X86::PHADDWrr,        X86::PHADDWrm,      TB_ALIGN_16 },
-    { X86::PHADDSWrr128,    X86::PHADDSWrm128,  TB_ALIGN_16 },
+    { X86::PHADDSWrr,       X86::PHADDSWrm,     TB_ALIGN_16 },
     { X86::PHSUBDrr,        X86::PHSUBDrm,      TB_ALIGN_16 },
-    { X86::PHSUBSWrr128,    X86::PHSUBSWrm128,  TB_ALIGN_16 },
+    { X86::PHSUBSWrr,       X86::PHSUBSWrm,     TB_ALIGN_16 },
     { X86::PHSUBWrr,        X86::PHSUBWrm,      TB_ALIGN_16 },
     { X86::PINSRBrr,        X86::PINSRBrm,      0 },
     { X86::PINSRDrr,        X86::PINSRDrm,      0 },
     { X86::PINSRQrr,        X86::PINSRQrm,      0 },
-    { X86::PINSRWrri,       X86::PINSRWrmi,     0 },
+    { X86::PINSRWrr,        X86::PINSRWrm,      0 },
     { X86::PMADDUBSWrr,     X86::PMADDUBSWrm,   TB_ALIGN_16 },
     { X86::PMADDWDrr,       X86::PMADDWDrm,     TB_ALIGN_16 },
     { X86::PMAXSBrr,        X86::PMAXSBrm,      TB_ALIGN_16 },
@@ -1339,9 +1342,9 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::PORrr,           X86::PORrm,         TB_ALIGN_16 },
     { X86::PSADBWrr,        X86::PSADBWrm,      TB_ALIGN_16 },
     { X86::PSHUFBrr,        X86::PSHUFBrm,      TB_ALIGN_16 },
-    { X86::PSIGNBrr128,     X86::PSIGNBrm128,   TB_ALIGN_16 },
-    { X86::PSIGNWrr128,     X86::PSIGNWrm128,   TB_ALIGN_16 },
-    { X86::PSIGNDrr128,     X86::PSIGNDrm128,   TB_ALIGN_16 },
+    { X86::PSIGNBrr,        X86::PSIGNBrm,      TB_ALIGN_16 },
+    { X86::PSIGNWrr,        X86::PSIGNWrm,      TB_ALIGN_16 },
+    { X86::PSIGNDrr,        X86::PSIGNDrm,      TB_ALIGN_16 },
     { X86::PSLLDrr,         X86::PSLLDrm,       TB_ALIGN_16 },
     { X86::PSLLQrr,         X86::PSLLQrm,       TB_ALIGN_16 },
     { X86::PSLLWrr,         X86::PSLLWrm,       TB_ALIGN_16 },
@@ -1410,7 +1413,7 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::MMX_PADDUSBirr,    X86::MMX_PADDUSBirm,    0 },
     { X86::MMX_PADDUSWirr,    X86::MMX_PADDUSWirm,    0 },
     { X86::MMX_PADDWirr,      X86::MMX_PADDWirm,      0 },
-    { X86::MMX_PALIGNR64irr,  X86::MMX_PALIGNR64irm,  0 },
+    { X86::MMX_PALIGNRrri,    X86::MMX_PALIGNRrmi,    0 },
     { X86::MMX_PANDNirr,      X86::MMX_PANDNirm,      0 },
     { X86::MMX_PANDirr,       X86::MMX_PANDirm,       0 },
     { X86::MMX_PAVGBirr,      X86::MMX_PAVGBirm,      0 },
@@ -1421,30 +1424,30 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::MMX_PCMPGTBirr,    X86::MMX_PCMPGTBirm,    0 },
     { X86::MMX_PCMPGTDirr,    X86::MMX_PCMPGTDirm,    0 },
     { X86::MMX_PCMPGTWirr,    X86::MMX_PCMPGTWirm,    0 },
-    { X86::MMX_PHADDSWrr64,   X86::MMX_PHADDSWrm64,   0 },
-    { X86::MMX_PHADDWrr64,    X86::MMX_PHADDWrm64,    0 },
-    { X86::MMX_PHADDrr64,     X86::MMX_PHADDrm64,     0 },
-    { X86::MMX_PHSUBDrr64,    X86::MMX_PHSUBDrm64,    0 },
-    { X86::MMX_PHSUBSWrr64,   X86::MMX_PHSUBSWrm64,   0 },
-    { X86::MMX_PHSUBWrr64,    X86::MMX_PHSUBWrm64,    0 },
-    { X86::MMX_PINSRWirri,    X86::MMX_PINSRWirmi,    0 },
-    { X86::MMX_PMADDUBSWrr64, X86::MMX_PMADDUBSWrm64, 0 },
+    { X86::MMX_PHADDDrr,      X86::MMX_PHADDDrm,      0 },
+    { X86::MMX_PHADDSWrr,     X86::MMX_PHADDSWrm,     0 },
+    { X86::MMX_PHADDWrr,      X86::MMX_PHADDWrm,      0 },
+    { X86::MMX_PHSUBDrr,      X86::MMX_PHSUBDrm,      0 },
+    { X86::MMX_PHSUBSWrr,     X86::MMX_PHSUBSWrm,     0 },
+    { X86::MMX_PHSUBWrr,      X86::MMX_PHSUBWrm,      0 },
+    { X86::MMX_PINSRWrr,      X86::MMX_PINSRWrm,      0 },
+    { X86::MMX_PMADDUBSWrr,   X86::MMX_PMADDUBSWrm,   0 },
     { X86::MMX_PMADDWDirr,    X86::MMX_PMADDWDirm,    0 },
     { X86::MMX_PMAXSWirr,     X86::MMX_PMAXSWirm,     0 },
     { X86::MMX_PMAXUBirr,     X86::MMX_PMAXUBirm,     0 },
     { X86::MMX_PMINSWirr,     X86::MMX_PMINSWirm,     0 },
     { X86::MMX_PMINUBirr,     X86::MMX_PMINUBirm,     0 },
-    { X86::MMX_PMULHRSWrr64,  X86::MMX_PMULHRSWrm64,  0 },
+    { X86::MMX_PMULHRSWrr,    X86::MMX_PMULHRSWrm,    0 },
     { X86::MMX_PMULHUWirr,    X86::MMX_PMULHUWirm,    0 },
     { X86::MMX_PMULHWirr,     X86::MMX_PMULHWirm,     0 },
     { X86::MMX_PMULLWirr,     X86::MMX_PMULLWirm,     0 },
     { X86::MMX_PMULUDQirr,    X86::MMX_PMULUDQirm,    0 },
     { X86::MMX_PORirr,        X86::MMX_PORirm,        0 },
     { X86::MMX_PSADBWirr,     X86::MMX_PSADBWirm,     0 },
-    { X86::MMX_PSHUFBrr64,    X86::MMX_PSHUFBrm64,    0 },
-    { X86::MMX_PSIGNBrr64,    X86::MMX_PSIGNBrm64,    0 },
-    { X86::MMX_PSIGNDrr64,    X86::MMX_PSIGNDrm64,    0 },
-    { X86::MMX_PSIGNWrr64,    X86::MMX_PSIGNWrm64,    0 },
+    { X86::MMX_PSHUFBrr,      X86::MMX_PSHUFBrm,      0 },
+    { X86::MMX_PSIGNBrr,      X86::MMX_PSIGNBrm,      0 },
+    { X86::MMX_PSIGNDrr,      X86::MMX_PSIGNDrm,      0 },
+    { X86::MMX_PSIGNWrr,      X86::MMX_PSIGNWrm,      0 },
     { X86::MMX_PSLLDrr,       X86::MMX_PSLLDrm,       0 },
     { X86::MMX_PSLLQrr,       X86::MMX_PSLLQrm,       0 },
     { X86::MMX_PSLLWrr,       X86::MMX_PSLLWrm,       0 },
@@ -1590,17 +1593,17 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::VPCMPGTQrr,        X86::VPCMPGTQrm,         0 },
     { X86::VPCMPGTWrr,        X86::VPCMPGTWrm,         0 },
     { X86::VPHADDDrr,         X86::VPHADDDrm,          0 },
-    { X86::VPHADDSWrr128,     X86::VPHADDSWrm128,      0 },
+    { X86::VPHADDSWrr,        X86::VPHADDSWrm,         0 },
     { X86::VPHADDWrr,         X86::VPHADDWrm,          0 },
     { X86::VPHSUBDrr,         X86::VPHSUBDrm,          0 },
-    { X86::VPHSUBSWrr128,     X86::VPHSUBSWrm128,      0 },
+    { X86::VPHSUBSWrr,        X86::VPHSUBSWrm,         0 },
     { X86::VPHSUBWrr,         X86::VPHSUBWrm,          0 },
     { X86::VPERMILPDrr,       X86::VPERMILPDrm,        0 },
     { X86::VPERMILPSrr,       X86::VPERMILPSrm,        0 },
     { X86::VPINSRBrr,         X86::VPINSRBrm,          0 },
     { X86::VPINSRDrr,         X86::VPINSRDrm,          0 },
     { X86::VPINSRQrr,         X86::VPINSRQrm,          0 },
-    { X86::VPINSRWrri,        X86::VPINSRWrmi,         0 },
+    { X86::VPINSRWrr,         X86::VPINSRWrm,          0 },
     { X86::VPMADDUBSWrr,      X86::VPMADDUBSWrm,       0 },
     { X86::VPMADDWDrr,        X86::VPMADDWDrm,         0 },
     { X86::VPMAXSBrr,         X86::VPMAXSBrm,          0 },
@@ -1625,9 +1628,9 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::VPORrr,            X86::VPORrm,             0 },
     { X86::VPSADBWrr,         X86::VPSADBWrm,          0 },
     { X86::VPSHUFBrr,         X86::VPSHUFBrm,          0 },
-    { X86::VPSIGNBrr128,      X86::VPSIGNBrm128,       0 },
-    { X86::VPSIGNWrr128,      X86::VPSIGNWrm128,       0 },
-    { X86::VPSIGNDrr128,      X86::VPSIGNDrm128,       0 },
+    { X86::VPSIGNBrr,         X86::VPSIGNBrm,          0 },
+    { X86::VPSIGNWrr,         X86::VPSIGNWrm,          0 },
+    { X86::VPSIGNDrr,         X86::VPSIGNDrm,          0 },
     { X86::VPSLLDrr,          X86::VPSLLDrm,           0 },
     { X86::VPSLLQrr,          X86::VPSLLQrm,           0 },
     { X86::VPSLLWrr,          X86::VPSLLWrm,           0 },
@@ -1764,10 +1767,10 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::VPERMDYrr,         X86::VPERMDYrm,          0 },
     { X86::VPERMPSYrr,        X86::VPERMPSYrm,         0 },
     { X86::VPHADDDYrr,        X86::VPHADDDYrm,         0 },
-    { X86::VPHADDSWrr256,     X86::VPHADDSWrm256,      0 },
+    { X86::VPHADDSWYrr,       X86::VPHADDSWYrm,        0 },
     { X86::VPHADDWYrr,        X86::VPHADDWYrm,         0 },
     { X86::VPHSUBDYrr,        X86::VPHSUBDYrm,         0 },
-    { X86::VPHSUBSWrr256,     X86::VPHSUBSWrm256,      0 },
+    { X86::VPHSUBSWYrr,       X86::VPHSUBSWYrm,        0 },
     { X86::VPHSUBWYrr,        X86::VPHSUBWYrm,         0 },
     { X86::VPMADDUBSWYrr,     X86::VPMADDUBSWYrm,      0 },
     { X86::VPMADDWDYrr,       X86::VPMADDWDYrm,        0 },
@@ -1794,9 +1797,9 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::VPORYrr,           X86::VPORYrm,            0 },
     { X86::VPSADBWYrr,        X86::VPSADBWYrm,         0 },
     { X86::VPSHUFBYrr,        X86::VPSHUFBYrm,         0 },
-    { X86::VPSIGNBYrr256,     X86::VPSIGNBYrm256,      0 },
-    { X86::VPSIGNWYrr256,     X86::VPSIGNWYrm256,      0 },
-    { X86::VPSIGNDYrr256,     X86::VPSIGNDYrm256,      0 },
+    { X86::VPSIGNBYrr,        X86::VPSIGNBYrm,         0 },
+    { X86::VPSIGNWYrr,        X86::VPSIGNWYrm,         0 },
+    { X86::VPSIGNDYrr,        X86::VPSIGNDYrm,         0 },
     { X86::VPSLLDYrr,         X86::VPSLLDYrm,          0 },
     { X86::VPSLLQYrr,         X86::VPSLLQYrm,          0 },
     { X86::VPSLLWYrr,         X86::VPSLLWYrm,          0 },
@@ -8061,7 +8064,8 @@ bool X86InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
 ///
 /// FIXME: This should be turned into a TSFlags.
 ///
-static bool hasPartialRegUpdate(unsigned Opcode) {
+static bool hasPartialRegUpdate(unsigned Opcode,
+                                const X86Subtarget &Subtarget) {
   switch (Opcode) {
   case X86::CVTSI2SSrr:
   case X86::CVTSI2SSrm:
@@ -8100,17 +8104,32 @@ static bool hasPartialRegUpdate(unsigned Opcode) {
   case X86::SQRTSDr_Int:
   case X86::SQRTSDm_Int:
     return true;
+  // GPR
+  case X86::POPCNT32rm:
+  case X86::POPCNT32rr:
+  case X86::POPCNT64rm:
+  case X86::POPCNT64rr:
+    return Subtarget.hasPOPCNTFalseDeps();
+  case X86::LZCNT32rm:
+  case X86::LZCNT32rr:
+  case X86::LZCNT64rm:
+  case X86::LZCNT64rr:
+  case X86::TZCNT32rm:
+  case X86::TZCNT32rr:
+  case X86::TZCNT64rm:
+  case X86::TZCNT64rr:
+    return Subtarget.hasLZCNTFalseDeps();
   }
 
   return false;
 }
 
-/// Inform the ExecutionDepsFix pass how many idle
+/// Inform the BreakFalseDeps pass how many idle
 /// instructions we would like before a partial register update.
 unsigned X86InstrInfo::getPartialRegUpdateClearance(
     const MachineInstr &MI, unsigned OpNum,
     const TargetRegisterInfo *TRI) const {
-  if (OpNum != 0 || !hasPartialRegUpdate(MI.getOpcode()))
+  if (OpNum != 0 || !hasPartialRegUpdate(MI.getOpcode(), Subtarget))
     return 0;
 
   // If MI is marked as reading Reg, the partial register update is wanted.
@@ -8262,7 +8281,7 @@ static bool hasUndefRegUpdate(unsigned Opcode) {
   return false;
 }
 
-/// Inform the ExecutionDepsFix pass how many idle instructions we would like
+/// Inform the BreakFalseDeps pass how many idle instructions we would like
 /// before certain undef register reads.
 ///
 /// This catches the VCVTSI2SD family of instructions:
@@ -8315,6 +8334,20 @@ void X86InstrInfo::breakPartialRegDependency(
         .addReg(XReg, RegState::Undef)
         .addReg(XReg, RegState::Undef)
         .addReg(Reg, RegState::ImplicitDefine);
+    MI.addRegisterKilled(Reg, TRI, true);
+  } else if (X86::GR64RegClass.contains(Reg)) {
+    // Using XOR32rr because it has shorter encoding and zeros up the upper bits
+    // as well.
+    unsigned XReg = TRI->getSubReg(Reg, X86::sub_32bit);
+    BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), get(X86::XOR32rr), XReg)
+        .addReg(XReg, RegState::Undef)
+        .addReg(XReg, RegState::Undef)
+        .addReg(Reg, RegState::ImplicitDefine);
+    MI.addRegisterKilled(Reg, TRI, true);
+  } else if (X86::GR32RegClass.contains(Reg)) {
+    BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), get(X86::XOR32rr), Reg)
+        .addReg(Reg, RegState::Undef)
+        .addReg(Reg, RegState::Undef);
     MI.addRegisterKilled(Reg, TRI, true);
   }
 }
@@ -8487,7 +8520,8 @@ MachineInstr *X86InstrInfo::foldMemoryOperandImpl(
 
   // Avoid partial register update stalls unless optimizing for size.
   // TODO: we should block undef reg update as well.
-  if (!MF.getFunction().optForSize() && hasPartialRegUpdate(MI.getOpcode()))
+  if (!MF.getFunction().optForSize() &&
+      hasPartialRegUpdate(MI.getOpcode(), Subtarget))
     return nullptr;
 
   unsigned NumOps = MI.getDesc().getNumOperands();
@@ -8656,7 +8690,8 @@ X86InstrInfo::foldMemoryOperandImpl(MachineFunction &MF, MachineInstr &MI,
   // Unless optimizing for size, don't fold to avoid partial
   // register update stalls
   // TODO: we should block undef reg update as well.
-  if (!MF.getFunction().optForSize() && hasPartialRegUpdate(MI.getOpcode()))
+  if (!MF.getFunction().optForSize() &&
+      hasPartialRegUpdate(MI.getOpcode(), Subtarget))
     return nullptr;
 
   // Don't fold subreg spills, or reloads that use a high subreg.
@@ -8855,7 +8890,8 @@ MachineInstr *X86InstrInfo::foldMemoryOperandImpl(
 
   // Avoid partial register update stalls unless optimizing for size.
   // TODO: we should block undef reg update as well.
-  if (!MF.getFunction().optForSize() && hasPartialRegUpdate(MI.getOpcode()))
+  if (!MF.getFunction().optForSize() &&
+      hasPartialRegUpdate(MI.getOpcode(), Subtarget))
     return nullptr;
 
   // Determine the alignment of the load.

@@ -90,7 +90,10 @@ namespace llvm {
     ///
     /// If \c AllowUnresolved, collect unresolved nodes attached to the module
     /// in order to resolve cycles during \a finalize().
-    explicit DIBuilder(Module &M, bool AllowUnresolved = true);
+    ///
+    /// If \p CU is given a value other than nullptr, then set \p CUNode to CU.
+    explicit DIBuilder(Module &M, bool AllowUnresolved = true,
+                       DICompileUnit *CU = nullptr);
     DIBuilder(const DIBuilder &) = delete;
     DIBuilder &operator=(const DIBuilder &) = delete;
 
@@ -514,6 +517,7 @@ namespace llvm {
     /// Create a descriptor for a value range.  This
     /// implicitly uniques the values returned.
     DISubrange *getOrCreateSubrange(int64_t Lo, int64_t Count);
+    DISubrange *getOrCreateSubrange(int64_t Lo, Metadata *CountNode);
 
     /// Create a descriptor for a value range.  This
     /// implicitly uniques the values returned.

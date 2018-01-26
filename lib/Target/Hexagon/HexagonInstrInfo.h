@@ -66,6 +66,20 @@ public:
   unsigned isStoreToStackSlot(const MachineInstr &MI,
                               int &FrameIndex) const override;
 
+  /// Check if the instruction or the bundle of instructions has
+  /// load from stack slots. Return the frameindex and machine memory operand
+  /// if true.
+  bool hasLoadFromStackSlot(const MachineInstr &MI,
+                           const MachineMemOperand *&MMO,
+                           int &FrameIndex) const override;
+
+  /// Check if the instruction or the bundle of instructions has
+  /// store to stack slots. Return the frameindex and machine memory operand
+  /// if true.
+  bool hasStoreToStackSlot(const MachineInstr &MI,
+                           const MachineMemOperand *&MMO,
+                           int &FrameIndex) const override;
+
   /// Analyze the branching code at the end of MBB, returning
   /// true if it cannot be understood (e.g. it's a switch dispatch or isn't
   /// implemented for a target).  Upon success, this returns false and returns
@@ -122,8 +136,8 @@ public:
   bool analyzeLoop(MachineLoop &L, MachineInstr *&IndVarInst,
                    MachineInstr *&CmpInst) const override;
 
-  /// Generate code to reduce the loop iteration by one and check if the loop is
-  /// finished.  Return the value/register of the the new loop count.  We need
+  /// Generate code to reduce the loop iteration by one and check if the loop
+  /// is finished.  Return the value/register of the new loop count.  We need
   /// this function when peeling off one or more iterations of a loop. This
   /// function assumes the nth iteration is peeled first.
   unsigned reduceLoopCount(MachineBasicBlock &MBB,

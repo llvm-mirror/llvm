@@ -263,6 +263,12 @@ class DwarfDebug : public DebugHandlerBase {
   bool HasAppleExtensionAttributes;
   bool HasSplitDwarf;
 
+  /// Whether to generate the DWARF v5 string offsets table.
+  /// It consists of a series of contributions, each preceded by a header.
+  /// The pre-DWARF v5 string offsets table for split dwarf is, in contrast,
+  /// a monolithic sequence of string offsets.
+  bool UseSegmentedStringOffsetsTable;
+
   /// Separated Dwarf Variables
   /// In general these will all be for bits that are left in the
   /// original object file, rather than things that are meant
@@ -334,6 +340,9 @@ class DwarfDebug : public DebugHandlerBase {
   /// Emit the abbreviation section.
   void emitAbbreviations();
 
+  /// Emit the string offsets table header.
+  void emitStringOffsetsTableHeader();
+
   /// Emit a specified accelerator table.
   void emitAccel(DwarfAccelTable &Accel, MCSection *Section,
                  StringRef TableName);
@@ -397,6 +406,9 @@ class DwarfDebug : public DebugHandlerBase {
 
   /// Emit the debug line dwo section.
   void emitDebugLineDWO();
+
+  /// Emit the dwo stringoffsets table header.
+  void emitStringOffsetsTableHeaderDWO();
 
   /// Emit the debug str dwo section.
   void emitDebugStrDWO();
@@ -507,6 +519,16 @@ public:
   /// Returns whether or not to change the current debug info for the
   /// split dwarf proposal support.
   bool useSplitDwarf() const { return HasSplitDwarf; }
+
+  /// Returns whether to generate a string offsets table with (possibly shared)
+  /// contributions from each CU and type unit. This implies the use of
+  /// DW_FORM_strx* indirect references with DWARF v5 and beyond. Note that
+  /// DW_FORM_GNU_str_index is also an indirect reference, but it is used with
+  /// a pre-DWARF v5 implementation of split DWARF sections, which uses a
+  /// monolithic string offsets table.
+  bool useSegmentedStringOffsetsTable() const {
+    return UseSegmentedStringOffsetsTable;
+  }
 
   bool shareAcrossDWOCUs() const;
 

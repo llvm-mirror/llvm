@@ -86,6 +86,9 @@ static cl::opt<unsigned>
                    cl::desc("Number of metadatas above which we emit an index "
                             "to enable lazy-loading"));
 
+cl::opt<bool> WriteRelBFToSummary(
+    "write-relbf-to-summary", cl::Hidden, cl::init(false),
+    cl::desc("Write relative block frequency to function summary "));
 namespace {
 
 /// These are manifest constants used by the bitcode writer. They do not need to
@@ -1450,8 +1453,9 @@ static uint64_t rotateSign(int64_t I) {
 void ModuleBitcodeWriter::writeDISubrange(const DISubrange *N,
                                           SmallVectorImpl<uint64_t> &Record,
                                           unsigned Abbrev) {
-  Record.push_back(N->isDistinct());
-  Record.push_back(N->getCount());
+  const uint64_t Version = 1 << 1;
+  Record.push_back((uint64_t)N->isDistinct() | Version);
+  Record.push_back(VE.getMetadataOrNullID(N->getRawCountNode()));
   Record.push_back(rotateSign(N->getLowerBound()));
 
   Stream.EmitRecord(bitc::METADATA_SUBRANGE, Record, Abbrev);
@@ -3437,11 +3441,15 @@ void ModuleBitcodeWriterBase::writePerModuleFunctionSummaryRecord(
     NameVals.push_back(getValueId(ECI.first));
     if (HasProfileData)
       NameVals.push_back(static_cast<uint8_t>(ECI.second.Hotness));
+    else if (WriteRelBFToSummary)
+      NameVals.push_back(ECI.second.RelBlockFreq);
   }
 
   unsigned FSAbbrev = (HasProfileData ? FSCallsProfileAbbrev : FSCallsAbbrev);
   unsigned Code =
-      (HasProfileData ? bitc::FS_PERMODULE_PROFILE : bitc::FS_PERMODULE);
+      (HasProfileData ? bitc::FS_PERMODULE_PROFILE
+                      : (WriteRelBFToSummary ? bitc::FS_PERMODULE_RELBF
+                                             : bitc::FS_PERMODULE));
 
   // Emit the finished record.
   Stream.EmitRecord(Code, NameVals, FSAbbrev);
@@ -3507,21 +3515,8 @@ void ModuleBitcodeWriterBase::writePerModuleGlobalValueSummary() {
                       ArrayRef<uint64_t>{GVI.second, GVI.first});
   }
 
-  // Abbrev for FS_PERMODULE.
-  auto Abbv = std::make_shared<BitCodeAbbrev>();
-  Abbv->Add(BitCodeAbbrevOp(bitc::FS_PERMODULE));
-  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8));   // valueid
-  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6));   // flags
-  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8));   // instcount
-  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 4));   // fflags
-  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 4));   // numrefs
-  // numrefs x valueid, n x (valueid)
-  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Array));
-  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8));
-  unsigned FSCallsAbbrev = Stream.EmitAbbrev(std::move(Abbv));
-
   // Abbrev for FS_PERMODULE_PROFILE.
-  Abbv = std::make_shared<BitCodeAbbrev>();
+  auto Abbv = std::make_shared<BitCodeAbbrev>();
   Abbv->Add(BitCodeAbbrevOp(bitc::FS_PERMODULE_PROFILE));
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8));   // valueid
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6));   // flags
@@ -3532,6 +3527,22 @@ void ModuleBitcodeWriterBase::writePerModuleGlobalValueSummary() {
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Array));
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8));
   unsigned FSCallsProfileAbbrev = Stream.EmitAbbrev(std::move(Abbv));
+
+  // Abbrev for FS_PERMODULE or FS_PERMODULE_RELBF.
+  Abbv = std::make_shared<BitCodeAbbrev>();
+  if (WriteRelBFToSummary)
+    Abbv->Add(BitCodeAbbrevOp(bitc::FS_PERMODULE_RELBF));
+  else
+    Abbv->Add(BitCodeAbbrevOp(bitc::FS_PERMODULE));
+  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8));   // valueid
+  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6));   // flags
+  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8));   // instcount
+  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 4));   // fflags
+  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 4));   // numrefs
+  // numrefs x valueid, n x (valueid [, rel_block_freq])
+  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Array));
+  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8));
+  unsigned FSCallsAbbrev = Stream.EmitAbbrev(std::move(Abbv));
 
   // Abbrev for FS_PERMODULE_GLOBALVAR_INIT_REFS.
   Abbv = std::make_shared<BitCodeAbbrev>();
@@ -3734,7 +3745,8 @@ void IndexBitcodeWriter::writeCombinedGlobalValueSummary() {
 
     bool HasProfileData = false;
     for (auto &EI : FS->calls()) {
-      HasProfileData |= EI.second.Hotness != CalleeInfo::HotnessType::Unknown;
+      HasProfileData |=
+          EI.second.getHotness() != CalleeInfo::HotnessType::Unknown;
       if (HasProfileData)
         break;
     }

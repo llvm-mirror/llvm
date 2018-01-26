@@ -1,4 +1,6 @@
-; RUN: llc -mtriple wasm32-unknown-unknown-wasm -O2 -filetype=obj %s -o - | llvm-readobj -r -s -expand-relocs | FileCheck %s
+; RUN: llc -O2 -filetype=obj %s -o - | llvm-readobj -r -s -expand-relocs | FileCheck %s
+
+target triple = "wasm32-unknown-unknown-wasm"
 
 declare i32 @import1()
 declare i32 @import2()
@@ -42,6 +44,6 @@ entry:
 ; CHECK:     Relocation {
 ; CHECK:       Type: R_WEBASSEMBLY_TABLE_INDEX_SLEB (1)
 ; CHECK:       Offset: 0x1E
-; CHECK:       Index: 0x0
+; CHECK:       Index: 0x2
 ; CHECK:     }
 ; CHECK:   }

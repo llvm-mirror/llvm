@@ -71,14 +71,13 @@ define i16 @cnt16(i16 %x) nounwind readnone {
 ; X32-NEXT:    andl $13107, %eax # imm = 0x3333
 ; X32-NEXT:    addl %ecx, %eax
 ; X32-NEXT:    movl %eax, %ecx
-; X32-NEXT:    andl $32752, %ecx # imm = 0x7FF0
 ; X32-NEXT:    shrl $4, %ecx
 ; X32-NEXT:    addl %eax, %ecx
 ; X32-NEXT:    andl $3855, %ecx # imm = 0xF0F
 ; X32-NEXT:    movl %ecx, %eax
 ; X32-NEXT:    shll $8, %eax
 ; X32-NEXT:    addl %ecx, %eax
-; X32-NEXT:    movzbl %ah, %eax # NOREX
+; X32-NEXT:    movzbl %ah, %eax
 ; X32-NEXT:    # kill: def %ax killed %ax killed %eax
 ; X32-NEXT:    retl
 ;
@@ -94,14 +93,13 @@ define i16 @cnt16(i16 %x) nounwind readnone {
 ; X64-NEXT:    andl $13107, %edi # imm = 0x3333
 ; X64-NEXT:    addl %eax, %edi
 ; X64-NEXT:    movl %edi, %eax
-; X64-NEXT:    andl $32752, %eax # imm = 0x7FF0
 ; X64-NEXT:    shrl $4, %eax
 ; X64-NEXT:    addl %edi, %eax
 ; X64-NEXT:    andl $3855, %eax # imm = 0xF0F
 ; X64-NEXT:    movl %eax, %ecx
 ; X64-NEXT:    shll $8, %ecx
 ; X64-NEXT:    addl %eax, %ecx
-; X64-NEXT:    movzbl %ch, %eax # NOREX
+; X64-NEXT:    movzbl %ch, %eax
 ; X64-NEXT:    # kill: def %ax killed %ax killed %eax
 ; X64-NEXT:    retq
 ;

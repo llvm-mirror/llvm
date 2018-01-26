@@ -835,6 +835,9 @@ namespace llvm {
     EVT getSetCCResultType(const DataLayout &DL, LLVMContext &Context,
                            EVT VT) const override;
 
+    bool targetShrinkDemandedConstant(SDValue Op, const APInt &Demanded,
+                                      TargetLoweringOpt &TLO) const override;
+
     /// Determine which of the bits specified in Mask are known to be either
     /// zero or one and return them in the KnownZero/KnownOne bitsets.
     void computeKnownBitsForTargetNode(const SDValue Op,
@@ -984,6 +987,9 @@ namespace llvm {
     bool isVectorClearMaskLegal(const SmallVectorImpl<int> &Mask,
                                 EVT VT) const override;
 
+    /// Returns true if lowering to a jump table is allowed.
+    bool areJTsAllowed(const Function *Fn) const override;
+
     /// If true, then instruction selection should
     /// seek to shrink the FP constant of the specified type to a smaller type
     /// in order to save space and / or reduce runtime.
@@ -1077,6 +1083,14 @@ namespace llvm {
 
     /// \brief Customize the preferred legalization strategy for certain types.
     LegalizeTypeAction getPreferredVectorAction(EVT VT) const override;
+
+    MVT getRegisterTypeForCallingConv(MVT VT) const override;
+
+    MVT getRegisterTypeForCallingConv(LLVMContext &Context,
+                                      EVT VT) const override;
+
+    unsigned getNumRegistersForCallingConv(LLVMContext &Context,
+                                           EVT VT) const override;
 
     bool isIntDivCheap(EVT VT, AttributeList Attr) const override;
 
@@ -1295,6 +1309,9 @@ namespace llvm {
 
     MachineBasicBlock *EmitLoweredTLSCall(MachineInstr &MI,
                                           MachineBasicBlock *BB) const;
+
+    MachineBasicBlock *EmitLoweredRetpoline(MachineInstr &MI,
+                                            MachineBasicBlock *BB) const;
 
     MachineBasicBlock *emitEHSjLjSetJmp(MachineInstr &MI,
                                         MachineBasicBlock *MBB) const;

@@ -383,16 +383,6 @@ static void PrintCallingConv(unsigned cc, raw_ostream &Out) {
   }
 }
 
-void llvm::PrintEscapedString(StringRef Name, raw_ostream &Out) {
-  for (unsigned i = 0, e = Name.size(); i != e; ++i) {
-    unsigned char C = Name[i];
-    if (isprint(C) && C != '\\' && C != '"')
-      Out << C;
-    else
-      Out << '\\' << hexdigit(C >> 4) << hexdigit(C & 0x0F);
-  }
-}
-
 enum PrefixType {
   GlobalPrefix,
   ComdatPrefix,
@@ -1621,10 +1611,15 @@ static void writeDILocation(raw_ostream &Out, const DILocation *DL,
 }
 
 static void writeDISubrange(raw_ostream &Out, const DISubrange *N,
-                            TypePrinting *, SlotTracker *, const Module *) {
+                            TypePrinting *TypePrinter, SlotTracker *Machine,
+                            const Module *Context) {
   Out << "!DISubrange(";
-  MDFieldPrinter Printer(Out);
-  Printer.printInt("count", N->getCount(), /* ShouldSkipZero */ false);
+  MDFieldPrinter Printer(Out, TypePrinter, Machine, Context);
+  if (auto *CE = N->getCount().dyn_cast<ConstantInt*>())
+    Printer.printInt("count", CE->getSExtValue(), /* ShouldSkipZero */ false);
+  else
+    Printer.printMetadata("count", N->getCount().dyn_cast<DIVariable*>(),
+                          /*ShouldSkipNull */ false);
   Printer.printInt("lowerBound", N->getLowerBound());
   Out << ")";
 }

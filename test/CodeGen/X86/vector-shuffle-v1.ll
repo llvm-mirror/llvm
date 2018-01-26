@@ -214,20 +214,40 @@ define <16 x i1> @shuf16i1_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0(<16 x i32> %a, <1
 define <32 x i1> @shuf32i1_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0(<32 x i1> %a) {
 ; AVX512F-LABEL: shuf32i1_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0:
 ; AVX512F:       # %bb.0:
-; AVX512F-NEXT:    vpshufb {{.*#+}} ymm1 = ymm0[3,6,u,12,3,7,7,0,3,6,1,13,3,u,7,0,u,u,22,u,u,u,u,u,u,u,u,u,u,21,u,u]
-; AVX512F-NEXT:    vpermq {{.*#+}} ymm0 = ymm0[2,3,0,1]
-; AVX512F-NEXT:    vpshufb {{.*#+}} ymm0 = ymm0[u,u,6,u,u,u,u,u,u,u,u,u,u,5,u,u,19,22,u,28,19,23,23,16,19,22,17,29,19,u,23,16]
-; AVX512F-NEXT:    vmovdqa {{.*#+}} ymm2 = [255,255,0,255,255,255,255,255,255,255,255,255,255,0,255,255,0,0,255,0,0,0,0,0,0,0,0,0,0,255,0,0]
-; AVX512F-NEXT:    vpblendvb %ymm2, %ymm1, %ymm0, %ymm0
+; AVX512F-NEXT:    vpmovsxbd %xmm0, %zmm1
+; AVX512F-NEXT:    vpslld $31, %zmm1, %zmm1
+; AVX512F-NEXT:    vptestmd %zmm1, %zmm1, %k1
+; AVX512F-NEXT:    vextracti128 $1, %ymm0, %xmm0
+; AVX512F-NEXT:    vpmovsxbd %xmm0, %zmm0
+; AVX512F-NEXT:    vpslld $31, %zmm0, %zmm0
+; AVX512F-NEXT:    vptestmd %zmm0, %zmm0, %k2
+; AVX512F-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k2} {z}
+; AVX512F-NEXT:    vpternlogd $255, %zmm1, %zmm1, %zmm1 {%k1} {z}
+; AVX512F-NEXT:    vmovdqa64 {{.*#+}} zmm2 = [3,6,22,12,3,7,7,0,3,6,1,13,3,21,7,0]
+; AVX512F-NEXT:    vpermi2d %zmm0, %zmm1, %zmm2
+; AVX512F-NEXT:    vptestmd %zmm2, %zmm2, %k1
+; AVX512F-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k1} {z}
+; AVX512F-NEXT:    vpmovdb %zmm0, %xmm0
+; AVX512F-NEXT:    vinserti128 $1, %xmm0, %ymm0, %ymm0
 ; AVX512F-NEXT:    retq
 ;
 ; AVX512VL-LABEL: shuf32i1_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0:
 ; AVX512VL:       # %bb.0:
-; AVX512VL-NEXT:    vpshufb {{.*#+}} ymm1 = ymm0[3,6,u,12,3,7,7,0,3,6,1,13,3,u,7,0,u,u,22,u,u,u,u,u,u,u,u,u,u,21,u,u]
-; AVX512VL-NEXT:    vpermq {{.*#+}} ymm0 = ymm0[2,3,0,1]
-; AVX512VL-NEXT:    vpshufb {{.*#+}} ymm0 = ymm0[u,u,6,u,u,u,u,u,u,u,u,u,u,5,u,u,19,22,u,28,19,23,23,16,19,22,17,29,19,u,23,16]
-; AVX512VL-NEXT:    vmovdqa {{.*#+}} ymm2 = [255,255,0,255,255,255,255,255,255,255,255,255,255,0,255,255,0,0,255,0,0,0,0,0,0,0,0,0,0,255,0,0]
-; AVX512VL-NEXT:    vpblendvb %ymm2, %ymm1, %ymm0, %ymm0
+; AVX512VL-NEXT:    vpmovsxbd %xmm0, %zmm1
+; AVX512VL-NEXT:    vpslld $31, %zmm1, %zmm1
+; AVX512VL-NEXT:    vptestmd %zmm1, %zmm1, %k1
+; AVX512VL-NEXT:    vextracti128 $1, %ymm0, %xmm0
+; AVX512VL-NEXT:    vpmovsxbd %xmm0, %zmm0
+; AVX512VL-NEXT:    vpslld $31, %zmm0, %zmm0
+; AVX512VL-NEXT:    vptestmd %zmm0, %zmm0, %k2
+; AVX512VL-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k2} {z}
+; AVX512VL-NEXT:    vpternlogd $255, %zmm1, %zmm1, %zmm1 {%k1} {z}
+; AVX512VL-NEXT:    vmovdqa64 {{.*#+}} zmm2 = [3,6,22,12,3,7,7,0,3,6,1,13,3,21,7,0]
+; AVX512VL-NEXT:    vpermi2d %zmm0, %zmm1, %zmm2
+; AVX512VL-NEXT:    vptestmd %zmm2, %zmm2, %k1
+; AVX512VL-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k1} {z}
+; AVX512VL-NEXT:    vpmovdb %zmm0, %xmm0
+; AVX512VL-NEXT:    vinserti128 $1, %xmm0, %ymm0, %ymm0
 ; AVX512VL-NEXT:    retq
 ;
 ; VL_BW_DQ-LABEL: shuf32i1_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0:
@@ -242,6 +262,226 @@ define <32 x i1> @shuf32i1_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_3_6_22_12_3_7_7_0
 ; VL_BW_DQ-NEXT:    retq
   %b = shufflevector <32 x i1> %a, <32 x i1> undef, <32 x i32> <i32 3, i32 6, i32 22, i32 12, i32 3, i32 7, i32 7, i32 0, i32 3, i32 6, i32 1, i32 13, i32 3, i32 21, i32 7, i32 0, i32 3, i32 6, i32 22, i32 12, i32 3, i32 7, i32 7, i32 0, i32 3, i32 6, i32 1, i32 13, i32 3, i32 21, i32 7, i32 0>
   ret <32 x i1> %b
+}
+
+define <32 x i16> @shuf32i1_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_icmp_v32i16(<32 x i16> %a, <32 x i16> %c, <32 x i16> %d) {
+; AVX512F-LABEL: shuf32i1_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_icmp_v32i16:
+; AVX512F:       # %bb.0:
+; AVX512F-NEXT:    vpxor %xmm6, %xmm6, %xmm6
+; AVX512F-NEXT:    vpcmpeqw %ymm6, %ymm0, %ymm0
+; AVX512F-NEXT:    vpmovsxwd %ymm0, %zmm0
+; AVX512F-NEXT:    vptestmd %zmm0, %zmm0, %k1
+; AVX512F-NEXT:    vpcmpeqw %ymm6, %ymm1, %ymm0
+; AVX512F-NEXT:    vpmovsxwd %ymm0, %zmm0
+; AVX512F-NEXT:    vptestmd %zmm0, %zmm0, %k2
+; AVX512F-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k2} {z}
+; AVX512F-NEXT:    vpternlogd $255, %zmm1, %zmm1, %zmm1 {%k1} {z}
+; AVX512F-NEXT:    vmovdqa64 {{.*#+}} zmm6 = [3,6,22,12,3,7,7,0,3,6,1,13,3,21,7,0]
+; AVX512F-NEXT:    vpermi2d %zmm0, %zmm1, %zmm6
+; AVX512F-NEXT:    vptestmd %zmm6, %zmm6, %k1
+; AVX512F-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k1} {z}
+; AVX512F-NEXT:    vpmovdw %zmm0, %ymm1
+; AVX512F-NEXT:    vpblendvb %ymm1, %ymm2, %ymm4, %ymm0
+; AVX512F-NEXT:    vpblendvb %ymm1, %ymm3, %ymm5, %ymm1
+; AVX512F-NEXT:    retq
+;
+; AVX512VL-LABEL: shuf32i1_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_icmp_v32i16:
+; AVX512VL:       # %bb.0:
+; AVX512VL-NEXT:    vpxor %xmm6, %xmm6, %xmm6
+; AVX512VL-NEXT:    vpcmpeqw %ymm6, %ymm0, %ymm0
+; AVX512VL-NEXT:    vpmovsxwd %ymm0, %zmm0
+; AVX512VL-NEXT:    vptestmd %zmm0, %zmm0, %k1
+; AVX512VL-NEXT:    vpcmpeqw %ymm6, %ymm1, %ymm0
+; AVX512VL-NEXT:    vpmovsxwd %ymm0, %zmm0
+; AVX512VL-NEXT:    vptestmd %zmm0, %zmm0, %k2
+; AVX512VL-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k2} {z}
+; AVX512VL-NEXT:    vpternlogd $255, %zmm1, %zmm1, %zmm1 {%k1} {z}
+; AVX512VL-NEXT:    vmovdqa64 {{.*#+}} zmm6 = [3,6,22,12,3,7,7,0,3,6,1,13,3,21,7,0]
+; AVX512VL-NEXT:    vpermi2d %zmm0, %zmm1, %zmm6
+; AVX512VL-NEXT:    vptestmd %zmm6, %zmm6, %k1
+; AVX512VL-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k1} {z}
+; AVX512VL-NEXT:    vpmovdw %zmm0, %ymm1
+; AVX512VL-NEXT:    vpblendvb %ymm1, %ymm2, %ymm4, %ymm0
+; AVX512VL-NEXT:    vpblendvb %ymm1, %ymm3, %ymm5, %ymm1
+; AVX512VL-NEXT:    retq
+;
+; VL_BW_DQ-LABEL: shuf32i1_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_icmp_v32i16:
+; VL_BW_DQ:       # %bb.0:
+; VL_BW_DQ-NEXT:    vpxor %xmm3, %xmm3, %xmm3
+; VL_BW_DQ-NEXT:    vpcmpeqw %zmm3, %zmm0, %k0
+; VL_BW_DQ-NEXT:    vpmovm2w %k0, %zmm0
+; VL_BW_DQ-NEXT:    vmovdqa64 {{.*#+}} zmm3 = [3,6,22,12,3,7,7,0,3,6,1,13,3,21,7,0,3,6,22,12,3,7,7,0,3,6,1,13,3,21,7,0]
+; VL_BW_DQ-NEXT:    vpermw %zmm0, %zmm3, %zmm0
+; VL_BW_DQ-NEXT:    vpmovw2m %zmm0, %k1
+; VL_BW_DQ-NEXT:    vpblendmw %zmm1, %zmm2, %zmm0 {%k1}
+; VL_BW_DQ-NEXT:    retq
+  %cmp = icmp eq <32 x i16> %a, zeroinitializer
+  %shuf = shufflevector <32 x i1> %cmp, <32 x i1> undef, <32 x i32> <i32 3, i32 6, i32 22, i32 12, i32 3, i32 7, i32 7, i32 0, i32 3, i32 6, i32 1, i32 13, i32 3, i32 21, i32 7, i32 0, i32 3, i32 6, i32 22, i32 12, i32 3, i32 7, i32 7, i32 0, i32 3, i32 6, i32 1, i32 13, i32 3, i32 21, i32 7, i32 0>
+  %sel = select <32 x i1> %shuf, <32 x i16> %c, <32 x i16> %d
+  ret <32 x i16> %sel
+}
+
+define <32 x i8> @shuf32i1_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_icmp_v32i8(<32 x i8> %a, <32 x i8> %c, <32 x i8> %d) {
+; AVX512F-LABEL: shuf32i1_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_icmp_v32i8:
+; AVX512F:       # %bb.0:
+; AVX512F-NEXT:    vpxor %xmm3, %xmm3, %xmm3
+; AVX512F-NEXT:    vpcmpeqb %ymm3, %ymm0, %ymm0
+; AVX512F-NEXT:    vpmovsxbd %xmm0, %zmm3
+; AVX512F-NEXT:    vptestmd %zmm3, %zmm3, %k1
+; AVX512F-NEXT:    vextracti128 $1, %ymm0, %xmm0
+; AVX512F-NEXT:    vpmovsxbd %xmm0, %zmm0
+; AVX512F-NEXT:    vptestmd %zmm0, %zmm0, %k2
+; AVX512F-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k2} {z}
+; AVX512F-NEXT:    vpternlogd $255, %zmm3, %zmm3, %zmm3 {%k1} {z}
+; AVX512F-NEXT:    vmovdqa64 {{.*#+}} zmm4 = [3,6,22,12,3,7,7,0,3,6,1,13,3,21,7,0]
+; AVX512F-NEXT:    vpermi2d %zmm0, %zmm3, %zmm4
+; AVX512F-NEXT:    vptestmd %zmm4, %zmm4, %k1
+; AVX512F-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k1} {z}
+; AVX512F-NEXT:    vpmovdb %zmm0, %xmm0
+; AVX512F-NEXT:    vinserti128 $1, %xmm0, %ymm0, %ymm0
+; AVX512F-NEXT:    vpblendvb %ymm0, %ymm1, %ymm2, %ymm0
+; AVX512F-NEXT:    retq
+;
+; AVX512VL-LABEL: shuf32i1_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_icmp_v32i8:
+; AVX512VL:       # %bb.0:
+; AVX512VL-NEXT:    vpxor %xmm3, %xmm3, %xmm3
+; AVX512VL-NEXT:    vpcmpeqb %ymm3, %ymm0, %ymm0
+; AVX512VL-NEXT:    vpmovsxbd %xmm0, %zmm3
+; AVX512VL-NEXT:    vptestmd %zmm3, %zmm3, %k1
+; AVX512VL-NEXT:    vextracti128 $1, %ymm0, %xmm0
+; AVX512VL-NEXT:    vpmovsxbd %xmm0, %zmm0
+; AVX512VL-NEXT:    vptestmd %zmm0, %zmm0, %k2
+; AVX512VL-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k2} {z}
+; AVX512VL-NEXT:    vpternlogd $255, %zmm3, %zmm3, %zmm3 {%k1} {z}
+; AVX512VL-NEXT:    vmovdqa64 {{.*#+}} zmm4 = [3,6,22,12,3,7,7,0,3,6,1,13,3,21,7,0]
+; AVX512VL-NEXT:    vpermi2d %zmm0, %zmm3, %zmm4
+; AVX512VL-NEXT:    vptestmd %zmm4, %zmm4, %k1
+; AVX512VL-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k1} {z}
+; AVX512VL-NEXT:    vpmovdb %zmm0, %xmm0
+; AVX512VL-NEXT:    vinserti128 $1, %xmm0, %ymm0, %ymm0
+; AVX512VL-NEXT:    vpblendvb %ymm0, %ymm1, %ymm2, %ymm0
+; AVX512VL-NEXT:    retq
+;
+; VL_BW_DQ-LABEL: shuf32i1_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_icmp_v32i8:
+; VL_BW_DQ:       # %bb.0:
+; VL_BW_DQ-NEXT:    vpxor %xmm3, %xmm3, %xmm3
+; VL_BW_DQ-NEXT:    vpcmpeqb %ymm3, %ymm0, %k0
+; VL_BW_DQ-NEXT:    vpmovm2w %k0, %zmm0
+; VL_BW_DQ-NEXT:    vmovdqa64 {{.*#+}} zmm3 = [3,6,22,12,3,7,7,0,3,6,1,13,3,21,7,0,3,6,22,12,3,7,7,0,3,6,1,13,3,21,7,0]
+; VL_BW_DQ-NEXT:    vpermw %zmm0, %zmm3, %zmm0
+; VL_BW_DQ-NEXT:    vpmovw2m %zmm0, %k1
+; VL_BW_DQ-NEXT:    vpblendmb %ymm1, %ymm2, %ymm0 {%k1}
+; VL_BW_DQ-NEXT:    retq
+  %cmp = icmp eq <32 x i8> %a, zeroinitializer
+  %shuf = shufflevector <32 x i1> %cmp, <32 x i1> undef, <32 x i32> <i32 3, i32 6, i32 22, i32 12, i32 3, i32 7, i32 7, i32 0, i32 3, i32 6, i32 1, i32 13, i32 3, i32 21, i32 7, i32 0, i32 3, i32 6, i32 22, i32 12, i32 3, i32 7, i32 7, i32 0, i32 3, i32 6, i32 1, i32 13, i32 3, i32 21, i32 7, i32 0>
+  %sel = select <32 x i1> %shuf, <32 x i8> %c, <32 x i8> %d
+  ret <32 x i8> %sel
+}
+
+define <32 x i16> @shuf32i1_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_icmp_v32i16_split(<16 x i32> %a, <16 x i32> %b, <32 x i16> %c, <32 x i16> %d) {
+; AVX512F-LABEL: shuf32i1_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_icmp_v32i16_split:
+; AVX512F:       # %bb.0:
+; AVX512F-NEXT:    vpxor %xmm6, %xmm6, %xmm6
+; AVX512F-NEXT:    vpcmpeqd %zmm6, %zmm0, %k1
+; AVX512F-NEXT:    vpcmpeqd %zmm6, %zmm1, %k2
+; AVX512F-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k2} {z}
+; AVX512F-NEXT:    vpternlogd $255, %zmm1, %zmm1, %zmm1 {%k1} {z}
+; AVX512F-NEXT:    vmovdqa64 {{.*#+}} zmm6 = [3,6,22,12,3,7,7,0,3,6,1,13,3,21,7,0]
+; AVX512F-NEXT:    vpermi2d %zmm0, %zmm1, %zmm6
+; AVX512F-NEXT:    vptestmd %zmm6, %zmm6, %k1
+; AVX512F-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k1} {z}
+; AVX512F-NEXT:    vpmovdw %zmm0, %ymm1
+; AVX512F-NEXT:    vpblendvb %ymm1, %ymm2, %ymm4, %ymm0
+; AVX512F-NEXT:    vpblendvb %ymm1, %ymm3, %ymm5, %ymm1
+; AVX512F-NEXT:    retq
+;
+; AVX512VL-LABEL: shuf32i1_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_icmp_v32i16_split:
+; AVX512VL:       # %bb.0:
+; AVX512VL-NEXT:    vpxor %xmm6, %xmm6, %xmm6
+; AVX512VL-NEXT:    vpcmpeqd %zmm6, %zmm0, %k1
+; AVX512VL-NEXT:    vpcmpeqd %zmm6, %zmm1, %k2
+; AVX512VL-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k2} {z}
+; AVX512VL-NEXT:    vpternlogd $255, %zmm1, %zmm1, %zmm1 {%k1} {z}
+; AVX512VL-NEXT:    vmovdqa64 {{.*#+}} zmm6 = [3,6,22,12,3,7,7,0,3,6,1,13,3,21,7,0]
+; AVX512VL-NEXT:    vpermi2d %zmm0, %zmm1, %zmm6
+; AVX512VL-NEXT:    vptestmd %zmm6, %zmm6, %k1
+; AVX512VL-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k1} {z}
+; AVX512VL-NEXT:    vpmovdw %zmm0, %ymm1
+; AVX512VL-NEXT:    vpblendvb %ymm1, %ymm2, %ymm4, %ymm0
+; AVX512VL-NEXT:    vpblendvb %ymm1, %ymm3, %ymm5, %ymm1
+; AVX512VL-NEXT:    retq
+;
+; VL_BW_DQ-LABEL: shuf32i1_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_icmp_v32i16_split:
+; VL_BW_DQ:       # %bb.0:
+; VL_BW_DQ-NEXT:    vpxor %xmm4, %xmm4, %xmm4
+; VL_BW_DQ-NEXT:    vpcmpeqd %zmm4, %zmm0, %k0
+; VL_BW_DQ-NEXT:    vpcmpeqd %zmm4, %zmm1, %k1
+; VL_BW_DQ-NEXT:    kunpckwd %k0, %k1, %k0
+; VL_BW_DQ-NEXT:    vpmovm2w %k0, %zmm0
+; VL_BW_DQ-NEXT:    vmovdqa64 {{.*#+}} zmm1 = [3,6,22,12,3,7,7,0,3,6,1,13,3,21,7,0,3,6,22,12,3,7,7,0,3,6,1,13,3,21,7,0]
+; VL_BW_DQ-NEXT:    vpermw %zmm0, %zmm1, %zmm0
+; VL_BW_DQ-NEXT:    vpmovw2m %zmm0, %k1
+; VL_BW_DQ-NEXT:    vpblendmw %zmm2, %zmm3, %zmm0 {%k1}
+; VL_BW_DQ-NEXT:    retq
+  %cmp1 = icmp eq <16 x i32> %a, zeroinitializer
+  %cmp2 = icmp eq <16 x i32> %b, zeroinitializer
+  %concat = shufflevector <16 x i1> %cmp1, <16 x i1> %cmp2, <32 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7, i32 8, i32 9, i32 10, i32 11, i32 12, i32 13, i32 14, i32 15, i32 16, i32 17, i32 18, i32 19, i32 20, i32 21, i32 22, i32 23, i32 24, i32 25, i32 26, i32 27, i32 28, i32 29, i32 30, i32 31>
+  %shuf = shufflevector <32 x i1> %concat, <32 x i1> undef, <32 x i32> <i32 3, i32 6, i32 22, i32 12, i32 3, i32 7, i32 7, i32 0, i32 3, i32 6, i32 1, i32 13, i32 3, i32 21, i32 7, i32 0, i32 3, i32 6, i32 22, i32 12, i32 3, i32 7, i32 7, i32 0, i32 3, i32 6, i32 1, i32 13, i32 3, i32 21, i32 7, i32 0>
+  %sel = select <32 x i1> %shuf, <32 x i16> %c, <32 x i16> %d
+  ret <32 x i16> %sel
+}
+
+define <32 x i8> @shuf32i1_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_icmp_v32i8_split(<16 x i32> %a, <16 x i32> %b, <32 x i8> %c, <32 x i8> %d) {
+; AVX512F-LABEL: shuf32i1_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_icmp_v32i8_split:
+; AVX512F:       # %bb.0:
+; AVX512F-NEXT:    vpxor %xmm4, %xmm4, %xmm4
+; AVX512F-NEXT:    vpcmpeqd %zmm4, %zmm0, %k1
+; AVX512F-NEXT:    vpcmpeqd %zmm4, %zmm1, %k2
+; AVX512F-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k2} {z}
+; AVX512F-NEXT:    vpternlogd $255, %zmm1, %zmm1, %zmm1 {%k1} {z}
+; AVX512F-NEXT:    vmovdqa64 {{.*#+}} zmm4 = [3,6,22,12,3,7,7,0,3,6,1,13,3,21,7,0]
+; AVX512F-NEXT:    vpermi2d %zmm0, %zmm1, %zmm4
+; AVX512F-NEXT:    vptestmd %zmm4, %zmm4, %k1
+; AVX512F-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k1} {z}
+; AVX512F-NEXT:    vpmovdb %zmm0, %xmm0
+; AVX512F-NEXT:    vinserti128 $1, %xmm0, %ymm0, %ymm0
+; AVX512F-NEXT:    vpblendvb %ymm0, %ymm2, %ymm3, %ymm0
+; AVX512F-NEXT:    retq
+;
+; AVX512VL-LABEL: shuf32i1_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_icmp_v32i8_split:
+; AVX512VL:       # %bb.0:
+; AVX512VL-NEXT:    vpxor %xmm4, %xmm4, %xmm4
+; AVX512VL-NEXT:    vpcmpeqd %zmm4, %zmm0, %k1
+; AVX512VL-NEXT:    vpcmpeqd %zmm4, %zmm1, %k2
+; AVX512VL-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k2} {z}
+; AVX512VL-NEXT:    vpternlogd $255, %zmm1, %zmm1, %zmm1 {%k1} {z}
+; AVX512VL-NEXT:    vmovdqa64 {{.*#+}} zmm4 = [3,6,22,12,3,7,7,0,3,6,1,13,3,21,7,0]
+; AVX512VL-NEXT:    vpermi2d %zmm0, %zmm1, %zmm4
+; AVX512VL-NEXT:    vptestmd %zmm4, %zmm4, %k1
+; AVX512VL-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k1} {z}
+; AVX512VL-NEXT:    vpmovdb %zmm0, %xmm0
+; AVX512VL-NEXT:    vinserti128 $1, %xmm0, %ymm0, %ymm0
+; AVX512VL-NEXT:    vpblendvb %ymm0, %ymm2, %ymm3, %ymm0
+; AVX512VL-NEXT:    retq
+;
+; VL_BW_DQ-LABEL: shuf32i1_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_3_6_22_12_3_7_7_0_3_6_1_13_3_21_7_0_icmp_v32i8_split:
+; VL_BW_DQ:       # %bb.0:
+; VL_BW_DQ-NEXT:    vpxor %xmm4, %xmm4, %xmm4
+; VL_BW_DQ-NEXT:    vpcmpeqd %zmm4, %zmm0, %k0
+; VL_BW_DQ-NEXT:    vpcmpeqd %zmm4, %zmm1, %k1
+; VL_BW_DQ-NEXT:    kunpckwd %k0, %k1, %k0
+; VL_BW_DQ-NEXT:    vpmovm2w %k0, %zmm0
+; VL_BW_DQ-NEXT:    vmovdqa64 {{.*#+}} zmm1 = [3,6,22,12,3,7,7,0,3,6,1,13,3,21,7,0,3,6,22,12,3,7,7,0,3,6,1,13,3,21,7,0]
+; VL_BW_DQ-NEXT:    vpermw %zmm0, %zmm1, %zmm0
+; VL_BW_DQ-NEXT:    vpmovw2m %zmm0, %k1
+; VL_BW_DQ-NEXT:    vpblendmb %ymm2, %ymm3, %ymm0 {%k1}
+; VL_BW_DQ-NEXT:    retq
+  %cmp1 = icmp eq <16 x i32> %a, zeroinitializer
+  %cmp2 = icmp eq <16 x i32> %b, zeroinitializer
+  %concat = shufflevector <16 x i1> %cmp1, <16 x i1> %cmp2, <32 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7, i32 8, i32 9, i32 10, i32 11, i32 12, i32 13, i32 14, i32 15, i32 16, i32 17, i32 18, i32 19, i32 20, i32 21, i32 22, i32 23, i32 24, i32 25, i32 26, i32 27, i32 28, i32 29, i32 30, i32 31>
+  %shuf = shufflevector <32 x i1> %concat, <32 x i1> undef, <32 x i32> <i32 3, i32 6, i32 22, i32 12, i32 3, i32 7, i32 7, i32 0, i32 3, i32 6, i32 1, i32 13, i32 3, i32 21, i32 7, i32 0, i32 3, i32 6, i32 22, i32 12, i32 3, i32 7, i32 7, i32 0, i32 3, i32 6, i32 1, i32 13, i32 3, i32 21, i32 7, i32 0>
+  %sel = select <32 x i1> %shuf, <32 x i8> %c, <32 x i8> %d
+  ret <32 x i8> %sel
 }
 
 define <8 x i1> @shuf8i1_u_2_u_u_2_u_2_u(i8 %a) {
@@ -608,65 +848,33 @@ define i16 @shuf16i1_0_0_0_0_0_0_0_0_0_0_0_0_0_0_0_0(i16 %a) {
 define i64 @shuf64i1_zero(i64 %a) {
 ; AVX512F-LABEL: shuf64i1_zero:
 ; AVX512F:       # %bb.0:
-; AVX512F-NEXT:    pushq %rbp
-; AVX512F-NEXT:    .cfi_def_cfa_offset 16
-; AVX512F-NEXT:    .cfi_offset %rbp, -16
-; AVX512F-NEXT:    movq %rsp, %rbp
-; AVX512F-NEXT:    .cfi_def_cfa_register %rbp
-; AVX512F-NEXT:    andq $-32, %rsp
-; AVX512F-NEXT:    subq $96, %rsp
-; AVX512F-NEXT:    movl %edi, {{[0-9]+}}(%rsp)
-; AVX512F-NEXT:    kmovw {{[0-9]+}}(%rsp), %k1
+; AVX512F-NEXT:    kmovw %edi, %k1
 ; AVX512F-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k1} {z}
-; AVX512F-NEXT:    vpmovdb %zmm0, %xmm0
-; AVX512F-NEXT:    vpbroadcastb %xmm0, %ymm0
-; AVX512F-NEXT:    vextracti128 $1, %ymm0, %xmm1
-; AVX512F-NEXT:    vpmovsxbd %xmm1, %zmm1
-; AVX512F-NEXT:    vpslld $31, %zmm1, %zmm1
-; AVX512F-NEXT:    vptestmd %zmm1, %zmm1, %k0
-; AVX512F-NEXT:    kmovw %k0, {{[0-9]+}}(%rsp)
-; AVX512F-NEXT:    vpmovsxbd %xmm0, %zmm0
-; AVX512F-NEXT:    vpslld $31, %zmm0, %zmm0
+; AVX512F-NEXT:    vpbroadcastd %xmm0, %zmm0
 ; AVX512F-NEXT:    vptestmd %zmm0, %zmm0, %k0
-; AVX512F-NEXT:    kmovw %k0, (%rsp)
-; AVX512F-NEXT:    movl (%rsp), %ecx
+; AVX512F-NEXT:    kmovw %k0, %eax
+; AVX512F-NEXT:    kmovw %k0, %ecx
+; AVX512F-NEXT:    shll $16, %ecx
+; AVX512F-NEXT:    orl %eax, %ecx
 ; AVX512F-NEXT:    movq %rcx, %rax
 ; AVX512F-NEXT:    shlq $32, %rax
 ; AVX512F-NEXT:    orq %rcx, %rax
-; AVX512F-NEXT:    movq %rbp, %rsp
-; AVX512F-NEXT:    popq %rbp
 ; AVX512F-NEXT:    vzeroupper
 ; AVX512F-NEXT:    retq
 ;
 ; AVX512VL-LABEL: shuf64i1_zero:
 ; AVX512VL:       # %bb.0:
-; AVX512VL-NEXT:    pushq %rbp
-; AVX512VL-NEXT:    .cfi_def_cfa_offset 16
-; AVX512VL-NEXT:    .cfi_offset %rbp, -16
-; AVX512VL-NEXT:    movq %rsp, %rbp
-; AVX512VL-NEXT:    .cfi_def_cfa_register %rbp
-; AVX512VL-NEXT:    andq $-32, %rsp
-; AVX512VL-NEXT:    subq $96, %rsp
-; AVX512VL-NEXT:    movl %edi, {{[0-9]+}}(%rsp)
-; AVX512VL-NEXT:    kmovw {{[0-9]+}}(%rsp), %k1
+; AVX512VL-NEXT:    kmovw %edi, %k1
 ; AVX512VL-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k1} {z}
-; AVX512VL-NEXT:    vpmovdb %zmm0, %xmm0
-; AVX512VL-NEXT:    vpbroadcastb %xmm0, %ymm0
-; AVX512VL-NEXT:    vextracti128 $1, %ymm0, %xmm1
-; AVX512VL-NEXT:    vpmovsxbd %xmm1, %zmm1
-; AVX512VL-NEXT:    vpslld $31, %zmm1, %zmm1
-; AVX512VL-NEXT:    vptestmd %zmm1, %zmm1, %k0
-; AVX512VL-NEXT:    kmovw %k0, {{[0-9]+}}(%rsp)
-; AVX512VL-NEXT:    vpmovsxbd %xmm0, %zmm0
-; AVX512VL-NEXT:    vpslld $31, %zmm0, %zmm0
+; AVX512VL-NEXT:    vpbroadcastd %xmm0, %zmm0
 ; AVX512VL-NEXT:    vptestmd %zmm0, %zmm0, %k0
-; AVX512VL-NEXT:    kmovw %k0, (%rsp)
-; AVX512VL-NEXT:    movl (%rsp), %ecx
+; AVX512VL-NEXT:    kmovw %k0, %eax
+; AVX512VL-NEXT:    kmovw %k0, %ecx
+; AVX512VL-NEXT:    shll $16, %ecx
+; AVX512VL-NEXT:    orl %eax, %ecx
 ; AVX512VL-NEXT:    movq %rcx, %rax
 ; AVX512VL-NEXT:    shlq $32, %rax
 ; AVX512VL-NEXT:    orq %rcx, %rax
-; AVX512VL-NEXT:    movq %rbp, %rsp
-; AVX512VL-NEXT:    popq %rbp
 ; AVX512VL-NEXT:    vzeroupper
 ; AVX512VL-NEXT:    retq
 ;

@@ -282,8 +282,8 @@ bool DWARFVerifier::handleDebugInfo() {
             DCtx, DObj.getInfoSection(), DCtx.getDebugAbbrev(),
             &DObj.getRangeSection(), DObj.getStringSection(),
             DObj.getStringOffsetSection(), &DObj.getAppleObjCSection(),
-            DObj.getLineSection(), DCtx.isLittleEndian(), false, TUSection,
-            nullptr));
+            DObj.getLineSection(), DObj.getLineStringSection(),
+            DCtx.isLittleEndian(), false, TUSection, nullptr));
         break;
       }
       case dwarf::DW_UT_skeleton:
@@ -297,8 +297,8 @@ bool DWARFVerifier::handleDebugInfo() {
             DCtx, DObj.getInfoSection(), DCtx.getDebugAbbrev(),
             &DObj.getRangeSection(), DObj.getStringSection(),
             DObj.getStringOffsetSection(), &DObj.getAppleObjCSection(),
-            DObj.getLineSection(), DCtx.isLittleEndian(), false, CUSection,
-            nullptr));
+            DObj.getLineSection(), DObj.getLineStringSection(),
+            DCtx.isLittleEndian(), false, CUSection, nullptr));
         break;
       }
       default: { llvm_unreachable("Invalid UnitType."); }
@@ -669,13 +669,13 @@ bool DWARFVerifier::handleDebugLine() {
   return NumDebugLineErrors == 0;
 }
 
-unsigned DWARFVerifier::verifyAccelTable(const DWARFSection *AccelSection,
-                                         DataExtractor *StrData,
-                                         const char *SectionName) {
+unsigned DWARFVerifier::verifyAppleAccelTable(const DWARFSection *AccelSection,
+                                              DataExtractor *StrData,
+                                              const char *SectionName) {
   unsigned NumErrors = 0;
   DWARFDataExtractor AccelSectionData(DCtx.getDWARFObj(), *AccelSection,
                                       DCtx.isLittleEndian(), 0);
-  DWARFAcceleratorTable AccelTable(AccelSectionData, *StrData);
+  AppleAcceleratorTable AccelTable(AccelSectionData, *StrData);
 
   OS << "Verifying " << SectionName << "...\n";
 
@@ -779,16 +779,16 @@ bool DWARFVerifier::handleAccelTables() {
   unsigned NumErrors = 0;
   if (!D.getAppleNamesSection().Data.empty())
     NumErrors +=
-        verifyAccelTable(&D.getAppleNamesSection(), &StrData, ".apple_names");
+        verifyAppleAccelTable(&D.getAppleNamesSection(), &StrData, ".apple_names");
   if (!D.getAppleTypesSection().Data.empty())
     NumErrors +=
-        verifyAccelTable(&D.getAppleTypesSection(), &StrData, ".apple_types");
+        verifyAppleAccelTable(&D.getAppleTypesSection(), &StrData, ".apple_types");
   if (!D.getAppleNamespacesSection().Data.empty())
-    NumErrors += verifyAccelTable(&D.getAppleNamespacesSection(), &StrData,
+    NumErrors += verifyAppleAccelTable(&D.getAppleNamespacesSection(), &StrData,
                                   ".apple_namespaces");
   if (!D.getAppleObjCSection().Data.empty())
     NumErrors +=
-        verifyAccelTable(&D.getAppleObjCSection(), &StrData, ".apple_objc");
+        verifyAppleAccelTable(&D.getAppleObjCSection(), &StrData, ".apple_objc");
   return NumErrors == 0;
 }
 

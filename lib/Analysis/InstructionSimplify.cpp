@@ -868,13 +868,14 @@ static Value *simplifyDivRem(Value *Op0, Value *Op1, bool IsDiv) {
   if (match(Op1, m_Zero()))
     return UndefValue::get(Ty);
 
-  // If any element of a constant divisor vector is zero, the whole op is undef.
+  // If any element of a constant divisor vector is zero or undef, the whole op
+  // is undef.
   auto *Op1C = dyn_cast<Constant>(Op1);
   if (Op1C && Ty->isVectorTy()) {
     unsigned NumElts = Ty->getVectorNumElements();
     for (unsigned i = 0; i != NumElts; ++i) {
       Constant *Elt = Op1C->getAggregateElement(i);
-      if (Elt && Elt->isNullValue())
+      if (Elt && (Elt->isNullValue() || isa<UndefValue>(Elt)))
         return UndefValue::get(Ty);
     }
   }
@@ -978,18 +979,17 @@ static Value *simplifyDiv(Instruction::BinaryOps Opcode, Value *Op0, Value *Op1,
   bool IsSigned = Opcode == Instruction::SDiv;
 
   // (X * Y) / Y -> X if the multiplication does not overflow.
-  Value *X = nullptr, *Y = nullptr;
-  if (match(Op0, m_Mul(m_Value(X), m_Value(Y))) && (X == Op1 || Y == Op1)) {
-    if (Y != Op1) std::swap(X, Y); // Ensure expression is (X * Y) / Y, Y = Op1
-    OverflowingBinaryOperator *Mul = cast<OverflowingBinaryOperator>(Op0);
-    // If the Mul knows it does not overflow, then we are good to go.
+  Value *X;
+  if (match(Op0, m_c_Mul(m_Value(X), m_Specific(Op1)))) {
+    auto *Mul = cast<OverflowingBinaryOperator>(Op0);
+    // If the Mul does not overflow, then we are good to go.
     if ((IsSigned && Mul->hasNoSignedWrap()) ||
         (!IsSigned && Mul->hasNoUnsignedWrap()))
       return X;
-    // If X has the form X = A / Y then X * Y cannot overflow.
-    if (BinaryOperator *Div = dyn_cast<BinaryOperator>(X))
-      if (Div->getOpcode() == Opcode && Div->getOperand(1) == Y)
-        return X;
+    // If X has the form X = A / Y, then X * Y cannot overflow.
+    if ((IsSigned && match(X, m_SDiv(m_Value(), m_Specific(Op1)))) ||
+        (!IsSigned && match(X, m_UDiv(m_Value(), m_Specific(Op1)))))
+      return X;
   }
 
   // (X rem Y) / Y -> 0
@@ -1040,6 +1040,13 @@ static Value *simplifyRem(Instruction::BinaryOps Opcode, Value *Op0, Value *Op1,
       (Opcode == Instruction::URem &&
        match(Op0, m_URem(m_Value(), m_Specific(Op1)))))
     return Op0;
+
+  // (X << Y) % X -> 0
+  if ((Opcode == Instruction::SRem &&
+       match(Op0, m_NSWShl(m_Specific(Op1), m_Value()))) ||
+      (Opcode == Instruction::URem &&
+       match(Op0, m_NUWShl(m_Specific(Op1), m_Value()))))
+    return Constant::getNullValue(Op0->getType());
 
   // If the operation is with the result of a select instruction, check whether
   // operating on either branch of the select always yields the same value.

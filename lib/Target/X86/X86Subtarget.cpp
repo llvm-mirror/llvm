@@ -254,6 +254,12 @@ void X86Subtarget::initSubtargetFeatures(StringRef CPU, StringRef FS) {
     GatherOverhead = 2;
   if (hasAVX512())
     ScatterOverhead = 2;
+
+  // Consume the vector width attribute or apply any target specific limit.
+  if (PreferVectorWidthOverride)
+    PreferVectorWidth = PreferVectorWidthOverride;
+  else if (Prefer256Bit)
+    PreferVectorWidth = 256;
 }
 
 void X86Subtarget::initializeEnvironment() {
@@ -315,6 +321,9 @@ void X86Subtarget::initializeEnvironment() {
   HasSGX = false;
   HasCLFLUSHOPT = false;
   HasCLWB = false;
+  HasRDPID = false;
+  UseRetpoline = false;
+  UseRetpolineExternalThunk = false;
   IsPMULLDSlow = false;
   IsSHLDSlow = false;
   IsUAMem16Slow = false;
@@ -322,6 +331,8 @@ void X86Subtarget::initializeEnvironment() {
   HasSSEUnalignedMem = false;
   HasCmpxchg16b = false;
   UseLeaForSP = false;
+  HasPOPCNTFalseDeps = false;
+  HasLZCNTFalseDeps = false;
   HasFastVariableShuffle = false;
   HasFastPartialYMMorZMMWrite = false;
   HasFastGather = false;
@@ -346,6 +357,8 @@ void X86Subtarget::initializeEnvironment() {
   X86ProcFamily = Others;
   GatherOverhead = 1024;
   ScatterOverhead = 1024;
+  PreferVectorWidth = UINT32_MAX;
+  Prefer256Bit = false;
 }
 
 X86Subtarget &X86Subtarget::initializeSubtargetDependencies(StringRef CPU,
@@ -357,10 +370,12 @@ X86Subtarget &X86Subtarget::initializeSubtargetDependencies(StringRef CPU,
 
 X86Subtarget::X86Subtarget(const Triple &TT, StringRef CPU, StringRef FS,
                            const X86TargetMachine &TM,
-                           unsigned StackAlignOverride)
+                           unsigned StackAlignOverride,
+                           unsigned PreferVectorWidthOverride)
     : X86GenSubtargetInfo(TT, CPU, FS), X86ProcFamily(Others),
       PICStyle(PICStyles::None), TM(TM), TargetTriple(TT),
       StackAlignOverride(StackAlignOverride),
+      PreferVectorWidthOverride(PreferVectorWidthOverride),
       In64BitMode(TargetTriple.getArch() == Triple::x86_64),
       In32BitMode(TargetTriple.getArch() == Triple::x86 &&
                   TargetTriple.getEnvironment() != Triple::CODE16),

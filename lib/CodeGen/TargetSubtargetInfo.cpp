@@ -38,6 +38,10 @@ bool TargetSubtargetInfo::enableAtomicExpand() const {
   return true;
 }
 
+bool TargetSubtargetInfo::enableIndirectBrExpand() const {
+  return false;
+}
+
 bool TargetSubtargetInfo::enableMachineScheduler() const {
   return false;
 }
@@ -110,4 +114,7 @@ std::string TargetSubtargetInfo::getSchedInfoStr(MCInst const &MCI) const {
   Optional<double> RThroughput =
       TSchedModel.computeInstrRThroughput(MCI.getOpcode());
   return createSchedInfoStr(Latency, RThroughput);
+}
+
+void TargetSubtargetInfo::mirFileLoaded(MachineFunction &MF) const {
 }
