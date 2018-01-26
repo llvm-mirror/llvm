@@ -1,4 +1,6 @@
-; RUN: llc -mtriple wasm32-unknown-unknown-wasm -filetype=obj %s -o - | obj2yaml | FileCheck %s
+; RUN: llc -filetype=obj %s -o - | obj2yaml | FileCheck %s
+
+target triple = "wasm32-unknown-unknown-wasm"
 
 @global1 = global i32 1025, align 8
 
@@ -87,7 +89,7 @@ declare void @func3()
 ; CHECK-NEXT:     Segments:        
 ; CHECK-NEXT:       - Offset:          
 ; CHECK-NEXT:           Opcode:          I32_CONST
-; CHECK-NEXT:           Value:           0
+; CHECK-NEXT:           Value:           1
 ; CHECK-NEXT:         Functions:       [ 5, 7 ]
 ; CHECK-NEXT:   - Type:            CODE
 ; CHECK-NEXT:     Relocations:     
@@ -95,7 +97,7 @@ declare void @func3()
 ; CHECK-NEXT:         Index:           0
 ; CHECK-NEXT:         Offset:          0x00000004
 ; CHECK-NEXT:       - Type:            R_WEBASSEMBLY_TABLE_INDEX_SLEB
-; CHECK-NEXT:         Index:           0
+; CHECK-NEXT:         Index:           5
 ; CHECK-NEXT:         Offset:          0x0000000F
 ; CHECK-NEXT:       - Type:            R_WEBASSEMBLY_MEMORY_ADDR_SLEB
 ; CHECK-NEXT:         Index:           0
@@ -107,7 +109,7 @@ declare void @func3()
 ; CHECK-NEXT:         Index:           2
 ; CHECK-NEXT:         Offset:          0x0000002C
 ; CHECK-NEXT:       - Type:            R_WEBASSEMBLY_TABLE_INDEX_SLEB
-; CHECK-NEXT:         Index:           1
+; CHECK-NEXT:         Index:           7
 ; CHECK-NEXT:         Offset:          0x00000037
 ; CHECK-NEXT:       - Type:            R_WEBASSEMBLY_MEMORY_ADDR_SLEB
 ; CHECK-NEXT:         Index:           0
@@ -121,13 +123,13 @@ declare void @func3()
 ; CHECK-NEXT:         Body:            1080808080000B
 ; CHECK-NEXT:       - Index:           6
 ; CHECK-NEXT:         Locals:          
-; CHECK-NEXT:         Body:            024041808080800041004180808080001081808080000D000F0B00000B
+; CHECK-NEXT:         Body:            024041818080800041004180808080001081808080000D000F0B00000B
 ; CHECK-NEXT:       - Index:           7
 ; CHECK-NEXT:         Locals:          
 ; CHECK-NEXT:         Body:            1082808080000B
 ; CHECK-NEXT:       - Index:           8
 ; CHECK-NEXT:         Locals:          
-; CHECK-NEXT:         Body:            024041818080800041004180808080001081808080000D000F0B00000B
+; CHECK-NEXT:         Body:            024041828080800041004180808080001081808080000D000F0B00000B
 ; CHECK-NEXT:   - Type:            DATA
 ; CHECK-NEXT:     Segments:        
 ; CHECK-NEXT:       - SectionOffset:   6
@@ -136,27 +138,6 @@ declare void @func3()
 ; CHECK-NEXT:           Opcode:          I32_CONST
 ; CHECK-NEXT:           Value:           0
 ; CHECK-NEXT:         Content:         '01040000'
-; CHECK-NEXT:   - Type:            CUSTOM
-; CHECK-NEXT:     Name:            name
-; CHECK-NEXT:     FunctionNames:   
-; CHECK-NEXT:       - Index:           0
-; CHECK-NEXT:         Name:            func3
-; CHECK-NEXT:       - Index:           1
-; CHECK-NEXT:         Name:            __cxa_atexit
-; CHECK-NEXT:       - Index:           2
-; CHECK-NEXT:         Name:            func2
-; CHECK-NEXT:       - Index:           3
-; CHECK-NEXT:         Name:            func1
-; CHECK-NEXT:       - Index:           4
-; CHECK-NEXT:         Name:            func0
-; CHECK-NEXT:       - Index:           5
-; CHECK-NEXT:         Name:            .Lcall_dtors.42
-; CHECK-NEXT:       - Index:           6
-; CHECK-NEXT:         Name:            .Lregister_call_dtors.42
-; CHECK-NEXT:       - Index:           7
-; CHECK-NEXT:         Name:            .Lcall_dtors
-; CHECK-NEXT:       - Index:           8
-; CHECK-NEXT:         Name:            .Lregister_call_dtors
 ; CHECK-NEXT:   - Type:            CUSTOM
 ; CHECK-NEXT:     Name:            linking
 ; CHECK-NEXT:     DataSize:        4

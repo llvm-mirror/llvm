@@ -1146,14 +1146,14 @@ def X86tcret_6regs : PatFrag<(ops node:$ptr, node:$off),
 
 def : Pat<(X86tcret ptr_rc_tailcall:$dst, imm:$off),
           (TCRETURNri ptr_rc_tailcall:$dst, imm:$off)>,
-          Requires<[Not64BitMode]>;
+          Requires<[Not64BitMode, NotUseRetpoline]>;
 
 // FIXME: This is disabled for 32-bit PIC mode because the global base
 // register which is part of the address mode may be assigned a
 // callee-saved register.
 def : Pat<(X86tcret (load addr:$dst), imm:$off),
           (TCRETURNmi addr:$dst, imm:$off)>,
-          Requires<[Not64BitMode, IsNotPIC]>;
+          Requires<[Not64BitMode, IsNotPIC, NotUseRetpoline]>;
 
 def : Pat<(X86tcret (i32 tglobaladdr:$dst), imm:$off),
           (TCRETURNdi tglobaladdr:$dst, imm:$off)>,
@@ -1165,13 +1165,21 @@ def : Pat<(X86tcret (i32 texternalsym:$dst), imm:$off),
 
 def : Pat<(X86tcret ptr_rc_tailcall:$dst, imm:$off),
           (TCRETURNri64 ptr_rc_tailcall:$dst, imm:$off)>,
-          Requires<[In64BitMode]>;
+          Requires<[In64BitMode, NotUseRetpoline]>;
 
 // Don't fold loads into X86tcret requiring more than 6 regs.
 // There wouldn't be enough scratch registers for base+index.
 def : Pat<(X86tcret_6regs (load addr:$dst), imm:$off),
           (TCRETURNmi64 addr:$dst, imm:$off)>,
-          Requires<[In64BitMode]>;
+          Requires<[In64BitMode, NotUseRetpoline]>;
+
+def : Pat<(X86tcret ptr_rc_tailcall:$dst, imm:$off),
+          (RETPOLINE_TCRETURN64 ptr_rc_tailcall:$dst, imm:$off)>,
+          Requires<[In64BitMode, UseRetpoline]>;
+
+def : Pat<(X86tcret ptr_rc_tailcall:$dst, imm:$off),
+          (RETPOLINE_TCRETURN32 ptr_rc_tailcall:$dst, imm:$off)>,
+          Requires<[Not64BitMode, UseRetpoline]>;
 
 def : Pat<(X86tcret (i64 tglobaladdr:$dst), imm:$off),
           (TCRETURNdi64 tglobaladdr:$dst, imm:$off)>,
@@ -1514,6 +1522,10 @@ def : Pat<(i8 (trunc GR16:$src)),
           (EXTRACT_SUBREG GR16:$src, sub_8bit)>,
       Requires<[In64BitMode]>;
 
+def immff00_ffff  : ImmLeaf<i32, [{
+  return Imm >= 0xff00 && Imm <= 0xffff;
+}]>;
+
 // h-register tricks
 def : Pat<(i8 (trunc (srl_su GR16:$src, (i8 8)))),
           (EXTRACT_SUBREG GR16:$src, sub_8bit_hi)>,
@@ -1534,7 +1546,7 @@ def : Pat<(i32 (anyext (srl_su GR16:$src, (i8 8)))),
           (MOVZX32_NOREXrr8 (EXTRACT_SUBREG GR16:$src, sub_8bit_hi))>;
 def : Pat<(and (srl_su GR32:$src, (i8 8)), (i32 255)),
           (MOVZX32_NOREXrr8 (EXTRACT_SUBREG GR32:$src, sub_8bit_hi))>;
-def : Pat<(srl (and_su GR32:$src, 0xff00), (i8 8)),
+def : Pat<(srl (and_su GR32:$src, immff00_ffff), (i8 8)),
           (MOVZX32_NOREXrr8 (EXTRACT_SUBREG GR32:$src, sub_8bit_hi))>;
 
 // h-register tricks.

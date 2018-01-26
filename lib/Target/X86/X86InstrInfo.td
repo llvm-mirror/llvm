@@ -878,6 +878,7 @@ def HasSHSTK     : Predicate<"Subtarget->hasSHSTK()">;
 def HasIBT       : Predicate<"Subtarget->hasIBT()">;
 def HasCLFLUSHOPT : Predicate<"Subtarget->hasCLFLUSHOPT()">;
 def HasCLWB      : Predicate<"Subtarget->hasCLWB()">;
+def HasRDPID     : Predicate<"Subtarget->hasRDPID()">;
 def HasCmpxchg16b: Predicate<"Subtarget->hasCmpxchg16b()">;
 def Not64BitMode : Predicate<"!Subtarget->is64Bit()">,
                              AssemblerPredicate<"!Mode64Bit", "Not 64-bit mode">;
@@ -925,6 +926,8 @@ def HasFastLZCNT : Predicate<"Subtarget->hasFastLZCNT()">;
 def HasFastSHLDRotate : Predicate<"Subtarget->hasFastSHLDRotate()">;
 def HasERMSB : Predicate<"Subtarget->hasERMSB()">;
 def HasMFence    : Predicate<"Subtarget->hasMFence()">;
+def UseRetpoline : Predicate<"Subtarget->useRetpoline()">;
+def NotUseRetpoline : Predicate<"!Subtarget->useRetpoline()">;
 
 //===----------------------------------------------------------------------===//
 // X86 Instruction Format Definitions.
@@ -1649,18 +1652,18 @@ let isCodeGenOnly = 1 in {
 let hasSideEffects = 0 in
 def MOV8rr_NOREX : I<0x88, MRMDestReg,
                      (outs GR8_NOREX:$dst), (ins GR8_NOREX:$src),
-                     "mov{b}\t{$src, $dst|$dst, $src}  # NOREX", [], IIC_MOV>,
+                     "mov{b}\t{$src, $dst|$dst, $src}", [], IIC_MOV>,
                    Sched<[WriteMove]>;
 let mayStore = 1, hasSideEffects = 0 in
 def MOV8mr_NOREX : I<0x88, MRMDestMem,
                      (outs), (ins i8mem_NOREX:$dst, GR8_NOREX:$src),
-                     "mov{b}\t{$src, $dst|$dst, $src}  # NOREX", [],
+                     "mov{b}\t{$src, $dst|$dst, $src}", [],
                      IIC_MOV_MEM>, Sched<[WriteStore]>;
 let mayLoad = 1, hasSideEffects = 0,
     canFoldAsLoad = 1, isReMaterializable = 1 in
 def MOV8rm_NOREX : I<0x8A, MRMSrcMem,
                      (outs GR8_NOREX:$dst), (ins i8mem_NOREX:$src),
-                     "mov{b}\t{$src, $dst|$dst, $src}  # NOREX", [],
+                     "mov{b}\t{$src, $dst|$dst, $src}", [],
                      IIC_MOV_MEM>, Sched<[WriteLoad]>;
 }
 

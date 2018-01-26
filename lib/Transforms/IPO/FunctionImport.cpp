@@ -231,7 +231,7 @@ updateValueInfoForIndirectCalls(const ModuleSummaryIndex &Index, ValueInfo VI) {
   // it, rather than needing to perform this mapping on each walk.
   auto GUID = Index.getGUIDFromOriginalID(VI.getGUID());
   if (GUID == 0)
-    return nullptr;
+    return ValueInfo();
   return Index.getValueInfo(GUID);
 }
 
@@ -269,7 +269,7 @@ static void computeImportForFunction(
     };
 
     const auto NewThreshold =
-        Threshold * GetBonusMultiplier(Edge.second.Hotness);
+        Threshold * GetBonusMultiplier(Edge.second.getHotness());
 
     auto *CalleeSummary = selectCallee(Index, VI.getSummaryList(), NewThreshold,
                                        Summary.modulePath());
@@ -293,7 +293,8 @@ static void computeImportForFunction(
       return Threshold * ImportInstrFactor;
     };
 
-    bool IsHotCallsite = Edge.second.Hotness == CalleeInfo::HotnessType::Hot;
+    bool IsHotCallsite =
+        Edge.second.getHotness() == CalleeInfo::HotnessType::Hot;
     const auto AdjThreshold = GetAdjustedThreshold(Threshold, IsHotCallsite);
 
     auto ExportModulePath = ResolvedCalleeSummary->modulePath();
@@ -517,7 +518,7 @@ void llvm::computeDeadSymbols(
     for (auto &S : Entry.second.SummaryList)
       if (S->isLive()) {
         DEBUG(dbgs() << "Live root: " << Entry.first << "\n");
-        Worklist.push_back(ValueInfo(&Entry));
+        Worklist.push_back(ValueInfo(/*IsAnalysis=*/false, &Entry));
         ++LiveSymbols;
         break;
       }

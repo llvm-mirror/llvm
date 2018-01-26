@@ -232,6 +232,12 @@ protected:
   /// the stack pointer. This is an optimization for Intel Atom processors.
   bool UseLeaForSP;
 
+  /// True if POPCNT instruction has a false dependency on the destination register.
+  bool HasPOPCNTFalseDeps;
+
+  /// True if LZCNT/TZCNT instructions have a false dependency on the destination register.
+  bool HasLZCNTFalseDeps;
+
   /// True if its preferable to combine to a single shuffle using a variable
   /// mask over multiple fixed shuffles.
   bool HasFastVariableShuffle;
@@ -345,6 +351,17 @@ protected:
   /// Processor supports Cache Line Write Back instruction
   bool HasCLWB;
 
+  /// Processor support RDPID instruction
+  bool HasRDPID;
+
+  /// Use a retpoline thunk rather than indirect calls to block speculative
+  /// execution.
+  bool UseRetpoline;
+
+  /// When using a retpoline thunk, call an externally provided thunk rather
+  /// than emitting one inside the compiler.
+  bool UseRetpolineExternalThunk;
+
   /// Use software floating point for code generation.
   bool UseSoftFloat;
 
@@ -355,6 +372,9 @@ protected:
   /// Max. memset / memcpy size that is turned into rep/movs, rep/stos ops.
   ///
   unsigned MaxInlineSizeThreshold;
+
+  /// Indicates target prefers 256 bit instructions.
+  bool Prefer256Bit;
 
   /// What processor and OS we're targeting.
   Triple TargetTriple;
@@ -371,6 +391,13 @@ protected:
 private:
   /// Override the stack alignment.
   unsigned StackAlignOverride;
+
+  /// Preferred vector width from function attribute.
+  unsigned PreferVectorWidthOverride;
+
+  /// Resolved preferred vector width from function attribute and subtarget
+  /// features.
+  unsigned PreferVectorWidth;
 
   /// True if compiling for 64-bit, false for 16-bit or 32-bit.
   bool In64BitMode;
@@ -397,7 +424,8 @@ public:
   /// of the specified triple.
   ///
   X86Subtarget(const Triple &TT, StringRef CPU, StringRef FS,
-               const X86TargetMachine &TM, unsigned StackAlignOverride);
+               const X86TargetMachine &TM, unsigned StackAlignOverride,
+               unsigned PreferVectorWidthOverride);
 
   const X86TargetLowering *getTargetLowering() const override {
     return &TLInfo;
@@ -543,6 +571,8 @@ public:
   bool hasSSEUnalignedMem() const { return HasSSEUnalignedMem; }
   bool hasCmpxchg16b() const { return HasCmpxchg16b; }
   bool useLeaForSP() const { return UseLeaForSP; }
+  bool hasPOPCNTFalseDeps() const { return HasPOPCNTFalseDeps; }
+  bool hasLZCNTFalseDeps() const { return HasLZCNTFalseDeps; }
   bool hasFastVariableShuffle() const {
     return HasFastVariableShuffle;
   }
@@ -579,6 +609,22 @@ public:
   bool hasIBT() const { return HasIBT; }
   bool hasCLFLUSHOPT() const { return HasCLFLUSHOPT; }
   bool hasCLWB() const { return HasCLWB; }
+  bool hasRDPID() const { return HasRDPID; }
+  bool useRetpoline() const { return UseRetpoline; }
+  bool useRetpolineExternalThunk() const { return UseRetpolineExternalThunk; }
+
+  unsigned getPreferVectorWidth() const { return PreferVectorWidth; }
+
+  // Helper functions to determine when we should allow widening to 512-bit
+  // during codegen.
+  // TODO: Currently we're always allowing widening on CPUs without VLX,
+  // because for many cases we don't have a better option.
+  bool canExtendTo512DQ() const {
+    return hasAVX512() && (!hasVLX() || getPreferVectorWidth() >= 512);
+  }
+  bool canExtendTo512BW() const  {
+    return hasBWI() && canExtendTo512DQ();
+  }
 
   bool isXRaySupported() const override { return is64Bit(); }
 
@@ -700,6 +746,10 @@ public:
 
   /// Return true if the subtarget allows calls to immediate address.
   bool isLegalToCallImmediateAddr() const;
+
+  /// If we are using retpolines, we need to expand indirectbr to avoid it
+  /// lowering to an actual indirect jump.
+  bool enableIndirectBrExpand() const override { return useRetpoline(); }
 
   /// Enable the MachineScheduler pass for all X86 subtargets.
   bool enableMachineScheduler() const override { return true; }

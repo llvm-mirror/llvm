@@ -721,18 +721,12 @@ AArch64TargetLowering::AArch64TargetLowering(const TargetMachine &TM,
 }
 
 void AArch64TargetLowering::addTypeForNEON(MVT VT, MVT PromotedBitwiseVT) {
-  if (VT == MVT::v2f32 || VT == MVT::v4f16) {
-    setOperationAction(ISD::LOAD, VT, Promote);
-    AddPromotedToType(ISD::LOAD, VT, MVT::v2i32);
+  assert(VT.isVector() && "VT should be a vector type");
 
-    setOperationAction(ISD::STORE, VT, Promote);
-    AddPromotedToType(ISD::STORE, VT, MVT::v2i32);
-  } else if (VT == MVT::v2f64 || VT == MVT::v4f32 || VT == MVT::v8f16) {
-    setOperationAction(ISD::LOAD, VT, Promote);
-    AddPromotedToType(ISD::LOAD, VT, MVT::v2i64);
-
-    setOperationAction(ISD::STORE, VT, Promote);
-    AddPromotedToType(ISD::STORE, VT, MVT::v2i64);
+  if (VT.isFloatingPoint()) {
+    MVT PromoteTo = EVT(VT).changeVectorElementTypeToInteger().getSimpleVT();
+    setOperationPromotedToType(ISD::LOAD, VT, PromoteTo);
+    setOperationPromotedToType(ISD::STORE, VT, PromoteTo);
   }
 
   // Mark vector float intrinsics as expand.
@@ -3343,9 +3337,15 @@ AArch64TargetLowering::LowerCall(CallLoweringInfo &CLI,
     assert(FPDiff % 16 == 0 && "unaligned stack on tail call");
   }
 
+  // We can omit callseq_start/callseq_end if there is no callframe to setup.
+  // Do not omit for patchpoints as SelectionDAGBuilder::visitPatchpoint()
+  // currently expects it.
+  bool OmitCallSeq = NumBytes == 0 && !CLI.IsPatchPoint;
+  assert((!IsSibCall || OmitCallSeq) && "Should not get callseq for sibcalls");
+
   // Adjust the stack pointer for the new arguments...
   // These operations are automatically eliminated by the prolog/epilog pass
-  if (!IsSibCall)
+  if (!OmitCallSeq)
     Chain = DAG.getCALLSEQ_START(Chain, NumBytes, 0, DL);
 
   SDValue StackPtr = DAG.getCopyFromReg(Chain, DL, AArch64::SP,
@@ -3511,7 +3511,7 @@ AArch64TargetLowering::LowerCall(CallLoweringInfo &CLI,
   // the frame up *after* the call, however in the ABI-changing tail-call case
   // we've carefully laid out the parameters so that when sp is reset they'll be
   // in the correct location.
-  if (IsTailCall && !IsSibCall) {
+  if (IsTailCall && !OmitCallSeq) {
     Chain = DAG.getCALLSEQ_END(Chain, DAG.getIntPtrConstant(NumBytes, DL, true),
                                DAG.getIntPtrConstant(0, DL, true), InFlag, DL);
     InFlag = Chain.getValue(1);
@@ -3569,9 +3569,11 @@ AArch64TargetLowering::LowerCall(CallLoweringInfo &CLI,
   uint64_t CalleePopBytes =
       DoesCalleeRestoreStack(CallConv, TailCallOpt) ? alignTo(NumBytes, 16) : 0;
 
-  Chain = DAG.getCALLSEQ_END(Chain, DAG.getIntPtrConstant(NumBytes, DL, true),
-                             DAG.getIntPtrConstant(CalleePopBytes, DL, true),
-                             InFlag, DL);
+  if (!OmitCallSeq)
+    Chain = DAG.getCALLSEQ_END(Chain, DAG.getIntPtrConstant(NumBytes, DL, true),
+                               DAG.getIntPtrConstant(CalleePopBytes, DL, true),
+                               InFlag, DL);
+
   if (!Ins.empty())
     InFlag = Chain.getValue(1);
 
@@ -7290,8 +7292,21 @@ SDValue AArch64TargetLowering::LowerVSETCC(SDValue Op,
     return DAG.getSExtOrTrunc(Cmp, dl, Op.getValueType());
   }
 
-  if (LHS.getValueType().getVectorElementType() == MVT::f16)
-    return SDValue();
+  const bool FullFP16 =
+    static_cast<const AArch64Subtarget &>(DAG.getSubtarget()).hasFullFP16();
+
+  // Make v4f16 (only) fcmp operations utilise vector instructions
+  // v8f16 support will be a litle more complicated
+  if (LHS.getValueType().getVectorElementType() == MVT::f16) {
+    if (!FullFP16 && LHS.getValueType().getVectorNumElements() == 4) {
+      LHS = DAG.getNode(ISD::FP_EXTEND, dl, MVT::v4f32, LHS);
+      RHS = DAG.getNode(ISD::FP_EXTEND, dl, MVT::v4f32, RHS);
+      SDValue NewSetcc = DAG.getSetCC(dl, MVT::v4i16, LHS, RHS, CC);
+      DAG.ReplaceAllUsesWith(Op, NewSetcc);
+      CmpVT = MVT::v4i32;
+    } else
+      return SDValue();
+  }
 
   assert(LHS.getValueType().getVectorElementType() == MVT::f32 ||
          LHS.getValueType().getVectorElementType() == MVT::f64);
@@ -8831,7 +8846,7 @@ static SDValue performConcatVectorsCombine(SDNode *N,
 static SDValue tryCombineFixedPointConvert(SDNode *N,
                                            TargetLowering::DAGCombinerInfo &DCI,
                                            SelectionDAG &DAG) {
-  // Wait 'til after everything is legalized to try this. That way we have
+  // Wait until after everything is legalized to try this. That way we have
   // legal vector types and such.
   if (DCI.isBeforeLegalizeOps())
     return SDValue();
@@ -10973,4 +10988,9 @@ AArch64TargetLowering::getVaListSizeInBits(const DataLayout &DL) const {
     return getPointerTy(DL).getSizeInBits();
 
   return 3 * getPointerTy(DL).getSizeInBits() + 2 * 32;
+}
+
+void AArch64TargetLowering::finalizeLowering(MachineFunction &MF) const {
+  MF.getFrameInfo().computeMaxCallFrameSize(MF);
+  TargetLoweringBase::finalizeLowering(MF);
 }

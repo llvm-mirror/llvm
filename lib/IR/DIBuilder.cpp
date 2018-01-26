@@ -30,8 +30,8 @@ cl::opt<bool>
                llvm::cl::desc("Use llvm.dbg.addr for all local variables"),
                cl::init(false), cl::Hidden);
 
-DIBuilder::DIBuilder(Module &m, bool AllowUnresolvedNodes)
-  : M(m), VMContext(M.getContext()), CUNode(nullptr),
+DIBuilder::DIBuilder(Module &m, bool AllowUnresolvedNodes, DICompileUnit *CU)
+  : M(m), VMContext(M.getContext()), CUNode(CU),
       DeclareFn(nullptr), ValueFn(nullptr),
       AllowUnresolvedNodes(AllowUnresolvedNodes) {}
 
@@ -595,6 +595,10 @@ DITypeRefArray DIBuilder::getOrCreateTypeArray(ArrayRef<Metadata *> Elements) {
 
 DISubrange *DIBuilder::getOrCreateSubrange(int64_t Lo, int64_t Count) {
   return DISubrange::get(VMContext, Count, Lo);
+}
+
+DISubrange *DIBuilder::getOrCreateSubrange(int64_t Lo, Metadata *CountNode) {
+  return DISubrange::get(VMContext, CountNode, Lo);
 }
 
 DIFortranSubrange *DIBuilder::getOrCreateFortranSubrange(

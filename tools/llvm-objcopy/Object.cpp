@@ -18,7 +18,6 @@
 #include "llvm/Object/ELFObjectFile.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FileOutputBuffer.h"
-#include "llvm/Support/Path.h"
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -344,50 +343,6 @@ void SectionWithStrTab::initialize(SectionTableRef SecTable) {
 
 void SectionWithStrTab::finalize() { this->Link = StrTab->Index; }
 
-template <class ELFT>
-void GnuDebugLinkSection<ELFT>::init(StringRef File, StringRef Data) {
-  FileName = sys::path::stem(File);
-  // The format for the .gnu_debuglink starts with the stemmed file name and is
-  // followed by a null terminator and then the CRC32 of the file. The CRC32
-  // should be 4 byte aligned. So we add the FileName size, a 1 for the null
-  // byte, and then finally push the size to alignment and add 4.
-  Size = alignTo(FileName.size() + 1, 4) + 4;
-  // The CRC32 will only be aligned if we align the whole section.
-  Align = 4;
-  Type = ELF::SHT_PROGBITS;
-  Name = ".gnu_debuglink";
-  // For sections not found in segments, OriginalOffset is only used to
-  // establish the order that sections should go in. By using the maximum
-  // possible offset we cause this section to wind up at the end.
-  OriginalOffset = std::numeric_limits<uint64_t>::max();
-  JamCRC crc;
-  crc.update(ArrayRef<char>(Data.data(), Data.size()));
-  // The CRC32 value needs to be complemented because the JamCRC dosn't
-  // finalize the CRC32 value. It also dosn't negate the initial CRC32 value
-  // but it starts by default at 0xFFFFFFFF which is the complement of zero.
-  CRC32 = ~crc.getCRC();
-}
-
-template <class ELFT>
-GnuDebugLinkSection<ELFT>::GnuDebugLinkSection(StringRef File)
-    : FileName(File) {
-  // Read in the file to compute the CRC of it.
-  auto DebugOrErr = MemoryBuffer::getFile(File);
-  if (!DebugOrErr)
-    error("'" + File + "': " + DebugOrErr.getError().message());
-  auto Debug = std::move(*DebugOrErr);
-  init(File, Debug->getBuffer());
-}
-
-template <class ELFT>
-void GnuDebugLinkSection<ELFT>::writeSection(FileOutputBuffer &Out) const {
-  auto Buf = Out.getBufferStart() + Offset;
-  char *File = reinterpret_cast<char *>(Buf);
-  Elf_Word *CRC = reinterpret_cast<Elf_Word *>(Buf + Size - sizeof(Elf_Word));
-  *CRC = CRC32;
-  std::copy(std::begin(FileName), std::end(FileName), File);
-}
-
 // Returns true IFF a section is wholly inside the range of a segment
 static bool sectionWithinSegment(const SectionBase &Section,
                                  const Segment &Segment) {
@@ -409,12 +364,20 @@ static bool segmentOverlapsSegment(const Segment &Child,
          Parent.OriginalOffset + Parent.FileSize > Child.OriginalOffset;
 }
 
-static bool compareSegments(const Segment *A, const Segment *B) {
+static bool compareSegmentsByOffset(const Segment *A, const Segment *B) {
   // Any segment without a parent segment should come before a segment
   // that has a parent segment.
   if (A->OriginalOffset < B->OriginalOffset)
     return true;
   if (A->OriginalOffset > B->OriginalOffset)
+    return false;
+  return A->Index < B->Index;
+}
+
+static bool compareSegmentsByPAddr(const Segment *A, const Segment *B) {
+  if (A->PAddr < B->PAddr)
+    return true;
+  if (A->PAddr > B->PAddr)
     return false;
   return A->Index < B->Index;
 }
@@ -456,9 +419,9 @@ void Object<ELFT>::readProgramHeaders(const ELFFile<ELFT> &ElfFile) {
       if (&Child != &Parent && segmentOverlapsSegment(*Child, *Parent)) {
         // We want a canonical "most parental" segment but this requires
         // inspecting the ParentSegment.
-        if (compareSegments(Parent.get(), Child.get()))
+        if (compareSegmentsByOffset(Parent.get(), Child.get()))
           if (Child->ParentSegment == nullptr ||
-              compareSegments(Parent.get(), Child->ParentSegment)) {
+              compareSegmentsByOffset(Parent.get(), Child->ParentSegment)) {
             Child->ParentSegment = Parent.get();
           }
       }
@@ -755,10 +718,6 @@ void Object<ELFT>::addSection(StringRef SecName, ArrayRef<uint8_t> Data) {
   Sections.push_back(std::move(Sec));
 }
 
-template <class ELFT> void Object<ELFT>::addGnuDebugLink(StringRef File) {
-  Sections.emplace_back(llvm::make_unique<GnuDebugLinkSection<ELFT>>(File));
-}
-
 template <class ELFT> void ELFObject<ELFT>::sortSections() {
   // Put all sections in offset order. Maintain the ordering as closely as
   // possible while meeting that demand however.
@@ -784,7 +743,8 @@ static uint64_t alignToAddr(uint64_t Offset, uint64_t Addr, uint64_t Align) {
 
 // Orders segments such that if x = y->ParentSegment then y comes before x.
 static void OrderSegments(std::vector<Segment *> &Segments) {
-  std::stable_sort(std::begin(Segments), std::end(Segments), compareSegments);
+  std::stable_sort(std::begin(Segments), std::end(Segments),
+                   compareSegmentsByOffset);
 }
 
 // This function finds a consistent layout for a list of segments starting from
@@ -793,7 +753,7 @@ static void OrderSegments(std::vector<Segment *> &Segments) {
 static uint64_t LayoutSegments(std::vector<Segment *> &Segments,
                                uint64_t Offset) {
   assert(std::is_sorted(std::begin(Segments), std::end(Segments),
-                        compareSegments));
+                        compareSegmentsByOffset));
   // The only way a segment should move is if a section was between two
   // segments and that section was removed. If that section isn't in a segment
   // then it's acceptable, but not ideal, to simply move it to after the
@@ -947,13 +907,28 @@ template <class ELFT> void BinaryObject<ELFT>::finalize() {
       OrderedSegments.push_back(Section->ParentSegment);
     }
   }
-  OrderSegments(OrderedSegments);
+
+  // For binary output, we're going to use physical addresses instead of
+  // virtual addresses, since a binary output is used for cases like ROM
+  // loading and physical addresses are intended for ROM loading.
+  // However, if no segment has a physical address, we'll fallback to using
+  // virtual addresses for all.
+  if (std::all_of(std::begin(OrderedSegments), std::end(OrderedSegments),
+                  [](const Segment *Segment) { return Segment->PAddr == 0; }))
+    for (const auto &Segment : OrderedSegments)
+      Segment->PAddr = Segment->VAddr;
+
+  std::stable_sort(std::begin(OrderedSegments), std::end(OrderedSegments),
+                   compareSegmentsByPAddr);
+
   // Because we add a ParentSegment for each section we might have duplicate
   // segments in OrderedSegments. If there were duplicates then LayoutSegments
   // would do very strange things.
   auto End =
       std::unique(std::begin(OrderedSegments), std::end(OrderedSegments));
   OrderedSegments.erase(End, std::end(OrderedSegments));
+
+  uint64_t Offset = 0;
 
   // Modify the first segment so that there is no gap at the start. This allows
   // our layout algorithm to proceed as expected while not out writing out the
@@ -963,18 +938,17 @@ template <class ELFT> void BinaryObject<ELFT>::finalize() {
     auto Sec = Seg->firstSection();
     auto Diff = Sec->OriginalOffset - Seg->OriginalOffset;
     Seg->OriginalOffset += Diff;
-    // The size needs to be shrunk as well
+    // The size needs to be shrunk as well.
     Seg->FileSize -= Diff;
-    Seg->MemSize -= Diff;
-    // The VAddr needs to be adjusted so that the alignment is correct as well
-    Seg->VAddr += Diff;
-    Seg->PAddr = Seg->VAddr;
-    // We don't want this to be shifted by alignment so we need to set the
-    // alignment to zero.
-    Seg->Align = 0;
+    // The PAddr needs to be increased to remove the gap before the first
+    // section.
+    Seg->PAddr += Diff;
+    uint64_t LowestPAddr = Seg->PAddr;
+    for (auto &Segment : OrderedSegments) {
+      Segment->Offset = Segment->PAddr - LowestPAddr;
+      Offset = std::max(Offset, Segment->Offset + Segment->FileSize);
+    }
   }
-
-  uint64_t Offset = LayoutSegments(OrderedSegments, 0);
 
   // TODO: generalize LayoutSections to take a range. Pass a special range
   // constructed from an iterator that skips values for which a predicate does
