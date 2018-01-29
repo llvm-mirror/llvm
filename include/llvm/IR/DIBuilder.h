@@ -182,6 +182,12 @@ namespace llvm {
     DIBasicType *createBasicType(StringRef Name, uint64_t SizeInBits,
                                  unsigned Encoding);
 
+    /// Create debugging information entry for a string
+    /// type.
+    /// \param Name        Type name.
+    /// \param SizeInBits  Size of the type.
+    DIStringType *createStringType(StringRef Name, uint64_t SizeInBits);
+
     /// Create debugging information entry for a qualified
     /// type, e.g. 'const int'.
     /// \param Tag         Tag identifing type, e.g. dwarf::TAG_volatile_type
@@ -426,6 +432,14 @@ namespace llvm {
     DICompositeType *createArrayType(uint64_t Size, uint32_t AlignInBits,
                                      DIType *Ty, DINodeArray Subscripts);
 
+    /// Create debugging information entry for a Fortran array.
+    /// \param Size         Array size.
+    /// \param AlignInBits  Alignment.
+    /// \param Ty           Element type.
+    /// \param Subscripts   Subscripts.
+    DIFortranArrayType *createFortranArrayType(
+        uint64_t Size, uint32_t AlignInBits, DIType *Ty, DINodeArray Subs);
+
     /// Create debugging information entry for a vector type.
     /// \param Size         Array size.
     /// \param AlignInBits  Alignment.
@@ -504,6 +518,12 @@ namespace llvm {
     /// implicitly uniques the values returned.
     DISubrange *getOrCreateSubrange(int64_t Lo, int64_t Count);
     DISubrange *getOrCreateSubrange(int64_t Lo, Metadata *CountNode);
+
+    /// Create a descriptor for a value range.  This
+    /// implicitly uniques the values returned.
+    DIFortranSubrange *getOrCreateFortranSubrange(
+        int64_t CLBound, int64_t CUBound, bool NoUBound, Metadata *Lbound,
+        Metadata * Lbndexp, Metadata *Ubound, Metadata * Ubndexp);
 
     /// Create a new descriptor for the specified variable.
     /// \param Context     Variable scope.
