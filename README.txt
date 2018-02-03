@@ -1,4 +1,6 @@
-Low Level Virtual Machine (LLVM)
+**Current state: not useable!**
+
+LowLowLow Level Virtual Machine (LLVM)
 ================================
 
 This directory and its subdirectories contain source code for LLVM,
