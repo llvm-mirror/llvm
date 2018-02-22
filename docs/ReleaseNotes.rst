@@ -5,12 +5,6 @@ LLVM 6.0.0 Release Notes
 .. contents::
     :local:
 
-.. warning::
-   These are in-progress notes for the upcoming LLVM 6 release.
-   Release notes for previous releases can be found on
-   `the Download Page <http://releases.llvm.org/download.html>`_.
-
-
 Introduction
 ============
 
@@ -25,11 +19,6 @@ release, please check out the `main LLVM web site <http://llvm.org/>`_.  If you
 have questions or comments, the `LLVM Developer's Mailing List
 <http://lists.llvm.org/mailman/listinfo/llvm-dev>`_ is a good place to send
 them.
-
-Note that if you are reading this file from a Subversion checkout or the main
-LLVM web page, this document applies to the *next* release, not the current
-one.  To see the release notes for a specific release, please see the `releases
-page <http://llvm.org/releases/>`_.
 
 Non-comprehensive list of changes in this release
 =================================================
@@ -56,6 +45,9 @@ Non-comprehensive list of changes in this release
 
 * Significantly improved quality of CodeView debug info for Windows.
 
+* Preliminary support for Sanitizers and sibling features on X86(_64) NetBSD
+  (ASan, UBsan, TSan, MSan, SafeStack, libFuzzer).
+
 * Note..
 
 .. NOTE
@@ -70,6 +62,15 @@ Non-comprehensive list of changes in this release
 
 Changes to the LLVM IR
 ----------------------
+
+* The fast-math-flags (FMF) have been updated. Previously, the 'fast' flag
+  indicated that floating-point reassociation was allowed and all other flags
+  were set too. The 'fast' flag still exists, but there is a new flag called
+  'reassoc' to indicate specifically that reassociation is allowed. A new bit
+  called 'afn' was also added to selectively allow approximations for common
+  mathlib functions like square-root. The new flags provide more flexibility
+  to enable/disable specific floating-point optimizations. Making the
+  optimizer respond appropriately to these flags is an ongoing effort.
 
 Changes to the AArch64 Target
 -----------------------------
@@ -132,10 +133,22 @@ During this release the SystemZ target has:
 Changes to the X86 Target
 -------------------------
 
-During this release ...
+During this release the X86 target has:
 
-* Got support for enabling SjLj exception handling on platforms where it
+* Added support for enabling SjLj exception handling on platforms where it
   isn't the default.
+
+* Added intrinsics for Intel Extensions: VAES, GFNI, VPCLMULQDQ, AVX512VBMI2, AVX512BITALG, AVX512VNNI.
+
+* Added support for Intel Icelake CPU.
+
+* Added instruction scheduling information for Intel Sandy Bridge, Ivy Bridge, Haswell, Broadwell, and Skylake CPUs.
+
+* Improved codegen of data being transferred between GPRs and K-registers.
+
+* Improved llvm-mc's disassembler for some EVEX encoded instructions.
+
+* Improved codegen for vector truncations.
 
 Changes to the AMDGPU Target
 -----------------------------
