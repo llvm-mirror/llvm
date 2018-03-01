@@ -1386,7 +1386,7 @@ AliasResult BasicAAResult::aliasGEP(const GEPOperator *GEP1, uint64_t V1Size,
   // Statically, we can see that the base objects are the same, but the
   // pointers have dynamic offsets which we can't resolve. And none of our
   // little tricks above worked.
-  return MayAlias;
+  return PartialAlias;
 }
 
 static AliasResult MergeAliasResults(AliasResult A, AliasResult B) {
