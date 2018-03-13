@@ -23,6 +23,12 @@ them.
 Non-comprehensive list of changes in this release
 =================================================
 
+* Support for `retpolines <https://support.google.com/faqs/answer/7625886>`_
+  was added to help mitigate "branch target injection" (variant #2) of the
+  "Spectre" speculative side channels described by `Project Zero
+  <https://googleprojectzero.blogspot.com/2018/01/reading-privileged-memory-with-side.html>`_
+  and the `Spectre paper <https://spectreattack.com/spectre.pdf>`_.
+
 * The ``Redirects`` argument of ``llvm::sys::ExecuteAndWait`` and
   ``llvm::sys::ExecuteNoWait`` was changed to an ``ArrayRef`` of optional
   ``StringRef``'s to make it safer and more convenient to use.
@@ -182,6 +188,10 @@ During this release the X86 target has:
 * Gained initial support recognizing variable shuffles from vector element extracts and inserts.
 
 * Improved documentation for SSE/AVX intrinsics in intrin.h header files.
+
+* Gained support for emitting `retpolines
+  <https://support.google.com/faqs/answer/7625886>`_, including automatic
+  insertion of the necessary thunks or using external thunks.
 
 
 External Open Source Projects Using LLVM 6
