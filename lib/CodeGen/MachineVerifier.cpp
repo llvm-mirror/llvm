@@ -359,11 +359,15 @@ unsigned MachineVerifier::verify(MachineFunction &MF) {
   TRI = MF.getSubtarget().getRegisterInfo();
   MRI = &MF.getRegInfo();
 
-  isFunctionRegBankSelected = MF.getProperties().hasProperty(
-      MachineFunctionProperties::Property::RegBankSelected);
-  isFunctionSelected = MF.getProperties().hasProperty(
-      MachineFunctionProperties::Property::Selected);
-
+  const bool isFunctionFailedISel = MF.getProperties().hasProperty(
+      MachineFunctionProperties::Property::FailedISel);
+  isFunctionRegBankSelected =
+      !isFunctionFailedISel &&
+      MF.getProperties().hasProperty(
+          MachineFunctionProperties::Property::RegBankSelected);
+  isFunctionSelected = !isFunctionFailedISel &&
+                       MF.getProperties().hasProperty(
+                           MachineFunctionProperties::Property::Selected);
   LiveVars = nullptr;
   LiveInts = nullptr;
   LiveStks = nullptr;
@@ -971,6 +975,36 @@ void MachineVerifier::visitMachineInstrBefore(const MachineInstr *MI) {
              MI);
     break;
   }
+  case TargetOpcode::COPY: {
+    if (foundErrors)
+      break;
+    const MachineOperand &DstOp = MI->getOperand(0);
+    const MachineOperand &SrcOp = MI->getOperand(1);
+    LLT DstTy = MRI->getType(DstOp.getReg());
+    LLT SrcTy = MRI->getType(SrcOp.getReg());
+    if (SrcTy.isValid() && DstTy.isValid()) {
+      // If both types are valid, check that the types are the same.
+      if (SrcTy != DstTy) {
+        report("Copy Instruction is illegal with mismatching types", MI);
+        errs() << "Def = " << DstTy << ", Src = " << SrcTy << "\n";
+      }
+    }
+    if (SrcTy.isValid() || DstTy.isValid()) {
+      // If one of them have valid types, let's just check they have the same
+      // size.
+      unsigned SrcSize = TRI->getRegSizeInBits(SrcOp.getReg(), *MRI);
+      unsigned DstSize = TRI->getRegSizeInBits(DstOp.getReg(), *MRI);
+      assert(SrcSize && "Expecting size here");
+      assert(DstSize && "Expecting size here");
+      if (SrcSize != DstSize)
+        if (!DstOp.getSubReg() && !SrcOp.getSubReg()) {
+          report("Copy Instruction is illegal with mismatching sizes", MI);
+          errs() << "Def Size = " << DstSize << ", Src Size = " << SrcSize
+                 << "\n";
+        }
+    }
+    break;
+  }
   case TargetOpcode::STATEPOINT:
     if (!MI->getOperand(StatepointOpers::IDPos).isImm() ||
         !MI->getOperand(StatepointOpers::NBytesPos).isImm() ||
@@ -1101,13 +1135,11 @@ MachineVerifier::visitMachineOperand(const MachineOperand *MO, unsigned MONum) {
           }
         }
       }
-      if (MO->isRenamable() &&
-          ((MO->isDef() && MI->hasExtraDefRegAllocReq()) ||
-           (MO->isUse() && MI->hasExtraSrcRegAllocReq()))) {
-        report("Illegal isRenamable setting for opcode with extra regalloc "
-               "requirements",
-               MO, MONum);
-        return;
+      if (MO->isRenamable()) {
+        if (MRI->isReserved(Reg)) {
+          report("isRenamable set on reserved register", MO, MONum);
+          return;
+        }
       }
     } else {
       // Virtual register.

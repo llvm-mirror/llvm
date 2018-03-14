@@ -10,7 +10,7 @@
 // An implementation of the Swing Modulo Scheduling (SMS) software pipeliner.
 //
 // Software pipelining (SWP) is an instruction scheduling technique for loops
-// that overlap loop iterations and explioits ILP via a compiler transformation.
+// that overlap loop iterations and exploits ILP via a compiler transformation.
 //
 // Swing Modulo Scheduling is an implementation of software pipelining
 // that generates schedules that are near optimal in terms of initiation
@@ -138,7 +138,7 @@ static cl::opt<bool> EnableSWPOptSize("enable-pipeliner-opt-size",
 
 /// A command line argument to limit minimum initial interval for pipelining.
 static cl::opt<int> SwpMaxMii("pipeliner-max-mii",
-                              cl::desc("Size limit for the the MII."),
+                              cl::desc("Size limit for the MII."),
                               cl::Hidden, cl::init(27));
 
 /// A command line argument to limit the number of stages in the pipeline.
@@ -313,7 +313,7 @@ public:
   /// Return the latest time an instruction my be scheduled.
   int getALAP(SUnit *Node) { return ScheduleInfo[Node->NodeNum].ALAP; }
 
-  /// The mobility function, which the the number of slots in which
+  /// The mobility function, which the number of slots in which
   /// an instruction may be scheduled.
   int getMOV(SUnit *Node) { return getALAP(Node) - getASAP(Node); }
 
@@ -970,7 +970,7 @@ static unsigned getInitPhiReg(MachineInstr &Phi, MachineBasicBlock *LoopBB) {
   return 0;
 }
 
-/// Return the Phi register value that comes the the loop block.
+/// Return the Phi register value that comes the loop block.
 static unsigned getLoopPhiReg(MachineInstr &Phi, MachineBasicBlock *LoopBB) {
   for (unsigned i = 1, e = Phi.getNumOperands(); i != e; i += 2)
     if (Phi.getOperand(i + 1).getMBB() == LoopBB)
@@ -3099,8 +3099,10 @@ void SwingSchedulerDAG::updateMemOperands(MachineInstr &NewMI,
       int64_t AdjOffset = Delta * Num;
       NewMemRefs[Refs++] =
           MF.getMachineMemOperand(MMO, AdjOffset, MMO->getSize());
-    } else
-      NewMemRefs[Refs++] = MF.getMachineMemOperand(MMO, 0, UINT64_MAX);
+    } else {
+      NewMI.dropMemRefs();
+      return;
+    }
   }
   NewMI.setMemRefs(NewMemRefs, NewMemRefs + NumRefs);
 }

@@ -66,10 +66,6 @@ specify the target triple:
      ============ ==============================================================
      *<empty>*    Defaults to ``opencl``.
      ``opencl``   OpenCL compute kernel (see :ref:`amdgpu-opencl`).
-     ``amdgizcl`` Same as ``opencl`` except a different address space mapping is
-                  used (see :ref:`amdgpu-address-spaces`).
-     ``amdgiz``   Same as ``opencl`` except a different address space mapping is
-                  used (see :ref:`amdgpu-address-spaces`).
      ``hcc``      AMD HC language compute kernel (see :ref:`amdgpu-hcc`).
      ============ ==============================================================
 
@@ -104,23 +100,23 @@ names from both the *Processor* and *Alternative Processor* can be used.
      **Radeon HD 5000 Series (Evergreen)** [AMD-RADEON-HD-5000]_
      -----------------------------------------------------------------------------------
      ``cedar``                   ``r600``     dGPU
+     ``cypress``                 ``r600``     dGPU
+     ``juniper``                 ``r600``     dGPU
      ``redwood``                 ``r600``     dGPU
      ``sumo``                    ``r600``     dGPU
-     ``juniper``                 ``r600``     dGPU
-     ``cypress``                 ``r600``     dGPU
      **Radeon HD 6000 Series (Northern Islands)** [AMD-RADEON-HD-6000]_
      -----------------------------------------------------------------------------------
      ``barts``                   ``r600``     dGPU
-     ``turks``                   ``r600``     dGPU
      ``caicos``                  ``r600``     dGPU
      ``cayman``                  ``r600``     dGPU
+     ``turks``                   ``r600``     dGPU
      **GCN GFX6 (Southern Islands (SI))** [AMD-GCN-GFX6]_
      -----------------------------------------------------------------------------------
      ``gfx600``  - ``tahiti``    ``amdgcn``   dGPU
-     ``gfx601``  - ``pitcairn``  ``amdgcn``   dGPU
-                 - ``verde``
+     ``gfx601``  - ``hainan``    ``amdgcn``   dGPU
                  - ``oland``
-                 - ``hainan``
+                 - ``pitcairn``
+                 - ``verde``
      **GCN GFX7 (Sea Islands (CI))** [AMD-GCN-GFX7]_
      -----------------------------------------------------------------------------------
      ``gfx700``  - ``kaveri``    ``amdgcn``   APU                     - A6-7000
@@ -174,8 +170,8 @@ names from both the *Processor* and *Alternative Processor* can be used.
      \                           ``amdgcn``   APU   - xnack           - E2-9010
                                                       [on]            - A6-9210
                                                                       - A9-9410
-     ``gfx802``  - ``tonga``     ``amdgcn``   dGPU  - xnack   ROCm    - FirePro S7150
-                 - ``iceland``                        [off]           - FirePro S7100
+     ``gfx802``  - ``iceland``   ``amdgcn``   dGPU  - xnack   ROCm    - FirePro S7150
+                 - ``tonga``                          [off]           - FirePro S7100
                                                                       - FirePro W7100
                                                                       - Radeon R285
                                                                       - Radeon R9 380
@@ -274,34 +270,17 @@ LLVM Address Space number is used throughout LLVM (for example, in LLVM IR).
   .. table:: Address Space Mapping
      :name: amdgpu-address-space-mapping-table
 
-     ================== ================= ================= ================= =================
+     ================== =================
      LLVM Address Space Memory Space
-     ------------------ -----------------------------------------------------------------------
-     \                  Current Default   amdgiz/amdgizcl   hcc               Future Default
-     ================== ================= ================= ================= =================
-     0                  Private (Scratch) Generic (Flat)    Generic (Flat)    Generic (Flat)
-     1                  Global            Global            Global            Global
-     2                  Constant          Constant          Constant          Region (GDS)
-     3                  Local (group/LDS) Local (group/LDS) Local (group/LDS) Local (group/LDS)
-     4                  Generic (Flat)    Region (GDS)      Region (GDS)      Constant
-     5                  Region (GDS)      Private (Scratch) Private (Scratch) Private (Scratch)
-     ================== ================= ================= ================= =================
-
-Current Default
-  This is the current default address space mapping used for all languages
-  except hcc. This will shortly be deprecated.
-
-amdgiz/amdgizcl
-  This is the current address space mapping used when ``amdgiz`` or ``amdgizcl``
-  is specified as the target triple environment value.
-
-hcc
-  This is the current address space mapping used when ``hcc`` is specified as
-  the target triple environment value.This will shortly be deprecated.
-
-Future Default
-  This will shortly be the only address space mapping for all languages using
-  AMDGPU backend.
+     ================== =================
+     0                  Generic (Flat)
+     1                  Global
+     2                  Region (GDS)
+     3                  Local (group/LDS)
+     4                  Constant
+     5                  Private (Scratch)
+     6                  Constant 32-bit
+     ================== =================
 
 .. _amdgpu-memory-scopes:
 
@@ -535,38 +514,42 @@ The AMDGPU backend uses the following ELF header:
      Name                              Value      Description (see
                                                   :ref:`amdgpu-processor-table`)
      ================================= ========== =============================
-     ``EF_AMDGPU_MACH_NONE``           0          *not specified*
-     ``EF_AMDGPU_MACH_R600_R600``      1          ``r600``
-     ``EF_AMDGPU_MACH_R600_R630``      2          ``r630``
-     ``EF_AMDGPU_MACH_R600_RS880``     3          ``rs880``
-     ``EF_AMDGPU_MACH_R600_RV670``     4          ``rv670``
-     ``EF_AMDGPU_MACH_R600_RV710``     5          ``rv710``
-     ``EF_AMDGPU_MACH_R600_RV730``     6          ``rv730``
-     ``EF_AMDGPU_MACH_R600_RV770``     7          ``rv770``
-     ``EF_AMDGPU_MACH_R600_CEDAR``     8          ``cedar``
-     ``EF_AMDGPU_MACH_R600_REDWOOD``   9          ``redwood``
-     ``EF_AMDGPU_MACH_R600_SUMO``      10         ``sumo``
-     ``EF_AMDGPU_MACH_R600_JUNIPER``   11         ``juniper``
-     ``EF_AMDGPU_MACH_R600_CYPRESS``   12         ``cypress``
-     ``EF_AMDGPU_MACH_R600_BARTS``     13         ``barts``
-     ``EF_AMDGPU_MACH_R600_TURKS``     14         ``turks``
-     ``EF_AMDGPU_MACH_R600_CAICOS``    15         ``caicos``
-     ``EF_AMDGPU_MACH_R600_CAYMAN``    16         ``cayman``
-     *reserved*                        17-31      Reserved for ``r600``
-                                                  architecture processors.
-     ``EF_AMDGPU_MACH_AMDGCN_GFX600``  32         ``gfx600``
-     ``EF_AMDGPU_MACH_AMDGCN_GFX601``  33         ``gfx601``
-     ``EF_AMDGPU_MACH_AMDGCN_GFX700``  34         ``gfx700``
-     ``EF_AMDGPU_MACH_AMDGCN_GFX701``  35         ``gfx701``
-     ``EF_AMDGPU_MACH_AMDGCN_GFX702``  36         ``gfx702``
-     ``EF_AMDGPU_MACH_AMDGCN_GFX703``  37         ``gfx703``
-     ``EF_AMDGPU_MACH_AMDGCN_GFX704``  38         ``gfx704``
-     ``EF_AMDGPU_MACH_AMDGCN_GFX801``  39         ``gfx801``
-     ``EF_AMDGPU_MACH_AMDGCN_GFX802``  40         ``gfx802``
-     ``EF_AMDGPU_MACH_AMDGCN_GFX803``  41         ``gfx803``
-     ``EF_AMDGPU_MACH_AMDGCN_GFX810``  42         ``gfx810``
-     ``EF_AMDGPU_MACH_AMDGCN_GFX900``  43         ``gfx900``
-     ``EF_AMDGPU_MACH_AMDGCN_GFX902``  44         ``gfx902``
+     ``EF_AMDGPU_MACH_NONE``           0x000      *not specified*
+     ``EF_AMDGPU_MACH_R600_R600``      0x001      ``r600``
+     ``EF_AMDGPU_MACH_R600_R630``      0x002      ``r630``
+     ``EF_AMDGPU_MACH_R600_RS880``     0x003      ``rs880``
+     ``EF_AMDGPU_MACH_R600_RV670``     0x004      ``rv670``
+     ``EF_AMDGPU_MACH_R600_RV710``     0x005      ``rv710``
+     ``EF_AMDGPU_MACH_R600_RV730``     0x006      ``rv730``
+     ``EF_AMDGPU_MACH_R600_RV770``     0x007      ``rv770``
+     ``EF_AMDGPU_MACH_R600_CEDAR``     0x008      ``cedar``
+     ``EF_AMDGPU_MACH_R600_CYPRESS``   0x009      ``cypress``
+     ``EF_AMDGPU_MACH_R600_JUNIPER``   0x00a      ``juniper``
+     ``EF_AMDGPU_MACH_R600_REDWOOD``   0x00b      ``redwood``
+     ``EF_AMDGPU_MACH_R600_SUMO``      0x00c      ``sumo``
+     ``EF_AMDGPU_MACH_R600_BARTS``     0x00d      ``barts``
+     ``EF_AMDGPU_MACH_R600_CAICOS``    0x00e      ``caicos``
+     ``EF_AMDGPU_MACH_R600_CAYMAN``    0x00f      ``cayman``
+     ``EF_AMDGPU_MACH_R600_TURKS``     0x010      ``turks``
+     *reserved*                        0x011 -    Reserved for ``r600``
+                                       0x01f      architecture processors.
+     ``EF_AMDGPU_MACH_AMDGCN_GFX600``  0x020      ``gfx600``
+     ``EF_AMDGPU_MACH_AMDGCN_GFX601``  0x021      ``gfx601``
+     ``EF_AMDGPU_MACH_AMDGCN_GFX700``  0x022      ``gfx700``
+     ``EF_AMDGPU_MACH_AMDGCN_GFX701``  0x023      ``gfx701``
+     ``EF_AMDGPU_MACH_AMDGCN_GFX702``  0x024      ``gfx702``
+     ``EF_AMDGPU_MACH_AMDGCN_GFX703``  0x025      ``gfx703``
+     ``EF_AMDGPU_MACH_AMDGCN_GFX704``  0x026      ``gfx704``
+     *reserved*                        0x027      Reserved.
+     ``EF_AMDGPU_MACH_AMDGCN_GFX801``  0x028      ``gfx801``
+     ``EF_AMDGPU_MACH_AMDGCN_GFX802``  0x029      ``gfx802``
+     ``EF_AMDGPU_MACH_AMDGCN_GFX803``  0x02a      ``gfx803``
+     ``EF_AMDGPU_MACH_AMDGCN_GFX810``  0x02b      ``gfx810``
+     ``EF_AMDGPU_MACH_AMDGCN_GFX900``  0x02c      ``gfx900``
+     ``EF_AMDGPU_MACH_AMDGCN_GFX902``  0x02d      ``gfx902``
+     *reserved*                        0x02e      Reserved.
+     *reserved*                        0x02f      Reserved.
+     *reserved*                        0x030      Reserved.
      ================================= ========== =============================
 
 Sections
@@ -773,31 +756,31 @@ The following relocation types are supported:
   .. table:: AMDGPU ELF Relocation Records
      :name: amdgpu-elf-relocation-records-table
 
-     ==========================  =====  ==========  ==============================
-     Relocation Type             Value  Field       Calculation
-     ==========================  =====  ==========  ==============================
-     ``R_AMDGPU_NONE``           0      *none*      *none*
-     ``R_AMDGPU_ABS32_LO``       1      ``word32``  (S + A) & 0xFFFFFFFF
-     ``R_AMDGPU_ABS32_HI``       2      ``word32``  (S + A) >> 32
-     ``R_AMDGPU_ABS64``          3      ``word64``  S + A
-     ``R_AMDGPU_REL32``          4      ``word32``  S + A - P
-     ``R_AMDGPU_REL64``          5      ``word64``  S + A - P
-     ``R_AMDGPU_ABS32``          6      ``word32``  S + A
-     ``R_AMDGPU_GOTPCREL``       7      ``word32``  G + GOT + A - P
-     ``R_AMDGPU_GOTPCREL32_LO``  8      ``word32``  (G + GOT + A - P) & 0xFFFFFFFF
-     ``R_AMDGPU_GOTPCREL32_HI``  9      ``word32``  (G + GOT + A - P) >> 32
-     ``R_AMDGPU_REL32_LO``       10     ``word32``  (S + A - P) & 0xFFFFFFFF
-     ``R_AMDGPU_REL32_HI``       11     ``word32``  (S + A - P) >> 32
-     *reserved*                  12
-     ``R_AMDGPU_RELATIVE64``     13     ``word64``  B + A
-     ==========================  =====  ==========  ==============================
+     ========================== ======= =====  ==========  ==============================
+     Relocation Type            Kind    Value  Field       Calculation
+     ========================== ======= =====  ==========  ==============================
+     ``R_AMDGPU_NONE``                  0      *none*      *none*
+     ``R_AMDGPU_ABS32_LO``      Dynamic 1      ``word32``  (S + A) & 0xFFFFFFFF
+     ``R_AMDGPU_ABS32_HI``      Dynamic 2      ``word32``  (S + A) >> 32
+     ``R_AMDGPU_ABS64``         Dynamic 3      ``word64``  S + A
+     ``R_AMDGPU_REL32``         Static  4      ``word32``  S + A - P
+     ``R_AMDGPU_REL64``         Static  5      ``word64``  S + A - P
+     ``R_AMDGPU_ABS32``         Static  6      ``word32``  S + A
+     ``R_AMDGPU_GOTPCREL``      Static  7      ``word32``  G + GOT + A - P
+     ``R_AMDGPU_GOTPCREL32_LO`` Static  8      ``word32``  (G + GOT + A - P) & 0xFFFFFFFF
+     ``R_AMDGPU_GOTPCREL32_HI`` Static  9      ``word32``  (G + GOT + A - P) >> 32
+     ``R_AMDGPU_REL32_LO``      Static  10     ``word32``  (S + A - P) & 0xFFFFFFFF
+     ``R_AMDGPU_REL32_HI``      Static  11     ``word32``  (S + A - P) >> 32
+     *reserved*                         12
+     ``R_AMDGPU_RELATIVE64``    Dynamic 13     ``word64``  B + A
+     ========================== ======= =====  ==========  ==============================
 
 .. _amdgpu-dwarf:
 
 DWARF
 -----
 
-Standard DWARF [DWARF]_ Version 2 sections can be generated. These contain
+Standard DWARF [DWARF]_ Version 5 sections can be generated. These contain
 information that maps the code object executable code and data to the source
 language constructs. It can be used by tools such as debuggers and profilers.
 
@@ -853,10 +836,60 @@ Register Mapping
 Source Text
 ~~~~~~~~~~~
 
-*This section is WIP.*
+Source text for online-compiled programs (e.g. those compiled by the OpenCL
+runtime) may be embedded into the DWARF v5 line table using the ``clang
+-gembed-source`` option, described in table :ref:`amdgpu-debug-options`.
 
-.. TODO
-   DWARF extension to include runtime generated source text.
+For example:
+
+``-gembed-source``
+  Enable the embedded source DWARF v5 extension.
+``-gno-embed-source``
+  Disable the embedded source DWARF v5 extension.
+
+  .. table:: AMDGPU Debug Options
+     :name: amdgpu-debug-options
+
+     ==================== ==================================================
+     Debug Flag           Description
+     ==================== ==================================================
+     -g[no-]embed-source  Enable/disable embedding source text in DWARF
+                          debug sections. Useful for environments where
+                          source cannot be written to disk, such as
+                          when performing online compilation.
+     ==================== ==================================================
+
+This option enables one extended content types in the DWARF v5 Line Number
+Program Header, which is used to encode embedded source.
+
+  .. table:: AMDGPU DWARF Line Number Program Header Extended Content Types
+     :name: amdgpu-dwarf-extended-content-types
+
+     ============================  ======================
+     Content Type                  Form
+     ============================  ======================
+     ``DW_LNCT_LLVM_source``       ``DW_FORM_line_strp``
+     ============================  ======================
+
+The source field will contain the UTF-8 encoded, null-terminated source text
+with ``'\n'`` line endings. When the source field is present, consumers can use
+the embedded source instead of attempting to discover the source on disk. When
+the source field is absent, consumers can access the file to get the source
+text.
+
+The above content type appears in the ``file_name_entry_format`` field of the
+line table prologue, and its corresponding value appear in the ``file_names``
+field. The current encoding of the content type is documented in table
+:ref:`amdgpu-dwarf-extended-content-types-encoding`
+
+  .. table:: AMDGPU DWARF Line Number Program Header Extended Content Types Encoding
+     :name: amdgpu-dwarf-extended-content-types-encoding
+
+     ============================  ====================
+     Content Type                  Value
+     ============================  ====================
+     ``DW_LNCT_LLVM_source``       0x2001
+     ============================  ====================
 
 .. _amdgpu-code-conventions:
 
@@ -991,9 +1024,11 @@ non-AMD key names should be prefixed by "*vendor-name*.".
      =================== ============== ========= ==============================
      String Key          Value Type     Required? Description
      =================== ============== ========= ==============================
-     "ReqdWorkGroupSize" sequence of              The dispatch work-group size
-                         3 integers               X, Y, Z must correspond to the
-                                                  specified values.
+     "ReqdWorkGroupSize" sequence of              If not 0, 0, 0 then all values
+                         3 integers               must be >=1 and the dispatch
+                                                  work-group size X, Y, Z must
+                                                  correspond to the specified
+                                                  values. Defaults to 0, 0, 0.
 
                                                   Corresponds to the OpenCL
                                                   ``reqd_work_group_size``
@@ -1286,19 +1321,9 @@ non-AMD key names should be prefixed by "*vendor-name*.".
                                                            supported by the
                                                            kernel in work-items.
                                                            Must be >=1 and
-                                                           consistent with any
-                                                           non-0 values in
-                                                           FixedWorkGroupSize.
-     "FixedWorkGroupSize"         sequence of              Corresponds to the
-                                  3 integers               dispatch work-group
-                                                           size X, Y, Z. If
-                                                           omitted, defaults to
-                                                           0, 0, 0. If an
-                                                           element is non-0 then
-                                                           the kernel must only
-                                                           be launched with a
-                                                           matching corresponding
-                                                           work-group size.
+                                                           consistent with
+                                                           ReqdWorkGroupSize if
+                                                           not 0, 0, 0.
      "NumSpilledSGPRs"            integer                  Number of stores from
                                                            a scalar register to
                                                            a register allocator
@@ -1530,30 +1555,7 @@ CP microcode requires the Kernel descritor to be allocated on 64 byte alignment.
                                                      entry point instruction
                                                      which must be 256 byte
                                                      aligned.
-     223:192 4 bytes MaxFlatWorkGroupSize            Maximum flat work-group
-                                                     size supported by the
-                                                     kernel in work-items. If
-                                                     an exact work-group size
-                                                     is required then must be
-                                                     omitted or 0 and
-                                                     ReqdWorkGroupSize* must
-                                                     be set to non-0.
-     239:224 2 bytes ReqdWorkGroupSizeX              If present and non-0 then
-                                                     the kernel
-                                                     must be executed with the
-                                                     specified work-group size
-                                                     for X.
-     255:240 2 bytes ReqdWorkGroupSizeY              If present and non-0 then
-                                                     the kernel
-                                                     must be executed with the
-                                                     specified work-group size
-                                                     for Y.
-     271:256 2 bytes ReqdWorkGroupSizeZ              If present and non-0 then
-                                                     the kernel
-                                                     must be executed with the
-                                                     specified work-group size
-                                                     for Z.
-     383:272 14                                      Reserved, must be 0.
+     383:192 24                                      Reserved, must be 0.
              bytes
      415:384 4 bytes ComputePgmRsrc1                 Compute Shader (CS)
                                                      program settings used by

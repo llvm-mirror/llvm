@@ -333,7 +333,7 @@ Value *InstCombiner::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
     KnownBits InputKnown(SrcBitWidth);
     if (SimplifyDemandedBits(I, 0, InputDemandedMask, InputKnown, Depth + 1))
       return I;
-    Known = Known.zextOrTrunc(BitWidth);
+    Known = InputKnown.zextOrTrunc(BitWidth);
     // Any top bits are known to be zero.
     if (BitWidth > SrcBitWidth)
       Known.Zero.setBitsFrom(SrcBitWidth);
@@ -1187,7 +1187,6 @@ Value *InstCombiner::SimplifyDemandedVectorElts(Value *V, APInt DemandedElts,
       break;
     }
 
-    // div/rem demand all inputs, because they don't want divide by zero.
     TmpV = SimplifyDemandedVectorElts(I->getOperand(0), InputDemandedElts,
                                       UndefElts2, Depth + 1);
     if (TmpV) {

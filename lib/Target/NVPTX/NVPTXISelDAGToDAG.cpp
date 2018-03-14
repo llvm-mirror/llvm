@@ -811,10 +811,6 @@ bool NVPTXDAGToDAGISel::tryIntrinsicChain(SDNode *N) {
   switch (IID) {
   default:
     return false;
-  case Intrinsic::nvvm_match_all_sync_i32p:
-  case Intrinsic::nvvm_match_all_sync_i64p:
-    SelectMatchAll(N);
-    return true;
   case Intrinsic::nvvm_ldg_global_f:
   case Intrinsic::nvvm_ldg_global_i:
   case Intrinsic::nvvm_ldg_global_p:
@@ -987,8 +983,10 @@ static bool canLowerToLDG(MemSDNode *N, const NVPTXSubtarget &Subtarget,
   // We have two ways of identifying invariant loads: Loads may be explicitly
   // marked as invariant, or we may infer them to be invariant.
   //
-  // We currently infer invariance only for kernel function pointer params that
-  // are noalias (i.e. __restrict) and never written to.
+  // We currently infer invariance for loads from
+  //  - constant global variables, and
+  //  - kernel function pointer params that are noalias (i.e. __restrict) and
+  //    never written to.
   //
   // TODO: Perform a more powerful invariance analysis (ideally IPO, and ideally
   // not during the SelectionDAG phase).
@@ -1002,23 +1000,22 @@ static bool canLowerToLDG(MemSDNode *N, const NVPTXSubtarget &Subtarget,
   if (N->isInvariant())
     return true;
 
-  // Load wasn't explicitly invariant.  Attempt to infer invariance.
-  if (!isKernelFunction(F->getFunction()))
-    return false;
+  bool IsKernelFn = isKernelFunction(F->getFunction());
 
-  // We use GetUnderlyingObjects() here instead of
-  // GetUnderlyingObject() mainly because the former looks through phi
-  // nodes while the latter does not. We need to look through phi
-  // nodes to handle pointer induction variables.
+  // We use GetUnderlyingObjects() here instead of GetUnderlyingObject() mainly
+  // because the former looks through phi nodes while the latter does not. We
+  // need to look through phi nodes to handle pointer induction variables.
   SmallVector<Value *, 8> Objs;
   GetUnderlyingObjects(const_cast<Value *>(N->getMemOperand()->getValue()),
                        Objs, F->getDataLayout());
-  for (Value *Obj : Objs) {
-    auto *A = dyn_cast<const Argument>(Obj);
-    if (!A || !A->onlyReadsMemory() || !A->hasNoAliasAttr()) return false;
-  }
 
-  return true;
+  return all_of(Objs, [&](Value *V) {
+    if (auto *A = dyn_cast<const Argument>(V))
+      return IsKernelFn && A->onlyReadsMemory() && A->hasNoAliasAttr();
+    if (auto *GV = dyn_cast<const GlobalVariable>(V))
+      return GV->isConstant();
+    return false;
+  });
 }
 
 bool NVPTXDAGToDAGISel::tryIntrinsicNoChain(SDNode *N) {
@@ -1071,36 +1068,6 @@ void NVPTXDAGToDAGISel::SelectTexSurfHandle(SDNode *N) {
   SDValue GlobalVal = Wrapper.getOperand(0);
   ReplaceNode(N, CurDAG->getMachineNode(NVPTX::texsurf_handles, SDLoc(N),
                                         MVT::i64, GlobalVal));
-}
-
-void NVPTXDAGToDAGISel::SelectMatchAll(SDNode *N) {
-  SDLoc DL(N);
-  enum { IS_I64 = 4, HAS_CONST_VALUE = 2, HAS_CONST_MASK = 1 };
-  unsigned IID = cast<ConstantSDNode>(N->getOperand(1))->getZExtValue();
-  unsigned OpcodeIndex =
-      (IID == Intrinsic::nvvm_match_all_sync_i64p) ? IS_I64 : 0;
-  SDValue MaskOp = N->getOperand(2);
-  SDValue ValueOp = N->getOperand(3);
-  if (ConstantSDNode *ValueConst = dyn_cast<ConstantSDNode>(ValueOp)) {
-    OpcodeIndex |= HAS_CONST_VALUE;
-    ValueOp = CurDAG->getTargetConstant(ValueConst->getZExtValue(), DL,
-                                        ValueConst->getValueType(0));
-  }
-  if (ConstantSDNode *MaskConst = dyn_cast<ConstantSDNode>(MaskOp)) {
-    OpcodeIndex |= HAS_CONST_MASK;
-    MaskOp = CurDAG->getTargetConstant(MaskConst->getZExtValue(), DL,
-                                       MaskConst->getValueType(0));
-  }
-  // Maps {IS_I64, HAS_CONST_VALUE, HAS_CONST_MASK} -> opcode
-  unsigned Opcodes[8] = {
-      NVPTX::MATCH_ALLP_SYNC_32rr, NVPTX::MATCH_ALLP_SYNC_32ri,
-      NVPTX::MATCH_ALLP_SYNC_32ir, NVPTX::MATCH_ALLP_SYNC_32ii,
-      NVPTX::MATCH_ALLP_SYNC_64rr, NVPTX::MATCH_ALLP_SYNC_64ri,
-      NVPTX::MATCH_ALLP_SYNC_64ir, NVPTX::MATCH_ALLP_SYNC_64ii};
-  SDNode *NewNode = CurDAG->getMachineNode(
-      Opcodes[OpcodeIndex], DL, {ValueOp->getValueType(0), MVT::i1, MVT::Other},
-      {MaskOp, ValueOp});
-  ReplaceNode(N, NewNode);
 }
 
 void NVPTXDAGToDAGISel::SelectAddrSpaceCast(SDNode *N) {
@@ -1632,6 +1599,7 @@ bool NVPTXDAGToDAGISel::tryLDGLDU(SDNode *N) {
     switch (N->getOpcode()) {
     default:
       return false;
+    case ISD::LOAD:
     case ISD::INTRINSIC_W_CHAIN:
       if (IsLDG)
         Opcode = pickOpcodeForVT(EltVT.getSimpleVT().SimpleTy,
@@ -1654,6 +1622,7 @@ bool NVPTXDAGToDAGISel::tryLDGLDU(SDNode *N) {
                                      NVPTX::INT_PTX_LDU_GLOBAL_f32avar,
                                      NVPTX::INT_PTX_LDU_GLOBAL_f64avar);
       break;
+    case NVPTXISD::LoadV2:
     case NVPTXISD::LDGV2:
       Opcode = pickOpcodeForVT(EltVT.getSimpleVT().SimpleTy,
                                    NVPTX::INT_PTX_LDG_G_v2i8_ELE_avar,
@@ -1676,6 +1645,7 @@ bool NVPTXDAGToDAGISel::tryLDGLDU(SDNode *N) {
                                    NVPTX::INT_PTX_LDU_G_v2f32_ELE_avar,
                                    NVPTX::INT_PTX_LDU_G_v2f64_ELE_avar);
       break;
+    case NVPTXISD::LoadV4:
     case NVPTXISD::LDGV4:
       Opcode = pickOpcodeForVT(EltVT.getSimpleVT().SimpleTy,
                                NVPTX::INT_PTX_LDG_G_v4i8_ELE_avar,

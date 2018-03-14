@@ -554,7 +554,7 @@ public:
   /// Check if the edge between this block and the given successor \p
   /// Succ, can be split. If this returns true a subsequent call to
   /// SplitCriticalEdge is guaranteed to return a valid basic block if
-  /// no changes occured in the meantime.
+  /// no changes occurred in the meantime.
   bool canSplitCriticalEdge(const MachineBasicBlock *Succ) const;
 
   void pop_front() { Insts.pop_front(); }
@@ -725,9 +725,10 @@ public:
 
   // Debugging methods.
   void dump() const;
-  void print(raw_ostream &OS, const SlotIndexes* = nullptr) const;
+  void print(raw_ostream &OS, const SlotIndexes * = nullptr,
+             bool IsStandalone = true) const;
   void print(raw_ostream &OS, ModuleSlotTracker &MST,
-             const SlotIndexes* = nullptr) const;
+             const SlotIndexes * = nullptr, bool IsStandalone = true) const;
 
   // Printing method used by LoopInfo.
   void printAsOperand(raw_ostream &OS, bool PrintType = true) const;

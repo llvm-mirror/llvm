@@ -134,7 +134,7 @@ class ImplicitNullChecks : public MachineFunctionPass {
     // The block branched to if the pointer is null.
     MachineBasicBlock *NullSucc;
 
-    // If this is non-null, then MemOperation has a dependency on on this
+    // If this is non-null, then MemOperation has a dependency on this
     // instruction; and it needs to be hoisted to execute before MemOperation.
     MachineInstr *OnlyDependency;
 
@@ -198,7 +198,7 @@ class ImplicitNullChecks : public MachineFunctionPass {
   SuitabilityResult isSuitableMemoryOp(MachineInstr &MI, unsigned PointerReg,
                                        ArrayRef<MachineInstr *> PrevInsts);
 
-  /// Return true if \p FaultingMI can be hoisted from after the the
+  /// Return true if \p FaultingMI can be hoisted from after the
   /// instructions in \p InstsSeenSoFar to before them.  Set \p Dependence to a
   /// non-null value if we also need to (and legally can) hoist a depedency.
   bool canHoistInst(MachineInstr *FaultingMI, unsigned PointerReg,

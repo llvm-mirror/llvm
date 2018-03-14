@@ -909,3 +909,93 @@ TEST_F(MemorySSATest, Irreducible) {
   Updater.insertUse(LoadAccess);
   MSSA.verifyMemorySSA();
 }
+
+TEST_F(MemorySSATest, MoveToBeforeLiveOnEntryInvalidatesCache) {
+  // Create:
+  //   %1 = alloca i8
+  //   ; 1 = MemoryDef(liveOnEntry)
+  //   store i8 0, i8* %1
+  //   ; 2 = MemoryDef(1)
+  //   store i8 0, i8* %1
+  //
+  // ...And be sure that MSSA's caching doesn't give us `1` for the clobber of
+  // `2` after `1` is removed.
+  IRBuilder<> B(C);
+  F = Function::Create(
+      FunctionType::get(B.getVoidTy(), {B.getInt8PtrTy()}, false),
+      GlobalValue::ExternalLinkage, "F", &M);
+
+  BasicBlock *Entry = BasicBlock::Create(C, "if", F);
+  B.SetInsertPoint(Entry);
+
+  Value *A = B.CreateAlloca(B.getInt8Ty());
+  StoreInst *StoreA = B.CreateStore(B.getInt8(0), A);
+  StoreInst *StoreB = B.CreateStore(B.getInt8(0), A);
+
+  setupAnalyses();
+
+  MemorySSA &MSSA = *Analyses->MSSA;
+
+  auto *DefA = cast<MemoryDef>(MSSA.getMemoryAccess(StoreA));
+  auto *DefB = cast<MemoryDef>(MSSA.getMemoryAccess(StoreB));
+
+  MemoryAccess *BClobber = MSSA.getWalker()->getClobberingMemoryAccess(DefB);
+  ASSERT_EQ(DefA, BClobber);
+
+  MemorySSAUpdater(&MSSA).removeMemoryAccess(DefA);
+  StoreA->eraseFromParent();
+
+  EXPECT_EQ(DefB->getDefiningAccess(), MSSA.getLiveOnEntryDef());
+
+  EXPECT_EQ(MSSA.getWalker()->getClobberingMemoryAccess(DefB),
+            MSSA.getLiveOnEntryDef())
+      << "(DefA = " << DefA << ")";
+}
+
+TEST_F(MemorySSATest, RemovingDefInvalidatesCache) {
+  // Create:
+  //   %x = alloca i8
+  //   %y = alloca i8
+  //   ; 1 = MemoryDef(liveOnEntry)
+  //   store i8 0, i8* %x
+  //   ; 2 = MemoryDef(1)
+  //   store i8 0, i8* %y
+  //   ; 3 = MemoryDef(2)
+  //   store i8 0, i8* %x
+  //
+  // And be sure that MSSA's caching handles the removal of def `1`
+  // appropriately.
+  IRBuilder<> B(C);
+  F = Function::Create(
+      FunctionType::get(B.getVoidTy(), {B.getInt8PtrTy()}, false),
+      GlobalValue::ExternalLinkage, "F", &M);
+
+  BasicBlock *Entry = BasicBlock::Create(C, "if", F);
+  B.SetInsertPoint(Entry);
+
+  Value *X = B.CreateAlloca(B.getInt8Ty());
+  Value *Y = B.CreateAlloca(B.getInt8Ty());
+  StoreInst *StoreX1 = B.CreateStore(B.getInt8(0), X);
+  StoreInst *StoreY = B.CreateStore(B.getInt8(0), Y);
+  StoreInst *StoreX2 = B.CreateStore(B.getInt8(0), X);
+
+  setupAnalyses();
+
+  MemorySSA &MSSA = *Analyses->MSSA;
+
+  auto *DefX1 = cast<MemoryDef>(MSSA.getMemoryAccess(StoreX1));
+  auto *DefY = cast<MemoryDef>(MSSA.getMemoryAccess(StoreY));
+  auto *DefX2 = cast<MemoryDef>(MSSA.getMemoryAccess(StoreX2));
+
+  EXPECT_EQ(DefX2->getDefiningAccess(), DefY);
+  MemoryAccess *X2Clobber = MSSA.getWalker()->getClobberingMemoryAccess(DefX2);
+  ASSERT_EQ(DefX1, X2Clobber);
+
+  MemorySSAUpdater(&MSSA).removeMemoryAccess(DefX1);
+  StoreX1->eraseFromParent();
+
+  EXPECT_EQ(DefX2->getDefiningAccess(), DefY);
+  EXPECT_EQ(MSSA.getWalker()->getClobberingMemoryAccess(DefX2),
+            MSSA.getLiveOnEntryDef())
+      << "(DefX1 = " << DefX1 << ")";
+}

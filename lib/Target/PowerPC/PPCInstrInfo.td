@@ -257,6 +257,13 @@ def PPCvcmp_o     : SDNode<"PPCISD::VCMPo", SDT_PPCvcmp, [SDNPOutGlue]>;
 def PPCcondbranch : SDNode<"PPCISD::COND_BRANCH", SDT_PPCcondbr,
                            [SDNPHasChain, SDNPOptInGlue]>;
 
+// PPC-specific atomic operations.
+def PPCatomicCmpSwap_8 :
+  SDNode<"PPCISD::ATOMIC_CMP_SWAP_8", SDTAtomic3,
+         [SDNPHasChain, SDNPMayStore, SDNPMayLoad, SDNPMemOperand]>;
+def PPCatomicCmpSwap_16 :
+  SDNode<"PPCISD::ATOMIC_CMP_SWAP_16", SDTAtomic3,
+         [SDNPHasChain, SDNPMayStore, SDNPMayLoad, SDNPMemOperand]>;
 def PPClbrx       : SDNode<"PPCISD::LBRX", SDT_PPClbrx,
                            [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
 def PPCstbrx      : SDNode<"PPCISD::STBRX", SDT_PPCstbrx,
@@ -301,7 +308,7 @@ def HI16 : SDNodeXForm<imm, [{
 
 def HA16 : SDNodeXForm<imm, [{
   // Transformation function: shift the immediate value down into the low bits.
-  int Val = N->getZExtValue();
+  long Val = N->getZExtValue();
   return getI32Imm((Val - (signed short)Val) >> 16, SDLoc(N));
 }]>;
 def MB : SDNodeXForm<imm, [{
@@ -1709,6 +1716,11 @@ let usesCustomInserter = 1 in {
       [(set i32:$dst, (atomic_swap_32 xoaddr:$ptr, i32:$new))]>;
   }
 }
+
+def : Pat<(PPCatomicCmpSwap_8 xoaddr:$ptr, i32:$old, i32:$new),
+        (ATOMIC_CMP_SWAP_I8 xoaddr:$ptr, i32:$old, i32:$new)>;
+def : Pat<(PPCatomicCmpSwap_16 xoaddr:$ptr, i32:$old, i32:$new),
+        (ATOMIC_CMP_SWAP_I16 xoaddr:$ptr, i32:$old, i32:$new)>;
 
 // Instructions to support atomic operations
 let mayLoad = 1, mayStore = 0, hasSideEffects = 0 in {

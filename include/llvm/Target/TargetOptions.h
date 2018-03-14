@@ -104,10 +104,11 @@ namespace llvm {
           NoSignedZerosFPMath(false),
           HonorSignDependentRoundingFPMathOption(false), NoZerosInBSS(false),
           GuaranteedTailCallOpt(false), StackSymbolOrdering(true),
-          EnableFastISel(false), UseInitArray(false),
+          EnableFastISel(false), EnableGlobalISel(false), UseInitArray(false),
           DisableIntegratedAS(false), RelaxELFRelocations(false),
           FunctionSections(false), DataSections(false),
-          UniqueSectionNames(true), TrapUnreachable(false), EmulatedTLS(false),
+          UniqueSectionNames(true), TrapUnreachable(false),
+          EmulatedTLS(false), ExplicitEmulatedTLS(false),
           EnableIPRA(false), EmitStackSizeSection(false) {}
 
     /// PrintMachineCode - This flag is enabled when the -print-machineinstrs
@@ -186,6 +187,9 @@ namespace llvm {
     /// compile time.
     unsigned EnableFastISel : 1;
 
+    /// EnableGlobalISel - This flag enables global instruction selection.
+    unsigned EnableGlobalISel : 1;
+
     /// UseInitArray - Use .init_array instead of .ctors for static
     /// constructors.
     unsigned UseInitArray : 1;
@@ -212,6 +216,9 @@ namespace llvm {
     /// EmulatedTLS - This flag enables emulated TLS model, using emutls
     /// function in the runtime library..
     unsigned EmulatedTLS : 1;
+
+    /// Whether -emulated-tls or -no-emulated-tls is set.
+    unsigned ExplicitEmulatedTLS : 1;
 
     /// This flag enables InterProcedural Register Allocation (IPRA).
     unsigned EnableIPRA : 1;

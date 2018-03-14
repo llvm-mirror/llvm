@@ -260,6 +260,11 @@ std::string explainOperator(Record *Operator) {
             ")")
         .str();
 
+  if (Operator->isSubClassOf("SDNodeXForm"))
+    return (" (Operator is an unmapped SDNodeXForm, " + Operator->getName() +
+            ")")
+        .str();
+
   return (" (Operator " + Operator->getName() + " not understood)").str();
 }
 
@@ -315,12 +320,7 @@ static Error isTrivialOperatorNode(const TreePatternNode *N) {
     break;
   }
 
-  if (N->getTransformFn()) {
-    Explanation += Separator + "Has a transform function";
-    Separator = ", ";
-  }
-
-  if (!HasUnsupportedPredicate && !N->getTransformFn())
+  if (!HasUnsupportedPredicate)
     return Error::success();
 
   return failedImport(Explanation);
@@ -610,8 +610,8 @@ public:
 /// Generates code to check that a match rule matches.
 class RuleMatcher : public Matcher {
 public:
-  using ActionVec = std::vector<std::unique_ptr<MatchAction>>;
-  using action_iterator = ActionVec::iterator;
+  using ActionList = std::list<std::unique_ptr<MatchAction>>;
+  using action_iterator = ActionList::iterator;
 
 protected:
   /// A list of matchers that all need to succeed for the current rule to match.
@@ -622,7 +622,7 @@ protected:
 
   /// A list of actions that need to be taken when all predicates in this rule
   /// have succeeded.
-  ActionVec Actions;
+  ActionList Actions;
 
   using DefinedInsnVariablesMap =
       std::map<const InstructionMatcher *, unsigned>;
@@ -1692,6 +1692,19 @@ public:
                             RuleMatcher &Rule) const override {
     InsnMatcher->emitPredicateOpcodes(Table, Rule);
   }
+
+  bool isHigherPriorityThan(const OperandPredicateMatcher &B) const override {
+    if (OperandPredicateMatcher::isHigherPriorityThan(B))
+      return true;
+    if (B.OperandPredicateMatcher::isHigherPriorityThan(*this))
+      return false;
+
+    if (const InstructionOperandMatcher *BP =
+            dyn_cast<InstructionOperandMatcher>(&B))
+      if (InsnMatcher->isHigherPriorityThan(*BP->InsnMatcher))
+        return true;
+    return false;
+  }
 };
 
 //===- Actions ------------------------------------------------------------===//
@@ -1706,7 +1719,8 @@ public:
     OR_Imm,
     OR_Register,
     OR_TempRegister,
-    OR_ComplexPattern
+    OR_ComplexPattern,
+    OR_Custom
   };
 
 protected:
@@ -2018,6 +2032,38 @@ public:
   }
 };
 
+class CustomRenderer : public OperandRenderer {
+protected:
+  unsigned InsnID;
+  const Record &Renderer;
+  /// The name of the operand.
+  const std::string SymbolicName;
+
+public:
+  CustomRenderer(unsigned InsnID, const Record &Renderer,
+                 StringRef SymbolicName)
+      : OperandRenderer(OR_Custom), InsnID(InsnID), Renderer(Renderer),
+        SymbolicName(SymbolicName) {}
+
+  static bool classof(const OperandRenderer *R) {
+    return R->getKind() == OR_Custom;
+  }
+
+  void emitRenderOpcodes(MatchTable &Table, RuleMatcher &Rule) const override {
+    const InstructionMatcher &InsnMatcher =
+        Rule.getInstructionMatcher(SymbolicName);
+    unsigned OldInsnVarID = Rule.getInsnVarID(InsnMatcher);
+    Table << MatchTable::Opcode("GIR_CustomRenderer")
+          << MatchTable::Comment("InsnID") << MatchTable::IntValue(InsnID)
+          << MatchTable::Comment("OldInsnID")
+          << MatchTable::IntValue(OldInsnVarID)
+          << MatchTable::Comment("Renderer")
+          << MatchTable::NamedValue(
+                 "GICR_" + Renderer.getValueAsString("RendererFn").str())
+          << MatchTable::Comment(SymbolicName) << MatchTable::LineBreak;
+  }
+};
+
 /// An action taken when all Matcher predicates succeeded for a parent rule.
 ///
 /// Typical actions include:
@@ -2079,6 +2125,7 @@ public:
   BuildMIAction(unsigned InsnID, const CodeGenInstruction *I)
       : InsnID(InsnID), I(I), Matched(nullptr) {}
 
+  unsigned getInsnID() const { return InsnID; }
   const CodeGenInstruction *getCGI() const { return I; }
 
   void chooseInsnToMutate(RuleMatcher &Rule) {
@@ -2442,6 +2489,7 @@ void RuleMatcher::emit(MatchTable &Table) {
 
   Table << MatchTable::Opcode("GIR_Done", -1) << MatchTable::LineBreak
         << MatchTable::Label(LabelID);
+  ++NumPatternEmitted;
 }
 
 bool RuleMatcher::isHigherPriorityThan(const RuleMatcher &B) const {
@@ -2541,6 +2589,15 @@ private:
   /// GIComplexPatternEquiv.
   DenseMap<const Record *, const Record *> ComplexPatternEquivs;
 
+  /// Keep track of the equivalence between SDNodeXForm's and
+  /// GICustomOperandRenderer. Map entries are specified by subclassing
+  /// GISDNodeXFormEquiv.
+  DenseMap<const Record *, const Record *> SDNodeXFormEquivs;
+
+  /// Keep track of Scores of PatternsToMatch similar to how the DAG does.
+  /// This adds compatibility for RuleMatchers to use this for ordering rules.
+  DenseMap<uint64_t, int> RuleMatcherScores;
+
   // Map of predicates to their subtarget features.
   SubtargetFeatureInfoMap SubtargetFeatures;
 
@@ -2600,7 +2657,7 @@ private:
 
   /// Takes a sequence of \p Rules and group them based on the predicates
   /// they share. \p StorageGroupMatcher is used as a memory container
-  /// for the the group that are created as part of this process.
+  /// for the group that are created as part of this process.
   /// The optimization process does not change the relative order of
   /// the rules. In particular, we don't try to share predicates if
   /// that means reordering the rules (e.g., we won't group R1 and R3
@@ -2644,6 +2701,14 @@ void GlobalISelEmitter::gatherNodeEquivs() {
     if (!SelDAGEquiv)
       continue;
     ComplexPatternEquivs[SelDAGEquiv] = Equiv;
+ }
+
+ assert(SDNodeXFormEquivs.empty());
+ for (Record *Equiv : RK.getAllDerivedDefinitions("GISDNodeXFormEquiv")) {
+   Record *SelDAGEquiv = Equiv->getValueAsDef("SelDAGEquivalent");
+   if (!SelDAGEquiv)
+     continue;
+   SDNodeXFormEquivs[SelDAGEquiv] = Equiv;
  }
 }
 
@@ -2986,10 +3051,6 @@ Error GlobalISelEmitter::importChildMatcher(RuleMatcher &Rule,
 Expected<action_iterator> GlobalISelEmitter::importExplicitUseRenderer(
     action_iterator InsertPt, RuleMatcher &Rule, BuildMIAction &DstMIBuilder,
     TreePatternNode *DstChild) {
-  if (DstChild->getTransformFn() != nullptr) {
-    return failedImport("Dst pattern child has transform fn " +
-                        DstChild->getTransformFn()->getName());
-  }
 
   const auto &SubOperand = Rule.getComplexSubOperand(DstChild->getName());
   if (SubOperand.hasValue()) {
@@ -3000,6 +3061,18 @@ Expected<action_iterator> GlobalISelEmitter::importExplicitUseRenderer(
   }
 
   if (!DstChild->isLeaf()) {
+
+    if (DstChild->getOperator()->isSubClassOf("SDNodeXForm")) {
+      auto Child = DstChild->getChild(0);
+      auto I = SDNodeXFormEquivs.find(DstChild->getOperator());
+      if (I != SDNodeXFormEquivs.end()) {
+        DstMIBuilder.addRenderer<CustomRenderer>(*I->second, Child->getName());
+        return InsertPt;
+      }
+      return failedImport("SDNodeXForm " + Child->getName() +
+                          " has no custom renderer");
+    }
+
     // We accept 'bb' here. It's an operator because BasicBlockSDNode isn't
     // inline, but in MI it's just another operand.
     if (DstChild->getOperator()->isSubClassOf("SDNode")) {
@@ -3104,10 +3177,6 @@ Expected<action_iterator> GlobalISelEmitter::importExplicitUseRenderer(
       return InsertPt;
     }
 
-    if (ChildRec->isSubClassOf("SDNodeXForm"))
-      return failedImport("Dst pattern child def is an unsupported tablegen "
-                          "class (SDNodeXForm)");
-
     return failedImport(
         "Dst pattern child def is an unsupported tablegen class");
   }
@@ -3135,7 +3204,7 @@ Expected<BuildMIAction &> GlobalISelEmitter::createAndImportInstructionRenderer(
 
 Expected<action_iterator>
 GlobalISelEmitter::createAndImportSubInstructionRenderer(
-    action_iterator InsertPt, RuleMatcher &M, const TreePatternNode *Dst,
+    const action_iterator InsertPt, RuleMatcher &M, const TreePatternNode *Dst,
     unsigned TempRegID) {
   auto InsertPtOrError = createInstructionRenderer(InsertPt, M, Dst);
 
@@ -3143,7 +3212,6 @@ GlobalISelEmitter::createAndImportSubInstructionRenderer(
 
   if (auto Error = InsertPtOrError.takeError())
     return std::move(Error);
-  InsertPt = InsertPtOrError.get();
 
   BuildMIAction &DstMIBuilder =
       *static_cast<BuildMIAction *>(InsertPtOrError.get()->get());
@@ -3151,10 +3219,13 @@ GlobalISelEmitter::createAndImportSubInstructionRenderer(
   // Assign the result to TempReg.
   DstMIBuilder.addRenderer<TempRegRenderer>(TempRegID, true);
 
-  InsertPtOrError = importExplicitUseRenderers(InsertPt, M, DstMIBuilder, Dst);
+  InsertPtOrError =
+      importExplicitUseRenderers(InsertPtOrError.get(), M, DstMIBuilder, Dst);
   if (auto Error = InsertPtOrError.takeError())
     return std::move(Error);
 
+  M.insertAction<ConstrainOperandsToDefinitionAction>(InsertPt,
+                                                      DstMIBuilder.getInsnID());
   return InsertPtOrError.get();
 }
 
@@ -3311,7 +3382,9 @@ Error GlobalISelEmitter::importImplicitDefRenderers(
 
 Expected<RuleMatcher> GlobalISelEmitter::runOnPattern(const PatternToMatch &P) {
   // Keep track of the matchers and actions to emit.
+  int Score = P.getPatternComplexity(CGP);
   RuleMatcher M(P.getSrcRecord()->getLoc());
+  RuleMatcherScores[M.getRuleID()] = Score;
   M.addAction<DebugCommentAction>(llvm::to_string(*P.getSrcPattern()) +
                                   "  =>  " +
                                   llvm::to_string(*P.getDstPattern()));
@@ -3652,14 +3725,19 @@ void GlobalISelEmitter::run(raw_ostream &OS) {
     Rules.push_back(std::move(MatcherOrErr.get()));
   }
 
+  // Comparison function to order records by name.
+  auto orderByName = [](const Record *A, const Record *B) {
+    return A->getName() < B->getName();
+  };
+
   std::vector<Record *> ComplexPredicates =
       RK.getAllDerivedDefinitions("GIComplexOperandMatcher");
-  std::sort(ComplexPredicates.begin(), ComplexPredicates.end(),
-            [](const Record *A, const Record *B) {
-              if (A->getName() < B->getName())
-                return true;
-              return false;
-            });
+  std::sort(ComplexPredicates.begin(), ComplexPredicates.end(), orderByName);
+
+  std::vector<Record *> CustomRendererFns =
+      RK.getAllDerivedDefinitions("GICustomOperandRenderer");
+  std::sort(CustomRendererFns.begin(), CustomRendererFns.end(), orderByName);
+
   unsigned MaxTemporaries = 0;
   for (const auto &Rule : Rules)
     MaxTemporaries = std::max(MaxTemporaries, Rule.countRendererFns());
@@ -3677,10 +3755,18 @@ void GlobalISelEmitter::run(raw_ostream &OS) {
         "ComplexRendererFns("
      << Target.getName()
      << "InstructionSelector::*ComplexMatcherMemFn)(MachineOperand &) const;\n"
-     << "  const MatcherInfoTy<PredicateBitset, ComplexMatcherMemFn> "
-        "MatcherInfo;\n"
-     << "  static " << Target.getName()
+
+     << "  typedef void(" << Target.getName()
+     << "InstructionSelector::*CustomRendererFn)(MachineInstrBuilder &, const "
+        "MachineInstr&) "
+        "const;\n"
+     << "  const ISelInfoTy<PredicateBitset, ComplexMatcherMemFn, "
+        "CustomRendererFn> "
+        "ISelInfo;\n";
+  OS << "  static " << Target.getName()
      << "InstructionSelector::ComplexMatcherMemFn ComplexPredicateFns[];\n"
+     << "  static " << Target.getName()
+     << "InstructionSelector::CustomRendererFn CustomRenderers[];\n"
      << "bool testImmPredicate_I64(unsigned PredicateID, int64_t Imm) const "
         "override;\n"
      << "bool testImmPredicate_APInt(unsigned PredicateID, const APInt &Imm) "
@@ -3691,7 +3777,8 @@ void GlobalISelEmitter::run(raw_ostream &OS) {
 
   OS << "#ifdef GET_GLOBALISEL_TEMPORARIES_INIT\n"
      << ", State(" << MaxTemporaries << "),\n"
-     << "MatcherInfo({TypeObjects, FeatureBitsets, ComplexPredicateFns})\n"
+     << "ISelInfo({TypeObjects, FeatureBitsets, ComplexPredicateFns, "
+        "CustomRenderers})\n"
      << "#endif // ifdef GET_GLOBALISEL_TEMPORARIES_INIT\n\n";
 
   OS << "#ifdef GET_GLOBALISEL_IMPL\n";
@@ -3821,6 +3908,22 @@ void GlobalISelEmitter::run(raw_ostream &OS) {
        << ", // " << Record->getName() << "\n";
   OS << "};\n\n";
 
+  OS << "// Custom renderers.\n"
+     << "enum {\n"
+     << "  GICR_Invalid,\n";
+  for (const auto &Record : CustomRendererFns)
+    OS << "  GICR_" << Record->getValueAsString("RendererFn") << ", \n";
+  OS << "};\n";
+
+  OS << Target.getName() << "InstructionSelector::CustomRendererFn\n"
+     << Target.getName() << "InstructionSelector::CustomRenderers[] = {\n"
+     << "  nullptr, // GICP_Invalid\n";
+  for (const auto &Record : CustomRendererFns)
+    OS << "  &" << Target.getName()
+       << "InstructionSelector::" << Record->getValueAsString("RendererFn")
+       << ", // " << Record->getName() << "\n";
+  OS << "};\n\n";
+
   OS << "bool " << Target.getName()
      << "InstructionSelector::selectImpl(MachineInstr &I, CodeGenCoverage "
         "&CoverageInfo) const {\n"
@@ -3837,6 +3940,12 @@ void GlobalISelEmitter::run(raw_ostream &OS) {
 
   std::stable_sort(Rules.begin(), Rules.end(), [&](const RuleMatcher &A,
                                                    const RuleMatcher &B) {
+    int ScoreA = RuleMatcherScores[A.getRuleID()];
+    int ScoreB = RuleMatcherScores[B.getRuleID()];
+    if (ScoreA > ScoreB)
+      return true;
+    if (ScoreB > ScoreA)
+      return false;
     if (A.isHigherPriorityThan(B)) {
       assert(!B.isHigherPriorityThan(A) && "Cannot be more important "
                                            "and less important at "
@@ -3856,13 +3965,12 @@ void GlobalISelEmitter::run(raw_ostream &OS) {
                          : InputRules;
 
   MatchTable Table(0);
-  for (Matcher *Rule : OptRules) {
+  for (Matcher *Rule : OptRules)
     Rule->emit(Table);
-    ++NumPatternEmitted;
-  }
+
   Table << MatchTable::Opcode("GIM_Reject") << MatchTable::LineBreak;
   Table.emitDeclaration(OS);
-  OS << "  if (executeMatchTable(*this, OutMIs, State, MatcherInfo, ";
+  OS << "  if (executeMatchTable(*this, OutMIs, State, ISelInfo, ";
   Table.emitUse(OS);
   OS << ", TII, MRI, TRI, RBI, AvailableFeatures, CoverageInfo)) {\n"
      << "    return true;\n"

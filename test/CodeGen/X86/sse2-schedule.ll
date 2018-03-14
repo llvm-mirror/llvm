@@ -428,8 +428,8 @@ define <2 x double> @test_cmppd(<2 x double> %a0, <2 x double> %a1, <2 x double>
 ;
 ; BTVER2-LABEL: test_cmppd:
 ; BTVER2:       # %bb.0:
-; BTVER2-NEXT:    vcmpeqpd %xmm1, %xmm0, %xmm1 # sched: [3:1.00]
-; BTVER2-NEXT:    vcmpeqpd (%rdi), %xmm0, %xmm0 # sched: [8:1.00]
+; BTVER2-NEXT:    vcmpeqpd %xmm1, %xmm0, %xmm1 # sched: [2:1.00]
+; BTVER2-NEXT:    vcmpeqpd (%rdi), %xmm0, %xmm0 # sched: [7:1.00]
 ; BTVER2-NEXT:    vorpd %xmm0, %xmm1, %xmm0 # sched: [1:0.50]
 ; BTVER2-NEXT:    retq # sched: [4:1.00]
 ;
@@ -499,8 +499,8 @@ define double @test_cmpsd(double %a0, double %a1, double *%a2) {
 ;
 ; BTVER2-LABEL: test_cmpsd:
 ; BTVER2:       # %bb.0:
-; BTVER2-NEXT:    vcmpeqsd %xmm1, %xmm0, %xmm0 # sched: [3:1.00]
-; BTVER2-NEXT:    vcmpeqsd (%rdi), %xmm0, %xmm0 # sched: [8:1.00]
+; BTVER2-NEXT:    vcmpeqsd %xmm1, %xmm0, %xmm0 # sched: [2:1.00]
+; BTVER2-NEXT:    vcmpeqsd (%rdi), %xmm0, %xmm0 # sched: [7:1.00]
 ; BTVER2-NEXT:    retq # sched: [4:1.00]
 ;
 ; ZNVER1-LABEL: test_cmpsd:
@@ -522,11 +522,11 @@ declare <2 x double> @llvm.x86.sse2.cmp.sd(<2 x double>, <2 x double>, i8) nounw
 define i32 @test_comisd(<2 x double> %a0, <2 x double> %a1, <2 x double> *%a2) {
 ; GENERIC-LABEL: test_comisd:
 ; GENERIC:       # %bb.0:
-; GENERIC-NEXT:    comisd %xmm1, %xmm0 # sched: [3:1.00]
+; GENERIC-NEXT:    comisd %xmm1, %xmm0 # sched: [2:1.00]
 ; GENERIC-NEXT:    setnp %al # sched: [1:0.50]
 ; GENERIC-NEXT:    sete %cl # sched: [1:0.50]
 ; GENERIC-NEXT:    andb %al, %cl # sched: [1:0.33]
-; GENERIC-NEXT:    comisd (%rdi), %xmm0 # sched: [7:1.00]
+; GENERIC-NEXT:    comisd (%rdi), %xmm0 # sched: [8:1.00]
 ; GENERIC-NEXT:    setnp %al # sched: [1:0.50]
 ; GENERIC-NEXT:    sete %dl # sched: [1:0.50]
 ; GENERIC-NEXT:    andb %al, %dl # sched: [1:0.33]
@@ -564,11 +564,11 @@ define i32 @test_comisd(<2 x double> %a0, <2 x double> %a1, <2 x double> *%a2) {
 ;
 ; SANDY-LABEL: test_comisd:
 ; SANDY:       # %bb.0:
-; SANDY-NEXT:    vcomisd %xmm1, %xmm0 # sched: [3:1.00]
+; SANDY-NEXT:    vcomisd %xmm1, %xmm0 # sched: [2:1.00]
 ; SANDY-NEXT:    setnp %al # sched: [1:0.50]
 ; SANDY-NEXT:    sete %cl # sched: [1:0.50]
 ; SANDY-NEXT:    andb %al, %cl # sched: [1:0.33]
-; SANDY-NEXT:    vcomisd (%rdi), %xmm0 # sched: [7:1.00]
+; SANDY-NEXT:    vcomisd (%rdi), %xmm0 # sched: [8:1.00]
 ; SANDY-NEXT:    setnp %al # sched: [1:0.50]
 ; SANDY-NEXT:    sete %dl # sched: [1:0.50]
 ; SANDY-NEXT:    andb %al, %dl # sched: [1:0.33]
@@ -606,11 +606,11 @@ define i32 @test_comisd(<2 x double> %a0, <2 x double> %a1, <2 x double> *%a2) {
 ;
 ; SKYLAKE-LABEL: test_comisd:
 ; SKYLAKE:       # %bb.0:
-; SKYLAKE-NEXT:    vcomisd %xmm1, %xmm0 # sched: [3:1.00]
+; SKYLAKE-NEXT:    vcomisd %xmm1, %xmm0 # sched: [2:1.00]
 ; SKYLAKE-NEXT:    setnp %al # sched: [1:0.50]
 ; SKYLAKE-NEXT:    sete %cl # sched: [1:0.50]
 ; SKYLAKE-NEXT:    andb %al, %cl # sched: [1:0.25]
-; SKYLAKE-NEXT:    vcomisd (%rdi), %xmm0 # sched: [8:1.00]
+; SKYLAKE-NEXT:    vcomisd (%rdi), %xmm0 # sched: [7:1.00]
 ; SKYLAKE-NEXT:    setnp %al # sched: [1:0.50]
 ; SKYLAKE-NEXT:    sete %dl # sched: [1:0.50]
 ; SKYLAKE-NEXT:    andb %al, %dl # sched: [1:0.25]
@@ -620,11 +620,11 @@ define i32 @test_comisd(<2 x double> %a0, <2 x double> %a1, <2 x double> *%a2) {
 ;
 ; SKX-LABEL: test_comisd:
 ; SKX:       # %bb.0:
-; SKX-NEXT:    vcomisd %xmm1, %xmm0 # sched: [3:1.00]
+; SKX-NEXT:    vcomisd %xmm1, %xmm0 # sched: [2:1.00]
 ; SKX-NEXT:    setnp %al # sched: [1:0.50]
 ; SKX-NEXT:    sete %cl # sched: [1:0.50]
 ; SKX-NEXT:    andb %al, %cl # sched: [1:0.25]
-; SKX-NEXT:    vcomisd (%rdi), %xmm0 # sched: [8:1.00]
+; SKX-NEXT:    vcomisd (%rdi), %xmm0 # sched: [7:1.00]
 ; SKX-NEXT:    setnp %al # sched: [1:0.50]
 ; SKX-NEXT:    sete %dl # sched: [1:0.50]
 ; SKX-NEXT:    andb %al, %dl # sched: [1:0.25]
@@ -2309,8 +2309,8 @@ define <2 x double> @test_maxpd(<2 x double> %a0, <2 x double> %a1, <2 x double>
 ;
 ; BTVER2-LABEL: test_maxpd:
 ; BTVER2:       # %bb.0:
-; BTVER2-NEXT:    vmaxpd %xmm1, %xmm0, %xmm0 # sched: [3:1.00]
-; BTVER2-NEXT:    vmaxpd (%rdi), %xmm0, %xmm0 # sched: [8:1.00]
+; BTVER2-NEXT:    vmaxpd %xmm1, %xmm0, %xmm0 # sched: [2:1.00]
+; BTVER2-NEXT:    vmaxpd (%rdi), %xmm0, %xmm0 # sched: [7:1.00]
 ; BTVER2-NEXT:    retq # sched: [4:1.00]
 ;
 ; ZNVER1-LABEL: test_maxpd:
@@ -2376,8 +2376,8 @@ define <2 x double> @test_maxsd(<2 x double> %a0, <2 x double> %a1, <2 x double>
 ;
 ; BTVER2-LABEL: test_maxsd:
 ; BTVER2:       # %bb.0:
-; BTVER2-NEXT:    vmaxsd %xmm1, %xmm0, %xmm0 # sched: [3:1.00]
-; BTVER2-NEXT:    vmaxsd (%rdi), %xmm0, %xmm0 # sched: [8:1.00]
+; BTVER2-NEXT:    vmaxsd %xmm1, %xmm0, %xmm0 # sched: [2:1.00]
+; BTVER2-NEXT:    vmaxsd (%rdi), %xmm0, %xmm0 # sched: [7:1.00]
 ; BTVER2-NEXT:    retq # sched: [4:1.00]
 ;
 ; ZNVER1-LABEL: test_maxsd:
@@ -2443,8 +2443,8 @@ define <2 x double> @test_minpd(<2 x double> %a0, <2 x double> %a1, <2 x double>
 ;
 ; BTVER2-LABEL: test_minpd:
 ; BTVER2:       # %bb.0:
-; BTVER2-NEXT:    vminpd %xmm1, %xmm0, %xmm0 # sched: [3:1.00]
-; BTVER2-NEXT:    vminpd (%rdi), %xmm0, %xmm0 # sched: [8:1.00]
+; BTVER2-NEXT:    vminpd %xmm1, %xmm0, %xmm0 # sched: [2:1.00]
+; BTVER2-NEXT:    vminpd (%rdi), %xmm0, %xmm0 # sched: [7:1.00]
 ; BTVER2-NEXT:    retq # sched: [4:1.00]
 ;
 ; ZNVER1-LABEL: test_minpd:
@@ -2510,8 +2510,8 @@ define <2 x double> @test_minsd(<2 x double> %a0, <2 x double> %a1, <2 x double>
 ;
 ; BTVER2-LABEL: test_minsd:
 ; BTVER2:       # %bb.0:
-; BTVER2-NEXT:    vminsd %xmm1, %xmm0, %xmm0 # sched: [3:1.00]
-; BTVER2-NEXT:    vminsd (%rdi), %xmm0, %xmm0 # sched: [8:1.00]
+; BTVER2-NEXT:    vminsd %xmm1, %xmm0, %xmm0 # sched: [2:1.00]
+; BTVER2-NEXT:    vminsd (%rdi), %xmm0, %xmm0 # sched: [7:1.00]
 ; BTVER2-NEXT:    retq # sched: [4:1.00]
 ;
 ; ZNVER1-LABEL: test_minsd:
@@ -3245,7 +3245,7 @@ define void @test_movntdqa(<2 x i64> %a0, <2 x i64> *%a1) {
 ; BTVER2-LABEL: test_movntdqa:
 ; BTVER2:       # %bb.0:
 ; BTVER2-NEXT:    vpaddq %xmm0, %xmm0, %xmm0 # sched: [1:0.50]
-; BTVER2-NEXT:    vmovntdq %xmm0, (%rdi) # sched: [1:1.00]
+; BTVER2-NEXT:    vmovntdq %xmm0, (%rdi) # sched: [2:1.00]
 ; BTVER2-NEXT:    retq # sched: [4:1.00]
 ;
 ; ZNVER1-LABEL: test_movntdqa:
@@ -3310,7 +3310,7 @@ define void @test_movntpd(<2 x double> %a0, <2 x double> *%a1) {
 ; BTVER2-LABEL: test_movntpd:
 ; BTVER2:       # %bb.0:
 ; BTVER2-NEXT:    vaddpd %xmm0, %xmm0, %xmm0 # sched: [3:1.00]
-; BTVER2-NEXT:    vmovntpd %xmm0, (%rdi) # sched: [1:1.00]
+; BTVER2-NEXT:    vmovntpd %xmm0, (%rdi) # sched: [3:1.00]
 ; BTVER2-NEXT:    retq # sched: [4:1.00]
 ;
 ; ZNVER1-LABEL: test_movntpd:
@@ -3732,8 +3732,8 @@ define <2 x double> @test_mulpd(<2 x double> %a0, <2 x double> %a1, <2 x double>
 ;
 ; BTVER2-LABEL: test_mulpd:
 ; BTVER2:       # %bb.0:
-; BTVER2-NEXT:    vmulpd %xmm1, %xmm0, %xmm0 # sched: [2:1.00]
-; BTVER2-NEXT:    vmulpd (%rdi), %xmm0, %xmm0 # sched: [7:1.00]
+; BTVER2-NEXT:    vmulpd %xmm1, %xmm0, %xmm0 # sched: [4:2.00]
+; BTVER2-NEXT:    vmulpd (%rdi), %xmm0, %xmm0 # sched: [9:2.00]
 ; BTVER2-NEXT:    retq # sched: [4:1.00]
 ;
 ; ZNVER1-LABEL: test_mulpd:
@@ -3798,8 +3798,8 @@ define double @test_mulsd(double %a0, double %a1, double *%a2) {
 ;
 ; BTVER2-LABEL: test_mulsd:
 ; BTVER2:       # %bb.0:
-; BTVER2-NEXT:    vmulsd %xmm1, %xmm0, %xmm0 # sched: [2:1.00]
-; BTVER2-NEXT:    vmulsd (%rdi), %xmm0, %xmm0 # sched: [7:1.00]
+; BTVER2-NEXT:    vmulsd %xmm1, %xmm0, %xmm0 # sched: [4:2.00]
+; BTVER2-NEXT:    vmulsd (%rdi), %xmm0, %xmm0 # sched: [9:2.00]
 ; BTVER2-NEXT:    retq # sched: [4:1.00]
 ;
 ; ZNVER1-LABEL: test_mulsd:
@@ -5485,61 +5485,61 @@ define i16 @test_pextrw(<8 x i16> %a0) {
 ; GENERIC-LABEL: test_pextrw:
 ; GENERIC:       # %bb.0:
 ; GENERIC-NEXT:    pextrw $6, %xmm0, %eax # sched: [3:1.00]
-; GENERIC-NEXT:    # kill: def %ax killed %ax killed %eax
+; GENERIC-NEXT:    # kill: def $ax killed $ax killed $eax
 ; GENERIC-NEXT:    retq # sched: [1:1.00]
 ;
 ; ATOM-LABEL: test_pextrw:
 ; ATOM:       # %bb.0:
 ; ATOM-NEXT:    pextrw $6, %xmm0, %eax # sched: [4:2.00]
-; ATOM-NEXT:    # kill: def %ax killed %ax killed %eax
+; ATOM-NEXT:    # kill: def $ax killed $ax killed $eax
 ; ATOM-NEXT:    retq # sched: [79:39.50]
 ;
 ; SLM-LABEL: test_pextrw:
 ; SLM:       # %bb.0:
-; SLM-NEXT:    pextrw $6, %xmm0, %eax # sched: [4:1.00]
-; SLM-NEXT:    # kill: def %ax killed %ax killed %eax
+; SLM-NEXT:    pextrw $6, %xmm0, %eax # sched: [1:1.00]
+; SLM-NEXT:    # kill: def $ax killed $ax killed $eax
 ; SLM-NEXT:    retq # sched: [4:1.00]
 ;
 ; SANDY-LABEL: test_pextrw:
 ; SANDY:       # %bb.0:
 ; SANDY-NEXT:    vpextrw $6, %xmm0, %eax # sched: [3:1.00]
-; SANDY-NEXT:    # kill: def %ax killed %ax killed %eax
+; SANDY-NEXT:    # kill: def $ax killed $ax killed $eax
 ; SANDY-NEXT:    retq # sched: [1:1.00]
 ;
 ; HASWELL-LABEL: test_pextrw:
 ; HASWELL:       # %bb.0:
 ; HASWELL-NEXT:    vpextrw $6, %xmm0, %eax # sched: [2:1.00]
-; HASWELL-NEXT:    # kill: def %ax killed %ax killed %eax
+; HASWELL-NEXT:    # kill: def $ax killed $ax killed $eax
 ; HASWELL-NEXT:    retq # sched: [7:1.00]
 ;
 ; BROADWELL-LABEL: test_pextrw:
 ; BROADWELL:       # %bb.0:
 ; BROADWELL-NEXT:    vpextrw $6, %xmm0, %eax # sched: [2:1.00]
-; BROADWELL-NEXT:    # kill: def %ax killed %ax killed %eax
+; BROADWELL-NEXT:    # kill: def $ax killed $ax killed $eax
 ; BROADWELL-NEXT:    retq # sched: [7:1.00]
 ;
 ; SKYLAKE-LABEL: test_pextrw:
 ; SKYLAKE:       # %bb.0:
 ; SKYLAKE-NEXT:    vpextrw $6, %xmm0, %eax # sched: [3:1.00]
-; SKYLAKE-NEXT:    # kill: def %ax killed %ax killed %eax
+; SKYLAKE-NEXT:    # kill: def $ax killed $ax killed $eax
 ; SKYLAKE-NEXT:    retq # sched: [7:1.00]
 ;
 ; SKX-LABEL: test_pextrw:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vpextrw $6, %xmm0, %eax # sched: [3:1.00]
-; SKX-NEXT:    # kill: def %ax killed %ax killed %eax
+; SKX-NEXT:    # kill: def $ax killed $ax killed $eax
 ; SKX-NEXT:    retq # sched: [7:1.00]
 ;
 ; BTVER2-LABEL: test_pextrw:
 ; BTVER2:       # %bb.0:
 ; BTVER2-NEXT:    vpextrw $6, %xmm0, %eax # sched: [1:0.50]
-; BTVER2-NEXT:    # kill: def %ax killed %ax killed %eax
+; BTVER2-NEXT:    # kill: def $ax killed $ax killed $eax
 ; BTVER2-NEXT:    retq # sched: [4:1.00]
 ;
 ; ZNVER1-LABEL: test_pextrw:
 ; ZNVER1:       # %bb.0:
 ; ZNVER1-NEXT:    vpextrw $6, %xmm0, %eax # sched: [1:0.25]
-; ZNVER1-NEXT:    # kill: def %ax killed %ax killed %eax
+; ZNVER1-NEXT:    # kill: def $ax killed $ax killed $eax
 ; ZNVER1-NEXT:    retq # sched: [1:0.50]
   %1 = extractelement <8 x i16> %a0, i32 6
   ret i16 %1
@@ -9040,11 +9040,11 @@ define double @test_subsd(double %a0, double %a1, double *%a2) {
 define i32 @test_ucomisd(<2 x double> %a0, <2 x double> %a1, <2 x double> *%a2) {
 ; GENERIC-LABEL: test_ucomisd:
 ; GENERIC:       # %bb.0:
-; GENERIC-NEXT:    ucomisd %xmm1, %xmm0 # sched: [3:1.00]
+; GENERIC-NEXT:    ucomisd %xmm1, %xmm0 # sched: [2:1.00]
 ; GENERIC-NEXT:    setnp %al # sched: [1:0.50]
 ; GENERIC-NEXT:    sete %cl # sched: [1:0.50]
 ; GENERIC-NEXT:    andb %al, %cl # sched: [1:0.33]
-; GENERIC-NEXT:    ucomisd (%rdi), %xmm0 # sched: [7:1.00]
+; GENERIC-NEXT:    ucomisd (%rdi), %xmm0 # sched: [8:1.00]
 ; GENERIC-NEXT:    setnp %al # sched: [1:0.50]
 ; GENERIC-NEXT:    sete %dl # sched: [1:0.50]
 ; GENERIC-NEXT:    andb %al, %dl # sched: [1:0.33]
@@ -9082,11 +9082,11 @@ define i32 @test_ucomisd(<2 x double> %a0, <2 x double> %a1, <2 x double> *%a2) 
 ;
 ; SANDY-LABEL: test_ucomisd:
 ; SANDY:       # %bb.0:
-; SANDY-NEXT:    vucomisd %xmm1, %xmm0 # sched: [3:1.00]
+; SANDY-NEXT:    vucomisd %xmm1, %xmm0 # sched: [2:1.00]
 ; SANDY-NEXT:    setnp %al # sched: [1:0.50]
 ; SANDY-NEXT:    sete %cl # sched: [1:0.50]
 ; SANDY-NEXT:    andb %al, %cl # sched: [1:0.33]
-; SANDY-NEXT:    vucomisd (%rdi), %xmm0 # sched: [7:1.00]
+; SANDY-NEXT:    vucomisd (%rdi), %xmm0 # sched: [8:1.00]
 ; SANDY-NEXT:    setnp %al # sched: [1:0.50]
 ; SANDY-NEXT:    sete %dl # sched: [1:0.50]
 ; SANDY-NEXT:    andb %al, %dl # sched: [1:0.33]
@@ -9124,11 +9124,11 @@ define i32 @test_ucomisd(<2 x double> %a0, <2 x double> %a1, <2 x double> *%a2) 
 ;
 ; SKYLAKE-LABEL: test_ucomisd:
 ; SKYLAKE:       # %bb.0:
-; SKYLAKE-NEXT:    vucomisd %xmm1, %xmm0 # sched: [3:1.00]
+; SKYLAKE-NEXT:    vucomisd %xmm1, %xmm0 # sched: [2:1.00]
 ; SKYLAKE-NEXT:    setnp %al # sched: [1:0.50]
 ; SKYLAKE-NEXT:    sete %cl # sched: [1:0.50]
 ; SKYLAKE-NEXT:    andb %al, %cl # sched: [1:0.25]
-; SKYLAKE-NEXT:    vucomisd (%rdi), %xmm0 # sched: [8:1.00]
+; SKYLAKE-NEXT:    vucomisd (%rdi), %xmm0 # sched: [7:1.00]
 ; SKYLAKE-NEXT:    setnp %al # sched: [1:0.50]
 ; SKYLAKE-NEXT:    sete %dl # sched: [1:0.50]
 ; SKYLAKE-NEXT:    andb %al, %dl # sched: [1:0.25]
@@ -9138,11 +9138,11 @@ define i32 @test_ucomisd(<2 x double> %a0, <2 x double> %a1, <2 x double> *%a2) 
 ;
 ; SKX-LABEL: test_ucomisd:
 ; SKX:       # %bb.0:
-; SKX-NEXT:    vucomisd %xmm1, %xmm0 # sched: [3:1.00]
+; SKX-NEXT:    vucomisd %xmm1, %xmm0 # sched: [2:1.00]
 ; SKX-NEXT:    setnp %al # sched: [1:0.50]
 ; SKX-NEXT:    sete %cl # sched: [1:0.50]
 ; SKX-NEXT:    andb %al, %cl # sched: [1:0.25]
-; SKX-NEXT:    vucomisd (%rdi), %xmm0 # sched: [8:1.00]
+; SKX-NEXT:    vucomisd (%rdi), %xmm0 # sched: [7:1.00]
 ; SKX-NEXT:    setnp %al # sched: [1:0.50]
 ; SKX-NEXT:    sete %dl # sched: [1:0.50]
 ; SKX-NEXT:    andb %al, %dl # sched: [1:0.25]

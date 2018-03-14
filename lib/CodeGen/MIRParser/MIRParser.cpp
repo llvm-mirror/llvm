@@ -237,7 +237,7 @@ std::unique_ptr<Module> MIRParserImpl::parseIRModule() {
           dyn_cast_or_null<yaml::BlockScalarNode>(In.getCurrentNode())) {
     SMDiagnostic Error;
     M = parseAssembly(MemoryBufferRef(BSN->getValue(), Filename), Error,
-                      Context, &IRSlots);
+                      Context, &IRSlots, /*UpgradeDebugInfo=*/false);
     if (!M) {
       reportDiagnostic(diagFromBlockStringDiag(Error, BSN->getSourceRange()));
       return nullptr;
@@ -362,6 +362,8 @@ MIRParserImpl::initializeMachineFunction(const yaml::MachineFunction &YamlMF,
         MachineFunctionProperties::Property::RegBankSelected);
   if (YamlMF.Selected)
     MF.getProperties().set(MachineFunctionProperties::Property::Selected);
+  if (YamlMF.FailedISel)
+    MF.getProperties().set(MachineFunctionProperties::Property::FailedISel);
 
   PerFunctionMIParsingState PFS(MF, SM, IRSlots, Names2RegClasses,
                                 Names2RegBanks);
@@ -416,6 +418,8 @@ MIRParserImpl::initializeMachineFunction(const yaml::MachineFunction &YamlMF,
     return true;
 
   computeFunctionProperties(MF);
+
+  MF.getSubtarget().mirFileLoaded(MF);
 
   MF.verify();
   return false;

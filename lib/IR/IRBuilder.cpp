@@ -15,6 +15,7 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Statepoint.h"
@@ -58,8 +59,11 @@ Value *IRBuilderBase::getCastedInt8PtrValue(Value *Ptr) {
 
 static CallInst *createCallHelper(Value *Callee, ArrayRef<Value *> Ops,
                                   IRBuilderBase *Builder,
-                                  const Twine& Name="") {
+                                  const Twine &Name = "",
+                                  Instruction *FMFSource = nullptr) {
   CallInst *CI = CallInst::Create(Callee, Ops, Name);
+  if (FMFSource)
+    CI->copyFastMathFlags(FMFSource);
   Builder->GetInsertBlock()->getInstList().insert(Builder->GetInsertPoint(),CI);
   Builder->SetInstDebugLocation(CI);
   return CI;  
@@ -83,13 +87,16 @@ CreateMemSet(Value *Ptr, Value *Val, Value *Size, unsigned Align,
              bool isVolatile, MDNode *TBAATag, MDNode *ScopeTag,
              MDNode *NoAliasTag) {
   Ptr = getCastedInt8PtrValue(Ptr);
-  Value *Ops[] = { Ptr, Val, Size, getInt32(Align), getInt1(isVolatile) };
+  Value *Ops[] = {Ptr, Val, Size, getInt1(isVolatile)};
   Type *Tys[] = { Ptr->getType(), Size->getType() };
   Module *M = BB->getParent()->getParent();
   Value *TheFn = Intrinsic::getDeclaration(M, Intrinsic::memset, Tys);
   
   CallInst *CI = createCallHelper(TheFn, Ops, this);
-  
+
+  if (Align > 0)
+    cast<MemSetInst>(CI)->setDestAlignment(Align);
+
   // Set the TBAA info if present.
   if (TBAATag)
     CI->setMetadata(LLVMContext::MD_tbaa, TBAATag);
@@ -99,24 +106,32 @@ CreateMemSet(Value *Ptr, Value *Val, Value *Size, unsigned Align,
  
   if (NoAliasTag)
     CI->setMetadata(LLVMContext::MD_noalias, NoAliasTag);
- 
+
   return CI;
 }
 
 CallInst *IRBuilderBase::
-CreateMemCpy(Value *Dst, Value *Src, Value *Size, unsigned Align,
-             bool isVolatile, MDNode *TBAATag, MDNode *TBAAStructTag,
-             MDNode *ScopeTag, MDNode *NoAliasTag) {
+CreateMemCpy(Value *Dst, unsigned DstAlign, Value *Src, unsigned SrcAlign,
+             Value *Size, bool isVolatile, MDNode *TBAATag,
+             MDNode *TBAAStructTag, MDNode *ScopeTag, MDNode *NoAliasTag) {
+  assert((DstAlign == 0 || isPowerOf2_32(DstAlign)) && "Must be 0 or a power of 2");
+  assert((SrcAlign == 0 || isPowerOf2_32(SrcAlign)) && "Must be 0 or a power of 2");
   Dst = getCastedInt8PtrValue(Dst);
   Src = getCastedInt8PtrValue(Src);
 
-  Value *Ops[] = { Dst, Src, Size, getInt32(Align), getInt1(isVolatile) };
+  Value *Ops[] = {Dst, Src, Size, getInt1(isVolatile)};
   Type *Tys[] = { Dst->getType(), Src->getType(), Size->getType() };
   Module *M = BB->getParent()->getParent();
   Value *TheFn = Intrinsic::getDeclaration(M, Intrinsic::memcpy, Tys);
   
   CallInst *CI = createCallHelper(TheFn, Ops, this);
-  
+
+  auto* MCI = cast<MemCpyInst>(CI);
+  if (DstAlign > 0)
+    MCI->setDestAlignment(DstAlign);
+  if (SrcAlign > 0)
+    MCI->setSourceAlignment(SrcAlign);
+
   // Set the TBAA info if present.
   if (TBAATag)
     CI->setMetadata(LLVMContext::MD_tbaa, TBAATag);
@@ -130,7 +145,7 @@ CreateMemCpy(Value *Dst, Value *Src, Value *Size, unsigned Align,
  
   if (NoAliasTag)
     CI->setMetadata(LLVMContext::MD_noalias, NoAliasTag);
- 
+
   return CI;  
 }
 
@@ -154,8 +169,9 @@ CallInst *IRBuilderBase::CreateElementUnorderedAtomicMemCpy(
   CallInst *CI = createCallHelper(TheFn, Ops, this);
 
   // Set the alignment of the pointer args.
-  CI->addParamAttr(0, Attribute::getWithAlignment(CI->getContext(), DstAlign));
-  CI->addParamAttr(1, Attribute::getWithAlignment(CI->getContext(), SrcAlign));
+  auto *AMCI = cast<AtomicMemCpyInst>(CI);
+  AMCI->setDestAlignment(DstAlign);
+  AMCI->setSourceAlignment(SrcAlign);
 
   // Set the TBAA info if present.
   if (TBAATag)
@@ -175,19 +191,27 @@ CallInst *IRBuilderBase::CreateElementUnorderedAtomicMemCpy(
 }
 
 CallInst *IRBuilderBase::
-CreateMemMove(Value *Dst, Value *Src, Value *Size, unsigned Align,
-              bool isVolatile, MDNode *TBAATag, MDNode *ScopeTag,
+CreateMemMove(Value *Dst, unsigned DstAlign, Value *Src, unsigned SrcAlign,
+              Value *Size, bool isVolatile, MDNode *TBAATag, MDNode *ScopeTag,
               MDNode *NoAliasTag) {
+  assert((DstAlign == 0 || isPowerOf2_32(DstAlign)) && "Must be 0 or a power of 2");
+  assert((SrcAlign == 0 || isPowerOf2_32(SrcAlign)) && "Must be 0 or a power of 2");
   Dst = getCastedInt8PtrValue(Dst);
   Src = getCastedInt8PtrValue(Src);
-  
-  Value *Ops[] = { Dst, Src, Size, getInt32(Align), getInt1(isVolatile) };
+
+  Value *Ops[] = {Dst, Src, Size, getInt1(isVolatile)};
   Type *Tys[] = { Dst->getType(), Src->getType(), Size->getType() };
   Module *M = BB->getParent()->getParent();
   Value *TheFn = Intrinsic::getDeclaration(M, Intrinsic::memmove, Tys);
   
   CallInst *CI = createCallHelper(TheFn, Ops, this);
-  
+
+  auto *MMI = cast<MemMoveInst>(CI);
+  if (DstAlign > 0)
+    MMI->setDestAlignment(DstAlign);
+  if (SrcAlign > 0)
+    MMI->setSourceAlignment(SrcAlign);
+
   // Set the TBAA info if present.
   if (TBAATag)
     CI->setMetadata(LLVMContext::MD_tbaa, TBAATag);
@@ -625,7 +649,18 @@ CallInst *IRBuilderBase::CreateGCRelocate(Instruction *Statepoint,
 CallInst *IRBuilderBase::CreateBinaryIntrinsic(Intrinsic::ID ID,
                                                Value *LHS, Value *RHS,
                                                const Twine &Name) {
-  Module *M = BB->getParent()->getParent();
-  Function *Fn =  Intrinsic::getDeclaration(M, ID, { LHS->getType() });
+  Module *M = BB->getModule();
+  Function *Fn = Intrinsic::getDeclaration(M, ID, { LHS->getType() });
   return createCallHelper(Fn, { LHS, RHS }, this, Name);
 }
+
+CallInst *IRBuilderBase::CreateIntrinsic(Intrinsic::ID ID,
+                                         ArrayRef<Value *> Args,
+                                         Instruction *FMFSource,
+                                         const Twine &Name) {
+  assert(!Args.empty() && "Expected at least one argument to intrinsic");
+  Module *M = BB->getModule();
+  Function *Fn = Intrinsic::getDeclaration(M, ID, { Args.front()->getType() });
+  return createCallHelper(Fn, Args, this, Name, FMFSource);
+}
+

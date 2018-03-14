@@ -2,54 +2,73 @@
 ; RUN: opt -S -instcombine < %s | FileCheck %s
 
 ; (-0.0 - X) * C => X * -C
-define float @test1(float %x) {
-; CHECK-LABEL: @test1(
-; CHECK-NEXT:    [[MUL:%.*]] = fmul float [[X:%.*]], -2.000000e+01
+define float @neg_constant(float %x) {
+; CHECK-LABEL: @neg_constant(
+; CHECK-NEXT:    [[MUL:%.*]] = fmul ninf float [[X:%.*]], -2.000000e+01
 ; CHECK-NEXT:    ret float [[MUL]]
 ;
   %sub = fsub float -0.000000e+00, %x
-  %mul = fmul float %sub, 2.0e+1
+  %mul = fmul ninf float %sub, 2.0e+1
   ret float %mul
 }
 
 ; (0.0 - X) * C => X * -C
-define float @test2(float %x) {
-; CHECK-LABEL: @test2(
-; CHECK-NEXT:    [[MUL:%.*]] = fmul float [[X:%.*]], -2.000000e+01
+define float @neg_nsz_constant(float %x) {
+; CHECK-LABEL: @neg_nsz_constant(
+; CHECK-NEXT:    [[MUL:%.*]] = fmul nnan float [[X:%.*]], -2.000000e+01
 ; CHECK-NEXT:    ret float [[MUL]]
 ;
   %sub = fsub nsz float 0.000000e+00, %x
-  %mul = fmul float %sub, 2.0e+1
+  %mul = fmul nnan float %sub, 2.0e+1
   ret float %mul
 }
 
 ; (-0.0 - X) * (-0.0 - Y) => X * Y
-define float @test3(float %x, float %y) {
-; CHECK-LABEL: @test3(
-; CHECK-NEXT:    [[MUL:%.*]] = fmul fast float [[X:%.*]], [[Y:%.*]]
+define float @neg_neg(float %x, float %y) {
+; CHECK-LABEL: @neg_neg(
+; CHECK-NEXT:    [[MUL:%.*]] = fmul arcp float [[X:%.*]], [[Y:%.*]]
 ; CHECK-NEXT:    ret float [[MUL]]
 ;
   %sub1 = fsub float -0.000000e+00, %x
   %sub2 = fsub float -0.000000e+00, %y
-  %mul = fmul fast float %sub1, %sub2
+  %mul = fmul arcp float %sub1, %sub2
   ret float %mul
 }
 
 ; (0.0 - X) * (0.0 - Y) => X * Y
-define float @test4(float %x, float %y) {
-; CHECK-LABEL: @test4(
-; CHECK-NEXT:    [[MUL:%.*]] = fmul float [[X:%.*]], [[Y:%.*]]
+define float @neg_neg_nsz(float %x, float %y) {
+; CHECK-LABEL: @neg_neg_nsz(
+; CHECK-NEXT:    [[MUL:%.*]] = fmul afn float [[X:%.*]], [[Y:%.*]]
 ; CHECK-NEXT:    ret float [[MUL]]
 ;
   %sub1 = fsub nsz float 0.000000e+00, %x
   %sub2 = fsub nsz float 0.000000e+00, %y
-  %mul = fmul float %sub1, %sub2
+  %mul = fmul afn float %sub1, %sub2
+  ret float %mul
+}
+
+declare void @use_f32(float)
+
+define float @neg_neg_multi_use(float %x, float %y) {
+; CHECK-LABEL: @neg_neg_multi_use(
+; CHECK-NEXT:    [[NX:%.*]] = fsub float -0.000000e+00, [[X:%.*]]
+; CHECK-NEXT:    [[NY:%.*]] = fsub float -0.000000e+00, [[Y:%.*]]
+; CHECK-NEXT:    [[MUL:%.*]] = fmul afn float [[X]], [[Y]]
+; CHECK-NEXT:    call void @use_f32(float [[NX]])
+; CHECK-NEXT:    call void @use_f32(float [[NY]])
+; CHECK-NEXT:    ret float [[MUL]]
+;
+  %nx = fsub float -0.000000e+00, %x
+  %ny = fsub float -0.000000e+00, %y
+  %mul = fmul afn float %nx, %ny
+  call void @use_f32(float %nx)
+  call void @use_f32(float %ny)
   ret float %mul
 }
 
 ; (-0.0 - X) * Y => -0.0 - (X * Y)
-define float @test5(float %x, float %y) {
-; CHECK-LABEL: @test5(
+define float @neg_sink(float %x, float %y) {
+; CHECK-LABEL: @neg_sink(
 ; CHECK-NEXT:    [[TMP1:%.*]] = fmul float [[X:%.*]], [[Y:%.*]]
 ; CHECK-NEXT:    [[MUL:%.*]] = fsub float -0.000000e+00, [[TMP1]]
 ; CHECK-NEXT:    ret float [[MUL]]
@@ -60,8 +79,8 @@ define float @test5(float %x, float %y) {
 }
 
 ; (0.0 - X) * Y => 0.0 - (X * Y)
-define float @test6(float %x, float %y) {
-; CHECK-LABEL: @test6(
+define float @neg_sink_nsz(float %x, float %y) {
+; CHECK-LABEL: @neg_sink_nsz(
 ; CHECK-NEXT:    [[TMP1:%.*]] = fmul float [[X:%.*]], [[Y:%.*]]
 ; CHECK-NEXT:    [[MUL:%.*]] = fsub float -0.000000e+00, [[TMP1]]
 ; CHECK-NEXT:    ret float [[MUL]]
@@ -73,8 +92,8 @@ define float @test6(float %x, float %y) {
 
 ; "(-0.0 - X) * Y => -0.0 - (X * Y)" is disabled if expression "-0.0 - X"
 ; has multiple uses.
-define float @test7(float %x, float %y) {
-; CHECK-LABEL: @test7(
+define float @neg_sink_multi_use(float %x, float %y) {
+; CHECK-LABEL: @neg_sink_multi_use(
 ; CHECK-NEXT:    [[SUB1:%.*]] = fsub float -0.000000e+00, [[X:%.*]]
 ; CHECK-NEXT:    [[MUL:%.*]] = fmul float [[SUB1]], [[Y:%.*]]
 ; CHECK-NEXT:    [[MUL2:%.*]] = fmul float [[MUL]], [[SUB1]]
@@ -134,10 +153,10 @@ define float @test9(float %x) {
 ; PR18532
 define <4 x float> @test10(<4 x float> %x) {
 ; CHECK-LABEL: @test10(
-; CHECK-NEXT:    [[MUL:%.*]] = fsub <4 x float> <float -0.000000e+00, float -0.000000e+00, float -0.000000e+00, float -0.000000e+00>, [[X:%.*]]
+; CHECK-NEXT:    [[MUL:%.*]] = fsub arcp afn <4 x float> <float -0.000000e+00, float -0.000000e+00, float -0.000000e+00, float -0.000000e+00>, [[X:%.*]]
 ; CHECK-NEXT:    ret <4 x float> [[MUL]]
 ;
-  %mul = fmul <4 x float> %x, <float -1.0, float -1.0, float -1.0, float -1.0>
+  %mul = fmul arcp afn <4 x float> %x, <float -1.0, float -1.0, float -1.0, float -1.0>
   ret <4 x float> %mul
 }
 
@@ -153,18 +172,7 @@ define float @test11(float %x, float %y) {
   ret float %c
 }
 
-; PR21126: http://llvm.org/bugs/show_bug.cgi?id=21126
-; With unsafe/fast math, sqrt(X) * sqrt(X) is just X.
 declare double @llvm.sqrt.f64(double)
-
-define double @sqrt_squared1(double %f) {
-; CHECK-LABEL: @sqrt_squared1(
-; CHECK-NEXT:    ret double [[F:%.*]]
-;
-  %sqrt = call double @llvm.sqrt.f64(double %f)
-  %mul = fmul fast double %sqrt, %sqrt
-  ret double %mul
-}
 
 ; With unsafe/fast math, sqrt(X) * sqrt(X) is just X,
 ; but make sure another use of the sqrt is intact.
@@ -218,3 +226,109 @@ define float @fabs_x_fabs(float %x, float %y) {
   %mul = fmul float %x.fabs, %y.fabs
   ret float %mul
 }
+
+; (X*Y) * X => (X*X) * Y
+; The transform only requires 'reassoc', but test other FMF in
+; the commuted variants to make sure FMF propagates as expected.
+
+define float @reassoc_common_operand1(float %x, float %y) {
+; CHECK-LABEL: @reassoc_common_operand1(
+; CHECK-NEXT:    [[TMP1:%.*]] = fmul reassoc float [[X:%.*]], [[X]]
+; CHECK-NEXT:    [[MUL2:%.*]] = fmul reassoc float [[TMP1]], [[Y:%.*]]
+; CHECK-NEXT:    ret float [[MUL2]]
+;
+  %mul1 = fmul float %x, %y
+  %mul2 = fmul reassoc float %mul1, %x
+  ret float %mul2
+}
+
+; (Y*X) * X => (X*X) * Y
+
+define float @reassoc_common_operand2(float %x, float %y) {
+; CHECK-LABEL: @reassoc_common_operand2(
+; CHECK-NEXT:    [[TMP1:%.*]] = fmul fast float [[X:%.*]], [[X]]
+; CHECK-NEXT:    [[MUL2:%.*]] = fmul fast float [[TMP1]], [[Y:%.*]]
+; CHECK-NEXT:    ret float [[MUL2]]
+;
+  %mul1 = fmul float %y, %x
+  %mul2 = fmul fast float %mul1, %x
+  ret float %mul2
+}
+
+; X * (X*Y) => (X*X) * Y
+
+define float @reassoc_common_operand3(float %x1, float %y) {
+; CHECK-LABEL: @reassoc_common_operand3(
+; CHECK-NEXT:    [[X:%.*]] = fdiv float [[X1:%.*]], 3.000000e+00
+; CHECK-NEXT:    [[TMP1:%.*]] = fmul reassoc nnan float [[X]], [[X]]
+; CHECK-NEXT:    [[MUL2:%.*]] = fmul reassoc nnan float [[TMP1]], [[Y:%.*]]
+; CHECK-NEXT:    ret float [[MUL2]]
+;
+  %x = fdiv float %x1, 3.0 ; thwart complexity-based canonicalization
+  %mul1 = fmul float %x, %y
+  %mul2 = fmul reassoc nnan float %x, %mul1
+  ret float %mul2
+}
+
+; X * (Y*X) => (X*X) * Y
+
+define float @reassoc_common_operand4(float %x1, float %y) {
+; CHECK-LABEL: @reassoc_common_operand4(
+; CHECK-NEXT:    [[X:%.*]] = fdiv float [[X1:%.*]], 3.000000e+00
+; CHECK-NEXT:    [[TMP1:%.*]] = fmul reassoc ninf float [[X]], [[X]]
+; CHECK-NEXT:    [[MUL2:%.*]] = fmul reassoc ninf float [[TMP1]], [[Y:%.*]]
+; CHECK-NEXT:    ret float [[MUL2]]
+;
+  %x = fdiv float %x1, 3.0 ; thwart complexity-based canonicalization
+  %mul1 = fmul float %y, %x
+  %mul2 = fmul reassoc ninf float %x, %mul1
+  ret float %mul2
+}
+
+; No change if the first fmul has another use.
+
+define float @reassoc_common_operand_multi_use(float %x, float %y) {
+; CHECK-LABEL: @reassoc_common_operand_multi_use(
+; CHECK-NEXT:    [[MUL1:%.*]] = fmul float [[X:%.*]], [[Y:%.*]]
+; CHECK-NEXT:    [[MUL2:%.*]] = fmul fast float [[MUL1]], [[X]]
+; CHECK-NEXT:    call void @use_f32(float [[MUL1]])
+; CHECK-NEXT:    ret float [[MUL2]]
+;
+  %mul1 = fmul float %x, %y
+  %mul2 = fmul fast float %mul1, %x
+  call void @use_f32(float %mul1)
+  ret float %mul2
+}
+
+declare float @llvm.log2.f32(float)
+
+; log2(Y * 0.5) * X = log2(Y) * X - X
+
+define float @log2half(float %x, float %y) {
+; CHECK-LABEL: @log2half(
+; CHECK-NEXT:    [[LOG2:%.*]] = call fast float @llvm.log2.f32(float [[Y:%.*]])
+; CHECK-NEXT:    [[TMP1:%.*]] = fmul fast float [[LOG2]], [[X:%.*]]
+; CHECK-NEXT:    [[MUL:%.*]] = fsub fast float [[TMP1]], [[X]]
+; CHECK-NEXT:    ret float [[MUL]]
+;
+  %halfy = fmul float %y, 0.5
+  %log2 = call float @llvm.log2.f32(float %halfy)
+  %mul = fmul fast float %log2, %x
+  ret float %mul
+}
+
+define float @log2half_commute(float %x1, float %y) {
+; CHECK-LABEL: @log2half_commute(
+; CHECK-NEXT:    [[X:%.*]] = fdiv float [[X1:%.*]], 7.000000e+00
+; CHECK-NEXT:    [[LOG2:%.*]] = call fast float @llvm.log2.f32(float [[Y:%.*]])
+; CHECK-NEXT:    [[TMP1:%.*]] = fmul fast float [[LOG2]], [[X]]
+; CHECK-NEXT:    [[MUL:%.*]] = fsub fast float [[TMP1]], [[X]]
+; CHECK-NEXT:    ret float [[MUL]]
+;
+  %x = fdiv float %x1, 7.0 ; thwart complexity-based canonicalization
+  %halfy = fmul float %y, 0.5
+  %log2 = call float @llvm.log2.f32(float %halfy)
+  %mul = fmul fast float %x, %log2
+  ret float %mul
+}
+

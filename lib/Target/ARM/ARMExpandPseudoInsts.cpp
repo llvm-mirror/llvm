@@ -156,8 +156,10 @@ static const NEONLdStTableEntry NEONLdStTable[] = {
 
 { ARM::VLD1d64QPseudo,      ARM::VLD1d64Q,     true,  false, false, SingleSpc,  4, 1 ,false},
 { ARM::VLD1d64QPseudoWB_fixed,  ARM::VLD1d64Qwb_fixed,   true,  true, false, SingleSpc,  4, 1 ,false},
+{ ARM::VLD1d64QPseudoWB_register,  ARM::VLD1d64Qwb_register,   true,  true, true, SingleSpc,  4, 1 ,false},
 { ARM::VLD1d64TPseudo,      ARM::VLD1d64T,     true,  false, false, SingleSpc,  3, 1 ,false},
 { ARM::VLD1d64TPseudoWB_fixed,  ARM::VLD1d64Twb_fixed,   true,  true, false, SingleSpc,  3, 1 ,false},
+{ ARM::VLD1d64TPseudoWB_register,  ARM::VLD1d64Twb_register, true, true, true,  SingleSpc,  3, 1 ,false},
 
 { ARM::VLD2LNd16Pseudo,     ARM::VLD2LNd16,     true, false, false, SingleSpc,  2, 4 ,true},
 { ARM::VLD2LNd16Pseudo_UPD, ARM::VLD2LNd16_UPD, true, true, true,  SingleSpc,  2, 4 ,true},
@@ -608,7 +610,6 @@ void ARMExpandPseudo::ExpandVTBL(MachineBasicBlock::iterator &MBBI,
   MIB.add(MI.getOperand(OpIdx++));
   if (IsExt) {
     MachineOperand VdSrc(MI.getOperand(OpIdx++));
-    VdSrc.setIsRenamable(false);
     MIB.add(VdSrc);
   }
 
@@ -620,7 +621,6 @@ void ARMExpandPseudo::ExpandVTBL(MachineBasicBlock::iterator &MBBI,
 
   // Copy the other source register operand.
   MachineOperand VmSrc(MI.getOperand(OpIdx++));
-  VmSrc.setIsRenamable(false);
   MIB.add(VmSrc);
 
   // Copy the predicate operands.
@@ -1470,7 +1470,6 @@ bool ARMExpandPseudo::ExpandMI(MachineBasicBlock &MBB,
 
       // Copy the destination register.
       MachineOperand Dst(MI.getOperand(OpIdx++));
-      Dst.setIsRenamable(false);
       MIB.add(Dst);
 
       // Copy the predicate operands.
@@ -1506,6 +1505,7 @@ bool ARMExpandPseudo::ExpandMI(MachineBasicBlock &MBB,
     case ARM::VLD3d32Pseudo:
     case ARM::VLD1d64TPseudo:
     case ARM::VLD1d64TPseudoWB_fixed:
+    case ARM::VLD1d64TPseudoWB_register:
     case ARM::VLD3d8Pseudo_UPD:
     case ARM::VLD3d16Pseudo_UPD:
     case ARM::VLD3d32Pseudo_UPD:
@@ -1523,6 +1523,7 @@ bool ARMExpandPseudo::ExpandMI(MachineBasicBlock &MBB,
     case ARM::VLD4d32Pseudo:
     case ARM::VLD1d64QPseudo:
     case ARM::VLD1d64QPseudoWB_fixed:
+    case ARM::VLD1d64QPseudoWB_register:
     case ARM::VLD4d8Pseudo_UPD:
     case ARM::VLD4d16Pseudo_UPD:
     case ARM::VLD4d32Pseudo_UPD:

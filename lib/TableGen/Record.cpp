@@ -63,6 +63,8 @@ bool RecTy::typeIsConvertibleTo(const RecTy *RHS) const {
   return Kind == RHS->getRecTyKind();
 }
 
+bool RecTy::typeIsA(const RecTy *RHS) const { return this == RHS; }
+
 bool BitRecTy::typeIsConvertibleTo(const RecTy *RHS) const{
   if (RecTy::typeIsConvertibleTo(RHS) || RHS->getRecTyKind() == IntRecTyKind)
     return true;
@@ -92,13 +94,29 @@ bool BitsRecTy::typeIsConvertibleTo(const RecTy *RHS) const {
   return (kind == BitRecTyKind && Size == 1) || (kind == IntRecTyKind);
 }
 
+bool BitsRecTy::typeIsA(const RecTy *RHS) const {
+  if (const BitsRecTy *RHSb = dyn_cast<BitsRecTy>(RHS))
+    return RHSb->Size == Size;
+  return false;
+}
+
 bool IntRecTy::typeIsConvertibleTo(const RecTy *RHS) const {
   RecTyKind kind = RHS->getRecTyKind();
   return kind==BitRecTyKind || kind==BitsRecTyKind || kind==IntRecTyKind;
 }
 
+bool CodeRecTy::typeIsConvertibleTo(const RecTy *RHS) const {
+  RecTyKind Kind = RHS->getRecTyKind();
+  return Kind == CodeRecTyKind || Kind == StringRecTyKind;
+}
+
 std::string StringRecTy::getAsString() const {
   return "string";
+}
+
+bool StringRecTy::typeIsConvertibleTo(const RecTy *RHS) const {
+  RecTyKind Kind = RHS->getRecTyKind();
+  return Kind == StringRecTyKind || Kind == CodeRecTyKind;
 }
 
 std::string ListRecTy::getAsString() const {
@@ -111,58 +129,152 @@ bool ListRecTy::typeIsConvertibleTo(const RecTy *RHS) const {
   return false;
 }
 
+bool ListRecTy::typeIsA(const RecTy *RHS) const {
+  if (const ListRecTy *RHSl = dyn_cast<ListRecTy>(RHS))
+    return getElementType()->typeIsA(RHSl->getElementType());
+  return false;
+}
+
 std::string DagRecTy::getAsString() const {
   return "dag";
 }
 
-RecordRecTy *RecordRecTy::get(Record *R) {
-  return dyn_cast<RecordRecTy>(R->getDefInit()->getType());
+static void ProfileRecordRecTy(FoldingSetNodeID &ID,
+                               ArrayRef<Record *> Classes) {
+  ID.AddInteger(Classes.size());
+  for (Record *R : Classes)
+    ID.AddPointer(R);
+}
+
+RecordRecTy *RecordRecTy::get(ArrayRef<Record *> UnsortedClasses) {
+  if (UnsortedClasses.empty()) {
+    static RecordRecTy AnyRecord(0);
+    return &AnyRecord;
+  }
+
+  FoldingSet<RecordRecTy> &ThePool =
+      UnsortedClasses[0]->getRecords().RecordTypePool;
+
+  SmallVector<Record *, 4> Classes(UnsortedClasses.begin(),
+                                   UnsortedClasses.end());
+  std::sort(Classes.begin(), Classes.end(),
+            [](Record *LHS, Record *RHS) {
+              return LHS->getNameInitAsString() < RHS->getNameInitAsString();
+            });
+
+  FoldingSetNodeID ID;
+  ProfileRecordRecTy(ID, Classes);
+
+  void *IP = nullptr;
+  if (RecordRecTy *Ty = ThePool.FindNodeOrInsertPos(ID, IP))
+    return Ty;
+
+#ifndef NDEBUG
+  // Check for redundancy.
+  for (unsigned i = 0; i < Classes.size(); ++i) {
+    for (unsigned j = 0; j < Classes.size(); ++j) {
+      assert(i == j || !Classes[i]->isSubClassOf(Classes[j]));
+    }
+    assert(&Classes[0]->getRecords() == &Classes[i]->getRecords());
+  }
+#endif
+
+  void *Mem = Allocator.Allocate(totalSizeToAlloc<Record *>(Classes.size()),
+                                 alignof(RecordRecTy));
+  RecordRecTy *Ty = new(Mem) RecordRecTy(Classes.size());
+  std::uninitialized_copy(Classes.begin(), Classes.end(),
+                          Ty->getTrailingObjects<Record *>());
+  ThePool.InsertNode(Ty, IP);
+  return Ty;
+}
+
+void RecordRecTy::Profile(FoldingSetNodeID &ID) const {
+  ProfileRecordRecTy(ID, getClasses());
 }
 
 std::string RecordRecTy::getAsString() const {
-  return Rec->getName();
+  if (NumClasses == 1)
+    return getClasses()[0]->getName();
+
+  std::string Str = "{";
+  bool First = true;
+  for (Record *R : getClasses()) {
+    if (!First)
+      Str += ", ";
+    First = false;
+    Str += R->getName();
+  }
+  Str += "}";
+  return Str;
+}
+
+bool RecordRecTy::isSubClassOf(Record *Class) const {
+  return llvm::any_of(getClasses(), [Class](Record *MySuperClass) {
+                                      return MySuperClass == Class ||
+                                             MySuperClass->isSubClassOf(Class);
+                                    });
 }
 
 bool RecordRecTy::typeIsConvertibleTo(const RecTy *RHS) const {
+  if (this == RHS)
+    return true;
+
   const RecordRecTy *RTy = dyn_cast<RecordRecTy>(RHS);
   if (!RTy)
     return false;
 
-  if (RTy->getRecord() == Rec || Rec->isSubClassOf(RTy->getRecord()))
-    return true;
+  return llvm::all_of(RTy->getClasses(), [this](Record *TargetClass) {
+                                           return isSubClassOf(TargetClass);
+                                         });
+}
 
-  for (const auto &SCPair : RTy->getRecord()->getSuperClasses())
-    if (Rec->isSubClassOf(SCPair.first))
-      return true;
+bool RecordRecTy::typeIsA(const RecTy *RHS) const {
+  return typeIsConvertibleTo(RHS);
+}
 
-  return false;
+static RecordRecTy *resolveRecordTypes(RecordRecTy *T1, RecordRecTy *T2) {
+  SmallVector<Record *, 4> CommonSuperClasses;
+  SmallVector<Record *, 4> Stack;
+
+  Stack.insert(Stack.end(), T1->classes_begin(), T1->classes_end());
+
+  while (!Stack.empty()) {
+    Record *R = Stack.back();
+    Stack.pop_back();
+
+    if (T2->isSubClassOf(R)) {
+      CommonSuperClasses.push_back(R);
+    } else {
+      R->getDirectSuperClasses(Stack);
+    }
+  }
+
+  return RecordRecTy::get(CommonSuperClasses);
 }
 
 RecTy *llvm::resolveTypes(RecTy *T1, RecTy *T2) {
+  if (T1 == T2)
+    return T1;
+
+  if (RecordRecTy *RecTy1 = dyn_cast<RecordRecTy>(T1)) {
+    if (RecordRecTy *RecTy2 = dyn_cast<RecordRecTy>(T2))
+      return resolveRecordTypes(RecTy1, RecTy2);
+  }
+
   if (T1->typeIsConvertibleTo(T2))
     return T2;
   if (T2->typeIsConvertibleTo(T1))
     return T1;
 
-  // If one is a Record type, check superclasses
-  if (RecordRecTy *RecTy1 = dyn_cast<RecordRecTy>(T1)) {
-    // See if T2 inherits from a type T1 also inherits from
-    for (const auto &SuperPair1 : RecTy1->getRecord()->getSuperClasses()) {
-      RecordRecTy *SuperRecTy1 = RecordRecTy::get(SuperPair1.first);
-      RecTy *NewType1 = resolveTypes(SuperRecTy1, T2);
-      if (NewType1)
-        return NewType1;
+  if (ListRecTy *ListTy1 = dyn_cast<ListRecTy>(T1)) {
+    if (ListRecTy *ListTy2 = dyn_cast<ListRecTy>(T2)) {
+      RecTy* NewType = resolveTypes(ListTy1->getElementType(),
+                                    ListTy2->getElementType());
+      if (NewType)
+        return NewType->getListTy();
     }
   }
-  if (RecordRecTy *RecTy2 = dyn_cast<RecordRecTy>(T2)) {
-    // See if T1 inherits from a type T2 also inherits from
-    for (const auto &SuperPair2 : RecTy2->getRecord()->getSuperClasses()) {
-      RecordRecTy *SuperRecTy2 = RecordRecTy::get(SuperPair2.first);
-      RecTy *NewType2 = resolveTypes(T1, SuperRecTy2);
-      if (NewType2)
-        return NewType2;
-    }
-  }
+
   return nullptr;
 }
 
@@ -181,17 +293,11 @@ UnsetInit *UnsetInit::get() {
   return &TheInit;
 }
 
+Init *UnsetInit::getCastTo(RecTy *Ty) const {
+  return const_cast<UnsetInit *>(this);
+}
+
 Init *UnsetInit::convertInitializerTo(RecTy *Ty) const {
-  if (auto *BRT = dyn_cast<BitsRecTy>(Ty)) {
-    SmallVector<Init *, 16> NewBits(BRT->getNumBits());
-
-    for (unsigned i = 0; i != BRT->getNumBits(); ++i)
-      NewBits[i] = UnsetInit::get();
-
-    return BitsInit::get(NewBits);
-  }
-
-  // All other types can just be returned.
   return const_cast<UnsetInit *>(this);
 }
 
@@ -287,6 +393,14 @@ BitsInit::convertInitializerBitRange(ArrayRef<unsigned> Bits) const {
   return BitsInit::get(NewBits);
 }
 
+bool BitsInit::isConcrete() const {
+  for (unsigned i = 0, e = getNumBits(); i != e; ++i) {
+    if (!getBit(i)->isConcrete())
+      return false;
+  }
+  return true;
+}
+
 std::string BitsInit::getAsString() const {
   std::string Result = "{ ";
   for (unsigned i = 0, e = getNumBits(); i != e; ++i) {
@@ -299,54 +413,35 @@ std::string BitsInit::getAsString() const {
   return Result + " }";
 }
 
-// Fix bit initializer to preserve the behavior that bit reference from a unset
-// bits initializer will resolve into VarBitInit to keep the field name and bit
-// number used in targets with fixed insn length.
-static Init *fixBitInit(const RecordVal *RV, Init *Before, Init *After) {
-  if (RV || !isa<UnsetInit>(After))
-    return After;
-  return Before;
-}
-
 // resolveReferences - If there are any field references that refer to fields
 // that have been filled in, we can propagate the values now.
-Init *BitsInit::resolveReferences(Record &R, const RecordVal *RV) const {
+Init *BitsInit::resolveReferences(Resolver &R) const {
   bool Changed = false;
   SmallVector<Init *, 16> NewBits(getNumBits());
 
-  Init *CachedInit = nullptr;
-  Init *CachedBitVar = nullptr;
-  bool CachedBitVarChanged = false;
+  Init *CachedBitVarRef = nullptr;
+  Init *CachedBitVarResolved = nullptr;
 
   for (unsigned i = 0, e = getNumBits(); i != e; ++i) {
     Init *CurBit = getBit(i);
-    Init *CurBitVar = CurBit->getBitVar();
+    Init *NewBit = CurBit;
 
-    NewBits[i] = CurBit;
-
-    if (CurBitVar == CachedBitVar) {
-      if (CachedBitVarChanged) {
-        Init *Bit = CachedInit->getBit(CurBit->getBitNum());
-        NewBits[i] = fixBitInit(RV, CurBit, Bit);
+    if (VarBitInit *CurBitVar = dyn_cast<VarBitInit>(CurBit)) {
+      if (CurBitVar->getBitVar() != CachedBitVarRef) {
+        CachedBitVarRef = CurBitVar->getBitVar();
+        CachedBitVarResolved = CachedBitVarRef->resolveReferences(R);
       }
-      continue;
-    }
-    CachedBitVar = CurBitVar;
-    CachedBitVarChanged = false;
 
-    Init *B;
-    do {
-      B = CurBitVar;
-      CurBitVar = CurBitVar->resolveReferences(R, RV);
-      CachedBitVarChanged |= B != CurBitVar;
-      Changed |= B != CurBitVar;
-    } while (B != CurBitVar);
-    CachedInit = CurBitVar;
-
-    if (CachedBitVarChanged) {
-      Init *Bit = CurBitVar->getBit(CurBit->getBitNum());
-      NewBits[i] = fixBitInit(RV, CurBit, Bit);
+      NewBit = CachedBitVarResolved->getBit(CurBitVar->getBitNum());
+    } else {
+      // getBit(0) implicitly converts int and bits<1> values to bit.
+      NewBit = CurBit->resolveReferences(R)->getBit(0);
     }
+
+    if (isa<UnsetInit>(NewBit) && R.keepUnsetBits())
+      NewBit = CurBit;
+    NewBits[i] = NewBit;
+    Changed |= CurBit != NewBit;
   }
 
   if (Changed)
@@ -433,6 +528,8 @@ StringInit *StringInit::get(StringRef V) {
 Init *StringInit::convertInitializerTo(RecTy *Ty) const {
   if (isa<StringRecTy>(Ty))
     return const_cast<StringInit *>(this);
+  if (isa<CodeRecTy>(Ty))
+    return CodeInit::get(getValue());
 
   return nullptr;
 }
@@ -440,6 +537,8 @@ Init *StringInit::convertInitializerTo(RecTy *Ty) const {
 Init *CodeInit::convertInitializerTo(RecTy *Ty) const {
   if (isa<CodeRecTy>(Ty))
     return const_cast<CodeInit *>(this);
+  if (isa<StringRecTy>(Ty))
+    return StringInit::get(getValue());
 
   return nullptr;
 }
@@ -463,6 +562,9 @@ ListInit *ListInit::get(ArrayRef<Init *> Range, RecTy *EltTy) {
   void *IP = nullptr;
   if (ListInit *I = ThePool.FindNodeOrInsertPos(ID, IP))
     return I;
+
+  assert(Range.empty() || !isa<TypedInit>(Range[0]) ||
+         cast<TypedInit>(Range[0])->getType()->typeIsConvertibleTo(EltTy));
 
   void *Mem = Allocator.Allocate(totalSizeToAlloc<Init *>(Range.size()),
                                  alignof(ListInit));
@@ -501,7 +603,7 @@ Init *ListInit::convertInitializerTo(RecTy *Ty) const {
 
     if (!Changed)
       return const_cast<ListInit*>(this);
-    return ListInit::get(Elements, Ty);
+    return ListInit::get(Elements, ElementType);
   }
 
   return nullptr;
@@ -515,7 +617,7 @@ Init *ListInit::convertInitListSlice(ArrayRef<unsigned> Elements) const {
       return nullptr;
     Vals.push_back(getElement(Element));
   }
-  return ListInit::get(Vals, getType());
+  return ListInit::get(Vals, getElementType());
 }
 
 Record *ListInit::getElementAsRecord(unsigned i) const {
@@ -526,7 +628,7 @@ Record *ListInit::getElementAsRecord(unsigned i) const {
   return DI->getDef();
 }
 
-Init *ListInit::resolveReferences(Record &R, const RecordVal *RV) const {
+Init *ListInit::resolveReferences(Resolver &R) const {
   SmallVector<Init*, 8> Resolved;
   Resolved.reserve(size());
   bool Changed = false;
@@ -536,28 +638,23 @@ Init *ListInit::resolveReferences(Record &R, const RecordVal *RV) const {
 
     do {
       E = CurElt;
-      CurElt = CurElt->resolveReferences(R, RV);
+      CurElt = CurElt->resolveReferences(R);
       Changed |= E != CurElt;
     } while (E != CurElt);
     Resolved.push_back(E);
   }
 
   if (Changed)
-    return ListInit::get(Resolved, getType());
+    return ListInit::get(Resolved, getElementType());
   return const_cast<ListInit *>(this);
 }
 
-Init *ListInit::resolveListElementReference(Record &R, const RecordVal *IRV,
-                                            unsigned Elt) const {
-  if (Elt >= size())
-    return nullptr;  // Out of range reference.
-  Init *E = getElement(Elt);
-  // If the element is set to some value, or if we are resolving a reference
-  // to a specific variable and that variable is explicitly unset, then
-  // replace the VarListElementInit with it.
-  if (IRV || !isa<UnsetInit>(E))
-    return E;
-  return nullptr;
+bool ListInit::isConcrete() const {
+  for (Init *Element : *this) {
+    if (!Element->isConcrete())
+      return false;
+  }
+  return true;
 }
 
 std::string ListInit::getAsString() const {
@@ -569,24 +666,6 @@ std::string ListInit::getAsString() const {
     Result += Element->getAsString();
   }
   return Result + "]";
-}
-
-Init *OpInit::resolveListElementReference(Record &R, const RecordVal *IRV,
-                                          unsigned Elt) const {
-  Init *Resolved = resolveReferences(R, IRV);
-  OpInit *OResolved = dyn_cast<OpInit>(Resolved);
-  if (OResolved) {
-    Resolved = OResolved->Fold(&R, nullptr);
-  }
-
-  if (Resolved != this) {
-    TypedInit *Typed = cast<TypedInit>(Resolved);
-    if (Init *New = Typed->resolveListElementReference(R, IRV, Elt))
-      return New;
-    return VarListElementInit::get(Typed, Elt);
-  }
-
-  return nullptr;
 }
 
 Init *OpInit::getBit(unsigned Bit) const {
@@ -633,7 +712,7 @@ Init *UnOpInit::Fold(Record *CurRec, MultiClass *CurMultiClass) const {
 
       if (IntInit *LHSi = dyn_cast<IntInit>(LHS))
         return StringInit::get(LHSi->getAsString());
-    } else {
+    } else if (isa<RecordRecTy>(getType())) {
       if (StringInit *Name = dyn_cast<StringInit>(LHS)) {
         // From TGParser::ParseIDValue
         if (CurRec) {
@@ -678,15 +757,10 @@ Init *UnOpInit::Fold(Record *CurRec, MultiClass *CurMultiClass) const {
         PrintFatalError(CurRec->getLoc(),
                         "Undefined reference:'" + Name->getValue() + "'\n");
       }
-
-      if (isa<IntRecTy>(getType())) {
-        if (BitsInit *BI = dyn_cast<BitsInit>(LHS)) {
-          if (Init *NewInit = BI->convertInitializerTo(IntRecTy::get()))
-            return NewInit;
-          break;
-        }
-      }
     }
+
+    if (Init *NewInit = LHS->convertInitializerTo(getType()))
+      return NewInit;
     break;
 
   case HEAD:
@@ -701,8 +775,13 @@ Init *UnOpInit::Fold(Record *CurRec, MultiClass *CurMultiClass) const {
       assert(!LHSl->empty() && "Empty list in tail");
       // Note the +1.  We can't just pass the result of getValues()
       // directly.
-      return ListInit::get(LHSl->getValues().slice(1), LHSl->getType());
+      return ListInit::get(LHSl->getValues().slice(1), LHSl->getElementType());
     }
+    break;
+
+  case SIZE:
+    if (ListInit *LHSl = dyn_cast<ListInit>(LHS))
+      return IntInit::get(LHSl->size());
     break;
 
   case EMPTY:
@@ -715,12 +794,13 @@ Init *UnOpInit::Fold(Record *CurRec, MultiClass *CurMultiClass) const {
   return const_cast<UnOpInit *>(this);
 }
 
-Init *UnOpInit::resolveReferences(Record &R, const RecordVal *RV) const {
-  Init *lhs = LHS->resolveReferences(R, RV);
+Init *UnOpInit::resolveReferences(Resolver &R) const {
+  Init *lhs = LHS->resolveReferences(R);
 
   if (LHS != lhs)
-    return (UnOpInit::get(getOpcode(), lhs, getType()))->Fold(&R, nullptr);
-  return Fold(&R, nullptr);
+    return (UnOpInit::get(getOpcode(), lhs, getType()))
+        ->Fold(R.getCurrentRecord(), nullptr);
+  return Fold(R.getCurrentRecord(), nullptr);
 }
 
 std::string UnOpInit::getAsString() const {
@@ -729,6 +809,7 @@ std::string UnOpInit::getAsString() const {
   case CAST: Result = "!cast<" + getType()->getAsString() + ">"; break;
   case HEAD: Result = "!head"; break;
   case TAIL: Result = "!tail"; break;
+  case SIZE: Result = "!size"; break;
   case EMPTY: Result = "!empty"; break;
   }
   return Result + "(" + LHS->getAsString() + ")";
@@ -801,8 +882,7 @@ Init *BinOpInit::Fold(Record *CurRec, MultiClass *CurMultiClass) const {
       SmallVector<Init *, 8> Args;
       Args.insert(Args.end(), LHSs->begin(), LHSs->end());
       Args.insert(Args.end(), RHSs->begin(), RHSs->end());
-      return ListInit::get(
-          Args, cast<ListRecTy>(LHSs->getType())->getElementType());
+      return ListInit::get(Args, LHSs->getElementType());
     }
     break;
   }
@@ -863,13 +943,14 @@ Init *BinOpInit::Fold(Record *CurRec, MultiClass *CurMultiClass) const {
   return const_cast<BinOpInit *>(this);
 }
 
-Init *BinOpInit::resolveReferences(Record &R, const RecordVal *RV) const {
-  Init *lhs = LHS->resolveReferences(R, RV);
-  Init *rhs = RHS->resolveReferences(R, RV);
+Init *BinOpInit::resolveReferences(Resolver &R) const {
+  Init *lhs = LHS->resolveReferences(R);
+  Init *rhs = RHS->resolveReferences(R);
 
   if (LHS != lhs || RHS != rhs)
-    return (BinOpInit::get(getOpcode(), lhs, rhs, getType()))->Fold(&R,nullptr);
-  return Fold(&R, nullptr);
+    return (BinOpInit::get(getOpcode(), lhs, rhs, getType()))
+        ->Fold(R.getCurrentRecord(), nullptr);
+  return Fold(R.getCurrentRecord(), nullptr);
 }
 
 std::string BinOpInit::getAsString() const {
@@ -919,98 +1000,57 @@ void TernOpInit::Profile(FoldingSetNodeID &ID) const {
   ProfileTernOpInit(ID, getOpcode(), getLHS(), getMHS(), getRHS(), getType());
 }
 
-static Init *ForeachHelper(Init *LHS, Init *MHS, Init *RHS, RecTy *Type,
-                           Record *CurRec, MultiClass *CurMultiClass);
-
-static Init *EvaluateOperation(OpInit *RHSo, Init *LHS, Init *Arg,
-                               RecTy *Type, Record *CurRec,
-                               MultiClass *CurMultiClass) {
-  // If this is a dag, recurse
-  if (auto *TArg = dyn_cast<TypedInit>(Arg))
-    if (isa<DagRecTy>(TArg->getType()))
-      return ForeachHelper(LHS, Arg, RHSo, Type, CurRec, CurMultiClass);
-
-  SmallVector<Init *, 8> NewOperands;
-  NewOperands.reserve(RHSo->getNumOperands());
-  for (unsigned i = 0, e = RHSo->getNumOperands(); i < e; ++i) {
-    if (auto *RHSoo = dyn_cast<OpInit>(RHSo->getOperand(i))) {
-      if (Init *Result = EvaluateOperation(RHSoo, LHS, Arg,
-                                           Type, CurRec, CurMultiClass))
-        NewOperands.push_back(Result);
-      else
-        NewOperands.push_back(Arg);
-    } else if (LHS->getAsString() == RHSo->getOperand(i)->getAsString()) {
-      NewOperands.push_back(Arg);
-    } else {
-      NewOperands.push_back(RHSo->getOperand(i));
-    }
-  }
-
-  // Now run the operator and use its result as the new leaf
-  const OpInit *NewOp = RHSo->clone(NewOperands);
-  Init *NewVal = NewOp->Fold(CurRec, CurMultiClass);
-  return (NewVal != NewOp) ? NewVal : nullptr;
+static Init *ForeachApply(Init *LHS, Init *MHSe, Init *RHS, Record *CurRec) {
+  MapResolver R(CurRec);
+  R.set(LHS, MHSe);
+  return RHS->resolveReferences(R);
 }
 
-static Init *ForeachHelper(Init *LHS, Init *MHS, Init *RHS, RecTy *Type,
-                           Record *CurRec, MultiClass *CurMultiClass) {
-  OpInit *RHSo = dyn_cast<OpInit>(RHS);
+static Init *ForeachDagApply(Init *LHS, DagInit *MHSd, Init *RHS,
+                             Record *CurRec) {
+  bool Change = false;
+  Init *Val = ForeachApply(LHS, MHSd->getOperator(), RHS, CurRec);
+  if (Val != MHSd->getOperator())
+    Change = true;
 
-  if (!RHSo)
-    PrintFatalError(CurRec->getLoc(), "!foreach requires an operator\n");
+  SmallVector<std::pair<Init *, StringInit *>, 8> NewArgs;
+  for (unsigned int i = 0; i < MHSd->getNumArgs(); ++i) {
+    Init *Arg = MHSd->getArg(i);
+    Init *NewArg;
+    StringInit *ArgName = MHSd->getArgName(i);
 
-  TypedInit *LHSt = dyn_cast<TypedInit>(LHS);
+    if (DagInit *Argd = dyn_cast<DagInit>(Arg))
+      NewArg = ForeachDagApply(LHS, Argd, RHS, CurRec);
+    else
+      NewArg = ForeachApply(LHS, Arg, RHS, CurRec);
 
-  if (!LHSt)
-    PrintFatalError(CurRec->getLoc(), "!foreach requires typed variable\n");
-
-  DagInit *MHSd = dyn_cast<DagInit>(MHS);
-  if (MHSd && isa<DagRecTy>(Type)) {
-    Init *Val = MHSd->getOperator();
-    if (Init *Result = EvaluateOperation(RHSo, LHS, Val,
-                                         Type, CurRec, CurMultiClass))
-      Val = Result;
-
-    SmallVector<std::pair<Init *, StringInit*>, 8> args;
-    for (unsigned int i = 0; i < MHSd->getNumArgs(); ++i) {
-      Init *Arg = MHSd->getArg(i);
-      StringInit *ArgName = MHSd->getArgName(i);
-
-      // Process args
-      if (Init *Result = EvaluateOperation(RHSo, LHS, Arg, Type,
-                                           CurRec, CurMultiClass))
-        Arg = Result;
-
-      // TODO: Process arg names
-      args.push_back(std::make_pair(Arg, ArgName));
-    }
-
-    return DagInit::get(Val, nullptr, args);
+    NewArgs.push_back(std::make_pair(NewArg, ArgName));
+    if (Arg != NewArg)
+      Change = true;
   }
 
-  ListInit *MHSl = dyn_cast<ListInit>(MHS);
-  if (MHSl && isa<ListRecTy>(Type)) {
-    SmallVector<Init *, 8> NewOperands;
+  if (Change)
+    return DagInit::get(Val, nullptr, NewArgs);
+  return MHSd;
+}
+
+// Applies RHS to all elements of MHS, using LHS as a temp variable.
+static Init *ForeachHelper(Init *LHS, Init *MHS, Init *RHS, RecTy *Type,
+                           Record *CurRec) {
+  if (DagInit *MHSd = dyn_cast<DagInit>(MHS))
+    return ForeachDagApply(LHS, MHSd, RHS, CurRec);
+
+  if (ListInit *MHSl = dyn_cast<ListInit>(MHS)) {
     SmallVector<Init *, 8> NewList(MHSl->begin(), MHSl->end());
 
     for (Init *&Item : NewList) {
-      NewOperands.clear();
-      for(unsigned i = 0; i < RHSo->getNumOperands(); ++i) {
-        // First, replace the foreach variable with the list item
-        if (LHS->getAsString() == RHSo->getOperand(i)->getAsString())
-          NewOperands.push_back(Item);
-        else
-          NewOperands.push_back(RHSo->getOperand(i));
-      }
-
-      // Now run the operator and use its result as the new list item
-      const OpInit *NewOp = RHSo->clone(NewOperands);
-      Init *NewItem = NewOp->Fold(CurRec, CurMultiClass);
-      if (NewItem != NewOp)
+      Init *NewItem = ForeachApply(LHS, Item, RHS, CurRec);
+      if (NewItem != Item)
         Item = NewItem;
     }
-    return ListInit::get(NewList, MHSl->getType());
+    return ListInit::get(NewList, cast<ListRecTy>(Type)->getElementType());
   }
+
   return nullptr;
 }
 
@@ -1060,17 +1100,14 @@ Init *TernOpInit::Fold(Record *CurRec, MultiClass *CurMultiClass) const {
   }
 
   case FOREACH: {
-    if (Init *Result = ForeachHelper(LHS, MHS, RHS, getType(),
-                                     CurRec, CurMultiClass))
+    if (Init *Result = ForeachHelper(LHS, MHS, RHS, getType(), CurRec))
       return Result;
     break;
   }
 
   case IF: {
-    IntInit *LHSi = dyn_cast<IntInit>(LHS);
-    if (Init *I = LHS->convertInitializerTo(IntRecTy::get()))
-      LHSi = dyn_cast<IntInit>(I);
-    if (LHSi) {
+    if (IntInit *LHSi = dyn_cast_or_null<IntInit>(
+                            LHS->convertInitializerTo(IntRecTy::get()))) {
       if (LHSi->getValue())
         return MHS;
       return RHS;
@@ -1082,34 +1119,34 @@ Init *TernOpInit::Fold(Record *CurRec, MultiClass *CurMultiClass) const {
   return const_cast<TernOpInit *>(this);
 }
 
-Init *TernOpInit::resolveReferences(Record &R,
-                                    const RecordVal *RV) const {
-  Init *lhs = LHS->resolveReferences(R, RV);
+Init *TernOpInit::resolveReferences(Resolver &R) const {
+  Init *lhs = LHS->resolveReferences(R);
 
   if (getOpcode() == IF && lhs != LHS) {
-    IntInit *Value = dyn_cast<IntInit>(lhs);
-    if (Init *I = lhs->convertInitializerTo(IntRecTy::get()))
-      Value = dyn_cast<IntInit>(I);
-    if (Value) {
+    if (IntInit *Value = dyn_cast_or_null<IntInit>(
+                             lhs->convertInitializerTo(IntRecTy::get()))) {
       // Short-circuit
-      if (Value->getValue()) {
-        Init *mhs = MHS->resolveReferences(R, RV);
-        return (TernOpInit::get(getOpcode(), lhs, mhs,
-                                RHS, getType()))->Fold(&R, nullptr);
-      }
-      Init *rhs = RHS->resolveReferences(R, RV);
-      return (TernOpInit::get(getOpcode(), lhs, MHS,
-                              rhs, getType()))->Fold(&R, nullptr);
+      if (Value->getValue())
+        return MHS->resolveReferences(R);
+      return RHS->resolveReferences(R);
     }
   }
 
-  Init *mhs = MHS->resolveReferences(R, RV);
-  Init *rhs = RHS->resolveReferences(R, RV);
+  Init *mhs = MHS->resolveReferences(R);
+  Init *rhs;
+
+  if (getOpcode() == FOREACH) {
+    ShadowResolver SR(R);
+    SR.addShadow(lhs);
+    rhs = RHS->resolveReferences(SR);
+  } else {
+    rhs = RHS->resolveReferences(R);
+  }
 
   if (LHS != lhs || MHS != mhs || RHS != rhs)
-    return (TernOpInit::get(getOpcode(), lhs, mhs, rhs,
-                            getType()))->Fold(&R, nullptr);
-  return Fold(&R, nullptr);
+    return (TernOpInit::get(getOpcode(), lhs, mhs, rhs, getType()))
+        ->Fold(R.getCurrentRecord(), nullptr);
+  return Fold(R.getCurrentRecord(), nullptr);
 }
 
 std::string TernOpInit::getAsString() const {
@@ -1123,91 +1160,95 @@ std::string TernOpInit::getAsString() const {
          RHS->getAsString() + ")";
 }
 
+static void ProfileFoldOpInit(FoldingSetNodeID &ID, Init *A, Init *B,
+                              Init *Start, Init *List, Init *Expr,
+                              RecTy *Type) {
+  ID.AddPointer(Start);
+  ID.AddPointer(List);
+  ID.AddPointer(A);
+  ID.AddPointer(B);
+  ID.AddPointer(Expr);
+  ID.AddPointer(Type);
+}
+
+FoldOpInit *FoldOpInit::get(Init *Start, Init *List, Init *A, Init *B,
+                            Init *Expr, RecTy *Type) {
+  static FoldingSet<FoldOpInit> ThePool;
+
+  FoldingSetNodeID ID;
+  ProfileFoldOpInit(ID, Start, List, A, B, Expr, Type);
+
+  void *IP = nullptr;
+  if (FoldOpInit *I = ThePool.FindNodeOrInsertPos(ID, IP))
+    return I;
+
+  FoldOpInit *I = new (Allocator) FoldOpInit(Start, List, A, B, Expr, Type);
+  ThePool.InsertNode(I, IP);
+  return I;
+}
+
+void FoldOpInit::Profile(FoldingSetNodeID &ID) const {
+  ProfileFoldOpInit(ID, Start, List, A, B, Expr, getType());
+}
+
+Init *FoldOpInit::Fold(Record *CurRec) const {
+  if (ListInit *LI = dyn_cast<ListInit>(List)) {
+    Init *Accum = Start;
+    for (Init *Elt : *LI) {
+      MapResolver R(CurRec);
+      R.set(A, Accum);
+      R.set(B, Elt);
+      Accum = Expr->resolveReferences(R);
+    }
+    return Accum;
+  }
+  return const_cast<FoldOpInit *>(this);
+}
+
+Init *FoldOpInit::resolveReferences(Resolver &R) const {
+  Init *NewStart = Start->resolveReferences(R);
+  Init *NewList = List->resolveReferences(R);
+  ShadowResolver SR(R);
+  SR.addShadow(A);
+  SR.addShadow(B);
+  Init *NewExpr = Expr->resolveReferences(SR);
+
+  if (Start == NewStart && List == NewList && Expr == NewExpr)
+    return const_cast<FoldOpInit *>(this);
+
+  return get(NewStart, NewList, A, B, NewExpr, getType())
+      ->Fold(R.getCurrentRecord());
+}
+
+Init *FoldOpInit::getBit(unsigned Bit) const {
+  return VarBitInit::get(const_cast<FoldOpInit *>(this), Bit);
+}
+
+std::string FoldOpInit::getAsString() const {
+  return (Twine("!foldl(") + Start->getAsString() + ", " + List->getAsString() +
+          ", " + A->getAsUnquotedString() + ", " + B->getAsUnquotedString() +
+          ", " + Expr->getAsString() + ")")
+      .str();
+}
+
 RecTy *TypedInit::getFieldType(StringInit *FieldName) const {
-  if (RecordRecTy *RecordType = dyn_cast<RecordRecTy>(getType()))
-    if (RecordVal *Field = RecordType->getRecord()->getValue(FieldName))
-      return Field->getType();
+  if (RecordRecTy *RecordType = dyn_cast<RecordRecTy>(getType())) {
+    for (Record *Rec : RecordType->getClasses()) {
+      if (RecordVal *Field = Rec->getValue(FieldName))
+        return Field->getType();
+    }
+  }
   return nullptr;
 }
 
 Init *
 TypedInit::convertInitializerTo(RecTy *Ty) const {
-  if (isa<IntRecTy>(Ty)) {
-    if (getType()->typeIsConvertibleTo(Ty))
-      return const_cast<TypedInit *>(this);
-    return nullptr;
-  }
+  if (getType() == Ty || getType()->typeIsA(Ty))
+    return const_cast<TypedInit *>(this);
 
-  if (isa<StringRecTy>(Ty)) {
-    if (isa<StringRecTy>(getType()))
-      return const_cast<TypedInit *>(this);
-    return nullptr;
-  }
-
-  if (isa<CodeRecTy>(Ty)) {
-    if (isa<CodeRecTy>(getType()))
-      return const_cast<TypedInit *>(this);
-    return nullptr;
-  }
-
-  if (isa<BitRecTy>(Ty)) {
-    // Accept variable if it is already of bit type!
-    if (isa<BitRecTy>(getType()))
-      return const_cast<TypedInit *>(this);
-    if (auto *BitsTy = dyn_cast<BitsRecTy>(getType())) {
-      // Accept only bits<1> expression.
-      if (BitsTy->getNumBits() == 1)
-        return const_cast<TypedInit *>(this);
-      return nullptr;
-    }
-    // Ternary !if can be converted to bit, but only if both sides are
-    // convertible to a bit.
-    if (const auto *TOI = dyn_cast<TernOpInit>(this)) {
-      if (TOI->getOpcode() == TernOpInit::TernaryOp::IF &&
-          TOI->getMHS()->convertInitializerTo(BitRecTy::get()) &&
-          TOI->getRHS()->convertInitializerTo(BitRecTy::get()))
-        return const_cast<TypedInit *>(this);
-      return nullptr;
-    }
-    return nullptr;
-  }
-
-  if (auto *BRT = dyn_cast<BitsRecTy>(Ty)) {
-    if (BRT->getNumBits() == 1 && isa<BitRecTy>(getType()))
-      return BitsInit::get(const_cast<TypedInit *>(this));
-
-    if (getType()->typeIsConvertibleTo(BRT)) {
-      SmallVector<Init *, 16> NewBits(BRT->getNumBits());
-
-      for (unsigned i = 0; i != BRT->getNumBits(); ++i)
-        NewBits[i] = VarBitInit::get(const_cast<TypedInit *>(this), i);
-      return BitsInit::get(NewBits);
-    }
-
-    return nullptr;
-  }
-
-  if (auto *DLRT = dyn_cast<ListRecTy>(Ty)) {
-    if (auto *SLRT = dyn_cast<ListRecTy>(getType()))
-      if (SLRT->getElementType()->typeIsConvertibleTo(DLRT->getElementType()))
-        return const_cast<TypedInit *>(this);
-    return nullptr;
-  }
-
-  if (auto *DRT = dyn_cast<DagRecTy>(Ty)) {
-    if (getType()->typeIsConvertibleTo(DRT))
-      return const_cast<TypedInit *>(this);
-    return nullptr;
-  }
-
-  if (auto *SRRT = dyn_cast<RecordRecTy>(Ty)) {
-    // Ensure that this is compatible with Rec.
-    if (RecordRecTy *DRRT = dyn_cast<RecordRecTy>(getType()))
-      if (DRRT->getRecord()->isSubClassOf(SRRT->getRecord()) ||
-          DRRT->getRecord() == SRRT->getRecord())
-        return const_cast<TypedInit *>(this);
-    return nullptr;
-  }
+  if (isa<BitRecTy>(getType()) && isa<BitsRecTy>(Ty) &&
+      cast<BitsRecTy>(Ty)->getNumBits() == 1)
+    return BitsInit::get({const_cast<TypedInit *>(this)});
 
   return nullptr;
 }
@@ -1228,6 +1269,24 @@ Init *TypedInit::convertInitializerBitRange(ArrayRef<unsigned> Bits) const {
   return BitsInit::get(NewBits);
 }
 
+Init *TypedInit::getCastTo(RecTy *Ty) const {
+  // Handle the common case quickly
+  if (getType() == Ty || getType()->typeIsA(Ty))
+    return const_cast<TypedInit *>(this);
+
+  if (Init *Converted = convertInitializerTo(Ty)) {
+    assert(!isa<TypedInit>(Converted) ||
+           cast<TypedInit>(Converted)->getType()->typeIsA(Ty));
+    return Converted;
+  }
+
+  if (!getType()->typeIsConvertibleTo(Ty))
+    return nullptr;
+
+  return UnOpInit::get(UnOpInit::CAST, const_cast<TypedInit *>(this), Ty)
+             ->Fold(nullptr, nullptr);
+}
+
 Init *TypedInit::convertInitListSlice(ArrayRef<unsigned> Elements) const {
   ListRecTy *T = dyn_cast<ListRecTy>(getType());
   if (!T) return nullptr;  // Cannot subscript a non-list variable.
@@ -1240,7 +1299,7 @@ Init *TypedInit::convertInitListSlice(ArrayRef<unsigned> Elements) const {
   for (unsigned Element : Elements)
     ListInits.push_back(VarListElementInit::get(const_cast<TypedInit *>(this),
                                                 Element));
-  return ListInit::get(ListInits, T);
+  return ListInit::get(ListInits, T->getElementType());
 }
 
 
@@ -1272,55 +1331,9 @@ Init *VarInit::getBit(unsigned Bit) const {
   return VarBitInit::get(const_cast<VarInit*>(this), Bit);
 }
 
-Init *VarInit::resolveListElementReference(Record &R,
-                                           const RecordVal *IRV,
-                                           unsigned Elt) const {
-  if (R.isTemplateArg(getNameInit())) return nullptr;
-  if (IRV && IRV->getNameInit() != getNameInit()) return nullptr;
-
-  RecordVal *RV = R.getValue(getNameInit());
-  assert(RV && "Reference to a non-existent variable?");
-  ListInit *LI = dyn_cast<ListInit>(RV->getValue());
-  if (!LI)
-    return VarListElementInit::get(cast<TypedInit>(RV->getValue()), Elt);
-
-  if (Elt >= LI->size())
-    return nullptr;  // Out of range reference.
-  Init *E = LI->getElement(Elt);
-  // If the element is set to some value, or if we are resolving a reference
-  // to a specific variable and that variable is explicitly unset, then
-  // replace the VarListElementInit with it.
-  if (IRV || !isa<UnsetInit>(E))
-    return E;
-  return nullptr;
-}
-
-RecTy *VarInit::getFieldType(StringInit *FieldName) const {
-  if (RecordRecTy *RTy = dyn_cast<RecordRecTy>(getType()))
-    if (const RecordVal *RV = RTy->getRecord()->getValue(FieldName))
-      return RV->getType();
-  return nullptr;
-}
-
-Init *VarInit::getFieldInit(Record &R, const RecordVal *RV,
-                            StringInit *FieldName) const {
-  if (isa<RecordRecTy>(getType()))
-    if (const RecordVal *Val = R.getValue(VarName)) {
-      if (RV != Val && (RV || isa<UnsetInit>(Val->getValue())))
-        return nullptr;
-      Init *TheInit = Val->getValue();
-      assert(TheInit != this && "Infinite loop detected!");
-      if (Init *I = TheInit->getFieldInit(R, RV, FieldName))
-        return I;
-      return nullptr;
-    }
-  return nullptr;
-}
-
-Init *VarInit::resolveReferences(Record &R, const RecordVal *RV) const {
-  if (RecordVal *Val = R.getValue(VarName))
-    if (RV == Val || (!RV && !isa<UnsetInit>(Val->getValue())))
-      return Val->getValue();
+Init *VarInit::resolveReferences(Resolver &R) const {
+  if (Init *Val = R.resolve(VarName))
+    return Val;
   return const_cast<VarInit *>(this);
 }
 
@@ -1336,19 +1349,12 @@ VarBitInit *VarBitInit::get(TypedInit *T, unsigned B) {
   return I;
 }
 
-Init *VarBitInit::convertInitializerTo(RecTy *Ty) const {
-  if (isa<BitRecTy>(Ty))
-    return const_cast<VarBitInit *>(this);
-
-  return nullptr;
-}
-
 std::string VarBitInit::getAsString() const {
   return TI->getAsString() + "{" + utostr(Bit) + "}";
 }
 
-Init *VarBitInit::resolveReferences(Record &R, const RecordVal *RV) const {
-  Init *I = TI->resolveReferences(R, RV);
+Init *VarBitInit::resolveReferences(Resolver &R) const {
+  Init *I = TI->resolveReferences(R);
   if (TI != I)
     return I->getBit(getBitNum());
 
@@ -1371,11 +1377,16 @@ std::string VarListElementInit::getAsString() const {
   return TI->getAsString() + "[" + utostr(Element) + "]";
 }
 
-Init *
-VarListElementInit::resolveReferences(Record &R, const RecordVal *RV) const {
-  if (Init *I = getVariable()->resolveListElementReference(R, RV,
-                                                           getElementNum()))
-    return I;
+Init *VarListElementInit::resolveReferences(Resolver &R) const {
+  Init *NewTI = TI->resolveReferences(R);
+  if (ListInit *List = dyn_cast<ListInit>(NewTI)) {
+    // Leave out-of-bounds array references as-is. This can happen without
+    // being an error, e.g. in the untaken "branch" of an !if expression.
+    if (getElementNum() < List->size())
+      return List->getElement(getElementNum());
+  }
+  if (NewTI != TI && isa<TypedInit>(NewTI))
+    return VarListElementInit::get(cast<TypedInit>(NewTI), getElementNum());
   return const_cast<VarListElementInit *>(this);
 }
 
@@ -1385,20 +1396,14 @@ Init *VarListElementInit::getBit(unsigned Bit) const {
   return VarBitInit::get(const_cast<VarListElementInit*>(this), Bit);
 }
 
-Init *VarListElementInit:: resolveListElementReference(Record &R,
-                                                       const RecordVal *RV,
-                                                       unsigned Elt) const {
-  if (Init *Result = TI->resolveListElementReference(R, RV, Element)) {
-    if (TypedInit *TInit = dyn_cast<TypedInit>(Result)) {
-      if (Init *Result2 = TInit->resolveListElementReference(R, RV, Elt))
-        return Result2;
-      return VarListElementInit::get(TInit, Elt);
-    }
-    return Result;
-  }
-
-  return nullptr;
+static RecordRecTy *makeDefInitType(Record *Rec) {
+  SmallVector<Record *, 4> SuperClasses;
+  Rec->getDirectSuperClasses(SuperClasses);
+  return RecordRecTy::get(SuperClasses);
 }
+
+DefInit::DefInit(Record *D)
+    : TypedInit(IK_DefInit, makeDefInitType(D)), Def(D) {}
 
 DefInit *DefInit::get(Record *R) {
   return R->getDefInit();
@@ -1406,7 +1411,7 @@ DefInit *DefInit::get(Record *R) {
 
 Init *DefInit::convertInitializerTo(RecTy *Ty) const {
   if (auto *RRT = dyn_cast<RecordRecTy>(Ty))
-    if (getDef()->isSubClassOf(RRT->getRecord()))
+    if (getType()->typeIsConvertibleTo(RRT))
       return const_cast<DefInit *>(this);
   return nullptr;
 }
@@ -1417,13 +1422,134 @@ RecTy *DefInit::getFieldType(StringInit *FieldName) const {
   return nullptr;
 }
 
-Init *DefInit::getFieldInit(Record &R, const RecordVal *RV,
-                            StringInit *FieldName) const {
-  return Def->getValue(FieldName)->getValue();
-}
-
 std::string DefInit::getAsString() const {
   return Def->getName();
+}
+
+static void ProfileVarDefInit(FoldingSetNodeID &ID,
+                              Record *Class,
+                              ArrayRef<Init *> Args) {
+  ID.AddInteger(Args.size());
+  ID.AddPointer(Class);
+
+  for (Init *I : Args)
+    ID.AddPointer(I);
+}
+
+VarDefInit *VarDefInit::get(Record *Class, ArrayRef<Init *> Args) {
+  static FoldingSet<VarDefInit> ThePool;
+
+  FoldingSetNodeID ID;
+  ProfileVarDefInit(ID, Class, Args);
+
+  void *IP = nullptr;
+  if (VarDefInit *I = ThePool.FindNodeOrInsertPos(ID, IP))
+    return I;
+
+  void *Mem = Allocator.Allocate(totalSizeToAlloc<Init *>(Args.size()),
+                                 alignof(VarDefInit));
+  VarDefInit *I = new(Mem) VarDefInit(Class, Args.size());
+  std::uninitialized_copy(Args.begin(), Args.end(),
+                          I->getTrailingObjects<Init *>());
+  ThePool.InsertNode(I, IP);
+  return I;
+}
+
+void VarDefInit::Profile(FoldingSetNodeID &ID) const {
+  ProfileVarDefInit(ID, Class, args());
+}
+
+DefInit *VarDefInit::instantiate() {
+  if (!Def) {
+    RecordKeeper &Records = Class->getRecords();
+    auto NewRecOwner = make_unique<Record>(Records.getNewAnonymousName(),
+                                           Class->getLoc(), Records,
+                                           /*IsAnonymous=*/true);
+    Record *NewRec = NewRecOwner.get();
+
+    // Copy values from class to instance
+    for (const RecordVal &Val : Class->getValues()) {
+      if (Val.getName() != "NAME")
+        NewRec->addValue(Val);
+    }
+
+    // Substitute and resolve template arguments
+    ArrayRef<Init *> TArgs = Class->getTemplateArgs();
+    MapResolver R(NewRec);
+
+    for (unsigned i = 0, e = TArgs.size(); i != e; ++i) {
+      if (i < args_size())
+        R.set(TArgs[i], getArg(i));
+      else
+        R.set(TArgs[i], NewRec->getValue(TArgs[i])->getValue());
+
+      NewRec->removeValue(TArgs[i]);
+    }
+
+    NewRec->resolveReferences(R);
+
+    // Add superclasses.
+    ArrayRef<std::pair<Record *, SMRange>> SCs = Class->getSuperClasses();
+    for (const auto &SCPair : SCs)
+      NewRec->addSuperClass(SCPair.first, SCPair.second);
+
+    NewRec->addSuperClass(Class,
+                          SMRange(Class->getLoc().back(),
+                                  Class->getLoc().back()));
+
+    // Resolve internal references and store in record keeper
+    NewRec->resolveReferences();
+    Records.addDef(std::move(NewRecOwner));
+
+    Def = DefInit::get(NewRec);
+  }
+
+  return Def;
+}
+
+Init *VarDefInit::resolveReferences(Resolver &R) const {
+  TrackUnresolvedResolver UR(&R);
+  bool Changed = false;
+  SmallVector<Init *, 8> NewArgs;
+  NewArgs.reserve(args_size());
+
+  for (Init *Arg : args()) {
+    Init *NewArg = Arg->resolveReferences(UR);
+    NewArgs.push_back(NewArg);
+    Changed |= NewArg != Arg;
+  }
+
+  if (Changed) {
+    auto New = VarDefInit::get(Class, NewArgs);
+    if (!UR.foundUnresolved())
+      return New->instantiate();
+    return New;
+  }
+  return const_cast<VarDefInit *>(this);
+}
+
+Init *VarDefInit::Fold() const {
+  if (Def)
+    return Def;
+
+  TrackUnresolvedResolver R;
+  for (Init *Arg : args())
+    Arg->resolveReferences(R);
+
+  if (!R.foundUnresolved())
+    return const_cast<VarDefInit *>(this)->instantiate();
+  return const_cast<VarDefInit *>(this);
+}
+
+std::string VarDefInit::getAsString() const {
+  std::string Result = Class->getNameInitAsString() + "<";
+  const char *sep = "";
+  for (Init *Arg : args()) {
+    Result += sep;
+    sep = ", ";
+    Result += Arg->getAsString();
+  }
+  return Result + ">";
 }
 
 FieldInit *FieldInit::get(Init *R, StringInit *FN) {
@@ -1443,28 +1569,14 @@ Init *FieldInit::getBit(unsigned Bit) const {
   return VarBitInit::get(const_cast<FieldInit*>(this), Bit);
 }
 
-Init *FieldInit::resolveListElementReference(Record &R, const RecordVal *RV,
-                                             unsigned Elt) const {
-  if (Init *ListVal = Rec->getFieldInit(R, RV, FieldName))
-    if (ListInit *LI = dyn_cast<ListInit>(ListVal)) {
-      if (Elt >= LI->size()) return nullptr;
-      Init *E = LI->getElement(Elt);
+Init *FieldInit::resolveReferences(Resolver &R) const {
+  Init *NewRec = Rec->resolveReferences(R);
 
-      // If the element is set to some value, or if we are resolving a
-      // reference to a specific variable and that variable is explicitly
-      // unset, then replace the VarListElementInit with it.
-      if (RV || !isa<UnsetInit>(E))
-        return E;
-    }
-  return nullptr;
-}
-
-Init *FieldInit::resolveReferences(Record &R, const RecordVal *RV) const {
-  Init *NewRec = RV ? Rec->resolveReferences(R, RV) : Rec;
-
-  if (Init *BitsVal = NewRec->getFieldInit(R, RV, FieldName)) {
-    Init *BVR = BitsVal->resolveReferences(R, RV);
-    return BVR->isComplete() ? BVR : const_cast<FieldInit *>(this);
+  if (DefInit *DI = dyn_cast<DefInit>(NewRec)) {
+    Init *FieldVal = DI->getDef()->getValue(FieldName)->getValue();
+    Init *BVR = FieldVal->resolveReferences(R);
+    if (BVR->isComplete())
+      return BVR;
   }
 
   if (NewRec != Rec)
@@ -1528,28 +1640,31 @@ void DagInit::Profile(FoldingSetNodeID &ID) const {
   ProfileDagInit(ID, Val, ValName, makeArrayRef(getTrailingObjects<Init *>(), NumArgs), makeArrayRef(getTrailingObjects<StringInit *>(), NumArgNames));
 }
 
-Init *DagInit::convertInitializerTo(RecTy *Ty) const {
-  if (isa<DagRecTy>(Ty))
-    return const_cast<DagInit *>(this);
-
-  return nullptr;
-}
-
-Init *DagInit::resolveReferences(Record &R, const RecordVal *RV) const {
+Init *DagInit::resolveReferences(Resolver &R) const {
   SmallVector<Init*, 8> NewArgs;
   NewArgs.reserve(arg_size());
   bool ArgsChanged = false;
   for (const Init *Arg : getArgs()) {
-    Init *NewArg = Arg->resolveReferences(R, RV);
+    Init *NewArg = Arg->resolveReferences(R);
     NewArgs.push_back(NewArg);
     ArgsChanged |= NewArg != Arg;
   }
 
-  Init *Op = Val->resolveReferences(R, RV);
+  Init *Op = Val->resolveReferences(R);
   if (Op != Val || ArgsChanged)
     return DagInit::get(Op, ValName, NewArgs, getArgNames());
 
   return const_cast<DagInit *>(this);
+}
+
+bool DagInit::isConcrete() const {
+  if (!Val->isConcrete())
+    return false;
+  for (const Init *Elt : getArgs()) {
+    if (!Elt->isConcrete())
+      return false;
+  }
+  return true;
 }
 
 std::string DagInit::getAsString() const {
@@ -1573,12 +1688,34 @@ std::string DagInit::getAsString() const {
 
 RecordVal::RecordVal(Init *N, RecTy *T, bool P)
   : Name(N), TyAndPrefix(T, P) {
-  Value = UnsetInit::get()->convertInitializerTo(T);
+  setValue(UnsetInit::get());
   assert(Value && "Cannot create unset value for current type!");
 }
 
 StringRef RecordVal::getName() const {
   return cast<StringInit>(getNameInit())->getValue();
+}
+
+bool RecordVal::setValue(Init *V) {
+  if (V) {
+    Value = V->getCastTo(getType());
+    if (Value) {
+      assert(!isa<TypedInit>(Value) ||
+             cast<TypedInit>(Value)->getType()->typeIsA(getType()));
+      if (BitsRecTy *BTy = dyn_cast<BitsRecTy>(getType())) {
+        if (!isa<BitsInit>(Value)) {
+          SmallVector<Init *, 64> Bits;
+          Bits.reserve(BTy->getNumBits());
+          for (unsigned i = 0, e = BTy->getNumBits(); i < e; ++i)
+            Bits.push_back(Value->getBit(i));
+          Value = BitsInit::get(Bits);
+        }
+      }
+    }
+    return Value == nullptr;
+  }
+  Value = nullptr;
+  return false;
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
@@ -1614,12 +1751,8 @@ void Record::checkName() {
 
 DefInit *Record::getDefInit() {
   if (!TheInit)
-    TheInit = new(Allocator) DefInit(this, new(Allocator) RecordRecTy(this));
+    TheInit = new(Allocator) DefInit(this);
   return TheInit;
-}
-
-StringRef Record::getName() const {
-  return cast<StringInit>(Name)->getValue();
 }
 
 void Record::setName(Init *NewName) {
@@ -1638,26 +1771,46 @@ void Record::setName(Init *NewName) {
   // this.  See TGParser::ParseDef and TGParser::ParseDefm.
 }
 
-void Record::resolveReferencesTo(const RecordVal *RV) {
+void Record::getDirectSuperClasses(SmallVectorImpl<Record *> &Classes) const {
+  ArrayRef<std::pair<Record *, SMRange>> SCs = getSuperClasses();
+  while (!SCs.empty()) {
+    // Superclasses are in reverse preorder, so 'back' is a direct superclass,
+    // and its transitive superclasses are directly preceding it.
+    Record *SC = SCs.back().first;
+    SCs = SCs.drop_back(1 + SC->getSuperClasses().size());
+    Classes.push_back(SC);
+  }
+}
+
+void Record::resolveReferences(Resolver &R, const RecordVal *SkipVal) {
   for (RecordVal &Value : Values) {
-    if (RV == &Value) // Skip resolve the same field as the given one
+    if (SkipVal == &Value) // Skip resolve the same field as the given one
       continue;
-    if (Init *V = Value.getValue())
-      if (Value.setValue(V->resolveReferences(*this, RV)))
+    if (Init *V = Value.getValue()) {
+      Init *VR = V->resolveReferences(R);
+      if (Value.setValue(VR))
         PrintFatalError(getLoc(), "Invalid value is found when setting '" +
-                        Value.getNameInitAsString() +
-                        "' after resolving references" +
-                        (RV ? " against '" + RV->getNameInitAsString() +
-                              "' of (" + RV->getValue()->getAsUnquotedString() +
-                              ")"
-                            : "") + "\n");
+                                      Value.getNameInitAsString() +
+                                      "' after resolving references: " +
+                                      VR->getAsUnquotedString() + "\n");
+    }
   }
   Init *OldName = getNameInit();
-  Init *NewName = Name->resolveReferences(*this, RV);
+  Init *NewName = Name->resolveReferences(R);
   if (NewName != OldName) {
     // Re-register with RecordKeeper.
     setName(NewName);
   }
+}
+
+void Record::resolveReferences() {
+  RecordResolver R(*this);
+  resolveReferences(R);
+}
+
+void Record::resolveReferencesTo(const RecordVal *RV) {
+  RecordValResolver R(*this, RV);
+  resolveReferences(R, RV);
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
@@ -1878,6 +2031,12 @@ raw_ostream &llvm::operator<<(raw_ostream &OS, const RecordKeeper &RK) {
   return OS;
 }
 
+/// GetNewAnonymousName - Generate a unique anonymous name that can be used as
+/// an identifier.
+Init *RecordKeeper::getNewAnonymousName() {
+  return StringInit::get("anonymous_" + utostr(AnonCounter++));
+}
+
 std::vector<Record *>
 RecordKeeper::getAllDerivedDefinitions(StringRef ClassName) const {
   Record *Class = getClass(ClassName);
@@ -1913,4 +2072,65 @@ Init *llvm::QualifyName(Record &CurRec, MultiClass *CurMultiClass,
   if (BinOpInit *BinOp = dyn_cast<BinOpInit>(NewName))
     NewName = BinOp->Fold(&CurRec, CurMultiClass);
   return NewName;
+}
+
+Init *MapResolver::resolve(Init *VarName) {
+  auto It = Map.find(VarName);
+  if (It == Map.end())
+    return nullptr;
+
+  Init *I = It->second.V;
+
+  if (!It->second.Resolved && Map.size() > 1) {
+    // Resolve mutual references among the mapped variables, but prevent
+    // infinite recursion.
+    Map.erase(It);
+    I = I->resolveReferences(*this);
+    Map[VarName] = {I, true};
+  }
+
+  return I;
+}
+
+Init *RecordResolver::resolve(Init *VarName) {
+  Init *Val = Cache.lookup(VarName);
+  if (Val)
+    return Val;
+
+  for (Init *S : Stack) {
+    if (S == VarName)
+      return nullptr; // prevent infinite recursion
+  }
+
+  if (RecordVal *RV = getCurrentRecord()->getValue(VarName)) {
+    if (!isa<UnsetInit>(RV->getValue())) {
+      Val = RV->getValue();
+      Stack.push_back(VarName);
+      Val = Val->resolveReferences(*this);
+      Stack.pop_back();
+    }
+  }
+
+  Cache[VarName] = Val;
+  return Val;
+}
+
+Init *TrackUnresolvedResolver::resolve(Init *VarName) {
+  Init *I = nullptr;
+
+  if (R) {
+    I = R->resolve(VarName);
+    if (I && !FoundUnresolved) {
+      // Do not recurse into the resolved initializer, as that would change
+      // the behavior of the resolver we're delegating, but do check to see
+      // if there are unresolved variables remaining.
+      TrackUnresolvedResolver Sub;
+      I->resolveReferences(Sub);
+      FoundUnresolved |= Sub.FoundUnresolved;
+    }
+  }
+
+  if (!I)
+    FoundUnresolved = true;
+  return I;
 }

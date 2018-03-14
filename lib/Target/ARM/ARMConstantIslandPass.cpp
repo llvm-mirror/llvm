@@ -510,7 +510,6 @@ ARMConstantIslands::doInitialConstPlacement(std::vector<MachineInstr*> &CPEMIs) 
   const DataLayout &TD = MF->getDataLayout();
   for (unsigned i = 0, e = CPs.size(); i != e; ++i) {
     unsigned Size = TD.getTypeAllocSize(CPs[i].getType());
-    assert(Size >= 4 && "Too small constant pool entry");
     unsigned Align = CPs[i].getAlignment();
     assert(isPowerOf2_32(Align) && "Invalid alignment");
     // Verify that all constant pool entries are a multiple of their alignment.
@@ -818,6 +817,11 @@ initializeFunctionInfo(const std::vector<MachineInstr*> &CPEMIs) {
           case ARM::VLDRS:
             Bits = 8;
             Scale = 4;  // +-(offset_8*4)
+            NegOk = true;
+            break;
+          case ARM::VLDRH:
+            Bits = 8;
+            Scale = 2;  // +-(offset_8*2)
             NegOk = true;
             break;
 
@@ -1481,6 +1485,12 @@ bool ARMConstantIslands::handleConstantPoolUser(unsigned CPUserIndex,
     // We are adding new water.  Update NewWaterList.
     NewWaterList.insert(NewIsland);
   }
+  // Always align the new block because CP entries can be smaller than 4
+  // bytes. Be careful not to decrease the existing alignment, e.g. NewMBB may
+  // be an already aligned constant pool block.
+  const unsigned Align = isThumb ? 1 : 2;
+  if (NewMBB->getAlignment() < Align)
+    NewMBB->setAlignment(Align);
 
   // Remove the original WaterList entry; we want subsequent insertions in
   // this vicinity to go after the one we're about to insert.  This

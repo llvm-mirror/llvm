@@ -26,7 +26,8 @@ class raw_ostream;
 
 /// PostDominatorTree Class - Concrete subclass of DominatorTree that is used to
 /// compute the post-dominator tree.
-struct PostDominatorTree : public PostDomTreeBase<BasicBlock> {
+class PostDominatorTree : public PostDomTreeBase<BasicBlock> {
+public:
   using Base = PostDomTreeBase<BasicBlock>;
 
   /// Handle invalidation explicitly.
@@ -74,6 +75,8 @@ struct PostDominatorTreeWrapperPass : public FunctionPass {
   const PostDominatorTree &getPostDomTree() const { return DT; }
 
   bool runOnFunction(Function &F) override;
+
+  void verifyAnalysis() const override;
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.setPreservesAll();

@@ -273,9 +273,16 @@ computeFunctionSummary(ModuleSummaryIndex &Index, const Module &M,
         // to record the call edge to the alias in that case. Eventually
         // an alias summary will be created to associate the alias and
         // aliasee.
-        CallGraphEdges[Index.getOrInsertValueInfo(
-                           cast<GlobalValue>(CalledValue))]
-            .updateHotness(Hotness);
+        auto &ValueInfo = CallGraphEdges[Index.getOrInsertValueInfo(
+            cast<GlobalValue>(CalledValue))];
+        ValueInfo.updateHotness(Hotness);
+        // Add the relative block frequency to CalleeInfo if there is no profile
+        // information.
+        if (BFI != nullptr && Hotness == CalleeInfo::HotnessType::Unknown) {
+          uint64_t BBFreq = BFI->getBlockFreq(&BB).getFrequency();
+          uint64_t EntryFreq = BFI->getEntryFreq();
+          ValueInfo.updateRelBlockFreq(BBFreq, EntryFreq);
+        }
       } else {
         // Skip inline assembly calls.
         if (CI && CI->isInlineAsm())
@@ -372,7 +379,7 @@ ModuleSummaryIndex llvm::buildModuleSummaryIndex(
     std::function<BlockFrequencyInfo *(const Function &F)> GetBFICallback,
     ProfileSummaryInfo *PSI) {
   assert(PSI);
-  ModuleSummaryIndex Index;
+  ModuleSummaryIndex Index(/*IsPerformingAnalysis=*/true);
 
   // Identify the local values in the llvm.used and llvm.compiler.used sets,
   // which should not be exported as they would then require renaming and

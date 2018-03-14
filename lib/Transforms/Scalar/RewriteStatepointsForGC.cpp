@@ -476,6 +476,12 @@ findBaseDefiningValueOfVector(Value *I) {
   if (auto *BC = dyn_cast<BitCastInst>(I))
     return findBaseDefiningValue(BC->getOperand(0));
 
+  // We assume that functions in the source language only return base
+  // pointers.  This should probably be generalized via attributes to support
+  // both source language and internal functions.
+  if (isa<CallInst>(I) || isa<InvokeInst>(I))
+    return BaseDefiningValueResult(I, true);
+
   // A PHI or Select is a base defining value.  The outer findBasePointer
   // algorithm is responsible for constructing a base value for this BDV.
   assert((isa<SelectInst>(I) || isa<PHINode>(I)) &&
@@ -2461,22 +2467,8 @@ static void stripNonValidDataFromBody(Function &F) {
         continue;
       }
 
-    if (const MDNode *MD = I.getMetadata(LLVMContext::MD_tbaa)) {
-      assert(MD->getNumOperands() < 5 && "unrecognized metadata shape!");
-      bool IsImmutableTBAA =
-          MD->getNumOperands() == 4 &&
-          mdconst::extract<ConstantInt>(MD->getOperand(3))->getValue() == 1;
-
-      if (!IsImmutableTBAA)
-        continue; // no work to do, MD_tbaa is already marked mutable
-
-      MDNode *Base = cast<MDNode>(MD->getOperand(0));
-      MDNode *Access = cast<MDNode>(MD->getOperand(1));
-      uint64_t Offset =
-          mdconst::extract<ConstantInt>(MD->getOperand(2))->getZExtValue();
-
-      MDNode *MutableTBAA =
-          Builder.createTBAAStructTagNode(Base, Access, Offset);
+    if (MDNode *Tag = I.getMetadata(LLVMContext::MD_tbaa)) {
+      MDNode *MutableTBAA = Builder.createMutableTBAAAccessTag(Tag);
       I.setMetadata(LLVMContext::MD_tbaa, MutableTBAA);
     }
 
@@ -2537,29 +2529,30 @@ bool RewriteStatepointsForGC::runOnFunction(Function &F, DominatorTree &DT,
     return false;
   };
 
+
+  // Delete any unreachable statepoints so that we don't have unrewritten
+  // statepoints surviving this pass.  This makes testing easier and the
+  // resulting IR less confusing to human readers.
+  DeferredDominance DD(DT);
+  bool MadeChange = removeUnreachableBlocks(F, nullptr, &DD);
+  DD.flush();
+
   // Gather all the statepoints which need rewritten.  Be careful to only
   // consider those in reachable code since we need to ask dominance queries
   // when rewriting.  We'll delete the unreachable ones in a moment.
   SmallVector<CallSite, 64> ParsePointNeeded;
-  bool HasUnreachableStatepoint = false;
   for (Instruction &I : instructions(F)) {
     // TODO: only the ones with the flag set!
     if (NeedsRewrite(I)) {
-      if (DT.isReachableFromEntry(I.getParent()))
-        ParsePointNeeded.push_back(CallSite(&I));
-      else
-        HasUnreachableStatepoint = true;
+      // NOTE removeUnreachableBlocks() is stronger than
+      // DominatorTree::isReachableFromEntry(). In other words
+      // removeUnreachableBlocks can remove some blocks for which
+      // isReachableFromEntry() returns true.
+      assert(DT.isReachableFromEntry(I.getParent()) &&
+            "no unreachable blocks expected");
+      ParsePointNeeded.push_back(CallSite(&I));
     }
   }
-
-  bool MadeChange = false;
-
-  // Delete any unreachable statepoints so that we don't have unrewritten
-  // statepoints surviving this pass.  This makes testing easier and the
-  // resulting IR less confusing to human readers.  Rather than be fancy, we
-  // just reuse a utility function which removes the unreachable blocks.
-  if (HasUnreachableStatepoint)
-    MadeChange |= removeUnreachableBlocks(F);
 
   // Return early if no work to do.
   if (ParsePointNeeded.empty())

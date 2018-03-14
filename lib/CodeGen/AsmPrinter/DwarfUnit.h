@@ -207,8 +207,7 @@ public:
   void addBlock(DIE &Die, dwarf::Attribute Attribute, DIEBlock *Block);
 
   /// Add location information to specified debug information entry.
-  void addSourceLine(DIE &Die, unsigned Line, StringRef File,
-                     StringRef Directory);
+  void addSourceLine(DIE &Die, unsigned Line, const DIFile *File);
   void addSourceLine(DIE &Die, const DILocalVariable *V);
   void addSourceLine(DIE &Die, const DIGlobalVariable *G);
   void addSourceLine(DIE &Die, const DISubprogram *SP);
@@ -274,6 +273,10 @@ public:
   /// call insertDIE if MD is not null.
   DIE &createAndAddDIE(unsigned Tag, DIE &Parent, const DINode *N = nullptr);
 
+  bool useSegmentedStringOffsetsTable() const {
+    return DD->useSegmentedStringOffsetsTable();
+  }
+
   /// Compute the size of a header for this unit, not including the initial
   /// length field.
   virtual unsigned getHeaderSize() const {
@@ -286,6 +289,9 @@ public:
 
   /// Emit the header for this unit, not including the initial length field.
   virtual void emitHeader(bool UseOffsets) = 0;
+
+  /// Add the DW_AT_str_offsets_base attribute to the unit DIE.
+  void addStringOffsetsStart();
 
   virtual DwarfCompileUnit &getCU() = 0;
 
@@ -306,9 +312,13 @@ protected:
   /// Create new static data member DIE.
   DIE *getOrCreateStaticMemberDIE(const DIDerivedType *DT);
 
-  /// Look up the source ID with the given directory and source file names. If
-  /// none currently exists, create a new ID and insert it in the line table.
-  virtual unsigned getOrCreateSourceID(StringRef File, StringRef Directory) = 0;
+  /// Look up the source ID for the given file. If none currently exists,
+  /// create a new ID and insert it in the line table.
+  virtual unsigned getOrCreateSourceID(const DIFile *File) = 0;
+
+  /// If the \p File has an MD5 checksum, return it as an MD5Result
+  /// allocated in the MCContext.
+  MD5::MD5Result *getMD5AsBytes(const DIFile *File);
 
   /// Look in the DwarfDebug map for the MDNode that corresponds to the
   /// reference.
@@ -331,7 +341,7 @@ private:
   void constructSubrangeDIE(DIE &Buffer, const DISubrange *SR, DIE *IndexTy);
   void constructArrayTypeDIE(DIE &Buffer, const DICompositeType *CTy);
   void constructEnumTypeDIE(DIE &Buffer, const DICompositeType *CTy);
-  void constructMemberDIE(DIE &Buffer, const DIDerivedType *DT);
+  DIE &constructMemberDIE(DIE &Buffer, const DIDerivedType *DT);
   void constructTemplateTypeParameterDIE(DIE &Buffer,
                                          const DITemplateTypeParameter *TP);
   void constructTemplateValueParameterDIE(DIE &Buffer,
@@ -358,7 +368,7 @@ class DwarfTypeUnit final : public DwarfUnit {
   DwarfCompileUnit &CU;
   MCDwarfDwoLineTable *SplitLineTable;
 
-  unsigned getOrCreateSourceID(StringRef File, StringRef Directory) override;
+  unsigned getOrCreateSourceID(const DIFile *File) override;
   bool isDwoUnit() const override;
 
 public:

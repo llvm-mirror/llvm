@@ -1084,8 +1084,7 @@ define <4 x float> @add_ss_mask(<4 x float> %a, <4 x float> %b, <4 x float> %c, 
 ; SSE2-NEXT:    testb $1, %dil
 ; SSE2-NEXT:    jne .LBB62_1
 ; SSE2-NEXT:  # %bb.2:
-; SSE2-NEXT:    movaps %xmm2, %xmm1
-; SSE2-NEXT:    movss {{.*#+}} xmm0 = xmm1[0],xmm0[1,2,3]
+; SSE2-NEXT:    movss {{.*#+}} xmm0 = xmm2[0],xmm0[1,2,3]
 ; SSE2-NEXT:    retq
 ; SSE2-NEXT:  .LBB62_1:
 ; SSE2-NEXT:    addss %xmm0, %xmm1
@@ -1097,8 +1096,7 @@ define <4 x float> @add_ss_mask(<4 x float> %a, <4 x float> %b, <4 x float> %c, 
 ; SSE41-NEXT:    testb $1, %dil
 ; SSE41-NEXT:    jne .LBB62_1
 ; SSE41-NEXT:  # %bb.2:
-; SSE41-NEXT:    movaps %xmm2, %xmm1
-; SSE41-NEXT:    blendps {{.*#+}} xmm0 = xmm1[0],xmm0[1,2,3]
+; SSE41-NEXT:    blendps {{.*#+}} xmm0 = xmm2[0],xmm0[1,2,3]
 ; SSE41-NEXT:    retq
 ; SSE41-NEXT:  .LBB62_1:
 ; SSE41-NEXT:    addss %xmm0, %xmm1
@@ -1117,9 +1115,8 @@ define <4 x float> @add_ss_mask(<4 x float> %a, <4 x float> %b, <4 x float> %c, 
 ;
 ; AVX512-LABEL: add_ss_mask:
 ; AVX512:       # %bb.0:
-; AVX512-NEXT:    vaddss %xmm1, %xmm0, %xmm1
 ; AVX512-NEXT:    kmovw %edi, %k1
-; AVX512-NEXT:    vmovss %xmm1, %xmm0, %xmm2 {%k1}
+; AVX512-NEXT:    vaddss %xmm1, %xmm0, %xmm2 {%k1}
 ; AVX512-NEXT:    vmovaps %xmm2, %xmm0
 ; AVX512-NEXT:    retq
   %1 = extractelement <4 x float> %a, i64 0
@@ -1139,8 +1136,7 @@ define <2 x double> @add_sd_mask(<2 x double> %a, <2 x double> %b, <2 x double> 
 ; SSE2-NEXT:    testb $1, %dil
 ; SSE2-NEXT:    jne .LBB63_1
 ; SSE2-NEXT:  # %bb.2:
-; SSE2-NEXT:    movapd %xmm2, %xmm1
-; SSE2-NEXT:    movsd {{.*#+}} xmm0 = xmm1[0],xmm0[1]
+; SSE2-NEXT:    movsd {{.*#+}} xmm0 = xmm2[0],xmm0[1]
 ; SSE2-NEXT:    retq
 ; SSE2-NEXT:  .LBB63_1:
 ; SSE2-NEXT:    addsd %xmm0, %xmm1
@@ -1152,8 +1148,7 @@ define <2 x double> @add_sd_mask(<2 x double> %a, <2 x double> %b, <2 x double> 
 ; SSE41-NEXT:    testb $1, %dil
 ; SSE41-NEXT:    jne .LBB63_1
 ; SSE41-NEXT:  # %bb.2:
-; SSE41-NEXT:    movapd %xmm2, %xmm1
-; SSE41-NEXT:    blendpd {{.*#+}} xmm0 = xmm1[0],xmm0[1]
+; SSE41-NEXT:    blendps {{.*#+}} xmm0 = xmm2[0,1],xmm0[2,3]
 ; SSE41-NEXT:    retq
 ; SSE41-NEXT:  .LBB63_1:
 ; SSE41-NEXT:    addsd %xmm0, %xmm1
@@ -1172,9 +1167,8 @@ define <2 x double> @add_sd_mask(<2 x double> %a, <2 x double> %b, <2 x double> 
 ;
 ; AVX512-LABEL: add_sd_mask:
 ; AVX512:       # %bb.0:
-; AVX512-NEXT:    vaddsd %xmm1, %xmm0, %xmm1
 ; AVX512-NEXT:    kmovw %edi, %k1
-; AVX512-NEXT:    vmovsd %xmm1, %xmm0, %xmm2 {%k1}
+; AVX512-NEXT:    vaddsd %xmm1, %xmm0, %xmm2 {%k1}
 ; AVX512-NEXT:    vmovapd %xmm2, %xmm0
 ; AVX512-NEXT:    retq
   %1 = extractelement <2 x double> %a, i64 0

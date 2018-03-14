@@ -49,14 +49,13 @@ STATISTIC(NumGlobals  , "Number of global vars initialized");
 ExecutionEngine *(*ExecutionEngine::MCJITCtor)(
     std::unique_ptr<Module> M, std::string *ErrorStr,
     std::shared_ptr<MCJITMemoryManager> MemMgr,
-
-    std::shared_ptr<JITSymbolResolver> Resolver,
+    std::shared_ptr<LegacyJITSymbolResolver> Resolver,
     std::unique_ptr<TargetMachine> TM) = nullptr;
 
 ExecutionEngine *(*ExecutionEngine::OrcMCJITReplacementCtor)(
-  std::string *ErrorStr, std::shared_ptr<MCJITMemoryManager> MemMgr,
-  std::shared_ptr<JITSymbolResolver> Resolver,
-  std::unique_ptr<TargetMachine> TM) = nullptr;
+    std::string *ErrorStr, std::shared_ptr<MCJITMemoryManager> MemMgr,
+    std::shared_ptr<LegacyJITSymbolResolver> Resolver,
+    std::unique_ptr<TargetMachine> TM) = nullptr;
 
 ExecutionEngine *(*ExecutionEngine::InterpCtor)(std::unique_ptr<Module> M,
                                                 std::string *ErrorStr) =nullptr;
@@ -502,9 +501,9 @@ EngineBuilder::setMemoryManager(std::unique_ptr<MCJITMemoryManager> MM) {
   return *this;
 }
 
-EngineBuilder&
-EngineBuilder::setSymbolResolver(std::unique_ptr<JITSymbolResolver> SR) {
-  Resolver = std::shared_ptr<JITSymbolResolver>(std::move(SR));
+EngineBuilder &
+EngineBuilder::setSymbolResolver(std::unique_ptr<LegacyJITSymbolResolver> SR) {
+  Resolver = std::shared_ptr<LegacyJITSymbolResolver>(std::move(SR));
   return *this;
 }
 
@@ -532,7 +531,6 @@ ExecutionEngine *EngineBuilder::create(TargetMachine *TM) {
   // Unless the interpreter was explicitly selected or the JIT is not linked,
   // try making a JIT.
   if ((WhichEngine & EngineKind::JIT) && TheTM) {
-    Triple TT(M->getTargetTriple());
     if (!TM->getTarget().hasJIT()) {
       errs() << "WARNING: This target JIT is not designed for the host"
              << " you are running.  If bad things happen, please choose"

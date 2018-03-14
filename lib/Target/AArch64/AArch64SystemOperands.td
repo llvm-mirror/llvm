@@ -175,6 +175,37 @@ def : PRFM<"pstl3keep", 0x14>;
 def : PRFM<"pstl3strm", 0x15>;
 
 //===----------------------------------------------------------------------===//
+// SVE Predicate patterns
+//===----------------------------------------------------------------------===//
+
+class SVEPREDPAT<string name, bits<5> encoding> : SearchableTable {
+  let SearchableFields = ["Name", "Encoding"];
+  let EnumValueField = "Encoding";
+
+  string Name = name;
+  bits<5> Encoding;
+  let Encoding = encoding;
+}
+
+def : SVEPREDPAT<"pow2",  0x00>;
+def : SVEPREDPAT<"vl1",   0x01>;
+def : SVEPREDPAT<"vl2",   0x02>;
+def : SVEPREDPAT<"vl3",   0x03>;
+def : SVEPREDPAT<"vl4",   0x04>;
+def : SVEPREDPAT<"vl5",   0x05>;
+def : SVEPREDPAT<"vl6",   0x06>;
+def : SVEPREDPAT<"vl7",   0x07>;
+def : SVEPREDPAT<"vl8",   0x08>;
+def : SVEPREDPAT<"vl16",  0x09>;
+def : SVEPREDPAT<"vl32",  0x0a>;
+def : SVEPREDPAT<"vl64",  0x0b>;
+def : SVEPREDPAT<"vl128", 0x0c>;
+def : SVEPREDPAT<"vl256", 0x0d>;
+def : SVEPREDPAT<"mul4",  0x1d>;
+def : SVEPREDPAT<"mul3",  0x1e>;
+def : SVEPREDPAT<"all",   0x1f>;
+
+//===----------------------------------------------------------------------===//
 // PState instruction options.
 //===----------------------------------------------------------------------===//
 
@@ -420,7 +451,7 @@ def : ROSysReg<"ICC_HPPIR0_EL1",     0b11, 0b000, 0b1100, 0b1000, 0b010>;
 def : ROSysReg<"ICC_RPR_EL1",        0b11, 0b000, 0b1100, 0b1011, 0b011>;
 def : ROSysReg<"ICH_VTR_EL2",        0b11, 0b100, 0b1100, 0b1011, 0b001>;
 def : ROSysReg<"ICH_EISR_EL2",       0b11, 0b100, 0b1100, 0b1011, 0b011>;
-def : ROSysReg<"ICH_ELSR_EL2",       0b11, 0b100, 0b1100, 0b1011, 0b101>;
+def : ROSysReg<"ICH_ELRSR_EL2",      0b11, 0b100, 0b1100, 0b1011, 0b101>;
 
 // v8.1a "Limited Ordering Regions" extension-specific system register
 //                         Op0    Op1     CRn     CRm    Op2

@@ -25,6 +25,7 @@
 #include "llvm/ADT/Twine.h"
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/IR/Attributes.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/LLVMContext.h"
@@ -389,6 +390,37 @@ public:
     BinaryOperator *BO = Create(Opc, V1, V2, Name);
     BO->copyIRFlags(CopyBO);
     return BO;
+  }
+
+  static BinaryOperator *CreateFAddFMF(Value *V1, Value *V2,
+                                       BinaryOperator *FMFSource,
+                                       const Twine &Name = "") {
+    return CreateWithCopiedFlags(Instruction::FAdd, V1, V2, FMFSource, Name);
+  }
+  static BinaryOperator *CreateFSubFMF(Value *V1, Value *V2,
+                                       BinaryOperator *FMFSource,
+                                       const Twine &Name = "") {
+    return CreateWithCopiedFlags(Instruction::FSub, V1, V2, FMFSource, Name);
+  }
+  static BinaryOperator *CreateFMulFMF(Value *V1, Value *V2,
+                                       BinaryOperator *FMFSource,
+                                       const Twine &Name = "") {
+    return CreateWithCopiedFlags(Instruction::FMul, V1, V2, FMFSource, Name);
+  }
+  static BinaryOperator *CreateFDivFMF(Value *V1, Value *V2,
+                                       BinaryOperator *FMFSource,
+                                       const Twine &Name = "") {
+    return CreateWithCopiedFlags(Instruction::FDiv, V1, V2, FMFSource, Name);
+  }
+  static BinaryOperator *CreateFRemFMF(Value *V1, Value *V2,
+                                       BinaryOperator *FMFSource,
+                                       const Twine &Name = "") {
+    return CreateWithCopiedFlags(Instruction::FRem, V1, V2, FMFSource, Name);
+  }
+  static BinaryOperator *CreateFNegFMF(Value *Op, BinaryOperator *FMFSource,
+                                       const Twine &Name = "") {
+    Value *Zero = ConstantFP::getNegativeZero(Op->getType());
+    return CreateWithCopiedFlags(Instruction::FSub, Zero, Op, FMFSource);
   }
 
   static BinaryOperator *CreateNSW(BinaryOps Opc, Value *V1, Value *V2,
@@ -972,6 +1004,34 @@ public:
   /// available.
   /// @brief Return the predicate as if the operands were swapped.
   static Predicate getSwappedPredicate(Predicate pred);
+
+  /// For predicate of kind "is X or equal to 0" returns the predicate "is X".
+  /// For predicate of kind "is X" returns the predicate "is X or equal to 0".
+  /// does not support other kind of predicates.
+  /// @returns the predicate that does not contains is equal to zero if
+  /// it had and vice versa.
+  /// @brief Return the flipped strictness of predicate
+  Predicate getFlippedStrictnessPredicate() const {
+    return getFlippedStrictnessPredicate(getPredicate());
+  }
+
+  /// This is a static version that you can use without an instruction
+  /// available.
+  /// @brief Return the flipped strictness of predicate
+  static Predicate getFlippedStrictnessPredicate(Predicate pred);
+
+  /// For example, SGT -> SGE, SLT -> SLE, ULT -> ULE, UGT -> UGE.
+  /// @brief Returns the non-strict version of strict comparisons.
+  Predicate getNonStrictPredicate() const {
+    return getNonStrictPredicate(getPredicate());
+  }
+
+  /// This is a static version that you can use without an instruction
+  /// available.
+  /// @returns the non-strict version of comparison provided in \p pred.
+  /// If \p pred is not a strict comparison predicate, returns \p pred.
+  /// @brief Returns the non-strict version of strict comparisons.
+  static Predicate getNonStrictPredicate(Predicate pred);
 
   /// @brief Provide more efficient getOperand methods.
   DECLARE_TRANSPARENT_OPERAND_ACCESSORS(Value);

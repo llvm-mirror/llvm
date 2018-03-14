@@ -138,8 +138,9 @@ void llvm::set_thread_name(const Twine &Name) {
   // terminated, but additionally the end of a long thread name will usually
   // be more unique than the beginning, since a common pattern is for similar
   // threads to share a common prefix.
+  // Note that the name length includes the null terminator.
   if (get_max_thread_name_length() > 0)
-    NameStr = NameStr.take_back(get_max_thread_name_length());
+    NameStr = NameStr.take_back(get_max_thread_name_length() - 1);
   (void)NameStr;
 #if defined(__linux__)
 #if (defined(__GLIBC__) && defined(_GNU_SOURCE)) || defined(__ANDROID__)
@@ -175,7 +176,7 @@ void llvm::get_thread_name(SmallVectorImpl<char> &Name) {
     if (kp == nullptr || (error != 0 && errno == ENOMEM)) {
       // Add extra space in case threads are added before next call.
       len += sizeof(*kp) + len / 10;
-      nkp = (struct kinfo_proc *)realloc(kp, len);
+      nkp = (struct kinfo_proc *)::realloc(kp, len);
       if (nkp == nullptr) {
         free(kp);
         return;

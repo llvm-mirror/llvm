@@ -52,8 +52,6 @@ class I3DNow_binop<bits<8> o, Format F, dag ins, string Mnemonic, list<dag> pat,
       : I3DNow<o, F, (outs VR64:$dst), ins,
           !strconcat(Mnemonic, "\t{$src2, $dst|$dst, $src2}"), pat, itin>,
         Has3DNow0F0FOpcode {
-  // FIXME: The disassembler doesn't support Has3DNow0F0FOpcode yet.
-  let isAsmParserOnly = 1;
   let Constraints = "$src1 = $dst";
 }
 
@@ -61,10 +59,7 @@ class I3DNow_conv<bits<8> o, Format F, dag ins, string Mnemonic, list<dag> pat,
                   InstrItinClass itin>
       : I3DNow<o, F, (outs VR64:$dst), ins,
           !strconcat(Mnemonic, "\t{$src, $dst|$dst, $src}"), pat, itin>,
-        Has3DNow0F0FOpcode {
-  // FIXME: The disassembler doesn't support Has3DNow0F0FOpcode yet.
-  let isAsmParserOnly = 1;
-}
+        Has3DNow0F0FOpcode;
 
 multiclass I3DNow_binop_rm_int<bits<8> opc, string Mn, OpndItins itins,
                                bit Commutable = 0, string Ver = ""> {
@@ -113,6 +108,8 @@ defm PFSUBR   : I3DNow_binop_rm_int<0xAA, "pfsubr", I3DNOW_FALU_ITINS, 1>;
 defm PI2FD    : I3DNow_conv_rm_int<0x0D, "pi2fd", I3DNOW_FCVT_I2F_ITINS>;
 defm PMULHRW  : I3DNow_binop_rm_int<0xB7, "pmulhrw", I3DNOW_MISC_FUNC_ITINS, 1>;
 
+// FIXME: Is there a better scheduler class for EMMS/FEMMS?
+let SchedRW = [WriteMicrocoded] in
 def FEMMS : I3DNow<0x0E, RawFrm, (outs), (ins), "femms",
                    [(int_x86_mmx_femms)], IIC_MMX_EMMS>;
 

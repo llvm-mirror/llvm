@@ -18,7 +18,7 @@
 ;
 ; CHECK: DW_TAG_variable [4]
 ; CHECK-NEXT:   DW_AT_location [DW_FORM_data4] (
-; CHECK-NEXT:     0x0000000000000004 - 0x0000000000000005: DW_OP_reg0 RAX, DW_OP_piece 0x4)
+; CHECK-NEXT:     [0x0000000000000004, 0x0000000000000005): DW_OP_reg0 RAX, DW_OP_piece 0x4)
 ; CHECK-NEXT:  DW_AT_name {{.*}}"i1"
 
 ; ModuleID = '/Volumes/Data/llvm/test/DebugInfo/X86/sroasplit-1.ll'
@@ -44,7 +44,7 @@ entry:
 declare void @llvm.dbg.declare(metadata, metadata, metadata) #1
 
 ; Function Attrs: nounwind
-declare void @llvm.memcpy.p0i8.p0i8.i64(i8* nocapture, i8* nocapture readonly, i64, i32, i1) #2
+declare void @llvm.memcpy.p0i8.p0i8.i64(i8* nocapture, i8* nocapture readonly, i64, i1) #2
 
 ; Function Attrs: nounwind readnone
 declare void @llvm.dbg.value(metadata, metadata, metadata) #1

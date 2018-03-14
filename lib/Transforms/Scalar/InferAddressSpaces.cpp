@@ -260,7 +260,10 @@ bool InferAddressSpaces::rewriteIntrinsicOperands(IntrinsicInst *II,
 
   switch (II->getIntrinsicID()) {
   case Intrinsic::amdgcn_atomic_inc:
-  case Intrinsic::amdgcn_atomic_dec:{
+  case Intrinsic::amdgcn_atomic_dec:
+  case Intrinsic::amdgcn_ds_fadd:
+  case Intrinsic::amdgcn_ds_fmin:
+  case Intrinsic::amdgcn_ds_fmax: {
     const ConstantInt *IsVolatile = dyn_cast<ConstantInt>(II->getArgOperand(4));
     if (!IsVolatile || !IsVolatile->isZero())
       return false;
@@ -289,6 +292,9 @@ void InferAddressSpaces::collectRewritableIntrinsicOperands(
   case Intrinsic::objectsize:
   case Intrinsic::amdgcn_atomic_inc:
   case Intrinsic::amdgcn_atomic_dec:
+  case Intrinsic::amdgcn_ds_fadd:
+  case Intrinsic::amdgcn_ds_fmin:
+  case Intrinsic::amdgcn_ds_fmax:
     appendsFlatAddressExpressionToPostorderStack(II->getArgOperand(0),
                                                  PostorderStack, Visited);
     break;
@@ -779,7 +785,7 @@ static bool handleMemIntrinsicPtrUse(MemIntrinsic *MI, Value *OldV,
 
   if (auto *MSI = dyn_cast<MemSetInst>(MI)) {
     B.CreateMemSet(NewV, MSI->getValue(),
-                   MSI->getLength(), MSI->getAlignment(),
+                   MSI->getLength(), MSI->getDestAlignment(),
                    false, // isVolatile
                    TBAA, ScopeMD, NoAliasMD);
   } else if (auto *MTI = dyn_cast<MemTransferInst>(MI)) {
@@ -795,14 +801,16 @@ static bool handleMemIntrinsicPtrUse(MemIntrinsic *MI, Value *OldV,
 
     if (isa<MemCpyInst>(MTI)) {
       MDNode *TBAAStruct = MTI->getMetadata(LLVMContext::MD_tbaa_struct);
-      B.CreateMemCpy(Dest, Src, MTI->getLength(),
-                     MTI->getAlignment(),
+      B.CreateMemCpy(Dest, MTI->getDestAlignment(),
+                     Src, MTI->getSourceAlignment(),
+                     MTI->getLength(),
                      false, // isVolatile
                      TBAA, TBAAStruct, ScopeMD, NoAliasMD);
     } else {
       assert(isa<MemMoveInst>(MTI));
-      B.CreateMemMove(Dest, Src, MTI->getLength(),
-                      MTI->getAlignment(),
+      B.CreateMemMove(Dest, MTI->getDestAlignment(),
+                      Src, MTI->getSourceAlignment(),
+                      MTI->getLength(),
                       false, // isVolatile
                       TBAA, ScopeMD, NoAliasMD);
     }

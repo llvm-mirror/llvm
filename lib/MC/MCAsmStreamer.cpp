@@ -7,6 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
@@ -151,6 +152,7 @@ public:
   void EmitCOFFSymbolType(int Type) override;
   void EndCOFFSymbolDef() override;
   void EmitCOFFSafeSEH(MCSymbol const *Symbol) override;
+  void EmitCOFFSymbolIndex(MCSymbol const *Symbol) override;
   void EmitCOFFSectionIndex(MCSymbol const *Symbol) override;
   void EmitCOFFSecRel32(MCSymbol const *Symbol, uint64_t Offset) override;
   void emitELFSize(MCSymbol *Symbol, const MCExpr *Value) override;
@@ -192,13 +194,8 @@ public:
 
   void EmitGPRel32Value(const MCExpr *Value) override;
 
-
-  void emitFill(uint64_t NumBytes, uint8_t FillValue) override;
-
   void emitFill(const MCExpr &NumBytes, uint64_t FillValue,
                 SMLoc Loc = SMLoc()) override;
-
-  void emitFill(uint64_t NumValues, int64_t Size, int64_t Expr) override;
 
   void emitFill(const MCExpr &NumValues, int64_t Size, int64_t Expr,
                 SMLoc Loc = SMLoc()) override;
@@ -215,9 +212,12 @@ public:
                          SMLoc Loc) override;
 
   void EmitFileDirective(StringRef Filename) override;
-  unsigned EmitDwarfFileDirective(unsigned FileNo, StringRef Directory,
-                                  StringRef Filename,
-                                  unsigned CUID = 0) override;
+  Expected<unsigned> tryEmitDwarfFileDirective(unsigned FileNo,
+                                               StringRef Directory,
+                                               StringRef Filename,
+                                               MD5::MD5Result *Checksum = 0,
+                                               Optional<StringRef> Source = None,
+                                               unsigned CUID = 0) override;
   void EmitDwarfLocDirective(unsigned FileNo, unsigned Line,
                              unsigned Column, unsigned Flags,
                              unsigned Isa, unsigned Discriminator,
@@ -568,7 +568,7 @@ bool MCAsmStreamer::EmitSymbolAttribute(MCSymbol *Symbol,
     case MCSA_ELF_TypeObject:      OS << "object"; break;
     case MCSA_ELF_TypeTLS:         OS << "tls_object"; break;
     case MCSA_ELF_TypeCommon:      OS << "common"; break;
-    case MCSA_ELF_TypeNoType:      OS << "no_type"; break;
+    case MCSA_ELF_TypeNoType:      OS << "notype"; break;
     case MCSA_ELF_TypeGnuUniqueObject: OS << "gnu_unique_object"; break;
     }
     EmitEOL();
@@ -649,6 +649,12 @@ void MCAsmStreamer::EndCOFFSymbolDef() {
 
 void MCAsmStreamer::EmitCOFFSafeSEH(MCSymbol const *Symbol) {
   OS << "\t.safeseh\t";
+  Symbol->print(OS, MAI);
+  EmitEOL();
+}
+
+void MCAsmStreamer::EmitCOFFSymbolIndex(MCSymbol const *Symbol) {
+  OS << "\t.symidx\t";
   Symbol->print(OS, MAI);
   EmitEOL();
 }
@@ -907,7 +913,7 @@ void MCAsmStreamer::EmitULEB128Value(const MCExpr *Value) {
     EmitULEB128IntValue(IntValue);
     return;
   }
-  OS << ".uleb128 ";
+  OS << "\t.uleb128 ";
   Value->print(OS, MAI);
   EmitEOL();
 }
@@ -918,7 +924,7 @@ void MCAsmStreamer::EmitSLEB128Value(const MCExpr *Value) {
     EmitSLEB128IntValue(IntValue);
     return;
   }
-  OS << ".sleb128 ";
+  OS << "\t.sleb128 ";
   Value->print(OS, MAI);
   EmitEOL();
 }
@@ -965,17 +971,12 @@ void MCAsmStreamer::EmitGPRel32Value(const MCExpr *Value) {
   EmitEOL();
 }
 
-/// emitFill - Emit NumBytes bytes worth of the value specified by
-/// FillValue.  This implements directives such as '.space'.
-void MCAsmStreamer::emitFill(uint64_t NumBytes, uint8_t FillValue) {
-  if (NumBytes == 0) return;
-
-  const MCExpr *E = MCConstantExpr::create(NumBytes, getContext());
-  emitFill(*E, FillValue);
-}
-
 void MCAsmStreamer::emitFill(const MCExpr &NumBytes, uint64_t FillValue,
                              SMLoc Loc) {
+  int64_t IntNumBytes;
+  if (NumBytes.evaluateAsAbsolute(IntNumBytes) && IntNumBytes == 0)
+    return;
+
   if (const char *ZeroDirective = MAI->getZeroDirective()) {
     // FIXME: Emit location directives
     OS << ZeroDirective;
@@ -987,14 +988,6 @@ void MCAsmStreamer::emitFill(const MCExpr &NumBytes, uint64_t FillValue,
   }
 
   MCStreamer::emitFill(NumBytes, FillValue);
-}
-
-void MCAsmStreamer::emitFill(uint64_t NumValues, int64_t Size, int64_t Expr) {
-  if (NumValues == 0)
-    return;
-
-  const MCExpr *E = MCConstantExpr::create(NumValues, getContext());
-  emitFill(*E, Size, Expr);
 }
 
 void MCAsmStreamer::emitFill(const MCExpr &NumValues, int64_t Size,
@@ -1083,17 +1076,18 @@ void MCAsmStreamer::EmitFileDirective(StringRef Filename) {
   EmitEOL();
 }
 
-unsigned MCAsmStreamer::EmitDwarfFileDirective(unsigned FileNo,
-                                               StringRef Directory,
-                                               StringRef Filename,
-                                               unsigned CUID) {
+Expected<unsigned> MCAsmStreamer::tryEmitDwarfFileDirective(
+    unsigned FileNo, StringRef Directory, StringRef Filename,
+    MD5::MD5Result *Checksum, Optional<StringRef> Source, unsigned CUID) {
   assert(CUID == 0);
 
   MCDwarfLineTable &Table = getContext().getMCDwarfLineTable(CUID);
   unsigned NumFiles = Table.getMCDwarfFiles().size();
-  FileNo = Table.getFile(Directory, Filename, FileNo);
-  if (FileNo == 0)
-    return 0;
+  Expected<unsigned> FileNoOrErr =
+      Table.tryGetFile(Directory, Filename, Checksum, Source, FileNo);
+  if (!FileNoOrErr)
+    return FileNoOrErr.takeError();
+  FileNo = FileNoOrErr.get();
   if (NumFiles == Table.getMCDwarfFiles().size())
     return FileNo;
 
@@ -1118,6 +1112,14 @@ unsigned MCAsmStreamer::EmitDwarfFileDirective(unsigned FileNo,
     OS1 << ' ';
   }
   PrintQuotedString(Filename, OS1);
+  if (Checksum) {
+    OS1 << " md5 ";
+    PrintQuotedString(Checksum->digest(), OS1);
+  }
+  if (Source) {
+    OS1 << " source ";
+    PrintQuotedString(*Source, OS1);
+  }
   if (MCTargetStreamer *TS = getTargetStreamer()) {
     TS->emitDwarfFileDirective(OS1.str());
   } else {

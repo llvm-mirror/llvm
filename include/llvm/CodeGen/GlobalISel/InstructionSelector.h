@@ -218,7 +218,7 @@ enum {
   /// - InsnID - Instruction ID to modify
   /// - RegNum - The register to add
   GIR_AddRegister,
-  /// Add a a temporary register to the specified instruction
+  /// Add a temporary register to the specified instruction
   /// - InsnID - Instruction ID to modify
   /// - TempRegID - The temporary register ID to add
   GIR_AddTempRegister,
@@ -235,6 +235,11 @@ enum {
   /// - RendererID - The renderer to call
   /// - RenderOpID - The suboperand to render.
   GIR_ComplexSubOperandRenderer,
+  /// Render operands to the specified instruction using a custom function
+  /// - InsnID - Instruction ID to modify
+  /// - OldInsnID - Instruction ID to get the matched operand from
+  /// - RendererFnID - Custom renderer function to call
+  GIR_CustomRenderer,
 
   /// Render a G_CONSTANT operator as a sign-extended immediate.
   /// - NewInsnID - Instruction ID to modify
@@ -311,11 +316,13 @@ protected:
   };
 
 public:
-  template <class PredicateBitset, class ComplexMatcherMemFn>
-  struct MatcherInfoTy {
+  template <class PredicateBitset, class ComplexMatcherMemFn,
+            class CustomRendererFn>
+  struct ISelInfoTy {
     const LLT *TypeObjects;
     const PredicateBitset *FeatureBitsets;
     const ComplexMatcherMemFn *ComplexPredicates;
+    const CustomRendererFn *CustomRenderers;
   };
 
 protected:
@@ -324,10 +331,11 @@ protected:
   /// Execute a given matcher table and return true if the match was successful
   /// and false otherwise.
   template <class TgtInstructionSelector, class PredicateBitset,
-            class ComplexMatcherMemFn>
+            class ComplexMatcherMemFn, class CustomRendererFn>
   bool executeMatchTable(
       TgtInstructionSelector &ISel, NewMIVector &OutMIs, MatcherState &State,
-      const MatcherInfoTy<PredicateBitset, ComplexMatcherMemFn> &MatcherInfo,
+      const ISelInfoTy<PredicateBitset, ComplexMatcherMemFn, CustomRendererFn>
+          &ISelInfo,
       const int64_t *MatchTable, const TargetInstrInfo &TII,
       MachineRegisterInfo &MRI, const TargetRegisterInfo &TRI,
       const RegisterBankInfo &RBI, const PredicateBitset &AvailableFeatures,
@@ -352,20 +360,6 @@ protected:
                                      const TargetInstrInfo &TII,
                                      const TargetRegisterInfo &TRI,
                                      const RegisterBankInfo &RBI) const;
-
-  /// Mutate the newly-selected instruction \p I to constrain its (possibly
-  /// generic) virtual register operands to the instruction's register class.
-  /// This could involve inserting COPYs before (for uses) or after (for defs).
-  /// This requires the number of operands to match the instruction description.
-  /// \returns whether operand regclass constraining succeeded.
-  ///
-  // FIXME: Not all instructions have the same number of operands. We should
-  // probably expose a constrain helper per operand and let the target selector
-  // constrain individual registers, like fast-isel.
-  bool constrainSelectedInstRegOperands(MachineInstr &I,
-                                        const TargetInstrInfo &TII,
-                                        const TargetRegisterInfo &TRI,
-                                        const RegisterBankInfo &RBI) const;
 
   bool isOperandImmEqual(const MachineOperand &MO, int64_t Value,
                          const MachineRegisterInfo &MRI) const;

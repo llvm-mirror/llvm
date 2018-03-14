@@ -1681,7 +1681,7 @@ static bool isBitfieldExtractOpFromShr(SDNode *N, unsigned &Opc, SDValue &Opd0,
     // later find more redundancy.
     Opd0 = N->getOperand(0).getOperand(0);
     TruncBits = Opd0->getValueType(0).getSizeInBits() - VT.getSizeInBits();
-    VT = Opd0->getValueType(0);
+    VT = Opd0.getValueType();
     assert(VT == MVT::i64 && "the promoted type should be i64");
   } else if (BiggerPattern) {
     // Let's pretend a 0 shift left has been performed.
@@ -2301,7 +2301,7 @@ static bool tryBitfieldInsertOpFromOr(SDNode *N, const APInt &UsefulBits,
       continue;
 
     // Check the second part of the pattern
-    EVT VT = OrOpd1->getValueType(0);
+    EVT VT = OrOpd1Val.getValueType();
     assert((VT == MVT::i32 || VT == MVT::i64) && "unexpected OR operand");
 
     // Compute the Known Zero for the candidate of the first operand.
@@ -2653,11 +2653,6 @@ bool AArch64DAGToDAGISel::SelectCMP_SWAP(SDNode *N) {
 }
 
 void AArch64DAGToDAGISel::Select(SDNode *Node) {
-  // Dump information about the Node being selected
-  DEBUG(errs() << "Selecting: ");
-  DEBUG(Node->dump(CurDAG));
-  DEBUG(errs() << "\n");
-
   // If we have a custom node, we already have selected!
   if (Node->isMachineOpcode()) {
     DEBUG(errs() << "== "; Node->dump(CurDAG); errs() << "\n");
@@ -2782,7 +2777,35 @@ void AArch64DAGToDAGISel::Select(SDNode *Node) {
     }
     break;
   }
-
+  case ISD::CopyToReg: {
+    // Special case for copy of zero to avoid a double copy.
+    SDNode *CopyVal = Node->getOperand(2).getNode();
+    ConstantSDNode *CopyValConst = dyn_cast<ConstantSDNode>(CopyVal);
+    if (!CopyValConst || !CopyValConst->isNullValue())
+      break;
+    const SDValue &Dest = Node->getOperand(1);
+    if (!TargetRegisterInfo::isVirtualRegister(
+            cast<RegisterSDNode>(Dest)->getReg()))
+      break;
+    unsigned ZeroReg;
+    EVT ZeroVT = CopyValConst->getValueType(0);
+    if (ZeroVT == MVT::i32)
+      ZeroReg = AArch64::WZR;
+    else if (ZeroVT == MVT::i64)
+      ZeroReg = AArch64::XZR;
+    else
+      break;
+    unsigned NumOperands = Node->getNumOperands();
+    SDValue ZeroRegVal = CurDAG->getRegister(ZeroReg, ZeroVT);
+    // Replace the source operand (#0) with ZeroRegVal.
+    SDValue Ops[] = {Node->getOperand(0), Node->getOperand(1), ZeroRegVal,
+                     (NumOperands == 4) ? Node->getOperand(3) : SDValue()};
+    SDValue New =
+        CurDAG->getNode(ISD::CopyToReg, SDLoc(Node), Node->getVTList(),
+                        makeArrayRef(Ops, NumOperands));
+    ReplaceNode(Node, New.getNode());
+    return;
+  }
   case ISD::FrameIndex: {
     // Selects to ADDXri FI, 0 which in turn will become ADDXri SP, imm.
     int FI = cast<FrameIndexSDNode>(Node)->getIndex();

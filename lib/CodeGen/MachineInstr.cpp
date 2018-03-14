@@ -74,6 +74,29 @@
 
 using namespace llvm;
 
+static const MachineFunction *getMFIfAvailable(const MachineInstr &MI) {
+  if (const MachineBasicBlock *MBB = MI.getParent())
+    if (const MachineFunction *MF = MBB->getParent())
+      return MF;
+  return nullptr;
+}
+
+// Try to crawl up to the machine function and get TRI and IntrinsicInfo from
+// it.
+static void tryToGetTargetInfo(const MachineInstr &MI,
+                               const TargetRegisterInfo *&TRI,
+                               const MachineRegisterInfo *&MRI,
+                               const TargetIntrinsicInfo *&IntrinsicInfo,
+                               const TargetInstrInfo *&TII) {
+
+  if (const MachineFunction *MF = getMFIfAvailable(MI)) {
+    TRI = MF->getSubtarget().getRegisterInfo();
+    MRI = &MF->getRegInfo();
+    IntrinsicInfo = MF->getTarget().getIntrinsicInfo();
+    TII = MF->getSubtarget().getInstrInfo();
+  }
+}
+
 void MachineInstr::addImplicitDefUseOperands(MachineFunction &MF) {
   if (MCID->ImplicitDefs)
     for (const MCPhysReg *ImpDefs = MCID->getImplicitDefs(); *ImpDefs;
@@ -905,8 +928,7 @@ void MachineInstr::clearKillInfo() {
   }
 }
 
-void MachineInstr::substituteRegister(unsigned FromReg,
-                                      unsigned ToReg,
+void MachineInstr::substituteRegister(unsigned FromReg, unsigned ToReg,
                                       unsigned SubIdx,
                                       const TargetRegisterInfo &RegInfo) {
   if (TargetRegisterInfo::isPhysicalRegister(ToReg)) {
@@ -1206,39 +1228,35 @@ LLVM_DUMP_METHOD void MachineInstr::dump() const {
 }
 #endif
 
-void MachineInstr::print(raw_ostream &OS, bool SkipOpers, bool SkipDebugLoc,
-                         const TargetInstrInfo *TII) const {
+void MachineInstr::print(raw_ostream &OS, bool IsStandalone, bool SkipOpers,
+                         bool SkipDebugLoc, const TargetInstrInfo *TII) const {
   const Module *M = nullptr;
-  if (const MachineBasicBlock *MBB = getParent())
-    if (const MachineFunction *MF = MBB->getParent())
-      M = MF->getFunction().getParent();
+  const Function *F = nullptr;
+  if (const MachineFunction *MF = getMFIfAvailable(*this)) {
+    F = &MF->getFunction();
+    M = F->getParent();
+    if (!TII)
+      TII = MF->getSubtarget().getInstrInfo();
+  }
 
   ModuleSlotTracker MST(M);
-  print(OS, MST, SkipOpers, SkipDebugLoc, TII);
+  if (F)
+    MST.incorporateFunction(*F);
+  print(OS, MST, IsStandalone, SkipOpers, SkipDebugLoc, TII);
 }
 
 void MachineInstr::print(raw_ostream &OS, ModuleSlotTracker &MST,
-                         bool SkipOpers, bool SkipDebugLoc,
+                         bool IsStandalone, bool SkipOpers, bool SkipDebugLoc,
                          const TargetInstrInfo *TII) const {
   // We can be a bit tidier if we know the MachineFunction.
   const MachineFunction *MF = nullptr;
   const TargetRegisterInfo *TRI = nullptr;
   const MachineRegisterInfo *MRI = nullptr;
   const TargetIntrinsicInfo *IntrinsicInfo = nullptr;
+  tryToGetTargetInfo(*this, TRI, MRI, IntrinsicInfo, TII);
 
-  if (const MachineBasicBlock *MBB = getParent()) {
-    MF = MBB->getParent();
-    if (MF) {
-      MRI = &MF->getRegInfo();
-      TRI = MF->getSubtarget().getRegisterInfo();
-      if (!TII)
-        TII = MF->getSubtarget().getInstrInfo();
-      IntrinsicInfo = MF->getTarget().getIntrinsicInfo();
-    }
-  }
-
-  // Save a list of virtual registers.
-  SmallVector<unsigned, 8> VirtRegs;
+  if (isCFIInstruction())
+    assert(getNumOperands() == 1 && "Expected 1 operand in CFI instruction");
 
   SmallBitVector PrintedTypes(8);
   bool ShouldPrintRegisterTies = hasComplexRegisterTies();
@@ -1250,25 +1268,32 @@ void MachineInstr::print(raw_ostream &OS, ModuleSlotTracker &MST,
       return findTiedOperandIdx(OpIdx);
     return 0U;
   };
+  unsigned StartOp = 0;
+  unsigned e = getNumOperands();
+
   // Print explicitly defined operands on the left of an assignment syntax.
-  unsigned StartOp = 0, e = getNumOperands();
-  for (; StartOp < e && getOperand(StartOp).isReg() &&
-         getOperand(StartOp).isDef() && !getOperand(StartOp).isImplicit();
-       ++StartOp) {
+  while (StartOp < e) {
+    const MachineOperand &MO = getOperand(StartOp);
+    if (!MO.isReg() || !MO.isDef() || MO.isImplicit())
+      break;
+
     if (StartOp != 0)
       OS << ", ";
+
     LLT TypeToPrint = MRI ? getTypeToPrint(StartOp, PrintedTypes, *MRI) : LLT{};
     unsigned TiedOperandIdx = getTiedOperandIdx(StartOp);
-    getOperand(StartOp).print(OS, MST, TypeToPrint, /*PrintDef=*/false,
-                              ShouldPrintRegisterTies, TiedOperandIdx, TRI,
-                              IntrinsicInfo);
-    unsigned Reg = getOperand(StartOp).getReg();
-    if (TargetRegisterInfo::isVirtualRegister(Reg))
-      VirtRegs.push_back(Reg);
+    MO.print(OS, MST, TypeToPrint, /*PrintDef=*/false, IsStandalone,
+             ShouldPrintRegisterTies, TiedOperandIdx, TRI, IntrinsicInfo);
+    ++StartOp;
   }
 
   if (StartOp != 0)
     OS << " = ";
+
+  if (getFlag(MachineInstr::FrameSetup))
+    OS << "frame-setup ";
+  else if (getFlag(MachineInstr::FrameDestroy))
+    OS << "frame-destroy ";
 
   // Print the opcode name.
   if (TII)
@@ -1290,7 +1315,7 @@ void MachineInstr::print(raw_ostream &OS, ModuleSlotTracker &MST,
     const unsigned OpIdx = InlineAsm::MIOp_AsmString;
     LLT TypeToPrint = MRI ? getTypeToPrint(OpIdx, PrintedTypes, *MRI) : LLT{};
     unsigned TiedOperandIdx = getTiedOperandIdx(OpIdx);
-    getOperand(OpIdx).print(OS, MST, TypeToPrint, /*PrintDef=*/true,
+    getOperand(OpIdx).print(OS, MST, TypeToPrint, /*PrintDef=*/true, IsStandalone,
                             ShouldPrintRegisterTies, TiedOperandIdx, TRI,
                             IntrinsicInfo);
 
@@ -1318,18 +1343,9 @@ void MachineInstr::print(raw_ostream &OS, ModuleSlotTracker &MST,
   for (unsigned i = StartOp, e = getNumOperands(); i != e; ++i) {
     const MachineOperand &MO = getOperand(i);
 
-    if (MO.isReg() && TargetRegisterInfo::isVirtualRegister(MO.getReg()))
-      VirtRegs.push_back(MO.getReg());
-
     if (FirstOp) FirstOp = false; else OS << ",";
     OS << " ";
-    if (i < getDesc().NumOperands) {
-      const MCOperandInfo &MCOI = getDesc().OpInfo[i];
-      if (MCOI.isPredicate())
-        OS << "pred:";
-      if (MCOI.isOptionalDef())
-        OS << "opt:";
-    }
+
     if (isDebugValue() && MO.isMetadata()) {
       // Pretty print DBG_VALUE instructions.
       auto *DIV = dyn_cast<DILocalVariable>(MO.getMetadata());
@@ -1338,12 +1354,9 @@ void MachineInstr::print(raw_ostream &OS, ModuleSlotTracker &MST,
       else {
         LLT TypeToPrint = MRI ? getTypeToPrint(i, PrintedTypes, *MRI) : LLT{};
         unsigned TiedOperandIdx = getTiedOperandIdx(i);
-        MO.print(OS, MST, TypeToPrint, /*PrintDef=*/true,
+        MO.print(OS, MST, TypeToPrint, /*PrintDef=*/true, IsStandalone,
                  ShouldPrintRegisterTies, TiedOperandIdx, TRI, IntrinsicInfo);
       }
-    } else if (TRI && (isInsertSubreg() || isRegSequence() ||
-                       (isSubregToReg() && i == 3)) && MO.isImm()) {
-      OS << TRI->getSubRegIndexName(MO.getImm());
     } else if (i == AsmDescOp && MO.isImm()) {
       // Pretty print the inline asm operand descriptor.
       OS << '$' << AsmOpCount++;
@@ -1406,29 +1419,23 @@ void MachineInstr::print(raw_ostream &OS, ModuleSlotTracker &MST,
       LLT TypeToPrint = MRI ? getTypeToPrint(i, PrintedTypes, *MRI) : LLT{};
       unsigned TiedOperandIdx = getTiedOperandIdx(i);
       if (MO.isImm() && isOperandSubregIdx(i))
-        MachineOperand::printSubregIdx(OS, MO.getImm(), TRI);
+        MachineOperand::printSubRegIdx(OS, MO.getImm(), TRI);
       else
-        MO.print(OS, MST, TypeToPrint, /*PrintDef=*/true,
+        MO.print(OS, MST, TypeToPrint, /*PrintDef=*/true, IsStandalone,
                  ShouldPrintRegisterTies, TiedOperandIdx, TRI, IntrinsicInfo);
     }
   }
 
-  bool HaveSemi = false;
-  const unsigned PrintableFlags = FrameSetup | FrameDestroy;
-  if (Flags & PrintableFlags) {
-    if (!HaveSemi) {
-      OS << ";";
-      HaveSemi = true;
+  if (!SkipDebugLoc) {
+    if (const DebugLoc &DL = getDebugLoc()) {
+      if (!FirstOp)
+        OS << ',';
+      OS << " debug-location ";
+      DL->printAsOperand(OS, MST);
     }
-    OS << " flags: ";
-
-    if (Flags & FrameSetup)
-      OS << "FrameSetup";
-
-    if (Flags & FrameDestroy)
-      OS << "FrameDestroy";
   }
 
+  bool HaveSemi = false;
   if (!memoperands_empty()) {
     if (!HaveSemi) {
       OS << ";";
@@ -1444,34 +1451,8 @@ void MachineInstr::print(raw_ostream &OS, ModuleSlotTracker &MST,
     }
   }
 
-  // Print the regclass of any virtual registers encountered.
-  if (MRI && !VirtRegs.empty()) {
-    if (!HaveSemi) {
-      OS << ";";
-      HaveSemi = true;
-    }
-    for (unsigned i = 0; i != VirtRegs.size(); ++i) {
-      const RegClassOrRegBank &RC = MRI->getRegClassOrRegBank(VirtRegs[i]);
-      if (!RC)
-        continue;
-      // Generic virtual registers do not have register classes.
-      if (RC.is<const RegisterBank *>())
-        OS << " " << RC.get<const RegisterBank *>()->getName();
-      else
-        OS << " "
-           << TRI->getRegClassName(RC.get<const TargetRegisterClass *>());
-      OS << ':' << printReg(VirtRegs[i]);
-      for (unsigned j = i+1; j != VirtRegs.size();) {
-        if (MRI->getRegClassOrRegBank(VirtRegs[j]) != RC) {
-          ++j;
-          continue;
-        }
-        if (VirtRegs[i] != VirtRegs[j])
-          OS << "," << printReg(VirtRegs[j]);
-        VirtRegs.erase(VirtRegs.begin()+j);
-      }
-    }
-  }
+  if (SkipDebugLoc)
+    return;
 
   // Print debug location information.
   if (isDebugValue() && getOperand(e - 2).isMetadata()) {
@@ -1489,13 +1470,6 @@ void MachineInstr::print(raw_ostream &OS, ModuleSlotTracker &MST,
     }
     if (isIndirectDebugValue())
       OS << " indirect";
-  } else if (SkipDebugLoc) {
-    return;
-  } else if (debugLoc && MF) {
-    if (!HaveSemi)
-      OS << ";";
-    OS << " dbg:";
-    debugLoc.print(OS);
   }
 
   OS << '\n';

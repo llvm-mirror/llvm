@@ -249,17 +249,26 @@ void GenericDINode::recalculateHash() {
 
 DISubrange *DISubrange::getImpl(LLVMContext &Context, int64_t Count, int64_t Lo,
                                 StorageType Storage, bool ShouldCreate) {
-  DEFINE_GETIMPL_LOOKUP(DISubrange, (Count, Lo));
-  DEFINE_GETIMPL_STORE_NO_OPS(DISubrange, (Count, Lo));
+  auto *CountNode = ConstantAsMetadata::get(
+      ConstantInt::getSigned(Type::getInt64Ty(Context), Count));
+  return getImpl(Context, CountNode, Lo, Storage, ShouldCreate);
+}
+
+DISubrange *DISubrange::getImpl(LLVMContext &Context, Metadata *CountNode,
+                                int64_t Lo, StorageType Storage,
+                                bool ShouldCreate) {
+  DEFINE_GETIMPL_LOOKUP(DISubrange, (CountNode, Lo));
+  Metadata *Ops[] = { CountNode };
+  DEFINE_GETIMPL_STORE(DISubrange, (CountNode, Lo), Ops);
 }
 
 DIEnumerator *DIEnumerator::getImpl(LLVMContext &Context, int64_t Value,
-                                    MDString *Name, StorageType Storage,
-                                    bool ShouldCreate) {
+                                    bool IsUnsigned, MDString *Name,
+                                    StorageType Storage, bool ShouldCreate) {
   assert(isCanonical(Name) && "Expected canonical MDString");
-  DEFINE_GETIMPL_LOOKUP(DIEnumerator, (Value, Name));
+  DEFINE_GETIMPL_LOOKUP(DIEnumerator, (Value, IsUnsigned, Name));
   Metadata *Ops[] = {Name};
-  DEFINE_GETIMPL_STORE(DIEnumerator, (Value), Ops);
+  DEFINE_GETIMPL_STORE(DIEnumerator, (Value, IsUnsigned), Ops);
 }
 
 DIBasicType *DIBasicType::getImpl(LLVMContext &Context, unsigned Tag,
@@ -296,17 +305,18 @@ DICompositeType *DICompositeType::getImpl(
     unsigned Line, Metadata *Scope, Metadata *BaseType, uint64_t SizeInBits,
     uint32_t AlignInBits, uint64_t OffsetInBits, DIFlags Flags,
     Metadata *Elements, unsigned RuntimeLang, Metadata *VTableHolder,
-    Metadata *TemplateParams, MDString *Identifier, StorageType Storage,
-    bool ShouldCreate) {
+    Metadata *TemplateParams, MDString *Identifier, Metadata *Discriminator,
+    StorageType Storage, bool ShouldCreate) {
   assert(isCanonical(Name) && "Expected canonical MDString");
 
   // Keep this in sync with buildODRType.
   DEFINE_GETIMPL_LOOKUP(
       DICompositeType, (Tag, Name, File, Line, Scope, BaseType, SizeInBits,
                         AlignInBits, OffsetInBits, Flags, Elements, RuntimeLang,
-                        VTableHolder, TemplateParams, Identifier));
+                        VTableHolder, TemplateParams, Identifier, Discriminator));
   Metadata *Ops[] = {File,     Scope,        Name,           BaseType,
-                     Elements, VTableHolder, TemplateParams, Identifier};
+                     Elements, VTableHolder, TemplateParams, Identifier,
+                     Discriminator};
   DEFINE_GETIMPL_STORE(DICompositeType, (Tag, Line, RuntimeLang, SizeInBits,
                                          AlignInBits, OffsetInBits, Flags),
                        Ops);
@@ -317,7 +327,7 @@ DICompositeType *DICompositeType::buildODRType(
     Metadata *File, unsigned Line, Metadata *Scope, Metadata *BaseType,
     uint64_t SizeInBits, uint32_t AlignInBits, uint64_t OffsetInBits,
     DIFlags Flags, Metadata *Elements, unsigned RuntimeLang,
-    Metadata *VTableHolder, Metadata *TemplateParams) {
+    Metadata *VTableHolder, Metadata *TemplateParams, Metadata *Discriminator) {
   assert(!Identifier.getString().empty() && "Expected valid identifier");
   if (!Context.isODRUniquingDebugTypes())
     return nullptr;
@@ -326,7 +336,7 @@ DICompositeType *DICompositeType::buildODRType(
     return CT = DICompositeType::getDistinct(
                Context, Tag, Name, File, Line, Scope, BaseType, SizeInBits,
                AlignInBits, OffsetInBits, Flags, Elements, RuntimeLang,
-               VTableHolder, TemplateParams, &Identifier);
+               VTableHolder, TemplateParams, &Identifier, Discriminator);
 
   // Only mutate CT if it's a forward declaration and the new operands aren't.
   assert(CT->getRawIdentifier() == &Identifier && "Wrong ODR identifier?");
@@ -337,7 +347,8 @@ DICompositeType *DICompositeType::buildODRType(
   CT->mutate(Tag, Line, RuntimeLang, SizeInBits, AlignInBits, OffsetInBits,
              Flags);
   Metadata *Ops[] = {File,     Scope,        Name,           BaseType,
-                     Elements, VTableHolder, TemplateParams, &Identifier};
+                     Elements, VTableHolder, TemplateParams, &Identifier,
+                     Discriminator};
   assert((std::end(Ops) - std::begin(Ops)) == (int)CT->getNumOperands() &&
          "Mismatched number of operands");
   for (unsigned I = 0, E = CT->getNumOperands(); I != E; ++I)
@@ -351,7 +362,7 @@ DICompositeType *DICompositeType::getODRType(
     Metadata *File, unsigned Line, Metadata *Scope, Metadata *BaseType,
     uint64_t SizeInBits, uint32_t AlignInBits, uint64_t OffsetInBits,
     DIFlags Flags, Metadata *Elements, unsigned RuntimeLang,
-    Metadata *VTableHolder, Metadata *TemplateParams) {
+    Metadata *VTableHolder, Metadata *TemplateParams, Metadata *Discriminator) {
   assert(!Identifier.getString().empty() && "Expected valid identifier");
   if (!Context.isODRUniquingDebugTypes())
     return nullptr;
@@ -360,7 +371,7 @@ DICompositeType *DICompositeType::getODRType(
     CT = DICompositeType::getDistinct(
         Context, Tag, Name, File, Line, Scope, BaseType, SizeInBits,
         AlignInBits, OffsetInBits, Flags, Elements, RuntimeLang, VTableHolder,
-        TemplateParams, &Identifier);
+        TemplateParams, &Identifier, Discriminator);
   return CT;
 }
 
@@ -383,34 +394,39 @@ DISubroutineType *DISubroutineType::getImpl(LLVMContext &Context, DIFlags Flags,
 
 // FIXME: Implement this string-enum correspondence with a .def file and macros,
 // so that the association is explicit rather than implied.
-static const char *ChecksumKindName[DIFile::CSK_Last + 1] = {
-  "CSK_None",
+static const char *ChecksumKindName[DIFile::CSK_Last] = {
   "CSK_MD5",
   "CSK_SHA1"
 };
 
-DIFile::ChecksumKind DIFile::getChecksumKind(StringRef CSKindStr) {
-  return StringSwitch<DIFile::ChecksumKind>(CSKindStr)
-      .Case("CSK_MD5", DIFile::CSK_MD5)
-      .Case("CSK_SHA1", DIFile::CSK_SHA1)
-      .Default(DIFile::CSK_None);
+StringRef DIFile::getChecksumKindAsString(ChecksumKind CSKind) {
+  assert(CSKind <= DIFile::CSK_Last && "Invalid checksum kind");
+  // The first space was originally the CSK_None variant, which is now
+  // obsolete, but the space is still reserved in ChecksumKind, so we account
+  // for it here.
+  return ChecksumKindName[CSKind - 1];
 }
 
-StringRef DIFile::getChecksumKindAsString() const {
-  assert(CSKind <= DIFile::CSK_Last && "Invalid checksum kind");
-  return ChecksumKindName[CSKind];
+Optional<DIFile::ChecksumKind> DIFile::getChecksumKind(StringRef CSKindStr) {
+  return StringSwitch<Optional<DIFile::ChecksumKind>>(CSKindStr)
+      .Case("CSK_MD5", DIFile::CSK_MD5)
+      .Case("CSK_SHA1", DIFile::CSK_SHA1)
+      .Default(None);
 }
 
 DIFile *DIFile::getImpl(LLVMContext &Context, MDString *Filename,
-                        MDString *Directory, DIFile::ChecksumKind CSKind,
-                        MDString *Checksum, StorageType Storage,
+                        MDString *Directory,
+                        Optional<DIFile::ChecksumInfo<MDString *>> CS,
+                        Optional<MDString *> Source, StorageType Storage,
                         bool ShouldCreate) {
   assert(isCanonical(Filename) && "Expected canonical MDString");
   assert(isCanonical(Directory) && "Expected canonical MDString");
-  assert(isCanonical(Checksum) && "Expected canonical MDString");
-  DEFINE_GETIMPL_LOOKUP(DIFile, (Filename, Directory, CSKind, Checksum));
-  Metadata *Ops[] = {Filename, Directory, Checksum};
-  DEFINE_GETIMPL_STORE(DIFile, (CSKind), Ops);
+  assert((!CS || isCanonical(CS->Value)) && "Expected canonical MDString");
+  assert((!Source || isCanonical(*Source)) && "Expected canonical MDString");
+  DEFINE_GETIMPL_LOOKUP(DIFile, (Filename, Directory, CS, Source));
+  Metadata *Ops[] = {Filename, Directory, CS ? CS->Value : nullptr,
+                     Source.getValueOr(nullptr)};
+  DEFINE_GETIMPL_STORE(DIFile, (CS, Source), Ops);
 }
 
 DICompileUnit *DICompileUnit::getImpl(
@@ -695,6 +711,14 @@ bool DIExpression::isValid() const {
     case dwarf::DW_OP_plus:
     case dwarf::DW_OP_minus:
     case dwarf::DW_OP_mul:
+    case dwarf::DW_OP_div:
+    case dwarf::DW_OP_mod:
+    case dwarf::DW_OP_or:
+    case dwarf::DW_OP_and:
+    case dwarf::DW_OP_xor:
+    case dwarf::DW_OP_shl:
+    case dwarf::DW_OP_shr:
+    case dwarf::DW_OP_shra:
     case dwarf::DW_OP_deref:
     case dwarf::DW_OP_xderef:
       break;
@@ -761,6 +785,12 @@ DIExpression *DIExpression::prepend(const DIExpression *Expr, bool DerefBefore,
   if (DerefAfter)
     Ops.push_back(dwarf::DW_OP_deref);
 
+  return doPrepend(Expr, Ops, StackValue);
+}
+
+DIExpression *DIExpression::doPrepend(const DIExpression *Expr,
+                                      SmallVectorImpl<uint64_t> &Ops,
+                                      bool StackValue) {
   if (Expr)
     for (auto Op : Expr->expr_ops()) {
       // A DW_OP_stack_value comes at the end, but before a DW_OP_LLVM_fragment.
@@ -883,4 +913,3 @@ DIMacroFile *DIMacroFile::getImpl(LLVMContext &Context, unsigned MIType,
   Metadata *Ops[] = { File, Elements };
   DEFINE_GETIMPL_STORE(DIMacroFile, (MIType, Line), Ops);
 }
-

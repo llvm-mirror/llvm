@@ -132,9 +132,18 @@ void TargetLoweringBase::InitLibcalls(const Triple &TT) {
     setLibcallName(RTLIB::FPEXT_F16_F32, "__extendhfsf2");
     setLibcallName(RTLIB::FPROUND_F32_F16, "__truncsfhf2");
 
-    // Darwin 10 and higher has an optimized __bzero.
-    if (!TT.isMacOSX() || !TT.isMacOSXVersionLT(10, 6) || TT.isArch64Bit()) {
-      setLibcallName(RTLIB::BZERO, TT.isAArch64() ? "bzero" : "__bzero");
+    // Some darwins have an optimized __bzero/bzero function.
+    switch (TT.getArch()) {
+    case Triple::x86:
+    case Triple::x86_64:
+      if (TT.isMacOSX() && !TT.isMacOSXVersionLT(10, 6))
+        setLibcallName(RTLIB::BZERO, "__bzero");
+      break;
+    case Triple::aarch64:
+      setLibcallName(RTLIB::BZERO, "bzero");
+      break;
+    default:
+      break;
     }
 
     if (darwinHasSinCos(TT)) {
@@ -183,6 +192,9 @@ RTLIB::Libcall RTLIB::getFPEXT(EVT OpVT, EVT RetVT) {
       return FPEXT_F64_F128;
     else if (RetVT == MVT::ppcf128)
       return FPEXT_F64_PPCF128;
+  } else if (OpVT == MVT::f80) {
+    if (RetVT == MVT::f128)
+      return FPEXT_F80_F128;
   }
 
   return UNKNOWN_LIBCALL;
@@ -218,6 +230,9 @@ RTLIB::Libcall RTLIB::getFPROUND(EVT OpVT, EVT RetVT) {
       return FPROUND_F128_F64;
     if (OpVT == MVT::ppcf128)
       return FPROUND_PPCF128_F64;
+  } else if (RetVT == MVT::f80) {
+    if (OpVT == MVT::f128)
+      return FPROUND_F128_F80;
   }
 
   return UNKNOWN_LIBCALL;
@@ -670,12 +685,13 @@ MVT TargetLoweringBase::getScalarShiftAmountTy(const DataLayout &DL,
   return MVT::getIntegerVT(8 * DL.getPointerSize(0));
 }
 
-EVT TargetLoweringBase::getShiftAmountTy(EVT LHSTy,
-                                         const DataLayout &DL) const {
+EVT TargetLoweringBase::getShiftAmountTy(EVT LHSTy, const DataLayout &DL,
+                                         bool LegalTypes) const {
   assert(LHSTy.isInteger() && "Shift amount is not an integer type!");
   if (LHSTy.isVector())
     return LHSTy;
-  return getScalarShiftAmountTy(DL, LHSTy);
+  return LegalTypes ? getScalarShiftAmountTy(DL, LHSTy)
+                    : getPointerTy(DL);
 }
 
 bool TargetLoweringBase::canOpTrap(unsigned Op, EVT VT) const {
@@ -967,6 +983,21 @@ TargetLoweringBase::emitPatchPoint(MachineInstr &InitialMI,
     MI->eraseFromParent();
     MI = MIB;
   }
+  return MBB;
+}
+
+MachineBasicBlock *
+TargetLoweringBase::emitXRayCustomEvent(MachineInstr &MI,
+                                        MachineBasicBlock *MBB) const {
+  assert(MI.getOpcode() == TargetOpcode::PATCHABLE_EVENT_CALL &&
+         "Called emitXRayCustomEvent on the wrong MI!");
+  auto &MF = *MI.getMF();
+  auto MIB = BuildMI(MF, MI.getDebugLoc(), MI.getDesc());
+  for (unsigned OpIdx = 0; OpIdx != MI.getNumOperands(); ++OpIdx)
+    MIB.add(MI.getOperand(OpIdx));
+
+  MBB->insert(MachineBasicBlock::iterator(MI), MIB);
+  MI.eraseFromParent();
   return MBB;
 }
 

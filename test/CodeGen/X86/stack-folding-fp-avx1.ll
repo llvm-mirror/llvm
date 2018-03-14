@@ -223,7 +223,9 @@ define <2 x double> @stack_fold_blendpd(<2 x double> %a0, <2 x double> %a1) {
   ;CHECK:       vblendpd $2, {{-?[0-9]*}}(%rsp), {{%xmm[0-9][0-9]*}}, {{%xmm[0-9][0-9]*}} {{.*#+}} 16-byte Folded Reload
   %1 = tail call <2 x i64> asm sideeffect "nop", "=x,~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15},~{flags}"()
   %2 = select <2 x i1> <i1 1, i1 0>, <2 x double> %a0, <2 x double> %a1
-  ret <2 x double> %2
+  ; fadd forces execution domain
+  %3 = fadd <2 x double> %2, <double 0x0, double 0x0>
+  ret <2 x double> %3
 }
 
 define <4 x double> @stack_fold_blendpd_ymm(<4 x double> %a0, <4 x double> %a1) {
@@ -231,15 +233,18 @@ define <4 x double> @stack_fold_blendpd_ymm(<4 x double> %a0, <4 x double> %a1) 
   ;CHECK:       vblendpd $6, {{-?[0-9]*}}(%rsp), {{%ymm[0-9][0-9]*}}, {{%ymm[0-9][0-9]*}} {{.*#+}} 32-byte Folded Reload
   %1 = tail call <2 x i64> asm sideeffect "nop", "=x,~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15},~{flags}"()
   %2 = select <4 x i1> <i1 1, i1 0, i1 0, i1 1>, <4 x double> %a0, <4 x double> %a1
-  ret <4 x double> %2
-}
+  ; fadd forces execution domain
+  %3 = fadd <4 x double> %2, <double 0x0, double 0x0, double 0x0, double 0x0>
+  ret <4 x double> %3}
 
 define <4 x float> @stack_fold_blendps(<4 x float> %a0, <4 x float> %a1) {
   ;CHECK-LABEL: stack_fold_blendps
   ;CHECK:       vblendps $6, {{-?[0-9]*}}(%rsp), {{%xmm[0-9][0-9]*}}, {{%xmm[0-9][0-9]*}} {{.*#+}} 16-byte Folded Reload
   %1 = tail call <2 x i64> asm sideeffect "nop", "=x,~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15},~{flags}"()
   %2 = select <4 x i1> <i1 1, i1 0, i1 0, i1 1>, <4 x float> %a0, <4 x float> %a1
-  ret <4 x float> %2
+  ; fadd forces execution domain
+  %3 = fadd <4 x float> %2, <float 0x0, float 0x0, float 0x0, float 0x0>
+  ret <4 x float> %3
 }
 
 define <8 x float> @stack_fold_blendps_ymm(<8 x float> %a0, <8 x float> %a1) {
@@ -247,7 +252,9 @@ define <8 x float> @stack_fold_blendps_ymm(<8 x float> %a0, <8 x float> %a1) {
   ;CHECK:       vblendps $102, {{-?[0-9]*}}(%rsp), {{%ymm[0-9][0-9]*}}, {{%ymm[0-9][0-9]*}} {{.*#+}} 32-byte Folded Reload
   %1 = tail call <2 x i64> asm sideeffect "nop", "=x,~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15},~{flags}"()
   %2 = select <8 x i1> <i1 1, i1 0, i1 0, i1 1, i1 1, i1 0, i1 0, i1 1>, <8 x float> %a0, <8 x float> %a1
-  ret <8 x float> %2
+  ; fadd forces execution domain
+  %3 = fadd <8 x float> %2, <float 0x0, float 0x0, float 0x0, float 0x0, float 0x0, float 0x0, float 0x0, float 0x0>
+  ret <8 x float> %3
 }
 
 define <2 x double> @stack_fold_blendvpd(<2 x double> %a0, <2 x double> %a1, <2 x double> %c) {
@@ -1579,7 +1586,9 @@ define <2 x double> @stack_fold_shufpd(<2 x double> %a0, <2 x double> %a1) {
   ;CHECK:       vshufpd $1, {{-?[0-9]*}}(%rsp), {{%xmm[0-9][0-9]*}}, {{%xmm[0-9][0-9]*}} {{.*#+}} 16-byte Folded Reload
   %1 = tail call <2 x i64> asm sideeffect "nop", "=x,~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15},~{flags}"()
   %2 = shufflevector <2 x double> %a0, <2 x double> %a1, <2 x i32> <i32 1, i32 2>
-  ret <2 x double> %2
+  ; fadd forces execution domain
+  %3 = fadd <2 x double> %2, <double 0x0, double 0x0>
+  ret <2 x double> %3
 }
 
 define <4 x double> @stack_fold_shufpd_ymm(<4 x double> %a0, <4 x double> %a1) {
@@ -1587,7 +1596,9 @@ define <4 x double> @stack_fold_shufpd_ymm(<4 x double> %a0, <4 x double> %a1) {
   ;CHECK:       vshufpd $5, {{-?[0-9]*}}(%rsp), {{%ymm[0-9][0-9]*}}, {{%ymm[0-9][0-9]*}} {{.*#+}} 32-byte Folded Reload
   %1 = tail call <2 x i64> asm sideeffect "nop", "=x,~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15},~{flags}"()
   %2 = shufflevector <4 x double> %a0, <4 x double> %a1, <4 x i32> <i32 1, i32 4, i32 3, i32 6>
-  ret <4 x double> %2
+  ; fadd forces execution domain
+  %3 = fadd <4 x double> %2, <double 0x0, double 0x0, double 0x0, double 0x0>
+  ret <4 x double> %3
 }
 
 define <4 x float> @stack_fold_shufps(<4 x float> %a0, <4 x float> %a1) {
@@ -1932,20 +1943,6 @@ define <8 x float> @stack_fold_xorps_ymm(<8 x float> %a0, <8 x float> %a1) {
   ; fadd forces execution domain
   %6 = fadd <8 x float> %5, <float 0x0, float 0x0, float 0x0, float 0x0, float 0x0, float 0x0, float 0x0, float 0x0>
   ret <8 x float> %6
-}
-
-define <4 x float> @stack_nofold_insertps(<8 x float> %a0, <8 x float> %a1) {
-; Cannot fold this without changing the immediate.
-; CHECK-LABEL: stack_nofold_insertps
-; CHECK:       32-byte Spill
-; CHECK:       nop
-; CHECK:       32-byte Reload
-; CHECK:       vinsertps $179, {{%xmm., %xmm., %xmm.}}
-  %1 = tail call <2 x i64> asm sideeffect "nop", "=x,~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15},~{flags}"()
-  %v0 = shufflevector <8 x float> %a0, <8 x float> undef, <4 x i32> <i32 0, i32 1, i32 2, i32 3>
-  %v1 = shufflevector <8 x float> %a1, <8 x float> undef, <4 x i32> <i32 0, i32 1, i32 2, i32 3>
-  %res = call <4 x float> @llvm.x86.sse41.insertps(<4 x float> %v0, <4 x float> %v1, i8 179)
-  ret <4 x float> %res
 }
 
 attributes #0 = { "unsafe-fp-math"="false" }

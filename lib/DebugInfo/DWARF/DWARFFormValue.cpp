@@ -28,7 +28,7 @@ using namespace llvm;
 using namespace dwarf;
 using namespace syntax;
 
-static const DWARFFormValue::FormClass DWARF4FormClasses[] = {
+static const DWARFFormValue::FormClass DWARF5FormClasses[] = {
     DWARFFormValue::FC_Unknown,  // 0x0
     DWARFFormValue::FC_Address,  // 0x01 DW_FORM_addr
     DWARFFormValue::FC_Unknown,  // 0x02 unused
@@ -57,6 +57,26 @@ static const DWARFFormValue::FormClass DWARF4FormClasses[] = {
     DWARFFormValue::FC_SectionOffset, // 0x17 DW_FORM_sec_offset
     DWARFFormValue::FC_Exprloc,       // 0x18 DW_FORM_exprloc
     DWARFFormValue::FC_Flag,          // 0x19 DW_FORM_flag_present
+    DWARFFormValue::FC_String,        // 0x1a DW_FORM_strx
+    DWARFFormValue::FC_Address,       // 0x1b DW_FORM_addrx
+    DWARFFormValue::FC_Reference,     // 0x1c DW_FORM_ref_sup4
+    DWARFFormValue::FC_String,        // 0x1d DW_FORM_strp_sup
+    DWARFFormValue::FC_Constant,      // 0x1e DW_FORM_data16
+    DWARFFormValue::FC_String,        // 0x1f DW_FORM_line_strp
+    DWARFFormValue::FC_Reference,     // 0x20 DW_FORM_ref_sig8
+    DWARFFormValue::FC_Constant,      // 0x21 DW_FORM_implicit_const
+    DWARFFormValue::FC_SectionOffset, // 0x22 DW_FORM_loclistx
+    DWARFFormValue::FC_SectionOffset, // 0x23 DW_FORM_rnglistx
+    DWARFFormValue::FC_Reference,     // 0x24 DW_FORM_ref_sup8
+    DWARFFormValue::FC_String,        // 0x25 DW_FORM_strx1
+    DWARFFormValue::FC_String,        // 0x26 DW_FORM_strx2
+    DWARFFormValue::FC_String,        // 0x27 DW_FORM_strx3
+    DWARFFormValue::FC_String,        // 0x28 DW_FORM_strx4
+    DWARFFormValue::FC_Address,       // 0x29 DW_FORM_addrx1
+    DWARFFormValue::FC_Address,       // 0x2a DW_FORM_addrx2
+    DWARFFormValue::FC_Address,       // 0x2b DW_FORM_addrx3
+    DWARFFormValue::FC_Address,       // 0x2c DW_FORM_addrx4
+
 };
 
 Optional<uint8_t>
@@ -246,42 +266,38 @@ bool DWARFFormValue::skipValue(dwarf::Form Form, DataExtractor DebugInfoData,
 }
 
 bool DWARFFormValue::isFormClass(DWARFFormValue::FormClass FC) const {
-  // First, check DWARF4 form classes.
-  if (Form < makeArrayRef(DWARF4FormClasses).size() &&
-      DWARF4FormClasses[Form] == FC)
+  // First, check DWARF5 form classes.
+  if (Form < makeArrayRef(DWARF5FormClasses).size() &&
+      DWARF5FormClasses[Form] == FC)
     return true;
-  // Check more forms from DWARF4 and DWARF5 proposals.
+  // Check more forms from extensions and proposals.
   switch (Form) {
-  case DW_FORM_ref_sig8:
   case DW_FORM_GNU_ref_alt:
     return (FC == FC_Reference);
   case DW_FORM_GNU_addr_index:
     return (FC == FC_Address);
   case DW_FORM_GNU_str_index:
   case DW_FORM_GNU_strp_alt:
-  case DW_FORM_strx:
-  case DW_FORM_strx1:
-  case DW_FORM_strx2:
-  case DW_FORM_strx3:
-  case DW_FORM_strx4:
     return (FC == FC_String);
-  case DW_FORM_implicit_const:
-    return (FC == FC_Constant);
   default:
     break;
   }
   // In DWARF3 DW_FORM_data4 and DW_FORM_data8 served also as a section offset.
   // Don't check for DWARF version here, as some producers may still do this
-  // by mistake. Also accept DW_FORM_strp since this is .debug_str section
-  // offset.
+  // by mistake. Also accept DW_FORM_[line_]strp since these are
+  // .debug_[line_]str section offsets.
   return (Form == DW_FORM_data4 || Form == DW_FORM_data8 ||
-          Form == DW_FORM_strp) &&
+          Form == DW_FORM_strp || Form == DW_FORM_line_strp) &&
          FC == FC_SectionOffset;
 }
 
 bool DWARFFormValue::extractValue(const DWARFDataExtractor &Data,
                                   uint32_t *OffsetPtr, DWARFFormParams FP,
+                                  const DWARFContext *Ctx,
                                   const DWARFUnit *CU) {
+  if (!Ctx && CU)
+    Ctx = &CU->getContext();
+  C = Ctx;
   U = CU;
   bool Indirect = false;
   bool IsBlock = false;
@@ -497,6 +513,11 @@ void DWARFFormValue::dump(raw_ostream &OS, DIDumpOptions DumpOpts) const {
       OS << format(" .debug_str[0x%8.8x] = ", (uint32_t)UValue);
     dumpString(OS);
     break;
+  case DW_FORM_line_strp:
+    if (DumpOpts.Verbose)
+      OS << format(" .debug_line_str[0x%8.8x] = ", (uint32_t)UValue);
+    dumpString(OS);
+    break;
   case DW_FORM_strx:
   case DW_FORM_strx1:
   case DW_FORM_strx2:
@@ -566,10 +587,10 @@ void DWARFFormValue::dump(raw_ostream &OS, DIDumpOptions DumpOpts) const {
 void DWARFFormValue::dumpString(raw_ostream &OS) const {
   Optional<const char *> DbgStr = getAsCString();
   if (DbgStr.hasValue()) {
-    raw_ostream &COS = WithColor(OS, syntax::String);
-    COS << '"';
-    COS.write_escaped(DbgStr.getValue());
-    COS << '"';
+    auto COS = WithColor(OS, syntax::String);
+    COS.get() << '"';
+    COS.get().write_escaped(DbgStr.getValue());
+    COS.get() << '"';
   }
 }
 
@@ -579,20 +600,32 @@ Optional<const char *> DWARFFormValue::getAsCString() const {
   if (Form == DW_FORM_string)
     return Value.cstr;
   // FIXME: Add support for DW_FORM_GNU_strp_alt
-  if (Form == DW_FORM_GNU_strp_alt || U == nullptr)
+  if (Form == DW_FORM_GNU_strp_alt || C == nullptr)
     return None;
   uint32_t Offset = Value.uval;
+  if (Form == DW_FORM_line_strp) {
+    // .debug_line_str is tracked in the Context.
+    if (const char *Str = C->getLineStringExtractor().getCStr(&Offset))
+      return Str;
+    return None;
+  }
   if (Form == DW_FORM_GNU_str_index || Form == DW_FORM_strx ||
       Form == DW_FORM_strx1 || Form == DW_FORM_strx2 || Form == DW_FORM_strx3 ||
       Form == DW_FORM_strx4) {
     uint64_t StrOffset;
-    if (!U->getStringOffsetSectionItem(Offset, StrOffset))
+    if (!U || !U->getStringOffsetSectionItem(Offset, StrOffset))
       return None;
     Offset = StrOffset;
   }
-  if (const char *Str = U->getStringExtractor().getCStr(&Offset)) {
-    return Str;
+  // Prefer the Unit's string extractor, because for .dwo it will point to
+  // .debug_str.dwo, while the Context's extractor always uses .debug_str.
+  if (U) {
+    if (const char *Str = U->getStringExtractor().getCStr(&Offset))
+      return Str;
+    return None;
   }
+  if (const char *Str = C->getStringExtractor().getCStr(&Offset))
+    return Str;
   return None;
 }
 

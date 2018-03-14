@@ -17,13 +17,14 @@
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/ExecutionEngine/JITSymbol.h"
-#include "llvm/ExecutionEngine/RuntimeDyld.h"
+#include "llvm/ExecutionEngine/Orc/Core.h"
 #include "llvm/ExecutionEngine/Orc/OrcError.h"
+#include "llvm/ExecutionEngine/RuntimeDyld.h"
 #include <algorithm>
 #include <cstdint>
 #include <string>
-#include <vector>
 #include <utility>
+#include <vector>
 
 namespace llvm {
 
@@ -95,35 +96,41 @@ class CtorDtorRunner {
 public:
   /// @brief Construct a CtorDtorRunner for the given range using the given
   ///        name mangling function.
-  CtorDtorRunner(std::vector<std::string> CtorDtorNames,
-                 typename JITLayerT::ModuleHandleT H)
-      : CtorDtorNames(std::move(CtorDtorNames)), H(H) {}
+  CtorDtorRunner(std::vector<std::string> CtorDtorNames, VModuleKey K)
+      : CtorDtorNames(std::move(CtorDtorNames)), K(K) {}
 
   /// @brief Run the recorded constructors/destructors through the given JIT
   ///        layer.
   Error runViaLayer(JITLayerT &JITLayer) const {
     using CtorDtorTy = void (*)();
 
-    for (const auto &CtorDtorName : CtorDtorNames)
-      if (auto CtorDtorSym = JITLayer.findSymbolIn(H, CtorDtorName, false)) {
+    for (const auto &CtorDtorName : CtorDtorNames) {
+      dbgs() << "Searching for ctor/dtor: " << CtorDtorName << "...";
+      if (auto CtorDtorSym = JITLayer.findSymbolIn(K, CtorDtorName, false)) {
+        dbgs() << " found symbol...";
         if (auto AddrOrErr = CtorDtorSym.getAddress()) {
+          dbgs() << " at addr " << format("0x%016x", *AddrOrErr) << "\n";
           CtorDtorTy CtorDtor =
             reinterpret_cast<CtorDtorTy>(static_cast<uintptr_t>(*AddrOrErr));
           CtorDtor();
-        } else
+        } else {
+          dbgs() << " failed materialization!\n";
           return AddrOrErr.takeError();
+        }
       } else {
+        dbgs() << " failed to find symbol...";
         if (auto Err = CtorDtorSym.takeError())
           return Err;
         else
           return make_error<JITSymbolNotFound>(CtorDtorName);
       }
+    }
     return Error::success();
   }
 
 private:
   std::vector<std::string> CtorDtorNames;
-  typename JITLayerT::ModuleHandleT H;
+  orc::VModuleKey K;
 };
 
 /// @brief Support class for static dtor execution. For hosted (in-process) JITs

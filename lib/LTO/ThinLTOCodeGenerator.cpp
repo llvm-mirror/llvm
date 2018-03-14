@@ -63,6 +63,7 @@ namespace llvm {
 extern cl::opt<bool> LTODiscardValueNames;
 extern cl::opt<std::string> LTORemarksFilename;
 extern cl::opt<bool> LTOPassRemarksWithHotness;
+extern cl::opt<unsigned> LTOPassRemarksHotnessThreshold;
 }
 
 namespace {
@@ -82,7 +83,7 @@ static void saveTempBitcode(const Module &TheModule, StringRef TempDir,
   if (EC)
     report_fatal_error(Twine("Failed to open ") + SaveTempPath +
                        " to save optimized bitcode\n");
-  WriteBitcodeToFile(&TheModule, OS, /* ShouldPreserveUseListOrder */ true);
+  WriteBitcodeToFile(TheModule, OS, /* ShouldPreserveUseListOrder */ true);
 }
 
 static const GlobalValueSummary *
@@ -476,7 +477,7 @@ ProcessThinLTOModule(Module &TheModule, ModuleSummaryIndex &Index,
       raw_svector_ostream OS(OutputBuffer);
       ProfileSummaryInfo PSI(TheModule);
       auto Index = buildModuleSummaryIndex(TheModule, nullptr, &PSI);
-      WriteBitcodeToFile(&TheModule, OS, true, &Index);
+      WriteBitcodeToFile(TheModule, OS, true, &Index);
     }
     return make_unique<ObjectMemoryBuffer>(std::move(OutputBuffer));
   }
@@ -592,7 +593,7 @@ std::unique_ptr<TargetMachine> TargetMachineBuilder::create() const {
  */
 std::unique_ptr<ModuleSummaryIndex> ThinLTOCodeGenerator::linkCombinedIndex() {
   std::unique_ptr<ModuleSummaryIndex> CombinedIndex =
-      llvm::make_unique<ModuleSummaryIndex>();
+      llvm::make_unique<ModuleSummaryIndex>(/*IsPeformingAnalysis=*/false);
   uint64_t NextModuleId = 0;
   for (auto &ModuleBuffer : Modules) {
     if (Error Err = readModuleSummaryIndex(ModuleBuffer.getMemBuffer(),
@@ -605,6 +606,32 @@ std::unique_ptr<ModuleSummaryIndex> ThinLTOCodeGenerator::linkCombinedIndex() {
     }
   }
   return CombinedIndex;
+}
+
+static void internalizeAndPromoteInIndex(
+    const StringMap<FunctionImporter::ExportSetTy> &ExportLists,
+    const DenseSet<GlobalValue::GUID> &GUIDPreservedSymbols,
+    ModuleSummaryIndex &Index) {
+  auto isExported = [&](StringRef ModuleIdentifier, GlobalValue::GUID GUID) {
+    const auto &ExportList = ExportLists.find(ModuleIdentifier);
+    return (ExportList != ExportLists.end() &&
+            ExportList->second.count(GUID)) ||
+           GUIDPreservedSymbols.count(GUID);
+  };
+
+  thinLTOInternalizeAndPromoteInIndex(Index, isExported);
+}
+
+static void computeDeadSymbolsInIndex(
+    ModuleSummaryIndex &Index,
+    const DenseSet<GlobalValue::GUID> &GUIDPreservedSymbols) {
+  // We have no symbols resolution available. And can't do any better now in the
+  // case where the prevailing symbol is in a native object. It can be refined
+  // with linker information in the future.
+  auto isPrevailing = [&](GlobalValue::GUID G) {
+    return PrevailingType::Unknown;
+  };
+  computeDeadSymbols(Index, GUIDPreservedSymbols, isPrevailing);
 }
 
 /**
@@ -625,7 +652,7 @@ void ThinLTOCodeGenerator::promote(Module &TheModule,
       PreservedSymbols, Triple(TheModule.getTargetTriple()));
 
   // Compute "dead" symbols, we don't want to import/export these!
-  computeDeadSymbols(Index, GUIDPreservedSymbols);
+  computeDeadSymbolsInIndex(Index, GUIDPreservedSymbols);
 
   // Generate import/export list
   StringMap<FunctionImporter::ImportMapTy> ImportLists(ModuleCount);
@@ -642,13 +669,7 @@ void ThinLTOCodeGenerator::promote(Module &TheModule,
 
   // Promote the exported values in the index, so that they are promoted
   // in the module.
-  auto isExported = [&](StringRef ModuleIdentifier, GlobalValue::GUID GUID) {
-    const auto &ExportList = ExportLists.find(ModuleIdentifier);
-    return (ExportList != ExportLists.end() &&
-            ExportList->second.count(GUID)) ||
-           GUIDPreservedSymbols.count(GUID);
-  };
-  thinLTOInternalizeAndPromoteInIndex(Index, isExported);
+  internalizeAndPromoteInIndex(ExportLists, GUIDPreservedSymbols, Index);
 
   promoteModule(TheModule, Index);
 }
@@ -670,7 +691,7 @@ void ThinLTOCodeGenerator::crossModuleImport(Module &TheModule,
       PreservedSymbols, Triple(TheModule.getTargetTriple()));
 
   // Compute "dead" symbols, we don't want to import/export these!
-  computeDeadSymbols(Index, GUIDPreservedSymbols);
+  computeDeadSymbolsInIndex(Index, GUIDPreservedSymbols);
 
   // Generate import/export list
   StringMap<FunctionImporter::ImportMapTy> ImportLists(ModuleCount);
@@ -747,7 +768,7 @@ void ThinLTOCodeGenerator::internalize(Module &TheModule,
   Index.collectDefinedGVSummariesPerModule(ModuleToDefinedGVSummaries);
 
   // Compute "dead" symbols, we don't want to import/export these!
-  computeDeadSymbols(Index, GUIDPreservedSymbols);
+  computeDeadSymbolsInIndex(Index, GUIDPreservedSymbols);
 
   // Generate import/export list
   StringMap<FunctionImporter::ImportMapTy> ImportLists(ModuleCount);
@@ -762,13 +783,7 @@ void ThinLTOCodeGenerator::internalize(Module &TheModule,
     return;
 
   // Internalization
-  auto isExported = [&](StringRef ModuleIdentifier, GlobalValue::GUID GUID) {
-    const auto &ExportList = ExportLists.find(ModuleIdentifier);
-    return (ExportList != ExportLists.end() &&
-            ExportList->second.count(GUID)) ||
-           GUIDPreservedSymbols.count(GUID);
-  };
-  thinLTOInternalizeAndPromoteInIndex(Index, isExported);
+  internalizeAndPromoteInIndex(ExportLists, GUIDPreservedSymbols, Index);
   thinLTOInternalizeModule(TheModule,
                            ModuleToDefinedGVSummaries[ModuleIdentifier]);
 }
@@ -899,7 +914,7 @@ void ThinLTOCodeGenerator::run() {
       computeGUIDPreservedSymbols(PreservedSymbols, TMBuilder.TheTriple);
 
   // Compute "dead" symbols, we don't want to import/export these!
-  computeDeadSymbols(*Index, GUIDPreservedSymbols);
+  computeDeadSymbolsInIndex(*Index, GUIDPreservedSymbols);
 
   // Collect the import/export lists for all modules from the call-graph in the
   // combined index.
@@ -918,17 +933,10 @@ void ThinLTOCodeGenerator::run() {
   // impacts the caching.
   resolveWeakForLinkerInIndex(*Index, ResolvedODR);
 
-  auto isExported = [&](StringRef ModuleIdentifier, GlobalValue::GUID GUID) {
-    const auto &ExportList = ExportLists.find(ModuleIdentifier);
-    return (ExportList != ExportLists.end() &&
-            ExportList->second.count(GUID)) ||
-           GUIDPreservedSymbols.count(GUID);
-  };
-
   // Use global summary-based analysis to identify symbols that can be
   // internalized (because they aren't exported or preserved as per callback).
   // Changes are made in the index, consumed in the ThinLTO backends.
-  thinLTOInternalizeAndPromoteInIndex(*Index, isExported);
+  internalizeAndPromoteInIndex(ExportLists, GUIDPreservedSymbols, *Index);
 
   // Make sure that every module has an entry in the ExportLists and
   // ResolvedODR maps to enable threaded access to these maps below.
@@ -991,7 +999,8 @@ void ThinLTOCodeGenerator::run() {
         Context.setDiscardValueNames(LTODiscardValueNames);
         Context.enableDebugTypeODRUniquing();
         auto DiagFileOrErr = lto::setupOptimizationRemarks(
-            Context, LTORemarksFilename, LTOPassRemarksWithHotness, count);
+            Context, LTORemarksFilename, LTOPassRemarksWithHotness,
+            LTOPassRemarksHotnessThreshold, count);
         if (!DiagFileOrErr) {
           errs() << "Error: " << toString(DiagFileOrErr.takeError()) << "\n";
           report_fatal_error("ThinLTO: Can't get an output file for the "

@@ -643,7 +643,9 @@ std::error_code mapped_file_region::init(int FD, uint64_t Offset,
 
 mapped_file_region::mapped_file_region(int fd, mapmode mode, size_t length,
                                        uint64_t offset, std::error_code &ec)
-    : Size(length), Mapping() {
+    : Size(length), Mapping(), FD(fd), Mode(mode) {
+  (void)FD;
+  (void)Mode;
   ec = init(fd, offset, mode);
   if (ec)
     Mapping = nullptr;
@@ -860,12 +862,12 @@ std::error_code real_path(const Twine &path, SmallVectorImpl<char> &dest,
     return real_path(Storage, dest, false);
   }
 
-  int fd;
-  std::error_code EC = openFileForRead(path, fd, &dest);
-
-  if (EC)
-    return EC;
-  ::close(fd);
+  SmallString<128> Storage;
+  StringRef P = path.toNullTerminatedStringRef(Storage);
+  char Buffer[PATH_MAX];
+  if (::realpath(P.begin(), Buffer) == nullptr)
+    return std::error_code(errno, std::generic_category());
+  dest.append(Buffer, Buffer + strlen(Buffer));
   return std::error_code();
 }
 

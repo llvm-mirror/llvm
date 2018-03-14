@@ -89,6 +89,12 @@ cl::opt<bool> LTOPassRemarksWithHotness(
     "lto-pass-remarks-with-hotness",
     cl::desc("With PGO, include profile count in optimization remarks"),
     cl::Hidden);
+
+cl::opt<unsigned> LTOPassRemarksHotnessThreshold(
+    "lto-pass-remarks-hotness-threshold",
+    cl::desc("Minimum profile count required for an optimization remark to be "
+             "output"),
+    cl::Hidden);
 }
 
 LTOCodeGenerator::LTOCodeGenerator(LLVMContext &Context)
@@ -220,7 +226,7 @@ bool LTOCodeGenerator::writeMergedModules(StringRef Path) {
   }
 
   // write bitcode to it
-  WriteBitcodeToFile(MergedModule.get(), Out.os(), ShouldEmbedUselists);
+  WriteBitcodeToFile(*MergedModule, Out.os(), ShouldEmbedUselists);
   Out.os().close();
 
   if (Out.os().has_error()) {
@@ -505,7 +511,8 @@ bool LTOCodeGenerator::optimize(bool DisableVerify, bool DisableInline,
     return false;
 
   auto DiagFileOrErr = lto::setupOptimizationRemarks(
-      Context, LTORemarksFilename, LTOPassRemarksWithHotness);
+      Context, LTORemarksFilename, LTOPassRemarksWithHotness,
+      LTOPassRemarksHotnessThreshold);
   if (!DiagFileOrErr) {
     errs() << "Error: " << toString(DiagFileOrErr.takeError()) << "\n";
     report_fatal_error("Can't get an output file for the remarks");

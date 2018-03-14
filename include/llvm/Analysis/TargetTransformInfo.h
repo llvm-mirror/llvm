@@ -308,7 +308,7 @@ public:
   /// compared to the same memory location accessed through a pointer with a
   /// different address space.
   //
-  /// This is for for targets with different pointer representations which can
+  /// This is for targets with different pointer representations which can
   /// be converted with the addrspacecast instruction. If a pointer is converted
   /// to this address space, optimizations should attempt to replace the access
   /// with the source address space.
@@ -471,6 +471,11 @@ public:
   bool isLSRCostLess(TargetTransformInfo::LSRCost &C1,
                      TargetTransformInfo::LSRCost &C2) const;
 
+  /// Return true if the target can fuse a compare and branch.
+  /// Loop-strength-reduction (LSR) uses that knowledge to adjust its cost
+  /// calculation for the instructions in a loop.
+  bool canMacroFuseCmp() const;
+
   /// \brief Return true if the target supports masked load/store
   /// AVX2 and AVX-512 targets allow masks for consecutive load and store
   bool isLegalMaskedStore(Type *DataType) const;
@@ -540,6 +545,10 @@ public:
   /// \brief Return true if switches should be turned into lookup tables
   /// containing this constant value for the target.
   bool shouldBuildLookupTablesForConstant(Constant *C) const;
+
+  /// \brief Return true if the input function which is cold at all call sites,
+  ///  should use coldcc calling convention.
+  bool useColdCCForColdCall(Function &F) const;
 
   unsigned getScalarizationOverhead(Type *Ty, bool Insert, bool Extract) const;
 
@@ -974,6 +983,7 @@ public:
                                      Instruction *I) = 0;
   virtual bool isLSRCostLess(TargetTransformInfo::LSRCost &C1,
                              TargetTransformInfo::LSRCost &C2) = 0;
+  virtual bool canMacroFuseCmp() = 0;
   virtual bool isLegalMaskedStore(Type *DataType) = 0;
   virtual bool isLegalMaskedLoad(Type *DataType) = 0;
   virtual bool isLegalMaskedScatter(Type *DataType) = 0;
@@ -992,6 +1002,7 @@ public:
   virtual unsigned getJumpBufSize() = 0;
   virtual bool shouldBuildLookupTables() = 0;
   virtual bool shouldBuildLookupTablesForConstant(Constant *C) = 0;
+  virtual bool useColdCCForColdCall(Function &F) = 0;
   virtual unsigned
   getScalarizationOverhead(Type *Ty, bool Insert, bool Extract) = 0;
   virtual unsigned getOperandsScalarizationOverhead(ArrayRef<const Value *> Args,
@@ -1192,6 +1203,9 @@ public:
                      TargetTransformInfo::LSRCost &C2) override {
     return Impl.isLSRCostLess(C1, C2);
   }
+  bool canMacroFuseCmp() override {
+    return Impl.canMacroFuseCmp();
+  }
   bool isLegalMaskedStore(Type *DataType) override {
     return Impl.isLegalMaskedStore(DataType);
   }
@@ -1237,6 +1251,10 @@ public:
   bool shouldBuildLookupTablesForConstant(Constant *C) override {
     return Impl.shouldBuildLookupTablesForConstant(C);
   }
+  bool useColdCCForColdCall(Function &F) override {
+    return Impl.useColdCCForColdCall(F);
+  }
+
   unsigned getScalarizationOverhead(Type *Ty, bool Insert,
                                     bool Extract) override {
     return Impl.getScalarizationOverhead(Ty, Insert, Extract);

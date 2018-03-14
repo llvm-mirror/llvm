@@ -56,11 +56,9 @@ namespace HexagonISD {
       VASR,
       VLSR,
 
+      TSTBIT,
       INSERT,
       EXTRACTU,
-      VCOMBINE,
-      VPACKE,
-      VPACKO,
       VEXTRACTW,
       VINSERTW0,
       VROR,
@@ -68,8 +66,21 @@ namespace HexagonISD {
       EH_RETURN,
       DCFETCH,
       READCYCLE,
+      D2P,         // Convert 8-byte value to 8-bit predicate register. [*]
+      P2D,         // Convert 8-bit predicate register to 8-byte value. [*]
+      V2Q,         // Convert HVX vector to a vector predicate reg. [*]
+      Q2V,         // Convert vector predicate to an HVX vector. [*]
+                   // [*] The equivalence is defined as "Q <=> (V != 0)",
+                   //     where the != operation compares bytes.
+                   // Note: V != 0 is implemented as V >u 0.
+      QCAT,
+      QTRUE,
+      QFALSE,
       VZERO,
-
+      TYPECAST,    // No-op that's used to convert between different legal
+                   // types in a register.
+      VALIGNADDR,  // Align vector address: Op & -HwLen, except when it is
+                   // an address in a vector load, then it's a no-op.
       OP_END
     };
 
@@ -125,6 +136,9 @@ namespace HexagonISD {
         const override;
 
     SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
+    void ReplaceNodeResults(SDNode *N, SmallVectorImpl<SDValue> &Results,
+                            SelectionDAG &DAG) const override;
+
     const char *getTargetNodeName(unsigned Opcode) const override;
 
     SDValue LowerBUILD_VECTOR(SDValue Op, SelectionDAG &DAG) const;
@@ -135,6 +149,10 @@ namespace HexagonISD {
     SDValue LowerINSERT_SUBVECTOR(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerVECTOR_SHUFFLE(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerVECTOR_SHIFT(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerBITCAST(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerANY_EXTEND(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerSIGN_EXTEND(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerZERO_EXTEND(SDValue Op, SelectionDAG &DAG) const;
 
     SDValue LowerDYNAMIC_STACKALLOC(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerINLINEASM(SDValue Op, SelectionDAG &DAG) const;
@@ -282,6 +300,9 @@ namespace HexagonISD {
     }
 
   private:
+    void initializeHVXLowering();
+    std::pair<SDValue,int> getBaseAndOffset(SDValue Addr) const;
+
     bool getBuildVectorConstInts(ArrayRef<SDValue> Values, MVT VecTy,
                                  SelectionDAG &DAG,
                                  MutableArrayRef<ConstantInt*> Consts) const;
@@ -293,13 +314,19 @@ namespace HexagonISD {
                           MVT ValTy, MVT ResTy, SelectionDAG &DAG) const;
     SDValue insertVector(SDValue VecV, SDValue ValV, SDValue IdxV,
                          const SDLoc &dl, MVT ValTy, SelectionDAG &DAG) const;
+    SDValue expandPredicate(SDValue Vec32, const SDLoc &dl,
+                            SelectionDAG &DAG) const;
+    SDValue contractPredicate(SDValue Vec64, const SDLoc &dl,
+                              SelectionDAG &DAG) const;
+    SDValue getVectorShiftByInt(SDValue Op, SelectionDAG &DAG) const;
+
     bool isUndef(SDValue Op) const {
       if (Op.isMachineOpcode())
         return Op.getMachineOpcode() == TargetOpcode::IMPLICIT_DEF;
       return Op.getOpcode() == ISD::UNDEF;
     }
-    SDValue getNode(unsigned MachineOpc, const SDLoc &dl, MVT Ty,
-                    ArrayRef<SDValue> Ops, SelectionDAG &DAG) const {
+    SDValue getInstr(unsigned MachineOpc, const SDLoc &dl, MVT Ty,
+                     ArrayRef<SDValue> Ops, SelectionDAG &DAG) const {
       SDNode *N = DAG.getMachineNode(MachineOpc, dl, Ty, Ops);
       return SDValue(N, 0);
     }
@@ -326,7 +353,8 @@ namespace HexagonISD {
     MVT tyVector(MVT Ty, MVT ElemTy) const {
       if (Ty.isVector() && Ty.getVectorElementType() == ElemTy)
         return Ty;
-      unsigned TyWidth = Ty.getSizeInBits(), ElemWidth = ElemTy.getSizeInBits();
+      unsigned TyWidth = Ty.getSizeInBits();
+      unsigned ElemWidth = ElemTy.getSizeInBits();
       assert((TyWidth % ElemWidth) == 0);
       return MVT::getVectorVT(ElemTy, TyWidth/ElemWidth);
     }
@@ -341,31 +369,66 @@ namespace HexagonISD {
     VectorPair opSplit(SDValue Vec, const SDLoc &dl, SelectionDAG &DAG) const;
     SDValue opCastElem(SDValue Vec, MVT ElemTy, SelectionDAG &DAG) const;
 
+    bool isHvxSingleTy(MVT Ty) const;
+    bool isHvxPairTy(MVT Ty) const;
     SDValue convertToByteIndex(SDValue ElemIdx, MVT ElemTy,
                                SelectionDAG &DAG) const;
     SDValue getIndexInWord32(SDValue Idx, MVT ElemTy, SelectionDAG &DAG) const;
     SDValue getByteShuffle(const SDLoc &dl, SDValue Op0, SDValue Op1,
                            ArrayRef<int> Mask, SelectionDAG &DAG) const;
 
-    MVT getVecBoolVT() const;
-
-    SDValue buildHvxVectorSingle(ArrayRef<SDValue> Values, const SDLoc &dl,
-                                 MVT VecTy, SelectionDAG &DAG) const;
+    SDValue buildHvxVectorReg(ArrayRef<SDValue> Values, const SDLoc &dl,
+                              MVT VecTy, SelectionDAG &DAG) const;
     SDValue buildHvxVectorPred(ArrayRef<SDValue> Values, const SDLoc &dl,
                                MVT VecTy, SelectionDAG &DAG) const;
+    SDValue createHvxPrefixPred(SDValue PredV, const SDLoc &dl,
+                                unsigned BitBytes, bool ZeroFill,
+                                SelectionDAG &DAG) const;
+    SDValue extractHvxElementReg(SDValue VecV, SDValue IdxV, const SDLoc &dl,
+                                 MVT ResTy, SelectionDAG &DAG) const;
+    SDValue extractHvxElementPred(SDValue VecV, SDValue IdxV, const SDLoc &dl,
+                                  MVT ResTy, SelectionDAG &DAG) const;
+    SDValue insertHvxElementReg(SDValue VecV, SDValue IdxV, SDValue ValV,
+                                const SDLoc &dl, SelectionDAG &DAG) const;
+    SDValue insertHvxElementPred(SDValue VecV, SDValue IdxV, SDValue ValV,
+                                 const SDLoc &dl, SelectionDAG &DAG) const;
+    SDValue extractHvxSubvectorReg(SDValue VecV, SDValue IdxV, const SDLoc &dl,
+                                   MVT ResTy, SelectionDAG &DAG) const;
+    SDValue extractHvxSubvectorPred(SDValue VecV, SDValue IdxV, const SDLoc &dl,
+                                    MVT ResTy, SelectionDAG &DAG) const;
+    SDValue insertHvxSubvectorReg(SDValue VecV, SDValue SubV, SDValue IdxV,
+                                  const SDLoc &dl, SelectionDAG &DAG) const;
+    SDValue insertHvxSubvectorPred(SDValue VecV, SDValue SubV, SDValue IdxV,
+                                   const SDLoc &dl, SelectionDAG &DAG) const;
+    SDValue extendHvxVectorPred(SDValue VecV, const SDLoc &dl, MVT ResTy,
+                                bool ZeroExt, SelectionDAG &DAG) const;
 
     SDValue LowerHvxBuildVector(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerHvxConcatVectors(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerHvxExtractElement(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerHvxInsertElement(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerHvxExtractSubvector(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerHvxInsertSubvector(SDValue Op, SelectionDAG &DAG) const;
+
+    SDValue LowerHvxAnyExt(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerHvxSignExt(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerHvxZeroExt(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerHvxMul(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerHvxMulh(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerHvxSetCC(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerHvxExtend(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerHvxShift(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerHvxUnalignedLoad(SDValue Op, SelectionDAG &DAG) const;
+
+    SDValue SplitHvxPairOp(SDValue Op, SelectionDAG &DAG) const;
+    SDValue SplitHvxMemOp(SDValue Op, SelectionDAG &DAG) const;
 
     std::pair<const TargetRegisterClass*, uint8_t>
     findRepresentativeClass(const TargetRegisterInfo *TRI, MVT VT)
         const override;
+
+    bool isHvxOperation(SDValue Op) const;
+    SDValue LowerHvxOperation(SDValue Op, SelectionDAG &DAG) const;
   };
 
 } // end namespace llvm

@@ -77,28 +77,28 @@ using namespace ELF;
 
 #define TYPEDEF_ELF_TYPES(ELFT)                                                \
   using ELFO = ELFFile<ELFT>;                                                  \
-  using Elf_Addr = typename ELFO::Elf_Addr;                                    \
-  using Elf_Shdr = typename ELFO::Elf_Shdr;                                    \
-  using Elf_Sym = typename ELFO::Elf_Sym;                                      \
-  using Elf_Dyn = typename ELFO::Elf_Dyn;                                      \
-  using Elf_Dyn_Range = typename ELFO::Elf_Dyn_Range;                          \
-  using Elf_Rel = typename ELFO::Elf_Rel;                                      \
-  using Elf_Rela = typename ELFO::Elf_Rela;                                    \
-  using Elf_Rel_Range = typename ELFO::Elf_Rel_Range;                          \
-  using Elf_Rela_Range = typename ELFO::Elf_Rela_Range;                        \
-  using Elf_Phdr = typename ELFO::Elf_Phdr;                                    \
-  using Elf_Half = typename ELFO::Elf_Half;                                    \
-  using Elf_Ehdr = typename ELFO::Elf_Ehdr;                                    \
-  using Elf_Word = typename ELFO::Elf_Word;                                    \
-  using Elf_Hash = typename ELFO::Elf_Hash;                                    \
-  using Elf_GnuHash = typename ELFO::Elf_GnuHash;                              \
-  using Elf_Sym_Range = typename ELFO::Elf_Sym_Range;                          \
-  using Elf_Versym = typename ELFO::Elf_Versym;                                \
-  using Elf_Verneed = typename ELFO::Elf_Verneed;                              \
-  using Elf_Vernaux = typename ELFO::Elf_Vernaux;                              \
-  using Elf_Verdef = typename ELFO::Elf_Verdef;                                \
-  using Elf_Verdaux = typename ELFO::Elf_Verdaux;                              \
-  using uintX_t = typename ELFO::uintX_t;
+  using Elf_Addr = typename ELFT::Addr;                                        \
+  using Elf_Shdr = typename ELFT::Shdr;                                        \
+  using Elf_Sym = typename ELFT::Sym;                                          \
+  using Elf_Dyn = typename ELFT::Dyn;                                          \
+  using Elf_Dyn_Range = typename ELFT::DynRange;                               \
+  using Elf_Rel = typename ELFT::Rel;                                          \
+  using Elf_Rela = typename ELFT::Rela;                                        \
+  using Elf_Rel_Range = typename ELFT::RelRange;                               \
+  using Elf_Rela_Range = typename ELFT::RelaRange;                             \
+  using Elf_Phdr = typename ELFT::Phdr;                                        \
+  using Elf_Half = typename ELFT::Half;                                        \
+  using Elf_Ehdr = typename ELFT::Ehdr;                                        \
+  using Elf_Word = typename ELFT::Word;                                        \
+  using Elf_Hash = typename ELFT::Hash;                                        \
+  using Elf_GnuHash = typename ELFT::GnuHash;                                  \
+  using Elf_Sym_Range = typename ELFT::SymRange;                               \
+  using Elf_Versym = typename ELFT::Versym;                                    \
+  using Elf_Verneed = typename ELFT::Verneed;                                  \
+  using Elf_Vernaux = typename ELFT::Vernaux;                                  \
+  using Elf_Verdef = typename ELFT::Verdef;                                    \
+  using Elf_Verdaux = typename ELFT::Verdaux;                                  \
+  using uintX_t = typename ELFT::uint;
 
 namespace {
 
@@ -163,6 +163,8 @@ public:
   void printHashHistogram() override;
 
   void printNotes() override;
+
+  void printELFLinkerOptions() override;
 
 private:
   std::unique_ptr<DumpStyle<ELFT>> ELFDumperStyle;
@@ -295,8 +297,8 @@ template <class ELFT> class MipsGOTParser;
 
 template <typename ELFT> class DumpStyle {
 public:
-  using Elf_Shdr = typename ELFFile<ELFT>::Elf_Shdr;
-  using Elf_Sym = typename ELFFile<ELFT>::Elf_Sym;
+  using Elf_Shdr = typename ELFT::Shdr;
+  using Elf_Sym = typename ELFT::Sym;
 
   DumpStyle(ELFDumper<ELFT> *Dumper) : Dumper(Dumper) {}
   virtual ~DumpStyle() = default;
@@ -316,6 +318,7 @@ public:
   virtual void printProgramHeaders(const ELFFile<ELFT> *Obj) = 0;
   virtual void printHashHistogram(const ELFFile<ELFT> *Obj) = 0;
   virtual void printNotes(const ELFFile<ELFT> *Obj) = 0;
+  virtual void printELFLinkerOptions(const ELFFile<ELFT> *Obj) = 0;
   virtual void printMipsGOT(const MipsGOTParser<ELFT> &Parser) = 0;
   virtual void printMipsPLT(const MipsGOTParser<ELFT> &Parser) = 0;
   const ELFDumper<ELFT> *dumper() const { return Dumper; }
@@ -345,6 +348,7 @@ public:
   void printProgramHeaders(const ELFO *Obj) override;
   void printHashHistogram(const ELFFile<ELFT> *Obj) override;
   void printNotes(const ELFFile<ELFT> *Obj) override;
+  void printELFLinkerOptions(const ELFFile<ELFT> *Obj) override;
   void printMipsGOT(const MipsGOTParser<ELFT> &Parser) override;
   void printMipsPLT(const MipsGOTParser<ELFT> &Parser) override;
 
@@ -405,6 +409,7 @@ public:
   void printProgramHeaders(const ELFO *Obj) override;
   void printHashHistogram(const ELFFile<ELFT> *Obj) override;
   void printNotes(const ELFFile<ELFT> *Obj) override;
+  void printELFLinkerOptions(const ELFFile<ELFT> *Obj) override;
   void printMipsGOT(const MipsGOTParser<ELFT> &Parser) override;
   void printMipsPLT(const MipsGOTParser<ELFT> &Parser) override;
 
@@ -1255,9 +1260,37 @@ static const EnumEntry<unsigned> ElfHeaderMipsFlags[] = {
 };
 
 static const EnumEntry<unsigned> ElfHeaderAMDGPUFlags[] = {
-  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_ARCH_NONE),
-  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_ARCH_R600),
-  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_ARCH_GCN)
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_NONE),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_R600_R600),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_R600_R630),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_R600_RS880),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_R600_RV670),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_R600_RV710),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_R600_RV730),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_R600_RV770),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_R600_CEDAR),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_R600_CYPRESS),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_R600_JUNIPER),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_R600_REDWOOD),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_R600_SUMO),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_R600_BARTS),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_R600_CAICOS),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_R600_CAYMAN),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_R600_TURKS),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_AMDGCN_GFX600),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_AMDGCN_GFX601),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_AMDGCN_GFX700),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_AMDGCN_GFX701),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_AMDGCN_GFX702),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_AMDGCN_GFX703),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_AMDGCN_GFX704),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_AMDGCN_GFX801),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_AMDGCN_GFX802),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_AMDGCN_GFX803),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_AMDGCN_GFX810),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_AMDGCN_GFX900),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_MACH_AMDGCN_GFX902),
+  LLVM_READOBJ_ENUM_ENT(ELF, EF_AMDGPU_XNACK)
 };
 
 static const EnumEntry<unsigned> ElfHeaderRISCVFlags[] = {
@@ -1499,6 +1532,10 @@ template <class ELFT> void ELFDumper<ELFT>::printHashHistogram() {
 
 template <class ELFT> void ELFDumper<ELFT>::printNotes() {
   ELFDumperStyle->printNotes(Obj);
+}
+
+template <class ELFT> void ELFDumper<ELFT>::printELFLinkerOptions() {
+  ELFDumperStyle->printELFLinkerOptions(Obj);
 }
 
 #define LLVM_READOBJ_TYPE_CASE(name) \
@@ -1776,11 +1813,10 @@ void ELFDumper<ELFT>::printUnwindInfo() {
 
 namespace {
 
-template <> void ELFDumper<ELFType<support::little, false>>::printUnwindInfo() {
+template <> void ELFDumper<ELF32LE>::printUnwindInfo() {
   const unsigned Machine = Obj->getHeader()->e_machine;
   if (Machine == EM_ARM) {
-    ARM::EHABI::PrinterContext<ELFType<support::little, false>> Ctx(
-        W, Obj, DotSymtabSec);
+    ARM::EHABI::PrinterContext<ELF32LE> Ctx(W, Obj, DotSymtabSec);
     return Ctx.PrintUnwindInformation();
   }
   W.startLine() << "UnwindInfo not implemented.\n";
@@ -1841,9 +1877,8 @@ void ELFDumper<ELFT>::printNeededLibraries() {
 
   std::stable_sort(Libs.begin(), Libs.end());
 
-  for (const auto &L : Libs) {
-    outs() << "  " << L << "\n";
-  }
+  for (const auto &L : Libs)
+     W.startLine() << L << "\n";
 }
 
 
@@ -1877,7 +1912,7 @@ void ELFDumper<ELFT>::printGnuHashTable() {
 }
 
 template <typename ELFT> void ELFDumper<ELFT>::printLoadName() {
-  outs() << "LoadName: " << SOName << '\n';
+  W.printString("LoadName", SOName);
 }
 
 template <class ELFT>
@@ -1887,7 +1922,7 @@ void ELFDumper<ELFT>::printAttributes() {
 
 namespace {
 
-template <> void ELFDumper<ELFType<support::little, false>>::printAttributes() {
+template <> void ELFDumper<ELF32LE>::printAttributes() {
   if (Obj->getHeader()->e_machine != EM_ARM) {
     W.startLine() << "Attributes not implemented.\n";
     return;
@@ -2361,8 +2396,8 @@ template <class ELFT> void ELFDumper<ELFT>::printStackMap() const {
   ArrayRef<uint8_t> StackMapContentsArray =
       unwrapOrError(Obj->getSectionContents(StackMapSection));
 
-  prettyPrintStackMap(outs(), StackMapV2Parser<ELFT::TargetEndianness>(
-                                  StackMapContentsArray));
+  prettyPrintStackMap(
+      W, StackMapV2Parser<ELFT::TargetEndianness>(StackMapContentsArray));
 }
 
 template <class ELFT> void ELFDumper<ELFT>::printGroupSections() {
@@ -2446,9 +2481,9 @@ struct GroupSection {
 
 template <class ELFT>
 std::vector<GroupSection> getGroups(const ELFFile<ELFT> *Obj) {
-  using Elf_Shdr = typename ELFFile<ELFT>::Elf_Shdr;
-  using Elf_Sym = typename ELFFile<ELFT>::Elf_Sym;
-  using Elf_Word = typename ELFFile<ELFT>::Elf_Word;
+  using Elf_Shdr = typename ELFT::Shdr;
+  using Elf_Sym = typename ELFT::Sym;
+  using Elf_Word = typename ELFT::Word;
 
   std::vector<GroupSection> Ret;
   uint64_t I = 0;
@@ -2696,6 +2731,8 @@ std::string getSectionTypeString(unsigned Arch, unsigned Type) {
     return "SYMTAB SECTION INDICES";
   case SHT_LLVM_ODRTAB:
     return "LLVM_ODRTAB";
+  case SHT_LLVM_LINKER_OPTIONS:
+    return "LLVM_LINKER_OPTIONS";
   // FIXME: Parse processor specific GNU attributes
   case SHT_GNU_ATTRIBUTES:
     return "ATTRIBUTES";
@@ -3423,8 +3460,7 @@ static std::string getAMDGPUNoteTypeName(const uint32_t NT) {
 
 template <typename ELFT>
 static void printGNUNote(raw_ostream &OS, uint32_t NoteType,
-                         ArrayRef<typename ELFFile<ELFT>::Elf_Word> Words,
-                         size_t Size) {
+                         ArrayRef<typename ELFT::Word> Words, size_t Size) {
   switch (NoteType) {
   default:
     return;
@@ -3463,8 +3499,7 @@ static void printGNUNote(raw_ostream &OS, uint32_t NoteType,
 
 template <typename ELFT>
 static void printAMDGPUNote(raw_ostream &OS, uint32_t NoteType,
-                            ArrayRef<typename ELFFile<ELFT>::Elf_Word> Words,
-                            size_t Size) {
+                            ArrayRef<typename ELFT::Word> Words, size_t Size) {
   switch (NoteType) {
   default:
     return;
@@ -3499,8 +3534,8 @@ void GNUStyle<ELFT>::printNotes(const ELFFile<ELFT> *Obj) {
   const Elf_Ehdr *e = Obj->getHeader();
   bool IsCore = e->e_type == ELF::ET_CORE;
 
-  auto process = [&](const typename ELFFile<ELFT>::Elf_Off Offset,
-                     const typename ELFFile<ELFT>::Elf_Addr Size) {
+  auto process = [&](const typename ELFT::Off Offset,
+                     const typename ELFT::Addr Size) {
     if (Size <= 0)
       return;
 
@@ -3556,6 +3591,11 @@ void GNUStyle<ELFT>::printNotes(const ELFFile<ELFT> *Obj) {
       if (S.sh_type == SHT_NOTE)
         process(S.sh_offset, S.sh_size);
   }
+}
+
+template <class ELFT>
+void GNUStyle<ELFT>::printELFLinkerOptions(const ELFFile<ELFT> *Obj) {
+  OS << "printELFLinkerOptions not implemented!\n";
 }
 
 template <class ELFT>
@@ -3715,7 +3755,7 @@ template <class ELFT> void LLVMStyle<ELFT>::printFileHeaders(const ELFO *Obj) {
                    unsigned(ELF::EF_MIPS_MACH));
     else if (e->e_machine == EM_AMDGPU)
       W.printFlags("Flags", e->e_flags, makeArrayRef(ElfHeaderAMDGPUFlags),
-                   unsigned(ELF::EF_AMDGPU_ARCH));
+                   unsigned(ELF::EF_AMDGPU_MACH));
     else if (e->e_machine == EM_RISCV)
       W.printFlags("Flags", e->e_flags, makeArrayRef(ElfHeaderRISCVFlags));
     else
@@ -4064,6 +4104,27 @@ void LLVMStyle<ELFT>::printHashHistogram(const ELFFile<ELFT> *Obj) {
 template <class ELFT>
 void LLVMStyle<ELFT>::printNotes(const ELFFile<ELFT> *Obj) {
   W.startLine() << "printNotes not implemented!\n";
+}
+
+template <class ELFT>
+void LLVMStyle<ELFT>::printELFLinkerOptions(const ELFFile<ELFT> *Obj) {
+  ListScope L(W, "LinkerOptions");
+
+  for (const Elf_Shdr &Shdr : unwrapOrError(Obj->sections())) {
+    if (Shdr.sh_type != ELF::SHT_LLVM_LINKER_OPTIONS)
+      continue;
+
+    ArrayRef<uint8_t> Contents = unwrapOrError(Obj->getSectionContents(&Shdr));
+    for (const uint8_t *P = Contents.begin(), *E = Contents.end(); P < E; ) {
+      StringRef Key = StringRef(reinterpret_cast<const char *>(P));
+      StringRef Value =
+          StringRef(reinterpret_cast<const char *>(P) + Key.size() + 1);
+
+      W.printString(Key, Value);
+
+      P = P + Key.size() + Value.size() + 2;
+    }
+  }
 }
 
 template <class ELFT>

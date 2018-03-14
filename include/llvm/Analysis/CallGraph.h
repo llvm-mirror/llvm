@@ -426,12 +426,14 @@ template <> struct GraphTraits<CallGraphNode *> {
 template <> struct GraphTraits<const CallGraphNode *> {
   using NodeRef = const CallGraphNode *;
   using CGNPairTy = CallGraphNode::CallRecord;
+  using EdgeRef = const CallGraphNode::CallRecord &;
 
   static NodeRef getEntryNode(const CallGraphNode *CGN) { return CGN; }
   static const CallGraphNode *CGNGetValue(CGNPairTy P) { return P.second; }
 
   using ChildIteratorType =
       mapped_iterator<CallGraphNode::const_iterator, decltype(&CGNGetValue)>;
+  using ChildEdgeIteratorType = CallGraphNode::const_iterator;
 
   static ChildIteratorType child_begin(NodeRef N) {
     return ChildIteratorType(N->begin(), &CGNGetValue);
@@ -440,6 +442,13 @@ template <> struct GraphTraits<const CallGraphNode *> {
   static ChildIteratorType child_end(NodeRef N) {
     return ChildIteratorType(N->end(), &CGNGetValue);
   }
+
+  static ChildEdgeIteratorType child_edge_begin(NodeRef N) {
+    return N->begin();
+  }
+  static ChildEdgeIteratorType child_edge_end(NodeRef N) { return N->end(); }
+
+  static NodeRef edge_dest(EdgeRef E) { return E.second; }
 };
 
 template <>

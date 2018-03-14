@@ -118,6 +118,9 @@ class InstSI <dag outs, dag ins, string asm = "",
   // This bit indicates that this is a packed VOP3P instruction
   field bit IsPacked = 0;
 
+  // This bit indicates that this is a D16 instruction.
+  field bit D16 = 0;
+
   // These need to be kept in sync with the enum in SIInstrFlags.
   let TSFlags{0} = SALU;
   let TSFlags{1} = VALU;
@@ -173,6 +176,8 @@ class InstSI <dag outs, dag ins, string asm = "",
 
   let TSFlags{49} = IsPacked;
 
+  let TSFlags{50} = D16;
+
   let SchedRW = [Write32Bit];
 
   field bits<1> DisableSIDecoder = 0;
@@ -181,6 +186,9 @@ class InstSI <dag outs, dag ins, string asm = "",
 
   let isAsmParserOnly = !if(!eq(DisableDecoder{0}, {0}), 0, 1);
   let AsmVariantName = AMDGPUAsmVariants.Default;
+
+  // Avoid changing source registers in a way that violates constant bus read limitations.
+  let hasExtraSrcRegAllocReq = !if(VOP1,1,!if(VOP2,1,!if(VOP3,1,!if(VOPC,1,!if(SDWA,1, !if(VALU,1,0))))));
 }
 
 class PseudoInstSI<dag outs, dag ins, list<dag> pattern = [], string asm = "">
@@ -247,6 +255,7 @@ class MIMGe <bits<7> op> : Enc64 {
   bits<1> tfe;
   bits<1> lwe;
   bits<1> slc;
+  bits<1> d16 = 0;
   bits<8> vaddr;
   bits<7> srsrc;
   bits<7> ssamp;
@@ -265,6 +274,7 @@ class MIMGe <bits<7> op> : Enc64 {
   let Inst{47-40} = vdata;
   let Inst{52-48} = srsrc{6-2};
   let Inst{57-53} = ssamp{6-2};
+  let Inst{63} = d16;
 }
 
 class EXPe : Enc64 {

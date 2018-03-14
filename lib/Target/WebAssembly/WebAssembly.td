@@ -32,6 +32,15 @@ def FeatureNontrappingFPToInt :
                        "HasNontrappingFPToInt", "true",
                        "Enable non-trapping float-to-int conversion operators">;
 
+def FeatureSignExt :
+      SubtargetFeature<"sign-ext",
+                       "HasSignExt", "true",
+                       "Enable sign extension operators">;
+
+def FeatureExceptionHandling :
+      SubtargetFeature<"exception-handling", "HasExceptionHandling", "true",
+                       "Enable Wasm exception handling">;
+
 //===----------------------------------------------------------------------===//
 // Architectures.
 //===----------------------------------------------------------------------===//

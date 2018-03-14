@@ -61,7 +61,8 @@ enum SIEncodingFamily {
   VI = 1,
   SDWA = 2,
   SDWA9 = 3,
-  GFX9 = 4
+  GFX80 = 4,
+  GFX9 = 5
 };
 
 static SIEncodingFamily subtargetEncodingFamily(const AMDGPUSubtarget &ST) {
@@ -94,6 +95,12 @@ int AMDGPUInstrInfo::pseudoToMCOpcode(int Opcode) const {
   if (get(Opcode).TSFlags & SIInstrFlags::SDWA)
     Gen = ST.getGeneration() == AMDGPUSubtarget::GFX9 ? SIEncodingFamily::SDWA9
                                                       : SIEncodingFamily::SDWA;
+  // Adjust the encoding family to GFX80 for D16 buffer instructions when the
+  // subtarget has UnpackedD16VMem feature.
+  // TODO: remove this when we discard GFX80 encoding.
+  if (ST.hasUnpackedD16VMem() && (get(Opcode).TSFlags & SIInstrFlags::D16)
+                              && !(get(Opcode).TSFlags & SIInstrFlags::MIMG))
+    Gen = SIEncodingFamily::GFX80;
 
   int MCOp = AMDGPU::getMCOpcode(Opcode, Gen);
 
@@ -107,4 +114,25 @@ int AMDGPUInstrInfo::pseudoToMCOpcode(int Opcode) const {
     return -1;
 
   return MCOp;
+}
+
+// TODO: Should largely merge with AMDGPUTTIImpl::isSourceOfDivergence.
+bool AMDGPUInstrInfo::isUniformMMO(const MachineMemOperand *MMO) {
+  const Value *Ptr = MMO->getValue();
+  // UndefValue means this is a load of a kernel input.  These are uniform.
+  // Sometimes LDS instructions have constant pointers.
+  // If Ptr is null, then that means this mem operand contains a
+  // PseudoSourceValue like GOT.
+  if (!Ptr || isa<UndefValue>(Ptr) ||
+      isa<Constant>(Ptr) || isa<GlobalValue>(Ptr))
+    return true;
+
+  if (MMO->getAddrSpace() == AMDGPUAS::CONSTANT_ADDRESS_32BIT)
+    return true;
+
+  if (const Argument *Arg = dyn_cast<Argument>(Ptr))
+    return AMDGPU::isArgPassedInSGPR(Arg);
+
+  const Instruction *I = dyn_cast<Instruction>(Ptr);
+  return I && I->getMetadata("amdgpu.uniform");
 }

@@ -3885,7 +3885,7 @@ bool MipsAsmParser::expandCondBranches(MCInst &Inst, SMLoc IDLoc,
   // This is accomplished by using a BNEZ with the result of the SLT.
   //
   // The other 2 pseudo-branches are opposites of the above 2 (BGE with BLT
-  // and BLE with BGT), so we change the BNEZ into a a BEQZ.
+  // and BLE with BGT), so we change the BNEZ into a BEQZ.
   // Because only BGE and BLE branch on equality, we can use the
   // AcceptsEquality variable to decide when to emit the BEQZ.
   // Note that the order of the SLT arguments doesn't change between
@@ -5136,6 +5136,7 @@ unsigned MipsAsmParser::checkTargetMatchPredicate(MCInst &Inst) {
   // It also applies for registers Rt and Rs of microMIPSr6 jalrc.hb instruction
   // and registers Rd and Base for microMIPS lwp instruction
   case Mips::JALR_HB:
+  case Mips::JALR_HB64:
   case Mips::JALRC_HB_MMR6:
   case Mips::JALRC_MMR6:
     if (Inst.getOperand(0).getReg() == Inst.getOperand(1).getReg())

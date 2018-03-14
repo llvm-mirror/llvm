@@ -65,7 +65,7 @@ template <class ELFT> class DyldELFObject : public ELFObjectFile<ELFT> {
 
   typedef Elf_Ehdr_Impl<ELFT> Elf_Ehdr;
 
-  typedef typename ELFDataTypeTypedefHelper<ELFT>::value_type addr_type;
+  typedef typename ELFT::uint addr_type;
 
   DyldELFObject(ELFObjectFile<ELFT> &&Obj);
 
@@ -148,8 +148,8 @@ template <typename ELFT>
 static Expected<std::unique_ptr<DyldELFObject<ELFT>>>
 createRTDyldELFObject(MemoryBufferRef Buffer, const ObjectFile &SourceObject,
                       const LoadedELFObjectInfo &L) {
-  typedef typename ELFFile<ELFT>::Elf_Shdr Elf_Shdr;
-  typedef typename ELFDataTypeTypedefHelper<ELFT>::value_type addr_type;
+  typedef typename ELFT::Shdr Elf_Shdr;
+  typedef typename ELFT::uint addr_type;
 
   Expected<std::unique_ptr<DyldELFObject<ELFT>>> ObjOrErr =
       DyldELFObject<ELFT>::create(Buffer);
@@ -326,6 +326,9 @@ void RuntimeDyldELF::resolveX86Relocation(const SectionEntry &Section,
         Value + Addend;
     break;
   }
+  // Handle R_386_PLT32 like R_386_PC32 since it should be able to
+  // reach any 32 bit address.
+  case ELF::R_386_PLT32:
   case ELF::R_386_PC32: {
     uint32_t FinalAddress =
         Section.getLoadAddressWithOffset(Offset) & 0xFFFFFFFF;
@@ -526,10 +529,11 @@ void RuntimeDyldELF::setMipsABI(const ObjectFile &Obj) {
     IsMipsN64ABI = false;
     return;
   }
-  unsigned AbiVariant;
-  Obj.getPlatformFlags(AbiVariant);
-  IsMipsO32ABI = AbiVariant & ELF::EF_MIPS_ABI_O32;
-  IsMipsN32ABI = AbiVariant & ELF::EF_MIPS_ABI2;
+  if (auto *E = dyn_cast<ELFObjectFileBase>(&Obj)) {
+    unsigned AbiVariant = E->getPlatformFlags();
+    IsMipsO32ABI = AbiVariant & ELF::EF_MIPS_ABI_O32;
+    IsMipsN32ABI = AbiVariant & ELF::EF_MIPS_ABI2;
+  }
   IsMipsN64ABI = Obj.getFileFormatName().equals("ELF64-mips");
 }
 
@@ -1258,8 +1262,7 @@ RuntimeDyldELF::processRelocationRef(
         DEBUG(dbgs() << " Create a new stub function\n");
         Stubs[Value] = Section.getStubOffset();
 
-        unsigned AbiVariant;
-        O.getPlatformFlags(AbiVariant);
+        unsigned AbiVariant = Obj.getPlatformFlags();
 
         uint8_t *StubTargetAddr = createStubFunction(
             Section.getAddressWithOffset(Section.getStubOffset()), AbiVariant);
@@ -1354,8 +1357,7 @@ RuntimeDyldELF::processRelocationRef(
         DEBUG(dbgs() << " Create a new stub function\n");
         Stubs[Value] = Section.getStubOffset();
 
-        unsigned AbiVariant;
-        O.getPlatformFlags(AbiVariant);
+        unsigned AbiVariant = Obj.getPlatformFlags();
 
         uint8_t *StubTargetAddr = createStubFunction(
             Section.getAddressWithOffset(Section.getStubOffset()), AbiVariant);
@@ -1412,8 +1414,7 @@ RuntimeDyldELF::processRelocationRef(
   } else if (Arch == Triple::ppc64 || Arch == Triple::ppc64le) {
     if (RelType == ELF::R_PPC64_REL24) {
       // Determine ABI variant in use for this object.
-      unsigned AbiVariant;
-      Obj.getPlatformFlags(AbiVariant);
+      unsigned AbiVariant = Obj.getPlatformFlags();
       AbiVariant &= ELF::EF_PPC64_ABI;
       // A PPC branch relocation will need a stub function if the target is
       // an external symbol (either Value.SymbolName is set, or SymType is

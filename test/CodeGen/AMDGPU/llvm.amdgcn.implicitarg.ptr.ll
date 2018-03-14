@@ -11,9 +11,9 @@
 
 ; HSA: s_load_dword s0, s[4:5], 0x0
 define amdgpu_kernel void @kernel_implicitarg_ptr_empty() #0 {
-  %implicitarg.ptr = call i8 addrspace(2)* @llvm.amdgcn.implicitarg.ptr()
-  %cast = bitcast i8 addrspace(2)* %implicitarg.ptr to i32 addrspace(2)*
-  %load = load volatile i32, i32 addrspace(2)* %cast
+  %implicitarg.ptr = call i8 addrspace(4)* @llvm.amdgcn.implicitarg.ptr()
+  %cast = bitcast i8 addrspace(4)* %implicitarg.ptr to i32 addrspace(4)*
+  %load = load volatile i32, i32 addrspace(4)* %cast
   ret void
 }
 
@@ -26,21 +26,27 @@ define amdgpu_kernel void @kernel_implicitarg_ptr_empty() #0 {
 
 ; HSA: s_load_dword s0, s[4:5], 0x1c
 define amdgpu_kernel void @kernel_implicitarg_ptr([112 x i8]) #0 {
-  %implicitarg.ptr = call i8 addrspace(2)* @llvm.amdgcn.implicitarg.ptr()
-  %cast = bitcast i8 addrspace(2)* %implicitarg.ptr to i32 addrspace(2)*
-  %load = load volatile i32, i32 addrspace(2)* %cast
+  %implicitarg.ptr = call i8 addrspace(4)* @llvm.amdgcn.implicitarg.ptr()
+  %cast = bitcast i8 addrspace(4)* %implicitarg.ptr to i32 addrspace(4)*
+  %load = load volatile i32, i32 addrspace(4)* %cast
   ret void
 }
 
 ; GCN-LABEL: {{^}}func_implicitarg_ptr:
 ; GCN: s_waitcnt
-; GCN-NEXT: s_load_dword s{{[0-9]+}}, s[6:7], 0x0{{$}}
+; MESA: s_mov_b64 s[8:9], s[6:7]
+; MESA: s_mov_b32 s11, 0xf000
+; MESA: s_mov_b32 s10, -1
+; MESA: buffer_load_dword v0, off, s[8:11], 0
+; HSA: v_mov_b32_e32 v0, s6
+; HSA: v_mov_b32_e32 v1, s7
+; HSA: flat_load_dword v0, v[0:1]
 ; GCN-NEXT: s_waitcnt
 ; GCN-NEXT: s_setpc_b64
 define void @func_implicitarg_ptr() #1 {
-  %implicitarg.ptr = call i8 addrspace(2)* @llvm.amdgcn.implicitarg.ptr()
-  %cast = bitcast i8 addrspace(2)* %implicitarg.ptr to i32 addrspace(2)*
-  %load = load volatile i32, i32 addrspace(2)* %cast
+  %implicitarg.ptr = call i8 addrspace(4)* @llvm.amdgcn.implicitarg.ptr()
+  %cast = bitcast i8 addrspace(4)* %implicitarg.ptr to i32 addrspace(4)*
+  %load = load volatile i32, i32 addrspace(4)* %cast
   ret void
 }
 
@@ -83,15 +89,28 @@ define void @func_call_implicitarg_ptr_func() #1 {
 
 ; GCN-LABEL: {{^}}func_kernarg_implicitarg_ptr:
 ; GCN: s_waitcnt
-; GCN: s_load_dword s{{[0-9]+}}, s[6:7], 0x0{{$}}
-; GCN: s_load_dword s{{[0-9]+}}, s[8:9], 0x0{{$}}
+; MESA: s_mov_b64 s[12:13], s[6:7]
+; MESA: s_mov_b32 s15, 0xf000
+; MESA: s_mov_b32 s14, -1
+; MESA: buffer_load_dword v0, off, s[12:15], 0
+; HSA: v_mov_b32_e32 v0, s6
+; HSA: v_mov_b32_e32 v1, s7
+; HSA: flat_load_dword v0, v[0:1]
+; MESA: s_mov_b32 s10, s14
+; MESA: s_mov_b32 s11, s15
+; MESA: buffer_load_dword v0, off, s[8:11], 0
+; HSA: v_mov_b32_e32 v0, s8
+; HSA: v_mov_b32_e32 v1, s9
+; HSA: flat_load_dword v0, v[0:1]
+
+; GCN: s_waitcnt vmcnt(0)
 define void @func_kernarg_implicitarg_ptr() #1 {
-  %kernarg.segment.ptr = call i8 addrspace(2)* @llvm.amdgcn.kernarg.segment.ptr()
-  %implicitarg.ptr = call i8 addrspace(2)* @llvm.amdgcn.implicitarg.ptr()
-  %cast.kernarg.segment.ptr = bitcast i8 addrspace(2)* %kernarg.segment.ptr to i32 addrspace(2)*
-  %cast.implicitarg = bitcast i8 addrspace(2)* %implicitarg.ptr to i32 addrspace(2)*
-  %load0 = load volatile i32, i32 addrspace(2)* %cast.kernarg.segment.ptr
-  %load1 = load volatile i32, i32 addrspace(2)* %cast.implicitarg
+  %kernarg.segment.ptr = call i8 addrspace(4)* @llvm.amdgcn.kernarg.segment.ptr()
+  %implicitarg.ptr = call i8 addrspace(4)* @llvm.amdgcn.implicitarg.ptr()
+  %cast.kernarg.segment.ptr = bitcast i8 addrspace(4)* %kernarg.segment.ptr to i32 addrspace(4)*
+  %cast.implicitarg = bitcast i8 addrspace(4)* %implicitarg.ptr to i32 addrspace(4)*
+  %load0 = load volatile i32, i32 addrspace(4)* %cast.kernarg.segment.ptr
+  %load1 = load volatile i32, i32 addrspace(4)* %cast.implicitarg
   ret void
 }
 
@@ -106,8 +125,8 @@ define amdgpu_kernel void @kernel_call_kernarg_implicitarg_ptr_func([112 x i8]) 
   ret void
 }
 
-declare i8 addrspace(2)* @llvm.amdgcn.implicitarg.ptr() #2
-declare i8 addrspace(2)* @llvm.amdgcn.kernarg.segment.ptr() #2
+declare i8 addrspace(4)* @llvm.amdgcn.implicitarg.ptr() #2
+declare i8 addrspace(4)* @llvm.amdgcn.kernarg.segment.ptr() #2
 
 attributes #0 = { nounwind noinline }
 attributes #1 = { nounwind noinline }

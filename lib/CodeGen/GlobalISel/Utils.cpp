@@ -42,18 +42,85 @@ unsigned llvm::constrainRegToClass(MachineRegisterInfo &MRI,
   return Reg;
 }
 
-
 unsigned llvm::constrainOperandRegClass(
     const MachineFunction &MF, const TargetRegisterInfo &TRI,
     MachineRegisterInfo &MRI, const TargetInstrInfo &TII,
     const RegisterBankInfo &RBI, MachineInstr &InsertPt, const MCInstrDesc &II,
-    unsigned Reg, unsigned OpIdx) {
+    const MachineOperand &RegMO, unsigned OpIdx) {
+  unsigned Reg = RegMO.getReg();
   // Assume physical registers are properly constrained.
   assert(TargetRegisterInfo::isVirtualRegister(Reg) &&
          "PhysReg not implemented");
 
   const TargetRegisterClass *RegClass = TII.getRegClass(II, OpIdx, &TRI, MF);
+  // Some of the target independent instructions, like COPY, may not impose any
+  // register class constraints on some of their operands: If it's a use, we can
+  // skip constraining as the instruction defining the register would constrain
+  // it.
+  if (!RegClass) {
+    assert((!isTargetSpecificOpcode(II.getOpcode()) || RegMO.isUse()) &&
+           "Register class constraint is required unless either the "
+           "instruction is target independent or the operand is a use");
+    // FIXME: Just bailing out like this here could be not enough, unless we
+    // expect the users of this function to do the right thing for PHIs and
+    // COPY:
+    //   v1 = COPY v0
+    //   v2 = COPY v1
+    // v1 here may end up not being constrained at all. Please notice that to
+    // reproduce the issue we likely need a destination pattern of a selection
+    // rule producing such extra copies, not just an input GMIR with them as
+    // every existing target using selectImpl handles copies before calling it
+    // and they never reach this function.
+    return Reg;
+  }
   return constrainRegToClass(MRI, TII, RBI, InsertPt, Reg, *RegClass);
+}
+
+bool llvm::constrainSelectedInstRegOperands(MachineInstr &I,
+                                            const TargetInstrInfo &TII,
+                                            const TargetRegisterInfo &TRI,
+                                            const RegisterBankInfo &RBI) {
+  assert(!isPreISelGenericOpcode(I.getOpcode()) &&
+         "A selected instruction is expected");
+  MachineBasicBlock &MBB = *I.getParent();
+  MachineFunction &MF = *MBB.getParent();
+  MachineRegisterInfo &MRI = MF.getRegInfo();
+
+  for (unsigned OpI = 0, OpE = I.getNumExplicitOperands(); OpI != OpE; ++OpI) {
+    MachineOperand &MO = I.getOperand(OpI);
+
+    // There's nothing to be done on non-register operands.
+    if (!MO.isReg())
+      continue;
+
+    DEBUG(dbgs() << "Converting operand: " << MO << '\n');
+    assert(MO.isReg() && "Unsupported non-reg operand");
+
+    unsigned Reg = MO.getReg();
+    // Physical registers don't need to be constrained.
+    if (TRI.isPhysicalRegister(Reg))
+      continue;
+
+    // Register operands with a value of 0 (e.g. predicate operands) don't need
+    // to be constrained.
+    if (Reg == 0)
+      continue;
+
+    // If the operand is a vreg, we should constrain its regclass, and only
+    // insert COPYs if that's impossible.
+    // constrainOperandRegClass does that for us.
+    MO.setReg(constrainOperandRegClass(MF, TRI, MRI, TII, RBI, I, I.getDesc(),
+                                       MO, OpI));
+
+    // Tie uses to defs as indicated in MCInstrDesc if this hasn't already been
+    // done.
+    if (MO.isUse()) {
+      int DefIdx = I.getDesc().getOperandConstraint(OpI, MCOI::TIED_TO);
+      if (DefIdx != -1 && !I.isRegTiedToUseOperand(DefIdx))
+        I.tieOperands(DefIdx, OpI);
+    }
+  }
+  return true;
 }
 
 bool llvm::isTriviallyDead(const MachineInstr &MI,
@@ -101,7 +168,7 @@ void llvm::reportGISelFailure(MachineFunction &MF, const TargetPassConfig &TPC,
                                     MI.getDebugLoc(), MI.getParent());
   R << Msg;
   // Printing MI is expensive;  only do it if expensive remarks are enabled.
-  if (MORE.allowExtraAnalysis(PassName))
+  if (TPC.isGlobalISelAbortEnabled() || MORE.allowExtraAnalysis(PassName))
     R << ": " << ore::MNV("Inst", MI);
   reportGISelFailure(MF, TPC, MORE, R);
 }

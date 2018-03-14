@@ -279,12 +279,18 @@ class LLVM_LIBRARY_VISIBILITY CodeViewDebug : public DebugHandlerBase {
 
   void addToUDTs(const DIType *Ty);
 
+  void addUDTSrcLine(const DIType *Ty, codeview::TypeIndex TI);
+
   codeview::TypeIndex lowerType(const DIType *Ty, const DIType *ClassTy);
   codeview::TypeIndex lowerTypeAlias(const DIDerivedType *Ty);
   codeview::TypeIndex lowerTypeArray(const DICompositeType *Ty);
   codeview::TypeIndex lowerTypeBasic(const DIBasicType *Ty);
-  codeview::TypeIndex lowerTypePointer(const DIDerivedType *Ty);
-  codeview::TypeIndex lowerTypeMemberPointer(const DIDerivedType *Ty);
+  codeview::TypeIndex lowerTypePointer(
+      const DIDerivedType *Ty,
+      codeview::PointerOptions PO = codeview::PointerOptions::None);
+  codeview::TypeIndex lowerTypeMemberPointer(
+      const DIDerivedType *Ty,
+      codeview::PointerOptions PO = codeview::PointerOptions::None);
   codeview::TypeIndex lowerTypeModifier(const DIDerivedType *Ty);
   codeview::TypeIndex lowerTypeFunction(const DISubroutineType *Ty);
   codeview::TypeIndex lowerTypeVFTableShape(const DIDerivedType *Ty);

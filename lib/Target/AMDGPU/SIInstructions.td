@@ -186,6 +186,7 @@ def S_XOR_B64_term : PseudoInstSI<(outs SReg_64:$dst),
   let SALU = 1;
   let isAsCheapAsAMove = 1;
   let isTerminator = 1;
+  let Defs = [SCC];
 }
 
 def S_ANDN2_B64_term : PseudoInstSI<(outs SReg_64:$dst),
@@ -246,7 +247,6 @@ def SI_IF: CFPseudoInstSI <
 def SI_ELSE : CFPseudoInstSI <
   (outs SReg_64:$dst),
   (ins SReg_64:$src, brtarget:$target, i1imm:$execfix), [], 1, 1> {
-  let Constraints = "$src = $dst";
   let Size = 12;
   let hasSideEffects = 1;
 }
@@ -726,6 +726,10 @@ def : GCNPat <
   (i32 (add (i32 (ctpop i32:$popcnt)), i32:$val)),
   (V_BCNT_U32_B32_e64 $popcnt, $val)
 >;
+def : GCNPat <
+  (i16 (add (i16 (trunc (ctpop i32:$popcnt))), i16:$val)),
+  (V_BCNT_U32_B32_e64 $popcnt, $val)
+>;
 
 /********** ============================================ **********/
 /********** Extraction, Insertion, Building and Casting  **********/
@@ -1097,6 +1101,7 @@ let SubtargetPredicate = isGCN in {
 def : IMad24Pat<V_MAD_I32_I24, 1>;
 def : UMad24Pat<V_MAD_U32_U24, 1>;
 
+// FIXME: This should only be done for VALU inputs
 defm : BFIPatterns <V_BFI_B32, S_MOV_B32, SReg_64>;
 def : ROTRPattern <V_ALIGNBIT_B32>;
 
@@ -1486,7 +1491,7 @@ defm : BFMPatterns <i32, S_BFM_B32, S_MOV_B32>;
 // FIXME: defm : BFMPatterns <i64, S_BFM_B64, S_MOV_B64>;
 
 defm : BFEPattern <V_BFE_U32, V_BFE_I32, S_MOV_B32>;
-def : SHA256MaPattern <V_BFI_B32, V_XOR_B32_e64>;
+defm : SHA256MaPattern <V_BFI_B32, V_XOR_B32_e64, SReg_64>;
 
 def : IntMed3Pat<V_MED3_I32, smax, smax_oneuse, smin_oneuse>;
 def : IntMed3Pat<V_MED3_U32, umax, umax_oneuse, umin_oneuse>;

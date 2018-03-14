@@ -4,7 +4,8 @@ if ( LLVM_ENABLE_ZLIB AND HAVE_LIBZ )
 endif()
 if( MSVC OR MINGW )
   # libuuid required for FOLDERID_Profile usage in lib/Support/Windows/Path.inc.
-  set(system_libs ${system_libs} psapi shell32 ole32 uuid)
+  # advapi32 required for CryptAcquireContextW in lib/Support/Windows/Path.inc.
+  set(system_libs ${system_libs} psapi shell32 ole32 uuid advapi32)
 elseif( CMAKE_HOST_UNIX )
   if( HAVE_LIBRT )
     set(system_libs ${system_libs} rt)
@@ -12,8 +13,13 @@ elseif( CMAKE_HOST_UNIX )
   if( HAVE_LIBDL )
     set(system_libs ${system_libs} ${CMAKE_DL_LIBS})
   endif()
-  if( HAVE_BACKTRACE )
-    set(system_libs ${system_libs} ${Backtrace_LIBRARIES})
+  if( HAVE_BACKTRACE AND NOT "${Backtrace_LIBRARIES}" STREQUAL "" )
+    # On BSDs, CMake returns a fully qualified path to the backtrace library.
+    # We need to remove the path and the 'lib' prefix, to make it look like a
+    # regular short library name, suitable for appending to a -l link flag.
+    get_filename_component(Backtrace_LIBFILE ${Backtrace_LIBRARIES} NAME_WE)
+    STRING(REGEX REPLACE "^lib" "" Backtrace_LIBFILE ${Backtrace_LIBFILE})
+    set(system_libs ${system_libs} ${Backtrace_LIBFILE})
   endif()
   if(LLVM_ENABLE_TERMINFO)
     if(HAVE_TERMINFO)
@@ -59,6 +65,7 @@ add_llvm_library(LLVMSupport
   DebugCounter.cpp
   DeltaAlgorithm.cpp
   DAGDeltaAlgorithm.cpp
+  DJB.cpp
   Error.cpp
   ErrorHandling.cpp
   FileUtilities.cpp
@@ -112,6 +119,7 @@ add_llvm_library(LLVMSupport
   Triple.cpp
   Twine.cpp
   Unicode.cpp
+  UnicodeCaseFold.cpp
   YAMLParser.cpp
   YAMLTraits.cpp
   raw_os_ostream.cpp

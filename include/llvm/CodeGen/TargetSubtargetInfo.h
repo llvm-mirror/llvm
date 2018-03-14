@@ -174,6 +174,9 @@ public:
   /// \brief True if the subtarget should run the atomic expansion pass.
   virtual bool enableAtomicExpand() const;
 
+  /// True if the subtarget should run the indirectbr expansion pass.
+  virtual bool enableIndirectBrExpand() const;
+
   /// \brief Override generic scheduling policy within a region.
   ///
   /// This is a convenient way for targets that don't provide any custom
@@ -248,6 +251,9 @@ public:
   /// Returns string representation of scheduler comment
   std::string getSchedInfoStr(const MachineInstr &MI) const override;
   std::string getSchedInfoStr(MCInst const &MCI) const override;
+
+  /// This is called after a .mir file was loaded.
+  virtual void mirFileLoaded(MachineFunction &MF) const;
 };
 
 } // end namespace llvm

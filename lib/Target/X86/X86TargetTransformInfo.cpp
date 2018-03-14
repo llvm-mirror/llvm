@@ -130,12 +130,13 @@ unsigned X86TTIImpl::getNumberOfRegisters(bool Vector) {
 }
 
 unsigned X86TTIImpl::getRegisterBitWidth(bool Vector) const {
+  unsigned PreferVectorWidth = ST->getPreferVectorWidth();
   if (Vector) {
-    if (ST->hasAVX512())
+    if (ST->hasAVX512() && PreferVectorWidth >= 512)
       return 512;
-    if (ST->hasAVX())
+    if (ST->hasAVX() && PreferVectorWidth >= 256)
       return 256;
-    if (ST->hasSSE1())
+    if (ST->hasSSE1() && PreferVectorWidth >= 128)
       return 128;
     return 0;
   }
@@ -196,7 +197,7 @@ int X86TTIImpl::getArithmeticInstrCost(
     // v2i64/v4i64 mul is custom lowered as a series of long:
     // multiplies(3), shifts(3) and adds(2)
     // slm muldq version throughput is 2 and addq throughput 4
-    // thus: 3X2 (muldq throughput) + 3X1 (shift throuput) +
+    // thus: 3X2 (muldq throughput) + 3X1 (shift throughput) +
     //       3X4 (addq throughput) = 17
     { ISD::MUL,  MVT::v2i64, 17 },
     // slm addq\subq throughput is 4
@@ -432,8 +433,18 @@ int X86TTIImpl::getArithmeticInstrCost(
 
     { ISD::MUL,     MVT::v32i8,     13 }, // extend/pmullw/trunc sequence.
     { ISD::MUL,     MVT::v16i8,      5 }, // extend/pmullw/trunc sequence.
-    { ISD::MUL,     MVT::v16i32,     1 }, // pmulld
+    { ISD::MUL,     MVT::v16i32,     1 }, // pmulld (Skylake from agner.org)
+    { ISD::MUL,     MVT::v8i32,      1 }, // pmulld (Skylake from agner.org)
+    { ISD::MUL,     MVT::v4i32,      1 }, // pmulld (Skylake from agner.org)
     { ISD::MUL,     MVT::v8i64,      8 }, // 3*pmuludq/3*shift/2*add
+
+    { ISD::FADD,    MVT::v8f64,      1 }, // Skylake from http://www.agner.org/
+    { ISD::FSUB,    MVT::v8f64,      1 }, // Skylake from http://www.agner.org/
+    { ISD::FMUL,    MVT::v8f64,      1 }, // Skylake from http://www.agner.org/
+
+    { ISD::FADD,    MVT::v16f32,     1 }, // Skylake from http://www.agner.org/
+    { ISD::FSUB,    MVT::v16f32,     1 }, // Skylake from http://www.agner.org/
+    { ISD::FMUL,    MVT::v16f32,     1 }, // Skylake from http://www.agner.org/
 
     // Vectorizing division is a bad idea. See the SSE2 table for more comments.
     { ISD::SDIV,    MVT::v16i32, 16*20 },
@@ -571,8 +582,15 @@ int X86TTIImpl::getArithmeticInstrCost(
     { ISD::MUL,  MVT::v32i8,     17 }, // extend/pmullw/trunc sequence.
     { ISD::MUL,  MVT::v16i8,      7 }, // extend/pmullw/trunc sequence.
     { ISD::MUL,  MVT::v16i16,     1 }, // pmullw
-    { ISD::MUL,  MVT::v8i32,      1 }, // pmulld
+    { ISD::MUL,  MVT::v8i32,      2 }, // pmulld (Haswell from agner.org)
     { ISD::MUL,  MVT::v4i64,      8 }, // 3*pmuludq/3*shift/2*add
+
+    { ISD::FADD, MVT::v4f64,      1 }, // Haswell from http://www.agner.org/
+    { ISD::FADD, MVT::v8f32,      1 }, // Haswell from http://www.agner.org/
+    { ISD::FSUB, MVT::v4f64,      1 }, // Haswell from http://www.agner.org/
+    { ISD::FSUB, MVT::v8f32,      1 }, // Haswell from http://www.agner.org/
+    { ISD::FMUL, MVT::v4f64,      1 }, // Haswell from http://www.agner.org/
+    { ISD::FMUL, MVT::v8f32,      1 }, // Haswell from http://www.agner.org/
 
     { ISD::FDIV, MVT::f32,        7 }, // Haswell from http://www.agner.org/
     { ISD::FDIV, MVT::v4f32,      7 }, // Haswell from http://www.agner.org/
@@ -634,6 +652,21 @@ int X86TTIImpl::getArithmeticInstrCost(
       return LT.first * Entry->Cost;
 
   static const CostTblEntry SSE42CostTable[] = {
+    { ISD::FADD, MVT::f64,     1 }, // Nehalem from http://www.agner.org/
+    { ISD::FADD, MVT::f32,     1 }, // Nehalem from http://www.agner.org/
+    { ISD::FADD, MVT::v2f64,   1 }, // Nehalem from http://www.agner.org/
+    { ISD::FADD, MVT::v4f32,   1 }, // Nehalem from http://www.agner.org/
+
+    { ISD::FSUB, MVT::f64,     1 }, // Nehalem from http://www.agner.org/
+    { ISD::FSUB, MVT::f32 ,    1 }, // Nehalem from http://www.agner.org/
+    { ISD::FSUB, MVT::v2f64,   1 }, // Nehalem from http://www.agner.org/
+    { ISD::FSUB, MVT::v4f32,   1 }, // Nehalem from http://www.agner.org/
+
+    { ISD::FMUL, MVT::f64,     1 }, // Nehalem from http://www.agner.org/
+    { ISD::FMUL, MVT::f32,     1 }, // Nehalem from http://www.agner.org/
+    { ISD::FMUL, MVT::v2f64,   1 }, // Nehalem from http://www.agner.org/
+    { ISD::FMUL, MVT::v4f32,   1 }, // Nehalem from http://www.agner.org/
+
     { ISD::FDIV,  MVT::f32,   14 }, // Nehalem from http://www.agner.org/
     { ISD::FDIV,  MVT::v4f32, 14 }, // Nehalem from http://www.agner.org/
     { ISD::FDIV,  MVT::f64,   22 }, // Nehalem from http://www.agner.org/
@@ -666,7 +699,7 @@ int X86TTIImpl::getArithmeticInstrCost(
     { ISD::SRA,  MVT::v4i32,      12 }, // Shift each lane + blend.
     { ISD::SRA,  MVT::v8i32,  2*12+2 }, // Shift each lane + blend + split.
 
-    { ISD::MUL,  MVT::v4i32,       1 }  // pmulld
+    { ISD::MUL,  MVT::v4i32,       2 }  // pmulld (Nehalem from agner.org)
   };
 
   if (ST->hasSSE41())
@@ -754,7 +787,8 @@ int X86TTIImpl::getShuffleCost(TTI::ShuffleKind Kind, Type *Tp, int Index,
   // type remains the same.
   if (Kind == TTI::SK_PermuteSingleSrc && LT.first != 1) {
     MVT LegalVT = LT.second;
-    if (LegalVT.getVectorElementType().getSizeInBits() ==
+    if (LegalVT.isVector() &&
+        LegalVT.getVectorElementType().getSizeInBits() ==
             Tp->getVectorElementType()->getPrimitiveSizeInBits() &&
         LegalVT.getVectorNumElements() < Tp->getVectorNumElements()) {
 
@@ -2480,6 +2514,10 @@ bool X86TTIImpl::isLSRCostLess(TargetTransformInfo::LSRCost &C1,
                     C2.ScaleCost, C2.ImmCost, C2.SetupCost);
 }
 
+bool X86TTIImpl::canMacroFuseCmp() {
+  return ST->hasMacroFusion();
+}
+
 bool X86TTIImpl::isLegalMaskedLoad(Type *DataTy) {
   // The backend can't handle a single element vector.
   if (isa<VectorType>(DataTy) && DataTy->getVectorNumElements() == 1)
@@ -2522,7 +2560,7 @@ bool X86TTIImpl::isLegalMaskedGather(Type *DataTy) {
   // TODO: Remove the explicit ST->hasAVX512()?, That would mean we would only
   // enable gather with a -march.
   return (DataWidth == 32 || DataWidth == 64) &&
-    (ST->hasAVX512() || (ST->hasFastGather() && ST->hasAVX2()));
+         (ST->hasAVX512() || (ST->hasFastGather() && ST->hasAVX2()));
 }
 
 bool X86TTIImpl::isLegalMaskedScatter(Type *DataType) {

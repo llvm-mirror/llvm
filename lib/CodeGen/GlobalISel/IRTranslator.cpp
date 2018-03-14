@@ -746,6 +746,11 @@ bool IRTranslator::translateKnownIntrinsic(const CallInst &CI, Intrinsic::ID ID,
         .addDef(getOrCreateVReg(CI))
         .addUse(getOrCreateVReg(*CI.getArgOperand(0)));
     return true;
+  case Intrinsic::fabs:
+    MIRBuilder.buildInstr(TargetOpcode::G_FABS)
+        .addDef(getOrCreateVReg(CI))
+        .addUse(getOrCreateVReg(*CI.getArgOperand(0)));
+    return true;
   case Intrinsic::fma:
     MIRBuilder.buildInstr(TargetOpcode::G_FMA)
         .addDef(getOrCreateVReg(CI))
@@ -753,6 +758,25 @@ bool IRTranslator::translateKnownIntrinsic(const CallInst &CI, Intrinsic::ID ID,
         .addUse(getOrCreateVReg(*CI.getArgOperand(1)))
         .addUse(getOrCreateVReg(*CI.getArgOperand(2)));
     return true;
+  case Intrinsic::fmuladd: {
+    const TargetMachine &TM = MF->getTarget();
+    const TargetLowering &TLI = *MF->getSubtarget().getTargetLowering();
+    unsigned Dst = getOrCreateVReg(CI);
+    unsigned Op0 = getOrCreateVReg(*CI.getArgOperand(0));
+    unsigned Op1 = getOrCreateVReg(*CI.getArgOperand(1));
+    unsigned Op2 = getOrCreateVReg(*CI.getArgOperand(2));
+    if (TM.Options.AllowFPOpFusion != FPOpFusion::Strict &&
+        TLI.isFMAFasterThanFMulAndFAdd(TLI.getValueType(*DL, CI.getType()))) {
+      // TODO: Revisit this to see if we should move this part of the
+      // lowering to the combiner.
+      MIRBuilder.buildInstr(TargetOpcode::G_FMA, Dst, Op0, Op1, Op2);
+    } else {
+      LLT Ty = getLLTForType(*CI.getType(), *DL);
+      auto FMul = MIRBuilder.buildInstr(TargetOpcode::G_FMUL, Ty, Op0, Op1);
+      MIRBuilder.buildInstr(TargetOpcode::G_FADD, Dst, FMul, Op2);
+    }
+    return true;
+  }
   case Intrinsic::memcpy:
   case Intrinsic::memmove:
   case Intrinsic::memset:
@@ -816,6 +840,10 @@ bool IRTranslator::translateCall(const User &U, MachineIRBuilder &MIRBuilder) {
   const CallInst &CI = cast<CallInst>(U);
   auto TII = MF->getTarget().getIntrinsicInfo();
   const Function *F = CI.getCalledFunction();
+
+  // FIXME: support Windows dllimport function calls.
+  if (F && F->hasDLLImportStorageClass())
+    return false;
 
   if (CI.isInlineAsm())
     return translateInlineAsm(CI, MIRBuilder);
@@ -999,6 +1027,10 @@ bool IRTranslator::translateAlloca(const User &U,
     MIRBuilder.buildFrameIndex(Res, FI);
     return true;
   }
+
+  // FIXME: support stack probing for Windows.
+  if (MF->getTarget().getTargetTriple().isOSWindows())
+    return false;
 
   // Now we're in the harder dynamic case.
   Type *Ty = AI.getAllocatedType();

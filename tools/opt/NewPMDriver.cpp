@@ -14,6 +14,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "NewPMDriver.h"
+#include "PassPrinters.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/CGSCCPassManager.h"
@@ -81,6 +82,11 @@ static cl::opt<std::string> VectorizerStartEPPipeline(
     "passes-ep-vectorizer-start",
     cl::desc("A textual description of the function pass pipeline inserted at "
              "the VectorizerStart extension point into default pipelines"),
+    cl::Hidden);
+static cl::opt<std::string> PipelineStartEPPipeline(
+    "passes-ep-pipeline-start",
+    cl::desc("A textual description of the function pass pipeline inserted at "
+             "the PipelineStart extension point into default pipelines"),
     cl::Hidden);
 enum PGOKind { NoPGO, InstrGen, InstrUse, SampleUse };
 static cl::opt<PGOKind> PGOKindFlag(
@@ -159,6 +165,12 @@ static void registerEPCallbacks(PassBuilder &PB, bool VerifyEachPass,
       PB.parsePassPipeline(PM, VectorizerStartEPPipeline, VerifyEachPass,
                            DebugLogging);
     });
+  if (tryParsePipelineText<ModulePassManager>(PB, PipelineStartEPPipeline))
+    PB.registerPipelineStartEPCallback(
+        [&PB, VerifyEachPass, DebugLogging](ModulePassManager &PM) {
+          PB.parsePassPipeline(PM, PipelineStartEPPipeline, VerifyEachPass,
+                               DebugLogging);
+        });
 }
 
 #ifdef LINK_POLLY_INTO_TOOLS
@@ -174,7 +186,8 @@ bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
                            VerifierKind VK,
                            bool ShouldPreserveAssemblyUseListOrder,
                            bool ShouldPreserveBitcodeUseListOrder,
-                           bool EmitSummaryIndex, bool EmitModuleHash) {
+                           bool EmitSummaryIndex, bool EmitModuleHash,
+                           bool EnableDebugify) {
   bool VerifyEachPass = VK == VK_VerifyEachPass;
 
   Optional<PGOOptions> P;
@@ -196,6 +209,20 @@ bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
   }
   PassBuilder PB(TM, P);
   registerEPCallbacks(PB, VerifyEachPass, DebugPM);
+
+  // Register a callback that creates the debugify passes as needed.
+  PB.registerPipelineParsingCallback(
+      [](StringRef Name, ModulePassManager &MPM,
+         ArrayRef<PassBuilder::PipelineElement>) {
+        if (Name == "debugify") {
+          MPM.addPass(NewPMDebugifyPass());
+          return true;
+        } else if (Name == "check-debugify") {
+          MPM.addPass(NewPMCheckDebugifyPass());
+          return true;
+        }
+        return false;
+      });
 
 #ifdef LINK_POLLY_INTO_TOOLS
   polly::RegisterPollyPasses(PB);
@@ -227,6 +254,8 @@ bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
   ModulePassManager MPM(DebugPM);
   if (VK > VK_NoVerifier)
     MPM.addPass(VerifierPass());
+  if (EnableDebugify)
+    MPM.addPass(NewPMDebugifyPass());
 
   if (!PB.parsePassPipeline(MPM, PassPipeline, VerifyEachPass, DebugPM)) {
     errs() << Arg0 << ": unable to parse pass pipeline description.\n";
@@ -235,6 +264,8 @@ bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
 
   if (VK > VK_NoVerifier)
     MPM.addPass(VerifierPass());
+  if (EnableDebugify)
+    MPM.addPass(NewPMCheckDebugifyPass());
 
   // Add any relevant output pass at the end of the pipeline.
   switch (OK) {

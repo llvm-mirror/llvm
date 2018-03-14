@@ -628,7 +628,7 @@ struct SemiNCAInfo {
         DecreasingLevel>
         Bucket;  // Queue of tree nodes sorted by level in descending order.
     SmallDenseSet<TreeNodePtr, 8> Affected;
-    SmallDenseSet<TreeNodePtr, 8> Visited;
+    SmallDenseMap<TreeNodePtr, unsigned, 8> Visited;
     SmallVector<TreeNodePtr, 8> AffectedQueue;
     SmallVector<TreeNodePtr, 8> VisitedNotAffectedQueue;
   };
@@ -698,24 +698,20 @@ struct SemiNCAInfo {
       return;
 
     // Recalculate the set of roots.
-    DT.Roots = FindRoots(DT, BUI);
-    for (const NodePtr R : DT.Roots) {
-      const TreeNodePtr TN = DT.getNode(R);
-      // A CFG node was selected as a tree root, but the corresponding tree node
-      // is not connected to the virtual root. This is because the incremental
-      // algorithm does not really know or use the set of roots and can make a
-      // different (implicit) decision about which nodes within an infinite loop
-      // becomes a root.
-      if (DT.isVirtualRoot(TN->getIDom())) {
-        DEBUG(dbgs() << "Root " << BlockNamePrinter(R)
-                     << " is not virtual root's child\n"
-                     << "The entire tree needs to be rebuilt\n");
-        // It should be possible to rotate the subtree instead of recalculating
-        // the whole tree, but this situation happens extremely rarely in
-        // practice.
-        CalculateFromScratch(DT, BUI);
-        return;
-      }
+    auto Roots = FindRoots(DT, BUI);
+    if (DT.Roots.size() != Roots.size() ||
+        !std::is_permutation(DT.Roots.begin(), DT.Roots.end(), Roots.begin())) {
+      // The roots chosen in the CFG have changed. This is because the
+      // incremental algorithm does not really know or use the set of roots and
+      // can make a different (implicit) decision about which node within an
+      // infinite loop becomes a root.
+
+      DEBUG(dbgs() << "Roots are different in updated trees\n"
+                   << "The entire tree needs to be rebuilt\n");
+      // It may be possible to update the tree without recalculating it, but
+      // we do not know yet how to do it, and it happens rarely in practise.
+      CalculateFromScratch(DT, BUI);
+      return;
     }
   }
 
@@ -753,14 +749,16 @@ struct SemiNCAInfo {
 
     while (!II.Bucket.empty()) {
       const TreeNodePtr CurrentNode = II.Bucket.top().second;
+      const unsigned  CurrentLevel = CurrentNode->getLevel();
       II.Bucket.pop();
       DEBUG(dbgs() << "\tAdding to Visited and AffectedQueue: "
                    << BlockNamePrinter(CurrentNode) << "\n");
-      II.Visited.insert(CurrentNode);
+
+      II.Visited.insert({CurrentNode, CurrentLevel});
       II.AffectedQueue.push_back(CurrentNode);
 
       // Discover and collect affected successors of the current node.
-      VisitInsertion(DT, BUI, CurrentNode, CurrentNode->getLevel(), NCD, II);
+      VisitInsertion(DT, BUI, CurrentNode, CurrentLevel, NCD, II);
     }
 
     // Finish by updating immediate dominators and levels.
@@ -772,13 +770,17 @@ struct SemiNCAInfo {
                              const TreeNodePtr TN, const unsigned RootLevel,
                              const TreeNodePtr NCD, InsertionInfo &II) {
     const unsigned NCDLevel = NCD->getLevel();
-    DEBUG(dbgs() << "Visiting " << BlockNamePrinter(TN) << "\n");
+    DEBUG(dbgs() << "Visiting " << BlockNamePrinter(TN) << ",  RootLevel "
+                 << RootLevel << "\n");
 
     SmallVector<TreeNodePtr, 8> Stack = {TN};
     assert(TN->getBlock() && II.Visited.count(TN) && "Preconditions!");
 
+    SmallPtrSet<TreeNodePtr, 8> Processed;
+
     do {
       TreeNodePtr Next = Stack.pop_back_val();
+      DEBUG(dbgs() << " Next: " << BlockNamePrinter(Next) << "\n");
 
       for (const NodePtr Succ :
            ChildrenGetter<IsPostDom>::Get(Next->getBlock(), BUI)) {
@@ -786,19 +788,31 @@ struct SemiNCAInfo {
         assert(SuccTN && "Unreachable successor found at reachable insertion");
         const unsigned SuccLevel = SuccTN->getLevel();
 
-        DEBUG(dbgs() << "\tSuccessor " << BlockNamePrinter(Succ)
-                     << ", level = " << SuccLevel << "\n");
+        DEBUG(dbgs() << "\tSuccessor " << BlockNamePrinter(Succ) << ", level = "
+                     << SuccLevel << "\n");
+
+        // Do not process the same node multiple times.
+        if (Processed.count(Next) > 0)
+          continue;
 
         // Succ dominated by subtree From -- not affected.
         // (Based on the lemma 2.5 from the second paper.)
         if (SuccLevel > RootLevel) {
           DEBUG(dbgs() << "\t\tDominated by subtree From\n");
-          if (II.Visited.count(SuccTN) != 0)
-            continue;
+          if (II.Visited.count(SuccTN) != 0) {
+            DEBUG(dbgs() << "\t\t\talready visited at level "
+                         << II.Visited[SuccTN] << "\n\t\t\tcurrent level "
+                         << RootLevel << ")\n");
+
+            // A node can be necessary to visit again if we see it again at
+            // a lower level than before.
+            if (II.Visited[SuccTN] >= RootLevel)
+              continue;
+          }
 
           DEBUG(dbgs() << "\t\tMarking visited not affected "
                        << BlockNamePrinter(Succ) << "\n");
-          II.Visited.insert(SuccTN);
+          II.Visited.insert({SuccTN, RootLevel});
           II.VisitedNotAffectedQueue.push_back(SuccTN);
           Stack.push_back(SuccTN);
         } else if ((SuccLevel > NCDLevel + 1) &&
@@ -809,6 +823,8 @@ struct SemiNCAInfo {
           II.Bucket.push({SuccLevel, SuccTN});
         }
       }
+
+      Processed.insert(Next);
     } while (!Stack.empty());
   }
 
@@ -920,21 +936,21 @@ struct SemiNCAInfo {
     const NodePtr NCDBlock = DT.findNearestCommonDominator(From, To);
     const TreeNodePtr NCD = DT.getNode(NCDBlock);
 
-    // To dominates From -- nothing to do.
-    if (ToTN == NCD) return;
+    // If To dominates From -- nothing to do.
+    if (ToTN != NCD) {
+      DT.DFSInfoValid = false;
 
-    DT.DFSInfoValid = false;
+      const TreeNodePtr ToIDom = ToTN->getIDom();
+      DEBUG(dbgs() << "\tNCD " << BlockNamePrinter(NCD) << ", ToIDom "
+                   << BlockNamePrinter(ToIDom) << "\n");
 
-    const TreeNodePtr ToIDom = ToTN->getIDom();
-    DEBUG(dbgs() << "\tNCD " << BlockNamePrinter(NCD) << ", ToIDom "
-                 << BlockNamePrinter(ToIDom) << "\n");
-
-    // To remains reachable after deletion.
-    // (Based on the caption under Figure 4. from the second paper.)
-    if (FromTN != ToIDom || HasProperSupport(DT, BUI, ToTN))
-      DeleteReachable(DT, BUI, FromTN, ToTN);
-    else
-      DeleteUnreachable(DT, BUI, ToTN);
+      // To remains reachable after deletion.
+      // (Based on the caption under Figure 4. from the second paper.)
+      if (FromTN != ToIDom || HasProperSupport(DT, BUI, ToTN))
+        DeleteReachable(DT, BUI, FromTN, ToTN);
+      else
+        DeleteUnreachable(DT, BUI, ToTN);
+    }
 
     if (IsPostDom) UpdateRootsAfterUpdate(DT, BUI);
   }
@@ -1261,6 +1277,7 @@ struct SemiNCAInfo {
   // root which is the function's entry node. A PostDominatorTree can have
   // multiple roots - one for each node with no successors and for infinite
   // loops.
+  // Running time: O(N).
   bool verifyRoots(const DomTreeT &DT) {
     if (!DT.Parent && !DT.Roots.empty()) {
       errs() << "Tree has no parent but has roots!\n";
@@ -1301,6 +1318,7 @@ struct SemiNCAInfo {
   }
 
   // Checks if the tree contains all reachable nodes in the input graph.
+  // Running time: O(N).
   bool verifyReachability(const DomTreeT &DT) {
     clear();
     doFullDFSWalk(DT, AlwaysDescend);
@@ -1336,6 +1354,7 @@ struct SemiNCAInfo {
 
   // Check if for every parent with a level L in the tree all of its children
   // have level L + 1.
+  // Running time: O(N).
   static bool VerifyLevels(const DomTreeT &DT) {
     for (auto &NodeToTN : DT.DomTreeNodes) {
       const TreeNodePtr TN = NodeToTN.second.get();
@@ -1367,6 +1386,7 @@ struct SemiNCAInfo {
 
   // Check if the computed DFS numbers are correct. Note that DFS info may not
   // be valid, and when that is the case, we don't verify the numbers.
+  // Running time: O(N log(N)).
   static bool VerifyDFSNumbers(const DomTreeT &DT) {
     if (!DT.DFSInfoValid || !DT.Parent)
       return true;
@@ -1497,10 +1517,10 @@ struct SemiNCAInfo {
   // linear time, but the algorithms are complex. Instead, we do it in a
   // straightforward N^2 and N^3 way below, using direct path reachability.
 
-
   // Checks if the tree has the parent property: if for all edges from V to W in
   // the input graph, such that V is reachable, the parent of W in the tree is
   // an ancestor of V in the tree.
+  // Running time: O(N^2).
   //
   // This means that if a node gets disconnected from the graph, then all of
   // the nodes it dominated previously will now become unreachable.
@@ -1533,6 +1553,7 @@ struct SemiNCAInfo {
 
   // Check if the tree has sibling property: if a node V does not dominate a
   // node W for all siblings V and W in the tree.
+  // Running time: O(N^3).
   //
   // This means that if a node gets disconnected from the graph, then all of its
   // siblings will now still be reachable.
@@ -1567,6 +1588,31 @@ struct SemiNCAInfo {
 
     return true;
   }
+
+  // Check if the given tree is the same as a freshly computed one for the same
+  // Parent.
+  // Running time: O(N^2), but faster in practise (same as tree construction).
+  //
+  // Note that this does not check if that the tree construction algorithm is
+  // correct and should be only used for fast (but possibly unsound)
+  // verification.
+  static bool IsSameAsFreshTree(const DomTreeT &DT) {
+    DomTreeT FreshTree;
+    FreshTree.recalculate(*DT.Parent);
+    const bool Different = DT.compare(FreshTree);
+
+    if (Different) {
+      errs() << (DT.isPostDominator() ? "Post" : "")
+             << "DominatorTree is different than a freshly computed one!\n"
+             << "\tCurrent:\n";
+      DT.print(errs());
+      errs() << "\n\tFreshly computed tree:\n";
+      FreshTree.print(errs());
+      errs().flush();
+    }
+
+    return !Different;
+  }
 };
 
 template <class DomTreeT>
@@ -1595,11 +1641,29 @@ void ApplyUpdates(DomTreeT &DT,
 }
 
 template <class DomTreeT>
-bool Verify(const DomTreeT &DT) {
+bool Verify(const DomTreeT &DT, typename DomTreeT::VerificationLevel VL) {
   SemiNCAInfo<DomTreeT> SNCA(nullptr);
-  return SNCA.verifyRoots(DT) && SNCA.verifyReachability(DT) &&
-         SNCA.VerifyLevels(DT) && SNCA.verifyParentProperty(DT) &&
-         SNCA.verifySiblingProperty(DT) && SNCA.VerifyDFSNumbers(DT);
+
+  // Simplist check is to compare against a new tree. This will also
+  // usefully print the old and new trees, if they are different.
+  if (!SNCA.IsSameAsFreshTree(DT))
+    return false;
+
+  // Common checks to verify the properties of the tree. O(N log N) at worst
+  if (!SNCA.verifyRoots(DT) || !SNCA.verifyReachability(DT) ||
+      !SNCA.VerifyLevels(DT) || !SNCA.VerifyDFSNumbers(DT))
+    return false;
+
+  // Extra checks depending on VerificationLevel. Up to O(N^3)
+  if (VL == DomTreeT::VerificationLevel::Basic ||
+      VL == DomTreeT::VerificationLevel::Full)
+    if (!SNCA.verifyParentProperty(DT))
+      return false;
+  if (VL == DomTreeT::VerificationLevel::Full)
+    if (!SNCA.verifySiblingProperty(DT))
+      return false;
+
+  return true;
 }
 
 }  // namespace DomTreeBuilder

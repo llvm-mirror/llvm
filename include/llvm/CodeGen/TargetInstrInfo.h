@@ -421,7 +421,8 @@ public:
   /// Build the equivalent inputs of a REG_SEQUENCE for the given \p MI
   /// and \p DefIdx.
   /// \p [out] InputRegs of the equivalent REG_SEQUENCE. Each element of
-  /// the list is modeled as <Reg:SubReg, SubIdx>.
+  /// the list is modeled as <Reg:SubReg, SubIdx>. Operands with the undef
+  /// flag are not added to this list.
   /// E.g., REG_SEQUENCE %1:sub1, sub0, %2, sub1 would produce
   /// two elements:
   /// - %1:sub1, sub0
@@ -446,7 +447,8 @@ public:
   /// - %1:sub1, sub0
   ///
   /// \returns true if it is possible to build such an input sequence
-  /// with the pair \p MI, \p DefIdx. False otherwise.
+  /// with the pair \p MI, \p DefIdx and the operand has no undef flag set.
+  /// False otherwise.
   ///
   /// \pre MI.isExtractSubreg() or MI.isExtractSubregLike().
   ///
@@ -465,7 +467,8 @@ public:
   /// - InsertedReg: %1:sub1, sub3
   ///
   /// \returns true if it is possible to build such an input sequence
-  /// with the pair \p MI, \p DefIdx. False otherwise.
+  /// with the pair \p MI, \p DefIdx and the operand has no undef flag set.
+  /// False otherwise.
   ///
   /// \pre MI.isInsertSubreg() or MI.isInsertSubregLike().
   ///
@@ -632,8 +635,8 @@ public:
     return true;
   }
 
-  /// Generate code to reduce the loop iteration by one and check if the loop is
-  /// finished.  Return the value/register of the the new loop count.  We need
+  /// Generate code to reduce the loop iteration by one and check if the loop
+  /// is finished.  Return the value/register of the new loop count.  We need
   /// this function when peeling off one or more iterations of a loop. This
   /// function assumes the nth iteration is peeled first.
   virtual unsigned reduceLoopCount(MachineBasicBlock &MBB, MachineInstr *IndVar,
@@ -949,6 +952,10 @@ public:
 
   /// Return true when a target supports MachineCombiner.
   virtual bool useMachineCombiner() const { return false; }
+
+  /// Return true if the given SDNode can be copied during scheduling
+  /// even if it has glue.
+  virtual bool canCopyGluedNodeDuringSchedule(SDNode *N) const { return false; }
 
 protected:
   /// Target-dependent implementation for foldMemoryOperand.
@@ -1607,9 +1614,16 @@ public:
   enum MachineOutlinerInstrType { Legal, Illegal, Invisible };
 
   /// Returns how or if \p MI should be outlined.
-  virtual MachineOutlinerInstrType getOutliningType(MachineInstr &MI) const {
+  virtual MachineOutlinerInstrType
+  getOutliningType(MachineBasicBlock::iterator &MIT, unsigned Flags) const {
     llvm_unreachable(
         "Target didn't implement TargetInstrInfo::getOutliningType!");
+  }
+
+  /// \brief Returns target-defined flags defining properties of the MBB for
+  /// the outliner.
+  virtual unsigned getMachineOutlinerMBBFlags(MachineBasicBlock &MBB) const {
+    return 0x0;
   }
 
   /// Insert a custom epilogue for outlined functions.

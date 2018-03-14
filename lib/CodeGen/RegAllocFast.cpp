@@ -193,9 +193,10 @@ namespace {
     void spillVirtReg(MachineBasicBlock::iterator MI, unsigned VirtReg);
 
     void usePhysReg(MachineOperand &MO);
-    void definePhysReg(MachineInstr &MI, MCPhysReg PhysReg, RegState NewState);
+    void definePhysReg(MachineBasicBlock::iterator MI, MCPhysReg PhysReg,
+                       RegState NewState);
     unsigned calcSpillCost(MCPhysReg PhysReg) const;
-    void assignVirtToPhysReg(LiveReg&, MCPhysReg PhysReg);
+    void assignVirtToPhysReg(LiveReg &, MCPhysReg PhysReg);
 
     LiveRegMap::iterator findLiveVirtReg(unsigned VirtReg) {
       return LiveVirtRegs.find(TargetRegisterInfo::virtReg2Index(VirtReg));
@@ -434,8 +435,8 @@ void RegAllocFast::usePhysReg(MachineOperand &MO) {
 /// Mark PhysReg as reserved or free after spilling any virtregs. This is very
 /// similar to defineVirtReg except the physreg is reserved instead of
 /// allocated.
-void RegAllocFast::definePhysReg(MachineInstr &MI, MCPhysReg PhysReg,
-                                 RegState NewState) {
+void RegAllocFast::definePhysReg(MachineBasicBlock::iterator MI,
+                                 MCPhysReg PhysReg, RegState NewState) {
   markRegUsedInInstr(PhysReg);
   switch (unsigned VirtReg = PhysRegState[PhysReg]) {
   case regDisabled:
@@ -698,13 +699,13 @@ bool RegAllocFast::setPhysReg(MachineInstr &MI, unsigned OpNum,
   bool Dead = MO.isDead();
   if (!MO.getSubReg()) {
     MO.setReg(PhysReg);
-    MO.setIsRenamableIfNoExtraRegAllocReq();
+    MO.setIsRenamable(true);
     return MO.isKill() || Dead;
   }
 
   // Handle subregister index.
   MO.setReg(PhysReg ? TRI->getSubReg(PhysReg, MO.getSubReg()) : 0);
-  MO.setIsRenamableIfNoExtraRegAllocReq();
+  MO.setIsRenamable(true);
   MO.setSubReg(0);
 
   // A kill flag implies killing the full register. Add corresponding super
@@ -857,7 +858,7 @@ void RegAllocFast::allocateBasicBlock(MachineBasicBlock &MBB) {
   // Add live-in registers as live.
   for (const MachineBasicBlock::RegisterMaskPair LI : MBB.liveins())
     if (MRI->isAllocatable(LI.PhysReg))
-      definePhysReg(*MII, LI.PhysReg, regReserved);
+      definePhysReg(MII, LI.PhysReg, regReserved);
 
   VirtDead.clear();
   Coalesced.clear();

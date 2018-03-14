@@ -1,13 +1,25 @@
 ; RUN: opt -debugify -S -o - < %s | FileCheck %s
+; RUN: opt -passes=debugify -S -o - < %s | FileCheck %s
 
 ; RUN: opt -debugify -debugify -S -o - < %s 2>&1 | \
+; RUN:   FileCheck %s -check-prefix=CHECK-REPEAT
+; RUN: opt -passes=debugify,debugify -S -o - < %s 2>&1 | \
 ; RUN:   FileCheck %s -check-prefix=CHECK-REPEAT
 
 ; RUN: opt -debugify -check-debugify -S -o - < %s | \
 ; RUN:   FileCheck %s -implicit-check-not="CheckDebugify: FAIL"
+; RUN: opt -passes=debugify,check-debugify -S -o - < %s | \
+; RUN:   FileCheck %s -implicit-check-not="CheckDebugify: FAIL"
+; RUN: opt -enable-debugify -passes=verify -S -o - < %s | \
+; RUN:   FileCheck %s -implicit-check-not="CheckDebugify: FAIL"
 
 ; RUN: opt -debugify -strip -check-debugify -S -o - < %s | \
 ; RUN:   FileCheck %s -check-prefix=CHECK-FAIL
+
+; RUN: opt -enable-debugify -strip -S -o - < %s | \
+; RUN:   FileCheck %s -check-prefix=CHECK-FAIL
+
+; RUN: opt -enable-debugify -S -o - < %s | FileCheck %s -check-prefix=PASS
 
 ; CHECK-LABEL: define void @foo
 define void @foo() {
@@ -25,6 +37,12 @@ define i32 @bar() {
 
 ; CHECK: ret i32 0, !dbg ![[RET2:.*]]
   ret i32 0
+}
+
+; CHECK-LABEL: define weak_odr zeroext i1 @baz
+define weak_odr zeroext i1 @baz() {
+; CHECK-NOT: !dbg
+  ret i1 false
 }
 
 ; CHECK-DAG: !llvm.dbg.cu = !{![[CU:.*]]}
@@ -63,3 +81,5 @@ define i32 @bar() {
 ; CHECK-FAIL: WARNING: Missing line 4
 ; CHECK-FAIL: ERROR: Missing variable 1
 ; CHECK-FAIL: CheckDebugify: FAIL
+
+; PASS: CheckDebugify: PASS

@@ -420,20 +420,42 @@ public:
   /// If the pointers aren't i8*, they will be converted.  If a TBAA tag is
   /// specified, it will be added to the instruction. Likewise with alias.scope
   /// and noalias tags.
+  CallInst *CreateMemCpy(Value *Dst, unsigned DstAlign, Value *Src,
+                         unsigned SrcAlign, uint64_t Size,
+                         bool isVolatile = false, MDNode *TBAATag = nullptr,
+                         MDNode *TBAAStructTag = nullptr,
+                         MDNode *ScopeTag = nullptr,
+                         MDNode *NoAliasTag = nullptr) {
+    return CreateMemCpy(Dst, DstAlign, Src, SrcAlign, getInt64(Size),
+                        isVolatile, TBAATag, TBAAStructTag, ScopeTag,
+                        NoAliasTag);
+  }
+
+  CallInst *CreateMemCpy(Value *Dst, unsigned DstAlign, Value *Src,
+                         unsigned SrcAlign, Value *Size,
+                         bool isVolatile = false, MDNode *TBAATag = nullptr,
+                         MDNode *TBAAStructTag = nullptr,
+                         MDNode *ScopeTag = nullptr,
+                         MDNode *NoAliasTag = nullptr);
+
+  // TODO: Old API. Remove this when no longer used.
   CallInst *CreateMemCpy(Value *Dst, Value *Src, uint64_t Size, unsigned Align,
                          bool isVolatile = false, MDNode *TBAATag = nullptr,
                          MDNode *TBAAStructTag = nullptr,
                          MDNode *ScopeTag = nullptr,
                          MDNode *NoAliasTag = nullptr) {
-    return CreateMemCpy(Dst, Src, getInt64(Size), Align, isVolatile, TBAATag,
+    return CreateMemCpy(Dst, Align, Src, Align, getInt64(Size), isVolatile, TBAATag,
                         TBAAStructTag, ScopeTag, NoAliasTag);
   }
-
+  // TODO: Old API. Remove this when no longer used.
   CallInst *CreateMemCpy(Value *Dst, Value *Src, Value *Size, unsigned Align,
                          bool isVolatile = false, MDNode *TBAATag = nullptr,
                          MDNode *TBAAStructTag = nullptr,
                          MDNode *ScopeTag = nullptr,
-                         MDNode *NoAliasTag = nullptr);
+                         MDNode *NoAliasTag = nullptr) {
+    return CreateMemCpy(Dst, Align, Src, Align, Size, isVolatile, TBAATag,
+                        TBAAStructTag, ScopeTag, NoAliasTag);
+  }
 
   /// \brief Create and insert an element unordered-atomic memcpy between the
   /// specified pointers.
@@ -465,18 +487,35 @@ public:
   /// If the pointers aren't i8*, they will be converted.  If a TBAA tag is
   /// specified, it will be added to the instruction. Likewise with alias.scope
   /// and noalias tags.
+  CallInst *CreateMemMove(Value *Dst, unsigned DstAlign, Value *Src, unsigned SrcAlign,
+                          uint64_t Size, bool isVolatile = false,
+                          MDNode *TBAATag = nullptr, MDNode *ScopeTag = nullptr,
+                          MDNode *NoAliasTag = nullptr) {
+    return CreateMemMove(Dst, DstAlign, Src, SrcAlign, getInt64(Size), isVolatile,
+                         TBAATag, ScopeTag, NoAliasTag);
+  }
+
+  CallInst *CreateMemMove(Value *Dst, unsigned DstAlign, Value *Src, unsigned SrcAlign,
+                          Value *Size, bool isVolatile = false, MDNode *TBAATag = nullptr,
+                          MDNode *ScopeTag = nullptr,
+                          MDNode *NoAliasTag = nullptr);
+
+  // TODO: Old API. Remove this when no longer used.
   CallInst *CreateMemMove(Value *Dst, Value *Src, uint64_t Size, unsigned Align,
                           bool isVolatile = false, MDNode *TBAATag = nullptr,
                           MDNode *ScopeTag = nullptr,
                           MDNode *NoAliasTag = nullptr) {
-    return CreateMemMove(Dst, Src, getInt64(Size), Align, isVolatile,
+    return CreateMemMove(Dst, Align, Src, Align, getInt64(Size), isVolatile,
                          TBAATag, ScopeTag, NoAliasTag);
   }
-
+  // TODO: Old API. Remove this when no longer used.
   CallInst *CreateMemMove(Value *Dst, Value *Src, Value *Size, unsigned Align,
                           bool isVolatile = false, MDNode *TBAATag = nullptr,
                           MDNode *ScopeTag = nullptr,
-                          MDNode *NoAliasTag = nullptr);
+                          MDNode *NoAliasTag = nullptr) {
+    return CreateMemMove(Dst, Align, Src, Align, Size, isVolatile, TBAATag,
+                         ScopeTag, NoAliasTag);
+  }
 
   /// \brief Create a vector fadd reduction intrinsic of the source vector.
   /// The first parameter is a scalar accumulator value for ordered reductions.
@@ -630,6 +669,13 @@ public:
                                   Value *LHS, Value *RHS,
                                   const Twine &Name = "");
 
+  /// Create a call to intrinsic \p ID with 1 or more operands assuming the
+  /// intrinsic and all operands have the same type. If \p FMFSource is
+  /// provided, copy fast-math-flags from that instruction to the intrinsic.
+  CallInst *CreateIntrinsic(Intrinsic::ID ID, ArrayRef<Value *> Args,
+                            Instruction *FMFSource = nullptr,
+                            const Twine &Name = "");
+
   /// Create call to the minnum intrinsic.
   CallInst *CreateMinNum(Value *LHS, Value *RHS, const Twine &Name = "") {
     return CreateBinaryIntrinsic(Intrinsic::minnum, LHS, RHS, Name);
@@ -637,7 +683,7 @@ public:
 
   /// Create call to the maxnum intrinsic.
   CallInst *CreateMaxNum(Value *LHS, Value *RHS, const Twine &Name = "") {
-    return CreateBinaryIntrinsic(Intrinsic::minnum, LHS, RHS, Name);
+    return CreateBinaryIntrinsic(Intrinsic::maxnum, LHS, RHS, Name);
   }
 
 private:
@@ -878,15 +924,21 @@ private:
     return BO;
   }
 
-  Instruction *AddFPMathAttributes(Instruction *I,
-                                   MDNode *FPMathTag,
-                                   FastMathFlags FMF) const {
-    if (!FPMathTag)
-      FPMathTag = DefaultFPMathTag;
-    if (FPMathTag)
-      I->setMetadata(LLVMContext::MD_fpmath, FPMathTag);
+  Instruction *setFPAttrs(Instruction *I, MDNode *FPMD,
+                          FastMathFlags FMF) const {
+    if (!FPMD)
+      FPMD = DefaultFPMathTag;
+    if (FPMD)
+      I->setMetadata(LLVMContext::MD_fpmath, FPMD);
     I->setFastMathFlags(FMF);
     return I;
+  }
+
+  Value *foldConstant(Instruction::BinaryOps Opc, Value *L,
+                      Value *R, const Twine &Name = nullptr) const {
+    auto *LC = dyn_cast<Constant>(L);
+    auto *RC = dyn_cast<Constant>(R);
+    return (LC && RC) ? Insert(Folder.CreateBinOp(Opc, LC, RC), Name) : nullptr;
   }
 
 public:
@@ -904,14 +956,6 @@ public:
   Value *CreateNUWAdd(Value *LHS, Value *RHS, const Twine &Name = "") {
     return CreateAdd(LHS, RHS, Name, true, false);
   }
-  Value *CreateFAdd(Value *LHS, Value *RHS, const Twine &Name = "",
-                    MDNode *FPMathTag = nullptr) {
-    if (Constant *LC = dyn_cast<Constant>(LHS))
-      if (Constant *RC = dyn_cast<Constant>(RHS))
-        return Insert(Folder.CreateFAdd(LC, RC), Name);
-    return Insert(AddFPMathAttributes(BinaryOperator::CreateFAdd(LHS, RHS),
-                                      FPMathTag, FMF), Name);
-  }
   Value *CreateSub(Value *LHS, Value *RHS, const Twine &Name = "",
                    bool HasNUW = false, bool HasNSW = false) {
     if (Constant *LC = dyn_cast<Constant>(LHS))
@@ -926,14 +970,6 @@ public:
   Value *CreateNUWSub(Value *LHS, Value *RHS, const Twine &Name = "") {
     return CreateSub(LHS, RHS, Name, true, false);
   }
-  Value *CreateFSub(Value *LHS, Value *RHS, const Twine &Name = "",
-                    MDNode *FPMathTag = nullptr) {
-    if (Constant *LC = dyn_cast<Constant>(LHS))
-      if (Constant *RC = dyn_cast<Constant>(RHS))
-        return Insert(Folder.CreateFSub(LC, RC), Name);
-    return Insert(AddFPMathAttributes(BinaryOperator::CreateFSub(LHS, RHS),
-                                      FPMathTag, FMF), Name);
-  }
   Value *CreateMul(Value *LHS, Value *RHS, const Twine &Name = "",
                    bool HasNUW = false, bool HasNSW = false) {
     if (Constant *LC = dyn_cast<Constant>(LHS))
@@ -947,14 +983,6 @@ public:
   }
   Value *CreateNUWMul(Value *LHS, Value *RHS, const Twine &Name = "") {
     return CreateMul(LHS, RHS, Name, true, false);
-  }
-  Value *CreateFMul(Value *LHS, Value *RHS, const Twine &Name = "",
-                    MDNode *FPMathTag = nullptr) {
-    if (Constant *LC = dyn_cast<Constant>(LHS))
-      if (Constant *RC = dyn_cast<Constant>(RHS))
-        return Insert(Folder.CreateFMul(LC, RC), Name);
-    return Insert(AddFPMathAttributes(BinaryOperator::CreateFMul(LHS, RHS),
-                                      FPMathTag, FMF), Name);
   }
   Value *CreateUDiv(Value *LHS, Value *RHS, const Twine &Name = "",
                     bool isExact = false) {
@@ -980,35 +1008,14 @@ public:
   Value *CreateExactSDiv(Value *LHS, Value *RHS, const Twine &Name = "") {
     return CreateSDiv(LHS, RHS, Name, true);
   }
-  Value *CreateFDiv(Value *LHS, Value *RHS, const Twine &Name = "",
-                    MDNode *FPMathTag = nullptr) {
-    if (Constant *LC = dyn_cast<Constant>(LHS))
-      if (Constant *RC = dyn_cast<Constant>(RHS))
-        return Insert(Folder.CreateFDiv(LC, RC), Name);
-    return Insert(AddFPMathAttributes(BinaryOperator::CreateFDiv(LHS, RHS),
-                                      FPMathTag, FMF), Name);
-  }
   Value *CreateURem(Value *LHS, Value *RHS, const Twine &Name = "") {
-    if (Constant *LC = dyn_cast<Constant>(LHS))
-      if (Constant *RC = dyn_cast<Constant>(RHS))
-        return Insert(Folder.CreateURem(LC, RC), Name);
+    if (Value *V = foldConstant(Instruction::URem, LHS, RHS, Name)) return V;
     return Insert(BinaryOperator::CreateURem(LHS, RHS), Name);
   }
   Value *CreateSRem(Value *LHS, Value *RHS, const Twine &Name = "") {
-    if (Constant *LC = dyn_cast<Constant>(LHS))
-      if (Constant *RC = dyn_cast<Constant>(RHS))
-        return Insert(Folder.CreateSRem(LC, RC), Name);
+    if (Value *V = foldConstant(Instruction::SRem, LHS, RHS, Name)) return V;
     return Insert(BinaryOperator::CreateSRem(LHS, RHS), Name);
   }
-  Value *CreateFRem(Value *LHS, Value *RHS, const Twine &Name = "",
-                    MDNode *FPMathTag = nullptr) {
-    if (Constant *LC = dyn_cast<Constant>(LHS))
-      if (Constant *RC = dyn_cast<Constant>(RHS))
-        return Insert(Folder.CreateFRem(LC, RC), Name);
-    return Insert(AddFPMathAttributes(BinaryOperator::CreateFRem(LHS, RHS),
-                                      FPMathTag, FMF), Name);
-  }
-
   Value *CreateShl(Value *LHS, Value *RHS, const Twine &Name = "",
                    bool HasNUW = false, bool HasNSW = false) {
     if (Constant *LC = dyn_cast<Constant>(LHS))
@@ -1097,9 +1104,7 @@ public:
   }
 
   Value *CreateXor(Value *LHS, Value *RHS, const Twine &Name = "") {
-    if (Constant *LC = dyn_cast<Constant>(LHS))
-      if (Constant *RC = dyn_cast<Constant>(RHS))
-        return Insert(Folder.CreateXor(LC, RC), Name);
+    if (Value *V = foldConstant(Instruction::Xor, LHS, RHS, Name)) return V;
     return Insert(BinaryOperator::CreateXor(LHS, RHS), Name);
   }
   Value *CreateXor(Value *LHS, const APInt &RHS, const Twine &Name = "") {
@@ -1108,16 +1113,89 @@ public:
   Value *CreateXor(Value *LHS, uint64_t RHS, const Twine &Name = "") {
     return CreateXor(LHS, ConstantInt::get(LHS->getType(), RHS), Name);
   }
+  Value *CreateFAdd(Value *L, Value *R, const Twine &Name = "",
+                    MDNode *FPMD = nullptr) {
+    if (Value *V = foldConstant(Instruction::FAdd, L, R, Name)) return V;
+    Instruction *I = setFPAttrs(BinaryOperator::CreateFAdd(L, R), FPMD, FMF);
+    return Insert(I, Name);
+  }
+  /// Copy fast-math-flags from an instruction rather than using the builder's
+  /// default FMF.
+  Value *CreateFAddFMF(Value *L, Value *R, Instruction *FMFSource,
+                       const Twine &Name = "") {
+    if (Value *V = foldConstant(Instruction::FAdd, L, R, Name)) return V;
+    Instruction *I = setFPAttrs(BinaryOperator::CreateFAdd(L, R), nullptr,
+                                FMFSource->getFastMathFlags());
+    return Insert(I, Name);
+  }
+  Value *CreateFSub(Value *L, Value *R, const Twine &Name = "",
+                    MDNode *FPMD = nullptr) {
+    if (Value *V = foldConstant(Instruction::FSub, L, R, Name)) return V;
+    Instruction *I = setFPAttrs(BinaryOperator::CreateFSub(L, R), FPMD, FMF);
+    return Insert(I, Name);
+  }
+  /// Copy fast-math-flags from an instruction rather than using the builder's
+  /// default FMF.
+  Value *CreateFSubFMF(Value *L, Value *R, Instruction *FMFSource,
+                       const Twine &Name = "") {
+    if (Value *V = foldConstant(Instruction::FSub, L, R, Name)) return V;
+    Instruction *I = setFPAttrs(BinaryOperator::CreateFSub(L, R), nullptr,
+                                FMFSource->getFastMathFlags());
+    return Insert(I, Name);
+  }
+  Value *CreateFMul(Value *L, Value *R, const Twine &Name = "",
+                    MDNode *FPMD = nullptr) {
+    if (Value *V = foldConstant(Instruction::FMul, L, R, Name)) return V;
+    Instruction *I = setFPAttrs(BinaryOperator::CreateFMul(L, R), FPMD, FMF);
+    return Insert(I, Name);
+  }
+  /// Copy fast-math-flags from an instruction rather than using the builder's
+  /// default FMF.
+  Value *CreateFMulFMF(Value *L, Value *R, Instruction *FMFSource,
+                       const Twine &Name = "") {
+    if (Value *V = foldConstant(Instruction::FMul, L, R, Name)) return V;
+    Instruction *I = setFPAttrs(BinaryOperator::CreateFMul(L, R), nullptr,
+                                FMFSource->getFastMathFlags());
+    return Insert(I, Name);
+  }
+  Value *CreateFDiv(Value *L, Value *R, const Twine &Name = "",
+                    MDNode *FPMD = nullptr) {
+    if (Value *V = foldConstant(Instruction::FDiv, L, R, Name)) return V;
+    Instruction *I = setFPAttrs(BinaryOperator::CreateFDiv(L, R), FPMD, FMF);
+    return Insert(I, Name);
+  }
+  /// Copy fast-math-flags from an instruction rather than using the builder's
+  /// default FMF.
+  Value *CreateFDivFMF(Value *L, Value *R, Instruction *FMFSource,
+                       const Twine &Name = "") {
+    if (Value *V = foldConstant(Instruction::FDiv, L, R, Name)) return V;
+    Instruction *I = setFPAttrs(BinaryOperator::CreateFDiv(L, R), nullptr,
+                                FMFSource->getFastMathFlags());
+    return Insert(I, Name);
+  }
+  Value *CreateFRem(Value *L, Value *R, const Twine &Name = "",
+                    MDNode *FPMD = nullptr) {
+    if (Value *V = foldConstant(Instruction::FRem, L, R, Name)) return V;
+    Instruction *I = setFPAttrs(BinaryOperator::CreateFRem(L, R), FPMD, FMF);
+    return Insert(I, Name);
+  }
+  /// Copy fast-math-flags from an instruction rather than using the builder's
+  /// default FMF.
+  Value *CreateFRemFMF(Value *L, Value *R, Instruction *FMFSource,
+                       const Twine &Name = "") {
+    if (Value *V = foldConstant(Instruction::FRem, L, R, Name)) return V;
+    Instruction *I = setFPAttrs(BinaryOperator::CreateFRem(L, R), nullptr,
+                                FMFSource->getFastMathFlags());
+    return Insert(I, Name);
+  }
 
   Value *CreateBinOp(Instruction::BinaryOps Opc,
                      Value *LHS, Value *RHS, const Twine &Name = "",
                      MDNode *FPMathTag = nullptr) {
-    if (Constant *LC = dyn_cast<Constant>(LHS))
-      if (Constant *RC = dyn_cast<Constant>(RHS))
-        return Insert(Folder.CreateBinOp(Opc, LC, RC), Name);
+    if (Value *V = foldConstant(Opc, LHS, RHS, Name)) return V;
     Instruction *BinOp = BinaryOperator::Create(Opc, LHS, RHS);
     if (isa<FPMathOperator>(BinOp))
-      BinOp = AddFPMathAttributes(BinOp, FPMathTag, FMF);
+      BinOp = setFPAttrs(BinOp, FPMathTag, FMF);
     return Insert(BinOp, Name);
   }
 
@@ -1140,8 +1218,8 @@ public:
                     MDNode *FPMathTag = nullptr) {
     if (Constant *VC = dyn_cast<Constant>(V))
       return Insert(Folder.CreateFNeg(VC), Name);
-    return Insert(AddFPMathAttributes(BinaryOperator::CreateFNeg(V),
-                                      FPMathTag, FMF), Name);
+    return Insert(setFPAttrs(BinaryOperator::CreateFNeg(V), FPMathTag, FMF),
+                  Name);
   }
   Value *CreateNot(Value *V, const Twine &Name = "") {
     if (Constant *VC = dyn_cast<Constant>(V))
@@ -1647,8 +1725,7 @@ public:
     if (Constant *LC = dyn_cast<Constant>(LHS))
       if (Constant *RC = dyn_cast<Constant>(RHS))
         return Insert(Folder.CreateFCmp(P, LC, RC), Name);
-    return Insert(AddFPMathAttributes(new FCmpInst(P, LHS, RHS),
-                                      FPMathTag, FMF), Name);
+    return Insert(setFPAttrs(new FCmpInst(P, LHS, RHS), FPMathTag, FMF), Name);
   }
 
   //===--------------------------------------------------------------------===//
@@ -1672,7 +1749,7 @@ public:
                        MDNode *FPMathTag = nullptr) {
     CallInst *CI = CallInst::Create(FTy, Callee, Args, DefaultOperandBundles);
     if (isa<FPMathOperator>(CI))
-      CI = cast<CallInst>(AddFPMathAttributes(CI, FPMathTag, FMF));
+      CI = cast<CallInst>(setFPAttrs(CI, FPMathTag, FMF));
     return Insert(CI, Name);
   }
 
@@ -1681,7 +1758,7 @@ public:
                        const Twine &Name = "", MDNode *FPMathTag = nullptr) {
     CallInst *CI = CallInst::Create(Callee, Args, OpBundles);
     if (isa<FPMathOperator>(CI))
-      CI = cast<CallInst>(AddFPMathAttributes(CI, FPMathTag, FMF));
+      CI = cast<CallInst>(setFPAttrs(CI, FPMathTag, FMF));
     return Insert(CI, Name);
   }
 

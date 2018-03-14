@@ -16,6 +16,7 @@
 #include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DIBuilder.h"
 #include "llvm/IR/PatternMatch.h"
 #include "llvm/Support/KnownBits.h"
 using namespace llvm;
@@ -265,7 +266,20 @@ Instruction *InstCombiner::commonCastTransforms(CastInst &CI) {
     if (Instruction::CastOps NewOpc = isEliminableCastPair(CSrc, &CI)) {
       // The first cast (CSrc) is eliminable so we need to fix up or replace
       // the second cast (CI). CSrc will then have a good chance of being dead.
-      return CastInst::Create(NewOpc, CSrc->getOperand(0), CI.getType());
+      auto *Res = CastInst::Create(NewOpc, CSrc->getOperand(0), CI.getType());
+
+      // If the eliminable cast has debug users, insert a debug value after the
+      // cast pointing to the new Value.
+      SmallVector<DbgInfoIntrinsic *, 1> CSrcDbgInsts;
+      findDbgUsers(CSrcDbgInsts, CSrc);
+      if (CSrcDbgInsts.size()) {
+        DIBuilder DIB(*CI.getModule());
+        for (auto *DII : CSrcDbgInsts)
+          DIB.insertDbgValueIntrinsic(
+              Res, DII->getVariable(), DII->getExpression(),
+              DII->getDebugLoc().get(), &*std::next(CI.getIterator()));
+      }
+      return Res;
     }
   }
 
@@ -287,6 +301,33 @@ Instruction *InstCombiner::commonCastTransforms(CastInst &CI) {
   return nullptr;
 }
 
+/// Constants and extensions/truncates from the destination type are always
+/// free to be evaluated in that type. This is a helper for canEvaluate*.
+static bool canAlwaysEvaluateInType(Value *V, Type *Ty) {
+  if (isa<Constant>(V))
+    return true;
+  Value *X;
+  if ((match(V, m_ZExtOrSExt(m_Value(X))) || match(V, m_Trunc(m_Value(X)))) &&
+      X->getType() == Ty)
+    return true;
+
+  return false;
+}
+
+/// Filter out values that we can not evaluate in the destination type for free.
+/// This is a helper for canEvaluate*.
+static bool canNotEvaluateInType(Value *V, Type *Ty) {
+  assert(!isa<Constant>(V) && "Constant should already be handled.");
+  if (!isa<Instruction>(V))
+    return true;
+  // We don't extend or shrink something that has multiple uses --  doing so
+  // would require duplicating the instruction which isn't profitable.
+  if (!V->hasOneUse())
+    return true;
+
+  return false;
+}
+
 /// Return true if we can evaluate the specified expression tree as type Ty
 /// instead of its larger type, and arrive with the same value.
 /// This is used by code that tries to eliminate truncates.
@@ -300,27 +341,14 @@ Instruction *InstCombiner::commonCastTransforms(CastInst &CI) {
 ///
 static bool canEvaluateTruncated(Value *V, Type *Ty, InstCombiner &IC,
                                  Instruction *CxtI) {
-  // We can always evaluate constants in another type.
-  if (isa<Constant>(V))
+  if (canAlwaysEvaluateInType(V, Ty))
     return true;
+  if (canNotEvaluateInType(V, Ty))
+    return false;
 
-  Instruction *I = dyn_cast<Instruction>(V);
-  if (!I) return false;
-
+  auto *I = cast<Instruction>(V);
   Type *OrigTy = V->getType();
-
-  // If this is an extension from the dest type, we can eliminate it, even if it
-  // has multiple uses.
-  if ((isa<ZExtInst>(I) || isa<SExtInst>(I)) &&
-      I->getOperand(0)->getType() == Ty)
-    return true;
-
-  // We can't extend or shrink something that has multiple uses: doing so would
-  // require duplicating the instruction in general, which isn't profitable.
-  if (!I->hasOneUse()) return false;
-
-  unsigned Opc = I->getOpcode();
-  switch (Opc) {
+  switch (I->getOpcode()) {
   case Instruction::Add:
   case Instruction::Sub:
   case Instruction::Mul:
@@ -916,23 +944,14 @@ Instruction *InstCombiner::transformZExtICmp(ICmpInst *ICI, ZExtInst &CI,
 static bool canEvaluateZExtd(Value *V, Type *Ty, unsigned &BitsToClear,
                              InstCombiner &IC, Instruction *CxtI) {
   BitsToClear = 0;
-  if (isa<Constant>(V))
+  if (canAlwaysEvaluateInType(V, Ty))
     return true;
+  if (canNotEvaluateInType(V, Ty))
+    return false;
 
-  Instruction *I = dyn_cast<Instruction>(V);
-  if (!I) return false;
-
-  // If the input is a truncate from the destination type, we can trivially
-  // eliminate it.
-  if (isa<TruncInst>(I) && I->getOperand(0)->getType() == Ty)
-    return true;
-
-  // We can't extend or shrink something that has multiple uses: doing so would
-  // require duplicating the instruction in general, which isn't profitable.
-  if (!I->hasOneUse()) return false;
-
-  unsigned Opc = I->getOpcode(), Tmp;
-  switch (Opc) {
+  auto *I = cast<Instruction>(V);
+  unsigned Tmp;
+  switch (I->getOpcode()) {
   case Instruction::ZExt:  // zext(zext(x)) -> zext(x).
   case Instruction::SExt:  // zext(sext(x)) -> sext(x).
   case Instruction::Trunc: // zext(trunc(x)) -> trunc(x) or zext(x)
@@ -961,7 +980,7 @@ static bool canEvaluateZExtd(Value *V, Type *Ty, unsigned &BitsToClear,
                                0, CxtI)) {
         // If this is an And instruction and all of the BitsToClear are
         // known to be zero we can reset BitsToClear.
-        if (Opc == Instruction::And)
+        if (I->getOpcode() == Instruction::And)
           BitsToClear = 0;
         return true;
       }
@@ -1254,21 +1273,12 @@ Instruction *InstCombiner::transformSExtICmp(ICmpInst *ICI, Instruction &CI) {
 static bool canEvaluateSExtd(Value *V, Type *Ty) {
   assert(V->getType()->getScalarSizeInBits() < Ty->getScalarSizeInBits() &&
          "Can't sign extend type to a smaller type");
-  // If this is a constant, it can be trivially promoted.
-  if (isa<Constant>(V))
+  if (canAlwaysEvaluateInType(V, Ty))
     return true;
+  if (canNotEvaluateInType(V, Ty))
+    return false;
 
-  Instruction *I = dyn_cast<Instruction>(V);
-  if (!I) return false;
-
-  // If this is a truncate from the dest type, we can trivially eliminate it.
-  if (isa<TruncInst>(I) && I->getOperand(0)->getType() == Ty)
-    return true;
-
-  // We can't extend or shrink something that has multiple uses: doing so would
-  // require duplicating the instruction in general, which isn't profitable.
-  if (!I->hasOneUse()) return false;
-
+  auto *I = cast<Instruction>(V);
   switch (I->getOpcode()) {
   case Instruction::SExt:  // sext(sext(x)) -> sext(x)
   case Instruction::ZExt:  // sext(zext(x)) -> zext(x)
@@ -1401,40 +1411,77 @@ Instruction *InstCombiner::visitSExt(SExtInst &CI) {
 
 /// Return a Constant* for the specified floating-point constant if it fits
 /// in the specified FP type without changing its value.
-static Constant *fitsInFPType(ConstantFP *CFP, const fltSemantics &Sem) {
+static bool fitsInFPType(ConstantFP *CFP, const fltSemantics &Sem) {
   bool losesInfo;
   APFloat F = CFP->getValueAPF();
   (void)F.convert(Sem, APFloat::rmNearestTiesToEven, &losesInfo);
-  if (!losesInfo)
-    return ConstantFP::get(CFP->getContext(), F);
+  return !losesInfo;
+}
+
+static Type *shrinkFPConstant(ConstantFP *CFP) {
+  if (CFP->getType() == Type::getPPC_FP128Ty(CFP->getContext()))
+    return nullptr;  // No constant folding of this.
+  // See if the value can be truncated to half and then reextended.
+  if (fitsInFPType(CFP, APFloat::IEEEhalf()))
+    return Type::getHalfTy(CFP->getContext());
+  // See if the value can be truncated to float and then reextended.
+  if (fitsInFPType(CFP, APFloat::IEEEsingle()))
+    return Type::getFloatTy(CFP->getContext());
+  if (CFP->getType()->isDoubleTy())
+    return nullptr;  // Won't shrink.
+  if (fitsInFPType(CFP, APFloat::IEEEdouble()))
+    return Type::getDoubleTy(CFP->getContext());
+  // Don't try to shrink to various long double types.
   return nullptr;
 }
 
-/// Look through floating-point extensions until we get the source value.
-static Value *lookThroughFPExtensions(Value *V) {
-  while (auto *FPExt = dyn_cast<FPExtInst>(V))
-    V = FPExt->getOperand(0);
+// Determine if this is a vector of ConstantFPs and if so, return the minimal
+// type we can safely truncate all elements to.
+// TODO: Make these support undef elements.
+static Type *shrinkFPConstantVector(Value *V) {
+  auto *CV = dyn_cast<Constant>(V);
+  if (!CV || !CV->getType()->isVectorTy())
+    return nullptr;
+
+  Type *MinType = nullptr;
+
+  unsigned NumElts = CV->getType()->getVectorNumElements();
+  for (unsigned i = 0; i != NumElts; ++i) {
+    auto *CFP = dyn_cast_or_null<ConstantFP>(CV->getAggregateElement(i));
+    if (!CFP)
+      return nullptr;
+
+    Type *T = shrinkFPConstant(CFP);
+    if (!T)
+      return nullptr;
+
+    // If we haven't found a type yet or this type has a larger mantissa than
+    // our previous type, this is our new minimal type.
+    if (!MinType || T->getFPMantissaWidth() > MinType->getFPMantissaWidth())
+      MinType = T;
+  }
+
+  // Make a vector type from the minimal type.
+  return VectorType::get(MinType, NumElts);
+}
+
+/// Find the minimum FP type we can safely truncate to.
+static Type *getMinimumFPType(Value *V) {
+  if (auto *FPExt = dyn_cast<FPExtInst>(V))
+    return FPExt->getOperand(0)->getType();
 
   // If this value is a constant, return the constant in the smallest FP type
   // that can accurately represent it.  This allows us to turn
   // (float)((double)X+2.0) into x+2.0f.
-  if (auto *CFP = dyn_cast<ConstantFP>(V)) {
-    if (CFP->getType() == Type::getPPC_FP128Ty(V->getContext()))
-      return V;  // No constant folding of this.
-    // See if the value can be truncated to half and then reextended.
-    if (Value *V = fitsInFPType(CFP, APFloat::IEEEhalf()))
-      return V;
-    // See if the value can be truncated to float and then reextended.
-    if (Value *V = fitsInFPType(CFP, APFloat::IEEEsingle()))
-      return V;
-    if (CFP->getType()->isDoubleTy())
-      return V;  // Won't shrink.
-    if (Value *V = fitsInFPType(CFP, APFloat::IEEEdouble()))
-      return V;
-    // Don't try to shrink to various long double types.
-  }
+  if (auto *CFP = dyn_cast<ConstantFP>(V))
+    if (Type *T = shrinkFPConstant(CFP))
+      return T;
 
-  return V;
+  // Try to shrink a vector of FP constants.
+  if (Type *T = shrinkFPConstantVector(V))
+    return T;
+
+  return V->getType();
 }
 
 Instruction *InstCombiner::visitFPTrunc(FPTruncInst &CI) {
@@ -1449,11 +1496,11 @@ Instruction *InstCombiner::visitFPTrunc(FPTruncInst &CI) {
   // is explained below in the various case statements.
   BinaryOperator *OpI = dyn_cast<BinaryOperator>(CI.getOperand(0));
   if (OpI && OpI->hasOneUse()) {
-    Value *LHSOrig = lookThroughFPExtensions(OpI->getOperand(0));
-    Value *RHSOrig = lookThroughFPExtensions(OpI->getOperand(1));
+    Type *LHSMinType = getMinimumFPType(OpI->getOperand(0));
+    Type *RHSMinType = getMinimumFPType(OpI->getOperand(1));
     unsigned OpWidth = OpI->getType()->getFPMantissaWidth();
-    unsigned LHSWidth = LHSOrig->getType()->getFPMantissaWidth();
-    unsigned RHSWidth = RHSOrig->getType()->getFPMantissaWidth();
+    unsigned LHSWidth = LHSMinType->getFPMantissaWidth();
+    unsigned RHSWidth = RHSMinType->getFPMantissaWidth();
     unsigned SrcWidth = std::max(LHSWidth, RHSWidth);
     unsigned DstWidth = CI.getType()->getFPMantissaWidth();
     switch (OpI->getOpcode()) {
@@ -1479,12 +1526,10 @@ Instruction *InstCombiner::visitFPTrunc(FPTruncInst &CI) {
         // could be tightened for those cases, but they are rare (the main
         // case of interest here is (float)((double)float + float)).
         if (OpWidth >= 2*DstWidth+1 && DstWidth >= SrcWidth) {
-          if (LHSOrig->getType() != CI.getType())
-            LHSOrig = Builder.CreateFPExt(LHSOrig, CI.getType());
-          if (RHSOrig->getType() != CI.getType())
-            RHSOrig = Builder.CreateFPExt(RHSOrig, CI.getType());
+          Value *LHS = Builder.CreateFPTrunc(OpI->getOperand(0), CI.getType());
+          Value *RHS = Builder.CreateFPTrunc(OpI->getOperand(1), CI.getType());
           Instruction *RI =
-            BinaryOperator::Create(OpI->getOpcode(), LHSOrig, RHSOrig);
+            BinaryOperator::Create(OpI->getOpcode(), LHS, RHS);
           RI->copyFastMathFlags(OpI);
           return RI;
         }
@@ -1496,12 +1541,10 @@ Instruction *InstCombiner::visitFPTrunc(FPTruncInst &CI) {
         // rounding can possibly occur; we can safely perform the operation
         // in the destination format if it can represent both sources.
         if (OpWidth >= LHSWidth + RHSWidth && DstWidth >= SrcWidth) {
-          if (LHSOrig->getType() != CI.getType())
-            LHSOrig = Builder.CreateFPExt(LHSOrig, CI.getType());
-          if (RHSOrig->getType() != CI.getType())
-            RHSOrig = Builder.CreateFPExt(RHSOrig, CI.getType());
+          Value *LHS = Builder.CreateFPTrunc(OpI->getOperand(0), CI.getType());
+          Value *RHS = Builder.CreateFPTrunc(OpI->getOperand(1), CI.getType());
           Instruction *RI =
-            BinaryOperator::CreateFMul(LHSOrig, RHSOrig);
+            BinaryOperator::CreateFMul(LHS, RHS);
           RI->copyFastMathFlags(OpI);
           return RI;
         }
@@ -1514,33 +1557,35 @@ Instruction *InstCombiner::visitFPTrunc(FPTruncInst &CI) {
         // condition used here is a good conservative first pass.
         // TODO: Tighten bound via rigorous analysis of the unbalanced case.
         if (OpWidth >= 2*DstWidth && DstWidth >= SrcWidth) {
-          if (LHSOrig->getType() != CI.getType())
-            LHSOrig = Builder.CreateFPExt(LHSOrig, CI.getType());
-          if (RHSOrig->getType() != CI.getType())
-            RHSOrig = Builder.CreateFPExt(RHSOrig, CI.getType());
+          Value *LHS = Builder.CreateFPTrunc(OpI->getOperand(0), CI.getType());
+          Value *RHS = Builder.CreateFPTrunc(OpI->getOperand(1), CI.getType());
           Instruction *RI =
-            BinaryOperator::CreateFDiv(LHSOrig, RHSOrig);
+            BinaryOperator::CreateFDiv(LHS, RHS);
           RI->copyFastMathFlags(OpI);
           return RI;
         }
         break;
-      case Instruction::FRem:
+      case Instruction::FRem: {
         // Remainder is straightforward.  Remainder is always exact, so the
         // type of OpI doesn't enter into things at all.  We simply evaluate
         // in whichever source type is larger, then convert to the
         // destination type.
         if (SrcWidth == OpWidth)
           break;
-        if (LHSWidth < SrcWidth)
-          LHSOrig = Builder.CreateFPExt(LHSOrig, RHSOrig->getType());
-        else if (RHSWidth <= SrcWidth)
-          RHSOrig = Builder.CreateFPExt(RHSOrig, LHSOrig->getType());
-        if (LHSOrig != OpI->getOperand(0) || RHSOrig != OpI->getOperand(1)) {
-          Value *ExactResult = Builder.CreateFRem(LHSOrig, RHSOrig);
-          if (Instruction *RI = dyn_cast<Instruction>(ExactResult))
-            RI->copyFastMathFlags(OpI);
-          return CastInst::CreateFPCast(ExactResult, CI.getType());
+        Value *LHS, *RHS;
+        if (LHSWidth == SrcWidth) {
+           LHS = Builder.CreateFPTrunc(OpI->getOperand(0), LHSMinType);
+           RHS = Builder.CreateFPTrunc(OpI->getOperand(1), LHSMinType);
+        } else {
+           LHS = Builder.CreateFPTrunc(OpI->getOperand(0), RHSMinType);
+           RHS = Builder.CreateFPTrunc(OpI->getOperand(1), RHSMinType);
         }
+
+        Value *ExactResult = Builder.CreateFRem(LHS, RHS);
+        if (Instruction *RI = dyn_cast<Instruction>(ExactResult))
+          RI->copyFastMathFlags(OpI);
+        return CastInst::CreateFPCast(ExactResult, CI.getType());
+      }
     }
 
     // (fptrunc (fneg x)) -> (fneg (fptrunc x))
@@ -1751,7 +1796,7 @@ Instruction *InstCombiner::visitPtrToInt(PtrToIntInst &CI) {
   Type *Ty = CI.getType();
   unsigned AS = CI.getPointerAddressSpace();
 
-  if (Ty->getScalarSizeInBits() == DL.getPointerSizeInBits(AS))
+  if (Ty->getScalarSizeInBits() == DL.getIndexSizeInBits(AS))
     return commonPointerCastTransforms(CI);
 
   Type *PtrTy = DL.getIntPtrType(CI.getContext(), AS);
@@ -2004,13 +2049,13 @@ static Instruction *foldBitCastBitwiseLogic(BitCastInst &BitCast,
       !match(BitCast.getOperand(0), m_OneUse(m_BinOp(BO))) ||
       !BO->isBitwiseLogicOp())
     return nullptr;
-  
+
   // FIXME: This transform is restricted to vector types to avoid backend
   // problems caused by creating potentially illegal operations. If a fix-up is
   // added to handle that situation, we can remove this check.
   if (!DestTy->isVectorTy() || !BO->getType()->isVectorTy())
     return nullptr;
-  
+
   Value *X;
   if (match(BO->getOperand(0), m_OneUse(m_BitCast(m_Value(X)))) &&
       X->getType() == DestTy && !isa<Constant>(X)) {

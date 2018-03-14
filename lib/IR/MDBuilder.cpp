@@ -58,10 +58,14 @@ MDNode *MDBuilder::createUnpredictable() {
 }
 
 MDNode *MDBuilder::createFunctionEntryCount(
-    uint64_t Count, const DenseSet<GlobalValue::GUID> *Imports) {
+    uint64_t Count, bool Synthetic,
+    const DenseSet<GlobalValue::GUID> *Imports) {
   Type *Int64Ty = Type::getInt64Ty(Context);
   SmallVector<Metadata *, 8> Ops;
-  Ops.push_back(createString("function_entry_count"));
+  if (Synthetic)
+    Ops.push_back(createString("synthetic_function_entry_count"));
+  else
+    Ops.push_back(createString("function_entry_count"));
   Ops.push_back(createConstant(ConstantInt::get(Int64Ty, Count)));
   if (Imports) {
     SmallVector<GlobalValue::GUID, 2> OrderID(Imports->begin(), Imports->end());
@@ -226,6 +230,33 @@ MDNode *MDBuilder::createTBAAAccessTag(MDNode *BaseType, MDNode *AccessType,
                                  ImmutabilityFlagNode});
   }
   return MDNode::get(Context, {BaseType, AccessType, OffsetNode, SizeNode});
+}
+
+MDNode *MDBuilder::createMutableTBAAAccessTag(MDNode *Tag) {
+  MDNode *BaseType = cast<MDNode>(Tag->getOperand(0));
+  MDNode *AccessType = cast<MDNode>(Tag->getOperand(1));
+  Metadata *OffsetNode = Tag->getOperand(2);
+  uint64_t Offset = mdconst::extract<ConstantInt>(OffsetNode)->getZExtValue();
+
+  bool NewFormat = isa<MDNode>(AccessType->getOperand(0));
+
+  // See if the tag is already mutable.
+  unsigned ImmutabilityFlagOp = NewFormat ? 4 : 3;
+  if (Tag->getNumOperands() <= ImmutabilityFlagOp)
+    return Tag;
+
+  // If Tag is already mutable then return it.
+  Metadata *ImmutabilityFlagNode = Tag->getOperand(ImmutabilityFlagOp);
+  if (!mdconst::extract<ConstantInt>(ImmutabilityFlagNode)->getValue())
+    return Tag;
+
+  // Otherwise, create another node.
+  if (!NewFormat)
+    return createTBAAStructTagNode(BaseType, AccessType, Offset);
+
+  Metadata *SizeNode = Tag->getOperand(3);
+  uint64_t Size = mdconst::extract<ConstantInt>(SizeNode)->getZExtValue();
+  return createTBAAAccessTag(BaseType, AccessType, Offset, Size);
 }
 
 MDNode *MDBuilder::createIrrLoopHeaderWeight(uint64_t Weight) {

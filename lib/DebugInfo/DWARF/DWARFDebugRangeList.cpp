@@ -13,14 +13,8 @@
 #include "llvm/Support/raw_ostream.h"
 #include <cinttypes>
 #include <cstdint>
-#include <utility>
 
 using namespace llvm;
-
-raw_ostream &llvm::operator<<(raw_ostream &OS, const DWARFAddressRange &R) {
-  return OS << format("[0x%16.16" PRIx64 ", 0x%16.16" PRIx64 ")", R.LowPC,
-                      R.HighPC);
-}
 
 void DWARFDebugRangeList::clear() {
   Offset = -1U;

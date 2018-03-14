@@ -50,15 +50,11 @@ public:
   }
 
   bool isAliased(const MachineFrameInfo *) const override {
-    // FIXME: If we ever change image intrinsics to accept fat pointers, then
-    // this could be true for some cases.
-    return false;
+    return true;
   }
 
   bool mayAlias(const MachineFrameInfo *) const override {
-    // FIXME: If we ever change image intrinsics to accept fat pointers, then
-    // this could be true for some cases.
-    return false;
+    return true;
   }
 };
 
@@ -74,15 +70,11 @@ public:
   }
 
   bool isAliased(const MachineFrameInfo *) const override {
-    // FIXME: If we ever change image intrinsics to accept fat pointers, then
-    // this could be true for some cases.
-    return false;
+    return true;
   }
 
   bool mayAlias(const MachineFrameInfo *) const override {
-    // FIXME: If we ever change image intrinsics to accept fat pointers, then
-    // this could be true for some cases.
-    return false;
+    return true;
   }
 };
 
@@ -189,6 +181,8 @@ private:
   // for AMDPAL OS type. 0xffffffff represents no hard-wired high half, since
   // current hardware only allows a 16 bit value.
   unsigned GITPtrHigh;
+
+  unsigned HighBitsOf32BitAddress;
 
   MCPhysReg getNextUserSGPR() const {
     assert(NumSystemSGPRs == 0 && "System SGPRs must be added after user SGPRs");
@@ -413,6 +407,10 @@ public:
 
   unsigned getGITPtrHigh() const {
     return GITPtrHigh;
+  }
+
+  unsigned get32BitAddressHighBits() const {
+    return HighBitsOf32BitAddress;
   }
 
   unsigned getNumUserSGPRs() const {

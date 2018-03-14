@@ -476,26 +476,27 @@ unsigned AArch64FastISel::materializeGV(const GlobalValue *GV) {
     // ADRP + LDRX
     BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(AArch64::ADRP),
             ADRPReg)
-      .addGlobalAddress(GV, 0, AArch64II::MO_GOT | AArch64II::MO_PAGE);
+        .addGlobalAddress(GV, 0, AArch64II::MO_PAGE | OpFlags);
 
     ResultReg = createResultReg(&AArch64::GPR64RegClass);
     BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(AArch64::LDRXui),
             ResultReg)
-      .addReg(ADRPReg)
-      .addGlobalAddress(GV, 0, AArch64II::MO_GOT | AArch64II::MO_PAGEOFF |
-                        AArch64II::MO_NC);
+        .addReg(ADRPReg)
+        .addGlobalAddress(GV, 0,
+                          AArch64II::MO_PAGEOFF | AArch64II::MO_NC | OpFlags);
   } else {
     // ADRP + ADDX
     BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(AArch64::ADRP),
             ADRPReg)
-      .addGlobalAddress(GV, 0, AArch64II::MO_PAGE);
+        .addGlobalAddress(GV, 0, AArch64II::MO_PAGE | OpFlags);
 
     ResultReg = createResultReg(&AArch64::GPR64spRegClass);
     BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(AArch64::ADDXri),
             ResultReg)
-      .addReg(ADRPReg)
-      .addGlobalAddress(GV, 0, AArch64II::MO_PAGEOFF | AArch64II::MO_NC)
-      .addImm(0);
+        .addReg(ADRPReg)
+        .addGlobalAddress(GV, 0,
+                          AArch64II::MO_PAGEOFF | AArch64II::MO_NC | OpFlags)
+        .addImm(0);
   }
   return ResultReg;
 }
@@ -3456,7 +3457,8 @@ bool AArch64FastISel::fastLowerIntrinsicCall(const IntrinsicInst *II) {
       // Small memcpy's are common enough that we want to do them without a call
       // if possible.
       uint64_t Len = cast<ConstantInt>(MTI->getLength())->getZExtValue();
-      unsigned Alignment = MTI->getAlignment();
+      unsigned Alignment = MinAlign(MTI->getDestAlignment(),
+                                    MTI->getSourceAlignment());
       if (isMemCpySmall(Len, Alignment)) {
         Address Dest, Src;
         if (!computeAddress(MTI->getRawDest(), Dest) ||
@@ -3476,7 +3478,7 @@ bool AArch64FastISel::fastLowerIntrinsicCall(const IntrinsicInst *II) {
       return false;
 
     const char *IntrMemName = isa<MemCpyInst>(II) ? "memcpy" : "memmove";
-    return lowerCallTo(II, IntrMemName, II->getNumArgOperands() - 2);
+    return lowerCallTo(II, IntrMemName, II->getNumArgOperands() - 1);
   }
   case Intrinsic::memset: {
     const MemSetInst *MSI = cast<MemSetInst>(II);
@@ -3492,7 +3494,7 @@ bool AArch64FastISel::fastLowerIntrinsicCall(const IntrinsicInst *II) {
       // address spaces.
       return false;
 
-    return lowerCallTo(II, "memset", II->getNumArgOperands() - 2);
+    return lowerCallTo(II, "memset", II->getNumArgOperands() - 1);
   }
   case Intrinsic::sin:
   case Intrinsic::cos:

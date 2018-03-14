@@ -682,7 +682,7 @@ static Value *rewriteGEPAsOffset(Value *Start, Value *Base,
   // 4. Emit GEPs to get the original pointers.
   // 5. Remove the original instructions.
   Type *IndexType = IntegerType::get(
-      Base->getContext(), DL.getPointerTypeSizeInBits(Start->getType()));
+      Base->getContext(), DL.getIndexTypeSizeInBits(Start->getType()));
 
   DenseMap<Value *, Value *> NewInsts;
   NewInsts[Base] = ConstantInt::getNullValue(IndexType);
@@ -790,7 +790,7 @@ static Value *rewriteGEPAsOffset(Value *Start, Value *Base,
 static std::pair<Value *, Value *>
 getAsConstantIndexedAddress(Value *V, const DataLayout &DL) {
   Type *IndexType = IntegerType::get(V->getContext(),
-                                     DL.getPointerTypeSizeInBits(V->getType()));
+                                     DL.getIndexTypeSizeInBits(V->getType()));
 
   Constant *Index = ConstantInt::getNullValue(IndexType);
   while (true) {
@@ -1893,11 +1893,8 @@ Instruction *InstCombiner::foldICmpShlConstant(ICmpInst &Cmp,
       APInt ShiftedC = C.ashr(*ShiftAmt);
       return new ICmpInst(Pred, X, ConstantInt::get(ShType, ShiftedC));
     }
-    if (Pred == ICmpInst::ICMP_EQ || Pred == ICmpInst::ICMP_NE) {
-      // This is the same code as the SGT case, but assert the pre-condition
-      // that is needed for this to work with equality predicates.
-      assert(C.ashr(*ShiftAmt).shl(*ShiftAmt) == C &&
-             "Compare known true or false was not folded");
+    if ((Pred == ICmpInst::ICMP_EQ || Pred == ICmpInst::ICMP_NE) &&
+        C.ashr(*ShiftAmt).shl(*ShiftAmt) == C) {
       APInt ShiftedC = C.ashr(*ShiftAmt);
       return new ICmpInst(Pred, X, ConstantInt::get(ShType, ShiftedC));
     }
@@ -1926,11 +1923,8 @@ Instruction *InstCombiner::foldICmpShlConstant(ICmpInst &Cmp,
       APInt ShiftedC = C.lshr(*ShiftAmt);
       return new ICmpInst(Pred, X, ConstantInt::get(ShType, ShiftedC));
     }
-    if (Pred == ICmpInst::ICMP_EQ || Pred == ICmpInst::ICMP_NE) {
-      // This is the same code as the UGT case, but assert the pre-condition
-      // that is needed for this to work with equality predicates.
-      assert(C.lshr(*ShiftAmt).shl(*ShiftAmt) == C &&
-             "Compare known true or false was not folded");
+    if ((Pred == ICmpInst::ICMP_EQ || Pred == ICmpInst::ICMP_NE) &&
+        C.lshr(*ShiftAmt).shl(*ShiftAmt) == C) {
       APInt ShiftedC = C.lshr(*ShiftAmt);
       return new ICmpInst(Pred, X, ConstantInt::get(ShType, ShiftedC));
     }
@@ -3414,8 +3408,15 @@ Instruction *InstCombiner::foldICmpWithCastAndCast(ICmpInst &ICmp) {
 
   // Turn icmp (ptrtoint x), (ptrtoint/c) into a compare of the input if the
   // integer type is the same size as the pointer type.
+  const auto& CompatibleSizes = [&](Type* SrcTy, Type* DestTy) -> bool {
+    if (isa<VectorType>(SrcTy)) {
+      SrcTy = cast<VectorType>(SrcTy)->getElementType();
+      DestTy = cast<VectorType>(DestTy)->getElementType();
+    }
+    return DL.getPointerTypeSizeInBits(SrcTy) == DestTy->getIntegerBitWidth();
+  };
   if (LHSCI->getOpcode() == Instruction::PtrToInt &&
-      DL.getPointerTypeSizeInBits(SrcTy) == DestTy->getIntegerBitWidth()) {
+      CompatibleSizes(SrcTy, DestTy)) {
     Value *RHSOp = nullptr;
     if (auto *RHSC = dyn_cast<PtrToIntOperator>(ICmp.getOperand(1))) {
       Value *RHSCIOp = RHSC->getOperand(0);
@@ -3890,45 +3891,30 @@ static APInt getDemandedBitsLHSMask(ICmpInst &I, unsigned BitWidth) {
   }
 }
 
-/// \brief Check if the order of \p Op0 and \p Op1 as operand in an ICmpInst
+/// Check if the order of \p Op0 and \p Op1 as operands in an ICmpInst
 /// should be swapped.
 /// The decision is based on how many times these two operands are reused
 /// as subtract operands and their positions in those instructions.
-/// The rational is that several architectures use the same instruction for
-/// both subtract and cmp, thus it is better if the order of those operands
+/// The rationale is that several architectures use the same instruction for
+/// both subtract and cmp. Thus, it is better if the order of those operands
 /// match.
 /// \return true if Op0 and Op1 should be swapped.
-static bool swapMayExposeCSEOpportunities(const Value * Op0,
-                                          const Value * Op1) {
-  // Filter out pointer value as those cannot appears directly in subtract.
+static bool swapMayExposeCSEOpportunities(const Value *Op0, const Value *Op1) {
+  // Filter out pointer values as those cannot appear directly in subtract.
   // FIXME: we may want to go through inttoptrs or bitcasts.
   if (Op0->getType()->isPointerTy())
     return false;
-  // Count every uses of both Op0 and Op1 in a subtract.
-  // Each time Op0 is the first operand, count -1: swapping is bad, the
-  // subtract has already the same layout as the compare.
-  // Each time Op0 is the second operand, count +1: swapping is good, the
-  // subtract has a different layout as the compare.
-  // At the end, if the benefit is greater than 0, Op0 should come second to
-  // expose more CSE opportunities.
-  int GlobalSwapBenefits = 0;
+  // If a subtract already has the same operands as a compare, swapping would be
+  // bad. If a subtract has the same operands as a compare but in reverse order,
+  // then swapping is good.
+  int GoodToSwap = 0;
   for (const User *U : Op0->users()) {
-    const BinaryOperator *BinOp = dyn_cast<BinaryOperator>(U);
-    if (!BinOp || BinOp->getOpcode() != Instruction::Sub)
-      continue;
-    // If Op0 is the first argument, this is not beneficial to swap the
-    // arguments.
-    int LocalSwapBenefits = -1;
-    unsigned Op1Idx = 1;
-    if (BinOp->getOperand(Op1Idx) == Op0) {
-      Op1Idx = 0;
-      LocalSwapBenefits = 1;
-    }
-    if (BinOp->getOperand(Op1Idx) != Op1)
-      continue;
-    GlobalSwapBenefits += LocalSwapBenefits;
+    if (match(U, m_Sub(m_Specific(Op1), m_Specific(Op0))))
+      GoodToSwap++;
+    else if (match(U, m_Sub(m_Specific(Op0), m_Specific(Op1))))
+      GoodToSwap--;
   }
-  return GlobalSwapBenefits > 0;
+  return GoodToSwap > 0;
 }
 
 /// \brief Check that one use is in the same block as the definition and all
@@ -4052,7 +4038,7 @@ Instruction *InstCombiner::foldICmpUsingKnownBits(ICmpInst &I) {
   // Get scalar or pointer size.
   unsigned BitWidth = Ty->isIntOrIntVectorTy()
                           ? Ty->getScalarSizeInBits()
-                          : DL.getTypeSizeInBits(Ty->getScalarType());
+                          : DL.getIndexTypeSizeInBits(Ty->getScalarType());
 
   if (!BitWidth)
     return nullptr;

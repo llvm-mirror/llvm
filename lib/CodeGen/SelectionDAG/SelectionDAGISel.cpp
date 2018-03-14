@@ -29,6 +29,7 @@
 #include "llvm/Analysis/CFG.h"
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
+#include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/CodeGen/FastISel.h"
 #include "llvm/CodeGen/FunctionLoweringInfo.h"
 #include "llvm/CodeGen/GCMetadata.h"
@@ -329,6 +330,7 @@ void SelectionDAGISel::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addPreserved<StackProtector>();
   AU.addPreserved<GCModuleInfo>();
   AU.addRequired<TargetLibraryInfoWrapperPass>();
+  AU.addRequired<TargetTransformInfoWrapperPass>();
   if (UseMBPI && OptLevel != CodeGenOpt::None)
     AU.addRequired<BranchProbabilityInfoWrapperPass>();
   MachineFunctionPass::getAnalysisUsage(AU);
@@ -414,7 +416,8 @@ bool SelectionDAGISel::runOnMachineFunction(MachineFunction &mf) {
 
   SplitCriticalSideEffectEdges(const_cast<Function &>(Fn), DT, LI);
 
-  CurDAG->init(*MF, *ORE, this);
+  CurDAG->init(*MF, *ORE, this, LibInfo,
+   getAnalysisIfAvailable<DivergenceAnalysis>());
   FuncInfo->set(Fn, *MF, CurDAG);
 
   // Now get the optional analyzes if we want to.
@@ -711,6 +714,8 @@ void SelectionDAGISel::CodeGenAndEmitDAG() {
   int BlockNumber = -1;
   (void)BlockNumber;
   bool MatchFilterBB = false; (void)MatchFilterBB;
+  TargetTransformInfo &TTI =
+      getAnalysis<TargetTransformInfoWrapperPass>().getTTI(*FuncInfo->Fn);
 
   // Pre-type legalization allow creation of any node types.
   CurDAG->NewNodesMustHaveLegalTypes = false;
@@ -744,6 +749,9 @@ void SelectionDAGISel::CodeGenAndEmitDAG() {
     CurDAG->Combine(BeforeLegalizeTypes, AA, OptLevel);
   }
 
+  if (TTI.hasBranchDivergence())
+    CurDAG->VerifyDAGDiverence();
+
   DEBUG(dbgs() << "Optimized lowered selection DAG: "
                << printMBBReference(*FuncInfo->MBB) << " '" << BlockName
                << "'\n";
@@ -760,6 +768,9 @@ void SelectionDAGISel::CodeGenAndEmitDAG() {
                        GroupDescription, TimePassesIsEnabled);
     Changed = CurDAG->LegalizeTypes();
   }
+
+  if (TTI.hasBranchDivergence())
+    CurDAG->VerifyDAGDiverence();
 
   DEBUG(dbgs() << "Type-legalized selection DAG: "
                << printMBBReference(*FuncInfo->MBB) << " '" << BlockName
@@ -779,6 +790,9 @@ void SelectionDAGISel::CodeGenAndEmitDAG() {
                          GroupName, GroupDescription, TimePassesIsEnabled);
       CurDAG->Combine(AfterLegalizeTypes, AA, OptLevel);
     }
+
+    if (TTI.hasBranchDivergence())
+      CurDAG->VerifyDAGDiverence();
 
     DEBUG(dbgs() << "Optimized type-legalized selection DAG: "
                  << printMBBReference(*FuncInfo->MBB) << " '" << BlockName
@@ -823,6 +837,9 @@ void SelectionDAGISel::CodeGenAndEmitDAG() {
                  << printMBBReference(*FuncInfo->MBB) << " '" << BlockName
                  << "'\n";
           CurDAG->dump());
+
+    if (TTI.hasBranchDivergence())
+      CurDAG->VerifyDAGDiverence();
   }
 
   if (ViewLegalizeDAGs && MatchFilterBB)
@@ -833,6 +850,9 @@ void SelectionDAGISel::CodeGenAndEmitDAG() {
                        GroupDescription, TimePassesIsEnabled);
     CurDAG->Legalize();
   }
+
+  if (TTI.hasBranchDivergence())
+    CurDAG->VerifyDAGDiverence();
 
   DEBUG(dbgs() << "Legalized selection DAG: "
                << printMBBReference(*FuncInfo->MBB) << " '" << BlockName
@@ -848,6 +868,9 @@ void SelectionDAGISel::CodeGenAndEmitDAG() {
                        GroupDescription, TimePassesIsEnabled);
     CurDAG->Combine(AfterLegalizeDAG, AA, OptLevel);
   }
+
+  if (TTI.hasBranchDivergence())
+    CurDAG->VerifyDAGDiverence();
 
   DEBUG(dbgs() << "Optimized legalized selection DAG: "
                << printMBBReference(*FuncInfo->MBB) << " '" << BlockName
@@ -985,13 +1008,16 @@ void SelectionDAGISel::DoInstructionSelection() {
       if (Node->isStrictFPOpcode())
         Node = CurDAG->mutateStrictFPToFP(Node);
 
+      DEBUG(dbgs() << "\nISEL: Starting selection on root node: ";
+            Node->dump(CurDAG));
+
       Select(Node);
     }
 
     CurDAG->setRoot(Dummy.getValue());
   }
 
-  DEBUG(dbgs() << "===== Instruction selection ends:\n");
+  DEBUG(dbgs() << "\n===== Instruction selection ends:\n");
 
   PostprocessISelDAG();
 }
@@ -1380,8 +1406,10 @@ void SelectionDAGISel::SelectAllBasicBlocks(const Function &Fn) {
   FastISelFailed = false;
   // Initialize the Fast-ISel state, if needed.
   FastISel *FastIS = nullptr;
-  if (TM.Options.EnableFastISel)
+  if (TM.Options.EnableFastISel) {
+    DEBUG(dbgs() << "Enabling fast-isel\n");
     FastIS = TLI->createFastISel(*FuncInfo, LibInfo);
+  }
 
   setupSwiftErrorVals(Fn, TLI, FuncInfo);
 
@@ -1395,6 +1423,8 @@ void SelectionDAGISel::SelectAllBasicBlocks(const Function &Fn) {
   // Set up FuncInfo for ISel. Entry blocks never have PHIs.
   FuncInfo->MBB = FuncInfo->MBBMap[&Fn.getEntryBlock()];
   FuncInfo->InsertPt = FuncInfo->MBB->begin();
+
+  CurDAG->setFunctionLoweringInfo(FuncInfo);
 
   if (!FastIS) {
     LowerArguments(Fn);
@@ -2152,7 +2182,9 @@ static bool findNonImmUse(SDNode *Use, SDNode* Def, SDNode *ImmedUse,
   while (!WorkList.empty()) {
     Use = WorkList.back();
     WorkList.pop_back();
-    if (Use->getNodeId() < Def->getNodeId() && Use->getNodeId() != -1)
+    // NodeId topological order of TokenFactors is not guaranteed. Do not skip.
+    if (Use->getOpcode() != ISD::TokenFactor &&
+        Use->getNodeId() < Def->getNodeId() && Use->getNodeId() != -1)
       continue;
 
     // Don't revisit nodes if we already scanned it and didn't fail, we know we
@@ -2358,7 +2390,8 @@ void SelectionDAGISel::UpdateChains(
             std::replace(ChainNodesMatched.begin(), ChainNodesMatched.end(), N,
                          static_cast<SDNode *>(nullptr));
           });
-      CurDAG->ReplaceAllUsesOfValueWith(ChainVal, InputChain);
+      if (ChainNode->getOpcode() != ISD::TokenFactor)
+        CurDAG->ReplaceAllUsesOfValueWith(ChainVal, InputChain);
 
       // If the node became dead and we haven't already seen it, delete it.
       if (ChainNode != NodeToMatch && ChainNode->use_empty() &&
@@ -2986,9 +3019,7 @@ void SelectionDAGISel::SelectCodeCommon(SDNode *NodeToMatch,
   // update the chain results when the pattern is complete.
   SmallVector<SDNode*, 3> ChainNodesMatched;
 
-  DEBUG(dbgs() << "ISEL: Starting pattern match on root node: ";
-        NodeToMatch->dump(CurDAG);
-        dbgs() << '\n');
+  DEBUG(dbgs() << "ISEL: Starting pattern match\n");
 
   // Determine where to start the interpreter.  Normally we start at opcode #0,
   // but if the state machine starts with an OPC_SwitchOpcode, then we
@@ -3663,8 +3694,6 @@ void SelectionDAGISel::SelectCodeCommon(SDNode *NodeToMatch,
                << (IsMorphNodeTo ? "Morphed" : "Created")
                << " node: ";
         Res->dump(CurDAG);
-
-        dbgs() << '\n';
       );
 
       // If this was a MorphNodeTo then we're completely done!

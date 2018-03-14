@@ -50,6 +50,9 @@ void MachineOperand::setReg(unsigned Reg) {
   if (getReg() == Reg)
     return; // No change.
 
+  // Clear the IsRenamable bit to keep it conservatively correct.
+  IsRenamable = false;
+
   // Otherwise, we have to change the register.  If this operand is embedded
   // into a machine function, we need to update the old and new register's
   // use/def lists.
@@ -110,28 +113,25 @@ bool MachineOperand::isRenamable() const {
   assert(isReg() && "Wrong MachineOperand accessor");
   assert(TargetRegisterInfo::isPhysicalRegister(getReg()) &&
          "isRenamable should only be checked on physical registers");
-  return IsRenamable;
+  if (!IsRenamable)
+    return false;
+
+  const MachineInstr *MI = getParent();
+  if (!MI)
+    return true;
+
+  if (isDef())
+    return !MI->hasExtraDefRegAllocReq(MachineInstr::IgnoreBundle);
+
+  assert(isUse() && "Reg is not def or use");
+  return !MI->hasExtraSrcRegAllocReq(MachineInstr::IgnoreBundle);
 }
 
 void MachineOperand::setIsRenamable(bool Val) {
   assert(isReg() && "Wrong MachineOperand accessor");
   assert(TargetRegisterInfo::isPhysicalRegister(getReg()) &&
          "setIsRenamable should only be called on physical registers");
-  if (const MachineInstr *MI = getParent())
-    if ((isDef() && MI->hasExtraDefRegAllocReq()) ||
-        (isUse() && MI->hasExtraSrcRegAllocReq()))
-      assert(!Val && "isRenamable should be false for "
-                     "hasExtraDefRegAllocReq/hasExtraSrcRegAllocReq opcodes");
   IsRenamable = Val;
-}
-
-void MachineOperand::setIsRenamableIfNoExtraRegAllocReq() {
-  if (const MachineInstr *MI = getParent())
-    if ((isDef() && MI->hasExtraDefRegAllocReq()) ||
-        (isUse() && MI->hasExtraSrcRegAllocReq()))
-      return;
-
-  setIsRenamable(true);
 }
 
 // If this operand is currently a register operand, and if this is in a
@@ -440,7 +440,7 @@ static void printIRBlockReference(raw_ostream &OS, const BasicBlock &BB,
     OS << "<unknown>";
 }
 
-void MachineOperand::printSubregIdx(raw_ostream &OS, uint64_t Index,
+void MachineOperand::printSubRegIdx(raw_ostream &OS, uint64_t Index,
                                     const TargetRegisterInfo *TRI) {
   OS << "%subreg.";
   if (TRI)
@@ -641,13 +641,13 @@ void MachineOperand::print(raw_ostream &OS, const TargetRegisterInfo *TRI,
                            const TargetIntrinsicInfo *IntrinsicInfo) const {
   tryToGetTargetInfo(*this, TRI, IntrinsicInfo);
   ModuleSlotTracker DummyMST(nullptr);
-  print(OS, DummyMST, LLT{}, /*PrintDef=*/false,
+  print(OS, DummyMST, LLT{}, /*PrintDef=*/false, /*IsStandalone=*/true,
         /*ShouldPrintRegisterTies=*/true,
         /*TiedOperandIdx=*/0, TRI, IntrinsicInfo);
 }
 
 void MachineOperand::print(raw_ostream &OS, ModuleSlotTracker &MST,
-                           LLT TypeToPrint, bool PrintDef,
+                           LLT TypeToPrint, bool PrintDef, bool IsStandalone,
                            bool ShouldPrintRegisterTies,
                            unsigned TiedOperandIdx,
                            const TargetRegisterInfo *TRI,
@@ -687,7 +687,7 @@ void MachineOperand::print(raw_ostream &OS, ModuleSlotTracker &MST,
     if (TargetRegisterInfo::isVirtualRegister(Reg)) {
       if (const MachineFunction *MF = getMFIfAvailable(*this)) {
         const MachineRegisterInfo &MRI = MF->getRegInfo();
-        if (!PrintDef || MRI.def_empty(Reg)) {
+        if (IsStandalone || !PrintDef || MRI.def_empty(Reg)) {
           OS << ':';
           OS << printRegClassOrBank(Reg, MRI, TRI);
         }
@@ -752,7 +752,7 @@ void MachineOperand::print(raw_ostream &OS, ModuleSlotTracker &MST,
     break;
   case MachineOperand::MO_ExternalSymbol: {
     StringRef Name = getSymbolName();
-    OS << '$';
+    OS << '&';
     if (Name.empty()) {
       OS << "\"\"";
     } else {

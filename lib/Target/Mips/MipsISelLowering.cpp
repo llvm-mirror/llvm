@@ -286,10 +286,6 @@ const char *MipsTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case MipsISD::VCLE_U:            return "MipsISD::VCLE_U";
   case MipsISD::VCLT_S:            return "MipsISD::VCLT_S";
   case MipsISD::VCLT_U:            return "MipsISD::VCLT_U";
-  case MipsISD::VSMAX:             return "MipsISD::VSMAX";
-  case MipsISD::VSMIN:             return "MipsISD::VSMIN";
-  case MipsISD::VUMAX:             return "MipsISD::VUMAX";
-  case MipsISD::VUMIN:             return "MipsISD::VUMIN";
   case MipsISD::VEXTRACT_SEXT_ELT: return "MipsISD::VEXTRACT_SEXT_ELT";
   case MipsISD::VEXTRACT_ZEXT_ELT: return "MipsISD::VEXTRACT_ZEXT_ELT";
   case MipsISD::VNOR:              return "MipsISD::VNOR";
@@ -2073,7 +2069,7 @@ lowerGlobalTLSAddress(SDValue Op, SelectionDAG &DAG) const
   // Local Exec TLS Model.
 
   GlobalAddressSDNode *GA = cast<GlobalAddressSDNode>(Op);
-  if (DAG.getTarget().Options.EmulatedTLS)
+  if (DAG.getTarget().useEmulatedTLS())
     return LowerToTLSEmulatedModel(GA, DAG);
 
   SDLoc DL(GA);
@@ -3507,10 +3503,9 @@ MipsTargetLowering::CanLowerReturn(CallingConv::ID CallConv,
 
 bool
 MipsTargetLowering::shouldSignExtendTypeInLibCall(EVT Type, bool IsSigned) const {
-  if (Subtarget.hasMips3() && Subtarget.useSoftFloat()) {
-    if (Type == MVT::i32)
+  if ((ABI.IsN32() || ABI.IsN64()) && Type == MVT::i32)
       return true;
-  }
+
   return IsSigned;
 }
 
@@ -3869,7 +3864,7 @@ MipsTargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
       return std::make_pair(0U, nullptr);
     case 'l': // use the `lo` register to store values
               // that are no bigger than a word
-      if (VT == MVT::i32)
+      if (VT == MVT::i32 || VT == MVT::i16 || VT == MVT::i8)
         return std::make_pair((unsigned)Mips::LO0, &Mips::LO32RegClass);
       return std::make_pair((unsigned)Mips::LO0_64, &Mips::LO64RegClass);
     case 'x': // use the concatenated `hi` and `lo` registers
@@ -4068,7 +4063,12 @@ void MipsTargetLowering::copyByValRegs(
 
   // Create frame object.
   EVT PtrTy = getPointerTy(DAG.getDataLayout());
-  int FI = MFI.CreateFixedObject(FrameObjSize, FrameObjOffset, true);
+  // Make the fixed object stored to mutable so that the load instructions
+  // referencing it have their memory dependencies added.
+  // Set the frame object as isAliased which clears the underlying objects
+  // vector in ScheduleDAGInstrs::buildSchedGraph() resulting in addition of all
+  // stores as dependencies for loads referencing this fixed object.
+  int FI = MFI.CreateFixedObject(FrameObjSize, FrameObjOffset, false, true);
   SDValue FIN = DAG.getFrameIndex(FI, PtrTy);
   InVals.push_back(FIN);
 

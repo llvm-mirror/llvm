@@ -195,6 +195,7 @@ declare i8* @__memset_chk(i8*, i32, i64, i64)
 define void @memset_16_nonconst_bytes(i8* %x, i8 %c) {
 ; SSE-LABEL: memset_16_nonconst_bytes:
 ; SSE:       # %bb.0:
+; SSE-NEXT:    # kill: def $esi killed $esi def $rsi
 ; SSE-NEXT:    movzbl %sil, %eax
 ; SSE-NEXT:    movabsq $72340172838076673, %rcx # imm = 0x101010101010101
 ; SSE-NEXT:    imulq %rax, %rcx
@@ -225,13 +226,14 @@ define void @memset_16_nonconst_bytes(i8* %x, i8 %c) {
 ; AVX2-NEXT:    vpbroadcastb %xmm0, %xmm0
 ; AVX2-NEXT:    vmovdqu %xmm0, (%rdi)
 ; AVX2-NEXT:    retq
-  tail call void @llvm.memset.p0i8.i64(i8* %x, i8 %c, i64 16, i32 1, i1 false)
+  tail call void @llvm.memset.p0i8.i64(i8* %x, i8 %c, i64 16, i1 false)
   ret void
 }
 
 define void @memset_32_nonconst_bytes(i8* %x, i8 %c) {
 ; SSE-LABEL: memset_32_nonconst_bytes:
 ; SSE:       # %bb.0:
+; SSE-NEXT:    # kill: def $esi killed $esi def $rsi
 ; SSE-NEXT:    movzbl %sil, %eax
 ; SSE-NEXT:    movabsq $72340172838076673, %rcx # imm = 0x101010101010101
 ; SSE-NEXT:    imulq %rax, %rcx
@@ -268,13 +270,14 @@ define void @memset_32_nonconst_bytes(i8* %x, i8 %c) {
 ; AVX2-NEXT:    vmovdqu %ymm0, (%rdi)
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
-  tail call void @llvm.memset.p0i8.i64(i8* %x, i8 %c, i64 32, i32 1, i1 false)
+  tail call void @llvm.memset.p0i8.i64(i8* %x, i8 %c, i64 32, i1 false)
   ret void
 }
 
 define void @memset_64_nonconst_bytes(i8* %x, i8 %c) {
 ; SSE-LABEL: memset_64_nonconst_bytes:
 ; SSE:       # %bb.0:
+; SSE-NEXT:    # kill: def $esi killed $esi def $rsi
 ; SSE-NEXT:    movzbl %sil, %eax
 ; SSE-NEXT:    movabsq $72340172838076673, %rcx # imm = 0x101010101010101
 ; SSE-NEXT:    imulq %rax, %rcx
@@ -319,13 +322,14 @@ define void @memset_64_nonconst_bytes(i8* %x, i8 %c) {
 ; AVX2-NEXT:    vmovdqu %ymm0, (%rdi)
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
-  tail call void @llvm.memset.p0i8.i64(i8* %x, i8 %c, i64 64, i32 1, i1 false)
+  tail call void @llvm.memset.p0i8.i64(i8* %x, i8 %c, i64 64, i1 false)
   ret void
 }
 
 define void @memset_128_nonconst_bytes(i8* %x, i8 %c) {
 ; SSE-LABEL: memset_128_nonconst_bytes:
 ; SSE:       # %bb.0:
+; SSE-NEXT:    # kill: def $esi killed $esi def $rsi
 ; SSE-NEXT:    movzbl %sil, %eax
 ; SSE-NEXT:    movabsq $72340172838076673, %rcx # imm = 0x101010101010101
 ; SSE-NEXT:    imulq %rax, %rcx
@@ -386,7 +390,7 @@ define void @memset_128_nonconst_bytes(i8* %x, i8 %c) {
 ; AVX2-NEXT:    vmovdqu %ymm0, (%rdi)
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
-  tail call void @llvm.memset.p0i8.i64(i8* %x, i8 %c, i64 128, i32 1, i1 false)
+  tail call void @llvm.memset.p0i8.i64(i8* %x, i8 %c, i64 128, i1 false)
   ret void
 }
 
@@ -394,7 +398,7 @@ define void @memset_256_nonconst_bytes(i8* %x, i8 %c) {
 ; SSE-LABEL: memset_256_nonconst_bytes:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movl $256, %edx # imm = 0x100
-; SSE-NEXT:    jmp memset # TAILCALL
+; SSE-NEXT:    jmp memset@PLT # TAILCALL
 ;
 ; SSE2FAST-LABEL: memset_256_nonconst_bytes:
 ; SSE2FAST:       # %bb.0:
@@ -451,9 +455,9 @@ define void @memset_256_nonconst_bytes(i8* %x, i8 %c) {
 ; AVX2-NEXT:    vmovdqu %ymm0, (%rdi)
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
-  tail call void @llvm.memset.p0i8.i64(i8* %x, i8 %c, i64 256, i32 1, i1 false)
+  tail call void @llvm.memset.p0i8.i64(i8* %x, i8 %c, i64 256, i1 false)
   ret void
 }
 
-declare void @llvm.memset.p0i8.i64(i8* nocapture, i8, i64, i32, i1) #1
+declare void @llvm.memset.p0i8.i64(i8* nocapture, i8, i64, i1) #1
 

@@ -213,7 +213,8 @@ static inline uint64_t ror(uint64_t elt, unsigned size) {
 static inline bool processLogicalImmediate(uint64_t Imm, unsigned RegSize,
                                            uint64_t &Encoding) {
   if (Imm == 0ULL || Imm == ~0ULL ||
-      (RegSize != 64 && (Imm >> RegSize != 0 || Imm == ~0U)))
+      (RegSize != 64 &&
+        (Imm >> RegSize != 0 || Imm == (~0ULL >> (64 - RegSize)))))
     return false;
 
   // First, determine the element size.
@@ -751,6 +752,17 @@ static inline uint64_t decodeAdvSIMDModImmType12(uint8_t Imm) {
   if (Imm & 0x02) EncVal |= 0x0002000000000000ULL;
   if (Imm & 0x01) EncVal |= 0x0001000000000000ULL;
   return (EncVal << 32) | EncVal;
+}
+
+/// Returns true if Imm is the concatenation of a repeating pattern of type T.
+template <typename T>
+static inline bool isSVEMaskOfIdenticalElements(int64_t Imm) {
+  union {
+    int64_t Whole;
+    T Parts[sizeof(int64_t)/sizeof(T)];
+  } Vec { Imm };
+
+  return all_of(Vec.Parts, [Vec](T Elem) { return Elem == Vec.Parts[0]; });
 }
 
 inline static bool isAnyMOVZMovAlias(uint64_t Value, int RegWidth) {

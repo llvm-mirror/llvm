@@ -71,7 +71,7 @@ struct BCEAtom {
 };
 
 // If this value is a load from a constant offset w.r.t. a base address, and
-// there are no othe rusers of the load or address, returns the base address and
+// there are no other users of the load or address, returns the base address and
 // the offset.
 BCEAtom visitICmpLoadOperand(Value *const Val) {
   BCEAtom Result;
@@ -127,7 +127,7 @@ class BCECmpBlock {
     return Lhs_.Base() != nullptr && Rhs_.Base() != nullptr;
   }
 
-  // Assert the the block is consistent: If valid, it should also have
+  // Assert the block is consistent: If valid, it should also have
   // non-null members besides Lhs_ and Rhs_.
   void AssertConsistent() const {
     if (IsValid()) {
@@ -159,22 +159,16 @@ class BCECmpBlock {
 
 bool BCECmpBlock::doesOtherWork() const {
   AssertConsistent();
+  // All the instructions we care about in the BCE cmp block.
+  DenseSet<Instruction *> BlockInsts(
+      {Lhs_.GEP, Rhs_.GEP, Lhs_.LoadI, Rhs_.LoadI, CmpI, BranchI});
   // TODO(courbet): Can we allow some other things ? This is very conservative.
   // We might be able to get away with anything does does not have any side
   // effects outside of the basic block.
   // Note: The GEPs and/or loads are not necessarily in the same block.
   for (const Instruction &Inst : *BB) {
-    if (const auto *const GEP = dyn_cast<GetElementPtrInst>(&Inst)) {
-      if (!(Lhs_.GEP == GEP || Rhs_.GEP == GEP)) return true;
-    } else if (const auto *const L = dyn_cast<LoadInst>(&Inst)) {
-      if (!(Lhs_.LoadI == L || Rhs_.LoadI == L)) return true;
-    } else if (const auto *const C = dyn_cast<ICmpInst>(&Inst)) {
-      if (C != CmpI) return true;
-    } else if (const auto *const Br = dyn_cast<BranchInst>(&Inst)) {
-      if (Br != BranchI) return true;
-    } else {
+    if (!BlockInsts.count(&Inst))
       return true;
-    }
   }
   return false;
 }
@@ -275,9 +269,12 @@ class BCECmpChain {
 
 BCECmpChain::BCECmpChain(const std::vector<BasicBlock *> &Blocks, PHINode &Phi)
     : Phi_(Phi) {
+  assert(!Blocks.empty() && "a chain should have at least one block");
   // Now look inside blocks to check for BCE comparisons.
   std::vector<BCECmpBlock> Comparisons;
-  for (BasicBlock *Block : Blocks) {
+  for (size_t BlockIdx = 0; BlockIdx < Blocks.size(); ++BlockIdx) {
+    BasicBlock *const Block = Blocks[BlockIdx];
+    assert(Block && "invalid block");
     BCECmpBlock Comparison = visitCmpBlock(Phi.getIncomingValueForBlock(Block),
                                            Block, Phi.getParent());
     Comparison.BB = Block;
@@ -286,13 +283,15 @@ BCECmpChain::BCECmpChain(const std::vector<BasicBlock *> &Blocks, PHINode &Phi)
       return;
     }
     if (Comparison.doesOtherWork()) {
-      DEBUG(dbgs() << "block does extra work besides compare\n");
-      if (Comparisons.empty()) {  // First block.
-        // TODO(courbet): The first block can do other things, and we should
+      DEBUG(dbgs() << "block '" << Comparison.BB->getName()
+                   << "' does extra work besides compare\n");
+      if (Comparisons.empty()) {
+        // TODO(courbet): The initial block can do other things, and we should
         // split them apart in a separate block before the comparison chain.
         // Right now we just discard it and make the chain shorter.
         DEBUG(dbgs()
-              << "ignoring first block that does extra work besides compare\n");
+              << "ignoring initial block '" << Comparison.BB->getName()
+              << "' that does extra work besides compare\n");
         continue;
       }
       // TODO(courbet): Right now we abort the whole chain. We could be
@@ -320,13 +319,19 @@ BCECmpChain::BCECmpChain(const std::vector<BasicBlock *> &Blocks, PHINode &Phi)
       // We could still merge bb1 and bb2 though.
       return;
     }
-    DEBUG(dbgs() << "*Found cmp of " << Comparison.SizeBits()
-                 << " bits between " << Comparison.Lhs().Base() << " + "
-                 << Comparison.Lhs().Offset << " and "
-                 << Comparison.Rhs().Base() << " + " << Comparison.Rhs().Offset
-                 << "\n");
+    DEBUG(dbgs() << "Block '" << Comparison.BB->getName()<< "': Found cmp of "
+                 << Comparison.SizeBits() << " bits between "
+                 << Comparison.Lhs().Base() << " + " << Comparison.Lhs().Offset
+                 << " and " << Comparison.Rhs().Base() << " + "
+                 << Comparison.Rhs().Offset << "\n");
     DEBUG(dbgs() << "\n");
     Comparisons.push_back(Comparison);
+  }
+
+  // It is possible we have no suitable comparison to merge.
+  if (Comparisons.empty()) {
+    DEBUG(dbgs() << "chain with no BCE basic blocks, no merge\n");
+    return;
   }
   EntryBlock_ = Comparisons[0].BB;
   Comparisons_ = std::move(Comparisons);
@@ -507,6 +512,7 @@ std::vector<BasicBlock *> getOrderedBlocks(PHINode &Phi,
                                            int NumBlocks) {
   // Walk up from the last block to find other blocks.
   std::vector<BasicBlock *> Blocks(NumBlocks);
+  assert(LastBlock && "invalid last block");
   BasicBlock *CurBlock = LastBlock;
   for (int BlockIndex = NumBlocks - 1; BlockIndex > 0; --BlockIndex) {
     if (CurBlock->hasAddressTaken()) {
@@ -552,7 +558,7 @@ bool processPhi(PHINode &Phi, const TargetLibraryInfo *const TLI) {
   //  - The last basic block (bb4 here) must branch unconditionally to bb_phi.
   //    It's the only block that contributes a non-constant value to the Phi.
   //  - All other blocks (b1, b2, b3) must have exactly two successors, one of
-  //    them being the the phi block.
+  //    them being the phi block.
   //  - All intermediate blocks (bb2, bb3) must have only one predecessor.
   //  - Blocks cannot do other work besides the comparison, see doesOtherWork()
 
@@ -564,6 +570,19 @@ bool processPhi(PHINode &Phi, const TargetLibraryInfo *const TLI) {
     if (LastBlock) {
       // There are several non-constant values.
       DEBUG(dbgs() << "skip: several non-constant values\n");
+      return false;
+    }
+    if (!isa<ICmpInst>(Phi.getIncomingValue(I)) ||
+        cast<ICmpInst>(Phi.getIncomingValue(I))->getParent() !=
+            Phi.getIncomingBlock(I)) {
+      // Non-constant incoming value is not from a cmp instruction or not
+      // produced by the last block. We could end up processing the value
+      // producing block more than once.
+      //
+      // This is an uncommon case, so we bail.
+      DEBUG(
+          dbgs()
+          << "skip: non-constant value not from cmp or not from last block.\n");
       return false;
     }
     LastBlock = Phi.getIncomingBlock(I);

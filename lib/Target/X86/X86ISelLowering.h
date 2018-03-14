@@ -304,9 +304,6 @@ namespace llvm {
       // Vector FP round.
       VFPROUND, VFPROUND_RND, VFPROUNDS_RND,
 
-      // Convert a vector to mask, set bits base on MSB.
-      CVT2MASK,
-
       // 128-bit vector logical left / right shift
       VSHLDQ, VSRLDQ,
 
@@ -332,8 +329,6 @@ namespace llvm {
 
       // Vector integer comparisons.
       PCMPEQ, PCMPGT,
-      // Vector integer comparisons, the result is in a mask vector.
-      PCMPEQM, PCMPGTM,
 
       // v8i16 Horizontal minimum and position.
       PHMINPOS,
@@ -350,6 +345,9 @@ namespace llvm {
       // Arithmetic operations with FLAGS results.
       ADD, SUB, ADC, SBB, SMUL,
       INC, DEC, OR, XOR, AND,
+
+      // Bit field extract.
+      BEXTR,
 
       // LOW, HI, FLAGS = umul LHS, RHS.
       UMUL,
@@ -373,13 +371,12 @@ namespace llvm {
       // Vector packed fp sign bitwise comparisons.
       TESTP,
 
-      // Vector "test" in AVX-512, the result is in a mask vector.
-      TESTM,
-      TESTNM,
-
       // OR/AND test for masks.
       KORTEST,
       KTEST,
+
+      // ADD for masks.
+      KADD,
 
       // Several flavors of instructions with vector shuffle behaviors.
       // Saturated signed/unnsigned packing.
@@ -838,6 +835,9 @@ namespace llvm {
     EVT getSetCCResultType(const DataLayout &DL, LLVMContext &Context,
                            EVT VT) const override;
 
+    bool targetShrinkDemandedConstant(SDValue Op, const APInt &Demanded,
+                                      TargetLoweringOpt &TLO) const override;
+
     /// Determine which of the bits specified in Mask are known to be either
     /// zero or one and return them in the KnownZero/KnownOne bitsets.
     void computeKnownBitsForTargetNode(const SDValue Op,
@@ -987,6 +987,9 @@ namespace llvm {
     bool isVectorClearMaskLegal(const SmallVectorImpl<int> &Mask,
                                 EVT VT) const override;
 
+    /// Returns true if lowering to a jump table is allowed.
+    bool areJTsAllowed(const Function *Fn) const override;
+
     /// If true, then instruction selection should
     /// seek to shrink the FP constant of the specified type to a smaller type
     /// in order to save space and / or reduce runtime.
@@ -1080,6 +1083,14 @@ namespace llvm {
 
     /// \brief Customize the preferred legalization strategy for certain types.
     LegalizeTypeAction getPreferredVectorAction(EVT VT) const override;
+
+    MVT getRegisterTypeForCallingConv(MVT VT) const override;
+
+    MVT getRegisterTypeForCallingConv(LLVMContext &Context,
+                                      EVT VT) const override;
+
+    unsigned getNumRegistersForCallingConv(LLVMContext &Context,
+                                           EVT VT) const override;
 
     bool isIntDivCheap(EVT VT, AttributeList Attr) const override;
 
@@ -1299,6 +1310,9 @@ namespace llvm {
     MachineBasicBlock *EmitLoweredTLSCall(MachineInstr &MI,
                                           MachineBasicBlock *BB) const;
 
+    MachineBasicBlock *EmitLoweredRetpoline(MachineInstr &MI,
+                                            MachineBasicBlock *BB) const;
+
     MachineBasicBlock *emitEHSjLjSetJmp(MachineInstr &MI,
                                         MachineBasicBlock *MBB) const;
 
@@ -1445,6 +1459,7 @@ namespace llvm {
     const SDValue &getIndex()   const { return getOperand(4); }
     const SDValue &getMask()    const { return getOperand(2); }
     const SDValue &getValue()   const { return getOperand(1); }
+    const SDValue &getScale()   const { return getOperand(5); }
 
     static bool classof(const SDNode *N) {
       return N->getOpcode() == X86ISD::MGATHER ||

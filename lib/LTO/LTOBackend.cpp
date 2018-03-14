@@ -82,7 +82,7 @@ Error Config::addSaveTemps(std::string OutputFileName,
       // directly and exit.
       if (EC)
         reportOpenError(Path, EC.message());
-      WriteBitcodeToFile(&M, OS, /*ShouldPreserveUseListOrder=*/false);
+      WriteBitcodeToFile(M, OS, /*ShouldPreserveUseListOrder=*/false);
       return true;
     };
   };
@@ -103,6 +103,12 @@ Error Config::addSaveTemps(std::string OutputFileName,
     if (EC)
       reportOpenError(Path, EC.message());
     WriteIndexToFile(Index, OS);
+
+    Path = OutputFileName + "index.dot";
+    raw_fd_ostream OSDot(Path, EC, sys::fs::OpenFlags::F_None);
+    if (EC)
+      reportOpenError(Path, EC.message());
+    Index.exportToDot(OSDot);
     return true;
   };
 
@@ -303,7 +309,7 @@ void splitCodeGen(Config &C, TargetMachine *TM, AddStreamFn AddStream,
         // FIXME: Provide a more direct way to do this in LLVM.
         SmallString<0> BC;
         raw_svector_ostream BCOS(BC);
-        WriteBitcodeToFile(MPart.get(), BCOS);
+        WriteBitcodeToFile(*MPart, BCOS);
 
         // Enqueue the task
         CodegenThreadPool.async(
@@ -370,7 +376,8 @@ Error lto::backend(Config &C, AddStreamFn AddStream,
 
   // Setup optimization remarks.
   auto DiagFileOrErr = lto::setupOptimizationRemarks(
-      Mod->getContext(), C.RemarksFilename, C.RemarksWithHotness);
+      Mod->getContext(), C.RemarksFilename, C.RemarksWithHotness,
+      C.RemarksHotnessThreshold);
   if (!DiagFileOrErr)
     return DiagFileOrErr.takeError();
   auto DiagnosticOutputFile = std::move(*DiagFileOrErr);
@@ -393,6 +400,27 @@ Error lto::backend(Config &C, AddStreamFn AddStream,
   return Error::success();
 }
 
+static void dropDeadSymbols(Module &Mod, const GVSummaryMapTy &DefinedGlobals,
+                            const ModuleSummaryIndex &Index) {
+  std::vector<GlobalValue*> DeadGVs;
+  for (auto &GV : Mod.global_values())
+    if (GlobalValueSummary *GVS = DefinedGlobals.lookup(GV.getGUID()))
+      if (!Index.isGlobalValueLive(GVS)) {
+        DeadGVs.push_back(&GV);
+        convertToDeclaration(GV);
+      }
+
+  // Now that all dead bodies have been dropped, delete the actual objects
+  // themselves when possible.
+  for (GlobalValue *GV : DeadGVs) {
+    GV->removeDeadConstantUsers();
+    // Might reference something defined in native object (i.e. dropped a
+    // non-prevailing IR def, but we need to keep the declaration).
+    if (GV->use_empty())
+      GV->eraseFromParent();
+  }
+}
+
 Error lto::thinBackend(Config &Conf, unsigned Task, AddStreamFn AddStream,
                        Module &Mod, const ModuleSummaryIndex &CombinedIndex,
                        const FunctionImporter::ImportMapTy &ImportList,
@@ -413,6 +441,8 @@ Error lto::thinBackend(Config &Conf, unsigned Task, AddStreamFn AddStream,
     return Error::success();
 
   renameModuleForThinLTO(Mod, CombinedIndex);
+
+  dropDeadSymbols(Mod, DefinedGlobals, CombinedIndex);
 
   thinLTOResolveWeakForLinkerModule(Mod, DefinedGlobals);
 

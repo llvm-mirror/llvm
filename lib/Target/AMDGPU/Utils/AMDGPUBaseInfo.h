@@ -159,6 +159,11 @@ int16_t getNamedOperandIdx(uint16_t Opcode, uint16_t NamedIdx);
 LLVM_READONLY
 int getMaskedMIMGOp(const MCInstrInfo &MII,
                     unsigned Opc, unsigned NewChannels);
+
+LLVM_READONLY
+int getMaskedMIMGAtomicOp(const MCInstrInfo &MII,
+                          unsigned Opc, unsigned NewChannels);
+
 LLVM_READONLY
 int getMCOpcode(uint16_t Opcode, unsigned Gen);
 
@@ -278,6 +283,10 @@ inline bool isKernel(CallingConv::ID CC) {
   }
 }
 
+bool hasXNACK(const MCSubtargetInfo &STI);
+bool hasMIMG_R128(const MCSubtargetInfo &STI);
+bool hasPackedD16(const MCSubtargetInfo &STI);
+
 bool isSI(const MCSubtargetInfo &STI);
 bool isCI(const MCSubtargetInfo &STI);
 bool isVI(const MCSubtargetInfo &STI);
@@ -363,7 +372,6 @@ LLVM_READNONE
 bool isInlinableLiteralV216(int32_t Literal, bool HasInv2Pi);
 
 bool isArgPassedInSGPR(const Argument *Arg);
-bool isUniformMMO(const MachineMemOperand *MMO);
 
 /// \returns The encoding that will be used for \p ByteOffset in the SMRD
 /// offset field.
@@ -373,6 +381,9 @@ int64_t getSMRDEncodedOffset(const MCSubtargetInfo &ST, int64_t ByteOffset);
 /// offset field.  \p ByteOffset should be the offset in bytes and
 /// not the encoded offset.
 bool isLegalSMRDImmOffset(const MCSubtargetInfo &ST, int64_t ByteOffset);
+
+/// \returns true if the intrinsic is divergent
+bool isIntrinsicSourceOfDivergence(unsigned IntrID);
 
 } // end namespace AMDGPU
 } // end namespace llvm

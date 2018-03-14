@@ -332,6 +332,42 @@ unsigned HexagonInstrInfo::isStoreToStackSlot(const MachineInstr &MI,
   return 0;
 }
 
+/// This function checks if the instruction or bundle of instructions
+/// has load from stack slot and returns frameindex and machine memory
+/// operand of that instruction if true.
+bool HexagonInstrInfo::hasLoadFromStackSlot(const MachineInstr &MI,
+                                           const MachineMemOperand *&MMO,
+                                           int &FrameIndex) const {
+  if (MI.isBundle()) {
+    const MachineBasicBlock *MBB = MI.getParent();
+    MachineBasicBlock::const_instr_iterator MII = MI.getIterator();
+    for (++MII; MII != MBB->instr_end() && MII->isInsideBundle(); ++MII)
+      if (TargetInstrInfo::hasLoadFromStackSlot(*MII, MMO, FrameIndex))
+        return true;
+    return false;
+  }
+
+  return TargetInstrInfo::hasLoadFromStackSlot(MI, MMO, FrameIndex);
+}
+
+/// This function checks if the instruction or bundle of instructions
+/// has store to stack slot and returns frameindex and machine memory
+/// operand of that instruction if true.
+bool HexagonInstrInfo::hasStoreToStackSlot(const MachineInstr &MI,
+                                           const MachineMemOperand *&MMO,
+                                           int &FrameIndex) const {
+  if (MI.isBundle()) {
+    const MachineBasicBlock *MBB = MI.getParent();
+    MachineBasicBlock::const_instr_iterator MII = MI.getIterator();
+    for (++MII; MII != MBB->instr_end() && MII->isInsideBundle(); ++MII)
+      if (TargetInstrInfo::hasStoreToStackSlot(*MII, MMO, FrameIndex))
+        return true;
+    return false;
+  }
+
+  return TargetInstrInfo::hasStoreToStackSlot(MI, MMO, FrameIndex);
+}
+
 /// This function can analyze one/two way branching only and should (mostly) be
 /// called by target independent side.
 /// First entry is always the opcode of the branching instruction, except when
@@ -1085,6 +1121,20 @@ bool HexagonInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
       BuildMI(MBB, MI, DL, get(Hexagon::C2_andn), Reg)
         .addReg(Reg, RegState::Undef)
         .addReg(Reg, RegState::Undef);
+      MBB.erase(MI);
+      return true;
+    }
+    case Hexagon::PS_qtrue: {
+      BuildMI(MBB, MI, DL, get(Hexagon::V6_veqw), MI.getOperand(0).getReg())
+        .addReg(Hexagon::V0, RegState::Undef)
+        .addReg(Hexagon::V0, RegState::Undef);
+      MBB.erase(MI);
+      return true;
+    }
+    case Hexagon::PS_qfalse: {
+      BuildMI(MBB, MI, DL, get(Hexagon::V6_vgtw), MI.getOperand(0).getReg())
+        .addReg(Hexagon::V0, RegState::Undef)
+        .addReg(Hexagon::V0, RegState::Undef);
       MBB.erase(MI);
       return true;
     }

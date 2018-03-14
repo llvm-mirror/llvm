@@ -222,8 +222,11 @@ struct AMDGPUAS {
     MAX_COMMON_ADDRESS = 5,
 
     GLOBAL_ADDRESS = 1,   ///< Address space for global memory (RAT0, VTX0).
-    CONSTANT_ADDRESS = 2, ///< Address space for constant memory (VTX2)
+    CONSTANT_ADDRESS = 4, ///< Address space for constant memory (VTX2)
     LOCAL_ADDRESS = 3,    ///< Address space for local memory.
+
+    CONSTANT_ADDRESS_32BIT = 6, ///< Address space for 32-bit constant memory
+
     /// Address space for direct addressible parameter memory (CONST0)
     PARAM_D_ADDRESS = 6,
     /// Address space for indirect addressible parameter memory (VTX1)

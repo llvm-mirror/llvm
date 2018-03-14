@@ -442,7 +442,7 @@ void Formula::initialMatch(const SCEV *S, Loop *L, ScalarEvolution &SE) {
   canonicalize(*L);
 }
 
-/// \brief Check whether or not this formula statisfies the canonical
+/// \brief Check whether or not this formula satisfies the canonical
 /// representation.
 /// \see Formula::BaseRegs.
 bool Formula::isCanonical(const Loop &L) const {
@@ -937,7 +937,7 @@ static bool isHighCostExpansion(const SCEV *S,
   return true;
 }
 
-/// If any of the instructions is the specified set are trivially dead, delete
+/// If any of the instructions in the specified set are trivially dead, delete
 /// them and see if this makes any of their operands subsequently dead.
 static bool
 DeleteTriviallyDeadInstructions(SmallVectorImpl<WeakTrackingVH> &DeadInsts) {
@@ -1343,14 +1343,15 @@ void Cost::RateFormula(const TargetTransformInfo &TTI,
 
   // If ICmpZero formula ends with not 0, it could not be replaced by
   // just add or sub. We'll need to compare final result of AddRec.
-  // That means we'll need an additional instruction.
+  // That means we'll need an additional instruction. But if the target can
+  // macro-fuse a compare with a branch, don't count this extra instruction.
   // For -10 + {0, +, 1}:
   // i = i + 1;
   // cmp i, 10
   //
   // For {-10, +, 1}:
   // i = i + 1;
-  if (LU.Kind == LSRUse::ICmpZero && !F.hasZeroEnd())
+  if (LU.Kind == LSRUse::ICmpZero && !F.hasZeroEnd() && !TTI.canMacroFuseCmp())
     C.Insns++;
   // Each new AddRec adds 1 instruction to calculation.
   C.Insns += (C.AddRecCost - PrevAddRecCost);
@@ -4993,7 +4994,7 @@ Value *LSRInstance::Expand(const LSRUse &LU, const LSRFixup &LF,
       // Unless the addressing mode will not be folded.
       if (!Ops.empty() && LU.Kind == LSRUse::Address &&
           isAMCompletelyFolded(TTI, LU, F)) {
-        Value *FullV = Rewriter.expandCodeFor(SE.getAddExpr(Ops), Ty);
+        Value *FullV = Rewriter.expandCodeFor(SE.getAddExpr(Ops), nullptr);
         Ops.clear();
         Ops.push_back(SE.getUnknown(FullV));
       }

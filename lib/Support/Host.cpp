@@ -1206,6 +1206,7 @@ bool sys::getHostCPUFeatures(StringMap<bool> &Features) {
 
   bool HasExtLeaf1 = MaxExtLevel >= 0x80000001 &&
                      !getX86CpuIDAndInfo(0x80000001, &EAX, &EBX, &ECX, &EDX);
+  Features["sahf"]   = HasExtLeaf1 && ((ECX >>  0) & 1);
   Features["lzcnt"]  = HasExtLeaf1 && ((ECX >>  5) & 1);
   Features["sse4a"]  = HasExtLeaf1 && ((ECX >>  6) & 1);
   Features["prfchw"] = HasExtLeaf1 && ((ECX >>  8) & 1);
@@ -1255,7 +1256,9 @@ bool sys::getHostCPUFeatures(StringMap<bool> &Features) {
   Features["avx512vnni"]      = HasLeaf7 && ((ECX >> 11) & 1) && HasAVX512Save;
   Features["avx512bitalg"]    = HasLeaf7 && ((ECX >> 12) & 1) && HasAVX512Save;
   Features["avx512vpopcntdq"] = HasLeaf7 && ((ECX >> 14) & 1) && HasAVX512Save;
-  Features["ibt"]             = HasLeaf7 && ((EDX >> 20) & 1);
+  Features["rdpid"]           = HasLeaf7 && ((ECX >> 22) & 1);
+
+  Features["ibt"] = HasLeaf7 && ((EDX >> 20) & 1);
 
   bool HasLeafD = MaxLevel >= 0xd &&
                   !getX86CpuIDAndInfoEx(0xd, 0x1, &EAX, &EBX, &ECX, &EDX);

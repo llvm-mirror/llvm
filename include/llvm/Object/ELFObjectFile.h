@@ -67,6 +67,9 @@ public:
 
   virtual elf_symbol_iterator_range getDynamicSymbolIterators() const = 0;
 
+  /// Returns platform-specific object flags, if any.
+  virtual unsigned getPlatformFlags() const = 0;
+
   elf_symbol_iterator_range symbols() const;
 
   static bool classof(const Binary *v) { return v->isELF(); }
@@ -76,6 +79,8 @@ public:
   SubtargetFeatures getMIPSFeatures() const;
 
   SubtargetFeatures getARMFeatures() const;
+
+  SubtargetFeatures getRISCVFeatures() const;
 
   void setARMSubArch(Triple &TheTriple) const override;
 };
@@ -200,14 +205,14 @@ template <class ELFT> class ELFObjectFile : public ELFObjectFileBase {
 public:
   LLVM_ELF_IMPORT_TYPES_ELFT(ELFT)
 
-  using uintX_t = typename ELFFile<ELFT>::uintX_t;
+  using uintX_t = typename ELFT::uint;
 
-  using Elf_Sym = typename ELFFile<ELFT>::Elf_Sym;
-  using Elf_Shdr = typename ELFFile<ELFT>::Elf_Shdr;
-  using Elf_Ehdr = typename ELFFile<ELFT>::Elf_Ehdr;
-  using Elf_Rel = typename ELFFile<ELFT>::Elf_Rel;
-  using Elf_Rela = typename ELFFile<ELFT>::Elf_Rela;
-  using Elf_Dyn = typename ELFFile<ELFT>::Elf_Dyn;
+  using Elf_Sym = typename ELFT::Sym;
+  using Elf_Shdr = typename ELFT::Shdr;
+  using Elf_Ehdr = typename ELFT::Ehdr;
+  using Elf_Rel = typename ELFT::Rel;
+  using Elf_Rela = typename ELFT::Rela;
+  using Elf_Dyn = typename ELFT::Dyn;
 
 private:
   ELFObjectFile(MemoryBufferRef Object, ELFFile<ELFT> EF,
@@ -364,10 +369,7 @@ public:
   StringRef getFileFormatName() const override;
   Triple::ArchType getArch() const override;
 
-  std::error_code getPlatformFlags(unsigned &Result) const override {
-    Result = EF.getHeader()->e_flags;
-    return std::error_code();
-  }
+  unsigned getPlatformFlags() const override { return EF.getHeader()->e_flags; }
 
   std::error_code getBuildAttributes(ARMAttributeParser &Attributes) const override {
     auto SectionsOrErr = EF.sections();
@@ -404,10 +406,10 @@ public:
   bool isRelocatableObject() const override;
 };
 
-using ELF32LEObjectFile = ELFObjectFile<ELFType<support::little, false>>;
-using ELF64LEObjectFile = ELFObjectFile<ELFType<support::little, true>>;
-using ELF32BEObjectFile = ELFObjectFile<ELFType<support::big, false>>;
-using ELF64BEObjectFile = ELFObjectFile<ELFType<support::big, true>>;
+using ELF32LEObjectFile = ELFObjectFile<ELF32LE>;
+using ELF64LEObjectFile = ELFObjectFile<ELF64LE>;
+using ELF32BEObjectFile = ELFObjectFile<ELF32BE>;
+using ELF64BEObjectFile = ELFObjectFile<ELF64BE>;
 
 template <class ELFT>
 void ELFObjectFile<ELFT>::moveSymbolNext(DataRefImpl &Sym) const {
@@ -1085,15 +1087,15 @@ template <class ELFT> Triple::ArchType ELFObjectFile<ELFT>::getArch() const {
     if (!IsLittleEndian)
       return Triple::UnknownArch;
 
-    unsigned EFlags = EF.getHeader()->e_flags;
-    switch (EFlags & ELF::EF_AMDGPU_ARCH) {
-    case ELF::EF_AMDGPU_ARCH_R600:
+    unsigned MACH = EF.getHeader()->e_flags & ELF::EF_AMDGPU_MACH;
+    if (MACH >= ELF::EF_AMDGPU_MACH_R600_FIRST &&
+        MACH <= ELF::EF_AMDGPU_MACH_R600_LAST)
       return Triple::r600;
-    case ELF::EF_AMDGPU_ARCH_GCN:
+    if (MACH >= ELF::EF_AMDGPU_MACH_AMDGCN_FIRST &&
+        MACH <= ELF::EF_AMDGPU_MACH_AMDGCN_LAST)
       return Triple::amdgcn;
-    default:
-      return Triple::UnknownArch;
-    }
+
+    return Triple::UnknownArch;
   }
 
   case ELF::EM_BPF:

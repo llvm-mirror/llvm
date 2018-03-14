@@ -79,6 +79,7 @@ protected:
   MCSection *DwarfAbbrevSection;
   MCSection *DwarfInfoSection;
   MCSection *DwarfLineSection;
+  MCSection *DwarfLineStrSection;
   MCSection *DwarfFrameSection;
   MCSection *DwarfPubTypesSection;
   const MCSection *DwarfDebugInlineSection;
@@ -196,6 +197,7 @@ protected:
   MCSection *PDataSection;
   MCSection *XDataSection;
   MCSection *SXDataSection;
+  MCSection *GFIDsSection;
 
 public:
   void InitMCObjectFileInfo(const Triple &TT, bool PIC, MCContext &ctx,
@@ -233,6 +235,7 @@ public:
   MCSection *getDwarfAbbrevSection() const { return DwarfAbbrevSection; }
   MCSection *getDwarfInfoSection() const { return DwarfInfoSection; }
   MCSection *getDwarfLineSection() const { return DwarfLineSection; }
+  MCSection *getDwarfLineStrSection() const { return DwarfLineStrSection; }
   MCSection *getDwarfFrameSection() const { return DwarfFrameSection; }
   MCSection *getDwarfPubNamesSection() const { return DwarfPubNamesSection; }
   MCSection *getDwarfPubTypesSection() const { return DwarfPubTypesSection; }
@@ -349,6 +352,7 @@ public:
   MCSection *getPDataSection() const { return PDataSection; }
   MCSection *getXDataSection() const { return XDataSection; }
   MCSection *getSXDataSection() const { return SXDataSection; }
+  MCSection *getGFIDsSection() const { return GFIDsSection; }
 
   MCSection *getEHFrameSection() {
     return EHFrameSection;

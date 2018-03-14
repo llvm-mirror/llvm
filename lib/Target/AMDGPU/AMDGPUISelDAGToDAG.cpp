@@ -27,6 +27,7 @@
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Analysis/DivergenceAnalysis.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/CodeGen/FunctionLoweringInfo.h"
 #include "llvm/CodeGen/ISDOpcodes.h"
@@ -83,6 +84,7 @@ public:
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequired<AMDGPUArgumentUsageInfo>();
+    AU.addRequired<DivergenceAnalysis>();
     SelectionDAGISel::getAnalysisUsage(AU);
   }
 
@@ -162,6 +164,7 @@ private:
 
   bool SelectSMRDOffset(SDValue ByteOffsetNode, SDValue &Offset,
                         bool &Imm) const;
+  SDValue Expand32BitAddress(SDValue Addr) const;
   bool SelectSMRD(SDValue Addr, SDValue &SBase, SDValue &Offset,
                   bool &Imm) const;
   bool SelectSMRDImm(SDValue Addr, SDValue &SBase, SDValue &Offset) const;
@@ -450,7 +453,10 @@ void AMDGPUDAGToDAGISel::Select(SDNode *N) {
   }
 
   if (isa<AtomicSDNode>(N) ||
-      (Opc == AMDGPUISD::ATOMIC_INC || Opc == AMDGPUISD::ATOMIC_DEC))
+      (Opc == AMDGPUISD::ATOMIC_INC || Opc == AMDGPUISD::ATOMIC_DEC ||
+       Opc == AMDGPUISD::ATOMIC_LOAD_FADD ||
+       Opc == AMDGPUISD::ATOMIC_LOAD_FMIN ||
+       Opc == AMDGPUISD::ATOMIC_LOAD_FMAX))
     N = glueCopyToM0(N);
 
   switch (Opc) {
@@ -633,7 +639,8 @@ bool AMDGPUDAGToDAGISel::isConstantLoad(const MemSDNode *N, int CbId) const {
   if (!N->readMem())
     return false;
   if (CbId == -1)
-    return N->getAddressSpace() == AMDGPUASI.CONSTANT_ADDRESS;
+    return N->getAddressSpace() == AMDGPUASI.CONSTANT_ADDRESS ||
+           N->getAddressSpace() == AMDGPUASI.CONSTANT_ADDRESS_32BIT;
 
   return N->getAddressSpace() == AMDGPUASI.CONSTANT_BUFFER_0 + CbId;
 }
@@ -1435,19 +1442,45 @@ bool AMDGPUDAGToDAGISel::SelectSMRDOffset(SDValue ByteOffsetNode,
   return true;
 }
 
+SDValue AMDGPUDAGToDAGISel::Expand32BitAddress(SDValue Addr) const {
+  if (Addr.getValueType() != MVT::i32)
+    return Addr;
+
+  // Zero-extend a 32-bit address.
+  SDLoc SL(Addr);
+
+  const MachineFunction &MF = CurDAG->getMachineFunction();
+  const SIMachineFunctionInfo *Info = MF.getInfo<SIMachineFunctionInfo>();
+  unsigned AddrHiVal = Info->get32BitAddressHighBits();
+  SDValue AddrHi = CurDAG->getTargetConstant(AddrHiVal, SL, MVT::i32);
+
+  const SDValue Ops[] = {
+    CurDAG->getTargetConstant(AMDGPU::SReg_64_XEXECRegClassID, SL, MVT::i32),
+    Addr,
+    CurDAG->getTargetConstant(AMDGPU::sub0, SL, MVT::i32),
+    SDValue(CurDAG->getMachineNode(AMDGPU::S_MOV_B32, SL, MVT::i32, AddrHi),
+            0),
+    CurDAG->getTargetConstant(AMDGPU::sub1, SL, MVT::i32),
+  };
+
+  return SDValue(CurDAG->getMachineNode(AMDGPU::REG_SEQUENCE, SL, MVT::i64,
+                                        Ops), 0);
+}
+
 bool AMDGPUDAGToDAGISel::SelectSMRD(SDValue Addr, SDValue &SBase,
                                      SDValue &Offset, bool &Imm) const {
   SDLoc SL(Addr);
+
   if (CurDAG->isBaseWithConstantOffset(Addr)) {
     SDValue N0 = Addr.getOperand(0);
     SDValue N1 = Addr.getOperand(1);
 
     if (SelectSMRDOffset(N1, Offset, Imm)) {
-      SBase = N0;
+      SBase = Expand32BitAddress(N0);
       return true;
     }
   }
-  SBase = Addr;
+  SBase = Expand32BitAddress(Addr);
   Offset = CurDAG->getTargetConstant(0, SL, MVT::i32);
   Imm = true;
   return true;
@@ -1673,6 +1706,26 @@ void AMDGPUDAGToDAGISel::SelectBRCOND(SDNode *N) {
   unsigned BrOp = UseSCCBr ? AMDGPU::S_CBRANCH_SCC1 : AMDGPU::S_CBRANCH_VCCNZ;
   unsigned CondReg = UseSCCBr ? AMDGPU::SCC : AMDGPU::VCC;
   SDLoc SL(N);
+
+  if (!UseSCCBr) {
+    // This is the case that we are selecting to S_CBRANCH_VCCNZ.  We have not
+    // analyzed what generates the vcc value, so we do not know whether vcc
+    // bits for disabled lanes are 0.  Thus we need to mask out bits for
+    // disabled lanes.
+    //
+    // For the case that we select S_CBRANCH_SCC1 and it gets
+    // changed to S_CBRANCH_VCCNZ in SIFixSGPRCopies, SIFixSGPRCopies calls
+    // SIInstrInfo::moveToVALU which inserts the S_AND).
+    //
+    // We could add an analysis of what generates the vcc value here and omit
+    // the S_AND when is unnecessary. But it would be better to add a separate
+    // pass after SIFixSGPRCopies to do the unnecessary S_AND removal, so it
+    // catches both cases.
+    Cond = SDValue(CurDAG->getMachineNode(AMDGPU::S_AND_B64, SL, MVT::i1,
+                               CurDAG->getRegister(AMDGPU::EXEC, MVT::i1),
+                               Cond),
+                   0);
+  }
 
   SDValue VCC = CurDAG->getCopyToReg(N->getOperand(0), SL, CondReg, Cond);
   CurDAG->SelectNodeTo(N, BrOp, MVT::Other,

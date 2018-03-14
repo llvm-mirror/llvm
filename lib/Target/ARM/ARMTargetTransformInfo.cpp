@@ -126,6 +126,10 @@ int ARMTTIImpl::getIntImmCost(unsigned Opcode, unsigned Idx, const APInt &Imm,
       return 0;
   }
 
+  // xor a, -1 can always be folded to MVN
+  if (Opcode == Instruction::Xor && Imm.isAllOnesValue())
+    return 0;
+
   return getIntImmCost(Imm, Ty);
 }
 
@@ -351,7 +355,7 @@ int ARMTTIImpl::getVectorInstrCost(unsigned Opcode, Type *ValTy,
 int ARMTTIImpl::getCmpSelInstrCost(unsigned Opcode, Type *ValTy, Type *CondTy,
                                    const Instruction *I) {
   int ISD = TLI->InstructionOpcodeToISD(Opcode);
-  // On NEON a a vector select gets lowered to vbsl.
+  // On NEON a vector select gets lowered to vbsl.
   if (ST->hasNEON() && ValTy->isVectorTy() && ISD == ISD::SELECT) {
     // Lowering of some vector selects is currently far from perfect.
     static const TypeConversionCostTblEntry NEONVectorSelectTbl[] = {

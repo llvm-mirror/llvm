@@ -161,7 +161,6 @@ public:
   bool EmitRelocDirective(const MCExpr &Offset, StringRef Name,
                           const MCExpr *Expr, SMLoc Loc) override;
   using MCStreamer::emitFill;
-  void emitFill(uint64_t NumBytes, uint8_t FillValue) override;
   void emitFill(const MCExpr &NumBytes, uint64_t FillValue,
                 SMLoc Loc = SMLoc()) override;
   void emitFill(const MCExpr &NumValues, int64_t Size, int64_t Expr,
@@ -179,6 +178,9 @@ public:
   /// \pre Offset of \c Hi is greater than the offset \c Lo.
   void emitAbsoluteSymbolDiff(const MCSymbol *Hi, const MCSymbol *Lo,
                               unsigned Size) override;
+
+  void emitAbsoluteSymbolDiffAsULEB128(const MCSymbol *Hi,
+                                       const MCSymbol *Lo) override;
 
   bool mayHaveInstructions(MCSection &Sec) const override;
 };

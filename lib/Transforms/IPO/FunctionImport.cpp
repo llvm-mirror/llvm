@@ -18,8 +18,8 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/StringMap.h"
-#include "llvm/ADT/StringSet.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/StringSet.h"
 #include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/IR/AutoUpgrade.h"
 #include "llvm/IR/Constants.h"
@@ -163,6 +163,9 @@ selectCallee(const ModuleSummaryIndex &Index,
       CalleeSummaryList,
       [&](const std::unique_ptr<GlobalValueSummary> &SummaryPtr) {
         auto *GVSummary = SummaryPtr.get();
+        if (!Index.isGlobalValueLive(GVSummary))
+          return false;
+
         // For SamplePGO, in computeImportForFunction the OriginalId
         // may have been used to locate the callee summary list (See
         // comment there).
@@ -231,7 +234,7 @@ updateValueInfoForIndirectCalls(const ModuleSummaryIndex &Index, ValueInfo VI) {
   // it, rather than needing to perform this mapping on each walk.
   auto GUID = Index.getGUIDFromOriginalID(VI.getGUID());
   if (GUID == 0)
-    return nullptr;
+    return ValueInfo();
   return Index.getValueInfo(GUID);
 }
 
@@ -269,7 +272,7 @@ static void computeImportForFunction(
     };
 
     const auto NewThreshold =
-        Threshold * GetBonusMultiplier(Edge.second.Hotness);
+        Threshold * GetBonusMultiplier(Edge.second.getHotness());
 
     auto *CalleeSummary = selectCallee(Index, VI.getSummaryList(), NewThreshold,
                                        Summary.modulePath());
@@ -293,7 +296,8 @@ static void computeImportForFunction(
       return Threshold * ImportInstrFactor;
     };
 
-    bool IsHotCallsite = Edge.second.Hotness == CalleeInfo::HotnessType::Hot;
+    bool IsHotCallsite =
+        Edge.second.getHotness() == CalleeInfo::HotnessType::Hot;
     const auto AdjThreshold = GetAdjustedThreshold(Threshold, IsHotCallsite);
 
     auto ExportModulePath = ResolvedCalleeSummary->modulePath();
@@ -494,7 +498,8 @@ void llvm::ComputeCrossModuleImportForModuleFromIndex(
 
 void llvm::computeDeadSymbols(
     ModuleSummaryIndex &Index,
-    const DenseSet<GlobalValue::GUID> &GUIDPreservedSymbols) {
+    const DenseSet<GlobalValue::GUID> &GUIDPreservedSymbols,
+    function_ref<PrevailingType(GlobalValue::GUID)> isPrevailing) {
   assert(!Index.withGlobalValueDeadStripping());
   if (!ComputeDead)
     return;
@@ -517,13 +522,12 @@ void llvm::computeDeadSymbols(
     for (auto &S : Entry.second.SummaryList)
       if (S->isLive()) {
         DEBUG(dbgs() << "Live root: " << Entry.first << "\n");
-        Worklist.push_back(ValueInfo(&Entry));
+        Worklist.push_back(ValueInfo(/*IsAnalysis=*/false, &Entry));
         ++LiveSymbols;
         break;
       }
 
   // Make value live and add it to the worklist if it was not live before.
-  // FIXME: we should only make the prevailing copy live here
   auto visit = [&](ValueInfo VI) {
     // FIXME: If we knew which edges were created for indirect call profiles,
     // we could skip them here. Any that are live should be reached via
@@ -539,6 +543,11 @@ void llvm::computeDeadSymbols(
     for (auto &S : VI.getSummaryList())
       if (S->isLive())
         return;
+
+    // We do not keep live symbols that are known to be non-prevailing.
+    if (isPrevailing(VI.getGUID()) == PrevailingType::No)
+      return;
+
     for (auto &S : VI.getSummaryList())
       S->setLive(true);
     ++LiveSymbols;
@@ -549,6 +558,8 @@ void llvm::computeDeadSymbols(
     auto VI = Worklist.pop_back_val();
     for (auto &Summary : VI.getSummaryList()) {
       GlobalValueSummary *Base = Summary->getBaseObject();
+      // Set base value live in case it is an alias.
+      Base->setLive(true);
       for (auto Ref : Base->refs())
         visit(Ref);
       if (auto *FS = dyn_cast<FunctionSummary>(Base))
@@ -602,26 +613,40 @@ llvm::EmitImportsFiles(StringRef ModulePath, StringRef OutputFilename,
   return std::error_code();
 }
 
+bool llvm::convertToDeclaration(GlobalValue &GV) {
+  DEBUG(dbgs() << "Converting to a declaration: `" << GV.getName() << "\n");
+  if (Function *F = dyn_cast<Function>(&GV)) {
+    F->deleteBody();
+    F->clearMetadata();
+    F->setComdat(nullptr);
+  } else if (GlobalVariable *V = dyn_cast<GlobalVariable>(&GV)) {
+    V->setInitializer(nullptr);
+    V->setLinkage(GlobalValue::ExternalLinkage);
+    V->clearMetadata();
+    V->setComdat(nullptr);
+  } else {
+    GlobalValue *NewGV;
+    if (GV.getValueType()->isFunctionTy())
+      NewGV =
+          Function::Create(cast<FunctionType>(GV.getValueType()),
+                           GlobalValue::ExternalLinkage, "", GV.getParent());
+    else
+      NewGV =
+          new GlobalVariable(*GV.getParent(), GV.getValueType(),
+                             /*isConstant*/ false, GlobalValue::ExternalLinkage,
+                             /*init*/ nullptr, "",
+                             /*insertbefore*/ nullptr, GV.getThreadLocalMode(),
+                             GV.getType()->getAddressSpace());
+    NewGV->takeName(&GV);
+    GV.replaceAllUsesWith(NewGV);
+    return false;
+  }
+  return true;
+}
+
 /// Fixup WeakForLinker linkages in \p TheModule based on summary analysis.
 void llvm::thinLTOResolveWeakForLinkerModule(
     Module &TheModule, const GVSummaryMapTy &DefinedGlobals) {
-  auto ConvertToDeclaration = [](GlobalValue &GV) {
-    DEBUG(dbgs() << "Converting to a declaration: `" << GV.getName() << "\n");
-    if (Function *F = dyn_cast<Function>(&GV)) {
-      F->deleteBody();
-      F->clearMetadata();
-    } else if (GlobalVariable *V = dyn_cast<GlobalVariable>(&GV)) {
-      V->setInitializer(nullptr);
-      V->setLinkage(GlobalValue::ExternalLinkage);
-      V->clearMetadata();
-    } else
-      // For now we don't resolve or drop aliases. Once we do we'll
-      // need to add support here for creating either a function or
-      // variable declaration, and return the new GlobalValue* for
-      // the caller to use.
-      llvm_unreachable("Expected function or variable");
-  };
-
   auto updateLinkage = [&](GlobalValue &GV) {
     // See if the global summary analysis computed a new resolved linkage.
     const auto &GS = DefinedGlobals.find(GV.getGUID());
@@ -651,9 +676,20 @@ void llvm::thinLTOResolveWeakForLinkerModule(
     // interposable property and possibly get inlined. Simply drop
     // the definition in that case.
     if (GlobalValue::isAvailableExternallyLinkage(NewLinkage) &&
-        GlobalValue::isInterposableLinkage(GV.getLinkage()))
-      ConvertToDeclaration(GV);
-    else {
+        GlobalValue::isInterposableLinkage(GV.getLinkage())) {
+      if (!convertToDeclaration(GV))
+        // FIXME: Change this to collect replaced GVs and later erase
+        // them from the parent module once thinLTOResolveWeakForLinkerGUID is
+        // changed to enable this for aliases.
+        llvm_unreachable("Expected GV to be converted");
+    } else {
+      // If the original symbols has global unnamed addr and linkonce_odr linkage,
+      // it should be an auto hide symbol. Add hidden visibility to the symbol to
+      // preserve the property.
+      if (GV.hasLinkOnceODRLinkage() && GV.hasGlobalUnnamedAddr() &&
+          NewLinkage == GlobalValue::WeakODRLinkage)
+        GV.setVisibility(GlobalValue::HiddenVisibility);
+
       DEBUG(dbgs() << "ODR fixing up linkage for `" << GV.getName() << "` from "
                    << GV.getLinkage() << " to " << NewLinkage << "\n");
       GV.setLinkage(NewLinkage);

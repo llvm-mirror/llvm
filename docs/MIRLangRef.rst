@@ -365,13 +365,33 @@ machine instructions.
 Instruction Flags
 ^^^^^^^^^^^^^^^^^
 
-The flag ``frame-setup`` can be specified before the instruction's name:
+The flag ``frame-setup`` or ``frame-destroy`` can be specified before the
+instruction's name:
 
 .. code-block:: text
 
     %fp = frame-setup ADDXri %sp, 0, 0
 
+.. code-block:: text
+
+    %x21, %x20 = frame-destroy LDPXi %sp
+
 .. _registers:
+
+Bundled Instructions
+^^^^^^^^^^^^^^^^^^^^
+
+The syntax for bundled instructions is the following:
+
+.. code-block:: text
+
+    BUNDLE implicit-def %r0, implicit-def %r1, implicit %r2 {
+      %r0 = SOME_OP %r2
+      %r1 = ANOTHER_OP internal %r0
+    }
+
+The first instruction is often a bundle header. The instructions between ``{``
+and ``}`` are bundled with the first instruction.
 
 Registers
 ---------
@@ -738,7 +758,6 @@ For an int eq predicate ``ICMP_EQ``, the syntax is:
 
 .. TODO: Describe the parsers default behaviour when optional YAML attributes
    are missing.
-.. TODO: Describe the syntax for the bundled instructions.
 .. TODO: Describe the syntax for virtual register YAML definitions.
 .. TODO: Describe the machine function's YAML flag attributes.
 .. TODO: Describe the syntax for the register mask machine operands.

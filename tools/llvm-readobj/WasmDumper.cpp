@@ -23,12 +23,10 @@ using namespace object;
 namespace {
 
 static const EnumEntry<unsigned> WasmSymbolTypes[] = {
-#define ENUM_ENTRY(X) { #X, static_cast<unsigned>(WasmSymbol::SymbolType::X) }
-  ENUM_ENTRY(FUNCTION_IMPORT),
-  ENUM_ENTRY(FUNCTION_EXPORT),
-  ENUM_ENTRY(GLOBAL_IMPORT),
-  ENUM_ENTRY(GLOBAL_EXPORT),
-  ENUM_ENTRY(DEBUG_FUNCTION_NAME),
+#define ENUM_ENTRY(X) { #X, wasm::WASM_SYMBOL_TYPE_##X }
+  ENUM_ENTRY(FUNCTION),
+  ENUM_ENTRY(DATA),
+  ENUM_ENTRY(GLOBAL),
 #undef ENUM_ENTRY
 };
 
@@ -155,12 +153,10 @@ void WasmDumper::printSections() {
       W.printString("Name", WasmSec.Name);
       if (WasmSec.Name == "linking") {
         const wasm::WasmLinkingData &LinkingData = Obj->linkingData();
-        W.printNumber("DataSize", LinkingData.DataSize);
         if (!LinkingData.InitFunctions.empty()) {
           ListScope Group(W, "InitFunctions");
           for (const wasm::WasmInitFunc &F: LinkingData.InitFunctions)
-            W.startLine() << F.FunctionIndex << " (priority=" << F.Priority
-                          << ")\n";
+            W.startLine() << F.Symbol << " (priority=" << F.Priority << ")\n";
         }
       }
       break;
@@ -204,9 +200,9 @@ void WasmDumper::printSections() {
 void WasmDumper::printSymbol(const SymbolRef &Sym) {
   DictScope D(W, "Symbol");
   WasmSymbol Symbol = Obj->getWasmSymbol(Sym.getRawDataRefImpl());
-  W.printString("Name", Symbol.Name);
-  W.printEnum("Type", static_cast<unsigned>(Symbol.Type), makeArrayRef(WasmSymbolTypes));
-  W.printHex("Flags", Symbol.Flags);
+  W.printString("Name", Symbol.Info.Name);
+  W.printEnum("Type", Symbol.Info.Kind, makeArrayRef(WasmSymbolTypes));
+  W.printHex("Flags", Symbol.Info.Flags);
 }
 
 }

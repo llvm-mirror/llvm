@@ -39,13 +39,25 @@ using namespace llvm;
 namespace {
 
 class BPFDAGToDAGISel : public SelectionDAGISel {
+
+  /// Subtarget - Keep a pointer to the BPFSubtarget around so that we can
+  /// make the right decision when generating code for different subtargets.
+  const BPFSubtarget *Subtarget;
+
 public:
-  explicit BPFDAGToDAGISel(BPFTargetMachine &TM) : SelectionDAGISel(TM) {
+  explicit BPFDAGToDAGISel(BPFTargetMachine &TM)
+      : SelectionDAGISel(TM), Subtarget(nullptr) {
     curr_func_ = nullptr;
   }
 
   StringRef getPassName() const override {
     return "BPF DAG->DAG Pattern Instruction Selection";
+  }
+
+  bool runOnMachineFunction(MachineFunction &MF) override {
+    // Reset the subtarget each time through.
+    Subtarget = &MF.getSubtarget<BPFSubtarget>();
+    return SelectionDAGISel::runOnMachineFunction(MF);
   }
 
   void PreprocessISelDAG() override;
@@ -65,9 +77,9 @@ private:
   bool SelectFIAddr(SDValue Addr, SDValue &Base, SDValue &Offset);
 
   // Node preprocessing cases
-  void PreprocessLoad(SDNode *Node, SelectionDAG::allnodes_iterator I);
+  void PreprocessLoad(SDNode *Node, SelectionDAG::allnodes_iterator &I);
   void PreprocessCopyToReg(SDNode *Node);
-  void PreprocessTrunc(SDNode *Node, SelectionDAG::allnodes_iterator I);
+  void PreprocessTrunc(SDNode *Node, SelectionDAG::allnodes_iterator &I);
 
   // Find constants from a constant structure
   typedef std::vector<unsigned char> val_vec_type;
@@ -176,9 +188,6 @@ bool BPFDAGToDAGISel::SelectInlineAsmMemoryOperand(
 void BPFDAGToDAGISel::Select(SDNode *Node) {
   unsigned Opcode = Node->getOpcode();
 
-  // Dump information about the Node being selected
-  DEBUG(dbgs() << "Selecting: "; Node->dump(CurDAG); dbgs() << '\n');
-
   // If we have a custom node, we already have selected!
   if (Node->isMachineOpcode()) {
     DEBUG(dbgs() << "== "; Node->dump(CurDAG); dbgs() << '\n');
@@ -241,7 +250,7 @@ void BPFDAGToDAGISel::Select(SDNode *Node) {
 }
 
 void BPFDAGToDAGISel::PreprocessLoad(SDNode *Node,
-                                     SelectionDAG::allnodes_iterator I) {
+                                     SelectionDAG::allnodes_iterator &I) {
   union {
     uint8_t c[8];
     uint16_t s;
@@ -514,9 +523,40 @@ void BPFDAGToDAGISel::PreprocessCopyToReg(SDNode *Node) {
 }
 
 void BPFDAGToDAGISel::PreprocessTrunc(SDNode *Node,
-                                      SelectionDAG::allnodes_iterator I) {
+                                      SelectionDAG::allnodes_iterator &I) {
   ConstantSDNode *MaskN = dyn_cast<ConstantSDNode>(Node->getOperand(1));
   if (!MaskN)
+    return;
+
+  // The Reg operand should be a virtual register, which is defined
+  // outside the current basic block. DAG combiner has done a pretty
+  // good job in removing truncating inside a single basic block except
+  // when the Reg operand comes from bpf_load_[byte | half | word] for
+  // which the generic optimizer doesn't understand their results are
+  // zero extended.
+  SDValue BaseV = Node->getOperand(0);
+  if (BaseV.getOpcode() == ISD::INTRINSIC_W_CHAIN) {
+    unsigned IntNo = cast<ConstantSDNode>(BaseV->getOperand(1))->getZExtValue();
+    uint64_t MaskV = MaskN->getZExtValue();
+
+    if (!((IntNo == Intrinsic::bpf_load_byte && MaskV == 0xFF) ||
+          (IntNo == Intrinsic::bpf_load_half && MaskV == 0xFFFF) ||
+          (IntNo == Intrinsic::bpf_load_word && MaskV == 0xFFFFFFFF)))
+      return;
+
+    DEBUG(dbgs() << "Remove the redundant AND operation in: "; Node->dump();
+          dbgs() << '\n');
+
+    I--;
+    CurDAG->ReplaceAllUsesWith(SDValue(Node, 0), BaseV);
+    I++;
+    CurDAG->DeleteNode(Node);
+
+    return;
+  }
+
+  // Multiple basic blocks case.
+  if (BaseV.getOpcode() != ISD::CopyFromReg)
     return;
 
   unsigned match_load_op = 0;
@@ -533,13 +573,6 @@ void BPFDAGToDAGISel::PreprocessTrunc(SDNode *Node,
     match_load_op = BPF::LDB;
     break;
   }
-
-  // The Reg operand should be a virtual register, which is defined
-  // outside the current basic block. DAG combiner has done a pretty
-  // good job in removing truncating inside a single basic block.
-  SDValue BaseV = Node->getOperand(0);
-  if (BaseV.getOpcode() != ISD::CopyFromReg)
-    return;
 
   const RegisterSDNode *RegN =
       dyn_cast<RegisterSDNode>(BaseV.getNode()->getOperand(1));

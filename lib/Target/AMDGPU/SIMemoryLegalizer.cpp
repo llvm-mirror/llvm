@@ -105,13 +105,9 @@ public:
   /// "None" otherwise.
   static Optional<SIMemOpInfo> getAtomicFenceInfo(
       const MachineBasicBlock::iterator &MI);
-  /// \returns Atomic cmpxchg info if \p MI is an atomic cmpxchg operation,
-  /// "None" otherwise.
-  static Optional<SIMemOpInfo> getAtomicCmpxchgInfo(
-      const MachineBasicBlock::iterator &MI);
-  /// \returns Atomic rmw info if \p MI is an atomic rmw operation,
-  /// "None" otherwise.
-  static Optional<SIMemOpInfo> getAtomicRmwInfo(
+  /// \returns Atomic cmpxchg/rmw info if \p MI is an atomic cmpxchg or
+  /// rmw operation, "None" otherwise.
+  static Optional<SIMemOpInfo> getAtomicCmpxchgOrRmwInfo(
       const MachineBasicBlock::iterator &MI);
 
   /// \brief Reports unknown synchronization scope used in \p MI to LLVM
@@ -132,7 +128,7 @@ private:
   unsigned Vmcnt0Immediate = 0;
 
   /// \brief Opcode for cache invalidation instruction (L1).
-  unsigned Wbinvl1Opcode = 0;
+  unsigned VmemSIMDCacheInvalidateOpc = 0;
 
   /// \brief List of atomic pseudo instructions.
   std::list<MachineBasicBlock::iterator> AtomicPseudoMIs;
@@ -167,8 +163,8 @@ private:
 
   /// \brief Inserts "buffer_wbinvl1_vol" instruction \p Before or after \p MI.
   /// Always returns true.
-  bool insertBufferWbinvl1Vol(MachineBasicBlock::iterator &MI,
-                              bool Before = true) const;
+  bool insertVmemSIMDCacheInvalidate(MachineBasicBlock::iterator &MI,
+                                     bool Before = true) const;
   /// \brief Inserts "s_waitcnt vmcnt(0)" instruction \p Before or after \p MI.
   /// Always returns true.
   bool insertWaitcntVmcnt0(MachineBasicBlock::iterator &MI,
@@ -190,14 +186,10 @@ private:
   /// instructions are added/deleted or \p MI is modified, false otherwise.
   bool expandAtomicFence(const SIMemOpInfo &MOI,
                          MachineBasicBlock::iterator &MI);
-  /// \brief Expands atomic cmpxchg operation \p MI. Returns true if
+  /// \brief Expands atomic cmpxchg or rmw operation \p MI. Returns true if
   /// instructions are added/deleted or \p MI is modified, false otherwise.
-  bool expandAtomicCmpxchg(const SIMemOpInfo &MOI,
-                           MachineBasicBlock::iterator &MI);
-  /// \brief Expands atomic rmw operation \p MI. Returns true if
-  /// instructions are added/deleted or \p MI is modified, false otherwise.
-  bool expandAtomicRmw(const SIMemOpInfo &MOI,
-                       MachineBasicBlock::iterator &MI);
+  bool expandAtomicCmpxchgOrRmw(const SIMemOpInfo &MOI,
+                                MachineBasicBlock::iterator &MI);
 
 public:
   static char ID;
@@ -305,7 +297,7 @@ Optional<SIMemOpInfo> SIMemOpInfo::getAtomicFenceInfo(
 }
 
 /* static */
-Optional<SIMemOpInfo> SIMemOpInfo::getAtomicCmpxchgInfo(
+Optional<SIMemOpInfo> SIMemOpInfo::getAtomicCmpxchgOrRmwInfo(
     const MachineBasicBlock::iterator &MI) {
   assert(MI->getDesc().TSFlags & SIInstrFlags::maybeAtomic);
 
@@ -322,22 +314,6 @@ Optional<SIMemOpInfo> SIMemOpInfo::getAtomicCmpxchgInfo(
 }
 
 /* static */
-Optional<SIMemOpInfo> SIMemOpInfo::getAtomicRmwInfo(
-    const MachineBasicBlock::iterator &MI) {
-  assert(MI->getDesc().TSFlags & SIInstrFlags::maybeAtomic);
-
-  if (!(MI->mayLoad() && MI->mayStore()))
-    return None;
-
-  // Be conservative if there are no memory operands.
-  if (MI->getNumMemOperands() == 0)
-    return SIMemOpInfo(SyncScope::System,
-                       AtomicOrdering::SequentiallyConsistent);
-
-  return SIMemOpInfo::constructFromMIWithMMO(MI);
-}
-
-/* static */
 void SIMemOpInfo::reportUnknownSyncScope(
     const MachineBasicBlock::iterator &MI) {
   DiagnosticInfoUnsupported Diag(MI->getParent()->getParent()->getFunction(),
@@ -346,15 +322,15 @@ void SIMemOpInfo::reportUnknownSyncScope(
   CTX->diagnose(Diag);
 }
 
-bool SIMemoryLegalizer::insertBufferWbinvl1Vol(MachineBasicBlock::iterator &MI,
-                                               bool Before) const {
+bool SIMemoryLegalizer::insertVmemSIMDCacheInvalidate(
+  MachineBasicBlock::iterator &MI, bool Before) const {
   MachineBasicBlock &MBB = *MI->getParent();
   DebugLoc DL = MI->getDebugLoc();
 
   if (!Before)
     ++MI;
 
-  BuildMI(MBB, MI, DL, TII->get(Wbinvl1Opcode));
+  BuildMI(MBB, MI, DL, TII->get(VmemSIMDCacheInvalidateOpc));
 
   if (!Before)
     --MI;
@@ -398,7 +374,8 @@ bool SIMemoryLegalizer::expandLoad(const SIMemOpInfo &MOI,
   if (MOI.isAtomic()) {
     if (MOI.getSSID() == SyncScope::System ||
         MOI.getSSID() == MMI->getAgentSSID()) {
-      if (MOI.getOrdering() == AtomicOrdering::Acquire ||
+      if (MOI.getOrdering() == AtomicOrdering::Monotonic ||
+          MOI.getOrdering() == AtomicOrdering::Acquire ||
           MOI.getOrdering() == AtomicOrdering::SequentiallyConsistent)
         Changed |= enableGLCBit(MI);
 
@@ -408,7 +385,7 @@ bool SIMemoryLegalizer::expandLoad(const SIMemOpInfo &MOI,
       if (MOI.getOrdering() == AtomicOrdering::Acquire ||
           MOI.getOrdering() == AtomicOrdering::SequentiallyConsistent) {
         Changed |= insertWaitcntVmcnt0(MI, false);
-        Changed |= insertBufferWbinvl1Vol(MI, false);
+        Changed |= insertVmemSIMDCacheInvalidate(MI, false);
       }
 
       return Changed;
@@ -486,7 +463,7 @@ bool SIMemoryLegalizer::expandAtomicFence(const SIMemOpInfo &MOI,
       if (MOI.getOrdering() == AtomicOrdering::Acquire ||
           MOI.getOrdering() == AtomicOrdering::AcquireRelease ||
           MOI.getOrdering() == AtomicOrdering::SequentiallyConsistent)
-        Changed |= insertBufferWbinvl1Vol(MI);
+        Changed |= insertVmemSIMDCacheInvalidate(MI);
 
       AtomicPseudoMIs.push_back(MI);
       return Changed;
@@ -505,8 +482,8 @@ bool SIMemoryLegalizer::expandAtomicFence(const SIMemOpInfo &MOI,
   return Changed;
 }
 
-bool SIMemoryLegalizer::expandAtomicCmpxchg(const SIMemOpInfo &MOI,
-                                            MachineBasicBlock::iterator &MI) {
+bool SIMemoryLegalizer::expandAtomicCmpxchgOrRmw(const SIMemOpInfo &MOI,
+  MachineBasicBlock::iterator &MI) {
   assert(MI->mayLoad() && MI->mayStore());
 
   bool Changed = false;
@@ -526,44 +503,7 @@ bool SIMemoryLegalizer::expandAtomicCmpxchg(const SIMemOpInfo &MOI,
           MOI.getFailureOrdering() == AtomicOrdering::Acquire ||
           MOI.getFailureOrdering() == AtomicOrdering::SequentiallyConsistent) {
         Changed |= insertWaitcntVmcnt0(MI, false);
-        Changed |= insertBufferWbinvl1Vol(MI, false);
-      }
-
-      return Changed;
-    }
-
-    if (MOI.getSSID() == SyncScope::SingleThread ||
-        MOI.getSSID() == MMI->getWorkgroupSSID() ||
-        MOI.getSSID() == MMI->getWavefrontSSID()) {
-      Changed |= enableGLCBit(MI);
-      return Changed;
-    }
-
-    llvm_unreachable("Unsupported synchronization scope");
-  }
-
-  return Changed;
-}
-
-bool SIMemoryLegalizer::expandAtomicRmw(const SIMemOpInfo &MOI,
-                                        MachineBasicBlock::iterator &MI) {
-  assert(MI->mayLoad() && MI->mayStore());
-
-  bool Changed = false;
-
-  if (MOI.isAtomic()) {
-    if (MOI.getSSID() == SyncScope::System ||
-        MOI.getSSID() == MMI->getAgentSSID()) {
-      if (MOI.getOrdering() == AtomicOrdering::Release ||
-          MOI.getOrdering() == AtomicOrdering::AcquireRelease ||
-          MOI.getOrdering() == AtomicOrdering::SequentiallyConsistent)
-        Changed |= insertWaitcntVmcnt0(MI);
-
-      if (MOI.getOrdering() == AtomicOrdering::Acquire ||
-          MOI.getOrdering() == AtomicOrdering::AcquireRelease ||
-          MOI.getOrdering() == AtomicOrdering::SequentiallyConsistent) {
-        Changed |= insertWaitcntVmcnt0(MI, false);
-        Changed |= insertBufferWbinvl1Vol(MI, false);
+        Changed |= insertVmemSIMDCacheInvalidate(MI, false);
       }
 
       return Changed;
@@ -592,8 +532,9 @@ bool SIMemoryLegalizer::runOnMachineFunction(MachineFunction &MF) {
 
   Vmcnt0Immediate =
       AMDGPU::encodeWaitcnt(IV, 0, getExpcntBitMask(IV), getLgkmcntBitMask(IV));
-  Wbinvl1Opcode = ST.getGeneration() <= AMDGPUSubtarget::SOUTHERN_ISLANDS ?
-      AMDGPU::BUFFER_WBINVL1 : AMDGPU::BUFFER_WBINVL1_VOL;
+  VmemSIMDCacheInvalidateOpc =
+     ST.getGeneration() <= AMDGPUSubtarget::SOUTHERN_ISLANDS ?
+       AMDGPU::BUFFER_WBINVL1 : AMDGPU::BUFFER_WBINVL1_VOL;
 
   for (auto &MBB : MF) {
     for (auto MI = MBB.begin(); MI != MBB.end(); ++MI) {
@@ -606,10 +547,8 @@ bool SIMemoryLegalizer::runOnMachineFunction(MachineFunction &MF) {
         Changed |= expandStore(MOI.getValue(), MI);
       else if (const auto &MOI = SIMemOpInfo::getAtomicFenceInfo(MI))
         Changed |= expandAtomicFence(MOI.getValue(), MI);
-      else if (const auto &MOI = SIMemOpInfo::getAtomicCmpxchgInfo(MI))
-        Changed |= expandAtomicCmpxchg(MOI.getValue(), MI);
-      else if (const auto &MOI = SIMemOpInfo::getAtomicRmwInfo(MI))
-        Changed |= expandAtomicRmw(MOI.getValue(), MI);
+      else if (const auto &MOI = SIMemOpInfo::getAtomicCmpxchgOrRmwInfo(MI))
+        Changed |= expandAtomicCmpxchgOrRmw(MOI.getValue(), MI);
     }
   }
 

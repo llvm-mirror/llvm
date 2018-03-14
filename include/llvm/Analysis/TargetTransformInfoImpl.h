@@ -246,6 +246,8 @@ public:
                     C2.ScaleCost, C2.ImmCost, C2.SetupCost);
   }
 
+  bool canMacroFuseCmp() { return false; }
+
   bool isLegalMaskedStore(Type *DataType) { return false; }
 
   bool isLegalMaskedLoad(Type *DataType) { return false; }
@@ -283,6 +285,8 @@ public:
 
   bool shouldBuildLookupTables() { return true; }
   bool shouldBuildLookupTablesForConstant(Constant *C) { return true; }
+
+  bool useColdCCForColdCall(Function &F) { return false; }
 
   unsigned getScalarizationOverhead(Type *Ty, bool Insert, bool Extract) {
     return 0;

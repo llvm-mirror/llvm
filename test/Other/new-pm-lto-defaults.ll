@@ -10,7 +10,8 @@
 ; RUN:     | FileCheck %s --check-prefix=CHECK-O --check-prefix=CHECK-O2
 ; RUN: opt -disable-verify -debug-pass-manager \
 ; RUN:     -passes='lto<O3>' -S  %s 2>&1 \
-; RUN:     | FileCheck %s --check-prefix=CHECK-O --check-prefix=CHECK-O2
+; RUN:     | FileCheck %s --check-prefix=CHECK-O --check-prefix=CHECK-O2 \
+; RUN:     --check-prefix=CHECK-O3
 ; RUN: opt -disable-verify -debug-pass-manager \
 ; RUN:     -passes='lto<Os>' -S %s 2>&1 \
 ; RUN:     | FileCheck %s --check-prefix=CHECK-O --check-prefix=CHECK-O2
@@ -20,7 +21,7 @@
 ; RUN: opt -disable-verify -debug-pass-manager \
 ; RUN:     -passes='lto<O3>' -S  %s -passes-ep-peephole='no-op-function' 2>&1 \
 ; RUN:     | FileCheck %s --check-prefix=CHECK-O --check-prefix=CHECK-O2 \
-; RUN:     --check-prefix=CHECK-EP-Peephole
+; RUN:     --check-prefix=CHECK-O3 --check-prefix=CHECK-EP-Peephole
 
 ; CHECK-O: Starting llvm::Module pass manager run.
 ; CHECK-O-NEXT: Running pass: PassManager<{{.*}}Module
@@ -34,6 +35,7 @@
 ; CHECK-O2-NEXT: Starting llvm::Function pass manager run.
 ; CHECK-O2-NEXT: Running pass: CallSiteSplittingPass on foo
 ; CHECK-O2-NEXT: Running analysis: TargetLibraryAnalysis on foo
+; CHECK-O2-NEXT: Running analysis: TargetIRAnalysis on foo
 ; CHECK-O2-NEXT: Finished llvm::Function pass manager run.
 ; CHECK-O2-NEXT: PGOIndirectCallPromotion
 ; CHECK-O2-NEXT: Running analysis: ProfileSummaryAnalysis
@@ -60,6 +62,7 @@
 ; CHECK-O2-NEXT: Running pass: DeadArgumentEliminationPass
 ; CHECK-O2-NEXT: Running pass: ModuleToFunctionPassAdaptor<{{.*}}PassManager{{.*}}>
 ; CHECK-O2-NEXT: Starting llvm::Function pass manager run.
+; CHECK-O3-NEXT: Running pass: AggressiveInstCombinePass
 ; CHECK-O2-NEXT: Running pass: InstCombinePass
 ; CHECK-EP-Peephole-NEXT: Running pass: NoOpFunctionPass
 ; CHECK-O2-NEXT: Finished llvm::Function pass manager run.
@@ -77,7 +80,6 @@
 ; CHECK-O2-NEXT: Running pass: ModuleToPostOrderCGSCCPassAdaptor<{{.*}}PostOrderFunctionAttrsPass>
 ; CHECK-O2-NEXT: Running pass: ModuleToFunctionPassAdaptor<{{.*}}PassManager{{.*}}>
 ; CHECK-O2-NEXT: Running analysis: MemoryDependenceAnalysis
-; CHECK-O2-NEXT: Running analysis: TargetIRAnalysis
 ; CHECK-O2-NEXT: Running analysis: DemandedBitsAnalysis
 ; CHECK-O2-NEXT: Running pass: CrossDSOCFIPass
 ; CHECK-O2-NEXT: Running pass: ModuleToFunctionPassAdaptor<{{.*}}SimplifyCFGPass>

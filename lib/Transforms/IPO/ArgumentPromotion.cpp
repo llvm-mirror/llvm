@@ -817,6 +817,12 @@ promoteArguments(Function *F, function_ref<AAResults &(Function &F)> AARGetter,
                  unsigned MaxElements,
                  Optional<function_ref<void(CallSite OldCS, CallSite NewCS)>>
                      ReplaceCallSite) {
+  // Don't perform argument promotion for naked functions; otherwise we can end
+  // up removing parameters that are seemingly 'not used' as they are referred
+  // to in the assembly.
+  if(F->hasFnAttribute(Attribute::Naked))
+    return nullptr;
+
   // Make sure that it is local to this module.
   if (!F->hasLocalLinkage())
     return nullptr;
@@ -847,9 +853,19 @@ promoteArguments(Function *F, function_ref<AAResults &(Function &F)> AARGetter,
     if (CS.getInstruction() == nullptr || !CS.isCallee(&U))
       return nullptr;
 
+    // Can't change signature of musttail callee
+    if (CS.isMustTailCall())
+      return nullptr;
+
     if (CS.getInstruction()->getParent()->getParent() == F)
       isSelfRecursive = true;
   }
+
+  // Can't change signature of musttail caller
+  // FIXME: Support promoting whole chain of musttail functions
+  for (BasicBlock &BB : *F)
+    if (BB.getTerminatingMustTailCall())
+      return nullptr;
 
   const DataLayout &DL = F->getParent()->getDataLayout();
 
@@ -963,7 +979,7 @@ PreservedAnalyses ArgumentPromotionPass::run(LazyCallGraph::SCC &C,
         return FAM.getResult<AAManager>(F);
       };
 
-      Function *NewF = promoteArguments(&OldF, AARGetter, 3u, None);
+      Function *NewF = promoteArguments(&OldF, AARGetter, MaxElements, None);
       if (!NewF)
         continue;
       LocalChange = true;

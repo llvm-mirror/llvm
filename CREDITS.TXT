@@ -203,6 +203,11 @@ N: Patrick Jenkins
 E: patjenk@wam.umd.edu
 D: Nightly Tester
 
+N: Tony(Yanjun) Jiang
+E: jtony@ca.ibm.com
+D: PowerPC Backend Developer
+D: Improvements to the PPC backend and miscellaneous bug fixes
+
 N: Dale Johannesen
 E: dalej@apple.com
 D: ARM constant islands improvements
@@ -269,7 +274,7 @@ D: Release manager (1.7+)
 N: Sylvestre Ledru
 E: sylvestre@debian.org
 W: http://sylvestre.ledru.info/
-W: http://apt.llvm.org/
+W: https://apt.llvm.org/
 D: Debian and Ubuntu packaging
 D: Continuous integration with jenkins
 

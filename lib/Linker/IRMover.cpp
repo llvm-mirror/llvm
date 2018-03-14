@@ -95,6 +95,12 @@ void TypeMapTy::addTypeMapping(Type *DstTy, Type *SrcTy) {
     for (StructType *Ty : SpeculativeDstOpaqueTypes)
       DstResolvedOpaqueTypes.erase(Ty);
   } else {
+    // SrcTy and DstTy are recursively ismorphic. We clear names of SrcTy
+    // and all its descendants to lower amount of renaming in LLVM context
+    // Renaming occurs because we load all source modules to the same context
+    // and declaration with existing name gets renamed (i.e Foo -> Foo.42).
+    // As a result we may get several different types in the destination
+    // module, which are in fact the same.
     for (Type *Ty : SpeculativeTypes)
       if (auto *STy = dyn_cast<StructType>(Ty))
         if (STy->hasName())
@@ -676,6 +682,14 @@ GlobalValue *IRLinker::copyGlobalValueProto(const GlobalValue *SGV,
   return NewGV;
 }
 
+static StringRef getTypeNamePrefix(StringRef Name) {
+  size_t DotPos = Name.rfind('.');
+  return (DotPos == 0 || DotPos == StringRef::npos || Name.back() == '.' ||
+          !isdigit(static_cast<unsigned char>(Name[DotPos + 1])))
+             ? Name
+             : Name.substr(0, DotPos);
+}
+
 /// Loop over all of the linked values to compute type mappings.  For example,
 /// if we link "extern Foo *x" and "Foo *x = NULL", then we have two struct
 /// types 'Foo' but one got renamed when the module was loaded into the same
@@ -722,15 +736,12 @@ void IRLinker::computeTypeMapping() {
       continue;
     }
 
-    // Check to see if there is a dot in the name followed by a digit.
-    size_t DotPos = ST->getName().rfind('.');
-    if (DotPos == 0 || DotPos == StringRef::npos ||
-        ST->getName().back() == '.' ||
-        !isdigit(static_cast<unsigned char>(ST->getName()[DotPos + 1])))
+    auto STTypePrefix = getTypeNamePrefix(ST->getName());
+    if (STTypePrefix.size()== ST->getName().size())
       continue;
 
     // Check to see if the destination module has a struct with the prefix name.
-    StructType *DST = DstM.getTypeByName(ST->getName().substr(0, DotPos));
+    StructType *DST = DstM.getTypeByName(STTypePrefix);
     if (!DST)
       continue;
 
@@ -954,7 +965,12 @@ Expected<Constant *> IRLinker::linkGlobalValueProto(GlobalValue *SGV,
     NewGV->setLinkage(GlobalValue::InternalLinkage);
 
   Constant *C = NewGV;
-  if (DGV)
+  // Only create a bitcast if necessary. In particular, with
+  // DebugTypeODRUniquing we may reach metadata in the destination module
+  // containing a GV from the source module, in which case SGV will be
+  // the same as DGV and NewGV, and TypeMap.get() will assert since it
+  // assumes it is being invoked on a type in the source module.
+  if (DGV && NewGV != SGV)
     C = ConstantExpr::getBitCast(NewGV, TypeMap.get(SGV->getType()));
 
   if (DGV && NewGV != DGV) {

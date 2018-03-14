@@ -77,6 +77,11 @@ public:
   ///
   Record *getInstructionSet() const;
 
+  /// getAllowRegisterRenaming - Return the AllowRegisterRenaming flag value for
+  /// this target.
+  ///
+  bool getAllowRegisterRenaming() const;
+
   /// getAsmParser - Return the AssemblyParser definition for this target.
   ///
   Record *getAsmParser() const;
@@ -139,6 +144,9 @@ public:
     assert(I != Instructions.end() && "Not an instruction");
     return *I->second;
   }
+
+  /// Returns the number of predefined instructions.
+  static unsigned getNumFixedInstructions();
 
   /// getInstructionsByEnumValue - Return all of the instructions defined by the
   /// target, ordered by their enum value.

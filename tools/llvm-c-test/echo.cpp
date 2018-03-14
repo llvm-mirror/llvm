@@ -90,7 +90,8 @@ struct TypeCloner {
         unsigned ParamCount = LLVMCountParamTypes(Src);
         LLVMTypeRef* Params = nullptr;
         if (ParamCount > 0) {
-          Params = (LLVMTypeRef*) malloc(ParamCount * sizeof(LLVMTypeRef));
+          Params = static_cast<LLVMTypeRef*>(
+              safe_malloc(ParamCount * sizeof(LLVMTypeRef)));
           LLVMGetParamTypes(Src, Params);
           for (unsigned i = 0; i < ParamCount; i++)
             Params[i] = Clone(Params[i]);
@@ -437,7 +438,7 @@ struct FunCloner {
         LLVMBasicBlockRef ElseBB = DeclareBB(LLVMValueAsBasicBlock(Else));
         LLVMValueRef Then = LLVMGetOperand(Src, 2);
         LLVMBasicBlockRef ThenBB = DeclareBB(LLVMValueAsBasicBlock(Then));
-        Dst = LLVMBuildCondBr(Builder, Cond, ThenBB, ElseBB);
+        Dst = LLVMBuildCondBr(Builder, CloneValue(Cond), ThenBB, ElseBB);
         break;
       }
       case LLVMSwitch:
@@ -927,18 +928,15 @@ int llvm_echo(void) {
   LLVMEnablePrettyStackTrace();
 
   LLVMModuleRef Src = llvm_load_module(false, true);
-  size_t Len;
-  const char *ModuleName = LLVMGetModuleIdentifier(Src, &Len);
+  size_t SourceFileLen;
+  const char *SourceFileName = LLVMGetSourceFileName(Src, &SourceFileLen);
+  size_t ModuleIdentLen;
+  const char *ModuleName = LLVMGetModuleIdentifier(Src, &ModuleIdentLen);
   LLVMContextRef Ctx = LLVMContextCreate();
   LLVMModuleRef M = LLVMModuleCreateWithNameInContext(ModuleName, Ctx);
 
-  // This whole switcharound is done because the C API has no way to
-  // set the source_filename
-  LLVMSetModuleIdentifier(M, "", 0);
-  LLVMGetModuleIdentifier(M, &Len);
-  if (Len != 0)
-      report_fatal_error("LLVM{Set,Get}ModuleIdentifier failed");
-  LLVMSetModuleIdentifier(M, ModuleName, strlen(ModuleName));
+  LLVMSetSourceFileName(M, SourceFileName, SourceFileLen);
+  LLVMSetModuleIdentifier(M, ModuleName, ModuleIdentLen);
 
   LLVMSetTarget(M, LLVMGetTarget(Src));
   LLVMSetModuleDataLayout(M, LLVMGetModuleDataLayout(Src));
@@ -951,6 +949,7 @@ int llvm_echo(void) {
   fputs(Str, stdout);
 
   LLVMDisposeMessage(Str);
+  LLVMDisposeModule(Src);
   LLVMDisposeModule(M);
   LLVMContextDispose(Ctx);
 

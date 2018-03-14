@@ -84,12 +84,10 @@ define i8 @umin_not_2_extra_use(i8 %x, i8 %y) {
 
 define i8 @umin3_not(i8 %x, i8 %y, i8 %z) {
 ; CHECK-LABEL: @umin3_not(
-; CHECK-NEXT:    [[CMPYX:%.*]] = icmp ult i8 %y, %x
 ; CHECK-NEXT:    [[TMP1:%.*]] = icmp ugt i8 %x, %z
 ; CHECK-NEXT:    [[TMP2:%.*]] = select i1 [[TMP1]], i8 %x, i8 %z
-; CHECK-NEXT:    [[TMP3:%.*]] = icmp ugt i8 %y, %z
-; CHECK-NEXT:    [[TMP4:%.*]] = select i1 [[TMP3]], i8 %y, i8 %z
-; CHECK-NEXT:    [[R_V:%.*]] = select i1 [[CMPYX]], i8 [[TMP2]], i8 [[TMP4]]
+; CHECK-NEXT:    [[TMP3:%.*]] = icmp ugt i8 [[TMP2]], %y
+; CHECK-NEXT:    [[R_V:%.*]] = select i1 [[TMP3]], i8 [[TMP2]], i8 %y
 ; CHECK-NEXT:    [[R:%.*]] = xor i8 [[R:%.*]].v, -1
 ; CHECK-NEXT:    ret i8 [[R]]
 ;
@@ -102,6 +100,35 @@ define i8 @umin3_not(i8 %x, i8 %y, i8 %z) {
   %cmpyz = icmp ult i8 %ny, %nz
   %minyz = select i1 %cmpyz, i8 %ny, i8 %nz
   %r = select i1 %cmpyx, i8 %minxz, i8 %minyz
+  ret i8 %r
+}
+
+; PR35875 - https://bugs.llvm.org/show_bug.cgi?id=35875
+
+define i8 @umin3_not_more_uses(i8 %x, i8 %y, i8 %z) {
+; CHECK-LABEL: @umin3_not_more_uses(
+; CHECK-NEXT:    [[NX:%.*]] = xor i8 %x, -1
+; CHECK-NEXT:    [[NY:%.*]] = xor i8 %y, -1
+; CHECK-NEXT:    [[TMP1:%.*]] = icmp ugt i8 %x, %z
+; CHECK-NEXT:    [[TMP2:%.*]] = select i1 [[TMP1]], i8 %x, i8 %z
+; CHECK-NEXT:    [[TMP3:%.*]] = icmp ugt i8 [[TMP2]], %y
+; CHECK-NEXT:    [[TMP4:%.*]] = select i1 [[TMP3]], i8 [[TMP2]], i8 %y
+; CHECK-NEXT:    [[R:%.*]] = xor i8 [[TMP4]], -1
+; CHECK-NEXT:    call void @extra_use(i8 [[NX]])
+; CHECK-NEXT:    call void @extra_use(i8 [[NY]])
+; CHECK-NEXT:    ret i8 [[R]]
+;
+  %nx = xor i8 %x, -1
+  %ny = xor i8 %y, -1
+  %nz = xor i8 %z, -1
+  %cmpxz = icmp ult i8 %nx, %nz
+  %minxz = select i1 %cmpxz, i8 %nx, i8 %nz
+  %cmpyz = icmp ult i8 %ny, %nz
+  %minyz = select i1 %cmpyz, i8 %ny, i8 %nz
+  %cmpyx = icmp ult i8 %y, %x
+  %r = select i1 %cmpyx, i8 %minxz, i8 %minyz
+  call void @extra_use(i8 %nx)
+  call void @extra_use(i8 %ny)
   ret i8 %r
 }
 

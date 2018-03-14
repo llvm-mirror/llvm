@@ -143,12 +143,19 @@ namespace llvm {
     /// UpgradeDebuginfo so it can generate broken bitcode.
     bool UpgradeDebugInfo;
 
+    /// DataLayout string to override that in LLVM assembly.
+    StringRef DataLayoutStr;
+
   public:
     LLParser(StringRef F, SourceMgr &SM, SMDiagnostic &Err, Module *M,
-             SlotMapping *Slots = nullptr, bool UpgradeDebugInfo = true)
+             SlotMapping *Slots = nullptr, bool UpgradeDebugInfo = true,
+             StringRef DataLayoutString = "")
         : Context(M->getContext()), Lex(F, SM, Err, M->getContext()), M(M),
           Slots(Slots), BlockAddressPFS(nullptr),
-          UpgradeDebugInfo(UpgradeDebugInfo) {}
+          UpgradeDebugInfo(UpgradeDebugInfo), DataLayoutStr(DataLayoutString) {
+      if (!DataLayoutStr.empty())
+        M->setDataLayout(DataLayoutStr);
+    }
     bool Run();
 
     bool parseStandaloneConstantValue(Constant *&C, const SlotMapping *Slots);
@@ -351,8 +358,8 @@ namespace llvm {
       /// GetVal - Get a value with the specified name or ID, creating a
       /// forward reference record if needed.  This can return null if the value
       /// exists but does not have the right type.
-      Value *GetVal(const std::string &Name, Type *Ty, LocTy Loc);
-      Value *GetVal(unsigned ID, Type *Ty, LocTy Loc);
+      Value *GetVal(const std::string &Name, Type *Ty, LocTy Loc, bool IsCall);
+      Value *GetVal(unsigned ID, Type *Ty, LocTy Loc, bool IsCall);
 
       /// SetInstName - After an instruction is parsed and inserted into its
       /// basic block, this installs its name.
@@ -374,7 +381,7 @@ namespace llvm {
     };
 
     bool ConvertValIDToValue(Type *Ty, ValID &ID, Value *&V,
-                             PerFunctionState *PFS);
+                             PerFunctionState *PFS, bool IsCall);
 
     bool parseConstantValue(Type *Ty, Constant *&C);
     bool ParseValue(Type *Ty, Value *&V, PerFunctionState *PFS);

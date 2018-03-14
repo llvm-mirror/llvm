@@ -155,7 +155,7 @@
 // When S = -1 (i.e. reverse iterating loop), the transformation is supported
 // when:
 //   * The loop has a single latch with the condition of the form:
-//     B(X) = X <pred> latchLimit, where <pred> is u> or s>.
+//     B(X) = X <pred> latchLimit, where <pred> is u>, u>=, s>, or s>=.
 //   * The guard condition is of the form
 //     G(X) = X - 1 u< guardLimit
 //
@@ -171,6 +171,10 @@
 //     guardStart u< guardLimit && latchLimit u>= 1.
 //   Similarly for sgt condition the widened condition is:
 //     guardStart u< guardLimit && latchLimit s>= 1.
+//   For uge condition the widened condition is:
+//     guardStart u< guardLimit && latchLimit u> 1.
+//   For sge condition the widened condition is:
+//     guardStart u< guardLimit && latchLimit s> 1.
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/Scalar/LoopPredication.h"
@@ -266,6 +270,7 @@ class LoopPredication {
   // Return the loopLatchCheck corresponding to the RangeCheckType if safe to do
   // so.
   Optional<LoopICmp> generateLoopLatchCheck(Type *RangeCheckType);
+
 public:
   LoopPredication(ScalarEvolution *SE) : SE(SE){};
   bool runOnLoop(Loop *L);
@@ -415,23 +420,8 @@ Optional<Value *> LoopPredication::widenICmpRangeCheckIncrementingLoop(
     DEBUG(dbgs() << "Can't expand limit check!\n");
     return None;
   }
-  ICmpInst::Predicate LimitCheckPred;
-  switch (LatchCheck.Pred) {
-  case ICmpInst::ICMP_ULT:
-    LimitCheckPred = ICmpInst::ICMP_ULE;
-    break;
-  case ICmpInst::ICMP_ULE:
-    LimitCheckPred = ICmpInst::ICMP_ULT;
-    break;
-  case ICmpInst::ICMP_SLT:
-    LimitCheckPred = ICmpInst::ICMP_SLE;
-    break;
-  case ICmpInst::ICMP_SLE:
-    LimitCheckPred = ICmpInst::ICMP_SLT;
-    break;
-  default:
-    llvm_unreachable("Unsupported loop latch!");
-  }
+  auto LimitCheckPred =
+      ICmpInst::getFlippedStrictnessPredicate(LatchCheck.Pred);
 
   DEBUG(dbgs() << "LHS: " << *LatchLimit << "\n");
   DEBUG(dbgs() << "RHS: " << *RHS << "\n");
@@ -472,9 +462,8 @@ Optional<Value *> LoopPredication::widenICmpRangeCheckDecrementingLoop(
   // latchLimit <pred> 1.
   // See the header comment for reasoning of the checks.
   Instruction *InsertAt = Preheader->getTerminator();
-  auto LimitCheckPred = ICmpInst::isSigned(LatchCheck.Pred)
-                            ? ICmpInst::ICMP_SGE
-                            : ICmpInst::ICMP_UGE;
+  auto LimitCheckPred =
+      ICmpInst::getFlippedStrictnessPredicate(LatchCheck.Pred);
   auto *FirstIterationCheck = expandCheck(Expander, Builder, ICmpInst::ICMP_ULT,
                                           GuardStart, GuardLimit, InsertAt);
   auto *LimitCheck = expandCheck(Expander, Builder, LimitCheckPred, LatchLimit,
@@ -558,7 +547,7 @@ bool LoopPredication::widenGuardConditions(IntrinsicInst *Guard,
 
   // The guard condition is expected to be in form of:
   //   cond1 && cond2 && cond3 ...
-  // Iterate over subconditions looking for for icmp conditions which can be
+  // Iterate over subconditions looking for icmp conditions which can be
   // widened across loop iterations. Widening these conditions remember the
   // resulting list of subconditions in Checks vector.
   SmallVector<Value *, 4> Worklist(1, Guard->getOperand(0));
@@ -658,7 +647,8 @@ Optional<LoopPredication::LoopICmp> LoopPredication::parseLoopLatchICmp() {
              Pred != ICmpInst::ICMP_ULE && Pred != ICmpInst::ICMP_SLE;
     } else {
       assert(Step->isAllOnesValue() && "Step should be -1!");
-      return Pred != ICmpInst::ICMP_UGT && Pred != ICmpInst::ICMP_SGT;
+      return Pred != ICmpInst::ICMP_UGT && Pred != ICmpInst::ICMP_SGT &&
+             Pred != ICmpInst::ICMP_UGE && Pred != ICmpInst::ICMP_SGE;
     }
   };
 

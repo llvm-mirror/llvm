@@ -29,6 +29,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Analysis/DivergenceAnalysis.h"
 #include "llvm/CodeGen/DAGCombine.h"
 #include "llvm/CodeGen/ISDOpcodes.h"
 #include "llvm/CodeGen/MachineValueType.h"
@@ -253,7 +254,8 @@ public:
   /// A documentation for this function would be nice...
   virtual MVT getScalarShiftAmountTy(const DataLayout &, EVT) const;
 
-  EVT getShiftAmountTy(EVT LHSTy, const DataLayout &DL) const;
+  EVT getShiftAmountTy(EVT LHSTy, const DataLayout &DL,
+                       bool LegalTypes = true) const;
 
   /// Returns the type to be used for the index operand of:
   /// ISD::INSERT_VECTOR_ELT, ISD::EXTRACT_VECTOR_ELT,
@@ -800,7 +802,7 @@ public:
   }
 
   /// Return true if lowering to a jump table is allowed.
-  bool areJTsAllowed(const Function *Fn) const {
+  virtual bool areJTsAllowed(const Function *Fn) const {
     if (Fn->getFnAttribute("no-jump-tables").getValueAsString() == "true")
       return false;
 
@@ -812,7 +814,7 @@ public:
   bool rangeFitsInWord(const APInt &Low, const APInt &High,
                        const DataLayout &DL) const {
     // FIXME: Using the pointer type doesn't seem ideal.
-    uint64_t BW = DL.getPointerSizeInBits();
+    uint64_t BW = DL.getIndexSizeInBits(0u);
     uint64_t Range = (High - Low).getLimitedValue(UINT64_MAX - 1) + 1;
     return Range <= BW;
   }
@@ -820,7 +822,7 @@ public:
   /// Return true if lowering to a jump table is suitable for a set of case
   /// clusters which may contain \p NumCases cases, \p Range range of values.
   /// FIXME: This function check the maximum table size and density, but the
-  /// minimum size is not checked. It would be nice if the the minimum size is
+  /// minimum size is not checked. It would be nice if the minimum size is
   /// also combined within this function. Currently, the minimum size check is
   /// performed in findJumpTable() in SelectionDAGBuiler and
   /// getEstimatedNumberOfCaseClusters() in BasicTTIImpl.
@@ -986,9 +988,14 @@ public:
 
   /// Return true if the specified condition code is legal on this target.
   bool isCondCodeLegal(ISD::CondCode CC, MVT VT) const {
-    return
-      getCondCodeAction(CC, VT) == Legal ||
-      getCondCodeAction(CC, VT) == Custom;
+    return getCondCodeAction(CC, VT) == Legal;
+  }
+
+  /// Return true if the specified condition code is legal or custom on this
+  /// target.
+  bool isCondCodeLegalOrCustom(ISD::CondCode CC, MVT VT) const {
+    return getCondCodeAction(CC, VT) == Legal ||
+           getCondCodeAction(CC, VT) == Custom;
   }
 
   /// If the action for this operation is to promote, this method returns the
@@ -2532,6 +2539,11 @@ protected:
   /// sequence of memory operands that is recognized by PrologEpilogInserter.
   MachineBasicBlock *emitPatchPoint(MachineInstr &MI,
                                     MachineBasicBlock *MBB) const;
+
+  /// Replace/modify the XRay custom event operands with target-dependent
+  /// details.
+  MachineBasicBlock *emitXRayCustomEvent(MachineInstr &MI,
+                                         MachineBasicBlock *MBB) const;
 };
 
 /// This class defines information used to lower LLVM code to legal SelectionDAG
@@ -2550,6 +2562,16 @@ public:
   explicit TargetLowering(const TargetMachine &TM);
 
   bool isPositionIndependent() const;
+
+  virtual bool isSDNodeSourceOfDivergence(const SDNode *N,
+                                          FunctionLoweringInfo *FLI,
+                                          DivergenceAnalysis *DA) const {
+    return false;
+  }
+
+  virtual bool isSDNodeAlwaysUniform(const SDNode * N) const {
+    return false;
+  }
 
   /// Returns true by value, base pointer and offset pointer and addressing mode
   /// by reference if the node's address can be legally represented as
@@ -2702,6 +2724,30 @@ public:
   bool SimplifyDemandedBits(SDValue Op, const APInt &DemandedMask,
                             DAGCombinerInfo &DCI) const;
 
+  /// Look at Vector Op. At this point, we know that only the DemandedElts
+  /// elements of the result of Op are ever used downstream.  If we can use
+  /// this information to simplify Op, create a new simplified DAG node and
+  /// return true, storing the original and new nodes in TLO.
+  /// Otherwise, analyze the expression and return a mask of KnownUndef and
+  /// KnownZero elements for the expression (used to simplify the caller).
+  /// The KnownUndef/Zero elements may only be accurate for those bits
+  /// in the DemandedMask.
+  /// \p AssumeSingleUse When this parameter is true, this function will
+  ///    attempt to simplify \p Op even if there are multiple uses.
+  ///    Callers are responsible for correctly updating the DAG based on the
+  ///    results of this function, because simply replacing replacing TLO.Old
+  ///    with TLO.New will be incorrect when this parameter is true and TLO.Old
+  ///    has multiple uses.
+  bool SimplifyDemandedVectorElts(SDValue Op, const APInt &DemandedElts,
+                                  APInt &KnownUndef, APInt &KnownZero,
+                                  TargetLoweringOpt &TLO, unsigned Depth = 0,
+                                  bool AssumeSingleUse = false) const;
+
+  /// Helper wrapper around SimplifyDemandedVectorElts
+  bool SimplifyDemandedVectorElts(SDValue Op, const APInt &DemandedElts,
+                                  APInt &KnownUndef, APInt &KnownZero,
+                                  DAGCombinerInfo &DCI) const;
+
   /// Determine which of the bits specified in Mask are known to be either zero
   /// or one and return them in the KnownZero/KnownOne bitsets. The DemandedElts
   /// argument allows us to only collect the known bits that are shared by the
@@ -2729,6 +2775,15 @@ public:
                                                    const APInt &DemandedElts,
                                                    const SelectionDAG &DAG,
                                                    unsigned Depth = 0) const;
+
+  /// Attempt to simplify any target nodes based on the demanded vector
+  /// elements, returning true on success. Otherwise, analyze the expression and
+  /// return a mask of KnownUndef and KnownZero elements for the expression
+  /// (used to simplify the caller). The KnownUndef/Zero elements may only be
+  /// accurate for those bits in the DemandedMask
+  virtual bool SimplifyDemandedVectorEltsForTargetNode(
+      SDValue Op, const APInt &DemandedElts, APInt &KnownUndef,
+      APInt &KnownZero, TargetLoweringOpt &TLO, unsigned Depth = 0) const;
 
   struct DAGCombinerInfo {
     void *DC;  // The DAG Combiner object.
@@ -2764,10 +2819,6 @@ public:
   /// Return if the N is a constant or constant vector equal to the false value
   /// from getBooleanContents().
   bool isConstFalseVal(const SDNode *N) const;
-
-  /// Return a constant of type VT that contains a true value that respects
-  /// getBooleanContents()
-  SDValue getConstTrueVal(SelectionDAG &DAG, EVT VT, const SDLoc &DL) const;
 
   /// Return if \p N is a True value when extended to \p VT.
   bool isExtendedTrueVal(const ConstantSDNode *N, EVT VT, bool Signed) const;

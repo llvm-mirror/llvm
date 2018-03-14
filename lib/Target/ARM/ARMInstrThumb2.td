@@ -2661,7 +2661,9 @@ class T2SMMUL<bits<4> op7_4, string opc, list<dag> pattern>
 }
 def t2SMMUL : T2SMMUL<0b0000, "smmul", [(set rGPR:$Rd, (mulhs rGPR:$Rn,
                                                               rGPR:$Rm))]>;
-def t2SMMULR : T2SMMUL<0b0001, "smmulr", []>;
+def t2SMMULR :
+  T2SMMUL<0b0001, "smmulr",
+          [(set rGPR:$Rd, (ARMsmmlar rGPR:$Rn, rGPR:$Rm, (i32 0)))]>;
 
 class T2FourRegSMMLA<bits<3> op22_20, bits<4> op7_4, string opc,
                      list<dag> pattern>
@@ -2677,9 +2679,11 @@ class T2FourRegSMMLA<bits<3> op22_20, bits<4> op7_4, string opc,
 
 def t2SMMLA :   T2FourRegSMMLA<0b101, 0b0000, "smmla",
                 [(set rGPR:$Rd, (add (mulhs rGPR:$Rm, rGPR:$Rn), rGPR:$Ra))]>;
-def t2SMMLAR:   T2FourRegSMMLA<0b101, 0b0001, "smmlar", []>;
+def t2SMMLAR:   T2FourRegSMMLA<0b101, 0b0001, "smmlar",
+                [(set rGPR:$Rd, (ARMsmmlar rGPR:$Rn, rGPR:$Rm, rGPR:$Ra))]>;
 def t2SMMLS:    T2FourRegSMMLA<0b110, 0b0000, "smmls", []>;
-def t2SMMLSR:   T2FourRegSMMLA<0b110, 0b0001, "smmlsr", []>;
+def t2SMMLSR:   T2FourRegSMMLA<0b110, 0b0001, "smmlsr",
+                [(set rGPR:$Rd, (ARMsmmlsr rGPR:$Rn, rGPR:$Rm, rGPR:$Ra))]>;
 
 class T2ThreeRegSMUL<bits<3> op22_20, bits<2> op5_4, string opc,
                      list<dag> pattern>
@@ -3696,6 +3700,8 @@ def : t2InstAlias<"esb$p.w", (t2HINT 16, pred:$p), 1> {
 def : t2InstAlias<"esb$p", (t2HINT 16, pred:$p), 0> {
   let Predicates = [IsThumb2, HasRAS];
 }
+def : t2InstAlias<"csdb$p.w", (t2HINT 20, pred:$p), 0>;
+def : t2InstAlias<"csdb$p",   (t2HINT 20, pred:$p), 1>;
 
 def t2DBG : T2I<(outs), (ins imm0_15:$opt), NoItinerary, "dbg", "\t$opt",
                 [(int_arm_dbg imm0_15:$opt)]> {

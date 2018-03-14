@@ -272,7 +272,7 @@ static void updateBranchWeights(BasicBlock *Header, BranchInst *LatchBR,
 /// \param IterNumber The serial number of the iteration currently being
 /// peeled off.
 /// \param Exit The exit block of the original loop.
-/// \param[out] NewBlocks A list of the the blocks in the newly created clone
+/// \param[out] NewBlocks A list of the blocks in the newly created clone
 /// \param[out] VMap The value map between the loop and the new clone.
 /// \param LoopBlocks A helper for DFS-traversal of the loop.
 /// \param LVMap A value-map that maps instructions from the original loop to
@@ -500,10 +500,7 @@ bool llvm::peelLoop(Loop *L, unsigned PeelCount, LoopInfo *LI,
       // the original loop body.
       if (Iter == 0)
         DT->changeImmediateDominator(Exit, cast<BasicBlock>(LVMap[Latch]));
-#ifndef NDEBUG
-      if (VerifyDomInfo)
-        DT->verifyDomTree();
-#endif
+      assert(DT->verify(DominatorTree::VerificationLevel::Fast));
     }
 
     updateBranchWeights(InsertBot, cast<BranchInst>(VMap[LatchBR]), Iter,

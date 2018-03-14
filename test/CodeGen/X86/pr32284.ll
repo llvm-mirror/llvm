@@ -308,7 +308,7 @@ entry:
 define void @f2() {
 ; X86-O0-LABEL: f2:
 ; X86-O0:       # %bb.0: # %entry
-; X86-O0-NEXT:    # implicit-def: %rax
+; X86-O0-NEXT:    # implicit-def: $rax
 ; X86-O0-NEXT:    movzbl var_7, %ecx
 ; X86-O0-NEXT:    cmpb $0, var_7
 ; X86-O0-NEXT:    setne %dl
@@ -361,7 +361,7 @@ define void @f2() {
 ; 686-O0-NEXT:    .cfi_def_cfa_offset 14
 ; 686-O0-NEXT:    .cfi_offset %esi, -12
 ; 686-O0-NEXT:    .cfi_offset %edi, -8
-; 686-O0-NEXT:    # implicit-def: %eax
+; 686-O0-NEXT:    # implicit-def: $eax
 ; 686-O0-NEXT:    movzbl var_7, %ecx
 ; 686-O0-NEXT:    cmpb $0, var_7
 ; 686-O0-NEXT:    setne %dl
@@ -479,17 +479,16 @@ define void @f3() #0 {
 ; X64-LABEL: f3:
 ; X64:       # %bb.0: # %entry
 ; X64-NEXT:    movl {{.*}}(%rip), %eax
-; X64-NEXT:    movl $4294967295, %ecx # imm = 0xFFFFFFFF
-; X64-NEXT:    xorq %rax, %rcx
-; X64-NEXT:    xorl %edx, %edx
-; X64-NEXT:    testq %rax, %rax
-; X64-NEXT:    sete %dl
-; X64-NEXT:    movl {{.*}}(%rip), %eax
-; X64-NEXT:    xorl %ecx, %eax
-; X64-NEXT:    andq %rdx, %rax
-; X64-NEXT:    orq %rcx, %rax
-; X64-NEXT:    movq %rax, -{{[0-9]+}}(%rsp)
-; X64-NEXT:    movl %ecx, {{.*}}(%rip)
+; X64-NEXT:    xorl %ecx, %ecx
+; X64-NEXT:    testl %eax, %eax
+; X64-NEXT:    notl %eax
+; X64-NEXT:    sete %cl
+; X64-NEXT:    movl {{.*}}(%rip), %edx
+; X64-NEXT:    xorl %eax, %edx
+; X64-NEXT:    andl %edx, %ecx
+; X64-NEXT:    orl %eax, %ecx
+; X64-NEXT:    movq %rcx, -{{[0-9]+}}(%rsp)
+; X64-NEXT:    movl %eax, {{.*}}(%rip)
 ; X64-NEXT:    retq
 ;
 ; 686-O0-LABEL: f3:

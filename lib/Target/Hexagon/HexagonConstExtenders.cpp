@@ -39,31 +39,57 @@ namespace llvm {
   FunctionPass *createHexagonConstExtenders();
 }
 
+static int32_t adjustUp(int32_t V, uint8_t A, uint8_t O) {
+  assert(isPowerOf2_32(A));
+  int32_t U = (V & -A) + O;
+  return U >= V ? U : U+A;
+}
+
+static int32_t adjustDown(int32_t V, uint8_t A, uint8_t O) {
+  assert(isPowerOf2_32(A));
+  int32_t U = (V & -A) + O;
+  return U <= V ? U : U-A;
+}
+
 namespace {
   struct OffsetRange {
+    // The range of values between Min and Max that are of form Align*N+Offset,
+    // for some integer N. Min and Max are required to be of that form as well,
+    // except in the case of an empty range.
     int32_t Min = INT_MIN, Max = INT_MAX;
     uint8_t Align = 1;
+    uint8_t Offset = 0;
 
     OffsetRange() = default;
-    OffsetRange(int32_t L, int32_t H, uint8_t A)
-      : Min(L), Max(H), Align(A) {}
+    OffsetRange(int32_t L, int32_t H, uint8_t A, uint8_t O = 0)
+      : Min(L), Max(H), Align(A), Offset(O) {}
     OffsetRange &intersect(OffsetRange A) {
-      Align = std::max(Align, A.Align);
-      Min = std::max(Min, A.Min);
-      Max = std::min(Max, A.Max);
+      if (Align < A.Align)
+        std::swap(*this, A);
+
+      // Align >= A.Align.
+      if (Offset >= A.Offset && (Offset - A.Offset) % A.Align == 0) {
+        Min = adjustUp(std::max(Min, A.Min), Align, Offset);
+        Max = adjustDown(std::min(Max, A.Max), Align, Offset);
+      } else {
+        // Make an empty range.
+        Min = 0;
+        Max = -1;
+      }
       // Canonicalize empty ranges.
       if (Min > Max)
         std::tie(Min, Max, Align) = std::make_tuple(0, -1, 1);
       return *this;
     }
     OffsetRange &shift(int32_t S) {
-      assert(alignTo(std::abs(S), Align) == uint64_t(std::abs(S)));
       Min += S;
       Max += S;
+      Offset = (Offset+S) % Align;
       return *this;
     }
     OffsetRange &extendBy(int32_t D) {
       // If D < 0, extend Min, otherwise extend Max.
+      assert(D % Align == 0);
       if (D < 0)
         Min = (INT_MIN-D < Min) ? Min+D : INT_MIN;
       else
@@ -74,7 +100,7 @@ namespace {
       return Min > Max;
     }
     bool contains(int32_t V) const {
-      return Min <= V && V <= Max && (V % Align) == 0;
+      return Min <= V && V <= Max && (V-Offset) % Align == 0;
     }
     bool operator==(const OffsetRange &R) const {
       return Min == R.Min && Max == R.Max && Align == R.Align;
@@ -408,7 +434,8 @@ namespace {
   raw_ostream &operator<< (raw_ostream &OS, const OffsetRange &OR) {
     if (OR.Min > OR.Max)
       OS << '!';
-    OS << '[' << OR.Min << ',' << OR.Max << "]a" << unsigned(OR.Align);
+    OS << '[' << OR.Min << ',' << OR.Max << "]a" << unsigned(OR.Align)
+       << '+' << unsigned(OR.Offset);
     return OS;
   }
 
@@ -999,15 +1026,19 @@ unsigned HCE::getDirectRegReplacement(unsigned ExtOpc) const {
   return 0;
 }
 
-// Return the allowable deviation from the current value of Rb which the
+// Return the allowable deviation from the current value of Rb (i.e. the
+// range of values that can be added to the current value) which the
 // instruction MI can accommodate.
 // The instruction MI is a user of register Rb, which is defined via an
 // extender. It may be possible for MI to be tweaked to work for a register
 // defined with a slightly different value. For example
-//   ... = L2_loadrub_io Rb, 0
+//   ... = L2_loadrub_io Rb, 1
 // can be modifed to be
-//   ... = L2_loadrub_io Rb', 1
-// if Rb' = Rb-1.
+//   ... = L2_loadrub_io Rb', 0
+// if Rb' = Rb+1.
+// The range for Rb would be [Min+1, Max+1], where [Min, Max] is a range
+// for L2_loadrub with offset 0. That means that Rb could be replaced with
+// Rc, where Rc-Rb belongs to [Min+1, Max+1].
 OffsetRange HCE::getOffsetRange(Register Rb, const MachineInstr &MI) const {
   unsigned Opc = MI.getOpcode();
   // Instructions that are constant-extended may be replaced with something
@@ -1280,11 +1311,17 @@ void HCE::assignInits(const ExtRoot &ER, unsigned Begin, unsigned End,
   SmallVector<RangeTree::Node*,8> Nodes;
   Tree.order(Nodes);
 
-  auto MaxAlign = [](const SmallVectorImpl<RangeTree::Node*> &Nodes) {
-    uint8_t Align = 1;
-    for (RangeTree::Node *N : Nodes)
-      Align = std::max(Align, N->Range.Align);
-    return Align;
+  auto MaxAlign = [](const SmallVectorImpl<RangeTree::Node*> &Nodes,
+                     uint8_t Align, uint8_t Offset) {
+    for (RangeTree::Node *N : Nodes) {
+      if (N->Range.Align <= Align || N->Range.Offset < Offset)
+        continue;
+      if ((N->Range.Offset - Offset) % Align != 0)
+        continue;
+      Align = N->Range.Align;
+      Offset = N->Range.Offset;
+    }
+    return std::make_pair(Align, Offset);
   };
 
   // Construct the set of all potential definition points from the endpoints
@@ -1294,14 +1331,14 @@ void HCE::assignInits(const ExtRoot &ER, unsigned Begin, unsigned End,
   std::set<int32_t> CandSet;
   for (RangeTree::Node *N : Nodes) {
     const OffsetRange &R = N->Range;
-    uint8_t A0 = MaxAlign(Tree.nodesWith(R.Min, false));
+    auto P0 = MaxAlign(Tree.nodesWith(R.Min, false), R.Align, R.Offset);
     CandSet.insert(R.Min);
-    if (R.Align < A0)
-      CandSet.insert(R.Min < 0 ? -alignDown(-R.Min, A0) : alignTo(R.Min, A0));
-    uint8_t A1 = MaxAlign(Tree.nodesWith(R.Max, false));
+    if (R.Align < P0.first)
+      CandSet.insert(adjustUp(R.Min, P0.first, P0.second));
+    auto P1 = MaxAlign(Tree.nodesWith(R.Max, false), R.Align, R.Offset);
     CandSet.insert(R.Max);
-    if (R.Align < A1)
-      CandSet.insert(R.Max < 0 ? -alignTo(-R.Max, A1) : alignDown(R.Max, A1));
+    if (R.Align < P1.first)
+      CandSet.insert(adjustDown(R.Max, P1.first, P1.second));
   }
 
   // Build the assignment map: candidate C -> { list of extender indexes }.
@@ -1618,7 +1655,7 @@ bool HCE::replaceInstrExpr(const ExtDesc &ED, const ExtenderInit &ExtI,
     assert(IdxOpc == Hexagon::A2_addi);
 
     // Clamp Diff to the 16 bit range.
-    int32_t D = isInt<16>(Diff) ? Diff : (Diff > 32767 ? 32767 : -32767);
+    int32_t D = isInt<16>(Diff) ? Diff : (Diff > 0 ? 32767 : -32768);
     BuildMI(MBB, At, dl, HII->get(IdxOpc))
       .add(MI.getOperand(0))
       .add(MachineOperand(ExtR))
@@ -1626,11 +1663,13 @@ bool HCE::replaceInstrExpr(const ExtDesc &ED, const ExtenderInit &ExtI,
     Diff -= D;
 #ifndef NDEBUG
     // Make sure the output is within allowable range for uses.
+    // "Diff" is a difference in the "opposite direction", i.e. Ext - DefV,
+    // not DefV - Ext, as the getOffsetRange would calculate.
     OffsetRange Uses = getOffsetRange(MI.getOperand(0));
-    if (!Uses.contains(Diff))
-      dbgs() << "Diff: " << Diff << " out of range " << Uses
+    if (!Uses.contains(-Diff))
+      dbgs() << "Diff: " << -Diff << " out of range " << Uses
              << " for " << MI;
-    assert(Uses.contains(Diff));
+    assert(Uses.contains(-Diff));
 #endif
     MBB.erase(MI);
     return true;

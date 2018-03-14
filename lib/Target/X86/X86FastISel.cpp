@@ -2675,7 +2675,7 @@ bool X86FastISel::fastLowerIntrinsicCall(const IntrinsicInst *II) {
             (FrameReg == X86::EBP && VT == MVT::i32)) &&
            "Invalid Frame Register!");
 
-    // Always make a copy of the frame register to to a vreg first, so that we
+    // Always make a copy of the frame register to a vreg first, so that we
     // never directly reference the frame register (the TwoAddressInstruction-
     // Pass doesn't like that).
     unsigned SrcReg = createResultReg(RC);
@@ -2726,7 +2726,7 @@ bool X86FastISel::fastLowerIntrinsicCall(const IntrinsicInst *II) {
     if (MCI->getSourceAddressSpace() > 255 || MCI->getDestAddressSpace() > 255)
       return false;
 
-    return lowerCallTo(II, "memcpy", II->getNumArgOperands() - 2);
+    return lowerCallTo(II, "memcpy", II->getNumArgOperands() - 1);
   }
   case Intrinsic::memset: {
     const MemSetInst *MSI = cast<MemSetInst>(II);
@@ -2741,7 +2741,7 @@ bool X86FastISel::fastLowerIntrinsicCall(const IntrinsicInst *II) {
     if (MSI->getDestAddressSpace() > 255)
       return false;
 
-    return lowerCallTo(II, "memset", II->getNumArgOperands() - 2);
+    return lowerCallTo(II, "memset", II->getNumArgOperands() - 1);
   }
   case Intrinsic::stackprotector: {
     // Emit code to store the stack guard onto the stack.
@@ -3170,6 +3170,10 @@ bool X86FastISel::fastLowerCall(CallLoweringInfo &CLI) {
   // Functions with no_caller_saved_registers that need special handling.
   if ((CI && CI->hasFnAttr("no_caller_saved_registers")) ||
       (CalledFn && CalledFn->hasFnAttribute("no_caller_saved_registers")))
+    return false;
+
+  // Functions using retpoline should use SDISel for calls.
+  if (Subtarget->useRetpoline())
     return false;
 
   // Handle only C, fastcc, and webkit_js calling conventions for now.

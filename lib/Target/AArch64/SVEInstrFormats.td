@@ -11,6 +11,206 @@
 //
 //===----------------------------------------------------------------------===//
 
+def SVEPatternOperand : AsmOperandClass {
+  let Name = "SVEPattern";
+  let ParserMethod = "tryParseSVEPattern";
+  let PredicateMethod = "isSVEPattern";
+  let RenderMethod = "addImmOperands";
+  let DiagnosticType = "InvalidSVEPattern";
+}
+
+def sve_pred_enum : Operand<i32>, ImmLeaf<i32, [{
+  return (((uint32_t)Imm) < 32);
+  }]> {
+
+  let PrintMethod = "printSVEPattern";
+  let ParserMatchClass = SVEPatternOperand;
+}
+
+class SVELogicalImmOperand<int Width> : AsmOperandClass {
+  let Name = "SVELogicalImm" # Width;
+  let DiagnosticType = "LogicalSecondSource";
+  let PredicateMethod = "isLogicalImm<int" # Width # "_t>";
+  let RenderMethod = "addLogicalImmOperands<int" # Width # "_t>";
+}
+
+def sve_logical_imm8 : Operand<i64> {
+  let ParserMatchClass = SVELogicalImmOperand<8>;
+  let PrintMethod = "printLogicalImm<int8_t>";
+
+  let MCOperandPredicate = [{
+    if (!MCOp.isImm())
+      return false;
+    int64_t Val = AArch64_AM::decodeLogicalImmediate(MCOp.getImm(), 64);
+    return AArch64_AM::isSVEMaskOfIdenticalElements<int8_t>(Val);
+  }];
+}
+
+def sve_logical_imm16 : Operand<i64> {
+  let ParserMatchClass = SVELogicalImmOperand<16>;
+  let PrintMethod = "printLogicalImm<int16_t>";
+
+  let MCOperandPredicate = [{
+    if (!MCOp.isImm())
+      return false;
+    int64_t Val = AArch64_AM::decodeLogicalImmediate(MCOp.getImm(), 64);
+    return AArch64_AM::isSVEMaskOfIdenticalElements<int16_t>(Val);
+  }];
+}
+
+def sve_logical_imm32 : Operand<i64> {
+  let ParserMatchClass = SVELogicalImmOperand<32>;
+  let PrintMethod = "printLogicalImm<int32_t>";
+
+  let MCOperandPredicate = [{
+    if (!MCOp.isImm())
+      return false;
+    int64_t Val = AArch64_AM::decodeLogicalImmediate(MCOp.getImm(), 64);
+    return AArch64_AM::isSVEMaskOfIdenticalElements<int32_t>(Val);
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+class SVELogicalImmNotOperand<int Width> : AsmOperandClass {
+  let Name = "SVELogicalImm" # Width # "Not";
+  let DiagnosticType = "LogicalSecondSource";
+  let PredicateMethod = "isLogicalImm<int" # Width # "_t>";
+  let RenderMethod = "addLogicalImmNotOperands<int" # Width # "_t>";
+}
+
+def sve_logical_imm8_not : Operand<i64> {
+  let ParserMatchClass = SVELogicalImmNotOperand<8>;
+}
+
+def sve_logical_imm16_not : Operand<i64> {
+  let ParserMatchClass = SVELogicalImmNotOperand<16>;
+}
+
+def sve_logical_imm32_not : Operand<i64> {
+  let ParserMatchClass = SVELogicalImmNotOperand<32>;
+}
+
+//===----------------------------------------------------------------------===//
+// SVE PTrue - These are used extensively throughout the pattern matching so
+//             it's important we define them first.
+//===----------------------------------------------------------------------===//
+
+class sve_int_ptrue<bits<2> sz8_64, bits<3> opc, string asm, PPRRegOp pprty>
+: I<(outs pprty:$Pd), (ins sve_pred_enum:$pattern),
+  asm, "\t$Pd, $pattern",
+  "",
+  []>, Sched<[]> {
+  bits<4> Pd;
+  bits<5> pattern;
+  let Inst{31-24} = 0b00100101;
+  let Inst{23-22} = sz8_64;
+  let Inst{21-19} = 0b011;
+  let Inst{18-17} = opc{2-1};
+  let Inst{16}    = opc{0};
+  let Inst{15-10} = 0b111000;
+  let Inst{9-5}   = pattern;
+  let Inst{4}     = 0b0;
+  let Inst{3-0}   = Pd;
+
+  let Defs = !if(!eq (opc{0}, 1), [NZCV], []);
+}
+
+multiclass sve_int_ptrue<bits<3> opc, string asm> {
+  def _B : sve_int_ptrue<0b00, opc, asm, PPR8>;
+  def _H : sve_int_ptrue<0b01, opc, asm, PPR16>;
+  def _S : sve_int_ptrue<0b10, opc, asm, PPR32>;
+  def _D : sve_int_ptrue<0b11, opc, asm, PPR64>;
+
+  def : InstAlias<asm # "\t$Pd",
+                  (!cast<Instruction>(NAME # _B) PPR8:$Pd, 0b11111), 1>;
+  def : InstAlias<asm # "\t$Pd",
+                  (!cast<Instruction>(NAME # _H) PPR16:$Pd, 0b11111), 1>;
+  def : InstAlias<asm # "\t$Pd",
+                  (!cast<Instruction>(NAME # _S) PPR32:$Pd, 0b11111), 1>;
+  def : InstAlias<asm # "\t$Pd",
+                  (!cast<Instruction>(NAME # _D) PPR64:$Pd, 0b11111), 1>;
+}
+
+let Predicates = [HasSVE] in {
+  defm PTRUE  : sve_int_ptrue<0b000, "ptrue">;
+  defm PTRUES : sve_int_ptrue<0b001, "ptrues">;
+}
+
+//===----------------------------------------------------------------------===//
+// SVE Permute - Cross Lane Group
+//===----------------------------------------------------------------------===//
+
+class sve_int_perm_dup_r<bits<2> sz8_64, string asm, ZPRRegOp zprty,
+                         RegisterClass srcRegType>
+: I<(outs zprty:$Zd), (ins srcRegType:$Rn),
+  asm, "\t$Zd, $Rn",
+  "",
+  []>, Sched<[]> {
+  bits<5> Rn;
+  bits<5> Zd;
+  let Inst{31-24} = 0b00000101;
+  let Inst{23-22} = sz8_64;
+  let Inst{21-10} = 0b100000001110;
+  let Inst{9-5}   = Rn;
+  let Inst{4-0}   = Zd;
+}
+
+multiclass sve_int_perm_dup_r<string asm> {
+  def _B : sve_int_perm_dup_r<0b00, asm, ZPR8, GPR32sp>;
+  def _H : sve_int_perm_dup_r<0b01, asm, ZPR16, GPR32sp>;
+  def _S : sve_int_perm_dup_r<0b10, asm, ZPR32, GPR32sp>;
+  def _D : sve_int_perm_dup_r<0b11, asm, ZPR64, GPR64sp>;
+
+  def : InstAlias<"mov $Zd, $Rn",
+                  (!cast<Instruction>(NAME # _B) ZPR8:$Zd, GPR32sp:$Rn), 1>;
+  def : InstAlias<"mov $Zd, $Rn",
+                  (!cast<Instruction>(NAME # _H) ZPR16:$Zd, GPR32sp:$Rn), 1>;
+  def : InstAlias<"mov $Zd, $Rn",
+                  (!cast<Instruction>(NAME # _S) ZPR32:$Zd, GPR32sp:$Rn), 1>;
+  def : InstAlias<"mov $Zd, $Rn",
+                  (!cast<Instruction>(NAME # _D) ZPR64:$Zd, GPR64sp:$Rn), 1>;
+}
+
+//===----------------------------------------------------------------------===//
+// SVE Logical Mask Immediate Group
+//===----------------------------------------------------------------------===//
+
+class sve_int_log_imm<bits<2> opc, string asm>
+: I<(outs ZPR64:$Zdn), (ins ZPR64:$_Zdn, logical_imm64:$imms13),
+  asm, "\t$Zdn, $_Zdn, $imms13",
+  "", []>, Sched<[]> {
+  bits<5> Zdn;
+  bits<13> imms13;
+  let Inst{31-24} = 0b00000101;
+  let Inst{23-22} = opc;
+  let Inst{21-18} = 0b0000;
+  let Inst{17-5}  = imms13;
+  let Inst{4-0}   = Zdn;
+
+  let Constraints = "$Zdn = $_Zdn";
+  let DecoderMethod = "DecodeSVELogicalImmInstruction";
+}
+
+multiclass sve_int_log_imm<bits<2> opc, string asm, string alias> {
+  def NAME : sve_int_log_imm<opc, asm>;
+
+  def : InstAlias<asm # "\t$Zdn, $Zdn, $imm",
+                  (!cast<Instruction>(NAME) ZPR8:$Zdn, sve_logical_imm8:$imm), 4>;
+  def : InstAlias<asm # "\t$Zdn, $Zdn, $imm",
+                  (!cast<Instruction>(NAME) ZPR16:$Zdn, sve_logical_imm16:$imm), 3>;
+  def : InstAlias<asm # "\t$Zdn, $Zdn, $imm",
+                  (!cast<Instruction>(NAME) ZPR32:$Zdn, sve_logical_imm32:$imm), 2>;
+
+  def : InstAlias<alias # "\t$Zdn, $Zdn, $imm",
+                  (!cast<Instruction>(NAME) ZPR8:$Zdn, sve_logical_imm8_not:$imm), 0>;
+  def : InstAlias<alias # "\t$Zdn, $Zdn, $imm",
+                  (!cast<Instruction>(NAME) ZPR16:$Zdn, sve_logical_imm16_not:$imm), 0>;
+  def : InstAlias<alias # "\t$Zdn, $Zdn, $imm",
+                  (!cast<Instruction>(NAME) ZPR32:$Zdn, sve_logical_imm32_not:$imm), 0>;
+  def : InstAlias<alias # "\t$Zdn, $Zdn, $imm",
+                  (!cast<Instruction>(NAME) ZPR64:$Zdn, logical_imm64_not:$imm), 0>;
+}
+
 //===----------------------------------------------------------------------===//
 // SVE Integer Arithmetic -  Unpredicated Group.
 //===----------------------------------------------------------------------===//
@@ -41,6 +241,43 @@ multiclass sve_int_bin_cons_arit_0<bits<3> opc, string asm> {
 }
 
 //===----------------------------------------------------------------------===//
+// SVE Stack Allocation Group
+//===----------------------------------------------------------------------===//
+
+class sve_int_arith_vl<bit opc, string asm>
+: I<(outs GPR64sp:$Rd), (ins GPR64sp:$Rn, simm6_32b:$imm6),
+  asm, "\t$Rd, $Rn, $imm6",
+  "",
+  []>, Sched<[]> {
+  bits<5> Rd;
+  bits<5> Rn;
+  bits<6> imm6;
+  let Inst{31-23} = 0b000001000;
+  let Inst{22}    = opc;
+  let Inst{21}    = 0b1;
+  let Inst{20-16} = Rn;
+  let Inst{15-11} = 0b01010;
+  let Inst{10-5}  = imm6;
+  let Inst{4-0}   = Rd;
+}
+
+class sve_int_read_vl_a<bit op, bits<5> opc2, string asm>
+: I<(outs GPR64:$Rd), (ins simm6_32b:$imm6),
+  asm, "\t$Rd, $imm6",
+  "",
+  []>, Sched<[]> {
+  bits<5> Rd;
+  bits<6> imm6;
+  let Inst{31-23} = 0b000001001;
+  let Inst{22}    = op;
+  let Inst{21}    = 0b1;
+  let Inst{20-16} = opc2{4-0};
+  let Inst{15-11} = 0b01010;
+  let Inst{10-5}  = imm6;
+  let Inst{4-0}   = Rd;
+}
+
+//===----------------------------------------------------------------------===//
 // SVE Permute - In Lane Group
 //===----------------------------------------------------------------------===//
 
@@ -68,6 +305,37 @@ multiclass sve_int_perm_bin_perm_zz<bits<3> opc, string asm> {
   def _H : sve_int_perm_bin_perm_zz<opc, 0b01, asm, ZPR16>;
   def _S : sve_int_perm_bin_perm_zz<opc, 0b10, asm, ZPR32>;
   def _D : sve_int_perm_bin_perm_zz<opc, 0b11, asm, ZPR64>;
+}
+
+//===----------------------------------------------------------------------===//
+// SVE Integer Arithmetic - Binary Predicated Group
+//===----------------------------------------------------------------------===//
+
+class sve_int_bin_pred_arit_log<bits<2> sz8_64, bits<2> fmt, bits<3> opc,
+                                string asm, ZPRRegOp zprty>
+: I<(outs zprty:$Zdn), (ins PPR3bAny:$Pg, zprty:$_Zdn, zprty:$Zm),
+  asm, "\t$Zdn, $Pg/m, $_Zdn, $Zm", "", []>, Sched<[]> {
+  bits<3> Pg;
+  bits<5> Zdn;
+  bits<5> Zm;
+  let Inst{31-24} = 0b00000100;
+  let Inst{23-22} = sz8_64;
+  let Inst{21}    = 0b0;
+  let Inst{20-19} = fmt;
+  let Inst{18-16} = opc;
+  let Inst{15-13} = 0b000;
+  let Inst{12-10} = Pg;
+  let Inst{9-5}   = Zm;
+  let Inst{4-0}   = Zdn;
+
+  let Constraints = "$Zdn = $_Zdn";
+}
+
+multiclass sve_int_bin_pred_arit_0<bits<3> opc, string asm> {
+  def _B : sve_int_bin_pred_arit_log<0b00, 0b00, opc, asm, ZPR8>;
+  def _H : sve_int_bin_pred_arit_log<0b01, 0b00, opc, asm, ZPR16>;
+  def _S : sve_int_bin_pred_arit_log<0b10, 0b00, opc, asm, ZPR32>;
+  def _D : sve_int_bin_pred_arit_log<0b11, 0b00, opc, asm, ZPR64>;
 }
 
 //===----------------------------------------------------------------------===//

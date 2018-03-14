@@ -37,7 +37,7 @@ struct CachePruningPolicy {
   std::chrono::seconds Expiration = std::chrono::hours(7 * 24); // 1w
 
   /// The maximum size for the cache directory, in terms of percentage of the
-  /// available space on the the disk. Set to 100 to indicate no limit, 50 to
+  /// available space on the disk. Set to 100 to indicate no limit, 50 to
   /// indicate that the cache size will not be left over half the available disk
   /// space. A value over 100 will be reduced to 100. A value of 0 disables the
   /// percentage size-based pruning.
@@ -66,7 +66,7 @@ struct CachePruningPolicy {
 Expected<CachePruningPolicy> parseCachePruningPolicy(StringRef PolicyStr);
 
 /// Peform pruning using the supplied policy, returns true if pruning
-/// occured, i.e. if Policy.Interval was expired.
+/// occurred, i.e. if Policy.Interval was expired.
 ///
 /// As a safeguard against data loss if the user specifies the wrong directory
 /// as their cache directory, this function will ignore files not matching the

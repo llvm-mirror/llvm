@@ -81,9 +81,9 @@ bool MCWasmStreamer::EmitSymbolAttribute(MCSymbol *S, MCSymbolAttr Attribute) {
 
   auto *Symbol = cast<MCSymbolWasm>(S);
 
-  // Adding a symbol attribute always introduces the symbol, note that an
-  // important side effect of calling registerSymbol here is to register
-  // the symbol with the assembler.
+  // Adding a symbol attribute always introduces the symbol; note that an
+  // important side effect of calling registerSymbol here is to register the
+  // symbol with the assembler.
   getAssembler().registerSymbol(*Symbol);
 
   switch (Attribute) {
@@ -113,11 +113,11 @@ bool MCWasmStreamer::EmitSymbolAttribute(MCSymbol *S, MCSymbolAttr Attribute) {
     break;
 
   case MCSA_ELF_TypeFunction:
-    Symbol->setIsFunction(true);
+    Symbol->setType(wasm::WASM_SYMBOL_TYPE_FUNCTION);
     break;
 
   case MCSA_ELF_TypeObject:
-    Symbol->setIsFunction(false);
+    Symbol->setType(wasm::WASM_SYMBOL_TYPE_DATA);
     break;
 
   default:

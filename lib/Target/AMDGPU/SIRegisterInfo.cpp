@@ -101,13 +101,6 @@ SIRegisterInfo::SIRegisterInfo(const SISubtarget &ST) :
          VGPRSetID < NumRegPressureSets);
 }
 
-void SIRegisterInfo::reserveRegisterTuples(BitVector &Reserved, unsigned Reg) const {
-  MCRegAliasIterator R(Reg, this, true);
-
-  for (; R.isValid(); ++R)
-    Reserved.set(*R);
-}
-
 unsigned SIRegisterInfo::reservedPrivateSegmentBufferReg(
   const MachineFunction &MF) const {
 
@@ -162,6 +155,9 @@ BitVector SIRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   reserveRegisterTuples(Reserved, AMDGPU::SRC_SHARED_LIMIT);
   reserveRegisterTuples(Reserved, AMDGPU::SRC_PRIVATE_BASE);
   reserveRegisterTuples(Reserved, AMDGPU::SRC_PRIVATE_LIMIT);
+
+  // Reserve xnack_mask registers - support is not implemented in Codegen.
+  reserveRegisterTuples(Reserved, AMDGPU::XNACK_MASK);
 
   // Reserve Trap Handler registers - support is not implemented in Codegen.
   reserveRegisterTuples(Reserved, AMDGPU::TBA);
@@ -640,6 +636,7 @@ bool SIRegisterInfo::spillSGPR(MachineBasicBlock::iterator MI,
   MachineBasicBlock *MBB = MI->getParent();
   MachineFunction *MF = MBB->getParent();
   SIMachineFunctionInfo *MFI = MF->getInfo<SIMachineFunctionInfo>();
+  DenseSet<unsigned> SGPRSpillVGPRDefinedSet;
 
   ArrayRef<SIMachineFunctionInfo::SpilledReg> VGPRSpills
     = MFI->getSGPRToVGPRSpills(Index);
@@ -736,11 +733,21 @@ bool SIRegisterInfo::spillSGPR(MachineBasicBlock::iterator MI,
     if (SpillToVGPR) {
       SIMachineFunctionInfo::SpilledReg Spill = VGPRSpills[i];
 
+      // During SGPR spilling to VGPR, determine if the VGPR is defined. The
+      // only circumstance in which we say it is undefined is when it is the
+      // first spill to this VGPR in the first basic block.
+      bool VGPRDefined = true;
+      if (MBB == &MF->front())
+        VGPRDefined = !SGPRSpillVGPRDefinedSet.insert(Spill.VGPR).second;
+
+      // Mark the "old value of vgpr" input undef only if this is the first sgpr
+      // spill to this specific vgpr in the first basic block.
       BuildMI(*MBB, MI, DL,
               TII->getMCOpcodeFromPseudo(AMDGPU::V_WRITELANE_B32),
               Spill.VGPR)
         .addReg(SubReg, getKillRegState(IsKill))
-        .addImm(Spill.Lane);
+        .addImm(Spill.Lane)
+        .addReg(Spill.VGPR, VGPRDefined ? 0 : RegState::Undef);
 
       // FIXME: Since this spills to another register instead of an actual
       // frame index, we should delete the frame index when all references to
@@ -1051,8 +1058,8 @@ void SIRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
         // Convert to an absolute stack address by finding the offset from the
         // scratch wave base and scaling by the wave size.
         //
-        // In an entry function/kernel the stack address is already the absolute
-        // address relative to the the scratch wave offset.
+        // In an entry function/kernel the stack address is already the
+        // absolute address relative to the scratch wave offset.
 
         unsigned DiffReg
           = MRI.createVirtualRegister(&AMDGPU::SReg_32_XM0RegClass);
@@ -1219,6 +1226,10 @@ const TargetRegisterClass *SIRegisterInfo::getPhysRegClass(unsigned Reg) const {
     &AMDGPU::VReg_512RegClass,
     &AMDGPU::SReg_512RegClass,
     &AMDGPU::SCC_CLASSRegClass,
+    &AMDGPU::R600_Reg32RegClass,
+    &AMDGPU::R600_PredicateRegClass,
+    &AMDGPU::Pseudo_SReg_32RegClass,
+    &AMDGPU::Pseudo_SReg_128RegClass,
   };
 
   for (const TargetRegisterClass *BaseClass : BaseClasses) {
@@ -1483,7 +1494,9 @@ SIRegisterInfo::getRegClassForReg(const MachineRegisterInfo &MRI,
 
 bool SIRegisterInfo::isVGPR(const MachineRegisterInfo &MRI,
                             unsigned Reg) const {
-  return hasVGPRs(getRegClassForReg(MRI, Reg));
+  const TargetRegisterClass * RC = getRegClassForReg(MRI, Reg);
+  assert(RC && "Register class for the reg not found");
+  return hasVGPRs(RC);
 }
 
 bool SIRegisterInfo::shouldCoalesce(MachineInstr *MI,

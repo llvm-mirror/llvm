@@ -932,8 +932,11 @@ typedef MetadataTest DISubrangeTest;
 
 TEST_F(DISubrangeTest, get) {
   auto *N = DISubrange::get(Context, 5, 7);
+  auto Count = N->getCount();
   EXPECT_EQ(dwarf::DW_TAG_subrange_type, N->getTag());
-  EXPECT_EQ(5, N->getCount());
+  ASSERT_TRUE(Count);
+  ASSERT_TRUE(Count.is<ConstantInt*>());
+  EXPECT_EQ(5, Count.get<ConstantInt*>()->getSExtValue());
   EXPECT_EQ(7, N->getLowerBound());
   EXPECT_EQ(N, DISubrange::get(Context, 5, 7));
   EXPECT_EQ(DISubrange::get(Context, 5, 0), DISubrange::get(Context, 5));
@@ -944,23 +947,47 @@ TEST_F(DISubrangeTest, get) {
 
 TEST_F(DISubrangeTest, getEmptyArray) {
   auto *N = DISubrange::get(Context, -1, 0);
+  auto Count = N->getCount();
   EXPECT_EQ(dwarf::DW_TAG_subrange_type, N->getTag());
-  EXPECT_EQ(-1, N->getCount());
+  ASSERT_TRUE(Count);
+  ASSERT_TRUE(Count.is<ConstantInt*>());
+  EXPECT_EQ(-1, Count.get<ConstantInt*>()->getSExtValue());
   EXPECT_EQ(0, N->getLowerBound());
   EXPECT_EQ(N, DISubrange::get(Context, -1, 0));
+}
+
+TEST_F(DISubrangeTest, getVariableCount) {
+  DILocalScope *Scope = getSubprogram();
+  DIFile *File = getFile();
+  DIType *Type = getDerivedType();
+  DINode::DIFlags Flags = static_cast<DINode::DIFlags>(7);
+  auto *VlaExpr = DILocalVariable::get(Context, Scope, "vla_expr", File, 8,
+                                       Type, 2, Flags, 8);
+
+  auto *N = DISubrange::get(Context, VlaExpr, 0);
+  auto Count = N->getCount();
+  ASSERT_TRUE(Count);
+  ASSERT_TRUE(Count.is<DIVariable*>());
+  EXPECT_EQ(VlaExpr, Count.get<DIVariable*>());
+  ASSERT_TRUE(isa<DIVariable>(N->getRawCountNode()));
+  EXPECT_EQ(0, N->getLowerBound());
+  EXPECT_EQ("vla_expr", Count.get<DIVariable*>()->getName());
+  EXPECT_EQ(N, DISubrange::get(Context, VlaExpr, 0));
 }
 
 typedef MetadataTest DIEnumeratorTest;
 
 TEST_F(DIEnumeratorTest, get) {
-  auto *N = DIEnumerator::get(Context, 7, "name");
+  auto *N = DIEnumerator::get(Context, 7, false, "name");
   EXPECT_EQ(dwarf::DW_TAG_enumerator, N->getTag());
   EXPECT_EQ(7, N->getValue());
+  EXPECT_FALSE(N->isUnsigned());
   EXPECT_EQ("name", N->getName());
-  EXPECT_EQ(N, DIEnumerator::get(Context, 7, "name"));
+  EXPECT_EQ(N, DIEnumerator::get(Context, 7, false, "name"));
 
-  EXPECT_NE(N, DIEnumerator::get(Context, 8, "name"));
-  EXPECT_NE(N, DIEnumerator::get(Context, 7, "nam"));
+  EXPECT_NE(N, DIEnumerator::get(Context, 7, true, "name"));
+  EXPECT_NE(N, DIEnumerator::get(Context, 8, false, "name"));
+  EXPECT_NE(N, DIEnumerator::get(Context, 7, false, "nam"));
 
   TempDIEnumerator Temp = N->clone();
   EXPECT_EQ(N, MDNode::replaceWithUniqued(std::move(Temp)));
@@ -1330,6 +1357,51 @@ TEST_F(DICompositeTypeTest, replaceOperands) {
   EXPECT_EQ(nullptr, N->getTemplateParams().get());
 }
 
+TEST_F(DICompositeTypeTest, variant_part) {
+  unsigned Tag = dwarf::DW_TAG_variant_part;
+  StringRef Name = "some name";
+  DIFile *File = getFile();
+  unsigned Line = 1;
+  DIScope *Scope = getSubprogram();
+  DIType *BaseType = getCompositeType();
+  uint64_t SizeInBits = 2;
+  uint32_t AlignInBits = 3;
+  uint64_t OffsetInBits = 4;
+  DINode::DIFlags Flags = static_cast<DINode::DIFlags>(5);
+  unsigned RuntimeLang = 6;
+  StringRef Identifier = "some id";
+  DIDerivedType *Discriminator = cast<DIDerivedType>(getDerivedType());
+  DIDerivedType *Discriminator2 = cast<DIDerivedType>(getDerivedType());
+
+  EXPECT_NE(Discriminator, Discriminator2);
+
+  auto *N = DICompositeType::get(
+      Context, Tag, Name, File, Line, Scope, BaseType, SizeInBits, AlignInBits,
+      OffsetInBits, Flags, nullptr, RuntimeLang, nullptr, nullptr, Identifier,
+      Discriminator);
+
+  // Test the hashing.
+  auto *Same = DICompositeType::get(
+      Context, Tag, Name, File, Line, Scope, BaseType, SizeInBits, AlignInBits,
+      OffsetInBits, Flags, nullptr, RuntimeLang, nullptr, nullptr, Identifier,
+      Discriminator);
+  auto *Other = DICompositeType::get(
+      Context, Tag, Name, File, Line, Scope, BaseType, SizeInBits, AlignInBits,
+      OffsetInBits, Flags, nullptr, RuntimeLang, nullptr, nullptr, Identifier,
+      Discriminator2);
+  auto *NoDisc = DICompositeType::get(
+      Context, Tag, Name, File, Line, Scope, BaseType, SizeInBits, AlignInBits,
+      OffsetInBits, Flags, nullptr, RuntimeLang, nullptr, nullptr, Identifier,
+      nullptr);
+
+  EXPECT_EQ(N, Same);
+  EXPECT_NE(Same, Other);
+  EXPECT_NE(Same, NoDisc);
+  EXPECT_NE(Other, NoDisc);
+
+  EXPECT_EQ(N->getDiscriminator(), Discriminator);
+}
+
 typedef MetadataTest DISubroutineTypeTest;
 
 TEST_F(DISubroutineTypeTest, get) {
@@ -1375,21 +1447,27 @@ typedef MetadataTest DIFileTest;
 TEST_F(DIFileTest, get) {
   StringRef Filename = "file";
   StringRef Directory = "dir";
-  DIFile::ChecksumKind CSKind = DIFile::CSK_MD5;
-  StringRef Checksum = "000102030405060708090a0b0c0d0e0f";
-  auto *N = DIFile::get(Context, Filename, Directory, CSKind, Checksum);
+  DIFile::ChecksumKind CSKind = DIFile::ChecksumKind::CSK_MD5;
+  StringRef ChecksumString = "000102030405060708090a0b0c0d0e0f";
+  DIFile::ChecksumInfo<StringRef> Checksum(CSKind, ChecksumString);
+  StringRef Source = "source";
+  auto *N = DIFile::get(Context, Filename, Directory, Checksum, Source);
 
   EXPECT_EQ(dwarf::DW_TAG_file_type, N->getTag());
   EXPECT_EQ(Filename, N->getFilename());
   EXPECT_EQ(Directory, N->getDirectory());
-  EXPECT_EQ(CSKind, N->getChecksumKind());
   EXPECT_EQ(Checksum, N->getChecksum());
-  EXPECT_EQ(N, DIFile::get(Context, Filename, Directory, CSKind, Checksum));
+  EXPECT_EQ(Source, N->getSource());
+  EXPECT_EQ(N, DIFile::get(Context, Filename, Directory, Checksum, Source));
 
-  EXPECT_NE(N, DIFile::get(Context, "other", Directory, CSKind, Checksum));
-  EXPECT_NE(N, DIFile::get(Context, Filename, "other", CSKind, Checksum));
+  EXPECT_NE(N, DIFile::get(Context, "other", Directory, Checksum, Source));
+  EXPECT_NE(N, DIFile::get(Context, Filename, "other", Checksum, Source));
+  DIFile::ChecksumInfo<StringRef> OtherChecksum(DIFile::ChecksumKind::CSK_SHA1, ChecksumString);
   EXPECT_NE(
-      N, DIFile::get(Context, Filename, Directory, DIFile::CSK_SHA1, Checksum));
+      N, DIFile::get(Context, Filename, Directory, OtherChecksum));
+  StringRef OtherSource = "other";
+  EXPECT_NE(N, DIFile::get(Context, Filename, Directory, Checksum, OtherSource));
+  EXPECT_NE(N, DIFile::get(Context, Filename, Directory, Checksum));
   EXPECT_NE(N, DIFile::get(Context, Filename, Directory));
 
   TempDIFile Temp = N->clone();
@@ -2436,9 +2514,20 @@ TEST_F(FunctionAttachmentTest, Verifier) {
 TEST_F(FunctionAttachmentTest, EntryCount) {
   Function *F = getFunction("foo");
   EXPECT_FALSE(F->getEntryCount().hasValue());
-  F->setEntryCount(12304);
-  EXPECT_TRUE(F->getEntryCount().hasValue());
-  EXPECT_EQ(12304u, *F->getEntryCount());
+  F->setEntryCount(12304, Function::PCT_Real);
+  auto Count = F->getEntryCount();
+  EXPECT_TRUE(Count.hasValue());
+  EXPECT_EQ(12304u, Count.getCount());
+  EXPECT_EQ(Function::PCT_Real, Count.getType());
+
+  // Repeat the same for synthetic counts.
+  F = getFunction("bar");
+  EXPECT_FALSE(F->getEntryCount().hasValue());
+  F->setEntryCount(123, Function::PCT_Synthetic);
+  Count = F->getEntryCount();
+  EXPECT_TRUE(Count.hasValue());
+  EXPECT_EQ(123u, Count.getCount());
+  EXPECT_EQ(Function::PCT_Synthetic, Count.getType());
 }
 
 TEST_F(FunctionAttachmentTest, SubprogramAttachment) {

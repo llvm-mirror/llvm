@@ -84,7 +84,13 @@ def RISCVAsmParser : AsmParser {
   let AllowDuplicateRegisterNames = 1;
 }
 
+def RISCVAsmWriter : AsmWriter {
+  int PassSubtarget = 1;
+}
+
 def RISCV : Target {
   let InstructionSet = RISCVInstrInfo;
   let AssemblyParsers = [RISCVAsmParser];
+  let AssemblyWriters = [RISCVAsmWriter];
+  let AllowRegisterRenaming = 1;
 }

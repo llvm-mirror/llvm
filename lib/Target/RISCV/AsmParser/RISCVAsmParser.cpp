@@ -260,12 +260,26 @@ public:
            (VK == RISCVMCExpr::VK_RISCV_None || VK == RISCVMCExpr::VK_RISCV_LO);
   }
 
-  bool isUImm6NonZero() const {
+  bool isSImm6NonZero() const {
+    RISCVMCExpr::VariantKind VK;
+    int64_t Imm;
+    bool IsValid;
+    bool IsConstantImm = evaluateConstantImm(Imm, VK);
+    if (!IsConstantImm)
+      IsValid = RISCVAsmParser::classifySymbolRef(getImm(), VK, Imm);
+    else
+      IsValid = ((Imm != 0) && isInt<6>(Imm));
+    return IsValid &&
+           (VK == RISCVMCExpr::VK_RISCV_None || VK == RISCVMCExpr::VK_RISCV_LO);
+  }
+
+  bool isCLUIImm() const {
     int64_t Imm;
     RISCVMCExpr::VariantKind VK;
     bool IsConstantImm = evaluateConstantImm(Imm, VK);
-    return IsConstantImm && isUInt<6>(Imm) && (Imm != 0) &&
-           VK == RISCVMCExpr::VK_RISCV_None;
+    return IsConstantImm && (Imm != 0) &&
+           (isUInt<5>(Imm) || (Imm >= 0xfffe0 && Imm <= 0xfffff)) &&
+            VK == RISCVMCExpr::VK_RISCV_None;
   }
 
   bool isUImm7Lsb00() const {
@@ -321,8 +335,9 @@ public:
       IsValid = RISCVAsmParser::classifySymbolRef(getImm(), VK, Imm);
     else
       IsValid = isInt<12>(Imm);
-    return IsValid &&
-           (VK == RISCVMCExpr::VK_RISCV_None || VK == RISCVMCExpr::VK_RISCV_LO);
+    return IsValid && (VK == RISCVMCExpr::VK_RISCV_None ||
+                       VK == RISCVMCExpr::VK_RISCV_LO ||
+                       VK == RISCVMCExpr::VK_RISCV_PCREL_LO);
   }
 
   bool isSImm12Lsb0() const { return isBareSimmNLsb0<12>(); }
@@ -338,11 +353,11 @@ public:
 
   bool isSImm13Lsb0() const { return isBareSimmNLsb0<13>(); }
 
-  bool isSImm10Lsb0000() const {
+  bool isSImm10Lsb0000NonZero() const {
     int64_t Imm;
     RISCVMCExpr::VariantKind VK;
     bool IsConstantImm = evaluateConstantImm(Imm, VK);
-    return IsConstantImm && isShiftedInt<6, 4>(Imm) &&
+    return IsConstantImm && (Imm != 0) && isShiftedInt<6, 4>(Imm) &&
            VK == RISCVMCExpr::VK_RISCV_None;
   }
 
@@ -613,8 +628,14 @@ bool RISCVAsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   case Match_InvalidSImm6:
     return generateImmOutOfRangeError(Operands, ErrorInfo, -(1 << 5),
                                       (1 << 5) - 1);
-  case Match_InvalidUImm6NonZero:
-    return generateImmOutOfRangeError(Operands, ErrorInfo, 1, (1 << 6) - 1);
+  case Match_InvalidSImm6NonZero:
+    return generateImmOutOfRangeError(Operands, ErrorInfo, -(1 << 5),
+                                      (1 << 5) - 1,
+        "immediate must be non-zero in the range");
+  case Match_InvalidCLUIImm:
+    return generateImmOutOfRangeError(
+        Operands, ErrorInfo, 1, (1 << 5) - 1,
+        "immediate must be in [0xfffe0, 0xfffff] or");
   case Match_InvalidUImm7Lsb00:
     return generateImmOutOfRangeError(
         Operands, ErrorInfo, 0, (1 << 7) - 4,
@@ -639,10 +660,10 @@ bool RISCVAsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     return generateImmOutOfRangeError(
         Operands, ErrorInfo, 4, (1 << 10) - 4,
         "immediate must be a multiple of 4 bytes in the range");
-  case Match_InvalidSImm10Lsb0000:
+  case Match_InvalidSImm10Lsb0000NonZero:
     return generateImmOutOfRangeError(
         Operands, ErrorInfo, -(1 << 9), (1 << 9) - 16,
-        "immediate must be a multiple of 16 bytes in the range");
+        "immediate must be a multiple of 16 bytes and non-zero in the range");
   case Match_InvalidSImm12:
     return generateImmOutOfRangeError(Operands, ErrorInfo, -(1 << 11),
                                       (1 << 11) - 1);

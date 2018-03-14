@@ -702,7 +702,7 @@ bool FastISel::lowerCallOperands(const CallInst *CI, unsigned ArgIdx,
     ArgListEntry Entry;
     Entry.Val = V;
     Entry.Ty = V->getType();
-    Entry.setAttributes(&CS, ArgIdx);
+    Entry.setAttributes(&CS, ArgI);
     Args.push_back(Entry);
   }
 
@@ -874,6 +874,7 @@ bool FastISel::selectXRayCustomEvent(const CallInst *I) {
               TII.get(TargetOpcode::PATCHABLE_EVENT_CALL));
   for (auto &MO : Ops)
     MIB.add(MO);
+
   // Insert the Patchable Event Call instruction, that gets lowered properly.
   return true;
 }

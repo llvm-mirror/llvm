@@ -743,7 +743,8 @@ private:
   std::vector<ValueInfo> makeRefList(ArrayRef<uint64_t> Record);
   std::vector<FunctionSummary::EdgeTy> makeCallList(ArrayRef<uint64_t> Record,
                                                     bool IsOldProfileFormat,
-                                                    bool HasProfile);
+                                                    bool HasProfile,
+                                                    bool HasRelBF);
   Error parseEntireSummary(unsigned ID);
   Error parseModuleStringTable();
 
@@ -1046,19 +1047,21 @@ static Comdat::SelectionKind getDecodedComdatSelectionKind(unsigned Val) {
 
 static FastMathFlags getDecodedFastMathFlags(unsigned Val) {
   FastMathFlags FMF;
-  if (0 != (Val & FastMathFlags::AllowReassoc))
+  if (0 != (Val & bitc::UnsafeAlgebra))
+    FMF.setFast();
+  if (0 != (Val & bitc::AllowReassoc))
     FMF.setAllowReassoc();
-  if (0 != (Val & FastMathFlags::NoNaNs))
+  if (0 != (Val & bitc::NoNaNs))
     FMF.setNoNaNs();
-  if (0 != (Val & FastMathFlags::NoInfs))
+  if (0 != (Val & bitc::NoInfs))
     FMF.setNoInfs();
-  if (0 != (Val & FastMathFlags::NoSignedZeros))
+  if (0 != (Val & bitc::NoSignedZeros))
     FMF.setNoSignedZeros();
-  if (0 != (Val & FastMathFlags::AllowReciprocal))
+  if (0 != (Val & bitc::AllowReciprocal))
     FMF.setAllowReciprocal();
-  if (0 != (Val & FastMathFlags::AllowContract))
+  if (0 != (Val & bitc::AllowContract))
     FMF.setAllowContract(true);
-  if (0 != (Val & FastMathFlags::ApproxFunc))
+  if (0 != (Val & bitc::ApproxFunc))
     FMF.setApproxFunc();
   return FMF;
 }
@@ -3054,14 +3057,17 @@ Error BitcodeReader::parseGlobalIndirectSymbolRecord(
       // FIXME: Change to an error if non-default in 4.0.
       NewGA->setVisibility(getDecodedVisibility(Record[VisInd]));
   }
-  if (OpNum != Record.size())
-    NewGA->setDLLStorageClass(getDecodedDLLStorageClass(Record[OpNum++]));
-  else
-    upgradeDLLImportExportLinkage(NewGA, Linkage);
-  if (OpNum != Record.size())
-    NewGA->setThreadLocalMode(getDecodedThreadLocalMode(Record[OpNum++]));
-  if (OpNum != Record.size())
-    NewGA->setUnnamedAddr(getDecodedUnnamedAddrType(Record[OpNum++]));
+  if (BitCode == bitc::MODULE_CODE_ALIAS ||
+      BitCode == bitc::MODULE_CODE_ALIAS_OLD) {
+    if (OpNum != Record.size())
+      NewGA->setDLLStorageClass(getDecodedDLLStorageClass(Record[OpNum++]));
+    else
+      upgradeDLLImportExportLinkage(NewGA, Linkage);
+    if (OpNum != Record.size())
+      NewGA->setThreadLocalMode(getDecodedThreadLocalMode(Record[OpNum++]));
+    if (OpNum != Record.size())
+      NewGA->setUnnamedAddr(getDecodedUnnamedAddrType(Record[OpNum++]));
+  }
   if (OpNum != Record.size())
     NewGA->setDSOLocal(getDecodedDSOLocal(Record[OpNum++]));
   ValueList.push_back(NewGA);
@@ -4810,8 +4816,12 @@ void ModuleSummaryIndexBitcodeReader::setValueGUID(
   if (PrintSummaryGUIDs)
     dbgs() << "GUID " << ValueGUID << "(" << OriginalNameID << ") is "
            << ValueName << "\n";
-  ValueIdToValueInfoMap[ValueID] =
-      std::make_pair(TheIndex.getOrInsertValueInfo(ValueGUID), OriginalNameID);
+  
+  // UseStrtab is false for legacy summary formats and value names are
+  // created on stack. We can't use them outside of parseValueSymbolTable.
+  ValueIdToValueInfoMap[ValueID] = std::make_pair(
+      TheIndex.getOrInsertValueInfo(ValueGUID, UseStrtab ? ValueName : ""),
+      OriginalNameID);
 }
 
 // Specialized value symbol table parser used when reading module index
@@ -5040,12 +5050,15 @@ ModuleSummaryIndexBitcodeReader::makeRefList(ArrayRef<uint64_t> Record) {
   return Ret;
 }
 
-std::vector<FunctionSummary::EdgeTy> ModuleSummaryIndexBitcodeReader::makeCallList(
-    ArrayRef<uint64_t> Record, bool IsOldProfileFormat, bool HasProfile) {
+std::vector<FunctionSummary::EdgeTy>
+ModuleSummaryIndexBitcodeReader::makeCallList(ArrayRef<uint64_t> Record,
+                                              bool IsOldProfileFormat,
+                                              bool HasProfile, bool HasRelBF) {
   std::vector<FunctionSummary::EdgeTy> Ret;
   Ret.reserve(Record.size());
   for (unsigned I = 0, E = Record.size(); I != E; ++I) {
     CalleeInfo::HotnessType Hotness = CalleeInfo::HotnessType::Unknown;
+    uint64_t RelBF = 0;
     ValueInfo Callee = getValueInfoFromValueId(Record[I]).first;
     if (IsOldProfileFormat) {
       I += 1; // Skip old callsitecount field
@@ -5053,9 +5066,61 @@ std::vector<FunctionSummary::EdgeTy> ModuleSummaryIndexBitcodeReader::makeCallLi
         I += 1; // Skip old profilecount field
     } else if (HasProfile)
       Hotness = static_cast<CalleeInfo::HotnessType>(Record[++I]);
-    Ret.push_back(FunctionSummary::EdgeTy{Callee, CalleeInfo{Hotness}});
+    else if (HasRelBF)
+      RelBF = Record[++I];
+    Ret.push_back(FunctionSummary::EdgeTy{Callee, CalleeInfo(Hotness, RelBF)});
   }
   return Ret;
+}
+
+static void
+parseWholeProgramDevirtResolutionByArg(ArrayRef<uint64_t> Record, size_t &Slot,
+                                       WholeProgramDevirtResolution &Wpd) {
+  uint64_t ArgNum = Record[Slot++];
+  WholeProgramDevirtResolution::ByArg &B =
+      Wpd.ResByArg[{Record.begin() + Slot, Record.begin() + Slot + ArgNum}];
+  Slot += ArgNum;
+
+  B.TheKind =
+      static_cast<WholeProgramDevirtResolution::ByArg::Kind>(Record[Slot++]);
+  B.Info = Record[Slot++];
+  B.Byte = Record[Slot++];
+  B.Bit = Record[Slot++];
+}
+
+static void parseWholeProgramDevirtResolution(ArrayRef<uint64_t> Record,
+                                              StringRef Strtab, size_t &Slot,
+                                              TypeIdSummary &TypeId) {
+  uint64_t Id = Record[Slot++];
+  WholeProgramDevirtResolution &Wpd = TypeId.WPDRes[Id];
+
+  Wpd.TheKind = static_cast<WholeProgramDevirtResolution::Kind>(Record[Slot++]);
+  Wpd.SingleImplName = {Strtab.data() + Record[Slot],
+                        static_cast<size_t>(Record[Slot + 1])};
+  Slot += 2;
+
+  uint64_t ResByArgNum = Record[Slot++];
+  for (uint64_t I = 0; I != ResByArgNum; ++I)
+    parseWholeProgramDevirtResolutionByArg(Record, Slot, Wpd);
+}
+
+static void parseTypeIdSummaryRecord(ArrayRef<uint64_t> Record,
+                                     StringRef Strtab,
+                                     ModuleSummaryIndex &TheIndex) {
+  size_t Slot = 0;
+  TypeIdSummary &TypeId = TheIndex.getOrInsertTypeIdSummary(
+      {Strtab.data() + Record[Slot], static_cast<size_t>(Record[Slot + 1])});
+  Slot += 2;
+
+  TypeId.TTRes.TheKind = static_cast<TypeTestResolution::Kind>(Record[Slot++]);
+  TypeId.TTRes.SizeM1BitWidth = Record[Slot++];
+  TypeId.TTRes.AlignLog2 = Record[Slot++];
+  TypeId.TTRes.SizeM1 = Record[Slot++];
+  TypeId.TTRes.BitMask = Record[Slot++];
+  TypeId.TTRes.InlineBits = Record[Slot++];
+
+  while (Slot < Record.size())
+    parseWholeProgramDevirtResolution(Record, Strtab, Slot, TypeId);
 }
 
 // Eagerly parse the entire summary block. This populates the GlobalValueSummary
@@ -5120,6 +5185,19 @@ Error ModuleSummaryIndexBitcodeReader::parseEntireSummary(unsigned ID) {
     switch (BitCode) {
     default: // Default behavior: ignore.
       break;
+    case bitc::FS_FLAGS: {  // [flags]
+      uint64_t Flags = Record[0];
+      // Scan flags (set only on the combined index).
+      assert(Flags <= 0x3 && "Unexpected bits in flag");
+
+      // 1 bit: WithGlobalValueDeadStripping flag.
+      if (Flags & 0x1)
+        TheIndex.setWithGlobalValueDeadStripping();
+      // 1 bit: SkipModuleByDistributedBackend flag.
+      if (Flags & 0x2)
+        TheIndex.setSkipModuleByDistributedBackend();
+      break;
+    }
     case bitc::FS_VALUE_GUID: { // [valueid, refguid]
       uint64_t ValueID = Record[0];
       GlobalValue::GUID RefGUID = Record[1];
@@ -5132,7 +5210,11 @@ Error ModuleSummaryIndexBitcodeReader::parseEntireSummary(unsigned ID) {
     // FS_PERMODULE_PROFILE: [valueid, flags, instcount, fflags, numrefs,
     //                        numrefs x valueid,
     //                        n x (valueid, hotness)]
+    // FS_PERMODULE_RELBF: [valueid, flags, instcount, fflags, numrefs,
+    //                      numrefs x valueid,
+    //                      n x (valueid, relblockfreq)]
     case bitc::FS_PERMODULE:
+    case bitc::FS_PERMODULE_RELBF:
     case bitc::FS_PERMODULE_PROFILE: {
       unsigned ValueID = Record[0];
       uint64_t RawFlags = Record[1];
@@ -5158,9 +5240,10 @@ Error ModuleSummaryIndexBitcodeReader::parseEntireSummary(unsigned ID) {
       std::vector<ValueInfo> Refs = makeRefList(
           ArrayRef<uint64_t>(Record).slice(RefListStartIndex, NumRefs));
       bool HasProfile = (BitCode == bitc::FS_PERMODULE_PROFILE);
+      bool HasRelBF = (BitCode == bitc::FS_PERMODULE_RELBF);
       std::vector<FunctionSummary::EdgeTy> Calls = makeCallList(
           ArrayRef<uint64_t>(Record).slice(CallGraphEdgeStartIndex),
-          IsOldProfileFormat, HasProfile);
+          IsOldProfileFormat, HasProfile, HasRelBF);
       auto FS = llvm::make_unique<FunctionSummary>(
           Flags, InstCount, getDecodedFFlags(RawFunFlags), std::move(Refs),
           std::move(Calls), std::move(PendingTypeTests),
@@ -5252,7 +5335,7 @@ Error ModuleSummaryIndexBitcodeReader::parseEntireSummary(unsigned ID) {
       bool HasProfile = (BitCode == bitc::FS_COMBINED_PROFILE);
       std::vector<FunctionSummary::EdgeTy> Edges = makeCallList(
           ArrayRef<uint64_t>(Record).slice(CallGraphEdgeStartIndex),
-          IsOldProfileFormat, HasProfile);
+          IsOldProfileFormat, HasProfile, false);
       ValueInfo VI = getValueInfoFromValueId(ValueID).first;
       auto FS = llvm::make_unique<FunctionSummary>(
           Flags, InstCount, getDecodedFFlags(RawFunFlags), std::move(Refs),
@@ -5360,6 +5443,7 @@ Error ModuleSummaryIndexBitcodeReader::parseEntireSummary(unsigned ID) {
             {Strtab.data() + Record[I], static_cast<size_t>(Record[I + 1])});
       break;
     }
+
     case bitc::FS_CFI_FUNCTION_DECLS: {
       std::set<std::string> &CfiFunctionDecls = TheIndex.cfiFunctionDecls();
       for (unsigned I = 0; I != Record.size(); I += 2)
@@ -5367,6 +5451,10 @@ Error ModuleSummaryIndexBitcodeReader::parseEntireSummary(unsigned ID) {
             {Strtab.data() + Record[I], static_cast<size_t>(Record[I + 1])});
       break;
     }
+
+    case bitc::FS_TYPE_ID:
+      parseTypeIdSummaryRecord(Record, Strtab, TheIndex);
+      break;
     }
   }
   llvm_unreachable("Exit infinite loop");
@@ -5676,7 +5764,8 @@ Expected<std::unique_ptr<ModuleSummaryIndex>> BitcodeModule::getSummary() {
   BitstreamCursor Stream(Buffer);
   Stream.JumpToBit(ModuleBit);
 
-  auto Index = llvm::make_unique<ModuleSummaryIndex>();
+  auto Index =
+      llvm::make_unique<ModuleSummaryIndex>(/*IsPerformingAnalysis=*/false);
   ModuleSummaryIndexBitcodeReader R(std::move(Stream), Strtab, *Index,
                                     ModuleIdentifier, 0);
 

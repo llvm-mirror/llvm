@@ -718,48 +718,55 @@ define i8 @test_cmpps_256(<8 x float> %a, <8 x float> %b) {
 ; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    vcmpleps %ymm1, %ymm0, %k0 ## encoding: [0x62,0xf1,0x7c,0x28,0xc2,0xc1,0x02]
 ; CHECK-NEXT:    kmovw %k0, %eax ## encoding: [0xc5,0xf8,0x93,0xc0]
-; CHECK-NEXT:    ## kill: def %al killed %al killed %eax
+; CHECK-NEXT:    ## kill: def $al killed $al killed $eax
 ; CHECK-NEXT:    retq ## encoding: [0xc3]
-   %res = call i8 @llvm.x86.avx512.mask.cmp.ps.256(<8 x float> %a, <8 x float> %b, i32 2, i8 -1)
-   ret i8 %res
- }
- declare i8 @llvm.x86.avx512.mask.cmp.ps.256(<8 x float> , <8 x float> , i32, i8)
+  %res = call <8 x i1> @llvm.x86.avx512.mask.cmp.ps.256(<8 x float> %a, <8 x float> %b, i32 2)
+  %1 = bitcast <8 x i1> %res to i8
+  ret i8 %1
+}
+declare <8 x i1> @llvm.x86.avx512.mask.cmp.ps.256(<8 x float>, <8 x float>, i32)
 
 define i8 @test_cmpps_128(<4 x float> %a, <4 x float> %b) {
 ; CHECK-LABEL: test_cmpps_128:
 ; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    vcmpleps %xmm1, %xmm0, %k0 ## encoding: [0x62,0xf1,0x7c,0x08,0xc2,0xc1,0x02]
 ; CHECK-NEXT:    kmovw %k0, %eax ## encoding: [0xc5,0xf8,0x93,0xc0]
-; CHECK-NEXT:    ## kill: def %al killed %al killed %eax
+; CHECK-NEXT:    ## kill: def $al killed $al killed $eax
 ; CHECK-NEXT:    retq ## encoding: [0xc3]
-   %res = call i8 @llvm.x86.avx512.mask.cmp.ps.128(<4 x float> %a, <4 x float> %b, i32 2, i8 -1)
-   ret i8 %res
- }
- declare i8 @llvm.x86.avx512.mask.cmp.ps.128(<4 x float> , <4 x float> , i32, i8)
+  %res = call <4 x i1> @llvm.x86.avx512.mask.cmp.ps.128(<4 x float> %a, <4 x float> %b, i32 2)
+  %1 = shufflevector <4 x i1> %res, <4 x i1> zeroinitializer, <8 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7>
+  %2 = bitcast <8 x i1> %1 to i8
+  ret i8 %2
+}
+declare <4 x i1> @llvm.x86.avx512.mask.cmp.ps.128(<4 x float>, <4 x float>, i32)
 
 define i8 @test_cmppd_256(<4 x double> %a, <4 x double> %b) {
 ; CHECK-LABEL: test_cmppd_256:
 ; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    vcmplepd %ymm1, %ymm0, %k0 ## encoding: [0x62,0xf1,0xfd,0x28,0xc2,0xc1,0x02]
 ; CHECK-NEXT:    kmovw %k0, %eax ## encoding: [0xc5,0xf8,0x93,0xc0]
-; CHECK-NEXT:    ## kill: def %al killed %al killed %eax
+; CHECK-NEXT:    ## kill: def $al killed $al killed $eax
 ; CHECK-NEXT:    retq ## encoding: [0xc3]
-   %res = call i8 @llvm.x86.avx512.mask.cmp.pd.256(<4 x double> %a, <4 x double> %b, i32 2, i8 -1)
-   ret i8 %res
- }
- declare i8 @llvm.x86.avx512.mask.cmp.pd.256(<4 x double> , <4 x double> , i32, i8)
+  %res = call <4 x i1> @llvm.x86.avx512.mask.cmp.pd.256(<4 x double> %a, <4 x double> %b, i32 2)
+  %1 = shufflevector <4 x i1> %res, <4 x i1> zeroinitializer, <8 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7>
+  %2 = bitcast <8 x i1> %1 to i8
+  ret i8 %2
+}
+declare <4 x i1> @llvm.x86.avx512.mask.cmp.pd.256(<4 x double>, <4 x double>, i32)
 
 define i8 @test_cmppd_128(<2 x double> %a, <2 x double> %b) {
 ; CHECK-LABEL: test_cmppd_128:
 ; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    vcmplepd %xmm1, %xmm0, %k0 ## encoding: [0x62,0xf1,0xfd,0x08,0xc2,0xc1,0x02]
 ; CHECK-NEXT:    kmovw %k0, %eax ## encoding: [0xc5,0xf8,0x93,0xc0]
-; CHECK-NEXT:    ## kill: def %al killed %al killed %eax
+; CHECK-NEXT:    ## kill: def $al killed $al killed $eax
 ; CHECK-NEXT:    retq ## encoding: [0xc3]
-   %res = call i8 @llvm.x86.avx512.mask.cmp.pd.128(<2 x double> %a, <2 x double> %b, i32 2, i8 -1)
-   ret i8 %res
- }
- declare i8 @llvm.x86.avx512.mask.cmp.pd.128(<2 x double> , <2 x double> , i32, i8)
+  %res = call <2 x i1> @llvm.x86.avx512.mask.cmp.pd.128(<2 x double> %a, <2 x double> %b, i32 2)
+  %1 = shufflevector <2 x i1> %res, <2 x i1> zeroinitializer, <8 x i32> <i32 0, i32 1, i32 2, i32 3, i32 2, i32 3, i32 2, i32 3>
+  %2 = bitcast <8 x i1> %1 to i8
+  ret i8 %2
+}
+declare <2 x i1> @llvm.x86.avx512.mask.cmp.pd.128(<2 x double>, <2 x double>, i32)
 
 define <8 x float> @test_mm512_maskz_max_ps_256(<8 x float> %a0, <8 x float> %a1, i8 %mask) {
 ; CHECK-LABEL: test_mm512_maskz_max_ps_256:
@@ -2694,7 +2701,7 @@ define <4 x float>@test_int_x86_avx512_mask_rndscale_ps_128(<4 x float> %x0, <4 
 ; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    kmovw %edi, %k1 ## encoding: [0xc5,0xf8,0x92,0xcf]
 ; CHECK-NEXT:    vrndscaleps $88, %xmm0, %xmm1 {%k1} ## encoding: [0x62,0xf3,0x7d,0x09,0x08,0xc8,0x58]
-; CHECK-NEXT:    vrndscaleps $4, %xmm0, %xmm0 ## encoding: [0x62,0xf3,0x7d,0x08,0x08,0xc0,0x04]
+; CHECK-NEXT:    vroundps $4, %xmm0, %xmm0 ## EVEX TO VEX Compression encoding: [0xc4,0xe3,0x79,0x08,0xc0,0x04]
 ; CHECK-NEXT:    vaddps %xmm0, %xmm1, %xmm0 ## EVEX TO VEX Compression encoding: [0xc5,0xf0,0x58,0xc0]
 ; CHECK-NEXT:    retq ## encoding: [0xc3]
   %res = call <4 x float> @llvm.x86.avx512.mask.rndscale.ps.128(<4 x float> %x0, i32 88, <4 x float> %x2, i8 %x3)

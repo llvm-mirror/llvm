@@ -22,8 +22,7 @@ define i32 @test1(%0* %p, %0* %q, i1 %r) nounwind {
 ; MCU-NEXT:    jne .LBB0_1
 ; MCU-NEXT:  # %bb.2:
 ; MCU-NEXT:    addl $8, %edx
-; MCU-NEXT:    movl %edx, %eax
-; MCU-NEXT:    movl (%eax), %eax
+; MCU-NEXT:    movl (%edx), %eax
 ; MCU-NEXT:    retl
 ; MCU-NEXT:  .LBB0_1:
 ; MCU-NEXT:    addl $8, %eax
@@ -145,7 +144,7 @@ define signext i8 @test4(i8* nocapture %P, double %F) nounwind readonly {
 ; MCU-NEXT:    fucompp
 ; MCU-NEXT:    fnstsw %ax
 ; MCU-NEXT:    xorl %edx, %edx
-; MCU-NEXT:    # kill: def %ah killed %ah killed %ax
+; MCU-NEXT:    # kill: def $ah killed $ah killed $ax
 ; MCU-NEXT:    sahf
 ; MCU-NEXT:    seta %dl
 ; MCU-NEXT:    movb (%ecx,%edx,4), %al
@@ -798,14 +797,14 @@ define i16 @test17(i16 %x) nounwind {
 ; GENERIC:       ## %bb.0: ## %entry
 ; GENERIC-NEXT:    negw %di
 ; GENERIC-NEXT:    sbbl %eax, %eax
-; GENERIC-NEXT:    ## kill: def %ax killed %ax killed %eax
+; GENERIC-NEXT:    ## kill: def $ax killed $ax killed $eax
 ; GENERIC-NEXT:    retq
 ;
 ; ATOM-LABEL: test17:
 ; ATOM:       ## %bb.0: ## %entry
 ; ATOM-NEXT:    negw %di
 ; ATOM-NEXT:    sbbl %eax, %eax
-; ATOM-NEXT:    ## kill: def %ax killed %ax killed %eax
+; ATOM-NEXT:    ## kill: def $ax killed $ax killed $eax
 ; ATOM-NEXT:    nop
 ; ATOM-NEXT:    nop
 ; ATOM-NEXT:    nop
@@ -816,7 +815,7 @@ define i16 @test17(i16 %x) nounwind {
 ; MCU:       # %bb.0: # %entry
 ; MCU-NEXT:    negw %ax
 ; MCU-NEXT:    sbbl %eax, %eax
-; MCU-NEXT:    # kill: def %ax killed %ax killed %eax
+; MCU-NEXT:    # kill: def $ax killed $ax killed $eax
 ; MCU-NEXT:    retl
 entry:
   %cmp = icmp ne i16 %x, 0
@@ -938,8 +937,8 @@ define void @clamp(i32 %src, i16* %dst) {
 ; GENERIC-NEXT:    movl $32767, %eax ## imm = 0x7FFF
 ; GENERIC-NEXT:    cmovlel %edi, %eax
 ; GENERIC-NEXT:    cmpl $-32768, %eax ## imm = 0x8000
-; GENERIC-NEXT:    movw $-32768, %cx ## imm = 0x8000
-; GENERIC-NEXT:    cmovgew %ax, %cx
+; GENERIC-NEXT:    movl $32768, %ecx ## imm = 0x8000
+; GENERIC-NEXT:    cmovgel %eax, %ecx
 ; GENERIC-NEXT:    movw %cx, (%rsi)
 ; GENERIC-NEXT:    retq
 ;
@@ -948,9 +947,9 @@ define void @clamp(i32 %src, i16* %dst) {
 ; ATOM-NEXT:    cmpl $32767, %edi ## imm = 0x7FFF
 ; ATOM-NEXT:    movl $32767, %eax ## imm = 0x7FFF
 ; ATOM-NEXT:    cmovlel %edi, %eax
-; ATOM-NEXT:    movw $-32768, %cx ## imm = 0x8000
+; ATOM-NEXT:    movl $32768, %ecx ## imm = 0x8000
 ; ATOM-NEXT:    cmpl $-32768, %eax ## imm = 0x8000
-; ATOM-NEXT:    cmovgew %ax, %cx
+; ATOM-NEXT:    cmovgel %eax, %ecx
 ; ATOM-NEXT:    movw %cx, (%rsi)
 ; ATOM-NEXT:    retq
 ;
@@ -963,7 +962,7 @@ define void @clamp(i32 %src, i16* %dst) {
 ; MCU-NEXT:    movl %eax, %ecx
 ; MCU-NEXT:  .LBB23_2:
 ; MCU-NEXT:    cmpl $-32768, %ecx # imm = 0x8000
-; MCU-NEXT:    movw $-32768, %ax # imm = 0x8000
+; MCU-NEXT:    movl $32768, %eax # imm = 0x8000
 ; MCU-NEXT:    jl .LBB23_4
 ; MCU-NEXT:  # %bb.3:
 ; MCU-NEXT:    movl %ecx, %eax
@@ -1027,7 +1026,7 @@ define void @test19() {
 ; MCU-NEXT:    cmpl %eax, %ecx
 ; MCU-NEXT:    fucom %st(0)
 ; MCU-NEXT:    fnstsw %ax
-; MCU-NEXT:    # kill: def %ah killed %ah killed %ax
+; MCU-NEXT:    # kill: def $ah killed $ah killed $ax
 ; MCU-NEXT:    sahf
 ; MCU-NEXT:    jp .LBB24_4
 ; MCU-NEXT:  # %bb.5: # %CF244
@@ -1063,8 +1062,8 @@ define i16 @select_xor_1(i16 %A, i8 %cond) {
 ; CHECK-NEXT:    movl %edi, %eax
 ; CHECK-NEXT:    xorl $43, %eax
 ; CHECK-NEXT:    testb $1, %sil
-; CHECK-NEXT:    cmovnew %ax, %di
-; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    cmovel %edi, %eax
+; CHECK-NEXT:    ## kill: def $ax killed $ax killed $eax
 ; CHECK-NEXT:    retq
 ;
 ; MCU-LABEL: select_xor_1:
@@ -1073,7 +1072,7 @@ define i16 @select_xor_1(i16 %A, i8 %cond) {
 ; MCU-NEXT:    negl %edx
 ; MCU-NEXT:    andl $43, %edx
 ; MCU-NEXT:    xorl %edx, %eax
-; MCU-NEXT:    # kill: def %ax killed %ax killed %eax
+; MCU-NEXT:    # kill: def $ax killed $ax killed $eax
 ; MCU-NEXT:    retl
 entry:
  %and = and i8 %cond, 1

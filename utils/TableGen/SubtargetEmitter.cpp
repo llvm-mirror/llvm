@@ -92,6 +92,8 @@ class SubtargetEmitter {
                          &ProcItinLists);
   void EmitProcessorProp(raw_ostream &OS, const Record *R, StringRef Name,
                          char Separator);
+  void EmitProcessorResourceSubUnits(const CodeGenProcModel &ProcModel,
+                                     raw_ostream &OS);
   void EmitProcessorResources(const CodeGenProcModel &ProcModel,
                               raw_ostream &OS);
   Record *FindWriteResources(const CodeGenSchedRW &SchedWrite,
@@ -442,7 +444,7 @@ EmitStageAndOperandCycleData(raw_ostream &OS,
       }
 
       // Check to see if stage already exists and create if it doesn't
-      unsigned FindStage = 0;
+      uint16_t FindStage = 0;
       if (NStages > 0) {
         FindStage = ItinStageMap[ItinStageString];
         if (FindStage == 0) {
@@ -458,7 +460,7 @@ EmitStageAndOperandCycleData(raw_ostream &OS,
       }
 
       // Check to see if operand cycle already exists and create if it doesn't
-      unsigned FindOperandCycle = 0;
+      uint16_t FindOperandCycle = 0;
       if (NOperandCycles > 0) {
         std::string ItinOperandString = ItinOperandCycleString+ItinBypassString;
         FindOperandCycle = ItinOperandMap[ItinOperandString];
@@ -480,10 +482,14 @@ EmitStageAndOperandCycleData(raw_ostream &OS,
       }
 
       // Set up itinerary as location and location + stage count
-      int NumUOps = ItinData ? ItinData->getValueAsInt("NumMicroOps") : 0;
-      InstrItinerary Intinerary = { NumUOps, FindStage, FindStage + NStages,
-                                    FindOperandCycle,
-                                    FindOperandCycle + NOperandCycles };
+      int16_t NumUOps = ItinData ? ItinData->getValueAsInt("NumMicroOps") : 0;
+      InstrItinerary Intinerary = {
+          NumUOps,
+          FindStage,
+          uint16_t(FindStage + NStages),
+          FindOperandCycle,
+          uint16_t(FindOperandCycle + NOperandCycles),
+      };
 
       // Inject - empty slots will be 0, 0
       ItinList[SchedClassIdx] = Intinerary;
@@ -559,7 +565,8 @@ EmitItineraries(raw_ostream &OS,
         ", // " << j << " " << SchedModels.getSchedClass(j).Name << "\n";
     }
     // End processor itinerary table
-    OS << "  { 0, ~0U, ~0U, ~0U, ~0U } // end marker\n";
+    OS << "  { 0, uint16_t(~0U), uint16_t(~0U), uint16_t(~0U), uint16_t(~0U) }"
+          "// end marker\n";
     OS << "};\n";
   }
 }
@@ -578,24 +585,53 @@ void SubtargetEmitter::EmitProcessorProp(raw_ostream &OS, const Record *R,
   OS << '\n';
 }
 
+void SubtargetEmitter::EmitProcessorResourceSubUnits(
+    const CodeGenProcModel &ProcModel, raw_ostream &OS) {
+  OS << "\nstatic const unsigned " << ProcModel.ModelName
+     << "ProcResourceSubUnits[] = {\n"
+     << "  0,  // Invalid\n";
+
+  for (unsigned i = 0, e = ProcModel.ProcResourceDefs.size(); i < e; ++i) {
+    Record *PRDef = ProcModel.ProcResourceDefs[i];
+    if (!PRDef->isSubClassOf("ProcResGroup"))
+      continue;
+    RecVec ResUnits = PRDef->getValueAsListOfDefs("Resources");
+    for (Record *RUDef : ResUnits) {
+      Record *const RU =
+          SchedModels.findProcResUnits(RUDef, ProcModel, PRDef->getLoc());
+      for (unsigned J = 0; J < RU->getValueAsInt("NumUnits"); ++J) {
+        OS << "  " << ProcModel.getProcResourceIdx(RU) << ", ";
+      }
+    }
+    OS << "  // " << PRDef->getName() << "\n";
+  }
+  OS << "};\n";
+}
+
 void SubtargetEmitter::EmitProcessorResources(const CodeGenProcModel &ProcModel,
                                               raw_ostream &OS) {
-  OS << "\n// {Name, NumUnits, SuperIdx, IsBuffered}\n";
-  OS << "static const llvm::MCProcResourceDesc "
-     << ProcModel.ModelName << "ProcResources" << "[] = {\n"
-     << "  {DBGFIELD(\"InvalidUnit\")     0, 0, 0},\n";
+  EmitProcessorResourceSubUnits(ProcModel, OS);
 
+  OS << "\n// {Name, NumUnits, SuperIdx, IsBuffered, SubUnitsIdxBegin}\n";
+  OS << "static const llvm::MCProcResourceDesc " << ProcModel.ModelName
+     << "ProcResources"
+     << "[] = {\n"
+     << "  {DBGFIELD(\"InvalidUnit\")     0, 0, 0, 0},\n";
+
+  unsigned SubUnitsOffset = 1;
   for (unsigned i = 0, e = ProcModel.ProcResourceDefs.size(); i < e; ++i) {
     Record *PRDef = ProcModel.ProcResourceDefs[i];
 
     Record *SuperDef = nullptr;
     unsigned SuperIdx = 0;
     unsigned NumUnits = 0;
+    const unsigned SubUnitsBeginOffset = SubUnitsOffset;
     int BufferSize = PRDef->getValueAsInt("BufferSize");
     if (PRDef->isSubClassOf("ProcResGroup")) {
       RecVec ResUnits = PRDef->getValueAsListOfDefs("Resources");
       for (Record *RU : ResUnits) {
         NumUnits += RU->getValueAsInt("NumUnits");
+        SubUnitsOffset += RU->getValueAsInt("NumUnits");
       }
     }
     else {
@@ -612,8 +648,14 @@ void SubtargetEmitter::EmitProcessorResources(const CodeGenProcModel &ProcModel,
     OS << "  {DBGFIELD(\"" << PRDef->getName() << "\") ";
     if (PRDef->getName().size() < 15)
       OS.indent(15 - PRDef->getName().size());
-    OS << NumUnits << ", " << SuperIdx << ", "
-       << BufferSize << "}, // #" << i+1;
+    OS << NumUnits << ", " << SuperIdx << ", " << BufferSize << ", ";
+    if (SubUnitsBeginOffset != SubUnitsOffset) {
+      OS << ProcModel.ModelName << "ProcResourceSubUnits + "
+         << SubUnitsBeginOffset;
+    } else {
+      OS << "nullptr";
+    }
+    OS << "}, // #" << i+1;
     if (SuperDef)
       OS << ", Super=" << SuperDef->getName();
     OS << "\n";

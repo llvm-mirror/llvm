@@ -89,15 +89,15 @@ Printable printReg(unsigned Reg, const TargetRegisterInfo *TRI,
                    unsigned SubIdx) {
   return Printable([Reg, TRI, SubIdx](raw_ostream &OS) {
     if (!Reg)
-      OS << "%noreg";
+      OS << "$noreg";
     else if (TargetRegisterInfo::isStackSlot(Reg))
       OS << "SS#" << TargetRegisterInfo::stackSlot2Index(Reg);
     else if (TargetRegisterInfo::isVirtualRegister(Reg))
       OS << '%' << TargetRegisterInfo::virtReg2Index(Reg);
     else if (!TRI)
-      OS << '%' << "physreg" << Reg;
+      OS << '$' << "physreg" << Reg;
     else if (Reg < TRI->getNumRegs()) {
-      OS << '%';
+      OS << '$';
       printLowerCase(TRI->getName(Reg), OS);
     } else
       llvm_unreachable("Register kind is unsupported.");
@@ -448,6 +448,28 @@ bool TargetRegisterInfo::regmaskSubsetEqual(const uint32_t *mask0,
     if ((mask0[I] & mask1[I]) != mask0[I])
       return false;
   return true;
+}
+
+unsigned TargetRegisterInfo::getRegSizeInBits(unsigned Reg,
+                                         const MachineRegisterInfo &MRI) const {
+  const TargetRegisterClass *RC{};
+  if (isPhysicalRegister(Reg)) {
+    // The size is not directly available for physical registers.
+    // Instead, we need to access a register class that contains Reg and
+    // get the size of that register class.
+    RC = getMinimalPhysRegClass(Reg);
+  } else {
+    LLT Ty = MRI.getType(Reg);
+    unsigned RegSize = Ty.isValid() ? Ty.getSizeInBits() : 0;
+    // If Reg is not a generic register, query the register class to
+    // get its size.
+    if (RegSize)
+      return RegSize;
+    // Since Reg is not a generic register, it must have a register class.
+    RC = MRI.getRegClass(Reg);
+  }
+  assert(RC && "Unable to deduce the register class");
+  return getRegSizeInBits(*RC);
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)

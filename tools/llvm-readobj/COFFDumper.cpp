@@ -67,6 +67,8 @@ struct LoadConfigTables {
   uint32_t GuardFlags = 0;
   uint64_t GuardFidTableVA = 0;
   uint64_t GuardFidTableCount = 0;
+  uint64_t GuardLJmpTableVA = 0;
+  uint64_t GuardLJmpTableCount = 0;
 };
 
 class COFFDumper : public ObjDumper {
@@ -242,7 +244,7 @@ std::error_code createCOFFDumper(const object::ObjectFile *Obj,
 
 } // namespace llvm
 
-// Given a a section and an offset into this section the function returns the
+// Given a section and an offset into this section the function returns the
 // symbol used for the relocation at the offset.
 std::error_code COFFDumper::resolveSymbol(const coff_section *Section,
                                           uint64_t Offset, SymbolRef &Sym) {
@@ -767,7 +769,7 @@ void COFFDumper::printRVATable(uint64_t TableVA, uint64_t Count,
   for (uintptr_t I = TableStart; I < TableEnd; I += EntrySize) {
     uint32_t RVA = *reinterpret_cast<const ulittle32_t *>(I);
     raw_ostream &OS = W.startLine();
-    OS << "0x" << W.hex(Obj->getImageBase() + RVA);
+    OS << W.hex(Obj->getImageBase() + RVA);
     if (PrintExtra)
       PrintExtra(OS, reinterpret_cast<const uint8_t *>(I));
     OS << '\n';
@@ -799,6 +801,11 @@ void COFFDumper::printCOFFLoadConfig() {
     } else {
       printRVATable(Tables.GuardFidTableVA, Tables.GuardFidTableCount, 4);
     }
+  }
+
+  if (Tables.GuardLJmpTableVA) {
+    ListScope LS(W, "GuardLJmpTable");
+    printRVATable(Tables.GuardLJmpTableVA, Tables.GuardLJmpTableCount, 4);
   }
 }
 
@@ -879,6 +886,9 @@ void COFFDumper::printCOFFLoadConfig(const T *Conf, LoadConfigTables &Tables) {
   W.printHex("GuardRFVerifyStackPointerFunctionPointer",
              Conf->GuardRFVerifyStackPointerFunctionPointer);
   W.printHex("HotPatchTableOffset", Conf->HotPatchTableOffset);
+
+  Tables.GuardLJmpTableVA = Conf->GuardLongJumpTargetTable;
+  Tables.GuardLJmpTableCount = Conf->GuardLongJumpTargetCount;
 }
 
 void COFFDumper::printBaseOfDataField(const pe32_header *Hdr) {
@@ -1812,10 +1822,9 @@ void COFFDumper::printStackMap() const {
 
   if (Obj->isLittleEndian())
     prettyPrintStackMap(
-                      llvm::outs(),
-                      StackMapV2Parser<support::little>(StackMapContentsArray));
+        W, StackMapV2Parser<support::little>(StackMapContentsArray));
   else
-    prettyPrintStackMap(llvm::outs(),
+    prettyPrintStackMap(W,
                         StackMapV2Parser<support::big>(StackMapContentsArray));
 }
 

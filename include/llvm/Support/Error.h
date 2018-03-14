@@ -882,16 +882,16 @@ Error handleErrors(Error E, HandlerTs &&... Hs) {
   return handleErrorImpl(std::move(Payload), std::forward<HandlerTs>(Hs)...);
 }
 
-/// Behaves the same as handleErrors, except that it requires that all
-/// errors be handled by the given handlers. If any unhandled error remains
-/// after the handlers have run, report_fatal_error() will be called.
+/// Behaves the same as handleErrors, except that by contract all errors
+/// *must* be handled by the given handlers (i.e. there must be no remaining
+/// errors after running the handlers, or llvm_unreachable is called).
 template <typename... HandlerTs>
 void handleAllErrors(Error E, HandlerTs &&... Handlers) {
   cantFail(handleErrors(std::move(E), std::forward<HandlerTs>(Handlers)...));
 }
 
 /// Check that E is a non-error, then drop it.
-/// If E is an error report_fatal_error will be called.
+/// If E is an error, llvm_unreachable will be called.
 inline void handleAllErrors(Error E) {
   cantFail(std::move(E));
 }
@@ -961,6 +961,18 @@ inline std::string toString(Error E) {
 /// might be more clearly refactored to return an Optional<T>.
 inline void consumeError(Error Err) {
   handleAllErrors(std::move(Err), [](const ErrorInfoBase &) {});
+}
+
+/// Helper for converting an Error to a bool.
+///
+/// This method returns true if Err is in an error state, or false if it is
+/// in a success state.  Puts Err in a checked state in both cases (unlike
+/// Error::operator bool(), which only does this for success states).
+inline bool errorToBool(Error Err) {
+  bool IsError = static_cast<bool>(Err);
+  if (IsError)
+    consumeError(std::move(Err));
+  return IsError;
 }
 
 /// Helper for Errors used as out-parameters.

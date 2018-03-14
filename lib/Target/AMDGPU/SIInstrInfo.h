@@ -44,7 +44,7 @@ private:
   const SIRegisterInfo RI;
   const SISubtarget &ST;
 
-  // The the inverse predicate should have the negative value.
+  // The inverse predicate should have the negative value.
   enum BranchPredicate {
     INVALID_BR = 0,
     SCC_TRUE = 1,
@@ -454,6 +454,14 @@ public:
 
   bool isGather4(uint16_t Opcode) const {
     return get(Opcode).TSFlags & SIInstrFlags::Gather4;
+  }
+
+  static bool isD16(const MachineInstr &MI) {
+    return MI.getDesc().TSFlags & SIInstrFlags::D16;
+  }
+
+  bool isD16(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::D16;
   }
 
   static bool isFLAT(const MachineInstr &MI) {
@@ -906,6 +914,9 @@ namespace AMDGPU {
 
   LLVM_READONLY
   int getAddr64Inst(uint16_t Opcode);
+
+  LLVM_READONLY
+  int getMUBUFNoLdsInst(uint16_t Opcode);
 
   LLVM_READONLY
   int getAtomicRetOp(uint16_t Opcode);

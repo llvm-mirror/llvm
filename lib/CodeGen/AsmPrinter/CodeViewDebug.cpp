@@ -165,14 +165,21 @@ unsigned CodeViewDebug::maybeRecordFile(const DIFile *F) {
   auto Insertion = FileIdMap.insert(std::make_pair(FullPath, NextId));
   if (Insertion.second) {
     // We have to compute the full filepath and emit a .cv_file directive.
-    std::string Checksum = fromHex(F->getChecksum());
-    void *CKMem = OS.getContext().allocate(Checksum.size(), 1);
-    memcpy(CKMem, Checksum.data(), Checksum.size());
-    ArrayRef<uint8_t> ChecksumAsBytes(reinterpret_cast<const uint8_t *>(CKMem),
-                                      Checksum.size());
-    DIFile::ChecksumKind ChecksumKind = F->getChecksumKind();
+    ArrayRef<uint8_t> ChecksumAsBytes;
+    FileChecksumKind CSKind = FileChecksumKind::None;
+    if (F->getChecksum()) {
+      std::string Checksum = fromHex(F->getChecksum()->Value);
+      void *CKMem = OS.getContext().allocate(Checksum.size(), 1);
+      memcpy(CKMem, Checksum.data(), Checksum.size());
+      ChecksumAsBytes = ArrayRef<uint8_t>(
+          reinterpret_cast<const uint8_t *>(CKMem), Checksum.size());
+      switch (F->getChecksum()->Kind) {
+      case DIFile::CSK_MD5:  CSKind = FileChecksumKind::MD5; break;
+      case DIFile::CSK_SHA1: CSKind = FileChecksumKind::SHA1; break;
+      }
+    }
     bool Success = OS.EmitCVFileDirective(NextId, FullPath, ChecksumAsBytes,
-                                          static_cast<unsigned>(ChecksumKind));
+                                          static_cast<unsigned>(CSKind));
     (void)Success;
     assert(Success && ".cv_file directive failed");
   }
@@ -501,12 +508,12 @@ void CodeViewDebug::endModule() {
   clear();
 }
 
-static void emitNullTerminatedSymbolName(MCStreamer &OS, StringRef S) {
+static void emitNullTerminatedSymbolName(MCStreamer &OS, StringRef S,
+    unsigned MaxFixedRecordLength = 0xF00) {
   // The maximum CV record length is 0xFF00. Most of the strings we emit appear
   // after a fixed length portion of the record. The fixed length portion should
   // always be less than 0xF00 (3840) bytes, so truncate the string so that the
   // overall record size is less than the maximum allowed.
-  unsigned MaxFixedRecordLength = 0xF00;
   SmallString<32> NullTerminatedString(
       S.take_front(MaxRecordLength - MaxFixedRecordLength - 1));
   NullTerminatedString.push_back('\0');
@@ -823,8 +830,8 @@ void CodeViewDebug::switchToDebugSectionForSymbol(const MCSymbol *GVSym) {
 
 void CodeViewDebug::emitDebugInfoForFunction(const Function *GV,
                                              FunctionInfo &FI) {
-  // For each function there is a separate subsection
-  // which holds the PC to file:line table.
+  // For each function there is a separate subsection which holds the PC to
+  // file:line table.
   const MCSymbol *Fn = Asm->getSymbol(GV);
   assert(Fn);
 
@@ -1261,6 +1268,7 @@ TypeIndex CodeViewDebug::lowerType(const DIType *Ty, const DIType *ClassTy) {
     return lowerTypePointer(cast<DIDerivedType>(Ty));
   case dwarf::DW_TAG_ptr_to_member_type:
     return lowerTypeMemberPointer(cast<DIDerivedType>(Ty));
+  case dwarf::DW_TAG_restrict_type:
   case dwarf::DW_TAG_const_type:
   case dwarf::DW_TAG_volatile_type:
   // TODO: add support for DW_TAG_atomic_type here
@@ -1281,6 +1289,8 @@ TypeIndex CodeViewDebug::lowerType(const DIType *Ty, const DIType *ClassTy) {
     return lowerTypeClass(cast<DICompositeType>(Ty));
   case dwarf::DW_TAG_union_type:
     return lowerTypeUnion(cast<DICompositeType>(Ty));
+  case dwarf::DW_TAG_unspecified_type:
+    return TypeIndex::None();
   default:
     // Use the null type index.
     return TypeIndex();
@@ -1323,7 +1333,9 @@ TypeIndex CodeViewDebug::lowerTypeArray(const DICompositeType *Ty) {
     const DISubrange *Subrange = cast<DISubrange>(Element);
     assert(Subrange->getLowerBound() == 0 &&
            "codeview doesn't support subranges with lower bounds");
-    int64_t Count = Subrange->getCount();
+    int64_t Count = -1;
+    if (auto *CI = Subrange->getCount().dyn_cast<ConstantInt*>())
+      Count = CI->getSExtValue();
 
     // Forward declarations of arrays without a size and VLAs use a count of -1.
     // Emit a count of zero in these cases to match what MSVC does for arrays
@@ -1441,12 +1453,13 @@ TypeIndex CodeViewDebug::lowerTypeBasic(const DIBasicType *Ty) {
   return TypeIndex(STK);
 }
 
-TypeIndex CodeViewDebug::lowerTypePointer(const DIDerivedType *Ty) {
+TypeIndex CodeViewDebug::lowerTypePointer(const DIDerivedType *Ty,
+                                          PointerOptions PO) {
   TypeIndex PointeeTI = getTypeIndex(Ty->getBaseType());
 
-  // Pointers to simple types can use SimpleTypeMode, rather than having a
-  // dedicated pointer type record.
-  if (PointeeTI.isSimple() &&
+  // Pointers to simple types without any options can use SimpleTypeMode, rather
+  // than having a dedicated pointer type record.
+  if (PointeeTI.isSimple() && PO == PointerOptions::None &&
       PointeeTI.getSimpleMode() == SimpleTypeMode::Direct &&
       Ty->getTag() == dwarf::DW_TAG_pointer_type) {
     SimpleTypeMode Mode = Ty->getSizeInBits() == 64
@@ -1470,10 +1483,7 @@ TypeIndex CodeViewDebug::lowerTypePointer(const DIDerivedType *Ty) {
     PM = PointerMode::RValueReference;
     break;
   }
-  // FIXME: MSVC folds qualifiers into PointerOptions in the context of a method
-  // 'this' pointer, but not normal contexts. Figure out what we're supposed to
-  // do.
-  PointerOptions PO = PointerOptions::None;
+
   PointerRecord PR(PointeeTI, PK, PM, PO, Ty->getSizeInBits() / 8);
   return TypeTable.writeLeafType(PR);
 }
@@ -1511,7 +1521,8 @@ translatePtrToMemberRep(unsigned SizeInBytes, bool IsPMF, unsigned Flags) {
   llvm_unreachable("invalid ptr to member representation");
 }
 
-TypeIndex CodeViewDebug::lowerTypeMemberPointer(const DIDerivedType *Ty) {
+TypeIndex CodeViewDebug::lowerTypeMemberPointer(const DIDerivedType *Ty,
+                                                PointerOptions PO) {
   assert(Ty->getTag() == dwarf::DW_TAG_ptr_to_member_type);
   TypeIndex ClassTI = getTypeIndex(Ty->getClassType());
   TypeIndex PointeeTI = getTypeIndex(Ty->getBaseType(), Ty->getClassType());
@@ -1520,7 +1531,7 @@ TypeIndex CodeViewDebug::lowerTypeMemberPointer(const DIDerivedType *Ty) {
   bool IsPMF = isa<DISubroutineType>(Ty->getBaseType());
   PointerMode PM = IsPMF ? PointerMode::PointerToMemberFunction
                          : PointerMode::PointerToDataMember;
-  PointerOptions PO = PointerOptions::None; // FIXME
+
   assert(Ty->getSizeInBits() / 8 <= 0xff && "pointer size too big");
   uint8_t SizeInBytes = Ty->getSizeInBits() / 8;
   MemberPointerInfo MPI(
@@ -1545,6 +1556,7 @@ static CallingConvention dwarfCCToCodeView(unsigned DwarfCC) {
 
 TypeIndex CodeViewDebug::lowerTypeModifier(const DIDerivedType *Ty) {
   ModifierOptions Mods = ModifierOptions::None;
+  PointerOptions PO = PointerOptions::None;
   bool IsModifier = true;
   const DIType *BaseTy = Ty;
   while (IsModifier && BaseTy) {
@@ -1552,9 +1564,16 @@ TypeIndex CodeViewDebug::lowerTypeModifier(const DIDerivedType *Ty) {
     switch (BaseTy->getTag()) {
     case dwarf::DW_TAG_const_type:
       Mods |= ModifierOptions::Const;
+      PO |= PointerOptions::Const;
       break;
     case dwarf::DW_TAG_volatile_type:
       Mods |= ModifierOptions::Volatile;
+      PO |= PointerOptions::Volatile;
+      break;
+    case dwarf::DW_TAG_restrict_type:
+      // Only pointer types be marked with __restrict. There is no known flag
+      // for __restrict in LF_MODIFIER records.
+      PO |= PointerOptions::Restrict;
       break;
     default:
       IsModifier = false;
@@ -1563,7 +1582,31 @@ TypeIndex CodeViewDebug::lowerTypeModifier(const DIDerivedType *Ty) {
     if (IsModifier)
       BaseTy = cast<DIDerivedType>(BaseTy)->getBaseType().resolve();
   }
+
+  // Check if the inner type will use an LF_POINTER record. If so, the
+  // qualifiers will go in the LF_POINTER record. This comes up for types like
+  // 'int *const' and 'int *__restrict', not the more common cases like 'const
+  // char *'.
+  if (BaseTy) {
+    switch (BaseTy->getTag()) {
+    case dwarf::DW_TAG_pointer_type:
+    case dwarf::DW_TAG_reference_type:
+    case dwarf::DW_TAG_rvalue_reference_type:
+      return lowerTypePointer(cast<DIDerivedType>(BaseTy), PO);
+    case dwarf::DW_TAG_ptr_to_member_type:
+      return lowerTypeMemberPointer(cast<DIDerivedType>(BaseTy), PO);
+    default:
+      break;
+    }
+  }
+
   TypeIndex ModifiedTI = getTypeIndex(BaseTy);
+
+  // Return the base type index if there aren't any modifiers. For example, the
+  // metadata could contain restrict wrappers around non-pointer types.
+  if (Mods == ModifierOptions::None)
+    return ModifiedTI;
+
   ModifierRecord MR(ModifiedTI, Mods);
   return TypeTable.writeLeafType(MR);
 }
@@ -1573,6 +1616,11 @@ TypeIndex CodeViewDebug::lowerTypeFunction(const DISubroutineType *Ty) {
   for (DITypeRef ArgTypeRef : Ty->getTypeArray())
     ReturnAndArgTypeIndices.push_back(getTypeIndex(ArgTypeRef));
 
+  // MSVC uses type none for variadic argument.
+  if (ReturnAndArgTypeIndices.size() > 1 &&
+      ReturnAndArgTypeIndices.back() == TypeIndex::Void()) {
+    ReturnAndArgTypeIndices.back() = TypeIndex::None();
+  }
   TypeIndex ReturnTypeIndex = TypeIndex::Void();
   ArrayRef<TypeIndex> ArgTypeIndices = None;
   if (!ReturnAndArgTypeIndices.empty()) {
@@ -1602,6 +1650,11 @@ TypeIndex CodeViewDebug::lowerTypeMemberFunction(const DISubroutineType *Ty,
   for (DITypeRef ArgTypeRef : Ty->getTypeArray())
     ReturnAndArgTypeIndices.push_back(getTypeIndex(ArgTypeRef));
 
+  // MSVC uses type none for variadic argument.
+  if (ReturnAndArgTypeIndices.size() > 1 &&
+      ReturnAndArgTypeIndices.back() == TypeIndex::Void()) {
+    ReturnAndArgTypeIndices.back() = TypeIndex::None();
+  }
   TypeIndex ReturnTypeIndex = TypeIndex::Void();
   ArrayRef<TypeIndex> ArgTypeIndices = None;
   if (!ReturnAndArgTypeIndices.empty()) {
@@ -1716,6 +1769,26 @@ static ClassOptions getCommonClassOptions(const DICompositeType *Ty) {
   return CO;
 }
 
+void CodeViewDebug::addUDTSrcLine(const DIType *Ty, TypeIndex TI) {
+  switch (Ty->getTag()) {
+  case dwarf::DW_TAG_class_type:
+  case dwarf::DW_TAG_structure_type:
+  case dwarf::DW_TAG_union_type:
+  case dwarf::DW_TAG_enumeration_type:
+    break;
+  default:
+    return;
+  }
+
+  if (const auto *File = Ty->getFile()) {
+    StringIdRecord SIDR(TypeIndex(0x0), getFullFilepath(File));
+    TypeIndex SIDI = TypeTable.writeLeafType(SIDR);
+
+    UdtSourceLineRecord USLR(TI, SIDI, Ty->getLine());
+    TypeTable.writeLeafType(USLR);
+  }
+}
+
 TypeIndex CodeViewDebug::lowerTypeEnum(const DICompositeType *Ty) {
   ClassOptions CO = getCommonClassOptions(Ty);
   TypeIndex FTI;
@@ -1744,7 +1817,11 @@ TypeIndex CodeViewDebug::lowerTypeEnum(const DICompositeType *Ty) {
 
   EnumRecord ER(EnumeratorCount, CO, FTI, FullName, Ty->getIdentifier(),
                 getTypeIndex(Ty->getBaseType()));
-  return TypeTable.writeLeafType(ER);
+  TypeIndex EnumTI = TypeTable.writeLeafType(ER);
+
+  addUDTSrcLine(Ty, EnumTI);
+
+  return EnumTI;
 }
 
 //===----------------------------------------------------------------------===//
@@ -1793,12 +1870,33 @@ void CodeViewDebug::collectMemberInfo(ClassInfo &Info,
     Info.Members.push_back({DDTy, 0});
     return;
   }
-  // An unnamed member must represent a nested struct or union. Add all the
-  // indirect fields to the current record.
+
+  // An unnamed member may represent a nested struct or union. Attempt to
+  // interpret the unnamed member as a DICompositeType possibly wrapped in
+  // qualifier types. Add all the indirect fields to the current record if that
+  // succeeds, and drop the member if that fails.
   assert((DDTy->getOffsetInBits() % 8) == 0 && "Unnamed bitfield member!");
   uint64_t Offset = DDTy->getOffsetInBits();
   const DIType *Ty = DDTy->getBaseType().resolve();
-  const DICompositeType *DCTy = cast<DICompositeType>(Ty);
+  bool FullyResolved = false;
+  while (!FullyResolved) {
+    switch (Ty->getTag()) {
+    case dwarf::DW_TAG_const_type:
+    case dwarf::DW_TAG_volatile_type:
+      // FIXME: we should apply the qualifier types to the indirect fields
+      // rather than dropping them.
+      Ty = cast<DIDerivedType>(Ty)->getBaseType().resolve();
+      break;
+    default:
+      FullyResolved = true;
+      break;
+    }
+  }
+
+  const DICompositeType *DCTy = dyn_cast<DICompositeType>(Ty);
+  if (!DCTy)
+    return;
+
   ClassInfo NestedInfo = collectClassInfo(DCTy);
   for (const ClassInfo::MemberInfo &IndirectField : NestedInfo.Members)
     Info.Members.push_back(
@@ -1875,13 +1973,7 @@ TypeIndex CodeViewDebug::lowerCompleteTypeClass(const DICompositeType *Ty) {
                  SizeInBytes, FullName, Ty->getIdentifier());
   TypeIndex ClassTI = TypeTable.writeLeafType(CR);
 
-  if (const auto *File = Ty->getFile()) {
-    StringIdRecord SIDR(TypeIndex(0x0), getFullFilepath(File));
-    TypeIndex SIDI = TypeTable.writeLeafType(SIDR);
-
-    UdtSourceLineRecord USLR(ClassTI, SIDI, Ty->getLine());
-    TypeTable.writeLeafType(USLR);
-  }
+  addUDTSrcLine(Ty, ClassTI);
 
   addToUDTs(Ty);
 
@@ -1917,11 +2009,7 @@ TypeIndex CodeViewDebug::lowerCompleteTypeUnion(const DICompositeType *Ty) {
                  Ty->getIdentifier());
   TypeIndex UnionTI = TypeTable.writeLeafType(UR);
 
-  StringIdRecord SIR(TypeIndex(0x0), getFullFilepath(Ty->getFile()));
-  TypeIndex SIRI = TypeTable.writeLeafType(SIR);
-
-  UdtSourceLineRecord USLR(UnionTI, SIRI, Ty->getLine());
-  TypeTable.writeLeafType(USLR);
+  addUDTSrcLine(Ty, UnionTI);
 
   addToUDTs(Ty);
 
@@ -1956,6 +2044,7 @@ CodeViewDebug::lowerRecordFieldList(const DICompositeType *Ty) {
           VBTableIndex);
 
       ContinuationBuilder.writeMemberType(VBCR);
+      MemberCount++;
     } else {
       assert(I->getOffsetInBits() % 8 == 0 &&
              "bases must be on byte boundaries");
@@ -1963,6 +2052,7 @@ CodeViewDebug::lowerRecordFieldList(const DICompositeType *Ty) {
                           getTypeIndex(I->getBaseType()),
                           I->getOffsetInBits() / 8);
       ContinuationBuilder.writeMemberType(BCR);
+      MemberCount++;
     }
   }
 
@@ -2432,6 +2522,7 @@ void CodeViewDebug::emitDebugInfoForGlobal(const DIGlobalVariable *DIGV,
   // FIXME: Thread local data, etc
   MCSymbol *DataBegin = MMI->getContext().createTempSymbol(),
            *DataEnd = MMI->getContext().createTempSymbol();
+  const unsigned FixedLengthOfThisRecord = 12;
   OS.AddComment("Record length");
   OS.emitAbsoluteSymbolDiff(DataEnd, DataBegin, 2);
   OS.EmitLabel(DataBegin);
@@ -2459,6 +2550,6 @@ void CodeViewDebug::emitDebugInfoForGlobal(const DIGlobalVariable *DIGV,
   OS.AddComment("Segment");
   OS.EmitCOFFSectionIndex(GVSym);
   OS.AddComment("Name");
-  emitNullTerminatedSymbolName(OS, DIGV->getName());
+  emitNullTerminatedSymbolName(OS, DIGV->getName(), FixedLengthOfThisRecord);
   OS.EmitLabel(DataEnd);
 }

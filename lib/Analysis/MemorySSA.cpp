@@ -1033,7 +1033,7 @@ void MemorySSA::markUnreachableAsLiveOnEntry(BasicBlock *BB) {
 
 MemorySSA::MemorySSA(Function &Func, AliasAnalysis *AA, DominatorTree *DT)
     : AA(AA), DT(DT), F(Func), LiveOnEntryDef(nullptr), Walker(nullptr),
-      NextID(INVALID_MEMORYACCESS_ID) {
+      NextID(0) {
   buildMemorySSA();
 }
 
@@ -1304,9 +1304,8 @@ void MemorySSA::buildMemorySSA() {
   // semantics do *not* imply that something with no immediate uses can simply
   // be removed.
   BasicBlock &StartingPoint = F.getEntryBlock();
-  LiveOnEntryDef =
-      llvm::make_unique<MemoryDef>(F.getContext(), nullptr, nullptr,
-                                   &StartingPoint, NextID++);
+  LiveOnEntryDef.reset(new MemoryDef(F.getContext(), nullptr, nullptr,
+                                     &StartingPoint, NextID++));
   DenseMap<const BasicBlock *, unsigned int> BBNumbers;
   unsigned NextBBNum = 0;
 
@@ -2029,9 +2028,8 @@ MemorySSA::CachingWalker::getClobberingMemoryAccess(MemoryAccess *MA) {
   // If this is an already optimized use or def, return the optimized result.
   // Note: Currently, we do not store the optimized def result because we'd need
   // a separate field, since we can't use it as the defining access.
-  if (auto *MUD = dyn_cast<MemoryUseOrDef>(StartingAccess))
-    if (MUD->isOptimized())
-      return MUD->getOptimized();
+  if (StartingAccess->isOptimized())
+    return StartingAccess->getOptimized();
 
   const Instruction *I = StartingAccess->getMemoryInst();
   UpwardsMemoryQuery Q(I, StartingAccess);

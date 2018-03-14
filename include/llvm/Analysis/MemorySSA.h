@@ -93,6 +93,7 @@
 #include "llvm/IR/Use.h"
 #include "llvm/IR/User.h"
 #include "llvm/IR/Value.h"
+#include "llvm/IR/ValueHandle.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Casting.h"
 #include <algorithm>
@@ -118,10 +119,10 @@ struct DefsOnlyTag {};
 
 } // end namespace MSSAHelpers
 
-enum {
+enum : unsigned {
   // Used to signify what the default invalid ID is for MemoryAccess's
   // getID()
-  INVALID_MEMORYACCESS_ID = 0
+  INVALID_MEMORYACCESS_ID = -1U
 };
 
 template <class T> class memoryaccess_def_iterator_base;
@@ -217,8 +218,16 @@ protected:
       : DerivedUser(Type::getVoidTy(C), Vty, nullptr, NumOperands, DeleteValue),
         Block(BB) {}
 
+  // Use deleteValue() to delete a generic MemoryAccess.
+  ~MemoryAccess() = default;
+
 private:
   BasicBlock *Block;
+};
+
+template <>
+struct ilist_alloc_traits<MemoryAccess> {
+  static void deleteNode(MemoryAccess *MA) { MA->deleteValue(); }
 };
 
 inline raw_ostream &operator<<(raw_ostream &OS, const MemoryAccess &MA) {
@@ -269,6 +278,9 @@ protected:
       : MemoryAccess(C, Vty, DeleteValue, BB, 1), MemoryInst(MI) {
     setDefiningAccess(DMA);
   }
+
+  // Use deleteValue() to delete a generic MemoryUseOrDef.
+  ~MemoryUseOrDef() = default;
 
   void setDefiningAccess(MemoryAccess *DMA, bool Optimized = false) {
     if (!Optimized) {
@@ -331,7 +343,7 @@ protected:
 private:
   static void deleteMe(DerivedUser *Self);
 
-  unsigned int OptimizedID = 0;
+  unsigned OptimizedID = INVALID_MEMORYACCESS_ID;
 };
 
 template <>
@@ -369,7 +381,9 @@ public:
     OptimizedID = getDefiningAccess()->getID();
   }
 
-  MemoryAccess *getOptimized() const { return Optimized; }
+  MemoryAccess *getOptimized() const {
+    return cast_or_null<MemoryAccess>(Optimized);
+  }
 
   bool isOptimized() const {
     return getOptimized() && getDefiningAccess() &&
@@ -388,8 +402,8 @@ private:
   static void deleteMe(DerivedUser *Self);
 
   const unsigned ID;
-  MemoryAccess *Optimized = nullptr;
-  unsigned int OptimizedID = INVALID_MEMORYACCESS_ID;
+  unsigned OptimizedID = INVALID_MEMORYACCESS_ID;
+  WeakVH Optimized;
 };
 
 template <>
@@ -773,7 +787,7 @@ private:
   // corresponding list is empty.
   AccessMap PerBlockAccesses;
   DefsMap PerBlockDefs;
-  std::unique_ptr<MemoryAccess> LiveOnEntryDef;
+  std::unique_ptr<MemoryAccess, ValueDeleter> LiveOnEntryDef;
 
   // Domination mappings
   // Note that the numbering is local to a block, even though the map is

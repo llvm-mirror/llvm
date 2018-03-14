@@ -155,6 +155,10 @@ bool TargetTransformInfo::isLSRCostLess(LSRCost &C1, LSRCost &C2) const {
   return TTIImpl->isLSRCostLess(C1, C2);
 }
 
+bool TargetTransformInfo::canMacroFuseCmp() const {
+  return TTIImpl->canMacroFuseCmp();
+}
+
 bool TargetTransformInfo::isLegalMaskedStore(Type *DataType) const {
   return TTIImpl->isLegalMaskedStore(DataType);
 }
@@ -224,6 +228,10 @@ bool TargetTransformInfo::shouldBuildLookupTables() const {
 }
 bool TargetTransformInfo::shouldBuildLookupTablesForConstant(Constant *C) const {
   return TTIImpl->shouldBuildLookupTablesForConstant(C);
+}
+
+bool TargetTransformInfo::useColdCCForColdCall(Function &F) const {
+  return TTIImpl->useColdCCForColdCall(F);
 }
 
 unsigned TargetTransformInfo::

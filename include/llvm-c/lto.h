@@ -44,7 +44,7 @@ typedef bool lto_bool_t;
  * @{
  */
 
-#define LTO_API_VERSION 21
+#define LTO_API_VERSION 22
 
 /**
  * \since prior to LTO_API_VERSION=3
@@ -784,7 +784,7 @@ extern void thinlto_codegen_set_cache_dir(thinlto_code_gen_t cg,
 /**
  * Sets the cache pruning interval (in seconds). A negative value disables the
  * pruning. An unspecified default value will be applied, and a value of 0 will
- * be ignored.
+ * force prunning to occur.
  *
  * \since LTO_API_VERSION=18
  */
@@ -793,7 +793,7 @@ extern void thinlto_codegen_set_cache_pruning_interval(thinlto_code_gen_t cg,
 
 /**
  * Sets the maximum cache size that can be persistent across build, in terms of
- * percentage of the available space on the the disk. Set to 100 to indicate
+ * percentage of the available space on the disk. Set to 100 to indicate
  * no limit, 50 to indicate that the cache size will not be left over half the
  * available space. A value over 100 will be reduced to 100, a value of 0 will
  * be ignored. An unspecified default value will be applied.
@@ -815,6 +815,28 @@ extern void thinlto_codegen_set_final_cache_size_relative_to_available_space(
  */
 extern void thinlto_codegen_set_cache_entry_expiration(thinlto_code_gen_t cg,
                                                        unsigned expiration);
+
+/**
+ * Sets the maximum size of the cache directory (in bytes). A value over the
+ * amount of available space on the disk will be reduced to the amount of
+ * available space. An unspecified default value will be applied. A value of 0
+ * will be ignored.
+ *
+ * \since LTO_API_VERSION=22
+ */
+extern void thinlto_codegen_set_cache_size_bytes(thinlto_code_gen_t cg,
+                                                 unsigned max_size_bytes);
+
+/**
+ * Sets the maximum number of files in the cache directory. An unspecified
+ * default value will be applied. A value of 0 will be ignored.
+ *
+ * \since LTO_API_VERSION=22
+ */
+extern void thinlto_codegen_set_cache_size_files(thinlto_code_gen_t cg,
+                                                 unsigned max_size_files);
+
+
 
 /**
  * @} // endgroup LLVMCTLTO_CACHING

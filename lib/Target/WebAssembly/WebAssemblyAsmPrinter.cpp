@@ -84,8 +84,16 @@ void WebAssemblyAsmPrinter::EmitEndOfAsmFile(Module &M) {
       SmallVector<MVT, 4> Results;
       SmallVector<MVT, 4> Params;
       ComputeSignatureVTs(F, TM, Params, Results);
-      getTargetStreamer()->emitIndirectFunctionType(getSymbol(&F), Params,
-                                                    Results);
+      MCSymbol *Sym = getSymbol(&F);
+      getTargetStreamer()->emitIndirectFunctionType(Sym, Params, Results);
+
+      if (TM.getTargetTriple().isOSBinFormatWasm() &&
+          F.hasFnAttribute("wasm-import-module")) {
+        MCSymbolWasm *WasmSym = cast<MCSymbolWasm>(Sym);
+        StringRef Name = F.getFnAttribute("wasm-import-module")
+                             .getValueAsString();
+        getTargetStreamer()->emitImportModule(WasmSym, Name);
+      }
     }
   }
   for (const auto &G : M.globals()) {

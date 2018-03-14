@@ -213,13 +213,14 @@ def LAR32rm : I<0x02, MRMSrcMem, (outs GR32:$dst), (ins i16mem:$src),
 def LAR32rr : I<0x02, MRMSrcReg, (outs GR32:$dst), (ins GR32:$src),
                 "lar{l}\t{$src, $dst|$dst, $src}", [], IIC_LAR_RR>, TB,
                 OpSize32;
-// i16mem operand in LAR64rm and GR32 operand in LAR32rr is not a typo.
+// i16mem operand in LAR64rm and GR32 operand in LAR64rr is not a typo.
 let mayLoad = 1 in
 def LAR64rm : RI<0x02, MRMSrcMem, (outs GR64:$dst), (ins i16mem:$src),
                  "lar{q}\t{$src, $dst|$dst, $src}", [], IIC_LAR_RM>, TB;
 def LAR64rr : RI<0x02, MRMSrcReg, (outs GR64:$dst), (ins GR32:$src),
                  "lar{q}\t{$src, $dst|$dst, $src}", [], IIC_LAR_RR>, TB;
 
+// i16mem operand in LSL32rm and GR32 operand in LSL32rr is not a typo.
 let mayLoad = 1 in
 def LSL16rm : I<0x03, MRMSrcMem, (outs GR16:$dst), (ins i16mem:$src),
                 "lsl{w}\t{$src, $dst|$dst, $src}", [], IIC_LSL_RM>, TB,
@@ -227,17 +228,18 @@ def LSL16rm : I<0x03, MRMSrcMem, (outs GR16:$dst), (ins i16mem:$src),
 def LSL16rr : I<0x03, MRMSrcReg, (outs GR16:$dst), (ins GR16:$src),
                 "lsl{w}\t{$src, $dst|$dst, $src}", [], IIC_LSL_RR>, TB,
                 OpSize16;
+// i16mem operand in LSL64rm and GR32 operand in LSL64rr is not a typo.
 let mayLoad = 1 in
-def LSL32rm : I<0x03, MRMSrcMem, (outs GR32:$dst), (ins i32mem:$src),
+def LSL32rm : I<0x03, MRMSrcMem, (outs GR32:$dst), (ins i16mem:$src),
                 "lsl{l}\t{$src, $dst|$dst, $src}", [], IIC_LSL_RM>, TB,
                 OpSize32;
 def LSL32rr : I<0x03, MRMSrcReg, (outs GR32:$dst), (ins GR32:$src),
                 "lsl{l}\t{$src, $dst|$dst, $src}", [], IIC_LSL_RR>, TB,
                 OpSize32;
 let mayLoad = 1 in
-def LSL64rm : RI<0x03, MRMSrcMem, (outs GR64:$dst), (ins i64mem:$src),
+def LSL64rm : RI<0x03, MRMSrcMem, (outs GR64:$dst), (ins i16mem:$src),
                  "lsl{q}\t{$src, $dst|$dst, $src}", [], IIC_LSL_RM>, TB;
-def LSL64rr : RI<0x03, MRMSrcReg, (outs GR64:$dst), (ins GR64:$src),
+def LSL64rr : RI<0x03, MRMSrcReg, (outs GR64:$dst), (ins GR32:$src),
                  "lsl{q}\t{$src, $dst|$dst, $src}", [], IIC_LSL_RR>, TB;
 
 def INVLPG : I<0x01, MRM7m, (outs), (ins i8mem:$addr), "invlpg\t$addr",
@@ -417,10 +419,10 @@ def SLDT32r : I<0x00, MRM0r, (outs GR32:$dst), (ins),
 // LLDT is not interpreted specially in 64-bit mode because there is no sign
 //   extension.
 def SLDT64r : RI<0x00, MRM0r, (outs GR64:$dst), (ins),
-                 "sldt{q}\t$dst", [], IIC_SLDT>, TB;
+                 "sldt{q}\t$dst", [], IIC_SLDT>, TB, Requires<[In64BitMode]>;
 let mayStore = 1 in
 def SLDT64m : RI<0x00, MRM0m, (outs), (ins i16mem:$dst),
-                 "sldt{q}\t$dst", [], IIC_SLDT>, TB;
+                 "sldt{q}\t$dst", [], IIC_SLDT>, TB, Requires<[In64BitMode]>;
 
 def LGDT16m : I<0x01, MRM2m, (outs), (ins opaque48mem:$src),
               "lgdt{w}\t$src", [], IIC_LGDT>, TB, OpSize16, Requires<[Not64BitMode]>;
@@ -535,6 +537,11 @@ let SchedRW = [WriteSystem], Predicates = [HasSHSTK]  in{
                      [(int_x86_clrssbsy addr:$src)]>, XS;
   } // Defs SSP
 } // SchedRW && HasSHSTK
+
+let SchedRW = [WriteSystem], Predicates = [HasIBT]  in {
+    def ENDBR64 : I<0x1E, MRM_FA, (outs), (ins), "endbr64", []>, XS;
+    def ENDBR32 : I<0x1E, MRM_FB, (outs), (ins), "endbr32", []>, XS;
+} // SchedRW && HasIBT
 
 //===----------------------------------------------------------------------===//
 // XSAVE instructions
@@ -695,13 +702,21 @@ let Uses = [RAX, RBX, RCX, RDX], Defs = [RAX, RBX, RCX] in {
 //===----------------------------------------------------------------------===//
 // RDPID Instruction
 let SchedRW = [WriteSystem] in {
-def RDPID32 : I<0xC7, MRM7r, (outs GR32:$src), (ins),
-              "rdpid\t$src", [], IIC_RDPID>, XS,
-              Requires<[Not64BitMode]>;
-def RDPID64 : I<0xC7, MRM7r, (outs GR64:$src), (ins),
-              "rdpid\t$src", [], IIC_RDPID>, XS,
-              Requires<[In64BitMode]>;
+def RDPID32 : I<0xC7, MRM7r, (outs GR32:$dst), (ins),
+              "rdpid\t$dst", [(set GR32:$dst, (int_x86_rdpid))], IIC_RDPID>, XS,
+              Requires<[Not64BitMode, HasRDPID]>;
+def RDPID64 : I<0xC7, MRM7r, (outs GR64:$dst), (ins),
+              "rdpid\t$dst", [], IIC_RDPID>, XS,
+              Requires<[In64BitMode, HasRDPID]>;
 } // SchedRW
+
+let Predicates = [In64BitMode, HasRDPID] in {
+  // Due to silly instruction definition, we have to compensate for the
+  // instruction outputing a 64-bit register.
+  def : Pat<(int_x86_rdpid),
+            (EXTRACT_SUBREG (RDPID64), sub_32bit)>;
+}
+
 
 //===----------------------------------------------------------------------===//
 // PTWRITE Instruction

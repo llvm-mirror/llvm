@@ -193,6 +193,7 @@ def SIMDImmType10Operand : AsmOperandClass { let Name = "SIMDImmType10"; }
 def SImm10s8Operand : AsmOperandClass {
   let Name = "SImm10s8";
   let DiagnosticType = "InvalidMemoryIndexedSImm10";
+  let PredicateMethod = "isSImmScaled<10, 8>";
 }
 
 //===----------------------------------------------------------------------===//
@@ -221,19 +222,29 @@ def adrlabel : Operand<i64> {
   let ParserMatchClass = AdrOperand;
 }
 
+class SImmOperand<int width> : AsmOperandClass {
+  let Name = "SImm" # width;
+  let DiagnosticType = "InvalidMemoryIndexedSImm" # width;
+  let RenderMethod = "addImmOperands";
+  let PredicateMethod = "isSImm<" # width # ">";
+}
+
 def simm10Scaled : Operand<i64> {
   let ParserMatchClass = SImm10s8Operand;
   let DecoderMethod = "DecodeSImm<10>";
   let PrintMethod = "printImmScale<8>";
 }
 
-// simm9 predicate - True if the immediate is in the range [-256, 255].
-def SImm9Operand : AsmOperandClass {
-  let Name = "SImm9";
-  let DiagnosticType = "InvalidMemoryIndexedSImm9";
-}
+def SImm9Operand : SImmOperand<9>;
 def simm9 : Operand<i64>, ImmLeaf<i64, [{ return Imm >= -256 && Imm < 256; }]> {
   let ParserMatchClass = SImm9Operand;
+  let DecoderMethod = "DecodeSImm<9>";
+}
+
+def SImm6Operand : SImmOperand<6>;
+def simm6_32b : Operand<i32>, ImmLeaf<i32, [{ return Imm >= -32 && Imm < 32; }]> {
+  let ParserMatchClass = SImm6Operand;
+  let DecoderMethod = "DecodeSImm<6>";
 }
 
 // simm7sN predicate - True if the immediate is a multiple of N in the range
@@ -241,6 +252,7 @@ def simm9 : Operand<i64>, ImmLeaf<i64, [{ return Imm >= -256 && Imm < 256; }]> {
 class SImm7Scaled<int Scale> : AsmOperandClass {
   let Name = "SImm7s" # Scale;
   let DiagnosticType = "InvalidMemoryIndexed" # Scale # "SImm7";
+  let PredicateMethod = "isSImmScaled<7, " # Scale # ">";
 }
 
 def SImm7s4Operand : SImm7Scaled<4>;
@@ -489,27 +501,35 @@ def logical_imm64_XFORM : SDNodeXForm<imm, [{
 let DiagnosticType = "LogicalSecondSource" in {
   def LogicalImm32Operand : AsmOperandClass {
     let Name = "LogicalImm32";
+    let PredicateMethod = "isLogicalImm<int32_t>";
+    let RenderMethod = "addLogicalImmOperands<int32_t>";
   }
   def LogicalImm64Operand : AsmOperandClass {
     let Name = "LogicalImm64";
+    let PredicateMethod = "isLogicalImm<int64_t>";
+    let RenderMethod = "addLogicalImmOperands<int64_t>";
   }
   def LogicalImm32NotOperand : AsmOperandClass {
     let Name = "LogicalImm32Not";
+    let PredicateMethod = "isLogicalImm<int32_t>";
+    let RenderMethod = "addLogicalImmNotOperands<int32_t>";
   }
   def LogicalImm64NotOperand : AsmOperandClass {
     let Name = "LogicalImm64Not";
+    let PredicateMethod = "isLogicalImm<int64_t>";
+    let RenderMethod = "addLogicalImmNotOperands<int64_t>";
   }
 }
 def logical_imm32 : Operand<i32>, IntImmLeaf<i32, [{
   return AArch64_AM::isLogicalImmediate(Imm.getZExtValue(), 32);
 }], logical_imm32_XFORM> {
-  let PrintMethod = "printLogicalImm32";
+  let PrintMethod = "printLogicalImm<int32_t>";
   let ParserMatchClass = LogicalImm32Operand;
 }
 def logical_imm64 : Operand<i64>, IntImmLeaf<i64, [{
   return AArch64_AM::isLogicalImmediate(Imm.getZExtValue(), 64);
 }], logical_imm64_XFORM> {
-  let PrintMethod = "printLogicalImm64";
+  let PrintMethod = "printLogicalImm<int64_t>";
   let ParserMatchClass = LogicalImm64Operand;
 }
 def logical_imm32_not : Operand<i32> {
@@ -3376,7 +3396,7 @@ class LoadPostIdx<bits<2> sz, bit V, bits<2> opc, RegisterClass regtype,
                       (outs GPR64sp:$wback, regtype:$Rt),
                       (ins GPR64sp:$Rn, simm9:$offset),
                       asm, "$Rn = $wback,@earlyclobber $wback", []>,
-      Sched<[WriteLD, WriteI]>;
+      Sched<[WriteLD, WriteAdr]>;
 
 let mayStore = 1, mayLoad = 0 in
 class StorePostIdx<bits<2> sz, bit V, bits<2> opc, RegisterClass regtype,
@@ -3387,7 +3407,7 @@ class StorePostIdx<bits<2> sz, bit V, bits<2> opc, RegisterClass regtype,
                        asm, "$Rn = $wback,@earlyclobber $wback",
       [(set GPR64sp:$wback,
             (storeop (Ty regtype:$Rt), GPR64sp:$Rn, simm9:$offset))]>,
-    Sched<[WriteAdr, WriteST, ReadAdrBase]>;
+    Sched<[WriteAdr, WriteST]>;
 } // hasSideEffects = 0
 
 

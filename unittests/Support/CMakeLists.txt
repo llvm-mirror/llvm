@@ -13,12 +13,14 @@ add_llvm_unittest(SupportTests
   CachePruningTest.cpp
   CrashRecoveryTest.cpp
   Casting.cpp
+  CheckedArithmeticTest.cpp
   Chrono.cpp
   CommandLineTest.cpp
   CompressionTest.cpp
   ConvertUTFTest.cpp
   DataExtractorTest.cpp
   DebugTest.cpp
+  DJBTest.cpp
   EndianStreamTest.cpp
   EndianTest.cpp
   ErrnoTest.cpp

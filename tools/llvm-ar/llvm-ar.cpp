@@ -31,6 +31,7 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/PrettyStackTrace.h"
+#include "llvm/Support/Process.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/ToolOutputFile.h"
@@ -758,7 +759,7 @@ static int performOperation(ArchiveOperation Operation,
 }
 
 static void runMRIScript() {
-  enum class MRICommand { AddLib, AddMod, Create, Save, End, Invalid };
+  enum class MRICommand { AddLib, AddMod, Create, Delete, Save, End, Invalid };
 
   ErrorOr<std::unique_ptr<MemoryBuffer>> Buf = MemoryBuffer::getSTDIN();
   failIfError(Buf.getError());
@@ -779,6 +780,7 @@ static void runMRIScript() {
                        .Case("addlib", MRICommand::AddLib)
                        .Case("addmod", MRICommand::AddMod)
                        .Case("create", MRICommand::Create)
+                       .Case("delete", MRICommand::Delete)
                        .Case("save", MRICommand::Save)
                        .Case("end", MRICommand::End)
                        .Default(MRICommand::Invalid);
@@ -813,6 +815,12 @@ static void runMRIScript() {
         fail("File already saved");
       ArchiveName = Rest;
       break;
+    case MRICommand::Delete: {
+      StringRef Name = sys::path::filename(Rest);
+      llvm::erase_if(NewMembers,
+                     [=](NewArchiveMember &M) { return M.MemberName == Name; });
+      break;
+    }
     case MRICommand::Save:
       Saved = true;
       break;
@@ -862,7 +870,12 @@ int main(int argc, char **argv) {
       Stem.find("lib") != StringRef::npos)
     return libDriverMain(makeArrayRef(argv, argc));
 
-  for (int i = 1; i < argc; i++) {
+  SmallVector<const char *, 256> Argv;
+  SpecificBumpPtrAllocator<char> ArgAllocator;
+  failIfError(errorCodeToError(sys::Process::GetArgumentVector(
+      Argv, makeArrayRef(argv, argc), ArgAllocator)));
+
+  for (unsigned i = 1; i < Argv.size(); i++) {
     // If an argument starts with a dash and only contains chars
     // that belong to the options chars set, remove the dash.
     // We can't handle it after the command line options parsing
@@ -870,10 +883,10 @@ int main(int argc, char **argv) {
     // starting with a dash.
     // Make sure this doesn't match the actual llvm-ar specific options
     // that start with a dash.
-    StringRef S = argv[i];
+    StringRef S = Argv[i];
     if (S.startswith("-") &&
         S.find_first_not_of(OptionChars, 1) == StringRef::npos) {
-      argv[i]++;
+      Argv[i]++;
       break;
     }
     if (S == "--")
@@ -882,7 +895,7 @@ int main(int argc, char **argv) {
 
   // Have the command line options parsed and handle things
   // like --help and --version.
-  cl::ParseCommandLineOptions(argc, argv,
+  cl::ParseCommandLineOptions(Argv.size(), Argv.data(),
     "LLVM Archiver (llvm-ar)\n\n"
     "  This program archives bitcode files into single libraries\n"
   );

@@ -503,6 +503,13 @@ bool BasicAAResult::DecomposeGEPExpression(const Value *V,
       Index = GetLinearExpression(Index, IndexScale, IndexOffset, ZExtBits,
                                   SExtBits, DL, 0, AC, DT, NSW, NUW);
 
+      // All GEP math happens in the width of the pointer type,
+      // so we can truncate the value to 64-bits as we don't handle
+      // currently pointers larger than 64 bits and we would crash
+      // later. TODO: Make `Scale` an APInt to avoid this problem.
+      if (IndexScale.getBitWidth() > 64)
+        IndexScale = IndexScale.sextOrTrunc(64);
+
       // The GEP index scale ("Scale") scales C1*V+C2, yielding (C1*V+C2)*Scale.
       // This gives us an aggregate computation of (C1*Scale)*V + C2*Scale.
       Decomposed.OtherOffset += IndexOffset.getSExtValue() * Scale;
@@ -845,8 +852,11 @@ ModRefInfo BasicAAResult::getModRefInfo(ImmutableCallSite CS,
       IsMustAlias = false;
 
     // Early return if we improved mod ref information
-    if (!isModAndRefSet(Result))
+    if (!isModAndRefSet(Result)) {
+      if (isNoModRef(Result))
+        return ModRefInfo::NoModRef;
       return IsMustAlias ? setMust(Result) : clearMust(Result);
+    }
   }
 
   // If the CallSite is to malloc or calloc, we can assume that it doesn't

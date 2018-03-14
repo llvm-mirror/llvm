@@ -17,8 +17,8 @@
 ;
 ; CHECK: DW_TAG_formal_parameter [3]
 ; CHECK-NEXT:   DW_AT_location [DW_FORM_data4]        (
-; CHECK-NEXT:     0x0000000000000000 - 0x0000000000000004: DW_OP_reg5 RDI, DW_OP_piece 0x8, DW_OP_piece 0x4, DW_OP_reg4 RSI, DW_OP_piece 0x4
-; CHECK-NEXT:     0x0000000000000004 - 0x0000000000000008: DW_OP_reg5 RDI, DW_OP_piece 0x8, DW_OP_piece 0x4, DW_OP_reg4 RSI, DW_OP_piece 0x4)
+; CHECK-NEXT:     [0x0000000000000000, 0x0000000000000004): DW_OP_reg5 RDI, DW_OP_piece 0x8, DW_OP_piece 0x4, DW_OP_reg4 RSI, DW_OP_piece 0x4
+; CHECK-NEXT:     [0x0000000000000004, 0x0000000000000008): DW_OP_reg5 RDI, DW_OP_piece 0x8, DW_OP_piece 0x4, DW_OP_reg4 RSI, DW_OP_piece 0x4)
 ; CHECK-NEXT:   DW_AT_name {{.*}}"outer"
 ; CHECK: DW_TAG_variable
 ; CHECK-NEXT:   DW_AT_location {{.*}}(DW_OP_reg4 RSI, DW_OP_piece 0x4)
@@ -49,7 +49,7 @@ define i32 @foo(i64 %outer.coerce0, i64 %outer.coerce1) #0 !dbg !4 {
 declare void @llvm.dbg.declare(metadata, metadata, metadata) #1
 
 ; Function Attrs: nounwind
-declare void @llvm.memcpy.p0i8.p0i8.i64(i8* nocapture, i8* nocapture readonly, i64, i32, i1) #2
+declare void @llvm.memcpy.p0i8.p0i8.i64(i8* nocapture, i8* nocapture readonly, i64, i1) #2
 
 ; Function Attrs: nounwind readnone
 declare void @llvm.dbg.value(metadata, metadata, metadata) #1

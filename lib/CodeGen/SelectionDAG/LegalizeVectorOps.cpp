@@ -662,35 +662,6 @@ SDValue VectorLegalizer::ExpandLoad(SDValue Op) {
 
 SDValue VectorLegalizer::ExpandStore(SDValue Op) {
   StoreSDNode *ST = cast<StoreSDNode>(Op.getNode());
-
-  EVT StVT = ST->getMemoryVT();
-  EVT MemSclVT = StVT.getScalarType();
-  unsigned ScalarSize = MemSclVT.getSizeInBits();
-
-  // Round odd types to the next pow of two.
-  if (!isPowerOf2_32(ScalarSize)) {
-    // FIXME: This is completely broken and inconsistent with ExpandLoad
-    // handling.
-
-    // For sub-byte element sizes, this ends up with 0 stride between elements,
-    // so the same element just gets re-written to the same location. There seem
-    // to be tests explicitly testing for this broken behavior though.  tests
-    // for this broken behavior.
-
-    LLVMContext &Ctx = *DAG.getContext();
-
-    EVT NewMemVT
-      = EVT::getVectorVT(Ctx,
-                         MemSclVT.getIntegerVT(Ctx, NextPowerOf2(ScalarSize)),
-                         StVT.getVectorNumElements());
-
-    SDValue NewVectorStore = DAG.getTruncStore(
-        ST->getChain(), SDLoc(Op), ST->getValue(), ST->getBasePtr(),
-        ST->getPointerInfo(), NewMemVT, ST->getAlignment(),
-        ST->getMemOperand()->getFlags(), ST->getAAInfo());
-    ST = cast<StoreSDNode>(NewVectorStore.getNode());
-  }
-
   SDValue TF = TLI.scalarizeVectorStore(ST, DAG);
   AddLegalizedOperand(Op, TF);
   return TF;
@@ -1020,7 +991,7 @@ SDValue VectorLegalizer::ExpandUINT_TO_FLOAT(SDValue Op) {
   SDValue HalfWordMask = DAG.getConstant(HWMask, DL, VT);
 
   // Two to the power of half-word-size.
-  SDValue TWOHW = DAG.getConstantFP(1 << (BW / 2), DL, Op.getValueType());
+  SDValue TWOHW = DAG.getConstantFP(1ULL << (BW / 2), DL, Op.getValueType());
 
   // Clear upper part of LO, lower HI
   SDValue HI = DAG.getNode(ISD::SRL, DL, VT, Op.getOperand(0), HalfWord);

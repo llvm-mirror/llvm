@@ -228,6 +228,10 @@ LLVM-specific variables
   Install symlinks from the binutils tool names to the corresponding LLVM tools.
   For example, ar will be symlinked to llvm-ar.
 
+**LLVM_INSTALL_CCTOOLS_SYMLINKS**:BOOL
+  Install symliks from the cctools tool names to the corresponding LLVM tools.
+  For example, dsymutil will be symlinked to llvm-dsymutil.
+
 **LLVM_BUILD_EXAMPLES**:BOOL
   Build LLVM examples. Defaults to OFF. Targets for building each example are
   generated in any case. See documentation for *LLVM_BUILD_TOOLS* above for more
@@ -550,6 +554,14 @@ LLVM-specific variables
   If enabled, `source-based code coverage
   <http://clang.llvm.org/docs/SourceBasedCodeCoverage.html>`_ instrumentation
   is enabled while building llvm.
+
+**LLVM_CCACHE_BUILD**:BOOL
+  If enabled and the ``ccache`` program is available, then LLVM will be
+  built using ``ccache`` to speed up rebuilds of LLVM and its components.
+  Defaults to OFF.  The size and location of the cache maintained
+  by ``ccache`` can be adjusted via the LLVM_CCACHE_MAXSIZE and LLVM_CCACHE_DIR
+  options, which are passed to the CCACHE_MAXSIZE and CCACHE_DIR environment
+  variables, respectively.
 
 CMake Caches
 ============

@@ -56,7 +56,6 @@
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/None.h"
 #include "llvm/ADT/Optional.h"
-#include "llvm/ADT/SCCIterator.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -69,6 +68,7 @@
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/BasicAliasAnalysis.h"
 #include "llvm/Analysis/BlockFrequencyInfo.h"
+#include "llvm/Analysis/CFG.h"
 #include "llvm/Analysis/CodeMetrics.h"
 #include "llvm/Analysis/DemandedBits.h"
 #include "llvm/Analysis/GlobalsModRef.h"
@@ -208,7 +208,7 @@ static cl::opt<unsigned> SmallLoopCost(
         "The cost of a loop that is considered 'small' by the interleaver."));
 
 static cl::opt<bool> LoopVectorizeWithBlockFrequency(
-    "loop-vectorize-with-block-frequency", cl::init(false), cl::Hidden,
+    "loop-vectorize-with-block-frequency", cl::init(true), cl::Hidden,
     cl::desc("Enable the use of the block frequency analysis to access PGO "
              "heuristics minimizing code growth in cold regions and being more "
              "aggressive in hot regions."));
@@ -283,24 +283,6 @@ class LoopVectorizationRequirements;
 
 } // end anonymous namespace
 
-/// Returns true if the given loop body has a cycle, excluding the loop
-/// itself.
-static bool hasCyclesInLoopBody(const Loop &L) {
-  if (!L.empty())
-    return true;
-
-  for (const auto &SCC :
-       make_range(scc_iterator<Loop, LoopBodyTraits>::begin(L),
-                  scc_iterator<Loop, LoopBodyTraits>::end(L))) {
-    if (SCC.size() > 1) {
-      DEBUG(dbgs() << "LVL: Detected a cycle in the loop body:\n");
-      DEBUG(L.dump());
-      return true;
-    }
-  }
-  return false;
-}
-
 /// A helper function for converting Scalar types to vector types.
 /// If the incoming type is void, we return void. If the VF is 1, we return
 /// the scalar type.
@@ -370,7 +352,7 @@ static bool hasIrregularType(Type *Ty, const DataLayout &DL, unsigned VF) {
 
 /// A helper function that returns the reciprocal of the block probability of
 /// predicated blocks. If we return X, we are assuming the predicated block
-/// will execute once for for every X iterations of the loop header.
+/// will execute once for every X iterations of the loop header.
 ///
 /// TODO: We should use actual block probability here, if available. Currently,
 ///       we always assume predicated blocks have a 50% chance of executing.
@@ -1539,9 +1521,10 @@ public:
       const TargetTransformInfo *TTI,
       std::function<const LoopAccessInfo &(Loop &)> *GetLAA, LoopInfo *LI,
       OptimizationRemarkEmitter *ORE, LoopVectorizationRequirements *R,
-      LoopVectorizeHints *H)
+      LoopVectorizeHints *H, DemandedBits *DB, AssumptionCache *AC)
       : TheLoop(L), PSE(PSE), TLI(TLI), TTI(TTI), DT(DT), GetLAA(GetLAA),
-        ORE(ORE), InterleaveInfo(PSE, L, DT, LI), Requirements(R), Hints(H) {}
+        ORE(ORE), InterleaveInfo(PSE, L, DT, LI), Requirements(R), Hints(H),
+        DB(DB), AC(AC) {}
 
   /// ReductionList contains the reduction descriptors for all
   /// of the reductions that were found in the loop.
@@ -1647,58 +1630,12 @@ public:
 
   bool hasStride(Value *V) { return LAI->hasStride(V); }
 
-  /// Returns true if the target machine supports masked store operation
-  /// for the given \p DataType and kind of access to \p Ptr.
-  bool isLegalMaskedStore(Type *DataType, Value *Ptr) {
-    return isConsecutivePtr(Ptr) && TTI->isLegalMaskedStore(DataType);
-  }
-
-  /// Returns true if the target machine supports masked load operation
-  /// for the given \p DataType and kind of access to \p Ptr.
-  bool isLegalMaskedLoad(Type *DataType, Value *Ptr) {
-    return isConsecutivePtr(Ptr) && TTI->isLegalMaskedLoad(DataType);
-  }
-
-  /// Returns true if the target machine supports masked scatter operation
-  /// for the given \p DataType.
-  bool isLegalMaskedScatter(Type *DataType) {
-    return TTI->isLegalMaskedScatter(DataType);
-  }
-
-  /// Returns true if the target machine supports masked gather operation
-  /// for the given \p DataType.
-  bool isLegalMaskedGather(Type *DataType) {
-    return TTI->isLegalMaskedGather(DataType);
-  }
-
-  /// Returns true if the target machine can represent \p V as a masked gather
-  /// or scatter operation.
-  bool isLegalGatherOrScatter(Value *V) {
-    auto *LI = dyn_cast<LoadInst>(V);
-    auto *SI = dyn_cast<StoreInst>(V);
-    if (!LI && !SI)
-      return false;
-    auto *Ptr = getPointerOperand(V);
-    auto *Ty = cast<PointerType>(Ptr->getType())->getElementType();
-    return (LI && isLegalMaskedGather(Ty)) || (SI && isLegalMaskedScatter(Ty));
-  }
-
   /// Returns true if vector representation of the instruction \p I
   /// requires mask.
   bool isMaskRequired(const Instruction *I) { return (MaskedOp.count(I) != 0); }
 
   unsigned getNumStores() const { return LAI->getNumStores(); }
   unsigned getNumLoads() const { return LAI->getNumLoads(); }
-  unsigned getNumPredStores() const { return NumPredStores; }
-
-  /// Returns true if \p I is an instruction that will be scalarized with
-  /// predication. Such instructions include conditional stores and
-  /// instructions that may divide by zero.
-  bool isScalarWithPredication(Instruction *I);
-
-  /// Returns true if \p I is a memory instruction with consecutive memory
-  /// access that can be widened.
-  bool memoryInstructionCanBeWidened(Instruction *I, unsigned VF = 1);
 
   // Returns true if the NoNaN attribute is set on the function.
   bool hasFunNoNaNAttr() const { return HasFunNoNaNAttr; }
@@ -1751,8 +1688,6 @@ private:
     // masked access.
     return LAI ? &LAI->getSymbolicStrides() : nullptr;
   }
-
-  unsigned NumPredStores = 0;
 
   /// The loop that we evaluate.
   Loop *TheLoop;
@@ -1829,6 +1764,14 @@ private:
 
   /// Used to emit an analysis of any legality issues.
   LoopVectorizeHints *Hints;
+
+  /// The demanded bits analsyis is used to compute the minimum type size in
+  /// which a reduction can be computed.
+  DemandedBits *DB;
+
+  /// The assumption cache analysis is used to compute the minimum type size in
+  /// which a reduction can be computed.
+  AssumptionCache *AC;
 
   /// While vectorizing these instructions we have to generate a
   /// call to the appropriate masked intrinsic
@@ -2051,7 +1994,53 @@ public:
     collectLoopScalars(VF);
   }
 
+  /// Returns true if the target machine supports masked store operation
+  /// for the given \p DataType and kind of access to \p Ptr.
+  bool isLegalMaskedStore(Type *DataType, Value *Ptr) {
+    return Legal->isConsecutivePtr(Ptr) && TTI.isLegalMaskedStore(DataType);
+  }
+
+  /// Returns true if the target machine supports masked load operation
+  /// for the given \p DataType and kind of access to \p Ptr.
+  bool isLegalMaskedLoad(Type *DataType, Value *Ptr) {
+    return Legal->isConsecutivePtr(Ptr) && TTI.isLegalMaskedLoad(DataType);
+  }
+
+  /// Returns true if the target machine supports masked scatter operation
+  /// for the given \p DataType.
+  bool isLegalMaskedScatter(Type *DataType) {
+    return TTI.isLegalMaskedScatter(DataType);
+  }
+
+  /// Returns true if the target machine supports masked gather operation
+  /// for the given \p DataType.
+  bool isLegalMaskedGather(Type *DataType) {
+    return TTI.isLegalMaskedGather(DataType);
+  }
+
+  /// Returns true if the target machine can represent \p V as a masked gather
+  /// or scatter operation.
+  bool isLegalGatherOrScatter(Value *V) {
+    bool LI = isa<LoadInst>(V);
+    bool SI = isa<StoreInst>(V);
+    if (!LI && !SI)
+      return false;
+    auto *Ty = getMemInstValueType(V);
+    return (LI && isLegalMaskedGather(Ty)) || (SI && isLegalMaskedScatter(Ty));
+  }
+
+  /// Returns true if \p I is an instruction that will be scalarized with
+  /// predication. Such instructions include conditional stores and
+  /// instructions that may divide by zero.
+  bool isScalarWithPredication(Instruction *I);
+
+  /// Returns true if \p I is a memory instruction with consecutive memory
+  /// access that can be widened.
+  bool memoryInstructionCanBeWidened(Instruction *I, unsigned VF = 1);
+
 private:
+  unsigned NumPredStores = 0;
+
   /// \return An upper bound for the vectorization factor, larger than zero.
   /// One is returned if vectorization should best be avoided due to cost.
   unsigned computeFeasibleMaxVF(bool OptForSize, unsigned ConstTripCount);
@@ -2102,6 +2091,10 @@ private:
   /// Returns whether the instruction is a load or store and will be a emitted
   /// as a vector operation.
   bool isConsecutiveLoadOrStore(Instruction *I);
+
+  /// Returns true if an artificially high cost for emulated masked memrefs
+  /// should be used.
+  bool useEmulatedMaskMemRefHack(Instruction *I);
 
   /// Create an analysis remark that explains why vectorization failed
   ///
@@ -2291,14 +2284,17 @@ private:
 
 } // end anonymous namespace
 
-static void addAcyclicInnerLoop(Loop &L, SmallVectorImpl<Loop *> &V) {
+static void addAcyclicInnerLoop(Loop &L, LoopInfo &LI,
+                                SmallVectorImpl<Loop *> &V) {
   if (L.empty()) {
-    if (!hasCyclesInLoopBody(L))
+    LoopBlocksRPO RPOT(&L);
+    RPOT.perform(&LI);
+    if (!containsIrreducibleCFG<const BasicBlock *>(RPOT, LI))
       V.push_back(&L);
     return;
   }
   for (Loop *InnerL : L)
-    addAcyclicInnerLoop(*InnerL, V);
+    addAcyclicInnerLoop(*InnerL, LI, V);
 }
 
 namespace {
@@ -2435,9 +2431,12 @@ void InnerLoopVectorizer::createVectorIntOrFpInductionPHI(
   Instruction *LastInduction = VecInd;
   for (unsigned Part = 0; Part < UF; ++Part) {
     VectorLoopValueMap.setVectorValue(EntryVal, Part, LastInduction);
-    recordVectorLoopValueForInductionCast(II, LastInduction, Part);
+
     if (isa<TruncInst>(EntryVal))
       addMetadata(LastInduction, EntryVal);
+    else
+      recordVectorLoopValueForInductionCast(II, LastInduction, Part);
+
     LastInduction = cast<Instruction>(addFastMathFlag(
         Builder.CreateBinOp(AddOp, LastInduction, SplatVF, "step.add")));
   }
@@ -2559,15 +2558,17 @@ void InnerLoopVectorizer::widenIntOrFpInduction(PHINode *IV, TruncInst *Trunc) {
 
   // If we haven't yet vectorized the induction variable, splat the scalar
   // induction variable, and build the necessary step vectors.
+  // TODO: Don't do it unless the vectorized IV is really required.
   if (!VectorizedIV) {
     Value *Broadcasted = getBroadcastInstrs(ScalarIV);
     for (unsigned Part = 0; Part < UF; ++Part) {
       Value *EntryPart =
           getStepVector(Broadcasted, VF * Part, Step, ID.getInductionOpcode());
       VectorLoopValueMap.setVectorValue(EntryVal, Part, EntryPart);
-      recordVectorLoopValueForInductionCast(ID, EntryPart, Part);
       if (Trunc)
         addMetadata(EntryPart, Trunc);
+      else
+        recordVectorLoopValueForInductionCast(ID, EntryPart, Part);
     }
   }
 
@@ -4763,7 +4764,7 @@ void InnerLoopVectorizer::updateAnalysis() {
   DT->addNewBlock(LoopScalarPreHeader, LoopBypassBlocks[0]);
   DT->changeImmediateDominator(LoopScalarBody, LoopScalarPreHeader);
   DT->changeImmediateDominator(LoopExitBlock, LoopBypassBlocks[0]);
-  DEBUG(DT->verifyDomTree());
+  assert(DT->verify(DominatorTree::VerificationLevel::Fast));
 }
 
 /// \brief Check whether it is safe to if-convert this phi node.
@@ -5100,7 +5101,8 @@ bool LoopVectorizationLegality::canVectorizeInstrs() {
         }
 
         RecurrenceDescriptor RedDes;
-        if (RecurrenceDescriptor::isReductionPHI(Phi, TheLoop, RedDes)) {
+        if (RecurrenceDescriptor::isReductionPHI(Phi, TheLoop, RedDes, DB, AC,
+                                                 DT)) {
           if (RedDes.hasUnsafeAlgebra())
             Requirements->addUnsafeAlgebraInst(RedDes.getUnsafeAlgebraInst());
           AllowedExit.insert(RedDes.getLoopExitInstr());
@@ -5406,14 +5408,22 @@ void LoopVectorizationCostModel::collectLoopScalars(unsigned VF) {
   Scalars[VF].insert(Worklist.begin(), Worklist.end());
 }
 
-bool LoopVectorizationLegality::isScalarWithPredication(Instruction *I) {
-  if (!blockNeedsPredication(I->getParent()))
+bool LoopVectorizationCostModel::isScalarWithPredication(Instruction *I) {
+  if (!Legal->blockNeedsPredication(I->getParent()))
     return false;
   switch(I->getOpcode()) {
   default:
     break;
-  case Instruction::Store:
-    return !isMaskRequired(I);
+  case Instruction::Load:
+  case Instruction::Store: {
+    if (!Legal->isMaskRequired(I))
+      return false;
+    auto *Ptr = getPointerOperand(I);
+    auto *Ty = getMemInstValueType(I);
+    return isa<LoadInst>(I) ?
+        !(isLegalMaskedLoad(Ty, Ptr)  || isLegalMaskedGather(Ty))
+      : !(isLegalMaskedStore(Ty, Ptr) || isLegalMaskedScatter(Ty));
+  }
   case Instruction::UDiv:
   case Instruction::SDiv:
   case Instruction::SRem:
@@ -5423,8 +5433,8 @@ bool LoopVectorizationLegality::isScalarWithPredication(Instruction *I) {
   return false;
 }
 
-bool LoopVectorizationLegality::memoryInstructionCanBeWidened(Instruction *I,
-                                                              unsigned VF) {
+bool LoopVectorizationCostModel::memoryInstructionCanBeWidened(Instruction *I,
+                                                               unsigned VF) {
   // Get and ensure we have a valid memory instruction.
   LoadInst *LI = dyn_cast<LoadInst>(I);
   StoreInst *SI = dyn_cast<StoreInst>(I);
@@ -5433,7 +5443,7 @@ bool LoopVectorizationLegality::memoryInstructionCanBeWidened(Instruction *I,
   auto *Ptr = getPointerOperand(I);
 
   // In order to be widened, the pointer should be consecutive, first of all.
-  if (!isConsecutivePtr(Ptr))
+  if (!Legal->isConsecutivePtr(Ptr))
     return false;
 
   // If the instruction is a store located in a predicated block, it will be
@@ -5688,39 +5698,26 @@ bool LoopVectorizationLegality::blockCanBePredicated(
       if (!LI)
         return false;
       if (!SafePtrs.count(LI->getPointerOperand())) {
-        if (isLegalMaskedLoad(LI->getType(), LI->getPointerOperand()) ||
-            isLegalMaskedGather(LI->getType())) {
-          MaskedOp.insert(LI);
-          continue;
-        }
         // !llvm.mem.parallel_loop_access implies if-conversion safety.
-        if (IsAnnotatedParallel)
-          continue;
-        return false;
+        // Otherwise, record that the load needs (real or emulated) masking
+        // and let the cost model decide.
+        if (!IsAnnotatedParallel)
+          MaskedOp.insert(LI);
+        continue;
       }
     }
 
     if (I.mayWriteToMemory()) {
       auto *SI = dyn_cast<StoreInst>(&I);
-      // We only support predication of stores in basic blocks with one
-      // predecessor.
       if (!SI)
         return false;
-
-      // Build a masked store if it is legal for the target.
-      if (isLegalMaskedStore(SI->getValueOperand()->getType(),
-                             SI->getPointerOperand()) ||
-          isLegalMaskedScatter(SI->getValueOperand()->getType())) {
-        MaskedOp.insert(SI);
-        continue;
-      }
-
-      bool isSafePtr = (SafePtrs.count(SI->getPointerOperand()) != 0);
-      bool isSinglePredecessor = SI->getParent()->getSinglePredecessor();
-
-      if (++NumPredStores > NumberOfStoresToPredicate || !isSafePtr ||
-          !isSinglePredecessor)
-        return false;
+      // Predicated store requires some form of masking:
+      // 1) masked store HW instruction,
+      // 2) emulation via load-blend-store (only if safe and legal to do so,
+      //    be aware on the race conditions), or
+      // 3) element-by-element predicate check and scalar store.
+      MaskedOp.insert(SI);
+      continue;
     }
     if (I.mayThrow())
       return false;
@@ -5911,7 +5908,12 @@ void InterleavedAccessInfo::analyzeInterleaving(
 
       // Ignore A if it's already in a group or isn't the same kind of memory
       // operation as B.
-      if (isInterleaved(A) || A->mayReadFromMemory() != B->mayReadFromMemory())
+      // Note that mayReadFromMemory() isn't mutually exclusive to mayWriteToMemory
+      // in the case of atomic loads. We shouldn't see those here, canVectorizeMemory()
+      // should have returned false - except for the case we asked for optimization
+      // remarks.
+      if (isInterleaved(A) || (A->mayReadFromMemory() != B->mayReadFromMemory())
+          || (A->mayWriteToMemory() != B->mayWriteToMemory()))
         continue;
 
       // Check rules 1 and 2. Ignore A if its stride or size is different from
@@ -6030,13 +6032,6 @@ void InterleavedAccessInfo::analyzeInterleaving(
 }
 
 Optional<unsigned> LoopVectorizationCostModel::computeMaxVF(bool OptForSize) {
-  if (!EnableCondStoresVectorization && Legal->getNumPredStores()) {
-    ORE->emit(createMissedAnalysis("ConditionalStore")
-              << "store that is conditionally executed prevents vectorization");
-    DEBUG(dbgs() << "LV: No vectorization. There are conditional stores.\n");
-    return None;
-  }
-
   if (Legal->getRuntimePointerChecking()->Need && TTI.hasBranchDivergence()) {
     // TODO: It may by useful to do since it's still likely to be dynamically
     // uniform if the target can skip.
@@ -6163,9 +6158,7 @@ LoopVectorizationCostModel::computeFeasibleMaxVF(bool OptForSize,
 VectorizationFactor
 LoopVectorizationCostModel::selectVectorizationFactor(unsigned MaxVF) {
   float Cost = expectedCost(1).first;
-#ifndef NDEBUG
   const float ScalarCost = Cost;
-#endif /* NDEBUG */
   unsigned Width = 1;
   DEBUG(dbgs() << "LV: Scalar loop costs: " << (int)ScalarCost << ".\n");
 
@@ -6194,6 +6187,14 @@ LoopVectorizationCostModel::selectVectorizationFactor(unsigned MaxVF) {
       Cost = VectorCost;
       Width = i;
     }
+  }
+
+  if (!EnableCondStoresVectorization && NumPredStores) {
+    ORE->emit(createMissedAnalysis("ConditionalStore")
+              << "store that is conditionally executed prevents vectorization");
+    DEBUG(dbgs() << "LV: No vectorization. There are conditional stores.\n");
+    Width = 1;
+    Cost = ScalarCost;
   }
 
   DEBUG(if (ForceVectorization && Width > 1 && Cost >= ScalarCost) dbgs()
@@ -6247,7 +6248,7 @@ LoopVectorizationCostModel::getSmallestAndWidestTypes() {
       //        optimization to non-pointer types.
       //
       if (T->isPointerTy() && !isConsecutiveLoadOrStore(&I) &&
-          !Legal->isAccessInterleaved(&I) && !Legal->isLegalGatherOrScatter(&I))
+          !Legal->isAccessInterleaved(&I) && !isLegalGatherOrScatter(&I))
         continue;
 
       MinWidth = std::min(MinWidth,
@@ -6572,6 +6573,22 @@ LoopVectorizationCostModel::calculateRegisterUsage(ArrayRef<unsigned> VFs) {
   return RUs;
 }
 
+bool LoopVectorizationCostModel::useEmulatedMaskMemRefHack(Instruction *I){
+  // TODO: Cost model for emulated masked load/store is completely
+  // broken. This hack guides the cost model to use an artificially
+  // high enough value to practically disable vectorization with such
+  // operations, except where previously deployed legality hack allowed
+  // using very low cost values. This is to avoid regressions coming simply
+  // from moving "masked load/store" check from legality to cost model. 
+  // Masked Load/Gather emulation was previously never allowed.
+  // Limited number of Masked Store/Scatter emulation was allowed.
+  assert(isScalarWithPredication(I) &&
+         "Expecting a scalar emulated instruction");
+  return isa<LoadInst>(I) ||
+         (isa<StoreInst>(I) &&
+          NumPredStores > NumberOfStoresToPredicate);
+}
+
 void LoopVectorizationCostModel::collectInstsToScalarize(unsigned VF) {
   // If we aren't vectorizing the loop, or if we've already collected the
   // instructions to scalarize, there's nothing to do. Collection may already
@@ -6592,11 +6609,13 @@ void LoopVectorizationCostModel::collectInstsToScalarize(unsigned VF) {
     if (!Legal->blockNeedsPredication(BB))
       continue;
     for (Instruction &I : *BB)
-      if (Legal->isScalarWithPredication(&I)) {
+      if (isScalarWithPredication(&I)) {
         ScalarCostsTy ScalarCosts;
-        if (computePredInstDiscount(&I, ScalarCosts, VF) >= 0)
+        // Do not apply discount logic if hacked cost is needed
+        // for emulated masked memrefs.
+        if (!useEmulatedMaskMemRefHack(&I) &&
+            computePredInstDiscount(&I, ScalarCosts, VF) >= 0)
           ScalarCostsVF.insert(ScalarCosts.begin(), ScalarCosts.end());
-
         // Remember that BB will remain after vectorization.
         PredicatedBBsAfterVectorization.insert(BB);
       }
@@ -6631,7 +6650,7 @@ int LoopVectorizationCostModel::computePredInstDiscount(
 
     // If the instruction is scalar with predication, it will be analyzed
     // separately. We ignore it within the context of PredInst.
-    if (Legal->isScalarWithPredication(I))
+    if (isScalarWithPredication(I))
       return false;
 
     // If any of the instruction's operands are uniform after vectorization,
@@ -6685,7 +6704,7 @@ int LoopVectorizationCostModel::computePredInstDiscount(
 
     // Compute the scalarization overhead of needed insertelement instructions
     // and phi nodes.
-    if (Legal->isScalarWithPredication(I) && !I->getType()->isVoidTy()) {
+    if (isScalarWithPredication(I) && !I->getType()->isVoidTy()) {
       ScalarCost += TTI.getScalarizationOverhead(ToVectorTy(I->getType(), VF),
                                                  true, false);
       ScalarCost += VF * TTI.getCFInstrCost(Instruction::PHI);
@@ -6828,8 +6847,14 @@ unsigned LoopVectorizationCostModel::getMemInstScalarizationCost(Instruction *I,
   // If we have a predicated store, it may not be executed for each vector
   // lane. Scale the cost by the probability of executing the predicated
   // block.
-  if (Legal->isScalarWithPredication(I))
+  if (isScalarWithPredication(I)) {
     Cost /= getReciprocalPredBlockProb();
+
+    if (useEmulatedMaskMemRefHack(I))
+      // Artificially setting to a high enough value to practically disable
+      // vectorization with such operations.
+      Cost = 3000000;
+  }
 
   return Cost;
 }
@@ -6955,6 +6980,7 @@ LoopVectorizationCostModel::getInstructionCost(Instruction *I, unsigned VF) {
 void LoopVectorizationCostModel::setCostBasedWideningDecision(unsigned VF) {
   if (VF == 1)
     return;
+  NumPredStores = 0;
   for (BasicBlock *BB : TheLoop->blocks()) {
     // For each instruction in the old loop.
     for (Instruction &I : *BB) {
@@ -6962,6 +6988,8 @@ void LoopVectorizationCostModel::setCostBasedWideningDecision(unsigned VF) {
       if (!Ptr)
         continue;
 
+      if (isa<StoreInst>(&I) && isScalarWithPredication(&I))
+        NumPredStores++;
       if (isa<LoadInst>(&I) && Legal->isUniform(Ptr)) {
         // Scalar load + broadcast
         unsigned Cost = getUniformMemOpCost(&I, VF);
@@ -6970,7 +6998,7 @@ void LoopVectorizationCostModel::setCostBasedWideningDecision(unsigned VF) {
       }
 
       // We assume that widening is the best solution when possible.
-      if (Legal->memoryInstructionCanBeWidened(&I, VF)) {
+      if (memoryInstructionCanBeWidened(&I, VF)) {
         unsigned Cost = getConsecutiveMemOpCost(&I, VF);
         int ConsecutiveStride = Legal->isConsecutivePtr(getPointerOperand(&I));
         assert((ConsecutiveStride == 1 || ConsecutiveStride == -1) &&
@@ -6997,7 +7025,7 @@ void LoopVectorizationCostModel::setCostBasedWideningDecision(unsigned VF) {
       }
 
       unsigned GatherScatterCost =
-          Legal->isLegalGatherOrScatter(&I)
+          isLegalGatherOrScatter(&I)
               ? getGatherScatterCost(&I, VF) * NumAccesses
               : std::numeric_limits<unsigned>::max();
 
@@ -7158,7 +7186,7 @@ unsigned LoopVectorizationCostModel::getInstructionCost(Instruction *I,
     // vector lane. Get the scalarization cost and scale this amount by the
     // probability of executing the predicated block. If the instruction is not
     // predicated, we fall through to the next case.
-    if (VF > 1 && Legal->isScalarWithPredication(I)) {
+    if (VF > 1 && isScalarWithPredication(I)) {
       unsigned Cost = 0;
 
       // These instructions have a non-void type, so account for the phi nodes
@@ -7779,7 +7807,7 @@ LoopVectorizationPlanner::tryToBlend(Instruction *I, VPlanPtr &Plan) {
 
 bool LoopVectorizationPlanner::tryToWiden(Instruction *I, VPBasicBlock *VPBB,
                                           VFRange &Range) {
-  if (Legal->isScalarWithPredication(I))
+  if (CM.isScalarWithPredication(I))
     return false;
 
   auto IsVectorizableOpcode = [](unsigned Opcode) {
@@ -7886,7 +7914,7 @@ VPBasicBlock *LoopVectorizationPlanner::handleReplication(
       [&](unsigned VF) { return CM.isUniformAfterVectorization(I, VF); },
       Range);
 
-  bool IsPredicated = Legal->isScalarWithPredication(I);
+  bool IsPredicated = CM.isScalarWithPredication(I);
   auto *Recipe = new VPReplicateRecipe(I, IsUniform, IsPredicated);
 
   // Find if I uses a predicated instruction. If so, it will use its scalar
@@ -8318,7 +8346,7 @@ bool LoopVectorizePass::processLoop(Loop *L) {
   // Check if it is legal to vectorize the loop.
   LoopVectorizationRequirements Requirements(*ORE);
   LoopVectorizationLegality LVL(L, PSE, DT, TLI, AA, F, TTI, GetLAA, LI, ORE,
-                                &Requirements, &Hints);
+                                &Requirements, &Hints, DB, AC);
   if (!LVL.canVectorize()) {
     DEBUG(dbgs() << "LV: Not vectorizing: Cannot prove legality.\n");
     emitMissedWarning(F, L, Hints, ORE);
@@ -8332,15 +8360,31 @@ bool LoopVectorizePass::processLoop(Loop *L) {
 
   // Check the loop for a trip count threshold: vectorize loops with a tiny trip
   // count by optimizing for size, to minimize overheads.
-  unsigned ExpectedTC = SE->getSmallConstantMaxTripCount(L);
-  bool HasExpectedTC = (ExpectedTC > 0);
-
+  // Prefer constant trip counts over profile data, over upper bound estimate.
+  unsigned ExpectedTC = 0;
+  bool HasExpectedTC = false;
+  if (const SCEVConstant *ConstExits =
+      dyn_cast<SCEVConstant>(SE->getBackedgeTakenCount(L))) {
+    const APInt &ExitsCount = ConstExits->getAPInt();
+    // We are interested in small values for ExpectedTC. Skip over those that
+    // can't fit an unsigned.
+    if (ExitsCount.ult(std::numeric_limits<unsigned>::max())) {
+      ExpectedTC = static_cast<unsigned>(ExitsCount.getZExtValue()) + 1;
+      HasExpectedTC = true;
+    }
+  }
+  // ExpectedTC may be large because it's bound by a variable. Check
+  // profiling information to validate we should vectorize.
   if (!HasExpectedTC && LoopVectorizeWithBlockFrequency) {
     auto EstimatedTC = getLoopEstimatedTripCount(L);
     if (EstimatedTC) {
       ExpectedTC = *EstimatedTC;
       HasExpectedTC = true;
     }
+  }
+  if (!HasExpectedTC) {
+    ExpectedTC = SE->getSmallConstantMaxTripCount(L);
+    HasExpectedTC = (ExpectedTC > 0);
   }
 
   if (HasExpectedTC && ExpectedTC < TinyTripCountVectorThreshold) {
@@ -8578,7 +8622,7 @@ bool LoopVectorizePass::runImpl(
   SmallVector<Loop *, 8> Worklist;
 
   for (Loop *L : *LI)
-    addAcyclicInnerLoop(*L, Worklist);
+    addAcyclicInnerLoop(*L, *LI, Worklist);
 
   LoopsAnalyzed += Worklist.size();
 

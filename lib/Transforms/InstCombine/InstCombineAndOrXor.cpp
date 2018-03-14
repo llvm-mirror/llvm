@@ -1148,6 +1148,73 @@ static Instruction *foldOrToXor(BinaryOperator &I,
   return nullptr;
 }
 
+/// Return true if a constant shift amount is always less than the specified
+/// bit-width. If not, the shift could create poison in the narrower type.
+static bool canNarrowShiftAmt(Constant *C, unsigned BitWidth) {
+  if (auto *ScalarC = dyn_cast<ConstantInt>(C))
+    return ScalarC->getZExtValue() < BitWidth;
+
+  if (C->getType()->isVectorTy()) {
+    // Check each element of a constant vector.
+    unsigned NumElts = C->getType()->getVectorNumElements();
+    for (unsigned i = 0; i != NumElts; ++i) {
+      Constant *Elt = C->getAggregateElement(i);
+      if (!Elt)
+        return false;
+      if (isa<UndefValue>(Elt))
+        continue;
+      auto *CI = dyn_cast<ConstantInt>(Elt);
+      if (!CI || CI->getZExtValue() >= BitWidth)
+        return false;
+    }
+    return true;
+  }
+
+  // The constant is a constant expression or unknown.
+  return false;
+}
+
+/// Try to use narrower ops (sink zext ops) for an 'and' with binop operand and
+/// a common zext operand: and (binop (zext X), C), (zext X).
+Instruction *InstCombiner::narrowMaskedBinOp(BinaryOperator &And) {
+  // This transform could also apply to {or, and, xor}, but there are better
+  // folds for those cases, so we don't expect those patterns here. AShr is not
+  // handled because it should always be transformed to LShr in this sequence.
+  // The subtract transform is different because it has a constant on the left.
+  // Add/mul commute the constant to RHS; sub with constant RHS becomes add.
+  Value *Op0 = And.getOperand(0), *Op1 = And.getOperand(1);
+  Constant *C;
+  if (!match(Op0, m_OneUse(m_Add(m_Specific(Op1), m_Constant(C)))) &&
+      !match(Op0, m_OneUse(m_Mul(m_Specific(Op1), m_Constant(C)))) &&
+      !match(Op0, m_OneUse(m_LShr(m_Specific(Op1), m_Constant(C)))) &&
+      !match(Op0, m_OneUse(m_Shl(m_Specific(Op1), m_Constant(C)))) &&
+      !match(Op0, m_OneUse(m_Sub(m_Constant(C), m_Specific(Op1)))))
+    return nullptr;
+
+  Value *X;
+  if (!match(Op1, m_ZExt(m_Value(X))) || Op1->getNumUses() > 2)
+    return nullptr;
+
+  Type *Ty = And.getType();
+  if (!isa<VectorType>(Ty) && !shouldChangeType(Ty, X->getType()))
+    return nullptr;
+
+  // If we're narrowing a shift, the shift amount must be safe (less than the
+  // width) in the narrower type. If the shift amount is greater, instsimplify
+  // usually handles that case, but we can't guarantee/assert it.
+  Instruction::BinaryOps Opc = cast<BinaryOperator>(Op0)->getOpcode();
+  if (Opc == Instruction::LShr || Opc == Instruction::Shl)
+    if (!canNarrowShiftAmt(C, X->getType()->getScalarSizeInBits()))
+      return nullptr;
+
+  // and (sub C, (zext X)), (zext X) --> zext (and (sub C', X), X)
+  // and (binop (zext X), C), (zext X) --> zext (and (binop X, C'), X)
+  Value *NewC = ConstantExpr::getTrunc(C, X->getType());
+  Value *NewBO = Opc == Instruction::Sub ? Builder.CreateBinOp(Opc, NewC, X)
+                                         : Builder.CreateBinOp(Opc, X, NewC);
+  return new ZExtInst(Builder.CreateAnd(NewBO, X), Ty);
+}
+
 // FIXME: We use commutative matchers (m_c_*) for some, but not all, matches
 // here. We should standardize that construct where it is needed or choose some
 // other way to ensure that commutated variants of patterns are not missed.
@@ -1289,9 +1356,11 @@ Instruction *InstCombiner::visitAnd(BinaryOperator &I) {
     }
   }
 
-  if (isa<Constant>(Op1))
-    if (Instruction *FoldedLogic = foldOpWithConstantIntoOperand(I))
-      return FoldedLogic;
+  if (Instruction *Z = narrowMaskedBinOp(I))
+    return Z;
+
+  if (Instruction *FoldedLogic = foldBinOpIntoSelectOrPhi(I))
+    return FoldedLogic;
 
   if (Instruction *DeMorgan = matchDeMorgansLaws(I, Builder))
     return DeMorgan;
@@ -1780,9 +1849,8 @@ Instruction *InstCombiner::visitOr(BinaryOperator &I) {
   if (Value *V = SimplifyBSwap(I, Builder))
     return replaceInstUsesWith(I, V);
 
-  if (isa<Constant>(Op1))
-    if (Instruction *FoldedLogic = foldOpWithConstantIntoOperand(I))
-      return FoldedLogic;
+  if (Instruction *FoldedLogic = foldBinOpIntoSelectOrPhi(I))
+    return FoldedLogic;
 
   // Given an OR instruction, check to see if this is a bswap.
   if (Instruction *BSwap = MatchBSwap(I))
@@ -2214,16 +2282,18 @@ Instruction *InstCombiner::visitXor(BinaryOperator &I) {
     // the 'not' by inverting the constant and using the opposite shift type.
     // Canonicalization rules ensure that only a negative constant uses 'ashr',
     // but we must check that in case that transform has not fired yet.
-    const APInt *C;
-    if (match(NotVal, m_AShr(m_APInt(C), m_Value(Y))) && C->isNegative()) {
+    Constant *C;
+    if (match(NotVal, m_AShr(m_Constant(C), m_Value(Y))) &&
+        match(C, m_Negative())) {
       // ~(C >>s Y) --> ~C >>u Y (when inverting the replicated sign bits)
-      Constant *NotC = ConstantInt::get(I.getType(), ~(*C));
+      Constant *NotC = ConstantExpr::getNot(C);
       return BinaryOperator::CreateLShr(NotC, Y);
     }
 
-    if (match(NotVal, m_LShr(m_APInt(C), m_Value(Y))) && C->isNonNegative()) {
+    if (match(NotVal, m_LShr(m_Constant(C), m_Value(Y))) &&
+        match(C, m_NonNegative())) {
       // ~(C >>u Y) --> ~C >>s Y (when inverting the replicated sign bits)
-      Constant *NotC = ConstantInt::get(I.getType(), ~(*C));
+      Constant *NotC = ConstantExpr::getNot(C);
       return BinaryOperator::CreateAShr(NotC, Y);
     }
   }
@@ -2305,9 +2375,8 @@ Instruction *InstCombiner::visitXor(BinaryOperator &I) {
     }
   }
 
-  if (isa<Constant>(Op1))
-    if (Instruction *FoldedLogic = foldOpWithConstantIntoOperand(I))
-      return FoldedLogic;
+  if (Instruction *FoldedLogic = foldBinOpIntoSelectOrPhi(I))
+    return FoldedLogic;
 
   {
     Value *A, *B;
