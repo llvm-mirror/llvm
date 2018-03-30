@@ -212,13 +212,11 @@ template <> struct GraphTraits<DominatorTree*>
   : public GraphTraits<DomTreeNode*> {
   static NodeRef getEntryNode(DominatorTree *DT) { return DT->getRootNode(); }
 
-  static nodes_iterator nodes_begin(DominatorTree *N) {
-    return df_begin(getEntryNode(N));
-  }
+  using nodes_iterator = typename DominatorTree::NodeIterator;
 
-  static nodes_iterator nodes_end(DominatorTree *N) {
-    return df_end(getEntryNode(N));
-  }
+  static nodes_iterator nodes_begin(DominatorTree *N) { return N->begin(); }
+
+  static nodes_iterator nodes_end(DominatorTree *N) { return N->end(); }
 };
 
 /// \brief Analysis pass which computes a \c DominatorTree.
