@@ -303,6 +303,24 @@ protected:
   DominatorTreeBase(const DominatorTreeBase &) = delete;
   DominatorTreeBase &operator=(const DominatorTreeBase &) = delete;
 
+protected:
+  using NodeIteratorBase = mapped_iterator<
+      typename DomTreeNodeMapType::iterator,
+      DomTreeNodeBase<NodeT> *(*)(typename DomTreeNodeMapType::value_type &)>;
+
+public:
+  struct NodeIterator : public NodeIteratorBase {
+    NodeIterator(typename DomTreeNodeMapType::iterator It)
+        : NodeIteratorBase(It,
+                           [](typename DomTreeNodeMapType::value_type &Pair) {
+                             return Pair.second.get();
+                           }) {}
+  };
+
+  NodeIterator begin() { return NodeIterator(DomTreeNodes.begin()); }
+
+  NodeIterator end() { return NodeIterator(DomTreeNodes.end()); }
+
   /// getRoots - Return the root blocks of the current CFG.  This may include
   /// multiple blocks if we are computing post dominators.  For forward
   /// dominators, this will always be a single block (the entry node).
