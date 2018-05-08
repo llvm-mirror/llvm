@@ -466,6 +466,7 @@ public:
   bool canBeDispatched(unsigned Idx, const InstrDesc &Desc) const;
   void scheduleInstruction(unsigned Idx, Instruction &MCIS);
 
+
   /// Issue an instruction.
   void issueInstruction(unsigned Index, Instruction &IS);
 

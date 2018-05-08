@@ -139,6 +139,8 @@ static void populateWrites(InstrDesc &ID, const MCInst &MCI,
                            const MCInstrDesc &MCDesc,
                            const MCSchedClassDesc &SCDesc,
                            const MCSubtargetInfo &STI) {
+  computeMaxLatency(ID, MCDesc, SCDesc, STI);
+
   // Set if writes through this opcode may update super registers.
   // TODO: on x86-64, a 4 byte write of a general purpose register always
   // fully updates the super-register.
@@ -408,7 +410,6 @@ void InstrBuilder::createInstrDescImpl(const MCInst &MCI) {
   ID->HasSideEffects = MCDesc.hasUnmodeledSideEffects();
 
   initializeUsedResources(*ID, SCDesc, STI, ProcResourceMasks);
-  computeMaxLatency(*ID, MCDesc, SCDesc, STI);
   populateWrites(*ID, MCI, MCDesc, SCDesc, STI);
   populateReads(*ID, MCI, MCDesc, SCDesc, STI);
 
@@ -430,7 +431,7 @@ InstrBuilder::createInstruction(unsigned Idx, const MCInst &MCI) {
   const InstrDesc &D = getOrCreateInstrDesc(MCI);
   std::unique_ptr<Instruction> NewIS = llvm::make_unique<Instruction>(D);
 
-  // Initialize Reads first.
+  // Populate Reads first.
   for (const ReadDescriptor &RD : D.Reads) {
     int RegID = -1;
     if (RD.OpIndex != -1) {
@@ -454,7 +455,7 @@ InstrBuilder::createInstruction(unsigned Idx, const MCInst &MCI) {
     NewIS->getUses().emplace_back(llvm::make_unique<ReadState>(RD, RegID));
   }
 
-  // Initialize writes.
+  // Now populate writes.
   for (const WriteDescriptor &WD : D.Writes) {
     unsigned RegID =
         WD.OpIndex == -1 ? WD.RegisterID : MCI.getOperand(WD.OpIndex).getReg();

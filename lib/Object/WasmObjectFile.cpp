@@ -412,7 +412,6 @@ Error WasmObjectFile::parseLinkingSectionSymtab(const uint8_t *&Ptr,
         wasm::WasmImport &Import = *ImportedFunctions[Info.ElementIndex];
         FunctionType = &Signatures[Import.SigIndex];
         Info.Name = Import.Field;
-        Info.Module = Import.Module;
       }
       break;
 

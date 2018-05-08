@@ -32,8 +32,7 @@ const RISCVMCExpr *RISCVMCExpr::create(const MCExpr *Expr, VariantKind Kind,
 }
 
 void RISCVMCExpr::printImpl(raw_ostream &OS, const MCAsmInfo *MAI) const {
-  bool HasVariant =
-      ((getKind() != VK_RISCV_None) && (getKind() != VK_RISCV_CALL));
+  bool HasVariant = getKind() != VK_RISCV_None;
   if (HasVariant)
     OS << '%' << getVariantKindName(getKind()) << '(';
   Expr->print(OS, MAI);
@@ -78,8 +77,7 @@ StringRef RISCVMCExpr::getVariantKindName(VariantKind Kind) {
 bool RISCVMCExpr::evaluateAsConstant(int64_t &Res) const {
   MCValue Value;
 
-  if (Kind == VK_RISCV_PCREL_HI || Kind == VK_RISCV_PCREL_LO ||
-      Kind == VK_RISCV_CALL)
+  if (Kind == VK_RISCV_PCREL_HI || Kind == VK_RISCV_PCREL_LO)
     return false;
 
   if (!getSubExpr()->evaluateAsRelocatable(Value, nullptr, nullptr))

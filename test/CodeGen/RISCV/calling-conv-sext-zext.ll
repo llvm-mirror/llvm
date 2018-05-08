@@ -16,7 +16,9 @@ define void @pass_uint8_as_uint8(i8 zeroext %a) nounwind {
 ; RV32I:       # %bb.0:
 ; RV32I-NEXT:    addi sp, sp, -16
 ; RV32I-NEXT:    sw ra, 12(sp)
-; RV32I-NEXT:    call receive_uint8
+; RV32I-NEXT:    lui a1, %hi(receive_uint8)
+; RV32I-NEXT:    addi a1, a1, %lo(receive_uint8)
+; RV32I-NEXT:    jalr a1
 ; RV32I-NEXT:    lw ra, 12(sp)
 ; RV32I-NEXT:    addi sp, sp, 16
 ; RV32I-NEXT:    ret
@@ -31,7 +33,9 @@ define zeroext i8 @ret_callresult_uint8_as_uint8() nounwind {
 ; RV32I:       # %bb.0:
 ; RV32I-NEXT:    addi sp, sp, -16
 ; RV32I-NEXT:    sw ra, 12(sp)
-; RV32I-NEXT:    call return_uint8
+; RV32I-NEXT:    lui a0, %hi(return_uint8)
+; RV32I-NEXT:    addi a0, a0, %lo(return_uint8)
+; RV32I-NEXT:    jalr a0
 ; RV32I-NEXT:    lw ra, 12(sp)
 ; RV32I-NEXT:    addi sp, sp, 16
 ; RV32I-NEXT:    ret
@@ -55,9 +59,11 @@ define void @pass_uint8_as_sint8(i8 zeroext %a) nounwind {
 ; RV32I:       # %bb.0:
 ; RV32I-NEXT:    addi sp, sp, -16
 ; RV32I-NEXT:    sw ra, 12(sp)
+; RV32I-NEXT:    lui a1, %hi(receive_sint8)
+; RV32I-NEXT:    addi a1, a1, %lo(receive_sint8)
 ; RV32I-NEXT:    slli a0, a0, 24
 ; RV32I-NEXT:    srai a0, a0, 24
-; RV32I-NEXT:    call receive_sint8
+; RV32I-NEXT:    jalr a1
 ; RV32I-NEXT:    lw ra, 12(sp)
 ; RV32I-NEXT:    addi sp, sp, 16
 ; RV32I-NEXT:    ret
@@ -71,7 +77,9 @@ define signext i8 @ret_callresult_uint8_as_sint8() nounwind {
 ; RV32I:       # %bb.0:
 ; RV32I-NEXT:    addi sp, sp, -16
 ; RV32I-NEXT:    sw ra, 12(sp)
-; RV32I-NEXT:    call return_uint8
+; RV32I-NEXT:    lui a0, %hi(return_uint8)
+; RV32I-NEXT:    addi a0, a0, %lo(return_uint8)
+; RV32I-NEXT:    jalr a0
 ; RV32I-NEXT:    slli a0, a0, 24
 ; RV32I-NEXT:    srai a0, a0, 24
 ; RV32I-NEXT:    lw ra, 12(sp)
@@ -96,7 +104,9 @@ define void @pass_uint8_as_anyint32(i8 zeroext %a) nounwind {
 ; RV32I:       # %bb.0:
 ; RV32I-NEXT:    addi sp, sp, -16
 ; RV32I-NEXT:    sw ra, 12(sp)
-; RV32I-NEXT:    call receive_anyint32
+; RV32I-NEXT:    lui a1, %hi(receive_anyint32)
+; RV32I-NEXT:    addi a1, a1, %lo(receive_anyint32)
+; RV32I-NEXT:    jalr a1
 ; RV32I-NEXT:    lw ra, 12(sp)
 ; RV32I-NEXT:    addi sp, sp, 16
 ; RV32I-NEXT:    ret
@@ -110,7 +120,9 @@ define signext i32 @ret_callresult_uint8_as_anyint32() nounwind {
 ; RV32I:       # %bb.0:
 ; RV32I-NEXT:    addi sp, sp, -16
 ; RV32I-NEXT:    sw ra, 12(sp)
-; RV32I-NEXT:    call return_uint8
+; RV32I-NEXT:    lui a0, %hi(return_uint8)
+; RV32I-NEXT:    addi a0, a0, %lo(return_uint8)
+; RV32I-NEXT:    jalr a0
 ; RV32I-NEXT:    lw ra, 12(sp)
 ; RV32I-NEXT:    addi sp, sp, 16
 ; RV32I-NEXT:    ret
@@ -133,7 +145,9 @@ define void @pass_sint8_as_uint8(i8 signext %a) nounwind {
 ; RV32I-NEXT:    addi sp, sp, -16
 ; RV32I-NEXT:    sw ra, 12(sp)
 ; RV32I-NEXT:    andi a0, a0, 255
-; RV32I-NEXT:    call receive_uint8
+; RV32I-NEXT:    lui a1, %hi(receive_uint8)
+; RV32I-NEXT:    addi a1, a1, %lo(receive_uint8)
+; RV32I-NEXT:    jalr a1
 ; RV32I-NEXT:    lw ra, 12(sp)
 ; RV32I-NEXT:    addi sp, sp, 16
 ; RV32I-NEXT:    ret
@@ -148,7 +162,9 @@ define zeroext i8 @ret_callresult_sint8_as_uint8() nounwind {
 ; RV32I:       # %bb.0:
 ; RV32I-NEXT:    addi sp, sp, -16
 ; RV32I-NEXT:    sw ra, 12(sp)
-; RV32I-NEXT:    call return_sint8
+; RV32I-NEXT:    lui a0, %hi(return_sint8)
+; RV32I-NEXT:    addi a0, a0, %lo(return_sint8)
+; RV32I-NEXT:    jalr a0
 ; RV32I-NEXT:    andi a0, a0, 255
 ; RV32I-NEXT:    lw ra, 12(sp)
 ; RV32I-NEXT:    addi sp, sp, 16
@@ -169,7 +185,9 @@ define void @pass_sint8_as_sint8(i8 signext %a) nounwind {
 ; RV32I:       # %bb.0:
 ; RV32I-NEXT:    addi sp, sp, -16
 ; RV32I-NEXT:    sw ra, 12(sp)
-; RV32I-NEXT:    call receive_sint8
+; RV32I-NEXT:    lui a1, %hi(receive_sint8)
+; RV32I-NEXT:    addi a1, a1, %lo(receive_sint8)
+; RV32I-NEXT:    jalr a1
 ; RV32I-NEXT:    lw ra, 12(sp)
 ; RV32I-NEXT:    addi sp, sp, 16
 ; RV32I-NEXT:    ret
@@ -182,7 +200,9 @@ define signext i8 @ret_callresult_sint8_as_sint8() nounwind {
 ; RV32I:       # %bb.0:
 ; RV32I-NEXT:    addi sp, sp, -16
 ; RV32I-NEXT:    sw ra, 12(sp)
-; RV32I-NEXT:    call return_sint8
+; RV32I-NEXT:    lui a0, %hi(return_sint8)
+; RV32I-NEXT:    addi a0, a0, %lo(return_sint8)
+; RV32I-NEXT:    jalr a0
 ; RV32I-NEXT:    lw ra, 12(sp)
 ; RV32I-NEXT:    addi sp, sp, 16
 ; RV32I-NEXT:    ret
@@ -203,7 +223,9 @@ define void @pass_sint8_as_anyint32(i8 signext %a) nounwind {
 ; RV32I:       # %bb.0:
 ; RV32I-NEXT:    addi sp, sp, -16
 ; RV32I-NEXT:    sw ra, 12(sp)
-; RV32I-NEXT:    call receive_anyint32
+; RV32I-NEXT:    lui a1, %hi(receive_anyint32)
+; RV32I-NEXT:    addi a1, a1, %lo(receive_anyint32)
+; RV32I-NEXT:    jalr a1
 ; RV32I-NEXT:    lw ra, 12(sp)
 ; RV32I-NEXT:    addi sp, sp, 16
 ; RV32I-NEXT:    ret
@@ -217,7 +239,9 @@ define signext i32 @ret_callresult_sint8_as_anyint32() nounwind {
 ; RV32I:       # %bb.0:
 ; RV32I-NEXT:    addi sp, sp, -16
 ; RV32I-NEXT:    sw ra, 12(sp)
-; RV32I-NEXT:    call return_sint8
+; RV32I-NEXT:    lui a0, %hi(return_sint8)
+; RV32I-NEXT:    addi a0, a0, %lo(return_sint8)
+; RV32I-NEXT:    jalr a0
 ; RV32I-NEXT:    lw ra, 12(sp)
 ; RV32I-NEXT:    addi sp, sp, 16
 ; RV32I-NEXT:    ret
@@ -241,7 +265,9 @@ define void @pass_anyint32_as_uint8(i32 signext %a) nounwind {
 ; RV32I-NEXT:    addi sp, sp, -16
 ; RV32I-NEXT:    sw ra, 12(sp)
 ; RV32I-NEXT:    andi a0, a0, 255
-; RV32I-NEXT:    call receive_uint8
+; RV32I-NEXT:    lui a1, %hi(receive_uint8)
+; RV32I-NEXT:    addi a1, a1, %lo(receive_uint8)
+; RV32I-NEXT:    jalr a1
 ; RV32I-NEXT:    lw ra, 12(sp)
 ; RV32I-NEXT:    addi sp, sp, 16
 ; RV32I-NEXT:    ret
@@ -257,7 +283,9 @@ define zeroext i8 @ret_callresult_anyint32_as_uint8() nounwind {
 ; RV32I:       # %bb.0:
 ; RV32I-NEXT:    addi sp, sp, -16
 ; RV32I-NEXT:    sw ra, 12(sp)
-; RV32I-NEXT:    call return_anyint32
+; RV32I-NEXT:    lui a0, %hi(return_anyint32)
+; RV32I-NEXT:    addi a0, a0, %lo(return_anyint32)
+; RV32I-NEXT:    jalr a0
 ; RV32I-NEXT:    andi a0, a0, 255
 ; RV32I-NEXT:    lw ra, 12(sp)
 ; RV32I-NEXT:    addi sp, sp, 16
@@ -282,9 +310,11 @@ define void @pass_anyint32_as_sint8(i32 signext %a) nounwind {
 ; RV32I:       # %bb.0:
 ; RV32I-NEXT:    addi sp, sp, -16
 ; RV32I-NEXT:    sw ra, 12(sp)
+; RV32I-NEXT:    lui a1, %hi(receive_sint8)
+; RV32I-NEXT:    addi a1, a1, %lo(receive_sint8)
 ; RV32I-NEXT:    slli a0, a0, 24
 ; RV32I-NEXT:    srai a0, a0, 24
-; RV32I-NEXT:    call receive_sint8
+; RV32I-NEXT:    jalr a1
 ; RV32I-NEXT:    lw ra, 12(sp)
 ; RV32I-NEXT:    addi sp, sp, 16
 ; RV32I-NEXT:    ret
@@ -298,7 +328,9 @@ define signext i8 @ret_callresult_anyint32_as_sint8() nounwind {
 ; RV32I:       # %bb.0:
 ; RV32I-NEXT:    addi sp, sp, -16
 ; RV32I-NEXT:    sw ra, 12(sp)
-; RV32I-NEXT:    call return_anyint32
+; RV32I-NEXT:    lui a0, %hi(return_anyint32)
+; RV32I-NEXT:    addi a0, a0, %lo(return_anyint32)
+; RV32I-NEXT:    jalr a0
 ; RV32I-NEXT:    slli a0, a0, 24
 ; RV32I-NEXT:    srai a0, a0, 24
 ; RV32I-NEXT:    lw ra, 12(sp)
@@ -321,7 +353,9 @@ define void @pass_anyint32_as_anyint32(i32 signext %a) nounwind {
 ; RV32I:       # %bb.0:
 ; RV32I-NEXT:    addi sp, sp, -16
 ; RV32I-NEXT:    sw ra, 12(sp)
-; RV32I-NEXT:    call receive_anyint32
+; RV32I-NEXT:    lui a1, %hi(receive_anyint32)
+; RV32I-NEXT:    addi a1, a1, %lo(receive_anyint32)
+; RV32I-NEXT:    jalr a1
 ; RV32I-NEXT:    lw ra, 12(sp)
 ; RV32I-NEXT:    addi sp, sp, 16
 ; RV32I-NEXT:    ret
@@ -334,7 +368,9 @@ define signext i32 @ret_callresult_anyint32_as_anyint32() nounwind {
 ; RV32I:       # %bb.0:
 ; RV32I-NEXT:    addi sp, sp, -16
 ; RV32I-NEXT:    sw ra, 12(sp)
-; RV32I-NEXT:    call return_anyint32
+; RV32I-NEXT:    lui a0, %hi(return_anyint32)
+; RV32I-NEXT:    addi a0, a0, %lo(return_anyint32)
+; RV32I-NEXT:    jalr a0
 ; RV32I-NEXT:    lw ra, 12(sp)
 ; RV32I-NEXT:    addi sp, sp, 16
 ; RV32I-NEXT:    ret
