@@ -259,7 +259,7 @@ bool Coloring::color() {
     Colors[C] = ColorC;
   }
 
-  // Explicitly assign "None" all all uncolored nodes.
+  // Explicitly assign "None" to all uncolored nodes.
   for (unsigned I = 0; I != Order.size(); ++I)
     if (Colors.count(I) == 0)
       Colors[I] = ColorKind::None;
@@ -820,6 +820,7 @@ namespace llvm {
 
     void selectShuffle(SDNode *N);
     void selectRor(SDNode *N);
+    void selectVAlign(SDNode *N);
 
   private:
     void materialize(const ResultStack &Results);
@@ -918,13 +919,16 @@ static bool isPermutation(ArrayRef<int> Mask) {
 }
 
 bool HvxSelector::selectVectorConstants(SDNode *N) {
-  // Constant vectors are generated as loads from constant pools or
-  // as VSPLATs of a constant value.
-  // Since they are generated during the selection process, the main
-  // selection algorithm is not aware of them. Select them directly
-  // here.
+  // Constant vectors are generated as loads from constant pools or as
+  // splats of a constant value. Since they are generated during the
+  // selection process, the main selection algorithm is not aware of them.
+  // Select them directly here.
   SmallVector<SDNode*,4> Nodes;
   SetVector<SDNode*> WorkQ;
+
+  // The one-use test for VSPLATW's operand may fail due to dead nodes
+  // left over in the DAG.
+  DAG.RemoveDeadNodes();
 
   // The DAG can change (due to CSE) during selection, so cache all the
   // unselected nodes first to avoid traversing a mutating DAG.
@@ -932,22 +936,23 @@ bool HvxSelector::selectVectorConstants(SDNode *N) {
   auto IsNodeToSelect = [] (SDNode *N) {
     if (N->isMachineOpcode())
       return false;
-    unsigned Opc = N->getOpcode();
-    if (Opc == HexagonISD::VSPLAT || Opc == HexagonISD::VZERO)
-      return true;
-    if (Opc == ISD::BITCAST) {
-      // Only select bitcasts of VSPLATs.
-      if (N->getOperand(0).getOpcode() == HexagonISD::VSPLAT)
+    switch (N->getOpcode()) {
+      case HexagonISD::VZERO:
+      case HexagonISD::VSPLATW:
         return true;
+      case ISD::LOAD: {
+        SDValue Addr = cast<LoadSDNode>(N)->getBasePtr();
+        unsigned AddrOpc = Addr.getOpcode();
+        if (AddrOpc == HexagonISD::AT_PCREL || AddrOpc == HexagonISD::CP)
+          if (Addr.getOperand(0).getOpcode() == ISD::TargetConstantPool)
+            return true;
+      }
+      break;
     }
-    if (Opc == ISD::LOAD) {
-      SDValue Addr = cast<LoadSDNode>(N)->getBasePtr();
-      unsigned AddrOpc = Addr.getOpcode();
-      if (AddrOpc == HexagonISD::AT_PCREL || AddrOpc == HexagonISD::CP)
-        if (Addr.getOperand(0).getOpcode() == ISD::TargetConstantPool)
-          return true;
-    }
-    return false;
+    // Make sure to select the operand of VSPLATW.
+    bool IsSplatOp = N->hasOneUse() &&
+                     N->use_begin()->getOpcode() == HexagonISD::VSPLATW;
+    return IsSplatOp;
   };
 
   WorkQ.insert(N);
@@ -1952,7 +1957,6 @@ void HvxSelector::selectShuffle(SDNode *N) {
   // If the mask is all -1's, generate "undef".
   if (!UseLeft && !UseRight) {
     ISel.ReplaceNode(N, ISel.selectUndef(SDLoc(SN), ResTy).getNode());
-    DAG.RemoveDeadNode(N);
     return;
   }
 
@@ -2008,6 +2012,15 @@ void HvxSelector::selectRor(SDNode *N) {
     NewN = DAG.getMachineNode(Hexagon::V6_vror, dl, Ty, {VecV, RotV});
 
   ISel.ReplaceNode(N, NewN);
+}
+
+void HvxSelector::selectVAlign(SDNode *N) {
+  SDValue Vv = N->getOperand(0);
+  SDValue Vu = N->getOperand(1);
+  SDValue Rt = N->getOperand(2);
+  SDNode *NewN = DAG.getMachineNode(Hexagon::V6_valignb, SDLoc(N),
+                                    N->getValueType(0), {Vv, Vu, Rt});
+  ISel.ReplaceNode(N, NewN);
   DAG.RemoveDeadNode(N);
 }
 
@@ -2019,7 +2032,15 @@ void HexagonDAGToDAGISel::SelectHvxRor(SDNode *N) {
   HvxSelector(*this, *CurDAG).selectRor(N);
 }
 
+void HexagonDAGToDAGISel::SelectHvxVAlign(SDNode *N) {
+  HvxSelector(*this, *CurDAG).selectVAlign(N);
+}
+
 void HexagonDAGToDAGISel::SelectV65GatherPred(SDNode *N) {
+  if (!HST->usePackets()) {
+    report_fatal_error("Support for gather requires packets, "
+                       "which are disabled");
+  }
   const SDLoc &dl(N);
   SDValue Chain = N->getOperand(0);
   SDValue Address = N->getOperand(2);
@@ -2055,11 +2076,14 @@ void HexagonDAGToDAGISel::SelectV65GatherPred(SDNode *N) {
   MemOp[0] = cast<MemIntrinsicSDNode>(N)->getMemOperand();
   cast<MachineSDNode>(Result)->setMemRefs(MemOp, MemOp + 1);
 
-  ReplaceUses(N, Result);
-  CurDAG->RemoveDeadNode(N);
+  ReplaceNode(N, Result);
 }
 
 void HexagonDAGToDAGISel::SelectV65Gather(SDNode *N) {
+  if (!HST->usePackets()) {
+    report_fatal_error("Support for gather requires packets, "
+                       "which are disabled");
+  }
   const SDLoc &dl(N);
   SDValue Chain = N->getOperand(0);
   SDValue Address = N->getOperand(2);
@@ -2094,8 +2118,7 @@ void HexagonDAGToDAGISel::SelectV65Gather(SDNode *N) {
   MemOp[0] = cast<MemIntrinsicSDNode>(N)->getMemOperand();
   cast<MachineSDNode>(Result)->setMemRefs(MemOp, MemOp + 1);
 
-  ReplaceUses(N, Result);
-  CurDAG->RemoveDeadNode(N);
+  ReplaceNode(N, Result);
 }
 
 void HexagonDAGToDAGISel::SelectHVXDualOutput(SDNode *N) {
@@ -2138,5 +2161,3 @@ void HexagonDAGToDAGISel::SelectHVXDualOutput(SDNode *N) {
   ReplaceUses(SDValue(N, 1), SDValue(Result, 1));
   CurDAG->RemoveDeadNode(N);
 }
-
-

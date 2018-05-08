@@ -124,6 +124,7 @@ private:
   Value *optimizeMemCpy(CallInst *CI, IRBuilder<> &B);
   Value *optimizeMemMove(CallInst *CI, IRBuilder<> &B);
   Value *optimizeMemSet(CallInst *CI, IRBuilder<> &B);
+  Value *optimizeRealloc(CallInst *CI, IRBuilder<> &B);
   Value *optimizeWcslen(CallInst *CI, IRBuilder<> &B);
   // Wrapper for all String/Memory Library Call Optimizations
   Value *optimizeStringMemoryLibCall(CallInst *CI, IRBuilder<> &B);
@@ -150,6 +151,8 @@ private:
   Value *optimizeIsDigit(CallInst *CI, IRBuilder<> &B);
   Value *optimizeIsAscii(CallInst *CI, IRBuilder<> &B);
   Value *optimizeToAscii(CallInst *CI, IRBuilder<> &B);
+  Value *optimizeAtoi(CallInst *CI, IRBuilder<> &B);
+  Value *optimizeStrtol(CallInst *CI, IRBuilder<> &B);
 
   // Formatting and IO Library Call Optimizations
   Value *optimizeErrorReporting(CallInst *CI, IRBuilder<> &B,

@@ -14,10 +14,6 @@
 
 using namespace llvm;
 
-static cl::opt<bool> ExpandUnalignedLoads("hvx-expand-unaligned-loads",
-  cl::Hidden, cl::init(true),
-  cl::desc("Expand unaligned HVX loads into a pair of aligned loads"));
-
 static const MVT LegalV64[] =  { MVT::v64i8,  MVT::v32i16,  MVT::v16i32 };
 static const MVT LegalW64[] =  { MVT::v128i8, MVT::v64i16,  MVT::v32i32 };
 static const MVT LegalV128[] = { MVT::v128i8, MVT::v64i16,  MVT::v32i32 };
@@ -371,9 +367,7 @@ HexagonTargetLowering::buildHvxVectorReg(ArrayRef<SDValue> Values,
     auto *IdxN = dyn_cast<ConstantSDNode>(SplatV.getNode());
     if (IdxN && IdxN->isNullValue())
       return getZero(dl, VecTy, DAG);
-    MVT WordTy = MVT::getVectorVT(MVT::i32, HwLen/4);
-    SDValue SV = DAG.getNode(HexagonISD::VSPLAT, dl, WordTy, SplatV);
-    return DAG.getBitcast(VecTy, SV);
+    return DAG.getNode(HexagonISD::VSPLATW, dl, VecTy, SplatV);
   }
 
   // Delay recognizing constant vectors until here, so that we can generate
@@ -975,6 +969,32 @@ HexagonTargetLowering::LowerHvxConcatVectors(SDValue Op, SelectionDAG &DAG)
     SmallVector<SDValue,8> Elems;
     for (SDValue V : Op.getNode()->ops())
       DAG.ExtractVectorElements(V, Elems);
+    // A vector of i16 will be broken up into a build_vector of i16's.
+    // This is a problem, since at the time of operation legalization,
+    // all operations are expected to be type-legalized, and i16 is not
+    // a legal type. If any of the extracted elements is not of a valid
+    // type, sign-extend it to a valid one.
+    for (unsigned i = 0, e = Elems.size(); i != e; ++i) {
+      SDValue V = Elems[i];
+      MVT Ty = ty(V);
+      if (!isTypeLegal(Ty)) {
+        EVT NTy = getTypeToTransformTo(*DAG.getContext(), Ty);
+        if (V.getOpcode() == ISD::EXTRACT_VECTOR_ELT) {
+          Elems[i] = DAG.getNode(ISD::SIGN_EXTEND_INREG, dl, NTy,
+                                 DAG.getNode(ISD::EXTRACT_VECTOR_ELT, dl, NTy,
+                                             V.getOperand(0), V.getOperand(1)),
+                                 DAG.getValueType(Ty));
+          continue;
+        }
+        // A few less complicated cases.
+        if (V.getOpcode() == ISD::Constant)
+          Elems[i] = DAG.getSExtOrTrunc(V, dl, NTy);
+        else if (V.isUndef())
+          Elems[i] = DAG.getUNDEF(NTy);
+        else
+          llvm_unreachable("Unexpected vector element");
+      }
+    }
     return DAG.getBuildVector(VecTy, dl, Elems);
   }
 
@@ -1296,59 +1316,6 @@ HexagonTargetLowering::LowerHvxShift(SDValue Op, SelectionDAG &DAG) const {
 }
 
 SDValue
-HexagonTargetLowering::LowerHvxUnalignedLoad(SDValue Op, SelectionDAG &DAG)
-      const {
-  LoadSDNode *LN = cast<LoadSDNode>(Op.getNode());
-  unsigned HaveAlign = LN->getAlignment();
-  MVT VecTy = ty(Op);
-  Type *Ty = EVT(VecTy).getTypeForEVT(*DAG.getContext());
-  const DataLayout &DL = DAG.getDataLayout();
-  unsigned NeedAlign = DL.getABITypeAlignment(Ty);
-  if (HaveAlign >= NeedAlign || !ExpandUnalignedLoads)
-    return Op;
-
-  unsigned HwLen = Subtarget.getVectorLength();
-
-  SDValue Base = LN->getBasePtr();
-  SDValue Chain = LN->getChain();
-  auto BO = getBaseAndOffset(Base);
-  unsigned BaseOpc = BO.first.getOpcode();
-  if (BaseOpc == HexagonISD::VALIGNADDR && BO.second % HwLen == 0)
-    return Op;
-
-  const SDLoc &dl(Op);
-  if (BO.second % HwLen != 0) {
-    BO.first = DAG.getNode(ISD::ADD, dl, MVT::i32, BO.first,
-                           DAG.getConstant(BO.second % HwLen, dl, MVT::i32));
-    BO.second -= BO.second % HwLen;
-  }
-  SDValue BaseNoOff = (BaseOpc != HexagonISD::VALIGNADDR)
-      ? DAG.getNode(HexagonISD::VALIGNADDR, dl, MVT::i32, BO.first)
-      : BO.first;
-  SDValue Base0 = DAG.getMemBasePlusOffset(BaseNoOff, BO.second, dl);
-  SDValue Base1 = DAG.getMemBasePlusOffset(BaseNoOff, BO.second+HwLen, dl);
-
-  MachineMemOperand *WideMMO = nullptr;
-  if (MachineMemOperand *MMO = LN->getMemOperand()) {
-    MachineFunction &MF = DAG.getMachineFunction();
-    WideMMO = MF.getMachineMemOperand(MMO->getPointerInfo(), MMO->getFlags(),
-                    2*HwLen, HwLen, MMO->getAAInfo(), MMO->getRanges(),
-                    MMO->getSyncScopeID(), MMO->getOrdering(),
-                    MMO->getFailureOrdering());
-  }
-
-  SDValue Load0 = DAG.getLoad(VecTy, dl, Chain, Base0, WideMMO);
-  SDValue Load1 = DAG.getLoad(VecTy, dl, Chain, Base1, WideMMO);
-
-  SDValue Aligned = getInstr(Hexagon::V6_valignb, dl, VecTy,
-                             {Load1, Load0, BaseNoOff.getOperand(0)}, DAG);
-  SDValue NewChain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other,
-                                 Load0.getValue(1), Load1.getValue(1));
-  SDValue M = DAG.getMergeValues({Aligned, NewChain}, dl);
-  return M;
-}
-
-SDValue
 HexagonTargetLowering::SplitHvxPairOp(SDValue Op, SelectionDAG &DAG) const {
   assert(!Op.isMachineOpcode());
   SmallVector<SDValue,2> OpsL, OpsH;
@@ -1465,7 +1432,6 @@ HexagonTargetLowering::LowerHvxOperation(SDValue Op, SelectionDAG &DAG) const {
     case ISD::EXTRACT_SUBVECTOR:       return LowerHvxExtractSubvector(Op, DAG);
     case ISD::EXTRACT_VECTOR_ELT:      return LowerHvxExtractElement(Op, DAG);
 
-    case ISD::LOAD:                    return LowerHvxUnalignedLoad(Op, DAG);
     case ISD::ANY_EXTEND:              return LowerHvxAnyExt(Op, DAG);
     case ISD::SIGN_EXTEND:             return LowerHvxSignExt(Op, DAG);
     case ISD::ZERO_EXTEND:             return LowerHvxZeroExt(Op, DAG);
@@ -1478,6 +1444,8 @@ HexagonTargetLowering::LowerHvxOperation(SDValue Op, SelectionDAG &DAG) const {
     case ISD::ANY_EXTEND_VECTOR_INREG: return LowerHvxExtend(Op, DAG);
     case ISD::SETCC:
     case ISD::INTRINSIC_VOID:          return Op;
+    // Unaligned loads will be handled by the default lowering.
+    case ISD::LOAD:                    return SDValue();
   }
 #ifndef NDEBUG
   Op.dumpr(&DAG);

@@ -15,6 +15,7 @@
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/DependenceAnalysis.h"
@@ -40,6 +41,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Scalar.h"
+#include "llvm/Transforms/Utils.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
 #include <cassert>
@@ -49,6 +51,8 @@
 using namespace llvm;
 
 #define DEBUG_TYPE "loop-interchange"
+
+STATISTIC(LoopsInterchanged, "Number of loops interchanged");
 
 static cl::opt<int> LoopInterchangeCostThreshold(
     "loop-interchange-threshold", cl::init(0), cl::Hidden,
@@ -401,7 +405,9 @@ public:
 
   /// Interchange OuterLoop and InnerLoop.
   bool transform();
-  void restructureLoops(Loop *InnerLoop, Loop *OuterLoop);
+  void restructureLoops(Loop *NewInner, Loop *NewOuter,
+                        BasicBlock *OrigInnerPreHeader,
+                        BasicBlock *OrigOuterPreHeader);
   void removeChildLoop(Loop *OuterLoop, Loop *InnerLoop);
 
 private:
@@ -452,6 +458,7 @@ struct LoopInterchange : public FunctionPass {
     AU.addRequired<OptimizationRemarkEmitterWrapperPass>();
 
     AU.addPreserved<DominatorTreeWrapperPass>();
+    AU.addPreserved<LoopInfoWrapperPass>();
   }
 
   bool runOnFunction(Function &F) override {
@@ -536,22 +543,16 @@ struct LoopInterchange : public FunctionPass {
     printDepMatrix(DependencyMatrix);
 #endif
 
-    BasicBlock *OuterMostLoopLatch = OuterMostLoop->getLoopLatch();
-    BranchInst *OuterMostLoopLatchBI =
-        dyn_cast<BranchInst>(OuterMostLoopLatch->getTerminator());
-    if (!OuterMostLoopLatchBI || OuterMostLoopLatchBI->getNumSuccessors() != 2)
-      return false;
-
     // Since we currently do not handle LCSSA PHI's any failure in loop
     // condition will now branch to LoopNestExit.
     // TODO: This should be removed once we handle LCSSA PHI nodes.
 
     // Get the Outermost loop exit.
-    BasicBlock *LoopNestExit;
-    if (OuterMostLoopLatchBI->getSuccessor(0) == OuterMostLoop->getHeader())
-      LoopNestExit = OuterMostLoopLatchBI->getSuccessor(1);
-    else
-      LoopNestExit = OuterMostLoopLatchBI->getSuccessor(0);
+    BasicBlock *LoopNestExit = OuterMostLoop->getExitBlock();
+    if (!LoopNestExit) {
+      DEBUG(dbgs() << "OuterMostLoop needs an unique exit block");
+      return false;
+    }
 
     if (isa<PHINode>(LoopNestExit->begin())) {
       DEBUG(dbgs() << "PHI Nodes in loop nest exit is not handled for now "
@@ -591,13 +592,13 @@ struct LoopInterchange : public FunctionPass {
     LoopInterchangeLegality LIL(OuterLoop, InnerLoop, SE, LI, DT,
                                 PreserveLCSSA, ORE);
     if (!LIL.canInterchangeLoops(InnerLoopId, OuterLoopId, DependencyMatrix)) {
-      DEBUG(dbgs() << "Not interchanging Loops. Cannot prove legality\n");
+      DEBUG(dbgs() << "Not interchanging loops. Cannot prove legality.\n");
       return false;
     }
     DEBUG(dbgs() << "Loops are legal to interchange\n");
     LoopInterchangeProfitability LIP(OuterLoop, InnerLoop, SE, ORE);
     if (!LIP.isProfitable(InnerLoopId, OuterLoopId, DependencyMatrix)) {
-      DEBUG(dbgs() << "Interchanging loops not profitable\n");
+      DEBUG(dbgs() << "Interchanging loops not profitable.\n");
       return false;
     }
 
@@ -611,7 +612,8 @@ struct LoopInterchange : public FunctionPass {
     LoopInterchangeTransform LIT(OuterLoop, InnerLoop, SE, LI, DT,
                                  LoopNestExit, LIL.hasInnerLoopReduction());
     LIT.transform();
-    DEBUG(dbgs() << "Loops interchanged\n");
+    DEBUG(dbgs() << "Loops interchanged.\n");
+    LoopsInterchanged++;
     return true;
   }
 };
@@ -748,28 +750,29 @@ static bool containsSafePHI(BasicBlock *Block, bool isOuterLoopExitBlock) {
   return true;
 }
 
-static BasicBlock *getLoopLatchExitBlock(BasicBlock *LatchBlock,
-                                         BasicBlock *LoopHeader) {
-  if (BranchInst *BI = dyn_cast<BranchInst>(LatchBlock->getTerminator())) {
-    assert(BI->getNumSuccessors() == 2 &&
-           "Branch leaving loop latch must have 2 successors");
-    for (BasicBlock *Succ : BI->successors()) {
-      if (Succ == LoopHeader)
-        continue;
-      return Succ;
-    }
-  }
-  return nullptr;
-}
-
 // This function indicates the current limitations in the transform as a result
 // of which we do not proceed.
 bool LoopInterchangeLegality::currentLimitations() {
   BasicBlock *InnerLoopPreHeader = InnerLoop->getLoopPreheader();
-  BasicBlock *InnerLoopHeader = InnerLoop->getHeader();
   BasicBlock *InnerLoopLatch = InnerLoop->getLoopLatch();
-  BasicBlock *OuterLoopLatch = OuterLoop->getLoopLatch();
-  BasicBlock *OuterLoopHeader = OuterLoop->getHeader();
+
+  // transform currently expects the loop latches to also be the exiting
+  // blocks.
+  if (InnerLoop->getExitingBlock() != InnerLoopLatch ||
+      OuterLoop->getExitingBlock() != OuterLoop->getLoopLatch() ||
+      !isa<BranchInst>(InnerLoopLatch->getTerminator()) ||
+      !isa<BranchInst>(OuterLoop->getLoopLatch()->getTerminator())) {
+    DEBUG(dbgs() << "Loops where the latch is not the exiting block are not"
+                 << " supported currently.\n");
+    ORE->emit([&]() {
+      return OptimizationRemarkMissed(DEBUG_TYPE, "ExitingNotLatch",
+                                      OuterLoop->getStartLoc(),
+                                      OuterLoop->getHeader())
+             << "Loops where the latch is not the exiting block cannot be"
+                " interchange currently.";
+    });
+    return true;
+  }
 
   PHINode *InnerInductionVar;
   SmallVector<PHINode *, 8> Inductions;
@@ -859,9 +862,8 @@ bool LoopInterchangeLegality::currentLimitations() {
   }
 
   // TODO: We only handle LCSSA PHI's corresponding to reduction for now.
-  BasicBlock *LoopExitBlock =
-      getLoopLatchExitBlock(OuterLoopLatch, OuterLoopHeader);
-  if (!LoopExitBlock || !containsSafePHI(LoopExitBlock, true)) {
+  BasicBlock *OuterExit = OuterLoop->getExitBlock();
+  if (!containsSafePHI(OuterExit, true)) {
     DEBUG(dbgs() << "Can only handle LCSSA PHIs in outer loops currently.\n");
     ORE->emit([&]() {
       return OptimizationRemarkMissed(DEBUG_TYPE, "NoLCSSAPHIOuter",
@@ -873,8 +875,8 @@ bool LoopInterchangeLegality::currentLimitations() {
     return true;
   }
 
-  LoopExitBlock = getLoopLatchExitBlock(InnerLoopLatch, InnerLoopHeader);
-  if (!LoopExitBlock || !containsSafePHI(LoopExitBlock, false)) {
+  BasicBlock *InnerExit = InnerLoop->getExitBlock();
+  if (!containsSafePHI(InnerExit, false)) {
     DEBUG(dbgs() << "Can only handle LCSSA PHIs in inner loops currently.\n");
     ORE->emit([&]() {
       return OptimizationRemarkMissed(DEBUG_TYPE, "NoLCSSAPHIOuterInner",
@@ -984,6 +986,13 @@ bool LoopInterchangeLegality::canInterchangeLoops(unsigned InnerLoopId,
           continue;
         DEBUG(dbgs() << "Loops with call instructions cannot be interchanged "
                      << "safely.");
+        ORE->emit([&]() {
+          return OptimizationRemarkMissed(DEBUG_TYPE, "CallInst",
+                                          CI->getDebugLoc(),
+                                          CI->getParent())
+                 << "Cannot interchange loops due to call instruction.";
+        });
+
         return false;
       }
 
@@ -1097,7 +1106,8 @@ static bool isProfitableForVectorization(unsigned InnerLoopId,
   }
   // If outer loop has dependence and inner loop is loop independent then it is
   // profitable to interchange to enable parallelism.
-  return true;
+  // If there are no dependences, interchanging will not improve anything.
+  return !DepMatrix.empty();
 }
 
 bool LoopInterchangeProfitability::isProfitable(unsigned InnerLoopId,
@@ -1145,23 +1155,80 @@ void LoopInterchangeTransform::removeChildLoop(Loop *OuterLoop,
   llvm_unreachable("Couldn't find loop");
 }
 
-void LoopInterchangeTransform::restructureLoops(Loop *InnerLoop,
-                                                Loop *OuterLoop) {
+/// Update LoopInfo, after interchanging. NewInner and NewOuter refer to the
+/// new inner and outer loop after interchanging: NewInner is the original
+/// outer loop and NewOuter is the original inner loop.
+///
+/// Before interchanging, we have the following structure
+/// Outer preheader
+//  Outer header
+//    Inner preheader
+//    Inner header
+//      Inner body
+//      Inner latch
+//   outer bbs
+//   Outer latch
+//
+// After interchanging:
+// Inner preheader
+// Inner header
+//   Outer preheader
+//   Outer header
+//     Inner body
+//     outer bbs
+//     Outer latch
+//   Inner latch
+void LoopInterchangeTransform::restructureLoops(
+    Loop *NewInner, Loop *NewOuter, BasicBlock *OrigInnerPreHeader,
+    BasicBlock *OrigOuterPreHeader) {
   Loop *OuterLoopParent = OuterLoop->getParentLoop();
+  // The original inner loop preheader moves from the new inner loop to
+  // the parent loop, if there is one.
+  NewInner->removeBlockFromLoop(OrigInnerPreHeader);
+  LI->changeLoopFor(OrigInnerPreHeader, OuterLoopParent);
+
+  // Switch the loop levels.
   if (OuterLoopParent) {
     // Remove the loop from its parent loop.
-    removeChildLoop(OuterLoopParent, OuterLoop);
-    removeChildLoop(OuterLoop, InnerLoop);
-    OuterLoopParent->addChildLoop(InnerLoop);
+    removeChildLoop(OuterLoopParent, NewInner);
+    removeChildLoop(NewInner, NewOuter);
+    OuterLoopParent->addChildLoop(NewOuter);
   } else {
-    removeChildLoop(OuterLoop, InnerLoop);
-    LI->changeTopLevelLoop(OuterLoop, InnerLoop);
+    removeChildLoop(NewInner, NewOuter);
+    LI->changeTopLevelLoop(NewInner, NewOuter);
+  }
+  while (!NewOuter->empty())
+    NewInner->addChildLoop(NewOuter->removeChildLoop(NewOuter->begin()));
+  NewOuter->addChildLoop(NewInner);
+
+  // BBs from the original inner loop.
+  SmallVector<BasicBlock *, 8> OrigInnerBBs(NewOuter->blocks());
+
+  // Add BBs from the original outer loop to the original inner loop (excluding
+  // BBs already in inner loop)
+  for (BasicBlock *BB : NewInner->blocks())
+    if (LI->getLoopFor(BB) == NewInner)
+      NewOuter->addBlockEntry(BB);
+
+  // Now remove inner loop header and latch from the new inner loop and move
+  // other BBs (the loop body) to the new inner loop.
+  BasicBlock *OuterHeader = NewOuter->getHeader();
+  BasicBlock *OuterLatch = NewOuter->getLoopLatch();
+  for (BasicBlock *BB : OrigInnerBBs) {
+    // Nothing will change for BBs in child loops.
+    if (LI->getLoopFor(BB) != NewOuter)
+      continue;
+    // Remove the new outer loop header and latch from the new inner loop.
+    if (BB == OuterHeader || BB == OuterLatch)
+      NewInner->removeBlockFromLoop(BB);
+    else
+      LI->changeLoopFor(BB, NewInner);
   }
 
-  while (!InnerLoop->empty())
-    OuterLoop->addChildLoop(InnerLoop->removeChildLoop(InnerLoop->begin()));
-
-  InnerLoop->addChildLoop(OuterLoop);
+  // The preheader of the original outer loop becomes part of the new
+  // outer loop.
+  NewOuter->addBlockEntry(OrigOuterPreHeader);
+  LI->changeLoopFor(OrigOuterPreHeader, NewOuter);
 }
 
 bool LoopInterchangeTransform::transform() {
@@ -1204,7 +1271,6 @@ bool LoopInterchangeTransform::transform() {
     return false;
   }
 
-  restructureLoops(InnerLoop, OuterLoop);
   return true;
 }
 
@@ -1374,6 +1440,9 @@ bool LoopInterchangeTransform::adjustLoopBranches() {
   updateIncomingBlock(OuterLoopLatchSuccessor, OuterLoopLatch, InnerLoopLatch);
 
   DT->applyUpdates(DTUpdates);
+  restructureLoops(OuterLoop, InnerLoop, InnerLoopPreHeader,
+                   OuterLoopPreHeader);
+
   return true;
 }
 

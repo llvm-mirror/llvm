@@ -52,6 +52,7 @@
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionAliasAnalysis.h"
+#include "llvm/Analysis/Utils/Local.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
@@ -64,9 +65,8 @@
 #include "llvm/IR/Type.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Transforms/Scalar.h"
+#include "llvm/Transforms/Utils.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
 using namespace llvm;
 
@@ -510,10 +510,6 @@ ReprocessLoop:
           BI->setCondition(ConstantInt::get(Cond->getType(),
                                             !L->contains(BI->getSuccessor(0))));
 
-          // This may make the loop analyzable, force SCEV recomputation.
-          if (SE)
-            SE->forgetLoop(L);
-
           Changed = true;
         }
       }
@@ -651,13 +647,6 @@ ReprocessLoop:
       DEBUG(dbgs() << "LoopSimplify: Eliminating exiting block "
                    << ExitingBlock->getName() << "\n");
 
-      // Notify ScalarEvolution before deleting this block. Currently assume the
-      // parent loop doesn't change (spliting edges doesn't count). If blocks,
-      // CFG edges, or other values in the parent loop change, then we need call
-      // to forgetLoop() for the parent instead.
-      if (SE)
-        SE->forgetLoop(L);
-
       assert(pred_begin(ExitingBlock) == pred_end(ExitingBlock));
       Changed = true;
       LI->removeBlock(ExitingBlock);
@@ -678,6 +667,12 @@ ReprocessLoop:
       ExitingBlock->eraseFromParent();
     }
   }
+
+  // Changing exit conditions for blocks may affect exit counts of this loop and
+  // any of its paretns, so we must invalidate the entire subtree if we've made
+  // any changes.
+  if (Changed && SE)
+    SE->forgetTopmostLoop(L);
 
   return Changed;
 }

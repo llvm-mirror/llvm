@@ -15,7 +15,7 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/Bitcode/BitcodeWriter.h"
-#include "llvm/CodeGen/CommandFlags.def"
+#include "llvm/CodeGen/CommandFlags.inc"
 #include "llvm/Config/config.h" // plugin-api.h requires HAVE_STDINT_H
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DiagnosticPrinter.h"
@@ -44,8 +44,17 @@
 
 #define LDPT_GET_SYMBOLS_V3 28
 
+// FIXME: Remove when binutils 2.31 (containing gold 1.16) is the minimum
+// required version.
+#define LDPT_GET_WRAP_SYMBOLS 32
+
 using namespace llvm;
 using namespace lto;
+
+// FIXME: Remove when binutils 2.31 (containing gold 1.16) is the minimum
+// required version.
+typedef enum ld_plugin_status (*ld_plugin_get_wrap_symbols)(
+    uint64_t *num_symbols, const char ***wrap_symbol_list);
 
 static ld_plugin_status discard_message(int level, const char *format, ...) {
   // Die loudly. Recent versions of Gold pass ld_plugin_message as the first
@@ -56,6 +65,7 @@ static ld_plugin_status discard_message(int level, const char *format, ...) {
 static ld_plugin_release_input_file release_input_file = nullptr;
 static ld_plugin_get_input_file get_input_file = nullptr;
 static ld_plugin_message message = discard_message;
+static ld_plugin_get_wrap_symbols get_wrap_symbols = nullptr;
 
 namespace {
 struct claimed_file {
@@ -93,6 +103,8 @@ struct PluginInputFile {
 struct ResolutionInfo {
   bool CanOmitFromDynSym = true;
   bool DefaultVisibility = true;
+  bool CanInline = true;
+  bool IsUsedInRegularObj = false;
 };
 
 }
@@ -185,6 +197,18 @@ namespace options {
   static std::string sample_profile;
   // New pass manager
   static bool new_pass_manager = false;
+  // Debug new pass manager
+  static bool debug_pass_manager = false;
+  // Objcopy for debug fission.
+  static std::string objcopy;
+  // Directory to store the .dwo files.
+  static std::string dwo_dir;
+  /// Statistics output filename.
+  static std::string stats_file;
+
+  // Optimization remarks filename and hotness options
+  static std::string OptRemarksFilename;
+  static bool OptRemarksWithHotness = false;
 
   static void process_plugin_option(const char *opt_)
   {
@@ -246,6 +270,18 @@ namespace options {
       sample_profile= opt.substr(strlen("sample-profile="));
     } else if (opt == "new-pass-manager") {
       new_pass_manager = true;
+    } else if (opt == "debug-pass-manager") {
+      debug_pass_manager = true;
+    } else if (opt.startswith("objcopy=")) {
+      objcopy = opt.substr(strlen("objcopy="));
+    } else if (opt.startswith("dwo_dir=")) {
+      dwo_dir = opt.substr(strlen("dwo_dir="));
+    } else if (opt.startswith("opt-remarks-filename=")) {
+      OptRemarksFilename = opt.substr(strlen("opt-remarks-filename="));
+    } else if (opt == "opt-remarks-with-hotness") {
+      OptRemarksWithHotness = true;
+    } else if (opt.startswith("stats-file=")) {
+      stats_file = opt.substr(strlen("stats-file="));
     } else {
       // Save this option to pass to the code generator.
       // ParseCommandLineOptions() expects argv[0] to be program name. Lazily
@@ -366,6 +402,13 @@ ld_plugin_status onload(ld_plugin_tv *tv) {
       break;
     case LDPT_MESSAGE:
       message = tv->tv_u.tv_message;
+      break;
+    case LDPT_GET_WRAP_SYMBOLS:
+      // FIXME: When binutils 2.31 (containing gold 1.16) is the minimum
+      // required version, this should be changed to:
+      // get_wrap_symbols = tv->tv_u.tv_get_wrap_symbols;
+      get_wrap_symbols =
+          (ld_plugin_get_wrap_symbols)tv->tv_u.tv_message;
       break;
     default:
       break;
@@ -563,6 +606,29 @@ static ld_plugin_status claim_file_hook(const ld_plugin_input_file *file,
     }
   }
 
+  // Handle any --wrap options passed to gold, which are than passed
+  // along to the plugin.
+  if (get_wrap_symbols) {
+    const char **wrap_symbols;
+    uint64_t count = 0;
+    if (get_wrap_symbols(&count, &wrap_symbols) != LDPS_OK) {
+      message(LDPL_ERROR, "Unable to get wrap symbols!");
+      return LDPS_ERR;
+    }
+    for (uint64_t i = 0; i < count; i++) {
+      StringRef Name = wrap_symbols[i];
+      ResolutionInfo &Res = ResInfo[Name];
+      ResolutionInfo &WrapRes = ResInfo["__wrap_" + Name.str()];
+      ResolutionInfo &RealRes = ResInfo["__real_" + Name.str()];
+      // Tell LTO not to inline symbols that will be overwritten.
+      Res.CanInline = false;
+      RealRes.CanInline = false;
+      // Tell LTO not to eliminate symbols that will be used after renaming.
+      Res.IsUsedInRegularObj = true;
+      WrapRes.IsUsedInRegularObj = true;
+    }
+  }
+
   return LDPS_OK;
 }
 
@@ -686,6 +752,12 @@ static void addModule(LTO &Lto, claimed_file &F, const void *View,
         (IsExecutable || !Res.DefaultVisibility))
       R.FinalDefinitionInLinkageUnit = true;
 
+    if (!Res.CanInline)
+      R.LinkerRedefined = true;
+
+    if (Res.IsUsedInRegularObj)
+      R.VisibleToRegularObj = true;
+
     freeSymName(Sym);
   }
 
@@ -727,6 +799,20 @@ static int getOutputFileName(StringRef InFilename, bool TempOutFile,
   return FD;
 }
 
+static CodeGenOpt::Level getCGOptLevel() {
+  switch (options::OptLevel) {
+  case 0:
+    return CodeGenOpt::None;
+  case 1:
+    return CodeGenOpt::Less;
+  case 2:
+    return CodeGenOpt::Default;
+  case 3:
+    return CodeGenOpt::Aggressive;
+  }
+  llvm_unreachable("Invalid optimization level");
+}
+
 /// Parse the thinlto_prefix_replace option into the \p OldPrefix and
 /// \p NewPrefix strings, if it was specified.
 static void getThinLTOOldAndNewPrefix(std::string &OldPrefix,
@@ -758,6 +844,7 @@ static std::unique_ptr<LTO> createLTO(IndexWriteCallback OnIndexWrite,
 
   Conf.MAttrs = MAttrs;
   Conf.RelocModel = RelocationModel;
+  Conf.CGOptLevel = getCGOptLevel();
   Conf.DisableVerify = options::DisableVerify;
   Conf.OptLevel = options::OptLevel;
   if (options::Parallelism)
@@ -803,9 +890,20 @@ static std::unique_ptr<LTO> createLTO(IndexWriteCallback OnIndexWrite,
   if (!options::sample_profile.empty())
     Conf.SampleProfile = options::sample_profile;
 
+  Conf.DwoDir = options::dwo_dir;
+
+  Conf.Objcopy = options::objcopy;
+
+  // Set up optimization remarks handling.
+  Conf.RemarksFilename = options::OptRemarksFilename;
+  Conf.RemarksWithHotness = options::OptRemarksWithHotness;
+
   // Use new pass manager if set in driver
   Conf.UseNewPM = options::new_pass_manager;
+  // Debug new pass manager if requested
+  Conf.DebugPassManager = options::debug_pass_manager;
 
+  Conf.StatsFile = options::stats_file;
   return llvm::make_unique<LTO>(std::move(Conf), Backend,
                                 options::ParallelCodeGenParallelismLevel);
 }
@@ -968,8 +1066,7 @@ static ld_plugin_status allSymbolsReadHook() {
     return LDPS_OK;
 
   if (options::thinlto_index_only) {
-    if (llvm::AreStatisticsEnabled())
-      llvm::PrintStatistics();
+    llvm_shutdown();
     cleanup_hook();
     exit(0);
   }

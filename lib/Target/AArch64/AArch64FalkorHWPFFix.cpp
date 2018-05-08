@@ -10,7 +10,7 @@
 /// that may inhibit the HW prefetching.  This is done in two steps.  Before
 /// ISel, we mark strided loads (i.e. those that will likely benefit from
 /// prefetching) with metadata.  Then, after opcodes have been finalized, we
-/// insert MOVs and re-write loads to prevent unintnentional tag collisions.
+/// insert MOVs and re-write loads to prevent unintentional tag collisions.
 // ===---------------------------------------------------------------------===//
 
 #include "AArch64.h"
@@ -46,6 +46,7 @@
 #include "llvm/Pass.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/DebugCounter.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cassert>
 #include <iterator>
@@ -59,7 +60,9 @@ STATISTIC(NumStridedLoadsMarked, "Number of strided loads marked");
 STATISTIC(NumCollisionsAvoided,
           "Number of HW prefetch tag collisions avoided");
 STATISTIC(NumCollisionsNotAvoided,
-          "Number of HW prefetch tag collisions not avoided due to lack of regsiters");
+          "Number of HW prefetch tag collisions not avoided due to lack of registers");
+DEBUG_COUNTER(FixCounter, "falkor-hwpf",
+              "Controls which tag collisions are avoided");
 
 namespace {
 
@@ -187,6 +190,7 @@ public:
   bool runOnMachineFunction(MachineFunction &Fn) override;
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
+    AU.setPreservesCFG();
     AU.addRequired<MachineLoopInfo>();
     MachineFunctionPass::getAnalysisUsage(AU);
   }
@@ -728,6 +732,21 @@ void FalkorHWPFFix::runOnLoop(MachineLoop &L, MachineFunction &Fn) {
 
       bool Fixed = false;
       DEBUG(dbgs() << "Attempting to fix tag collision: " << MI);
+
+      if (!DebugCounter::shouldExecute(FixCounter)) {
+        DEBUG(dbgs() << "Skipping fix due to debug counter:\n  " << MI);
+        continue;
+      }
+
+      // Add the non-base registers of MI as live so we don't use them as
+      // scratch registers.
+      for (unsigned OpI = 0, OpE = MI.getNumOperands(); OpI < OpE; ++OpI) {
+        if (OpI == static_cast<unsigned>(LdI.BaseRegIdx))
+          continue;
+        MachineOperand &MO = MI.getOperand(OpI);
+        if (MO.isReg() && MO.readsReg())
+          LR.addReg(MO.getReg());
+      }
 
       for (unsigned ScratchReg : AArch64::GPR64RegClass) {
         if (!LR.available(ScratchReg) || MRI.isReserved(ScratchReg))

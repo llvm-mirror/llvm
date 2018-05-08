@@ -1131,8 +1131,11 @@ bool LLParser::ParseFnAttributeValuePairs(AttrBuilder &B,
     case lltok::kw_nonlazybind: B.addAttribute(Attribute::NonLazyBind); break;
     case lltok::kw_noredzone: B.addAttribute(Attribute::NoRedZone); break;
     case lltok::kw_noreturn: B.addAttribute(Attribute::NoReturn); break;
+    case lltok::kw_nocf_check: B.addAttribute(Attribute::NoCfCheck); break;
     case lltok::kw_norecurse: B.addAttribute(Attribute::NoRecurse); break;
     case lltok::kw_nounwind: B.addAttribute(Attribute::NoUnwind); break;
+    case lltok::kw_optforfuzzing:
+      B.addAttribute(Attribute::OptForFuzzing); break;
     case lltok::kw_optnone: B.addAttribute(Attribute::OptimizeNone); break;
     case lltok::kw_optsize: B.addAttribute(Attribute::OptimizeForSize); break;
     case lltok::kw_readnone: B.addAttribute(Attribute::ReadNone); break;
@@ -1145,6 +1148,8 @@ bool LLParser::ParseFnAttributeValuePairs(AttrBuilder &B,
     case lltok::kw_sspstrong:
       B.addAttribute(Attribute::StackProtectStrong); break;
     case lltok::kw_safestack: B.addAttribute(Attribute::SafeStack); break;
+    case lltok::kw_shadowcallstack:
+      B.addAttribute(Attribute::ShadowCallStack); break;
     case lltok::kw_sanitize_address:
       B.addAttribute(Attribute::SanitizeAddress); break;
     case lltok::kw_sanitize_hwaddress:
@@ -1468,7 +1473,9 @@ bool LLParser::ParseOptionalParamAttrs(AttrBuilder &B) {
     case lltok::kw_nonlazybind:
     case lltok::kw_noredzone:
     case lltok::kw_noreturn:
+    case lltok::kw_nocf_check:
     case lltok::kw_nounwind:
+    case lltok::kw_optforfuzzing:
     case lltok::kw_optnone:
     case lltok::kw_optsize:
     case lltok::kw_returns_twice:
@@ -1480,6 +1487,7 @@ bool LLParser::ParseOptionalParamAttrs(AttrBuilder &B) {
     case lltok::kw_sspreq:
     case lltok::kw_sspstrong:
     case lltok::kw_safestack:
+    case lltok::kw_shadowcallstack:
     case lltok::kw_strictfp:
     case lltok::kw_uwtable:
       HaveError |= Error(Lex.getLoc(), "invalid use of function-only attribute");
@@ -1561,7 +1569,9 @@ bool LLParser::ParseOptionalReturnAttrs(AttrBuilder &B) {
     case lltok::kw_nonlazybind:
     case lltok::kw_noredzone:
     case lltok::kw_noreturn:
+    case lltok::kw_nocf_check:
     case lltok::kw_nounwind:
+    case lltok::kw_optforfuzzing:
     case lltok::kw_optnone:
     case lltok::kw_optsize:
     case lltok::kw_returns_twice:
@@ -1573,6 +1583,7 @@ bool LLParser::ParseOptionalReturnAttrs(AttrBuilder &B) {
     case lltok::kw_sspreq:
     case lltok::kw_sspstrong:
     case lltok::kw_safestack:
+    case lltok::kw_shadowcallstack:
     case lltok::kw_strictfp:
     case lltok::kw_uwtable:
       HaveError |= Error(Lex.getLoc(), "invalid use of function-only attribute");

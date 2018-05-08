@@ -26,7 +26,6 @@
 #include "llvm/CodeGen/GlobalISel/RegisterBankInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/CallingConv.h"
-#include "llvm/MC/MCInstrItineraries.h"
 #include "llvm/Target/TargetMachine.h"
 #include <memory>
 
@@ -57,13 +56,16 @@ public:
     IntelAtom,
     IntelSLM,
     IntelGLM,
+    IntelGLP,
+    IntelTRM,
     IntelHaswell,
     IntelBroadwell,
     IntelSkylake,
     IntelKNL,
     IntelSKX,
     IntelCannonlake,
-    IntelIcelake,
+    IntelIcelakeClient,
+    IntelIcelakeServer,
   };
 
 protected:
@@ -203,6 +205,9 @@ protected:
 
   /// Processor has Cache Line Zero instruction
   bool HasCLZERO;
+
+  /// Processor has Cache Line Demote instruction
+  bool HasCLDEMOTE;
 
   /// Processor has Prefetch with intent to Write instruction
   bool HasPREFETCHWT1;
@@ -359,8 +364,14 @@ protected:
   /// Processor supports Cache Line Write Back instruction
   bool HasCLWB;
 
+  /// Processor supports Write Back No Invalidate instruction
+  bool HasWBNOINVD;
+
   /// Processor support RDPID instruction
   bool HasRDPID;
+
+  /// Processor supports WaitPKG instructions
+  bool HasWAITPKG;
 
   /// Use a retpoline thunk rather than indirect calls to block speculative
   /// execution.
@@ -386,9 +397,6 @@ protected:
 
   /// What processor and OS we're targeting.
   Triple TargetTriple;
-
-  /// Instruction itineraries for scheduling
-  InstrItineraryData InstrItins;
 
   /// GlobalISel related APIs.
   std::unique_ptr<CallLowering> CallLoweringInfo;
@@ -573,6 +581,7 @@ public:
   bool hasLAHFSAHF() const { return HasLAHFSAHF; }
   bool hasMWAITX() const { return HasMWAITX; }
   bool hasCLZERO() const { return HasCLZERO; }
+  bool hasCLDEMOTE() const { return HasCLDEMOTE; }
   bool isSHLDSlow() const { return IsSHLDSlow; }
   bool isPMULLDSlow() const { return IsPMULLDSlow; }
   bool isUnalignedMem16Slow() const { return IsUAMem16Slow; }
@@ -620,7 +629,9 @@ public:
   bool hasIBT() const { return HasIBT; }
   bool hasCLFLUSHOPT() const { return HasCLFLUSHOPT; }
   bool hasCLWB() const { return HasCLWB; }
+  bool hasWBNOINVD() const { return HasWBNOINVD; }
   bool hasRDPID() const { return HasRDPID; }
+  bool hasWAITPKG() const { return HasWAITPKG; }
   bool useRetpoline() const { return UseRetpoline; }
   bool useRetpolineExternalThunk() const { return UseRetpolineExternalThunk; }
 
@@ -655,6 +666,11 @@ public:
   /// TODO: to be removed later and replaced with suitable properties
   bool isAtom() const { return X86ProcFamily == IntelAtom; }
   bool isSLM() const { return X86ProcFamily == IntelSLM; }
+  bool isGLM() const {
+    return X86ProcFamily == IntelGLM ||
+           X86ProcFamily == IntelGLP ||
+           X86ProcFamily == IntelTRM;
+  }
   bool useSoftFloat() const { return UseSoftFloat; }
 
   /// Use mfence if we have SSE2 or we're on x86-64 (even if we asked for
@@ -780,11 +796,6 @@ public:
   bool supportPrintSchedInfo() const override { return false; }
 
   bool enableEarlyIfConversion() const override;
-
-  /// Return the instruction itineraries based on the subtarget selection.
-  const InstrItineraryData *getInstrItineraryData() const override {
-    return &InstrItins;
-  }
 
   AntiDepBreakMode getAntiDepBreakMode() const override {
     return TargetSubtargetInfo::ANTIDEP_CRITICAL;

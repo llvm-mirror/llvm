@@ -584,6 +584,8 @@ def DS_BPERMUTE_B32 : DS_1A1D_PERMUTE <"ds_bpermute_b32",
                                        int_amdgcn_ds_bpermute>;
 }
 
+def DS_ADD_SRC2_F32 : DS_1A<"ds_add_src2_f32">;
+
 } // let SubtargetPredicate = isVI
 
 //===----------------------------------------------------------------------===//
@@ -649,6 +651,7 @@ defm : DSReadPat_mc <DS_READ_B32, i32, "load_local">;
 let AddedComplexity = 100 in {
 
 defm : DSReadPat_mc <DS_READ_B64, v2i32, "load_align8_local">;
+defm : DSReadPat_mc <DS_READ_B128, v4i32, "load_align16_local">;
 
 } // End AddedComplexity = 100
 
@@ -718,6 +721,8 @@ def : DS64Bit4ByteAlignedWritePat<DS_WRITE2_B32_gfx9, store_local>;
 let AddedComplexity = 100 in {
 
 defm : DSWritePat_mc <DS_WRITE_B64, v2i32, "store_align8_local">;
+defm : DSWritePat_mc <DS_WRITE_B128, v4i32, "store_align16_local">;
+
 } // End AddedComplexity = 100
 class DSAtomicRetPat<DS_Pseudo inst, ValueType vt, PatFrag frag> : GCNPat <
   (frag (DS1Addr1Offset i32:$ptr, i32:$offset), vt:$value),
@@ -1126,6 +1131,7 @@ def DS_XOR_SRC2_B32_vi    : DS_Real_vi<0x8b, DS_XOR_SRC2_B32>;
 def DS_WRITE_SRC2_B32_vi  : DS_Real_vi<0x8d, DS_WRITE_SRC2_B32>;
 def DS_MIN_SRC2_F32_vi    : DS_Real_vi<0x92, DS_MIN_SRC2_F32>;
 def DS_MAX_SRC2_F32_vi    : DS_Real_vi<0x93, DS_MAX_SRC2_F32>;
+def DS_ADD_SRC2_F32_vi    : DS_Real_vi<0x95, DS_ADD_SRC2_F32>;
 def DS_ADD_SRC2_U64_vi    : DS_Real_vi<0xc0, DS_ADD_SRC2_U64>;
 def DS_SUB_SRC2_U64_vi    : DS_Real_vi<0xc1, DS_SUB_SRC2_U64>;
 def DS_RSUB_SRC2_U64_vi   : DS_Real_vi<0xc2, DS_RSUB_SRC2_U64>;

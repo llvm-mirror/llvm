@@ -48,6 +48,7 @@
 #include "llvm/Analysis/MemorySSA.h"
 #include "llvm/Analysis/MemorySSAUpdater.h"
 #include "llvm/Analysis/PostDominators.h"
+#include "llvm/Analysis/Utils/Local.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/BasicBlock.h"
@@ -72,7 +73,6 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/GVN.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include <algorithm>
 #include <cassert>
 #include <iterator>
@@ -748,11 +748,11 @@ private:
     // TODO: Remove fully-redundant expressions.
     // Get instruction from the Map, assume that all the Instructions
     // with same VNs have same rank (this is an approximation).
-    std::sort(Ranks.begin(), Ranks.end(),
-              [this, &Map](const VNType &r1, const VNType &r2) {
-                return (rank(*Map.lookup(r1).begin()) <
-                        rank(*Map.lookup(r2).begin()));
-              });
+    llvm::sort(Ranks.begin(), Ranks.end(),
+               [this, &Map](const VNType &r1, const VNType &r2) {
+                 return (rank(*Map.lookup(r1).begin()) <
+                         rank(*Map.lookup(r2).begin()));
+               });
 
     // - Sort VNs according to their rank, and start with lowest ranked VN
     // - Take a VN and for each instruction with same VN

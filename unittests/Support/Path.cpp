@@ -21,6 +21,7 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
 #include "gtest/gtest.h"
+#include "gmock/gmock.h"
 
 #ifdef LLVM_ON_WIN32
 #include "llvm/ADT/ArrayRef.h"
@@ -78,6 +79,7 @@ TEST(Support, Path) {
   paths.push_back("foo/bar");
   paths.push_back("/foo/bar");
   paths.push_back("//net");
+  paths.push_back("//net/");
   paths.push_back("//net/foo");
   paths.push_back("///foo///");
   paths.push_back("///foo///bar");
@@ -108,27 +110,30 @@ TEST(Support, Path) {
   paths.push_back("c:\\foo/");
   paths.push_back("c:/foo\\bar");
 
-  SmallVector<StringRef, 5> ComponentStack;
   for (SmallVector<StringRef, 40>::const_iterator i = paths.begin(),
                                                   e = paths.end();
                                                   i != e;
                                                   ++i) {
+    SCOPED_TRACE(*i);
+    SmallVector<StringRef, 5> ComponentStack;
     for (sys::path::const_iterator ci = sys::path::begin(*i),
                                    ce = sys::path::end(*i);
                                    ci != ce;
                                    ++ci) {
-      ASSERT_FALSE(ci->empty());
+      EXPECT_FALSE(ci->empty());
       ComponentStack.push_back(*ci);
     }
 
+    SmallVector<StringRef, 5> ReverseComponentStack;
     for (sys::path::reverse_iterator ci = sys::path::rbegin(*i),
                                      ce = sys::path::rend(*i);
                                      ci != ce;
                                      ++ci) {
-      ASSERT_TRUE(*ci == ComponentStack.back());
-      ComponentStack.pop_back();
+      EXPECT_FALSE(ci->empty());
+      ReverseComponentStack.push_back(*ci);
     }
-    ASSERT_TRUE(ComponentStack.empty());
+    std::reverse(ReverseComponentStack.begin(), ReverseComponentStack.end());
+    EXPECT_THAT(ComponentStack, testing::ContainerEq(ReverseComponentStack));
 
     // Crash test most of the API - since we're iterating over all of our paths
     // here there isn't really anything reasonable to assert on in the results.
@@ -171,115 +176,56 @@ TEST(Support, Path) {
   ASSERT_EQ("/root/foo.cpp", Relative);
 }
 
-TEST(Support, RelativePathIterator) {
-  SmallString<64> Path(StringRef("c/d/e/foo.txt"));
-  typedef SmallVector<StringRef, 4> PathComponents;
-  PathComponents ExpectedPathComponents;
-  PathComponents ActualPathComponents;
+TEST(Support, FilenameParent) {
+  EXPECT_EQ("/", path::filename("/"));
+  EXPECT_EQ("", path::parent_path("/"));
 
-  StringRef(Path).split(ExpectedPathComponents, '/');
+  EXPECT_EQ("\\", path::filename("c:\\", path::Style::windows));
+  EXPECT_EQ("c:", path::parent_path("c:\\", path::Style::windows));
 
-  for (path::const_iterator I = path::begin(Path), E = path::end(Path); I != E;
-       ++I) {
-    ActualPathComponents.push_back(*I);
-  }
+  EXPECT_EQ("bar", path::filename("/foo/bar"));
+  EXPECT_EQ("/foo", path::parent_path("/foo/bar"));
 
-  ASSERT_EQ(ExpectedPathComponents.size(), ActualPathComponents.size());
+  EXPECT_EQ("foo", path::filename("/foo"));
+  EXPECT_EQ("/", path::parent_path("/foo"));
 
-  for (size_t i = 0; i <ExpectedPathComponents.size(); ++i) {
-    EXPECT_EQ(ExpectedPathComponents[i].str(), ActualPathComponents[i].str());
-  }
+  EXPECT_EQ("foo", path::filename("foo"));
+  EXPECT_EQ("", path::parent_path("foo"));
+
+  EXPECT_EQ(".", path::filename("foo/"));
+  EXPECT_EQ("foo", path::parent_path("foo/"));
+
+  EXPECT_EQ("//net", path::filename("//net"));
+  EXPECT_EQ("", path::parent_path("//net"));
+
+  EXPECT_EQ("/", path::filename("//net/"));
+  EXPECT_EQ("//net", path::parent_path("//net/"));
+
+  EXPECT_EQ("foo", path::filename("//net/foo"));
+  EXPECT_EQ("//net/", path::parent_path("//net/foo"));
 }
 
-TEST(Support, RelativePathDotIterator) {
-  SmallString<64> Path(StringRef(".c/.d/../."));
-  typedef SmallVector<StringRef, 4> PathComponents;
-  PathComponents ExpectedPathComponents;
-  PathComponents ActualPathComponents;
-
-  StringRef(Path).split(ExpectedPathComponents, '/');
-
-  for (path::const_iterator I = path::begin(Path), E = path::end(Path); I != E;
-       ++I) {
-    ActualPathComponents.push_back(*I);
-  }
-
-  ASSERT_EQ(ExpectedPathComponents.size(), ActualPathComponents.size());
-
-  for (size_t i = 0; i <ExpectedPathComponents.size(); ++i) {
-    EXPECT_EQ(ExpectedPathComponents[i].str(), ActualPathComponents[i].str());
-  }
+static std::vector<StringRef>
+GetComponents(StringRef Path, path::Style S = path::Style::native) {
+  return {path::begin(Path, S), path::end(Path)};
 }
 
-TEST(Support, AbsolutePathIterator) {
-  SmallString<64> Path(StringRef("/c/d/e/foo.txt"));
-  typedef SmallVector<StringRef, 4> PathComponents;
-  PathComponents ExpectedPathComponents;
-  PathComponents ActualPathComponents;
-
-  StringRef(Path).split(ExpectedPathComponents, '/');
-
-  // The root path will also be a component when iterating
-  ExpectedPathComponents[0] = "/";
-
-  for (path::const_iterator I = path::begin(Path), E = path::end(Path); I != E;
-       ++I) {
-    ActualPathComponents.push_back(*I);
-  }
-
-  ASSERT_EQ(ExpectedPathComponents.size(), ActualPathComponents.size());
-
-  for (size_t i = 0; i <ExpectedPathComponents.size(); ++i) {
-    EXPECT_EQ(ExpectedPathComponents[i].str(), ActualPathComponents[i].str());
-  }
-}
-
-TEST(Support, AbsolutePathDotIterator) {
-  SmallString<64> Path(StringRef("/.c/.d/../."));
-  typedef SmallVector<StringRef, 4> PathComponents;
-  PathComponents ExpectedPathComponents;
-  PathComponents ActualPathComponents;
-
-  StringRef(Path).split(ExpectedPathComponents, '/');
-
-  // The root path will also be a component when iterating
-  ExpectedPathComponents[0] = "/";
-
-  for (path::const_iterator I = path::begin(Path), E = path::end(Path); I != E;
-       ++I) {
-    ActualPathComponents.push_back(*I);
-  }
-
-  ASSERT_EQ(ExpectedPathComponents.size(), ActualPathComponents.size());
-
-  for (size_t i = 0; i <ExpectedPathComponents.size(); ++i) {
-    EXPECT_EQ(ExpectedPathComponents[i].str(), ActualPathComponents[i].str());
-  }
-}
-
-TEST(Support, AbsolutePathIteratorWin32) {
-  SmallString<64> Path(StringRef("c:\\c\\e\\foo.txt"));
-  typedef SmallVector<StringRef, 4> PathComponents;
-  PathComponents ExpectedPathComponents;
-  PathComponents ActualPathComponents;
-
-  StringRef(Path).split(ExpectedPathComponents, "\\");
-
-  // The root path (which comes after the drive name) will also be a component
-  // when iterating.
-  ExpectedPathComponents.insert(ExpectedPathComponents.begin()+1, "\\");
-
-  for (path::const_iterator I = path::begin(Path, path::Style::windows),
-                            E = path::end(Path);
-       I != E; ++I) {
-    ActualPathComponents.push_back(*I);
-  }
-
-  ASSERT_EQ(ExpectedPathComponents.size(), ActualPathComponents.size());
-
-  for (size_t i = 0; i <ExpectedPathComponents.size(); ++i) {
-    EXPECT_EQ(ExpectedPathComponents[i].str(), ActualPathComponents[i].str());
-  }
+TEST(Support, PathIterator) {
+  EXPECT_THAT(GetComponents("/foo"), testing::ElementsAre("/", "foo"));
+  EXPECT_THAT(GetComponents("/"), testing::ElementsAre("/"));
+  EXPECT_THAT(GetComponents("c/d/e/foo.txt"),
+              testing::ElementsAre("c", "d", "e", "foo.txt"));
+  EXPECT_THAT(GetComponents(".c/.d/../."),
+              testing::ElementsAre(".c", ".d", "..", "."));
+  EXPECT_THAT(GetComponents("/c/d/e/foo.txt"),
+              testing::ElementsAre("/", "c", "d", "e", "foo.txt"));
+  EXPECT_THAT(GetComponents("/.c/.d/../."),
+              testing::ElementsAre("/", ".c", ".d", "..", "."));
+  EXPECT_THAT(GetComponents("c:\\c\\e\\foo.txt", path::Style::windows),
+              testing::ElementsAre("c:", "\\", "c", "e", "foo.txt"));
+  EXPECT_THAT(GetComponents("//net/"), testing::ElementsAre("//net", "/"));
+  EXPECT_THAT(GetComponents("//net/c/foo.txt"),
+              testing::ElementsAre("//net", "/", "c", "foo.txt"));
 }
 
 TEST(Support, AbsolutePathIteratorEnd) {
@@ -288,9 +234,12 @@ TEST(Support, AbsolutePathIteratorEnd) {
   Paths.emplace_back("/foo/", path::Style::native);
   Paths.emplace_back("/foo//", path::Style::native);
   Paths.emplace_back("//net//", path::Style::native);
+  Paths.emplace_back("//net/foo/", path::Style::native);
+  Paths.emplace_back("c:\\foo\\", path::Style::windows);
   Paths.emplace_back("c:\\\\", path::Style::windows);
 
   for (auto &Path : Paths) {
+    SCOPED_TRACE(Path.first);
     StringRef LastComponent = *path::rbegin(Path.first, Path.second);
     EXPECT_EQ(".", LastComponent);
   }
@@ -301,6 +250,7 @@ TEST(Support, AbsolutePathIteratorEnd) {
   RootPaths.emplace_back("c:\\", path::Style::windows);
 
   for (auto &Path : RootPaths) {
+    SCOPED_TRACE(Path.first);
     StringRef LastComponent = *path::rbegin(Path.first, Path.second);
     EXPECT_EQ(1u, LastComponent.size());
     EXPECT_TRUE(path::is_separator(LastComponent[0], Path.second));
@@ -885,58 +835,91 @@ TEST_F(FileSystemTest, BrokenSymlinkDirectoryIteration) {
       fs::create_link("no_such_file", Twine(TestDirectory) + "/symlink/e"));
 
   typedef std::vector<std::string> v_t;
-  v_t visited;
-
-  // The directory iterator doesn't stat the file, so we should be able to
-  // iterate over the whole directory.
+  v_t VisitedNonBrokenSymlinks;
+  v_t VisitedBrokenSymlinks;
   std::error_code ec;
+
+  // Broken symbol links are expected to throw an error.
   for (fs::directory_iterator i(Twine(TestDirectory) + "/symlink", ec), e;
        i != e; i.increment(ec)) {
-    ASSERT_NO_ERROR(ec);
-    visited.push_back(path::filename(i->path()));
-  }
-  std::sort(visited.begin(), visited.end());
-  v_t expected = {"a", "b", "c", "d", "e"};
-  ASSERT_TRUE(visited.size() == expected.size());
-  ASSERT_TRUE(std::equal(visited.begin(), visited.end(), expected.begin()));
-  visited.clear();
-
-  // The recursive directory iterator has to stat the file, so we need to skip
-  // the broken symlinks.
-  for (fs::recursive_directory_iterator
-           i(Twine(TestDirectory) + "/symlink", ec),
-       e;
-       i != e; i.increment(ec)) {
-    ASSERT_NO_ERROR(ec);
-
-    ErrorOr<fs::basic_file_status> status = i->status();
-    if (status.getError() ==
-        std::make_error_code(std::errc::no_such_file_or_directory)) {
-      i.no_push();
+    if (ec == std::make_error_code(std::errc::no_such_file_or_directory)) {
+      VisitedBrokenSymlinks.push_back(path::filename(i->path()));
       continue;
     }
 
-    visited.push_back(path::filename(i->path()));
-  }
-  std::sort(visited.begin(), visited.end());
-  expected = {"b", "bb", "d", "da", "dd", "ddd", "ddd"};
-  ASSERT_TRUE(visited.size() == expected.size());
-  ASSERT_TRUE(std::equal(visited.begin(), visited.end(), expected.begin()));
-  visited.clear();
-
-  // This recursive directory iterator doesn't follow symlinks, so we don't need
-  // to skip them.
-  for (fs::recursive_directory_iterator
-           i(Twine(TestDirectory) + "/symlink", ec, /*follow_symlinks=*/false),
-       e;
-       i != e; i.increment(ec)) {
     ASSERT_NO_ERROR(ec);
-    visited.push_back(path::filename(i->path()));
+    VisitedNonBrokenSymlinks.push_back(path::filename(i->path()));
   }
-  std::sort(visited.begin(), visited.end());
-  expected = {"a", "b", "ba", "bb", "bc", "c", "d", "da", "dd", "ddd", "e"};
-  ASSERT_TRUE(visited.size() == expected.size());
-  ASSERT_TRUE(std::equal(visited.begin(), visited.end(), expected.begin()));
+  llvm::sort(VisitedNonBrokenSymlinks.begin(), VisitedNonBrokenSymlinks.end());
+  llvm::sort(VisitedBrokenSymlinks.begin(), VisitedBrokenSymlinks.end());
+  v_t ExpectedNonBrokenSymlinks = {"b", "d"};
+  ASSERT_EQ(ExpectedNonBrokenSymlinks.size(), VisitedNonBrokenSymlinks.size());
+  ASSERT_TRUE(std::equal(VisitedNonBrokenSymlinks.begin(),
+                         VisitedNonBrokenSymlinks.end(),
+                         ExpectedNonBrokenSymlinks.begin()));
+  VisitedNonBrokenSymlinks.clear();
+
+  v_t ExpectedBrokenSymlinks = {"a", "c", "e"};
+  ASSERT_EQ(ExpectedBrokenSymlinks.size(), VisitedBrokenSymlinks.size());
+  ASSERT_TRUE(std::equal(VisitedBrokenSymlinks.begin(),
+                         VisitedBrokenSymlinks.end(),
+                         ExpectedBrokenSymlinks.begin()));
+  VisitedBrokenSymlinks.clear();
+
+  // Broken symbol links are expected to throw an error.
+  for (fs::recursive_directory_iterator i(
+      Twine(TestDirectory) + "/symlink", ec), e; i != e; i.increment(ec)) {
+    if (ec == std::make_error_code(std::errc::no_such_file_or_directory)) {
+      VisitedBrokenSymlinks.push_back(path::filename(i->path()));
+      continue;
+    }
+
+    ASSERT_NO_ERROR(ec);
+    VisitedNonBrokenSymlinks.push_back(path::filename(i->path()));
+  }
+  llvm::sort(VisitedNonBrokenSymlinks.begin(), VisitedNonBrokenSymlinks.end());
+  llvm::sort(VisitedBrokenSymlinks.begin(), VisitedBrokenSymlinks.end());
+  ExpectedNonBrokenSymlinks = {"b", "bb", "d", "da", "dd", "ddd", "ddd"};
+  ASSERT_EQ(ExpectedNonBrokenSymlinks.size(), VisitedNonBrokenSymlinks.size());
+  ASSERT_TRUE(std::equal(VisitedNonBrokenSymlinks.begin(),
+                         VisitedNonBrokenSymlinks.end(),
+                         ExpectedNonBrokenSymlinks.begin()));
+  VisitedNonBrokenSymlinks.clear();
+
+  ExpectedBrokenSymlinks = {"a", "ba", "bc", "c", "e"};
+  ASSERT_EQ(ExpectedBrokenSymlinks.size(), VisitedBrokenSymlinks.size());
+  ASSERT_TRUE(std::equal(VisitedBrokenSymlinks.begin(),
+                         VisitedBrokenSymlinks.end(),
+                         ExpectedBrokenSymlinks.begin()));
+  VisitedBrokenSymlinks.clear();
+
+  for (fs::recursive_directory_iterator i(
+      Twine(TestDirectory) + "/symlink", ec, /*follow_symlinks=*/false), e;
+       i != e; i.increment(ec)) {
+    if (ec == std::make_error_code(std::errc::no_such_file_or_directory)) {
+      VisitedBrokenSymlinks.push_back(path::filename(i->path()));
+      continue;
+    }
+
+    ASSERT_NO_ERROR(ec);
+    VisitedNonBrokenSymlinks.push_back(path::filename(i->path()));
+  }
+  llvm::sort(VisitedNonBrokenSymlinks.begin(), VisitedNonBrokenSymlinks.end());
+  llvm::sort(VisitedBrokenSymlinks.begin(), VisitedBrokenSymlinks.end());
+  ExpectedNonBrokenSymlinks = {"a", "b", "ba", "bb", "bc", "c", "d", "da", "dd",
+                               "ddd", "e"};
+  ASSERT_EQ(ExpectedNonBrokenSymlinks.size(), VisitedNonBrokenSymlinks.size());
+  ASSERT_TRUE(std::equal(VisitedNonBrokenSymlinks.begin(),
+                         VisitedNonBrokenSymlinks.end(),
+                         ExpectedNonBrokenSymlinks.begin()));
+  VisitedNonBrokenSymlinks.clear();
+
+  ExpectedBrokenSymlinks = {};
+  ASSERT_EQ(ExpectedBrokenSymlinks.size(), VisitedBrokenSymlinks.size());
+  ASSERT_TRUE(std::equal(VisitedBrokenSymlinks.begin(),
+                         VisitedBrokenSymlinks.end(),
+                         ExpectedBrokenSymlinks.begin()));
+  VisitedBrokenSymlinks.clear();
 
   ASSERT_NO_ERROR(fs::remove_directories(Twine(TestDirectory) + "/symlink"));
 }

@@ -21,7 +21,6 @@
 #include "llvm/BinaryFormat/COFF.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineModuleInfoImpls.h"
-#include "llvm/CodeGen/MachineValueType.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Mangler.h"
@@ -36,6 +35,7 @@
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/MachineValueType.h"
 #include "llvm/Support/TargetRegistry.h"
 using namespace llvm;
 
@@ -371,6 +371,12 @@ static bool printAsmMRegister(X86AsmPrinter &P, const MachineOperand &MO,
                               char Mode, raw_ostream &O) {
   unsigned Reg = MO.getReg();
   bool EmitPercent = true;
+
+  if (!X86::GR8RegClass.contains(Reg) &&
+      !X86::GR16RegClass.contains(Reg) &&
+      !X86::GR32RegClass.contains(Reg) &&
+      !X86::GR64RegClass.contains(Reg))
+    return true;
 
   switch (Mode) {
   default: return true;  // Unknown mode.

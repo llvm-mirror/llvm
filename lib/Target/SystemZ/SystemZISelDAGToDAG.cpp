@@ -593,10 +593,16 @@ bool SystemZDAGToDAGISel::selectAddress(SDValue Addr,
 // The selection DAG must no longer depend on their uniqueness when this
 // function is used.
 static void insertDAGNode(SelectionDAG *DAG, SDNode *Pos, SDValue N) {
-  if (N.getNode()->getNodeId() == -1 ||
-      N.getNode()->getNodeId() > Pos->getNodeId()) {
+  if (N->getNodeId() == -1 ||
+      (SelectionDAGISel::getUninvalidatedNodeId(N.getNode()) >
+       SelectionDAGISel::getUninvalidatedNodeId(Pos))) {
     DAG->RepositionNode(Pos->getIterator(), N.getNode());
-    N.getNode()->setNodeId(Pos->getNodeId());
+    // Mark Node as invalid for pruning as after this it may be a successor to a
+    // selected node but otherwise be in the same position of Pos.
+    // Conservatively mark it with the same -abs(Id) to assure node id
+    // invariant is preserved.
+    N->setNodeId(Pos->getNodeId());
+    SelectionDAGISel::InvalidateNodeId(N.getNode());
   }
 }
 
@@ -1027,8 +1033,7 @@ bool SystemZDAGToDAGISel::tryRISBGZero(SDNode *N) {
   };
   SDValue New = convertTo(
       DL, VT, SDValue(CurDAG->getMachineNode(Opcode, DL, OpcodeVT, Ops), 0));
-  ReplaceUses(N, New.getNode());
-  CurDAG->RemoveDeadNode(N);
+  ReplaceNode(N, New.getNode());
   return true;
 }
 
@@ -1119,8 +1124,7 @@ void SystemZDAGToDAGISel::splitLargeImmediate(unsigned Opcode, SDNode *Node,
   SDValue Lower = CurDAG->getConstant(LowerVal, DL, VT);
   SDValue Or = CurDAG->getNode(Opcode, DL, VT, Upper, Lower);
 
-  ReplaceUses(Node, Or.getNode());
-  CurDAG->RemoveDeadNode(Node);
+  ReplaceNode(Node, Or.getNode());
 
   SelectCode(Or.getNode());
 }
@@ -1618,4 +1622,3 @@ void SystemZDAGToDAGISel::PreprocessISelDAG() {
   if (MadeChange)
     CurDAG->RemoveDeadNodes();
 }
-

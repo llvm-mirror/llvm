@@ -20,6 +20,7 @@
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/ADT/StringSet.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/CodeGen/FaultMaps.h"
 #include "llvm/DebugInfo/DWARF/DWARFContext.h"
@@ -50,10 +51,8 @@
 #include "llvm/Support/Format.h"
 #include "llvm/Support/GraphWriter.h"
 #include "llvm/Support/Host.h"
-#include "llvm/Support/ManagedStatic.h"
+#include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/MemoryBuffer.h"
-#include "llvm/Support/PrettyStackTrace.h"
-#include "llvm/Support/Signals.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
@@ -84,6 +83,12 @@ llvm::DisassembleAll("disassemble-all",
 static cl::alias
 DisassembleAlld("D", cl::desc("Alias for --disassemble-all"),
              cl::aliasopt(DisassembleAll));
+
+static cl::list<std::string>
+DisassembleFunctions("df",
+                     cl::CommaSeparated,
+                     cl::desc("List of functions to disassemble"));
+static StringSet<> DisasmFuncsSet;
 
 cl::opt<bool>
 llvm::Relocations("r", cl::desc("Display the relocation entries in the file"));
@@ -588,23 +593,42 @@ public:
     if (SP && (PrintSource || PrintLines))
       SP->printSourceLine(OS, Address);
 
-    if (!MI) {
-      OS << " <unknown>";
-      return;
+    typedef support::ulittle32_t U32;
+
+    if (MI) {
+      SmallString<40> InstStr;
+      raw_svector_ostream IS(InstStr);
+
+      IP.printInst(MI, IS, "", STI);
+
+      OS << left_justify(IS.str(), 60);
+    } else {
+      // an unrecognized encoding - this is probably data so represent it
+      // using the .long directive, or .byte directive if fewer than 4 bytes
+      // remaining
+      if (Bytes.size() >= 4) {
+        OS << format("\t.long 0x%08" PRIx32 " ",
+                     static_cast<uint32_t>(*reinterpret_cast<const U32*>(Bytes.data())));
+        OS.indent(42);
+      } else {
+          OS << format("\t.byte 0x%02" PRIx8, Bytes[0]);
+          for (unsigned int i = 1; i < Bytes.size(); i++)
+            OS << format(", 0x%02" PRIx8, Bytes[i]);
+          OS.indent(55 - (6 * Bytes.size()));
+      }
     }
 
-    SmallString<40> InstStr;
-    raw_svector_ostream IS(InstStr);
-
-    IP.printInst(MI, IS, "", STI);
-
-    OS << left_justify(IS.str(), 60) << format("// %012" PRIX64 ": ", Address);
-    typedef support::ulittle32_t U32;
-    for (auto D : makeArrayRef(reinterpret_cast<const U32*>(Bytes.data()),
-                               Bytes.size() / sizeof(U32)))
-      // D should be explicitly casted to uint32_t here as it is passed
-      // by format to snprintf as vararg.
-      OS << format("%08" PRIX32 " ", static_cast<uint32_t>(D));
+    OS << format("// %012" PRIX64 ": ", Address);
+    if (Bytes.size() >=4) {
+      for (auto D : makeArrayRef(reinterpret_cast<const U32*>(Bytes.data()),
+                                 Bytes.size() / sizeof(U32)))
+        // D should be explicitly casted to uint32_t here as it is passed
+        // by format to snprintf as vararg.
+        OS << format("%08" PRIX32 " ", static_cast<uint32_t>(D));
+    } else {
+      for (unsigned int i = 0; i < Bytes.size(); i++)
+        OS << format("%02" PRIX8 " ", Bytes[i]);
+    }
 
     if (!Annot.empty())
       OS << "// " << Annot;
@@ -1355,8 +1379,8 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
       }
     }
 
-    std::sort(DataMappingSymsAddr.begin(), DataMappingSymsAddr.end());
-    std::sort(TextMappingSymsAddr.begin(), TextMappingSymsAddr.end());
+    llvm::sort(DataMappingSymsAddr.begin(), DataMappingSymsAddr.end());
+    llvm::sort(TextMappingSymsAddr.begin(), TextMappingSymsAddr.end());
 
     if (Obj->isELF() && Obj->getArch() == Triple::amdgcn) {
       // AMDGPU disassembler uses symbolizer for printing labels
@@ -1381,30 +1405,22 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
     }
 
     // Sort relocations by address.
-    std::sort(Rels.begin(), Rels.end(), RelocAddressLess);
+    llvm::sort(Rels.begin(), Rels.end(), RelocAddressLess);
 
     StringRef SegmentName = "";
     if (const MachOObjectFile *MachO = dyn_cast<const MachOObjectFile>(Obj)) {
       DataRefImpl DR = Section.getRawDataRefImpl();
       SegmentName = MachO->getSectionFinalSegmentName(DR);
     }
-    StringRef name;
-    error(Section.getName(name));
-
-    if ((SectionAddr <= StopAddress) &&
-        (SectionAddr + SectSize) >= StartAddress) {
-    outs() << "Disassembly of section ";
-    if (!SegmentName.empty())
-      outs() << SegmentName << ",";
-    outs() << name << ':';
-    }
+    StringRef SectionName;
+    error(Section.getName(SectionName));
 
     // If the section has no symbol at the start, just insert a dummy one.
     if (Symbols.empty() || std::get<0>(Symbols[0]) != 0) {
-      Symbols.insert(Symbols.begin(),
-                     std::make_tuple(SectionAddr, name, Section.isText()
-                                                            ? ELF::STT_FUNC
-                                                            : ELF::STT_OBJECT));
+      Symbols.insert(
+          Symbols.begin(),
+          std::make_tuple(SectionAddr, SectionName,
+                          Section.isText() ? ELF::STT_FUNC : ELF::STT_OBJECT));
     }
 
     SmallString<40> Comments;
@@ -1417,6 +1433,7 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
 
     uint64_t Size;
     uint64_t Index;
+    bool PrintedSection = false;
 
     std::vector<RelocationRef>::const_iterator rel_cur = Rels.begin();
     std::vector<RelocationRef>::const_iterator rel_end = Rels.end();
@@ -1441,13 +1458,24 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
         continue;
       }
 
+      /// Skip if user requested specific symbols and this is not in the list
+      if (!DisasmFuncsSet.empty() &&
+          !DisasmFuncsSet.count(std::get<1>(Symbols[si])))
+        continue;
+
+      if (!PrintedSection) {
+        PrintedSection = true;
+        outs() << "Disassembly of section ";
+        if (!SegmentName.empty())
+          outs() << SegmentName << ",";
+        outs() << SectionName << ':';
+      }
+
       // Stop disassembly at the stop address specified
       if (End + SectionAddr > StopAddress)
         End = StopAddress - SectionAddr;
 
       if (Obj->isELF() && Obj->getArch() == Triple::amdgcn) {
-        // make size 4 bytes folded
-        End = Start + ((End - Start) & ~0x3ull);
         if (std::get<2>(Symbols[si]) == ELF::STT_AMDGPU_HSA_KERNEL) {
           // skip amd_kernel_code_t at the begining of kernel symbol (256 bytes)
           Start += 256;
@@ -1465,6 +1493,13 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
       }
 
       outs() << '\n' << std::get<1>(Symbols[si]) << ":\n";
+
+      // Don't print raw contents of a virtual section. A virtual section
+      // doesn't have any contents in the file.
+      if (Section.isVirtual()) {
+        outs() << "...\n";
+        continue;
+      }
 
 #ifndef NDEBUG
       raw_ostream &DebugOut = DebugFlag ? dbgs() : nulls();
@@ -2149,10 +2184,7 @@ static void DumpInput(StringRef file) {
 }
 
 int main(int argc, char **argv) {
-  // Print a stack trace if we signal out.
-  sys::PrintStackTraceOnErrorSignal(argv[0]);
-  PrettyStackTraceProgram X(argc, argv);
-  llvm_shutdown_obj Y;  // Call llvm_shutdown() on exit.
+  InitLLVM X(argc, argv);
 
   // Initialize targets and assembly printers/parsers.
   llvm::InitializeAllTargetInfos();
@@ -2202,6 +2234,9 @@ int main(int argc, char **argv) {
     cl::PrintHelpMessage();
     return 2;
   }
+
+  DisasmFuncsSet.insert(DisassembleFunctions.begin(),
+                        DisassembleFunctions.end());
 
   llvm::for_each(InputFilenames, DumpInput);
 

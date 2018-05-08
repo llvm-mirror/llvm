@@ -71,6 +71,7 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Mangler.h"
 #include "llvm/Support/Allocator.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include <functional>
@@ -86,6 +87,17 @@ using namespace ore;
 
 STATISTIC(NumOutlined, "Number of candidates outlined");
 STATISTIC(FunctionsCreated, "Number of functions created");
+
+// Set to true if the user wants the outliner to run on linkonceodr linkage
+// functions. This is false by default because the linker can dedupe linkonceodr
+// functions. Since the outliner is confined to a single module (modulo LTO),
+// this is off by default. It should, however, be the default behaviour in
+// LTO.
+static cl::opt<bool> EnableLinkOnceODROutlining(
+    "enable-linkonceodr-outlining",
+    cl::Hidden,
+    cl::desc("Enable the machine outliner on linkonceodr functions"),
+    cl::init(false));
 
 namespace {
 
@@ -813,8 +825,7 @@ struct MachineOutliner : public ModulePass {
     ModulePass::getAnalysisUsage(AU);
   }
 
-  MachineOutliner(bool OutlineFromLinkOnceODRs = false)
-      : ModulePass(ID), OutlineFromLinkOnceODRs(OutlineFromLinkOnceODRs) {
+  MachineOutliner() : ModulePass(ID) {
     initializeMachineOutlinerPass(*PassRegistry::getPassRegistry());
   }
 
@@ -910,8 +921,8 @@ struct MachineOutliner : public ModulePass {
 char MachineOutliner::ID = 0;
 
 namespace llvm {
-ModulePass *createMachineOutlinerPass(bool OutlineFromLinkOnceODRs) {
-  return new MachineOutliner(OutlineFromLinkOnceODRs);
+ModulePass *createMachineOutlinerPass() {
+  return new MachineOutliner();
 }
 
 } // namespace llvm
@@ -1239,7 +1250,7 @@ MachineOutliner::createOutlinedFunction(Module &M, const OutlinedFunction &OF,
 
   // NOTE: If this is linkonceodr, then we can take advantage of linker deduping
   // which gives us better results when we outline from linkonceodr functions.
-  F->setLinkage(GlobalValue::PrivateLinkage);
+  F->setLinkage(GlobalValue::InternalLinkage);
   F->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
 
   // Save F so that we can add debug info later if we need to.
@@ -1406,8 +1417,8 @@ bool MachineOutliner::outline(
 }
 
 bool MachineOutliner::runOnModule(Module &M) {
-
-  // Is there anything in the module at all?
+  // Check if there's anything in the module. If it's empty, then there's
+  // nothing to outline.
   if (M.empty())
     return false;
 
@@ -1416,26 +1427,59 @@ bool MachineOutliner::runOnModule(Module &M) {
       MMI.getOrCreateMachineFunction(*M.begin()).getSubtarget();
   const TargetRegisterInfo *TRI = STI.getRegisterInfo();
   const TargetInstrInfo *TII = STI.getInstrInfo();
-  
+
+  // Does the target implement the MachineOutliner? If it doesn't, quit here.
+  if (!TII->useMachineOutliner()) {
+    // No. So we're done.
+    DEBUG(dbgs()
+          << "Skipping pass: Target does not support the MachineOutliner.\n");
+    return false;
+  }
+
+  // If the user specifies that they want to outline from linkonceodrs, set
+  // it here.
+  OutlineFromLinkOnceODRs = EnableLinkOnceODROutlining;
+
   InstructionMapper Mapper;
 
-  // Build instruction mappings for each function in the module.
+  // Build instruction mappings for each function in the module. Start by
+  // iterating over each Function in M.
   for (Function &F : M) {
-    MachineFunction &MF = MMI.getOrCreateMachineFunction(F);
 
-    // Is the function empty? Safe to outline from?
-    if (F.empty() ||
-        !TII->isFunctionSafeToOutlineFrom(MF, OutlineFromLinkOnceODRs))
+    // If there's nothing in F, then there's no reason to try and outline from
+    // it.
+    if (F.empty())
       continue;
 
-    // If it is, look at each MachineBasicBlock in the function.
-    for (MachineBasicBlock &MBB : MF) {
+    // There's something in F. Check if it has a MachineFunction associated with
+    // it.
+    MachineFunction *MF = MMI.getMachineFunction(F);
 
-      // Is there anything in MBB? And is it the target of an indirect branch?
-      if (MBB.empty() || MBB.hasAddressTaken())
+    // If it doesn't, then there's nothing to outline from. Move to the next
+    // Function.
+    if (!MF)
+      continue;
+
+    // We have a MachineFunction. Ask the target if it's suitable for outlining.
+    // If it isn't, then move on to the next Function in the module.
+    if (!TII->isFunctionSafeToOutlineFrom(*MF, OutlineFromLinkOnceODRs))
+      continue;
+
+    // We have a function suitable for outlining. Iterate over every
+    // MachineBasicBlock in MF and try to map its instructions to a list of
+    // unsigned integers.
+    for (MachineBasicBlock &MBB : *MF) {
+      // If there isn't anything in MBB, then there's no point in outlining from
+      // it.
+      if (MBB.empty())
         continue;
 
-      // If yes, map it.
+      // Check if MBB could be the target of an indirect branch. If it is, then
+      // we don't want to outline from it.
+      if (MBB.hasAddressTaken())
+        continue;
+
+      // MBB is suitable for outlining. Map it to a list of unsigneds.
       Mapper.convertToUnsignedVec(MBB, *TRI, *TII);
     }
   }

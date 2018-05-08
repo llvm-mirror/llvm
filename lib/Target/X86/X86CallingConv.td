@@ -18,6 +18,12 @@ class CCIfSubtarget<string F, CCAction A>
                        "(State.getMachineFunction().getSubtarget()).", F),
            A>;
 
+/// CCIfNotSubtarget - Match if the current subtarget doesn't has a feature F.
+class CCIfNotSubtarget<string F, CCAction A>
+    : CCIf<!strconcat("!static_cast<const X86Subtarget&>"
+                       "(State.getMachineFunction().getSubtarget()).", F),
+           A>;
+
 // Register classes for RegCall
 class RC_X86_RegCall {
   list<Register> GPR_8 = [];
@@ -246,8 +252,9 @@ def RetCC_X86Common : CallingConv<[
   // MM0, it doesn't support these vector types.
   CCIfType<[x86mmx], CCAssignToReg<[MM0]>>,
 
-  // Long double types are always returned in FP0 (even with SSE).
-  CCIfType<[f80], CCAssignToReg<[FP0, FP1]>>
+  // Long double types are always returned in FP0 (even with SSE),
+  // except on Win64.
+  CCIfNotSubtarget<"isTargetWin64()", CCIfType<[f80], CCAssignToReg<[FP0, FP1]>>>
 ]>;
 
 // X86-32 C return-value convention.
@@ -586,8 +593,8 @@ def CC_X86_Win64_C : CallingConv<[
   // FIXME: Handle byval stuff.
   // FIXME: Handle varargs.
 
-  // Promote i1/i8/i16/v1i1 arguments to i32.
-  CCIfType<[i1, i8, i16, v1i1], CCPromoteToType<i32>>,
+  // Promote i1/v1i1 arguments to i8.
+  CCIfType<[i1, v1i1], CCPromoteToType<i8>>,
 
   // The 'nest' parameter, if any, is passed in R10.
   CCIfNest<CCAssignToReg<[R10]>>,
@@ -605,10 +612,17 @@ def CC_X86_Win64_C : CallingConv<[
   // 512 bit vectors are passed by pointer
   CCIfType<[v16i32, v16f32, v8f64, v8i64], CCPassIndirect<i64>>,
 
+  // Long doubles are passed by pointer
+  CCIfType<[f80], CCPassIndirect<i64>>,
+
   // The first 4 MMX vector arguments are passed in GPRs.
   CCIfType<[x86mmx], CCBitConvertToType<i64>>,
 
   // The first 4 integer arguments are passed in integer registers.
+  CCIfType<[i8 ], CCAssignToRegWithShadow<[CL  , DL  , R8B , R9B ],
+                                          [XMM0, XMM1, XMM2, XMM3]>>,
+  CCIfType<[i16], CCAssignToRegWithShadow<[CX  , DX  , R8W , R9W ],
+                                          [XMM0, XMM1, XMM2, XMM3]>>,
   CCIfType<[i32], CCAssignToRegWithShadow<[ECX , EDX , R8D , R9D ],
                                           [XMM0, XMM1, XMM2, XMM3]>>,
 
@@ -628,11 +642,7 @@ def CC_X86_Win64_C : CallingConv<[
 
   // Integer/FP values get stored in stack slots that are 8 bytes in size and
   // 8-byte aligned if there are no more registers to hold them.
-  CCIfType<[i32, i64, f32, f64], CCAssignToStack<8, 8>>,
-
-  // Long doubles get stack slots whose size and alignment depends on the
-  // subtarget.
-  CCIfType<[f80], CCAssignToStack<0, 0>>
+  CCIfType<[i8, i16, i32, i64, f32, f64], CCAssignToStack<8, 8>>
 ]>;
 
 def CC_X86_Win64_VectorCall : CallingConv<[
@@ -841,13 +851,15 @@ def CC_X86_32_MCU : CallingConv<[
 ]>;
 
 def CC_X86_32_FastCall : CallingConv<[
-  // Promote i1/i8/i16/v1i1 arguments to i32.
-  CCIfType<[i1, i8, i16, v1i1], CCPromoteToType<i32>>,
+  // Promote i1 to i8.
+  CCIfType<[i1], CCPromoteToType<i8>>,
 
   // The 'nest' parameter, if any, is passed in EAX.
   CCIfNest<CCAssignToReg<[EAX]>>,
 
   // The first 2 integer arguments are passed in ECX/EDX
+  CCIfInReg<CCIfType<[ i8], CCAssignToReg<[ CL,  DL]>>>,
+  CCIfInReg<CCIfType<[i16], CCAssignToReg<[ CX,  DX]>>>,
   CCIfInReg<CCIfType<[i32], CCAssignToReg<[ECX, EDX]>>>,
 
   // Otherwise, same as everything else.

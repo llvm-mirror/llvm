@@ -728,7 +728,7 @@ def : MipsPat<(i64 (sext_inreg GPR64:$src, i32)),
               (SLL64_64 GPR64:$src)>;
 
 // bswap MipsPattern
-def : MipsPat<(bswap GPR64:$rt), (DSHD (DSBH GPR64:$rt))>;
+def : MipsPat<(bswap GPR64:$rt), (DSHD (DSBH GPR64:$rt))>, ISA_MIPS64R2;
 
 // Carry pattern
 let AdditionalPredicates = [NotInMicroMips] in {
@@ -792,13 +792,13 @@ let AdditionalPredicates = [NotInMicroMips] in {
                       0>, ISA_MIPS3;
 
   defm : OneOrTwoOperandMacroImmediateAlias<"and", ANDi64, GPR64Opnd, imm64>,
-         GPR_64;
+         ISA_MIPS3, GPR_64;
 
   defm : OneOrTwoOperandMacroImmediateAlias<"or", ORi64, GPR64Opnd, imm64>,
-         GPR_64;
+         ISA_MIPS3, GPR_64;
 
   defm : OneOrTwoOperandMacroImmediateAlias<"xor", XORi64, GPR64Opnd, imm64>,
-         GPR_64;
+         ISA_MIPS3, GPR_64;
 }
 let AdditionalPredicates = [NotInMicroMips] in {
   def : MipsInstAlias<"dneg $rt, $rs",

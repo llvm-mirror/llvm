@@ -12,8 +12,8 @@ Introduction
 does not build the project, it generates the files needed by your build tool
 (GNU make, Visual Studio, etc.) for building LLVM.
 
-If **you are a new contributor**, please start with the :doc:`GettingStarted` 
-page.  This page is geared for existing contributors moving from the 
+If **you are a new contributor**, please start with the :doc:`GettingStarted`
+page.  This page is geared for existing contributors moving from the
 legacy configure/make system.
 
 If you are really anxious about getting a functional LLVM build, go to the
@@ -228,10 +228,6 @@ LLVM-specific variables
   Install symlinks from the binutils tool names to the corresponding LLVM tools.
   For example, ar will be symlinked to llvm-ar.
 
-**LLVM_INSTALL_CCTOOLS_SYMLINKS**:BOOL
-  Install symliks from the cctools tool names to the corresponding LLVM tools.
-  For example, dsymutil will be symlinked to llvm-dsymutil.
-
 **LLVM_BUILD_EXAMPLES**:BOOL
   Build LLVM examples. Defaults to OFF. Targets for building each example are
   generated in any case. See documentation for *LLVM_BUILD_TOOLS* above for more
@@ -374,6 +370,11 @@ LLVM-specific variables
 **LLVM_USE_INTEL_JITEVENTS**:BOOL
   Enable building support for Intel JIT Events API. Defaults to OFF.
 
+**LLVM_ENABLE_LIBPFM**:BOOL
+  Enable building with libpfm to support hardware counter measurements in LLVM
+  tools.
+  Defaults to ON.
+
 **LLVM_ENABLE_ZLIB**:BOOL
   Enable building with zlib to support compression/uncompression in LLVM tools.
   Defaults to ON.
@@ -413,10 +414,10 @@ LLVM-specific variables
 **LLVM_BUILD_DOCS**:BOOL
   Adds all *enabled* documentation targets (i.e. Doxgyen and Sphinx targets) as
   dependencies of the default build targets.  This results in all of the (enabled)
-  documentation targets being as part of a normal build.  If the ``install`` 
-  target is run then this also enables all built documentation targets to be 
-  installed. Defaults to OFF.  To enable a particular documentation target, see 
-  see LLVM_ENABLE_SPHINX and LLVM_ENABLE_DOXYGEN.  
+  documentation targets being as part of a normal build.  If the ``install``
+  target is run then this also enables all built documentation targets to be
+  installed. Defaults to OFF.  To enable a particular documentation target, see
+  see LLVM_ENABLE_SPHINX and LLVM_ENABLE_DOXYGEN.
 
 **LLVM_ENABLE_DOXYGEN**:BOOL
   Enables the generation of browsable HTML documentation using doxygen.
@@ -513,7 +514,7 @@ LLVM-specific variables
   OS X Only: If enabled CMake will generate a target named
   'install-xcode-toolchain'. This target will create a directory at
   $CMAKE_INSTALL_PREFIX/Toolchains containing an xctoolchain directory which can
-  be used to override the default system tools. 
+  be used to override the default system tools.
 
 **LLVM_BUILD_LLVM_DYLIB**:BOOL
   If enabled, the target for building the libLLVM shared library is added.
@@ -534,7 +535,7 @@ LLVM-specific variables
   library (ON) or as a static library (OFF). Its default value is OFF. On
   Windows, shared libraries may be used when building with MinGW, including
   mingw-w64, but not when building with the Microsoft toolchain.
- 
+
   .. note:: BUILD_SHARED_LIBS is only recommended for use by LLVM developers.
             If you want to build LLVM as a shared library, you should use the
             ``LLVM_BUILD_LLVM_DYLIB`` option.

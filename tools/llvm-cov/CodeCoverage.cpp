@@ -126,6 +126,7 @@ private:
   std::vector<StringRef> ObjectFilenames;
   CoverageViewOptions ViewOpts;
   CoverageFiltersMatchAll Filters;
+  CoverageFilters IgnoreFilenameFilters;
 
   /// The path to the indexed profile.
   std::string PGOFilename;
@@ -189,7 +190,8 @@ void CodeCoverageTool::addCollectedPath(const std::string &Path) {
     return;
   }
   sys::path::remove_dots(EffectivePath, /*remove_dot_dots=*/true);
-  SourceFiles.emplace_back(EffectivePath.str());
+  if (!IgnoreFilenameFilters.matchesFilename(EffectivePath))
+    SourceFiles.emplace_back(EffectivePath.str());
 }
 
 void CodeCoverageTool::collectPaths(const std::string &Path) {
@@ -199,7 +201,7 @@ void CodeCoverageTool::collectPaths(const std::string &Path) {
     if (PathRemapping)
       addCollectedPath(Path);
     else
-      error("Missing source file", Path);
+      warning("Source file doesn't exist, proceeded by ignoring it.", Path);
     return;
   }
 
@@ -211,12 +213,16 @@ void CodeCoverageTool::collectPaths(const std::string &Path) {
   if (llvm::sys::fs::is_directory(Status)) {
     std::error_code EC;
     for (llvm::sys::fs::recursive_directory_iterator F(Path, EC), E;
-         F != E && !EC; F.increment(EC)) {
+         F != E; F.increment(EC)) {
+
+      if (EC) {
+        warning(EC.message(), F->path());
+        continue;
+      }
+
       if (llvm::sys::fs::is_regular_file(F->path()))
         addCollectedPath(F->path());
     }
-    if (EC)
-      warning(EC.message(), Path);
   }
 }
 
@@ -593,6 +599,12 @@ int CodeCoverageTool::run(Command Cmd, int argc, const char **argv) {
                "regular expression"),
       cl::ZeroOrMore, cl::cat(FilteringCategory));
 
+  cl::list<std::string> IgnoreFilenameRegexFilters(
+      "ignore-filename-regex", cl::Optional,
+      cl::desc("Skip source code files with file paths that match the given "
+               "regular expression"),
+      cl::ZeroOrMore, cl::cat(FilteringCategory));
+
   cl::opt<double> RegionCoverageLtFilter(
       "region-coverage-lt", cl::Optional,
       cl::desc("Show code coverage only for functions with region coverage "
@@ -710,6 +722,7 @@ int CodeCoverageTool::run(Command Cmd, int argc, const char **argv) {
             llvm::make_unique<NameRegexCoverageFilter>(Regex));
       Filters.push_back(std::move(NameFilterer));
     }
+
     if (RegionCoverageLtFilter.getNumOccurrences() ||
         RegionCoverageGtFilter.getNumOccurrences() ||
         LineCoverageLtFilter.getNumOccurrences() ||
@@ -730,6 +743,11 @@ int CodeCoverageTool::run(Command Cmd, int argc, const char **argv) {
       Filters.push_back(std::move(StatFilterer));
     }
 
+    // Create the ignore filename filters.
+    for (const auto &RE : IgnoreFilenameRegexFilters)
+      IgnoreFilenameFilters.push_back(
+          llvm::make_unique<NameRegexCoverageFilter>(RE));
+
     if (!Arches.empty()) {
       for (const std::string &Arch : Arches) {
         if (Triple(Arch).getArch() == llvm::Triple::ArchType::UnknownArch) {
@@ -744,6 +762,7 @@ int CodeCoverageTool::run(Command Cmd, int argc, const char **argv) {
       }
     }
 
+    // IgnoreFilenameFilters are applied even when InputSourceFiles specified.
     for (const std::string &File : InputSourceFiles)
       collectPaths(File);
 
@@ -858,8 +877,10 @@ int CodeCoverageTool::doShow(int argc, const char **argv,
 
   if (SourceFiles.empty())
     // Get the source files from the function coverage mapping.
-    for (StringRef Filename : Coverage->getUniqueSourceFiles())
-      SourceFiles.push_back(Filename);
+    for (StringRef Filename : Coverage->getUniqueSourceFiles()) {
+      if (!IgnoreFilenameFilters.matchesFilename(Filename))
+        SourceFiles.push_back(Filename);
+    }
 
   // Create an index out of the source files.
   if (ViewOpts.hasOutputDirectory()) {
@@ -958,7 +979,7 @@ int CodeCoverageTool::doReport(int argc, const char **argv,
   CoverageReport Report(ViewOpts, *Coverage.get());
   if (!ShowFunctionSummaries) {
     if (SourceFiles.empty())
-      Report.renderFileReports(llvm::outs());
+      Report.renderFileReports(llvm::outs(), IgnoreFilenameFilters);
     else
       Report.renderFileReports(llvm::outs(), SourceFiles);
   } else {
@@ -994,7 +1015,7 @@ int CodeCoverageTool::doExport(int argc, const char **argv,
   auto Exporter = CoverageExporterJson(*Coverage.get(), ViewOpts, outs());
 
   if (SourceFiles.empty())
-    Exporter.renderRoot();
+    Exporter.renderRoot(IgnoreFilenameFilters);
   else
     Exporter.renderRoot(SourceFiles);
 

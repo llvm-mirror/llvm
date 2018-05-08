@@ -135,6 +135,10 @@ void MCObjectFileInfo::initMachOMCObjectFileInfo(const Triple &T) {
   // "__DATA/__datacoal_nt" => section "__DATA/__data"
   Triple::ArchType ArchTy = T.getArch();
 
+  ConstDataSection  // .const_data
+    = Ctx->getMachOSection("__DATA", "__const", 0,
+                           SectionKind::getReadOnlyWithRel());
+
   if (ArchTy == Triple::ppc || ArchTy == Triple::ppc64) {
     TextCoalSection
       = Ctx->getMachOSection("__TEXT", "__textcoal_nt",
@@ -147,15 +151,14 @@ void MCObjectFileInfo::initMachOMCObjectFileInfo(const Triple &T) {
                              SectionKind::getReadOnly());
     DataCoalSection = Ctx->getMachOSection(
         "__DATA", "__datacoal_nt", MachO::S_COALESCED, SectionKind::getData());
+    ConstDataCoalSection = DataCoalSection;
   } else {
     TextCoalSection = TextSection;
     ConstTextCoalSection = ReadOnlySection;
     DataCoalSection = DataSection;
+    ConstDataCoalSection = ConstDataSection;
   }
 
-  ConstDataSection  // .const_data
-    = Ctx->getMachOSection("__DATA", "__const", 0,
-                           SectionKind::getReadOnlyWithRel());
   DataCommonSection
     = Ctx->getMachOSection("__DATA","__common",
                            MachO::S_ZEROFILL,
@@ -201,6 +204,9 @@ void MCObjectFileInfo::initMachOMCObjectFileInfo(const Triple &T) {
   }
 
   // Debug Information.
+  DwarfDebugNamesSection =
+      Ctx->getMachOSection("__DWARF", "__debug_names", MachO::S_ATTR_DEBUG,
+                           SectionKind::getMetadata(), "debug_names_begin");
   DwarfAccelNamesSection =
       Ctx->getMachOSection("__DWARF", "__apple_names", MachO::S_ATTR_DEBUG,
                            SectionKind::getMetadata(), "names_begin");
@@ -292,6 +298,8 @@ void MCObjectFileInfo::initELFMCObjectFileInfo(const Triple &T, bool Large) {
   case Triple::mips64el:
     FDECFIEncoding = dwarf::DW_EH_PE_sdata8;
     break;
+  case Triple::ppc64:
+  case Triple::ppc64le:
   case Triple::x86_64:
     FDECFIEncoding = dwarf::DW_EH_PE_pcrel |
                      (Large ? dwarf::DW_EH_PE_sdata8 : dwarf::DW_EH_PE_sdata4);
@@ -556,6 +564,8 @@ void MCObjectFileInfo::initELFMCObjectFileInfo(const Triple &T, bool Large) {
   // DWARF5 Experimental Debug Info
 
   // Accelerator Tables
+  DwarfDebugNamesSection =
+      Ctx->getELFSection(".debug_names", ELF::SHT_PROGBITS, 0);
   DwarfAccelNamesSection =
       Ctx->getELFSection(".apple_names", ELF::SHT_PROGBITS, 0);
   DwarfAccelObjCSection =
@@ -793,6 +803,11 @@ void MCObjectFileInfo::initCOFFMCObjectFileInfo(const Triple &T) {
       COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
           COFF::IMAGE_SCN_MEM_READ,
       SectionKind::getMetadata());
+  DwarfDebugNamesSection = Ctx->getCOFFSection(
+      ".debug_names",
+      COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+          COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getMetadata(), "debug_names_begin");
   DwarfAccelNamesSection = Ctx->getCOFFSection(
       ".apple_names",
       COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |

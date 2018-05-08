@@ -18,9 +18,8 @@ namespace {
 
 TEST(LegacyAPIInteropTest, QueryAgainstVSO) {
 
-  SymbolStringPool SP;
-  ExecutionSession ES(SP);
-  auto Foo = SP.intern("foo");
+  ExecutionSession ES(std::make_shared<SymbolStringPool>());
+  auto Foo = ES.getSymbolStringPool().intern("foo");
 
   VSO V;
   SymbolMap Defs;
@@ -36,7 +35,7 @@ TEST(LegacyAPIInteropTest, QueryAgainstVSO) {
   auto Lookup = [&](std::shared_ptr<AsynchronousSymbolQuery> Query,
                     SymbolNameSet Symbols) {
     auto R = V.lookup(std::move(Query), Symbols);
-    EXPECT_TRUE(R.MaterializationWork.empty())
+    EXPECT_TRUE(R.Materializers.empty())
         << "Query resulted in unexpected materialization work";
     return std::move(R.UnresolvedSymbols);
   };

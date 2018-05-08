@@ -7,6 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/CodeGen/GlobalISel/ConstantFoldingMIRBuilder.h"
 #include "llvm/CodeGen/GlobalISel/MIPatternMatch.h"
 #include "llvm/CodeGen/GlobalISel/MachineIRBuilder.h"
 #include "llvm/CodeGen/GlobalISel/Utils.h"
@@ -134,10 +135,10 @@ TEST(PatternMatchInstr, MatchIntConstant) {
   MachineRegisterInfo &MRI = MF->getRegInfo();
   B.setInsertPt(*EntryMBB, EntryMBB->end());
   auto MIBCst = B.buildConstant(LLT::scalar(64), 42);
-  uint64_t Cst;
+  int64_t Cst;
   bool match = mi_match(MIBCst->getOperand(0).getReg(), MRI, m_ICst(Cst));
   ASSERT_TRUE(match);
-  ASSERT_EQ(Cst, (uint64_t)42);
+  ASSERT_EQ(Cst, 42);
 }
 
 TEST(PatternMatchInstr, MatchBinaryOp) {
@@ -189,11 +190,11 @@ TEST(PatternMatchInstr, MatchBinaryOp) {
   auto MIBMul2 = B.buildMul(s64, Copies[0], B.buildConstant(s64, 42));
   // Try to match MUL(Cst, Reg) on src of MUL(Reg, Cst) to validate
   // commutativity.
-  uint64_t Cst;
+  int64_t Cst;
   match = mi_match(MIBMul2->getOperand(0).getReg(), MRI,
                    m_GMul(m_ICst(Cst), m_Reg(Src0)));
   ASSERT_TRUE(match);
-  ASSERT_EQ(Cst, (uint64_t)42);
+  ASSERT_EQ(Cst, 42);
   ASSERT_EQ(Src0, Copies[0]);
 
   // Make sure commutative doesn't work with something like SUB.
@@ -208,7 +209,7 @@ TEST(PatternMatchInstr, MatchBinaryOp) {
   match = mi_match(MIBFMul->getOperand(0).getReg(), MRI,
                    m_GFMul(m_ICst(Cst), m_Reg(Src0)));
   ASSERT_TRUE(match);
-  ASSERT_EQ(Cst, (uint64_t)42);
+  ASSERT_EQ(Cst, 42);
   ASSERT_EQ(Src0, Copies[0]);
 
   // Build AND %0, %1
@@ -228,6 +229,35 @@ TEST(PatternMatchInstr, MatchBinaryOp) {
   ASSERT_TRUE(match);
   ASSERT_EQ(Src0, Copies[0]);
   ASSERT_EQ(Src1, Copies[1]);
+
+  // Try to use the FoldableInstructionsBuilder to build binary ops.
+  ConstantFoldingMIRBuilder CFB(B.getState());
+  LLT s32 = LLT::scalar(32);
+  auto MIBCAdd =
+      CFB.buildAdd(s32, CFB.buildConstant(s32, 0), CFB.buildConstant(s32, 1));
+  // This should be a constant now.
+  match = mi_match(MIBCAdd->getOperand(0).getReg(), MRI, m_ICst(Cst));
+  ASSERT_TRUE(match);
+  ASSERT_EQ(Cst, 1);
+  auto MIBCAdd1 =
+      CFB.buildInstr(TargetOpcode::G_ADD, s32, CFB.buildConstant(s32, 0),
+                     CFB.buildConstant(s32, 1));
+  // This should be a constant now.
+  match = mi_match(MIBCAdd1->getOperand(0).getReg(), MRI, m_ICst(Cst));
+  ASSERT_TRUE(match);
+  ASSERT_EQ(Cst, 1);
+
+  // Try one of the other constructors of MachineIRBuilder to make sure it's
+  // compatible.
+  ConstantFoldingMIRBuilder CFB1(*MF);
+  CFB1.setInsertPt(*EntryMBB, EntryMBB->end());
+  auto MIBCSub =
+      CFB1.buildInstr(TargetOpcode::G_SUB, s32, CFB1.buildConstant(s32, 1),
+                      CFB1.buildConstant(s32, 1));
+  // This should be a constant now.
+  match = mi_match(MIBCSub->getOperand(0).getReg(), MRI, m_ICst(Cst));
+  ASSERT_TRUE(match);
+  ASSERT_EQ(Cst, 0);
 }
 
 TEST(PatternMatchInstr, MatchFPUnaryOp) {
@@ -257,6 +287,42 @@ TEST(PatternMatchInstr, MatchFPUnaryOp) {
   match = mi_match(MIBFabs->getOperand(0).getReg(), MRI, m_GFabs(m_Reg(Src)));
   ASSERT_TRUE(match);
   ASSERT_EQ(Src, Copy0s32->getOperand(0).getReg());
+
+  // Build and match FConstant.
+  auto MIBFCst = B.buildFConstant(s32, .5);
+  const ConstantFP *TmpFP{};
+  match = mi_match(MIBFCst->getOperand(0).getReg(), MRI, m_GFCst(TmpFP));
+  ASSERT_TRUE(match);
+  ASSERT_TRUE(TmpFP);
+  APFloat APF((float).5);
+  auto *CFP = ConstantFP::get(Context, APF);
+  ASSERT_EQ(CFP, TmpFP);
+
+  // Build double float.
+  LLT s64 = LLT::scalar(64);
+  auto MIBFCst64 = B.buildFConstant(s64, .5);
+  const ConstantFP *TmpFP64{};
+  match = mi_match(MIBFCst64->getOperand(0).getReg(), MRI, m_GFCst(TmpFP64));
+  ASSERT_TRUE(match);
+  ASSERT_TRUE(TmpFP64);
+  APFloat APF64(.5);
+  auto CFP64 = ConstantFP::get(Context, APF64);
+  ASSERT_EQ(CFP64, TmpFP64);
+  ASSERT_NE(TmpFP64, TmpFP);
+
+  // Build half float.
+  LLT s16 = LLT::scalar(16);
+  auto MIBFCst16 = B.buildFConstant(s16, .5);
+  const ConstantFP *TmpFP16{};
+  match = mi_match(MIBFCst16->getOperand(0).getReg(), MRI, m_GFCst(TmpFP16));
+  ASSERT_TRUE(match);
+  ASSERT_TRUE(TmpFP16);
+  bool Ignored;
+  APFloat APF16(.5);
+  APF16.convert(APFloat::IEEEhalf(), APFloat::rmNearestTiesToEven, &Ignored);
+  auto CFP16 = ConstantFP::get(Context, APF16);
+  ASSERT_EQ(TmpFP16, CFP16);
+  ASSERT_NE(TmpFP16, TmpFP);
 }
 
 TEST(PatternMatchInstr, MatchExtendsTrunc) {

@@ -47,8 +47,7 @@ define <4 x double> @var_shuffle_v4f64_v4f64_uxx0_i64(<4 x double> %x, i64 %i0, 
 ; ALL-NEXT:    andl $3, %edx
 ; ALL-NEXT:    andl $3, %esi
 ; ALL-NEXT:    vmovaps %ymm0, (%rsp)
-; ALL-NEXT:    vmovsd {{.*#+}} xmm0 = mem[0],zero
-; ALL-NEXT:    vmovddup {{.*#+}} xmm0 = xmm0[0,0]
+; ALL-NEXT:    vmovddup {{.*#+}} xmm0 = mem[0,0]
 ; ALL-NEXT:    vmovsd {{.*#+}} xmm1 = mem[0],zero
 ; ALL-NEXT:    vinsertf128 $1, %xmm1, %ymm0, %ymm0
 ; ALL-NEXT:    movq %rbp, %rsp
@@ -136,7 +135,6 @@ define <4 x i64> @var_shuffle_v4i64_v4i64_xx00_i64(<4 x i64> %x, i64 %i0, i64 %i
 ; ALL-NEXT:    vmovsd {{.*#+}} xmm0 = mem[0],zero
 ; ALL-NEXT:    vmovsd {{.*#+}} xmm1 = mem[0],zero
 ; ALL-NEXT:    vmovlhps {{.*#+}} xmm0 = xmm1[0],xmm0[0]
-; ALL-NEXT:    vmovaps %xmm0, %xmm0
 ; ALL-NEXT:    movq %rbp, %rsp
 ; ALL-NEXT:    popq %rbp
 ; ALL-NEXT:    retq

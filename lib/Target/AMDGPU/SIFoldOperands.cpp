@@ -155,6 +155,35 @@ static bool updateOperand(FoldCandidate &Fold,
   assert(Old.isReg());
 
   if (Fold.isImm()) {
+    if (MI->getDesc().TSFlags & SIInstrFlags::IsPacked) {
+      // Set op_sel/op_sel_hi on this operand or bail out if op_sel is
+      // already set.
+      unsigned Opcode = MI->getOpcode();
+      int OpNo = MI->getOperandNo(&Old);
+      int ModIdx = -1;
+      if (OpNo == AMDGPU::getNamedOperandIdx(Opcode, AMDGPU::OpName::src0))
+        ModIdx = AMDGPU::OpName::src0_modifiers;
+      else if (OpNo == AMDGPU::getNamedOperandIdx(Opcode, AMDGPU::OpName::src1))
+        ModIdx = AMDGPU::OpName::src1_modifiers;
+      else if (OpNo == AMDGPU::getNamedOperandIdx(Opcode, AMDGPU::OpName::src2))
+        ModIdx = AMDGPU::OpName::src2_modifiers;
+      assert(ModIdx != -1);
+      ModIdx = AMDGPU::getNamedOperandIdx(Opcode, ModIdx);
+      MachineOperand &Mod = MI->getOperand(ModIdx);
+      unsigned Val = Mod.getImm();
+      if ((Val & SISrcMods::OP_SEL_0) || !(Val & SISrcMods::OP_SEL_1))
+        return false;
+      // If upper part is all zero we do not need op_sel_hi.
+      if (!isUInt<16>(Fold.ImmToFold)) {
+        if (!(Fold.ImmToFold & 0xffff)) {
+          Mod.setImm(Mod.getImm() | SISrcMods::OP_SEL_0);
+          Mod.setImm(Mod.getImm() & ~SISrcMods::OP_SEL_1);
+          Old.ChangeToImmediate((Fold.ImmToFold >> 16) & 0xffff);
+          return true;
+        }
+        Mod.setImm(Mod.getImm() & ~SISrcMods::OP_SEL_1);
+      }
+    }
     Old.ChangeToImmediate(Fold.ImmToFold);
     return true;
   }
@@ -471,7 +500,8 @@ static MachineOperand *getImmOrMaterializedImm(MachineRegisterInfo &MRI,
                                                MachineOperand &Op) {
   if (Op.isReg()) {
     // If this has a subregister, it obviously is a register source.
-    if (Op.getSubReg() != AMDGPU::NoSubRegister)
+    if (Op.getSubReg() != AMDGPU::NoSubRegister ||
+        !TargetRegisterInfo::isVirtualRegister(Op.getReg()))
       return &Op;
 
     MachineInstr *Def = MRI.getVRegDef(Op.getReg());

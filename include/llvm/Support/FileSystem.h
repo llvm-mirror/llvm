@@ -678,15 +678,20 @@ enum OpenFlags : unsigned {
   /// with F_Excl.
   F_Append = 2,
 
+  /// F_NoTrunc - When opening a file, if it already exists don't truncate
+  /// the file contents.  F_Append implies F_NoTrunc, but F_Append seeks to
+  /// the end of the file, which F_NoTrunc doesn't.
+  F_NoTrunc = 4,
+
   /// The file should be opened in text mode on platforms that make this
   /// distinction.
-  F_Text = 4,
+  F_Text = 8,
 
   /// Open the file for read and write.
-  F_RW = 8,
+  F_RW = 16,
 
   /// Delete the file on close. Only makes a difference on windows.
-  F_Delete = 16
+  F_Delete = 32
 };
 
 /// @brief Create a uniquely named file.
@@ -715,9 +720,11 @@ std::error_code createUniqueFile(const Twine &Model, int &ResultFD,
                                  unsigned Mode = all_read | all_write,
                                  sys::fs::OpenFlags Flags = sys::fs::F_RW);
 
-/// @brief Simpler version for clients that don't want an open file.
+/// @brief Simpler version for clients that don't want an open file. An empty
+/// file will still be created.
 std::error_code createUniqueFile(const Twine &Model,
-                                 SmallVectorImpl<char> &ResultPath);
+                                 SmallVectorImpl<char> &ResultPath,
+                                 unsigned Mode = all_read | all_write);
 
 /// Represents a temporary file.
 ///
@@ -770,12 +777,35 @@ std::error_code createTemporaryFile(const Twine &Prefix, StringRef Suffix,
                                     SmallVectorImpl<char> &ResultPath,
                                     sys::fs::OpenFlags Flags = sys::fs::F_RW);
 
-/// @brief Simpler version for clients that don't want an open file.
+/// @brief Simpler version for clients that don't want an open file. An empty
+/// file will still be created.
 std::error_code createTemporaryFile(const Twine &Prefix, StringRef Suffix,
                                     SmallVectorImpl<char> &ResultPath);
 
 std::error_code createUniqueDirectory(const Twine &Prefix,
                                       SmallVectorImpl<char> &ResultPath);
+
+/// @brief Get a unique name, not currently exisiting in the filesystem. Subject
+/// to race conditions, prefer to use createUniqueFile instead.
+///
+/// Similar to createUniqueFile, but instead of creating a file only
+/// checks if it exists. This function is subject to race conditions, if you
+/// want to use the returned name to actually create a file, use
+/// createUniqueFile instead.
+std::error_code getPotentiallyUniqueFileName(const Twine &Model,
+                                             SmallVectorImpl<char> &ResultPath);
+
+/// @brief Get a unique temporary file name, not currently exisiting in the
+/// filesystem. Subject to race conditions, prefer to use createTemporaryFile
+/// instead.
+///
+/// Similar to createTemporaryFile, but instead of creating a file only
+/// checks if it exists. This function is subject to race conditions, if you
+/// want to use the returned name to actually create a file, use
+/// createTemporaryFile instead.
+std::error_code
+getPotentiallyUniqueTempFileName(const Twine &Prefix, StringRef Suffix,
+                                 SmallVectorImpl<char> &ResultPath);
 
 inline OpenFlags operator|(OpenFlags A, OpenFlags B) {
   return OpenFlags(unsigned(A) | unsigned(B));
@@ -926,14 +956,16 @@ public:
     SmallString<128> path_storage;
     ec = detail::directory_iterator_construct(
         *State, path.toStringRef(path_storage), FollowSymlinks);
+    update_error_code_for_current_entry(ec);
   }
 
   explicit directory_iterator(const directory_entry &de, std::error_code &ec,
                               bool follow_symlinks = true)
       : FollowSymlinks(follow_symlinks) {
     State = std::make_shared<detail::DirIterState>();
-    ec =
-        detail::directory_iterator_construct(*State, de.path(), FollowSymlinks);
+    ec = detail::directory_iterator_construct(
+        *State, de.path(), FollowSymlinks);
+    update_error_code_for_current_entry(ec);
   }
 
   /// Construct end iterator.
@@ -942,6 +974,7 @@ public:
   // No operator++ because we need error_code.
   directory_iterator &increment(std::error_code &ec) {
     ec = directory_iterator_increment(*State);
+    update_error_code_for_current_entry(ec);
     return *this;
   }
 
@@ -963,6 +996,24 @@ public:
   }
   // Other members as required by
   // C++ Std, 24.1.1 Input iterators [input.iterators]
+
+private:
+  // Checks if current entry is valid and populates error code. For example,
+  // current entry may not exist due to broken symbol links.
+  void update_error_code_for_current_entry(std::error_code &ec) {
+    // Bail out if error has already occured earlier to avoid overwriting it.
+    if (ec)
+      return;
+
+    // Empty directory entry is used to mark the end of an interation, it's not
+    // an error.
+    if (State->CurrentEntry == directory_entry())
+      return;
+
+    ErrorOr<basic_file_status> status = State->CurrentEntry.status();
+    if (!status)
+      ec = status.getError();
+  }
 };
 
 namespace detail {
@@ -1000,11 +1051,9 @@ public:
     if (State->HasNoPushRequest)
       State->HasNoPushRequest = false;
     else {
-      ErrorOr<basic_file_status> st = State->Stack.top()->status();
-      if (!st) return *this;
-      if (is_directory(*st)) {
+      ErrorOr<basic_file_status> status = State->Stack.top()->status();
+      if (status && is_directory(*status)) {
         State->Stack.push(directory_iterator(*State->Stack.top(), ec, Follow));
-        if (ec) return *this;
         if (State->Stack.top() != end_itr) {
           ++State->Level;
           return *this;

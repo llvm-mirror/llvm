@@ -743,14 +743,16 @@ bool AArch64DAGToDAGISel::SelectAddrModeIndexed(SDValue N, unsigned Size,
     if (!GAN)
       return true;
 
-    const GlobalValue *GV = GAN->getGlobal();
-    unsigned Alignment = GV->getAlignment();
-    Type *Ty = GV->getValueType();
-    if (Alignment == 0 && Ty->isSized())
-      Alignment = DL.getABITypeAlignment(Ty);
+    if (GAN->getOffset() % Size == 0) {
+      const GlobalValue *GV = GAN->getGlobal();
+      unsigned Alignment = GV->getAlignment();
+      Type *Ty = GV->getValueType();
+      if (Alignment == 0 && Ty->isSized())
+        Alignment = DL.getABITypeAlignment(Ty);
 
-    if (Alignment >= Size)
-      return true;
+      if (Alignment >= Size)
+        return true;
+    }
   }
 
   if (CurDAG->isBaseWithConstantOffset(N)) {
@@ -1512,7 +1514,7 @@ static bool isBitfieldExtractOpFromAnd(SelectionDAG *CurDAG, SDNode *N,
 
   // Because of simplify-demanded-bits in DAGCombine, the mask may have been
   // simplified. Try to undo that
-  AndImm |= (1 << NumberOfIgnoredLowBits) - 1;
+  AndImm |= maskTrailingOnes<uint64_t>(NumberOfIgnoredLowBits);
 
   // The immediate is a mask of the low bits iff imm & (imm+1) == 0
   if (AndImm & (AndImm + 1))

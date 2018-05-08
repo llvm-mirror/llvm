@@ -35,7 +35,7 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Transforms/GCOVProfiler.h"
+#include "llvm/Transforms/Instrumentation/GCOVProfiler.h"
 #include "llvm/Transforms/Instrumentation.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
 #include <algorithm>
@@ -272,7 +272,7 @@ namespace {
       write(Len);
       write(Number);
 
-      std::sort(
+      llvm::sort(
           SortedLinesByFile.begin(), SortedLinesByFile.end(),
           [](StringMapEntry<GCOVLines> *LHS, StringMapEntry<GCOVLines> *RHS) {
             return LHS->getKey() < RHS->getKey();

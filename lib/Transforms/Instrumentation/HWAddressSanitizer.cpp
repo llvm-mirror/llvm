@@ -52,11 +52,15 @@ using namespace llvm;
 static const char *const kHwasanModuleCtorName = "hwasan.module_ctor";
 static const char *const kHwasanInitName = "__hwasan_init";
 
+static const char *const kHwasanShadowMemoryDynamicAddress =
+    "__hwasan_shadow_memory_dynamic_address";
+
 // Accesses sizes are powers of two: 1, 2, 4, 8, 16.
 static const size_t kNumberOfAccessSizes = 5;
 
-static const size_t kShadowScale = 4;
-static const unsigned kAllocaAlignment = 1U << kShadowScale;
+static const size_t kDefaultShadowScale = 4;
+static const uint64_t kDynamicShadowSentinel =
+    std::numeric_limits<uint64_t>::max();
 static const unsigned kPointerTagShift = 56;
 
 static cl::opt<std::string> ClMemoryAccessCallbackPrefix(
@@ -96,14 +100,24 @@ static cl::opt<bool> ClGenerateTagsWithCalls(
     cl::desc("generate new tags with runtime library calls"), cl::Hidden,
     cl::init(false));
 
-static cl::opt<unsigned long long> ClMappingOffset(
-    "hwasan-mapping-offset",
-    cl::desc("offset of hwasan shadow mapping [EXPERIMENTAL]"), cl::Hidden,
-    cl::init(0));
+static cl::opt<int> ClMatchAllTag(
+    "hwasan-match-all-tag",
+    cl::desc("don't report bad accesses via pointers with this tag"),
+    cl::Hidden, cl::init(-1));
 
 static cl::opt<bool> ClEnableKhwasan(
-    "hwasan-kernel", cl::desc("Enable KernelHWAddressSanitizer instrumentation"),
+    "hwasan-kernel",
+    cl::desc("Enable KernelHWAddressSanitizer instrumentation"),
     cl::Hidden, cl::init(false));
+
+// These flags allow to change the shadow mapping and control how shadow memory
+// is accessed. The shadow mapping looks like:
+//    Shadow = (Mem >> scale) + offset
+
+static cl::opt<unsigned long long> ClMappingOffset(
+    "hwasan-mapping-offset",
+    cl::desc("HWASan shadow mapping offset [EXPERIMENTAL]"), cl::Hidden,
+    cl::init(0));
 
 namespace {
 
@@ -114,8 +128,12 @@ public:
   // Pass identification, replacement for typeid.
   static char ID;
 
-  HWAddressSanitizer(bool Recover = false)
-      : FunctionPass(ID), Recover(Recover || ClRecover) {}
+  explicit HWAddressSanitizer(bool CompileKernel = false, bool Recover = false)
+      : FunctionPass(ID) {
+    this->Recover = ClRecover.getNumOccurrences() > 0 ? ClRecover : Recover;
+    this->CompileKernel = ClEnableKhwasan.getNumOccurrences() > 0 ?
+        ClEnableKhwasan : CompileKernel;
+  }
 
   StringRef getPassName() const override { return "HWAddressSanitizer"; }
 
@@ -123,6 +141,11 @@ public:
   bool doInitialization(Module &M) override;
 
   void initializeCallbacks(Module &M);
+
+  void maybeInsertDynamicShadowAtFunctionEntry(Function &F);
+
+  void untagPointerOperand(Instruction *I, Value *Addr);
+  Value *memToShadow(Value *Shadow, Type *Ty, IRBuilder<> &IRB);
   void instrumentMemAccessInline(Value *PtrLong, bool IsWrite,
                                  unsigned AccessSizeIndex,
                                  Instruction *InsertBefore);
@@ -145,9 +168,27 @@ public:
 
 private:
   LLVMContext *C;
+  Triple TargetTriple;
+
+  /// This struct defines the shadow mapping using the rule:
+  ///   shadow = (mem >> Scale) + Offset.
+  /// If InGlobal is true, then
+  ///   extern char __hwasan_shadow[];
+  ///   shadow = (mem >> Scale) + &__hwasan_shadow
+  struct ShadowMapping {
+    int Scale;
+    uint64_t Offset;
+    bool InGlobal;
+
+    void init(Triple &TargetTriple);
+    unsigned getAllocaAlignment() const { return 1U << Scale; }
+  };
+  ShadowMapping Mapping;
+
   Type *IntptrTy;
   Type *Int8Ty;
 
+  bool CompileKernel;
   bool Recover;
 
   Function *HwasanCtorFunction;
@@ -157,6 +198,10 @@ private:
 
   Function *HwasanTagMemoryFunc;
   Function *HwasanGenerateTagFunc;
+
+  Constant *ShadowGlobal;
+
+  Value *LocalDynamicShadow = nullptr;
 };
 
 } // end anonymous namespace
@@ -165,13 +210,17 @@ char HWAddressSanitizer::ID = 0;
 
 INITIALIZE_PASS_BEGIN(
     HWAddressSanitizer, "hwasan",
-    "HWAddressSanitizer: detect memory bugs using tagged addressing.", false, false)
+    "HWAddressSanitizer: detect memory bugs using tagged addressing.", false,
+    false)
 INITIALIZE_PASS_END(
     HWAddressSanitizer, "hwasan",
-    "HWAddressSanitizer: detect memory bugs using tagged addressing.", false, false)
+    "HWAddressSanitizer: detect memory bugs using tagged addressing.", false,
+    false)
 
-FunctionPass *llvm::createHWAddressSanitizerPass(bool Recover) {
-  return new HWAddressSanitizer(Recover);
+FunctionPass *llvm::createHWAddressSanitizerPass(bool CompileKernel,
+                                                 bool Recover) {
+  assert(!CompileKernel || Recover);
+  return new HWAddressSanitizer(CompileKernel, Recover);
 }
 
 /// \brief Module-level initialization.
@@ -181,7 +230,9 @@ bool HWAddressSanitizer::doInitialization(Module &M) {
   DEBUG(dbgs() << "Init " << M.getName() << "\n");
   auto &DL = M.getDataLayout();
 
-  Triple TargetTriple(M.getTargetTriple());
+  TargetTriple = Triple(M.getTargetTriple());
+
+  Mapping.init(TargetTriple);
 
   C = &(M.getContext());
   IRBuilder<> IRB(*C);
@@ -189,7 +240,7 @@ bool HWAddressSanitizer::doInitialization(Module &M) {
   Int8Ty = IRB.getInt8Ty();
 
   HwasanCtorFunction = nullptr;
-  if (!ClEnableKhwasan) {
+  if (!CompileKernel) {
     std::tie(HwasanCtorFunction, std::ignore) =
         createSanitizerCtorAndInitFunctions(M, kHwasanModuleCtorName,
                                             kHwasanInitName,
@@ -225,15 +276,44 @@ void HWAddressSanitizer::initializeCallbacks(Module &M) {
       "__hwasan_tag_memory", IRB.getVoidTy(), IntptrTy, Int8Ty, IntptrTy));
   HwasanGenerateTagFunc = checkSanitizerInterfaceFunction(
       M.getOrInsertFunction("__hwasan_generate_tag", Int8Ty));
+
+  if (Mapping.InGlobal)
+    ShadowGlobal = M.getOrInsertGlobal("__hwasan_shadow",
+                                       ArrayType::get(IRB.getInt8Ty(), 0));
+}
+
+void HWAddressSanitizer::maybeInsertDynamicShadowAtFunctionEntry(Function &F) {
+  // Generate code only when dynamic addressing is needed.
+  if (Mapping.Offset != kDynamicShadowSentinel)
+    return;
+
+  IRBuilder<> IRB(&F.front().front());
+  if (Mapping.InGlobal) {
+    // An empty inline asm with input reg == output reg.
+    // An opaque pointer-to-int cast, basically.
+    InlineAsm *Asm = InlineAsm::get(
+        FunctionType::get(IntptrTy, {ShadowGlobal->getType()}, false),
+        StringRef(""), StringRef("=r,0"),
+        /*hasSideEffects=*/false);
+    LocalDynamicShadow = IRB.CreateCall(Asm, {ShadowGlobal}, ".hwasan.shadow");
+  } else {
+    Value *GlobalDynamicAddress = F.getParent()->getOrInsertGlobal(
+        kHwasanShadowMemoryDynamicAddress, IntptrTy);
+    LocalDynamicShadow = IRB.CreateLoad(GlobalDynamicAddress);
+  }
 }
 
 Value *HWAddressSanitizer::isInterestingMemoryAccess(Instruction *I,
-                                                   bool *IsWrite,
-                                                   uint64_t *TypeSize,
-                                                   unsigned *Alignment,
-                                                   Value **MaybeMask) {
+                                                     bool *IsWrite,
+                                                     uint64_t *TypeSize,
+                                                     unsigned *Alignment,
+                                                     Value **MaybeMask) {
   // Skip memory accesses inserted by another instrumentation.
   if (I->getMetadata("nosanitize")) return nullptr;
+
+  // Do not instrument the load fetching the dynamic shadow address.
+  if (LocalDynamicShadow == I)
+    return nullptr;
 
   Value *PtrOperand = nullptr;
   const DataLayout &DL = I->getModule()->getDataLayout();
@@ -264,7 +344,7 @@ Value *HWAddressSanitizer::isInterestingMemoryAccess(Instruction *I,
   }
 
   if (PtrOperand) {
-    // Do not instrument acesses from different address spaces; we cannot deal
+    // Do not instrument accesses from different address spaces; we cannot deal
     // with them.
     Type *PtrTy = cast<PointerType>(PtrOperand->getType()->getScalarType());
     if (PtrTy->getPointerAddressSpace() != 0)
@@ -281,39 +361,98 @@ Value *HWAddressSanitizer::isInterestingMemoryAccess(Instruction *I,
   return PtrOperand;
 }
 
+static unsigned getPointerOperandIndex(Instruction *I) {
+  if (LoadInst *LI = dyn_cast<LoadInst>(I))
+    return LI->getPointerOperandIndex();
+  if (StoreInst *SI = dyn_cast<StoreInst>(I))
+    return SI->getPointerOperandIndex();
+  if (AtomicRMWInst *RMW = dyn_cast<AtomicRMWInst>(I))
+    return RMW->getPointerOperandIndex();
+  if (AtomicCmpXchgInst *XCHG = dyn_cast<AtomicCmpXchgInst>(I))
+    return XCHG->getPointerOperandIndex();
+  report_fatal_error("Unexpected instruction");
+  return -1;
+}
+
 static size_t TypeSizeToSizeIndex(uint32_t TypeSize) {
   size_t Res = countTrailingZeros(TypeSize / 8);
   assert(Res < kNumberOfAccessSizes);
   return Res;
 }
 
+void HWAddressSanitizer::untagPointerOperand(Instruction *I, Value *Addr) {
+  if (TargetTriple.isAArch64())
+    return;
+
+  IRBuilder<> IRB(I);
+  Value *AddrLong = IRB.CreatePointerCast(Addr, IntptrTy);
+  Value *UntaggedPtr =
+      IRB.CreateIntToPtr(untagPointer(IRB, AddrLong), Addr->getType());
+  I->setOperand(getPointerOperandIndex(I), UntaggedPtr);
+}
+
+Value *HWAddressSanitizer::memToShadow(Value *Mem, Type *Ty, IRBuilder<> &IRB) {
+  // Mem >> Scale
+  Value *Shadow = IRB.CreateLShr(Mem, Mapping.Scale);
+  if (Mapping.Offset == 0)
+    return Shadow;
+  // (Mem >> Scale) + Offset
+  Value *ShadowBase;
+  if (LocalDynamicShadow)
+    ShadowBase = LocalDynamicShadow;
+  else
+    ShadowBase = ConstantInt::get(Ty, Mapping.Offset);
+  return IRB.CreateAdd(Shadow, ShadowBase);
+}
+
 void HWAddressSanitizer::instrumentMemAccessInline(Value *PtrLong, bool IsWrite,
                                                    unsigned AccessSizeIndex,
                                                    Instruction *InsertBefore) {
   IRBuilder<> IRB(InsertBefore);
-  Value *PtrTag = IRB.CreateTrunc(IRB.CreateLShr(PtrLong, kPointerTagShift), IRB.getInt8Ty());
+  Value *PtrTag = IRB.CreateTrunc(IRB.CreateLShr(PtrLong, kPointerTagShift),
+                                  IRB.getInt8Ty());
   Value *AddrLong = untagPointer(IRB, PtrLong);
-  Value *ShadowLong = IRB.CreateLShr(AddrLong, kShadowScale);
-  if (ClMappingOffset)
-    ShadowLong = IRB.CreateAdd(
-        ShadowLong, ConstantInt::get(PtrLong->getType(), ClMappingOffset,
-                                     /*isSigned=*/false));
+  Value *ShadowLong = memToShadow(AddrLong, PtrLong->getType(), IRB);
   Value *MemTag =
       IRB.CreateLoad(IRB.CreateIntToPtr(ShadowLong, IRB.getInt8PtrTy()));
   Value *TagMismatch = IRB.CreateICmpNE(PtrTag, MemTag);
+
+  int matchAllTag = ClMatchAllTag.getNumOccurrences() > 0 ?
+      ClMatchAllTag : (CompileKernel ? 0xFF : -1);
+  if (matchAllTag != -1) {
+    Value *TagNotIgnored = IRB.CreateICmpNE(PtrTag,
+        ConstantInt::get(PtrTag->getType(), matchAllTag));
+    TagMismatch = IRB.CreateAnd(TagMismatch, TagNotIgnored);
+  }
 
   TerminatorInst *CheckTerm =
       SplitBlockAndInsertIfThen(TagMismatch, InsertBefore, !Recover,
                                 MDBuilder(*C).createBranchWeights(1, 100000));
 
   IRB.SetInsertPoint(CheckTerm);
-  // The signal handler will find the data address in x0.
-  InlineAsm *Asm = InlineAsm::get(
-      FunctionType::get(IRB.getVoidTy(), {PtrLong->getType()}, false),
-      "brk #" +
-          itostr(0x900 + Recover * 0x20 + IsWrite * 0x10 + AccessSizeIndex),
-      "{x0}",
-      /*hasSideEffects=*/true);
+  const int64_t AccessInfo = Recover * 0x20 + IsWrite * 0x10 + AccessSizeIndex;
+  InlineAsm *Asm;
+  switch (TargetTriple.getArch()) {
+    case Triple::x86_64:
+      // The signal handler will find the data address in rdi.
+      Asm = InlineAsm::get(
+          FunctionType::get(IRB.getVoidTy(), {PtrLong->getType()}, false),
+          "int3\nnopl " + itostr(0x40 + AccessInfo) + "(%rax)",
+          "{rdi}",
+          /*hasSideEffects=*/true);
+      break;
+    case Triple::aarch64:
+    case Triple::aarch64_be:
+      // The signal handler will find the data address in x0.
+      Asm = InlineAsm::get(
+          FunctionType::get(IRB.getVoidTy(), {PtrLong->getType()}, false),
+          "brk #" + itostr(0x900 + AccessInfo),
+          "{x0}",
+          /*hasSideEffects=*/true);
+      break;
+    default:
+      report_fatal_error("unsupported architecture");
+  }
   IRB.CreateCall(Asm, PtrLong);
 }
 
@@ -336,7 +475,7 @@ bool HWAddressSanitizer::instrumentMemAccess(Instruction *I) {
   Value *AddrLong = IRB.CreatePointerCast(Addr, IntptrTy);
   if (isPowerOf2_64(TypeSize) &&
       (TypeSize / 8 <= (1UL << (kNumberOfAccessSizes - 1))) &&
-      (Alignment >= (1UL << kShadowScale) || Alignment == 0 ||
+      (Alignment >= (1UL << Mapping.Scale) || Alignment == 0 ||
        Alignment >= TypeSize / 8)) {
     size_t AccessSizeIndex = TypeSizeToSizeIndex(TypeSize);
     if (ClInstrumentWithCalls) {
@@ -349,6 +488,7 @@ bool HWAddressSanitizer::instrumentMemAccess(Instruction *I) {
     IRB.CreateCall(HwasanMemoryAccessCallbackSized[IsWrite],
                    {AddrLong, ConstantInt::get(IntptrTy, TypeSize / 8)});
   }
+  untagPointerOperand(I, Addr);
 
   return true;
 }
@@ -367,8 +507,8 @@ static uint64_t getAllocaSizeInBytes(const AllocaInst &AI) {
 
 bool HWAddressSanitizer::tagAlloca(IRBuilder<> &IRB, AllocaInst *AI,
                                    Value *Tag) {
-  size_t Size = (getAllocaSizeInBytes(*AI) + kAllocaAlignment - 1) &
-                ~(kAllocaAlignment - 1);
+  size_t Size = (getAllocaSizeInBytes(*AI) + Mapping.getAllocaAlignment() - 1) &
+                ~(Mapping.getAllocaAlignment() - 1);
 
   Value *JustTag = IRB.CreateTrunc(Tag, IRB.getInt8Ty());
   if (ClInstrumentWithCalls) {
@@ -376,9 +516,9 @@ bool HWAddressSanitizer::tagAlloca(IRBuilder<> &IRB, AllocaInst *AI,
                    {IRB.CreatePointerCast(AI, IntptrTy), JustTag,
                     ConstantInt::get(IntptrTy, Size)});
   } else {
-    size_t ShadowSize = Size >> kShadowScale;
+    size_t ShadowSize = Size >> Mapping.Scale;
     Value *ShadowPtr = IRB.CreateIntToPtr(
-        IRB.CreateLShr(IRB.CreatePointerCast(AI, IntptrTy), kShadowScale),
+        memToShadow(IRB.CreatePointerCast(AI, IntptrTy), AI->getType(), IRB),
         IRB.getInt8PtrTy());
     // If this memset is not inlined, it will be intercepted in the hwasan
     // runtime library. That's OK, because the interceptor skips the checks if
@@ -443,10 +583,10 @@ Value *HWAddressSanitizer::getUARTag(IRBuilder<> &IRB, Value *StackTag) {
 }
 
 // Add a tag to an address.
-Value *HWAddressSanitizer::tagPointer(IRBuilder<> &IRB, Type *Ty, Value *PtrLong,
-                                      Value *Tag) {
+Value *HWAddressSanitizer::tagPointer(IRBuilder<> &IRB, Type *Ty,
+                                      Value *PtrLong, Value *Tag) {
   Value *TaggedPtrLong;
-  if (ClEnableKhwasan) {
+  if (CompileKernel) {
     // Kernel addresses have 0xFF in the most significant byte.
     Value *ShiftedTag = IRB.CreateOr(
         IRB.CreateShl(Tag, kPointerTagShift),
@@ -463,7 +603,7 @@ Value *HWAddressSanitizer::tagPointer(IRBuilder<> &IRB, Type *Ty, Value *PtrLong
 // Remove tag from an address.
 Value *HWAddressSanitizer::untagPointer(IRBuilder<> &IRB, Value *PtrLong) {
   Value *UntaggedPtrLong;
-  if (ClEnableKhwasan) {
+  if (CompileKernel) {
     // Kernel addresses have 0xFF in the most significant byte.
     UntaggedPtrLong = IRB.CreateOr(PtrLong,
         ConstantInt::get(PtrLong->getType(), 0xFFULL << kPointerTagShift));
@@ -548,6 +688,9 @@ bool HWAddressSanitizer::runOnFunction(Function &F) {
 
   initializeCallbacks(*F.getParent());
 
+  assert(!LocalDynamicShadow);
+  maybeInsertDynamicShadowAtFunctionEntry(F);
+
   bool Changed = false;
   SmallVector<Instruction*, 16> ToInstrument;
   SmallVector<AllocaInst*, 8> AllocasToInstrument;
@@ -558,15 +701,16 @@ bool HWAddressSanitizer::runOnFunction(Function &F) {
         if (AllocaInst *AI = dyn_cast<AllocaInst>(&Inst)) {
           // Realign all allocas. We don't want small uninteresting allocas to
           // hide in instrumented alloca's padding.
-          if (AI->getAlignment() < kAllocaAlignment)
-            AI->setAlignment(kAllocaAlignment);
+          if (AI->getAlignment() < Mapping.getAllocaAlignment())
+            AI->setAlignment(Mapping.getAllocaAlignment());
           // Instrument some of them.
           if (isInterestingAlloca(*AI))
             AllocasToInstrument.push_back(AI);
           continue;
         }
 
-      if (isa<ReturnInst>(Inst) || isa<ResumeInst>(Inst) || isa<CleanupReturnInst>(Inst))
+      if (isa<ReturnInst>(Inst) || isa<ResumeInst>(Inst) ||
+          isa<CleanupReturnInst>(Inst))
         RetVec.push_back(&Inst);
 
       Value *MaybeMask = nullptr;
@@ -586,5 +730,24 @@ bool HWAddressSanitizer::runOnFunction(Function &F) {
   for (auto Inst : ToInstrument)
     Changed |= instrumentMemAccess(Inst);
 
+  LocalDynamicShadow = nullptr;
+
   return Changed;
+}
+
+void HWAddressSanitizer::ShadowMapping::init(Triple &TargetTriple) {
+  const bool IsAndroid = TargetTriple.isAndroid();
+  const bool IsAndroidWithIfuncSupport =
+      IsAndroid && !TargetTriple.isAndroidVersionLT(21);
+
+  Scale = kDefaultShadowScale;
+
+  if (ClEnableKhwasan || ClInstrumentWithCalls || !IsAndroidWithIfuncSupport)
+    Offset = 0;
+  else
+    Offset = kDynamicShadowSentinel;
+  if (ClMappingOffset.getNumOccurrences() > 0)
+    Offset = ClMappingOffset;
+
+  InGlobal = IsAndroidWithIfuncSupport;
 }

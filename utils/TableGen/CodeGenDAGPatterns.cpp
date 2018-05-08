@@ -1305,7 +1305,7 @@ std::string PatternToMatch::getPredicateCheck() const {
   SmallVector<const Predicate*,4> PredList;
   for (const Predicate &P : Predicates)
     PredList.push_back(&P);
-  std::sort(PredList.begin(), PredList.end(), deref<llvm::less>());
+  llvm::sort(PredList.begin(), PredList.end(), deref<llvm::less>());
 
   std::string Check;
   for (unsigned i = 0, e = PredList.size(); i != e; ++i) {
@@ -2660,7 +2660,7 @@ TreePatternNode *TreePattern::ParseTreePattern(Init *TheInit, StringRef OpName){
   // node (which is hard-coded to have either zero or one result).
   unsigned NumResults = GetNumNodeResults(Operator, CDP);
 
-  // If the operator is an intrinsic, then this is just syntactic sugar for for
+  // If the operator is an intrinsic, then this is just syntactic sugar for
   // (intrinsic_* <number>, ..children..).  Pick the right intrinsic node, and
   // convert the intrinsic name to a number.
   if (Operator->isSubClassOf("Intrinsic")) {
@@ -3698,7 +3698,7 @@ std::vector<Predicate> CodeGenDAGPatterns::makePredList(ListInit *L) {
   }
 
   // Sort so that different orders get canonicalized to the same string.
-  std::sort(Preds.begin(), Preds.end());
+  llvm::sort(Preds.begin(), Preds.end());
   return Preds;
 }
 

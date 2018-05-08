@@ -43,8 +43,6 @@ namespace llvm {
 
 class OrcCBindingsStack;
 
-DEFINE_SIMPLE_CONVERSION_FUNCTIONS(std::shared_ptr<Module>,
-                                   LLVMSharedModuleRef)
 DEFINE_SIMPLE_CONVERSION_FUNCTIONS(OrcCBindingsStack, LLVMOrcJITStackRef)
 DEFINE_SIMPLE_CONVERSION_FUNCTIONS(TargetMachine, LLVMTargetMachineRef)
 
@@ -155,13 +153,13 @@ private:
       for (auto &S : Symbols) {
         if (auto Sym = findSymbol(*S)) {
           if (auto Addr = Sym.getAddress())
-            Query->setDefinition(S, JITEvaluatedSymbol(*Addr, Sym.getFlags()));
+            Query->resolve(S, JITEvaluatedSymbol(*Addr, Sym.getFlags()));
           else {
-            Query->setFailed(Addr.takeError());
+            Query->notifyMaterializationFailed(Addr.takeError());
             return orc::SymbolNameSet();
           }
         } else if (auto Err = Sym.takeError()) {
-          Query->setFailed(std::move(Err));
+          Query->notifyMaterializationFailed(std::move(Err));
           return orc::SymbolNameSet();
         } else
           UnresolvedSymbols.insert(S);
@@ -202,7 +200,7 @@ public:
   OrcCBindingsStack(TargetMachine &TM,
                     std::unique_ptr<CompileCallbackMgr> CCMgr,
                     IndirectStubsManagerBuilder IndirectStubsMgrBuilder)
-      : ES(SSP), DL(TM.createDataLayout()),
+      : DL(TM.createDataLayout()),
         IndirectStubsMgr(IndirectStubsMgrBuilder()), CCMgr(std::move(CCMgr)),
         ObjectLayer(ES,
                     [this](orc::VModuleKey K) {
@@ -284,7 +282,7 @@ public:
   }
   template <typename LayerT>
   LLVMOrcErrorCode
-  addIRModule(orc::VModuleKey &RetKey, LayerT &Layer, std::shared_ptr<Module> M,
+  addIRModule(orc::VModuleKey &RetKey, LayerT &Layer, std::unique_ptr<Module> M,
               std::unique_ptr<RuntimeDyld::MemoryManager> MemMgr,
               LLVMOrcSymbolResolverFn ExternalResolver,
               void *ExternalResolverCtx) {
@@ -323,7 +321,7 @@ public:
   }
 
   LLVMOrcErrorCode addIRModuleEager(orc::VModuleKey &RetKey,
-                                    std::shared_ptr<Module> M,
+                                    std::unique_ptr<Module> M,
                                     LLVMOrcSymbolResolverFn ExternalResolver,
                                     void *ExternalResolverCtx) {
     return addIRModule(RetKey, CompileLayer, std::move(M),
@@ -332,7 +330,7 @@ public:
   }
 
   LLVMOrcErrorCode addIRModuleLazy(orc::VModuleKey &RetKey,
-                                   std::shared_ptr<Module> M,
+                                   std::unique_ptr<Module> M,
                                    LLVMOrcSymbolResolverFn ExternalResolver,
                                    void *ExternalResolverCtx) {
     return addIRModule(RetKey, CODLayer, std::move(M),
@@ -423,7 +421,6 @@ private:
     logAllUnhandledErrors(std::move(Err), errs(), "ORC error: ");
   };
 
-  orc::SymbolStringPool SSP;
   orc::ExecutionSession ES;
 
   DataLayout DL;

@@ -135,12 +135,12 @@ public:
   ArrayRef<wasm::WasmLimits> memories() const { return Memories; }
   ArrayRef<wasm::WasmGlobal> globals() const { return Globals; }
   ArrayRef<wasm::WasmExport> exports() const { return Exports; }
+  ArrayRef<WasmSymbol> syms() const { return Symbols; }
   const wasm::WasmLinkingData& linkingData() const { return LinkingData; }
   uint32_t getNumberOfSymbols() const { return Symbols.size(); }
   ArrayRef<wasm::WasmElemSegment> elements() const { return ElemSegments; }
   ArrayRef<WasmSegment> dataSegments() const { return DataSegments; }
   ArrayRef<wasm::WasmFunction> functions() const { return Functions; }
-  ArrayRef<StringRef> comdats() const { return Comdats; }
   ArrayRef<wasm::WasmFunctionName> debugNames() const { return DebugNames; }
   uint32_t startFunction() const { return StartFunction; }
   uint32_t getNumImportedGlobals() const { return NumImportedGlobals; }
@@ -212,9 +212,6 @@ private:
   const WasmSection &getWasmSection(DataRefImpl Ref) const;
   const wasm::WasmRelocation &getWasmRelocation(DataRefImpl Ref) const;
 
-  WasmSection* findCustomSectionByName(StringRef Name);
-  WasmSection* findSectionByType(uint32_t Type);
-
   const uint8_t *getPtr(size_t Offset) const;
   Error parseSection(WasmSection &Sec);
   Error parseCustomSection(WasmSection &Sec, const uint8_t *Ptr,
@@ -254,7 +251,6 @@ private:
   std::vector<WasmSegment> DataSegments;
   std::vector<wasm::WasmFunction> Functions;
   std::vector<WasmSymbol> Symbols;
-  std::vector<StringRef> Comdats;
   std::vector<wasm::WasmFunctionName> DebugNames;
   uint32_t StartFunction = -1;
   bool HasLinkingSection = false;

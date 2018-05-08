@@ -62,16 +62,16 @@ define i16 @test_ctpop_i16(i16 zeroext %a0, i16 *%a1) {
 ;
 ; BTVER2-LABEL: test_ctpop_i16:
 ; BTVER2:       # %bb.0:
-; BTVER2-NEXT:    popcntw (%rsi), %cx # sched: [8:1.00]
-; BTVER2-NEXT:    popcntw %di, %ax # sched: [3:1.00]
+; BTVER2-NEXT:    popcntw (%rsi), %cx # sched: [4:1.00]
+; BTVER2-NEXT:    popcntw %di, %ax # sched: [1:0.50]
 ; BTVER2-NEXT:    orl %ecx, %eax # sched: [1:0.50]
 ; BTVER2-NEXT:    # kill: def $ax killed $ax killed $eax
 ; BTVER2-NEXT:    retq # sched: [4:1.00]
 ;
 ; ZNVER1-LABEL: test_ctpop_i16:
 ; ZNVER1:       # %bb.0:
-; ZNVER1-NEXT:    popcntw (%rsi), %cx # sched: [10:1.00]
-; ZNVER1-NEXT:    popcntw %di, %ax # sched: [3:1.00]
+; ZNVER1-NEXT:    popcntw (%rsi), %cx # sched: [5:0.50]
+; ZNVER1-NEXT:    popcntw %di, %ax # sched: [1:0.25]
 ; ZNVER1-NEXT:    orl %ecx, %eax # sched: [1:0.25]
 ; ZNVER1-NEXT:    # kill: def $ax killed $ax killed $eax
 ; ZNVER1-NEXT:    retq # sched: [1:0.50]
@@ -128,15 +128,15 @@ define i32 @test_ctpop_i32(i32 %a0, i32 *%a1) {
 ;
 ; BTVER2-LABEL: test_ctpop_i32:
 ; BTVER2:       # %bb.0:
-; BTVER2-NEXT:    popcntl (%rsi), %ecx # sched: [8:1.00]
-; BTVER2-NEXT:    popcntl %edi, %eax # sched: [3:1.00]
+; BTVER2-NEXT:    popcntl (%rsi), %ecx # sched: [4:1.00]
+; BTVER2-NEXT:    popcntl %edi, %eax # sched: [1:0.50]
 ; BTVER2-NEXT:    orl %ecx, %eax # sched: [1:0.50]
 ; BTVER2-NEXT:    retq # sched: [4:1.00]
 ;
 ; ZNVER1-LABEL: test_ctpop_i32:
 ; ZNVER1:       # %bb.0:
-; ZNVER1-NEXT:    popcntl (%rsi), %ecx # sched: [10:1.00]
-; ZNVER1-NEXT:    popcntl %edi, %eax # sched: [3:1.00]
+; ZNVER1-NEXT:    popcntl (%rsi), %ecx # sched: [5:0.50]
+; ZNVER1-NEXT:    popcntl %edi, %eax # sched: [1:0.25]
 ; ZNVER1-NEXT:    orl %ecx, %eax # sched: [1:0.25]
 ; ZNVER1-NEXT:    retq # sched: [1:0.50]
   %1 = load i32, i32 *%a1
@@ -192,15 +192,15 @@ define i64 @test_ctpop_i64(i64 %a0, i64 *%a1) {
 ;
 ; BTVER2-LABEL: test_ctpop_i64:
 ; BTVER2:       # %bb.0:
-; BTVER2-NEXT:    popcntq (%rsi), %rcx # sched: [8:1.00]
-; BTVER2-NEXT:    popcntq %rdi, %rax # sched: [3:1.00]
+; BTVER2-NEXT:    popcntq (%rsi), %rcx # sched: [4:1.00]
+; BTVER2-NEXT:    popcntq %rdi, %rax # sched: [1:0.50]
 ; BTVER2-NEXT:    orq %rcx, %rax # sched: [1:0.50]
 ; BTVER2-NEXT:    retq # sched: [4:1.00]
 ;
 ; ZNVER1-LABEL: test_ctpop_i64:
 ; ZNVER1:       # %bb.0:
-; ZNVER1-NEXT:    popcntq (%rsi), %rcx # sched: [10:1.00]
-; ZNVER1-NEXT:    popcntq %rdi, %rax # sched: [3:1.00]
+; ZNVER1-NEXT:    popcntq (%rsi), %rcx # sched: [5:0.50]
+; ZNVER1-NEXT:    popcntq %rdi, %rax # sched: [1:0.25]
 ; ZNVER1-NEXT:    orq %rcx, %rax # sched: [1:0.25]
 ; ZNVER1-NEXT:    retq # sched: [1:0.50]
   %1 = load i64, i64 *%a1

@@ -56,12 +56,12 @@ public:
   ~Latch() { sync(); }
 
   void inc() {
-    std::unique_lock<std::mutex> lock(Mutex);
+    std::lock_guard<std::mutex> lock(Mutex);
     ++Count;
   }
 
   void dec() {
-    std::unique_lock<std::mutex> lock(Mutex);
+    std::lock_guard<std::mutex> lock(Mutex);
     if (--Count == 0)
       Cond.notify_all();
   }
@@ -118,7 +118,7 @@ void parallel_quick_sort(RandomAccessIterator Start, RandomAccessIterator End,
                          const Comparator &Comp, TaskGroup &TG, size_t Depth) {
   // Do a sequential sort for small inputs.
   if (std::distance(Start, End) < detail::MinParallelSize || Depth == 0) {
-    std::sort(Start, End, Comp);
+    llvm::sort(Start, End, Comp);
     return;
   }
 
@@ -200,7 +200,7 @@ void sort(Policy policy, RandomAccessIterator Start, RandomAccessIterator End,
           const Comparator &Comp = Comparator()) {
   static_assert(is_execution_policy<Policy>::value,
                 "Invalid execution policy!");
-  std::sort(Start, End, Comp);
+  llvm::sort(Start, End, Comp);
 }
 
 template <class Policy, class IterTy, class FuncTy>

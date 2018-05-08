@@ -1383,6 +1383,7 @@ bool X86AsmParser::ParseIntelExpression(IntelExprStateMachine &SM, SMLoc &End) {
       if (ParseIntelDotOperator(SM, End))
         return true;
       break;
+    case AsmToken::At:
     case AsmToken::String:
     case AsmToken::Identifier: {
       SMLoc IdentLoc = Tok.getLoc();
@@ -1390,7 +1391,7 @@ bool X86AsmParser::ParseIntelExpression(IntelExprStateMachine &SM, SMLoc &End) {
       UpdateLocLex = false;
       // Register
       unsigned Reg;
-      if (Tok.isNot(AsmToken::String) && !ParseRegister(Reg, IdentLoc, End)) {
+      if (Tok.is(AsmToken::Identifier) && !ParseRegister(Reg, IdentLoc, End)) {
         if (SM.onRegister(Reg, ErrMsg))
           return Error(Tok.getLoc(), ErrMsg);
         break;
@@ -1428,6 +1429,9 @@ bool X86AsmParser::ParseIntelExpression(IntelExprStateMachine &SM, SMLoc &End) {
         break;
       }
       // MS InlineAsm identifier
+      // Call parseIdentifier() to combine @ with the identifier behind it.
+      if (TK == AsmToken::At && Parser.parseIdentifier(Identifier))
+        return Error(IdentLoc, "expected identifier");
       if (ParseIntelInlineAsmIdentifier(Val, Identifier, Info, false, End))
         return true;
       else if (SM.onIdentifierExpr(Val, Identifier, Info, true, ErrMsg))
@@ -2105,12 +2109,8 @@ std::unique_ptr<X86Operand> X86AsmParser::ParseMemOperand(unsigned SegReg,
       if (getLexer().isNot(AsmToken::RParen)) {
         // Parse the scale amount:
         //  ::= ',' [scale-expression]
-        if (getLexer().isNot(AsmToken::Comma)) {
-          Error(Parser.getTok().getLoc(),
-                "expected comma in scale expression");
+        if (parseToken(AsmToken::Comma, "expected comma in scale expression"))
           return nullptr;
-        }
-        Parser.Lex(); // Eat the comma.
 
         if (getLexer().isNot(AsmToken::RParen)) {
           SMLoc Loc = Parser.getTok().getLoc();
@@ -2151,12 +2151,9 @@ std::unique_ptr<X86Operand> X86AsmParser::ParseMemOperand(unsigned SegReg,
   }
 
   // Ok, we've eaten the memory operand, verify we have a ')' and eat it too.
-  if (getLexer().isNot(AsmToken::RParen)) {
-    Error(Parser.getTok().getLoc(), "unexpected token in memory operand");
-    return nullptr;
-  }
   SMLoc MemEnd = Parser.getTok().getEndLoc();
-  Parser.Lex(); // Eat the ')'.
+  if (parseToken(AsmToken::RParen, "unexpected token in memory operand"))
+    return nullptr;
 
   // Check for use of invalid 16-bit registers. Only BX/BP/SI/DI are allowed,
   // and then only in non-64-bit modes. Except for DX, which is a special case
@@ -2349,21 +2346,22 @@ bool X86AsmParser::ParseInstruction(ParseInstructionInfo &Info, StringRef Name,
                       .Cases("acquire", "release", isParsingIntelSyntax())
                       .Default(false);
 
-  auto isLockRepeatPrefix = [](StringRef N) {
+  auto isLockRepeatNtPrefix = [](StringRef N) {
     return StringSwitch<bool>(N)
-        .Cases("lock", "rep", "repe", "repz", "repne", "repnz", true)
+        .Cases("lock", "rep", "repe", "repz", "repne", "repnz", "notrack", true)
         .Default(false);
   };
 
   bool CurlyAsEndOfStatement = false;
 
   unsigned Flags = X86::IP_NO_PREFIX;
-  while (isLockRepeatPrefix(Name.lower())) {
+  while (isLockRepeatNtPrefix(Name.lower())) {
     unsigned Prefix =
         StringSwitch<unsigned>(Name)
             .Cases("lock", "lock", X86::IP_HAS_LOCK)
             .Cases("rep", "repe", "repz", X86::IP_HAS_REPEAT)
             .Cases("repne", "repnz", X86::IP_HAS_REPEAT_NE)
+            .Cases("notrack", "notrack", X86::IP_HAS_NOTRACK)
             .Default(X86::IP_NO_PREFIX); // Invalid prefix (impossible)
     Flags |= Prefix;
     if (getLexer().is(AsmToken::EndOfStatement)) {
@@ -2387,6 +2385,20 @@ bool X86AsmParser::ParseInstruction(ParseInstructionInfo &Info, StringRef Name,
 
   if (Flags)
     PatchedName = Name;
+
+  // Hacks to handle 'data16' and 'data32'
+  if (PatchedName == "data16" && is16BitMode()) {
+    return Error(NameLoc, "redundant data16 prefix");
+  }
+  if (PatchedName == "data32") {
+    if (is32BitMode())
+      return Error(NameLoc, "redundant data32 prefix");
+    if (is64BitMode())
+      return Error(NameLoc, "'data32' is not supported in 64-bit mode");
+    // Hack to 'data16' for the table lookup.
+    PatchedName = "data16";
+  }
+
   Operands.push_back(X86Operand::CreateToken(PatchedName, NameLoc));
 
   // This does the actual operand parsing.  Don't parse any more if we have a
@@ -2421,7 +2433,7 @@ bool X86AsmParser::ParseInstruction(ParseInstructionInfo &Info, StringRef Name,
         (getLexer().is(AsmToken::LCurly) || getLexer().is(AsmToken::RCurly));
     if (getLexer().isNot(AsmToken::EndOfStatement) && !CurlyAsEndOfStatement)
       return TokError("unexpected token in argument list");
-   }
+  }
 
   // Consume the EndOfStatement or the prefix separator Slash
   if (getLexer().is(AsmToken::EndOfStatement) ||
@@ -3193,10 +3205,9 @@ bool X86AsmParser::ParseDirective(AsmToken DirectiveID) {
 /// parseDirectiveEven
 ///  ::= .even
 bool X86AsmParser::parseDirectiveEven(SMLoc L) {
-  if (getLexer().isNot(AsmToken::EndOfStatement)) {
-    TokError("unexpected token in directive");
-    return false;  
-  }
+  if (parseToken(AsmToken::EndOfStatement, "unexpected token in directive"))
+    return false;
+
   const MCSection *Section = getStreamer().getCurrentSectionOnly();
   if (!Section) {
     getStreamer().InitSections(false);
@@ -3211,37 +3222,22 @@ bool X86AsmParser::parseDirectiveEven(SMLoc L) {
 /// ParseDirectiveWord
 ///  ::= .word [ expression (, expression)* ]
 bool X86AsmParser::ParseDirectiveWord(unsigned Size, SMLoc L) {
-  MCAsmParser &Parser = getParser();
-  if (getLexer().isNot(AsmToken::EndOfStatement)) {
-    for (;;) {
-      const MCExpr *Value;
-      SMLoc ExprLoc = getLexer().getLoc();
-      if (getParser().parseExpression(Value))
-        return false;
-
-      if (const auto *MCE = dyn_cast<MCConstantExpr>(Value)) {
-        assert(Size <= 8 && "Invalid size");
-        uint64_t IntValue = MCE->getValue();
-        if (!isUIntN(8 * Size, IntValue) && !isIntN(8 * Size, IntValue))
-          return Error(ExprLoc, "literal value out of range for directive");
-        getStreamer().EmitIntValue(IntValue, Size);
-      } else {
-        getStreamer().EmitValue(Value, Size, ExprLoc);
-      }
-
-      if (getLexer().is(AsmToken::EndOfStatement))
-        break;
-
-      // FIXME: Improve diagnostic.
-      if (getLexer().isNot(AsmToken::Comma)) {
-        Error(L, "unexpected token in directive");
-        return false;
-      }
-      Parser.Lex();
-    }
-  }
-
-  Parser.Lex();
+  auto parseOp = [&]() -> bool {
+    const MCExpr *Value;
+    SMLoc ExprLoc = getLexer().getLoc();
+    if (getParser().parseExpression(Value))
+      return true;
+    if (const auto *MCE = dyn_cast<MCConstantExpr>(Value)) {
+      assert(Size <= 8 && "Invalid size");
+      uint64_t IntValue = MCE->getValue();
+      if (!isUIntN(8 * Size, IntValue) && !isIntN(8 * Size, IntValue))
+        return Error(ExprLoc, "literal value out of range for directive");
+      getStreamer().EmitIntValue(IntValue, Size);
+    } else
+      getStreamer().EmitValue(Value, Size, ExprLoc);
+    return false;
+  };
+  parseMany(parseOp);
   return false;
 }
 

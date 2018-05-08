@@ -34,7 +34,7 @@ void ReachingDefAnalysis::enterBasicBlock(
   // Set up LiveRegs to represent registers entering MBB.
   // Default values are 'nothing happened a long time ago'.
   if (LiveRegs.empty())
-    LiveRegs.assign(NumRegUnits, ReachingDedDefaultVal);
+    LiveRegs.assign(NumRegUnits, ReachingDefDefaultVal);
 
   // This is the entry block.
   if (MBB->pred_empty()) {
@@ -64,7 +64,7 @@ void ReachingDefAnalysis::enterBasicBlock(
     for (unsigned Unit = 0; Unit != NumRegUnits; ++Unit) {
       // Use the most recent predecessor def for each register.
       LiveRegs[Unit] = std::max(LiveRegs[Unit], Incoming[Unit]);
-      if ((LiveRegs[Unit] != ReachingDedDefaultVal))
+      if ((LiveRegs[Unit] != ReachingDefDefaultVal))
         MBBReachingDefs[MBBNumber][Unit].push_back(LiveRegs[Unit]);
     }
   }
@@ -157,7 +157,7 @@ bool ReachingDefAnalysis::runOnMachineFunction(MachineFunction &mf) {
   // Sorting all reaching defs found for a ceartin reg unit in a given BB.
   for (MBBDefsInfo &MBBDefs : MBBReachingDefs) {
     for (MBBRegUnitDefs &RegUnitDefs : MBBDefs)
-      std::sort(RegUnitDefs.begin(), RegUnitDefs.end());
+      llvm::sort(RegUnitDefs.begin(), RegUnitDefs.end());
   }
 
   return false;
@@ -173,11 +173,11 @@ void ReachingDefAnalysis::releaseMemory() {
 int ReachingDefAnalysis::getReachingDef(MachineInstr *MI, int PhysReg) {
   assert(InstIds.count(MI) && "Unexpected machine instuction.");
   int InstId = InstIds[MI];
-  int DefRes = ReachingDedDefaultVal;
+  int DefRes = ReachingDefDefaultVal;
   unsigned MBBNumber = MI->getParent()->getNumber();
   assert(MBBNumber < MBBReachingDefs.size() &&
          "Unexpected basic block number.");
-  int LatestDef = ReachingDedDefaultVal;
+  int LatestDef = ReachingDefDefaultVal;
   for (MCRegUnitIterator Unit(PhysReg, TRI); Unit.isValid(); ++Unit) {
     for (int Def : MBBReachingDefs[MBBNumber][*Unit]) {
       if (Def >= InstId)

@@ -16,9 +16,9 @@
 
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/BinaryFormat/COFF.h"
-#include "llvm/DebugInfo/CodeView/CVDebugRecord.h"
 #include "llvm/MC/SubtargetFeature.h"
 #include "llvm/Object/Binary.h"
+#include "llvm/Object/CVDebugRecord.h"
 #include "llvm/Object/Error.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/BinaryByteStream.h"
@@ -1012,8 +1012,7 @@ public:
     llvm_unreachable("null symbol table pointer!");
   }
 
-  iterator_range<const coff_relocation *>
-  getRelocations(const coff_section *Sec) const;
+  ArrayRef<coff_relocation> getRelocations(const coff_section *Sec) const;
 
   std::error_code getSectionName(const coff_section *Sec, StringRef &Res) const;
   uint64_t getSectionSize(const coff_section *Sec) const;

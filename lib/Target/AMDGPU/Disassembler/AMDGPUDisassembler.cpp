@@ -246,7 +246,10 @@ DecodeStatus AMDGPUDisassembler::getInstruction(MCInst &MI, uint64_t &Size,
   if (Res && IsSDWA)
     Res = convertSDWAInst(MI);
 
-  Size = Res ? (MaxInstBytesNum - Bytes.size()) : 0;
+  // if the opcode was not recognized we'll assume a Size of 4 bytes
+  // (unless there are fewer bytes left)
+  Size = Res ? (MaxInstBytesNum - Bytes.size())
+             : std::min((size_t)4, Bytes_.size());
   return Res;
 }
 
@@ -273,6 +276,11 @@ DecodeStatus AMDGPUDisassembler::convertSDWAInst(MCInst &MI) const {
 // Consequently, decoded instructions always show address
 // as if it has 1 dword, which could be not really so.
 DecodeStatus AMDGPUDisassembler::convertMIMGInst(MCInst &MI) const {
+
+  if (MCII->get(MI.getOpcode()).TSFlags & SIInstrFlags::Gather4) {
+    return MCDisassembler::Success;
+  }
+
   int VDstIdx = AMDGPU::getNamedOperandIdx(MI.getOpcode(),
                                            AMDGPU::OpName::vdst);
 
@@ -289,7 +297,7 @@ DecodeStatus AMDGPUDisassembler::convertMIMGInst(MCInst &MI) const {
   assert(DMaskIdx != -1);
   assert(TFEIdx != -1);
 
-  bool isAtomic = (VDstIdx != -1);
+  bool IsAtomic = (VDstIdx != -1);
 
   unsigned DMask = MI.getOperand(DMaskIdx).getImm() & 0xf;
   if (DMask == 0)
@@ -310,7 +318,7 @@ DecodeStatus AMDGPUDisassembler::convertMIMGInst(MCInst &MI) const {
 
   int NewOpcode = -1;
 
-  if (isAtomic) {
+  if (IsAtomic) {
     if (DMask == 0x1 || DMask == 0x3 || DMask == 0xF) {
       NewOpcode = AMDGPU::getMaskedMIMGAtomicOp(*MCII, MI.getOpcode(), DstSize);
     }
@@ -342,7 +350,7 @@ DecodeStatus AMDGPUDisassembler::convertMIMGInst(MCInst &MI) const {
   // in the instruction encoding.
   MI.getOperand(VDataIdx) = MCOperand::createReg(NewVdata);
 
-  if (isAtomic) {
+  if (IsAtomic) {
     // Atomic operations have an additional operand (a copy of data)
     MI.getOperand(VDstIdx) = MCOperand::createReg(NewVdata);
   }
@@ -874,6 +882,9 @@ bool AMDGPUSymbolizer::tryAddingSymbolicOperand(MCInst &Inst,
   }
 
   auto *Symbols = static_cast<SectionSymbolsTy *>(DisInfo);
+  if (!Symbols)
+    return false;
+
   auto Result = std::find_if(Symbols->begin(), Symbols->end(),
                              [Value](const SymbolInfoTy& Val) {
                                 return std::get<0>(Val) == static_cast<uint64_t>(Value)

@@ -14,9 +14,7 @@
 
 #include "llvm/LTO/legacy/LTOModule.h"
 #include "llvm/ADT/Triple.h"
-#include "llvm/Analysis/ObjectUtils.h"
 #include "llvm/Bitcode/BitcodeReader.h"
-#include "llvm/CodeGen/TargetLoweringObjectFile.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/LLVMContext.h"
@@ -39,6 +37,7 @@
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
+#include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/Transforms/Utils/GlobalStatus.h"
 #include <system_error>
 using namespace llvm;
@@ -208,7 +207,7 @@ LTOModule::makeLTOModule(MemoryBufferRef Buffer, const TargetOptions &options,
   std::string errMsg;
   const Target *march = TargetRegistry::lookupTarget(TripleStr, errMsg);
   if (!march)
-    return std::unique_ptr<LTOModule>(nullptr);
+    return make_error_code(object::object_error::arch_not_found);
 
   // construct LTOModule, hand over ownership of module and target
   SubtargetFeatures Features;
@@ -444,7 +443,7 @@ void LTOModule::addDefinedSymbol(StringRef Name, const GlobalValue *def,
     attr |= LTO_SYMBOL_SCOPE_HIDDEN;
   else if (def->hasProtectedVisibility())
     attr |= LTO_SYMBOL_SCOPE_PROTECTED;
-  else if (canBeOmittedFromSymbolTable(def))
+  else if (def->canBeOmittedFromSymbolTable())
     attr |= LTO_SYMBOL_SCOPE_DEFAULT_CAN_BE_HIDDEN;
   else
     attr |= LTO_SYMBOL_SCOPE_DEFAULT;

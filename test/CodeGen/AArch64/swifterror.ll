@@ -1,5 +1,5 @@
-; RUN: llc -verify-machineinstrs -disable-fp-elim -enable-shrink-wrap=false < %s -mtriple=aarch64-apple-ios -disable-post-ra | FileCheck --check-prefix=CHECK-APPLE %s
-; RUN: llc -verify-machineinstrs -disable-fp-elim -O0 -fast-isel < %s -mtriple=aarch64-apple-ios -disable-post-ra | FileCheck --check-prefix=CHECK-O0 %s
+; RUN: llc -fast-isel-sink-local-values -verify-machineinstrs -disable-fp-elim -enable-shrink-wrap=false < %s -mtriple=aarch64-apple-ios -disable-post-ra | FileCheck --check-prefix=CHECK-APPLE %s
+; RUN: llc -fast-isel-sink-local-values -verify-machineinstrs -disable-fp-elim -O0 -fast-isel < %s -mtriple=aarch64-apple-ios -disable-post-ra | FileCheck --check-prefix=CHECK-O0 %s
 
 declare i8* @malloc(i64)
 declare void @free(i8*)
@@ -189,10 +189,10 @@ define float @foo_loop(%swift_error** swifterror %error_ptr_ref, i32 %cc, float 
 ; CHECK-O0:[[BB2]]:
 ; CHECK-O0: ldr     x0, [sp, [[SLOT2]]]
 ; CHECK-O0: fcmp
-; CHECK-O0: str     x0, [sp]
+; CHECK-O0: str     x0, [sp, [[SLOT3:#[0-9]+]]
 ; CHECK-O0: b.le [[BB1]]
 ; reload from stack
-; CHECK-O0: ldr [[ID3:x[0-9]+]], [sp]
+; CHECK-O0: ldr [[ID3:x[0-9]+]], [sp, [[SLOT3]]]
 ; CHECK-O0: mov x21, [[ID3]]
 ; CHECK-O0: ret
 entry:

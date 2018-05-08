@@ -19,6 +19,7 @@
 #include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
+#include "llvm/Analysis/Utils/Local.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Function.h"
@@ -31,7 +32,6 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/KnownBits.h"
 #include "llvm/Transforms/Utils/BuildLibCalls.h"
-#include "llvm/Transforms/Utils/Local.h"
 
 using namespace llvm;
 using namespace PatternMatch;
@@ -100,6 +100,31 @@ static bool callHasFloatingPointArgument(const CallInst *CI) {
   return any_of(CI->operands(), [](const Use &OI) {
     return OI->getType()->isFloatingPointTy();
   });
+}
+
+static Value *convertStrToNumber(CallInst *CI, StringRef &Str, int64_t Base) {
+  if (Base < 2 || Base > 36)
+    // handle special zero base
+    if (Base != 0)
+      return nullptr;
+
+  char *End;
+  std::string nptr = Str.str();
+  errno = 0;
+  long long int Result = strtoll(nptr.c_str(), &End, Base);
+  if (errno)
+    return nullptr;
+
+  // if we assume all possible target locales are ASCII supersets,
+  // then if strtoll successfully parses a number on the host,
+  // it will also successfully parse the same way on the target
+  if (*End != '\0')
+    return nullptr;
+
+  if (!isIntN(CI->getType()->getPrimitiveSizeInBits(), Result))
+    return nullptr;
+
+  return ConstantInt::get(CI->getType(), Result);
 }
 
 //===----------------------------------------------------------------------===//
@@ -811,27 +836,6 @@ Value *LibCallSimplifier::optimizeMemMove(CallInst *CI, IRBuilder<> &B) {
   return CI->getArgOperand(0);
 }
 
-// TODO: Does this belong in BuildLibCalls or should all of those similar
-// functions be moved here?
-static Value *emitCalloc(Value *Num, Value *Size, const AttributeList &Attrs,
-                         IRBuilder<> &B, const TargetLibraryInfo &TLI) {
-  LibFunc Func;
-  if (!TLI.getLibFunc("calloc", Func) || !TLI.has(Func))
-    return nullptr;
-
-  Module *M = B.GetInsertBlock()->getModule();
-  const DataLayout &DL = M->getDataLayout();
-  IntegerType *PtrType = DL.getIntPtrType((B.GetInsertBlock()->getContext()));
-  Value *Calloc = M->getOrInsertFunction("calloc", Attrs, B.getInt8PtrTy(),
-                                         PtrType, PtrType);
-  CallInst *CI = B.CreateCall(Calloc, { Num, Size }, "calloc");
-
-  if (const auto *F = dyn_cast<Function>(Calloc->stripPointerCasts()))
-    CI->setCallingConv(F->getCallingConv());
-
-  return CI;
-}
-
 /// Fold memset[_chk](malloc(n), 0, n) --> calloc(1, n).
 static Value *foldMallocMemset(CallInst *Memset, IRBuilder<> &B,
                                const TargetLibraryInfo &TLI) {
@@ -887,6 +891,13 @@ Value *LibCallSimplifier::optimizeMemSet(CallInst *CI, IRBuilder<> &B) {
   Value *Val = B.CreateIntCast(CI->getArgOperand(1), B.getInt8Ty(), false);
   B.CreateMemSet(CI->getArgOperand(0), Val, CI->getArgOperand(2), 1);
   return CI->getArgOperand(0);
+}
+
+Value *LibCallSimplifier::optimizeRealloc(CallInst *CI, IRBuilder<> &B) {
+  if (isa<ConstantPointerNull>(CI->getArgOperand(0)))
+    return emitMalloc(CI->getArgOperand(1), B, DL, TLI);
+
+  return nullptr;
 }
 
 //===----------------------------------------------------------------------===//
@@ -1677,6 +1688,29 @@ Value *LibCallSimplifier::optimizeToAscii(CallInst *CI, IRBuilder<> &B) {
                      ConstantInt::get(CI->getType(), 0x7F));
 }
 
+Value *LibCallSimplifier::optimizeAtoi(CallInst *CI, IRBuilder<> &B) {
+  StringRef Str;
+  if (!getConstantStringInfo(CI->getArgOperand(0), Str))
+    return nullptr;
+
+  return convertStrToNumber(CI, Str, 10);
+}
+
+Value *LibCallSimplifier::optimizeStrtol(CallInst *CI, IRBuilder<> &B) {
+  StringRef Str;
+  if (!getConstantStringInfo(CI->getArgOperand(0), Str))
+    return nullptr;
+
+  if (!isa<ConstantPointerNull>(CI->getArgOperand(1)))
+    return nullptr;
+
+  if (ConstantInt *CInt = dyn_cast<ConstantInt>(CI->getArgOperand(2))) {
+    return convertStrToNumber(CI, Str, CInt->getSExtValue());
+  }
+
+  return nullptr;
+}
+
 //===----------------------------------------------------------------------===//
 // Formatting and IO Library Call Optimizations
 //===----------------------------------------------------------------------===//
@@ -2080,6 +2114,8 @@ Value *LibCallSimplifier::optimizeStringMemoryLibCall(CallInst *CI,
       return optimizeMemMove(CI, Builder);
     case LibFunc_memset:
       return optimizeMemSet(CI, Builder);
+    case LibFunc_realloc:
+      return optimizeRealloc(CI, Builder);
     case LibFunc_wcslen:
       return optimizeWcslen(CI, Builder);
     default:
@@ -2271,6 +2307,13 @@ Value *LibCallSimplifier::optimizeCall(CallInst *CI) {
       return optimizeIsAscii(CI, Builder);
     case LibFunc_toascii:
       return optimizeToAscii(CI, Builder);
+    case LibFunc_atoi:
+    case LibFunc_atol:
+    case LibFunc_atoll:
+      return optimizeAtoi(CI, Builder);
+    case LibFunc_strtol:
+    case LibFunc_strtoll:
+      return optimizeStrtol(CI, Builder);
     case LibFunc_printf:
       return optimizePrintF(CI, Builder);
     case LibFunc_sprintf:

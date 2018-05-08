@@ -1,7 +1,7 @@
 # RUN: llvm-mc -triple x86_64-pc-linux %s -filetype=obj -o %t
-# RUN: llvm-dwarfdump -find=foo %t | FileCheck --check-prefix=FOO %s
-# RUN: llvm-dwarfdump -find=baz %t | FileCheck --check-prefix=BAZ %s
-# RUN: llvm-dwarfdump -find=missing %t | FileCheck --check-prefix=MISSING %s
+# RUN: llvm-dwarfdump -find=foo - <%t | FileCheck --check-prefix=FOO %s
+# RUN: llvm-dwarfdump -find=baz - <%t | FileCheck --check-prefix=BAZ %s
+# RUN: llvm-dwarfdump -find=missing - <%t | FileCheck --check-prefix=MISSING %s
 
 # FOO: DW_TAG_subprogram
 # FOO-NEXT: DW_AT_name ("foo")
@@ -121,7 +121,7 @@
 	.byte	46                      # Abbrev code
 	.byte	46                      # DW_TAG_subprogram
 	.byte	3                       # DW_IDX_die_offset
-	.byte	6                       # DW_FORM_data4
+	.byte	19                      # DW_FORM_ref4
 	.byte	0                       # End of abbrev
 	.byte	0                       # End of abbrev
 	.byte	0                       # End of abbrev list
@@ -129,15 +129,15 @@
 .Lnames_entries0:
 .Lnames0:
 	.byte	46                      # Abbrev code
-	.long	.Ldie_bar               # DW_IDX_die_offset
+	.long	.Ldie_bar-.Lcu_begin0   # DW_IDX_die_offset
 	.long	0                       # End of list: bar
 .Lnames1:
 	.byte	46                      # Abbrev code
-	.long	.Ldie_foo               # DW_IDX_die_offset
+	.long	.Ldie_foo-.Lcu_begin0   # DW_IDX_die_offset
 	.long	0                       # End of list: foo
 .Lnames2:
 	.byte	46                      # Abbrev code
-	.long	.Ldie_foo               # DW_IDX_die_offset
+	.long	.Ldie_foo-.Lcu_begin0   # DW_IDX_die_offset
 	.long	0                       # End of list: _Z3foov
 	.p2align	2
 .Lnames_end0:
@@ -163,7 +163,7 @@
 	.byte	46                      # Abbrev code
 	.byte	46                      # DW_TAG_subprogram
 	.byte	3                       # DW_IDX_die_offset
-	.byte	6                       # DW_FORM_data4
+	.byte	19                      # DW_FORM_ref4
 	.byte	0                       # End of abbrev
 	.byte	0                       # End of abbrev
 	.byte	0                       # End of abbrev list
@@ -171,12 +171,12 @@
 .Lnames_entries1:
 .Lnames3:
 	.byte	46                      # Abbrev code
-	.long	.Ldie_baz               # DW_IDX_die_offset
+	.long	.Ldie_baz-.Lcu_begin1   # DW_IDX_die_offset
 	.long	0                       # End of list: baz
 	.p2align	2
 .Lnames4:
 	.byte	46                      # Abbrev code
-	.long	.Ldie_bazz              # DW_IDX_die_offset
+	.long	.Ldie_bazz-.Lcu_begin1  # DW_IDX_die_offset
 	.long	0                       # End of list: baz
 	.p2align	2
 .Lnames_end1:

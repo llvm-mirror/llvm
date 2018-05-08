@@ -37,7 +37,6 @@
 #include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/CodeGen/MachineValueType.h"
 #include "llvm/CodeGen/RegisterScavenging.h"
 #include "llvm/CodeGen/ScheduleDAG.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
@@ -53,6 +52,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/MachineValueType.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Target/TargetMachine.h"
 #include <cassert>
@@ -827,10 +827,6 @@ void SIInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
   MachineFrameInfo &FrameInfo = MF->getFrameInfo();
   DebugLoc DL = MBB.findDebugLoc(MI);
 
-  assert(SrcReg != MFI->getStackPtrOffsetReg() &&
-         SrcReg != MFI->getFrameOffsetReg() &&
-         SrcReg != MFI->getScratchWaveOffsetReg());
-
   unsigned Size = FrameInfo.getObjectSize(FrameIndex);
   unsigned Align = FrameInfo.getObjectAlignment(FrameIndex);
   MachinePointerInfo PtrInfo
@@ -864,7 +860,7 @@ void SIInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
     // needing them, and need to ensure that the reserved registers are
     // correctly handled.
 
-    FrameInfo.setStackID(FrameIndex, 1);
+    FrameInfo.setStackID(FrameIndex, SIStackID::SGPR_SPILL);
     if (ST.hasScalarStores()) {
       // m0 is used for offset to scalar stores if used to spill.
       Spill.addReg(AMDGPU::M0, RegState::ImplicitDefine | RegState::Dead);
@@ -960,7 +956,7 @@ void SIInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
       MRI.constrainRegClass(DestReg, &AMDGPU::SReg_32_XM0RegClass);
     }
 
-    FrameInfo.setStackID(FrameIndex, 1);
+    FrameInfo.setStackID(FrameIndex, SIStackID::SGPR_SPILL);
     MachineInstrBuilder Spill = BuildMI(MBB, MI, DL, OpDesc, DestReg)
       .addFrameIndex(FrameIndex) // addr
       .addMemOperand(MMO)
@@ -2339,6 +2335,15 @@ bool SIInstrInfo::isInlineConstant(const MachineOperand &MO,
   }
   case AMDGPU::OPERAND_REG_INLINE_C_V2INT16:
   case AMDGPU::OPERAND_REG_INLINE_C_V2FP16: {
+    if (isUInt<16>(Imm)) {
+      int16_t Trunc = static_cast<int16_t>(Imm);
+      return ST.has16BitInsts() &&
+             AMDGPU::isInlinableLiteral16(Trunc, ST.hasInv2PiInlineImm());
+    }
+    if (!(Imm & 0xffff)) {
+      return ST.has16BitInsts() &&
+             AMDGPU::isInlinableLiteral16(Imm >> 16, ST.hasInv2PiInlineImm());
+    }
     uint32_t Trunc = static_cast<uint32_t>(Imm);
     return  AMDGPU::isInlinableLiteralV216(Trunc, ST.hasInv2PiInlineImm());
   }
@@ -2720,6 +2725,7 @@ bool SIInstrInfo::verifyInstruction(const MachineInstr &MI,
     const int OpIndices[] = { Src0Idx, Src1Idx, Src2Idx };
 
     unsigned ConstantBusCount = 0;
+    unsigned LiteralCount = 0;
 
     if (AMDGPU::getNamedOperandIdx(Opcode, AMDGPU::OpName::imm) != -1)
       ++ConstantBusCount;
@@ -2739,11 +2745,17 @@ bool SIInstrInfo::verifyInstruction(const MachineInstr &MI,
           SGPRUsed = MO.getReg();
         } else {
           ++ConstantBusCount;
+          ++LiteralCount;
         }
       }
     }
     if (ConstantBusCount > 1) {
       ErrInfo = "VOP* instruction uses the constant bus more than once";
+      return false;
+    }
+
+    if (isVOP3(MI) && LiteralCount) {
+      ErrInfo = "VOP3 instruction uses literal";
       return false;
     }
   }
@@ -3285,6 +3297,13 @@ unsigned SIInstrInfo::readlaneVGPRToSGPR(unsigned SrcReg, MachineInstr &UseMI,
   unsigned DstReg = MRI.createVirtualRegister(SRC);
   unsigned SubRegs = RI.getRegSizeInBits(*VRC) / 32;
 
+  if (SubRegs == 1) {
+    BuildMI(*UseMI.getParent(), UseMI, UseMI.getDebugLoc(),
+            get(AMDGPU::V_READFIRSTLANE_B32), DstReg)
+        .addReg(SrcReg);
+    return DstReg;
+  }
+
   SmallVector<unsigned, 8> SRegs;
   for (unsigned i = 0; i < SubRegs; ++i) {
     unsigned SGPR = MRI.createVirtualRegister(&AMDGPU::SGPR_32RegClass);
@@ -3459,6 +3478,14 @@ void SIInstrInfo::legalizeOperands(MachineInstr &MI) const {
       MachineOperand &Op = MI.getOperand(1);
       legalizeGenericOperand(*MBB, MI, DstRC, Op, MRI, MI.getDebugLoc());
     }
+    return;
+  }
+
+  // Legalize SI_INIT_M0
+  if (MI.getOpcode() == AMDGPU::SI_INIT_M0) {
+    MachineOperand &Src = MI.getOperand(0);
+    if (Src.isReg() && RI.hasVGPRs(MRI.getRegClass(Src.getReg())))
+      Src.setReg(readlaneVGPRToSGPR(Src.getReg(), MI, MRI));
     return;
   }
 
@@ -3923,6 +3950,13 @@ void SIInstrInfo::moveToVALU(MachineInstr &TopInst) const {
         MRI.replaceRegWith(DstReg, Inst.getOperand(1).getReg());
         MRI.clearKillFlags(Inst.getOperand(1).getReg());
         Inst.getOperand(0).setReg(DstReg);
+
+        // Make sure we don't leave around a dead VGPR->SGPR copy. Normally
+        // these are deleted later, but at -O0 it would leave a suspicious
+        // looking illegal copy of an undef register.
+        for (unsigned I = Inst.getNumOperands() - 1; I != 0; --I)
+          Inst.RemoveOperand(I);
+        Inst.setDesc(get(AMDGPU::IMPLICIT_DEF));
         continue;
       }
 

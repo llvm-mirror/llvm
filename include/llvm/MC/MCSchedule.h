@@ -15,18 +15,20 @@
 #ifndef LLVM_MC_MCSCHEDULE_H
 #define LLVM_MC_MCSCHEDULE_H
 
+#include "llvm/ADT/Optional.h"
 #include "llvm/Support/DataTypes.h"
 #include <cassert>
 
 namespace llvm {
 
 struct InstrItinerary;
+class MCSubtargetInfo;
+class MCInstrInfo;
+class InstrItineraryData;
 
 /// Define a kind of processor resource that will be modeled by the scheduler.
 struct MCProcResourceDesc {
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
   const char *Name;
-#endif
   unsigned NumUnits; // Number of resource of this kind
   unsigned SuperIdx; // Index of the resources kind that contains this kind.
 
@@ -128,6 +130,64 @@ struct MCSchedClassDesc {
   }
 };
 
+/// Specify the cost of a register definition in terms of number of physical
+/// register allocated at register renaming stage. For example, AMD Jaguar.
+/// natively supports 128-bit data types, and operations on 256-bit registers
+/// (i.e. YMM registers) are internally split into two COPs (complex operations)
+/// and each COP updates a physical register. Basically, on Jaguar, a YMM
+/// register write effectively consumes two physical registers. That means,
+/// the cost of a YMM write in the BtVer2 model is 2.
+struct MCRegisterCostEntry {
+  unsigned RegisterClassID;
+  unsigned Cost;
+};
+
+/// A register file descriptor.
+///
+/// This struct allows to describe processor register files. In particular, it
+/// helps describing the size of the register file, as well as the cost of
+/// allocating a register file at register renaming stage.
+/// FIXME: this struct can be extended to provide information about the number
+/// of read/write ports to the register file.  A value of zero for field
+/// 'NumPhysRegs' means: this register file has an unbounded number of physical
+/// registers.
+struct MCRegisterFileDesc {
+  const char *Name;
+  uint16_t NumPhysRegs;
+  uint16_t NumRegisterCostEntries;
+  // Index of the first cost entry in MCExtraProcessorInfo::RegisterCostTable.
+  uint16_t RegisterCostEntryIdx;
+};
+
+/// Provide extra details about the machine processor.
+///
+/// This is a collection of "optional" processor information that is not
+/// normally used by the LLVM machine schedulers, but that can be consumed by
+/// external tools like llvm-mca to improve the quality of the peformance
+/// analysis.
+struct MCExtraProcessorInfo {
+  // Actual size of the reorder buffer in hardware.
+  unsigned ReorderBufferSize;
+  // Number of instructions retired per cycle.
+  unsigned MaxRetirePerCycle;
+  const MCRegisterFileDesc *RegisterFiles;
+  unsigned NumRegisterFiles;
+  const MCRegisterCostEntry *RegisterCostTable;
+  unsigned NumRegisterCostEntries;
+
+  struct PfmCountersInfo {
+    // An optional name of a performance counter that can be used to measure
+    // cycles.
+    const char *CycleCounter;
+
+    // For each MCProcResourceDesc defined by the processor, an optional list of
+    // names of performance counters that can be used to measure the resource
+    // utilization.
+    const char **IssueCounters;
+  };
+  PfmCountersInfo PfmCounters;
+};
+
 /// Machine model for scheduling, bundling, and heuristics.
 ///
 /// The machine model directly provides basic information about the
@@ -198,10 +258,20 @@ struct MCSchedModel {
   friend class InstrItineraryData;
   const InstrItinerary *InstrItineraries;
 
+  const MCExtraProcessorInfo *ExtraProcessorInfo;
+
+  bool hasExtraProcessorInfo() const { return ExtraProcessorInfo; }
+
   unsigned getProcessorID() const { return ProcID; }
 
   /// Does this machine model include instruction-level scheduling.
   bool hasInstrSchedModel() const { return SchedClassTable; }
+
+  const MCExtraProcessorInfo &getExtraProcessorInfo() const {
+    assert(hasExtraProcessorInfo() &&
+           "No extra information available for this model");
+    return *ExtraProcessorInfo;
+  }
 
   /// Return true if this machine model data for all instructions with a
   /// scheduling class (itinerary class or SchedRW list).
@@ -228,11 +298,25 @@ struct MCSchedModel {
     return &SchedClassTable[SchedClassIdx];
   }
 
+  /// Returns the latency value for the scheduling class.
+  static int computeInstrLatency(const MCSubtargetInfo &STI,
+                                 const MCSchedClassDesc &SCDesc);
+
+  int computeInstrLatency(const MCSubtargetInfo &STI, unsigned SClass) const;
+
+  // Returns the reciprocal throughput information from a MCSchedClassDesc.
+  static Optional<double>
+  getReciprocalThroughput(const MCSubtargetInfo &STI,
+                          const MCSchedClassDesc &SCDesc);
+
+  static Optional<double>
+  getReciprocalThroughput(unsigned SchedClass, const InstrItineraryData &IID);
+
   /// Returns the default initialized model.
   static const MCSchedModel &GetDefaultSchedModel() { return Default; }
   static const MCSchedModel Default;
 };
 
-} // End llvm namespace
+} // namespace llvm
 
 #endif

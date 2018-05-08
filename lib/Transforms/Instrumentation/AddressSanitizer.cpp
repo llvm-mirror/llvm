@@ -25,6 +25,7 @@
 #include "llvm/ADT/Twine.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
+#include "llvm/Analysis/Utils/Local.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/BinaryFormat/MachO.h"
 #include "llvm/IR/Argument.h"
@@ -71,7 +72,6 @@
 #include "llvm/Transforms/Instrumentation.h"
 #include "llvm/Transforms/Utils/ASanStackFrameLayout.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
 #include "llvm/Transforms/Utils/PromoteMemToReg.h"
 #include <algorithm>
@@ -589,9 +589,10 @@ struct AddressSanitizer : public FunctionPass {
 
   explicit AddressSanitizer(bool CompileKernel = false, bool Recover = false,
                             bool UseAfterScope = false)
-      : FunctionPass(ID), CompileKernel(CompileKernel || ClEnableKasan),
-        Recover(Recover || ClRecover),
-        UseAfterScope(UseAfterScope || ClUseAfterScope) {
+      : FunctionPass(ID), UseAfterScope(UseAfterScope || ClUseAfterScope) {
+    this->Recover = ClRecover.getNumOccurrences() > 0 ? ClRecover : Recover;
+    this->CompileKernel = ClEnableKasan.getNumOccurrences() > 0 ?
+        ClEnableKasan : CompileKernel;
     initializeAddressSanitizerPass(*PassRegistry::getPassRegistry());
   }
 
@@ -717,8 +718,7 @@ public:
   explicit AddressSanitizerModule(bool CompileKernel = false,
                                   bool Recover = false,
                                   bool UseGlobalsGC = true)
-      : ModulePass(ID), CompileKernel(CompileKernel || ClEnableKasan),
-        Recover(Recover || ClRecover),
+      : ModulePass(ID),
         UseGlobalsGC(UseGlobalsGC && ClUseGlobalsGC),
         // Not a typo: ClWithComdat is almost completely pointless without
         // ClUseGlobalsGC (because then it only works on modules without
@@ -727,7 +727,12 @@ public:
         // argument is designed as workaround. Therefore, disable both
         // ClWithComdat and ClUseGlobalsGC unless the frontend says it's ok to
         // do globals-gc.
-        UseCtorComdat(UseGlobalsGC && ClWithComdat) {}
+        UseCtorComdat(UseGlobalsGC && ClWithComdat) {
+          this->Recover = ClRecover.getNumOccurrences() > 0 ?
+              ClRecover : Recover;
+          this->CompileKernel = ClEnableKasan.getNumOccurrences() > 0 ?
+              ClEnableKasan : CompileKernel;
+	}
 
   bool runOnModule(Module &M) override;
   StringRef getPassName() const override { return "AddressSanitizerModule"; }
@@ -2157,6 +2162,16 @@ bool AddressSanitizerModule::InstrumentGlobals(IRBuilder<> &IRB, Module &M, bool
 
     Initializers[i] = Initializer;
   }
+
+  // Add instrumented globals to llvm.compiler.used list to avoid LTO from
+  // ConstantMerge'ing them.
+  SmallVector<GlobalValue *, 16> GlobalsToAddToUsedList;
+  for (size_t i = 0; i < n; i++) {
+    GlobalVariable *G = NewGlobals[i];
+    if (G->getName().empty()) continue;
+    GlobalsToAddToUsedList.push_back(G);
+  }
+  appendToCompilerUsed(M, ArrayRef<GlobalValue *>(GlobalsToAddToUsedList));
 
   std::string ELFUniqueModuleId =
       (UseGlobalsGC && TargetTriple.isOSBinFormatELF()) ? getUniqueModuleId(&M)

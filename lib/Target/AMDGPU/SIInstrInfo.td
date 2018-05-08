@@ -410,6 +410,9 @@ def sextloadi16_glue : PatFrag<(ops node:$ptr), (sextload_glue node:$ptr), [{
 def load_glue_align8 : Aligned8Bytes <
   (ops node:$ptr), (load_glue node:$ptr)
 >;
+def load_glue_align16 : Aligned16Bytes <
+  (ops node:$ptr), (load_glue node:$ptr)
+>;
 
 
 def load_local_m0 : LoadFrag<load_glue>, LocalAddress;
@@ -418,6 +421,7 @@ def sextloadi16_local_m0 : LoadFrag<sextloadi16_glue>, LocalAddress;
 def az_extloadi8_local_m0 : LoadFrag<az_extloadi8_glue>, LocalAddress;
 def az_extloadi16_local_m0 : LoadFrag<az_extloadi16_glue>, LocalAddress;
 def load_align8_local_m0 : LoadFrag <load_glue_align8>, LocalAddress;
+def load_align16_local_m0 : LoadFrag <load_glue_align16>, LocalAddress;
 
 
 def AMDGPUst_glue : SDNode <"ISD::STORE", SDTStore,
@@ -453,11 +457,16 @@ def store_glue_align8 : Aligned8Bytes <
   (ops node:$value, node:$ptr), (store_glue node:$value, node:$ptr)
 >;
 
+def store_glue_align16 : Aligned16Bytes <
+  (ops node:$value, node:$ptr), (store_glue node:$value, node:$ptr)
+>;
+
 def store_local_m0 : StoreFrag<store_glue>, LocalAddress;
 def truncstorei8_local_m0 : StoreFrag<truncstorei8_glue>, LocalAddress;
 def truncstorei16_local_m0 : StoreFrag<truncstorei16_glue>, LocalAddress;
 
 def store_align8_local_m0 : StoreFrag<store_glue_align8>, LocalAddress;
+def store_align16_local_m0 : StoreFrag<store_glue_align16>, LocalAddress;
 
 def si_setcc_uniform : PatFrag <
   (ops node:$lhs, node:$rhs, node:$cond),
@@ -561,6 +570,12 @@ def frameindex_to_targetframeindex : SDNodeXForm<frameindex, [{
 def bitcast_fpimm_to_i64 : SDNodeXForm<fpimm, [{
 return CurDAG->getTargetConstant(
   N->getValueAPF().bitcastToAPInt().getZExtValue(), SDLoc(N), MVT::i64);
+}]>;
+
+class bitextract_imm<int bitnum> : SDNodeXForm<imm, [{
+  uint64_t Imm = N->getZExtValue();
+  unsigned Bit = (Imm >> }] # bitnum # [{ ) & 1;
+  return CurDAG->getTargetConstant(Bit, SDLoc(N), MVT::i1);
 }]>;
 
 def SIMM16bit : PatLeaf <(imm),
@@ -1932,6 +1947,8 @@ class AtomicNoRet <string noRetOp, bit isRet> {
 //===----------------------------------------------------------------------===//
 // Interpolation opcodes
 //===----------------------------------------------------------------------===//
+
+class VINTRPDstOperand <RegisterClass rc> : RegisterOperand <rc, "printVINTRPDst">;
 
 class VINTRP_Pseudo <string opName, dag outs, dag ins, list<dag> pattern> :
   VINTRPCommon <outs, ins, "", pattern>,

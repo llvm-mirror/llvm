@@ -45,6 +45,11 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
   // Set up the register classes.
   addRegisterClass(XLenVT, &RISCV::GPRRegClass);
 
+  if (Subtarget.hasStdExtF())
+    addRegisterClass(MVT::f32, &RISCV::FPR32RegClass);
+  if (Subtarget.hasStdExtD())
+    addRegisterClass(MVT::f64, &RISCV::FPR64RegClass);
+
   // Compute derived properties from the register classes.
   computeRegisterProperties(STI.getRegisterInfo());
 
@@ -103,14 +108,43 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::CTLZ, XLenVT, Expand);
   setOperationAction(ISD::CTPOP, XLenVT, Expand);
 
+  ISD::CondCode FPCCToExtend[] = {
+      ISD::SETOGT, ISD::SETOGE, ISD::SETONE, ISD::SETO,   ISD::SETUEQ,
+      ISD::SETUGT, ISD::SETUGE, ISD::SETULT, ISD::SETULE, ISD::SETUNE,
+      ISD::SETGT,  ISD::SETGE,  ISD::SETNE};
+
+  if (Subtarget.hasStdExtF()) {
+    setOperationAction(ISD::FMINNUM, MVT::f32, Legal);
+    setOperationAction(ISD::FMAXNUM, MVT::f32, Legal);
+    for (auto CC : FPCCToExtend)
+      setCondCodeAction(CC, MVT::f32, Expand);
+    setOperationAction(ISD::SELECT_CC, MVT::f32, Expand);
+    setOperationAction(ISD::SELECT, MVT::f32, Custom);
+    setOperationAction(ISD::BR_CC, MVT::f32, Expand);
+  }
+
+  if (Subtarget.hasStdExtD()) {
+    setOperationAction(ISD::FMINNUM, MVT::f64, Legal);
+    setOperationAction(ISD::FMAXNUM, MVT::f64, Legal);
+    for (auto CC : FPCCToExtend)
+      setCondCodeAction(CC, MVT::f64, Expand);
+    setOperationAction(ISD::SELECT_CC, MVT::f64, Expand);
+    setOperationAction(ISD::SELECT, MVT::f64, Custom);
+    setOperationAction(ISD::BR_CC, MVT::f64, Expand);
+    setLoadExtAction(ISD::EXTLOAD, MVT::f64, MVT::f32, Expand);
+    setTruncStoreAction(MVT::f64, MVT::f32, Expand);
+  }
+
   setOperationAction(ISD::GlobalAddress, XLenVT, Custom);
   setOperationAction(ISD::BlockAddress, XLenVT, Custom);
+  setOperationAction(ISD::ConstantPool, XLenVT, Custom);
 
   setBooleanContents(ZeroOrOneBooleanContent);
 
   // Function alignments (log2).
-  setMinFunctionAlignment(3);
-  setPrefFunctionAlignment(3);
+  unsigned FunctionAlignment = Subtarget.hasStdExtC() ? 1 : 2;
+  setMinFunctionAlignment(FunctionAlignment);
+  setPrefFunctionAlignment(FunctionAlignment);
 
   // Effectively disable jump table generation.
   setMinimumJumpTableEntries(INT_MAX);
@@ -171,6 +205,8 @@ SDValue RISCVTargetLowering::LowerOperation(SDValue Op,
     return lowerGlobalAddress(Op, DAG);
   case ISD::BlockAddress:
     return lowerBlockAddress(Op, DAG);
+  case ISD::ConstantPool:
+    return lowerConstantPool(Op, DAG);
   case ISD::SELECT:
     return lowerSELECT(Op, DAG);
   case ISD::VASTART:
@@ -220,6 +256,29 @@ SDValue RISCVTargetLowering::lowerBlockAddress(SDValue Op,
   SDValue MNLo =
     SDValue(DAG.getMachineNode(RISCV::ADDI, DL, Ty, MNHi, BALo), 0);
   return MNLo;
+}
+
+SDValue RISCVTargetLowering::lowerConstantPool(SDValue Op,
+                                               SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  EVT Ty = Op.getValueType();
+  ConstantPoolSDNode *N = cast<ConstantPoolSDNode>(Op);
+  const Constant *CPA = N->getConstVal();
+  int64_t Offset = N->getOffset();
+  unsigned Alignment = N->getAlignment();
+
+  if (!isPositionIndependent()) {
+    SDValue CPAHi =
+        DAG.getTargetConstantPool(CPA, Ty, Alignment, Offset, RISCVII::MO_HI);
+    SDValue CPALo =
+        DAG.getTargetConstantPool(CPA, Ty, Alignment, Offset, RISCVII::MO_LO);
+    SDValue MNHi = SDValue(DAG.getMachineNode(RISCV::LUI, DL, Ty, CPAHi), 0);
+    SDValue MNLo =
+        SDValue(DAG.getMachineNode(RISCV::ADDI, DL, Ty, MNHi, CPALo), 0);
+    return MNLo;
+  } else {
+    report_fatal_error("Unable to lowerConstantPool");
+  }
 }
 
 SDValue RISCVTargetLowering::lowerExternalSymbol(SDValue Op,
@@ -350,14 +409,85 @@ SDValue RISCVTargetLowering::LowerRETURNADDR(SDValue Op,
   return DAG.getCopyFromReg(DAG.getEntryNode(), DL, Reg, XLenVT);
 }
 
+static MachineBasicBlock *emitSplitF64Pseudo(MachineInstr &MI,
+                                             MachineBasicBlock *BB) {
+  assert(MI.getOpcode() == RISCV::SplitF64Pseudo && "Unexpected instruction");
+
+  MachineFunction &MF = *BB->getParent();
+  DebugLoc DL = MI.getDebugLoc();
+  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
+  const TargetRegisterInfo *RI = MF.getSubtarget().getRegisterInfo();
+  unsigned LoReg = MI.getOperand(0).getReg();
+  unsigned HiReg = MI.getOperand(1).getReg();
+  unsigned SrcReg = MI.getOperand(2).getReg();
+  const TargetRegisterClass *SrcRC = &RISCV::FPR64RegClass;
+  int FI = MF.getInfo<RISCVMachineFunctionInfo>()->getMoveF64FrameIndex();
+
+  TII.storeRegToStackSlot(*BB, MI, SrcReg, MI.getOperand(2).isKill(), FI, SrcRC,
+                          RI);
+  MachineMemOperand *MMO =
+      MF.getMachineMemOperand(MachinePointerInfo::getFixedStack(MF, FI),
+                              MachineMemOperand::MOLoad, 8, 8);
+  BuildMI(*BB, MI, DL, TII.get(RISCV::LW), LoReg)
+      .addFrameIndex(FI)
+      .addImm(0)
+      .addMemOperand(MMO);
+  BuildMI(*BB, MI, DL, TII.get(RISCV::LW), HiReg)
+      .addFrameIndex(FI)
+      .addImm(4)
+      .addMemOperand(MMO);
+  MI.eraseFromParent(); // The pseudo instruction is gone now.
+  return BB;
+}
+
+static MachineBasicBlock *emitBuildPairF64Pseudo(MachineInstr &MI,
+                                                 MachineBasicBlock *BB) {
+  assert(MI.getOpcode() == RISCV::BuildPairF64Pseudo &&
+         "Unexpected instruction");
+
+  MachineFunction &MF = *BB->getParent();
+  DebugLoc DL = MI.getDebugLoc();
+  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
+  const TargetRegisterInfo *RI = MF.getSubtarget().getRegisterInfo();
+  unsigned DstReg = MI.getOperand(0).getReg();
+  unsigned LoReg = MI.getOperand(1).getReg();
+  unsigned HiReg = MI.getOperand(2).getReg();
+  const TargetRegisterClass *DstRC = &RISCV::FPR64RegClass;
+  int FI = MF.getInfo<RISCVMachineFunctionInfo>()->getMoveF64FrameIndex();
+
+  MachineMemOperand *MMO =
+      MF.getMachineMemOperand(MachinePointerInfo::getFixedStack(MF, FI),
+                              MachineMemOperand::MOStore, 8, 8);
+  BuildMI(*BB, MI, DL, TII.get(RISCV::SW))
+      .addReg(LoReg, getKillRegState(MI.getOperand(1).isKill()))
+      .addFrameIndex(FI)
+      .addImm(0)
+      .addMemOperand(MMO);
+  BuildMI(*BB, MI, DL, TII.get(RISCV::SW))
+      .addReg(HiReg, getKillRegState(MI.getOperand(2).isKill()))
+      .addFrameIndex(FI)
+      .addImm(4)
+      .addMemOperand(MMO);
+  TII.loadRegFromStackSlot(*BB, MI, DstReg, FI, DstRC, RI);
+  MI.eraseFromParent(); // The pseudo instruction is gone now.
+  return BB;
+}
+
 MachineBasicBlock *
 RISCVTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
                                                  MachineBasicBlock *BB) const {
-  const TargetInstrInfo &TII = *BB->getParent()->getSubtarget().getInstrInfo();
-  DebugLoc DL = MI.getDebugLoc();
-
-  assert(MI.getOpcode() == RISCV::Select_GPR_Using_CC_GPR &&
-         "Unexpected instr type to insert");
+  switch (MI.getOpcode()) {
+  default:
+    llvm_unreachable("Unexpected instr type to insert");
+  case RISCV::Select_GPR_Using_CC_GPR:
+  case RISCV::Select_FPR32_Using_CC_GPR:
+  case RISCV::Select_FPR64_Using_CC_GPR:
+    break;
+  case RISCV::BuildPairF64Pseudo:
+    return emitBuildPairF64Pseudo(MI, BB);
+  case RISCV::SplitF64Pseudo:
+    return emitSplitF64Pseudo(MI, BB);
+  }
 
   // To "insert" a SELECT instruction, we actually have to insert the triangle
   // control-flow pattern.  The incoming instruction knows the destination vreg
@@ -370,7 +500,9 @@ RISCVTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
   //     |  IfFalseMBB
   //     | /
   //    TailMBB
+  const TargetInstrInfo &TII = *BB->getParent()->getSubtarget().getInstrInfo();
   const BasicBlock *LLVM_BB = BB->getBasicBlock();
+  DebugLoc DL = MI.getDebugLoc();
   MachineFunction::iterator I = ++BB->getIterator();
 
   MachineBasicBlock *HeadMBB = BB;
@@ -491,8 +623,10 @@ static bool CC_RISCV(const DataLayout &DL, unsigned ValNo, MVT ValVT, MVT LocVT,
   unsigned XLen = DL.getLargestLegalIntTypeSizeInBits();
   assert(XLen == 32 || XLen == 64);
   MVT XLenVT = XLen == 32 ? MVT::i32 : MVT::i64;
-  assert(ValVT == XLenVT && "Unexpected ValVT");
-  assert(LocVT == XLenVT && "Unexpected LocVT");
+  if (ValVT == MVT::f32) {
+    LocVT = MVT::i32;
+    LocInfo = CCValAssign::BCvt;
+  }
 
   // Any return value split in to more than two values can't be returned
   // directly.
@@ -521,6 +655,28 @@ static bool CC_RISCV(const DataLayout &DL, unsigned ValNo, MVT ValVT, MVT LocVT,
 
   assert(PendingLocs.size() == PendingArgFlags.size() &&
          "PendingLocs and PendingArgFlags out of sync");
+
+  // Handle passing f64 on RV32D with a soft float ABI.
+  if (XLen == 32 && ValVT == MVT::f64) {
+    assert(!ArgFlags.isSplit() && PendingLocs.empty() &&
+           "Can't lower f64 if it is split");
+    // Depending on available argument GPRS, f64 may be passed in a pair of
+    // GPRs, split between a GPR and the stack, or passed completely on the
+    // stack. LowerCall/LowerFormalArguments/LowerReturn must recognise these
+    // cases.
+    unsigned Reg = State.AllocateReg(ArgGPRs);
+    LocVT = MVT::i32;
+    if (!Reg) {
+      unsigned StackOffset = State.AllocateStack(8, 8);
+      State.addLoc(
+          CCValAssign::getMem(ValNo, ValVT, StackOffset, LocVT, LocInfo));
+      return false;
+    }
+    if (!State.AllocateReg(ArgGPRs))
+      State.AllocateStack(4, 4);
+    State.addLoc(CCValAssign::getReg(ValNo, ValVT, Reg, LocVT, LocInfo));
+    return false;
+  }
 
   // Split arguments might be passed indirectly, so keep track of the pending
   // values.
@@ -634,6 +790,7 @@ static SDValue unpackFromRegLoc(SelectionDAG &DAG, SDValue Chain,
   MachineFunction &MF = DAG.getMachineFunction();
   MachineRegisterInfo &RegInfo = MF.getRegInfo();
   EVT LocVT = VA.getLocVT();
+  EVT ValVT = VA.getValVT();
   SDValue Val;
 
   unsigned VReg = RegInfo.createVirtualRegister(&RISCV::GPRRegClass);
@@ -645,8 +802,12 @@ static SDValue unpackFromRegLoc(SelectionDAG &DAG, SDValue Chain,
     llvm_unreachable("Unexpected CCValAssign::LocInfo");
   case CCValAssign::Full:
   case CCValAssign::Indirect:
-    return Val;
+    break;
+  case CCValAssign::BCvt:
+    Val = DAG.getNode(ISD::BITCAST, DL, ValVT, Val);
+    break;
   }
+  return Val;
 }
 
 // The caller is responsible for loading the full value if the argument is
@@ -676,6 +837,43 @@ static SDValue unpackFromMemLoc(SelectionDAG &DAG, SDValue Chain,
       ExtType, DL, LocVT, Chain, FIN,
       MachinePointerInfo::getFixedStack(DAG.getMachineFunction(), FI), ValVT);
   return Val;
+}
+
+static SDValue unpackF64OnRV32DSoftABI(SelectionDAG &DAG, SDValue Chain,
+                                       const CCValAssign &VA, const SDLoc &DL) {
+  assert(VA.getLocVT() == MVT::i32 && VA.getValVT() == MVT::f64 &&
+         "Unexpected VA");
+  MachineFunction &MF = DAG.getMachineFunction();
+  MachineFrameInfo &MFI = MF.getFrameInfo();
+  MachineRegisterInfo &RegInfo = MF.getRegInfo();
+
+  if (VA.isMemLoc()) {
+    // f64 is passed on the stack.
+    int FI = MFI.CreateFixedObject(8, VA.getLocMemOffset(), /*Immutable=*/true);
+    SDValue FIN = DAG.getFrameIndex(FI, MVT::i32);
+    return DAG.getLoad(MVT::f64, DL, Chain, FIN,
+                       MachinePointerInfo::getFixedStack(MF, FI));
+  }
+
+  assert(VA.isRegLoc() && "Expected register VA assignment");
+
+  unsigned LoVReg = RegInfo.createVirtualRegister(&RISCV::GPRRegClass);
+  RegInfo.addLiveIn(VA.getLocReg(), LoVReg);
+  SDValue Lo = DAG.getCopyFromReg(Chain, DL, LoVReg, MVT::i32);
+  SDValue Hi;
+  if (VA.getLocReg() == RISCV::X17) {
+    // Second half of f64 is passed on the stack.
+    int FI = MFI.CreateFixedObject(4, 0, /*Immutable=*/true);
+    SDValue FIN = DAG.getFrameIndex(FI, MVT::i32);
+    Hi = DAG.getLoad(MVT::i32, DL, Chain, FIN,
+                     MachinePointerInfo::getFixedStack(MF, FI));
+  } else {
+    // Second half of f64 is passed in another GPR.
+    unsigned HiVReg = RegInfo.createVirtualRegister(&RISCV::GPRRegClass);
+    RegInfo.addLiveIn(VA.getLocReg() + 1, HiVReg);
+    Hi = DAG.getCopyFromReg(Chain, DL, HiVReg, MVT::i32);
+  }
+  return DAG.getNode(RISCVISD::BuildPairF64, DL, MVT::f64, Lo, Hi);
 }
 
 // Transform physical registers into virtual registers.
@@ -708,7 +906,11 @@ SDValue RISCVTargetLowering::LowerFormalArguments(
     CCValAssign &VA = ArgLocs[i];
     assert(VA.getLocVT() == XLenVT && "Unhandled argument type");
     SDValue ArgValue;
-    if (VA.isRegLoc())
+    // Passing f64 on RV32D with a soft float ABI must be handled as a special
+    // case.
+    if (VA.getLocVT() == MVT::i32 && VA.getValVT() == MVT::f64)
+      ArgValue = unpackF64OnRV32DSoftABI(DAG, Chain, VA, DL);
+    else if (VA.isRegLoc())
       ArgValue = unpackFromRegLoc(DAG, Chain, VA, DL);
     else
       ArgValue = unpackFromMemLoc(DAG, Chain, VA, DL);
@@ -862,10 +1064,44 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
     SDValue ArgValue = OutVals[i];
     ISD::ArgFlagsTy Flags = Outs[i].Flags;
 
+    // Handle passing f64 on RV32D with a soft float ABI as a special case.
+    bool IsF64OnRV32DSoftABI =
+        VA.getLocVT() == MVT::i32 && VA.getValVT() == MVT::f64;
+    if (IsF64OnRV32DSoftABI && VA.isRegLoc()) {
+      SDValue SplitF64 = DAG.getNode(
+          RISCVISD::SplitF64, DL, DAG.getVTList(MVT::i32, MVT::i32), ArgValue);
+      SDValue Lo = SplitF64.getValue(0);
+      SDValue Hi = SplitF64.getValue(1);
+
+      unsigned RegLo = VA.getLocReg();
+      RegsToPass.push_back(std::make_pair(RegLo, Lo));
+
+      if (RegLo == RISCV::X17) {
+        // Second half of f64 is passed on the stack.
+        // Work out the address of the stack slot.
+        if (!StackPtr.getNode())
+          StackPtr = DAG.getCopyFromReg(Chain, DL, RISCV::X2, PtrVT);
+        // Emit the store.
+        MemOpChains.push_back(
+            DAG.getStore(Chain, DL, Hi, StackPtr, MachinePointerInfo()));
+      } else {
+        // Second half of f64 is passed in another GPR.
+        unsigned RegHigh = RegLo + 1;
+        RegsToPass.push_back(std::make_pair(RegHigh, Hi));
+      }
+      continue;
+    }
+
+    // IsF64OnRV32DSoftABI && VA.isMemLoc() is handled below in the same way
+    // as any other MemLoc.
+
     // Promote the value if needed.
     // For now, only handle fully promoted and indirect arguments.
     switch (VA.getLocInfo()) {
     case CCValAssign::Full:
+      break;
+    case CCValAssign::BCvt:
+      ArgValue = DAG.getNode(ISD::BITCAST, DL, VA.getLocVT(), ArgValue);
       break;
     case CCValAssign::Indirect: {
       // Store the argument in a stack slot and pass its address.
@@ -930,10 +1166,13 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
     Glue = Chain.getValue(1);
   }
 
-  if (isa<GlobalAddressSDNode>(Callee)) {
-    Callee = lowerGlobalAddress(Callee, DAG);
-  } else if (isa<ExternalSymbolSDNode>(Callee)) {
-    Callee = lowerExternalSymbol(Callee, DAG);
+  // If the callee is a GlobalAddress/ExternalSymbol node, turn it into a
+  // TargetGlobalAddress/TargetExternalSymbol node so that legalize won't
+  // split it and then direct call can be matched by PseudoCALL.
+  if (GlobalAddressSDNode *S = dyn_cast<GlobalAddressSDNode>(Callee)) {
+    Callee = DAG.getTargetGlobalAddress(S->getGlobal(), DL, PtrVT, 0, 0);
+  } else if (ExternalSymbolSDNode *S = dyn_cast<ExternalSymbolSDNode>(Callee)) {
+    Callee = DAG.getTargetExternalSymbol(S->getSymbol(), PtrVT, 0);
   }
 
   // The first call operand is the chain and the second is the target address.
@@ -975,13 +1214,32 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
 
   // Copy all of the result registers out of their specified physreg.
   for (auto &VA : RVLocs) {
-    // Copy the value out, gluing the copy to the end of the call sequence.
-    SDValue RetValue = DAG.getCopyFromReg(Chain, DL, VA.getLocReg(),
-                                          VA.getLocVT(), Glue);
+    // Copy the value out
+    SDValue RetValue =
+        DAG.getCopyFromReg(Chain, DL, VA.getLocReg(), VA.getLocVT(), Glue);
+    // Glue the RetValue to the end of the call sequence
     Chain = RetValue.getValue(1);
     Glue = RetValue.getValue(2);
+    if (VA.getLocVT() == MVT::i32 && VA.getValVT() == MVT::f64) {
+      assert(VA.getLocReg() == ArgGPRs[0] && "Unexpected reg assignment");
+      SDValue RetValue2 =
+          DAG.getCopyFromReg(Chain, DL, ArgGPRs[1], MVT::i32, Glue);
+      Chain = RetValue2.getValue(1);
+      Glue = RetValue2.getValue(2);
+      RetValue = DAG.getNode(RISCVISD::BuildPairF64, DL, MVT::f64, RetValue,
+                             RetValue2);
+    }
 
-    assert(VA.getLocInfo() == CCValAssign::Full && "Unknown loc info!");
+    switch (VA.getLocInfo()) {
+    default:
+      llvm_unreachable("Unknown loc info!");
+    case CCValAssign::Full:
+      break;
+    case CCValAssign::BCvt:
+      RetValue = DAG.getNode(ISD::BITCAST, DL, VA.getValVT(), RetValue);
+      break;
+    }
+
     InVals.push_back(RetValue);
   }
 
@@ -1003,6 +1261,22 @@ bool RISCVTargetLowering::CanLowerReturn(
   return true;
 }
 
+static SDValue packIntoRegLoc(SelectionDAG &DAG, SDValue Val,
+                              const CCValAssign &VA, const SDLoc &DL) {
+  EVT LocVT = VA.getLocVT();
+
+  switch (VA.getLocInfo()) {
+  default:
+    llvm_unreachable("Unexpected CCValAssign::LocInfo");
+  case CCValAssign::Full:
+    break;
+  case CCValAssign::BCvt:
+    Val = DAG.getNode(ISD::BITCAST, DL, LocVT, Val);
+    break;
+  }
+  return Val;
+}
+
 SDValue
 RISCVTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
                                  bool IsVarArg,
@@ -1019,7 +1293,7 @@ RISCVTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
   analyzeOutputArgs(DAG.getMachineFunction(), CCInfo, Outs, /*IsRet=*/true,
                     nullptr);
 
-  SDValue Flag;
+  SDValue Glue;
   SmallVector<SDValue, 4> RetOps(1, Chain);
 
   // Copy the result values into the output registers.
@@ -1027,21 +1301,38 @@ RISCVTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
     SDValue Val = OutVals[i];
     CCValAssign &VA = RVLocs[i];
     assert(VA.isRegLoc() && "Can only return in registers!");
-    assert(VA.getLocInfo() == CCValAssign::Full &&
-           "Unexpected CCValAssign::LocInfo");
 
-    Chain = DAG.getCopyToReg(Chain, DL, VA.getLocReg(), Val, Flag);
+    if (VA.getLocVT() == MVT::i32 && VA.getValVT() == MVT::f64) {
+      // Handle returning f64 on RV32D with a soft float ABI.
+      assert(VA.isRegLoc() && "Expected return via registers");
+      SDValue SplitF64 = DAG.getNode(RISCVISD::SplitF64, DL,
+                                     DAG.getVTList(MVT::i32, MVT::i32), Val);
+      SDValue Lo = SplitF64.getValue(0);
+      SDValue Hi = SplitF64.getValue(1);
+      unsigned RegLo = VA.getLocReg();
+      unsigned RegHi = RegLo + 1;
+      Chain = DAG.getCopyToReg(Chain, DL, RegLo, Lo, Glue);
+      Glue = Chain.getValue(1);
+      RetOps.push_back(DAG.getRegister(RegLo, MVT::i32));
+      Chain = DAG.getCopyToReg(Chain, DL, RegHi, Hi, Glue);
+      Glue = Chain.getValue(1);
+      RetOps.push_back(DAG.getRegister(RegHi, MVT::i32));
+    } else {
+      // Handle a 'normal' return.
+      Val = packIntoRegLoc(DAG, Val, VA, DL);
+      Chain = DAG.getCopyToReg(Chain, DL, VA.getLocReg(), Val, Glue);
 
-    // Guarantee that all emitted copies are stuck together.
-    Flag = Chain.getValue(1);
-    RetOps.push_back(DAG.getRegister(VA.getLocReg(), VA.getLocVT()));
+      // Guarantee that all emitted copies are stuck together.
+      Glue = Chain.getValue(1);
+      RetOps.push_back(DAG.getRegister(VA.getLocReg(), VA.getLocVT()));
+    }
   }
 
   RetOps[0] = Chain; // Update chain.
 
-  // Add the flag if we have it.
-  if (Flag.getNode()) {
-    RetOps.push_back(Flag);
+  // Add the glue node if we have it.
+  if (Glue.getNode()) {
+    RetOps.push_back(Glue);
   }
 
   return DAG.getNode(RISCVISD::RET_FLAG, DL, MVT::Other, RetOps);
@@ -1057,6 +1348,10 @@ const char *RISCVTargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "RISCVISD::CALL";
   case RISCVISD::SELECT_CC:
     return "RISCVISD::SELECT_CC";
+  case RISCVISD::BuildPairF64:
+    return "RISCVISD::BuildPairF64";
+  case RISCVISD::SplitF64:
+    return "RISCVISD::SplitF64";
   }
   return nullptr;
 }

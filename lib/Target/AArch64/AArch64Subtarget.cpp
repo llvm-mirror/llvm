@@ -24,6 +24,7 @@
 #include "llvm/CodeGen/GlobalISel/InstructionSelect.h"
 #include "llvm/CodeGen/MachineScheduler.h"
 #include "llvm/IR/GlobalValue.h"
+#include "llvm/Support/TargetParser.h"
 
 using namespace llvm;
 
@@ -151,7 +152,7 @@ AArch64Subtarget::AArch64Subtarget(const Triple &TT, const std::string &CPU,
                                    const std::string &FS,
                                    const TargetMachine &TM, bool LittleEndian)
     : AArch64GenSubtargetInfo(TT, CPU, FS),
-      ReserveX18(TT.isOSDarwin() || TT.isOSWindows()), IsLittle(LittleEndian),
+      ReserveX18(AArch64::isX18ReservedByDefault(TT)), IsLittle(LittleEndian),
       TargetTriple(TT), FrameLowering(),
       InstrInfo(initializeSubtargetDependencies(FS, CPU)), TSInfo(),
       TLInfo(TM, *this) {

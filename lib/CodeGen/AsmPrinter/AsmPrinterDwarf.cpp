@@ -17,7 +17,6 @@
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/DIE.h"
 #include "llvm/CodeGen/MachineFunction.h"
-#include "llvm/CodeGen/TargetLoweringObjectFile.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
@@ -26,6 +25,7 @@
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/MachineLocation.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/Target/TargetMachine.h"
 using namespace llvm;
 
@@ -176,7 +176,11 @@ void AsmPrinter::emitDwarfStringOffset(DwarfStringPoolEntry S) const {
   }
 
   // Just emit the offset directly; no need for symbol math.
-  EmitInt32(S.Offset);
+  emitInt32(S.Offset);
+}
+
+void AsmPrinter::EmitDwarfOffset(const MCSymbol *Label, uint64_t Offset) const {
+  EmitLabelPlusOffset(Label, Offset, MAI->getCodePointerSize());
 }
 
 //===----------------------------------------------------------------------===//
@@ -254,7 +258,7 @@ void AsmPrinter::emitDwarfDIE(const DIE &Die) const {
       emitDwarfDIE(Child);
 
     OutStreamer->AddComment("End Of Children Mark");
-    EmitInt8(0);
+    emitInt8(0);
   }
 }
 

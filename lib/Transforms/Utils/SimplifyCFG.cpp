@@ -28,6 +28,7 @@
 #include "llvm/Analysis/EHPersonalities.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
+#include "llvm/Analysis/Utils/Local.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/BasicBlock.h"
@@ -66,7 +67,6 @@
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
 #include <algorithm>
 #include <cassert>
@@ -1290,31 +1290,44 @@ static bool HoistThenElseCodeToIf(BranchInst *BI,
     if (!TTI.isProfitableToHoist(I1) || !TTI.isProfitableToHoist(I2))
       return Changed;
 
-    // For a normal instruction, we just move one to right before the branch,
-    // then replace all uses of the other with the first.  Finally, we remove
-    // the now redundant second instruction.
-    BIParent->getInstList().splice(BI->getIterator(), BB1->getInstList(), I1);
-    if (!I2->use_empty())
-      I2->replaceAllUsesWith(I1);
-    I1->andIRFlags(I2);
-    unsigned KnownIDs[] = {LLVMContext::MD_tbaa,
-                           LLVMContext::MD_range,
-                           LLVMContext::MD_fpmath,
-                           LLVMContext::MD_invariant_load,
-                           LLVMContext::MD_nonnull,
-                           LLVMContext::MD_invariant_group,
-                           LLVMContext::MD_align,
-                           LLVMContext::MD_dereferenceable,
-                           LLVMContext::MD_dereferenceable_or_null,
-                           LLVMContext::MD_mem_parallel_loop_access};
-    combineMetadata(I1, I2, KnownIDs);
+    if (isa<DbgInfoIntrinsic>(I1) || isa<DbgInfoIntrinsic>(I2)) {
+      assert (isa<DbgInfoIntrinsic>(I1) && isa<DbgInfoIntrinsic>(I2));
+      // The debug location is an integral part of a debug info intrinsic
+      // and can't be separated from it or replaced.  Instead of attempting
+      // to merge locations, simply hoist both copies of the intrinsic.
+      BIParent->getInstList().splice(BI->getIterator(),
+                                     BB1->getInstList(), I1);
+      BIParent->getInstList().splice(BI->getIterator(),
+                                     BB2->getInstList(), I2);
+      Changed = true;
+    } else {
+      // For a normal instruction, we just move one to right before the branch,
+      // then replace all uses of the other with the first.  Finally, we remove
+      // the now redundant second instruction.
+      BIParent->getInstList().splice(BI->getIterator(),
+                                     BB1->getInstList(), I1);
+      if (!I2->use_empty())
+        I2->replaceAllUsesWith(I1);
+      I1->andIRFlags(I2);
+      unsigned KnownIDs[] = {LLVMContext::MD_tbaa,
+                             LLVMContext::MD_range,
+                             LLVMContext::MD_fpmath,
+                             LLVMContext::MD_invariant_load,
+                             LLVMContext::MD_nonnull,
+                             LLVMContext::MD_invariant_group,
+                             LLVMContext::MD_align,
+                             LLVMContext::MD_dereferenceable,
+                             LLVMContext::MD_dereferenceable_or_null,
+                             LLVMContext::MD_mem_parallel_loop_access};
+      combineMetadata(I1, I2, KnownIDs);
 
-    // I1 and I2 are being combined into a single instruction.  Its debug
-    // location is the merged locations of the original instructions.
-    I1->applyMergedLocation(I1->getDebugLoc(), I2->getDebugLoc());
+      // I1 and I2 are being combined into a single instruction.  Its debug
+      // location is the merged locations of the original instructions.
+      I1->applyMergedLocation(I1->getDebugLoc(), I2->getDebugLoc());
 
-    I2->eraseFromParent();
-    Changed = true;
+      I2->eraseFromParent();
+      Changed = true;
+    }
 
     I1 = &*BB1_Itr++;
     I2 = &*BB2_Itr++;
@@ -2260,6 +2273,10 @@ static bool FoldTwoEntryPHINode(PHINode *PN, const TargetTransformInfo &TTI,
   // dependence information for this check, but simplifycfg can't keep it up
   // to date, and this catches most of the cases we care about anyway.
   BasicBlock *BB = PN->getParent();
+  const Function *Fn = BB->getParent();
+  if (Fn && Fn->hasFnAttribute(Attribute::OptForFuzzing))
+    return false;
+
   BasicBlock *IfTrue, *IfFalse;
   Value *IfCond = GetIfCondition(BB, IfTrue, IfFalse);
   if (!IfCond ||
@@ -2965,6 +2982,21 @@ static bool mergeConditionalStoreToAddress(BasicBlock *PTB, BasicBlock *PFB,
     if (&*I != PStore && I->mayReadOrWriteMemory())
       return false;
 
+  // If PostBB has more than two predecessors, we need to split it so we can
+  // sink the store.
+  if (std::next(pred_begin(PostBB), 2) != pred_end(PostBB)) {
+    // We know that QFB's only successor is PostBB. And QFB has a single
+    // predecessor. If QTB exists, then its only successor is also PostBB.
+    // If QTB does not exist, then QFB's only predecessor has a conditional
+    // branch to QFB and PostBB.
+    BasicBlock *TruePred = QTB ? QTB : QFB->getSinglePredecessor();
+    BasicBlock *NewBB = SplitBlockPredecessors(PostBB, { QFB, TruePred},
+                                               "condstore.split");
+    if (!NewBB)
+      return false;
+    PostBB = NewBB;
+  }
+
   // OK, we're going to sink the stores to PostBB. The store has to be
   // conditional though, so first create the predicate.
   Value *PCond = cast<BranchInst>(PFB->getSinglePredecessor()->getTerminator())
@@ -3100,7 +3132,7 @@ static bool mergeConditionalStores(BranchInst *PBI, BranchInst *QBI,
   if ((PTB && !HasOnePredAndOneSucc(PTB, PBI->getParent(), QBI->getParent())) ||
       (QTB && !HasOnePredAndOneSucc(QTB, QBI->getParent(), PostBB)))
     return false;
-  if (!PostBB->hasNUses(2) || !QBI->getParent()->hasNUses(2))
+  if (!QBI->getParent()->hasNUses(2))
     return false;
 
   // OK, this is a sequence of two diamonds or triangles.
@@ -5487,7 +5519,7 @@ static bool ReduceSwitchRange(SwitchInst *SI, IRBuilder<> &Builder,
   SmallVector<int64_t,4> Values;
   for (auto &C : SI->cases())
     Values.push_back(C.getCaseValue()->getValue().getSExtValue());
-  std::sort(Values.begin(), Values.end());
+  llvm::sort(Values.begin(), Values.end());
 
   // If the switch is already dense, there's nothing useful to do here.
   if (isSwitchDense(Values))
@@ -5786,6 +5818,9 @@ static BasicBlock *allPredecessorsComeFromSameSource(BasicBlock *BB) {
 
 bool SimplifyCFGOpt::SimplifyCondBranch(BranchInst *BI, IRBuilder<> &Builder) {
   BasicBlock *BB = BI->getParent();
+  const Function *Fn = BB->getParent();
+  if (Fn && Fn->hasFnAttribute(Attribute::OptForFuzzing))
+    return false;
 
   // Conditional branch
   if (isValueEqualityComparison(BI)) {

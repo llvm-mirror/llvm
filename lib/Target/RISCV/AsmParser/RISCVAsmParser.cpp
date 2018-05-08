@@ -26,6 +26,10 @@
 
 using namespace llvm;
 
+// Include the auto-generated portion of the compress emitter.
+#define GEN_COMPRESS_INSTR
+#include "RISCVGenCompressInstEmitter.inc"
+
 namespace {
 struct RISCVOperand;
 
@@ -61,7 +65,7 @@ class RISCVAsmParser : public MCTargetAsmParser {
   OperandMatchResultTy parseMemOpBaseReg(OperandVector &Operands);
   OperandMatchResultTy parseOperandWithModifier(OperandVector &Operands);
 
-  bool parseOperand(OperandVector &Operands);
+  bool parseOperand(OperandVector &Operands, bool ForceImmediate);
 
 public:
   enum RISCVMatchResultTy {
@@ -166,6 +170,16 @@ public:
   }
 
   // Predicate methods for AsmOperands defined in RISCVInstrInfo.td
+
+  bool isBareSymbol() const {
+    int64_t Imm;
+    RISCVMCExpr::VariantKind VK;
+    // Must be of 'immediate' type but not a constant.
+    if (!isImm() || evaluateConstantImm(Imm, VK))
+      return false;
+    return RISCVAsmParser::classifySymbolRef(getImm(), VK, Imm) &&
+           VK == RISCVMCExpr::VK_RISCV_None;
+  }
 
   /// Return true if the operand is a valid for the fence instruction e.g.
   /// ('iorw').
@@ -595,10 +609,14 @@ bool RISCVAsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   switch (MatchInstructionImpl(Operands, Inst, ErrorInfo, MatchingInlineAsm)) {
   default:
     break;
-  case Match_Success:
+  case Match_Success: {
+    MCInst CInst;
+    bool Res = compressInst(CInst, Inst, getSTI(), Out.getContext());
+    CInst.setLoc(IDLoc);
     Inst.setLoc(IDLoc);
-    Out.EmitInstruction(Inst, getSTI());
+    Out.EmitInstruction((Res ? CInst : Inst), getSTI());
     return false;
+  }
   case Match_MissingFeature:
     return Error(IDLoc, "instruction use requires an option to be enabled");
   case Match_MnemonicFail:
@@ -694,6 +712,10 @@ bool RISCVAsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     return Error(
         ErrorLoc,
         "operand must be a valid floating point rounding mode mnemonic");
+  }
+  case Match_InvalidBareSymbol: {
+    SMLoc ErrorLoc = ((RISCVOperand &)*Operands[ErrorInfo]).getStartLoc();
+    return Error(ErrorLoc, "operand must be a bare symbol name");
   }
   }
 
@@ -859,12 +881,15 @@ RISCVAsmParser::parseMemOpBaseReg(OperandVector &Operands) {
   return MatchOperand_Success;
 }
 
-/// Looks at a token type and creates the relevant operand
-/// from this information, adding to Operands.
-/// If operand was parsed, returns false, else true.
-bool RISCVAsmParser::parseOperand(OperandVector &Operands) {
-  // Attempt to parse token as register
-  if (parseRegister(Operands, true) == MatchOperand_Success)
+/// Looks at a token type and creates the relevant operand from this
+/// information, adding to Operands. If operand was parsed, returns false, else
+/// true. If ForceImmediate is true, no attempt will be made to parse the
+/// operand as a register, which is needed for pseudoinstructions such as
+/// call.
+bool RISCVAsmParser::parseOperand(OperandVector &Operands,
+                                  bool ForceImmediate) {
+  // Attempt to parse token as register, unless ForceImmediate.
+  if (!ForceImmediate && parseRegister(Operands, true) == MatchOperand_Success)
     return false;
 
   // Attempt to parse token as an immediate
@@ -891,7 +916,7 @@ bool RISCVAsmParser::ParseInstruction(ParseInstructionInfo &Info,
     return false;
 
   // Parse first operand
-  if (parseOperand(Operands))
+  if (parseOperand(Operands, Name == "call"))
     return true;
 
   // Parse until end of statement, consuming commas between operands
@@ -900,7 +925,7 @@ bool RISCVAsmParser::ParseInstruction(ParseInstructionInfo &Info,
     getLexer().Lex();
 
     // Parse next operand
-    if (parseOperand(Operands))
+    if (parseOperand(Operands, false))
       return true;
   }
 
@@ -945,7 +970,7 @@ bool RISCVAsmParser::classifySymbolRef(const MCExpr *Expr,
       isa<MCSymbolRefExpr>(BE->getRHS()))
     return true;
 
-  // See if the addend is is a constant, otherwise there's more going
+  // See if the addend is a constant, otherwise there's more going
   // on here than we can deal with.
   auto AddendExpr = dyn_cast<MCConstantExpr>(BE->getRHS());
   if (!AddendExpr)

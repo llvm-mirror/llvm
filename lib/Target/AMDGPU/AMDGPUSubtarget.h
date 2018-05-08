@@ -133,6 +133,7 @@ protected:
   bool EnableLoadStoreOpt;
   bool EnableUnsafeDSOffsetFolding;
   bool EnableSIScheduler;
+  bool EnableDS128;
   bool DumpCode;
 
   // Subtarget statically properties set by tablegen
@@ -152,6 +153,7 @@ protected:
   bool HasMovrel;
   bool HasVGPRIndexMode;
   bool HasScalarStores;
+  bool HasScalarAtomics;
   bool HasInv2PiInlineImm;
   bool HasSDWA;
   bool HasSDWAOmod;
@@ -210,11 +212,6 @@ public:
 
   bool isMesa3DOS() const {
     return TargetTriple.getOS() == Triple::Mesa3D;
-  }
-
-  bool isOpenCLEnv() const {
-    return TargetTriple.getEnvironment() == Triple::OpenCL ||
-           TargetTriple.getEnvironmentName() == "amdgizcl";
   }
 
   bool isAmdPalOS() const {
@@ -414,6 +411,12 @@ public:
     return FlatForGlobal;
   }
 
+  /// \returns If target supports ds_read/write_b128 and user enables generation
+  /// of ds_read/write_b128.
+  bool useDS128() const {
+    return CIInsts && EnableDS128;
+  }
+
   /// \returns If MUBUF instructions always perform range checking, even for
   /// buffer resources used for private memory access.
   bool privateMemoryResourceIsRangeChecked() const {
@@ -537,19 +540,25 @@ public:
     return isAmdHsaOS() ? 8 : 4;
   }
 
+  /// \returns Number of bytes of arguments that are passed to a shader or
+  /// kernel in addition to the explicit ones declared for the function.
   unsigned getImplicitArgNumBytes(const MachineFunction &MF) const {
     if (isMesaKernel(MF))
       return 16;
-    if (isAmdHsaOS() && isOpenCLEnv())
-      return 32;
-    return 0;
+    return AMDGPU::getIntegerAttribute(
+      MF.getFunction(), "amdgpu-implicitarg-num-bytes", 0);
   }
 
   // Scratch is allocated in 256 dword per wave blocks for the entire
   // wavefront. When viewed from the perspecive of an arbitrary workitem, this
   // is 4-byte aligned.
+  //
+  // Only 4-byte alignment is really needed to access anything. Transformations
+  // on the pointer value itself may rely on the alignment / known low bits of
+  // the pointer. Set this to something above the minimum to avoid needing
+  // dynamic realignment in common cases.
   unsigned getStackAlignment() const {
-    return 4;
+    return 16;
   }
 
   bool enableMachineScheduler() const override {
@@ -705,7 +714,7 @@ private:
 
 public:
   SISubtarget(const Triple &TT, StringRef CPU, StringRef FS,
-              const TargetMachine &TM);
+              const GCNTargetMachine &TM);
 
   const SIInstrInfo *getInstrInfo() const override {
     return &InstrInfo;
@@ -775,6 +784,10 @@ public:
 
   bool hasScalarStores() const {
     return HasScalarStores;
+  }
+
+  bool hasScalarAtomics() const {
+    return HasScalarAtomics;
   }
 
   bool hasInv2PiInlineImm() const {

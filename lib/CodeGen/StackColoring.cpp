@@ -600,12 +600,12 @@ bool StackColoring::isLifetimeStartOrEnd(const MachineInstr &MI,
       isStart = false;
       return true;
     }
-    if (! applyFirstUse(Slot)) {
+    if (!applyFirstUse(Slot)) {
       isStart = true;
       return true;
     }
   } else if (LifetimeStartOnFirstUse && !ProtectFromEscapedAllocas) {
-    if (! MI.isDebugValue()) {
+    if (!MI.isDebugValue()) {
       bool found = false;
       for (const MachineOperand &MO : MI.operands()) {
         if (!MO.isFI())
@@ -993,7 +993,7 @@ void StackColoring::remapInstructions(DenseMap<int, int> &SlotRemap) {
         // the calculated range then it means that the alloca usage moved
         // outside of the lifetime markers, or that the user has a bug.
         // NOTE: Alloca address calculations which happen outside the lifetime
-        // zone are are okay, despite the fact that we don't have a good way
+        // zone are okay, despite the fact that we don't have a good way
         // for validating all of the usages of the calculation.
 #ifndef NDEBUG
         bool TouchesMemory = I.mayLoad() || I.mayStore();
@@ -1224,7 +1224,7 @@ bool StackColoring::runOnMachineFunction(MachineFunction &Func) {
   });
 
   for (auto &s : LiveStarts)
-    std::sort(s.begin(), s.end());
+    llvm::sort(s.begin(), s.end());
 
   bool Changed = true;
   while (Changed) {

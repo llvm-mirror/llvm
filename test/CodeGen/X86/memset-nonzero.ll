@@ -148,6 +148,7 @@ define void @memset_256_nonzero_bytes(i8* %x) {
 ; SSE-NEXT:    movl $256, %edx # imm = 0x100
 ; SSE-NEXT:    callq memset
 ; SSE-NEXT:    popq %rax
+; SSE-NEXT:    .cfi_def_cfa_offset 8
 ; SSE-NEXT:    retq
 ;
 ; SSE2FAST-LABEL: memset_256_nonzero_bytes:
@@ -398,7 +399,7 @@ define void @memset_256_nonconst_bytes(i8* %x, i8 %c) {
 ; SSE-LABEL: memset_256_nonconst_bytes:
 ; SSE:       # %bb.0:
 ; SSE-NEXT:    movl $256, %edx # imm = 0x100
-; SSE-NEXT:    jmp memset@PLT # TAILCALL
+; SSE-NEXT:    jmp memset # TAILCALL
 ;
 ; SSE2FAST-LABEL: memset_256_nonconst_bytes:
 ; SSE2FAST:       # %bb.0:

@@ -54,47 +54,44 @@ static Value *createMinMax(InstCombiner::BuilderTy &Builder,
   return Builder.CreateSelect(Builder.CreateICmp(Pred, A, B), A, B);
 }
 
-/// If one of the constants is zero (we know they can't both be) and we have an
-/// icmp instruction with zero, and we have an 'and' with the non-constant value
-/// and a power of two we can turn the select into a shift on the result of the
-/// 'and'.
 /// This folds:
-///  select (icmp eq (and X, C1)), C2, C3
-///    iff C1 is a power 2 and the difference between C2 and C3 is a power of 2.
+///  select (icmp eq (and X, C1)), TC, FC
+///    iff C1 is a power 2 and the difference between TC and FC is a power-of-2.
 /// To something like:
-///  (shr (and (X, C1)), (log2(C1) - log2(C2-C3))) + C3
+///  (shr (and (X, C1)), (log2(C1) - log2(TC-FC))) + FC
 /// Or:
-///  (shl (and (X, C1)), (log2(C2-C3) - log2(C1))) + C3
-/// With some variations depending if C3 is larger than C2, or the shift
+///  (shl (and (X, C1)), (log2(TC-FC) - log2(C1))) + FC
+/// With some variations depending if FC is larger than TC, or the shift
 /// isn't needed, or the bit widths don't match.
-static Value *foldSelectICmpAnd(Type *SelType, const ICmpInst *IC,
-                                APInt TrueVal, APInt FalseVal,
+static Value *foldSelectICmpAnd(SelectInst &Sel, ICmpInst *Cmp,
                                 InstCombiner::BuilderTy &Builder) {
-  assert(SelType->isIntOrIntVectorTy() && "Not an integer select?");
+  const APInt *SelTC, *SelFC;
+  if (!match(Sel.getTrueValue(), m_APInt(SelTC)) ||
+      !match(Sel.getFalseValue(), m_APInt(SelFC)))
+    return nullptr;
 
   // If this is a vector select, we need a vector compare.
-  if (SelType->isVectorTy() != IC->getType()->isVectorTy())
+  Type *SelType = Sel.getType();
+  if (SelType->isVectorTy() != Cmp->getType()->isVectorTy())
     return nullptr;
 
   Value *V;
   APInt AndMask;
   bool CreateAnd = false;
-  ICmpInst::Predicate Pred = IC->getPredicate();
+  ICmpInst::Predicate Pred = Cmp->getPredicate();
   if (ICmpInst::isEquality(Pred)) {
-    if (!match(IC->getOperand(1), m_Zero()))
+    if (!match(Cmp->getOperand(1), m_Zero()))
       return nullptr;
 
-    V = IC->getOperand(0);
-
+    V = Cmp->getOperand(0);
     const APInt *AndRHS;
     if (!match(V, m_And(m_Value(), m_Power2(AndRHS))))
       return nullptr;
 
     AndMask = *AndRHS;
-  } else if (decomposeBitTestICmp(IC->getOperand(0), IC->getOperand(1),
+  } else if (decomposeBitTestICmp(Cmp->getOperand(0), Cmp->getOperand(1),
                                   Pred, V, AndMask)) {
     assert(ICmpInst::isEquality(Pred) && "Not equality test?");
-
     if (!AndMask.isPowerOf2())
       return nullptr;
 
@@ -104,38 +101,39 @@ static Value *foldSelectICmpAnd(Type *SelType, const ICmpInst *IC,
   }
 
   // If both select arms are non-zero see if we have a select of the form
-  // 'x ? 2^n + C : C'. Then we can offset both arms by C, use the logic
+  // 'x ? 2^n + TC : FC'. Then we can offset both arms by C, use the logic
   // for 'x ? 2^n : 0' and fix the thing up at the end.
-  APInt Offset(TrueVal.getBitWidth(), 0);
-  if (!TrueVal.isNullValue() && !FalseVal.isNullValue()) {
-    if ((TrueVal - FalseVal).isPowerOf2())
-      Offset = FalseVal;
-    else if ((FalseVal - TrueVal).isPowerOf2())
-      Offset = TrueVal;
+  APInt TC = *SelTC;
+  APInt FC = *SelFC;
+  APInt Offset(TC.getBitWidth(), 0);
+  if (!TC.isNullValue() && !FC.isNullValue()) {
+    if ((TC - FC).isPowerOf2())
+      Offset = FC;
+    else if ((FC - TC).isPowerOf2())
+      Offset = TC;
     else
       return nullptr;
 
-    // Adjust TrueVal and FalseVal to the offset.
-    TrueVal -= Offset;
-    FalseVal -= Offset;
+    // Adjust TC and FC by the offset.
+    TC -= Offset;
+    FC -= Offset;
   }
 
-  // Make sure one of the select arms is a power of 2.
-  if (!TrueVal.isPowerOf2() && !FalseVal.isPowerOf2())
+  // Make sure one of the select arms is a power-of-2.
+  if (!TC.isPowerOf2() && !FC.isPowerOf2())
     return nullptr;
 
   // Determine which shift is needed to transform result of the 'and' into the
   // desired result.
-  const APInt &ValC = !TrueVal.isNullValue() ? TrueVal : FalseVal;
+  const APInt &ValC = !TC.isNullValue() ? TC : FC;
   unsigned ValZeros = ValC.logBase2();
   unsigned AndZeros = AndMask.logBase2();
 
-  if (CreateAnd) {
-    // Insert the AND instruction on the input to the truncate.
+  // Insert the 'and' instruction on the input to the truncate.
+  if (CreateAnd)
     V = Builder.CreateAnd(V, ConstantInt::get(V->getType(), AndMask));
-  }
 
-  // If types don't match we can still convert the select by introducing a zext
+  // If types don't match, we can still convert the select by introducing a zext
   // or a trunc of the 'and'.
   if (ValZeros > AndZeros) {
     V = Builder.CreateZExtOrTrunc(V, SelType);
@@ -143,12 +141,13 @@ static Value *foldSelectICmpAnd(Type *SelType, const ICmpInst *IC,
   } else if (ValZeros < AndZeros) {
     V = Builder.CreateLShr(V, AndZeros - ValZeros);
     V = Builder.CreateZExtOrTrunc(V, SelType);
-  } else
+  } else {
     V = Builder.CreateZExtOrTrunc(V, SelType);
+  }
 
   // Okay, now we know that everything is set up, we just don't know whether we
   // have a icmp_ne or icmp_eq and whether the true or false val is the zero.
-  bool ShouldNotVal = !TrueVal.isNullValue();
+  bool ShouldNotVal = !TC.isNullValue();
   ShouldNotVal ^= Pred == ICmpInst::ICMP_NE;
   if (ShouldNotVal)
     V = Builder.CreateXor(V, ValC);
@@ -394,6 +393,47 @@ Instruction *InstCombiner::foldSelectIntoOp(SelectInst &SI, Value *TrueVal,
   }
 
   return nullptr;
+}
+
+/// We want to turn:
+///   (select (icmp eq (and X, Y), 0), (and (lshr X, Z), 1), 1)
+/// into:
+///   zext (icmp ne i32 (and X, (or Y, (shl 1, Z))), 0)
+/// Note:
+///   Z may be 0 if lshr is missing.
+/// Worst-case scenario is that we will replace 5 instructions with 5 different
+/// instructions, but we got rid of select.
+static Instruction *foldSelectICmpAndAnd(Type *SelType, const ICmpInst *Cmp,
+                                         Value *TVal, Value *FVal,
+                                         InstCombiner::BuilderTy &Builder) {
+  if (!(Cmp->hasOneUse() && Cmp->getOperand(0)->hasOneUse() &&
+        Cmp->getPredicate() == ICmpInst::ICMP_EQ &&
+        match(Cmp->getOperand(1), m_Zero()) && match(FVal, m_One())))
+    return nullptr;
+
+  // The TrueVal has general form of:  and %B, 1
+  Value *B;
+  if (!match(TVal, m_OneUse(m_And(m_Value(B), m_One()))))
+    return nullptr;
+
+  // Where %B may be optionally shifted:  lshr %X, %Z.
+  Value *X, *Z;
+  const bool HasShift = match(B, m_OneUse(m_LShr(m_Value(X), m_Value(Z))));
+  if (!HasShift)
+    X = B;
+
+  Value *Y;
+  if (!match(Cmp->getOperand(0), m_c_And(m_Specific(X), m_Value(Y))))
+    return nullptr;
+
+  // ((X & Y) == 0) ? ((X >> Z) & 1) : 1 --> (X & (Y | (1 << Z))) != 0
+  // ((X & Y) == 0) ? (X & 1) : 1 --> (X & (Y | 1)) != 0
+  Constant *One = ConstantInt::get(SelType, 1);
+  Value *MaskB = HasShift ? Builder.CreateShl(One, Z) : One;
+  Value *FullMask = Builder.CreateOr(Y, MaskB);
+  Value *MaskedX = Builder.CreateAnd(X, FullMask);
+  Value *ICmpNeZero = Builder.CreateIsNotNull(MaskedX);
+  return new ZExtInst(ICmpNeZero, SelType);
 }
 
 /// We want to turn:
@@ -790,14 +830,8 @@ Instruction *InstCombiner::foldSelectInstWithICmp(SelectInst &SI,
     }
   }
 
-  {
-    const APInt *TrueValC, *FalseValC;
-    if (match(TrueVal, m_APInt(TrueValC)) &&
-        match(FalseVal, m_APInt(FalseValC)))
-      if (Value *V = foldSelectICmpAnd(SI.getType(), ICI, *TrueValC,
-                                       *FalseValC, Builder))
-        return replaceInstUsesWith(SI, V);
-  }
+  if (Value *V = foldSelectICmpAnd(SI, ICI, Builder))
+    return replaceInstUsesWith(SI, V);
 
   // NOTE: if we wanted to, this is where to detect integer MIN/MAX
 
@@ -862,6 +896,10 @@ Instruction *InstCombiner::foldSelectInstWithICmp(SelectInst &SI,
         return replaceInstUsesWith(SI, V);
     }
   }
+
+  if (Instruction *V =
+          foldSelectICmpAndAnd(SI.getType(), ICI, TrueVal, FalseVal, Builder))
+    return V;
 
   if (Value *V = foldSelectICmpAndOr(ICI, TrueVal, FalseVal, Builder))
     return replaceInstUsesWith(SI, V);
@@ -1333,7 +1371,7 @@ static Instruction *factorizeMinMaxTree(SelectPatternFlavor SPF, Value *LHS,
   // the select.
   Value *MinMaxOp = nullptr;
   Value *ThirdOp = nullptr;
-  if (LHS->getNumUses() <= 2 && RHS->getNumUses() > 2) {
+  if (!LHS->hasNUsesOrMore(3) && RHS->hasNUsesOrMore(3)) {
     // If the LHS is only used in this chain and the RHS is used outside of it,
     // reuse the RHS min/max because that will eliminate the LHS.
     if (D == A || C == A) {
@@ -1347,7 +1385,7 @@ static Instruction *factorizeMinMaxTree(SelectPatternFlavor SPF, Value *LHS,
       MinMaxOp = RHS;
       ThirdOp = A;
     }
-  } else if (RHS->getNumUses() <= 2) {
+  } else if (!RHS->hasNUsesOrMore(3)) {
     // Reuse the LHS. This will eliminate the RHS.
     if (D == A || D == B) {
       // min(min(a, b), min(c, a)) --> min(min(a, b), c)
@@ -1569,7 +1607,37 @@ Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
 
       // NOTE: if we wanted to, this is where to detect MIN/MAX
     }
-    // NOTE: if we wanted to, this is where to detect ABS
+
+    // Canonicalize select with fcmp to fabs(). -0.0 makes this tricky. We need
+    // fast-math-flags (nsz) or fsub with +0.0 (not fneg) for this to work. We
+    // also require nnan because we do not want to unintentionally change the
+    // sign of a NaN value.
+    Value *X = FCI->getOperand(0);
+    FCmpInst::Predicate Pred = FCI->getPredicate();
+    if (match(FCI->getOperand(1), m_AnyZeroFP()) && FCI->hasNoNaNs()) {
+      // (X <= +/-0.0) ? (0.0 - X) : X --> fabs(X)
+      // (X >  +/-0.0) ? X : (0.0 - X) --> fabs(X)
+      if ((X == FalseVal && Pred == FCmpInst::FCMP_OLE &&
+           match(TrueVal, m_FSub(m_PosZeroFP(), m_Specific(X)))) ||
+          (X == TrueVal && Pred == FCmpInst::FCMP_OGT &&
+           match(FalseVal, m_FSub(m_PosZeroFP(), m_Specific(X))))) {
+        Value *Fabs = Builder.CreateIntrinsic(Intrinsic::fabs, { X }, FCI);
+        return replaceInstUsesWith(SI, Fabs);
+      }
+      // With nsz:
+      // (X <  +/-0.0) ? -X : X --> fabs(X)
+      // (X <= +/-0.0) ? -X : X --> fabs(X)
+      // (X >  +/-0.0) ? X : -X --> fabs(X)
+      // (X >= +/-0.0) ? X : -X --> fabs(X)
+      if (FCI->hasNoSignedZeros() &&
+          ((X == FalseVal && match(TrueVal, m_FNeg(m_Specific(X))) &&
+            (Pred == FCmpInst::FCMP_OLT || Pred == FCmpInst::FCMP_OLE)) ||
+           (X == TrueVal && match(FalseVal, m_FNeg(m_Specific(X))) &&
+            (Pred == FCmpInst::FCMP_OGT || Pred == FCmpInst::FCMP_OGE)))) {
+        Value *Fabs = Builder.CreateIntrinsic(Intrinsic::fabs, { X }, FCI);
+        return replaceInstUsesWith(SI, Fabs);
+      }
+    }
   }
 
   // See if we are selecting two values based on a comparison of the two values.

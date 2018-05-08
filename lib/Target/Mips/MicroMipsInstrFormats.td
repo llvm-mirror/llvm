@@ -406,7 +406,7 @@ class POOL32C_LHUE_FM_MM<bits<6> op, bits<4> fmt, bits<3> funct> : MMArch {
   let Inst{8-0}  = offset;
 }
 
-class LWL_FM_MM<bits<4> funct> {
+class LWL_FM_MM<bits<4> funct> : MMArch {
   bits<5> rt;
   bits<21> addr;
 
@@ -419,7 +419,7 @@ class LWL_FM_MM<bits<4> funct> {
   let Inst{11-0}  = addr{11-0};
 }
 
-class POOL32C_STEVA_LDEVA_FM_MM<bits<4> type, bits<3> funct> {
+class POOL32C_STEVA_LDEVA_FM_MM<bits<4> type, bits<3> funct> : MMArch {
   bits<5> rt;
   bits<21> addr;
   bits<5> base = addr{20-16};
@@ -600,8 +600,9 @@ class SYNC_FM_MM : MMArch {
 }
 
 class SYNCI_FM_MM : MMArch {
-  bits<5> rs;
-  bits<16> offset;
+  bits<21> addr;
+  bits<5> rs = addr{20-16};
+  bits<16> offset = addr{15-0};
   bits<32> Inst;
 
   let Inst{31-26} = 0b010000;

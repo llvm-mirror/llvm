@@ -142,6 +142,7 @@ def true : Predicate<"true">;
 
 def hasPTX31 : Predicate<"Subtarget->getPTXVersion() >= 31">;
 def hasPTX60 : Predicate<"Subtarget->getPTXVersion() >= 60">;
+def hasPTX61 : Predicate<"Subtarget->getPTXVersion() >= 61">;
 
 def hasSM30 : Predicate<"Subtarget->getSmVersion() >= 30">;
 def hasSM70 : Predicate<"Subtarget->getSmVersion() >= 70">;
@@ -1527,6 +1528,7 @@ def ADDRri : ComplexPattern<i32, 2, "SelectADDRri", [frameindex],
                             [SDNPWantRoot]>;
 def ADDRri64 : ComplexPattern<i64, 2, "SelectADDRri64", [frameindex],
                               [SDNPWantRoot]>;
+def ADDRvar : ComplexPattern<iPTR, 1, "SelectDirectAddr", [], []>;
 
 def MEMri : Operand<i32> {
   let PrintMethod = "printMemOperand";

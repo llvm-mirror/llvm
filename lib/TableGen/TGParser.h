@@ -51,6 +51,12 @@ namespace llvm {
       : IterVar(IVar), ListValue(LValue) {}
   };
 
+  struct DefsetRecord {
+    SMLoc Loc;
+    RecTy *EltTy;
+    SmallVector<Init *, 16> Elements;
+  };
+
 class TGParser {
   TGLexer Lex;
   std::vector<SmallVector<LetRecord, 4>> LetStack;
@@ -60,6 +66,8 @@ class TGParser {
   ///
   typedef std::vector<ForeachLoop> LoopVector;
   LoopVector Loops;
+
+  SmallVector<DefsetRecord *, 2> Defsets;
 
   /// CurMultiClass - If we are parsing a 'multiclass' definition, this is the
   /// current value.
@@ -77,7 +85,6 @@ class TGParser {
     ParseValueMode,   // We are parsing a value we expect to look up.
     ParseNameMode,    // We are parsing a name of an object that does not yet
                       // exist.
-    ParseForeachMode  // We are parsing a foreach init.
   };
 
 public:
@@ -119,28 +126,19 @@ private:  // Semantic analysis methods.
   // iteration space.
   typedef std::vector<IterRecord> IterSet;
 
-  bool ProcessForeachDefs(Record *CurRec, SMLoc Loc);
-  bool ProcessForeachDefs(Record *CurRec, SMLoc Loc, IterSet &IterVals);
+  bool addDefOne(std::unique_ptr<Record> Rec, Init *DefmName,
+                 IterSet &IterVals);
+  bool addDefForeach(Record *Rec, Init *DefmName, IterSet &IterVals);
+  bool addDef(std::unique_ptr<Record> Rec, Init *DefmName);
 
 private:  // Parser methods.
   bool ParseObjectList(MultiClass *MC = nullptr);
   bool ParseObject(MultiClass *MC);
   bool ParseClass();
   bool ParseMultiClass();
-  Record *InstantiateMulticlassDef(MultiClass &MC, Record *DefProto,
-                                   Init *&DefmPrefix, SMRange DefmPrefixRange,
-                                   ArrayRef<Init *> TArgs,
-                                   ArrayRef<Init *> TemplateVals);
-  bool ResolveMulticlassDefArgs(MultiClass &MC, Record *DefProto,
-                                SMLoc DefmPrefixLoc, SMLoc SubClassLoc,
-                                ArrayRef<Init *> TArgs,
-                                ArrayRef<Init *> TemplateVals, bool DeleteArgs);
-  bool ResolveMulticlassDef(MultiClass &MC,
-                            Record *CurRec,
-                            Record *DefProto,
-                            SMLoc DefmPrefixLoc);
   bool ParseDefm(MultiClass *CurMultiClass);
   bool ParseDef(MultiClass *CurMultiClass);
+  bool ParseDefset();
   bool ParseForeach(MultiClass *CurMultiClass);
   bool ParseTopLevelLet(MultiClass *CurMultiClass);
   void ParseLetList(SmallVectorImpl<LetRecord> &Result);

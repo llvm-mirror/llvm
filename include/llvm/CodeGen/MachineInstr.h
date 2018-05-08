@@ -1244,10 +1244,11 @@ public:
   /// \p TII is used to print the opcode name.  If it's not present, but the
   /// MI is in a function, the opcode will be printed using the function's TII.
   void print(raw_ostream &OS, bool IsStandalone = true, bool SkipOpers = false,
-             bool SkipDebugLoc = false,
+             bool SkipDebugLoc = false, bool AddNewLine = true,
              const TargetInstrInfo *TII = nullptr) const;
   void print(raw_ostream &OS, ModuleSlotTracker &MST, bool IsStandalone = true,
              bool SkipOpers = false, bool SkipDebugLoc = false,
+             bool AddNewLine = true,
              const TargetInstrInfo *TII = nullptr) const;
   void dump() const;
   /// @}
@@ -1316,6 +1317,11 @@ public:
   /// for use when merging two MachineInstrs into one. This routine does not
   /// modify the memrefs of the this MachineInstr.
   std::pair<mmo_iterator, unsigned> mergeMemRefsWith(const MachineInstr& Other);
+
+  /// Return the MIFlags which represent both MachineInstrs. This
+  /// should be used when merging two MachineInstrs into one. This routine does
+  /// not modify the MIFlags of this MachineInstr.
+  uint8_t mergeFlagsWith(const MachineInstr& Other) const;
 
   /// Clear this MachineInstr's memory reference descriptor list.  This resets
   /// the memrefs to their most conservative state.  This should be used only

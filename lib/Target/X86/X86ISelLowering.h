@@ -75,6 +75,9 @@ namespace llvm {
       ///
       CALL,
 
+      /// Same as call except it adds the NoTrack prefix.
+      NT_CALL,
+
       /// This operation implements the lowering for readcyclecounter.
       RDTSC_DAG,
 
@@ -121,6 +124,10 @@ namespace llvm {
       /// condition code, and operand 3 is the flag operand produced by a CMP
       /// or TEST instruction.
       BRCOND,
+
+      /// BRIND node with NoTrack prefix. Operand 0 is the chain operand and
+      /// operand 1 is the target address.
+      NT_BRIND,
 
       /// Return with a flag operand. Operand 0 is the chain operand, operand
       /// 1 is the number of bytes of stack to pop.
@@ -586,6 +593,9 @@ namespace llvm {
 
       // LWP insert record.
       LWPINS,
+
+      // User level wait
+      UMWAIT, TPAUSE,
 
       // Compare and swap.
       LCMPXCHG_DAG = ISD::FIRST_TARGET_MEMORY_OPCODE,
@@ -1098,6 +1108,8 @@ namespace llvm {
 
     StringRef getStackProbeSymbolName(MachineFunction &MF) const override;
 
+    bool hasVectorBlend() const override { return true; }
+
     unsigned getMaxSupportedInterleaveFactor() const override { return 4; }
 
     /// \brief Lower interleaved load(s) into target specific
@@ -1112,8 +1124,9 @@ namespace llvm {
     bool lowerInterleavedStore(StoreInst *SI, ShuffleVectorInst *SVI,
                                unsigned Factor) const override;
 
-
-    void finalizeLowering(MachineFunction &MF) const override;
+    SDValue expandIndirectJTBranch(const SDLoc& dl, SDValue Value, 
+                                   SDValue Addr, SelectionDAG &DAG) 
+                                   const override;
 
   protected:
     std::pair<const TargetRegisterClass *, uint8_t>
@@ -1189,7 +1202,8 @@ namespace llvm {
     SDValue LowerEXTRACT_VECTOR_ELT(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerINSERT_VECTOR_ELT(SDValue Op, SelectionDAG &DAG) const;
 
-    unsigned getGlobalWrapperKind(const GlobalValue *GV = nullptr) const;
+    unsigned getGlobalWrapperKind(const GlobalValue *GV = nullptr,
+                                  const unsigned char OpFlags = 0) const;
     SDValue LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerBlockAddress(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerGlobalAddress(const GlobalValue *GV, const SDLoc &dl,

@@ -17,6 +17,7 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
+#include "llvm/Analysis/Utils/Local.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DebugInfo.h"
@@ -32,7 +33,6 @@
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Cloning.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include <set>
 using namespace llvm;
 
@@ -1161,7 +1161,7 @@ static Error DebugACrash(BugDriver &BD, BugTester TestFn) {
   if (!BugpointIsInterrupted) {
     outs() << "\n*** Attempting to perform final cleanups: ";
     std::unique_ptr<Module> M = CloneModule(BD.getProgram());
-    M = BD.performFinalCleanups(M.release(), true);
+    M = BD.performFinalCleanups(std::move(M), true);
 
     // Find out if the pass still crashes on the cleaned up program...
     if (M && TestFn(BD, M.get()))

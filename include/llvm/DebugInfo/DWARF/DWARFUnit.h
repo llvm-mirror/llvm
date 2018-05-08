@@ -56,7 +56,8 @@ public:
 protected:
   ~DWARFUnitSectionBase() = default;
 
-  virtual void parseImpl(DWARFContext &Context, const DWARFSection &Section,
+  virtual void parseImpl(DWARFContext &Context, const DWARFObject &Obj,
+                         const DWARFSection &Section,
                          const DWARFDebugAbbrev *DA, const DWARFSection *RS,
                          StringRef SS, const DWARFSection &SOS,
                          const DWARFSection *AOS, const DWARFSection &LS,
@@ -116,14 +117,14 @@ public:
   }
 
 private:
-  void parseImpl(DWARFContext &Context, const DWARFSection &Section,
-                 const DWARFDebugAbbrev *DA, const DWARFSection *RS,
-                 StringRef SS, const DWARFSection &SOS, const DWARFSection *AOS,
-                 const DWARFSection &LS, bool LE, bool IsDWO,
-                 bool Lazy) override {
+  void parseImpl(DWARFContext &Context, const DWARFObject &Obj,
+                 const DWARFSection &Section, const DWARFDebugAbbrev *DA,
+                 const DWARFSection *RS, StringRef SS, const DWARFSection &SOS,
+                 const DWARFSection *AOS, const DWARFSection &LS, bool LE,
+                 bool IsDWO, bool Lazy) override {
     if (Parsed)
       return;
-    DataExtractor Data(Section.Data, LE, 0);
+    DWARFDataExtractor Data(Obj, Section, LE, 0);
     if (!Parser) {
       const DWARFUnitIndex *Index = nullptr;
       if (IsDWO)
@@ -170,7 +171,7 @@ struct StrOffsetsContributionDescriptor {
   uint64_t Base = 0;
   uint64_t Size = 0;
   /// Format and version.
-  DWARFFormParams FormParams = {0, 0, dwarf::DwarfFormat::DWARF32};
+  dwarf::FormParams FormParams = {0, 0, dwarf::DwarfFormat::DWARF32};
 
   StrOffsetsContributionDescriptor(uint64_t Base, uint64_t Size,
                                    uint8_t Version, dwarf::DwarfFormat Format)
@@ -206,7 +207,7 @@ class DWARFUnit {
   const DWARFUnitSectionBase &UnitSection;
 
   // Version, address size, and DWARF format.
-  DWARFFormParams FormParams;
+  dwarf::FormParams FormParams;
   /// Start, length, and DWARF format of the unit's contribution to the string
   /// offsets table (DWARF v5).
   Optional<StrOffsetsContributionDescriptor> StringOffsetsTableContribution;
@@ -239,7 +240,8 @@ class DWARFUnit {
   }
 
 protected:
-  virtual bool extractImpl(DataExtractor debug_info, uint32_t *offset_ptr);
+  virtual bool extractImpl(const DWARFDataExtractor &debug_info,
+                           uint32_t *offset_ptr);
 
   /// Size in bytes of the unit header.
   virtual uint32_t getHeaderSize() const { return getVersion() <= 4 ? 11 : 12; }
@@ -299,7 +301,7 @@ public:
     return DataExtractor(StringSection, false, 0);
   }
 
-  bool extract(DataExtractor debug_info, uint32_t* offset_ptr);
+  bool extract(const DWARFDataExtractor &debug_info, uint32_t *offset_ptr);
 
   /// extractRangeList - extracts the range list referenced by this compile
   /// unit from .debug_ranges section. Returns true on success.
@@ -315,7 +317,7 @@ public:
   getStringOffsetsTableContribution() const {
     return StringOffsetsTableContribution;
   }
-  const DWARFFormParams &getFormParams() const { return FormParams; }
+  const dwarf::FormParams &getFormParams() const { return FormParams; }
   uint16_t getVersion() const { return FormParams.Version; }
   dwarf::DwarfFormat getFormat() const { return FormParams.Format; }
   uint8_t getAddressByteSize() const { return FormParams.AddrSize; }

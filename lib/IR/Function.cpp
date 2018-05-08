@@ -21,7 +21,6 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/BasicBlock.h"
@@ -480,13 +479,13 @@ void Function::copyAttributesFrom(const Function *Src) {
 static const char * const IntrinsicNameTable[] = {
   "not_intrinsic",
 #define GET_INTRINSIC_NAME_TABLE
-#include "llvm/IR/Intrinsics.gen"
+#include "llvm/IR/Intrinsics.inc"
 #undef GET_INTRINSIC_NAME_TABLE
 };
 
 /// Table of per-target intrinsic name tables.
 #define GET_INTRINSIC_TARGET_DATA
-#include "llvm/IR/Intrinsics.gen"
+#include "llvm/IR/Intrinsics.inc"
 #undef GET_INTRINSIC_TARGET_DATA
 
 /// Find the segment of \c IntrinsicNameTable for intrinsics with the same
@@ -551,10 +550,7 @@ void Function::recalculateIntrinsicID() {
 /// which can't be confused with it's prefix.  This ensures we don't have
 /// collisions between two unrelated function types. Otherwise, you might
 /// parse ffXX as f(fXX) or f(fX)X.  (X is a placeholder for any other type.)
-/// Manglings of integers, floats, and vectors ('i', 'f', and 'v' prefix in most
-/// cases) fall back to the MVT codepath, where they could be mangled to
-/// 'x86mmx', for example; matching on derived types is not sufficient to mangle
-/// everything.
+///
 static std::string getMangledTypeStr(Type* Ty) {
   std::string Result;
   if (PointerType* PTyp = dyn_cast<PointerType>(Ty)) {
@@ -582,11 +578,26 @@ static std::string getMangledTypeStr(Type* Ty) {
       Result += "vararg";
     // Ensure nested function types are distinguishable.
     Result += "f"; 
-  } else if (isa<VectorType>(Ty))
+  } else if (isa<VectorType>(Ty)) {
     Result += "v" + utostr(Ty->getVectorNumElements()) +
       getMangledTypeStr(Ty->getVectorElementType());
-  else if (Ty)
-    Result += EVT::getEVT(Ty).getEVTString();
+  } else if (Ty) {
+    switch (Ty->getTypeID()) {
+    default: llvm_unreachable("Unhandled type");
+    case Type::VoidTyID:      Result += "isVoid";   break;
+    case Type::MetadataTyID:  Result += "Metadata"; break;
+    case Type::HalfTyID:      Result += "f16";      break;
+    case Type::FloatTyID:     Result += "f32";      break;
+    case Type::DoubleTyID:    Result += "f64";      break;
+    case Type::X86_FP80TyID:  Result += "f80";      break;
+    case Type::FP128TyID:     Result += "f128";     break;
+    case Type::PPC_FP128TyID: Result += "ppcf128";  break;
+    case Type::X86_MMXTyID:   Result += "x86mmx";   break;
+    case Type::IntegerTyID:
+      Result += "i" + utostr(cast<IntegerType>(Ty)->getBitWidth());
+      break;
+    }
+  }
   return Result;
 }
 
@@ -821,7 +832,7 @@ static void DecodeIITType(unsigned &NextElt, ArrayRef<unsigned char> Infos,
 }
 
 #define GET_INTRINSIC_GENERATOR_GLOBAL
-#include "llvm/IR/Intrinsics.gen"
+#include "llvm/IR/Intrinsics.inc"
 #undef GET_INTRINSIC_GENERATOR_GLOBAL
 
 void Intrinsic::getIntrinsicInfoTableEntries(ID id,
@@ -958,7 +969,7 @@ FunctionType *Intrinsic::getType(LLVMContext &Context,
 
 bool Intrinsic::isOverloaded(ID id) {
 #define GET_INTRINSIC_OVERLOAD_TABLE
-#include "llvm/IR/Intrinsics.gen"
+#include "llvm/IR/Intrinsics.inc"
 #undef GET_INTRINSIC_OVERLOAD_TABLE
 }
 
@@ -976,7 +987,7 @@ bool Intrinsic::isLeaf(ID id) {
 
 /// This defines the "Intrinsic::getAttributes(ID id)" method.
 #define GET_INTRINSIC_ATTRIBUTES
-#include "llvm/IR/Intrinsics.gen"
+#include "llvm/IR/Intrinsics.inc"
 #undef GET_INTRINSIC_ATTRIBUTES
 
 Function *Intrinsic::getDeclaration(Module *M, ID id, ArrayRef<Type*> Tys) {
@@ -989,12 +1000,12 @@ Function *Intrinsic::getDeclaration(Module *M, ID id, ArrayRef<Type*> Tys) {
 
 // This defines the "Intrinsic::getIntrinsicForGCCBuiltin()" method.
 #define GET_LLVM_INTRINSIC_FOR_GCC_BUILTIN
-#include "llvm/IR/Intrinsics.gen"
+#include "llvm/IR/Intrinsics.inc"
 #undef GET_LLVM_INTRINSIC_FOR_GCC_BUILTIN
 
 // This defines the "Intrinsic::getIntrinsicForMSBuiltin()" method.
 #define GET_LLVM_INTRINSIC_FOR_MS_BUILTIN
-#include "llvm/IR/Intrinsics.gen"
+#include "llvm/IR/Intrinsics.inc"
 #undef GET_LLVM_INTRINSIC_FOR_MS_BUILTIN
 
 bool Intrinsic::matchIntrinsicType(Type *Ty, ArrayRef<Intrinsic::IITDescriptor> &Infos,

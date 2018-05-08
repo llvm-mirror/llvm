@@ -20,6 +20,7 @@
 #include "llvm/Object/MachO.h"
 #include "llvm/Support/FileUtilities.h"
 #include "llvm/Support/Program.h"
+#include "llvm/Support/WithColor.h"
 #include "llvm/Support/raw_ostream.h"
 
 namespace llvm {
@@ -38,7 +39,7 @@ static bool runLipo(StringRef SDKPath, SmallVectorImpl<const char *> &Args) {
     Path = sys::findProgramByName("lipo");
 
   if (!Path) {
-    errs() << "error: lipo: " << Path.getError().message() << "\n";
+    WithColor::error() << "lipo: " << Path.getError().message() << "\n";
     return false;
   }
 
@@ -46,7 +47,7 @@ static bool runLipo(StringRef SDKPath, SmallVectorImpl<const char *> &Args) {
   int result =
       sys::ExecuteAndWait(*Path, Args.data(), nullptr, {}, 0, 0, &ErrMsg);
   if (result) {
-    errs() << "error: lipo: " << ErrMsg << "\n";
+    WithColor::error() << "lipo: " << ErrMsg << "\n";
     return false;
   }
 
@@ -63,8 +64,8 @@ bool generateUniversalBinary(SmallVectorImpl<ArchAndFilename> &ArchFiles,
     StringRef From(ArchFiles.front().Path);
     if (sys::fs::rename(From, OutputFileName)) {
       if (std::error_code EC = sys::fs::copy_file(From, OutputFileName)) {
-        errs() << "error: while copying " << From << " to " << OutputFileName
-               << ": " << EC.message() << "\n";
+        WithColor::error() << "while copying " << From << " to "
+                           << OutputFileName << ": " << EC.message() << "\n";
         return false;
       }
       sys::fs::remove(From);

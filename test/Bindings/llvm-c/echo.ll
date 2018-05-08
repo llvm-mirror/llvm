@@ -6,6 +6,8 @@ source_filename = "/test/Bindings/echo.ll"
 target datalayout = "e-m:o-i64:64-f80:128-n8:16:32:64-S128"
 target triple = "x86_64-apple-macosx10.11.0"
 
+module asm "classical GAS"
+
 %S = type { i64, %S* }
 
 @var = global i32 42
@@ -14,6 +16,7 @@ target triple = "x86_64-apple-macosx10.11.0"
 @tl = thread_local global { i64, %S* } { i64 1, %S* @cst }
 @arr = linkonce_odr global [5 x i8] [ i8 2, i8 3, i8 5, i8 7, i8 11 ]
 @str = private unnamed_addr constant [13 x i8] c"hello world\0A\00"
+@locStr = private local_unnamed_addr constant [13 x i8] c"hello world\0A\00"
 @hidden = hidden global i32 7
 @protected = protected global i32 23
 @section = global i32 27, section ".custom"
@@ -120,4 +123,39 @@ do:
   br label %cond
 done:
   ret i32 %p
+}
+
+declare void @personalityFn()
+
+define void @exn() personality void ()* @personalityFn {
+entry:
+  invoke void @decl()
+          to label %via.cleanup unwind label %exn.dispatch
+via.cleanup:
+  invoke void @decl()
+          to label %via.catchswitch unwind label %cleanup.inner
+cleanup.inner:
+  %cp.inner = cleanuppad within none []
+  cleanupret from %cp.inner unwind label %exn.dispatch
+via.catchswitch:
+  invoke void @decl()
+          to label %exit unwind label %dispatch.inner
+dispatch.inner:
+  %cs.inner = catchswitch within none [label %pad.inner] unwind label %exn.dispatch
+pad.inner:
+  %catch.inner = catchpad within %cs.inner [i32 0]
+  catchret from %catch.inner to label %exit
+exn.dispatch:
+  %cs = catchswitch within none [label %pad1, label %pad2] unwind label %cleanup
+pad1:
+  catchpad within %cs [i32 1]
+  unreachable
+pad2:
+  catchpad within %cs [i32 2]
+  unreachable
+cleanup:
+  %cp = cleanuppad within none []
+  cleanupret from %cp unwind to caller
+exit:
+  ret void
 }

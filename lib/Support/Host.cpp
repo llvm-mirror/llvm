@@ -65,8 +65,7 @@ static std::unique_ptr<llvm::MemoryBuffer>
   return std::move(*Text);
 }
 
-StringRef sys::detail::getHostCPUNameForPowerPC(
-    const StringRef &ProcCpuinfoContent) {
+StringRef sys::detail::getHostCPUNameForPowerPC(StringRef ProcCpuinfoContent) {
   // Access to the Processor Version Register (PVR) on PowerPC is privileged,
   // and so we must use an operating-system interface to determine the current
   // processor type. On Linux, this is exposed through the /proc/cpuinfo file.
@@ -145,8 +144,7 @@ StringRef sys::detail::getHostCPUNameForPowerPC(
       .Default(generic);
 }
 
-StringRef sys::detail::getHostCPUNameForARM(
-    const StringRef &ProcCpuinfoContent) {
+StringRef sys::detail::getHostCPUNameForARM(StringRef ProcCpuinfoContent) {
   // The cpuid register on arm is not accessible from user space. On Linux,
   // it is exposed through the /proc/cpuinfo file.
 
@@ -250,8 +248,7 @@ StringRef sys::detail::getHostCPUNameForARM(
   return "generic";
 }
 
-StringRef sys::detail::getHostCPUNameForS390x(
-    const StringRef &ProcCpuinfoContent) {
+StringRef sys::detail::getHostCPUNameForS390x(StringRef ProcCpuinfoContent) {
   // STIDP is a privileged operation, so use /proc/cpuinfo instead.
 
   // The "processor 0:" line comes after a fair amount of other information,
@@ -654,9 +651,11 @@ getIntelProcessorTypeAndSubtype(unsigned Family, unsigned Model,
     // Goldmont:
     case 0x5c: // Apollo Lake
     case 0x5f: // Denverton
-    case 0x7a: // Gemini Lake
       *Type = X86::INTEL_GOLDMONT;
       break; // "goldmont"
+    case 0x7a:
+      *Type = X86::INTEL_GOLDMONT_PLUS;
+      break;
     case 0x57:
       *Type = X86::INTEL_KNL; // knl
       break;
@@ -1009,7 +1008,7 @@ StringRef sys::getHostCPUName() {
 #include "llvm/Support/X86TargetParser.def"
 
   // Now check types.
-#define X86_CPU_SUBTYPE(ARCHNAME, ENUM) \
+#define X86_CPU_TYPE(ARCHNAME, ENUM) \
   if (Type == X86::ENUM) \
     return ARCHNAME;
 #include "llvm/Support/X86TargetParser.def"
@@ -1062,19 +1061,19 @@ StringRef sys::getHostCPUName() {
 #elif defined(__linux__) && (defined(__ppc__) || defined(__powerpc__))
 StringRef sys::getHostCPUName() {
   std::unique_ptr<llvm::MemoryBuffer> P = getProcCpuinfoContent();
-  const StringRef& Content = P ? P->getBuffer() : "";
+  StringRef Content = P ? P->getBuffer() : "";
   return detail::getHostCPUNameForPowerPC(Content);
 }
 #elif defined(__linux__) && (defined(__arm__) || defined(__aarch64__))
 StringRef sys::getHostCPUName() {
   std::unique_ptr<llvm::MemoryBuffer> P = getProcCpuinfoContent();
-  const StringRef& Content = P ? P->getBuffer() : "";
+  StringRef Content = P ? P->getBuffer() : "";
   return detail::getHostCPUNameForARM(Content);
 }
 #elif defined(__linux__) && defined(__s390x__)
 StringRef sys::getHostCPUName() {
   std::unique_ptr<llvm::MemoryBuffer> P = getProcCpuinfoContent();
-  const StringRef& Content = P ? P->getBuffer() : "";
+  StringRef Content = P ? P->getBuffer() : "";
   return detail::getHostCPUNameForS390x(Content);
 }
 #else
@@ -1216,9 +1215,12 @@ bool sys::getHostCPUFeatures(StringMap<bool> &Features) {
   Features["tbm"]    = HasExtLeaf1 && ((ECX >> 21) & 1);
   Features["mwaitx"] = HasExtLeaf1 && ((ECX >> 29) & 1);
 
+  // Miscellaneous memory related features, detected by
+  // using the 0x80000008 leaf of the CPUID instruction
   bool HasExtLeaf8 = MaxExtLevel >= 0x80000008 &&
                      !getX86CpuIDAndInfo(0x80000008, &EAX, &EBX, &ECX, &EDX);
-  Features["clzero"] = HasExtLeaf8 && ((EBX >> 0) & 1);
+  Features["clzero"]   = HasExtLeaf8 && ((EBX >> 0) & 1);
+  Features["wbnoinvd"] = HasExtLeaf8 && ((EBX >> 9) & 1);
 
   bool HasLeaf7 =
       MaxLevel >= 7 && !getX86CpuIDAndInfoEx(0x7, 0x0, &EAX, &EBX, &ECX, &EDX);
@@ -1248,6 +1250,7 @@ bool sys::getHostCPUFeatures(StringMap<bool> &Features) {
   Features["prefetchwt1"]     = HasLeaf7 && ((ECX >>  0) & 1);
   Features["avx512vbmi"]      = HasLeaf7 && ((ECX >>  1) & 1) && HasAVX512Save;
   Features["pku"]             = HasLeaf7 && ((ECX >>  4) & 1);
+  Features["waitpkg"]         = HasLeaf7 && ((ECX >>  5) & 1);
   Features["avx512vbmi2"]     = HasLeaf7 && ((ECX >>  6) & 1) && HasAVX512Save;
   Features["shstk"]           = HasLeaf7 && ((ECX >>  7) & 1);
   Features["gfni"]            = HasLeaf7 && ((ECX >>  8) & 1);
@@ -1257,6 +1260,7 @@ bool sys::getHostCPUFeatures(StringMap<bool> &Features) {
   Features["avx512bitalg"]    = HasLeaf7 && ((ECX >> 12) & 1) && HasAVX512Save;
   Features["avx512vpopcntdq"] = HasLeaf7 && ((ECX >> 14) & 1) && HasAVX512Save;
   Features["rdpid"]           = HasLeaf7 && ((ECX >> 22) & 1);
+  Features["cldemote"]        = HasLeaf7 && ((ECX >> 25) & 1);
 
   Features["ibt"] = HasLeaf7 && ((EDX >> 20) & 1);
 

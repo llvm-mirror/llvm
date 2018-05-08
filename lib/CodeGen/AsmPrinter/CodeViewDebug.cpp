@@ -36,7 +36,6 @@
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/TargetFrameLowering.h"
-#include "llvm/CodeGen/TargetLoweringObjectFile.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/Config/llvm-config.h"
@@ -75,6 +74,7 @@
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/SMLoc.h"
 #include "llvm/Support/ScopedPrinter.h"
+#include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/Target/TargetMachine.h"
 #include <algorithm>
 #include <cassert>
@@ -113,6 +113,16 @@ StringRef CodeViewDebug::getFullFilepath(const DIFile *File) {
     return Filepath;
 
   StringRef Dir = File->getDirectory(), Filename = File->getFilename();
+
+  // If this is a Unix-style path, just use it as is. Don't try to canonicalize
+  // it textually because one of the path components could be a symlink.
+  if (!Dir.empty() && Dir[0] == '/') {
+    Filepath = Dir;
+    if (Dir.back() != '/')
+      Filepath += '/';
+    Filepath += Filename;
+    return Filepath;
+  }
 
   // Clang emits directory and relative filename info into the IR, but CodeView
   // operates on full paths.  We could change Clang to emit full paths too, but
@@ -365,15 +375,15 @@ unsigned CodeViewDebug::getPointerSizeInBytes() {
 }
 
 void CodeViewDebug::recordLocalVariable(LocalVariable &&Var,
-                                        const DILocation *InlinedAt) {
-  if (InlinedAt) {
+                                        const LexicalScope *LS) {
+  if (const DILocation *InlinedAt = LS->getInlinedAt()) {
     // This variable was inlined. Associate it with the InlineSite.
     const DISubprogram *Inlinee = Var.DIVar->getScope()->getSubprogram();
     InlineSite &Site = getInlineSite(InlinedAt, Inlinee);
     Site.InlinedLocals.emplace_back(Var);
   } else {
-    // This variable goes in the main ProcSym.
-    CurFn->Locals.emplace_back(Var);
+    // This variable goes into the corresponding lexical scope.
+    ScopeVariables[LS].emplace_back(Var);
   }
 }
 
@@ -470,7 +480,7 @@ void CodeViewDebug::endModule() {
   // Emit per-function debug information.
   for (auto &P : FnDebugInfo)
     if (!P.first->isDeclarationForLinker())
-      emitDebugInfoForFunction(P.first, P.second);
+      emitDebugInfoForFunction(P.first, *P.second);
 
   // Emit global variable debug information.
   setCurrentSubprogram(nullptr);
@@ -524,7 +534,7 @@ void CodeViewDebug::emitTypeInformation() {
   if (TypeTable.empty())
     return;
 
-  // Start the .debug$T section with 0x4.
+  // Start the .debug$T or .debug$P section with 0x4.
   OS.SwitchSection(Asm->getObjFileLowering().getCOFFDebugTypesSection());
   emitCodeViewMagicVersion();
 
@@ -828,6 +838,57 @@ void CodeViewDebug::switchToDebugSectionForSymbol(const MCSymbol *GVSym) {
     emitCodeViewMagicVersion();
 }
 
+// Emit an S_THUNK32/S_END symbol pair for a thunk routine.
+// The only supported thunk ordinal is currently the standard type.
+void CodeViewDebug::emitDebugInfoForThunk(const Function *GV,
+                                          FunctionInfo &FI,
+                                          const MCSymbol *Fn) {
+  std::string FuncName = GlobalValue::dropLLVMManglingEscape(GV->getName());
+  const ThunkOrdinal ordinal = ThunkOrdinal::Standard; // Only supported kind.
+
+  OS.AddComment("Symbol subsection for " + Twine(FuncName));
+  MCSymbol *SymbolsEnd = beginCVSubsection(DebugSubsectionKind::Symbols);
+
+  // Emit S_THUNK32
+  MCSymbol *ThunkRecordBegin = MMI->getContext().createTempSymbol(),
+           *ThunkRecordEnd   = MMI->getContext().createTempSymbol();
+  OS.AddComment("Record length");
+  OS.emitAbsoluteSymbolDiff(ThunkRecordEnd, ThunkRecordBegin, 2);
+  OS.EmitLabel(ThunkRecordBegin);
+  OS.AddComment("Record kind: S_THUNK32");
+  OS.EmitIntValue(unsigned(SymbolKind::S_THUNK32), 2);
+  OS.AddComment("PtrParent");
+  OS.EmitIntValue(0, 4);
+  OS.AddComment("PtrEnd");
+  OS.EmitIntValue(0, 4);
+  OS.AddComment("PtrNext");
+  OS.EmitIntValue(0, 4);
+  OS.AddComment("Thunk section relative address");
+  OS.EmitCOFFSecRel32(Fn, /*Offset=*/0);
+  OS.AddComment("Thunk section index");
+  OS.EmitCOFFSectionIndex(Fn);
+  OS.AddComment("Code size");
+  OS.emitAbsoluteSymbolDiff(FI.End, Fn, 2);
+  OS.AddComment("Ordinal");
+  OS.EmitIntValue(unsigned(ordinal), 1);
+  OS.AddComment("Function name");
+  emitNullTerminatedSymbolName(OS, FuncName);
+  // Additional fields specific to the thunk ordinal would go here.
+  OS.EmitLabel(ThunkRecordEnd);
+
+  // Local variables/inlined routines are purposely omitted here.  The point of
+  // marking this as a thunk is so Visual Studio will NOT stop in this routine.
+
+  // Emit S_PROC_ID_END
+  const unsigned RecordLengthForSymbolEnd = 2;
+  OS.AddComment("Record length");
+  OS.EmitIntValue(RecordLengthForSymbolEnd, 2);
+  OS.AddComment("Record kind: S_PROC_ID_END");
+  OS.EmitIntValue(unsigned(SymbolKind::S_PROC_ID_END), 2);
+
+  endCVSubsection(SymbolsEnd);
+}
+
 void CodeViewDebug::emitDebugInfoForFunction(const Function *GV,
                                              FunctionInfo &FI) {
   // For each function there is a separate subsection which holds the PC to
@@ -842,6 +903,11 @@ void CodeViewDebug::emitDebugInfoForFunction(const Function *GV,
   auto *SP = GV->getSubprogram();
   assert(SP);
   setCurrentSubprogram(SP);
+
+  if (SP->isThunk()) {
+    emitDebugInfoForThunk(GV, FI, Fn);
+    return;
+  }
 
   // If we have a display name, build the fully qualified name by walking the
   // chain of scopes.
@@ -905,6 +971,7 @@ void CodeViewDebug::emitDebugInfoForFunction(const Function *GV,
     OS.EmitLabel(ProcRecordEnd);
 
     emitLocalVariableList(FI.Locals);
+    emitLexicalBlockList(FI.ChildBlocks, FI);
 
     // Emit inlined call site information. Only emit functions inlined directly
     // into the parent function. We'll emit the other sites recursively as part
@@ -1025,7 +1092,7 @@ void CodeViewDebug::collectVariableInfoFromMFTable(
     LocalVariable Var;
     Var.DIVar = VI.Var;
     Var.DefRanges.emplace_back(std::move(DefRange));
-    recordLocalVariable(std::move(Var), VI.Loc->getInlinedAt());
+    recordLocalVariable(std::move(Var), Scope);
   }
 }
 
@@ -1107,7 +1174,7 @@ void CodeViewDebug::calculateRanges(
       auto J = std::next(I);
       const DIExpression *DIExpr = DVInst->getDebugExpression();
       while (J != E &&
-             !fragmentsOverlap(DIExpr, J->first->getDebugExpression()))
+             !DIExpr->fragmentsOverlap(J->first->getDebugExpression()))
         ++J;
       if (J != E)
         End = getLabelBeforeInsn(J->first);
@@ -1156,14 +1223,15 @@ void CodeViewDebug::collectVariableInfo(const DISubprogram *SP) {
     Var.DIVar = DIVar;
 
     calculateRanges(Var, Ranges);
-    recordLocalVariable(std::move(Var), InlinedAt);
+    recordLocalVariable(std::move(Var), Scope);
   }
 }
 
 void CodeViewDebug::beginFunctionImpl(const MachineFunction *MF) {
   const Function &GV = MF->getFunction();
-  assert(FnDebugInfo.count(&GV) == false);
-  CurFn = &FnDebugInfo[&GV];
+  auto Insertion = FnDebugInfo.insert({&GV, llvm::make_unique<FunctionInfo>()});
+  assert(Insertion.second && "function already has info");
+  CurFn = Insertion.first->second.get();
   CurFn->FuncId = NextFuncId++;
   CurFn->Begin = Asm->getFunctionBegin();
 
@@ -1318,7 +1386,7 @@ TypeIndex CodeViewDebug::lowerTypeArray(const DICompositeType *Ty) {
   DITypeRef ElementTypeRef = Ty->getBaseType();
   TypeIndex ElementTypeIndex = getTypeIndex(ElementTypeRef);
   // IndexType is size_t, which depends on the bitness of the target.
-  TypeIndex IndexType = Asm->TM.getPointerSize() == 8
+  TypeIndex IndexType = getPointerSizeInBytes() == 8
                             ? TypeIndex(SimpleTypeKind::UInt64Quad)
                             : TypeIndex(SimpleTypeKind::UInt32Long);
 
@@ -1526,8 +1594,8 @@ TypeIndex CodeViewDebug::lowerTypeMemberPointer(const DIDerivedType *Ty,
   assert(Ty->getTag() == dwarf::DW_TAG_ptr_to_member_type);
   TypeIndex ClassTI = getTypeIndex(Ty->getClassType());
   TypeIndex PointeeTI = getTypeIndex(Ty->getBaseType(), Ty->getClassType());
-  PointerKind PK = Asm->TM.getPointerSize() == 8 ? PointerKind::Near64
-                                                 : PointerKind::Near32;
+  PointerKind PK = getPointerSizeInBytes() == 8 ? PointerKind::Near64
+                                                : PointerKind::Near32;
   bool IsPMF = isa<DISubroutineType>(Ty->getBaseType());
   PointerMode PM = IsPMF ? PointerMode::PointerToMemberFunction
                          : PointerMode::PointerToDataMember;
@@ -2269,10 +2337,10 @@ void CodeViewDebug::emitLocalVariableList(ArrayRef<LocalVariable> Locals) {
   for (const LocalVariable &L : Locals)
     if (L.DIVar->isParameter())
       Params.push_back(&L);
-  std::sort(Params.begin(), Params.end(),
-            [](const LocalVariable *L, const LocalVariable *R) {
-              return L->DIVar->getArg() < R->DIVar->getArg();
-            });
+  llvm::sort(Params.begin(), Params.end(),
+             [](const LocalVariable *L, const LocalVariable *R) {
+               return L->DIVar->getArg() < R->DIVar->getArg();
+             });
   for (const LocalVariable *L : Params)
     emitLocalVariable(*L);
 
@@ -2362,15 +2430,150 @@ void CodeViewDebug::emitLocalVariable(const LocalVariable &Var) {
   }
 }
 
+void CodeViewDebug::emitLexicalBlockList(ArrayRef<LexicalBlock *> Blocks,
+                                         const FunctionInfo& FI) {
+  for (LexicalBlock *Block : Blocks)
+    emitLexicalBlock(*Block, FI);
+}
+
+/// Emit an S_BLOCK32 and S_END record pair delimiting the contents of a
+/// lexical block scope.
+void CodeViewDebug::emitLexicalBlock(const LexicalBlock &Block,
+                                     const FunctionInfo& FI) {
+  MCSymbol *RecordBegin = MMI->getContext().createTempSymbol(),
+           *RecordEnd   = MMI->getContext().createTempSymbol();
+
+  // Lexical block symbol record.
+  OS.AddComment("Record length");
+  OS.emitAbsoluteSymbolDiff(RecordEnd, RecordBegin, 2);   // Record Length
+  OS.EmitLabel(RecordBegin);
+  OS.AddComment("Record kind: S_BLOCK32");
+  OS.EmitIntValue(SymbolKind::S_BLOCK32, 2);              // Record Kind
+  OS.AddComment("PtrParent");
+  OS.EmitIntValue(0, 4);                                  // PtrParent
+  OS.AddComment("PtrEnd");
+  OS.EmitIntValue(0, 4);                                  // PtrEnd
+  OS.AddComment("Code size");
+  OS.emitAbsoluteSymbolDiff(Block.End, Block.Begin, 4);   // Code Size
+  OS.AddComment("Function section relative address");
+  OS.EmitCOFFSecRel32(Block.Begin, /*Offset=*/0);         // Func Offset
+  OS.AddComment("Function section index");
+  OS.EmitCOFFSectionIndex(FI.Begin);                      // Func Symbol
+  OS.AddComment("Lexical block name");
+  emitNullTerminatedSymbolName(OS, Block.Name);           // Name
+  OS.EmitLabel(RecordEnd);
+
+  // Emit variables local to this lexical block.
+  emitLocalVariableList(Block.Locals);
+
+  // Emit lexical blocks contained within this block.
+  emitLexicalBlockList(Block.Children, FI);
+
+  // Close the lexical block scope.
+  OS.AddComment("Record length");
+  OS.EmitIntValue(2, 2);                                  // Record Length
+  OS.AddComment("Record kind: S_END");
+  OS.EmitIntValue(SymbolKind::S_END, 2);                  // Record Kind
+}
+
+/// Convenience routine for collecting lexical block information for a list
+/// of lexical scopes.
+void CodeViewDebug::collectLexicalBlockInfo(
+        SmallVectorImpl<LexicalScope *> &Scopes,
+        SmallVectorImpl<LexicalBlock *> &Blocks,
+        SmallVectorImpl<LocalVariable> &Locals) {
+  for (LexicalScope *Scope : Scopes)
+    collectLexicalBlockInfo(*Scope, Blocks, Locals);
+}
+
+/// Populate the lexical blocks and local variable lists of the parent with
+/// information about the specified lexical scope.
+void CodeViewDebug::collectLexicalBlockInfo(
+    LexicalScope &Scope,
+    SmallVectorImpl<LexicalBlock *> &ParentBlocks,
+    SmallVectorImpl<LocalVariable> &ParentLocals) {
+  if (Scope.isAbstractScope())
+    return;
+
+  auto LocalsIter = ScopeVariables.find(&Scope);
+  if (LocalsIter == ScopeVariables.end()) {
+    // This scope does not contain variables and can be eliminated.
+    collectLexicalBlockInfo(Scope.getChildren(), ParentBlocks, ParentLocals);
+    return;
+  }
+  SmallVectorImpl<LocalVariable> &Locals = LocalsIter->second;
+
+  const DILexicalBlock *DILB = dyn_cast<DILexicalBlock>(Scope.getScopeNode());
+  if (!DILB) {
+    // This scope is not a lexical block and can be eliminated, but keep any
+    // local variables it contains.
+    ParentLocals.append(Locals.begin(), Locals.end());
+    collectLexicalBlockInfo(Scope.getChildren(), ParentBlocks, ParentLocals);
+    return;
+  }
+
+  const SmallVectorImpl<InsnRange> &Ranges = Scope.getRanges();
+  if (Ranges.size() != 1 || !getLabelAfterInsn(Ranges.front().second)) {
+    // This lexical block scope has too many address ranges to represent in the
+    // current CodeView format or does not have a valid address range.
+    // Eliminate this lexical scope and promote any locals it contains to the
+    // parent scope.
+    //
+    // For lexical scopes with multiple address ranges you may be tempted to
+    // construct a single range covering every instruction where the block is
+    // live and everything in between.  Unfortunately, Visual Studio only
+    // displays variables from the first matching lexical block scope.  If the
+    // first lexical block contains exception handling code or cold code which
+    // is moved to the bottom of the routine creating a single range covering
+    // nearly the entire routine, then it will hide all other lexical blocks
+    // and the variables they contain.
+    //
+    ParentLocals.append(Locals.begin(), Locals.end());
+    collectLexicalBlockInfo(Scope.getChildren(), ParentBlocks, ParentLocals);
+    return;
+  }
+
+  // Create a new CodeView lexical block for this lexical scope.  If we've
+  // seen this DILexicalBlock before then the scope tree is malformed and
+  // we can handle this gracefully by not processing it a second time.
+  auto BlockInsertion = CurFn->LexicalBlocks.insert({DILB, LexicalBlock()});
+  if (!BlockInsertion.second)
+    return;
+
+  // Create a lexical block containing the local variables and collect the
+  // the lexical block information for the children.
+  const InsnRange &Range = Ranges.front();
+  assert(Range.first && Range.second);
+  LexicalBlock &Block = BlockInsertion.first->second;
+  Block.Begin = getLabelBeforeInsn(Range.first);
+  Block.End = getLabelAfterInsn(Range.second);
+  assert(Block.Begin && "missing label for scope begin");
+  assert(Block.End && "missing label for scope end");
+  Block.Name = DILB->getName();
+  Block.Locals = std::move(Locals);
+  ParentBlocks.push_back(&Block);
+  collectLexicalBlockInfo(Scope.getChildren(), Block.Children, Block.Locals);
+}
+
 void CodeViewDebug::endFunctionImpl(const MachineFunction *MF) {
   const Function &GV = MF->getFunction();
   assert(FnDebugInfo.count(&GV));
-  assert(CurFn == &FnDebugInfo[&GV]);
+  assert(CurFn == FnDebugInfo[&GV].get());
 
   collectVariableInfo(GV.getSubprogram());
 
+  // Build the lexical block structure to emit for this routine.
+  if (LexicalScope *CFS = LScopes.getCurrentFunctionScope())
+    collectLexicalBlockInfo(*CFS, CurFn->ChildBlocks, CurFn->Locals);
+
+  // Clear the scope and variable information from the map which will not be
+  // valid after we have finished processing this routine.  This also prepares
+  // the map for the subsequent routine.
+  ScopeVariables.clear();
+
   // Don't emit anything if we don't have any line tables.
-  if (!CurFn->HaveLineInfo) {
+  // Thunks are compiler-generated and probably won't have source correlation.
+  if (!CurFn->HaveLineInfo && !GV.getSubprogram()->isThunk()) {
     FnDebugInfo.erase(&GV);
     CurFn = nullptr;
     return;

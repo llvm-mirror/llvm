@@ -36,9 +36,6 @@
 #ifdef _MSC_VER
  #pragma comment(lib, "psapi.lib")
 #elif __MINGW32__
- #if (HAVE_LIBPSAPI != 1)
-  #error "libpsapi.a should be present"
- #endif
  // The version of g++ that comes with MinGW does *not* properly understand
  // the ll format specifier for printf. However, MinGW passes the format
  // specifiers on to the MSVCRT entirely, and the CRT understands the ll
@@ -536,10 +533,14 @@ void llvm::sys::PrintStackTrace(raw_ostream &OS) {
   StackFrame.AddrPC.Offset = Context.Eip;
   StackFrame.AddrStack.Offset = Context.Esp;
   StackFrame.AddrFrame.Offset = Context.Ebp;
-#elif defined(_M_ARM64) || defined(_M_ARM)
+#elif defined(_M_ARM64)
   StackFrame.AddrPC.Offset = Context.Pc;
   StackFrame.AddrStack.Offset = Context.Sp;
   StackFrame.AddrFrame.Offset = Context.Fp;
+#elif defined(_M_ARM)
+  StackFrame.AddrPC.Offset = Context.Pc;
+  StackFrame.AddrStack.Offset = Context.Sp;
+  StackFrame.AddrFrame.Offset = Context.R11;
 #endif
   StackFrame.AddrPC.Mode = AddrModeFlat;
   StackFrame.AddrStack.Mode = AddrModeFlat;
@@ -819,7 +820,11 @@ static LONG WINAPI LLVMUnhandledExceptionFilter(LPEXCEPTION_POINTERS ep) {
   StackFrame.AddrPC.Mode = AddrModeFlat;
   StackFrame.AddrStack.Offset = ep->ContextRecord->Sp;
   StackFrame.AddrStack.Mode = AddrModeFlat;
+#if defined(_M_ARM64)
   StackFrame.AddrFrame.Offset = ep->ContextRecord->Fp;
+#else
+  StackFrame.AddrFrame.Offset = ep->ContextRecord->R11;
+#endif
   StackFrame.AddrFrame.Mode = AddrModeFlat;
 #endif
 

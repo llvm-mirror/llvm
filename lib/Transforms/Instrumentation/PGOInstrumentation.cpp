@@ -48,7 +48,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Transforms/PGOInstrumentation.h"
+#include "llvm/Transforms/Instrumentation/PGOInstrumentation.h"
 #include "CFGMST.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -224,8 +224,8 @@ static cl::opt<bool>
     EmitBranchProbability("pgo-emit-branch-prob", cl::init(false), cl::Hidden,
                           cl::desc("When this option is on, the annotated "
                                    "branch probability will be emitted as "
-                                   " optimization remarks: -Rpass-analysis="
-                                   "pgo-instr-use"));
+                                   "optimization remarks: -{Rpass|"
+                                   "pass-remarks}=pgo-instrumentation"));
 
 // Command line option to turn on CFG dot dump after profile annotation.
 // Defined in Analysis/BlockFrequencyInfo.cpp:  -pgo-view-counts
@@ -862,7 +862,7 @@ public:
   // Set the branch weights based on the count values.
   void setBranchWeights();
 
-  // Annotate the value profile call sites all all value kind.
+  // Annotate the value profile call sites for all value kind.
   void annotateValueSites();
 
   // Annotate the value profile call sites for one value kind.
@@ -1595,13 +1595,15 @@ void llvm::setProfMetadata(Module *M, Instruction *TI,
     if (BrCondStr.empty())
       return;
 
-    unsigned WSum =
-        std::accumulate(Weights.begin(), Weights.end(), 0,
-                        [](unsigned w1, unsigned w2) { return w1 + w2; });
+    uint64_t WSum =
+        std::accumulate(Weights.begin(), Weights.end(), (uint64_t)0,
+                        [](uint64_t w1, uint64_t w2) { return w1 + w2; });
     uint64_t TotalCount =
-        std::accumulate(EdgeCounts.begin(), EdgeCounts.end(), 0,
+        std::accumulate(EdgeCounts.begin(), EdgeCounts.end(), (uint64_t)0,
                         [](uint64_t c1, uint64_t c2) { return c1 + c2; });
-    BranchProbability BP(Weights[0], WSum);
+    Scale = calculateCountScale(WSum);
+    BranchProbability BP(scaleBranchCount(Weights[0], Scale),
+                         scaleBranchCount(WSum, Scale));
     std::string BranchProbStr;
     raw_string_ostream OS(BranchProbStr);
     OS << BP;

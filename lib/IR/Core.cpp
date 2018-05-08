@@ -304,8 +304,42 @@ char *LLVMPrintModuleToString(LLVMModuleRef M) {
 }
 
 /*--.. Operations on inline assembler ......................................--*/
+void LLVMSetModuleInlineAsm2(LLVMModuleRef M, const char *Asm, size_t Len) {
+  unwrap(M)->setModuleInlineAsm(StringRef(Asm, Len));
+}
+
 void LLVMSetModuleInlineAsm(LLVMModuleRef M, const char *Asm) {
   unwrap(M)->setModuleInlineAsm(StringRef(Asm));
+}
+
+void LLVMAppendModuleInlineAsm(LLVMModuleRef M, const char *Asm, size_t Len) {
+  unwrap(M)->appendModuleInlineAsm(StringRef(Asm, Len));
+}
+
+const char *LLVMGetModuleInlineAsm(LLVMModuleRef M, size_t *Len) {
+  auto &Str = unwrap(M)->getModuleInlineAsm();
+  *Len = Str.length();
+  return Str.c_str();
+}
+
+LLVMValueRef LLVMGetInlineAsm(LLVMTypeRef Ty,
+                              char *AsmString, size_t AsmStringSize,
+                              char *Constraints, size_t ConstraintsSize,
+                              LLVMBool HasSideEffects, LLVMBool IsAlignStack,
+                              LLVMInlineAsmDialect Dialect) {
+  InlineAsm::AsmDialect AD;
+  switch (Dialect) {
+  case LLVMInlineAsmDialectATT:
+    AD = InlineAsm::AD_ATT;
+    break;
+  case LLVMInlineAsmDialectIntel:
+    AD = InlineAsm::AD_Intel;
+    break;
+  }
+  return wrap(InlineAsm::get(unwrap<FunctionType>(Ty),
+                             StringRef(AsmString, AsmStringSize),
+                             StringRef(Constraints, ConstraintsSize),
+                             HasSideEffects, IsAlignStack, AD));
 }
 
 
@@ -368,11 +402,9 @@ LLVMContextRef LLVMGetTypeContext(LLVMTypeRef Ty) {
   return wrap(&unwrap(Ty)->getContext());
 }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
-LLVM_DUMP_METHOD void LLVMDumpType(LLVMTypeRef Ty) {
-  return unwrap(Ty)->dump();
+void LLVMDumpType(LLVMTypeRef Ty) {
+  return unwrap(Ty)->print(errs(), /*IsForDebug=*/true);
 }
-#endif
 
 char *LLVMPrintTypeToString(LLVMTypeRef Ty) {
   std::string buf;
@@ -667,7 +699,7 @@ void LLVMSetValueName(LLVMValueRef Val, const char *Name) {
   unwrap(Val)->setName(Name);
 }
 
-LLVM_DUMP_METHOD void LLVMDumpValue(LLVMValueRef Val) {
+void LLVMDumpValue(LLVMValueRef Val) {
   unwrap(Val)->print(errs(), /*IsForDebug=*/true);
 }
 
@@ -1607,6 +1639,31 @@ void LLVMSetDLLStorageClass(LLVMValueRef Global, LLVMDLLStorageClass Class) {
       static_cast<GlobalValue::DLLStorageClassTypes>(Class));
 }
 
+LLVMUnnamedAddr LLVMGetUnnamedAddress(LLVMValueRef Global) {
+  switch (unwrap<GlobalValue>(Global)->getUnnamedAddr()) {
+  case GlobalVariable::UnnamedAddr::None:
+    return LLVMNoUnnamedAddr;
+  case GlobalVariable::UnnamedAddr::Local:
+    return LLVMLocalUnnamedAddr;
+  case GlobalVariable::UnnamedAddr::Global:
+    return LLVMGlobalUnnamedAddr;
+  }
+  llvm_unreachable("Unknown UnnamedAddr kind!");
+}
+
+void LLVMSetUnnamedAddress(LLVMValueRef Global, LLVMUnnamedAddr UnnamedAddr) {
+  GlobalValue *GV = unwrap<GlobalValue>(Global);
+
+  switch (UnnamedAddr) {
+  case LLVMNoUnnamedAddr:
+    return GV->setUnnamedAddr(GlobalVariable::UnnamedAddr::None);
+  case LLVMLocalUnnamedAddr:
+    return GV->setUnnamedAddr(GlobalVariable::UnnamedAddr::Local);
+  case LLVMGlobalUnnamedAddr:
+    return GV->setUnnamedAddr(GlobalVariable::UnnamedAddr::Global);
+  }
+}
+
 LLVMBool LLVMHasUnnamedAddr(LLVMValueRef Global) {
   return unwrap<GlobalValue>(Global)->hasGlobalUnnamedAddr();
 }
@@ -2171,11 +2228,14 @@ LLVMValueRef LLVMInstructionClone(LLVMValueRef Inst) {
   return nullptr;
 }
 
-/*--.. Call and invoke instructions ........................................--*/
-
 unsigned LLVMGetNumArgOperands(LLVMValueRef Instr) {
+  if (FuncletPadInst *FPI = dyn_cast<FuncletPadInst>(unwrap(Instr))) {
+    return FPI->getNumArgOperands();
+  }
   return CallSite(unwrap<Instruction>(Instr)).getNumArgOperands();
 }
+
+/*--.. Call and invoke instructions ........................................--*/
 
 unsigned LLVMGetInstructionCallConv(LLVMValueRef Instr) {
   return CallSite(unwrap<Instruction>(Instr)).getCallingConv();
@@ -2259,6 +2319,11 @@ LLVMBasicBlockRef LLVMGetNormalDest(LLVMValueRef Invoke) {
 }
 
 LLVMBasicBlockRef LLVMGetUnwindDest(LLVMValueRef Invoke) {
+  if (CleanupReturnInst *CRI = dyn_cast<CleanupReturnInst>(unwrap(Invoke))) {
+    return wrap(CRI->getUnwindDest());
+  } else if (CatchSwitchInst *CSI = dyn_cast<CatchSwitchInst>(unwrap(Invoke))) {
+    return wrap(CSI->getUnwindDest());
+  }
   return wrap(unwrap<InvokeInst>(Invoke)->getUnwindDest());
 }
 
@@ -2267,6 +2332,11 @@ void LLVMSetNormalDest(LLVMValueRef Invoke, LLVMBasicBlockRef B) {
 }
 
 void LLVMSetUnwindDest(LLVMValueRef Invoke, LLVMBasicBlockRef B) {
+  if (CleanupReturnInst *CRI = dyn_cast<CleanupReturnInst>(unwrap(Invoke))) {
+    return CRI->setUnwindDest(unwrap(B));
+  } else if (CatchSwitchInst *CSI = dyn_cast<CatchSwitchInst>(unwrap(Invoke))) {
+    return CSI->setUnwindDest(unwrap(B));
+  }
   unwrap<InvokeInst>(Invoke)->setUnwindDest(unwrap(B));
 }
 
@@ -2488,8 +2558,51 @@ LLVMValueRef LLVMBuildLandingPad(LLVMBuilderRef B, LLVMTypeRef Ty,
   return wrap(unwrap(B)->CreateLandingPad(unwrap(Ty), NumClauses, Name));
 }
 
+LLVMValueRef LLVMBuildCatchPad(LLVMBuilderRef B, LLVMValueRef ParentPad,
+                               LLVMValueRef *Args, unsigned NumArgs,
+                               const char *Name) {
+  return wrap(unwrap(B)->CreateCatchPad(unwrap(ParentPad),
+                                        makeArrayRef(unwrap(Args), NumArgs),
+                                        Name));
+}
+
+LLVMValueRef LLVMBuildCleanupPad(LLVMBuilderRef B, LLVMValueRef ParentPad,
+                                 LLVMValueRef *Args, unsigned NumArgs,
+                                 const char *Name) {
+  if (ParentPad == nullptr) {
+    Type *Ty = Type::getTokenTy(unwrap(B)->getContext());
+    ParentPad = wrap(Constant::getNullValue(Ty));
+  }
+  return wrap(unwrap(B)->CreateCleanupPad(unwrap(ParentPad),
+                                          makeArrayRef(unwrap(Args), NumArgs),
+                                          Name));
+}
+
 LLVMValueRef LLVMBuildResume(LLVMBuilderRef B, LLVMValueRef Exn) {
   return wrap(unwrap(B)->CreateResume(unwrap(Exn)));
+}
+
+LLVMValueRef LLVMBuildCatchSwitch(LLVMBuilderRef B, LLVMValueRef ParentPad,
+                                  LLVMBasicBlockRef UnwindBB,
+                                  unsigned NumHandlers, const char *Name) {
+  if (ParentPad == nullptr) {
+    Type *Ty = Type::getTokenTy(unwrap(B)->getContext());
+    ParentPad = wrap(Constant::getNullValue(Ty));
+  }
+  return wrap(unwrap(B)->CreateCatchSwitch(unwrap(ParentPad), unwrap(UnwindBB),
+                                           NumHandlers, Name));
+}
+
+LLVMValueRef LLVMBuildCatchRet(LLVMBuilderRef B, LLVMValueRef CatchPad,
+                               LLVMBasicBlockRef BB) {
+  return wrap(unwrap(B)->CreateCatchRet(unwrap<CatchPadInst>(CatchPad),
+                                        unwrap(BB)));
+}
+
+LLVMValueRef LLVMBuildCleanupRet(LLVMBuilderRef B, LLVMValueRef CatchPad,
+                                 LLVMBasicBlockRef BB) {
+  return wrap(unwrap(B)->CreateCleanupRet(unwrap<CleanupPadInst>(CatchPad),
+                                          unwrap(BB)));
 }
 
 LLVMValueRef LLVMBuildUnreachable(LLVMBuilderRef B) {
@@ -2524,6 +2637,40 @@ LLVMBool LLVMIsCleanup(LLVMValueRef LandingPad) {
 
 void LLVMSetCleanup(LLVMValueRef LandingPad, LLVMBool Val) {
   unwrap<LandingPadInst>(LandingPad)->setCleanup(Val);
+}
+
+void LLVMAddHandler(LLVMValueRef CatchSwitch, LLVMBasicBlockRef Dest) {
+  unwrap<CatchSwitchInst>(CatchSwitch)->addHandler(unwrap(Dest));
+}
+
+unsigned LLVMGetNumHandlers(LLVMValueRef CatchSwitch) {
+  return unwrap<CatchSwitchInst>(CatchSwitch)->getNumHandlers();
+}
+
+void LLVMGetHandlers(LLVMValueRef CatchSwitch, LLVMBasicBlockRef *Handlers) {
+  CatchSwitchInst *CSI = unwrap<CatchSwitchInst>(CatchSwitch);
+  for (CatchSwitchInst::handler_iterator I = CSI->handler_begin(),
+                                         E = CSI->handler_end(); I != E; ++I)
+    *Handlers++ = wrap(*I);
+}
+
+LLVMValueRef LLVMGetParentCatchSwitch(LLVMValueRef CatchPad) {
+  return wrap(unwrap<CatchPadInst>(CatchPad)->getCatchSwitch());
+}
+
+void LLVMSetParentCatchSwitch(LLVMValueRef CatchPad, LLVMValueRef CatchSwitch) {
+  unwrap<CatchPadInst>(CatchPad)
+    ->setCatchSwitch(unwrap<CatchSwitchInst>(CatchSwitch));
+}
+
+/*--.. Funclets ...........................................................--*/
+
+LLVMValueRef LLVMGetArgOperand(LLVMValueRef Funclet, unsigned i) {
+  return wrap(unwrap<FuncletPadInst>(Funclet)->getArgOperand(i));
+}
+
+void LLVMSetArgOperand(LLVMValueRef Funclet, unsigned i, LLVMValueRef value) {
+  unwrap<FuncletPadInst>(Funclet)->setArgOperand(i, unwrap(value));
 }
 
 /*--.. Arithmetic ..........................................................--*/

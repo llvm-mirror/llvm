@@ -1284,14 +1284,35 @@ static void DumpLiteralPointerSection(MachOObjectFile *O,
   }
 }
 
-static void DumpInitTermPointerSection(MachOObjectFile *O, const char *sect,
+static void DumpInitTermPointerSection(MachOObjectFile *O,
+                                       const SectionRef &Section,
+                                       const char *sect,
                                        uint32_t sect_size, uint64_t sect_addr,
                                        SymbolAddressMap *AddrMap,
                                        bool verbose) {
   uint32_t stride;
   stride = (O->is64Bit()) ? sizeof(uint64_t) : sizeof(uint32_t);
+
+  // Collect the external relocation symbols for the pointers.
+  std::vector<std::pair<uint64_t, SymbolRef>> Relocs;
+  for (const RelocationRef &Reloc : Section.relocations()) {
+    DataRefImpl Rel;
+    MachO::any_relocation_info RE;
+    bool isExtern = false;
+    Rel = Reloc.getRawDataRefImpl();
+    RE = O->getRelocation(Rel);
+    isExtern = O->getPlainRelocationExternal(RE);
+    if (isExtern) {
+      uint64_t RelocOffset = Reloc.getOffset();
+      symbol_iterator RelocSym = Reloc.getSymbol();
+      Relocs.push_back(std::make_pair(RelocOffset, *RelocSym));
+    }
+  }
+  array_pod_sort(Relocs.begin(), Relocs.end());
+
   for (uint32_t i = 0; i < sect_size; i += stride) {
     const char *SymbolName = nullptr;
+    uint64_t p;
     if (O->is64Bit()) {
       outs() << format("0x%016" PRIx64, sect_addr + i * stride) << " ";
       uint64_t pointer_value;
@@ -1299,8 +1320,7 @@ static void DumpInitTermPointerSection(MachOObjectFile *O, const char *sect,
       if (O->isLittleEndian() != sys::IsLittleEndianHost)
         sys::swapByteOrder(pointer_value);
       outs() << format("0x%016" PRIx64, pointer_value);
-      if (verbose)
-        SymbolName = GuessSymbolName(pointer_value, AddrMap);
+      p = pointer_value;
     } else {
       outs() << format("0x%08" PRIx64, sect_addr + i * stride) << " ";
       uint32_t pointer_value;
@@ -1308,11 +1328,25 @@ static void DumpInitTermPointerSection(MachOObjectFile *O, const char *sect,
       if (O->isLittleEndian() != sys::IsLittleEndianHost)
         sys::swapByteOrder(pointer_value);
       outs() << format("0x%08" PRIx32, pointer_value);
-      if (verbose)
-        SymbolName = GuessSymbolName(pointer_value, AddrMap);
+      p = pointer_value;
     }
-    if (SymbolName)
-      outs() << " " << SymbolName;
+    if (verbose) {
+      // First look for an external relocation entry for this pointer.
+      auto Reloc = find_if(Relocs, [&](const std::pair<uint64_t, SymbolRef> &P) {
+        return P.first == i;
+      });
+      if (Reloc != Relocs.end()) {
+        symbol_iterator RelocSym = Reloc->second;
+        Expected<StringRef> SymName = RelocSym->getName();
+        if (!SymName)
+          report_error(O->getFileName(), SymName.takeError());
+        outs() << " " << *SymName;
+      } else {
+        SymbolName = GuessSymbolName(p, AddrMap);
+        if (SymbolName)
+          outs() << " " << SymbolName;
+      }
+    }
     outs() << "\n";
   }
 }
@@ -1463,8 +1497,8 @@ static void DumpSectionContents(StringRef Filename, MachOObjectFile *O,
             break;
           case MachO::S_MOD_INIT_FUNC_POINTERS:
           case MachO::S_MOD_TERM_FUNC_POINTERS:
-            DumpInitTermPointerSection(O, sect, sect_size, sect_addr, &AddrMap,
-                                       verbose);
+            DumpInitTermPointerSection(O, Section, sect, sect_size, sect_addr,
+                                       &AddrMap, verbose);
             break;
           default:
             outs() << "Unknown section type ("
@@ -6875,7 +6909,7 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
                         BaseSegmentAddress);
 
   // Sort the symbols by address, just in case they didn't come in that way.
-  std::sort(Symbols.begin(), Symbols.end(), SymbolSorter());
+  llvm::sort(Symbols.begin(), Symbols.end(), SymbolSorter());
 
   // Build a data in code table that is sorted on by the address of each entry.
   uint64_t BaseAddress = 0;
@@ -6911,10 +6945,12 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
         errs() << "llvm-objdump: " << Filename << ": " << EC.message() << '\n';
         return;
       }
-      DbgObj =
-          ObjectFile::createMachOObjectFile(BufOrErr.get()->getMemBufferRef())
-              .get()
-              .release();
+      Expected<std::unique_ptr<MachOObjectFile>> DbgObjCheck =
+          ObjectFile::createMachOObjectFile(BufOrErr.get()->getMemBufferRef());
+
+      if (DbgObjCheck.takeError())
+        report_error(MachOOF->getFileName(), DbgObjCheck.takeError());
+      DbgObj = DbgObjCheck.get().release();
     }
 
     // Setup the DIContext
@@ -9328,6 +9364,26 @@ static void PrintThreadCommand(MachO::thread_command t, const char *Ptr,
           outs() << "\t    esh.flavor " << es.esh.flavor << "  esh.count "
                  << es.esh.count << "\n";
         }
+      } else if (flavor == MachO::x86_EXCEPTION_STATE64) {
+        outs() << "     flavor x86_EXCEPTION_STATE64\n";
+        if (count == MachO::x86_EXCEPTION_STATE64_COUNT)
+          outs() << "      count x86_EXCEPTION_STATE64_COUNT\n";
+        else
+          outs() << "      count " << count
+                 << " (not x86_EXCEPTION_STATE64_COUNT)\n";
+        struct MachO::x86_exception_state64_t es64;
+        left = end - begin;
+        if (left >= sizeof(MachO::x86_exception_state64_t)) {
+          memcpy(&es64, begin, sizeof(MachO::x86_exception_state64_t));
+          begin += sizeof(MachO::x86_exception_state64_t);
+        } else {
+          memset(&es64, '\0', sizeof(MachO::x86_exception_state64_t));
+          memcpy(&es64, begin, left);
+          begin += left;
+        }
+        if (isLittleEndian != sys::IsLittleEndianHost)
+          swapStruct(es64);
+        Print_x86_exception_state_t(es64);
       } else {
         outs() << "     flavor " << flavor << " (unknown)\n";
         outs() << "      count " << count << "\n";

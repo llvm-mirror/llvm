@@ -25,20 +25,19 @@
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSubtargetInfo.h"
-#include "llvm/MC/MCTargetOptionsCommandFlags.def"
+#include "llvm/MC/MCTargetOptionsCommandFlags.inc"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compression.h"
 #include "llvm/Support/FileUtilities.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/Host.h"
-#include "llvm/Support/ManagedStatic.h"
+#include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/MemoryBuffer.h"
-#include "llvm/Support/PrettyStackTrace.h"
-#include "llvm/Support/Signals.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/ToolOutputFile.h"
+#include "llvm/Support/WithColor.h"
 
 using namespace llvm;
 
@@ -188,7 +187,7 @@ static const Target *GetTarget(const char *ProgName) {
   const Target *TheTarget = TargetRegistry::lookupTarget(ArchName, TheTriple,
                                                          Error);
   if (!TheTarget) {
-    errs() << ProgName << ": " << Error;
+    WithColor::error(errs(), ProgName) << Error;
     return nullptr;
   }
 
@@ -205,7 +204,7 @@ static std::unique_ptr<ToolOutputFile> GetOutputStream() {
   auto Out =
       llvm::make_unique<ToolOutputFile>(OutputFilename, EC, sys::fs::F_None);
   if (EC) {
-    errs() << EC.message() << '\n';
+    WithColor::error() << EC.message() << '\n';
     return nullptr;
   }
 
@@ -254,12 +253,13 @@ static int fillCommandLineSymbols(MCAsmParser &Parser) {
     auto Val = Pair.second;
 
     if (Sym.empty() || Val.empty()) {
-      errs() << "error: defsym must be of the form: sym=value: " << I << "\n";
+      WithColor::error() << "defsym must be of the form: sym=value: " << I
+                         << "\n";
       return 1;
     }
     int64_t Value;
     if (Val.getAsInteger(0, Value)) {
-      errs() << "error: Value is not an integer: " << Val << "\n";
+      WithColor::error() << "value is not an integer: " << Val << "\n";
       return 1;
     }
     Parser.getContext().setSymbolValue(Parser.getStreamer(), Sym, Value);
@@ -277,8 +277,8 @@ static int AssembleInput(const char *ProgName, const Target *TheTarget,
       TheTarget->createMCAsmParser(STI, *Parser, MCII, MCOptions));
 
   if (!TAP) {
-    errs() << ProgName
-           << ": error: this target does not support assembly parsing.\n";
+    WithColor::error(errs(), ProgName)
+        << "this target does not support assembly parsing.\n";
     return 1;
   }
 
@@ -294,10 +294,7 @@ static int AssembleInput(const char *ProgName, const Target *TheTarget,
 }
 
 int main(int argc, char **argv) {
-  // Print a stack trace if we signal out.
-  sys::PrintStackTraceOnErrorSignal(argv[0]);
-  PrettyStackTraceProgram X(argc, argv);
-  llvm_shutdown_obj Y;  // Call llvm_shutdown() on exit.
+  InitLLVM X(argc, argv);
 
   // Initialize targets and assembly printers/parsers.
   llvm::InitializeAllTargetInfos();
@@ -326,7 +323,8 @@ int main(int argc, char **argv) {
   ErrorOr<std::unique_ptr<MemoryBuffer>> BufferPtr =
       MemoryBuffer::getFileOrSTDIN(InputFilename);
   if (std::error_code EC = BufferPtr.getError()) {
-    errs() << InputFilename << ": " << EC.message() << '\n';
+    WithColor::error(errs(), ProgName)
+        << InputFilename << ": " << EC.message() << '\n';
     return 1;
   }
   MemoryBuffer *Buffer = BufferPtr->get();
@@ -350,8 +348,8 @@ int main(int argc, char **argv) {
 
   if (CompressDebugSections != DebugCompressionType::None) {
     if (!zlib::isAvailable()) {
-      errs() << ProgName
-             << ": build tools with zlib to enable -compress-debug-sections";
+      WithColor::error(errs(), ProgName)
+          << "build tools with zlib to enable -compress-debug-sections";
       return 1;
     }
     MAI->setCompressDebugSections(CompressDebugSections);
@@ -390,6 +388,18 @@ int main(int argc, char **argv) {
   }
   if (!MainFileName.empty())
     Ctx.setMainFileName(MainFileName);
+  if (DwarfVersion >= 5) {
+    // DWARF v5 needs the root file as well as the compilation directory.
+    // If we find a '.file 0' directive that will supersede these values.
+    MD5 Hash;
+    MD5::MD5Result *Cksum =
+        (MD5::MD5Result *)Ctx.allocate(sizeof(MD5::MD5Result), 1);
+    Hash.update(Buffer->getBuffer());
+    Hash.final(*Cksum);
+    Ctx.setMCLineTableRootFile(
+        /*CUID=*/0, Ctx.getCompilationDir(),
+        !MainFileName.empty() ? MainFileName : InputFilename, Cksum, None);
+  }
 
   // Package up features to be passed to target/subtarget
   std::string FeaturesStr;
@@ -418,8 +428,8 @@ int main(int argc, char **argv) {
                                         *MAI, *MCII, *MRI);
 
     if (!IP) {
-      errs()
-          << "error: unable to create instruction printer for target triple '"
+      WithColor::error()
+          << "unable to create instruction printer for target triple '"
           << TheTriple.normalize() << "' with assembly variant "
           << OutputAsmVariant << ".\n";
       return 1;

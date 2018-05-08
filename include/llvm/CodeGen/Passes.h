@@ -154,6 +154,9 @@ namespace llvm {
   /// This pass adds dead/undef flags after analyzing subregister lanes.
   extern char &DetectDeadLanesID;
 
+  /// This pass perform post-ra machine sink for COPY instructions.
+  extern char &PostRAMachineSinkingID;
+
   /// FastRegisterAllocation Pass - This pass register allocates as fast as
   /// possible. It is best suited for debug code where live ranges are short.
   ///
@@ -416,7 +419,7 @@ namespace llvm {
 
   /// This pass performs outlining on machine instructions directly before
   /// printing assembly.
-  ModulePass *createMachineOutlinerPass(bool OutlineFromLinkOnceODRs = false);
+  ModulePass *createMachineOutlinerPass();
 
   /// This pass expands the experimental reduction intrinsics into sequences of
   /// shuffles.
@@ -430,6 +433,9 @@ namespace llvm {
 
   // This pass expands indirectbr instructions.
   FunctionPass *createIndirectBrExpandPass();
+
+  /// Creates CFI Instruction Inserter pass. \see CFIInstrInserter.cpp
+  FunctionPass *createCFIInstrInserter();
 
 } // End llvm namespace
 

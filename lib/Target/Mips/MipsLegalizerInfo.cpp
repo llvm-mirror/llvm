@@ -12,13 +12,15 @@
 //===----------------------------------------------------------------------===//
 
 #include "MipsLegalizerInfo.h"
-#include "llvm/CodeGen/TargetOpcodes.h"
-#include "llvm/CodeGen/ValueTypes.h"
-#include "llvm/IR/DerivedTypes.h"
-#include "llvm/IR/Type.h"
 
 using namespace llvm;
 
 MipsLegalizerInfo::MipsLegalizerInfo(const MipsSubtarget &ST) {
+  using namespace TargetOpcode;
+
+  const LLT s32 = LLT::scalar(32);
+
+  getActionDefinitionsBuilder(G_ADD).legalFor({s32});
+
   computeTables();
 }

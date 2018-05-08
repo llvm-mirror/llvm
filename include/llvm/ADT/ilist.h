@@ -84,21 +84,11 @@ template <typename NodeTy>
 struct ilist_node_traits : ilist_alloc_traits<NodeTy>,
                            ilist_callback_traits<NodeTy> {};
 
-/// Default template traits for intrusive list.
-///
-/// By inheriting from this, you can easily use default implementations for all
-/// common operations.
-///
-/// TODO: Remove this customization point.  Specializing ilist_traits is
-/// already fully general.
-template <typename NodeTy>
-struct ilist_default_traits : public ilist_node_traits<NodeTy> {};
-
 /// Template traits for intrusive list.
 ///
 /// Customize callbacks and allocation semantics.
 template <typename NodeTy>
-struct ilist_traits : public ilist_default_traits<NodeTy> {};
+struct ilist_traits : public ilist_node_traits<NodeTy> {};
 
 /// Const traits should never be instantiated.
 template <typename Ty> struct ilist_traits<const Ty> {};
@@ -177,9 +167,6 @@ template <class TraitsT, class NodeT> struct HasObsoleteCustomization {
 template <class IntrusiveListT, class TraitsT>
 class iplist_impl : public TraitsT, IntrusiveListT {
   typedef IntrusiveListT base_list_type;
-
-protected:
-  typedef iplist_impl iplist_impl_type;
 
 public:
   typedef typename base_list_type::pointer pointer;
@@ -402,7 +389,7 @@ public:
 template <class T, class... Options>
 class iplist
     : public iplist_impl<simple_ilist<T, Options...>, ilist_traits<T>> {
-  typedef typename iplist::iplist_impl_type iplist_impl_type;
+  using iplist_impl_type = typename iplist::iplist_impl;
 
 public:
   iplist() = default;

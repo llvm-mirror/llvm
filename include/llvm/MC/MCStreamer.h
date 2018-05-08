@@ -525,9 +525,10 @@ public:
   ///
   /// This corresponds to an assembler statement such as:
   ///  .symver _start, foo@@SOME_VERSION
-  /// \param Alias - The versioned alias (i.e. "foo@@SOME_VERSION")
+  /// \param AliasName - The versioned alias (i.e. "foo@@SOME_VERSION")
   /// \param Aliasee - The aliased symbol (i.e. "_start")
-  virtual void emitELFSymverDirective(MCSymbol *Alias, const MCSymbol *Aliasee);
+  virtual void emitELFSymverDirective(StringRef AliasName,
+                                      const MCSymbol *Aliasee);
 
   /// \brief Emit a Linker Optimization Hint (LOH) directive.
   /// \param Args - Arguments of the LOH.
@@ -773,6 +774,12 @@ public:
       unsigned FileNo, StringRef Directory, StringRef Filename,
       MD5::MD5Result *Checksum = nullptr, Optional<StringRef> Source = None,
       unsigned CUID = 0);
+
+  /// Specify the "root" file of the compilation, using the ".file 0" extension.
+  virtual void emitDwarfFile0Directive(StringRef Directory, StringRef Filename,
+                                       MD5::MD5Result *Checksum,
+                                       Optional<StringRef> Source,
+                                       unsigned CUID = 0);
 
   /// \brief This implements the DWARF2 '.loc fileno lineno ...' assembler
   /// directive.

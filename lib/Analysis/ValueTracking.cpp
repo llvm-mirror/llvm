@@ -190,6 +190,14 @@ bool llvm::haveNoCommonBitsSet(const Value *LHS, const Value *RHS,
          "LHS and RHS should have the same type");
   assert(LHS->getType()->isIntOrIntVectorTy() &&
          "LHS and RHS should be integers");
+  // Look for an inverted mask: (X & ~M) op (Y & M).
+  Value *M;
+  if (match(LHS, m_c_And(m_Not(m_Value(M)), m_Value())) &&
+      match(RHS, m_c_And(m_Specific(M), m_Value())))
+    return true;
+  if (match(RHS, m_c_And(m_Not(m_Value(M)), m_Value())) &&
+      match(LHS, m_c_And(m_Specific(M), m_Value())))
+    return true;
   IntegerType *IT = cast<IntegerType>(LHS->getType()->getScalarType());
   KnownBits LHSKnown(IT->getBitWidth());
   KnownBits RHSKnown(IT->getBitWidth());
@@ -2687,7 +2695,7 @@ bool llvm::CannotBeNegativeZero(const Value *V, const TargetLibraryInfo *TLI,
       return true;
 
   // (fadd x, 0.0) is guaranteed to return +0.0, not -0.0.
-  if (match(Op, m_FAdd(m_Value(), m_Zero())))
+  if (match(Op, m_FAdd(m_Value(), m_PosZeroFP())))
     return true;
 
   // sitofp and uitofp turn into +0.0 for zero.
@@ -3965,6 +3973,15 @@ bool llvm::isGuaranteedToTransferExecutionToSuccessor(const Instruction *I) {
   }
 
   // Other instructions return normally.
+  return true;
+}
+
+bool llvm::isGuaranteedToTransferExecutionToSuccessor(const BasicBlock *BB) {
+  // TODO: This is slightly consdervative for invoke instruction since exiting
+  // via an exception *is* normal control for them.
+  for (auto I = BB->begin(), E = BB->end(); I != E; ++I)
+    if (!isGuaranteedToTransferExecutionToSuccessor(&*I))
+      return false;
   return true;
 }
 

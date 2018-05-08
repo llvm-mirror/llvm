@@ -10,6 +10,7 @@
 #ifndef LLVM_DEBUGINFO_DWARF_DWARFADDRESSRANGE_H
 #define LLVM_DEBUGINFO_DWARF_DWARFADDRESSRANGE_H
 
+#include "llvm/DebugInfo/DIContext.h"
 #include <cstdint>
 #include <tuple>
 #include <vector>
@@ -35,20 +36,21 @@ struct DWARFAddressRange {
 
   /// Returns true if [LowPC, HighPC) intersects with [RHS.LowPC, RHS.HighPC).
   bool intersects(const DWARFAddressRange &RHS) const {
+    assert(valid() && RHS.valid());
     // Empty ranges can't intersect.
     if (LowPC == HighPC || RHS.LowPC == RHS.HighPC)
       return false;
-    return (LowPC < RHS.HighPC) && (HighPC > RHS.LowPC);
+    return LowPC < RHS.HighPC && RHS.LowPC < HighPC;
   }
 
   /// Returns true if [LowPC, HighPC) fully contains [RHS.LowPC, RHS.HighPC).
   bool contains(const DWARFAddressRange &RHS) const {
-    if (LowPC <= RHS.LowPC && RHS.LowPC <= HighPC)
-      return LowPC <= RHS.HighPC && RHS.HighPC <= HighPC;
-    return false;
+    assert(valid() && RHS.valid());
+    return LowPC <= RHS.LowPC && RHS.HighPC <= HighPC;
   }
 
-  void dump(raw_ostream &OS, uint32_t AddressSize) const;
+  void dump(raw_ostream &OS, uint32_t AddressSize,
+            DIDumpOptions DumpOpts = {}) const;
 };
 
 static inline bool operator<(const DWARFAddressRange &LHS,

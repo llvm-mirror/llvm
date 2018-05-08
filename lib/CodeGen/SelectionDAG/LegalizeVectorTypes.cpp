@@ -1694,8 +1694,8 @@ SDValue DAGTypeLegalizer::SplitVecOp_VECREDUCE(SDNode *N, unsigned OpNo) {
 
   // Use the appropriate scalar instruction on the split subvectors before
   // reducing the now partially reduced smaller vector.
-  SDValue Partial = DAG.getNode(CombineOpc, dl, LoOpVT, Lo, Hi);
-  return DAG.getNode(N->getOpcode(), dl, ResVT, Partial);
+  SDValue Partial = DAG.getNode(CombineOpc, dl, LoOpVT, Lo, Hi, N->getFlags());
+  return DAG.getNode(N->getOpcode(), dl, ResVT, Partial, N->getFlags());
 }
 
 SDValue DAGTypeLegalizer::SplitVecOp_UnaryOp(SDNode *N) {
@@ -2108,9 +2108,9 @@ SDValue DAGTypeLegalizer::SplitVecOp_TruncateHelper(SDNode *N) {
     return SplitVecOp_UnaryOp(N);
   SDLoc DL(N);
 
-  // Extract the halves of the input via extract_subvector.
+  // Get the split input vector.
   SDValue InLoVec, InHiVec;
-  std::tie(InLoVec, InHiVec) = DAG.SplitVector(InVec, DL);
+  GetSplitVector(InVec, InLoVec, InHiVec);
   // Truncate them to 1/2 the element size.
   EVT HalfElementVT = IsFloat ?
     EVT::getFloatingPointVT(InElementSize/2) :

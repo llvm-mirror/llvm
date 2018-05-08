@@ -77,6 +77,7 @@
 #include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/Analysis/MemorySSA.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
+#include "llvm/Analysis/Utils/Local.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constant.h"
@@ -105,7 +106,6 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/GVNExpression.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/PredicateInfo.h"
 #include "llvm/Transforms/Utils/VNCoercion.h"
 #include <algorithm>
@@ -958,7 +958,8 @@ static bool isCopyOfAPHI(const Value *V) {
 // order. The BlockInstRange numbers are generated in an RPO walk of the basic
 // blocks.
 void NewGVN::sortPHIOps(MutableArrayRef<ValPair> Ops) const {
-  std::sort(Ops.begin(), Ops.end(), [&](const ValPair &P1, const ValPair &P2) {
+  llvm::sort(Ops.begin(), Ops.end(),
+             [&](const ValPair &P1, const ValPair &P2) {
     return BlockInstRange.lookup(P1.second).first <
            BlockInstRange.lookup(P2.second).first;
   });
@@ -1705,7 +1706,7 @@ bool NewGVN::isCycleFree(const Instruction *I) const {
   if (ICS == ICS_Unknown) {
     SCCFinder.Start(I);
     auto &SCC = SCCFinder.getComponentFor(I);
-    // It's cycle free if it's size 1 or or the SCC is *only* phi nodes.
+    // It's cycle free if it's size 1 or the SCC is *only* phi nodes.
     if (SCC.size() == 1)
       InstCycleState.insert({I, ICS_CycleFree});
     else {
@@ -2207,7 +2208,7 @@ Value *NewGVN::getNextValueLeader(CongruenceClass *CC) const {
 //
 // - I must be moving to NewClass from OldClass
 // - The StoreCount of OldClass and NewClass is expected to have been updated
-//   for I already if it is is a store.
+//   for I already if it is a store.
 // - The OldClass memory leader has not been updated yet if I was the leader.
 void NewGVN::moveMemoryToNewCongruenceClass(Instruction *I,
                                             MemoryAccess *InstMA,
@@ -2723,9 +2724,14 @@ NewGVN::makePossiblePHIOfOps(Instruction *I,
       MemAccess->getDefiningAccess()->getBlock() == I->getParent())
     return nullptr;
 
-  SmallPtrSet<const Value *, 10> VisitedOps;
   // Convert op of phis to phi of ops
-  for (auto *Op : I->operand_values()) {
+  SmallPtrSet<const Value *, 10> VisitedOps;
+  SmallVector<Value *, 4> Ops(I->operand_values());
+  BasicBlock *SamePHIBlock = nullptr;
+  PHINode *OpPHI = nullptr;
+  if (!DebugCounter::shouldExecute(PHIOfOpsCounter))
+    return nullptr;
+  for (auto *Op : Ops) {
     if (!isa<PHINode>(Op)) {
       auto *ValuePHI = RealToTemp.lookup(Op);
       if (!ValuePHI)
@@ -2733,107 +2739,125 @@ NewGVN::makePossiblePHIOfOps(Instruction *I,
       DEBUG(dbgs() << "Found possible dependent phi of ops\n");
       Op = ValuePHI;
     }
-    auto *OpPHI = cast<PHINode>(Op);
-    // No point in doing this for one-operand phis.
-    if (OpPHI->getNumOperands() == 1)
-      continue;
-    if (!DebugCounter::shouldExecute(PHIOfOpsCounter))
-      return nullptr;
-    SmallVector<ValPair, 4> Ops;
-    SmallPtrSet<Value *, 4> Deps;
-    auto *PHIBlock = getBlockForValue(OpPHI);
-    RevisitOnReachabilityChange[PHIBlock].reset(InstrToDFSNum(I));
-    for (unsigned PredNum = 0; PredNum < OpPHI->getNumOperands(); ++PredNum) {
-      auto *PredBB = OpPHI->getIncomingBlock(PredNum);
-      Value *FoundVal = nullptr;
-      // We could just skip unreachable edges entirely but it's tricky to do
-      // with rewriting existing phi nodes.
-      if (ReachableEdges.count({PredBB, PHIBlock})) {
-        // Clone the instruction, create an expression from it that is
-        // translated back into the predecessor, and see if we have a leader.
-        Instruction *ValueOp = I->clone();
-        if (MemAccess)
-          TempToMemory.insert({ValueOp, MemAccess});
-        bool SafeForPHIOfOps = true;
-        VisitedOps.clear();
-        for (auto &Op : ValueOp->operands()) {
-          auto *OrigOp = &*Op;
-          // When these operand changes, it could change whether there is a
-          // leader for us or not, so we have to add additional users.
-          if (isa<PHINode>(Op)) {
-            Op = Op->DoPHITranslation(PHIBlock, PredBB);
-            if (Op != OrigOp && Op != I)
-              Deps.insert(Op);
-          } else if (auto *ValuePHI = RealToTemp.lookup(Op)) {
-            if (getBlockForValue(ValuePHI) == PHIBlock)
-              Op = ValuePHI->getIncomingValueForBlock(PredBB);
-          }
-          // If we phi-translated the op, it must be safe.
-          SafeForPHIOfOps =
-              SafeForPHIOfOps &&
-              (Op != OrigOp || OpIsSafeForPHIOfOps(Op, PHIBlock, VisitedOps));
-        }
-        // FIXME: For those things that are not safe we could generate
-        // expressions all the way down, and see if this comes out to a
-        // constant.  For anything where that is true, and unsafe, we should
-        // have made a phi-of-ops (or value numbered it equivalent to something)
-        // for the pieces already.
-        FoundVal = !SafeForPHIOfOps ? nullptr
-                                    : findLeaderForInst(ValueOp, Visited,
-                                                        MemAccess, I, PredBB);
-        ValueOp->deleteValue();
-        if (!FoundVal)
-          return nullptr;
-      } else {
-        DEBUG(dbgs() << "Skipping phi of ops operand for incoming block "
-                     << getBlockName(PredBB)
-                     << " because the block is unreachable\n");
-        FoundVal = UndefValue::get(I->getType());
-        RevisitOnReachabilityChange[PHIBlock].set(InstrToDFSNum(I));
-      }
-
-      Ops.push_back({FoundVal, PredBB});
-      DEBUG(dbgs() << "Found phi of ops operand " << *FoundVal << " in "
-                   << getBlockName(PredBB) << "\n");
-    }
-    for (auto Dep : Deps)
-      addAdditionalUsers(Dep, I);
-    sortPHIOps(Ops);
-    auto *E = performSymbolicPHIEvaluation(Ops, I, PHIBlock);
-    if (isa<ConstantExpression>(E) || isa<VariableExpression>(E)) {
+    OpPHI = cast<PHINode>(Op);
+    if (!SamePHIBlock) {
+      SamePHIBlock = getBlockForValue(OpPHI);
+    } else if (SamePHIBlock != getBlockForValue(OpPHI)) {
       DEBUG(dbgs()
-            << "Not creating real PHI of ops because it simplified to existing "
-               "value or constant\n");
-      return E;
+            << "PHIs for operands are not all in the same block, aborting\n");
+      return nullptr;
     }
-    auto *ValuePHI = RealToTemp.lookup(I);
-    bool NewPHI = false;
-    if (!ValuePHI) {
-      ValuePHI =
-          PHINode::Create(I->getType(), OpPHI->getNumOperands(), "phiofops");
-      addPhiOfOps(ValuePHI, PHIBlock, I);
-      NewPHI = true;
-      NumGVNPHIOfOpsCreated++;
+    // No point in doing this for one-operand phis.
+    if (OpPHI->getNumOperands() == 1) {
+      OpPHI = nullptr;
+      continue;
     }
-    if (NewPHI) {
-      for (auto PHIOp : Ops)
-        ValuePHI->addIncoming(PHIOp.first, PHIOp.second);
-    } else {
-      TempToBlock[ValuePHI] = PHIBlock;
-      unsigned int i = 0;
-      for (auto PHIOp : Ops) {
-        ValuePHI->setIncomingValue(i, PHIOp.first);
-        ValuePHI->setIncomingBlock(i, PHIOp.second);
-        ++i;
-      }
-    }
-    RevisitOnReachabilityChange[PHIBlock].set(InstrToDFSNum(I));
-    DEBUG(dbgs() << "Created phi of ops " << *ValuePHI << " for " << *I
-                 << "\n");
+  }
 
+  if (!OpPHI)
+    return nullptr;
+
+  SmallVector<ValPair, 4> PHIOps;
+  SmallPtrSet<Value *, 4> Deps;
+  auto *PHIBlock = getBlockForValue(OpPHI);
+  RevisitOnReachabilityChange[PHIBlock].reset(InstrToDFSNum(I));
+  for (unsigned PredNum = 0; PredNum < OpPHI->getNumOperands(); ++PredNum) {
+    auto *PredBB = OpPHI->getIncomingBlock(PredNum);
+    Value *FoundVal = nullptr;
+    SmallPtrSet<Value *, 4> CurrentDeps;
+    // We could just skip unreachable edges entirely but it's tricky to do
+    // with rewriting existing phi nodes.
+    if (ReachableEdges.count({PredBB, PHIBlock})) {
+      // Clone the instruction, create an expression from it that is
+      // translated back into the predecessor, and see if we have a leader.
+      Instruction *ValueOp = I->clone();
+      if (MemAccess)
+        TempToMemory.insert({ValueOp, MemAccess});
+      bool SafeForPHIOfOps = true;
+      VisitedOps.clear();
+      for (auto &Op : ValueOp->operands()) {
+        auto *OrigOp = &*Op;
+        // When these operand changes, it could change whether there is a
+        // leader for us or not, so we have to add additional users.
+        if (isa<PHINode>(Op)) {
+          Op = Op->DoPHITranslation(PHIBlock, PredBB);
+          if (Op != OrigOp && Op != I)
+            CurrentDeps.insert(Op);
+        } else if (auto *ValuePHI = RealToTemp.lookup(Op)) {
+          if (getBlockForValue(ValuePHI) == PHIBlock)
+            Op = ValuePHI->getIncomingValueForBlock(PredBB);
+        }
+        // If we phi-translated the op, it must be safe.
+        SafeForPHIOfOps =
+            SafeForPHIOfOps &&
+            (Op != OrigOp || OpIsSafeForPHIOfOps(Op, PHIBlock, VisitedOps));
+      }
+      // FIXME: For those things that are not safe we could generate
+      // expressions all the way down, and see if this comes out to a
+      // constant.  For anything where that is true, and unsafe, we should
+      // have made a phi-of-ops (or value numbered it equivalent to something)
+      // for the pieces already.
+      FoundVal = !SafeForPHIOfOps ? nullptr
+                                  : findLeaderForInst(ValueOp, Visited,
+                                                      MemAccess, I, PredBB);
+      ValueOp->deleteValue();
+      if (!FoundVal) {
+        // We failed to find a leader for the current ValueOp, but this might
+        // change in case of the translated operands change.
+        if (SafeForPHIOfOps)
+          for (auto Dep : CurrentDeps)
+            addAdditionalUsers(Dep, I);
+
+        return nullptr;
+      }
+      Deps.insert(CurrentDeps.begin(), CurrentDeps.end());
+    } else {
+      DEBUG(dbgs() << "Skipping phi of ops operand for incoming block "
+                   << getBlockName(PredBB)
+                   << " because the block is unreachable\n");
+      FoundVal = UndefValue::get(I->getType());
+      RevisitOnReachabilityChange[PHIBlock].set(InstrToDFSNum(I));
+    }
+
+    PHIOps.push_back({FoundVal, PredBB});
+    DEBUG(dbgs() << "Found phi of ops operand " << *FoundVal << " in "
+                 << getBlockName(PredBB) << "\n");
+  }
+  for (auto Dep : Deps)
+    addAdditionalUsers(Dep, I);
+  sortPHIOps(PHIOps);
+  auto *E = performSymbolicPHIEvaluation(PHIOps, I, PHIBlock);
+  if (isa<ConstantExpression>(E) || isa<VariableExpression>(E)) {
+    DEBUG(dbgs()
+          << "Not creating real PHI of ops because it simplified to existing "
+             "value or constant\n");
     return E;
   }
-  return nullptr;
+  auto *ValuePHI = RealToTemp.lookup(I);
+  bool NewPHI = false;
+  if (!ValuePHI) {
+    ValuePHI =
+        PHINode::Create(I->getType(), OpPHI->getNumOperands(), "phiofops");
+    addPhiOfOps(ValuePHI, PHIBlock, I);
+    NewPHI = true;
+    NumGVNPHIOfOpsCreated++;
+  }
+  if (NewPHI) {
+    for (auto PHIOp : PHIOps)
+      ValuePHI->addIncoming(PHIOp.first, PHIOp.second);
+  } else {
+    TempToBlock[ValuePHI] = PHIBlock;
+    unsigned int i = 0;
+    for (auto PHIOp : PHIOps) {
+      ValuePHI->setIncomingValue(i, PHIOp.first);
+      ValuePHI->setIncomingBlock(i, PHIOp.second);
+      ++i;
+    }
+  }
+  RevisitOnReachabilityChange[PHIBlock].set(InstrToDFSNum(I));
+  DEBUG(dbgs() << "Created phi of ops " << *ValuePHI << " for " << *I << "\n");
+
+  return E;
 }
 
 // The algorithm initially places the values of the routine in the TOP
@@ -3423,10 +3447,10 @@ bool NewGVN::runGVN() {
   for (auto &B : RPOT) {
     auto *Node = DT->getNode(B);
     if (Node->getChildren().size() > 1)
-      std::sort(Node->begin(), Node->end(),
-                [&](const DomTreeNode *A, const DomTreeNode *B) {
-                  return RPOOrdering[A] < RPOOrdering[B];
-                });
+      llvm::sort(Node->begin(), Node->end(),
+                 [&](const DomTreeNode *A, const DomTreeNode *B) {
+                   return RPOOrdering[A] < RPOOrdering[B];
+                 });
   }
 
   // Now a standard depth first ordering of the domtree is equivalent to RPO.
@@ -3948,7 +3972,7 @@ bool NewGVN::eliminateInstructions(Function &F) {
         convertClassToDFSOrdered(*CC, DFSOrderedSet, UseCounts, ProbablyDead);
 
         // Sort the whole thing.
-        std::sort(DFSOrderedSet.begin(), DFSOrderedSet.end());
+        llvm::sort(DFSOrderedSet.begin(), DFSOrderedSet.end());
         for (auto &VD : DFSOrderedSet) {
           int MemberDFSIn = VD.DFSIn;
           int MemberDFSOut = VD.DFSOut;
@@ -4110,7 +4134,7 @@ bool NewGVN::eliminateInstructions(Function &F) {
     // If we have possible dead stores to look at, try to eliminate them.
     if (CC->getStoreCount() > 0) {
       convertClassToLoadsAndStores(*CC, PossibleDeadStores);
-      std::sort(PossibleDeadStores.begin(), PossibleDeadStores.end());
+      llvm::sort(PossibleDeadStores.begin(), PossibleDeadStores.end());
       ValueDFSStack EliminationStack;
       for (auto &VD : PossibleDeadStores) {
         int MemberDFSIn = VD.DFSIn;

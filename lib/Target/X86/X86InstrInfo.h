@@ -29,6 +29,12 @@ class X86RegisterInfo;
 class X86Subtarget;
 
 namespace X86 {
+
+enum AsmComments {
+  // For instr that was compressed from EVEX to VEX.
+  AC_EVEX_2_VEX = MachineInstr::TAsmComments
+};
+
 // X86 specific condition code. These correspond to X86_*_COND in
 // X86InstrInfo.td. They must be kept in synch.
 enum CondCode {
@@ -76,6 +82,12 @@ unsigned getSETFromCond(CondCode CC, bool HasMemoryOperand = false);
 /// bytes, and operand type.
 unsigned getCMovFromCond(CondCode CC, unsigned RegBytes,
                          bool HasMemoryOperand = false);
+
+// Turn jCC opcode into condition code.
+CondCode getCondFromBranchOpc(unsigned Opc);
+
+// Turn setCC opcode into condition code.
+CondCode getCondFromSETOpc(unsigned Opc);
 
 // Turn CMov opcode into condition code.
 CondCode getCondFromCMovOpc(unsigned Opc);
@@ -226,6 +238,9 @@ public:
 
   unsigned isLoadFromStackSlot(const MachineInstr &MI,
                                int &FrameIndex) const override;
+  unsigned isLoadFromStackSlot(const MachineInstr &MI,
+                               int &FrameIndex,
+                               unsigned &MemBytes) const override;
   /// isLoadFromStackSlotPostFE - Check for post-frame ptr elimination
   /// stack locations as well.  This uses a heuristic so it isn't
   /// reliable for correctness.
@@ -234,6 +249,9 @@ public:
 
   unsigned isStoreToStackSlot(const MachineInstr &MI,
                               int &FrameIndex) const override;
+  unsigned isStoreToStackSlot(const MachineInstr &MI,
+                              int &FrameIndex,
+                              unsigned &MemBytes) const override;
   /// isStoreToStackSlotPostFE - Check for post-frame ptr elimination
   /// stack locations as well.  This uses a heuristic so it isn't
   /// reliable for correctness.
@@ -569,6 +587,9 @@ public:
 
   ArrayRef<std::pair<unsigned, const char *>>
   getSerializableDirectMachineOperandTargetFlags() const override;
+
+  /// X86 supports the MachineOutliner.
+  bool useMachineOutliner() const override { return true; }
 
   virtual MachineOutlinerInfo getOutlininingCandidateInfo(
       std::vector<

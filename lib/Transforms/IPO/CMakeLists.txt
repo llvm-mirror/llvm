@@ -28,6 +28,7 @@ add_llvm_library(LLVMipo
   PassManagerBuilder.cpp
   PruneEH.cpp
   SampleProfile.cpp
+  SCCP.cpp
   StripDeadPrototypes.cpp
   StripSymbols.cpp
   SyntheticCountsPropagation.cpp

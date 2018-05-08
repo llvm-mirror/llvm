@@ -764,6 +764,12 @@ public:
   /// loop bodies.
   void forgetLoop(const Loop *L);
 
+  // This method invokes forgetLoop for the outermost loop of the given loop
+  // \p L, making ScalarEvolution forget about all this subtree. This needs to
+  // be done whenever we make a transform that may affect the parameters of the
+  // outer loop, such as exit counts for branches.
+  void forgetTopmostLoop(const Loop *L);
+
   /// This method should be called by the client when it has changed a value
   /// in a way that may effect its value, or which may disconnect it from a
   /// def-use chain linking it to a loop.
@@ -828,6 +834,46 @@ public:
 
   /// Test if the given expression is known to be non-zero.
   bool isKnownNonZero(const SCEV *S);
+
+  /// Splits SCEV expression \p S into two SCEVs. One of them is obtained from
+  /// \p S by substitution of all AddRec sub-expression related to loop \p L
+  /// with initial value of that SCEV. The second is obtained from \p S by
+  /// substitution of all AddRec sub-expressions related to loop \p L with post
+  /// increment of this AddRec in the loop \p L. In both cases all other AddRec
+  /// sub-expressions (not related to \p L) remain the same.
+  /// If the \p S contains non-invariant unknown SCEV the function returns
+  /// CouldNotCompute SCEV in both values of std::pair.
+  /// For example, for SCEV S={0, +, 1}<L1> + {0, +, 1}<L2> and loop L=L1
+  /// the function returns pair:
+  /// first = {0, +, 1}<L2>
+  /// second = {1, +, 1}<L1> + {0, +, 1}<L2>
+  /// We can see that for the first AddRec sub-expression it was replaced with
+  /// 0 (initial value) for the first element and to {1, +, 1}<L1> (post
+  /// increment value) for the second one. In both cases AddRec expression
+  /// related to L2 remains the same.
+  std::pair<const SCEV *, const SCEV *> SplitIntoInitAndPostInc(const Loop *L,
+                                                                const SCEV *S);
+
+  /// We'd like to check the predicate on every iteration of the most dominated
+  /// loop between loops used in LHS and RHS.
+  /// To do this we use the following list of steps:
+  /// 1. Collect set S all loops on which either LHS or RHS depend.
+  /// 2. If S is non-empty
+  /// a. Let PD be the element of S which is dominated by all other elements.
+  /// b. Let E(LHS) be value of LHS on entry of PD.
+  ///    To get E(LHS), we should just take LHS and replace all AddRecs that are
+  ///    attached to PD on with their entry values.
+  ///    Define E(RHS) in the same way.
+  /// c. Let B(LHS) be value of L on backedge of PD.
+  ///    To get B(LHS), we should just take LHS and replace all AddRecs that are
+  ///    attached to PD on with their backedge values.
+  ///    Define B(RHS) in the same way.
+  /// d. Note that E(LHS) and E(RHS) are automatically available on entry of PD,
+  ///    so we can assert on that.
+  /// e. Return true if isLoopEntryGuardedByCond(Pred, E(LHS), E(RHS)) &&
+  ///                   isLoopBackedgeGuardedByCond(Pred, B(LHS), B(RHS))
+  bool isKnownViaInduction(ICmpInst::Predicate Pred, const SCEV *LHS,
+                           const SCEV *RHS);
 
   /// Test if the given expression is known to satisfy the condition described
   /// by Pred, LHS, and RHS.
@@ -1102,6 +1148,9 @@ private:
   /// Mark SCEVUnknown Phis currently being processed by getRangeRef.
   SmallPtrSet<const PHINode *, 6> PendingPhiRanges;
 
+  // Mark SCEVUnknown Phis currently being processed by isImpliedViaMerge.
+  SmallPtrSet<const PHINode *, 6> PendingMerges;
+
   /// Set to true by isLoopBackedgeGuardedByCond when we're walking the set of
   /// conditions dominating the backedge of a loop.
   bool WalkingBEDominatingConds = false;
@@ -1248,7 +1297,7 @@ private:
     /// If we allowed SCEV predicates to be generated when populating this
     /// vector, this information can contain them and therefore a
     /// SCEVPredicate argument should be added to getExact.
-    const SCEV *getExact(ScalarEvolution *SE,
+    const SCEV *getExact(const Loop *L, ScalarEvolution *SE,
                          SCEVUnionPredicate *Predicates = nullptr) const;
 
     /// Return the number of times this loop exit may fall through to the back
@@ -1432,8 +1481,7 @@ private:
                              bool AllowPredicates = false);
 
   /// Compute the number of times the backedge of the specified loop will
-  /// execute if its exit condition were a conditional branch of ExitCond,
-  /// TBB, and FBB.
+  /// execute if its exit condition were a conditional branch of ExitCond.
   ///
   /// \p ControlsExit is true if ExitCond directly controls the exit
   /// branch. In this case, we can assume that the loop exits only if the
@@ -1443,15 +1491,14 @@ private:
   /// If \p AllowPredicates is set, this call will try to use a minimal set of
   /// SCEV predicates in order to return an exact answer.
   ExitLimit computeExitLimitFromCond(const Loop *L, Value *ExitCond,
-                                     BasicBlock *TBB, BasicBlock *FBB,
-                                     bool ControlsExit,
+                                     bool ExitIfTrue, bool ControlsExit,
                                      bool AllowPredicates = false);
 
   // Helper functions for computeExitLimitFromCond to avoid exponential time
   // complexity.
 
   class ExitLimitCache {
-    // It may look like we need key on the whole (L, TBB, FBB, ControlsExit,
+    // It may look like we need key on the whole (L, ExitIfTrue, ControlsExit,
     // AllowPredicates) tuple, but recursive calls to
     // computeExitLimitFromCondCached from computeExitLimitFromCondImpl only
     // vary the in \c ExitCond and \c ControlsExit parameters.  We remember the
@@ -1459,43 +1506,39 @@ private:
     SmallDenseMap<PointerIntPair<Value *, 1>, ExitLimit> TripCountMap;
 
     const Loop *L;
-    BasicBlock *TBB;
-    BasicBlock *FBB;
+    bool ExitIfTrue;
     bool AllowPredicates;
 
   public:
-    ExitLimitCache(const Loop *L, BasicBlock *TBB, BasicBlock *FBB,
-                   bool AllowPredicates)
-        : L(L), TBB(TBB), FBB(FBB), AllowPredicates(AllowPredicates) {}
+    ExitLimitCache(const Loop *L, bool ExitIfTrue, bool AllowPredicates)
+        : L(L), ExitIfTrue(ExitIfTrue), AllowPredicates(AllowPredicates) {}
 
-    Optional<ExitLimit> find(const Loop *L, Value *ExitCond, BasicBlock *TBB,
-                             BasicBlock *FBB, bool ControlsExit,
-                             bool AllowPredicates);
+    Optional<ExitLimit> find(const Loop *L, Value *ExitCond, bool ExitIfTrue,
+                             bool ControlsExit, bool AllowPredicates);
 
-    void insert(const Loop *L, Value *ExitCond, BasicBlock *TBB,
-                BasicBlock *FBB, bool ControlsExit, bool AllowPredicates,
-                const ExitLimit &EL);
+    void insert(const Loop *L, Value *ExitCond, bool ExitIfTrue,
+                bool ControlsExit, bool AllowPredicates, const ExitLimit &EL);
   };
 
   using ExitLimitCacheTy = ExitLimitCache;
 
   ExitLimit computeExitLimitFromCondCached(ExitLimitCacheTy &Cache,
                                            const Loop *L, Value *ExitCond,
-                                           BasicBlock *TBB, BasicBlock *FBB,
+                                           bool ExitIfTrue,
                                            bool ControlsExit,
                                            bool AllowPredicates);
   ExitLimit computeExitLimitFromCondImpl(ExitLimitCacheTy &Cache, const Loop *L,
-                                         Value *ExitCond, BasicBlock *TBB,
-                                         BasicBlock *FBB, bool ControlsExit,
+                                         Value *ExitCond, bool ExitIfTrue,
+                                         bool ControlsExit,
                                          bool AllowPredicates);
 
   /// Compute the number of times the backedge of the specified loop will
   /// execute if its exit condition were a conditional branch of the ICmpInst
-  /// ExitCond, TBB, and FBB. If AllowPredicates is set, this call will try
+  /// ExitCond and ExitIfTrue. If AllowPredicates is set, this call will try
   /// to use a minimal set of SCEV predicates in order to return an exact
   /// answer.
   ExitLimit computeExitLimitFromICmp(const Loop *L, ICmpInst *ExitCond,
-                                     BasicBlock *TBB, BasicBlock *FBB,
+                                     bool ExitIfTrue,
                                      bool IsSubExpr,
                                      bool AllowPredicates = false);
 
@@ -1632,6 +1675,18 @@ private:
                                           const SCEV *LHS, const SCEV *RHS,
                                           const SCEV *FoundLHS,
                                           const SCEV *FoundRHS);
+
+  /// Test whether the condition described by Pred, LHS, and RHS is true
+  /// whenever the condition described by Pred, FoundLHS, and FoundRHS is
+  /// true.
+  ///
+  /// This routine tries to figure out predicate for Phis which are SCEVUnknown
+  /// if it is true for every possible incoming value from their respective
+  /// basic blocks.
+  bool isImpliedViaMerge(ICmpInst::Predicate Pred,
+                         const SCEV *LHS, const SCEV *RHS,
+                         const SCEV *FoundLHS, const SCEV *FoundRHS,
+                         unsigned Depth);
 
   /// If we know that the specified Phi is in the header of its containing
   /// loop, we know the loop executes a constant number of times, and the PHI

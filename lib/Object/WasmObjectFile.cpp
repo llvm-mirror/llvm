@@ -178,6 +178,11 @@ static Error readSection(WasmSection &Section, const uint8_t *&Ptr,
   if (Ptr + Size > Eof)
     return make_error<StringError>("Section too large",
                                    object_error::parse_failed);
+  if (Section.Type == wasm::WASM_SEC_CUSTOM) {
+    const uint8_t *NameStart = Ptr;
+    Section.Name = readString(Ptr);
+    Size -= Ptr - NameStart;
+  }
   Section.Content = ArrayRef<uint8_t>(Ptr, Size);
   Ptr += Size;
   return Error::success();
@@ -278,11 +283,8 @@ Error WasmObjectFile::parseNameSection(const uint8_t *Ptr, const uint8_t *End) {
           return make_error<GenericBinaryError>("Invalid name entry",
                                                 object_error::parse_failed);
         DebugNames.push_back(wasm::WasmFunctionName{Index, Name});
-        if (isDefinedFunctionIndex(Index)) {
-          // Override any existing name; the name specified by the "names"
-          // section is the Function's canonical name.
-          getDefinedFunction(Index).Name = Name;
-        }
+        if (isDefinedFunctionIndex(Index))
+          getDefinedFunction(Index).DebugName = Name;
       }
       break;
     }
@@ -404,15 +406,13 @@ Error WasmObjectFile::parseLinkingSectionSymtab(const uint8_t *&Ptr,
         unsigned FuncIndex = Info.ElementIndex - NumImportedFunctions;
         FunctionType = &Signatures[FunctionTypes[FuncIndex]];
         wasm::WasmFunction &Function = Functions[FuncIndex];
-        if (Function.Name.empty()) {
-          // Use the symbol's name to set a name for the Function, but only if
-          // one hasn't already been set.
-          Function.Name = Info.Name;
-        }
+        if (Function.SymbolName.empty())
+          Function.SymbolName = Info.Name;
       } else {
         wasm::WasmImport &Import = *ImportedFunctions[Info.ElementIndex];
         FunctionType = &Signatures[Import.SigIndex];
         Info.Name = Import.Field;
+        Info.Module = Import.Module;
       }
       break;
 
@@ -422,16 +422,18 @@ Error WasmObjectFile::parseLinkingSectionSymtab(const uint8_t *&Ptr,
           IsDefined != isDefinedGlobalIndex(Info.ElementIndex))
         return make_error<GenericBinaryError>("invalid global symbol index",
                                               object_error::parse_failed);
+      if (!IsDefined &&
+          (Info.Flags & wasm::WASM_SYMBOL_BINDING_MASK) ==
+              wasm::WASM_SYMBOL_BINDING_WEAK)
+        return make_error<GenericBinaryError>("undefined weak global symbol",
+                                              object_error::parse_failed);
       if (IsDefined) {
         Info.Name = readString(Ptr);
         unsigned GlobalIndex = Info.ElementIndex - NumImportedGlobals;
         wasm::WasmGlobal &Global = Globals[GlobalIndex];
         GlobalType = &Global.Type;
-        if (Global.Name.empty()) {
-          // Use the symbol's name to set a name for the Global, but only if
-          // one hasn't already been set.
-          Global.Name = Info.Name;
-        }
+        if (Global.SymbolName.empty())
+          Global.SymbolName = Info.Name;
       } else {
         wasm::WasmImport &Import = *ImportedGlobals[Info.ElementIndex];
         Info.Name = Import.Field;
@@ -480,12 +482,12 @@ Error WasmObjectFile::parseLinkingSectionComdat(const uint8_t *&Ptr,
 {
   uint32_t ComdatCount = readVaruint32(Ptr);
   StringSet<> ComdatSet;
-  while (ComdatCount--) {
+  for (unsigned ComdatIndex = 0; ComdatIndex < ComdatCount; ++ComdatIndex) {
     StringRef Name = readString(Ptr);
     if (Name.empty() || !ComdatSet.insert(Name).second)
       return make_error<GenericBinaryError>("Bad/duplicate COMDAT name " + Twine(Name),
                                             object_error::parse_failed);
-    Comdats.emplace_back(Name);
+    LinkingData.Comdats.emplace_back(Name);
     uint32_t Flags = readVaruint32(Ptr);
     if (Flags != 0)
       return make_error<GenericBinaryError>("Unsupported COMDAT flags",
@@ -503,19 +505,19 @@ Error WasmObjectFile::parseLinkingSectionComdat(const uint8_t *&Ptr,
         if (Index >= DataSegments.size())
           return make_error<GenericBinaryError>("COMDAT data index out of range",
                                                 object_error::parse_failed);
-        if (!DataSegments[Index].Data.Comdat.empty())
+        if (DataSegments[Index].Data.Comdat != UINT32_MAX)
           return make_error<GenericBinaryError>("Data segment in two COMDATs",
                                                 object_error::parse_failed);
-        DataSegments[Index].Data.Comdat = Name;
+        DataSegments[Index].Data.Comdat = ComdatIndex;
         break;
       case wasm::WASM_COMDAT_FUNCTION:
         if (!isDefinedFunctionIndex(Index))
           return make_error<GenericBinaryError>("COMDAT function index out of range",
                                                 object_error::parse_failed);
-        if (!getDefinedFunction(Index).Comdat.empty())
+        if (getDefinedFunction(Index).Comdat != UINT32_MAX)
           return make_error<GenericBinaryError>("Function in two COMDATs",
                                                 object_error::parse_failed);
-        getDefinedFunction(Index).Comdat = Name;
+        getDefinedFunction(Index).Comdat = ComdatIndex;
         break;
       }
     }
@@ -523,38 +525,15 @@ Error WasmObjectFile::parseLinkingSectionComdat(const uint8_t *&Ptr,
   return Error::success();
 }
 
-WasmSection* WasmObjectFile::findCustomSectionByName(StringRef Name) {
-  for (WasmSection& Section : Sections) {
-    if (Section.Type == wasm::WASM_SEC_CUSTOM && Section.Name == Name)
-      return &Section;
-  }
-  return nullptr;
-}
-
-WasmSection* WasmObjectFile::findSectionByType(uint32_t Type) {
-  assert(Type != wasm::WASM_SEC_CUSTOM);
-  for (WasmSection& Section : Sections) {
-    if (Section.Type == Type)
-      return &Section;
-  }
-  return nullptr;
-}
-
 Error WasmObjectFile::parseRelocSection(StringRef Name, const uint8_t *Ptr,
                                         const uint8_t *End) {
-  uint8_t SectionCode = readUint8(Ptr);
-  WasmSection* Section = nullptr;
-  if (SectionCode == wasm::WASM_SEC_CUSTOM) {
-    StringRef Name = readString(Ptr);
-    Section = findCustomSectionByName(Name);
-  } else {
-    Section = findSectionByType(SectionCode);
-  }
-  if (!Section)
-    return make_error<GenericBinaryError>("Invalid section code",
+  uint32_t SectionIndex = readVaruint32(Ptr);
+  if (SectionIndex >= Sections.size())
+    return make_error<GenericBinaryError>("Invalid section index",
                                           object_error::parse_failed);
+  WasmSection& Section = Sections[SectionIndex];
   uint32_t RelocCount = readVaruint32(Ptr);
-  uint32_t EndOffset = Section->Content.size();
+  uint32_t EndOffset = Section.Content.size();
   while (RelocCount--) {
     wasm::WasmRelocation Reloc = {};
     Reloc.Type = readVaruint32(Ptr);
@@ -603,7 +582,7 @@ Error WasmObjectFile::parseRelocSection(StringRef Name, const uint8_t *Ptr,
       return make_error<GenericBinaryError>("Bad relocation offset",
                                             object_error::parse_failed);
 
-    Section->Relocations.push_back(Reloc);
+    Section.Relocations.push_back(Reloc);
   }
   if (Ptr != End)
     return make_error<GenericBinaryError>("Reloc section ended prematurely",
@@ -613,7 +592,6 @@ Error WasmObjectFile::parseRelocSection(StringRef Name, const uint8_t *Ptr,
 
 Error WasmObjectFile::parseCustomSection(WasmSection &Sec,
                                          const uint8_t *Ptr, const uint8_t *End) {
-  Sec.Name = readString(Ptr);
   if (Sec.Name == "name") {
     if (Error Err = parseNameSection(Ptr, End))
       return Err;
@@ -873,6 +851,8 @@ Error WasmObjectFile::parseCodeSection(const uint8_t *Ptr, const uint8_t *End) {
 
     uint32_t BodySize = FunctionEnd - Ptr;
     Function.Body = ArrayRef<uint8_t>(Ptr, BodySize);
+    // This will be set later when reading in the linking metadata section.
+    Function.Comdat = UINT32_MAX;
     Ptr += BodySize;
     assert(Ptr == FunctionEnd);
     Functions.push_back(Function);
@@ -919,8 +899,11 @@ Error WasmObjectFile::parseDataSection(const uint8_t *Ptr, const uint8_t *End) {
       return Err;
     uint32_t Size = readVaruint32(Ptr);
     Segment.Data.Content = ArrayRef<uint8_t>(Ptr, Size);
+    // The rest of these Data fields are set later, when reading in the linking
+    // metadata section.
     Segment.Data.Alignment = 0;
     Segment.Data.Flags = 0;
+    Segment.Data.Comdat = UINT32_MAX;
     Segment.SectionOffset = Ptr - Start;
     Ptr += Size;
     DataSegments.push_back(Segment);

@@ -24,8 +24,7 @@
 // Both of these are conservative weaknesses;
 // that is, not a source of correctness problems.
 //
-// The implementation depends on the GEP instruction to differentiate
-// subscripts. Since Clang linearizes some array subscripts, the dependence
+// Since Clang linearizes some array subscripts, the dependence
 // analysis is using SCEV->delinearize to recover the representation of multiple
 // subscripts, and thus avoid the more expensive and less precise MIV tests. The
 // delinearization is controlled by the flag -da-delinearize.
@@ -622,13 +621,38 @@ void Dependence::dump(raw_ostream &OS) const {
   OS << "!\n";
 }
 
+// Returns NoAlias/MayAliass/MustAlias for two memory locations based upon their
+// underlaying objects. If LocA and LocB are known to not alias (for any reason:
+// tbaa, non-overlapping regions etc), then it is known there is no dependecy.
+// Otherwise the underlying objects are checked to see if they point to
+// different identifiable objects.
 static AliasResult underlyingObjectsAlias(AliasAnalysis *AA,
-                                          const DataLayout &DL, const Value *A,
-                                          const Value *B) {
-  const Value *AObj = GetUnderlyingObject(A, DL);
-  const Value *BObj = GetUnderlyingObject(B, DL);
-  return AA->alias(AObj, DL.getTypeStoreSize(AObj->getType()),
-                   BObj, DL.getTypeStoreSize(BObj->getType()));
+                                          const DataLayout &DL,
+                                          const MemoryLocation &LocA,
+                                          const MemoryLocation &LocB) {
+  // Check the original locations (minus size) for noalias, which can happen for
+  // tbaa, incompatible underlying object locations, etc.
+  MemoryLocation LocAS(LocA.Ptr, MemoryLocation::UnknownSize, LocA.AATags);
+  MemoryLocation LocBS(LocB.Ptr, MemoryLocation::UnknownSize, LocB.AATags);
+  if (AA->alias(LocAS, LocBS) == NoAlias)
+    return NoAlias;
+
+  // Check the underlying objects are the same
+  const Value *AObj = GetUnderlyingObject(LocA.Ptr, DL);
+  const Value *BObj = GetUnderlyingObject(LocB.Ptr, DL);
+
+  // If the underlying objects are the same, they must alias
+  if (AObj == BObj)
+    return MustAlias;
+
+  // We may have hit the recursion limit for underlying objects, or have
+  // underlying objects where we don't know they will alias.
+  if (!isIdentifiedObject(AObj) || !isIdentifiedObject(BObj))
+    return MayAlias;
+
+  // Otherwise we know the objects are different and both identified objects so
+  // must not alias.
+  return NoAlias;
 }
 
 
@@ -641,17 +665,6 @@ bool isLoadOrStore(const Instruction *I) {
   else if (const StoreInst *SI = dyn_cast<StoreInst>(I))
     return SI->isUnordered();
   return false;
-}
-
-
-static
-Value *getPointerOperand(Instruction *I) {
-  if (LoadInst *LI = dyn_cast<LoadInst>(I))
-    return LI->getPointerOperand();
-  if (StoreInst *SI = dyn_cast<StoreInst>(I))
-    return SI->getPointerOperand();
-  llvm_unreachable("Value is not load or store instruction");
-  return nullptr;
 }
 
 
@@ -3177,8 +3190,10 @@ void DependenceInfo::updateDirection(Dependence::DVEntry &Level,
 /// for each loop level.
 bool DependenceInfo::tryDelinearize(Instruction *Src, Instruction *Dst,
                                     SmallVectorImpl<Subscript> &Pair) {
-  Value *SrcPtr = getPointerOperand(Src);
-  Value *DstPtr = getPointerOperand(Dst);
+  assert(isLoadOrStore(Src) && "instruction is not load or store");
+  assert(isLoadOrStore(Dst) && "instruction is not load or store");
+  Value *SrcPtr = getLoadStorePointerOperand(Src);
+  Value *DstPtr = getLoadStorePointerOperand(Dst);
 
   Loop *SrcLoop = LI->getLoopFor(Src->getParent());
   Loop *DstLoop = LI->getLoopFor(Dst->getParent());
@@ -3303,11 +3318,14 @@ DependenceInfo::depends(Instruction *Src, Instruction *Dst,
     return make_unique<Dependence>(Src, Dst);
   }
 
-  Value *SrcPtr = getPointerOperand(Src);
-  Value *DstPtr = getPointerOperand(Dst);
+  assert(isLoadOrStore(Src) && "instruction is not load or store");
+  assert(isLoadOrStore(Dst) && "instruction is not load or store");
+  Value *SrcPtr = getLoadStorePointerOperand(Src);
+  Value *DstPtr = getLoadStorePointerOperand(Dst);
 
-  switch (underlyingObjectsAlias(AA, F->getParent()->getDataLayout(), DstPtr,
-                                 SrcPtr)) {
+  switch (underlyingObjectsAlias(AA, F->getParent()->getDataLayout(),
+                                 MemoryLocation::get(Dst),
+                                 MemoryLocation::get(Src))) {
   case MayAlias:
   case PartialAlias:
     // cannot analyse objects if we don't understand their aliasing.
@@ -3329,50 +3347,18 @@ DependenceInfo::depends(Instruction *Src, Instruction *Dst,
   FullDependence Result(Src, Dst, PossiblyLoopIndependent, CommonLevels);
   ++TotalArrayPairs;
 
-  // See if there are GEPs we can use.
-  bool UsefulGEP = false;
-  GEPOperator *SrcGEP = dyn_cast<GEPOperator>(SrcPtr);
-  GEPOperator *DstGEP = dyn_cast<GEPOperator>(DstPtr);
-  if (SrcGEP && DstGEP &&
-      SrcGEP->getPointerOperandType() == DstGEP->getPointerOperandType()) {
-    const SCEV *SrcPtrSCEV = SE->getSCEV(SrcGEP->getPointerOperand());
-    const SCEV *DstPtrSCEV = SE->getSCEV(DstGEP->getPointerOperand());
-    DEBUG(dbgs() << "    SrcPtrSCEV = " << *SrcPtrSCEV << "\n");
-    DEBUG(dbgs() << "    DstPtrSCEV = " << *DstPtrSCEV << "\n");
+  unsigned Pairs = 1;
+  SmallVector<Subscript, 2> Pair(Pairs);
+  const SCEV *SrcSCEV = SE->getSCEV(SrcPtr);
+  const SCEV *DstSCEV = SE->getSCEV(DstPtr);
+  DEBUG(dbgs() << "    SrcSCEV = " << *SrcSCEV << "\n");
+  DEBUG(dbgs() << "    DstSCEV = " << *DstSCEV << "\n");
+  Pair[0].Src = SrcSCEV;
+  Pair[0].Dst = DstSCEV;
 
-    UsefulGEP = isLoopInvariant(SrcPtrSCEV, LI->getLoopFor(Src->getParent())) &&
-                isLoopInvariant(DstPtrSCEV, LI->getLoopFor(Dst->getParent())) &&
-                (SrcGEP->getNumOperands() == DstGEP->getNumOperands()) &&
-                isKnownPredicate(CmpInst::ICMP_EQ, SrcPtrSCEV, DstPtrSCEV);
-  }
-  unsigned Pairs = UsefulGEP ? SrcGEP->idx_end() - SrcGEP->idx_begin() : 1;
-  SmallVector<Subscript, 4> Pair(Pairs);
-  if (UsefulGEP) {
-    DEBUG(dbgs() << "    using GEPs\n");
-    unsigned P = 0;
-    for (GEPOperator::const_op_iterator SrcIdx = SrcGEP->idx_begin(),
-           SrcEnd = SrcGEP->idx_end(),
-           DstIdx = DstGEP->idx_begin();
-         SrcIdx != SrcEnd;
-         ++SrcIdx, ++DstIdx, ++P) {
-      Pair[P].Src = SE->getSCEV(*SrcIdx);
-      Pair[P].Dst = SE->getSCEV(*DstIdx);
-      unifySubscriptType(&Pair[P]);
-    }
-  }
-  else {
-    DEBUG(dbgs() << "    ignoring GEPs\n");
-    const SCEV *SrcSCEV = SE->getSCEV(SrcPtr);
-    const SCEV *DstSCEV = SE->getSCEV(DstPtr);
-    DEBUG(dbgs() << "    SrcSCEV = " << *SrcSCEV << "\n");
-    DEBUG(dbgs() << "    DstSCEV = " << *DstSCEV << "\n");
-    Pair[0].Src = SrcSCEV;
-    Pair[0].Dst = DstSCEV;
-  }
-
-  if (Delinearize && CommonLevels > 1) {
+  if (Delinearize) {
     if (tryDelinearize(Src, Dst, Pair)) {
-      DEBUG(dbgs() << "    delinearized GEP\n");
+      DEBUG(dbgs() << "    delinearized\n");
       Pairs = Pair.size();
     }
   }
@@ -3753,51 +3739,27 @@ const SCEV *DependenceInfo::getSplitIteration(const Dependence &Dep,
   assert(Dst->mayReadFromMemory() || Dst->mayWriteToMemory());
   assert(isLoadOrStore(Src));
   assert(isLoadOrStore(Dst));
-  Value *SrcPtr = getPointerOperand(Src);
-  Value *DstPtr = getPointerOperand(Dst);
-  assert(underlyingObjectsAlias(AA, F->getParent()->getDataLayout(), DstPtr,
-                                SrcPtr) == MustAlias);
+  Value *SrcPtr = getLoadStorePointerOperand(Src);
+  Value *DstPtr = getLoadStorePointerOperand(Dst);
+  assert(underlyingObjectsAlias(AA, F->getParent()->getDataLayout(),
+                                MemoryLocation::get(Dst),
+                                MemoryLocation::get(Src)) == MustAlias);
 
   // establish loop nesting levels
   establishNestingLevels(Src, Dst);
 
   FullDependence Result(Src, Dst, false, CommonLevels);
 
-  // See if there are GEPs we can use.
-  bool UsefulGEP = false;
-  GEPOperator *SrcGEP = dyn_cast<GEPOperator>(SrcPtr);
-  GEPOperator *DstGEP = dyn_cast<GEPOperator>(DstPtr);
-  if (SrcGEP && DstGEP &&
-      SrcGEP->getPointerOperandType() == DstGEP->getPointerOperandType()) {
-    const SCEV *SrcPtrSCEV = SE->getSCEV(SrcGEP->getPointerOperand());
-    const SCEV *DstPtrSCEV = SE->getSCEV(DstGEP->getPointerOperand());
-    UsefulGEP = isLoopInvariant(SrcPtrSCEV, LI->getLoopFor(Src->getParent())) &&
-                isLoopInvariant(DstPtrSCEV, LI->getLoopFor(Dst->getParent())) &&
-                (SrcGEP->getNumOperands() == DstGEP->getNumOperands());
-  }
-  unsigned Pairs = UsefulGEP ? SrcGEP->idx_end() - SrcGEP->idx_begin() : 1;
-  SmallVector<Subscript, 4> Pair(Pairs);
-  if (UsefulGEP) {
-    unsigned P = 0;
-    for (GEPOperator::const_op_iterator SrcIdx = SrcGEP->idx_begin(),
-           SrcEnd = SrcGEP->idx_end(),
-           DstIdx = DstGEP->idx_begin();
-         SrcIdx != SrcEnd;
-         ++SrcIdx, ++DstIdx, ++P) {
-      Pair[P].Src = SE->getSCEV(*SrcIdx);
-      Pair[P].Dst = SE->getSCEV(*DstIdx);
-    }
-  }
-  else {
-    const SCEV *SrcSCEV = SE->getSCEV(SrcPtr);
-    const SCEV *DstSCEV = SE->getSCEV(DstPtr);
-    Pair[0].Src = SrcSCEV;
-    Pair[0].Dst = DstSCEV;
-  }
+  unsigned Pairs = 1;
+  SmallVector<Subscript, 2> Pair(Pairs);
+  const SCEV *SrcSCEV = SE->getSCEV(SrcPtr);
+  const SCEV *DstSCEV = SE->getSCEV(DstPtr);
+  Pair[0].Src = SrcSCEV;
+  Pair[0].Dst = DstSCEV;
 
-  if (Delinearize && CommonLevels > 1) {
+  if (Delinearize) {
     if (tryDelinearize(Src, Dst, Pair)) {
-      DEBUG(dbgs() << "    delinearized GEP\n");
+      DEBUG(dbgs() << "    delinearized\n");
       Pairs = Pair.size();
     }
   }

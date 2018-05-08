@@ -178,6 +178,12 @@ public:
     return DenseBlockSet;
   }
 
+  /// Return a direct, immutable handle to the blocks set.
+  const SmallPtrSetImpl<const BlockT *> &getBlocksSet() const {
+    assert(!isInvalid() && "Loop not in a valid state!");
+    return DenseBlockSet;
+  }
+
   /// Return true if this loop is no longer valid.  The only valid use of this
   /// helper is "assert(L.isInvalid())" or equivalent, since IsInvalid is set to
   /// true by the destructor.  In other words, if this accessor returns true,
@@ -527,7 +533,7 @@ public:
   ///
   /// If this loop contains the same llvm.loop metadata on each branch to the
   /// header then the node is returned. If any latch instruction does not
-  /// contain llvm.loop or or if multiple latches contain different nodes then
+  /// contain llvm.loop or if multiple latches contain different nodes then
   /// 0 is returned.
   MDNode *getLoopID() const;
   /// Set the llvm.loop loop id metadata for this loop.

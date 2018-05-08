@@ -80,6 +80,8 @@ public:
 
   void resetIndent() { IndentLevel = 0; }
 
+  int getIndentLevel() { return IndentLevel; }
+
   void setPrefix(StringRef P) { Prefix = P; }
 
   void printIndent() {
@@ -136,7 +138,7 @@ public:
       }
     }
 
-    std::sort(SetFlags.begin(), SetFlags.end(), &flagName<TFlag>);
+    llvm::sort(SetFlags.begin(), SetFlags.end(), &flagName<TFlag>);
 
     startLine() << Label << " [ (" << hex(Value) << ")\n";
     for (const auto &Flag : SetFlags) {

@@ -32,6 +32,13 @@
 #include <memory>
 #include <vector>
 
+// Determine whether statistics should be enabled. We must do it here rather
+// than in CMake because multi-config generators cannot determine this at
+// configure time.
+#if !defined(NDEBUG) || LLVM_FORCE_ENABLE_STATS
+#define LLVM_ENABLE_STATS 1
+#endif
+
 namespace llvm {
 
 class raw_ostream;
@@ -191,6 +198,21 @@ void PrintStatisticsJSON(raw_ostream &OS);
 /// read. However, it will prevent new statistics from registering until it
 /// completes.
 const std::vector<std::pair<StringRef, unsigned>> GetStatistics();
+
+/// \brief Reset the statistics. This can be used to zero and de-register the
+/// statistics in order to measure a compilation.
+///
+/// When this function begins to call destructors prior to returning, all
+/// statistics will be zero and unregistered. However, that might not remain the
+/// case by the time this function finishes returning. Whether update from other
+/// threads are lost or merely deferred until during the function return is
+/// timing sensitive.
+///
+/// Callers who intend to use this to measure statistics for a single
+/// compilation should ensure that no compilations are in progress at the point
+/// this function is called and that only one compilation executes until calling
+/// GetStatistics().
+void ResetStatistics();
 
 } // end namespace llvm
 

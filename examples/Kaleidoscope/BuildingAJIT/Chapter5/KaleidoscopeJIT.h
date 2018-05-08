@@ -34,6 +34,7 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
+#include "llvm/Transforms/InstCombine/InstCombine.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/GVN.h"
 #include <algorithm>
@@ -77,7 +78,6 @@ using MyRemote = remote::OrcRemoteTargetClient;
 
 class KaleidoscopeJIT {
 private:
-  SymbolStringPool SSP;
   ExecutionSession ES;
   std::shared_ptr<SymbolResolver> Resolver;
   std::unique_ptr<TargetMachine> TM;
@@ -86,7 +86,7 @@ private:
   IRCompileLayer<decltype(ObjectLayer), SimpleCompiler> CompileLayer;
 
   using OptimizeFunction =
-      std::function<std::shared_ptr<Module>(std::shared_ptr<Module>)>;
+      std::function<std::unique_ptr<Module>(std::unique_ptr<Module>)>;
 
   IRTransformLayer<decltype(CompileLayer), OptimizeFunction> OptimizeLayer;
 
@@ -96,8 +96,7 @@ private:
 
 public:
   KaleidoscopeJIT(MyRemote &Remote)
-      : ES(SSP),
-        Resolver(createLegacyLookupResolver(
+      : Resolver(createLegacyLookupResolver(
             [this](const std::string &Name) -> JITSymbol {
               if (auto Sym = IndirectStubsMgr->findStub(Name, false))
                 return Sym;
@@ -121,7 +120,7 @@ public:
                     }),
         CompileLayer(ObjectLayer, SimpleCompiler(*TM)),
         OptimizeLayer(CompileLayer,
-                      [this](std::shared_ptr<Module> M) {
+                      [this](std::unique_ptr<Module> M) {
                         return optimizeModule(std::move(M));
                       }),
         Remote(Remote) {
@@ -223,7 +222,7 @@ private:
     return MangledNameStream.str();
   }
 
-  std::shared_ptr<Module> optimizeModule(std::shared_ptr<Module> M) {
+  std::unique_ptr<Module> optimizeModule(std::unique_ptr<Module> M) {
     // Create a function pass manager.
     auto FPM = llvm::make_unique<legacy::FunctionPassManager>(M.get());
 

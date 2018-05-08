@@ -19,7 +19,6 @@
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringSet.h"
-#include "llvm/Analysis/ObjectUtils.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/ModuleSummaryIndex.h"
 #include "llvm/LTO/Config.h"
@@ -73,9 +72,7 @@ std::string getThinLTOOutputFile(const std::string &Path,
 /// Setup optimization remarks.
 Expected<std::unique_ptr<ToolOutputFile>>
 setupOptimizationRemarks(LLVMContext &Context, StringRef LTORemarksFilename,
-                         bool LTOPassRemarksWithHotness,
-                         unsigned LTOPassRemarksHotnessThreshold,
-                         int Count = -1);
+                         bool LTOPassRemarksWithHotness, int Count = -1);
 
 class LTO;
 struct SymbolResolution;

@@ -1,6 +1,6 @@
 # Instructions that are valid
 #
-# RUN: llvm-mc %s -triple=mips64-unknown-linux -show-encoding -mcpu=mips64r2 | FileCheck %s
+# RUN: llvm-mc %s -triple=mips64-unknown-linux -show-encoding -show-inst -mcpu=mips64r2 | FileCheck %s
 a:
         .set noat
         abs.d     $f7,$f25             # CHECK: encoding:
@@ -267,6 +267,8 @@ a:
         or        $12,$s0,$sp
         or        $2, 4                # CHECK: ori $2, $2, 4           # encoding: [0x34,0x42,0x00,0x04]
         pause                          # CHECK: pause # encoding:  [0x00,0x00,0x01,0x40]
+                                       # CHECK-NEXT:  # <MCInst #{{[0-9]+}} PAUSE
+                                       # CHECK-NOT    # <MCInst #{{[0-9}+}} PAUSE_MM
         pref      1, 8($5)             # CHECK: pref 1, 8($5)           # encoding: [0xcc,0xa1,0x00,0x08]
         # FIXME: Use the code generator in order to print the .set directives
         #        instead of the instruction printer.
@@ -291,7 +293,11 @@ a:
         sc        $15,18904($s3)       # CHECK: sc $15, 18904($19)     # encoding: [0xe2,0x6f,0x49,0xd8]
         scd       $15,-8243($sp)       # CHECK: scd $15, -8243($sp)    # encoding: [0xf3,0xaf,0xdf,0xcd]
         sdbbp                          # CHECK: sdbbp                  # encoding: [0x70,0x00,0x00,0x3f]
+                                       # CHECK-NEXT:                   # <MCInst #{{[0-9]+}} SDBBP
+                                       # CHECK-NOT:                    # <MCInst #{{[0-9]+}} SDBBP_MM
         sdbbp     34                   # CHECK: sdbbp 34               # encoding: [0x70,0x00,0x08,0xbf]
+                                       # CHECK-NEXT:                   # <MCInst #{{[0-9]+}} SDBBP
+                                       # CHECK-NOT:                    # <MCInst #{{[0-9]+}} SDBBP_MM
         sd        $12,5835($10)
         sdc1      $f31,30574($13)
         sdc2      $20,23157($s2)       # CHECK: sdc2 $20, 23157($18)   # encoding: [0xfa,0x54,0x5a,0x75]
@@ -344,31 +350,41 @@ a:
         swr       $s1,-26590($14)
         swxc1     $f19,$12($k0)
         sync                           # CHECK: sync                   # encoding: [0x00,0x00,0x00,0x0f]
+                                       # CHECK-NEXT:                   # <MCInst #{{[0-9]+}} SYNC
         sync      1                    # CHECK: sync 1                 # encoding: [0x00,0x00,0x00,0x4f]
+                                       # CHECK-NEXT:                   # <MCInst #{{[0-9]+}} SYNC
         syscall                        # CHECK: syscall                # encoding: [0x00,0x00,0x00,0x0c]
         syscall   256                  # CHECK: syscall 256            # encoding: [0x00,0x00,0x40,0x0c]
-        teq       $0,$3                # CHECK: teq $zero, $3          # encoding: [0x00,0x03,0x00,0x34]
-        teq       $5,$7,620            # CHECK: teq $5, $7, 620        # encoding: [0x00,0xa7,0x9b,0x34]
-        teqi      $s5,-17504
-        tge       $7,$10               # CHECK: tge $7, $10            # encoding: [0x00,0xea,0x00,0x30]
-        tge       $5,$19,340           # CHECK: tge $5, $19, 340       # encoding: [0x00,0xb3,0x55,0x30]
-        tgei      $s1,5025
-        tgeiu     $sp,-28621
-        tgeu      $22,$28              # CHECK: tgeu $22, $gp          # encoding: [0x02,0xdc,0x00,0x31]
-        tgeu      $20,$14,379          # CHECK: tgeu $20, $14, 379     # encoding: [0x02,0x8e,0x5e,0xf1]
+        teq $zero, $3                  # CHECK: teq $zero, $3          # encoding: [0x00,0x03,0x00,0x34]
+        teq $5, $7, 620                # CHECK: teq $5, $7, 620        # encoding: [0x00,0xa7,0x9b,0x34]
+        teqi  $21, -17504              # CHECK: teqi  $21, -17504      # encoding: [0x06,0xac,0xbb,0xa0]
+        tge $7, $10                    # CHECK: tge $7, $10            # encoding: [0x00,0xea,0x00,0x30]
+        tge $5, $19, 340               # CHECK: tge $5, $19, 340       # encoding: [0x00,0xb3,0x55,0x30]
+        tgei  $17, 5025                # CHECK: tgei  $17, 5025        # encoding: [0x06,0x28,0x13,0xa1]
+        tgeiu $sp, -28621              # CHECK: tgeiu $sp, -28621      # encoding: [0x07,0xa9,0x90,0x33]
+        tgeu  $22, $gp                 # CHECK: tgeu  $22, $gp         # encoding: [0x02,0xdc,0x00,0x31]
+        tgeu  $20, $14, 379            # CHECK: tgeu  $20, $14, 379    # encoding: [0x02,0x8e,0x5e,0xf1]
         tlbp                           # CHECK: tlbp                   # encoding: [0x42,0x00,0x00,0x08]
+                                       # CHECK-NEXT:                   # <MCInst #{{[0-9]+}} TLBP
+                                       # CHECK-NOT:                    # <MCInst #{{[0-9]+}} TLBP_MM
         tlbr                           # CHECK: tlbr                   # encoding: [0x42,0x00,0x00,0x01]
+                                       # CHECK-NEXT:                   # <MCInst #{{[0-9]+}} TLBR
+                                       # CHECK-NOT:                    # <MCInst #{{[0-9]+}} TLBR_MM
         tlbwi                          # CHECK: tlbwi                  # encoding: [0x42,0x00,0x00,0x02]
+                                       # CHECK-NEXT:                   # <MCInst #{{[0-9]+}} TLBWI
+                                       # CHECK-NOT:                    # <MCInst #{{[0-9]+}} TLBWI_MM
         tlbwr                          # CHECK: tlbwr                  # encoding: [0x42,0x00,0x00,0x06]
-        tlt       $15,$13              # CHECK: tlt $15, $13           # encoding: [0x01,0xed,0x00,0x32]
-        tlt       $2,$19,133           # CHECK: tlt $2, $19, 133       # encoding: [0x00,0x53,0x21,0x72]
-        tlti      $14,-21059
-        tltiu     $ra,-5076
-        tltu      $11,$16              # CHECK: tltu $11, $16          # encoding: [0x01,0x70,0x00,0x33]
-        tltu      $16,$29,1016         # CHECK: tltu $16, $sp, 1016    # encoding: [0x02,0x1d,0xfe,0x33]
-        tne       $6,$17               # CHECK: tne $6, $17            # encoding: [0x00,0xd1,0x00,0x36]
-        tne       $7,$8,885            # CHECK: tne $7, $8, 885        # encoding: [0x00,0xe8,0xdd,0x76]
-        tnei      $12,-29647
+                                       # CHECK-NEXT:                   # <MCInst #{{[0-9]+}} TLBWR
+                                       # CHECK-NOT:                    # <MCInst #{{[0-9]+}} TLBWR_MM
+        tlt $15, $13                   # CHECK: tlt $15, $13           # encoding: [0x01,0xed,0x00,0x32]
+        tlt $2, $19, 133               # CHECK: tlt $2, $19, 133       # encoding: [0x00,0x53,0x21,0x72]
+        tlti  $14, -21059              # CHECK: tlti  $14, -21059      # encoding: [0x05,0xca,0xad,0xbd]
+        tltiu $ra, -5076               # CHECK: tltiu $ra, -5076       # encoding: [0x07,0xeb,0xec,0x2c]
+        tltu  $11, $16                 # CHECK: tltu  $11, $16         # encoding: [0x01,0x70,0x00,0x33]
+        tltu  $16, $sp, 1016           # CHECK: tltu  $16, $sp, 1016   # encoding: [0x02,0x1d,0xfe,0x33]
+        tne $6, $17                    # CHECK: tne $6, $17            # encoding: [0x00,0xd1,0x00,0x36]
+        tne $7, $8, 885                # CHECK: tne $7, $8, 885        # encoding: [0x00,0xe8,0xdd,0x76]
+        tnei  $12, -29647              # CHECK: tnei  $12, -29647      # encoding: [0x05,0x8e,0x8c,0x31]
         trunc.l.d $f23,$f23            # CHECK: trunc.l.d $f23, $f23   # encoding: [0x46,0x20,0xbd,0xc9]
         trunc.l.s $f28,$f31            # CHECK: trunc.l.s $f28, $f31   # encoding: [0x46,0x00,0xff,0x09]
         trunc.w.d $f22,$f15            # CHECK: trunc.w.d $f22, $f15   # encoding: [0x46,0x20,0x7d,0x8d]
@@ -378,6 +394,8 @@ a:
         xor       $s2,$a0,$s8
         xor       $2, 4                # CHECK: xori $2, $2, 4         # encoding: [0x38,0x42,0x00,0x04]
         wsbh      $k1,$9
+        synci     -15842($a2)          # CHECK: synci -15842($6)       # encoding: [0x04,0xdf,0xc2,0x1e]
+                                       # CHECK-NEXT:                   # <MCInst #{{[0-9]+}} SYNC
 
 1:
 

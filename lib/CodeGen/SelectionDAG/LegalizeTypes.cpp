@@ -598,6 +598,12 @@ void DAGTypeLegalizer::ExpungeNode(SDNode *N) {
     RemapValue(I->second);
   }
 
+  for (DenseMap<SDValue, SDValue>::iterator I = PromotedFloats.begin(),
+       E = PromotedFloats.end(); I != E; ++I) {
+    assert(I->first.getNode() != N);
+    RemapValue(I->second);
+  }
+
   for (DenseMap<SDValue, SDValue>::iterator I = SoftenedFloats.begin(),
        E = SoftenedFloats.end(); I != E; ++I) {
     assert(I->first.getNode() != N);
@@ -776,6 +782,8 @@ void DAGTypeLegalizer::SetPromotedInteger(SDValue Op, SDValue Result) {
   SDValue &OpEntry = PromotedIntegers[Op];
   assert(!OpEntry.getNode() && "Node is already promoted!");
   OpEntry = Result;
+
+  DAG.transferDbgValues(Op, Result);
 }
 
 void DAGTypeLegalizer::SetSoftenedFloat(SDValue Op, SDValue Result) {

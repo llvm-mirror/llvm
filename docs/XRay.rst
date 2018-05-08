@@ -59,7 +59,7 @@ For example:
 
 ::
 
-  clang -fxray-instrument ..
+  clang -fxray-instrument ...
 
 By default, functions that have at least 200 instructions will get XRay
 instrumentation points. You can tweak that number through the
@@ -67,7 +67,7 @@ instrumentation points. You can tweak that number through the
 
 ::
 
-  clang -fxray-instrument -fxray-instruction-threshold=1 ..
+  clang -fxray-instrument -fxray-instruction-threshold=1 ...
 
 You can also specifically instrument functions in your binary to either always
 or never be instrumented using source-level attributes. You can do it using the
@@ -116,6 +116,27 @@ it gets instrumented.
     define i32 @maybe_instrument() uwtable "xray-instruction-threshold"="2" {
       ; ...
     }
+
+Special Case File
+-----------------
+
+Attributes can be imbued through the use of special case files instead of
+adding them to the original source files. You can use this to mark certain
+functions and classes to be never, always, or instrumented with first-argument
+logging from a file. The file's format is described below:
+
+.. code-block:: bash
+
+    # Comments are supported
+    [always]
+    fun:always_instrument
+    fun:log_arg1=arg1 # Log the first argument for the function
+
+    [never]
+    fun:never_instrument
+
+These files can be provided through the ``-fxray-attr-list=`` flag to clang.
+You may have multiple files loaded through multiple instances of the flag.
 
 XRay Runtime Library
 --------------------

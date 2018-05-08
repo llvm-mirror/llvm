@@ -37,6 +37,9 @@ void initializeVectorization(PassRegistry&);
 /// Initialize all passes linked into the InstCombine library.
 void initializeInstCombine(PassRegistry&);
 
+/// Initialize all passes linked into the AggressiveInstCombine library.
+void initializeAggressiveInstCombine(PassRegistry&);
+
 /// Initialize all passes linked into the IPO library.
 void initializeIPO(PassRegistry&);
 
@@ -88,6 +91,7 @@ void initializeCFGOnlyViewerLegacyPassPass(PassRegistry&);
 void initializeCFGPrinterLegacyPassPass(PassRegistry&);
 void initializeCFGSimplifyPassPass(PassRegistry&);
 void initializeCFGViewerLegacyPassPass(PassRegistry&);
+void initializeCFIInstrInserterPass(PassRegistry&);
 void initializeCFLAndersAAWrapperPassPass(PassRegistry&);
 void initializeCFLSteensAAWrapperPassPass(PassRegistry&);
 void initializeCallGraphDOTPrinterPass(PassRegistry&);
@@ -166,7 +170,7 @@ void initializeIfConverterPass(PassRegistry&);
 void initializeImplicitNullChecksPass(PassRegistry&);
 void initializeIndVarSimplifyLegacyPassPass(PassRegistry&);
 void initializeIndirectBrExpandPassPass(PassRegistry&);
-void initializeInductiveRangeCheckEliminationPass(PassRegistry&);
+void initializeIRCELegacyPassPass(PassRegistry&);
 void initializeInferAddressSpacesPass(PassRegistry&);
 void initializeInferFunctionAttrsLegacyPassPass(PassRegistry&);
 void initializeInlineCostAnalysisPass(PassRegistry&);
@@ -210,7 +214,6 @@ void initializeLoopDistributeLegacyPass(PassRegistry&);
 void initializeLoopExtractorPass(PassRegistry&);
 void initializeLoopIdiomRecognizeLegacyPassPass(PassRegistry&);
 void initializeLoopInfoWrapperPassPass(PassRegistry&);
-void initializeLoopInstSimplifyLegacyPassPass(PassRegistry&);
 void initializeLoopInterchangePass(PassRegistry&);
 void initializeLoopLoadEliminationPass(PassRegistry&);
 void initializeLoopPassPass(PassRegistry&);
@@ -269,6 +272,7 @@ void initializeMergedLoadStoreMotionLegacyPassPass(PassRegistry&);
 void initializeMetaRenamerPass(PassRegistry&);
 void initializeModuleDebugInfoPrinterPass(PassRegistry&);
 void initializeModuleSummaryIndexWrapperPassPass(PassRegistry&);
+void initializeMustExecutePrinterPass(PassRegistry&);
 void initializeNameAnonGlobalLegacyPassPass(PassRegistry&);
 void initializeNaryReassociateLegacyPassPass(PassRegistry&);
 void initializeNewGVNLegacyPassPass(PassRegistry&);
@@ -301,6 +305,7 @@ void initializePostDominatorTreeWrapperPassPass(PassRegistry&);
 void initializePostMachineSchedulerPass(PassRegistry&);
 void initializePostOrderFunctionAttrsLegacyPassPass(PassRegistry&);
 void initializePostRAHazardRecognizerPass(PassRegistry&);
+void initializePostRAMachineSinkingPass(PassRegistry&);
 void initializePostRASchedulerPass(PassRegistry&);
 void initializePreISelIntrinsicLoweringLegacyPassPass(PassRegistry&);
 void initializePredicateInfoPrinterLegacyPassPass(PassRegistry&);

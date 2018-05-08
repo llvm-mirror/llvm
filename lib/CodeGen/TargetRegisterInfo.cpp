@@ -19,7 +19,6 @@
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/CodeGen/MachineValueType.h"
 #include "llvm/CodeGen/TargetFrameLowering.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/CodeGen/VirtRegMap.h"
@@ -28,6 +27,7 @@
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/MachineValueType.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/Printable.h"
 #include "llvm/Support/raw_ostream.h"
@@ -86,14 +86,20 @@ bool TargetRegisterInfo::checkAllSuperRegsMarked(const BitVector &RegisterSet,
 namespace llvm {
 
 Printable printReg(unsigned Reg, const TargetRegisterInfo *TRI,
-                   unsigned SubIdx) {
-  return Printable([Reg, TRI, SubIdx](raw_ostream &OS) {
+                   unsigned SubIdx, const MachineRegisterInfo *MRI) {
+  return Printable([Reg, TRI, SubIdx, MRI](raw_ostream &OS) {
     if (!Reg)
       OS << "$noreg";
     else if (TargetRegisterInfo::isStackSlot(Reg))
       OS << "SS#" << TargetRegisterInfo::stackSlot2Index(Reg);
-    else if (TargetRegisterInfo::isVirtualRegister(Reg))
-      OS << '%' << TargetRegisterInfo::virtReg2Index(Reg);
+    else if (TargetRegisterInfo::isVirtualRegister(Reg)) {
+      StringRef Name = MRI ? MRI->getVRegName(Reg) : "";
+      if (Name != "") {
+        OS << '%' << Name;
+      } else {
+        OS << '%' << TargetRegisterInfo::virtReg2Index(Reg);
+      }
+    }
     else if (!TRI)
       OS << '$' << "physreg" << Reg;
     else if (Reg < TRI->getNumRegs()) {
@@ -470,6 +476,29 @@ unsigned TargetRegisterInfo::getRegSizeInBits(unsigned Reg,
   }
   assert(RC && "Unable to deduce the register class");
   return getRegSizeInBits(*RC);
+}
+
+unsigned
+TargetRegisterInfo::lookThruCopyLike(unsigned SrcReg,
+                                     const MachineRegisterInfo *MRI) const {
+  while (true) {
+    const MachineInstr *MI = MRI->getVRegDef(SrcReg);
+    if (!MI->isCopyLike())
+      return SrcReg;
+
+    unsigned CopySrcReg;
+    if (MI->isCopy())
+      CopySrcReg = MI->getOperand(1).getReg();
+    else {
+      assert(MI->isSubregToReg() && "Bad opcode for lookThruCopyLike");
+      CopySrcReg = MI->getOperand(2).getReg();
+    }
+
+    if (!isVirtualRegister(CopySrcReg))
+      return CopySrcReg;
+
+    SrcReg = CopySrcReg;
+  }
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)

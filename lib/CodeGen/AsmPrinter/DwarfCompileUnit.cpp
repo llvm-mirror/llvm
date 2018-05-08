@@ -28,7 +28,6 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/TargetFrameLowering.h"
-#include "llvm/CodeGen/TargetLoweringObjectFile.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/DataLayout.h"
@@ -40,6 +39,7 @@
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/MachineLocation.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
 #include <algorithm>
@@ -270,15 +270,20 @@ void DwarfCompileUnit::addRange(RangeSpan Range) {
 
 void DwarfCompileUnit::initStmtList() {
   // Define start line table label for each Compile Unit.
-  MCSymbol *LineTableStartSym =
-      Asm->OutStreamer->getDwarfLineTableSymbol(getUniqueID());
+  MCSymbol *LineTableStartSym;
+  const TargetLoweringObjectFile &TLOF = Asm->getObjFileLowering();
+  if (DD->useSectionsAsReferences()) {
+    LineTableStartSym = TLOF.getDwarfLineSection()->getBeginSymbol();
+  } else {
+    LineTableStartSym =
+        Asm->OutStreamer->getDwarfLineTableSymbol(getUniqueID());
+  }
 
   // DW_AT_stmt_list is a offset of line number information for this
   // compile unit in debug_line section. For split dwarf this is
   // left in the skeleton CU and so not included.
   // The line table entries are not always emitted in assembly, so it
   // is not okay to use line_table_start here.
-  const TargetLoweringObjectFile &TLOF = Asm->getObjFileLowering();
   StmtListValue =
       addSectionLabel(getUnitDie(), dwarf::DW_AT_stmt_list, LineTableStartSym,
                       TLOF.getDwarfLineSection()->getBeginSymbol());
@@ -410,9 +415,10 @@ void DwarfCompileUnit::addScopeRangeList(DIE &ScopeDIE,
 
 void DwarfCompileUnit::attachRangesOrLowHighPC(
     DIE &Die, SmallVector<RangeSpan, 2> Ranges) {
-  if (Ranges.size() == 1) {
-    const auto &single = Ranges.front();
-    attachLowHighPC(Die, single.getStart(), single.getEnd());
+  if (Ranges.size() == 1 || !DD->useRangesSection()) {
+    const RangeSpan &Front = Ranges.front();
+    const RangeSpan &Back = Ranges.back();
+    attachLowHighPC(Die, Front.getStart(), Back.getEnd());
   } else
     addScopeRangeList(Die, std::move(Ranges));
 }
@@ -834,7 +840,7 @@ void DwarfCompileUnit::createAbstractVariable(const DILocalVariable *Var,
 
 void DwarfCompileUnit::emitHeader(bool UseOffsets) {
   // Don't bother labeling the .dwo unit, as its offset isn't used.
-  if (!Skeleton) {
+  if (!Skeleton && !DD->useSectionsAsReferences()) {
     LabelBegin = Asm->createTempSymbol("cu_begin");
     Asm->OutStreamer->EmitLabel(LabelBegin);
   }
@@ -851,7 +857,8 @@ bool DwarfCompileUnit::hasDwarfPubSections() const {
   if (CUNode->getGnuPubnames())
     return true;
 
-  return DD->tuneForGDB() && !includeMinimalInlineScopes();
+  return DD->tuneForGDB() && DD->usePubSections() &&
+         !includeMinimalInlineScopes();
 }
 
 /// addGlobalName - Add a new global name to the compile unit.

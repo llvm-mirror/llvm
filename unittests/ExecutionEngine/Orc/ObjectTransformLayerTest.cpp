@@ -14,6 +14,7 @@
 #include "llvm/ExecutionEngine/Orc/NullResolver.h"
 #include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Object/ObjectFile.h"
 #include "gtest/gtest.h"
 
@@ -178,8 +179,7 @@ private:
 TEST(ObjectTransformLayerTest, Main) {
   MockBaseLayer M;
 
-  SymbolStringPool SSP;
-  ExecutionSession ES(SSP);
+  ExecutionSession ES(std::make_shared<SymbolStringPool>());
 
   // Create one object transform layer using a transform (as a functor)
   // that allocates new objects, and deals in unique pointers.
@@ -302,7 +302,7 @@ TEST(ObjectTransformLayerTest, Main) {
   // Make sure that the calls from IRCompileLayer to ObjectTransformLayer
   // compile.
   cantFail(CompileLayer.addModule(ES.allocateVModule(),
-                                  std::shared_ptr<llvm::Module>()));
+                                  std::unique_ptr<llvm::Module>()));
 
   // Make sure that the calls from ObjectTransformLayer to ObjectLinkingLayer
   // compile.

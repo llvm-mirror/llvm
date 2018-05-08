@@ -225,6 +225,17 @@ public:
     return 0;
   }
 
+  /// Optional extension of isLoadFromStackSlot that returns the number of
+  /// bytes loaded from the stack. This must be implemented if a backend
+  /// supports partial stack slot spills/loads to further disambiguate
+  /// what the load does.
+  virtual unsigned isLoadFromStackSlot(const MachineInstr &MI,
+                                       int &FrameIndex,
+                                       unsigned &MemBytes) const {
+    MemBytes = 0;
+    return isLoadFromStackSlot(MI, FrameIndex);
+  }
+
   /// Check for post-frame ptr elimination stack locations as well.
   /// This uses a heuristic so it isn't reliable for correctness.
   virtual unsigned isLoadFromStackSlotPostFE(const MachineInstr &MI,
@@ -250,6 +261,17 @@ public:
   virtual unsigned isStoreToStackSlot(const MachineInstr &MI,
                                       int &FrameIndex) const {
     return 0;
+  }
+
+  /// Optional extension of isStoreToStackSlot that returns the number of
+  /// bytes stored to the stack. This must be implemented if a backend
+  /// supports partial stack slot spills/loads to further disambiguate
+  /// what the store does.
+  virtual unsigned isStoreToStackSlot(const MachineInstr &MI,
+                                      int &FrameIndex,
+                                      unsigned &MemBytes) const {
+    MemBytes = 0;
+    return isStoreToStackSlot(MI, FrameIndex);
   }
 
   /// Check for post-frame ptr elimination stack locations as well.
@@ -957,6 +979,11 @@ public:
   /// even if it has glue.
   virtual bool canCopyGluedNodeDuringSchedule(SDNode *N) const { return false; }
 
+  /// Remember what registers the specified instruction uses and modifies.
+  virtual void trackRegDefsUses(const MachineInstr &MI, BitVector &ModifiedRegs,
+                                BitVector &UsedRegs,
+                                const TargetRegisterInfo *TRI) const;
+
 protected:
   /// Target-dependent implementation for foldMemoryOperand.
   /// Target-independent code in foldMemoryOperand will
@@ -1569,6 +1596,9 @@ public:
     return false;
   }
 
+  /// Returns true if the target implements the MachineOutliner.
+  virtual bool useMachineOutliner() const { return false; }
+
   /// \brief Describes the number of instructions that it will take to call and
   /// construct a frame for a given outlining candidate.
   struct MachineOutlinerInfo {
@@ -1603,7 +1633,7 @@ public:
           std::pair<MachineBasicBlock::iterator, MachineBasicBlock::iterator>>
           &RepeatedSequenceLocs) const {
     llvm_unreachable(
-        "Target didn't implement TargetInstrInfo::getOutliningOverhead!");
+        "Target didn't implement TargetInstrInfo::getOutliningCandidateInfo!");
   }
 
   /// Represents how an instruction should be mapped by the outliner.

@@ -62,6 +62,8 @@ static Value *SimplifyOrInst(Value *, Value *, const SimplifyQuery &, unsigned);
 static Value *SimplifyXorInst(Value *, Value *, const SimplifyQuery &, unsigned);
 static Value *SimplifyCastInst(unsigned, Value *, Type *,
                                const SimplifyQuery &, unsigned);
+static Value *SimplifyGEPInst(Type *, ArrayRef<Value *>, const SimplifyQuery &,
+                              unsigned);
 
 /// For a boolean type or a vector of boolean type, return false or a vector
 /// with every element false.
@@ -90,7 +92,7 @@ static bool isSameCompare(Value *V, CmpInst::Predicate Pred, Value *LHS,
 }
 
 /// Does the given value dominate the specified phi node?
-static bool ValueDominatesPHI(Value *V, PHINode *P, const DominatorTree *DT) {
+static bool valueDominatesPHI(Value *V, PHINode *P, const DominatorTree *DT) {
   Instruction *I = dyn_cast<Instruction>(V);
   if (!I)
     // Arguments and constants dominate all instructions.
@@ -99,7 +101,7 @@ static bool ValueDominatesPHI(Value *V, PHINode *P, const DominatorTree *DT) {
   // If we are processing instructions (and/or basic blocks) that have not been
   // fully added to a function, the parent nodes may still be null. Simply
   // return the conservative answer in these cases.
-  if (!I->getParent() || !P->getParent() || !I->getParent()->getParent())
+  if (!I->getParent() || !P->getParent() || !I->getFunction())
     return false;
 
   // If we have a DominatorTree then do a precise test.
@@ -108,7 +110,7 @@ static bool ValueDominatesPHI(Value *V, PHINode *P, const DominatorTree *DT) {
 
   // Otherwise, if the instruction is in the entry block and is not an invoke,
   // then it obviously dominates all phi nodes.
-  if (I->getParent() == &I->getParent()->getParent()->getEntryBlock() &&
+  if (I->getParent() == &I->getFunction()->getEntryBlock() &&
       !isa<InvokeInst>(I))
     return true;
 
@@ -443,13 +445,13 @@ static Value *ThreadBinOpOverPHI(Instruction::BinaryOps Opcode, Value *LHS,
   if (isa<PHINode>(LHS)) {
     PI = cast<PHINode>(LHS);
     // Bail out if RHS and the phi may be mutually interdependent due to a loop.
-    if (!ValueDominatesPHI(RHS, PI, Q.DT))
+    if (!valueDominatesPHI(RHS, PI, Q.DT))
       return nullptr;
   } else {
     assert(isa<PHINode>(RHS) && "No PHI instruction operand!");
     PI = cast<PHINode>(RHS);
     // Bail out if LHS and the phi may be mutually interdependent due to a loop.
-    if (!ValueDominatesPHI(LHS, PI, Q.DT))
+    if (!valueDominatesPHI(LHS, PI, Q.DT))
       return nullptr;
   }
 
@@ -490,7 +492,7 @@ static Value *ThreadCmpOverPHI(CmpInst::Predicate Pred, Value *LHS, Value *RHS,
   PHINode *PI = cast<PHINode>(LHS);
 
   // Bail out if RHS and the phi may be mutually interdependent due to a loop.
-  if (!ValueDominatesPHI(RHS, PI, Q.DT))
+  if (!valueDominatesPHI(RHS, PI, Q.DT))
     return nullptr;
 
   // Evaluate the BinOp on the incoming phi values.
@@ -680,14 +682,14 @@ static Value *SimplifySubInst(Value *Op0, Value *Op1, bool isNSW, bool isNUW,
   if (match(Op0, m_Zero())) {
     // 0 - X -> 0 if the sub is NUW.
     if (isNUW)
-      return Op0;
+      return Constant::getNullValue(Op0->getType());
 
     KnownBits Known = computeKnownBits(Op1, Q.DL, 0, Q.AC, Q.CxtI, Q.DT);
     if (Known.Zero.isMaxSignedValue()) {
       // Op1 is either 0 or the minimum signed value. If the sub is NSW, then
       // Op1 must be 0 because negating the minimum signed value is undefined.
       if (isNSW)
-        return Op0;
+        return Constant::getNullValue(Op0->getType());
 
       // 0 - X -> X if X is 0 or the minimum signed value.
       return Op1;
@@ -799,12 +801,9 @@ static Value *SimplifyMulInst(Value *Op0, Value *Op1, const SimplifyQuery &Q,
     return C;
 
   // X * undef -> 0
-  if (match(Op1, m_Undef()))
-    return Constant::getNullValue(Op0->getType());
-
   // X * 0 -> 0
-  if (match(Op1, m_Zero()))
-    return Op1;
+  if (match(Op1, m_CombineOr(m_Undef(), m_Zero())))
+    return Constant::getNullValue(Op0->getType());
 
   // X * 1 -> X
   if (match(Op1, m_One()))
@@ -888,7 +887,7 @@ static Value *simplifyDivRem(Value *Op0, Value *Op1, bool IsDiv) {
   // 0 / X -> 0
   // 0 % X -> 0
   if (match(Op0, m_Zero()))
-    return Op0;
+    return Constant::getNullValue(Op0->getType());
 
   // X / X -> 1
   // X % X -> 0
@@ -1147,7 +1146,7 @@ static Value *SimplifyShift(Instruction::BinaryOps Opcode, Value *Op0,
 
   // 0 shift by X -> 0
   if (match(Op0, m_Zero()))
-    return Op0;
+    return Constant::getNullValue(Op0->getType());
 
   // X shift by 0 -> X
   if (match(Op1, m_Zero()))
@@ -1689,7 +1688,7 @@ static Value *SimplifyAndInst(Value *Op0, Value *Op1, const SimplifyQuery &Q,
 
   // X & 0 = 0
   if (match(Op1, m_Zero()))
-    return Op1;
+    return Constant::getNullValue(Op0->getType());
 
   // X & -1 = X
   if (match(Op1, m_AllOnes()))
@@ -2488,6 +2487,20 @@ static void setLimitsForBinOp(BinaryOperator &BO, APInt &Lower, APInt &Upper) {
 
 static Value *simplifyICmpWithConstant(CmpInst::Predicate Pred, Value *LHS,
                                        Value *RHS) {
+  Type *ITy = GetCompareTy(RHS); // The return type.
+
+  Value *X;
+  // Sign-bit checks can be optimized to true/false after unsigned
+  // floating-point casts:
+  // icmp slt (bitcast (uitofp X)),  0 --> false
+  // icmp sgt (bitcast (uitofp X)), -1 --> true
+  if (match(LHS, m_BitCast(m_UIToFP(m_Value(X))))) {
+    if (Pred == ICmpInst::ICMP_SLT && match(RHS, m_Zero()))
+      return ConstantInt::getFalse(ITy);
+    if (Pred == ICmpInst::ICMP_SGT && match(RHS, m_AllOnes()))
+      return ConstantInt::getTrue(ITy);
+  }
+
   const APInt *C;
   if (!match(RHS, m_APInt(C)))
     return nullptr;
@@ -2495,9 +2508,9 @@ static Value *simplifyICmpWithConstant(CmpInst::Predicate Pred, Value *LHS,
   // Rule out tautological comparisons (eg., ult 0 or uge 0).
   ConstantRange RHS_CR = ConstantRange::makeExactICmpRegion(Pred, *C);
   if (RHS_CR.isEmptySet())
-    return ConstantInt::getFalse(GetCompareTy(RHS));
+    return ConstantInt::getFalse(ITy);
   if (RHS_CR.isFullSet())
-    return ConstantInt::getTrue(GetCompareTy(RHS));
+    return ConstantInt::getTrue(ITy);
 
   // Find the range of possible values for binary operators.
   unsigned Width = C->getBitWidth();
@@ -2515,9 +2528,9 @@ static Value *simplifyICmpWithConstant(CmpInst::Predicate Pred, Value *LHS,
 
   if (!LHS_CR.isFullSet()) {
     if (RHS_CR.contains(LHS_CR))
-      return ConstantInt::getTrue(GetCompareTy(RHS));
+      return ConstantInt::getTrue(ITy);
     if (RHS_CR.inverse().contains(LHS_CR))
-      return ConstantInt::getFalse(GetCompareTy(RHS));
+      return ConstantInt::getFalse(ITy);
   }
 
   return nullptr;
@@ -3054,8 +3067,7 @@ static Value *SimplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
   Type *ITy = GetCompareTy(LHS); // The return type.
 
   // icmp X, X -> true/false
-  // X icmp undef -> true/false.  For example, icmp ugt %X, undef -> false
-  // because X could be 0.
+  // icmp X, undef -> true/false because undef could be X.
   if (LHS == RHS || isa<UndefValue>(RHS))
     return ConstantInt::get(ITy, CmpInst::isTrueWhenEqual(Pred));
 
@@ -3518,6 +3530,17 @@ static const Value *SimplifyWithOpReplaced(Value *V, Value *Op, Value *RepOp,
     }
   }
 
+  // Same for GEPs.
+  if (auto *GEP = dyn_cast<GetElementPtrInst>(I)) {
+    if (MaxRecurse) {
+      SmallVector<Value *, 8> NewOps(GEP->getNumOperands());
+      transform(GEP->operands(), NewOps.begin(),
+                [&](Value *V) { return V == Op ? RepOp : V; });
+      return SimplifyGEPInst(GEP->getSourceElementType(), NewOps, Q,
+                             MaxRecurse - 1);
+    }
+  }
+
   // TODO: We could hand off more cases to instsimplify here.
 
   // If all operands are constant after substituting Op for RepOp then we can
@@ -3723,7 +3746,7 @@ static Value *SimplifyGEPInst(Type *SrcTy, ArrayRef<Value *> Ops,
 
   if (Ops.size() == 2) {
     // getelementptr P, 0 -> P.
-    if (match(Ops[1], m_Zero()))
+    if (match(Ops[1], m_Zero()) && Ops[0]->getType() == GEPTy)
       return Ops[0];
 
     Type *Ty = SrcTy;
@@ -3732,7 +3755,7 @@ static Value *SimplifyGEPInst(Type *SrcTy, ArrayRef<Value *> Ops,
       uint64_t C;
       uint64_t TyAllocSize = Q.DL.getTypeAllocSize(Ty);
       // getelementptr P, N -> P if P points to a type of zero size.
-      if (TyAllocSize == 0)
+      if (TyAllocSize == 0 && Ops[0]->getType() == GEPTy)
         return Ops[0];
 
       // The following transforms are only safe if the ptrtoint cast
@@ -3972,7 +3995,7 @@ static Value *SimplifyPHINode(PHINode *PN, const SimplifyQuery &Q) {
   // instruction, we cannot return X as the result of the PHI node unless it
   // dominates the PHI block.
   if (HasUndefInput)
-    return ValueDominatesPHI(CommonValue, PN, Q.DT) ? CommonValue : nullptr;
+    return valueDominatesPHI(CommonValue, PN, Q.DT) ? CommonValue : nullptr;
 
   return CommonValue;
 }
@@ -4149,6 +4172,28 @@ Value *llvm::SimplifyShuffleVectorInst(Value *Op0, Value *Op1, Constant *Mask,
   return ::SimplifyShuffleVectorInst(Op0, Op1, Mask, RetTy, Q, RecursionLimit);
 }
 
+static Constant *propagateNaN(Constant *In) {
+  // If the input is a vector with undef elements, just return a default NaN.
+  if (!In->isNaN())
+    return ConstantFP::getNaN(In->getType());
+
+  // Propagate the existing NaN constant when possible.
+  // TODO: Should we quiet a signaling NaN?
+  return In;
+}
+
+static Constant *simplifyFPBinop(Value *Op0, Value *Op1) {
+  if (isa<UndefValue>(Op0) || isa<UndefValue>(Op1))
+    return ConstantFP::getNaN(Op0->getType());
+
+  if (match(Op0, m_NaN()))
+    return propagateNaN(cast<Constant>(Op0));
+  if (match(Op1, m_NaN()))
+    return propagateNaN(cast<Constant>(Op1));
+
+  return nullptr;
+}
+
 /// Given operands for an FAdd, see if we can fold the result.  If not, this
 /// returns null.
 static Value *SimplifyFAddInst(Value *Op0, Value *Op1, FastMathFlags FMF,
@@ -4156,29 +4201,28 @@ static Value *SimplifyFAddInst(Value *Op0, Value *Op1, FastMathFlags FMF,
   if (Constant *C = foldOrCommuteConstant(Instruction::FAdd, Op0, Op1, Q))
     return C;
 
+  if (Constant *C = simplifyFPBinop(Op0, Op1))
+    return C;
+
   // fadd X, -0 ==> X
-  if (match(Op1, m_NegZero()))
+  if (match(Op1, m_NegZeroFP()))
     return Op0;
 
   // fadd X, 0 ==> X, when we know X is not -0
-  if (match(Op1, m_Zero()) &&
+  if (match(Op1, m_PosZeroFP()) &&
       (FMF.noSignedZeros() || CannotBeNegativeZero(Op0, Q.TLI)))
     return Op0;
 
-  // fadd [nnan ninf] X, (fsub [nnan ninf] 0, X) ==> 0
-  //   where nnan and ninf have to occur at least once somewhere in this
-  //   expression
-  Value *SubOp = nullptr;
-  if (match(Op1, m_FSub(m_AnyZero(), m_Specific(Op0))))
-    SubOp = Op1;
-  else if (match(Op0, m_FSub(m_AnyZero(), m_Specific(Op1))))
-    SubOp = Op0;
-  if (SubOp) {
-    Instruction *FSub = cast<Instruction>(SubOp);
-    if ((FMF.noNaNs() || FSub->hasNoNaNs()) &&
-        (FMF.noInfs() || FSub->hasNoInfs()))
-      return Constant::getNullValue(Op0->getType());
-  }
+  // With nnan: (+/-0.0 - X) + X --> 0.0 (and commuted variant)
+  // We don't have to explicitly exclude infinities (ninf): INF + -INF == NaN.
+  // Negative zeros are allowed because we always end up with positive zero:
+  // X = -0.0: (-0.0 - (-0.0)) + (-0.0) == ( 0.0) + (-0.0) == 0.0
+  // X = -0.0: ( 0.0 - (-0.0)) + (-0.0) == ( 0.0) + (-0.0) == 0.0
+  // X =  0.0: (-0.0 - ( 0.0)) + ( 0.0) == (-0.0) + ( 0.0) == 0.0
+  // X =  0.0: ( 0.0 - ( 0.0)) + ( 0.0) == ( 0.0) + ( 0.0) == 0.0
+  if (FMF.noNaNs() && (match(Op0, m_FSub(m_AnyZeroFP(), m_Specific(Op1))) ||
+                       match(Op1, m_FSub(m_AnyZeroFP(), m_Specific(Op0)))))
+    return ConstantFP::getNullValue(Op0->getType());
 
   return nullptr;
 }
@@ -4190,23 +4234,27 @@ static Value *SimplifyFSubInst(Value *Op0, Value *Op1, FastMathFlags FMF,
   if (Constant *C = foldOrCommuteConstant(Instruction::FSub, Op0, Op1, Q))
     return C;
 
-  // fsub X, 0 ==> X
-  if (match(Op1, m_Zero()))
+  if (Constant *C = simplifyFPBinop(Op0, Op1))
+    return C;
+
+  // fsub X, +0 ==> X
+  if (match(Op1, m_PosZeroFP()))
     return Op0;
 
   // fsub X, -0 ==> X, when we know X is not -0
-  if (match(Op1, m_NegZero()) &&
+  if (match(Op1, m_NegZeroFP()) &&
       (FMF.noSignedZeros() || CannotBeNegativeZero(Op0, Q.TLI)))
     return Op0;
 
   // fsub -0.0, (fsub -0.0, X) ==> X
   Value *X;
-  if (match(Op0, m_NegZero()) && match(Op1, m_FSub(m_NegZero(), m_Value(X))))
+  if (match(Op0, m_NegZeroFP()) &&
+      match(Op1, m_FSub(m_NegZeroFP(), m_Value(X))))
     return X;
 
   // fsub 0.0, (fsub 0.0, X) ==> X if signed zeros are ignored.
-  if (FMF.noSignedZeros() && match(Op0, m_AnyZero()) &&
-      match(Op1, m_FSub(m_AnyZero(), m_Value(X))))
+  if (FMF.noSignedZeros() && match(Op0, m_AnyZeroFP()) &&
+      match(Op1, m_FSub(m_AnyZeroFP(), m_Value(X))))
     return X;
 
   // fsub nnan x, x ==> 0.0
@@ -4222,18 +4270,24 @@ static Value *SimplifyFMulInst(Value *Op0, Value *Op1, FastMathFlags FMF,
   if (Constant *C = foldOrCommuteConstant(Instruction::FMul, Op0, Op1, Q))
     return C;
 
+  if (Constant *C = simplifyFPBinop(Op0, Op1))
+    return C;
+
   // fmul X, 1.0 ==> X
   if (match(Op1, m_FPOne()))
     return Op0;
 
   // fmul nnan nsz X, 0 ==> 0
-  if (FMF.noNaNs() && FMF.noSignedZeros() && match(Op1, m_AnyZero()))
-    return Op1;
+  if (FMF.noNaNs() && FMF.noSignedZeros() && match(Op1, m_AnyZeroFP()))
+    return ConstantFP::getNullValue(Op0->getType());
 
-  // sqrt(X) * sqrt(X) --> X
+  // sqrt(X) * sqrt(X) --> X, if we can:
+  // 1. Remove the intermediate rounding (reassociate).
+  // 2. Ignore non-zero negative numbers because sqrt would produce NAN.
+  // 3. Ignore -0.0 because sqrt(-0.0) == -0.0, but -0.0 * -0.0 == 0.0.
   Value *X;
-  if (FMF.isFast() && Op0 == Op1 &&
-      match(Op0, m_Intrinsic<Intrinsic::sqrt>(m_Value(X))))
+  if (Op0 == Op1 && match(Op0, m_Intrinsic<Intrinsic::sqrt>(m_Value(X))) &&
+      FMF.allowReassoc() && FMF.noNaNs() && FMF.noSignedZeros())
     return X;
 
   return nullptr;
@@ -4260,13 +4314,8 @@ static Value *SimplifyFDivInst(Value *Op0, Value *Op1, FastMathFlags FMF,
   if (Constant *C = foldOrCommuteConstant(Instruction::FDiv, Op0, Op1, Q))
     return C;
 
-  // undef / X -> undef    (the undef could be a snan).
-  if (match(Op0, m_Undef()))
-    return Op0;
-
-  // X / undef -> undef
-  if (match(Op1, m_Undef()))
-    return Op1;
+  if (Constant *C = simplifyFPBinop(Op0, Op1))
+    return C;
 
   // X / 1.0 -> X
   if (match(Op1, m_FPOne()))
@@ -4275,8 +4324,8 @@ static Value *SimplifyFDivInst(Value *Op0, Value *Op1, FastMathFlags FMF,
   // 0 / X -> 0
   // Requires that NaNs are off (X could be zero) and signed zeroes are
   // ignored (X could be positive or negative, so the output sign is unknown).
-  if (FMF.noNaNs() && FMF.noSignedZeros() && match(Op0, m_AnyZero()))
-    return Op0;
+  if (FMF.noNaNs() && FMF.noSignedZeros() && match(Op0, m_AnyZeroFP()))
+    return ConstantFP::getNullValue(Op0->getType());
 
   if (FMF.noNaNs()) {
     // X / X -> 1.0 is legal when NaNs are ignored.
@@ -4312,19 +4361,20 @@ static Value *SimplifyFRemInst(Value *Op0, Value *Op1, FastMathFlags FMF,
   if (Constant *C = foldOrCommuteConstant(Instruction::FRem, Op0, Op1, Q))
     return C;
 
-  // undef % X -> undef    (the undef could be a snan).
-  if (match(Op0, m_Undef()))
-    return Op0;
+  if (Constant *C = simplifyFPBinop(Op0, Op1))
+    return C;
 
-  // X % undef -> undef
-  if (match(Op1, m_Undef()))
-    return Op1;
-
-  // 0 % X -> 0
-  // Requires that NaNs are off (X could be zero) and signed zeroes are
-  // ignored (X could be positive or negative, so the output sign is unknown).
-  if (FMF.noNaNs() && FMF.noSignedZeros() && match(Op0, m_AnyZero()))
-    return Op0;
+  // Unlike fdiv, the result of frem always matches the sign of the dividend.
+  // The constant match may include undef elements in a vector, so return a full
+  // zero constant as the result.
+  if (FMF.noNaNs()) {
+    // +0 % X -> 0
+    if (match(Op0, m_PosZeroFP()))
+      return ConstantFP::getNullValue(Op0->getType());
+    // -0 % X -> -0
+    if (match(Op0, m_NegZeroFP()))
+      return ConstantFP::getNegativeZero(Op0->getType());
+  }
 
   return nullptr;
 }

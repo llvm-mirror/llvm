@@ -74,7 +74,7 @@ struct WasmGlobal {
   uint32_t Index;
   WasmGlobalType Type;
   WasmInitExpr InitExpr;
-  StringRef Name; // from the "linking" or "names" section
+  StringRef SymbolName; // from the "linking" section
 };
 
 struct WasmImport {
@@ -100,18 +100,19 @@ struct WasmFunction {
   ArrayRef<uint8_t> Body;
   uint32_t CodeSectionOffset;
   uint32_t Size;
-  StringRef Name; // from the "linking" or "names" section
-  StringRef Comdat; // from the "comdat info" section
+  StringRef SymbolName; // from the "linking" section
+  StringRef DebugName; // from the "name" section
+  uint32_t Comdat; // from the "comdat info" section
 };
 
 struct WasmDataSegment {
   uint32_t MemoryIndex;
   WasmInitExpr Offset;
   ArrayRef<uint8_t> Content;
-  StringRef Name;
+  StringRef Name; // from the "segment info" section
   uint32_t Alignment;
   uint32_t Flags;
-  StringRef Comdat; // from the "comdat info" section
+  uint32_t Comdat; // from the "comdat info" section
 };
 
 struct WasmElemSegment {
@@ -144,8 +145,9 @@ struct WasmSymbolInfo {
   StringRef Name;
   uint8_t Kind;
   uint32_t Flags;
+  StringRef Module; // For undefined symbols the module name of the import
   union {
-    // For function or global symbols, the index in function of global index
+    // For function or global symbols, the index in function or global index
     // space.
     uint32_t ElementIndex;
     // For a data symbols, the address of the data relative to segment.
@@ -160,6 +162,7 @@ struct WasmFunctionName {
 
 struct WasmLinkingData {
   std::vector<WasmInitFunc> InitFunctions;
+  std::vector<StringRef> Comdats;
   std::vector<WasmSymbolInfo> SymbolTable;
 };
 
@@ -185,6 +188,7 @@ enum : unsigned {
   WASM_TYPE_F32 = 0x7D,
   WASM_TYPE_F64 = 0x7C,
   WASM_TYPE_ANYFUNC = 0x70,
+  WASM_TYPE_EXCEPT_REF = 0x68,
   WASM_TYPE_FUNC = 0x60,
   WASM_TYPE_NORESULT = 0x40, // for blocks with no result values
 };
@@ -217,6 +221,7 @@ enum class ValType {
   I64 = WASM_TYPE_I64,
   F32 = WASM_TYPE_F32,
   F64 = WASM_TYPE_F64,
+  EXCEPT_REF = WASM_TYPE_EXCEPT_REF,
 };
 
 // Kind codes used in the custom "name" section
@@ -263,6 +268,23 @@ enum : unsigned {
 };
 
 #undef WASM_RELOC
+
+// Useful comparison operators
+inline bool operator==(const WasmSignature &LHS, const WasmSignature &RHS) {
+  return LHS.ReturnType == RHS.ReturnType && LHS.ParamTypes == RHS.ParamTypes;
+}
+
+inline bool operator!=(const WasmSignature &LHS, const WasmSignature &RHS) {
+  return !(LHS == RHS);
+}
+
+inline bool operator==(const WasmGlobalType &LHS, const WasmGlobalType &RHS) {
+  return LHS.Type == RHS.Type && LHS.Mutable == RHS.Mutable;
+}
+
+inline bool operator!=(const WasmGlobalType &LHS, const WasmGlobalType &RHS) {
+  return !(LHS == RHS);
+}
 
 } // end namespace wasm
 } // end namespace llvm

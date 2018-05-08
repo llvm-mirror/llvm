@@ -43,8 +43,8 @@ inline OneUse_match<SubPat> m_OneUse(const SubPat &SP) {
 }
 
 struct ConstantMatch {
-  uint64_t &CR;
-  ConstantMatch(uint64_t &C) : CR(C) {}
+  int64_t &CR;
+  ConstantMatch(int64_t &C) : CR(C) {}
   bool match(const MachineRegisterInfo &MRI, unsigned Reg) {
     if (auto MaybeCst = getConstantVRegVal(Reg, MRI)) {
       CR = *MaybeCst;
@@ -54,7 +54,7 @@ struct ConstantMatch {
   }
 };
 
-inline ConstantMatch m_ICst(uint64_t &Cst) { return ConstantMatch(Cst); }
+inline ConstantMatch m_ICst(int64_t &Cst) { return ConstantMatch(Cst); }
 
 // TODO: Rework this for different kinds of MachineOperand.
 // Currently assumes the Src for a match is a register.
@@ -142,6 +142,16 @@ template <> struct bind_helper<LLT> {
   }
 };
 
+template <> struct bind_helper<const ConstantFP *> {
+  static bool bind(const MachineRegisterInfo &MRI, const ConstantFP *&F,
+                   unsigned Reg) {
+    F = getConstantFPVRegVal(Reg, MRI);
+    if (F)
+      return true;
+    return false;
+  }
+};
+
 template <typename Class> struct bind_ty {
   Class &VR;
 
@@ -155,6 +165,9 @@ template <typename Class> struct bind_ty {
 inline bind_ty<unsigned> m_Reg(unsigned &R) { return R; }
 inline bind_ty<MachineInstr *> m_MInstr(MachineInstr *&MI) { return MI; }
 inline bind_ty<LLT> m_Type(LLT &Ty) { return Ty; }
+
+// Helper for matching G_FCONSTANT
+inline bind_ty<const ConstantFP *> m_GFCst(const ConstantFP *&C) { return C; }
 
 // General helper for all the binary generic MI such as G_ADD/G_SUB etc
 template <typename LHS_P, typename RHS_P, unsigned Opcode,

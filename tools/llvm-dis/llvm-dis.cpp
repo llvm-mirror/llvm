@@ -16,24 +16,23 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/IR/LLVMContext.h"
 #include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/IR/AssemblyAnnotationWriter.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/DiagnosticPrinter.h"
 #include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FormattedStream.h"
-#include "llvm/Support/ManagedStatic.h"
+#include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/MemoryBuffer.h"
-#include "llvm/Support/PrettyStackTrace.h"
-#include "llvm/Support/Signals.h"
 #include "llvm/Support/ToolOutputFile.h"
+#include "llvm/Support/WithColor.h"
 #include <system_error>
 using namespace llvm;
 
@@ -129,10 +128,10 @@ struct LLVMDisDiagnosticHandler : public DiagnosticHandler {
     raw_ostream &OS = errs();
     OS << Prefix << ": ";
     switch (DI.getSeverity()) {
-      case DS_Error: OS << "error: "; break;
-      case DS_Warning: OS << "warning: "; break;
+      case DS_Error: WithColor::error(OS); break;
+      case DS_Warning: WithColor::warning(OS); break;
       case DS_Remark: OS << "remark: "; break;
-      case DS_Note: OS << "note: "; break;
+      case DS_Note: WithColor::note(OS); break;
     }
 
     DiagnosticPrinterRawOStream DP(OS);
@@ -162,14 +161,11 @@ static std::unique_ptr<Module> openInputFile(LLVMContext &Context) {
 }
 
 int main(int argc, char **argv) {
-  // Print a stack trace if we signal out.
-  sys::PrintStackTraceOnErrorSignal(argv[0]);
-  PrettyStackTraceProgram X(argc, argv);
+  InitLLVM X(argc, argv);
 
   ExitOnErr.setBanner(std::string(argv[0]) + ": error: ");
 
   LLVMContext Context;
-  llvm_shutdown_obj Y;  // Call llvm_shutdown() on exit.
   Context.setDiagnosticHandler(
       llvm::make_unique<LLVMDisDiagnosticHandler>(argv[0]));
   cl::ParseCommandLineOptions(argc, argv, "llvm .bc -> .ll disassembler\n");

@@ -50,6 +50,7 @@ struct SectionBookkeeping {
   uint64_t SizeOffset;
   // Where the contents of the section starts (after the header).
   uint64_t ContentsOffset;
+  uint32_t Index;
 };
 
 // The signature of a wasm function, in a struct capable of being used as a
@@ -167,6 +168,14 @@ struct WasmRelocationEntry {
 #endif
 };
 
+struct WasmCustomSection {
+  StringRef Name;
+  const SmallVectorImpl<char> &Contents;
+
+  WasmCustomSection(StringRef Name, const SmallVectorImpl<char> &Contents)
+      : Name(Name), Contents(Contents) {}
+};
+
 #if !defined(NDEBUG)
 raw_ostream &operator<<(raw_ostream &OS, const WasmRelocationEntry &Rel) {
   Rel.print(OS);
@@ -180,9 +189,11 @@ class WasmObjectWriter : public MCObjectWriter {
 
   // Relocations for fixing up references in the code section.
   std::vector<WasmRelocationEntry> CodeRelocations;
+  uint32_t CodeSectionIndex;
 
   // Relocations for fixing up references in the data section.
   std::vector<WasmRelocationEntry> DataRelocations;
+  uint32_t DataSectionIndex;
 
   // Index values to use for fixing up call_indirect type indices.
   // Maps function symbols to the index of the type of the function
@@ -202,8 +213,10 @@ class WasmObjectWriter : public MCObjectWriter {
   SmallVector<WasmFunctionType, 4> FunctionTypes;
   SmallVector<WasmGlobal, 4> Globals;
   SmallVector<WasmDataSegment, 4> DataSegments;
+  std::vector<WasmCustomSection> CustomSections;
   unsigned NumFunctionImports = 0;
   unsigned NumGlobalImports = 0;
+  uint32_t SectionCount = 0;
 
   // TargetObjectWriter wrappers.
   bool is64Bit() const { return TargetObjectWriter->is64Bit(); }
@@ -211,8 +224,8 @@ class WasmObjectWriter : public MCObjectWriter {
     return TargetObjectWriter->getRelocType(Target, Fixup);
   }
 
-  void startSection(SectionBookkeeping &Section, unsigned SectionId,
-                    const char *Name = nullptr);
+  void startSection(SectionBookkeeping &Section, unsigned SectionId);
+  void startCustomSection(SectionBookkeeping &Section, StringRef Name);
   void endSection(SectionBookkeeping &Section);
 
 public:
@@ -271,21 +284,21 @@ private:
   void writeCodeSection(const MCAssembler &Asm, const MCAsmLayout &Layout,
                         ArrayRef<WasmFunction> Functions);
   void writeDataSection();
-  void writeCodeRelocSection();
-  void writeDataRelocSection();
+  void writeRelocSection(uint32_t SectionIndex, StringRef Name,
+                         ArrayRef<WasmRelocationEntry> Relocations);
   void writeLinkingMetaDataSection(
       ArrayRef<wasm::WasmSymbolInfo> SymbolInfos,
       ArrayRef<std::pair<uint16_t, uint32_t>> InitFuncs,
       const std::map<StringRef, std::vector<WasmComdatEntry>> &Comdats);
+  void writeUserCustomSections(ArrayRef<WasmCustomSection> CustomSections);
 
   uint32_t getProvisionalValue(const WasmRelocationEntry &RelEntry);
   void applyRelocations(ArrayRef<WasmRelocationEntry> Relocations,
                         uint64_t ContentsOffset);
 
-  void writeRelocations(ArrayRef<WasmRelocationEntry> Relocations);
   uint32_t getRelocationIndexValue(const WasmRelocationEntry &RelEntry);
-  uint32_t getFunctionType(const MCSymbolWasm& Symbol);
-  uint32_t registerFunctionType(const MCSymbolWasm& Symbol);
+  uint32_t getFunctionType(const MCSymbolWasm &Symbol);
+  uint32_t registerFunctionType(const MCSymbolWasm &Symbol);
 };
 
 } // end anonymous namespace
@@ -294,12 +307,8 @@ WasmObjectWriter::~WasmObjectWriter() {}
 
 // Write out a section header and a patchable section size field.
 void WasmObjectWriter::startSection(SectionBookkeeping &Section,
-                                    unsigned SectionId,
-                                    const char *Name) {
-  assert((Name != nullptr) == (SectionId == wasm::WASM_SEC_CUSTOM) &&
-         "Only custom sections can have names");
-
-  DEBUG(dbgs() << "startSection " << SectionId << ": " << Name << "\n");
+                                    unsigned SectionId) {
+  DEBUG(dbgs() << "startSection " << SectionId << "\n");
   write8(SectionId);
 
   Section.SizeOffset = getStream().tell();
@@ -310,12 +319,15 @@ void WasmObjectWriter::startSection(SectionBookkeeping &Section,
 
   // The position where the section starts, for measuring its size.
   Section.ContentsOffset = getStream().tell();
+  Section.Index = SectionCount++;
+}
 
+void WasmObjectWriter::startCustomSection(SectionBookkeeping &Section,
+                                          StringRef Name) {
+  DEBUG(dbgs() << "startCustomSection " << Name << "\n");
+  startSection(Section, wasm::WASM_SEC_CUSTOM);
   // Custom sections in wasm also have a string identifier.
-  if (SectionId == wasm::WASM_SEC_CUSTOM) {
-    assert(Name);
-    writeString(StringRef(Name));
-  }
+  writeString(Name);
 }
 
 // Now that the section is complete and we know how big it is, patch up the
@@ -614,25 +626,6 @@ void WasmObjectWriter::applyRelocations(
   }
 }
 
-// Write out the portions of the relocation records that the linker will
-// need to handle.
-void WasmObjectWriter::writeRelocations(
-    ArrayRef<WasmRelocationEntry> Relocations) {
-  raw_pwrite_stream &Stream = getStream();
-  for (const WasmRelocationEntry& RelEntry : Relocations) {
-
-    uint64_t Offset = RelEntry.Offset +
-                      RelEntry.FixupSection->getSectionOffset();
-    uint32_t Index = getRelocationIndexValue(RelEntry);
-
-    write8(RelEntry.Type);
-    encodeULEB128(Offset, Stream);
-    encodeULEB128(Index, Stream);
-    if (RelEntry.hasAddend())
-      encodeSLEB128(RelEntry.Addend, Stream);
-  }
-}
-
 void WasmObjectWriter::writeTypeSection(
     ArrayRef<WasmFunctionType> FunctionTypes) {
   if (FunctionTypes.empty())
@@ -779,6 +772,7 @@ void WasmObjectWriter::writeCodeSection(const MCAssembler &Asm,
 
   SectionBookkeeping Section;
   startSection(Section, wasm::WASM_SEC_CODE);
+  CodeSectionIndex = Section.Index;
 
   encodeULEB128(Functions.size(), getStream());
 
@@ -806,6 +800,7 @@ void WasmObjectWriter::writeDataSection() {
 
   SectionBookkeeping Section;
   startSection(Section, wasm::WASM_SEC_DATA);
+  DataSectionIndex = Section.Index;
 
   encodeULEB128(DataSegments.size(), getStream()); // count
 
@@ -825,38 +820,33 @@ void WasmObjectWriter::writeDataSection() {
   endSection(Section);
 }
 
-void WasmObjectWriter::writeCodeRelocSection() {
+void WasmObjectWriter::writeRelocSection(
+    uint32_t SectionIndex, StringRef Name,
+    ArrayRef<WasmRelocationEntry> Relocations) {
   // See: https://github.com/WebAssembly/tool-conventions/blob/master/Linking.md
   // for descriptions of the reloc sections.
 
-  if (CodeRelocations.empty())
+  if (Relocations.empty())
     return;
 
   SectionBookkeeping Section;
-  startSection(Section, wasm::WASM_SEC_CUSTOM, "reloc.CODE");
+  startCustomSection(Section, std::string("reloc.") + Name.str());
 
-  encodeULEB128(wasm::WASM_SEC_CODE, getStream());
-  encodeULEB128(CodeRelocations.size(), getStream());
+  raw_pwrite_stream &Stream = getStream();
 
-  writeRelocations(CodeRelocations);
+  encodeULEB128(SectionIndex, Stream);
+  encodeULEB128(Relocations.size(), Stream);
+  for (const WasmRelocationEntry& RelEntry : Relocations) {
+    uint64_t Offset = RelEntry.Offset +
+                      RelEntry.FixupSection->getSectionOffset();
+    uint32_t Index = getRelocationIndexValue(RelEntry);
 
-  endSection(Section);
-}
-
-void WasmObjectWriter::writeDataRelocSection() {
-  // See: https://github.com/WebAssembly/tool-conventions/blob/master/Linking.md
-  // for descriptions of the reloc sections.
-
-  if (DataRelocations.empty())
-    return;
-
-  SectionBookkeeping Section;
-  startSection(Section, wasm::WASM_SEC_CUSTOM, "reloc.DATA");
-
-  encodeULEB128(wasm::WASM_SEC_DATA, getStream());
-  encodeULEB128(DataRelocations.size(), getStream());
-
-  writeRelocations(DataRelocations);
+    write8(RelEntry.Type);
+    encodeULEB128(Offset, Stream);
+    encodeULEB128(Index, Stream);
+    if (RelEntry.hasAddend())
+      encodeSLEB128(RelEntry.Addend, Stream);
+  }
 
   endSection(Section);
 }
@@ -866,7 +856,7 @@ void WasmObjectWriter::writeLinkingMetaDataSection(
     ArrayRef<std::pair<uint16_t, uint32_t>> InitFuncs,
     const std::map<StringRef, std::vector<WasmComdatEntry>> &Comdats) {
   SectionBookkeeping Section;
-  startSection(Section, wasm::WASM_SEC_CUSTOM, "linking");
+  startCustomSection(Section, "linking");
   SectionBookkeeping SubSection;
 
   if (SymbolInfos.size() != 0) {
@@ -934,6 +924,16 @@ void WasmObjectWriter::writeLinkingMetaDataSection(
   }
 
   endSection(Section);
+}
+
+void WasmObjectWriter::writeUserCustomSections(
+    ArrayRef<WasmCustomSection> CustomSections) {
+  for (const auto &CustomSection : CustomSections) {
+    SectionBookkeeping Section;
+    startCustomSection(Section, CustomSection.Name);
+    writeBytes(CustomSection.Contents);
+    endSection(Section);
+  }
 }
 
 uint32_t WasmObjectWriter::getFunctionType(const MCSymbolWasm& Symbol) {
@@ -1024,6 +1024,9 @@ void WasmObjectWriter::writeObject(MCAssembler &Asm,
         Imports.push_back(Import);
         WasmIndices[&WS] = NumFunctionImports++;
       } else if (WS.isGlobal()) {
+        if (WS.isWeak())
+          report_fatal_error("undefined global symbol cannot be weak");
+
         wasm::WasmImport Import;
         Import.Module = WS.getModuleName();
         Import.Field = WS.getName();
@@ -1038,6 +1041,26 @@ void WasmObjectWriter::writeObject(MCAssembler &Asm,
   // Populate DataSegments, which must be done before populating DataLocations.
   for (MCSection &Sec : Asm) {
     auto &Section = static_cast<MCSectionWasm &>(Sec);
+
+    if (cast<MCSectionWasm>(Sec).getSectionName().startswith(
+            ".custom_section.")) {
+      if (Section.getFragmentList().empty())
+        continue;
+      if (Section.getFragmentList().size() != 1)
+        report_fatal_error(
+            "only one .custom_section section fragment supported");
+      const MCFragment &Frag = *Section.begin();
+      if (Frag.hasInstructions() || Frag.getKind() != MCFragment::FT_Data)
+        report_fatal_error("only data supported in .custom_section section");
+      const auto &DataFrag = cast<MCDataFragment>(Frag);
+      if (!DataFrag.getFixups().empty())
+        report_fatal_error("fixups not supported in .custom_section section");
+      StringRef UserName = Section.getSectionName().substr(16);
+      const SmallVectorImpl<char> &Contents = DataFrag.getContents();
+      CustomSections.push_back(WasmCustomSection(UserName, Contents));
+      continue;
+    }
+
     if (!Section.isWasmData())
       continue;
 
@@ -1307,9 +1330,10 @@ void WasmObjectWriter::writeObject(MCAssembler &Asm,
   writeElemSection(TableElems);
   writeCodeSection(Asm, Layout, Functions);
   writeDataSection();
+  writeUserCustomSections(CustomSections);
   writeLinkingMetaDataSection(SymbolInfos, InitFuncs, Comdats);
-  writeCodeRelocSection();
-  writeDataRelocSection();
+  writeRelocSection(CodeSectionIndex, "CODE", CodeRelocations);
+  writeRelocSection(DataSectionIndex, "DATA", DataRelocations);
 
   // TODO: Translate the .comment section to the output.
   // TODO: Translate debug sections to the output.

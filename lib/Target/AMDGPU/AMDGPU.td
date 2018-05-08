@@ -250,6 +250,12 @@ def FeatureScalarStores : SubtargetFeature<"scalar-stores",
   "Has store scalar memory instructions"
 >;
 
+def FeatureScalarAtomics : SubtargetFeature<"scalar-atomics",
+  "HasScalarAtomics",
+  "true",
+  "Has atomic scalar memory instructions"
+>;
+
 def FeatureSDWA : SubtargetFeature<"sdwa",
   "HasSDWA",
   "true",
@@ -420,6 +426,12 @@ def FeatureEnableSIScheduler : SubtargetFeature<"si-scheduler",
   "Enable SI Machine Scheduler"
 >;
 
+def FeatureEnableDS128 : SubtargetFeature<"enable-ds128",
+  "EnableDS128",
+  "true",
+  "Use ds_{read|write}_b128"
+>;
+
 // Unless +-flat-for-global is specified, turn on FlatForGlobal for
 // all OS-es on VI and newer hardware to avoid assertion failures due
 // to missing ADDR64 variants of MUBUF instructions.
@@ -510,7 +522,7 @@ def FeatureGFX9 : SubtargetFeatureGeneration<"GFX9",
    FeatureFastFMAF32, FeatureDPP, FeatureIntClamp,
    FeatureSDWA, FeatureSDWAOmod, FeatureSDWAScalar, FeatureSDWASdst,
    FeatureFlatInstOffsets, FeatureFlatGlobalInsts, FeatureFlatScratchInsts,
-   FeatureAddNoCarryInsts
+   FeatureAddNoCarryInsts, FeatureScalarAtomics
   ]
 >;
 
@@ -766,6 +778,9 @@ def HasIntClamp : Predicate<"Subtarget->hasIntClamp()">,
 def HasMadMixInsts : Predicate<"Subtarget->hasMadMixInsts()">,
   AssemblerPredicate<"FeatureMadMixInsts">;
 
+def HasScalarAtomics : Predicate<"Subtarget->hasScalarAtomics()">,
+  AssemblerPredicate<"FeatureScalarAtomics">;
+
 def EnableLateCFGStructurize : Predicate<
   "EnableLateStructurizeCFG">;
 
@@ -801,3 +816,4 @@ include "AMDGPURegisterInfo.td"
 include "AMDGPURegisterBanks.td"
 include "AMDGPUInstructions.td"
 include "AMDGPUCallingConv.td"
+include "AMDGPUSearchableTables.td"

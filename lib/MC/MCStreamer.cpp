@@ -199,6 +199,15 @@ MCStreamer::tryEmitDwarfFileDirective(unsigned FileNo, StringRef Directory,
                                    Source, CUID);
 }
 
+void MCStreamer::emitDwarfFile0Directive(StringRef Directory,
+                                         StringRef Filename,
+                                         MD5::MD5Result *Checksum,
+                                         Optional<StringRef> Source,
+                                         unsigned CUID) {
+  getContext().setMCLineTableRootFile(CUID, Directory, Filename, Checksum,
+                                      Source);
+}
+
 void MCStreamer::EmitDwarfLocDirective(unsigned FileNo, unsigned Line,
                                        unsigned Column, unsigned Flags,
                                        unsigned Isa,
@@ -929,7 +938,7 @@ void MCStreamer::EmitCOFFSymbolType(int Type) {
   llvm_unreachable("this directive only supported on COFF targets");
 }
 void MCStreamer::emitELFSize(MCSymbol *Symbol, const MCExpr *Value) {}
-void MCStreamer::emitELFSymverDirective(MCSymbol *Alias,
+void MCStreamer::emitELFSymverDirective(StringRef AliasName,
                                         const MCSymbol *Aliasee) {}
 void MCStreamer::EmitLocalCommonSymbol(MCSymbol *Symbol, uint64_t Size,
                                        unsigned ByteAlignment) {}

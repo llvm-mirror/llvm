@@ -30,6 +30,7 @@
 #include "llvm/Analysis/Loads.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
+#include "llvm/Analysis/Utils/Local.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
@@ -64,7 +65,6 @@
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Cloning.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/SSAUpdater.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
 #include <algorithm>
@@ -357,67 +357,57 @@ bool JumpThreadingPass::runImpl(Function &F, TargetLibraryInfo *TLI_,
     BFI = std::move(BFI_);
   }
 
-  // Remove unreachable blocks from function as they may result in infinite
-  // loop. We do threading if we found something profitable. Jump threading a
-  // branch can create other opportunities. If these opportunities form a cycle
-  // i.e. if any jump threading is undoing previous threading in the path, then
-  // we will loop forever. We take care of this issue by not jump threading for
-  // back edges. This works for normal cases but not for unreachable blocks as
-  // they may have cycle with no back edge.
-  bool EverChanged = false;
-  EverChanged |= removeUnreachableBlocks(F, LVI, DDT);
+  // JumpThreading must not processes blocks unreachable from entry. It's a
+  // waste of compute time and can potentially lead to hangs.
+  SmallPtrSet<BasicBlock *, 16> Unreachable;
+  DominatorTree &DT = DDT->flush();
+  for (auto &BB : F)
+    if (!DT.isReachableFromEntry(&BB))
+      Unreachable.insert(&BB);
 
   FindLoopHeaders(F);
 
+  bool EverChanged = false;
   bool Changed;
   do {
     Changed = false;
-    for (Function::iterator I = F.begin(), E = F.end(); I != E;) {
-      BasicBlock *BB = &*I;
-      // Thread all of the branches we can over this block.
-      while (ProcessBlock(BB))
+    for (auto &BB : F) {
+      if (Unreachable.count(&BB))
+        continue;
+      while (ProcessBlock(&BB)) // Thread all of the branches we can over BB.
         Changed = true;
-
-      ++I;
-
-      // Don't thread branches over a block that's slated for deletion.
-      if (DDT->pendingDeletedBB(BB))
+      // Stop processing BB if it's the entry or is now deleted. The following
+      // routines attempt to eliminate BB and locating a suitable replacement
+      // for the entry is non-trivial.
+      if (&BB == &F.getEntryBlock() || DDT->pendingDeletedBB(&BB))
         continue;
 
-      // If the block is trivially dead, zap it.  This eliminates the successor
-      // edges which simplifies the CFG.
-      if (pred_empty(BB) &&
-          BB != &BB->getParent()->getEntryBlock()) {
-        DEBUG(dbgs() << "  JT: Deleting dead block '" << BB->getName()
-              << "' with terminator: " << *BB->getTerminator() << '\n');
-        LoopHeaders.erase(BB);
-        LVI->eraseBlock(BB);
-        DeleteDeadBlock(BB, DDT);
+      if (pred_empty(&BB)) {
+        // When ProcessBlock makes BB unreachable it doesn't bother to fix up
+        // the instructions in it. We must remove BB to prevent invalid IR.
+        DEBUG(dbgs() << "  JT: Deleting dead block '" << BB.getName()
+                     << "' with terminator: " << *BB.getTerminator() << '\n');
+        LoopHeaders.erase(&BB);
+        LVI->eraseBlock(&BB);
+        DeleteDeadBlock(&BB, DDT);
         Changed = true;
         continue;
       }
 
-      BranchInst *BI = dyn_cast<BranchInst>(BB->getTerminator());
-
-      // Can't thread an unconditional jump, but if the block is "almost
-      // empty", we can replace uses of it with uses of the successor and make
-      // this dead.
-      // We should not eliminate the loop header or latch either, because
-      // eliminating a loop header or latch might later prevent LoopSimplify
-      // from transforming nested loops into simplified form. We will rely on
-      // later passes in backend to clean up empty blocks.
+      // ProcessBlock doesn't thread BBs with unconditional TIs. However, if BB
+      // is "almost empty", we attempt to merge BB with its sole successor.
+      auto *BI = dyn_cast<BranchInst>(BB.getTerminator());
       if (BI && BI->isUnconditional() &&
-          BB != &BB->getParent()->getEntryBlock() &&
-          // If the terminator is the only non-phi instruction, try to nuke it.
-          BB->getFirstNonPHIOrDbg()->isTerminator() && !LoopHeaders.count(BB) &&
-          !LoopHeaders.count(BI->getSuccessor(0))) {
-        // FIXME: It is always conservatively correct to drop the info
-        // for a block even if it doesn't get erased.  This isn't totally
-        // awesome, but it allows us to use AssertingVH to prevent nasty
-        // dangling pointer issues within LazyValueInfo.
-        LVI->eraseBlock(BB);
-        if (TryToSimplifyUncondBranchFromEmptyBlock(BB, DDT))
-          Changed = true;
+          // The terminator must be the only non-phi instruction in BB.
+          BB.getFirstNonPHIOrDbg()->isTerminator() &&
+          // Don't alter Loop headers and latches to ensure another pass can
+          // detect and transform nested loops later.
+          !LoopHeaders.count(&BB) && !LoopHeaders.count(BI->getSuccessor(0)) &&
+          TryToSimplifyUncondBranchFromEmptyBlock(&BB, DDT)) {
+        // BB is valid for cleanup here because we passed in DDT. F remains
+        // BB's parent until a DDT->flush() event.
+        LVI->eraseBlock(&BB);
+        Changed = true;
       }
     }
     EverChanged |= Changed;
@@ -656,11 +646,9 @@ bool JumpThreadingPass::ComputeValueKnownInPredecessors(
   }
 
   // Handle Cast instructions.  Only see through Cast when the source operand is
-  // PHI or Cmp and the source type is i1 to save the compilation time.
+  // PHI or Cmp to save the compilation time.
   if (CastInst *CI = dyn_cast<CastInst>(I)) {
     Value *Source = CI->getOperand(0);
-    if (!Source->getType()->isIntegerTy(1))
-      return false;
     if (!isa<PHINode>(Source) && !isa<CmpInst>(Source))
       return false;
     ComputeValueKnownInPredecessors(Source, BB, Result, Preference, CxtI);
@@ -1019,9 +1007,7 @@ bool JumpThreadingPass::ProcessBlock(BasicBlock *BB) {
 
       // Invalidate LVI information for BB if the LVI is not provably true for
       // all of BB.
-      if (any_of(*BB, [](Instruction &I) {
-            return !isGuaranteedToTransferExecutionToSuccessor(&I);
-          }))
+      if (!isGuaranteedToTransferExecutionToSuccessor(BB))
         LVI->eraseBlock(BB);
       return true;
     }
@@ -1513,6 +1499,9 @@ FindMostPopularDest(BasicBlock *BB,
     if (PredToDest.second)
       DestPopularity[PredToDest.second]++;
 
+  if (DestPopularity.empty())
+    return nullptr;
+
   // Find the most popular dest.
   DenseMap<BasicBlock*, unsigned>::iterator DPI = DestPopularity.begin();
   BasicBlock *MostPopularDest = DPI->first;
@@ -1693,8 +1682,20 @@ bool JumpThreadingPass::ProcessThreadableEdges(Value *Cond, BasicBlock *BB,
   // threadable destination (the common case) we can avoid this.
   BasicBlock *MostPopularDest = OnlyDest;
 
-  if (MostPopularDest == MultipleDestSentinel)
+  if (MostPopularDest == MultipleDestSentinel) {
+    // Remove any loop headers from the Dest list, ThreadEdge conservatively
+    // won't process them, but we might have other destination that are eligible
+    // and we still want to process.
+    erase_if(PredToDestList,
+             [&](const std::pair<BasicBlock *, BasicBlock *> &PredToDest) {
+               return LoopHeaders.count(PredToDest.second) != 0;
+             });
+
+    if (PredToDestList.empty())
+      return false;
+
     MostPopularDest = FindMostPopularDest(BB, PredToDestList);
+  }
 
   // Now that we know what the most popular destination is, factor all
   // predecessors that will jump to it into a single predecessor.

@@ -42,6 +42,7 @@
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionAliasAnalysis.h"
+#include "llvm/Analysis/Utils/Local.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/LLVMContext.h"
@@ -49,7 +50,6 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/LoopPassManager.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
 using namespace llvm;
 
@@ -200,10 +200,10 @@ static bool sinkInstruction(Loop &L, Instruction &I,
   SmallVector<BasicBlock *, 2> SortedBBsToSinkInto;
   SortedBBsToSinkInto.insert(SortedBBsToSinkInto.begin(), BBsToSinkInto.begin(),
                              BBsToSinkInto.end());
-  std::sort(SortedBBsToSinkInto.begin(), SortedBBsToSinkInto.end(),
-            [&](BasicBlock *A, BasicBlock *B) {
-              return *LoopBlockNumber.find(A) < *LoopBlockNumber.find(B);
-            });
+  llvm::sort(SortedBBsToSinkInto.begin(), SortedBBsToSinkInto.end(),
+             [&](BasicBlock *A, BasicBlock *B) {
+               return *LoopBlockNumber.find(A) < *LoopBlockNumber.find(B);
+             });
 
   BasicBlock *MoveBB = *SortedBBsToSinkInto.begin();
   // FIXME: Optimize the efficiency for cloned value replacement. The current

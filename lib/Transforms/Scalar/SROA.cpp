@@ -42,6 +42,7 @@
 #include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/Loads.h"
 #include "llvm/Analysis/PtrUseVisitor.h"
+#include "llvm/Analysis/Utils/Local.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/ConstantFolder.h"
@@ -79,7 +80,6 @@
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Scalar.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/PromoteMemToReg.h"
 #include <algorithm>
 #include <cassert>
@@ -273,7 +273,7 @@ public:
     int OldSize = Slices.size();
     Slices.append(NewSlices.begin(), NewSlices.end());
     auto SliceI = Slices.begin() + OldSize;
-    std::sort(SliceI, Slices.end());
+    llvm::sort(SliceI, Slices.end());
     std::inplace_merge(Slices.begin(), SliceI, Slices.end());
   }
 
@@ -1057,7 +1057,7 @@ AllocaSlices::AllocaSlices(const DataLayout &DL, AllocaInst &AI)
 
   // Sort the uses. This arranges for the offsets to be in ascending order,
   // and the sizes to be in descending order.
-  std::sort(Slices.begin(), Slices.end());
+  llvm::sort(Slices.begin(), Slices.end());
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
@@ -1891,7 +1891,7 @@ static VectorType *isVectorPromotionViable(Partition &P, const DataLayout &DL) {
              "All non-integer types eliminated!");
       return RHSTy->getNumElements() < LHSTy->getNumElements();
     };
-    std::sort(CandidateTys.begin(), CandidateTys.end(), RankVectorTypes);
+    llvm::sort(CandidateTys.begin(), CandidateTys.end(), RankVectorTypes);
     CandidateTys.erase(
         std::unique(CandidateTys.begin(), CandidateTys.end(), RankVectorTypes),
         CandidateTys.end());
@@ -2698,7 +2698,7 @@ private:
       assert(!IsSplit);
       assert(NewBeginOffset == BeginOffset);
       II.setDest(getNewAllocaSlicePtr(IRB, OldPtr->getType()));
-      II.setAlignment(getSliceAlign());
+      II.setDestAlignment(getSliceAlign());
 
       deleteIfTriviallyDead(OldPtr);
       return false;
@@ -2819,13 +2819,13 @@ private:
     // update both source and dest of a single call.
     if (!IsSplittable) {
       Value *AdjustedPtr = getNewAllocaSlicePtr(IRB, OldPtr->getType());
-      if (IsDest)
+      if (IsDest) {
         II.setDest(AdjustedPtr);
-      else
+        II.setDestAlignment(SliceAlign);
+      }
+      else {
         II.setSource(AdjustedPtr);
-
-      if (II.getAlignment() > SliceAlign) {
-        II.setAlignment(MinAlign(II.getAlignment(), SliceAlign));
+        II.setSourceAlignment(SliceAlign);
       }
 
       DEBUG(dbgs() << "          to: " << II << "\n");
@@ -2878,8 +2878,10 @@ private:
     // Compute the relative offset for the other pointer within the transfer.
     unsigned IntPtrWidth = DL.getPointerSizeInBits(OtherAS);
     APInt OtherOffset(IntPtrWidth, NewBeginOffset - BeginOffset);
-    unsigned OtherAlign = MinAlign(II.getAlignment() ? II.getAlignment() : 1,
-                                   OtherOffset.zextOrTrunc(64).getZExtValue());
+    unsigned OtherAlign =
+      IsDest ? II.getSourceAlignment() : II.getDestAlignment();
+    OtherAlign =  MinAlign(OtherAlign ? OtherAlign : 1,
+                           OtherOffset.zextOrTrunc(64).getZExtValue());
 
     if (EmitMemCpy) {
       // Compute the other pointer, folding as much as possible to produce
@@ -2891,9 +2893,22 @@ private:
       Type *SizeTy = II.getLength()->getType();
       Constant *Size = ConstantInt::get(SizeTy, NewEndOffset - NewBeginOffset);
 
-      CallInst *New = IRB.CreateMemCpy(
-          IsDest ? OurPtr : OtherPtr, IsDest ? OtherPtr : OurPtr, Size,
-          MinAlign(SliceAlign, OtherAlign), II.isVolatile());
+      Value *DestPtr, *SrcPtr;
+      unsigned DestAlign, SrcAlign;
+      // Note: IsDest is true iff we're copying into the new alloca slice
+      if (IsDest) {
+        DestPtr = OurPtr;
+        DestAlign = SliceAlign;
+        SrcPtr = OtherPtr;
+        SrcAlign = OtherAlign;
+      } else {
+        DestPtr = OtherPtr;
+        DestAlign = OtherAlign;
+        SrcPtr = OurPtr;
+        SrcAlign = SliceAlign;
+      }
+      CallInst *New = IRB.CreateMemCpy(DestPtr, DestAlign, SrcPtr, SrcAlign,
+                                       Size, II.isVolatile());
       if (AATags)
         New->setAAMetadata(AATags);
       DEBUG(dbgs() << "          to: " << *New << "\n");
@@ -4137,7 +4152,7 @@ bool SROA::splitAlloca(AllocaInst &AI, AllocaSlices &AS) {
   }
 
   if (!IsSorted)
-    std::sort(AS.begin(), AS.end());
+    llvm::sort(AS.begin(), AS.end());
 
   /// Describes the allocas introduced by rewritePartition in order to migrate
   /// the debug info.

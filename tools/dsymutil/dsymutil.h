@@ -48,6 +48,9 @@ struct LinkOptions {
   /// Do not check swiftmodule timestamp
   bool NoTimestamp = false;
 
+  /// Number of threads.
+  unsigned Threads = 1;
+
   /// -oso-prepend-path
   std::string PrependPath;
 
@@ -59,7 +62,8 @@ struct LinkOptions {
 /// returned when the file is universal (aka fat) binary.
 ErrorOr<std::vector<std::unique_ptr<DebugMap>>>
 parseDebugMap(StringRef InputFile, ArrayRef<std::string> Archs,
-              StringRef PrependPath, bool Verbose, bool InputIsYAML);
+              StringRef PrependPath, bool PaperTrailWarnings, bool Verbose,
+              bool InputIsYAML);
 
 /// Dump the symbol table
 bool dumpStab(StringRef InputFile, ArrayRef<std::string> Archs,
@@ -70,8 +74,8 @@ bool dumpStab(StringRef InputFile, ArrayRef<std::string> Archs,
 bool linkDwarf(raw_fd_ostream &OutFile, const DebugMap &DM,
                const LinkOptions &Options);
 
-void warn(const Twine &Warning, const Twine &Context);
-bool error(const Twine &Error, const Twine &Context);
+void warn(Twine Warning, Twine Context = {});
+bool error(Twine Error, Twine Context = {});
 
 } // end namespace dsymutil
 } // end namespace llvm

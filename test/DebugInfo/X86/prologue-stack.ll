@@ -1,4 +1,4 @@
-; RUN: llc -disable-fp-elim -O0 %s -mtriple x86_64-unknown-linux-gnu -o - | FileCheck %s
+; RUN: llc -fast-isel-sink-local-values -disable-fp-elim -O0 %s -mtriple x86_64-unknown-linux-gnu -o - | FileCheck %s
 
 ; int callme(int);
 ; int isel_line_test2() {
@@ -11,6 +11,8 @@ define i32 @isel_line_test2() nounwind uwtable !dbg !5 {
   ; CHECK: isel_line_test2:
   ; CHECK: {{subq|leaq}} {{.*}}, %rsp
   ; CHECK: .loc 1 5 3 prologue_end
+  ; CHECK: movl $400, %edi
+  ; CHECK: callq callme
 entry:
   %call = call i32 @callme(i32 400), !dbg !10
   ret i32 0, !dbg !12

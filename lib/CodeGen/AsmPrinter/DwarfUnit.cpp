@@ -23,7 +23,6 @@
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineOperand.h"
-#include "llvm/CodeGen/TargetLoweringObjectFile.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/Constants.h"
@@ -38,6 +37,7 @@
 #include "llvm/MC/MachineLocation.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Target/TargetLoweringObjectFile.h"
 #include <cassert>
 #include <cstdint>
 #include <string>
@@ -85,8 +85,6 @@ DwarfTypeUnit::DwarfTypeUnit(DwarfCompileUnit &CU, AsmPrinter *A,
                              MCDwarfDwoLineTable *SplitLineTable)
     : DwarfUnit(dwarf::DW_TAG_type_unit, CU.getCUNode(), A, DW, DWU), CU(CU),
       SplitLineTable(SplitLineTable) {
-  if (SplitLineTable)
-    addSectionOffset(getUnitDie(), dwarf::DW_AT_stmt_list, 0);
 }
 
 DwarfUnit::~DwarfUnit() {
@@ -284,8 +282,10 @@ void DwarfUnit::addSectionOffset(DIE &Die, dwarf::Attribute Attribute,
     addUInt(Die, Attribute, dwarf::DW_FORM_data4, Integer);
 }
 
-MD5::MD5Result *DwarfUnit::getMD5AsBytes(const DIFile *File) {
+MD5::MD5Result *DwarfUnit::getMD5AsBytes(const DIFile *File) const {
   assert(File);
+  if (DD->getDwarfVersion() < 5)
+    return nullptr;
   Optional<DIFile::ChecksumInfo<StringRef>> Checksum = File->getChecksum();
   if (!Checksum || Checksum->Kind != DIFile::CSK_MD5)
     return nullptr;
@@ -300,12 +300,15 @@ MD5::MD5Result *DwarfUnit::getMD5AsBytes(const DIFile *File) {
 }
 
 unsigned DwarfTypeUnit::getOrCreateSourceID(const DIFile *File) {
-  return SplitLineTable
-             ? SplitLineTable->getFile(File->getDirectory(),
-                                       File->getFilename(),
-                                       getMD5AsBytes(File),
-                                       File->getSource())
-             : getCU().getOrCreateSourceID(File);
+  if (!SplitLineTable)
+    return getCU().getOrCreateSourceID(File);
+  if (!UsedLineTable) {
+    UsedLineTable = true;
+    // This is a split type unit that needs a line table.
+    addSectionOffset(getUnitDie(), dwarf::DW_AT_stmt_list, 0);
+  }
+  return SplitLineTable->getFile(File->getDirectory(), File->getFilename(),
+                                 getMD5AsBytes(File), File->getSource());
 }
 
 void DwarfUnit::addOpAddress(DIELoc &Die, const MCSymbol *Sym) {
@@ -1401,16 +1404,49 @@ DIE *DwarfUnit::getIndexTyDie() {
     return IndexTyDie;
   // Construct an integer type to use for indexes.
   IndexTyDie = &createAndAddDIE(dwarf::DW_TAG_base_type, getUnitDie());
-  addString(*IndexTyDie, dwarf::DW_AT_name, "sizetype");
+  StringRef Name = "__ARRAY_SIZE_TYPE__";
+  addString(*IndexTyDie, dwarf::DW_AT_name, Name);
   addUInt(*IndexTyDie, dwarf::DW_AT_byte_size, None, sizeof(int64_t));
   addUInt(*IndexTyDie, dwarf::DW_AT_encoding, dwarf::DW_FORM_data1,
           dwarf::DW_ATE_unsigned);
+  DD->addAccelType(Name, *IndexTyDie, /*Flags*/ 0);
   return IndexTyDie;
 }
 
+/// Returns true if the vector's size differs from the sum of sizes of elements
+/// the user specified.  This can occur if the vector has been rounded up to
+/// fit memory alignment constraints.
+static bool hasVectorBeenPadded(const DICompositeType *CTy) {
+  assert(CTy && CTy->isVector() && "Composite type is not a vector");
+  const uint64_t ActualSize = CTy->getSizeInBits();
+
+  // Obtain the size of each element in the vector.
+  DIType *BaseTy = CTy->getBaseType().resolve();
+  assert(BaseTy && "Unknown vector element type.");
+  const uint64_t ElementSize = BaseTy->getSizeInBits();
+
+  // Locate the number of elements in the vector.
+  const DINodeArray Elements = CTy->getElements();
+  assert(Elements.size() == 1 &&
+         Elements[0]->getTag() == dwarf::DW_TAG_subrange_type &&
+         "Invalid vector element array, expected one element of type subrange");
+  const auto Subrange = cast<DISubrange>(Elements[0]);
+  const auto CI = Subrange->getCount().get<ConstantInt *>();
+  const int32_t NumVecElements = CI->getSExtValue();
+
+  // Ensure we found the element count and that the actual size is wide
+  // enough to contain the requested size.
+  assert(ActualSize >= (NumVecElements * ElementSize) && "Invalid vector size");
+  return ActualSize != (NumVecElements * ElementSize);
+}
+
 void DwarfUnit::constructArrayTypeDIE(DIE &Buffer, const DICompositeType *CTy) {
-  if (CTy->isVector())
+  if (CTy->isVector()) {
     addFlag(Buffer, dwarf::DW_AT_GNU_vector);
+    if (hasVectorBeenPadded(CTy))
+      addUInt(Buffer, dwarf::DW_AT_byte_size, None,
+              CTy->getSizeInBits() / CHAR_BIT);
+  }
 
   // Emit the element type.
   addType(Buffer, resolve(CTy->getBaseType()));
@@ -1628,18 +1664,18 @@ DIE *DwarfUnit::getOrCreateStaticMemberDIE(const DIDerivedType *DT) {
 void DwarfUnit::emitCommonHeader(bool UseOffsets, dwarf::UnitType UT) {
   // Emit size of content not including length itself
   Asm->OutStreamer->AddComment("Length of Unit");
-  Asm->EmitInt32(getHeaderSize() + getUnitDie().getSize());
+  Asm->emitInt32(getHeaderSize() + getUnitDie().getSize());
 
   Asm->OutStreamer->AddComment("DWARF version number");
   unsigned Version = DD->getDwarfVersion();
-  Asm->EmitInt16(Version);
+  Asm->emitInt16(Version);
 
   // DWARF v5 reorders the address size and adds a unit type.
   if (Version >= 5) {
     Asm->OutStreamer->AddComment("DWARF Unit Type");
-    Asm->EmitInt8(UT);
+    Asm->emitInt8(UT);
     Asm->OutStreamer->AddComment("Address Size (in bytes)");
-    Asm->EmitInt8(Asm->MAI->getCodePointerSize());
+    Asm->emitInt8(Asm->MAI->getCodePointerSize());
   }
 
   // We share one abbreviations table across all units so it's always at the
@@ -1648,14 +1684,14 @@ void DwarfUnit::emitCommonHeader(bool UseOffsets, dwarf::UnitType UT) {
   Asm->OutStreamer->AddComment("Offset Into Abbrev. Section");
   const TargetLoweringObjectFile &TLOF = Asm->getObjFileLowering();
   if (UseOffsets)
-    Asm->EmitInt32(0);
+    Asm->emitInt32(0);
   else
     Asm->emitDwarfSymbolReference(
         TLOF.getDwarfAbbrevSection()->getBeginSymbol(), false);
 
   if (Version <= 4) {
     Asm->OutStreamer->AddComment("Address Size (in bytes)");
-    Asm->EmitInt8(Asm->MAI->getCodePointerSize());
+    Asm->emitInt8(Asm->MAI->getCodePointerSize());
   }
 }
 

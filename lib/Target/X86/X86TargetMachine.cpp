@@ -34,7 +34,6 @@
 #include "llvm/CodeGen/GlobalISel/RegBankSelect.h"
 #include "llvm/CodeGen/MachineScheduler.h"
 #include "llvm/CodeGen/Passes.h"
-#include "llvm/CodeGen/TargetLoweringObjectFile.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/DataLayout.h"
@@ -44,6 +43,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TargetRegistry.h"
+#include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/Target/TargetOptions.h"
 #include <memory>
 #include <string>
@@ -58,10 +58,13 @@ namespace llvm {
 
 void initializeWinEHStatePassPass(PassRegistry &);
 void initializeFixupLEAPassPass(PassRegistry &);
+void initializeShadowCallStackPass(PassRegistry &);
 void initializeX86CallFrameOptimizationPass(PassRegistry &);
 void initializeX86CmovConverterPassPass(PassRegistry &);
 void initializeX86ExecutionDomainFixPass(PassRegistry &);
 void initializeX86DomainReassignmentPass(PassRegistry &);
+void initializeX86AvoidSFBPassPass(PassRegistry &);
+void initializeX86FlagsCopyLoweringPassPass(PassRegistry &);
 
 } // end namespace llvm
 
@@ -76,10 +79,13 @@ extern "C" void LLVMInitializeX86Target() {
   initializeFixupBWInstPassPass(PR);
   initializeEvexToVexInstPassPass(PR);
   initializeFixupLEAPassPass(PR);
+  initializeShadowCallStackPass(PR);
   initializeX86CallFrameOptimizationPass(PR);
   initializeX86CmovConverterPassPass(PR);
   initializeX86ExecutionDomainFixPass(PR);
   initializeX86DomainReassignmentPass(PR);
+  initializeX86AvoidSFBPassPass(PR);
+  initializeX86FlagsCopyLoweringPassPass(PR);
 }
 
 static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
@@ -218,7 +224,8 @@ X86TargetMachine::X86TargetMachine(const Target &T, const Triple &TT,
   // The check here for 64-bit windows is a bit icky, but as we're unlikely
   // to ever want to mix 32 and 64-bit windows code in a single module
   // this should be fine.
-  if ((TT.isOSWindows() && TT.getArch() == Triple::x86_64) || TT.isPS4())
+  if ((TT.isOSWindows() && TT.getArch() == Triple::x86_64) || TT.isPS4() ||
+      TT.isOSBinFormatMachO())
     this->Options.TrapUnreachable = true;
 
   initAsmInfo();
@@ -449,8 +456,10 @@ void X86PassConfig::addPreRegAlloc() {
     addPass(createX86FixupSetCC());
     addPass(createX86OptimizeLEAs());
     addPass(createX86CallFrameOptimization());
+    addPass(createX86AvoidStoreForwardingBlocks());
   }
 
+  addPass(createX86FlagsCopyLoweringPass());
   addPass(createX86WinAllocaExpander());
 }
 void X86PassConfig::addMachineSSAOptimization() {
@@ -470,6 +479,7 @@ void X86PassConfig::addPreEmitPass() {
     addPass(createBreakFalseDeps());
   }
 
+  addPass(createShadowCallStackPass());
   addPass(createX86IndirectBranchTrackingPass());
 
   if (UseVZeroUpper)
@@ -485,4 +495,10 @@ void X86PassConfig::addPreEmitPass() {
 
 void X86PassConfig::addPreEmitPass2() {
   addPass(createX86RetpolineThunksPass());
+  // Verify basic block incoming and outgoing cfa offset and register values and
+  // correct CFA calculation rule where needed by inserting appropriate CFI
+  // instructions.
+  const Triple &TT = TM->getTargetTriple();
+  if (!TT.isOSDarwin() && !TT.isOSWindows())
+    addPass(createCFIInstrInserter());
 }
