@@ -1231,7 +1231,7 @@ AliasResult BasicAAResult::aliasGEP(const GEPOperator *GEP1, uint64_t V1Size,
     // If we get a No or May, then return it immediately, no amount of analysis
     // will improve this situation.
     if (BaseAlias != MustAlias) {
-      assert(BaseAlias == NoAlias || BaseAlias == MayAlias);
+      //assert(BaseAlias == NoAlias || BaseAlias == MayAlias);
       return BaseAlias;
     }
 
@@ -1278,7 +1278,7 @@ AliasResult BasicAAResult::aliasGEP(const GEPOperator *GEP1, uint64_t V1Size,
       // cannot alias per GEP semantics: "Any memory access must be done through
       // a pointer value associated with an address range of the memory access,
       // otherwise the behavior is undefined.".
-      assert(R == NoAlias || R == MayAlias);
+      //assert(R == NoAlias || R == MayAlias);
       return R;
     }
 
@@ -1386,7 +1386,7 @@ AliasResult BasicAAResult::aliasGEP(const GEPOperator *GEP1, uint64_t V1Size,
   // Statically, we can see that the base objects are the same, but the
   // pointers have dynamic offsets which we can't resolve. And none of our
   // little tricks above worked.
-  return MayAlias;
+  return PartialAlias;
 }
 
 static AliasResult MergeAliasResults(AliasResult A, AliasResult B) {

@@ -298,6 +298,9 @@ enum MetadataCodes {
   METADATA_GLOBAL_VAR_EXPR = 37,        // [distinct, var, expr]
   METADATA_INDEX_OFFSET = 38,           // [offset]
   METADATA_INDEX = 39,                  // [bitpos]
+  METADATA_STRING_TYPE = 40,      // [distinct, name, size, align, ...]
+  METADATA_FORTRAN_ARRAY_TYPE = 41, // [distinct, name, [bounds ...], ...]
+  METADATA_FORTRAN_SUBRANGE = 42, // [distinct, lbound, lbnde, ubound, ubnde]
 };
 
 // The constants block (CONSTANTS_BLOCK_ID) describes emission for each

@@ -724,8 +724,12 @@ DIE *DwarfUnit::getOrCreateTypeDIE(const MDNode *TyNode) {
 
   if (auto *BT = dyn_cast<DIBasicType>(Ty))
     constructTypeDIE(TyDIE, BT);
+  else if (auto *ST = dyn_cast<DIStringType>(Ty))
+    constructTypeDIE(TyDIE, ST);
   else if (auto *STy = dyn_cast<DISubroutineType>(Ty))
     constructTypeDIE(TyDIE, STy);
+  else if (auto *ATy = dyn_cast<DIFortranArrayType>(Ty))
+    constructArrayTypeDIE(TyDIE, ATy);
   else if (auto *CTy = dyn_cast<DICompositeType>(Ty)) {
     if (GenerateDwarfTypeUnits && !Ty->isForwardDecl())
       if (MDString *TypeId = CTy->getRawIdentifier()) {
@@ -810,11 +814,37 @@ void DwarfUnit::constructTypeDIE(DIE &Buffer, const DIBasicType *BTy) {
   if (BTy->getTag() == dwarf::DW_TAG_unspecified_type)
     return;
 
-  addUInt(Buffer, dwarf::DW_AT_encoding, dwarf::DW_FORM_data1,
-          BTy->getEncoding());
+  if (BTy->getTag() != dwarf::DW_TAG_string_type)
+    addUInt(Buffer, dwarf::DW_AT_encoding, dwarf::DW_FORM_data1,
+            BTy->getEncoding());
 
   uint64_t Size = BTy->getSizeInBits() >> 3;
   addUInt(Buffer, dwarf::DW_AT_byte_size, None, Size);
+}
+
+void DwarfUnit::constructTypeDIE(DIE &Buffer, const DIStringType *STy) {
+  // Get core information.
+  StringRef Name = STy->getName();
+  // Add name if not anonymous or intermediate type.
+  if (!Name.empty())
+    addString(Buffer, dwarf::DW_AT_name, Name);
+
+  if (unsigned LLI = DD->getStringTypeLoc(STy)) {
+    // DW_TAG_string_type has a DW_AT_string_length location
+    dwarf::Form Form = (DD->getDwarfVersion() >= 4)
+      ? dwarf::DW_FORM_sec_offset : dwarf::DW_FORM_data4;
+    Buffer.addValue(DIEValueAllocator, dwarf::DW_AT_string_length, Form,
+                    DIELocList(LLI));
+  }
+
+  uint64_t Size = STy->getSizeInBits() >> 3;
+  addUInt(Buffer, dwarf::DW_AT_byte_size, None, Size);
+
+  if (STy->getEncoding()) {
+    // for eventual unicode support
+    addUInt(Buffer, dwarf::DW_AT_encoding, dwarf::DW_FORM_data1,
+            STy->getEncoding());
+  }
 }
 
 void DwarfUnit::constructTypeDIE(DIE &Buffer, const DIDerivedType *DTy) {
@@ -1291,6 +1321,12 @@ void DwarfUnit::applySubprogramAttributes(const DISubprogram *SP, DIE &SPDie,
 
   if (SP->isMainSubprogram())
     addFlag(SPDie, dwarf::DW_AT_main_subprogram);
+  if (SP->isPure())
+    addFlag(SPDie, dwarf::DW_AT_pure);
+  if (SP->isElemental())
+    addFlag(SPDie, dwarf::DW_AT_elemental);
+  if (SP->isRecursive())
+    addFlag(SPDie, dwarf::DW_AT_recursive);
 }
 
 void DwarfUnit::constructSubrangeDIE(DIE &Buffer, const DISubrange *SR,
@@ -1313,6 +1349,26 @@ void DwarfUnit::constructSubrangeDIE(DIE &Buffer, const DISubrange *SR,
     // FIXME: An unbounded array should reference the expression that defines
     // the array.
     addUInt(DW_Subrange, dwarf::DW_AT_count, None, Count);
+}
+
+void DwarfUnit::constructFortranSubrangeDIE(DIE &Buffer,
+                                            const DIFortranSubrange *SR) {
+  DIE *IndexTy = getIndexTyDie();
+  DIE *Die = DD->getSubrangeDie(SR);
+  if ((!Die) || Die->getParent())
+    Die = DIE::get(DIEValueAllocator, dwarf::DW_TAG_subrange_type);
+  DIE &DW_Subrange = Buffer.addChild(Die);
+  addDIEEntry(DW_Subrange, dwarf::DW_AT_type, *IndexTy);
+
+  if (!SR->getLowerBound()) {
+    int64_t BVC = SR->getCLowerBound();
+    addSInt(DW_Subrange, dwarf::DW_AT_lower_bound, None, BVC);
+  }
+
+  if ((!SR->getUpperBound()) && (!SR->noUpperBound())) {
+    int64_t BVC = SR->getCUpperBound();
+    addSInt(DW_Subrange, dwarf::DW_AT_upper_bound, None, BVC);
+  }
 }
 
 DIE *DwarfUnit::getIndexTyDie() {
@@ -1346,6 +1402,20 @@ void DwarfUnit::constructArrayTypeDIE(DIE &Buffer, const DICompositeType *CTy) {
     if (auto *Element = dyn_cast_or_null<DINode>(Elements[i]))
       if (Element->getTag() == dwarf::DW_TAG_subrange_type)
         constructSubrangeDIE(Buffer, cast<DISubrange>(Element), IdxTy);
+  }
+}
+
+void DwarfUnit::constructArrayTypeDIE(DIE &Buffer,
+                                      const DIFortranArrayType *ATy) {
+  // Emit the element type.
+  addType(Buffer, resolve(ATy->getBaseType()));
+
+  // Add subranges to array type.
+  DINodeArray Elements = ATy->getElements();
+  for (unsigned i = 0, N = Elements.size(); i < N; ++i) {
+    DINode *Element = cast<DINode>(Elements[i]);
+    if (const DIFortranSubrange *FS = dyn_cast<DIFortranSubrange>(Element))
+      constructFortranSubrangeDIE(Buffer, FS);
   }
 }
 

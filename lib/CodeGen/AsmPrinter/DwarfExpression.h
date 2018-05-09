@@ -261,7 +261,7 @@ public:
 
 /// DwarfExpression implementation for singular DW_AT_location.
 class DIEDwarfExpression final : public DwarfExpression {
-const AsmPrinter &AP;
+  const AsmPrinter &AP;
   DwarfUnit &DU;
   DIELoc &DIE;
 

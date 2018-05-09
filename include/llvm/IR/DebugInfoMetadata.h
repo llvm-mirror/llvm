@@ -215,10 +215,13 @@ public:
       return false;
     case GenericDINodeKind:
     case DISubrangeKind:
+    case DIFortranSubrangeKind:
     case DIEnumeratorKind:
     case DIBasicTypeKind:
+    case DIStringTypeKind:
     case DIDerivedTypeKind:
     case DICompositeTypeKind:
+    case DIFortranArrayTypeKind:
     case DISubroutineTypeKind:
     case DIFileKind:
     case DICompileUnitKind:
@@ -363,6 +366,71 @@ public:
   }
 };
 
+/// Fortran array subrange
+class DIFortranSubrange : public DINode {
+  friend class LLVMContextImpl;
+  friend class MDNode;
+
+  int64_t CLowerBound;
+  int64_t CUpperBound;
+  bool NoUpperBound;
+
+  DIFortranSubrange(LLVMContext &C, StorageType Storage, int64_t CLowerBound,
+                    int64_t CUpperBound, bool NoUpperBound,
+                    ArrayRef<Metadata *> Ops)
+      : DINode(C, DIFortranSubrangeKind, Storage,
+               dwarf::DW_TAG_subrange_type, Ops), CLowerBound(CLowerBound),
+        CUpperBound(CUpperBound), NoUpperBound(NoUpperBound) {}
+  ~DIFortranSubrange() = default;
+
+  static DIFortranSubrange *getImpl(LLVMContext &Context, int64_t CLBound,
+                                    int64_t CUBound, bool NoUpperBound,
+                                    Metadata *Lbound, Metadata *Lbndexp,
+                                    Metadata *Ubound, Metadata *Ubndexp,
+                                    StorageType Storage,
+                                    bool ShouldCreate = true);
+
+  TempDIFortranSubrange cloneImpl() const {
+    return getTemporary(getContext(), getCLowerBound(), getCUpperBound(),
+                        noUpperBound(), getRawLowerBound(),
+                        getRawLowerBoundExpression(), getRawUpperBound(),
+                        getRawUpperBoundExpression());
+  }
+
+public:
+  DEFINE_MDNODE_GET(DIFortranSubrange, (int64_t CLB, int64_t CUB, bool NUB,
+                                        Metadata *LBound, Metadata *LBndExp,
+                                        Metadata *UBound, Metadata *UBndExp),
+                    (CLB, CUB, NUB, LBound, LBndExp, UBound, UBndExp))
+
+  TempDIFortranSubrange clone() const { return cloneImpl(); }
+
+  DIVariable *getLowerBound() const {
+    return cast_or_null<DIVariable>(getRawLowerBound());
+  }
+  DIExpression *getLowerBoundExp() const {
+    return cast_or_null<DIExpression>(getRawLowerBoundExpression());
+  }
+  DIVariable *getUpperBound() const {
+    return  cast_or_null<DIVariable>(getRawUpperBound());
+  }
+  DIExpression *getUpperBoundExp() const {
+    return cast_or_null<DIExpression>(getRawUpperBoundExpression());
+  }
+
+  int64_t getCLowerBound() const { return CLowerBound; }
+  int64_t getCUpperBound() const { return CUpperBound; }
+  Metadata *getRawLowerBound() const { return getOperand(0); }
+  Metadata *getRawLowerBoundExpression() const { return getOperand(1); }
+  Metadata *getRawUpperBound() const { return getOperand(2); }
+  Metadata *getRawUpperBoundExpression() const { return getOperand(3); }
+  bool noUpperBound() const { return NoUpperBound; }
+
+  static bool classof(const Metadata *MD) {
+    return MD->getMetadataID() == DIFortranSubrangeKind;
+  }
+};
+
 /// Enumeration value.
 ///
 /// TODO: Add a pointer to the context (DW_TAG_enumeration_type) once that no
@@ -449,8 +517,10 @@ public:
     default:
       return false;
     case DIBasicTypeKind:
+    case DIStringTypeKind:
     case DIDerivedTypeKind:
     case DICompositeTypeKind:
+    case DIFortranArrayTypeKind:
     case DISubroutineTypeKind:
     case DIFileKind:
     case DICompileUnitKind:
@@ -639,8 +709,10 @@ public:
     default:
       return false;
     case DIBasicTypeKind:
+    case DIStringTypeKind:
     case DIDerivedTypeKind:
     case DICompositeTypeKind:
+    case DIFortranArrayTypeKind:
     case DISubroutineTypeKind:
       return true;
     }
@@ -686,6 +758,12 @@ public:
   DEFINE_MDNODE_GET(DIBasicType, (unsigned Tag, StringRef Name),
                     (Tag, Name, 0, 0, 0))
   DEFINE_MDNODE_GET(DIBasicType,
+                    (unsigned Tag, StringRef Name, uint64_t SizeInBits),
+                    (Tag, Name, SizeInBits, 0, 0))
+  DEFINE_MDNODE_GET(DIBasicType,
+                    (unsigned Tag, MDString *Name, uint64_t SizeInBits),
+                    (Tag, Name, SizeInBits, 0, 0))
+  DEFINE_MDNODE_GET(DIBasicType,
                     (unsigned Tag, StringRef Name, uint64_t SizeInBits,
                      uint32_t AlignInBits, unsigned Encoding),
                     (Tag, Name, SizeInBits, AlignInBits, Encoding))
@@ -701,6 +779,99 @@ public:
   static bool classof(const Metadata *MD) {
     return MD->getMetadataID() == DIBasicTypeKind;
   }
+};
+
+/// String type, Fortran CHARACTER(n)
+class DIStringType : public DIType {
+  friend class LLVMContextImpl;
+  friend class MDNode;
+
+  unsigned Encoding;
+
+  DIStringType(LLVMContext &C, StorageType Storage, unsigned Tag,
+               uint64_t SizeInBits, uint32_t AlignInBits, unsigned Encoding,
+               ArrayRef<Metadata *> Ops)
+      : DIType(C, DIStringTypeKind, Storage, Tag, 0, SizeInBits, AlignInBits, 0,
+               FlagZero, Ops),
+        Encoding(Encoding) {}
+  ~DIStringType() = default;
+
+  static DIStringType *getImpl(LLVMContext &Context, unsigned Tag,
+                               StringRef Name, Metadata *StringLength,
+                               Metadata *StrLenExp, uint64_t SizeInBits,
+                               uint32_t AlignInBits, unsigned Encoding,
+                               StorageType Storage, bool ShouldCreate = true) {
+    return getImpl(Context, Tag, getCanonicalMDString(Context, Name),
+                   StringLength, StrLenExp, SizeInBits, AlignInBits, Encoding,
+                   Storage, ShouldCreate);
+  }
+  static DIStringType *getImpl(LLVMContext &Context, unsigned Tag,
+                               MDString *Name, Metadata *StringLength,
+                               Metadata *StrLenExp, uint64_t SizeInBits,
+                               uint32_t AlignInBits, unsigned Encoding,
+                               StorageType Storage, bool ShouldCreate = true);
+
+  TempDIStringType cloneImpl() const {
+    return getTemporary(getContext(), getTag(), getName(), getRawStringLength(),
+                        getRawStringLengthExp(), getSizeInBits(),
+                        getAlignInBits(), getEncoding());
+  }
+
+public:
+  DEFINE_MDNODE_GET(DIStringType, (unsigned Tag, StringRef Name),
+                    (Tag, Name, nullptr, nullptr, 0, 0, 0))
+  DEFINE_MDNODE_GET(DIStringType,
+                    (unsigned Tag, StringRef Name, uint64_t SizeInBits,
+                     uint32_t AlignInBits),
+                    (Tag, Name, nullptr, nullptr, SizeInBits, AlignInBits, 0))
+  DEFINE_MDNODE_GET(DIStringType,
+                    (unsigned Tag, MDString *Name, uint64_t SizeInBits,
+                     uint32_t AlignInBits),
+                    (Tag, Name, nullptr, nullptr, SizeInBits, AlignInBits, 0))
+  DEFINE_MDNODE_GET(DIStringType,
+                    (unsigned Tag, StringRef Name, Metadata *StringLength,
+                     Metadata *StringLengthExp, uint64_t SizeInBits,
+                     uint32_t AlignInBits),
+                    (Tag, Name, StringLength, StringLengthExp, SizeInBits,
+                     AlignInBits, 0))
+  DEFINE_MDNODE_GET(DIStringType,
+                    (unsigned Tag, MDString *Name, Metadata *StringLength,
+                     Metadata *StringLengthExp, uint64_t SizeInBits,
+                     uint32_t AlignInBits),
+                    (Tag, Name, StringLength, StringLengthExp, SizeInBits,
+                     AlignInBits, 0))
+  DEFINE_MDNODE_GET(DIStringType,
+                    (unsigned Tag, StringRef Name, Metadata *StringLength,
+                     Metadata *StringLengthExp, uint64_t SizeInBits,
+                     uint32_t AlignInBits, unsigned Encoding),
+                    (Tag, Name, StringLength, StringLengthExp, SizeInBits,
+                     AlignInBits, Encoding))
+  DEFINE_MDNODE_GET(DIStringType,
+                    (unsigned Tag, MDString *Name, Metadata *StringLength,
+                     Metadata *StringLengthExp, uint64_t SizeInBits,
+                     uint32_t AlignInBits, unsigned Encoding),
+                    (Tag, Name, StringLength, StringLengthExp, SizeInBits,
+                     AlignInBits, Encoding))
+
+  TempDIStringType clone() const { return cloneImpl(); }
+
+  static bool classof(const Metadata *MD) {
+    return MD->getMetadataID() == DIStringTypeKind;
+  }
+
+  DIVariable *getStringLength() const {
+    return cast_or_null<DIVariable>(getRawStringLength());
+  }
+
+  DIExpression *getStringLengthExp() const {
+    return cast_or_null<DIExpression>(getRawStringLengthExp());
+  }
+
+  unsigned getEncoding() const { return Encoding; }
+
+  Metadata *getRawStringLength() const { return getOperand(3); }
+
+  Metadata *getRawStringLengthExp() const { return getOperand(4); }
 };
 
 /// Derived types.
@@ -987,6 +1158,90 @@ public:
 
   static bool classof(const Metadata *MD) {
     return MD->getMetadataID() == DICompositeTypeKind;
+  }
+};
+
+/// Fortran array types.
+class DIFortranArrayType : public DIType {
+  friend class LLVMContextImpl;
+  friend class MDNode;
+
+  DIFortranArrayType(LLVMContext &C, StorageType Storage, unsigned Tag,
+                     unsigned Line, uint64_t SizeInBits, uint32_t AlignInBits,
+                     uint64_t OffsetInBits, DIFlags Flags,
+                     ArrayRef<Metadata *> Ops)
+      : DIType(C, DIFortranArrayTypeKind, Storage, Tag, Line, SizeInBits,
+               AlignInBits, OffsetInBits, Flags, Ops) {}
+  ~DIFortranArrayType() = default;
+
+  static DIFortranArrayType *
+  getImpl(LLVMContext &Context, unsigned Tag, StringRef Name, Metadata *File,
+          unsigned Line, DIScopeRef Scope, DITypeRef BaseType,
+          uint64_t SizeInBits, uint32_t AlignInBits, uint64_t OffsetInBits,
+          DIFlags Flags, DINodeArray Elements, StorageType Storage,
+          bool ShouldCreate = true) {
+    return getImpl(
+        Context, Tag, getCanonicalMDString(Context, Name), File, Line, Scope,
+        BaseType, SizeInBits, AlignInBits, OffsetInBits, Flags, Elements.get(),
+        Storage, ShouldCreate);
+  }
+  static DIFortranArrayType *
+  getImpl(LLVMContext &Context, unsigned Tag, MDString *Name, Metadata *File,
+          unsigned Line, Metadata *Scope, Metadata *BaseType,
+          uint64_t SizeInBits, uint32_t AlignInBits, uint64_t OffsetInBits,
+          DIFlags Flags, Metadata *Elements, StorageType Storage,
+          bool ShouldCreate = true);
+
+  TempDIFortranArrayType cloneImpl() const {
+    return getTemporary(getContext(), getTag(), getName(), getFile(), getLine(),
+                        getScope(), getBaseType(), getSizeInBits(),
+                        getAlignInBits(), getOffsetInBits(), getFlags(),
+                        getElements());
+  }
+
+public:
+  DEFINE_MDNODE_GET(DIFortranArrayType,
+                    (unsigned Tag, StringRef Name, DIFile *File, unsigned Line,
+                     DIScopeRef Scope, DITypeRef BaseType, uint64_t SizeInBits,
+                     uint32_t AlignInBits, uint64_t OffsetInBits,
+                     DIFlags Flags, DINodeArray Elements),
+                    (Tag, Name, File, Line, Scope, BaseType, SizeInBits,
+                     AlignInBits, OffsetInBits, Flags, Elements))
+  DEFINE_MDNODE_GET(DIFortranArrayType,
+                    (unsigned Tag, MDString *Name, Metadata *File,
+                     unsigned Line, Metadata *Scope, Metadata *BaseType,
+                     uint64_t SizeInBits, uint32_t AlignInBits,
+                     uint64_t OffsetInBits, DIFlags Flags, Metadata *Elements),
+                    (Tag, Name, File, Line, Scope, BaseType, SizeInBits,
+                     AlignInBits, OffsetInBits, Flags, Elements))
+
+  TempDIFortranArrayType clone() const { return cloneImpl(); }
+
+  DITypeRef getBaseType() const { return DITypeRef(getRawBaseType()); }
+  DINodeArray getElements() const {
+    return cast_or_null<MDTuple>(getRawElements());
+  }
+
+  Metadata *getRawBaseType() const { return getOperand(3); }
+  Metadata *getRawElements() const { return getOperand(4); }
+
+  /// Replace operands.
+  ///
+  /// If this \a isUniqued() and not \a isResolved(), on a uniquing collision
+  /// this will be RAUW'ed and deleted.  Use a \a TrackingMDRef to keep track
+  /// of its movement if necessary.
+  /// @{
+  void replaceElements(DINodeArray Elements) {
+#ifndef NDEBUG
+    for (DINode *Op : getElements())
+      assert(is_contained(Elements->operands(), Op) &&
+             "Lost a member during member list replacement");
+#endif
+    replaceOperandWith(4, Elements.get());
+  }
+
+  static bool classof(const Metadata *MD) {
+    return MD->getMetadataID() == DIFortranArrayTypeKind;
   }
 };
 
@@ -1605,6 +1860,9 @@ public:
   bool isExplicit() const { return getFlags() & FlagExplicit; }
   bool isPrototyped() const { return getFlags() & FlagPrototyped; }
   bool isMainSubprogram() const { return getFlags() & FlagMainSubprogram; }
+  bool isPure() const { return getFlags() & FlagPure; }
+  bool isElemental() const { return getFlags() & FlagElemental; }
+  bool isRecursive() const { return getFlags() & FlagRecursive; }
 
   /// Check if this is reference-qualified.
   ///

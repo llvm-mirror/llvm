@@ -290,6 +290,12 @@ public:
   void setBaseAddress(const MCSymbol *Base) { BaseAddress = Base; }
   const MCSymbol *getBaseAddress() const { return BaseAddress; }
 
+  void constructDieLocation(DIE &Die, dwarf::Attribute Attribute,
+                            const DbgVariable &DV);
+  void constructDieLocationAddExpr(DIE &Die, dwarf::Attribute Attribute,
+                                   const DbgVariable &DV,
+                                   DIExpression *SubExpr);
+
   bool hasDwarfPubSections() const;
 };
 

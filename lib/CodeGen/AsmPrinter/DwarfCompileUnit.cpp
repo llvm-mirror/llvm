@@ -489,11 +489,18 @@ DIE *DwarfCompileUnit::constructVariableDIEImpl(const DbgVariable &DV,
   }
 
   // Add variable address.
+  constructDieLocation(*VariableDie, dwarf::DW_AT_location, DV);
+  return VariableDie;
+}
 
-  unsigned Offset = DV.getDebugLocListIndex();
-  if (Offset != ~0U) {
-    addLocationList(*VariableDie, dwarf::DW_AT_location, Offset);
-    return VariableDie;
+void DwarfCompileUnit::constructDieLocation(
+    DIE &Die, dwarf::Attribute Attribute, const DbgVariable &DV) {
+  if (Attribute == dwarf::DW_AT_location) {
+    unsigned Offset = DV.getDebugLocListIndex();
+    if (Offset != ~0U) {
+      addLocationList(Die, Attribute, Offset);
+      return;
+    }
   }
 
   // Check if variable is described by a DBG_VALUE instruction.
@@ -505,7 +512,7 @@ DIE *DwarfCompileUnit::constructVariableDIEImpl(const DbgVariable &DV,
       // If the second operand is an immediate, this is an indirect value.
       assert((!Op1.isImm() || (Op1.getImm() == 0)) && "unexpected offset");
       MachineLocation Location(RegOp.getReg(), Op1.isImm());
-      addVariableAddress(DV, *VariableDie, Location);
+      addVariableAddress(DV, Die, Location);
     } else if (DVInsn->getOperand(0).isImm()) {
       // This variable is described by a single constant.
       // Check whether it has a DIExpression.
@@ -517,21 +524,21 @@ DIE *DwarfCompileUnit::constructVariableDIEImpl(const DbgVariable &DV,
         DwarfExpr.addFragmentOffset(Expr);
         DwarfExpr.addUnsignedConstant(DVInsn->getOperand(0).getImm());
         DwarfExpr.addExpression(Expr);
-        addBlock(*VariableDie, dwarf::DW_AT_location, DwarfExpr.finalize());
+        addBlock(Die, Attribute, DwarfExpr.finalize());
       } else
-        addConstantValue(*VariableDie, DVInsn->getOperand(0), DV.getType());
+        addConstantValue(Die, DVInsn->getOperand(0), DV.getType());
     } else if (DVInsn->getOperand(0).isFPImm())
-      addConstantFPValue(*VariableDie, DVInsn->getOperand(0));
+      addConstantFPValue(Die, DVInsn->getOperand(0));
     else if (DVInsn->getOperand(0).isCImm())
-      addConstantValue(*VariableDie, DVInsn->getOperand(0).getCImm(),
+      addConstantValue(Die, DVInsn->getOperand(0).getCImm(),
                        DV.getType());
 
-    return VariableDie;
+    return;
   }
 
   // .. else use frame index.
   if (!DV.hasFrameIndexExprs())
-    return VariableDie;
+    return;
 
   DIELoc *Loc = new (DIEValueAllocator) DIELoc;
   DIEDwarfExpression DwarfExpr(*Asm, *this, *Loc);
@@ -551,9 +558,44 @@ DIE *DwarfCompileUnit::constructVariableDIEImpl(const DbgVariable &DV,
         *Asm->MF->getSubtarget().getRegisterInfo(), Cursor, FrameReg);
     DwarfExpr.addExpression(std::move(Cursor));
   }
-  addBlock(*VariableDie, dwarf::DW_AT_location, DwarfExpr.finalize());
+  addBlock(Die, Attribute, DwarfExpr.finalize());
+}
 
-  return VariableDie;
+void DwarfCompileUnit::constructDieLocationAddExpr(
+    DIE &Die, dwarf::Attribute Attribute, const DbgVariable &DV,
+    DIExpression *SubExpr) {
+  if (Attribute == dwarf::DW_AT_location)
+    return; // clients like gdb don't handle location lists correctly
+  if (DV.getMInsn())
+    return; // temp should not have a DBG_VALUE instruction
+  if (!DV.hasFrameIndexExprs())
+    return; // but it should have a frame index expression
+
+  DIELoc *Loc = new (DIEValueAllocator) DIELoc;
+  DIEDwarfExpression DwarfExpr(*Asm, *this, *Loc);
+  for (auto &Fragment : DV.getFrameIndexExprs()) {
+    unsigned FrameReg = 0;
+    const DIExpression *Expr = Fragment.Expr;
+    const TargetFrameLowering *TFI = Asm->MF->getSubtarget().getFrameLowering();
+    int Offset = TFI->getFrameIndexReference(*Asm->MF, Fragment.FI, FrameReg);
+    DwarfExpr.addFragmentOffset(Expr);
+    SmallVector<uint64_t, 8> Ops;
+    Ops.push_back(dwarf::DW_OP_plus_uconst);
+    Ops.push_back(Offset);
+    Ops.append(Expr->elements_begin(), Expr->elements_end());
+    if (SubExpr) {
+      for (unsigned SEOp : SubExpr->getElements())
+        Ops.push_back(SEOp);
+    } else {
+      Ops.push_back(dwarf::DW_OP_deref);
+    }
+    DIExpressionCursor Cursor(Ops);
+    DwarfExpr.setMemoryLocationKind();
+    DwarfExpr.addMachineRegExpression(
+        *Asm->MF->getSubtarget().getRegisterInfo(), Cursor, FrameReg);
+    DwarfExpr.addExpression(std::move(Cursor));
+  }
+  addBlock(Die, Attribute, DwarfExpr.finalize());
 }
 
 DIE *DwarfCompileUnit::constructVariableDIE(DbgVariable &DV,
