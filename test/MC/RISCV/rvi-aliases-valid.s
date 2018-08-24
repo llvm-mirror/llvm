@@ -1,23 +1,28 @@
 # RUN: llvm-mc %s -triple=riscv32 -riscv-no-aliases \
-# RUN:     | FileCheck -check-prefix=CHECK-INST %s
+# RUN:     | FileCheck -check-prefixes=CHECK-EXPAND,CHECK-INST %s
 # RUN: llvm-mc %s -triple=riscv32 \
-# RUN:     | FileCheck -check-prefix=CHECK-ALIAS %s
+# RUN:     | FileCheck -check-prefixes=CHECK-EXPAND,CHECK-ALIAS %s
 # RUN: llvm-mc %s -triple=riscv64 -riscv-no-aliases\
-# RUN:     | FileCheck -check-prefix=CHECK-INST %s
+# RUN:     | FileCheck -check-prefixes=CHECK-EXPAND,CHECK-INST %s
 # RUN: llvm-mc %s -triple=riscv64 \
-# RUN:     | FileCheck -check-prefix=CHECK-ALIAS %s
+# RUN:     | FileCheck -check-prefixes=CHECK-EXPAND,CHECK-ALIAS %s
 # RUN: llvm-mc -filetype=obj -triple riscv32 < %s \
 # RUN:     | llvm-objdump -d -riscv-no-aliases - \
-# RUN:     | FileCheck -check-prefix=CHECK-INST %s
+# RUN:     | FileCheck -check-prefixes=CHECK-EXPAND,CHECK-INST %s
 # RUN: llvm-mc -filetype=obj -triple riscv32 < %s \
 # RUN:     | llvm-objdump -d - \
-# RUN:     | FileCheck -check-prefix=CHECK-ALIAS %s
+# RUN:     | FileCheck -check-prefixes=CHECK-EXPAND,CHECK-ALIAS %s
 # RUN: llvm-mc -filetype=obj -triple riscv64 < %s \
 # RUN:     | llvm-objdump -d -riscv-no-aliases - \
-# RUN:     | FileCheck -check-prefix=CHECK-INST %s
+# RUN:     | FileCheck -check-prefixes=CHECK-EXPAND,CHECK-INST %s
 # RUN: llvm-mc -filetype=obj -triple riscv64 < %s \
 # RUN:     | llvm-objdump -d - \
-# RUN:     | FileCheck -check-prefix=CHECK-ALIAS %s
+# RUN:     | FileCheck -check-prefixes=CHECK-EXPAND,CHECK-ALIAS %s
+
+# The following check prefixes are used in this test:
+# CHECK-INST.....Match the canonical instr (tests alias to instr. mapping)
+# CHECK-ALIAS....Match the alias (tests instr. to alias mapping)
+# CHECK-EXPAND...Match canonical instr. unconditionally (tests alias expansion)
 
 # TODO la
 # TODO lb lh lw
@@ -26,10 +31,13 @@
 # CHECK-INST: addi zero, zero, 0
 # CHECK-ALIAS: nop
 nop
-# TODO li
+
 # CHECK-INST: addi t6, zero, 0
 # CHECK-ALIAS: mv t6, zero
 mv x31, zero
+# CHECK-INST: addi a2, a3, 0
+# CHECK-ALIAS: mv a2, a3
+move a2,a3
 # CHECK-INST: xori t6, ra, -1
 # CHECK-ALIAS: not t6, ra
 not x31, x1
@@ -48,6 +56,13 @@ sltz x31, x1
 # CHECK-INST: slt t6, zero, ra
 # CHECK-ALIAS: sgtz t6, ra
 sgtz x31, x1
+
+# CHECK-INST: slt ra, gp, sp
+# CHECK-ALIAS: slt ra, gp, sp
+sgt x1, x2, x3
+# CHECK-INST: sltu tp, t1, t0
+# CHECK-ALIAS: sltu tp, t1, t0
+sgtu x4, x5, x6
 
 # CHECK-INST: beq a0, zero, 512
 # CHECK-ALIAS: beqz a0, 512
@@ -143,3 +158,49 @@ sfence.vma
 # CHECK-INST: sfence.vma a0, zero
 # CHECK-ALIAS: sfence.vma a0
 sfence.vma a0
+
+# The following aliases are accepted as input but the canonical form
+# of the instruction will always be printed.
+# CHECK-INST: addi a2, a3, 4
+# CHECK-ALIAS: addi a2, a3, 4
+add a2,a3,4
+
+# CHECK-INST: andi a2, a3, 4
+# CHECK-ALIAS: andi a2, a3, 4
+and a2,a3,4
+
+# CHECK-INST: xori a2, a3, 4
+# CHECK-ALIAS: xori a2, a3, 4
+xor a2,a3,4
+
+# CHECK-INST: ori a2, a3, 4
+# CHECK-ALIAS: ori a2, a3, 4
+or a2,a3,4
+
+# CHECK-INST: slli a2, a3, 4
+# CHECK-ALIAS: slli a2, a3, 4
+sll a2,a3,4
+
+# CHECK-INST: srli a2, a3, 4
+# CHECK-ALIAS: srli a2, a3, 4
+srl a2,a3,4
+
+# CHECK-INST: srai a2, a3, 4
+# CHECK-ALIAS: srai a2, a3, 4
+sra a2,a3,4
+
+# CHECK-INST: slti a2, a3, 4
+# CHECK-ALIAS: slti a2, a3, 4
+slt a2,a3,4
+
+# CHECK-INST: sltiu a2, a3, 4
+# CHECK-ALIAS: sltiu a2, a3, 4
+sltu a2,a3,4
+
+# CHECK-INST: ebreak
+# CHECK-ALIAS: ebreak
+sbreak
+
+# CHECK-INST: ecall
+# CHECK-ALIAS: ecall
+scall

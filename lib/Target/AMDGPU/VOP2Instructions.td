@@ -425,11 +425,11 @@ defm V_MBCNT_LO_U32_B32 : VOP2Inst <"v_mbcnt_lo_u32_b32", VOP_NO_EXT<VOP_I32_I32
 defm V_MBCNT_HI_U32_B32 : VOP2Inst <"v_mbcnt_hi_u32_b32", VOP_NO_EXT<VOP_I32_I32_I32>, int_amdgcn_mbcnt_hi>;
 defm V_LDEXP_F32 : VOP2Inst <"v_ldexp_f32", VOP_NO_EXT<VOP_F32_F32_I32>, AMDGPUldexp>;
 defm V_CVT_PKACCUM_U8_F32 : VOP2Inst <"v_cvt_pkaccum_u8_f32", VOP_NO_EXT<VOP_I32_F32_I32>>; // TODO: set "Uses = dst"
-defm V_CVT_PKNORM_I16_F32 : VOP2Inst <"v_cvt_pknorm_i16_f32", VOP_NO_EXT<VOP_I32_F32_F32>, AMDGPUpknorm_i16_f32>;
-defm V_CVT_PKNORM_U16_F32 : VOP2Inst <"v_cvt_pknorm_u16_f32", VOP_NO_EXT<VOP_I32_F32_F32>, AMDGPUpknorm_u16_f32>;
-defm V_CVT_PKRTZ_F16_F32 : VOP2Inst <"v_cvt_pkrtz_f16_f32", VOP_NO_EXT<VOP_I32_F32_F32>, AMDGPUpkrtz_f16_f32>;
-defm V_CVT_PK_U16_U32 : VOP2Inst <"v_cvt_pk_u16_u32", VOP_NO_EXT<VOP_I32_I32_I32>, AMDGPUpk_u16_u32>;
-defm V_CVT_PK_I16_I32 : VOP2Inst <"v_cvt_pk_i16_i32", VOP_NO_EXT<VOP_I32_I32_I32>, AMDGPUpk_i16_i32>;
+defm V_CVT_PKNORM_I16_F32 : VOP2Inst <"v_cvt_pknorm_i16_f32", VOP_NO_EXT<VOP_V2I16_F32_F32>, AMDGPUpknorm_i16_f32>;
+defm V_CVT_PKNORM_U16_F32 : VOP2Inst <"v_cvt_pknorm_u16_f32", VOP_NO_EXT<VOP_V2I16_F32_F32>, AMDGPUpknorm_u16_f32>;
+defm V_CVT_PKRTZ_F16_F32 : VOP2Inst <"v_cvt_pkrtz_f16_f32", VOP_NO_EXT<VOP_V2F16_F32_F32>, AMDGPUpkrtz_f16_f32>;
+defm V_CVT_PK_U16_U32 : VOP2Inst <"v_cvt_pk_u16_u32", VOP_NO_EXT<VOP_V2I16_I32_I32>, AMDGPUpk_u16_u32>;
+defm V_CVT_PK_I16_I32 : VOP2Inst <"v_cvt_pk_i16_i32", VOP_NO_EXT<VOP_V2I16_I32_I32>, AMDGPUpk_i16_i32>;
 
 } // End SubtargetPredicate = isGCN
 
@@ -490,6 +490,19 @@ defm V_MAC_F16 : VOP2Inst <"v_mac_f16", VOP_MAC_F16>;
 } // End isCommutable = 1
 
 } // End SubtargetPredicate = Has16BitInsts
+
+let SubtargetPredicate = HasDLInsts in {
+
+defm V_XNOR_B32 : VOP2Inst <"v_xnor_b32", VOP_I32_I32_I32>;
+
+let Constraints = "$vdst = $src2",
+    DisableEncoding="$src2",
+    isConvertibleToThreeAddress = 1,
+    isCommutable = 1 in {
+defm V_FMAC_F32 : VOP2Inst <"v_fmac_f32", VOP_MAC_F32>;
+}
+
+} // End SubtargetPredicate = HasDLInsts
 
 // Note: 16-bit instructions produce a 0 result in the high 16-bits.
 multiclass Arithmetic_i16_Pats <SDPatternOperator op, Instruction inst> {
@@ -944,3 +957,10 @@ def : SI2_VI3Alias <"v_cvt_pknorm_u16_f32", V_CVT_PKNORM_U16_F32_e64_vi>;
 def : SI2_VI3Alias <"v_cvt_pkrtz_f16_f32", V_CVT_PKRTZ_F16_F32_e64_vi>;
 
 } // End SubtargetPredicate = isVI
+
+let SubtargetPredicate = HasDLInsts in {
+
+defm V_FMAC_F32 : VOP2_Real_e32e64_vi <0x3b>;
+defm V_XNOR_B32 : VOP2_Real_e32e64_vi <0x3d>;
+
+} // End SubtargetPredicate = HasDLInsts

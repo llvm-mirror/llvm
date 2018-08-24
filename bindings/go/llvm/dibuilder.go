@@ -14,7 +14,7 @@
 package llvm
 
 /*
-#include "DIBuilderBindings.h"
+#include "IRBindings.h"
 #include <stdlib.h>
 */
 import "C"
@@ -297,8 +297,9 @@ func (d *DIBuilder) CreateBasicType(t DIBasicType) Metadata {
 		d.ref,
 		name,
 		C.size_t(len(t.Name)),
-		C.unsigned(t.SizeInBits),
+		C.uint64_t(t.SizeInBits),
 		C.unsigned(t.Encoding),
+		C.LLVMDIFlags(0),
 	)
 	return Metadata{C: result}
 }
@@ -319,8 +320,8 @@ func (d *DIBuilder) CreatePointerType(t DIPointerType) Metadata {
 	result := C.LLVMDIBuilderCreatePointerType(
 		d.ref,
 		t.Pointee.C,
-		C.unsigned(t.SizeInBits),
-		C.unsigned(t.AlignInBits),
+		C.uint64_t(t.SizeInBits),
+		C.uint32_t(t.AlignInBits),
 		C.unsigned(t.AddressSpace),
 		name,
 		C.size_t(len(t.Name)),
@@ -381,8 +382,8 @@ func (d *DIBuilder) CreateStructType(scope Metadata, t DIStructType) Metadata {
 		C.size_t(len(t.Name)),
 		t.File.C,
 		C.unsigned(t.Line),
-		C.unsigned(t.SizeInBits),
-		C.unsigned(t.AlignInBits),
+		C.uint64_t(t.SizeInBits),
+		C.uint32_t(t.AlignInBits),
 		C.LLVMDIFlags(t.Flags),
 		t.DerivedFrom.C,
 		elements,
@@ -424,8 +425,8 @@ func (d *DIBuilder) CreateReplaceableCompositeType(scope Metadata, t DIReplaceab
 		t.File.C,
 		C.unsigned(t.Line),
 		C.unsigned(t.RuntimeLang),
-		C.unsigned(t.SizeInBits),
-		C.unsigned(t.AlignInBits),
+		C.uint64_t(t.SizeInBits),
+		C.uint32_t(t.AlignInBits),
 		C.LLVMDIFlags(t.Flags),
 		uniqueID,
 		C.size_t(len(t.UniqueID)),
@@ -456,9 +457,9 @@ func (d *DIBuilder) CreateMemberType(scope Metadata, t DIMemberType) Metadata {
 		C.size_t(len(t.Name)),
 		t.File.C,
 		C.unsigned(t.Line),
-		C.unsigned(t.SizeInBits),
-		C.unsigned(t.AlignInBits),
-		C.unsigned(t.OffsetInBits),
+		C.uint64_t(t.SizeInBits),
+		C.uint32_t(t.AlignInBits),
+		C.uint64_t(t.OffsetInBits),
 		C.LLVMDIFlags(t.Flags),
 		t.Type.C,
 	)
@@ -488,8 +489,8 @@ func (d *DIBuilder) CreateArrayType(t DIArrayType) Metadata {
 	subscripts, length := llvmMetadataRefs(subscriptsSlice)
 	result := C.LLVMDIBuilderCreateArrayType(
 		d.ref,
-		C.unsigned(t.SizeInBits),
-		C.unsigned(t.AlignInBits),
+		C.uint64_t(t.SizeInBits),
+		C.uint32_t(t.AlignInBits),
 		t.ElementType.C,
 		subscripts,
 		length,
@@ -514,6 +515,7 @@ func (d *DIBuilder) CreateTypedef(t DITypedef) Metadata {
 		d.ref,
 		t.Type.C,
 		name,
+		C.size_t(len(t.Name)),
 		t.File.C,
 		C.unsigned(t.Line),
 		t.Context.C,
@@ -584,4 +586,18 @@ func boolToCInt(v bool) C.int {
 		return 1
 	}
 	return 0
+}
+
+//-------------------------------------------------------------------------
+// llvm.Metadata
+//-------------------------------------------------------------------------
+
+func (c Context) TemporaryMDNode(mds []Metadata) (md Metadata) {
+	ptr, nvals := llvmMetadataRefs(mds)
+	md.C = C.LLVMTemporaryMDNode(c.C, ptr, C.size_t(nvals))
+	return
+}
+
+func (md Metadata) ReplaceAllUsesWith(new Metadata) {
+	C.LLVMMetadataReplaceAllUsesWith(md.C, new.C)
 }

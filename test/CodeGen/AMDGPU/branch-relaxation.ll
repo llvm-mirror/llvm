@@ -431,11 +431,17 @@ endif:
 ; si_mask_branch
 
 ; GCN-LABEL: {{^}}analyze_mask_branch:
-; GCN: v_cmp_lt_f32_e32 vcc
-; GCN-NEXT: s_and_saveexec_b64 [[MASK:s\[[0-9]+:[0-9]+\]]], vcc
+; GCN: v_cmp_nlt_f32_e32 vcc
+; GCN-NEXT: s_and_saveexec_b64 [[TEMP_MASK:s\[[0-9]+:[0-9]+\]]], vcc
+; GCN-NEXT: s_xor_b64  [[MASK:s\[[0-9]+:[0-9]+\]]], exec, [[TEMP_MASK]]
+; GCN-NEXT: ; mask branch [[FLOW:BB[0-9]+_[0-9]+]]
+
+; GCN: [[FLOW]]: ; %Flow
+; GCN-NEXT: s_or_saveexec_b64 [[TEMP_MASK1:s\[[0-9]+:[0-9]+\]]], [[MASK]]
+; GCN-NEXT: s_xor_b64 exec, exec, [[TEMP_MASK1]]
 ; GCN-NEXT: ; mask branch [[RET:BB[0-9]+_[0-9]+]]
 
-; GCN-NEXT: [[LOOP_BODY:BB[0-9]+_[0-9]+]]: ; %loop_body
+; GCN: [[LOOP_BODY:BB[0-9]+_[0-9]+]]: ; %loop
 ; GCN: ;;#ASMSTART
 ; GCN: v_nop_e64
 ; GCN: v_nop_e64
@@ -444,17 +450,16 @@ endif:
 ; GCN: v_nop_e64
 ; GCN: v_nop_e64
 ; GCN: ;;#ASMEND
+; GCN: s_cbranch_vccz [[RET]]
 
-; GCN-NEXT: [[LONGBB:BB[0-9]+_[0-9]+]]: ; %loop_body
+; GCN-NEXT: [[LONGBB:BB[0-9]+_[0-9]+]]: ; %loop
 ; GCN-NEXT: ; in Loop: Header=[[LOOP_BODY]] Depth=1
 ; GCN-NEXT: s_getpc_b64 vcc
 ; GCN-NEXT: s_sub_u32 vcc_lo, vcc_lo, ([[LONGBB]]+4)-[[LOOP_BODY]]
 ; GCN-NEXT: s_subb_u32 vcc_hi, vcc_hi, 0
 ; GCN-NEXT: s_setpc_b64 vcc
 
-; GCN-NEXT: [[RET]]: ; %ret
-; GCN-NEXT: s_or_b64 exec, exec, [[MASK]]
-; GCN: buffer_store_dword
+; GCN-NEXT: [[RET]]: ; %UnifiedReturnBlock
 ; GCN-NEXT: s_endpgm
 define amdgpu_kernel void @analyze_mask_branch() #0 {
 entry:
@@ -485,7 +490,7 @@ ret:
 
 ; GCN-LABEL: {{^}}long_branch_hang:
 ; GCN: s_cmp_lt_i32 s{{[0-9]+}}, 6
-; GCN-NEXT: s_cbranch_scc1 {{BB[0-9]+_[0-9]+}}
+; GCN: s_cbranch_scc1 {{BB[0-9]+_[0-9]+}}
 ; GCN-NEXT: s_branch [[LONG_BR_0:BB[0-9]+_[0-9]+]]
 ; GCN-NEXT: BB{{[0-9]+_[0-9]+}}:
 

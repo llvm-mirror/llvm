@@ -80,7 +80,7 @@ identifiers, for different purposes:
    characters may be escaped using ``"\xx"`` where ``xx`` is the ASCII
    code for the character in hexadecimal. In this way, any character can
    be used in a name value, even quotes themselves. The ``"\01"`` prefix
-   can be used on global variables to suppress mangling.
+   can be used on global values to suppress mangling.
 #. Unnamed values are represented as an unsigned numeric value with
    their prefix. For example, ``%12``, ``@2``, ``%44``.
 #. Constants, which are described in the section Constants_ below.
@@ -1048,7 +1048,7 @@ Currently, only the following parameter attributes are defined:
 
     When the call site is reached, the argument allocation must have
     been the most recent stack allocation that is still live, or the
-    results are undefined. It is possible to allocate additional stack
+    behavior is undefined. It is possible to allocate additional stack
     space after an argument allocation and before its call site, but it
     must be cleared off with :ref:`llvm.stackrestore
     <int_stackrestore>`.
@@ -1122,9 +1122,8 @@ Currently, only the following parameter attributes are defined:
 ``nonnull``
     This indicates that the parameter or return pointer is not null. This
     attribute may only be applied to pointer typed parameters. This is not
-    checked or enforced by LLVM, the caller must ensure that the pointer
-    passed in is non-null, or the callee must ensure that the returned pointer
-    is non-null.
+    checked or enforced by LLVM; if the parameter or return pointer is null,
+    the behavior is undefined.
 
 ``dereferenceable(<n>)``
     This indicates that the parameter or return pointer is dereferenceable. This
@@ -1387,11 +1386,13 @@ example:
 ``inaccessiblememonly``
     This attribute indicates that the function may only access memory that
     is not accessible by the module being compiled. This is a weaker form
-    of ``readnone``.
+    of ``readnone``. If the function reads or writes other memory, the
+    behavior is undefined.
 ``inaccessiblemem_or_argmemonly``
     This attribute indicates that the function may only access memory that is
     either not accessible by the module being compiled, or is pointed to
-    by its pointer arguments. This is a weaker form of  ``argmemonly``
+    by its pointer arguments. This is a weaker form of  ``argmemonly``. If the
+    function reads or writes other memory, the behavior is undefined.
 ``inlinehint``
     This attribute indicates that the source code contained a hint that
     inlining this function is desirable (such as the "inline" keyword in
@@ -1461,6 +1462,14 @@ example:
     trap or generate asynchronous exceptions. Exception handling schemes
     that are recognized by LLVM to handle asynchronous exceptions, such
     as SEH, will still provide their implementation defined semantics.
+``"null-pointer-is-valid"``
+   If ``"null-pointer-is-valid"`` is set to ``"true"``, then ``null`` address
+   in address-space 0 is considered to be a valid address for memory loads and
+   stores. Any analysis or optimization should not treat dereferencing a
+   pointer to ``null`` as undefined behavior in this function.
+   Note: Comparing address of a global variable to ``null`` may still
+   evaluate to false because of a limitation in querying this attribute inside
+   constant expressions.
 ``optforfuzzing``
     This attribute indicates that this function should be optimized
     for maximum fuzzing signal.
@@ -1534,6 +1543,10 @@ example:
     On an argument, this attribute indicates that the function does not
     dereference that pointer argument, even though it may read or write the
     memory that the pointer points to if accessed through other pointers.
+
+    If a readnone function reads or writes memory visible to the program, or
+    has other side-effects, the behavior is undefined. If a function reads from
+    or writes to a readnone pointer argument, the behavior is undefined.
 ``readonly``
     On a function, this attribute indicates that the function does not write
     through any pointer arguments (including ``byval`` arguments) or otherwise
@@ -1549,6 +1562,10 @@ example:
     On an argument, this attribute indicates that the function does not write
     through this pointer argument, even though it may write to the memory that
     the pointer points to.
+
+    If a readonly function writes memory visible to the program, or
+    has other side-effects, the behavior is undefined. If a function writes to
+    a readonly pointer argument, the behavior is undefined.
 ``"stack-probe-size"``
     This attribute controls the behavior of stack probes: either
     the ``"probe-stack"`` attribute, or ABI-required stack probes, if any.
@@ -1573,14 +1590,22 @@ example:
     On an argument, this attribute indicates that the function may write to but
     does not read through this pointer argument (even though it may read from
     the memory that the pointer points to).
+
+    If a writeonly function reads memory visible to the program, or
+    has other side-effects, the behavior is undefined. If a function reads
+    from a writeonly pointer argument, the behavior is undefined.
 ``argmemonly``
     This attribute indicates that the only memory accesses inside function are
     loads and stores from objects pointed to by its pointer-typed arguments,
     with arbitrary offsets. Or in other words, all memory operations in the
     function can refer to memory only using pointers based on its function
     arguments.
+
     Note that ``argmemonly`` can be used together with ``readonly`` attribute
     in order to specify that function reads only from its arguments.
+
+    If an argmemonly function reads or writes memory other than the pointer
+    arguments, or has other side-effects, the behavior is undefined.
 ``returns_twice``
     This attribute indicates that this function can return twice. The C
     ``setjmp`` is an example of such a function. The compiler disables
@@ -1703,10 +1728,10 @@ example:
     the ELF x86-64 abi, but it can be disabled for some compilation
     units.
 ``nocf_check``
-    This attribute indicates that no control-flow check will be perfomed on
+    This attribute indicates that no control-flow check will be performed on
     the attributed entity. It disables -fcf-protection=<> for a specific
     entity to fine grain the HW control flow protection mechanism. The flag
-    is target independant and currently appertains to a function or function
+    is target independent and currently appertains to a function or function
     pointer.
 ``shadowcallstack``
     This attribute indicates that the ShadowCallStack checks are enabled for
@@ -2312,15 +2337,7 @@ The default LLVM floating-point environment assumes that floating-point
 instructions do not have side effects. Results assume the round-to-nearest
 rounding mode. No floating-point exception state is maintained in this
 environment. Therefore, there is no attempt to create or preserve invalid
-operation (SNaN) or division-by-zero exceptions in these examples:
-
-.. code-block:: llvm
-
-      %A = fdiv 0x7ff0000000000001, %X  ; 64-bit SNaN hex value 
-      %B = fdiv %X, 0.0
-    Safe:
-      %A = NaN
-      %B = NaN
+operation (SNaN) or division-by-zero exceptions.
 
 The benefit of this exception-free assumption is that floating-point
 operations may be speculated freely without any other fast-math relaxations
@@ -2342,13 +2359,13 @@ floating-point transformations.
 
 ``nnan``
    No NaNs - Allow optimizations to assume the arguments and result are not
-   NaN. Such optimizations are required to retain defined behavior over
-   NaNs, but the value of the result is undefined.
+   NaN. If an argument is a nan, or the result would be a nan, it produces
+   a :ref:`poison value <poisonvalues>` instead.
 
 ``ninf``
    No Infs - Allow optimizations to assume the arguments and result are not
-   +/-Inf. Such optimizations are required to retain defined behavior over
-   +/-Inf, but the value of the result is undefined.
+   +/-Inf. If an argument is +/-Inf, or the result would be +/-Inf, it
+   produces a :ref:`poison value <poisonvalues>` instead.
 
 ``nsz``
    No Signed Zeros - Allow optimizations to treat the sign of a zero
@@ -3275,25 +3292,25 @@ The following is the syntax for constant expressions:
     integer constant. TYPE must be a scalar or vector integer type. CST
     must be of scalar or vector floating-point type. Both CST and TYPE
     must be scalars, or vectors of the same number of elements. If the
-    value won't fit in the integer type, the results are undefined.
+    value won't fit in the integer type, the result is a
+    :ref:`poison value <poisonvalues>`.
 ``fptosi (CST to TYPE)``
     Convert a floating-point constant to the corresponding signed
     integer constant. TYPE must be a scalar or vector integer type. CST
     must be of scalar or vector floating-point type. Both CST and TYPE
     must be scalars, or vectors of the same number of elements. If the
-    value won't fit in the integer type, the results are undefined.
+    value won't fit in the integer type, the result is a
+    :ref:`poison value <poisonvalues>`.
 ``uitofp (CST to TYPE)``
     Convert an unsigned integer constant to the corresponding 
     floating-point constant. TYPE must be a scalar or vector floating-point
     type.  CST must be of scalar or vector integer type. Both CST and TYPE must
-    be scalars, or vectors of the same number of elements. If the value
-    won't fit in the floating-point type, the results are undefined.
+    be scalars, or vectors of the same number of elements.
 ``sitofp (CST to TYPE)``
     Convert a signed integer constant to the corresponding floating-point
     constant. TYPE must be a scalar or vector floating-point type.
     CST must be of scalar or vector integer type. Both CST and TYPE must
-    be scalars, or vectors of the same number of elements. If the value
-    won't fit in the floating-point type, the results are undefined.
+    be scalars, or vectors of the same number of elements.
 ``ptrtoint (CST to TYPE)``
     Perform the :ref:`ptrtoint operation <i_ptrtoint>` on constants.
 ``inttoptr (CST to TYPE)``
@@ -4375,7 +4392,7 @@ DISubrange
 - ``count: !9`` describes the count with a :ref:`DILocalVariable`.
 - ``count: !11`` describes the count with a :ref:`DIGlobalVariable`.
 
-.. code-block:: llvm
+.. code-block:: text
 
     !0 = !DISubrange(count: 5, lowerBound: 0) ; array counting from 0
     !1 = !DISubrange(count: 5, lowerBound: 1) ; array counting from 1
@@ -4383,17 +4400,17 @@ DISubrange
 
     ; Scopes used in rest of example
     !6 = !DIFile(filename: "vla.c", directory: "/path/to/file")
-    !7 = distinct !DICompileUnit(language: DW_LANG_C99, ...
-    !8 = distinct !DISubprogram(name: "foo", scope: !7, file: !6, line: 5, ...
+    !7 = distinct !DICompileUnit(language: DW_LANG_C99, file: !6)
+    !8 = distinct !DISubprogram(name: "foo", scope: !7, file: !6, line: 5)
 
     ; Use of local variable as count value
     !9 = !DIBasicType(name: "int", size: 32, encoding: DW_ATE_signed)
     !10 = !DILocalVariable(name: "count", scope: !8, file: !6, line: 42, type: !9)
-    !11 = !DISubrange(count !10, lowerBound: 0)
+    !11 = !DISubrange(count: !10, lowerBound: 0)
 
     ; Use of global variable as count value
     !12 = !DIGlobalVariable(name: "count", scope: !8, file: !6, line: 22, type: !9)
-    !13 = !DISubrange(count !12, lowerBound: 0)
+    !13 = !DISubrange(count: !12, lowerBound: 0)
 
 .. _DIEnumerator:
 
@@ -4403,7 +4420,7 @@ DIEnumerator
 ``DIEnumerator`` nodes are the elements for ``DW_TAG_enumeration_type``
 variants of :ref:`DICompositeType`.
 
-.. code-block:: llvm
+.. code-block:: text
 
     !0 = !DIEnumerator(name: "SixKind", value: 7)
     !1 = !DIEnumerator(name: "SevenKind", value: 7)
@@ -4416,7 +4433,7 @@ DITemplateTypeParameter
 language constructs. They are used (optionally) in :ref:`DICompositeType` and
 :ref:`DISubprogram` ``templateParams:`` fields.
 
-.. code-block:: llvm
+.. code-block:: text
 
     !0 = !DITemplateTypeParameter(name: "Ty", type: !1)
 
@@ -4429,7 +4446,7 @@ but if specified can also be set to ``DW_TAG_GNU_template_template_param`` or
 ``DW_TAG_GNU_template_param_pack``. They are used (optionally) in
 :ref:`DICompositeType` and :ref:`DISubprogram` ``templateParams:`` fields.
 
-.. code-block:: llvm
+.. code-block:: text
 
     !0 = !DITemplateValueParameter(name: "Ty", type: !1, value: i32 7)
 
@@ -4438,7 +4455,7 @@ DINamespace
 
 ``DINamespace`` nodes represent namespaces in the source language.
 
-.. code-block:: llvm
+.. code-block:: text
 
     !0 = !DINamespace(name: "myawesomeproject", scope: !1, file: !2, line: 7)
 
@@ -4449,7 +4466,7 @@ DIGlobalVariable
 
 ``DIGlobalVariable`` nodes represent global variables in the source language.
 
-.. code-block:: llvm
+.. code-block:: text
 
     !0 = !DIGlobalVariable(name: "foo", linkageName: "foo", scope: !1,
                            file: !2, line: 7, type: !3, isLocal: true,
@@ -4520,7 +4537,7 @@ DILexicalBlockFile
 indicate textual inclusion, or the ``discriminator:`` field can be used to
 discriminate between control flow within a single block in the source language.
 
-.. code-block:: llvm
+.. code-block:: text
 
     !0 = !DILexicalBlock(scope: !3, file: !4, line: 7, column: 35)
     !1 = !DILexicalBlockFile(scope: !0, file: !4, discriminator: 0)
@@ -4535,7 +4552,7 @@ DILocation
 mandatory, and points at an :ref:`DILexicalBlockFile`, an
 :ref:`DILexicalBlock`, or an :ref:`DISubprogram`.
 
-.. code-block:: llvm
+.. code-block:: text
 
     !0 = !DILocation(line: 2900, column: 42, scope: !1, inlinedAt: !2)
 
@@ -4563,9 +4580,12 @@ DIExpression
 ``DIExpression`` nodes represent expressions that are inspired by the DWARF
 expression language. They are used in :ref:`debug intrinsics<dbg_intrinsics>`
 (such as ``llvm.dbg.declare`` and ``llvm.dbg.value``) to describe how the
-referenced LLVM variable relates to the source language variable.
+referenced LLVM variable relates to the source language variable. Debug
+intrinsics are interpreted left-to-right: start by pushing the value/address
+operand of the intrinsic onto a stack, then repeatedly push and evaluate
+opcodes from the DIExpression until the final variable description is produced.
 
-The current supported vocabulary is limited:
+The current supported opcode vocabulary is limited:
 
 - ``DW_OP_deref`` dereferences the top of the expression stack.
 - ``DW_OP_plus`` pops the last two entries from the expression stack, adds
@@ -4585,12 +4605,30 @@ The current supported vocabulary is limited:
 - ``DW_OP_stack_value`` marks a constant value.
 
 DWARF specifies three kinds of simple location descriptions: Register, memory,
-and implicit location descriptions. Register and memory location descriptions
-describe the *location* of a source variable (in the sense that a debugger might
-modify its value), whereas implicit locations describe merely the *value* of a
-source variable. DIExpressions also follow this model: A DIExpression that
-doesn't have a trailing ``DW_OP_stack_value`` will describe an *address* when
-combined with a concrete location.
+and implicit location descriptions.  Note that a location description is
+defined over certain ranges of a program, i.e the location of a variable may
+change over the course of the program. Register and memory location
+descriptions describe the *concrete location* of a source variable (in the
+sense that a debugger might modify its value), whereas *implicit locations*
+describe merely the actual *value* of a source variable which might not exist
+in registers or in memory (see ``DW_OP_stack_value``).
+
+A ``llvm.dbg.addr`` or ``llvm.dbg.declare`` intrinsic describes an indirect
+value (the address) of a source variable. The first operand of the intrinsic
+must be an address of some kind. A DIExpression attached to the intrinsic
+refines this address to produce a concrete location for the source variable.
+
+A ``llvm.dbg.value`` intrinsic describes the direct value of a source variable.
+The first operand of the intrinsic may be a direct or indirect value. A
+DIExpresion attached to the intrinsic refines the first operand to produce a
+direct value. For example, if the first operand is an indirect value, it may be
+necessary to insert ``DW_OP_deref`` into the DIExpresion in order to produce a
+valid debug intrinsic.
+
+.. note::
+
+   A DIExpression is interpreted in the same way regardless of which kind of
+   debug intrinsic it's attached to.
 
 .. code-block:: text
 
@@ -4607,7 +4645,7 @@ DIObjCProperty
 
 ``DIObjCProperty`` nodes represent Objective-C property nodes.
 
-.. code-block:: llvm
+.. code-block:: text
 
     !3 = !DIObjCProperty(name: "foo", file: !1, line: 7, setter: "setFoo",
                          getter: "getFoo", attributes: 7, type: !2)
@@ -4742,7 +4780,7 @@ As a concrete example, the type descriptor graph for the following program
     void f(struct Outer* outer, struct Inner* inner, float* f, int* i, char* c) {
       outer->f = 0;            // tag0: (OuterStructTy, FloatScalarTy, 0)
       outer->inner_a.i = 0;    // tag1: (OuterStructTy, IntScalarTy, 12)
-      outer->inner_a.f = 0.0;  // tag2: (OuterStructTy, IntScalarTy, 16)
+      outer->inner_a.f = 0.0;  // tag2: (OuterStructTy, FloatScalarTy, 16)
       *f = 0.0;                // tag3: (FloatScalarTy, FloatScalarTy, 0)
     }
 
@@ -4933,10 +4971,11 @@ representing the maximum relative error, for example:
 
 ``range`` metadata may be attached only to ``load``, ``call`` and ``invoke`` of
 integer types. It expresses the possible ranges the loaded value or the value
-returned by the called function at this call site is in. The ranges are
-represented with a flattened list of integers. The loaded value or the value
-returned is known to be in the union of the ranges defined by each consecutive
-pair. Each pair has the following properties:
+returned by the called function at this call site is in. If the loaded or
+returned value is not in the specified range, the behavior is undefined. The
+ranges are represented with a flattened list of integers. The loaded value or
+the value returned is known to be in the union of the ranges defined by each
+consecutive pair. Each pair has the following properties:
 
 -  The type must match the type loaded by the instruction.
 -  The pair ``a,b`` represents the range ``[a,b)``.
@@ -5171,6 +5210,59 @@ For example:
 
    !0 = !{!"llvm.loop.unroll.full"}
 
+'``llvm.loop.unroll_and_jam``'
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This metadata is treated very similarly to the ``llvm.loop.unroll`` metadata
+above, but affect the unroll and jam pass. In addition any loop with
+``llvm.loop.unroll`` metadata but no ``llvm.loop.unroll_and_jam`` metadata will
+disable unroll and jam (so ``llvm.loop.unroll`` metadata will be left to the
+unroller, plus ``llvm.loop.unroll.disable`` metadata will disable unroll and jam
+too.)
+
+The metadata for unroll and jam otherwise is the same as for ``unroll``.
+``llvm.loop.unroll_and_jam.enable``, ``llvm.loop.unroll_and_jam.disable`` and
+``llvm.loop.unroll_and_jam.count`` do the same as for unroll.
+``llvm.loop.unroll_and_jam.full`` is not supported. Again these are only hints
+and the normal safety checks will still be performed.
+
+'``llvm.loop.unroll_and_jam.count``' Metadata
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This metadata suggests an unroll and jam factor to use, similarly to
+``llvm.loop.unroll.count``. The first operand is the string
+``llvm.loop.unroll_and_jam.count`` and the second operand is a positive integer
+specifying the unroll factor. For example:
+
+.. code-block:: llvm
+
+   !0 = !{!"llvm.loop.unroll_and_jam.count", i32 4}
+
+If the trip count of the loop is less than the unroll count the loop
+will be partially unroll and jammed.
+
+'``llvm.loop.unroll_and_jam.disable``' Metadata
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This metadata disables loop unroll and jamming. The metadata has a single
+operand which is the string ``llvm.loop.unroll_and_jam.disable``. For example:
+
+.. code-block:: llvm
+
+   !0 = !{!"llvm.loop.unroll_and_jam.disable"}
+
+'``llvm.loop.unroll_and_jam.enable``' Metadata
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This metadata suggests that the loop should be fully unroll and jammed if the
+trip count is known at compile time and partially unrolled if the trip count is
+not known at compile time. The metadata has a single operand which is the
+string ``llvm.loop.unroll_and_jam.enable``.  For example:
+
+.. code-block:: llvm
+
+   !0 = !{!"llvm.loop.unroll_and_jam.enable"}
+
 '``llvm.loop.licm_versioning.disable``' Metadata
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -5314,11 +5406,11 @@ Irreducible loop header weights are typically based on profile data.
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The experimental ``invariant.group`` metadata may be attached to 
-``load``/``store`` instructions.
+``load``/``store`` instructions referencing a single metadata with no entries.
 The existence of the ``invariant.group`` metadata on the instruction tells
 the optimizer that every ``load`` and ``store`` to the same pointer operand
-within the same invariant group can be assumed to load or store the same
-value (but see the ``llvm.invariant.group.barrier`` intrinsic which affects
+can be assumed to load or store the same
+value (but see the ``llvm.launder.invariant.group`` intrinsic which affects
 when two pointers are considered the same). Pointers returned by bitcast or
 getelementptr with only zero indices are considered the same.
 
@@ -5334,7 +5426,6 @@ Examples:
 
    %a = load i8, i8* %ptr, !invariant.group !0 ; Can assume that value under %ptr didn't change
    call void @foo(i8* %ptr)
-   %b = load i8, i8* %ptr, !invariant.group !1 ; Can't assume anything, because group changed
 
    %newPtr = call i8* @getPointer(i8* %ptr)
    %c = load i8, i8* %newPtr, !invariant.group !0 ; Can't assume anything, because we only have information about %ptr
@@ -5343,16 +5434,15 @@ Examples:
    store i8 %unknownValue, i8* %ptr, !invariant.group !0 ; Can assume that %unknownValue == 42
 
    call void @foo(i8* %ptr)
-   %newPtr2 = call i8* @llvm.invariant.group.barrier(i8* %ptr)
-   %d = load i8, i8* %newPtr2, !invariant.group !0  ; Can't step through invariant.group.barrier to get value of %ptr
+   %newPtr2 = call i8* @llvm.launder.invariant.group(i8* %ptr)
+   %d = load i8, i8* %newPtr2, !invariant.group !0  ; Can't step through launder.invariant.group to get value of %ptr
 
    ...
    declare void @foo(i8*)
    declare i8* @getPointer(i8*)
-   declare i8* @llvm.invariant.group.barrier(i8*)
+   declare i8* @llvm.launder.invariant.group(i8*)
 
-   !0 = !{!"magic ptr"}
-   !1 = !{!"other ptr"}
+   !0 = !{}
 
 The invariant.group metadata must be dropped when replacing one pointer by
 another based on aliasing information. This is because invariant.group is tied
@@ -5701,6 +5791,310 @@ assembly writer or object file emitter.
 Each individual option is required to be either a valid option for the target's
 linker, or an option that is reserved by the target specific assembly writer or
 object file emitter. No other aspect of these options is defined by the IR.
+
+.. _summary:
+
+ThinLTO Summary
+===============
+
+Compiling with `ThinLTO <https://clang.llvm.org/docs/ThinLTO.html>`_
+causes the building of a compact summary of the module that is emitted into
+the bitcode. The summary is emitted into the LLVM assembly and identified
+in syntax by a caret ('``^``').
+
+*Note that temporarily the summary entries are skipped when parsing the
+assembly, although the parsing support is actively being implemented. The
+following describes when the summary entries will be parsed once implemented.*
+The summary will be parsed into a ModuleSummaryIndex object under the
+same conditions where summary index is currently built from bitcode.
+Specifically, tools that test the Thin Link portion of a ThinLTO compile
+(i.e. llvm-lto and llvm-lto2), or when parsing a combined index
+for a distributed ThinLTO backend via clang's "``-fthinlto-index=<>``" flag.
+Additionally, it will be parsed into a bitcode output, along with the Module
+IR, via the "``llvm-as``" tool. Tools that parse the Module IR for the purposes
+of optimization (e.g. "``clang -x ir``" and "``opt``"), will ignore the
+summary entries (just as they currently ignore summary entries in a bitcode
+input file).
+
+There are currently 3 types of summary entries in the LLVM assembly:
+:ref:`module paths<module_path_summary>`,
+:ref:`global values<gv_summary>`, and
+:ref:`type identifiers<typeid_summary>`.
+
+.. _module_path_summary:
+
+Module Path Summary Entry
+-------------------------
+
+Each module path summary entry lists a module containing global values included
+in the summary. For a single IR module there will be one such entry, but
+in a combined summary index produced during the thin link, there will be
+one module path entry per linked module with summary.
+
+Example:
+
+.. code-block:: text
+
+    ^0 = module: (path: "/path/to/file.o", hash: (2468601609, 1329373163, 1565878005, 638838075, 3148790418))
+
+The ``path`` field is a string path to the bitcode file, and the ``hash``
+field is the 160-bit SHA-1 hash of the IR bitcode contents, used for
+incremental builds and caching.
+
+.. _gv_summary:
+
+Global Value Summary Entry
+--------------------------
+
+Each global value summary entry corresponds to a global value defined or
+referenced by a summarized module.
+
+Example:
+
+.. code-block:: text
+
+    ^4 = gv: (name: "f"[, summaries: (Summary)[, (Summary)]*]?) ; guid = 14740650423002898831
+
+For declarations, there will not be a summary list. For definitions, a
+global value will contain a list of summaries, one per module containing
+a definition. There can be multiple entries in a combined summary index
+for symbols with weak linkage.
+
+Each ``Summary`` format will depend on whether the global value is a
+:ref:`function<function_summary>`, :ref:`variable<variable_summary>`, or
+:ref:`alias<alias_summary>`.
+
+.. _function_summary:
+
+Function Summary
+^^^^^^^^^^^^^^^^
+
+If the global value is a function, the ``Summary`` entry will look like:
+
+.. code-block:: text
+
+    function: (module: ^0, flags: (linkage: external, notEligibleToImport: 0, live: 0, dsoLocal: 0), insts: 2[, FuncFlags]?[, Calls]?[, TypeIdInfo]?[, Refs]?
+
+The ``module`` field includes the summary entry id for the module containing
+this definition, and the ``flags`` field contains information such as
+the linkage type, a flag indicating whether it is legal to import the
+definition, whether it is globally live and whether the linker resolved it
+to a local definition (the latter two are populated during the thin link).
+The ``insts`` field contains the number of IR instructions in the function.
+Finally, there are several optional fields: :ref:`FuncFlags<funcflags_summary>`,
+:ref:`Calls<calls_summary>`, :ref:`TypeIdInfo<typeidinfo_summary>`,
+:ref:`Refs<refs_summary>`.
+
+.. _variable_summary:
+
+Global Variable Summary
+^^^^^^^^^^^^^^^^^^^^^^^
+
+If the global value is a variable, the ``Summary`` entry will look like:
+
+.. code-block:: text
+
+    variable: (module: ^0, flags: (linkage: external, notEligibleToImport: 0, live: 0, dsoLocal: 0)[, Refs]?
+
+The variable entry contains a subset of the fields in a
+:ref:`function summary <function_summary>`, see the descriptions there.
+
+.. _alias_summary:
+
+Alias Summary
+^^^^^^^^^^^^^
+
+If the global value is an alias, the ``Summary`` entry will look like:
+
+.. code-block:: text
+
+    alias: (module: ^0, flags: (linkage: external, notEligibleToImport: 0, live: 0, dsoLocal: 0), aliasee: ^2)
+
+The ``module`` and ``flags`` fields are as described for a
+:ref:`function summary <function_summary>`. The ``aliasee`` field
+contains a reference to the global value summary entry of the aliasee.
+
+.. _funcflags_summary:
+
+Function Flags
+^^^^^^^^^^^^^^
+
+The optional ``FuncFlags`` field looks like:
+
+.. code-block:: text
+
+    funcFlags: (readNone: 0, readOnly: 0, noRecurse: 0, returnDoesNotAlias: 0)
+
+If unspecified, flags are assumed to hold the conservative ``false`` value of
+``0``.
+
+.. _calls_summary:
+
+Calls
+^^^^^
+
+The optional ``Calls`` field looks like:
+
+.. code-block:: text
+
+    calls: ((Callee)[, (Callee)]*)
+
+where each ``Callee`` looks like:
+
+.. code-block:: text
+
+    callee: ^1[, hotness: None]?[, relbf: 0]?
+
+The ``callee`` refers to the summary entry id of the callee. At most one
+of ``hotness`` (which can take the values ``Unknown``, ``Cold``, ``None``,
+``Hot``, and ``Critical``), and ``relbf`` (which holds the integer
+branch frequency relative to the entry frequency, scaled down by 2^8)
+may be specified. The defaults are ``Unknown`` and ``0``, respectively.
+
+.. _refs_summary:
+
+Refs
+^^^^
+
+The optional ``Refs`` field looks like:
+
+.. code-block:: text
+
+    refs: ((Ref)[, (Ref)]*)
+
+where each ``Ref`` contains a reference to the summary id of the referenced
+value (e.g. ``^1``).
+
+.. _typeidinfo_summary:
+
+TypeIdInfo
+^^^^^^^^^^
+
+The optional ``TypeIdInfo`` field, used for
+`Control Flow Integrity <http://clang.llvm.org/docs/ControlFlowIntegrity.html>`_,
+looks like:
+
+.. code-block:: text
+
+    typeIdInfo: [(TypeTests)]?[, (TypeTestAssumeVCalls)]?[, (TypeCheckedLoadVCalls)]?[, (TypeTestAssumeConstVCalls)]?[, (TypeCheckedLoadConstVCalls)]?
+
+These optional fields have the following forms:
+
+TypeTests
+"""""""""
+
+.. code-block:: text
+
+    typeTests: (TypeIdRef[, TypeIdRef]*)
+
+Where each ``TypeIdRef`` refers to a :ref:`type id<typeid_summary>`
+by summary id or ``GUID``.
+
+TypeTestAssumeVCalls
+""""""""""""""""""""
+
+.. code-block:: text
+
+    typeTestAssumeVCalls: (VFuncId[, VFuncId]*)
+
+Where each VFuncId has the format:
+
+.. code-block:: text
+
+    vFuncId: (TypeIdRef, offset: 16)
+
+Where each ``TypeIdRef`` refers to a :ref:`type id<typeid_summary>`
+by summary id or ``GUID`` preceeded by a ``guid:`` tag.
+
+TypeCheckedLoadVCalls
+"""""""""""""""""""""
+
+.. code-block:: text
+
+    typeCheckedLoadVCalls: (VFuncId[, VFuncId]*)
+
+Where each VFuncId has the format described for ``TypeTestAssumeVCalls``.
+
+TypeTestAssumeConstVCalls
+"""""""""""""""""""""""""
+
+.. code-block:: text
+
+    typeTestAssumeConstVCalls: (ConstVCall[, ConstVCall]*)
+
+Where each ConstVCall has the format:
+
+.. code-block:: text
+
+    VFuncId, args: (Arg[, Arg]*)
+
+and where each VFuncId has the format described for ``TypeTestAssumeVCalls``,
+and each Arg is an integer argument number.
+
+TypeCheckedLoadConstVCalls
+""""""""""""""""""""""""""
+
+.. code-block:: text
+
+    typeCheckedLoadConstVCalls: (ConstVCall[, ConstVCall]*)
+
+Where each ConstVCall has the format described for
+``TypeTestAssumeConstVCalls``.
+
+.. _typeid_summary:
+
+Type ID Summary Entry
+---------------------
+
+Each type id summary entry corresponds to a type identifier resolution
+which is generated during the LTO link portion of the compile when building
+with `Control Flow Integrity <http://clang.llvm.org/docs/ControlFlowIntegrity.html>`_,
+so these are only present in a combined summary index.
+
+Example:
+
+.. code-block:: text
+
+    ^4 = typeid: (name: "_ZTS1A", summary: (typeTestRes: (kind: allOnes, sizeM1BitWidth: 7[, alignLog2: 0]?[, sizeM1: 0]?[, bitMask: 0]?[, inlineBits: 0]?)[, WpdResolutions]?)) ; guid = 7004155349499253778
+
+The ``typeTestRes`` gives the type test resolution ``kind`` (which may
+be ``unsat``, ``byteArray``, ``inline``, ``single``, or ``allOnes``), and
+the ``size-1`` bit width. It is followed by optional flags, which default to 0,
+and an optional WpdResolutions (whole program devirtualization resolution)
+field that looks like:
+
+.. code-block:: text
+
+    wpdResolutions: ((offset: 0, WpdRes)[, (offset: 1, WpdRes)]*
+
+where each entry is a mapping from the given byte offset to the whole-program
+devirtualization resolution WpdRes, that has one of the following formats:
+
+.. code-block:: text
+
+    wpdRes: (kind: branchFunnel)
+    wpdRes: (kind: singleImpl, singleImplName: "_ZN1A1nEi")
+    wpdRes: (kind: indir)
+
+Additionally, each wpdRes has an optional ``resByArg`` field, which
+describes the resolutions for calls with all constant integer arguments:
+
+.. code-block:: text
+
+    resByArg: (ResByArg[, ResByArg]*)
+
+where ResByArg is:
+
+.. code-block:: text
+
+    args: (Arg[, Arg]*), byArg: (kind: UniformRetVal[, info: 0][, byte: 0][, bit: 0])
+
+Where the ``kind`` can be ``Indir``, ``UniformRetVal``, ``UniqueRetVal``
+or ``VirtualConstProp``. The ``info`` field is only used if the kind
+is ``UniformRetVal`` (indicates the uniform return value), or
+``UniqueRetVal`` (holds the return value associated with the unique vtable
+(0 or 1)). The ``byte`` and ``bit`` fields are only used if the target does
+not support the use of absolute symbols to store constants.
 
 .. _intrinsicglobalvariables:
 
@@ -6991,7 +7385,7 @@ by the corresponding shift amount in ``op2``.
 If the ``nuw`` keyword is present, then the shift produces a poison
 value if it shifts out any non-zero bits.
 If the ``nsw`` keyword is present, then the shift produces a poison
-value it shifts out any bits that disagree with the resultant sign bit.
+value if it shifts out any bits that disagree with the resultant sign bit.
 
 Example:
 """"""""
@@ -7293,7 +7687,8 @@ Semantics:
 
 The result is a scalar of the same type as the element type of ``val``.
 Its value is the value at position ``idx`` of ``val``. If ``idx``
-exceeds the length of ``val``, the results are undefined.
+exceeds the length of ``val``, the result is a
+:ref:`poison value <poisonvalues>`.
 
 Example:
 """"""""
@@ -7334,8 +7729,8 @@ Semantics:
 
 The result is a vector of the same type as ``val``. Its element values
 are those of ``val`` except at position ``idx``, where it gets the value
-``elt``. If ``idx`` exceeds the length of ``val``, the results are
-undefined.
+``elt``. If ``idx`` exceeds the length of ``val``, the result
+is a :ref:`poison value <poisonvalues>`.
 
 Example:
 """"""""
@@ -7551,9 +7946,9 @@ memory is automatically released when the function returns. The
 '``alloca``' instruction is commonly used to represent automatic
 variables that must have an address available. When the function returns
 (either with the ``ret`` or ``resume`` instructions), the memory is
-reclaimed. Allocating zero bytes is legal, but the result is undefined.
-The order in which memory is allocated (ie., which way the stack grows)
-is not specified.
+reclaimed. Allocating zero bytes is legal, but the returned pointer may not
+be unique. The order in which memory is allocated (ie., which way the stack
+grows) is not specified.
 
 Example:
 """"""""
@@ -7634,18 +8029,20 @@ metadata name ``<index>`` corresponding to a metadata node with no
 entries. If a load instruction tagged with the ``!invariant.load``
 metadata is executed, the optimizer may assume the memory location
 referenced by the load contains the same value at all points in the
-program where the memory location is known to be dereferenceable.
+program where the memory location is known to be dereferenceable;
+otherwise, the behavior is undefined.
 
 The optional ``!invariant.group`` metadata must reference a single metadata name
- ``<index>`` corresponding to a metadata node. See ``invariant.group`` metadata.
+ ``<index>`` corresponding to a metadata node with no entries.
+ See ``invariant.group`` metadata.
 
 The optional ``!nonnull`` metadata must reference a single
 metadata name ``<index>`` corresponding to a metadata node with no
 entries. The existence of the ``!nonnull`` metadata on the
 instruction tells the optimizer that the value loaded is known to
-never be null. This is analogous to the ``nonnull`` attribute
-on parameters and return values. This metadata can only be applied
-to loads of a pointer type.
+never be null. If the value is null at runtime, the behavior is undefined.
+This is analogous to the ``nonnull`` attribute on parameters and return
+values. This metadata can only be applied to loads of a pointer type.
 
 The optional ``!dereferenceable`` metadata must reference a single metadata
 name ``<deref_bytes_node>`` corresponding to a metadata node with one ``i64``
@@ -7672,7 +8069,8 @@ The existence of the ``!align`` metadata on the instruction tells the
 optimizer that the value loaded is known to be aligned to a boundary specified
 by the integer value in the metadata node. The alignment must be a power of 2.
 This is analogous to the ''align'' attribute on parameters and return values.
-This metadata can only be applied to loads of a pointer type.
+This metadata can only be applied to loads of a pointer type. If the returned
+value is not appropriately aligned at runtime, the behavior is undefined.
 
 Semantics:
 """"""""""
@@ -8461,8 +8859,8 @@ Semantics:
 
 The '``fptoui``' instruction converts its :ref:`floating-point
 <t_floating>` operand into the nearest (rounding towards zero)
-unsigned integer value. If the value cannot fit in ``ty2``, the results
-are undefined.
+unsigned integer value. If the value cannot fit in ``ty2``, the result
+is a :ref:`poison value <poisonvalues>`.
 
 Example:
 """"""""
@@ -8503,8 +8901,8 @@ Semantics:
 
 The '``fptosi``' instruction converts its :ref:`floating-point
 <t_floating>` operand into the nearest (rounding towards zero)
-signed integer value. If the value cannot fit in ``ty2``, the results
-are undefined.
+signed integer value. If the value cannot fit in ``ty2``, the result
+is a :ref:`poison value <poisonvalues>`.
 
 Example:
 """"""""
@@ -8545,8 +8943,9 @@ Semantics:
 
 The '``uitofp``' instruction interprets its operand as an unsigned
 integer quantity and converts it to the corresponding floating-point
-value. If the value cannot fit in the floating-point value, the results
-are undefined.
+value. If the value cannot be exactly represented, it is rounded using
+the default rounding mode.
+
 
 Example:
 """"""""
@@ -8585,9 +8984,9 @@ Semantics:
 """"""""""
 
 The '``sitofp``' instruction interprets its operand as a signed integer
-quantity and converts it to the corresponding floating-point value. If
-the value cannot fit in the floating-point value, the results are
-undefined.
+quantity and converts it to the corresponding floating-point value. If the
+value cannot be exactly represented, it is rounded using the default rounding
+mode.
 
 Example:
 """"""""
@@ -8981,7 +9380,7 @@ otherwise unsafe floating-point optimizations.
 Any set of fast-math flags are legal on an ``fcmp`` instruction, but the
 only flags that have any effect on its semantics are those that allow
 assumptions to be made about the values of input arguments; namely
-``nnan``, ``ninf``, and ``nsz``. See :ref:`fastmath` for more information.
+``nnan``, ``ninf``, and ``reassoc``. See :ref:`fastmath` for more information.
 
 Example:
 """"""""
@@ -11567,6 +11966,98 @@ then the result is the size in bits of the type of ``src`` if
 
 .. _int_overflow:
 
+'``llvm.fshl.*``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+
+This is an overloaded intrinsic. You can use ``llvm.fshl`` on any
+integer bit width or any vector of integer elements. Not all targets
+support all bit widths or vector types, however.
+
+::
+
+      declare i8  @llvm.fshl.i8 (i8 %a, i8 %b, i8 %c)
+      declare i67 @llvm.fshl.i67(i67 %a, i67 %b, i67 %c)
+      declare <2 x i32> @llvm.fshl.v2i32(<2 x i32> %a, <2 x i32> %b, <2 x i32> %c)
+
+Overview:
+"""""""""
+
+The '``llvm.fshl``' family of intrinsic functions performs a funnel shift left:
+the first two values are concatenated as { %a : %b } (%a is the most significant
+bits of the wide value), the combined value is shifted left, and the most 
+significant bits are extracted to produce a result that is the same size as the 
+original arguments. If the first 2 arguments are identical, this is equivalent 
+to a rotate left operation. For vector types, the operation occurs for each 
+element of the vector. The shift argument is treated as an unsigned amount 
+modulo the element size of the arguments.
+
+Arguments:
+""""""""""
+
+The first two arguments are the values to be concatenated. The third
+argument is the shift amount. The arguments may be any integer type or a
+vector with integer element type. All arguments and the return value must
+have the same type.
+
+Example:
+""""""""
+
+.. code-block:: text
+
+      %r = call i8 @llvm.fshl.i8(i8 %x, i8 %y, i8 %z)  ; %r = i8: msb_extract((concat(x, y) << (z % 8)), 8)
+      %r = call i8 @llvm.fshl.i8(i8 255, i8 0, i8 15)  ; %r = i8: 128 (0b10000000)
+      %r = call i8 @llvm.fshl.i8(i8 15, i8 15, i8 11)  ; %r = i8: 120 (0b01111000)
+      %r = call i8 @llvm.fshl.i8(i8 0, i8 255, i8 8)   ; %r = i8: 0   (0b00000000)
+
+'``llvm.fshr.*``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+
+This is an overloaded intrinsic. You can use ``llvm.fshr`` on any
+integer bit width or any vector of integer elements. Not all targets
+support all bit widths or vector types, however.
+
+::
+
+      declare i8  @llvm.fshr.i8 (i8 %a, i8 %b, i8 %c)
+      declare i67 @llvm.fshr.i67(i67 %a, i67 %b, i67 %c)
+      declare <2 x i32> @llvm.fshr.v2i32(<2 x i32> %a, <2 x i32> %b, <2 x i32> %c)
+
+Overview:
+"""""""""
+
+The '``llvm.fshr``' family of intrinsic functions performs a funnel shift right:
+the first two values are concatenated as { %a : %b } (%a is the most significant
+bits of the wide value), the combined value is shifted right, and the least 
+significant bits are extracted to produce a result that is the same size as the 
+original arguments. If the first 2 arguments are identical, this is equivalent 
+to a rotate right operation. For vector types, the operation occurs for each 
+element of the vector. The shift argument is treated as an unsigned amount 
+modulo the element size of the arguments.
+
+Arguments:
+""""""""""
+
+The first two arguments are the values to be concatenated. The third
+argument is the shift amount. The arguments may be any integer type or a
+vector with integer element type. All arguments and the return value must
+have the same type.
+
+Example:
+""""""""
+
+.. code-block:: text
+
+      %r = call i8 @llvm.fshr.i8(i8 %x, i8 %y, i8 %z)  ; %r = i8: lsb_extract((concat(x, y) >> (z % 8)), 8)
+      %r = call i8 @llvm.fshr.i8(i8 255, i8 0, i8 15)  ; %r = i8: 254 (0b11111110)
+      %r = call i8 @llvm.fshr.i8(i8 15, i8 15, i8 11)  ; %r = i8: 225 (0b11100001)
+      %r = call i8 @llvm.fshr.i8(i8 0, i8 255, i8 8)   ; %r = i8: 255 (0b11111111)
+
 Arithmetic with Overflow Intrinsics
 -----------------------------------
 
@@ -12775,6 +13266,126 @@ The '``llvm.masked.scatter``' intrinsics is designed for writing selected vector
        store i32 %val7, i32* %ptr7, align 4
 
 
+Masked Vector Expanding Load and Compressing Store Intrinsics
+-------------------------------------------------------------
+
+LLVM provides intrinsics for expanding load and compressing store operations. Data selected from a vector according to a mask is stored in consecutive memory addresses (compressed store), and vice-versa (expanding load). These operations effective map to "if (cond.i) a[j++] = v.i" and "if (cond.i) v.i = a[j++]" patterns, respectively. Note that when the mask starts with '1' bits followed by '0' bits, these operations are identical to :ref:`llvm.masked.store <int_mstore>` and :ref:`llvm.masked.load <int_mload>`.
+
+.. _int_expandload:
+
+'``llvm.masked.expandload.*``' Intrinsics
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+This is an overloaded intrinsic. Several values of integer, floating point or pointer data type are loaded from consecutive memory addresses and stored into the elements of a vector according to the mask.
+
+::
+
+      declare <16 x float>  @llvm.masked.expandload.v16f32 (float* <ptr>, <16 x i1> <mask>, <16 x float> <passthru>)
+      declare <2 x i64>     @llvm.masked.expandload.v2i64 (i64* <ptr>, <2 x i1>  <mask>, <2 x i64> <passthru>)
+
+Overview:
+"""""""""
+
+Reads a number of scalar values sequentially from memory location provided in '``ptr``' and spreads them in a vector. The '``mask``' holds a bit for each vector lane. The number of elements read from memory is equal to the number of '1' bits in the mask. The loaded elements are positioned in the destination vector according to the sequence of '1' and '0' bits in the mask. E.g., if the mask vector is '10010001', "explandload" reads 3 values from memory addresses ptr, ptr+1, ptr+2 and places them in lanes 0, 3 and 7 accordingly. The masked-off lanes are filled by elements from the corresponding lanes of the '``passthru``' operand.
+
+
+Arguments:
+""""""""""
+
+The first operand is the base pointer for the load. It has the same underlying type as the element of the returned vector. The second operand, mask, is a vector of boolean values with the same number of elements as the return type. The third is a pass-through value that is used to fill the masked-off lanes of the result. The return type and the type of the '``passthru``' operand have the same vector type.
+
+Semantics:
+""""""""""
+
+The '``llvm.masked.expandload``' intrinsic is designed for reading multiple scalar values from adjacent memory addresses into possibly non-adjacent vector lanes. It is useful for targets that support vector expanding loads and allows vectorizing loop with cross-iteration dependency like in the following example:
+
+.. code-block:: c
+
+    // In this loop we load from B and spread the elements into array A.
+    double *A, B; int *C;
+    for (int i = 0; i < size; ++i) {
+      if (C[i] != 0)
+        A[i] = B[j++];
+    }
+
+
+.. code-block:: llvm
+
+    ; Load several elements from array B and expand them in a vector.
+    ; The number of loaded elements is equal to the number of '1' elements in the Mask.
+    %Tmp = call <8 x double> @llvm.masked.expandload.v8f64(double* %Bptr, <8 x i1> %Mask, <8 x double> undef)
+    ; Store the result in A
+    call void @llvm.masked.store.v8f64.p0v8f64(<8 x double> %Tmp, <8 x double>* %Aptr, i32 8, <8 x i1> %Mask)
+    
+    ; %Bptr should be increased on each iteration according to the number of '1' elements in the Mask.
+    %MaskI = bitcast <8 x i1> %Mask to i8
+    %MaskIPopcnt = call i8 @llvm.ctpop.i8(i8 %MaskI)
+    %MaskI64 = zext i8 %MaskIPopcnt to i64
+    %BNextInd = add i64 %BInd, %MaskI64
+
+
+Other targets may support this intrinsic differently, for example, by lowering it into a sequence of conditional scalar load operations and shuffles.
+If all mask elements are '1', the intrinsic behavior is equivalent to the regular unmasked vector load.
+
+.. _int_compressstore:
+
+'``llvm.masked.compressstore.*``' Intrinsics
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+This is an overloaded intrinsic. A number of scalar values of integer, floating point or pointer data type are collected from an input vector and stored into adjacent memory addresses. A mask defines which elements to collect from the vector.
+
+::
+
+      declare void @llvm.masked.compressstore.v8i32  (<8  x i32>   <value>, i32*   <ptr>, <8  x i1> <mask>)
+      declare void @llvm.masked.compressstore.v16f32 (<16 x float> <value>, float* <ptr>, <16 x i1> <mask>)
+
+Overview:
+"""""""""
+
+Selects elements from input vector '``value``' according to the '``mask``'. All selected elements are written into adjacent memory addresses starting at address '`ptr`', from lower to higher. The mask holds a bit for each vector lane, and is used to select elements to be stored. The number of elements to be stored is equal to the number of active bits in the mask.
+
+Arguments:
+""""""""""
+
+The first operand is the input vector, from which elements are collected and written to memory. The second operand is the base pointer for the store, it has the same underlying type as the element of the input vector operand. The third operand is the mask, a vector of boolean values. The mask and the input vector must have the same number of vector elements.
+
+
+Semantics:
+""""""""""
+
+The '``llvm.masked.compressstore``' intrinsic is designed for compressing data in memory. It allows to collect elements from possibly non-adjacent lanes of a vector and store them contiguously in memory in one IR operation. It is useful for targets that support compressing store operations and allows vectorizing loops with cross-iteration dependences like in the following example:
+
+.. code-block:: c
+
+    // In this loop we load elements from A and store them consecutively in B
+    double *A, B; int *C;
+    for (int i = 0; i < size; ++i) {
+      if (C[i] != 0)
+        B[j++] = A[i]
+    }
+
+
+.. code-block:: llvm
+
+    ; Load elements from A.
+    %Tmp = call <8 x double> @llvm.masked.load.v8f64.p0v8f64(<8 x double>* %Aptr, i32 8, <8 x i1> %Mask, <8 x double> undef)
+    ; Store all selected elements consecutively in array B
+    call <void> @llvm.masked.compressstore.v8f64(<8 x double> %Tmp, double* %Bptr, <8 x i1> %Mask)
+    
+    ; %Bptr should be increased on each iteration according to the number of '1' elements in the Mask.
+    %MaskI = bitcast <8 x i1> %Mask to i8
+    %MaskIPopcnt = call i8 @llvm.ctpop.i8(i8 %MaskI)
+    %MaskI64 = zext i8 %MaskIPopcnt to i64
+    %BNextInd = add i64 %BInd, %MaskI64
+
+
+Other targets may support this intrinsic differently, for example, by lowering it into a sequence of branches that guard scalar store operations.
+
+
 Memory Use Markers
 ------------------
 
@@ -12908,7 +13519,7 @@ Semantics:
 
 This intrinsic indicates that the memory is mutable again.
 
-'``llvm.invariant.group.barrier``' Intrinsic
+'``llvm.launder.invariant.group``' Intrinsic
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Syntax:
@@ -12919,13 +13530,49 @@ argument.
 
 ::
 
-      declare i8* @llvm.invariant.group.barrier.p0i8(i8* <ptr>)
+      declare i8* @llvm.launder.invariant.group.p0i8(i8* <ptr>)
 
 Overview:
 """""""""
 
-The '``llvm.invariant.group.barrier``' intrinsic can be used when an invariant
-established by invariant.group metadata no longer holds, to obtain a new pointer
+The '``llvm.launder.invariant.group``' intrinsic can be used when an invariant
+established by ``invariant.group`` metadata no longer holds, to obtain a new
+pointer value that carries fresh invariant group information. It is an
+experimental intrinsic, which means that its semantics might change in the
+future.
+
+
+Arguments:
+""""""""""
+
+The ``llvm.launder.invariant.group`` takes only one argument, which is a pointer
+to the memory.
+
+Semantics:
+""""""""""
+
+Returns another pointer that aliases its argument but which is considered different
+for the purposes of ``load``/``store`` ``invariant.group`` metadata.
+It does not read any accessible memory and the execution can be speculated.
+
+'``llvm.strip.invariant.group``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+This is an overloaded intrinsic. The memory object can belong to any address
+space. The returned pointer must belong to the same address space as the
+argument.
+
+::
+
+      declare i8* @llvm.strip.invariant.group.p0i8(i8* <ptr>)
+
+Overview:
+"""""""""
+
+The '``llvm.strip.invariant.group``' intrinsic can be used when an invariant
+established by ``invariant.group`` metadata no longer holds, to obtain a new pointer
 value that does not carry the invariant information. It is an experimental
 intrinsic, which means that its semantics might change in the future.
 
@@ -12933,14 +13580,17 @@ intrinsic, which means that its semantics might change in the future.
 Arguments:
 """"""""""
 
-The ``llvm.invariant.group.barrier`` takes only one argument, which is
-the pointer to the memory for which the ``invariant.group`` no longer holds.
+The ``llvm.strip.invariant.group`` takes only one argument, which is a pointer
+to the memory.
 
 Semantics:
 """"""""""
 
-Returns another pointer that aliases its argument but which is considered different
-for the purposes of ``load``/``store`` ``invariant.group`` metadata.
+Returns another pointer that aliases its argument but which has no associated
+``invariant.group`` metadata.
+It does not read any memory and can be speculated.
+
+
 
 .. _constrainedfp:
 
@@ -13995,10 +14645,10 @@ The ``llvm.objectsize`` intrinsic takes three arguments. The first argument is
 a pointer to or into the ``object``. The second argument determines whether
 ``llvm.objectsize`` returns 0 (if true) or -1 (if false) when the object size
 is unknown. The third argument controls how ``llvm.objectsize`` acts when
-``null`` is used as its pointer argument. If it's true and the pointer is in
-address space 0, ``null`` is treated as an opaque value with an unknown number
-of bytes. Otherwise, ``llvm.objectsize`` reports 0 bytes available when given
-``null``.
+``null`` in address space 0 is used as its pointer argument. If it's ``false``,
+``llvm.objectsize`` reports 0 bytes available when given ``null``. Otherwise, if
+the ``null`` is in a non-zero address space or if ``true`` is given for the
+third argument of ``llvm.objectsize``, we assume its size is unknown.
 
 The second and third arguments only accept constants.
 

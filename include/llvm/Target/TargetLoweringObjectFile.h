@@ -45,6 +45,13 @@ class TargetLoweringObjectFile : public MCObjectFileInfo {
 protected:
   bool SupportIndirectSymViaGOTPCRel = false;
   bool SupportGOTPCRelWithOffset = true;
+  bool SupportDebugThreadLocalLocation = true;
+
+  /// PersonalityEncoding, LSDAEncoding, TTypeEncoding - Some encoding values
+  /// for EH.
+  unsigned PersonalityEncoding = 0;
+  unsigned LSDAEncoding = 0;
+  unsigned TTypeEncoding = 0;
 
   /// This section contains the static constructor pointer list.
   MCSection *StaticCtorSection = nullptr;
@@ -135,6 +142,10 @@ public:
                                             const TargetMachine &TM,
                                             MachineModuleInfo *MMI) const;
 
+  unsigned getPersonalityEncoding() const { return PersonalityEncoding; }
+  unsigned getLSDAEncoding() const { return LSDAEncoding; }
+  unsigned getTTypeEncoding() const { return TTypeEncoding; }
+
   const MCExpr *getTTypeReference(const MCSymbolRefExpr *Sym, unsigned Encoding,
                                   MCStreamer &Streamer) const;
 
@@ -148,7 +159,7 @@ public:
     return StaticDtorSection;
   }
 
-  /// \brief Create a symbol reference to describe the given TLS variable when
+  /// Create a symbol reference to describe the given TLS variable when
   /// emitting the address in debug info.
   virtual const MCExpr *getDebugThreadLocalSymbol(const MCSymbol *Sym) const;
 
@@ -158,19 +169,24 @@ public:
     return nullptr;
   }
 
-  /// \brief Target supports replacing a data "PC"-relative access to a symbol
+  /// Target supports replacing a data "PC"-relative access to a symbol
   /// through another symbol, by accessing the later via a GOT entry instead?
   bool supportIndirectSymViaGOTPCRel() const {
     return SupportIndirectSymViaGOTPCRel;
   }
 
-  /// \brief Target GOT "PC"-relative relocation supports encoding an additional
+  /// Target GOT "PC"-relative relocation supports encoding an additional
   /// binary expression with an offset?
   bool supportGOTPCRelWithOffset() const {
     return SupportGOTPCRelWithOffset;
   }
 
-  /// \brief Get the target specific PC relative GOT entry relocation
+  /// Target supports TLS offset relocation in debug section?
+  bool supportDebugThreadLocalLocation() const {
+    return SupportDebugThreadLocalLocation;
+  }
+
+  /// Get the target specific PC relative GOT entry relocation
   virtual const MCExpr *getIndirectSymViaGOTPCRel(const MCSymbol *Sym,
                                                   const MCValue &MV,
                                                   int64_t Offset,

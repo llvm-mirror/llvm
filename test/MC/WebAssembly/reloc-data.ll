@@ -1,6 +1,6 @@
 ; RUN: llc -O0 -filetype=obj %s -o - | llvm-readobj -r -expand-relocs | FileCheck %s
 
-target triple = "wasm32-unknown-unknown-wasm"
+target triple = "wasm32-unknown-unknown"
 
 ; foo and bar are external and internal symbols.  a and b are pointers
 ; initialized to these locations offset by 2 and -2 elements respecitively.
@@ -17,31 +17,31 @@ target triple = "wasm32-unknown-unknown-wasm"
 ; CHECK-NEXT:     Relocation {
 ; CHECK-NEXT:       Type: R_WEBASSEMBLY_MEMORY_ADDR_I32 (5)
 ; CHECK-NEXT:       Offset: 0x13
-; CHECK-NEXT:       Index: 0x2
+; CHECK-NEXT:       Symbol: foo
 ; CHECK-NEXT:       Addend: 8
 ; CHECK-NEXT:     }
 ; CHECK-NEXT:     Relocation {
 ; CHECK-NEXT:       Type: R_WEBASSEMBLY_MEMORY_ADDR_I32 (5)
 ; CHECK-NEXT:       Offset: 0x1C
-; CHECK-NEXT:       Index: 0x0
+; CHECK-NEXT:       Symbol: bar
 ; CHECK-NEXT:       Addend: -16
 ; CHECK-NEXT:     }
 ; CHECK-NEXT:     Relocation {
 ; CHECK-NEXT:       Type: R_WEBASSEMBLY_MEMORY_ADDR_I32 (5)
 ; CHECK-NEXT:       Offset: 0x25
-; CHECK-NEXT:       Index: 0x2
+; CHECK-NEXT:       Symbol: foo
 ; CHECK-NEXT:       Addend: 0
 ; CHECK-NEXT:     }
 ; CHECK-NEXT:     Relocation {
 ; CHECK-NEXT:       Type: R_WEBASSEMBLY_MEMORY_ADDR_I32 (5)
 ; CHECK-NEXT:       Offset: 0x29
-; CHECK-NEXT:       Index: 0x2
+; CHECK-NEXT:       Symbol: foo
 ; CHECK-NEXT:       Addend: 0
 ; CHECK-NEXT:     }
 ; CHECK-NEXT:     Relocation {
 ; CHECK-NEXT:       Type: R_WEBASSEMBLY_MEMORY_ADDR_I32 (5)
 ; CHECK-NEXT:       Offset: 0x2D
-; CHECK-NEXT:       Index: 0x2
+; CHECK-NEXT:       Symbol: foo
 ; CHECK-NEXT:       Addend: 0
 ; CHECK-NEXT:     }
 ; CHECK-NEXT:   }

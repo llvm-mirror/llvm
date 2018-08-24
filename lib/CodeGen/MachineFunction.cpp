@@ -37,7 +37,9 @@
 #include "llvm/CodeGen/TargetLowering.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
+#include "llvm/CodeGen/WasmEHFuncInfo.h"
 #include "llvm/CodeGen/WinEHFuncInfo.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constant.h"
@@ -174,6 +176,11 @@ void MachineFunction::init() {
     WinEHInfo = new (Allocator) WinEHFuncInfo();
   }
 
+  if (isScopedEHPersonality(classifyEHPersonality(
+          F.hasPersonalityFn() ? F.getPersonalityFn() : nullptr))) {
+    WasmEHInfo = new (Allocator) WasmEHFuncInfo();
+  }
+
   assert(Target.isCompatibleDataLayout(getDataLayout()) &&
          "Can't create a MachineFunction using a Module with a "
          "Target-incompatible DataLayout attached\n");
@@ -195,6 +202,7 @@ void MachineFunction::clear() {
   // Do call MachineBasicBlock destructors, it contains std::vectors.
   for (iterator I = begin(), E = end(); I != E; I = BasicBlocks.erase(I))
     I->Insts.clearAndLeakNodesUnsafely();
+  MBBNumbering.clear();
 
   InstructionRecycler.clear(Allocator);
   OperandRecycler.clear(Allocator);
@@ -398,77 +406,12 @@ MachineFunction::getMachineMemOperand(const MachineMemOperand *MMO,
                                MMO->getOrdering(), MMO->getFailureOrdering());
 }
 
-MachineInstr::mmo_iterator
-MachineFunction::allocateMemRefsArray(unsigned long Num) {
-  return Allocator.Allocate<MachineMemOperand *>(Num);
-}
-
-std::pair<MachineInstr::mmo_iterator, MachineInstr::mmo_iterator>
-MachineFunction::extractLoadMemRefs(MachineInstr::mmo_iterator Begin,
-                                    MachineInstr::mmo_iterator End) {
-  // Count the number of load mem refs.
-  unsigned Num = 0;
-  for (MachineInstr::mmo_iterator I = Begin; I != End; ++I)
-    if ((*I)->isLoad())
-      ++Num;
-
-  // Allocate a new array and populate it with the load information.
-  MachineInstr::mmo_iterator Result = allocateMemRefsArray(Num);
-  unsigned Index = 0;
-  for (MachineInstr::mmo_iterator I = Begin; I != End; ++I) {
-    if ((*I)->isLoad()) {
-      if (!(*I)->isStore())
-        // Reuse the MMO.
-        Result[Index] = *I;
-      else {
-        // Clone the MMO and unset the store flag.
-        MachineMemOperand *JustLoad =
-          getMachineMemOperand((*I)->getPointerInfo(),
-                               (*I)->getFlags() & ~MachineMemOperand::MOStore,
-                               (*I)->getSize(), (*I)->getBaseAlignment(),
-                               (*I)->getAAInfo(), nullptr,
-                               (*I)->getSyncScopeID(), (*I)->getOrdering(),
-                               (*I)->getFailureOrdering());
-        Result[Index] = JustLoad;
-      }
-      ++Index;
-    }
-  }
-  return std::make_pair(Result, Result + Num);
-}
-
-std::pair<MachineInstr::mmo_iterator, MachineInstr::mmo_iterator>
-MachineFunction::extractStoreMemRefs(MachineInstr::mmo_iterator Begin,
-                                     MachineInstr::mmo_iterator End) {
-  // Count the number of load mem refs.
-  unsigned Num = 0;
-  for (MachineInstr::mmo_iterator I = Begin; I != End; ++I)
-    if ((*I)->isStore())
-      ++Num;
-
-  // Allocate a new array and populate it with the store information.
-  MachineInstr::mmo_iterator Result = allocateMemRefsArray(Num);
-  unsigned Index = 0;
-  for (MachineInstr::mmo_iterator I = Begin; I != End; ++I) {
-    if ((*I)->isStore()) {
-      if (!(*I)->isLoad())
-        // Reuse the MMO.
-        Result[Index] = *I;
-      else {
-        // Clone the MMO and unset the load flag.
-        MachineMemOperand *JustStore =
-          getMachineMemOperand((*I)->getPointerInfo(),
-                               (*I)->getFlags() & ~MachineMemOperand::MOLoad,
-                               (*I)->getSize(), (*I)->getBaseAlignment(),
-                               (*I)->getAAInfo(), nullptr,
-                               (*I)->getSyncScopeID(), (*I)->getOrdering(),
-                               (*I)->getFailureOrdering());
-        Result[Index] = JustStore;
-      }
-      ++Index;
-    }
-  }
-  return std::make_pair(Result, Result + Num);
+MachineInstr::ExtraInfo *
+MachineFunction::createMIExtraInfo(ArrayRef<MachineMemOperand *> MMOs,
+                                   MCSymbol *PreInstrSymbol,
+                                   MCSymbol *PostInstrSymbol) {
+  return MachineInstr::ExtraInfo::create(Allocator, MMOs, PreInstrSymbol,
+                                         PostInstrSymbol);
 }
 
 const char *MachineFunction::createExternalSymbolName(StringRef Name) {
@@ -476,6 +419,14 @@ const char *MachineFunction::createExternalSymbolName(StringRef Name) {
   std::copy(Name.begin(), Name.end(), Dest);
   Dest[Name.size()] = 0;
   return Dest;
+}
+
+uint32_t *MachineFunction::allocateRegMask() {
+  unsigned NumRegs = getSubtarget().getRegisterInfo()->getNumRegs();
+  unsigned Size = MachineOperand::getRegMaskSize(NumRegs);
+  uint32_t *Mask = Allocator.Allocate<uint32_t>(Size);
+  memset(Mask, 0, Size * sizeof(Mask[0]));
+  return Mask;
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)

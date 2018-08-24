@@ -31,7 +31,7 @@ static cl::opt<bool> EnableReduxCost("costmodel-reduxcost", cl::init(false),
                                      cl::desc("Recognize reduction patterns."));
 
 namespace {
-/// \brief No-op implementation of the TTI interface using the utility base
+/// No-op implementation of the TTI interface using the utility base
 /// classes.
 ///
 /// This is used when no target specific information is available.
@@ -630,73 +630,43 @@ int TargetTransformInfo::getInstructionLatency(const Instruction *I) const {
   return TTIImpl->getInstructionLatency(I);
 }
 
-static bool isReverseVectorMask(ArrayRef<int> Mask) {
-  for (unsigned i = 0, MaskSize = Mask.size(); i < MaskSize; ++i)
-    if (Mask[i] >= 0 && Mask[i] != (int)(MaskSize - 1 - i))
-      return false;
-  return true;
-}
-
-static bool isSingleSourceVectorMask(ArrayRef<int> Mask) {
-  bool Vec0 = false;
-  bool Vec1 = false;
-  for (unsigned i = 0, NumVecElts = Mask.size(); i < NumVecElts; ++i) {
-    if (Mask[i] >= 0) {
-      if ((unsigned)Mask[i] >= NumVecElts)
-        Vec1 = true;
-      else
-        Vec0 = true;
-    }
-  }
-  return !(Vec0 && Vec1);
-}
-
-static bool isZeroEltBroadcastVectorMask(ArrayRef<int> Mask) {
-  for (unsigned i = 0; i < Mask.size(); ++i)
-    if (Mask[i] > 0)
-      return false;
-  return true;
-}
-
-static bool isAlternateVectorMask(ArrayRef<int> Mask) {
-  bool isAlternate = true;
-  unsigned MaskSize = Mask.size();
-
-  // Example: shufflevector A, B, <0,5,2,7>
-  for (unsigned i = 0; i < MaskSize && isAlternate; ++i) {
-    if (Mask[i] < 0)
-      continue;
-    isAlternate = Mask[i] == (int)((i & 1) ? MaskSize + i : i);
-  }
-
-  if (isAlternate)
-    return true;
-
-  isAlternate = true;
-  // Example: shufflevector A, B, <4,1,6,3>
-  for (unsigned i = 0; i < MaskSize && isAlternate; ++i) {
-    if (Mask[i] < 0)
-      continue;
-    isAlternate = Mask[i] == (int)((i & 1) ? i : MaskSize + i);
-  }
-
-  return isAlternate;
-}
-
-static TargetTransformInfo::OperandValueKind getOperandInfo(Value *V) {
+static TargetTransformInfo::OperandValueKind
+getOperandInfo(Value *V, TargetTransformInfo::OperandValueProperties &OpProps) {
   TargetTransformInfo::OperandValueKind OpInfo =
       TargetTransformInfo::OK_AnyValue;
+  OpProps = TargetTransformInfo::OP_None;
 
-  // Check for a splat of a constant or for a non uniform vector of constants.
+  if (auto *CI = dyn_cast<ConstantInt>(V)) {
+    if (CI->getValue().isPowerOf2())
+      OpProps = TargetTransformInfo::OP_PowerOf2;
+    return TargetTransformInfo::OK_UniformConstantValue;
+  }
+
+  const Value *Splat = getSplatValue(V);
+
+  // Check for a splat of a constant or for a non uniform vector of constants
+  // and check if the constant(s) are all powers of two.
   if (isa<ConstantVector>(V) || isa<ConstantDataVector>(V)) {
     OpInfo = TargetTransformInfo::OK_NonUniformConstantValue;
-    if (cast<Constant>(V)->getSplatValue() != nullptr)
+    if (Splat) {
       OpInfo = TargetTransformInfo::OK_UniformConstantValue;
+      if (auto *CI = dyn_cast<ConstantInt>(Splat))
+        if (CI->getValue().isPowerOf2())
+          OpProps = TargetTransformInfo::OP_PowerOf2;
+    } else if (auto *CDS = dyn_cast<ConstantDataSequential>(V)) {
+      OpProps = TargetTransformInfo::OP_PowerOf2;
+      for (unsigned I = 0, E = CDS->getNumElements(); I != E; ++I) {
+        if (auto *CI = dyn_cast<ConstantInt>(CDS->getElementAsConstant(I)))
+          if (CI->getValue().isPowerOf2())
+            continue;
+        OpProps = TargetTransformInfo::OP_None;
+        break;
+      }
+    }
   }
 
   // Check for a splat of a uniform value. This is not loop aware, so return
   // true only for the obviously uniform cases (argument, globalvalue)
-  const Value *Splat = getSplatValue(V);
   if (Splat && (isa<Argument>(Splat) || isa<GlobalValue>(Splat)))
     OpInfo = TargetTransformInfo::OK_UniformValue;
 
@@ -751,7 +721,7 @@ struct ReductionData {
 static Optional<ReductionData> getReductionData(Instruction *I) {
   Value *L, *R;
   if (m_BinOp(m_Value(L), m_Value(R)).match(I))
-    return ReductionData(RK_Arithmetic, I->getOpcode(), L, R); 
+    return ReductionData(RK_Arithmetic, I->getOpcode(), L, R);
   if (auto *SI = dyn_cast<SelectInst>(I)) {
     if (m_SMin(m_Value(L), m_Value(R)).match(SI) ||
         m_SMax(m_Value(L), m_Value(R)).match(SI) ||
@@ -760,8 +730,8 @@ static Optional<ReductionData> getReductionData(Instruction *I) {
         m_UnordFMin(m_Value(L), m_Value(R)).match(SI) ||
         m_UnordFMax(m_Value(L), m_Value(R)).match(SI)) {
       auto *CI = cast<CmpInst>(SI->getCondition());
-      return ReductionData(RK_MinMax, CI->getOpcode(), L, R); 
-    }   
+      return ReductionData(RK_MinMax, CI->getOpcode(), L, R);
+    }
     if (m_UMin(m_Value(L), m_Value(R)).match(SI) ||
         m_UMax(m_Value(L), m_Value(R)).match(SI)) {
       auto *CI = cast<CmpInst>(SI->getCondition());
@@ -881,11 +851,11 @@ static ReductionKind matchPairwiseReduction(const ExtractElementInst *ReduxRoot,
 
   // We look for a sequence of shuffle,shuffle,add triples like the following
   // that builds a pairwise reduction tree.
-  //  
+  //
   //  (X0, X1, X2, X3)
   //   (X0 + X1, X2 + X3, undef, undef)
   //    ((X0 + X1) + (X2 + X3), undef, undef, undef)
-  //  
+  //
   // %rdx.shuf.0.0 = shufflevector <4 x float> %rdx, <4 x float> undef,
   //       <4 x i32> <i32 0, i32 2 , i32 undef, i32 undef>
   // %rdx.shuf.0.1 = shufflevector <4 x float> %rdx, <4 x float> undef,
@@ -946,7 +916,7 @@ matchVectorSplittingReduction(const ExtractElementInst *ReduxRoot,
 
   // We look for a sequence of shuffles and adds like the following matching one
   // fadd, shuffle vector pair at a time.
-  //  
+  //
   // %rdx.shuf = shufflevector <4 x float> %rdx, <4 x float> undef,
   //                           <4 x i32> <i32 2, i32 3, i32 undef, i32 undef>
   // %bin.rdx = fadd <4 x float> %rdx, %rdx.shuf
@@ -957,7 +927,7 @@ matchVectorSplittingReduction(const ExtractElementInst *ReduxRoot,
 
   unsigned MaskStart = 1;
   Instruction *RdxOp = RdxStart;
-  SmallVector<int, 32> ShuffleMask(NumVecElems, 0); 
+  SmallVector<int, 32> ShuffleMask(NumVecElems, 0);
   unsigned NumVecElemsRemain = NumVecElems;
   while (NumVecElemsRemain - 1) {
     // Check for the right reduction operation.
@@ -1026,15 +996,13 @@ int TargetTransformInfo::getInstructionThroughput(const Instruction *I) const {
   case Instruction::And:
   case Instruction::Or:
   case Instruction::Xor: {
-    TargetTransformInfo::OperandValueKind Op1VK =
-      getOperandInfo(I->getOperand(0));
-    TargetTransformInfo::OperandValueKind Op2VK =
-      getOperandInfo(I->getOperand(1));
-    SmallVector<const Value*, 2> Operands(I->operand_values());
-    return getArithmeticInstrCost(I->getOpcode(), I->getType(), Op1VK,
-                                       Op2VK, TargetTransformInfo::OP_None,
-                                       TargetTransformInfo::OP_None,
-                                       Operands);
+    TargetTransformInfo::OperandValueKind Op1VK, Op2VK;
+    TargetTransformInfo::OperandValueProperties Op1VP, Op2VP;
+    Op1VK = getOperandInfo(I->getOperand(0), Op1VP);
+    Op2VK = getOperandInfo(I->getOperand(1), Op2VP);
+    SmallVector<const Value *, 2> Operands(I->operand_values());
+    return getArithmeticInstrCost(I->getOpcode(), I->getType(), Op1VK, Op2VK,
+                                  Op1VP, Op2VP, Operands);
   }
   case Instruction::Select: {
     const SelectInst *SI = cast<SelectInst>(I);
@@ -1125,7 +1093,7 @@ int TargetTransformInfo::getInstructionThroughput(const Instruction *I) const {
   case Instruction::InsertElement: {
     const InsertElementInst * IE = cast<InsertElementInst>(I);
     ConstantInt *CI = dyn_cast<ConstantInt>(IE->getOperand(2));
-    unsigned Idx = -1; 
+    unsigned Idx = -1;
     if (CI)
       Idx = CI->getZExtValue();
     return getVectorInstrCost(I->getOpcode(),
@@ -1133,31 +1101,30 @@ int TargetTransformInfo::getInstructionThroughput(const Instruction *I) const {
   }
   case Instruction::ShuffleVector: {
     const ShuffleVectorInst *Shuffle = cast<ShuffleVectorInst>(I);
-    Type *VecTypOp0 = Shuffle->getOperand(0)->getType();
-    unsigned NumVecElems = VecTypOp0->getVectorNumElements();
-    SmallVector<int, 16> Mask = Shuffle->getShuffleMask();
+    // TODO: Identify and add costs for insert/extract subvector, etc.
+    if (Shuffle->changesLength())
+      return -1;
 
-    if (NumVecElems == Mask.size()) {
-      if (isReverseVectorMask(Mask))
-        return getShuffleCost(TargetTransformInfo::SK_Reverse, VecTypOp0,
-                                   0, nullptr);
-      if (isAlternateVectorMask(Mask))
-        return getShuffleCost(TargetTransformInfo::SK_Alternate,
-                                   VecTypOp0, 0, nullptr);
+    if (Shuffle->isIdentity())
+      return 0;
 
-      if (isZeroEltBroadcastVectorMask(Mask))
-        return getShuffleCost(TargetTransformInfo::SK_Broadcast,
-                                   VecTypOp0, 0, nullptr);
+    Type *Ty = Shuffle->getType();
+    if (Shuffle->isReverse())
+      return TTIImpl->getShuffleCost(SK_Reverse, Ty, 0, nullptr);
 
-      if (isSingleSourceVectorMask(Mask))
-        return getShuffleCost(TargetTransformInfo::SK_PermuteSingleSrc,
-                                   VecTypOp0, 0, nullptr);
+    if (Shuffle->isSelect())
+      return TTIImpl->getShuffleCost(SK_Select, Ty, 0, nullptr);
 
-      return getShuffleCost(TargetTransformInfo::SK_PermuteTwoSrc,
-                                 VecTypOp0, 0, nullptr);
-    }
+    if (Shuffle->isTranspose())
+      return TTIImpl->getShuffleCost(SK_Transpose, Ty, 0, nullptr);
 
-    return -1;
+    if (Shuffle->isZeroEltSplat())
+      return TTIImpl->getShuffleCost(SK_Broadcast, Ty, 0, nullptr);
+
+    if (Shuffle->isSingleSource())
+      return TTIImpl->getShuffleCost(SK_PermuteSingleSrc, Ty, 0, nullptr);
+
+    return TTIImpl->getShuffleCost(SK_PermuteTwoSrc, Ty, 0, nullptr);
   }
   case Instruction::Call:
     if (const IntrinsicInst *II = dyn_cast<IntrinsicInst>(I)) {

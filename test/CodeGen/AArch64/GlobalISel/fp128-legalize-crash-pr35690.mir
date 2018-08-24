@@ -1,4 +1,4 @@
-# RUN: llc -O0 -run-pass=legalizer -global-isel -global-isel-abort=0 %s -o - | FileCheck %s
+# RUN: llc -O0 -run-pass=legalizer -global-isel-abort=0 %s -o - | FileCheck %s
 --- |
   target datalayout = "e-m:e-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128"
   target triple = "aarch64"
@@ -25,7 +25,8 @@ fixedStack:
 stack:           
   - { id: 0, name: a.addr, type: default, offset: 0, size: 16, alignment: 16, 
       stack-id: 0, callee-saved-register: '', callee-saved-restored: true, 
-      di-variable: '', di-expression: '', di-location: '' }
+      debug-info-variable: '', debug-info-expression: '',
+      debug-info-location: '' }
 body:             |
   bb.1.entry:
     liveins: $q0

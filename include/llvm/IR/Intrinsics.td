@@ -541,7 +541,7 @@ let IntrProperties = [IntrInaccessibleMemOnly] in {
                                                     [ LLVMMatchType<0>,
                                                       llvm_metadata_ty,
                                                       llvm_metadata_ty ]>;
-  def int_experimental_constrained_exp  : Intrinsic<[ llvm_anyfloat_ty ], 
+  def int_experimental_constrained_exp  : Intrinsic<[ llvm_anyfloat_ty ],
                                                     [ LLVMMatchType<0>,
                                                       llvm_metadata_ty,
                                                       llvm_metadata_ty ]>;
@@ -577,6 +577,10 @@ let IntrProperties = [IntrNoMem, IntrSpeculatable] in {
   def int_ctlz : Intrinsic<[llvm_anyint_ty], [LLVMMatchType<0>, llvm_i1_ty]>;
   def int_cttz : Intrinsic<[llvm_anyint_ty], [LLVMMatchType<0>, llvm_i1_ty]>;
   def int_bitreverse : Intrinsic<[llvm_anyint_ty], [LLVMMatchType<0>]>;
+  def int_fshl : Intrinsic<[llvm_anyint_ty],
+      [LLVMMatchType<0>, LLVMMatchType<0>, LLVMMatchType<0>]>;
+  def int_fshr : Intrinsic<[llvm_anyint_ty],
+      [LLVMMatchType<0>, LLVMMatchType<0>, LLVMMatchType<0>]>;
 }
 
 //===------------------------ Debugger Intrinsics -------------------------===//
@@ -599,6 +603,8 @@ let IntrProperties = [IntrNoMem, IntrSpeculatable] in {
                                        [llvm_metadata_ty,
                                         llvm_metadata_ty,
                                         llvm_metadata_ty]>;
+  def int_dbg_label        : Intrinsic<[],
+                                       [llvm_metadata_ty]>;
 }
 
 //===------------------ Exception Handling Intrinsics----------------------===//
@@ -710,18 +716,26 @@ def int_invariant_end   : Intrinsic<[],
                                      llvm_anyptr_ty],
                                     [IntrArgMemOnly, NoCapture<2>]>;
 
-// invariant.group.barrier can't be marked with 'readnone' (IntrNoMem),
+// launder.invariant.group can't be marked with 'readnone' (IntrNoMem),
 // because it would cause CSE of two barriers with the same argument.
-// Readonly and argmemonly says that barrier only reads its argument and
-// it can be CSE only if memory didn't change between 2 barriers call,
-// which is valid.
+// Inaccessiblememonly says that the barrier doesn't read the argument,
+// but it changes state not accessible to this module. This way
+// we can DSE through the barrier because it doesn't read the value
+// after store. Although the barrier doesn't modify any memory it
+// can't be marked as readonly, because it would be possible to
+// CSE 2 barriers with store in between.
 // The argument also can't be marked with 'returned' attribute, because
 // it would remove barrier.
 // Note that it is still experimental, which means that its semantics
 // might change in the future.
-def int_invariant_group_barrier : Intrinsic<[llvm_anyptr_ty],
+def int_launder_invariant_group : Intrinsic<[llvm_anyptr_ty],
                                             [LLVMMatchType<0>],
-                                            [IntrReadMem, IntrArgMemOnly]>;
+                                            [IntrInaccessibleMemOnly, IntrSpeculatable]>;
+
+
+def int_strip_invariant_group : Intrinsic<[llvm_anyptr_ty],
+                                          [LLVMMatchType<0>],
+                                          [IntrSpeculatable, IntrNoMem]>;
 
 //===------------------------ Stackmap Intrinsics -------------------------===//
 //

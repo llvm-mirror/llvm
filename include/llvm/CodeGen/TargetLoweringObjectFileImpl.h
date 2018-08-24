@@ -36,15 +36,18 @@ class TargetLoweringObjectFileELF : public TargetLoweringObjectFile {
 protected:
   MCSymbolRefExpr::VariantKind PLTRelativeVariantKind =
       MCSymbolRefExpr::VK_None;
+  const TargetMachine *TM;
 
 public:
   TargetLoweringObjectFileELF() = default;
   ~TargetLoweringObjectFileELF() override = default;
 
+  void Initialize(MCContext &Ctx, const TargetMachine &TM) override;
+
   /// Emit Obj-C garbage collection and linker options.
   void emitModuleMetadata(MCStreamer &Streamer, Module &M) const override;
 
-  void emitPersonalityValue(MCStreamer &Streamer, const DataLayout &TM,
+  void emitPersonalityValue(MCStreamer &Streamer, const DataLayout &DL,
                             const MCSymbol *Sym) const override;
 
   /// Given a constant with the SectionKind, return a section that it should be
@@ -163,6 +166,16 @@ public:
 
   void emitLinkerFlagsForUsed(raw_ostream &OS,
                               const GlobalValue *GV) const override;
+
+  const MCExpr *lowerRelativeReference(const GlobalValue *LHS,
+                                       const GlobalValue *RHS,
+                                       const TargetMachine &TM) const override;
+
+  /// Given a mergeable constant with the specified size and relocation
+  /// information, return a section that it should be placed in.
+  MCSection *getSectionForConstant(const DataLayout &DL, SectionKind Kind,
+                                   const Constant *C,
+                                   unsigned &Align) const override;
 };
 
 class TargetLoweringObjectFileWasm : public TargetLoweringObjectFile {

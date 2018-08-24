@@ -13,6 +13,7 @@
 #include "llvm/ADT/Triple.h"
 #include "llvm/Config/config.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Program.h"
 #include "llvm/Support/StringSaver.h"
@@ -51,26 +52,11 @@ class TempEnvVar {
   const char *const name;
 };
 
-template <typename T>
-class StackOption : public cl::opt<T> {
-  typedef cl::opt<T> Base;
+template <typename T, typename Base = cl::opt<T>>
+class StackOption : public Base {
 public:
-  // One option...
-  template<class M0t>
-  explicit StackOption(const M0t &M0) : Base(M0) {}
-
-  // Two options...
-  template<class M0t, class M1t>
-  StackOption(const M0t &M0, const M1t &M1) : Base(M0, M1) {}
-
-  // Three options...
-  template<class M0t, class M1t, class M2t>
-  StackOption(const M0t &M0, const M1t &M1, const M2t &M2) : Base(M0, M1, M2) {}
-
-  // Four options...
-  template<class M0t, class M1t, class M2t, class M3t>
-  StackOption(const M0t &M0, const M1t &M1, const M2t &M2, const M3t &M3)
-    : Base(M0, M1, M2, M3) {}
+  template <class... Ts>
+  explicit StackOption(Ts &&... Ms) : Base(std::forward<Ts>(Ms)...) {}
 
   ~StackOption() override { this->removeArgument(); }
 
@@ -636,8 +622,8 @@ TEST(CommandLineTest, ResponseFileWindows) {
   if (!Triple(sys::getProcessTriple()).isOSWindows())
     return;
 
-  static cl::list<std::string>
-	  InputFilenames(cl::Positional, cl::desc("<input files>"), cl::ZeroOrMore);
+  StackOption<std::string, cl::list<std::string>> InputFilenames(
+      cl::Positional, cl::desc("<input files>"), cl::ZeroOrMore);
   StackOption<bool> TopLevelOpt("top-level", cl::init(false));
 
   // Create response file.
@@ -760,6 +746,7 @@ TEST(CommandLineTest, SetDefautValue) {
   EXPECT_TRUE(Opt1 == "true");
   EXPECT_TRUE(Opt2);
   EXPECT_TRUE(Opt3 == 3);
+  Alias.removeArgument();
 }
 
 TEST(CommandLineTest, ReadConfigFile) {
@@ -815,5 +802,42 @@ TEST(CommandLineTest, ReadConfigFile) {
   llvm::sys::fs::remove(TestCfg);
   llvm::sys::fs::remove(TestDir);
 }
+
+TEST(CommandLineTest, PositionalEatArgsError) {
+  StackOption<std::string, cl::list<std::string>> PosEatArgs(
+      "positional-eat-args", cl::Positional, cl::desc("<arguments>..."),
+      cl::ZeroOrMore, cl::PositionalEatsArgs);
+
+  const char *args[] = {"prog", "-positional-eat-args=XXXX"};
+  const char *args2[] = {"prog", "-positional-eat-args=XXXX", "-foo"};
+  const char *args3[] = {"prog", "-positional-eat-args", "-foo"};
+
+  std::string Errs;
+  raw_string_ostream OS(Errs);
+  EXPECT_FALSE(cl::ParseCommandLineOptions(2, args, StringRef(), &OS)); OS.flush();
+  EXPECT_FALSE(Errs.empty()); Errs.clear();
+  EXPECT_FALSE(cl::ParseCommandLineOptions(3, args2, StringRef(), &OS)); OS.flush();
+  EXPECT_FALSE(Errs.empty()); Errs.clear();
+  EXPECT_TRUE(cl::ParseCommandLineOptions(3, args3, StringRef(), &OS)); OS.flush();
+  EXPECT_TRUE(Errs.empty());
+}
+
+#ifdef _WIN32
+TEST(CommandLineTest, GetCommandLineArguments) {
+  int argc = __argc;
+  char **argv = __argv;
+
+  // GetCommandLineArguments is called in InitLLVM.
+  llvm::InitLLVM X(argc, argv);
+
+  EXPECT_EQ(llvm::sys::path::is_absolute(argv[0]),
+            llvm::sys::path::is_absolute(__argv[0]));
+
+  EXPECT_TRUE(llvm::sys::path::filename(argv[0])
+              .equals_lower("supporttests.exe"))
+      << "Filename of test executable is "
+      << llvm::sys::path::filename(argv[0]);
+}
+#endif
 
 }  // anonymous namespace

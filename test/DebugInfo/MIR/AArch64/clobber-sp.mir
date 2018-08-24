@@ -71,7 +71,7 @@
   !4 = !{i32 2, !"Debug Info Version", i32 3}
   !5 = !{i32 1, !"PIC Level", i32 2}
   !6 = !{!"clang version 5.0.0 (trunk 302682) (llvm/trunk 302683)"}
-  !7 = distinct !DISubprogram(name: "f", scope: !1, file: !1, line: 7, type: !8, isLocal: false, isDefinition: true, scopeLine: 7, flags: DIFlagPrototyped, isOptimized: true, unit: !0, variables: !18)
+  !7 = distinct !DISubprogram(name: "f", scope: !1, file: !1, line: 7, type: !8, isLocal: false, isDefinition: true, scopeLine: 7, flags: DIFlagPrototyped, isOptimized: true, unit: !0, retainedNodes: !18)
   !8 = !DISubroutineType(types: !9)
   !9 = !{!10, !10, !10, !11}
   !10 = !DIBasicType(name: "int", size: 32, encoding: DW_ATE_signed)
@@ -149,7 +149,7 @@ body:             |
     STURWi killed $w0, $fp, -4 :: (store 4 into %stack.0.x.addr)
     DBG_VALUE debug-use $w1, debug-use _, !20, !22, debug-location !28
     STRWui killed $w1, $sp, 2, debug-location !30 :: (store 4 into %stack.1)
-    DBG_VALUE $sp, 0, !20, !36, debug-location !28
+    DBG_VALUE debug-use $sp, 0, !20, !36, debug-location !28
     BL @g, csr_aarch64_aapcs, implicit-def dead $lr, implicit $sp, implicit killed $d0, implicit killed $d1, implicit killed $d2, implicit killed $d3, implicit-def $sp, debug-location !30
     $w0 = LDRWui $sp, 2, debug-location !33 :: (load 4 from %stack.1)
     CBZW killed $w0, %bb.2.if.end, debug-location !33

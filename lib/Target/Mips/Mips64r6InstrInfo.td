@@ -73,7 +73,7 @@ class DMUHU_DESC   : MUL_R6_DESC_BASE<"dmuhu", GPR64Opnd, II_DMUHU, mulhu>;
 class DMUL_R6_DESC : MUL_R6_DESC_BASE<"dmul", GPR64Opnd, II_DMUL, mul>;
 class DMULU_DESC   : MUL_R6_DESC_BASE<"dmulu", GPR64Opnd, II_DMUL>;
 class LDPC_DESC    : PCREL_DESC_BASE<"ldpc", GPR64Opnd, simm18_lsl3, II_LDPC>;
-class LLD_R6_DESC   : LL_R6_DESC_BASE<"lld", GPR64Opnd, mem_simm16, II_LLD>;
+class LLD_R6_DESC   : LL_R6_DESC_BASE<"lld", GPR64Opnd, mem_simmptr, II_LLD>;
 class SCD_R6_DESC   : SC_R6_DESC_BASE<"scd", GPR64Opnd, II_SCD>;
 class SELEQZ64_DESC : SELEQNE_Z_DESC_BASE<"seleqz", GPR64Opnd>;
 class SELNEZ64_DESC : SELEQNE_Z_DESC_BASE<"selnez", GPR64Opnd>;
@@ -298,6 +298,21 @@ def : MipsPat<(select (i32 (setne i32:$cond, immz)), immz, i64:$f),
 def : MipsPat<(select (i32 (seteq i32:$cond, immz)), immz, i64:$f),
               (SELNEZ64 i64:$f, (SLL64_32 i32:$cond))>,
               ISA_MIPS64R6;
+
+// Patterns used for matching away redundant sign extensions.
+// MIPS32 arithmetic instructions sign extend their result implicitly.
+def : MipsPat<(i64 (sext (i32 (sdiv GPR32:$src, GPR32:$src2)))),
+              (INSERT_SUBREG (i64 (IMPLICIT_DEF)),
+              (DIV GPR32:$src, GPR32:$src2), sub_32)>, ISA_MIPS64R6;
+def : MipsPat<(i64 (sext (i32 (udiv GPR32:$src, GPR32:$src2)))),
+              (INSERT_SUBREG (i64 (IMPLICIT_DEF)),
+              (DIVU GPR32:$src, GPR32:$src2), sub_32)>, ISA_MIPS64R6;
+def : MipsPat<(i64 (sext (i32 (srem GPR32:$src, GPR32:$src2)))),
+              (INSERT_SUBREG (i64 (IMPLICIT_DEF)),
+              (MOD GPR32:$src, GPR32:$src2), sub_32)>, ISA_MIPS64R6;
+def : MipsPat<(i64 (sext (i32 (urem GPR32:$src, GPR32:$src2)))),
+              (INSERT_SUBREG (i64 (IMPLICIT_DEF)),
+              (MODU GPR32:$src, GPR32:$src2), sub_32)>, ISA_MIPS64R6;
 
 // Pseudo instructions
 

@@ -57,7 +57,7 @@
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/TargetFolder.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
-#include "llvm/Analysis/Utils/Local.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
@@ -1351,22 +1351,7 @@ Value *InstCombiner::Descale(Value *Val, APInt Scale, bool &NoSignedWrap) {
   } while (true);
 }
 
-/// \brief Creates node of binary operation with the same attributes as the
-/// specified one but with other operands.
-static Value *CreateBinOpAsGiven(BinaryOperator &Inst, Value *LHS, Value *RHS,
-                                 InstCombiner::BuilderTy &B) {
-  Value *BO = B.CreateBinOp(Inst.getOpcode(), LHS, RHS);
-  // If LHS and RHS are constant, BO won't be a binary operator.
-  if (BinaryOperator *NewBO = dyn_cast<BinaryOperator>(BO))
-    NewBO->copyIRFlags(&Inst);
-  return BO;
-}
-
-/// \brief Makes transformation of binary operation specific for vector types.
-/// \param Inst Binary operator to transform.
-/// \return Pointer to node that must replace the original binary operator, or
-///         null pointer if no transformation was made.
-Value *InstCombiner::SimplifyVectorOp(BinaryOperator &Inst) {
+Instruction *InstCombiner::foldShuffledBinop(BinaryOperator &Inst) {
   if (!Inst.getType()->isVectorTy()) return nullptr;
 
   // It may not be safe to reorder shuffles and things like div, urem, etc.
@@ -1380,58 +1365,71 @@ Value *InstCombiner::SimplifyVectorOp(BinaryOperator &Inst) {
   assert(cast<VectorType>(LHS->getType())->getNumElements() == VWidth);
   assert(cast<VectorType>(RHS->getType())->getNumElements() == VWidth);
 
+  auto createBinOpShuffle = [&](Value *X, Value *Y, Constant *M) {
+    Value *XY = Builder.CreateBinOp(Inst.getOpcode(), X, Y);
+    if (auto *BO = dyn_cast<BinaryOperator>(XY))
+      BO->copyIRFlags(&Inst);
+    return new ShuffleVectorInst(XY, UndefValue::get(XY->getType()), M);
+  };
+
   // If both arguments of the binary operation are shuffles that use the same
-  // mask and shuffle within a single vector, move the shuffle after the binop:
-  //   Op(shuffle(v1, m), shuffle(v2, m)) -> shuffle(Op(v1, v2), m)
-  auto *LShuf = dyn_cast<ShuffleVectorInst>(LHS);
-  auto *RShuf = dyn_cast<ShuffleVectorInst>(RHS);
-  if (LShuf && RShuf && LShuf->getMask() == RShuf->getMask() &&
-      isa<UndefValue>(LShuf->getOperand(1)) &&
-      isa<UndefValue>(RShuf->getOperand(1)) &&
-      LShuf->getOperand(0)->getType() == RShuf->getOperand(0)->getType()) {
-    Value *NewBO = CreateBinOpAsGiven(Inst, LShuf->getOperand(0),
-                                      RShuf->getOperand(0), Builder);
-    return Builder.CreateShuffleVector(
-        NewBO, UndefValue::get(NewBO->getType()), LShuf->getMask());
+  // mask and shuffle within a single vector, move the shuffle after the binop.
+  Value *V1, *V2;
+  Constant *Mask;
+  if (match(LHS, m_ShuffleVector(m_Value(V1), m_Undef(), m_Constant(Mask))) &&
+      match(RHS, m_ShuffleVector(m_Value(V2), m_Undef(), m_Specific(Mask))) &&
+      V1->getType() == V2->getType() &&
+      (LHS->hasOneUse() || RHS->hasOneUse() || LHS == RHS)) {
+    // Op(shuffle(V1, Mask), shuffle(V2, Mask)) -> shuffle(Op(V1, V2), Mask)
+    return createBinOpShuffle(V1, V2, Mask);
   }
 
-  // If one argument is a shuffle within one vector, the other is a constant,
-  // try moving the shuffle after the binary operation.
-  ShuffleVectorInst *Shuffle = nullptr;
-  Constant *C1 = nullptr;
-  if (isa<ShuffleVectorInst>(LHS)) Shuffle = cast<ShuffleVectorInst>(LHS);
-  if (isa<ShuffleVectorInst>(RHS)) Shuffle = cast<ShuffleVectorInst>(RHS);
-  if (isa<Constant>(LHS)) C1 = cast<Constant>(LHS);
-  if (isa<Constant>(RHS)) C1 = cast<Constant>(RHS);
-  if (Shuffle && C1 &&
-      (isa<ConstantVector>(C1) || isa<ConstantDataVector>(C1)) &&
-      isa<UndefValue>(Shuffle->getOperand(1)) &&
-      Shuffle->getType() == Shuffle->getOperand(0)->getType()) {
-    SmallVector<int, 16> ShMask = Shuffle->getShuffleMask();
-    // Find constant C2 that has property:
-    //   shuffle(C2, ShMask) = C1
-    // If such constant does not exist (example: ShMask=<0,0> and C1=<1,2>)
-    // reorder is not possible.
-    SmallVector<Constant*, 16> C2M(VWidth,
-                               UndefValue::get(C1->getType()->getScalarType()));
+  // If one argument is a shuffle within one vector and the other is a constant,
+  // try moving the shuffle after the binary operation. This canonicalization
+  // intends to move shuffles closer to other shuffles and binops closer to
+  // other binops, so they can be folded. It may also enable demanded elements
+  // transforms.
+  Constant *C;
+  if (match(&Inst, m_c_BinOp(
+          m_OneUse(m_ShuffleVector(m_Value(V1), m_Undef(), m_Constant(Mask))),
+          m_Constant(C))) &&
+      V1->getType() == Inst.getType()) {
+    // Find constant NewC that has property:
+    //   shuffle(NewC, ShMask) = C
+    // If such constant does not exist (example: ShMask=<0,0> and C=<1,2>)
+    // reorder is not possible. A 1-to-1 mapping is not required. Example:
+    // ShMask = <1,1,2,2> and C = <5,5,6,6> --> NewC = <undef,5,6,undef>
+    SmallVector<int, 16> ShMask;
+    ShuffleVectorInst::getShuffleMask(Mask, ShMask);
+    SmallVector<Constant *, 16>
+        NewVecC(VWidth, UndefValue::get(C->getType()->getScalarType()));
     bool MayChange = true;
     for (unsigned I = 0; I < VWidth; ++I) {
       if (ShMask[I] >= 0) {
         assert(ShMask[I] < (int)VWidth);
-        if (!isa<UndefValue>(C2M[ShMask[I]])) {
+        Constant *CElt = C->getAggregateElement(I);
+        Constant *NewCElt = NewVecC[ShMask[I]];
+        if (!CElt || (!isa<UndefValue>(NewCElt) && NewCElt != CElt)) {
           MayChange = false;
           break;
         }
-        C2M[ShMask[I]] = C1->getAggregateElement(I);
+        NewVecC[ShMask[I]] = CElt;
       }
     }
     if (MayChange) {
-      Constant *C2 = ConstantVector::get(C2M);
-      Value *NewLHS = isa<Constant>(LHS) ? C2 : Shuffle->getOperand(0);
-      Value *NewRHS = isa<Constant>(LHS) ? Shuffle->getOperand(0) : C2;
-      Value *NewBO = CreateBinOpAsGiven(Inst, NewLHS, NewRHS, Builder);
-      return Builder.CreateShuffleVector(NewBO,
-          UndefValue::get(Inst.getType()), Shuffle->getMask());
+      Constant *NewC = ConstantVector::get(NewVecC);
+      // It may not be safe to execute a binop on a vector with undef elements
+      // because the entire instruction can be folded to undef or create poison
+      // that did not exist in the original code.
+      bool ConstOp1 = isa<Constant>(Inst.getOperand(1));
+      if (Inst.isIntDivRem() || (Inst.isShift() && ConstOp1))
+        NewC = getSafeVectorConstantForBinop(Inst.getOpcode(), NewC, ConstOp1);
+
+      // Op(shuffle(V1, Mask), C) -> shuffle(Op(V1, NewC), Mask)
+      // Op(C, shuffle(V1, Mask)) -> shuffle(Op(NewC, V1), Mask)
+      Value *NewLHS = isa<Constant>(LHS) ? NewC : V1;
+      Value *NewRHS = isa<Constant>(LHS) ? V1 : NewC;
+      return createBinOpShuffle(NewLHS, NewRHS, Mask);
     }
   }
 
@@ -1937,16 +1935,17 @@ Instruction *InstCombiner::visitGetElementPtrInst(GetElementPtrInst &GEP) {
   // addrspacecast between types is canonicalized as a bitcast, then an
   // addrspacecast. To take advantage of the below bitcast + struct GEP, look
   // through the addrspacecast.
+  Value *ASCStrippedPtrOp = PtrOp;
   if (auto *ASC = dyn_cast<AddrSpaceCastInst>(PtrOp)) {
     //   X = bitcast A addrspace(1)* to B addrspace(1)*
     //   Y = addrspacecast A addrspace(1)* to B addrspace(2)*
     //   Z = gep Y, <...constant indices...>
     // Into an addrspacecasted GEP of the struct.
     if (auto *BC = dyn_cast<BitCastInst>(ASC->getOperand(0)))
-      PtrOp = BC;
+      ASCStrippedPtrOp = BC;
   }
 
-  if (auto *BCI = dyn_cast<BitCastInst>(PtrOp)) {
+  if (auto *BCI = dyn_cast<BitCastInst>(ASCStrippedPtrOp)) {
     Value *SrcOp = BCI->getOperand(0);
     PointerType *SrcType = cast<PointerType>(BCI->getSrcTy());
     Type *SrcEltType = SrcType->getElementType();
@@ -2145,7 +2144,7 @@ Instruction *InstCombiner::visitAllocSite(Instruction &MI) {
 
   // If we are removing an alloca with a dbg.declare, insert dbg.value calls
   // before each store.
-  TinyPtrVector<DbgInfoIntrinsic *> DIIs;
+  TinyPtrVector<DbgVariableIntrinsic *> DIIs;
   std::unique_ptr<DIBuilder> DIB;
   if (isa<AllocaInst>(MI)) {
     DIIs = FindDbgAddrUses(&MI);
@@ -2207,7 +2206,7 @@ Instruction *InstCombiner::visitAllocSite(Instruction &MI) {
   return nullptr;
 }
 
-/// \brief Move the call to free before a NULL test.
+/// Move the call to free before a NULL test.
 ///
 /// Check if this free is accessed after its argument has been test
 /// against NULL (property 0).
@@ -2571,6 +2570,7 @@ static bool isCatchAll(EHPersonality Personality, Constant *TypeInfo) {
   case EHPersonality::MSVC_Win64SEH:
   case EHPersonality::MSVC_CXX:
   case EHPersonality::CoreCLR:
+  case EHPersonality::Wasm_CXX:
     return TypeInfo->isNullValue();
   }
   llvm_unreachable("invalid enum");
@@ -2934,12 +2934,12 @@ static bool TryToSinkInstruction(Instruction *I, BasicBlock *DestBlock) {
 
   // Also sink all related debug uses from the source basic block. Otherwise we
   // get debug use before the def.
-  SmallVector<DbgInfoIntrinsic *, 1> DbgUsers;
+  SmallVector<DbgVariableIntrinsic *, 1> DbgUsers;
   findDbgUsers(DbgUsers, I);
   for (auto *DII : DbgUsers) {
     if (DII->getParent() == SrcBlock) {
       DII->moveBefore(&*InsertPos);
-      DEBUG(dbgs() << "SINK: " << *DII << '\n');
+      LLVM_DEBUG(dbgs() << "SINK: " << *DII << '\n');
     }
   }
   return true;
@@ -2952,7 +2952,7 @@ bool InstCombiner::run() {
 
     // Check to see if we can DCE the instruction.
     if (isInstructionTriviallyDead(I, &TLI)) {
-      DEBUG(dbgs() << "IC: DCE: " << *I << '\n');
+      LLVM_DEBUG(dbgs() << "IC: DCE: " << *I << '\n');
       eraseInstFromFunction(*I);
       ++NumDeadInst;
       MadeIRChange = true;
@@ -2966,7 +2966,8 @@ bool InstCombiner::run() {
     if (!I->use_empty() &&
         (I->getNumOperands() == 0 || isa<Constant>(I->getOperand(0)))) {
       if (Constant *C = ConstantFoldInstruction(I, DL, &TLI)) {
-        DEBUG(dbgs() << "IC: ConstFold to: " << *C << " from: " << *I << '\n');
+        LLVM_DEBUG(dbgs() << "IC: ConstFold to: " << *C << " from: " << *I
+                          << '\n');
 
         // Add operands to the worklist.
         replaceInstUsesWith(*I, C);
@@ -2985,8 +2986,8 @@ bool InstCombiner::run() {
       KnownBits Known = computeKnownBits(I, /*Depth*/0, I);
       if (Known.isConstant()) {
         Constant *C = ConstantInt::get(Ty, Known.getConstant());
-        DEBUG(dbgs() << "IC: ConstFold (all bits known) to: " << *C <<
-                        " from: " << *I << '\n');
+        LLVM_DEBUG(dbgs() << "IC: ConstFold (all bits known) to: " << *C
+                          << " from: " << *I << '\n');
 
         // Add operands to the worklist.
         replaceInstUsesWith(*I, C);
@@ -3025,7 +3026,7 @@ bool InstCombiner::run() {
         if (UserIsSuccessor && UserParent->getUniquePredecessor()) {
           // Okay, the CFG is simple enough, try to sink this instruction.
           if (TryToSinkInstruction(I, UserParent)) {
-            DEBUG(dbgs() << "IC: Sink: " << *I << '\n');
+            LLVM_DEBUG(dbgs() << "IC: Sink: " << *I << '\n');
             MadeIRChange = true;
             // We'll add uses of the sunk instruction below, but since sinking
             // can expose opportunities for it's *operands* add them to the
@@ -3045,15 +3046,15 @@ bool InstCombiner::run() {
 #ifndef NDEBUG
     std::string OrigI;
 #endif
-    DEBUG(raw_string_ostream SS(OrigI); I->print(SS); OrigI = SS.str(););
-    DEBUG(dbgs() << "IC: Visiting: " << OrigI << '\n');
+    LLVM_DEBUG(raw_string_ostream SS(OrigI); I->print(SS); OrigI = SS.str(););
+    LLVM_DEBUG(dbgs() << "IC: Visiting: " << OrigI << '\n');
 
     if (Instruction *Result = visit(*I)) {
       ++NumCombined;
       // Should we replace the old instruction with a new one?
       if (Result != I) {
-        DEBUG(dbgs() << "IC: Old = " << *I << '\n'
-                     << "    New = " << *Result << '\n');
+        LLVM_DEBUG(dbgs() << "IC: Old = " << *I << '\n'
+                          << "    New = " << *Result << '\n');
 
         if (I->getDebugLoc())
           Result->setDebugLoc(I->getDebugLoc());
@@ -3080,8 +3081,8 @@ bool InstCombiner::run() {
 
         eraseInstFromFunction(*I);
       } else {
-        DEBUG(dbgs() << "IC: Mod = " << OrigI << '\n'
-                     << "    New = " << *I << '\n');
+        LLVM_DEBUG(dbgs() << "IC: Mod = " << OrigI << '\n'
+                          << "    New = " << *I << '\n');
 
         // If the instruction was modified, it's possible that it is now dead.
         // if so, remove it.
@@ -3132,7 +3133,7 @@ static bool AddReachableCodeToWorklist(BasicBlock *BB, const DataLayout &DL,
       // DCE instruction if trivially dead.
       if (isInstructionTriviallyDead(Inst, TLI)) {
         ++NumDeadInst;
-        DEBUG(dbgs() << "IC: DCE: " << *Inst << '\n');
+        LLVM_DEBUG(dbgs() << "IC: DCE: " << *Inst << '\n');
         salvageDebugInfo(*Inst);
         Inst->eraseFromParent();
         MadeIRChange = true;
@@ -3143,8 +3144,8 @@ static bool AddReachableCodeToWorklist(BasicBlock *BB, const DataLayout &DL,
       if (!Inst->use_empty() &&
           (Inst->getNumOperands() == 0 || isa<Constant>(Inst->getOperand(0))))
         if (Constant *C = ConstantFoldInstruction(Inst, DL, TLI)) {
-          DEBUG(dbgs() << "IC: ConstFold to: " << *C << " from: "
-                       << *Inst << '\n');
+          LLVM_DEBUG(dbgs() << "IC: ConstFold to: " << *C << " from: " << *Inst
+                            << '\n');
           Inst->replaceAllUsesWith(C);
           ++NumConstProp;
           if (isInstructionTriviallyDead(Inst, TLI))
@@ -3166,9 +3167,9 @@ static bool AddReachableCodeToWorklist(BasicBlock *BB, const DataLayout &DL,
           FoldRes = C;
 
         if (FoldRes != C) {
-          DEBUG(dbgs() << "IC: ConstFold operand of: " << *Inst
-                       << "\n    Old = " << *C
-                       << "\n    New = " << *FoldRes << '\n');
+          LLVM_DEBUG(dbgs() << "IC: ConstFold operand of: " << *Inst
+                            << "\n    Old = " << *C
+                            << "\n    New = " << *FoldRes << '\n');
           U = FoldRes;
           MadeIRChange = true;
         }
@@ -3211,7 +3212,7 @@ static bool AddReachableCodeToWorklist(BasicBlock *BB, const DataLayout &DL,
   return MadeIRChange;
 }
 
-/// \brief Populate the IC worklist from a function, and prune any dead basic
+/// Populate the IC worklist from a function, and prune any dead basic
 /// blocks discovered in the process.
 ///
 /// This also does basic constant propagation and other forward fixing to make
@@ -3271,8 +3272,8 @@ static bool combineInstructionsOverFunction(
   int Iteration = 0;
   while (true) {
     ++Iteration;
-    DEBUG(dbgs() << "\n\nINSTCOMBINE ITERATION #" << Iteration << " on "
-                 << F.getName() << "\n");
+    LLVM_DEBUG(dbgs() << "\n\nINSTCOMBINE ITERATION #" << Iteration << " on "
+                      << F.getName() << "\n");
 
     MadeIRChange |= prepareICWorklistFromFunction(F, DL, &TLI, Worklist);
 

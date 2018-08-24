@@ -171,7 +171,7 @@
   !28 = !{i32 2, !"Debug Info Version", i32 3}
   !29 = !{i32 7, !"PIC Level", i32 2}
   !30 = !{!"clang version 4.0.0 "}
-  !31 = distinct !DISubprogram(name: "foo", scope: !3, file: !3, line: 50, type: !32, isLocal: false, isDefinition: true, scopeLine: 52, flags: DIFlagPrototyped, isOptimized: true, unit: !2, variables: !35)
+  !31 = distinct !DISubprogram(name: "foo", scope: !3, file: !3, line: 50, type: !32, isLocal: false, isDefinition: true, scopeLine: 52, flags: DIFlagPrototyped, isOptimized: true, unit: !2, retainedNodes: !35)
   !32 = !DISubroutineType(types: !33)
   !33 = !{!34, !14, !14}
   !34 = !DIDerivedType(tag: DW_TAG_typedef, name: "boolean", file: !3, line: 6, baseType: !6)
@@ -246,10 +246,12 @@ fixedStack:
 stack:
   - { id: 0, name: '', type: spill-slot, offset: -64, size: 4, alignment: 4,
       stack-id: 0, callee-saved-register: '', callee-saved-restored: true,
-      di-variable: '', di-expression: '', di-location: '' }
+      debug-info-variable: '', debug-info-expression: '',
+      debug-info-location: '' }
   - { id: 1, name: '', type: spill-slot, offset: -60, size: 4, alignment: 4,
       stack-id: 0, callee-saved-register: '', callee-saved-restored: true,
-      di-variable: '', di-expression: '', di-location: '' }
+      debug-info-variable: '', debug-info-expression: '',
+      debug-info-location: '' }
 constants:
 body:             |
   bb.0.entry:
@@ -275,9 +277,9 @@ body:             |
     DBG_VALUE debug-use $edi, debug-use $noreg, !36, !DIExpression(), debug-location !57
     DBG_VALUE debug-use $esi, debug-use $noreg, !37, !DIExpression(), debug-location !58
     $ebx = MOV32rr $esi
-    DBG_VALUE $ebx, debug-use $noreg, !37, !DIExpression(), debug-location !58
+    DBG_VALUE debug-use $ebx, debug-use $noreg, !37, !DIExpression(), debug-location !58
     $r15d = MOV32rr $edi
-    DBG_VALUE $r15d, debug-use $noreg, !36, !DIExpression(), debug-location !57
+    DBG_VALUE debug-use $r15d, debug-use $noreg, !36, !DIExpression(), debug-location !57
     renamable $r14 = MOV64ri -9223372036854775808
     $edi = MOV32rr $ebx
     CALL64pcrel32 @func1, csr_64, implicit $rsp, implicit $ssp, implicit $edi, implicit-def $rsp, implicit-def $ssp, implicit-def $rax

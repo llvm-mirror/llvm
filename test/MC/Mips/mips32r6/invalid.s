@@ -30,12 +30,12 @@ local_label:
         lhe $4, 8($33)    # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid register number
         lhu $4, 8($35)    # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid register number
         lhue $4, 8($37)   # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid register number
-        lh  $2, -65536($4) # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 16-bit signed offset
-        lh  $2, 65536($4)  # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 16-bit signed offset
+        lh  $2, -2147483649($4) # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 32-bit signed offset
+        lh  $2, 2147483648($4)  # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 32-bit signed offset
         lhe $4, -512($2)   # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
         lhe $4, 512($2)    # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
-        lhu $4, -65536($2) # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 16-bit signed offset
-        lhu $4, 65536($2)  # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 16-bit signed offset
+        lhu $4, -2147483649($2) # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 32-bit signed offset
+        lhu $4, 2147483648($2)  # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 32-bit signed offset
         lhue $4, -512($2)  # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
         lhue $4, 512($2)   # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
         // FIXME: Following tests are temporarily disabled, until "PredicateControl not in hierarchy" problem is resolved
@@ -146,12 +146,12 @@ local_label:
         sync -1              # CHECK: :[[@LINE]]:14: error: expected 5-bit unsigned immediate
         sync 32              # CHECK: :[[@LINE]]:14: error: expected 5-bit unsigned immediate
         lb $32, 8($5)        # CHECK: :[[@LINE]]:12: error: invalid register number
-        lb $4, -32769($5)    # CHECK: :[[@LINE]]:16: error: expected memory with 16-bit signed offset
-        lb $4, 32768($5)     # CHECK: :[[@LINE]]:16: error: expected memory with 16-bit signed offset
+        lb $4, -2147483649($5)  # CHECK: :[[@LINE]]:16: error: expected memory with 32-bit signed offset
+        lb $4, 2147483648($5)   # CHECK: :[[@LINE]]:16: error: expected memory with 32-bit signed offset
         lb $4, 8($32)        # CHECK: :[[@LINE]]:18: error: invalid register number
         lbu $32, 8($5)       # CHECK: :[[@LINE]]:13: error: invalid register number
-        lbu $4, -32769($5)   # CHECK: :[[@LINE]]:17: error: expected memory with 16-bit signed offset
-        lbu $4, 32768($5)    # CHECK: :[[@LINE]]:17: error: expected memory with 16-bit signed offset
+        lbu $4, -2147483649($5) # CHECK: :[[@LINE]]:17: error: expected memory with 32-bit signed offset
+        lbu $4, 2147483648($5)  # CHECK: :[[@LINE]]:17: error: expected memory with 32-bit signed offset
         lbu $4, 8($32)       # CHECK: :[[@LINE]]:19: error: invalid register number
         ldc1 $f32, 300($10)   # CHECK: :[[@LINE]]:14: error: invalid operand for instruction
         ldc1 $f7, -32769($10) # CHECK: :[[@LINE]]:19: error: expected memory with 16-bit signed offset

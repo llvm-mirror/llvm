@@ -4,6 +4,7 @@ target datalayout = "e-m:e-i64:64-f80:128-n8:16:32:64-S128"
 target triple = "x86_64-unknown-linux-gnu"
 
 declare void @f() nounwind
+declare void @llvm.experimental.guard(i1,...)
 
 ; constant fold on first ieration
 define i32 @test1(i32* noalias nocapture readonly %a) nounwind uwtable {
@@ -223,9 +224,14 @@ entry:
 for.body:
   %iv = phi i32 [ 0, %entry ], [ %inc, %continue ]
   %acc = phi i32 [ 0, %entry ], [ %add, %continue ]
-  br label %dummy_block
-dummy_block:
-  %wrongphi = phi i32 [12, %for.body]
+  %cond = icmp ult i32 %iv, 500
+  br i1 %cond, label %dummy_block1, label %dummy_block2
+
+dummy_block1:
+  br label %dummy_block2
+
+dummy_block2:
+  %wrongphi = phi i32 [11, %for.body], [12, %dummy_block1]
   %r.chk = icmp ugt i32 %wrongphi, 2000
   br i1 %r.chk, label %fail, label %continue
 continue:
@@ -274,4 +280,178 @@ for.cond.cleanup:
 fail:
   call void @f()
   ret i32 -1
+}
+
+define void @test-hoisting-in-presence-of-guards(i1 %c, i32* %p) {
+
+; CHECK-LABEL: @test-hoisting-in-presence-of-guards
+; CHECK:       entry:
+; CHECK:         %a = load i32, i32* %p
+; CHECK:         %invariant_cond = icmp ne i32 %a, 100
+; CHECK:       loop:
+
+entry:
+  br label %loop
+
+loop:
+  %iv = phi i32 [ 0, %entry ], [ %iv.next, %loop ]
+  %iv.next = add i32 %iv, 1
+  %a = load i32, i32* %p
+  %invariant_cond = icmp ne i32 %a, 100
+  call void (i1, ...) @llvm.experimental.guard(i1 %invariant_cond) [ "deopt"() ]
+  %loop_cond = icmp slt i32 %iv.next, 1000
+  br i1 %loop_cond, label %loop, label %exit
+
+exit:
+  ret void
+}
+
+
+declare void @may_throw() inaccessiblememonly
+
+; Test that we can sink a mustexecute load from loop header even in presence of
+; throwing instructions after it.
+define void @test_hoist_from_header_01(i32* %p, i32 %n) {
+
+; CHECK-LABEL: @test_hoist_from_header_01(
+; CHECK:       entry:
+; CHECK-NEXT:  %load = load i32, i32* %p
+; CHECK-NOT:   load i32
+
+entry:
+  br label %loop
+
+loop:
+  %iv = phi i32 [ 0, %entry ], [ %iv.next, %backedge ]
+  %dummy = phi i32 [ 0, %entry ], [ %merge, %backedge ]
+  %load = load i32, i32* %p
+  call void @may_throw()
+  %cond = icmp slt i32 %iv, %n
+  br i1 %cond, label %if.true, label %if.false
+
+if.true:
+  %a = add i32 %iv, %iv
+  br label %backedge
+
+if.false:
+  %b = mul i32 %iv, %iv
+  br label %backedge
+
+backedge:
+  %merge = phi i32 [ %a, %if.true ], [ %b, %if.false ]
+  %iv.next = add i32 %iv, %merge
+  %loop.cond = icmp ult i32 %iv.next, %load
+  br i1 %loop.cond, label %loop, label %exit
+
+exit:
+  ret void
+}
+
+define void @test_hoist_from_header_02(i32* %p, i32 %n) {
+
+; CHECK-LABEL: @test_hoist_from_header_02(
+; CHECK:       entry:
+; CHECK-NEXT:  %load = load i32, i32* %p
+; CHECK-NOT:   load i32
+
+entry:
+  br label %loop
+
+loop:
+  %iv = phi i32 [ 0, %entry ], [ %iv.next, %backedge ]
+  %dummy = phi i32 [ 0, %entry ], [ %merge, %backedge ]
+  %load = load i32, i32* %p
+  %cond = icmp slt i32 %iv, %n
+  br i1 %cond, label %if.true, label %if.false
+
+if.true:
+  call void @may_throw()
+  %a = add i32 %iv, %iv
+  br label %backedge
+
+if.false:
+  %b = mul i32 %iv, %iv
+  br label %backedge
+
+backedge:
+  %merge = phi i32 [ %a, %if.true ], [ %b, %if.false ]
+  %iv.next = add i32 %iv, %merge
+  %loop.cond = icmp ult i32 %iv.next, %load
+  br i1 %loop.cond, label %loop, label %exit
+
+exit:
+  ret void
+}
+
+define void @test_hoist_from_header_03(i32* %p, i32 %n) {
+
+; CHECK-LABEL: @test_hoist_from_header_03(
+; CHECK:       entry:
+; CHECK-NEXT:  %load = load i32, i32* %p
+; CHECK-NOT:   load i32
+
+entry:
+  br label %loop
+
+loop:
+  %iv = phi i32 [ 0, %entry ], [ %iv.next, %backedge ]
+  %dummy = phi i32 [ 0, %entry ], [ %merge, %backedge ]
+  %load = load i32, i32* %p
+  %cond = icmp slt i32 %iv, %n
+  br i1 %cond, label %if.true, label %if.false
+
+if.true:
+  %a = add i32 %iv, %iv
+  br label %backedge
+
+if.false:
+  %b = mul i32 %iv, %iv
+  br label %backedge
+
+backedge:
+  %merge = phi i32 [ %a, %if.true ], [ %b, %if.false ]
+  call void @may_throw()
+  %iv.next = add i32 %iv, %merge
+  %loop.cond = icmp ult i32 %iv.next, %load
+  br i1 %loop.cond, label %loop, label %exit
+
+exit:
+  ret void
+}
+
+; Check that a throwing instruction prohibits hoisting across it.
+define void @test_hoist_from_header_04(i32* %p, i32 %n) {
+
+; CHECK-LABEL: @test_hoist_from_header_04(
+; CHECK:       entry:
+; CHECK:       loop:
+; CHECK:       %load = load i32, i32* %p
+
+entry:
+  br label %loop
+
+loop:
+  %iv = phi i32 [ 0, %entry ], [ %iv.next, %backedge ]
+  %dummy = phi i32 [ 0, %entry ], [ %merge, %backedge ]
+  call void @may_throw()
+  %load = load i32, i32* %p
+  %cond = icmp slt i32 %iv, %n
+  br i1 %cond, label %if.true, label %if.false
+
+if.true:
+  %a = add i32 %iv, %iv
+  br label %backedge
+
+if.false:
+  %b = mul i32 %iv, %iv
+  br label %backedge
+
+backedge:
+  %merge = phi i32 [ %a, %if.true ], [ %b, %if.false ]
+  %iv.next = add i32 %iv, %merge
+  %loop.cond = icmp ult i32 %iv.next, %load
+  br i1 %loop.cond, label %loop, label %exit
+
+exit:
+  ret void
 }

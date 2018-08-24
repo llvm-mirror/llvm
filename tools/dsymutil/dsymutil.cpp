@@ -13,11 +13,14 @@
 //===----------------------------------------------------------------------===//
 
 #include "dsymutil.h"
+#include "BinaryHolder.h"
 #include "CFBundle.h"
 #include "DebugMap.h"
+#include "LinkUtils.h"
 #include "MachOUtils.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/DebugInfo/DIContext.h"
@@ -63,6 +66,11 @@ static opt<std::string> OsoPrependPath(
     desc("Specify a directory to prepend to the paths of object files."),
     value_desc("path"), cat(DsymCategory));
 
+static opt<bool> Assembly(
+    "S",
+    desc("Output textual assembly instead of a binary dSYM companion file."),
+    init(false), cat(DsymCategory), cl::Hidden);
+
 static opt<bool> DumpStab(
     "symtab",
     desc("Dumps the symbol table found in executable or object file(s) and\n"
@@ -77,10 +85,10 @@ static alias FlatOutA("f", desc("Alias for --flat"), aliasopt(FlatOut));
 
 static opt<bool> Minimize(
     "minimize",
-    desc("When used when creating a dSYM file, this option will suppress\n"
-         "the emission of the .debug_inlines, .debug_pubnames, and\n"
-         ".debug_pubtypes sections since dsymutil currently has better\n"
-         "equivalents: .apple_names and .apple_types. When used in\n"
+    desc("When used when creating a dSYM file with Apple accelerator tables,\n"
+         "this option will suppress the emission of the .debug_inlines, \n"
+         ".debug_pubnames, and .debug_pubtypes sections since dsymutil \n"
+         "has better equivalents: .apple_names and .apple_types. When used in\n"
          "conjunction with --update option, this option will cause redundant\n"
          "accelerator tables to be removed."),
     init(false), cat(DsymCategory));
@@ -89,11 +97,17 @@ static alias MinimizeA("z", desc("Alias for --minimize"), aliasopt(Minimize));
 static opt<bool> Update(
     "update",
     desc("Updates existing dSYM files to contain the latest accelerator\n"
-         "tables and other DWARF optimizations. This option will currently\n"
-         "add the new .apple_names and .apple_types hashed accelerator\n"
-         "tables."),
+         "tables and other DWARF optimizations."),
     init(false), cat(DsymCategory));
 static alias UpdateA("u", desc("Alias for --update"), aliasopt(Update));
+
+static cl::opt<AccelTableKind> AcceleratorTable(
+    "accelerator", cl::desc("Output accelerator tables."),
+    cl::values(clEnumValN(AccelTableKind::Default, "Default",
+                          "Default for input."),
+               clEnumValN(AccelTableKind::Apple, "Apple", "Apple"),
+               clEnumValN(AccelTableKind::Dwarf, "Dwarf", "DWARF")),
+    cl::init(AccelTableKind::Default), cat(DsymCategory));
 
 static opt<unsigned> NumThreads(
     "num-threads",
@@ -193,16 +207,24 @@ static bool createPlistFile(llvm::StringRef Bin, llvm::StringRef BundleRoot) {
      << "\t\t<key>CFBundleSignature</key>\n"
      << "\t\t<string>\?\?\?\?</string>\n";
 
-  if (!BI.OmitShortVersion())
-    PL << "\t\t<key>CFBundleShortVersionString</key>\n"
-       << "\t\t<string>" << BI.ShortVersionStr << "</string>\n";
+  if (!BI.OmitShortVersion()) {
+    PL << "\t\t<key>CFBundleShortVersionString</key>\n";
+    PL << "\t\t<string>";
+    printHTMLEscaped(BI.ShortVersionStr, PL);
+    PL << "</string>\n";
+  }
 
-  PL << "\t\t<key>CFBundleVersion</key>\n"
-     << "\t\t<string>" << BI.VersionStr << "</string>\n";
+  PL << "\t\t<key>CFBundleVersion</key>\n";
+  PL << "\t\t<string>";
+  printHTMLEscaped(BI.VersionStr, PL);
+  PL << "</string>\n";
 
-  if (!Toolchain.empty())
-    PL << "\t\t<key>Toolchain</key>\n"
-       << "\t\t<string>" << Toolchain << "</string>\n";
+  if (!Toolchain.empty()) {
+    PL << "\t\t<key>Toolchain</key>\n";
+    PL << "\t\t<string>";
+    printHTMLEscaped(Toolchain, PL);
+    PL << "</string>\n";
+  }
 
   PL << "\t</dict>\n"
      << "</plist>\n";
@@ -291,13 +313,6 @@ static std::string getOutputFileName(llvm::StringRef InputFile) {
   return BundleDir.str();
 }
 
-static Expected<sys::fs::TempFile> createTempFile() {
-  llvm::SmallString<128> TmpModel;
-  llvm::sys::path::system_temp_directory(true, TmpModel);
-  llvm::sys::path::append(TmpModel, "dsym.tmp%%%%%.dwarf");
-  return sys::fs::TempFile::create(TmpModel);
-}
-
 /// Parses the command line options into the LinkOptions struct and performs
 /// some sanity checking. Returns an error in case the latter fails.
 static Expected<LinkOptions> getOptions() {
@@ -310,6 +325,10 @@ static Expected<LinkOptions> getOptions() {
   Options.Update = Update;
   Options.NoTimestamp = NoTimestamp;
   Options.PrependPath = OsoPrependPath;
+  Options.TheAccelTableKind = AcceleratorTable;
+
+  if (Assembly)
+    Options.FileType = OutputFileType::Assembly;
 
   if (Options.Update && std::find(InputFiles.begin(), InputFiles.end(), "-") !=
                             InputFiles.end()) {
@@ -374,18 +393,6 @@ static Expected<std::vector<std::string>> getInputs(bool DsymAsInput) {
   return Inputs;
 }
 
-namespace {
-struct TempFileVector {
-  std::vector<sys::fs::TempFile> Files;
-  ~TempFileVector() {
-    for (sys::fs::TempFile &Tmp : Files) {
-      if (Error E = Tmp.discard())
-        errs() << toString(std::move(E));
-    }
-  }
-};
-} // namespace
-
 int main(int argc, char **argv) {
   InitLLVM X(argc, argv);
 
@@ -393,7 +400,7 @@ int main(int argc, char **argv) {
   std::string SDKPath = llvm::sys::fs::getMainExecutable(argv[0], P);
   SDKPath = llvm::sys::path::parent_path(SDKPath);
 
-  HideUnrelatedOptions(DsymCategory);
+  HideUnrelatedOptions({&DsymCategory, &ColorCategory});
   llvm::cl::ParseCommandLineOptions(
       argc, argv,
       "manipulate archived DWARF debug symbol files.\n\n"
@@ -484,6 +491,9 @@ int main(int argc, char **argv) {
       return 1;
     }
 
+    // Shared a single binary holder for all the link steps.
+    BinaryHolder BinHolder;
+
     NumThreads =
         std::min<unsigned>(OptionsOrErr->Threads, DebugMapPtrsOrErr->size());
     llvm::ThreadPool Threads(NumThreads);
@@ -494,8 +504,7 @@ int main(int argc, char **argv) {
         !DumpDebugMap && (OutputFileOpt != "-") &&
         (DebugMapPtrsOrErr->size() != 1 || OptionsOrErr->Update);
 
-    llvm::SmallVector<MachOUtils::ArchAndFilename, 4> TempFiles;
-    TempFileVector TempFileStore;
+    llvm::SmallVector<MachOUtils::ArchAndFile, 4> TempFiles;
     std::atomic_char AllOK(1);
     for (auto &Map : *DebugMapPtrsOrErr) {
       if (Verbose || DumpDebugMap)
@@ -514,16 +523,18 @@ int main(int argc, char **argv) {
       std::shared_ptr<raw_fd_ostream> OS;
       std::string OutputFile = getOutputFileName(InputFile);
       if (NeedsTempFiles) {
-        Expected<sys::fs::TempFile> T = createTempFile();
-        if (!T) {
-          errs() << toString(T.takeError());
+        TempFiles.emplace_back(Map->getTriple().getArchName().str());
+
+        auto E = TempFiles.back().createTempFile();
+        if (E) {
+          errs() << toString(std::move(E));
           return 1;
         }
-        OS = std::make_shared<raw_fd_ostream>(T->FD, /*shouldClose*/ false);
-        OutputFile = T->TmpName;
-        TempFileStore.Files.push_back(std::move(*T));
-        TempFiles.emplace_back(Map->getTriple().getArchName().str(),
-                               OutputFile);
+
+        auto &TempFile = *(TempFiles.back().File);
+        OS = std::make_shared<raw_fd_ostream>(TempFile.FD,
+                                              /*shouldClose*/ false);
+        OutputFile = TempFile.TmpName;
       } else {
         std::error_code EC;
         OS = std::make_shared<raw_fd_ostream>(NoOutput ? "-" : OutputFile, EC,
@@ -536,7 +547,7 @@ int main(int argc, char **argv) {
 
       auto LinkLambda = [&,
                          OutputFile](std::shared_ptr<raw_fd_ostream> Stream) {
-        AllOK.fetch_and(linkDwarf(*Stream, *Map, *OptionsOrErr));
+        AllOK.fetch_and(linkDwarf(*Stream, BinHolder, *Map, *OptionsOrErr));
         Stream->flush();
         if (Verify && !NoOutput)
           AllOK.fetch_and(verify(OutputFile, Map->getTriple().getArchName()));

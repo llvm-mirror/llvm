@@ -301,7 +301,7 @@ namespace llvm {
   /// StackSlotColoring - This pass performs stack slot coloring.
   extern char &StackSlotColoringID;
 
-  /// \brief This pass lays out funclets contiguously.
+  /// This pass lays out funclets contiguously.
   extern char &FuncletLayoutID;
 
   /// This pass inserts the XRay instrumentation sleds if they are supported by
@@ -311,7 +311,7 @@ namespace llvm {
   /// This pass inserts FEntry calls
   extern char &FEntryInserterID;
 
-  /// \brief This pass implements the "patchable-function" attribute.
+  /// This pass implements the "patchable-function" attribute.
   extern char &PatchableFunctionID;
 
   /// createStackProtectorPass - This pass adds stack protectors to functions.
@@ -329,12 +329,16 @@ namespace llvm {
 
   /// createWinEHPass - Prepares personality functions used by MSVC on Windows,
   /// in addition to the Itanium LSDA based personalities.
-  FunctionPass *createWinEHPass();
+  FunctionPass *createWinEHPass(bool DemoteCatchSwitchPHIOnly = false);
 
   /// createSjLjEHPreparePass - This pass adapts exception handling code to use
   /// the GCC-style builtin setjmp/longjmp (sjlj) to handling EH control flow.
   ///
   FunctionPass *createSjLjEHPreparePass();
+
+  /// createWasmEHPass - This pass adapts exception handling code to use
+  /// WebAssembly's exception handling scheme.
+  FunctionPass *createWasmEHPass();
 
   /// LocalStackSlotAllocation - This pass assigns local frame indices to stack
   /// slots relative to one another and allocates base registers to access them
@@ -380,7 +384,7 @@ namespace llvm {
   ///
   ModulePass *createLowerEmuTLSPass();
 
-  /// This pass lowers the @llvm.load.relative intrinsic to instructions.
+  /// This pass lowers the \@llvm.load.relative intrinsic to instructions.
   /// This is unsafe to do earlier because a pass may combine the constant
   /// initializer into the load, which may result in an overflowing evaluation.
   ModulePass *createPreISelIntrinsicLoweringPass();
@@ -419,7 +423,7 @@ namespace llvm {
 
   /// This pass performs outlining on machine instructions directly before
   /// printing assembly.
-  ModulePass *createMachineOutlinerPass();
+  ModulePass *createMachineOutlinerPass(bool RunOnAllFunctions = true);
 
   /// This pass expands the experimental reduction intrinsics into sequences of
   /// shuffles.

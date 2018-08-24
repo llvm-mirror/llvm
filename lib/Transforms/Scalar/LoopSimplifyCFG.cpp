@@ -27,18 +27,22 @@
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionAliasAnalysis.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
-#include "llvm/Analysis/Utils/Local.h"
+#include "llvm/IR/DomTreeUpdater.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/LoopPassManager.h"
 #include "llvm/Transforms/Utils.h"
+#include "llvm/Transforms/Utils/BasicBlockUtils.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
 using namespace llvm;
 
 #define DEBUG_TYPE "loop-simplifycfg"
 
-static bool simplifyLoopCFG(Loop &L, DominatorTree &DT, LoopInfo &LI) {
+static bool simplifyLoopCFG(Loop &L, DominatorTree &DT, LoopInfo &LI,
+                            ScalarEvolution &SE) {
   bool Changed = false;
+  DomTreeUpdater DTU(DT, DomTreeUpdater::UpdateStrategy::Eager);
   // Copy blocks into a temporary array to avoid iterator invalidation issues
   // as we remove them.
   SmallVector<WeakTrackingVH, 16> Blocks(L.blocks());
@@ -54,11 +58,11 @@ static bool simplifyLoopCFG(Loop &L, DominatorTree &DT, LoopInfo &LI) {
     if (!Pred || !Pred->getSingleSuccessor() || LI.getLoopFor(Pred) != &L)
       continue;
 
-    // Pred is going to disappear, so we need to update the loop info.
-    if (L.getHeader() == Pred)
-      L.moveToHeader(Succ);
-    LI.removeBlock(Pred);
-    MergeBasicBlockIntoOnlyPred(Succ, &DT);
+    // Merge Succ into Pred and delete it.
+    MergeBlockIntoPredecessor(Succ, &DTU, &LI);
+
+    SE.forgetTopmostLoop(&L);
+
     Changed = true;
   }
 
@@ -68,7 +72,7 @@ static bool simplifyLoopCFG(Loop &L, DominatorTree &DT, LoopInfo &LI) {
 PreservedAnalyses LoopSimplifyCFGPass::run(Loop &L, LoopAnalysisManager &AM,
                                            LoopStandardAnalysisResults &AR,
                                            LPMUpdater &) {
-  if (!simplifyLoopCFG(L, AR.DT, AR.LI))
+  if (!simplifyLoopCFG(L, AR.DT, AR.LI, AR.SE))
     return PreservedAnalyses::all();
 
   return getLoopPassPreservedAnalyses();
@@ -88,7 +92,8 @@ public:
 
     DominatorTree &DT = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
     LoopInfo &LI = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
-    return simplifyLoopCFG(*L, DT, LI);
+    ScalarEvolution &SE = getAnalysis<ScalarEvolutionWrapperPass>().getSE();
+    return simplifyLoopCFG(*L, DT, LI, SE);
   }
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {

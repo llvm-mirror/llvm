@@ -1,6 +1,6 @@
 ; RUN: llc -filetype=obj %s -o - | obj2yaml | FileCheck %s
 
-target triple = "wasm32-unknown-unknown-wasm"
+target triple = "wasm32-unknown-unknown"
 
 ; Function with __attribute__((visibility("default")))
 define void @defaultVis() #0 {
@@ -14,9 +14,7 @@ entry:
   ret void
 }
 
-; CHECK:        - Type:            CUSTOM
-; CHECK-NEXT:     Name:            linking
-; CHECK-NEXT:     SymbolTable:
+; CHECK:          SymbolTable:
 ; CHECK-NEXT:       - Index:           0
 ; CHECK-NEXT:         Kind:            FUNCTION
 ; CHECK-NEXT:         Name:            defaultVis

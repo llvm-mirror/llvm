@@ -14,12 +14,12 @@
 /// performance throughput. Below is an example of summary view:
 ///
 ///
-/// Iterations:     300
-/// Instructions:   900
-/// Total Cycles:   610
-/// Dispatch Width: 2
-/// IPC:            1.48
-///
+/// Iterations:        300
+/// Instructions:      900
+/// Total Cycles:      610
+/// Dispatch Width:    2
+/// IPC:               1.48
+/// Block RThroughput: 2.0
 ///
 /// The summary view collects a few performance numbers. The two main
 /// performance indicators are 'Total Cycles' and IPC (Instructions Per Cycle).
@@ -31,21 +31,43 @@
 
 #include "SourceMgr.h"
 #include "View.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/MC/MCSchedule.h"
 #include "llvm/Support/raw_ostream.h"
 
 namespace mca {
 
-/// \brief A view that collects and prints a few performance numbers.
+/// A view that collects and prints a few performance numbers.
 class SummaryView : public View {
+  const llvm::MCSchedModel &SM;
   const SourceMgr &Source;
   const unsigned DispatchWidth;
   unsigned TotalCycles;
+  // The total number of micro opcodes contributed by a block of instructions.
+  unsigned NumMicroOps;
+  // For each processor resource, this vector stores the cumulative number of
+  // resource cycles consumed by the analyzed code block.
+  llvm::SmallVector<unsigned, 8> ProcResourceUsage;
+
+  // Each processor resource is associated with a so-called processor resource
+  // mask. This vector allows to correlate processor resource IDs with processor
+  // resource masks. There is exactly one element per each processor resource
+  // declared by the scheduling model.
+  llvm::SmallVector<uint64_t, 8> ProcResourceMasks;
+
+  // Compute the reciprocal throughput for the analyzed code block.
+  // The reciprocal block throughput is computed as the MAX between:
+  //   - NumMicroOps / DispatchWidth
+  //   - Total Resource Cycles / #Units   (for every resource consumed).
+  double getBlockRThroughput() const;
 
 public:
-  SummaryView(const SourceMgr &S, unsigned Width)
-      : Source(S), DispatchWidth(Width), TotalCycles(0) {}
+  SummaryView(const llvm::MCSchedModel &Model, const SourceMgr &S,
+              unsigned Width);
 
   void onCycleEnd() override { ++TotalCycles; }
+
+  void onEvent(const HWInstructionEvent &Event) override;
 
   void printView(llvm::raw_ostream &OS) const override;
 };

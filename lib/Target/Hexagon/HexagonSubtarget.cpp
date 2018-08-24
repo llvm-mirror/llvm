@@ -39,17 +39,6 @@ using namespace llvm;
 #define GET_SUBTARGETINFO_TARGET_DESC
 #include "HexagonGenSubtargetInfo.inc"
 
-static cl::opt<bool> EnableMemOps("enable-hexagon-memops",
-  cl::Hidden, cl::ZeroOrMore, cl::ValueDisallowed, cl::init(true),
-  cl::desc("Generate V4 MEMOP in code generation for Hexagon target"));
-
-static cl::opt<bool> DisableMemOps("disable-hexagon-memops",
-  cl::Hidden, cl::ZeroOrMore, cl::ValueDisallowed, cl::init(false),
-  cl::desc("Do not generate V4 MEMOP in code generation for Hexagon target"));
-
-static cl::opt<bool> EnableIEEERndNear("enable-hexagon-ieee-rnd-near",
-  cl::Hidden, cl::ZeroOrMore, cl::init(false),
-  cl::desc("Generate non-chopped conversion from fp to int."));
 
 static cl::opt<bool> EnableBSBSched("enable-bsb-sched",
   cl::Hidden, cl::ZeroOrMore, cl::init(true));
@@ -60,9 +49,6 @@ static cl::opt<bool> EnableTCLatencySched("enable-tc-latency-sched",
 static cl::opt<bool> EnableDotCurSched("enable-cur-sched",
   cl::Hidden, cl::ZeroOrMore, cl::init(true),
   cl::desc("Enable the scheduler to generate .cur"));
-
-static cl::opt<bool> EnableVecFrwdSched("enable-evec-frwd-sched",
-  cl::Hidden, cl::ZeroOrMore, cl::init(true));
 
 static cl::opt<bool> DisableHexagonMISched("disable-hexagon-misched",
   cl::Hidden, cl::ZeroOrMore, cl::init(false),
@@ -106,6 +92,7 @@ HexagonSubtarget::HexagonSubtarget(const Triple &TT, StringRef CPU,
 HexagonSubtarget &
 HexagonSubtarget::initializeSubtargetDependencies(StringRef CPU, StringRef FS) {
   static std::map<StringRef, Hexagon::ArchEnum> CpuTable{
+      {"generic", Hexagon::ArchEnum::V60},
       {"hexagonv4", Hexagon::ArchEnum::V4},
       {"hexagonv5", Hexagon::ArchEnum::V5},
       {"hexagonv55", Hexagon::ArchEnum::V55},
@@ -124,9 +111,7 @@ HexagonSubtarget::initializeSubtargetDependencies(StringRef CPU, StringRef FS) {
   UseHVX64BOps = false;
   UseLongCalls = false;
 
-  UseMemOps = DisableMemOps ? false : EnableMemOps;
-  ModeIEEERndNear = EnableIEEERndNear;
-  UseBSBScheduling = hasV60TOps() && EnableBSBSched;
+  UseBSBScheduling = hasV60Ops() && EnableBSBSched;
 
   ParseSubtargetFeatures(CPUString, FS);
 
@@ -322,7 +307,7 @@ void HexagonSubtarget::BankConflictMutation::apply(ScheduleDAGInstrs *DAG) {
   }
 }
 
-/// \brief Enable use of alias analysis during code generation (during MI
+/// Enable use of alias analysis during code generation (during MI
 /// scheduling, DAGCombine, etc.).
 bool HexagonSubtarget::useAA() const {
   if (OptLevel != CodeGenOpt::None)
@@ -330,7 +315,7 @@ bool HexagonSubtarget::useAA() const {
   return false;
 }
 
-/// \brief Perform target specific adjustments to the latency of a schedule
+/// Perform target specific adjustments to the latency of a schedule
 /// dependency.
 void HexagonSubtarget::adjustSchedDependency(SUnit *Src, SUnit *Dst,
                                              SDep &Dep) const {
@@ -350,7 +335,7 @@ void HexagonSubtarget::adjustSchedDependency(SUnit *Src, SUnit *Dst,
     return;
   }
 
-  if (!hasV60TOps())
+  if (!hasV60Ops())
     return;
 
   // Set the latency for a copy to zero since we hope that is will get removed.
@@ -421,7 +406,7 @@ void HexagonSubtarget::updateLatency(MachineInstr &SrcInst,
     return;
   }
 
-  if (!hasV60TOps())
+  if (!hasV60Ops())
     return;
 
   auto &QII = static_cast<const HexagonInstrInfo&>(*getInstrInfo());
@@ -545,13 +530,13 @@ bool HexagonSubtarget::isBestZeroLatency(SUnit *Src, SUnit *Dst,
   // Reassign the latency for the previous bests, which requires setting
   // the dependence edge in both directions.
   if (SrcBest != nullptr) {
-    if (!hasV60TOps())
+    if (!hasV60Ops())
       changeLatency(SrcBest, Dst, 1);
     else
       restoreLatency(SrcBest, Dst);
   }
   if (DstBest != nullptr) {
-    if (!hasV60TOps())
+    if (!hasV60Ops())
       changeLatency(Src, DstBest, 1);
     else
       restoreLatency(Src, DstBest);

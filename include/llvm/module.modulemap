@@ -26,7 +26,6 @@ module LLVM_Backend {
     // These are intended for (repeated) textual inclusion.
     textual header "CodeGen/CommandFlags.inc"
     textual header "CodeGen/DIEValue.def"
-    textual header "CodeGen/RuntimeLibcalls.def"
   }
 
   module Target {
@@ -59,7 +58,6 @@ module LLVM_BinaryFormat {
     textual header "BinaryFormat/ELFRelocs/Sparc.def"
     textual header "BinaryFormat/ELFRelocs/SystemZ.def"
     textual header "BinaryFormat/ELFRelocs/x86_64.def"
-    textual header "BinaryFormat/ELFRelocs/WebAssembly.def"
     textual header "BinaryFormat/WasmRelocs.def"
 }
 
@@ -194,8 +192,11 @@ module LLVM_intrinsic_gen {
 
   // Intrinsics.h
   module IR_CFG { header "IR/CFG.h" export * }
+  module IR_CFGDiff { header "IR/CFGDiff.h" export * }
   module IR_ConstantRange { header "IR/ConstantRange.h" export * }
   module IR_Dominators { header "IR/Dominators.h" export * }
+  module Analysis_PostDominators { header "Analysis/PostDominators.h" export * }
+  module IR_DomTreeUpdater { header "IR/DomTreeUpdater.h" export * }
   module IR_IRBuilder { header "IR/IRBuilder.h" export * }
   module IR_PassManager { header "IR/PassManager.h" export * }
   module IR_PredIteratorCache { header "IR/PredIteratorCache.h" export * }
@@ -221,6 +222,7 @@ module LLVM_IR {
   textual header "IR/Instruction.def"
   textual header "IR/Metadata.def"
   textual header "IR/Value.def"
+  textual header "IR/RuntimeLibcalls.def"
 }
 
 module LLVM_IRReader { requires cplusplus umbrella "IRReader" module * { export * } }

@@ -2862,7 +2862,7 @@ body:             |
     %11 = LI8 280
     %12 = LDX %0, killed %11 :: (load 8 from %ir.arrayidx3, !tbaa !10)
     ; CHECK: LD 280, %0
-    ; CHECK-LATE: ld 12, 280(3)
+    ; CHECK-LATE: ld 3, 280(3)
     %13 = ADD8 killed %12, killed %7
     $x3 = COPY %13
     BLR8 implicit $lr8, implicit $rm, implicit $x3
@@ -3075,19 +3075,24 @@ fixedStack:
 stack:           
   - { id: 0, name: '', type: default, offset: 0, size: 16, alignment: 16, 
       stack-id: 0, callee-saved-register: '', callee-saved-restored: true, 
-      local-offset: -16, di-variable: '', di-expression: '', di-location: '' }
+      local-offset: -16, debug-info-variable: '', debug-info-expression: '',
+      debug-info-location: '' }
   - { id: 1, name: '', type: default, offset: 0, size: 4, alignment: 4, 
       stack-id: 0, callee-saved-register: '', callee-saved-restored: true, 
-      local-offset: -20, di-variable: '', di-expression: '', di-location: '' }
+      local-offset: -20, debug-info-variable: '', debug-info-expression: '',
+      debug-info-location: '' }
   - { id: 2, name: '', type: default, offset: 0, size: 4, alignment: 4, 
       stack-id: 0, callee-saved-register: '', callee-saved-restored: true, 
-      local-offset: -24, di-variable: '', di-expression: '', di-location: '' }
+      local-offset: -24, debug-info-variable: '', debug-info-expression: '',
+      debug-info-location: '' }
   - { id: 3, name: '', type: default, offset: 0, size: 4, alignment: 4, 
       stack-id: 0, callee-saved-register: '', callee-saved-restored: true, 
-      local-offset: -28, di-variable: '', di-expression: '', di-location: '' }
+      local-offset: -28, debug-info-variable: '', debug-info-expression: '',
+      debug-info-location: '' }
   - { id: 4, name: '', type: default, offset: 0, size: 4, alignment: 4, 
       stack-id: 0, callee-saved-register: '', callee-saved-restored: true, 
-      local-offset: -32, di-variable: '', di-expression: '', di-location: '' }
+      local-offset: -32, debug-info-variable: '', debug-info-expression: '',
+      debug-info-location: '' }
 constants:       
 body:             |
   bb.0.entry:
@@ -3977,7 +3982,8 @@ body:             |
     %1 = COPY $x4
     %0 = LI8 200
     %2 = RLDICLo %0, 61, 3, implicit-def $cr0
-    ; CHECK-NOT: ANDI
+    ; CHECK: LI8 25
+    ; CHECK: ANDIo8 %0, 25
     ; CHECK-LATE-NOT: andi.
     %3 = COPY killed $cr0
     %4 = ISEL8 %1, %2, %3.sub_eq
@@ -4293,7 +4299,8 @@ body:             |
     %2 = COPY %1.sub_32
     %3 = LI -22
     %4 = RLWINMo %3, 0, 24, 31, implicit-def $cr0
-    ; CHECK: ANDIo %3, 234
+    ; CHECK: LI -22
+    ; CHECK: ANDIo %3, 65514
     ; CHECK-LATE: li 3, -22
     ; CHECK-LATE: andi. 5, 3, 234
     %5 = COPY killed $cr0
@@ -4357,7 +4364,8 @@ body:             |
     %2 = COPY %1.sub_32
     %3 = LI -22
     %4 = RLWINMo %3, 5, 24, 31, implicit-def $cr0
-    ; CHECK-NOT: ANDI
+    ; CHECK: LI -22
+    ; CHECK-NOT: ANDIo8 %3, 65514
     ; CHECK-LATE-NOT: andi.
     %5 = COPY killed $cr0
     %6 = ISEL %2, %3, %5.sub_eq

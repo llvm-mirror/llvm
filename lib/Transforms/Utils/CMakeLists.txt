@@ -18,6 +18,7 @@ add_llvm_library(LLVMTransformUtils
   FunctionComparator.cpp
   FunctionImportUtils.cpp
   GlobalStatus.cpp
+  ImplicitControlFlowTracking.cpp
   InlineFunction.cpp
   ImportedFunctionsInliningStatistics.cpp
   InstructionNamer.cpp
@@ -28,6 +29,7 @@ add_llvm_library(LLVMTransformUtils
   LoopRotationUtils.cpp
   LoopSimplify.cpp
   LoopUnroll.cpp
+  LoopUnrollAndJam.cpp
   LoopUnrollPeel.cpp
   LoopUnrollRuntime.cpp
   LoopUtils.cpp
@@ -48,7 +50,6 @@ add_llvm_library(LLVMTransformUtils
   SanitizerStats.cpp
   SimplifyCFG.cpp
   SimplifyIndVar.cpp
-  SimplifyInstructions.cpp
   SimplifyLibCalls.cpp
   SplitModule.cpp
   StripNonLineTableDebugInfo.cpp

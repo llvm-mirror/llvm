@@ -12,6 +12,7 @@
 #include "SIInstrInfo.h"
 #include "SIMachineFunctionInfo.h"
 #include "SIRegisterInfo.h"
+#include "MCTargetDesc/AMDGPUMCTargetDesc.h"
 
 #include "llvm/CodeGen/LivePhysRegs.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -22,19 +23,19 @@
 using namespace llvm;
 
 
-static ArrayRef<MCPhysReg> getAllSGPR128(const SISubtarget &ST,
+static ArrayRef<MCPhysReg> getAllSGPR128(const GCNSubtarget &ST,
                                          const MachineFunction &MF) {
   return makeArrayRef(AMDGPU::SGPR_128RegClass.begin(),
                       ST.getMaxNumSGPRs(MF) / 4);
 }
 
-static ArrayRef<MCPhysReg> getAllSGPRs(const SISubtarget &ST,
+static ArrayRef<MCPhysReg> getAllSGPRs(const GCNSubtarget &ST,
                                        const MachineFunction &MF) {
   return makeArrayRef(AMDGPU::SGPR_32RegClass.begin(),
                       ST.getMaxNumSGPRs(MF));
 }
 
-void SIFrameLowering::emitFlatScratchInit(const SISubtarget &ST,
+void SIFrameLowering::emitFlatScratchInit(const GCNSubtarget &ST,
                                           MachineFunction &MF,
                                           MachineBasicBlock &MBB) const {
   const SIInstrInfo *TII = ST.getInstrInfo();
@@ -97,7 +98,7 @@ void SIFrameLowering::emitFlatScratchInit(const SISubtarget &ST,
 }
 
 unsigned SIFrameLowering::getReservedPrivateSegmentBufferReg(
-  const SISubtarget &ST,
+  const GCNSubtarget &ST,
   const SIInstrInfo *TII,
   const SIRegisterInfo *TRI,
   SIMachineFunctionInfo *MFI,
@@ -148,7 +149,7 @@ unsigned SIFrameLowering::getReservedPrivateSegmentBufferReg(
 // SGPRs.
 std::pair<unsigned, unsigned>
 SIFrameLowering::getReservedPrivateSegmentWaveByteOffsetReg(
-  const SISubtarget &ST,
+  const GCNSubtarget &ST,
   const SIInstrInfo *TII,
   const SIRegisterInfo *TRI,
   SIMachineFunctionInfo *MFI,
@@ -219,7 +220,7 @@ void SIFrameLowering::emitEntryFunctionPrologue(MachineFunction &MF,
                                                 MachineBasicBlock &MBB) const {
   // Emit debugger prologue if "amdgpu-debugger-emit-prologue" attribute was
   // specified.
-  const SISubtarget &ST = MF.getSubtarget<SISubtarget>();
+  const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
   if (ST.debuggerEmitPrologue())
     emitDebuggerPrologue(MF, MBB);
 
@@ -236,6 +237,7 @@ void SIFrameLowering::emitEntryFunctionPrologue(MachineFunction &MF,
   const SIInstrInfo *TII = ST.getInstrInfo();
   const SIRegisterInfo *TRI = &TII->getRegisterInfo();
   MachineRegisterInfo &MRI = MF.getRegInfo();
+  const Function &F = MF.getFunction();
 
   // We need to do the replacement of the private segment buffer and wave offset
   // register even if there are no stack objects. There could be stores to undef
@@ -287,7 +289,7 @@ void SIFrameLowering::emitEntryFunctionPrologue(MachineFunction &MF,
     AMDGPUFunctionArgInfo::PRIVATE_SEGMENT_WAVE_BYTE_OFFSET);
 
   unsigned PreloadedPrivateBufferReg = AMDGPU::NoRegister;
-  if (ST.isAmdCodeObjectV2(MF)) {
+  if (ST.isAmdCodeObjectV2(F)) {
     PreloadedPrivateBufferReg = MFI->getPreloadedReg(
       AMDGPUFunctionArgInfo::PRIVATE_SEGMENT_BUFFER);
   }
@@ -306,7 +308,7 @@ void SIFrameLowering::emitEntryFunctionPrologue(MachineFunction &MF,
   }
 
   if (ResourceRegUsed && PreloadedPrivateBufferReg != AMDGPU::NoRegister) {
-    assert(ST.isAmdCodeObjectV2(MF) || ST.isMesaGfxShader(MF));
+    assert(ST.isAmdCodeObjectV2(F) || ST.isMesaGfxShader(F));
     MRI.addLiveIn(PreloadedPrivateBufferReg);
     MBB.addLiveIn(PreloadedPrivateBufferReg);
   }
@@ -331,7 +333,7 @@ void SIFrameLowering::emitEntryFunctionPrologue(MachineFunction &MF,
 
   bool CopyBuffer = ResourceRegUsed &&
     PreloadedPrivateBufferReg != AMDGPU::NoRegister &&
-    ST.isAmdCodeObjectV2(MF) &&
+    ST.isAmdCodeObjectV2(F) &&
     ScratchRsrcReg != PreloadedPrivateBufferReg;
 
   // This needs to be careful of the copying order to avoid overwriting one of
@@ -362,13 +364,14 @@ void SIFrameLowering::emitEntryFunctionPrologue(MachineFunction &MF,
 }
 
 // Emit scratch setup code for AMDPAL or Mesa, assuming ResourceRegUsed is set.
-void SIFrameLowering::emitEntryFunctionScratchSetup(const SISubtarget &ST,
+void SIFrameLowering::emitEntryFunctionScratchSetup(const GCNSubtarget &ST,
       MachineFunction &MF, MachineBasicBlock &MBB, SIMachineFunctionInfo *MFI,
       MachineBasicBlock::iterator I, unsigned PreloadedPrivateBufferReg,
       unsigned ScratchRsrcReg) const {
 
   const SIInstrInfo *TII = ST.getInstrInfo();
   const SIRegisterInfo *TRI = &TII->getRegisterInfo();
+  const Function &Fn = MF.getFunction();
   DebugLoc DL;
 
   if (ST.isAmdPalOS()) {
@@ -419,8 +422,7 @@ void SIFrameLowering::emitEntryFunctionScratchSetup(const SISubtarget &ST,
                                        MachineMemOperand::MOInvariant |
                                        MachineMemOperand::MODereferenceable,
                                        0, 0);
-    unsigned Offset
-        = MF.getFunction().getCallingConv() == CallingConv::AMDGPU_CS ? 16 : 0;
+    unsigned Offset = Fn.getCallingConv() == CallingConv::AMDGPU_CS ? 16 : 0;
     BuildMI(MBB, I, DL, LoadDwordX4, ScratchRsrcReg)
       .addReg(Rsrc01)
       .addImm(Offset) // offset
@@ -429,9 +431,9 @@ void SIFrameLowering::emitEntryFunctionScratchSetup(const SISubtarget &ST,
       .addMemOperand(MMO);
     return;
   }
-  if (ST.isMesaGfxShader(MF)
+  if (ST.isMesaGfxShader(Fn)
       || (PreloadedPrivateBufferReg == AMDGPU::NoRegister)) {
-    assert(!ST.isAmdCodeObjectV2(MF));
+    assert(!ST.isAmdCodeObjectV2(Fn));
     const MCInstrDesc &SMovB32 = TII->get(AMDGPU::S_MOV_B32);
 
     unsigned Rsrc2 = TRI->getSubReg(ScratchRsrcReg, AMDGPU::sub2);
@@ -506,7 +508,7 @@ void SIFrameLowering::emitEntryFunctionScratchSetup(const SISubtarget &ST,
 static unsigned findScratchNonCalleeSaveRegister(MachineBasicBlock &MBB) {
   MachineFunction *MF = MBB.getParent();
 
-  const SISubtarget &Subtarget = MF->getSubtarget<SISubtarget>();
+  const GCNSubtarget &Subtarget = MF->getSubtarget<GCNSubtarget>();
   const SIRegisterInfo &TRI = *Subtarget.getRegisterInfo();
   LivePhysRegs LiveRegs(TRI);
   LiveRegs.addLiveIns(MBB);
@@ -535,7 +537,7 @@ void SIFrameLowering::emitPrologue(MachineFunction &MF,
   }
 
   const MachineFrameInfo &MFI = MF.getFrameInfo();
-  const SISubtarget &ST = MF.getSubtarget<SISubtarget>();
+  const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
   const SIInstrInfo *TII = ST.getInstrInfo();
   const SIRegisterInfo &TRI = TII->getRegisterInfo();
 
@@ -605,7 +607,7 @@ void SIFrameLowering::emitEpilogue(MachineFunction &MF,
   if (FuncInfo->isEntryFunction())
     return;
 
-  const SISubtarget &ST = MF.getSubtarget<SISubtarget>();
+  const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
   const SIInstrInfo *TII = ST.getInstrInfo();
   MachineBasicBlock::iterator MBBI = MBB.getFirstTerminator();
 
@@ -652,7 +654,7 @@ static bool allStackObjectsAreDead(const MachineFrameInfo &MFI) {
 
 int SIFrameLowering::getFrameIndexReference(const MachineFunction &MF, int FI,
                                             unsigned &FrameReg) const {
-  const SIRegisterInfo *RI = MF.getSubtarget<SISubtarget>().getRegisterInfo();
+  const SIRegisterInfo *RI = MF.getSubtarget<GCNSubtarget>().getRegisterInfo();
 
   FrameReg = RI->getFrameRegister(MF);
   return MF.getFrameInfo().getObjectOffset(FI);
@@ -666,7 +668,7 @@ void SIFrameLowering::processFunctionBeforeFrameFinalized(
   if (!MFI.hasStackObjects())
     return;
 
-  const SISubtarget &ST = MF.getSubtarget<SISubtarget>();
+  const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
   const SIInstrInfo *TII = ST.getInstrInfo();
   const SIRegisterInfo &TRI = TII->getRegisterInfo();
   SIMachineFunctionInfo *FuncInfo = MF.getInfo<SIMachineFunctionInfo>();
@@ -748,7 +750,7 @@ MachineBasicBlock::iterator SIFrameLowering::eliminateCallFramePseudoInstr(
   if (Amount == 0)
     return MBB.erase(I);
 
-  const SISubtarget &ST = MF.getSubtarget<SISubtarget>();
+  const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
   const SIInstrInfo *TII = ST.getInstrInfo();
   const DebugLoc &DL = I->getDebugLoc();
   unsigned Opc = I->getOpcode();
@@ -777,7 +779,7 @@ MachineBasicBlock::iterator SIFrameLowering::eliminateCallFramePseudoInstr(
 
 void SIFrameLowering::emitDebuggerPrologue(MachineFunction &MF,
                                            MachineBasicBlock &MBB) const {
-  const SISubtarget &ST = MF.getSubtarget<SISubtarget>();
+  const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
   const SIInstrInfo *TII = ST.getInstrInfo();
   const SIRegisterInfo *TRI = &TII->getRegisterInfo();
   const SIMachineFunctionInfo *MFI = MF.getInfo<SIMachineFunctionInfo>();
@@ -827,7 +829,7 @@ bool SIFrameLowering::hasFP(const MachineFunction &MF) const {
 }
 
 bool SIFrameLowering::hasSP(const MachineFunction &MF) const {
-  const SIRegisterInfo *TRI = MF.getSubtarget<SISubtarget>().getRegisterInfo();
+  const SIRegisterInfo *TRI = MF.getSubtarget<GCNSubtarget>().getRegisterInfo();
   // All stack operations are relative to the frame offset SGPR.
   const MachineFrameInfo &MFI = MF.getFrameInfo();
   return MFI.hasCalls() || MFI.hasVarSizedObjects() || TRI->needsStackRealignment(MF);

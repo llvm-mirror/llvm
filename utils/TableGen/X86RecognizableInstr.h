@@ -142,7 +142,7 @@ namespace X86Local {
   };
 
   enum {
-    VEX_W0 = 0, VEX_W1 = 1, VEX_WIG = 2
+    VEX_W0 = 0, VEX_W1 = 1, VEX_WIG = 2, VEX_W1X = 3
   };
 }
 
@@ -272,7 +272,7 @@ private:
   static OperandEncoding writemaskRegisterEncodingFromString(const std::string &s,
                                                              uint8_t OpSize);
 
-  /// \brief Adjust the encoding type for an operand based on the instruction.
+  /// Adjust the encoding type for an operand based on the instruction.
   void adjustOperandEncoding(OperandEncoding &encoding);
 
   /// handleOperand - Converts a single operand from the LLVM table format to

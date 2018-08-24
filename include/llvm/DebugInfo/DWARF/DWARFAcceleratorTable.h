@@ -56,12 +56,6 @@ public:
     /// in this Accelerator Entry.
     virtual Optional<uint64_t> getCUOffset() const = 0;
 
-    /// Returns the Section Offset of the Debug Info Entry associated with this
-    /// Accelerator Entry or None if the DIE offset is not recorded in this
-    /// Accelerator Entry. The returned offset is relative to the start of the
-    /// Section containing the DIE.
-    virtual Optional<uint64_t> getDIESectionOffset() const = 0;
-
     /// Returns the Tag of the Debug Info Entry associated with this
     /// Accelerator Entry or None if the Tag is not recorded in this
     /// Accelerator Entry.
@@ -130,7 +124,13 @@ public:
 
   public:
     Optional<uint64_t> getCUOffset() const override;
-    Optional<uint64_t> getDIESectionOffset() const override;
+
+    /// Returns the Section Offset of the Debug Info Entry associated with this
+    /// Accelerator Entry or None if the DIE offset is not recorded in this
+    /// Accelerator Entry. The returned offset is relative to the start of the
+    /// Section containing the DIE.
+    Optional<uint64_t> getDIESectionOffset() const;
+
     Optional<dwarf::Tag> getTag() const override;
 
     /// Returns the value of the Atom in this Accelerator Entry, if the Entry
@@ -239,6 +239,7 @@ class DWARFDebugNames : public DWARFAcceleratorTable {
 
 public:
   class NameIndex;
+  class NameIterator;
   class ValueIterator;
 
   /// Dwarf 5 Name Index header.
@@ -285,7 +286,6 @@ public:
 
   public:
     Optional<uint64_t> getCUOffset() const override;
-    Optional<uint64_t> getDIESectionOffset() const override;
     Optional<dwarf::Tag> getTag() const override { return tag(); }
 
     /// Returns the Index into the Compilation Unit list of the owning Name
@@ -351,9 +351,34 @@ private:
 public:
   /// A single entry in the Name Table (Dwarf 5 sect. 6.1.1.4.6) of the Name
   /// Index.
-  struct NameTableEntry {
-    uint32_t StringOffset; ///< Offset of the name of the described entities.
-    uint32_t EntryOffset;  ///< Offset of the first Entry in the list.
+  class NameTableEntry {
+    DataExtractor StrData;
+
+    uint32_t Index;
+    uint32_t StringOffset;
+    uint32_t EntryOffset;
+
+  public:
+    NameTableEntry(const DataExtractor &StrData, uint32_t Index,
+                   uint32_t StringOffset, uint32_t EntryOffset)
+        : StrData(StrData), Index(Index), StringOffset(StringOffset),
+          EntryOffset(EntryOffset) {}
+
+    /// Return the index of this name in the parent Name Index.
+    uint32_t getIndex() const { return Index; }
+
+    /// Returns the offset of the name of the described entities.
+    uint32_t getStringOffset() const { return StringOffset; }
+
+    /// Return the string referenced by this name table entry or nullptr if the
+    /// string offset is not valid.
+    const char *getString() const {
+      uint32_t Off = StringOffset;
+      return StrData.getCStr(&Off);
+    }
+
+    /// Returns the offset of the first Entry in the list.
+    uint32_t getEntryOffset() const { return EntryOffset; }
   };
 
   /// Represents a single accelerator table within the Dwarf 5 .debug_names
@@ -378,7 +403,7 @@ public:
     void dumpForeignTUs(ScopedPrinter &W) const;
     void dumpAbbreviations(ScopedPrinter &W) const;
     bool dumpEntry(ScopedPrinter &W, uint32_t *Offset) const;
-    void dumpName(ScopedPrinter &W, uint32_t Index,
+    void dumpName(ScopedPrinter &W, const NameTableEntry &NTE,
                   Optional<uint32_t> Hash) const;
     void dumpBucket(ScopedPrinter &W, uint32_t Bucket) const;
 
@@ -429,6 +454,12 @@ public:
 
     Expected<Entry> getEntry(uint32_t *Offset) const;
 
+    /// Look up all entries in this Name Index matching \c Key.
+    iterator_range<ValueIterator> equal_range(StringRef Key) const;
+
+    NameIterator begin() const { return NameIterator(this, 1); }
+    NameIterator end() const { return NameIterator(this, getNameCount() + 1); }
+
     llvm::Error extract();
     uint32_t getUnitOffset() const { return Base; }
     uint32_t getNextUnitOffset() const { return Base + 4 + Hdr.UnitLength; }
@@ -443,6 +474,10 @@ public:
     /// relies on the fact that this can also be used as an iterator into the
     /// "NameIndices" vector in the Accelerator section.
     const NameIndex *CurrentIndex = nullptr;
+
+    /// Whether this is a local iterator (searches in CurrentIndex only) or not
+    /// (searches all name indices).
+    bool IsLocal;
 
     Optional<Entry> CurrentEntry;
     unsigned DataOffset = 0; ///< Offset into the section.
@@ -463,6 +498,10 @@ public:
     /// accelerator table matching Key. The iterator will run through all Name
     /// Indexes in the section in sequence.
     ValueIterator(const DWARFDebugNames &AccelTable, StringRef Key);
+
+    /// Create a "begin" iterator for looping over all entries in a specific
+    /// Name Index. Other indices in the section will not be visited.
+    ValueIterator(const NameIndex &NI, StringRef Key);
 
     /// End marker.
     ValueIterator() = default;
@@ -486,8 +525,55 @@ public:
     }
   };
 
+  class NameIterator {
+
+    /// The Name Index we are iterating through.
+    const NameIndex *CurrentIndex;
+
+    /// The current name in the Name Index.
+    uint32_t CurrentName;
+
+    void next() {
+      assert(CurrentName <= CurrentIndex->getNameCount());
+      ++CurrentName;
+    }
+
+  public:
+    using iterator_category = std::input_iterator_tag;
+    using value_type = NameTableEntry;
+    using difference_type = uint32_t;
+    using pointer = NameTableEntry *;
+    using reference = NameTableEntry; // We return entries by value.
+
+    /// Creates an iterator whose initial position is name CurrentName in
+    /// CurrentIndex.
+    NameIterator(const NameIndex *CurrentIndex, uint32_t CurrentName)
+        : CurrentIndex(CurrentIndex), CurrentName(CurrentName) {}
+
+    NameTableEntry operator*() const {
+      return CurrentIndex->getNameTableEntry(CurrentName);
+    }
+    NameIterator &operator++() {
+      next();
+      return *this;
+    }
+    NameIterator operator++(int) {
+      NameIterator I = *this;
+      next();
+      return I;
+    }
+
+    friend bool operator==(const NameIterator &A, const NameIterator &B) {
+      return A.CurrentIndex == B.CurrentIndex && A.CurrentName == B.CurrentName;
+    }
+    friend bool operator!=(const NameIterator &A, const NameIterator &B) {
+      return !(A == B);
+    }
+  };
+
 private:
   SmallVector<NameIndex, 0> NameIndices;
+  DenseMap<uint32_t, const NameIndex *> CUToNameIndex;
 
 public:
   DWARFDebugNames(const DWARFDataExtractor &AccelSection,
@@ -503,6 +589,10 @@ public:
   using const_iterator = SmallVector<NameIndex, 0>::const_iterator;
   const_iterator begin() const { return NameIndices.begin(); }
   const_iterator end() const { return NameIndices.end(); }
+
+  /// Return the Name Index covering the compile unit at CUOffset, or nullptr if
+  /// there is no Name Index covering that unit.
+  const NameIndex *getCUNameIndex(uint32_t CUOffset);
 };
 
 } // end namespace llvm

@@ -293,9 +293,13 @@ bool SystemZElimCompare::convertToLoadAndTest(
   if (!Opcode || !adjustCCMasksForInstr(MI, Compare, CCUsers, Opcode))
     return false;
 
-  MI.setDesc(TII->get(Opcode));
-  MachineInstrBuilder(*MI.getParent()->getParent(), MI)
-      .addReg(SystemZ::CC, RegState::ImplicitDefine);
+  // Rebuild to get the CC operand in the right place.
+  auto MIB = BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(Opcode));
+  for (const auto &MO : MI.operands())
+    MIB.add(MO);
+  MIB.setMemRefs(MI.memoperands());
+  MI.eraseFromParent();
+
   return true;
 }
 
@@ -425,12 +429,12 @@ bool SystemZElimCompare::optimizeCompareZero(
   // Search back for CC results that are based on the first operand.
   unsigned SrcReg = getCompareSourceReg(Compare);
   MachineBasicBlock &MBB = *Compare.getParent();
-  MachineBasicBlock::iterator MBBI = Compare, MBBE = MBB.begin();
   Reference CCRefs;
   Reference SrcRefs;
-  while (MBBI != MBBE) {
-    --MBBI;
-    MachineInstr &MI = *MBBI;
+  for (MachineBasicBlock::reverse_iterator MBBI =
+         std::next(MachineBasicBlock::reverse_iterator(&Compare)),
+         MBBE = MBB.rend(); MBBI != MBBE;) {
+    MachineInstr &MI = *MBBI++;
     if (resultTests(MI, SrcReg)) {
       // Try to remove both MI and Compare by converting a branch to BRCT(G).
       // or a load-and-trap instruction.  We don't care in this case whether
@@ -463,9 +467,10 @@ bool SystemZElimCompare::optimizeCompareZero(
   // Also do a forward search to handle cases where an instruction after the
   // compare can be converted, like
   // LTEBRCompare %f0s, %f0s; %f2s = LER %f0s  =>  LTEBRCompare %f2s, %f0s
-  MBBI = Compare, MBBE = MBB.end();
-  while (++MBBI != MBBE) {
-    MachineInstr &MI = *MBBI;
+  for (MachineBasicBlock::iterator MBBI =
+         std::next(MachineBasicBlock::iterator(&Compare)), MBBE = MBB.end();
+       MBBI != MBBE;) {
+    MachineInstr &MI = *MBBI++;
     if (preservesValueOf(MI, SrcReg)) {
       // Try to eliminate Compare by reusing a CC result from MI.
       if (convertToLoadAndTest(MI, Compare, CCUsers)) {

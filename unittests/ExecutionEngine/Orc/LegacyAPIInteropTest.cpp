@@ -14,35 +14,79 @@
 using namespace llvm;
 using namespace llvm::orc;
 
+class LegacyAPIsStandardTest : public CoreAPIsBasedStandardTest {};
+
 namespace {
 
-TEST(LegacyAPIInteropTest, QueryAgainstVSO) {
+TEST_F(LegacyAPIsStandardTest, TestLambdaSymbolResolver) {
+  cantFail(JD.define(absoluteSymbols({{Foo, FooSym}, {Bar, BarSym}})));
+
+  auto Resolver = createSymbolResolver(
+      [&](const SymbolNameSet &Symbols) { return JD.lookupFlags(Symbols); },
+      [&](std::shared_ptr<AsynchronousSymbolQuery> Q, SymbolNameSet Symbols) {
+        return JD.legacyLookup(std::move(Q), Symbols);
+      });
+
+  SymbolNameSet Symbols({Foo, Bar, Baz});
+
+  SymbolFlagsMap SymbolFlags = Resolver->lookupFlags(Symbols);
+
+  EXPECT_EQ(SymbolFlags.size(), 2U)
+      << "lookupFlags returned the wrong number of results";
+  EXPECT_EQ(SymbolFlags.count(Foo), 1U) << "Missing lookupFlags result for foo";
+  EXPECT_EQ(SymbolFlags.count(Bar), 1U) << "Missing lookupFlags result for bar";
+  EXPECT_EQ(SymbolFlags[Foo], FooSym.getFlags())
+      << "Incorrect lookupFlags result for Foo";
+  EXPECT_EQ(SymbolFlags[Bar], BarSym.getFlags())
+      << "Incorrect lookupFlags result for Bar";
+
+  bool OnResolvedRun = false;
+
+  auto OnResolved = [&](Expected<SymbolMap> Result) {
+    OnResolvedRun = true;
+    EXPECT_TRUE(!!Result) << "Unexpected error";
+    EXPECT_EQ(Result->size(), 2U) << "Unexpected number of resolved symbols";
+    EXPECT_EQ(Result->count(Foo), 1U) << "Missing lookup result for foo";
+    EXPECT_EQ(Result->count(Bar), 1U) << "Missing lookup result for bar";
+    EXPECT_EQ((*Result)[Foo].getAddress(), FooSym.getAddress())
+        << "Incorrect address for foo";
+    EXPECT_EQ((*Result)[Bar].getAddress(), BarSym.getAddress())
+        << "Incorrect address for bar";
+  };
+  auto OnReady = [&](Error Err) {
+    EXPECT_FALSE(!!Err) << "Finalization should never fail in this test";
+  };
+
+  auto Q = std::make_shared<AsynchronousSymbolQuery>(SymbolNameSet({Foo, Bar}),
+                                                     OnResolved, OnReady);
+  auto Unresolved = Resolver->lookup(std::move(Q), Symbols);
+
+  EXPECT_EQ(Unresolved.size(), 1U) << "Expected one unresolved symbol";
+  EXPECT_EQ(Unresolved.count(Baz), 1U) << "Expected baz to not be resolved";
+  EXPECT_TRUE(OnResolvedRun) << "OnResolved was never run";
+}
+
+TEST(LegacyAPIInteropTest, QueryAgainstJITDylib) {
 
   ExecutionSession ES(std::make_shared<SymbolStringPool>());
   auto Foo = ES.getSymbolStringPool().intern("foo");
 
-  VSO V;
-  SymbolMap Defs;
+  auto &JD = ES.createJITDylib("JD");
   JITEvaluatedSymbol FooSym(0xdeadbeef, JITSymbolFlags::Exported);
-  Defs[Foo] = FooSym;
-  cantFail(V.define(std::move(Defs)));
+  cantFail(JD.define(absoluteSymbols({{Foo, FooSym}})));
 
-  auto LookupFlags = [&](SymbolFlagsMap &SymbolFlags,
-                         const SymbolNameSet &Names) {
-    return V.lookupFlags(SymbolFlags, Names);
+  auto LookupFlags = [&](const SymbolNameSet &Names) {
+    return JD.lookupFlags(Names);
   };
 
   auto Lookup = [&](std::shared_ptr<AsynchronousSymbolQuery> Query,
                     SymbolNameSet Symbols) {
-    auto R = V.lookup(std::move(Query), Symbols);
-    EXPECT_TRUE(R.Materializers.empty())
-        << "Query resulted in unexpected materialization work";
-    return std::move(R.UnresolvedSymbols);
+    return JD.legacyLookup(std::move(Query), Symbols);
   };
 
   auto UnderlyingResolver =
       createSymbolResolver(std::move(LookupFlags), std::move(Lookup));
-  JITSymbolResolverAdapter Resolver(ES, *UnderlyingResolver);
+  JITSymbolResolverAdapter Resolver(ES, *UnderlyingResolver, nullptr);
 
   JITSymbolResolver::LookupSet Names{StringRef("foo")};
 
@@ -90,26 +134,21 @@ TEST(LegacyAPIInteropTset, LegacyLookupHelpersFn) {
     return nullptr;
   };
 
-  SymbolStringPool SP;
-  auto Foo = SP.intern("foo");
-  auto Bar = SP.intern("bar");
-  auto Baz = SP.intern("baz");
+  ExecutionSession ES;
+  auto Foo = ES.getSymbolStringPool().intern("foo");
+  auto Bar = ES.getSymbolStringPool().intern("bar");
+  auto Baz = ES.getSymbolStringPool().intern("baz");
 
   SymbolNameSet Symbols({Foo, Bar, Baz});
 
-  SymbolFlagsMap SymbolFlags;
-  auto SymbolsNotFound =
-      lookupFlagsWithLegacyFn(SymbolFlags, Symbols, LegacyLookup);
+  auto SymbolFlags = lookupFlagsWithLegacyFn(Symbols, LegacyLookup);
 
-  EXPECT_TRUE(!!SymbolsNotFound) << "lookupFlagsWithLegacy failed unexpectedly";
-  EXPECT_EQ(SymbolFlags.size(), 2U) << "Wrong number of flags returned";
-  EXPECT_EQ(SymbolFlags.count(Foo), 1U) << "Flags for foo missing";
-  EXPECT_EQ(SymbolFlags.count(Bar), 1U) << "Flags for foo missing";
-  EXPECT_EQ(SymbolFlags[Foo], FooFlags) << "Wrong flags for foo";
-  EXPECT_EQ(SymbolFlags[Bar], BarFlags) << "Wrong flags for foo";
-  EXPECT_EQ(SymbolsNotFound->size(), 1U) << "Expected one symbol not found";
-  EXPECT_EQ(SymbolsNotFound->count(Baz), 1U)
-      << "Expected symbol baz to be not found";
+  EXPECT_TRUE(!!SymbolFlags) << "Expected lookupFlagsWithLegacyFn to succeed";
+  EXPECT_EQ(SymbolFlags->size(), 2U) << "Wrong number of flags returned";
+  EXPECT_EQ(SymbolFlags->count(Foo), 1U) << "Flags for foo missing";
+  EXPECT_EQ(SymbolFlags->count(Bar), 1U) << "Flags for foo missing";
+  EXPECT_EQ((*SymbolFlags)[Foo], FooFlags) << "Wrong flags for foo";
+  EXPECT_EQ((*SymbolFlags)[Bar], BarFlags) << "Wrong flags for foo";
   EXPECT_FALSE(BarMaterialized)
       << "lookupFlags should not have materialized bar";
 
@@ -118,6 +157,7 @@ TEST(LegacyAPIInteropTset, LegacyLookupHelpersFn) {
   auto OnResolved = [&](Expected<SymbolMap> Result) {
     OnResolvedRun = true;
     EXPECT_TRUE(!!Result) << "lookuWithLegacy failed to resolve";
+
     EXPECT_EQ(Result->size(), 2U) << "Wrong number of symbols resolved";
     EXPECT_EQ(Result->count(Foo), 1U) << "Result for foo missing";
     EXPECT_EQ(Result->count(Bar), 1U) << "Result for bar missing";
@@ -132,7 +172,7 @@ TEST(LegacyAPIInteropTset, LegacyLookupHelpersFn) {
   };
 
   AsynchronousSymbolQuery Q({Foo, Bar}, OnResolved, OnReady);
-  auto Unresolved = lookupWithLegacyFn(Q, Symbols, LegacyLookup);
+  auto Unresolved = lookupWithLegacyFn(ES, Q, Symbols, LegacyLookup);
 
   EXPECT_TRUE(OnResolvedRun) << "OnResolved was not run";
   EXPECT_TRUE(OnReadyRun) << "OnReady was not run";

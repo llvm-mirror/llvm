@@ -155,6 +155,12 @@ struct OutgoingArgHandler : public CallLowering::ValueHandler {
 
   void assignValueToAddress(unsigned ValVReg, unsigned Addr, uint64_t Size,
                             MachinePointerInfo &MPO, CCValAssign &VA) override {
+    if (VA.getLocInfo() == CCValAssign::LocInfo::AExt) {
+      Size = VA.getLocVT().getSizeInBits() / 8;
+      ValVReg = MIRBuilder.buildAnyExt(LLT::scalar(Size * 8), ValVReg)
+                    ->getOperand(0)
+                    .getReg();
+    }
     auto MMO = MIRBuilder.getMF().getMachineMemOperand(
         MPO, MachineMemOperand::MOStore, Size, 0);
     MIRBuilder.buildStore(ValVReg, Addr, *MMO);
@@ -187,6 +193,9 @@ void AArch64CallLowering::splitToValueTypes(
   const AArch64TargetLowering &TLI = *getTLI<AArch64TargetLowering>();
   LLVMContext &Ctx = OrigArg.Ty->getContext();
 
+  if (OrigArg.Ty->isVoidTy())
+    return;
+
   SmallVector<EVT, 4> SplitVTs;
   SmallVector<uint64_t, 4> Offsets;
   ComputeValueVTs(TLI, DL, OrigArg.Ty, SplitVTs, &Offsets, 0);
@@ -218,27 +227,45 @@ void AArch64CallLowering::splitToValueTypes(
 }
 
 bool AArch64CallLowering::lowerReturn(MachineIRBuilder &MIRBuilder,
-                                      const Value *Val, unsigned VReg) const {
-  MachineFunction &MF = MIRBuilder.getMF();
-  const Function &F = MF.getFunction();
-
+                                      const Value *Val,
+                                      ArrayRef<unsigned> VRegs) const {
   auto MIB = MIRBuilder.buildInstrNoInsert(AArch64::RET_ReallyLR);
-  assert(((Val && VReg) || (!Val && !VReg)) && "Return value without a vreg");
+  assert(((Val && !VRegs.empty()) || (!Val && VRegs.empty())) &&
+         "Return value without a vreg");
+
   bool Success = true;
-  if (VReg) {
+  if (!VRegs.empty()) {
+    MachineFunction &MF = MIRBuilder.getMF();
+    const Function &F = MF.getFunction();
+
+    MachineRegisterInfo &MRI = MF.getRegInfo();
     const AArch64TargetLowering &TLI = *getTLI<AArch64TargetLowering>();
     CCAssignFn *AssignFn = TLI.CCAssignFnForReturn(F.getCallingConv());
-    MachineRegisterInfo &MRI = MF.getRegInfo();
     auto &DL = F.getParent()->getDataLayout();
+    LLVMContext &Ctx = Val->getType()->getContext();
 
-    ArgInfo OrigArg{VReg, Val->getType()};
-    setArgFlags(OrigArg, AttributeList::ReturnIndex, DL, F);
+    SmallVector<EVT, 4> SplitEVTs;
+    ComputeValueVTs(TLI, DL, Val->getType(), SplitEVTs);
+    assert(VRegs.size() == SplitEVTs.size() &&
+           "For each split Type there should be exactly one VReg.");
 
     SmallVector<ArgInfo, 8> SplitArgs;
-    splitToValueTypes(OrigArg, SplitArgs, DL, MRI, F.getCallingConv(),
-                      [&](unsigned Reg, uint64_t Offset) {
-                        MIRBuilder.buildExtract(Reg, VReg, Offset);
-                      });
+    for (unsigned i = 0; i < SplitEVTs.size(); ++i) {
+      // We zero-extend i1s to i8.
+      unsigned CurVReg = VRegs[i];
+      if (MRI.getType(VRegs[i]).getSizeInBits() == 1) {
+        CurVReg = MIRBuilder.buildZExt(LLT::scalar(8), CurVReg)
+                       ->getOperand(0)
+                       .getReg();
+      }
+
+      ArgInfo CurArgInfo = ArgInfo{CurVReg, SplitEVTs[i].getTypeForEVT(Ctx)};
+      setArgFlags(CurArgInfo, AttributeList::ReturnIndex, DL, F);
+      splitToValueTypes(CurArgInfo, SplitArgs, DL, MRI, F.getCallingConv(),
+                        [&](unsigned Reg, uint64_t Offset) {
+                          MIRBuilder.buildExtract(Reg, CurVReg, Offset);
+                        });
+    }
 
     OutgoingArgHandler Handler(MIRBuilder, MRI, MIB, AssignFn, AssignFn);
     Success = handleAssignments(MIRBuilder, SplitArgs, Handler);

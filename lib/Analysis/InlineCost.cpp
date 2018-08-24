@@ -26,6 +26,7 @@
 #include "llvm/Analysis/ProfileSummaryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/DataLayout.h"
@@ -226,7 +227,8 @@ class CallAnalyzer : public InstVisitor<CallAnalyzer, bool> {
                                         BlockFrequencyInfo *CallerBFI);
 
   // Custom analysis routines.
-  bool analyzeBlock(BasicBlock *BB, SmallPtrSetImpl<const Value *> &EphValues);
+  InlineResult analyzeBlock(BasicBlock *BB,
+                            SmallPtrSetImpl<const Value *> &EphValues);
 
   // Disable several entry points to the visitor so we don't accidentally use
   // them by declaring but not defining them here.
@@ -289,7 +291,7 @@ public:
         NumInstructionsSimplified(0), SROACostSavings(0),
         SROACostSavingsLost(0) {}
 
-  bool analyzeCall(CallSite CS);
+  InlineResult analyzeCall(CallSite CS);
 
   int getThreshold() { return Threshold; }
   int getCost() { return Cost; }
@@ -310,12 +312,12 @@ public:
 
 } // namespace
 
-/// \brief Test whether the given value is an Alloca-derived function argument.
+/// Test whether the given value is an Alloca-derived function argument.
 bool CallAnalyzer::isAllocaDerivedArg(Value *V) {
   return SROAArgValues.count(V);
 }
 
-/// \brief Lookup the SROA-candidate argument and cost iterator which V maps to.
+/// Lookup the SROA-candidate argument and cost iterator which V maps to.
 /// Returns false if V does not map to a SROA-candidate.
 bool CallAnalyzer::lookupSROAArgAndCost(
     Value *V, Value *&Arg, DenseMap<Value *, int>::iterator &CostIt) {
@@ -331,7 +333,7 @@ bool CallAnalyzer::lookupSROAArgAndCost(
   return CostIt != SROAArgCosts.end();
 }
 
-/// \brief Disable SROA for the candidate marked by this cost iterator.
+/// Disable SROA for the candidate marked by this cost iterator.
 ///
 /// This marks the candidate as no longer viable for SROA, and adds the cost
 /// savings associated with it back into the inline cost measurement.
@@ -345,7 +347,7 @@ void CallAnalyzer::disableSROA(DenseMap<Value *, int>::iterator CostIt) {
   disableLoadElimination();
 }
 
-/// \brief If 'V' maps to a SROA candidate, disable SROA for it.
+/// If 'V' maps to a SROA candidate, disable SROA for it.
 void CallAnalyzer::disableSROA(Value *V) {
   Value *SROAArg;
   DenseMap<Value *, int>::iterator CostIt;
@@ -353,7 +355,7 @@ void CallAnalyzer::disableSROA(Value *V) {
     disableSROA(CostIt);
 }
 
-/// \brief Accumulate the given cost for a particular SROA candidate.
+/// Accumulate the given cost for a particular SROA candidate.
 void CallAnalyzer::accumulateSROACost(DenseMap<Value *, int>::iterator CostIt,
                                       int InstructionCost) {
   CostIt->second += InstructionCost;
@@ -368,7 +370,7 @@ void CallAnalyzer::disableLoadElimination() {
   }
 }
 
-/// \brief Accumulate a constant GEP offset into an APInt if possible.
+/// Accumulate a constant GEP offset into an APInt if possible.
 ///
 /// Returns false if unable to compute the offset for any reason. Respects any
 /// simplified values known during the analysis of this callsite.
@@ -401,7 +403,7 @@ bool CallAnalyzer::accumulateGEPOffset(GEPOperator &GEP, APInt &Offset) {
   return true;
 }
 
-/// \brief Use TTI to check whether a GEP is free.
+/// Use TTI to check whether a GEP is free.
 ///
 /// Respects any simplified values known during the analysis of this callsite.
 bool CallAnalyzer::isGEPFree(GetElementPtrInst &GEP) {
@@ -542,7 +544,7 @@ bool CallAnalyzer::visitPHI(PHINode &I) {
   return true;
 }
 
-/// \brief Check we can fold GEPs of constant-offset call site argument pointers.
+/// Check we can fold GEPs of constant-offset call site argument pointers.
 /// This requires target data and inbounds GEPs.
 ///
 /// \return true if the specified GEP can be folded.
@@ -920,14 +922,14 @@ void CallAnalyzer::updateThreshold(CallSite CS, Function &Callee) {
     BlockFrequencyInfo *CallerBFI = GetBFI ? &((*GetBFI)(*Caller)) : nullptr;
     auto HotCallSiteThreshold = getHotCallSiteThreshold(CS, CallerBFI);
     if (!Caller->optForSize() && HotCallSiteThreshold) {
-      DEBUG(dbgs() << "Hot callsite.\n");
+      LLVM_DEBUG(dbgs() << "Hot callsite.\n");
       // FIXME: This should update the threshold only if it exceeds the
       // current threshold, but AutoFDO + ThinLTO currently relies on this
       // behavior to prevent inlining of hot callsites during ThinLTO
       // compile phase.
       Threshold = HotCallSiteThreshold.getValue();
     } else if (isColdCallSite(CS, CallerBFI)) {
-      DEBUG(dbgs() << "Cold callsite.\n");
+      LLVM_DEBUG(dbgs() << "Cold callsite.\n");
       // Do not apply bonuses for a cold callsite including the
       // LastCallToStatic bonus. While this bonus might result in code size
       // reduction, it can cause the size of a non-cold caller to increase
@@ -938,13 +940,13 @@ void CallAnalyzer::updateThreshold(CallSite CS, Function &Callee) {
       // Use callee's global profile information only if we have no way of
       // determining this via callsite information.
       if (PSI->isFunctionEntryHot(&Callee)) {
-        DEBUG(dbgs() << "Hot callee.\n");
+        LLVM_DEBUG(dbgs() << "Hot callee.\n");
         // If callsite hotness can not be determined, we may still know
         // that the callee is hot and treat it as a weaker hint for threshold
         // increase.
         Threshold = MaxIfValid(Threshold, Params.HintThreshold);
       } else if (PSI->isFunctionEntryCold(&Callee)) {
-        DEBUG(dbgs() << "Cold callee.\n");
+        LLVM_DEBUG(dbgs() << "Cold callee.\n");
         // Do not apply bonuses for a cold callee including the
         // LastCallToStatic bonus. While this bonus might result in code size
         // reduction, it can cause the size of a non-cold caller to increase
@@ -1162,7 +1164,7 @@ bool CallAnalyzer::visitInsertValue(InsertValueInst &I) {
   return false;
 }
 
-/// \brief Try to simplify a call site.
+/// Try to simplify a call site.
 ///
 /// Takes a concrete function and callsite and tries to actually simplify it by
 /// analyzing the arguments and call itself with instsimplify. Returns true if
@@ -1533,15 +1535,16 @@ bool CallAnalyzer::visitInstruction(Instruction &I) {
   return false;
 }
 
-/// \brief Analyze a basic block for its contribution to the inline cost.
+/// Analyze a basic block for its contribution to the inline cost.
 ///
 /// This method walks the analyzer over every instruction in the given basic
 /// block and accounts for their cost during inlining at this callsite. It
 /// aborts early if the threshold has been exceeded or an impossible to inline
 /// construct has been detected. It returns false if inlining is no longer
 /// viable, and true if inlining remains viable.
-bool CallAnalyzer::analyzeBlock(BasicBlock *BB,
-                                SmallPtrSetImpl<const Value *> &EphValues) {
+InlineResult
+CallAnalyzer::analyzeBlock(BasicBlock *BB,
+                           SmallPtrSetImpl<const Value *> &EphValues) {
   for (BasicBlock::iterator I = BB->begin(), E = BB->end(); I != E; ++I) {
     // FIXME: Currently, the number of instructions in a function regardless of
     // our ability to simplify them during inline to constants or dead code,
@@ -1573,16 +1576,29 @@ bool CallAnalyzer::analyzeBlock(BasicBlock *BB,
 
     using namespace ore;
     // If the visit this instruction detected an uninlinable pattern, abort.
-    if (IsRecursiveCall || ExposesReturnsTwice || HasDynamicAlloca ||
-        HasIndirectBr || HasUninlineableIntrinsic || UsesVarArgs) {
+    InlineResult IR;
+    if (IsRecursiveCall)
+      IR = "recursive";
+    else if (ExposesReturnsTwice)
+      IR = "exposes returns twice";
+    else if (HasDynamicAlloca)
+      IR = "dynamic alloca";
+    else if (HasIndirectBr)
+      IR = "indirect branch";
+    else if (HasUninlineableIntrinsic)
+      IR = "uninlinable intrinsic";
+    else if (UsesVarArgs)
+      IR = "varargs";
+    if (!IR) {
       if (ORE)
         ORE->emit([&]() {
           return OptimizationRemarkMissed(DEBUG_TYPE, "NeverInline",
                                           CandidateCS.getInstruction())
-                 << NV("Callee", &F)
-                 << " has uninlinable pattern and cost is not fully computed";
+                 << NV("Callee", &F) << " has uninlinable pattern ("
+                 << NV("InlineResult", IR.message)
+                 << ") and cost is not fully computed";
         });
-      return false;
+      return IR;
     }
 
     // If the caller is a recursive function then we don't want to inline
@@ -1590,15 +1606,15 @@ bool CallAnalyzer::analyzeBlock(BasicBlock *BB,
     // the caller stack usage dramatically.
     if (IsCallerRecursive &&
         AllocatedSize > InlineConstants::TotalAllocaSizeRecursiveCaller) {
+      InlineResult IR = "recursive and allocates too much stack space";
       if (ORE)
         ORE->emit([&]() {
           return OptimizationRemarkMissed(DEBUG_TYPE, "NeverInline",
                                           CandidateCS.getInstruction())
-                 << NV("Callee", &F)
-                 << " is recursive and allocates too much stack space. Cost is "
-                    "not fully computed";
+                 << NV("Callee", &F) << " is " << NV("InlineResult", IR.message)
+                 << ". Cost is not fully computed";
         });
-      return false;
+      return IR;
     }
 
     // Check if we've past the maximum possible threshold so we don't spin in
@@ -1610,7 +1626,7 @@ bool CallAnalyzer::analyzeBlock(BasicBlock *BB,
   return true;
 }
 
-/// \brief Compute the base pointer and cumulative constant offsets for V.
+/// Compute the base pointer and cumulative constant offsets for V.
 ///
 /// This strips all constant offsets off of V, leaving it the base pointer, and
 /// accumulates the total constant offset applied in the returned constant. It
@@ -1649,7 +1665,7 @@ ConstantInt *CallAnalyzer::stripAndComputeInBoundsConstantOffsets(Value *&V) {
   return cast<ConstantInt>(ConstantInt::get(IntPtrTy, Offset));
 }
 
-/// \brief Find dead blocks due to deleted CFG edges during inlining.
+/// Find dead blocks due to deleted CFG edges during inlining.
 ///
 /// If we know the successor of the current block, \p CurrBB, has to be \p
 /// NextBB, the other successors of \p CurrBB are dead if these successors have
@@ -1687,14 +1703,14 @@ void CallAnalyzer::findDeadBlocks(BasicBlock *CurrBB, BasicBlock *NextBB) {
   }
 }
 
-/// \brief Analyze a call site for potential inlining.
+/// Analyze a call site for potential inlining.
 ///
 /// Returns true if inlining this call is viable, and false if it is not
 /// viable. It computes the cost and adjusts the threshold based on numerous
 /// factors and heuristics. If this method returns false but the computed cost
 /// is below the computed threshold, then inlining was forcibly disabled by
 /// some artifact of the routine.
-bool CallAnalyzer::analyzeCall(CallSite CS) {
+InlineResult CallAnalyzer::analyzeCall(CallSite CS) {
   ++NumCallsAnalyzed;
 
   // Perform some tweaks to the cost and threshold based on the direct
@@ -1729,7 +1745,7 @@ bool CallAnalyzer::analyzeCall(CallSite CS) {
 
   // Check if we're done. This can happen due to bonuses and penalties.
   if (Cost >= Threshold && !ComputeFullInlineCost)
-    return false;
+    return "high cost";
 
   if (F.empty())
     return true;
@@ -1808,12 +1824,13 @@ bool CallAnalyzer::analyzeCall(CallSite CS) {
     // site. If the blockaddress escapes the function, e.g., via a global
     // variable, inlining may lead to an invalid cross-function reference.
     if (BB->hasAddressTaken())
-      return false;
+      return "blockaddress";
 
     // Analyze the cost of this block. If we blow through the threshold, this
     // returns false, and we can bail on out.
-    if (!analyzeBlock(BB, EphValues))
-      return false;
+    InlineResult IR = analyzeBlock(BB, EphValues);
+    if (!IR)
+      return IR;
 
     TerminatorInst *TI = BB->getTerminator();
 
@@ -1866,7 +1883,7 @@ bool CallAnalyzer::analyzeCall(CallSite CS) {
   // inlining this would cause the removal of the caller (so the instruction
   // is not actually duplicated, just moved).
   if (!OnlyOneCallAndLocalLinkage && ContainsNoDuplicateCall)
-    return false;
+    return "noduplicate";
 
   // We applied the maximum possible vector bonus at the beginning. Now,
   // subtract the excess bonus, if any, from the Threshold before
@@ -1880,7 +1897,7 @@ bool CallAnalyzer::analyzeCall(CallSite CS) {
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
-/// \brief Dump stats about this call's analysis.
+/// Dump stats about this call's analysis.
 LLVM_DUMP_METHOD void CallAnalyzer::dump() {
 #define DEBUG_PRINT_STAT(x) dbgs() << "      " #x ": " << x << "\n"
   DEBUG_PRINT_STAT(NumConstantArgs);
@@ -1900,7 +1917,7 @@ LLVM_DUMP_METHOD void CallAnalyzer::dump() {
 }
 #endif
 
-/// \brief Test that there are no attribute conflicts between Caller and Callee
+/// Test that there are no attribute conflicts between Caller and Callee
 ///        that prevent inlining.
 static bool functionsHaveCompatibleAttributes(Function *Caller,
                                               Function *Callee,
@@ -1960,7 +1977,7 @@ InlineCost llvm::getInlineCost(
 
   // Cannot inline indirect calls.
   if (!Callee)
-    return llvm::InlineCost::getNever();
+    return llvm::InlineCost::getNever("indirect call");
 
   // Never inline calls with byval arguments that does not have the alloca
   // address space. Since byval arguments can be replaced with a copy to an
@@ -1972,49 +1989,59 @@ InlineCost llvm::getInlineCost(
     if (CS.isByValArgument(I)) {
       PointerType *PTy = cast<PointerType>(CS.getArgument(I)->getType());
       if (PTy->getAddressSpace() != AllocaAS)
-        return llvm::InlineCost::getNever();
+        return llvm::InlineCost::getNever("byval arguments without alloca"
+                                          " address space");
     }
 
   // Calls to functions with always-inline attributes should be inlined
   // whenever possible.
   if (CS.hasFnAttr(Attribute::AlwaysInline)) {
     if (isInlineViable(*Callee))
-      return llvm::InlineCost::getAlways();
-    return llvm::InlineCost::getNever();
+      return llvm::InlineCost::getAlways("always inline attribute");
+    return llvm::InlineCost::getNever("inapplicable always inline attribute");
   }
 
   // Never inline functions with conflicting attributes (unless callee has
   // always-inline attribute).
   Function *Caller = CS.getCaller();
   if (!functionsHaveCompatibleAttributes(Caller, Callee, CalleeTTI))
-    return llvm::InlineCost::getNever();
+    return llvm::InlineCost::getNever("conflicting attributes");
 
   // Don't inline this call if the caller has the optnone attribute.
   if (Caller->hasFnAttribute(Attribute::OptimizeNone))
-    return llvm::InlineCost::getNever();
+    return llvm::InlineCost::getNever("optnone attribute");
 
-  // Don't inline functions which can be interposed at link-time.  Don't inline
-  // functions marked noinline or call sites marked noinline.
-  // Note: inlining non-exact non-interposable functions is fine, since we know
-  // we have *a* correct implementation of the source level function.
-  if (Callee->isInterposable() || Callee->hasFnAttribute(Attribute::NoInline) ||
-      CS.isNoInline())
-    return llvm::InlineCost::getNever();
+  // Don't inline a function that treats null pointer as valid into a caller
+  // that does not have this attribute.
+  if (!Caller->nullPointerIsDefined() && Callee->nullPointerIsDefined())
+    return llvm::InlineCost::getNever("nullptr definitions incompatible");
 
-  DEBUG(llvm::dbgs() << "      Analyzing call of " << Callee->getName()
-                     << "... (caller:" << Caller->getName() << ")\n");
+  // Don't inline functions which can be interposed at link-time.
+  if (Callee->isInterposable())
+    return llvm::InlineCost::getNever("interposable");
+
+  // Don't inline functions marked noinline.
+  if (Callee->hasFnAttribute(Attribute::NoInline))
+    return llvm::InlineCost::getNever("noinline function attribute");
+
+  // Don't inline call sites marked noinline.
+  if (CS.isNoInline())
+    return llvm::InlineCost::getNever("noinline call site attribute");
+
+  LLVM_DEBUG(llvm::dbgs() << "      Analyzing call of " << Callee->getName()
+                          << "... (caller:" << Caller->getName() << ")\n");
 
   CallAnalyzer CA(CalleeTTI, GetAssumptionCache, GetBFI, PSI, ORE, *Callee, CS,
                   Params);
-  bool ShouldInline = CA.analyzeCall(CS);
+  InlineResult ShouldInline = CA.analyzeCall(CS);
 
-  DEBUG(CA.dump());
+  LLVM_DEBUG(CA.dump());
 
   // Check if there was a reason to force inlining or no inlining.
   if (!ShouldInline && CA.getCost() < CA.getThreshold())
-    return InlineCost::getNever();
+    return InlineCost::getNever(ShouldInline.message);
   if (ShouldInline && CA.getCost() >= CA.getThreshold())
-    return InlineCost::getAlways();
+    return InlineCost::getAlways("empty function");
 
   return llvm::InlineCost::get(CA.getCost(), CA.getThreshold());
 }

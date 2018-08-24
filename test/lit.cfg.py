@@ -98,15 +98,15 @@ lli_args = []
 # we don't support COFF in MCJIT well enough for the tests, force ELF format on
 # Windows.  FIXME: the process target triple should be used here, but this is
 # difficult to obtain on Windows.
-if re.search(r'cygwin|mingw32|windows-gnu|windows-msvc|win32', config.host_triple):
+if re.search(r'cygwin|windows-gnu|windows-msvc', config.host_triple):
     lli_args = ['-mtriple=' + config.host_triple + '-elf']
 
 llc_args = []
 
-# Similarly, have a macro to use llc with DWARF even when the host is win32.
-if re.search(r'win32', config.target_triple):
+# Similarly, have a macro to use llc with DWARF even when the host is Windows
+if re.search(r'windows-msvc', config.target_triple):
     llc_args = [' -mtriple=' +
-                config.target_triple.replace('-win32', '-mingw32')]
+                config.target_triple.replace('-msvc', '-gnu')]
 
 # Provide the path to asan runtime lib if available. On darwin, this lib needs
 # to be loaded via DYLD_INSERT_LIBRARIES before libLTO.dylib in case the files
@@ -135,6 +135,7 @@ tools = [
     ToolSubst('%ocamlopt', ocamlopt_command, unresolved='ignore'),
     ToolSubst('%opt-viewer', opt_viewer_cmd),
     ToolSubst('%llvm-objcopy', FindTool('llvm-objcopy')),
+    ToolSubst('%llvm-strip', FindTool('llvm-strip')),
 ]
 
 # FIXME: Why do we have both `lli` and `%lli` that do slightly different things?
@@ -145,8 +146,8 @@ tools.extend([
     'llvm-link', 'llvm-lto', 'llvm-lto2', 'llvm-mc', 'llvm-mca',
     'llvm-modextract', 'llvm-nm', 'llvm-objcopy', 'llvm-objdump',
     'llvm-pdbutil', 'llvm-profdata', 'llvm-ranlib', 'llvm-readobj',
-    'llvm-rtdyld', 'llvm-size', 'llvm-split', 'llvm-strings', 'llvm-tblgen',
-    'llvm-c-test', 'llvm-cxxfilt', 'llvm-xray', 'yaml2obj', 'obj2yaml',
+    'llvm-rtdyld', 'llvm-size', 'llvm-split', 'llvm-strings', 'llvm-strip', 'llvm-tblgen',
+    'llvm-undname', 'llvm-c-test', 'llvm-cxxfilt', 'llvm-xray', 'yaml2obj', 'obj2yaml',
     'yaml-bench', 'verify-uselistorder',
     'bugpoint', 'llc', 'llvm-symbolizer', 'opt', 'sancov', 'sanstats'])
 
@@ -238,7 +239,7 @@ import subprocess
 
 
 def have_ld_plugin_support():
-    if not os.path.exists(os.path.join(config.llvm_shlib_dir, 'LLVMgold.so')):
+    if not os.path.exists(os.path.join(config.llvm_shlib_dir, 'LLVMgold' + config.llvm_shlib_ext)):
         return False
 
     ld_cmd = subprocess.Popen(
@@ -311,7 +312,7 @@ if 'darwin' == sys.platform:
     sysctl_cmd.wait()
 
 # .debug_frame is not emitted for targeting Windows x64.
-if not re.match(r'^x86_64.*-(mingw32|windows-gnu|win32)', config.target_triple):
+if not re.match(r'^x86_64.*-(windows-gnu|windows-msvc)', config.target_triple):
     config.available_features.add('debug_frame')
 
 if config.have_libxar:

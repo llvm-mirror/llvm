@@ -26,6 +26,7 @@
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
+#include "llvm/IR/DomTreeUpdater.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
@@ -555,47 +556,48 @@ bool RecurrenceDescriptor::isReductionPHI(PHINode *Phi, Loop *TheLoop,
 
   if (AddReductionVar(Phi, RK_IntegerAdd, TheLoop, HasFunNoNaNAttr, RedDes, DB,
                       AC, DT)) {
-    DEBUG(dbgs() << "Found an ADD reduction PHI." << *Phi << "\n");
+    LLVM_DEBUG(dbgs() << "Found an ADD reduction PHI." << *Phi << "\n");
     return true;
   }
   if (AddReductionVar(Phi, RK_IntegerMult, TheLoop, HasFunNoNaNAttr, RedDes, DB,
                       AC, DT)) {
-    DEBUG(dbgs() << "Found a MUL reduction PHI." << *Phi << "\n");
+    LLVM_DEBUG(dbgs() << "Found a MUL reduction PHI." << *Phi << "\n");
     return true;
   }
   if (AddReductionVar(Phi, RK_IntegerOr, TheLoop, HasFunNoNaNAttr, RedDes, DB,
                       AC, DT)) {
-    DEBUG(dbgs() << "Found an OR reduction PHI." << *Phi << "\n");
+    LLVM_DEBUG(dbgs() << "Found an OR reduction PHI." << *Phi << "\n");
     return true;
   }
   if (AddReductionVar(Phi, RK_IntegerAnd, TheLoop, HasFunNoNaNAttr, RedDes, DB,
                       AC, DT)) {
-    DEBUG(dbgs() << "Found an AND reduction PHI." << *Phi << "\n");
+    LLVM_DEBUG(dbgs() << "Found an AND reduction PHI." << *Phi << "\n");
     return true;
   }
   if (AddReductionVar(Phi, RK_IntegerXor, TheLoop, HasFunNoNaNAttr, RedDes, DB,
                       AC, DT)) {
-    DEBUG(dbgs() << "Found a XOR reduction PHI." << *Phi << "\n");
+    LLVM_DEBUG(dbgs() << "Found a XOR reduction PHI." << *Phi << "\n");
     return true;
   }
   if (AddReductionVar(Phi, RK_IntegerMinMax, TheLoop, HasFunNoNaNAttr, RedDes,
                       DB, AC, DT)) {
-    DEBUG(dbgs() << "Found a MINMAX reduction PHI." << *Phi << "\n");
+    LLVM_DEBUG(dbgs() << "Found a MINMAX reduction PHI." << *Phi << "\n");
     return true;
   }
   if (AddReductionVar(Phi, RK_FloatMult, TheLoop, HasFunNoNaNAttr, RedDes, DB,
                       AC, DT)) {
-    DEBUG(dbgs() << "Found an FMult reduction PHI." << *Phi << "\n");
+    LLVM_DEBUG(dbgs() << "Found an FMult reduction PHI." << *Phi << "\n");
     return true;
   }
   if (AddReductionVar(Phi, RK_FloatAdd, TheLoop, HasFunNoNaNAttr, RedDes, DB,
                       AC, DT)) {
-    DEBUG(dbgs() << "Found an FAdd reduction PHI." << *Phi << "\n");
+    LLVM_DEBUG(dbgs() << "Found an FAdd reduction PHI." << *Phi << "\n");
     return true;
   }
   if (AddReductionVar(Phi, RK_FloatMinMax, TheLoop, HasFunNoNaNAttr, RedDes, DB,
                       AC, DT)) {
-    DEBUG(dbgs() << "Found an float MINMAX reduction PHI." << *Phi << "\n");
+    LLVM_DEBUG(dbgs() << "Found an float MINMAX reduction PHI." << *Phi
+                      << "\n");
     return true;
   }
   // Not a reduction of known type.
@@ -1052,7 +1054,7 @@ bool InductionDescriptor::isInductionPHI(PHINode *Phi, const Loop *TheLoop,
     AR = PSE.getAsAddRec(Phi);
 
   if (!AR) {
-    DEBUG(dbgs() << "LV: PHI is not a poly recurrence.\n");
+    LLVM_DEBUG(dbgs() << "LV: PHI is not a poly recurrence.\n");
     return false;
   }
 
@@ -1086,14 +1088,15 @@ bool InductionDescriptor::isInductionPHI(
   const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(PhiScev);
 
   if (!AR) {
-    DEBUG(dbgs() << "LV: PHI is not a poly recurrence.\n");
+    LLVM_DEBUG(dbgs() << "LV: PHI is not a poly recurrence.\n");
     return false;
   }
 
   if (AR->getLoop() != TheLoop) {
     // FIXME: We should treat this as a uniform. Unfortunately, we
     // don't currently know how to handled uniform PHIs.
-    DEBUG(dbgs() << "LV: PHI is a recurrence with respect to an outer loop.\n");
+    LLVM_DEBUG(
+        dbgs() << "LV: PHI is a recurrence with respect to an outer loop.\n");
     return false;
   }
 
@@ -1174,11 +1177,12 @@ bool llvm::formDedicatedExitBlocks(Loop *L, DominatorTree *DT, LoopInfo *LI,
         BB, InLoopPredecessors, ".loopexit", DT, LI, PreserveLCSSA);
 
     if (!NewExitBB)
-      DEBUG(dbgs() << "WARNING: Can't create a dedicated exit block for loop: "
-                   << *L << "\n");
+      LLVM_DEBUG(
+          dbgs() << "WARNING: Can't create a dedicated exit block for loop: "
+                 << *L << "\n");
     else
-      DEBUG(dbgs() << "LoopSimplify: Creating dedicated exit block "
-                   << NewExitBB->getName() << "\n");
+      LLVM_DEBUG(dbgs() << "LoopSimplify: Creating dedicated exit block "
+                        << NewExitBB->getName() << "\n");
     return true;
   };
 
@@ -1201,7 +1205,7 @@ bool llvm::formDedicatedExitBlocks(Loop *L, DominatorTree *DT, LoopInfo *LI,
   return Changed;
 }
 
-/// \brief Returns the instructions that use values defined in the loop.
+/// Returns the instructions that use values defined in the loop.
 SmallVector<Instruction *, 8> llvm::findDefsUsedOutsideOfLoop(Loop *L) {
   SmallVector<Instruction *, 8> UsedOutside;
 
@@ -1278,7 +1282,7 @@ void llvm::initializeLoopPassPass(PassRegistry &Registry) {
   INITIALIZE_PASS_DEPENDENCY(ScalarEvolutionWrapperPass)
 }
 
-/// \brief Find string metadata for loop
+/// Find string metadata for loop
 ///
 /// If it has a value (e.g. {"llvm.distribute", 1} return the value as an
 /// operand or null otherwise.  If the string metadata is not found return
@@ -1422,12 +1426,13 @@ void llvm::deleteDeadLoop(Loop *L, DominatorTree *DT = nullptr,
   // Remove the old branch.
   Preheader->getTerminator()->eraseFromParent();
 
+  DomTreeUpdater DTU(DT, DomTreeUpdater::UpdateStrategy::Eager);
   if (DT) {
     // Update the dominator tree by informing it about the new edge from the
     // preheader to the exit.
-    DT->insertEdge(Preheader, ExitBlock);
+    DTU.insertEdge(Preheader, ExitBlock);
     // Inform the dominator tree about the removed edge.
-    DT->deleteEdge(Preheader, L->getHeader());
+    DTU.deleteEdge(Preheader, L->getHeader());
   }
 
   // Given LCSSA form is satisfied, we should not have users of instructions
@@ -1516,7 +1521,29 @@ Optional<unsigned> llvm::getLoopEstimatedTripCount(Loop *L) {
     return (FalseVal + (TrueVal / 2)) / TrueVal;
 }
 
-/// \brief Adds a 'fast' flag to floating point operations.
+bool llvm::hasIterationCountInvariantInParent(Loop *InnerLoop,
+                                              ScalarEvolution &SE) {
+  Loop *OuterL = InnerLoop->getParentLoop();
+  if (!OuterL)
+    return true;
+
+  // Get the backedge taken count for the inner loop
+  BasicBlock *InnerLoopLatch = InnerLoop->getLoopLatch();
+  const SCEV *InnerLoopBECountSC = SE.getExitCount(InnerLoop, InnerLoopLatch);
+  if (isa<SCEVCouldNotCompute>(InnerLoopBECountSC) ||
+      !InnerLoopBECountSC->getType()->isIntegerTy())
+    return false;
+
+  // Get whether count is invariant to the outer loop
+  ScalarEvolution::LoopDisposition LD =
+      SE.getLoopDisposition(InnerLoopBECountSC, OuterL);
+  if (LD != ScalarEvolution::LoopInvariant)
+    return false;
+
+  return true;
+}
+
+/// Adds a 'fast' flag to floating point operations.
 static Value *addFastMathFlag(Value *V) {
   if (isa<FPMathOperator>(V)) {
     FastMathFlags Flags;

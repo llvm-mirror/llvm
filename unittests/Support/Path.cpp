@@ -12,6 +12,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/BinaryFormat/Magic.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/Errc.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -23,8 +24,9 @@
 #include "gtest/gtest.h"
 #include "gmock/gmock.h"
 
-#ifdef LLVM_ON_WIN32
+#ifdef _WIN32
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/Support/Chrono.h"
 #include <windows.h>
 #include <winerror.h>
 #endif
@@ -48,7 +50,21 @@ using namespace llvm::sys;
   } else {                                                                     \
   }
 
+#define ASSERT_ERROR(x)                                                        \
+  if (!x) {                                                                    \
+    SmallString<128> MessageStorage;                                           \
+    raw_svector_ostream Message(MessageStorage);                               \
+    Message << #x ": did not return a failure error code.\n";                  \
+    GTEST_FATAL_FAILURE_(MessageStorage.c_str());                              \
+  }
+
 namespace {
+
+struct FileDescriptorCloser {
+  explicit FileDescriptorCloser(int FD) : FD(FD) {}
+  ~FileDescriptorCloser() { ::close(FD); }
+  int FD;
+};
 
 TEST(is_separator, Works) {
   EXPECT_TRUE(path::is_separator('/'));
@@ -59,7 +75,7 @@ TEST(is_separator, Works) {
   EXPECT_TRUE(path::is_separator('\\', path::Style::windows));
   EXPECT_FALSE(path::is_separator('\\', path::Style::posix));
 
-#ifdef LLVM_ON_WIN32
+#ifdef _WIN32
   EXPECT_TRUE(path::is_separator('\\'));
 #else
   EXPECT_FALSE(path::is_separator('\\'));
@@ -183,6 +199,12 @@ TEST(Support, FilenameParent) {
   EXPECT_EQ("\\", path::filename("c:\\", path::Style::windows));
   EXPECT_EQ("c:", path::parent_path("c:\\", path::Style::windows));
 
+  EXPECT_EQ("/", path::filename("///"));
+  EXPECT_EQ("", path::parent_path("///"));
+
+  EXPECT_EQ("\\", path::filename("c:\\\\", path::Style::windows));
+  EXPECT_EQ("c:", path::parent_path("c:\\\\", path::Style::windows));
+
   EXPECT_EQ("bar", path::filename("/foo/bar"));
   EXPECT_EQ("/foo", path::parent_path("/foo/bar"));
 
@@ -203,6 +225,19 @@ TEST(Support, FilenameParent) {
 
   EXPECT_EQ("foo", path::filename("//net/foo"));
   EXPECT_EQ("//net/", path::parent_path("//net/foo"));
+
+  // These checks are just to make sure we do something reasonable with the
+  // paths below. They are not meant to prescribe the one true interpretation of
+  // these paths. Other decompositions (e.g. "//" -> "" + "//") are also
+  // possible.
+  EXPECT_EQ("/", path::filename("//"));
+  EXPECT_EQ("", path::parent_path("//"));
+
+  EXPECT_EQ("\\", path::filename("\\\\", path::Style::windows));
+  EXPECT_EQ("", path::parent_path("\\\\", path::Style::windows));
+
+  EXPECT_EQ("\\", path::filename("\\\\\\", path::Style::windows));
+  EXPECT_EQ("", path::parent_path("\\\\\\", path::Style::windows));
 }
 
 static std::vector<StringRef>
@@ -213,6 +248,8 @@ GetComponents(StringRef Path, path::Style S = path::Style::native) {
 TEST(Support, PathIterator) {
   EXPECT_THAT(GetComponents("/foo"), testing::ElementsAre("/", "foo"));
   EXPECT_THAT(GetComponents("/"), testing::ElementsAre("/"));
+  EXPECT_THAT(GetComponents("//"), testing::ElementsAre("/"));
+  EXPECT_THAT(GetComponents("///"), testing::ElementsAre("/"));
   EXPECT_THAT(GetComponents("c/d/e/foo.txt"),
               testing::ElementsAre("c", "d", "e", "foo.txt"));
   EXPECT_THAT(GetComponents(".c/.d/../."),
@@ -233,10 +270,8 @@ TEST(Support, AbsolutePathIteratorEnd) {
   SmallVector<std::pair<StringRef, path::Style>, 4> Paths;
   Paths.emplace_back("/foo/", path::Style::native);
   Paths.emplace_back("/foo//", path::Style::native);
-  Paths.emplace_back("//net//", path::Style::native);
   Paths.emplace_back("//net/foo/", path::Style::native);
   Paths.emplace_back("c:\\foo\\", path::Style::windows);
-  Paths.emplace_back("c:\\\\", path::Style::windows);
 
   for (auto &Path : Paths) {
     SCOPED_TRACE(Path.first);
@@ -248,6 +283,8 @@ TEST(Support, AbsolutePathIteratorEnd) {
   RootPaths.emplace_back("/", path::Style::native);
   RootPaths.emplace_back("//net/", path::Style::native);
   RootPaths.emplace_back("c:\\", path::Style::windows);
+  RootPaths.emplace_back("//net//", path::Style::native);
+  RootPaths.emplace_back("c:\\\\", path::Style::windows);
 
   for (auto &Path : RootPaths) {
     SCOPED_TRACE(Path.first);
@@ -259,7 +296,7 @@ TEST(Support, AbsolutePathIteratorEnd) {
 
 TEST(Support, HomeDirectory) {
   std::string expected;
-#ifdef LLVM_ON_WIN32
+#ifdef _WIN32
   if (wchar_t const *path = ::_wgetenv(L"USERPROFILE")) {
     auto pathLen = ::wcslen(path);
     ArrayRef<char> ref{reinterpret_cast<char const *>(path),
@@ -348,7 +385,7 @@ TEST(Support, TempDirectory) {
   EXPECT_TRUE(!TempDir.empty());
 }
 
-#ifdef LLVM_ON_WIN32
+#ifdef _WIN32
 static std::string path2regex(std::string Path) {
   size_t Pos = 0;
   while ((Pos = Path.find('\\', Pos)) != std::string::npos) {
@@ -414,6 +451,7 @@ protected:
   /// Unique temporary directory in which all created filesystem entities must
   /// be placed. It is removed at the end of each test (must be empty).
   SmallString<128> TestDirectory;
+  SmallString<128> NonExistantFile;
 
   void SetUp() override {
     ASSERT_NO_ERROR(
@@ -421,6 +459,11 @@ protected:
     // We don't care about this specific file.
     errs() << "Test Directory: " << TestDirectory << '\n';
     errs().flush();
+    NonExistantFile = TestDirectory;
+
+    // Even though this value is hardcoded, is a 128-bit GUID, so we should be
+    // guaranteed that this file will never exist.
+    sys::path::append(NonExistantFile, "1B28B495C16344CB9822E588CD4C3EF0");
   }
 
   void TearDown() override { ASSERT_NO_ERROR(fs::remove(TestDirectory.str())); }
@@ -617,7 +660,7 @@ TEST_F(FileSystemTest, TempFiles) {
   ASSERT_EQ(fs::access(Twine(TempPath), sys::fs::AccessMode::Exist),
             errc::no_such_file_or_directory);
 
-#ifdef LLVM_ON_WIN32
+#ifdef _WIN32
   // Path name > 260 chars should get an error.
   const char *Path270 =
     "abcdefghijklmnopqrstuvwxyz9abcdefghijklmnopqrstuvwxyz8"
@@ -636,6 +679,37 @@ TEST_F(FileSystemTest, TempFiles) {
   ASSERT_NO_ERROR(fs::createTemporaryFile(Path216, "", TempPath));
   ASSERT_NO_ERROR(fs::remove(Twine(TempPath)));
 #endif
+}
+
+TEST_F(FileSystemTest, TempFileCollisions) {
+  SmallString<128> TestDirectory;
+  ASSERT_NO_ERROR(
+      fs::createUniqueDirectory("CreateUniqueFileTest", TestDirectory));
+  FileRemover Cleanup(TestDirectory);
+  SmallString<128> Model = TestDirectory;
+  path::append(Model, "%.tmp");
+  SmallString<128> Path;
+  std::vector<fs::TempFile> TempFiles;
+
+  auto TryCreateTempFile = [&]() {
+    Expected<fs::TempFile> T = fs::TempFile::create(Model);
+    if (T) {
+      TempFiles.push_back(std::move(*T));
+      return true;
+    } else {
+      logAllUnhandledErrors(T.takeError(), errs(),
+                            "Failed to create temporary file: ");
+      return false;
+    }
+  };
+
+  // We should be able to create exactly 16 temporary files.
+  for (int i = 0; i < 16; ++i)
+    EXPECT_TRUE(TryCreateTempFile());
+  EXPECT_FALSE(TryCreateTempFile());
+
+  for (fs::TempFile &T : TempFiles)
+    cantFail(T.discard());
 }
 
 TEST_F(FileSystemTest, CreateDir) {
@@ -665,7 +739,7 @@ TEST_F(FileSystemTest, CreateDir) {
   ::umask(OldUmask);
 #endif
 
-#ifdef LLVM_ON_WIN32
+#ifdef _WIN32
   // Prove that create_directories() can handle a pathname > 248 characters,
   // which is the documented limit for CreateDirectory().
   // (248 is MAX_PATH subtracting room for an 8.3 filename.)
@@ -958,7 +1032,7 @@ TEST_F(FileSystemTest, Remove) {
   ASSERT_FALSE(fs::exists(BaseDir));
 }
 
-#ifdef LLVM_ON_WIN32
+#ifdef _WIN32
 TEST_F(FileSystemTest, CarriageReturn) {
   SmallString<128> FilePathname(TestDirectory);
   std::error_code EC;
@@ -1076,7 +1150,7 @@ TEST(Support, NormalizePath) {
     EXPECT_EQ(std::get<2>(T), Posix);
   }
 
-#if defined(LLVM_ON_WIN32)
+#if defined(_WIN32)
   SmallString<64> PathHome;
   path::home_directory(PathHome);
 
@@ -1197,8 +1271,8 @@ TEST_F(FileSystemTest, OpenFileForRead) {
   // Open the file for read
   int FileDescriptor2;
   SmallString<64> ResultPath;
-  ASSERT_NO_ERROR(
-      fs::openFileForRead(Twine(TempPath), FileDescriptor2, &ResultPath))
+  ASSERT_NO_ERROR(fs::openFileForRead(Twine(TempPath), FileDescriptor2,
+                                      fs::OF_None, &ResultPath))
 
   // If we succeeded, check that the paths are the same (modulo case):
   if (!ResultPath.empty()) {
@@ -1209,8 +1283,241 @@ TEST_F(FileSystemTest, OpenFileForRead) {
     ASSERT_NO_ERROR(fs::getUniqueID(Twine(ResultPath), D2));
     ASSERT_EQ(D1, D2);
   }
-
   ::close(FileDescriptor);
+  ::close(FileDescriptor2);
+
+#ifdef _WIN32
+  // Since Windows Vista, file access time is not updated by default.
+  // This is instead updated manually by openFileForRead.
+  // https://blogs.technet.microsoft.com/filecab/2006/11/07/disabling-last-access-time-in-windows-vista-to-improve-ntfs-performance/
+  // This part of the unit test is Windows specific as the updating of
+  // access times can be disabled on Linux using /etc/fstab.
+
+  // Set access time to UNIX epoch.
+  ASSERT_NO_ERROR(sys::fs::openFileForWrite(Twine(TempPath), FileDescriptor,
+                                            fs::CD_OpenExisting));
+  TimePoint<> Epoch(std::chrono::milliseconds(0));
+  ASSERT_NO_ERROR(fs::setLastAccessAndModificationTime(FileDescriptor, Epoch));
+  ::close(FileDescriptor);
+
+  // Open the file and ensure access time is updated, when forced.
+  ASSERT_NO_ERROR(fs::openFileForRead(Twine(TempPath), FileDescriptor,
+                                      fs::OF_UpdateAtime, &ResultPath));
+
+  sys::fs::file_status Status;
+  ASSERT_NO_ERROR(sys::fs::status(FileDescriptor, Status));
+  auto FileAccessTime = Status.getLastAccessedTime();
+
+  ASSERT_NE(Epoch, FileAccessTime);
+  ::close(FileDescriptor);
+
+  // Ideally this test would include a case when ATime is not forced to update,
+  // however the expected behaviour will differ depending on the configuration
+  // of the Windows file system.
+#endif
+}
+
+static void createFileWithData(const Twine &Path, bool ShouldExistBefore,
+                               fs::CreationDisposition Disp, StringRef Data) {
+  int FD;
+  ASSERT_EQ(ShouldExistBefore, fs::exists(Path));
+  ASSERT_NO_ERROR(fs::openFileForWrite(Path, FD, Disp));
+  FileDescriptorCloser Closer(FD);
+  ASSERT_TRUE(fs::exists(Path));
+
+  ASSERT_EQ(Data.size(), (size_t)write(FD, Data.data(), Data.size()));
+}
+
+static void verifyFileContents(const Twine &Path, StringRef Contents) {
+  auto Buffer = MemoryBuffer::getFile(Path);
+  ASSERT_TRUE((bool)Buffer);
+  StringRef Data = Buffer.get()->getBuffer();
+  ASSERT_EQ(Data, Contents);
+}
+
+TEST_F(FileSystemTest, CreateNew) {
+  int FD;
+  Optional<FileDescriptorCloser> Closer;
+
+  // Succeeds if the file does not exist.
+  ASSERT_FALSE(fs::exists(NonExistantFile));
+  ASSERT_NO_ERROR(fs::openFileForWrite(NonExistantFile, FD, fs::CD_CreateNew));
+  ASSERT_TRUE(fs::exists(NonExistantFile));
+
+  FileRemover Cleanup(NonExistantFile);
+  Closer.emplace(FD);
+
+  // And creates a file of size 0.
+  sys::fs::file_status Status;
+  ASSERT_NO_ERROR(sys::fs::status(FD, Status));
+  EXPECT_EQ(0ULL, Status.getSize());
+
+  // Close this first, before trying to re-open the file.
+  Closer.reset();
+
+  // But fails if the file does exist.
+  ASSERT_ERROR(fs::openFileForWrite(NonExistantFile, FD, fs::CD_CreateNew));
+}
+
+TEST_F(FileSystemTest, CreateAlways) {
+  int FD;
+  Optional<FileDescriptorCloser> Closer;
+
+  // Succeeds if the file does not exist.
+  ASSERT_FALSE(fs::exists(NonExistantFile));
+  ASSERT_NO_ERROR(
+      fs::openFileForWrite(NonExistantFile, FD, fs::CD_CreateAlways));
+
+  Closer.emplace(FD);
+
+  ASSERT_TRUE(fs::exists(NonExistantFile));
+
+  FileRemover Cleanup(NonExistantFile);
+
+  // And creates a file of size 0.
+  uint64_t FileSize;
+  ASSERT_NO_ERROR(sys::fs::file_size(NonExistantFile, FileSize));
+  ASSERT_EQ(0ULL, FileSize);
+
+  // If we write some data to it re-create it with CreateAlways, it succeeds and
+  // truncates to 0 bytes.
+  ASSERT_EQ(4, write(FD, "Test", 4));
+
+  Closer.reset();
+
+  ASSERT_NO_ERROR(sys::fs::file_size(NonExistantFile, FileSize));
+  ASSERT_EQ(4ULL, FileSize);
+
+  ASSERT_NO_ERROR(
+      fs::openFileForWrite(NonExistantFile, FD, fs::CD_CreateAlways));
+  Closer.emplace(FD);
+  ASSERT_NO_ERROR(sys::fs::file_size(NonExistantFile, FileSize));
+  ASSERT_EQ(0ULL, FileSize);
+}
+
+TEST_F(FileSystemTest, OpenExisting) {
+  int FD;
+
+  // Fails if the file does not exist.
+  ASSERT_FALSE(fs::exists(NonExistantFile));
+  ASSERT_ERROR(fs::openFileForWrite(NonExistantFile, FD, fs::CD_OpenExisting));
+  ASSERT_FALSE(fs::exists(NonExistantFile));
+
+  // Make a dummy file now so that we can try again when the file does exist.
+  createFileWithData(NonExistantFile, false, fs::CD_CreateNew, "Fizz");
+  FileRemover Cleanup(NonExistantFile);
+  uint64_t FileSize;
+  ASSERT_NO_ERROR(sys::fs::file_size(NonExistantFile, FileSize));
+  ASSERT_EQ(4ULL, FileSize);
+
+  // If we re-create it with different data, it overwrites rather than
+  // appending.
+  createFileWithData(NonExistantFile, true, fs::CD_OpenExisting, "Buzz");
+  verifyFileContents(NonExistantFile, "Buzz");
+}
+
+TEST_F(FileSystemTest, OpenAlways) {
+  // Succeeds if the file does not exist.
+  createFileWithData(NonExistantFile, false, fs::CD_OpenAlways, "Fizz");
+  FileRemover Cleanup(NonExistantFile);
+  uint64_t FileSize;
+  ASSERT_NO_ERROR(sys::fs::file_size(NonExistantFile, FileSize));
+  ASSERT_EQ(4ULL, FileSize);
+
+  // Now re-open it and write again, verifying the contents get over-written.
+  createFileWithData(NonExistantFile, true, fs::CD_OpenAlways, "Bu");
+  verifyFileContents(NonExistantFile, "Buzz");
+}
+
+TEST_F(FileSystemTest, AppendSetsCorrectFileOffset) {
+  fs::CreationDisposition Disps[] = {fs::CD_CreateAlways, fs::CD_OpenAlways,
+                                     fs::CD_OpenExisting};
+
+  // Write some data and re-open it with every possible disposition (this is a
+  // hack that shouldn't work, but is left for compatibility.  F_Append
+  // overrides
+  // the specified disposition.
+  for (fs::CreationDisposition Disp : Disps) {
+    int FD;
+    Optional<FileDescriptorCloser> Closer;
+
+    createFileWithData(NonExistantFile, false, fs::CD_CreateNew, "Fizz");
+
+    FileRemover Cleanup(NonExistantFile);
+
+    uint64_t FileSize;
+    ASSERT_NO_ERROR(sys::fs::file_size(NonExistantFile, FileSize));
+    ASSERT_EQ(4ULL, FileSize);
+    ASSERT_NO_ERROR(
+        fs::openFileForWrite(NonExistantFile, FD, Disp, fs::OF_Append));
+    Closer.emplace(FD);
+    ASSERT_NO_ERROR(sys::fs::file_size(NonExistantFile, FileSize));
+    ASSERT_EQ(4ULL, FileSize);
+
+    ASSERT_EQ(4, write(FD, "Buzz", 4));
+    Closer.reset();
+
+    verifyFileContents(NonExistantFile, "FizzBuzz");
+  }
+}
+
+static void verifyRead(int FD, StringRef Data, bool ShouldSucceed) {
+  std::vector<char> Buffer;
+  Buffer.resize(Data.size());
+  int Result = ::read(FD, Buffer.data(), Buffer.size());
+  if (ShouldSucceed) {
+    ASSERT_EQ((size_t)Result, Data.size());
+    ASSERT_EQ(Data, StringRef(Buffer.data(), Buffer.size()));
+  } else {
+    ASSERT_EQ(-1, Result);
+    ASSERT_EQ(EBADF, errno);
+  }
+}
+
+static void verifyWrite(int FD, StringRef Data, bool ShouldSucceed) {
+  int Result = ::write(FD, Data.data(), Data.size());
+  if (ShouldSucceed)
+    ASSERT_EQ((size_t)Result, Data.size());
+  else {
+    ASSERT_EQ(-1, Result);
+    ASSERT_EQ(EBADF, errno);
+  }
+}
+
+TEST_F(FileSystemTest, ReadOnlyFileCantWrite) {
+  createFileWithData(NonExistantFile, false, fs::CD_CreateNew, "Fizz");
+  FileRemover Cleanup(NonExistantFile);
+
+  int FD;
+  ASSERT_NO_ERROR(fs::openFileForRead(NonExistantFile, FD));
+  FileDescriptorCloser Closer(FD);
+
+  verifyWrite(FD, "Buzz", false);
+  verifyRead(FD, "Fizz", true);
+}
+
+TEST_F(FileSystemTest, WriteOnlyFileCantRead) {
+  createFileWithData(NonExistantFile, false, fs::CD_CreateNew, "Fizz");
+  FileRemover Cleanup(NonExistantFile);
+
+  int FD;
+  ASSERT_NO_ERROR(
+      fs::openFileForWrite(NonExistantFile, FD, fs::CD_OpenExisting));
+  FileDescriptorCloser Closer(FD);
+  verifyRead(FD, "Fizz", false);
+  verifyWrite(FD, "Buzz", true);
+}
+
+TEST_F(FileSystemTest, ReadWriteFileCanReadOrWrite) {
+  createFileWithData(NonExistantFile, false, fs::CD_CreateNew, "Fizz");
+  FileRemover Cleanup(NonExistantFile);
+
+  int FD;
+  ASSERT_NO_ERROR(fs::openFileForReadWrite(NonExistantFile, FD,
+                                           fs::CD_OpenExisting, fs::OF_None));
+  FileDescriptorCloser Closer(FD);
+  verifyRead(FD, "Fizz", true);
+  verifyWrite(FD, "Buzz", true);
 }
 
 TEST_F(FileSystemTest, set_current_path) {
@@ -1256,7 +1563,7 @@ TEST_F(FileSystemTest, permissions) {
   EXPECT_EQ(fs::setPermissions(TempPath, fs::all_read | fs::all_exe), NoError);
   EXPECT_TRUE(CheckPermissions(fs::all_read | fs::all_exe));
 
-#if defined(LLVM_ON_WIN32)
+#if defined(_WIN32)
   fs::perms ReadOnly = fs::all_read | fs::all_exe;
   EXPECT_EQ(fs::setPermissions(TempPath, fs::no_perms), NoError);
   EXPECT_TRUE(CheckPermissions(ReadOnly));

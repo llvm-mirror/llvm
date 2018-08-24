@@ -42,7 +42,7 @@
   !16 = !DISubroutineType(types: !17)
   !17 = !{null}
   !18 = !DILocalVariable(name: "sp", arg: 1, scope: !19, file: !3, line: 7, type: !24)
-  !19 = distinct !DISubprogram(name: "foo", scope: !3, file: !3, line: 8, type: !20, isLocal: false, isDefinition: true, scopeLine: 8, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: true, unit: !2, variables: !22)
+  !19 = distinct !DISubprogram(name: "foo", scope: !3, file: !3, line: 8, type: !20, isLocal: false, isDefinition: true, scopeLine: 8, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: true, unit: !2, retainedNodes: !22)
   !20 = !DISubroutineType(types: !21)
   !21 = !{!13}
   !22 = !{!18, !23}
@@ -106,17 +106,11 @@ body:             |
 # CHECK-LABEL: name: foobar
 
 # CHECK-LABEL: bb.1:
-## After solving https://bugs.llvm.org/show_bug.cgi?id=36579 we expect to get a
-##   DBG_VALUE debug-use $noreg
-## here.
-# CHECK-NOT:    DBG_VALUE
+# CHECK:        DBG_VALUE debug-use $noreg
 
 # CHECK-LABEL: bb.2:
-## After solving https://bugs.llvm.org/show_bug.cgi?id=36579 we expect to get a
-##   DBG_VALUE debug-use $noreg
-## here.
-# CHECK-NOT:    DBG_VALUE
-# CHECK:        dead renamable $rcx = IMPLICIT_DEF
+# CHECK:        DBG_VALUE debug-use $noreg
+# CHECK-NEXT:   dead renamable $rcx = IMPLICIT_DEF
 # CHECK-NEXT:   dead renamable $rcx = IMPLICIT_DEF
 # CHECK-NEXT:   dead renamable $rcx = IMPLICIT_DEF
 # CHECK-NEXT:   dead renamable $rcx = IMPLICIT_DEF

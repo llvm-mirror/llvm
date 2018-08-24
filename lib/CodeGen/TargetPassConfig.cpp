@@ -111,9 +111,16 @@ static cl::opt<bool> VerifyMachineCode("verify-machineinstrs", cl::Hidden,
     cl::desc("Verify generated machine code"),
     cl::init(false),
     cl::ZeroOrMore);
-static cl::opt<bool> EnableMachineOutliner("enable-machine-outliner",
-    cl::Hidden,
-    cl::desc("Enable machine outliner"));
+enum RunOutliner { AlwaysOutline, NeverOutline, TargetDefault };
+// Enable or disable the MachineOutliner.
+static cl::opt<RunOutliner> EnableMachineOutliner(
+    "enable-machine-outliner", cl::desc("Enable the machine outliner"),
+    cl::Hidden, cl::ValueOptional, cl::init(TargetDefault),
+    cl::values(clEnumValN(AlwaysOutline, "always",
+                          "Run on all functions guaranteed to be beneficial"),
+               clEnumValN(NeverOutline, "never", "Disable all outlining"),
+               // Sentinel value for unspecified option.
+               clEnumValN(AlwaysOutline, "", "")));
 // Enable or disable FastISel. Both options are needed, because
 // FastISel is enabled by default with -fast, and we wish to be
 // able to enable or disable fast-isel independently from -O0.
@@ -159,7 +166,7 @@ static cl::opt<CFLAAType> UseCFLAA(
                           "Enable unification-based CFL-AA"),
                clEnumValN(CFLAAType::Andersen, "anders",
                           "Enable inclusion-based CFL-AA"),
-               clEnumValN(CFLAAType::Both, "both", 
+               clEnumValN(CFLAAType::Both, "both",
                           "Enable both variants of CFL-AA")));
 
 /// Option names for limiting the codegen pipeline.
@@ -656,7 +663,12 @@ void TargetPassConfig::addPassesToHandleExceptions() {
     addPass(createDwarfEHPass());
     break;
   case ExceptionHandling::Wasm:
-    // TODO to prevent warning
+    // Wasm EH uses Windows EH instructions, but it does not need to demote PHIs
+    // on catchpads and cleanuppads because it does not outline them into
+    // funclets. Catchswitch blocks are not lowered in SelectionDAG, so we
+    // should remove PHIs there.
+    addPass(createWinEHPass(/*DemoteCatchSwitchPHIOnly=*/false));
+    addPass(createWasmEHPass());
     break;
   case ExceptionHandling::None:
     addPass(createLowerInvokePass());
@@ -901,8 +913,14 @@ void TargetPassConfig::addMachinePasses() {
   addPass(&XRayInstrumentationID, false);
   addPass(&PatchableFunctionID, false);
 
-  if (EnableMachineOutliner)
-    addPass(createMachineOutlinerPass());
+  if (TM->Options.EnableMachineOutliner && getOptLevel() != CodeGenOpt::None &&
+      EnableMachineOutliner != NeverOutline) {
+    bool RunOnAllFunctions = (EnableMachineOutliner == AlwaysOutline);
+    bool AddOutliner = RunOnAllFunctions ||
+                       TM->Options.SupportsDefaultOutlining;
+    if (AddOutliner)
+      addPass(createMachineOutlinerPass(RunOnAllFunctions));
+  }
 
   // Add passes that directly emit MI after all other MI passes.
   addPreEmitPass2();

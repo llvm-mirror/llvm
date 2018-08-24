@@ -95,6 +95,24 @@ define <2 x i1> @urem_bool_vec(<2 x i1> %x, <2 x i1> %y) {
   ret <2 x i1> %rem
 }
 
+define <2 x i32> @zext_bool_urem_divisor_vec(<2 x i1> %x, <2 x i32> %y) {
+; CHECK-LABEL: @zext_bool_urem_divisor_vec(
+; CHECK-NEXT:    ret <2 x i32> zeroinitializer
+;
+  %ext = zext <2 x i1> %x to <2 x i32>
+  %r = urem <2 x i32> %y, %ext
+  ret <2 x i32> %r
+}
+
+define i32 @zext_bool_srem_divisor(i1 %x, i32 %y) {
+; CHECK-LABEL: @zext_bool_srem_divisor(
+; CHECK-NEXT:    ret i32 0
+;
+  %ext = zext i1 %x to i32
+  %r = srem i32 %y, %ext
+  ret i32 %r
+}
+
 define i32 @select1(i32 %x, i1 %b) {
 ; CHECK-LABEL: @select1(
 ; CHECK-NEXT:    ret i32 0
@@ -288,3 +306,22 @@ define i32 @rem10(i32 %x, i32 %y) {
   %mod = urem i32 %shl, %x
   ret i32 %mod
 }
+
+define i32 @srem_with_sext_bool_divisor(i1 %x, i32 %y) {
+; CHECK-LABEL: @srem_with_sext_bool_divisor(
+; CHECK-NEXT:    ret i32 0
+;
+  %s = sext i1 %x to i32
+  %r = srem i32 %y, %s
+  ret i32 %r
+}
+
+define <2 x i32> @srem_with_sext_bool_divisor_vec(<2 x i1> %x, <2 x i32> %y) {
+; CHECK-LABEL: @srem_with_sext_bool_divisor_vec(
+; CHECK-NEXT:    ret <2 x i32> zeroinitializer
+;
+  %s = sext <2 x i1> %x to <2 x i32>
+  %r = srem <2 x i32> %y, %s
+  ret <2 x i32> %r
+}
+

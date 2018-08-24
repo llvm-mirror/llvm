@@ -1,6 +1,6 @@
 ; RUN: llc -filetype=obj %s -o - | obj2yaml | FileCheck %s
 
-target triple = "wasm32-unknown-unknown-wasm"
+target triple = "wasm32-unknown-unknown"
 
 %struct.bd = type { i32, i8 }
 
@@ -30,9 +30,8 @@ target triple = "wasm32-unknown-unknown-wasm"
 ; CHECK-NEXT:           Opcode:          I32_CONST
 ; CHECK-NEXT:           Value:           24
 ; CHECK-NEXT:         Content:         '08000000'
-; CHECK-NEXT:   - Type:            CUSTOM
-; CHECK-NEXT:     Name:            linking
-; CHECK-NEXT:     SymbolTable:
+
+; CHECK:          SymbolTable:
 ; CHECK-NEXT:       - Index:           0
 ; CHECK-NEXT:         Kind:            DATA
 ; CHECK-NEXT:         Name:            global0

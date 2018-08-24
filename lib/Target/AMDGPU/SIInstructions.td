@@ -11,17 +11,9 @@
 // that are not yet supported remain commented out.
 //===----------------------------------------------------------------------===//
 
-def has16BankLDS : Predicate<"Subtarget->getLDSBankCount() == 16">;
-def has32BankLDS : Predicate<"Subtarget->getLDSBankCount() == 32">;
-def HasVGPRIndexMode : Predicate<"Subtarget->hasVGPRIndexMode()">,
-                      AssemblerPredicate<"FeatureVGPRIndexMode">;
-def HasMovrel : Predicate<"Subtarget->hasMovrel()">,
-                AssemblerPredicate<"FeatureMovrel">;
-
-class GCNPat<dag pattern, dag result> : AMDGPUPat<pattern, result> {
+class GCNPat<dag pattern, dag result> : Pat<pattern, result>, GCNPredicateControl {
   let SubtargetPredicate = isGCN;
 }
-
 
 include "VOPInstructions.td"
 include "SOPInstructions.td"
@@ -172,29 +164,26 @@ def S_SUB_U64_CO_PSEUDO : SPseudoInstSI <
 
 } // End usesCustomInserter = 1, Defs = [SCC]
 
-let usesCustomInserter = 1, SALU = 1 in {
-def GET_GROUPSTATICSIZE : PseudoInstSI <(outs SReg_32:$sdst), (ins),
+let usesCustomInserter = 1 in {
+def GET_GROUPSTATICSIZE : SPseudoInstSI <(outs SReg_32:$sdst), (ins),
   [(set SReg_32:$sdst, (int_amdgcn_groupstaticsize))]>;
 } // End let usesCustomInserter = 1, SALU = 1
 
-def S_MOV_B64_term : PseudoInstSI<(outs SReg_64:$dst),
+def S_MOV_B64_term : SPseudoInstSI<(outs SReg_64:$dst),
    (ins SSrc_b64:$src0)> {
-  let SALU = 1;
   let isAsCheapAsAMove = 1;
   let isTerminator = 1;
 }
 
-def S_XOR_B64_term : PseudoInstSI<(outs SReg_64:$dst),
+def S_XOR_B64_term : SPseudoInstSI<(outs SReg_64:$dst),
    (ins SSrc_b64:$src0, SSrc_b64:$src1)> {
-  let SALU = 1;
   let isAsCheapAsAMove = 1;
   let isTerminator = 1;
   let Defs = [SCC];
 }
 
-def S_ANDN2_B64_term : PseudoInstSI<(outs SReg_64:$dst),
+def S_ANDN2_B64_term : SPseudoInstSI<(outs SReg_64:$dst),
    (ins SSrc_b64:$src0, SSrc_b64:$src1)> {
-  let SALU = 1;
   let isAsCheapAsAMove = 1;
   let isTerminator = 1;
 }
@@ -299,14 +288,21 @@ def SI_ELSE_BREAK : CFPseudoInstSI <
   let isReMaterializable = 1;
 }
 
-let Uses = [EXEC], Defs = [EXEC,VCC] in {
+let Uses = [EXEC] in {
 
 multiclass PseudoInstKill <dag ins> {
+  // Even though this pseudo can usually be expanded without an SCC def, we
+  // conservatively assume that it has an SCC def, both because it is sometimes
+  // required in degenerate cases (when V_CMPX cannot be used due to constant
+  // bus limitations) and because it allows us to avoid having to track SCC
+  // liveness across basic blocks.
+  let Defs = [EXEC,VCC,SCC] in
   def _PSEUDO : PseudoInstSI <(outs), ins> {
     let isConvergent = 1;
     let usesCustomInserter = 1;
   }
 
+  let Defs = [EXEC,VCC,SCC] in
   def _TERMINATOR : SPseudoInstSI <(outs), ins> {
     let isTerminator = 1;
   }
@@ -315,6 +311,7 @@ multiclass PseudoInstKill <dag ins> {
 defm SI_KILL_I1 : PseudoInstKill <(ins SSrc_b64:$src, i1imm:$killvalue)>;
 defm SI_KILL_F32_COND_IMM : PseudoInstKill <(ins VSrc_b32:$src0, i32imm:$src1, i32imm:$cond)>;
 
+let Defs = [EXEC,VCC] in
 def SI_ILLEGAL_COPY : SPseudoInstSI <
   (outs unknown:$dst), (ins unknown:$src),
   [], " ; illegal copy $src to $dst">;
@@ -374,6 +371,7 @@ def SI_RETURN_TO_EPILOG : SPseudoInstSI <
   let isReturn = 1;
   let hasNoSchedulingInfo = 1;
   let DisableWQM = 1;
+  let FixedSize = 1;
 }
 
 // Return for returning function calls.
@@ -452,7 +450,7 @@ def ADJCALLSTACKDOWN : SPseudoInstSI<
   let usesCustomInserter = 1;
 }
 
-let Defs = [M0, EXEC],
+let Defs = [M0, EXEC, SCC],
   UseNamedOperandTable = 1 in {
 
 class SI_INDIRECT_SRC<RegisterClass rc> : VPseudoInstSI <
@@ -572,11 +570,6 @@ def : GCNPat<
   (SI_ELSE $src, $target, 0)
 >;
 
-def : GCNPat <
-  (int_AMDGPU_kilp),
-  (SI_KILL_I1_PSEUDO (i1 0), 0)
->;
-
 def : Pat <
   // -1.0 as i32 (LowerINTRINSIC_VOID converts all other constants to -1.0)
   (AMDGPUkill (i32 -1082130432)),
@@ -646,6 +639,11 @@ def : GCNPat <
 >;
 
 def : GCNPat <
+  (f32 (f16_to_fp (i32 (srl_oneuse (and_oneuse i32:$src0, 0x7fff0000), (i32 16))))),
+  (V_CVT_F32_F16_e64 SRCMODS.ABS, (i32 (V_LSHRREV_B32_e64 (i32 16), i32:$src0)), DSTCLAMP.NONE, DSTOMOD.NONE)
+>;
+
+def : GCNPat <
   (f32 (f16_to_fp (or_oneuse i32:$src0, 0x8000))),
   (V_CVT_F32_F16_e64 SRCMODS.NEG_ABS, $src0, DSTCLAMP.NONE, DSTOMOD.NONE)
 >;
@@ -703,15 +701,19 @@ multiclass FMADPat <ValueType vt, Instruction inst> {
 defm : FMADPat <f16, V_MAC_F16_e64>;
 defm : FMADPat <f32, V_MAC_F32_e64>;
 
-class FMADModsPat<Instruction inst, SDPatternOperator mad_opr> : GCNPat<
-  (f32 (mad_opr (VOP3Mods f32:$src0, i32:$src0_mod),
-  (VOP3Mods f32:$src1, i32:$src1_mod),
-  (VOP3Mods f32:$src2, i32:$src2_mod))),
+class FMADModsPat<Instruction inst, SDPatternOperator mad_opr, ValueType Ty>
+  : GCNPat<
+  (Ty (mad_opr (VOP3Mods Ty:$src0, i32:$src0_mod),
+  (VOP3Mods Ty:$src1, i32:$src1_mod),
+  (VOP3Mods Ty:$src2, i32:$src2_mod))),
   (inst $src0_mod, $src0, $src1_mod, $src1,
   $src2_mod, $src2, DSTCLAMP.NONE, DSTOMOD.NONE)
 >;
 
-def : FMADModsPat<V_MAD_F32, AMDGPUfmad_ftz>;
+def : FMADModsPat<V_MAD_F32, AMDGPUfmad_ftz, f32>;
+def : FMADModsPat<V_MAD_F16, AMDGPUfmad_ftz, f16> {
+  let SubtargetPredicate = Has16BitInsts;
+}
 
 multiclass SelectPat <ValueType vt, Instruction inst> {
   def : GCNPat <
@@ -802,6 +804,27 @@ foreach Index = 0-15 in {
   >;
 }
 
+
+def : Pat <
+  (extract_subvector v4i16:$vec, (i32 0)),
+  (v2i16 (EXTRACT_SUBREG v4i16:$vec, sub0))
+>;
+
+def : Pat <
+  (extract_subvector v4i16:$vec, (i32 2)),
+  (v2i16 (EXTRACT_SUBREG v4i16:$vec, sub1))
+>;
+
+def : Pat <
+  (extract_subvector v4f16:$vec, (i32 0)),
+  (v2f16 (EXTRACT_SUBREG v4f16:$vec, sub0))
+>;
+
+def : Pat <
+  (extract_subvector v4f16:$vec, (i32 2)),
+  (v2f16 (EXTRACT_SUBREG v4f16:$vec, sub1))
+>;
+
 let SubtargetPredicate = isGCN in {
 
 // FIXME: Why do only some of these type combinations for SReg and
@@ -841,6 +864,26 @@ def : BitConvert <f64, v2f32, VReg_64>;
 def : BitConvert <v2f32, f64, VReg_64>;
 def : BitConvert <f64, v2i32, VReg_64>;
 def : BitConvert <v2i32, f64, VReg_64>;
+
+// FIXME: Make SGPR
+def : BitConvert <v2i32, v4f16, VReg_64>;
+def : BitConvert <v4f16, v2i32, VReg_64>;
+def : BitConvert <v2i32, v4f16, VReg_64>;
+def : BitConvert <v2i32, v4i16, VReg_64>;
+def : BitConvert <v4i16, v2i32, VReg_64>;
+def : BitConvert <v2f32, v4f16, VReg_64>;
+def : BitConvert <v4f16, v2f32, VReg_64>;
+def : BitConvert <v2f32, v4i16, VReg_64>;
+def : BitConvert <v4i16, v2f32, VReg_64>;
+def : BitConvert <v4i16, f64, VReg_64>;
+def : BitConvert <v4f16, f64, VReg_64>;
+def : BitConvert <f64, v4i16, VReg_64>;
+def : BitConvert <f64, v4f16, VReg_64>;
+def : BitConvert <v4i16, i64, VReg_64>;
+def : BitConvert <v4f16, i64, VReg_64>;
+def : BitConvert <i64, v4i16, VReg_64>;
+def : BitConvert <i64, v4f16, VReg_64>;
+
 def : BitConvert <v4i32, v4f32, VReg_128>;
 def : BitConvert <v4f32, v4i32, VReg_128>;
 
@@ -883,11 +926,13 @@ def : ClampPat<V_MAX_F32_e64, f32>;
 def : ClampPat<V_MAX_F64, f64>;
 def : ClampPat<V_MAX_F16_e64, f16>;
 
+let SubtargetPredicate = HasVOP3PInsts in {
 def : GCNPat <
   (v2f16 (AMDGPUclamp (VOP3PMods v2f16:$src0, i32:$src0_modifiers))),
   (V_PK_MAX_F16 $src0_modifiers, $src0,
                 $src0_modifiers, $src0, DSTCLAMP.ENABLE)
 >;
+}
 
 /********** ================================ **********/
 /********** Floating point absolute/negative **********/
@@ -913,7 +958,7 @@ def : GCNPat <
 
 def : GCNPat <
   (fabs f32:$src),
-  (V_AND_B32_e64 $src, (V_MOV_B32_e32 (i32 0x7fffffff)))
+  (S_AND_B32 $src, (S_MOV_B32 (i32 0x7fffffff)))
 >;
 
 def : GCNPat <
@@ -974,12 +1019,12 @@ def : GCNPat <
 
 def : GCNPat <
   (fneg f16:$src),
-  (V_XOR_B32_e32 $src, (V_MOV_B32_e32 (i32 0x00008000)))
+  (S_XOR_B32 $src, (S_MOV_B32 (i32 0x00008000)))
 >;
 
 def : GCNPat <
   (fabs f16:$src),
-  (V_AND_B32_e64 $src, (V_MOV_B32_e32 (i32 0x00007fff)))
+  (S_AND_B32 $src, (S_MOV_B32 (i32 0x00007fff)))
 >;
 
 def : GCNPat <
@@ -989,12 +1034,12 @@ def : GCNPat <
 
 def : GCNPat <
   (fneg v2f16:$src),
-  (V_XOR_B32_e64 (S_MOV_B32 (i32 0x80008000)), $src)
+  (S_XOR_B32 $src, (S_MOV_B32 (i32 0x80008000)))
 >;
 
 def : GCNPat <
   (fabs v2f16:$src),
-  (V_AND_B32_e64 (S_MOV_B32 (i32 0x7fff7fff)), $src)
+  (S_AND_B32 $src, (S_MOV_B32 (i32 0x7fff7fff)))
 >;
 
 // This is really (fneg (fabs v2f16:$src))
@@ -1003,7 +1048,12 @@ def : GCNPat <
 // VOP3P instructions, so it is turned into the bit op.
 def : GCNPat <
   (fneg (v2f16 (bitconvert (and_oneuse i32:$src, 0x7fff7fff)))),
-  (S_OR_B32 (S_MOV_B32 (i32 0x80008000)), $src) // Set sign bit
+  (S_OR_B32 $src, (S_MOV_B32 (i32 0x80008000))) // Set sign bit
+>;
+
+def : GCNPat <
+  (fneg (v2f16 (fabs v2f16:$src))),
+  (S_OR_B32 $src, (S_MOV_B32 (i32 0x80008000))) // Set sign bit
 >;
 
 /********** ================== **********/
@@ -1334,6 +1384,11 @@ def : GCNPat<
 >;
 
 def : GCNPat<
+  (fcanonicalize (f16 (fneg (VOP3Mods f16:$src, i32:$src_mods)))),
+  (V_MUL_F16_e64 0, (i32 CONST.FP16_NEG_ONE), $src_mods, $src, 0, 0)
+>;
+
+def : GCNPat<
   (fcanonicalize (v2f16 (VOP3PMods v2f16:$src, i32:$src_mods))),
   (V_PK_MUL_F16 0, (i32 CONST.V2FP16_ONE), $src_mods, $src, DSTCLAMP.NONE)
 >;
@@ -1345,16 +1400,23 @@ def : GCNPat<
   (V_MAX_F16_e64 $src_mods, $src, $src_mods, $src, 0, 0)
 >;
 
+let SubtargetPredicate = HasVOP3PInsts in {
 def : GCNPat<
   (fcanonicalize (v2f16 (VOP3PMods v2f16:$src, i32:$src_mods))),
   (V_PK_MAX_F16 $src_mods, $src, $src_mods, $src, DSTCLAMP.NONE)
 >;
+}
 }
 
 let OtherPredicates = [NoFP32Denormals] in {
 def : GCNPat<
   (fcanonicalize (f32 (VOP3Mods f32:$src, i32:$src_mods))),
   (V_MUL_F32_e64 0, (i32 CONST.FP32_ONE), $src_mods, $src, 0, 0)
+>;
+
+def : GCNPat<
+  (fcanonicalize (f32 (fneg (VOP3Mods f32:$src, i32:$src_mods)))),
+  (V_MUL_F32_e64 0, (i32 CONST.FP32_NEG_ONE), $src_mods, $src, 0, 0)
 >;
 }
 
@@ -1379,6 +1441,16 @@ def : GCNPat<
 >;
 }
 
+let OtherPredicates = [HasDLInsts] in {
+def : GCNPat <
+  (fma (f32 (VOP3Mods0 f32:$src0, i32:$src0_modifiers, i1:$clamp, i32:$omod)),
+       (f32 (VOP3Mods f32:$src1, i32:$src1_modifiers)),
+       (f32 (VOP3NoMods f32:$src2))),
+  (V_FMAC_F32_e64 $src0_modifiers, $src0, $src1_modifiers, $src1,
+                  SRCMODS.NONE, $src2, $clamp, $omod)
+>;
+} // End OtherPredicates = [HasDLInsts]
+
 
 // Allow integer inputs
 class ExpPattern<SDPatternOperator node, ValueType vt, Instruction Inst> : GCNPat<
@@ -1389,16 +1461,37 @@ class ExpPattern<SDPatternOperator node, ValueType vt, Instruction Inst> : GCNPa
 def : ExpPattern<AMDGPUexport, i32, EXP>;
 def : ExpPattern<AMDGPUexport_done, i32, EXP_DONE>;
 
-def : GCNPat <
-  (v2i16 (build_vector i16:$src0, i16:$src1)),
-  (v2i16 (S_PACK_LL_B32_B16 $src0, $src1))
->;
-
-// COPY_TO_REGCLASS is workaround tablegen bug from multiple outputs
+// COPY is workaround tablegen bug from multiple outputs
 // from S_LSHL_B32's multiple outputs from implicit scc def.
 def : GCNPat <
   (v2i16 (build_vector (i16 0), i16:$src1)),
-  (v2i16 (COPY_TO_REGCLASS (S_LSHL_B32 i16:$src1, (i16 16)), SReg_32_XM0))
+  (v2i16 (COPY (S_LSHL_B32 i16:$src1, (i16 16))))
+>;
+
+def : GCNPat <
+  (v2i16 (build_vector i16:$src0, (i16 undef))),
+  (v2i16 (COPY $src0))
+>;
+
+def : GCNPat <
+  (v2f16 (build_vector f16:$src0, (f16 undef))),
+  (v2f16 (COPY $src0))
+>;
+
+def : GCNPat <
+  (v2i16 (build_vector (i16 undef), i16:$src1)),
+  (v2i16 (COPY (S_LSHL_B32 $src1, (i32 16))))
+>;
+
+def : GCNPat <
+  (v2f16 (build_vector (f16 undef), f16:$src1)),
+  (v2f16 (COPY (S_LSHL_B32 $src1, (i32 16))))
+>;
+
+let SubtargetPredicate = HasVOP3PInsts in {
+def : GCNPat <
+  (v2i16 (build_vector i16:$src0, i16:$src1)),
+  (v2i16 (S_PACK_LL_B32_B16 $src0, $src1))
 >;
 
 // With multiple uses of the shift, this will duplicate the shift and
@@ -1407,6 +1500,7 @@ def : GCNPat <
   (v2i16 (build_vector i16:$src0, (i16 (trunc (srl_oneuse i32:$src1, (i32 16)))))),
   (v2i16 (S_PACK_LH_B32_B16 i16:$src0, i32:$src1))
 >;
+
 
 def : GCNPat <
   (v2i16 (build_vector (i16 (trunc (srl_oneuse i32:$src0, (i32 16)))),
@@ -1420,6 +1514,9 @@ def : GCNPat <
   (v2f16 (S_PACK_LL_B32_B16 $src0, $src1))
 >;
 
+} // End SubtargetPredicate = HasVOP3PInsts
+
+
 // def : GCNPat <
 //   (v2f16 (scalar_to_vector f16:$src0)),
 //   (COPY $src0)
@@ -1429,6 +1526,16 @@ def : GCNPat <
 //   (v2i16 (scalar_to_vector i16:$src0)),
 //   (COPY $src0)
 // >;
+
+def : GCNPat <
+  (v4i16 (scalar_to_vector i16:$src0)),
+  (INSERT_SUBREG (IMPLICIT_DEF), $src0, sub0)
+>;
+
+def : GCNPat <
+  (v4f16 (scalar_to_vector f16:$src0)),
+  (INSERT_SUBREG (IMPLICIT_DEF), $src0, sub0)
+>;
 
 //===----------------------------------------------------------------------===//
 // Fract Patterns

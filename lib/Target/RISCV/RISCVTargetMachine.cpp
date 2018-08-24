@@ -75,13 +75,20 @@ public:
     return getTM<RISCVTargetMachine>();
   }
 
+  void addIRPasses() override;
   bool addInstSelector() override;
   void addPreEmitPass() override;
+  void addPreRegAlloc() override;
 };
 }
 
 TargetPassConfig *RISCVTargetMachine::createPassConfig(PassManagerBase &PM) {
   return new RISCVPassConfig(*this, PM);
+}
+
+void RISCVPassConfig::addIRPasses() {
+  addPass(createAtomicExpandPass());
+  TargetPassConfig::addIRPasses();
 }
 
 bool RISCVPassConfig::addInstSelector() {
@@ -91,3 +98,7 @@ bool RISCVPassConfig::addInstSelector() {
 }
 
 void RISCVPassConfig::addPreEmitPass() { addPass(&BranchRelaxationPassID); }
+
+void RISCVPassConfig::addPreRegAlloc() {
+  addPass(createRISCVMergeBaseOffsetOptPass());
+}

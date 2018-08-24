@@ -612,13 +612,32 @@ defm VecListTwo   : VectorList<2, DD,    QQ>;
 defm VecListThree : VectorList<3, DDD,   QQQ>;
 defm VecListFour  : VectorList<4, DDDD,  QQQQ>;
 
+class FPRAsmOperand<string RC> : AsmOperandClass {
+  let Name = "FPRAsmOperand" # RC;
+  let PredicateMethod = "isGPR64<AArch64::" # RC # "RegClassID>";
+  let RenderMethod = "addRegOperands";
+}
 
 // Register operand versions of the scalar FP registers.
-def FPR16Op : RegisterOperand<FPR16, "printOperand">;
-def FPR32Op : RegisterOperand<FPR32, "printOperand">;
-def FPR64Op : RegisterOperand<FPR64, "printOperand">;
-def FPR128Op : RegisterOperand<FPR128, "printOperand">;
+def FPR8Op  : RegisterOperand<FPR8, "printOperand"> {
+  let ParserMatchClass = FPRAsmOperand<"FPR8">;
+}
 
+def FPR16Op  : RegisterOperand<FPR16, "printOperand"> {
+  let ParserMatchClass = FPRAsmOperand<"FPR16">;
+}
+
+def FPR32Op  : RegisterOperand<FPR32, "printOperand"> {
+  let ParserMatchClass = FPRAsmOperand<"FPR32">;
+}
+
+def FPR64Op  : RegisterOperand<FPR64, "printOperand"> {
+  let ParserMatchClass = FPRAsmOperand<"FPR64">;
+}
+
+def FPR128Op : RegisterOperand<FPR128, "printOperand"> {
+  let ParserMatchClass = FPRAsmOperand<"FPR128">;
+}
 
 //===----------------------------------------------------------------------===//
 // ARMv8.1a atomic CASP register operands
@@ -745,18 +764,35 @@ def Z30   : AArch64Reg<30, "z30", [Q30, Z30_HI]>, DwarfRegNum<[126]>;
 def Z31   : AArch64Reg<31, "z31", [Q31, Z31_HI]>, DwarfRegNum<[127]>;
 }
 
+// Enum descibing the element size for destructive
+// operations.
+class ElementSizeEnum<bits<3> val> {
+  bits<3> Value = val;
+}
+
+def ElementSizeNone : ElementSizeEnum<0>;
+def ElementSizeB    : ElementSizeEnum<1>;
+def ElementSizeH    : ElementSizeEnum<2>;
+def ElementSizeS    : ElementSizeEnum<3>;
+def ElementSizeD    : ElementSizeEnum<4>;
+def ElementSizeQ    : ElementSizeEnum<5>;  // Unused
+
 class SVERegOp <string Suffix, AsmOperandClass C,
+                ElementSizeEnum Size,
                 RegisterClass RC> : RegisterOperand<RC> {
+  ElementSizeEnum ElementSize;
+
+  let ElementSize = Size;
   let PrintMethod = !if(!eq(Suffix, ""),
                         "printSVERegOp<>",
                         "printSVERegOp<'" # Suffix # "'>");
   let ParserMatchClass = C;
 }
 
-class PPRRegOp <string Suffix, AsmOperandClass C,
-                RegisterClass RC> : SVERegOp<Suffix, C, RC> {}
-class ZPRRegOp <string Suffix, AsmOperandClass C,
-                RegisterClass RC> : SVERegOp<Suffix, C, RC> {}
+class PPRRegOp <string Suffix, AsmOperandClass C, ElementSizeEnum Size,
+                RegisterClass RC> : SVERegOp<Suffix, C, Size, RC> {}
+class ZPRRegOp <string Suffix, AsmOperandClass C, ElementSizeEnum Size,
+                RegisterClass RC> : SVERegOp<Suffix, C, Size, RC> {}
 
 //******************************************************************************
 
@@ -773,7 +809,7 @@ def PPR_3b : PPRClass<7>; // Restricted 3 bit SVE predicate register class.
 
 class PPRAsmOperand <string name, string RegClass, int Width>: AsmOperandClass {
   let Name = "SVE" # name # "Reg";
-  let PredicateMethod = "isSVEVectorRegOfWidth<"
+  let PredicateMethod = "isSVEPredicateVectorRegOfWidth<"
                             # Width # ", " # "AArch64::" # RegClass # "RegClassID>";
   let DiagnosticType = "InvalidSVE" # name # "Reg";
   let RenderMethod = "addRegOperands";
@@ -786,11 +822,11 @@ def PPRAsmOp16  : PPRAsmOperand<"PredicateH",   "PPR", 16>;
 def PPRAsmOp32  : PPRAsmOperand<"PredicateS",   "PPR", 32>;
 def PPRAsmOp64  : PPRAsmOperand<"PredicateD",   "PPR", 64>;
 
-def PPRAny : PPRRegOp<"",  PPRAsmOpAny, PPR>;
-def PPR8   : PPRRegOp<"b", PPRAsmOp8,   PPR>;
-def PPR16  : PPRRegOp<"h", PPRAsmOp16,  PPR>;
-def PPR32  : PPRRegOp<"s", PPRAsmOp32,  PPR>;
-def PPR64  : PPRRegOp<"d", PPRAsmOp64,  PPR>;
+def PPRAny : PPRRegOp<"",  PPRAsmOpAny, ElementSizeNone, PPR>;
+def PPR8   : PPRRegOp<"b", PPRAsmOp8,   ElementSizeB,  PPR>;
+def PPR16  : PPRRegOp<"h", PPRAsmOp16,  ElementSizeH,  PPR>;
+def PPR32  : PPRRegOp<"s", PPRAsmOp32,  ElementSizeS,  PPR>;
+def PPR64  : PPRRegOp<"d", PPRAsmOp64,  ElementSizeD,  PPR>;
 
 def PPRAsmOp3bAny : PPRAsmOperand<"Predicate3bAny", "PPR_3b",  0>;
 def PPRAsmOp3b8   : PPRAsmOperand<"Predicate3bB",   "PPR_3b",  8>;
@@ -798,11 +834,11 @@ def PPRAsmOp3b16  : PPRAsmOperand<"Predicate3bH",   "PPR_3b", 16>;
 def PPRAsmOp3b32  : PPRAsmOperand<"Predicate3bS",   "PPR_3b", 32>;
 def PPRAsmOp3b64  : PPRAsmOperand<"Predicate3bD",   "PPR_3b", 64>;
 
-def PPR3bAny : PPRRegOp<"",  PPRAsmOp3bAny, PPR_3b>;
-def PPR3b8   : PPRRegOp<"b", PPRAsmOp3b8,   PPR_3b>;
-def PPR3b16  : PPRRegOp<"h", PPRAsmOp3b16,  PPR_3b>;
-def PPR3b32  : PPRRegOp<"s", PPRAsmOp3b32,  PPR_3b>;
-def PPR3b64  : PPRRegOp<"d", PPRAsmOp3b64,  PPR_3b>;
+def PPR3bAny : PPRRegOp<"",  PPRAsmOp3bAny, ElementSizeNone, PPR_3b>;
+def PPR3b8   : PPRRegOp<"b", PPRAsmOp3b8,   ElementSizeB, PPR_3b>;
+def PPR3b16  : PPRRegOp<"h", PPRAsmOp3b16,  ElementSizeH, PPR_3b>;
+def PPR3b32  : PPRRegOp<"s", PPRAsmOp3b32,  ElementSizeS, PPR_3b>;
+def PPR3b64  : PPRRegOp<"d", PPRAsmOp3b64,  ElementSizeD, PPR_3b>;
 
 //******************************************************************************
 
@@ -816,12 +852,35 @@ def ZPR : RegisterClass<"AArch64",
   let Size = 128;
 }
 
-class ZPRAsmOperand <string name, int Width>: AsmOperandClass {
+// SVE restricted 4 bit scalable vector register class
+def ZPR_4b : RegisterClass<"AArch64",
+                         [nxv16i8, nxv8i16, nxv4i32, nxv2i64,
+                          nxv2f16, nxv4f16, nxv8f16,
+                          nxv1f32, nxv2f32, nxv4f32,
+                          nxv1f64, nxv2f64],
+                         128, (sequence "Z%u", 0, 15)> {
+  let Size = 128;
+}
+
+// SVE restricted 3 bit scalable vector register class
+def ZPR_3b : RegisterClass<"AArch64",
+                         [nxv16i8, nxv8i16, nxv4i32, nxv2i64,
+                          nxv2f16, nxv4f16, nxv8f16,
+                          nxv1f32, nxv2f32, nxv4f32,
+                          nxv1f64, nxv2f64],
+                         128, (sequence "Z%u", 0, 7)> {
+  let Size = 128;
+}
+
+class ZPRAsmOperand<string name, int Width, string RegClassSuffix = "">
+    : AsmOperandClass {
   let Name = "SVE" # name # "Reg";
-  let PredicateMethod = "isSVEVectorRegOfWidth<"
-                            # Width # ", AArch64::ZPRRegClassID>";
+  let PredicateMethod = "isSVEDataVectorRegOfWidth<"
+                            # Width # ", AArch64::ZPR"
+                            # RegClassSuffix # "RegClassID>";
   let RenderMethod = "addRegOperands";
-  let ParserMethod = "tryParseSVEDataVector<"
+  let DiagnosticType = "InvalidZPR" # RegClassSuffix # Width;
+  let ParserMethod = "tryParseSVEDataVector<false, "
                                # !if(!eq(Width, 0), "false", "true") # ">";
 }
 
@@ -832,13 +891,45 @@ def ZPRAsmOp32  : ZPRAsmOperand<"VectorS",   32>;
 def ZPRAsmOp64  : ZPRAsmOperand<"VectorD",   64>;
 def ZPRAsmOp128 : ZPRAsmOperand<"VectorQ",   128>;
 
-def ZPRAny  : ZPRRegOp<"",  ZPRAsmOpAny, ZPR>;
-def ZPR8    : ZPRRegOp<"b", ZPRAsmOp8,   ZPR>;
-def ZPR16   : ZPRRegOp<"h", ZPRAsmOp16,  ZPR>;
-def ZPR32   : ZPRRegOp<"s", ZPRAsmOp32,  ZPR>;
-def ZPR64   : ZPRRegOp<"d", ZPRAsmOp64,  ZPR>;
-def ZPR128  : ZPRRegOp<"q", ZPRAsmOp128, ZPR>;
+def ZPRAny  : ZPRRegOp<"",  ZPRAsmOpAny, ElementSizeNone, ZPR>;
+def ZPR8    : ZPRRegOp<"b", ZPRAsmOp8,   ElementSizeB, ZPR>;
+def ZPR16   : ZPRRegOp<"h", ZPRAsmOp16,  ElementSizeH, ZPR>;
+def ZPR32   : ZPRRegOp<"s", ZPRAsmOp32,  ElementSizeS, ZPR>;
+def ZPR64   : ZPRRegOp<"d", ZPRAsmOp64,  ElementSizeD, ZPR>;
+def ZPR128  : ZPRRegOp<"q", ZPRAsmOp128, ElementSizeQ, ZPR>;
 
+def ZPRAsmOp3b8   : ZPRAsmOperand<"Vector3bB", 8, "_3b">;
+def ZPRAsmOp3b16  : ZPRAsmOperand<"Vector3bH", 16, "_3b">;
+def ZPRAsmOp3b32  : ZPRAsmOperand<"Vector3bS", 32, "_3b">;
+
+def ZPR3b8  : ZPRRegOp<"b", ZPRAsmOp3b8,  ElementSizeB, ZPR_3b>;
+def ZPR3b16 : ZPRRegOp<"h", ZPRAsmOp3b16, ElementSizeH, ZPR_3b>;
+def ZPR3b32 : ZPRRegOp<"s", ZPRAsmOp3b32, ElementSizeS, ZPR_3b>;
+
+def ZPRAsmOp4b16  : ZPRAsmOperand<"Vector4bH", 16, "_4b">;
+def ZPRAsmOp4b32  : ZPRAsmOperand<"Vector4bS", 32, "_4b">;
+def ZPRAsmOp4b64  : ZPRAsmOperand<"Vector4bD", 64, "_4b">;
+
+def ZPR4b16 : ZPRRegOp<"h", ZPRAsmOp4b16, ElementSizeH, ZPR_4b>;
+def ZPR4b32 : ZPRRegOp<"s", ZPRAsmOp4b32, ElementSizeS, ZPR_4b>;
+def ZPR4b64 : ZPRRegOp<"d", ZPRAsmOp4b64, ElementSizeD, ZPR_4b>;
+
+class FPRasZPR<int Width> : AsmOperandClass{
+  let Name = "FPR" # Width # "asZPR";
+  let PredicateMethod = "isFPRasZPR<AArch64::FPR" # Width # "RegClassID>";
+  let RenderMethod = "addFPRasZPRRegOperands<" # Width # ">";
+}
+
+class FPRasZPROperand<int Width> : RegisterOperand<ZPR> {
+  let ParserMatchClass = FPRasZPR<Width>;
+  let PrintMethod = "printZPRasFPR<" # Width # ">";
+}
+
+def FPR8asZPR   : FPRasZPROperand<8>;
+def FPR16asZPR  : FPRasZPROperand<16>;
+def FPR32asZPR  : FPRasZPROperand<32>;
+def FPR64asZPR  : FPRasZPROperand<64>;
+def FPR128asZPR : FPRasZPROperand<128>;
 
 let Namespace = "AArch64" in {
   def zsub0 : SubRegIndex<128, -1>;
@@ -934,6 +1025,72 @@ def ZZZZ_d : RegisterOperand<ZPR4, "printTypedVectorList<0,'d'>"> {
   let ParserMatchClass = ZPRVectorList<64, 4>;
 }
 
+class ZPRExtendAsmOperand<string ShiftExtend, int RegWidth, int Scale,
+                          bit ScaleAlwaysSame = 0b0> : AsmOperandClass {
+  let Name = "ZPRExtend" # ShiftExtend # RegWidth # Scale
+                         # !if(ScaleAlwaysSame, "Only", "");
+
+  let PredicateMethod = "isSVEDataVectorRegWithShiftExtend<"
+                          # RegWidth # ", AArch64::ZPRRegClassID, "
+                          # "AArch64_AM::" # ShiftExtend # ", "
+                          # Scale # ", "
+                          # !if(ScaleAlwaysSame, "true", "false")
+                          # ">";
+  let DiagnosticType = "InvalidZPR" # RegWidth # ShiftExtend # Scale;
+  let RenderMethod = "addRegOperands";
+  let ParserMethod = "tryParseSVEDataVector<true, true>";
+}
+
+class ZPRExtendRegisterOperand<bit SignExtend, bit IsLSL, string Repr,
+                               int RegWidth, int Scale, string Suffix = "">
+    : RegisterOperand<ZPR> {
+  let ParserMatchClass =
+    !cast<AsmOperandClass>("ZPR" # RegWidth # "AsmOpndExt" # Repr # Scale # Suffix);
+  let PrintMethod = "printRegWithShiftExtend<"
+                          # !if(SignExtend, "true", "false") # ", "
+                          # Scale # ", "
+                          # !if(IsLSL, "'x'", "'w'") # ", "
+                          # !if(!eq(RegWidth, 32), "'s'", "'d'") # ">";
+}
+
+foreach RegWidth = [32, 64] in {
+  // UXTW(8|16|32|64)
+  def ZPR#RegWidth#AsmOpndExtUXTW8Only : ZPRExtendAsmOperand<"UXTW", RegWidth, 8, 0b1>;
+  def ZPR#RegWidth#AsmOpndExtUXTW8     : ZPRExtendAsmOperand<"UXTW", RegWidth, 8>;
+  def ZPR#RegWidth#AsmOpndExtUXTW16    : ZPRExtendAsmOperand<"UXTW", RegWidth, 16>;
+  def ZPR#RegWidth#AsmOpndExtUXTW32    : ZPRExtendAsmOperand<"UXTW", RegWidth, 32>;
+  def ZPR#RegWidth#AsmOpndExtUXTW64    : ZPRExtendAsmOperand<"UXTW", RegWidth, 64>;
+
+  def ZPR#RegWidth#ExtUXTW8Only        : ZPRExtendRegisterOperand<0b0, 0b0, "UXTW", RegWidth, 8, "Only">;
+  def ZPR#RegWidth#ExtUXTW8            : ZPRExtendRegisterOperand<0b0, 0b0, "UXTW", RegWidth, 8>;
+  def ZPR#RegWidth#ExtUXTW16           : ZPRExtendRegisterOperand<0b0, 0b0, "UXTW", RegWidth, 16>;
+  def ZPR#RegWidth#ExtUXTW32           : ZPRExtendRegisterOperand<0b0, 0b0, "UXTW", RegWidth, 32>;
+  def ZPR#RegWidth#ExtUXTW64           : ZPRExtendRegisterOperand<0b0, 0b0, "UXTW", RegWidth, 64>;
+
+  // SXTW(8|16|32|64)
+  def ZPR#RegWidth#AsmOpndExtSXTW8Only : ZPRExtendAsmOperand<"SXTW", RegWidth, 8, 0b1>;
+  def ZPR#RegWidth#AsmOpndExtSXTW8     : ZPRExtendAsmOperand<"SXTW", RegWidth, 8>;
+  def ZPR#RegWidth#AsmOpndExtSXTW16    : ZPRExtendAsmOperand<"SXTW", RegWidth, 16>;
+  def ZPR#RegWidth#AsmOpndExtSXTW32    : ZPRExtendAsmOperand<"SXTW", RegWidth, 32>;
+  def ZPR#RegWidth#AsmOpndExtSXTW64    : ZPRExtendAsmOperand<"SXTW", RegWidth, 64>;
+
+  def ZPR#RegWidth#ExtSXTW8Only        : ZPRExtendRegisterOperand<0b1, 0b0, "SXTW", RegWidth, 8, "Only">;
+  def ZPR#RegWidth#ExtSXTW8            : ZPRExtendRegisterOperand<0b1, 0b0, "SXTW", RegWidth, 8>;
+  def ZPR#RegWidth#ExtSXTW16           : ZPRExtendRegisterOperand<0b1, 0b0, "SXTW", RegWidth, 16>;
+  def ZPR#RegWidth#ExtSXTW32           : ZPRExtendRegisterOperand<0b1, 0b0, "SXTW", RegWidth, 32>;
+  def ZPR#RegWidth#ExtSXTW64           : ZPRExtendRegisterOperand<0b1, 0b0, "SXTW", RegWidth, 64>;
+
+  // LSL(8|16|32|64)
+  def ZPR#RegWidth#AsmOpndExtLSL8      : ZPRExtendAsmOperand<"LSL", RegWidth, 8>;
+  def ZPR#RegWidth#AsmOpndExtLSL16     : ZPRExtendAsmOperand<"LSL", RegWidth, 16>;
+  def ZPR#RegWidth#AsmOpndExtLSL32     : ZPRExtendAsmOperand<"LSL", RegWidth, 32>;
+  def ZPR#RegWidth#AsmOpndExtLSL64     : ZPRExtendAsmOperand<"LSL", RegWidth, 64>;
+  def ZPR#RegWidth#ExtLSL8             : ZPRExtendRegisterOperand<0b0, 0b1, "LSL", RegWidth, 8>;
+  def ZPR#RegWidth#ExtLSL16            : ZPRExtendRegisterOperand<0b0, 0b1, "LSL", RegWidth, 16>;
+  def ZPR#RegWidth#ExtLSL32            : ZPRExtendRegisterOperand<0b0, 0b1, "LSL", RegWidth, 32>;
+  def ZPR#RegWidth#ExtLSL64            : ZPRExtendRegisterOperand<0b0, 0b1, "LSL", RegWidth, 64>;
+}
+
 class GPR64ShiftExtendAsmOperand <string AsmOperandName, int Scale, string RegClass> : AsmOperandClass {
   let Name = AsmOperandName # Scale;
   let PredicateMethod = "isGPR64WithShiftExtend<AArch64::"#RegClass#"RegClassID, " # Scale # ">";
@@ -944,7 +1101,7 @@ class GPR64ShiftExtendAsmOperand <string AsmOperandName, int Scale, string RegCl
 
 class GPR64ExtendRegisterOperand<string Name, int Scale, RegisterClass RegClass> : RegisterOperand<RegClass>{
   let ParserMatchClass = !cast<AsmOperandClass>(Name);
-  let PrintMethod = "printRegWithShiftExtend<false, " # Scale # ", 'x'>";
+  let PrintMethod = "printRegWithShiftExtend<false, " # Scale # ", 'x', 0>";
 }
 
 foreach Scale = [8, 16, 32, 64] in {

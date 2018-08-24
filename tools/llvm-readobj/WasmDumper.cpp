@@ -27,6 +27,7 @@ static const EnumEntry<unsigned> WasmSymbolTypes[] = {
   ENUM_ENTRY(FUNCTION),
   ENUM_ENTRY(DATA),
   ENUM_ENTRY(GLOBAL),
+  ENUM_ENTRY(SECTION),
 #undef ENUM_ENTRY
 };
 
@@ -79,11 +80,18 @@ void WasmDumper::printRelocation(const SectionRef &Section,
   Reloc.getTypeName(RelocTypeName);
   const wasm::WasmRelocation &WasmReloc = Obj->getWasmRelocation(Reloc);
 
+  StringRef SymName;
+  symbol_iterator SI = Reloc.getSymbol();
+  if (SI != Obj->symbol_end())
+    SymName = error(SI->getName());
+
   bool HasAddend = false;
   switch (RelocType) {
   case wasm::R_WEBASSEMBLY_MEMORY_ADDR_LEB:
   case wasm::R_WEBASSEMBLY_MEMORY_ADDR_SLEB:
   case wasm::R_WEBASSEMBLY_MEMORY_ADDR_I32:
+  case wasm::R_WEBASSEMBLY_FUNCTION_OFFSET_I32:
+  case wasm::R_WEBASSEMBLY_SECTION_OFFSET_I32:
     HasAddend = true;
     break;
   default:
@@ -93,13 +101,19 @@ void WasmDumper::printRelocation(const SectionRef &Section,
     DictScope Group(W, "Relocation");
     W.printNumber("Type", RelocTypeName, RelocType);
     W.printHex("Offset", Reloc.getOffset());
-    W.printHex("Index", WasmReloc.Index);
+    if (!SymName.empty())
+      W.printString("Symbol", SymName);
+    else
+      W.printHex("Index", WasmReloc.Index);
     if (HasAddend)
       W.printNumber("Addend", WasmReloc.Addend);
   } else {
     raw_ostream& OS = W.startLine();
-    OS << W.hex(Reloc.getOffset()) << " " << RelocTypeName << "["
-       << WasmReloc.Index << "]";
+    OS << W.hex(Reloc.getOffset()) << " " << RelocTypeName << " ";
+    if (!SymName.empty())
+      OS << SymName;
+    else
+      OS << WasmReloc.Index;
     if (HasAddend)
       OS << " " << WasmReloc.Addend;
     OS << "\n";

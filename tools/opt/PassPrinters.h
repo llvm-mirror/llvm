@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// \brief Utilities to print analysis info for various kinds of passes.
+/// Utilities to print analysis info for various kinds of passes.
 ///
 //===----------------------------------------------------------------------===//
 
@@ -48,18 +48,5 @@ BasicBlockPass *createBasicBlockPassPrinter(const PassInfo *PI,
                                             raw_ostream &out, bool Quiet);
 
 } // end namespace llvm
-
-llvm::ModulePass *createDebugifyPass();
-
-struct NewPMDebugifyPass : public llvm::PassInfoMixin<NewPMDebugifyPass> {
-  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &AM);
-};
-
-llvm::ModulePass *createCheckDebugifyPass();
-
-struct NewPMCheckDebugifyPass
-    : public llvm::PassInfoMixin<NewPMCheckDebugifyPass> {
-  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &AM);
-};
 
 #endif // LLVM_TOOLS_OPT_PASSPRINTERS_H

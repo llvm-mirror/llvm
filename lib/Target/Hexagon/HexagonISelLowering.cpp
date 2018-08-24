@@ -151,16 +151,6 @@ static bool CC_SkipOdd(unsigned &ValNo, MVT &ValVT, MVT &LocVT,
 #include "HexagonGenCallingConv.inc"
 
 
-void HexagonTargetLowering::promoteLdStType(MVT VT, MVT PromotedLdStVT) {
-  if (VT != PromotedLdStVT) {
-    setOperationAction(ISD::LOAD, VT, Promote);
-    AddPromotedToType(ISD::LOAD, VT, PromotedLdStVT);
-
-    setOperationAction(ISD::STORE, VT, Promote);
-    AddPromotedToType(ISD::STORE, VT, PromotedLdStVT);
-  }
-}
-
 SDValue
 HexagonTargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op, SelectionDAG &DAG)
       const {
@@ -359,9 +349,9 @@ HexagonTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
         break;
       }
     }
-    DEBUG(dbgs() << (CLI.IsTailCall ? "Eligible for Tail Call\n"
-                                    : "Argument must be passed on stack. "
-                                      "Not eligible for Tail Call\n"));
+    LLVM_DEBUG(dbgs() << (CLI.IsTailCall ? "Eligible for Tail Call\n"
+                                         : "Argument must be passed on stack. "
+                                           "Not eligible for Tail Call\n"));
   }
   // Get a count of how many bytes are to be pushed on the stack.
   unsigned NumBytes = CCInfo.getNextStackOffset();
@@ -432,8 +422,8 @@ HexagonTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
       RegsToPass.push_back(std::make_pair(VA.getLocReg(), Arg));
   }
 
-  if (NeedsArgAlign && Subtarget.hasV60TOps()) {
-    DEBUG(dbgs() << "Function needs byte stack align due to call args\n");
+  if (NeedsArgAlign && Subtarget.hasV60Ops()) {
+    LLVM_DEBUG(dbgs() << "Function needs byte stack align due to call args\n");
     unsigned VecAlign = HRI.getSpillAlignment(Hexagon::HvxVRRegClass);
     LargestAlignSeen = std::max(LargestAlignSeen, VecAlign);
     MFI.ensureMaxAlignment(LargestAlignSeen);
@@ -550,8 +540,9 @@ bool HexagonTargetLowering::getPostIndexedAddressParts(SDNode *N, SDNode *Op,
   if (!VT.isSimple())
     return false;
   bool IsLegalType = VT == MVT::i8 || VT == MVT::i16 || VT == MVT::i32 ||
-                     VT == MVT::i64 || VT == MVT::v2i16 || VT == MVT::v2i32 ||
-                     VT == MVT::v4i8 || VT == MVT::v4i16 || VT == MVT::v8i8 ||
+                     VT == MVT::i64 || VT == MVT::f32 || VT == MVT::f64 ||
+                     VT == MVT::v2i16 || VT == MVT::v2i32 || VT == MVT::v4i8 ||
+                     VT == MVT::v4i16 || VT == MVT::v8i8 ||
                      Subtarget.isHVXVectorType(VT.getSimpleVT());
   if (!IsLegalType)
     return false;
@@ -670,7 +661,7 @@ HexagonTargetLowering::LowerDYNAMIC_STACKALLOC(SDValue Op,
   if (A == 0)
     A = HFI.getStackAlignment();
 
-  DEBUG({
+  LLVM_DEBUG({
     dbgs () << __func__ << " Align: " << A << " Size: ";
     Size.getNode()->dump(&DAG);
     dbgs() << "\n";
@@ -835,7 +826,7 @@ SDValue HexagonTargetLowering::LowerSETCC(SDValue Op, SelectionDAG &DAG) const {
         SDValue Op = N.getOperand(0);
         if (Op.getOpcode() != ISD::AssertSext)
           return false;
-        MVT OrigTy = cast<VTSDNode>(Op.getOperand(1))->getVT().getSimpleVT();
+        EVT OrigTy = cast<VTSDNode>(Op.getOperand(1))->getVT();
         unsigned ThisBW = ty(N).getSizeInBits();
         unsigned OrigBW = OrigTy.getSizeInBits();
         // The type that was sign-extended to get the AssertSext must be
@@ -1016,7 +1007,7 @@ HexagonTargetLowering::LowerGLOBALADDRESS(SDValue Op, SelectionDAG &DAG) const {
   if (RM == Reloc::Static) {
     SDValue GA = DAG.getTargetGlobalAddress(GV, dl, PtrVT, Offset);
     const GlobalObject *GO = GV->getBaseObject();
-    if (GO && HLOF.isGlobalInSmallSection(GO, HTM))
+    if (GO && Subtarget.useSmallData() && HLOF.isGlobalInSmallSection(GO, HTM))
       return DAG.getNode(HexagonISD::CONST32_GP, dl, PtrVT, GA);
     return DAG.getNode(HexagonISD::CONST32, dl, PtrVT, GA);
   }
@@ -1224,7 +1215,7 @@ HexagonTargetLowering::HexagonTargetLowering(const TargetMachine &TM,
                                              const HexagonSubtarget &ST)
     : TargetLowering(TM), HTM(static_cast<const HexagonTargetMachine&>(TM)),
       Subtarget(ST) {
-  bool IsV4 = !Subtarget.hasV5TOps();
+  bool IsV4 = !Subtarget.hasV5Ops();
   auto &HRI = *Subtarget.getRegisterInfo();
 
   setPrefLoopAlignment(4);
@@ -1266,7 +1257,7 @@ HexagonTargetLowering::HexagonTargetLowering(const TargetMachine &TM,
   addRegisterClass(MVT::v4i16, &Hexagon::DoubleRegsRegClass);
   addRegisterClass(MVT::v2i32, &Hexagon::DoubleRegsRegClass);
 
-  if (Subtarget.hasV5TOps()) {
+  if (Subtarget.hasV5Ops()) {
     addRegisterClass(MVT::f32, &Hexagon::IntRegsRegClass);
     addRegisterClass(MVT::f64, &Hexagon::DoubleRegsRegClass);
   }
@@ -1283,21 +1274,21 @@ HexagonTargetLowering::HexagonTargetLowering(const TargetMachine &TM,
   // which default to "expand" for at least one type.
 
   // Misc operations.
-  setOperationAction(ISD::ConstantFP, MVT::f32, Legal); // Default: expand
-  setOperationAction(ISD::ConstantFP, MVT::f64, Legal); // Default: expand
-
-  setOperationAction(ISD::ConstantPool, MVT::i32, Custom);
-  setOperationAction(ISD::JumpTable, MVT::i32, Custom);
-  setOperationAction(ISD::BUILD_PAIR, MVT::i64, Expand);
-  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1, Expand);
-  setOperationAction(ISD::INLINEASM, MVT::Other, Custom);
-  setOperationAction(ISD::PREFETCH, MVT::Other, Custom);
-  setOperationAction(ISD::READCYCLECOUNTER, MVT::i64, Custom);
-  setOperationAction(ISD::INTRINSIC_VOID, MVT::Other, Custom);
-  setOperationAction(ISD::EH_RETURN, MVT::Other, Custom);
-  setOperationAction(ISD::GLOBAL_OFFSET_TABLE, MVT::i32, Custom);
-  setOperationAction(ISD::GlobalTLSAddress, MVT::i32, Custom);
-  setOperationAction(ISD::ATOMIC_FENCE, MVT::Other, Custom);
+  setOperationAction(ISD::ConstantFP,           MVT::f32,   Legal);
+  setOperationAction(ISD::ConstantFP,           MVT::f64,   Legal);
+  setOperationAction(ISD::TRAP,                 MVT::Other, Legal);
+  setOperationAction(ISD::ConstantPool,         MVT::i32,   Custom);
+  setOperationAction(ISD::JumpTable,            MVT::i32,   Custom);
+  setOperationAction(ISD::BUILD_PAIR,           MVT::i64,   Expand);
+  setOperationAction(ISD::SIGN_EXTEND_INREG,    MVT::i1,    Expand);
+  setOperationAction(ISD::INLINEASM,            MVT::Other, Custom);
+  setOperationAction(ISD::PREFETCH,             MVT::Other, Custom);
+  setOperationAction(ISD::READCYCLECOUNTER,     MVT::i64,   Custom);
+  setOperationAction(ISD::INTRINSIC_VOID,       MVT::Other, Custom);
+  setOperationAction(ISD::EH_RETURN,            MVT::Other, Custom);
+  setOperationAction(ISD::GLOBAL_OFFSET_TABLE,  MVT::i32,   Custom);
+  setOperationAction(ISD::GlobalTLSAddress,     MVT::i32,   Custom);
+  setOperationAction(ISD::ATOMIC_FENCE,         MVT::Other, Custom);
 
   // Custom legalize GlobalAddress nodes into CONST32.
   setOperationAction(ISD::GlobalAddress, MVT::i32, Custom);
@@ -1326,35 +1317,21 @@ HexagonTargetLowering::HexagonTargetLowering(const TargetMachine &TM,
     setMinimumJumpTableEntries(std::numeric_limits<int>::max());
   setOperationAction(ISD::BR_JT, MVT::Other, Expand);
 
-  // Hexagon has instructions for add/sub with carry. The problem with
-  // modeling these instructions is that they produce 2 results: Rdd and Px.
-  // To model the update of Px, we will have to use Defs[p0..p3] which will
-  // cause any predicate live range to spill. So, we pretend we dont't have
-  // these instructions.
-  setOperationAction(ISD::ADDE, MVT::i8,  Expand);
-  setOperationAction(ISD::ADDE, MVT::i16, Expand);
-  setOperationAction(ISD::ADDE, MVT::i32, Expand);
-  setOperationAction(ISD::ADDE, MVT::i64, Expand);
-  setOperationAction(ISD::SUBE, MVT::i8,  Expand);
-  setOperationAction(ISD::SUBE, MVT::i16, Expand);
-  setOperationAction(ISD::SUBE, MVT::i32, Expand);
-  setOperationAction(ISD::SUBE, MVT::i64, Expand);
-  setOperationAction(ISD::ADDC, MVT::i8,  Expand);
-  setOperationAction(ISD::ADDC, MVT::i16, Expand);
-  setOperationAction(ISD::ADDC, MVT::i32, Expand);
-  setOperationAction(ISD::ADDC, MVT::i64, Expand);
-  setOperationAction(ISD::SUBC, MVT::i8,  Expand);
-  setOperationAction(ISD::SUBC, MVT::i16, Expand);
-  setOperationAction(ISD::SUBC, MVT::i32, Expand);
-  setOperationAction(ISD::SUBC, MVT::i64, Expand);
+  setOperationAction(ISD::ABS, MVT::i32, Legal);
+  setOperationAction(ISD::ABS, MVT::i64, Legal);
 
-  // Only add and sub that detect overflow are the saturating ones.
+  // Hexagon has A4_addp_c and A4_subp_c that take and generate a carry bit,
+  // but they only operate on i64.
   for (MVT VT : MVT::integer_valuetypes()) {
-    setOperationAction(ISD::UADDO, VT, Expand);
-    setOperationAction(ISD::SADDO, VT, Expand);
-    setOperationAction(ISD::USUBO, VT, Expand);
-    setOperationAction(ISD::SSUBO, VT, Expand);
+    setOperationAction(ISD::UADDO,    VT, Expand);
+    setOperationAction(ISD::USUBO,    VT, Expand);
+    setOperationAction(ISD::SADDO,    VT, Expand);
+    setOperationAction(ISD::SSUBO,    VT, Expand);
+    setOperationAction(ISD::ADDCARRY, VT, Expand);
+    setOperationAction(ISD::SUBCARRY, VT, Expand);
   }
+  setOperationAction(ISD::ADDCARRY, MVT::i64, Custom);
+  setOperationAction(ISD::SUBCARRY, MVT::i64, Custom);
 
   setOperationAction(ISD::CTLZ, MVT::i8,  Promote);
   setOperationAction(ISD::CTLZ, MVT::i16, Promote);
@@ -1372,22 +1349,21 @@ HexagonTargetLowering::HexagonTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::BITREVERSE, MVT::i64, Legal);
   setOperationAction(ISD::BSWAP, MVT::i32, Legal);
   setOperationAction(ISD::BSWAP, MVT::i64, Legal);
-  setOperationAction(ISD::MUL,   MVT::i64, Legal);
 
   for (unsigned IntExpOp :
-       { ISD::SDIV,      ISD::UDIV,      ISD::SREM,      ISD::UREM,
-         ISD::SDIVREM,   ISD::UDIVREM,   ISD::ROTL,      ISD::ROTR,
-         ISD::SHL_PARTS, ISD::SRA_PARTS, ISD::SRL_PARTS,
-         ISD::SMUL_LOHI, ISD::UMUL_LOHI }) {
-    setOperationAction(IntExpOp, MVT::i32, Expand);
-    setOperationAction(IntExpOp, MVT::i64, Expand);
+       {ISD::SDIV,      ISD::UDIV,      ISD::SREM,      ISD::UREM,
+        ISD::SDIVREM,   ISD::UDIVREM,   ISD::ROTL,      ISD::ROTR,
+        ISD::SHL_PARTS, ISD::SRA_PARTS, ISD::SRL_PARTS,
+        ISD::SMUL_LOHI, ISD::UMUL_LOHI}) {
+    for (MVT VT : MVT::integer_valuetypes())
+      setOperationAction(IntExpOp, VT, Expand);
   }
 
   for (unsigned FPExpOp :
        {ISD::FDIV, ISD::FREM, ISD::FSQRT, ISD::FSIN, ISD::FCOS, ISD::FSINCOS,
         ISD::FPOW, ISD::FCOPYSIGN}) {
-    setOperationAction(FPExpOp, MVT::f32, Expand);
-    setOperationAction(FPExpOp, MVT::f64, Expand);
+    for (MVT VT : MVT::fp_valuetypes())
+      setOperationAction(FPExpOp, VT, Expand);
   }
 
   // No extending loads from i32.
@@ -1417,20 +1393,13 @@ HexagonTargetLowering::HexagonTargetLowering(const TargetMachine &TM,
   // Handling of vector operations.
   //
 
-  promoteLdStType(MVT::v4i8,  MVT::i32);
-  promoteLdStType(MVT::v2i16, MVT::i32);
-  promoteLdStType(MVT::v8i8,  MVT::i64);
-  promoteLdStType(MVT::v4i16, MVT::i64);
-  promoteLdStType(MVT::v2i32, MVT::i64);
-
   // Set the action for vector operations to "expand", then override it with
   // either "custom" or "legal" for specific cases.
   static const unsigned VectExpOps[] = {
     // Integer arithmetic:
-    ISD::ADD,     ISD::SUB,     ISD::MUL,     ISD::SDIV,    ISD::UDIV,
-    ISD::SREM,    ISD::UREM,    ISD::SDIVREM, ISD::UDIVREM, ISD::ADDC,
-    ISD::SUBC,    ISD::SADDO,   ISD::UADDO,   ISD::SSUBO,   ISD::USUBO,
-    ISD::SMUL_LOHI,             ISD::UMUL_LOHI,
+    ISD::ADD,     ISD::SUB,     ISD::MUL,     ISD::SDIV,      ISD::UDIV,
+    ISD::SREM,    ISD::UREM,    ISD::SDIVREM, ISD::UDIVREM,   ISD::SADDO,
+    ISD::UADDO,   ISD::SSUBO,   ISD::USUBO,   ISD::SMUL_LOHI, ISD::UMUL_LOHI,
     // Logical/bit:
     ISD::AND,     ISD::OR,      ISD::XOR,     ISD::ROTL,    ISD::ROTR,
     ISD::CTPOP,   ISD::CTLZ,    ISD::CTTZ,
@@ -1503,9 +1472,13 @@ HexagonTargetLowering::HexagonTargetLowering(const TargetMachine &TM,
   }
 
   // Custom lower unaligned loads.
-  for (MVT VecVT : {MVT::i32, MVT::v4i8, MVT::i64, MVT::v8i8,
-                    MVT::v2i16, MVT::v4i16, MVT::v2i32}) {
-    setOperationAction(ISD::LOAD, VecVT, Custom);
+  // Also, for both loads and stores, verify the alignment of the address
+  // in case it is a compile-time constant. This is a usability feature to
+  // provide a meaningful error message to users.
+  for (MVT VT : {MVT::i16, MVT::i32, MVT::v4i8, MVT::i64, MVT::v8i8,
+                 MVT::v2i16, MVT::v4i16, MVT::v2i32}) {
+    setOperationAction(ISD::LOAD,  VT, Custom);
+    setOperationAction(ISD::STORE, VT, Custom);
   }
 
   for (MVT VT : {MVT::v2i16, MVT::v4i8, MVT::v2i32, MVT::v4i16, MVT::v2i32}) {
@@ -1525,7 +1498,11 @@ HexagonTargetLowering::HexagonTargetLowering(const TargetMachine &TM,
 
   // Subtarget-specific operation actions.
   //
-  if (Subtarget.hasV5TOps()) {
+  if (Subtarget.hasV60Ops()) {
+    setOperationAction(ISD::ROTL, MVT::i32, Custom);
+    setOperationAction(ISD::ROTL, MVT::i64, Custom);
+  }
+  if (Subtarget.hasV5Ops()) {
     setOperationAction(ISD::FMA,  MVT::f64, Expand);
     setOperationAction(ISD::FADD, MVT::f64, Expand);
     setOperationAction(ISD::FSUB, MVT::f64, Expand);
@@ -1579,8 +1556,8 @@ HexagonTargetLowering::HexagonTargetLowering(const TargetMachine &TM,
 
   // Handling of indexed loads/stores: default is "expand".
   //
-  for (MVT VT : {MVT::i8, MVT::i16, MVT::i32, MVT::i64, MVT::v2i16,
-                 MVT::v2i32, MVT::v4i8, MVT::v4i16, MVT::v8i8}) {
+  for (MVT VT : {MVT::i8, MVT::i16, MVT::i32, MVT::i64, MVT::f32, MVT::f64,
+                 MVT::v2i16, MVT::v2i32, MVT::v4i8, MVT::v4i16, MVT::v8i8}) {
     setIndexedLoadAction(ISD::POST_INC, VT, Legal);
     setIndexedStoreAction(ISD::POST_INC, VT, Legal);
   }
@@ -1656,7 +1633,7 @@ HexagonTargetLowering::HexagonTargetLowering(const TargetMachine &TM,
     setLibcallName(RTLIB::DIV_F32, "__hexagon_divsf3");
   }
 
-  if (Subtarget.hasV5TOps()) {
+  if (Subtarget.hasV5Ops()) {
     if (FastMath)
       setLibcallName(RTLIB::SQRT_F32, "__hexagon_fast2_sqrtf");
     else
@@ -1703,6 +1680,8 @@ HexagonTargetLowering::HexagonTargetLowering(const TargetMachine &TM,
 
 const char* HexagonTargetLowering::getTargetNodeName(unsigned Opcode) const {
   switch ((HexagonISD::NodeType)Opcode) {
+  case HexagonISD::ADDC:          return "HexagonISD::ADDC";
+  case HexagonISD::SUBC:          return "HexagonISD::SUBC";
   case HexagonISD::ALLOCA:        return "HexagonISD::ALLOCA";
   case HexagonISD::AT_GOT:        return "HexagonISD::AT_GOT";
   case HexagonISD::AT_PCREL:      return "HexagonISD::AT_PCREL";
@@ -1745,6 +1724,26 @@ const char* HexagonTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case HexagonISD::OP_END:        break;
   }
   return nullptr;
+}
+
+void
+HexagonTargetLowering::validateConstPtrAlignment(SDValue Ptr, const SDLoc &dl,
+      unsigned NeedAlign) const {
+  auto *CA = dyn_cast<ConstantSDNode>(Ptr);
+  if (!CA)
+    return;
+  unsigned Addr = CA->getZExtValue();
+  unsigned HaveAlign = Addr != 0 ? 1u << countTrailingZeros(Addr) : NeedAlign;
+  if (HaveAlign < NeedAlign) {
+    std::string ErrMsg;
+    raw_string_ostream O(ErrMsg);
+    O << "Misaligned constant address: " << format_hex(Addr, 10)
+      << " has alignment " << HaveAlign
+      << ", but the memory access requires " << NeedAlign;
+    if (DebugLoc DL = dl.getDebugLoc())
+      DL.print(O << ", at ");
+    report_fatal_error(O.str());
+  }
 }
 
 // Bit-reverse Load Intrinsic: Check if the instruction is a bit reverse load
@@ -2108,6 +2107,13 @@ HexagonTargetLowering::LowerVECTOR_SHIFT(SDValue Op, SelectionDAG &DAG) const {
 }
 
 SDValue
+HexagonTargetLowering::LowerROTL(SDValue Op, SelectionDAG &DAG) const {
+  if (isa<ConstantSDNode>(Op.getOperand(1).getNode()))
+    return Op;
+  return SDValue();
+}
+
+SDValue
 HexagonTargetLowering::LowerBITCAST(SDValue Op, SelectionDAG &DAG) const {
   MVT ResTy = ty(Op);
   SDValue InpV = Op.getOperand(0);
@@ -2329,7 +2335,9 @@ HexagonTargetLowering::extractVector(SDValue VecV, SDValue IdxV,
     // If the value extracted is a single bit, use tstbit.
     if (ValWidth == 1) {
       SDValue A0 = getInstr(Hexagon::C2_tfrpr, dl, MVT::i32, {VecV}, DAG);
-      return DAG.getNode(HexagonISD::TSTBIT, dl, MVT::i1, A0, IdxV);
+      SDValue M0 = DAG.getConstant(8 / VecWidth, dl, MVT::i32);
+      SDValue I0 = DAG.getNode(ISD::MUL, dl, MVT::i32, IdxV, M0);
+      return DAG.getNode(HexagonISD::TSTBIT, dl, MVT::i1, A0, I0);
     }
 
     // Each bool vector (v2i1, v4i1, v8i1) always occupies 8 bits in
@@ -2643,12 +2651,37 @@ HexagonTargetLowering::allowTruncateForTailCall(Type *Ty1, Type *Ty2) const {
 }
 
 SDValue
+HexagonTargetLowering::LowerLoad(SDValue Op, SelectionDAG &DAG) const {
+  LoadSDNode *LN = cast<LoadSDNode>(Op.getNode());
+  unsigned ClaimAlign = LN->getAlignment();
+  validateConstPtrAlignment(LN->getBasePtr(), SDLoc(Op), ClaimAlign);
+  // Call LowerUnalignedLoad for all loads, it recognizes loads that
+  // don't need extra aligning.
+  return LowerUnalignedLoad(Op, DAG);
+}
+
+SDValue
+HexagonTargetLowering::LowerStore(SDValue Op, SelectionDAG &DAG) const {
+  StoreSDNode *SN = cast<StoreSDNode>(Op.getNode());
+  unsigned ClaimAlign = SN->getAlignment();
+  SDValue Ptr = SN->getBasePtr();
+  const SDLoc &dl(Op);
+  validateConstPtrAlignment(Ptr, dl, ClaimAlign);
+
+  MVT StoreTy = SN->getMemoryVT().getSimpleVT();
+  unsigned NeedAlign = Subtarget.getTypeAlignment(StoreTy);
+  if (ClaimAlign < NeedAlign)
+    return expandUnalignedStore(SN, DAG);
+  return Op;
+}
+
+SDValue
 HexagonTargetLowering::LowerUnalignedLoad(SDValue Op, SelectionDAG &DAG)
       const {
   LoadSDNode *LN = cast<LoadSDNode>(Op.getNode());
-  unsigned HaveAlign = LN->getAlignment();
   MVT LoadTy = ty(Op);
   unsigned NeedAlign = Subtarget.getTypeAlignment(LoadTy);
+  unsigned HaveAlign = LN->getAlignment();
   if (HaveAlign >= NeedAlign)
     return Op;
 
@@ -2728,6 +2761,24 @@ HexagonTargetLowering::LowerUnalignedLoad(SDValue Op, SelectionDAG &DAG)
 }
 
 SDValue
+HexagonTargetLowering::LowerAddSubCarry(SDValue Op, SelectionDAG &DAG) const {
+  const SDLoc &dl(Op);
+  unsigned Opc = Op.getOpcode();
+  SDValue X = Op.getOperand(0), Y = Op.getOperand(1), C = Op.getOperand(2);
+
+  if (Opc == ISD::ADDCARRY)
+    return DAG.getNode(HexagonISD::ADDC, dl, Op.getNode()->getVTList(),
+                       { X, Y, C });
+
+  EVT CarryTy = C.getValueType();
+  SDValue SubC = DAG.getNode(HexagonISD::SUBC, dl, Op.getNode()->getVTList(),
+                             { X, Y, DAG.getLogicalNOT(dl, C, CarryTy) });
+  SDValue Out[] = { SubC.getValue(0),
+                    DAG.getLogicalNOT(dl, SubC.getValue(1), CarryTy) };
+  return DAG.getMergeValues(Out, dl);
+}
+
+SDValue
 HexagonTargetLowering::LowerEH_RETURN(SDValue Op, SelectionDAG &DAG) const {
   SDValue Chain     = Op.getOperand(0);
   SDValue Offset    = Op.getOperand(1);
@@ -2784,10 +2835,14 @@ HexagonTargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
     case ISD::BUILD_VECTOR:         return LowerBUILD_VECTOR(Op, DAG);
     case ISD::VECTOR_SHUFFLE:       return LowerVECTOR_SHUFFLE(Op, DAG);
     case ISD::BITCAST:              return LowerBITCAST(Op, DAG);
-    case ISD::LOAD:                 return LowerUnalignedLoad(Op, DAG);
+    case ISD::LOAD:                 return LowerLoad(Op, DAG);
+    case ISD::STORE:                return LowerStore(Op, DAG);
+    case ISD::ADDCARRY:
+    case ISD::SUBCARRY:             return LowerAddSubCarry(Op, DAG);
     case ISD::SRA:
     case ISD::SHL:
     case ISD::SRL:                  return LowerVECTOR_SHIFT(Op, DAG);
+    case ISD::ROTL:                 return LowerROTL(Op, DAG);
     case ISD::ConstantPool:         return LowerConstantPool(Op, DAG);
     case ISD::JumpTable:            return LowerJumpTable(Op, DAG);
     case ISD::EH_RETURN:            return LowerEH_RETURN(Op, DAG);
@@ -2810,6 +2865,19 @@ HexagonTargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
   }
 
   return SDValue();
+}
+
+void
+HexagonTargetLowering::LowerOperationWrapper(SDNode *N,
+                                             SmallVectorImpl<SDValue> &Results,
+                                             SelectionDAG &DAG) const {
+  // We are only custom-lowering stores to verify the alignment of the
+  // address if it is a compile-time constant. Since a store can be modified
+  // during type-legalization (the value being stored may need legalization),
+  // return empty Results here to indicate that we don't really make any
+  // changes in the custom lowering.
+  if (N->getOpcode() != ISD::STORE)
+    return TargetLowering::LowerOperationWrapper(N, Results, DAG);
 }
 
 void
@@ -2906,7 +2974,7 @@ HexagonTargetLowering::getRegForInlineAsmConstraint(
       case 512:
         return {0u, &Hexagon::HvxVRRegClass};
       case 1024:
-        if (Subtarget.hasV60TOps() && Subtarget.useHVX128BOps())
+        if (Subtarget.hasV60Ops() && Subtarget.useHVX128BOps())
           return {0u, &Hexagon::HvxVRRegClass};
         return {0u, &Hexagon::HvxWRRegClass};
       case 2048:
@@ -2925,7 +2993,7 @@ HexagonTargetLowering::getRegForInlineAsmConstraint(
 /// specified FP immediate natively. If false, the legalizer will
 /// materialize the FP immediate as a load from a constant pool.
 bool HexagonTargetLowering::isFPImmLegal(const APFloat &Imm, EVT VT) const {
-  return Subtarget.hasV5TOps();
+  return Subtarget.hasV5Ops();
 }
 
 /// isLegalAddressingMode - Return true if the addressing mode represented by

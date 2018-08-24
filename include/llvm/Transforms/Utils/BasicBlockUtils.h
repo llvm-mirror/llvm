@@ -20,6 +20,7 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
+#include "llvm/IR/DomTreeUpdater.h"
 #include "llvm/IR/InstrTypes.h"
 #include <cassert>
 
@@ -27,8 +28,8 @@ namespace llvm {
 
 class BlockFrequencyInfo;
 class BranchProbabilityInfo;
-class DeferredDominance;
 class DominatorTree;
+class DomTreeUpdater;
 class Function;
 class Instruction;
 class LoopInfo;
@@ -39,7 +40,7 @@ class TargetLibraryInfo;
 class Value;
 
 /// Delete the specified block, which must have no predecessors.
-void DeleteDeadBlock(BasicBlock *BB, DeferredDominance *DDT = nullptr);
+void DeleteDeadBlock(BasicBlock *BB, DomTreeUpdater *DTU = nullptr);
 
 /// We know that BB has one predecessor. If there are any single-entry PHI nodes
 /// in it, fold them away. This handles the case when all entries to the PHI
@@ -56,7 +57,7 @@ bool DeleteDeadPHIs(BasicBlock *BB, const TargetLibraryInfo *TLI = nullptr);
 
 /// Attempts to merge a block into its predecessor, if possible. The return
 /// value indicates success or failure.
-bool MergeBlockIntoPredecessor(BasicBlock *BB, DominatorTree *DT = nullptr,
+bool MergeBlockIntoPredecessor(BasicBlock *BB, DomTreeUpdater *DTU = nullptr,
                                LoopInfo *LI = nullptr,
                                MemoryDependenceResults *MemDep = nullptr);
 
@@ -228,7 +229,8 @@ void SplitLandingPadPredecessors(BasicBlock *OrigBB,
 /// value defined by a PHI, propagate the right value into the return. It
 /// returns the new return instruction in the predecessor.
 ReturnInst *FoldReturnIntoUncondBranch(ReturnInst *RI, BasicBlock *BB,
-                                       BasicBlock *Pred);
+                                       BasicBlock *Pred,
+                                       DomTreeUpdater *DTU = nullptr);
 
 /// Split the containing block at the specified instruction - everything before
 /// SplitBefore stays in the old basic block, and the rest of the instructions

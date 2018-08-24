@@ -32,21 +32,33 @@ public:
     virtual ~MipsHandler() = default;
 
   protected:
-    virtual void assignValueToReg(unsigned ValVReg, unsigned PhysReg) = 0;
-
     bool assign(const CCValAssign &VA, unsigned vreg);
 
     MachineIRBuilder &MIRBuilder;
     MachineRegisterInfo &MRI;
+
+  private:
+    virtual unsigned getStackAddress(uint64_t Size, int64_t Offset,
+                                     MachinePointerInfo &MPO) = 0;
+
+    virtual void assignValueToReg(unsigned ValVReg, unsigned PhysReg) = 0;
+
+    virtual void assignValueToAddress(unsigned ValVReg, unsigned Addr,
+                                      uint64_t Size,
+                                      MachinePointerInfo &MPO) = 0;
   };
 
   MipsCallLowering(const MipsTargetLowering &TLI);
 
-  bool lowerReturn(MachineIRBuilder &MIRBuiler, const Value *Val,
-                   unsigned VReg) const override;
+  bool lowerReturn(MachineIRBuilder &MIRBuilder, const Value *Val,
+                   ArrayRef<unsigned> VRegs) const override;
 
   bool lowerFormalArguments(MachineIRBuilder &MIRBuilder, const Function &F,
                             ArrayRef<unsigned> VRegs) const override;
+
+  bool lowerCall(MachineIRBuilder &MIRBuilder, CallingConv::ID CallConv,
+                 const MachineOperand &Callee, const ArgInfo &OrigRet,
+                 ArrayRef<ArgInfo> OrigArgs) const override;
 
 private:
   using FunTy =

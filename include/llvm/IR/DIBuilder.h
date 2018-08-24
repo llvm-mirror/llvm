@@ -46,6 +46,7 @@ namespace llvm {
     DICompileUnit *CUNode;   ///< The one compile unit created by this DIBuiler.
     Function *DeclareFn;     ///< llvm.dbg.declare
     Function *ValueFn;       ///< llvm.dbg.value
+    Function *LabelFn;       ///< llvm.dbg.label
 
     SmallVector<Metadata *, 4> AllEnumTypes;
     /// Track the RetainTypes, since they can be updated later on.
@@ -69,6 +70,9 @@ namespace llvm {
     /// copy.
     DenseMap<MDNode *, SmallVector<TrackingMDNodeRef, 1>> PreservedVariables;
 
+    /// Each subprogram's preserved labels.
+    DenseMap<MDNode *, SmallVector<TrackingMDNodeRef, 1>> PreservedLabels;
+
     /// Create a temporary.
     ///
     /// Create an \a temporary node and track it in \a UnresolvedNodes.
@@ -78,6 +82,10 @@ namespace llvm {
     Instruction *insertDeclare(llvm::Value *Storage, DILocalVariable *VarInfo,
                                DIExpression *Expr, const DILocation *DL,
                                BasicBlock *InsertBB, Instruction *InsertBefore);
+
+    /// Internal helper for insertLabel.
+    Instruction *insertLabel(DILabel *LabelInfo, const DILocation *DL,
+                             BasicBlock *InsertBB, Instruction *InsertBefore);
 
     /// Internal helper for insertDbgValueIntrinsic.
     Instruction *
@@ -126,8 +134,8 @@ namespace llvm {
     /// \param SplitDebugInlining    Whether to emit inline debug info.
     /// \param DebugInfoForProfiling Whether to emit extra debug info for
     ///                              profile collection.
-    /// \param GnuPubnames   Whether to emit .debug_gnu_pubnames section instead
-    ///                      of .debug_pubnames.
+    /// \param nameTableKind  Whether to emit .debug_gnu_pubnames,
+    ///                      .debug_pubnames, or no pubnames at all.
     DICompileUnit *
     createCompileUnit(unsigned Lang, DIFile *File, StringRef Producer,
                       bool isOptimized, StringRef Flags, unsigned RV,
@@ -136,7 +144,8 @@ namespace llvm {
                           DICompileUnit::DebugEmissionKind::FullDebug,
                       uint64_t DWOId = 0, bool SplitDebugInlining = true,
                       bool DebugInfoForProfiling = false,
-                      bool GnuPubnames = false);
+                      DICompileUnit::DebugNameTableKind NameTableKind =
+                          DICompileUnit::DebugNameTableKind::Default);
 
     /// Create a file descriptor to hold debugging information for a file.
     /// \param Filename  File name.
@@ -180,9 +189,11 @@ namespace llvm {
     /// type.
     /// \param Name        Type name.
     /// \param SizeInBits  Size of the type.
-    /// \param Encoding    DWARF encoding code, e.g. dwarf::DW_ATE_float.
+    /// \param Encoding    DWARF encoding code, e.g., dwarf::DW_ATE_float.
+    /// \param Flags       Optional DWARF attributes, e.g., DW_AT_endianity.
     DIBasicType *createBasicType(StringRef Name, uint64_t SizeInBits,
-                                 unsigned Encoding);
+                                 unsigned Encoding,
+                                 DINode::DIFlags Flags = DINode::FlagZero);
 
     /// Create debugging information entry for a qualified
     /// type, e.g. 'const int'.
@@ -237,10 +248,11 @@ namespace llvm {
     /// \param Ty           Original type.
     /// \param BaseTy       Base type. Ty is inherits from base.
     /// \param BaseOffset   Base offset.
+    /// \param VBPtrOffset  Virtual base pointer offset.
     /// \param Flags        Flags to describe inheritance attribute,
     ///                     e.g. private
     DIDerivedType *createInheritance(DIType *Ty, DIType *BaseTy,
-                                     uint64_t BaseOffset,
+                                     uint64_t BaseOffset, uint32_t VBPtrOffset,
                                      DINode::DIFlags Flags);
 
     /// Create debugging information entry for a member.
@@ -506,12 +518,15 @@ namespace llvm {
                          DINode::DIFlags Flags = DINode::FlagZero,
                          unsigned CC = 0);
 
-    /// Create a new DIType* with "artificial" flag set.
-    DIType *createArtificialType(DIType *Ty);
+    /// Create a distinct clone of \p SP with FlagArtificial set.
+    static DISubprogram *createArtificialSubprogram(DISubprogram *SP);
 
-    /// Create a new DIType* with the "object pointer"
-    /// flag set.
-    DIType *createObjectPointerType(DIType *Ty);
+    /// Create a uniqued clone of \p Ty with FlagArtificial set.
+    static DIType *createArtificialType(DIType *Ty);
+
+    /// Create a uniqued clone of \p Ty with FlagObjectPointer and
+    /// FlagArtificial set.
+    static DIType *createObjectPointerType(DIType *Ty);
 
     /// Create a permanent forward-declared type.
     DICompositeType *createForwardDecl(unsigned Tag, StringRef Name,
@@ -590,6 +605,14 @@ namespace llvm {
                        unsigned LineNo, DIType *Ty, bool AlwaysPreserve = false,
                        DINode::DIFlags Flags = DINode::FlagZero,
                        uint32_t AlignInBits = 0);
+
+    /// Create a new descriptor for an label.
+    ///
+    /// \c Scope must be a \a DILocalScope, and thus its scope chain eventually
+    /// leads to a \a DISubprogram.
+    DILabel *
+    createLabel(DIScope *Scope, StringRef Name, DIFile *File, unsigned LineNo,
+                bool AlwaysPreserve = false);
 
     /// Create a new descriptor for a parameter variable.
     ///
@@ -781,6 +804,20 @@ namespace llvm {
     Instruction *insertDeclare(llvm::Value *Storage, DILocalVariable *VarInfo,
                                DIExpression *Expr, const DILocation *DL,
                                Instruction *InsertBefore);
+
+    /// Insert a new llvm.dbg.label intrinsic call.
+    /// \param LabelInfo    Label's debug info descriptor.
+    /// \param DL           Debug info location.
+    /// \param InsertBefore Location for the new intrinsic.
+    Instruction *insertLabel(DILabel *LabelInfo, const DILocation *DL,
+                             Instruction *InsertBefore);
+
+    /// Insert a new llvm.dbg.label intrinsic call.
+    /// \param LabelInfo    Label's debug info descriptor.
+    /// \param DL           Debug info location.
+    /// \param InsertAtEnd Location for the new intrinsic.
+    Instruction *insertLabel(DILabel *LabelInfo, const DILocation *DL,
+                             BasicBlock *InsertAtEnd);
 
     /// Insert a new llvm.dbg.value intrinsic call.
     /// \param Val          llvm::Value of the variable

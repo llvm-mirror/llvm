@@ -60,6 +60,19 @@ define float @sub_sub_nsz(float %x, float %y, float %z) {
   ret float %t2
 }
 
+; With nsz and reassoc: Y - ((X * 5) + Y) --> X * -5
+
+define float @sub_add_neg_x(float %x, float %y) {
+; CHECK-LABEL: @sub_add_neg_x(
+; CHECK-NEXT:    [[TMP1:%.*]] = fmul reassoc nsz float [[X:%.*]], -5.000000e+00
+; CHECK-NEXT:    ret float [[TMP1]]
+;
+  %mul = fmul float %x, 5.000000e+00
+  %add = fadd float %mul, %y
+  %r = fsub nsz reassoc float %y, %add
+  ret float %r
+}
+
 ; Same as above: if 'Z' is not -0.0, swap fsub operands and convert to fadd.
 
 define float @sub_sub_known_not_negzero(float %x, float %y) {
@@ -240,5 +253,19 @@ define float @neg_trunc_op1_extra_uses(double %a, float %b) {
   %t3 = fsub float %b, %t2
   call void @use2(float %t2, double %t1)
   ret float %t3
+}
+
+; Don't negate a constant expression to form fadd and induce infinite looping:
+; https://bugs.llvm.org/show_bug.cgi?id=37605
+
+@b = external global i16, align 1
+
+define float @PR37605(float %conv) {
+; CHECK-LABEL: @PR37605(
+; CHECK-NEXT:    [[SUB:%.*]] = fsub float [[CONV:%.*]], bitcast (i32 ptrtoint (i16* @b to i32) to float)
+; CHECK-NEXT:    ret float [[SUB]]
+;
+  %sub = fsub float %conv, bitcast (i32 ptrtoint (i16* @b to i32) to float)
+  ret float %sub
 }
 

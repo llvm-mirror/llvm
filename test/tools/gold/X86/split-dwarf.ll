@@ -3,15 +3,14 @@
 ; RUN: %gold -plugin %llvmshlibdir/LLVMgold%shlibext  \
 ; RUN:    -m elf_x86_64 \
 ; RUN:    --plugin-opt=thinlto \
-; RUN:    --plugin-opt=objcopy=%llvm-objcopy \
 ; RUN:    --plugin-opt=dwo_dir=%t/dwo_dir \
 ; RUN:    %t/split-dwarf.o --shared -o %t/split-dwarf
 
 ; RUN: llvm-dwarfdump -debug-info %t/split-dwarf | FileCheck %s
-; CHECK: DW_AT_GNU_dwo_name{{.*}}dwo_dir/split-dwarf.{{.*}}
+; CHECK: DW_AT_GNU_dwo_name{{.*}}dwo_dir/1.dwo
 ; CHECK-NOT: DW_TAG_subprogram
-; RUN: llvm-dwarfdump -debug-info %t/dwo_dir/split-dwarf.* | FileCheck --check-prefix DWOCHECK %s
-; DWOCHECK: DW_AT_GNU_dwo_name{{.*}}dwo_dir/split-dwarf.o{{.*}}
+; RUN: llvm-dwarfdump -debug-info %t/dwo_dir/1.dwo | FileCheck --check-prefix DWOCHECK %s
+; DWOCHECK: DW_AT_GNU_dwo_name{{.*}}dwo_dir/1.dwo
 ; DWOCHECK: DW_AT_name{{.*}}split-dwarf.c
 ; DWOCHECK: DW_TAG_subprogram
 
@@ -20,15 +19,14 @@
 ; RUN: %gold -plugin %llvmshlibdir/LLVMgold%shlibext  \
 ; RUN:    -m elf_x86_64 \
 ; RUN:    --plugin-opt=thinlto \
-; RUN:    --plugin-opt=objcopy=%llvm-objcopy \
 ; RUN:    --plugin-opt=dwo_dir=%t/dwo_dir \
 ; RUN:    %t/split-dwarf.o --shared -o %t/split-dwarf
 
 ; RUN: llvm-dwarfdump -debug-info %t/split-dwarf | FileCheck --check-prefix LTOCHECK %s
-; LTOCHECK: DW_AT_GNU_dwo_name{{.*}}dwo_dir/ld-temp.{{.*}}
+; LTOCHECK: DW_AT_GNU_dwo_name{{.*}}dwo_dir/0.dwo
 ; LTOCHECK-NOT: DW_TAG_subprogram
-; RUN: llvm-dwarfdump -debug-info %t/dwo_dir/ld-temp.* | FileCheck --check-prefix LTODWOCHECK %s
-; LTODWOCHECK: DW_AT_GNU_dwo_name{{.*}}dwo_dir/ld-temp.o{{.*}}
+; RUN: llvm-dwarfdump -debug-info %t/dwo_dir/0.dwo | FileCheck --check-prefix LTODWOCHECK %s
+; LTODWOCHECK: DW_AT_GNU_dwo_name{{.*}}dwo_dir/0.dwo
 ; LTODWOCHECK: DW_AT_name{{.*}}split-dwarf.c
 ; LTODWOCHECK: DW_TAG_subprogram
 
@@ -56,7 +54,7 @@ attributes #0 = { noinline nounwind optnone uwtable "correctly-rounded-divide-sq
 !4 = !{i32 2, !"Debug Info Version", i32 3}
 !5 = !{i32 1, !"wchar_size", i32 4}
 !6 = !{!"clang version 7.0.0 (https://github.com/llvm-mirror/clang.git b641d31365414ba3ea0305fdaa80369a9efb6bd9) (https://github.com/llvm-mirror/llvm.git 6165a776d1a8bb181be93f2dc97088f7a1abc405)"}
-!7 = distinct !DISubprogram(name: "split_dwarf", scope: !1, file: !1, line: 1, type: !8, isLocal: false, isDefinition: true, scopeLine: 1, isOptimized: false, unit: !0, variables: !2)
+!7 = distinct !DISubprogram(name: "split_dwarf", scope: !1, file: !1, line: 1, type: !8, isLocal: false, isDefinition: true, scopeLine: 1, isOptimized: false, unit: !0, retainedNodes: !2)
 !8 = !DISubroutineType(types: !9)
 !9 = !{!10}
 !10 = !DIBasicType(name: "int", size: 32, encoding: DW_ATE_signed)

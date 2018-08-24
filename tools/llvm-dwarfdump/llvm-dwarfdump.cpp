@@ -28,6 +28,7 @@
 #include "llvm/Support/Regex.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/ToolOutputFile.h"
+#include "llvm/Support/WithColor.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
@@ -281,7 +282,8 @@ using HandlerFn = std::function<bool(ObjectFile &, DWARFContext &DICtx, Twine,
 
 /// Print only DIEs that have a certain name.
 static void filterByName(const StringSet<> &Names,
-                         DWARFContext::cu_iterator_range CUs, raw_ostream &OS) {
+                         DWARFContext::unit_iterator_range CUs,
+                         raw_ostream &OS) {
   for (const auto &CU : CUs)
     for (const auto &Entry : CU->dies()) {
       DWARFDie Die = {CU.get(), &Entry};
@@ -305,7 +307,62 @@ static void filterByName(const StringSet<> &Names,
           Die.dump(OS, 0, getDumpOpts());
       }
     }
+}
 
+static void getDies(DWARFContext &DICtx, const AppleAcceleratorTable &Accel,
+                    StringRef Name, SmallVectorImpl<DWARFDie> &Dies) {
+  for (const auto &Entry : Accel.equal_range(Name)) {
+    if (llvm::Optional<uint64_t> Off = Entry.getDIESectionOffset()) {
+      if (DWARFDie Die = DICtx.getDIEForOffset(*Off))
+        Dies.push_back(Die);
+    }
+  }
+}
+
+static DWARFDie toDie(const DWARFDebugNames::Entry &Entry,
+                      DWARFContext &DICtx) {
+  llvm::Optional<uint64_t> CUOff = Entry.getCUOffset();
+  llvm::Optional<uint64_t> Off = Entry.getDIEUnitOffset();
+  if (!CUOff || !Off)
+    return DWARFDie();
+
+  DWARFCompileUnit *CU = DICtx.getCompileUnitForOffset(*CUOff);
+  if (!CU)
+    return DWARFDie();
+
+  if (llvm::Optional<uint64_t> DWOId = CU->getDWOId()) {
+    // This is a skeleton unit. Look up the DIE in the DWO unit.
+    CU = DICtx.getDWOCompileUnitForHash(*DWOId);
+    if (!CU)
+      return DWARFDie();
+  }
+
+  return CU->getDIEForOffset(CU->getOffset() + *Off);
+}
+
+static void getDies(DWARFContext &DICtx, const DWARFDebugNames &Accel,
+                    StringRef Name, SmallVectorImpl<DWARFDie> &Dies) {
+  for (const auto &Entry : Accel.equal_range(Name)) {
+    if (DWARFDie Die = toDie(Entry, DICtx))
+      Dies.push_back(Die);
+  }
+}
+
+/// Print only DIEs that have a certain name.
+static void filterByAccelName(ArrayRef<std::string> Names, DWARFContext &DICtx,
+                              raw_ostream &OS) {
+  SmallVector<DWARFDie, 4> Dies;
+  for (const auto &Name : Names) {
+    getDies(DICtx, DICtx.getAppleNames(), Name, Dies);
+    getDies(DICtx, DICtx.getAppleTypes(), Name, Dies);
+    getDies(DICtx, DICtx.getAppleNamespaces(), Name, Dies);
+    getDies(DICtx, DICtx.getDebugNames(), Name, Dies);
+  }
+  llvm::sort(Dies.begin(), Dies.end());
+  Dies.erase(std::unique(Dies.begin(), Dies.end()), Dies.end());
+
+  for (DWARFDie Die : Dies)
+    Die.dump(OS, 0, getDumpOpts());
 }
 
 /// Handle the --lookup option and dump the DIEs and line info for the given
@@ -334,15 +391,6 @@ static bool lookup(DWARFContext &DICtx, uint64_t Address, raw_ostream &OS) {
 bool collectStatsForObjectFile(ObjectFile &Obj, DWARFContext &DICtx,
                                Twine Filename, raw_ostream &OS);
 
-template <typename AccelTable>
-static llvm::Optional<uint64_t> getDIEOffset(const AccelTable &Accel,
-                                       StringRef Name) {
-  for (const auto &Entry : Accel.equal_range(Name))
-    if (llvm::Optional<uint64_t> Off = Entry.getDIESectionOffset())
-      return *Off;
-  return None;
-}
-
 static bool dumpObjectFile(ObjectFile &Obj, DWARFContext &DICtx, Twine Filename,
                            raw_ostream &OS) {
   logAllUnhandledErrors(DICtx.loadRegisterInfo(Obj), errs(),
@@ -368,22 +416,8 @@ static bool dumpObjectFile(ObjectFile &Obj, DWARFContext &DICtx, Twine Filename,
 
   // Handle the --find option and lower it to --debug-info=<offset>.
   if (!Find.empty()) {
-    DumpOffsets[DIDT_ID_DebugInfo] = [&]() -> llvm::Optional<uint64_t> {
-      for (auto Name : Find) {
-        if (auto Offset = getDIEOffset(DICtx.getAppleNames(), Name))
-          return DumpOffsets[DIDT_ID_DebugInfo] = *Offset;
-        if (auto Offset = getDIEOffset(DICtx.getAppleTypes(), Name))
-          return DumpOffsets[DIDT_ID_DebugInfo] = *Offset;
-        if (auto Offset = getDIEOffset(DICtx.getAppleNamespaces(), Name))
-          return DumpOffsets[DIDT_ID_DebugInfo] = *Offset;
-        if (auto Offset = getDIEOffset(DICtx.getDebugNames(), Name))
-          return DumpOffsets[DIDT_ID_DebugInfo] = *Offset;
-      }
-      return None;
-    }();
-    // Early exit if --find was specified but the current file doesn't have it.
-    if (!DumpOffsets[DIDT_ID_DebugInfo])
-      return true;
+    filterByAccelName(Find, DICtx, OS);
+    return true;
   }
 
   // Dump the complete DWARF structure.
@@ -513,7 +547,7 @@ int main(int argc, char **argv) {
   llvm::InitializeAllTargetInfos();
   llvm::InitializeAllTargetMCs();
 
-  HideUnrelatedOptions({&DwarfDumpCategory, &SectionCategory});
+  HideUnrelatedOptions({&DwarfDumpCategory, &SectionCategory, &ColorCategory});
   cl::ParseCommandLineOptions(
       argc, argv,
       "pretty-print DWARF debug information in object files"
@@ -565,7 +599,7 @@ int main(int argc, char **argv) {
     ShowChildren = true;
 
   // Defaults to a.out if no filenames specified.
-  if (InputFilenames.size() == 0)
+  if (InputFilenames.empty())
     InputFilenames.push_back("a.out");
 
   // Expand any .dSYM bundles to the individual object files contained therein.

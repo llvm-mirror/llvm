@@ -171,8 +171,8 @@ bool DWARFVerifier::verifyUnitHeader(const DWARFDataExtractor DebugInfoData,
   return Success;
 }
 
-bool DWARFVerifier::verifyUnitContents(DWARFUnit Unit, uint8_t UnitType) {
-  uint32_t NumUnitErrors = 0;
+unsigned DWARFVerifier::verifyUnitContents(DWARFUnit &Unit, uint8_t UnitType) {
+  unsigned NumUnitErrors = 0;
   unsigned NumDies = Unit.getNumDIEs();
   for (unsigned I = 0; I < NumDies; ++I) {
     auto Die = Unit.getDIEAtIndex(I);
@@ -188,7 +188,7 @@ bool DWARFVerifier::verifyUnitContents(DWARFUnit Unit, uint8_t UnitType) {
   if (!Die) {
     error() << "Compilation unit without DIE.\n";
     NumUnitErrors++;
-    return NumUnitErrors == 0;
+    return NumUnitErrors;
   }
 
   if (!dwarf::isUnitType(Die.getTag())) {
@@ -208,7 +208,7 @@ bool DWARFVerifier::verifyUnitContents(DWARFUnit Unit, uint8_t UnitType) {
   DieRangeInfo RI;
   NumUnitErrors += verifyDieRanges(Die, RI);
 
-  return NumUnitErrors == 0;
+  return NumUnitErrors;
 }
 
 unsigned DWARFVerifier::verifyAbbrevSection(const DWARFDebugAbbrev *Abbrev) {
@@ -252,20 +252,17 @@ bool DWARFVerifier::handleDebugAbbrev() {
   return NumErrors == 0;
 }
 
-bool DWARFVerifier::handleDebugInfo() {
-  OS << "Verifying .debug_info Unit Header Chain...\n";
-
+unsigned DWARFVerifier::verifyUnitSection(const DWARFSection &S,
+                                          DWARFSectionKind SectionKind) {
   const DWARFObject &DObj = DCtx.getDWARFObj();
-  DWARFDataExtractor DebugInfoData(DObj, DObj.getInfoSection(),
-                                   DCtx.isLittleEndian(), 0);
-  uint32_t NumDebugInfoErrors = 0;
+  DWARFDataExtractor DebugInfoData(DObj, S, DCtx.isLittleEndian(), 0);
+  unsigned NumDebugInfoErrors = 0;
   uint32_t OffsetStart = 0, Offset = 0, UnitIdx = 0;
   uint8_t UnitType = 0;
   bool isUnitDWARF64 = false;
   bool isHeaderChainValid = true;
   bool hasDIE = DebugInfoData.isValidOffset(Offset);
-  DWARFUnitSection<DWARFTypeUnit> TUSection{};
-  DWARFUnitSection<DWARFCompileUnit> CUSection{};
+  DWARFUnitVector UnitVector{};
   while (hasDIE) {
     OffsetStart = Offset;
     if (!verifyUnitHeader(DebugInfoData, &Offset, UnitIdx, UnitType,
@@ -274,16 +271,17 @@ bool DWARFVerifier::handleDebugInfo() {
       if (isUnitDWARF64)
         break;
     } else {
+      DWARFUnitHeader Header;
+      Header.extract(DCtx, DebugInfoData, &OffsetStart, SectionKind);
       std::unique_ptr<DWARFUnit> Unit;
       switch (UnitType) {
       case dwarf::DW_UT_type:
       case dwarf::DW_UT_split_type: {
         Unit.reset(new DWARFTypeUnit(
-            DCtx, DObj.getInfoSection(), DCtx.getDebugAbbrev(),
-            &DObj.getRangeSection(), DObj.getStringSection(),
-            DObj.getStringOffsetSection(), &DObj.getAppleObjCSection(),
-            DObj.getLineSection(), DCtx.isLittleEndian(), false, TUSection,
-            nullptr));
+            DCtx, S, Header, DCtx.getDebugAbbrev(), &DObj.getRangeSection(),
+            DObj.getStringSection(), DObj.getStringOffsetSection(),
+            &DObj.getAppleObjCSection(), DObj.getLineSection(),
+            DCtx.isLittleEndian(), false, UnitVector));
         break;
       }
       case dwarf::DW_UT_skeleton:
@@ -294,28 +292,40 @@ bool DWARFVerifier::handleDebugInfo() {
       // verifying a compile unit in DWARF v4.
       case 0: {
         Unit.reset(new DWARFCompileUnit(
-            DCtx, DObj.getInfoSection(), DCtx.getDebugAbbrev(),
-            &DObj.getRangeSection(), DObj.getStringSection(),
-            DObj.getStringOffsetSection(), &DObj.getAppleObjCSection(),
-            DObj.getLineSection(), DCtx.isLittleEndian(), false, CUSection,
-            nullptr));
+            DCtx, S, Header, DCtx.getDebugAbbrev(), &DObj.getRangeSection(),
+            DObj.getStringSection(), DObj.getStringOffsetSection(),
+            &DObj.getAppleObjCSection(), DObj.getLineSection(),
+            DCtx.isLittleEndian(), false, UnitVector));
         break;
       }
       default: { llvm_unreachable("Invalid UnitType."); }
       }
-      Unit->extract(DebugInfoData, &OffsetStart);
-      if (!verifyUnitContents(*Unit, UnitType))
-        ++NumDebugInfoErrors;
+      NumDebugInfoErrors += verifyUnitContents(*Unit, UnitType);
     }
     hasDIE = DebugInfoData.isValidOffset(Offset);
     ++UnitIdx;
   }
   if (UnitIdx == 0 && !hasDIE) {
-    warn() << ".debug_info is empty.\n";
+    warn() << "Section is empty.\n";
     isHeaderChainValid = true;
   }
+  if (!isHeaderChainValid)
+    ++NumDebugInfoErrors;
   NumDebugInfoErrors += verifyDebugInfoReferences();
-  return (isHeaderChainValid && NumDebugInfoErrors == 0);
+  return NumDebugInfoErrors;
+}
+
+bool DWARFVerifier::handleDebugInfo() {
+  const DWARFObject &DObj = DCtx.getDWARFObj();
+
+  OS << "Verifying .debug_info Unit Header Chain...\n";
+  unsigned result = verifyUnitSection(DObj.getInfoSection(), DW_SECT_INFO);
+
+  OS << "Verifying .debug_types Unit Header Chain...\n";
+  DObj.forEachTypesSections([&](const DWARFSection &S) {
+    result += verifyUnitSection(S, DW_SECT_TYPES);
+  });
+  return result == 0;
 }
 
 unsigned DWARFVerifier::verifyDieRanges(const DWARFDie &Die,
@@ -325,8 +335,15 @@ unsigned DWARFVerifier::verifyDieRanges(const DWARFDie &Die,
   if (!Die.isValid())
     return NumErrors;
 
-  DWARFAddressRangesVector Ranges = Die.getAddressRanges();
+  auto RangesOrError = Die.getAddressRanges();
+  if (!RangesOrError) {
+    // FIXME: Report the error.
+    ++NumErrors;
+    llvm::consumeError(RangesOrError.takeError());
+    return NumErrors;
+  }
 
+  DWARFAddressRangesVector Ranges = RangesOrError.get();
   // Build RI for this DIE and check that ranges within this DIE do not
   // overlap.
   DieRangeInfo RI(Die);
@@ -363,10 +380,9 @@ unsigned DWARFVerifier::verifyDieRanges(const DWARFDie &Die,
                              ParentRI.Die.getTag() == DW_TAG_subprogram);
   if (ShouldBeContained && !ParentRI.contains(RI)) {
     ++NumErrors;
-    error() << "DIE address ranges are not "
-               "contained in its parent's ranges:";
-    Die.dump(OS, 0);
+    error() << "DIE address ranges are not contained in its parent's ranges:";
     ParentRI.Die.dump(OS, 0);
+    Die.dump(OS, 2);
     OS << "\n";
   }
 
@@ -410,7 +426,7 @@ unsigned DWARFVerifier::verifyDebugInfoAttribute(const DWARFDie &Die,
     ReportError("DIE has invalid DW_AT_stmt_list encoding:");
     break;
   case DW_AT_location: {
-    auto VerifyLocation = [&](StringRef D) {
+    auto VerifyLocationExpr = [&](StringRef D) {
       DWARFUnit *U = Die.getDwarfUnit();
       DataExtractor Data(D, DCtx.isLittleEndian(), 0);
       DWARFExpression Expression(Data, U->getVersion(),
@@ -423,13 +439,13 @@ unsigned DWARFVerifier::verifyDebugInfoAttribute(const DWARFDie &Die,
     };
     if (Optional<ArrayRef<uint8_t>> Expr = AttrValue.Value.getAsBlock()) {
       // Verify inlined location.
-      VerifyLocation(llvm::toStringRef(*Expr));
-    } else if (auto LocOffset = AttrValue.Value.getAsUnsignedConstant()) {
+      VerifyLocationExpr(llvm::toStringRef(*Expr));
+    } else if (auto LocOffset = AttrValue.Value.getAsSectionOffset()) {
       // Verify location list.
       if (auto DebugLoc = DCtx.getDebugLoc())
         if (auto LocList = DebugLoc->getLocationListAtOffset(*LocOffset))
           for (const auto &Entry : LocList->Entries)
-            VerifyLocation({Entry.Loc.data(), Entry.Loc.size()});
+            VerifyLocationExpr({Entry.Loc.data(), Entry.Loc.size()});
     }
     break;
   }
@@ -922,8 +938,7 @@ DWARFVerifier::verifyNameIndexBuckets(const DWARFDebugNames::NameIndex &NI,
       if (Hash % NI.getBucketCount() != B.Bucket)
         break;
 
-      auto NTE = NI.getNameTableEntry(Idx);
-      const char *Str = StrData.getCStr(&NTE.StringOffset);
+      const char *Str = NI.getNameTableEntry(Idx).getString();
       if (caseFoldingDjbHash(Str) != Hash) {
         error() << formatv("Name Index @ {0:x}: String ({1}) at index {2} "
                            "hashes to {3:x}, but "
@@ -1059,30 +1074,29 @@ static SmallVector<StringRef, 2> getNames(const DWARFDie &DIE) {
   return Result;
 }
 
-unsigned
-DWARFVerifier::verifyNameIndexEntries(const DWARFDebugNames::NameIndex &NI,
-                                      uint32_t Name,
-                                      const DataExtractor &StrData) {
+unsigned DWARFVerifier::verifyNameIndexEntries(
+    const DWARFDebugNames::NameIndex &NI,
+    const DWARFDebugNames::NameTableEntry &NTE) {
   // Verifying type unit indexes not supported.
   if (NI.getLocalTUCount() + NI.getForeignTUCount() > 0)
     return 0;
 
-  DWARFDebugNames::NameTableEntry NTE = NI.getNameTableEntry(Name);
-  const char *CStr = StrData.getCStr(&NTE.StringOffset);
+  const char *CStr = NTE.getString();
   if (!CStr) {
     error() << formatv(
         "Name Index @ {0:x}: Unable to get string associated with name {1}.\n",
-        NI.getUnitOffset(), Name);
+        NI.getUnitOffset(), NTE.getIndex());
     return 1;
   }
   StringRef Str(CStr);
 
   unsigned NumErrors = 0;
   unsigned NumEntries = 0;
-  uint32_t EntryID = NTE.EntryOffset;
-  Expected<DWARFDebugNames::Entry> EntryOr = NI.getEntry(&NTE.EntryOffset);
-  for (; EntryOr; ++NumEntries, EntryID = NTE.EntryOffset,
-                                EntryOr = NI.getEntry(&NTE.EntryOffset)) {
+  uint32_t EntryID = NTE.getEntryOffset();
+  uint32_t NextEntryID = EntryID;
+  Expected<DWARFDebugNames::Entry> EntryOr = NI.getEntry(&NextEntryID);
+  for (; EntryOr; ++NumEntries, EntryID = NextEntryID,
+                                EntryOr = NI.getEntry(&NextEntryID)) {
     uint32_t CUIndex = *EntryOr->getCUIndex();
     if (CUIndex > NI.getCUCount()) {
       error() << formatv("Name Index @ {0:x}: Entry @ {1:x} contains an "
@@ -1092,7 +1106,7 @@ DWARFVerifier::verifyNameIndexEntries(const DWARFDebugNames::NameIndex &NI,
       continue;
     }
     uint32_t CUOffset = NI.getCUOffset(CUIndex);
-    uint64_t DIEOffset = *EntryOr->getDIESectionOffset();
+    uint64_t DIEOffset = CUOffset + *EntryOr->getDIEUnitOffset();
     DWARFDie DIE = DCtx.getDIEForOffset(DIEOffset);
     if (!DIE) {
       error() << formatv("Name Index @ {0:x}: Entry @ {1:x} references a "
@@ -1122,6 +1136,7 @@ DWARFVerifier::verifyNameIndexEntries(const DWARFDebugNames::NameIndex &NI,
                          "of DIE @ {2:x}: index - {3}; debug_info - {4}.\n",
                          NI.getUnitOffset(), EntryID, DIEOffset, Str,
                          make_range(EntryNames.begin(), EntryNames.end()));
+      ++NumErrors;
     }
   }
   handleAllErrors(EntryOr.takeError(),
@@ -1130,15 +1145,153 @@ DWARFVerifier::verifyNameIndexEntries(const DWARFDebugNames::NameIndex &NI,
                       return;
                     error() << formatv("Name Index @ {0:x}: Name {1} ({2}) is "
                                        "not associated with any entries.\n",
-                                       NI.getUnitOffset(), Name, Str);
+                                       NI.getUnitOffset(), NTE.getIndex(), Str);
                     ++NumErrors;
                   },
                   [&](const ErrorInfoBase &Info) {
-                    error() << formatv(
-                        "Name Index @ {0:x}: Name {1} ({2}): {3}\n",
-                        NI.getUnitOffset(), Name, Str, Info.message());
+                    error()
+                        << formatv("Name Index @ {0:x}: Name {1} ({2}): {3}\n",
+                                   NI.getUnitOffset(), NTE.getIndex(), Str,
+                                   Info.message());
                     ++NumErrors;
                   });
+  return NumErrors;
+}
+
+static bool isVariableIndexable(const DWARFDie &Die, DWARFContext &DCtx) {
+  Optional<DWARFFormValue> Location = Die.findRecursively(DW_AT_location);
+  if (!Location)
+    return false;
+
+  auto ContainsInterestingOperators = [&](StringRef D) {
+    DWARFUnit *U = Die.getDwarfUnit();
+    DataExtractor Data(D, DCtx.isLittleEndian(), U->getAddressByteSize());
+    DWARFExpression Expression(Data, U->getVersion(), U->getAddressByteSize());
+    return any_of(Expression, [](DWARFExpression::Operation &Op) {
+      return !Op.isError() && (Op.getCode() == DW_OP_addr ||
+                               Op.getCode() == DW_OP_form_tls_address ||
+                               Op.getCode() == DW_OP_GNU_push_tls_address);
+    });
+  };
+
+  if (Optional<ArrayRef<uint8_t>> Expr = Location->getAsBlock()) {
+    // Inlined location.
+    if (ContainsInterestingOperators(toStringRef(*Expr)))
+      return true;
+  } else if (Optional<uint64_t> Offset = Location->getAsSectionOffset()) {
+    // Location list.
+    if (const DWARFDebugLoc *DebugLoc = DCtx.getDebugLoc()) {
+      if (const DWARFDebugLoc::LocationList *LocList =
+              DebugLoc->getLocationListAtOffset(*Offset)) {
+        if (any_of(LocList->Entries, [&](const DWARFDebugLoc::Entry &E) {
+              return ContainsInterestingOperators({E.Loc.data(), E.Loc.size()});
+            }))
+          return true;
+      }
+    }
+  }
+  return false;
+}
+
+unsigned DWARFVerifier::verifyNameIndexCompleteness(
+    const DWARFDie &Die, const DWARFDebugNames::NameIndex &NI) {
+
+  // First check, if the Die should be indexed. The code follows the DWARF v5
+  // wording as closely as possible.
+
+  // "All non-defining declarations (that is, debugging information entries
+  // with a DW_AT_declaration attribute) are excluded."
+  if (Die.find(DW_AT_declaration))
+    return 0;
+
+  // "DW_TAG_namespace debugging information entries without a DW_AT_name
+  // attribute are included with the name “(anonymous namespace)”.
+  // All other debugging information entries without a DW_AT_name attribute
+  // are excluded."
+  // "If a subprogram or inlined subroutine is included, and has a
+  // DW_AT_linkage_name attribute, there will be an additional index entry for
+  // the linkage name."
+  auto EntryNames = getNames(Die);
+  if (EntryNames.empty())
+    return 0;
+
+  // We deviate from the specification here, which says:
+  // "The name index must contain an entry for each debugging information entry
+  // that defines a named subprogram, label, variable, type, or namespace,
+  // subject to ..."
+  // Instead whitelisting all TAGs representing a "type" or a "subprogram", to
+  // make sure we catch any missing items, we instead blacklist all TAGs that we
+  // know shouldn't be indexed.
+  switch (Die.getTag()) {
+  // Compile units and modules have names but shouldn't be indexed.
+  case DW_TAG_compile_unit:
+  case DW_TAG_module:
+    return 0;
+
+  // Function and template parameters are not globally visible, so we shouldn't
+  // index them.
+  case DW_TAG_formal_parameter:
+  case DW_TAG_template_value_parameter:
+  case DW_TAG_template_type_parameter:
+  case DW_TAG_GNU_template_parameter_pack:
+  case DW_TAG_GNU_template_template_param:
+    return 0;
+
+  // Object members aren't globally visible.
+  case DW_TAG_member:
+    return 0;
+
+  // According to a strict reading of the specification, enumerators should not
+  // be indexed (and LLVM currently does not do that). However, this causes
+  // problems for the debuggers, so we may need to reconsider this.
+  case DW_TAG_enumerator:
+    return 0;
+
+  // Imported declarations should not be indexed according to the specification
+  // and LLVM currently does not do that.
+  case DW_TAG_imported_declaration:
+    return 0;
+
+  // "DW_TAG_subprogram, DW_TAG_inlined_subroutine, and DW_TAG_label debugging
+  // information entries without an address attribute (DW_AT_low_pc,
+  // DW_AT_high_pc, DW_AT_ranges, or DW_AT_entry_pc) are excluded."
+  case DW_TAG_subprogram:
+  case DW_TAG_inlined_subroutine:
+  case DW_TAG_label:
+    if (Die.findRecursively(
+            {DW_AT_low_pc, DW_AT_high_pc, DW_AT_ranges, DW_AT_entry_pc}))
+      break;
+    return 0;
+
+  // "DW_TAG_variable debugging information entries with a DW_AT_location
+  // attribute that includes a DW_OP_addr or DW_OP_form_tls_address operator are
+  // included; otherwise, they are excluded."
+  //
+  // LLVM extension: We also add DW_OP_GNU_push_tls_address to this list.
+  case DW_TAG_variable:
+    if (isVariableIndexable(Die, DCtx))
+      break;
+    return 0;
+
+  default:
+    break;
+  }
+
+  // Now we know that our Die should be present in the Index. Let's check if
+  // that's the case.
+  unsigned NumErrors = 0;
+  uint64_t DieUnitOffset = Die.getOffset() - Die.getDwarfUnit()->getOffset();
+  for (StringRef Name : EntryNames) {
+    if (none_of(NI.equal_range(Name), [&](const DWARFDebugNames::Entry &E) {
+          return E.getDIEUnitOffset() == DieUnitOffset;
+        })) {
+      error() << formatv("Name Index @ {0:x}: Entry for DIE @ {1:x} ({2}) with "
+                         "name {3} missing.\n",
+                         NI.getUnitOffset(), Die.getOffset(), Die.getTag(),
+                         Name);
+      ++NumErrors;
+    }
+  }
   return NumErrors;
 }
 
@@ -1168,9 +1321,20 @@ unsigned DWARFVerifier::verifyDebugNames(const DWARFSection &AccelSection,
   if (NumErrors > 0)
     return NumErrors;
   for (const auto &NI : AccelTable)
-    for (uint64_t Name = 1; Name <= NI.getNameCount(); ++Name)
-      NumErrors += verifyNameIndexEntries(NI, Name, StrData);
+    for (DWARFDebugNames::NameTableEntry NTE : NI)
+      NumErrors += verifyNameIndexEntries(NI, NTE);
 
+  if (NumErrors > 0)
+    return NumErrors;
+
+  for (const std::unique_ptr<DWARFUnit> &U : DCtx.compile_units()) {
+    if (const DWARFDebugNames::NameIndex *NI =
+            AccelTable.getCUNameIndex(U->getOffset())) {
+      auto *CU = cast<DWARFCompileUnit>(U.get());
+      for (const DWARFDebugInfoEntry &Die : CU->dies())
+        NumErrors += verifyNameIndexCompleteness(DWARFDie(CU, &Die), *NI);
+    }
+  }
   return NumErrors;
 }
 

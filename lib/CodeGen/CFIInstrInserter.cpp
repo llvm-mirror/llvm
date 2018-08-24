@@ -18,6 +18,7 @@
 /// blocks in a function.
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
@@ -27,6 +28,11 @@
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/Target/TargetMachine.h"
 using namespace llvm;
+
+static cl::opt<bool> VerifyCFI("verify-cfiinstrs",
+    cl::desc("Verify Call Frame Information instructions"),
+    cl::init(false),
+    cl::Hidden);
 
 namespace {
 class CFIInstrInserter : public MachineFunctionPass {
@@ -49,11 +55,12 @@ class CFIInstrInserter : public MachineFunctionPass {
 
     MBBVector.resize(MF.getNumBlockIDs());
     calculateCFAInfo(MF);
-#ifndef NDEBUG
-    if (unsigned ErrorNum = verify(MF))
-      report_fatal_error("Found " + Twine(ErrorNum) +
-                         " in/out CFI information errors.");
-#endif
+
+    if (VerifyCFI) {
+      if (unsigned ErrorNum = verify(MF))
+        report_fatal_error("Found " + Twine(ErrorNum) +
+                           " in/out CFI information errors.");
+    }
     bool insertedCFI = insertCFIInstrs(MF);
     MBBVector.clear();
     return insertedCFI;
@@ -144,7 +151,6 @@ void CFIInstrInserter::calculateCFAInfo(MachineFunction &MF) {
   // information.
   for (MachineBasicBlock &MBB : MF) {
     if (MBBVector[MBB.getNumber()].Processed) continue;
-    calculateOutgoingCFAInfo(MBBVector[MBB.getNumber()]);
     updateSuccCFAInfo(MBBVector[MBB.getNumber()]);
   }
 }
@@ -215,14 +221,25 @@ void CFIInstrInserter::calculateOutgoingCFAInfo(MBBCFAInfo &MBBInfo) {
 }
 
 void CFIInstrInserter::updateSuccCFAInfo(MBBCFAInfo &MBBInfo) {
-  for (MachineBasicBlock *Succ : MBBInfo.MBB->successors()) {
-    MBBCFAInfo &SuccInfo = MBBVector[Succ->getNumber()];
-    if (SuccInfo.Processed) continue;
-    SuccInfo.IncomingCFAOffset = MBBInfo.OutgoingCFAOffset;
-    SuccInfo.IncomingCFARegister = MBBInfo.OutgoingCFARegister;
-    calculateOutgoingCFAInfo(SuccInfo);
-    updateSuccCFAInfo(SuccInfo);
-  }
+  SmallVector<MachineBasicBlock *, 4> Stack;
+  Stack.push_back(MBBInfo.MBB);
+
+  do {
+    MachineBasicBlock *Current = Stack.pop_back_val();
+    MBBCFAInfo &CurrentInfo = MBBVector[Current->getNumber()];
+    if (CurrentInfo.Processed)
+      continue;
+
+    calculateOutgoingCFAInfo(CurrentInfo);
+    for (auto *Succ : CurrentInfo.MBB->successors()) {
+      MBBCFAInfo &SuccInfo = MBBVector[Succ->getNumber()];
+      if (!SuccInfo.Processed) {
+        SuccInfo.IncomingCFAOffset = CurrentInfo.OutgoingCFAOffset;
+        SuccInfo.IncomingCFARegister = CurrentInfo.OutgoingCFARegister;
+        Stack.push_back(Succ);
+      }
+    }
+  } while (!Stack.empty());
 }
 
 bool CFIInstrInserter::insertCFIInstrs(MachineFunction &MF) {
@@ -275,25 +292,26 @@ bool CFIInstrInserter::insertCFIInstrs(MachineFunction &MF) {
   return InsertedCFIInstr;
 }
 
-void CFIInstrInserter::report(const MBBCFAInfo &Pred,
-                              const MBBCFAInfo &Succ) {
+void CFIInstrInserter::report(const MBBCFAInfo &Pred, const MBBCFAInfo &Succ) {
   errs() << "*** Inconsistent CFA register and/or offset between pred and succ "
             "***\n";
-  errs() << "Pred: " << Pred.MBB->getName()
+  errs() << "Pred: " << Pred.MBB->getName() << " #" << Pred.MBB->getNumber()
+         << " in " << Pred.MBB->getParent()->getName()
          << " outgoing CFA Reg:" << Pred.OutgoingCFARegister << "\n";
-  errs() << "Pred: " << Pred.MBB->getName()
+  errs() << "Pred: " << Pred.MBB->getName() << " #" << Pred.MBB->getNumber()
+         << " in " << Pred.MBB->getParent()->getName()
          << " outgoing CFA Offset:" << Pred.OutgoingCFAOffset << "\n";
-  errs() << "Succ: " << Succ.MBB->getName()
+  errs() << "Succ: " << Succ.MBB->getName() << " #" << Succ.MBB->getNumber()
          << " incoming CFA Reg:" << Succ.IncomingCFARegister << "\n";
-  errs() << "Succ: " << Succ.MBB->getName()
+  errs() << "Succ: " << Succ.MBB->getName() << " #" << Succ.MBB->getNumber()
          << " incoming CFA Offset:" << Succ.IncomingCFAOffset << "\n";
 }
 
 unsigned CFIInstrInserter::verify(MachineFunction &MF) {
   unsigned ErrorNum = 0;
-  for (MachineBasicBlock &CurrMBB : MF) {
-    const MBBCFAInfo &CurrMBBInfo = MBBVector[CurrMBB.getNumber()];
-    for (MachineBasicBlock *Succ : CurrMBB.successors()) {
+  for (auto *CurrMBB : depth_first(&MF)) {
+    const MBBCFAInfo &CurrMBBInfo = MBBVector[CurrMBB->getNumber()];
+    for (MachineBasicBlock *Succ : CurrMBB->successors()) {
       const MBBCFAInfo &SuccMBBInfo = MBBVector[Succ->getNumber()];
       // Check that incoming offset and register values of successors match the
       // outgoing offset and register values of CurrMBB

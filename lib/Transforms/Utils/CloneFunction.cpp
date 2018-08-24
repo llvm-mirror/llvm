@@ -18,7 +18,7 @@
 #include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/LoopInfo.h"
-#include "llvm/Analysis/Utils/Local.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DebugInfo.h"
@@ -275,7 +275,7 @@ namespace {
 
     /// The specified block is found to be reachable, clone it and
     /// anything that it can reach.
-    void CloneBlock(const BasicBlock *BB, 
+    void CloneBlock(const BasicBlock *BB,
                     BasicBlock::const_iterator StartingInst,
                     std::vector<const BasicBlock*> &ToClone);
   };
@@ -290,7 +290,7 @@ void PruningFunctionCloner::CloneBlock(const BasicBlock *BB,
 
   // Have we already cloned this block?
   if (BBEntry) return;
-  
+
   // Nope, clone it now.
   BasicBlock *NewBB;
   BBEntry = NewBB = BasicBlock::Create(BB->getContext());
@@ -363,7 +363,7 @@ void PruningFunctionCloner::CloneBlock(const BasicBlock *BB,
         hasDynamicAllocas = true;
     }
   }
-  
+
   // Finally, clone over the terminator.
   const TerminatorInst *OldTI = BB->getTerminator();
   bool TerminatorDone = false;
@@ -400,7 +400,7 @@ void PruningFunctionCloner::CloneBlock(const BasicBlock *BB,
       TerminatorDone = true;
     }
   }
-  
+
   if (!TerminatorDone) {
     Instruction *NewInst = OldTI->clone();
     if (OldTI->hasName())
@@ -418,11 +418,11 @@ void PruningFunctionCloner::CloneBlock(const BasicBlock *BB,
     for (const BasicBlock *Succ : TI->successors())
       ToClone.push_back(Succ);
   }
-  
+
   if (CodeInfo) {
     CodeInfo->ContainsCalls          |= hasCalls;
     CodeInfo->ContainsDynamicAllocas |= hasDynamicAllocas;
-    CodeInfo->ContainsDynamicAllocas |= hasStaticAllocas && 
+    CodeInfo->ContainsDynamicAllocas |= hasStaticAllocas &&
       BB != &BB->getParent()->front();
   }
 }
@@ -468,7 +468,7 @@ void llvm::CloneAndPruneIntoFromInst(Function *NewFunc, const Function *OldFunc,
     CloneWorklist.pop_back();
     PFC.CloneBlock(BB, BB->begin(), CloneWorklist);
   }
-  
+
   // Loop over all of the basic blocks in the old function.  If the block was
   // reachable, we have cloned it and the old block is now in the value map:
   // insert it into the new function in the right order.  If not, ignore it.
@@ -500,7 +500,7 @@ void llvm::CloneAndPruneIntoFromInst(Function *NewFunc, const Function *OldFunc,
                      ModuleLevelChanges ? RF_None : RF_NoModuleLevelChanges,
                      TypeMapper, Materializer);
   }
-  
+
   // Defer PHI resolution until rest of function is resolved, PHI resolution
   // requires the CFG to be up-to-date.
   for (unsigned phino = 0, e = PHIToResolve.size(); phino != e; ) {
@@ -519,7 +519,7 @@ void llvm::CloneAndPruneIntoFromInst(Function *NewFunc, const Function *OldFunc,
         Value *V = VMap.lookup(PN->getIncomingBlock(pred));
         if (BasicBlock *MappedBlock = cast_or_null<BasicBlock>(V)) {
           Value *InVal = MapValue(PN->getIncomingValue(pred),
-                                  VMap, 
+                                  VMap,
                         ModuleLevelChanges ? RF_None : RF_NoModuleLevelChanges);
           assert(InVal && "Unknown input value?");
           PN->setIncomingValue(pred, InVal);
@@ -529,16 +529,16 @@ void llvm::CloneAndPruneIntoFromInst(Function *NewFunc, const Function *OldFunc,
           --pred;  // Revisit the next entry.
           --e;
         }
-      } 
+      }
     }
-    
+
     // The loop above has removed PHI entries for those blocks that are dead
     // and has updated others.  However, if a block is live (i.e. copied over)
     // but its terminator has been changed to not go to this block, then our
     // phi nodes will have invalid entries.  Update the PHI nodes in this
     // case.
     PHINode *PN = cast<PHINode>(NewBB->begin());
-    NumPreds = std::distance(pred_begin(NewBB), pred_end(NewBB));
+    NumPreds = pred_size(NewBB);
     if (NumPreds != PN->getNumIncomingValues()) {
       assert(NumPreds < PN->getNumIncomingValues());
       // Count how many times each predecessor comes to this block.
@@ -546,11 +546,11 @@ void llvm::CloneAndPruneIntoFromInst(Function *NewFunc, const Function *OldFunc,
       for (pred_iterator PI = pred_begin(NewBB), E = pred_end(NewBB);
            PI != E; ++PI)
         --PredCount[*PI];
-      
+
       // Figure out how many entries to remove from each PHI.
       for (unsigned i = 0, e = PN->getNumIncomingValues(); i != e; ++i)
         ++PredCount[PN->getIncomingBlock(i)];
-      
+
       // At this point, the excess predecessor entries are positive in the
       // map.  Loop over all of the PHIs and remove excess predecessor
       // entries.
@@ -563,7 +563,7 @@ void llvm::CloneAndPruneIntoFromInst(Function *NewFunc, const Function *OldFunc,
         }
       }
     }
-    
+
     // If the loops above have made these phi nodes have 0 or 1 operand,
     // replace them with undef or the input value.  We must do this for
     // correctness, because 0-operand phis are not valid.
@@ -655,7 +655,7 @@ void llvm::CloneAndPruneIntoFromInst(Function *NewFunc, const Function *OldFunc,
 
     BranchInst *BI = dyn_cast<BranchInst>(I->getTerminator());
     if (!BI || BI->isConditional()) { ++I; continue; }
-    
+
     BasicBlock *Dest = BI->getSuccessor(0);
     if (!Dest->getSinglePredecessor()) {
       ++I; continue;
@@ -668,16 +668,16 @@ void llvm::CloneAndPruneIntoFromInst(Function *NewFunc, const Function *OldFunc,
     // We know all single-entry PHI nodes in the inlined function have been
     // removed, so we just need to splice the blocks.
     BI->eraseFromParent();
-    
+
     // Make all PHI nodes that referred to Dest now refer to I as their source.
     Dest->replaceAllUsesWith(&*I);
 
     // Move all the instructions in the succ to the pred.
     I->getInstList().splice(I->end(), Dest->getInstList());
-    
+
     // Remove the dest block.
     Dest->eraseFromParent();
-    
+
     // Do not increment I, iteratively merge all things this block branches to.
   }
 
@@ -703,14 +703,14 @@ void llvm::CloneAndPruneFunctionInto(Function *NewFunc, const Function *OldFunc,
                                      ValueToValueMapTy &VMap,
                                      bool ModuleLevelChanges,
                                      SmallVectorImpl<ReturnInst*> &Returns,
-                                     const char *NameSuffix, 
+                                     const char *NameSuffix,
                                      ClonedCodeInfo *CodeInfo,
                                      Instruction *TheCall) {
   CloneAndPruneIntoFromInst(NewFunc, OldFunc, &OldFunc->front().front(), VMap,
                             ModuleLevelChanges, Returns, NameSuffix, CodeInfo);
 }
 
-/// \brief Remaps instructions in \p Blocks using the mapping in \p VMap.
+/// Remaps instructions in \p Blocks using the mapping in \p VMap.
 void llvm::remapInstructionsInBlocks(
     const SmallVectorImpl<BasicBlock *> &Blocks, ValueToValueMapTy &VMap) {
   // Rewrite the code to refer to itself.
@@ -720,7 +720,7 @@ void llvm::remapInstructionsInBlocks(
                        RF_NoModuleLevelChanges | RF_IgnoreMissingLocals);
 }
 
-/// \brief Clones a loop \p OrigLoop.  Returns the loop and the blocks in \p
+/// Clones a loop \p OrigLoop.  Returns the loop and the blocks in \p
 /// Blocks.
 ///
 /// Updates LoopInfo and DominatorTree assuming the loop is dominated by block
@@ -730,7 +730,7 @@ Loop *llvm::cloneLoopWithPreheader(BasicBlock *Before, BasicBlock *LoopDomBB,
                                    const Twine &NameSuffix, LoopInfo *LI,
                                    DominatorTree *DT,
                                    SmallVectorImpl<BasicBlock *> &Blocks) {
-  assert(OrigLoop->getSubLoops().empty() && 
+  assert(OrigLoop->getSubLoops().empty() &&
          "Loop to be cloned cannot have inner loop");
   Function *F = OrigLoop->getHeader()->getParent();
   Loop *ParentLoop = OrigLoop->getParentLoop();
@@ -784,7 +784,7 @@ Loop *llvm::cloneLoopWithPreheader(BasicBlock *Before, BasicBlock *LoopDomBB,
   return NewLoop;
 }
 
-/// \brief Duplicate non-Phi instructions from the beginning of block up to
+/// Duplicate non-Phi instructions from the beginning of block up to
 /// StopAt instruction into a split block between BB and its predecessor.
 BasicBlock *
 llvm::DuplicateInstructionsInSplitBetween(BasicBlock *BB, BasicBlock *PredBB,

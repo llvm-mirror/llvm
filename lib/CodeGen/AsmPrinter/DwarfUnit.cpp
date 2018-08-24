@@ -47,11 +47,6 @@ using namespace llvm;
 
 #define DEBUG_TYPE "dwarfdebug"
 
-static cl::opt<bool>
-GenerateDwarfTypeUnits("generate-type-units", cl::Hidden,
-                       cl::desc("Generate DWARF4 type units."),
-                       cl::init(false));
-
 DIEDwarfExpression::DIEDwarfExpression(const AsmPrinter &AP, DwarfUnit &DU,
                                        DIELoc &DIE)
     : DwarfExpression(AP.getDwarfVersion()), AP(AP), DU(DU),
@@ -185,7 +180,7 @@ bool DwarfUnit::isShareableAcrossCUs(const DINode *D) const {
     return false;
   return (isa<DIType>(D) ||
           (isa<DISubprogram>(D) && !cast<DISubprogram>(D)->isDefinition())) &&
-         !GenerateDwarfTypeUnits;
+         !DD->generateTypeUnits();
 }
 
 DIE *DwarfUnit::getDIE(const DINode *D) const {
@@ -239,15 +234,23 @@ void DwarfUnit::addSInt(DIELoc &Die, Optional<dwarf::Form> Form,
 
 void DwarfUnit::addString(DIE &Die, dwarf::Attribute Attribute,
                           StringRef String) {
+  if (CUNode->isDebugDirectivesOnly())
+    return;
+
   if (DD->useInlineStrings()) {
     Die.addValue(DIEValueAllocator, Attribute, dwarf::DW_FORM_string,
                  new (DIEValueAllocator)
                      DIEInlineString(String, DIEValueAllocator));
     return;
   }
-  auto StringPoolEntry = DU->getStringPool().getEntry(*Asm, String);
   dwarf::Form IxForm =
       isDwoUnit() ? dwarf::DW_FORM_GNU_str_index : dwarf::DW_FORM_strp;
+
+  auto StringPoolEntry =
+      useSegmentedStringOffsetsTable() || IxForm == dwarf::DW_FORM_GNU_str_index
+          ? DU->getStringPool().getIndexedEntry(*Asm, String)
+          : DU->getStringPool().getEntry(*Asm, String);
+
   // For DWARF v5 and beyond, use the smallest strx? form possible.
   if (useSegmentedStringOffsetsTable()) {
     IxForm = dwarf::DW_FORM_strx1;
@@ -404,6 +407,12 @@ void DwarfUnit::addSourceLine(DIE &Die, const DISubprogram *SP) {
   assert(SP);
 
   addSourceLine(Die, SP->getLine(), SP->getFile());
+}
+
+void DwarfUnit::addSourceLine(DIE &Die, const DILabel *L) {
+  assert(L);
+
+  addSourceLine(Die, L->getLine(), L->getFile());
 }
 
 void DwarfUnit::addSourceLine(DIE &Die, const DIType *Ty) {
@@ -768,7 +777,7 @@ DIE *DwarfUnit::getOrCreateTypeDIE(const MDNode *TyNode) {
   else if (auto *STy = dyn_cast<DISubroutineType>(Ty))
     constructTypeDIE(TyDIE, STy);
   else if (auto *CTy = dyn_cast<DICompositeType>(Ty)) {
-    if (GenerateDwarfTypeUnits && !Ty->isForwardDecl())
+    if (DD->generateTypeUnits() && !Ty->isForwardDecl())
       if (MDString *TypeId = CTy->getRawIdentifier()) {
         DD->addDwarfTypeUnitType(getCU(), TypeId->getString(), TyDIE, CTy);
         // Skip updating the accelerator tables since this is not the full type.
@@ -792,7 +801,7 @@ void DwarfUnit::updateAcceleratorTables(const DIScope *Context,
       IsImplementation = CT->getRuntimeLang() == 0 || CT->isObjcClassComplete();
     }
     unsigned Flags = IsImplementation ? dwarf::DW_FLAG_type_implementation : 0;
-    DD->addAccelType(Ty->getName(), TyDIE, Flags);
+    DD->addAccelType(*CUNode, Ty->getName(), TyDIE, Flags);
 
     if (!Context || isa<DICompileUnit>(Context) || isa<DIFile>(Context) ||
         isa<DINamespace>(Context))
@@ -856,6 +865,11 @@ void DwarfUnit::constructTypeDIE(DIE &Buffer, const DIBasicType *BTy) {
 
   uint64_t Size = BTy->getSizeInBits() >> 3;
   addUInt(Buffer, dwarf::DW_AT_byte_size, None, Size);
+
+  if (BTy->isBigEndian())
+    addUInt(Buffer, dwarf::DW_AT_endianity, None, dwarf::DW_END_big);
+  else if (BTy->isLittleEndian())
+    addUInt(Buffer, dwarf::DW_AT_endianity, None, dwarf::DW_END_little);
 }
 
 void DwarfUnit::constructTypeDIE(DIE &Buffer, const DIDerivedType *DTy) {
@@ -1160,7 +1174,7 @@ DIE *DwarfUnit::getOrCreateNameSpace(const DINamespace *NS) {
     addString(NDie, dwarf::DW_AT_name, NS->getName());
   else
     Name = "(anonymous namespace)";
-  DD->addAccelNamespace(Name, NDie);
+  DD->addAccelNamespace(*CUNode, Name, NDie);
   addGlobalName(Name, NDie, NS->getScope());
   if (NS->getExportSymbols())
     addFlag(NDie, dwarf::DW_AT_export_symbols);
@@ -1187,7 +1201,7 @@ DIE *DwarfUnit::getOrCreateModule(const DIModule *M) {
     addString(MDie, dwarf::DW_AT_LLVM_include_path, M->getIncludePath());
   if (!M->getISysRoot().empty())
     addString(MDie, dwarf::DW_AT_LLVM_isysroot, M->getISysRoot());
-  
+
   return &MDie;
 }
 
@@ -1409,7 +1423,7 @@ DIE *DwarfUnit::getIndexTyDie() {
   addUInt(*IndexTyDie, dwarf::DW_AT_byte_size, None, sizeof(int64_t));
   addUInt(*IndexTyDie, dwarf::DW_AT_encoding, dwarf::DW_FORM_data1,
           dwarf::DW_ATE_unsigned);
-  DD->addAccelType(Name, *IndexTyDie, /*Flags*/ 0);
+  DD->addAccelType(*CUNode, Name, *IndexTyDie, /*Flags*/ 0);
   return IndexTyDie;
 }
 
@@ -1696,7 +1710,7 @@ void DwarfUnit::emitCommonHeader(bool UseOffsets, dwarf::UnitType UT) {
 }
 
 void DwarfTypeUnit::emitHeader(bool UseOffsets) {
-  DwarfUnit::emitCommonHeader(UseOffsets, 
+  DwarfUnit::emitCommonHeader(UseOffsets,
                               DD->useSplitDwarf() ? dwarf::DW_UT_split_type
                                                   : dwarf::DW_UT_type);
   Asm->OutStreamer->AddComment("Type Signature");
@@ -1756,4 +1770,13 @@ void DwarfUnit::addStringOffsetsStart() {
   addSectionLabel(getUnitDie(), dwarf::DW_AT_str_offsets_base,
                   DU->getStringOffsetsStartSym(),
                   TLOF.getDwarfStrOffSection()->getBeginSymbol());
+}
+
+void DwarfUnit::addRnglistsBase() {
+  assert(DD->getDwarfVersion() >= 5 &&
+         "DW_AT_rnglists_base requires DWARF version 5 or later");
+  const TargetLoweringObjectFile &TLOF = Asm->getObjFileLowering();
+  addSectionLabel(getUnitDie(), dwarf::DW_AT_rnglists_base,
+                  DU->getRnglistsTableBaseSym(),
+                  TLOF.getDwarfRnglistsSection()->getBeginSymbol());
 }

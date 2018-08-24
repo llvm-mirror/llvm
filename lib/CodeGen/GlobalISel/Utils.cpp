@@ -18,6 +18,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineOptimizationRemarkEmitter.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/StackProtector.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
@@ -58,6 +59,13 @@ unsigned llvm::constrainOperandRegClass(
   // register class constraints on some of their operands: If it's a use, we can
   // skip constraining as the instruction defining the register would constrain
   // it.
+
+  // We can't constrain unallocatable register classes, because we can't create
+  // virtual registers for these classes, so we need to let targets handled this
+  // case.
+  if (RegClass && !RegClass->isAllocatable())
+    RegClass = TRI.getConstrainedRegClassForOperand(RegMO, MRI);
+
   if (!RegClass) {
     assert((!isTargetSpecificOpcode(II.getOpcode()) || RegMO.isUse()) &&
            "Register class constraint is required unless either the "
@@ -94,7 +102,7 @@ bool llvm::constrainSelectedInstRegOperands(MachineInstr &I,
     if (!MO.isReg())
       continue;
 
-    DEBUG(dbgs() << "Converting operand: " << MO << '\n');
+    LLVM_DEBUG(dbgs() << "Converting operand: " << MO << '\n');
     assert(MO.isReg() && "Unsupported non-reg operand");
 
     unsigned Reg = MO.getReg();
@@ -225,4 +233,8 @@ APFloat llvm::getAPFloatFromSize(double Val, unsigned Size) {
   APFloat APF(Val);
   APF.convert(APFloat::IEEEhalf(), APFloat::rmNearestTiesToEven, &Ignored);
   return APF;
+}
+
+void llvm::getSelectionDAGFallbackAnalysisUsage(AnalysisUsage &AU) {
+  AU.addPreserved<StackProtector>();
 }

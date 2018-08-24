@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// \brief This file declares classes for handling the YAML representation
+/// This file declares classes for handling the YAML representation
 /// of wasm binaries.
 ///
 //===----------------------------------------------------------------------===//
@@ -195,6 +195,7 @@ struct LinkingSection : CustomSection {
     return C && C->Name == "linking";
   }
 
+  uint32_t Version;
   std::vector<SymbolInfo> SymbolTable;
   std::vector<SegmentInfo> SegmentInfos;
   std::vector<InitFunction> InitFunctions;

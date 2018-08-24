@@ -269,6 +269,10 @@ void ARMInstPrinter::printInst(const MCInst *MI, raw_ostream &O,
     }
     break;
   }
+  case ARM::TSB:
+  case ARM::t2TSB:
+    O << "\ttsb\tcsync";
+    return;
   }
 
   if (!printAliasInstr(MI, STI, O))
@@ -696,6 +700,13 @@ void ARMInstPrinter::printInstSyncBOption(const MCInst *MI, unsigned OpNum,
   O << ARM_ISB::InstSyncBOptToString(val);
 }
 
+void ARMInstPrinter::printTraceSyncBOption(const MCInst *MI, unsigned OpNum,
+                                          const MCSubtargetInfo &STI,
+                                          raw_ostream &O) {
+  unsigned val = MI->getOperand(OpNum).getImm();
+  O << ARM_TSB::TraceSyncBOptToString(val);
+}
+
 void ARMInstPrinter::printShiftImmOperand(const MCInst *MI, unsigned OpNum,
                                           const MCSubtargetInfo &STI,
                                           raw_ostream &O) {
@@ -823,7 +834,7 @@ void ARMInstPrinter::printMSRMaskOperand(const MCInst *MI, unsigned OpNum,
       return;
     }
 
-    O << SYSm; 
+    O << SYSm;
 
     return;
   }

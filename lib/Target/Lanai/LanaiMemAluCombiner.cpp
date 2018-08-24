@@ -277,8 +277,7 @@ void LanaiMemAluCombiner::insertMergedInstruction(MachineBasicBlock *BB,
     InstrBuilder.addImm(LPAC::makePostOp(AluOpcode));
 
   // Transfer memory operands.
-  InstrBuilder->setMemRefs(MemInstr->memoperands_begin(),
-                           MemInstr->memoperands_end());
+  InstrBuilder.setMemRefs(MemInstr->memoperands());
 }
 
 // Function determines if ALU operation (in alu_iter) can be combined with
@@ -343,7 +342,7 @@ MbbIterator LanaiMemAluCombiner::findClosestSuitableAluInstr(
       break;
 
     // Skip over debug instructions
-    if (First->isDebugValue())
+    if (First->isDebugInstr())
       continue;
 
     if (isSuitableAluInstr(IsSpls, First, *Base, *Offset)) {

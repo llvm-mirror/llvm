@@ -136,10 +136,8 @@ static bool isBSDLike(object::Archive::Kind Kind) {
 
 template <class T>
 static void print(raw_ostream &Out, object::Archive::Kind Kind, T Val) {
-  if (isBSDLike(Kind))
-    support::endian::Writer<support::little>(Out).write(Val);
-  else
-    support::endian::Writer<support::big>(Out).write(Val);
+  support::endian::write(Out, Val,
+                         isBSDLike(Kind) ? support::little : support::big);
 }
 
 static void printRestOfMemberHeader(
@@ -207,7 +205,7 @@ static std::string computeRelativePath(StringRef From, StringRef To) {
   for (auto ToE = sys::path::end(To); ToI != ToE; ++ToI)
     sys::path::append(Relative, *ToI);
 
-#ifdef LLVM_ON_WIN32
+#ifdef _WIN32
   // Replace backslashes with slashes so that the path is portable between *nix
   // and Windows.
   std::replace(Relative.begin(), Relative.end(), '\\', '/');
@@ -296,8 +294,7 @@ static bool isArchiveSymbol(const object::BasicSymbolRef &S) {
     return false;
   if (!(Symflags & object::SymbolRef::SF_Global))
     return false;
-  if (Symflags & object::SymbolRef::SF_Undefined &&
-      !(Symflags & object::SymbolRef::SF_Indirect))
+  if (Symflags & object::SymbolRef::SF_Undefined)
     return false;
   return true;
 }

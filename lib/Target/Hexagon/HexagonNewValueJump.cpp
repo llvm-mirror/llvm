@@ -96,7 +96,7 @@ namespace {
     const HexagonInstrInfo *QII;
     const HexagonRegisterInfo *QRI;
 
-    /// \brief A handle to the branch probability pass.
+    /// A handle to the branch probability pass.
     const MachineBranchProbabilityInfo *MBPI;
 
     bool isNewValueJumpCandidate(const MachineInstr &MI) const;
@@ -160,7 +160,7 @@ static bool canBeFeederToNewValueJump(const HexagonInstrInfo *QII,
   assert(HadDef);
 
   // Make sure there is no 'def' or 'use' of any of the uses of
-  // feeder insn between it's definition, this MI and jump, jmpInst
+  // feeder insn between its definition, this MI and jump, jmpInst
   // skipping compare, cmpInst.
   // Here's the example.
   //    r21=memub(r22+r24<<#0)
@@ -302,7 +302,7 @@ static bool canCompareBeNewValueJump(const HexagonInstrInfo *QII,
   // and satisfy the following conditions.
   ++II;
   for (MachineBasicBlock::iterator localII = II; localII != end; ++localII) {
-    if (localII->isDebugValue())
+    if (localII->isDebugInstr())
       continue;
 
     // Check 1.
@@ -448,8 +448,8 @@ bool HexagonNewValueJump::isNewValueJumpCandidate(
 }
 
 bool HexagonNewValueJump::runOnMachineFunction(MachineFunction &MF) {
-  DEBUG(dbgs() << "********** Hexagon New Value Jump **********\n"
-               << "********** Function: " << MF.getName() << "\n");
+  LLVM_DEBUG(dbgs() << "********** Hexagon New Value Jump **********\n"
+                    << "********** Function: " << MF.getName() << "\n");
 
   if (skipFunction(MF.getFunction()))
     return false;
@@ -474,9 +474,10 @@ bool HexagonNewValueJump::runOnMachineFunction(MachineFunction &MF) {
        MBBb != MBBe; ++MBBb) {
     MachineBasicBlock *MBB = &*MBBb;
 
-    DEBUG(dbgs() << "** dumping bb ** " << MBB->getNumber() << "\n");
-    DEBUG(MBB->dump());
-    DEBUG(dbgs() << "\n" << "********** dumping instr bottom up **********\n");
+    LLVM_DEBUG(dbgs() << "** dumping bb ** " << MBB->getNumber() << "\n");
+    LLVM_DEBUG(MBB->dump());
+    LLVM_DEBUG(dbgs() << "\n"
+                      << "********** dumping instr bottom up **********\n");
     bool foundJump    = false;
     bool foundCompare = false;
     bool invertPredicate = false;
@@ -494,14 +495,14 @@ bool HexagonNewValueJump::runOnMachineFunction(MachineFunction &MF) {
     for (MachineBasicBlock::iterator MII = MBB->end(), E = MBB->begin();
          MII != E;) {
       MachineInstr &MI = *--MII;
-      if (MI.isDebugValue()) {
+      if (MI.isDebugInstr()) {
         continue;
       }
 
       if ((nvjCount == 0) || (nvjCount > -1 && nvjCount <= nvjGenerated))
         break;
 
-      DEBUG(dbgs() << "Instr: "; MI.dump(); dbgs() << "\n");
+      LLVM_DEBUG(dbgs() << "Instr: "; MI.dump(); dbgs() << "\n");
 
       if (!foundJump && (MI.getOpcode() == Hexagon::J2_jumpt ||
                          MI.getOpcode() == Hexagon::J2_jumptpt ||

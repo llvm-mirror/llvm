@@ -331,7 +331,7 @@ bool ARMBaseInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
     bool CantAnalyze = false;
 
     // Skip over DEBUG values and predicated nonterminators.
-    while (I->isDebugValue() || !I->isTerminator()) {
+    while (I->isDebugInstr() || !I->isTerminator()) {
       if (I == MBB.begin())
         return false;
       --I;
@@ -935,6 +935,25 @@ void ARMBaseInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     Mov->addRegisterKilled(SrcReg, TRI);
 }
 
+bool ARMBaseInstrInfo::isCopyInstr(const MachineInstr &MI,
+                                   const MachineOperand *&Src,
+                                   const MachineOperand *&Dest) const {
+  // VMOVRRD is also a copy instruction but it requires
+  // special way of handling. It is more complex copy version
+  // and since that we are not considering it. For recognition
+  // of such instruction isExtractSubregLike MI interface fuction
+  // could be used.
+  // VORRq is considered as a move only if two inputs are
+  // the same register.
+  if (!MI.isMoveReg() ||
+      (MI.getOpcode() == ARM::VORRq &&
+       MI.getOperand(1).getReg() != MI.getOperand(2).getReg()))
+    return false;
+  Dest = &MI.getOperand(0);
+  Src = &MI.getOperand(1);
+  return true;
+}
+
 const MachineInstrBuilder &
 ARMBaseInstrInfo::AddDReg(MachineInstrBuilder &MIB, unsigned Reg,
                           unsigned SubIdx, unsigned State,
@@ -1341,7 +1360,13 @@ unsigned ARMBaseInstrInfo::isLoadFromStackSlot(const MachineInstr &MI,
     }
     break;
   case ARM::VLD1q64:
+  case ARM::VLD1d8TPseudo:
+  case ARM::VLD1d16TPseudo:
+  case ARM::VLD1d32TPseudo:
   case ARM::VLD1d64TPseudo:
+  case ARM::VLD1d8QPseudo:
+  case ARM::VLD1d16QPseudo:
+  case ARM::VLD1d32QPseudo:
   case ARM::VLD1d64QPseudo:
     if (MI.getOperand(1).isFI() && MI.getOperand(0).getSubReg() == 0) {
       FrameIndex = MI.getOperand(1).getIndex();
@@ -1365,7 +1390,7 @@ unsigned ARMBaseInstrInfo::isLoadFromStackSlotPostFE(const MachineInstr &MI,
   return MI.mayLoad() && hasLoadFromStackSlot(MI, Dummy, FrameIndex);
 }
 
-/// \brief Expands MEMCPY to either LDMIA/STMIA or LDMIA_UPD/STMID_UPD
+/// Expands MEMCPY to either LDMIA/STMIA or LDMIA_UPD/STMID_UPD
 /// depending on whether the result is used.
 void ARMBaseInstrInfo::expandMEMCPY(MachineBasicBlock::iterator MI) const {
   bool isThumb1 = Subtarget.isThumb1Only();
@@ -1469,7 +1494,7 @@ bool ARMBaseInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     return false;
 
   // All clear, widen the COPY.
-  DEBUG(dbgs() << "widening:    " << MI);
+  LLVM_DEBUG(dbgs() << "widening:    " << MI);
   MachineInstrBuilder MIB(*MI.getParent()->getParent(), MI);
 
   // Get rid of the old implicit-def of DstRegD.  Leave it if it defines a Q-reg
@@ -1498,7 +1523,7 @@ bool ARMBaseInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     MI.addRegisterKilled(SrcRegS, TRI, true);
   }
 
-  DEBUG(dbgs() << "replaced by: " << MI);
+  LLVM_DEBUG(dbgs() << "replaced by: " << MI);
   return true;
 }
 
@@ -1565,11 +1590,10 @@ void ARMBaseInstrInfo::reMaterialize(MachineBasicBlock &MBB,
     MachineFunction &MF = *MBB.getParent();
     unsigned CPI = Orig.getOperand(1).getIndex();
     unsigned PCLabelId = duplicateCPV(MF, CPI);
-    MachineInstrBuilder MIB =
-        BuildMI(MBB, I, Orig.getDebugLoc(), get(Opcode), DestReg)
-            .addConstantPoolIndex(CPI)
-            .addImm(PCLabelId);
-    MIB->setMemRefs(Orig.memoperands_begin(), Orig.memoperands_end());
+    BuildMI(MBB, I, Orig.getDebugLoc(), get(Opcode), DestReg)
+        .addConstantPoolIndex(CPI)
+        .addImm(PCLabelId)
+        .cloneMemRefs(Orig);
     break;
   }
   }
@@ -1815,7 +1839,7 @@ bool ARMBaseInstrInfo::isSchedulingBoundary(const MachineInstr &MI,
   // considered a scheduling hazard, which is wrong. It should be the actual
   // instruction preceding the dbg_value instruction(s), just like it is
   // when debug info is not present.
-  if (MI.isDebugValue())
+  if (MI.isDebugInstr())
     return false;
 
   // Terminators and labels can't be scheduled around.
@@ -1829,8 +1853,8 @@ bool ARMBaseInstrInfo::isSchedulingBoundary(const MachineInstr &MI,
   // to the t2IT instruction. The added compile time and complexity does not
   // seem worth it.
   MachineBasicBlock::const_iterator I = MI;
-  // Make sure to skip any dbg_value instructions
-  while (++I != MBB->end() && I->isDebugValue())
+  // Make sure to skip any debug instructions
+  while (++I != MBB->end() && I->isDebugInstr())
     ;
   if (I != MBB->end() && I->getOpcode() == ARM::t2IT)
     return true;
@@ -4212,6 +4236,9 @@ ARMBaseInstrInfo::getOperandLatency(const InstrItineraryData *ItinData,
     case ARM::VLD3d8Pseudo:
     case ARM::VLD3d16Pseudo:
     case ARM::VLD3d32Pseudo:
+    case ARM::VLD1d8TPseudo:
+    case ARM::VLD1d16TPseudo:
+    case ARM::VLD1d32TPseudo:
     case ARM::VLD1d64TPseudo:
     case ARM::VLD1d64TPseudoWB_fixed:
     case ARM::VLD1d64TPseudoWB_register:
@@ -4230,9 +4257,28 @@ ARMBaseInstrInfo::getOperandLatency(const InstrItineraryData *ItinData,
     case ARM::VLD4d8Pseudo:
     case ARM::VLD4d16Pseudo:
     case ARM::VLD4d32Pseudo:
+    case ARM::VLD1d8QPseudo:
+    case ARM::VLD1d16QPseudo:
+    case ARM::VLD1d32QPseudo:
     case ARM::VLD1d64QPseudo:
     case ARM::VLD1d64QPseudoWB_fixed:
     case ARM::VLD1d64QPseudoWB_register:
+    case ARM::VLD1q8HighQPseudo:
+    case ARM::VLD1q8LowQPseudo_UPD:
+    case ARM::VLD1q8HighTPseudo:
+    case ARM::VLD1q8LowTPseudo_UPD:
+    case ARM::VLD1q16HighQPseudo:
+    case ARM::VLD1q16LowQPseudo_UPD:
+    case ARM::VLD1q16HighTPseudo:
+    case ARM::VLD1q16LowTPseudo_UPD:
+    case ARM::VLD1q32HighQPseudo:
+    case ARM::VLD1q32LowQPseudo_UPD:
+    case ARM::VLD1q32HighTPseudo:
+    case ARM::VLD1q32LowTPseudo_UPD:
+    case ARM::VLD1q64HighQPseudo:
+    case ARM::VLD1q64LowQPseudo_UPD:
+    case ARM::VLD1q64HighTPseudo:
+    case ARM::VLD1q64LowTPseudo_UPD:
     case ARM::VLD4d8Pseudo_UPD:
     case ARM::VLD4d16Pseudo_UPD:
     case ARM::VLD4d32Pseudo_UPD:
@@ -4263,12 +4309,30 @@ ARMBaseInstrInfo::getOperandLatency(const InstrItineraryData *ItinData,
     case ARM::VLD2DUPd8wb_register:
     case ARM::VLD2DUPd16wb_register:
     case ARM::VLD2DUPd32wb_register:
+    case ARM::VLD2DUPq8EvenPseudo:
+    case ARM::VLD2DUPq8OddPseudo:
+    case ARM::VLD2DUPq16EvenPseudo:
+    case ARM::VLD2DUPq16OddPseudo:
+    case ARM::VLD2DUPq32EvenPseudo:
+    case ARM::VLD2DUPq32OddPseudo:
+    case ARM::VLD3DUPq8EvenPseudo:
+    case ARM::VLD3DUPq8OddPseudo:
+    case ARM::VLD3DUPq16EvenPseudo:
+    case ARM::VLD3DUPq16OddPseudo:
+    case ARM::VLD3DUPq32EvenPseudo:
+    case ARM::VLD3DUPq32OddPseudo:
     case ARM::VLD4DUPd8Pseudo:
     case ARM::VLD4DUPd16Pseudo:
     case ARM::VLD4DUPd32Pseudo:
     case ARM::VLD4DUPd8Pseudo_UPD:
     case ARM::VLD4DUPd16Pseudo_UPD:
     case ARM::VLD4DUPd32Pseudo_UPD:
+    case ARM::VLD4DUPq8EvenPseudo:
+    case ARM::VLD4DUPq8OddPseudo:
+    case ARM::VLD4DUPq16EvenPseudo:
+    case ARM::VLD4DUPq16OddPseudo:
+    case ARM::VLD4DUPq32EvenPseudo:
+    case ARM::VLD4DUPq32OddPseudo:
     case ARM::VLD1LNq8Pseudo:
     case ARM::VLD1LNq16Pseudo:
     case ARM::VLD1LNq32Pseudo:
@@ -4469,9 +4533,9 @@ void ARMBaseInstrInfo::expandLoadStackGuardBase(MachineBasicBlock::iterator MI,
 
   MIB = BuildMI(MBB, MI, DL, get(LoadOpc), Reg);
   MIB.addReg(Reg, RegState::Kill)
-     .addImm(0)
-     .setMemRefs(MI->memoperands_begin(), MI->memoperands_end())
-     .add(predOps(ARMCC::AL));
+      .addImm(0)
+      .cloneMemRefs(*MI)
+      .add(predOps(ARMCC::AL));
 }
 
 bool

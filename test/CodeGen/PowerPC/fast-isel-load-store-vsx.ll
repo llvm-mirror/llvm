@@ -1,4 +1,4 @@
-; RUN: llc < %s -O0 -fast-isel -mattr=+vsx -mtriple=powerpc64-unknown-linux-gnu -mcpu=pwr7 | FileCheck %s --check-prefix=ELF64VSX
+; RUN: llc < %s -O0 -fast-isel -mattr=+vsx -mtriple=powerpc64-unknown-linux-gnu -mcpu=pwr7 -ppc-late-peephole=false | FileCheck %s --check-prefix=ELF64VSX
 
 ;; The semantics of VSX stores for when R0 is used is different depending on
 ;; whether it is used as base or offset. If used as base, the effective
@@ -17,7 +17,7 @@ entry:
   %this.addr = alloca %SomeStruct*, align 8
   %V.addr = alloca double, align 8
   store %SomeStruct* %this, %SomeStruct** %this.addr, align 8
-; ELF64VSX: stxsdx {{[0-9][0-9]?}}, 0, {{[1-9][0-9]?}}
+; ELF64VSX: stfdx {{[0-9][0-9]?}}, 0, {{[1-9][0-9]?}}
   store double %V, double* %V.addr, align 8
   %this1 = load %SomeStruct*, %SomeStruct** %this.addr
   %Val = getelementptr inbounds %SomeStruct, %SomeStruct* %this1, i32 0, i32 0

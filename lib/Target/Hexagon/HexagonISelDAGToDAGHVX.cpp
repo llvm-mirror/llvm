@@ -1054,7 +1054,7 @@ OpRef HvxSelector::packs(ShuffleMask SM, OpRef Va, OpRef Vb,
   int VecLen = SM.Mask.size();
   MVT Ty = getSingleVT(MVT::i8);
 
-  auto IsSubvector = [] (ShuffleMask M) {
+  auto IsExtSubvector = [] (ShuffleMask M) {
     assert(M.MinSrc >= 0 && M.MaxSrc >= 0);
     for (int I = 0, E = M.Mask.size(); I != E; ++I) {
       if (M.Mask[I] >= 0 && M.Mask[I]-I != M.MinSrc)
@@ -1064,7 +1064,12 @@ OpRef HvxSelector::packs(ShuffleMask SM, OpRef Va, OpRef Vb,
   };
 
   if (SM.MaxSrc - SM.MinSrc < int(HwLen)) {
-    if (SM.MinSrc == 0 || SM.MinSrc == int(HwLen) || !IsSubvector(SM)) {
+    if (SM.MinSrc == 0 || SM.MinSrc == int(HwLen) || !IsExtSubvector(SM)) {
+      // If the mask picks elements from only one of the operands, return
+      // that operand, and update the mask to use index 0 to refer to the
+      // first element of that operand.
+      // If the mask extracts a subvector, it will be handled below, so
+      // skip it here.
       if (SM.MaxSrc < int(HwLen)) {
         memcpy(NewMask.data(), SM.Mask.data(), sizeof(int)*VecLen);
         return Va;
@@ -1079,17 +1084,23 @@ OpRef HvxSelector::packs(ShuffleMask SM, OpRef Va, OpRef Vb,
         return Vb;
       }
     }
+    int MinSrc = SM.MinSrc;
     if (SM.MaxSrc < int(HwLen)) {
       Vb = Va;
     } else if (SM.MinSrc > int(HwLen)) {
       Va = Vb;
-      SM.MinSrc -= HwLen;
+      MinSrc = SM.MinSrc - HwLen;
     }
     const SDLoc &dl(Results.InpNode);
-    SDValue S = DAG.getTargetConstant(SM.MinSrc, dl, MVT::i32);
-    if (isUInt<3>(SM.MinSrc)) {
-      Results.push(Hexagon::V6_valignbi, Ty, {Vb, Va, S});
+    if (isUInt<3>(MinSrc) || isUInt<3>(HwLen-MinSrc)) {
+      bool IsRight = isUInt<3>(MinSrc); // Right align.
+      SDValue S = DAG.getTargetConstant(IsRight ? MinSrc : HwLen-MinSrc,
+                                        dl, MVT::i32);
+      unsigned Opc = IsRight ? Hexagon::V6_valignbi
+                             : Hexagon::V6_vlalignbi;
+      Results.push(Opc, Ty, {Vb, Va, S});
     } else {
+      SDValue S = DAG.getTargetConstant(MinSrc, dl, MVT::i32);
       Results.push(Hexagon::A2_tfrsi, MVT::i32, {S});
       unsigned Top = Results.top();
       Results.push(Hexagon::V6_valignb, Ty, {Vb, Va, OpRef::res(Top)});
@@ -2037,10 +2048,6 @@ void HexagonDAGToDAGISel::SelectHvxVAlign(SDNode *N) {
 }
 
 void HexagonDAGToDAGISel::SelectV65GatherPred(SDNode *N) {
-  if (!HST->usePackets()) {
-    report_fatal_error("Support for gather requires packets, "
-                       "which are disabled");
-  }
   const SDLoc &dl(N);
   SDValue Chain = N->getOperand(0);
   SDValue Address = N->getOperand(2);
@@ -2072,18 +2079,13 @@ void HexagonDAGToDAGISel::SelectV65GatherPred(SDNode *N) {
   SDValue Ops[] = { Address, Predicate, Base, Modifier, Offset, Chain };
   SDNode *Result = CurDAG->getMachineNode(Opcode, dl, VTs, Ops);
 
-  MachineSDNode::mmo_iterator MemOp = MF->allocateMemRefsArray(1);
-  MemOp[0] = cast<MemIntrinsicSDNode>(N)->getMemOperand();
-  cast<MachineSDNode>(Result)->setMemRefs(MemOp, MemOp + 1);
+  MachineMemOperand *MemOp = cast<MemIntrinsicSDNode>(N)->getMemOperand();
+  CurDAG->setNodeMemRefs(cast<MachineSDNode>(Result), {MemOp});
 
   ReplaceNode(N, Result);
 }
 
 void HexagonDAGToDAGISel::SelectV65Gather(SDNode *N) {
-  if (!HST->usePackets()) {
-    report_fatal_error("Support for gather requires packets, "
-                       "which are disabled");
-  }
   const SDLoc &dl(N);
   SDValue Chain = N->getOperand(0);
   SDValue Address = N->getOperand(2);
@@ -2114,9 +2116,8 @@ void HexagonDAGToDAGISel::SelectV65Gather(SDNode *N) {
   SDValue Ops[] = { Address, Base, Modifier, Offset, Chain };
   SDNode *Result = CurDAG->getMachineNode(Opcode, dl, VTs, Ops);
 
-  MachineSDNode::mmo_iterator MemOp = MF->allocateMemRefsArray(1);
-  MemOp[0] = cast<MemIntrinsicSDNode>(N)->getMemOperand();
-  cast<MachineSDNode>(Result)->setMemRefs(MemOp, MemOp + 1);
+  MachineMemOperand *MemOp = cast<MemIntrinsicSDNode>(N)->getMemOperand();
+  CurDAG->setNodeMemRefs(cast<MachineSDNode>(Result), {MemOp});
 
   ReplaceNode(N, Result);
 }

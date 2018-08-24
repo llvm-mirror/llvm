@@ -86,6 +86,9 @@ enum ArchExtKind : unsigned {
   AEK_RAS =         1 << 12,
   AEK_SVE =         1 << 13,
   AEK_DOTPROD =     1 << 14,
+  AEK_SHA2    =     1 << 15,
+  AEK_AES     =     1 << 16,
+  AEK_FP16FML =     1 << 17,
   // Unsupported extensions.
   AEK_OS = 0x8000000,
   AEK_IWMMXT = 0x10000000,
@@ -171,7 +174,12 @@ enum ArchExtKind : unsigned {
   AEK_SVE =         1 << 9,
   AEK_DOTPROD =     1 << 10,
   AEK_RCPC =        1 << 11,
-  AEK_RDM =         1 << 12
+  AEK_RDM =         1 << 12,
+  AEK_SM4 =         1 << 13,
+  AEK_SHA3 =        1 << 14,
+  AEK_SHA2 =        1 << 15,
+  AEK_AES =         1 << 16,
+  AEK_FP16FML =     1 << 17,
 };
 
 StringRef getCanonicalArchName(StringRef Arch);
@@ -200,6 +208,7 @@ unsigned checkArchVersion(StringRef Arch);
 unsigned  getDefaultFPU(StringRef CPU, ArchKind AK);
 unsigned  getDefaultExtensions(StringRef CPU, ArchKind AK);
 StringRef getDefaultCPU(StringRef Arch);
+AArch64::ArchKind getCPUArchKind(StringRef CPU);
 
 // Parser
 unsigned parseFPU(StringRef FPU);

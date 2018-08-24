@@ -9,6 +9,7 @@
 
 #include "llvm/DebugInfo/DWARF/DWARFDebugRangeList.h"
 #include "llvm/DebugInfo/DWARF/DWARFContext.h"
+#include "llvm/Support/Errc.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cinttypes>
@@ -22,14 +23,17 @@ void DWARFDebugRangeList::clear() {
   Entries.clear();
 }
 
-bool DWARFDebugRangeList::extract(const DWARFDataExtractor &data,
-                                  uint32_t *offset_ptr) {
+Error DWARFDebugRangeList::extract(const DWARFDataExtractor &data,
+                                   uint32_t *offset_ptr) {
   clear();
   if (!data.isValidOffset(*offset_ptr))
-    return false;
+    return createStringError(errc::invalid_argument,
+                       "invalid range list offset 0x%" PRIx32, *offset_ptr);
+
   AddressSize = data.getAddressSize();
   if (AddressSize != 4 && AddressSize != 8)
-    return false;
+    return createStringError(errc::invalid_argument,
+                       "invalid address size: %" PRIu8, AddressSize);
   Offset = *offset_ptr;
   while (true) {
     RangeListEntry Entry;
@@ -43,13 +47,15 @@ bool DWARFDebugRangeList::extract(const DWARFDataExtractor &data,
     // Check that both values were extracted correctly.
     if (*offset_ptr != prev_offset + 2 * AddressSize) {
       clear();
-      return false;
+      return createStringError(errc::invalid_argument,
+                         "invalid range list entry at offset 0x%" PRIx32,
+                         prev_offset);
     }
     if (Entry.isEndOfListEntry())
       break;
     Entries.push_back(Entry);
   }
-  return true;
+  return Error::success();
 }
 
 void DWARFDebugRangeList::dump(raw_ostream &OS) const {

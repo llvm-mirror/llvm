@@ -276,3 +276,70 @@ define <8 x double> @test_intrinsic_fmin_v8f64(<8 x double> %x, <8 x double> %y)
   %z = call <8 x double> @llvm.minnum.v8f64(<8 x double> %x, <8 x double> %y) readnone
   ret <8 x double> %z
 }
+
+; The IR-level FMF propagate to the node. With nnan, there's no need to blend.
+
+define float @minnum_intrinsic_nnan_fmf_f32(float %a, float %b) {
+; SSE-LABEL: minnum_intrinsic_nnan_fmf_f32:
+; SSE:       # %bb.0:
+; SSE-NEXT:    minss %xmm1, %xmm0
+; SSE-NEXT:    retq
+;
+; AVX-LABEL: minnum_intrinsic_nnan_fmf_f32:
+; AVX:       # %bb.0:
+; AVX-NEXT:    vminss %xmm1, %xmm0, %xmm0
+; AVX-NEXT:    retq
+  %r = tail call nnan float @llvm.minnum.f32(float %a, float %b)
+  ret float %r
+}
+
+; Make sure vectors work too.
+
+define <2 x double> @minnum_intrinsic_nnan_fmf_v2f64(<2 x double> %a, <2 x double> %b) {
+; SSE-LABEL: minnum_intrinsic_nnan_fmf_v2f64:
+; SSE:       # %bb.0:
+; SSE-NEXT:    minpd %xmm1, %xmm0
+; SSE-NEXT:    retq
+;
+; AVX-LABEL: minnum_intrinsic_nnan_fmf_v2f64:
+; AVX:       # %bb.0:
+; AVX-NEXT:    vminpd %xmm1, %xmm0, %xmm0
+; AVX-NEXT:    retq
+  %r = tail call nnan <2 x double> @llvm.minnum.v2f64(<2 x double> %a, <2 x double> %b)
+  ret <2 x double> %r
+}
+
+; Current (but legacy someday): a function-level attribute should also enable the fold.
+
+define double @minnum_intrinsic_nnan_attr_f64(double %a, double %b) #0 {
+; SSE-LABEL: minnum_intrinsic_nnan_attr_f64:
+; SSE:       # %bb.0:
+; SSE-NEXT:    minsd %xmm1, %xmm0
+; SSE-NEXT:    retq
+;
+; AVX-LABEL: minnum_intrinsic_nnan_attr_f64:
+; AVX:       # %bb.0:
+; AVX-NEXT:    vminsd %xmm1, %xmm0, %xmm0
+; AVX-NEXT:    retq
+  %r = tail call double @llvm.minnum.f64(double %a, double %b)
+  ret double %r
+}
+
+; Make sure vectors work too.
+
+define <4 x float> @minnum_intrinsic_nnan_attr_v4f32(<4 x float> %a, <4 x float> %b) #0 {
+; SSE-LABEL: minnum_intrinsic_nnan_attr_v4f32:
+; SSE:       # %bb.0:
+; SSE-NEXT:    minps %xmm1, %xmm0
+; SSE-NEXT:    retq
+;
+; AVX-LABEL: minnum_intrinsic_nnan_attr_v4f32:
+; AVX:       # %bb.0:
+; AVX-NEXT:    vminps %xmm1, %xmm0, %xmm0
+; AVX-NEXT:    retq
+  %r = tail call <4 x float> @llvm.minnum.v4f32(<4 x float> %a, <4 x float> %b)
+  ret <4 x float> %r
+}
+
+attributes #0 = { "no-nans-fp-math"="true" }
+

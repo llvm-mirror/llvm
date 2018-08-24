@@ -165,7 +165,7 @@
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
-#include "llvm/Analysis/Utils/Local.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constant.h"
@@ -212,7 +212,7 @@ static cl::opt<bool>
 
 namespace {
 
-/// \brief A helper class for separating a constant offset from a GEP index.
+/// A helper class for separating a constant offset from a GEP index.
 ///
 /// In real programs, a GEP index may be more complicated than a simple addition
 /// of something and a constant integer which can be trivially splitted. For
@@ -339,7 +339,7 @@ private:
   const DominatorTree *DT;
 };
 
-/// \brief A pass that tries to split every GEP in the function into a variadic
+/// A pass that tries to split every GEP in the function into a variadic
 /// base and a constant offset. It is a FunctionPass because searching for the
 /// constant offset may inspect other basic blocks.
 class SeparateConstOffsetFromGEP : public FunctionPass {
@@ -587,6 +587,10 @@ APInt ConstantOffsetExtractor::find(Value *V, bool SignExtended,
     // Trace into subexpressions for more hoisting opportunities.
     if (CanTraceInto(SignExtended, ZeroExtended, BO, NonNegative))
       ConstantOffset = findInEitherOperand(BO, SignExtended, ZeroExtended);
+  } else if (isa<TruncInst>(V)) {
+    ConstantOffset =
+        find(U->getOperand(0), SignExtended, ZeroExtended, NonNegative)
+            .trunc(BitWidth);
   } else if (isa<SExtInst>(V)) {
     ConstantOffset = find(U->getOperand(0), /* SignExtended */ true,
                           ZeroExtended, NonNegative).sext(BitWidth);
@@ -651,8 +655,9 @@ ConstantOffsetExtractor::distributeExtsAndCloneChain(unsigned ChainIndex) {
   }
 
   if (CastInst *Cast = dyn_cast<CastInst>(U)) {
-    assert((isa<SExtInst>(Cast) || isa<ZExtInst>(Cast)) &&
-           "We only traced into two types of CastInst: sext and zext");
+    assert(
+        (isa<SExtInst>(Cast) || isa<ZExtInst>(Cast) || isa<TruncInst>(Cast)) &&
+        "Only following instructions can be traced: sext, zext & trunc");
     ExtInsts.push_back(Cast);
     UserChain[ChainIndex] = nullptr;
     return distributeExtsAndCloneChain(ChainIndex - 1);
@@ -703,7 +708,7 @@ Value *ConstantOffsetExtractor::removeConstOffset(unsigned ChainIndex) {
   BinaryOperator::BinaryOps NewOp = BO->getOpcode();
   if (BO->getOpcode() == Instruction::Or) {
     // Rebuild "or" as "add", because "or" may be invalid for the new
-    // epxression.
+    // expression.
     //
     // For instance, given
     //   a | (b + 5) where a and b + 5 have no common bits,
@@ -1063,7 +1068,7 @@ bool SeparateConstOffsetFromGEP::splitGEP(GetElementPtrInst *GEP) {
       DL->getTypeAllocSize(GEP->getResultElementType()));
   Type *IntPtrTy = DL->getIntPtrType(GEP->getType());
   if (AccumulativeByteOffset % ElementTypeSizeOfGEP == 0) {
-    // Very likely. As long as %gep is natually aligned, the byte offset we
+    // Very likely. As long as %gep is naturally aligned, the byte offset we
     // extracted should be a multiple of sizeof(*%gep).
     int64_t Index = AccumulativeByteOffset / ElementTypeSizeOfGEP;
     NewGEP = GetElementPtrInst::Create(GEP->getResultElementType(), NewGEP,

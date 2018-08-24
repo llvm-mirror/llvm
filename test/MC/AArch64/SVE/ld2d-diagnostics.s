@@ -30,6 +30,35 @@ ld2d {z7.d, z8.d}, p3/z, [x1, #5, MUL VL]
 
 
 // --------------------------------------------------------------------------//
+// Invalid scalar + scalar addressing modes
+
+ld2d { z0.d, z1.d }, p0/z, [x0, x0]
+// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: register must be x0..x30 with required shift 'lsl #3'
+// CHECK-NEXT: ld2d { z0.d, z1.d }, p0/z, [x0, x0]
+// CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:
+
+ld2d { z0.d, z1.d }, p0/z, [x0, xzr]
+// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: register must be x0..x30 with required shift 'lsl #3'
+// CHECK-NEXT: ld2d { z0.d, z1.d }, p0/z, [x0, xzr]
+// CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:
+
+ld2d { z0.d, z1.d }, p0/z, [x0, x0, lsl #2]
+// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: register must be x0..x30 with required shift 'lsl #3'
+// CHECK-NEXT: ld2d { z0.d, z1.d }, p0/z, [x0, x0, lsl #2]
+// CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:
+
+ld2d { z0.d, z1.d }, p0/z, [x0, w0]
+// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: register must be x0..x30 with required shift 'lsl #3'
+// CHECK-NEXT: ld2d { z0.d, z1.d }, p0/z, [x0, w0]
+// CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:
+
+ld2d { z0.d, z1.d }, p0/z, [x0, w0, uxtw]
+// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: register must be x0..x30 with required shift 'lsl #3'
+// CHECK-NEXT: ld2d { z0.d, z1.d }, p0/z, [x0, w0, uxtw]
+// CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:
+
+
+// --------------------------------------------------------------------------//
 // error: restricted predicate has range [0, 7].
 
 ld2d {z2.d, z3.d}, p8/z, [x15, #10, MUL VL]
@@ -64,4 +93,20 @@ ld2d { z0.d, z2.d }, p0/z, [x0]
 ld2d { v0.2d, v1.2d }, p0/z, [x0]
 // CHECK: [[@LINE-1]]:{{[0-9]+}}: error: invalid operand
 // CHECK-NEXT: ld2d { v0.2d, v1.2d }, p0/z, [x0]
+// CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:
+
+
+// --------------------------------------------------------------------------//
+// Negative tests for instructions that are incompatible with movprfx
+
+movprfx z21.d, p5/z, z28.d
+ld2d    { z21.d, z22.d }, p5/z, [x10, #10, mul vl]
+// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: instruction is unpredictable when following a movprfx, suggest replacing movprfx with mov
+// CHECK-NEXT: ld2d    { z21.d, z22.d }, p5/z, [x10, #10, mul vl]
+// CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:
+
+movprfx z21, z28
+ld2d    { z21.d, z22.d }, p5/z, [x10, #10, mul vl]
+// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: instruction is unpredictable when following a movprfx, suggest replacing movprfx with mov
+// CHECK-NEXT: ld2d    { z21.d, z22.d }, p5/z, [x10, #10, mul vl]
 // CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:

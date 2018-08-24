@@ -20,6 +20,7 @@
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cassert>
@@ -40,9 +41,9 @@ static inline unsigned clampStackAlignment(bool ShouldClamp, unsigned Align,
                                            unsigned StackAlign) {
   if (!ShouldClamp || Align <= StackAlign)
     return Align;
-  DEBUG(dbgs() << "Warning: requested alignment " << Align
-               << " exceeds the stack alignment " << StackAlign
-               << " when stack realignment is off" << '\n');
+  LLVM_DEBUG(dbgs() << "Warning: requested alignment " << Align
+                    << " exceeds the stack alignment " << StackAlign
+                    << " when stack realignment is off" << '\n');
   return StackAlign;
 }
 

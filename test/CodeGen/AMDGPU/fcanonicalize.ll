@@ -7,6 +7,7 @@ declare double @llvm.canonicalize.f64(double) #0
 declare half @llvm.canonicalize.f16(half) #0
 declare <2 x half> @llvm.canonicalize.v2f16(<2 x half>) #0
 declare i32 @llvm.amdgcn.workitem.id.x() #0
+declare <2 x double> @llvm.canonicalize.v2f64(<2 x double>) #0
 
 ; GCN-LABEL: {{^}}v_test_canonicalize_var_f32:
 ; GCN: v_mul_f32_e32 [[REG:v[0-9]+]], 1.0, {{v[0-9]+}}
@@ -39,7 +40,7 @@ define amdgpu_kernel void @v_test_canonicalize_fabs_var_f32(float addrspace(1)* 
 }
 
 ; GCN-LABEL: {{^}}v_test_canonicalize_fneg_fabs_var_f32:
-; GCN: v_mul_f32_e64 [[REG:v[0-9]+]], 1.0, -|{{v[0-9]+}}|
+; GCN: v_mul_f32_e64 [[REG:v[0-9]+]], -1.0, |{{v[0-9]+}}|
 ; GCN: buffer_store_dword [[REG]]
 define amdgpu_kernel void @v_test_canonicalize_fneg_fabs_var_f32(float addrspace(1)* %out) #1 {
   %val = load float, float addrspace(1)* %out
@@ -51,12 +52,21 @@ define amdgpu_kernel void @v_test_canonicalize_fneg_fabs_var_f32(float addrspace
 }
 
 ; GCN-LABEL: {{^}}v_test_canonicalize_fneg_var_f32:
-; GCN: v_mul_f32_e64 [[REG:v[0-9]+]], 1.0, -{{v[0-9]+}}
+; GCN: v_mul_f32_e32 [[REG:v[0-9]+]], -1.0, {{v[0-9]+}}
 ; GCN: buffer_store_dword [[REG]]
 define amdgpu_kernel void @v_test_canonicalize_fneg_var_f32(float addrspace(1)* %out) #1 {
   %val = load float, float addrspace(1)* %out
   %val.fneg = fsub float -0.0, %val
   %canonicalized = call float @llvm.canonicalize.f32(float %val.fneg)
+  store float %canonicalized, float addrspace(1)* %out
+  ret void
+}
+
+; GCN-LABEL: {{^}}test_fold_canonicalize_undef_f32:
+; GCN: v_mov_b32_e32 [[REG:v[0-9]+]], 0x7fc00000{{$}}
+; GCN: buffer_store_dword [[REG]]
+define amdgpu_kernel void @test_fold_canonicalize_undef_f32(float addrspace(1)* %out) #1 {
+  %canonicalized = call float @llvm.canonicalize.f32(float undef)
   store float %canonicalized, float addrspace(1)* %out
   ret void
 }
@@ -525,6 +535,18 @@ define amdgpu_kernel void @test_canonicalize_value_v2f16_denorm(<2 x half> addrs
   %canonicalized = tail call <2 x half> @llvm.canonicalize.v2f16(<2 x half> %v)
   %gep2 = getelementptr inbounds <2 x half>, <2 x half> addrspace(1)* %out, i32 %id
   store <2 x half> %canonicalized, <2 x half> addrspace(1)* %gep2, align 2
+  ret void
+}
+
+; GCN-LABEL: {{^}}v_test_canonicalize_var_v2f64:
+; GCN: v_max_f64
+; GCN: v_max_f64
+define amdgpu_kernel void @v_test_canonicalize_var_v2f64(<2 x double> addrspace(1)* %out) #1 {
+  %tid = call i32 @llvm.amdgcn.workitem.id.x()
+  %gep = getelementptr <2 x double>, <2 x double> addrspace(1)* %out, i32 %tid
+  %val = load <2 x double>, <2 x double> addrspace(1)* %gep
+  %canonicalized = call <2 x double> @llvm.canonicalize.v2f64(<2 x double> %val)
+  store <2 x double> %canonicalized, <2 x double> addrspace(1)* %out
   ret void
 }
 

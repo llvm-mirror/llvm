@@ -15,6 +15,10 @@
 //===----------------------------------------------------------------------===//
 
 // C's ?: operator for floating-point operands.
+let Predicates = [FeatureVector] in {
+  def SelectVR32 : SelectWrapper<f32, VR32>;
+  def SelectVR64 : SelectWrapper<f64, VR64>;
+}
 def SelectF32  : SelectWrapper<f32, FP32>;
 def SelectF64  : SelectWrapper<f64, FP64>;
 let Predicates = [FeatureNoVectorEnhancements1] in
@@ -65,7 +69,7 @@ let Predicates = [FeatureNoVector] in {
 
 // Use a normal load-and-test for compare against zero in case of
 // vector support (via a pseudo to simplify instruction selection).
-let Defs = [CC], usesCustomInserter = 1 in {
+let Defs = [CC], usesCustomInserter = 1, hasNoSchedulingInfo = 1 in {
   def LTEBRCompare_VecPseudo : Pseudo<(outs), (ins FP32:$R1, FP32:$R2), []>;
   def LTDBRCompare_VecPseudo : Pseudo<(outs), (ins FP64:$R1, FP64:$R2), []>;
   def LTXBRCompare_VecPseudo : Pseudo<(outs), (ins FP128:$R1, FP128:$R2), []>;
@@ -93,7 +97,7 @@ let Predicates = [FeatureNoVectorEnhancements1] in
             (CPSDRsd FP32:$src1, (EXTRACT_SUBREG FP128:$src2, subreg_h64))>;
 let Predicates = [FeatureVectorEnhancements1] in
   def : Pat<(fcopysign FP32:$src1, (f32 (fpround (f128 VR128:$src2)))),
-            (CPSDRsd FP32:$src1, (EXTRACT_SUBREG VR128:$src2, subreg_r64))>;
+            (CPSDRsd FP32:$src1, (EXTRACT_SUBREG VR128:$src2, subreg_h64))>;
 
 // fcopysign with an FP64 result.
 let isCodeGenOnly = 1 in
@@ -106,7 +110,7 @@ let Predicates = [FeatureNoVectorEnhancements1] in
             (CPSDRdd FP64:$src1, (EXTRACT_SUBREG FP128:$src2, subreg_h64))>;
 let Predicates = [FeatureVectorEnhancements1] in
   def : Pat<(fcopysign FP64:$src1, (f64 (fpround (f128 VR128:$src2)))),
-            (CPSDRdd FP64:$src1, (EXTRACT_SUBREG VR128:$src2, subreg_r64))>;
+            (CPSDRdd FP64:$src1, (EXTRACT_SUBREG VR128:$src2, subreg_h64))>;
 
 // fcopysign with an FP128 result.  Use "upper" as the high half and leave
 // the low half as-is.
@@ -183,7 +187,7 @@ def LDXBRA : TernaryRRFe<"ldxbra", 0xB345, FP128, FP128>,
 
 let Predicates = [FeatureNoVectorEnhancements1] in {
   def : Pat<(f32 (fpround FP128:$src)),
-            (EXTRACT_SUBREG (LEXBR FP128:$src), subreg_hr32)>;
+            (EXTRACT_SUBREG (LEXBR FP128:$src), subreg_hh32)>;
   def : Pat<(f64 (fpround FP128:$src)),
             (EXTRACT_SUBREG (LDXBR FP128:$src), subreg_h64)>;
 }
@@ -442,13 +446,13 @@ def MDB  : BinaryRXE<"mdb",  0xED1C, fmul, FP64, load, 8>;
 def MDEBR : BinaryRRE<"mdebr", 0xB30C, null_frag, FP64, FP32>;
 def : Pat<(fmul (f64 (fpextend FP32:$src1)), (f64 (fpextend FP32:$src2))),
           (MDEBR (INSERT_SUBREG (f64 (IMPLICIT_DEF)),
-                                FP32:$src1, subreg_r32), FP32:$src2)>;
+                                FP32:$src1, subreg_h32), FP32:$src2)>;
 
 // f64 multiplication of an FP32 register and an f32 memory.
 def MDEB : BinaryRXE<"mdeb", 0xED0C, null_frag, FP64, load, 4>;
 def : Pat<(fmul (f64 (fpextend FP32:$src1)),
                 (f64 (extloadf32 bdxaddr12only:$addr))),
-          (MDEB (INSERT_SUBREG (f64 (IMPLICIT_DEF)), FP32:$src1, subreg_r32),
+          (MDEB (INSERT_SUBREG (f64 (IMPLICIT_DEF)), FP32:$src1, subreg_h32),
                 bdxaddr12only:$addr)>;
 
 // f128 multiplication of two FP64 registers.

@@ -47,7 +47,9 @@ const char *ExplicitAlign[] = {"MOVDQA",  "MOVAPS",  "MOVAPD",  "MOVNTPS",
                                "MOVNTPD", "MOVNTDQ", "MOVNTDQA"};
 
 // List of instructions NOT requiring explicit memory alignment.
-const char *ExplicitUnalign[] = {"MOVDQU", "MOVUPS", "MOVUPD"};
+const char *ExplicitUnalign[] = {"MOVDQU", "MOVUPS", "MOVUPD",
+                                 "PCMPESTRM", "PCMPESTRI",
+                                 "PCMPISTRM", "PCMPISTRI" };
 
 // For manually mapping instructions that do not match by their encoding.
 const ManualMapEntry ManualMapSet[] = {
@@ -63,9 +65,9 @@ const ManualMapEntry ManualMapSet[] = {
     { "ADD16rr_DB",       "ADD16rm",         NO_UNFOLD  },
     { "ADD32rr_DB",       "ADD32rm",         NO_UNFOLD  },
     { "ADD64rr_DB",       "ADD64rm",         NO_UNFOLD  },
-    { "PUSH16r",          "PUSH16rmm",       NO_UNFOLD  },
-    { "PUSH32r",          "PUSH32rmm",       NO_UNFOLD  },
-    { "PUSH64r",          "PUSH64rmm",       NO_UNFOLD  },
+    { "PUSH16r",          "PUSH16rmm",       UNFOLD },
+    { "PUSH32r",          "PUSH32rmm",       UNFOLD },
+    { "PUSH64r",          "PUSH64rmm",       UNFOLD },
     { "TAILJMPr",         "TAILJMPm",        UNFOLD },
     { "TAILJMPr64",       "TAILJMPm64",      UNFOLD },
     { "TAILJMPr64_REX",   "TAILJMPm64_REX",  UNFOLD },
@@ -251,16 +253,6 @@ getMemOperandSize(const Record *MemRec, const bool IntrinsicSensitive = false) {
   llvm_unreachable("Memory operand's size not known!");
 }
 
-// Returns true if the record's list of defs includes the given def.
-static inline bool hasDefInList(const Record *Rec, const StringRef List,
-                                const StringRef Def) {
-  if (!Rec->isValueUnset(List)) {
-    return any_of(*(Rec->getValueAsListInit(List)),
-                  [Def](const Init *I) { return I->getAsString() == Def; });
-  }
-  return false;
-}
-
 // Return true if the instruction defined as a register flavor.
 static inline bool hasRegisterFormat(const Record *Inst) {
   const BitsInit *FormBits = Inst->getValueAsBitsInit("FormBits");
@@ -335,6 +327,7 @@ public:
             MemRec->getValueAsDef("OpPrefix") ||
         RegRec->getValueAsDef("OpMap") != MemRec->getValueAsDef("OpMap") ||
         RegRec->getValueAsDef("OpSize") != MemRec->getValueAsDef("OpSize") ||
+        RegRec->getValueAsDef("AdSize") != MemRec->getValueAsDef("AdSize") ||
         RegRec->getValueAsBit("hasVEX_4V") !=
             MemRec->getValueAsBit("hasVEX_4V") ||
         RegRec->getValueAsBit("hasEVEX_K") !=
@@ -514,10 +507,8 @@ void X86FoldTablesEmitter::updateTables(const CodeGenInstruction *RegInstr,
   unsigned MemInSize = MemRec->getValueAsDag("InOperandList")->getNumArgs();
   unsigned RegInSize = RegRec->getValueAsDag("InOperandList")->getNumArgs();
 
-  // Instructions which have the WriteRMW value (Read-Modify-Write) should be
-  // added to Table2Addr.
-  if (hasDefInList(MemRec, "SchedRW", "WriteRMW") && MemOutSize != RegOutSize &&
-      MemInSize == RegInSize) {
+  // Instructions which Read-Modify-Write should be added to Table2Addr.
+  if (MemOutSize != RegOutSize && MemInSize == RegInSize) {
     addEntryWithFlags(Table2Addr, RegInstr, MemInstr, S, 0);
     return;
   }
@@ -559,7 +550,8 @@ void X86FoldTablesEmitter::updateTables(const CodeGenInstruction *RegInstr,
     //   MOVAPSmr => (outs), (ins f128mem:$dst, VR128:$src)
     Record *RegOpRec = RegInstr->Operands[RegOutSize - 1].Rec;
     Record *MemOpRec = MemInstr->Operands[RegOutSize - 1].Rec;
-    if (isRegisterOperand(RegOpRec) && isMemoryOperand(MemOpRec))
+    if (isRegisterOperand(RegOpRec) && isMemoryOperand(MemOpRec) &&
+        getRegOperandSize(RegOpRec) == getMemOperandSize(MemOpRec))
       addEntryWithFlags(Table0, RegInstr, MemInstr, S, 0);
   }
 

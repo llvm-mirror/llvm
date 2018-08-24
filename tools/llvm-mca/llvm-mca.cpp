@@ -16,16 +16,19 @@
 //      -o <file>
 //
 // The target defaults to the host target.
-// The cpu defaults to 'generic'.
+// The cpu defaults to the 'native' host cpu.
 // The output defaults to standard output.
 //
 //===----------------------------------------------------------------------===//
 
-#include "BackendPrinter.h"
 #include "CodeRegion.h"
+#include "Context.h"
 #include "DispatchStatistics.h"
+#include "FetchStage.h"
 #include "InstructionInfoView.h"
 #include "InstructionTables.h"
+#include "Pipeline.h"
+#include "PipelinePrinter.h"
 #include "RegisterFileStatistics.h"
 #include "ResourcePressureView.h"
 #include "RetireControlUnitStatistics.h"
@@ -39,8 +42,10 @@
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/ErrorOr.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Host.h"
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/SourceMgr.h"
@@ -51,111 +56,131 @@
 
 using namespace llvm;
 
-static cl::opt<std::string>
-    InputFilename(cl::Positional, cl::desc("<input file>"), cl::init("-"));
+static cl::OptionCategory ToolOptions("Tool Options");
+static cl::OptionCategory ViewOptions("View Options");
+
+static cl::opt<std::string> InputFilename(cl::Positional,
+                                          cl::desc("<input file>"),
+                                          cl::cat(ToolOptions), cl::init("-"));
 
 static cl::opt<std::string> OutputFilename("o", cl::desc("Output filename"),
-                                           cl::init("-"),
+                                           cl::init("-"), cl::cat(ToolOptions),
                                            cl::value_desc("filename"));
 
 static cl::opt<std::string>
     ArchName("march", cl::desc("Target arch to assemble for, "
-                               "see -version for available targets"));
+                               "see -version for available targets"),
+             cl::cat(ToolOptions));
 
 static cl::opt<std::string>
     TripleName("mtriple", cl::desc("Target triple to assemble for, "
-                                   "see -version for available targets"));
+                                   "see -version for available targets"),
+               cl::cat(ToolOptions));
 
 static cl::opt<std::string>
     MCPU("mcpu",
          cl::desc("Target a specific cpu type (-mcpu=help for details)"),
-         cl::value_desc("cpu-name"), cl::init("generic"));
+         cl::value_desc("cpu-name"), cl::cat(ToolOptions), cl::init("native"));
 
 static cl::opt<int>
     OutputAsmVariant("output-asm-variant",
                      cl::desc("Syntax variant to use for output printing"),
-                     cl::init(-1));
+                     cl::cat(ToolOptions), cl::init(-1));
 
 static cl::opt<unsigned> Iterations("iterations",
                                     cl::desc("Number of iterations to run"),
-                                    cl::init(0));
+                                    cl::cat(ToolOptions), cl::init(0));
 
-static cl::opt<unsigned> DispatchWidth(
-    "dispatch",
-    cl::desc("Dispatch Width. By default it is set equal to IssueWidth"),
-    cl::init(0));
+static cl::opt<unsigned>
+    DispatchWidth("dispatch", cl::desc("Override the processor dispatch width"),
+                  cl::cat(ToolOptions), cl::init(0));
 
 static cl::opt<unsigned>
     RegisterFileSize("register-file-size",
-                     cl::desc("Maximum number of temporary registers which can "
+                     cl::desc("Maximum number of physical registers which can "
                               "be used for register mappings"),
-                     cl::init(0));
+                     cl::cat(ToolOptions), cl::init(0));
 
 static cl::opt<bool>
     PrintRegisterFileStats("register-file-stats",
                            cl::desc("Print register file statistics"),
-                           cl::init(false));
+                           cl::cat(ViewOptions), cl::init(false));
+
+static cl::opt<bool> PrintDispatchStats("dispatch-stats",
+                                        cl::desc("Print dispatch statistics"),
+                                        cl::cat(ViewOptions), cl::init(false));
 
 static cl::opt<bool>
-    PrintDispatchStats("dispatch-stats",
-                       cl::desc("Print dispatch statistics"),
-                       cl::init(false));
+    PrintSummaryView("summary-view", cl::Hidden,
+                     cl::desc("Print summary view (enabled by default)"),
+                     cl::cat(ViewOptions), cl::init(true));
 
-static cl::opt<bool>
-    PrintSchedulerStats("scheduler-stats",
-                         cl::desc("Print scheduler statistics"),
-                         cl::init(false));
+static cl::opt<bool> PrintSchedulerStats("scheduler-stats",
+                                         cl::desc("Print scheduler statistics"),
+                                         cl::cat(ViewOptions), cl::init(false));
 
 static cl::opt<bool>
     PrintRetireStats("retire-stats",
-                      cl::desc("Print retire control unit statistics"),
-                      cl::init(false));
+                     cl::desc("Print retire control unit statistics"),
+                     cl::cat(ViewOptions), cl::init(false));
 
-static cl::opt<bool>
-    PrintResourcePressureView("resource-pressure",
-                              cl::desc("Print the resource pressure view"),
-                              cl::init(true));
+static cl::opt<bool> PrintResourcePressureView(
+    "resource-pressure",
+    cl::desc("Print the resource pressure view (enabled by default)"),
+    cl::cat(ViewOptions), cl::init(true));
 
 static cl::opt<bool> PrintTimelineView("timeline",
                                        cl::desc("Print the timeline view"),
-                                       cl::init(false));
+                                       cl::cat(ViewOptions), cl::init(false));
 
 static cl::opt<unsigned> TimelineMaxIterations(
     "timeline-max-iterations",
     cl::desc("Maximum number of iterations to print in timeline view"),
-    cl::init(0));
+    cl::cat(ViewOptions), cl::init(0));
 
 static cl::opt<unsigned> TimelineMaxCycles(
     "timeline-max-cycles",
     cl::desc(
         "Maximum number of cycles in the timeline view. Defaults to 80 cycles"),
-    cl::init(80));
+    cl::cat(ViewOptions), cl::init(80));
 
-static cl::opt<bool> AssumeNoAlias(
-    "noalias",
-    cl::desc("If set, it assumes that loads and stores do not alias"),
-    cl::init(true));
-
-static cl::opt<unsigned>
-    LoadQueueSize("lqueue", cl::desc("Size of the load queue"), cl::init(0));
+static cl::opt<bool>
+    AssumeNoAlias("noalias",
+                  cl::desc("If set, assume that loads and stores do not alias"),
+                  cl::cat(ToolOptions), cl::init(true));
 
 static cl::opt<unsigned>
-    StoreQueueSize("squeue", cl::desc("Size of the store queue"), cl::init(0));
+    LoadQueueSize("lqueue",
+                  cl::desc("Size of the load queue (unbound by default)"),
+                  cl::cat(ToolOptions), cl::init(0));
+
+static cl::opt<unsigned>
+    StoreQueueSize("squeue",
+                   cl::desc("Size of the store queue (unbound by default)"),
+                   cl::cat(ToolOptions), cl::init(0));
 
 static cl::opt<bool>
     PrintInstructionTables("instruction-tables",
                            cl::desc("Print instruction tables"),
-                           cl::init(false));
+                           cl::cat(ToolOptions), cl::init(false));
+
+static cl::opt<bool> PrintInstructionInfoView(
+    "instruction-info",
+    cl::desc("Print the instruction info view (enabled by default)"),
+    cl::cat(ViewOptions), cl::init(true));
+
+static cl::opt<bool> EnableAllStats("all-stats",
+                                    cl::desc("Print all hardware statistics"),
+                                    cl::cat(ViewOptions), cl::init(false));
 
 static cl::opt<bool>
-    PrintInstructionInfoView("instruction-info",
-                             cl::desc("Print the instruction info view"),
-                             cl::init(true));
+    EnableAllViews("all-views",
+                   cl::desc("Print all views including hardware statistics"),
+                   cl::cat(ViewOptions), cl::init(false));
 
 namespace {
 
 const Target *getTarget(const char *ProgName) {
-  TripleName = Triple::normalize(TripleName);
   if (TripleName.empty())
     TripleName = Triple::normalize(sys::getDefaultTargetTriple());
   Triple TheTriple(TripleName);
@@ -218,8 +243,7 @@ int AssembleInput(const char *ProgName, MCAsmParser &Parser,
       TheTarget->createMCAsmParser(STI, Parser, MCII, MCOptions));
 
   if (!TAP) {
-    errs() << ProgName
-           << ": error: this target does not support assembly parsing.\n";
+    WithColor::error() << "this target does not support assembly parsing.\n";
     return 1;
   }
 
@@ -258,7 +282,8 @@ public:
   void EmitCommonSymbol(MCSymbol *Symbol, uint64_t Size,
                         unsigned ByteAlignment) override {}
   void EmitZerofill(MCSection *Section, MCSymbol *Symbol = nullptr,
-                    uint64_t Size = 0, unsigned ByteAlignment = 0) override {}
+                    uint64_t Size = 0, unsigned ByteAlignment = 0,
+                    SMLoc Loc = SMLoc()) override {}
   void EmitGPRel32Value(const MCExpr *Value) override {}
   void BeginCOFFSymbolDef(const MCSymbol *Symbol) override {}
   void EmitCOFFSymbolStorageClass(int StorageClass) override {}
@@ -272,6 +297,34 @@ public:
 };
 } // end of anonymous namespace
 
+static void processOptionImpl(cl::opt<bool> &O, const cl::opt<bool> &Default) {
+  if (!O.getNumOccurrences() || O.getPosition() < Default.getPosition())
+    O = Default.getValue();
+}
+
+static void processViewOptions() {
+  if (!EnableAllViews.getNumOccurrences() &&
+      !EnableAllStats.getNumOccurrences())
+    return;
+
+  if (EnableAllViews.getNumOccurrences()) {
+    processOptionImpl(PrintSummaryView, EnableAllViews);
+    processOptionImpl(PrintResourcePressureView, EnableAllViews);
+    processOptionImpl(PrintTimelineView, EnableAllViews);
+    processOptionImpl(PrintInstructionInfoView, EnableAllViews);
+  }
+
+  const cl::opt<bool> &Default =
+      EnableAllViews.getPosition() < EnableAllStats.getPosition()
+          ? EnableAllStats
+          : EnableAllViews;
+  processOptionImpl(PrintSummaryView, Default);
+  processOptionImpl(PrintRegisterFileStats, Default);
+  processOptionImpl(PrintDispatchStats, Default);
+  processOptionImpl(PrintSchedulerStats, Default);
+  processOptionImpl(PrintRetireStats, Default);
+}
+
 int main(int argc, char **argv) {
   InitLLVM X(argc, argv);
 
@@ -283,9 +336,12 @@ int main(int argc, char **argv) {
   // Enable printing of available targets when flag --version is specified.
   cl::AddExtraVersionPrinter(TargetRegistry::printRegisteredTargetsForVersion);
 
+  cl::HideUnrelatedOptions({&ToolOptions, &ViewOptions});
+
   // Parse flags and initialize target options.
   cl::ParseCommandLineOptions(argc, argv,
                               "llvm machine code performance analyzer.\n");
+
   MCTargetOptions MCOptions;
   MCOptions.PreserveAsmComments = false;
 
@@ -308,6 +364,9 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+  // Apply overrides to llvm-mca specific options.
+  processViewOptions();
+
   SourceMgr SrcMgr;
 
   // Tell SrcMgr about this buffer, which is what the parser will pick up.
@@ -329,12 +388,19 @@ int main(int argc, char **argv) {
   MCStreamerWrapper Str(Ctx, Regions);
 
   std::unique_ptr<MCInstrInfo> MCII(TheTarget->createMCInstrInfo());
+
+  std::unique_ptr<MCInstrAnalysis> MCIA(
+      TheTarget->createMCInstrAnalysis(MCII.get()));
+
+  if (!MCPU.compare("native"))
+    MCPU = llvm::sys::getHostCPUName();
+
   std::unique_ptr<MCSubtargetInfo> STI(
       TheTarget->createMCSubtargetInfo(TripleName, MCPU, /* FeaturesStr */ ""));
   if (!STI->isCPUStringValid(MCPU))
     return 1;
 
-  if (!STI->getSchedModel().isOutOfOrder()) {
+  if (!PrintInstructionTables && !STI->getSchedModel().isOutOfOrder()) {
     WithColor::error() << "please specify an out-of-order cpu. '" << MCPU
                        << "' is an in-order cpu.\n";
     return 1;
@@ -395,7 +461,13 @@ int main(int argc, char **argv) {
     Width = DispatchWidth;
 
   // Create an instruction builder.
-  mca::InstrBuilder IB(*STI, *MCII);
+  mca::InstrBuilder IB(*STI, *MCII, *MRI, *MCIA, *IP);
+
+  // Create a context to control ownership of the pipeline hardware.
+  mca::Context MCA(*MRI, *STI);
+
+  mca::PipelineOptions PO(Width, RegisterFileSize, LoadQueueSize,
+                          StoreQueueSize, AssumeNoAlias);
 
   // Number each region in the sequence.
   unsigned RegionIdx = 0;
@@ -418,24 +490,33 @@ int main(int argc, char **argv) {
                      PrintInstructionTables ? 1 : Iterations);
 
     if (PrintInstructionTables) {
-      mca::InstructionTables IT(STI->getSchedModel(), IB, S);
+      //  Create a pipeline, stages, and a printer.
+      auto P = llvm::make_unique<mca::Pipeline>();
+      P->appendStage(llvm::make_unique<mca::FetchStage>(IB, S));
+      P->appendStage(llvm::make_unique<mca::InstructionTables>(SM, IB));
+      mca::PipelinePrinter Printer(*P);
 
+      // Create the views for this pipeline, execute, and emit a report.
       if (PrintInstructionInfoView) {
-        IT.addView(
+        Printer.addView(
             llvm::make_unique<mca::InstructionInfoView>(*STI, *MCII, S, *IP));
       }
-
-      IT.addView(llvm::make_unique<mca::ResourcePressureView>(*STI, *IP, S));
-      IT.run();
-      IT.printReport(TOF->os());
+      Printer.addView(
+          llvm::make_unique<mca::ResourcePressureView>(*STI, *IP, S));
+      auto Err = P->run();
+      if (Err)
+        report_fatal_error(toString(std::move(Err)));
+      Printer.printReport(TOF->os());
       continue;
     }
 
-    mca::Backend B(*STI, *MRI, IB, S, Width, RegisterFileSize, LoadQueueSize,
-                   StoreQueueSize, AssumeNoAlias);
-    mca::BackendPrinter Printer(B);
+    // Create a basic pipeline simulating an out-of-order backend.
+    auto P = MCA.createDefaultPipeline(PO, IB, S);
+    mca::PipelinePrinter Printer(*P);
 
-    Printer.addView(llvm::make_unique<mca::SummaryView>(S, Width));
+    if (PrintSummaryView)
+      Printer.addView(llvm::make_unique<mca::SummaryView>(SM, S, Width));
+
     if (PrintInstructionInfoView)
       Printer.addView(
           llvm::make_unique<mca::InstructionInfoView>(*STI, *MCII, S, *IP));
@@ -461,8 +542,13 @@ int main(int argc, char **argv) {
           *STI, *IP, S, TimelineMaxIterations, TimelineMaxCycles));
     }
 
-    B.run();
+    auto Err = P->run();
+    if (Err)
+      report_fatal_error(toString(std::move(Err)));
     Printer.printReport(TOF->os());
+
+    // Clear the InstrBuilder internal state in preparation for another round.
+    IB.clear();
   }
 
   TOF->keep();

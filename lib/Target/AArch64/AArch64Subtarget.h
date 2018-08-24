@@ -66,6 +66,7 @@ protected:
   bool HasV8_1aOps = false;
   bool HasV8_2aOps = false;
   bool HasV8_3aOps = false;
+  bool HasV8_4aOps = false;
 
   bool HasFPARMv8 = false;
   bool HasNEON = false;
@@ -77,7 +78,16 @@ protected:
   bool HasRDM = false;
   bool HasPerfMon = false;
   bool HasFullFP16 = false;
+  bool HasFP16FML = false;
   bool HasSPE = false;
+
+  // ARMv8.4 Crypto extensions
+  bool HasSM4 = true;
+  bool HasSHA3 = true;
+
+  bool HasSHA2 = true;
+  bool HasAES = true;
+
   bool HasLSLFast = false;
   bool HasSVE = false;
   bool HasRCPC = false;
@@ -130,6 +140,9 @@ protected:
 
   // ReserveX18 - X18 is not available as a general purpose register.
   bool ReserveX18;
+
+  // ReserveX20 - X20 is not available as a general purpose register.
+  bool ReserveX20 = false;
 
   bool IsLittle;
 
@@ -198,6 +211,7 @@ public:
   bool hasV8_1aOps() const { return HasV8_1aOps; }
   bool hasV8_2aOps() const { return HasV8_2aOps; }
   bool hasV8_3aOps() const { return HasV8_3aOps; }
+  bool hasV8_4aOps() const { return HasV8_4aOps; }
 
   bool hasZeroCycleRegMove() const { return HasZeroCycleRegMove; }
 
@@ -216,6 +230,7 @@ public:
   }
 
   bool isX18Reserved() const { return ReserveX18; }
+  bool isX20Reserved() const { return ReserveX20; }
   bool hasFPARMv8() const { return HasFPARMv8; }
   bool hasNEON() const { return HasNEON; }
   bool hasCrypto() const { return HasCrypto; }
@@ -224,6 +239,10 @@ public:
   bool hasLSE() const { return HasLSE; }
   bool hasRAS() const { return HasRAS; }
   bool hasRDM() const { return HasRDM; }
+  bool hasSM4() const { return HasSM4; }
+  bool hasSHA3() const { return HasSHA3; }
+  bool hasSHA2() const { return HasSHA2; }
+  bool hasAES() const { return HasAES; }
   bool balanceFPOps() const { return BalanceFPOps; }
   bool predictableSelectIsExpensive() const {
     return PredictableSelectIsExpensive;
@@ -243,7 +262,7 @@ public:
   bool hasFuseCCSelect() const { return HasFuseCCSelect; }
   bool hasFuseLiterals() const { return HasFuseLiterals; }
 
-  /// \brief Return true if the CPU supports any kind of instruction fusion.
+  /// Return true if the CPU supports any kind of instruction fusion.
   bool hasFusion() const {
     return hasArithmeticBccFusion() || hasArithmeticCbzFusion() ||
            hasFuseAES() || hasFuseCCSelect() || hasFuseLiterals();
@@ -273,6 +292,7 @@ public:
 
   bool hasPerfMon() const { return HasPerfMon; }
   bool hasFullFP16() const { return HasFullFP16; }
+  bool hasFP16FML() const { return HasFP16FML; }
   bool hasSPE() const { return HasSPE; }
   bool hasLSLFast() const { return HasLSLFast; }
   bool hasSVE() const { return HasSVE; }

@@ -53,7 +53,9 @@ public:
 
   uint64_t getSize() { return CurrentEndOffset; }
 
-  std::vector<DwarfStringPoolEntryRef> getEntries() const;
+  /// Return the list of strings to be emitted. This does not contain the
+  /// strings which were added via internString only.
+  std::vector<DwarfStringPoolEntryRef> getEntriesForEmission() const;
 
 private:
   MapTy Strings;
@@ -61,6 +63,21 @@ private:
   unsigned NumEntries = 0;
   DwarfStringPoolEntryRef EmptyString;
 };
+
+/// Helper for making strong types.
+template <typename T, typename S> class StrongType : public T {
+public:
+  template <typename... Args>
+  explicit StrongType(Args... A) : T(std::forward<Args>(A)...) {}
+};
+
+/// It's very easy to introduce bugs by passing the wrong string pool in the
+/// dwarf linker. By using strong types the interface enforces that the right
+/// kind of pool is used.
+struct UniqueTag {};
+struct OffsetsTag {};
+using UniquingStringPool = StrongType<NonRelocatableStringpool, UniqueTag>;
+using OffsetsStringPool = StrongType<NonRelocatableStringpool, OffsetsTag>;
 
 } // end namespace dsymutil
 } // end namespace llvm

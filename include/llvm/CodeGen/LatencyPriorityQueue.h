@@ -17,6 +17,7 @@
 #define LLVM_CODEGEN_LATENCYPRIORITYQUEUE_H
 
 #include "llvm/CodeGen/ScheduleDAG.h"
+#include "llvm/Config/llvm-config.h"
 
 namespace llvm {
   class LatencyPriorityQueue;
@@ -26,7 +27,7 @@ namespace llvm {
     LatencyPriorityQueue *PQ;
     explicit latency_sort(LatencyPriorityQueue *pq) : PQ(pq) {}
 
-    bool operator()(const SUnit* left, const SUnit* right) const;
+    bool operator()(const SUnit* LHS, const SUnit* RHS) const;
   };
 
   class LatencyPriorityQueue : public SchedulingPriorityQueue {
@@ -91,7 +92,7 @@ namespace llvm {
     // successor nodes that have a single unscheduled predecessor.  If so, that
     // single predecessor has a higher priority, since scheduling it will make
     // the node available.
-    void scheduledNode(SUnit *Node) override;
+    void scheduledNode(SUnit *SU) override;
 
 private:
     void AdjustPriorityOfUnscheduledPreds(SUnit *SU);

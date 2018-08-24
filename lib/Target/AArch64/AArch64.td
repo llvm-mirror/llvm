@@ -26,8 +26,32 @@ def FeatureFPARMv8 : SubtargetFeature<"fp-armv8", "HasFPARMv8", "true",
 def FeatureNEON : SubtargetFeature<"neon", "HasNEON", "true",
   "Enable Advanced SIMD instructions", [FeatureFPARMv8]>;
 
+def FeatureSM4 : SubtargetFeature<
+    "sm4", "HasSM4", "true",
+    "Enable SM3 and SM4 support", [FeatureNEON]>;
+
+def FeatureSHA2 : SubtargetFeature<
+    "sha2", "HasSHA2", "true",
+    "Enable SHA1 and SHA256 support", [FeatureNEON]>;
+
+def FeatureSHA3 : SubtargetFeature<
+    "sha3", "HasSHA3", "true",
+    "Enable SHA512 and SHA3 support", [FeatureNEON, FeatureSHA2]>;
+
+def FeatureAES : SubtargetFeature<
+    "aes", "HasAES", "true",
+    "Enable AES support", [FeatureNEON]>;
+
+// Crypto has been split up and any combination is now valid (see the
+// crypto defintions above). Also, crypto is now context sensitive:
+// it has a different meaning for e.g. Armv8.4 than it has for Armv8.2.
+// Therefore, we rely on Clang, the user interacing tool, to pass on the
+// appropriate crypto options. But here in the backend, crypto has very little
+// meaning anymore. We kept the Crypto defintion here for backward
+// compatibility, and now imply features SHA2 and AES, which was the
+// "traditional" meaning of Crypto.
 def FeatureCrypto : SubtargetFeature<"crypto", "HasCrypto", "true",
-  "Enable cryptographic instructions", [FeatureNEON]>;
+  "Enable cryptographic instructions", [FeatureNEON, FeatureSHA2, FeatureAES]>;
 
 def FeatureCRC : SubtargetFeature<"crc", "HasCRC", "true",
   "Enable ARMv8 CRC-32 checksum instructions">;
@@ -46,6 +70,9 @@ def FeaturePerfMon : SubtargetFeature<"perfmon", "HasPerfMon", "true",
 
 def FeatureFullFP16 : SubtargetFeature<"fullfp16", "HasFullFP16", "true",
   "Full FP16", [FeatureFPARMv8]>;
+
+def FeatureFP16FML : SubtargetFeature<"fp16fml", "HasFP16FML", "true",
+  "Enable FP16 FML instructions", [FeatureFullFP16]>;
 
 def FeatureSPE : SubtargetFeature<"spe", "HasSPE", "true",
   "Enable Statistical Profiling extension">;
@@ -74,6 +101,10 @@ def FeatureStrictAlign : SubtargetFeature<"strict-align",
 
 def FeatureReserveX18 : SubtargetFeature<"reserve-x18", "ReserveX18", "true",
                                          "Reserve X18, making it unavailable "
+                                         "as a GPR">;
+
+def FeatureReserveX20 : SubtargetFeature<"reserve-x20", "ReserveX20", "true",
+                                         "Reserve X20, making it unavailable "
                                          "as a GPR">;
 
 def FeatureUseAA : SubtargetFeature<"use-aa", "UseAA", "true",
@@ -180,6 +211,9 @@ def HasV8_2aOps : SubtargetFeature<"v8.2a", "HasV8_2aOps", "true",
 
 def HasV8_3aOps : SubtargetFeature<"v8.3a", "HasV8_3aOps", "true",
   "Support ARM v8.3a instructions", [HasV8_2aOps, FeatureRCPC]>;
+
+def HasV8_4aOps : SubtargetFeature<"v8.4a", "HasV8_4aOps", "true",
+  "Support ARM v8.4a instructions", [HasV8_3aOps, FeatureDotProd]>;
 
 //===----------------------------------------------------------------------===//
 // Register File Description
@@ -487,6 +521,7 @@ def : ProcessorModel<"cyclone", CycloneModel, [ProcCyclone]>;
 def : ProcessorModel<"exynos-m1", ExynosM1Model, [ProcExynosM1]>;
 def : ProcessorModel<"exynos-m2", ExynosM1Model, [ProcExynosM2]>;
 def : ProcessorModel<"exynos-m3", ExynosM3Model, [ProcExynosM3]>;
+def : ProcessorModel<"exynos-m4", ExynosM3Model, [ProcExynosM3]>;
 def : ProcessorModel<"falkor", FalkorModel, [ProcFalkor]>;
 def : ProcessorModel<"saphira", FalkorModel, [ProcSaphira]>;
 def : ProcessorModel<"kryo", KryoModel, [ProcKryo]>;

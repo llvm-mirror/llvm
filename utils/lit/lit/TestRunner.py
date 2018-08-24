@@ -40,6 +40,17 @@ kUseCloseFDs = not kIsWindows
 kAvoidDevNull = kIsWindows
 kDevNull = "/dev/null"
 
+# A regex that matches %dbg(ARG), which lit inserts at the beginning of each
+# run command pipeline such that ARG specifies the pipeline's source line
+# number.  lit later expands each %dbg(ARG) to a command that behaves as a null
+# command in the target shell so that the line number is seen in lit's verbose
+# mode.
+#
+# This regex captures ARG.  ARG must not contain a right parenthesis, which
+# terminates %dbg.  ARG must not contain quotes, in which ARG might be enclosed
+# during expansion.
+kPdbgRegex = '%dbg\(([^)\'"]*)\)'
+
 class ShellEnvironment(object):
 
     """Mutable shell environment containing things like CWD and env vars.
@@ -989,7 +1000,8 @@ def _executeShCmd(cmd, shenv, results, timeoutHelper):
 
 def executeScriptInternal(test, litConfig, tmpBase, commands, cwd):
     cmds = []
-    for ln in commands:
+    for i, ln in enumerate(commands):
+        ln = commands[i] = re.sub(kPdbgRegex, ": '\\1'; ", ln)
         try:
             cmds.append(ShUtil.ShParser(ln, litConfig.isWindows,
                                         test.config.pipefail).parse())
@@ -1073,9 +1085,16 @@ def executeScript(test, litConfig, tmpBase, commands, cwd):
       mode += 'b'  # Avoid CRLFs when writing bash scripts.
     f = open(script, mode)
     if isWin32CMDEXE:
-        f.write('@echo off\n')
-        f.write('\nif %ERRORLEVEL% NEQ 0 EXIT\n'.join(commands))
+        for i, ln in enumerate(commands):
+            commands[i] = re.sub(kPdbgRegex, "echo '\\1' > nul && ", ln)
+        if litConfig.echo_all_commands:
+            f.write('@echo on\n')
+        else:
+            f.write('@echo off\n')
+        f.write('\n@if %ERRORLEVEL% NEQ 0 EXIT\n'.join(commands))
     else:
+        for i, ln in enumerate(commands):
+            commands[i] = re.sub(kPdbgRegex, ": '\\1'; ", ln)
         if test.config.pipefail:
             f.write('set -o pipefail;')
         if litConfig.echo_all_commands:
@@ -1308,7 +1327,9 @@ class IntegratedTestKeywordParser(object):
         self.parser = parser
 
         if kind == ParserKind.COMMAND:
-            self.parser = self._handleCommand
+            self.parser = lambda line_number, line, output: \
+                                 self._handleCommand(line_number, line, output,
+                                                     self.keyword)
         elif kind == ParserKind.LIST:
             self.parser = self._handleList
         elif kind == ParserKind.BOOLEAN_EXPR:
@@ -1325,8 +1346,7 @@ class IntegratedTestKeywordParser(object):
     def parseLine(self, line_number, line):
         try:
             self.parsed_lines += [(line_number, line)]
-            self.value = self.parser(line_number, line, self.value,
-                                     self.keyword)
+            self.value = self.parser(line_number, line, self.value)
         except ValueError as e:
             raise ValueError(str(e) + ("\nin %s directive on test line %d" %
                                        (self.keyword, line_number)))
@@ -1335,7 +1355,7 @@ class IntegratedTestKeywordParser(object):
         return self.value
 
     @staticmethod
-    def _handleTag(line_number, line, output, keyword):
+    def _handleTag(line_number, line, output):
         """A helper for parsing TAG type keywords"""
         return (not line.strip() or output)
 
@@ -1359,15 +1379,19 @@ class IntegratedTestKeywordParser(object):
         else:
             if output is None:
                 output = []
-            line = ": '{keyword} at line {line}'; {real_command}".format(
+            pdbg = "%dbg({keyword} at line {line_number})".format(
                 keyword=keyword,
-                line=line_number,
+                line_number=line_number)
+            assert re.match(kPdbgRegex + "$", pdbg), \
+                   "kPdbgRegex expected to match actual %dbg usage"
+            line = "{pdbg} {real_command}".format(
+                pdbg=pdbg,
                 real_command=line)
             output.append(line)
         return output
 
     @staticmethod
-    def _handleList(line_number, line, output, keyword):
+    def _handleList(line_number, line, output):
         """A parser for LIST type keywords"""
         if output is None:
             output = []
@@ -1375,7 +1399,7 @@ class IntegratedTestKeywordParser(object):
         return output
 
     @staticmethod
-    def _handleBooleanExpr(line_number, line, output, keyword):
+    def _handleBooleanExpr(line_number, line, output):
         """A parser for BOOLEAN_EXPR type keywords"""
         if output is None:
             output = []
@@ -1388,18 +1412,17 @@ class IntegratedTestKeywordParser(object):
         return output
 
     @staticmethod
-    def _handleRequiresAny(line_number, line, output, keyword):
+    def _handleRequiresAny(line_number, line, output):
         """A custom parser to transform REQUIRES-ANY: into REQUIRES:"""
 
         # Extract the conditions specified in REQUIRES-ANY: as written.
         conditions = []
-        IntegratedTestKeywordParser._handleList(line_number, line, conditions,
-                                                keyword)
+        IntegratedTestKeywordParser._handleList(line_number, line, conditions)
 
         # Output a `REQUIRES: a || b || c` expression in its place.
         expression = ' || '.join(conditions)
-        IntegratedTestKeywordParser._handleBooleanExpr(line_number, expression,
-                                                       output, keyword)
+        IntegratedTestKeywordParser._handleBooleanExpr(line_number,
+                                                       expression, output)
         return output
 
 def parseIntegratedTestScript(test, additional_parsers=[],

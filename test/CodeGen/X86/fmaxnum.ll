@@ -285,3 +285,69 @@ define <8 x double> @test_intrinsic_fmax_v8f64(<8 x double> %x, <8 x double> %y)
   ret <8 x double> %z
 }
 
+; The IR-level FMF propagate to the node. With nnan, there's no need to blend.
+
+define double @maxnum_intrinsic_nnan_fmf_f64(double %a, double %b) {
+; SSE-LABEL: maxnum_intrinsic_nnan_fmf_f64:
+; SSE:       # %bb.0:
+; SSE-NEXT:    maxsd %xmm1, %xmm0
+; SSE-NEXT:    retq
+;
+; AVX-LABEL: maxnum_intrinsic_nnan_fmf_f64:
+; AVX:       # %bb.0:
+; AVX-NEXT:    vmaxsd %xmm1, %xmm0, %xmm0
+; AVX-NEXT:    retq
+  %r = tail call nnan double @llvm.maxnum.f64(double %a, double %b)
+  ret double %r
+}
+
+; Make sure vectors work too.
+
+define <4 x float> @maxnum_intrinsic_nnan_fmf_f432(<4 x float> %a, <4 x float> %b) {
+; SSE-LABEL: maxnum_intrinsic_nnan_fmf_f432:
+; SSE:       # %bb.0:
+; SSE-NEXT:    maxps %xmm1, %xmm0
+; SSE-NEXT:    retq
+;
+; AVX-LABEL: maxnum_intrinsic_nnan_fmf_f432:
+; AVX:       # %bb.0:
+; AVX-NEXT:    vmaxps %xmm1, %xmm0, %xmm0
+; AVX-NEXT:    retq
+  %r = tail call nnan <4 x float> @llvm.maxnum.v4f32(<4 x float> %a, <4 x float> %b)
+  ret <4 x float> %r
+}
+
+; Current (but legacy someday): a function-level attribute should also enable the fold.
+
+define float @maxnum_intrinsic_nnan_attr_f32(float %a, float %b) #0 {
+; SSE-LABEL: maxnum_intrinsic_nnan_attr_f32:
+; SSE:       # %bb.0:
+; SSE-NEXT:    maxss %xmm1, %xmm0
+; SSE-NEXT:    retq
+;
+; AVX-LABEL: maxnum_intrinsic_nnan_attr_f32:
+; AVX:       # %bb.0:
+; AVX-NEXT:    vmaxss %xmm1, %xmm0, %xmm0
+; AVX-NEXT:    retq
+  %r = tail call float @llvm.maxnum.f32(float %a, float %b)
+  ret float %r
+}
+
+; Make sure vectors work too.
+
+define <2 x double> @maxnum_intrinsic_nnan_attr_f64(<2 x double> %a, <2 x double> %b) #0 {
+; SSE-LABEL: maxnum_intrinsic_nnan_attr_f64:
+; SSE:       # %bb.0:
+; SSE-NEXT:    maxpd %xmm1, %xmm0
+; SSE-NEXT:    retq
+;
+; AVX-LABEL: maxnum_intrinsic_nnan_attr_f64:
+; AVX:       # %bb.0:
+; AVX-NEXT:    vmaxpd %xmm1, %xmm0, %xmm0
+; AVX-NEXT:    retq
+  %r = tail call <2 x double> @llvm.maxnum.v2f64(<2 x double> %a, <2 x double> %b)
+  ret <2 x double> %r
+}
+
+attributes #0 = { "no-nans-fp-math"="true" }
+

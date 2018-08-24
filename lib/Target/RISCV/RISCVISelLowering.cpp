@@ -18,6 +18,7 @@
 #include "RISCVRegisterInfo.h"
 #include "RISCVSubtarget.h"
 #include "RISCVTargetMachine.h"
+#include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -35,6 +36,8 @@
 using namespace llvm;
 
 #define DEBUG_TYPE "riscv-lower"
+
+STATISTIC(NumTailCalls, "Number of tail calls");
 
 RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
                                          const RISCVSubtarget &STI)
@@ -76,11 +79,6 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
 
   for (auto VT : {MVT::i1, MVT::i8, MVT::i16})
     setOperationAction(ISD::SIGN_EXTEND_INREG, VT, Expand);
-
-  setOperationAction(ISD::ADDC, XLenVT, Expand);
-  setOperationAction(ISD::ADDE, XLenVT, Expand);
-  setOperationAction(ISD::SUBC, XLenVT, Expand);
-  setOperationAction(ISD::SUBE, XLenVT, Expand);
 
   if (!Subtarget.hasStdExtM()) {
     setOperationAction(ISD::MUL, XLenVT, Expand);
@@ -139,6 +137,11 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::BlockAddress, XLenVT, Custom);
   setOperationAction(ISD::ConstantPool, XLenVT, Custom);
 
+  if (Subtarget.hasStdExtA())
+    setMaxAtomicSizeInBitsSupported(Subtarget.getXLen());
+  else
+    setMaxAtomicSizeInBitsSupported(0);
+
   setBooleanContents(ZeroOrOneBooleanContent);
 
   // Function alignments (log2).
@@ -155,6 +158,74 @@ EVT RISCVTargetLowering::getSetCCResultType(const DataLayout &DL, LLVMContext &,
   if (!VT.isVector())
     return getPointerTy(DL);
   return VT.changeVectorElementTypeToInteger();
+}
+
+bool RISCVTargetLowering::isLegalAddressingMode(const DataLayout &DL,
+                                                const AddrMode &AM, Type *Ty,
+                                                unsigned AS,
+                                                Instruction *I) const {
+  // No global is ever allowed as a base.
+  if (AM.BaseGV)
+    return false;
+
+  // Require a 12-bit signed offset.
+  if (!isInt<12>(AM.BaseOffs))
+    return false;
+
+  switch (AM.Scale) {
+  case 0: // "r+i" or just "i", depending on HasBaseReg.
+    break;
+  case 1:
+    if (!AM.HasBaseReg) // allow "r+i".
+      break;
+    return false; // disallow "r+r" or "r+r+i".
+  default:
+    return false;
+  }
+
+  return true;
+}
+
+bool RISCVTargetLowering::isLegalICmpImmediate(int64_t Imm) const {
+  return isInt<12>(Imm);
+}
+
+bool RISCVTargetLowering::isLegalAddImmediate(int64_t Imm) const {
+  return isInt<12>(Imm);
+}
+
+// On RV32, 64-bit integers are split into their high and low parts and held
+// in two different registers, so the trunc is free since the low register can
+// just be used.
+bool RISCVTargetLowering::isTruncateFree(Type *SrcTy, Type *DstTy) const {
+  if (Subtarget.is64Bit() || !SrcTy->isIntegerTy() || !DstTy->isIntegerTy())
+    return false;
+  unsigned SrcBits = SrcTy->getPrimitiveSizeInBits();
+  unsigned DestBits = DstTy->getPrimitiveSizeInBits();
+  return (SrcBits == 64 && DestBits == 32);
+}
+
+bool RISCVTargetLowering::isTruncateFree(EVT SrcVT, EVT DstVT) const {
+  if (Subtarget.is64Bit() || SrcVT.isVector() || DstVT.isVector() ||
+      !SrcVT.isInteger() || !DstVT.isInteger())
+    return false;
+  unsigned SrcBits = SrcVT.getSizeInBits();
+  unsigned DestBits = DstVT.getSizeInBits();
+  return (SrcBits == 64 && DestBits == 32);
+}
+
+bool RISCVTargetLowering::isZExtFree(SDValue Val, EVT VT2) const {
+  // Zexts are free if they can be combined with a load.
+  if (auto *LD = dyn_cast<LoadSDNode>(Val)) {
+    EVT MemVT = LD->getMemoryVT();
+    if ((MemVT == MVT::i8 || MemVT == MVT::i16 ||
+         (Subtarget.is64Bit() && MemVT == MVT::i32)) &&
+        (LD->getExtensionType() == ISD::NON_EXTLOAD ||
+         LD->getExtensionType() == ISD::ZEXTLOAD))
+      return true;
+  }
+
+  return TargetLowering::isZExtFree(Val, VT2);
 }
 
 // Changes the condition code and swaps operands if necessary, so the SetCC
@@ -225,17 +296,22 @@ SDValue RISCVTargetLowering::lowerGlobalAddress(SDValue Op,
   GlobalAddressSDNode *N = cast<GlobalAddressSDNode>(Op);
   const GlobalValue *GV = N->getGlobal();
   int64_t Offset = N->getOffset();
+  MVT XLenVT = Subtarget.getXLenVT();
 
   if (isPositionIndependent() || Subtarget.is64Bit())
     report_fatal_error("Unable to lowerGlobalAddress");
-
-  SDValue GAHi =
-    DAG.getTargetGlobalAddress(GV, DL, Ty, Offset, RISCVII::MO_HI);
-  SDValue GALo =
-    DAG.getTargetGlobalAddress(GV, DL, Ty, Offset, RISCVII::MO_LO);
+  // In order to maximise the opportunity for common subexpression elimination,
+  // emit a separate ADD node for the global address offset instead of folding
+  // it in the global address node. Later peephole optimisations may choose to
+  // fold it back in when profitable.
+  SDValue GAHi = DAG.getTargetGlobalAddress(GV, DL, Ty, 0, RISCVII::MO_HI);
+  SDValue GALo = DAG.getTargetGlobalAddress(GV, DL, Ty, 0, RISCVII::MO_LO);
   SDValue MNHi = SDValue(DAG.getMachineNode(RISCV::LUI, DL, Ty, GAHi), 0);
   SDValue MNLo =
     SDValue(DAG.getMachineNode(RISCV::ADDI, DL, Ty, MNHi, GALo), 0);
+  if (Offset != 0)
+    return DAG.getNode(ISD::ADD, DL, Ty, MNLo,
+                       DAG.getConstant(Offset, DL, XLenVT));
   return MNLo;
 }
 
@@ -279,26 +355,6 @@ SDValue RISCVTargetLowering::lowerConstantPool(SDValue Op,
   } else {
     report_fatal_error("Unable to lowerConstantPool");
   }
-}
-
-SDValue RISCVTargetLowering::lowerExternalSymbol(SDValue Op,
-                                                 SelectionDAG &DAG) const {
-  SDLoc DL(Op);
-  EVT Ty = Op.getValueType();
-  ExternalSymbolSDNode *N = cast<ExternalSymbolSDNode>(Op);
-  const char *Sym = N->getSymbol();
-
-  // TODO: should also handle gp-relative loads.
-
-  if (isPositionIndependent() || Subtarget.is64Bit())
-    report_fatal_error("Unable to lowerExternalSymbol");
-
-  SDValue GAHi = DAG.getTargetExternalSymbol(Sym, Ty, RISCVII::MO_HI);
-  SDValue GALo = DAG.getTargetExternalSymbol(Sym, Ty, RISCVII::MO_LO);
-  SDValue MNHi = SDValue(DAG.getMachineNode(RISCV::LUI, DL, Ty, GAHi), 0);
-  SDValue MNLo =
-    SDValue(DAG.getMachineNode(RISCV::ADDI, DL, Ty, MNHi, GALo), 0);
-  return MNLo;
 }
 
 SDValue RISCVTargetLowering::lowerSELECT(SDValue Op, SelectionDAG &DAG) const {
@@ -756,8 +812,8 @@ void RISCVTargetLowering::analyzeInputArgs(
 
     if (CC_RISCV(MF.getDataLayout(), i, ArgVT, ArgVT, CCValAssign::Full,
                  ArgFlags, CCInfo, /*IsRet=*/true, IsRet, ArgTy)) {
-      DEBUG(dbgs() << "InputArg #" << i << " has unhandled type "
-                   << EVT(ArgVT).getEVTString() << '\n');
+      LLVM_DEBUG(dbgs() << "InputArg #" << i << " has unhandled type "
+                        << EVT(ArgVT).getEVTString() << '\n');
       llvm_unreachable(nullptr);
     }
   }
@@ -776,8 +832,8 @@ void RISCVTargetLowering::analyzeOutputArgs(
 
     if (CC_RISCV(MF.getDataLayout(), i, ArgVT, ArgVT, CCValAssign::Full,
                  ArgFlags, CCInfo, Outs[i].IsFixed, IsRet, OrigTy)) {
-      DEBUG(dbgs() << "OutputArg #" << i << " has unhandled type "
-                   << EVT(ArgVT).getEVTString() << "\n");
+      LLVM_DEBUG(dbgs() << "OutputArg #" << i << " has unhandled type "
+                        << EVT(ArgVT).getEVTString() << "\n");
       llvm_unreachable(nullptr);
     }
   }
@@ -891,6 +947,21 @@ SDValue RISCVTargetLowering::LowerFormalArguments(
   }
 
   MachineFunction &MF = DAG.getMachineFunction();
+
+  const Function &Func = MF.getFunction();
+  if (Func.hasFnAttribute("interrupt")) {
+    if (!Func.arg_empty())
+      report_fatal_error(
+        "Functions with the interrupt attribute cannot have arguments!");
+
+    StringRef Kind =
+      MF.getFunction().getFnAttribute("interrupt").getValueAsString();
+
+    if (!(Kind == "user" || Kind == "supervisor" || Kind == "machine"))
+      report_fatal_error(
+        "Function interrupt attribute argument not supported!");
+  }
+
   EVT PtrVT = getPointerTy(DAG.getDataLayout());
   MVT XLenVT = Subtarget.getXLenVT();
   unsigned XLenInBytes = Subtarget.getXLen() / 8;
@@ -1003,6 +1074,88 @@ SDValue RISCVTargetLowering::LowerFormalArguments(
   return Chain;
 }
 
+/// IsEligibleForTailCallOptimization - Check whether the call is eligible
+/// for tail call optimization.
+/// Note: This is modelled after ARM's IsEligibleForTailCallOptimization.
+bool RISCVTargetLowering::IsEligibleForTailCallOptimization(
+  CCState &CCInfo, CallLoweringInfo &CLI, MachineFunction &MF,
+  const SmallVector<CCValAssign, 16> &ArgLocs) const {
+
+  auto &Callee = CLI.Callee;
+  auto CalleeCC = CLI.CallConv;
+  auto IsVarArg = CLI.IsVarArg;
+  auto &Outs = CLI.Outs;
+  auto &Caller = MF.getFunction();
+  auto CallerCC = Caller.getCallingConv();
+
+  // Do not tail call opt functions with "disable-tail-calls" attribute.
+  if (Caller.getFnAttribute("disable-tail-calls").getValueAsString() == "true")
+    return false;
+
+  // Exception-handling functions need a special set of instructions to
+  // indicate a return to the hardware. Tail-calling another function would
+  // probably break this.
+  // TODO: The "interrupt" attribute isn't currently defined by RISC-V. This
+  // should be expanded as new function attributes are introduced.
+  if (Caller.hasFnAttribute("interrupt"))
+    return false;
+
+  // Do not tail call opt functions with varargs.
+  if (IsVarArg)
+    return false;
+
+  // Do not tail call opt if the stack is used to pass parameters.
+  if (CCInfo.getNextStackOffset() != 0)
+    return false;
+
+  // Do not tail call opt if any parameters need to be passed indirectly.
+  // Since long doubles (fp128) and i128 are larger than 2*XLEN, they are
+  // passed indirectly. So the address of the value will be passed in a
+  // register, or if not available, then the address is put on the stack. In
+  // order to pass indirectly, space on the stack often needs to be allocated
+  // in order to store the value. In this case the CCInfo.getNextStackOffset()
+  // != 0 check is not enough and we need to check if any CCValAssign ArgsLocs
+  // are passed CCValAssign::Indirect.
+  for (auto &VA : ArgLocs)
+    if (VA.getLocInfo() == CCValAssign::Indirect)
+      return false;
+
+  // Do not tail call opt if either caller or callee uses struct return
+  // semantics.
+  auto IsCallerStructRet = Caller.hasStructRetAttr();
+  auto IsCalleeStructRet = Outs.empty() ? false : Outs[0].Flags.isSRet();
+  if (IsCallerStructRet || IsCalleeStructRet)
+    return false;
+
+  // Externally-defined functions with weak linkage should not be
+  // tail-called. The behaviour of branch instructions in this situation (as
+  // used for tail calls) is implementation-defined, so we cannot rely on the
+  // linker replacing the tail call with a return.
+  if (GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(Callee)) {
+    const GlobalValue *GV = G->getGlobal();
+    if (GV->hasExternalWeakLinkage())
+      return false;
+  }
+
+  // The callee has to preserve all registers the caller needs to preserve.
+  const RISCVRegisterInfo *TRI = Subtarget.getRegisterInfo();
+  const uint32_t *CallerPreserved = TRI->getCallPreservedMask(MF, CallerCC);
+  if (CalleeCC != CallerCC) {
+    const uint32_t *CalleePreserved = TRI->getCallPreservedMask(MF, CalleeCC);
+    if (!TRI->regmaskSubsetEqual(CallerPreserved, CalleePreserved))
+      return false;
+  }
+
+  // Byval parameters hand the function a pointer directly into the stack area
+  // we want to reuse during a tail call. Working around this *is* possible
+  // but less efficient and uglier in LowerCall.
+  for (auto &Arg : Outs)
+    if (Arg.Flags.isByVal())
+      return false;
+
+  return true;
+}
+
 // Lower a call to a callseq_start + CALL + callseq_end chain, and add input
 // and output parameter nodes.
 SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
@@ -1014,7 +1167,7 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
   SmallVectorImpl<ISD::InputArg> &Ins = CLI.Ins;
   SDValue Chain = CLI.Chain;
   SDValue Callee = CLI.Callee;
-  CLI.IsTailCall = false;
+  bool &IsTailCall = CLI.IsTailCall;
   CallingConv::ID CallConv = CLI.CallConv;
   bool IsVarArg = CLI.IsVarArg;
   EVT PtrVT = getPointerTy(DAG.getDataLayout());
@@ -1026,6 +1179,17 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
   SmallVector<CCValAssign, 16> ArgLocs;
   CCState ArgCCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
   analyzeOutputArgs(MF, ArgCCInfo, Outs, /*IsRet=*/false, &CLI);
+
+  // Check if it's really possible to do a tail call.
+  if (IsTailCall)
+    IsTailCall = IsEligibleForTailCallOptimization(ArgCCInfo, CLI, MF,
+                                                   ArgLocs);
+
+  if (IsTailCall)
+    ++NumTailCalls;
+  else if (CLI.CS && CLI.CS.isMustTailCall())
+    report_fatal_error("failed to perform tail call elimination on a call "
+                       "site marked musttail");
 
   // Get a count of how many bytes are to be pushed on the stack.
   unsigned NumBytes = ArgCCInfo.getNextStackOffset();
@@ -1048,12 +1212,13 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
     Chain = DAG.getMemcpy(Chain, DL, FIPtr, Arg, SizeNode, Align,
                           /*IsVolatile=*/false,
                           /*AlwaysInline=*/false,
-                          /*isTailCall=*/false, MachinePointerInfo(),
+                          IsTailCall, MachinePointerInfo(),
                           MachinePointerInfo());
     ByValArgs.push_back(FIPtr);
   }
 
-  Chain = DAG.getCALLSEQ_START(Chain, NumBytes, 0, CLI.DL);
+  if (!IsTailCall)
+    Chain = DAG.getCALLSEQ_START(Chain, NumBytes, 0, CLI.DL);
 
   // Copy argument values to their designated locations.
   SmallVector<std::pair<unsigned, SDValue>, 8> RegsToPass;
@@ -1140,6 +1305,8 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
       RegsToPass.push_back(std::make_pair(VA.getLocReg(), ArgValue));
     } else {
       assert(VA.isMemLoc() && "Argument not register or memory");
+      assert(!IsTailCall && "Tail call not allowed if stack is used "
+                            "for passing parameters");
 
       // Work out the address of the stack slot.
       if (!StackPtr.getNode())
@@ -1166,10 +1333,13 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
     Glue = Chain.getValue(1);
   }
 
-  if (isa<GlobalAddressSDNode>(Callee)) {
-    Callee = lowerGlobalAddress(Callee, DAG);
-  } else if (isa<ExternalSymbolSDNode>(Callee)) {
-    Callee = lowerExternalSymbol(Callee, DAG);
+  // If the callee is a GlobalAddress/ExternalSymbol node, turn it into a
+  // TargetGlobalAddress/TargetExternalSymbol node so that legalize won't
+  // split it and then direct call can be matched by PseudoCALL.
+  if (GlobalAddressSDNode *S = dyn_cast<GlobalAddressSDNode>(Callee)) {
+    Callee = DAG.getTargetGlobalAddress(S->getGlobal(), DL, PtrVT, 0, 0);
+  } else if (ExternalSymbolSDNode *S = dyn_cast<ExternalSymbolSDNode>(Callee)) {
+    Callee = DAG.getTargetExternalSymbol(S->getSymbol(), PtrVT, 0);
   }
 
   // The first call operand is the chain and the second is the target address.
@@ -1182,11 +1352,13 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
   for (auto &Reg : RegsToPass)
     Ops.push_back(DAG.getRegister(Reg.first, Reg.second.getValueType()));
 
-  // Add a register mask operand representing the call-preserved registers.
-  const TargetRegisterInfo *TRI = Subtarget.getRegisterInfo();
-  const uint32_t *Mask = TRI->getCallPreservedMask(MF, CallConv);
-  assert(Mask && "Missing call preserved mask for calling convention");
-  Ops.push_back(DAG.getRegisterMask(Mask));
+  if (!IsTailCall) {
+    // Add a register mask operand representing the call-preserved registers.
+    const TargetRegisterInfo *TRI = Subtarget.getRegisterInfo();
+    const uint32_t *Mask = TRI->getCallPreservedMask(MF, CallConv);
+    assert(Mask && "Missing call preserved mask for calling convention");
+    Ops.push_back(DAG.getRegisterMask(Mask));
+  }
 
   // Glue the call to the argument copies, if any.
   if (Glue.getNode())
@@ -1194,6 +1366,12 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
 
   // Emit the call.
   SDVTList NodeTys = DAG.getVTList(MVT::Other, MVT::Glue);
+
+  if (IsTailCall) {
+    MF.getFrameInfo().setHasTailCall();
+    return DAG.getNode(RISCVISD::TAIL, DL, NodeTys, Ops);
+  }
+
   Chain = DAG.getNode(RISCVISD::CALL, DL, NodeTys, Ops);
   Glue = Chain.getValue(1);
 
@@ -1332,6 +1510,28 @@ RISCVTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
     RetOps.push_back(Glue);
   }
 
+  // Interrupt service routines use different return instructions.
+  const Function &Func = DAG.getMachineFunction().getFunction();
+  if (Func.hasFnAttribute("interrupt")) {
+    if (!Func.getReturnType()->isVoidTy())
+      report_fatal_error(
+          "Functions with the interrupt attribute must have void return type!");
+
+    MachineFunction &MF = DAG.getMachineFunction();
+    StringRef Kind =
+      MF.getFunction().getFnAttribute("interrupt").getValueAsString();
+
+    unsigned RetOpc;
+    if (Kind == "user")
+      RetOpc = RISCVISD::URET_FLAG;
+    else if (Kind == "supervisor")
+      RetOpc = RISCVISD::SRET_FLAG;
+    else
+      RetOpc = RISCVISD::MRET_FLAG;
+
+    return DAG.getNode(RetOpc, DL, MVT::Other, RetOps);
+  }
+
   return DAG.getNode(RISCVISD::RET_FLAG, DL, MVT::Other, RetOps);
 }
 
@@ -1341,6 +1541,12 @@ const char *RISCVTargetLowering::getTargetNodeName(unsigned Opcode) const {
     break;
   case RISCVISD::RET_FLAG:
     return "RISCVISD::RET_FLAG";
+  case RISCVISD::URET_FLAG:
+    return "RISCVISD::URET_FLAG";
+  case RISCVISD::SRET_FLAG:
+    return "RISCVISD::SRET_FLAG";
+  case RISCVISD::MRET_FLAG:
+    return "RISCVISD::MRET_FLAG";
   case RISCVISD::CALL:
     return "RISCVISD::CALL";
   case RISCVISD::SELECT_CC:
@@ -1349,6 +1555,8 @@ const char *RISCVTargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "RISCVISD::BuildPairF64";
   case RISCVISD::SplitF64:
     return "RISCVISD::SplitF64";
+  case RISCVISD::TAIL:
+    return "RISCVISD::TAIL";
   }
   return nullptr;
 }
@@ -1369,4 +1577,22 @@ RISCVTargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
   }
 
   return TargetLowering::getRegForInlineAsmConstraint(TRI, Constraint, VT);
+}
+
+Instruction *RISCVTargetLowering::emitLeadingFence(IRBuilder<> &Builder,
+                                                   Instruction *Inst,
+                                                   AtomicOrdering Ord) const {
+  if (isa<LoadInst>(Inst) && Ord == AtomicOrdering::SequentiallyConsistent)
+    return Builder.CreateFence(Ord);
+  if (isa<StoreInst>(Inst) && isReleaseOrStronger(Ord))
+    return Builder.CreateFence(AtomicOrdering::Release);
+  return nullptr;
+}
+
+Instruction *RISCVTargetLowering::emitTrailingFence(IRBuilder<> &Builder,
+                                                    Instruction *Inst,
+                                                    AtomicOrdering Ord) const {
+  if (isa<LoadInst>(Inst) && isAcquireOrStronger(Ord))
+    return Builder.CreateFence(AtomicOrdering::Acquire);
+  return nullptr;
 }

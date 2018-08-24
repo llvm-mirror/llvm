@@ -400,6 +400,8 @@ void ScalarBitSetTraits<ELFYAML::ELF_EF>::bitset(IO &IO,
     BCaseMask(EF_AMDGPU_MACH_AMDGCN_GFX810, EF_AMDGPU_MACH);
     BCaseMask(EF_AMDGPU_MACH_AMDGCN_GFX900, EF_AMDGPU_MACH);
     BCaseMask(EF_AMDGPU_MACH_AMDGCN_GFX902, EF_AMDGPU_MACH);
+    BCaseMask(EF_AMDGPU_MACH_AMDGCN_GFX904, EF_AMDGPU_MACH);
+    BCaseMask(EF_AMDGPU_MACH_AMDGCN_GFX906, EF_AMDGPU_MACH);
     BCase(EF_AMDGPU_XNACK);
     break;
   case ELF::EM_X86_64:
@@ -434,11 +436,15 @@ void ScalarEnumerationTraits<ELFYAML::ELF_SHT>::enumeration(
   ECase(SHT_PREINIT_ARRAY);
   ECase(SHT_GROUP);
   ECase(SHT_SYMTAB_SHNDX);
+  ECase(SHT_RELR);
   ECase(SHT_LOOS);
   ECase(SHT_ANDROID_REL);
   ECase(SHT_ANDROID_RELA);
+  ECase(SHT_ANDROID_RELR);
   ECase(SHT_LLVM_ODRTAB);
   ECase(SHT_LLVM_LINKER_OPTIONS);
+  ECase(SHT_LLVM_CALL_GRAPH_PROFILE);
+  ECase(SHT_LLVM_ADDRSIG);
   ECase(SHT_GNU_ATTRIBUTES);
   ECase(SHT_GNU_HASH);
   ECase(SHT_GNU_verdef);
@@ -810,6 +816,7 @@ static void commonSectionMapping(IO &IO, ELFYAML::Section &Section) {
   IO.mapOptional("Address", Section.Address, Hex64(0));
   IO.mapOptional("Link", Section.Link, StringRef());
   IO.mapOptional("AddressAlign", Section.AddressAlign, Hex64(0));
+  IO.mapOptional("EntSize", Section.EntSize);
   IO.mapOptional("Info", Section.Info, StringRef());
 }
 

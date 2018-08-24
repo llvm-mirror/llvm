@@ -18,6 +18,7 @@
 #include "llvm/MC/MCInstPrinter.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCObjectFileInfo.h"
+#include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCParser/AsmLexer.h"
 #include "llvm/MC/MCParser/MCTargetAsmParser.h"
 #include "llvm/MC/MCRegisterInfo.h"
@@ -190,8 +191,8 @@ int AssembleOneInput(const uint8_t *Data, size_t Size) {
   const char *ProgName = "llvm-mc-fuzzer";
   std::unique_ptr<MCSubtargetInfo> STI(
       TheTarget->createMCSubtargetInfo(TripleName, MCPU, FeaturesStr));
-  MCCodeEmitter *CE = nullptr;
-  MCAsmBackend *MAB = nullptr;
+  std::unique_ptr<MCCodeEmitter> CE = nullptr;
+  std::unique_ptr<MCAsmBackend> MAB = nullptr;
 
   MCTargetOptions MCOptions = InitMCTargetOptionsFromFlags();
 
@@ -202,9 +203,9 @@ int AssembleOneInput(const uint8_t *Data, size_t Size) {
   std::unique_ptr<MCStreamer> Str;
 
   if (FileType == OFT_AssemblyFile) {
-    Str.reset(TheTarget->createAsmStreamer(
-        Ctx,  std::move(FOut), AsmVerbose,
-        UseDwarfDirectory, IP, CE, MAB, ShowInst));
+    Str.reset(TheTarget->createAsmStreamer(Ctx, std::move(FOut), AsmVerbose,
+                                           UseDwarfDirectory, IP, std::move(CE),
+                                           std::move(MAB), ShowInst));
   } else {
     assert(FileType == OFT_ObjectFile && "Invalid file type!");
 
@@ -228,12 +229,11 @@ int AssembleOneInput(const uint8_t *Data, size_t Size) {
     }
 
     MCCodeEmitter *CE = TheTarget->createMCCodeEmitter(*MCII, *MRI, Ctx);
-    MCAsmBackend *MAB = TheTarget->createMCAsmBackend(*MRI, TripleName, MCPU,
-                                                      MCOptions);
+    MCAsmBackend *MAB = TheTarget->createMCAsmBackend(*STI, *MRI, MCOptions);
     Str.reset(TheTarget->createMCObjectStreamer(
-        TheTriple, Ctx, std::unique_ptr<MCAsmBackend>(MAB), *OS,
-        std::unique_ptr<MCCodeEmitter>(CE), *STI, MCOptions.MCRelaxAll,
-        MCOptions.MCIncrementalLinkerCompatible,
+        TheTriple, Ctx, std::unique_ptr<MCAsmBackend>(MAB),
+        MAB->createObjectWriter(*OS), std::unique_ptr<MCCodeEmitter>(CE), *STI,
+        MCOptions.MCRelaxAll, MCOptions.MCIncrementalLinkerCompatible,
         /*DWARFMustBeAtTheEnd*/ false));
   }
   const int Res = AssembleInput(ProgName, TheTarget, SrcMgr, Ctx, *Str, *MAI, *STI,

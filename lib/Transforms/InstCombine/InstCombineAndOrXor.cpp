@@ -14,7 +14,7 @@
 #include "InstCombineInternal.h"
 #include "llvm/Analysis/CmpInstAnalysis.h"
 #include "llvm/Analysis/InstructionSimplify.h"
-#include "llvm/Analysis/Utils/Local.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/IR/ConstantRange.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/PatternMatch.h"
@@ -75,7 +75,7 @@ static Value *getFCmpValue(unsigned Code, Value *LHS, Value *RHS,
   return Builder.CreateFCmp(Pred, LHS, RHS);
 }
 
-/// \brief Transform BITWISE_OP(BSWAP(A),BSWAP(B)) or
+/// Transform BITWISE_OP(BSWAP(A),BSWAP(B)) or
 /// BITWISE_OP(BSWAP(A), Constant) to BSWAP(BITWISE_OP(A, B))
 /// \param I Binary operator to transform.
 /// \return Pointer to node that must replace the original binary operator, or
@@ -898,6 +898,130 @@ Value *InstCombiner::foldAndOrOfICmpsOfAndWithPow2(ICmpInst *LHS, ICmpInst *RHS,
   return nullptr;
 }
 
+/// General pattern:
+///   X & Y
+///
+/// Where Y is checking that all the high bits (covered by a mask 4294967168)
+/// are uniform, i.e.  %arg & 4294967168  can be either  4294967168  or  0
+/// Pattern can be one of:
+///   %t = add        i32 %arg,    128
+///   %r = icmp   ult i32 %t,      256
+/// Or
+///   %t0 = shl       i32 %arg,    24
+///   %t1 = ashr      i32 %t0,     24
+///   %r  = icmp  eq  i32 %t1,     %arg
+/// Or
+///   %t0 = trunc     i32 %arg  to i8
+///   %t1 = sext      i8  %t0   to i32
+///   %r  = icmp  eq  i32 %t1,     %arg
+/// This pattern is a signed truncation check.
+///
+/// And X is checking that some bit in that same mask is zero.
+/// I.e. can be one of:
+///   %r = icmp sgt i32   %arg,    -1
+/// Or
+///   %t = and      i32   %arg,    2147483648
+///   %r = icmp eq  i32   %t,      0
+///
+/// Since we are checking that all the bits in that mask are the same,
+/// and a particular bit is zero, what we are really checking is that all the
+/// masked bits are zero.
+/// So this should be transformed to:
+///   %r = icmp ult i32 %arg, 128
+static Value *foldSignedTruncationCheck(ICmpInst *ICmp0, ICmpInst *ICmp1,
+                                        Instruction &CxtI,
+                                        InstCombiner::BuilderTy &Builder) {
+  assert(CxtI.getOpcode() == Instruction::And);
+
+  // Match  icmp ult (add %arg, C01), C1   (C1 == C01 << 1; powers of two)
+  auto tryToMatchSignedTruncationCheck = [](ICmpInst *ICmp, Value *&X,
+                                            APInt &SignBitMask) -> bool {
+    CmpInst::Predicate Pred;
+    const APInt *I01, *I1; // powers of two; I1 == I01 << 1
+    if (!(match(ICmp,
+                m_ICmp(Pred, m_Add(m_Value(X), m_Power2(I01)), m_Power2(I1))) &&
+          Pred == ICmpInst::ICMP_ULT && I1->ugt(*I01) && I01->shl(1) == *I1))
+      return false;
+    // Which bit is the new sign bit as per the 'signed truncation' pattern?
+    SignBitMask = *I01;
+    return true;
+  };
+
+  // One icmp needs to be 'signed truncation check'.
+  // We need to match this first, else we will mismatch commutative cases.
+  Value *X1;
+  APInt HighestBit;
+  ICmpInst *OtherICmp;
+  if (tryToMatchSignedTruncationCheck(ICmp1, X1, HighestBit))
+    OtherICmp = ICmp0;
+  else if (tryToMatchSignedTruncationCheck(ICmp0, X1, HighestBit))
+    OtherICmp = ICmp1;
+  else
+    return nullptr;
+
+  assert(HighestBit.isPowerOf2() && "expected to be power of two (non-zero)");
+
+  // Try to match/decompose into:  icmp eq (X & Mask), 0
+  auto tryToDecompose = [](ICmpInst *ICmp, Value *&X,
+                           APInt &UnsetBitsMask) -> bool {
+    CmpInst::Predicate Pred = ICmp->getPredicate();
+    // Can it be decomposed into  icmp eq (X & Mask), 0  ?
+    if (llvm::decomposeBitTestICmp(ICmp->getOperand(0), ICmp->getOperand(1),
+                                   Pred, X, UnsetBitsMask,
+                                   /*LookThruTrunc=*/false) &&
+        Pred == ICmpInst::ICMP_EQ)
+      return true;
+    // Is it  icmp eq (X & Mask), 0  already?
+    const APInt *Mask;
+    if (match(ICmp, m_ICmp(Pred, m_And(m_Value(X), m_APInt(Mask)), m_Zero())) &&
+        Pred == ICmpInst::ICMP_EQ) {
+      UnsetBitsMask = *Mask;
+      return true;
+    }
+    return false;
+  };
+
+  // And the other icmp needs to be decomposable into a bit test.
+  Value *X0;
+  APInt UnsetBitsMask;
+  if (!tryToDecompose(OtherICmp, X0, UnsetBitsMask))
+    return nullptr;
+
+  assert(!UnsetBitsMask.isNullValue() && "empty mask makes no sense.");
+
+  // Are they working on the same value?
+  Value *X;
+  if (X1 == X0) {
+    // Ok as is.
+    X = X1;
+  } else if (match(X0, m_Trunc(m_Specific(X1)))) {
+    UnsetBitsMask = UnsetBitsMask.zext(X1->getType()->getScalarSizeInBits());
+    X = X1;
+  } else
+    return nullptr;
+
+  // So which bits should be uniform as per the 'signed truncation check'?
+  // (all the bits starting with (i.e. including) HighestBit)
+  APInt SignBitsMask = ~(HighestBit - 1U);
+
+  // UnsetBitsMask must have some common bits with SignBitsMask,
+  if (!UnsetBitsMask.intersects(SignBitsMask))
+    return nullptr;
+
+  // Does UnsetBitsMask contain any bits outside of SignBitsMask?
+  if (!UnsetBitsMask.isSubsetOf(SignBitsMask)) {
+    APInt OtherHighestBit = (~UnsetBitsMask) + 1U;
+    if (!OtherHighestBit.isPowerOf2())
+      return nullptr;
+    HighestBit = APIntOps::umin(HighestBit, OtherHighestBit);
+  }
+  // Else, if it does not, then all is ok as-is.
+
+  // %r = icmp ult %X, SignBit
+  return Builder.CreateICmpULT(X, ConstantInt::get(X->getType(), HighestBit),
+                               CxtI.getName() + ".simplified");
+}
+
 /// Fold (icmp)&(icmp) if possible.
 Value *InstCombiner::foldAndOfICmps(ICmpInst *LHS, ICmpInst *RHS,
                                     Instruction &CxtI) {
@@ -935,6 +1059,9 @@ Value *InstCombiner::foldAndOfICmps(ICmpInst *LHS, ICmpInst *RHS,
     return V;
 
   if (Value *V = foldAndOrOfEqualityCmpsWithConstants(LHS, RHS, true, Builder))
+    return V;
+
+  if (Value *V = foldSignedTruncationCheck(LHS, RHS, CxtI, Builder))
     return V;
 
   // This only handles icmp of constants: (icmp1 A, C1) & (icmp2 B, C2).
@@ -1288,8 +1415,8 @@ static Instruction *foldAndToXor(BinaryOperator &I,
   // Operand complexity canonicalization guarantees that the 'or' is Op0.
   // (A | B) & ~(A & B) --> A ^ B
   // (A | B) & ~(B & A) --> A ^ B
-  if (match(Op0, m_Or(m_Value(A), m_Value(B))) &&
-      match(Op1, m_Not(m_c_And(m_Specific(A), m_Specific(B)))))
+  if (match(&I, m_BinOp(m_Or(m_Value(A), m_Value(B)),
+                        m_Not(m_c_And(m_Deferred(A), m_Deferred(B))))))
     return BinaryOperator::CreateXor(A, B);
 
   // (A | ~B) & (~A | B) --> ~(A ^ B)
@@ -1297,8 +1424,8 @@ static Instruction *foldAndToXor(BinaryOperator &I,
   // (~B | A) & (~A | B) --> ~(A ^ B)
   // (~B | A) & (B | ~A) --> ~(A ^ B)
   if (Op0->hasOneUse() || Op1->hasOneUse())
-    if (match(Op0, m_c_Or(m_Value(A), m_Not(m_Value(B)))) &&
-        match(Op1, m_c_Or(m_Not(m_Specific(A)), m_Specific(B))))
+    if (match(&I, m_BinOp(m_c_Or(m_Value(A), m_Not(m_Value(B))),
+                          m_c_Or(m_Not(m_Deferred(A)), m_Deferred(B)))))
       return BinaryOperator::CreateNot(Builder.CreateXor(A, B));
 
   return nullptr;
@@ -1401,14 +1528,15 @@ Instruction *InstCombiner::narrowMaskedBinOp(BinaryOperator &And) {
 // here. We should standardize that construct where it is needed or choose some
 // other way to ensure that commutated variants of patterns are not missed.
 Instruction *InstCombiner::visitAnd(BinaryOperator &I) {
-  bool Changed = SimplifyAssociativeOrCommutative(I);
-  Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
-
-  if (Value *V = SimplifyVectorOp(I))
+  if (Value *V = SimplifyAndInst(I.getOperand(0), I.getOperand(1),
+                                 SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
 
-  if (Value *V = SimplifyAndInst(Op0, Op1, SQ.getWithInstruction(&I)))
-    return replaceInstUsesWith(I, V);
+  if (SimplifyAssociativeOrCommutative(I))
+    return &I;
+
+  if (Instruction *X = foldShuffledBinop(I))
+    return X;
 
   // See if we can simplify any instructions used by the instruction whose sole
   // purpose is to compute bits we don't care about.
@@ -1426,6 +1554,7 @@ Instruction *InstCombiner::visitAnd(BinaryOperator &I) {
   if (Value *V = SimplifyBSwap(I, Builder))
     return replaceInstUsesWith(I, V);
 
+  Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
   const APInt *C;
   if (match(Op1, m_APInt(C))) {
     Value *X, *Y;
@@ -1548,31 +1677,13 @@ Instruction *InstCombiner::visitAnd(BinaryOperator &I) {
     return DeMorgan;
 
   {
-    Value *A = nullptr, *B = nullptr, *C = nullptr;
-    // A&(A^B) => A & ~B
-    {
-      Value *tmpOp0 = Op0;
-      Value *tmpOp1 = Op1;
-      if (match(Op0, m_OneUse(m_Xor(m_Value(A), m_Value(B))))) {
-        if (A == Op1 || B == Op1 ) {
-          tmpOp1 = Op0;
-          tmpOp0 = Op1;
-          // Simplify below
-        }
-      }
-
-      if (match(tmpOp1, m_OneUse(m_Xor(m_Value(A), m_Value(B))))) {
-        if (B == tmpOp0) {
-          std::swap(A, B);
-        }
-        // Notice that the pattern (A&(~B)) is actually (A&(-1^B)), so if
-        // A is originally -1 (or a vector of -1 and undefs), then we enter
-        // an endless loop. By checking that A is non-constant we ensure that
-        // we will never get to the loop.
-        if (A == tmpOp0 && !isa<Constant>(A)) // A&(A^B) -> A & ~B
-          return BinaryOperator::CreateAnd(A, Builder.CreateNot(B));
-      }
-    }
+    Value *A, *B, *C;
+    // A & (A ^ B) --> A & ~B
+    if (match(Op1, m_OneUse(m_c_Xor(m_Specific(Op0), m_Value(B)))))
+      return BinaryOperator::CreateAnd(Op0, Builder.CreateNot(B));
+    // (A ^ B) & A --> A & ~B
+    if (match(Op0, m_OneUse(m_c_Xor(m_Specific(Op1), m_Value(B)))))
+      return BinaryOperator::CreateAnd(Op1, Builder.CreateNot(B));
 
     // (A ^ B) & ((B ^ C) ^ A) -> (A ^ B) & ~C
     if (match(Op0, m_Xor(m_Value(A), m_Value(B))))
@@ -1648,7 +1759,7 @@ Instruction *InstCombiner::visitAnd(BinaryOperator &I) {
       A->getType()->isIntOrIntVectorTy(1))
     return SelectInst::Create(A, Op0, Constant::getNullValue(I.getType()));
 
-  return Changed ? &I : nullptr;
+  return nullptr;
 }
 
 /// Given an OR instruction, check to see if this is a bswap idiom. If so,
@@ -1675,7 +1786,18 @@ Instruction *InstCombiner::MatchBSwap(BinaryOperator &I) {
   bool OrOfAnds = match(Op0, m_And(m_Value(), m_Value())) &&
                   match(Op1, m_And(m_Value(), m_Value()));
 
-  if (!OrOfOrs && !OrOfShifts && !OrOfAnds)
+  // (A << B) | (C & D)                              -> bswap if possible.
+  // The bigger pattern here is ((A & C1) << C2) | ((B >> C2) & C1), which is a
+  // part of the bswap idiom for specific values of C1, C2 (e.g. C1 = 16711935,
+  // C2 = 8 for i32).
+  // This pattern can occur when the operands of the 'or' are not canonicalized
+  // for some reason (not having only one use, for example).
+  bool OrOfAndAndSh = (match(Op0, m_LogicalShift(m_Value(), m_Value())) &&
+                       match(Op1, m_And(m_Value(), m_Value()))) ||
+                      (match(Op0, m_And(m_Value(), m_Value())) &&
+                       match(Op1, m_LogicalShift(m_Value(), m_Value())));
+
+  if (!OrOfOrs && !OrOfShifts && !OrOfAnds && !OrOfAndAndSh)
     return nullptr;
 
   SmallVector<Instruction*, 4> Insts;
@@ -2005,14 +2127,15 @@ Value *InstCombiner::foldOrOfICmps(ICmpInst *LHS, ICmpInst *RHS,
 // here. We should standardize that construct where it is needed or choose some
 // other way to ensure that commutated variants of patterns are not missed.
 Instruction *InstCombiner::visitOr(BinaryOperator &I) {
-  bool Changed = SimplifyAssociativeOrCommutative(I);
-  Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
-
-  if (Value *V = SimplifyVectorOp(I))
+  if (Value *V = SimplifyOrInst(I.getOperand(0), I.getOperand(1),
+                                SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
 
-  if (Value *V = SimplifyOrInst(Op0, Op1, SQ.getWithInstruction(&I)))
-    return replaceInstUsesWith(I, V);
+  if (SimplifyAssociativeOrCommutative(I))
+    return &I;
+
+  if (Instruction *X = foldShuffledBinop(I))
+    return X;
 
   // See if we can simplify any instructions used by the instruction whose sole
   // purpose is to compute bits we don't care about.
@@ -2037,6 +2160,7 @@ Instruction *InstCombiner::visitOr(BinaryOperator &I) {
   if (Instruction *BSwap = MatchBSwap(I))
     return BSwap;
 
+  Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
   {
     Value *A;
     const APInt *C;
@@ -2276,7 +2400,7 @@ Instruction *InstCombiner::visitOr(BinaryOperator &I) {
     }
   }
 
-  return Changed ? &I : nullptr;
+  return nullptr;
 }
 
 /// A ^ B can be specified using other logic ops in a variety of patterns. We
@@ -2294,10 +2418,8 @@ static Instruction *foldXorToXor(BinaryOperator &I,
   // (A & B) ^ (B | A) -> A ^ B
   // (A | B) ^ (A & B) -> A ^ B
   // (A | B) ^ (B & A) -> A ^ B
-  if ((match(Op0, m_And(m_Value(A), m_Value(B))) &&
-       match(Op1, m_c_Or(m_Specific(A), m_Specific(B)))) ||
-      (match(Op0, m_Or(m_Value(A), m_Value(B))) &&
-       match(Op1, m_c_And(m_Specific(A), m_Specific(B))))) {
+  if (match(&I, m_c_Xor(m_And(m_Value(A), m_Value(B)),
+                        m_c_Or(m_Deferred(A), m_Deferred(B))))) {
     I.setOperand(0, A);
     I.setOperand(1, B);
     return &I;
@@ -2307,10 +2429,8 @@ static Instruction *foldXorToXor(BinaryOperator &I,
   // (~B | A) ^ (~A | B) -> A ^ B
   // (~A | B) ^ (A | ~B) -> A ^ B
   // (B | ~A) ^ (A | ~B) -> A ^ B
-  if ((match(Op0, m_Or(m_Value(A), m_Not(m_Value(B)))) &&
-       match(Op1, m_c_Or(m_Not(m_Specific(A)), m_Specific(B)))) ||
-      (match(Op0, m_Or(m_Not(m_Value(A)), m_Value(B))) &&
-       match(Op1, m_c_Or(m_Specific(A), m_Not(m_Specific(B)))))) {
+  if (match(&I, m_Xor(m_c_Or(m_Value(A), m_Not(m_Value(B))),
+                      m_c_Or(m_Not(m_Deferred(A)), m_Deferred(B))))) {
     I.setOperand(0, A);
     I.setOperand(1, B);
     return &I;
@@ -2320,10 +2440,8 @@ static Instruction *foldXorToXor(BinaryOperator &I,
   // (~B & A) ^ (~A & B) -> A ^ B
   // (~A & B) ^ (A & ~B) -> A ^ B
   // (B & ~A) ^ (A & ~B) -> A ^ B
-  if ((match(Op0, m_And(m_Value(A), m_Not(m_Value(B)))) &&
-       match(Op1, m_c_And(m_Not(m_Specific(A)), m_Specific(B)))) ||
-      (match(Op0, m_And(m_Not(m_Value(A)), m_Value(B))) &&
-       match(Op1, m_c_And(m_Specific(A), m_Not(m_Specific(B)))))) {
+  if (match(&I, m_Xor(m_c_And(m_Value(A), m_Not(m_Value(B))),
+                      m_c_And(m_Not(m_Deferred(A)), m_Deferred(B))))) {
     I.setOperand(0, A);
     I.setOperand(1, B);
     return &I;
@@ -2369,7 +2487,8 @@ Value *InstCombiner::foldXorOfICmps(ICmpInst *LHS, ICmpInst *RHS) {
   Value *LHS0 = LHS->getOperand(0), *LHS1 = LHS->getOperand(1);
   Value *RHS0 = RHS->getOperand(0), *RHS1 = RHS->getOperand(1);
   if ((LHS->hasOneUse() || RHS->hasOneUse()) &&
-      LHS0->getType() == RHS0->getType()) {
+      LHS0->getType() == RHS0->getType() &&
+      LHS0->getType()->isIntOrIntVectorTy()) {
     // (X > -1) ^ (Y > -1) --> (X ^ Y) < 0
     // (X <  0) ^ (Y <  0) --> (X ^ Y) < 0
     if ((PredL == CmpInst::ICMP_SGT && match(LHS1, m_AllOnes()) &&
@@ -2417,18 +2536,89 @@ Value *InstCombiner::foldXorOfICmps(ICmpInst *LHS, ICmpInst *RHS) {
   return nullptr;
 }
 
+/// If we have a masked merge, in the canonical form of:
+/// (assuming that A only has one use.)
+///   |        A  |  |B|
+///   ((x ^ y) & M) ^ y
+///    |  D  |
+/// * If M is inverted:
+///      |  D  |
+///     ((x ^ y) & ~M) ^ y
+///   We can canonicalize by swapping the final xor operand
+///   to eliminate the 'not' of the mask.
+///     ((x ^ y) & M) ^ x
+/// * If M is a constant, and D has one use, we transform to 'and' / 'or' ops
+///   because that shortens the dependency chain and improves analysis:
+///     (x & M) | (y & ~M)
+static Instruction *visitMaskedMerge(BinaryOperator &I,
+                                     InstCombiner::BuilderTy &Builder) {
+  Value *B, *X, *D;
+  Value *M;
+  if (!match(&I, m_c_Xor(m_Value(B),
+                         m_OneUse(m_c_And(
+                             m_CombineAnd(m_c_Xor(m_Deferred(B), m_Value(X)),
+                                          m_Value(D)),
+                             m_Value(M))))))
+    return nullptr;
+
+  Value *NotM;
+  if (match(M, m_Not(m_Value(NotM)))) {
+    // De-invert the mask and swap the value in B part.
+    Value *NewA = Builder.CreateAnd(D, NotM);
+    return BinaryOperator::CreateXor(NewA, X);
+  }
+
+  Constant *C;
+  if (D->hasOneUse() && match(M, m_Constant(C))) {
+    // Unfold.
+    Value *LHS = Builder.CreateAnd(X, C);
+    Value *NotC = Builder.CreateNot(C);
+    Value *RHS = Builder.CreateAnd(B, NotC);
+    return BinaryOperator::CreateOr(LHS, RHS);
+  }
+
+  return nullptr;
+}
+
+// Transform
+//   ~(x ^ y)
+// into:
+//   (~x) ^ y
+// or into
+//   x ^ (~y)
+static Instruction *sinkNotIntoXor(BinaryOperator &I,
+                                   InstCombiner::BuilderTy &Builder) {
+  Value *X, *Y;
+  // FIXME: one-use check is not needed in general, but currently we are unable
+  // to fold 'not' into 'icmp', if that 'icmp' has multiple uses. (D35182)
+  if (!match(&I, m_Not(m_OneUse(m_Xor(m_Value(X), m_Value(Y))))))
+    return nullptr;
+
+  // We only want to do the transform if it is free to do.
+  if (IsFreeToInvert(X, X->hasOneUse())) {
+    // Ok, good.
+  } else if (IsFreeToInvert(Y, Y->hasOneUse())) {
+    std::swap(X, Y);
+  } else
+    return nullptr;
+
+  Value *NotX = Builder.CreateNot(X, X->getName() + ".not");
+  return BinaryOperator::CreateXor(NotX, Y, I.getName() + ".demorgan");
+}
+
 // FIXME: We use commutative matchers (m_c_*) for some, but not all, matches
 // here. We should standardize that construct where it is needed or choose some
 // other way to ensure that commutated variants of patterns are not missed.
 Instruction *InstCombiner::visitXor(BinaryOperator &I) {
-  bool Changed = SimplifyAssociativeOrCommutative(I);
-  Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
-
-  if (Value *V = SimplifyVectorOp(I))
+  if (Value *V = SimplifyXorInst(I.getOperand(0), I.getOperand(1),
+                                 SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
 
-  if (Value *V = SimplifyXorInst(Op0, Op1, SQ.getWithInstruction(&I)))
-    return replaceInstUsesWith(I, V);
+  if (SimplifyAssociativeOrCommutative(I))
+    return &I;
+
+  if (Instruction *X = foldShuffledBinop(I))
+    return X;
 
   if (Instruction *NewXor = foldXorToXor(I, Builder))
     return NewXor;
@@ -2445,8 +2635,15 @@ Instruction *InstCombiner::visitXor(BinaryOperator &I) {
   if (Value *V = SimplifyBSwap(I, Builder))
     return replaceInstUsesWith(I, V);
 
-  // A^B --> A|B iff A and B have no bits set in common.
-  if (haveNoCommonBitsSet(Op0, Op1, DL, &AC, &I, &DT))
+  Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
+
+  // Fold (X & M) ^ (Y & ~M) -> (X & M) | (Y & ~M)
+  // This it a special case in haveNoCommonBitsSet, but the computeKnownBits
+  // calls in there are unnecessary as SimplifyDemandedInstructionBits should
+  // have already taken care of those cases.
+  Value *M;
+  if (match(&I, m_c_Xor(m_c_And(m_Not(m_Value(M)), m_Value()),
+                        m_c_And(m_Deferred(M), m_Value()))))
     return BinaryOperator::CreateOr(Op0, Op1);
 
   // Apply DeMorgan's Law for 'nand' / 'nor' logic with an inverted operand.
@@ -2467,6 +2664,9 @@ Instruction *InstCombiner::visitXor(BinaryOperator &I) {
     return BinaryOperator::CreateAnd(X, NotY);
   }
 
+  if (Instruction *Xor = visitMaskedMerge(I, Builder))
+    return Xor;
+
   // Is this a 'not' (~) fed by a binary operator?
   BinaryOperator *NotVal;
   if (match(&I, m_Not(m_BinOp(NotVal)))) {
@@ -2486,6 +2686,10 @@ Instruction *InstCombiner::visitXor(BinaryOperator &I) {
         return BinaryOperator::CreateAnd(NotX, NotY);
       }
     }
+
+    // ~(X - Y) --> ~X + Y
+    if (match(NotVal, m_OneUse(m_Sub(m_Value(X), m_Value(Y)))))
+      return BinaryOperator::CreateAdd(Builder.CreateNot(X), Y);
 
     // ~(~X >>s Y) --> (X >>s Y)
     if (match(NotVal, m_AShr(m_Not(m_Value(X)), m_Value(Y))))
@@ -2679,7 +2883,7 @@ Instruction *InstCombiner::visitXor(BinaryOperator &I) {
   if (Instruction *CastedXor = foldCastedBitwiseLogic(I))
     return CastedXor;
 
-  // Canonicalize the shifty way to code absolute value to the common pattern.
+  // Canonicalize a shifty way to code absolute value to the common pattern.
   // There are 4 potential commuted variants. Move the 'ashr' candidate to Op1.
   // We're relying on the fact that we only do this transform when the shift has
   // exactly 2 uses and the add has exactly 1 use (otherwise, we might increase
@@ -2696,7 +2900,11 @@ Instruction *InstCombiner::visitXor(BinaryOperator &I) {
     // xor (add A, B), B  ; add -1 and flip bits if negative
     // --> (A < 0) ? -A : A
     Value *Cmp = Builder.CreateICmpSLT(A, ConstantInt::getNullValue(Ty));
-    return SelectInst::Create(Cmp, Builder.CreateNeg(A), A);
+    // Copy the nuw/nsw flags from the add to the negate.
+    auto *Add = cast<BinaryOperator>(Op0);
+    Value *Neg = Builder.CreateNeg(A, "", Add->hasNoUnsignedWrap(),
+                                   Add->hasNoSignedWrap());
+    return SelectInst::Create(Cmp, Neg, A);
   }
 
   // Eliminate a bitwise 'not' op of 'not' min/max by inverting the min/max:
@@ -2729,5 +2937,8 @@ Instruction *InstCombiner::visitXor(BinaryOperator &I) {
     }
   }
 
-  return Changed ? &I : nullptr;
+  if (Instruction *NewXor = sinkNotIntoXor(I, Builder))
+    return NewXor;
+
+  return nullptr;
 }

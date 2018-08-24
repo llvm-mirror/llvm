@@ -16,6 +16,7 @@
 #include "CodeGenInstruction.h"
 #include "CodeGenSchedule.h"
 #include "CodeGenTarget.h"
+#include "PredicateExpander.h"
 #include "SequenceToOffsetTable.h"
 #include "TableGenBackends.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -59,6 +60,17 @@ private:
   typedef std::map<std::map<unsigned, unsigned>,
                    std::vector<std::string>> OpNameMapTy;
   typedef std::map<std::string, unsigned>::iterator StrUintMapIter;
+
+  /// Generate member functions in the target-specific GenInstrInfo class.
+  ///
+  /// This method is used to custom expand TIIPredicate definitions.
+  /// See file llvm/Target/TargetInstPredicates.td for a description of what is
+  /// a TIIPredicate and how to use it.
+  void emitTIIHelperMethods(raw_ostream &OS, StringRef TargetName);
+
+  /// Expand TIIPredicate definitions to functions that accept a const MCInst
+  /// reference.
+  void emitMCIIHelperMethods(raw_ostream &OS, StringRef TargetName);
   void emitRecord(const CodeGenInstruction &Inst, unsigned Num,
                   Record *InstrInfo,
                   std::map<std::vector<Record*>, unsigned> &EL,
@@ -339,6 +351,74 @@ void InstrInfoEmitter::emitOperandTypesEnum(raw_ostream &OS,
   OS << "#endif // GET_INSTRINFO_OPERAND_TYPES_ENUM\n\n";
 }
 
+void InstrInfoEmitter::emitMCIIHelperMethods(raw_ostream &OS,
+                                             StringRef TargetName) {
+  RecVec TIIPredicates = Records.getAllDerivedDefinitions("TIIPredicate");
+  if (TIIPredicates.empty())
+    return;
+
+  OS << "#ifdef GET_GENINSTRINFO_MC_DECL\n";
+  OS << "#undef GET_GENINSTRINFO_MC_DECL\n\n";
+
+  OS << "namespace llvm {\n";
+  OS << "class MCInst;\n\n";
+
+  OS << "namespace " << TargetName << "_MC {\n\n";
+
+  for (const Record *Rec : TIIPredicates) {
+    OS << "bool " << Rec->getValueAsString("FunctionName")
+        << "(const MCInst &MI);\n";
+  }
+
+  OS << "\n} // end " << TargetName << "_MC namespace\n";
+  OS << "} // end llvm namespace\n\n";
+
+  OS << "#endif // GET_GENINSTRINFO_MC_DECL\n\n";
+
+  OS << "#ifdef GET_GENINSTRINFO_MC_HELPERS\n";
+  OS << "#undef GET_GENINSTRINFO_MC_HELPERS\n\n";
+
+  OS << "namespace llvm {\n";
+  OS << "namespace " << TargetName << "_MC {\n\n";
+
+  PredicateExpander PE(TargetName);
+  PE.setExpandForMC(true);
+
+  for (const Record *Rec : TIIPredicates) {
+    OS << "bool " << Rec->getValueAsString("FunctionName");
+    OS << "(const MCInst &MI) {\n";
+
+    OS.indent(PE.getIndentLevel() * 2);
+    PE.expandStatement(OS, Rec->getValueAsDef("Body"));
+    OS << "\n}\n";
+  }
+
+  OS << "\n} // end " << TargetName << "_MC namespace\n";
+  OS << "} // end llvm namespace\n\n";
+
+  OS << "#endif // GET_GENISTRINFO_MC_HELPERS\n";
+}
+
+void InstrInfoEmitter::emitTIIHelperMethods(raw_ostream &OS,
+                                            StringRef TargetName) {
+  RecVec TIIPredicates = Records.getAllDerivedDefinitions("TIIPredicate");
+  if (TIIPredicates.empty())
+    return;
+
+  PredicateExpander PE(TargetName);
+  PE.setExpandForMC(false);
+  PE.setIndentLevel(2);
+
+  for (const Record *Rec : TIIPredicates) {
+    OS << "\n  static bool " << Rec->getValueAsString("FunctionName");
+    OS << "(const MachineInstr &MI) {\n";
+
+    OS.indent(PE.getIndentLevel() * 2);
+    PE.expandStatement(OS, Rec->getValueAsDef("Body"));
+    OS << "\n  }\n";
+  }
+}
+
 //===----------------------------------------------------------------------===//
 // Main Output.
 //===----------------------------------------------------------------------===//
@@ -435,9 +515,11 @@ void InstrInfoEmitter::run(raw_ostream &OS) {
   OS << "struct " << ClassName << " : public TargetInstrInfo {\n"
      << "  explicit " << ClassName
      << "(int CFSetupOpcode = -1, int CFDestroyOpcode = -1, int CatchRetOpcode = -1, int ReturnOpcode = -1);\n"
-     << "  ~" << ClassName << "() override = default;\n"
-     << "};\n";
-  OS << "} // end llvm namespace\n";
+     << "  ~" << ClassName << "() override = default;\n";
+
+  emitTIIHelperMethods(OS, TargetName);
+
+  OS << "\n};\n} // end llvm namespace\n";
 
   OS << "#endif // GET_INSTRINFO_HEADER\n\n";
 
@@ -461,6 +543,8 @@ void InstrInfoEmitter::run(raw_ostream &OS) {
   emitOperandNameMappings(OS, Target, NumberedInstructions);
 
   emitOperandTypesEnum(OS, Target);
+
+  emitMCIIHelperMethods(OS, TargetName);
 }
 
 void InstrInfoEmitter::emitRecord(const CodeGenInstruction &Inst, unsigned Num,
@@ -489,8 +573,10 @@ void InstrInfoEmitter::emitRecord(const CodeGenInstruction &Inst, unsigned Num,
   if (Inst.isIndirectBranch)   OS << "|(1ULL<<MCID::IndirectBranch)";
   if (Inst.isCompare)          OS << "|(1ULL<<MCID::Compare)";
   if (Inst.isMoveImm)          OS << "|(1ULL<<MCID::MoveImm)";
+  if (Inst.isMoveReg)          OS << "|(1ULL<<MCID::MoveReg)";
   if (Inst.isBitcast)          OS << "|(1ULL<<MCID::Bitcast)";
   if (Inst.isAdd)              OS << "|(1ULL<<MCID::Add)";
+  if (Inst.isTrap)             OS << "|(1ULL<<MCID::Trap)";
   if (Inst.isSelect)           OS << "|(1ULL<<MCID::Select)";
   if (Inst.isBarrier)          OS << "|(1ULL<<MCID::Barrier)";
   if (Inst.hasDelaySlot)       OS << "|(1ULL<<MCID::DelaySlot)";

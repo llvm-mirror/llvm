@@ -24,6 +24,8 @@ namespace wasm {
 const char WasmMagic[] = {'\0', 'a', 's', 'm'};
 // Wasm binary format version
 const uint32_t WasmVersion = 0x1;
+// Wasm linking metadata version
+const uint32_t WasmMetadataVersion = 0x1;
 // Wasm uses a 64k page size
 const uint32_t WasmPageSize = 65536;
 
@@ -100,6 +102,7 @@ struct WasmFunction {
   ArrayRef<uint8_t> Body;
   uint32_t CodeSectionOffset;
   uint32_t Size;
+  uint32_t CodeOffset;  // start of Locals and Body
   StringRef SymbolName; // from the "linking" section
   StringRef DebugName; // from the "name" section
   uint32_t Comdat; // from the "comdat info" section
@@ -145,6 +148,7 @@ struct WasmSymbolInfo {
   StringRef Name;
   uint8_t Kind;
   uint32_t Flags;
+  StringRef Module; // For undefined symbols the module name of the import
   union {
     // For function or global symbols, the index in function or global index
     // space.
@@ -160,6 +164,7 @@ struct WasmFunctionName {
 };
 
 struct WasmLinkingData {
+  uint32_t Version;
   std::vector<WasmInitFunc> InitFunctions;
   std::vector<StringRef> Comdats;
   std::vector<WasmSymbolInfo> SymbolTable;
@@ -246,8 +251,9 @@ enum : unsigned {
 // Kind codes used in the custom "linking" section in the WASM_SYMBOL_TABLE
 enum WasmSymbolType : unsigned {
   WASM_SYMBOL_TYPE_FUNCTION = 0x0,
-  WASM_SYMBOL_TYPE_DATA     = 0x1,
-  WASM_SYMBOL_TYPE_GLOBAL   = 0x2,
+  WASM_SYMBOL_TYPE_DATA = 0x1,
+  WASM_SYMBOL_TYPE_GLOBAL = 0x2,
+  WASM_SYMBOL_TYPE_SECTION = 0x3,
 };
 
 const unsigned WASM_SYMBOL_BINDING_MASK       = 0x3;
@@ -284,6 +290,9 @@ inline bool operator==(const WasmGlobalType &LHS, const WasmGlobalType &RHS) {
 inline bool operator!=(const WasmGlobalType &LHS, const WasmGlobalType &RHS) {
   return !(LHS == RHS);
 }
+
+std::string toString(wasm::WasmSymbolType type);
+std::string relocTypetoString(uint32_t type);
 
 } // end namespace wasm
 } // end namespace llvm

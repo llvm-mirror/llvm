@@ -4,11 +4,12 @@
 vaddps %ymm0, %ymm0, %ymm1
 vandps (%rdi), %ymm1, %ymm2
 
-# CHECK:      Iterations:     1
-# CHECK-NEXT: Instructions:   2
-# CHECK-NEXT: Total Cycles:   10
-# CHECK-NEXT: Dispatch Width: 2
-# CHECK-NEXT: IPC:            0.20
+# CHECK:      Iterations:        1
+# CHECK-NEXT: Instructions:      2
+# CHECK-NEXT: Total Cycles:      10
+# CHECK-NEXT: Dispatch Width:    2
+# CHECK-NEXT: IPC:               0.20
+# CHECK-NEXT: Block RThroughput: 2.0
 
 # CHECK:      Instruction Info:
 # CHECK-NEXT: [1]: #uOps
@@ -16,18 +17,17 @@ vandps (%rdi), %ymm1, %ymm2
 # CHECK-NEXT: [3]: RThroughput
 # CHECK-NEXT: [4]: MayLoad
 # CHECK-NEXT: [5]: MayStore
-# CHECK-NEXT: [6]: HasSideEffects
+# CHECK-NEXT: [6]: HasSideEffects (U)
 
-# CHECK:      [1]    [2]    [3]    [4]    [5]    [6]	Instructions:
-# CHECK-NEXT:  2      3     2.00                    	vaddps	%ymm0, %ymm0, %ymm1
-# CHECK-NEXT:  2      6     2.00    *               	vandps	(%rdi), %ymm1, %ymm2
+# CHECK:      [1]    [2]    [3]    [4]    [5]    [6]    Instructions:
+# CHECK-NEXT:  2      3     2.00                        vaddps	%ymm0, %ymm0, %ymm1
+# CHECK-NEXT:  2      6     2.00    *                   vandps	(%rdi), %ymm1, %ymm2
 
 # CHECK:      Timeline view:
+# CHECK-NEXT: Index     0123456789
 
-# CHECK:      Index	0123456789
-
-# CHECK:      [0,0]	DeeeER   .	vaddps	%ymm0, %ymm0, %ymm1
-# CHECK-NEXT: [0,1]	.DeeeeeeER	vandps	(%rdi), %ymm1, %ymm2
+# CHECK:      [0,0]     DeeeER   .   vaddps	%ymm0, %ymm0, %ymm1
+# CHECK-NEXT: [0,1]     .DeeeeeeER   vandps	(%rdi), %ymm1, %ymm2
 
 # CHECK:      Average Wait times (based on the timeline view):
 # CHECK-NEXT: [0]: Executions
@@ -36,6 +36,5 @@ vandps (%rdi), %ymm1, %ymm2
 # CHECK-NEXT: [3]: Average time elapsed from WB until retire stage
 
 # CHECK:            [0]    [1]    [2]    [3]
-# CHECK-NEXT: 0.     1     1.0    1.0    0.0    	vaddps	%ymm0, %ymm0, %ymm1
-# CHECK-NEXT: 1.     1     1.0    1.0    0.0    	vandps	(%rdi), %ymm1, %ymm2
-
+# CHECK-NEXT: 0.     1     1.0    1.0    0.0       vaddps	%ymm0, %ymm0, %ymm1
+# CHECK-NEXT: 1.     1     1.0    1.0    0.0       vandps	(%rdi), %ymm1, %ymm2

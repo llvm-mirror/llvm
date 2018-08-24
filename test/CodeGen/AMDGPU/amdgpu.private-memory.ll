@@ -232,7 +232,7 @@ for.end:
 ; SI-ALLOCA: buffer_load_sshort v{{[0-9]+}}, v{{[0-9]+}}, s[{{[0-9]+:[0-9]+}}], s{{[0-9]+}}
 
 ; SI-PROMOTE-VECT: s_load_dword [[IDX:s[0-9]+]]
-; SI-PROMOTE-VECT: s_lshl_b32 [[SCALED_IDX:s[0-9]+]], [[IDX]], 16
+; SI-PROMOTE-VECT: s_lshl_b32 [[SCALED_IDX:s[0-9]+]], [[IDX]], 4
 ; SI-PROMOTE-VECT: v_bfe_u32 v{{[0-9]+}}, v{{[0-9]+}}, [[SCALED_IDX]], 16
 define amdgpu_kernel void @short_array(i32 addrspace(1)* %out, i32 %index) #0 {
 entry:
@@ -252,8 +252,8 @@ entry:
 
 ; R600-VECT: MOVA_INT
 
-; SI-PROMOTE-VECT-DAG: buffer_store_byte v{{[0-9]+}}, off, s[{{[0-9]+:[0-9]+}}], s{{[0-9]+}} offset:4 ; encoding:
-; SI-PROMOTE-VECT-DAG: buffer_store_byte v{{[0-9]+}}, off, s[{{[0-9]+:[0-9]+}}], s{{[0-9]+}} offset:5 ; encoding:
+; SI-PROMOTE-VECT-DAG: s_lshl_b32
+; SI-PROMOTE-VECT-DAG: v_lshrrev
 
 ; SI-ALLOCA-DAG: buffer_store_byte v{{[0-9]+}}, off, s[{{[0-9]+:[0-9]+}}], s{{[0-9]+}} offset:4 ; encoding: [0x04,0x00,0x60,0xe0
 ; SI-ALLOCA-DAG: buffer_store_byte v{{[0-9]+}}, off, s[{{[0-9]+:[0-9]+}}], s{{[0-9]+}} offset:5 ; encoding: [0x05,0x00,0x60,0xe0

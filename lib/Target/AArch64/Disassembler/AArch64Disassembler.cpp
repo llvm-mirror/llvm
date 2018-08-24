@@ -90,22 +90,28 @@ static DecodeStatus DecodeDDDDRegisterClass(MCInst &Inst, unsigned RegNo,
                                             const void *Decoder);
 static DecodeStatus DecodeZPRRegisterClass(MCInst &Inst, unsigned RegNo,
                                            uint64_t Address,
-                                           const void *Decode);
+                                           const void *Decoder);
+static DecodeStatus DecodeZPR_4bRegisterClass(MCInst &Inst, unsigned RegNo,
+                                              uint64_t Address,
+                                              const void *Decoder);
+static DecodeStatus DecodeZPR_3bRegisterClass(MCInst &Inst, unsigned RegNo,
+                                              uint64_t Address,
+                                              const void *Decoder);
 static DecodeStatus DecodeZPR2RegisterClass(MCInst &Inst, unsigned RegNo,
                                             uint64_t Address,
-                                            const void *Decode);
+                                            const void *Decoder);
 static DecodeStatus DecodeZPR3RegisterClass(MCInst &Inst, unsigned RegNo,
                                             uint64_t Address,
-                                            const void *Decode);
+                                            const void *Decoder);
 static DecodeStatus DecodeZPR4RegisterClass(MCInst &Inst, unsigned RegNo,
                                             uint64_t Address,
-                                            const void *Decode);
+                                            const void *Decoder);
 static DecodeStatus DecodePPRRegisterClass(MCInst &Inst, unsigned RegNo,
                                            uint64_t Address,
-                                           const void *Decode);
+                                           const void *Decoder);
 static DecodeStatus DecodePPR_3bRegisterClass(MCInst &Inst, unsigned RegNo,
                                               uint64_t Address,
-                                              const void *Decode);
+                                              const void *Decoder);
 
 static DecodeStatus DecodeFixedPointScaleImm32(MCInst &Inst, unsigned Imm,
                                                uint64_t Address,
@@ -207,6 +213,11 @@ static DecodeStatus DecodeSVELogicalImmInstruction(llvm::MCInst &Inst,
 template<int Bits>
 static DecodeStatus DecodeSImm(llvm::MCInst &Inst, uint64_t Imm,
                                uint64_t Address, const void *Decoder);
+template <int ElementWidth>
+static DecodeStatus DecodeImm8OptLsl(MCInst &Inst, unsigned Imm,
+                                     uint64_t Addr, const void *Decoder);
+static DecodeStatus DecodeSVEIncDecImm(MCInst &Inst, unsigned Imm,
+                                       uint64_t Addr, const void *Decoder);
 
 static bool Check(DecodeStatus &Out, DecodeStatus In) {
   switch (In) {
@@ -492,6 +503,22 @@ static DecodeStatus DecodeZPRRegisterClass(MCInst &Inst, unsigned RegNo,
   unsigned Register = ZPRDecoderTable[RegNo];
   Inst.addOperand(MCOperand::createReg(Register));
   return Success;
+}
+
+static DecodeStatus DecodeZPR_4bRegisterClass(MCInst &Inst, unsigned RegNo,
+                                              uint64_t Address,
+                                              const void *Decoder) {
+  if (RegNo > 15)
+    return Fail;
+  return DecodeZPRRegisterClass(Inst, RegNo, Address, Decoder);
+}
+
+static DecodeStatus DecodeZPR_3bRegisterClass(MCInst &Inst, unsigned RegNo,
+                                              uint64_t Address,
+                                              const void *Decoder) {
+  if (RegNo > 7)
+    return Fail;
+  return DecodeZPRRegisterClass(Inst, RegNo, Address, Decoder);
 }
 
 static const unsigned ZZDecoderTable[] = {
@@ -1156,6 +1183,14 @@ static DecodeStatus DecodeSignedLdStInstruction(MCInst &Inst, uint32_t insn,
   case AArch64::LDRHHpost:
   case AArch64::STRWpost:
   case AArch64::LDRWpost:
+  case AArch64::STLURBi:
+  case AArch64::STLURHi:
+  case AArch64::STLURWi:
+  case AArch64::LDAPURBi:
+  case AArch64::LDAPURSBWi:
+  case AArch64::LDAPURHi:
+  case AArch64::LDAPURSHWi:
+  case AArch64::LDAPURi:
     DecodeGPR32RegisterClass(Inst, Rt, Addr, Decoder);
     break;
   case AArch64::LDURSBXi:
@@ -1178,6 +1213,11 @@ static DecodeStatus DecodeSignedLdStInstruction(MCInst &Inst, uint32_t insn,
   case AArch64::STRXpost:
   case AArch64::LDRSWpost:
   case AArch64::LDRXpost:
+  case AArch64::LDAPURSWi:
+  case AArch64::LDAPURSHXi:
+  case AArch64::LDAPURSBXi:
+  case AArch64::STLURXi:
+  case AArch64::LDAPURXi:
     DecodeGPR64RegisterClass(Inst, Rt, Addr, Decoder);
     break;
   case AArch64::LDURQi:
@@ -1756,7 +1796,8 @@ static DecodeStatus DecodeSVELogicalImmInstruction(llvm::MCInst &Inst,
 
   // The same (tied) operand is added twice to the instruction.
   DecodeZPRRegisterClass(Inst, Zdn, Addr, Decoder);
-  DecodeZPRRegisterClass(Inst, Zdn, Addr, Decoder);
+  if (Inst.getOpcode() != AArch64::DUPM_ZI)
+    DecodeZPRRegisterClass(Inst, Zdn, Addr, Decoder);
   Inst.addOperand(MCOperand::createImm(imm));
   return Success;
 }
@@ -1775,3 +1816,22 @@ static DecodeStatus DecodeSImm(llvm::MCInst &Inst, uint64_t Imm,
   return Success;
 }
 
+// Decode 8-bit signed/unsigned immediate for a given element width.
+template <int ElementWidth>
+static DecodeStatus DecodeImm8OptLsl(MCInst &Inst, unsigned Imm,
+                                      uint64_t Addr, const void *Decoder) {
+  unsigned Val = (uint8_t)Imm;
+  unsigned Shift = (Imm & 0x100) ? 8 : 0;
+  if (ElementWidth == 8 && Shift)
+    return Fail;
+  Inst.addOperand(MCOperand::createImm(Val));
+  Inst.addOperand(MCOperand::createImm(Shift));
+  return Success;
+}
+
+// Decode uimm4 ranged from 1-16.
+static DecodeStatus DecodeSVEIncDecImm(MCInst &Inst, unsigned Imm,
+                                       uint64_t Addr, const void *Decoder) {
+  Inst.addOperand(MCOperand::createImm(Imm + 1));
+  return Success;
+}

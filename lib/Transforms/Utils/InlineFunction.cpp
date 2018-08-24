@@ -29,7 +29,7 @@
 #include "llvm/Analysis/EHPersonalities.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/ProfileSummaryInfo.h"
-#include "llvm/Analysis/Utils/Local.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/BasicBlock.h"
@@ -84,13 +84,15 @@ PreserveAlignmentAssumptions("preserve-alignment-assumptions-during-inlining",
   cl::init(true), cl::Hidden,
   cl::desc("Convert align attributes to assumptions during inlining."));
 
-bool llvm::InlineFunction(CallInst *CI, InlineFunctionInfo &IFI,
-                          AAResults *CalleeAAR, bool InsertLifetime) {
+llvm::InlineResult llvm::InlineFunction(CallInst *CI, InlineFunctionInfo &IFI,
+                                        AAResults *CalleeAAR,
+                                        bool InsertLifetime) {
   return InlineFunction(CallSite(CI), IFI, CalleeAAR, InsertLifetime);
 }
 
-bool llvm::InlineFunction(InvokeInst *II, InlineFunctionInfo &IFI,
-                          AAResults *CalleeAAR, bool InsertLifetime) {
+llvm::InlineResult llvm::InlineFunction(InvokeInst *II, InlineFunctionInfo &IFI,
+                                        AAResults *CalleeAAR,
+                                        bool InsertLifetime) {
   return InlineFunction(CallSite(II), IFI, CalleeAAR, InsertLifetime);
 }
 
@@ -1199,7 +1201,7 @@ static void UpdateCallGraphAfterInlining(CallSite CS,
     // Only copy the edge if the call was inlined!
     if (VMI == VMap.end() || VMI->second == nullptr)
       continue;
-    
+
     // If the call was inlined, but then constant folded, there is no edge to
     // add.  Check for this case.
     Instruction *NewCall = dyn_cast<Instruction>(VMI->second);
@@ -1211,7 +1213,7 @@ static void UpdateCallGraphAfterInlining(CallSite CS,
     CallSite CS = CallSite(NewCall);
     if (CS && CS.getCalledFunction() && CS.getCalledFunction()->isIntrinsic())
       continue;
-    
+
     // Remember that this call site got inlined for the client of
     // InlineFunction.
     IFI.InlinedCalls.push_back(NewCall);
@@ -1231,7 +1233,7 @@ static void UpdateCallGraphAfterInlining(CallSite CS,
 
     CallerNode->addCalledFunction(CallSite(NewCall), I->second);
   }
-  
+
   // Update the call graph by deleting the edge from Callee to Caller.  We must
   // do this after the loop above in case Caller and Callee are the same.
   CallerNode->removeCallEdgeFor(CS);
@@ -1380,7 +1382,7 @@ static void fixupLineNumbers(Function *Fn, Function::iterator FI,
 
       if (CalleeHasDebugInfo)
         continue;
-      
+
       // If the inlined instruction has no line number, make it look as if it
       // originates from the call location. This is important for
       // ((__always_inline__, __nodebug__)) functions which must use caller
@@ -1491,9 +1493,10 @@ static void updateCalleeCount(BlockFrequencyInfo *CallerBFI, BasicBlock *CallBB,
 /// instruction 'call B' is inlined, and 'B' calls 'C', then the call to 'C' now
 /// exists in the instruction stream.  Similarly this will inline a recursive
 /// function by one level.
-bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
-                          AAResults *CalleeAAR, bool InsertLifetime,
-                          Function *ForwardVarArgsTo) {
+llvm::InlineResult llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
+                                        AAResults *CalleeAAR,
+                                        bool InsertLifetime,
+                                        Function *ForwardVarArgsTo) {
   Instruction *TheCall = CS.getInstruction();
   assert(TheCall->getParent() && TheCall->getFunction()
          && "Instruction not in function!");
@@ -1504,7 +1507,7 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
   Function *CalledFunc = CS.getCalledFunction();
   if (!CalledFunc ||               // Can't inline external function or indirect
       CalledFunc->isDeclaration()) // call!
-    return false;
+    return "external or indirect";
 
   // The inliner does not know how to inline through calls with operand bundles
   // in general ...
@@ -1518,7 +1521,7 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
       if (Tag == LLVMContext::OB_funclet)
         continue;
 
-      return false;
+      return "unsupported operand bundle";
     }
   }
 
@@ -1537,7 +1540,7 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
     if (!Caller->hasGC())
       Caller->setGC(CalledFunc->getGC());
     else if (CalledFunc->getGC() != Caller->getGC())
-      return false;
+      return "incompatible GC";
   }
 
   // Get the personality function from the callee if it contains a landing pad.
@@ -1561,7 +1564,7 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
     // TODO: This isn't 100% true. Some personality functions are proper
     //       supersets of others and can be used in place of the other.
     else if (CalledPersonality != CallerPersonality)
-      return false;
+      return "incompatible personality";
   }
 
   // We need to figure out which funclet the callsite was in so that we may
@@ -1569,7 +1572,7 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
   Instruction *CallSiteEHPad = nullptr;
   if (CallerPersonality) {
     EHPersonality Personality = classifyEHPersonality(CallerPersonality);
-    if (isFuncletEHPersonality(Personality)) {
+    if (isScopedEHPersonality(Personality)) {
       Optional<OperandBundleUse> ParentFunclet =
           CS.getOperandBundle(LLVMContext::OB_funclet);
       if (ParentFunclet)
@@ -1586,7 +1589,7 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
             // for catchpads.
             for (const BasicBlock &CalledBB : *CalledFunc) {
               if (isa<CatchSwitchInst>(CalledBB.getFirstNonPHI()))
-                return false;
+                return "catch in cleanup funclet";
             }
           }
         } else if (isAsynchronousEHPersonality(Personality)) {
@@ -1594,7 +1597,7 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
           // funclet in the callee.
           for (const BasicBlock &CalledBB : *CalledFunc) {
             if (CalledBB.isEHPad())
-              return false;
+              return "SEH in cleanup funclet";
           }
         }
       }
@@ -1777,7 +1780,7 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
          E = FirstNewBlock->end(); I != E; ) {
       AllocaInst *AI = dyn_cast<AllocaInst>(I++);
       if (!AI) continue;
-      
+
       // If the alloca is now dead, remove it.  This often occurs due to code
       // specialization.
       if (AI->use_empty()) {
@@ -1787,10 +1790,10 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
 
       if (!allocaWouldBeStaticInEntry(AI))
         continue;
-      
+
       // Keep track of the static allocas that we inline into the caller.
       IFI.StaticAllocas.push_back(AI);
-      
+
       // Scan for the block of allocas that we can move over, and move them
       // all at once.
       while (isa<AllocaInst>(I) &&

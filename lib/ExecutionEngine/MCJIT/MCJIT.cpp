@@ -142,7 +142,13 @@ void MCJIT::setObjectCache(ObjectCache* NewCache) {
 }
 
 std::unique_ptr<MemoryBuffer> MCJIT::emitObject(Module *M) {
+  assert(M && "Can not emit a null module");
+
   MutexGuard locked(lock);
+
+  // Materialize all globals in the module if they have not been
+  // materialized already.
+  cantFail(M->materializeAll());
 
   // This must be a module which has already been added but not loaded to this
   // MCJIT instance, since these conditions are tested by our caller,
@@ -320,8 +326,9 @@ uint64_t MCJIT::getSymbolAddress(const std::string &Name,
       return *AddrOrErr;
     else
       report_fatal_error(AddrOrErr.takeError());
-  } else
+  } else if (auto Err = Sym.takeError())
     report_fatal_error(Sym.takeError());
+  return 0;
 }
 
 JITSymbol MCJIT::findSymbol(const std::string &Name,

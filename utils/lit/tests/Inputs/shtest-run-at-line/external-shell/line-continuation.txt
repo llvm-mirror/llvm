@@ -1,5 +1,6 @@
-# RUN: : first line continued \
-# RUN:   to second line
+# These commands must run under both bash and windows cmd.exe (with GnuWin32
+# tools).
+
 # RUN: echo 'foo bar' \
 # RUN: | FileCheck %s
 # RUN: echo \

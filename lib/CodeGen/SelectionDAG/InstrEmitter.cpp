@@ -524,7 +524,7 @@ void InstrEmitter::EmitSubregNode(SDNode *Node,
       Reg = R->getReg();
       DefMI = nullptr;
     } else {
-      Reg = getVR(Node->getOperand(0), VRBaseMap);
+      Reg = R ? R->getReg() : getVR(Node->getOperand(0), VRBaseMap);
       DefMI = MRI->getVRegDef(Reg);
     }
 
@@ -697,11 +697,15 @@ InstrEmitter::EmitDbgValue(SDDbgValue *SD,
   if (SD->getKind() == SDDbgValue::FRAMEIX) {
     // Stack address; this needs to be lowered in target-dependent fashion.
     // EmitTargetCodeForFrameDebugValue is responsible for allocation.
-    return BuildMI(*MF, DL, TII->get(TargetOpcode::DBG_VALUE))
-        .addFrameIndex(SD->getFrameIx())
-        .addImm(0)
-        .addMetadata(Var)
-        .addMetadata(Expr);
+    auto FrameMI = BuildMI(*MF, DL, TII->get(TargetOpcode::DBG_VALUE))
+                       .addFrameIndex(SD->getFrameIx());
+    if (SD->isIndirect())
+      // Push [fi + 0] onto the DIExpression stack.
+      FrameMI.addImm(0);
+    else
+      // Push fi onto the DIExpression stack.
+      FrameMI.addReg(0);
+    return FrameMI.addMetadata(Var).addMetadata(Expr);
   }
   // Otherwise, we're going to create an instruction here.
   const MCInstrDesc &II = TII->get(TargetOpcode::DBG_VALUE);
@@ -720,6 +724,8 @@ InstrEmitter::EmitDbgValue(SDDbgValue *SD,
     else
       AddOperand(MIB, Op, (*MIB).getNumOperands(), &II, VRBaseMap,
                  /*IsDebug=*/true, /*IsClone=*/false, /*IsCloned=*/false);
+  } else if (SD->getKind() == SDDbgValue::VREG) {
+    MIB.addReg(SD->getVReg(), RegState::Debug);
   } else if (SD->getKind() == SDDbgValue::CONST) {
     const Value *V = SD->getConst();
     if (const ConstantInt *CI = dyn_cast<ConstantInt>(V)) {
@@ -747,6 +753,20 @@ InstrEmitter::EmitDbgValue(SDDbgValue *SD,
 
   MIB.addMetadata(Var);
   MIB.addMetadata(Expr);
+
+  return &*MIB;
+}
+
+MachineInstr *
+InstrEmitter::EmitDbgLabel(SDDbgLabel *SD) {
+  MDNode *Label = SD->getLabel();
+  DebugLoc DL = SD->getDebugLoc();
+  assert(cast<DILabel>(Label)->isValidLocationForIntrinsic(DL) &&
+         "Expected inlined-at fields to agree");
+
+  const MCInstrDesc &II = TII->get(TargetOpcode::DBG_LABEL);
+  MachineInstrBuilder MIB = BuildMI(*MF, DL, II);
+  MIB.addMetadata(Label);
 
   return &*MIB;
 }
@@ -822,8 +842,33 @@ EmitMachineNode(SDNode *Node, bool IsClone, bool IsCloned,
 
   // Add result register values for things that are defined by this
   // instruction.
-  if (NumResults)
+  if (NumResults) {
     CreateVirtualRegisters(Node, MIB, II, IsClone, IsCloned, VRBaseMap);
+
+    // Transfer any IR flags from the SDNode to the MachineInstr
+    MachineInstr *MI = MIB.getInstr();
+    const SDNodeFlags Flags = Node->getFlags();
+    if (Flags.hasNoSignedZeros())
+      MI->setFlag(MachineInstr::MIFlag::FmNsz);
+
+    if (Flags.hasAllowReciprocal())
+      MI->setFlag(MachineInstr::MIFlag::FmArcp);
+
+    if (Flags.hasNoNaNs())
+      MI->setFlag(MachineInstr::MIFlag::FmNoNans);
+
+    if (Flags.hasNoInfs())
+      MI->setFlag(MachineInstr::MIFlag::FmNoInfs);
+
+    if (Flags.hasAllowContract())
+      MI->setFlag(MachineInstr::MIFlag::FmContract);
+
+    if (Flags.hasApproximateFuncs())
+      MI->setFlag(MachineInstr::MIFlag::FmAfn);
+
+    if (Flags.hasAllowReassociation())
+      MI->setFlag(MachineInstr::MIFlag::FmReassoc);
+  }
 
   // Emit all of the actual operands of this instruction, adding them to the
   // instruction as appropriate.
@@ -841,9 +886,9 @@ EmitMachineNode(SDNode *Node, bool IsClone, bool IsCloned,
       MIB.addReg(ScratchRegs[i], RegState::ImplicitDefine |
                                  RegState::EarlyClobber);
 
-  // Transfer all of the memory reference descriptions of this instruction.
-  MIB.setMemRefs(cast<MachineSDNode>(Node)->memoperands_begin(),
-                 cast<MachineSDNode>(Node)->memoperands_end());
+  // Set the memory reference descriptions of this instruction now that it is
+  // part of the function.
+  MIB.setMemRefs(cast<MachineSDNode>(Node)->memoperands());
 
   // Insert the instruction into position in the block. This needs to
   // happen before any custom inserter hook is called so that the

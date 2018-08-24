@@ -215,7 +215,7 @@ public:
   /// anything was changed.
   bool expandPostRAPseudo(MachineInstr &MI) const override;
 
-  /// \brief Get the base register and byte offset of a load/store instr.
+  /// Get the base register and byte offset of a load/store instr.
   bool getMemOpBaseRegImmOfs(MachineInstr &LdSt, unsigned &BaseReg,
                              int64_t &Offset,
                              const TargetRegisterInfo *TRI) const override;
@@ -471,6 +471,8 @@ public:
   unsigned getSize(const MachineInstr &MI) const;
   uint64_t getType(const MachineInstr &MI) const;
   unsigned getUnits(const MachineInstr &MI) const;
+
+  MachineBasicBlock::instr_iterator expandVGatherPseudo(MachineInstr &MI) const;
 
   /// getInstrTimingClassLatency - Compute the instruction latency of a given
   /// instruction using Timing Class information, if available.

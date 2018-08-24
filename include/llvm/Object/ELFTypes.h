@@ -43,6 +43,7 @@ template <class ELFT> struct Elf_Chdr_Impl;
 template <class ELFT> struct Elf_Nhdr_Impl;
 template <class ELFT> class Elf_Note_Impl;
 template <class ELFT> class Elf_Note_Iterator_Impl;
+template <class ELFT> struct Elf_CGProfile_Impl;
 
 template <endianness E, bool Is64> struct ELFType {
 private:
@@ -61,6 +62,7 @@ public:
   using Phdr = Elf_Phdr_Impl<ELFType<E, Is64>>;
   using Rel = Elf_Rel_Impl<ELFType<E, Is64>, false>;
   using Rela = Elf_Rel_Impl<ELFType<E, Is64>, true>;
+  using Relr = packed<uint>;
   using Verdef = Elf_Verdef_Impl<ELFType<E, Is64>>;
   using Verdaux = Elf_Verdaux_Impl<ELFType<E, Is64>>;
   using Verneed = Elf_Verneed_Impl<ELFType<E, Is64>>;
@@ -72,11 +74,13 @@ public:
   using Nhdr = Elf_Nhdr_Impl<ELFType<E, Is64>>;
   using Note = Elf_Note_Impl<ELFType<E, Is64>>;
   using NoteIterator = Elf_Note_Iterator_Impl<ELFType<E, Is64>>;
+  using CGProfile = Elf_CGProfile_Impl<ELFType<E, Is64>>;
   using DynRange = ArrayRef<Dyn>;
   using ShdrRange = ArrayRef<Shdr>;
   using SymRange = ArrayRef<Sym>;
   using RelRange = ArrayRef<Rel>;
   using RelaRange = ArrayRef<Rela>;
+  using RelrRange = ArrayRef<Relr>;
   using PhdrRange = ArrayRef<Phdr>;
 
   using Half = packed<uint16_t>;
@@ -148,7 +152,7 @@ struct Elf_Shdr_Impl : Elf_Shdr_Base<ELFT> {
   using Elf_Shdr_Base<ELFT>::sh_entsize;
   using Elf_Shdr_Base<ELFT>::sh_size;
 
-  /// @brief Get the number of entities this section contains if it has any.
+  /// Get the number of entities this section contains if it has any.
   unsigned getEntityCount() const {
     if (sh_entsize == 0)
       return 0;
@@ -676,6 +680,13 @@ public:
     assert(Nhdr && "dereferenced ELF note end iterator");
     return Elf_Note_Impl<ELFT>(*Nhdr);
   }
+};
+
+template <class ELFT> struct Elf_CGProfile_Impl {
+  LLVM_ELF_IMPORT_TYPES_ELFT(ELFT)
+  Elf_Word cgp_from;
+  Elf_Word cgp_to;
+  Elf_Xword cgp_weight;
 };
 
 // MIPS .reginfo section

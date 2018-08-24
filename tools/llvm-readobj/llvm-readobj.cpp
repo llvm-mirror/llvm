@@ -146,6 +146,18 @@ namespace opts {
   cl::alias ProgramHeadersShort("l", cl::desc("Alias for --program-headers"),
                                 cl::aliasopt(ProgramHeaders));
 
+  // -string-dump
+  cl::list<std::string> StringDump("string-dump", cl::desc("<number|name>"),
+                                   cl::ZeroOrMore);
+  cl::alias StringDumpShort("p", cl::desc("Alias for --string-dump"),
+                            cl::aliasopt(StringDump));
+
+  // -hex-dump
+  cl::list<std::string> HexDump("hex-dump", cl::desc("<number|name>"),
+                                cl::ZeroOrMore);
+  cl::alias HexDumpShort("x", cl::desc("Alias for --hex-dump"),
+                         cl::aliasopt(HexDump));
+
   // -hash-table
   cl::opt<bool> HashTable("hash-table",
     cl::desc("Display ELF hash table"));
@@ -157,6 +169,10 @@ namespace opts {
   // -expand-relocs
   cl::opt<bool> ExpandRelocs("expand-relocs",
     cl::desc("Expand each shown relocation to multiple lines"));
+
+  // -raw-relr
+  cl::opt<bool> RawRelr("raw-relr",
+    cl::desc("Do not decode relocations in SHT_RELR section, display raw contents"));
 
   // -codeview
   cl::opt<bool> CodeView("codeview",
@@ -284,6 +300,11 @@ namespace opts {
   cl::alias HashHistogramShort("I", cl::desc("Alias for -elf-hash-histogram"),
                                cl::aliasopt(HashHistogram));
 
+  cl::opt<bool> CGProfile("elf-cg-profile", cl::desc("Display callgraph profile section"));
+
+  cl::opt<bool> Addrsig("elf-addrsig",
+                        cl::desc("Display address-significance table"));
+
   cl::opt<OutputStyleTy>
       Output("elf-output-style", cl::desc("Specify ELF dump style"),
              cl::values(clEnumVal(LLVM, "LLVM default style"),
@@ -359,7 +380,7 @@ struct ReadObjTypeTableBuilder {
 }
 static ReadObjTypeTableBuilder CVTypes;
 
-/// @brief Creates an format-specific object file dumper.
+/// Creates an format-specific object file dumper.
 static std::error_code createDumper(const ObjectFile *Obj,
                                     ScopedPrinter &Writer,
                                     std::unique_ptr<ObjDumper> &Result) {
@@ -378,7 +399,7 @@ static std::error_code createDumper(const ObjectFile *Obj,
   return readobj_error::unsupported_obj_file_format;
 }
 
-/// @brief Dumps the specified object file.
+/// Dumps the specified object file.
 static void dumpObject(const ObjectFile *Obj, ScopedPrinter &Writer) {
   std::unique_ptr<ObjDumper> Dumper;
   if (std::error_code EC = createDumper(Obj, Writer, Dumper))
@@ -415,6 +436,14 @@ static void dumpObject(const ObjectFile *Obj, ScopedPrinter &Writer) {
     Dumper->printNeededLibraries();
   if (opts::ProgramHeaders)
     Dumper->printProgramHeaders();
+  if (!opts::StringDump.empty())
+    llvm::for_each(opts::StringDump, [&Dumper, Obj](StringRef SectionName) {
+      Dumper->printSectionAsString(Obj, SectionName);
+    });
+  if (!opts::HexDump.empty())
+    llvm::for_each(opts::HexDump, [&Dumper, Obj](StringRef SectionName) {
+      Dumper->printSectionAsHex(Obj, SectionName);
+    });
   if (opts::HashTable)
     Dumper->printHashTable();
   if (opts::GnuHashTable)
@@ -441,6 +470,10 @@ static void dumpObject(const ObjectFile *Obj, ScopedPrinter &Writer) {
       Dumper->printGroupSections();
     if (opts::HashHistogram)
       Dumper->printHashHistogram();
+    if (opts::CGProfile)
+      Dumper->printCGProfile();
+    if (opts::Addrsig)
+      Dumper->printAddrsig();
     if (opts::Notes)
       Dumper->printNotes();
   }
@@ -482,7 +515,7 @@ static void dumpObject(const ObjectFile *Obj, ScopedPrinter &Writer) {
     Dumper->printStackMap();
 }
 
-/// @brief Dumps each object file in \a Arc;
+/// Dumps each object file in \a Arc;
 static void dumpArchive(const Archive *Arc, ScopedPrinter &Writer) {
   Error Err = Error::success();
   for (auto &Child : Arc->children(Err)) {
@@ -504,7 +537,7 @@ static void dumpArchive(const Archive *Arc, ScopedPrinter &Writer) {
     reportError(Arc->getFileName(), std::move(Err));
 }
 
-/// @brief Dumps each object file in \a MachO Universal Binary;
+/// Dumps each object file in \a MachO Universal Binary;
 static void dumpMachOUniversalBinary(const MachOUniversalBinary *UBinary,
                                      ScopedPrinter &Writer) {
   for (const MachOUniversalBinary::ObjectForArch &Obj : UBinary->objects()) {
@@ -519,7 +552,7 @@ static void dumpMachOUniversalBinary(const MachOUniversalBinary *UBinary,
   }
 }
 
-/// @brief Dumps \a WinRes, Windows Resource (.res) file;
+/// Dumps \a WinRes, Windows Resource (.res) file;
 static void dumpWindowsResourceFile(WindowsResource *WinRes) {
   ScopedPrinter Printer{outs()};
   WindowsRes::Dumper Dumper(WinRes, Printer);
@@ -528,7 +561,7 @@ static void dumpWindowsResourceFile(WindowsResource *WinRes) {
 }
 
 
-/// @brief Opens \a File and dumps it.
+/// Opens \a File and dumps it.
 static void dumpInput(StringRef File) {
   ScopedPrinter Writer(outs());
 

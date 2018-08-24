@@ -10,9 +10,9 @@ entry:
 ; CHECK: subs
 ; CHECK-NOT: cmp
 ; CHECK-NOT: sub
-; CHECK: b.lt
+; CHECK: b.ge
 ; CHECK: sub
-; CHECK: sub
+; CHECK-NEXT: add
 ; CHECK-NOT: sub
 ; CHECK: ret
  %0 = load i32, i32* %offset, align 4

@@ -1,6 +1,6 @@
 ; RUN: llc -filetype=obj %s -o - | obj2yaml | FileCheck %s
 
-target triple = "wasm32-unknown-unknown-wasm"
+target triple = "wasm32-unknown-unknown"
 
 @.str1 = private unnamed_addr constant [6 x i8] c"hello\00", align 1
 @.str2 = private unnamed_addr constant [6 x i8] c"world\00", align 1
@@ -44,6 +44,7 @@ target triple = "wasm32-unknown-unknown-wasm"
 ; CHECK-NEXT:         Content:         '06000000'
 ; CHECK-NEXT:   - Type:            CUSTOM
 ; CHECK-NEXT:     Name:            linking
+; CHECK-NEXT:     Version:         1
 ; CHECK-NEXT:     SymbolTable:      
 ; CHECK-NEXT:       - Index:           0
 ; CHECK-NEXT:         Kind:            DATA

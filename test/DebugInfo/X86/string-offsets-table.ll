@@ -1,7 +1,7 @@
 ; REQUIRES: object-emission
 ; RUN: llc -mtriple=x86_64-unknown-linux-gnu -filetype=obj < %s | llvm-dwarfdump -v - \
 ; RUN:   | FileCheck --check-prefix=MONOLITHIC %s
-; RUN: llc -mtriple=x86_64-unknown-linux-gnu -split-dwarf-file=%t.dwo -filetype=obj < %s \
+; RUN: llc -mtriple=x86_64-unknown-linux-gnu -split-dwarf-file=foo.dwo -filetype=obj < %s \
 ; RUN:   | llvm-dwarfdump -v - | FileCheck --check-prefix=SPLIT %s
 
 ; This basic test checks the emission of a DWARF v5 string offsets table in
@@ -44,7 +44,7 @@
 ; Verify that the .debug_str_offsets section is there and that it starts
 ; with an 8-byte header, followed by offsets into the .debug_str section.
 ; MONOLITHIC:          .debug_str_offsets contents:
-; MONOLITHIC-NEXT:     Contribution size = 32, Format = DWARF32, Version = 5
+; MONOLITHIC-NEXT:     Contribution size = 36, Format = DWARF32, Version = 5
 ; MONOLITHIC-NEXT:     0x00000008: 00000000
 ; MONOLITHIC-NEXT:     0x0000000c: [[STRING2]]
 ; MONOLITHIC-NEXT:     0x00000010: [[STRING3]]
@@ -59,6 +59,8 @@
 ; SPLIT:      DW_TAG_compile_unit
 ; SPLIT-NOT:  {{DW_TAG|contents:}}
 ; SPLIT:      DW_AT_str_offsets_base [DW_FORM_sec_offset] (0x00000008)
+; SPLIT:      DW_AT_GNU_dwo_name [DW_FORM_strx1] ( indexed (00000000) string = "foo.dwo")
+; SPLIT:      DW_AT_comp_dir [DW_FORM_strx1] ( indexed (00000001) string = "/home/test")
 
 ; Check for the split CU in .debug_info.dwo.
 ; SPLIT:      .debug_info.dwo contents:
@@ -79,8 +81,10 @@
 ;
 ; Extract the string offsets referenced in the main file by the skeleton unit.
 ; SPLIT:      .debug_str contents:
-; SPLIT-NEXT: 0x00000000:{{.*}}
-; SPLIT-NEXT: 0x[[STRING2SPLIT:[0-9a-f]*]]{{.*}}
+; SPLIT-NEXT: 0x00000000: "foo.dwo"
+; SPLIT-NEXT: 0x[[STRING2SPLIT:[0-9a-f]*]]: "/home/test"
+; SPLIT-NEXT: 0x[[STRING3SPLIT:[0-9a-f]*]]: "E"
+; SPLIT-NEXT: 0x[[STRING4SPLIT:[0-9a-f]*]]: "glob"
 ;
 ; Extract the string offsets referenced in the .dwo file by the split unit.
 ; SPLIT:      .debug_str.dwo contents:
@@ -89,13 +93,17 @@
 ; SPLIT-NEXT: 0x[[STRING3DWO:[0-9a-f]*]]{{.*}}
 ;
 ; Check the string offsets sections in both the main and the .dwo files and
-; verify that the extracted string offsets are referenced correctly.
+; verify that the extracted string offsets are referenced correctly. The
+; sections should contain only the offsets of strings that are actually
+; referenced by the debug info.
 ; SPLIT:      .debug_str_offsets contents:
-; SPLIT-NEXT: 0x00000000: Contribution size = 8, Format = DWARF32, Version = 5
-; SPLIT-NEXT: 0x00000008: 00000000{{.*}}
-; SPLIT-NEXT: 0x0000000c: [[STRING2SPLIT]]
+; SPLIT-NEXT: 0x00000000: Contribution size = 12, Format = DWARF32, Version = 5
+; SPLIT-NEXT: 0x00000008: 00000000 "foo.dwo"
+; SPLIT-NEXT: 0x0000000c: [[STRING2SPLIT]] "/home/test"
+; SPLIT-EMPTY:
+
 ; SPLIT:      .debug_str_offsets.dwo contents:
-; SPLIT-NEXT: 0x00000000: Contribution size = 32, Format = DWARF32, Version = 5
+; SPLIT-NEXT: 0x00000000: Contribution size = 36, Format = DWARF32, Version = 5
 ; SPLIT-NEXT: 0x00000008: 00000000{{.*}}
 ; SPLIT-NEXT: 0x0000000c: [[STRING2DWO]]{{.*}}
 ; SPLIT-NEXT: 0x00000010: [[STRING3DWO]]

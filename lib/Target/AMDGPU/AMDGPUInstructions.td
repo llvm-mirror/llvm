@@ -42,6 +42,47 @@ class AMDGPUShaderInst <dag outs, dag ins, string asm = "",
   field bits<32> Inst = 0xffffffff;
 }
 
+//===---------------------------------------------------------------------===//
+// Return instruction
+//===---------------------------------------------------------------------===//
+
+class ILFormat<dag outs, dag ins, string asmstr, list<dag> pattern>
+: Instruction {
+
+     let Namespace = "AMDGPU";
+     dag OutOperandList = outs;
+     dag InOperandList = ins;
+     let Pattern = pattern;
+     let AsmString = !strconcat(asmstr, "\n");
+     let isPseudo = 1;
+     let Itinerary = NullALU;
+     bit hasIEEEFlag = 0;
+     bit hasZeroOpFlag = 0;
+     let mayLoad = 0;
+     let mayStore = 0;
+     let hasSideEffects = 0;
+     let isCodeGenOnly = 1;
+}
+
+def TruePredicate : Predicate<"true">;
+
+// Exists to help track down where SubtargetPredicate isn't set rather
+// than letting tablegen crash with an unhelpful error.
+def InvalidPred : Predicate<"predicate not set on instruction or pattern">;
+
+class PredicateControl {
+  Predicate SubtargetPredicate = InvalidPred;
+  list<Predicate> AssemblerPredicates = [];
+  Predicate AssemblerPredicate = TruePredicate;
+  list<Predicate> OtherPredicates = [];
+  list<Predicate> Predicates = !listconcat([SubtargetPredicate,
+                                            AssemblerPredicate],
+                                            AssemblerPredicates,
+                                            OtherPredicates);
+}
+class AMDGPUPat<dag pattern, dag result> : Pat<pattern, result>,
+      PredicateControl;
+
 def FP16Denormals : Predicate<"Subtarget->hasFP16Denormals()">;
 def FP32Denormals : Predicate<"Subtarget->hasFP32Denormals()">;
 def FP64Denormals : Predicate<"Subtarget->hasFP64Denormals()">;
@@ -94,12 +135,6 @@ def brtarget   : Operand<OtherVT>;
 // Misc. PatFrags
 //===----------------------------------------------------------------------===//
 
-class HasOneUseUnaryOp<SDPatternOperator op> : PatFrag<
-  (ops node:$src0),
-  (op $src0),
-  [{ return N->hasOneUse(); }]
->;
-
 class HasOneUseBinOp<SDPatternOperator op> : PatFrag<
   (ops node:$src0, node:$src1),
   (op $src0, $src1),
@@ -111,8 +146,6 @@ class HasOneUseTernaryOp<SDPatternOperator op> : PatFrag<
   (op $src0, $src1, $src2),
   [{ return N->hasOneUse(); }]
 >;
-
-def trunc_oneuse : HasOneUseUnaryOp<trunc>;
 
 let Properties = [SDNPCommutative, SDNPAssociative] in {
 def smax_oneuse : HasOneUseBinOp<smax>;
@@ -126,6 +159,7 @@ def or_oneuse : HasOneUseBinOp<or>;
 def xor_oneuse : HasOneUseBinOp<xor>;
 } // Properties = [SDNPCommutative, SDNPAssociative]
 
+def add_oneuse : HasOneUseBinOp<add>;
 def sub_oneuse : HasOneUseBinOp<sub>;
 
 def srl_oneuse : HasOneUseBinOp<srl>;
@@ -239,6 +273,37 @@ def COND_NULL : PatLeaf <
   [{(void)N; return false;}]
 >;
 
+//===----------------------------------------------------------------------===//
+// PatLeafs for Texture Constants
+//===----------------------------------------------------------------------===//
+
+def TEX_ARRAY : PatLeaf<
+  (imm),
+  [{uint32_t TType = (uint32_t)N->getZExtValue();
+    return TType == 9 || TType == 10 || TType == 16;
+  }]
+>;
+
+def TEX_RECT : PatLeaf<
+  (imm),
+  [{uint32_t TType = (uint32_t)N->getZExtValue();
+    return TType == 5;
+  }]
+>;
+
+def TEX_SHADOW : PatLeaf<
+  (imm),
+  [{uint32_t TType = (uint32_t)N->getZExtValue();
+    return (TType >= 6 && TType <= 8) || TType == 13;
+  }]
+>;
+
+def TEX_SHADOW_ARRAY : PatLeaf<
+  (imm),
+  [{uint32_t TType = (uint32_t)N->getZExtValue();
+    return TType == 11 || TType == 12 || TType == 17;
+  }]
+>;
 
 //===----------------------------------------------------------------------===//
 // Load/Store Pattern Fragments
@@ -364,12 +429,15 @@ def az_extloadi8_local : LocalLoad <az_extloadi8>;
 def sextloadi8_local : LocalLoad <sextloadi8>;
 def az_extloadi16_local : LocalLoad <az_extloadi16>;
 def sextloadi16_local : LocalLoad <sextloadi16>;
+def atomic_load_32_local : LocalLoad<atomic_load_32>;
+def atomic_load_64_local : LocalLoad<atomic_load_64>;
 
 def store_local : LocalStore <store>;
 def truncstorei8_local : LocalStore <truncstorei8>;
 def truncstorei16_local : LocalStore <truncstorei16>;
 def store_local_hi16 : StoreHi16 <truncstorei16>, LocalAddress;
 def truncstorei8_local_hi16 : StoreHi16<truncstorei8>, LocalAddress;
+def atomic_store_local : LocalStore <atomic_store>;
 
 def load_align8_local : Aligned8Bytes <
   (ops node:$ptr), (load_local node:$ptr)
@@ -499,6 +567,7 @@ int PI = 0x40490fdb;
 int TWO_PI_INV = 0x3e22f983;
 int FP_UINT_MAX_PLUS_1 = 0x4f800000;    // 1 << 32 in floating point encoding
 int FP16_ONE = 0x3C00;
+int FP16_NEG_ONE = 0xBC00;
 int V2FP16_ONE = 0x3C003C00;
 int FP32_ONE = 0x3f800000;
 int FP32_NEG_ONE = 0xbf800000;
@@ -682,14 +751,33 @@ multiclass BFEPattern <Instruction UBFE, Instruction SBFE, Instruction MOV> {
     (UBFE $src, $rshift, (MOV (i32 (IMMPopCount $mask))))
   >;
 
+  // x & ((1 << y) - 1)
+  def : AMDGPUPat <
+    (and i32:$src, (add_oneuse (shl_oneuse 1, i32:$width), -1)),
+    (UBFE $src, (MOV (i32 0)), $width)
+  >;
+
+  // x & ~(-1 << y)
+  def : AMDGPUPat <
+    (and i32:$src, (xor_oneuse (shl_oneuse -1, i32:$width), -1)),
+    (UBFE $src, (MOV (i32 0)), $width)
+  >;
+
+  // x & (-1 >> (bitwidth - y))
+  def : AMDGPUPat <
+    (and i32:$src, (srl_oneuse -1, (sub 32, i32:$width))),
+    (UBFE $src, (MOV (i32 0)), $width)
+  >;
+
+  // x << (bitwidth - y) >> (bitwidth - y)
   def : AMDGPUPat <
     (srl (shl_oneuse i32:$src, (sub 32, i32:$width)), (sub 32, i32:$width)),
-    (UBFE $src, (i32 0), $width)
+    (UBFE $src, (MOV (i32 0)), $width)
   >;
 
   def : AMDGPUPat <
     (sra (shl_oneuse i32:$src, (sub 32, i32:$width)), (sub 32, i32:$width)),
-    (SBFE $src, (i32 0), $width)
+    (SBFE $src, (MOV (i32 0)), $width)
   >;
 }
 
@@ -746,11 +834,3 @@ class RsqPat<Instruction RsqInst, ValueType vt> : AMDGPUPat <
   (AMDGPUrcp (fsqrt vt:$src)),
   (RsqInst $src)
 >;
-
-include "R600Instructions.td"
-include "R700Instructions.td"
-include "EvergreenInstructions.td"
-include "CaymanInstructions.td"
-
-include "SIInstrInfo.td"
-

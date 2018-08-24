@@ -2104,6 +2104,12 @@ def : t2InstSubst<"sub${s}${p}.w $rd, $rn, $imm",
                  (t2ADDri GPRnopc:$rd, GPRnopc:$rn, t2_so_imm_neg:$imm, pred:$p, s_cc_out:$s)>;
 def : t2InstSubst<"subw${p} $rd, $rn, $imm",
                  (t2ADDri12 GPRnopc:$rd, GPR:$rn, t2_so_imm_neg:$imm, pred:$p)>;
+def : t2InstSubst<"subw${p} $Rd, $Rn, $imm",
+                 (t2ADDri12 GPRnopc:$Rd, GPR:$Rn, imm0_4095_neg:$imm, pred:$p)>;
+def : t2InstSubst<"sub${s}${p} $rd, $rn, $imm",
+                 (t2ADDri GPRnopc:$rd, GPRnopc:$rn, t2_so_imm_neg:$imm, pred:$p, s_cc_out:$s)>;
+def : t2InstSubst<"sub${p} $rd, $rn, $imm",
+                 (t2ADDri12 GPRnopc:$rd, GPR:$rn, t2_so_imm_neg:$imm, pred:$p)>;
 // RSB
 defm t2RSB  : T2I_rbin_irs  <0b1110, "rsb", sub>;
 
@@ -2593,6 +2599,18 @@ def : T2Pat<(or      rGPR:$src, t2_so_imm_not:$imm),
 
 def : T2Pat<(t2_so_imm_not:$src),
             (t2MVNi t2_so_imm_not:$src)>;
+
+// There are shorter Thumb encodings for ADD than ORR, so to increase
+// Thumb2SizeReduction's chances later on we select a t2ADD for an or where
+// possible.
+def : T2Pat<(or AddLikeOrOp:$Rn, t2_so_imm:$imm),
+            (t2ADDri $Rn, t2_so_imm:$imm)>;
+
+def : T2Pat<(or AddLikeOrOp:$Rn, imm0_4095:$Rm),
+            (t2ADDri12 $Rn, imm0_4095:$Rm)>;
+
+def : T2Pat<(or AddLikeOrOp:$Rn, non_imm32:$Rm),
+            (t2ADDrr $Rn, $Rm)>;
 
 //===----------------------------------------------------------------------===//
 //  Multiply Instructions.
@@ -3196,6 +3214,12 @@ def t2ISB : T2I<(outs), (ins instsyncb_opt:$opt), NoItinerary,
   bits<4> opt;
   let Inst{31-4} = 0xf3bf8f6;
   let Inst{3-0} = opt;
+}
+
+let hasNoSchedulingInfo = 1 in
+def t2TSB : T2I<(outs), (ins tsb_opt:$opt), NoItinerary,
+                "tsb", "\t$opt", []>, Requires<[IsThumb, HasV8_4a]> {
+  let Inst{31-0} = 0xf3af8012;
 }
 }
 
@@ -4719,10 +4743,22 @@ def : t2InstSubst<"bic${s}${p} $Rd, $Rn, $imm",
 def : t2InstSubst<"bic${s}${p} $Rdn, $imm",
                   (t2ANDri rGPR:$Rdn, rGPR:$Rdn, t2_so_imm_not:$imm,
                            pred:$p, cc_out:$s)>;
+def : t2InstSubst<"bic${s}${p}.w $Rd, $Rn, $imm",
+                  (t2ANDri rGPR:$Rd, rGPR:$Rn, t2_so_imm_not:$imm,
+                           pred:$p, cc_out:$s)>;
+def : t2InstSubst<"bic${s}${p}.w $Rdn, $imm",
+                  (t2ANDri rGPR:$Rdn, rGPR:$Rdn, t2_so_imm_not:$imm,
+                           pred:$p, cc_out:$s)>;
 def : t2InstSubst<"and${s}${p} $Rd, $Rn, $imm",
                   (t2BICri rGPR:$Rd, rGPR:$Rn, t2_so_imm_not:$imm,
                            pred:$p, cc_out:$s)>;
 def : t2InstSubst<"and${s}${p} $Rdn, $imm",
+                  (t2BICri rGPR:$Rdn, rGPR:$Rdn, t2_so_imm_not:$imm,
+                           pred:$p, cc_out:$s)>;
+def : t2InstSubst<"and${s}${p}.w $Rd, $Rn, $imm",
+                  (t2BICri rGPR:$Rd, rGPR:$Rn, t2_so_imm_not:$imm,
+                           pred:$p, cc_out:$s)>;
+def : t2InstSubst<"and${s}${p}.w $Rdn, $imm",
                   (t2BICri rGPR:$Rdn, rGPR:$Rdn, t2_so_imm_not:$imm,
                            pred:$p, cc_out:$s)>;
 // And ORR <--> ORN

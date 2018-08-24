@@ -153,19 +153,24 @@ class getVOP3VCC<VOPProfile P, SDPatternOperator node> {
             (i1 VCC)))];
 }
 
-class VOP3Features<bit Clamp, bit OpSel> {
+class VOP3Features<bit Clamp, bit OpSel, bit Packed> {
   bit HasClamp = Clamp;
   bit HasOpSel = OpSel;
+  bit IsPacked = Packed;
 }
 
-def VOP3_REGULAR : VOP3Features<0, 0>;
-def VOP3_CLAMP   : VOP3Features<1, 0>;
-def VOP3_OPSEL   : VOP3Features<1, 1>;
+def VOP3_REGULAR : VOP3Features<0, 0, 0>;
+def VOP3_CLAMP   : VOP3Features<1, 0, 0>;
+def VOP3_OPSEL   : VOP3Features<1, 1, 0>;
+def VOP3_PACKED  : VOP3Features<1, 1, 1>;
 
 class VOP3_Profile<VOPProfile P, VOP3Features Features = VOP3_REGULAR> : VOPProfile<P.ArgVT> {
 
   let HasClamp = !if(Features.HasClamp, 1, P.HasClamp);
   let HasOpSel = !if(Features.HasOpSel, 1, P.HasOpSel);
+  let IsPacked = !if(Features.IsPacked, 1, P.IsPacked);
+
+  let HasModifiers = !if(Features.IsPacked, 1, P.HasModifiers);
 
   // FIXME: Hack to stop printing _e64
   let Outs64 = (outs DstRC.RegClass:$vdst);
@@ -444,7 +449,7 @@ def V_INTERP_P1_F32_e64  : VOP3Interp <"v_interp_p1_f32", VOP3_INTERP>;
 def V_INTERP_P2_F32_e64  : VOP3Interp <"v_interp_p2_f32", VOP3_INTERP>;
 def V_INTERP_MOV_F32_e64 : VOP3Interp <"v_interp_mov_f32", VOP3_INTERP_MOV>;
 
-def V_PERM_B32 : VOP3Inst <"v_perm_b32", VOP3_Profile<VOP_I32_I32_I32_I32>>;
+def V_PERM_B32 : VOP3Inst <"v_perm_b32", VOP3_Profile<VOP_I32_I32_I32_I32>, AMDGPUperm>;
 } // End SubtargetPredicate = isVI
 
 let Predicates = [Has16BitInsts] in {
@@ -456,17 +461,6 @@ def : GCNPat <
   (inst i16:$src0, i16:$src1, i16:$src2, (i1 0))
 >;
 
-def : GCNPat<
-  (i32 (op3 (op2 (op1 i16:$src0, i16:$src1), i16:$src2))),
-  (inst i16:$src0, i16:$src1, i16:$src2, (i1 0))
->;
-
-def : GCNPat<
-  (i64 (op3 (op2 (op1 i16:$src0, i16:$src1), i16:$src2))),
-   (REG_SEQUENCE VReg_64,
-     (inst i16:$src0, i16:$src1, i16:$src2, (i1 0)), sub0,
-     (V_MOV_B32_e32 (i32 0)), sub1)
->;
 }
 
 defm: Ternary_i16_Pats<mul, add, V_MAD_U16, zext>;

@@ -21,7 +21,7 @@
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
-#include "llvm/Analysis/Utils/Local.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
@@ -173,7 +173,7 @@ Value *FastDivInsertionTask::getReplacement(DivCacheTy &Cache) {
   return isDivisionOp() ? Value.Quotient : Value.Remainder;
 }
 
-/// \brief Check if a value looks like a hash.
+/// Check if a value looks like a hash.
 ///
 /// The routine is expected to detect values computed using the most common hash
 /// algorithms. Typically, hash computations end with one of the following

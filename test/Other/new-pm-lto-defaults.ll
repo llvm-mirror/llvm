@@ -54,6 +54,7 @@
 ; CHECK-O-NEXT: Running analysis: CallGraphAnalysis
 ; CHECK-O-NEXT: Running pass: GlobalSplitPass
 ; CHECK-O-NEXT: Running pass: WholeProgramDevirtPass
+; CHECK-O1-NEXT: Running pass: LowerTypeTestsPass
 ; CHECK-O2-NEXT: Running pass: GlobalOptPass
 ; CHECK-O2-NEXT: Running pass: ModuleToFunctionPassAdaptor<{{.*}}PromotePass>
 ; CHECK-O2-NEXT: Running analysis: DominatorTreeAnalysis
@@ -80,8 +81,10 @@
 ; CHECK-O2-NEXT: Running pass: ModuleToPostOrderCGSCCPassAdaptor<{{.*}}PostOrderFunctionAttrsPass>
 ; CHECK-O2-NEXT: Running pass: ModuleToFunctionPassAdaptor<{{.*}}PassManager{{.*}}>
 ; CHECK-O2-NEXT: Running analysis: MemoryDependenceAnalysis
+; CHECK-O2-NEXT: Running analysis: PhiValuesAnalysis
 ; CHECK-O2-NEXT: Running analysis: DemandedBitsAnalysis
 ; CHECK-O2-NEXT: Running pass: CrossDSOCFIPass
+; CHECK-O2-NEXT: Running pass: LowerTypeTestsPass
 ; CHECK-O2-NEXT: Running pass: ModuleToFunctionPassAdaptor<{{.*}}SimplifyCFGPass>
 ; CHECK-O2-NEXT: Running pass: EliminateAvailableExternallyPass
 ; CHECK-O2-NEXT: Running pass: GlobalDCEPass

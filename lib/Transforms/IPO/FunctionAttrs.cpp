@@ -18,7 +18,6 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
-#include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/AliasAnalysis.h"
@@ -406,7 +405,7 @@ static Attribute::AttrKind
 determinePointerReadAttrs(Argument *A,
                           const SmallPtrSet<Argument *, 8> &SCCNodes) {
   SmallVector<Use *, 32> Worklist;
-  SmallSet<Use *, 32> Visited;
+  SmallPtrSet<Use *, 32> Visited;
 
   // inalloca arguments are always clobbered by the call.
   if (A->hasInAllocaAttr())
@@ -618,7 +617,7 @@ static bool addArgumentAttrsFromCallsites(Function &F) {
     if (!isGuaranteedToTransferExecutionToSuccessor(&I))
       break;
   }
-  
+
   return Changed;
 }
 
@@ -1013,7 +1012,8 @@ static bool addNonNullAttrs(const SCCNodeSet &SCCNodes) {
       if (!Speculative) {
         // Mark the function eagerly since we may discover a function
         // which prevents us from speculating about the entire SCC
-        DEBUG(dbgs() << "Eagerly marking " << F->getName() << " as nonnull\n");
+        LLVM_DEBUG(dbgs() << "Eagerly marking " << F->getName()
+                          << " as nonnull\n");
         F->addAttribute(AttributeList::ReturnIndex, Attribute::NonNull);
         ++NumNonNullReturn;
         MadeChange = true;
@@ -1032,7 +1032,7 @@ static bool addNonNullAttrs(const SCCNodeSet &SCCNodes) {
           !F->getReturnType()->isPointerTy())
         continue;
 
-      DEBUG(dbgs() << "SCC marking " << F->getName() << " as nonnull\n");
+      LLVM_DEBUG(dbgs() << "SCC marking " << F->getName() << " as nonnull\n");
       F->addAttribute(AttributeList::ReturnIndex, Attribute::NonNull);
       ++NumNonNullReturn;
       MadeChange = true;
@@ -1218,8 +1218,8 @@ static bool inferAttrsFromFunctionBodies(const SCCNodeSet &SCCNodes) {
         return InstrBreaksNonConvergent(I, SCCNodes);
       },
       [](Function &F) {
-        DEBUG(dbgs() << "Removing convergent attr from fn " << F.getName()
-                     << "\n");
+        LLVM_DEBUG(dbgs() << "Removing convergent attr from fn " << F.getName()
+                          << "\n");
         F.setNotConvergent();
       },
       /* RequiresExactDefinition= */ false});
@@ -1239,7 +1239,8 @@ static bool inferAttrsFromFunctionBodies(const SCCNodeSet &SCCNodes) {
           return InstrBreaksNonThrowing(I, SCCNodes);
         },
         [](Function &F) {
-          DEBUG(dbgs() << "Adding nounwind attr to fn " << F.getName() << "\n");
+          LLVM_DEBUG(dbgs()
+                     << "Adding nounwind attr to fn " << F.getName() << "\n");
           F.setDoesNotThrow();
           ++NumNoUnwind;
         },
@@ -1285,6 +1286,31 @@ static bool addNoRecurseAttrs(const SCCNodeSet &SCCNodes) {
   return setDoesNotRecurse(*F);
 }
 
+template <typename AARGetterT>
+static bool deriveAttrsInPostOrder(SCCNodeSet &SCCNodes, AARGetterT &&AARGetter,
+                                   bool HasUnknownCall) {
+  bool Changed = false;
+
+  // Bail if the SCC only contains optnone functions.
+  if (SCCNodes.empty())
+    return Changed;
+
+  Changed |= addArgumentReturnedAttrs(SCCNodes);
+  Changed |= addReadAttrs(SCCNodes, AARGetter);
+  Changed |= addArgumentAttrs(SCCNodes);
+
+  // If we have no external nodes participating in the SCC, we can deduce some
+  // more precise attributes as well.
+  if (!HasUnknownCall) {
+    Changed |= addNoAliasAttrs(SCCNodes);
+    Changed |= addNonNullAttrs(SCCNodes);
+    Changed |= inferAttrsFromFunctionBodies(SCCNodes);
+    Changed |= addNoRecurseAttrs(SCCNodes);
+  }
+
+  return Changed;
+}
+
 PreservedAnalyses PostOrderFunctionAttrsPass::run(LazyCallGraph::SCC &C,
                                                   CGSCCAnalysisManager &AM,
                                                   LazyCallGraph &CG,
@@ -1327,21 +1353,10 @@ PreservedAnalyses PostOrderFunctionAttrsPass::run(LazyCallGraph::SCC &C,
     SCCNodes.insert(&F);
   }
 
-  bool Changed = false;
-  Changed |= addArgumentReturnedAttrs(SCCNodes);
-  Changed |= addReadAttrs(SCCNodes, AARGetter);
-  Changed |= addArgumentAttrs(SCCNodes);
+  if (deriveAttrsInPostOrder(SCCNodes, AARGetter, HasUnknownCall))
+    return PreservedAnalyses::none();
 
-  // If we have no external nodes participating in the SCC, we can deduce some
-  // more precise attributes as well.
-  if (!HasUnknownCall) {
-    Changed |= addNoAliasAttrs(SCCNodes);
-    Changed |= addNonNullAttrs(SCCNodes);
-    Changed |= inferAttrsFromFunctionBodies(SCCNodes);
-    Changed |= addNoRecurseAttrs(SCCNodes);
-  }
-
-  return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
+  return PreservedAnalyses::all();
 }
 
 namespace {
@@ -1381,7 +1396,6 @@ Pass *llvm::createPostOrderFunctionAttrsLegacyPass() {
 
 template <typename AARGetterT>
 static bool runImpl(CallGraphSCC &SCC, AARGetterT AARGetter) {
-  bool Changed = false;
 
   // Fill SCCNodes with the elements of the SCC. Used for quickly looking up
   // whether a given CallGraphNode is in this SCC. Also track whether there are
@@ -1402,24 +1416,7 @@ static bool runImpl(CallGraphSCC &SCC, AARGetterT AARGetter) {
     SCCNodes.insert(F);
   }
 
-  // Skip it if the SCC only contains optnone functions.
-  if (SCCNodes.empty())
-    return Changed;
-
-  Changed |= addArgumentReturnedAttrs(SCCNodes);
-  Changed |= addReadAttrs(SCCNodes, AARGetter);
-  Changed |= addArgumentAttrs(SCCNodes);
-
-  // If we have no external nodes participating in the SCC, we can deduce some
-  // more precise attributes as well.
-  if (!ExternalNode) {
-    Changed |= addNoAliasAttrs(SCCNodes);
-    Changed |= addNonNullAttrs(SCCNodes);
-    Changed |= inferAttrsFromFunctionBodies(SCCNodes);
-    Changed |= addNoRecurseAttrs(SCCNodes);
-  }
-
-  return Changed;
+  return deriveAttrsInPostOrder(SCCNodes, AARGetter, ExternalNode);
 }
 
 bool PostOrderFunctionAttrsLegacyPass::runOnSCC(CallGraphSCC &SCC) {

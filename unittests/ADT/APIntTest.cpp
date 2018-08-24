@@ -10,6 +10,7 @@
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/Twine.h"
 #include "gtest/gtest.h"
 #include <array>
 
@@ -1060,6 +1061,38 @@ TEST(APIntTest, divremuint) {
           APInt{1024, 1});
 }
 
+TEST(APIntTest, divrem_simple) {
+  // Test simple cases.
+  APInt A(65, 2), B(65, 2);
+  APInt Q, R;
+
+  // X / X
+  APInt::sdivrem(A, B, Q, R);
+  EXPECT_EQ(Q, APInt(65, 1));
+  EXPECT_EQ(R, APInt(65, 0));
+  APInt::udivrem(A, B, Q, R);
+  EXPECT_EQ(Q, APInt(65, 1));
+  EXPECT_EQ(R, APInt(65, 0));
+
+  // 0 / X
+  APInt O(65, 0);
+  APInt::sdivrem(O, B, Q, R);
+  EXPECT_EQ(Q, APInt(65, 0));
+  EXPECT_EQ(R, APInt(65, 0));
+  APInt::udivrem(O, B, Q, R);
+  EXPECT_EQ(Q, APInt(65, 0));
+  EXPECT_EQ(R, APInt(65, 0));
+
+  // X / 1
+  APInt I(65, 1);
+  APInt::sdivrem(A, I, Q, R);
+  EXPECT_EQ(Q, A);
+  EXPECT_EQ(R, APInt(65, 0));
+  APInt::udivrem(A, I, Q, R);
+  EXPECT_EQ(Q, A);
+  EXPECT_EQ(R, APInt(65, 0));
+}
+
 TEST(APIntTest, fromString) {
   EXPECT_EQ(APInt(32, 0), APInt(32,   "0", 2));
   EXPECT_EQ(APInt(32, 1), APInt(32,   "1", 2));
@@ -1659,6 +1692,38 @@ TEST(APIntTest, isShiftedMask) {
   }
 }
 
+// Test that self-move works, but only when we're using MSVC.
+#if defined(_MSC_VER)
+#if defined(__clang__)
+// Disable the pragma warning from versions of Clang without -Wself-move
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunknown-pragmas"
+// Disable the warning that triggers on exactly what is being tested.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wself-move"
+#endif
+TEST(APIntTest, SelfMoveAssignment) {
+  APInt X(32, 0xdeadbeef);
+  X = std::move(X);
+  EXPECT_EQ(32u, X.getBitWidth());
+  EXPECT_EQ(0xdeadbeefULL, X.getLimitedValue());
+
+  uint64_t Bits[] = {0xdeadbeefdeadbeefULL, 0xdeadbeefdeadbeefULL};
+  APInt Y(128, Bits);
+  Y = std::move(Y);
+  EXPECT_EQ(128u, Y.getBitWidth());
+  EXPECT_EQ(~0ULL, Y.getLimitedValue());
+  const uint64_t *Raw = Y.getRawData();
+  EXPECT_EQ(2u, Y.getNumWords());
+  EXPECT_EQ(0xdeadbeefdeadbeefULL, Raw[0]);
+  EXPECT_EQ(0xdeadbeefdeadbeefULL, Raw[1]);
+}
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#pragma clang diagnostic pop
+#endif
+#endif // _MSC_VER
+
 TEST(APIntTest, reverseBits) {
   EXPECT_EQ(1, APInt(1, 1).reverseBits());
   EXPECT_EQ(0, APInt(1, 0).reverseBits());
@@ -2224,6 +2289,158 @@ TEST(APIntTest, multiply) {
   EXPECT_EQ(32U, i96.countLeadingOnes());
   EXPECT_EQ(32U, i96.countPopulation());
   EXPECT_EQ(64U, i96.countTrailingZeros());
+}
+
+TEST(APIntTest, RoundingUDiv) {
+  for (uint64_t Ai = 1; Ai <= 255; Ai++) {
+    APInt A(8, Ai);
+    APInt Zero(8, 0);
+    EXPECT_EQ(0, APIntOps::RoundingUDiv(Zero, A, APInt::Rounding::UP));
+    EXPECT_EQ(0, APIntOps::RoundingUDiv(Zero, A, APInt::Rounding::DOWN));
+    EXPECT_EQ(0, APIntOps::RoundingUDiv(Zero, A, APInt::Rounding::TOWARD_ZERO));
+
+    for (uint64_t Bi = 1; Bi <= 255; Bi++) {
+      APInt B(8, Bi);
+      {
+        APInt Quo = APIntOps::RoundingUDiv(A, B, APInt::Rounding::UP);
+        auto Prod = Quo.zext(16) * B.zext(16);
+        EXPECT_TRUE(Prod.uge(Ai));
+        if (Prod.ugt(Ai)) {
+          EXPECT_TRUE(((Quo - 1).zext(16) * B.zext(16)).ult(Ai));
+        }
+      }
+      {
+        APInt Quo = A.udiv(B);
+        EXPECT_EQ(Quo, APIntOps::RoundingUDiv(A, B, APInt::Rounding::TOWARD_ZERO));
+        EXPECT_EQ(Quo, APIntOps::RoundingUDiv(A, B, APInt::Rounding::DOWN));
+      }
+    }
+  }
+}
+
+TEST(APIntTest, RoundingSDiv) {
+  for (int64_t Ai = -128; Ai <= 127; Ai++) {
+    APInt A(8, Ai);
+
+    if (Ai != 0) {
+      APInt Zero(8, 0);
+      EXPECT_EQ(0, APIntOps::RoundingSDiv(Zero, A, APInt::Rounding::UP));
+      EXPECT_EQ(0, APIntOps::RoundingSDiv(Zero, A, APInt::Rounding::DOWN));
+      EXPECT_EQ(0, APIntOps::RoundingSDiv(Zero, A, APInt::Rounding::TOWARD_ZERO));
+    }
+
+    for (uint64_t Bi = -128; Bi <= 127; Bi++) {
+      if (Bi == 0)
+        continue;
+
+      APInt B(8, Bi);
+      {
+        APInt Quo = APIntOps::RoundingSDiv(A, B, APInt::Rounding::UP);
+        auto Prod = Quo.sext(16) * B.sext(16);
+        EXPECT_TRUE(Prod.uge(A));
+        if (Prod.ugt(A)) {
+          EXPECT_TRUE(((Quo - 1).sext(16) * B.sext(16)).ult(A));
+        }
+      }
+      {
+        APInt Quo = APIntOps::RoundingSDiv(A, B, APInt::Rounding::DOWN);
+        auto Prod = Quo.sext(16) * B.sext(16);
+        EXPECT_TRUE(Prod.ule(A));
+        if (Prod.ult(A)) {
+          EXPECT_TRUE(((Quo + 1).sext(16) * B.sext(16)).ugt(A));
+        }
+      }
+      {
+        APInt Quo = A.sdiv(B);
+        EXPECT_EQ(Quo, APIntOps::RoundingSDiv(A, B, APInt::Rounding::TOWARD_ZERO));
+      }
+    }
+  }
+}
+
+TEST(APIntTest, SolveQuadraticEquationWrap) {
+  // Verify that "Solution" is the first non-negative integer that solves
+  // Ax^2 + Bx + C = "0 or overflow", i.e. that it is a correct solution
+  // as calculated by SolveQuadraticEquationWrap.
+  auto Validate = [] (int A, int B, int C, unsigned Width, int Solution) {
+    int Mask = (1 << Width) - 1;
+
+    // Solution should be non-negative.
+    EXPECT_GE(Solution, 0);
+
+    auto OverflowBits = [] (int64_t V, unsigned W) {
+      return V & -(1 << W);
+    };
+
+    int64_t Over0 = OverflowBits(C, Width);
+
+    auto IsZeroOrOverflow = [&] (int X) {
+      int64_t ValueAtX = A*X*X + B*X + C;
+      int64_t OverX = OverflowBits(ValueAtX, Width);
+      return (ValueAtX & Mask) == 0 || OverX != Over0;
+    };
+
+    auto EquationToString = [&] (const char *X_str) {
+      return (Twine(A) + Twine(X_str) + Twine("^2 + ") + Twine(B) +
+              Twine(X_str) + Twine(" + ") + Twine(C) + Twine(", bitwidth: ") +
+              Twine(Width)).str();
+    };
+
+    auto IsSolution = [&] (const char *X_str, int X) {
+      if (IsZeroOrOverflow(X))
+        return ::testing::AssertionSuccess()
+                  << X << " is a solution of " << EquationToString(X_str);
+      return ::testing::AssertionFailure()
+                << X << " is not an expected solution of "
+                << EquationToString(X_str);
+    };
+
+    auto IsNotSolution = [&] (const char *X_str, int X) {
+      if (!IsZeroOrOverflow(X))
+        return ::testing::AssertionSuccess()
+                  << X << " is not a solution of " << EquationToString(X_str);
+      return ::testing::AssertionFailure()
+                << X << " is an unexpected solution of "
+                << EquationToString(X_str);
+    };
+
+    // This is the important part: make sure that there is no solution that
+    // is less than the calculated one.
+    if (Solution > 0) {
+      for (int X = 1; X < Solution-1; ++X)
+        EXPECT_PRED_FORMAT1(IsNotSolution, X);
+    }
+
+    // Verify that the calculated solution is indeed a solution.
+    EXPECT_PRED_FORMAT1(IsSolution, Solution);
+  };
+
+  // Generate all possible quadratic equations with Width-bit wide integer
+  // coefficients, get the solution from SolveQuadraticEquationWrap, and
+  // verify that the solution is correct.
+  auto Iterate = [&] (unsigned Width) {
+    assert(1 < Width && Width < 32);
+    int Low = -(1 << (Width-1));
+    int High = (1 << (Width-1));
+
+    for (int A = Low; A != High; ++A) {
+      if (A == 0)
+        continue;
+      for (int B = Low; B != High; ++B) {
+        for (int C = Low; C != High; ++C) {
+          Optional<APInt> S = APIntOps::SolveQuadraticEquationWrap(
+                                APInt(Width, A), APInt(Width, B),
+                                APInt(Width, C), Width);
+          if (S.hasValue())
+            Validate(A, B, C, Width, S->getSExtValue());
+        }
+      }
+    }
+  };
+
+  // Test all widths in [2..6].
+  for (unsigned i = 2; i <= 6; ++i)
+    Iterate(i);
 }
 
 } // end anonymous namespace

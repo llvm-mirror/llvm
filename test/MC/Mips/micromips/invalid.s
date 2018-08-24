@@ -91,12 +91,12 @@
   lhe $4, 8($33)      # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid register number
   lhu $4, 8($35)      # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid register number
   lhue $4, 8($37)     # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid register number
-  lh $2, -65536($4)   # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 16-bit signed offset
-  lh $2, 65536($4)    # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 16-bit signed offset
+  lh $2, -2147483649($4) # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 32-bit signed offset
+  lh $2, 2147483648($4)  # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 32-bit signed offset
   lhe $4, -512($2)    # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 9-bit signed offset
   lhe $4, 512($2)     # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 9-bit signed offset
-  lhu $4, -65536($2)  # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 16-bit signed offset
-  lhu $4, 65536($2)   # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 16-bit signed offset
+  lhu $4, -2147483649($2) # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 32-bit signed offset
+  lhu $4, 2147483648($2)  # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 32-bit signed offset
   lhue $4, -512($2)   # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 9-bit signed offset
   lhue $4, 512($2)    # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 9-bit signed offset
   lwp $31, 8($4)      # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
@@ -121,10 +121,10 @@
   xori $3, 65536      # CHECK: :[[@LINE]]:12: error: expected 16-bit unsigned immediate
   not $3, 4           # CHECK: :[[@LINE]]:11: error: invalid operand for instruction
   lb $32, 8($5)       # CHECK: :[[@LINE]]:6: error: invalid register number
-  lb $4, -32769($5)   # CHECK: :[[@LINE]]:10: error: expected memory with 16-bit signed offset
-  lb $4, 32768($5)    # CHECK: :[[@LINE]]:10: error: expected memory with 16-bit signed offset
+  lb $4, -2147483649($5)  # CHECK: :[[@LINE]]:10: error: expected memory with 16-bit signed offset
+  lb $4, 2147483648($5)   # CHECK: :[[@LINE]]:10: error: expected memory with 16-bit signed offset
   lb $4, 8($32)       # CHECK: :[[@LINE]]:12: error: invalid register number
   lbu $32, 8($5)      # CHECK: :[[@LINE]]:7: error: invalid register number
-  lbu $4, -32769($5)  # CHECK: :[[@LINE]]:11: error: expected memory with 16-bit signed offset
-  lbu $4, 32768($5)   # CHECK: :[[@LINE]]:11: error: expected memory with 16-bit signed offset
+  lbu $4, -2147483649($5) # CHECK: :[[@LINE]]:11: error: expected memory with 16-bit signed offset
+  lbu $4, 2147483648($5)  # CHECK: :[[@LINE]]:11: error: expected memory with 16-bit signed offset
   lbu $4, 8($32)      # CHECK: :[[@LINE]]:13: error: invalid register number

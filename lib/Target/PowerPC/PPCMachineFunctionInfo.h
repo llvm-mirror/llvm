@@ -29,7 +29,7 @@ class PPCFunctionInfo : public MachineFunctionInfo {
   /// stored.  Also used as an anchor for instructions that need to be altered
   /// when using frame pointers (dyna_add, dyna_sub.)
   int FramePointerSaveIndex = 0;
-  
+
   /// ReturnAddrSaveIndex - Frame index of where the return address is stored.
   ///
   int ReturnAddrSaveIndex = 0;
@@ -128,7 +128,7 @@ public:
 
   int getFramePointerSaveIndex() const { return FramePointerSaveIndex; }
   void setFramePointerSaveIndex(int Idx) { FramePointerSaveIndex = Idx; }
-  
+
   int getReturnAddrSaveIndex() const { return ReturnAddrSaveIndex; }
   void setReturnAddrSaveIndex(int idx) { ReturnAddrSaveIndex = idx; }
 
@@ -196,11 +196,11 @@ public:
     LiveInAttrs.push_back(std::make_pair(VReg, Flags));
   }
 
-  /// This function returns true if the spesified vreg is
+  /// This function returns true if the specified vreg is
   /// a live-in register and sign-extended.
   bool isLiveInSExt(unsigned VReg) const;
 
-  /// This function returns true if the spesified vreg is
+  /// This function returns true if the specified vreg is
   /// a live-in register and zero-extended.
   bool isLiveInZExt(unsigned VReg) const;
 

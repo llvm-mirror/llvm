@@ -46,7 +46,71 @@ and z7.d, z8.d, #254
 // CHECK-NEXT: and z7.d, z8.d, #254
 // CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:
 
-bic z7.d, z8.d, #254
+and z0.d, p0/m, z1.d, z2.d
 // CHECK: [[@LINE-1]]:{{[0-9]+}}: error: operand must match destination register
-// CHECK-NEXT: bic z7.d, z8.d, #254
+// CHECK-NEXT: and z0.d, p0/m, z1.d, z2.d
+// CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:
+
+// Element size specifiers should match.
+and z21.d, z5.d, z26.b
+// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: invalid element width
+// CHECK-NEXT: and z21.d, z5.d, z26.b
+// CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:
+
+
+// --------------------------------------------------------------------------//
+// Predicate out of restricted predicate range
+
+and z0.d, p8/z, z0.d, z1.d
+// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: restricted predicate has range [0, 7].
+// CHECK-NEXT: and z0.d, p8/z, z0.d, z1.d
+// CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:
+
+
+// --------------------------------------------------------------------------//
+// Predicate register must have .b suffix
+
+and p0.h, p0/z, p0.h, p1.h
+// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: invalid predicate register.
+// CHECK-NEXT: and p0.h, p0/z, p0.h, p1.h
+// CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:
+
+and p0.s, p0/z, p0.s, p1.s
+// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: invalid predicate register.
+// CHECK-NEXT: and p0.s, p0/z, p0.s, p1.s
+// CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:
+
+and p0.d, p0/z, p0.d, p1.d
+// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: invalid predicate register.
+// CHECK-NEXT: and p0.d, p0/z, p0.d, p1.d
+// CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:
+
+// --------------------------------------------------------------------------//
+// Operation only has zeroing predicate behaviour (p0/z).
+
+and p0.b, p0/m, p1.b, p2.b
+// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: invalid operand
+// CHECK-NEXT: and p0.b, p0/m, p1.b, p2.b
+// CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:
+
+
+// --------------------------------------------------------------------------//
+// Negative tests for instructions that are incompatible with movprfx
+
+movprfx z0.d, p0/z, z7.d
+and     z0.d, z0.d, #0x6
+// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: instruction is unpredictable when following a predicated movprfx, suggest using unpredicated movprfx
+// CHECK-NEXT: and     z0.d, z0.d, #0x6
+// CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:
+
+movprfx z23.d, p0/z, z30.d
+and     z23.d, z13.d, z8.d
+// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: instruction is unpredictable when following a movprfx, suggest replacing movprfx with mov
+// CHECK-NEXT: and     z23.d, z13.d, z8.d
+// CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:
+
+movprfx z23, z30
+and     z23.d, z13.d, z8.d
+// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: instruction is unpredictable when following a movprfx, suggest replacing movprfx with mov
+// CHECK-NEXT: and     z23.d, z13.d, z8.d
 // CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:

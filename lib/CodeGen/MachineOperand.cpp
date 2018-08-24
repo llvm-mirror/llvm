@@ -20,6 +20,7 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/IR/ModuleSlotTracker.h"
@@ -473,7 +474,7 @@ static void printSyncScope(raw_ostream &OS, const LLVMContext &Context,
       Context.getSyncScopeNames(SSNs);
 
     OS << "syncscope(\"";
-    PrintEscapedString(SSNs[SSID], OS);
+    printEscapedString(SSNs[SSID], OS);
     OS << "\") ";
     break;
   }
@@ -703,9 +704,15 @@ static void printCFI(raw_ostream &OS, const MCCFIInstruction &CFI,
 
 void MachineOperand::print(raw_ostream &OS, const TargetRegisterInfo *TRI,
                            const TargetIntrinsicInfo *IntrinsicInfo) const {
+  print(OS, LLT{}, TRI, IntrinsicInfo);
+}
+
+void MachineOperand::print(raw_ostream &OS, LLT TypeToPrint,
+                           const TargetRegisterInfo *TRI,
+                           const TargetIntrinsicInfo *IntrinsicInfo) const {
   tryToGetTargetInfo(*this, TRI, IntrinsicInfo);
   ModuleSlotTracker DummyMST(nullptr);
-  print(OS, DummyMST, LLT{}, /*PrintDef=*/false, /*IsStandalone=*/true,
+  print(OS, DummyMST, TypeToPrint, /*PrintDef=*/false, /*IsStandalone=*/true,
         /*ShouldPrintRegisterTies=*/true,
         /*TiedOperandIdx=*/0, TRI, IntrinsicInfo);
 }

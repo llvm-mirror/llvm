@@ -54,7 +54,7 @@ class TypedInit;
 
 class RecTy {
 public:
-  /// \brief Subclass discriminator (for dyn_cast<> et al.)
+  /// Subclass discriminator (for dyn_cast<> et al.)
   enum RecTyKind {
     BitRecTyKind,
     BitsRecTyKind,
@@ -287,7 +287,7 @@ RecTy *resolveTypes(RecTy *T1, RecTy *T2);
 
 class Init {
 protected:
-  /// \brief Discriminator enum (for isa<>, dyn_cast<>, et al.)
+  /// Discriminator enum (for isa<>, dyn_cast<>, et al.)
   ///
   /// This enum is laid out by a preorder traversal of the inheritance
   /// hierarchy, and does not contain an entry for abstract classes, as per
@@ -1357,30 +1357,31 @@ class Record {
   unsigned ID;
 
   bool IsAnonymous;
+  bool IsClass;
 
-  void init();
   void checkName();
 
 public:
   // Constructs a record.
   explicit Record(Init *N, ArrayRef<SMLoc> locs, RecordKeeper &records,
-                  bool Anonymous = false) :
-    Name(N), Locs(locs.begin(), locs.end()), TrackedRecords(records),
-    ID(LastID++), IsAnonymous(Anonymous) {
-    init();
+                  bool Anonymous = false, bool Class = false)
+    : Name(N), Locs(locs.begin(), locs.end()), TrackedRecords(records),
+      ID(LastID++), IsAnonymous(Anonymous), IsClass(Class) {
+    checkName();
   }
 
-  explicit Record(StringRef N, ArrayRef<SMLoc> locs, RecordKeeper &records)
-      : Record(StringInit::get(N), locs, records) {}
+  explicit Record(StringRef N, ArrayRef<SMLoc> locs, RecordKeeper &records,
+                  bool Class = false)
+      : Record(StringInit::get(N), locs, records, false, Class) {}
 
   // When copy-constructing a Record, we must still guarantee a globally unique
   // ID number.  Don't copy TheInit either since it's owned by the original
   // record. All other fields can be copied normally.
-  Record(const Record &O) :
-    Name(O.Name), Locs(O.Locs), TemplateArgs(O.TemplateArgs),
-    Values(O.Values), SuperClasses(O.SuperClasses),
-    TrackedRecords(O.TrackedRecords), ID(LastID++),
-    IsAnonymous(O.IsAnonymous) { }
+  Record(const Record &O)
+    : Name(O.Name), Locs(O.Locs), TemplateArgs(O.TemplateArgs),
+      Values(O.Values), SuperClasses(O.SuperClasses),
+      TrackedRecords(O.TrackedRecords), ID(LastID++),
+      IsAnonymous(O.IsAnonymous), IsClass(O.IsClass) { }
 
   static unsigned getNewUID() { return LastID++; }
 
@@ -1406,6 +1407,8 @@ public:
 
   /// get the corresponding DefInit.
   DefInit *getDefInit();
+
+  bool isClass() const { return IsClass; }
 
   ArrayRef<Init *> getTemplateArgs() const {
     return TemplateArgs;
@@ -1452,13 +1455,6 @@ public:
   void addValue(const RecordVal &RV) {
     assert(getValue(RV.getNameInit()) == nullptr && "Value already added!");
     Values.push_back(RV);
-    if (Values.size() > 1)
-      // Keep NAME at the end of the list.  It makes record dumps a
-      // bit prettier and allows TableGen tests to be written more
-      // naturally.  Tests can use CHECK-NEXT to look for Record
-      // fields they expect to see after a def.  They can't do that if
-      // NAME is the first Record field.
-      std::swap(Values[Values.size() - 2], Values[Values.size() - 1]);
   }
 
   void removeValue(Init *Name) {
@@ -1599,17 +1595,6 @@ public:
 };
 
 raw_ostream &operator<<(raw_ostream &OS, const Record &R);
-
-struct MultiClass {
-  Record Rec;  // Placeholder for template args and Name.
-  using RecordVector = std::vector<std::unique_ptr<Record>>;
-  RecordVector DefPrototypes;
-
-  void dump() const;
-
-  MultiClass(StringRef Name, SMLoc Loc, RecordKeeper &Records) :
-    Rec(Name, Loc, Records) {}
-};
 
 class RecordKeeper {
   friend class RecordRecTy;
@@ -1780,11 +1765,6 @@ struct LessRecordRegister {
 
 raw_ostream &operator<<(raw_ostream &OS, const RecordKeeper &RK);
 
-/// Return an Init with a qualifier prefix referring
-/// to CurRec's name.
-Init *QualifyName(Record &CurRec, MultiClass *CurMultiClass,
-                  Init *Name, StringRef Scoper);
-
 //===----------------------------------------------------------------------===//
 //  Resolvers
 //===----------------------------------------------------------------------===//
@@ -1904,6 +1884,23 @@ public:
 
   Init *resolve(Init *VarName) override;
 };
+
+/// Do not resolve anything, but keep track of whether a given variable was
+/// referenced.
+class HasReferenceResolver final : public Resolver {
+  Init *VarNameToTrack;
+  bool Found = false;
+
+public:
+  explicit HasReferenceResolver(Init *VarNameToTrack)
+      : Resolver(nullptr), VarNameToTrack(VarNameToTrack) {}
+
+  bool found() const { return Found; }
+
+  Init *resolve(Init *VarName) override;
+};
+
+void EmitJSON(RecordKeeper &RK, raw_ostream &OS);
 
 } // end namespace llvm
 

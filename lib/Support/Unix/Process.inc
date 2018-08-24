@@ -14,6 +14,7 @@
 #include "Unix.h"
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Config/config.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/Mutex.h"
 #include "llvm/Support/MutexGuard.h"
@@ -78,7 +79,7 @@ unsigned Process::getPageSize() {
 #elif defined(HAVE_SYSCONF)
   static long page_size = ::sysconf(_SC_PAGE_SIZE);
 #else
-#warning Cannot get the page size on this machine
+#error Cannot get the page size on this machine
 #endif
   return static_cast<unsigned>(page_size);
 }
@@ -198,7 +199,7 @@ std::error_code Process::FixupStandardFileDescriptors() {
   for (int StandardFD : StandardFDs) {
     struct stat st;
     errno = 0;
-    if (RetryAfterSignal(-1, fstat, StandardFD, &st) < 0) {
+    if (RetryAfterSignal(-1, ::fstat, StandardFD, &st) < 0) {
       assert(errno && "expected errno to be set if fstat failed!");
       // fstat should return EBADF if the file descriptor is closed.
       if (errno != EBADF)
@@ -210,7 +211,7 @@ std::error_code Process::FixupStandardFileDescriptors() {
     assert(errno == EBADF && "expected errno to have EBADF at this point!");
 
     if (NullFD < 0) {
-      if ((NullFD = RetryAfterSignal(-1, open, "/dev/null", O_RDWR)) < 0)
+      if ((NullFD = RetryAfterSignal(-1, ::open, "/dev/null", O_RDWR)) < 0)
         return std::error_code(errno, std::generic_category());
     }
 

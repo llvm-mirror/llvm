@@ -404,7 +404,7 @@ def Pseudo_SReg_32 : RegisterClass<"AMDGPU", [i32, f32, i16, f16, v2i16, v2f16],
   let CopyCost = -1;
 }
 
-def Pseudo_SReg_128 : RegisterClass<"AMDGPU", [v4i32, v2i64], 32,
+def Pseudo_SReg_128 : RegisterClass<"AMDGPU", [v4i32, v2i64, v2f64], 32,
   (add PRIVATE_RSRC_REG)> {
   let isAllocatable = 0;
   let CopyCost = -1;
@@ -435,22 +435,22 @@ def SReg_32 : RegisterClass<"AMDGPU", [i32, f32, i16, f16, v2i16, v2f16], 32,
   let AllocationPriority = 7;
 }
 
-def SGPR_64 : RegisterClass<"AMDGPU", [v2i32, i64, f64], 32, (add SGPR_64Regs)> {
+def SGPR_64 : RegisterClass<"AMDGPU", [v2i32, i64, f64, v4i16, v4f16], 32, (add SGPR_64Regs)> {
   let CopyCost = 1;
   let AllocationPriority = 8;
 }
 
-def TTMP_64 : RegisterClass<"AMDGPU", [v2i32, i64, f64], 32, (add TTMP_64Regs)> {
+def TTMP_64 : RegisterClass<"AMDGPU", [v2i32, i64, f64, v4i16, v4f16], 32, (add TTMP_64Regs)> {
   let isAllocatable = 0;
 }
 
-def SReg_64_XEXEC : RegisterClass<"AMDGPU", [v2i32, i64, f64, i1], 32,
+def SReg_64_XEXEC : RegisterClass<"AMDGPU", [v2i32, i64, f64, i1, v4i16, v4f16], 32,
   (add SGPR_64, VCC, FLAT_SCR, XNACK_MASK, TTMP_64, TBA, TMA)> {
   let CopyCost = 1;
   let AllocationPriority = 8;
 }
 
-def SReg_64 : RegisterClass<"AMDGPU", [v2i32, i64, f64, i1], 32,
+def SReg_64 : RegisterClass<"AMDGPU", [v2i32, i64, f64, i1, v4i16, v4f16], 32,
   (add SReg_64_XEXEC, EXEC)> {
   let CopyCost = 1;
   let AllocationPriority = 8;
@@ -467,7 +467,7 @@ def TTMP_128 : RegisterClass<"AMDGPU", [v4i32, v16i8, v2i64], 32, (add TTMP_128R
   let isAllocatable = 0;
 }
 
-def SReg_128 : RegisterClass<"AMDGPU", [v4i32, v16i8, v2i64], 32,
+def SReg_128 : RegisterClass<"AMDGPU", [v4i32, v16i8, v2i64, v2f64], 32,
   (add SGPR_128, TTMP_128)> {
   let AllocationPriority = 10;
 }
@@ -505,7 +505,7 @@ def SReg_512 : RegisterClass<"AMDGPU", [v16i32, v16f32], 32,
 }
 
 // Register class for all vector registers (VGPRs + Interploation Registers)
-def VReg_64 : RegisterClass<"AMDGPU", [i64, f64, v2i32, v2f32], 32, (add VGPR_64)> {
+def VReg_64 : RegisterClass<"AMDGPU", [i64, f64, v2i32, v2f32, v4f16, v4i16], 32, (add VGPR_64)> {
   let Size = 64;
 
   // Requires 2 v_mov_b32 to copy

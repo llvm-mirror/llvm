@@ -12,8 +12,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ExecutionEngine/JITSymbol.h"
+#include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalValue.h"
-#include "llvm/Object/SymbolicFile.h"
+#include "llvm/Object/ObjectFile.h"
 
 using namespace llvm;
 
@@ -25,11 +26,13 @@ JITSymbolFlags llvm::JITSymbolFlags::fromGlobalValue(const GlobalValue &GV) {
     Flags |= JITSymbolFlags::Common;
   if (!GV.hasLocalLinkage() && !GV.hasHiddenVisibility())
     Flags |= JITSymbolFlags::Exported;
+  if (isa<Function>(GV))
+    Flags |= JITSymbolFlags::Callable;
   return Flags;
 }
 
-JITSymbolFlags
-llvm::JITSymbolFlags::fromObjectSymbol(const object::BasicSymbolRef &Symbol) {
+Expected<JITSymbolFlags>
+llvm::JITSymbolFlags::fromObjectSymbol(const object::SymbolRef &Symbol) {
   JITSymbolFlags Flags = JITSymbolFlags::None;
   if (Symbol.getFlags() & object::BasicSymbolRef::SF_Weak)
     Flags |= JITSymbolFlags::Weak;
@@ -37,18 +40,26 @@ llvm::JITSymbolFlags::fromObjectSymbol(const object::BasicSymbolRef &Symbol) {
     Flags |= JITSymbolFlags::Common;
   if (Symbol.getFlags() & object::BasicSymbolRef::SF_Exported)
     Flags |= JITSymbolFlags::Exported;
+
+  auto SymbolType = Symbol.getType();
+  if (!SymbolType)
+    return SymbolType.takeError();
+
+  if (*SymbolType & object::SymbolRef::ST_Function)
+    Flags |= JITSymbolFlags::Callable;
+
   return Flags;
 }
 
-ARMJITSymbolFlags llvm::ARMJITSymbolFlags::fromObjectSymbol(
-                                         const object::BasicSymbolRef &Symbol) {
+ARMJITSymbolFlags
+llvm::ARMJITSymbolFlags::fromObjectSymbol(const object::SymbolRef &Symbol) {
   ARMJITSymbolFlags Flags;
   if (Symbol.getFlags() & object::BasicSymbolRef::SF_Thumb)
     Flags |= ARMJITSymbolFlags::Thumb;
   return Flags;
 }
 
-/// @brief Performs lookup by, for each symbol, first calling
+/// Performs lookup by, for each symbol, first calling
 ///        findSymbolInLogicalDylib and if that fails calling
 ///        findSymbol.
 Expected<JITSymbolResolver::LookupResult>
@@ -81,7 +92,7 @@ LegacyJITSymbolResolver::lookup(const LookupSet &Symbols) {
   return std::move(Result);
 }
 
-/// @brief Performs flags lookup by calling findSymbolInLogicalDylib and
+/// Performs flags lookup by calling findSymbolInLogicalDylib and
 ///        returning the flags value for that symbol.
 Expected<JITSymbolResolver::LookupFlagsResult>
 LegacyJITSymbolResolver::lookupFlags(const LookupSet &Symbols) {

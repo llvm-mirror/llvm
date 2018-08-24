@@ -8,6 +8,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Support/Error.h"
+#include "llvm-c/Error.h"
 
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/Errc.h"
@@ -32,7 +33,7 @@ public:
 
   // Log this error to a stream.
   void log(raw_ostream &OS) const override {
-    OS << "CustomError { " << getInfo() << "}";
+    OS << "CustomError {" << getInfo() << "}";
   }
 
   std::error_code convertToErrorCode() const override {
@@ -443,6 +444,29 @@ TEST(Error, StringError) {
     << "Failed to convert StringError to error_code.";
 }
 
+TEST(Error, createStringError) {
+  static const char *Bar = "bar";
+  static const std::error_code EC = errc::invalid_argument;
+  std::string Msg;
+  raw_string_ostream S(Msg);
+  logAllUnhandledErrors(createStringError(EC, "foo%s%d0x%" PRIx8, Bar, 1, 0xff),
+                        S, "");
+  EXPECT_EQ(S.str(), "foobar10xff\n")
+    << "Unexpected createStringError() log result";
+
+  S.flush();
+  Msg.clear();
+  logAllUnhandledErrors(createStringError(EC, Bar), S, "");
+  EXPECT_EQ(S.str(), "bar\n")
+    << "Unexpected createStringError() (overloaded) log result";
+
+  S.flush();
+  Msg.clear();
+  auto Res = errorToErrorCode(createStringError(EC, "foo%s", Bar));
+  EXPECT_EQ(Res, EC)
+    << "Failed to convert createStringError() result to error_code.";
+}
+
 // Test that the ExitOnError utility works as expected.
 TEST(Error, ExitOnError) {
   ExitOnError ExitOnErr;
@@ -702,25 +726,44 @@ TEST(Error, ErrorMessage) {
   EXPECT_EQ(toString(Error::success()).compare(""), 0);
 
   Error E1 = make_error<CustomError>(0);
-  EXPECT_EQ(toString(std::move(E1)).compare("CustomError { 0}"), 0);
+  EXPECT_EQ(toString(std::move(E1)).compare("CustomError {0}"), 0);
 
   Error E2 = make_error<CustomError>(0);
   handleAllErrors(std::move(E2), [](const CustomError &CE) {
-    EXPECT_EQ(CE.message().compare("CustomError { 0}"), 0);
+    EXPECT_EQ(CE.message().compare("CustomError {0}"), 0);
   });
 
   Error E3 = joinErrors(make_error<CustomError>(0), make_error<CustomError>(1));
   EXPECT_EQ(toString(std::move(E3))
-                .compare("CustomError { 0}\n"
-                         "CustomError { 1}"),
+                .compare("CustomError {0}\n"
+                         "CustomError {1}"),
             0);
+}
+
+TEST(Error, Stream) {
+  {
+    Error OK = Error::success();
+    std::string Buf;
+    llvm::raw_string_ostream S(Buf);
+    S << OK;
+    EXPECT_EQ("success", S.str());
+    consumeError(std::move(OK));
+  }
+  {
+    Error E1 = make_error<CustomError>(0);
+    std::string Buf;
+    llvm::raw_string_ostream S(Buf);
+    S << E1;
+    EXPECT_EQ("CustomError {0}", S.str());
+    consumeError(std::move(E1));
+  }
 }
 
 TEST(Error, ErrorMatchers) {
   EXPECT_THAT_ERROR(Error::success(), Succeeded());
   EXPECT_NONFATAL_FAILURE(
       EXPECT_THAT_ERROR(make_error<CustomError>(0), Succeeded()),
-      "Expected: succeeded\n  Actual: failed  (CustomError { 0})");
+      "Expected: succeeded\n  Actual: failed  (CustomError {0})");
 
   EXPECT_THAT_ERROR(make_error<CustomError>(0), Failed());
   EXPECT_NONFATAL_FAILURE(EXPECT_THAT_ERROR(Error::success(), Failed()),
@@ -748,14 +791,14 @@ TEST(Error, ErrorMatchers) {
           Failed<CustomError>(testing::Property(&CustomError::getInfo, 1))),
       "Expected: failed with Error of given type and the error is an object "
       "whose given property is equal to 1\n"
-      "  Actual: failed  (CustomError { 0})");
+      "  Actual: failed  (CustomError {0})");
   EXPECT_THAT_ERROR(make_error<CustomError>(0), Failed<ErrorInfoBase>());
 
   EXPECT_THAT_EXPECTED(Expected<int>(0), Succeeded());
   EXPECT_NONFATAL_FAILURE(
       EXPECT_THAT_EXPECTED(Expected<int>(make_error<CustomError>(0)),
                            Succeeded()),
-      "Expected: succeeded\n  Actual: failed  (CustomError { 0})");
+      "Expected: succeeded\n  Actual: failed  (CustomError {0})");
 
   EXPECT_THAT_EXPECTED(Expected<int>(make_error<CustomError>(0)), Failed());
   EXPECT_NONFATAL_FAILURE(
@@ -767,7 +810,7 @@ TEST(Error, ErrorMatchers) {
       EXPECT_THAT_EXPECTED(Expected<int>(make_error<CustomError>(0)),
                            HasValue(0)),
       "Expected: succeeded with value (is equal to 0)\n"
-      "  Actual: failed  (CustomError { 0})");
+      "  Actual: failed  (CustomError {0})");
   EXPECT_NONFATAL_FAILURE(
       EXPECT_THAT_EXPECTED(Expected<int>(1), HasValue(0)),
       "Expected: succeeded with value (is equal to 0)\n"
@@ -787,7 +830,38 @@ TEST(Error, ErrorMatchers) {
       EXPECT_THAT_EXPECTED(Expected<int>(make_error<CustomError>(0)),
                            HasValue(testing::Gt(1))),
       "Expected: succeeded with value (is > 1)\n"
-      "  Actual: failed  (CustomError { 0})");
+      "  Actual: failed  (CustomError {0})");
+}
+
+TEST(Error, C_API) {
+  EXPECT_THAT_ERROR(unwrap(wrap(Error::success())), Succeeded())
+      << "Failed to round-trip Error success value via C API";
+  EXPECT_THAT_ERROR(unwrap(wrap(make_error<CustomError>(0))),
+                    Failed<CustomError>())
+      << "Failed to round-trip Error failure value via C API";
+
+  auto Err =
+      wrap(make_error<StringError>("test message", inconvertibleErrorCode()));
+  EXPECT_EQ(LLVMGetErrorTypeId(Err), LLVMGetStringErrorTypeId())
+      << "Failed to match error type ids via C API";
+  char *ErrMsg = LLVMGetErrorMessage(Err);
+  EXPECT_STREQ(ErrMsg, "test message")
+      << "Failed to roundtrip StringError error message via C API";
+  LLVMDisposeErrorMessage(ErrMsg);
+
+  bool GotCSE = false;
+  bool GotCE = false;
+  handleAllErrors(
+    unwrap(wrap(joinErrors(make_error<CustomSubError>(42, 7),
+                           make_error<CustomError>(42)))),
+    [&](CustomSubError &CSE) {
+      GotCSE = true;
+    },
+    [&](CustomError &CE) {
+      GotCE = true;
+    });
+  EXPECT_TRUE(GotCSE) << "Failed to round-trip ErrorList via C API";
+  EXPECT_TRUE(GotCE) << "Failed to round-trip ErrorList via C API";
 }
 
 } // end anon namespace

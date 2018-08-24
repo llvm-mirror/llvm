@@ -54,6 +54,10 @@ void MipsTargetStreamer::emitDirectiveSetMt() {}
 void MipsTargetStreamer::emitDirectiveSetNoMt() { forbidModuleDirective(); }
 void MipsTargetStreamer::emitDirectiveSetCRC() {}
 void MipsTargetStreamer::emitDirectiveSetNoCRC() {}
+void MipsTargetStreamer::emitDirectiveSetVirt() {}
+void MipsTargetStreamer::emitDirectiveSetNoVirt() {}
+void MipsTargetStreamer::emitDirectiveSetGINV() {}
+void MipsTargetStreamer::emitDirectiveSetNoGINV() {}
 void MipsTargetStreamer::emitDirectiveSetAt() { forbidModuleDirective(); }
 void MipsTargetStreamer::emitDirectiveSetAtWithArg(unsigned RegNo) {
   forbidModuleDirective();
@@ -126,6 +130,10 @@ void MipsTargetStreamer::emitDirectiveModuleHardFloat() {}
 void MipsTargetStreamer::emitDirectiveModuleMT() {}
 void MipsTargetStreamer::emitDirectiveModuleCRC() {}
 void MipsTargetStreamer::emitDirectiveModuleNoCRC() {}
+void MipsTargetStreamer::emitDirectiveModuleVirt() {}
+void MipsTargetStreamer::emitDirectiveModuleNoVirt() {}
+void MipsTargetStreamer::emitDirectiveModuleGINV() {}
+void MipsTargetStreamer::emitDirectiveModuleNoGINV() {}
 void MipsTargetStreamer::emitDirectiveSetFp(
     MipsABIFlagsSection::FpABIKind Value) {
   forbidModuleDirective();
@@ -435,6 +443,26 @@ void MipsTargetAsmStreamer::emitDirectiveSetNoCRC() {
   MipsTargetStreamer::emitDirectiveSetNoCRC();
 }
 
+void MipsTargetAsmStreamer::emitDirectiveSetVirt() {
+  OS << "\t.set\tvirt\n";
+  MipsTargetStreamer::emitDirectiveSetVirt();
+}
+
+void MipsTargetAsmStreamer::emitDirectiveSetNoVirt() {
+  OS << "\t.set\tnovirt\n";
+  MipsTargetStreamer::emitDirectiveSetNoVirt();
+}
+
+void MipsTargetAsmStreamer::emitDirectiveSetGINV() {
+  OS << "\t.set\tginv\n";
+  MipsTargetStreamer::emitDirectiveSetGINV();
+}
+
+void MipsTargetAsmStreamer::emitDirectiveSetNoGINV() {
+  OS << "\t.set\tnoginv\n";
+  MipsTargetStreamer::emitDirectiveSetNoGINV();
+}
+
 void MipsTargetAsmStreamer::emitDirectiveSetAt() {
   OS << "\t.set\tat\n";
   MipsTargetStreamer::emitDirectiveSetAt();
@@ -714,6 +742,22 @@ void MipsTargetAsmStreamer::emitDirectiveModuleCRC() {
 
 void MipsTargetAsmStreamer::emitDirectiveModuleNoCRC() {
   OS << "\t.module\tnocrc\n";
+}
+
+void MipsTargetAsmStreamer::emitDirectiveModuleVirt() {
+  OS << "\t.module\tvirt\n";
+}
+
+void MipsTargetAsmStreamer::emitDirectiveModuleNoVirt() {
+  OS << "\t.module\tnovirt\n";
+}
+
+void MipsTargetAsmStreamer::emitDirectiveModuleGINV() {
+  OS << "\t.module\tginv\n";
+}
+
+void MipsTargetAsmStreamer::emitDirectiveModuleNoGINV() {
+  OS << "\t.module\tnoginv\n";
 }
 
 // This part is for ELF object output.

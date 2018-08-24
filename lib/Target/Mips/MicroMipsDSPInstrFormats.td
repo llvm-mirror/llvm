@@ -8,9 +8,9 @@
 //===----------------------------------------------------------------------===//
 
 class MMDSPInst<string opstr = "">
-    : MipsInst<(outs), (ins), "", [], NoItinerary, FrmOther>, PredicateControl {
+    : MipsInst<(outs), (ins), "", [], NoItinerary, FrmOther> {
   let ASEPredicate = [HasDSP];
-  let AdditionalPredicates = [InMicroMips];
+  let EncodingPredicates = [InMicroMips];
   string BaseOpcode = opstr;
   string Arch = "mmdsp";
   let DecoderNamespace = "MicroMips";

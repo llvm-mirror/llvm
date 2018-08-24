@@ -11,9 +11,8 @@ define i32 @sterix(i32, i8, i64) {
 ; CHECK-NEXT:    [[SHR:%.*]] = lshr i32 [[MUL]], [[SH_PROM]]
 ; CHECK-NEXT:    [[CONV2:%.*]] = zext i32 [[SHR]] to i64
 ; CHECK-NEXT:    [[MUL3:%.*]] = mul nuw nsw i64 [[CONV]], [[CONV2]]
-; CHECK-NEXT:    [[CONV6:%.*]] = and i64 [[MUL3]], 4294967295
-; CHECK-NEXT:    [[TOBOOL:%.*]] = icmp eq i64 [[CONV6]], [[MUL3]]
-; CHECK-NEXT:    br i1 [[TOBOOL]], label [[LOR_RHS:%.*]], label [[LOR_END:%.*]]
+; CHECK-NEXT:    [[TMP3:%.*]] = icmp ugt i64 [[MUL3]], 4294967295
+; CHECK-NEXT:    br i1 [[TMP3]], label [[LOR_END:%.*]], label [[LOR_RHS:%.*]]
 ; CHECK:       lor.rhs:
 ; CHECK-NEXT:    [[AND:%.*]] = and i64 [[MUL3]], [[TMP2]]
 ; CHECK-NEXT:    [[CONV4:%.*]] = trunc i64 [[AND]] to i32
@@ -21,8 +20,8 @@ define i32 @sterix(i32, i8, i64) {
 ; CHECK-NEXT:    [[PHITMP:%.*]] = zext i1 [[TOBOOL7]] to i32
 ; CHECK-NEXT:    br label [[LOR_END]]
 ; CHECK:       lor.end:
-; CHECK-NEXT:    [[TMP3:%.*]] = phi i32 [ 1, [[ENTRY:%.*]] ], [ [[PHITMP]], [[LOR_RHS]] ]
-; CHECK-NEXT:    ret i32 [[TMP3]]
+; CHECK-NEXT:    [[TMP4:%.*]] = phi i32 [ 1, [[ENTRY:%.*]] ], [ [[PHITMP]], [[LOR_RHS]] ]
+; CHECK-NEXT:    ret i32 [[TMP4]]
 ;
 entry:
   %conv = zext i32 %0 to i64
@@ -80,3 +79,42 @@ if.then9:
   ret void
 }
 
+; Repro case for bug involving mutating a list while
+; iterating it.
+
+declare i16 @aux(i8)
+
+define i16 @iter_breaker(i16 %a, i16 %b) {
+; CHECK-LABEL: @iter_breaker(
+; CHECK-NEXT:    [[UMUL:%.*]] = call { i16, i1 } @llvm.umul.with.overflow.i16(i16 [[A:%.*]], i16 [[B:%.*]])
+; CHECK-NEXT:    [[UMUL_VALUE:%.*]] = extractvalue { i16, i1 } [[UMUL]], 0
+; CHECK-NEXT:    [[DID_OVF:%.*]] = extractvalue { i16, i1 } [[UMUL]], 1
+; CHECK-NEXT:    br i1 [[DID_OVF]], label [[RET1:%.*]], label [[RET2:%.*]]
+; CHECK:       ret1:
+; CHECK-NEXT:    [[TRUNC_REMAIN:%.*]] = trunc i16 [[UMUL_VALUE]] to i8
+; CHECK-NEXT:    [[VAL:%.*]] = call i16 @aux(i8 [[TRUNC_REMAIN]])
+; CHECK-NEXT:    ret i16 [[VAL]]
+; CHECK:       ret2:
+; CHECK-NEXT:    ret i16 [[UMUL_VALUE]]
+;
+  %a_wide = zext i16 %a to i32
+  %b_wide = zext i16 %b to i32
+  %mul_wide = mul i32 %a_wide, %b_wide              ; uses of %mul_wide will be iterated
+
+  %trunc_remain = trunc i32 %mul_wide to i8         ; this use will be replaced w/ new value
+  ; when iteration visits it, switching
+  ; iteration to the uses of new value
+
+  %trunc_unnecessary = trunc i32 %mul_wide to i16   ; uses of %trunc_unnecessary will have
+  ; been updated to uses of new value
+
+  %did_ovf = icmp ugt i32 %mul_wide, 65535
+  br i1 %did_ovf, label %ret1, label %ret2
+
+ret1:
+  %val = call i16 @aux(i8 %trunc_remain)
+  ret i16 %val
+
+ret2:
+  ret i16 %trunc_unnecessary              ; crash visiting this use after corrupting iterator
+}

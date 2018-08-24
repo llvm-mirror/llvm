@@ -89,6 +89,8 @@ extern "C" void LLVMInitializeARMTarget() {
   initializeGlobalISel(Registry);
   initializeARMLoadStoreOptPass(Registry);
   initializeARMPreAllocLoadStoreOptPass(Registry);
+  initializeARMParallelDSPPass(Registry);
+  initializeARMCodeGenPreparePass(Registry);
   initializeARMConstantIslandsPass(Registry);
   initializeARMExecutionDomainFixPass(Registry);
   initializeARMExpandPseudoPass(Registry);
@@ -214,11 +216,7 @@ ARMBaseTargetMachine::ARMBaseTargetMachine(const Target &T, const Triple &TT,
 
   // Default to triple-appropriate float ABI
   if (Options.FloatABIType == FloatABI::Default) {
-    if (TargetTriple.getEnvironment() == Triple::GNUEABIHF ||
-        TargetTriple.getEnvironment() == Triple::MuslEABIHF ||
-        TargetTriple.getEnvironment() == Triple::EABIHF ||
-        TargetTriple.isOSWindows() ||
-        TargetABI == ARMBaseTargetMachine::ARM_ABI_AAPCS16)
+    if (isTargetHardFloat())
       this->Options.FloatABIType = FloatABI::Hard;
     else
       this->Options.FloatABIType = FloatABI::Soft;
@@ -238,8 +236,10 @@ ARMBaseTargetMachine::ARMBaseTargetMachine(const Target &T, const Triple &TT,
       this->Options.EABIVersion = EABI::EABI5;
   }
 
-  if (TT.isOSBinFormatMachO())
+  if (TT.isOSBinFormatMachO()) {
     this->Options.TrapUnreachable = true;
+    this->Options.NoTrapAfterNoreturn = true;
+  }
 
   initAsmInfo();
 }
@@ -347,6 +347,7 @@ public:
   }
 
   void addIRPasses() override;
+  void addCodeGenPrepare() override;
   bool addPreISel() override;
   bool addInstSelector() override;
   bool addIRTranslator() override;
@@ -403,7 +404,16 @@ void ARMPassConfig::addIRPasses() {
     addPass(createInterleavedAccessPass());
 }
 
+void ARMPassConfig::addCodeGenPrepare() {
+  if (getOptLevel() != CodeGenOpt::None)
+    addPass(createARMCodeGenPreparePass());
+  TargetPassConfig::addCodeGenPrepare();
+}
+
 bool ARMPassConfig::addPreISel() {
+  if (getOptLevel() != CodeGenOpt::None)
+    addPass(createARMParallelDSPPass());
+
   if ((TM->getOptLevel() != CodeGenOpt::None &&
        EnableGlobalMerge == cl::BOU_UNSET) ||
       EnableGlobalMerge == cl::BOU_TRUE) {

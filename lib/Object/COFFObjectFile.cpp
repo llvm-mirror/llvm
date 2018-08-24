@@ -217,10 +217,10 @@ uint32_t COFFObjectFile::getSymbolFlags(DataRefImpl Ref) const {
   if (Symb.isExternal() || Symb.isWeakExternal())
     Result |= SymbolRef::SF_Global;
 
-  if (Symb.isWeakExternal()) {
+  if (const coff_aux_weak_external *AWE = Symb.getWeakExternal()) {
     Result |= SymbolRef::SF_Weak;
-    // We use indirect to allow the archiver to write weak externs
-    Result |= SymbolRef::SF_Indirect;
+    if (AWE->Characteristics != COFF::IMAGE_WEAK_EXTERN_SEARCH_ALIAS)
+      Result |= SymbolRef::SF_Undefined;
   }
 
   if (Symb.getSectionNumber() == COFF::IMAGE_SYM_ABSOLUTE)
@@ -235,7 +235,7 @@ uint32_t COFFObjectFile::getSymbolFlags(DataRefImpl Ref) const {
   if (Symb.isCommon())
     Result |= SymbolRef::SF_Common;
 
-  if (Symb.isAnyUndefined())
+  if (Symb.isUndefined())
     Result |= SymbolRef::SF_Undefined;
 
   return Result;
@@ -339,7 +339,7 @@ unsigned COFFObjectFile::getSectionID(SectionRef Sec) const {
 
 bool COFFObjectFile::isSectionVirtual(DataRefImpl Ref) const {
   const coff_section *Sec = toSec(Ref);
-  // In COFF, a virtual section won't have any in-file 
+  // In COFF, a virtual section won't have any in-file
   // content, so the file pointer to the content will be zero.
   return Sec->PointerToRawData == 0;
 }
@@ -910,6 +910,12 @@ Triple::ArchType COFFObjectFile::getArch() const {
   }
 }
 
+Expected<uint64_t> COFFObjectFile::getStartAddress() const {
+  if (PE32Header)
+    return PE32Header->AddressOfEntryPoint;
+  return 0;
+}
+
 iterator_range<import_directory_iterator>
 COFFObjectFile::import_directories() const {
   return make_range(import_directory_begin(), import_directory_end());
@@ -969,6 +975,21 @@ std::error_code COFFObjectFile::getSection(int32_t Index,
     // We already verified the section table data, so no need to check again.
     Result = SectionTable + (Index - 1);
     return std::error_code();
+  }
+  return object_error::parse_failed;
+}
+
+std::error_code COFFObjectFile::getSection(StringRef SectionName,
+                                           const coff_section *&Result) const {
+  Result = nullptr;
+  StringRef SecName;
+  for (const SectionRef &Section : sections()) {
+    if (std::error_code E = Section.getName(SecName))
+      return E;
+    if (SecName == SectionName) {
+      Result = getCOFFSection(Section);
+      return std::error_code();
+    }
   }
   return object_error::parse_failed;
 }

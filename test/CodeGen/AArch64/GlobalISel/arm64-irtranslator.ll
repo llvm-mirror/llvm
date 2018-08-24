@@ -33,13 +33,13 @@ define i64 @muli64(i64 %arg1, i64 %arg2) {
 ; CHECK: stack:
 ; CHECK-NEXT:   - { id: 0, name: ptr1, type: default, offset: 0, size: 8, alignment: 8,
 ; CHECK-NEXT:       stack-id: 0, callee-saved-register: '', callee-saved-restored: true,
-; CHECK-NEXT: di-variable: '', di-expression: '', di-location: '' }
+; CHECK-NEXT: debug-info-variable: '', debug-info-expression: '', debug-info-location: '' }
 ; CHECK-NEXT:   - { id: 1, name: ptr2, type: default, offset: 0, size: 8, alignment: 1,
 ; CHECK-NEXT:       stack-id: 0, callee-saved-register: '', callee-saved-restored: true,
-; CHECK-NEXT:       di-variable: '', di-expression: '', di-location: '' }
+; CHECK-NEXT:       debug-info-variable: '', debug-info-expression: '', debug-info-location: '' }
 ; CHECK-NEXT:   - { id: 2, name: ptr3, type: default, offset: 0, size: 128, alignment: 8,
 ; CHECK-NEXT:       stack-id: 0, callee-saved-register: '', callee-saved-restored: true,
-; CHECK-NEXT:       di-variable: '', di-expression: '', di-location: '' }
+; CHECK-NEXT:       debug-info-variable: '', debug-info-expression: '', debug-info-location: '' }
 ; CHECK-NEXT:   - { id: 3, name: ptr4, type: default, offset: 0, size: 1, alignment: 8,
 ; CHECK: %{{[0-9]+}}:_(p0) = G_FRAME_INDEX %stack.0.ptr1
 ; CHECK: %{{[0-9]+}}:_(p0) = G_FRAME_INDEX %stack.1.ptr2
@@ -138,9 +138,9 @@ false:
 ; CHECK: %0:_(s32) = COPY $w0
 ; CHECK: %[[reg100:[0-9]+]]:_(s32) = G_CONSTANT i32 100
 ; CHECK: %[[reg200:[0-9]+]]:_(s32) = G_CONSTANT i32 200
-; CHECK: %[[reg0:[0-9]+]]:_(s32) = G_CONSTANT i32 0
-; CHECK: %[[reg1:[0-9]+]]:_(s32) = G_CONSTANT i32 1
 ; CHECK: %[[reg2:[0-9]+]]:_(s32) = G_CONSTANT i32 2
+; CHECK: %[[reg1:[0-9]+]]:_(s32) = G_CONSTANT i32 1
+; CHECK: %[[reg0:[0-9]+]]:_(s32) = G_CONSTANT i32 0
 ; CHECK: %[[regicmp100:[0-9]+]]:_(s1) = G_ICMP intpred(eq), %[[reg100]](s32), %0
 ; CHECK: G_BRCOND %[[regicmp100]](s1), %[[BB_CASE100]]
 ; CHECK: G_BR %[[BB_NOTCASE100_CHECKNEXT]]
@@ -413,9 +413,9 @@ define i64* @trivial_bitcast(i8* %a) {
 ; CHECK:     G_BR %[[CAST:bb\.[0-9]+]]
 
 ; CHECK: [[END:bb\.[0-9]+]].{{[a-zA-Z0-9.]+}}:
+; CHECK:     $x0 = COPY [[A]]
 
 ; CHECK: [[CAST]].{{[a-zA-Z0-9.]+}}:
-; CHECK:     {{%[0-9]+}}:_(p0) = COPY [[A]]
 ; CHECK:     G_BR %[[END]]
 define i64* @trivial_bitcast_with_copy(i8* %a) {
   br label %cast
@@ -438,6 +438,18 @@ define i64 @bitcast(i64 %a) {
   %res1 = bitcast i64 %a to <2 x i32>
   %res2 = bitcast <2 x i32> %res1 to i64
   ret i64 %res2
+}
+
+; CHECK-LABEL: name: addrspacecast
+; CHECK: [[ARG1:%[0-9]+]]:_(p1) = COPY $x0
+; CHECK: [[RES1:%[0-9]+]]:_(p2) = G_ADDRSPACE_CAST [[ARG1]]
+; CHECK: [[RES2:%[0-9]+]]:_(p0) = G_ADDRSPACE_CAST [[RES1]]
+; CHECK: $x0 = COPY [[RES2]]
+; CHECK: RET_ReallyLR implicit $x0
+define i64* @addrspacecast(i32 addrspace(1)* %a) {
+  %res1 = addrspacecast i32 addrspace(1)* %a to i64 addrspace(2)*
+  %res2 = addrspacecast i64 addrspace(2)* %res1 to i64*
+  ret i64* %res2
 }
 
 ; CHECK-LABEL: name: trunc
@@ -709,8 +721,14 @@ define i8* @test_constant_null() {
 
 ; CHECK-LABEL: name: test_struct_memops
 ; CHECK: [[ADDR:%[0-9]+]]:_(p0) = COPY $x0
-; CHECK: [[VAL:%[0-9]+]]:_(s64) = G_LOAD [[ADDR]](p0) :: (load 8 from  %ir.addr, align 4)
-; CHECK: G_STORE [[VAL]](s64), [[ADDR]](p0) :: (store 8 into  %ir.addr, align 4)
+; CHECK: [[VAL1:%[0-9]+]]:_(s8) = G_LOAD %0(p0) :: (load 1 from %ir.addr, align 4)
+; CHECK: [[CST1:%[0-9]+]]:_(s64) = G_CONSTANT i64 4
+; CHECK: [[GEP1:%[0-9]+]]:_(p0) = G_GEP [[ADDR]], [[CST1]](s64)
+; CHECK: [[VAL2:%[0-9]+]]:_(s32) = G_LOAD [[GEP1]](p0) :: (load 4 from %ir.addr + 4)
+; CHECK: G_STORE [[VAL1]](s8), [[ADDR]](p0) :: (store 1 into %ir.addr, align 4)
+; CHECK: [[CST2:%[0-9]+]]:_(s64) = G_CONSTANT i64 4
+; CHECK: [[GEP2:%[0-9]+]]:_(p0) = G_GEP [[ADDR]], [[CST2]](s64)
+; CHECK: G_STORE [[VAL2]](s32), [[GEP2]](p0) :: (store 4 into %ir.addr + 4)
 define void @test_struct_memops({ i8, i32 }* %addr) {
   %val = load { i8, i32 }, { i8, i32 }* %addr
   store { i8, i32 } %val, { i8, i32 }* %addr
@@ -811,10 +829,10 @@ define float @test_frem(float %arg1, float %arg2) {
 ; CHECK: [[RHS:%[0-9]+]]:_(s32) = COPY $w1
 ; CHECK: [[ADDR:%[0-9]+]]:_(p0) = COPY $x2
 ; CHECK: [[VAL:%[0-9]+]]:_(s32), [[OVERFLOW:%[0-9]+]]:_(s1) = G_SADDO [[LHS]], [[RHS]]
-; CHECK: [[TMP:%[0-9]+]]:_(s64) = G_IMPLICIT_DEF
-; CHECK: [[TMP1:%[0-9]+]]:_(s64) = G_INSERT [[TMP]], [[VAL]](s32), 0
-; CHECK: [[RES:%[0-9]+]]:_(s64) = G_INSERT [[TMP1]], [[OVERFLOW]](s1), 32
-; CHECK: G_STORE [[RES]](s64), [[ADDR]](p0)
+; CHECK: G_STORE [[VAL]](s32), [[ADDR]](p0) :: (store 4 into %ir.addr)
+; CHECK: [[CST:%[0-9]+]]:_(s64) = G_CONSTANT i64 4
+; CHECK: [[GEP:%[0-9]+]]:_(p0) = G_GEP [[ADDR]], [[CST]](s64)
+; CHECK: G_STORE [[OVERFLOW]](s1), [[GEP]](p0) :: (store 1 into %ir.addr + 4, align 4)
 declare { i32, i1 } @llvm.sadd.with.overflow.i32(i32, i32)
 define void @test_sadd_overflow(i32 %lhs, i32 %rhs, { i32, i1 }* %addr) {
   %res = call { i32, i1 } @llvm.sadd.with.overflow.i32(i32 %lhs, i32 %rhs)
@@ -828,10 +846,10 @@ define void @test_sadd_overflow(i32 %lhs, i32 %rhs, { i32, i1 }* %addr) {
 ; CHECK: [[ADDR:%[0-9]+]]:_(p0) = COPY $x2
 ; CHECK: [[ZERO:%[0-9]+]]:_(s1) = G_CONSTANT i1 false
 ; CHECK: [[VAL:%[0-9]+]]:_(s32), [[OVERFLOW:%[0-9]+]]:_(s1) = G_UADDE [[LHS]], [[RHS]], [[ZERO]]
-; CHECK: [[TMP:%[0-9]+]]:_(s64) = G_IMPLICIT_DEF
-; CHECK: [[TMP1:%[0-9]+]]:_(s64) = G_INSERT [[TMP]], [[VAL]](s32), 0
-; CHECK: [[RES:%[0-9]+]]:_(s64) = G_INSERT [[TMP1]], [[OVERFLOW]](s1), 32
-; CHECK: G_STORE [[RES]](s64), [[ADDR]](p0)
+; CHECK: G_STORE [[VAL]](s32), [[ADDR]](p0) :: (store 4 into %ir.addr)
+; CHECK: [[CST:%[0-9]+]]:_(s64) = G_CONSTANT i64 4
+; CHECK: [[GEP:%[0-9]+]]:_(p0) = G_GEP [[ADDR]], [[CST]](s64)
+; CHECK: G_STORE [[OVERFLOW]](s1), [[GEP]](p0) :: (store 1 into %ir.addr + 4, align 4)
 declare { i32, i1 } @llvm.uadd.with.overflow.i32(i32, i32)
 define void @test_uadd_overflow(i32 %lhs, i32 %rhs, { i32, i1 }* %addr) {
   %res = call { i32, i1 } @llvm.uadd.with.overflow.i32(i32 %lhs, i32 %rhs)
@@ -844,10 +862,10 @@ define void @test_uadd_overflow(i32 %lhs, i32 %rhs, { i32, i1 }* %addr) {
 ; CHECK: [[RHS:%[0-9]+]]:_(s32) = COPY $w1
 ; CHECK: [[ADDR:%[0-9]+]]:_(p0) = COPY $x2
 ; CHECK: [[VAL:%[0-9]+]]:_(s32), [[OVERFLOW:%[0-9]+]]:_(s1) = G_SSUBO [[LHS]], [[RHS]]
-; CHECK: [[TMP:%[0-9]+]]:_(s64) = G_IMPLICIT_DEF
-; CHECK: [[TMP1:%[0-9]+]]:_(s64) = G_INSERT [[TMP]], [[VAL]](s32), 0
-; CHECK: [[RES:%[0-9]+]]:_(s64) = G_INSERT [[TMP1]], [[OVERFLOW]](s1), 32
-; CHECK: G_STORE [[RES]](s64), [[ADDR]](p0)
+; CHECK: G_STORE [[VAL]](s32), [[ADDR]](p0) :: (store 4 into %ir.subr)
+; CHECK: [[CST:%[0-9]+]]:_(s64) = G_CONSTANT i64 4
+; CHECK: [[GEP:%[0-9]+]]:_(p0) = G_GEP [[ADDR]], [[CST]](s64)
+; CHECK: G_STORE [[OVERFLOW]](s1), [[GEP]](p0) :: (store 1 into %ir.subr + 4, align 4)
 declare { i32, i1 } @llvm.ssub.with.overflow.i32(i32, i32)
 define void @test_ssub_overflow(i32 %lhs, i32 %rhs, { i32, i1 }* %subr) {
   %res = call { i32, i1 } @llvm.ssub.with.overflow.i32(i32 %lhs, i32 %rhs)
@@ -861,10 +879,10 @@ define void @test_ssub_overflow(i32 %lhs, i32 %rhs, { i32, i1 }* %subr) {
 ; CHECK: [[ADDR:%[0-9]+]]:_(p0) = COPY $x2
 ; CHECK: [[ZERO:%[0-9]+]]:_(s1) = G_CONSTANT i1 false
 ; CHECK: [[VAL:%[0-9]+]]:_(s32), [[OVERFLOW:%[0-9]+]]:_(s1) = G_USUBE [[LHS]], [[RHS]], [[ZERO]]
-; CHECK: [[TMP:%[0-9]+]]:_(s64) = G_IMPLICIT_DEF
-; CHECK: [[TMP1:%[0-9]+]]:_(s64) = G_INSERT [[TMP]], [[VAL]](s32), 0
-; CHECK: [[RES:%[0-9]+]]:_(s64) = G_INSERT [[TMP1]], [[OVERFLOW]](s1), 32
-; CHECK: G_STORE [[RES]](s64), [[ADDR]](p0)
+; CHECK: G_STORE [[VAL]](s32), [[ADDR]](p0) :: (store 4 into %ir.subr)
+; CHECK: [[CST:%[0-9]+]]:_(s64) = G_CONSTANT i64 4
+; CHECK: [[GEP:%[0-9]+]]:_(p0) = G_GEP [[ADDR]], [[CST]](s64)
+; CHECK: G_STORE [[OVERFLOW]](s1), [[GEP]](p0) :: (store 1 into %ir.subr + 4, align 4)
 declare { i32, i1 } @llvm.usub.with.overflow.i32(i32, i32)
 define void @test_usub_overflow(i32 %lhs, i32 %rhs, { i32, i1 }* %subr) {
   %res = call { i32, i1 } @llvm.usub.with.overflow.i32(i32 %lhs, i32 %rhs)
@@ -877,10 +895,10 @@ define void @test_usub_overflow(i32 %lhs, i32 %rhs, { i32, i1 }* %subr) {
 ; CHECK: [[RHS:%[0-9]+]]:_(s32) = COPY $w1
 ; CHECK: [[ADDR:%[0-9]+]]:_(p0) = COPY $x2
 ; CHECK: [[VAL:%[0-9]+]]:_(s32), [[OVERFLOW:%[0-9]+]]:_(s1) = G_SMULO [[LHS]], [[RHS]]
-; CHECK: [[TMP:%[0-9]+]]:_(s64) = G_IMPLICIT_DEF
-; CHECK: [[TMP1:%[0-9]+]]:_(s64) = G_INSERT [[TMP]], [[VAL]](s32), 0
-; CHECK: [[RES:%[0-9]+]]:_(s64) = G_INSERT [[TMP1]], [[OVERFLOW]](s1), 32
-; CHECK: G_STORE [[RES]](s64), [[ADDR]](p0)
+; CHECK: G_STORE [[VAL]](s32), [[ADDR]](p0) :: (store 4 into %ir.addr)
+; CHECK: [[CST:%[0-9]+]]:_(s64) = G_CONSTANT i64 4
+; CHECK: [[GEP:%[0-9]+]]:_(p0) = G_GEP [[ADDR]], [[CST]](s64)
+; CHECK: G_STORE [[OVERFLOW]](s1), [[GEP]](p0) :: (store 1 into %ir.addr + 4, align 4)
 declare { i32, i1 } @llvm.smul.with.overflow.i32(i32, i32)
 define void @test_smul_overflow(i32 %lhs, i32 %rhs, { i32, i1 }* %addr) {
   %res = call { i32, i1 } @llvm.smul.with.overflow.i32(i32 %lhs, i32 %rhs)
@@ -893,10 +911,10 @@ define void @test_smul_overflow(i32 %lhs, i32 %rhs, { i32, i1 }* %addr) {
 ; CHECK: [[RHS:%[0-9]+]]:_(s32) = COPY $w1
 ; CHECK: [[ADDR:%[0-9]+]]:_(p0) = COPY $x2
 ; CHECK: [[VAL:%[0-9]+]]:_(s32), [[OVERFLOW:%[0-9]+]]:_(s1) = G_UMULO [[LHS]], [[RHS]]
-; CHECK: [[TMP:%[0-9]+]]:_(s64) = G_IMPLICIT_DEF
-; CHECK: [[TMP1:%[0-9]+]]:_(s64) = G_INSERT [[TMP]], [[VAL]](s32), 0
-; CHECK: [[RES:%[0-9]+]]:_(s64) = G_INSERT [[TMP1]], [[OVERFLOW]](s1), 32
-; CHECK: G_STORE [[RES]](s64), [[ADDR]](p0)
+; CHECK: G_STORE [[VAL]](s32), [[ADDR]](p0) :: (store 4 into %ir.addr)
+; CHECK: [[CST:%[0-9]+]]:_(s64) = G_CONSTANT i64 4
+; CHECK: [[GEP:%[0-9]+]]:_(p0) = G_GEP [[ADDR]], [[CST]](s64)
+; CHECK: G_STORE [[OVERFLOW]](s1), [[GEP]](p0) :: (store 1 into %ir.addr + 4, align 4)
 declare { i32, i1 } @llvm.umul.with.overflow.i32(i32, i32)
 define void @test_umul_overflow(i32 %lhs, i32 %rhs, { i32, i1 }* %addr) {
   %res = call { i32, i1 } @llvm.umul.with.overflow.i32(i32 %lhs, i32 %rhs)
@@ -905,9 +923,18 @@ define void @test_umul_overflow(i32 %lhs, i32 %rhs, { i32, i1 }* %addr) {
 }
 
 ; CHECK-LABEL: name: test_extractvalue
-; CHECK: [[STRUCT:%[0-9]+]]:_(s128) = G_LOAD
-; CHECK: [[RES:%[0-9]+]]:_(s32) = G_EXTRACT [[STRUCT]](s128), 64
-; CHECK: $w0 = COPY [[RES]]
+; CHECK: %0:_(p0) = COPY $x0
+; CHECK: [[LD1:%[0-9]+]]:_(s8) = G_LOAD %0(p0) :: (load 1 from %ir.addr, align 4)
+; CHECK: [[CST1:%[0-9]+]]:_(s64) = G_CONSTANT i64 4
+; CHECK: [[GEP1:%[0-9]+]]:_(p0) = G_GEP %0, [[CST1]](s64)
+; CHECK: [[LD2:%[0-9]+]]:_(s8) = G_LOAD [[GEP1]](p0) :: (load 1 from %ir.addr + 4, align 4)
+; CHECK: [[CST2:%[0-9]+]]:_(s64) = G_CONSTANT i64 8
+; CHECK: [[GEP2:%[0-9]+]]:_(p0) = G_GEP %0, [[CST2]](s64)
+; CHECK: [[LD3:%[0-9]+]]:_(s32) = G_LOAD [[GEP2]](p0) :: (load 4 from %ir.addr + 8)
+; CHECK: [[CST3:%[0-9]+]]:_(s64) = G_CONSTANT i64 12
+; CHECK: [[GEP3:%[0-9]+]]:_(p0) = G_GEP %0, [[CST3]](s64)
+; CHECK: [[LD4:%[0-9]+]]:_(s32) = G_LOAD [[GEP3]](p0) :: (load 4 from %ir.addr + 12)
+; CHECK: $w0 = COPY [[LD3]](s32)
 %struct.nested = type {i8, { i8, i32 }, i32}
 define i32 @test_extractvalue(%struct.nested* %addr) {
   %struct = load %struct.nested, %struct.nested* %addr
@@ -916,9 +943,22 @@ define i32 @test_extractvalue(%struct.nested* %addr) {
 }
 
 ; CHECK-LABEL: name: test_extractvalue_agg
-; CHECK: [[STRUCT:%[0-9]+]]:_(s128) = G_LOAD
-; CHECK: [[RES:%[0-9]+]]:_(s64) = G_EXTRACT [[STRUCT]](s128), 32
-; CHECK: G_STORE [[RES]]
+; CHECK: %0:_(p0) = COPY $x0
+; CHECK: %1:_(p0) = COPY $x1
+; CHECK: [[LD1:%[0-9]+]]:_(s8) = G_LOAD %0(p0) :: (load 1 from %ir.addr, align 4)
+; CHECK: [[CST1:%[0-9]+]]:_(s64) = G_CONSTANT i64 4
+; CHECK: [[GEP1:%[0-9]+]]:_(p0) = G_GEP %0, [[CST1]](s64)
+; CHECK: [[LD2:%[0-9]+]]:_(s8) = G_LOAD [[GEP1]](p0) :: (load 1 from %ir.addr + 4, align 4)
+; CHECK: [[CST2:%[0-9]+]]:_(s64) = G_CONSTANT i64 8
+; CHECK: [[GEP2:%[0-9]+]]:_(p0) = G_GEP %0, [[CST2]](s64)
+; CHECK: [[LD3:%[0-9]+]]:_(s32) = G_LOAD [[GEP2]](p0) :: (load 4 from %ir.addr + 8)
+; CHECK: [[CST3:%[0-9]+]]:_(s64) = G_CONSTANT i64 12
+; CHECK: [[GEP3:%[0-9]+]]:_(p0) = G_GEP %0, [[CST3]](s64)
+; CHECK: [[LD4:%[0-9]+]]:_(s32) = G_LOAD [[GEP3]](p0) :: (load 4 from %ir.addr + 12)
+; CHECK: G_STORE [[LD2]](s8), %1(p0) :: (store 1 into %ir.addr2, align 4)
+; CHECK: [[CST4:%[0-9]+]]:_(s64) = G_CONSTANT i64 4
+; CHECK: [[GEP4:%[0-9]+]]:_(p0) = G_GEP %1, [[CST4]](s64)
+; CHECK: G_STORE [[LD3]](s32), [[GEP4]](p0) :: (store 4 into %ir.addr2 + 4)
 define void @test_extractvalue_agg(%struct.nested* %addr, {i8, i32}* %addr2) {
   %struct = load %struct.nested, %struct.nested* %addr
   %res = extractvalue %struct.nested %struct, 1
@@ -927,10 +967,28 @@ define void @test_extractvalue_agg(%struct.nested* %addr, {i8, i32}* %addr2) {
 }
 
 ; CHECK-LABEL: name: test_insertvalue
-; CHECK: [[VAL:%[0-9]+]]:_(s32) = COPY $w1
-; CHECK: [[STRUCT:%[0-9]+]]:_(s128) = G_LOAD
-; CHECK: [[NEWSTRUCT:%[0-9]+]]:_(s128) = G_INSERT [[STRUCT]], [[VAL]](s32), 64
-; CHECK: G_STORE [[NEWSTRUCT]](s128),
+; CHECK: %0:_(p0) = COPY $x0
+; CHECK: %1:_(s32) = COPY $w1
+; CHECK: [[LD1:%[0-9]+]]:_(s8) = G_LOAD %0(p0) :: (load 1 from %ir.addr, align 4)
+; CHECK: [[CST1:%[0-9]+]]:_(s64) = G_CONSTANT i64 4
+; CHECK: [[GEP1:%[0-9]+]]:_(p0) = G_GEP %0, [[CST1]](s64)
+; CHECK: [[LD2:%[0-9]+]]:_(s8) = G_LOAD [[GEP1]](p0) :: (load 1 from %ir.addr + 4, align 4)
+; CHECK: [[CST2:%[0-9]+]]:_(s64) = G_CONSTANT i64 8
+; CHECK: [[GEP2:%[0-9]+]]:_(p0) = G_GEP %0, [[CST2]](s64)
+; CHECK: [[LD3:%[0-9]+]]:_(s32) = G_LOAD [[GEP2]](p0) :: (load 4 from %ir.addr + 8)
+; CHECK: [[CST3:%[0-9]+]]:_(s64) = G_CONSTANT i64 12
+; CHECK: [[GEP3:%[0-9]+]]:_(p0) = G_GEP %0, [[CST3]](s64)
+; CHECK: [[LD4:%[0-9]+]]:_(s32) = G_LOAD [[GEP3]](p0) :: (load 4 from %ir.addr + 12)
+; CHECK: G_STORE [[LD1]](s8), %0(p0) :: (store 1 into %ir.addr, align 4)
+; CHECK: [[CST4:%[0-9]+]]:_(s64) = G_CONSTANT i64 4
+; CHECK: [[GEP4:%[0-9]+]]:_(p0) = G_GEP %0, [[CST4]](s64)
+; CHECK: G_STORE [[LD2]](s8), [[GEP4]](p0) :: (store 1 into %ir.addr + 4, align 4)
+; CHECK: [[CST5:%[0-9]+]]:_(s64) = G_CONSTANT i64 8
+; CHECK: [[GEP5:%[0-9]+]]:_(p0) = G_GEP %0, [[CST5]](s64)
+; CHECK: G_STORE %1(s32), [[GEP5]](p0) :: (store 4 into %ir.addr + 8)
+; CHECK: [[CST6:%[0-9]+]]:_(s64) = G_CONSTANT i64 12
+; CHECK: [[GEP6:%[0-9]+]]:_(p0) = G_GEP %0, [[CST6]](s64)
+; CHECK: G_STORE [[LD4]](s32), [[GEP6]](p0) :: (store 4 into %ir.addr + 12)
 define void @test_insertvalue(%struct.nested* %addr, i32 %val) {
   %struct = load %struct.nested, %struct.nested* %addr
   %newstruct = insertvalue %struct.nested %struct, i32 %val, 1, 1
@@ -942,8 +1000,7 @@ define [1 x i64] @test_trivial_insert([1 x i64] %s, i64 %val) {
 ; CHECK-LABEL: name: test_trivial_insert
 ; CHECK: [[STRUCT:%[0-9]+]]:_(s64) = COPY $x0
 ; CHECK: [[VAL:%[0-9]+]]:_(s64) = COPY $x1
-; CHECK: [[RES:%[0-9]+]]:_(s64) = COPY [[VAL]](s64)
-; CHECK: $x0 = COPY [[RES]]
+; CHECK: $x0 = COPY [[VAL]]
   %res = insertvalue [1 x i64] %s, i64 %val, 0
   ret [1 x i64] %res
 }
@@ -952,17 +1009,38 @@ define [1 x i8*] @test_trivial_insert_ptr([1 x i8*] %s, i8* %val) {
 ; CHECK-LABEL: name: test_trivial_insert_ptr
 ; CHECK: [[STRUCT:%[0-9]+]]:_(s64) = COPY $x0
 ; CHECK: [[VAL:%[0-9]+]]:_(p0) = COPY $x1
-; CHECK: [[RES:%[0-9]+]]:_(s64) = G_PTRTOINT [[VAL]](p0)
-; CHECK: $x0 = COPY [[RES]]
+; CHECK: $x0 = COPY [[VAL]]
   %res = insertvalue [1 x i8*] %s, i8* %val, 0
   ret [1 x i8*] %res
 }
 
 ; CHECK-LABEL: name: test_insertvalue_agg
-; CHECK: [[SMALLSTRUCT:%[0-9]+]]:_(s64) = G_LOAD
-; CHECK: [[STRUCT:%[0-9]+]]:_(s128) = G_LOAD
-; CHECK: [[RES:%[0-9]+]]:_(s128) = G_INSERT [[STRUCT]], [[SMALLSTRUCT]](s64), 32
-; CHECK: G_STORE [[RES]](s128)
+; CHECK: %0:_(p0) = COPY $x0
+; CHECK: %1:_(p0) = COPY $x1
+; CHECK: [[LD1:%[0-9]+]]:_(s8) = G_LOAD %1(p0) :: (load 1 from %ir.addr2, align 4)
+; CHECK: [[CST1:%[0-9]+]]:_(s64) = G_CONSTANT i64 4
+; CHECK: [[GEP1:%[0-9]+]]:_(p0) = G_GEP %1, [[CST1]](s64)
+; CHECK: [[LD2:%[0-9]+]]:_(s32) = G_LOAD [[GEP1]](p0) :: (load 4 from %ir.addr2 + 4)
+; CHECK: [[LD3:%[0-9]+]]:_(s8) = G_LOAD %0(p0) :: (load 1 from %ir.addr, align 4)
+; CHECK: [[CST2:%[0-9]+]]:_(s64) = G_CONSTANT i64 4
+; CHECK: [[GEP2:%[0-9]+]]:_(p0) = G_GEP %0, [[CST2]](s64)
+; CHECK: [[LD4:%[0-9]+]]:_(s8) = G_LOAD [[GEP2]](p0) :: (load 1 from %ir.addr + 4, align 4)
+; CHECK: [[CST3:%[0-9]+]]:_(s64) = G_CONSTANT i64 8
+; CHECK: [[GEP3:%[0-9]+]]:_(p0) = G_GEP %0, [[CST3]](s64)
+; CHECK: [[LD5:%[0-9]+]]:_(s32) = G_LOAD [[GEP3]](p0) :: (load 4 from %ir.addr + 8)
+; CHECK: [[CST4:%[0-9]+]]:_(s64) = G_CONSTANT i64 12
+; CHECK: [[GEP4:%[0-9]+]]:_(p0) = G_GEP %0, [[CST4]](s64)
+; CHECK: [[LD6:%[0-9]+]]:_(s32) = G_LOAD [[GEP4]](p0) :: (load 4 from %ir.addr + 12)
+; CHECK: G_STORE [[LD3]](s8), %0(p0) :: (store 1 into %ir.addr, align 4)
+; CHECK: [[CST5:%[0-9]+]]:_(s64) = G_CONSTANT i64 4
+; CHECK: [[GEP5:%[0-9]+]]:_(p0) = G_GEP %0, [[CST5]](s64)
+; CHECK: G_STORE [[LD1]](s8), [[GEP5]](p0) :: (store 1 into %ir.addr + 4, align 4)
+; CHECK: [[CST6:%[0-9]+]]:_(s64) = G_CONSTANT i64 8
+; CHECK: [[GEP6:%[0-9]+]]:_(p0) = G_GEP %0, [[CST6]](s64)
+; CHECK: G_STORE [[LD2]](s32), [[GEP6]](p0) :: (store 4 into %ir.addr + 8)
+; CHECK: [[CST7:%[0-9]+]]:_(s64) = G_CONSTANT i64 12
+; CHECK: [[GEP7:%[0-9]+]]:_(p0) = G_GEP %0, [[CST7]](s64)
+; CHECK: G_STORE [[LD6]](s32), [[GEP7]](p0) :: (store 4 into %ir.addr + 12)
 define void @test_insertvalue_agg(%struct.nested* %addr, {i8, i32}* %addr2) {
   %smallstruct = load {i8, i32}, {i8, i32}* %addr2
   %struct = load %struct.nested, %struct.nested* %addr
@@ -1330,6 +1408,36 @@ define float @test_fabs_intrin(float %a) {
   ret float %res
 }
 
+declare i32 @llvm.ctlz.i32(i32, i1)
+define i32 @test_ctlz_intrinsic_zero_not_undef(i32 %a) {
+; CHECK-LABEL: name: test_ctlz_intrinsic_zero_not_undef
+; CHECK: [[A:%[0-9]+]]:_(s32) = COPY $w0
+; CHECK: [[RES:%[0-9]+]]:_(s32) = G_CTLZ [[A]]
+; CHECK: $w0 = COPY [[RES]]
+  %res = call i32 @llvm.ctlz.i32(i32 %a, i1 0)
+  ret i32 %res
+}
+
+declare i32 @llvm.cttz.i32(i32, i1)
+define i32 @test_cttz_intrinsic_zero_undef(i32 %a) {
+; CHECK-LABEL: name: test_cttz_intrinsic_zero_undef
+; CHECK: [[A:%[0-9]+]]:_(s32) = COPY $w0
+; CHECK: [[RES:%[0-9]+]]:_(s32) = G_CTTZ_ZERO_UNDEF [[A]]
+; CHECK: $w0 = COPY [[RES]]
+  %res = call i32 @llvm.cttz.i32(i32 %a, i1 1)
+  ret i32 %res
+}
+
+declare i32 @llvm.ctpop.i32(i32)
+define i32 @test_ctpop_intrinsic(i32 %a) {
+; CHECK-LABEL: name: test_ctpop
+; CHECK: [[A:%[0-9]+]]:_(s32) = COPY $w0
+; CHECK: [[RES:%[0-9]+]]:_(s32) = G_CTPOP [[A]]
+; CHECK: $w0 = COPY [[RES]]
+  %res = call i32 @llvm.ctpop.i32(i32 %a)
+  ret i32 %res
+}
+
 declare void @llvm.lifetime.start.p0i8(i64, i8*)
 declare void @llvm.lifetime.end.p0i8(i64, i8*)
 define void @test_lifetime_intrin() {
@@ -1660,4 +1768,424 @@ entry:
   store %zerosize_type undef, %zerosize_type* undef, align 4
   %val = load %zerosize_type, %zerosize_type* %ptr, align 4
   ret %zerosize_type %in
+}
+
+
+define i64 @test_phi_loop(i32 %n) {
+; CHECK-LABEL: name: test_phi_loop
+; CHECK: [[ARG1:%[0-9]+]]:_(s32) = COPY $w0
+; CHECK: [[CST1:%[0-9]+]]:_(s32) = G_CONSTANT i32 1
+; CHECK: [[CST2:%[0-9]+]]:_(s32) = G_CONSTANT i32 0
+; CHECK: [[CST3:%[0-9]+]]:_(s64) = G_CONSTANT i64 0
+; CHECK: [[CST4:%[0-9]+]]:_(s64) = G_CONSTANT i64 1
+
+; CHECK: [[PN1:%[0-9]+]]:_(s32) = G_PHI [[ARG1]](s32), %bb.1, [[SUB:%[0-9]+]](s32), %bb.2
+; CHECK: [[PN2:%[0-9]+]]:_(s64) = G_PHI [[CST3]](s64), %bb.1, [[PN3:%[0-9]+]](s64), %bb.2
+; CHECK: [[PN3]]:_(s64) = G_PHI [[CST4]](s64), %bb.1, [[ADD:%[0-9]+]](s64), %bb.2
+; CHECK: [[ADD]]:_(s64) = G_ADD [[PN2]], [[PN3]]
+; CHECK: [[SUB]]:_(s32) = G_SUB [[PN1]], [[CST1]]
+; CHECK: [[CMP:%[0-9]+]]:_(s1) = G_ICMP intpred(sle), [[PN1]](s32), [[CST2]]
+; CHECK: G_BRCOND [[CMP]](s1), %bb.3
+; CHECK: G_BR %bb.2
+
+; CHECK: $x0 = COPY [[PN2]](s64)
+; CHECK: RET_ReallyLR implicit $x0
+entry:
+  br label %loop
+
+loop:
+  %counter = phi i32 [ %n, %entry ], [ %counter.dec, %loop ]
+  %elem = phi { i64, i64 } [ { i64 0, i64 1 }, %entry ], [ %updated, %loop ]
+  %prev = extractvalue { i64, i64 } %elem, 0
+  %curr = extractvalue { i64, i64 } %elem, 1
+  %next = add i64 %prev, %curr
+  %shifted = insertvalue { i64, i64 } %elem, i64 %curr, 0
+  %updated = insertvalue { i64, i64 } %shifted, i64 %next, 1
+  %counter.dec = sub i32 %counter, 1
+  %cond = icmp sle i32 %counter, 0
+  br i1 %cond, label %exit, label %loop
+
+exit:
+  %res = extractvalue { i64, i64 } %elem, 0
+  ret i64 %res
+}
+
+define void @test_phi_diamond({ i8, i16, i32 }* %a.ptr, { i8, i16, i32 }* %b.ptr, i1 %selector, { i8, i16, i32 }* %dst) {
+; CHECK-LABEL: name: test_phi_diamond
+; CHECK: [[ARG1:%[0-9]+]]:_(p0) = COPY $x0
+; CHECK: [[ARG2:%[0-9]+]]:_(p0) = COPY $x1
+; CHECK: [[ARG3:%[0-9]+]]:_(s32) = COPY $w2
+; CHECK: [[TRUNC:%[0-9]+]]:_(s1) = G_TRUNC [[ARG3]](s32)
+; CHECK: [[ARG4:%[0-9]+]]:_(p0) = COPY $x3
+; CHECK: G_BRCOND [[TRUNC]](s1), %bb.2
+; CHECK: G_BR %bb.3
+
+; CHECK: [[LD1:%[0-9]+]]:_(s8) = G_LOAD [[ARG1]](p0) :: (load 1 from %ir.a.ptr, align 4)
+; CHECK: [[CST1:%[0-9]+]]:_(s64) = G_CONSTANT i64 2
+; CHECK: [[GEP1:%[0-9]+]]:_(p0) = G_GEP [[ARG1]], [[CST1]](s64)
+; CHECK: [[LD2:%[0-9]+]]:_(s16) = G_LOAD [[GEP1]](p0) :: (load 2 from %ir.a.ptr + 2)
+; CHECK: [[CST2:%[0-9]+]]:_(s64) = G_CONSTANT i64 4
+; CHECK: [[GEP2:%[0-9]+]]:_(p0) = G_GEP [[ARG1]], [[CST2]](s64)
+; CHECK: [[LD3:%[0-9]+]]:_(s32) = G_LOAD [[GEP2]](p0) :: (load 4 from %ir.a.ptr + 4)
+; CHECK: G_BR %bb.4
+
+; CHECK: [[LD4:%[0-9]+]]:_(s8) = G_LOAD [[ARG2]](p0) :: (load 1 from %ir.b.ptr, align 4)
+; CHECK: [[CST3:%[0-9]+]]:_(s64) = G_CONSTANT i64 2
+; CHECK: [[GEP3:%[0-9]+]]:_(p0) = G_GEP [[ARG2]], [[CST3]](s64)
+; CHECK: [[LD5:%[0-9]+]]:_(s16) = G_LOAD [[GEP3]](p0) :: (load 2 from %ir.b.ptr + 2)
+; CHECK: [[CST4:%[0-9]+]]:_(s64) = G_CONSTANT i64 4
+; CHECK: [[GEP4:%[0-9]+]]:_(p0) = G_GEP [[ARG2]], [[CST4]](s64)
+; CHECK: [[LD6:%[0-9]+]]:_(s32) = G_LOAD [[GEP4]](p0) :: (load 4 from %ir.b.ptr + 4)
+
+; CHECK: [[PN1:%[0-9]+]]:_(s8) = G_PHI [[LD1]](s8), %bb.2, [[LD4]](s8), %bb.3
+; CHECK: [[PN2:%[0-9]+]]:_(s16) = G_PHI [[LD2]](s16), %bb.2, [[LD5]](s16), %bb.3
+; CHECK: [[PN3:%[0-9]+]]:_(s32) = G_PHI [[LD3]](s32), %bb.2, [[LD6]](s32), %bb.3
+; CHECK: G_STORE [[PN1]](s8), [[ARG4]](p0) :: (store 1 into %ir.dst, align 4)
+; CHECK: [[CST5:%[0-9]+]]:_(s64) = G_CONSTANT i64 2
+; CHECK: [[GEP5:%[0-9]+]]:_(p0) = G_GEP [[ARG4]], [[CST5]](s64)
+; CHECK: G_STORE [[PN2]](s16), [[GEP5]](p0) :: (store 2 into %ir.dst + 2)
+; CHECK: [[CST6:%[0-9]+]]:_(s64) = G_CONSTANT i64 4
+; CHECK: [[GEP6:%[0-9]+]]:_(p0) = G_GEP [[ARG4]], [[CST6]](s64)
+; CHECK: G_STORE [[PN3]](s32), [[GEP6]](p0) :: (store 4 into %ir.dst + 4)
+; CHECK: RET_ReallyLR
+
+entry:
+  br i1 %selector, label %store.a, label %store.b
+
+store.a:
+  %a = load { i8, i16, i32 }, { i8, i16, i32 }* %a.ptr
+  br label %join
+
+store.b:
+  %b = load { i8, i16, i32 }, { i8, i16, i32 }* %b.ptr
+  br label %join
+
+join:
+  %v = phi { i8, i16, i32 } [ %a, %store.a ], [ %b, %store.b ]
+  store { i8, i16, i32 } %v, { i8, i16, i32 }* %dst
+  ret void
+}
+
+%agg.inner.inner = type {i64, i64}
+%agg.inner = type {i16, i8, %agg.inner.inner }
+%agg.nested = type {i32, i32, %agg.inner, i32}
+
+define void @test_nested_aggregate_const(%agg.nested *%ptr) {
+; CHECK-LABEL: name: test_nested_aggregate_const
+; CHECK: [[BASE:%[0-9]+]]:_(p0) = COPY $x0
+; CHECK: [[CST1:%[0-9]+]]:_(s32) = G_CONSTANT i32 1
+; CHECK: [[CST2:%[0-9]+]]:_(s16) = G_CONSTANT i16 2
+; CHECK: [[CST3:%[0-9]+]]:_(s8) = G_CONSTANT i8 3
+; CHECK: [[CST4:%[0-9]+]]:_(s64) = G_CONSTANT i64 5
+; CHECK: [[CST5:%[0-9]+]]:_(s64) = G_CONSTANT i64 8
+; CHECK: [[CST6:%[0-9]+]]:_(s32) = G_CONSTANT i32 13
+; CHECK: G_STORE [[CST1]](s32), [[BASE]](p0) :: (store 4 into %ir.ptr, align 8)
+; CHECK: [[CST7:%[0-9]+]]:_(s64) = G_CONSTANT i64 4
+; CHECK: [[GEP1:%[0-9]+]]:_(p0) = G_GEP [[BASE]], [[CST7]](s64)
+; CHECK: G_STORE [[CST1]](s32), [[GEP1]](p0) :: (store 4 into %ir.ptr + 4)
+; CHECK: [[CST8:%[0-9]+]]:_(s64) = G_CONSTANT i64 8
+; CHECK: [[GEP2:%[0-9]+]]:_(p0) = G_GEP [[BASE]], [[CST8]](s64)
+; CHECK: G_STORE [[CST2]](s16), [[GEP2]](p0) :: (store 2 into %ir.ptr + 8, align 8)
+; CHECK: [[CST9:%[0-9]+]]:_(s64) = G_CONSTANT i64 10
+; CHECK: [[GEP3:%[0-9]+]]:_(p0) = G_GEP [[BASE]], [[CST9]](s64)
+; CHECK: G_STORE [[CST3]](s8), [[GEP3]](p0) :: (store 1 into %ir.ptr + 10, align 2)
+; CHECK: [[CST10:%[0-9]+]]:_(s64) = G_CONSTANT i64 16
+; CHECK: [[GEP4:%[0-9]+]]:_(p0) = G_GEP [[BASE]], [[CST10]](s64)
+; CHECK: G_STORE [[CST4]](s64), [[GEP4]](p0) :: (store 8 into %ir.ptr + 16)
+; CHECK: [[CST11:%[0-9]+]]:_(s64) = G_CONSTANT i64 24
+; CHECK: [[GEP5:%[0-9]+]]:_(p0) = G_GEP [[BASE]], [[CST11]](s64)
+; CHECK: G_STORE [[CST5]](s64), [[GEP5]](p0) :: (store 8 into %ir.ptr + 24)
+; CHECK: [[CST12:%[0-9]+]]:_(s64) = G_CONSTANT i64 32
+; CHECK: [[GEP6:%[0-9]+]]:_(p0) = G_GEP [[BASE]], [[CST12]](s64)
+; CHECK: G_STORE [[CST6]](s32), [[GEP6]](p0) :: (store 4 into %ir.ptr + 32, align 8)
+  store %agg.nested { i32 1, i32 1, %agg.inner { i16 2, i8 3, %agg.inner.inner {i64 5, i64 8} }, i32 13}, %agg.nested *%ptr
+  ret void
+}
+
+define i1 @return_i1_zext() {
+; AAPCS ABI says that booleans can only be 1 or 0, so we need to zero-extend.
+; CHECK-LABEL: name: return_i1_zext
+; CHECK: [[CST:%[0-9]+]]:_(s1) = G_CONSTANT i1 true
+; CHECK: [[ZEXT:%[0-9]+]]:_(s8) = G_ZEXT [[CST]](s1)
+; CHECK: [[ANYEXT:%[0-9]+]]:_(s32) = G_ANYEXT [[ZEXT]](s8)
+; CHECK: $w0 = COPY [[ANYEXT]](s32)
+; CHECK: RET_ReallyLR implicit $w0
+  ret i1 true
+}
+
+; Try one cmpxchg
+define i32 @test_atomic_cmpxchg_1(i32* %addr) {
+; CHECK-LABEL: name: test_atomic_cmpxchg_1
+; CHECK:       bb.1.entry:
+; CHECK-NEXT:  successors: %bb.{{[^)]+}}
+; CHECK-NEXT:  liveins: $x0
+; CHECK:         [[ADDR:%[0-9]+]]:_(p0) = COPY $x0
+; CHECK-NEXT:    [[OLDVAL:%[0-9]+]]:_(s32) = G_CONSTANT i32 0
+; CHECK-NEXT:    [[NEWVAL:%[0-9]+]]:_(s32) = G_CONSTANT i32 1
+; CHECK:       bb.2.repeat:
+; CHECK-NEXT:    successors: %bb.3({{[^)]+}}), %bb.2({{[^)]+}})
+; CHECK:         [[OLDVALRES:%[0-9]+]]:_(s32), [[SUCCESS:%[0-9]+]]:_(s1) = G_ATOMIC_CMPXCHG_WITH_SUCCESS [[ADDR]](p0), [[OLDVAL]], [[NEWVAL]] :: (load store monotonic monotonic 4 on %ir.addr)
+; CHECK-NEXT:    G_BRCOND [[SUCCESS]](s1), %bb.3
+; CHECK-NEXT:    G_BR %bb.2
+; CHECK:       bb.3.done:
+entry:
+  br label %repeat
+repeat:
+  %val_success = cmpxchg i32* %addr, i32 0, i32 1 monotonic monotonic
+  %value_loaded = extractvalue { i32, i1 } %val_success, 0
+  %success = extractvalue { i32, i1 } %val_success, 1
+  br i1 %success, label %done, label %repeat
+done:
+  ret i32 %value_loaded
+}
+
+; Try one cmpxchg with a small type and high atomic ordering.
+define i16 @test_atomic_cmpxchg_2(i16* %addr) {
+; CHECK-LABEL: name: test_atomic_cmpxchg_2
+; CHECK:       bb.1.entry:
+; CHECK-NEXT:  successors: %bb.2({{[^)]+}})
+; CHECK-NEXT:  liveins: $x0
+; CHECK:         [[ADDR:%[0-9]+]]:_(p0) = COPY $x0
+; CHECK-NEXT:    [[OLDVAL:%[0-9]+]]:_(s16) = G_CONSTANT i16 0
+; CHECK-NEXT:    [[NEWVAL:%[0-9]+]]:_(s16) = G_CONSTANT i16 1
+; CHECK:       bb.2.repeat:
+; CHECK-NEXT:    successors: %bb.3({{[^)]+}}), %bb.2({{[^)]+}})
+; CHECK:         [[OLDVALRES:%[0-9]+]]:_(s16), [[SUCCESS:%[0-9]+]]:_(s1) = G_ATOMIC_CMPXCHG_WITH_SUCCESS [[ADDR]](p0), [[OLDVAL]], [[NEWVAL]] :: (load store seq_cst seq_cst 2 on %ir.addr)
+; CHECK-NEXT:    G_BRCOND [[SUCCESS]](s1), %bb.3
+; CHECK-NEXT:    G_BR %bb.2
+; CHECK:       bb.3.done:
+entry:
+  br label %repeat
+repeat:
+  %val_success = cmpxchg i16* %addr, i16 0, i16 1 seq_cst seq_cst
+  %value_loaded = extractvalue { i16, i1 } %val_success, 0
+  %success = extractvalue { i16, i1 } %val_success, 1
+  br i1 %success, label %done, label %repeat
+done:
+  ret i16 %value_loaded
+}
+
+; Try one cmpxchg where the success order and failure order differ.
+define i64 @test_atomic_cmpxchg_3(i64* %addr) {
+; CHECK-LABEL: name: test_atomic_cmpxchg_3
+; CHECK:       bb.1.entry:
+; CHECK-NEXT:  successors: %bb.2({{[^)]+}})
+; CHECK-NEXT:  liveins: $x0
+; CHECK:         [[ADDR:%[0-9]+]]:_(p0) = COPY $x0
+; CHECK-NEXT:    [[OLDVAL:%[0-9]+]]:_(s64) = G_CONSTANT i64 0
+; CHECK-NEXT:    [[NEWVAL:%[0-9]+]]:_(s64) = G_CONSTANT i64 1
+; CHECK:       bb.2.repeat:
+; CHECK-NEXT:    successors: %bb.3({{[^)]+}}), %bb.2({{[^)]+}})
+; CHECK:         [[OLDVALRES:%[0-9]+]]:_(s64), [[SUCCESS:%[0-9]+]]:_(s1) = G_ATOMIC_CMPXCHG_WITH_SUCCESS [[ADDR]](p0), [[OLDVAL]], [[NEWVAL]] :: (load store seq_cst acquire 8 on %ir.addr)
+; CHECK-NEXT:    G_BRCOND [[SUCCESS]](s1), %bb.3
+; CHECK-NEXT:    G_BR %bb.2
+; CHECK:       bb.3.done:
+entry:
+  br label %repeat
+repeat:
+  %val_success = cmpxchg i64* %addr, i64 0, i64 1 seq_cst acquire
+  %value_loaded = extractvalue { i64, i1 } %val_success, 0
+  %success = extractvalue { i64, i1 } %val_success, 1
+  br i1 %success, label %done, label %repeat
+done:
+  ret i64 %value_loaded
+}
+
+; Try a monotonic atomicrmw xchg
+; AArch64 will expand some atomicrmw's at the LLVM-IR level so we use a wide type to avoid this.
+define i32 @test_atomicrmw_xchg(i256* %addr) {
+; CHECK-LABEL: name: test_atomicrmw_xchg
+; CHECK:       bb.1 (%ir-block.{{[0-9]+}}):
+; CHECK-NEXT:  liveins: $x0
+; CHECK:         [[ADDR:%[0-9]+]]:_(p0) = COPY $x0
+; CHECK-NEXT:    [[VAL:%[0-9]+]]:_(s256) = G_CONSTANT i256 1
+; CHECK-NEXT:    [[OLDVALRES:%[0-9]+]]:_(s256) = G_ATOMICRMW_XCHG [[ADDR]](p0), [[VAL]] :: (load store monotonic 32 on %ir.addr)
+; CHECK-NEXT:    [[RES:%[0-9]+]]:_(s32) = G_TRUNC [[OLDVALRES]]
+  %oldval = atomicrmw xchg i256* %addr, i256 1 monotonic
+  ; FIXME: We currently can't lower 'ret i256' and it's not the purpose of this
+  ;        test so work around it by truncating to i32 for now.
+  %oldval.trunc = trunc i256 %oldval to i32
+  ret i32 %oldval.trunc
+}
+
+; Try an acquire atomicrmw add
+; AArch64 will expand some atomicrmw's at the LLVM-IR level so we use a wide type to avoid this.
+define i32 @test_atomicrmw_add(i256* %addr) {
+; CHECK-LABEL: name: test_atomicrmw_add
+; CHECK:       bb.1 (%ir-block.{{[0-9]+}}):
+; CHECK-NEXT:  liveins: $x0
+; CHECK:         [[ADDR:%[0-9]+]]:_(p0) = COPY $x0
+; CHECK-NEXT:    [[VAL:%[0-9]+]]:_(s256) = G_CONSTANT i256 1
+; CHECK-NEXT:    [[OLDVALRES:%[0-9]+]]:_(s256) = G_ATOMICRMW_ADD [[ADDR]](p0), [[VAL]] :: (load store acquire 32 on %ir.addr)
+; CHECK-NEXT:    [[RES:%[0-9]+]]:_(s32) = G_TRUNC [[OLDVALRES]]
+  %oldval = atomicrmw add i256* %addr, i256 1 acquire
+  ; FIXME: We currently can't lower 'ret i256' and it's not the purpose of this
+  ;        test so work around it by truncating to i32 for now.
+  %oldval.trunc = trunc i256 %oldval to i32
+  ret i32 %oldval.trunc
+}
+
+; Try a release atomicrmw sub
+; AArch64 will expand some atomicrmw's at the LLVM-IR level so we use a wide type to avoid this.
+define i32 @test_atomicrmw_sub(i256* %addr) {
+; CHECK-LABEL: name: test_atomicrmw_sub
+; CHECK:       bb.1 (%ir-block.{{[0-9]+}}):
+; CHECK-NEXT:  liveins: $x0
+; CHECK:         [[ADDR:%[0-9]+]]:_(p0) = COPY $x0
+; CHECK-NEXT:    [[VAL:%[0-9]+]]:_(s256) = G_CONSTANT i256 1
+; CHECK-NEXT:    [[OLDVALRES:%[0-9]+]]:_(s256) = G_ATOMICRMW_SUB [[ADDR]](p0), [[VAL]] :: (load store release 32 on %ir.addr)
+; CHECK-NEXT:    [[RES:%[0-9]+]]:_(s32) = G_TRUNC [[OLDVALRES]]
+  %oldval = atomicrmw sub i256* %addr, i256 1 release
+  ; FIXME: We currently can't lower 'ret i256' and it's not the purpose of this
+  ;        test so work around it by truncating to i32 for now.
+  %oldval.trunc = trunc i256 %oldval to i32
+  ret i32 %oldval.trunc
+}
+
+; Try an acq_rel atomicrmw and
+; AArch64 will expand some atomicrmw's at the LLVM-IR level so we use a wide type to avoid this.
+define i32 @test_atomicrmw_and(i256* %addr) {
+; CHECK-LABEL: name: test_atomicrmw_and
+; CHECK:       bb.1 (%ir-block.{{[0-9]+}}):
+; CHECK-NEXT:  liveins: $x0
+; CHECK:         [[ADDR:%[0-9]+]]:_(p0) = COPY $x0
+; CHECK-NEXT:    [[VAL:%[0-9]+]]:_(s256) = G_CONSTANT i256 1
+; CHECK-NEXT:    [[OLDVALRES:%[0-9]+]]:_(s256) = G_ATOMICRMW_AND [[ADDR]](p0), [[VAL]] :: (load store acq_rel 32 on %ir.addr)
+; CHECK-NEXT:    [[RES:%[0-9]+]]:_(s32) = G_TRUNC [[OLDVALRES]]
+  %oldval = atomicrmw and i256* %addr, i256 1 acq_rel
+  ; FIXME: We currently can't lower 'ret i256' and it's not the purpose of this
+  ;        test so work around it by truncating to i32 for now.
+  %oldval.trunc = trunc i256 %oldval to i32
+  ret i32 %oldval.trunc
+}
+
+; Try an seq_cst atomicrmw nand
+; AArch64 will expand some atomicrmw's at the LLVM-IR level so we use a wide type to avoid this.
+define i32 @test_atomicrmw_nand(i256* %addr) {
+; CHECK-LABEL: name: test_atomicrmw_nand
+; CHECK:       bb.1 (%ir-block.{{[0-9]+}}):
+; CHECK-NEXT:  liveins: $x0
+; CHECK:         [[ADDR:%[0-9]+]]:_(p0) = COPY $x0
+; CHECK-NEXT:    [[VAL:%[0-9]+]]:_(s256) = G_CONSTANT i256 1
+; CHECK-NEXT:    [[OLDVALRES:%[0-9]+]]:_(s256) = G_ATOMICRMW_NAND [[ADDR]](p0), [[VAL]] :: (load store seq_cst 32 on %ir.addr)
+; CHECK-NEXT:    [[RES:%[0-9]+]]:_(s32) = G_TRUNC [[OLDVALRES]]
+  %oldval = atomicrmw nand i256* %addr, i256 1 seq_cst
+  ; FIXME: We currently can't lower 'ret i256' and it's not the purpose of this
+  ;        test so work around it by truncating to i32 for now.
+  %oldval.trunc = trunc i256 %oldval to i32
+  ret i32 %oldval.trunc
+}
+
+; Try an seq_cst atomicrmw or
+; AArch64 will expand some atomicrmw's at the LLVM-IR level so we use a wide type to avoid this.
+define i32 @test_atomicrmw_or(i256* %addr) {
+; CHECK-LABEL: name: test_atomicrmw_or
+; CHECK:       bb.1 (%ir-block.{{[0-9]+}}):
+; CHECK-NEXT:  liveins: $x0
+; CHECK:         [[ADDR:%[0-9]+]]:_(p0) = COPY $x0
+; CHECK-NEXT:    [[VAL:%[0-9]+]]:_(s256) = G_CONSTANT i256 1
+; CHECK-NEXT:    [[OLDVALRES:%[0-9]+]]:_(s256) = G_ATOMICRMW_OR [[ADDR]](p0), [[VAL]] :: (load store seq_cst 32 on %ir.addr)
+; CHECK-NEXT:    [[RES:%[0-9]+]]:_(s32) = G_TRUNC [[OLDVALRES]]
+  %oldval = atomicrmw or i256* %addr, i256 1 seq_cst
+  ; FIXME: We currently can't lower 'ret i256' and it's not the purpose of this
+  ;        test so work around it by truncating to i32 for now.
+  %oldval.trunc = trunc i256 %oldval to i32
+  ret i32 %oldval.trunc
+}
+
+; Try an seq_cst atomicrmw xor
+; AArch64 will expand some atomicrmw's at the LLVM-IR level so we use a wide type to avoid this.
+define i32 @test_atomicrmw_xor(i256* %addr) {
+; CHECK-LABEL: name: test_atomicrmw_xor
+; CHECK:       bb.1 (%ir-block.{{[0-9]+}}):
+; CHECK-NEXT:  liveins: $x0
+; CHECK:         [[ADDR:%[0-9]+]]:_(p0) = COPY $x0
+; CHECK-NEXT:    [[VAL:%[0-9]+]]:_(s256) = G_CONSTANT i256 1
+; CHECK-NEXT:    [[OLDVALRES:%[0-9]+]]:_(s256) = G_ATOMICRMW_XOR [[ADDR]](p0), [[VAL]] :: (load store seq_cst 32 on %ir.addr)
+; CHECK-NEXT:    [[RES:%[0-9]+]]:_(s32) = G_TRUNC [[OLDVALRES]]
+  %oldval = atomicrmw xor i256* %addr, i256 1 seq_cst
+  ; FIXME: We currently can't lower 'ret i256' and it's not the purpose of this
+  ;        test so work around it by truncating to i32 for now.
+  %oldval.trunc = trunc i256 %oldval to i32
+  ret i32 %oldval.trunc
+}
+
+; Try an seq_cst atomicrmw min
+; AArch64 will expand some atomicrmw's at the LLVM-IR level so we use a wide type to avoid this.
+define i32 @test_atomicrmw_min(i256* %addr) {
+; CHECK-LABEL: name: test_atomicrmw_min
+; CHECK:       bb.1 (%ir-block.{{[0-9]+}}):
+; CHECK-NEXT:  liveins: $x0
+; CHECK:         [[ADDR:%[0-9]+]]:_(p0) = COPY $x0
+; CHECK-NEXT:    [[VAL:%[0-9]+]]:_(s256) = G_CONSTANT i256 1
+; CHECK-NEXT:    [[OLDVALRES:%[0-9]+]]:_(s256) = G_ATOMICRMW_MIN [[ADDR]](p0), [[VAL]] :: (load store seq_cst 32 on %ir.addr)
+; CHECK-NEXT:    [[RES:%[0-9]+]]:_(s32) = G_TRUNC [[OLDVALRES]]
+  %oldval = atomicrmw min i256* %addr, i256 1 seq_cst
+  ; FIXME: We currently can't lower 'ret i256' and it's not the purpose of this
+  ;        test so work around it by truncating to i32 for now.
+  %oldval.trunc = trunc i256 %oldval to i32
+  ret i32 %oldval.trunc
+}
+
+; Try an seq_cst atomicrmw max
+; AArch64 will expand some atomicrmw's at the LLVM-IR level so we use a wide type to avoid this.
+define i32 @test_atomicrmw_max(i256* %addr) {
+; CHECK-LABEL: name: test_atomicrmw_max
+; CHECK:       bb.1 (%ir-block.{{[0-9]+}}):
+; CHECK-NEXT:  liveins: $x0
+; CHECK:         [[ADDR:%[0-9]+]]:_(p0) = COPY $x0
+; CHECK-NEXT:    [[VAL:%[0-9]+]]:_(s256) = G_CONSTANT i256 1
+; CHECK-NEXT:    [[OLDVALRES:%[0-9]+]]:_(s256) = G_ATOMICRMW_MAX [[ADDR]](p0), [[VAL]] :: (load store seq_cst 32 on %ir.addr)
+; CHECK-NEXT:    [[RES:%[0-9]+]]:_(s32) = G_TRUNC [[OLDVALRES]]
+  %oldval = atomicrmw max i256* %addr, i256 1 seq_cst
+  ; FIXME: We currently can't lower 'ret i256' and it's not the purpose of this
+  ;        test so work around it by truncating to i32 for now.
+  %oldval.trunc = trunc i256 %oldval to i32
+  ret i32 %oldval.trunc
+}
+
+; Try an seq_cst atomicrmw unsigned min
+; AArch64 will expand some atomicrmw's at the LLVM-IR level so we use a wide type to avoid this.
+define i32 @test_atomicrmw_umin(i256* %addr) {
+; CHECK-LABEL: name: test_atomicrmw_umin
+; CHECK:       bb.1 (%ir-block.{{[0-9]+}}):
+; CHECK-NEXT:  liveins: $x0
+; CHECK:         [[ADDR:%[0-9]+]]:_(p0) = COPY $x0
+; CHECK-NEXT:    [[VAL:%[0-9]+]]:_(s256) = G_CONSTANT i256 1
+; CHECK-NEXT:    [[OLDVALRES:%[0-9]+]]:_(s256) = G_ATOMICRMW_UMIN [[ADDR]](p0), [[VAL]] :: (load store seq_cst 32 on %ir.addr)
+; CHECK-NEXT:    [[RES:%[0-9]+]]:_(s32) = G_TRUNC [[OLDVALRES]]
+  %oldval = atomicrmw umin i256* %addr, i256 1 seq_cst
+  ; FIXME: We currently can't lower 'ret i256' and it's not the purpose of this
+  ;        test so work around it by truncating to i32 for now.
+  %oldval.trunc = trunc i256 %oldval to i32
+  ret i32 %oldval.trunc
+}
+
+; Try an seq_cst atomicrmw unsigned max
+; AArch64 will expand some atomicrmw's at the LLVM-IR level so we use a wide type to avoid this.
+define i32 @test_atomicrmw_umax(i256* %addr) {
+; CHECK-LABEL: name: test_atomicrmw_umax
+; CHECK:       bb.1 (%ir-block.{{[0-9]+}}):
+; CHECK-NEXT:  liveins: $x0
+; CHECK:         [[ADDR:%[0-9]+]]:_(p0) = COPY $x0
+; CHECK-NEXT:    [[VAL:%[0-9]+]]:_(s256) = G_CONSTANT i256 1
+; CHECK-NEXT:    [[OLDVALRES:%[0-9]+]]:_(s256) = G_ATOMICRMW_UMAX [[ADDR]](p0), [[VAL]] :: (load store seq_cst 32 on %ir.addr)
+; CHECK-NEXT:    [[RES:%[0-9]+]]:_(s32) = G_TRUNC [[OLDVALRES]]
+  %oldval = atomicrmw umax i256* %addr, i256 1 seq_cst
+  ; FIXME: We currently can't lower 'ret i256' and it's not the purpose of this
+  ;        test so work around it by truncating to i32 for now.
+  %oldval.trunc = trunc i256 %oldval to i32
+  ret i32 %oldval.trunc
+}
+
+@addr = global i8* null
+
+define void @test_blockaddress() {
+; CHECK-LABEL: name: test_blockaddress
+; CHECK: [[BADDR:%[0-9]+]]:_(p0) = G_BLOCK_ADDR blockaddress(@test_blockaddress, %ir-block.block)
+; CHECK: G_STORE [[BADDR]](p0)
+  store i8* blockaddress(@test_blockaddress, %block), i8** @addr
+  indirectbr i8* blockaddress(@test_blockaddress, %block), [label %block]
+block:
+  ret void
 }

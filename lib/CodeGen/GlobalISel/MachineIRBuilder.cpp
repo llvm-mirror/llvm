@@ -53,6 +53,11 @@ void MachineIRBuilderBase::setInsertPt(MachineBasicBlock &MBB,
   State.II = II;
 }
 
+void MachineIRBuilderBase::recordInsertion(MachineInstr *InsertedInstr) const {
+  if (State.InsertedInstr)
+    State.InsertedInstr(InsertedInstr);
+}
+
 void MachineIRBuilderBase::recordInsertions(
     std::function<void(MachineInstr *)> Inserted) {
   State.InsertedInstr = std::move(Inserted);
@@ -77,8 +82,7 @@ MachineInstrBuilder MachineIRBuilderBase::buildInstrNoInsert(unsigned Opcode) {
 
 MachineInstrBuilder MachineIRBuilderBase::insertInstr(MachineInstrBuilder MIB) {
   getMBB().insert(getInsertPt(), MIB);
-  if (State.InsertedInstr)
-    State.InsertedInstr(MIB);
+  recordInsertion(MIB);
   return MIB;
 }
 
@@ -143,6 +147,15 @@ MachineInstrBuilder MachineIRBuilderBase::buildConstDbgValue(
   }
 
   return MIB.addImm(0).addMetadata(Variable).addMetadata(Expr);
+}
+
+MachineInstrBuilder MachineIRBuilderBase::buildDbgLabel(const MDNode *Label) {
+  assert(isa<DILabel>(Label) && "not a label");
+  assert(cast<DILabel>(Label)->isValidLocationForIntrinsic(State.DL) &&
+         "Expected inlined-at fields to agree");
+  auto MIB = buildInstr(TargetOpcode::DBG_LABEL);
+
+  return MIB.addMetadata(Label);
 }
 
 MachineInstrBuilder MachineIRBuilderBase::buildFrameIndex(unsigned Res,
@@ -278,10 +291,16 @@ MachineInstrBuilder MachineIRBuilderBase::buildBrCond(unsigned Tst,
 
 MachineInstrBuilder MachineIRBuilderBase::buildLoad(unsigned Res, unsigned Addr,
                                                     MachineMemOperand &MMO) {
+  return buildLoadInstr(TargetOpcode::G_LOAD, Res, Addr, MMO);
+}
+
+MachineInstrBuilder
+MachineIRBuilderBase::buildLoadInstr(unsigned Opcode, unsigned Res,
+                                     unsigned Addr, MachineMemOperand &MMO) {
   assert(getMRI()->getType(Res).isValid() && "invalid operand type");
   assert(getMRI()->getType(Addr).isPointer() && "invalid operand type");
 
-  return buildInstr(TargetOpcode::G_LOAD)
+  return buildInstr(Opcode)
       .addDef(Res)
       .addUse(Addr)
       .addMemOperand(&MMO);
@@ -659,6 +678,33 @@ MachineIRBuilderBase::buildExtractVectorElement(unsigned Res, unsigned Val,
       .addUse(Idx);
 }
 
+MachineInstrBuilder MachineIRBuilderBase::buildAtomicCmpXchgWithSuccess(
+    unsigned OldValRes, unsigned SuccessRes, unsigned Addr, unsigned CmpVal,
+    unsigned NewVal, MachineMemOperand &MMO) {
+#ifndef NDEBUG
+  LLT OldValResTy = getMRI()->getType(OldValRes);
+  LLT SuccessResTy = getMRI()->getType(SuccessRes);
+  LLT AddrTy = getMRI()->getType(Addr);
+  LLT CmpValTy = getMRI()->getType(CmpVal);
+  LLT NewValTy = getMRI()->getType(NewVal);
+  assert(OldValResTy.isScalar() && "invalid operand type");
+  assert(SuccessResTy.isScalar() && "invalid operand type");
+  assert(AddrTy.isPointer() && "invalid operand type");
+  assert(CmpValTy.isValid() && "invalid operand type");
+  assert(NewValTy.isValid() && "invalid operand type");
+  assert(OldValResTy == CmpValTy && "type mismatch");
+  assert(OldValResTy == NewValTy && "type mismatch");
+#endif
+
+  return buildInstr(TargetOpcode::G_ATOMIC_CMPXCHG_WITH_SUCCESS)
+      .addDef(OldValRes)
+      .addDef(SuccessRes)
+      .addUse(Addr)
+      .addUse(CmpVal)
+      .addUse(NewVal)
+      .addMemOperand(&MMO);
+}
+
 MachineInstrBuilder
 MachineIRBuilderBase::buildAtomicCmpXchg(unsigned OldValRes, unsigned Addr,
                                          unsigned CmpVal, unsigned NewVal,
@@ -684,6 +730,103 @@ MachineIRBuilderBase::buildAtomicCmpXchg(unsigned OldValRes, unsigned Addr,
       .addMemOperand(&MMO);
 }
 
+MachineInstrBuilder
+MachineIRBuilderBase::buildAtomicRMW(unsigned Opcode, unsigned OldValRes,
+                                     unsigned Addr, unsigned Val,
+                                     MachineMemOperand &MMO) {
+#ifndef NDEBUG
+  LLT OldValResTy = getMRI()->getType(OldValRes);
+  LLT AddrTy = getMRI()->getType(Addr);
+  LLT ValTy = getMRI()->getType(Val);
+  assert(OldValResTy.isScalar() && "invalid operand type");
+  assert(AddrTy.isPointer() && "invalid operand type");
+  assert(ValTy.isValid() && "invalid operand type");
+  assert(OldValResTy == ValTy && "type mismatch");
+#endif
+
+  return buildInstr(Opcode)
+      .addDef(OldValRes)
+      .addUse(Addr)
+      .addUse(Val)
+      .addMemOperand(&MMO);
+}
+
+MachineInstrBuilder
+MachineIRBuilderBase::buildAtomicRMWXchg(unsigned OldValRes, unsigned Addr,
+                                         unsigned Val, MachineMemOperand &MMO) {
+  return buildAtomicRMW(TargetOpcode::G_ATOMICRMW_XCHG, OldValRes, Addr, Val,
+                        MMO);
+}
+MachineInstrBuilder
+MachineIRBuilderBase::buildAtomicRMWAdd(unsigned OldValRes, unsigned Addr,
+                                        unsigned Val, MachineMemOperand &MMO) {
+  return buildAtomicRMW(TargetOpcode::G_ATOMICRMW_ADD, OldValRes, Addr, Val,
+                        MMO);
+}
+MachineInstrBuilder
+MachineIRBuilderBase::buildAtomicRMWSub(unsigned OldValRes, unsigned Addr,
+                                        unsigned Val, MachineMemOperand &MMO) {
+  return buildAtomicRMW(TargetOpcode::G_ATOMICRMW_SUB, OldValRes, Addr, Val,
+                        MMO);
+}
+MachineInstrBuilder
+MachineIRBuilderBase::buildAtomicRMWAnd(unsigned OldValRes, unsigned Addr,
+                                        unsigned Val, MachineMemOperand &MMO) {
+  return buildAtomicRMW(TargetOpcode::G_ATOMICRMW_AND, OldValRes, Addr, Val,
+                        MMO);
+}
+MachineInstrBuilder
+MachineIRBuilderBase::buildAtomicRMWNand(unsigned OldValRes, unsigned Addr,
+                                         unsigned Val, MachineMemOperand &MMO) {
+  return buildAtomicRMW(TargetOpcode::G_ATOMICRMW_NAND, OldValRes, Addr, Val,
+                        MMO);
+}
+MachineInstrBuilder
+MachineIRBuilderBase::buildAtomicRMWOr(unsigned OldValRes, unsigned Addr,
+                                       unsigned Val, MachineMemOperand &MMO) {
+  return buildAtomicRMW(TargetOpcode::G_ATOMICRMW_OR, OldValRes, Addr, Val,
+                        MMO);
+}
+MachineInstrBuilder
+MachineIRBuilderBase::buildAtomicRMWXor(unsigned OldValRes, unsigned Addr,
+                                        unsigned Val, MachineMemOperand &MMO) {
+  return buildAtomicRMW(TargetOpcode::G_ATOMICRMW_XOR, OldValRes, Addr, Val,
+                        MMO);
+}
+MachineInstrBuilder
+MachineIRBuilderBase::buildAtomicRMWMax(unsigned OldValRes, unsigned Addr,
+                                        unsigned Val, MachineMemOperand &MMO) {
+  return buildAtomicRMW(TargetOpcode::G_ATOMICRMW_MAX, OldValRes, Addr, Val,
+                        MMO);
+}
+MachineInstrBuilder
+MachineIRBuilderBase::buildAtomicRMWMin(unsigned OldValRes, unsigned Addr,
+                                        unsigned Val, MachineMemOperand &MMO) {
+  return buildAtomicRMW(TargetOpcode::G_ATOMICRMW_MIN, OldValRes, Addr, Val,
+                        MMO);
+}
+MachineInstrBuilder
+MachineIRBuilderBase::buildAtomicRMWUmax(unsigned OldValRes, unsigned Addr,
+                                         unsigned Val, MachineMemOperand &MMO) {
+  return buildAtomicRMW(TargetOpcode::G_ATOMICRMW_UMAX, OldValRes, Addr, Val,
+                        MMO);
+}
+MachineInstrBuilder
+MachineIRBuilderBase::buildAtomicRMWUmin(unsigned OldValRes, unsigned Addr,
+                                         unsigned Val, MachineMemOperand &MMO) {
+  return buildAtomicRMW(TargetOpcode::G_ATOMICRMW_UMIN, OldValRes, Addr, Val,
+                        MMO);
+}
+
+MachineInstrBuilder
+MachineIRBuilderBase::buildBlockAddress(unsigned Res, const BlockAddress *BA) {
+#ifndef NDEBUG
+  assert(getMRI()->getType(Res).isPointer() && "invalid res type");
+#endif
+
+  return buildInstr(TargetOpcode::G_BLOCK_ADDR).addDef(Res).addBlockAddress(BA);
+}
+
 void MachineIRBuilderBase::validateTruncExt(unsigned Dst, unsigned Src,
                                             bool IsExtend) {
 #ifndef NDEBUG
@@ -691,7 +834,7 @@ void MachineIRBuilderBase::validateTruncExt(unsigned Dst, unsigned Src,
   LLT DstTy = getMRI()->getType(Dst);
 
   if (DstTy.isVector()) {
-    assert(SrcTy.isVector() && "mismatched cast between vecot and non-vector");
+    assert(SrcTy.isVector() && "mismatched cast between vector and non-vector");
     assert(SrcTy.getNumElements() == DstTy.getNumElements() &&
            "different number of elements in a trunc/ext");
   } else

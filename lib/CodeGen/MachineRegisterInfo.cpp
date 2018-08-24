@@ -22,6 +22,7 @@
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/Function.h"
@@ -176,17 +177,13 @@ MachineRegisterInfo::createVirtualRegister(const TargetRegisterClass *RegClass,
   return Reg;
 }
 
-LLT MachineRegisterInfo::getType(unsigned VReg) const {
-  VRegToTypeMap::const_iterator TypeIt = getVRegToType().find(VReg);
-  return TypeIt != getVRegToType().end() ? TypeIt->second : LLT{};
-}
-
 void MachineRegisterInfo::setType(unsigned VReg, LLT Ty) {
   // Check that VReg doesn't have a class.
   assert((getRegClassOrRegBank(VReg).isNull() ||
          !getRegClassOrRegBank(VReg).is<const TargetRegisterClass *>()) &&
          "Can't set the size of a non-generic virtual register");
-  getVRegToType()[VReg] = Ty;
+  VRegToType.grow(VReg);
+  VRegToType[VReg] = Ty;
 }
 
 unsigned
@@ -195,15 +192,13 @@ MachineRegisterInfo::createGenericVirtualRegister(LLT Ty, StringRef Name) {
   unsigned Reg = createIncompleteVirtualRegister(Name);
   // FIXME: Should we use a dummy register class?
   VRegInfo[Reg].first = static_cast<RegisterBank *>(nullptr);
-  getVRegToType()[Reg] = Ty;
+  setType(Reg, Ty);
   if (TheDelegate)
     TheDelegate->MRI_NoteNewVirtualRegister(Reg);
   return Reg;
 }
 
-void MachineRegisterInfo::clearVirtRegTypes() {
-  getVRegToType().clear();
-}
+void MachineRegisterInfo::clearVirtRegTypes() { VRegToType.clear(); }
 
 /// clearVirtRegs - Remove all virtual registers (after physreg assignment).
 void MachineRegisterInfo::clearVirtRegs() {
@@ -388,7 +383,7 @@ void MachineRegisterInfo::replaceRegWith(unsigned FromReg, unsigned ToReg) {
   assert(FromReg != ToReg && "Cannot replace a reg with itself");
 
   const TargetRegisterInfo *TRI = getTargetRegisterInfo();
-  
+
   // TODO: This could be more efficient by bulk changing the operands.
   for (reg_iterator I = reg_begin(FromReg), E = reg_end(); I != E; ) {
     MachineOperand &O = *I;

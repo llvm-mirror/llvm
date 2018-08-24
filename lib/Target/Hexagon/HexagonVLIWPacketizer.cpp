@@ -77,7 +77,7 @@ extern cl::opt<bool> ScheduleInlineAsm;
 
 namespace llvm {
 
-FunctionPass *createHexagonPacketizer();
+FunctionPass *createHexagonPacketizer(bool Minimal);
 void initializeHexagonPacketizerPass(PassRegistry&);
 
 } // end namespace llvm
@@ -88,7 +88,8 @@ namespace {
   public:
     static char ID;
 
-    HexagonPacketizer() : MachineFunctionPass(ID) {}
+    HexagonPacketizer(bool Min = false)
+      : MachineFunctionPass(ID), Minimal(Min) {}
 
     void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesCFG();
@@ -112,6 +113,7 @@ namespace {
   private:
     const HexagonInstrInfo *HII;
     const HexagonRegisterInfo *HRI;
+    const bool Minimal;
   };
 
 } // end anonymous namespace
@@ -129,8 +131,9 @@ INITIALIZE_PASS_END(HexagonPacketizer, "hexagon-packetizer",
 
 HexagonPacketizerList::HexagonPacketizerList(MachineFunction &MF,
       MachineLoopInfo &MLI, AliasAnalysis *AA,
-      const MachineBranchProbabilityInfo *MBPI)
-    : VLIWPacketizerList(MF, MLI, AA), MBPI(MBPI), MLI(&MLI) {
+      const MachineBranchProbabilityInfo *MBPI, bool Minimal)
+    : VLIWPacketizerList(MF, MLI, AA), MBPI(MBPI), MLI(&MLI),
+      Minimal(Minimal) {
   HII = MF.getSubtarget<HexagonSubtarget>().getInstrInfo();
   HRI = MF.getSubtarget<HexagonSubtarget>().getRegisterInfo();
 
@@ -200,9 +203,6 @@ static MachineBasicBlock::iterator moveInstrOut(MachineInstr &MI,
 
 bool HexagonPacketizer::runOnMachineFunction(MachineFunction &MF) {
   auto &HST = MF.getSubtarget<HexagonSubtarget>();
-  if (DisablePacketizer || !HST.usePackets() || skipFunction(MF.getFunction()))
-    return false;
-
   HII = HST.getInstrInfo();
   HRI = HST.getRegisterInfo();
   auto &MLI = getAnalysis<MachineLoopInfo>();
@@ -213,7 +213,9 @@ bool HexagonPacketizer::runOnMachineFunction(MachineFunction &MF) {
     HII->genAllInsnTimingClasses(MF);
 
   // Instantiate the packetizer.
-  HexagonPacketizerList Packetizer(MF, MLI, AA, MBPI);
+  bool MinOnly = Minimal || DisablePacketizer || !HST.usePackets() ||
+                 skipFunction(MF.getFunction());
+  HexagonPacketizerList Packetizer(MF, MLI, AA, MBPI, MinOnly);
 
   // DFA state table should not be empty.
   assert(Packetizer.getResourceTracker() && "Empty DFA table!");
@@ -226,7 +228,7 @@ bool HexagonPacketizer::runOnMachineFunction(MachineFunction &MF) {
   // Here, Insn 1 will result in the dependence graph not emitting an output
   // dependence between Insn 0 and Insn 2. This can lead to incorrect
   // packetization
-  for (auto &MB : MF) {
+  for (MachineBasicBlock &MB : MF) {
     auto End = MB.end();
     auto MI = MB.begin();
     while (MI != End) {
@@ -375,7 +377,7 @@ bool HexagonPacketizerList::promoteToDotCur(MachineInstr &MI,
 void HexagonPacketizerList::cleanUpDotCur() {
   MachineInstr *MI = nullptr;
   for (auto BI : CurrentPacketMIs) {
-    DEBUG(dbgs() << "Cleanup packet has "; BI->dump(););
+    LLVM_DEBUG(dbgs() << "Cleanup packet has "; BI->dump(););
     if (HII->isDotCurInst(*BI)) {
       MI = BI;
       continue;
@@ -390,7 +392,7 @@ void HexagonPacketizerList::cleanUpDotCur() {
     return;
   // We did not find a use of the CUR, so de-cur it.
   MI->setDesc(HII->get(HII->getNonDotCurOp(*MI)));
-  DEBUG(dbgs() << "Demoted CUR "; MI->dump(););
+  LLVM_DEBUG(dbgs() << "Demoted CUR "; MI->dump(););
 }
 
 // Check to see if an instruction can be dot cur.
@@ -414,11 +416,10 @@ bool HexagonPacketizerList::canPromoteToDotCur(const MachineInstr &MI,
     return false;
 
   // Make sure candidate instruction uses cur.
-  DEBUG(dbgs() << "Can we DOT Cur Vector MI\n";
-        MI.dump();
-        dbgs() << "in packet\n";);
+  LLVM_DEBUG(dbgs() << "Can we DOT Cur Vector MI\n"; MI.dump();
+             dbgs() << "in packet\n";);
   MachineInstr &MJ = *MII;
-  DEBUG({
+  LLVM_DEBUG({
     dbgs() << "Checking CUR against ";
     MJ.dump();
   });
@@ -433,12 +434,12 @@ bool HexagonPacketizerList::canPromoteToDotCur(const MachineInstr &MI,
   // Check for existing uses of a vector register within the packet which
   // would be affected by converting a vector load into .cur formt.
   for (auto BI : CurrentPacketMIs) {
-    DEBUG(dbgs() << "packet has "; BI->dump(););
+    LLVM_DEBUG(dbgs() << "packet has "; BI->dump(););
     if (BI->readsRegister(DepReg, MF.getSubtarget().getRegisterInfo()))
       return false;
   }
 
-  DEBUG(dbgs() << "Can Dot CUR MI\n"; MI.dump(););
+  LLVM_DEBUG(dbgs() << "Can Dot CUR MI\n"; MI.dump(););
   // We can convert the opcode into a .cur.
   return true;
 }
@@ -1037,7 +1038,7 @@ void HexagonPacketizerList::initPacketizerState() {
 // Ignore bundling of pseudo instructions.
 bool HexagonPacketizerList::ignorePseudoInstruction(const MachineInstr &MI,
                                                     const MachineBasicBlock *) {
-  if (MI.isDebugValue())
+  if (MI.isDebugInstr())
     return true;
 
   if (MI.isCFIInstruction())
@@ -1099,7 +1100,7 @@ bool HexagonPacketizerList::isSoloInstruction(const MachineInstr &MI) {
 static bool cannotCoexistAsymm(const MachineInstr &MI, const MachineInstr &MJ,
       const HexagonInstrInfo &HII) {
   const MachineFunction *MF = MI.getParent()->getParent();
-  if (MF->getSubtarget<HexagonSubtarget>().hasV60TOpsOnly() &&
+  if (MF->getSubtarget<HexagonSubtarget>().hasV60OpsOnly() &&
       HII.isHVXMemWithAIndirect(MI, MJ))
     return true;
 
@@ -1116,6 +1117,10 @@ static bool cannotCoexistAsymm(const MachineInstr &MI, const MachineInstr &MJ,
   case Hexagon::S4_stored_locked:
   case Hexagon::L2_loadw_locked:
   case Hexagon::L4_loadd_locked:
+  case Hexagon::Y2_dccleana:
+  case Hexagon::Y2_dccleaninva:
+  case Hexagon::Y2_dcinva:
+  case Hexagon::Y2_dczeroa:
   case Hexagon::Y4_l2fetch:
   case Hexagon::Y5_l2fetch: {
     // These instructions can only be grouped with ALU32 or non-floating-point
@@ -1517,7 +1522,7 @@ bool HexagonPacketizerList::isLegalToPacketizeTogether(SUnit *SUI, SUnit *SUJ) {
       bool IsVecJ = HII->isHVXVec(J);
       bool IsVecI = HII->isHVXVec(I);
 
-      if (Slot1Store && MF.getSubtarget<HexagonSubtarget>().hasV65TOps() &&
+      if (Slot1Store && MF.getSubtarget<HexagonSubtarget>().hasV65Ops() &&
           ((LoadJ && StoreI && !NVStoreI) ||
            (StoreJ && LoadI && !NVStoreJ)) &&
           (J.getOpcode() != Hexagon::S2_allocframe &&
@@ -1756,35 +1761,42 @@ HexagonPacketizerList::addToPacket(MachineInstr &MI) {
 }
 
 void HexagonPacketizerList::endPacket(MachineBasicBlock *MBB,
-                                      MachineBasicBlock::iterator MI) {
-  // Replace VLIWPacketizerList::endPacket(MBB, MI).
+                                      MachineBasicBlock::iterator EndMI) {
+  // Replace VLIWPacketizerList::endPacket(MBB, EndMI).
 
   bool memShufDisabled = getmemShufDisabled();
   if (memShufDisabled && !foundLSInPacket()) {
     setmemShufDisabled(false);
-    DEBUG(dbgs() << "  Not added to NoShufPacket\n");
+    LLVM_DEBUG(dbgs() << "  Not added to NoShufPacket\n");
   }
   memShufDisabled = getmemShufDisabled();
 
-  if (CurrentPacketMIs.size() > 1) {
-    MachineBasicBlock::instr_iterator FirstMI(CurrentPacketMIs.front());
-    MachineBasicBlock::instr_iterator LastMI(MI.getInstrIterator());
-    finalizeBundle(*MBB, FirstMI, LastMI);
+  OldPacketMIs.clear();
+  for (MachineInstr *MI : CurrentPacketMIs) {
+    MachineBasicBlock::instr_iterator NextMI = std::next(MI->getIterator());
+    for (auto &I : make_range(HII->expandVGatherPseudo(*MI), NextMI))
+      OldPacketMIs.push_back(&I);
+  }
+  CurrentPacketMIs.clear();
 
+  if (OldPacketMIs.size() > 1) {
+    MachineBasicBlock::instr_iterator FirstMI(OldPacketMIs.front());
+    MachineBasicBlock::instr_iterator LastMI(EndMI.getInstrIterator());
+    finalizeBundle(*MBB, FirstMI, LastMI);
     auto BundleMII = std::prev(FirstMI);
     if (memShufDisabled)
       HII->setBundleNoShuf(BundleMII);
 
     setmemShufDisabled(false);
   }
-  OldPacketMIs = CurrentPacketMIs;
-  CurrentPacketMIs.clear();
 
   ResourceTracker->clearResources();
-  DEBUG(dbgs() << "End packet\n");
+  LLVM_DEBUG(dbgs() << "End packet\n");
 }
 
 bool HexagonPacketizerList::shouldAddToPacket(const MachineInstr &MI) {
+  if (Minimal)
+    return false;
   return !producesStall(MI);
 }
 
@@ -1857,6 +1869,6 @@ bool HexagonPacketizerList::producesStall(const MachineInstr &I) {
 //                         Public Constructor Functions
 //===----------------------------------------------------------------------===//
 
-FunctionPass *llvm::createHexagonPacketizer() {
-  return new HexagonPacketizer();
+FunctionPass *llvm::createHexagonPacketizer(bool Minimal) {
+  return new HexagonPacketizer(Minimal);
 }

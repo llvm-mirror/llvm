@@ -602,7 +602,7 @@ static bool ParseBlock(BitstreamCursor &Stream, BitstreamBlockInfo &BlockInfo,
     ++BlockStats.NumRecords;
 
     StringRef Blob;
-    unsigned CurrentRecordPos = Stream.GetCurrentBitNo();
+    uint64_t CurrentRecordPos = Stream.GetCurrentBitNo();
     unsigned Code = Stream.readRecord(Entry.ID, Record, &Blob);
 
     // Increment the # occurrences of this code.
@@ -699,7 +699,7 @@ static bool ParseBlock(BitstreamCursor &Stream, BitstreamBlockInfo &BlockInfo,
           std::string Str;
           bool ArrayIsPrintable = true;
           for (unsigned j = i - 1, je = Record.size(); j != je; ++j) {
-            if (!isprint(static_cast<unsigned char>(Record[j]))) {
+            if (!isPrint(static_cast<unsigned char>(Record[j]))) {
               ArrayIsPrintable = false;
               break;
             }
@@ -719,7 +719,7 @@ static bool ParseBlock(BitstreamCursor &Stream, BitstreamBlockInfo &BlockInfo,
         } else {
           bool BlobIsPrintable = true;
           for (unsigned i = 0, e = Blob.size(); i != e; ++i)
-            if (!isprint(static_cast<unsigned char>(Blob[i]))) {
+            if (!isPrint(static_cast<unsigned char>(Blob[i]))) {
               BlobIsPrintable = false;
               break;
             }

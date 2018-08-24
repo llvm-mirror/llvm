@@ -76,8 +76,10 @@ struct Config {
   /// The directory to store .dwo files.
   std::string DwoDir;
 
-  /// The objcopy binary used to extract dwo files.
-  std::string Objcopy;
+  /// The path to write a .dwo file to. This should generally only be used when
+  /// running an individual backend directly via thinBackend(), as otherwise
+  /// all .dwo files will be written to the same path.
+  std::string DwoPath;
 
   /// Optimization remarks file path.
   std::string RemarksFilename = "";

@@ -33,15 +33,15 @@
 
 #include "View.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/DenseMap.h"
 #include "llvm/MC/MCSubtargetInfo.h"
+#include <map>
 
 namespace mca {
 
 class SchedulerStatistics : public View {
   const llvm::MCSchedModel &SM;
 
-  using Histogram = llvm::DenseMap<unsigned, unsigned>;
+  using Histogram = std::map<unsigned, unsigned>;
   Histogram IssuedPerCycle;
 
   unsigned NumIssued;
@@ -53,7 +53,7 @@ class SchedulerStatistics : public View {
     unsigned MaxUsedSlots;
   };
 
-  llvm::DenseMap<unsigned, BufferUsage> BufferedResources;
+  std::map<unsigned, BufferUsage> BufferedResources;
 
   void updateHistograms() {
     IssuedPerCycle[NumIssued]++;
@@ -65,9 +65,9 @@ class SchedulerStatistics : public View {
 
 public:
   SchedulerStatistics(const llvm::MCSubtargetInfo &STI)
-      : SM(STI.getSchedModel()), NumIssued(0), NumCycles(0) { }
+      : SM(STI.getSchedModel()), NumIssued(0), NumCycles(0) {}
 
-  void onInstructionEvent(const HWInstructionEvent &Event) override;
+  void onEvent(const HWInstructionEvent &Event) override;
 
   void onCycleBegin() override { NumCycles++; }
 

@@ -12,17 +12,15 @@
 //===----------------------------------------------------------------------===//
 
 #include "Scheduler.h"
-#include "Backend.h"
-#include "HWEventListener.h"
 #include "Support.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
-#define DEBUG_TYPE "llvm-mca"
-
 namespace mca {
 
 using namespace llvm;
+
+#define DEBUG_TYPE "llvm-mca"
 
 uint64_t ResourceState::selectNextInSequence() {
   assert(isReady());
@@ -44,30 +42,38 @@ void ResourceState::dump() const {
 }
 #endif
 
-void ResourceManager::initialize(const llvm::MCSchedModel &SM) {
-  computeProcResourceMasks(SM, ProcResID2Mask);
-  for (unsigned I = 0, E = SM.getNumProcResourceKinds(); I < E; ++I)
-    addResource(*SM.getProcResource(I), I, ProcResID2Mask[I]);
+unsigned getResourceStateIndex(uint64_t Mask) {
+  return std::numeric_limits<uint64_t>::digits - llvm::countLeadingZeros(Mask);
 }
 
-// Adds a new resource state in Resources, as well as a new descriptor in
-// ResourceDescriptor. Map 'Resources' allows to quickly obtain ResourceState
-// objects from resource mask identifiers.
-void ResourceManager::addResource(const MCProcResourceDesc &Desc,
-                                  unsigned Index, uint64_t Mask) {
-  assert(Resources.find(Mask) == Resources.end() && "Resource already added!");
-  Resources[Mask] = llvm::make_unique<ResourceState>(Desc, Index, Mask);
+unsigned ResourceManager::resolveResourceMask(uint64_t Mask) const {
+  return Resources[getResourceStateIndex(Mask)]->getProcResourceID();
+}
+
+unsigned ResourceManager::getNumUnits(uint64_t ResourceID) const {
+  return Resources[getResourceStateIndex(ResourceID)]->getNumUnits();
+}
+
+void ResourceManager::initialize(const llvm::MCSchedModel &SM) {
+  computeProcResourceMasks(SM, ProcResID2Mask);
+  Resources.resize(SM.getNumProcResourceKinds());
+
+  for (unsigned I = 0, E = SM.getNumProcResourceKinds(); I < E; ++I) {
+    uint64_t Mask = ProcResID2Mask[I];
+    Resources[getResourceStateIndex(Mask)] =
+        llvm::make_unique<ResourceState>(*SM.getProcResource(I), I, Mask);
+  }
 }
 
 // Returns the actual resource consumed by this Use.
 // First, is the primary resource ID.
 // Second, is the specific sub-resource ID.
 std::pair<uint64_t, uint64_t> ResourceManager::selectPipe(uint64_t ResourceID) {
-  ResourceState &RS = *Resources[ResourceID];
+  ResourceState &RS = *Resources[getResourceStateIndex(ResourceID)];
   uint64_t SubResourceID = RS.selectNextInSequence();
   if (RS.isAResourceGroup())
     return selectPipe(SubResourceID);
-  return std::pair<uint64_t, uint64_t>(ResourceID, SubResourceID);
+  return std::make_pair(ResourceID, SubResourceID);
 }
 
 void ResourceState::removeFromNextInSequence(uint64_t ID) {
@@ -84,9 +90,9 @@ void ResourceState::removeFromNextInSequence(uint64_t ID) {
   }
 }
 
-void ResourceManager::use(ResourceRef RR) {
+void ResourceManager::use(const ResourceRef &RR) {
   // Mark the sub-resource referenced by RR as used.
-  ResourceState &RS = *Resources[RR.first];
+  ResourceState &RS = *Resources[getResourceStateIndex(RR.first)];
   RS.markSubResourceAsUsed(RR.second);
   // If there are still available units in RR.first,
   // then we are done.
@@ -94,8 +100,8 @@ void ResourceManager::use(ResourceRef RR) {
     return;
 
   // Notify to other resources that RR.first is no longer available.
-  for (const std::pair<uint64_t, UniqueResourceState> &Res : Resources) {
-    ResourceState &Current = *Res.second.get();
+  for (UniqueResourceState &Res : Resources) {
+    ResourceState &Current = *Res;
     if (!Current.isAResourceGroup() || Current.getResourceMask() == RR.first)
       continue;
 
@@ -106,15 +112,15 @@ void ResourceManager::use(ResourceRef RR) {
   }
 }
 
-void ResourceManager::release(ResourceRef RR) {
-  ResourceState &RS = *Resources[RR.first];
+void ResourceManager::release(const ResourceRef &RR) {
+  ResourceState &RS = *Resources[getResourceStateIndex(RR.first)];
   bool WasFullyUsed = !RS.isReady();
   RS.releaseSubResource(RR.second);
   if (!WasFullyUsed)
     return;
 
-  for (const std::pair<uint64_t, UniqueResourceState> &Res : Resources) {
-    ResourceState &Current = *Res.second.get();
+  for (UniqueResourceState &Res : Resources) {
+    ResourceState &Current = *Res;
     if (!Current.isAResourceGroup() || Current.getResourceMask() == RR.first)
       continue;
 
@@ -127,7 +133,8 @@ ResourceStateEvent
 ResourceManager::canBeDispatched(ArrayRef<uint64_t> Buffers) const {
   ResourceStateEvent Result = ResourceStateEvent::RS_BUFFER_AVAILABLE;
   for (uint64_t Buffer : Buffers) {
-    Result = isBufferAvailable(Buffer);
+    ResourceState &RS = *Resources[getResourceStateIndex(Buffer)];
+    Result = RS.isBufferAvailable();
     if (Result != ResourceStateEvent::RS_BUFFER_AVAILABLE)
       break;
   }
@@ -135,19 +142,21 @@ ResourceManager::canBeDispatched(ArrayRef<uint64_t> Buffers) const {
 }
 
 void ResourceManager::reserveBuffers(ArrayRef<uint64_t> Buffers) {
-  for (const uint64_t R : Buffers) {
-    reserveBuffer(R);
-    ResourceState &Resource = *Resources[R];
-    if (Resource.isADispatchHazard()) {
-      assert(!Resource.isReserved());
-      Resource.setReserved();
+  for (const uint64_t Buffer : Buffers) {
+    ResourceState &RS = *Resources[getResourceStateIndex(Buffer)];
+    assert(RS.isBufferAvailable() == ResourceStateEvent::RS_BUFFER_AVAILABLE);
+    RS.reserveBuffer();
+
+    if (RS.isADispatchHazard()) {
+      assert(!RS.isReserved());
+      RS.setReserved();
     }
   }
 }
 
 void ResourceManager::releaseBuffers(ArrayRef<uint64_t> Buffers) {
   for (const uint64_t R : Buffers)
-    releaseBuffer(R);
+    Resources[getResourceStateIndex(R)]->releaseBuffer();
 }
 
 bool ResourceManager::canBeIssued(const InstrDesc &Desc) const {
@@ -155,31 +164,31 @@ bool ResourceManager::canBeIssued(const InstrDesc &Desc) const {
                      [&](const std::pair<uint64_t, const ResourceUsage> &E) {
                        unsigned NumUnits =
                            E.second.isReserved() ? 0U : E.second.NumUnits;
-                       return isReady(E.first, NumUnits);
+                       unsigned Index = getResourceStateIndex(E.first);
+                       return Resources[Index]->isReady(NumUnits);
                      });
 }
 
 // Returns true if all resources are in-order, and there is at least one
 // resource which is a dispatch hazard (BufferSize = 0).
-bool ResourceManager::mustIssueImmediately(const InstrDesc &Desc) {
+bool ResourceManager::mustIssueImmediately(const InstrDesc &Desc) const {
   if (!canBeIssued(Desc))
     return false;
-  bool AllInOrderResources = std::all_of(
-      Desc.Buffers.begin(), Desc.Buffers.end(), [&](const unsigned BufferMask) {
-        const ResourceState &Resource = *Resources[BufferMask];
-        return Resource.isInOrder() || Resource.isADispatchHazard();
-      });
+  bool AllInOrderResources = all_of(Desc.Buffers, [&](uint64_t BufferMask) {
+    unsigned Index = getResourceStateIndex(BufferMask);
+    const ResourceState &Resource = *Resources[Index];
+    return Resource.isInOrder() || Resource.isADispatchHazard();
+  });
   if (!AllInOrderResources)
     return false;
 
-  return std::any_of(Desc.Buffers.begin(), Desc.Buffers.end(),
-                     [&](const unsigned BufferMask) {
-                       return Resources[BufferMask]->isADispatchHazard();
-                     });
+  return any_of(Desc.Buffers, [&](uint64_t BufferMask) {
+    return Resources[getResourceStateIndex(BufferMask)]->isADispatchHazard();
+  });
 }
 
 void ResourceManager::issueInstruction(
-    unsigned Index, const InstrDesc &Desc,
+    const InstrDesc &Desc,
     SmallVectorImpl<std::pair<ResourceRef, double>> &Pipes) {
   for (const std::pair<uint64_t, ResourceUsage> &R : Desc.Resources) {
     const CycleSegment &CS = R.second.CS;
@@ -194,7 +203,7 @@ void ResourceManager::issueInstruction(
       use(Pipe);
       BusyResources[Pipe] += CS.size();
       // Replace the resource mask with a valid processor resource index.
-      const ResourceState &RS = *Resources[Pipe.first];
+      const ResourceState &RS = *Resources[getResourceStateIndex(Pipe.first)];
       Pipe.first = RS.getProcResourceID();
       Pipes.emplace_back(
           std::pair<ResourceRef, double>(Pipe, static_cast<double>(CS.size())));
@@ -228,275 +237,231 @@ void ResourceManager::cycleEvent(SmallVectorImpl<ResourceRef> &ResourcesFreed) {
     BusyResources.erase(RF);
 }
 
-void Scheduler::scheduleInstruction(unsigned Idx, Instruction &MCIS) {
-  assert(WaitQueue.find(Idx) == WaitQueue.end());
-  assert(ReadyQueue.find(Idx) == ReadyQueue.end());
-  assert(IssuedQueue.find(Idx) == IssuedQueue.end());
+void ResourceManager::reserveResource(uint64_t ResourceID) {
+  ResourceState &Resource = *Resources[getResourceStateIndex(ResourceID)];
+  assert(!Resource.isReserved());
+  Resource.setReserved();
+}
 
-  // Reserve a slot in each buffered resource. Also, mark units with
-  // BufferSize=0 as reserved. Resources with a buffer size of zero will only
-  // be released after MCIS is issued, and all the ResourceCycles for those
-  // units have been consumed.
-  const InstrDesc &Desc = MCIS.getDesc();
-  reserveBuffers(Desc.Buffers);
-  notifyReservedBuffers(Desc.Buffers);
+void ResourceManager::releaseResource(uint64_t ResourceID) {
+  ResourceState &Resource = *Resources[getResourceStateIndex(ResourceID)];
+  Resource.clearReserved();
+}
+
+#ifndef NDEBUG
+void Scheduler::dump() const {
+  dbgs() << "[SCHEDULER]: WaitSet size is: " << WaitSet.size() << '\n';
+  dbgs() << "[SCHEDULER]: ReadySet size is: " << ReadySet.size() << '\n';
+  dbgs() << "[SCHEDULER]: IssuedSet size is: " << IssuedSet.size() << '\n';
+  Resources->dump();
+}
+#endif
+
+Scheduler::Status Scheduler::isAvailable(const InstRef &IR) const {
+  const InstrDesc &Desc = IR.getInstruction()->getDesc();
+   
+  switch (Resources->canBeDispatched(Desc.Buffers)) {
+  case ResourceStateEvent::RS_BUFFER_UNAVAILABLE:
+    return Scheduler::SC_BUFFERS_FULL;
+  case ResourceStateEvent::RS_RESERVED:
+    return Scheduler::SC_DISPATCH_GROUP_STALL;
+  case ResourceStateEvent::RS_BUFFER_AVAILABLE:
+    break;
+  }
+
+  // Give lower priority to LSUnit stall events.
+  switch (LSU->isAvailable(IR)) {
+  case LSUnit::LSU_LQUEUE_FULL:
+    return Scheduler::SC_LOAD_QUEUE_FULL;
+  case LSUnit::LSU_SQUEUE_FULL:
+    return Scheduler::SC_STORE_QUEUE_FULL;
+  case LSUnit::LSU_AVAILABLE:
+    return Scheduler::SC_AVAILABLE;
+  }
+
+  llvm_unreachable("Don't know how to process this LSU state result!");
+}
+
+void Scheduler::issueInstructionImpl(
+    InstRef &IR,
+    SmallVectorImpl<std::pair<ResourceRef, double>> &UsedResources) {
+  Instruction *IS = IR.getInstruction();
+  const InstrDesc &D = IS->getDesc();
+
+  // Issue the instruction and collect all the consumed resources
+  // into a vector. That vector is then used to notify the listener.
+  Resources->issueInstruction(D, UsedResources);
+
+  // Notify the instruction that it started executing.
+  // This updates the internal state of each write.
+  IS->execute();
+
+  if (IS->isExecuting())
+    IssuedSet.emplace_back(IR);
+  else if (IS->isExecuted())
+    LSU->onInstructionExecuted(IR);
+}
+
+// Release the buffered resources and issue the instruction.
+void Scheduler::issueInstruction(
+    InstRef &IR,
+    SmallVectorImpl<std::pair<ResourceRef, double>> &UsedResources) {
+  const InstrDesc &Desc = IR.getInstruction()->getDesc();
+  Resources->releaseBuffers(Desc.Buffers);
+  issueInstructionImpl(IR, UsedResources);
+}
+
+void Scheduler::promoteToReadySet(SmallVectorImpl<InstRef> &Ready) {
+  // Scan the set of waiting instructions and promote them to the
+  // ready queue if operands are all ready.
+  unsigned RemovedElements = 0;
+  for (auto I = WaitSet.begin(), E = WaitSet.end(); I != E;) {
+    InstRef &IR = *I;
+    if (!IR.isValid())
+      break;
+
+    // Check if this instruction is now ready. In case, force
+    // a transition in state using method 'update()'.
+    Instruction &IS = *IR.getInstruction();
+    if (!IS.isReady())
+      IS.update();
+
+    // Check f there are still unsolved data dependencies. 
+    if (!isReady(IR)) {
+      ++I;
+      continue;
+    }
+
+    Ready.emplace_back(IR);
+    ReadySet.emplace_back(IR);
+
+    IR.invalidate();
+    ++RemovedElements;
+    std::iter_swap(I, E - RemovedElements);
+  }
+
+  WaitSet.resize(WaitSet.size() - RemovedElements);
+}
+
+InstRef Scheduler::select() {
+  unsigned QueueIndex = ReadySet.size();
+  int Rank = std::numeric_limits<int>::max();
+
+  for (unsigned I = 0, E = ReadySet.size(); I != E; ++I) {
+    const InstRef &IR = ReadySet[I];
+    const unsigned IID = IR.getSourceIndex();
+    const Instruction &IS = *IR.getInstruction();
+
+    // Compute a rank value based on the age of an instruction (i.e. its source
+    // index) and its number of users. The lower the rank value, the better.
+    int CurrentRank = IID - IS.getNumUsers();
+
+    // We want to prioritize older instructions over younger instructions to
+    // minimize the pressure on the reorder buffer.  We also want to
+    // rank higher the instructions with more users to better expose ILP.
+    if (CurrentRank == Rank)
+      if (IID > ReadySet[QueueIndex].getSourceIndex())
+        continue;
+
+    if (CurrentRank <= Rank) {
+      const InstrDesc &D = IS.getDesc();
+      if (Resources->canBeIssued(D)) {
+        Rank = CurrentRank;
+        QueueIndex = I;
+      }
+    }
+  }
+
+  if (QueueIndex == ReadySet.size())
+    return InstRef();
+
+  // We found an instruction to issue.
+
+  InstRef IR = ReadySet[QueueIndex];
+  std::swap(ReadySet[QueueIndex], ReadySet[ReadySet.size() - 1]);
+  ReadySet.pop_back();
+  return IR;
+}
+
+void Scheduler::updatePendingQueue(SmallVectorImpl<InstRef> &Ready) {
+  // Notify to instructions in the pending queue that a new cycle just
+  // started.
+  for (InstRef &Entry : WaitSet)
+    Entry.getInstruction()->cycleEvent();
+  promoteToReadySet(Ready);
+}
+
+void Scheduler::updateIssuedSet(SmallVectorImpl<InstRef> &Executed) {
+  unsigned RemovedElements = 0;
+  for (auto I = IssuedSet.begin(), E = IssuedSet.end(); I != E;) {
+    InstRef &IR = *I;
+    if (!IR.isValid())
+      break;
+    Instruction &IS = *IR.getInstruction();
+    IS.cycleEvent();
+    if (!IS.isExecuted()) {
+      LLVM_DEBUG(dbgs() << "[SCHEDULER]: Instruction #" << IR
+                        << " is still executing.\n");
+      ++I;
+      continue;
+    }
+
+    // Instruction IR has completed execution.
+    LSU->onInstructionExecuted(IR);
+    Executed.emplace_back(IR);
+    ++RemovedElements;
+    IR.invalidate();
+    std::iter_swap(I, E - RemovedElements);
+  }
+
+  IssuedSet.resize(IssuedSet.size() - RemovedElements);
+}
+
+void Scheduler::reclaimSimulatedResources(SmallVectorImpl<ResourceRef> &Freed) {
+  Resources->cycleEvent(Freed);
+}
+
+bool Scheduler::mustIssueImmediately(const InstRef &IR) const {
+  // Instructions that use an in-order dispatch/issue processor resource must be
+  // issued immediately to the pipeline(s). Any other in-order buffered
+  // resources (i.e. BufferSize=1) is consumed.
+  const InstrDesc &Desc = IR.getInstruction()->getDesc();
+  return Desc.isZeroLatency() || Resources->mustIssueImmediately(Desc);
+}
+
+void Scheduler::dispatch(const InstRef &IR) {
+  const InstrDesc &Desc = IR.getInstruction()->getDesc();
+  Resources->reserveBuffers(Desc.Buffers);
 
   // If necessary, reserve queue entries in the load-store unit (LSU).
-  bool Reserved = LSU->reserve(Idx, Desc);
-  if (!MCIS.isReady() || (Reserved && !LSU->isReady(Idx))) {
-    DEBUG(dbgs() << "[SCHEDULER] Adding " << Idx << " to the Wait Queue\n");
-    WaitQueue[Idx] = &MCIS;
+  bool IsMemOp = Desc.MayLoad || Desc.MayStore;
+  if (IsMemOp)
+    LSU->dispatch(IR);
+
+  if (!isReady(IR)) {
+    LLVM_DEBUG(dbgs() << "[SCHEDULER] Adding #" << IR << " to the WaitSet\n");
+    WaitSet.push_back(IR);
     return;
   }
-  notifyInstructionReady(Idx);
 
-  // Don't add a zero-latency instruction to the Wait or Ready queue.
+  // Don't add a zero-latency instruction to the Ready queue.
   // A zero-latency instruction doesn't consume any scheduler resources. That is
   // because it doesn't need to be executed, and it is often removed at register
   // renaming stage. For example, register-register moves are often optimized at
   // register renaming stage by simply updating register aliases. On some
   // targets, zero-idiom instructions (for example: a xor that clears the value
-  // of a register) are treated speacially, and are often eliminated at register
+  // of a register) are treated specially, and are often eliminated at register
   // renaming stage.
-
-  // Instructions that use an in-order dispatch/issue processor resource must be
-  // issued immediately to the pipeline(s). Any other in-order buffered
-  // resources (i.e. BufferSize=1) is consumed.
-
-  if (!MCIS.isZeroLatency() && !Resources->mustIssueImmediately(Desc)) {
-    DEBUG(dbgs() << "[SCHEDULER] Adding " << Idx << " to the Ready Queue\n");
-    ReadyQueue[Idx] = &MCIS;
-    return;
-  }
-
-  DEBUG(dbgs() << "[SCHEDULER] Instruction " << Idx << " issued immediately\n");
-  // Release buffered resources and issue MCIS to the underlying pipelines.
-  issueInstruction(Idx, MCIS);
-}
-
-void Scheduler::cycleEvent() {
-  SmallVector<ResourceRef, 8> ResourcesFreed;
-  Resources->cycleEvent(ResourcesFreed);
-
-  for (const ResourceRef &RR : ResourcesFreed)
-    notifyResourceAvailable(RR);
-
-  SmallVector<unsigned, 4> InstructionIDs;
-  updateIssuedQueue(InstructionIDs);
-  for (unsigned Idx : InstructionIDs)
-    notifyInstructionExecuted(Idx);
-  InstructionIDs.clear();
-
-  updatePendingQueue(InstructionIDs);
-  for (unsigned Idx : InstructionIDs)
-    notifyInstructionReady(Idx);
-  InstructionIDs.clear();
-
-  std::pair<unsigned, Instruction *> Inst = select();
-  while (Inst.second) {
-    issueInstruction(Inst.first, *Inst.second);
-
-    // Instructions that have been issued during this cycle might have unblocked
-    // other dependent instructions. Dependent instructions may be issued during
-    // this same cycle if operands have ReadAdvance entries.  Promote those
-    // instructions to the ReadyQueue and tell to the caller that we need
-    // another round of 'issue()'.
-    promoteToReadyQueue(InstructionIDs);
-    for (unsigned Idx : InstructionIDs)
-      notifyInstructionReady(Idx);
-    InstructionIDs.clear();
-
-    // Select the next instruction to issue.
-    Inst = select();
+  if (!mustIssueImmediately(IR)) {
+    LLVM_DEBUG(dbgs() << "[SCHEDULER] Adding #" << IR << " to the ReadySet\n");
+    ReadySet.push_back(IR);
   }
 }
 
-#ifndef NDEBUG
-void Scheduler::dump() const {
-  dbgs() << "[SCHEDULER]: WaitQueue size is: " << WaitQueue.size() << '\n';
-  dbgs() << "[SCHEDULER]: ReadyQueue size is: " << ReadyQueue.size() << '\n';
-  dbgs() << "[SCHEDULER]: IssuedQueue size is: " << IssuedQueue.size() << '\n';
-  Resources->dump();
-}
-#endif
-
-bool Scheduler::canBeDispatched(unsigned Index, const InstrDesc &Desc) const {
-  HWStallEvent::GenericEventType Type = HWStallEvent::Invalid;
-
-  if (Desc.MayLoad && LSU->isLQFull())
-    Type = HWStallEvent::LoadQueueFull;
-  else if (Desc.MayStore && LSU->isSQFull())
-    Type = HWStallEvent::StoreQueueFull;
-  else {
-    switch (Resources->canBeDispatched(Desc.Buffers)) {
-    default:
-      return true;
-    case ResourceStateEvent::RS_BUFFER_UNAVAILABLE:
-      Type = HWStallEvent::SchedulerQueueFull;
-      break;
-    case ResourceStateEvent::RS_RESERVED:
-      Type = HWStallEvent::DispatchGroupStall;
-    }
-  }
-
-  Owner->notifyStallEvent(HWStallEvent(Type, Index));
-  return false;
+bool Scheduler::isReady(const InstRef &IR) const {
+  const InstrDesc &Desc = IR.getInstruction()->getDesc();
+  bool IsMemOp = Desc.MayLoad || Desc.MayStore;
+  return IR.getInstruction()->isReady() && (!IsMemOp || LSU->isReady(IR));
 }
 
-void Scheduler::issueInstructionImpl(
-    unsigned InstrIndex, Instruction &IS,
-    SmallVectorImpl<std::pair<ResourceRef, double>> &UsedResources) {
-  const InstrDesc &D = IS.getDesc();
-
-  // Issue the instruction and collect all the consumed resources
-  // into a vector. That vector is then used to notify the listener.
-  Resources->issueInstruction(InstrIndex, D, UsedResources);
-
-  // Notify the instruction that it started executing.
-  // This updates the internal state of each write.
-  IS.execute();
-
-  if (IS.isExecuting())
-    IssuedQueue[InstrIndex] = &IS;
-}
-
-void Scheduler::issueInstruction(unsigned InstrIndex, Instruction &IS) {
-  // Release buffered resources.
-  const InstrDesc &Desc = IS.getDesc();
-  releaseBuffers(Desc.Buffers);
-  notifyReleasedBuffers(Desc.Buffers);
-
-  // Issue IS to the underlying pipelines and notify listeners.
-  SmallVector<std::pair<ResourceRef, double>, 4> Pipes;
-  issueInstructionImpl(InstrIndex, IS, Pipes);
-  notifyInstructionIssued(InstrIndex, Pipes);
-  if (IS.isExecuted())
-    notifyInstructionExecuted(InstrIndex);
-}
-
-void Scheduler::promoteToReadyQueue(SmallVectorImpl<unsigned> &Ready) {
-  // Scan the set of waiting instructions and promote them to the
-  // ready queue if operands are all ready.
-  for (auto I = WaitQueue.begin(), E = WaitQueue.end(); I != E;) {
-    const QueueEntryTy &Entry = *I;
-    unsigned IID = Entry.first;
-    Instruction &Inst = *Entry.second;
-
-    // Check if this instruction is now ready. In case, force
-    // a transition in state using method 'update()'.
-    Inst.update();
-
-    const InstrDesc &Desc = Inst.getDesc();
-    bool IsMemOp = Desc.MayLoad || Desc.MayStore;
-    if (!Inst.isReady() || (IsMemOp && !LSU->isReady(IID))) {
-      ++I;
-      continue;
-    }
-
-    Ready.emplace_back(IID);
-    ReadyQueue[IID] = &Inst;
-    auto ToRemove = I;
-    ++I;
-    WaitQueue.erase(ToRemove);
-  }
-}
-
-std::pair<unsigned, Instruction *> Scheduler::select() {
-  // Give priority to older instructions in the ReadyQueue. Since the ready
-  // queue is ordered by key, this will always prioritize older instructions.
-  const auto It = std::find_if(ReadyQueue.begin(), ReadyQueue.end(),
-                               [&](const QueueEntryTy &Entry) {
-                                 const Instruction &IS = *Entry.second;
-                                 const InstrDesc &D = IS.getDesc();
-                                 return Resources->canBeIssued(D);
-                               });
-
-  if (It == ReadyQueue.end())
-    return {0, nullptr};
-
-  // We found an instruction to issue.
-  const QueueEntryTy Entry = *It;
-  ReadyQueue.erase(It);
-  return Entry;
-}
-
-void Scheduler::updatePendingQueue(SmallVectorImpl<unsigned> &Ready) {
-  // Notify to instructions in the pending queue that a new cycle just
-  // started.
-  for (QueueEntryTy Entry : WaitQueue)
-    Entry.second->cycleEvent();
-  promoteToReadyQueue(Ready);
-}
-
-void Scheduler::updateIssuedQueue(SmallVectorImpl<unsigned> &Executed) {
-  for (auto I = IssuedQueue.begin(), E = IssuedQueue.end(); I != E;) {
-    const QueueEntryTy Entry = *I;
-    Entry.second->cycleEvent();
-    if (Entry.second->isExecuted()) {
-      Executed.push_back(Entry.first);
-      auto ToRemove = I;
-      ++I;
-      IssuedQueue.erase(ToRemove);
-    } else {
-      DEBUG(dbgs() << "[SCHEDULER]: Instruction " << Entry.first
-                   << " is still executing.\n");
-      ++I;
-    }
-  }
-}
-
-void Scheduler::notifyInstructionIssued(
-    unsigned Index, ArrayRef<std::pair<ResourceRef, double>> Used) {
-  DEBUG({
-    dbgs() << "[E] Instruction Issued: " << Index << '\n';
-    for (const std::pair<ResourceRef, unsigned> &Resource : Used) {
-      dbgs() << "[E] Resource Used: [" << Resource.first.first << '.'
-             << Resource.first.second << "]\n";
-      dbgs() << "           cycles: " << Resource.second << '\n';
-    }
-  });
-  Owner->notifyInstructionEvent(HWInstructionIssuedEvent(Index, Used));
-}
-
-void Scheduler::notifyInstructionExecuted(unsigned Index) {
-  LSU->onInstructionExecuted(Index);
-  DEBUG(dbgs() << "[E] Instruction Executed: " << Index << '\n');
-  Owner->notifyInstructionEvent(
-      HWInstructionEvent(HWInstructionEvent::Executed, Index));
-
-  const Instruction &IS = Owner->getInstruction(Index);
-  DU->onInstructionExecuted(IS.getRCUTokenID());
-}
-
-void Scheduler::notifyInstructionReady(unsigned Index) {
-  DEBUG(dbgs() << "[E] Instruction Ready: " << Index << '\n');
-  Owner->notifyInstructionEvent(
-      HWInstructionEvent(HWInstructionEvent::Ready, Index));
-}
-
-void Scheduler::notifyResourceAvailable(const ResourceRef &RR) {
-  Owner->notifyResourceAvailable(RR);
-}
-
-void Scheduler::notifyReservedBuffers(ArrayRef<uint64_t> Buffers) {
-  if (Buffers.empty())
-    return;
-
-  SmallVector<unsigned, 4> BufferIDs(Buffers.begin(), Buffers.end());
-  std::transform(
-      Buffers.begin(), Buffers.end(), BufferIDs.begin(),
-      [&](uint64_t Op) { return Resources->resolveResourceMask(Op); });
-  Owner->notifyReservedBuffers(BufferIDs);
-}
-
-void Scheduler::notifyReleasedBuffers(ArrayRef<uint64_t> Buffers) {
-  if (Buffers.empty())
-    return;
-
-  SmallVector<unsigned, 4> BufferIDs(Buffers.begin(), Buffers.end());
-  std::transform(
-      Buffers.begin(), Buffers.end(), BufferIDs.begin(),
-      [&](uint64_t Op) { return Resources->resolveResourceMask(Op); });
-  Owner->notifyReleasedBuffers(BufferIDs);
-}
 } // namespace mca

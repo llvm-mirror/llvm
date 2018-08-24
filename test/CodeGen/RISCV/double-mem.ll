@@ -64,9 +64,9 @@ define double @fld_fsd_global(double %a, double %b) nounwind {
 ; RV32IFD-NEXT:    lui a0, %hi(G)
 ; RV32IFD-NEXT:    fld ft1, %lo(G)(a0)
 ; RV32IFD-NEXT:    fsd ft0, %lo(G)(a0)
-; RV32IFD-NEXT:    lui a0, %hi(G+72)
-; RV32IFD-NEXT:    fld ft1, %lo(G+72)(a0)
-; RV32IFD-NEXT:    fsd ft0, %lo(G+72)(a0)
+; RV32IFD-NEXT:    addi a0, a0, %lo(G)
+; RV32IFD-NEXT:    fld ft1, 72(a0)
+; RV32IFD-NEXT:    fsd ft0, 72(a0)
 ; RV32IFD-NEXT:    fsd ft0, 8(sp)
 ; RV32IFD-NEXT:    lw a0, 8(sp)
 ; RV32IFD-NEXT:    lw a1, 12(sp)
@@ -116,14 +116,12 @@ define double @fld_stack(double %a) nounwind {
 ; RV32IFD-NEXT:    sw ra, 28(sp)
 ; RV32IFD-NEXT:    sw s1, 24(sp)
 ; RV32IFD-NEXT:    sw s2, 20(sp)
-; RV32IFD-NEXT:    mv s1, a1
-; RV32IFD-NEXT:    mv s2, a0
-; RV32IFD-NEXT:    lui a0, %hi(notdead)
-; RV32IFD-NEXT:    addi a1, a0, %lo(notdead)
+; RV32IFD-NEXT:    mv s2, a1
+; RV32IFD-NEXT:    mv s1, a0
 ; RV32IFD-NEXT:    addi a0, sp, 8
-; RV32IFD-NEXT:    jalr a1
-; RV32IFD-NEXT:    sw s2, 0(sp)
-; RV32IFD-NEXT:    sw s1, 4(sp)
+; RV32IFD-NEXT:    call notdead
+; RV32IFD-NEXT:    sw s1, 0(sp)
+; RV32IFD-NEXT:    sw s2, 4(sp)
 ; RV32IFD-NEXT:    fld ft0, 0(sp)
 ; RV32IFD-NEXT:    fld ft1, 8(sp)
 ; RV32IFD-NEXT:    fadd.d ft0, ft1, ft0
@@ -156,10 +154,8 @@ define void @fsd_stack(double %a, double %b) nounwind {
 ; RV32IFD-NEXT:    fld ft1, 8(sp)
 ; RV32IFD-NEXT:    fadd.d ft0, ft1, ft0
 ; RV32IFD-NEXT:    fsd ft0, 16(sp)
-; RV32IFD-NEXT:    lui a0, %hi(notdead)
-; RV32IFD-NEXT:    addi a1, a0, %lo(notdead)
 ; RV32IFD-NEXT:    addi a0, sp, 16
-; RV32IFD-NEXT:    jalr a1
+; RV32IFD-NEXT:    call notdead
 ; RV32IFD-NEXT:    lw ra, 28(sp)
 ; RV32IFD-NEXT:    addi sp, sp, 32
 ; RV32IFD-NEXT:    ret

@@ -405,7 +405,7 @@ static bool contains(Value *Expr, Value *V) {
 }
 #endif // NDEBUG
 
-void Value::doRAUW(Value *New, bool NoMetadata) {
+void Value::doRAUW(Value *New, ReplaceMetadataUses ReplaceMetaUses) {
   assert(New && "Value::replaceAllUsesWith(<null>) is invalid!");
   assert(!contains(New, this) &&
          "this->replaceAllUsesWith(expr(this)) is NOT valid!");
@@ -415,7 +415,7 @@ void Value::doRAUW(Value *New, bool NoMetadata) {
   // Notify all ValueHandles (if present) that this value is going away.
   if (HasValueHandle)
     ValueHandleBase::ValueIsRAUWd(this, New);
-  if (!NoMetadata && isUsedByMetadata())
+  if (ReplaceMetaUses == ReplaceMetadataUses::Yes && isUsedByMetadata())
     ValueAsMetadata::handleRAUW(this, New);
 
   while (!materialized_use_empty()) {
@@ -437,11 +437,11 @@ void Value::doRAUW(Value *New, bool NoMetadata) {
 }
 
 void Value::replaceAllUsesWith(Value *New) {
-  doRAUW(New, false /* NoMetadata */);
+  doRAUW(New, ReplaceMetadataUses::Yes);
 }
 
 void Value::replaceNonMetadataUsesWith(Value *New) {
-  doRAUW(New, true /* NoMetadata */);
+  doRAUW(New, ReplaceMetadataUses::No);
 }
 
 // Like replaceAllUsesWith except it does not handle constants or basic blocks.
@@ -465,41 +465,12 @@ void Value::replaceUsesOutsideBlock(Value *New, BasicBlock *BB) {
   }
 }
 
-void Value::replaceUsesExceptBlockAddr(Value *New) {
-  SmallSetVector<Constant *, 4> Constants;
-  use_iterator UI = use_begin(), E = use_end();
-  for (; UI != E;) {
-    Use &U = *UI;
-    ++UI;
-
-    if (isa<BlockAddress>(U.getUser()))
-      continue;
-
-    // Must handle Constants specially, we cannot call replaceUsesOfWith on a
-    // constant because they are uniqued.
-    if (auto *C = dyn_cast<Constant>(U.getUser())) {
-      if (!isa<GlobalValue>(C)) {
-        // Save unique users to avoid processing operand replacement
-        // more than once.
-        Constants.insert(C);
-        continue;
-      }
-    }
-
-    U.set(New);
-  }
-
-  // Process operand replacement of saved constants.
-  for (auto *C : Constants)
-    C->handleOperandChange(this, New);
-}
-
 namespace {
 // Various metrics for how much to strip off of pointers.
 enum PointerStripKind {
   PSK_ZeroIndices,
   PSK_ZeroIndicesAndAliases,
-  PSK_ZeroIndicesAndAliasesAndBarriers,
+  PSK_ZeroIndicesAndAliasesAndInvariantGroups,
   PSK_InBoundsConstantIndices,
   PSK_InBounds
 };
@@ -518,7 +489,7 @@ static const Value *stripPointerCastsAndOffsets(const Value *V) {
     if (auto *GEP = dyn_cast<GEPOperator>(V)) {
       switch (StripKind) {
       case PSK_ZeroIndicesAndAliases:
-      case PSK_ZeroIndicesAndAliasesAndBarriers:
+      case PSK_ZeroIndicesAndAliasesAndInvariantGroups:
       case PSK_ZeroIndices:
         if (!GEP->hasAllZeroIndices())
           return V;
@@ -546,11 +517,12 @@ static const Value *stripPointerCastsAndOffsets(const Value *V) {
           V = RV;
           continue;
         }
-        // The result of invariant.group.barrier must alias it's argument,
+        // The result of launder.invariant.group must alias it's argument,
         // but it can't be marked with returned attribute, that's why it needs
         // special case.
-        if (StripKind == PSK_ZeroIndicesAndAliasesAndBarriers &&
-            CS.getIntrinsicID() == Intrinsic::invariant_group_barrier) {
+        if (StripKind == PSK_ZeroIndicesAndAliasesAndInvariantGroups &&
+            (CS.getIntrinsicID() == Intrinsic::launder_invariant_group ||
+             CS.getIntrinsicID() == Intrinsic::strip_invariant_group)) {
           V = CS.getArgOperand(0);
           continue;
         }
@@ -576,8 +548,8 @@ const Value *Value::stripInBoundsConstantOffsets() const {
   return stripPointerCastsAndOffsets<PSK_InBoundsConstantIndices>(this);
 }
 
-const Value *Value::stripPointerCastsAndBarriers() const {
-  return stripPointerCastsAndOffsets<PSK_ZeroIndicesAndAliasesAndBarriers>(
+const Value *Value::stripPointerCastsAndInvariantGroups() const {
+  return stripPointerCastsAndOffsets<PSK_ZeroIndicesAndAliasesAndInvariantGroups>(
       this);
 }
 
@@ -685,6 +657,10 @@ unsigned Value::getPointerAlignment(const DataLayout &DL) const {
 
   unsigned Align = 0;
   if (auto *GO = dyn_cast<GlobalObject>(this)) {
+    // Don't make any assumptions about function pointer alignment. Some
+    // targets use the LSBs to store additional information.
+    if (isa<Function>(GO))
+      return 0;
     Align = GO->getAlignment();
     if (Align == 0) {
       if (auto *GVar = dyn_cast<GlobalVariable>(GO)) {

@@ -765,6 +765,56 @@ static inline bool isSVEMaskOfIdenticalElements(int64_t Imm) {
   return all_of(Vec.Parts, [Vec](T Elem) { return Elem == Vec.Parts[0]; });
 }
 
+/// Returns true if Imm is valid for CPY/DUP.
+template <typename T>
+static inline bool isSVECpyImm(int64_t Imm) {
+  bool IsImm8 = int8_t(Imm) == Imm;
+  bool IsImm16 = int16_t(Imm & ~0xff) == Imm;
+
+  if (std::is_same<int8_t, typename std::make_signed<T>::type>::value)
+    return IsImm8 || uint8_t(Imm) == Imm;
+
+  if (std::is_same<int16_t, typename std::make_signed<T>::type>::value)
+    return IsImm8 || IsImm16 || uint16_t(Imm & ~0xff) == Imm;
+
+  return IsImm8 || IsImm16;
+}
+
+/// Returns true if Imm is valid for ADD/SUB.
+template <typename T>
+static inline bool isSVEAddSubImm(int64_t Imm) {
+  bool IsInt8t =
+      std::is_same<int8_t, typename std::make_signed<T>::type>::value;
+  return uint8_t(Imm) == Imm || (!IsInt8t && uint16_t(Imm & ~0xff) == Imm);
+}
+
+/// Return true if Imm is valid for DUPM and has no single CPY/DUP equivalent.
+static inline bool isSVEMoveMaskPreferredLogicalImmediate(int64_t Imm) {
+  union {
+    int64_t D;
+    int32_t S[2];
+    int16_t H[4];
+    int8_t  B[8];
+  } Vec = { Imm };
+
+  if (isSVECpyImm<int64_t>(Vec.D))
+    return false;
+
+  if (isSVEMaskOfIdenticalElements<int32_t>(Imm) &&
+      isSVECpyImm<int32_t>(Vec.S[0]))
+    return false;
+
+  if (isSVEMaskOfIdenticalElements<int16_t>(Imm) &&
+      isSVECpyImm<int16_t>(Vec.H[0]))
+    return false;
+
+  if (isSVEMaskOfIdenticalElements<int8_t>(Imm) &&
+      isSVECpyImm<int8_t>(Vec.B[0]))
+    return false;
+
+  return isLogicalImmediate(Vec.D, 64);
+}
+
 inline static bool isAnyMOVZMovAlias(uint64_t Value, int RegWidth) {
   for (int Shift = 0; Shift <= RegWidth - 16; Shift += 16)
     if ((Value & ~(0xffffULL << Shift)) == 0)

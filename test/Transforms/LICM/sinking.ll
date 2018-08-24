@@ -40,6 +40,39 @@ Out:		; preds = %Loop
 ; CHECK-NEXT: ret double %A
 }
 
+; FIXME: Should be able to sink this case
+define i32 @test2b(i32 %X) {
+	br label %Loop
+
+Loop:		; preds = %Loop, %0
+	call void @foo( )
+	%A = sdiv i32 10, %X
+	br i1 true, label %Loop, label %Out
+
+Out:		; preds = %Loop
+	ret i32 %A
+; CHECK-LABEL: @test2b(
+; CHECK: Out:
+; CHECK-NEXT: sdiv
+; CHECK-NEXT: ret i32 %A
+}
+
+define double @test2c(double* %P) {
+	br label %Loop
+
+Loop:		; preds = %Loop, %0
+	call void @foo( )
+	%A = load double, double* %P, !invariant.load !{}
+	br i1 true, label %Loop, label %Out
+
+Out:		; preds = %Loop
+	ret double %A
+; CHECK-LABEL: @test2c(
+; CHECK: Out:
+; CHECK-NEXT: load double
+; CHECK-NEXT: ret double %A
+}
+
 ; This testcase checks to make sure the sinker does not cause problems with
 ; critical edges.
 define void @test3() {
@@ -243,7 +276,8 @@ Out:		; preds = %Loop
 define void @test11() {
 	br label %Loop
 Loop:
-	%dead = getelementptr %Ty, %Ty* @X2, i64 0, i32 0
+	%dead1 = getelementptr %Ty, %Ty* @X2, i64 0, i32 0
+	%dead2 = getelementptr %Ty, %Ty* @X2, i64 0, i32 1
 	br i1 false, label %Loop, label %Out
 Out:
 	ret void
@@ -251,8 +285,14 @@ Out:
 ; CHECK:     Out:
 ; CHECK-NEXT:  ret void
 
+; The GEP in dead1 is adding a zero offset, so the DIExpression can be kept as
+; a "register location".
+; The GEP in dead2 is adding a 4 bytes to the pointer, so the DIExpression is
+; turned into an "implicit location" using DW_OP_stack_value.
+;
 ; DEBUGIFY-LABEL: @test11(
-; DEBUGIFY: call void @llvm.dbg.value(metadata %Ty* @X2, metadata {{.*}}, metadata !DIExpression(DW_OP_stack_value))
+; DEBUGIFY: call void @llvm.dbg.value(metadata %Ty* @X2, metadata {{.*}}, metadata !DIExpression())
+; DEBUGIFY: call void @llvm.dbg.value(metadata %Ty* @X2, metadata {{.*}}, metadata !DIExpression(DW_OP_plus_uconst, 4, DW_OP_stack_value))
 }
 
 @c = common global [1 x i32] zeroinitializer, align 4

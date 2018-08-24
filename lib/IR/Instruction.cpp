@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/IR/Instruction.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
@@ -594,6 +595,13 @@ bool Instruction::isSafeToRemove() const {
          !isa<TerminatorInst>(this);
 }
 
+const Instruction *Instruction::getNextNonDebugInstruction() const {
+  for (const Instruction *I = getNextNode(); I; I = I->getNextNode())
+    if (!isa<DbgInfoIntrinsic>(I))
+      return I;
+  return nullptr;
+}
+
 bool Instruction::isAssociative() const {
   unsigned Opcode = getOpcode();
   if (isAssociative(Opcode))
@@ -602,7 +610,8 @@ bool Instruction::isAssociative() const {
   switch (Opcode) {
   case FMul:
   case FAdd:
-    return cast<FPMathOperator>(this)->isFast();
+    return cast<FPMathOperator>(this)->hasAllowReassoc() &&
+           cast<FPMathOperator>(this)->hasNoSignedZeros();
   default:
     return false;
   }

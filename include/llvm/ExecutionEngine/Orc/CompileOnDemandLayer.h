@@ -20,9 +20,10 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/ExecutionEngine/JITSymbol.h"
-#include "llvm/ExecutionEngine/Orc/Core.h"
 #include "llvm/ExecutionEngine/Orc/IndirectionUtils.h"
 #include "llvm/ExecutionEngine/Orc/LambdaResolver.h"
+#include "llvm/ExecutionEngine/Orc/Layer.h"
+#include "llvm/ExecutionEngine/Orc/Legacy.h"
 #include "llvm/ExecutionEngine/Orc/OrcError.h"
 #include "llvm/ExecutionEngine/RuntimeDyld.h"
 #include "llvm/IR/Attributes.h"
@@ -57,7 +58,47 @@ class Value;
 
 namespace orc {
 
-/// @brief Compile-on-demand layer.
+class ExtractingIRMaterializationUnit;
+
+class CompileOnDemandLayer2 : public IRLayer {
+  friend class ExtractingIRMaterializationUnit;
+
+public:
+  /// Builder for IndirectStubsManagers.
+  using IndirectStubsManagerBuilder =
+      std::function<std::unique_ptr<IndirectStubsManager>()>;
+
+  using GetAvailableContextFunction = std::function<LLVMContext &()>;
+
+  CompileOnDemandLayer2(ExecutionSession &ES, IRLayer &BaseLayer,
+                        JITCompileCallbackManager &CCMgr,
+                        IndirectStubsManagerBuilder BuildIndirectStubsManager,
+                        GetAvailableContextFunction GetAvailableContext);
+
+  Error add(JITDylib &V, VModuleKey K, std::unique_ptr<Module> M) override;
+
+  void emit(MaterializationResponsibility R, VModuleKey K,
+            std::unique_ptr<Module> M) override;
+
+private:
+  using StubManagersMap =
+      std::map<const JITDylib *, std::unique_ptr<IndirectStubsManager>>;
+
+  IndirectStubsManager &getStubsManager(const JITDylib &JD);
+
+  void emitExtractedFunctionsModule(MaterializationResponsibility R,
+                                    std::unique_ptr<Module> M);
+
+  mutable std::mutex CODLayerMutex;
+
+  IRLayer &BaseLayer;
+  JITCompileCallbackManager &CCMgr;
+  IndirectStubsManagerBuilder BuildIndirectStubsManager;
+  StubManagersMap StubsMgrs;
+  GetAvailableContextFunction GetAvailableContext;
+};
+
+/// Compile-on-demand layer.
 ///
 ///   When a module is added to this layer a stub is created for each of its
 /// function definitions. The stubs and other global values are immediately
@@ -196,10 +237,10 @@ private:
 
 public:
 
-  /// @brief Module partitioning functor.
+  /// Module partitioning functor.
   using PartitioningFtor = std::function<std::set<Function*>(Function&)>;
 
-  /// @brief Builder for IndirectStubsManagers.
+  /// Builder for IndirectStubsManagers.
   using IndirectStubsManagerBuilderT =
       std::function<std::unique_ptr<IndirectStubsMgrT>()>;
 
@@ -209,7 +250,7 @@ public:
   using SymbolResolverSetter =
       std::function<void(VModuleKey K, std::shared_ptr<SymbolResolver> R)>;
 
-  /// @brief Construct a compile-on-demand layer instance.
+  /// Construct a compile-on-demand layer instance.
   CompileOnDemandLayer(ExecutionSession &ES, BaseLayerT &BaseLayer,
                        SymbolResolverGetter GetSymbolResolver,
                        SymbolResolverSetter SetSymbolResolver,
@@ -230,7 +271,7 @@ public:
       consumeError(removeModule(LogicalDylibs.begin()->first));
   }
 
-  /// @brief Add a module to the compile-on-demand layer.
+  /// Add a module to the compile-on-demand layer.
   Error addModule(VModuleKey K, std::unique_ptr<Module> M) {
 
     assert(!LogicalDylibs.count(K) && "VModuleKey K already in use");
@@ -242,12 +283,12 @@ public:
     return addLogicalModule(I->second, std::move(M));
   }
 
-  /// @brief Add extra modules to an existing logical module.
+  /// Add extra modules to an existing logical module.
   Error addExtraModule(VModuleKey K, std::unique_ptr<Module> M) {
     return addLogicalModule(LogicalDylibs[K], std::move(M));
   }
 
-  /// @brief Remove the module represented by the given key.
+  /// Remove the module represented by the given key.
   ///
   ///   This will remove all modules in the layers below that were derived from
   /// the module represented by K.
@@ -259,7 +300,7 @@ public:
     return Err;
   }
 
-  /// @brief Search for the given named symbol.
+  /// Search for the given named symbol.
   /// @param Name The name of the symbol to search for.
   /// @param ExportedSymbolsOnly If true, search only for exported symbols.
   /// @return A handle for the given named symbol, if it exists.
@@ -275,7 +316,7 @@ public:
     return BaseLayer.findSymbol(Name, ExportedSymbolsOnly);
   }
 
-  /// @brief Get the address of a symbol provided by this layer, or some layer
+  /// Get the address of a symbol provided by this layer, or some layer
   ///        below this one.
   JITSymbol findSymbolIn(VModuleKey K, const std::string &Name,
                          bool ExportedSymbolsOnly) {
@@ -283,7 +324,7 @@ public:
     return LogicalDylibs[K].findSymbol(BaseLayer, Name, ExportedSymbolsOnly);
   }
 
-  /// @brief Update the stub for the given function to point at FnBodyAddr.
+  /// Update the stub for the given function to point at FnBodyAddr.
   /// This can be used to support re-optimization.
   /// @return true if the function exists and the stub is updated, false
   ///         otherwise.
@@ -316,7 +357,7 @@ private:
     // simplifying symbol lookup.
     LD.StaticRenamer.rename(*SrcMPtr);
 
-    // Bump the linkage and rename any anonymous/privote members in SrcM to
+    // Bump the linkage and rename any anonymous/private members in SrcM to
     // ensure that everything will resolve properly after we partition SrcM.
     makeAllSymbolsExternallyAccessible(*SrcMPtr);
 
@@ -349,22 +390,21 @@ private:
         // Create a callback, associate it with the stub for the function,
         // and set the compile action to compile the partition containing the
         // function.
-        if (auto CCInfoOrErr = CompileCallbackMgr.getCompileCallback()) {
-          auto &CCInfo = *CCInfoOrErr;
+        auto CompileAction = [this, &LD, LMId, &F]() -> JITTargetAddress {
+          if (auto FnImplAddrOrErr = this->extractAndCompile(LD, LMId, F))
+            return *FnImplAddrOrErr;
+          else {
+            // FIXME: Report error, return to 'abort' or something similar.
+            consumeError(FnImplAddrOrErr.takeError());
+            return 0;
+          }
+        };
+        if (auto CCAddr =
+                CompileCallbackMgr.getCompileCallback(std::move(CompileAction)))
           StubInits[MangledName] =
-            std::make_pair(CCInfo.getAddress(),
-                           JITSymbolFlags::fromGlobalValue(F));
-          CCInfo.setCompileAction([this, &LD, LMId, &F]() -> JITTargetAddress {
-              if (auto FnImplAddrOrErr = this->extractAndCompile(LD, LMId, F))
-                return *FnImplAddrOrErr;
-              else {
-                // FIXME: Report error, return to 'abort' or something similar.
-                consumeError(FnImplAddrOrErr.takeError());
-                return 0;
-              }
-            });
-        } else
-          return CCInfoOrErr.takeError();
+              std::make_pair(*CCAddr, JITSymbolFlags::fromGlobalValue(F));
+        else
+          return CCAddr.takeError();
       }
 
       if (auto Err = LD.StubsMgr->createStubs(StubInits))
@@ -402,9 +442,8 @@ private:
 
     // Initializers may refer to functions declared (but not defined) in this
     // module. Build a materializer to clone decls on demand.
-    Error MaterializerErrors = Error::success();
     auto Materializer = createLambdaMaterializer(
-      [&LD, &GVsM, &MaterializerErrors](Value *V) -> Value* {
+      [&LD, &GVsM](Value *V) -> Value* {
         if (auto *F = dyn_cast<Function>(V)) {
           // Decls in the original module just get cloned.
           if (F->isDeclaration())
@@ -416,18 +455,8 @@ private:
           const DataLayout &DL = GVsM->getDataLayout();
           std::string FName = mangle(F->getName(), DL);
           unsigned PtrBitWidth = DL.getPointerTypeSizeInBits(F->getType());
-          JITTargetAddress StubAddr = 0;
-
-          // Get the address for the stub. If we encounter an error while
-          // doing so, stash it in the MaterializerErrors variable and use a
-          // null address as a placeholder.
-          if (auto StubSym = LD.StubsMgr->findStub(FName, false)) {
-            if (auto StubAddrOrErr = StubSym.getAddress())
-              StubAddr = *StubAddrOrErr;
-            else
-              MaterializerErrors = joinErrors(std::move(MaterializerErrors),
-                                              StubAddrOrErr.takeError());
-          }
+          JITTargetAddress StubAddr =
+            LD.StubsMgr->findStub(FName, false).getAddress();
 
           ConstantInt *StubAddrCI =
             ConstantInt::get(GVsM->getContext(), APInt(PtrBitWidth, StubAddr));
@@ -456,15 +485,10 @@ private:
       NewA->setAliasee(cast<Constant>(Init));
     }
 
-    if (MaterializerErrors)
-      return MaterializerErrors;
-
     // Build a resolver for the globals module and add it to the base layer.
     auto LegacyLookup = [this, &LD](const std::string &Name) -> JITSymbol {
       if (auto Sym = LD.StubsMgr->findStub(Name, false))
         return Sym;
-      else if (auto Err = Sym.takeError())
-        return std::move(Err);
 
       if (auto Sym = LD.findSymbol(BaseLayer, Name, false))
         return Sym;
@@ -475,25 +499,35 @@ private:
     };
 
     auto GVsResolver = createSymbolResolver(
-        [&LD, LegacyLookup](SymbolFlagsMap &SymbolFlags,
-                            const SymbolNameSet &Symbols) {
-          auto NotFoundViaLegacyLookup =
-              lookupFlagsWithLegacyFn(SymbolFlags, Symbols, LegacyLookup);
+        [&LD, LegacyLookup](const SymbolNameSet &Symbols) {
+          auto SymbolFlags = lookupFlagsWithLegacyFn(Symbols, LegacyLookup);
 
-          if (!NotFoundViaLegacyLookup) {
-            logAllUnhandledErrors(NotFoundViaLegacyLookup.takeError(), errs(),
+          if (!SymbolFlags) {
+            logAllUnhandledErrors(SymbolFlags.takeError(), errs(),
                                   "CODLayer/GVsResolver flags lookup failed: ");
-            SymbolFlags.clear();
-            return SymbolNameSet();
+            return SymbolFlagsMap();
           }
 
-          return LD.BackingResolver->lookupFlags(SymbolFlags,
-                                                 *NotFoundViaLegacyLookup);
+          if (SymbolFlags->size() == Symbols.size())
+            return *SymbolFlags;
+
+          SymbolNameSet NotFoundViaLegacyLookup;
+          for (auto &S : Symbols)
+            if (!SymbolFlags->count(S))
+              NotFoundViaLegacyLookup.insert(S);
+          auto SymbolFlags2 =
+              LD.BackingResolver->lookupFlags(NotFoundViaLegacyLookup);
+
+          for (auto &KV : SymbolFlags2)
+            (*SymbolFlags)[KV.first] = std::move(KV.second);
+
+          return *SymbolFlags;
         },
-        [&LD, LegacyLookup](std::shared_ptr<AsynchronousSymbolQuery> Query,
-                            SymbolNameSet Symbols) {
+        [this, &LD,
+         LegacyLookup](std::shared_ptr<AsynchronousSymbolQuery> Query,
+                       SymbolNameSet Symbols) {
           auto NotFoundViaLegacyLookup =
-              lookupWithLegacyFn(*Query, Symbols, LegacyLookup);
+              lookupWithLegacyFn(ES, *Query, Symbols, LegacyLookup);
           return LD.BackingResolver->lookup(Query, NotFoundViaLegacyLookup);
         });
 
@@ -634,23 +668,34 @@ private:
 
     // Create memory manager and symbol resolver.
     auto Resolver = createSymbolResolver(
-        [&LD, LegacyLookup](SymbolFlagsMap &SymbolFlags,
-                            const SymbolNameSet &Symbols) {
-          auto NotFoundViaLegacyLookup =
-              lookupFlagsWithLegacyFn(SymbolFlags, Symbols, LegacyLookup);
-          if (!NotFoundViaLegacyLookup) {
-            logAllUnhandledErrors(NotFoundViaLegacyLookup.takeError(), errs(),
+        [&LD, LegacyLookup](const SymbolNameSet &Symbols) {
+          auto SymbolFlags = lookupFlagsWithLegacyFn(Symbols, LegacyLookup);
+          if (!SymbolFlags) {
+            logAllUnhandledErrors(SymbolFlags.takeError(), errs(),
                                   "CODLayer/SubResolver flags lookup failed: ");
-            SymbolFlags.clear();
-            return SymbolNameSet();
+            return SymbolFlagsMap();
           }
-          return LD.BackingResolver->lookupFlags(SymbolFlags,
-                                                 *NotFoundViaLegacyLookup);
+
+          if (SymbolFlags->size() == Symbols.size())
+            return *SymbolFlags;
+
+          SymbolNameSet NotFoundViaLegacyLookup;
+          for (auto &S : Symbols)
+            if (!SymbolFlags->count(S))
+              NotFoundViaLegacyLookup.insert(S);
+
+          auto SymbolFlags2 =
+              LD.BackingResolver->lookupFlags(NotFoundViaLegacyLookup);
+
+          for (auto &KV : SymbolFlags2)
+            (*SymbolFlags)[KV.first] = std::move(KV.second);
+
+          return *SymbolFlags;
         },
-        [&LD, LegacyLookup](std::shared_ptr<AsynchronousSymbolQuery> Q,
-                            SymbolNameSet Symbols) {
+        [this, &LD, LegacyLookup](std::shared_ptr<AsynchronousSymbolQuery> Q,
+                                  SymbolNameSet Symbols) {
           auto NotFoundViaLegacyLookup =
-              lookupWithLegacyFn(*Q, Symbols, LegacyLookup);
+              lookupWithLegacyFn(ES, *Q, Symbols, LegacyLookup);
           return LD.BackingResolver->lookup(Q,
                                             std::move(NotFoundViaLegacyLookup));
         });

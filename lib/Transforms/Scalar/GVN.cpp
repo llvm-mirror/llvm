@@ -38,8 +38,8 @@
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/PHITransAddr.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
-#include "llvm/Analysis/Utils/Local.h"
 #include "llvm/Analysis/ValueTracking.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CallSite.h"
@@ -47,6 +47,7 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DebugLoc.h"
+#include "llvm/IR/DomTreeUpdater.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InstrTypes.h"
@@ -70,6 +71,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/SSAUpdater.h"
 #include "llvm/Transforms/Utils/VNCoercion.h"
 #include <algorithm>
@@ -676,7 +678,7 @@ static bool IsValueFullyAvailableInBlock(BasicBlock *BB,
 
   // Optimistically assume that the block is fully available and check to see
   // if we already know about this block in one lookup.
-  std::pair<DenseMap<BasicBlock*, char>::iterator, char> IV =
+  std::pair<DenseMap<BasicBlock*, char>::iterator, bool> IV =
     FullyAvailableBlocks.insert(std::make_pair(BB, 2));
 
   // If the entry already existed for this block, return the precomputed value.
@@ -765,6 +767,15 @@ static Value *ConstructSSAForLoadSet(LoadInst *LI,
     if (SSAUpdate.HasValueForBlock(BB))
       continue;
 
+    // If the value is the load that we will be eliminating, and the block it's
+    // available in is the block that the load is in, then don't add it as
+    // SSAUpdater will resolve the value to the relevant phi which may let it
+    // avoid phi construction entirely if there's actually only one value.
+    if (BB == LI->getParent() &&
+        ((AV.AV.isSimpleValue() && AV.AV.getSimpleValue() == LI) ||
+         (AV.AV.isCoercedLoadValue() && AV.AV.getCoercedLoadValue() == LI)))
+      continue;
+
     SSAUpdate.AddAvailableValue(BB, AV.MaterializeAdjustedValue(LI, gvn));
   }
 
@@ -783,9 +794,10 @@ Value *AvailableValue::MaterializeAdjustedValue(LoadInst *LI,
     if (Res->getType() != LoadTy) {
       Res = getStoreValueForLoad(Res, Offset, LoadTy, InsertPt, DL);
 
-      DEBUG(dbgs() << "GVN COERCED NONLOCAL VAL:\nOffset: " << Offset << "  "
-                   << *getSimpleValue() << '\n'
-                   << *Res << '\n' << "\n\n\n");
+      LLVM_DEBUG(dbgs() << "GVN COERCED NONLOCAL VAL:\nOffset: " << Offset
+                        << "  " << *getSimpleValue() << '\n'
+                        << *Res << '\n'
+                        << "\n\n\n");
     }
   } else if (isCoercedLoadValue()) {
     LoadInst *Load = getCoercedLoadValue();
@@ -799,20 +811,21 @@ Value *AvailableValue::MaterializeAdjustedValue(LoadInst *LI,
       // but then there all of the operations based on it would need to be
       // rehashed.  Just leave the dead load around.
       gvn.getMemDep().removeInstruction(Load);
-      DEBUG(dbgs() << "GVN COERCED NONLOCAL LOAD:\nOffset: " << Offset << "  "
-                   << *getCoercedLoadValue() << '\n'
-                   << *Res << '\n'
-                   << "\n\n\n");
+      LLVM_DEBUG(dbgs() << "GVN COERCED NONLOCAL LOAD:\nOffset: " << Offset
+                        << "  " << *getCoercedLoadValue() << '\n'
+                        << *Res << '\n'
+                        << "\n\n\n");
     }
   } else if (isMemIntrinValue()) {
     Res = getMemInstValueForLoad(getMemIntrinValue(), Offset, LoadTy,
                                  InsertPt, DL);
-    DEBUG(dbgs() << "GVN COERCED NONLOCAL MEM INTRIN:\nOffset: " << Offset
-                 << "  " << *getMemIntrinValue() << '\n'
-                 << *Res << '\n' << "\n\n\n");
+    LLVM_DEBUG(dbgs() << "GVN COERCED NONLOCAL MEM INTRIN:\nOffset: " << Offset
+                      << "  " << *getMemIntrinValue() << '\n'
+                      << *Res << '\n'
+                      << "\n\n\n");
   } else {
     assert(isUndefValue() && "Should be UndefVal");
-    DEBUG(dbgs() << "GVN COERCED NONLOCAL Undef:\n";);
+    LLVM_DEBUG(dbgs() << "GVN COERCED NONLOCAL Undef:\n";);
     return UndefValue::get(LoadTy);
   }
   assert(Res && "failed to materialize?");
@@ -825,7 +838,7 @@ static bool isLifetimeStart(const Instruction *Inst) {
   return false;
 }
 
-/// \brief Try to locate the three instruction involved in a missed
+/// Try to locate the three instruction involved in a missed
 /// load-elimination case that is due to an intervening store.
 static void reportMayClobberedLoad(LoadInst *LI, MemDepResult DepInfo,
                                    DominatorTree *DT,
@@ -914,13 +927,11 @@ bool GVN::AnalyzeLoadAvailability(LoadInst *LI, MemDepResult DepInfo,
       }
     }
     // Nothing known about this clobber, have to be conservative
-    DEBUG(
-      // fast print dep, using operator<< on instruction is too slow.
-      dbgs() << "GVN: load ";
-      LI->printAsOperand(dbgs());
-      Instruction *I = DepInfo.getInst();
-      dbgs() << " is clobbered by " << *I << '\n';
-    );
+    LLVM_DEBUG(
+        // fast print dep, using operator<< on instruction is too slow.
+        dbgs() << "GVN: load "; LI->printAsOperand(dbgs());
+        Instruction *I = DepInfo.getInst();
+        dbgs() << " is clobbered by " << *I << '\n';);
     if (ORE->allowExtraAnalysis(DEBUG_TYPE))
       reportMayClobberedLoad(LI, DepInfo, DT, ORE);
 
@@ -978,12 +989,10 @@ bool GVN::AnalyzeLoadAvailability(LoadInst *LI, MemDepResult DepInfo,
   }
 
   // Unknown def - must be conservative
-  DEBUG(
-    // fast print dep, using operator<< on instruction is too slow.
-    dbgs() << "GVN: load ";
-    LI->printAsOperand(dbgs());
-    dbgs() << " has unknown def " << *DepInst << '\n';
-  );
+  LLVM_DEBUG(
+      // fast print dep, using operator<< on instruction is too slow.
+      dbgs() << "GVN: load "; LI->printAsOperand(dbgs());
+      dbgs() << " has unknown def " << *DepInst << '\n';);
   return false;
 }
 
@@ -1065,16 +1074,9 @@ bool GVN::PerformLoadPRE(LoadInst *LI, AvailValInBlkVect &ValuesPerBlock,
   // It is illegal to move the array access to any point above the guard,
   // because if the index is out of bounds we should deoptimize rather than
   // access the array.
-  // Check that there is no guard in this block above our intruction.
-  if (!IsSafeToSpeculativelyExecute) {
-    auto It = FirstImplicitControlFlowInsts.find(TmpBB);
-    if (It != FirstImplicitControlFlowInsts.end()) {
-      assert(It->second->getParent() == TmpBB &&
-             "Implicit control flow map broken?");
-      if (OI->dominates(It->second, LI))
-        return false;
-    }
-  }
+  // Check that there is no guard in this block above our instruction.
+  if (!IsSafeToSpeculativelyExecute && ICF->isDominatedByICFIFromSameBlock(LI))
+    return false;
   while (TmpBB->getSinglePredecessor()) {
     TmpBB = TmpBB->getSinglePredecessor();
     if (TmpBB == LoadBB) // Infinite (unreachable) loop.
@@ -1091,8 +1093,7 @@ bool GVN::PerformLoadPRE(LoadInst *LI, AvailValInBlkVect &ValuesPerBlock,
       return false;
 
     // Check that there is no implicit control flow in a block above.
-    if (!IsSafeToSpeculativelyExecute &&
-        FirstImplicitControlFlowInsts.count(TmpBB))
+    if (!IsSafeToSpeculativelyExecute && ICF->hasICF(TmpBB))
       return false;
   }
 
@@ -1113,9 +1114,9 @@ bool GVN::PerformLoadPRE(LoadInst *LI, AvailValInBlkVect &ValuesPerBlock,
     // If any predecessor block is an EH pad that does not allow non-PHI
     // instructions before the terminator, we can't PRE the load.
     if (Pred->getTerminator()->isEHPad()) {
-      DEBUG(dbgs()
-            << "COULD NOT PRE LOAD BECAUSE OF AN EH PAD PREDECESSOR '"
-            << Pred->getName() << "': " << *LI << '\n');
+      LLVM_DEBUG(
+          dbgs() << "COULD NOT PRE LOAD BECAUSE OF AN EH PAD PREDECESSOR '"
+                 << Pred->getName() << "': " << *LI << '\n');
       return false;
     }
 
@@ -1125,15 +1126,16 @@ bool GVN::PerformLoadPRE(LoadInst *LI, AvailValInBlkVect &ValuesPerBlock,
 
     if (Pred->getTerminator()->getNumSuccessors() != 1) {
       if (isa<IndirectBrInst>(Pred->getTerminator())) {
-        DEBUG(dbgs() << "COULD NOT PRE LOAD BECAUSE OF INDBR CRITICAL EDGE '"
-              << Pred->getName() << "': " << *LI << '\n');
+        LLVM_DEBUG(
+            dbgs() << "COULD NOT PRE LOAD BECAUSE OF INDBR CRITICAL EDGE '"
+                   << Pred->getName() << "': " << *LI << '\n');
         return false;
       }
 
       if (LoadBB->isEHPad()) {
-        DEBUG(dbgs()
-              << "COULD NOT PRE LOAD BECAUSE OF AN EH PAD CRITICAL EDGE '"
-              << Pred->getName() << "': " << *LI << '\n');
+        LLVM_DEBUG(
+            dbgs() << "COULD NOT PRE LOAD BECAUSE OF AN EH PAD CRITICAL EDGE '"
+                   << Pred->getName() << "': " << *LI << '\n');
         return false;
       }
 
@@ -1161,8 +1163,8 @@ bool GVN::PerformLoadPRE(LoadInst *LI, AvailValInBlkVect &ValuesPerBlock,
     BasicBlock *NewPred = splitCriticalEdges(OrigPred, LoadBB);
     assert(!PredLoads.count(OrigPred) && "Split edges shouldn't be in map!");
     PredLoads[NewPred] = nullptr;
-    DEBUG(dbgs() << "Split critical edge " << OrigPred->getName() << "->"
-                 << LoadBB->getName() << '\n');
+    LLVM_DEBUG(dbgs() << "Split critical edge " << OrigPred->getName() << "->"
+                      << LoadBB->getName() << '\n');
   }
 
   // Check if the load can safely be moved to all the unavailable predecessors.
@@ -1186,8 +1188,8 @@ bool GVN::PerformLoadPRE(LoadInst *LI, AvailValInBlkVect &ValuesPerBlock,
     // If we couldn't find or insert a computation of this phi translated value,
     // we fail PRE.
     if (!LoadPtr) {
-      DEBUG(dbgs() << "COULDN'T INSERT PHI TRANSLATED VALUE OF: "
-            << *LI->getPointerOperand() << "\n");
+      LLVM_DEBUG(dbgs() << "COULDN'T INSERT PHI TRANSLATED VALUE OF: "
+                        << *LI->getPointerOperand() << "\n");
       CanDoPRE = false;
       break;
     }
@@ -1208,10 +1210,10 @@ bool GVN::PerformLoadPRE(LoadInst *LI, AvailValInBlkVect &ValuesPerBlock,
   // Okay, we can eliminate this load by inserting a reload in the predecessor
   // and using PHI construction to get the value in the other predecessors, do
   // it.
-  DEBUG(dbgs() << "GVN REMOVING PRE LOAD: " << *LI << '\n');
-  DEBUG(if (!NewInsts.empty())
-          dbgs() << "INSERTED " << NewInsts.size() << " INSTS: "
-                 << *NewInsts.back() << '\n');
+  LLVM_DEBUG(dbgs() << "GVN REMOVING PRE LOAD: " << *LI << '\n');
+  LLVM_DEBUG(if (!NewInsts.empty()) dbgs()
+             << "INSERTED " << NewInsts.size() << " INSTS: " << *NewInsts.back()
+             << '\n');
 
   // Assign value numbers to the new instructions.
   for (Instruction *I : NewInsts) {
@@ -1262,7 +1264,7 @@ bool GVN::PerformLoadPRE(LoadInst *LI, AvailValInBlkVect &ValuesPerBlock,
     ValuesPerBlock.push_back(AvailableValueInBlock::get(UnavailablePred,
                                                         NewLoad));
     MD->invalidateCachedPointerInfo(LoadPtr);
-    DEBUG(dbgs() << "GVN INSERTED " << *NewLoad << '\n');
+    LLVM_DEBUG(dbgs() << "GVN INSERTED " << *NewLoad << '\n');
   }
 
   // Perform PHI construction.
@@ -1320,11 +1322,8 @@ bool GVN::processNonLocalLoad(LoadInst *LI) {
   // clobber in the current block.  Reject this early.
   if (NumDeps == 1 &&
       !Deps[0].getResult().isDef() && !Deps[0].getResult().isClobber()) {
-    DEBUG(
-      dbgs() << "GVN: non-local load ";
-      LI->printAsOperand(dbgs());
-      dbgs() << " has unknown dependencies\n";
-    );
+    LLVM_DEBUG(dbgs() << "GVN: non-local load "; LI->printAsOperand(dbgs());
+               dbgs() << " has unknown dependencies\n";);
     return false;
   }
 
@@ -1353,7 +1352,7 @@ bool GVN::processNonLocalLoad(LoadInst *LI) {
   // load, then it is fully redundant and we can use PHI insertion to compute
   // its value.  Insert PHIs and remove the fully redundant value now.
   if (UnavailableBlocks.empty()) {
-    DEBUG(dbgs() << "GVN REMOVING NONLOCAL LOAD: " << *LI << '\n');
+    LLVM_DEBUG(dbgs() << "GVN REMOVING NONLOCAL LOAD: " << *LI << '\n');
 
     // Perform PHI construction.
     Value *V = ConstructSSAForLoadSet(LI, ValuesPerBlock, *this);
@@ -1445,37 +1444,6 @@ bool GVN::processAssumeIntrinsic(IntrinsicInst *IntrinsicI) {
   return Changed;
 }
 
-static void patchReplacementInstruction(Instruction *I, Value *Repl) {
-  auto *ReplInst = dyn_cast<Instruction>(Repl);
-  if (!ReplInst)
-    return;
-
-  // Patch the replacement so that it is not more restrictive than the value
-  // being replaced.
-  // Note that if 'I' is a load being replaced by some operation,
-  // for example, by an arithmetic operation, then andIRFlags()
-  // would just erase all math flags from the original arithmetic
-  // operation, which is clearly not wanted and not needed.
-  if (!isa<LoadInst>(I))
-    ReplInst->andIRFlags(I);
-
-  // FIXME: If both the original and replacement value are part of the
-  // same control-flow region (meaning that the execution of one
-  // guarantees the execution of the other), then we can combine the
-  // noalias scopes here and do better than the general conservative
-  // answer used in combineMetadata().
-
-  // In general, GVN unifies expressions over different control-flow
-  // regions, and so we need a conservative combination of the noalias
-  // scopes.
-  static const unsigned KnownIDs[] = {
-      LLVMContext::MD_tbaa,           LLVMContext::MD_alias_scope,
-      LLVMContext::MD_noalias,        LLVMContext::MD_range,
-      LLVMContext::MD_fpmath,         LLVMContext::MD_invariant_load,
-      LLVMContext::MD_invariant_group};
-  combineMetadata(ReplInst, I, KnownIDs);
-}
-
 static void patchAndReplaceAllUsesWith(Instruction *I, Value *Repl) {
   patchReplacementInstruction(I, Repl);
   I->replaceAllUsesWith(Repl);
@@ -1506,12 +1474,10 @@ bool GVN::processLoad(LoadInst *L) {
   // Only handle the local case below
   if (!Dep.isDef() && !Dep.isClobber()) {
     // This might be a NonFuncLocal or an Unknown
-    DEBUG(
-      // fast print dep, using operator<< on instruction is too slow.
-      dbgs() << "GVN: load ";
-      L->printAsOperand(dbgs());
-      dbgs() << " has unknown dependence\n";
-    );
+    LLVM_DEBUG(
+        // fast print dep, using operator<< on instruction is too slow.
+        dbgs() << "GVN: load "; L->printAsOperand(dbgs());
+        dbgs() << " has unknown dependence\n";);
     return false;
   }
 
@@ -1695,8 +1661,8 @@ bool GVN::replaceOperandsWithConsts(Instruction *Instr) const {
     if (it != ReplaceWithConstMap.end()) {
       assert(!isa<Constant>(Operand) &&
              "Replacing constants with constants is invalid");
-      DEBUG(dbgs() << "GVN replacing: " << *Operand << " with " << *it->second
-                   << " in instruction " << *Instr << '\n');
+      LLVM_DEBUG(dbgs() << "GVN replacing: " << *Operand << " with "
+                        << *it->second << " in instruction " << *Instr << '\n');
       Instr->setOperand(OpNum, it->second);
       Changed = true;
     }
@@ -2016,20 +1982,21 @@ bool GVN::runImpl(Function &F, AssumptionCache &RunAC, DominatorTree &RunDT,
   TLI = &RunTLI;
   VN.setAliasAnalysis(&RunAA);
   MD = RunMD;
-  OrderedInstructions OrderedInstrs(DT);
-  OI = &OrderedInstrs;
+  ImplicitControlFlowTracking ImplicitCFT(DT);
+  ICF = &ImplicitCFT;
   VN.setMemDep(MD);
   ORE = RunORE;
 
   bool Changed = false;
   bool ShouldContinue = true;
 
+  DomTreeUpdater DTU(DT, DomTreeUpdater::UpdateStrategy::Eager);
   // Merge unconditional branches, allowing PRE to catch more
   // optimization opportunities.
   for (Function::iterator FI = F.begin(), FE = F.end(); FI != FE; ) {
     BasicBlock *BB = &*FI++;
 
-    bool removedBlock = MergeBlockIntoPredecessor(BB, DT, LI, MD);
+    bool removedBlock = MergeBlockIntoPredecessor(BB, &DTU, LI, MD);
     if (removedBlock)
       ++NumGVNBlocks;
 
@@ -2038,7 +2005,7 @@ bool GVN::runImpl(Function &F, AssumptionCache &RunAC, DominatorTree &RunDT,
 
   unsigned Iteration = 0;
   while (ShouldContinue) {
-    DEBUG(dbgs() << "GVN iteration: " << Iteration << "\n");
+    LLVM_DEBUG(dbgs() << "GVN iteration: " << Iteration << "\n");
     ShouldContinue = iterateOnFunction(F);
     Changed |= ShouldContinue;
     ++Iteration;
@@ -2100,27 +2067,23 @@ bool GVN::processBlock(BasicBlock *BB) {
     if (!AtStart)
       --BI;
 
-    bool InvalidateImplicitCF = false;
-    const Instruction *MaybeFirstICF = FirstImplicitControlFlowInsts.lookup(BB);
+    const Instruction *MaybeFirstICF = ICF->getFirstICFI(BB);
     for (auto *I : InstrsToErase) {
       assert(I->getParent() == BB && "Removing instruction from wrong block?");
-      DEBUG(dbgs() << "GVN removed: " << *I << '\n');
+      LLVM_DEBUG(dbgs() << "GVN removed: " << *I << '\n');
       salvageDebugInfo(*I);
       if (MD) MD->removeInstruction(I);
-      DEBUG(verifyRemoved(I));
+      LLVM_DEBUG(verifyRemoved(I));
       if (MaybeFirstICF == I) {
         // We have erased the first ICF in block. The map needs to be updated.
-        InvalidateImplicitCF = true;
         // Do not keep dangling pointer on the erased instruction.
         MaybeFirstICF = nullptr;
       }
       I->eraseFromParent();
     }
 
-    OI->invalidateBlock(BB);
+    ICF->invalidateBlock(BB);
     InstrsToErase.clear();
-    if (InvalidateImplicitCF)
-      fillImplicitControlFlowInfo(BB);
 
     if (AtStart)
       BI = BB->begin();
@@ -2264,13 +2227,8 @@ bool GVN::performScalarPRE(Instruction *CurInst) {
       // is always executed. An instruction with implicit control flow could
       // prevent us from doing it. If we cannot speculate the execution, then
       // PRE should be prohibited.
-      auto It = FirstImplicitControlFlowInsts.find(CurrentBlock);
-      if (It != FirstImplicitControlFlowInsts.end()) {
-        assert(It->second->getParent() == CurrentBlock &&
-               "Implicit control flow map broken?");
-        if (OI->dominates(It->second, CurInst))
-          return false;
-      }
+      if (ICF->isDominatedByICFIFromSameBlock(CurInst))
+        return false;
     }
 
     // Don't do PRE across indirect branch.
@@ -2289,7 +2247,7 @@ bool GVN::performScalarPRE(Instruction *CurInst) {
     PREInstr = CurInst->clone();
     if (!performScalarPREInsertion(PREInstr, PREPred, CurrentBlock, ValNo)) {
       // If we failed insertion, make sure we remove the instruction.
-      DEBUG(verifyRemoved(PREInstr));
+      LLVM_DEBUG(verifyRemoved(PREInstr));
       PREInstr->deleteValue();
       return false;
     }
@@ -2327,18 +2285,14 @@ bool GVN::performScalarPRE(Instruction *CurInst) {
   VN.erase(CurInst);
   removeFromLeaderTable(ValNo, CurInst, CurrentBlock);
 
-  DEBUG(dbgs() << "GVN PRE removed: " << *CurInst << '\n');
+  LLVM_DEBUG(dbgs() << "GVN PRE removed: " << *CurInst << '\n');
   if (MD)
     MD->removeInstruction(CurInst);
-  DEBUG(verifyRemoved(CurInst));
-  bool InvalidateImplicitCF =
-      FirstImplicitControlFlowInsts.lookup(CurInst->getParent()) == CurInst;
+  LLVM_DEBUG(verifyRemoved(CurInst));
   // FIXME: Intended to be markInstructionForDeletion(CurInst), but it causes
   // some assertion failures.
-  OI->invalidateBlock(CurrentBlock);
+  ICF->invalidateBlock(CurrentBlock);
   CurInst->eraseFromParent();
-  if (InvalidateImplicitCF)
-    fillImplicitControlFlowInfo(CurrentBlock);
   ++NumGVNInstr;
 
   return true;
@@ -2407,8 +2361,6 @@ bool GVN::iterateOnFunction(Function &F) {
   ReversePostOrderTraversal<Function *> RPOT(&F);
 
   for (BasicBlock *BB : RPOT)
-    fillImplicitControlFlowInfo(BB);
-  for (BasicBlock *BB : RPOT)
     Changed |= processBlock(BB);
 
   return Changed;
@@ -2419,48 +2371,7 @@ void GVN::cleanupGlobalSets() {
   LeaderTable.clear();
   BlockRPONumber.clear();
   TableAllocator.Reset();
-  FirstImplicitControlFlowInsts.clear();
-}
-
-void
-GVN::fillImplicitControlFlowInfo(BasicBlock *BB) {
-  // Make sure that all marked instructions are actually deleted by this point,
-  // so that we don't need to care about omitting them.
-  assert(InstrsToErase.empty() && "Filling before removed all marked insns?");
-  auto MayNotTransferExecutionToSuccessor = [&](const Instruction *I) {
-    // If a block's instruction doesn't always pass the control to its successor
-    // instruction, mark the block as having implicit control flow. We use them
-    // to avoid wrong assumptions of sort "if A is executed and B post-dominates
-    // A, then B is also executed". This is not true is there is an implicit
-    // control flow instruction (e.g. a guard) between them.
-    //
-    // TODO: Currently, isGuaranteedToTransferExecutionToSuccessor returns false
-    // for volatile stores and loads because they can trap. The discussion on
-    // whether or not it is correct is still ongoing. We might want to get rid
-    // of this logic in the future. Anyways, trapping instructions shouldn't
-    // introduce implicit control flow, so we explicitly allow them here. This
-    // must be removed once isGuaranteedToTransferExecutionToSuccessor is fixed.
-    if (isGuaranteedToTransferExecutionToSuccessor(I))
-      return false;
-    if (isa<LoadInst>(I)) {
-      assert(cast<LoadInst>(I)->isVolatile() &&
-             "Non-volatile load should transfer execution to successor!");
-      return false;
-    }
-    if (isa<StoreInst>(I)) {
-      assert(cast<StoreInst>(I)->isVolatile() &&
-             "Non-volatile store should transfer execution to successor!");
-      return false;
-    }
-    return true;
-  };
-  FirstImplicitControlFlowInsts.erase(BB);
-
-  for (auto &I : *BB)
-    if (MayNotTransferExecutionToSuccessor(&I)) {
-      FirstImplicitControlFlowInsts[BB] = &I;
-      break;
-    }
+  ICF->clear();
 }
 
 /// Verify that the specified instruction does not occur in our

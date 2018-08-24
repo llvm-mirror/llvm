@@ -59,7 +59,7 @@
 #endif
 #endif
 
-#ifdef LLVM_ON_WIN32
+#ifdef _WIN32
 #include "Windows/WindowsSupport.h"
 #endif
 
@@ -74,9 +74,6 @@ raw_ostream::~raw_ostream() {
   if (BufferMode == InternalBuffer)
     delete [] OutBufStart;
 }
-
-// An out of line virtual method to provide a home for the class vtable.
-void raw_ostream::handle() {}
 
 size_t raw_ostream::preferred_buffer_size() const {
   // BUFSIZ is intended to be a reasonable default.
@@ -163,7 +160,7 @@ raw_ostream &raw_ostream::write_escaped(StringRef Str,
       *this << '\\' << '"';
       break;
     default:
-      if (std::isprint(c)) {
+      if (isPrint(c)) {
         *this << c;
         break;
       }
@@ -439,7 +436,7 @@ raw_ostream &raw_ostream::operator<<(const FormattedBytes &FB) {
 
       // Print the ASCII char values for each byte on this line
       for (uint8_t Byte : Line) {
-        if (isprint(Byte))
+        if (isPrint(Byte))
           *this << static_cast<char>(Byte);
         else
           *this << '.';
@@ -455,23 +452,35 @@ raw_ostream &raw_ostream::operator<<(const FormattedBytes &FB) {
   return *this;
 }
 
-/// indent - Insert 'NumSpaces' spaces.
-raw_ostream &raw_ostream::indent(unsigned NumSpaces) {
-  static const char Spaces[] = "                                "
-                               "                                "
-                               "                ";
+template <char C>
+static raw_ostream &write_padding(raw_ostream &OS, unsigned NumChars) {
+  static const char Chars[] = {C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C,
+                               C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C,
+                               C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C,
+                               C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C,
+                               C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C};
 
   // Usually the indentation is small, handle it with a fastpath.
-  if (NumSpaces < array_lengthof(Spaces))
-    return write(Spaces, NumSpaces);
+  if (NumChars < array_lengthof(Chars))
+    return OS.write(Chars, NumChars);
 
-  while (NumSpaces) {
-    unsigned NumToWrite = std::min(NumSpaces,
-                                   (unsigned)array_lengthof(Spaces)-1);
-    write(Spaces, NumToWrite);
-    NumSpaces -= NumToWrite;
+  while (NumChars) {
+    unsigned NumToWrite = std::min(NumChars,
+                                   (unsigned)array_lengthof(Chars)-1);
+    OS.write(Chars, NumToWrite);
+    NumChars -= NumToWrite;
   }
-  return *this;
+  return OS;
+}
+
+/// indent - Insert 'NumSpaces' spaces.
+raw_ostream &raw_ostream::indent(unsigned NumSpaces) {
+  return write_padding<' '>(*this, NumSpaces);
+}
+
+/// write_zeros - Insert 'NumZeros' nulls.
+raw_ostream &raw_ostream::write_zeros(unsigned NumZeros) {
+  return write_padding<'\0'>(*this, NumZeros);
 }
 
 void raw_ostream::anchor() {}
@@ -489,29 +498,56 @@ void format_object_base::home() {
 //===----------------------------------------------------------------------===//
 
 static int getFD(StringRef Filename, std::error_code &EC,
+                 sys::fs::CreationDisposition Disp, sys::fs::FileAccess Access,
                  sys::fs::OpenFlags Flags) {
+  assert((Access & sys::fs::FA_Write) &&
+         "Cannot make a raw_ostream from a read-only descriptor!");
+
   // Handle "-" as stdout. Note that when we do this, we consider ourself
   // the owner of stdout and may set the "binary" flag globally based on Flags.
   if (Filename == "-") {
     EC = std::error_code();
     // If user requested binary then put stdout into binary mode if
     // possible.
-    if (!(Flags & sys::fs::F_Text))
+    if (!(Flags & sys::fs::OF_Text))
       sys::ChangeStdoutToBinary();
     return STDOUT_FILENO;
   }
 
   int FD;
-  EC = sys::fs::openFileForWrite(Filename, FD, Flags);
+  if (Access & sys::fs::FA_Read)
+    EC = sys::fs::openFileForReadWrite(Filename, FD, Disp, Flags);
+  else
+    EC = sys::fs::openFileForWrite(Filename, FD, Disp, Flags);
   if (EC)
     return -1;
 
   return FD;
 }
 
+raw_fd_ostream::raw_fd_ostream(StringRef Filename, std::error_code &EC)
+    : raw_fd_ostream(Filename, EC, sys::fs::CD_CreateAlways, sys::fs::FA_Write,
+                     sys::fs::OF_None) {}
+
+raw_fd_ostream::raw_fd_ostream(StringRef Filename, std::error_code &EC,
+                               sys::fs::CreationDisposition Disp)
+    : raw_fd_ostream(Filename, EC, Disp, sys::fs::FA_Write, sys::fs::OF_None) {}
+
+raw_fd_ostream::raw_fd_ostream(StringRef Filename, std::error_code &EC,
+                               sys::fs::FileAccess Access)
+    : raw_fd_ostream(Filename, EC, sys::fs::CD_CreateAlways, Access,
+                     sys::fs::OF_None) {}
+
 raw_fd_ostream::raw_fd_ostream(StringRef Filename, std::error_code &EC,
                                sys::fs::OpenFlags Flags)
-    : raw_fd_ostream(getFD(Filename, EC, Flags), true) {}
+    : raw_fd_ostream(Filename, EC, sys::fs::CD_CreateAlways, sys::fs::FA_Write,
+                     Flags) {}
+
+raw_fd_ostream::raw_fd_ostream(StringRef Filename, std::error_code &EC,
+                               sys::fs::CreationDisposition Disp,
+                               sys::fs::FileAccess Access,
+                               sys::fs::OpenFlags Flags)
+    : raw_fd_ostream(getFD(Filename, EC, Disp, Access, Flags), true) {}
 
 /// FD is the file descriptor that this writes to.  If ShouldClose is true, this
 /// closes the file when the stream is destroyed.
@@ -533,7 +569,7 @@ raw_fd_ostream::raw_fd_ostream(int fd, bool shouldClose, bool unbuffered)
 
   // Get the starting position.
   off_t loc = ::lseek(FD, 0, SEEK_CUR);
-#ifdef LLVM_ON_WIN32
+#ifdef _WIN32
   // MSVCRT's _lseek(SEEK_CUR) doesn't return -1 for pipes.
   sys::fs::file_status Status;
   std::error_code EC = status(FD, Status);
@@ -577,16 +613,16 @@ void raw_fd_ostream::write_impl(const char *Ptr, size_t Size) {
   assert(FD >= 0 && "File already closed.");
   pos += Size;
 
-  // The maximum write size is limited to SSIZE_MAX because a write
-  // greater than SSIZE_MAX is implementation-defined in POSIX.
-  // Since SSIZE_MAX is not portable, we use SIZE_MAX >> 1 instead.
-  size_t MaxWriteSize = SIZE_MAX >> 1;
+  // The maximum write size is limited to INT32_MAX. A write
+  // greater than SSIZE_MAX is implementation-defined in POSIX,
+  // and Windows _write requires 32 bit input.
+  size_t MaxWriteSize = INT32_MAX;
 
 #if defined(__linux__)
   // It is observed that Linux returns EINVAL for a very large write (>2G).
   // Make it a reasonably small value.
   MaxWriteSize = 1024 * 1024 * 1024;
-#elif defined(LLVM_ON_WIN32)
+#elif defined(_WIN32)
   // Writing a large size of output to Windows console returns ENOMEM. It seems
   // that, prior to Windows 8, WriteFile() is redirecting to WriteConsole(), and
   // the latter has a size limit (66000 bytes or less, depending on heap usage).
@@ -639,7 +675,7 @@ void raw_fd_ostream::close() {
 uint64_t raw_fd_ostream::seek(uint64_t off) {
   assert(SupportsSeeking && "Stream does not support seeking!");
   flush();
-#ifdef LLVM_ON_WIN32
+#ifdef _WIN32
   pos = ::_lseeki64(FD, off, SEEK_SET);
 #elif defined(HAVE_LSEEK64)
   pos = ::lseek64(FD, off, SEEK_SET);

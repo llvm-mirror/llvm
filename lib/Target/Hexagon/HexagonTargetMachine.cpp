@@ -97,6 +97,10 @@ static cl::opt<bool> EnableVectorPrint("enable-hexagon-vector-print",
 static cl::opt<bool> EnableVExtractOpt("hexagon-opt-vextract", cl::Hidden,
   cl::ZeroOrMore, cl::init(true), cl::desc("Enable vextract optimization"));
 
+static cl::opt<bool> EnableInitialCFGCleanup("hexagon-initial-cfg-cleanup",
+  cl::Hidden, cl::ZeroOrMore, cl::init(true),
+  cl::desc("Simplify the CFG after atomic expansion pass"));
+
 /// HexagonTargetMachineModule - Note that this is used on hosts that
 /// cannot link in a library unless there are references into the
 /// library.  In particular, it seems that it is not possible to get
@@ -134,6 +138,7 @@ namespace llvm {
   void initializeHexagonOptAddrModePass(PassRegistry&);
   void initializeHexagonPacketizerPass(PassRegistry&);
   void initializeHexagonRDFOptPass(PassRegistry&);
+  void initializeHexagonSplitDoubleRegsPass(PassRegistry&);
   void initializeHexagonVExtractPass(PassRegistry&);
   Pass *createHexagonLoopIdiomPass();
   Pass *createHexagonVectorLoopCarriedReusePass();
@@ -148,7 +153,6 @@ namespace llvm {
   FunctionPass *createHexagonCopyToCombine();
   FunctionPass *createHexagonEarlyIfConversion();
   FunctionPass *createHexagonFixupHwLoops();
-  FunctionPass *createHexagonGatherPacketize();
   FunctionPass *createHexagonGenExtract();
   FunctionPass *createHexagonGenInsert();
   FunctionPass *createHexagonGenMux();
@@ -160,7 +164,7 @@ namespace llvm {
   FunctionPass *createHexagonNewValueJump();
   FunctionPass *createHexagonOptimizeSZextends();
   FunctionPass *createHexagonOptAddrMode();
-  FunctionPass *createHexagonPacketizer();
+  FunctionPass *createHexagonPacketizer(bool Minimal);
   FunctionPass *createHexagonPeephole();
   FunctionPass *createHexagonRDFOpt();
   FunctionPass *createHexagonSplitConst32AndConst64();
@@ -199,6 +203,7 @@ extern "C" void LLVMInitializeHexagonTarget() {
   initializeHexagonOptAddrModePass(PR);
   initializeHexagonPacketizerPass(PR);
   initializeHexagonRDFOptPass(PR);
+  initializeHexagonSplitDoubleRegsPass(PR);
   initializeHexagonVExtractPass(PR);
 }
 
@@ -309,7 +314,10 @@ void HexagonPassConfig::addIRPasses() {
   }
 
   addPass(createAtomicExpandPass());
+
   if (!NoOpt) {
+    if (EnableInitialCFGCleanup)
+      addPass(createCFGSimplificationPass(1, true, true, false, true));
     if (EnableLoopPrefetch)
       addPass(createLoopDataPrefetchPass());
     if (EnableCommGEP)
@@ -400,7 +408,6 @@ void HexagonPassConfig::addPreEmitPass() {
 
   addPass(createHexagonBranchRelaxation());
 
-  // Create Packets.
   if (!NoOpt) {
     if (!DisableHardwareLoops)
       addPass(createHexagonFixupHwLoops());
@@ -409,12 +416,8 @@ void HexagonPassConfig::addPreEmitPass() {
       addPass(createHexagonGenMux());
   }
 
-  // Create packets for 2 instructions that consitute a gather instruction.
-  // Do this regardless of the opt level.
-  addPass(createHexagonGatherPacketize(), false);
-
-  if (!NoOpt)
-    addPass(createHexagonPacketizer(), false);
+  // Packetization is mandatory: it handles gather/scatter at all opt levels.
+  addPass(createHexagonPacketizer(NoOpt), false);
 
   if (EnableVectorPrint)
     addPass(createHexagonVectorPrint(), false);

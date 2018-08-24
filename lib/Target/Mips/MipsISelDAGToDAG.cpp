@@ -24,6 +24,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
+#include "llvm/CodeGen/StackProtector.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/Instructions.h"
@@ -45,6 +46,13 @@ using namespace llvm;
 // MipsDAGToDAGISel - MIPS specific code to select MIPS machine
 // instructions for SelectionDAG operations.
 //===----------------------------------------------------------------------===//
+
+void MipsDAGToDAGISel::getAnalysisUsage(AnalysisUsage &AU) const {
+  // There are multiple MipsDAGToDAGISel instances added to the pass pipeline.
+  // We need to preserve StackProtector for the next one.
+  AU.addPreserved<StackProtector>();
+  SelectionDAGISel::getAnalysisUsage(AU);
+}
 
 bool MipsDAGToDAGISel::runOnMachineFunction(MachineFunction &MF) {
   Subtarget = &static_cast<const MipsSubtarget &>(MF.getSubtarget());
@@ -217,7 +225,7 @@ void MipsDAGToDAGISel::Select(SDNode *Node) {
 
   // If we have a custom node, we already have selected!
   if (Node->isMachineOpcode()) {
-    DEBUG(errs() << "== "; Node->dump(CurDAG); errs() << "\n");
+    LLVM_DEBUG(errs() << "== "; Node->dump(CurDAG); errs() << "\n");
     Node->setNodeId(-1);
     return;
   }

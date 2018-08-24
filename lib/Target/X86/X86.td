@@ -218,8 +218,6 @@ def FeatureSHA     : SubtargetFeature<"sha", "HasSHA", "true",
                                       [FeatureSSE2]>;
 def FeatureSHSTK   : SubtargetFeature<"shstk", "HasSHSTK", "true",
                        "Support CET Shadow-Stack instructions">;
-def FeatureIBT     : SubtargetFeature<"ibt", "HasIBT", "true",
-                       "Support CET Indirect-Branch-Tracking instructions">;
 def FeaturePRFCHW  : SubtargetFeature<"prfchw", "HasPRFCHW", "true",
                                       "Support PRFCHW instructions">;
 def FeatureRDSEED  : SubtargetFeature<"rdseed", "HasRDSEED", "true",
@@ -232,6 +230,8 @@ def FeatureCLZERO  : SubtargetFeature<"clzero", "HasCLZERO", "true",
                                       "Enable Cache Line Zero">;
 def FeatureCLDEMOTE  : SubtargetFeature<"cldemote", "HasCLDEMOTE", "true",
                                       "Enable Cache Demote">;
+def FeaturePTWRITE  : SubtargetFeature<"ptwrite", "HasPTWRITE", "true",
+                                      "Support ptwrite instruction">;
 def FeatureMPX     : SubtargetFeature<"mpx", "HasMPX", "true",
                                       "Support MPX instructions">;
 def FeatureLEAForSP : SubtargetFeature<"lea-sp", "UseLeaForSP", "true",
@@ -245,6 +245,8 @@ def FeatureSlowDivide64 : SubtargetFeature<"idivq-to-divl",
 def FeaturePadShortFunctions : SubtargetFeature<"pad-short-functions",
                                      "PadShortFunctions", "true",
                                      "Pad short functions">;
+def FeatureINVPCID : SubtargetFeature<"invpcid", "HasINVPCID", "true",
+                                      "Invalidate Process-Context Identifier">;
 def FeatureSGX     : SubtargetFeature<"sgx", "HasSGX", "true",
                                       "Enable Software Guard Extensions">;
 def FeatureCLFLUSHOPT : SubtargetFeature<"clflushopt", "HasCLFLUSHOPT", "true",
@@ -280,6 +282,8 @@ def FeaturePOPCNTFalseDeps : SubtargetFeature<"false-deps-popcnt",
 def FeatureLZCNTFalseDeps : SubtargetFeature<"false-deps-lzcnt-tzcnt",
                                      "HasLZCNTFalseDeps", "true",
                                      "LZCNT/TZCNT have a false dependency on dest register">;
+def FeaturePCONFIG : SubtargetFeature<"pconfig", "HasPCONFIG", "true",
+                                      "platform configuration instruction">;
 // On recent X86 (port bound) processors, its preferable to combine to a single shuffle
 // using a variable mask over multiple fixed shuffles.
 def FeatureFastVariableShuffle
@@ -379,6 +383,12 @@ def FeatureRetpolineExternalThunk
           "Enable retpoline, but with an externally provided thunk.",
           [FeatureRetpoline]>;
 
+// Direct Move instructions.
+def FeatureMOVDIRI  : SubtargetFeature<"movdiri", "HasMOVDIRI", "true",
+                                       "Support movdiri instruction">;
+def FeatureMOVDIR64B : SubtargetFeature<"movdir64b", "HasMOVDIR64B", "true",
+                                        "Support movdir64b instruction">;
+
 //===----------------------------------------------------------------------===//
 // Register File Description
 //===----------------------------------------------------------------------===//
@@ -392,6 +402,7 @@ include "X86RegisterBanks.td"
 
 include "X86Schedule.td"
 include "X86InstrInfo.td"
+include "X86SchedPredicates.td"
 
 def X86InstrInfo : InstrInfo;
 
@@ -616,21 +627,25 @@ class GoldmontProc<string Name> : ProcModel<Name, SLMModel,
 ]>;
 def : GoldmontProc<"goldmont">;
 
-class GoldmontPlusProc<string Name> : ProcModel<Name, SLMModel,
-      GLMFeatures.Value, [
-  ProcIntelGLP,
+def GLPFeatures : ProcessorFeatures<GLMFeatures.Value, [
+  FeaturePTWRITE,
   FeatureRDPID,
   FeatureSGX
+]>;
+
+class GoldmontPlusProc<string Name> : ProcModel<Name, SLMModel,
+      GLPFeatures.Value, [
+  ProcIntelGLP
 ]>;
 def : GoldmontPlusProc<"goldmont-plus">;
 
 class TremontProc<string Name> : ProcModel<Name, SLMModel,
-      GLMFeatures.Value, [
+      GLPFeatures.Value, [
   ProcIntelTRM,
   FeatureCLDEMOTE,
   FeatureGFNI,
-  FeatureRDPID,
-  FeatureSGX,
+  FeatureMOVDIRI,
+  FeatureMOVDIR64B,
   FeatureWAITPKG
 ]>;
 def : TremontProc<"tremont">;
@@ -718,6 +733,7 @@ def HSWFeatures : ProcessorFeatures<IVBFeatures.Value, [
   FeatureBMI2,
   FeatureERMSB,
   FeatureFMA,
+  FeatureINVPCID,
   FeatureLZCNT,
   FeatureMOVBE,
   FeatureFastVariableShuffle
@@ -860,6 +876,7 @@ def : IcelakeClientProc<"icelake-client">;
 class IcelakeServerProc<string Name> : ProcModel<Name, SkylakeServerModel,
                                                  ICLFeatures.Value, [
   ProcIntelICX,
+  FeaturePCONFIG,
   FeatureWBNOINVD,
   FeatureHasFastGather
 ]>;

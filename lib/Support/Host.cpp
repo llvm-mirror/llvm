@@ -18,7 +18,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/ADT/Triple.h"
-#include "llvm/Config/config.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -30,7 +30,7 @@
 #ifdef LLVM_ON_UNIX
 #include "Unix/Host.inc"
 #endif
-#ifdef LLVM_ON_WIN32
+#ifdef _WIN32
 #include "Windows/Host.inc"
 #endif
 #ifdef _MSC_VER
@@ -840,9 +840,9 @@ static void getAMDProcessorTypeAndSubtype(unsigned Family, unsigned Model,
       *Subtype = X86::AMDFAM15H_BDVER3;
       break; // "bdver3"; 30h-3Fh: Steamroller
     }
-    if (Model >= 0x10 && Model <= 0x1f) {
+    if ((Model >= 0x10 && Model <= 0x1f) || Model == 0x02) {
       *Subtype = X86::AMDFAM15H_BDVER2;
-      break; // "bdver2"; 10h-1Fh: Piledriver
+      break; // "bdver2"; 02h, 10h-1Fh: Piledriver
     }
     if (Model <= 0x0f) {
       *Subtype = X86::AMDFAM15H_BDVER1;
@@ -1231,6 +1231,7 @@ bool sys::getHostCPUFeatures(StringMap<bool> &Features) {
   // AVX2 is only supported if we have the OS save support from AVX.
   Features["avx2"]       = HasLeaf7 && ((EBX >>  5) & 1) && HasAVXSave;
   Features["bmi2"]       = HasLeaf7 && ((EBX >>  8) & 1);
+  Features["invpcid"]    = HasLeaf7 && ((EBX >> 10) & 1);
   Features["rtm"]        = HasLeaf7 && ((EBX >> 11) & 1);
   // AVX512 is only supported if the OS supports the context save for it.
   Features["avx512f"]    = HasLeaf7 && ((EBX >> 16) & 1) && HasAVX512Save;
@@ -1261,8 +1262,20 @@ bool sys::getHostCPUFeatures(StringMap<bool> &Features) {
   Features["avx512vpopcntdq"] = HasLeaf7 && ((ECX >> 14) & 1) && HasAVX512Save;
   Features["rdpid"]           = HasLeaf7 && ((ECX >> 22) & 1);
   Features["cldemote"]        = HasLeaf7 && ((ECX >> 25) & 1);
+  Features["movdiri"]         = HasLeaf7 && ((ECX >> 27) & 1);
+  Features["movdir64b"]       = HasLeaf7 && ((ECX >> 28) & 1);
 
-  Features["ibt"] = HasLeaf7 && ((EDX >> 20) & 1);
+  // There are two CPUID leafs which information associated with the pconfig
+  // instruction:
+  // EAX=0x7, ECX=0x0 indicates the availability of the instruction (via the 18th
+  // bit of EDX), while the EAX=0x1b leaf returns information on the
+  // availability of specific pconfig leafs.
+  // The target feature here only refers to the the first of these two.
+  // Users might need to check for the availability of specific pconfig
+  // leaves using cpuid, since that information is ignored while
+  // detecting features using the "-march=native" flag.
+  // For more info, see X86 ISA docs.
+  Features["pconfig"] = HasLeaf7 && ((EDX >> 18) & 1);
 
   bool HasLeafD = MaxLevel >= 0xd &&
                   !getX86CpuIDAndInfoEx(0xd, 0x1, &EAX, &EBX, &ECX, &EDX);
@@ -1271,6 +1284,11 @@ bool sys::getHostCPUFeatures(StringMap<bool> &Features) {
   Features["xsaveopt"] = HasLeafD && ((EAX >> 0) & 1) && HasAVXSave;
   Features["xsavec"]   = HasLeafD && ((EAX >> 1) & 1) && HasAVXSave;
   Features["xsaves"]   = HasLeafD && ((EAX >> 3) & 1) && HasAVXSave;
+
+  bool HasLeaf14 = MaxLevel >= 0x14 &&
+                  !getX86CpuIDAndInfoEx(0x14, 0x0, &EAX, &EBX, &ECX, &EDX);
+
+  Features["ptwrite"] = HasLeaf14 && ((EBX >> 4) & 1);
 
   return true;
 }

@@ -18,7 +18,8 @@ namespace {
 
 class DummyCallbackManager : public orc::JITCompileCallbackManager {
 public:
-  DummyCallbackManager() : JITCompileCallbackManager(0) {}
+  DummyCallbackManager(ExecutionSession &ES)
+      : JITCompileCallbackManager(ES, 0) {}
 
 public:
   Error grow() override { llvm_unreachable("not implemented"); }
@@ -35,11 +36,11 @@ public:
     llvm_unreachable("Not implemented");
   }
 
-  JITSymbol findStub(StringRef Name, bool ExportedStubsOnly) override {
+  JITEvaluatedSymbol findStub(StringRef Name, bool ExportedStubsOnly) override {
     llvm_unreachable("Not implemented");
   }
 
-  JITSymbol findPointer(StringRef Name) override {
+  JITEvaluatedSymbol findPointer(StringRef Name) override {
     llvm_unreachable("Not implemented");
   }
 
@@ -57,9 +58,9 @@ TEST(CompileOnDemandLayerTest, FindSymbol) {
       return JITSymbol(nullptr);
     };
 
-  DummyCallbackManager CallbackMgr;
 
   ExecutionSession ES(std::make_shared<SymbolStringPool>());
+  DummyCallbackManager CallbackMgr(ES);
 
   auto GetResolver =
       [](orc::VModuleKey) -> std::shared_ptr<llvm::orc::SymbolResolver> {

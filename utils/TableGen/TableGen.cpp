@@ -24,6 +24,7 @@ using namespace llvm;
 
 enum ActionType {
   PrintRecords,
+  DumpJSON,
   GenEmitter,
   GenRegisterInfo,
   GenInstrInfo,
@@ -38,8 +39,10 @@ enum ActionType {
   GenDFAPacketizer,
   GenFastISel,
   GenSubtarget,
-  GenIntrinsic,
-  GenTgtIntrinsic,
+  GenIntrinsicEnums,
+  GenIntrinsicImpl,
+  GenTgtIntrinsicEnums,
+  GenTgtIntrinsicImpl,
   PrintEnums,
   PrintSets,
   GenOptParserDefs,
@@ -57,6 +60,8 @@ namespace {
   Action(cl::desc("Action to perform:"),
          cl::values(clEnumValN(PrintRecords, "print-records",
                                "Print all records to stdout (default)"),
+                    clEnumValN(DumpJSON, "dump-json",
+                               "Dump all records as machine-readable JSON"),
                     clEnumValN(GenEmitter, "gen-emitter",
                                "Generate machine code emitter"),
                     clEnumValN(GenRegisterInfo, "gen-register-info",
@@ -85,9 +90,13 @@ namespace {
                                "Generate a \"fast\" instruction selector"),
                     clEnumValN(GenSubtarget, "gen-subtarget",
                                "Generate subtarget enumerations"),
-                    clEnumValN(GenIntrinsic, "gen-intrinsic",
+                    clEnumValN(GenIntrinsicEnums, "gen-intrinsic-enums",
+                               "Generate intrinsic enums"),
+                    clEnumValN(GenIntrinsicImpl, "gen-intrinsic-impl",
                                "Generate intrinsic information"),
-                    clEnumValN(GenTgtIntrinsic, "gen-tgt-intrinsic",
+                    clEnumValN(GenTgtIntrinsicEnums, "gen-tgt-intrinsic-enums",
+                               "Generate target intrinsic enums"),
+                    clEnumValN(GenTgtIntrinsicImpl, "gen-tgt-intrinsic-impl",
                                "Generate target intrinsic information"),
                     clEnumValN(PrintEnums, "print-enums",
                                "Print enum values for a class"),
@@ -119,6 +128,9 @@ bool LLVMTableGenMain(raw_ostream &OS, RecordKeeper &Records) {
   switch (Action) {
   case PrintRecords:
     OS << Records;           // No argument, dump all contents
+    break;
+  case DumpJSON:
+    EmitJSON(Records, OS);
     break;
   case GenEmitter:
     EmitCodeEmitter(Records, OS);
@@ -162,11 +174,17 @@ bool LLVMTableGenMain(raw_ostream &OS, RecordKeeper &Records) {
   case GenSubtarget:
     EmitSubtarget(Records, OS);
     break;
-  case GenIntrinsic:
-    EmitIntrinsics(Records, OS);
+  case GenIntrinsicEnums:
+    EmitIntrinsicEnums(Records, OS);
     break;
-  case GenTgtIntrinsic:
-    EmitIntrinsics(Records, OS, true);
+  case GenIntrinsicImpl:
+    EmitIntrinsicImpl(Records, OS);
+    break;
+  case GenTgtIntrinsicEnums:
+    EmitIntrinsicEnums(Records, OS, true);
+    break;
+  case GenTgtIntrinsicImpl:
+    EmitIntrinsicImpl(Records, OS, true);
     break;
   case GenOptParserDefs:
     EmitOptParser(Records, OS);

@@ -8,7 +8,7 @@ zip1 z10.h, z22.h, z31.x
 
 // Element size specifiers should match.
 zip1 z10.h, z3.h, z15.b
-// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: invalid operand
+// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: invalid element width
 // CHECK-NEXT: zip1 z10.h, z3.h, z15.b
 // CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:
 
@@ -26,7 +26,7 @@ zip1 z1.s, z2.s, z32.s
 
 // p16 is not a valid SVE predicate register
 zip1 p1.s, p2.s, p16.s
-// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: invalid predicate register
+// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: invalid operand for instruction
 // CHECK-NEXT: zip1 p1.s, p2.s, p16.s
 // CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:
 
@@ -38,6 +38,22 @@ zip1 z1.s, z2.s, p3.s
 
 // Combining predicate and data registers as operands
 zip1 p1.s, p2.s, z3.s
-// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: invalid predicate register
+// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: invalid operand for instruction
 // CHECK-NEXT: zip1 p1.s, p2.s, z3.s
+// CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:
+
+
+// --------------------------------------------------------------------------//
+// Negative tests for instructions that are incompatible with movprfx
+
+movprfx z31.d, p0/z, z6.d
+zip1    z31.d, z31.d, z31.d
+// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: instruction is unpredictable when following a movprfx, suggest replacing movprfx with mov
+// CHECK-NEXT: zip1    z31.d, z31.d, z31.d
+// CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:
+
+movprfx z31, z6
+zip1    z31.d, z31.d, z31.d
+// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: instruction is unpredictable when following a movprfx, suggest replacing movprfx with mov
+// CHECK-NEXT: zip1    z31.d, z31.d, z31.d
 // CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:

@@ -253,8 +253,8 @@ void llvm::computePeelCount(Loop *L, unsigned LoopSize,
   // If the user provided a peel count, use that.
   bool UserPeelCount = UnrollForcePeelCount.getNumOccurrences() > 0;
   if (UserPeelCount) {
-    DEBUG(dbgs() << "Force-peeling first " << UnrollForcePeelCount
-                 << " iterations.\n");
+    LLVM_DEBUG(dbgs() << "Force-peeling first " << UnrollForcePeelCount
+                      << " iterations.\n");
     UP.PeelCount = UnrollForcePeelCount;
     return;
   }
@@ -298,8 +298,9 @@ void llvm::computePeelCount(Loop *L, unsigned LoopSize,
       DesiredPeelCount = std::min(DesiredPeelCount, MaxPeelCount);
       // Consider max peel count limitation.
       assert(DesiredPeelCount > 0 && "Wrong loop size estimation?");
-      DEBUG(dbgs() << "Peel " << DesiredPeelCount << " iteration(s) to turn"
-                   << " some Phis into invariants.\n");
+      LLVM_DEBUG(dbgs() << "Peel " << DesiredPeelCount
+                        << " iteration(s) to turn"
+                        << " some Phis into invariants.\n");
       UP.PeelCount = DesiredPeelCount;
       return;
     }
@@ -320,28 +321,30 @@ void llvm::computePeelCount(Loop *L, unsigned LoopSize,
     if (!PeelCount)
       return;
 
-    DEBUG(dbgs() << "Profile-based estimated trip count is " << *PeelCount
-                 << "\n");
+    LLVM_DEBUG(dbgs() << "Profile-based estimated trip count is " << *PeelCount
+                      << "\n");
 
     if (*PeelCount) {
       if ((*PeelCount <= UnrollPeelMaxCount) &&
           (LoopSize * (*PeelCount + 1) <= UP.Threshold)) {
-        DEBUG(dbgs() << "Peeling first " << *PeelCount << " iterations.\n");
+        LLVM_DEBUG(dbgs() << "Peeling first " << *PeelCount
+                          << " iterations.\n");
         UP.PeelCount = *PeelCount;
         return;
       }
-      DEBUG(dbgs() << "Requested peel count: " << *PeelCount << "\n");
-      DEBUG(dbgs() << "Max peel count: " << UnrollPeelMaxCount << "\n");
-      DEBUG(dbgs() << "Peel cost: " << LoopSize * (*PeelCount + 1) << "\n");
-      DEBUG(dbgs() << "Max peel cost: " << UP.Threshold << "\n");
+      LLVM_DEBUG(dbgs() << "Requested peel count: " << *PeelCount << "\n");
+      LLVM_DEBUG(dbgs() << "Max peel count: " << UnrollPeelMaxCount << "\n");
+      LLVM_DEBUG(dbgs() << "Peel cost: " << LoopSize * (*PeelCount + 1)
+                        << "\n");
+      LLVM_DEBUG(dbgs() << "Max peel cost: " << UP.Threshold << "\n");
     }
   }
 }
 
-/// \brief Update the branch weights of the latch of a peeled-off loop
+/// Update the branch weights of the latch of a peeled-off loop
 /// iteration.
 /// This sets the branch weights for the latch of the recently peeled off loop
-/// iteration correctly. 
+/// iteration correctly.
 /// Our goal is to make sure that:
 /// a) The total weight of all the copies of the loop body is preserved.
 /// b) The total weight of the loop exit is preserved.
@@ -379,7 +382,7 @@ static void updateBranchWeights(BasicBlock *Header, BranchInst *LatchBR,
   }
 }
 
-/// \brief Clones the body of the loop L, putting it between \p InsertTop and \p
+/// Clones the body of the loop L, putting it between \p InsertTop and \p
 /// InsertBot.
 /// \param IterNumber The serial number of the iteration currently being
 /// peeled off.
@@ -488,7 +491,7 @@ static void cloneLoopBlocks(Loop *L, unsigned IterNumber, BasicBlock *InsertTop,
     LVMap[KV.first] = KV.second;
 }
 
-/// \brief Peel off the first \p PeelCount iterations of loop \p L.
+/// Peel off the first \p PeelCount iterations of loop \p L.
 ///
 /// Note that this does not peel them off as a single straight-line block.
 /// Rather, each iteration is peeled off separately, and needs to check the
@@ -541,7 +544,7 @@ bool llvm::peelLoop(Loop *L, unsigned PeelCount, LoopInfo *LI,
   //
   // Each following iteration will split the current bottom anchor in two,
   // and put the new copy of the loop body between these two blocks. That is,
-  // after peeling another iteration from the example above, we'll split 
+  // after peeling another iteration from the example above, we'll split
   // InsertBot, and get:
   //
   // InsertTop:

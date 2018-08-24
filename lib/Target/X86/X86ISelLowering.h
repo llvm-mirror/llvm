@@ -345,7 +345,6 @@ namespace llvm {
       /// Vector comparison generating mask bits for fp and
       /// integer signed and unsigned data types.
       CMPM,
-      CMPMU,
       // Vector comparison with rounding mode for FP values
       CMPM_RND,
 
@@ -409,8 +408,6 @@ namespace llvm {
       MOVSLDUP,
       MOVLHPS,
       MOVHLPS,
-      MOVLPS,
-      MOVLPD,
       MOVSD,
       MOVSS,
       UNPCKL,
@@ -427,10 +424,6 @@ namespace llvm {
       // 3-op Variable Permute (VPERMT2).
       // Res = VPERMV3 V0, MaskV, V1
       VPERMV3,
-
-      // 3-op Variable Permute overwriting the index (VPERMI2).
-      // Res = VPERMIV3 V0, MaskV, V1
-      VPERMIV3,
 
       // Bitwise ternary logic.
       VPTERNLOG,
@@ -506,22 +499,6 @@ namespace llvm {
       FMADDSUB_RND,
       FMSUBADD_RND,
 
-      // FMA4 specific scalar intrinsics bits that zero the non-scalar bits.
-      FMADD4S, FNMADD4S, FMSUB4S, FNMSUB4S,
-
-      // Scalar intrinsic FMA.
-      FMADDS1, FMADDS3,
-      FNMADDS1, FNMADDS3,
-      FMSUBS1, FMSUBS3,
-      FNMSUBS1, FNMSUBS3,
-
-      // Scalar intrinsic FMA with rounding mode.
-      // Two versions, passthru bits on op1 or op3.
-      FMADDS1_RND, FMADDS3_RND,
-      FNMADDS1_RND, FNMADDS3_RND,
-      FMSUBS1_RND, FMSUBS3_RND,
-      FNMSUBS1_RND, FNMSUBS3_RND,
-
       // Compress and expand.
       COMPRESS,
       EXPAND,
@@ -536,12 +513,12 @@ namespace llvm {
       // Vector float/double to signed/unsigned integer.
       CVTP2SI, CVTP2UI, CVTP2SI_RND, CVTP2UI_RND,
       // Scalar float/double to signed/unsigned integer.
-      CVTS2SI_RND, CVTS2UI_RND,
+      CVTS2SI, CVTS2UI, CVTS2SI_RND, CVTS2UI_RND,
 
       // Vector float/double to signed/unsigned integer with truncation.
       CVTTP2SI, CVTTP2UI, CVTTP2SI_RND, CVTTP2UI_RND,
       // Scalar float/double to signed/unsigned integer with truncation.
-      CVTTS2SI_RND, CVTTS2UI_RND,
+      CVTTS2SI, CVTTS2UI, CVTTS2SI_RND, CVTTS2UI_RND,
 
       // Vector signed/unsigned integer to float/double.
       CVTSI2P, CVTUI2P,
@@ -576,8 +553,13 @@ namespace llvm {
       RDSEED,
 
       // SSE42 string comparisons.
-      PCMPISTRI,
-      PCMPESTRI,
+      // These nodes produce 3 results, index, mask, and flags. X86ISelDAGToDAG
+      // will emit one or two instructions based on which results are used. If
+      // flags and index/mask this allows us to use a single instruction since
+      // we won't have to pick and opcode for flags. Instead we can rely on the
+      // DAG to CSE everything and decide at isel.
+      PCMPISTR,
+      PCMPESTR,
 
       // Test if in transactional execution.
       XTEST,
@@ -829,6 +811,28 @@ namespace llvm {
 
     bool hasAndNotCompare(SDValue Y) const override;
 
+    bool hasAndNot(SDValue Y) const override;
+
+    bool preferShiftsToClearExtremeBits(SDValue Y) const override;
+
+    bool
+    shouldTransformSignedTruncationCheck(EVT XVT,
+                                         unsigned KeptBits) const override {
+      // For vectors, we don't have a preference..
+      if (XVT.isVector())
+        return false;
+
+      auto VTIsOk = [](EVT VT) -> bool {
+        return VT == MVT::i8 || VT == MVT::i16 || VT == MVT::i32 ||
+               VT == MVT::i64;
+      };
+
+      // We are ok with KeptBitsVT being byte/word/dword, what MOVS supports.
+      // XVT will be larger than KeptBitsVT.
+      MVT KeptBitsVT = MVT::getIntegerVT(KeptBits);
+      return VTIsOk(XVT) && VTIsOk(KeptBitsVT);
+    }
+
     bool convertSetCCLogicToBitwiseLogic(EVT VT) const override {
       return VT.isScalarInteger();
     }
@@ -928,7 +932,7 @@ namespace llvm {
     /// the immediate into a register.
     bool isLegalAddImmediate(int64_t Imm) const override;
 
-    /// \brief Return the cost of the scaling factor used in the addressing
+    /// Return the cost of the scaling factor used in the addressing
     /// mode represented by AM for this target, for a load/store
     /// of the specified type.
     /// If the AM is supported, the return value must be >= 0.
@@ -991,11 +995,10 @@ namespace llvm {
     /// be legal.
     bool isShuffleMaskLegal(ArrayRef<int> Mask, EVT VT) const override;
 
-    /// Similar to isShuffleMaskLegal. This is used by Targets can use this to
-    /// indicate if there is a suitable VECTOR_SHUFFLE that can be used to
-    /// replace a VAND with a constant pool entry.
-    bool isVectorClearMaskLegal(const SmallVectorImpl<int> &Mask,
-                                EVT VT) const override;
+    /// Similar to isShuffleMaskLegal. Targets can use this to indicate if there
+    /// is a suitable VECTOR_SHUFFLE that can be used to replace a VAND with a
+    /// constant pool entry.
+    bool isVectorClearMaskLegal(ArrayRef<int> Mask, EVT VT) const override;
 
     /// Returns true if lowering to a jump table is allowed.
     bool areJTsAllowed(const Function *Fn) const override;
@@ -1022,7 +1025,7 @@ namespace llvm {
              (VT == MVT::f32 && X86ScalarSSEf32);   // f32 is when SSE1
     }
 
-    /// \brief Returns true if it is beneficial to convert a load of a constant
+    /// Returns true if it is beneficial to convert a load of a constant
     /// to just the constant itself.
     bool shouldConvertConstantLoadToIntImm(const APInt &Imm,
                                            Type *Ty) const override;
@@ -1091,15 +1094,14 @@ namespace llvm {
 
     bool isNoopAddrSpaceCast(unsigned SrcAS, unsigned DestAS) const override;
 
-    /// \brief Customize the preferred legalization strategy for certain types.
+    /// Customize the preferred legalization strategy for certain types.
     LegalizeTypeAction getPreferredVectorAction(EVT VT) const override;
 
-    MVT getRegisterTypeForCallingConv(MVT VT) const override;
-
-    MVT getRegisterTypeForCallingConv(LLVMContext &Context,
+    MVT getRegisterTypeForCallingConv(LLVMContext &Context, CallingConv::ID CC,
                                       EVT VT) const override;
 
     unsigned getNumRegistersForCallingConv(LLVMContext &Context,
+                                           CallingConv::ID CC,
                                            EVT VT) const override;
 
     bool isIntDivCheap(EVT VT, AttributeList Attr) const override;
@@ -1112,20 +1114,20 @@ namespace llvm {
 
     unsigned getMaxSupportedInterleaveFactor() const override { return 4; }
 
-    /// \brief Lower interleaved load(s) into target specific
+    /// Lower interleaved load(s) into target specific
     /// instructions/intrinsics.
     bool lowerInterleavedLoad(LoadInst *LI,
                               ArrayRef<ShuffleVectorInst *> Shuffles,
                               ArrayRef<unsigned> Indices,
                               unsigned Factor) const override;
 
-    /// \brief Lower interleaved store(s) into target specific
+    /// Lower interleaved store(s) into target specific
     /// instructions/intrinsics.
     bool lowerInterleavedStore(StoreInst *SI, ShuffleVectorInst *SVI,
                                unsigned Factor) const override;
 
-    SDValue expandIndirectJTBranch(const SDLoc& dl, SDValue Value, 
-                                   SDValue Addr, SelectionDAG &DAG) 
+    SDValue expandIndirectJTBranch(const SDLoc& dl, SDValue Value,
+                                   SDValue Addr, SelectionDAG &DAG)
                                    const override;
 
   protected:
@@ -1330,8 +1332,14 @@ namespace llvm {
     MachineBasicBlock *emitEHSjLjSetJmp(MachineInstr &MI,
                                         MachineBasicBlock *MBB) const;
 
+    void emitSetJmpShadowStackFix(MachineInstr &MI,
+                                  MachineBasicBlock *MBB) const;
+
     MachineBasicBlock *emitEHSjLjLongJmp(MachineInstr &MI,
                                          MachineBasicBlock *MBB) const;
+
+    MachineBasicBlock *emitLongJmpShadowStackFix(MachineInstr &MI,
+                                                 MachineBasicBlock *MBB) const;
 
     MachineBasicBlock *emitFMA3Instr(MachineInstr &MI,
                                      MachineBasicBlock *MBB) const;
@@ -1472,7 +1480,6 @@ namespace llvm {
     const SDValue &getBasePtr() const { return getOperand(3); }
     const SDValue &getIndex()   const { return getOperand(4); }
     const SDValue &getMask()    const { return getOperand(2); }
-    const SDValue &getValue()   const { return getOperand(1); }
     const SDValue &getScale()   const { return getOperand(5); }
 
     static bool classof(const SDNode *N) {
@@ -1488,6 +1495,8 @@ namespace llvm {
         : X86MaskedGatherScatterSDNode(X86ISD::MGATHER, Order, dl, VTs, MemVT,
                                        MMO) {}
 
+    const SDValue &getPassThru() const { return getOperand(1); }
+
     static bool classof(const SDNode *N) {
       return N->getOpcode() == X86ISD::MGATHER;
     }
@@ -1499,6 +1508,8 @@ namespace llvm {
                            EVT MemVT, MachineMemOperand *MMO)
         : X86MaskedGatherScatterSDNode(X86ISD::MSCATTER, Order, dl, VTs, MemVT,
                                        MMO) {}
+
+    const SDValue &getValue() const { return getOperand(1); }
 
     static bool classof(const SDNode *N) {
       return N->getOpcode() == X86ISD::MSCATTER;

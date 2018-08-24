@@ -25,6 +25,7 @@
 #include "SIDefines.h"
 #include "SIInstrInfo.h"
 #include "SIRegisterInfo.h"
+#include "MCTargetDesc/AMDGPUMCTargetDesc.h"
 #include "Utils/AMDGPUBaseInfo.h"
 #include "llvm/ADT/None.h"
 #include "llvm/ADT/Optional.h"
@@ -39,6 +40,7 @@
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/MC/LaneBitmask.h"
 #include "llvm/MC/MCInstrDesc.h"
 #include "llvm/Pass.h"
@@ -88,9 +90,9 @@ public:
   bool runOnMachineFunction(MachineFunction &MF) override;
   void matchSDWAOperands(MachineBasicBlock &MBB);
   std::unique_ptr<SDWAOperand> matchSDWAOperand(MachineInstr &MI);
-  bool isConvertibleToSDWA(const MachineInstr &MI, const SISubtarget &ST) const;
+  bool isConvertibleToSDWA(const MachineInstr &MI, const GCNSubtarget &ST) const;
   bool convertToSDWA(MachineInstr &MI, const SDWAOperandsVector &SDWAOperands);
-  void legalizeScalarOperands(MachineInstr &MI, const SISubtarget &ST) const;
+  void legalizeScalarOperands(MachineInstr &MI, const GCNSubtarget &ST) const;
 
   StringRef getPassName() const override { return "SI Peephole SDWA"; }
 
@@ -845,7 +847,7 @@ SIPeepholeSDWA::matchSDWAOperand(MachineInstr &MI) {
 void SIPeepholeSDWA::matchSDWAOperands(MachineBasicBlock &MBB) {
   for (MachineInstr &MI : MBB) {
     if (auto Operand = matchSDWAOperand(MI)) {
-      DEBUG(dbgs() << "Match: " << MI << "To: " << *Operand << '\n');
+      LLVM_DEBUG(dbgs() << "Match: " << MI << "To: " << *Operand << '\n');
       SDWAOperands[&MI] = std::move(Operand);
       ++NumSDWAPatternsFound;
     }
@@ -853,7 +855,7 @@ void SIPeepholeSDWA::matchSDWAOperands(MachineBasicBlock &MBB) {
 }
 
 bool SIPeepholeSDWA::isConvertibleToSDWA(const MachineInstr &MI,
-                                         const SISubtarget &ST) const {
+                                         const GCNSubtarget &ST) const {
   // Check if this is already an SDWA instruction
   unsigned Opc = MI.getOpcode();
   if (TII->isSDWA(Opc))
@@ -900,7 +902,7 @@ bool SIPeepholeSDWA::isConvertibleToSDWA(const MachineInstr &MI,
 bool SIPeepholeSDWA::convertToSDWA(MachineInstr &MI,
                                    const SDWAOperandsVector &SDWAOperands) {
 
-  DEBUG(dbgs() << "Convert instruction:" << MI);
+  LLVM_DEBUG(dbgs() << "Convert instruction:" << MI);
 
   // Convert to sdwa
   int SDWAOpcode;
@@ -1049,7 +1051,7 @@ bool SIPeepholeSDWA::convertToSDWA(MachineInstr &MI,
   // Apply all sdwa operand patterns.
   bool Converted = false;
   for (auto &Operand : SDWAOperands) {
-    DEBUG(dbgs() << *SDWAInst << "\nOperand: " << *Operand);
+    LLVM_DEBUG(dbgs() << *SDWAInst << "\nOperand: " << *Operand);
     // There should be no intesection between SDWA operands and potential MIs
     // e.g.:
     // v_and_b32 v0, 0xff, v1 -> src:v1 sel:BYTE_0
@@ -1070,7 +1072,7 @@ bool SIPeepholeSDWA::convertToSDWA(MachineInstr &MI,
     return false;
   }
 
-  DEBUG(dbgs() << "\nInto:" << *SDWAInst << '\n');
+  LLVM_DEBUG(dbgs() << "\nInto:" << *SDWAInst << '\n');
   ++NumSDWAInstructionsPeepholed;
 
   MI.eraseFromParent();
@@ -1080,7 +1082,7 @@ bool SIPeepholeSDWA::convertToSDWA(MachineInstr &MI,
 // If an instruction was converted to SDWA it should not have immediates or SGPR
 // operands (allowed one SGPR on GFX9). Copy its scalar operands into VGPRs.
 void SIPeepholeSDWA::legalizeScalarOperands(MachineInstr &MI,
-                                            const SISubtarget &ST) const {
+                                            const GCNSubtarget &ST) const {
   const MCInstrDesc &Desc = TII->get(MI.getOpcode());
   unsigned ConstantBusCount = 0;
   for (MachineOperand &Op : MI.explicit_uses()) {
@@ -1111,7 +1113,7 @@ void SIPeepholeSDWA::legalizeScalarOperands(MachineInstr &MI,
 }
 
 bool SIPeepholeSDWA::runOnMachineFunction(MachineFunction &MF) {
-  const SISubtarget &ST = MF.getSubtarget<SISubtarget>();
+  const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
 
   if (!ST.hasSDWA() || skipFunction(MF.getFunction()))
     return false;

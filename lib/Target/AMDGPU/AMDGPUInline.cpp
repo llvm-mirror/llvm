@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 //
 /// \file
-/// \brief This is AMDGPU specific replacement of the standard inliner.
+/// This is AMDGPU specific replacement of the standard inliner.
 /// The main purpose is to account for the fact that calls not only expensive
 /// on the AMDGPU, but much more expensive if a private memory pointer is
 /// passed to a function as an argument. In this situation, we are unable to
@@ -161,8 +161,8 @@ static bool isWrapperOnlyCall(CallSite CS) {
       return false;
     }
     if (isa<ReturnInst>(*std::next(I->getIterator()))) {
-      DEBUG(dbgs() << "    Wrapper only call detected: "
-                   << Callee->getName() << '\n');
+      LLVM_DEBUG(dbgs() << "    Wrapper only call detected: "
+                        << Callee->getName() << '\n');
       return true;
     }
   }
@@ -174,18 +174,23 @@ InlineCost AMDGPUInliner::getInlineCost(CallSite CS) {
   Function *Caller = CS.getCaller();
   TargetTransformInfo &TTI = TTIWP->getTTI(*Callee);
 
-  if (!Callee || Callee->isDeclaration() || CS.isNoInline() ||
-      !TTI.areInlineCompatible(Caller, Callee))
-    return llvm::InlineCost::getNever();
+  if (!Callee || Callee->isDeclaration())
+    return llvm::InlineCost::getNever("undefined callee");
+
+  if (CS.isNoInline())
+    return llvm::InlineCost::getNever("noinline");
+
+  if (!TTI.areInlineCompatible(Caller, Callee))
+    return llvm::InlineCost::getNever("incompatible");
 
   if (CS.hasFnAttr(Attribute::AlwaysInline)) {
     if (isInlineViable(*Callee))
-      return llvm::InlineCost::getAlways();
-    return llvm::InlineCost::getNever();
+      return llvm::InlineCost::getAlways("alwaysinline viable");
+    return llvm::InlineCost::getNever("alwaysinline unviable");
   }
 
   if (isWrapperOnlyCall(CS))
-    return llvm::InlineCost::getAlways();
+    return llvm::InlineCost::getAlways("wrapper-only call");
 
   InlineParams LocalParams = Params;
   LocalParams.DefaultThreshold = (int)getInlineThreshold(CS);

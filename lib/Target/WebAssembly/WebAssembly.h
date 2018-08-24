@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// \brief This file contains the entry points for global functions defined in
+/// This file contains the entry points for global functions defined in
 /// the LLVM WebAssembly back-end.
 ///
 //===----------------------------------------------------------------------===//
@@ -28,6 +28,7 @@ class FunctionPass;
 // LLVM IR passes.
 ModulePass *createWebAssemblyLowerEmscriptenEHSjLj(bool DoEH, bool DoSjLj);
 ModulePass *createWebAssemblyLowerGlobalDtors();
+ModulePass *createWebAssemblyAddMissingPrototypes();
 ModulePass *createWebAssemblyFixFunctionBitcasts();
 FunctionPass *createWebAssemblyOptimizeReturned();
 
@@ -46,6 +47,7 @@ FunctionPass *createWebAssemblyRegStackify();
 FunctionPass *createWebAssemblyRegColoring();
 FunctionPass *createWebAssemblyExplicitLocals();
 FunctionPass *createWebAssemblyFixIrreducibleControlFlow();
+FunctionPass *createWebAssemblyLateEHPrepare();
 FunctionPass *createWebAssemblyCFGSort();
 FunctionPass *createWebAssemblyCFGStackify();
 FunctionPass *createWebAssemblyLowerBrUnless();
@@ -54,6 +56,7 @@ FunctionPass *createWebAssemblyPeephole();
 FunctionPass *createWebAssemblyCallIndirectFixup();
 
 // PassRegistry initialization declarations.
+void initializeWebAssemblyAddMissingPrototypesPass(PassRegistry &);
 void initializeWebAssemblyLowerEmscriptenEHSjLjPass(PassRegistry &);
 void initializeLowerGlobalDtorsPass(PassRegistry &);
 void initializeFixFunctionBitcastsPass(PassRegistry &);
@@ -68,6 +71,8 @@ void initializeWebAssemblyRegStackifyPass(PassRegistry &);
 void initializeWebAssemblyRegColoringPass(PassRegistry &);
 void initializeWebAssemblyExplicitLocalsPass(PassRegistry &);
 void initializeWebAssemblyFixIrreducibleControlFlowPass(PassRegistry &);
+void initializeWebAssemblyLateEHPreparePass(PassRegistry &);
+void initializeWebAssemblyExceptionInfoPass(PassRegistry &);
 void initializeWebAssemblyCFGSortPass(PassRegistry &);
 void initializeWebAssemblyCFGStackifyPass(PassRegistry &);
 void initializeWebAssemblyLowerBrUnlessPass(PassRegistry &);

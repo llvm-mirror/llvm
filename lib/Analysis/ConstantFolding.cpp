@@ -1389,9 +1389,13 @@ bool llvm::canConstantFoldCallTo(ImmutableCallSite CS, const Function *F) {
   case Intrinsic::ctpop:
   case Intrinsic::ctlz:
   case Intrinsic::cttz:
+  case Intrinsic::fshl:
+  case Intrinsic::fshr:
   case Intrinsic::fma:
   case Intrinsic::fmuladd:
   case Intrinsic::copysign:
+  case Intrinsic::launder_invariant_group:
+  case Intrinsic::strip_invariant_group:
   case Intrinsic::round:
   case Intrinsic::masked_load:
   case Intrinsic::sadd_with_overflow:
@@ -1411,6 +1415,22 @@ bool llvm::canConstantFoldCallTo(ImmutableCallSite CS, const Function *F) {
   case Intrinsic::x86_sse2_cvtsd2si64:
   case Intrinsic::x86_sse2_cvttsd2si:
   case Intrinsic::x86_sse2_cvttsd2si64:
+  case Intrinsic::x86_avx512_vcvtss2si32:
+  case Intrinsic::x86_avx512_vcvtss2si64:
+  case Intrinsic::x86_avx512_cvttss2si:
+  case Intrinsic::x86_avx512_cvttss2si64:
+  case Intrinsic::x86_avx512_vcvtsd2si32:
+  case Intrinsic::x86_avx512_vcvtsd2si64:
+  case Intrinsic::x86_avx512_cvttsd2si:
+  case Intrinsic::x86_avx512_cvttsd2si64:
+  case Intrinsic::x86_avx512_vcvtss2usi32:
+  case Intrinsic::x86_avx512_vcvtss2usi64:
+  case Intrinsic::x86_avx512_cvttss2usi:
+  case Intrinsic::x86_avx512_cvttss2usi64:
+  case Intrinsic::x86_avx512_vcvtsd2usi32:
+  case Intrinsic::x86_avx512_vcvtsd2usi64:
+  case Intrinsic::x86_avx512_cvttsd2usi:
+  case Intrinsic::x86_avx512_cvttsd2usi64:
     return true;
   default:
     return false;
@@ -1551,7 +1571,7 @@ Constant *ConstantFoldBinaryFP(double (*NativeFP)(double, double), double V,
 /// result. Returns null if the conversion cannot be performed, otherwise
 /// returns the Constant value resulting from the conversion.
 Constant *ConstantFoldSSEConvertToInt(const APFloat &Val, bool roundTowardZero,
-                                      Type *Ty) {
+                                      Type *Ty, bool IsSigned) {
   // All of these conversion intrinsics form an integer of at most 64bits.
   unsigned ResultWidth = Ty->getIntegerBitWidth();
   assert(ResultWidth <= 64 &&
@@ -1563,11 +1583,11 @@ Constant *ConstantFoldSSEConvertToInt(const APFloat &Val, bool roundTowardZero,
                                               : APFloat::rmNearestTiesToEven;
   APFloat::opStatus status =
       Val.convertToInteger(makeMutableArrayRef(UIntVal), ResultWidth,
-                           /*isSigned=*/true, mode, &isExact);
+                           IsSigned, mode, &isExact);
   if (status != APFloat::opOK &&
       (!roundTowardZero || status != APFloat::opInexact))
     return nullptr;
-  return ConstantInt::get(Ty, UIntVal, /*isSigned=*/true);
+  return ConstantInt::get(Ty, UIntVal, IsSigned);
 }
 
 double getValueAsDouble(ConstantFP *Op) {
@@ -1587,16 +1607,37 @@ double getValueAsDouble(ConstantFP *Op) {
 
 Constant *ConstantFoldScalarCall(StringRef Name, unsigned IntrinsicID, Type *Ty,
                                  ArrayRef<Constant *> Operands,
-                                 const TargetLibraryInfo *TLI) {
+                                 const TargetLibraryInfo *TLI,
+                                 ImmutableCallSite CS) {
   if (Operands.size() == 1) {
     if (isa<UndefValue>(Operands[0])) {
       // cosine(arg) is between -1 and 1. cosine(invalid arg) is NaN
       if (IntrinsicID == Intrinsic::cos)
         return Constant::getNullValue(Ty);
       if (IntrinsicID == Intrinsic::bswap ||
-          IntrinsicID == Intrinsic::bitreverse)
+          IntrinsicID == Intrinsic::bitreverse ||
+          IntrinsicID == Intrinsic::launder_invariant_group ||
+          IntrinsicID == Intrinsic::strip_invariant_group)
         return Operands[0];
     }
+
+    if (isa<ConstantPointerNull>(Operands[0])) {
+      // launder(null) == null == strip(null) iff in addrspace 0
+      if (IntrinsicID == Intrinsic::launder_invariant_group ||
+          IntrinsicID == Intrinsic::strip_invariant_group) {
+        // If instruction is not yet put in a basic block (e.g. when cloning
+        // a function during inlining), CS caller may not be available.
+        // So check CS's BB first before querying CS.getCaller.
+        const Function *Caller = CS.getParent() ? CS.getCaller() : nullptr;
+        if (Caller &&
+            !NullPointerIsDefined(
+                Caller, Operands[0]->getType()->getPointerAddressSpace())) {
+          return Operands[0];
+        }
+        return nullptr;
+      }
+    }
+
     if (auto *Op = dyn_cast<ConstantFP>(Operands[0])) {
       if (IntrinsicID == Intrinsic::convert_to_fp16) {
         APFloat Val(Op->getValueAPF());
@@ -1826,7 +1867,8 @@ Constant *ConstantFoldScalarCall(StringRef Name, unsigned IntrinsicID, Type *Ty,
         if (ConstantFP *FPOp =
                 dyn_cast_or_null<ConstantFP>(Op->getAggregateElement(0U)))
           return ConstantFoldSSEConvertToInt(FPOp->getValueAPF(),
-                                             /*roundTowardZero=*/false, Ty);
+                                             /*roundTowardZero=*/false, Ty,
+                                             /*IsSigned*/true);
         break;
       case Intrinsic::x86_sse_cvttss2si:
       case Intrinsic::x86_sse_cvttss2si64:
@@ -1835,7 +1877,8 @@ Constant *ConstantFoldScalarCall(StringRef Name, unsigned IntrinsicID, Type *Ty,
         if (ConstantFP *FPOp =
                 dyn_cast_or_null<ConstantFP>(Op->getAggregateElement(0U)))
           return ConstantFoldSSEConvertToInt(FPOp->getValueAPF(),
-                                             /*roundTowardZero=*/true, Ty);
+                                             /*roundTowardZero=*/true, Ty,
+                                             /*IsSigned*/true);
         break;
       }
     }
@@ -1960,6 +2003,59 @@ Constant *ConstantFoldScalarCall(StringRef Name, unsigned IntrinsicID, Type *Ty,
 
       return nullptr;
     }
+
+    // Support ConstantVector in case we have an Undef in the top.
+    if ((isa<ConstantVector>(Operands[0]) ||
+         isa<ConstantDataVector>(Operands[0])) &&
+        // Check for default rounding mode.
+        // FIXME: Support other rounding modes?
+        isa<ConstantInt>(Operands[1]) &&
+        cast<ConstantInt>(Operands[1])->getValue() == 4) {
+      auto *Op = cast<Constant>(Operands[0]);
+      switch (IntrinsicID) {
+      default: break;
+      case Intrinsic::x86_avx512_vcvtss2si32:
+      case Intrinsic::x86_avx512_vcvtss2si64:
+      case Intrinsic::x86_avx512_vcvtsd2si32:
+      case Intrinsic::x86_avx512_vcvtsd2si64:
+        if (ConstantFP *FPOp =
+                dyn_cast_or_null<ConstantFP>(Op->getAggregateElement(0U)))
+          return ConstantFoldSSEConvertToInt(FPOp->getValueAPF(),
+                                             /*roundTowardZero=*/false, Ty,
+                                             /*IsSigned*/true);
+        break;
+      case Intrinsic::x86_avx512_vcvtss2usi32:
+      case Intrinsic::x86_avx512_vcvtss2usi64:
+      case Intrinsic::x86_avx512_vcvtsd2usi32:
+      case Intrinsic::x86_avx512_vcvtsd2usi64:
+        if (ConstantFP *FPOp =
+                dyn_cast_or_null<ConstantFP>(Op->getAggregateElement(0U)))
+          return ConstantFoldSSEConvertToInt(FPOp->getValueAPF(),
+                                             /*roundTowardZero=*/false, Ty,
+                                             /*IsSigned*/false);
+        break;
+      case Intrinsic::x86_avx512_cvttss2si:
+      case Intrinsic::x86_avx512_cvttss2si64:
+      case Intrinsic::x86_avx512_cvttsd2si:
+      case Intrinsic::x86_avx512_cvttsd2si64:
+        if (ConstantFP *FPOp =
+                dyn_cast_or_null<ConstantFP>(Op->getAggregateElement(0U)))
+          return ConstantFoldSSEConvertToInt(FPOp->getValueAPF(),
+                                             /*roundTowardZero=*/true, Ty,
+                                             /*IsSigned*/true);
+        break;
+      case Intrinsic::x86_avx512_cvttss2usi:
+      case Intrinsic::x86_avx512_cvttss2usi64:
+      case Intrinsic::x86_avx512_cvttsd2usi:
+      case Intrinsic::x86_avx512_cvttsd2usi64:
+        if (ConstantFP *FPOp =
+                dyn_cast_or_null<ConstantFP>(Op->getAggregateElement(0U)))
+          return ConstantFoldSSEConvertToInt(FPOp->getValueAPF(),
+                                             /*roundTowardZero=*/true, Ty,
+                                             /*IsSigned*/false);
+        break;
+      }
+    }
     return nullptr;
   }
 
@@ -1987,13 +2083,37 @@ Constant *ConstantFoldScalarCall(StringRef Name, unsigned IntrinsicID, Type *Ty,
     }
   }
 
+  if (IntrinsicID == Intrinsic::fshl || IntrinsicID == Intrinsic::fshr) {
+    auto *C0 = dyn_cast<ConstantInt>(Operands[0]);
+    auto *C1 = dyn_cast<ConstantInt>(Operands[1]);
+    auto *C2 = dyn_cast<ConstantInt>(Operands[2]);
+    if (!(C0 && C1 && C2))
+      return nullptr;
+
+    // The shift amount is interpreted as modulo the bitwidth. If the shift
+    // amount is effectively 0, avoid UB due to oversized inverse shift below.
+    unsigned BitWidth = C0->getBitWidth();
+    unsigned ShAmt = C2->getValue().urem(BitWidth);
+    bool IsRight = IntrinsicID == Intrinsic::fshr;
+    if (!ShAmt)
+      return IsRight ? C1 : C0;
+
+    // (X << ShlAmt) | (Y >> LshrAmt)
+    const APInt &X = C0->getValue();
+    const APInt &Y = C1->getValue();
+    unsigned LshrAmt = IsRight ? ShAmt : BitWidth - ShAmt;
+    unsigned ShlAmt = !IsRight ? ShAmt : BitWidth - ShAmt;
+    return ConstantInt::get(Ty->getContext(), X.shl(ShlAmt) | Y.lshr(LshrAmt));
+  }
+
   return nullptr;
 }
 
 Constant *ConstantFoldVectorCall(StringRef Name, unsigned IntrinsicID,
                                  VectorType *VTy, ArrayRef<Constant *> Operands,
                                  const DataLayout &DL,
-                                 const TargetLibraryInfo *TLI) {
+                                 const TargetLibraryInfo *TLI,
+                                 ImmutableCallSite CS) {
   SmallVector<Constant *, 4> Result(VTy->getNumElements());
   SmallVector<Constant *, 4> Lane(Operands.size());
   Type *Ty = VTy->getElementType();
@@ -2056,7 +2176,7 @@ Constant *ConstantFoldVectorCall(StringRef Name, unsigned IntrinsicID,
     }
 
     // Use the regular scalar folding to simplify this column.
-    Constant *Folded = ConstantFoldScalarCall(Name, IntrinsicID, Ty, Lane, TLI);
+    Constant *Folded = ConstantFoldScalarCall(Name, IntrinsicID, Ty, Lane, TLI, CS);
     if (!Folded)
       return nullptr;
     Result[I] = Folded;
@@ -2081,9 +2201,9 @@ llvm::ConstantFoldCall(ImmutableCallSite CS, Function *F,
 
   if (auto *VTy = dyn_cast<VectorType>(Ty))
     return ConstantFoldVectorCall(Name, F->getIntrinsicID(), VTy, Operands,
-                                  F->getParent()->getDataLayout(), TLI);
+                                  F->getParent()->getDataLayout(), TLI, CS);
 
-  return ConstantFoldScalarCall(Name, F->getIntrinsicID(), Ty, Operands, TLI);
+  return ConstantFoldScalarCall(Name, F->getIntrinsicID(), Ty, Operands, TLI, CS);
 }
 
 bool llvm::isMathLibCallNoop(CallSite CS, const TargetLibraryInfo *TLI) {

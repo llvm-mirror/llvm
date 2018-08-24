@@ -23,10 +23,10 @@
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionAliasAnalysis.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
-#include "llvm/Analysis/Utils/Local.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/DebugInfoMetadata.h"
+#include "llvm/IR/DomTreeUpdater.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IntrinsicInst.h"
@@ -35,6 +35,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
 #include "llvm/Transforms/Utils/SSAUpdater.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
@@ -235,15 +236,16 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
     CodeMetrics Metrics;
     Metrics.analyzeBasicBlock(OrigHeader, *TTI, EphValues);
     if (Metrics.notDuplicatable) {
-      DEBUG(dbgs() << "LoopRotation: NOT rotating - contains non-duplicatable"
-                   << " instructions: ";
-            L->dump());
+      LLVM_DEBUG(
+          dbgs() << "LoopRotation: NOT rotating - contains non-duplicatable"
+                 << " instructions: ";
+          L->dump());
       return false;
     }
     if (Metrics.convergent) {
-      DEBUG(dbgs() << "LoopRotation: NOT rotating - contains convergent "
-                      "instructions: ";
-            L->dump());
+      LLVM_DEBUG(dbgs() << "LoopRotation: NOT rotating - contains convergent "
+                           "instructions: ";
+                 L->dump());
       return false;
     }
     if (Metrics.NumInsts > MaxHeaderSize)
@@ -266,7 +268,7 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
   if (SE)
     SE->forgetTopmostLoop(L);
 
-  DEBUG(dbgs() << "LoopRotation: rotating "; L->dump());
+  LLVM_DEBUG(dbgs() << "LoopRotation: rotating "; L->dump());
 
   // Find new Loop header. NewHeader is a Header's one and only successor
   // that is inside loop.  Header's other successor is outside the
@@ -302,13 +304,13 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
   // Record all debug intrinsics preceding LoopEntryBranch to avoid duplication.
   using DbgIntrinsicHash =
       std::pair<std::pair<Value *, DILocalVariable *>, DIExpression *>;
-  auto makeHash = [](DbgInfoIntrinsic *D) -> DbgIntrinsicHash {
+  auto makeHash = [](DbgVariableIntrinsic *D) -> DbgIntrinsicHash {
     return {{D->getVariableLocation(), D->getVariable()}, D->getExpression()};
   };
   SmallDenseSet<DbgIntrinsicHash, 8> DbgIntrinsics;
   for (auto I = std::next(OrigPreheader->rbegin()), E = OrigPreheader->rend();
        I != E; ++I) {
-    if (auto *DII = dyn_cast<DbgInfoIntrinsic>(&*I))
+    if (auto *DII = dyn_cast<DbgVariableIntrinsic>(&*I))
       DbgIntrinsics.insert(makeHash(DII));
     else
       break;
@@ -338,7 +340,7 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
                      RF_NoModuleLevelChanges | RF_IgnoreMissingLocals);
 
     // Avoid inserting the same intrinsic twice.
-    if (auto *DII = dyn_cast<DbgInfoIntrinsic>(C))
+    if (auto *DII = dyn_cast<DbgVariableIntrinsic>(C))
       if (DbgIntrinsics.count(makeHash(DII))) {
         C->deleteValue();
         continue;
@@ -475,9 +477,10 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
   // the OrigHeader block into OrigLatch.  This will succeed if they are
   // connected by an unconditional branch.  This is just a cleanup so the
   // emitted code isn't too gross in this common case.
-  MergeBlockIntoPredecessor(OrigHeader, DT, LI);
+  DomTreeUpdater DTU(DT, DomTreeUpdater::UpdateStrategy::Eager);
+  MergeBlockIntoPredecessor(OrigHeader, &DTU, LI);
 
-  DEBUG(dbgs() << "LoopRotation: into "; L->dump());
+  LLVM_DEBUG(dbgs() << "LoopRotation: into "; L->dump());
 
   ++NumRotated;
   return true;
@@ -580,8 +583,8 @@ bool LoopRotate::simplifyLoopLatch(Loop *L) {
   if (!shouldSpeculateInstrs(Latch->begin(), Jmp->getIterator(), L))
     return false;
 
-  DEBUG(dbgs() << "Folding loop latch " << Latch->getName() << " into "
-               << LastExit->getName() << "\n");
+  LLVM_DEBUG(dbgs() << "Folding loop latch " << Latch->getName() << " into "
+                    << LastExit->getName() << "\n");
 
   // Hoist the instructions from Latch into LastExit.
   LastExit->getInstList().splice(BI->getIterator(), Latch->getInstList(),

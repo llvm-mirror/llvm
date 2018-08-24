@@ -13,12 +13,15 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/Scalar/DivRemPairs.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/Pass.h"
+#include "llvm/Support/DebugCounter.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/BypassSlowDivision.h"
 using namespace llvm;
@@ -27,6 +30,8 @@ using namespace llvm;
 STATISTIC(NumPairs, "Number of div/rem pairs");
 STATISTIC(NumHoisted, "Number of instructions hoisted");
 STATISTIC(NumDecomposed, "Number of instructions decomposed");
+DEBUG_COUNTER(DRPCounter, "div-rem-pairs-transform",
+              "Controls transformations in div-rem-pairs pass");
 
 /// Find matching pairs of integer div/rem ops (they have the same numerator,
 /// denominator, and signedness). If they exist in different basic blocks, bring
@@ -48,7 +53,10 @@ static bool optimizeDivRem(Function &F, const TargetTransformInfo &TTI,
 
   // Insert all divide and remainder instructions into maps keyed by their
   // operands and opcode (signed or unsigned).
-  DenseMap<DivRemMapKey, Instruction *> DivMap, RemMap;
+  DenseMap<DivRemMapKey, Instruction *> DivMap;
+  // Use a MapVector for RemMap so that instructions are moved/inserted in a
+  // deterministic order.
+  MapVector<DivRemMapKey, Instruction *> RemMap;
   for (auto &BB : F) {
     for (auto &I : BB) {
       if (I.getOpcode() == Instruction::SDiv)
@@ -67,14 +75,14 @@ static bool optimizeDivRem(Function &F, const TargetTransformInfo &TTI,
   // rare than division.
   for (auto &RemPair : RemMap) {
     // Find the matching division instruction from the division map.
-    Instruction *DivInst = DivMap[RemPair.getFirst()];
+    Instruction *DivInst = DivMap[RemPair.first];
     if (!DivInst)
       continue;
 
     // We have a matching pair of div/rem instructions. If one dominates the
     // other, hoist and/or replace one.
     NumPairs++;
-    Instruction *RemInst = RemPair.getSecond();
+    Instruction *RemInst = RemPair.second;
     bool IsSigned = DivInst->getOpcode() == Instruction::SDiv;
     bool HasDivRemOp = TTI.hasDivRemOp(DivInst->getType(), IsSigned);
 
@@ -86,6 +94,9 @@ static bool optimizeDivRem(Function &F, const TargetTransformInfo &TTI,
 
     bool DivDominates = DT.dominates(DivInst, RemInst);
     if (!DivDominates && !DT.dominates(RemInst, DivInst))
+      continue;
+
+    if (!DebugCounter::shouldExecute(DRPCounter))
       continue;
 
     if (HasDivRemOp) {

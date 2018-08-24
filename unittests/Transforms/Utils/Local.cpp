@@ -7,14 +7,17 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Analysis/Utils/Local.h"
+#include "llvm/Transforms/Utils/Local.h"
+#include "llvm/Analysis/PostDominators.h"
 #include "llvm/AsmParser/Parser.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/DIBuilder.h"
+#include "llvm/IR/DomTreeUpdater.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Verifier.h"
 #include "llvm/Support/SourceMgr.h"
 #include "gtest/gtest.h"
 
@@ -130,7 +133,7 @@ TEST(Local, ReplaceDbgDeclare) {
       !2 = !{}
       !3 = !{i32 2, !"Dwarf Version", i32 4}
       !4 = !{i32 2, !"Debug Info Version", i32 3}
-      !8 = distinct !DISubprogram(name: "f", scope: !1, file: !1, line: 1, type: !9, isLocal: false, isDefinition: true, scopeLine: 1, isOptimized: false, unit: !0, variables: !2)
+      !8 = distinct !DISubprogram(name: "f", scope: !1, file: !1, line: 1, type: !9, isLocal: false, isDefinition: true, scopeLine: 1, isOptimized: false, unit: !0, retainedNodes: !2)
       !9 = !DISubroutineType(types: !10)
       !10 = !{null}
       !11 = !DILocalVariable(name: "x", scope: !8, file: !1, line: 2, type: !12)
@@ -175,9 +178,10 @@ static void runWithDomTree(
 
 TEST(Local, MergeBasicBlockIntoOnlyPred) {
   LLVMContext C;
-
-  std::unique_ptr<Module> M = parseIR(C,
-                                      R"(
+  std::unique_ptr<Module> M;
+  auto resetIR = [&]() {
+    M = parseIR(C,
+                R"(
       define i32 @f(i8* %str) {
       entry:
         br label %bb2.i
@@ -194,18 +198,137 @@ TEST(Local, MergeBasicBlockIntoOnlyPred) {
         ret i32 0
       }
       )");
-  runWithDomTree(
-      *M, "f", [&](Function &F, DominatorTree *DT) {
-        for (Function::iterator I = F.begin(), E = F.end(); I != E;) {
-          BasicBlock *BB = &*I++;
-          BasicBlock *SinglePred = BB->getSinglePredecessor();
-          if (!SinglePred || SinglePred == BB || BB->hasAddressTaken()) continue;
-          BranchInst *Term = dyn_cast<BranchInst>(SinglePred->getTerminator());
-          if (Term && !Term->isConditional())
-            MergeBasicBlockIntoOnlyPred(BB, DT);
-        }
-        EXPECT_TRUE(DT->verify());
-      });
+  };
+
+  auto resetIRReplaceEntry = [&]() {
+    M = parseIR(C,
+                R"(
+      define i32 @f() {
+      entry:
+        br label %bb2.i
+      bb2.i:                                            ; preds = %entry
+        ret i32 0
+      }
+      )");
+  };
+
+  auto Test = [&](Function &F, DomTreeUpdater &DTU) {
+    for (Function::iterator I = F.begin(), E = F.end(); I != E;) {
+      BasicBlock *BB = &*I++;
+      BasicBlock *SinglePred = BB->getSinglePredecessor();
+      if (!SinglePred || SinglePred == BB || BB->hasAddressTaken())
+        continue;
+      BranchInst *Term = dyn_cast<BranchInst>(SinglePred->getTerminator());
+      if (Term && !Term->isConditional())
+        MergeBasicBlockIntoOnlyPred(BB, &DTU);
+    }
+    if (DTU.hasDomTree())
+      EXPECT_TRUE(DTU.getDomTree().verify());
+    if (DTU.hasPostDomTree())
+      EXPECT_TRUE(DTU.getPostDomTree().verify());
+  };
+
+  // Test MergeBasicBlockIntoOnlyPred working under Eager UpdateStrategy with
+  // both DT and PDT.
+  resetIR();
+  runWithDomTree(*M, "f", [&](Function &F, DominatorTree *DT) {
+    PostDominatorTree PDT = PostDominatorTree(F);
+    DomTreeUpdater DTU(*DT, PDT, DomTreeUpdater::UpdateStrategy::Eager);
+    Test(F, DTU);
+  });
+
+  // Test MergeBasicBlockIntoOnlyPred working under Eager UpdateStrategy with
+  // DT.
+  resetIR();
+  runWithDomTree(*M, "f", [&](Function &F, DominatorTree *DT) {
+    DomTreeUpdater DTU(*DT, DomTreeUpdater::UpdateStrategy::Eager);
+    Test(F, DTU);
+  });
+
+  // Test MergeBasicBlockIntoOnlyPred working under Eager UpdateStrategy with
+  // PDT.
+  resetIR();
+  runWithDomTree(*M, "f", [&](Function &F, DominatorTree *DT) {
+    PostDominatorTree PDT = PostDominatorTree(F);
+    DomTreeUpdater DTU(PDT, DomTreeUpdater::UpdateStrategy::Eager);
+    Test(F, DTU);
+  });
+
+  // Test MergeBasicBlockIntoOnlyPred working under Lazy UpdateStrategy with
+  // both DT and PDT.
+  resetIR();
+  runWithDomTree(*M, "f", [&](Function &F, DominatorTree *DT) {
+    PostDominatorTree PDT = PostDominatorTree(F);
+    DomTreeUpdater DTU(*DT, PDT, DomTreeUpdater::UpdateStrategy::Lazy);
+    Test(F, DTU);
+  });
+
+  // Test MergeBasicBlockIntoOnlyPred working under Lazy UpdateStrategy with
+  // PDT.
+  resetIR();
+  runWithDomTree(*M, "f", [&](Function &F, DominatorTree *DT) {
+    PostDominatorTree PDT = PostDominatorTree(F);
+    DomTreeUpdater DTU(PDT, DomTreeUpdater::UpdateStrategy::Lazy);
+    Test(F, DTU);
+  });
+
+  // Test MergeBasicBlockIntoOnlyPred working under Lazy UpdateStrategy with DT.
+  resetIR();
+  runWithDomTree(*M, "f", [&](Function &F, DominatorTree *DT) {
+    DomTreeUpdater DTU(*DT, DomTreeUpdater::UpdateStrategy::Lazy);
+    Test(F, DTU);
+  });
+
+  // Test MergeBasicBlockIntoOnlyPred working under Eager UpdateStrategy with
+  // both DT and PDT.
+  resetIRReplaceEntry();
+  runWithDomTree(*M, "f", [&](Function &F, DominatorTree *DT) {
+    PostDominatorTree PDT = PostDominatorTree(F);
+    DomTreeUpdater DTU(*DT, PDT, DomTreeUpdater::UpdateStrategy::Eager);
+    Test(F, DTU);
+  });
+
+  // Test MergeBasicBlockIntoOnlyPred working under Eager UpdateStrategy with
+  // DT.
+  resetIRReplaceEntry();
+  runWithDomTree(*M, "f", [&](Function &F, DominatorTree *DT) {
+    DomTreeUpdater DTU(*DT, DomTreeUpdater::UpdateStrategy::Eager);
+    Test(F, DTU);
+  });
+
+  // Test MergeBasicBlockIntoOnlyPred working under Eager UpdateStrategy with
+  // PDT.
+  resetIRReplaceEntry();
+  runWithDomTree(*M, "f", [&](Function &F, DominatorTree *DT) {
+    PostDominatorTree PDT = PostDominatorTree(F);
+    DomTreeUpdater DTU(PDT, DomTreeUpdater::UpdateStrategy::Eager);
+    Test(F, DTU);
+  });
+
+  // Test MergeBasicBlockIntoOnlyPred working under Lazy UpdateStrategy with
+  // both DT and PDT.
+  resetIRReplaceEntry();
+  runWithDomTree(*M, "f", [&](Function &F, DominatorTree *DT) {
+    PostDominatorTree PDT = PostDominatorTree(F);
+    DomTreeUpdater DTU(*DT, PDT, DomTreeUpdater::UpdateStrategy::Lazy);
+    Test(F, DTU);
+  });
+
+  // Test MergeBasicBlockIntoOnlyPred working under Lazy UpdateStrategy with
+  // PDT.
+  resetIRReplaceEntry();
+  runWithDomTree(*M, "f", [&](Function &F, DominatorTree *DT) {
+    PostDominatorTree PDT = PostDominatorTree(F);
+    DomTreeUpdater DTU(PDT, DomTreeUpdater::UpdateStrategy::Lazy);
+    Test(F, DTU);
+  });
+
+  // Test MergeBasicBlockIntoOnlyPred working under Lazy UpdateStrategy with DT.
+  resetIRReplaceEntry();
+  runWithDomTree(*M, "f", [&](Function &F, DominatorTree *DT) {
+    DomTreeUpdater DTU(*DT, DomTreeUpdater::UpdateStrategy::Lazy);
+    Test(F, DTU);
+  });
 }
 
 TEST(Local, ConstantFoldTerminator) {
@@ -309,27 +432,55 @@ TEST(Local, ConstantFoldTerminator) {
       }
         )");
 
-  auto CFAllTerminators = [&](Function &F, DominatorTree *DT) {
-    DeferredDominance DDT(*DT);
+  auto CFAllTerminatorsEager = [&](Function &F, DominatorTree *DT) {
+    PostDominatorTree PDT = PostDominatorTree(F);
+    DomTreeUpdater DTU(*DT, PDT, DomTreeUpdater::UpdateStrategy::Eager);
     for (Function::iterator I = F.begin(), E = F.end(); I != E;) {
       BasicBlock *BB = &*I++;
-      ConstantFoldTerminator(BB, true, nullptr, &DDT);
+      ConstantFoldTerminator(BB, true, nullptr, &DTU);
     }
 
-    EXPECT_TRUE(DDT.flush().verify());
+    EXPECT_TRUE(DTU.getDomTree().verify());
+    EXPECT_TRUE(DTU.getPostDomTree().verify());
   };
 
-  runWithDomTree(*M, "br_same_dest", CFAllTerminators);
-  runWithDomTree(*M, "br_different_dest", CFAllTerminators);
-  runWithDomTree(*M, "switch_2_different_dest", CFAllTerminators);
-  runWithDomTree(*M, "switch_2_different_dest_default", CFAllTerminators);
-  runWithDomTree(*M, "switch_3_different_dest", CFAllTerminators);
-  runWithDomTree(*M, "switch_variable_2_default_dest", CFAllTerminators);
-  runWithDomTree(*M, "switch_constant_2_default_dest", CFAllTerminators);
-  runWithDomTree(*M, "switch_constant_3_repeated_dest", CFAllTerminators);
-  runWithDomTree(*M, "indirectbr", CFAllTerminators);
-  runWithDomTree(*M, "indirectbr_repeated", CFAllTerminators);
-  runWithDomTree(*M, "indirectbr_unreachable", CFAllTerminators);
+  auto CFAllTerminatorsLazy = [&](Function &F, DominatorTree *DT) {
+    PostDominatorTree PDT = PostDominatorTree(F);
+    DomTreeUpdater DTU(*DT, PDT, DomTreeUpdater::UpdateStrategy::Lazy);
+    for (Function::iterator I = F.begin(), E = F.end(); I != E;) {
+      BasicBlock *BB = &*I++;
+      ConstantFoldTerminator(BB, true, nullptr, &DTU);
+    }
+
+    EXPECT_TRUE(DTU.getDomTree().verify());
+    EXPECT_TRUE(DTU.getPostDomTree().verify());
+  };
+
+  // Test ConstantFoldTerminator under Eager UpdateStrategy.
+  runWithDomTree(*M, "br_same_dest", CFAllTerminatorsEager);
+  runWithDomTree(*M, "br_different_dest", CFAllTerminatorsEager);
+  runWithDomTree(*M, "switch_2_different_dest", CFAllTerminatorsEager);
+  runWithDomTree(*M, "switch_2_different_dest_default", CFAllTerminatorsEager);
+  runWithDomTree(*M, "switch_3_different_dest", CFAllTerminatorsEager);
+  runWithDomTree(*M, "switch_variable_2_default_dest", CFAllTerminatorsEager);
+  runWithDomTree(*M, "switch_constant_2_default_dest", CFAllTerminatorsEager);
+  runWithDomTree(*M, "switch_constant_3_repeated_dest", CFAllTerminatorsEager);
+  runWithDomTree(*M, "indirectbr", CFAllTerminatorsEager);
+  runWithDomTree(*M, "indirectbr_repeated", CFAllTerminatorsEager);
+  runWithDomTree(*M, "indirectbr_unreachable", CFAllTerminatorsEager);
+
+  // Test ConstantFoldTerminator under Lazy UpdateStrategy.
+  runWithDomTree(*M, "br_same_dest", CFAllTerminatorsLazy);
+  runWithDomTree(*M, "br_different_dest", CFAllTerminatorsLazy);
+  runWithDomTree(*M, "switch_2_different_dest", CFAllTerminatorsLazy);
+  runWithDomTree(*M, "switch_2_different_dest_default", CFAllTerminatorsLazy);
+  runWithDomTree(*M, "switch_3_different_dest", CFAllTerminatorsLazy);
+  runWithDomTree(*M, "switch_variable_2_default_dest", CFAllTerminatorsLazy);
+  runWithDomTree(*M, "switch_constant_2_default_dest", CFAllTerminatorsLazy);
+  runWithDomTree(*M, "switch_constant_3_repeated_dest", CFAllTerminatorsLazy);
+  runWithDomTree(*M, "indirectbr", CFAllTerminatorsLazy);
+  runWithDomTree(*M, "indirectbr_repeated", CFAllTerminatorsLazy);
+  runWithDomTree(*M, "indirectbr_unreachable", CFAllTerminatorsLazy);
 }
 
 struct SalvageDebugInfoTest : ::testing::Test {
@@ -356,7 +507,7 @@ struct SalvageDebugInfoTest : ::testing::Test {
       !2 = !{}
       !3 = !{i32 2, !"Dwarf Version", i32 4}
       !4 = !{i32 2, !"Debug Info Version", i32 3}
-      !8 = distinct !DISubprogram(name: "f", scope: !1, file: !1, line: 1, type: !9, isLocal: false, isDefinition: true, scopeLine: 1, isOptimized: false, unit: !0, variables: !2)
+      !8 = distinct !DISubprogram(name: "f", scope: !1, file: !1, line: 1, type: !9, isLocal: false, isDefinition: true, scopeLine: 1, isOptimized: false, unit: !0, retainedNodes: !2)
       !9 = !DISubroutineType(types: !10)
       !10 = !{null}
       !11 = !DILocalVariable(name: "x", scope: !8, file: !1, line: 2, type: !12)
@@ -428,4 +579,336 @@ TEST_F(SalvageDebugInfoTest, RecursiveBlockSimplification) {
   bool Deleted = SimplifyInstructionsInBlock(BB);
   ASSERT_TRUE(Deleted);
   verifyDebugValuesAreSalvaged();
+}
+
+TEST(Local, ChangeToUnreachable) {
+  LLVMContext Ctx;
+
+  std::unique_ptr<Module> M = parseIR(Ctx,
+                                      R"(
+    define internal void @foo() !dbg !6 {
+    entry:
+      ret void, !dbg !8
+    }
+
+    !llvm.dbg.cu = !{!0}
+    !llvm.debugify = !{!3, !4}
+    !llvm.module.flags = !{!5}
+
+    !0 = distinct !DICompileUnit(language: DW_LANG_C, file: !1, producer: "debugify", isOptimized: true, runtimeVersion: 0, emissionKind: FullDebug, enums: !2)
+    !1 = !DIFile(filename: "test.ll", directory: "/")
+    !2 = !{}
+    !3 = !{i32 1}
+    !4 = !{i32 0}
+    !5 = !{i32 2, !"Debug Info Version", i32 3}
+    !6 = distinct !DISubprogram(name: "foo", linkageName: "foo", scope: null, file: !1, line: 1, type: !7, isLocal: true, isDefinition: true, scopeLine: 1, isOptimized: true, unit: !0, retainedNodes: !2)
+    !7 = !DISubroutineType(types: !2)
+    !8 = !DILocation(line: 1, column: 1, scope: !6)
+  )");
+
+  bool BrokenDebugInfo = true;
+  verifyModule(*M, &errs(), &BrokenDebugInfo);
+  ASSERT_FALSE(BrokenDebugInfo);
+
+  Function &F = *cast<Function>(M->getNamedValue("foo"));
+
+  BasicBlock &BB = F.front();
+  Instruction &A = BB.front();
+  DebugLoc DLA = A.getDebugLoc();
+
+  ASSERT_TRUE(isa<ReturnInst>(&A));
+  // One instruction should be affected.
+  EXPECT_EQ(changeToUnreachable(&A, /*UseLLVMTrap*/false), 1U);
+
+  Instruction &B = BB.front();
+
+  // There should be an uncreachable instruction.
+  ASSERT_TRUE(isa<UnreachableInst>(&B));
+
+  DebugLoc DLB = B.getDebugLoc();
+  EXPECT_EQ(DLA, DLB);
+}
+
+TEST(Local, ReplaceAllDbgUsesWith) {
+  using namespace llvm::dwarf;
+
+  LLVMContext Ctx;
+
+  // Note: The datalayout simulates Darwin/x86_64.
+  std::unique_ptr<Module> M = parseIR(Ctx,
+                                      R"(
+    target datalayout = "e-m:o-i63:64-f80:128-n8:16:32:64-S128"
+
+    declare i32 @escape(i32)
+
+    define void @f() !dbg !6 {
+    entry:
+      %a = add i32 0, 1, !dbg !15
+      call void @llvm.dbg.value(metadata i32 %a, metadata !9, metadata !DIExpression()), !dbg !15
+
+      %b = add i64 0, 1, !dbg !16
+      call void @llvm.dbg.value(metadata i64 %b, metadata !11, metadata !DIExpression()), !dbg !16
+      call void @llvm.dbg.value(metadata i64 %b, metadata !11, metadata !DIExpression(DW_OP_lit0, DW_OP_mul)), !dbg !16
+      call void @llvm.dbg.value(metadata i64 %b, metadata !11, metadata !DIExpression(DW_OP_lit0, DW_OP_mul, DW_OP_stack_value)), !dbg !16
+      call void @llvm.dbg.value(metadata i64 %b, metadata !11, metadata !DIExpression(DW_OP_LLVM_fragment, 0, 8)), !dbg !16
+      call void @llvm.dbg.value(metadata i64 %b, metadata !11, metadata !DIExpression(DW_OP_lit0, DW_OP_mul, DW_OP_LLVM_fragment, 0, 8)), !dbg !16
+      call void @llvm.dbg.value(metadata i64 %b, metadata !11, metadata !DIExpression(DW_OP_lit0, DW_OP_mul, DW_OP_stack_value, DW_OP_LLVM_fragment, 0, 8)), !dbg !16
+
+      %c = inttoptr i64 0 to i64*, !dbg !17
+      call void @llvm.dbg.declare(metadata i64* %c, metadata !13, metadata !DIExpression()), !dbg !17
+
+      %d = inttoptr i64 0 to i32*, !dbg !18
+      call void @llvm.dbg.addr(metadata i32* %d, metadata !20, metadata !DIExpression()), !dbg !18
+
+      %e = add <2 x i16> zeroinitializer, zeroinitializer
+      call void @llvm.dbg.value(metadata <2 x i16> %e, metadata !14, metadata !DIExpression()), !dbg !18
+
+      %f = call i32 @escape(i32 0)
+      call void @llvm.dbg.value(metadata i32 %f, metadata !9, metadata !DIExpression()), !dbg !15
+
+      %barrier = call i32 @escape(i32 0)
+
+      %g = call i32 @escape(i32 %f)
+      call void @llvm.dbg.value(metadata i32 %g, metadata !9, metadata !DIExpression()), !dbg !15
+
+      ret void, !dbg !19
+    }
+
+    declare void @llvm.dbg.addr(metadata, metadata, metadata)
+    declare void @llvm.dbg.declare(metadata, metadata, metadata)
+    declare void @llvm.dbg.value(metadata, metadata, metadata)
+
+    !llvm.dbg.cu = !{!0}
+    !llvm.module.flags = !{!5}
+
+    !0 = distinct !DICompileUnit(language: DW_LANG_C, file: !1, producer: "debugify", isOptimized: true, runtimeVersion: 0, emissionKind: FullDebug, enums: !2)
+    !1 = !DIFile(filename: "/Users/vsk/Desktop/foo.ll", directory: "/")
+    !2 = !{}
+    !5 = !{i32 2, !"Debug Info Version", i32 3}
+    !6 = distinct !DISubprogram(name: "f", linkageName: "f", scope: null, file: !1, line: 1, type: !7, isLocal: false, isDefinition: true, scopeLine: 1, isOptimized: true, unit: !0, retainedNodes: !8)
+    !7 = !DISubroutineType(types: !2)
+    !8 = !{!9, !11, !13, !14}
+    !9 = !DILocalVariable(name: "1", scope: !6, file: !1, line: 1, type: !10)
+    !10 = !DIBasicType(name: "ty32", size: 32, encoding: DW_ATE_signed)
+    !11 = !DILocalVariable(name: "2", scope: !6, file: !1, line: 2, type: !12)
+    !12 = !DIBasicType(name: "ty64", size: 64, encoding: DW_ATE_signed)
+    !13 = !DILocalVariable(name: "3", scope: !6, file: !1, line: 3, type: !12)
+    !14 = !DILocalVariable(name: "4", scope: !6, file: !1, line: 4, type: !10)
+    !15 = !DILocation(line: 1, column: 1, scope: !6)
+    !16 = !DILocation(line: 2, column: 1, scope: !6)
+    !17 = !DILocation(line: 3, column: 1, scope: !6)
+    !18 = !DILocation(line: 4, column: 1, scope: !6)
+    !19 = !DILocation(line: 5, column: 1, scope: !6)
+    !20 = !DILocalVariable(name: "5", scope: !6, file: !1, line: 5, type: !10)
+  )");
+
+  bool BrokenDebugInfo = true;
+  verifyModule(*M, &errs(), &BrokenDebugInfo);
+  ASSERT_FALSE(BrokenDebugInfo);
+
+  Function &F = *cast<Function>(M->getNamedValue("f"));
+  DominatorTree DT{F};
+
+  BasicBlock &BB = F.front();
+  Instruction &A = BB.front();
+  Instruction &B = *A.getNextNonDebugInstruction();
+  Instruction &C = *B.getNextNonDebugInstruction();
+  Instruction &D = *C.getNextNonDebugInstruction();
+  Instruction &E = *D.getNextNonDebugInstruction();
+  Instruction &F_ = *E.getNextNonDebugInstruction();
+  Instruction &Barrier = *F_.getNextNonDebugInstruction();
+  Instruction &G = *Barrier.getNextNonDebugInstruction();
+
+  // Simulate i32 <-> i64* conversion. Expect no updates: the datalayout says
+  // pointers are 64 bits, so the conversion would be lossy.
+  EXPECT_FALSE(replaceAllDbgUsesWith(A, C, C, DT));
+  EXPECT_FALSE(replaceAllDbgUsesWith(C, A, A, DT));
+
+  // Simulate i32 <-> <2 x i16> conversion. This is unsupported.
+  EXPECT_FALSE(replaceAllDbgUsesWith(E, A, A, DT));
+  EXPECT_FALSE(replaceAllDbgUsesWith(A, E, E, DT));
+
+  // Simulate i32* <-> i64* conversion.
+  EXPECT_TRUE(replaceAllDbgUsesWith(D, C, C, DT));
+
+  SmallVector<DbgVariableIntrinsic *, 2> CDbgVals;
+  findDbgUsers(CDbgVals, &C);
+  EXPECT_EQ(2U, CDbgVals.size());
+  EXPECT_TRUE(any_of(CDbgVals, [](DbgVariableIntrinsic *DII) {
+    return isa<DbgAddrIntrinsic>(DII);
+  }));
+  EXPECT_TRUE(any_of(CDbgVals, [](DbgVariableIntrinsic *DII) {
+    return isa<DbgDeclareInst>(DII);
+  }));
+
+  EXPECT_TRUE(replaceAllDbgUsesWith(C, D, D, DT));
+
+  SmallVector<DbgVariableIntrinsic *, 2> DDbgVals;
+  findDbgUsers(DDbgVals, &D);
+  EXPECT_EQ(2U, DDbgVals.size());
+  EXPECT_TRUE(any_of(DDbgVals, [](DbgVariableIntrinsic *DII) {
+    return isa<DbgAddrIntrinsic>(DII);
+  }));
+  EXPECT_TRUE(any_of(DDbgVals, [](DbgVariableIntrinsic *DII) {
+    return isa<DbgDeclareInst>(DII);
+  }));
+
+  // Introduce a use-before-def. Check that the dbg.value for %a is salvaged.
+  EXPECT_TRUE(replaceAllDbgUsesWith(A, F_, F_, DT));
+
+  auto *ADbgVal = cast<DbgValueInst>(A.getNextNode());
+  EXPECT_EQ(ConstantInt::get(A.getType(), 0), ADbgVal->getVariableLocation());
+
+  // Introduce a use-before-def. Check that the dbg.values for %f are deleted.
+  EXPECT_TRUE(replaceAllDbgUsesWith(F_, G, G, DT));
+
+  SmallVector<DbgValueInst *, 1> FDbgVals;
+  findDbgValues(FDbgVals, &F);
+  EXPECT_EQ(0U, FDbgVals.size());
+
+  // Simulate i32 -> i64 conversion to test sign-extension. Here are some
+  // interesting cases to handle:
+  //  1) debug user has empty DIExpression
+  //  2) debug user has non-empty, non-stack-value'd DIExpression
+  //  3) debug user has non-empty, stack-value'd DIExpression
+  //  4-6) like (1-3), but with a fragment
+  EXPECT_TRUE(replaceAllDbgUsesWith(B, A, A, DT));
+
+  SmallVector<DbgValueInst *, 8> ADbgVals;
+  findDbgValues(ADbgVals, &A);
+  EXPECT_EQ(6U, ADbgVals.size());
+
+  // Check that %a has a dbg.value with a DIExpression matching \p Ops.
+  auto hasADbgVal = [&](ArrayRef<uint64_t> Ops) {
+    return any_of(ADbgVals, [&](DbgValueInst *DVI) {
+      assert(DVI->getVariable()->getName() == "2");
+      return DVI->getExpression()->getElements() == Ops;
+    });
+  };
+
+  // Case 1: The original expr is empty, so no deref is needed.
+  EXPECT_TRUE(hasADbgVal({DW_OP_dup, DW_OP_constu, 31, DW_OP_shr, DW_OP_lit0,
+                          DW_OP_not, DW_OP_mul, DW_OP_or, DW_OP_stack_value}));
+
+  // Case 2: Perform an address calculation with the original expr, deref it,
+  // then sign-extend the result.
+  EXPECT_TRUE(hasADbgVal({DW_OP_lit0, DW_OP_mul, DW_OP_deref, DW_OP_dup,
+                          DW_OP_constu, 31, DW_OP_shr, DW_OP_lit0, DW_OP_not,
+                          DW_OP_mul, DW_OP_or, DW_OP_stack_value}));
+
+  // Case 3: Insert the sign-extension logic before the DW_OP_stack_value.
+  EXPECT_TRUE(hasADbgVal({DW_OP_lit0, DW_OP_mul, DW_OP_dup, DW_OP_constu, 31,
+                          DW_OP_shr, DW_OP_lit0, DW_OP_not, DW_OP_mul, DW_OP_or,
+                          DW_OP_stack_value}));
+
+  // Cases 4-6: Just like cases 1-3, but preserve the fragment at the end.
+  EXPECT_TRUE(hasADbgVal({DW_OP_dup, DW_OP_constu, 31, DW_OP_shr, DW_OP_lit0,
+                          DW_OP_not, DW_OP_mul, DW_OP_or, DW_OP_stack_value,
+                          DW_OP_LLVM_fragment, 0, 8}));
+  EXPECT_TRUE(
+      hasADbgVal({DW_OP_lit0, DW_OP_mul, DW_OP_deref, DW_OP_dup, DW_OP_constu,
+                  31, DW_OP_shr, DW_OP_lit0, DW_OP_not, DW_OP_mul, DW_OP_or,
+                  DW_OP_stack_value, DW_OP_LLVM_fragment, 0, 8}));
+  EXPECT_TRUE(hasADbgVal({DW_OP_lit0, DW_OP_mul, DW_OP_dup, DW_OP_constu, 31,
+                          DW_OP_shr, DW_OP_lit0, DW_OP_not, DW_OP_mul, DW_OP_or,
+                          DW_OP_stack_value, DW_OP_LLVM_fragment, 0, 8}));
+
+  verifyModule(*M, &errs(), &BrokenDebugInfo);
+  ASSERT_FALSE(BrokenDebugInfo);
+}
+
+TEST(Local, RemoveUnreachableBlocks) {
+  LLVMContext C;
+
+  std::unique_ptr<Module> M = parseIR(C,
+                                      R"(
+      define void @br_simple() {
+      entry:
+        br label %bb0
+      bb0:
+        ret void
+      bb1:
+        ret void
+      }
+
+      define void @br_self_loop() {
+      entry:
+        br label %bb0
+      bb0:
+        br i1 true, label %bb1, label %bb0
+      bb1:
+        br i1 true, label %bb0, label %bb2
+      bb2:
+        br label %bb2
+      }
+
+      define void @br_constant() {
+      entry:
+        br label %bb0
+      bb0:
+        br i1 true, label %bb1, label %bb2
+      bb1:
+        br i1 true, label %bb0, label %bb2
+      bb2:
+        br label %bb2
+      }
+
+      define void @br_loop() {
+      entry:
+        br label %bb0
+      bb0:
+        br label %bb0
+      bb1:
+        br label %bb2
+      bb2:
+        br label %bb1
+      }
+      )");
+
+  auto runEager = [&](Function &F, DominatorTree *DT) {
+    PostDominatorTree PDT = PostDominatorTree(F);
+    DomTreeUpdater DTU(*DT, PDT, DomTreeUpdater::UpdateStrategy::Eager);
+    removeUnreachableBlocks(F, nullptr, &DTU);
+    EXPECT_TRUE(DTU.getDomTree().verify());
+    EXPECT_TRUE(DTU.getPostDomTree().verify());
+  };
+
+  auto runLazy = [&](Function &F, DominatorTree *DT) {
+    PostDominatorTree PDT = PostDominatorTree(F);
+    DomTreeUpdater DTU(*DT, PDT, DomTreeUpdater::UpdateStrategy::Lazy);
+    removeUnreachableBlocks(F, nullptr, &DTU);
+    EXPECT_TRUE(DTU.getDomTree().verify());
+    EXPECT_TRUE(DTU.getPostDomTree().verify());
+  };
+
+  // Test removeUnreachableBlocks under Eager UpdateStrategy.
+  runWithDomTree(*M, "br_simple", runEager);
+  runWithDomTree(*M, "br_self_loop", runEager);
+  runWithDomTree(*M, "br_constant", runEager);
+  runWithDomTree(*M, "br_loop", runEager);
+
+  // Test removeUnreachableBlocks under Lazy UpdateStrategy.
+  runWithDomTree(*M, "br_simple", runLazy);
+  runWithDomTree(*M, "br_self_loop", runLazy);
+  runWithDomTree(*M, "br_constant", runLazy);
+  runWithDomTree(*M, "br_loop", runLazy);
+
+  M = parseIR(C,
+              R"(
+      define void @f() {
+      entry:
+        ret void
+      bb0:
+        ret void
+      }
+        )");
+
+  auto checkRUBlocksRetVal = [&](Function &F, DominatorTree *DT) {
+    DomTreeUpdater DTU(DT, DomTreeUpdater::UpdateStrategy::Lazy);
+    EXPECT_TRUE(removeUnreachableBlocks(F, nullptr, &DTU));
+    EXPECT_FALSE(removeUnreachableBlocks(F, nullptr, &DTU));
+    EXPECT_TRUE(DTU.getDomTree().verify());
+  };
+
+  runWithDomTree(*M, "f", checkRUBlocksRetVal);
 }

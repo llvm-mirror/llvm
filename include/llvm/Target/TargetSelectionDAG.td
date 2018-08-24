@@ -615,14 +615,18 @@ class CodePatPred<code predicate> : PatPred {
 // compact and readable.
 //
 
-/// PatFrag - Represents a pattern fragment.  This can match something on the
-/// DAG, from a single node to multiple nested other fragments.
+/// PatFrags - Represents a set of pattern fragments.  Each single fragment
+/// can match something on the DAG, from a single node to multiple nested other
+/// fragments.   The whole set of fragments matches if any of the single
+/// fragemnts match.  This allows e.g. matching and "add with overflow" and
+/// a regular "add" with the same fragment set.
 ///
-class PatFrag<dag ops, dag frag, code pred = [{}],
-              SDNodeXForm xform = NOOP_SDNodeXForm> : SDPatternOperator {
+class PatFrags<dag ops, list<dag> frags, code pred = [{}],
+               SDNodeXForm xform = NOOP_SDNodeXForm> : SDPatternOperator {
   dag Operands = ops;
-  dag Fragment = frag;
+  list<dag> Fragments = frags;
   code PredicateCode = pred;
+  code GISelPredicateCode = [{}];
   code ImmediateCode = [{}];
   SDNodeXForm OperandTransform = xform;
 
@@ -680,6 +684,11 @@ class PatFrag<dag ops, dag frag, code pred = [{}],
   // cast<StoreSDNode>(N)->getMemoryVT().getScalarType() == MVT::<VT>;
   ValueType ScalarMemoryVT = ?;
 }
+
+// PatFrag - A version of PatFrags matching only a single fragment.
+class PatFrag<dag ops, dag frag, code pred = [{}],
+              SDNodeXForm xform = NOOP_SDNodeXForm>
+  : PatFrags<ops, [frag], pred, xform>;
 
 // OutPatFrag is a pattern fragment that is used as part of an output pattern
 // (not an input pattern). These do not have predicates or transforms, but are
@@ -1057,6 +1066,15 @@ def post_truncstf32 : PatFrag<(ops node:$val, node:$base, node:$offset),
   let IsStore = 1;
   let MemoryVT = f32;
 }
+
+def nonvolatile_load : PatFrag<(ops node:$ptr),
+                               (load node:$ptr), [{
+  return !cast<LoadSDNode>(N)->isVolatile();
+}]>;
+def nonvolatile_store : PatFrag<(ops node:$val, node:$ptr),
+                                (store node:$val, node:$ptr), [{
+  return !cast<StoreSDNode>(N)->isVolatile();
+}]>;
 
 // nontemporal store fragments.
 def nontemporalstore : PatFrag<(ops node:$val, node:$ptr),

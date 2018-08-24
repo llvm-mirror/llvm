@@ -11,7 +11,7 @@
 
 ; CHECK: Legalizing node: [[VTWO:t.*]]: v2f64 = BUILD_VECTOR
 ; CHECK: Legally typed node: [[VTWO]]: v2f64 = BUILD_VECTOR
-; CHECK: Legalizing node: t26: v2f64 = fmaxnum nnan [[VTWO]], [[VTWO]]
+; CHECK: Legalizing node: t26: v2f64 = fmaxnum nnan reassoc [[VTWO]], [[VTWO]]
 
 target datalayout = "e-m:e-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128"
 target triple = "aarch64--linux-gnu"
@@ -24,7 +24,7 @@ entry:
  %1 = insertelement <4 x double> %0, double 1.0, i32 1
  %2 = insertelement <4 x double> %1, double 1.0, i32 2
  %3 = insertelement <4 x double> %2, double 1.0, i32 3
- %4 = call nnan double @llvm.experimental.vector.reduce.fmax.f64.v4f64(<4 x double> %3)
+ %4 = call nnan reassoc double @llvm.experimental.vector.reduce.fmax.f64.v4f64(<4 x double> %3)
  ret double %4
 }
 

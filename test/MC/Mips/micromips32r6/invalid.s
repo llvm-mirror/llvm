@@ -154,6 +154,10 @@
   sra $3, 32               # CHECK: :[[@LINE]]:11: error: expected 5-bit unsigned immediate
   srl $3, -1               # CHECK: :[[@LINE]]:11: error: expected 5-bit unsigned immediate
   srl $3, 32               # CHECK: :[[@LINE]]:11: error: expected 5-bit unsigned immediate
+  ll $33, 8($5)            # CHECK: :[[@LINE]]:6: error: invalid register number
+  ll $4, 8($33)            # CHECK: :[[@LINE]]:12: error: invalid register number
+  ll $4, 512($5)           # CHECK: :[[@LINE]]:3: error: instruction requires a CPU feature not currently enabled
+  ll $4, -513($5)          # CHECK: :[[@LINE]]:3: error: instruction requires a CPU feature not currently enabled
   lle $33, 8($5)           # CHECK: :[[@LINE]]:7: error: invalid register number
   lle $4, 8($33)           # CHECK: :[[@LINE]]:13: error: invalid register number
   lle $4, 512($5)          # CHECK: :[[@LINE]]:11: error: expected memory with 9-bit signed offset
@@ -166,6 +170,10 @@
   sbe $4, 8($33)           # CHECK: :[[@LINE]]:13: error: invalid register number
   sbe $4, 512($5)          # CHECK: :[[@LINE]]:11: error: expected memory with 9-bit signed offset
   sbe $4, -513($5)         # CHECK: :[[@LINE]]:11: error: expected memory with 9-bit signed offset
+  sc $33, 8($5)            # CHECK: :[[@LINE]]:6: error: invalid register number
+  sc $4, 8($33)            # CHECK: :[[@LINE]]:12: error: invalid register number
+  sc $4, 512($5)           # CHECK: :[[@LINE]]:3: error: instruction requires a CPU feature not currently enabled
+  sc $4, -513($5)          # CHECK: :[[@LINE]]:3: error: instruction requires a CPU feature not currently enabled
   sce $33, 8($5)           # CHECK: :[[@LINE]]:7: error: invalid register number
   sce $4, 8($33)           # CHECK: :[[@LINE]]:13: error: invalid register number
   sce $4, 512($5)          # CHECK: :[[@LINE]]:11: error: expected memory with 9-bit signed offset
@@ -183,12 +191,12 @@
   lhe $4, 8($33)           # CHECK: :[[@LINE]]:13: error: invalid register number
   lhu $4, 8($35)           # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid register number
   lhue $4, 8($37)          # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid register number
-  lh $2, -65536($4)        # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 16-bit signed offset
-  lh $2, 65536($4)         # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 16-bit signed offset
+  lh $2, -2147483649($4)   # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 32-bit signed offset
+  lh $2, 2147483648($4)    # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 32-bit signed offset
   lhe $4, -512($2)         # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 9-bit signed offset
   lhe $4, 512($2)          # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 9-bit signed offset
-  lhu $4, -65536($2)       # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 16-bit signed offset
-  lhu $4, 65536($2)        # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 16-bit signed offset
+  lhu $4, -2147483649($2)  # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 32-bit signed offset
+  lhu $4, 2147483648($2)   # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 32-bit signed offset
   lhue $4, -512($2)        # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 9-bit signed offset
   lhue $4, 512($2)         # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 9-bit signed offset
   lwm32 $5, $6, 8($4)      # CHECK: :[[@LINE]]:{{[0-9]+}}: error: $16 or $31 expected
@@ -253,12 +261,12 @@
   xori $3, 65536           # CHECK: :[[@LINE]]:12: error: expected 16-bit unsigned immediate
   not $3, 4                # CHECK: :[[@LINE]]:11: error: invalid operand for instruction
   lb $32, 8($5)            # CHECK: :[[@LINE]]:6: error: invalid register number
-  lb $4, -32769($5)        # CHECK: :[[@LINE]]:10: error: expected memory with 16-bit signed offset
-  lb $4, 32768($5)         # CHECK: :[[@LINE]]:10: error: expected memory with 16-bit signed offset
+  lb $4, -2147483649($5)   # CHECK: :[[@LINE]]:10: error: expected memory with 16-bit signed offset
+  lb $4, 2147483648($5)    # CHECK: :[[@LINE]]:10: error: expected memory with 16-bit signed offset
   lb $4, 8($32)            # CHECK: :[[@LINE]]:12: error: invalid register number
   lbu $32, 8($5)           # CHECK: :[[@LINE]]:7: error: invalid register number
-  lbu $4, -32769($5)       # CHECK: :[[@LINE]]:11: error: expected memory with 16-bit signed offset
-  lbu $4, 32768($5)        # CHECK: :[[@LINE]]:11: error: expected memory with 16-bit signed offset
+  lbu $4, -2147483649($5)  # CHECK: :[[@LINE]]:11: error: expected memory with 16-bit signed offset
+  lbu $4, 2147483648($5)   # CHECK: :[[@LINE]]:11: error: expected memory with 16-bit signed offset
   lbu $4, 8($32)           # CHECK: :[[@LINE]]:13: error: invalid register number
   ldc1 $f32, 300($10)      # CHECK: :[[@LINE]]:8: error: invalid operand for instruction
   ldc1 $f7, -32769($10)    # CHECK: :[[@LINE]]:13: error: expected memory with 16-bit signed offset
@@ -374,3 +382,11 @@
   lwc2 $1, 16($32)         # CHECK: :[[@LINE]]:15: error: invalid register number
   sdc2 $1, 8($32)          # CHECK: :[[@LINE]]:14: error: invalid register number
   swc2 $1, 777($32)        # CHECK: :[[@LINE]]:16: error: invalid register number
+  movn  $3, $3, $4         # CHECK: :[[@LINE]]:3: error: instruction requires a CPU feature not currently enabled
+  movz  $3, $3, $4         # CHECK: :[[@LINE]]:3: error: instruction requires a CPU feature not currently enabled
+  movt  $4, $5, $fcc0      # CHECK: :[[@LINE]]:3: error: instruction requires a CPU feature not currently enabled
+  movf  $4, $5, $fcc0      # CHECK: :[[@LINE]]:3: error: instruction requires a CPU feature not currently enabled
+  madd  $4, $5             # CHECK: :[[@LINE]]:3: error: instruction requires a CPU feature not currently enabled
+  maddu $4, $5             # CHECK: :[[@LINE]]:3: error: instruction requires a CPU feature not currently enabled
+  msub  $4, $5             # CHECK: :[[@LINE]]:3: error: instruction requires a CPU feature not currently enabled
+  msubu $4, $5             # CHECK: :[[@LINE]]:3: error: instruction requires a CPU feature not currently enabled

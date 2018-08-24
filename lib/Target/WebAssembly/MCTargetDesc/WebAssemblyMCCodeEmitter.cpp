@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// \brief This file implements the WebAssemblyMCCodeEmitter class.
+/// This file implements the WebAssemblyMCCodeEmitter class.
 ///
 //===----------------------------------------------------------------------===//
 
@@ -88,7 +88,8 @@ void WebAssemblyMCCodeEmitter::encodeInstruction(
         assert(Desc.TSFlags == 0 &&
                "WebAssembly non-variable_ops don't use TSFlags");
         const MCOperandInfo &Info = Desc.OpInfo[i];
-        DEBUG(dbgs() << "Encoding immediate: type=" << int(Info.OperandType) << "\n");
+        LLVM_DEBUG(dbgs() << "Encoding immediate: type="
+                          << int(Info.OperandType) << "\n");
         if (Info.OperandType == WebAssembly::OPERAND_I32IMM) {
           encodeSLEB128(int32_t(MO.getImm()), OS);
         } else if (Info.OperandType == WebAssembly::OPERAND_OFFSET32) {
@@ -117,11 +118,11 @@ void WebAssemblyMCCodeEmitter::encodeInstruction(
         // TODO: MC converts all floating point immediate operands to double.
         // This is fine for numeric values, but may cause NaNs to change bits.
         float f = float(MO.getFPImm());
-        support::endian::Writer<support::little>(OS).write<float>(f);
+        support::endian::write<float>(OS, f, support::little);
       } else {
         assert(Info.OperandType == WebAssembly::OPERAND_F64IMM);
         double d = MO.getFPImm();
-        support::endian::Writer<support::little>(OS).write<double>(d);
+        support::endian::write<double>(OS, d, support::little);
       }
     } else if (MO.isExpr()) {
       const MCOperandInfo &Info = Desc.OpInfo[i];
@@ -137,7 +138,7 @@ void WebAssemblyMCCodeEmitter::encodeInstruction(
                  Info.OperandType == WebAssembly::OPERAND_TYPEINDEX) {
         FixupKind = MCFixupKind(WebAssembly::fixup_code_uleb128_i32);
       } else if (Info.OperandType == WebAssembly::OPERAND_GLOBAL) {
-        FixupKind = MCFixupKind(WebAssembly::fixup_code_global_index);
+        FixupKind = MCFixupKind(WebAssembly::fixup_code_uleb128_i32);
       } else {
         llvm_unreachable("unexpected symbolic operand kind");
       }

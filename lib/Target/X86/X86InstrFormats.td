@@ -208,6 +208,11 @@ class TAXD : TA { Prefix OpPrefix = XD; }
 class VEX    { Encoding OpEnc = EncVEX; }
 class VEX_W    { bits<2> VEX_WPrefix = 1; }
 class VEX_WIG  { bits<2> VEX_WPrefix = 2; }
+// Special version of VEX_W that can be changed to VEX.W==0 for EVEX2VEX.
+// FIXME: We should consider adding separate bits for VEX_WIG and the extra
+// part of W1X. This would probably simplify the tablegen emitters and
+// the TSFlags creation below.
+class VEX_W1X  { bits<2> VEX_WPrefix = 3; }
 class VEX_4V : VEX { bit hasVEX_4V = 1; }
 class VEX_L  { bit hasVEX_L = 1; }
 class VEX_LIG { bit ignoresVEX_L = 1; }
@@ -235,11 +240,19 @@ class XOP_4V : XOP { bit hasVEX_4V = 1; }
 // Specify the alternative register form instruction to replace the current
 // instruction in case it was picked during generation of memory folding tables
 class FoldGenData<string _RegisterForm> {
-    string FoldGenRegForm = _RegisterForm;
+  string FoldGenRegForm = _RegisterForm;
+}
+
+// Provide a specific instruction to be used by the EVEX2VEX conversion.
+class EVEX2VEXOverride<string VEXInstrName> {
+  string EVEX2VEXOverride = VEXInstrName;
 }
 
 // Mark the instruction as "illegal to memory fold/unfold"
 class NotMemoryFoldable { bit isMemoryFoldable = 0; }
+
+// Prevent EVEX->VEX conversion from considering this instruction.
+class NotEVEX2VEXConvertible { bit notEVEX2VEXConvertible = 1; }
 
 class X86Inst<bits<8> opcod, Format f, ImmType i, dag outs, dag ins,
               string AsmStr, Domain d = GenericDomain>
@@ -320,7 +333,11 @@ class X86Inst<bits<8> opcod, Format f, ImmType i, dag outs, dag ins,
   // instruction to replace the current one in case it got picked during generation.
   string FoldGenRegForm = ?;
 
+  // Used to prevent an explicit EVEX2VEX override for this instruction.
+  string EVEX2VEXOverride = ?;
+
   bit isMemoryFoldable = 1;     // Is it allowed to memory fold/unfold this instruction?
+  bit notEVEX2VEXConvertible = 0; // Prevent EVEX->VEX conversion.
 
   // TSFlags layout should be kept in sync with X86BaseInfo.h.
   let TSFlags{6-0}   = FormBits;
@@ -518,8 +535,8 @@ class PI<bits<8> o, Format F, dag outs, dag ins, string asm, list<dag> pattern,
 class MMXPI<bits<8> o, Format F, dag outs, dag ins, string asm, list<dag> pattern,
             Domain d>
       : I<o, F, outs, ins, asm, pattern, d> {
-  let Predicates = !if(!eq(OpPrefix.Value, PD.Value), [HasSSE2],
-                       [HasSSE1]);
+  let Predicates = !if(!eq(OpPrefix.Value, PD.Value), [HasMMX, HasSSE2],
+                       [HasMMX, HasSSE1]);
 }
 
 // PIi8 - SSE 1 & 2 packed instructions with immediate
@@ -627,10 +644,10 @@ class S2I<bits<8> o, Format F, dag outs, dag ins, string asm,
       : I<o, F, outs, ins, asm, pattern>, PD, Requires<[UseSSE2]>;
 class MMXSDIi8<bits<8> o, Format F, dag outs, dag ins, string asm,
                list<dag> pattern>
-      : Ii8<o, F, outs, ins, asm, pattern>, XD, Requires<[HasSSE2]>;
+      : Ii8<o, F, outs, ins, asm, pattern>, XD, Requires<[HasMMX, HasSSE2]>;
 class MMXS2SIi8<bits<8> o, Format F, dag outs, dag ins, string asm,
                 list<dag> pattern>
-      : Ii8<o, F, outs, ins, asm, pattern>, XS, Requires<[HasSSE2]>;
+      : Ii8<o, F, outs, ins, asm, pattern>, XS, Requires<[HasMMX, HasSSE2]>;
 
 // SSE3 Instruction Templates:
 //
@@ -674,11 +691,11 @@ class SS3AI<bits<8> o, Format F, dag outs, dag ins, string asm,
 class MMXSS38I<bits<8> o, Format F, dag outs, dag ins, string asm,
                list<dag> pattern>
       : I<o, F, outs, ins, asm, pattern, SSEPackedInt>, T8PS,
-        Requires<[HasSSSE3]>;
+        Requires<[HasMMX, HasSSSE3]>;
 class MMXSS3AI<bits<8> o, Format F, dag outs, dag ins, string asm,
                list<dag> pattern>
       : Ii8<o, F, outs, ins, asm, pattern, SSEPackedInt>, TAPS,
-        Requires<[HasSSSE3]>;
+        Requires<[HasMMX, HasSSSE3]>;
 
 // SSE4.1 Instruction Templates:
 //

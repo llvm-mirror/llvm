@@ -16,6 +16,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
@@ -65,15 +66,15 @@ static void addEdge(SmallVectorImpl<LazyCallGraph::Edge> &Edges,
   if (!EdgeIndexMap.insert({&N, Edges.size()}).second)
     return;
 
-  DEBUG(dbgs() << "    Added callable function: " << N.getName() << "\n");
+  LLVM_DEBUG(dbgs() << "    Added callable function: " << N.getName() << "\n");
   Edges.emplace_back(LazyCallGraph::Edge(N, EK));
 }
 
 LazyCallGraph::EdgeSequence &LazyCallGraph::Node::populateSlow() {
   assert(!Edges && "Must not have already populated the edges for this node!");
 
-  DEBUG(dbgs() << "  Adding functions called by '" << getName()
-               << "' to the graph.\n");
+  LLVM_DEBUG(dbgs() << "  Adding functions called by '" << getName()
+                    << "' to the graph.\n");
 
   Edges = EdgeSequence();
 
@@ -151,8 +152,8 @@ static bool isKnownLibFunction(Function &F, TargetLibraryInfo &TLI) {
 }
 
 LazyCallGraph::LazyCallGraph(Module &M, TargetLibraryInfo &TLI) {
-  DEBUG(dbgs() << "Building CG for module: " << M.getModuleIdentifier()
-               << "\n");
+  LLVM_DEBUG(dbgs() << "Building CG for module: " << M.getModuleIdentifier()
+                    << "\n");
   for (Function &F : M) {
     if (F.isDeclaration())
       continue;
@@ -167,8 +168,8 @@ LazyCallGraph::LazyCallGraph(Module &M, TargetLibraryInfo &TLI) {
 
     // External linkage defined functions have edges to them from other
     // modules.
-    DEBUG(dbgs() << "  Adding '" << F.getName()
-                 << "' to entry set of the graph.\n");
+    LLVM_DEBUG(dbgs() << "  Adding '" << F.getName()
+                      << "' to entry set of the graph.\n");
     addEdge(EntryEdges.Edges, EntryEdges.EdgeIndexMap, get(F), Edge::Ref);
   }
 
@@ -180,8 +181,9 @@ LazyCallGraph::LazyCallGraph(Module &M, TargetLibraryInfo &TLI) {
       if (Visited.insert(GV.getInitializer()).second)
         Worklist.push_back(GV.getInitializer());
 
-  DEBUG(dbgs() << "  Adding functions referenced by global initializers to the "
-                  "entry set.\n");
+  LLVM_DEBUG(
+      dbgs() << "  Adding functions referenced by global initializers to the "
+                "entry set.\n");
   visitReferences(Worklist, Visited, [&](Function &F) {
     addEdge(EntryEdges.Edges, EntryEdges.EdgeIndexMap, get(F),
             LazyCallGraph::Edge::Ref);
@@ -1271,8 +1273,7 @@ LazyCallGraph::RefSCC::removeInternalRefEdge(Node &SourceN,
       // the removal hasn't changed the structure at all. This is an important
       // special case and we can directly exit the entire routine more
       // efficiently as soon as we discover it.
-      if (std::distance(RefSCCNodes.begin(), RefSCCNodes.end()) ==
-          NumRefSCCNodes) {
+      if (llvm::size(RefSCCNodes) == NumRefSCCNodes) {
         // Clear out the low link field as we won't need it.
         for (Node *N : RefSCCNodes)
           N->LowLink = -1;
@@ -1738,7 +1739,7 @@ static void printNode(raw_ostream &OS, LazyCallGraph::Node &N) {
 }
 
 static void printSCC(raw_ostream &OS, LazyCallGraph::SCC &C) {
-  ptrdiff_t Size = std::distance(C.begin(), C.end());
+  ptrdiff_t Size = size(C);
   OS << "    SCC with " << Size << " functions:\n";
 
   for (LazyCallGraph::Node &N : C)
@@ -1746,7 +1747,7 @@ static void printSCC(raw_ostream &OS, LazyCallGraph::SCC &C) {
 }
 
 static void printRefSCC(raw_ostream &OS, LazyCallGraph::RefSCC &C) {
-  ptrdiff_t Size = std::distance(C.begin(), C.end());
+  ptrdiff_t Size = size(C);
   OS << "  RefSCC with " << Size << " call SCCs:\n";
 
   for (LazyCallGraph::SCC &InnerC : C)

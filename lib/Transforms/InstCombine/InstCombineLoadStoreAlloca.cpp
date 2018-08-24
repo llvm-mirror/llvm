@@ -16,7 +16,7 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/Loads.h"
-#include "llvm/Analysis/Utils/Local.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/IR/ConstantRange.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/IntrinsicInst.h"
@@ -197,30 +197,32 @@ static Instruction *simplifyAllocaArraySize(InstCombiner &IC, AllocaInst &AI) {
 
   // Convert: alloca Ty, C - where C is a constant != 1 into: alloca [C x Ty], 1
   if (const ConstantInt *C = dyn_cast<ConstantInt>(AI.getArraySize())) {
-    Type *NewTy = ArrayType::get(AI.getAllocatedType(), C->getZExtValue());
-    AllocaInst *New = IC.Builder.CreateAlloca(NewTy, nullptr, AI.getName());
-    New->setAlignment(AI.getAlignment());
+    if (C->getValue().getActiveBits() <= 64) {
+      Type *NewTy = ArrayType::get(AI.getAllocatedType(), C->getZExtValue());
+      AllocaInst *New = IC.Builder.CreateAlloca(NewTy, nullptr, AI.getName());
+      New->setAlignment(AI.getAlignment());
 
-    // Scan to the end of the allocation instructions, to skip over a block of
-    // allocas if possible...also skip interleaved debug info
-    //
-    BasicBlock::iterator It(New);
-    while (isa<AllocaInst>(*It) || isa<DbgInfoIntrinsic>(*It))
-      ++It;
+      // Scan to the end of the allocation instructions, to skip over a block of
+      // allocas if possible...also skip interleaved debug info
+      //
+      BasicBlock::iterator It(New);
+      while (isa<AllocaInst>(*It) || isa<DbgInfoIntrinsic>(*It))
+        ++It;
 
-    // Now that I is pointing to the first non-allocation-inst in the block,
-    // insert our getelementptr instruction...
-    //
-    Type *IdxTy = IC.getDataLayout().getIntPtrType(AI.getType());
-    Value *NullIdx = Constant::getNullValue(IdxTy);
-    Value *Idx[2] = {NullIdx, NullIdx};
-    Instruction *GEP =
-        GetElementPtrInst::CreateInBounds(New, Idx, New->getName() + ".sub");
-    IC.InsertNewInstBefore(GEP, *It);
+      // Now that I is pointing to the first non-allocation-inst in the block,
+      // insert our getelementptr instruction...
+      //
+      Type *IdxTy = IC.getDataLayout().getIntPtrType(AI.getType());
+      Value *NullIdx = Constant::getNullValue(IdxTy);
+      Value *Idx[2] = {NullIdx, NullIdx};
+      Instruction *GEP =
+          GetElementPtrInst::CreateInBounds(New, Idx, New->getName() + ".sub");
+      IC.InsertNewInstBefore(GEP, *It);
 
-    // Now make everything use the getelementptr instead of the original
-    // allocation.
-    return IC.replaceInstUsesWith(AI, GEP);
+      // Now make everything use the getelementptr instead of the original
+      // allocation.
+      return IC.replaceInstUsesWith(AI, GEP);
+    }
   }
 
   if (isa<UndefValue>(AI.getArraySize()))
@@ -270,7 +272,7 @@ void PointerReplacer::findLoadAndReplace(Instruction &I) {
     auto *Inst = dyn_cast<Instruction>(&*U);
     if (!Inst)
       return;
-    DEBUG(dbgs() << "Found pointer user: " << *U << '\n');
+    LLVM_DEBUG(dbgs() << "Found pointer user: " << *U << '\n');
     if (isa<LoadInst>(Inst)) {
       for (auto P : Path)
         replace(P);
@@ -405,8 +407,8 @@ Instruction *InstCombiner::visitAllocaInst(AllocaInst &AI) {
           Copy->getSource(), AI.getAlignment(), DL, &AI, &AC, &DT);
       if (AI.getAlignment() <= SourceAlign &&
           isDereferenceableForAllocaSize(Copy->getSource(), &AI, DL)) {
-        DEBUG(dbgs() << "Found alloca equal to global: " << AI << '\n');
-        DEBUG(dbgs() << "  memcpy = " << *Copy << '\n');
+        LLVM_DEBUG(dbgs() << "Found alloca equal to global: " << AI << '\n');
+        LLVM_DEBUG(dbgs() << "  memcpy = " << *Copy << '\n');
         for (unsigned i = 0, e = ToDelete.size(); i != e; ++i)
           eraseInstFromFunction(*ToDelete[i]);
         Constant *TheSrc = cast<Constant>(Copy->getSource());
@@ -437,10 +439,10 @@ Instruction *InstCombiner::visitAllocaInst(AllocaInst &AI) {
 
 // Are we allowed to form a atomic load or store of this type?
 static bool isSupportedAtomicType(Type *Ty) {
-  return Ty->isIntegerTy() || Ty->isPointerTy() || Ty->isFloatingPointTy();
+  return Ty->isIntOrPtrTy() || Ty->isFloatingPointTy();
 }
 
-/// \brief Helper to combine a load to a new type.
+/// Helper to combine a load to a new type.
 ///
 /// This just does the work of combining a load to a new type. It handles
 /// metadata, etc., and returns the new instruction. The \c NewTy should be the
@@ -453,15 +455,20 @@ static LoadInst *combineLoadToNewType(InstCombiner &IC, LoadInst &LI, Type *NewT
                                       const Twine &Suffix = "") {
   assert((!LI.isAtomic() || isSupportedAtomicType(NewTy)) &&
          "can't fold an atomic load to requested type");
-  
+
   Value *Ptr = LI.getPointerOperand();
   unsigned AS = LI.getPointerAddressSpace();
   SmallVector<std::pair<unsigned, MDNode *>, 8> MD;
   LI.getAllMetadata(MD);
 
+  Value *NewPtr = nullptr;
+  if (!(match(Ptr, m_BitCast(m_Value(NewPtr))) &&
+        NewPtr->getType()->getPointerElementType() == NewTy &&
+        NewPtr->getType()->getPointerAddressSpace() == AS))
+    NewPtr = IC.Builder.CreateBitCast(Ptr, NewTy->getPointerTo(AS));
+
   LoadInst *NewLoad = IC.Builder.CreateAlignedLoad(
-      IC.Builder.CreateBitCast(Ptr, NewTy->getPointerTo(AS)),
-      LI.getAlignment(), LI.isVolatile(), LI.getName() + Suffix);
+      NewPtr, LI.getAlignment(), LI.isVolatile(), LI.getName() + Suffix);
   NewLoad->setAtomic(LI.getOrdering(), LI.getSyncScopeID());
   MDBuilder MDB(NewLoad->getContext());
   for (const auto &MDPair : MD) {
@@ -507,13 +514,13 @@ static LoadInst *combineLoadToNewType(InstCombiner &IC, LoadInst &LI, Type *NewT
   return NewLoad;
 }
 
-/// \brief Combine a store to a new type.
+/// Combine a store to a new type.
 ///
 /// Returns the newly created store instruction.
 static StoreInst *combineStoreToNewValue(InstCombiner &IC, StoreInst &SI, Value *V) {
   assert((!SI.isAtomic() || isSupportedAtomicType(V->getType())) &&
          "can't fold an atomic store of requested type");
-  
+
   Value *Ptr = SI.getPointerOperand();
   unsigned AS = SI.getPointerAddressSpace();
   SmallVector<std::pair<unsigned, MDNode *>, 8> MD;
@@ -584,7 +591,7 @@ static bool isMinMaxWithLoads(Value *V) {
           match(L2, m_Load(m_Specific(LHS))));
 }
 
-/// \brief Combine loads to match the type of their uses' value after looking
+/// Combine loads to match the type of their uses' value after looking
 /// through intervening bitcasts.
 ///
 /// The core idea here is that if the result of a load is used in an operation,
@@ -959,23 +966,26 @@ static Instruction *replaceGEPIdxWithZero(InstCombiner &IC, Value *Ptr,
 }
 
 static bool canSimplifyNullStoreOrGEP(StoreInst &SI) {
-  if (SI.getPointerAddressSpace() != 0)
+  if (NullPointerIsDefined(SI.getFunction(), SI.getPointerAddressSpace()))
     return false;
 
   auto *Ptr = SI.getPointerOperand();
   if (GetElementPtrInst *GEPI = dyn_cast<GetElementPtrInst>(Ptr))
     Ptr = GEPI->getOperand(0);
-  return isa<ConstantPointerNull>(Ptr);
+  return (isa<ConstantPointerNull>(Ptr) &&
+          !NullPointerIsDefined(SI.getFunction(), SI.getPointerAddressSpace()));
 }
 
 static bool canSimplifyNullLoadOrGEP(LoadInst &LI, Value *Op) {
   if (GetElementPtrInst *GEPI = dyn_cast<GetElementPtrInst>(Op)) {
     const Value *GEPI0 = GEPI->getOperand(0);
-    if (isa<ConstantPointerNull>(GEPI0) && GEPI->getPointerAddressSpace() == 0)
+    if (isa<ConstantPointerNull>(GEPI0) &&
+        !NullPointerIsDefined(LI.getFunction(), GEPI->getPointerAddressSpace()))
       return true;
   }
   if (isa<UndefValue>(Op) ||
-      (isa<ConstantPointerNull>(Op) && LI.getPointerAddressSpace() == 0))
+      (isa<ConstantPointerNull>(Op) &&
+       !NullPointerIsDefined(LI.getFunction(), LI.getPointerAddressSpace())))
     return true;
   return false;
 }
@@ -1071,14 +1081,16 @@ Instruction *InstCombiner::visitLoadInst(LoadInst &LI) {
 
       // load (select (cond, null, P)) -> load P
       if (isa<ConstantPointerNull>(SI->getOperand(1)) &&
-          LI.getPointerAddressSpace() == 0) {
+          !NullPointerIsDefined(SI->getFunction(),
+                                LI.getPointerAddressSpace())) {
         LI.setOperand(0, SI->getOperand(2));
         return &LI;
       }
 
       // load (select (cond, P, null)) -> load P
       if (isa<ConstantPointerNull>(SI->getOperand(2)) &&
-          LI.getPointerAddressSpace() == 0) {
+          !NullPointerIsDefined(SI->getFunction(),
+                                LI.getPointerAddressSpace())) {
         LI.setOperand(0, SI->getOperand(1));
         return &LI;
       }
@@ -1087,7 +1099,7 @@ Instruction *InstCombiner::visitLoadInst(LoadInst &LI) {
   return nullptr;
 }
 
-/// \brief Look for extractelement/insertvalue sequence that acts like a bitcast.
+/// Look for extractelement/insertvalue sequence that acts like a bitcast.
 ///
 /// \returns underlying value that was "cast", or nullptr otherwise.
 ///
@@ -1142,7 +1154,7 @@ static Value *likeBitCastFromVector(InstCombiner &IC, Value *V) {
   return U;
 }
 
-/// \brief Combine stores to match the type of value being stored.
+/// Combine stores to match the type of value being stored.
 ///
 /// The core idea here is that the memory does not have any intrinsic type and
 /// where we can we should match the type of a store to the type of value being

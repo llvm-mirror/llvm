@@ -168,6 +168,7 @@ StringRef Triple::getVendorTypeName(VendorType Kind) {
   case AMD: return "amd";
   case Mesa: return "mesa";
   case SUSE: return "suse";
+  case OpenEmbedded: return "oe";
   }
 
   llvm_unreachable("Invalid VendorType!");
@@ -463,6 +464,7 @@ static Triple::VendorType parseVendor(StringRef VendorName) {
     .Case("amd", Triple::AMD)
     .Case("mesa", Triple::Mesa)
     .Case("suse", Triple::SUSE)
+    .Case("oe", Triple::OpenEmbedded)
     .Default(Triple::UnknownVendor);
 }
 
@@ -590,6 +592,8 @@ static Triple::SubArchType parseSubArch(StringRef SubArchName) {
     return Triple::ARMSubArch_v8_2a;
   case ARM::ArchKind::ARMV8_3A:
     return Triple::ARMSubArch_v8_3a;
+  case ARM::ArchKind::ARMV8_4A:
+    return Triple::ARMSubArch_v8_4a;
   case ARM::ArchKind::ARMV8R:
     return Triple::ARMSubArch_v8r;
   case ARM::ArchKind::ARMV8MBaseline:
@@ -682,7 +686,7 @@ static Triple::ObjectFormatType getDefaultFormat(const Triple &T) {
   llvm_unreachable("unknown architecture");
 }
 
-/// \brief Construct a triple from the string representation provided.
+/// Construct a triple from the string representation provided.
 ///
 /// This stores the string representation and parses the various pieces into
 /// enum members.
@@ -711,7 +715,7 @@ Triple::Triple(const Twine &Str)
     ObjectFormat = getDefaultFormat(*this);
 }
 
-/// \brief Construct a triple from string representations of the architecture,
+/// Construct a triple from string representations of the architecture,
 /// vendor, and OS.
 ///
 /// This joins each argument into a canonical string representation and parses
@@ -727,7 +731,7 @@ Triple::Triple(const Twine &ArchStr, const Twine &VendorStr, const Twine &OSStr)
   ObjectFormat = getDefaultFormat(*this);
 }
 
-/// \brief Construct a triple from string representations of the architecture,
+/// Construct a triple from string representations of the architecture,
 /// vendor, OS, and environment.
 ///
 /// This joins each argument into a canonical string representation and parses
@@ -881,6 +885,12 @@ std::string Triple::normalize(StringRef Str) {
       Found[Pos] = true;
       break;
     }
+  }
+
+  // Replace empty components with "unknown" value.
+  for (unsigned i = 0, e = Components.size(); i < e; ++i) {
+    if (Components[i].empty())
+      Components[i] = "unknown";
   }
 
   // Special case logic goes here.  At this point Arch, Vendor and OS have the

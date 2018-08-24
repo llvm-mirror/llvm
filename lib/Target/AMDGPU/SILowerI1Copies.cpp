@@ -17,6 +17,7 @@
 #include "AMDGPU.h"
 #include "AMDGPUSubtarget.h"
 #include "SIInstrInfo.h"
+#include "MCTargetDesc/AMDGPUMCTargetDesc.h"
 #include "Utils/AMDGPULaneDominator.h"
 #include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
@@ -65,7 +66,7 @@ FunctionPass *llvm::createSILowerI1CopiesPass() {
 
 bool SILowerI1Copies::runOnMachineFunction(MachineFunction &MF) {
   MachineRegisterInfo &MRI = MF.getRegInfo();
-  const SISubtarget &ST = MF.getSubtarget<SISubtarget>();
+  const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
   const SIInstrInfo *TII = ST.getInstrInfo();
   const TargetRegisterInfo *TRI = &TII->getRegisterInfo();
 

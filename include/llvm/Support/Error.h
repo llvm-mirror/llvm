@@ -14,8 +14,9 @@
 #ifndef LLVM_SUPPORT_ERROR_H
 #define LLVM_SUPPORT_ERROR_H
 
-#include "llvm/ADT/SmallVector.h"
+#include "llvm-c/Error.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/Config/abi-breaking.h"
@@ -24,6 +25,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/ErrorOr.h"
+#include "llvm/Support/Format.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <cassert>
@@ -166,6 +168,9 @@ class LLVM_NODISCARD Error {
   // error.
   template <typename T> friend class Expected;
 
+  // wrap needs to be able to steal the payload.
+  friend LLVMErrorRef wrap(Error);
+
 protected:
   /// Create a success value. Prefer using 'Error::success()' for readability
   Error() {
@@ -302,6 +307,14 @@ private:
     return Tmp;
   }
 
+  friend raw_ostream &operator<<(raw_ostream &OS, const Error &E) {
+    if (auto P = E.getPtr())
+      P->log(OS);
+    else
+      OS << "success";
+    return OS;
+  }
+
   ErrorInfoBase *Payload = nullptr;
 };
 
@@ -421,7 +434,7 @@ template <class T> class LLVM_NODISCARD Expected {
 
   static const bool isRef = std::is_reference<T>::value;
 
-  using wrap = ReferenceStorage<typename std::remove_reference<T>::type>;
+  using wrap = std::reference_wrapper<typename std::remove_reference<T>::type>;
 
   using error_type = std::unique_ptr<ErrorInfoBase>;
 
@@ -505,7 +518,7 @@ public:
       getErrorStorage()->~error_type();
   }
 
-  /// \brief Return false if there is an error.
+  /// Return false if there is an error.
   explicit operator bool() {
 #if LLVM_ENABLE_ABI_BREAKING_CHECKS
     Unchecked = HasError;
@@ -513,24 +526,24 @@ public:
     return !HasError;
   }
 
-  /// \brief Returns a reference to the stored T value.
+  /// Returns a reference to the stored T value.
   reference get() {
     assertIsChecked();
     return *getStorage();
   }
 
-  /// \brief Returns a const reference to the stored T value.
+  /// Returns a const reference to the stored T value.
   const_reference get() const {
     assertIsChecked();
     return const_cast<Expected<T> *>(this)->get();
   }
 
-  /// \brief Check that this Expected<T> is an error of type ErrT.
+  /// Check that this Expected<T> is an error of type ErrT.
   template <typename ErrT> bool errorIsA() const {
     return HasError && (*getErrorStorage())->template isA<ErrT>();
   }
 
-  /// \brief Take ownership of the stored error.
+  /// Take ownership of the stored error.
   /// After calling this the Expected<T> is in an indeterminate state that can
   /// only be safely destructed. No further calls (beside the destructor) should
   /// be made on the Expected<T> vaule.
@@ -541,25 +554,25 @@ public:
     return HasError ? Error(std::move(*getErrorStorage())) : Error::success();
   }
 
-  /// \brief Returns a pointer to the stored T value.
+  /// Returns a pointer to the stored T value.
   pointer operator->() {
     assertIsChecked();
     return toPointer(getStorage());
   }
 
-  /// \brief Returns a const pointer to the stored T value.
+  /// Returns a const pointer to the stored T value.
   const_pointer operator->() const {
     assertIsChecked();
     return toPointer(getStorage());
   }
 
-  /// \brief Returns a reference to the stored T value.
+  /// Returns a reference to the stored T value.
   reference operator*() {
     assertIsChecked();
     return *getStorage();
   }
 
-  /// \brief Returns a const reference to the stored T value.
+  /// Returns a const reference to the stored T value.
   const_reference operator*() const {
     assertIsChecked();
     return *getStorage();
@@ -1113,6 +1126,18 @@ private:
   std::error_code EC;
 };
 
+/// Create formatted StringError object.
+template <typename... Ts>
+Error createStringError(std::error_code EC, char const *Fmt,
+                        const Ts &... Vals) {
+  std::string Buffer;
+  raw_string_ostream Stream(Buffer);
+  Stream << format(Fmt, Vals...);
+  return make_error<StringError>(Stream.str(), EC);
+}
+
+Error createStringError(std::error_code EC, char const *Msg);
+
 /// Helper for check-and-exit error handling.
 ///
 /// For tool use only. NOT FOR USE IN LIBRARY CODE.
@@ -1161,6 +1186,17 @@ private:
   std::string Banner;
   std::function<int(const Error &)> GetExitCode;
 };
+
+/// Conversion from Error to LLVMErrorRef for C error bindings.
+inline LLVMErrorRef wrap(Error Err) {
+  return reinterpret_cast<LLVMErrorRef>(Err.takePayload().release());
+}
+
+/// Conversion from LLVMErrorRef to Error for C error bindings.
+inline Error unwrap(LLVMErrorRef ErrRef) {
+  return Error(std::unique_ptr<ErrorInfoBase>(
+      reinterpret_cast<ErrorInfoBase *>(ErrRef)));
+}
 
 } // end namespace llvm
 

@@ -58,7 +58,7 @@ static ChoppedName NamesToTest[] = {
    "mfn", "void", "(int, char, float, unsigned int, char, double)"},
 };
 
-TEST(PartialDemangleTest, TestNameChopping) {
+TEST(PartialDemanglerTest, TestNameChopping) {
   size_t Size = 1;
   char *Buf = static_cast<char *>(std::malloc(Size));
 
@@ -86,7 +86,7 @@ TEST(PartialDemangleTest, TestNameChopping) {
   std::free(Buf);
 }
 
-TEST(PartialDemangleTest, TestNameMeta) {
+TEST(PartialDemanglerTest, TestNameMeta) {
   llvm::ItaniumPartialDemangler Demangler;
 
   EXPECT_FALSE(Demangler.partialDemangle("_ZNK1f1gEv"));
@@ -109,6 +109,32 @@ TEST(PartialDemangleTest, TestNameMeta) {
   EXPECT_TRUE(Demangler.isData());
 }
 
+TEST(PartialDemanglerTest, TestCtorOrDtor) {
+  static const char *Pos[] = {
+      "_ZN1AC1Ev",        // A::A()
+      "_ZN1AC1IiEET_",    // A::A<int>(int)
+      "_ZN1AD2Ev",        // A::~A()
+      "_ZN1BIiEC1IcEET_", // B<int>::B<char>(char)
+      "_ZN1AC1B1TEv",     // A::A[abi:T]()
+      "_ZNSt1AD2Ev",      // std::A::~A()
+      "_ZN2ns1AD1Ev",      // ns::A::~A()
+  };
+  static const char *Neg[] = {
+      "_Z1fv",
+      "_ZN1A1gIiEEvT_", // void A::g<int>(int)
+  };
+
+  llvm::ItaniumPartialDemangler D;
+  for (const char *N : Pos) {
+    EXPECT_FALSE(D.partialDemangle(N));
+    EXPECT_TRUE(D.isCtorOrDtor());
+  }
+  for (const char *N : Neg) {
+    EXPECT_FALSE(D.partialDemangle(N));
+    EXPECT_FALSE(D.isCtorOrDtor());
+  }
+}
+
 TEST(PartialDemanglerTest, TestMisc) {
   llvm::ItaniumPartialDemangler D1, D2;
 
@@ -119,5 +145,50 @@ TEST(PartialDemanglerTest, TestMisc) {
   EXPECT_TRUE(D2.isFunction());
 
   EXPECT_TRUE(D1.partialDemangle("Not a mangled name!"));
+}
 
+TEST(PartialDemanglerTest, TestPrintCases) {
+  llvm::ItaniumPartialDemangler D;
+
+  const size_t OriginalSize = 4;
+  char *Buf = static_cast<char *>(std::malloc(OriginalSize));
+  const char *OriginalBuf = Buf;
+
+  // Default success case: Result fits into the given buffer.
+  // Res points to Buf. N returns string size including null termination.
+  {
+    EXPECT_FALSE(D.partialDemangle("_ZN1a1bEv"));
+
+    size_t N = OriginalSize;
+    char *Res = D.getFunctionDeclContextName(Buf, &N);
+    EXPECT_STREQ("a", Res);
+    EXPECT_EQ(OriginalBuf, Res);
+    EXPECT_EQ(strlen(Res) + 1, N);
+  }
+
+  // Realloc success case: Result does not fit into the given buffer.
+  // Res points to the new or extended buffer. N returns string size
+  // including null termination. Buf was extended or freed.
+  {
+    EXPECT_FALSE(D.partialDemangle("_ZN1a1b1cIiiiEEvm"));
+
+    size_t N = OriginalSize;
+    char *Res = D.finishDemangle(Buf, &N);
+    EXPECT_STREQ("void a::b::c<int, int, int>(unsigned long)", Res);
+    EXPECT_EQ(strlen(Res) + 1, N);
+    Buf = Res;
+  }
+
+  // Failure case: a::c is not a function.
+  // Res is nullptr. N remains unchanged.
+  {
+    EXPECT_FALSE(D.partialDemangle("_ZN1a1cE"));
+
+    size_t N = OriginalSize;
+    char *Res = D.getFunctionName(Buf, &N);
+    EXPECT_EQ(nullptr, Res);
+    EXPECT_EQ(OriginalSize, N);
+  }
+
+  std::free(Buf);
 }

@@ -15,7 +15,7 @@ define i16 @mask16(i16 %x) {
 ;
 ; X86-LABEL: mask16:
 ; X86:       ## %bb.0:
-; X86-NEXT:    movzwl {{[0-9]+}}(%esp), %eax
+; X86-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; X86-NEXT:    notl %eax
 ; X86-NEXT:    ## kill: def $ax killed $ax killed $eax
 ; X86-NEXT:    retl
@@ -157,8 +157,8 @@ define i16 @mand16(i16 %x, i16 %y) {
 ;
 ; X86-LABEL: mand16:
 ; X86:       ## %bb.0:
-; X86-NEXT:    movzwl {{[0-9]+}}(%esp), %ecx
-; X86-NEXT:    movzwl {{[0-9]+}}(%esp), %eax
+; X86-NEXT:    movl {{[0-9]+}}(%esp), %ecx
+; X86-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; X86-NEXT:    movl %eax, %edx
 ; X86-NEXT:    andl %ecx, %edx
 ; X86-NEXT:    xorl %ecx, %eax
@@ -1571,8 +1571,7 @@ define void @store_v2i1(<2 x i1> %c , <2 x i1>* %ptr) {
 ; KNL-LABEL: store_v2i1:
 ; KNL:       ## %bb.0:
 ; KNL-NEXT:    vpsllq $63, %xmm0, %xmm0
-; KNL-NEXT:    vptestmq %zmm0, %zmm0, %k0
-; KNL-NEXT:    knotw %k0, %k0
+; KNL-NEXT:    vptestnmq %zmm0, %zmm0, %k0
 ; KNL-NEXT:    kmovw %k0, %eax
 ; KNL-NEXT:    movb %al, (%rdi)
 ; KNL-NEXT:    vzeroupper
@@ -1589,8 +1588,7 @@ define void @store_v2i1(<2 x i1> %c , <2 x i1>* %ptr) {
 ; AVX512BW-LABEL: store_v2i1:
 ; AVX512BW:       ## %bb.0:
 ; AVX512BW-NEXT:    vpsllq $63, %xmm0, %xmm0
-; AVX512BW-NEXT:    vptestmq %zmm0, %zmm0, %k0
-; AVX512BW-NEXT:    knotw %k0, %k0
+; AVX512BW-NEXT:    vptestnmq %zmm0, %zmm0, %k0
 ; AVX512BW-NEXT:    kmovd %k0, %eax
 ; AVX512BW-NEXT:    movb %al, (%rdi)
 ; AVX512BW-NEXT:    vzeroupper
@@ -1622,8 +1620,7 @@ define void @store_v4i1(<4 x i1> %c , <4 x i1>* %ptr) {
 ; KNL-LABEL: store_v4i1:
 ; KNL:       ## %bb.0:
 ; KNL-NEXT:    vpslld $31, %xmm0, %xmm0
-; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
-; KNL-NEXT:    knotw %k0, %k0
+; KNL-NEXT:    vptestnmd %zmm0, %zmm0, %k0
 ; KNL-NEXT:    kmovw %k0, %eax
 ; KNL-NEXT:    movb %al, (%rdi)
 ; KNL-NEXT:    vzeroupper
@@ -1640,8 +1637,7 @@ define void @store_v4i1(<4 x i1> %c , <4 x i1>* %ptr) {
 ; AVX512BW-LABEL: store_v4i1:
 ; AVX512BW:       ## %bb.0:
 ; AVX512BW-NEXT:    vpslld $31, %xmm0, %xmm0
-; AVX512BW-NEXT:    vptestmd %zmm0, %zmm0, %k0
-; AVX512BW-NEXT:    knotw %k0, %k0
+; AVX512BW-NEXT:    vptestnmd %zmm0, %zmm0, %k0
 ; AVX512BW-NEXT:    kmovd %k0, %eax
 ; AVX512BW-NEXT:    movb %al, (%rdi)
 ; AVX512BW-NEXT:    vzeroupper
@@ -1674,8 +1670,7 @@ define void @store_v8i1(<8 x i1> %c , <8 x i1>* %ptr) {
 ; KNL:       ## %bb.0:
 ; KNL-NEXT:    vpmovsxwq %xmm0, %zmm0
 ; KNL-NEXT:    vpsllq $63, %zmm0, %zmm0
-; KNL-NEXT:    vptestmq %zmm0, %zmm0, %k0
-; KNL-NEXT:    knotw %k0, %k0
+; KNL-NEXT:    vptestnmq %zmm0, %zmm0, %k0
 ; KNL-NEXT:    kmovw %k0, %eax
 ; KNL-NEXT:    movb %al, (%rdi)
 ; KNL-NEXT:    vzeroupper
@@ -1727,8 +1722,7 @@ define void @store_v16i1(<16 x i1> %c , <16 x i1>* %ptr) {
 ; KNL:       ## %bb.0:
 ; KNL-NEXT:    vpmovsxbd %xmm0, %zmm0
 ; KNL-NEXT:    vpslld $31, %zmm0, %zmm0
-; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
-; KNL-NEXT:    knotw %k0, %k0
+; KNL-NEXT:    vptestnmd %zmm0, %zmm0, %k0
 ; KNL-NEXT:    kmovw %k0, (%rdi)
 ; KNL-NEXT:    vzeroupper
 ; KNL-NEXT:    retq
@@ -3446,3 +3440,39 @@ entry:
   store <4 x i1> <i1 1, i1 0, i1 1, i1 0>, <4 x i1>* %R
   ret void
 }
+
+; Make sure we bring the -1 constant into the mask domain.
+define void @mask_not_cast(i8*, <8 x i64>, <8 x i64>, <8 x i64>, <8 x i64>) {
+; CHECK-LABEL: mask_not_cast:
+; CHECK:       ## %bb.0:
+; CHECK-NEXT:    vpcmpnleud %zmm3, %zmm2, %k1
+; CHECK-NEXT:    vptestmd %zmm0, %zmm1, %k1 {%k1}
+; CHECK-NEXT:    vmovdqu32 %zmm0, (%rdi) {%k1}
+; CHECK-NEXT:    vzeroupper
+; CHECK-NEXT:    retq
+;
+; X86-LABEL: mask_not_cast:
+; X86:       ## %bb.0:
+; X86-NEXT:    movl {{[0-9]+}}(%esp), %eax
+; X86-NEXT:    vpcmpnleud %zmm3, %zmm2, %k1
+; X86-NEXT:    vptestmd %zmm0, %zmm1, %k1 {%k1}
+; X86-NEXT:    vmovdqu32 %zmm0, (%eax) {%k1}
+; X86-NEXT:    vzeroupper
+; X86-NEXT:    retl
+  %6 = and <8 x i64> %2, %1
+  %7 = bitcast <8 x i64> %6 to <16 x i32>
+  %8 = icmp ne <16 x i32> %7, zeroinitializer
+  %9 = bitcast <16 x i1> %8 to i16
+  %10 = bitcast <8 x i64> %3 to <16 x i32>
+  %11 = bitcast <8 x i64> %4 to <16 x i32>
+  %12 = icmp ule <16 x i32> %10, %11
+  %13 = bitcast <16 x i1> %12 to i16
+  %14 = xor i16 %13, -1
+  %15 = and i16 %14, %9
+  %16 = bitcast <8 x i64> %1 to <16 x i32>
+  %17 = bitcast i8* %0 to <16 x i32>*
+  %18 = bitcast i16 %15 to <16 x i1>
+  tail call void @llvm.masked.store.v16i32.p0v16i32(<16 x i32> %16, <16 x i32>* %17, i32 1, <16 x i1> %18) #2
+  ret void
+}
+declare void @llvm.masked.store.v16i32.p0v16i32(<16 x i32>, <16 x i32>*, i32, <16 x i1>)

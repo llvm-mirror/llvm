@@ -67,13 +67,12 @@ bool TargetSubtargetInfo::useAA() const {
   return false;
 }
 
-static std::string createSchedInfoStr(unsigned Latency,
-                                      Optional<double> RThroughput) {
+static std::string createSchedInfoStr(unsigned Latency, double RThroughput) {
   static const char *SchedPrefix = " sched: [";
   std::string Comment;
   raw_string_ostream CS(Comment);
-  if (RThroughput.hasValue())
-    CS << SchedPrefix << Latency << format(":%2.2f", RThroughput.getValue())
+  if (RThroughput != 0.0)
+    CS << SchedPrefix << Latency << format(":%2.2f", RThroughput)
        << "]";
   else
     CS << SchedPrefix << Latency << ":?]";
@@ -90,7 +89,7 @@ std::string TargetSubtargetInfo::getSchedInfoStr(const MachineInstr &MI) const {
   TargetSchedModel TSchedModel;
   TSchedModel.init(this);
   unsigned Latency = TSchedModel.computeInstrLatency(&MI);
-  Optional<double> RThroughput = TSchedModel.computeReciprocalThroughput(&MI);
+  double RThroughput = TSchedModel.computeReciprocalThroughput(&MI);
   return createSchedInfoStr(Latency, RThroughput);
 }
 
@@ -102,15 +101,14 @@ std::string TargetSubtargetInfo::getSchedInfoStr(MCInst const &MCI) const {
   TSchedModel.init(this);
   unsigned Latency;
   if (TSchedModel.hasInstrSchedModel())
-    Latency = TSchedModel.computeInstrLatency(MCI.getOpcode());
+    Latency = TSchedModel.computeInstrLatency(MCI);
   else if (TSchedModel.hasInstrItineraries()) {
     auto *ItinData = TSchedModel.getInstrItineraries();
     Latency = ItinData->getStageLatency(
         getInstrInfo()->get(MCI.getOpcode()).getSchedClass());
   } else
     return std::string();
-  Optional<double> RThroughput =
-      TSchedModel.computeReciprocalThroughput(MCI.getOpcode());
+  double RThroughput = TSchedModel.computeReciprocalThroughput(MCI);
   return createSchedInfoStr(Latency, RThroughput);
 }
 

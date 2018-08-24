@@ -26,7 +26,7 @@
 #include "llvm/Analysis/ScalarEvolutionExpander.h"
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
-#include "llvm/Analysis/Utils/Local.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/BasicBlock.h"
@@ -244,8 +244,8 @@ namespace {
     const Value *V;
   };
 
-  raw_ostream &operator<< (raw_ostream &OS, const PE &P) LLVM_ATTRIBUTE_USED;
-  raw_ostream &operator<< (raw_ostream &OS, const PE &P) {
+  LLVM_ATTRIBUTE_USED
+  raw_ostream &operator<<(raw_ostream &OS, const PE &P) {
     P.C.print(OS, P.V ? P.V : P.C.Root);
     return OS;
   }
@@ -1758,15 +1758,15 @@ void PolynomialMultiplyRecognize::setupPostSimplifier(Simplifier &S) {
 }
 
 bool PolynomialMultiplyRecognize::recognize() {
-  DEBUG(dbgs() << "Starting PolynomialMultiplyRecognize on loop\n"
-               << *CurLoop << '\n');
+  LLVM_DEBUG(dbgs() << "Starting PolynomialMultiplyRecognize on loop\n"
+                    << *CurLoop << '\n');
   // Restrictions:
   // - The loop must consist of a single block.
   // - The iteration count must be known at compile-time.
   // - The loop must have an induction variable starting from 0, and
   //   incremented in each iteration of the loop.
   BasicBlock *LoopB = CurLoop->getHeader();
-  DEBUG(dbgs() << "Loop header:\n" << *LoopB);
+  LLVM_DEBUG(dbgs() << "Loop header:\n" << *LoopB);
 
   if (LoopB != CurLoop->getLoopLatch())
     return false;
@@ -1788,7 +1788,8 @@ bool PolynomialMultiplyRecognize::recognize() {
   ParsedValues PV;
   Simplifier PreSimp;
   PV.IterCount = IterCount;
-  DEBUG(dbgs() << "Loop IV: " << *CIV << "\nIterCount: " << IterCount << '\n');
+  LLVM_DEBUG(dbgs() << "Loop IV: " << *CIV << "\nIterCount: " << IterCount
+                    << '\n');
 
   setupPreSimplifier(PreSimp);
 
@@ -1815,7 +1816,7 @@ bool PolynomialMultiplyRecognize::recognize() {
     Simplifier::Context C(SI);
     Value *T = PreSimp.simplify(C);
     SelectInst *SelI = (T && isa<SelectInst>(T)) ? cast<SelectInst>(T) : SI;
-    DEBUG(dbgs() << "scanSelect(pre-scan): " << PE(C, SelI) << '\n');
+    LLVM_DEBUG(dbgs() << "scanSelect(pre-scan): " << PE(C, SelI) << '\n');
     if (scanSelect(SelI, LoopB, EntryB, CIV, PV, true)) {
       FoundPreScan = true;
       if (SelI != SI) {
@@ -1828,7 +1829,7 @@ bool PolynomialMultiplyRecognize::recognize() {
   }
 
   if (!FoundPreScan) {
-    DEBUG(dbgs() << "Have not found candidates for pmpy\n");
+    LLVM_DEBUG(dbgs() << "Have not found candidates for pmpy\n");
     return false;
   }
 
@@ -1868,14 +1869,14 @@ bool PolynomialMultiplyRecognize::recognize() {
     SelectInst *SelI = dyn_cast<SelectInst>(&In);
     if (!SelI)
       continue;
-    DEBUG(dbgs() << "scanSelect: " << *SelI << '\n');
+    LLVM_DEBUG(dbgs() << "scanSelect: " << *SelI << '\n');
     FoundScan = scanSelect(SelI, LoopB, EntryB, CIV, PV, false);
     if (FoundScan)
       break;
   }
   assert(FoundScan);
 
-  DEBUG({
+  LLVM_DEBUG({
     StringRef PP = (PV.M ? "(P+M)" : "P");
     if (!PV.Inv)
       dbgs() << "Found pmpy idiom: R = " << PP << ".Q\n";
@@ -1969,7 +1970,7 @@ mayLoopAccessLocation(Value *Ptr, ModRefInfo Access, Loop *L,
   // Get the location that may be stored across the loop.  Since the access
   // is strided positively through memory, we say that the modified location
   // starts at the pointer and has infinite size.
-  uint64_t AccessSize = MemoryLocation::UnknownSize;
+  LocationSize AccessSize = MemoryLocation::UnknownSize;
 
   // If the loop iterates a fixed number of times, we can refine the access
   // size to be exactly the size of the memset, which is (BECount+1)*StoreSize
@@ -2287,15 +2288,16 @@ CleanupAndExit:
 
   NewCall->setDebugLoc(DLoc);
 
-  DEBUG(dbgs() << "  Formed " << (Overlap ? "memmove: " : "memcpy: ")
-               << *NewCall << "\n"
-               << "    from load ptr=" << *LoadEv << " at: " << *LI << "\n"
-               << "    from store ptr=" << *StoreEv << " at: " << *SI << "\n");
+  LLVM_DEBUG(dbgs() << "  Formed " << (Overlap ? "memmove: " : "memcpy: ")
+                    << *NewCall << "\n"
+                    << "    from load ptr=" << *LoadEv << " at: " << *LI << "\n"
+                    << "    from store ptr=" << *StoreEv << " at: " << *SI
+                    << "\n");
 
   return true;
 }
 
-// \brief Check if the instructions in Insts, together with their dependencies
+// Check if the instructions in Insts, together with their dependencies
 // cover the loop in the sense that the loop could be safely eliminated once
 // the instructions in Insts are removed.
 bool HexagonLoopIdiomRecognize::coverLoop(Loop *L,

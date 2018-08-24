@@ -115,6 +115,7 @@ static ld_plugin_add_input_file add_input_file = nullptr;
 static ld_plugin_set_extra_library_path set_extra_library_path = nullptr;
 static ld_plugin_get_view get_view = nullptr;
 static bool IsExecutable = false;
+static bool SplitSections = true;
 static Optional<Reloc::Model> RelocationModel = None;
 static std::string output_name = "";
 static std::list<claimed_file> Modules;
@@ -199,8 +200,6 @@ namespace options {
   static bool new_pass_manager = false;
   // Debug new pass manager
   static bool debug_pass_manager = false;
-  // Objcopy for debug fission.
-  static std::string objcopy;
   // Directory to store the .dwo files.
   static std::string dwo_dir;
   /// Statistics output filename.
@@ -272,8 +271,6 @@ namespace options {
       new_pass_manager = true;
     } else if (opt == "debug-pass-manager") {
       debug_pass_manager = true;
-    } else if (opt.startswith("objcopy=")) {
-      objcopy = opt.substr(strlen("objcopy="));
     } else if (opt.startswith("dwo_dir=")) {
       dwo_dir = opt.substr(strlen("dwo_dir="));
     } else if (opt.startswith("opt-remarks-filename=")) {
@@ -328,6 +325,7 @@ ld_plugin_status onload(ld_plugin_tv *tv) {
       switch (tv->tv_u.tv_val) {
       case LDPO_REL: // .o
         IsExecutable = false;
+        SplitSections = false;
         break;
       case LDPO_DYN: // .so
         IsExecutable = false;
@@ -791,7 +789,7 @@ static int getOutputFileName(StringRef InFilename, bool TempOutFile,
     if (TaskID > 0)
       NewFilename += utostr(TaskID);
     std::error_code EC =
-        sys::fs::openFileForWrite(NewFilename, FD, sys::fs::F_None);
+        sys::fs::openFileForWrite(NewFilename, FD, sys::fs::CD_CreateAlways);
     if (EC)
       message(LDPL_FATAL, "Could not open file %s: %s", NewFilename.c_str(),
               EC.message().c_str());
@@ -838,12 +836,13 @@ static std::unique_ptr<LTO> createLTO(IndexWriteCallback OnIndexWrite,
   // FIXME: Check the gold version or add a new option to enable them.
   Conf.Options.RelaxELFRelocations = false;
 
-  // Enable function/data sections by default.
-  Conf.Options.FunctionSections = true;
-  Conf.Options.DataSections = true;
+  // Toggle function/data sections.
+  Conf.Options.FunctionSections = SplitSections;
+  Conf.Options.DataSections = SplitSections;
 
   Conf.MAttrs = MAttrs;
   Conf.RelocModel = RelocationModel;
+  Conf.CodeModel = getCodeModel();
   Conf.CGOptLevel = getCGOptLevel();
   Conf.DisableVerify = options::DisableVerify;
   Conf.OptLevel = options::OptLevel;
@@ -892,8 +891,6 @@ static std::unique_ptr<LTO> createLTO(IndexWriteCallback OnIndexWrite,
 
   Conf.DwoDir = options::dwo_dir;
 
-  Conf.Objcopy = options::objcopy;
-
   // Set up optimization remarks handling.
   Conf.RemarksFilename = options::OptRemarksFilename;
   Conf.RemarksWithHotness = options::OptRemarksWithHotness;
@@ -933,7 +930,7 @@ static void writeEmptyDistributedBuildOutputs(const std::string &ModulePath,
               (NewModulePath + ".thinlto.bc").c_str(), EC.message().c_str());
 
     if (SkipModule) {
-      ModuleSummaryIndex Index(false);
+      ModuleSummaryIndex Index(/*HaveGVs*/ false);
       Index.setSkipModuleByDistributedBackend();
       WriteIndexToFile(Index, OS, nullptr);
     }

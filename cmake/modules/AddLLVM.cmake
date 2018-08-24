@@ -147,34 +147,48 @@ function(add_llvm_symbol_exports target_name export_file)
   set(LLVM_COMMON_DEPENDS ${LLVM_COMMON_DEPENDS} PARENT_SCOPE)
 endfunction(add_llvm_symbol_exports)
 
-if(NOT WIN32 AND NOT APPLE)
+if(APPLE)
+  execute_process(
+    COMMAND "${CMAKE_LINKER}" -v
+    ERROR_VARIABLE stderr
+    )
+  set(LLVM_LINKER_DETECTED YES)
+  if("${stderr}" MATCHES "PROJECT:ld64")
+    set(LLVM_LINKER_IS_LD64 YES)
+    message(STATUS "Linker detection: ld64")
+  else()
+    set(LLVM_LINKER_DETECTED NO)
+    message(STATUS "Linker detection: unknown")
+  endif()
+elseif(NOT WIN32)
   # Detect what linker we have here
   if( LLVM_USE_LINKER )
     set(command ${CMAKE_C_COMPILER} -fuse-ld=${LLVM_USE_LINKER} -Wl,--version)
   else()
-    set(command ${CMAKE_C_COMPILER} -Wl,--version)
+    separate_arguments(flags UNIX_COMMAND "${CMAKE_EXE_LINKER_FLAGS}")
+    set(command ${CMAKE_C_COMPILER} ${flags} -Wl,--version)
   endif()
   execute_process(
     COMMAND ${command}
     OUTPUT_VARIABLE stdout
     ERROR_VARIABLE stderr
     )
-  set(LLVM_LINKER_DETECTED ON)
+  set(LLVM_LINKER_DETECTED YES)
   if("${stdout}" MATCHES "GNU gold")
-    set(LLVM_LINKER_IS_GOLD ON)
+    set(LLVM_LINKER_IS_GOLD YES)
     message(STATUS "Linker detection: GNU Gold")
   elseif("${stdout}" MATCHES "^LLD")
-    set(LLVM_LINKER_IS_LLD ON)
+    set(LLVM_LINKER_IS_LLD YES)
     message(STATUS "Linker detection: LLD")
   elseif("${stdout}" MATCHES "GNU ld")
-    set(LLVM_LINKER_IS_GNULD ON)
+    set(LLVM_LINKER_IS_GNULD YES)
     message(STATUS "Linker detection: GNU ld")
   elseif("${stderr}" MATCHES "Solaris Link Editors" OR
          "${stdout}" MATCHES "Solaris Link Editors")
-    set(LLVM_LINKER_IS_SOLARISLD ON)
+    set(LLVM_LINKER_IS_SOLARISLD YES)
     message(STATUS "Linker detection: Solaris ld")
   else()
-    set(LLVM_LINKER_DETECTED OFF)
+    set(LLVM_LINKER_DETECTED NO)
     message(STATUS "Linker detection: unknown")
   endif()
 endif()
@@ -207,7 +221,7 @@ function(add_link_opts target_name)
       elseif(${CMAKE_SYSTEM_NAME} MATCHES "SunOS")
         set_property(TARGET ${target_name} APPEND_STRING PROPERTY
                      LINK_FLAGS " -Wl,-z -Wl,discard-unused=sections")
-      elseif(NOT WIN32 AND NOT LLVM_LINKER_IS_GOLD)
+      elseif(NOT WIN32 AND NOT LLVM_LINKER_IS_GOLD AND NOT ${CMAKE_SYSTEM_NAME} MATCHES "OpenBSD")
         # Object files are compiled with -ffunction-data-sections.
         # Versions of bfd ld < 2.23.1 have a bug in --gc-sections that breaks
         # tools that use plugins. Always pass --gc-sections once we require
@@ -485,7 +499,7 @@ function(llvm_add_library name)
       set_target_properties(${name}
         PROPERTIES
         # Since 4.0.0, the ABI version is indicated by the major version
-        SOVERSION ${LLVM_VERSION_MAJOR}
+        SOVERSION ${LLVM_VERSION_MAJOR}${LLVM_VERSION_SUFFIX}
         VERSION ${LLVM_VERSION_MAJOR}${LLVM_VERSION_SUFFIX})
     endif()
   endif()
@@ -566,6 +580,7 @@ function(llvm_add_library name)
 
   if(ARG_SHARED OR ARG_MODULE)
     llvm_externalize_debuginfo(${name})
+    llvm_codesign(${name})
   endif()
 endfunction()
 
@@ -770,6 +785,8 @@ macro(add_llvm_executable name)
     # API for all shared libaries loaded by this executable.
     target_link_libraries(${name} PRIVATE ${LLVM_PTHREAD_LIB})
   endif()
+
+  llvm_codesign(${name})
 endmacro(add_llvm_executable name)
 
 function(export_executable_symbols target)
@@ -850,6 +867,7 @@ if(NOT LLVM_TOOLCHAIN_TOOLS)
     llvm-ranlib
     llvm-lib
     llvm-objdump
+    llvm-rc
     )
 endif()
 
@@ -1269,7 +1287,7 @@ function(get_llvm_lit_path base_dir file_name)
   endif()
 
   set(lit_file_name "llvm-lit")
-  if (WIN32 AND NOT CYGWIN)
+  if (CMAKE_HOST_WIN32 AND NOT CYGWIN)
     # llvm-lit needs suffix.py for multiprocess to find a main module.
     set(lit_file_name "${lit_file_name}.py")
   endif ()
@@ -1543,9 +1561,12 @@ function(llvm_externalize_debuginfo name)
 
   if(NOT LLVM_EXTERNALIZE_DEBUGINFO_SKIP_STRIP)
     if(APPLE)
-      set(strip_command COMMAND xcrun strip -Sxl $<TARGET_FILE:${name}>)
+      if(NOT CMAKE_STRIP)
+        set(CMAKE_STRIP xcrun strip)
+      endif()
+      set(strip_command COMMAND ${CMAKE_STRIP} -Sxl $<TARGET_FILE:${name}>)
     else()
-      set(strip_command COMMAND strip -gx $<TARGET_FILE:${name}>)
+      set(strip_command COMMAND ${CMAKE_STRIP} -g -x $<TARGET_FILE:${name}>)
     endif()
   endif()
 
@@ -1557,16 +1578,45 @@ function(llvm_externalize_debuginfo name)
       set_property(TARGET ${name} APPEND_STRING PROPERTY
         LINK_FLAGS " -Wl,-object_path_lto,${lto_object}")
     endif()
+    if(NOT CMAKE_DSYMUTIL)
+      set(CMAKE_DSYMUTIL xcrun dsymutil)
+    endif()
     add_custom_command(TARGET ${name} POST_BUILD
-      COMMAND xcrun dsymutil $<TARGET_FILE:${name}>
+      COMMAND ${CMAKE_DSYMUTIL} $<TARGET_FILE:${name}>
       ${strip_command}
       )
   else()
     add_custom_command(TARGET ${name} POST_BUILD
-      COMMAND objcopy --only-keep-debug $<TARGET_FILE:${name}> $<TARGET_FILE:${name}>.debug
+      COMMAND ${CMAKE_OBJCOPY} --only-keep-debug $<TARGET_FILE:${name}> $<TARGET_FILE:${name}>.debug
       ${strip_command} -R .gnu_debuglink
-      COMMAND objcopy --add-gnu-debuglink=$<TARGET_FILE:${name}>.debug $<TARGET_FILE:${name}>
+      COMMAND ${CMAKE_OBJCOPY} --add-gnu-debuglink=$<TARGET_FILE:${name}>.debug $<TARGET_FILE:${name}>
       )
+  endif()
+endfunction()
+
+function(llvm_codesign name)
+  if(NOT LLVM_CODESIGNING_IDENTITY)
+    return()
+  endif()
+
+  if(APPLE)
+    if(NOT CMAKE_CODESIGN)
+      set(CMAKE_CODESIGN xcrun codesign)
+    endif()
+    if(NOT CMAKE_CODESIGN_ALLOCATE)
+      execute_process(
+        COMMAND xcrun -f codesign_allocate
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        OUTPUT_VARIABLE CMAKE_CODESIGN_ALLOCATE
+      )
+    endif()
+    add_custom_command(
+      TARGET ${name} POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E
+              env CODESIGN_ALLOCATE=${CMAKE_CODESIGN_ALLOCATE}
+              ${CMAKE_CODESIGN} -s ${LLVM_CODESIGNING_IDENTITY}
+              $<TARGET_FILE:${name}>
+    )
   endif()
 endfunction()
 
@@ -1614,10 +1664,10 @@ function(setup_dependency_debugging name)
     return()
   endif()
 
-  set(deny_attributes_gen "(deny file* (literal \"${LLVM_BINARY_DIR}/include/llvm/IR/Attributes.gen\"))")
-  set(deny_intrinsics_gen "(deny file* (literal \"${LLVM_BINARY_DIR}/include/llvm/IR/Intrinsics.gen\"))")
+  set(deny_attributes_inc "(deny file* (literal \"${LLVM_BINARY_DIR}/include/llvm/IR/Attributes.inc\"))")
+  set(deny_intrinsics_inc "(deny file* (literal \"${LLVM_BINARY_DIR}/include/llvm/IR/Intrinsics.inc\"))")
 
-  set(sandbox_command "sandbox-exec -p '(version 1) (allow default) ${deny_attributes_gen} ${deny_intrinsics_gen}'")
+  set(sandbox_command "sandbox-exec -p '(version 1) (allow default) ${deny_attributes_inc} ${deny_intrinsics_inc}'")
   set_target_properties(${name} PROPERTIES RULE_LAUNCH_COMPILE ${sandbox_command})
 endfunction()
 

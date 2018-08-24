@@ -1,6 +1,6 @@
 ; RUN: llc -filetype=obj %s -o - | obj2yaml | FileCheck %s
 
-target triple = "wasm32-unknown-unknown-wasm"
+target triple = "wasm32-unknown-unknown"
 
 ; Weak external data reference
 @weak_external_data = extern_weak global i32, align 4
@@ -20,9 +20,7 @@ entry:
 ; CHECK-NEXT:         Field:           __indirect_function_table
 
 
-; CHECK:        - Type:            CUSTOM
-; CHECK-NEXT:     Name:            linking
-; CHECK-NEXT:     SymbolTable:      
+; CHECK:          SymbolTable:      
 ; CHECK-NEXT:       - Index:           0
 ; CHECK-NEXT:         Kind:            FUNCTION
 ; CHECK-NEXT:         Name:            weak_function

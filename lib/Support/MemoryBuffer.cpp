@@ -152,7 +152,7 @@ MemoryBuffer::getFileOrSTDIN(const Twine &Filename, int64_t FileSize,
 }
 
 ErrorOr<std::unique_ptr<MemoryBuffer>>
-MemoryBuffer::getFileSlice(const Twine &FilePath, uint64_t MapSize, 
+MemoryBuffer::getFileSlice(const Twine &FilePath, uint64_t MapSize,
                            uint64_t Offset, bool IsVolatile) {
   return getFileAux<MemoryBuffer>(FilePath, -1, MapSize, Offset, false,
                                   IsVolatile);
@@ -163,7 +163,7 @@ MemoryBuffer::getFileSlice(const Twine &FilePath, uint64_t MapSize,
 //===----------------------------------------------------------------------===//
 
 namespace {
-/// \brief Memory maps a file descriptor using sys::fs::mapped_file_region.
+/// Memory maps a file descriptor using sys::fs::mapped_file_region.
 ///
 /// This handles converting the offset into a legal offset on the platform.
 template<typename MB>
@@ -216,7 +216,7 @@ getMemoryBufferForStream(int FD, const Twine &BufferName) {
   // Read into Buffer until we hit EOF.
   do {
     Buffer.reserve(Buffer.size() + ChunkSize);
-    ReadBytes = sys::RetryAfterSignal(-1, read, FD, Buffer.end(), ChunkSize);
+    ReadBytes = sys::RetryAfterSignal(-1, ::read, FD, Buffer.end(), ChunkSize);
     if (ReadBytes == -1)
       return std::error_code(errno, std::generic_category());
     Buffer.set_size(Buffer.size() + ReadBytes);
@@ -244,7 +244,7 @@ static ErrorOr<std::unique_ptr<MB>>
 getFileAux(const Twine &Filename, int64_t FileSize, uint64_t MapSize,
            uint64_t Offset, bool RequiresNullTerminator, bool IsVolatile) {
   int FD;
-  std::error_code EC = sys::fs::openFileForRead(Filename, FD);
+  std::error_code EC = sys::fs::openFileForRead(Filename, FD, sys::fs::OF_None);
 
   if (EC)
     return EC;
@@ -364,8 +364,8 @@ static ErrorOr<std::unique_ptr<WriteThroughMemoryBuffer>>
 getReadWriteFile(const Twine &Filename, uint64_t FileSize, uint64_t MapSize,
                  uint64_t Offset) {
   int FD;
-  std::error_code EC = sys::fs::openFileForWrite(
-      Filename, FD, sys::fs::F_RW | sys::fs::F_NoTrunc);
+  std::error_code EC = sys::fs::openFileForReadWrite(
+      Filename, FD, sys::fs::CD_OpenExisting, sys::fs::OF_None);
 
   if (EC)
     return EC;
@@ -518,7 +518,7 @@ ErrorOr<std::unique_ptr<MemoryBuffer>> MemoryBuffer::getSTDIN() {
 ErrorOr<std::unique_ptr<MemoryBuffer>>
 MemoryBuffer::getFileAsStream(const Twine &Filename) {
   int FD;
-  std::error_code EC = sys::fs::openFileForRead(Filename, FD);
+  std::error_code EC = sys::fs::openFileForRead(Filename, FD, sys::fs::OF_None);
   if (EC)
     return EC;
   ErrorOr<std::unique_ptr<MemoryBuffer>> Ret =
@@ -533,5 +533,4 @@ MemoryBufferRef MemoryBuffer::getMemBufferRef() const {
   return MemoryBufferRef(Data, Identifier);
 }
 
-void MemoryBuffer::anchor() {}
-void SmallVectorMemoryBuffer::anchor() {}
+SmallVectorMemoryBuffer::~SmallVectorMemoryBuffer() {}

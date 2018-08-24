@@ -43,6 +43,7 @@ set(sources
   X86IndirectBranchTracking.cpp
   X86InterleavedAccess.cpp
   X86InstrFMA3Info.cpp
+  X86InstrFoldTables.cpp
   X86InstrInfo.cpp
   X86EvexToVex.cpp
   X86LegalizerInfo.cpp
@@ -56,6 +57,7 @@ set(sources
   X86RetpolineThunks.cpp
   X86SelectionDAGInfo.cpp
   X86ShuffleDecodeConstantPool.cpp
+  X86SpeculativeLoadHardening.cpp
   X86Subtarget.cpp
   X86TargetMachine.cpp
   X86TargetObjectFile.cpp

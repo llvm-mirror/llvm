@@ -16,7 +16,7 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/Analysis/Utils/Local.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
@@ -307,8 +307,8 @@ void SjLjEHPrepare::lowerAcrossUnwindEdges(Function &F,
       for (InvokeInst *Invoke : Invokes) {
         BasicBlock *UnwindBlock = Invoke->getUnwindDest();
         if (UnwindBlock != &BB && LiveBBs.count(UnwindBlock)) {
-          DEBUG(dbgs() << "SJLJ Spill: " << Inst << " around "
-                       << UnwindBlock->getName() << "\n");
+          LLVM_DEBUG(dbgs() << "SJLJ Spill: " << Inst << " around "
+                            << UnwindBlock->getName() << "\n");
           NeedsSpill = true;
           break;
         }

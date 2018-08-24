@@ -51,7 +51,7 @@ STATISTIC(NumStoreStrongs, "Number objc_storeStrong calls formed");
 //===----------------------------------------------------------------------===//
 
 namespace {
-  /// \brief Late ARC optimizations
+  /// Late ARC optimizations
   ///
   /// These change the IR in a way that makes it difficult to be analyzed by
   /// ObjCARCOpt, so it's run late.
@@ -132,16 +132,18 @@ bool ObjCARCContract::optimizeRetainCall(Function &F, Instruction *Retain) {
   Changed = true;
   ++NumPeeps;
 
-  DEBUG(dbgs() << "Transforming objc_retain => "
-                  "objc_retainAutoreleasedReturnValue since the operand is a "
-                  "return value.\nOld: "<< *Retain << "\n");
+  LLVM_DEBUG(
+      dbgs() << "Transforming objc_retain => "
+                "objc_retainAutoreleasedReturnValue since the operand is a "
+                "return value.\nOld: "
+             << *Retain << "\n");
 
   // We do not have to worry about tail calls/does not throw since
   // retain/retainRV have the same properties.
   Constant *Decl = EP.get(ARCRuntimeEntryPointKind::RetainRV);
   cast<CallInst>(Retain)->setCalledFunction(Decl);
 
-  DEBUG(dbgs() << "New: " << *Retain << "\n");
+  LLVM_DEBUG(dbgs() << "New: " << *Retain << "\n");
   return true;
 }
 
@@ -180,16 +182,19 @@ bool ObjCARCContract::contractAutorelease(
   Changed = true;
   ++NumPeeps;
 
-  DEBUG(dbgs() << "    Fusing retain/autorelease!\n"
-                  "        Autorelease:" << *Autorelease << "\n"
-                  "        Retain: " << *Retain << "\n");
+  LLVM_DEBUG(dbgs() << "    Fusing retain/autorelease!\n"
+                       "        Autorelease:"
+                    << *Autorelease
+                    << "\n"
+                       "        Retain: "
+                    << *Retain << "\n");
 
   Constant *Decl = EP.get(Class == ARCInstKind::AutoreleaseRV
                               ? ARCRuntimeEntryPointKind::RetainAutoreleaseRV
                               : ARCRuntimeEntryPointKind::RetainAutorelease);
   Retain->setCalledFunction(Decl);
 
-  DEBUG(dbgs() << "        New RetainAutorelease: " << *Retain << "\n");
+  LLVM_DEBUG(dbgs() << "        New RetainAutorelease: " << *Retain << "\n");
 
   EraseInstruction(Autorelease);
   return true;
@@ -387,7 +392,7 @@ void ObjCARCContract::tryToContractReleaseIntoStoreStrong(
   Changed = true;
   ++NumStoreStrongs;
 
-  DEBUG(
+  LLVM_DEBUG(
       llvm::dbgs() << "    Contracting retain, release into objc_storeStrong.\n"
                    << "        Old:\n"
                    << "            Store:   " << *Store << "\n"
@@ -414,7 +419,8 @@ void ObjCARCContract::tryToContractReleaseIntoStoreStrong(
   // we can set the tail flag once we know it's safe.
   StoreStrongCalls.insert(StoreStrong);
 
-  DEBUG(llvm::dbgs() << "        New Store Strong: " << *StoreStrong << "\n");
+  LLVM_DEBUG(llvm::dbgs() << "        New Store Strong: " << *StoreStrong
+                          << "\n");
 
   if (&*Iter == Retain) ++Iter;
   if (&*Iter == Store) ++Iter;
@@ -472,8 +478,8 @@ bool ObjCARCContract::tryToPeepholeInstruction(
       } while (IsNoopInstruction(&*BBI));
 
       if (&*BBI == GetArgRCIdentityRoot(Inst)) {
-        DEBUG(dbgs() << "Adding inline asm marker for the return value "
-                        "optimization.\n");
+        LLVM_DEBUG(dbgs() << "Adding inline asm marker for the return value "
+                             "optimization.\n");
         Changed = true;
         InlineAsm *IA = InlineAsm::get(
             FunctionType::get(Type::getVoidTy(Inst->getContext()),
@@ -495,8 +501,8 @@ bool ObjCARCContract::tryToPeepholeInstruction(
         Changed = true;
         new StoreInst(Null, CI->getArgOperand(0), CI);
 
-        DEBUG(dbgs() << "OBJCARCContract: Old = " << *CI << "\n"
-                     << "                 New = " << *Null << "\n");
+        LLVM_DEBUG(dbgs() << "OBJCARCContract: Old = " << *CI << "\n"
+                          << "                 New = " << *Null << "\n");
 
         CI->replaceAllUsesWith(Null);
         CI->eraseFromParent();
@@ -544,10 +550,10 @@ bool ObjCARCContract::runOnFunction(Function &F) {
 
   DenseMap<BasicBlock *, ColorVector> BlockColors;
   if (F.hasPersonalityFn() &&
-      isFuncletEHPersonality(classifyEHPersonality(F.getPersonalityFn())))
+      isScopedEHPersonality(classifyEHPersonality(F.getPersonalityFn())))
     BlockColors = colorEHFunclets(F);
 
-  DEBUG(llvm::dbgs() << "**** ObjCARC Contract ****\n");
+  LLVM_DEBUG(llvm::dbgs() << "**** ObjCARC Contract ****\n");
 
   // Track whether it's ok to mark objc_storeStrong calls with the "tail"
   // keyword. Be conservative if the function has variadic arguments.
@@ -565,7 +571,7 @@ bool ObjCARCContract::runOnFunction(Function &F) {
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E;) {
     Instruction *Inst = &*I++;
 
-    DEBUG(dbgs() << "Visiting: " << *Inst << "\n");
+    LLVM_DEBUG(dbgs() << "Visiting: " << *Inst << "\n");
 
     // First try to peephole Inst. If there is nothing further we can do in
     // terms of undoing objc-arc-expand, process the next inst.
@@ -597,35 +603,48 @@ bool ObjCARCContract::runOnFunction(Function &F) {
         // trivially dominate itself, which would lead us to rewriting its
         // argument in terms of its return value, which would lead to
         // infinite loops in GetArgRCIdentityRoot.
-        if (DT->isReachableFromEntry(U) && DT->dominates(Inst, U)) {
-          Changed = true;
-          Instruction *Replacement = Inst;
-          Type *UseTy = U.get()->getType();
-          if (PHINode *PHI = dyn_cast<PHINode>(U.getUser())) {
-            // For PHI nodes, insert the bitcast in the predecessor block.
-            unsigned ValNo = PHINode::getIncomingValueNumForOperand(OperandNo);
-            BasicBlock *BB = PHI->getIncomingBlock(ValNo);
-            if (Replacement->getType() != UseTy)
-              Replacement = new BitCastInst(Replacement, UseTy, "",
-                                            &BB->back());
-            // While we're here, rewrite all edges for this PHI, rather
-            // than just one use at a time, to minimize the number of
-            // bitcasts we emit.
-            for (unsigned i = 0, e = PHI->getNumIncomingValues(); i != e; ++i)
-              if (PHI->getIncomingBlock(i) == BB) {
-                // Keep the UI iterator valid.
-                if (UI != UE &&
-                    &PHI->getOperandUse(
-                        PHINode::getOperandNumForIncomingValue(i)) == &*UI)
-                  ++UI;
-                PHI->setIncomingValue(i, Replacement);
-              }
-          } else {
-            if (Replacement->getType() != UseTy)
-              Replacement = new BitCastInst(Replacement, UseTy, "",
-                                            cast<Instruction>(U.getUser()));
-            U.set(Replacement);
+        if (!DT->isReachableFromEntry(U) || !DT->dominates(Inst, U))
+          continue;
+
+        Changed = true;
+        Instruction *Replacement = Inst;
+        Type *UseTy = U.get()->getType();
+        if (PHINode *PHI = dyn_cast<PHINode>(U.getUser())) {
+          // For PHI nodes, insert the bitcast in the predecessor block.
+          unsigned ValNo = PHINode::getIncomingValueNumForOperand(OperandNo);
+          BasicBlock *IncomingBB = PHI->getIncomingBlock(ValNo);
+          if (Replacement->getType() != UseTy) {
+            // A catchswitch is both a pad and a terminator, meaning a basic
+            // block with a catchswitch has no insertion point. Keep going up
+            // the dominator tree until we find a non-catchswitch.
+            BasicBlock *InsertBB = IncomingBB;
+            while (isa<CatchSwitchInst>(InsertBB->getFirstNonPHI())) {
+              InsertBB = DT->getNode(InsertBB)->getIDom()->getBlock();
+            }
+
+            assert(DT->dominates(Inst, &InsertBB->back()) &&
+                   "Invalid insertion point for bitcast");
+            Replacement =
+                new BitCastInst(Replacement, UseTy, "", &InsertBB->back());
           }
+
+          // While we're here, rewrite all edges for this PHI, rather
+          // than just one use at a time, to minimize the number of
+          // bitcasts we emit.
+          for (unsigned i = 0, e = PHI->getNumIncomingValues(); i != e; ++i)
+            if (PHI->getIncomingBlock(i) == IncomingBB) {
+              // Keep the UI iterator valid.
+              if (UI != UE &&
+                  &PHI->getOperandUse(
+                      PHINode::getOperandNumForIncomingValue(i)) == &*UI)
+                ++UI;
+              PHI->setIncomingValue(i, Replacement);
+            }
+        } else {
+          if (Replacement->getType() != UseTy)
+            Replacement = new BitCastInst(Replacement, UseTy, "",
+                                          cast<Instruction>(U.getUser()));
+          U.set(Replacement);
         }
       }
     };

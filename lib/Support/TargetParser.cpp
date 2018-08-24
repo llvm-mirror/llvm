@@ -234,6 +234,11 @@ bool llvm::ARM::getExtensionFeatures(unsigned Extensions,
   else
     Features.push_back("-dsp");
 
+  if (Extensions & ARM::AEK_FP16FML)
+    Features.push_back("+fp16fml");
+  else
+    Features.push_back("-fp16fml");
+
   if (Extensions & ARM::AEK_RAS)
     Features.push_back("+ras");
   else
@@ -433,6 +438,17 @@ unsigned llvm::AArch64::getDefaultExtensions(StringRef CPU, ArchKind AK) {
     .Default(AArch64::AEK_INVALID);
 }
 
+AArch64::ArchKind llvm::AArch64::getCPUArchKind(StringRef CPU) {
+  if (CPU == "generic")
+    return AArch64::ArchKind::ARMV8A;
+
+  return StringSwitch<AArch64::ArchKind>(CPU)
+#define AARCH64_CPU_NAME(NAME, ID, DEFAULT_FPU, IS_DEFAULT, DEFAULT_EXT) \
+  .Case(NAME, AArch64::ArchKind:: ID)
+#include "llvm/Support/AArch64TargetParser.def"
+    .Default(AArch64::ArchKind::INVALID);
+}
+
 bool llvm::AArch64::getExtensionFeatures(unsigned Extensions,
                                      std::vector<StringRef> &Features) {
 
@@ -449,6 +465,8 @@ bool llvm::AArch64::getExtensionFeatures(unsigned Extensions,
     Features.push_back("+crypto");
   if (Extensions & AArch64::AEK_DOTPROD)
     Features.push_back("+dotprod");
+  if (Extensions & AArch64::AEK_FP16FML)
+    Features.push_back("+fp16fml");
   if (Extensions & AArch64::AEK_FP16)
     Features.push_back("+fullfp16");
   if (Extensions & AArch64::AEK_PROFILE)
@@ -480,6 +498,8 @@ bool llvm::AArch64::getArchFeatures(AArch64::ArchKind AK,
     Features.push_back("+v8.2a");
   if (AK == AArch64::ArchKind::ARMV8_3A)
     Features.push_back("+v8.3a");
+  if (AK == AArch64::ArchKind::ARMV8_4A)
+    Features.push_back("+v8.4a");
 
   return AK != AArch64::ArchKind::INVALID;
 }
@@ -585,6 +605,7 @@ static StringRef getArchSynonym(StringRef Arch) {
       .Case("v8.1a", "v8.1-a")
       .Case("v8.2a", "v8.2-a")
       .Case("v8.3a", "v8.3-a")
+      .Case("v8.4a", "v8.4-a")
       .Case("v8r", "v8-r")
       .Case("v8m.base", "v8-m.base")
       .Case("v8m.main", "v8-m.main")
@@ -752,6 +773,7 @@ ARM::ProfileKind ARM::parseArchProfile(StringRef Arch) {
   case ARM::ArchKind::ARMV8_1A:
   case ARM::ArchKind::ARMV8_2A:
   case ARM::ArchKind::ARMV8_3A:
+  case ARM::ArchKind::ARMV8_4A:
     return ARM::ProfileKind::A;
   case ARM::ArchKind::ARMV2:
   case ARM::ArchKind::ARMV2A:
@@ -814,6 +836,7 @@ unsigned llvm::ARM::parseArchVersion(StringRef Arch) {
   case ARM::ArchKind::ARMV8_1A:
   case ARM::ArchKind::ARMV8_2A:
   case ARM::ArchKind::ARMV8_3A:
+  case ARM::ArchKind::ARMV8_4A:
   case ARM::ArchKind::ARMV8R:
   case ARM::ArchKind::ARMV8MBaseline:
   case ARM::ArchKind::ARMV8MMainline:

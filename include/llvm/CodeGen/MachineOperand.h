@@ -295,6 +295,12 @@ public:
              unsigned TiedOperandIdx, const TargetRegisterInfo *TRI,
              const TargetIntrinsicInfo *IntrinsicInfo) const;
 
+  /// Same as print(os, TRI, IntrinsicInfo), but allows to specify the low-level
+  /// type to be printed the same way the full version of print(...) does it.
+  void print(raw_ostream &os, LLT TypeToPrint,
+             const TargetRegisterInfo *TRI = nullptr,
+             const TargetIntrinsicInfo *IntrinsicInfo = nullptr) const;
+
   void dump() const;
 
   //===--------------------------------------------------------------------===//
@@ -610,6 +616,11 @@ public:
     return Contents.RegMask;
   }
 
+  /// Returns number of elements needed for a regmask array.
+  static unsigned getRegMaskSize(unsigned NumRegs) {
+    return (NumRegs + 31) / 32;
+  }
+
   /// getRegLiveOut - Returns a bit mask of live-out registers.
   const uint32_t *getRegLiveOut() const {
     assert(isRegLiveOut() && "Wrong MachineOperand accessor");
@@ -628,6 +639,11 @@ public:
   void setImm(int64_t immVal) {
     assert(isImm() && "Wrong MachineOperand mutator");
     Contents.ImmVal = immVal;
+  }
+
+  void setCImm(const ConstantInt *CI) {
+    assert(isCImm() && "Wrong MachineOperand mutator");
+    Contents.CI = CI;
   }
 
   void setFPImm(const ConstantFP *CFP) {
@@ -677,7 +693,7 @@ public:
   /// should stay in sync with the hash_value overload below.
   bool isIdenticalTo(const MachineOperand &Other) const;
 
-  /// \brief MachineOperand hash_value overload.
+  /// MachineOperand hash_value overload.
   ///
   /// Note that this includes the same information in the hash that
   /// isIdenticalTo uses for comparison. It is thus suited for use in hash

@@ -1,6 +1,6 @@
 ; RUN: llc -filetype=obj %s -o - | llvm-readobj -r -expand-relocs | FileCheck %s
 
-target triple = "wasm32-unknown-unknown-wasm"
+target triple = "wasm32-unknown-unknown"
 
 ; Pointers to functions of two different types
 @a = global i64 ()* inttoptr (i64 5 to i64 ()*), align 8
@@ -28,13 +28,13 @@ entry:
 ; CHECK-NEXT:     Relocation {
 ; CHECK-NEXT:       Type: R_WEBASSEMBLY_MEMORY_ADDR_LEB (3)
 ; CHECK-NEXT:       Offset: 0x9
-; CHECK-NEXT:       Index: 0x1
+; CHECK-NEXT:       Symbol: b
 ; CHECK-NEXT:       Addend: 0
 ; CHECK-NEXT:     }
 ; CHECK-NEXT:     Relocation {
 ; CHECK-NEXT:       Type: R_WEBASSEMBLY_MEMORY_ADDR_LEB (3)
 ; CHECK-NEXT:       Offset: 0x14
-; CHECK-NEXT:       Index: 0x2
+; CHECK-NEXT:       Symbol: a
 ; CHECK-NEXT:       Addend: 0
 ; CHECK-NEXT:     }
 ; CHECK-NEXT:     Relocation {
@@ -50,12 +50,12 @@ entry:
 ; CHECK-NEXT:     Relocation {
 ; CHECK-NEXT:       Type: R_WEBASSEMBLY_FUNCTION_INDEX_LEB (0)
 ; CHECK-NEXT:       Offset: 0x2D
-; CHECK-NEXT:       Index: 0x3
+; CHECK-NEXT:       Symbol: c
 ; CHECK-NEXT:     }
 ; CHECK-NEXT:     Relocation {
 ; CHECK-NEXT:       Type: R_WEBASSEMBLY_FUNCTION_INDEX_LEB (0)
 ; CHECK-NEXT:       Offset: 0x34
-; CHECK-NEXT:       Index: 0x4
+; CHECK-NEXT:       Symbol: d
 ; CHECK-NEXT:     }
 ; CHECK-NEXT:   }
 ; CHECK-NEXT: ]

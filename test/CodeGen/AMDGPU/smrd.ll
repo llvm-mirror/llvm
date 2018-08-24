@@ -46,10 +46,10 @@ entry:
 ; GCN-LABEL: {{^}}smrd3:
 ; FIXME: There are too many copies here because we don't fold immediates
 ;        through REG_SEQUENCE
-; SI: s_load_dwordx2 s[{{[0-9]:[0-9]}}], s[{{[0-9]:[0-9]}}], 0xb ; encoding: [0x0b
+; SI: s_load_dwordx2 s[{{[0-9]:[0-9]}}], s[{{[0-9]:[0-9]}}], 0x13 ; encoding: [0x13
 ; TODO: Add VI checks
 ; GCN: s_endpgm
-define amdgpu_kernel void @smrd3(i32 addrspace(1)* %out, i32 addrspace(4)* %ptr) #0 {
+define amdgpu_kernel void @smrd3(i32 addrspace(1)* %out, [8 x i32], i32 addrspace(4)* %ptr) #0 {
 entry:
   %tmp = getelementptr i32, i32 addrspace(4)* %ptr, i64 4294967296
   %tmp1 = load i32, i32 addrspace(4)* %tmp
@@ -328,6 +328,7 @@ ret_block:                                       ; preds = %.outer, %.label22, %
 .inner_loop_body:
   %descriptor = load <4 x i32>, <4 x i32> addrspace(4)* %descptr, align 16, !invariant.load !0
   %load1result = call float @llvm.SI.load.const.v4i32(<4 x i32> %descriptor, i32 0)
+  store float %load1result, float addrspace(1)* undef
   %inner_br2 = icmp uge i32 %1, 10
   br i1 %inner_br2, label %.inner_loop_header, label %.outer_loop_body
 

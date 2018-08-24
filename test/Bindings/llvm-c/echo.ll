@@ -22,6 +22,12 @@ module asm "classical GAS"
 @section = global i32 27, section ".custom"
 @align = global i32 31, align 4
 
+@aliased1 = alias i32, i32* @var
+@aliased2 = internal alias i32, i32* @var
+@aliased3 = external alias i32, i32* @var
+@aliased4 = weak alias i32, i32* @var
+@aliased5 = weak_odr alias i32, i32* @var
+
 define { i64, %S* } @unpackrepack(%S %s) {
   %1 = extractvalue %S %s, 0
   %2 = extractvalue %S %s, 1
@@ -159,3 +165,7 @@ cleanup:
 exit:
   ret void
 }
+
+!llvm.module.flags = !{!1}
+
+!1 = !{i32 2, !"Debug Info Version", i32 3}

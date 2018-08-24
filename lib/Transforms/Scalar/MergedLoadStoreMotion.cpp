@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 //
 //! \file
-//! \brief This pass performs merges of loads and stores on both sides of a
+//! This pass performs merges of loads and stores on both sides of a
 //  diamond (hammock). It hoists the loads and sinks the stores.
 //
 // The algorithm iteratively hoists two loads to the same address out of a
@@ -121,7 +121,7 @@ private:
 } // end anonymous namespace
 
 ///
-/// \brief Return tail block of a diamond.
+/// Return tail block of a diamond.
 ///
 BasicBlock *MergedLoadStoreMotion::getDiamondTail(BasicBlock *BB) {
   assert(isDiamondHead(BB) && "Basic block is not head of a diamond");
@@ -129,7 +129,7 @@ BasicBlock *MergedLoadStoreMotion::getDiamondTail(BasicBlock *BB) {
 }
 
 ///
-/// \brief True when BB is the head of a diamond (hammock)
+/// True when BB is the head of a diamond (hammock)
 ///
 bool MergedLoadStoreMotion::isDiamondHead(BasicBlock *BB) {
   if (!BB)
@@ -156,7 +156,7 @@ bool MergedLoadStoreMotion::isDiamondHead(BasicBlock *BB) {
 
 
 ///
-/// \brief True when instruction is a sink barrier for a store
+/// True when instruction is a sink barrier for a store
 /// located in Loc
 ///
 /// Whenever an instruction could possibly read or modify the
@@ -174,13 +174,13 @@ bool MergedLoadStoreMotion::isStoreSinkBarrierInRange(const Instruction &Start,
 }
 
 ///
-/// \brief Check if \p BB contains a store to the same address as \p SI
+/// Check if \p BB contains a store to the same address as \p SI
 ///
 /// \return The store in \p  when it is safe to sink. Otherwise return Null.
 ///
 StoreInst *MergedLoadStoreMotion::canSinkFromBlock(BasicBlock *BB1,
                                                    StoreInst *Store0) {
-  DEBUG(dbgs() << "can Sink? : "; Store0->dump(); dbgs() << "\n");
+  LLVM_DEBUG(dbgs() << "can Sink? : "; Store0->dump(); dbgs() << "\n");
   BasicBlock *BB0 = Store0->getParent();
   for (Instruction &Inst : reverse(*BB1)) {
     auto *Store1 = dyn_cast<StoreInst>(&Inst);
@@ -199,7 +199,7 @@ StoreInst *MergedLoadStoreMotion::canSinkFromBlock(BasicBlock *BB1,
 }
 
 ///
-/// \brief Create a PHI node in BB for the operands of S0 and S1
+/// Create a PHI node in BB for the operands of S0 and S1
 ///
 PHINode *MergedLoadStoreMotion::getPHIOperand(BasicBlock *BB, StoreInst *S0,
                                               StoreInst *S1) {
@@ -217,7 +217,7 @@ PHINode *MergedLoadStoreMotion::getPHIOperand(BasicBlock *BB, StoreInst *S0,
 }
 
 ///
-/// \brief Merge two stores to same address and sink into \p BB
+/// Merge two stores to same address and sink into \p BB
 ///
 /// Also sinks GEP instruction computing the store address
 ///
@@ -229,9 +229,9 @@ bool MergedLoadStoreMotion::sinkStore(BasicBlock *BB, StoreInst *S0,
   if (A0 && A1 && A0->isIdenticalTo(A1) && A0->hasOneUse() &&
       (A0->getParent() == S0->getParent()) && A1->hasOneUse() &&
       (A1->getParent() == S1->getParent()) && isa<GetElementPtrInst>(A0)) {
-    DEBUG(dbgs() << "Sink Instruction into BB \n"; BB->dump();
-          dbgs() << "Instruction Left\n"; S0->dump(); dbgs() << "\n";
-          dbgs() << "Instruction Right\n"; S1->dump(); dbgs() << "\n");
+    LLVM_DEBUG(dbgs() << "Sink Instruction into BB \n"; BB->dump();
+               dbgs() << "Instruction Left\n"; S0->dump(); dbgs() << "\n";
+               dbgs() << "Instruction Right\n"; S1->dump(); dbgs() << "\n");
     // Hoist the instruction.
     BasicBlock::iterator InsertPt = BB->getFirstInsertionPt();
     // Intersect optional metadata.
@@ -262,7 +262,7 @@ bool MergedLoadStoreMotion::sinkStore(BasicBlock *BB, StoreInst *S0,
 }
 
 ///
-/// \brief True when two stores are equivalent and can sink into the footer
+/// True when two stores are equivalent and can sink into the footer
 ///
 /// Starting from a diamond tail block, iterate over the instructions in one
 /// predecessor block and try to match a store in the second predecessor.
@@ -285,7 +285,8 @@ bool MergedLoadStoreMotion::mergeStores(BasicBlock *T) {
     return false; // No. More than 2 predecessors.
 
   // #Instructions in Succ1 for Compile Time Control
-  int Size1 = Pred1->size();
+  auto InstsNoDbg = Pred1->instructionsWithoutDebug();
+  int Size1 = std::distance(InstsNoDbg.begin(), InstsNoDbg.end());
   int NStores = 0;
 
   for (BasicBlock::reverse_iterator RBI = Pred0->rbegin(), RBE = Pred0->rend();
@@ -313,7 +314,7 @@ bool MergedLoadStoreMotion::mergeStores(BasicBlock *T) {
         break;
       RBI = Pred0->rbegin();
       RBE = Pred0->rend();
-      DEBUG(dbgs() << "Search again\n"; Instruction *I = &*RBI; I->dump());
+      LLVM_DEBUG(dbgs() << "Search again\n"; Instruction *I = &*RBI; I->dump());
     }
   }
   return MergedStores;
@@ -323,7 +324,7 @@ bool MergedLoadStoreMotion::run(Function &F, AliasAnalysis &AA) {
   this->AA = &AA;
 
   bool Changed = false;
-  DEBUG(dbgs() << "Instruction Merger\n");
+  LLVM_DEBUG(dbgs() << "Instruction Merger\n");
 
   // Merge unconditional branches, allowing PRE to catch more
   // optimization opportunities.
@@ -349,7 +350,7 @@ public:
   }
 
   ///
-  /// \brief Run the transformation for each function
+  /// Run the transformation for each function
   ///
   bool runOnFunction(Function &F) override {
     if (skipFunction(F))
@@ -370,7 +371,7 @@ char MergedLoadStoreMotionLegacyPass::ID = 0;
 } // anonymous namespace
 
 ///
-/// \brief createMergedLoadStoreMotionPass - The public interface to this file.
+/// createMergedLoadStoreMotionPass - The public interface to this file.
 ///
 FunctionPass *llvm::createMergedLoadStoreMotionPass() {
   return new MergedLoadStoreMotionLegacyPass();

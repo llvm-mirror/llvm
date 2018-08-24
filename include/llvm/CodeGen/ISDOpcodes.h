@@ -377,6 +377,8 @@ namespace ISD {
     /// When the 1st operand is a vector, the shift amount must be in the same
     /// type. (TLI.getShiftAmountTy() will return the same type when the input
     /// type is a vector.)
+    /// For rotates, the shift amount is treated as an unsigned amount modulo
+    /// the element size of the first operand.
     SHL, SRA, SRL, ROTL, ROTR,
 
     /// Byte Swap and Counting operators.
@@ -412,19 +414,11 @@ namespace ISD {
     /// then the result type must also be a vector type.
     SETCC,
 
-    /// Like SetCC, ops #0 and #1 are the LHS and RHS operands to compare, and
-    /// op #2 is a *carry value*. This operator checks the result of
-    /// "LHS - RHS - Carry", and can be used to compare two wide integers:
-    /// (setcce lhshi rhshi (subc lhslo rhslo) cc). Only valid for integers.
-    /// FIXME: This node is deprecated in favor of SETCCCARRY.
-    /// It is kept around for now to provide a smooth transition path
-    /// toward the use of SETCCCARRY and will eventually be removed.
-    SETCCE,
-
     /// Like SetCC, ops #0 and #1 are the LHS and RHS operands to compare, but
     /// op #2 is a boolean indicating if there is an incoming carry. This
     /// operator checks the result of "LHS - RHS - Carry", and can be used to
-    /// compare two wide integers: (setcce lhshi rhshi (subc lhslo rhslo) cc).
+    /// compare two wide integers:
+    /// (setcccarry lhshi rhshi (subcarry lhslo rhslo) cc).
     /// Only valid for integers.
     SETCCCARRY,
 

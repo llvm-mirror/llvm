@@ -162,8 +162,8 @@ exit:
 ; SI: [[LABEL_LOOP:BB[0-9]+_[0-9]+]]:
 ; SI: buffer_load_dword
 ; SI-DAG: buffer_store_dword
-; SI-DAG: s_cmpk_eq_i32 s{{[0-9]+}}, 0x100
-; SI: s_cbranch_scc0 [[LABEL_LOOP]]
+; SI-DAG: v_cmp_eq_u32_e32 vcc, 0x100
+; SI: s_cbranch_vccz [[LABEL_LOOP]]
 ; SI: [[LABEL_EXIT]]:
 ; SI: s_endpgm
 
@@ -201,8 +201,7 @@ exit:
 
 ; Initialize inner condition to false
 ; SI: BB{{[0-9]+_[0-9]+}}: ; %bb10.preheader
-; SI: s_mov_b64 [[ZERO:s\[[0-9]+:[0-9]+\]]], 0{{$}}
-; SI: s_mov_b64 [[COND_STATE:s\[[0-9]+:[0-9]+\]]], [[ZERO]]
+; SI: s_mov_b64 [[COND_STATE:s\[[0-9]+:[0-9]+\]]], 0{{$}}
 
 ; Clear exec bits for workitems that load -1s
 ; SI: [[LABEL_LOOP:BB[0-9]+_[0-9]+]]:
@@ -223,7 +222,9 @@ exit:
 ; SI: [[LABEL_FLOW]]:
 ; SI-NEXT: ; in Loop: Header=[[LABEL_LOOP]]
 ; SI-NEXT: s_or_b64 exec, exec, [[ORNEG3]]
-; SI-NEXT: s_or_b64 [[COND_STATE]], [[ORNEG3]], [[TMP]]
+; SI-NEXT: s_mov_b64 [[MOVED_TMP:s\[[0-9]+:[0-9]+\]]], [[TMP]]
+; SI-NEXT: s_and_b64 [[MASKED_ORNEG3:s\[[0-9]+:[0-9]+\]]], exec, [[ORNEG3]]
+; SI-NEXT: s_or_b64 [[COND_STATE]], [[MASKED_ORNEG3]], [[MOVED_TMP]]
 ; SI-NEXT: s_andn2_b64 exec, exec, [[COND_STATE]]
 ; SI-NEXT: s_cbranch_execnz [[LABEL_LOOP]]
 

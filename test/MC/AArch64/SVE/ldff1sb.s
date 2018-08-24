@@ -60,3 +60,57 @@ ldff1sb { z0.d }, p0/z, [x0, x0]
 // CHECK-ENCODING: [0x00,0x60,0x80,0xa5]
 // CHECK-ERROR: instruction requires: sve
 // CHECK-UNKNOWN: 00 60 80 a5 <unknown>
+
+ldff1sb   { z0.s }, p0/z, [x0, z0.s, uxtw]
+// CHECK-INST: ldff1sb   { z0.s }, p0/z, [x0, z0.s, uxtw]
+// CHECK-ENCODING: [0x00,0x20,0x00,0x84]
+// CHECK-ERROR: instruction requires: sve
+// CHECK-UNKNOWN: 00 20 00 84 <unknown>
+
+ldff1sb   { z0.s }, p0/z, [x0, z0.s, sxtw]
+// CHECK-INST: ldff1sb   { z0.s }, p0/z, [x0, z0.s, sxtw]
+// CHECK-ENCODING: [0x00,0x20,0x40,0x84]
+// CHECK-ERROR: instruction requires: sve
+// CHECK-UNKNOWN: 00 20 40 84 <unknown>
+
+ldff1sb { z31.d }, p7/z, [sp, z31.d]
+// CHECK-INST: ldff1sb { z31.d }, p7/z, [sp, z31.d]
+// CHECK-ENCODING: [0xff,0xbf,0x5f,0xc4]
+// CHECK-ERROR: instruction requires: sve
+// CHECK-UNKNOWN: ff bf 5f c4 <unknown>
+
+ldff1sb { z21.d }, p5/z, [x10, z21.d, uxtw]
+// CHECK-INST: ldff1sb { z21.d }, p5/z, [x10, z21.d, uxtw]
+// CHECK-ENCODING: [0x55,0x35,0x15,0xc4]
+// CHECK-ERROR: instruction requires: sve
+// CHECK-UNKNOWN: 55 35 15 c4 <unknown>
+
+ldff1sb { z21.d }, p5/z, [x10, z21.d, sxtw]
+// CHECK-INST: ldff1sb { z21.d }, p5/z, [x10, z21.d, sxtw]
+// CHECK-ENCODING: [0x55,0x35,0x55,0xc4]
+// CHECK-ERROR: instruction requires: sve
+// CHECK-UNKNOWN: 55 35 55 c4 <unknown>
+
+ldff1sb { z31.s }, p7/z, [z31.s, #31]
+// CHECK-INST: ldff1sb { z31.s }, p7/z, [z31.s, #31]
+// CHECK-ENCODING: [0xff,0xbf,0x3f,0x84]
+// CHECK-ERROR: instruction requires: sve
+// CHECK-UNKNOWN: ff bf 3f 84 <unknown>
+
+ldff1sb { z0.s }, p0/z, [z0.s]
+// CHECK-INST: ldff1sb { z0.s }, p0/z, [z0.s]
+// CHECK-ENCODING: [0x00,0xa0,0x20,0x84]
+// CHECK-ERROR: instruction requires: sve
+// CHECK-UNKNOWN: 00 a0 20 84 <unknown>
+
+ldff1sb { z31.d }, p7/z, [z31.d, #31]
+// CHECK-INST: ldff1sb { z31.d }, p7/z, [z31.d, #31]
+// CHECK-ENCODING: [0xff,0xbf,0x3f,0xc4]
+// CHECK-ERROR: instruction requires: sve
+// CHECK-UNKNOWN: ff bf 3f c4 <unknown>
+
+ldff1sb { z0.d }, p0/z, [z0.d]
+// CHECK-INST: ldff1sb { z0.d }, p0/z, [z0.d]
+// CHECK-ENCODING: [0x00,0xa0,0x20,0xc4]
+// CHECK-ERROR: instruction requires: sve
+// CHECK-UNKNOWN: 00 a0 20 c4 <unknown>

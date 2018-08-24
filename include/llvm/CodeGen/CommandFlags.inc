@@ -261,6 +261,10 @@ static cl::opt<bool> EnableStackSizeSection(
     "stack-size-section",
     cl::desc("Emit a section containing stack size metadata"), cl::init(false));
 
+static cl::opt<bool>
+    EnableAddrsig("addrsig", cl::desc("Emit an address-significance table"),
+                  cl::init(false));
+
 // Common utility function tightly tied to the options listed here. Initializes
 // a TargetOptions object with CodeGen flags and returns it.
 static TargetOptions InitTargetOptionsFromCodeGenFlags() {
@@ -289,6 +293,7 @@ static TargetOptions InitTargetOptionsFromCodeGenFlags() {
   Options.ExplicitEmulatedTLS = EmulatedTLS.getNumOccurrences() > 0;
   Options.ExceptionModel = ExceptionModel;
   Options.EmitStackSizeSection = EnableStackSizeSection;
+  Options.EmitAddrsig = EnableAddrsig;
 
   Options.MCOptions = InitMCTargetOptionsFromFlags();
 
@@ -349,7 +354,7 @@ LLVM_ATTRIBUTE_UNUSED static std::vector<std::string> getFeatureList() {
   return Features.getFeatures();
 }
 
-/// \brief Set function attributes of functions in Module M based on CPU,
+/// Set function attributes of functions in Module M based on CPU,
 /// Features, and command line flags.
 LLVM_ATTRIBUTE_UNUSED static void
 setFunctionAttributes(StringRef CPU, StringRef Features, Module &M) {

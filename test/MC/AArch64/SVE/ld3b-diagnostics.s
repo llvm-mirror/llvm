@@ -30,6 +30,30 @@ ld3b {z7.b, z8.b, z9.b}, p3/z, [x1, #5, MUL VL]
 
 
 // --------------------------------------------------------------------------//
+// Invalid scalar + scalar addressing modes
+
+ld3b { z0.b, z1.b, z2.b }, p0/z, [x0, xzr]
+// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: register must be x0..x30 without shift
+// CHECK-NEXT: ld3b { z0.b, z1.b, z2.b }, p0/z, [x0, xzr]
+// CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:
+
+ld3b { z0.b, z1.b, z2.b }, p0/z, [x0, x0, lsl #1]
+// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: register must be x0..x30 without shift
+// CHECK-NEXT: ld3b { z0.b, z1.b, z2.b }, p0/z, [x0, x0, lsl #1]
+// CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:
+
+ld3b { z0.b, z1.b, z2.b }, p0/z, [x0, w0]
+// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: register must be x0..x30 without shift
+// CHECK-NEXT: ld3b { z0.b, z1.b, z2.b }, p0/z, [x0, w0]
+// CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:
+
+ld3b { z0.b, z1.b, z2.b }, p0/z, [x0, w0, uxtw]
+// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: register must be x0..x30 without shift
+// CHECK-NEXT: ld3b { z0.b, z1.b, z2.b }, p0/z, [x0, w0, uxtw]
+// CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:
+
+
+// --------------------------------------------------------------------------//
 // error: restricted predicate has range [0, 7].
 
 ld3b {z2.b, z3.b, z4.b}, p8/z, [x15, #10, MUL VL]
@@ -64,4 +88,20 @@ ld3b { z0.b, z1.b, z3.b }, p0/z, [x0]
 ld3b { v0.16b, v1.16b, v2.16b }, p0/z, [x0]
 // CHECK: [[@LINE-1]]:{{[0-9]+}}: error: invalid operand
 // CHECK-NEXT: ld3b { v0.16b, v1.16b, v2.16b }, p0/z, [x0]
+// CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:
+
+
+// --------------------------------------------------------------------------//
+// Negative tests for instructions that are incompatible with movprfx
+
+movprfx z21.b, p5/z, z28.b
+ld3b    { z21.b, z22.b, z23.b }, p5/z, [x10, #15, mul vl]
+// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: instruction is unpredictable when following a movprfx, suggest replacing movprfx with mov
+// CHECK-NEXT: ld3b    { z21.b, z22.b, z23.b }, p5/z, [x10, #15, mul vl]
+// CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:
+
+movprfx z21, z28
+ld3b    { z21.b, z22.b, z23.b }, p5/z, [x10, #15, mul vl]
+// CHECK: [[@LINE-1]]:{{[0-9]+}}: error: instruction is unpredictable when following a movprfx, suggest replacing movprfx with mov
+// CHECK-NEXT: ld3b    { z21.b, z22.b, z23.b }, p5/z, [x10, #15, mul vl]
 // CHECK-NOT: [[@LINE-1]]:{{[0-9]+}}:

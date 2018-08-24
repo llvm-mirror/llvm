@@ -254,6 +254,16 @@ bool Constant::isNaN() const {
   return true;
 }
 
+bool Constant::containsUndefElement() const {
+  if (!getType()->isVectorTy())
+    return false;
+  for (unsigned i = 0, e = getType()->getVectorNumElements(); i != e; ++i)
+    if (isa<UndefValue>(getAggregateElement(i)))
+      return true;
+
+  return false;
+}
+
 /// Constructor to create a '0' constant of arbitrary type.
 Constant *Constant::getNullValue(Type *Ty) {
   switch (Ty->getTypeID()) {
@@ -709,7 +719,7 @@ Constant *ConstantFP::get(Type *Ty, StringRef Str) {
   if (VectorType *VTy = dyn_cast<VectorType>(Ty))
     return ConstantVector::getSplat(VTy->getNumElements(), C);
 
-  return C; 
+  return C;
 }
 
 Constant *ConstantFP::getNaN(Type *Ty, bool Negative, unsigned Type) {
@@ -762,7 +772,7 @@ ConstantFP* ConstantFP::get(LLVMContext &Context, const APFloat& V) {
     else if (&V.getSemantics() == &APFloat::IEEEquad())
       Ty = Type::getFP128Ty(Context);
     else {
-      assert(&V.getSemantics() == &APFloat::PPCDoubleDouble() && 
+      assert(&V.getSemantics() == &APFloat::PPCDoubleDouble() &&
              "Unknown FP format");
       Ty = Type::getPPC_FP128Ty(Context);
     }
@@ -1015,7 +1025,7 @@ Constant *ConstantStruct::get(StructType *ST, ArrayRef<Constant*> V) {
   // Create a ConstantAggregateZero value if all elements are zeros.
   bool isZero = true;
   bool isUndef = false;
-  
+
   if (!V.empty()) {
     isUndef = isa<UndefValue>(V[0]);
     isZero = V[0]->isNullValue();
@@ -1276,17 +1286,17 @@ bool ConstantFP::isValueValidForType(Type *Ty, const APFloat& Val) {
   }
   case Type::X86_FP80TyID:
     return &Val2.getSemantics() == &APFloat::IEEEhalf() ||
-           &Val2.getSemantics() == &APFloat::IEEEsingle() || 
+           &Val2.getSemantics() == &APFloat::IEEEsingle() ||
            &Val2.getSemantics() == &APFloat::IEEEdouble() ||
            &Val2.getSemantics() == &APFloat::x87DoubleExtended();
   case Type::FP128TyID:
     return &Val2.getSemantics() == &APFloat::IEEEhalf() ||
-           &Val2.getSemantics() == &APFloat::IEEEsingle() || 
+           &Val2.getSemantics() == &APFloat::IEEEsingle() ||
            &Val2.getSemantics() == &APFloat::IEEEdouble() ||
            &Val2.getSemantics() == &APFloat::IEEEquad();
   case Type::PPC_FP128TyID:
     return &Val2.getSemantics() == &APFloat::IEEEhalf() ||
-           &Val2.getSemantics() == &APFloat::IEEEsingle() || 
+           &Val2.getSemantics() == &APFloat::IEEEsingle() ||
            &Val2.getSemantics() == &APFloat::IEEEdouble() ||
            &Val2.getSemantics() == &APFloat::PPCDoubleDouble();
   }
@@ -1773,8 +1783,7 @@ Constant *ConstantExpr::getAddrSpaceCast(Constant *C, Type *DstTy,
 Constant *ConstantExpr::get(unsigned Opcode, Constant *C1, Constant *C2,
                             unsigned Flags, Type *OnlyIfReducedTy) {
   // Check the operands for consistency first.
-  assert(Opcode >= Instruction::BinaryOpsBegin &&
-         Opcode <  Instruction::BinaryOpsEnd   &&
+  assert(Instruction::isBinaryOp(Opcode) &&
          "Invalid opcode in binary constant expression");
   assert(C1->getType() == C2->getType() &&
          "Operand types in binary constant expression should match");
@@ -1796,8 +1805,8 @@ Constant *ConstantExpr::get(unsigned Opcode, Constant *C1, Constant *C2,
            "Tried to create a floating-point operation on a "
            "non-floating-point type!");
     break;
-  case Instruction::UDiv: 
-  case Instruction::SDiv: 
+  case Instruction::UDiv:
+  case Instruction::SDiv:
     assert(C1->getType() == C2->getType() && "Op types should be identical!");
     assert(C1->getType()->isIntOrIntVectorTy() &&
            "Tried to create an arithmetic operation on a non-arithmetic type!");
@@ -1807,8 +1816,8 @@ Constant *ConstantExpr::get(unsigned Opcode, Constant *C1, Constant *C2,
     assert(C1->getType()->isFPOrFPVectorTy() &&
            "Tried to create an arithmetic operation on a non-arithmetic type!");
     break;
-  case Instruction::URem: 
-  case Instruction::SRem: 
+  case Instruction::URem:
+  case Instruction::SRem:
     assert(C1->getType() == C2->getType() && "Op types should be identical!");
     assert(C1->getType()->isIntOrIntVectorTy() &&
            "Tried to create an arithmetic operation on a non-arithmetic type!");
@@ -1856,7 +1865,7 @@ Constant *ConstantExpr::getSizeOf(Type* Ty) {
   Constant *GEPIdx = ConstantInt::get(Type::getInt32Ty(Ty->getContext()), 1);
   Constant *GEP = getGetElementPtr(
       Ty, Constant::getNullValue(PointerType::getUnqual(Ty)), GEPIdx);
-  return getPtrToInt(GEP, 
+  return getPtrToInt(GEP,
                      Type::getInt64Ty(Ty->getContext()));
 }
 
@@ -2262,22 +2271,49 @@ Constant *ConstantExpr::getAShr(Constant *C1, Constant *C2, bool isExact) {
              isExact ? PossiblyExactOperator::IsExact : 0);
 }
 
-Constant *ConstantExpr::getBinOpIdentity(unsigned Opcode, Type *Ty) {
-  switch (Opcode) {
-  default:
-    // Doesn't have an identity.
+Constant *ConstantExpr::getBinOpIdentity(unsigned Opcode, Type *Ty,
+                                         bool AllowRHSConstant) {
+  assert(Instruction::isBinaryOp(Opcode) && "Only binops allowed");
+
+  // Commutative opcodes: it does not matter if AllowRHSConstant is set.
+  if (Instruction::isCommutative(Opcode)) {
+    switch (Opcode) {
+      case Instruction::Add: // X + 0 = X
+      case Instruction::Or:  // X | 0 = X
+      case Instruction::Xor: // X ^ 0 = X
+        return Constant::getNullValue(Ty);
+      case Instruction::Mul: // X * 1 = X
+        return ConstantInt::get(Ty, 1);
+      case Instruction::And: // X & -1 = X
+        return Constant::getAllOnesValue(Ty);
+      case Instruction::FAdd: // X + -0.0 = X
+        // TODO: If the fadd has 'nsz', should we return +0.0?
+        return ConstantFP::getNegativeZero(Ty);
+      case Instruction::FMul: // X * 1.0 = X
+        return ConstantFP::get(Ty, 1.0);
+      default:
+        llvm_unreachable("Every commutative binop has an identity constant");
+    }
+  }
+
+  // Non-commutative opcodes: AllowRHSConstant must be set.
+  if (!AllowRHSConstant)
     return nullptr;
 
-  case Instruction::Add:
-  case Instruction::Or:
-  case Instruction::Xor:
-    return Constant::getNullValue(Ty);
-
-  case Instruction::Mul:
-    return ConstantInt::get(Ty, 1);
-
-  case Instruction::And:
-    return Constant::getAllOnesValue(Ty);
+  switch (Opcode) {
+    case Instruction::Sub:  // X - 0 = X
+    case Instruction::Shl:  // X << 0 = X
+    case Instruction::LShr: // X >>u 0 = X
+    case Instruction::AShr: // X >> 0 = X
+    case Instruction::FSub: // X - 0.0 = X
+      return Constant::getNullValue(Ty);
+    case Instruction::SDiv: // X / 1 = X
+    case Instruction::UDiv: // X /u 1 = X
+      return ConstantInt::get(Ty, 1);
+    case Instruction::FDiv: // X / 1.0 = X
+      return ConstantFP::get(Ty, 1.0);
+    default:
+      return nullptr;
   }
 }
 
@@ -2417,7 +2453,7 @@ Constant *ConstantDataSequential::getImpl(StringRef Elements, Type *Ty) {
 
 void ConstantDataSequential::destroyConstantImpl() {
   // Remove the constant from the StringMap.
-  StringMap<ConstantDataSequential*> &CDSConstants = 
+  StringMap<ConstantDataSequential*> &CDSConstants =
     getType()->getContext().pImpl->CDSConstants;
 
   StringMap<ConstantDataSequential*>::iterator Slot =
@@ -2434,7 +2470,7 @@ void ConstantDataSequential::destroyConstantImpl() {
     assert((*Entry) == this && "Hash mismatch in ConstantDataSequential");
     getContext().pImpl->CDSConstants.erase(Slot);
   } else {
-    // Otherwise, there are multiple entries linked off the bucket, unlink the 
+    // Otherwise, there are multiple entries linked off the bucket, unlink the
     // node we care about but keep the bucket around.
     for (ConstantDataSequential *Node = *Entry; ;
          Entry = &Node->Next, Node = *Entry) {

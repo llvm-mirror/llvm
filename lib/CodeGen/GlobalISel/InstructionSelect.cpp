@@ -56,6 +56,7 @@ InstructionSelect::InstructionSelect() : MachineFunctionPass(ID) {
 
 void InstructionSelect::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequired<TargetPassConfig>();
+  getSelectionDAGFallbackAnalysisUsage(AU);
   MachineFunctionPass::getAnalysisUsage(AU);
 }
 
@@ -65,7 +66,7 @@ bool InstructionSelect::runOnMachineFunction(MachineFunction &MF) {
           MachineFunctionProperties::Property::FailedISel))
     return false;
 
-  DEBUG(dbgs() << "Selecting function: " << MF.getName() << '\n');
+  LLVM_DEBUG(dbgs() << "Selecting function: " << MF.getName() << '\n');
 
   const TargetPassConfig &TPC = getAnalysis<TargetPassConfig>();
   const InstructionSelector *ISel = MF.getSubtarget().getInstructionSelector();
@@ -77,7 +78,7 @@ bool InstructionSelect::runOnMachineFunction(MachineFunction &MF) {
 
   // FIXME: There are many other MF/MFI fields we need to initialize.
 
-  const MachineRegisterInfo &MRI = MF.getRegInfo();
+  MachineRegisterInfo &MRI = MF.getRegInfo();
 #ifndef NDEBUG
   // Check that our input is fully legal: we require the function to have the
   // Legalized property, so it should be.
@@ -116,12 +117,12 @@ bool InstructionSelect::runOnMachineFunction(MachineFunction &MF) {
       else
         --MII;
 
-      DEBUG(dbgs() << "Selecting: \n  " << MI);
+      LLVM_DEBUG(dbgs() << "Selecting: \n  " << MI);
 
       // We could have folded this instruction away already, making it dead.
       // If so, erase it.
       if (isTriviallyDead(MI, MRI)) {
-        DEBUG(dbgs() << "Is dead; erasing.\n");
+        LLVM_DEBUG(dbgs() << "Is dead; erasing.\n");
         MI.eraseFromParentAndMarkDBGValuesForRemoval();
         continue;
       }
@@ -134,7 +135,7 @@ bool InstructionSelect::runOnMachineFunction(MachineFunction &MF) {
       }
 
       // Dump the range of instructions that MI expanded into.
-      DEBUG({
+      LLVM_DEBUG({
         auto InsertedBegin = ReachedBegin ? MBB->begin() : std::next(MII);
         dbgs() << "Into:\n";
         for (auto &InsertedMI : make_range(InsertedBegin, AfterIt))
@@ -167,7 +168,6 @@ bool InstructionSelect::runOnMachineFunction(MachineFunction &MF) {
       unsigned DstReg = MI.getOperand(0).getReg();
       if (TargetRegisterInfo::isVirtualRegister(SrcReg) &&
           TargetRegisterInfo::isVirtualRegister(DstReg)) {
-        MachineRegisterInfo &MRI = MF.getRegInfo();
         auto SrcRC = MRI.getRegClass(SrcReg);
         auto DstRC = MRI.getRegClass(DstReg);
         if (SrcRC == DstRC) {
@@ -181,27 +181,29 @@ bool InstructionSelect::runOnMachineFunction(MachineFunction &MF) {
   // Now that selection is complete, there are no more generic vregs.  Verify
   // that the size of the now-constrained vreg is unchanged and that it has a
   // register class.
-  for (auto &VRegToType : MRI.getVRegToType()) {
-    unsigned VReg = VRegToType.first;
-    auto *RC = MRI.getRegClassOrNull(VReg);
+  for (unsigned I = 0, E = MRI.getNumVirtRegs(); I != E; ++I) {
+    unsigned VReg = TargetRegisterInfo::index2VirtReg(I);
+
     MachineInstr *MI = nullptr;
     if (!MRI.def_empty(VReg))
       MI = &*MRI.def_instr_begin(VReg);
     else if (!MRI.use_empty(VReg))
       MI = &*MRI.use_instr_begin(VReg);
+    if (!MI)
+      continue;
 
-    if (MI && !RC) {
+    const TargetRegisterClass *RC = MRI.getRegClassOrNull(VReg);
+    if (!RC) {
       reportGISelFailure(MF, TPC, MORE, "gisel-select",
                          "VReg has no regclass after selection", *MI);
       return false;
-    } else if (!RC)
-      continue;
+    }
 
-    if (VRegToType.second.isValid() &&
-        VRegToType.second.getSizeInBits() > TRI.getRegSizeInBits(*RC)) {
-      reportGISelFailure(MF, TPC, MORE, "gisel-select",
-                         "VReg has explicit size different from class size",
-                         *MI);
+    const LLT Ty = MRI.getType(VReg);
+    if (Ty.isValid() && Ty.getSizeInBits() > TRI.getRegSizeInBits(*RC)) {
+      reportGISelFailure(
+          MF, TPC, MORE, "gisel-select",
+          "VReg's low-level type and register class have different sizes", *MI);
       return false;
     }
   }
@@ -218,6 +220,12 @@ bool InstructionSelect::runOnMachineFunction(MachineFunction &MF) {
   auto &TLI = *MF.getSubtarget().getTargetLowering();
   TLI.finalizeLowering(MF);
 
+  LLVM_DEBUG({
+    dbgs() << "Rules covered by selecting function: " << MF.getName() << ":";
+    for (auto RuleID : CoverageInfo.covered())
+      dbgs() << " id" << RuleID;
+    dbgs() << "\n\n";
+  });
   CoverageInfo.emit(CoveragePrefix,
                     MF.getSubtarget()
                         .getTargetLowering()
@@ -228,7 +236,7 @@ bool InstructionSelect::runOnMachineFunction(MachineFunction &MF) {
   // If we successfully selected the function nothing is going to use the vreg
   // types after us (otherwise MIRPrinter would need them). Make sure the types
   // disappear.
-  MRI.getVRegToType().clear();
+  MRI.clearVirtRegTypes();
 
   // FIXME: Should we accurately track changes?
   return true;

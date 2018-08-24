@@ -9,6 +9,7 @@
 
 #include "OrcCBindingsStack.h"
 #include "llvm-c/OrcBindings.h"
+#include "llvm/ExecutionEngine/JITEventListener.h"
 
 using namespace llvm;
 
@@ -17,12 +18,11 @@ LLVMOrcJITStackRef LLVMOrcCreateInstance(LLVMTargetMachineRef TM) {
 
   Triple T(TM2->getTargetTriple());
 
-  auto CompileCallbackMgr = orc::createLocalCompileCallbackManager(T, 0);
   auto IndirectStubsMgrBuilder =
       orc::createLocalIndirectStubsManagerBuilder(T);
 
-  OrcCBindingsStack *JITStack = new OrcCBindingsStack(
-      *TM2, std::move(CompileCallbackMgr), IndirectStubsMgrBuilder);
+  OrcCBindingsStack *JITStack =
+      new OrcCBindingsStack(*TM2, std::move(IndirectStubsMgrBuilder));
 
   return wrap(JITStack);
 }
@@ -112,9 +112,27 @@ LLVMOrcErrorCode LLVMOrcGetSymbolAddress(LLVMOrcJITStackRef JITStack,
   return J.findSymbolAddress(*RetAddr, SymbolName, true);
 }
 
+LLVMOrcErrorCode LLVMOrcGetSymbolAddressIn(LLVMOrcJITStackRef JITStack,
+                                           LLVMOrcTargetAddress *RetAddr,
+                                           LLVMOrcModuleHandle H,
+                                           const char *SymbolName) {
+  OrcCBindingsStack &J = *unwrap(JITStack);
+  return J.findSymbolAddressIn(*RetAddr, H, SymbolName, true);
+}
+
 LLVMOrcErrorCode LLVMOrcDisposeInstance(LLVMOrcJITStackRef JITStack) {
   auto *J = unwrap(JITStack);
   auto Err = J->shutdown();
   delete J;
   return Err;
+}
+
+void LLVMOrcRegisterJITEventListener(LLVMOrcJITStackRef JITStack, LLVMJITEventListenerRef L)
+{
+  unwrap(JITStack)->RegisterJITEventListener(unwrap(L));
+}
+
+void LLVMOrcUnregisterJITEventListener(LLVMOrcJITStackRef JITStack, LLVMJITEventListenerRef L)
+{
+  unwrap(JITStack)->UnregisterJITEventListener(unwrap(L));
 }

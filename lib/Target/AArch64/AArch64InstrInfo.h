@@ -70,13 +70,13 @@ public:
   /// value is non-zero.
   static bool hasExtendedReg(const MachineInstr &MI);
 
-  /// \brief Does this instruction set its full destination register to zero?
+  /// Does this instruction set its full destination register to zero?
   static bool isGPRZero(const MachineInstr &MI);
 
-  /// \brief Does this instruction rename a GPR without modifying bits?
+  /// Does this instruction rename a GPR without modifying bits?
   static bool isGPRCopy(const MachineInstr &MI);
 
-  /// \brief Does this instruction rename an FPR without modifying bits?
+  /// Does this instruction rename an FPR without modifying bits?
   static bool isFPRCopy(const MachineInstr &MI);
 
   /// Return true if this is load/store scales or extends its register offset.
@@ -100,7 +100,7 @@ public:
   /// Return true if pairing the given load or store may be paired with another.
   static bool isPairableLdStInst(const MachineInstr &MI);
 
-  /// \brief Return the opcode that set flags when possible.  The caller is
+  /// Return the opcode that set flags when possible.  The caller is
   /// responsible for ensuring the opc has a flag setting equivalent.
   static unsigned convertToFlagSettingOpc(unsigned Opc, bool &Is64Bit);
 
@@ -121,7 +121,7 @@ public:
   /// Return the immediate offset of the base register in a load/store \p LdSt.
   MachineOperand &getMemOpBaseRegImmOfsOffsetOperand(MachineInstr &LdSt) const;
 
-  /// \brief Returns true if opcode \p Opc is a memory operation. If it is, set
+  /// Returns true if opcode \p Opc is a memory operation. If it is, set
   /// \p Scale, \p Width, \p MinOffset, and \p MaxOffset accordingly.
   ///
   /// For unscaled instructions, \p Scale is set to 1.
@@ -236,28 +236,20 @@ public:
   ArrayRef<std::pair<MachineMemOperand::Flags, const char *>>
   getSerializableMachineMemOperandTargetFlags() const override;
 
-  /// AArch64 supports the MachineOutliner.
-  bool useMachineOutliner() const override { return true; }
-  
-  bool
-  canOutlineWithoutLRSave(MachineBasicBlock::iterator &CallInsertionPt) const;
   bool isFunctionSafeToOutlineFrom(MachineFunction &MF,
                                    bool OutlineFromLinkOnceODRs) const override;
-  MachineOutlinerInfo getOutlininingCandidateInfo(
-      std::vector<
-          std::pair<MachineBasicBlock::iterator, MachineBasicBlock::iterator>>
-          &RepeatedSequenceLocs) const override;
-  AArch64GenInstrInfo::MachineOutlinerInstrType
+  outliner::OutlinedFunction getOutliningCandidateInfo(
+      std::vector<outliner::Candidate> &RepeatedSequenceLocs) const override;
+  outliner::InstrType
   getOutliningType(MachineBasicBlock::iterator &MIT, unsigned Flags) const override;
   unsigned getMachineOutlinerMBBFlags(MachineBasicBlock &MBB) const override;
-  void insertOutlinerEpilogue(MachineBasicBlock &MBB, MachineFunction &MF,
-                              const MachineOutlinerInfo &MInfo) const override;
-  void insertOutlinerPrologue(MachineBasicBlock &MBB, MachineFunction &MF,
-                              const MachineOutlinerInfo &MInfo) const override;
+  void buildOutlinedFrame(MachineBasicBlock &MBB, MachineFunction &MF,
+                          const outliner::OutlinedFunction &OF) const override;
   MachineBasicBlock::iterator
   insertOutlinedCall(Module &M, MachineBasicBlock &MBB,
                      MachineBasicBlock::iterator &It, MachineFunction &MF,
-                     const MachineOutlinerInfo &MInfo) const override;
+                     const outliner::Candidate &C) const override;
+  bool shouldOutlineFromFunctionByDefault(MachineFunction &MF) const override;
   /// Returns true if the instruction sets to an immediate value that can be
   /// executed more efficiently.
   bool isExynosResetFast(const MachineInstr &MI) const;
@@ -269,7 +261,7 @@ public:
   bool isFalkorShiftExtFast(const MachineInstr &MI) const;
 
 private:
-  /// \brief Sets the offsets on outlined instructions in \p MBB which use SP
+  /// Sets the offsets on outlined instructions in \p MBB which use SP
   /// so that they will be valid post-outlining.
   ///
   /// \param MBB A \p MachineBasicBlock in an outlined function.
@@ -280,6 +272,10 @@ private:
                              ArrayRef<MachineOperand> Cond) const;
   bool substituteCmpToZero(MachineInstr &CmpInstr, unsigned SrcReg,
                            const MachineRegisterInfo *MRI) const;
+
+  /// Returns an unused general-purpose register which can be used for
+  /// constructing an outlined call if one exists. Returns 0 otherwise.
+  unsigned findRegisterToSaveLRTo(const outliner::Candidate &C) const;
 };
 
 /// emitFrameOffset - Emit instructions as needed to set DestReg to SrcReg
@@ -299,14 +295,14 @@ bool rewriteAArch64FrameIndex(MachineInstr &MI, unsigned FrameRegIdx,
                               unsigned FrameReg, int &Offset,
                               const AArch64InstrInfo *TII);
 
-/// \brief Use to report the frame offset status in isAArch64FrameOffsetLegal.
+/// Use to report the frame offset status in isAArch64FrameOffsetLegal.
 enum AArch64FrameOffsetStatus {
   AArch64FrameOffsetCannotUpdate = 0x0, ///< Offset cannot apply.
   AArch64FrameOffsetIsLegal = 0x1,      ///< Offset is legal.
   AArch64FrameOffsetCanUpdate = 0x2     ///< Offset can apply, at least partly.
 };
 
-/// \brief Check if the @p Offset is a valid frame offset for @p MI.
+/// Check if the @p Offset is a valid frame offset for @p MI.
 /// The returned value reports the validity of the frame offset for @p MI.
 /// It uses the values defined by AArch64FrameOffsetStatus for that.
 /// If result == AArch64FrameOffsetCannotUpdate, @p MI cannot be updated to
@@ -346,6 +342,32 @@ static inline bool isCondBranchOpcode(int Opc) {
 
 static inline bool isIndirectBranchOpcode(int Opc) {
   return Opc == AArch64::BR;
+}
+
+// struct TSFlags {
+#define TSFLAG_ELEMENT_SIZE_TYPE(X)      (X)       // 3-bits
+#define TSFLAG_DESTRUCTIVE_INST_TYPE(X) ((X) << 3) // 1-bit
+// }
+
+namespace AArch64 {
+
+enum ElementSizeType {
+  ElementSizeMask = TSFLAG_ELEMENT_SIZE_TYPE(0x7),
+  ElementSizeNone = TSFLAG_ELEMENT_SIZE_TYPE(0x0),
+  ElementSizeB    = TSFLAG_ELEMENT_SIZE_TYPE(0x1),
+  ElementSizeH    = TSFLAG_ELEMENT_SIZE_TYPE(0x2),
+  ElementSizeS    = TSFLAG_ELEMENT_SIZE_TYPE(0x3),
+  ElementSizeD    = TSFLAG_ELEMENT_SIZE_TYPE(0x4),
+};
+
+enum DestructiveInstType {
+  DestructiveInstTypeMask = TSFLAG_DESTRUCTIVE_INST_TYPE(0x1),
+  NotDestructive          = TSFLAG_DESTRUCTIVE_INST_TYPE(0x0),
+  Destructive             = TSFLAG_DESTRUCTIVE_INST_TYPE(0x1),
+};
+
+#undef TSFLAG_ELEMENT_SIZE_TYPE
+#undef TSFLAG_DESTRUCTIVE_INST_TYPE
 }
 
 } // end namespace llvm

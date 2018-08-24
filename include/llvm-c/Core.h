@@ -381,6 +381,57 @@ typedef enum {
   LLVMInlineAsmDialectIntel
 } LLVMInlineAsmDialect;
 
+typedef enum {
+  /**
+   * Emits an error if two values disagree, otherwise the resulting value is
+   * that of the operands.
+   *
+   * @see Module::ModFlagBehavior::Error
+   */
+  LLVMModuleFlagBehaviorError,
+  /**
+   * Emits a warning if two values disagree. The result value will be the
+   * operand for the flag from the first module being linked.
+   *
+   * @see Module::ModFlagBehavior::Warning
+   */
+  LLVMModuleFlagBehaviorWarning,
+  /**
+   * Adds a requirement that another module flag be present and have a
+   * specified value after linking is performed. The value must be a metadata
+   * pair, where the first element of the pair is the ID of the module flag
+   * to be restricted, and the second element of the pair is the value the
+   * module flag should be restricted to. This behavior can be used to
+   * restrict the allowable results (via triggering of an error) of linking
+   * IDs with the **Override** behavior.
+   *
+   * @see Module::ModFlagBehavior::Require
+   */
+  LLVMModuleFlagBehaviorRequire,
+  /**
+   * Uses the specified value, regardless of the behavior or value of the
+   * other module. If both modules specify **Override**, but the values
+   * differ, an error will be emitted.
+   *
+   * @see Module::ModFlagBehavior::Override
+   */
+  LLVMModuleFlagBehaviorOverride,
+  /**
+   * Appends the two values, which are required to be metadata nodes.
+   *
+   * @see Module::ModFlagBehavior::Append
+   */
+  LLVMModuleFlagBehaviorAppend,
+  /**
+   * Appends the two values, which are required to be metadata
+   * nodes. However, duplicate entries in the second list are dropped
+   * during the append operation.
+   *
+   * @see Module::ModFlagBehavior::AppendUnique
+   */
+  LLVMModuleFlagBehaviorAppendUnique,
+} LLVMModuleFlagBehavior;
+
 /**
  * Attribute index are either LLVMAttributeReturnIndex,
  * LLVMAttributeFunctionIndex or a parameter number from 1 to N.
@@ -664,6 +715,64 @@ const char *LLVMGetTarget(LLVMModuleRef M);
  * @see Module::setTargetTriple()
  */
 void LLVMSetTarget(LLVMModuleRef M, const char *Triple);
+
+/**
+ * Returns the module flags as an array of flag-key-value triples.  The caller
+ * is responsible for freeing this array by calling
+ * \c LLVMDisposeModuleFlagsMetadata.
+ *
+ * @see Module::getModuleFlagsMetadata()
+ */
+LLVMModuleFlagEntry *LLVMCopyModuleFlagsMetadata(LLVMModuleRef M, size_t *Len);
+
+/**
+ * Destroys module flags metadata entries.
+ */
+void LLVMDisposeModuleFlagsMetadata(LLVMModuleFlagEntry *Entries);
+
+/**
+ * Returns the flag behavior for a module flag entry at a specific index.
+ *
+ * @see Module::ModuleFlagEntry::Behavior
+ */
+LLVMModuleFlagBehavior
+LLVMModuleFlagEntriesGetFlagBehavior(LLVMModuleFlagEntry *Entries,
+                                     unsigned Index);
+
+/**
+ * Returns the key for a module flag entry at a specific index.
+ *
+ * @see Module::ModuleFlagEntry::Key
+ */
+const char *LLVMModuleFlagEntriesGetKey(LLVMModuleFlagEntry *Entries,
+                                        unsigned Index, size_t *Len);
+
+/**
+ * Returns the metadata for a module flag entry at a specific index.
+ *
+ * @see Module::ModuleFlagEntry::Val
+ */
+LLVMMetadataRef LLVMModuleFlagEntriesGetMetadata(LLVMModuleFlagEntry *Entries,
+                                                 unsigned Index);
+
+/**
+ * Add a module-level flag to the module-level flags metadata if it doesn't
+ * already exist.
+ *
+ * @see Module::getModuleFlag()
+ */
+LLVMMetadataRef LLVMGetModuleFlag(LLVMModuleRef M,
+                                  const char *Key, size_t KeyLen);
+
+/**
+ * Add a module-level flag to the module-level flags metadata if it doesn't
+ * already exist.
+ *
+ * @see Module::addModuleFlag()
+ */
+void LLVMAddModuleFlag(LLVMModuleRef M, LLVMModuleFlagBehavior Behavior,
+                       const char *Key, size_t KeyLen,
+                       LLVMMetadataRef Val);
 
 /**
  * Dump a representation of a module to stderr.
@@ -1308,7 +1417,9 @@ LLVMTypeRef LLVMX86MMXType(void);
       macro(CallInst)                       \
         macro(IntrinsicInst)                \
           macro(DbgInfoIntrinsic)           \
-            macro(DbgDeclareInst)           \
+            macro(DbgVariableIntrinsic)     \
+              macro(DbgDeclareInst)         \
+            macro(DbgLabelInst)             \
           macro(MemIntrinsic)               \
             macro(MemCpyInst)               \
             macro(MemMoveInst)              \
@@ -1387,14 +1498,14 @@ LLVMValueKind LLVMGetValueKind(LLVMValueRef Val);
  *
  * @see llvm::Value::getName()
  */
-const char *LLVMGetValueName(LLVMValueRef Val);
+const char *LLVMGetValueName2(LLVMValueRef Val, size_t *Length);
 
 /**
  * Set the string name of a value.
  *
  * @see llvm::Value::setName()
  */
-void LLVMSetValueName(LLVMValueRef Val, const char *Name);
+void LLVMSetValueName2(LLVMValueRef Val, const char *Name, size_t NameLen);
 
 /**
  * Dump a representation of a value to stderr.
@@ -1445,6 +1556,11 @@ LLVM_FOR_EACH_VALUE_SUBCLASS(LLVM_DECLARE_VALUE_CAST)
 
 LLVMValueRef LLVMIsAMDNode(LLVMValueRef Val);
 LLVMValueRef LLVMIsAMDString(LLVMValueRef Val);
+
+/** Deprecated: Use LLVMGetValueName2 instead. */
+const char *LLVMGetValueName(LLVMValueRef Val);
+/** Deprecated: Use LLVMSetValueName2 instead. */
+void LLVMSetValueName(LLVMValueRef Val, const char *Name);
 
 /**
  * @}
@@ -2002,6 +2118,56 @@ void LLVMSetExternallyInitialized(LLVMValueRef GlobalVar, LLVMBool IsExtInit);
  */
 LLVMValueRef LLVMAddAlias(LLVMModuleRef M, LLVMTypeRef Ty, LLVMValueRef Aliasee,
                           const char *Name);
+
+/**
+ * Obtain a GlobalAlias value from a Module by its name.
+ *
+ * The returned value corresponds to a llvm::GlobalAlias value.
+ *
+ * @see llvm::Module::getNamedAlias()
+ */
+LLVMValueRef LLVMGetNamedGlobalAlias(LLVMModuleRef M,
+                                     const char *Name, size_t NameLen);
+
+/**
+ * Obtain an iterator to the first GlobalAlias in a Module.
+ *
+ * @see llvm::Module::alias_begin()
+ */
+LLVMValueRef LLVMGetFirstGlobalAlias(LLVMModuleRef M);
+
+/**
+ * Obtain an iterator to the last GlobalAlias in a Module.
+ *
+ * @see llvm::Module::alias_end()
+ */
+LLVMValueRef LLVMGetLastGlobalAlias(LLVMModuleRef M);
+
+/**
+ * Advance a GlobalAlias iterator to the next GlobalAlias.
+ *
+ * Returns NULL if the iterator was already at the end and there are no more
+ * global aliases.
+ */
+LLVMValueRef LLVMGetNextGlobalAlias(LLVMValueRef GA);
+
+/**
+ * Decrement a GlobalAlias iterator to the previous GlobalAlias.
+ *
+ * Returns NULL if the iterator was already at the beginning and there are
+ * no previous global aliases.
+ */
+LLVMValueRef LLVMGetPreviousGlobalAlias(LLVMValueRef GA);
+
+/**
+ * Retrieve the target value of an alias.
+ */
+LLVMValueRef LLVMAliasGetAliasee(LLVMValueRef Alias);
+
+/**
+ * Set the target value of an alias.
+ */
+void LLVMAliasSetAliasee(LLVMValueRef Alias, LLVMValueRef Aliasee);
 
 /**
  * @}

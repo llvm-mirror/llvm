@@ -111,6 +111,9 @@ struct InstrProfOptions {
   // Do counter register promotion
   bool DoCounterPromotion = false;
 
+  // Use atomic profile counter increments.
+  bool Atomic = false;
+
   // Name of the profile file to use as output
   std::string InstrProfileOutput;
 
@@ -187,7 +190,7 @@ struct SanitizerCoverageOptions {
 ModulePass *createSanitizerCoverageModulePass(
     const SanitizerCoverageOptions &Options = SanitizerCoverageOptions());
 
-/// \brief Calculate what to divide by to scale counts.
+/// Calculate what to divide by to scale counts.
 ///
 /// Given the maximum count, calculate a divisor that will scale all the
 /// weights to strictly less than std::numeric_limits<uint32_t>::max().
@@ -197,7 +200,7 @@ static inline uint64_t calculateCountScale(uint64_t MaxCount) {
              : MaxCount / std::numeric_limits<uint32_t>::max() + 1;
 }
 
-/// \brief Scale an individual branch count.
+/// Scale an individual branch count.
 ///
 /// Scale a 64-bit weight down to 32-bits using \c Scale.
 ///

@@ -93,11 +93,13 @@ void HexagonDAGToDAGISel::SelectIndexedLoad(LoadSDNode *LD, const SDLoc &dl) {
       Opcode = IsValidInc ? Hexagon::L2_loadrh_pi : Hexagon::L2_loadrh_io;
     break;
   case MVT::i32:
+  case MVT::f32:
   case MVT::v2i16:
   case MVT::v4i8:
     Opcode = IsValidInc ? Hexagon::L2_loadri_pi : Hexagon::L2_loadri_io;
     break;
   case MVT::i64:
+  case MVT::f64:
   case MVT::v2i32:
   case MVT::v4i16:
   case MVT::v8i8:
@@ -125,8 +127,7 @@ void HexagonDAGToDAGISel::SelectIndexedLoad(LoadSDNode *LD, const SDLoc &dl) {
   }
 
   SDValue IncV = CurDAG->getTargetConstant(Inc, dl, MVT::i32);
-  MachineSDNode::mmo_iterator MemOp = MF->allocateMemRefsArray(1);
-  MemOp[0] = LD->getMemOperand();
+  MachineMemOperand *MemOp = LD->getMemOperand();
 
   auto getExt64 = [this,ExtType] (MachineSDNode *N, const SDLoc &dl)
         -> MachineSDNode* {
@@ -157,7 +158,7 @@ void HexagonDAGToDAGISel::SelectIndexedLoad(LoadSDNode *LD, const SDLoc &dl) {
     MachineSDNode *L = CurDAG->getMachineNode(Opcode, dl, ValueVT,
                                               MVT::i32, MVT::Other, Base,
                                               IncV, Chain);
-    L->setMemRefs(MemOp, MemOp+1);
+    CurDAG->setNodeMemRefs(L, {MemOp});
     To[1] = SDValue(L, 1); // Next address.
     To[2] = SDValue(L, 2); // Chain.
     // Handle special case for extension to i64.
@@ -168,7 +169,7 @@ void HexagonDAGToDAGISel::SelectIndexedLoad(LoadSDNode *LD, const SDLoc &dl) {
     SDValue Zero = CurDAG->getTargetConstant(0, dl, MVT::i32);
     MachineSDNode *L = CurDAG->getMachineNode(Opcode, dl, ValueVT, MVT::Other,
                                               Base, Zero, Chain);
-    L->setMemRefs(MemOp, MemOp+1);
+    CurDAG->setNodeMemRefs(L, {MemOp});
     To[2] = SDValue(L, 1); // Chain.
     MachineSDNode *A = CurDAG->getMachineNode(Hexagon::A2_addi, dl, MVT::i32,
                                               Base, IncV);
@@ -342,9 +343,8 @@ bool HexagonDAGToDAGISel::SelectBrevLdIntrinsic(SDNode *IntN) {
         FLI->second, dl, RTys,
         {IntN->getOperand(2), IntN->getOperand(3), IntN->getOperand(0)});
 
-    MachineSDNode::mmo_iterator MemOp = MF->allocateMemRefsArray(1);
-    MemOp[0] = cast<MemIntrinsicSDNode>(IntN)->getMemOperand();
-    Res->setMemRefs(MemOp, MemOp + 1);
+    MachineMemOperand *MemOp = cast<MemIntrinsicSDNode>(IntN)->getMemOperand();
+    CurDAG->setNodeMemRefs(Res, {MemOp});
 
     ReplaceUses(SDValue(IntN, 0), SDValue(Res, 0));
     ReplaceUses(SDValue(IntN, 1), SDValue(Res, 1));
@@ -483,11 +483,13 @@ void HexagonDAGToDAGISel::SelectIndexedStore(StoreSDNode *ST, const SDLoc &dl) {
     Opcode = IsValidInc ? Hexagon::S2_storerh_pi : Hexagon::S2_storerh_io;
     break;
   case MVT::i32:
+  case MVT::f32:
   case MVT::v2i16:
   case MVT::v4i8:
     Opcode = IsValidInc ? Hexagon::S2_storeri_pi : Hexagon::S2_storeri_io;
     break;
   case MVT::i64:
+  case MVT::f64:
   case MVT::v2i32:
   case MVT::v4i16:
   case MVT::v8i8:
@@ -521,8 +523,7 @@ void HexagonDAGToDAGISel::SelectIndexedStore(StoreSDNode *ST, const SDLoc &dl) {
   }
 
   SDValue IncV = CurDAG->getTargetConstant(Inc, dl, MVT::i32);
-  MachineSDNode::mmo_iterator MemOp = MF->allocateMemRefsArray(1);
-  MemOp[0] = ST->getMemOperand();
+  MachineMemOperand *MemOp = ST->getMemOperand();
 
   //                  Next address   Chain
   SDValue From[2] = { SDValue(ST,0), SDValue(ST,1) };
@@ -533,14 +534,14 @@ void HexagonDAGToDAGISel::SelectIndexedStore(StoreSDNode *ST, const SDLoc &dl) {
     SDValue Ops[] = { Base, IncV, Value, Chain };
     MachineSDNode *S = CurDAG->getMachineNode(Opcode, dl, MVT::i32, MVT::Other,
                                               Ops);
-    S->setMemRefs(MemOp, MemOp + 1);
+    CurDAG->setNodeMemRefs(S, {MemOp});
     To[0] = SDValue(S, 0);
     To[1] = SDValue(S, 1);
   } else {
     SDValue Zero = CurDAG->getTargetConstant(0, dl, MVT::i32);
     SDValue Ops[] = { Base, Zero, Value, Chain };
     MachineSDNode *S = CurDAG->getMachineNode(Opcode, dl, MVT::Other, Ops);
-    S->setMemRefs(MemOp, MemOp + 1);
+    CurDAG->setNodeMemRefs(S, {MemOp});
     To[1] = SDValue(S, 0);
     MachineSDNode *A = CurDAG->getMachineNode(Hexagon::A2_addi, dl, MVT::i32,
                                               Base, IncV);
@@ -758,6 +759,15 @@ void HexagonDAGToDAGISel::SelectFrameIndex(SDNode *N) {
   ReplaceNode(N, R);
 }
 
+void HexagonDAGToDAGISel::SelectAddSubCarry(SDNode *N) {
+  unsigned OpcCarry = N->getOpcode() == HexagonISD::ADDC ? Hexagon::A4_addp_c
+                                                         : Hexagon::A4_subp_c;
+  SDNode *C = CurDAG->getMachineNode(OpcCarry, SDLoc(N), N->getVTList(),
+                                     { N->getOperand(0), N->getOperand(1),
+                                       N->getOperand(2) });
+  ReplaceNode(N, C);
+}
+
 void HexagonDAGToDAGISel::SelectVAlign(SDNode *N) {
   MVT ResTy = N->getValueType(0).getSimpleVT();
   if (HST->isHVXVectorType(ResTy, true))
@@ -871,6 +881,9 @@ void HexagonDAGToDAGISel::Select(SDNode *N) {
   case ISD::STORE:                return SelectStore(N);
   case ISD::INTRINSIC_W_CHAIN:    return SelectIntrinsicWChain(N);
   case ISD::INTRINSIC_WO_CHAIN:   return SelectIntrinsicWOChain(N);
+
+  case HexagonISD::ADDC:
+  case HexagonISD::SUBC:          return SelectAddSubCarry(N);
   case HexagonISD::VALIGN:        return SelectVAlign(N);
   case HexagonISD::VALIGNADDR:    return SelectVAlignAddr(N);
   case HexagonISD::TYPECAST:      return SelectTypecast(N);
@@ -1593,7 +1606,7 @@ static bool isOpcodeHandled(const SDNode *N) {
   }
 }
 
-/// \brief Return the weight of an SDNode
+/// Return the weight of an SDNode
 int HexagonDAGToDAGISel::getWeight(SDNode *N) {
   if (!isOpcodeHandled(N))
     return 1;
@@ -1892,15 +1905,15 @@ SDValue HexagonDAGToDAGISel::balanceSubTree(SDNode *N, bool TopLevel) {
     RootHeights[N] = std::max(getHeight(N->getOperand(0).getNode()),
                               getHeight(N->getOperand(1).getNode())) + 1;
 
-    DEBUG(dbgs() << "--> No need to balance root (Weight=" << Weight
-                 << " Height=" << RootHeights[N] << "): ");
-    DEBUG(N->dump(CurDAG));
+    LLVM_DEBUG(dbgs() << "--> No need to balance root (Weight=" << Weight
+                      << " Height=" << RootHeights[N] << "): ");
+    LLVM_DEBUG(N->dump(CurDAG));
 
     return SDValue(N, 0);
   }
 
-  DEBUG(dbgs() << "** Balancing root node: ");
-  DEBUG(N->dump(CurDAG));
+  LLVM_DEBUG(dbgs() << "** Balancing root node: ");
+  LLVM_DEBUG(N->dump(CurDAG));
 
   unsigned NOpcode = N->getOpcode();
 
@@ -1948,7 +1961,7 @@ SDValue HexagonDAGToDAGISel::balanceSubTree(SDNode *N, bool TopLevel) {
         // Whoops, this node was RAUWd by one of the balanceSubTree calls we
         // made. Our worklist isn't up to date anymore.
         // Restart the whole process.
-        DEBUG(dbgs() << "--> Subtree was RAUWd. Restarting...\n");
+        LLVM_DEBUG(dbgs() << "--> Subtree was RAUWd. Restarting...\n");
         return balanceSubTree(N, TopLevel);
       }
 
@@ -2019,15 +2032,15 @@ SDValue HexagonDAGToDAGISel::balanceSubTree(SDNode *N, bool TopLevel) {
     }
   }
 
-  DEBUG(dbgs() << "--> Current height=" << NodeHeights[SDValue(N, 0)]
-               << " weight=" << CurrentWeight << " imbalanced="
-               << Imbalanced << "\n");
+  LLVM_DEBUG(dbgs() << "--> Current height=" << NodeHeights[SDValue(N, 0)]
+                    << " weight=" << CurrentWeight
+                    << " imbalanced=" << Imbalanced << "\n");
 
   // Transform MUL(x, C * 2^Y) + SHL(z, Y) -> SHL(ADD(MUL(x, C), z), Y)
   //  This factors out a shift in order to match memw(a<<Y+b).
   if (CanFactorize && (willShiftRightEliminate(Mul1.Value, MaxPowerOf2) ||
                        willShiftRightEliminate(Mul2.Value, MaxPowerOf2))) {
-    DEBUG(dbgs() << "--> Found common factor for two MUL children!\n");
+    LLVM_DEBUG(dbgs() << "--> Found common factor for two MUL children!\n");
     int Weight = Mul1.Weight + Mul2.Weight;
     int Height = std::max(NodeHeights[Mul1.Value], NodeHeights[Mul2.Value]) + 1;
     SDValue Mul1Factored = factorOutPowerOf2(Mul1.Value, MaxPowerOf2);
@@ -2061,9 +2074,9 @@ SDValue HexagonDAGToDAGISel::balanceSubTree(SDNode *N, bool TopLevel) {
 
     if (getUsesInFunction(GANode->getGlobal()) == 1 && Offset->hasOneUse() &&
         getTargetLowering()->isOffsetFoldingLegal(GANode)) {
-      DEBUG(dbgs() << "--> Combining GA and offset (" << Offset->getSExtValue()
-          << "): ");
-      DEBUG(GANode->dump(CurDAG));
+      LLVM_DEBUG(dbgs() << "--> Combining GA and offset ("
+                        << Offset->getSExtValue() << "): ");
+      LLVM_DEBUG(GANode->dump(CurDAG));
 
       SDValue NewTGA =
         CurDAG->getTargetGlobalAddress(GANode->getGlobal(), SDLoc(GA.Value),
@@ -2107,7 +2120,7 @@ SDValue HexagonDAGToDAGISel::balanceSubTree(SDNode *N, bool TopLevel) {
   // If this is the top level and we haven't factored out a shift, we should try
   // to move a constant to the bottom to match addressing modes like memw(rX+C)
   if (TopLevel && !CanFactorize && Leaves.hasConst()) {
-    DEBUG(dbgs() << "--> Pushing constant to tip of tree.");
+    LLVM_DEBUG(dbgs() << "--> Pushing constant to tip of tree.");
     Leaves.pushToBottom(Leaves.pop());
   }
 
@@ -2134,7 +2147,7 @@ SDValue HexagonDAGToDAGISel::balanceSubTree(SDNode *N, bool TopLevel) {
     // Make sure that none of these nodes have been RAUW'd
     if ((RootWeights.count(V0.getNode()) && RootWeights[V0.getNode()] == -2) ||
         (RootWeights.count(V1.getNode()) && RootWeights[V1.getNode()] == -2)) {
-      DEBUG(dbgs() << "--> Subtree was RAUWd. Restarting...\n");
+      LLVM_DEBUG(dbgs() << "--> Subtree was RAUWd. Restarting...\n");
       return balanceSubTree(N, TopLevel);
     }
 
@@ -2168,9 +2181,9 @@ SDValue HexagonDAGToDAGISel::balanceSubTree(SDNode *N, bool TopLevel) {
     int Weight = V0Weight + V1Weight;
     Leaves.push(WeightedLeaf(NewNode, Weight, L0.InsertionOrder));
 
-    DEBUG(dbgs() << "--> Built new node (Weight=" << Weight << ",Height="
-                 << Height << "):\n");
-    DEBUG(NewNode.dump());
+    LLVM_DEBUG(dbgs() << "--> Built new node (Weight=" << Weight
+                      << ",Height=" << Height << "):\n");
+    LLVM_DEBUG(NewNode.dump());
   }
 
   assert(Leaves.size() == 1);
@@ -2194,15 +2207,15 @@ SDValue HexagonDAGToDAGISel::balanceSubTree(SDNode *N, bool TopLevel) {
   }
 
   if (N != NewRoot.getNode()) {
-    DEBUG(dbgs() << "--> Root is now: ");
-    DEBUG(NewRoot.dump());
+    LLVM_DEBUG(dbgs() << "--> Root is now: ");
+    LLVM_DEBUG(NewRoot.dump());
 
     // Replace all uses of old root by new root
     CurDAG->ReplaceAllUsesWith(N, NewRoot.getNode());
     // Mark that we have RAUW'd N
     RootWeights[N] = -2;
   } else {
-    DEBUG(dbgs() << "--> Root unchanged.\n");
+    LLVM_DEBUG(dbgs() << "--> Root unchanged.\n");
   }
 
   RootWeights[NewRoot.getNode()] = Leaves.top().Weight;
@@ -2225,8 +2238,8 @@ void HexagonDAGToDAGISel::rebalanceAddressTrees() {
     if (RootWeights.count(BasePtr.getNode()))
       continue;
 
-    DEBUG(dbgs() << "** Rebalancing address calculation in node: ");
-    DEBUG(N->dump(CurDAG));
+    LLVM_DEBUG(dbgs() << "** Rebalancing address calculation in node: ");
+    LLVM_DEBUG(N->dump(CurDAG));
 
     // FindRoots
     SmallVector<SDNode *, 4> Worklist;
@@ -2266,8 +2279,8 @@ void HexagonDAGToDAGISel::rebalanceAddressTrees() {
       N = CurDAG->UpdateNodeOperands(N, N->getOperand(0), N->getOperand(1),
             NewBasePtr, N->getOperand(3));
 
-    DEBUG(dbgs() << "--> Final node: ");
-    DEBUG(N->dump(CurDAG));
+    LLVM_DEBUG(dbgs() << "--> Final node: ");
+    LLVM_DEBUG(N->dump(CurDAG));
   }
 
   CurDAG->RemoveDeadNodes();

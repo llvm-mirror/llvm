@@ -14,7 +14,7 @@
 #ifndef LLVM_LIB_CODEGEN_ASMPRINTER_DWARFCOMPILEUNIT_H
 #define LLVM_LIB_CODEGEN_ASMPRINTER_DWARFCOMPILEUNIT_H
 
-#include "DbgValueHistoryCalculator.h"
+#include "DbgEntityHistoryCalculator.h"
 #include "DwarfDebug.h"
 #include "DwarfUnit.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -81,9 +81,12 @@ class DwarfCompileUnit final : public DwarfUnit {
   const MCSymbol *BaseAddress = nullptr;
 
   DenseMap<const MDNode *, DIE *> AbstractSPDies;
-  DenseMap<const MDNode *, std::unique_ptr<DbgVariable>> AbstractVariables;
+  DenseMap<const DINode *, std::unique_ptr<DbgEntity>> AbstractEntities;
 
-  /// \brief Construct a DIE for the given DbgVariable without initializing the
+  /// DWO ID for correlating skeleton and split units.
+  uint64_t DWOId = 0;
+
+  /// Construct a DIE for the given DbgVariable without initializing the
   /// DbgVariable's DIE reference.
   DIE *constructVariableDIEImpl(const DbgVariable &DV, bool Abstract);
 
@@ -95,10 +98,10 @@ class DwarfCompileUnit final : public DwarfUnit {
     return DU->getAbstractSPDies();
   }
 
-  DenseMap<const MDNode *, std::unique_ptr<DbgVariable>> &getAbstractVariables() {
+  DenseMap<const DINode *, std::unique_ptr<DbgEntity>> &getAbstractEntities() {
     if (isDwoUnit() && !DD->shareAcrossDWOCUs())
-      return AbstractVariables;
-    return DU->getAbstractVariables();
+      return AbstractEntities;
+    return DU->getAbstractEntities();
   }
 
 public:
@@ -159,7 +162,7 @@ public:
 
   void attachLowHighPC(DIE &D, const MCSymbol *Begin, const MCSymbol *End);
 
-  /// \brief Find DIE for the given subprogram and attach appropriate
+  /// Find DIE for the given subprogram and attach appropriate
   /// DW_AT_low_pc and DW_AT_high_pc attributes. If there are global
   /// variables in this scope then create and insert DIEs for these
   /// variables.
@@ -168,7 +171,7 @@ public:
   void constructScopeDIE(LexicalScope *Scope,
                          SmallVectorImpl<DIE *> &FinalChildren);
 
-  /// \brief A helper function to construct a RangeSpanList for a given
+  /// A helper function to construct a RangeSpanList for a given
   /// lexical scope.
   void addScopeRangeList(DIE &ScopeDIE, SmallVector<RangeSpan, 2> Range);
 
@@ -177,11 +180,11 @@ public:
   void attachRangesOrLowHighPC(DIE &D,
                                const SmallVectorImpl<InsnRange> &Ranges);
 
-  /// \brief This scope represents inlined body of a function. Construct
+  /// This scope represents inlined body of a function. Construct
   /// DIE to represent this concrete inlined copy of the function.
   DIE *constructInlinedScopeDIE(LexicalScope *Scope);
 
-  /// \brief Construct new DW_TAG_lexical_block for this scope and
+  /// Construct new DW_TAG_lexical_block for this scope and
   /// attach DW_AT_low_pc/DW_AT_high_pc labels.
   DIE *constructLexicalScopeDIE(LexicalScope *Scope);
 
@@ -191,34 +194,42 @@ public:
   DIE *constructVariableDIE(DbgVariable &DV, const LexicalScope &Scope,
                             DIE *&ObjectPointer);
 
+  /// Construct a DIE for the given DbgLabel.
+  DIE *constructLabelDIE(DbgLabel &DL, const LexicalScope &Scope);
+
   /// A helper function to create children of a Scope DIE.
   DIE *createScopeChildrenDIE(LexicalScope *Scope,
                               SmallVectorImpl<DIE *> &Children,
                               bool *HasNonScopeChildren = nullptr);
 
-  /// \brief Construct a DIE for this subprogram scope.
+  /// Construct a DIE for this subprogram scope.
   void constructSubprogramScopeDIE(const DISubprogram *Sub, LexicalScope *Scope);
 
   DIE *createAndAddScopeChildren(LexicalScope *Scope, DIE &ScopeDIE);
 
   void constructAbstractSubprogramScopeDIE(LexicalScope *Scope);
 
-  /// \brief Construct import_module DIE.
+  /// Construct import_module DIE.
   DIE *constructImportedEntityDIE(const DIImportedEntity *Module);
 
   void finishSubprogramDefinition(const DISubprogram *SP);
-  void finishVariableDefinition(const DbgVariable &Var);
+  void finishEntityDefinition(const DbgEntity *Entity);
 
   /// Find abstract variable associated with Var.
   using InlinedVariable = DbgValueHistoryMap::InlinedVariable;
-  DbgVariable *getExistingAbstractVariable(InlinedVariable IV,
-                                           const DILocalVariable *&Cleansed);
-  DbgVariable *getExistingAbstractVariable(InlinedVariable IV);
-  void createAbstractVariable(const DILocalVariable *DV, LexicalScope *Scope);
+  DbgEntity *getExistingAbstractEntity(const DINode *Node);
+  void createAbstractEntity(const DINode *Node, LexicalScope *Scope);
 
   /// Set the skeleton unit associated with this unit.
   void setSkeleton(DwarfCompileUnit &Skel) { Skeleton = &Skel; }
 
+  unsigned getHeaderSize() const override {
+    // DWARF v5 added the DWO ID to the header for split/skeleton units.
+    unsigned DWOIdSize =
+        DD->getDwarfVersion() >= 5 && DD->useSplitDwarf() ? sizeof(uint64_t)
+                                                          : 0;
+    return DwarfUnit::getHeaderSize() + DWOIdSize;
+  }
   unsigned getLength() {
     return sizeof(uint32_t) + // Length field
         getHeaderSize() + getUnitDie().getSize();
@@ -278,6 +289,8 @@ public:
   void applySubprogramAttributesToDefinition(const DISubprogram *SP,
                                              DIE &SPDie);
 
+  void applyLabelAttributes(const DbgLabel &Label, DIE &LabelDie);
+
   /// getRangeLists - Get the vector of range lists.
   const SmallVectorImpl<RangeSpanList> &getRangeLists() const {
     return (Skeleton ? Skeleton : this)->CURangeLists;
@@ -289,6 +302,9 @@ public:
 
   void setBaseAddress(const MCSymbol *Base) { BaseAddress = Base; }
   const MCSymbol *getBaseAddress() const { return BaseAddress; }
+
+  uint64_t getDWOId() const { return DWOId; }
+  void setDWOId(uint64_t DwoId) { DWOId = DwoId; }
 
   bool hasDwarfPubSections() const;
 };

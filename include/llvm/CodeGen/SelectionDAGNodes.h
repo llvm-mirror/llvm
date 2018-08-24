@@ -37,6 +37,7 @@
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Metadata.h"
+#include "llvm/IR/Operator.h"
 #include "llvm/Support/AlignOf.h"
 #include "llvm/Support/AtomicOrdering.h"
 #include "llvm/Support/Casting.h"
@@ -359,21 +360,34 @@ private:
   bool NoUnsignedWrap : 1;
   bool NoSignedWrap : 1;
   bool Exact : 1;
-  bool UnsafeAlgebra : 1;
   bool NoNaNs : 1;
   bool NoInfs : 1;
   bool NoSignedZeros : 1;
   bool AllowReciprocal : 1;
   bool VectorReduction : 1;
   bool AllowContract : 1;
+  bool ApproximateFuncs : 1;
+  bool AllowReassociation : 1;
 
 public:
   /// Default constructor turns off all optimization flags.
   SDNodeFlags()
       : AnyDefined(false), NoUnsignedWrap(false), NoSignedWrap(false),
-        Exact(false), UnsafeAlgebra(false), NoNaNs(false), NoInfs(false),
+        Exact(false), NoNaNs(false), NoInfs(false),
         NoSignedZeros(false), AllowReciprocal(false), VectorReduction(false),
-        AllowContract(false) {}
+        AllowContract(false), ApproximateFuncs(false),
+        AllowReassociation(false) {}
+
+  /// Propagate the fast-math-flags from an IR FPMathOperator.
+  void copyFMF(const FPMathOperator &FPMO) {
+    setNoNaNs(FPMO.hasNoNaNs());
+    setNoInfs(FPMO.hasNoInfs());
+    setNoSignedZeros(FPMO.hasNoSignedZeros());
+    setAllowReciprocal(FPMO.hasAllowReciprocal());
+    setAllowContract(FPMO.hasAllowContract());
+    setApproximateFuncs(FPMO.hasApproxFunc());
+    setAllowReassociation(FPMO.hasAllowReassoc());
+  }
 
   /// Sets the state of the flags to the defined state.
   void setDefined() { AnyDefined = true; }
@@ -392,10 +406,6 @@ public:
   void setExact(bool b) {
     setDefined();
     Exact = b;
-  }
-  void setUnsafeAlgebra(bool b) {
-    setDefined();
-    UnsafeAlgebra = b;
   }
   void setNoNaNs(bool b) {
     setDefined();
@@ -421,18 +431,32 @@ public:
     setDefined();
     AllowContract = b;
   }
+  void setApproximateFuncs(bool b) {
+    setDefined();
+    ApproximateFuncs = b;
+  }
+  void setAllowReassociation(bool b) {
+    setDefined();
+    AllowReassociation = b;
+  }
 
   // These are accessors for each flag.
   bool hasNoUnsignedWrap() const { return NoUnsignedWrap; }
   bool hasNoSignedWrap() const { return NoSignedWrap; }
   bool hasExact() const { return Exact; }
-  bool hasUnsafeAlgebra() const { return UnsafeAlgebra; }
   bool hasNoNaNs() const { return NoNaNs; }
   bool hasNoInfs() const { return NoInfs; }
   bool hasNoSignedZeros() const { return NoSignedZeros; }
   bool hasAllowReciprocal() const { return AllowReciprocal; }
   bool hasVectorReduction() const { return VectorReduction; }
   bool hasAllowContract() const { return AllowContract; }
+  bool hasApproximateFuncs() const { return ApproximateFuncs; }
+  bool hasAllowReassociation() const { return AllowReassociation; }
+
+  bool isFast() const {
+    return NoSignedZeros && AllowReciprocal && NoNaNs && NoInfs &&
+           AllowContract && ApproximateFuncs && AllowReassociation;
+  }
 
   /// Clear any flags in this flag set that aren't also set in Flags.
   /// If the given Flags are undefined then don't do anything.
@@ -442,13 +466,14 @@ public:
     NoUnsignedWrap &= Flags.NoUnsignedWrap;
     NoSignedWrap &= Flags.NoSignedWrap;
     Exact &= Flags.Exact;
-    UnsafeAlgebra &= Flags.UnsafeAlgebra;
     NoNaNs &= Flags.NoNaNs;
     NoInfs &= Flags.NoInfs;
     NoSignedZeros &= Flags.NoSignedZeros;
     AllowReciprocal &= Flags.AllowReciprocal;
     VectorReduction &= Flags.VectorReduction;
     AllowContract &= Flags.AllowContract;
+    ApproximateFuncs &= Flags.ApproximateFuncs;
+    AllowReassociation &= Flags.AllowReassociation;
   }
 };
 
@@ -544,7 +569,7 @@ protected:
   static_assert(sizeof(ConstantSDNodeBitfields) <= 2, "field too wide");
   static_assert(sizeof(MemSDNodeBitfields) <= 2, "field too wide");
   static_assert(sizeof(LSBaseSDNodeBitfields) <= 2, "field too wide");
-  static_assert(sizeof(LoadSDNodeBitfields) <= 4, "field too wide");
+  static_assert(sizeof(LoadSDNodeBitfields) <= 2, "field too wide");
   static_assert(sizeof(StoreSDNodeBitfields) <= 2, "field too wide");
 
 private:
@@ -923,6 +948,7 @@ public:
 
   const SDNodeFlags getFlags() const { return Flags; }
   void setFlags(SDNodeFlags NewFlags) { Flags = NewFlags; }
+  bool isFast() { return Flags.isFast(); }
 
   /// Clear any flags in this node that aren't also set in Flags.
   /// If Flags is not in a defined state then this has no effect.
@@ -1220,7 +1246,7 @@ protected:
 
 public:
   MemSDNode(unsigned Opc, unsigned Order, const DebugLoc &dl, SDVTList VTs,
-            EVT MemoryVT, MachineMemOperand *MMO);
+            EVT memvt, MachineMemOperand *MMO);
 
   bool readMem() const { return MMO->isLoad(); }
   bool writeMem() const { return MMO->isStore(); }
@@ -1472,9 +1498,8 @@ class ConstantSDNode : public SDNode {
 
   const ConstantInt *Value;
 
-  ConstantSDNode(bool isTarget, bool isOpaque, const ConstantInt *val,
-                 const DebugLoc &DL, EVT VT)
-      : SDNode(isTarget ? ISD::TargetConstant : ISD::Constant, 0, DL,
+  ConstantSDNode(bool isTarget, bool isOpaque, const ConstantInt *val, EVT VT)
+      : SDNode(isTarget ? ISD::TargetConstant : ISD::Constant, 0, DebugLoc(),
                getSDVTList(VT)),
         Value(val) {
     ConstantSDNodeBits.IsOpaque = isOpaque;
@@ -1510,10 +1535,9 @@ class ConstantFPSDNode : public SDNode {
 
   const ConstantFP *Value;
 
-  ConstantFPSDNode(bool isTarget, const ConstantFP *val, const DebugLoc &DL,
-                   EVT VT)
-      : SDNode(isTarget ? ISD::TargetConstantFP : ISD::ConstantFP, 0, DL,
-               getSDVTList(VT)),
+  ConstantFPSDNode(bool isTarget, const ConstantFP *val, EVT VT)
+      : SDNode(isTarget ? ISD::TargetConstantFP : ISD::ConstantFP, 0,
+               DebugLoc(), getSDVTList(VT)),
         Value(val) {}
 
 public:
@@ -1570,10 +1594,10 @@ bool isOneConstant(SDValue V);
 bool isBitwiseNot(SDValue V);
 
 /// Returns the SDNode if it is a constant splat BuildVector or constant int.
-ConstantSDNode *isConstOrConstSplat(SDValue V);
+ConstantSDNode *isConstOrConstSplat(SDValue N);
 
 /// Returns the SDNode if it is a constant splat BuildVector or constant float.
-ConstantFPSDNode *isConstOrConstSplatFP(SDValue V);
+ConstantFPSDNode *isConstOrConstSplatFP(SDValue N);
 
 class GlobalAddressSDNode : public SDNode {
   friend class SelectionDAG;
@@ -1584,7 +1608,7 @@ class GlobalAddressSDNode : public SDNode {
 
   GlobalAddressSDNode(unsigned Opc, unsigned Order, const DebugLoc &DL,
                       const GlobalValue *GA, EVT VT, int64_t o,
-                      unsigned char TargetFlags);
+                      unsigned char TF);
 
 public:
   const GlobalValue *getGlobal() const { return TheGlobal; }
@@ -1765,13 +1789,13 @@ public:
                        unsigned MinSplatBits = 0,
                        bool isBigEndian = false) const;
 
-  /// \brief Returns the splatted value or a null value if this is not a splat.
+  /// Returns the splatted value or a null value if this is not a splat.
   ///
   /// If passed a non-null UndefElements bitvector, it will resize it to match
   /// the vector width and set the bits where elements are undef.
   SDValue getSplatValue(BitVector *UndefElements = nullptr) const;
 
-  /// \brief Returns the splatted constant or null if this is not a constant
+  /// Returns the splatted constant or null if this is not a constant
   /// splat.
   ///
   /// If passed a non-null UndefElements bitvector, it will resize it to match
@@ -1779,7 +1803,7 @@ public:
   ConstantSDNode *
   getConstantSplatNode(BitVector *UndefElements = nullptr) const;
 
-  /// \brief Returns the splatted constant FP or null if this is not a constant
+  /// Returns the splatted constant FP or null if this is not a constant
   /// FP splat.
   ///
   /// If passed a non-null UndefElements bitvector, it will resize it to match
@@ -1787,7 +1811,7 @@ public:
   ConstantFPSDNode *
   getConstantFPSplatNode(BitVector *UndefElements = nullptr) const;
 
-  /// \brief If this is a constant FP splat and the splatted constant FP is an
+  /// If this is a constant FP splat and the splatted constant FP is an
   /// exact power or 2, return the log base 2 integer value.  Otherwise,
   /// return -1.
   ///
@@ -2119,7 +2143,7 @@ public:
     return static_cast<ISD::LoadExtType>(LoadSDNodeBits.ExtTy);
   }
 
-  const SDValue &getSrc0() const { return getOperand(3); }
+  const SDValue &getPassThru() const { return getOperand(3); }
   static bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::MLOAD;
   }
@@ -2177,7 +2201,6 @@ public:
   const SDValue &getBasePtr() const { return getOperand(3); }
   const SDValue &getIndex()   const { return getOperand(4); }
   const SDValue &getMask()    const { return getOperand(2); }
-  const SDValue &getValue()   const { return getOperand(1); }
   const SDValue &getScale()   const { return getOperand(5); }
 
   static bool classof(const SDNode *N) {
@@ -2196,6 +2219,8 @@ public:
                      EVT MemVT, MachineMemOperand *MMO)
       : MaskedGatherScatterSDNode(ISD::MGATHER, Order, dl, VTs, MemVT, MMO) {}
 
+  const SDValue &getPassThru() const { return getOperand(1); }
+
   static bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::MGATHER;
   }
@@ -2211,6 +2236,8 @@ public:
                       EVT MemVT, MachineMemOperand *MMO)
       : MaskedGatherScatterSDNode(ISD::MSCATTER, Order, dl, VTs, MemVT, MMO) {}
 
+  const SDValue &getValue() const { return getOperand(1); }
+
   static bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::MSCATTER;
   }
@@ -2219,32 +2246,60 @@ public:
 /// An SDNode that represents everything that will be needed
 /// to construct a MachineInstr. These nodes are created during the
 /// instruction selection proper phase.
+///
+/// Note that the only supported way to set the `memoperands` is by calling the
+/// `SelectionDAG::setNodeMemRefs` function as the memory management happens
+/// inside the DAG rather than in the node.
 class MachineSDNode : public SDNode {
-public:
-  using mmo_iterator = MachineMemOperand **;
-
 private:
   friend class SelectionDAG;
 
   MachineSDNode(unsigned Opc, unsigned Order, const DebugLoc &DL, SDVTList VTs)
       : SDNode(Opc, Order, DL, VTs) {}
 
-  /// Memory reference descriptions for this instruction.
-  mmo_iterator MemRefs = nullptr;
-  mmo_iterator MemRefsEnd = nullptr;
+  // We use a pointer union between a single `MachineMemOperand` pointer and
+  // a pointer to an array of `MachineMemOperand` pointers. This is null when
+  // the number of these is zero, the single pointer variant used when the
+  // number is one, and the array is used for larger numbers.
+  //
+  // The array is allocated via the `SelectionDAG`'s allocator and so will
+  // always live until the DAG is cleaned up and doesn't require ownership here.
+  //
+  // We can't use something simpler like `TinyPtrVector` here because `SDNode`
+  // subclasses aren't managed in a conforming C++ manner. See the comments on
+  // `SelectionDAG::MorphNodeTo` which details what all goes on, but the
+  // constraint here is that these don't manage memory with their constructor or
+  // destructor and can be initialized to a good state even if they start off
+  // uninitialized.
+  PointerUnion<MachineMemOperand *, MachineMemOperand **> MemRefs = {};
+
+  // Note that this could be folded into the above `MemRefs` member if doing so
+  // is advantageous at some point. We don't need to store this in most cases.
+  // However, at the moment this doesn't appear to make the allocation any
+  // smaller and makes the code somewhat simpler to read.
+  int NumMemRefs = 0;
 
 public:
-  mmo_iterator memoperands_begin() const { return MemRefs; }
-  mmo_iterator memoperands_end() const { return MemRefsEnd; }
-  bool memoperands_empty() const { return MemRefsEnd == MemRefs; }
+  using mmo_iterator = ArrayRef<MachineMemOperand *>::const_iterator;
 
-  /// Assign this MachineSDNodes's memory reference descriptor
-  /// list. This does not transfer ownership.
-  void setMemRefs(mmo_iterator NewMemRefs, mmo_iterator NewMemRefsEnd) {
-    for (mmo_iterator MMI = NewMemRefs, MME = NewMemRefsEnd; MMI != MME; ++MMI)
-      assert(*MMI && "Null mem ref detected!");
-    MemRefs = NewMemRefs;
-    MemRefsEnd = NewMemRefsEnd;
+  ArrayRef<MachineMemOperand *> memoperands() const {
+    // Special case the common cases.
+    if (NumMemRefs == 0)
+      return {};
+    if (NumMemRefs == 1)
+      return makeArrayRef(MemRefs.getAddrOfPtr1(), 1);
+
+    // Otherwise we have an actual array.
+    return makeArrayRef(MemRefs.get<MachineMemOperand **>(), NumMemRefs);
+  }
+  mmo_iterator memoperands_begin() const { return memoperands().begin(); }
+  mmo_iterator memoperands_end() const { return memoperands().end(); }
+  bool memoperands_empty() const { return memoperands().empty(); }
+
+  /// Clear out the memory reference descriptor list.
+  void clearMemRefs() {
+    MemRefs = nullptr;
+    NumMemRefs = 0;
   }
 
   static bool classof(const SDNode *N) {

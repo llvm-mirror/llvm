@@ -1198,10 +1198,10 @@ define <4 x float> @merge_4f32_f32_2345_volatile(float* %ptr) nounwind uwtable n
 ; X32-SSE1-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; X32-SSE1-NEXT:    movss {{.*#+}} xmm0 = mem[0],zero,zero,zero
 ; X32-SSE1-NEXT:    movss {{.*#+}} xmm1 = mem[0],zero,zero,zero
-; X32-SSE1-NEXT:    unpcklps {{.*#+}} xmm1 = xmm1[0],xmm0[0],xmm1[1],xmm0[1]
-; X32-SSE1-NEXT:    movss {{.*#+}} xmm0 = mem[0],zero,zero,zero
+; X32-SSE1-NEXT:    unpcklps {{.*#+}} xmm0 = xmm0[0],xmm1[0],xmm0[1],xmm1[1]
+; X32-SSE1-NEXT:    movss {{.*#+}} xmm1 = mem[0],zero,zero,zero
 ; X32-SSE1-NEXT:    movss {{.*#+}} xmm2 = mem[0],zero,zero,zero
-; X32-SSE1-NEXT:    unpcklps {{.*#+}} xmm0 = xmm0[0],xmm2[0],xmm0[1],xmm2[1]
+; X32-SSE1-NEXT:    unpcklps {{.*#+}} xmm1 = xmm1[0],xmm2[0],xmm1[1],xmm2[1]
 ; X32-SSE1-NEXT:    movlhps {{.*#+}} xmm0 = xmm0[0],xmm1[0]
 ; X32-SSE1-NEXT:    retl
 ;

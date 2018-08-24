@@ -356,8 +356,10 @@ Instruction *InstCombiner::FoldShiftByConstant(Value *Op0, Constant *Op1,
   // cast of lshr(shl(x,c1),c2) as well as other more complex cases.
   if (I.getOpcode() != Instruction::AShr &&
       canEvaluateShifted(Op0, Op1C->getZExtValue(), isLeftShift, *this, &I)) {
-    DEBUG(dbgs() << "ICE: GetShiftedValue propagating shift through expression"
-              " to eliminate shift:\n  IN: " << *Op0 << "\n  SH: " << I <<"\n");
+    LLVM_DEBUG(
+        dbgs() << "ICE: GetShiftedValue propagating shift through expression"
+                  " to eliminate shift:\n  IN: "
+               << *Op0 << "\n  SH: " << I << "\n");
 
     return replaceInstUsesWith(
         I, getShiftedValue(Op0, Op1C->getZExtValue(), isLeftShift, *this, DL));
@@ -568,7 +570,7 @@ Instruction *InstCombiner::FoldShiftByConstant(Value *Op0, Constant *Op1,
                             m_OneUse(m_BinOp(FBO))))) {
       const APInt *C;
       if (!isa<Constant>(TrueVal) && FBO->getOperand(0) == TrueVal &&
-          match(FBO->getOperand(1), m_APInt(C)) && 
+          match(FBO->getOperand(1), m_APInt(C)) &&
           canShiftBinOpWithConstantRHS(I, FBO, *C)) {
         Constant *NewRHS = ConstantExpr::get(I.getOpcode(),
                                        cast<Constant>(FBO->getOperand(1)), Op1);
@@ -586,23 +588,23 @@ Instruction *InstCombiner::FoldShiftByConstant(Value *Op0, Constant *Op1,
 }
 
 Instruction *InstCombiner::visitShl(BinaryOperator &I) {
-  if (Value *V = SimplifyVectorOp(I))
+  if (Value *V = SimplifyShlInst(I.getOperand(0), I.getOperand(1),
+                                 I.hasNoSignedWrap(), I.hasNoUnsignedWrap(),
+                                 SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
 
-  Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
-  if (Value *V =
-          SimplifyShlInst(Op0, Op1, I.hasNoSignedWrap(), I.hasNoUnsignedWrap(),
-                          SQ.getWithInstruction(&I)))
-    return replaceInstUsesWith(I, V);
+  if (Instruction *X = foldShuffledBinop(I))
+    return X;
 
   if (Instruction *V = commonShiftTransforms(I))
     return V;
 
+  Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
+  Type *Ty = I.getType();
   const APInt *ShAmtAPInt;
   if (match(Op1, m_APInt(ShAmtAPInt))) {
     unsigned ShAmt = ShAmtAPInt->getZExtValue();
-    unsigned BitWidth = I.getType()->getScalarSizeInBits();
-    Type *Ty = I.getType();
+    unsigned BitWidth = Ty->getScalarSizeInBits();
 
     // shl (zext X), ShAmt --> zext (shl X, ShAmt)
     // This is only valid if X would have zeros shifted out.
@@ -620,11 +622,8 @@ Instruction *InstCombiner::visitShl(BinaryOperator &I) {
       return BinaryOperator::CreateAnd(X, ConstantInt::get(Ty, Mask));
     }
 
-    // Be careful about hiding shl instructions behind bit masks. They are used
-    // to represent multiplies by a constant, and it is important that simple
-    // arithmetic expressions are still recognizable by scalar evolution.
-    // The inexact versions are deferred to DAGCombine, so we don't hide shl
-    // behind a bit mask.
+    // FIXME: we do not yet transform non-exact shr's. The backend (DAGCombine)
+    // needs a few fixes for the rotate pattern recognition first.
     const APInt *ShOp1;
     if (match(Op0, m_Exact(m_Shr(m_Value(X), m_APInt(ShOp1))))) {
       unsigned ShrAmt = ShOp1->getZExtValue();
@@ -668,6 +667,15 @@ Instruction *InstCombiner::visitShl(BinaryOperator &I) {
     }
   }
 
+  // Transform  (x >> y) << y  to  x & (-1 << y)
+  // Valid for any type of right-shift.
+  Value *X;
+  if (match(Op0, m_OneUse(m_Shr(m_Value(X), m_Specific(Op1))))) {
+    Constant *AllOnes = ConstantInt::getAllOnesValue(Ty);
+    Value *Mask = Builder.CreateShl(AllOnes, Op1);
+    return BinaryOperator::CreateAnd(Mask, X);
+  }
+
   Constant *C1;
   if (match(Op1, m_Constant(C1))) {
     Constant *C2;
@@ -685,17 +693,17 @@ Instruction *InstCombiner::visitShl(BinaryOperator &I) {
 }
 
 Instruction *InstCombiner::visitLShr(BinaryOperator &I) {
-  if (Value *V = SimplifyVectorOp(I))
+  if (Value *V = SimplifyLShrInst(I.getOperand(0), I.getOperand(1), I.isExact(),
+                                  SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
 
-  Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
-  if (Value *V =
-          SimplifyLShrInst(Op0, Op1, I.isExact(), SQ.getWithInstruction(&I)))
-    return replaceInstUsesWith(I, V);
+  if (Instruction *X = foldShuffledBinop(I))
+    return X;
 
   if (Instruction *R = commonShiftTransforms(I))
     return R;
 
+  Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
   Type *Ty = I.getType();
   const APInt *ShAmtAPInt;
   if (match(Op1, m_APInt(ShAmtAPInt))) {
@@ -800,21 +808,30 @@ Instruction *InstCombiner::visitLShr(BinaryOperator &I) {
       return &I;
     }
   }
+
+  // Transform  (x << y) >> y  to  x & (-1 >> y)
+  Value *X;
+  if (match(Op0, m_OneUse(m_Shl(m_Value(X), m_Specific(Op1))))) {
+    Constant *AllOnes = ConstantInt::getAllOnesValue(Ty);
+    Value *Mask = Builder.CreateLShr(AllOnes, Op1);
+    return BinaryOperator::CreateAnd(Mask, X);
+  }
+
   return nullptr;
 }
 
 Instruction *InstCombiner::visitAShr(BinaryOperator &I) {
-  if (Value *V = SimplifyVectorOp(I))
+  if (Value *V = SimplifyAShrInst(I.getOperand(0), I.getOperand(1), I.isExact(),
+                                  SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
 
-  Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
-  if (Value *V =
-          SimplifyAShrInst(Op0, Op1, I.isExact(), SQ.getWithInstruction(&I)))
-    return replaceInstUsesWith(I, V);
+  if (Instruction *X = foldShuffledBinop(I))
+    return X;
 
   if (Instruction *R = commonShiftTransforms(I))
     return R;
 
+  Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
   Type *Ty = I.getType();
   unsigned BitWidth = Ty->getScalarSizeInBits();
   const APInt *ShAmtAPInt;

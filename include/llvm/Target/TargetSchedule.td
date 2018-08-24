@@ -182,8 +182,7 @@ class ProcResourceKind;
 //
 // SchedModel ties these units to a processor for any stand-alone defs
 // of this class.
-class ProcResourceUnits<ProcResourceKind kind, int num,
-                        list<string> pfmCounters> {
+class ProcResourceUnits<ProcResourceKind kind, int num> {
   ProcResourceKind Kind = kind;
   int NumUnits = num;
   ProcResourceKind Super = ?;
@@ -198,8 +197,8 @@ def EponymousProcResourceKind : ProcResourceKind;
 
 // Subtargets typically define processor resource kind and number of
 // units in one place.
-class ProcResource<int num, list<string> pfmCounters = []> : ProcResourceKind,
-  ProcResourceUnits<EponymousProcResourceKind, num, pfmCounters>;
+class ProcResource<int num> : ProcResourceKind,
+  ProcResourceUnits<EponymousProcResourceKind, num>;
 
 class ProcResGroup<list<ProcResource> resources> : ProcResourceKind {
   list<ProcResource> Resources = resources;
@@ -281,10 +280,9 @@ class ProcWriteResources<list<ProcResourceKind> resources> {
 // ProcResources indicates the set of resources consumed by the write.
 // Optionally, ResourceCycles indicates the number of cycles the
 // resource is consumed. Each ResourceCycles item is paired with the
-// ProcResource item at the same position in its list. Since
-// ResourceCycles are rarely specialized, the list may be
-// incomplete. By default, resources are consumed for a single cycle,
-// regardless of latency, which models a fully pipelined processing
+// ProcResource item at the same position in its list. ResourceCycles
+// can be `[]`: in that case, all resources are consumed for a single
+// cycle, regardless of latency, which models a fully pipelined processing
 // unit. A value of 0 for ResourceCycles means that the resource must
 // be available but is not consumed, which is only relevant for
 // unbuffered resources.
@@ -355,17 +353,27 @@ class PredicateProlog<code c> {
   code Code = c;
 }
 
+// Base class for scheduling predicates.
+class SchedPredicateBase;
+
+// A scheduling predicate whose logic is defined by a MCInstPredicate.
+// This can directly be used by SchedWriteVariant definitions.
+class MCSchedPredicate<MCInstPredicate P> : SchedPredicateBase {
+  MCInstPredicate Pred = P;
+  SchedMachineModel SchedModel = ?;
+}
+
 // Define a predicate to determine which SchedVariant applies to a
 // particular MachineInstr. The code snippet is used as an
 // if-statement's expression. Available variables are MI, SchedModel,
 // and anything defined in a PredicateProlog.
 //
 // SchedModel silences warnings but is ignored.
-class SchedPredicate<code pred> {
+class SchedPredicate<code pred> : SchedPredicateBase {
   SchedMachineModel SchedModel = ?;
   code Predicate = pred;
 }
-def NoSchedPred : SchedPredicate<[{true}]>;
+def NoSchedPred : MCSchedPredicate<TruePred>;
 
 // Associate a predicate with a list of SchedReadWrites. By default,
 // the selected SchedReadWrites are still associated with a single
@@ -376,8 +384,8 @@ def NoSchedPred : SchedPredicate<[{true}]>;
 // operands. In this case, latency is not additive. If the current Variant
 // is already part of a Sequence, then that entire chain leading up to
 // the Variant is distributed over the variadic operands.
-class SchedVar<SchedPredicate pred, list<SchedReadWrite> selected> {
-  SchedPredicate Predicate = pred;
+class SchedVar<SchedPredicateBase pred, list<SchedReadWrite> selected> {
+  SchedPredicateBase Predicate = pred;
   list<SchedReadWrite> Selected = selected;
 }
 
@@ -444,15 +452,60 @@ class SchedAlias<SchedReadWrite match, SchedReadWrite alias> {
   SchedMachineModel SchedModel = ?;
 }
 
-// Allow the definition of processor register files.
-// Each processor register file declares the number of physical registers, as
-// well as a optional register cost information. The cost of a register R is the
-// number of physical registers used to rename R (at register renaming stage).
-// That value defaults to 1, to all the registers contained in the register
-// file. The set of target register files is inferred from the list of register
-// classes. Register costs are defined at register class granularity. An empty
-// list of register classes means that this register file contains all the
-// registers defined by the target.
+// Allow the definition of processor register files for register renaming
+// purposes.
+//
+// Each processor register file declares:
+//  - The set of registers that can be renamed.
+//  - The number of physical registers which can be used for register renaming
+//    purpose.
+//  - The cost of a register rename.
+//
+// The cost of a rename is the number of physical registers allocated by the
+// register alias table to map the new definition. By default, register can be
+// renamed at the cost of a single physical register.  Note that register costs
+// are defined at register class granularity (see field `Costs`).
+//
+// The set of registers that are subject to register renaming is declared using
+// a list of register classes (see field `RegClasses`). An empty list of
+// register classes means: all the logical registers defined by the target can
+// be fully renamed.
+//
+// A register R can be renamed if its register class appears in the `RegClasses`
+// set. When R is written, a new alias is allocated at the cost of one or more
+// physical registers; as a result, false dependencies on R are removed.
+//
+// A sub-register V of register R is implicitly part of the same register file.
+// However, V is only renamed if its register class is part of `RegClasses`.
+// Otherwise, the processor keeps it (as well as any other different part
+// of R) together with R, and a write of V always causes a compulsory read of R.
+//
+// This is what happens for example on AMD processors (at least from Bulldozer
+// onwards), where AL and AH are not treated as independent from AX, and AX is
+// not treated as independent from EAX. A write to AL has an implicity false
+// dependency on the last write to EAX (or a portion of EAX).  As a consequence,
+// a write to AL cannot go in parallel with a write to AH.
+//
+// There is no false dependency if the partial register write belongs to a
+// register class that is in `RegClasses`.
+// There is also no penalty for writes that "clear the content a super-register"
+// (see MC/MCInstrAnalysis.h - method MCInstrAnalysis::clearsSuperRegisters()).
+// On x86-64, 32-bit GPR writes implicitly zero the upper half of the underlying
+// physical register, effectively removing any false dependencies with the
+// previous register definition.
+//
+// TODO: This implementation assumes that there is no limit in the number of
+// renames per cycle, which might not be true for all hardware or register
+// classes. Also, there is no limit to how many times the same logical register
+// can be renamed during the same cycle.
+//
+// TODO: we don't currently model merge penalties for the case where a write to
+// a part of a register is followed by a read from a larger part of the same
+// register. On some Intel chips, different parts of a GPR can be stored in
+// different physical registers. However, there is a cost to pay for when the
+// partial write is combined with the previous super-register definition.  We
+// should add support for these cases, and correctly model merge problems with
+// partial register accesses.
 class RegisterFile<int numPhysRegs, list<RegisterClass> Classes = [],
                    list<int> Costs = []> {
   list<RegisterClass> RegClasses = Classes;

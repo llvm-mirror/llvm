@@ -149,6 +149,11 @@ let TargetPrefix = "aarch64" in {  // All intrinsics start with "llvm.aarch64.".
 
   class AdvSIMD_1Arg_Intrinsic
     : Intrinsic<[llvm_any_ty], [LLVMMatchType<0>], [IntrNoMem]>;
+
+  class AdvSIMD_Dot_Intrinsic
+    : Intrinsic<[llvm_anyvector_ty],
+                [LLVMMatchType<0>, llvm_anyvector_ty, LLVMMatchType<1>],
+                [IntrNoMem]>;
 }
 
 // Arithmetic ops
@@ -415,6 +420,10 @@ let TargetPrefix = "aarch64", IntrProperties = [IntrNoMem] in {
   // Scalar FP Inexact Narrowing
   def int_aarch64_sisd_fcvtxn : Intrinsic<[llvm_float_ty], [llvm_double_ty],
                                         [IntrNoMem]>;
+
+  // v8.2-A Dot Product
+  def int_aarch64_neon_udot : AdvSIMD_Dot_Intrinsic;
+  def int_aarch64_neon_sdot : AdvSIMD_Dot_Intrinsic;
 }
 
 let TargetPrefix = "aarch64" in {  // All intrinsics start with "llvm.aarch64.".
@@ -573,6 +582,14 @@ def int_aarch64_neon_tbx1 : AdvSIMD_Tbx1_Intrinsic;
 def int_aarch64_neon_tbx2 : AdvSIMD_Tbx2_Intrinsic;
 def int_aarch64_neon_tbx3 : AdvSIMD_Tbx3_Intrinsic;
 def int_aarch64_neon_tbx4 : AdvSIMD_Tbx4_Intrinsic;
+
+let TargetPrefix = "aarch64" in {
+  class FPCR_Get_Intrinsic
+    : Intrinsic<[llvm_i64_ty], [], [IntrNoMem]>;
+}
+
+// FPCR
+def int_aarch64_get_fpcr : FPCR_Get_Intrinsic;
 
 let TargetPrefix = "aarch64" in {
   class Crypto_AES_DataKey_Intrinsic

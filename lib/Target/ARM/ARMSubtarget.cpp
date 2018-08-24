@@ -302,6 +302,8 @@ void ARMSubtarget::initSubtargetFeatures(StringRef CPU, StringRef FS) {
   }
 }
 
+bool ARMSubtarget::isTargetHardFloat() const { return TM.isTargetHardFloat(); }
+
 bool ARMSubtarget::isAPCS_ABI() const {
   assert(TM.TargetABI != ARMBaseTargetMachine::ARM_ABI_UNKNOWN);
   return TM.TargetABI == ARMBaseTargetMachine::ARM_ABI_APCS;
@@ -368,7 +370,8 @@ bool ARMSubtarget::useStride4VFPs(const MachineFunction &MF) const {
   // For general targets, the prologue can grow when VFPs are allocated with
   // stride 4 (more vpush instructions). But WatchOS uses a compact unwind
   // format which it's more important to get right.
-  return isTargetWatchABI() || (isSwift() && !MF.getFunction().optForMinSize());
+  return isTargetWatchABI() ||
+         (useWideStrideVFP() && !MF.getFunction().optForMinSize());
 }
 
 bool ARMSubtarget::useMovt(const MachineFunction &MF) const {

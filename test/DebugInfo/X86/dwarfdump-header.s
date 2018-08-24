@@ -2,8 +2,9 @@
 # We have a representative set of units: v4 CU, v5 CU, v4 TU, v5 split TU.
 # We have v4 and v5 line-table headers.
 #
-# RUN: llvm-mc -triple x86_64-unknown-linux %s -filetype=obj -o - | \
-# RUN: llvm-dwarfdump -v - | FileCheck %s
+# RUN: llvm-mc -triple x86_64-unknown-linux %s -filetype=obj -o %t.o
+# RUN: llvm-dwarfdump -v %t.o | FileCheck %s
+# RUN: llvm-dwarfdump -verify %t.o | FileCheck %s --check-prefix=VERIFY
 
         .section .debug_str,"MS",@progbits,1
 str_producer:
@@ -137,6 +138,7 @@ CU_split_5_version:
         .byte 5                 # DWARF Unit Type
         .byte 8                 # Address Size (in bytes)
         .long .debug_abbrev.dwo # Offset Into Abbrev. Section
+        .quad 0x5a              # DWO ID
 # The split compile-unit DIE, with DW_AT_producer, DW_AT_name, DW_AT_stmt_list.
         .byte 1
         .long dwo_producer
@@ -145,8 +147,8 @@ CU_split_5_version:
         .byte 0 # NULL
 CU_split_5_end:
 
-# CHECK: 0x00000000: Compile Unit: length = 0x00000016 version = 0x0005 unit_type = DW_UT_split_compile abbr_offset = 0x0000 addr_size = 0x08 (next unit at 0x0000001a)
-# CHECK: 0x0000000c: DW_TAG_compile_unit
+# CHECK: 0x00000000: Compile Unit: length = 0x0000001e version = 0x0005 unit_type = DW_UT_split_compile abbr_offset = 0x0000 addr_size = 0x08 DWO_id = 0x000000000000005a (next unit at 0x00000022)
+# CHECK: 0x00000014: DW_TAG_compile_unit
 # CHECK-NEXT: DW_AT_producer {{.*}} "Handmade DWO producer"
 # CHECK-NEXT: DW_AT_name {{.*}} "V5_dwo_compile_unit"
 
@@ -434,3 +436,6 @@ dwo_LH_5_end:
 # CHECK-NEXT: mod_time: 0x00000035
 # CHECK-NEXT: length: 0x00000045
 # CHECK-NOT: file_names
+
+# VERIFY: Verifying .debug_types
+# VERIFY: No errors.

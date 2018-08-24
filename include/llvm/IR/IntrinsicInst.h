@@ -66,6 +66,27 @@ namespace llvm {
   /// This is the common base class for debug info intrinsics.
   class DbgInfoIntrinsic : public IntrinsicInst {
   public:
+    /// \name Casting methods
+    /// @{
+    static bool classof(const IntrinsicInst *I) {
+      switch (I->getIntrinsicID()) {
+      case Intrinsic::dbg_declare:
+      case Intrinsic::dbg_value:
+      case Intrinsic::dbg_addr:
+      case Intrinsic::dbg_label:
+        return true;
+      default: return false;
+      }
+    }
+    static bool classof(const Value *V) {
+      return isa<IntrinsicInst>(V) && classof(cast<IntrinsicInst>(V));
+    }
+    /// @}
+  };
+
+  /// This is the common base class for debug info intrinsics for variables.
+  class DbgVariableIntrinsic : public DbgInfoIntrinsic {
+  public:
     /// Get the location corresponding to the variable referenced by the debug
     /// info intrinsic.  Depending on the intrinsic, this could be the
     /// variable's value or its address.
@@ -93,6 +114,10 @@ namespace llvm {
       return cast<MetadataAsValue>(getArgOperand(2))->getMetadata();
     }
 
+    /// Get the size (in bits) of the variable, or fragment of the variable that
+    /// is described.
+    Optional<uint64_t> getFragmentSizeInBits() const;
+
     /// \name Casting methods
     /// @{
     static bool classof(const IntrinsicInst *I) {
@@ -111,7 +136,7 @@ namespace llvm {
   };
 
   /// This represents the llvm.dbg.declare instruction.
-  class DbgDeclareInst : public DbgInfoIntrinsic {
+  class DbgDeclareInst : public DbgVariableIntrinsic {
   public:
     Value *getAddress() const { return getVariableLocation(); }
 
@@ -127,7 +152,7 @@ namespace llvm {
   };
 
   /// This represents the llvm.dbg.addr instruction.
-  class DbgAddrIntrinsic : public DbgInfoIntrinsic {
+  class DbgAddrIntrinsic : public DbgVariableIntrinsic {
   public:
     Value *getAddress() const { return getVariableLocation(); }
 
@@ -142,7 +167,7 @@ namespace llvm {
   };
 
   /// This represents the llvm.dbg.value instruction.
-  class DbgValueInst : public DbgInfoIntrinsic {
+  class DbgValueInst : public DbgVariableIntrinsic {
   public:
     Value *getValue() const {
       return getVariableLocation(/* AllowNullOp = */ false);
@@ -152,6 +177,28 @@ namespace llvm {
     /// @{
     static bool classof(const IntrinsicInst *I) {
       return I->getIntrinsicID() == Intrinsic::dbg_value;
+    }
+    static bool classof(const Value *V) {
+      return isa<IntrinsicInst>(V) && classof(cast<IntrinsicInst>(V));
+    }
+    /// @}
+  };
+
+  /// This represents the llvm.dbg.label instruction.
+  class DbgLabelInst : public DbgInfoIntrinsic {
+  public:
+    DILabel *getLabel() const {
+      return cast<DILabel>(getRawLabel());
+    }
+
+    Metadata *getRawLabel() const {
+      return cast<MetadataAsValue>(getArgOperand(0))->getMetadata();
+    }
+
+    /// Methods for support type inquiry through isa, cast, and dyn_cast:
+    /// @{
+    static bool classof(const IntrinsicInst *I) {
+      return I->getIntrinsicID() == Intrinsic::dbg_label;
     }
     static bool classof(const Value *V) {
       return isa<IntrinsicInst>(V) && classof(cast<IntrinsicInst>(V));

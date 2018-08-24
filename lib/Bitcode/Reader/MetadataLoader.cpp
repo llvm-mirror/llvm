@@ -822,6 +822,7 @@ MetadataLoader::MetadataLoaderImpl::lazyLoadModuleMetadataBlock() {
       case bitc::METADATA_TEMPLATE_VALUE:
       case bitc::METADATA_GLOBAL_VAR:
       case bitc::METADATA_LOCAL_VAR:
+      case bitc::METADATA_LABEL:
       case bitc::METADATA_EXPRESSION:
       case bitc::METADATA_OBJC_PROPERTY:
       case bitc::METADATA_IMPORTED_ENTITY:
@@ -1210,14 +1211,17 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
     break;
   }
   case bitc::METADATA_BASIC_TYPE: {
-    if (Record.size() != 6)
+    if (Record.size() < 6 || Record.size() > 7)
       return error("Invalid record");
 
     IsDistinct = Record[0];
+    DINode::DIFlags Flags = (Record.size() > 6) ?
+                    static_cast<DINode::DIFlags>(Record[6]) : DINode::FlagZero;
+
     MetadataList.assignValue(
         GET_OR_DISTINCT(DIBasicType,
                         (Context, Record[1], getMDString(Record[2]), Record[3],
-                         Record[4], Record[5])),
+                         Record[4], Record[5], Flags)),
         NextMetadataNo);
     NextMetadataNo++;
     break;
@@ -1389,7 +1393,7 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
         Record.size() <= 14 ? 0 : Record[14],
         Record.size() <= 16 ? true : Record[16],
         Record.size() <= 17 ? false : Record[17],
-        Record.size() <= 18 ? false : Record[18]);
+        Record.size() <= 18 ? 0 : Record[18]);
 
     MetadataList.assignValue(CU, NextMetadataNo);
     NextMetadataNo++;
@@ -1438,7 +1442,7 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
          HasUnit ? CUorFn : nullptr,                        // unit
          getMDOrNull(Record[15 + Offset]),                  // templateParams
          getMDOrNull(Record[16 + Offset]),                  // declaration
-         getMDOrNull(Record[17 + Offset]),                  // variables
+         getMDOrNull(Record[17 + Offset]),                  // retainedNodes
          HasThrownTypes ? getMDOrNull(Record[20]) : nullptr // thrownTypes
          ));
     MetadataList.assignValue(SP, NextMetadataNo);
@@ -1643,6 +1647,20 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
                          getMDOrNull(Record[3 + HasTag]), Record[4 + HasTag],
                          getDITypeRefOrNull(Record[5 + HasTag]),
                          Record[6 + HasTag], Flags, AlignInBits)),
+        NextMetadataNo);
+    NextMetadataNo++;
+    break;
+  }
+  case bitc::METADATA_LABEL: {
+    if (Record.size() != 5)
+      return error("Invalid record");
+
+    IsDistinct = Record[0] & 1;
+    MetadataList.assignValue(
+        GET_OR_DISTINCT(DILabel,
+                        (Context, getMDOrNull(Record[1]),
+                         getMDString(Record[2]),
+                         getMDOrNull(Record[3]), Record[4])),
         NextMetadataNo);
     NextMetadataNo++;
     break;

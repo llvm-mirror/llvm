@@ -44,7 +44,7 @@ namespace Intrinsic {
 
 class GlobalValue : public Constant {
 public:
-  /// @brief An enumeration for the kinds of linkage for global values.
+  /// An enumeration for the kinds of linkage for global values.
   enum LinkageTypes {
     ExternalLinkage = 0,///< Externally visible function
     AvailableExternallyLinkage, ///< Available for inspection, not emission.
@@ -59,14 +59,14 @@ public:
     CommonLinkage       ///< Tentative definitions.
   };
 
-  /// @brief An enumeration for the kinds of visibility of global values.
+  /// An enumeration for the kinds of visibility of global values.
   enum VisibilityTypes {
     DefaultVisibility = 0,  ///< The GV is visible
     HiddenVisibility,       ///< The GV is hidden
     ProtectedVisibility     ///< The GV is protected
   };
 
-  /// @brief Storage classes of global values for PE targets.
+  /// Storage classes of global values for PE targets.
   enum DLLStorageClassTypes {
     DefaultStorageClass   = 0,
     DLLImportStorageClass = 1, ///< Function to be imported from DLL
@@ -110,17 +110,11 @@ protected:
   unsigned IsDSOLocal : 1;
 
 private:
-  friend class Constant;
-
-  void maybeSetDsoLocal() {
-    if (hasLocalLinkage() ||
-        (!hasDefaultVisibility() && !hasExternalWeakLinkage()))
-      setDSOLocal(true);
-  }
-
   // Give subclasses access to what otherwise would be wasted padding.
   // (17 + 4 + 2 + 2 + 2 + 3 + 1 + 1) == 32.
   unsigned SubClassData : GlobalValueSubClassDataBits;
+
+  friend class Constant;
 
   void destroyConstantImpl();
   Value *handleOperandChangeImpl(Value *From, Value *To);
@@ -149,8 +143,14 @@ private:
     llvm_unreachable("Fully covered switch above!");
   }
 
+  void maybeSetDsoLocal() {
+    if (hasLocalLinkage() ||
+        (!hasDefaultVisibility() && !hasExternalWeakLinkage()))
+      setDSOLocal(true);
+  }
+
 protected:
-  /// \brief The intrinsic ID for this subclass (which must be a Function).
+  /// The intrinsic ID for this subclass (which must be a Function).
   ///
   /// This member is defined by this class, but not used for anything.
   /// Subclasses can use it to store their intrinsic ID, if they have one.

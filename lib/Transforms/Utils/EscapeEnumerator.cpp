@@ -14,7 +14,7 @@
 
 #include "llvm/Transforms/Utils/EscapeEnumerator.h"
 #include "llvm/Analysis/EHPersonalities.h"
-#include "llvm/Analysis/Utils/Local.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/Module.h"
 using namespace llvm;
@@ -73,8 +73,8 @@ IRBuilder<> *EscapeEnumerator::Next() {
     F.setPersonalityFn(PersFn);
   }
 
-  if (isFuncletEHPersonality(classifyEHPersonality(F.getPersonalityFn()))) {
-    report_fatal_error("Funclet EH not supported");
+  if (isScopedEHPersonality(classifyEHPersonality(F.getPersonalityFn()))) {
+    report_fatal_error("Scoped EH not supported");
   }
 
   LandingPadInst *LPad =

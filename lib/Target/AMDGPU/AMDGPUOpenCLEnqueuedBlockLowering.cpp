@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 //
 // \file
-// \brief This post-linking pass replaces the function pointer of enqueued
+// This post-linking pass replaces the function pointer of enqueued
 // block kernel with a global variable (runtime handle) and adds
 // "runtime-handle" attribute to the enqueued block kernel.
 //
@@ -36,6 +36,7 @@
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Mangler.h"
 #include "llvm/IR/Module.h"
@@ -50,7 +51,7 @@ using namespace llvm;
 
 namespace {
 
-/// \brief Lower enqueued blocks.
+/// Lower enqueued blocks.
 class AMDGPUOpenCLEnqueuedBlockLowering : public ModulePass {
 public:
   static char ID;
@@ -114,9 +115,9 @@ bool AMDGPUOpenCLEnqueuedBlockLowering::runOnModule(Module &M) {
                                    M.getDataLayout());
         F.setName(Name);
       }
-      DEBUG(dbgs() << "found enqueued kernel: " << F.getName() << '\n');
+      LLVM_DEBUG(dbgs() << "found enqueued kernel: " << F.getName() << '\n');
       auto RuntimeHandle = (F.getName() + ".runtime_handle").str();
-      auto T = Type::getInt8Ty(C)->getPointerTo(AMDGPUAS::GLOBAL_ADDRESS);
+      auto T = ArrayType::get(Type::getInt64Ty(C), 2);
       auto *GV = new GlobalVariable(
           M, T,
           /*IsConstant=*/false, GlobalValue::ExternalLinkage,
@@ -124,7 +125,7 @@ bool AMDGPUOpenCLEnqueuedBlockLowering::runOnModule(Module &M) {
           /*InsertBefore=*/nullptr, GlobalValue::NotThreadLocal,
           AMDGPUAS::GLOBAL_ADDRESS,
           /*IsExternallyInitialized=*/false);
-      DEBUG(dbgs() << "runtime handle created: " << *GV << '\n');
+      LLVM_DEBUG(dbgs() << "runtime handle created: " << *GV << '\n');
 
       for (auto U : F.users()) {
         auto *UU = &*U;
@@ -145,7 +146,7 @@ bool AMDGPUOpenCLEnqueuedBlockLowering::runOnModule(Module &M) {
     if (F->getCallingConv() != CallingConv::AMDGPU_KERNEL)
       continue;
     F->addFnAttr("calls-enqueue-kernel");
-    DEBUG(dbgs() << "mark enqueue_kernel caller:" << F->getName() << '\n');
+    LLVM_DEBUG(dbgs() << "mark enqueue_kernel caller:" << F->getName() << '\n');
   }
   return Changed;
 }

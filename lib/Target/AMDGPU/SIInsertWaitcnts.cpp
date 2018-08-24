@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 //
 /// \file
-/// \brief Insert wait instructions for memory reads and writes.
+/// Insert wait instructions for memory reads and writes.
 ///
 /// Memory reads and writes are issued asynchronously, so we need to insert
 /// S_WAITCNT instructions when we want to access any of their results or
@@ -40,6 +40,7 @@
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/DebugCounter.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
@@ -50,9 +51,21 @@
 #include <utility>
 #include <vector>
 
+using namespace llvm;
+
 #define DEBUG_TYPE "si-insert-waitcnts"
 
-using namespace llvm;
+DEBUG_COUNTER(ForceExpCounter, DEBUG_TYPE"-forceexp",
+              "Force emit s_waitcnt expcnt(0) instrs");
+DEBUG_COUNTER(ForceLgkmCounter, DEBUG_TYPE"-forcelgkm",
+              "Force emit s_waitcnt lgkmcnt(0) instrs");
+DEBUG_COUNTER(ForceVMCounter, DEBUG_TYPE"-forcevm",
+              "Force emit s_waitcnt vmcnt(0) instrs");
+
+static cl::opt<unsigned> ForceEmitZeroFlag(
+  "amdgpu-waitcnt-forcezero",
+  cl::desc("Force all waitcnt instrs to be emitted as s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)"),
+  cl::init(0), cl::Hidden);
 
 namespace {
 
@@ -123,7 +136,7 @@ enum RegisterMapping {
 // "s_waitcnt 0" before use.
 class BlockWaitcntBrackets {
 public:
-  BlockWaitcntBrackets() {
+  BlockWaitcntBrackets(const GCNSubtarget *SubTarget) : ST(SubTarget) {
     for (enum InstCounterType T = VM_CNT; T < NUM_INST_CNTS;
          T = (enum InstCounterType)(T + 1)) {
       memset(VgprScores[T], 0, sizeof(VgprScores[T]));
@@ -301,6 +314,7 @@ public:
   void dump() { print(dbgs()); }
 
 private:
+  const GCNSubtarget *ST = nullptr;
   bool WaitAtBeginning = false;
   bool RevisitLoop = false;
   bool MixedExpTypes = false;
@@ -332,14 +346,12 @@ public:
 
   void incIterCnt() { IterCnt++; }
   void resetIterCnt() { IterCnt = 0; }
-  int32_t getIterCnt() { return IterCnt; }
+  unsigned getIterCnt() { return IterCnt; }
 
   void setWaitcnt(MachineInstr *WaitcntIn) { LfWaitcnt = WaitcntIn; }
   MachineInstr *getWaitcnt() const { return LfWaitcnt; }
 
-  void print() {
-    DEBUG(dbgs() << "  iteration " << IterCnt << '\n';);
-  }
+  void print() { LLVM_DEBUG(dbgs() << "  iteration " << IterCnt << '\n';); }
 
 private:
   // s_waitcnt added at the end of loop footer to stablize wait scores
@@ -352,7 +364,7 @@ private:
 
 class SIInsertWaitcnts : public MachineFunctionPass {
 private:
-  const SISubtarget *ST = nullptr;
+  const GCNSubtarget *ST = nullptr;
   const SIInstrInfo *TII = nullptr;
   const SIRegisterInfo *TRI = nullptr;
   const MachineRegisterInfo *MRI = nullptr;
@@ -373,10 +385,19 @@ private:
 
   std::vector<std::unique_ptr<BlockWaitcntBrackets>> KillWaitBrackets;
 
+  // ForceEmitZeroWaitcnts: force all waitcnts insts to be s_waitcnt 0
+  // because of amdgpu-waitcnt-forcezero flag
+  bool ForceEmitZeroWaitcnts;
+  bool ForceEmitWaitcnt[NUM_INST_CNTS];
+
 public:
   static char ID;
 
-  SIInsertWaitcnts() : MachineFunctionPass(ID) {}
+  SIInsertWaitcnts() : MachineFunctionPass(ID) {
+    (void)ForceExpCounter;
+    (void)ForceLgkmCounter;
+    (void)ForceVMCounter;
+  }
 
   bool runOnMachineFunction(MachineFunction &MF) override;
 
@@ -395,6 +416,41 @@ public:
     // traversed.
     KillWaitBrackets.push_back(
         llvm::make_unique<BlockWaitcntBrackets>(*Bracket));
+  }
+
+  bool isForceEmitWaitcnt() const {
+    for (enum InstCounterType T = VM_CNT; T < NUM_INST_CNTS;
+         T = (enum InstCounterType)(T + 1))
+      if (ForceEmitWaitcnt[T])
+        return true;
+    return false;
+  }
+
+  void setForceEmitWaitcnt() {
+// For non-debug builds, ForceEmitWaitcnt has been initialized to false;
+// For debug builds, get the debug counter info and adjust if need be
+#ifndef NDEBUG
+    if (DebugCounter::isCounterSet(ForceExpCounter) &&
+        DebugCounter::shouldExecute(ForceExpCounter)) {
+      ForceEmitWaitcnt[EXP_CNT] = true;
+    } else {
+      ForceEmitWaitcnt[EXP_CNT] = false;
+    }
+
+    if (DebugCounter::isCounterSet(ForceLgkmCounter) &&
+         DebugCounter::shouldExecute(ForceLgkmCounter)) {
+      ForceEmitWaitcnt[LGKM_CNT] = true;
+    } else {
+      ForceEmitWaitcnt[LGKM_CNT] = false;
+    }
+
+    if (DebugCounter::isCounterSet(ForceVMCounter) &&
+        DebugCounter::shouldExecute(ForceVMCounter)) {
+      ForceEmitWaitcnt[VM_CNT] = true;
+    } else {
+      ForceEmitWaitcnt[VM_CNT] = false;
+    }
+#endif // NDEBUG
   }
 
   bool mayAccessLDSThroughFlat(const MachineInstr &MI) const;
@@ -462,7 +518,7 @@ void BlockWaitcntBrackets::setExpScore(const MachineInstr *MI,
                                        const MachineRegisterInfo *MRI,
                                        unsigned OpNo, int32_t Val) {
   RegInterval Interval = getRegInterval(MI, TII, MRI, TRI, OpNo, false);
-  DEBUG({
+  LLVM_DEBUG({
     const MachineOperand &Opnd = MI->getOperand(OpNo);
     assert(TRI->isVGPR(*MRI, Opnd.getReg()));
   });
@@ -684,9 +740,12 @@ unsigned int BlockWaitcntBrackets::updateByWait(InstCounterType T,
   const int32_t LB = getScoreLB(T);
   const int32_t UB = getScoreUB(T);
   if ((UB >= ScoreToWait) && (ScoreToWait > LB)) {
-    if (T == VM_CNT && hasPendingFlat()) {
-      // If there is a pending FLAT operation, and this is a VM waitcnt,
-      // then we need to force a waitcnt 0 for VM.
+    if ((T == VM_CNT || T == LGKM_CNT) &&
+        hasPendingFlat() &&
+        !ST->hasFlatLgkmVMemCountInOrder()) {
+      // If there is a pending FLAT operation, and this is a VMem or LGKM
+      // waitcnt and the target can report early completion, then we need
+      // to force a waitcnt 0.
       NeedWait = CNT_MASK(T);
       setScoreLB(T, getScoreUB(T));
     } else if (counterOutOfOrder(T)) {
@@ -792,7 +851,7 @@ static bool readsVCCZ(const MachineInstr &MI) {
          !MI.getOperand(1).isUndef();
 }
 
-/// \brief Given wait count encodings checks if LHS is stronger than RHS.
+/// Given wait count encodings checks if LHS is stronger than RHS.
 bool SIInsertWaitcnts::isWaitcntStronger(unsigned LHS, unsigned RHS) {
   if (AMDGPU::decodeVmcnt(IV, LHS) > AMDGPU::decodeVmcnt(IV, RHS))
     return false;
@@ -803,7 +862,7 @@ bool SIInsertWaitcnts::isWaitcntStronger(unsigned LHS, unsigned RHS) {
   return true;
 }
 
-/// \brief Given wait count encodings create a new encoding which is stronger
+/// Given wait count encodings create a new encoding which is stronger
 /// or equal to both.
 unsigned SIInsertWaitcnts::combineWaitcnt(unsigned LHS, unsigned RHS) {
   unsigned VmCnt = std::min(AMDGPU::decodeVmcnt(IV, LHS),
@@ -815,7 +874,7 @@ unsigned SIInsertWaitcnts::combineWaitcnt(unsigned LHS, unsigned RHS) {
   return AMDGPU::encodeWaitcnt(IV, VmCnt, ExpCnt, LgkmCnt);
 }
 
-///  \brief Generate s_waitcnt instruction to be placed before cur_Inst.
+///  Generate s_waitcnt instruction to be placed before cur_Inst.
 ///  Instructions of a given type are returned in order,
 ///  but instructions of different types can complete out of order.
 ///  We rely on this in-order completion
@@ -830,13 +889,21 @@ void SIInsertWaitcnts::generateWaitcntInstBefore(
   // To emit, or not to emit - that's the question!
   // Start with an assumption that there is no need to emit.
   unsigned int EmitWaitcnt = 0;
+
   // No need to wait before phi. If a phi-move exists, then the wait should
   // has been inserted before the move. If a phi-move does not exist, then
   // wait should be inserted before the real use. The same is true for
   // sc-merge. It is not a coincident that all these cases correspond to the
   // instructions that are skipped in the assembling loop.
   bool NeedLineMapping = false; // TODO: Check on this.
-  if (MI.isDebugValue() &&
+
+  // ForceEmitZeroWaitcnt: force a single s_waitcnt 0 due to hw bug
+  bool ForceEmitZeroWaitcnt = false;
+
+  setForceEmitWaitcnt();
+  bool IsForceEmitWaitcnt = isForceEmitWaitcnt();
+
+  if (MI.isDebugInstr() &&
       // TODO: any other opcode?
       !NeedLineMapping) {
     return;
@@ -867,8 +934,7 @@ void SIInsertWaitcnts::generateWaitcntInstBefore(
   // All waits must be resolved at call return.
   // NOTE: this could be improved with knowledge of all call sites or
   //   with knowledge of the called routines.
-  if (MI.getOpcode() == AMDGPU::RETURN ||
-      MI.getOpcode() == AMDGPU::SI_RETURN_TO_EPILOG ||
+  if (MI.getOpcode() == AMDGPU::SI_RETURN_TO_EPILOG ||
       MI.getOpcode() == AMDGPU::S_SETPC_B64_return) {
     for (enum InstCounterType T = VM_CNT; T < NUM_INST_CNTS;
          T = (enum InstCounterType)(T + 1)) {
@@ -1047,9 +1113,6 @@ void SIInsertWaitcnts::generateWaitcntInstBefore(
     } // End of for loop that looks at all dest operands.
   }
 
-  // TODO: Tie force zero to a compiler triage option.
-  bool ForceZero = false;
-
   // Check to see if this is an S_BARRIER, and if an implicit S_WAITCNT 0
   // occurs before the instruction. Doing it here prevents any additional
   // S_WAITCNTs from being emitted if the instruction was marked as
@@ -1067,7 +1130,7 @@ void SIInsertWaitcnts::generateWaitcntInstBefore(
   // TODO: Remove this work-around, enable the assert for Bug 457939
   //       after fixing the scheduler. Also, the Shader Compiler code is
   //       independent of target.
-  if (readsVCCZ(MI) && ST->getGeneration() <= SISubtarget::SEA_ISLANDS) {
+  if (readsVCCZ(MI) && ST->getGeneration() <= AMDGPUSubtarget::SEA_ISLANDS) {
     if (ScoreBrackets->getScoreLB(LGKM_CNT) <
             ScoreBrackets->getScoreUB(LGKM_CNT) &&
         ScoreBrackets->hasPendingSMEM()) {
@@ -1076,17 +1139,20 @@ void SIInsertWaitcnts::generateWaitcntInstBefore(
       // block, so if we only wait on LGKM here, we might end up with
       // another s_waitcnt inserted right after this if there are non-LGKM
       // instructions still outstanding.
-      ForceZero = true;
+      // FIXME: this is too conservative / the comment is wrong.
+      // We don't wait on everything at the end of the block and we combine
+      // waitcnts so we should never have back-to-back waitcnts.
+      ForceEmitZeroWaitcnt = true;
       EmitWaitcnt = true;
     }
   }
 
   // Does this operand processing indicate s_wait counter update?
-  if (EmitWaitcnt) {
+  if (EmitWaitcnt || IsForceEmitWaitcnt) {
     int CntVal[NUM_INST_CNTS];
 
     bool UseDefaultWaitcntStrategy = true;
-    if (ForceZero) {
+    if (ForceEmitZeroWaitcnt || ForceEmitZeroWaitcnts) {
       // Force all waitcnts to 0.
       for (enum InstCounterType T = VM_CNT; T < NUM_INST_CNTS;
            T = (enum InstCounterType)(T + 1)) {
@@ -1123,7 +1189,7 @@ void SIInsertWaitcnts::generateWaitcntInstBefore(
     }
 
     // If we are not waiting on any counter we can skip the wait altogether.
-    if (EmitWaitcnt != 0) {
+    if (EmitWaitcnt != 0 || IsForceEmitWaitcnt) {
       MachineInstr *OldWaitcnt = ScoreBrackets->getWaitcnt();
       int Imm = (!OldWaitcnt) ? 0 : OldWaitcnt->getOperand(0).getImm();
       if (!OldWaitcnt ||
@@ -1141,18 +1207,21 @@ void SIInsertWaitcnts::generateWaitcntInstBefore(
           if (!ScoreBracket) {
             assert(!BlockVisitedSet.count(TBB));
             BlockWaitcntBracketsMap[TBB] =
-                llvm::make_unique<BlockWaitcntBrackets>();
+                llvm::make_unique<BlockWaitcntBrackets>(ST);
             ScoreBracket = BlockWaitcntBracketsMap[TBB].get();
           }
           ScoreBracket->setRevisitLoop(true);
-          DEBUG(dbgs() << "set-revisit: Block"
-                       << ContainingLoop->getHeader()->getNumber() << '\n';);
+          LLVM_DEBUG(dbgs()
+                         << "set-revisit2: Block"
+                         << ContainingLoop->getHeader()->getNumber() << '\n';);
         }
       }
 
       // Update an existing waitcount, or make a new one.
-      unsigned Enc = AMDGPU::encodeWaitcnt(IV, CntVal[VM_CNT],
-                                           CntVal[EXP_CNT], CntVal[LGKM_CNT]);
+      unsigned Enc = AMDGPU::encodeWaitcnt(IV,
+                      ForceEmitWaitcnt[VM_CNT] ? 0 : CntVal[VM_CNT],
+                      ForceEmitWaitcnt[EXP_CNT] ? 0 : CntVal[EXP_CNT],
+                      ForceEmitWaitcnt[LGKM_CNT] ? 0 : CntVal[LGKM_CNT]);
       // We don't remove waitcnts that existed prior to the waitcnt
       // pass. Check if the waitcnt to-be-inserted can be avoided
       // or if the prev waitcnt can be updated.
@@ -1178,22 +1247,30 @@ void SIInsertWaitcnts::generateWaitcntInstBefore(
       }
       if (insertSWaitInst) {
         if (OldWaitcnt && OldWaitcnt->getOpcode() == AMDGPU::S_WAITCNT) {
+          if (ForceEmitZeroWaitcnts)
+            LLVM_DEBUG(
+                dbgs()
+                << "Force emit s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)\n");
+          if (IsForceEmitWaitcnt)
+            LLVM_DEBUG(dbgs()
+                       << "Force emit a s_waitcnt due to debug counter\n");
+
           OldWaitcnt->getOperand(0).setImm(Enc);
           if (!OldWaitcnt->getParent())
             MI.getParent()->insert(MI, OldWaitcnt);
 
-          DEBUG(dbgs() << "updateWaitcntInBlock\n"
-                       << "Old Instr: " << MI << '\n'
-                       << "New Instr: " << *OldWaitcnt << '\n');
+          LLVM_DEBUG(dbgs() << "updateWaitcntInBlock\n"
+                            << "Old Instr: " << MI << '\n'
+                            << "New Instr: " << *OldWaitcnt << '\n');
         } else {
             auto SWaitInst = BuildMI(*MI.getParent(), MI.getIterator(),
                                MI.getDebugLoc(), TII->get(AMDGPU::S_WAITCNT))
                              .addImm(Enc);
             TrackedWaitcntSet.insert(SWaitInst);
 
-            DEBUG(dbgs() << "insertWaitcntInBlock\n"
-                         << "Old Instr: " << MI << '\n'
-                         << "New Instr: " << *SWaitInst << '\n');
+            LLVM_DEBUG(dbgs() << "insertWaitcntInBlock\n"
+                              << "Old Instr: " << MI << '\n'
+                              << "New Instr: " << *SWaitInst << '\n');
         }
       }
 
@@ -1269,7 +1346,7 @@ void SIInsertWaitcnts::updateEventWaitcntAfter(
              Inst.getOpcode() != AMDGPU::BUFFER_WBINVL1_SC &&
              Inst.getOpcode() != AMDGPU::BUFFER_WBINVL1_VOL) {
     ScoreBrackets->updateByEvent(TII, TRI, MRI, VMEM_ACCESS, Inst);
-    if ( // TODO: assumed yes -- target_info->MemWriteNeedsExpWait() &&
+    if (ST->vmemWriteNeedsExpWaitcnt() &&
         (Inst.mayStore() || AMDGPU::getAtomicNoRetOp(Inst.getOpcode()) != -1)) {
       ScoreBrackets->updateByEvent(TII, TRI, MRI, VMW_GPR_LOCK, Inst);
     }
@@ -1569,10 +1646,9 @@ void SIInsertWaitcnts::mergeInputScoreBrackets(MachineBasicBlock &Block) {
   }
 }
 
-/// Return true if the given basic block is a "bottom" block of a loop. This
-/// differs from MachineLoop::getBottomBlock in that it works even if the loop
-/// is discontiguous. This also handles multiple back-edges for the same
-/// "header" block of a loop.
+/// Return true if the given basic block is a "bottom" block of a loop.
+/// This works even if the loop is discontiguous. This also handles
+/// multiple back-edges for the same "header" block of a loop.
 bool SIInsertWaitcnts::isLoopBottom(const MachineLoop *Loop,
                                     const MachineBasicBlock *Block) {
   for (MachineBasicBlock *MBB : Loop->blocks()) {
@@ -1602,8 +1678,8 @@ void SIInsertWaitcnts::insertWaitcntInBlock(MachineFunction &MF,
 
   BlockWaitcntBrackets *ScoreBrackets = BlockWaitcntBracketsMap[&Block].get();
 
-  DEBUG({
-    dbgs() << "Block" << Block.getNumber();
+  LLVM_DEBUG({
+    dbgs() << "*** Block" << Block.getNumber() << " ***";
     ScoreBrackets->dump();
   });
 
@@ -1639,7 +1715,7 @@ void SIInsertWaitcnts::insertWaitcntInBlock(MachineFunction &MF,
       if (ScoreBrackets->getScoreLB(LGKM_CNT) <
               ScoreBrackets->getScoreUB(LGKM_CNT) &&
           ScoreBrackets->hasPendingSMEM()) {
-        if (ST->getGeneration() <= SISubtarget::SEA_ISLANDS)
+        if (ST->getGeneration() <= AMDGPUSubtarget::SEA_ISLANDS)
           VCCZBugWorkAround = true;
       }
     }
@@ -1663,7 +1739,7 @@ void SIInsertWaitcnts::insertWaitcntInBlock(MachineFunction &MF,
 
     ScoreBrackets->clearWaitcnt();
 
-    DEBUG({
+    LLVM_DEBUG({
       Inst.print(dbgs());
       ScoreBrackets->dump();
     });
@@ -1703,14 +1779,15 @@ void SIInsertWaitcnts::insertWaitcntInBlock(MachineFunction &MF,
   if (ContainingLoop && isLoopBottom(ContainingLoop, &Block)) {
     LoopWaitcntData *WaitcntData = LoopWaitcntDataMap[ContainingLoop].get();
     WaitcntData->print();
-    DEBUG(dbgs() << '\n';);
+    LLVM_DEBUG(dbgs() << '\n';);
 
     // The iterative waitcnt insertion algorithm aims for optimal waitcnt
-    // placement and doesn't always guarantee convergence for a loop. Each
-    // loop should take at most 2 iterations for it to converge naturally.
-    // When this max is reached and result doesn't converge, we force
-    // convergence by inserting a s_waitcnt at the end of loop footer.
-    if (WaitcntData->getIterCnt() > 2) {
+    // placement, but doesn't guarantee convergence for a loop. Each
+    // loop should take at most (n+1) iterations for it to converge naturally,
+    // where n is the number of bottom blocks. If this threshold is reached and
+    // the result hasn't converged, then we force convergence by inserting
+    // a s_waitcnt at the end of loop footer.
+    if (WaitcntData->getIterCnt() > (countNumBottomBlocks(ContainingLoop) + 1)) {
       // To ensure convergence, need to make wait events at loop footer be no
       // more than those from the previous iteration.
       // As a simplification, instead of tracking individual scores and
@@ -1722,16 +1799,16 @@ void SIInsertWaitcnts::insertWaitcntInBlock(MachineFunction &MF,
         if (ScoreBrackets->getScoreUB(T) > ScoreBrackets->getScoreLB(T)) {
           ScoreBrackets->setScoreLB(T, ScoreBrackets->getScoreUB(T));
           HasPending = true;
+          break;
         }
       }
 
       if (HasPending) {
         if (!SWaitInst) {
-          SWaitInst = Block.getParent()->CreateMachineInstr(
-              TII->get(AMDGPU::S_WAITCNT), DebugLoc());
+          SWaitInst = BuildMI(Block, Block.getFirstNonPHI(),
+                              DebugLoc(), TII->get(AMDGPU::S_WAITCNT))
+                              .addImm(0);
           TrackedWaitcntSet.insert(SWaitInst);
-          const MachineOperand &Op = MachineOperand::CreateImm(0);
-          SWaitInst->addOperand(MF, Op);
 #if 0 // TODO: Format the debug output
           OutputTransformBanner("insertWaitcntInBlock",0,"Create:",context);
           OutputTransformAdd(SWaitInst, context);
@@ -1743,7 +1820,7 @@ void SIInsertWaitcnts::insertWaitcntInBlock(MachineFunction &MF,
       }
 
       if (SWaitInst) {
-        DEBUG({
+        LLVM_DEBUG({
           SWaitInst->print(dbgs());
           dbgs() << "\nAdjusted score board:";
           ScoreBrackets->dump();
@@ -1760,7 +1837,7 @@ void SIInsertWaitcnts::insertWaitcntInBlock(MachineFunction &MF,
 }
 
 bool SIInsertWaitcnts::runOnMachineFunction(MachineFunction &MF) {
-  ST = &MF.getSubtarget<SISubtarget>();
+  ST = &MF.getSubtarget<GCNSubtarget>();
   TII = ST->getInstrInfo();
   TRI = &TII->getRegisterInfo();
   MRI = &MF.getRegInfo();
@@ -1768,6 +1845,11 @@ bool SIInsertWaitcnts::runOnMachineFunction(MachineFunction &MF) {
   IV = AMDGPU::IsaInfo::getIsaVersion(ST->getFeatureBits());
   const SIMachineFunctionInfo *MFI = MF.getInfo<SIMachineFunctionInfo>();
   AMDGPUASI = ST->getAMDGPUAS();
+
+  ForceEmitZeroWaitcnts = ForceEmitZeroFlag;
+  for (enum InstCounterType T = VM_CNT; T < NUM_INST_CNTS;
+       T = (enum InstCounterType)(T + 1))
+    ForceEmitWaitcnt[T] = false;
 
   HardwareLimits.VmcntMax = AMDGPU::getVmcntBitMask(IV);
   HardwareLimits.ExpcntMax = AMDGPU::getExpcntBitMask(IV);
@@ -1789,6 +1871,7 @@ bool SIInsertWaitcnts::runOnMachineFunction(MachineFunction &MF) {
   BlockVisitedSet.clear();
   VCCZBugHandledSet.clear();
   LoopWaitcntDataMap.clear();
+  BlockWaitcntProcessedSet.clear();
 
   // Walk over the blocks in reverse post-dominator order, inserting
   // s_waitcnt where needed.
@@ -1804,7 +1887,7 @@ bool SIInsertWaitcnts::runOnMachineFunction(MachineFunction &MF) {
 
     BlockWaitcntBrackets *ScoreBrackets = BlockWaitcntBracketsMap[&MBB].get();
     if (!ScoreBrackets) {
-      BlockWaitcntBracketsMap[&MBB] = llvm::make_unique<BlockWaitcntBrackets>();
+      BlockWaitcntBracketsMap[&MBB] = llvm::make_unique<BlockWaitcntBrackets>(ST);
       ScoreBrackets = BlockWaitcntBracketsMap[&MBB].get();
     }
     ScoreBrackets->setPostOrder(MBB.getNumber());
@@ -1821,17 +1904,17 @@ bool SIInsertWaitcnts::runOnMachineFunction(MachineFunction &MF) {
       // If the loop has multiple back-edges, and so more than one "bottom"
       // basic block, we have to guarantee a re-walk over every blocks.
       if ((std::count(BlockWaitcntProcessedSet.begin(),
-                      BlockWaitcntProcessedSet.end(), &MBB) < Count)) {
+                      BlockWaitcntProcessedSet.end(), &MBB) < (int)Count)) {
         BlockWaitcntBracketsMap[&MBB]->setRevisitLoop(true);
-        DEBUG(dbgs() << "set-revisit: Block"
-                     << ContainingLoop->getHeader()->getNumber() << '\n';);
+        LLVM_DEBUG(dbgs() << "set-revisit1: Block"
+                          << ContainingLoop->getHeader()->getNumber() << '\n';);
       }
     }
 
     // Walk over the instructions.
     insertWaitcntInBlock(MF, MBB);
 
-    // Flag that waitcnts have been processed at least once.
+    // Record that waitcnts have been processed at least once for this block.
     BlockWaitcntProcessedSet.push_back(&MBB);
 
     // See if we want to revisit the loop. If a loop has multiple back-edges,
@@ -1858,7 +1941,7 @@ bool SIInsertWaitcnts::runOnMachineFunction(MachineFunction &MF) {
         }
         LoopWaitcntData *WaitcntData = LoopWaitcntDataMap[ContainingLoop].get();
         WaitcntData->incIterCnt();
-        DEBUG(dbgs() << "revisit: Block" << EntryBB->getNumber() << '\n';);
+        LLVM_DEBUG(dbgs() << "revisit: Block" << EntryBB->getNumber() << '\n';);
         continue;
       } else {
         LoopWaitcntData *WaitcntData = LoopWaitcntDataMap[ContainingLoop].get();

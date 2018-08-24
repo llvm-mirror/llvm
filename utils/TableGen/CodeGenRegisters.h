@@ -348,7 +348,7 @@ namespace llvm {
     ArrayRef<ValueTypeByHwMode> getValueTypes() const { return VTs; }
     unsigned getNumValueTypes() const { return VTs.size(); }
 
-    ValueTypeByHwMode getValueTypeNum(unsigned VTNum) const {
+    const ValueTypeByHwMode &getValueTypeNum(unsigned VTNum) const {
       if (VTNum < VTs.size())
         return VTs[VTNum];
       llvm_unreachable("VTNum greater than number of ValueTypes in RegClass!");
@@ -561,6 +561,9 @@ namespace llvm {
 
     // Give each register unit set an order based on sorting criteria.
     std::vector<unsigned> RegUnitSetOrder;
+
+    // Keep track of synthesized definitions generated in TupleExpander.
+    std::vector<std::unique_ptr<Record>> SynthDefs;
 
     // Add RC to *2RC maps.
     void addToMaps(CodeGenRegisterClass*);

@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// \brief This file implements an optimization pass using store result values.
+/// This file implements an optimization pass using store result values.
 ///
 /// WebAssembly's store instructions return the stored value. This is to enable
 /// an optimization wherein uses of the stored value can be replaced by uses of
@@ -111,8 +111,8 @@ static bool ReplaceDominatedUses(MachineBasicBlock &MBB, MachineInstr &MI,
       continue;
 
     Changed = true;
-    DEBUG(dbgs() << "Setting operand " << O << " in " << *Where << " from "
-                 << MI << "\n");
+    LLVM_DEBUG(dbgs() << "Setting operand " << O << " in " << *Where << " from "
+                      << MI << "\n");
     O.setReg(ToReg);
 
     // If the store's def was previously dead, it is no longer.
@@ -170,7 +170,7 @@ static bool optimizeCall(MachineBasicBlock &MBB, MachineInstr &MI,
 }
 
 bool WebAssemblyStoreResults::runOnMachineFunction(MachineFunction &MF) {
-  DEBUG({
+  LLVM_DEBUG({
     dbgs() << "********** Store Results **********\n"
            << "********** Function: " << MF.getName() << '\n';
   });
@@ -189,7 +189,7 @@ bool WebAssemblyStoreResults::runOnMachineFunction(MachineFunction &MF) {
   assert(MRI.tracksLiveness() && "StoreResults expects liveness tracking");
 
   for (auto &MBB : MF) {
-    DEBUG(dbgs() << "Basic Block: " << MBB.getName() << '\n');
+    LLVM_DEBUG(dbgs() << "Basic Block: " << MBB.getName() << '\n');
     for (auto &MI : MBB)
       switch (MI.getOpcode()) {
       default:

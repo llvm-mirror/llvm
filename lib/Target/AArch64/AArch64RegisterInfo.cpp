@@ -72,6 +72,19 @@ const MCPhysReg *AArch64RegisterInfo::getCalleeSavedRegsViaCopy(
   return nullptr;
 }
 
+const TargetRegisterClass *
+AArch64RegisterInfo::getSubClassWithSubReg(const TargetRegisterClass *RC,
+                                       unsigned Idx) const {
+  // edge case for GPR/FPR register classes
+  if (RC == &AArch64::GPR32allRegClass && Idx == AArch64::hsub)
+    return &AArch64::FPR32RegClass;
+  else if (RC == &AArch64::GPR64allRegClass && Idx == AArch64::hsub)
+    return &AArch64::FPR64RegClass;
+
+  // Forward to TableGen's default version.
+  return AArch64GenRegisterInfo::getSubClassWithSubReg(RC, Idx);
+}
+
 const uint32_t *
 AArch64RegisterInfo::getCallPreservedMask(const MachineFunction &MF,
                                           CallingConv::ID CC) const {
@@ -137,6 +150,9 @@ AArch64RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   if (MF.getSubtarget<AArch64Subtarget>().isX18Reserved())
     markSuperRegs(Reserved, AArch64::W18); // Platform register
 
+  if (MF.getSubtarget<AArch64Subtarget>().isX20Reserved())
+    markSuperRegs(Reserved, AArch64::W20); // Platform register
+
   if (hasBasePointer(MF))
     markSuperRegs(Reserved, AArch64::W19);
 
@@ -159,12 +175,15 @@ bool AArch64RegisterInfo::isReservedReg(const MachineFunction &MF,
   case AArch64::X18:
   case AArch64::W18:
     return MF.getSubtarget<AArch64Subtarget>().isX18Reserved();
+  case AArch64::X19:
+  case AArch64::W19:
+    return hasBasePointer(MF);
+  case AArch64::X20:
+  case AArch64::W20:
+    return MF.getSubtarget<AArch64Subtarget>().isX20Reserved();
   case AArch64::FP:
   case AArch64::W29:
     return TFI->hasFP(MF) || TT.isOSDarwin();
-  case AArch64::W19:
-  case AArch64::X19:
-    return hasBasePointer(MF);
   }
 
   return false;
@@ -432,6 +451,8 @@ unsigned AArch64RegisterInfo::getRegPressureLimit(const TargetRegisterClass *RC,
               - (TFI->hasFP(MF) || TT.isOSDarwin()) // FP
               - MF.getSubtarget<AArch64Subtarget>()
                     .isX18Reserved() // X18 reserved as platform register
+              - MF.getSubtarget<AArch64Subtarget>()
+                    .isX20Reserved() // X20 reserved as platform register
               - hasBasePointer(MF);  // X19
   case AArch64::FPR8RegClassID:
   case AArch64::FPR16RegClassID:

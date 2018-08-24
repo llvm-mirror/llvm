@@ -184,13 +184,12 @@ TEST_F(RTDyldObjectLinkingLayerExecutionTest, NoDuplicateFinalization) {
   };
 
   Resolvers[K2] = createSymbolResolver(
-      [&](SymbolFlagsMap &SymbolFlags, const SymbolNameSet &Symbols) {
-        return cantFail(
-            lookupFlagsWithLegacyFn(SymbolFlags, Symbols, LegacyLookup));
+      [&](const SymbolNameSet &Symbols) {
+        return cantFail(lookupFlagsWithLegacyFn(Symbols, LegacyLookup));
       },
       [&](std::shared_ptr<AsynchronousSymbolQuery> Query,
           const SymbolNameSet &Symbols) {
-        return lookupWithLegacyFn(*Query, Symbols, LegacyLookup);
+        return lookupWithLegacyFn(ES, *Query, Symbols, LegacyLookup);
       });
 
   cantFail(ObjLayer.addObject(K2, std::move(Obj2)));

@@ -297,8 +297,8 @@ define void @void_func_v2i16(<2 x i16> %arg0) #0 {
 }
 
 ; GCN-LABEL: {{^}}void_func_v3i16:
-; GCN-DAG: buffer_store_dword v0, off
-; GCN-DAG: buffer_store_short v2, off
+; GCN-DAG: buffer_store_dword v{{[0-9]+}}, off
+; GCN-DAG: buffer_store_short v{{[0-9]+}}, off
 define void @void_func_v3i16(<3 x i16> %arg0) #0 {
   store <3 x i16> %arg0, <3 x i16> addrspace(1)* undef
   ret void
@@ -434,10 +434,17 @@ define void @void_func_v2f16(<2 x half> %arg0) #0 {
   ret void
 }
 
+; FIXME: Different abi if f16 legal
 ; GCN-LABEL: {{^}}void_func_v3f16:
-; GFX9-NOT: v0
-; GCN-DAG: buffer_store_dword v0, off
-; GCN-DAG: buffer_store_short v2, off
+; CI-DAG: v_cvt_f16_f32_e32 v{{[0-9]+}}, v0
+; CI-DAG: v_cvt_f16_f32_e32 v{{[0-9]+}}, v1
+; CI-DAG: v_cvt_f16_f32_e32 v{{[0-9]+}}, v2
+
+; GFX89-DAG: v0
+; GFX89-DAG: v1
+
+; GCN-DAG: buffer_store_short
+; GCN-DAG: buffer_store_dword
 define void @void_func_v3f16(<3 x half> %arg0) #0 {
   store <3 x half> %arg0, <3 x half> addrspace(1)* undef
   ret void
@@ -729,6 +736,45 @@ define void @void_func_v32i32_v16i32_v16f32(<32 x i32> %arg0, <16 x i32> %arg1, 
   store volatile <32 x i32> %arg0, <32 x i32> addrspace(1)* undef
   store volatile <16 x i32> %arg1, <16 x i32> addrspace(1)* undef
   store volatile <16 x float> %arg2, <16 x float> addrspace(1)* undef
+  ret void
+}
+
+; Make sure v3 isn't a wasted register because of v3 types being promoted to v4
+; GCN-LABEL: {{^}}void_func_v3f32_wasted_reg:
+; GCN: s_waitcnt
+; GCN: ds_write_b32 v{{[0-9]+}}, v0
+; GCN-NEXT: ds_write_b32 v{{[0-9]+}}, v1
+; GCN-NEXT: ds_write_b32 v{{[0-9]+}}, v2
+; GCN-NEXT: ds_write_b32 v{{[0-9]+}}, v3
+; GCN-NEXT: s_waitcnt
+; GCN-NEXT: s_setpc_b64
+define void @void_func_v3f32_wasted_reg(<3 x float> %arg0, i32 %arg1) #0 {
+  %arg0.0 = extractelement <3 x float> %arg0, i32 0
+  %arg0.1 = extractelement <3 x float> %arg0, i32 1
+  %arg0.2 = extractelement <3 x float> %arg0, i32 2
+  store volatile float %arg0.0, float addrspace(3)* undef
+  store volatile float %arg0.1, float addrspace(3)* undef
+  store volatile float %arg0.2, float addrspace(3)* undef
+  store volatile i32 %arg1, i32 addrspace(3)* undef
+  ret void
+}
+
+; GCN-LABEL: {{^}}void_func_v3i32_wasted_reg:
+; GCN: s_waitcnt
+; GCN: ds_write_b32 v{{[0-9]+}}, v0
+; GCN-NEXT: ds_write_b32 v{{[0-9]+}}, v1
+; GCN-NEXT: ds_write_b32 v{{[0-9]+}}, v2
+; GCN-NEXT: ds_write_b32 v{{[0-9]+}}, v3
+; GCN-NEXT: s_waitcnt
+; GCN-NEXT: s_setpc_b64
+define void @void_func_v3i32_wasted_reg(<3 x i32> %arg0, i32 %arg1) #0 {
+  %arg0.0 = extractelement <3 x i32> %arg0, i32 0
+  %arg0.1 = extractelement <3 x i32> %arg0, i32 1
+  %arg0.2 = extractelement <3 x i32> %arg0, i32 2
+  store volatile i32 %arg0.0, i32 addrspace(3)* undef
+  store volatile i32 %arg0.1, i32 addrspace(3)* undef
+  store volatile i32 %arg0.2, i32 addrspace(3)* undef
+  store volatile i32 %arg1, i32 addrspace(3)* undef
   ret void
 }
 

@@ -200,7 +200,7 @@ will need about 1-3 GB of space.  A full build of LLVM and Clang will need aroun
 is so large because of all the debugging information and the fact that the
 libraries are statically linked into multiple tools).
 
-If you you are space-constrained, you can build only selected tools or only
+If you are space-constrained, you can build only selected tools or only
 selected targets.  The Release build requires considerably less space.
 
 The LLVM suite *may* compile on other platforms, but it is not guaranteed to do
@@ -492,8 +492,16 @@ Git Mirror
 Git mirrors are available for a number of LLVM subprojects. These mirrors sync
 automatically with each Subversion commit and contain all necessary git-svn
 marks (so, you can recreate git-svn metadata locally). Note that right now
-mirrors reflect only ``trunk`` for each project. You can do the read-only Git
-clone of LLVM via:
+mirrors reflect only ``trunk`` for each project.
+
+.. note::
+
+  On Windows, first you will want to do ``git config --global core.autocrlf
+  false`` before you clone. This goes a long way toward ensuring that
+  line-endings will be handled correctly (the LLVM project mostly uses Linux
+  line-endings).
+
+You can do the read-only Git clone of LLVM via:
 
 .. code-block:: console
 
@@ -830,7 +838,7 @@ To configure LLVM, follow these steps:
 
    .. code-block:: console
 
-     % cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX=prefix=/install/path
+     % cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX=/install/path
        [other options] SRC_ROOT
 
 Compiling the LLVM Suite Source Code

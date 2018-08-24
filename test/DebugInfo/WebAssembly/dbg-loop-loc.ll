@@ -15,7 +15,7 @@
 ; ModuleID = 'dbg-loop-loc.bc'
 source_filename = "dbg-loop-loc.c"
 target datalayout = "e-m:e-p:32:32-i64:64-n32:64-S128"
-target triple = "wasm32-unknown-unknown-wasm"
+target triple = "wasm32-unknown-unknown"
 
 ; CHECK: .file 1
 ; CHECK: .loc 1 1 0
@@ -93,7 +93,7 @@ attributes #1 = { nounwind readnone speculatable }
 !4 = !{i32 2, !"Debug Info Version", i32 3}
 !5 = !{i32 1, !"wchar_size", i32 4}
 !6 = !{!"clang version 7.0.0 (trunk 326837)"}
-!7 = distinct !DISubprogram(name: "fib", scope: !1, file: !1, line: 1, type: !8, isLocal: false, isDefinition: true, scopeLine: 1, flags: DIFlagPrototyped, isOptimized: false, unit: !0, variables: !2)
+!7 = distinct !DISubprogram(name: "fib", scope: !1, file: !1, line: 1, type: !8, isLocal: false, isDefinition: true, scopeLine: 1, flags: DIFlagPrototyped, isOptimized: false, unit: !0, retainedNodes: !2)
 !8 = !DISubroutineType(types: !9)
 !9 = !{!10, !10}
 !10 = !DIBasicType(name: "int", size: 32, encoding: DW_ATE_signed)

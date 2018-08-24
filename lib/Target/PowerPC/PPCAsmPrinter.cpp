@@ -510,6 +510,32 @@ void PPCAsmPrinter::EmitInstruction(const MachineInstr *MI) {
   const Module *M = MF->getFunction().getParent();
   PICLevel::Level PL = M->getPICLevel();
 
+#ifndef NDEBUG
+  // Validate that SPE and FPU are mutually exclusive in codegen
+  if (!MI->isInlineAsm()) {
+    for (const MachineOperand &MO: MI->operands()) {
+      if (MO.isReg()) {
+        unsigned Reg = MO.getReg();
+        if (Subtarget->hasSPE()) {
+          if (PPC::F4RCRegClass.contains(Reg) ||
+              PPC::F8RCRegClass.contains(Reg) ||
+              PPC::QBRCRegClass.contains(Reg) ||
+              PPC::QFRCRegClass.contains(Reg) ||
+              PPC::QSRCRegClass.contains(Reg) ||
+              PPC::VFRCRegClass.contains(Reg) ||
+              PPC::VRRCRegClass.contains(Reg) ||
+              PPC::VSFRCRegClass.contains(Reg) ||
+              PPC::VSSRCRegClass.contains(Reg)
+              )
+            llvm_unreachable("SPE targets cannot have FPRegs!");
+        } else {
+          if (PPC::SPERCRegClass.contains(Reg))
+            llvm_unreachable("SPE register found in FPU-targeted code!");
+        }
+      }
+    }
+  }
+#endif
   // Lower multi-instruction pseudo operations.
   switch (MI->getOpcode()) {
   default: break;
@@ -771,11 +797,11 @@ void PPCAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     else if (MO.isGlobal()) {
       const GlobalValue *GV = MO.getGlobal();
       MOSymbol = getSymbol(GV);
-      DEBUG(
-        unsigned char GVFlags = Subtarget->classifyGlobalReference(GV);
-        assert((GVFlags & PPCII::MO_NLP_FLAG) &&
-               "LDtocL used on symbol that could be accessed directly is "
-               "invalid. Must match ADDIStocHA."));
+      LLVM_DEBUG(
+          unsigned char GVFlags = Subtarget->classifyGlobalReference(GV);
+          assert((GVFlags & PPCII::MO_NLP_FLAG) &&
+                 "LDtocL used on symbol that could be accessed directly is "
+                 "invalid. Must match ADDIStocHA."));
       MOSymbol = lookUpOrCreateTOCEntry(MOSymbol);
     }
 
@@ -800,11 +826,9 @@ void PPCAsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
     if (MO.isGlobal()) {
       const GlobalValue *GV = MO.getGlobal();
-      DEBUG(
-        unsigned char GVFlags = Subtarget->classifyGlobalReference(GV);
-        assert (
-            !(GVFlags & PPCII::MO_NLP_FLAG) &&
-            "Interposable definitions must use indirect access."));
+      LLVM_DEBUG(unsigned char GVFlags = Subtarget->classifyGlobalReference(GV);
+                 assert(!(GVFlags & PPCII::MO_NLP_FLAG) &&
+                        "Interposable definitions must use indirect access."));
       MOSymbol = getSymbol(GV);
     } else if (MO.isCPI()) {
       MOSymbol = GetCPISymbol(MO.getIndex());
@@ -1285,7 +1309,7 @@ void PPCLinuxAsmPrinter::EmitFunctionEntryLabel() {
   if (Subtarget->isELFv2ABI()) {
     // In the Large code model, we allow arbitrary displacements between
     // the text section and its associated TOC section.  We place the
-    // full 8-byte offset to the TOC in memory immediatedly preceding
+    // full 8-byte offset to the TOC in memory immediately preceding
     // the function global entry point.
     if (TM.getCodeModel() == CodeModel::Large
         && !MF->getRegInfo().use_empty(PPC::X2)) {
@@ -1488,6 +1512,7 @@ void PPCDarwinAsmPrinter::EmitStartOfAsmFile(Module &M) {
     "ppc750",
     "ppc970",
     "ppcA2",
+    "ppce500",
     "ppce500mc",
     "ppce5500",
     "power3",

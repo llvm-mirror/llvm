@@ -63,11 +63,7 @@ void MCObjectFileInfo::initMachOMCObjectFileInfo(const Triple &T) {
   if (T.isWatchABI())
     OmitDwarfIfHaveCompactUnwind = true;
 
-  PersonalityEncoding = dwarf::DW_EH_PE_indirect | dwarf::DW_EH_PE_pcrel
-    | dwarf::DW_EH_PE_sdata4;
-  LSDAEncoding = FDECFIEncoding = dwarf::DW_EH_PE_pcrel;
-  TTypeEncoding = dwarf::DW_EH_PE_indirect | dwarf::DW_EH_PE_pcrel |
-    dwarf::DW_EH_PE_sdata4;
+  FDECFIEncoding = dwarf::DW_EH_PE_pcrel;
 
   // .comm doesn't support alignment before Leopard.
   if (T.isMacOSX() && T.isMacOSXVersionLT(10, 5))
@@ -267,6 +263,9 @@ void MCObjectFileInfo::initMachOMCObjectFileInfo(const Triple &T) {
   DwarfRangesSection =
       Ctx->getMachOSection("__DWARF", "__debug_ranges", MachO::S_ATTR_DEBUG,
                            SectionKind::getMetadata(), "debug_range");
+  DwarfRnglistsSection =
+      Ctx->getMachOSection("__DWARF", "__debug_rnglists", MachO::S_ATTR_DEBUG,
+                           SectionKind::getMetadata(), "debug_range");
   DwarfMacinfoSection =
       Ctx->getMachOSection("__DWARF", "__debug_macinfo", MachO::S_ATTR_DEBUG,
                            SectionKind::getMetadata(), "debug_macinfo");
@@ -308,158 +307,12 @@ void MCObjectFileInfo::initELFMCObjectFileInfo(const Triple &T, bool Large) {
   case Triple::bpfeb:
     FDECFIEncoding = dwarf::DW_EH_PE_sdata8;
     break;
+  case Triple::hexagon:
+    FDECFIEncoding =
+        PositionIndependent ? dwarf::DW_EH_PE_pcrel : dwarf::DW_EH_PE_absptr;
+    break;
   default:
     FDECFIEncoding = dwarf::DW_EH_PE_pcrel | dwarf::DW_EH_PE_sdata4;
-    break;
-  }
-
-  switch (T.getArch()) {
-  case Triple::arm:
-  case Triple::armeb:
-  case Triple::thumb:
-  case Triple::thumbeb:
-    if (Ctx->getAsmInfo()->getExceptionHandlingType() == ExceptionHandling::ARM)
-      break;
-    // Fallthrough if not using EHABI
-    LLVM_FALLTHROUGH;
-  case Triple::ppc:
-  case Triple::x86:
-    PersonalityEncoding = PositionIndependent
-                              ? dwarf::DW_EH_PE_indirect |
-                                    dwarf::DW_EH_PE_pcrel |
-                                    dwarf::DW_EH_PE_sdata4
-                              : dwarf::DW_EH_PE_absptr;
-    LSDAEncoding = PositionIndependent
-                       ? dwarf::DW_EH_PE_pcrel | dwarf::DW_EH_PE_sdata4
-                       : dwarf::DW_EH_PE_absptr;
-    TTypeEncoding = PositionIndependent
-                        ? dwarf::DW_EH_PE_indirect | dwarf::DW_EH_PE_pcrel |
-                              dwarf::DW_EH_PE_sdata4
-                        : dwarf::DW_EH_PE_absptr;
-    break;
-  case Triple::x86_64:
-    if (PositionIndependent) {
-      PersonalityEncoding =
-          dwarf::DW_EH_PE_indirect | dwarf::DW_EH_PE_pcrel |
-          (Large ? dwarf::DW_EH_PE_sdata8 : dwarf::DW_EH_PE_sdata4);
-      LSDAEncoding = dwarf::DW_EH_PE_pcrel |
-                     (Large ? dwarf::DW_EH_PE_sdata8 : dwarf::DW_EH_PE_sdata4);
-      TTypeEncoding = dwarf::DW_EH_PE_indirect | dwarf::DW_EH_PE_pcrel |
-                      (Large ? dwarf::DW_EH_PE_sdata8 : dwarf::DW_EH_PE_sdata4);
-    } else {
-      PersonalityEncoding =
-          Large ? dwarf::DW_EH_PE_absptr : dwarf::DW_EH_PE_udata4;
-      LSDAEncoding = Large ? dwarf::DW_EH_PE_absptr : dwarf::DW_EH_PE_udata4;
-      TTypeEncoding = Large ? dwarf::DW_EH_PE_absptr : dwarf::DW_EH_PE_udata4;
-    }
-    break;
-  case Triple::hexagon:
-    PersonalityEncoding = dwarf::DW_EH_PE_absptr;
-    LSDAEncoding = dwarf::DW_EH_PE_absptr;
-    FDECFIEncoding = dwarf::DW_EH_PE_absptr;
-    TTypeEncoding = dwarf::DW_EH_PE_absptr;
-    if (PositionIndependent) {
-      PersonalityEncoding |= dwarf::DW_EH_PE_indirect | dwarf::DW_EH_PE_pcrel;
-      LSDAEncoding |= dwarf::DW_EH_PE_pcrel;
-      FDECFIEncoding |= dwarf::DW_EH_PE_pcrel;
-      TTypeEncoding |= dwarf::DW_EH_PE_indirect | dwarf::DW_EH_PE_pcrel;
-    }
-    break;
-  case Triple::aarch64:
-  case Triple::aarch64_be:
-    // The small model guarantees static code/data size < 4GB, but not where it
-    // will be in memory. Most of these could end up >2GB away so even a signed
-    // pc-relative 32-bit address is insufficient, theoretically.
-    if (PositionIndependent) {
-      PersonalityEncoding = dwarf::DW_EH_PE_indirect | dwarf::DW_EH_PE_pcrel |
-        dwarf::DW_EH_PE_sdata8;
-      LSDAEncoding = dwarf::DW_EH_PE_pcrel | dwarf::DW_EH_PE_sdata8;
-      TTypeEncoding = dwarf::DW_EH_PE_indirect | dwarf::DW_EH_PE_pcrel |
-        dwarf::DW_EH_PE_sdata8;
-    } else {
-      PersonalityEncoding = dwarf::DW_EH_PE_absptr;
-      LSDAEncoding = dwarf::DW_EH_PE_absptr;
-      TTypeEncoding = dwarf::DW_EH_PE_absptr;
-    }
-    break;
-  case Triple::lanai:
-    LSDAEncoding = dwarf::DW_EH_PE_absptr;
-    PersonalityEncoding = dwarf::DW_EH_PE_absptr;
-    TTypeEncoding = dwarf::DW_EH_PE_absptr;
-    break;
-  case Triple::mips:
-  case Triple::mipsel:
-  case Triple::mips64:
-  case Triple::mips64el:
-    // MIPS uses indirect pointer to refer personality functions and types, so
-    // that the eh_frame section can be read-only. DW.ref.personality will be
-    // generated for relocation.
-    PersonalityEncoding = dwarf::DW_EH_PE_indirect;
-    // FIXME: The N64 ABI probably ought to use DW_EH_PE_sdata8 but we can't
-    //        identify N64 from just a triple.
-    TTypeEncoding = dwarf::DW_EH_PE_indirect | dwarf::DW_EH_PE_pcrel |
-                    dwarf::DW_EH_PE_sdata4;
-    // We don't support PC-relative LSDA references in GAS so we use the default
-    // DW_EH_PE_absptr for those.
-
-    // FreeBSD must be explicit about the data size and using pcrel since it's
-    // assembler/linker won't do the automatic conversion that the Linux tools
-    // do.
-    if (T.isOSFreeBSD()) {
-      PersonalityEncoding |= dwarf::DW_EH_PE_pcrel | dwarf::DW_EH_PE_sdata4;
-      LSDAEncoding = dwarf::DW_EH_PE_pcrel | dwarf::DW_EH_PE_sdata4;
-    }
-    break;
-  case Triple::ppc64:
-  case Triple::ppc64le:
-    PersonalityEncoding = dwarf::DW_EH_PE_indirect | dwarf::DW_EH_PE_pcrel |
-      dwarf::DW_EH_PE_udata8;
-    LSDAEncoding = dwarf::DW_EH_PE_pcrel | dwarf::DW_EH_PE_udata8;
-    TTypeEncoding = dwarf::DW_EH_PE_indirect | dwarf::DW_EH_PE_pcrel |
-      dwarf::DW_EH_PE_udata8;
-    break;
-  case Triple::sparcel:
-  case Triple::sparc:
-    if (PositionIndependent) {
-      LSDAEncoding = dwarf::DW_EH_PE_pcrel | dwarf::DW_EH_PE_sdata4;
-      PersonalityEncoding = dwarf::DW_EH_PE_indirect | dwarf::DW_EH_PE_pcrel |
-        dwarf::DW_EH_PE_sdata4;
-      TTypeEncoding = dwarf::DW_EH_PE_indirect | dwarf::DW_EH_PE_pcrel |
-        dwarf::DW_EH_PE_sdata4;
-    } else {
-      LSDAEncoding = dwarf::DW_EH_PE_absptr;
-      PersonalityEncoding = dwarf::DW_EH_PE_absptr;
-      TTypeEncoding = dwarf::DW_EH_PE_absptr;
-    }
-    break;
-  case Triple::sparcv9:
-    LSDAEncoding = dwarf::DW_EH_PE_pcrel | dwarf::DW_EH_PE_sdata4;
-    if (PositionIndependent) {
-      PersonalityEncoding = dwarf::DW_EH_PE_indirect | dwarf::DW_EH_PE_pcrel |
-        dwarf::DW_EH_PE_sdata4;
-      TTypeEncoding = dwarf::DW_EH_PE_indirect | dwarf::DW_EH_PE_pcrel |
-        dwarf::DW_EH_PE_sdata4;
-    } else {
-      PersonalityEncoding = dwarf::DW_EH_PE_absptr;
-      TTypeEncoding = dwarf::DW_EH_PE_absptr;
-    }
-    break;
-  case Triple::systemz:
-    // All currently-defined code models guarantee that 4-byte PC-relative
-    // values will be in range.
-    if (PositionIndependent) {
-      PersonalityEncoding = dwarf::DW_EH_PE_indirect | dwarf::DW_EH_PE_pcrel |
-        dwarf::DW_EH_PE_sdata4;
-      LSDAEncoding = dwarf::DW_EH_PE_pcrel | dwarf::DW_EH_PE_sdata4;
-      TTypeEncoding = dwarf::DW_EH_PE_indirect | dwarf::DW_EH_PE_pcrel |
-        dwarf::DW_EH_PE_sdata4;
-    } else {
-      PersonalityEncoding = dwarf::DW_EH_PE_absptr;
-      LSDAEncoding = dwarf::DW_EH_PE_absptr;
-      TTypeEncoding = dwarf::DW_EH_PE_absptr;
-    }
-    break;
-  default:
     break;
   }
 
@@ -529,8 +382,7 @@ void MCObjectFileInfo::initELFMCObjectFileInfo(const Triple &T, bool Large) {
   // MIPS .debug_* sections should have SHT_MIPS_DWARF section type
   // to distinguish among sections contain DWARF and ECOFF debug formats.
   // Sections with ECOFF debug format are obsoleted and marked by SHT_PROGBITS.
-  if (T.getArch() == Triple::mips || T.getArch() == Triple::mipsel ||
-      T.getArch() == Triple::mips64 || T.getArch() == Triple::mips64el)
+  if (T.isMIPS())
     DebugSecType = ELF::SHT_MIPS_DWARF;
 
   // Debug Info Sections.
@@ -579,6 +431,7 @@ void MCObjectFileInfo::initELFMCObjectFileInfo(const Triple &T, bool Large) {
   DwarfStrOffSection =
       Ctx->getELFSection(".debug_str_offsets", DebugSecType, 0);
   DwarfAddrSection = Ctx->getELFSection(".debug_addr", DebugSecType, 0);
+  DwarfRnglistsSection = Ctx->getELFSection(".debug_rnglists", DebugSecType, 0);
 
   // Fission Sections
   DwarfInfoDWOSection =
@@ -596,6 +449,8 @@ void MCObjectFileInfo::initELFMCObjectFileInfo(const Triple &T, bool Large) {
       Ctx->getELFSection(".debug_loc.dwo", DebugSecType, 0);
   DwarfStrOffDWOSection =
       Ctx->getELFSection(".debug_str_offsets.dwo", DebugSecType, 0);
+  DwarfRnglistsDWOSection =
+      Ctx->getELFSection(".debug_rnglists.dwo", DebugSecType, 0);
 
   // DWP Sections
   DwarfCUIndexSection =
@@ -861,24 +716,29 @@ void MCObjectFileInfo::initCOFFMCObjectFileInfo(const Triple &T) {
 }
 
 void MCObjectFileInfo::initWasmMCObjectFileInfo(const Triple &T) {
-  // TODO: Set the section types and flags.
   TextSection = Ctx->getWasmSection(".text", SectionKind::getText());
   DataSection = Ctx->getWasmSection(".data", SectionKind::getData());
 
-  // TODO: Set the section types and flags.
-  DwarfLineSection = Ctx->getWasmSection(".debug_line", SectionKind::getMetadata());
+  DwarfLineSection =
+      Ctx->getWasmSection(".debug_line", SectionKind::getMetadata());
   DwarfLineStrSection =
       Ctx->getWasmSection(".debug_line_str", SectionKind::getMetadata());
-  DwarfStrSection = Ctx->getWasmSection(".debug_str", SectionKind::getMetadata());
-  DwarfLocSection = Ctx->getWasmSection(".debug_loc", SectionKind::getMetadata());
-  DwarfAbbrevSection = Ctx->getWasmSection(".debug_abbrev", SectionKind::getMetadata(), "section_abbrev");
+  DwarfStrSection =
+      Ctx->getWasmSection(".debug_str", SectionKind::getMetadata());
+  DwarfLocSection =
+      Ctx->getWasmSection(".debug_loc", SectionKind::getMetadata());
+  DwarfAbbrevSection =
+      Ctx->getWasmSection(".debug_abbrev", SectionKind::getMetadata());
   DwarfARangesSection = Ctx->getWasmSection(".debug_aranges", SectionKind::getMetadata());
-  DwarfRangesSection = Ctx->getWasmSection(".debug_ranges", SectionKind::getMetadata(), "debug_range");
-  DwarfMacinfoSection = Ctx->getWasmSection(".debug_macinfo", SectionKind::getMetadata(), "debug_macinfo");
+  DwarfRangesSection =
+      Ctx->getWasmSection(".debug_ranges", SectionKind::getMetadata());
+  DwarfMacinfoSection =
+      Ctx->getWasmSection(".debug_macinfo", SectionKind::getMetadata());
   DwarfAddrSection = Ctx->getWasmSection(".debug_addr", SectionKind::getMetadata());
   DwarfCUIndexSection = Ctx->getWasmSection(".debug_cu_index", SectionKind::getMetadata());
   DwarfTUIndexSection = Ctx->getWasmSection(".debug_tu_index", SectionKind::getMetadata());
-  DwarfInfoSection = Ctx->getWasmSection(".debug_info", SectionKind::getMetadata(), "section_info");
+  DwarfInfoSection =
+      Ctx->getWasmSection(".debug_info", SectionKind::getMetadata());
   DwarfFrameSection = Ctx->getWasmSection(".debug_frame", SectionKind::getMetadata());
   DwarfPubNamesSection = Ctx->getWasmSection(".debug_pubnames", SectionKind::getMetadata());
   DwarfPubTypesSection = Ctx->getWasmSection(".debug_pubtypes", SectionKind::getMetadata());
@@ -898,8 +758,7 @@ void MCObjectFileInfo::InitMCObjectFileInfo(const Triple &TheTriple, bool PIC,
   SupportsCompactUnwindWithoutEHFrame = false;
   OmitDwarfIfHaveCompactUnwind = false;
 
-  PersonalityEncoding = LSDAEncoding = FDECFIEncoding = TTypeEncoding =
-      dwarf::DW_EH_PE_absptr;
+  FDECFIEncoding = dwarf::DW_EH_PE_absptr;
 
   CompactUnwindDwarfEHFrameOnly = 0;
 
@@ -940,6 +799,38 @@ void MCObjectFileInfo::InitMCObjectFileInfo(const Triple &TheTriple, bool PIC,
 }
 
 MCSection *MCObjectFileInfo::getDwarfTypesSection(uint64_t Hash) const {
-  return Ctx->getELFSection(".debug_types", ELF::SHT_PROGBITS, ELF::SHF_GROUP,
-                            0, utostr(Hash));
+  switch (TT.getObjectFormat()) {
+  case Triple::ELF:
+    return Ctx->getELFSection(".debug_types", ELF::SHT_PROGBITS, ELF::SHF_GROUP,
+                              0, utostr(Hash));
+  case Triple::MachO:
+  case Triple::COFF:
+  case Triple::Wasm:
+  case Triple::UnknownObjectFormat:
+    report_fatal_error("Cannot get DWARF types section for this object file "
+                       "format: not implemented.");
+    break;
+  }
+  llvm_unreachable("Unknown ObjectFormatType");
+}
+
+MCSection *
+MCObjectFileInfo::getStackSizesSection(const MCSection &TextSec) const {
+  if (Env != IsELF)
+    return StackSizesSection;
+
+  const MCSectionELF &ElfSec = static_cast<const MCSectionELF &>(TextSec);
+  unsigned Flags = ELF::SHF_LINK_ORDER;
+  StringRef GroupName;
+  if (const MCSymbol *Group = ElfSec.getGroup()) {
+    GroupName = Group->getName();
+    Flags |= ELF::SHF_GROUP;
+  }
+
+  const MCSymbol *Link = TextSec.getBeginSymbol();
+  auto It = StackSizesUniquing.insert({Link, StackSizesUniquing.size()});
+  unsigned UniqueID = It.first->second;
+
+  return Ctx->getELFSection(".stack_sizes", ELF::SHT_PROGBITS, Flags, 0,
+                            GroupName, UniqueID, cast<MCSymbolELF>(Link));
 }

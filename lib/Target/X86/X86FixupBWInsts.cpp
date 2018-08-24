@@ -155,18 +155,18 @@ bool FixupBWInstPass::runOnMachineFunction(MachineFunction &MF) {
   MLI = &getAnalysis<MachineLoopInfo>();
   LiveRegs.init(TII->getRegisterInfo());
 
-  DEBUG(dbgs() << "Start X86FixupBWInsts\n";);
+  LLVM_DEBUG(dbgs() << "Start X86FixupBWInsts\n";);
 
   // Process all basic blocks.
   for (auto &MBB : MF)
     processBasicBlock(MF, MBB);
 
-  DEBUG(dbgs() << "End X86FixupBWInsts\n";);
+  LLVM_DEBUG(dbgs() << "End X86FixupBWInsts\n";);
 
   return true;
 }
 
-/// \brief Check if after \p OrigMI the only portion of super register
+/// Check if after \p OrigMI the only portion of super register
 /// of the destination register of \p OrigMI that is alive is that
 /// destination register.
 ///
@@ -288,7 +288,7 @@ MachineInstr *FixupBWInstPass::tryReplaceLoad(unsigned New32BitOpcode,
   for (unsigned i = 1; i < NumArgs; ++i)
     MIB.add(MI->getOperand(i));
 
-  MIB->setMemRefs(MI->memoperands_begin(), MI->memoperands_end());
+  MIB.setMemRefs(MI->memoperands());
 
   return MIB;
 }

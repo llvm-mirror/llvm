@@ -113,7 +113,7 @@ void CriticalAntiDepBreaker::Observe(MachineInstr &MI, unsigned Count,
   // FIXME: It may be possible to remove the isKill() restriction once PR18663
   // has been properly fixed. There can be value in processing kills as seen in
   // the AggressiveAntiDepBreaker class.
-  if (MI.isDebugValue() || MI.isKill())
+  if (MI.isDebugInstr() || MI.isKill())
     return;
   assert(Count < InsertPosIndex && "Instruction index out of expected range!");
 
@@ -461,14 +461,14 @@ BreakAntiDependencies(const std::vector<SUnit> &SUnits,
 
 #ifndef NDEBUG
   {
-    DEBUG(dbgs() << "Critical path has total latency "
-          << (Max->getDepth() + Max->Latency) << "\n");
-    DEBUG(dbgs() << "Available regs:");
+    LLVM_DEBUG(dbgs() << "Critical path has total latency "
+                      << (Max->getDepth() + Max->Latency) << "\n");
+    LLVM_DEBUG(dbgs() << "Available regs:");
     for (unsigned Reg = 0; Reg < TRI->getNumRegs(); ++Reg) {
       if (KillIndices[Reg] == ~0u)
-        DEBUG(dbgs() << " " << printReg(Reg, TRI));
+        LLVM_DEBUG(dbgs() << " " << printReg(Reg, TRI));
     }
-    DEBUG(dbgs() << '\n');
+    LLVM_DEBUG(dbgs() << '\n');
   }
 #endif
 
@@ -530,11 +530,11 @@ BreakAntiDependencies(const std::vector<SUnit> &SUnits,
     // Kill instructions can define registers but are really nops, and there
     // might be a real definition earlier that needs to be paired with uses
     // dominated by this kill.
-    
+
     // FIXME: It may be possible to remove the isKill() restriction once PR18663
     // has been properly fixed. There can be value in processing kills as seen
     // in the AggressiveAntiDepBreaker class.
-    if (MI.isDebugValue() || MI.isKill())
+    if (MI.isDebugInstr() || MI.isKill())
       continue;
 
     // Check if this instruction has a dependence on the critical path that
@@ -645,10 +645,10 @@ BreakAntiDependencies(const std::vector<SUnit> &SUnits,
                                                      AntiDepReg,
                                                      LastNewReg[AntiDepReg],
                                                      RC, ForbidRegs)) {
-        DEBUG(dbgs() << "Breaking anti-dependence edge on "
-                     << printReg(AntiDepReg, TRI) << " with "
-                     << RegRefs.count(AntiDepReg) << " references"
-                     << " using " << printReg(NewReg, TRI) << "!\n");
+        LLVM_DEBUG(dbgs() << "Breaking anti-dependence edge on "
+                          << printReg(AntiDepReg, TRI) << " with "
+                          << RegRefs.count(AntiDepReg) << " references"
+                          << " using " << printReg(NewReg, TRI) << "!\n");
 
         // Update the references to the old register to refer to the new
         // register.

@@ -385,7 +385,7 @@ bool formDedicatedExitBlocks(Loop *L, DominatorTree *DT, LoopInfo *LI,
 bool formLCSSAForInstructions(SmallVectorImpl<Instruction *> &Worklist,
                               DominatorTree &DT, LoopInfo &LI);
 
-/// \brief Put loop into LCSSA form.
+/// Put loop into LCSSA form.
 ///
 /// Looks at all instructions in the loop which have uses outside of the
 /// current loop. For each, an LCSSA PHI node is inserted and the uses outside
@@ -398,7 +398,7 @@ bool formLCSSAForInstructions(SmallVectorImpl<Instruction *> &Worklist,
 /// Returns true if any modifications are made to the loop.
 bool formLCSSA(Loop &L, DominatorTree &DT, LoopInfo *LI, ScalarEvolution *SE);
 
-/// \brief Put a loop nest into LCSSA form.
+/// Put a loop nest into LCSSA form.
 ///
 /// This recursively forms LCSSA for a loop nest.
 ///
@@ -410,7 +410,7 @@ bool formLCSSA(Loop &L, DominatorTree &DT, LoopInfo *LI, ScalarEvolution *SE);
 bool formLCSSARecursively(Loop &L, DominatorTree &DT, LoopInfo *LI,
                           ScalarEvolution *SE);
 
-/// \brief Walk the specified region of the CFG (defined by all blocks
+/// Walk the specified region of the CFG (defined by all blocks
 /// dominated by the specified block, and that are in the current loop) in
 /// reverse depth first order w.r.t the DominatorTree. This allows us to visit
 /// uses before definitions, allowing us to sink a loop body in one pass without
@@ -423,7 +423,7 @@ bool sinkRegion(DomTreeNode *, AliasAnalysis *, LoopInfo *, DominatorTree *,
                 AliasSetTracker *, LoopSafetyInfo *,
                 OptimizationRemarkEmitter *ORE);
 
-/// \brief Walk the specified region of the CFG (defined by all blocks
+/// Walk the specified region of the CFG (defined by all blocks
 /// dominated by the specified block, and that are in the current loop) in depth
 /// first order w.r.t the DominatorTree.  This allows us to visit definitions
 /// before uses, allowing us to hoist a loop body in one pass without iteration.
@@ -449,7 +449,7 @@ bool hoistRegion(DomTreeNode *, AliasAnalysis *, LoopInfo *, DominatorTree *,
 void deleteDeadLoop(Loop *L, DominatorTree *DT, ScalarEvolution *SE,
                     LoopInfo *LI);
 
-/// \brief Try to promote memory values to scalars by sinking stores out of
+/// Try to promote memory values to scalars by sinking stores out of
 /// the loop and moving loads to before the loop.  We do this by looping over
 /// the stores in the loop, looking for stores to Must pointers which are
 /// loop invariant. It takes a set of must-alias values, Loop exit blocks
@@ -470,10 +470,10 @@ bool promoteLoopAccessesToScalars(const SmallSetVector<Value *, 8> &,
 SmallVector<DomTreeNode *, 16> collectChildrenInLoop(DomTreeNode *N,
                                                      const Loop *CurLoop);
 
-/// \brief Returns the instructions that use values defined in the loop.
+/// Returns the instructions that use values defined in the loop.
 SmallVector<Instruction *, 8> findDefsUsedOutsideOfLoop(Loop *L);
 
-/// \brief Find string metadata for loop
+/// Find string metadata for loop
 ///
 /// If it has a value (e.g. {"llvm.distribute", 1} return the value as an
 /// operand or null otherwise.  If the string metadata is not found return
@@ -481,14 +481,18 @@ SmallVector<Instruction *, 8> findDefsUsedOutsideOfLoop(Loop *L);
 Optional<const MDOperand *> findStringMetadataForLoop(Loop *TheLoop,
                                                       StringRef Name);
 
-/// \brief Set input string into loop metadata by keeping other values intact.
+/// Set input string into loop metadata by keeping other values intact.
 void addStringMetadataToLoop(Loop *TheLoop, const char *MDString,
                              unsigned V = 0);
 
-/// \brief Get a loop's estimated trip count based on branch weight metadata.
+/// Get a loop's estimated trip count based on branch weight metadata.
 /// Returns 0 when the count is estimated to be 0, or None when a meaningful
 /// estimate can not be made.
 Optional<unsigned> getLoopEstimatedTripCount(Loop *L);
+
+/// Check inner loop (L) backedge count is known to be invariant on all iterations
+/// of its outer loop. If the loop has no parent, this is trivially true.
+bool hasIterationCountInvariantInParent(Loop *L, ScalarEvolution &SE);
 
 /// Helper to consistently add the set of standard passes to a loop pass's \c
 /// AnalysisUsage.
@@ -497,16 +501,18 @@ Optional<unsigned> getLoopEstimatedTripCount(Loop *L);
 /// getAnalysisUsage.
 void getLoopAnalysisUsage(AnalysisUsage &AU);
 
-/// Returns true if the hoister and sinker can handle this instruction.
-/// If SafetyInfo is null, we are checking for sinking instructions from
-/// preheader to loop body (no speculation).
-/// If SafetyInfo is not null, we are checking for hoisting/sinking
-/// instructions from loop body to preheader/exit. Check if the instruction
-/// can execute speculatively.
+/// Returns true if is legal to hoist or sink this instruction disregarding the
+/// possible introduction of faults.  Reasoning about potential faulting
+/// instructions is the responsibility of the caller since it is challenging to
+/// do efficiently from within this routine.
+/// \p TargetExecutesOncePerLoop is true only when it is guaranteed that the
+/// target executes at most once per execution of the loop body.  This is used
+/// to assess the legality of duplicating atomic loads.  Generally, this is
+/// true when moving out of loop and not true when moving into loops.  
 /// If \p ORE is set use it to emit optimization remarks.
 bool canSinkOrHoistInst(Instruction &I, AAResults *AA, DominatorTree *DT,
                         Loop *CurLoop, AliasSetTracker *CurAST,
-                        LoopSafetyInfo *SafetyInfo,
+                        bool TargetExecutesOncePerLoop,
                         OptimizationRemarkEmitter *ORE = nullptr);
 
 /// Generates an ordered vector reduction using extracts to reduce the value.

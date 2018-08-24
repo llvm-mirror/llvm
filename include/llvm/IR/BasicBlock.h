@@ -126,7 +126,7 @@ public:
                         static_cast<const BasicBlock *>(this)->getTerminator());
   }
 
-  /// Returns the call instruction calling @llvm.experimental.deoptimize
+  /// Returns the call instruction calling \@llvm.experimental.deoptimize
   /// prior to the terminating return instruction of this basic block, if such
   /// a call is present.  Otherwise, returns null.
   const CallInst *getTerminatingDeoptimizeCall() const;
@@ -432,6 +432,10 @@ private:
 
 // Create wrappers for C Binding types (see CBindingWrapping.h).
 DEFINE_SIMPLE_CONVERSION_FUNCTIONS(BasicBlock, LLVMBasicBlockRef)
+
+/// Advance \p It while it points to a debug instruction and return the result.
+/// This assumes that \p It is not at the end of a block.
+BasicBlock::iterator skipDebugIntrinsics(BasicBlock::iterator It);
 
 } // end namespace llvm
 

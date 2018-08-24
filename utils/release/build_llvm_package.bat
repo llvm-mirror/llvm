@@ -8,7 +8,7 @@ REM Usage: build_llvm_package.bat <revision>
 
 REM Prerequisites:
 REM
-REM   Visual Studio 2017, CMake, Ninja, SVN, GNUWin32, 
+REM   Visual Studio 2017, CMake, Ninja, SVN, GNUWin32,
 REM   NSIS with the strlen_8192 patch,
 REM   Visual Studio 2017 SDK and Nuget (for the clang-format plugin),
 REM   Perl (for the OpenMP run-time).
@@ -19,8 +19,8 @@ set vsdevcmd=C:\Program Files (x86)\Microsoft Visual Studio\2017\Professional\Co
 
 set revision=%1
 set branch=trunk
-set package_version=7.0.0-r%revision%
-set clang_format_vs_version=7.0.0.%revision%
+set package_version=8.0.0-r%revision%
+set clang_format_vs_version=8.0.0.%revision%
 set build_dir=llvm_package_%revision%
 
 echo Branch: %branch%
@@ -40,7 +40,7 @@ svn.exe export -r %revision% http://llvm.org/svn/llvm-project/cfe/%branch% llvm/
 svn.exe export -r %revision% http://llvm.org/svn/llvm-project/clang-tools-extra/%branch% llvm/tools/clang/tools/extra || exit /b
 svn.exe export -r %revision% http://llvm.org/svn/llvm-project/lld/%branch% llvm/tools/lld || exit /b
 svn.exe export -r %revision% http://llvm.org/svn/llvm-project/compiler-rt/%branch% llvm/projects/compiler-rt || exit /b
-REM svn.exe export -r %revision% http://llvm.org/svn/llvm-project/openmp/%branch% llvm/projects/openmp || exit /b
+svn.exe export -r %revision% http://llvm.org/svn/llvm-project/openmp/%branch% llvm/projects/openmp || exit /b
 
 
 REM Setting CMAKE_CL_SHOWINCLUDES_PREFIX to work around PR27226.
@@ -56,7 +56,7 @@ mkdir build32_stage0
 cd build32_stage0
 REM Work around VS2017 bug by using MinSizeRel.
 cmake -GNinja %cmake_flags% -DCMAKE_BUILD_TYPE=MinSizeRel ..\llvm || exit /b
-ninja all || exit /b
+ninja all || ninja all || ninja all || exit /b
 ninja check || ninja check || ninja check || exit /b
 ninja check-clang || ninja check-clang || ninja check-clang ||  exit /b
 cd..
@@ -66,7 +66,7 @@ cd build32
 set CC=..\build32_stage0\bin\clang-cl
 set CXX=..\build32_stage0\bin\clang-cl
 cmake -GNinja %cmake_flags% ..\llvm || exit /b
-ninja all || exit /b
+ninja all || ninja all || ninja all || exit /b
 ninja check || ninja check || ninja check || exit /b
 ninja check-clang || ninja check-clang || ninja check-clang ||  exit /b
 ninja package || exit /b
@@ -91,7 +91,7 @@ mkdir build64_stage0
 cd build64_stage0
 REM Work around VS2017 bug by using MinSizeRel.
 cmake -GNinja %cmake_flags% -DCMAKE_BUILD_TYPE=MinSizeRel ..\llvm || exit /b
-ninja all || exit /b
+ninja all || ninja all || ninja all || exit /b
 ninja check || ninja check || ninja check || exit /b
 ninja check-clang || ninja check-clang || ninja check-clang ||  exit /b
 cd..
@@ -101,7 +101,7 @@ cd build64
 set CC=..\build64_stage0\bin\clang-cl
 set CXX=..\build64_stage0\bin\clang-cl
 cmake -GNinja %cmake_flags% ..\llvm || exit /b
-ninja all || exit /b
+ninja all || ninja all || ninja all || exit /b
 ninja check || ninja check || ninja check || exit /b
 ninja check-clang || ninja check-clang || ninja check-clang ||  exit /b
 ninja package || exit /b

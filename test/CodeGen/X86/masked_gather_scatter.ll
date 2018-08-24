@@ -2857,11 +2857,11 @@ define void @test_scatter_setcc_split(double* %base, <16 x i32> %ind, <16 x i32>
 ; KNL_64-LABEL: test_scatter_setcc_split:
 ; KNL_64:       # %bb.0:
 ; KNL_64-NEXT:    vextractf64x4 $1, %zmm0, %ymm4
-; KNL_64-NEXT:    vptestnmd %zmm1, %zmm1, %k1
-; KNL_64-NEXT:    vextracti64x4 $1, %zmm1, %ymm1
+; KNL_64-NEXT:    vextracti64x4 $1, %zmm1, %ymm5
+; KNL_64-NEXT:    vptestnmd %zmm5, %zmm5, %k1
 ; KNL_64-NEXT:    vptestnmd %zmm1, %zmm1, %k2
-; KNL_64-NEXT:    vscatterdpd %zmm3, (%rdi,%ymm4,8) {%k2}
-; KNL_64-NEXT:    vscatterdpd %zmm2, (%rdi,%ymm0,8) {%k1}
+; KNL_64-NEXT:    vscatterdpd %zmm2, (%rdi,%ymm0,8) {%k2}
+; KNL_64-NEXT:    vscatterdpd %zmm3, (%rdi,%ymm4,8) {%k1}
 ; KNL_64-NEXT:    vzeroupper
 ; KNL_64-NEXT:    retq
 ;
@@ -2877,11 +2877,11 @@ define void @test_scatter_setcc_split(double* %base, <16 x i32> %ind, <16 x i32>
 ; KNL_32-NEXT:    vmovapd 72(%ebp), %zmm3
 ; KNL_32-NEXT:    movl 8(%ebp), %eax
 ; KNL_32-NEXT:    vextractf64x4 $1, %zmm0, %ymm4
-; KNL_32-NEXT:    vptestnmd %zmm1, %zmm1, %k1
-; KNL_32-NEXT:    vextracti64x4 $1, %zmm1, %ymm1
+; KNL_32-NEXT:    vextracti64x4 $1, %zmm1, %ymm5
+; KNL_32-NEXT:    vptestnmd %zmm5, %zmm5, %k1
 ; KNL_32-NEXT:    vptestnmd %zmm1, %zmm1, %k2
-; KNL_32-NEXT:    vscatterdpd %zmm3, (%eax,%ymm4,8) {%k2}
-; KNL_32-NEXT:    vscatterdpd %zmm2, (%eax,%ymm0,8) {%k1}
+; KNL_32-NEXT:    vscatterdpd %zmm2, (%eax,%ymm0,8) {%k2}
+; KNL_32-NEXT:    vscatterdpd %zmm3, (%eax,%ymm4,8) {%k1}
 ; KNL_32-NEXT:    movl %ebp, %esp
 ; KNL_32-NEXT:    popl %ebp
 ; KNL_32-NEXT:    .cfi_def_cfa %esp, 4
@@ -2891,11 +2891,11 @@ define void @test_scatter_setcc_split(double* %base, <16 x i32> %ind, <16 x i32>
 ; SKX-LABEL: test_scatter_setcc_split:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vextractf64x4 $1, %zmm0, %ymm4
-; SKX-NEXT:    vptestnmd %ymm1, %ymm1, %k1
-; SKX-NEXT:    vextracti64x4 $1, %zmm1, %ymm1
+; SKX-NEXT:    vextracti64x4 $1, %zmm1, %ymm5
+; SKX-NEXT:    vptestnmd %ymm5, %ymm5, %k1
 ; SKX-NEXT:    vptestnmd %ymm1, %ymm1, %k2
-; SKX-NEXT:    vscatterdpd %zmm3, (%rdi,%ymm4,8) {%k2}
-; SKX-NEXT:    vscatterdpd %zmm2, (%rdi,%ymm0,8) {%k1}
+; SKX-NEXT:    vscatterdpd %zmm2, (%rdi,%ymm0,8) {%k2}
+; SKX-NEXT:    vscatterdpd %zmm3, (%rdi,%ymm4,8) {%k1}
 ; SKX-NEXT:    vzeroupper
 ; SKX-NEXT:    retq
 ;
@@ -2911,11 +2911,11 @@ define void @test_scatter_setcc_split(double* %base, <16 x i32> %ind, <16 x i32>
 ; SKX_32-NEXT:    vmovapd 72(%ebp), %zmm3
 ; SKX_32-NEXT:    movl 8(%ebp), %eax
 ; SKX_32-NEXT:    vextractf64x4 $1, %zmm0, %ymm4
-; SKX_32-NEXT:    vptestnmd %ymm1, %ymm1, %k1
-; SKX_32-NEXT:    vextracti64x4 $1, %zmm1, %ymm1
+; SKX_32-NEXT:    vextracti64x4 $1, %zmm1, %ymm5
+; SKX_32-NEXT:    vptestnmd %ymm5, %ymm5, %k1
 ; SKX_32-NEXT:    vptestnmd %ymm1, %ymm1, %k2
-; SKX_32-NEXT:    vscatterdpd %zmm3, (%eax,%ymm4,8) {%k2}
-; SKX_32-NEXT:    vscatterdpd %zmm2, (%eax,%ymm0,8) {%k1}
+; SKX_32-NEXT:    vscatterdpd %zmm2, (%eax,%ymm0,8) {%k2}
+; SKX_32-NEXT:    vscatterdpd %zmm3, (%eax,%ymm4,8) {%k1}
 ; SKX_32-NEXT:    movl %ebp, %esp
 ; SKX_32-NEXT:    popl %ebp
 ; SKX_32-NEXT:    .cfi_def_cfa %esp, 4
@@ -2927,4 +2927,55 @@ define void @test_scatter_setcc_split(double* %base, <16 x i32> %ind, <16 x i32>
   %mask = icmp eq <16 x i32> %cmp, zeroinitializer
   call void @llvm.masked.scatter.v16f64.v16p0f64(<16 x double> %src0, <16 x double*> %gep.random, i32 4, <16 x i1> %mask)
   ret void
+}
+
+; This test case previously triggered an infinite loop when the two gathers became identical after DAG combine removed the sign extend.
+define <16 x float> @test_sext_cse(float* %base, <16 x i32> %ind, <16 x i32>* %foo) {
+; KNL_64-LABEL: test_sext_cse:
+; KNL_64:       # %bb.0:
+; KNL_64-NEXT:    vmovaps %zmm0, (%rsi)
+; KNL_64-NEXT:    kxnorw %k0, %k0, %k1
+; KNL_64-NEXT:    vgatherdps (%rdi,%zmm0,4), %zmm1 {%k1}
+; KNL_64-NEXT:    vaddps %zmm1, %zmm1, %zmm0
+; KNL_64-NEXT:    retq
+;
+; KNL_32-LABEL: test_sext_cse:
+; KNL_32:       # %bb.0:
+; KNL_32-NEXT:    movl {{[0-9]+}}(%esp), %eax
+; KNL_32-NEXT:    movl {{[0-9]+}}(%esp), %ecx
+; KNL_32-NEXT:    vmovaps %zmm0, (%ecx)
+; KNL_32-NEXT:    kxnorw %k0, %k0, %k1
+; KNL_32-NEXT:    vgatherdps (%eax,%zmm0,4), %zmm1 {%k1}
+; KNL_32-NEXT:    vaddps %zmm1, %zmm1, %zmm0
+; KNL_32-NEXT:    retl
+;
+; SKX-LABEL: test_sext_cse:
+; SKX:       # %bb.0:
+; SKX-NEXT:    vmovaps %zmm0, (%rsi)
+; SKX-NEXT:    kxnorw %k0, %k0, %k1
+; SKX-NEXT:    vgatherdps (%rdi,%zmm0,4), %zmm1 {%k1}
+; SKX-NEXT:    vaddps %zmm1, %zmm1, %zmm0
+; SKX-NEXT:    retq
+;
+; SKX_32-LABEL: test_sext_cse:
+; SKX_32:       # %bb.0:
+; SKX_32-NEXT:    movl {{[0-9]+}}(%esp), %eax
+; SKX_32-NEXT:    movl {{[0-9]+}}(%esp), %ecx
+; SKX_32-NEXT:    vmovaps %zmm0, (%ecx)
+; SKX_32-NEXT:    kxnorw %k0, %k0, %k1
+; SKX_32-NEXT:    vgatherdps (%eax,%zmm0,4), %zmm1 {%k1}
+; SKX_32-NEXT:    vaddps %zmm1, %zmm1, %zmm0
+; SKX_32-NEXT:    retl
+  %broadcast.splatinsert = insertelement <16 x float*> undef, float* %base, i32 0
+  %broadcast.splat = shufflevector <16 x float*> %broadcast.splatinsert, <16 x float*> undef, <16 x i32> zeroinitializer
+
+  %sext_ind = sext <16 x i32> %ind to <16 x i64>
+  %gep.random = getelementptr float, <16 x float*> %broadcast.splat, <16 x i64> %sext_ind
+
+  store <16 x i32> %ind, <16 x i32>* %foo
+  %res = call <16 x float> @llvm.masked.gather.v16f32.v16p0f32(<16 x float*> %gep.random, i32 4, <16 x i1> <i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true>, <16 x float> undef)
+  %gep.random2 = getelementptr float, <16 x float*> %broadcast.splat, <16 x i32> %ind
+  %res2 = call <16 x float> @llvm.masked.gather.v16f32.v16p0f32(<16 x float*> %gep.random2, i32 4, <16 x i1> <i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true>, <16 x float> undef)
+  %res3 = fadd <16 x float> %res2, %res
+  ret <16 x float>%res3
 }

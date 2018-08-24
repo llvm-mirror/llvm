@@ -120,9 +120,51 @@ def G_VAARG : GenericInstruction {
   let mayStore = 1;
 }
 
+def G_CTLZ : GenericInstruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins type0:$src);
+  let hasSideEffects = 0;
+}
+
+def G_CTLZ_ZERO_UNDEF : GenericInstruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins type0:$src);
+  let hasSideEffects = 0;
+}
+
+def G_CTTZ : GenericInstruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins type0:$src);
+  let hasSideEffects = 0;
+}
+
+def G_CTTZ_ZERO_UNDEF : GenericInstruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins type0:$src);
+  let hasSideEffects = 0;
+}
+
+def G_CTPOP : GenericInstruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins type0:$src);
+  let hasSideEffects = 0;
+}
+
 def G_BSWAP : GenericInstruction {
   let OutOperandList = (outs type0:$dst);
   let InOperandList = (ins type0:$src);
+  let hasSideEffects = 0;
+}
+
+def G_ADDRSPACE_CAST : GenericInstruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins type1:$src);
+  let hasSideEffects = 0;
+}
+
+def G_BLOCK_ADDR : GenericInstruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins unknown:$ba);
   let hasSideEffects = 0;
 }
 
@@ -476,6 +518,22 @@ def G_FLOG2 : GenericInstruction {
 
 // Generic load. Expects a MachineMemOperand in addition to explicit operands.
 def G_LOAD : GenericInstruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins ptype1:$addr);
+  let hasSideEffects = 0;
+  let mayLoad = 1;
+}
+
+// Generic sign-extended load. Expects a MachineMemOperand in addition to explicit operands.
+def G_SEXTLOAD : GenericInstruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins ptype1:$addr);
+  let hasSideEffects = 0;
+  let mayLoad = 1;
+}
+
+// Generic zero-extended load. Expects a MachineMemOperand in addition to explicit operands.
+def G_ZEXTLOAD : GenericInstruction {
   let OutOperandList = (outs type0:$dst);
   let InOperandList = (ins ptype1:$addr);
   let hasSideEffects = 0;
