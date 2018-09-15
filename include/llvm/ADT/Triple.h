@@ -621,6 +621,30 @@ public:
   /// Tests whether the target is Android
   bool isAndroid() const { return getEnvironment() == Triple::Android; }
 
+  /// Tests whether the target is an EABI variant
+  bool isEABI() const {
+      return getEnvironment() == Triple::GNUEABI ||
+             getEnvironment() == Triple::GNUEABIHF ||
+             getEnvironment() == Triple::EABI ||
+             getEnvironment() == Triple::EABIHF ||
+             getEnvironment() == Triple::MuslEABI ||
+             getEnvironment() == Triple::MuslEABIHF;
+  }
+
+  /// Tests whether the target is a hard-float EABI variant
+  bool isHardFloatEABI() const {
+      return getEnvironment() == Triple::GNUEABIHF ||
+             getEnvironment() == Triple::EABIHF ||
+             getEnvironment() == Triple::MuslEABIHF;
+  }
+
+  /// Tests whether the target is a soft-float EABI variant
+  bool isSoftFloatEABI() const {
+      return getEnvironment() == Triple::GNUEABI ||
+             getEnvironment() == Triple::EABI ||
+             getEnvironment() == Triple::MuslEABI;
+  }
+
   bool isAndroidVersionLT(unsigned Major) const {
     assert(isAndroid() && "Not an Android triple!");
 
@@ -751,6 +775,24 @@ public:
   /// \returns A new triple with a 64-bit architecture or an unknown
   ///          architecture if no such variant can be found.
   llvm::Triple get64BitArchVariant() const;
+
+  /// Form a triple with a hard-float variant of the current architecture.
+  ///
+  /// This can be used to move across "families" of architectures where useful.
+  ///
+  /// \returns A new triple with a hard float variant of the current
+  ///          architecture or an unknown architecture if no such variant
+  ///          can be found.
+  llvm::Triple getHardFloatArchVariant() const;
+
+  /// Form a triple with a soft-float variant of the current architecture.
+  ///
+  /// This can be used to move across "families" of architectures where useful.
+  ///
+  /// \returns A new triple with a soft float variant of the current
+  ///          architecture or an unknown architecture if no such variant
+  ///          can be found.
+  llvm::Triple getSoftFloatArchVariant() const;
 
   /// Form a triple with a big endian variant of the current architecture.
   ///
