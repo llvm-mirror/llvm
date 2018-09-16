@@ -1390,6 +1390,65 @@ Triple Triple::get64BitArchVariant() const {
   return T;
 }
 
+Triple Triple::getHardFloatArchVariant() const {
+  Triple T(*this);
+  // A few architectures are guaranteed to *always* be hard-float.
+  switch (getArch()) {
+  case Triple::aarch64:
+  case Triple::aarch64_be:
+  case Triple::sparcv9:
+  case Triple::x86_64:
+    // Always hard-float
+    return T;
+  }
+
+  // Hard-float vs soft-float triples are normally distinguished by
+  // environment rather than architecture (i.e. GNUEABI vs GNUEABIHF).
+  switch (getEnvironment()) {
+  case Triple::EABIHF:
+  case Triple::GNUEABIHF:
+  case Triple::MuslEABIHF:
+    // Already hard-float.
+    break;
+  case Triple::EABI:     T.setEnvironment(Triple::EABIHF);     break;
+  case Triple::GNUEABI:  T.setEnvironment(Triple::GNUEABIHF);  break;
+  case Triple::MuslEABI: T.setEnvironment(Triple::MuslEABIHF); break;
+  default:
+    T.setArch(UnknownArch);
+  }
+  return T;
+}
+
+Triple Triple::getSoftFloatArchVariant() const {
+  Triple T(*this);
+  // A few architectures are guaranteed to *always* be hard-float.
+  switch (getArch()) {
+  case Triple::aarch64:
+  case Triple::aarch64_be:
+  case Triple::sparcv9:
+  case Triple::x86_64:
+    // No soft-float variant.
+    T.setArch(UnknownArch);
+    return T;
+  }
+
+  // Hard-float vs soft-float triples are normally distinguished by
+  // environment rather than architecture (i.e. GNUEABI vs GNUEABIHF).
+  switch (getEnvironment()) {
+  case Triple::EABI:
+  case Triple::GNUEABI:
+  case Triple::MuslEABI:
+    // Already soft-float.
+    break;
+  case Triple::EABIHF:     T.setEnvironment(Triple::EABI);     break;
+  case Triple::GNUEABIHF:  T.setEnvironment(Triple::GNUEABI);  break;
+  case Triple::MuslEABIHF: T.setEnvironment(Triple::MuslEABI); break;
+  default:
+    T.setArch(UnknownArch);
+  }
+  return T;
+}
+
 Triple Triple::getBigEndianArchVariant() const {
   Triple T(*this);
   // Already big endian.
