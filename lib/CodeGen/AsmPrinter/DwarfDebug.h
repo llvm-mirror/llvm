@@ -563,6 +563,9 @@ class DwarfDebug : public DebugHandlerBase {
   /// Emit the reference to the section.
   void emitSectionReference(const DwarfCompileUnit &CU);
 
+  // Emit the BTF sections
+  void emitBTFSection();
+
 protected:
   /// Gather pre-function debug information.
   void beginFunctionImpl(const MachineFunction *MF) override;
