@@ -302,10 +302,11 @@ static void hoistLoopToNewParent(Loop &L, BasicBlock &Preheader,
     formLCSSA(*OldContainingL, DT, &LI, nullptr);
 
     // We shouldn't need to form dedicated exits because the exit introduced
-    // here is the (just split by unswitching) preheader. As such, it is
-    // necessarily dedicated.
-    assert(OldContainingL->hasDedicatedExits() &&
-           "Unexpected predecessor of hoisted loop preheader!");
+    // here is the (just split by unswitching) preheader. However, after trivial
+    // unswitching it is possible to get new non-dedicated exits out of parent
+    // loop so let's conservatively form dedicated exit blocks and figure out
+    // if we can optimize later.
+    formDedicatedExitBlocks(OldContainingL, &DT, &LI, /*PreserveLCSSA*/ true);
   }
 }
 
@@ -482,6 +483,7 @@ static bool unswitchTrivialBranch(Loop &L, BranchInst &BI, DominatorTree &DT,
   if (FullUnswitch)
     hoistLoopToNewParent(L, *NewPH, DT, LI);
 
+  LLVM_DEBUG(dbgs() << "    done: unswitching trivial branch...\n");
   ++NumTrivial;
   ++NumBranches;
   return true;
@@ -539,7 +541,7 @@ static bool unswitchTrivialSwitch(Loop &L, SwitchInst &SI, DominatorTree &DT,
   else if (ExitCaseIndices.empty())
     return false;
 
-  LLVM_DEBUG(dbgs() << "    unswitching trivial cases...\n");
+  LLVM_DEBUG(dbgs() << "    unswitching trivial switch...\n");
 
   // We may need to invalidate SCEVs for the outermost loop reached by any of
   // the exits.
@@ -739,6 +741,7 @@ static bool unswitchTrivialSwitch(Loop &L, SwitchInst &SI, DominatorTree &DT,
 
   ++NumTrivial;
   ++NumSwitches;
+  LLVM_DEBUG(dbgs() << "    done: unswitching trivial switch...\n");
   return true;
 }
 
@@ -1262,11 +1265,10 @@ static void buildClonedLoops(Loop &OrigL, ArrayRef<BasicBlock *> ExitBlocks,
   // matter as we're just trying to build up the map from inside-out; we use
   // the map in a more stably ordered way below.
   auto OrderedClonedExitsInLoops = ClonedExitsInLoops;
-  llvm::sort(OrderedClonedExitsInLoops.begin(), OrderedClonedExitsInLoops.end(),
-             [&](BasicBlock *LHS, BasicBlock *RHS) {
-               return ExitLoopMap.lookup(LHS)->getLoopDepth() <
-                      ExitLoopMap.lookup(RHS)->getLoopDepth();
-             });
+  llvm::sort(OrderedClonedExitsInLoops, [&](BasicBlock *LHS, BasicBlock *RHS) {
+    return ExitLoopMap.lookup(LHS)->getLoopDepth() <
+           ExitLoopMap.lookup(RHS)->getLoopDepth();
+  });
 
   // Populate the existing ExitLoopMap with everything reachable from each
   // exit, starting from the inner most exit.
@@ -1375,17 +1377,25 @@ static void
 deleteDeadBlocksFromLoop(Loop &L,
                          SmallVectorImpl<BasicBlock *> &ExitBlocks,
                          DominatorTree &DT, LoopInfo &LI) {
-  // Find all the dead blocks, and remove them from their successors.
-  SmallVector<BasicBlock *, 16> DeadBlocks;
-  for (BasicBlock *BB : llvm::concat<BasicBlock *const>(L.blocks(), ExitBlocks))
-    if (!DT.isReachableFromEntry(BB)) {
-      for (BasicBlock *SuccBB : successors(BB))
-        SuccBB->removePredecessor(BB);
-      DeadBlocks.push_back(BB);
-    }
+  // Find all the dead blocks tied to this loop, and remove them from their
+  // successors.
+  SmallPtrSet<BasicBlock *, 16> DeadBlockSet;
 
-  SmallPtrSet<BasicBlock *, 16> DeadBlockSet(DeadBlocks.begin(),
-                                             DeadBlocks.end());
+  // Start with loop/exit blocks and get a transitive closure of reachable dead
+  // blocks.
+  SmallVector<BasicBlock *, 16> DeathCandidates(ExitBlocks.begin(),
+                                                ExitBlocks.end());
+  DeathCandidates.append(L.blocks().begin(), L.blocks().end());
+  while (!DeathCandidates.empty()) {
+    auto *BB = DeathCandidates.pop_back_val();
+    if (!DeadBlockSet.count(BB) && !DT.isReachableFromEntry(BB)) {
+      for (BasicBlock *SuccBB : successors(BB)) {
+        SuccBB->removePredecessor(BB);
+        DeathCandidates.push_back(SuccBB);
+      }
+      DeadBlockSet.insert(BB);
+    }
+  }
 
   // Filter out the dead blocks from the exit blocks list so that it can be
   // used in the caller.
@@ -1394,7 +1404,7 @@ deleteDeadBlocksFromLoop(Loop &L,
 
   // Walk from this loop up through its parents removing all of the dead blocks.
   for (Loop *ParentL = &L; ParentL; ParentL = ParentL->getParentLoop()) {
-    for (auto *BB : DeadBlocks)
+    for (auto *BB : DeadBlockSet)
       ParentL->getBlocksSet().erase(BB);
     llvm::erase_if(ParentL->getBlocksVector(),
                    [&](BasicBlock *BB) { return DeadBlockSet.count(BB); });
@@ -1419,7 +1429,7 @@ deleteDeadBlocksFromLoop(Loop &L,
   // Remove the loop mappings for the dead blocks and drop all the references
   // from these blocks to others to handle cyclic references as we start
   // deleting the blocks themselves.
-  for (auto *BB : DeadBlocks) {
+  for (auto *BB : DeadBlockSet) {
     // Check that the dominator tree has already been updated.
     assert(!DT.getNode(BB) && "Should already have cleared domtree!");
     LI.changeLoopFor(BB, nullptr);
@@ -1428,7 +1438,7 @@ deleteDeadBlocksFromLoop(Loop &L,
 
   // Actually delete the blocks now that they've been fully unhooked from the
   // IR.
-  for (auto *BB : DeadBlocks)
+  for (auto *BB : DeadBlockSet)
     BB->eraseFromParent();
 }
 

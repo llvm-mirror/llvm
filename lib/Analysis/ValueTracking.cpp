@@ -26,6 +26,7 @@
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/AssumptionCache.h"
+#include "llvm/Analysis/GuardUtils.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/Loads.h"
 #include "llvm/Analysis/LoopInfo.h"
@@ -1902,8 +1903,7 @@ static bool isKnownNonNullFromDominatingCondition(const Value *V,
           BasicBlockEdge Edge(BI->getParent(), NonNullSuccessor);
           if (Edge.isSingleEdge() && DT->dominates(Edge, CtxI->getParent()))
             return true;
-        } else if (Pred == ICmpInst::ICMP_NE &&
-                   match(Curr, m_Intrinsic<Intrinsic::experimental_guard>()) &&
+        } else if (Pred == ICmpInst::ICMP_NE && isGuard(Curr) &&
                    DT->dominates(cast<Instruction>(Curr), CtxI)) {
           return true;
         }
@@ -2209,6 +2209,36 @@ bool MaskedValueIsZero(const Value *V, const APInt &Mask, unsigned Depth,
   return Mask.isSubsetOf(Known.Zero);
 }
 
+// Match a signed min+max clamp pattern like smax(smin(In, CHigh), CLow).
+// Returns the input and lower/upper bounds.
+static bool isSignedMinMaxClamp(const Value *Select, const Value *&In,
+                                const APInt *&CLow, const APInt *&CHigh) {
+  assert(isa<Operator>(Select) &&
+         cast<Operator>(Select)->getOpcode() == Instruction::Select &&
+         "Input should be a Select!");
+
+  const Value *LHS, *RHS, *LHS2, *RHS2;
+  SelectPatternFlavor SPF = matchSelectPattern(Select, LHS, RHS).Flavor;
+  if (SPF != SPF_SMAX && SPF != SPF_SMIN)
+    return false;
+
+  if (!match(RHS, m_APInt(CLow)))
+    return false;
+
+  SelectPatternFlavor SPF2 = matchSelectPattern(LHS, LHS2, RHS2).Flavor;
+  if (getInverseMinMaxFlavor(SPF) != SPF2)
+    return false;
+
+  if (!match(RHS2, m_APInt(CHigh)))
+    return false;
+
+  if (SPF == SPF_SMIN)
+    std::swap(CLow, CHigh);
+
+  In = LHS2;
+  return CLow->sle(*CHigh);
+}
+
 /// For vector constants, loop over the elements and find the constant with the
 /// minimum number of sign bits. Return 0 if the value is not a vector constant
 /// or if any element was not analyzed; otherwise, return the count for the
@@ -2370,11 +2400,19 @@ static unsigned ComputeNumSignBitsImpl(const Value *V, unsigned Depth,
     }
     break;
 
-  case Instruction::Select:
+  case Instruction::Select: {
+    // If we have a clamp pattern, we know that the number of sign bits will be
+    // the minimum of the clamp min/max range.
+    const Value *X;
+    const APInt *CLow, *CHigh;
+    if (isSignedMinMaxClamp(U, X, CLow, CHigh))
+      return std::min(CLow->getNumSignBits(), CHigh->getNumSignBits());
+
     Tmp = ComputeNumSignBits(U->getOperand(1), Depth + 1, Q);
     if (Tmp == 1) break;
     Tmp2 = ComputeNumSignBits(U->getOperand(2), Depth + 1, Q);
     return std::min(Tmp, Tmp2);
+  }
 
   case Instruction::Add:
     // Add can have at most one carry bit.  Thus we know that the output
@@ -2930,9 +2968,6 @@ bool llvm::isKnownNeverNaN(const Value *V, const TargetLibraryInfo *TLI,
     if (FPMathOp->hasNoNaNs())
       return true;
 
-  // TODO: Handle instructions and potentially recurse like other 'isKnown'
-  // functions. For example, the result of sitofp is never NaN.
-
   // Handle scalar constants.
   if (auto *CFP = dyn_cast<ConstantFP>(V))
     return !CFP->isNaN();
@@ -2940,11 +2975,44 @@ bool llvm::isKnownNeverNaN(const Value *V, const TargetLibraryInfo *TLI,
   if (Depth == MaxDepth)
     return false;
 
+  if (auto *Inst = dyn_cast<Instruction>(V)) {
+    switch (Inst->getOpcode()) {
+    case Instruction::FAdd:
+    case Instruction::FMul:
+    case Instruction::FSub:
+    case Instruction::FDiv:
+    case Instruction::FRem: {
+      // TODO: Need isKnownNeverInfinity
+      return false;
+    }
+    case Instruction::Select: {
+      return isKnownNeverNaN(Inst->getOperand(1), TLI, Depth + 1) &&
+             isKnownNeverNaN(Inst->getOperand(2), TLI, Depth + 1);
+    }
+    case Instruction::SIToFP:
+    case Instruction::UIToFP:
+      return true;
+    case Instruction::FPTrunc:
+    case Instruction::FPExt:
+      return isKnownNeverNaN(Inst->getOperand(0), TLI, Depth + 1);
+    default:
+      break;
+    }
+  }
+
   if (const auto *II = dyn_cast<IntrinsicInst>(V)) {
     switch (II->getIntrinsicID()) {
     case Intrinsic::canonicalize:
     case Intrinsic::fabs:
     case Intrinsic::copysign:
+    case Intrinsic::exp:
+    case Intrinsic::exp2:
+    case Intrinsic::floor:
+    case Intrinsic::ceil:
+    case Intrinsic::trunc:
+    case Intrinsic::rint:
+    case Intrinsic::nearbyint:
+    case Intrinsic::round:
       return isKnownNeverNaN(II->getArgOperand(0), TLI, Depth + 1);
     case Intrinsic::sqrt:
       return isKnownNeverNaN(II->getArgOperand(0), TLI, Depth + 1) &&
@@ -2974,62 +3042,92 @@ bool llvm::isKnownNeverNaN(const Value *V, const TargetLibraryInfo *TLI,
   return true;
 }
 
-/// If the specified value can be set by repeating the same byte in memory,
-/// return the i8 value that it is represented with.  This is
-/// true for all i8 values obviously, but is also true for i32 0, i32 -1,
-/// i16 0xF0F0, double 0.0 etc.  If the value can't be handled with a repeated
-/// byte store (e.g. i16 0x1234), return null.
 Value *llvm::isBytewiseValue(Value *V) {
+
   // All byte-wide stores are splatable, even of arbitrary variables.
-  if (V->getType()->isIntegerTy(8)) return V;
+  if (V->getType()->isIntegerTy(8))
+    return V;
+
+  LLVMContext &Ctx = V->getContext();
+
+  // Undef don't care.
+  auto *UndefInt8 = UndefValue::get(Type::getInt8Ty(Ctx));
+  if (isa<UndefValue>(V))
+    return UndefInt8;
+
+  Constant *C = dyn_cast<Constant>(V);
+  if (!C) {
+    // Conceptually, we could handle things like:
+    //   %a = zext i8 %X to i16
+    //   %b = shl i16 %a, 8
+    //   %c = or i16 %a, %b
+    // but until there is an example that actually needs this, it doesn't seem
+    // worth worrying about.
+    return nullptr;
+  }
 
   // Handle 'null' ConstantArrayZero etc.
-  if (Constant *C = dyn_cast<Constant>(V))
-    if (C->isNullValue())
-      return Constant::getNullValue(Type::getInt8Ty(V->getContext()));
+  if (C->isNullValue())
+    return Constant::getNullValue(Type::getInt8Ty(Ctx));
 
-  // Constant float and double values can be handled as integer values if the
+  // Constant floating-point values can be handled as integer values if the
   // corresponding integer value is "byteable".  An important case is 0.0.
-  if (ConstantFP *CFP = dyn_cast<ConstantFP>(V)) {
-    if (CFP->getType()->isFloatTy())
-      V = ConstantExpr::getBitCast(CFP, Type::getInt32Ty(V->getContext()));
-    if (CFP->getType()->isDoubleTy())
-      V = ConstantExpr::getBitCast(CFP, Type::getInt64Ty(V->getContext()));
+  if (ConstantFP *CFP = dyn_cast<ConstantFP>(C)) {
+    Type *Ty = nullptr;
+    if (CFP->getType()->isHalfTy())
+      Ty = Type::getInt16Ty(Ctx);
+    else if (CFP->getType()->isFloatTy())
+      Ty = Type::getInt32Ty(Ctx);
+    else if (CFP->getType()->isDoubleTy())
+      Ty = Type::getInt64Ty(Ctx);
     // Don't handle long double formats, which have strange constraints.
+    return Ty ? isBytewiseValue(ConstantExpr::getBitCast(CFP, Ty)) : nullptr;
   }
 
   // We can handle constant integers that are multiple of 8 bits.
-  if (ConstantInt *CI = dyn_cast<ConstantInt>(V)) {
+  if (ConstantInt *CI = dyn_cast<ConstantInt>(C)) {
     if (CI->getBitWidth() % 8 == 0) {
       assert(CI->getBitWidth() > 8 && "8 bits should be handled above!");
-
       if (!CI->getValue().isSplat(8))
         return nullptr;
-      return ConstantInt::get(V->getContext(), CI->getValue().trunc(8));
+      return ConstantInt::get(Ctx, CI->getValue().trunc(8));
     }
   }
 
-  // A ConstantDataArray/Vector is splatable if all its members are equal and
-  // also splatable.
-  if (ConstantDataSequential *CA = dyn_cast<ConstantDataSequential>(V)) {
-    Value *Elt = CA->getElementAsConstant(0);
-    Value *Val = isBytewiseValue(Elt);
-    if (!Val)
+  auto Merge = [&](Value *LHS, Value *RHS) -> Value * {
+    if (LHS == RHS)
+      return LHS;
+    if (!LHS || !RHS)
       return nullptr;
+    if (LHS == UndefInt8)
+      return RHS;
+    if (RHS == UndefInt8)
+      return LHS;
+    return nullptr;
+  };
 
-    for (unsigned I = 1, E = CA->getNumElements(); I != E; ++I)
-      if (CA->getElementAsConstant(I) != Elt)
+  if (ConstantDataSequential *CA = dyn_cast<ConstantDataSequential>(C)) {
+    Value *Val = UndefInt8;
+    for (unsigned I = 0, E = CA->getNumElements(); I != E; ++I)
+      if (!(Val = Merge(Val, isBytewiseValue(CA->getElementAsConstant(I)))))
         return nullptr;
-
     return Val;
   }
 
-  // Conceptually, we could handle things like:
-  //   %a = zext i8 %X to i16
-  //   %b = shl i16 %a, 8
-  //   %c = or i16 %a, %b
-  // but until there is an example that actually needs this, it doesn't seem
-  // worth worrying about.
+  if (isa<ConstantVector>(C)) {
+    Constant *Splat = cast<ConstantVector>(C)->getSplatValue();
+    return Splat ? isBytewiseValue(Splat) : nullptr;
+  }
+
+  if (isa<ConstantArray>(C) || isa<ConstantStruct>(C)) {
+    Value *Val = UndefInt8;
+    for (unsigned I = 0, E = C->getNumOperands(); I != E; ++I)
+      if (!(Val = Merge(Val, isBytewiseValue(C->getOperand(I)))))
+        return nullptr;
+    return Val;
+  }
+
+  // Don't try to handle the handful of other constants.
   return nullptr;
 }
 

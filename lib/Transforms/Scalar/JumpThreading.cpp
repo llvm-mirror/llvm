@@ -25,6 +25,7 @@
 #include "llvm/Analysis/CFG.h"
 #include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/Analysis/GlobalsModRef.h"
+#include "llvm/Analysis/GuardUtils.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/LazyValueInfo.h"
 #include "llvm/Analysis/Loads.h"
@@ -988,7 +989,7 @@ bool JumpThreadingPass::ProcessBlock(BasicBlock *BB) {
   // predecessors of our predecessor block.
   if (BasicBlock *SinglePred = BB->getSinglePredecessor()) {
     const TerminatorInst *TI = SinglePred->getTerminator();
-    if (!TI->isExceptional() && TI->getNumSuccessors() == 1 &&
+    if (!TI->isExceptionalTerminator() && TI->getNumSuccessors() == 1 &&
         SinglePred != BB && !hasAddressTakenAndUsed(BB)) {
       // If SinglePred was a loop header, BB becomes one.
       if (LoopHeaders.erase(SinglePred))
@@ -1300,7 +1301,7 @@ bool JumpThreadingPass::SimplifyPartiallyRedundantLoad(LoadInst *LoadI) {
 
     if (IsLoadCSE) {
       LoadInst *NLoadI = cast<LoadInst>(AvailableVal);
-      combineMetadataForCSE(NLoadI, LoadI);
+      combineMetadataForCSE(NLoadI, LoadI, false);
     };
 
     // If the returned value is the load itself, replace with an undef. This can
@@ -1490,7 +1491,7 @@ bool JumpThreadingPass::SimplifyPartiallyRedundantLoad(LoadInst *LoadI) {
   }
 
   for (LoadInst *PredLoadI : CSELoads) {
-    combineMetadataForCSE(PredLoadI, LoadI);
+    combineMetadataForCSE(PredLoadI, LoadI, true);
   }
 
   LoadI->replaceAllUsesWith(PN);
@@ -1978,7 +1979,7 @@ bool JumpThreadingPass::ThreadEdge(BasicBlock *BB,
 
   // Clone the non-phi instructions of BB into NewBB, keeping track of the
   // mapping and using it to remap operands in the cloned instructions.
-  for (; !isa<TerminatorInst>(BI); ++BI) {
+  for (; !BI->isTerminator(); ++BI) {
     Instruction *New = BI->clone();
     New->setName(BI->getName());
     NewBB->getInstList().push_back(New);
@@ -2607,9 +2608,8 @@ bool JumpThreadingPass::ProcessGuards(BasicBlock *BB) {
 
   if (auto *BI = dyn_cast<BranchInst>(Parent->getTerminator()))
     for (auto &I : *BB)
-      if (match(&I, m_Intrinsic<Intrinsic::experimental_guard>()))
-        if (ThreadGuard(BB, cast<IntrinsicInst>(&I), BI))
-          return true;
+      if (isGuard(&I) && ThreadGuard(BB, cast<IntrinsicInst>(&I), BI))
+        return true;
 
   return false;
 }

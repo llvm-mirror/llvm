@@ -202,6 +202,9 @@ static MIToken::TokenKind getIdentifierKind(StringRef Identifier) {
       .Case("contract", MIToken::kw_contract)
       .Case("afn", MIToken::kw_afn)
       .Case("reassoc", MIToken::kw_reassoc)
+      .Case("nuw" , MIToken::kw_nuw)
+      .Case("nsw" , MIToken::kw_nsw)
+      .Case("exact" , MIToken::kw_exact)
       .Case("debug-location", MIToken::kw_debug_location)
       .Case("same_value", MIToken::kw_cfi_same_value)
       .Case("offset", MIToken::kw_cfi_offset)
@@ -247,6 +250,7 @@ static MIToken::TokenKind getIdentifierKind(StringRef Identifier) {
       .Case("intpred", MIToken::kw_intpred)
       .Case("pre-instr-symbol", MIToken::kw_pre_instr_symbol)
       .Case("post-instr-symbol", MIToken::kw_post_instr_symbol)
+      .Case("unknown-size", MIToken::kw_unknown_size)
       .Default(MIToken::Identifier);
 }
 

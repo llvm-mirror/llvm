@@ -1276,6 +1276,9 @@ bool LLParser::ParseFnAttributeValuePairs(AttrBuilder &B,
       B.addAttribute(Attribute::SanitizeThread); break;
     case lltok::kw_sanitize_memory:
       B.addAttribute(Attribute::SanitizeMemory); break;
+    case lltok::kw_speculative_load_hardening:
+      B.addAttribute(Attribute::SpeculativeLoadHardening);
+      break;
     case lltok::kw_strictfp: B.addAttribute(Attribute::StrictFP); break;
     case lltok::kw_uwtable: B.addAttribute(Attribute::UWTable); break;
     case lltok::kw_writeonly: B.addAttribute(Attribute::WriteOnly); break;
@@ -1317,7 +1320,8 @@ bool LLParser::ParseFnAttributeValuePairs(AttrBuilder &B,
 static inline GlobalValue *createGlobalFwdRef(Module *M, PointerType *PTy,
                                               const std::string &Name) {
   if (auto *FT = dyn_cast<FunctionType>(PTy->getElementType()))
-    return Function::Create(FT, GlobalValue::ExternalWeakLinkage, Name, M);
+    return Function::Create(FT, GlobalValue::ExternalWeakLinkage,
+                            PTy->getAddressSpace(), Name, M);
   else
     return new GlobalVariable(*M, PTy->getElementType(), false,
                               GlobalValue::ExternalWeakLinkage, nullptr, Name,
@@ -1325,11 +1329,33 @@ static inline GlobalValue *createGlobalFwdRef(Module *M, PointerType *PTy,
                               PTy->getAddressSpace());
 }
 
+Value *LLParser::checkValidVariableType(LocTy Loc, const Twine &Name, Type *Ty,
+                                        Value *Val, bool IsCall) {
+  if (Val->getType() == Ty)
+    return Val;
+  // For calls we also accept variables in the program address space.
+  Type *SuggestedTy = Ty;
+  if (IsCall && isa<PointerType>(Ty)) {
+    Type *TyInProgAS = cast<PointerType>(Ty)->getElementType()->getPointerTo(
+        M->getDataLayout().getProgramAddressSpace());
+    SuggestedTy = TyInProgAS;
+    if (Val->getType() == TyInProgAS)
+      return Val;
+  }
+  if (Ty->isLabelTy())
+    Error(Loc, "'" + Name + "' is not a basic block");
+  else
+    Error(Loc, "'" + Name + "' defined with type '" +
+                   getTypeString(Val->getType()) + "' but expected '" +
+                   getTypeString(SuggestedTy) + "'");
+  return nullptr;
+}
+
 /// GetGlobalVal - Get a value with the specified name or ID, creating a
 /// forward reference record if needed.  This can return null if the value
 /// exists but does not have the right type.
 GlobalValue *LLParser::GetGlobalVal(const std::string &Name, Type *Ty,
-                                    LocTy Loc) {
+                                    LocTy Loc, bool IsCall) {
   PointerType *PTy = dyn_cast<PointerType>(Ty);
   if (!PTy) {
     Error(Loc, "global variable reference must have pointer type");
@@ -1349,12 +1375,9 @@ GlobalValue *LLParser::GetGlobalVal(const std::string &Name, Type *Ty,
   }
 
   // If we have the value in the symbol table or fwd-ref table, return it.
-  if (Val) {
-    if (Val->getType() == Ty) return Val;
-    Error(Loc, "'@" + Name + "' defined with type '" +
-          getTypeString(Val->getType()) + "'");
-    return nullptr;
-  }
+  if (Val)
+    return cast_or_null<GlobalValue>(
+        checkValidVariableType(Loc, "@" + Name, Ty, Val, IsCall));
 
   // Otherwise, create a new forward reference for this value and remember it.
   GlobalValue *FwdVal = createGlobalFwdRef(M, PTy, Name);
@@ -1362,7 +1385,8 @@ GlobalValue *LLParser::GetGlobalVal(const std::string &Name, Type *Ty,
   return FwdVal;
 }
 
-GlobalValue *LLParser::GetGlobalVal(unsigned ID, Type *Ty, LocTy Loc) {
+GlobalValue *LLParser::GetGlobalVal(unsigned ID, Type *Ty, LocTy Loc,
+                                    bool IsCall) {
   PointerType *PTy = dyn_cast<PointerType>(Ty);
   if (!PTy) {
     Error(Loc, "global variable reference must have pointer type");
@@ -1380,12 +1404,9 @@ GlobalValue *LLParser::GetGlobalVal(unsigned ID, Type *Ty, LocTy Loc) {
   }
 
   // If we have the value in the symbol table or fwd-ref table, return it.
-  if (Val) {
-    if (Val->getType() == Ty) return Val;
-    Error(Loc, "'@" + Twine(ID) + "' defined with type '" +
-          getTypeString(Val->getType()) + "'");
-    return nullptr;
-  }
+  if (Val)
+    return cast_or_null<GlobalValue>(
+        checkValidVariableType(Loc, "@" + Twine(ID), Ty, Val, IsCall));
 
   // Otherwise, create a new forward reference for this value and remember it.
   GlobalValue *FwdVal = createGlobalFwdRef(M, PTy, "");
@@ -1500,8 +1521,8 @@ bool LLParser::ParseOptionalThreadLocal(GlobalVariable::ThreadLocalMode &TLM) {
 /// ParseOptionalAddrSpace
 ///   := /*empty*/
 ///   := 'addrspace' '(' uint32 ')'
-bool LLParser::ParseOptionalAddrSpace(unsigned &AddrSpace) {
-  AddrSpace = 0;
+bool LLParser::ParseOptionalAddrSpace(unsigned &AddrSpace, unsigned DefaultAS) {
+  AddrSpace = DefaultAS;
   if (!EatIfPresent(lltok::kw_addrspace))
     return false;
   return ParseToken(lltok::lparen, "expected '(' in address space") ||
@@ -1601,6 +1622,7 @@ bool LLParser::ParseOptionalParamAttrs(AttrBuilder &B) {
     case lltok::kw_sanitize_hwaddress:
     case lltok::kw_sanitize_memory:
     case lltok::kw_sanitize_thread:
+    case lltok::kw_speculative_load_hardening:
     case lltok::kw_ssp:
     case lltok::kw_sspreq:
     case lltok::kw_sspstrong:
@@ -1697,6 +1719,7 @@ bool LLParser::ParseOptionalReturnAttrs(AttrBuilder &B) {
     case lltok::kw_sanitize_hwaddress:
     case lltok::kw_sanitize_memory:
     case lltok::kw_sanitize_thread:
+    case lltok::kw_speculative_load_hardening:
     case lltok::kw_ssp:
     case lltok::kw_sspreq:
     case lltok::kw_sspstrong:
@@ -1851,6 +1874,7 @@ void LLParser::ParseOptionalDLLStorageClass(unsigned &Res) {
 ///   ::= 'arm_apcscc'
 ///   ::= 'arm_aapcscc'
 ///   ::= 'arm_aapcs_vfpcc'
+///   ::= 'aarch64_vector_pcs'
 ///   ::= 'msp430_intrcc'
 ///   ::= 'avr_intrcc'
 ///   ::= 'avr_signalcc'
@@ -1894,6 +1918,7 @@ bool LLParser::ParseOptionalCallingConv(unsigned &CC) {
   case lltok::kw_arm_apcscc:     CC = CallingConv::ARM_APCS; break;
   case lltok::kw_arm_aapcscc:    CC = CallingConv::ARM_AAPCS; break;
   case lltok::kw_arm_aapcs_vfpcc:CC = CallingConv::ARM_AAPCS_VFP; break;
+  case lltok::kw_aarch64_vector_pcs:CC = CallingConv::AArch64_VectorCall; break;
   case lltok::kw_msp430_intrcc:  CC = CallingConv::MSP430_INTR; break;
   case lltok::kw_avr_intrcc:     CC = CallingConv::AVR_INTR; break;
   case lltok::kw_avr_signalcc:   CC = CallingConv::AVR_SIGNAL; break;
@@ -2741,19 +2766,6 @@ bool LLParser::PerFunctionState::FinishFunction() {
   return false;
 }
 
-static bool isValidVariableType(Module *M, Type *Ty, Value *Val, bool IsCall) {
-  if (Val->getType() == Ty)
-    return true;
-  // For calls we also accept variables in the program address space
-  if (IsCall && isa<PointerType>(Ty)) {
-    Type *TyInProgAS = cast<PointerType>(Ty)->getElementType()->getPointerTo(
-        M->getDataLayout().getProgramAddressSpace());
-    if (Val->getType() == TyInProgAS)
-      return true;
-  }
-  return false;
-}
-
 /// GetVal - Get a value with the specified name or ID, creating a
 /// forward reference record if needed.  This can return null if the value
 /// exists but does not have the right type.
@@ -2771,16 +2783,8 @@ Value *LLParser::PerFunctionState::GetVal(const std::string &Name, Type *Ty,
   }
 
   // If we have the value in the symbol table or fwd-ref table, return it.
-  if (Val) {
-    if (isValidVariableType(P.M, Ty, Val, IsCall))
-      return Val;
-    if (Ty->isLabelTy())
-      P.Error(Loc, "'%" + Name + "' is not a basic block");
-    else
-      P.Error(Loc, "'%" + Name + "' defined with type '" +
-              getTypeString(Val->getType()) + "'");
-    return nullptr;
-  }
+  if (Val)
+    return P.checkValidVariableType(Loc, "%" + Name, Ty, Val, IsCall);
 
   // Don't make placeholders with invalid type.
   if (!Ty->isFirstClassType()) {
@@ -2814,16 +2818,8 @@ Value *LLParser::PerFunctionState::GetVal(unsigned ID, Type *Ty, LocTy Loc,
   }
 
   // If we have the value in the symbol table or fwd-ref table, return it.
-  if (Val) {
-    if (isValidVariableType(P.M, Ty, Val, IsCall))
-      return Val;
-    if (Ty->isLabelTy())
-      P.Error(Loc, "'%" + Twine(ID) + "' is not a basic block");
-    else
-      P.Error(Loc, "'%" + Twine(ID) + "' defined with type '" +
-              getTypeString(Val->getType()) + "'");
-    return nullptr;
-  }
+  if (Val)
+    return P.checkValidVariableType(Loc, "%" + Twine(ID), Ty, Val, IsCall);
 
   if (!Ty->isFirstClassType()) {
     P.Error(Loc, "invalid use of a non-first-class type");
@@ -4232,18 +4228,21 @@ bool LLParser::ParseSpecializedMDNode(MDNode *&N, bool IsDistinct) {
   (IsDistinct ? CLASS::getDistinct ARGS : CLASS::get ARGS)
 
 /// ParseDILocationFields:
-///   ::= !DILocation(line: 43, column: 8, scope: !5, inlinedAt: !6)
+///   ::= !DILocation(line: 43, column: 8, scope: !5, inlinedAt: !6,
+///   isImplicitCode: true)
 bool LLParser::ParseDILocation(MDNode *&Result, bool IsDistinct) {
 #define VISIT_MD_FIELDS(OPTIONAL, REQUIRED)                                    \
   OPTIONAL(line, LineField, );                                                 \
   OPTIONAL(column, ColumnField, );                                             \
   REQUIRED(scope, MDField, (/* AllowNull */ false));                           \
-  OPTIONAL(inlinedAt, MDField, );
+  OPTIONAL(inlinedAt, MDField, );                                              \
+  OPTIONAL(isImplicitCode, MDBoolField, (false));
   PARSE_MD_FIELDS();
 #undef VISIT_MD_FIELDS
 
-  Result = GET_OR_DISTINCT(
-      DILocation, (Context, line.Val, column.Val, scope.Val, inlinedAt.Val));
+  Result =
+      GET_OR_DISTINCT(DILocation, (Context, line.Val, column.Val, scope.Val,
+                                   inlinedAt.Val, isImplicitCode.Val));
   return false;
 }
 
@@ -4940,10 +4939,10 @@ bool LLParser::ConvertValIDToValue(Type *Ty, ValID &ID, Value *&V,
     return false;
   }
   case ValID::t_GlobalName:
-    V = GetGlobalVal(ID.StrVal, Ty, ID.Loc);
+    V = GetGlobalVal(ID.StrVal, Ty, ID.Loc, IsCall);
     return V == nullptr;
   case ValID::t_GlobalID:
-    V = GetGlobalVal(ID.UIntVal, Ty, ID.Loc);
+    V = GetGlobalVal(ID.UIntVal, Ty, ID.Loc, IsCall);
     return V == nullptr;
   case ValID::t_APSInt:
     if (!Ty->isIntegerTy())
@@ -5086,8 +5085,8 @@ bool LLParser::ParseTypeAndBasicBlock(BasicBlock *&BB, LocTy &Loc,
 /// FunctionHeader
 ///   ::= OptionalLinkage OptionalPreemptionSpecifier OptionalVisibility
 ///       OptionalCallingConv OptRetAttrs OptUnnamedAddr Type GlobalName
-///       '(' ArgList ')' OptFuncAttrs OptSection OptionalAlign OptGC
-///       OptionalPrefix OptionalPrologue OptPersonalityFn
+///       '(' ArgList ')' OptAddrSpace OptFuncAttrs OptSection OptionalAlign
+///       OptGC OptionalPrefix OptionalPrologue OptPersonalityFn
 bool LLParser::ParseFunctionHeader(Function *&Fn, bool isDefine) {
   // Parse the linkage.
   LocTy LinkageLoc = Lex.getLoc();
@@ -5165,6 +5164,7 @@ bool LLParser::ParseFunctionHeader(Function *&Fn, bool isDefine) {
   unsigned Alignment;
   std::string GC;
   GlobalValue::UnnamedAddr UnnamedAddr = GlobalValue::UnnamedAddr::None;
+  unsigned AddrSpace = 0;
   Constant *Prefix = nullptr;
   Constant *Prologue = nullptr;
   Constant *PersonalityFn = nullptr;
@@ -5172,6 +5172,7 @@ bool LLParser::ParseFunctionHeader(Function *&Fn, bool isDefine) {
 
   if (ParseArgumentList(ArgList, isVarArg) ||
       ParseOptionalUnnamedAddr(UnnamedAddr) ||
+      ParseOptionalProgramAddrSpace(AddrSpace) ||
       ParseFnAttributeValuePairs(FuncAttrs, FwdRefAttrGrps, false,
                                  BuiltinLoc) ||
       (EatIfPresent(lltok::kw_section) &&
@@ -5216,7 +5217,7 @@ bool LLParser::ParseFunctionHeader(Function *&Fn, bool isDefine) {
 
   FunctionType *FT =
     FunctionType::get(RetType, ParamTypeList, isVarArg);
-  PointerType *PFT = PointerType::getUnqual(FT);
+  PointerType *PFT = PointerType::get(FT, AddrSpace);
 
   Fn = nullptr;
   if (!FunctionName.empty()) {
@@ -5230,8 +5231,9 @@ bool LLParser::ParseFunctionHeader(Function *&Fn, bool isDefine) {
                      "function as global value!");
       if (Fn->getType() != PFT)
         return Error(FRVI->second.second, "invalid forward reference to "
-                     "function '" + FunctionName + "' with wrong type!");
-
+                     "function '" + FunctionName + "' with wrong type: "
+                     "expected '" + getTypeString(PFT) + "' but was '" +
+                     getTypeString(Fn->getType()) + "'");
       ForwardRefVals.erase(FRVI);
     } else if ((Fn = M->getFunction(FunctionName))) {
       // Reject redefinitions.
@@ -5249,15 +5251,20 @@ bool LLParser::ParseFunctionHeader(Function *&Fn, bool isDefine) {
       Fn = cast<Function>(I->second.first);
       if (Fn->getType() != PFT)
         return Error(NameLoc, "type of definition and forward reference of '@" +
-                     Twine(NumberedVals.size()) + "' disagree");
+                     Twine(NumberedVals.size()) + "' disagree: "
+                     "expected '" + getTypeString(PFT) + "' but was '" +
+                     getTypeString(Fn->getType()) + "'");
       ForwardRefValIDs.erase(I);
     }
   }
 
   if (!Fn)
-    Fn = Function::Create(FT, GlobalValue::ExternalLinkage, FunctionName, M);
+    Fn = Function::Create(FT, GlobalValue::ExternalLinkage, AddrSpace,
+                          FunctionName, M);
   else // Move the forward-reference to the correct spot in the module.
     M->getFunctionList().splice(M->end(), M->getFunctionList(), Fn);
+
+  assert(Fn->getAddressSpace() == AddrSpace && "Created function in wrong AS");
 
   if (FunctionName.empty())
     NumberedVals.push_back(Fn);
@@ -5447,7 +5454,7 @@ bool LLParser::ParseBasicBlock(PerFunctionState &PFS) {
 
     // Set the name on the instruction.
     if (PFS.SetInstName(NameID, NameStr, NameLoc, Inst)) return true;
-  } while (!isa<TerminatorInst>(Inst));
+  } while (!Inst->isTerminator());
 
   return false;
 }
@@ -5777,6 +5784,7 @@ bool LLParser::ParseInvoke(Instruction *&Inst, PerFunctionState &PFS) {
   std::vector<unsigned> FwdRefAttrGrps;
   LocTy NoBuiltinLoc;
   unsigned CC;
+  unsigned InvokeAddrSpace;
   Type *RetType = nullptr;
   LocTy RetTypeLoc;
   ValID CalleeID;
@@ -5785,6 +5793,7 @@ bool LLParser::ParseInvoke(Instruction *&Inst, PerFunctionState &PFS) {
 
   BasicBlock *NormalBB, *UnwindBB;
   if (ParseOptionalCallingConv(CC) || ParseOptionalReturnAttrs(RetAttrs) ||
+      ParseOptionalProgramAddrSpace(InvokeAddrSpace) ||
       ParseType(RetType, RetTypeLoc, true /*void allowed*/) ||
       ParseValID(CalleeID) || ParseParameterList(ArgList, PFS) ||
       ParseFnAttributeValuePairs(FnAttrs, FwdRefAttrGrps, false,
@@ -5816,8 +5825,8 @@ bool LLParser::ParseInvoke(Instruction *&Inst, PerFunctionState &PFS) {
 
   // Look up the callee.
   Value *Callee;
-  if (ConvertValIDToValue(PointerType::getUnqual(Ty), CalleeID, Callee, &PFS,
-                          /*IsCall=*/true))
+  if (ConvertValIDToValue(PointerType::get(Ty, InvokeAddrSpace), CalleeID,
+                          Callee, &PFS, /*IsCall=*/true))
     return true;
 
   // Set up the Attribute for the function.
@@ -6360,6 +6369,7 @@ bool LLParser::ParseCall(Instruction *&Inst, PerFunctionState &PFS,
   AttrBuilder RetAttrs, FnAttrs;
   std::vector<unsigned> FwdRefAttrGrps;
   LocTy BuiltinLoc;
+  unsigned CallAddrSpace;
   unsigned CC;
   Type *RetType = nullptr;
   LocTy RetTypeLoc;
@@ -6376,6 +6386,7 @@ bool LLParser::ParseCall(Instruction *&Inst, PerFunctionState &PFS,
   FastMathFlags FMF = EatFastMathFlagsIfPresent();
 
   if (ParseOptionalCallingConv(CC) || ParseOptionalReturnAttrs(RetAttrs) ||
+      ParseOptionalProgramAddrSpace(CallAddrSpace) ||
       ParseType(RetType, RetTypeLoc, true /*void allowed*/) ||
       ParseValID(CalleeID) ||
       ParseParameterList(ArgList, PFS, TCK == CallInst::TCK_MustTail,
@@ -6408,8 +6419,8 @@ bool LLParser::ParseCall(Instruction *&Inst, PerFunctionState &PFS,
 
   // Look up the callee.
   Value *Callee;
-  if (ConvertValIDToValue(PointerType::getUnqual(Ty), CalleeID, Callee, &PFS,
-                          /*IsCall=*/true))
+  if (ConvertValIDToValue(PointerType::get(Ty, CallAddrSpace), CalleeID, Callee,
+                          &PFS, /*IsCall=*/true))
     return true;
 
   // Set up the Attribute for the function.

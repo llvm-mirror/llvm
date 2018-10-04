@@ -264,10 +264,16 @@ unsigned PPCMCCodeEmitter::getMemRIX16Encoding(const MCInst &MI, unsigned OpNo,
   unsigned RegBits = getMachineOpValue(MI, MI.getOperand(OpNo+1), Fixups, STI) << 12;
 
   const MCOperand &MO = MI.getOperand(OpNo);
-  assert(MO.isImm() && !(MO.getImm() % 16) &&
-         "Expecting an immediate that is a multiple of 16");
+  if (MO.isImm()) {
+    assert(!(MO.getImm() % 16) &&
+           "Expecting an immediate that is a multiple of 16");
+    return ((getMachineOpValue(MI, MO, Fixups, STI) >> 4) & 0xFFF) | RegBits;
+  }
 
-  return ((getMachineOpValue(MI, MO, Fixups, STI) >> 4) & 0xFFF) | RegBits;
+  // Otherwise add a fixup for the displacement field.
+  Fixups.push_back(MCFixup::create(IsLittleEndian? 0 : 2, MO.getExpr(),
+                                   (MCFixupKind)PPC::fixup_ppc_half16ds));
+  return RegBits;
 }
 
 unsigned PPCMCCodeEmitter::getSPE8DisEncoding(const MCInst &MI, unsigned OpNo,
@@ -354,6 +360,20 @@ get_crbitm_encoding(const MCInst &MI, unsigned OpNo,
   return 0x80 >> CTX.getRegisterInfo()->getEncodingValue(MO.getReg());
 }
 
+// Get the index for this operand in this instruction. This is needed for
+// computing the register number in PPCInstrInfo::getRegNumForOperand() for
+// any instructions that use a different numbering scheme for registers in
+// different operands.
+static unsigned getOpIdxForMO(const MCInst &MI, const MCOperand &MO) {
+  for (unsigned i = 0; i < MI.getNumOperands(); i++) {
+    const MCOperand &Op = MI.getOperand(i);
+    if (&Op == &MO)
+      return i;
+  }
+  llvm_unreachable("This operand is not part of this instruction");
+  return ~0U; // Silence any warnings about no return.
+}
+
 unsigned PPCMCCodeEmitter::
 getMachineOpValue(const MCInst &MI, const MCOperand &MO,
                   SmallVectorImpl<MCFixup> &Fixups,
@@ -364,14 +384,11 @@ getMachineOpValue(const MCInst &MI, const MCOperand &MO,
     assert((MI.getOpcode() != PPC::MTOCRF && MI.getOpcode() != PPC::MTOCRF8 &&
             MI.getOpcode() != PPC::MFOCRF && MI.getOpcode() != PPC::MFOCRF8) ||
            MO.getReg() < PPC::CR0 || MO.getReg() > PPC::CR7);
-    unsigned Reg = MO.getReg();
-    unsigned Encode = CTX.getRegisterInfo()->getEncodingValue(Reg);
-
-    if ((MCII.get(MI.getOpcode()).TSFlags & PPCII::UseVSXReg))
-      if (PPCInstrInfo::isVRRegister(Reg))
-        Encode += 32;
-
-    return Encode;
+    unsigned OpNo = getOpIdxForMO(MI, MO);
+    unsigned Reg =
+      PPCInstrInfo::getRegNumForOperand(MCII.get(MI.getOpcode()),
+                                        MO.getReg(), OpNo);
+    return CTX.getRegisterInfo()->getEncodingValue(Reg);
   }
 
   assert(MO.isImm() &&

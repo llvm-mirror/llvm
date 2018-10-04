@@ -209,6 +209,7 @@ StringRef Triple::getOSTypeName(OSType Kind) {
   case Mesa3D: return "mesa3d";
   case Contiki: return "contiki";
   case AMDPAL: return "amdpal";
+  case HermitCore: return "hermit";
   }
 
   llvm_unreachable("Invalid OSType");
@@ -398,10 +399,14 @@ static Triple::ArchType parseArch(StringRef ArchName) {
     .Case("thumbeb", Triple::thumbeb)
     .Case("avr", Triple::avr)
     .Case("msp430", Triple::msp430)
-    .Cases("mips", "mipseb", "mipsallegrex", Triple::mips)
-    .Cases("mipsel", "mipsallegrexel", Triple::mipsel)
-    .Cases("mips64", "mips64eb", Triple::mips64)
-    .Case("mips64el", Triple::mips64el)
+    .Cases("mips", "mipseb", "mipsallegrex", "mipsisa32r6",
+           "mipsr6", Triple::mips)
+    .Cases("mipsel", "mipsallegrexel", "mipsisa32r6el", "mipsr6el",
+           Triple::mipsel)
+    .Cases("mips64", "mips64eb", "mipsn32", "mipsisa64r6",
+           "mips64r6", "mipsn32r6", Triple::mips64)
+    .Cases("mips64el", "mipsn32el", "mipsisa64r6el", "mips64r6el",
+           "mipsn32r6el", Triple::mips64el)
     .Case("nios2", Triple::nios2)
     .Case("r600", Triple::r600)
     .Case("amdgcn", Triple::amdgcn)
@@ -502,6 +507,7 @@ static Triple::OSType parseOS(StringRef OSName) {
     .StartsWith("mesa3d", Triple::Mesa3D)
     .StartsWith("contiki", Triple::Contiki)
     .StartsWith("amdpal", Triple::AMDPAL)
+    .StartsWith("hermit", Triple::HermitCore)
     .Default(Triple::UnknownOS);
 }
 
@@ -538,6 +544,10 @@ static Triple::ObjectFormatType parseFormat(StringRef EnvironmentName) {
 }
 
 static Triple::SubArchType parseSubArch(StringRef SubArchName) {
+  if (SubArchName.startswith("mips") &&
+      (SubArchName.endswith("r6el") || SubArchName.endswith("r6")))
+    return Triple::MipsSubArch_r6;
+
   StringRef ARMSubArch = ARM::getCanonicalArchName(SubArchName);
 
   // For now, this is the small part. Early return.
@@ -594,6 +604,8 @@ static Triple::SubArchType parseSubArch(StringRef SubArchName) {
     return Triple::ARMSubArch_v8_3a;
   case ARM::ArchKind::ARMV8_4A:
     return Triple::ARMSubArch_v8_4a;
+  case ARM::ArchKind::ARMV8_5A:
+    return Triple::ARMSubArch_v8_5a;
   case ARM::ArchKind::ARMV8R:
     return Triple::ARMSubArch_v8r;
   case ARM::ArchKind::ARMV8MBaseline:
@@ -709,6 +721,15 @@ Triple::Triple(const Twine &Str)
           ObjectFormat = parseFormat(Components[3]);
         }
       }
+    } else {
+      Environment =
+          StringSwitch<Triple::EnvironmentType>(Components[0])
+              .StartsWith("mipsn32", Triple::GNUABIN32)
+              .StartsWith("mips64", Triple::GNUABI64)
+              .StartsWith("mipsisa64", Triple::GNUABI64)
+              .StartsWith("mipsisa32", Triple::GNU)
+              .Cases("mips", "mipsel", "mipsr6", "mipsr6el", Triple::GNU)
+              .Default(UnknownEnvironment);
     }
   }
   if (ObjectFormat == UnknownObjectFormat)

@@ -996,7 +996,7 @@ void ScheduleDAGInstrs::reduceHugeMemNodeMaps(Value2SUsMap &stores,
   for (auto &I : loads)
     for (auto *SU : I.second)
       NodeNums.push_back(SU->NodeNum);
-  llvm::sort(NodeNums.begin(), NodeNums.end());
+  llvm::sort(NodeNums);
 
   // The N last elements in NodeNums will be removed, and the SU with
   // the lowest NodeNum of them will become the new BarrierChain to
@@ -1097,10 +1097,22 @@ void ScheduleDAGInstrs::fixupKills(MachineBasicBlock &MBB) {
   }
 }
 
-void ScheduleDAGInstrs::dumpNode(const SUnit *SU) const {
-  // Cannot completely remove virtual function even in release mode.
+void ScheduleDAGInstrs::dumpNode(const SUnit &SU) const {
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
-  SU->getInstr()->dump();
+  dumpNodeName(SU);
+  dbgs() << ": ";
+  SU.getInstr()->dump();
+#endif
+}
+
+void ScheduleDAGInstrs::dump() const {
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+  if (EntrySU.getInstr() != nullptr)
+    dumpNodeAll(EntrySU);
+  for (const SUnit &SU : SUnits)
+    dumpNodeAll(SU);
+  if (ExitSU.getInstr() != nullptr)
+    dumpNodeAll(ExitSU);
 #endif
 }
 

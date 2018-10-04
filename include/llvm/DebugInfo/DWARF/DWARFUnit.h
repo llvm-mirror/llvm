@@ -110,7 +110,7 @@ class DWARFUnitVector final : public SmallVector<std::unique_ptr<DWARFUnit>, 1> 
   std::function<std::unique_ptr<DWARFUnit>(uint32_t, DWARFSectionKind,
                                            const DWARFSection *)>
       Parser;
-  unsigned NumInfoUnits = 0;
+  int NumInfoUnits = -1;
 
 public:
   using UnitVector = SmallVectorImpl<std::unique_ptr<DWARFUnit>>;
@@ -134,12 +134,18 @@ public:
   void addUnitsForDWOSection(DWARFContext &C, const DWARFSection &DWOSection,
                              DWARFSectionKind SectionKind, bool Lazy = false);
 
+  /// Add an existing DWARFUnit to this UnitVector. This is used by the DWARF
+  /// verifier to process unit separately.
+  DWARFUnit *addUnit(std::unique_ptr<DWARFUnit> Unit);
+
   /// Returns number of all units held by this instance.
-  unsigned getNumUnits() { return size(); }
+  unsigned getNumUnits() const { return size(); }
   /// Returns number of units from all .debug_info[.dwo] sections.
-  unsigned getNumInfoUnits() { return NumInfoUnits; }
+  unsigned getNumInfoUnits() const {
+    return NumInfoUnits == -1 ? size() : NumInfoUnits;
+  }
   /// Returns number of units from all .debug_types[.dwo] sections.
-  unsigned getNumTypesUnits() { return size() - NumInfoUnits; }
+  unsigned getNumTypesUnits() const { return size() - NumInfoUnits; }
   /// Indicate that parsing .debug_info[.dwo] is done, and remaining units
   /// will be from .debug_types[.dwo].
   void finishedInfoUnits() { NumInfoUnits = size(); }

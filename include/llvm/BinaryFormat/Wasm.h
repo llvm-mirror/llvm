@@ -104,8 +104,8 @@ struct WasmFunction {
   uint32_t Size;
   uint32_t CodeOffset;  // start of Locals and Body
   StringRef SymbolName; // from the "linking" section
-  StringRef DebugName; // from the "name" section
-  uint32_t Comdat; // from the "comdat info" section
+  StringRef DebugName;  // from the "name" section
+  uint32_t Comdat;      // from the "comdat info" section
 };
 
 struct WasmDataSegment {
@@ -191,6 +191,7 @@ enum : unsigned {
   WASM_TYPE_I64 = 0x7E,
   WASM_TYPE_F32 = 0x7D,
   WASM_TYPE_F64 = 0x7C,
+  WASM_TYPE_V128 = 0x7B,
   WASM_TYPE_ANYFUNC = 0x70,
   WASM_TYPE_EXCEPT_REF = 0x68,
   WASM_TYPE_FUNC = 0x60,
@@ -225,27 +226,28 @@ enum class ValType {
   I64 = WASM_TYPE_I64,
   F32 = WASM_TYPE_F32,
   F64 = WASM_TYPE_F64,
+  V128 = WASM_TYPE_V128,
   EXCEPT_REF = WASM_TYPE_EXCEPT_REF,
 };
 
 // Kind codes used in the custom "name" section
 enum : unsigned {
   WASM_NAMES_FUNCTION = 0x1,
-  WASM_NAMES_LOCAL    = 0x2,
+  WASM_NAMES_LOCAL = 0x2,
 };
 
 // Kind codes used in the custom "linking" section
 enum : unsigned {
-  WASM_SEGMENT_INFO   = 0x5,
-  WASM_INIT_FUNCS     = 0x6,
-  WASM_COMDAT_INFO    = 0x7,
-  WASM_SYMBOL_TABLE   = 0x8,
+  WASM_SEGMENT_INFO = 0x5,
+  WASM_INIT_FUNCS = 0x6,
+  WASM_COMDAT_INFO = 0x7,
+  WASM_SYMBOL_TABLE = 0x8,
 };
 
 // Kind codes used in the custom "linking" section in the WASM_COMDAT_INFO
 enum : unsigned {
-  WASM_COMDAT_DATA        = 0x0,
-  WASM_COMDAT_FUNCTION    = 0x1,
+  WASM_COMDAT_DATA = 0x0,
+  WASM_COMDAT_FUNCTION = 0x1,
 };
 
 // Kind codes used in the custom "linking" section in the WASM_SYMBOL_TABLE
@@ -256,15 +258,15 @@ enum WasmSymbolType : unsigned {
   WASM_SYMBOL_TYPE_SECTION = 0x3,
 };
 
-const unsigned WASM_SYMBOL_BINDING_MASK       = 0x3;
-const unsigned WASM_SYMBOL_VISIBILITY_MASK    = 0xc;
+const unsigned WASM_SYMBOL_BINDING_MASK = 0x3;
+const unsigned WASM_SYMBOL_VISIBILITY_MASK = 0xc;
 
-const unsigned WASM_SYMBOL_BINDING_GLOBAL     = 0x0;
-const unsigned WASM_SYMBOL_BINDING_WEAK       = 0x1;
-const unsigned WASM_SYMBOL_BINDING_LOCAL      = 0x2;
+const unsigned WASM_SYMBOL_BINDING_GLOBAL = 0x0;
+const unsigned WASM_SYMBOL_BINDING_WEAK = 0x1;
+const unsigned WASM_SYMBOL_BINDING_LOCAL = 0x2;
 const unsigned WASM_SYMBOL_VISIBILITY_DEFAULT = 0x0;
-const unsigned WASM_SYMBOL_VISIBILITY_HIDDEN  = 0x4;
-const unsigned WASM_SYMBOL_UNDEFINED          = 0x10;
+const unsigned WASM_SYMBOL_VISIBILITY_HIDDEN = 0x4;
+const unsigned WASM_SYMBOL_UNDEFINED = 0x10;
 
 #define WASM_RELOC(name, value) name = value,
 

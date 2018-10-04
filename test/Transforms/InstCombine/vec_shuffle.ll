@@ -184,6 +184,40 @@ define <2 x i8> @test13a(i8 %x1, i8 %x2) {
   ret <2 x i8> %D
 }
 
+; Increasing length of vector ops is not a good canonicalization.
+
+define <3 x i32> @add_wider(i32 %y, i32 %z) {
+; CHECK-LABEL: @add_wider(
+; CHECK-NEXT:    [[I0:%.*]] = insertelement <2 x i32> undef, i32 [[Y:%.*]], i32 0
+; CHECK-NEXT:    [[I1:%.*]] = insertelement <2 x i32> [[I0]], i32 [[Z:%.*]], i32 1
+; CHECK-NEXT:    [[A:%.*]] = add <2 x i32> [[I1]], <i32 255, i32 255>
+; CHECK-NEXT:    [[EXT:%.*]] = shufflevector <2 x i32> [[A]], <2 x i32> undef, <3 x i32> <i32 0, i32 1, i32 undef>
+; CHECK-NEXT:    ret <3 x i32> [[EXT]]
+;
+  %i0 = insertelement <2 x i32> undef, i32 %y, i32 0
+  %i1 = insertelement <2 x i32> %i0, i32 %z, i32 1
+  %a = add <2 x i32> %i1, <i32 255, i32 255>
+  %ext = shufflevector <2 x i32> %a, <2 x i32> undef, <3 x i32> <i32 0, i32 1, i32 undef>
+  ret <3 x i32> %ext
+}
+
+; Increasing length of vector ops must be safe from illegal undef propagation.
+
+define <3 x i32> @div_wider(i32 %y, i32 %z) {
+; CHECK-LABEL: @div_wider(
+; CHECK-NEXT:    [[I0:%.*]] = insertelement <2 x i32> undef, i32 [[Y:%.*]], i32 0
+; CHECK-NEXT:    [[I1:%.*]] = insertelement <2 x i32> [[I0]], i32 [[Z:%.*]], i32 1
+; CHECK-NEXT:    [[A:%.*]] = sdiv <2 x i32> [[I1]], <i32 255, i32 255>
+; CHECK-NEXT:    [[EXT:%.*]] = shufflevector <2 x i32> [[A]], <2 x i32> undef, <3 x i32> <i32 0, i32 1, i32 undef>
+; CHECK-NEXT:    ret <3 x i32> [[EXT]]
+;
+  %i0 = insertelement <2 x i32> undef, i32 %y, i32 0
+  %i1 = insertelement <2 x i32> %i0, i32 %z, i32 1
+  %a = sdiv <2 x i32> %i1, <i32 255, i32 255>
+  %ext = shufflevector <2 x i32> %a, <2 x i32> undef, <3 x i32> <i32 0, i32 1, i32 undef>
+  ret <3 x i32> %ext
+}
+
 define <2 x i8> @test13b(i8 %x) {
 ; CHECK-LABEL: @test13b(
 ; CHECK-NEXT:    [[TMP1:%.*]] = insertelement <2 x i8> undef, i8 [[X:%.*]], i32 1
@@ -472,6 +506,58 @@ define <2 x float> @fmul_const_invalid_constant(<2 x float> %v) {
   %t1 = shufflevector <2 x float> %v, <2 x float> undef, <2 x i32> <i32 0, i32 0>
   %r = fmul <2 x float> %t1, <float 41.0, float 42.0>
   ret <2 x float> %r
+}
+
+; Reduce the width of the binop by moving it ahead of a shuffle.
+
+define <4 x i8> @widening_shuffle_add_1(<2 x i8> %x) {
+; CHECK-LABEL: @widening_shuffle_add_1(
+; CHECK-NEXT:    [[TMP1:%.*]] = add <2 x i8> [[X:%.*]], <i8 42, i8 43>
+; CHECK-NEXT:    [[R:%.*]] = shufflevector <2 x i8> [[TMP1]], <2 x i8> undef, <4 x i32> <i32 0, i32 1, i32 undef, i32 undef>
+; CHECK-NEXT:    ret <4 x i8> [[R]]
+;
+  %widex = shufflevector <2 x i8> %x, <2 x i8> undef, <4 x i32> <i32 0, i32 1, i32 undef, i32 undef>
+  %r = add <4 x i8> %widex, <i8 42, i8 43, i8 44, i8 45>
+  ret <4 x i8> %r
+}
+
+; Reduce the width of the binop by moving it ahead of a shuffle.
+
+define <4 x i8> @widening_shuffle_add_2(<2 x i8> %x) {
+; CHECK-LABEL: @widening_shuffle_add_2(
+; CHECK-NEXT:    [[TMP1:%.*]] = add <2 x i8> [[X:%.*]], <i8 43, i8 42>
+; CHECK-NEXT:    [[R:%.*]] = shufflevector <2 x i8> [[TMP1]], <2 x i8> undef, <4 x i32> <i32 1, i32 0, i32 undef, i32 undef>
+; CHECK-NEXT:    ret <4 x i8> [[R]]
+;
+  %widex = shufflevector <2 x i8> %x, <2 x i8> undef, <4 x i32> <i32 1, i32 0, i32 undef, i32 undef>
+  %r = add <4 x i8> %widex, <i8 42, i8 43, i8 44, i8 45>
+  ret <4 x i8> %r
+}
+
+; Negative test - widening shuffles have the same mask/constant constraint as non-size-changing shuffles.
+
+define <4 x i8> @widening_shuffle_add_invalid_constant(<2 x i8> %x) {
+; CHECK-LABEL: @widening_shuffle_add_invalid_constant(
+; CHECK-NEXT:    [[WIDEX:%.*]] = shufflevector <2 x i8> [[X:%.*]], <2 x i8> undef, <4 x i32> <i32 1, i32 1, i32 undef, i32 undef>
+; CHECK-NEXT:    [[R:%.*]] = add <4 x i8> [[WIDEX]], <i8 42, i8 43, i8 44, i8 45>
+; CHECK-NEXT:    ret <4 x i8> [[R]]
+;
+  %widex = shufflevector <2 x i8> %x, <2 x i8> undef, <4 x i32> <i32 1, i32 1, i32 undef, i32 undef>
+  %r = add <4 x i8> %widex, <i8 42, i8 43, i8 44, i8 45>
+  ret <4 x i8> %r
+}
+
+; Negative test - widening shuffles have an additional constraint: they must not extend with anything but undefs.
+
+define <4 x i8> @widening_shuffle_add_invalid_mask(<2 x i8> %x) {
+; CHECK-LABEL: @widening_shuffle_add_invalid_mask(
+; CHECK-NEXT:    [[WIDEX:%.*]] = shufflevector <2 x i8> [[X:%.*]], <2 x i8> undef, <4 x i32> <i32 0, i32 1, i32 undef, i32 0>
+; CHECK-NEXT:    [[R:%.*]] = add <4 x i8> [[WIDEX]], <i8 42, i8 43, i8 44, i8 45>
+; CHECK-NEXT:    ret <4 x i8> [[R]]
+;
+  %widex = shufflevector <2 x i8> %x, <2 x i8> undef, <4 x i32> <i32 0, i32 1, i32 undef, i32 0>
+  %r = add <4 x i8> %widex, <i8 42, i8 43, i8 44, i8 45>
+  ret <4 x i8> %r
 }
 
 define <4 x i32> @shuffle_17add2(<4 x i32> %v) {
@@ -858,6 +944,17 @@ define <2 x float> @fsub_splat_constant1(<2 x float> %x) {
 ;
   %splat = shufflevector <2 x float> %x, <2 x float> undef, <2 x i32> zeroinitializer
   %r = fsub <2 x float> %splat, <float 42.0, float 42.0>
+  ret <2 x float> %r
+}
+
+define <2 x float> @fneg(<2 x float> %x) {
+; CHECK-LABEL: @fneg(
+; CHECK-NEXT:    [[TMP1:%.*]] = fsub <2 x float> <float -0.000000e+00, float undef>, [[X:%.*]]
+; CHECK-NEXT:    [[R:%.*]] = shufflevector <2 x float> [[TMP1]], <2 x float> undef, <2 x i32> zeroinitializer
+; CHECK-NEXT:    ret <2 x float> [[R]]
+;
+  %splat = shufflevector <2 x float> %x, <2 x float> undef, <2 x i32> zeroinitializer
+  %r = fsub <2 x float> <float -0.0, float -0.0>, %splat
   ret <2 x float> %r
 }
 

@@ -850,8 +850,10 @@ ARMTargetLowering::ARMTargetLowering(const TargetMachine &TM,
   }
   setOperationAction(ISD::CTTZ,  MVT::i32, Custom);
   setOperationAction(ISD::CTPOP, MVT::i32, Expand);
-  if (!Subtarget->hasV5TOps() || Subtarget->isThumb1Only())
+  if (!Subtarget->hasV5TOps() || Subtarget->isThumb1Only()) {
     setOperationAction(ISD::CTLZ, MVT::i32, Expand);
+    setOperationAction(ISD::CTLZ_ZERO_UNDEF, MVT::i32, LibCall);
+  }
 
   // @llvm.readcyclecounter requires the Performance Monitors extension.
   // Default to the 0 expansion on unsupported platforms.
@@ -1196,6 +1198,8 @@ ARMTargetLowering::ARMTargetLowering(const TargetMachine &TM,
 
   // Prefer likely predicted branches to selects on out-of-order cores.
   PredictableSelectIsExpensive = Subtarget->getSchedModel().isOutOfOrder();
+
+  setPrefLoopAlignment(Subtarget->getPrefLoopAlignment());
 
   setMinFunctionAlignment(Subtarget->isThumb() ? 1 : 2);
 }
@@ -3144,7 +3148,7 @@ static SDValue promoteToConstantPool(const GlobalValue *GV, SelectionDAG &DAG,
   // that are strings for simplicity.
   auto *CDAInit = dyn_cast<ConstantDataArray>(Init);
   unsigned Size = DAG.getDataLayout().getTypeAllocSize(Init->getType());
-  unsigned Align = GVar->getAlignment();
+  unsigned Align = DAG.getDataLayout().getPreferredAlignment(GVar);
   unsigned RequiredPadding = 4 - (Size % 4);
   bool PaddingPossible =
     RequiredPadding == 4 || (CDAInit && CDAInit->isString());
@@ -3315,9 +3319,13 @@ SDValue ARMTargetLowering::LowerGlobalAddressWindows(SDValue Op,
   assert(!Subtarget->isROPI() && !Subtarget->isRWPI() &&
          "ROPI/RWPI not currently supported for Windows");
 
+  const TargetMachine &TM = getTargetMachine();
   const GlobalValue *GV = cast<GlobalAddressSDNode>(Op)->getGlobal();
-  const ARMII::TOF TargetFlags =
-    (GV->hasDLLImportStorageClass() ? ARMII::MO_DLLIMPORT : ARMII::MO_NO_FLAG);
+  ARMII::TOF TargetFlags = ARMII::MO_NO_FLAG;
+  if (GV->hasDLLImportStorageClass())
+    TargetFlags = ARMII::MO_DLLIMPORT;
+  else if (!TM.shouldAssumeDSOLocal(*GV->getParent(), GV))
+    TargetFlags = ARMII::MO_COFFSTUB;
   EVT PtrVT = getPointerTy(DAG.getDataLayout());
   SDValue Result;
   SDLoc DL(Op);
@@ -3329,7 +3337,7 @@ SDValue ARMTargetLowering::LowerGlobalAddressWindows(SDValue Op,
   Result = DAG.getNode(ARMISD::Wrapper, DL, PtrVT,
                        DAG.getTargetGlobalAddress(GV, DL, PtrVT, /*Offset=*/0,
                                                   TargetFlags));
-  if (GV->hasDLLImportStorageClass())
+  if (TargetFlags & (ARMII::MO_DLLIMPORT | ARMII::MO_COFFSTUB))
     Result = DAG.getLoad(PtrVT, DL, DAG.getEntryNode(), Result,
                          MachinePointerInfo::getGOT(DAG.getMachineFunction()));
   return Result;
@@ -9207,6 +9215,8 @@ ARMTargetLowering::EmitLowered__chkstk(MachineInstr &MI,
   // IP.
 
   switch (TM.getCodeModel()) {
+  case CodeModel::Tiny:
+    llvm_unreachable("Tiny code model not available on ARM.");
   case CodeModel::Small:
   case CodeModel::Medium:
   case CodeModel::Kernel:
@@ -11596,8 +11606,15 @@ static SDValue CombineBaseUpdate(SDNode *N,
       continue;
 
     // Check that the add is independent of the load/store.  Otherwise, folding
-    // it would create a cycle.
-    if (User->isPredecessorOf(N) || N->isPredecessorOf(User))
+    // it would create a cycle. We can avoid searching through Addr as it's a
+    // predecessor to both.
+    SmallPtrSet<const SDNode *, 32> Visited;
+    SmallVector<const SDNode *, 16> Worklist;
+    Visited.insert(Addr.getNode());
+    Worklist.push_back(N);
+    Worklist.push_back(User);
+    if (SDNode::hasPredecessorHelper(N, Visited, Worklist) ||
+        SDNode::hasPredecessorHelper(User, Visited, Worklist))
       continue;
 
     // Find the new opcode for the updating load/store.
@@ -13645,13 +13662,20 @@ ARMTargetLowering::targetShrinkDemandedConstant(SDValue Op,
 
   unsigned Mask = C->getZExtValue();
 
-  // If mask is zero, nothing to do.
-  if (!Mask)
-    return false;
-
   unsigned Demanded = DemandedAPInt.getZExtValue();
   unsigned ShrunkMask = Mask & Demanded;
   unsigned ExpandedMask = Mask | ~Demanded;
+
+  // If the mask is all zeros, let the target-independent code replace the
+  // result with zero.
+  if (ShrunkMask == 0)
+    return false;
+
+  // If the mask is all ones, erase the AND. (Currently, the target-independent
+  // code won't do this, so we have to do it explicitly to avoid an infinite
+  // loop in obscure cases.)
+  if (ExpandedMask == ~0U)
+    return TLO.CombineTo(Op, Op.getOperand(0));
 
   auto IsLegalMask = [ShrunkMask, ExpandedMask](unsigned Mask) -> bool {
     return (ShrunkMask & Mask) == ShrunkMask && (~ExpandedMask & Mask) == 0;
@@ -14544,16 +14568,18 @@ ARMTargetLowering::shouldExpandAtomicRMWInIR(AtomicRMWInst *AI) const {
              : AtomicExpansionKind::None;
 }
 
-bool ARMTargetLowering::shouldExpandAtomicCmpXchgInIR(
-    AtomicCmpXchgInst *AI) const {
+TargetLowering::AtomicExpansionKind
+ARMTargetLowering::shouldExpandAtomicCmpXchgInIR(AtomicCmpXchgInst *AI) const {
   // At -O0, fast-regalloc cannot cope with the live vregs necessary to
   // implement cmpxchg without spilling. If the address being exchanged is also
   // on the stack and close enough to the spill slot, this can lead to a
   // situation where the monitor always gets cleared and the atomic operation
   // can never succeed. So at -O0 we need a late-expanded pseudo-inst instead.
-  bool hasAtomicCmpXchg =
+  bool HasAtomicCmpXchg =
       !Subtarget->isThumb() || Subtarget->hasV8MBaselineOps();
-  return getTargetMachine().getOptLevel() != 0 && hasAtomicCmpXchg;
+  if (getTargetMachine().getOptLevel() != 0 && HasAtomicCmpXchg)
+    return AtomicExpansionKind::LLSC;
+  return AtomicExpansionKind::None;
 }
 
 bool ARMTargetLowering::shouldInsertFencesForAtomic(
@@ -14678,6 +14704,11 @@ Value *ARMTargetLowering::emitStoreConditional(IRBuilder<> &Builder, Value *Val,
       Strex, {Builder.CreateZExtOrBitCast(
                   Val, Strex->getFunctionType()->getParamType(0)),
               Addr});
+}
+
+
+bool ARMTargetLowering::alignLoopsWithOptSize() const {
+  return Subtarget->isMClass();
 }
 
 /// A helper function for determining the number of interleaved accesses we

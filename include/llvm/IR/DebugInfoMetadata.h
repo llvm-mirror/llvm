@@ -1396,19 +1396,20 @@ class DILocation : public MDNode {
   friend class MDNode;
 
   DILocation(LLVMContext &C, StorageType Storage, unsigned Line,
-             unsigned Column, ArrayRef<Metadata *> MDs);
+             unsigned Column, ArrayRef<Metadata *> MDs, bool ImplicitCode);
   ~DILocation() { dropAllReferences(); }
 
   static DILocation *getImpl(LLVMContext &Context, unsigned Line,
                              unsigned Column, Metadata *Scope,
-                             Metadata *InlinedAt, StorageType Storage,
-                             bool ShouldCreate = true);
+                             Metadata *InlinedAt, bool ImplicitCode,
+                             StorageType Storage, bool ShouldCreate = true);
   static DILocation *getImpl(LLVMContext &Context, unsigned Line,
                              unsigned Column, DILocalScope *Scope,
-                             DILocation *InlinedAt, StorageType Storage,
-                             bool ShouldCreate = true) {
+                             DILocation *InlinedAt, bool ImplicitCode,
+                             StorageType Storage, bool ShouldCreate = true) {
     return getImpl(Context, Line, Column, static_cast<Metadata *>(Scope),
-                   static_cast<Metadata *>(InlinedAt), Storage, ShouldCreate);
+                   static_cast<Metadata *>(InlinedAt), ImplicitCode, Storage,
+                   ShouldCreate);
   }
 
   /// With a given unsigned int \p U, use up to 13 bits to represent it.
@@ -1437,7 +1438,7 @@ class DILocation : public MDNode {
     // Get the raw scope/inlinedAt since it is possible to invoke this on
     // a DILocation containing temporary metadata.
     return getTemporary(getContext(), getLine(), getColumn(), getRawScope(),
-                        getRawInlinedAt());
+                        getRawInlinedAt(), isImplicitCode());
   }
 
 public:
@@ -1446,12 +1447,13 @@ public:
 
   DEFINE_MDNODE_GET(DILocation,
                     (unsigned Line, unsigned Column, Metadata *Scope,
-                     Metadata *InlinedAt = nullptr),
-                    (Line, Column, Scope, InlinedAt))
+                     Metadata *InlinedAt = nullptr, bool ImplicitCode = false),
+                    (Line, Column, Scope, InlinedAt, ImplicitCode))
   DEFINE_MDNODE_GET(DILocation,
                     (unsigned Line, unsigned Column, DILocalScope *Scope,
-                     DILocation *InlinedAt = nullptr),
-                    (Line, Column, Scope, InlinedAt))
+                     DILocation *InlinedAt = nullptr,
+                     bool ImplicitCode = false),
+                    (Line, Column, Scope, InlinedAt, ImplicitCode))
 
   /// Return a (temporary) clone of this.
   TempDILocation clone() const { return cloneImpl(); }
@@ -1463,6 +1465,15 @@ public:
   DILocation *getInlinedAt() const {
     return cast_or_null<DILocation>(getRawInlinedAt());
   }
+
+  /// Check if the location corresponds to an implicit code.
+  /// When the ImplicitCode flag is true, it means that the Instruction
+  /// with this DILocation has been added by the front-end but it hasn't been
+  /// written explicitly by the user (e.g. cleanup stuff in C++ put on a closing
+  /// bracket). It's useful for code coverage to not show a counter on "empty"
+  /// lines.
+  bool isImplicitCode() const { return ImplicitCode; }
+  void setImplicitCode(bool ImplicitCode) { this->ImplicitCode = ImplicitCode; }
 
   DIFile *getFile() const { return getScope()->getFile(); }
   StringRef getFilename() const { return getScope()->getFilename(); }
@@ -1477,19 +1488,6 @@ public:
     if (auto *IA = getInlinedAt())
       return IA->getInlinedAtScope();
     return getScope();
-  }
-
-  /// Check whether this can be discriminated from another location.
-  ///
-  /// Check \c this can be discriminated from \c RHS in a linetable entry.
-  /// Scope and inlined-at chains are not recorded in the linetable, so they
-  /// cannot be used to distinguish basic blocks.
-  bool canDiscriminate(const DILocation &RHS) const {
-    return getLine() != RHS.getLine() ||
-           getColumn() != RHS.getColumn() ||
-           getDiscriminator() != RHS.getDiscriminator() ||
-           getFilename() != RHS.getFilename() ||
-           getDirectory() != RHS.getDirectory();
   }
 
   /// Get the DWARF discriminator.
@@ -1539,8 +1537,6 @@ public:
   /// discriminator.
   inline const DILocation *cloneWithDuplicationFactor(unsigned DF) const;
 
-  enum { NoGeneratedLocation = false, WithGeneratedLocation = true };
-
   /// When two instructions are combined into a single instruction we also
   /// need to combine the original locations into a single location.
   ///
@@ -1555,9 +1551,8 @@ public:
   ///
   /// \p GenerateLocation: Whether the merged location can be generated when
   /// \p LocA and \p LocB differ.
-  static const DILocation *
-  getMergedLocation(const DILocation *LocA, const DILocation *LocB,
-                    bool GenerateLocation = NoGeneratedLocation);
+  static const DILocation *getMergedLocation(const DILocation *LocA,
+                                             const DILocation *LocB);
 
   /// Returns the base discriminator for a given encoded discriminator \p D.
   static unsigned getBaseDiscriminatorFromDiscriminator(unsigned D) {

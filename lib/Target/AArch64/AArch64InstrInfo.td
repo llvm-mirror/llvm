@@ -22,6 +22,8 @@ def HasV8_3a         : Predicate<"Subtarget->hasV8_3aOps()">,
                                  AssemblerPredicate<"HasV8_3aOps", "armv8.3a">;
 def HasV8_4a         : Predicate<"Subtarget->hasV8_4aOps()">,
                                  AssemblerPredicate<"HasV8_4aOps", "armv8.4a">;
+def HasV8_5a         : Predicate<"Subtarget->hasV8_5aOps()">,
+                                 AssemblerPredicate<"HasV8_5aOps", "armv8.5a">;
 def HasFPARMv8       : Predicate<"Subtarget->hasFPARMv8()">,
                                AssemblerPredicate<"FeatureFPARMv8", "fp-armv8">;
 def HasNEON          : Predicate<"Subtarget->hasNEON()">,
@@ -60,7 +62,18 @@ def HasSVE           : Predicate<"Subtarget->hasSVE()">,
                                  AssemblerPredicate<"FeatureSVE", "sve">;
 def HasRCPC          : Predicate<"Subtarget->hasRCPC()">,
                                  AssemblerPredicate<"FeatureRCPC", "rcpc">;
-
+def HasAltNZCV       : Predicate<"Subtarget->hasAlternativeNZCV()">,
+                       AssemblerPredicate<"FeatureAltFPCmp", "altnzcv">;
+def HasFRInt3264     : Predicate<"Subtarget->hasFRInt3264()">,
+                       AssemblerPredicate<"FeatureFRInt3264", "frint3264">;
+def HasSpecCtrl      : Predicate<"Subtarget->hasSpecCtrl()">,
+                       AssemblerPredicate<"FeatureSpecCtrl", "specctrl">;
+def HasPredCtrl      : Predicate<"Subtarget->hasPredCtrl()">,
+                       AssemblerPredicate<"FeaturePredCtrl", "predctrl">;
+def HasCCDP          : Predicate<"Subtarget->hasCCDP()">,
+                       AssemblerPredicate<"FeatureCacheDeepPersist", "ccdp">;
+def HasBTI           : Predicate<"Subtarget->hasBTI()">,
+                       AssemblerPredicate<"FeatureBranchTargetId", "bti">;
 def IsLE             : Predicate<"Subtarget->isLittleEndian()">;
 def IsBE             : Predicate<"!Subtarget->isLittleEndian()">;
 def UseAlternateSExtLoadCVTF32
@@ -176,6 +189,7 @@ def SDT_AArch64WrapperLarge : SDTypeProfile<1, 4,
 
 // Node definitions.
 def AArch64adrp          : SDNode<"AArch64ISD::ADRP", SDTIntUnaryOp, []>;
+def AArch64adr           : SDNode<"AArch64ISD::ADR", SDTIntUnaryOp, []>;
 def AArch64addlow        : SDNode<"AArch64ISD::ADDlow", SDTIntBinOp, []>;
 def AArch64LOADgot       : SDNode<"AArch64ISD::LOADgot", SDTIntUnaryOp>;
 def AArch64callseq_start : SDNode<"ISD::CALLSEQ_START",
@@ -442,6 +456,8 @@ def : InstAlias<"sev",  (HINT 0b100)>;
 def : InstAlias<"sevl", (HINT 0b101)>;
 def : InstAlias<"esb",  (HINT 0b10000)>, Requires<[HasRAS]>;
 def : InstAlias<"csdb", (HINT 20)>;
+def : InstAlias<"bti",  (HINT 32)>, Requires<[HasBTI]>;
+def : InstAlias<"bti $op", (HINT btihint_op:$op)>, Requires<[HasBTI]>;
 
 // v8.2a Statistical Profiling extension
 def : InstAlias<"psb $op",  (HINT psbhint_op:$op)>, Requires<[HasSPE]>;
@@ -605,8 +621,37 @@ def RMIF   : FlagRotate<(ins GPR64:$Rn, uimm6:$imm, imm0_15:$mask), "rmif",
                         "{\t$Rn, $imm, $mask}">;
 } // HasV8_4a
 
+// v8.5 flag manipulation instructions
+let Predicates = [HasAltNZCV], Uses = [NZCV], Defs = [NZCV] in {
+
+def XAFLAG : PstateWriteSimple<(ins), "xaflag", "">, Sched<[WriteSys]> {
+  let Inst{18-16} = 0b000;
+  let Inst{11-8} = 0b0000;
+  let Unpredictable{11-8} = 0b1111;
+  let Inst{7-5} = 0b001;
+}
+
+def AXFLAG : PstateWriteSimple<(ins), "axflag", "">, Sched<[WriteSys]> {
+  let Inst{18-16} = 0b000;
+  let Inst{11-8} = 0b0000;
+  let Unpredictable{11-8} = 0b1111;
+  let Inst{7-5} = 0b010;
+}
+} // HasAltNZCV
+
+
+// Armv8.5-A speculation barrier
+def SB : SimpleSystemI<0, (ins), "sb", "">, Sched<[]> {
+  let Inst{20-5} = 0b0001100110000111;
+  let Unpredictable{11-8} = 0b1111;
+  let Predicates = [HasSpecCtrl];
+  let hasSideEffects = 1;
+}
+
 def : InstAlias<"clrex", (CLREX 0xf)>;
 def : InstAlias<"isb", (ISB 0xf)>;
+def : InstAlias<"ssbb", (DSB 0)>;
+def : InstAlias<"pssbb", (DSB 4)>;
 
 def MRS    : MRSI;
 def MSR    : MSRI;
@@ -1385,7 +1430,8 @@ def : InstAlias<"cneg $dst, $src, $cc",
 //===----------------------------------------------------------------------===//
 let isReMaterializable = 1 in {
 let hasSideEffects = 0, mayStore = 0, mayLoad = 0 in {
-def ADR  : ADRI<0, "adr", adrlabel, []>;
+def ADR  : ADRI<0, "adr", adrlabel,
+                [(set GPR64:$Xd, (AArch64adr tglobaladdr:$label))]>;
 } // hasSideEffects = 0
 
 def ADRP : ADRI<1, "adrp", adrplabel,
@@ -1393,6 +1439,10 @@ def ADRP : ADRI<1, "adrp", adrplabel,
 } // isReMaterializable = 1
 
 // page address of a constant pool entry, block address
+def : Pat<(AArch64adr tconstpool:$cp), (ADR tconstpool:$cp)>;
+def : Pat<(AArch64adr tblockaddress:$cp), (ADR tblockaddress:$cp)>;
+def : Pat<(AArch64adr texternalsym:$sym), (ADR texternalsym:$sym)>;
+def : Pat<(AArch64adr tjumptable:$sym), (ADR tjumptable:$sym)>;
 def : Pat<(AArch64adrp tconstpool:$cp), (ADRP tconstpool:$cp)>;
 def : Pat<(AArch64adrp tblockaddress:$cp), (ADRP tblockaddress:$cp)>;
 def : Pat<(AArch64adrp texternalsym:$sym), (ADRP texternalsym:$sym)>;
@@ -1885,14 +1935,37 @@ def : InstAlias<"prfm $Rt, [$Rn]", (PRFMui prfop:$Rt, GPR64sp:$Rn, 0)>;
 
 //---
 // (literal)
-def LDRWl : LoadLiteral<0b00, 0, GPR32z, "ldr">;
-def LDRXl : LoadLiteral<0b01, 0, GPR64z, "ldr">;
-def LDRSl : LoadLiteral<0b00, 1, FPR32Op, "ldr">;
-def LDRDl : LoadLiteral<0b01, 1, FPR64Op, "ldr">;
-def LDRQl : LoadLiteral<0b10, 1, FPR128Op, "ldr">;
+
+def alignedglobal : PatLeaf<(iPTR iPTR:$label), [{
+  if (auto *G = dyn_cast<GlobalAddressSDNode>(N)) {
+    const DataLayout &DL = MF->getDataLayout();
+    unsigned Align = G->getGlobal()->getPointerAlignment(DL);
+    return Align >= 4 && G->getOffset() % 4 == 0;
+  }
+  if (auto *C = dyn_cast<ConstantPoolSDNode>(N))
+    return C->getAlignment() >= 4 && C->getOffset() % 4 == 0;
+  return false;
+}]>;
+
+def LDRWl : LoadLiteral<0b00, 0, GPR32z, "ldr",
+  [(set GPR32z:$Rt, (load (AArch64adr alignedglobal:$label)))]>;
+def LDRXl : LoadLiteral<0b01, 0, GPR64z, "ldr",
+  [(set GPR64z:$Rt, (load (AArch64adr alignedglobal:$label)))]>;
+def LDRSl : LoadLiteral<0b00, 1, FPR32Op, "ldr",
+  [(set (f32 FPR32Op:$Rt), (load (AArch64adr alignedglobal:$label)))]>;
+def LDRDl : LoadLiteral<0b01, 1, FPR64Op, "ldr",
+  [(set (f64 FPR64Op:$Rt), (load (AArch64adr alignedglobal:$label)))]>;
+def LDRQl : LoadLiteral<0b10, 1, FPR128Op, "ldr",
+  [(set (f128 FPR128Op:$Rt), (load (AArch64adr alignedglobal:$label)))]>;
 
 // load sign-extended word
-def LDRSWl : LoadLiteral<0b10, 0, GPR64z, "ldrsw">;
+def LDRSWl : LoadLiteral<0b10, 0, GPR64z, "ldrsw",
+  [(set GPR64z:$Rt, (sextloadi32 (AArch64adr alignedglobal:$label)))]>;
+
+let AddedComplexity = 20 in {
+def : Pat<(i64 (zextloadi32 (AArch64adr alignedglobal:$label))),
+        (SUBREG_TO_REG (i64 0), (LDRWl $label), sub_32)>;
+}
 
 // prefetch
 def PRFMl : PrefetchLiteral<0b11, 0, "prfm", []>;
@@ -2888,6 +2961,13 @@ let SchedRW = [WriteFDiv] in {
 defm FSQRT  : SingleOperandFPData<0b0011, "fsqrt", fsqrt>;
 }
 
+let Predicates = [HasFRInt3264] in {
+  defm FRINT32Z : FRIntNNT<0b00, "frint32z">;
+  defm FRINT64Z : FRIntNNT<0b10, "frint64z">;
+  defm FRINT32X : FRIntNNT<0b01, "frint32x">;
+  defm FRINT64X : FRIntNNT<0b11, "frint64x">;
+} // HasFRInt3264
+
 //===----------------------------------------------------------------------===//
 // Floating point two operand instructions.
 //===----------------------------------------------------------------------===//
@@ -3106,6 +3186,14 @@ defm FRINTN : SIMDTwoVectorFP<0, 0, 0b11000, "frintn", int_aarch64_neon_frintn>;
 defm FRINTP : SIMDTwoVectorFP<0, 1, 0b11000, "frintp", fceil>;
 defm FRINTX : SIMDTwoVectorFP<1, 0, 0b11001, "frintx", frint>;
 defm FRINTZ : SIMDTwoVectorFP<0, 1, 0b11001, "frintz", ftrunc>;
+
+let Predicates = [HasFRInt3264] in {
+  defm FRINT32Z : FRIntNNTVector<0, 0, "frint32z">;
+  defm FRINT64Z : FRIntNNTVector<0, 1, "frint64z">;
+  defm FRINT32X : FRIntNNTVector<1, 0, "frint32x">;
+  defm FRINT64X : FRIntNNTVector<1, 1, "frint64x">;
+} // HasFRInt3264
+
 defm FRSQRTE: SIMDTwoVectorFP<1, 1, 0b11101, "frsqrte", int_aarch64_neon_frsqrte>;
 defm FSQRT  : SIMDTwoVectorFP<1, 1, 0b11111, "fsqrt", fsqrt>;
 defm NEG    : SIMDTwoVectorBHSD<1, 0b01011, "neg",

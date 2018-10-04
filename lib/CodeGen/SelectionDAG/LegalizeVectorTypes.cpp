@@ -143,6 +143,7 @@ void DAGTypeLegalizer::ScalarizeVectorResult(SDNode *N, unsigned ResNo) {
   case ISD::STRICT_FSUB:
   case ISD::STRICT_FMUL:
   case ISD::STRICT_FDIV:
+  case ISD::STRICT_FREM:
   case ISD::STRICT_FSQRT:
   case ISD::STRICT_FMA:
   case ISD::STRICT_FPOW:
@@ -808,6 +809,7 @@ void DAGTypeLegalizer::SplitVectorResult(SDNode *N, unsigned ResNo) {
   case ISD::STRICT_FSUB:
   case ISD::STRICT_FMUL:
   case ISD::STRICT_FDIV:
+  case ISD::STRICT_FREM:
   case ISD::STRICT_FSQRT:
   case ISD::STRICT_FMA:
   case ISD::STRICT_FPOW:
@@ -2373,6 +2375,7 @@ void DAGTypeLegalizer::WidenVectorResult(SDNode *N, unsigned ResNo) {
   case ISD::STRICT_FSUB:
   case ISD::STRICT_FMUL:
   case ISD::STRICT_FDIV:
+  case ISD::STRICT_FREM:
   case ISD::STRICT_FSQRT:
   case ISD::STRICT_FMA:
   case ISD::STRICT_FPOW:
@@ -2422,11 +2425,6 @@ void DAGTypeLegalizer::WidenVectorResult(SDNode *N, unsigned ResNo) {
     Res = WidenVecRes_Convert(N);
     break;
 
-  case ISD::BITREVERSE:
-  case ISD::BSWAP:
-  case ISD::CTLZ:
-  case ISD::CTPOP:
-  case ISD::CTTZ:
   case ISD::FABS:
   case ISD::FCEIL:
   case ISD::FCOS:
@@ -2437,12 +2435,36 @@ void DAGTypeLegalizer::WidenVectorResult(SDNode *N, unsigned ResNo) {
   case ISD::FLOG10:
   case ISD::FLOG2:
   case ISD::FNEARBYINT:
-  case ISD::FNEG:
   case ISD::FRINT:
   case ISD::FROUND:
   case ISD::FSIN:
   case ISD::FSQRT:
-  case ISD::FTRUNC:
+  case ISD::FTRUNC: {
+    // We're going to widen this vector op to a legal type by padding with undef
+    // elements. If the wide vector op is eventually going to be expanded to
+    // scalar libcalls, then unroll into scalar ops now to avoid unnecessary
+    // libcalls on the undef elements. We are assuming that if the scalar op
+    // requires expanding, then the vector op needs expanding too.
+    EVT VT = N->getValueType(0);
+    if (TLI.isOperationExpand(N->getOpcode(), VT.getScalarType())) {
+      EVT WideVecVT = TLI.getTypeToTransformTo(*DAG.getContext(), VT);
+      assert(!TLI.isOperationLegalOrCustom(N->getOpcode(), WideVecVT) &&
+             "Target supports vector op, but scalar requires expansion?");
+      Res = DAG.UnrollVectorOp(N, WideVecVT.getVectorNumElements());
+      break;
+    }
+  }
+  // If the target has custom/legal support for the scalar FP intrinsic ops
+  // (they are probably not destined to become libcalls), then widen those like
+  // any other unary ops.
+  LLVM_FALLTHROUGH;
+
+  case ISD::BITREVERSE:
+  case ISD::BSWAP:
+  case ISD::CTLZ:
+  case ISD::CTPOP:
+  case ISD::CTTZ:
+  case ISD::FNEG:
   case ISD::FCANONICALIZE:
     Res = WidenVecRes_Unary(N);
     break;
@@ -3611,6 +3633,7 @@ bool DAGTypeLegalizer::WidenVectorOperand(SDNode *N, unsigned OpNo) {
   case ISD::EXTRACT_VECTOR_ELT: Res = WidenVecOp_EXTRACT_VECTOR_ELT(N); break;
   case ISD::STORE:              Res = WidenVecOp_STORE(N); break;
   case ISD::MSTORE:             Res = WidenVecOp_MSTORE(N, OpNo); break;
+  case ISD::MGATHER:            Res = WidenVecOp_MGATHER(N, OpNo); break;
   case ISD::MSCATTER:           Res = WidenVecOp_MSCATTER(N, OpNo); break;
   case ISD::SETCC:              Res = WidenVecOp_SETCC(N); break;
   case ISD::FCOPYSIGN:          Res = WidenVecOp_FCOPYSIGN(N); break;
@@ -3838,7 +3861,7 @@ SDValue DAGTypeLegalizer::WidenVecOp_STORE(SDNode *N) {
 }
 
 SDValue DAGTypeLegalizer::WidenVecOp_MSTORE(SDNode *N, unsigned OpNo) {
-  assert((OpNo == 2 || OpNo == 3) &&
+  assert((OpNo == 1 || OpNo == 3) &&
          "Can widen only data or mask operand of mstore");
   MaskedStoreSDNode *MST = cast<MaskedStoreSDNode>(N);
   SDValue Mask = MST->getMask();
@@ -3846,8 +3869,8 @@ SDValue DAGTypeLegalizer::WidenVecOp_MSTORE(SDNode *N, unsigned OpNo) {
   SDValue StVal = MST->getValue();
   SDLoc dl(N);
 
-  if (OpNo == 3) {
-    // Widen the value
+  if (OpNo == 1) {
+    // Widen the value.
     StVal = GetWidenedVector(StVal);
 
     // The mask should be widened as well.
@@ -3857,18 +3880,15 @@ SDValue DAGTypeLegalizer::WidenVecOp_MSTORE(SDNode *N, unsigned OpNo) {
                                       WideVT.getVectorNumElements());
     Mask = ModifyToType(Mask, WideMaskVT, true);
   } else {
+    // Widen the mask.
     EVT WideMaskVT = TLI.getTypeToTransformTo(*DAG.getContext(), MaskVT);
     Mask = ModifyToType(Mask, WideMaskVT, true);
 
     EVT ValueVT = StVal.getValueType();
-    if (getTypeAction(ValueVT) == TargetLowering::TypeWidenVector)
-      StVal = GetWidenedVector(StVal);
-    else {
-      EVT WideVT = EVT::getVectorVT(*DAG.getContext(),
-                                    ValueVT.getVectorElementType(),
-                                    WideMaskVT.getVectorNumElements());
-      StVal = ModifyToType(StVal, WideVT);
-    }
+    EVT WideVT = EVT::getVectorVT(*DAG.getContext(),
+                                  ValueVT.getVectorElementType(),
+                                  WideMaskVT.getVectorNumElements());
+    StVal = ModifyToType(StVal, WideVT);
   }
 
   assert(Mask.getValueType().getVectorNumElements() ==
@@ -3879,36 +3899,59 @@ SDValue DAGTypeLegalizer::WidenVecOp_MSTORE(SDNode *N, unsigned OpNo) {
                             false, MST->isCompressingStore());
 }
 
+SDValue DAGTypeLegalizer::WidenVecOp_MGATHER(SDNode *N, unsigned OpNo) {
+  assert(OpNo == 4 && "Can widen only the index of mgather");
+  auto *MG = cast<MaskedGatherSDNode>(N);
+  SDValue DataOp = MG->getPassThru();
+  SDValue Mask = MG->getMask();
+  SDValue Scale = MG->getScale();
+
+  // Just widen the index. It's allowed to have extra elements.
+  SDValue Index = GetWidenedVector(MG->getIndex());
+
+  SDLoc dl(N);
+  SDValue Ops[] = {MG->getChain(), DataOp, Mask, MG->getBasePtr(), Index,
+                   Scale};
+  SDValue Res = DAG.getMaskedGather(MG->getVTList(), MG->getMemoryVT(), dl, Ops,
+                                    MG->getMemOperand());
+  ReplaceValueWith(SDValue(N, 1), Res.getValue(1));
+  ReplaceValueWith(SDValue(N, 0), Res.getValue(0));
+  return SDValue();
+}
+
 SDValue DAGTypeLegalizer::WidenVecOp_MSCATTER(SDNode *N, unsigned OpNo) {
-  assert(OpNo == 1 && "Can widen only data operand of mscatter");
   MaskedScatterSDNode *MSC = cast<MaskedScatterSDNode>(N);
   SDValue DataOp = MSC->getValue();
   SDValue Mask = MSC->getMask();
-  EVT MaskVT = Mask.getValueType();
+  SDValue Index = MSC->getIndex();
   SDValue Scale = MSC->getScale();
 
-  // Widen the value.
-  SDValue WideVal = GetWidenedVector(DataOp);
-  EVT WideVT = WideVal.getValueType();
-  unsigned NumElts = WideVT.getVectorNumElements();
-  SDLoc dl(N);
+  unsigned NumElts;
+  if (OpNo == 1) {
+    DataOp = GetWidenedVector(DataOp);
+    NumElts = DataOp.getValueType().getVectorNumElements();
 
-  // The mask should be widened as well.
-  EVT WideMaskVT = EVT::getVectorVT(*DAG.getContext(),
-                                    MaskVT.getVectorElementType(), NumElts);
-  Mask = ModifyToType(Mask, WideMaskVT, true);
+    // Widen index.
+    EVT IndexVT = Index.getValueType();
+    EVT WideIndexVT = EVT::getVectorVT(*DAG.getContext(),
+                                       IndexVT.getVectorElementType(), NumElts);
+    Index = ModifyToType(Index, WideIndexVT);
 
-  // Widen index.
-  SDValue Index = MSC->getIndex();
-  EVT WideIndexVT = EVT::getVectorVT(*DAG.getContext(),
-                                     Index.getValueType().getScalarType(),
-                                     NumElts);
-  Index = ModifyToType(Index, WideIndexVT);
+    // The mask should be widened as well.
+    EVT MaskVT = Mask.getValueType();
+    EVT WideMaskVT = EVT::getVectorVT(*DAG.getContext(),
+                                      MaskVT.getVectorElementType(), NumElts);
+    Mask = ModifyToType(Mask, WideMaskVT, true);
+  } else if (OpNo == 4) {
+    // Just widen the index. It's allowed to have extra elements.
+    Index = GetWidenedVector(Index);
+  } else
+    llvm_unreachable("Can't widen this operand of mscatter");
 
-  SDValue Ops[] = {MSC->getChain(), WideVal, Mask, MSC->getBasePtr(), Index,
+  SDValue Ops[] = {MSC->getChain(), DataOp, Mask, MSC->getBasePtr(), Index,
                    Scale};
   return DAG.getMaskedScatter(DAG.getVTList(MVT::Other),
-                              MSC->getMemoryVT(), dl, Ops,
+                              MSC->getMemoryVT(), SDLoc(N), Ops,
                               MSC->getMemOperand());
 }
 

@@ -101,8 +101,7 @@ define i1 @test7(i32 %x) {
 
 define <2 x i1> @test7_vec(<2 x i32> %x) {
 ; CHECK-LABEL: @test7_vec(
-; CHECK-NEXT:    [[A:%.*]] = add <2 x i32> [[X:%.*]], <i32 -1, i32 -1>
-; CHECK-NEXT:    [[B:%.*]] = icmp ult <2 x i32> [[A]], [[X]]
+; CHECK-NEXT:    [[B:%.*]] = icmp ne <2 x i32> [[X:%.*]], zeroinitializer
 ; CHECK-NEXT:    ret <2 x i1> [[B]]
 ;
   %a = add <2 x i32> %x, <i32 -1, i32 -1>
@@ -140,12 +139,31 @@ define i1 @test9(i32 %x) {
 
 define <2 x i1> @test9_vec(<2 x i32> %x) {
 ; CHECK-LABEL: @test9_vec(
-; CHECK-NEXT:    [[A:%.*]] = add <2 x i32> [[X:%.*]], <i32 -2, i32 -2>
-; CHECK-NEXT:    [[B:%.*]] = icmp ult <2 x i32> [[A]], [[X]]
+; CHECK-NEXT:    [[B:%.*]] = icmp ugt <2 x i32> [[X:%.*]], <i32 1, i32 1>
 ; CHECK-NEXT:    ret <2 x i1> [[B]]
 ;
   %a = add <2 x i32> %x, <i32 -2, i32 -2>
   %b = icmp ugt <2 x i32> %x, %a
+  ret <2 x i1> %b
+}
+
+define i1 @test9b(i32 %x) {
+; CHECK-LABEL: @test9b(
+; CHECK-NEXT:    [[B:%.*]] = icmp ult i32 [[X:%.*]], 2
+; CHECK-NEXT:    ret i1 [[B]]
+;
+  %a = add i32 %x, -2
+  %b = icmp ugt i32 %a, %x
+  ret i1 %b
+}
+
+define <2 x i1> @test9b_vec(<2 x i32> %x) {
+; CHECK-LABEL: @test9b_vec(
+; CHECK-NEXT:    [[B:%.*]] = icmp ult <2 x i32> [[X:%.*]], <i32 2, i32 2>
+; CHECK-NEXT:    ret <2 x i1> [[B]]
+;
+  %a = add <2 x i32> %x, <i32 -2, i32 -2>
+  %b = icmp ugt <2 x i32> %a, %x
   ret <2 x i1> %b
 }
 
@@ -161,12 +179,31 @@ define i1 @test10(i32 %x) {
 
 define <2 x i1> @test10_vec(<2 x i32> %x) {
 ; CHECK-LABEL: @test10_vec(
-; CHECK-NEXT:    [[A:%.*]] = add <2 x i32> [[X:%.*]], <i32 -1, i32 -1>
-; CHECK-NEXT:    [[B:%.*]] = icmp slt <2 x i32> [[A]], [[X]]
+; CHECK-NEXT:    [[B:%.*]] = icmp ne <2 x i32> [[X:%.*]], <i32 -2147483648, i32 -2147483648>
 ; CHECK-NEXT:    ret <2 x i1> [[B]]
 ;
   %a = add <2 x i32> %x, <i32 -1, i32 -1>
   %b = icmp slt <2 x i32> %a, %x
+  ret <2 x i1> %b
+}
+
+define i1 @test10b(i32 %x) {
+; CHECK-LABEL: @test10b(
+; CHECK-NEXT:    [[B:%.*]] = icmp eq i32 [[X:%.*]], -2147483648
+; CHECK-NEXT:    ret i1 [[B]]
+;
+  %a = add i32 %x, -1
+  %b = icmp sgt i32 %a, %x
+  ret i1 %b
+}
+
+define <2 x i1> @test10b_vec(<2 x i32> %x) {
+; CHECK-LABEL: @test10b_vec(
+; CHECK-NEXT:    [[B:%.*]] = icmp eq <2 x i32> [[X:%.*]], <i32 -2147483648, i32 -2147483648>
+; CHECK-NEXT:    ret <2 x i1> [[B]]
+;
+  %a = add <2 x i32> %x, <i32 -1, i32 -1>
+  %b = icmp sgt <2 x i32> %a, %x
   ret <2 x i1> %b
 }
 
@@ -2188,6 +2225,52 @@ define <2 x i1> @icmp_xor_neg4_X_uge_4_vec(<2 x i32> %X) {
   %xor = xor <2 x i32> %X, <i32 -4, i32 -4>
   %cmp = icmp uge <2 x i32> %xor, <i32 4, i32 4>
   ret <2 x i1> %cmp
+}
+
+define <2 x i1> @xor_ult(<2 x i8> %x) {
+; CHECK-LABEL: @xor_ult(
+; CHECK-NEXT:    [[R:%.*]] = icmp ugt <2 x i8> [[X:%.*]], <i8 3, i8 3>
+; CHECK-NEXT:    ret <2 x i1> [[R]]
+;
+  %xor = xor <2 x i8> %x, <i8 -4, i8 -4>
+  %r = icmp ult <2 x i8> %xor, <i8 -4, i8 -4>
+  ret <2 x i1> %r
+}
+
+define i1 @xor_ult_extra_use(i8 %x, i8* %p) {
+; CHECK-LABEL: @xor_ult_extra_use(
+; CHECK-NEXT:    [[XOR:%.*]] = xor i8 [[X:%.*]], -32
+; CHECK-NEXT:    store i8 [[XOR]], i8* [[P:%.*]], align 1
+; CHECK-NEXT:    [[R:%.*]] = icmp ugt i8 [[X]], 31
+; CHECK-NEXT:    ret i1 [[R]]
+;
+  %xor = xor i8 %x, -32
+  store i8 %xor, i8* %p
+  %r = icmp ult i8 %xor, -32
+  ret i1 %r
+}
+
+define <2 x i1> @xor_ugt(<2 x i8> %x) {
+; CHECK-LABEL: @xor_ugt(
+; CHECK-NEXT:    [[R:%.*]] = icmp ugt <2 x i8> [[X:%.*]], <i8 7, i8 7>
+; CHECK-NEXT:    ret <2 x i1> [[R]]
+;
+  %xor = xor <2 x i8> %x, <i8 7, i8 7>
+  %r = icmp ugt <2 x i8> %xor, <i8 7, i8 7>
+  ret <2 x i1> %r
+}
+
+define i1 @xor_ugt_extra_use(i8 %x, i8* %p) {
+; CHECK-LABEL: @xor_ugt_extra_use(
+; CHECK-NEXT:    [[XOR:%.*]] = xor i8 [[X:%.*]], 63
+; CHECK-NEXT:    store i8 [[XOR]], i8* [[P:%.*]], align 1
+; CHECK-NEXT:    [[R:%.*]] = icmp ugt i8 [[X]], 63
+; CHECK-NEXT:    ret i1 [[R]]
+;
+  %xor = xor i8 %x, 63
+  store i8 %xor, i8* %p
+  %r = icmp ugt i8 %xor, 63
+  ret i1 %r
 }
 
 define i1 @icmp_swap_operands_for_cse(i32 %X, i32 %Y) {

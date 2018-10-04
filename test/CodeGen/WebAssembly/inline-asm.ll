@@ -1,4 +1,4 @@
-; RUN: llc < %s -asm-verbose=false -disable-wasm-fallthrough-return-opt -no-integrated-as | FileCheck %s
+; RUN: llc < %s -asm-verbose=false -disable-wasm-fallthrough-return-opt -wasm-keep-registers -no-integrated-as -verify-machineinstrs | FileCheck %s
 
 ; Test basic inline assembly. Pass -no-integrated-as since these aren't
 ; actually valid assembly syntax.
@@ -95,6 +95,15 @@ entry:
   %z = bitcast i32 0 to i32
   %t0 = tail call i32 asm "foo $0, $1, $2, $3", "=r,r,r,r"(i32 %y, i32 %z, i32 37) #0, !srcloc !0
   ret i32 %t0
+}
+
+; CHECK-LABEL: tied_operands
+; CHECK: get_local  $push0=, 0
+; CHECK: return    $pop0
+define i32 @tied_operands(i32 %var) {
+entry:
+  %ret = call i32 asm "", "=r,0"(i32 %var)
+  ret i32 %ret
 }
 
 attributes #0 = { nounwind }

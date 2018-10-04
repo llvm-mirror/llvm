@@ -15,8 +15,8 @@ class GCNPat<dag pattern, dag result> : Pat<pattern, result>, GCNPredicateContro
   let SubtargetPredicate = isGCN;
 }
 
-include "VOPInstructions.td"
 include "SOPInstructions.td"
+include "VOPInstructions.td"
 include "SMInstructions.td"
 include "FLATInstructions.td"
 include "BUFInstructions.td"
@@ -727,12 +727,14 @@ defm : SelectPat <i32, V_CNDMASK_B32_e64>;
 defm : SelectPat <f16, V_CNDMASK_B32_e64>;
 defm : SelectPat <f32, V_CNDMASK_B32_e64>;
 
+let AddedComplexity = 1 in {
 def : GCNPat <
-  (i32 (add (i32 (ctpop i32:$popcnt)), i32:$val)),
+  (i32 (add (i32 (getDivergentFrag<ctpop>.ret i32:$popcnt)), i32:$val)),
   (V_BCNT_U32_B32_e64 $popcnt, $val)
 >;
+}
 def : GCNPat <
-  (i16 (add (i16 (trunc (ctpop i32:$popcnt))), i16:$val)),
+  (i16 (add (i16 (trunc (getDivergentFrag<ctpop>.ret i32:$popcnt))), i16:$val)),
   (V_BCNT_U32_B32_e64 $popcnt, $val)
 >;
 
@@ -1318,6 +1320,28 @@ def : GCNPat <
 def : GCNPat <
   (i1 (xor i1:$src0, i1:$src1)),
   (S_XOR_B64 $src0, $src1)
+>;
+
+def : GCNPat <
+  (i1 (add i1:$src0, i1:$src1)),
+  (S_XOR_B64 $src0, $src1)
+>;
+
+let AddedComplexity = 1 in {
+def : GCNPat <
+  (i1 (add i1:$src0, (i1 -1))),
+  (S_NOT_B64 $src0)
+>;
+}
+
+def : GCNPat <
+  (f16 (sint_to_fp i1:$src)),
+  (V_CVT_F16_F32_e32 (V_CNDMASK_B32_e64 (i32 0), (i32 CONST.FP32_NEG_ONE), $src))
+>;
+
+def : GCNPat <
+  (f16 (uint_to_fp i1:$src)),
+  (V_CVT_F16_F32_e32 (V_CNDMASK_B32_e64 (i32 0), (i32 CONST.FP32_ONE), $src))
 >;
 
 def : GCNPat <

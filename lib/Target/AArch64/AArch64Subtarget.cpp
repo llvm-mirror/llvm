@@ -152,10 +152,15 @@ AArch64Subtarget::AArch64Subtarget(const Triple &TT, const std::string &CPU,
                                    const std::string &FS,
                                    const TargetMachine &TM, bool LittleEndian)
     : AArch64GenSubtargetInfo(TT, CPU, FS),
-      ReserveX18(AArch64::isX18ReservedByDefault(TT)), IsLittle(LittleEndian),
+      ReserveXRegister(AArch64::GPR64commonRegClass.getNumRegs()),
+      CustomCallSavedXRegs(AArch64::GPR64commonRegClass.getNumRegs()),
+      IsLittle(LittleEndian),
       TargetTriple(TT), FrameLowering(),
       InstrInfo(initializeSubtargetDependencies(FS, CPU)), TSInfo(),
       TLInfo(TM, *this) {
+  if (AArch64::isX18ReservedByDefault(TT))
+    ReserveXRegister.set(18);
+
   CallLoweringInfo.reset(new AArch64CallLowering(*getTargetLowering()));
   Legalizer.reset(new AArch64LegalizerInfo(*this));
 
@@ -196,18 +201,22 @@ AArch64Subtarget::ClassifyGlobalReference(const GlobalValue *GV,
   if (TM.getCodeModel() == CodeModel::Large && isTargetMachO())
     return AArch64II::MO_GOT;
 
-  unsigned Flags = GV->hasDLLImportStorageClass() ? AArch64II::MO_DLLIMPORT
-                                                  : AArch64II::MO_NO_FLAG;
-
-  if (!TM.shouldAssumeDSOLocal(*GV->getParent(), GV))
-    return AArch64II::MO_GOT | Flags;
+  if (!TM.shouldAssumeDSOLocal(*GV->getParent(), GV)) {
+    if (GV->hasDLLImportStorageClass())
+      return AArch64II::MO_GOT | AArch64II::MO_DLLIMPORT;
+    if (getTargetTriple().isOSWindows())
+      return AArch64II::MO_GOT | AArch64II::MO_COFFSTUB;
+    return AArch64II::MO_GOT;
+  }
 
   // The small code model's direct accesses use ADRP, which cannot
   // necessarily produce the value 0 (if the code is above 4GB).
-  if (useSmallAddressing() && GV->hasExternalWeakLinkage())
-    return AArch64II::MO_GOT | Flags;
+  // Same for the tiny code model, where we have a pc relative LDR.
+  if ((useSmallAddressing() || TM.getCodeModel() == CodeModel::Tiny) &&
+      GV->hasExternalWeakLinkage())
+    return AArch64II::MO_GOT;
 
-  return Flags;
+  return AArch64II::MO_NO_FLAG;
 }
 
 unsigned char AArch64Subtarget::classifyGlobalFunctionReference(
@@ -265,7 +274,7 @@ void AArch64Subtarget::mirFileLoaded(MachineFunction &MF) const {
   // We usually compute max call frame size after ISel. Do the computation now
   // if the .mir file didn't specify it. Note that this will probably give you
   // bogus values after PEI has eliminated the callframe setup/destroy pseudo
-  // instructions, specify explicitely if you need it to be correct.
+  // instructions, specify explicitly if you need it to be correct.
   MachineFrameInfo &MFI = MF.getFrameInfo();
   if (!MFI.isMaxCallFrameSizeComputed())
     MFI.computeMaxCallFrameSize(MF);

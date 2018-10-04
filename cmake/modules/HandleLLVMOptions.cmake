@@ -11,7 +11,7 @@ include(HandleLLVMStdlib)
 include(CheckCCompilerFlag)
 include(CheckCXXCompilerFlag)
 
-if(CMAKE_LINKER MATCHES "lld-link.exe" OR (WIN32 AND LLVM_USE_LINKER STREQUAL "lld"))
+if(CMAKE_LINKER MATCHES "lld-link\.exe" OR (WIN32 AND LLVM_USE_LINKER STREQUAL "lld") OR LLVM_ENABLE_LLD)
   set(LINKER_IS_LLD_LINK TRUE)
 else()
   set(LINKER_IS_LLD_LINK FALSE)
@@ -584,6 +584,10 @@ if (LLVM_ENABLE_WARNINGS AND (LLVM_COMPILER_IS_GCC_COMPATIBLE OR CLANG_CL))
   # LLVM's ADT classes.
   check_cxx_compiler_flag("-Wclass-memaccess" CXX_SUPPORTS_CLASS_MEMACCESS_FLAG)
   append_if(CXX_SUPPORTS_CLASS_MEMACCESS_FLAG "-Wno-class-memaccess" CMAKE_CXX_FLAGS)
+
+  # The LLVM libraries have no stable C++ API, so -Wnoexcept-type is not useful.
+  check_cxx_compiler_flag("-Wnoexcept-type" CXX_SUPPORTS_NOEXCEPT_TYPE_FLAG)
+  append_if(CXX_SUPPORTS_NOEXCEPT_TYPE_FLAG "-Wno-noexcept-type" CMAKE_CXX_FLAGS)
 
   # Check if -Wnon-virtual-dtor warns even though the class is marked final.
   # If it does, don't add it. So it won't be added on clang 3.4 and older.

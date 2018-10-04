@@ -36,6 +36,20 @@ void ExegesisTarget::registerTarget(ExegesisTarget *Target) {
   FirstTarget = Target;
 }
 
+std::unique_ptr<SnippetGenerator>
+ExegesisTarget::createSnippetGenerator(InstructionBenchmark::ModeE Mode,
+                                       const LLVMState &State) const {
+  switch (Mode) {
+  case InstructionBenchmark::Unknown:
+    return nullptr;
+  case InstructionBenchmark::Latency:
+    return createLatencySnippetGenerator(State);
+  case InstructionBenchmark::Uops:
+    return createUopsSnippetGenerator(State);
+  }
+  return nullptr;
+}
+
 std::unique_ptr<BenchmarkRunner>
 ExegesisTarget::createBenchmarkRunner(InstructionBenchmark::ModeE Mode,
                                       const LLVMState &State) const {
@@ -48,6 +62,16 @@ ExegesisTarget::createBenchmarkRunner(InstructionBenchmark::ModeE Mode,
     return createUopsBenchmarkRunner(State);
   }
   return nullptr;
+}
+
+std::unique_ptr<SnippetGenerator>
+ExegesisTarget::createLatencySnippetGenerator(const LLVMState &State) const {
+  return llvm::make_unique<LatencySnippetGenerator>(State);
+}
+
+std::unique_ptr<SnippetGenerator>
+ExegesisTarget::createUopsSnippetGenerator(const LLVMState &State) const {
+  return llvm::make_unique<UopsSnippetGenerator>(State);
 }
 
 std::unique_ptr<BenchmarkRunner>
@@ -65,6 +89,12 @@ namespace {
 // Default implementation.
 class ExegesisDefaultTarget : public ExegesisTarget {
 private:
+  std::vector<llvm::MCInst> setRegTo(const llvm::MCSubtargetInfo &STI,
+                                     unsigned Reg,
+                                     const llvm::APInt &Value) const override {
+    llvm_unreachable("Not yet implemented");
+  }
+
   bool matchesArch(llvm::Triple::ArchType Arch) const override {
     llvm_unreachable("never called");
     return false;

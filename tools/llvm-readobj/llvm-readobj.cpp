@@ -302,7 +302,7 @@ namespace opts {
 
   cl::opt<bool> CGProfile("elf-cg-profile", cl::desc("Display callgraph profile section"));
 
-  cl::opt<bool> Addrsig("elf-addrsig",
+  cl::opt<bool> Addrsig("addrsig",
                         cl::desc("Display address-significance table"));
 
   cl::opt<OutputStyleTy>
@@ -492,6 +492,8 @@ static void dumpObject(const ObjectFile *Obj, ScopedPrinter &Writer) {
       Dumper->printCOFFResources();
     if (opts::COFFLoadConfig)
       Dumper->printCOFFLoadConfig();
+    if (opts::Addrsig)
+      Dumper->printAddrsig();
     if (opts::CodeView)
       Dumper->printCodeViewDebugInfo();
     if (opts::CodeViewMergedTypes)
@@ -591,6 +593,15 @@ int main(int argc, const char *argv[]) {
 
   // Register the target printer for --version.
   cl::AddExtraVersionPrinter(TargetRegistry::printRegisteredTargetsForVersion);
+
+  // Make some commonly used short options visibile in -help.
+  opts::DynamicTableShort.setHiddenFlag(cl::NotHidden);
+  opts::FileHeadersShort.setHiddenFlag(cl::NotHidden);
+  opts::ProgramHeadersShort.setHiddenFlag(cl::NotHidden);
+  opts::RelocationsShort.setHiddenFlag(cl::NotHidden);
+  opts::SectionsShort.setHiddenFlag(cl::NotHidden);
+  opts::SectionsShortUpper.setHiddenFlag(cl::NotHidden);
+  opts::SymbolsShort.setHiddenFlag(cl::NotHidden);
 
   opts::WideOutput.setHiddenFlag(cl::Hidden);
 

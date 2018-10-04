@@ -871,7 +871,7 @@ define x86_regcallcc <32 x float> @testf32_inp(<32 x float> %a, <32 x float> %b,
 ; X32-LABEL: testf32_inp:
 ; X32:       # %bb.0:
 ; X32-NEXT:    subl $44, %esp
-; X32-NEXT:    vmovups %xmm7, {{[0-9]+}}(%esp) # 16-byte Spill
+; X32-NEXT:    vmovups %xmm7, {{[-0-9]+}}(%e{{[sb]}}p) # 16-byte Spill
 ; X32-NEXT:    vmovups %xmm6, (%esp) # 16-byte Spill
 ; X32-NEXT:    vaddps %zmm2, %zmm0, %zmm6
 ; X32-NEXT:    vaddps %zmm3, %zmm1, %zmm7
@@ -882,7 +882,7 @@ define x86_regcallcc <32 x float> @testf32_inp(<32 x float> %a, <32 x float> %b,
 ; X32-NEXT:    vaddps %zmm4, %zmm0, %zmm0
 ; X32-NEXT:    vaddps %zmm5, %zmm1, %zmm1
 ; X32-NEXT:    vmovups (%esp), %xmm6 # 16-byte Reload
-; X32-NEXT:    vmovups {{[0-9]+}}(%esp), %xmm7 # 16-byte Reload
+; X32-NEXT:    vmovups {{[-0-9]+}}(%e{{[sb]}}p), %xmm7 # 16-byte Reload
 ; X32-NEXT:    addl $44, %esp
 ; X32-NEXT:    retl
 ;
@@ -923,48 +923,47 @@ define x86_regcallcc i32 @testi32_inp(i32 %a1, i32 %a2, i32 %a3, i32 %a4, i32 %a
 ; X32-NEXT:    pushl %ebp
 ; X32-NEXT:    pushl %ebx
 ; X32-NEXT:    subl $20, %esp
-; X32-NEXT:    movl %esi, {{[0-9]+}}(%esp) # 4-byte Spill
-; X32-NEXT:    movl %edi, %esi
-; X32-NEXT:    movl %edi, {{[0-9]+}}(%esp) # 4-byte Spill
-; X32-NEXT:    movl %edx, %ebx
+; X32-NEXT:    movl %esi, {{[-0-9]+}}(%e{{[sb]}}p) # 4-byte Spill
+; X32-NEXT:    movl %edi, {{[-0-9]+}}(%e{{[sb]}}p) # 4-byte Spill
 ; X32-NEXT:    movl %edx, (%esp) # 4-byte Spill
-; X32-NEXT:    movl %ecx, {{[0-9]+}}(%esp) # 4-byte Spill
-; X32-NEXT:    movl %eax, %edx
-; X32-NEXT:    movl %eax, {{[0-9]+}}(%esp) # 4-byte Spill
-; X32-NEXT:    subl %ecx, %edx
-; X32-NEXT:    movl {{[0-9]+}}(%esp), %edi
-; X32-NEXT:    movl %edi, %ebp
-; X32-NEXT:    subl {{[0-9]+}}(%esp), %ebp
-; X32-NEXT:    imull %ebp, %edx
-; X32-NEXT:    subl %esi, %ebx
+; X32-NEXT:    movl %ecx, {{[-0-9]+}}(%e{{[sb]}}p) # 4-byte Spill
+; X32-NEXT:    movl %eax, %ebx
+; X32-NEXT:    movl %eax, {{[-0-9]+}}(%e{{[sb]}}p) # 4-byte Spill
+; X32-NEXT:    subl %ecx, %ebx
 ; X32-NEXT:    movl {{[0-9]+}}(%esp), %esi
-; X32-NEXT:    movl %esi, %ecx
+; X32-NEXT:    movl %esi, %ebp
+; X32-NEXT:    subl {{[0-9]+}}(%esp), %ebp
+; X32-NEXT:    imull %ebp, %ebx
+; X32-NEXT:    movl %edx, %ebp
+; X32-NEXT:    subl %edi, %ebp
+; X32-NEXT:    movl {{[0-9]+}}(%esp), %edx
+; X32-NEXT:    movl %edx, %ecx
 ; X32-NEXT:    subl {{[0-9]+}}(%esp), %ecx
-; X32-NEXT:    imull %ebx, %ecx
-; X32-NEXT:    addl %ecx, %edx
-; X32-NEXT:    movl {{[0-9]+}}(%esp), %ebx # 4-byte Reload
-; X32-NEXT:    movl %ebx, %ebp
+; X32-NEXT:    imull %ebp, %ecx
+; X32-NEXT:    addl %ecx, %ebx
+; X32-NEXT:    movl {{[-0-9]+}}(%e{{[sb]}}p), %edi # 4-byte Reload
+; X32-NEXT:    movl %edi, %ebp
 ; X32-NEXT:    subl {{[0-9]+}}(%esp), %ebp
 ; X32-NEXT:    movl {{[0-9]+}}(%esp), %ecx
 ; X32-NEXT:    movl %ecx, %eax
 ; X32-NEXT:    subl {{[0-9]+}}(%esp), %eax
 ; X32-NEXT:    imull %ebp, %eax
-; X32-NEXT:    addl %eax, %edx
-; X32-NEXT:    movl {{[0-9]+}}(%esp), %eax # 4-byte Reload
-; X32-NEXT:    addl {{[0-9]+}}(%esp), %eax # 4-byte Folded Reload
+; X32-NEXT:    addl %eax, %ebx
+; X32-NEXT:    movl {{[-0-9]+}}(%e{{[sb]}}p), %eax # 4-byte Reload
+; X32-NEXT:    addl {{[-0-9]+}}(%e{{[sb]}}p), %eax # 4-byte Folded Reload
 ; X32-NEXT:    movl (%esp), %ebp # 4-byte Reload
-; X32-NEXT:    addl {{[0-9]+}}(%esp), %ebp # 4-byte Folded Reload
-; X32-NEXT:    addl {{[0-9]+}}(%esp), %ebx
+; X32-NEXT:    addl {{[-0-9]+}}(%e{{[sb]}}p), %ebp # 4-byte Folded Reload
 ; X32-NEXT:    addl {{[0-9]+}}(%esp), %edi
-; X32-NEXT:    imull %eax, %edi
 ; X32-NEXT:    addl {{[0-9]+}}(%esp), %esi
-; X32-NEXT:    imull %ebp, %esi
-; X32-NEXT:    addl %edi, %esi
+; X32-NEXT:    imull %eax, %esi
+; X32-NEXT:    addl {{[0-9]+}}(%esp), %edx
+; X32-NEXT:    imull %ebp, %edx
+; X32-NEXT:    addl %esi, %edx
 ; X32-NEXT:    addl {{[0-9]+}}(%esp), %ecx
-; X32-NEXT:    imull %ebx, %ecx
-; X32-NEXT:    addl %esi, %ecx
-; X32-NEXT:    addl %ecx, %edx
-; X32-NEXT:    movl %edx, %eax
+; X32-NEXT:    imull %edi, %ecx
+; X32-NEXT:    addl %edx, %ecx
+; X32-NEXT:    addl %ecx, %ebx
+; X32-NEXT:    movl %ebx, %eax
 ; X32-NEXT:    addl $20, %esp
 ; X32-NEXT:    popl %ebx
 ; X32-NEXT:    popl %ebp

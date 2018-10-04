@@ -719,7 +719,7 @@ an optional ``unnamed_addr`` attribute, a return type, an optional
 :ref:`parameter attribute <paramattrs>` for the return type, a function
 name, a (possibly empty) argument list (each with optional :ref:`parameter
 attributes <paramattrs>`), optional :ref:`function attributes <fnattrs>`,
-an optional section, an optional alignment,
+an optional address space, an optional section, an optional alignment,
 an optional :ref:`comdat <langref_comdats>`,
 an optional :ref:`garbage collector name <gc>`, an optional :ref:`prefix <prefixdata>`,
 an optional :ref:`prologue <prologuedata>`,
@@ -731,8 +731,8 @@ LLVM function declarations consist of the "``declare``" keyword, an
 optional :ref:`linkage type <linkage>`, an optional :ref:`visibility style
 <visibility>`, an optional :ref:`DLL storage class <dllstorageclass>`, an
 optional :ref:`calling convention <callingconv>`, an optional ``unnamed_addr``
-or ``local_unnamed_addr`` attribute, a return type, an optional :ref:`parameter
-attribute <paramattrs>` for the return type, a function name, a possibly
+or ``local_unnamed_addr`` attribute, an optional address space, a return type,
+an optional :ref:`parameter attribute <paramattrs>` for the return type, a function name, a possibly
 empty list of arguments, an optional alignment, an optional :ref:`garbage
 collector name <gc>`, an optional :ref:`prefix <prefixdata>`, and an optional
 :ref:`prologue <prologuedata>`.
@@ -769,13 +769,16 @@ be significant and two identical functions can be merged.
 If the ``local_unnamed_addr`` attribute is given, the address is known to
 not be significant within the module.
 
+If an explicit address space is not given, it will default to the program
+address space from the :ref:`datalayout string<langref_datalayout>`.
+
 Syntax::
 
     define [linkage] [PreemptionSpecifier] [visibility] [DLLStorageClass]
            [cconv] [ret attrs]
            <ResultType> @<FunctionName> ([argument list])
-           [(unnamed_addr|local_unnamed_addr)] [fn Attrs] [section "name"]
-           [comdat [($name)]] [align N] [gc] [prefix Constant]
+           [(unnamed_addr|local_unnamed_addr)] [AddrSpace] [fn Attrs]
+           [section "name"] [comdat [($name)]] [align N] [gc] [prefix Constant]
            [prologue Constant] [personality Constant] (!name !N)* { ... }
 
 The argument list is a comma separated sequence of arguments where each
@@ -1633,6 +1636,28 @@ example:
     This attribute indicates that HWAddressSanitizer checks
     (dynamic address safety analysis based on tagged pointers) are enabled for
     this function.
+``speculative_load_hardening``
+    This attribute indicates that
+    `Speculative Load Hardening <https://llvm.org/docs/SpeculativeLoadHardening.html>`_
+    should be enabled for the function body. This is a best-effort attempt to
+    mitigate all known speculative execution information leak vulnerabilities
+    that are based on the fundamental principles of modern processors'
+    speculative execution. These vulnerabilities are classified as "Spectre
+    variant #1" vulnerabilities typically. Notably, this does not attempt to
+    mitigate any vulnerabilities where the speculative execution and/or
+    prediction devices of specific processors can be *completely* undermined
+    (such as "Branch Target Injection", a.k.a, "Spectre variant #2"). Instead,
+    this is a target-independent request to harden against the completely
+    generic risk posed by speculative execution to incorrectly load secret data,
+    making it available to some micro-architectural side-channel for information
+    leak. For a processor without any speculative execution or predictors, this
+    is expected to be a no-op.
+
+    When inlining, the attribute is sticky. Inlining a function that carries
+    this attribute will cause the caller to gain the attribute. This is intended
+    to provide a maximally conservative model where the code in a function
+    annotated with this attribute will always (even after inlining) end up
+    hardened.
 ``speculatable``
     This function attribute indicates that the function does not have any
     effects besides calculating its result and does not have undefined behavior.
@@ -5802,19 +5827,19 @@ causes the building of a compact summary of the module that is emitted into
 the bitcode. The summary is emitted into the LLVM assembly and identified
 in syntax by a caret ('``^``').
 
-*Note that temporarily the summary entries are skipped when parsing the
-assembly, although the parsing support is actively being implemented. The
-following describes when the summary entries will be parsed once implemented.*
-The summary will be parsed into a ModuleSummaryIndex object under the
-same conditions where summary index is currently built from bitcode.
-Specifically, tools that test the Thin Link portion of a ThinLTO compile
-(i.e. llvm-lto and llvm-lto2), or when parsing a combined index
-for a distributed ThinLTO backend via clang's "``-fthinlto-index=<>``" flag.
-Additionally, it will be parsed into a bitcode output, along with the Module
+The summary is parsed into a bitcode output, along with the Module
 IR, via the "``llvm-as``" tool. Tools that parse the Module IR for the purposes
 of optimization (e.g. "``clang -x ir``" and "``opt``"), will ignore the
 summary entries (just as they currently ignore summary entries in a bitcode
 input file).
+
+Eventually, the summary will be parsed into a ModuleSummaryIndex object under
+the same conditions where summary index is currently built from bitcode.
+Specifically, tools that test the Thin Link portion of a ThinLTO compile
+(i.e. llvm-lto and llvm-lto2), or when parsing a combined index
+for a distributed ThinLTO backend via clang's "``-fthinlto-index=<>``" flag
+(this part is not yet implemented, use llvm-as to create a bitcode object
+before feeding into thin link tools for now).
 
 There are currently 3 types of summary entries in the LLVM assembly:
 :ref:`module paths<module_path_summary>`,
@@ -6026,7 +6051,7 @@ Where each ConstVCall has the format:
 
 .. code-block:: text
 
-    VFuncId, args: (Arg[, Arg]*)
+    (VFuncId, args: (Arg[, Arg]*))
 
 and where each VFuncId has the format described for ``TypeTestAssumeVCalls``,
 and each Arg is an integer argument number.
@@ -6452,7 +6477,7 @@ Syntax:
 
 ::
 
-      <result> = invoke [cconv] [ret attrs] <ty>|<fnty> <fnptrval>(<function args>) [fn attrs]
+      <result> = invoke [cconv] [ret attrs] [addrspace(<num>)] [<ty>|<fnty> <fnptrval>(<function args>) [fn attrs]
                     [operand bundles] to label <normal label> unwind label <exception label>
 
 Overview:
@@ -6488,6 +6513,9 @@ This instruction requires several arguments:
 #. The optional :ref:`Parameter Attributes <paramattrs>` list for return
    values. Only '``zeroext``', '``signext``', and '``inreg``' attributes
    are valid here.
+#. The optional addrspace attribute can be used to indicate the adress space
+   of the called function. If it is not specified, the program address space
+   from the :ref:`datalayout string<langref_datalayout>` will be used.
 #. '``ty``': the type of the call instruction itself which is also the
    type of the return value. Functions that return no value are marked
    ``void``.
@@ -9503,8 +9531,8 @@ Syntax:
 
 ::
 
-      <result> = [tail | musttail | notail ] call [fast-math flags] [cconv] [ret attrs] <ty>|<fnty> <fnptrval>(<function args>) [fn attrs]
-                   [ operand bundles ]
+      <result> = [tail | musttail | notail ] call [fast-math flags] [cconv] [ret attrs] [addrspace(<num>)]
+                 [<ty>|<fnty> <fnptrval>(<function args>) [fn attrs] [ operand bundles ]
 
 Overview:
 """""""""
@@ -9575,6 +9603,9 @@ This instruction requires several arguments:
 #. The optional :ref:`Parameter Attributes <paramattrs>` list for return
    values. Only '``zeroext``', '``signext``', and '``inreg``' attributes
    are valid here.
+#. The optional addrspace attribute can be used to indicate the adress space
+   of the called function. If it is not specified, the program address space
+   from the :ref:`datalayout string<langref_datalayout>` will be used.
 #. '``ty``': the type of the call instruction itself which is also the
    type of the return value. Functions that return no value are marked
    ``void``.
@@ -11463,13 +11494,22 @@ type.
 Semantics:
 """"""""""
 
-Follows the IEEE-754 semantics for minNum, which also match for libm's
-fmin.
+Follows the IEEE-754 semantics for minNum, except for handling of
+signaling NaNs. This match's the behavior of libm's fmin.
 
 If either operand is a NaN, returns the other non-NaN operand. Returns
-NaN only if both operands are NaN. If the operands compare equal,
-returns a value that compares equal to both operands. This means that
-fmin(+/-0.0, +/-0.0) could return either -0.0 or 0.0.
+NaN only if both operands are NaN. The returned NaN is always
+quiet. If the operands compare equal, returns a value that compares
+equal to both operands. This means that fmin(+/-0.0, +/-0.0) could
+return either -0.0 or 0.0.
+
+Unlike the IEEE-754 2008 behavior, this does not distinguish between
+signaling and quiet NaN inputs. If a target's implementation follows
+the standard and returns a quiet NaN if either input is a signaling
+NaN, the intrinsic lowering is responsible for quieting the inputs to
+correctly return the non-NaN input (e.g. by using the equivalent of
+``llvm.canonicalize``).
+
 
 '``llvm.maxnum.*``' Intrinsic
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -11504,13 +11544,21 @@ type.
 
 Semantics:
 """"""""""
-Follows the IEEE-754 semantics for maxNum, which also match for libm's
-fmax.
+Follows the IEEE-754 semantics for maxNum except for the handling of
+signaling NaNs. This matches the behavior of libm's fmax.
 
 If either operand is a NaN, returns the other non-NaN operand. Returns
-NaN only if both operands are NaN. If the operands compare equal,
-returns a value that compares equal to both operands. This means that
-fmax(+/-0.0, +/-0.0) could return either -0.0 or 0.0.
+NaN only if both operands are NaN. The returned NaN is always
+quiet. If the operands compare equal, returns a value that compares
+equal to both operands. This means that fmax(+/-0.0, +/-0.0) could
+return either -0.0 or 0.0.
+
+Unlike the IEEE-754 2008 behavior, this does not distinguish between
+signaling and quiet NaN inputs. If a target's implementation follows
+the standard and returns a quiet NaN if either input is a signaling
+NaN, the intrinsic lowering is responsible for quieting the inputs to
+correctly return the non-NaN input (e.g. by using the equivalent of
+``llvm.canonicalize``).
 
 '``llvm.copysign.*``' Intrinsic
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

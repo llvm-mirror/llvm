@@ -56,6 +56,7 @@
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/SourceMgr.h"
+#include "llvm/Support/StringSaver.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
@@ -92,12 +93,11 @@ static cl::alias
 DisassembleAlld("D", cl::desc("Alias for --disassemble-all"),
              cl::aliasopt(DisassembleAll));
 
-cl::opt<std::string> llvm::Demangle("demangle",
-                                    cl::desc("Demangle symbols names"),
-                                    cl::ValueOptional, cl::init("none"));
+cl::opt<bool> llvm::Demangle("demangle", cl::desc("Demangle symbols names"),
+                             cl::init(false));
 
 static cl::alias DemangleShort("C", cl::desc("Alias for --demangle"),
-                               cl::aliasopt(Demangle));
+                               cl::aliasopt(llvm::Demangle));
 
 static cl::list<std::string>
 DisassembleFunctions("df",
@@ -1236,6 +1236,37 @@ addDynamicElfSymbols(const ObjectFile *Obj,
     llvm_unreachable("Unsupported binary format");
 }
 
+static void addPltEntries(const ObjectFile *Obj,
+                          std::map<SectionRef, SectionSymbolsTy> &AllSymbols,
+                          StringSaver &Saver) {
+  Optional<SectionRef> Plt = None;
+  for (const SectionRef &Section : Obj->sections()) {
+    StringRef Name;
+    if (Section.getName(Name))
+      continue;
+    if (Name == ".plt")
+      Plt = Section;
+  }
+  if (!Plt)
+    return;
+  if (auto *ElfObj = dyn_cast<ELFObjectFileBase>(Obj)) {
+    for (auto PltEntry : ElfObj->getPltAddresses()) {
+      SymbolRef Symbol(PltEntry.first, ElfObj);
+
+      uint8_t SymbolType = getElfSymbolType(Obj, Symbol);
+
+      Expected<StringRef> NameOrErr = Symbol.getName();
+      if (!NameOrErr)
+        report_error(Obj->getFileName(), NameOrErr.takeError());
+      if (NameOrErr->empty())
+        continue;
+      StringRef Name = Saver.save((*NameOrErr + "@plt").str());
+
+      AllSymbols[*Plt].emplace_back(PltEntry.second, Name, SymbolType);
+    }
+  }
+}
+
 static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
   if (StartAddress > StopAddress)
     error("Start address should be less than stop address");
@@ -1343,6 +1374,10 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
   if (AllSymbols.empty() && Obj->isELF())
     addDynamicElfSymbols(Obj, AllSymbols);
 
+  BumpPtrAllocator A;
+  StringSaver Saver(A);
+  addPltEntries(Obj, AllSymbols, Saver);
+
   // Create a mapping from virtual address to section.
   std::vector<std::pair<uint64_t, SectionRef>> SectionAddresses;
   for (SectionRef Sec : Obj->sections())
@@ -1412,8 +1447,8 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
       }
     }
 
-    llvm::sort(DataMappingSymsAddr.begin(), DataMappingSymsAddr.end());
-    llvm::sort(TextMappingSymsAddr.begin(), TextMappingSymsAddr.end());
+    llvm::sort(DataMappingSymsAddr);
+    llvm::sort(TextMappingSymsAddr);
 
     if (Obj->isELF() && Obj->getArch() == Triple::amdgcn) {
       // AMDGPU disassembler uses symbolizer for printing labels
@@ -1438,7 +1473,7 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
     }
 
     // Sort relocations by address.
-    llvm::sort(Rels.begin(), Rels.end(), RelocAddressLess);
+    llvm::sort(Rels, RelocAddressLess);
 
     StringRef SegmentName = "";
     if (const MachOObjectFile *MachO = dyn_cast<const MachOObjectFile>(Obj)) {
@@ -1529,18 +1564,23 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
         outs() << '\n' << Name << ":\n";
       };
       StringRef SymbolName = std::get<1>(Symbols[si]);
-      if (Demangle.getValue() == "" || Demangle.getValue() == "itanium") {
+      if (Demangle) {
         char *DemangledSymbol = nullptr;
         size_t Size = 0;
-        int Status;
-        DemangledSymbol =
-            itaniumDemangle(SymbolName.data(), DemangledSymbol, &Size, &Status);
-        if (Status == 0)
+        int Status = -1;
+        if (SymbolName.startswith("_Z"))
+          DemangledSymbol = itaniumDemangle(SymbolName.data(), DemangledSymbol,
+                                            &Size, &Status);
+        else if (SymbolName.startswith("?"))
+          DemangledSymbol = microsoftDemangle(SymbolName.data(),
+                                              DemangledSymbol, &Size, &Status);
+
+        if (Status == 0 && DemangledSymbol)
           PrintSymbol(StringRef(DemangledSymbol));
         else
           PrintSymbol(SymbolName);
 
-        if (Size != 0)
+        if (DemangledSymbol)
           free(DemangledSymbol);
       } else
         PrintSymbol(SymbolName);
@@ -2394,10 +2434,6 @@ int main(int argc, char **argv) {
 
   if (DisassembleAll || PrintSource || PrintLines)
     Disassemble = true;
-
-  if (Demangle.getValue() != "none" && Demangle.getValue() != "" &&
-      Demangle.getValue() != "itanium")
-    warn("Unsupported demangling style");
 
   if (!Disassemble
       && !Relocations

@@ -139,7 +139,7 @@ void Analysis::printInstructionRowCsv(const size_t PointId,
 #endif
   for (const auto &Measurement : Point.Measurements) {
     OS << kCsvSep;
-    writeMeasurementValue<kEscapeCsv>(OS, Measurement.Value);
+    writeMeasurementValue<kEscapeCsv>(OS, Measurement.PerInstructionValue);
   }
   OS << "\n";
 }
@@ -248,10 +248,7 @@ void Analysis::printSchedClassClustersHtml(
   for (const auto &Measurement :
        Points[Clusters[0].getPointIds()[0]].Measurements) {
     OS << "<th>";
-    if (Measurement.DebugString.empty())
-      writeEscaped<kEscapeHtml>(OS, Measurement.Key);
-    else
-      writeEscaped<kEscapeHtml>(OS, Measurement.DebugString);
+    writeEscaped<kEscapeHtml>(OS, Measurement.Key);
     OS << "</th>";
   }
   OS << "</tr>";
@@ -393,6 +390,22 @@ void Analysis::SchedClassCluster::addPoint(
   assert(ClusterId == Clustering.getClusterIdForPoint(PointId));
 }
 
+// Returns a ProxResIdx by id or name.
+static unsigned findProcResIdx(const llvm::MCSubtargetInfo &STI,
+                               const llvm::StringRef NameOrId) {
+  // Interpret the key as an ProcResIdx.
+  unsigned ProcResIdx = 0;
+  if (llvm::to_integer(NameOrId, ProcResIdx, 10))
+    return ProcResIdx;
+  // Interpret the key as a ProcRes name.
+  const auto &SchedModel = STI.getSchedModel();
+  for (int I = 0, E = SchedModel.getNumProcResourceKinds(); I < E; ++I) {
+    if (NameOrId == SchedModel.getProcResource(I)->Name)
+      return I;
+  }
+  return 0;
+}
+
 bool Analysis::SchedClassCluster::measurementsMatch(
     const llvm::MCSubtargetInfo &STI, const SchedClass &SC,
     const InstructionBenchmarkClustering &Clustering) const {
@@ -410,34 +423,39 @@ bool Analysis::SchedClassCluster::measurementsMatch(
       return false;
     }
     // Find the latency.
-    SchedClassPoint[0].Value = 0.0;
+    SchedClassPoint[0].PerInstructionValue = 0.0;
     for (unsigned I = 0; I < SC.SCDesc->NumWriteLatencyEntries; ++I) {
       const llvm::MCWriteLatencyEntry *const WLE =
           STI.getWriteLatencyEntry(SC.SCDesc, I);
-      SchedClassPoint[0].Value =
-          std::max<double>(SchedClassPoint[0].Value, WLE->Cycles);
+      SchedClassPoint[0].PerInstructionValue =
+          std::max<double>(SchedClassPoint[0].PerInstructionValue, WLE->Cycles);
     }
-    ClusterCenterPoint[0].Value = Representative[0].avg();
+    ClusterCenterPoint[0].PerInstructionValue = Representative[0].avg();
   } else if (Mode == InstructionBenchmark::Uops) {
     for (int I = 0, E = Representative.size(); I < E; ++I) {
-      // Find the pressure on ProcResIdx `Key`.
-      uint16_t ProcResIdx = 0;
-      if (!llvm::to_integer(Representative[I].key(), ProcResIdx, 10)) {
-        llvm::errs() << "expected ProcResIdx key, got "
-                     << Representative[I].key() << "\n";
+      const auto Key = Representative[I].key();
+      uint16_t ProcResIdx = findProcResIdx(STI, Key);
+      if (ProcResIdx > 0) {
+        // Find the pressure on ProcResIdx `Key`.
+        const auto ProcResPressureIt =
+            std::find_if(SC.IdealizedProcResPressure.begin(),
+                         SC.IdealizedProcResPressure.end(),
+                         [ProcResIdx](const std::pair<uint16_t, float> &WPR) {
+                           return WPR.first == ProcResIdx;
+                         });
+        SchedClassPoint[I].PerInstructionValue =
+            ProcResPressureIt == SC.IdealizedProcResPressure.end()
+                ? 0.0
+                : ProcResPressureIt->second;
+      } else if (Key == "NumMicroOps") {
+        SchedClassPoint[I].PerInstructionValue = SC.SCDesc->NumMicroOps;
+      } else {
+        llvm::errs() << "expected `key` to be either a ProcResIdx or a ProcRes "
+                        "name, got "
+                     << Key << "\n";
         return false;
       }
-      const auto ProcResPressureIt =
-          std::find_if(SC.IdealizedProcResPressure.begin(),
-                       SC.IdealizedProcResPressure.end(),
-                       [ProcResIdx](const std::pair<uint16_t, float> &WPR) {
-                         return WPR.first == ProcResIdx;
-                       });
-      SchedClassPoint[I].Value =
-          ProcResPressureIt == SC.IdealizedProcResPressure.end()
-              ? 0.0
-              : ProcResPressureIt->second;
-      ClusterCenterPoint[I].Value = Representative[I].avg();
+      ClusterCenterPoint[I].PerInstructionValue = Representative[I].avg();
     }
   } else {
     llvm::errs() << "unimplemented measurement matching for mode " << Mode
@@ -450,7 +468,7 @@ bool Analysis::SchedClassCluster::measurementsMatch(
 void Analysis::printSchedClassDescHtml(const SchedClass &SC,
                                        llvm::raw_ostream &OS) const {
   OS << "<table class=\"sched-class-desc\">";
-  OS << "<tr><th>Valid</th><th>Variant</th><th>uOps</th><th>Latency</"
+  OS << "<tr><th>Valid</th><th>Variant</th><th>NumMicroOps</th><th>Latency</"
         "th><th>WriteProcRes</th><th title=\"This is the idealized unit "
         "resource (port) pressure assuming ideal distribution\">Idealized "
         "Resource Pressure</th></tr>";
@@ -671,10 +689,9 @@ void distributePressure(float RemainingPressure,
                         llvm::SmallVector<float, 32> &DensePressure) {
   // Find the number of subunits with minimal pressure (they are at the
   // front).
-  llvm::sort(Subunits.begin(), Subunits.end(),
-             [&DensePressure](const uint16_t A, const uint16_t B) {
-               return DensePressure[A] < DensePressure[B];
-             });
+  llvm::sort(Subunits, [&DensePressure](const uint16_t A, const uint16_t B) {
+    return DensePressure[A] < DensePressure[B];
+  });
   const auto getPressureForSubunit = [&DensePressure,
                                       &Subunits](size_t I) -> float & {
     return DensePressure[Subunits[I]];
@@ -721,11 +738,10 @@ std::vector<std::pair<uint16_t, float>> computeIdealizedProcResPressure(
     llvm::SmallVector<llvm::MCWriteProcResEntry, 8> WPRS) {
   // DensePressure[I] is the port pressure for Proc Resource I.
   llvm::SmallVector<float, 32> DensePressure(SM.getNumProcResourceKinds());
-  llvm::sort(WPRS.begin(), WPRS.end(),
-             [](const llvm::MCWriteProcResEntry &A,
-                const llvm::MCWriteProcResEntry &B) {
-               return A.ProcResourceIdx < B.ProcResourceIdx;
-             });
+  llvm::sort(WPRS, [](const llvm::MCWriteProcResEntry &A,
+                      const llvm::MCWriteProcResEntry &B) {
+    return A.ProcResourceIdx < B.ProcResourceIdx;
+  });
   for (const llvm::MCWriteProcResEntry &WPR : WPRS) {
     // Get units for the entry.
     const llvm::MCProcResourceDesc *const ProcResDesc =

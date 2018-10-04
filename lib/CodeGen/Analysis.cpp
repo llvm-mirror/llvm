@@ -519,10 +519,12 @@ bool llvm::attributesPermitTailCall(const Function *F, const Instruction *I,
   AttrBuilder CalleeAttrs(cast<CallInst>(I)->getAttributes(),
                           AttributeList::ReturnIndex);
 
-  // Noalias is completely benign as far as calling convention goes, it
-  // shouldn't affect whether the call is a tail call.
+  // NoAlias and NonNull are completely benign as far as calling convention
+  // goes, they shouldn't affect whether the call is a tail call.
   CallerAttrs.removeAttribute(Attribute::NoAlias);
   CalleeAttrs.removeAttribute(Attribute::NoAlias);
+  CallerAttrs.removeAttribute(Attribute::NonNull);
+  CalleeAttrs.removeAttribute(Attribute::NonNull);
 
   if (CallerAttrs.contains(Attribute::ZExt)) {
     if (!CalleeAttrs.contains(Attribute::ZExt))
@@ -650,7 +652,7 @@ static void collectEHScopeMembers(
 
     // Returns are boundaries where scope transfer can occur, don't follow
     // successors.
-    if (Visiting->isReturnBlock())
+    if (Visiting->isEHScopeReturnBlock())
       continue;
 
     for (const MachineBasicBlock *Succ : Visiting->successors())

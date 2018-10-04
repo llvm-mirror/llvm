@@ -222,8 +222,11 @@ Instruction *InstCombiner::FoldIntegerTypedPHI(PHINode &PN) {
   // instruction, do not do it.
   if (std::any_of(AvailablePtrVals.begin(), AvailablePtrVals.end(),
                   [&](Value *V) {
-                    return (V->getType() != IntToPtr->getType()) &&
-                           isa<TerminatorInst>(V);
+                    if (V->getType() == IntToPtr->getType())
+                      return false;
+
+                    auto *Inst = dyn_cast<Instruction>(V);
+                    return Inst && Inst->isTerminator();
                   }))
     return nullptr;
 
@@ -616,7 +619,7 @@ Instruction *InstCombiner::FoldPHIArgLoadIntoPHI(PHINode &PN) {
   // Add all operands to the new PHI and combine TBAA metadata.
   for (unsigned i = 1, e = PN.getNumIncomingValues(); i != e; ++i) {
     LoadInst *LI = cast<LoadInst>(PN.getIncomingValue(i));
-    combineMetadata(NewLI, LI, KnownIDs);
+    combineMetadata(NewLI, LI, KnownIDs, true);
     Value *NewInVal = LI->getOperand(0);
     if (NewInVal != InVal)
       InVal = nullptr;

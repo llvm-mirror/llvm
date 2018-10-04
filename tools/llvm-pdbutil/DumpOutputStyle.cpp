@@ -22,6 +22,7 @@
 #include "llvm/DebugInfo/CodeView/DebugChecksumsSubsection.h"
 #include "llvm/DebugInfo/CodeView/DebugCrossExSubsection.h"
 #include "llvm/DebugInfo/CodeView/DebugCrossImpSubsection.h"
+#include "llvm/DebugInfo/CodeView/DebugFrameDataSubsection.h"
 #include "llvm/DebugInfo/CodeView/DebugInlineeLinesSubsection.h"
 #include "llvm/DebugInfo/CodeView/DebugLinesSubsection.h"
 #include "llvm/DebugInfo/CodeView/DebugStringTableSubsection.h"
@@ -139,6 +140,11 @@ Error DumpOutputStyle::dump() {
 
   if (opts::dump::DumpXme) {
     if (auto EC = dumpXme())
+      return EC;
+  }
+
+  if (opts::dump::DumpFpo) {
+    if (auto EC = dumpFpo())
       return EC;
   }
 
@@ -985,6 +991,111 @@ Error DumpOutputStyle::dumpXme() {
   return Error::success();
 }
 
+std::string formatFrameType(object::frame_type FT) {
+  switch (FT) {
+  case object::frame_type::Fpo:
+    return "FPO";
+  case object::frame_type::NonFpo:
+    return "Non-FPO";
+  case object::frame_type::Trap:
+    return "Trap";
+  case object::frame_type::Tss:
+    return "TSS";
+  }
+  return "<unknown>";
+}
+
+Error DumpOutputStyle::dumpOldFpo(PDBFile &File) {
+  printHeader(P, "Old FPO Data");
+
+  ExitOnError Err("Error dumping old fpo data:");
+  auto &Dbi = Err(File.getPDBDbiStream());
+
+  uint32_t Index = Dbi.getDebugStreamIndex(DbgHeaderType::FPO);
+  if (Index == kInvalidStreamIndex) {
+    printStreamNotPresent("FPO");
+    return Error::success();
+  }
+
+  std::unique_ptr<MappedBlockStream> OldFpo = File.createIndexedStream(Index);
+  BinaryStreamReader Reader(*OldFpo);
+  FixedStreamArray<object::FpoData> Records;
+  Err(Reader.readArray(Records,
+                       Reader.bytesRemaining() / sizeof(object::FpoData)));
+
+  P.printLine("  RVA    | Code | Locals | Params | Prolog | Saved Regs | Use "
+              "BP | Has SEH | Frame Type");
+
+  for (const object::FpoData &FD : Records) {
+    P.formatLine("{0:X-8} | {1,4} | {2,6} | {3,6} | {4,6} | {5,10} | {6,6} | "
+                 "{7,7} | {8,9}",
+                 uint32_t(FD.Offset), uint32_t(FD.Size), uint32_t(FD.NumLocals),
+                 uint32_t(FD.NumParams), FD.getPrologSize(),
+                 FD.getNumSavedRegs(), FD.useBP(), FD.hasSEH(),
+                 formatFrameType(FD.getFP()));
+  }
+  return Error::success();
+}
+
+Error DumpOutputStyle::dumpNewFpo(PDBFile &File) {
+  printHeader(P, "New FPO Data");
+
+  ExitOnError Err("Error dumping new fpo data:");
+  auto &Dbi = Err(File.getPDBDbiStream());
+
+  uint32_t Index = Dbi.getDebugStreamIndex(DbgHeaderType::NewFPO);
+  if (Index == kInvalidStreamIndex) {
+    printStreamNotPresent("New FPO");
+    return Error::success();
+  }
+
+  std::unique_ptr<MappedBlockStream> NewFpo = File.createIndexedStream(Index);
+
+  DebugFrameDataSubsectionRef FDS;
+  if (auto EC = FDS.initialize(*NewFpo))
+    return make_error<RawError>(raw_error_code::corrupt_file,
+                                "Invalid new fpo stream");
+
+  P.printLine("  RVA    | Code | Locals | Params | Stack | Prolog | Saved Regs "
+              "| Has SEH | Has C++EH | Start | Program");
+  for (const FrameData &FD : FDS) {
+    bool IsFuncStart = FD.Flags & FrameData::IsFunctionStart;
+    bool HasEH = FD.Flags & FrameData::HasEH;
+    bool HasSEH = FD.Flags & FrameData::HasSEH;
+
+    auto &StringTable = Err(File.getStringTable());
+
+    auto Program = Err(StringTable.getStringForID(FD.FrameFunc));
+    P.formatLine("{0:X-8} | {1,4} | {2,6} | {3,6} | {4,5} | {5,6} | {6,10} | "
+                 "{7,7} | {8,9} | {9,5} | {10}",
+                 uint32_t(FD.RvaStart), uint32_t(FD.CodeSize),
+                 uint32_t(FD.LocalSize), uint32_t(FD.ParamsSize),
+                 uint32_t(FD.MaxStackSize), uint16_t(FD.PrologSize),
+                 uint16_t(FD.SavedRegsSize), HasSEH, HasEH, IsFuncStart,
+                 Program);
+  }
+  return Error::success();
+}
+
+Error DumpOutputStyle::dumpFpo() {
+  if (!File.isPdb()) {
+    printStreamNotValidForObj();
+    return Error::success();
+  }
+
+  PDBFile &File = getPdb();
+  if (!File.hasPDBDbiStream()) {
+    printStreamNotPresent("DBI");
+    return Error::success();
+  }
+
+  if (auto EC = dumpOldFpo(File))
+    return EC;
+  if (auto EC = dumpNewFpo(File))
+    return EC;
+  return Error::success();
+}
+
 Error DumpOutputStyle::dumpStringTableFromPdb() {
   AutoIndent Indent(P);
   auto IS = getPdb().getStringTable();
@@ -1007,7 +1118,7 @@ Error DumpOutputStyle::dumpStringTableFromPdb() {
 
       std::vector<uint32_t> SortedIDs(IS->name_ids().begin(),
                                       IS->name_ids().end());
-      llvm::sort(SortedIDs.begin(), SortedIDs.end());
+      llvm::sort(SortedIDs);
       for (uint32_t I : SortedIDs) {
         auto ES = IS->getStringForID(I);
         llvm::SmallString<32> Str;
@@ -1130,13 +1241,13 @@ static void
 dumpFullTypeStream(LinePrinter &Printer, LazyRandomTypeCollection &Types,
                    uint32_t NumTypeRecords, uint32_t NumHashBuckets,
                    FixedStreamArray<support::ulittle32_t> HashValues,
-                   bool Bytes, bool Extras) {
+                   TpiStream *Stream, bool Bytes, bool Extras) {
 
   Printer.formatLine("Showing {0:N} records", NumTypeRecords);
   uint32_t Width = NumDigits(TypeIndex::FirstNonSimpleIndex + NumTypeRecords);
 
   MinimalTypeDumpVisitor V(Printer, Width + 2, Bytes, Extras, Types,
-                           NumHashBuckets, HashValues);
+                           NumHashBuckets, HashValues, Stream);
 
   if (auto EC = codeview::visitTypeStream(Types, V)) {
     Printer.formatLine("An error occurred dumping type records: {0}",
@@ -1152,7 +1263,8 @@ static void dumpPartialTypeStream(LinePrinter &Printer,
       NumDigits(TypeIndex::FirstNonSimpleIndex + Stream.getNumTypeRecords());
 
   MinimalTypeDumpVisitor V(Printer, Width + 2, Bytes, Extras, Types,
-                           Stream.getNumHashBuckets(), Stream.getHashValues());
+                           Stream.getNumHashBuckets(), Stream.getHashValues(),
+                           &Stream);
 
   if (opts::dump::DumpTypeDependents) {
     // If we need to dump all dependents, then iterate each index and find
@@ -1214,7 +1326,8 @@ Error DumpOutputStyle::dumpTypesFromObjectFile() {
     Types.reset(Reader, 100);
 
     if (opts::dump::DumpTypes) {
-      dumpFullTypeStream(P, Types, 0, 0, {}, opts::dump::DumpTypeData, false);
+      dumpFullTypeStream(P, Types, 0, 0, {}, nullptr, opts::dump::DumpTypeData,
+                         false);
     } else if (opts::dump::DumpTypeExtras) {
       auto LocalHashes = LocallyHashedType::hashTypeCollection(Types);
       auto GlobalHashes = GloballyHashedType::hashTypeCollection(Types);
@@ -1283,11 +1396,14 @@ Error DumpOutputStyle::dumpTpiStream(uint32_t StreamIdx) {
 
   auto &Types = (StreamIdx == StreamTPI) ? File.types() : File.ids();
 
+  // Enable resolving forward decls.
+  Stream.buildHashMap();
+
   if (DumpTypes || !Indices.empty()) {
     if (Indices.empty())
       dumpFullTypeStream(P, Types, Stream.getNumTypeRecords(),
                          Stream.getNumHashBuckets(), Stream.getHashValues(),
-                         DumpBytes, DumpExtras);
+                         &Stream, DumpBytes, DumpExtras);
     else {
       std::vector<TypeIndex> TiList(Indices.begin(), Indices.end());
       dumpPartialTypeStream(P, Types, Stream, TiList, DumpBytes, DumpExtras,

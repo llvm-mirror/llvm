@@ -959,8 +959,7 @@ static bool isCopyOfAPHI(const Value *V) {
 // order. The BlockInstRange numbers are generated in an RPO walk of the basic
 // blocks.
 void NewGVN::sortPHIOps(MutableArrayRef<ValPair> Ops) const {
-  llvm::sort(Ops.begin(), Ops.end(),
-             [&](const ValPair &P1, const ValPair &P2) {
+  llvm::sort(Ops, [&](const ValPair &P1, const ValPair &P2) {
     return BlockInstRange.lookup(P1.second).first <
            BlockInstRange.lookup(P2.second).first;
   });
@@ -2925,7 +2924,7 @@ void NewGVN::initializeCongruenceClasses(Function &F) {
               PHINodeUses.insert(UInst);
       // Don't insert void terminators into the class. We don't value number
       // them, and they just end up sitting in TOP.
-      if (isa<TerminatorInst>(I) && I.getType()->isVoidTy())
+      if (I.isTerminator() && I.getType()->isVoidTy())
         continue;
       TOPClass->insert(&I);
       ValueToClass[&I] = TOPClass;
@@ -3497,9 +3496,11 @@ bool NewGVN::runGVN() {
     if (!ToErase->use_empty())
       ToErase->replaceAllUsesWith(UndefValue::get(ToErase->getType()));
 
-    if (ToErase->getParent())
-      ToErase->eraseFromParent();
+    assert(ToErase->getParent() &&
+           "BB containing ToErase deleted unexpectedly!");
+    ToErase->eraseFromParent();
   }
+	Changed |= !InstructionsToErase.empty();
 
   // Delete all unreachable blocks.
   auto UnreachableBlockPred = [&](const BasicBlock &BB) {
@@ -3953,7 +3954,7 @@ bool NewGVN::eliminateInstructions(Function &F) {
         convertClassToDFSOrdered(*CC, DFSOrderedSet, UseCounts, ProbablyDead);
 
         // Sort the whole thing.
-        llvm::sort(DFSOrderedSet.begin(), DFSOrderedSet.end());
+        llvm::sort(DFSOrderedSet);
         for (auto &VD : DFSOrderedSet) {
           int MemberDFSIn = VD.DFSIn;
           int MemberDFSOut = VD.DFSOut;
@@ -4116,7 +4117,7 @@ bool NewGVN::eliminateInstructions(Function &F) {
     // If we have possible dead stores to look at, try to eliminate them.
     if (CC->getStoreCount() > 0) {
       convertClassToLoadsAndStores(*CC, PossibleDeadStores);
-      llvm::sort(PossibleDeadStores.begin(), PossibleDeadStores.end());
+      llvm::sort(PossibleDeadStores);
       ValueDFSStack EliminationStack;
       for (auto &VD : PossibleDeadStores) {
         int MemberDFSIn = VD.DFSIn;

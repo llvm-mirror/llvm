@@ -20,6 +20,7 @@
 #include "BenchmarkResult.h"
 #include "BenchmarkRunner.h"
 #include "LlvmState.h"
+#include "SnippetGenerator.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/IR/CallingConv.h"
@@ -35,21 +36,22 @@ public:
   virtual void addTargetSpecificPasses(llvm::PassManagerBase &PM) const {}
 
   // Generates code to move a constant into a the given register.
+  // Precondition: Value must fit into Reg.
   virtual std::vector<llvm::MCInst>
-  setRegToConstant(const llvm::MCSubtargetInfo &STI, unsigned Reg) const {
-    return {};
-  }
+  setRegTo(const llvm::MCSubtargetInfo &STI, unsigned Reg,
+           const llvm::APInt &Value) const = 0;
 
-  // Returns the register pointing to scratch memory, or 0 if this target does
-  // not support memory operands. The benchmark function uses the default
-  // calling convention.
+  // Returns the register pointing to scratch memory, or 0 if this target
+  // does not support memory operands. The benchmark function uses the
+  // default calling convention.
   virtual unsigned getScratchMemoryRegister(const llvm::Triple &) const {
     return 0;
   }
 
   // Fills memory operands with references to the address at [Reg] + Offset.
-  virtual void fillMemoryOperands(InstructionBuilder &IB, unsigned Reg,
+  virtual void fillMemoryOperands(InstructionTemplate &IT, unsigned Reg,
                                   unsigned Offset) const {
+
     llvm_unreachable(
         "fillMemoryOperands() requires getScratchMemoryRegister() > 0");
   }
@@ -61,6 +63,10 @@ public:
   // matter as long as it's large enough.
   virtual unsigned getMaxMemoryAccessSize() const { return 0; }
 
+  // Creates a snippet generator for the given mode.
+  std::unique_ptr<SnippetGenerator>
+  createSnippetGenerator(InstructionBenchmark::ModeE Mode,
+                         const LLVMState &State) const;
   // Creates a benchmark runner for the given mode.
   std::unique_ptr<BenchmarkRunner>
   createBenchmarkRunner(InstructionBenchmark::ModeE Mode,
@@ -79,8 +85,12 @@ public:
 private:
   virtual bool matchesArch(llvm::Triple::ArchType Arch) const = 0;
 
-  // Targets can implement their own Latency/Uops benchmarks runners by
+  // Targets can implement their own snippet generators/benchmarks runners by
   // implementing these.
+  std::unique_ptr<SnippetGenerator> virtual createLatencySnippetGenerator(
+      const LLVMState &State) const;
+  std::unique_ptr<SnippetGenerator> virtual createUopsSnippetGenerator(
+      const LLVMState &State) const;
   std::unique_ptr<BenchmarkRunner> virtual createLatencyBenchmarkRunner(
       const LLVMState &State) const;
   std::unique_ptr<BenchmarkRunner> virtual createUopsBenchmarkRunner(

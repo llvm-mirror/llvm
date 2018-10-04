@@ -97,8 +97,14 @@ public:
                                         // contraction operations like fma.
     FmAfn        = 1 << 9,              // Instruction may map to Fast math
                                         // instrinsic approximation.
-    FmReassoc    = 1 << 10              // Instruction supports Fast math
+    FmReassoc    = 1 << 10,             // Instruction supports Fast math
                                         // reassociation of operand order.
+    NoUWrap      = 1 << 11,             // Instruction supports binary operator
+                                        // no unsigned wrap.
+    NoSWrap      = 1 << 12,             // Instruction supports binary operator
+                                        // no signed wrap.
+    IsExact      = 1 << 13              // Instruction supports division is
+                                        // known to be exact.
   };
 
 private:
@@ -584,6 +590,8 @@ public:
   /// The second argument indicates whether the query should look inside
   /// instruction bundles.
   bool hasProperty(unsigned MCFlag, QueryType Type = AnyInBundle) const {
+    assert(MCFlag < 64 &&
+           "MCFlag out of range for bit mask in getFlags/hasPropertyInBundle.");
     // Inline the fast path for unbundled or bundle-internal instructions.
     if (Type == IgnoreBundle || !isBundled() || isBundledWithPred())
       return getDesc().getFlags() & (1ULL << MCFlag);
@@ -614,6 +622,12 @@ public:
 
   bool isReturn(QueryType Type = AnyInBundle) const {
     return hasProperty(MCID::Return, Type);
+  }
+
+  /// Return true if this is an instruction that marks the end of an EH scope,
+  /// i.e., a catchpad or a cleanuppad instruction.
+  bool isEHScopeReturn(QueryType Type = AnyInBundle) const {
+    return hasProperty(MCID::EHScopeReturn, Type);
   }
 
   bool isCall(QueryType Type = AnyInBundle) const {
@@ -1512,6 +1526,9 @@ public:
   /// not modify the MIFlags of this MachineInstr.
   uint16_t mergeFlagsWith(const MachineInstr& Other) const;
 
+  /// Copy all flags to MachineInst MIFlags
+  void copyIRFlags(const Instruction &I);
+
   /// Break any tie involving OpIdx.
   void untieRegOperand(unsigned OpIdx) {
     MachineOperand &MO = getOperand(OpIdx);
@@ -1523,6 +1540,9 @@ public:
 
   /// Add all implicit def and use operands to this instruction.
   void addImplicitDefUseOperands(MachineFunction &MF);
+
+  /// Scan instructions following MI and collect any matching DBG_VALUEs.
+  void collectDebugValues(SmallVectorImpl<MachineInstr *> &DbgValues);
 
 private:
   /// If this instruction is embedded into a MachineFunction, return the
@@ -1541,7 +1561,7 @@ private:
   void AddRegOperandsToUseLists(MachineRegisterInfo&);
 
   /// Slow path for hasProperty when we're dealing with a bundle.
-  bool hasPropertyInBundle(unsigned Mask, QueryType Type) const;
+  bool hasPropertyInBundle(uint64_t Mask, QueryType Type) const;
 
   /// Implements the logic of getRegClassConstraintEffectForVReg for the
   /// this MI and the given operand index \p OpIdx.

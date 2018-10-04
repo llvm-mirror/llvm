@@ -1165,6 +1165,8 @@ static uint64_t getRawAttributeMask(Attribute::AttrKind Val) {
   case Attribute::NoCfCheck:       return 1ULL << 57;
   case Attribute::OptForFuzzing:   return 1ULL << 58;
   case Attribute::ShadowCallStack: return 1ULL << 59;
+  case Attribute::SpeculativeLoadHardening:
+    return 1ULL << 60;
   case Attribute::Dereferenceable:
     llvm_unreachable("dereferenceable attribute not supported in raw format");
     break;
@@ -1389,6 +1391,8 @@ static Attribute::AttrKind getAttrFromCode(uint64_t Code) {
     return Attribute::SanitizeThread;
   case bitc::ATTR_KIND_SANITIZE_MEMORY:
     return Attribute::SanitizeMemory;
+  case bitc::ATTR_KIND_SPECULATIVE_LOAD_HARDENING:
+    return Attribute::SpeculativeLoadHardening;
   case bitc::ATTR_KIND_SWIFT_ERROR:
     return Attribute::SwiftError;
   case bitc::ATTR_KIND_SWIFT_SELF:
@@ -2938,7 +2942,7 @@ Error BitcodeReader::parseGlobalVarRecord(ArrayRef<uint64_t> Record) {
 Error BitcodeReader::parseFunctionRecord(ArrayRef<uint64_t> Record) {
   // v1: [type, callingconv, isproto, linkage, paramattr, alignment, section,
   // visibility, gc, unnamed_addr, prologuedata, dllstorageclass, comdat,
-  // prefixdata,  personalityfn, preemption specifier] (name in VST)
+  // prefixdata,  personalityfn, preemption specifier, addrspace] (name in VST)
   // v2: [strtab_offset, strtab_size, v1]
   StringRef Name;
   std::tie(Name, Record) = readNameFromStrtab(Record);
@@ -2957,8 +2961,12 @@ Error BitcodeReader::parseFunctionRecord(ArrayRef<uint64_t> Record) {
   if (CC & ~CallingConv::MaxID)
     return error("Invalid calling convention ID");
 
-  Function *Func =
-      Function::Create(FTy, GlobalValue::ExternalLinkage, Name, TheModule);
+  unsigned AddrSpace = TheModule->getDataLayout().getProgramAddressSpace();
+  if (Record.size() > 16)
+    AddrSpace = Record[16];
+
+  Function *Func = Function::Create(FTy, GlobalValue::ExternalLinkage,
+                                    AddrSpace, Name, TheModule);
 
   Func->setCallingConv(CC);
   bool isProto = Record[2];
@@ -3508,6 +3516,7 @@ Error BitcodeReader::parseFunctionBody(Function *F) {
 
       unsigned Line = Record[0], Col = Record[1];
       unsigned ScopeID = Record[2], IAID = Record[3];
+      bool isImplicitCode = Record.size() == 5 && Record[4];
 
       MDNode *Scope = nullptr, *IA = nullptr;
       if (ScopeID) {
@@ -3520,7 +3529,7 @@ Error BitcodeReader::parseFunctionBody(Function *F) {
         if (!IA)
           return error("Invalid record");
       }
-      LastLoc = DebugLoc::get(Line, Col, Scope, IA);
+      LastLoc = DebugLoc::get(Line, Col, Scope, IA, isImplicitCode);
       I->setDebugLoc(LastLoc);
       I = nullptr;
       continue;
@@ -4616,7 +4625,7 @@ Error BitcodeReader::parseFunctionBody(Function *F) {
     CurBB->getInstList().push_back(I);
 
     // If this was a terminator instruction, move to the next block.
-    if (isa<TerminatorInst>(I)) {
+    if (I->isTerminator()) {
       ++CurBBNo;
       CurBB = CurBBNo < FunctionBBs.size() ? FunctionBBs[CurBBNo] : nullptr;
     }

@@ -14,6 +14,7 @@ add_llvm_unittest(OrcJITTests
   CoreAPIsTest.cpp
   IndirectionUtilsTest.cpp
   GlobalMappingLayerTest.cpp
+  LazyCallThroughAndReexportsTest.cpp
   LazyEmittingLayerTest.cpp
   LegacyAPIInteropTest.cpp
   ObjectTransformLayerTest.cpp
@@ -23,12 +24,9 @@ add_llvm_unittest(OrcJITTests
   RemoteObjectLayerTest.cpp
   RPCUtilsTest.cpp
   RTDyldObjectLinkingLayerTest.cpp
+  RTDyldObjectLinkingLayer2Test.cpp
   SymbolStringPoolTest.cpp
+  ThreadSafeModuleTest.cpp
   )
-
-set(ORC_JIT_TEST_LIBS ${LLVM_PTHREAD_LIB})
-if(NOT HAVE_CXX_ATOMICS64_WITHOUT_LIB)
-  list(APPEND ORC_JIT_TEST_LIBS atomic)
-endif()
 
 target_link_libraries(OrcJITTests PRIVATE ${ORC_JIT_TEST_LIBS})

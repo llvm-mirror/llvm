@@ -839,7 +839,7 @@ Error DWARFDebugLine::LineTable::parse(
 
   // Sort all sequences so that address lookup will work faster.
   if (!Sequences.empty()) {
-    llvm::sort(Sequences.begin(), Sequences.end(), Sequence::orderByLowPC);
+    llvm::sort(Sequences, Sequence::orderByLowPC);
     // Note: actually, instruction address ranges of sequences should not
     // overlap (in shared objects and executables). If they do, the address
     // lookup would still work, though, but result would be ambiguous.
@@ -1111,10 +1111,4 @@ void DWARFDebugLine::SectionParser::moveToNextTable(uint32_t OldOffset,
   if (!DebugLineData.isValidOffset(Offset)) {
     Done = true;
   }
-}
-
-void DWARFDebugLine::warn(Error Err) {
-  handleAllErrors(std::move(Err), [](ErrorInfoBase &Info) {
-    WithColor::warning() << Info.message() << '\n';
-  });
 }

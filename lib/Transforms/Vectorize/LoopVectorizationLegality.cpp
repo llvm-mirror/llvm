@@ -436,8 +436,6 @@ static bool hasOutsideLoopUser(const Loop *TheLoop, Instruction *Inst,
                                SmallPtrSetImpl<Value *> &AllowedExit) {
   // Reductions, Inductions and non-header phis are allowed to have exit users. All
   // other instructions must not have external users.
-  // TODO: Non-phi instructions can also be taught to have exit users, now that
-  // we know how to extract the last scalar element from the loop.
   if (!AllowedExit.count(Inst))
     // Check that all of the users of the loop are inside the BB.
     for (User *U : Inst->users()) {
@@ -518,6 +516,18 @@ bool LoopVectorizationLegality::canVectorizeOuterLoop() {
       return false;
   }
 
+  // Check whether we are able to set up outer loop induction.
+  if (!setupOuterLoopInductions()) {
+    LLVM_DEBUG(
+        dbgs() << "LV: Not vectorizing: Unsupported outer loop Phi(s).\n");
+    ORE->emit(createMissedAnalysis("UnsupportedPhi")
+              << "Unsupported outer loop Phi(s)");
+    if (DoExtraAnalysis)
+      Result = false;
+    else
+      return false;
+  }
+
   return Result;
 }
 
@@ -573,6 +583,32 @@ void LoopVectorizationLegality::addInductionPhi(
   LLVM_DEBUG(dbgs() << "LV: Found an induction variable.\n");
 }
 
+bool LoopVectorizationLegality::setupOuterLoopInductions() {
+  BasicBlock *Header = TheLoop->getHeader();
+
+  // Returns true if a given Phi is a supported induction.
+  auto isSupportedPhi = [&](PHINode &Phi) -> bool {
+    InductionDescriptor ID;
+    if (InductionDescriptor::isInductionPHI(&Phi, TheLoop, PSE, ID) &&
+        ID.getKind() == InductionDescriptor::IK_IntInduction) {
+      addInductionPhi(&Phi, ID, AllowedExit);
+      return true;
+    } else {
+      // Bail out for any Phi in the outer loop header that is not a supported
+      // induction.
+      LLVM_DEBUG(
+          dbgs()
+          << "LV: Found unsupported PHI for outer loop vectorization.\n");
+      return false;
+    }
+  };
+
+  if (llvm::all_of(Header->phis(), isSupportedPhi))
+    return true;
+  else
+    return false;
+}
+
 bool LoopVectorizationLegality::canVectorizeInstrs() {
   BasicBlock *Header = TheLoop->getHeader();
 
@@ -626,6 +662,20 @@ bool LoopVectorizationLegality::canVectorizeInstrs() {
           continue;
         }
 
+        // TODO: Instead of recording the AllowedExit, it would be good to record the
+        // complementary set: NotAllowedExit. These include (but may not be
+        // limited to):
+        // 1. Reduction phis as they represent the one-before-last value, which
+        // is not available when vectorized 
+        // 2. Induction phis and increment when SCEV predicates cannot be used
+        // outside the loop - see addInductionPhi
+        // 3. Non-Phis with outside uses when SCEV predicates cannot be used
+        // outside the loop - see call to hasOutsideLoopUser in the non-phi
+        // handling below
+        // 4. FirstOrderRecurrence phis that can possibly be handled by
+        // extraction.
+        // By recording these, we can then reason about ways to vectorize each
+        // of these NotAllowedExit. 
         InductionDescriptor ID;
         if (InductionDescriptor::isInductionPHI(Phi, TheLoop, PSE, ID)) {
           addInductionPhi(Phi, ID, AllowedExit);
@@ -718,6 +768,14 @@ bool LoopVectorizationLegality::canVectorizeInstrs() {
       // Reduction instructions are allowed to have exit users.
       // All other instructions must not have external users.
       if (hasOutsideLoopUser(TheLoop, &I, AllowedExit)) {
+        // We can safely vectorize loops where instructions within the loop are
+        // used outside the loop only if the SCEV predicates within the loop is
+        // same as outside the loop. Allowing the exit means reusing the SCEV
+        // outside the loop.
+        if (PSE.getUnionPredicate().isAlwaysTrue()) {
+          AllowedExit.insert(&I);
+          continue;
+        }
         ORE->emit(createMissedAnalysis("ValueUsedOutsideLoop", &I)
                   << "value cannot be used outside the loop");
         return false;
@@ -730,6 +788,10 @@ bool LoopVectorizationLegality::canVectorizeInstrs() {
     if (Inductions.empty()) {
       ORE->emit(createMissedAnalysis("NoInductionVariable")
                 << "loop induction variable could not be identified");
+      return false;
+    } else if (!WidestIndTy) {
+      ORE->emit(createMissedAnalysis("NoIntegerInductionVariable")
+                << "integer loop induction variable could not be identified");
       return false;
     }
   }
@@ -755,9 +817,10 @@ bool LoopVectorizationLegality::canVectorizeMemory() {
   if (!LAI->canVectorizeMemory())
     return false;
 
-  if (LAI->hasStoreToLoopInvariantAddress()) {
+  if (LAI->hasVariantStoreToLoopInvariantAddress()) {
     ORE->emit(createMissedAnalysis("CantVectorizeStoreToLoopInvariantAddress")
-              << "write to a loop invariant address could not be vectorized");
+              << "write of variant value to a loop invariant address could not "
+                 "be vectorized");
     LLVM_DEBUG(dbgs() << "LV: We don't allow storing to uniform addresses\n");
     return false;
   }

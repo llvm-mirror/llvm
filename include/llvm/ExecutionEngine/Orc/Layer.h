@@ -15,6 +15,7 @@
 #define LLVM_EXECUTIONENGINE_ORC_LAYER_H
 
 #include "llvm/ExecutionEngine/Orc/Core.h"
+#include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/MemoryBuffer.h"
 
@@ -30,15 +31,38 @@ public:
   /// Returns the ExecutionSession for this layer.
   ExecutionSession &getExecutionSession() { return ES; }
 
+  /// Sets the CloneToNewContextOnEmit flag (false by default).
+  ///
+  /// When set, IR modules added to this layer will be cloned on to a new
+  /// context before emit is called. This can be used by clients who want
+  /// to load all IR using one LLVMContext (to save memory via type and
+  /// constant uniquing), but want to move Modules to fresh contexts before
+  /// compiling them to enable concurrent compilation.
+  /// Single threaded clients, or clients who load every module on a new
+  /// context, need not set this.
+  void setCloneToNewContextOnEmit(bool CloneToNewContextOnEmit) {
+    this->CloneToNewContextOnEmit = CloneToNewContextOnEmit;
+  }
+
+  /// Returns the current value of the CloneToNewContextOnEmit flag.
+  bool getCloneToNewContextOnEmit() const { return CloneToNewContextOnEmit; }
+
   /// Adds a MaterializationUnit representing the given IR to the given
   /// JITDylib.
-  virtual Error add(JITDylib &JD, VModuleKey K, std::unique_ptr<Module> M);
+  virtual Error add(JITDylib &JD, VModuleKey K, ThreadSafeModule TSM);
+
+  /// Adds a MaterializationUnit representing the given IR to the main
+  /// JITDylib.
+  Error add(VModuleKey K, ThreadSafeModule TSM) {
+    return add(ES.getMainJITDylib(), K, std::move(TSM));
+  }
 
   /// Emit should materialize the given IR.
   virtual void emit(MaterializationResponsibility R, VModuleKey K,
-                    std::unique_ptr<Module> M) = 0;
+                    ThreadSafeModule TSM) = 0;
 
 private:
+  bool CloneToNewContextOnEmit = false;
   ExecutionSession &ES;
 };
 
@@ -52,18 +76,21 @@ public:
 
   /// Create an IRMaterializationLayer. Scans the module to build the
   /// SymbolFlags and SymbolToDefinition maps.
-  IRMaterializationUnit(ExecutionSession &ES, std::unique_ptr<Module> M);
+  IRMaterializationUnit(ExecutionSession &ES, ThreadSafeModule TSM);
 
   /// Create an IRMaterializationLayer from a module, and pre-existing
   /// SymbolFlags and SymbolToDefinition maps. The maps must provide
   /// entries for each definition in M.
   /// This constructor is useful for delegating work from one
   /// IRMaterializationUnit to another.
-  IRMaterializationUnit(std::unique_ptr<Module> M, SymbolFlagsMap SymbolFlags,
+  IRMaterializationUnit(ThreadSafeModule TSM, SymbolFlagsMap SymbolFlags,
                         SymbolNameToDefinitionMap SymbolToDefinition);
 
+  /// Return the ModuleIdentifier as the name for this MaterializationUnit.
+  StringRef getName() const override;
+
 protected:
-  std::unique_ptr<Module> M;
+  ThreadSafeModule TSM;
   SymbolNameToDefinitionMap SymbolToDefinition;
 
 private:
@@ -75,7 +102,8 @@ private:
 class BasicIRLayerMaterializationUnit : public IRMaterializationUnit {
 public:
   BasicIRLayerMaterializationUnit(IRLayer &L, VModuleKey K,
-                                  std::unique_ptr<Module> M);
+                                  ThreadSafeModule TSM);
+
 private:
 
   void materialize(MaterializationResponsibility R) override;
@@ -97,6 +125,12 @@ public:
   /// JITDylib.
   virtual Error add(JITDylib &JD, VModuleKey K, std::unique_ptr<MemoryBuffer> O);
 
+  /// Adds a MaterializationUnit representing the given object to the main
+  /// JITDylib.
+  Error add(VModuleKey K, std::unique_ptr<MemoryBuffer> O) {
+    return add(ES.getMainJITDylib(), K, std::move(O));
+  }
+
   /// Emit should materialize the given IR.
   virtual void emit(MaterializationResponsibility R, VModuleKey K,
                     std::unique_ptr<MemoryBuffer> O) = 0;
@@ -115,6 +149,9 @@ public:
   BasicObjectLayerMaterializationUnit(ObjectLayer &L, VModuleKey K,
                                       std::unique_ptr<MemoryBuffer> O,
                                       SymbolFlagsMap SymbolFlags);
+
+  /// Return the buffer's identifier as the name for this MaterializationUnit.
+  StringRef getName() const override;
 
 private:
 

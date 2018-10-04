@@ -144,11 +144,10 @@ void GSIHashStreamBuilder::finalizeBuckets(uint32_t RecordZeroOffset) {
     // can properly early-out when it detects the record won't be found.  The
     // algorithm used here corredsponds to the function
     // caseInsensitiveComparePchPchCchCch in the reference implementation.
-    llvm::sort(Bucket.begin(), Bucket.end(),
-              [](const std::pair<StringRef, PSHashRecord> &Left,
-                 const std::pair<StringRef, PSHashRecord> &Right) {
-                return gsiRecordLess(Left.first, Right.first);
-              });
+    llvm::sort(Bucket, [](const std::pair<StringRef, PSHashRecord> &Left,
+                          const std::pair<StringRef, PSHashRecord> &Right) {
+      return gsiRecordLess(Left.first, Right.first);
+    });
 
     for (const auto &Entry : Bucket)
       HashRecords.push_back(Entry.second);
@@ -310,13 +309,14 @@ Error GSIStreamBuilder::commitPublicsHashStream(
   PublicsStreamHeader Header;
 
   // FIXME: Fill these in. They are for incremental linking.
+  Header.SymHash = PSH->calculateSerializedLength();
+  Header.AddrMap = PSH->Records.size() * 4;
   Header.NumThunks = 0;
   Header.SizeOfThunk = 0;
   Header.ISectThunkTable = 0;
+  memset(Header.Padding, 0, sizeof(Header.Padding));
   Header.OffThunkTable = 0;
   Header.NumSections = 0;
-  Header.SymHash = PSH->calculateSerializedLength();
-  Header.AddrMap = PSH->Records.size() * 4;
   if (auto EC = Writer.writeObject(Header))
     return EC;
 

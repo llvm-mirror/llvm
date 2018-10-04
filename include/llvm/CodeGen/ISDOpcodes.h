@@ -550,11 +550,8 @@ namespace ISD {
     /// is often a storage-only type but has native conversions.
     FP16_TO_FP, FP_TO_FP16,
 
-    /// FNEG, FABS, FSQRT, FSIN, FCOS, FPOWI, FPOW,
-    /// FLOG, FLOG2, FLOG10, FEXP, FEXP2,
-    /// FCEIL, FTRUNC, FRINT, FNEARBYINT, FROUND, FFLOOR - Perform various unary
-    /// floating point operations. These are inspired by libm.
-    FNEG, FABS, FSQRT, FSIN, FCOS, FPOWI, FPOW,
+    /// Perform various unary floating-point operations inspired by libm.
+    FNEG, FABS, FSQRT, FCBRT, FSIN, FCOS, FPOWI, FPOW,
     FLOG, FLOG2, FLOG10, FEXP, FEXP2,
     FCEIL, FTRUNC, FRINT, FNEARBYINT, FROUND, FFLOOR,
     /// FMINNUM/FMAXNUM - Perform floating-point minimum or maximum on two
@@ -786,11 +783,20 @@ namespace ISD {
     // Masked load and store - consecutive vector load and store operations
     // with additional mask operand that prevents memory accesses to the
     // masked-off lanes.
+    //
+    // Val, OutChain = MLOAD(BasePtr, Mask, PassThru)
+    // OutChain = MSTORE(Value, BasePtr, Mask)
     MLOAD, MSTORE,
 
     // Masked gather and scatter - load and store operations for a vector of
     // random addresses with additional mask operand that prevents memory
     // accesses to the masked-off lanes.
+    //
+    // Val, OutChain = GATHER(InChain, PassThru, Mask, BasePtr, Index, Scale)
+    // OutChain = SCATTER(InChain, Value, Mask, BasePtr, Index, Scale)
+    //
+    // The Index operand can have more vector elements than the other operands
+    // due to type legalization. The extra elements are ignored.
     MGATHER, MSCATTER,
 
     /// This corresponds to the llvm.lifetime.* intrinsics. The first operand

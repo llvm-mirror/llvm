@@ -387,7 +387,15 @@ protected:
 
   /// Use a retpoline thunk rather than indirect calls to block speculative
   /// execution.
-  bool UseRetpoline = false;
+  bool UseRetpolineIndirectCalls = false;
+
+  /// Use a retpoline thunk or remove any indirect branch to block speculative
+  /// execution.
+  bool UseRetpolineIndirectBranches = false;
+
+  /// Deprecated flag, query `UseRetpolineIndirectCalls` and
+  /// `UseRetpolineIndirectBranches` instead.
+  bool DeprecatedUseRetpoline = false;
 
   /// When using a retpoline thunk, call an externally provided thunk rather
   /// than emitting one inside the compiler.
@@ -534,7 +542,9 @@ public:
 
   bool hasX87() const { return HasX87; }
   bool hasNOPL() const { return HasNOPL; }
-  bool hasCMov() const { return HasCMov; }
+  // SSE codegen depends on cmovs, and all SSE1+ processors support them.
+  // All 64-bit processors support cmov.
+  bool hasCMov() const { return HasCMov || X86SSELevel >= SSE1 || is64Bit(); }
   bool hasSSE1() const { return X86SSELevel >= SSE1; }
   bool hasSSE2() const { return X86SSELevel >= SSE2; }
   bool hasSSE3() const { return X86SSELevel >= SSE3; }
@@ -649,7 +659,10 @@ public:
   bool hasPCONFIG() const { return HasPCONFIG; }
   bool hasSGX() const { return HasSGX; }
   bool hasINVPCID() const { return HasINVPCID; }
-  bool useRetpoline() const { return UseRetpoline; }
+  bool useRetpolineIndirectCalls() const { return UseRetpolineIndirectCalls; }
+  bool useRetpolineIndirectBranches() const {
+    return UseRetpolineIndirectBranches;
+  }
   bool useRetpolineExternalThunk() const { return UseRetpolineExternalThunk; }
 
   unsigned getPreferVectorWidth() const { return PreferVectorWidth; }
@@ -804,7 +817,9 @@ public:
 
   /// If we are using retpolines, we need to expand indirectbr to avoid it
   /// lowering to an actual indirect jump.
-  bool enableIndirectBrExpand() const override { return useRetpoline(); }
+  bool enableIndirectBrExpand() const override {
+    return useRetpolineIndirectBranches();
+  }
 
   /// Enable the MachineScheduler pass for all X86 subtargets.
   bool enableMachineScheduler() const override { return true; }

@@ -1354,16 +1354,39 @@ Value *InstCombiner::Descale(Value *Val, APInt Scale, bool &NoSignedWrap) {
 Instruction *InstCombiner::foldShuffledBinop(BinaryOperator &Inst) {
   if (!Inst.getType()->isVectorTy()) return nullptr;
 
+  unsigned VWidth = cast<VectorType>(Inst.getType())->getNumElements();
+  Value *LHS = Inst.getOperand(0), *RHS = Inst.getOperand(1);
+  assert(cast<VectorType>(LHS->getType())->getNumElements() == VWidth);
+  assert(cast<VectorType>(RHS->getType())->getNumElements() == VWidth);
+
+  // If both operands of the binop are vector concatenations, then perform the
+  // narrow binop on each pair of the source operands followed by concatenation
+  // of the results.
+  Value *L0, *L1, *R0, *R1;
+  Constant *Mask;
+  if (match(LHS, m_ShuffleVector(m_Value(L0), m_Value(L1), m_Constant(Mask))) &&
+      match(RHS, m_ShuffleVector(m_Value(R0), m_Value(R1), m_Specific(Mask))) &&
+      LHS->hasOneUse() && RHS->hasOneUse() &&
+      cast<ShuffleVectorInst>(LHS)->isConcat()) {
+    // This transform does not have the speculative execution constraint as
+    // below because the shuffle is a concatenation. The new binops are
+    // operating on exactly the same elements as the existing binop.
+    // TODO: We could ease the mask requirement to allow different undef lanes,
+    //       but that requires an analysis of the binop-with-undef output value.
+    Value *NewBO0 = Builder.CreateBinOp(Inst.getOpcode(), L0, R0);
+    if (auto *BO = dyn_cast<BinaryOperator>(NewBO0))
+      BO->copyIRFlags(&Inst);
+    Value *NewBO1 = Builder.CreateBinOp(Inst.getOpcode(), L1, R1);
+    if (auto *BO = dyn_cast<BinaryOperator>(NewBO1))
+      BO->copyIRFlags(&Inst);
+    return new ShuffleVectorInst(NewBO0, NewBO1, Mask);
+  }
+
   // It may not be safe to reorder shuffles and things like div, urem, etc.
   // because we may trap when executing those ops on unknown vector elements.
   // See PR20059.
   if (!isSafeToSpeculativelyExecute(&Inst))
     return nullptr;
-
-  unsigned VWidth = cast<VectorType>(Inst.getType())->getNumElements();
-  Value *LHS = Inst.getOperand(0), *RHS = Inst.getOperand(1);
-  assert(cast<VectorType>(LHS->getType())->getNumElements() == VWidth);
-  assert(cast<VectorType>(RHS->getType())->getNumElements() == VWidth);
 
   auto createBinOpShuffle = [&](Value *X, Value *Y, Constant *M) {
     Value *XY = Builder.CreateBinOp(Inst.getOpcode(), X, Y);
@@ -1375,7 +1398,6 @@ Instruction *InstCombiner::foldShuffledBinop(BinaryOperator &Inst) {
   // If both arguments of the binary operation are shuffles that use the same
   // mask and shuffle within a single vector, move the shuffle after the binop.
   Value *V1, *V2;
-  Constant *Mask;
   if (match(LHS, m_ShuffleVector(m_Value(V1), m_Undef(), m_Constant(Mask))) &&
       match(RHS, m_ShuffleVector(m_Value(V2), m_Undef(), m_Specific(Mask))) &&
       V1->getType() == V2->getType() &&
@@ -1393,7 +1415,10 @@ Instruction *InstCombiner::foldShuffledBinop(BinaryOperator &Inst) {
   if (match(&Inst, m_c_BinOp(
           m_OneUse(m_ShuffleVector(m_Value(V1), m_Undef(), m_Constant(Mask))),
           m_Constant(C))) &&
-      V1->getType() == Inst.getType()) {
+      V1->getType()->getVectorNumElements() <= VWidth) {
+    assert(Inst.getType()->getScalarType() == V1->getType()->getScalarType() &&
+           "Shuffle should not change scalar type");
+    unsigned V1Width = V1->getType()->getVectorNumElements();
     // Find constant NewC that has property:
     //   shuffle(NewC, ShMask) = C
     // If such constant does not exist (example: ShMask=<0,0> and C=<1,2>)
@@ -1402,14 +1427,21 @@ Instruction *InstCombiner::foldShuffledBinop(BinaryOperator &Inst) {
     SmallVector<int, 16> ShMask;
     ShuffleVectorInst::getShuffleMask(Mask, ShMask);
     SmallVector<Constant *, 16>
-        NewVecC(VWidth, UndefValue::get(C->getType()->getScalarType()));
+        NewVecC(V1Width, UndefValue::get(C->getType()->getScalarType()));
     bool MayChange = true;
     for (unsigned I = 0; I < VWidth; ++I) {
       if (ShMask[I] >= 0) {
-        assert(ShMask[I] < (int)VWidth);
+        assert(ShMask[I] < (int)VWidth && "Not expecting narrowing shuffle");
         Constant *CElt = C->getAggregateElement(I);
         Constant *NewCElt = NewVecC[ShMask[I]];
-        if (!CElt || (!isa<UndefValue>(NewCElt) && NewCElt != CElt)) {
+        // Bail out if:
+        // 1. The constant vector contains a constant expression.
+        // 2. The shuffle needs an element of the constant vector that can't
+        //    be mapped to a new constant vector.
+        // 3. This is a widening shuffle that copies elements of V1 into the
+        //    extended elements (extending with undef is allowed).
+        if (!CElt || (!isa<UndefValue>(NewCElt) && NewCElt != CElt) ||
+            I >= V1Width) {
           MayChange = false;
           break;
         }
@@ -1434,6 +1466,62 @@ Instruction *InstCombiner::foldShuffledBinop(BinaryOperator &Inst) {
   }
 
   return nullptr;
+}
+
+/// Try to narrow the width of a binop if at least 1 operand is an extend of
+/// of a value. This requires a potentially expensive known bits check to make
+/// sure the narrow op does not overflow.
+Instruction *InstCombiner::narrowMathIfNoOverflow(BinaryOperator &BO) {
+  // We need at least one extended operand.
+  Value *Op0 = BO.getOperand(0), *Op1 = BO.getOperand(1);
+
+  // If this is a sub, we swap the operands since we always want an extension
+  // on the RHS. The LHS can be an extension or a constant.
+  if (BO.getOpcode() == Instruction::Sub)
+    std::swap(Op0, Op1);
+
+  Value *X;
+  bool IsSext = match(Op0, m_SExt(m_Value(X)));
+  if (!IsSext && !match(Op0, m_ZExt(m_Value(X))))
+    return nullptr;
+
+  // If both operands are the same extension from the same source type and we
+  // can eliminate at least one (hasOneUse), this might work.
+  CastInst::CastOps CastOpc = IsSext ? Instruction::SExt : Instruction::ZExt;
+  Value *Y;
+  if (!(match(Op1, m_ZExtOrSExt(m_Value(Y))) && X->getType() == Y->getType() &&
+        cast<Operator>(Op1)->getOpcode() == CastOpc &&
+        (Op0->hasOneUse() || Op1->hasOneUse()))) {
+    // If that did not match, see if we have a suitable constant operand.
+    // Truncating and extending must produce the same constant.
+    Constant *WideC;
+    if (!Op0->hasOneUse() || !match(Op1, m_Constant(WideC)))
+      return nullptr;
+    Constant *NarrowC = ConstantExpr::getTrunc(WideC, X->getType());
+    if (ConstantExpr::getCast(CastOpc, NarrowC, BO.getType()) != WideC)
+      return nullptr;
+    Y = NarrowC;
+  }
+
+  // Swap back now that we found our operands.
+  if (BO.getOpcode() == Instruction::Sub)
+    std::swap(X, Y);
+
+  // Both operands have narrow versions. Last step: the math must not overflow
+  // in the narrow width.
+  if (!willNotOverflow(BO.getOpcode(), X, Y, BO, IsSext))
+    return nullptr;
+
+  // bo (ext X), (ext Y) --> ext (bo X, Y)
+  // bo (ext X), C       --> ext (bo X, C')
+  Value *NarrowBO = Builder.CreateBinOp(BO.getOpcode(), X, Y, "narrow");
+  if (auto *NewBinOp = dyn_cast<BinaryOperator>(NarrowBO)) {
+    if (IsSext)
+      NewBinOp->setHasNoSignedWrap();
+    else
+      NewBinOp->setHasNoUnsignedWrap();
+  }
+  return CastInst::Create(CastOpc, NarrowBO, BO.getType());
 }
 
 Instruction *InstCombiner::visitGetElementPtrInst(GetElementPtrInst &GEP) {
@@ -2902,7 +2990,7 @@ static bool TryToSinkInstruction(Instruction *I, BasicBlock *DestBlock) {
 
   // Cannot move control-flow-involving, volatile loads, vaarg, etc.
   if (isa<PHINode>(I) || I->isEHPad() || I->mayHaveSideEffects() ||
-      isa<TerminatorInst>(I))
+      I->isTerminator())
     return false;
 
   // Do not sink alloca instructions out of the entry block.
@@ -3198,7 +3286,7 @@ static bool AddReachableCodeToWorklist(BasicBlock *BB, const DataLayout &DL,
       }
     }
 
-    for (BasicBlock *SuccBB : TI->successors())
+    for (BasicBlock *SuccBB : successors(TI))
       Worklist.push_back(SuccBB);
   } while (!Worklist.empty());
 

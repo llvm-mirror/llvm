@@ -902,9 +902,11 @@ RegisterCoalescer::removeCopyByCommutingDef(const CoalescerPair &CP,
       IntB.createSubRangeFrom(Allocator, Mask, IntB);
     }
     SlotIndex AIdx = CopyIdx.getRegSlot(true);
+    LaneBitmask MaskA;
     for (LiveInterval::SubRange &SA : IntA.subranges()) {
       VNInfo *ASubValNo = SA.getVNInfoAt(AIdx);
       assert(ASubValNo != nullptr);
+      MaskA |= SA.LaneMask;
 
       IntB.refineSubRanges(Allocator, SA.LaneMask,
           [&Allocator,&SA,CopyIdx,ASubValNo,&ShrinkB]
@@ -918,6 +920,16 @@ RegisterCoalescer::removeCopyByCommutingDef(const CoalescerPair &CP,
         if (P.first)
           BSubValNo->def = ASubValNo->def;
       });
+    }
+    // Go over all subranges of IntB that have not been covered by IntA,
+    // and delete the segments starting at CopyIdx. This can happen if
+    // IntA has undef lanes that are defined in IntB.
+    for (LiveInterval::SubRange &SB : IntB.subranges()) {
+      if ((SB.LaneMask & MaskA).any())
+        continue;
+      if (LiveRange::Segment *S = SB.getSegmentContaining(CopyIdx))
+        if (S->start.getBaseIndex() == CopyIdx.getBaseIndex())
+          SB.removeSegment(*S, true);
     }
   }
 
@@ -1119,6 +1131,20 @@ bool RegisterCoalescer::removePartialRedundancy(const CoalescerPair &CP,
     assert(BValNo && "All sublanes should be live");
     LIS->pruneValue(SR, CopyIdx.getRegSlot(), &EndPoints);
     BValNo->markUnused();
+    // We can have a situation where the result of the original copy is live,
+    // but is immediately dead in this subrange, e.g. [336r,336d:0). That makes
+    // the copy appear as an endpoint from pruneValue(), but we don't want it
+    // to because the copy has been removed.  We can go ahead and remove that
+    // endpoint; there is no other situation here that there could be a use at
+    // the same place as we know that the copy is a full copy.
+    for (unsigned I = 0; I != EndPoints.size(); ) {
+      if (SlotIndex::isSameInstr(EndPoints[I], CopyIdx)) {
+        EndPoints[I] = EndPoints.back();
+        EndPoints.pop_back();
+        continue;
+      }
+      ++I;
+    }
     LIS->extendToIndices(SR, EndPoints);
   }
   // If any dead defs were extended, truncate them.
@@ -1159,7 +1185,8 @@ bool RegisterCoalescer::reMaterializeTrivialDef(const CoalescerPair &CP,
   LiveInterval &SrcInt = LIS->getInterval(SrcReg);
   SlotIndex CopyIdx = LIS->getInstructionIndex(*CopyMI);
   VNInfo *ValNo = SrcInt.Query(CopyIdx).valueIn();
-  assert(ValNo && "CopyMI input register not live");
+  if (!ValNo)
+    return false;
   if (ValNo->isPHIDef() || ValNo->isUnused())
     return false;
   MachineInstr *DefMI = LIS->getInstructionFromIndex(ValNo->def);
@@ -1423,7 +1450,10 @@ bool RegisterCoalescer::reMaterializeTrivialDef(const CoalescerPair &CP,
     for (MachineOperand &UseMO : MRI->use_operands(SrcReg)) {
       MachineInstr *UseMI = UseMO.getParent();
       if (UseMI->isDebugValue()) {
-        UseMO.setReg(DstReg);
+        if (TargetRegisterInfo::isPhysicalRegister(DstReg))
+          UseMO.substPhysReg(DstReg, *TRI);
+        else
+          UseMO.setReg(DstReg);
         // Move the debug value directly after the def of the rematerialized
         // value in DstReg.
         MBB->splice(std::next(NewMI.getIterator()), UseMI->getParent(), UseMI);

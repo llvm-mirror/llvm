@@ -223,6 +223,9 @@ namespace HexagonISD {
 
     bool mayBeEmittedAsTailCall(const CallInst *CI) const override;
 
+    unsigned getRegisterByName(const char* RegName, EVT VT,
+                               SelectionDAG &DAG) const override;
+
     /// If a physical register, this returns the register that receives the
     /// exception address on entry to an EH pad.
     unsigned
@@ -308,7 +311,8 @@ namespace HexagonISD {
         Value *Addr, AtomicOrdering Ord) const override;
     AtomicExpansionKind shouldExpandAtomicLoadInIR(LoadInst *LI) const override;
     bool shouldExpandAtomicStoreInIR(StoreInst *SI) const override;
-    bool shouldExpandAtomicCmpXchgInIR(AtomicCmpXchgInst *AI) const override;
+    AtomicExpansionKind
+    shouldExpandAtomicCmpXchgInIR(AtomicCmpXchgInst *AI) const override;
 
     AtomicExpansionKind
     shouldExpandAtomicRMWInIR(AtomicRMWInst *AI) const override {

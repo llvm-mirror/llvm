@@ -399,15 +399,32 @@ define amdgpu_kernel void @test_call_external_void_func_v3i16() #0 {
   ret void
 }
 
-; FIXME: materialize constant directly in VGPR
+; GCN-LABEL: {{^}}test_call_external_void_func_v3f16:
+; GFX9: buffer_load_dwordx2 v[0:1]
+; GFX9-NOT: v0
+; GFX9-NOT: v1
+; GFX9: s_swappc_b64
+define amdgpu_kernel void @test_call_external_void_func_v3f16() #0 {
+  %val = load <3 x half>, <3 x half> addrspace(1)* undef
+  call void @external_void_func_v3f16(<3 x half> %val)
+  ret void
+}
+
 ; GCN-LABEL: {{^}}test_call_external_void_func_v3i16_imm:
-; GFX9-DAG: s_mov_b32 [[K01:s[0-9]+]], 0x20001
-; GFX9-DAG: s_mov_b32 [[K2:s[0-9]+]], 3
-; GFX9: v_mov_b32_e32 v0, [[K01]]
-; GFX9: v_mov_b32_e32 v1, [[K2]]
+; GFX9: v_mov_b32_e32 v0, 0x20001
+; GFX9: v_mov_b32_e32 v1, 3
 ; GFX9: s_swappc_b64
 define amdgpu_kernel void @test_call_external_void_func_v3i16_imm() #0 {
   call void @external_void_func_v3i16(<3 x i16> <i16 1, i16 2, i16 3>)
+  ret void
+}
+
+; GCN-LABEL: {{^}}test_call_external_void_func_v3f16_imm:
+; GFX9: v_mov_b32_e32 v0, 0x40003c00
+; GFX9: v_mov_b32_e32 v1, 0x4400
+; GFX9: s_swappc_b64
+define amdgpu_kernel void @test_call_external_void_func_v3f16_imm() #0 {
+  call void @external_void_func_v3f16(<3 x half> <half 1.0, half 2.0, half 4.0>)
   ret void
 }
 
@@ -703,6 +720,56 @@ define amdgpu_kernel void @test_call_external_void_func_v16i8() #0 {
   call void @external_void_func_v16i8(<16 x i8> %val)
   ret void
 }
+
+; GCN-LABEL: {{^}}stack_passed_arg_alignment_v32i32_f64:
+; GCN: buffer_store_dword v{{[0-9]+}}, off, s{{\[[0-9]+:[0-9]+\]}}, s32 offset:8
+; GCN: buffer_store_dword v{{[0-9]+}}, off, s{{\[[0-9]+:[0-9]+\]}}, s32 offset:4
+; GCN: s_swappc_b64
+define amdgpu_kernel void @stack_passed_arg_alignment_v32i32_f64(<32 x i32> %val, double %tmp) #0 {
+entry:
+  call void @stack_passed_f64_arg(<32 x i32> %val, double %tmp)
+  ret void
+}
+
+; GCN-LABEL: {{^}}tail_call_byval_align16:
+; GCN: s_mov_b32 s5, s32
+; GCN: buffer_store_dword v32, off, s[0:3], s5 offset:28 ; 4-byte Folded Spill
+; GCN: buffer_store_dword v33, off, s[0:3], s5 offset:24 ; 4-byte Folded Spill
+; GCN: buffer_load_dword v32, off, s[0:3], s5 offset:32
+; GCN: buffer_load_dword v33, off, s[0:3], s5 offset:36
+; GCN: buffer_store_dword v33, off, s[0:3], s5 offset:20
+; GCN: buffer_store_dword v32, off, s[0:3], s5 offset:16
+; GCN: s_getpc_b64
+; GCN: buffer_load_dword v33, off, s[0:3], s5 offset:24 ; 4-byte Folded Reload
+; GCN: buffer_load_dword v32, off, s[0:3], s5 offset:28 ; 4-byte Folded Reload
+; GCN: s_setpc_b64
+define void @tail_call_byval_align16(<32 x i32> %val, double %tmp) #0 {
+entry:
+  %alloca = alloca double, align 8, addrspace(5)
+  tail call void @byval_align16_f64_arg(<32 x i32> %val, double addrspace(5)* byval align 16 %alloca)
+  ret void
+}
+
+; GCN-LABEL: {{^}}tail_call_stack_passed_arg_alignment_v32i32_f64:
+; GCN: s_mov_b32 s5, s32
+; GCN: buffer_store_dword v32, off, s[0:3], s5 offset:16 ; 4-byte Folded Spill
+; GCN: buffer_store_dword v33, off, s[0:3], s5 offset:12 ; 4-byte Folded Spill
+; GCN: buffer_load_dword v32, off, s[0:3], s5 offset:4
+; GCN: buffer_load_dword v33, off, s[0:3], s5 offset:8
+; GCN: buffer_store_dword v33, off, s[0:3], s5 offset:8
+; GCN: buffer_store_dword v32, off, s[0:3], s5 offset:4
+; GCN: s_getpc_b64
+; GCN: buffer_load_dword v33, off, s[0:3], s5 offset:12 ; 4-byte Folded Reload
+; GCN: buffer_load_dword v32, off, s[0:3], s5 offset:16 ; 4-byte Folded Reload
+; GCN: s_setpc_b64
+define void @tail_call_stack_passed_arg_alignment_v32i32_f64(<32 x i32> %val, double %tmp) #0 {
+entry:
+  tail call void @stack_passed_f64_arg(<32 x i32> %val, double %tmp)
+  ret void
+}
+
+declare void @byval_align16_f64_arg(<32 x i32>, double addrspace(5)* byval align 16) #0
+declare void @stack_passed_f64_arg(<32 x i32>, double) #0
 
 attributes #0 = { nounwind }
 attributes #1 = { nounwind readnone }

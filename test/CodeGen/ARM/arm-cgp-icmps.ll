@@ -1,4 +1,4 @@
-; RUN: llc -mtriple=thumbv8.main -mcpu=cortex-m33 %s -arm-disable-cgp=false -o - | FileCheck %s --check-prefix=CHECK-COMMON --check-prefix=CHECK-NODSP
+; RUN: llc -mtriple=thumbv8m.main -mcpu=cortex-m33 %s -arm-disable-cgp=false -o - | FileCheck %s --check-prefix=CHECK-COMMON --check-prefix=CHECK-NODSP
 ; RUN: llc -mtriple=thumbv7em %s -arm-disable-cgp=false -arm-enable-scalar-dsp=true -o - | FileCheck %s --check-prefix=CHECK-COMMON --check-prefix=CHECK-DSP
 ; RUN: llc -mtriple=thumbv8 %s -arm-disable-cgp=false -arm-enable-scalar-dsp=true -arm-enable-scalar-dsp-imms=true -o - | FileCheck %s --check-prefix=CHECK-COMMON --check-prefix=CHECK-DSP-IMM
 
@@ -277,5 +277,36 @@ entry:
   %cmp = icmp ult i7 %arg1, %add
   %res = select i1 %cmp, i32 %a, i32 %b
   ret i32 %res
+}
+
+; CHECK-COMMON-LABEL: icmp_i15
+; CHECK-COMMON: movw [[MINUS_ONE:r[0-9]+]], #32767
+define i32 @icmp_i15(i15 zeroext %arg0, i15 zeroext %arg1) {
+  %xor = xor i15 %arg0, -1
+  %cmp = icmp eq i15 %xor, %arg1
+  %res = select i1 %cmp, i32 21, i32 42
+  ret i32 %res
+}
+
+; CHECK-COMMON-LABEL: icmp_minus_imm
+; CHECK-NODSP: subs [[SUB:r[0-9]+]],
+; CHECK-NODSP: uxtb [[UXT:r[0-9]+]],
+; CHECK-NODSP: cmp [[UXT]], #251
+
+; CHECK-DSP: subs [[SUB:r[0-9]+]],
+; CHECK-DSP: uxtb [[UXT:r[0-9]+]],
+; CHECK-DSP: cmp [[UXT]], #251
+
+; CHECK-DSP-IMM: ldrb [[A:r[0-9]+]],
+; CHECK-DSP-IMM: movs  [[MINUS_7:r[0-9]+]], #249
+; CHECK-DSP-IMM: uadd8 [[RES:r[0-9]+]], [[A]], [[MINUS_7]]
+; CHECK-DSP-IMM: cmp [[RES]], #251
+define i32 @icmp_minus_imm(i8* %a) {
+entry:
+  %0 = load i8, i8* %a, align 1
+  %add.i = add i8 %0, -7
+  %cmp = icmp ugt i8 %add.i, -5
+  %conv1 = zext i1 %cmp to i32
+  ret i32 %conv1
 }
 

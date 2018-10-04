@@ -13,6 +13,7 @@
 #include "PrettyBuiltinDumper.h"
 #include "PrettyClassDefinitionDumper.h"
 #include "PrettyEnumDumper.h"
+#include "PrettyFunctionDumper.h"
 #include "PrettyTypedefDumper.h"
 #include "llvm-pdbutil.h"
 
@@ -20,6 +21,7 @@
 #include "llvm/DebugInfo/PDB/PDBSymbolExe.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolTypeBuiltin.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolTypeEnum.h"
+#include "llvm/DebugInfo/PDB/PDBSymbolTypeFunctionSig.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolTypeTypedef.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolTypeUDT.h"
 #include "llvm/DebugInfo/PDB/UDTLayout.h"
@@ -128,7 +130,7 @@ filterAndSortClassDefs(LinePrinter &Printer, Enumerator &E,
   }
 
   if (Comp)
-    llvm::sort(Filtered.begin(), Filtered.end(), Comp);
+    llvm::sort(Filtered, Comp);
   return Filtered;
 }
 
@@ -143,6 +145,19 @@ void TypeDumper::start(const PDBSymbolExe &Exe) {
       Printer.Indent();
       while (auto Enum = Enums->getNext())
         Enum->dump(*this);
+      Printer.Unindent();
+    }
+  }
+
+  if (opts::pretty::Funcsigs) {
+    if (auto Funcsigs = Exe.findAllChildren<PDBSymbolTypeFunctionSig>()) {
+      Printer.NewLine();
+      WithColor(Printer, PDB_ColorItem::Identifier).get()
+          << "Function Signatures";
+      Printer << ": (" << Funcsigs->getChildCount() << " items)";
+      Printer.Indent();
+      while (auto FS = Funcsigs->getNext())
+        FS->dump(*this);
       Printer.Unindent();
     }
   }
@@ -196,11 +211,22 @@ void TypeDumper::start(const PDBSymbolExe &Exe) {
           dumpClassLayout(*Class);
       } else {
         while (auto Class = Classes->getNext()) {
-          if (Class->getUnmodifiedTypeId() != 0)
-            continue;
-
           if (Printer.IsTypeExcluded(Class->getName(), Class->getLength()))
             continue;
+
+          if (Class->getUnmodifiedTypeId() != 0) {
+            Printer.NewLine();
+            if (Class->isConstType())
+              WithColor(Printer, PDB_ColorItem::Keyword).get() << "const ";
+            if (Class->isVolatileType())
+              WithColor(Printer, PDB_ColorItem::Keyword).get() << "volatile ";
+            if (Class->isUnalignedType())
+              WithColor(Printer, PDB_ColorItem::Keyword).get() << "unaligned ";
+            WithColor(Printer, PDB_ColorItem::Keyword).get()
+                << Class->getUdtKind() << " ";
+            WithColor(Printer, PDB_ColorItem::Type).get() << Class->getName();
+            continue;
+          }
 
           auto Layout = llvm::make_unique<ClassLayout>(std::move(Class));
           if (Layout->deepPaddingSize() < opts::pretty::PaddingThreshold)
@@ -240,13 +266,19 @@ void TypeDumper::dump(const PDBSymbolTypeTypedef &Symbol) {
   Dumper.start(Symbol);
 }
 
+void TypeDumper::dump(const PDBSymbolTypeFunctionSig &Symbol) {
+  Printer.NewLine();
+  FunctionDumper Dumper(Printer);
+  Dumper.start(Symbol, nullptr, FunctionDumper::PointerType::None);
+}
+
 void TypeDumper::dumpClassLayout(const ClassLayout &Class) {
   assert(opts::pretty::Classes);
 
   if (opts::pretty::ClassFormat == opts::pretty::ClassDefinitionFormat::None) {
-    Printer.NewLine();
-    WithColor(Printer, PDB_ColorItem::Keyword).get() << "class ";
-    WithColor(Printer, PDB_ColorItem::Identifier).get() << Class.getName();
+    WithColor(Printer, PDB_ColorItem::Keyword).get()
+        << Class.getClass().getUdtKind() << " ";
+    WithColor(Printer, PDB_ColorItem::Type).get() << Class.getName();
   } else {
     ClassDefinitionDumper Dumper(Printer);
     Dumper.start(Class);

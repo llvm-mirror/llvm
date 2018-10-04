@@ -12,7 +12,9 @@
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/DebugInfo/CodeView/LazyRandomTypeCollection.h"
 #include "llvm/DebugInfo/CodeView/TypeRecord.h"
+#include "llvm/DebugInfo/CodeView/TypeRecordHelpers.h"
 #include "llvm/DebugInfo/MSF/MappedBlockStream.h"
+#include "llvm/DebugInfo/PDB/Native/Hash.h"
 #include "llvm/DebugInfo/PDB/Native/PDBFile.h"
 #include "llvm/DebugInfo/PDB/Native/RawConstants.h"
 #include "llvm/DebugInfo/PDB/Native/RawError.h"
@@ -139,6 +141,63 @@ uint16_t TpiStream::getTypeHashStreamAuxIndex() const {
 
 uint32_t TpiStream::getNumHashBuckets() const { return Header->NumHashBuckets; }
 uint32_t TpiStream::getHashKeySize() const { return Header->HashKeySize; }
+
+void TpiStream::buildHashMap() {
+  if (!HashMap.empty())
+    return;
+  if (HashValues.empty())
+    return;
+
+  HashMap.resize(Header->NumHashBuckets);
+
+  TypeIndex TIB{Header->TypeIndexBegin};
+  TypeIndex TIE{Header->TypeIndexEnd};
+  while (TIB < TIE) {
+    uint32_t HV = HashValues[TIB.toArrayIndex()];
+    HashMap[HV].push_back(TIB++);
+  }
+}
+
+bool TpiStream::supportsTypeLookup() const { return !HashMap.empty(); }
+
+Expected<TypeIndex>
+TpiStream::findFullDeclForForwardRef(TypeIndex ForwardRefTI) const {
+  CVType F = Types->getType(ForwardRefTI);
+  if (!isUdtForwardRef(F))
+    return ForwardRefTI;
+
+  Expected<TagRecordHash> ForwardTRH = hashTagRecord(F);
+  if (!ForwardTRH)
+    return ForwardTRH.takeError();
+
+  uint32_t BucketIdx = ForwardTRH->FullRecordHash % Header->NumHashBuckets;
+
+  for (TypeIndex TI : HashMap[BucketIdx]) {
+    CVType CVT = Types->getType(TI);
+    if (CVT.kind() != F.kind())
+      continue;
+
+    Expected<TagRecordHash> FullTRH = hashTagRecord(CVT);
+    if (!FullTRH)
+      return FullTRH.takeError();
+    if (ForwardTRH->FullRecordHash != FullTRH->FullRecordHash)
+      continue;
+    TagRecord &ForwardTR = ForwardTRH->getRecord();
+    TagRecord &FullTR = FullTRH->getRecord();
+
+    if (!ForwardTR.hasUniqueName()) {
+      if (ForwardTR.getName() == FullTR.getName())
+        return TI;
+      continue;
+    }
+
+    if (!FullTR.hasUniqueName())
+      continue;
+    if (ForwardTR.getUniqueName() == FullTR.getUniqueName())
+      return TI;
+  }
+  return ForwardRefTI;
+}
 
 BinarySubstreamRef TpiStream::getTypeRecordsSubstream() const {
   return TypeRecordsSubstream;

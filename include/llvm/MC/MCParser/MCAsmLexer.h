@@ -52,7 +52,6 @@ protected: // Can only create subclasses.
   bool IsAtStartOfStatement = true;
   AsmCommentConsumer *CommentConsumer = nullptr;
 
-  bool AltMacroMode;
   MCAsmLexer();
 
   virtual AsmToken LexToken() = 0;
@@ -67,17 +66,9 @@ public:
   MCAsmLexer &operator=(const MCAsmLexer &) = delete;
   virtual ~MCAsmLexer();
 
-  bool IsaAltMacroMode() {
-    return AltMacroMode;
-  }
-
-  void SetAltMacroMode(bool AltMacroSet) {
-    AltMacroMode = AltMacroSet;
-  }
-
   /// Consume the next token from the input stream and return it.
   ///
-  /// The lexer will continuosly return the end-of-file token once the end of
+  /// The lexer will continuously return the end-of-file token once the end of
   /// the main input file has been reached.
   const AsmToken &Lex() {
     assert(!CurTok.empty());

@@ -24,6 +24,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/ADT/Twine.h"
+#include "llvm/Analysis/MemoryLocation.h"
 #include "llvm/AsmParser/Parser.h"
 #include "llvm/AsmParser/SlotMapping.h"
 #include "llvm/CodeGen/MIRPrinter.h"
@@ -962,7 +963,10 @@ bool MIParser::parseInstruction(unsigned &OpCode, unsigned &Flags) {
          Token.is(MIToken::kw_arcp) ||
          Token.is(MIToken::kw_contract) ||
          Token.is(MIToken::kw_afn) ||
-         Token.is(MIToken::kw_reassoc)) {
+         Token.is(MIToken::kw_reassoc) ||
+         Token.is(MIToken::kw_nuw) ||
+         Token.is(MIToken::kw_nsw) ||
+         Token.is(MIToken::kw_exact)) {
     // Mine frame and fast math flags
     if (Token.is(MIToken::kw_frame_setup))
       Flags |= MachineInstr::FrameSetup;
@@ -982,6 +986,12 @@ bool MIParser::parseInstruction(unsigned &OpCode, unsigned &Flags) {
       Flags |= MachineInstr::FmAfn;
     if (Token.is(MIToken::kw_reassoc))
       Flags |= MachineInstr::FmReassoc;
+    if (Token.is(MIToken::kw_nuw))
+      Flags |= MachineInstr::NoUWrap;
+    if (Token.is(MIToken::kw_nsw))
+      Flags |= MachineInstr::NoSWrap;
+    if (Token.is(MIToken::kw_exact))
+      Flags |= MachineInstr::IsExact;
 
     lex();
   }
@@ -2452,7 +2462,7 @@ bool MIParser::parseOptionalAtomicOrdering(AtomicOrdering &Order) {
     return false;
   }
 
-  return error("expected an atomic scope, ordering or a size integer literal");
+  return error("expected an atomic scope, ordering or a size specification");
 }
 
 bool MIParser::parseMachineMemoryOperand(MachineMemOperand *&Dest) {
@@ -2491,11 +2501,17 @@ bool MIParser::parseMachineMemoryOperand(MachineMemOperand *&Dest) {
   if (parseOptionalAtomicOrdering(FailureOrder))
     return true;
 
-  if (Token.isNot(MIToken::IntegerLiteral))
-    return error("expected the size integer literal after memory operation");
+  if (Token.isNot(MIToken::IntegerLiteral) &&
+      Token.isNot(MIToken::kw_unknown_size))
+    return error("expected the size integer literal or 'unknown-size' after "
+                 "memory operation");
   uint64_t Size;
-  if (getUint64(Size))
-    return true;
+  if (Token.is(MIToken::IntegerLiteral)) {
+    if (getUint64(Size))
+      return true;
+  } else if (Token.is(MIToken::kw_unknown_size)) {
+    Size = MemoryLocation::UnknownSize;
+  }
   lex();
 
   MachinePointerInfo Ptr = MachinePointerInfo();
@@ -2512,7 +2528,7 @@ bool MIParser::parseMachineMemoryOperand(MachineMemOperand *&Dest) {
     if (parseMachinePointerInfo(Ptr))
       return true;
   }
-  unsigned BaseAlignment = Size;
+  unsigned BaseAlignment = (Size != MemoryLocation::UnknownSize ? Size : 1);
   AAMDNodes AAInfo;
   MDNode *Range = nullptr;
   while (consumeIfPresent(MIToken::comma)) {

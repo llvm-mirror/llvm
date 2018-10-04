@@ -466,6 +466,9 @@ public:
   PressureDiff &getPressureDiff(const SUnit *SU) {
     return SUPressureDiffs[SU->NodeNum];
   }
+  const PressureDiff &getPressureDiff(const SUnit *SU) const {
+    return SUPressureDiffs[SU->NodeNum];
+  }
 
   /// Compute a DFSResult after DAG building is complete, and before any
   /// queue comparisons.
@@ -490,6 +493,8 @@ public:
 
   /// Compute the cyclic critical path through the DAG.
   unsigned computeCyclicCriticalPath();
+
+  void dump() const override;
 
 protected:
   // Top-Level entry points for the schedule() driver...
@@ -895,6 +900,10 @@ protected:
 #ifndef NDEBUG
   void traceCandidate(const SchedCandidate &Cand);
 #endif
+
+private:
+  bool shouldReduceLatency(const CandPolicy &Policy, SchedBoundary &CurrZone,
+                           bool ComputeRemLatency, unsigned &RemLatency) const;
 };
 
 // Utility functions used by heuristics in tryCandidate().

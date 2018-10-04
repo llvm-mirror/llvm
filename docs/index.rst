@@ -145,6 +145,9 @@ representation.
 :doc:`LLVM Testing Infrastructure Guide <TestingGuide>`
    A reference manual for using the LLVM testing infrastructure.
 
+:doc:`TestSuiteGuide`
+  Describes how to compile and run the test-suite benchmarks.
+
 `How to build the C, C++, ObjC, and ObjC++ front end`__
    Instructions for building the clang front-end from source.
 
@@ -269,6 +272,7 @@ For API clients and LLVM developers.
    GoldPlugin
    MarkedUpDisassembly
    SystemLibrary
+   SupportLibrary
    SourceLevelDebugging
    Vectorizers
    WritingAnLLVMBackend
@@ -343,8 +347,8 @@ For API clients and LLVM developers.
 :doc:`BitCodeFormat`
    This describes the file format and encoding used for LLVM "bc" files.
 
-:doc:`System Library <SystemLibrary>`
-   This document describes the LLVM System Library (``lib/System``) and
+:doc:`Support Library <SupportLibrary>`
+   This document describes the LLVM Support Library (``lib/Support``) and
    how to keep LLVM source code portable
 
 :doc:`LinkTimeOptimization`

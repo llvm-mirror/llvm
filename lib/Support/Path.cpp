@@ -1085,12 +1085,13 @@ std::error_code is_other(const Twine &Path, bool &Result) {
   return std::error_code();
 }
 
-void directory_entry::replace_filename(const Twine &filename,
-                                       basic_file_status st) {
-  SmallString<128> path = path::parent_path(Path);
-  path::append(path, filename);
-  Path = path.str();
-  Status = st;
+void directory_entry::replace_filename(const Twine &Filename, file_type Type,
+                                       basic_file_status Status) {
+  SmallString<128> PathStr = path::parent_path(Path);
+  path::append(PathStr, Filename);
+  this->Path = PathStr.str();
+  this->Type = Type;
+  this->Status = Status;
 }
 
 ErrorOr<perms> getPermissions(const Twine &Path) {
@@ -1239,17 +1240,5 @@ Expected<TempFile> TempFile::create(const Twine &Model, unsigned Mode) {
 }
 }
 
-namespace path {
-
-bool user_cache_directory(SmallVectorImpl<char> &Result, const Twine &Path1,
-                          const Twine &Path2, const Twine &Path3) {
-  if (getUserCacheDir(Result)) {
-    append(Result, Path1, Path2, Path3);
-    return true;
-  }
-  return false;
-}
-
-} // end namespace path
 } // end namsspace sys
 } // end namespace llvm

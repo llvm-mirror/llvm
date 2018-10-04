@@ -614,6 +614,32 @@ static void getCopyToParts(SelectionDAG &DAG, const SDLoc &DL, SDValue Val,
     std::reverse(Parts, Parts + OrigNumParts);
 }
 
+static SDValue widenVectorToPartType(SelectionDAG &DAG,
+                                     SDValue Val, const SDLoc &DL, EVT PartVT) {
+  if (!PartVT.isVector())
+    return SDValue();
+
+  EVT ValueVT = Val.getValueType();
+  unsigned PartNumElts = PartVT.getVectorNumElements();
+  unsigned ValueNumElts = ValueVT.getVectorNumElements();
+  if (PartNumElts > ValueNumElts &&
+      PartVT.getVectorElementType() == ValueVT.getVectorElementType()) {
+    EVT ElementVT = PartVT.getVectorElementType();
+    // Vector widening case, e.g. <2 x float> -> <4 x float>.  Shuffle in
+    // undef elements.
+    SmallVector<SDValue, 16> Ops;
+    DAG.ExtractVectorElements(Val, Ops);
+    SDValue EltUndef = DAG.getUNDEF(ElementVT);
+    for (unsigned i = ValueNumElts, e = PartNumElts; i != e; ++i)
+      Ops.push_back(EltUndef);
+
+    // FIXME: Use CONCAT for 2x -> 4x.
+    return DAG.getBuildVector(PartVT, DL, Ops);
+  }
+
+  return SDValue();
+}
+
 /// getCopyToPartsVector - Create a series of nodes that contain the specified
 /// value split into legal parts.
 static void getCopyToPartsVector(SelectionDAG &DAG, const SDLoc &DL,
@@ -632,28 +658,8 @@ static void getCopyToPartsVector(SelectionDAG &DAG, const SDLoc &DL,
     } else if (PartVT.getSizeInBits() == ValueVT.getSizeInBits()) {
       // Bitconvert vector->vector case.
       Val = DAG.getNode(ISD::BITCAST, DL, PartVT, Val);
-    } else if (PartVT.isVector() &&
-               PartEVT.getVectorElementType() == ValueVT.getVectorElementType() &&
-               PartEVT.getVectorNumElements() > ValueVT.getVectorNumElements()) {
-      EVT ElementVT = PartVT.getVectorElementType();
-      // Vector widening case, e.g. <2 x float> -> <4 x float>.  Shuffle in
-      // undef elements.
-      SmallVector<SDValue, 16> Ops;
-      for (unsigned i = 0, e = ValueVT.getVectorNumElements(); i != e; ++i)
-        Ops.push_back(DAG.getNode(
-            ISD::EXTRACT_VECTOR_ELT, DL, ElementVT, Val,
-            DAG.getConstant(i, DL, TLI.getVectorIdxTy(DAG.getDataLayout()))));
-
-      for (unsigned i = ValueVT.getVectorNumElements(),
-           e = PartVT.getVectorNumElements(); i != e; ++i)
-        Ops.push_back(DAG.getUNDEF(ElementVT));
-
-      Val = DAG.getBuildVector(PartVT, DL, Ops);
-
-      // FIXME: Use CONCAT for 2x -> 4x.
-
-      //SDValue UndefElts = DAG.getUNDEF(VectorTy);
-      //Val = DAG.getNode(ISD::CONCAT_VECTORS, DL, PartVT, Val, UndefElts);
+    } else if (SDValue Widened = widenVectorToPartType(DAG, Val, DL, PartVT)) {
+      Val = Widened;
     } else if (PartVT.isVector() &&
                PartEVT.getVectorElementType().bitsGE(
                  ValueVT.getVectorElementType()) &&
@@ -695,33 +701,38 @@ static void getCopyToPartsVector(SelectionDAG &DAG, const SDLoc &DL,
         TLI.getVectorTypeBreakdown(*DAG.getContext(), ValueVT, IntermediateVT,
                                    NumIntermediates, RegisterVT);
   }
-  unsigned NumElements = ValueVT.getVectorNumElements();
 
   assert(NumRegs == NumParts && "Part count doesn't match vector breakdown!");
   NumParts = NumRegs; // Silence a compiler warning.
   assert(RegisterVT == PartVT && "Part type doesn't match vector breakdown!");
 
+  unsigned IntermediateNumElts = IntermediateVT.isVector() ?
+    IntermediateVT.getVectorNumElements() : 1;
+
   // Convert the vector to the appropiate type if necessary.
-  unsigned DestVectorNoElts =
-      NumIntermediates *
-      (IntermediateVT.isVector() ? IntermediateVT.getVectorNumElements() : 1);
+  unsigned DestVectorNoElts = NumIntermediates * IntermediateNumElts;
+
   EVT BuiltVectorTy = EVT::getVectorVT(
       *DAG.getContext(), IntermediateVT.getScalarType(), DestVectorNoElts);
-  if (Val.getValueType() != BuiltVectorTy)
+  MVT IdxVT = TLI.getVectorIdxTy(DAG.getDataLayout());
+  if (ValueVT != BuiltVectorTy) {
+    if (SDValue Widened = widenVectorToPartType(DAG, Val, DL, BuiltVectorTy))
+      Val = Widened;
+
     Val = DAG.getNode(ISD::BITCAST, DL, BuiltVectorTy, Val);
+  }
 
   // Split the vector into intermediate operands.
   SmallVector<SDValue, 8> Ops(NumIntermediates);
   for (unsigned i = 0; i != NumIntermediates; ++i) {
-    if (IntermediateVT.isVector())
-      Ops[i] =
-          DAG.getNode(ISD::EXTRACT_SUBVECTOR, DL, IntermediateVT, Val,
-                      DAG.getConstant(i * (NumElements / NumIntermediates), DL,
-                                      TLI.getVectorIdxTy(DAG.getDataLayout())));
-    else
+    if (IntermediateVT.isVector()) {
+      Ops[i] = DAG.getNode(ISD::EXTRACT_SUBVECTOR, DL, IntermediateVT, Val,
+                           DAG.getConstant(i * IntermediateNumElts, DL, IdxVT));
+    } else {
       Ops[i] = DAG.getNode(
           ISD::EXTRACT_VECTOR_ELT, DL, IntermediateVT, Val,
-          DAG.getConstant(i, DL, TLI.getVectorIdxTy(DAG.getDataLayout())));
+          DAG.getConstant(i, DL, IdxVT));
+    }
   }
 
   // Split the intermediate operands into legal parts.
@@ -1054,7 +1065,7 @@ SDValue SelectionDAGBuilder::getControlRoot() {
 
 void SelectionDAGBuilder::visit(const Instruction &I) {
   // Set up outgoing PHI node register values before emitting the terminator.
-  if (isa<TerminatorInst>(&I)) {
+  if (I.isTerminator()) {
     HandlePHINodesInSuccessorBlocks(I.getParent());
   }
 
@@ -1082,7 +1093,7 @@ void SelectionDAGBuilder::visit(const Instruction &I) {
     }
   }
 
-  if (!isa<TerminatorInst>(&I) && !HasTailCall &&
+  if (!I.isTerminator() && !HasTailCall &&
       !isStatepoint(&I)) // statepoints handle their exports internally
     CopyToExportRegsIfNeeded(&I);
 
@@ -1178,7 +1189,8 @@ SDValue SelectionDAGBuilder::getCopyFromRegs(const Value *V, Type *Ty) {
     unsigned InReg = It->second;
 
     RegsForValue RFV(*DAG.getContext(), DAG.getTargetLoweringInfo(),
-                     DAG.getDataLayout(), InReg, Ty, getABIRegCopyCC(V));
+                     DAG.getDataLayout(), InReg, Ty,
+                     None); // This is not an ABI copy.
     SDValue Chain = DAG.getEntryNode();
     Result = RFV.getCopyFromRegs(DAG, FuncInfo, getCurSDLoc(), Chain, nullptr,
                                  V);
@@ -1437,8 +1449,11 @@ void SelectionDAGBuilder::visitCleanupPad(const CleanupPadInst &CPI) {
   // Don't emit any special code for the cleanuppad instruction. It just marks
   // the start of an EH scope/funclet.
   FuncInfo.MBB->setIsEHScopeEntry();
-  FuncInfo.MBB->setIsEHFuncletEntry();
-  FuncInfo.MBB->setIsCleanupFuncletEntry();
+  auto Pers = classifyEHPersonality(FuncInfo.Fn->getPersonalityFn());
+  if (Pers != EHPersonality::Wasm_CXX) {
+    FuncInfo.MBB->setIsEHFuncletEntry();
+    FuncInfo.MBB->setIsCleanupFuncletEntry();
+  }
 }
 
 /// When an invoke or a cleanupret unwinds to the next EH pad, there are
@@ -1458,6 +1473,7 @@ static void findUnwindDestinations(
     classifyEHPersonality(FuncInfo.Fn->getPersonalityFn());
   bool IsMSVCCXX = Personality == EHPersonality::MSVC_CXX;
   bool IsCoreCLR = Personality == EHPersonality::CoreCLR;
+  bool IsWasmCXX = Personality == EHPersonality::Wasm_CXX;
   bool IsSEH = isAsynchronousEHPersonality(Personality);
 
   while (EHPadBB) {
@@ -1472,7 +1488,8 @@ static void findUnwindDestinations(
       // personalities.
       UnwindDests.emplace_back(FuncInfo.MBBMap[EHPadBB], Prob);
       UnwindDests.back().first->setIsEHScopeEntry();
-      UnwindDests.back().first->setIsEHFuncletEntry();
+      if (!IsWasmCXX)
+        UnwindDests.back().first->setIsEHFuncletEntry();
       break;
     } else if (auto *CatchSwitch = dyn_cast<CatchSwitchInst>(Pad)) {
       // Add the catchpad handlers to the possible destinations.
@@ -2513,9 +2530,6 @@ void SelectionDAGBuilder::visitLandingPad(const LandingPadInst &LP) {
   assert(FuncInfo.MBB->isEHPad() &&
          "Call to landingpad not in landing pad!");
 
-  MachineBasicBlock *MBB = FuncInfo.MBB;
-  addLandingPadInfo(LP, *MBB);
-
   // If there aren't registers to copy the values into (e.g., during SjLj
   // exceptions), then don't bother to create these DAG nodes.
   const TargetLowering &TLI = DAG.getTargetLoweringInfo();
@@ -2566,8 +2580,7 @@ void SelectionDAGBuilder::sortAndRangeify(CaseClusterVector &Clusters) {
     assert(CC.Low == CC.High && "Input clusters must be single-case");
 #endif
 
-  llvm::sort(Clusters.begin(), Clusters.end(),
-             [](const CaseCluster &a, const CaseCluster &b) {
+  llvm::sort(Clusters, [](const CaseCluster &a, const CaseCluster &b) {
     return a.Low->getValue().slt(b.Low->getValue());
   });
 
@@ -6238,7 +6251,7 @@ SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I, unsigned Intrinsic) {
                                      GA->getGlobal(), getCurSDLoc(),
                                      Val.getValueType(), GA->getOffset())});
     }
-    llvm::sort(Targets.begin(), Targets.end(),
+    llvm::sort(Targets,
                [](const BranchFunnelTarget &T1, const BranchFunnelTarget &T2) {
                  return T1.Offset < T2.Offset;
                });
@@ -8691,7 +8704,7 @@ SelectionDAGBuilder::CopyValueToVirtualRegister(const Value *V, unsigned Reg) {
   // notional registers required by the type.
 
   RegsForValue RFV(V->getContext(), TLI, DAG.getDataLayout(), Reg, V->getType(),
-                   getABIRegCopyCC(V));
+                   None); // This is not an ABI copy.
   SDValue Chain = DAG.getEntryNode();
 
   ISD::NodeType ExtendType = (FuncInfo.PreferredExtendType.find(V) ==
@@ -9656,7 +9669,7 @@ bool SelectionDAGBuilder::buildBitTests(CaseClusterVector &Clusters,
   }
 
   BitTestInfo BTI;
-  llvm::sort(CBV.begin(), CBV.end(), [](const CaseBits &a, const CaseBits &b) {
+  llvm::sort(CBV, [](const CaseBits &a, const CaseBits &b) {
     // Sort by probability first, number of bits second, bit mask third.
     if (a.ExtraProb != b.ExtraProb)
       return a.ExtraProb > b.ExtraProb;

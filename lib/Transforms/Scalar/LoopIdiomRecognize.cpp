@@ -163,8 +163,9 @@ private:
 
   void collectStores(BasicBlock *BB);
   LegalStoreKind isLegalStore(StoreInst *SI);
+  enum class ForMemset { No, Yes };
   bool processLoopStores(SmallVectorImpl<StoreInst *> &SL, const SCEV *BECount,
-                         bool ForMemset);
+                         ForMemset For);
   bool processLoopMemSet(MemSetInst *MSI, const SCEV *BECount);
 
   bool processLoopStridedStore(Value *DestPtr, unsigned StoreSize,
@@ -347,6 +348,9 @@ static APInt getStoreStride(const SCEVAddRecExpr *StoreEv) {
 /// Note that we don't ever attempt to use memset_pattern8 or 4, because these
 /// just replicate their input array and then pass on to memset_pattern16.
 static Constant *getMemSetPatternValue(Value *V, const DataLayout *DL) {
+  // FIXME: This could check for UndefValue because it can be merged into any
+  // other valid pattern.
+
   // If the value isn't a constant, we can't promote it to being in a constant
   // array.  We could theoretically do a store to an alloca or something, but
   // that doesn't seem worthwhile.
@@ -543,10 +547,10 @@ bool LoopIdiomRecognize::runOnLoopBlock(
   // optimized into a memset (memset_pattern).  The latter most commonly happens
   // with structs and handunrolled loops.
   for (auto &SL : StoreRefsForMemset)
-    MadeChange |= processLoopStores(SL.second, BECount, true);
+    MadeChange |= processLoopStores(SL.second, BECount, ForMemset::Yes);
 
   for (auto &SL : StoreRefsForMemsetPattern)
-    MadeChange |= processLoopStores(SL.second, BECount, false);
+    MadeChange |= processLoopStores(SL.second, BECount, ForMemset::No);
 
   // Optimize the store into a memcpy, if it feeds an similarly strided load.
   for (auto &SI : StoreRefsForMemcpy)
@@ -572,10 +576,9 @@ bool LoopIdiomRecognize::runOnLoopBlock(
   return MadeChange;
 }
 
-/// processLoopStores - See if this store(s) can be promoted to a memset.
+/// See if this store(s) can be promoted to a memset.
 bool LoopIdiomRecognize::processLoopStores(SmallVectorImpl<StoreInst *> &SL,
-                                           const SCEV *BECount,
-                                           bool ForMemset) {
+                                           const SCEV *BECount, ForMemset For) {
   // Try to find consecutive stores that can be transformed into memsets.
   SetVector<StoreInst *> Heads, Tails;
   SmallDenseMap<StoreInst *, StoreInst *> ConsecutiveChain;
@@ -602,7 +605,7 @@ bool LoopIdiomRecognize::processLoopStores(SmallVectorImpl<StoreInst *> &SL,
     Value *FirstSplatValue = nullptr;
     Constant *FirstPatternValue = nullptr;
 
-    if (ForMemset)
+    if (For == ForMemset::Yes)
       FirstSplatValue = isBytewiseValue(FirstStoredVal);
     else
       FirstPatternValue = getMemSetPatternValue(FirstStoredVal, DL);
@@ -635,7 +638,7 @@ bool LoopIdiomRecognize::processLoopStores(SmallVectorImpl<StoreInst *> &SL,
       Value *SecondSplatValue = nullptr;
       Constant *SecondPatternValue = nullptr;
 
-      if (ForMemset)
+      if (For == ForMemset::Yes)
         SecondSplatValue = isBytewiseValue(SecondStoredVal);
       else
         SecondPatternValue = getMemSetPatternValue(SecondStoredVal, DL);
@@ -644,10 +647,14 @@ bool LoopIdiomRecognize::processLoopStores(SmallVectorImpl<StoreInst *> &SL,
              "Expected either splat value or pattern value.");
 
       if (isConsecutiveAccess(SL[i], SL[k], *DL, *SE, false)) {
-        if (ForMemset) {
+        if (For == ForMemset::Yes) {
+          if (isa<UndefValue>(FirstSplatValue))
+            FirstSplatValue = SecondSplatValue;
           if (FirstSplatValue != SecondSplatValue)
             continue;
         } else {
+          if (isa<UndefValue>(FirstPatternValue))
+            FirstPatternValue = SecondPatternValue;
           if (FirstPatternValue != SecondPatternValue)
             continue;
         }

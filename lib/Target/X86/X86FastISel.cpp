@@ -1278,7 +1278,7 @@ bool X86FastISel::X86SelectRet(const Instruction *I) {
     unsigned Reg = X86MFInfo->getSRetReturnReg();
     assert(Reg &&
            "SRetReturnReg should have been set in LowerFormalArguments()!");
-    unsigned RetReg = Subtarget->is64Bit() ? X86::RAX : X86::EAX;
+    unsigned RetReg = Subtarget->isTarget64BitLP64() ? X86::RAX : X86::EAX;
     BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
             TII.get(TargetOpcode::COPY), RetReg).addReg(Reg);
     RetRegs.push_back(RetReg);
@@ -3222,8 +3222,8 @@ bool X86FastISel::fastLowerCall(CallLoweringInfo &CLI) {
       (CalledFn && CalledFn->hasFnAttribute("no_caller_saved_registers")))
     return false;
 
-  // Functions using retpoline should use SDISel for calls.
-  if (Subtarget->useRetpoline())
+  // Functions using retpoline for indirect calls need to use SDISel.
+  if (Subtarget->useRetpolineIndirectCalls())
     return false;
 
   // Handle only C, fastcc, and webkit_js calling conventions for now.
@@ -3744,21 +3744,13 @@ unsigned X86FastISel::X86MaterializeInt(const ConstantInt *CI, MVT VT) {
   case MVT::i32: Opc = X86::MOV32ri; break;
   case MVT::i64: {
     if (isUInt<32>(Imm))
-      Opc = X86::MOV32ri;
+      Opc = X86::MOV32ri64;
     else if (isInt<32>(Imm))
       Opc = X86::MOV64ri32;
     else
       Opc = X86::MOV64ri;
     break;
   }
-  }
-  if (VT == MVT::i64 && Opc == X86::MOV32ri) {
-    unsigned SrcReg = fastEmitInst_i(Opc, &X86::GR32RegClass, Imm);
-    unsigned ResultReg = createResultReg(&X86::GR64RegClass);
-    BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
-            TII.get(TargetOpcode::SUBREG_TO_REG), ResultReg)
-      .addImm(0).addReg(SrcReg).addImm(X86::sub_32bit);
-    return ResultReg;
   }
   return fastEmitInst_i(Opc, TLI.getRegClassFor(VT), Imm);
 }

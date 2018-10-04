@@ -706,6 +706,10 @@ LLVMBool LLVMIsOpaqueStruct(LLVMTypeRef StructTy) {
   return unwrap<StructType>(StructTy)->isOpaque();
 }
 
+LLVMBool LLVMIsLiteralStruct(LLVMTypeRef StructTy) {
+  return unwrap<StructType>(StructTy)->isLiteral();
+}
+
 LLVMTypeRef LLVMGetTypeByName(LLVMModuleRef M, const char *Name) {
   return wrap(unwrap(M)->getTypeByName(Name));
 }
@@ -866,6 +870,38 @@ void LLVMSetMetadata(LLVMValueRef Inst, unsigned KindID, LLVMValueRef Val) {
   MDNode *N = Val ? extractMDNode(unwrap<MetadataAsValue>(Val)) : nullptr;
 
   unwrap<Instruction>(Inst)->setMetadata(KindID, N);
+}
+
+struct LLVMOpaqueValueMetadataEntry {
+  unsigned Kind;
+  LLVMMetadataRef Metadata;
+};
+
+using MetadataEntries = SmallVectorImpl<std::pair<unsigned, MDNode *>>;
+static LLVMValueMetadataEntry *
+llvm_getMetadata(size_t *NumEntries,
+                 llvm::function_ref<void(MetadataEntries &)> AccessMD) {
+  SmallVector<std::pair<unsigned, MDNode *>, 8> MVEs;
+  AccessMD(MVEs);
+
+  LLVMOpaqueValueMetadataEntry *Result =
+  static_cast<LLVMOpaqueValueMetadataEntry *>(
+                                              safe_malloc(MVEs.size() * sizeof(LLVMOpaqueValueMetadataEntry)));
+  for (unsigned i = 0; i < MVEs.size(); ++i) {
+    const auto &ModuleFlag = MVEs[i];
+    Result[i].Kind = ModuleFlag.first;
+    Result[i].Metadata = wrap(ModuleFlag.second);
+  }
+  *NumEntries = MVEs.size();
+  return Result;
+}
+
+LLVMValueMetadataEntry *
+LLVMInstructionGetAllMetadataOtherThanDebugLoc(LLVMValueRef Value,
+                                               size_t *NumEntries) {
+  return llvm_getMetadata(NumEntries, [&Value](MetadataEntries &Entries) {
+    unwrap<Instruction>(Value)->getAllMetadata(Entries);
+  });
 }
 
 /*--.. Conversion functions ................................................--*/
@@ -1063,6 +1099,54 @@ unsigned LLVMGetMDNodeNumOperands(LLVMValueRef V) {
   if (isa<ValueAsMetadata>(MD->getMetadata()))
     return 1;
   return cast<MDNode>(MD->getMetadata())->getNumOperands();
+}
+
+LLVMNamedMDNodeRef LLVMGetFirstNamedMetadata(LLVMModuleRef M) {
+  Module *Mod = unwrap(M);
+  Module::named_metadata_iterator I = Mod->named_metadata_begin();
+  if (I == Mod->named_metadata_end())
+    return nullptr;
+  return wrap(&*I);
+}
+
+LLVMNamedMDNodeRef LLVMGetLastNamedMetadata(LLVMModuleRef M) {
+  Module *Mod = unwrap(M);
+  Module::named_metadata_iterator I = Mod->named_metadata_end();
+  if (I == Mod->named_metadata_begin())
+    return nullptr;
+  return wrap(&*--I);
+}
+
+LLVMNamedMDNodeRef LLVMGetNextNamedMetadata(LLVMNamedMDNodeRef NMD) {
+  NamedMDNode *NamedNode = unwrap<NamedMDNode>(NMD);
+  Module::named_metadata_iterator I(NamedNode);
+  if (++I == NamedNode->getParent()->named_metadata_end())
+    return nullptr;
+  return wrap(&*I);
+}
+
+LLVMNamedMDNodeRef LLVMGetPreviousNamedMetadata(LLVMNamedMDNodeRef NMD) {
+  NamedMDNode *NamedNode = unwrap<NamedMDNode>(NMD);
+  Module::named_metadata_iterator I(NamedNode);
+  if (I == NamedNode->getParent()->named_metadata_begin())
+    return nullptr;
+  return wrap(&*--I);
+}
+
+LLVMNamedMDNodeRef LLVMGetNamedMetadata(LLVMModuleRef M,
+                                        const char *Name, size_t NameLen) {
+  return wrap(unwrap(M)->getNamedMetadata(StringRef(Name, NameLen)));
+}
+
+LLVMNamedMDNodeRef LLVMGetOrInsertNamedMetadata(LLVMModuleRef M,
+                                                const char *Name, size_t NameLen) {
+  return wrap(unwrap(M)->getOrInsertNamedMetadata({Name, NameLen}));
+}
+
+const char *LLVMGetNamedMetadataName(LLVMNamedMDNodeRef NMD, size_t *NameLen) {
+  NamedMDNode *NamedNode = unwrap<NamedMDNode>(NMD);
+  *NameLen = NamedNode->getName().size();
+  return NamedNode->getName().data();
 }
 
 void LLVMGetMDNodeOperands(LLVMValueRef V, LLVMValueRef *Dest) {
@@ -1822,6 +1906,49 @@ void LLVMSetAlignment(LLVMValueRef V, unsigned Bytes) {
   else
     llvm_unreachable(
         "only GlobalValue, AllocaInst, LoadInst and StoreInst have alignment");
+}
+
+LLVMValueMetadataEntry *LLVMGlobalCopyAllMetadata(LLVMValueRef Value,
+                                                  size_t *NumEntries) {
+  return llvm_getMetadata(NumEntries, [&Value](MetadataEntries &Entries) {
+    if (Instruction *Instr = dyn_cast<Instruction>(unwrap(Value))) {
+      Instr->getAllMetadata(Entries);
+    } else {
+      unwrap<GlobalObject>(Value)->getAllMetadata(Entries);
+    }
+  });
+}
+
+unsigned LLVMValueMetadataEntriesGetKind(LLVMValueMetadataEntry *Entries,
+                                         unsigned Index) {
+  LLVMOpaqueValueMetadataEntry MVE =
+      static_cast<LLVMOpaqueValueMetadataEntry>(Entries[Index]);
+  return MVE.Kind;
+}
+
+LLVMMetadataRef
+LLVMValueMetadataEntriesGetMetadata(LLVMValueMetadataEntry *Entries,
+                                    unsigned Index) {
+  LLVMOpaqueValueMetadataEntry MVE =
+      static_cast<LLVMOpaqueValueMetadataEntry>(Entries[Index]);
+  return MVE.Metadata;
+}
+
+void LLVMDisposeValueMetadataEntries(LLVMValueMetadataEntry *Entries) {
+  free(Entries);
+}
+
+void LLVMGlobalSetMetadata(LLVMValueRef Global, unsigned Kind,
+                           LLVMMetadataRef MD) {
+  unwrap<GlobalObject>(Global)->setMetadata(Kind, unwrap<MDNode>(MD));
+}
+
+void LLVMGlobalEraseMetadata(LLVMValueRef Global, unsigned Kind) {
+  unwrap<GlobalObject>(Global)->eraseMetadata(Kind);
+}
+
+void LLVMGlobalClearMetadata(LLVMValueRef Global) {
+  unwrap<GlobalObject>(Global)->clearMetadata();
 }
 
 /*--.. Operations on global variables ......................................--*/
@@ -2584,6 +2711,8 @@ unsigned LLVMGetNumIndices(LLVMValueRef Inst) {
     return EV->getNumIndices();
   if (auto *IV = dyn_cast<InsertValueInst>(I))
     return IV->getNumIndices();
+  if (auto *CE = dyn_cast<ConstantExpr>(I))
+    return CE->getIndices().size();
   llvm_unreachable(
     "LLVMGetNumIndices applies only to extractvalue and insertvalue!");
 }
@@ -2594,6 +2723,8 @@ const unsigned *LLVMGetIndices(LLVMValueRef Inst) {
     return EV->getIndices().data();
   if (auto *IV = dyn_cast<InsertValueInst>(I))
     return IV->getIndices().data();
+  if (auto *CE = dyn_cast<ConstantExpr>(I))
+    return CE->getIndices().data();
   llvm_unreachable(
     "LLVMGetIndices applies only to extractvalue and insertvalue!");
 }

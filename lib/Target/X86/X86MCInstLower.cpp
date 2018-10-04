@@ -132,6 +132,9 @@ MCSymbol *X86MCInstLower::GetSymbolFromOperand(const MachineOperand &MO) const {
     // Handle dllimport linkage.
     Name += "__imp_";
     break;
+  case X86II::MO_COFFSTUB:
+    Name += ".refptr.";
+    break;
   case X86II::MO_DARWIN_NONLAZY:
   case X86II::MO_DARWIN_NONLAZY_PIC_BASE:
     Suffix = "$non_lazy_ptr";
@@ -160,6 +163,17 @@ MCSymbol *X86MCInstLower::GetSymbolFromOperand(const MachineOperand &MO) const {
   switch (MO.getTargetFlags()) {
   default:
     break;
+  case X86II::MO_COFFSTUB: {
+    MachineModuleInfoCOFF &MMICOFF =
+        MF.getMMI().getObjFileInfo<MachineModuleInfoCOFF>();
+    MachineModuleInfoImpl::StubValueTy &StubSym = MMICOFF.getGVStubEntry(Sym);
+    if (!StubSym.getPointer()) {
+      assert(MO.isGlobal() && "Extern symbol not handled yet");
+      StubSym = MachineModuleInfoImpl::StubValueTy(
+          AsmPrinter.getSymbol(MO.getGlobal()), true);
+    }
+    break;
+  }
   case X86II::MO_DARWIN_NONLAZY:
   case X86II::MO_DARWIN_NONLAZY_PIC_BASE: {
     MachineModuleInfoImpl::StubValueTy &StubSym =
@@ -191,6 +205,7 @@ MCOperand X86MCInstLower::LowerSymbolOperand(const MachineOperand &MO,
   // These affect the name of the symbol, not any suffix.
   case X86II::MO_DARWIN_NONLAZY:
   case X86II::MO_DLLIMPORT:
+  case X86II::MO_COFFSTUB:
     break;
 
   case X86II::MO_TLVP:
@@ -898,7 +913,7 @@ void X86AsmPrinter::LowerSTATEPOINT(const MachineInstr &MI,
       break;
     case MachineOperand::MO_Register:
       // FIXME: Add retpoline support and remove this.
-      if (Subtarget->useRetpoline())
+      if (Subtarget->useRetpolineIndirectCalls())
         report_fatal_error("Lowering register statepoints with retpoline not "
                            "yet implemented.");
       CallTargetMCOp = MCOperand::createReg(CallTarget.getReg());
@@ -1055,7 +1070,7 @@ void X86AsmPrinter::LowerPATCHPOINT(const MachineInstr &MI,
     EmitAndCountInstruction(
         MCInstBuilder(X86::MOV64ri).addReg(ScratchReg).addOperand(CalleeMCOp));
     // FIXME: Add retpoline support and remove this.
-    if (Subtarget->useRetpoline())
+    if (Subtarget->useRetpolineIndirectCalls())
       report_fatal_error(
           "Lowering patchpoint with retpoline not yet implemented.");
     EmitAndCountInstruction(MCInstBuilder(X86::CALL64r).addReg(ScratchReg));

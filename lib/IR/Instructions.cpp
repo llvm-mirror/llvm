@@ -72,46 +72,6 @@ User::op_iterator CallSite::getCallee() const {
 }
 
 //===----------------------------------------------------------------------===//
-//                            TerminatorInst Class
-//===----------------------------------------------------------------------===//
-
-unsigned TerminatorInst::getNumSuccessors() const {
-  switch (getOpcode()) {
-#define HANDLE_TERM_INST(N, OPC, CLASS)                                        \
-  case Instruction::OPC:                                                       \
-    return static_cast<const CLASS *>(this)->getNumSuccessors();
-#include "llvm/IR/Instruction.def"
-  default:
-    break;
-  }
-  llvm_unreachable("not a terminator");
-}
-
-BasicBlock *TerminatorInst::getSuccessor(unsigned idx) const {
-  switch (getOpcode()) {
-#define HANDLE_TERM_INST(N, OPC, CLASS)                                        \
-  case Instruction::OPC:                                                       \
-    return static_cast<const CLASS *>(this)->getSuccessor(idx);
-#include "llvm/IR/Instruction.def"
-  default:
-    break;
-  }
-  llvm_unreachable("not a terminator");
-}
-
-void TerminatorInst::setSuccessor(unsigned idx, BasicBlock *B) {
-  switch (getOpcode()) {
-#define HANDLE_TERM_INST(N, OPC, CLASS)                                        \
-  case Instruction::OPC:                                                       \
-    return static_cast<CLASS *>(this)->setSuccessor(idx, B);
-#include "llvm/IR/Instruction.def"
-  default:
-    break;
-  }
-  llvm_unreachable("not a terminator");
-}
-
-//===----------------------------------------------------------------------===//
 //                              SelectInst Class
 //===----------------------------------------------------------------------===//
 
@@ -1700,17 +1660,17 @@ void ShuffleVectorInst::getShuffleMask(const Constant *Mask,
   }
 }
 
-bool ShuffleVectorInst::isSingleSourceMask(ArrayRef<int> Mask) {
+static bool isSingleSourceMaskImpl(ArrayRef<int> Mask, int NumOpElts) {
   assert(!Mask.empty() && "Shuffle mask must contain elements");
   bool UsesLHS = false;
   bool UsesRHS = false;
-  for (int i = 0, NumElts = Mask.size(); i < NumElts; ++i) {
+  for (int i = 0, NumMaskElts = Mask.size(); i < NumMaskElts; ++i) {
     if (Mask[i] == -1)
       continue;
-    assert(Mask[i] >= 0 && Mask[i] < (NumElts * 2) &&
+    assert(Mask[i] >= 0 && Mask[i] < (NumOpElts * 2) &&
            "Out-of-bounds shuffle mask element");
-    UsesLHS |= (Mask[i] < NumElts);
-    UsesRHS |= (Mask[i] >= NumElts);
+    UsesLHS |= (Mask[i] < NumOpElts);
+    UsesRHS |= (Mask[i] >= NumOpElts);
     if (UsesLHS && UsesRHS)
       return false;
   }
@@ -1718,16 +1678,28 @@ bool ShuffleVectorInst::isSingleSourceMask(ArrayRef<int> Mask) {
   return true;
 }
 
-bool ShuffleVectorInst::isIdentityMask(ArrayRef<int> Mask) {
-  if (!isSingleSourceMask(Mask))
+bool ShuffleVectorInst::isSingleSourceMask(ArrayRef<int> Mask) {
+  // We don't have vector operand size information, so assume operands are the
+  // same size as the mask.
+  return isSingleSourceMaskImpl(Mask, Mask.size());
+}
+
+static bool isIdentityMaskImpl(ArrayRef<int> Mask, int NumOpElts) {
+  if (!isSingleSourceMaskImpl(Mask, NumOpElts))
     return false;
-  for (int i = 0, NumElts = Mask.size(); i < NumElts; ++i) {
+  for (int i = 0, NumMaskElts = Mask.size(); i < NumMaskElts; ++i) {
     if (Mask[i] == -1)
       continue;
-    if (Mask[i] != i && Mask[i] != (NumElts + i))
+    if (Mask[i] != i && Mask[i] != (NumOpElts + i))
       return false;
   }
   return true;
+}
+
+bool ShuffleVectorInst::isIdentityMask(ArrayRef<int> Mask) {
+  // We don't have vector operand size information, so assume operands are the
+  // same size as the mask.
+  return isIdentityMaskImpl(Mask, Mask.size());
 }
 
 bool ShuffleVectorInst::isReverseMask(ArrayRef<int> Mask) {
@@ -1801,6 +1773,50 @@ bool ShuffleVectorInst::isTransposeMask(ArrayRef<int> Mask) {
   return true;
 }
 
+bool ShuffleVectorInst::isIdentityWithPadding() const {
+  int NumOpElts = Op<0>()->getType()->getVectorNumElements();
+  int NumMaskElts = getType()->getVectorNumElements();
+  if (NumMaskElts <= NumOpElts)
+    return false;
+
+  // The first part of the mask must choose elements from exactly 1 source op.
+  SmallVector<int, 16> Mask = getShuffleMask();
+  if (!isIdentityMaskImpl(Mask, NumOpElts))
+    return false;
+
+  // All extending must be with undef elements.
+  for (int i = NumOpElts; i < NumMaskElts; ++i)
+    if (Mask[i] != -1)
+      return false;
+
+  return true;
+}
+
+bool ShuffleVectorInst::isIdentityWithExtract() const {
+  int NumOpElts = Op<0>()->getType()->getVectorNumElements();
+  int NumMaskElts = getType()->getVectorNumElements();
+  if (NumMaskElts >= NumOpElts)
+    return false;
+
+  return isIdentityMaskImpl(getShuffleMask(), NumOpElts);
+}
+
+bool ShuffleVectorInst::isConcat() const {
+  // Vector concatenation is differentiated from identity with padding.
+  if (isa<UndefValue>(Op<0>()) || isa<UndefValue>(Op<1>()))
+    return false;
+
+  int NumOpElts = Op<0>()->getType()->getVectorNumElements();
+  int NumMaskElts = getType()->getVectorNumElements();
+  if (NumMaskElts != NumOpElts * 2)
+    return false;
+
+  // Use the mask length rather than the operands' vector lengths here. We
+  // already know that the shuffle returns a vector twice as long as the inputs,
+  // and neither of the inputs are undef vectors. If the mask picks consecutive
+  // elements from both inputs, then this is a concatenation of the inputs.
+  return isIdentityMaskImpl(getShuffleMask(), NumMaskElts);
+}
 
 //===----------------------------------------------------------------------===//
 //                             InsertValueInst Class
@@ -2978,12 +2994,14 @@ CastInst::castIsValid(Instruction::CastOps op, Value *S, Type *DstTy) {
       return false;
 
     // A vector of pointers must have the same number of elements.
-    if (VectorType *SrcVecTy = dyn_cast<VectorType>(SrcTy)) {
-      if (VectorType *DstVecTy = dyn_cast<VectorType>(DstTy))
-        return (SrcVecTy->getNumElements() == DstVecTy->getNumElements());
-
-      return false;
-    }
+    VectorType *SrcVecTy = dyn_cast<VectorType>(SrcTy);
+    VectorType *DstVecTy = dyn_cast<VectorType>(DstTy);
+    if (SrcVecTy && DstVecTy)
+      return (SrcVecTy->getNumElements() == DstVecTy->getNumElements());
+    if (SrcVecTy)
+      return SrcVecTy->getNumElements() == 1;
+    if (DstVecTy)
+      return DstVecTy->getNumElements() == 1;
 
     return true;
   }

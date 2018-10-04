@@ -152,6 +152,14 @@ findBBsToSinkInto(const Loop &L, const SmallPtrSetImpl<BasicBlock *> &UseBBs,
     }
   }
 
+  // Can't sink into blocks that have no valid insertion point.
+  for (BasicBlock *BB : BBsToSinkInto) {
+    if (BB->getFirstInsertionPt() == BB->end()) {
+      BBsToSinkInto.clear();
+      break;
+    }
+  }
+
   // If the total frequency of BBsToSinkInto is larger than preheader frequency,
   // do not sink.
   if (adjustedSumFreq(BBsToSinkInto, BFI) >
@@ -200,11 +208,9 @@ static bool sinkInstruction(Loop &L, Instruction &I,
   SmallVector<BasicBlock *, 2> SortedBBsToSinkInto;
   SortedBBsToSinkInto.insert(SortedBBsToSinkInto.begin(), BBsToSinkInto.begin(),
                              BBsToSinkInto.end());
-  llvm::sort(SortedBBsToSinkInto.begin(), SortedBBsToSinkInto.end(),
-             [&](BasicBlock *A, BasicBlock *B) {
-               return LoopBlockNumber.find(A)->second <
-                      LoopBlockNumber.find(B)->second;
-             });
+  llvm::sort(SortedBBsToSinkInto, [&](BasicBlock *A, BasicBlock *B) {
+    return LoopBlockNumber.find(A)->second < LoopBlockNumber.find(B)->second;
+  });
 
   BasicBlock *MoveBB = *SortedBBsToSinkInto.begin();
   // FIXME: Optimize the efficiency for cloned value replacement. The current

@@ -146,7 +146,6 @@ unsigned AMDGPUTargetLowering::numBitsSigned(SDValue Op, SelectionDAG &DAG) {
 AMDGPUTargetLowering::AMDGPUTargetLowering(const TargetMachine &TM,
                                            const AMDGPUSubtarget &STI)
     : TargetLowering(TM), Subtarget(&STI) {
-  AMDGPUASI = AMDGPU::getAMDGPUAS(TM);
   // Lower floating point store/load to integer store/load to reduce the number
   // of patterns in tablegen.
   setOperationAction(ISD::LOAD, MVT::f32, Promote);
@@ -472,6 +471,7 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::FCOPYSIGN, VT, Expand);
     setOperationAction(ISD::VECTOR_SHUFFLE, VT, Expand);
     setOperationAction(ISD::SETCC, VT, Expand);
+    setOperationAction(ISD::FCANONICALIZE, VT, Expand);
   }
 
   // This causes using an unrolled select operation rather than expansion with
@@ -725,7 +725,7 @@ bool AMDGPUTargetLowering::isSDNodeAlwaysUniform(const SDNode * N) const {
     {
       const LoadSDNode * L = dyn_cast<LoadSDNode>(N);
       if (L->getMemOperand()->getAddrSpace()
-      == AMDGPUASI.CONSTANT_ADDRESS_32BIT)
+      == AMDGPUAS::CONSTANT_ADDRESS_32BIT)
         return true;
       return false;
     }
@@ -1193,8 +1193,8 @@ SDValue AMDGPUTargetLowering::LowerGlobalAddress(AMDGPUMachineFunction* MFI,
   GlobalAddressSDNode *G = cast<GlobalAddressSDNode>(Op);
   const GlobalValue *GV = G->getGlobal();
 
-  if (G->getAddressSpace() == AMDGPUASI.LOCAL_ADDRESS ||
-      G->getAddressSpace() == AMDGPUASI.REGION_ADDRESS) {
+  if (G->getAddressSpace() == AMDGPUAS::LOCAL_ADDRESS ||
+      G->getAddressSpace() == AMDGPUAS::REGION_ADDRESS) {
     if (!MFI->isEntryFunction()) {
       const Function &Fn = DAG.getMachineFunction().getFunction();
       DiagnosticInfoUnsupported BadLDSDecl(
@@ -4003,13 +4003,12 @@ SDValue AMDGPUTargetLowering::loadStackInputValue(SelectionDAG &DAG,
 SDValue AMDGPUTargetLowering::storeStackInputValue(SelectionDAG &DAG,
                                                    const SDLoc &SL,
                                                    SDValue Chain,
-                                                   SDValue StackPtr,
                                                    SDValue ArgVal,
                                                    int64_t Offset) const {
   MachineFunction &MF = DAG.getMachineFunction();
   MachinePointerInfo DstInfo = MachinePointerInfo::getStack(MF, Offset);
 
-  SDValue Ptr = DAG.getObjectPtrOffset(SL, StackPtr, Offset);
+  SDValue Ptr = DAG.getConstant(Offset, SL, MVT::i32);
   SDValue Store = DAG.getStore(Chain, SL, ArgVal, Ptr, DstInfo, 4,
                                MachineMemOperand::MODereferenceable);
   return Store;
@@ -4171,6 +4170,7 @@ const char* AMDGPUTargetLowering::getTargetNodeName(unsigned Opcode) const {
   NODE_NAME_CASE(BUFFER_LOAD)
   NODE_NAME_CASE(BUFFER_LOAD_FORMAT)
   NODE_NAME_CASE(BUFFER_LOAD_FORMAT_D16)
+  NODE_NAME_CASE(SBUFFER_LOAD)
   NODE_NAME_CASE(BUFFER_STORE)
   NODE_NAME_CASE(BUFFER_STORE_FORMAT)
   NODE_NAME_CASE(BUFFER_STORE_FORMAT_D16)

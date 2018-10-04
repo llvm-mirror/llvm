@@ -29,9 +29,9 @@ static bool hasMemoryOperand(const llvm::MCOperandInfo &OpInfo) {
   return OpInfo.OperandType == llvm::MCOI::OPERAND_MEMORY;
 }
 
-LatencyBenchmarkRunner::~LatencyBenchmarkRunner() = default;
+LatencySnippetGenerator::~LatencySnippetGenerator() = default;
 
-llvm::Error LatencyBenchmarkRunner::isInfeasible(
+llvm::Error LatencySnippetGenerator::isInfeasible(
     const llvm::MCInstrDesc &MCInstrDesc) const {
   if (llvm::any_of(MCInstrDesc.operands(), hasUnknownOperand))
     return llvm::make_error<BenchmarkFailure>(
@@ -43,7 +43,7 @@ llvm::Error LatencyBenchmarkRunner::isInfeasible(
 }
 
 llvm::Expected<CodeTemplate>
-LatencyBenchmarkRunner::generateTwoInstructionPrototype(
+LatencySnippetGenerator::generateTwoInstructionPrototype(
     const Instruction &Instr) const {
   std::vector<unsigned> Opcodes;
   Opcodes.resize(State.getInstrInfo().getNumOpcodes());
@@ -62,17 +62,17 @@ LatencyBenchmarkRunner::generateTwoInstructionPrototype(
     const AliasingConfigurations Back(OtherInstr, Instr);
     if (Forward.empty() || Back.empty())
       continue;
-    InstructionBuilder ThisIB(Instr);
-    InstructionBuilder OtherIB(OtherInstr);
+    InstructionTemplate ThisIT(Instr);
+    InstructionTemplate OtherIT(OtherInstr);
     if (!Forward.hasImplicitAliasing())
-      setRandomAliasing(Forward, ThisIB, OtherIB);
+      setRandomAliasing(Forward, ThisIT, OtherIT);
     if (!Back.hasImplicitAliasing())
-      setRandomAliasing(Back, OtherIB, ThisIB);
+      setRandomAliasing(Back, OtherIT, ThisIT);
     CodeTemplate CT;
     CT.Info = llvm::formatv("creating cycle through {0}.",
                             State.getInstrInfo().getName(OtherOpcode));
-    CT.Instructions.push_back(std::move(ThisIB));
-    CT.Instructions.push_back(std::move(OtherIB));
+    CT.Instructions.push_back(std::move(ThisIT));
+    CT.Instructions.push_back(std::move(OtherIT));
     return std::move(CT);
   }
   return llvm::make_error<BenchmarkFailure>(
@@ -80,7 +80,7 @@ LatencyBenchmarkRunner::generateTwoInstructionPrototype(
 }
 
 llvm::Expected<CodeTemplate>
-LatencyBenchmarkRunner::generateCodeTemplate(unsigned Opcode) const {
+LatencySnippetGenerator::generateCodeTemplate(unsigned Opcode) const {
   const auto &InstrDesc = State.getInstrInfo().get(Opcode);
   if (auto E = isInfeasible(InstrDesc))
     return std::move(E);
@@ -105,10 +105,11 @@ const char *LatencyBenchmarkRunner::getCounterName() const {
   return CounterName;
 }
 
+LatencyBenchmarkRunner::~LatencyBenchmarkRunner() = default;
+
 std::vector<BenchmarkMeasure>
 LatencyBenchmarkRunner::runMeasurements(const ExecutableFunction &Function,
-                                        ScratchSpace &Scratch,
-                                        const unsigned NumRepetitions) const {
+                                        ScratchSpace &Scratch) const {
   // Cycle measurements include some overhead from the kernel. Repeat the
   // measure several times and take the minimum value.
   constexpr const int NumMeasurements = 30;
@@ -129,7 +130,7 @@ LatencyBenchmarkRunner::runMeasurements(const ExecutableFunction &Function,
     if (Value < MinLatency)
       MinLatency = Value;
   }
-  return {{"latency", static_cast<double>(MinLatency) / NumRepetitions, ""}};
+  return {BenchmarkMeasure::Create("latency", MinLatency)};
 }
 
 } // namespace exegesis

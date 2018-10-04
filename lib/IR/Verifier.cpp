@@ -1478,6 +1478,7 @@ static bool isFuncOnlyAttr(Attribute::AttrKind Kind) {
   case Attribute::InaccessibleMemOnly:
   case Attribute::InaccessibleMemOrArgMemOnly:
   case Attribute::AllocSize:
+  case Attribute::SpeculativeLoadHardening:
   case Attribute::Speculatable:
   case Attribute::StrictFP:
     return true;
@@ -2264,6 +2265,10 @@ void Verifier::visitFunction(const Function &F) {
       if (!Seen.insert(DL).second)
         continue;
 
+      Metadata *Parent = DL->getRawScope();
+      AssertDI(Parent && isa<DILocalScope>(Parent),
+               "DILocation's scope must be a DILocalScope", N, &F, &I, DL,
+               Parent);
       DILocalScope *Scope = DL->getInlinedAtScope();
       if (Scope && !Seen.insert(Scope).second)
         continue;
@@ -2295,7 +2300,7 @@ void Verifier::visitBasicBlock(BasicBlock &BB) {
   if (isa<PHINode>(BB.front())) {
     SmallVector<BasicBlock*, 8> Preds(pred_begin(&BB), pred_end(&BB));
     SmallVector<std::pair<BasicBlock*, Value*>, 8> Values;
-    llvm::sort(Preds.begin(), Preds.end());
+    llvm::sort(Preds);
     for (const PHINode &PN : BB.phis()) {
       // Ensure that PHI nodes have at least one entry!
       Assert(PN.getNumIncomingValues() != 0,
@@ -2313,7 +2318,7 @@ void Verifier::visitBasicBlock(BasicBlock &BB) {
       for (unsigned i = 0, e = PN.getNumIncomingValues(); i != e; ++i)
         Values.push_back(
             std::make_pair(PN.getIncomingBlock(i), PN.getIncomingValue(i)));
-      llvm::sort(Values.begin(), Values.end());
+      llvm::sort(Values);
 
       for (unsigned i = 0, e = Values.size(); i != e; ++i) {
         // Check to make sure that if there is more than one entry for a
@@ -4529,6 +4534,14 @@ void Verifier::visitDbgIntrinsic(StringRef Kind, DbgVariableIntrinsic &DII) {
            &DII, BB, F, Var, Var->getScope()->getSubprogram(), Loc,
            Loc->getScope()->getSubprogram());
 
+  // This check is redundant with one in visitLocalVariable().
+  AssertDI(isType(Var->getRawType()), "invalid type ref", Var,
+           Var->getRawType());
+  if (auto *Type = dyn_cast_or_null<DIType>(Var->getRawType()))
+    if (Type->isBlockByrefStruct())
+      AssertDI(DII.getExpression() && DII.getExpression()->getNumElements(),
+               "BlockByRef variable without complex expression", Var, &DII);
+
   verifyFnArgs(DII);
 }
 
@@ -4717,9 +4730,10 @@ struct VerifierLegacyPass : public FunctionPass {
   }
 
   bool runOnFunction(Function &F) override {
-    if (!V->verify(F) && FatalErrors)
+    if (!V->verify(F) && FatalErrors) {
+      errs() << "in function " << F.getName() << '\n'; 
       report_fatal_error("Broken function found, compilation aborted!");
-
+    }
     return false;
   }
 

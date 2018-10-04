@@ -1,11 +1,15 @@
+set(TARGETS_TO_APPEND "")
+
 if (LLVM_TARGETS_TO_BUILD MATCHES "X86")
   add_subdirectory(X86)
-  set(LLVM_EXEGESIS_TARGETS "${LLVM_EXEGESIS_TARGETS} X86" PARENT_SCOPE)
+  set(TARGETS_TO_APPEND "${TARGETS_TO_APPEND} X86")
 endif()
 if (LLVM_TARGETS_TO_BUILD MATCHES "AArch64")
   add_subdirectory(AArch64)
-  set(LLVM_EXEGESIS_TARGETS "${LLVM_EXEGESIS_TARGETS} AArch64" PARENT_SCOPE)
+  set(TARGETS_TO_APPEND "${TARGETS_TO_APPEND} AArch64")
 endif()
+
+set(LLVM_EXEGESIS_TARGETS "${LLVM_EXEGESIS_TARGETS} ${TARGETS_TO_APPEND}" PARENT_SCOPE)
 
 add_library(LLVMExegesis
   STATIC
@@ -14,11 +18,14 @@ add_library(LLVMExegesis
   BenchmarkResult.cpp
   BenchmarkRunner.cpp
   Clustering.cpp
+  CodeTemplate.cpp
   Latency.cpp
   LlvmState.cpp
   MCInstrDescView.cpp
   PerfHelper.cpp
   RegisterAliasing.cpp
+  SnippetGenerator.cpp
+  RegisterValue.cpp
   Target.cpp
   Uops.cpp
   )

@@ -26,6 +26,8 @@
 ; CHECK-NEXT:       Loop Pass Manager
 ; CHECK-NEXT:         Induction Variable Users
 ; CHECK-NEXT:         Loop Strength Reduction
+; CHECK-NEXT:       Basic Alias Analysis (stateless AA impl)
+; CHECK-NEXT:         Function Alias Analysis Results
 ; CHECK-NEXT:       Merge contiguous icmps into a memcmp
 ; CHECK-NEXT:       Expand memcmp() to load/stores
 ; CHECK-NEXT:       Lower Garbage Collection Instructions
@@ -90,6 +92,7 @@
 ; CHECK-NEXT:       X86 LEA Optimize
 ; CHECK-NEXT:       X86 Optimize Call Frame
 ; CHECK-NEXT:       X86 Avoid Store Forwarding Block
+; CHECK-NEXT:       X86 speculative load hardening
 ; CHECK-NEXT:       MachineDominator Tree Construction
 ; CHECK-NEXT:       X86 EFLAGS copy lowering
 ; CHECK-NEXT:       X86 WinAlloca Expander

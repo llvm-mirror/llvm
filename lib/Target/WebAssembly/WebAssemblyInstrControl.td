@@ -47,27 +47,29 @@ let Defs = [ARGUMENTS] in {
 // FIXME: this can't inherit from I<> since there is no way to inherit from a
 // multiclass and still have the let statements.
 let isTerminator = 1, hasCtrlDep = 1, isBarrier = 1 in {
+let isCodeGenOnly = 1 in
 def BR_TABLE_I32 : NI<(outs), (ins I32:$index, variable_ops),
                       [(WebAssemblybr_table I32:$index)], 0,
                       "br_table \t$index", 0x0e> {
   let TSFlags{0} = 1;
   let TSFlags{1} = 1;
 }
-def BR_TABLE_I32_S : NI<(outs), (ins I32:$index),
+def BR_TABLE_I32_S : NI<(outs), (ins variable_ops),
                         [], 1,
-                        "br_table \t$index", 0x0e> {
+                        "br_table", 0x0e> {
   let TSFlags{0} = 1;
   let TSFlags{1} = 1;
 }
+let isCodeGenOnly = 1 in
 def BR_TABLE_I64 : NI<(outs), (ins I64:$index, variable_ops),
                       [(WebAssemblybr_table I64:$index)], 0,
                       "br_table \t$index"> {
   let TSFlags{0} = 1;
   let TSFlags{1} = 1;
 }
-def BR_TABLE_I64_S : NI<(outs), (ins I64:$index),
+def BR_TABLE_I64_S : NI<(outs), (ins variable_ops),
                         [], 1,
-                        "br_table \t$index"> {
+                        "br_table"> {
   let TSFlags{0} = 1;
   let TSFlags{1} = 1;
 }
@@ -172,7 +174,7 @@ defm END_TRY : NRI<(outs), (ins), [], "end_try", 0x0b>;
 } // Uses = [VALUE_STACK], Defs = [VALUE_STACK]
 
 // Catching an exception: catch / catch_all
-let hasCtrlDep = 1 in {
+let hasCtrlDep = 1, hasSideEffects = 1 in {
 defm CATCH_I32 : I<(outs I32:$dst), (ins i32imm:$tag),
                    (outs), (ins i32imm:$tag),
                    [(set I32:$dst, (int_wasm_catch imm:$tag))],
@@ -185,10 +187,8 @@ defm CATCH_ALL : NRI<(outs), (ins), [], "catch_all", 0x05>;
 }
 
 // Pseudo instructions: cleanupret / catchret
-// They are not return instructions in wasm, but setting 'isReturn' to true as
-// in X86 is necessary for computing EH scope membership.
 let isTerminator = 1, hasSideEffects = 1, isBarrier = 1, hasCtrlDep = 1,
-    isCodeGenOnly = 1, isReturn = 1 in {
+    isCodeGenOnly = 1, isEHScopeReturn = 1 in {
   defm CLEANUPRET : NRI<(outs), (ins), [(cleanupret)], "", 0>;
   defm CATCHRET : NRI<(outs), (ins bb_op:$dst, bb_op:$from),
                    [(catchret bb:$dst, bb:$from)], "", 0>;

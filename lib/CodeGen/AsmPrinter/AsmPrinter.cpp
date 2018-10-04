@@ -32,6 +32,7 @@
 #include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/Analysis/EHPersonalities.h"
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
+#include "llvm/BinaryFormat/COFF.h"
 #include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/CodeGen/GCMetadata.h"
@@ -749,18 +750,30 @@ static bool emitComments(const MachineInstr &MI, raw_ostream &CommentOS,
   const MachineFrameInfo &MFI = MF->getFrameInfo();
   bool Commented = false;
 
+  auto getSize =
+      [&MFI](const SmallVectorImpl<const MachineMemOperand *> &Accesses) {
+        unsigned Size = 0;
+        for (auto A : Accesses)
+          if (MFI.isSpillSlotObjectIndex(
+                  cast<FixedStackPseudoSourceValue>(A->getPseudoValue())
+                      ->getFrameIndex()))
+            Size += A->getSize();
+        return Size;
+      };
+
   // We assume a single instruction only has a spill or reload, not
   // both.
   const MachineMemOperand *MMO;
+  SmallVector<const MachineMemOperand *, 2> Accesses;
   if (TII->isLoadFromStackSlotPostFE(MI, FI)) {
     if (MFI.isSpillSlotObjectIndex(FI)) {
       MMO = *MI.memoperands_begin();
       CommentOS << MMO->getSize() << "-byte Reload";
       Commented = true;
     }
-  } else if (TII->hasLoadFromStackSlot(MI, MMO, FI)) {
-    if (MFI.isSpillSlotObjectIndex(FI)) {
-      CommentOS << MMO->getSize() << "-byte Folded Reload";
+  } else if (TII->hasLoadFromStackSlot(MI, Accesses)) {
+    if (auto Size = getSize(Accesses)) {
+      CommentOS << Size << "-byte Folded Reload";
       Commented = true;
     }
   } else if (TII->isStoreToStackSlotPostFE(MI, FI)) {
@@ -769,9 +782,9 @@ static bool emitComments(const MachineInstr &MI, raw_ostream &CommentOS,
       CommentOS << MMO->getSize() << "-byte Spill";
       Commented = true;
     }
-  } else if (TII->hasStoreToStackSlot(MI, MMO, FI)) {
-    if (MFI.isSpillSlotObjectIndex(FI)) {
-      CommentOS << MMO->getSize() << "-byte Folded Spill";
+  } else if (TII->hasStoreToStackSlot(MI, Accesses)) {
+    if (auto Size = getSize(Accesses)) {
+      CommentOS << Size << "-byte Folded Spill";
       Commented = true;
     }
   }
@@ -1402,6 +1415,33 @@ bool AsmPrinter::doFinalization(Module &M) {
     }
   }
 
+  if (TM.getTargetTriple().isOSBinFormatCOFF()) {
+    MachineModuleInfoCOFF &MMICOFF =
+        MMI->getObjFileInfo<MachineModuleInfoCOFF>();
+
+    // Output stubs for external and common global variables.
+    MachineModuleInfoCOFF::SymbolListTy Stubs = MMICOFF.GetGVStubList();
+    if (!Stubs.empty()) {
+      const DataLayout &DL = M.getDataLayout();
+
+      for (const auto &Stub : Stubs) {
+        SmallString<256> SectionName = StringRef(".rdata$");
+        SectionName += Stub.first->getName();
+        OutStreamer->SwitchSection(OutContext.getCOFFSection(
+            SectionName,
+            COFF::IMAGE_SCN_CNT_INITIALIZED_DATA | COFF::IMAGE_SCN_MEM_READ |
+                COFF::IMAGE_SCN_LNK_COMDAT,
+            SectionKind::getReadOnly(), Stub.first->getName(),
+            COFF::IMAGE_COMDAT_SELECT_ANY));
+        EmitAlignment(Log2_32(DL.getPointerSize()));
+        OutStreamer->EmitSymbolAttribute(Stub.first, MCSA_Global);
+        OutStreamer->EmitLabel(Stub.first);
+        OutStreamer->EmitSymbolValue(Stub.second.getPointer(),
+                                     DL.getPointerSize());
+      }
+    }
+  }
+
   // Finalize debug and EH information.
   for (const HandlerInfo &HI : Handlers) {
     NamedRegionTimer T(HI.TimerName, HI.TimerDescription, HI.TimerGroupName,
@@ -1542,7 +1582,8 @@ bool AsmPrinter::doFinalization(Module &M) {
     // Emit address-significance attributes for all globals.
     OutStreamer->EmitAddrsig();
     for (const GlobalValue &GV : M.global_values())
-      if (!GV.isThreadLocal() && !GV.getName().startswith("llvm.") &&
+      if (!GV.use_empty() && !GV.isThreadLocal() &&
+          !GV.hasDLLImportStorageClass() && !GV.getName().startswith("llvm.") &&
           !GV.hasAtLeastLocalUnnamedAddr())
         OutStreamer->EmitAddrsigSym(getSymbol(&GV));
   }

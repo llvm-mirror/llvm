@@ -13,20 +13,19 @@ define void @vectorDiv (<2 x i32> addrspace(1)* %nsource, <2 x i32> addrspace(1)
 ; CHECK-NEXT:    movq %rsi, -{{[0-9]+}}(%rsp)
 ; CHECK-NEXT:    movq %rdx, -{{[0-9]+}}(%rsp)
 ; CHECK-NEXT:    movslq -{{[0-9]+}}(%rsp), %rcx
-; CHECK-NEXT:    pmovsxdq (%rdi,%rcx,8), %xmm0
-; CHECK-NEXT:    pmovsxdq (%rsi,%rcx,8), %xmm1
-; CHECK-NEXT:    pextrq $1, %xmm0, %rax
-; CHECK-NEXT:    pextrq $1, %xmm1, %rsi
-; CHECK-NEXT:    cqto
-; CHECK-NEXT:    idivq %rsi
-; CHECK-NEXT:    movq %rax, %xmm2
-; CHECK-NEXT:    movq %xmm0, %rax
-; CHECK-NEXT:    movq %xmm1, %rsi
-; CHECK-NEXT:    cqto
-; CHECK-NEXT:    idivq %rsi
-; CHECK-NEXT:    movq %rax, %xmm0
-; CHECK-NEXT:    punpcklqdq {{.*#+}} xmm0 = xmm0[0],xmm2[0]
-; CHECK-NEXT:    pshufd {{.*#+}} xmm0 = xmm0[0,2,2,3]
+; CHECK-NEXT:    movq {{.*#+}} xmm0 = mem[0],zero
+; CHECK-NEXT:    movq {{.*#+}} xmm1 = mem[0],zero
+; CHECK-NEXT:    pextrd $1, %xmm0, %eax
+; CHECK-NEXT:    pextrd $1, %xmm1, %esi
+; CHECK-NEXT:    cltd
+; CHECK-NEXT:    idivl %esi
+; CHECK-NEXT:    movl %eax, %esi
+; CHECK-NEXT:    movd %xmm0, %eax
+; CHECK-NEXT:    movd %xmm1, %edi
+; CHECK-NEXT:    cltd
+; CHECK-NEXT:    idivl %edi
+; CHECK-NEXT:    movd %eax, %xmm0
+; CHECK-NEXT:    pinsrd $1, %esi, %xmm0
 ; CHECK-NEXT:    movq %xmm0, (%r8,%rcx,8)
 ; CHECK-NEXT:    retq
 entry:
@@ -57,20 +56,21 @@ entry:
 define <3 x i8> @test_char_div(<3 x i8> %num, <3 x i8> %div) {
 ; CHECK-LABEL: test_char_div:
 ; CHECK:       # %bb.0:
+; CHECK-NEXT:    movl %edx, %r10d
 ; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    # kill: def $al killed $al killed $eax
 ; CHECK-NEXT:    cbtw
 ; CHECK-NEXT:    idivb %cl
 ; CHECK-NEXT:    movl %eax, %edi
 ; CHECK-NEXT:    movl %esi, %eax
 ; CHECK-NEXT:    cbtw
 ; CHECK-NEXT:    idivb %r8b
-; CHECK-NEXT:    movl %eax, %esi
-; CHECK-NEXT:    movl %edx, %eax
+; CHECK-NEXT:    movl %eax, %edx
+; CHECK-NEXT:    movl %r10d, %eax
 ; CHECK-NEXT:    cbtw
 ; CHECK-NEXT:    idivb %r9b
 ; CHECK-NEXT:    movl %eax, %ecx
 ; CHECK-NEXT:    movl %edi, %eax
-; CHECK-NEXT:    movl %esi, %edx
 ; CHECK-NEXT:    retq
   %div.r = sdiv <3 x i8> %num, %div
   ret <3 x i8>  %div.r
@@ -233,8 +233,8 @@ define <3 x i64> @test_ulong_div(<3 x i64> %num, <3 x i64> %div) {
 ; CHECK-LABEL: test_ulong_div:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    movq %rdx, %r10
-; CHECK-NEXT:    xorl %edx, %edx
 ; CHECK-NEXT:    movq %rdi, %rax
+; CHECK-NEXT:    xorl %edx, %edx
 ; CHECK-NEXT:    divq %rcx
 ; CHECK-NEXT:    movq %rax, %rcx
 ; CHECK-NEXT:    xorl %edx, %edx

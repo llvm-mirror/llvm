@@ -104,6 +104,10 @@ static cl::opt<bool>
     EnablePrepareForThinLTO("prepare-for-thinlto", cl::init(false), cl::Hidden,
                             cl::desc("Enable preparation for ThinLTO."));
 
+cl::opt<bool> EnableHotColdSplit("hot-cold-split", cl::init(false), cl::Hidden,
+    cl::desc("Enable hot-cold splitting pass"));
+
+
 static cl::opt<bool> RunPGOInstrGen(
     "profile-generate", cl::init(false), cl::Hidden,
     cl::desc("Enable PGO instrumentation."));
@@ -135,8 +139,8 @@ static cl::opt<bool> EnableEarlyCSEMemSSA(
     cl::desc("Enable the EarlyCSE w/ MemorySSA pass (default = on)"));
 
 static cl::opt<bool> EnableGVNHoist(
-    "enable-gvn-hoist", cl::init(false), cl::Hidden,
-    cl::desc("Enable the GVN hoisting pass (default = off)"));
+    "enable-gvn-hoist", cl::init(true), cl::Hidden,
+    cl::desc("Enable the GVN hoisting pass (default = on)"));
 
 static cl::opt<bool>
     DisableLibCallsShrinkWrap("disable-libcalls-shrinkwrap", cl::init(false),
@@ -151,6 +155,10 @@ static cl::opt<bool> EnableSimpleLoopUnswitch(
 static cl::opt<bool> EnableGVNSink(
     "enable-gvn-sink", cl::init(false), cl::Hidden,
     cl::desc("Enable the GVN sinking pass (default = off)"));
+
+static cl::opt<bool>
+    EnableCHR("enable-chr", cl::init(true), cl::Hidden,
+              cl::desc("Enable control height reduction optimization (CHR)"));
 
 PassManagerBuilder::PassManagerBuilder() {
     OptLevel = 2;
@@ -411,6 +419,10 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
   // Clean up after everything.
   addInstructionCombiningPass(MPM);
   addExtensionsToPM(EP_Peephole, MPM);
+
+  if (EnableCHR && OptLevel >= 3 &&
+      (!PGOInstrUse.empty() || !PGOSampleUse.empty()))
+    MPM.add(createControlHeightReductionLegacyPass());
 }
 
 void PassManagerBuilder::populateModulePassManager(
@@ -488,6 +500,9 @@ void PassManagerBuilder::populateModulePassManager(
 
   // Infer attributes about declarations if possible.
   MPM.add(createInferFunctionAttrsLegacyPass());
+
+  if (EnableHotColdSplit)
+    MPM.add(createHotColdSplittingPass());
 
   addExtensionsToPM(EP_ModuleOptimizerEarly, MPM);
 

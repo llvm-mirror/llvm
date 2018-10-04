@@ -6,6 +6,8 @@
 ; RUN: llc < %s -mtriple=x86_64-unknown-unknown -mattr=+avx512f,+avx512vl | FileCheck %s --check-prefix=ALL --check-prefix=AVX --check-prefix=AVX512 --check-prefix=AVX512VL
 ; RUN: llc < %s -mtriple=x86_64-unknown-unknown -mattr=+avx512dq | FileCheck %s --check-prefix=ALL --check-prefix=AVX --check-prefix=AVX512 --check-prefix=AVX512DQ
 ; RUN: llc < %s -mtriple=x86_64-unknown-unknown -mattr=+avx512dq,+avx512vl | FileCheck %s --check-prefix=ALL --check-prefix=AVX --check-prefix=AVX512 --check-prefix=AVX512VLDQ
+; RUN: llc < %s -mtriple=x86_64-unknown-unknown -mattr=+avx512dq,+avx512vl -x86-experimental-vector-widening-legalization | FileCheck %s --check-prefix=WIDEN --check-prefix=WIDEN_SKX
+; RUN: llc < %s -mtriple=x86_64-unknown-unknown -mattr=+avx512f -x86-experimental-vector-widening-legalization | FileCheck %s --check-prefix=WIDEN --check-prefix=WIDEN_KNL
 ;
 ; 32-bit tests to make sure we're not doing anything stupid.
 ; RUN: llc < %s -mtriple=i686-unknown-unknown
@@ -70,6 +72,21 @@ define <2 x i64> @fptosi_2f64_to_2i64(<2 x double> %a) {
 ; AVX512VLDQ:       # %bb.0:
 ; AVX512VLDQ-NEXT:    vcvttpd2qq %xmm0, %xmm0
 ; AVX512VLDQ-NEXT:    retq
+;
+; WIDEN_SKX-LABEL: fptosi_2f64_to_2i64:
+; WIDEN_SKX:       # %bb.0:
+; WIDEN_SKX-NEXT:    vcvttpd2qq %xmm0, %xmm0
+; WIDEN_SKX-NEXT:    retq
+;
+; WIDEN_KNL-LABEL: fptosi_2f64_to_2i64:
+; WIDEN_KNL:       # %bb.0:
+; WIDEN_KNL-NEXT:    vcvttsd2si %xmm0, %rax
+; WIDEN_KNL-NEXT:    vmovq %rax, %xmm1
+; WIDEN_KNL-NEXT:    vpermilpd {{.*#+}} xmm0 = xmm0[1,0]
+; WIDEN_KNL-NEXT:    vcvttsd2si %xmm0, %rax
+; WIDEN_KNL-NEXT:    vmovq %rax, %xmm0
+; WIDEN_KNL-NEXT:    vpunpcklqdq {{.*#+}} xmm0 = xmm1[0],xmm0[0]
+; WIDEN_KNL-NEXT:    retq
   %cvt = fptosi <2 x double> %a to <2 x i64>
   ret <2 x i64> %cvt
 }
@@ -84,6 +101,11 @@ define <4 x i32> @fptosi_2f64_to_4i32(<2 x double> %a) {
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vcvttpd2dq %xmm0, %xmm0
 ; AVX-NEXT:    retq
+;
+; WIDEN-LABEL: fptosi_2f64_to_4i32:
+; WIDEN:       # %bb.0:
+; WIDEN-NEXT:    vcvttpd2dq %xmm0, %xmm0
+; WIDEN-NEXT:    retq
   %cvt = fptosi <2 x double> %a to <2 x i32>
   %ext = shufflevector <2 x i32> %cvt, <2 x i32> zeroinitializer, <4 x i32> <i32 0, i32 1, i32 2, i32 3>
   ret <4 x i32> %ext
@@ -101,6 +123,11 @@ define <2 x i32> @fptosi_2f64_to_2i32(<2 x double> %a) {
 ; AVX-NEXT:    vcvttpd2dq %xmm0, %xmm0
 ; AVX-NEXT:    vpmovzxdq {{.*#+}} xmm0 = xmm0[0],zero,xmm0[1],zero
 ; AVX-NEXT:    retq
+;
+; WIDEN-LABEL: fptosi_2f64_to_2i32:
+; WIDEN:       # %bb.0:
+; WIDEN-NEXT:    vcvttpd2dq %xmm0, %xmm0
+; WIDEN-NEXT:    retq
   %cvt = fptosi <2 x double> %a to <2 x i32>
   ret <2 x i32> %cvt
 }
@@ -119,6 +146,13 @@ define <4 x i32> @fptosi_4f64_to_2i32(<2 x double> %a) {
 ; AVX-NEXT:    vcvttpd2dq %ymm0, %xmm0
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
+;
+; WIDEN-LABEL: fptosi_4f64_to_2i32:
+; WIDEN:       # %bb.0:
+; WIDEN-NEXT:    # kill: def $xmm0 killed $xmm0 def $ymm0
+; WIDEN-NEXT:    vcvttpd2dq %ymm0, %xmm0
+; WIDEN-NEXT:    vzeroupper
+; WIDEN-NEXT:    retq
   %ext = shufflevector <2 x double> %a, <2 x double> undef, <4 x i32> <i32 0, i32 1, i32 undef, i32 undef>
   %cvt = fptosi <4 x double> %ext to <4 x i32>
   ret <4 x i32> %cvt
@@ -226,6 +260,29 @@ define <4 x i64> @fptosi_4f64_to_4i64(<4 x double> %a) {
 ; AVX512VLDQ:       # %bb.0:
 ; AVX512VLDQ-NEXT:    vcvttpd2qq %ymm0, %ymm0
 ; AVX512VLDQ-NEXT:    retq
+;
+; WIDEN_SKX-LABEL: fptosi_4f64_to_4i64:
+; WIDEN_SKX:       # %bb.0:
+; WIDEN_SKX-NEXT:    vcvttpd2qq %ymm0, %ymm0
+; WIDEN_SKX-NEXT:    retq
+;
+; WIDEN_KNL-LABEL: fptosi_4f64_to_4i64:
+; WIDEN_KNL:       # %bb.0:
+; WIDEN_KNL-NEXT:    vextractf128 $1, %ymm0, %xmm1
+; WIDEN_KNL-NEXT:    vcvttsd2si %xmm1, %rax
+; WIDEN_KNL-NEXT:    vmovq %rax, %xmm2
+; WIDEN_KNL-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm1[1,0]
+; WIDEN_KNL-NEXT:    vcvttsd2si %xmm1, %rax
+; WIDEN_KNL-NEXT:    vmovq %rax, %xmm1
+; WIDEN_KNL-NEXT:    vpunpcklqdq {{.*#+}} xmm1 = xmm2[0],xmm1[0]
+; WIDEN_KNL-NEXT:    vcvttsd2si %xmm0, %rax
+; WIDEN_KNL-NEXT:    vmovq %rax, %xmm2
+; WIDEN_KNL-NEXT:    vpermilpd {{.*#+}} xmm0 = xmm0[1,0]
+; WIDEN_KNL-NEXT:    vcvttsd2si %xmm0, %rax
+; WIDEN_KNL-NEXT:    vmovq %rax, %xmm0
+; WIDEN_KNL-NEXT:    vpunpcklqdq {{.*#+}} xmm0 = xmm2[0],xmm0[0]
+; WIDEN_KNL-NEXT:    vinserti128 $1, %xmm1, %ymm0, %ymm0
+; WIDEN_KNL-NEXT:    retq
   %cvt = fptosi <4 x double> %a to <4 x i64>
   ret <4 x i64> %cvt
 }
@@ -243,6 +300,12 @@ define <4 x i32> @fptosi_4f64_to_4i32(<4 x double> %a) {
 ; AVX-NEXT:    vcvttpd2dq %ymm0, %xmm0
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
+;
+; WIDEN-LABEL: fptosi_4f64_to_4i32:
+; WIDEN:       # %bb.0:
+; WIDEN-NEXT:    vcvttpd2dq %ymm0, %xmm0
+; WIDEN-NEXT:    vzeroupper
+; WIDEN-NEXT:    retq
   %cvt = fptosi <4 x double> %a to <4 x i32>
   ret <4 x i32> %cvt
 }
@@ -331,6 +394,21 @@ define <2 x i64> @fptoui_2f64_to_2i64(<2 x double> %a) {
 ; AVX512VLDQ:       # %bb.0:
 ; AVX512VLDQ-NEXT:    vcvttpd2uqq %xmm0, %xmm0
 ; AVX512VLDQ-NEXT:    retq
+;
+; WIDEN_SKX-LABEL: fptoui_2f64_to_2i64:
+; WIDEN_SKX:       # %bb.0:
+; WIDEN_SKX-NEXT:    vcvttpd2uqq %xmm0, %xmm0
+; WIDEN_SKX-NEXT:    retq
+;
+; WIDEN_KNL-LABEL: fptoui_2f64_to_2i64:
+; WIDEN_KNL:       # %bb.0:
+; WIDEN_KNL-NEXT:    vcvttsd2usi %xmm0, %rax
+; WIDEN_KNL-NEXT:    vmovq %rax, %xmm1
+; WIDEN_KNL-NEXT:    vpermilpd {{.*#+}} xmm0 = xmm0[1,0]
+; WIDEN_KNL-NEXT:    vcvttsd2usi %xmm0, %rax
+; WIDEN_KNL-NEXT:    vmovq %rax, %xmm0
+; WIDEN_KNL-NEXT:    vpunpcklqdq {{.*#+}} xmm0 = xmm1[0],xmm0[0]
+; WIDEN_KNL-NEXT:    retq
   %cvt = fptoui <2 x double> %a to <2 x i64>
   ret <2 x i64> %cvt
 }
@@ -411,6 +489,19 @@ define <4 x i32> @fptoui_2f64_to_4i32(<2 x double> %a) {
 ; AVX512VLDQ:       # %bb.0:
 ; AVX512VLDQ-NEXT:    vcvttpd2udq %xmm0, %xmm0
 ; AVX512VLDQ-NEXT:    retq
+;
+; WIDEN_SKX-LABEL: fptoui_2f64_to_4i32:
+; WIDEN_SKX:       # %bb.0:
+; WIDEN_SKX-NEXT:    vcvttpd2udq %xmm0, %xmm0
+; WIDEN_SKX-NEXT:    retq
+;
+; WIDEN_KNL-LABEL: fptoui_2f64_to_4i32:
+; WIDEN_KNL:       # %bb.0:
+; WIDEN_KNL-NEXT:    # kill: def $xmm0 killed $xmm0 def $zmm0
+; WIDEN_KNL-NEXT:    vcvttpd2udq %zmm0, %ymm0
+; WIDEN_KNL-NEXT:    vmovq {{.*#+}} xmm0 = xmm0[0],zero
+; WIDEN_KNL-NEXT:    vzeroupper
+; WIDEN_KNL-NEXT:    retq
   %cvt = fptoui <2 x double> %a to <2 x i32>
   %ext = shufflevector <2 x i32> %cvt, <2 x i32> zeroinitializer, <4 x i32> <i32 0, i32 1, i32 2, i32 3>
   ret <4 x i32> %ext
@@ -490,6 +581,19 @@ define <4 x i32> @fptoui_2f64_to_2i32(<2 x double> %a) {
 ; AVX512VLDQ:       # %bb.0:
 ; AVX512VLDQ-NEXT:    vcvttpd2udq %xmm0, %xmm0
 ; AVX512VLDQ-NEXT:    retq
+;
+; WIDEN_SKX-LABEL: fptoui_2f64_to_2i32:
+; WIDEN_SKX:       # %bb.0:
+; WIDEN_SKX-NEXT:    vcvttpd2udq %xmm0, %xmm0
+; WIDEN_SKX-NEXT:    retq
+;
+; WIDEN_KNL-LABEL: fptoui_2f64_to_2i32:
+; WIDEN_KNL:       # %bb.0:
+; WIDEN_KNL-NEXT:    # kill: def $xmm0 killed $xmm0 def $zmm0
+; WIDEN_KNL-NEXT:    vcvttpd2udq %zmm0, %ymm0
+; WIDEN_KNL-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
+; WIDEN_KNL-NEXT:    vzeroupper
+; WIDEN_KNL-NEXT:    retq
   %cvt = fptoui <2 x double> %a to <2 x i32>
   %ext = shufflevector <2 x i32> %cvt, <2 x i32> undef, <4 x i32> <i32 0, i32 1, i32 undef, i32 undef>
   ret <4 x i32> %ext
@@ -563,6 +667,21 @@ define <4 x i32> @fptoui_4f64_to_2i32(<2 x double> %a) {
 ; AVX512VLDQ-NEXT:    vcvttpd2udq %ymm0, %xmm0
 ; AVX512VLDQ-NEXT:    vzeroupper
 ; AVX512VLDQ-NEXT:    retq
+;
+; WIDEN_SKX-LABEL: fptoui_4f64_to_2i32:
+; WIDEN_SKX:       # %bb.0:
+; WIDEN_SKX-NEXT:    vmovaps %xmm0, %xmm0
+; WIDEN_SKX-NEXT:    vcvttpd2udq %ymm0, %xmm0
+; WIDEN_SKX-NEXT:    vzeroupper
+; WIDEN_SKX-NEXT:    retq
+;
+; WIDEN_KNL-LABEL: fptoui_4f64_to_2i32:
+; WIDEN_KNL:       # %bb.0:
+; WIDEN_KNL-NEXT:    vmovaps %xmm0, %xmm0
+; WIDEN_KNL-NEXT:    vcvttpd2udq %zmm0, %ymm0
+; WIDEN_KNL-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
+; WIDEN_KNL-NEXT:    vzeroupper
+; WIDEN_KNL-NEXT:    retq
   %ext = shufflevector <2 x double> %a, <2 x double> zeroinitializer, <4 x i32> <i32 0, i32 1, i32 2, i32 3>
   %cvt = fptoui <4 x double> %ext to <4 x i32>
   ret <4 x i32> %cvt
@@ -739,6 +858,29 @@ define <4 x i64> @fptoui_4f64_to_4i64(<4 x double> %a) {
 ; AVX512VLDQ:       # %bb.0:
 ; AVX512VLDQ-NEXT:    vcvttpd2uqq %ymm0, %ymm0
 ; AVX512VLDQ-NEXT:    retq
+;
+; WIDEN_SKX-LABEL: fptoui_4f64_to_4i64:
+; WIDEN_SKX:       # %bb.0:
+; WIDEN_SKX-NEXT:    vcvttpd2uqq %ymm0, %ymm0
+; WIDEN_SKX-NEXT:    retq
+;
+; WIDEN_KNL-LABEL: fptoui_4f64_to_4i64:
+; WIDEN_KNL:       # %bb.0:
+; WIDEN_KNL-NEXT:    vextractf128 $1, %ymm0, %xmm1
+; WIDEN_KNL-NEXT:    vcvttsd2usi %xmm1, %rax
+; WIDEN_KNL-NEXT:    vmovq %rax, %xmm2
+; WIDEN_KNL-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm1[1,0]
+; WIDEN_KNL-NEXT:    vcvttsd2usi %xmm1, %rax
+; WIDEN_KNL-NEXT:    vmovq %rax, %xmm1
+; WIDEN_KNL-NEXT:    vpunpcklqdq {{.*#+}} xmm1 = xmm2[0],xmm1[0]
+; WIDEN_KNL-NEXT:    vcvttsd2usi %xmm0, %rax
+; WIDEN_KNL-NEXT:    vmovq %rax, %xmm2
+; WIDEN_KNL-NEXT:    vpermilpd {{.*#+}} xmm0 = xmm0[1,0]
+; WIDEN_KNL-NEXT:    vcvttsd2usi %xmm0, %rax
+; WIDEN_KNL-NEXT:    vmovq %rax, %xmm0
+; WIDEN_KNL-NEXT:    vpunpcklqdq {{.*#+}} xmm0 = xmm2[0],xmm0[0]
+; WIDEN_KNL-NEXT:    vinserti128 $1, %xmm1, %ymm0, %ymm0
+; WIDEN_KNL-NEXT:    retq
   %cvt = fptoui <4 x double> %a to <4 x i64>
   ret <4 x i64> %cvt
 }
@@ -831,6 +973,20 @@ define <4 x i32> @fptoui_4f64_to_4i32(<4 x double> %a) {
 ; AVX512VLDQ-NEXT:    vcvttpd2udq %ymm0, %xmm0
 ; AVX512VLDQ-NEXT:    vzeroupper
 ; AVX512VLDQ-NEXT:    retq
+;
+; WIDEN_SKX-LABEL: fptoui_4f64_to_4i32:
+; WIDEN_SKX:       # %bb.0:
+; WIDEN_SKX-NEXT:    vcvttpd2udq %ymm0, %xmm0
+; WIDEN_SKX-NEXT:    vzeroupper
+; WIDEN_SKX-NEXT:    retq
+;
+; WIDEN_KNL-LABEL: fptoui_4f64_to_4i32:
+; WIDEN_KNL:       # %bb.0:
+; WIDEN_KNL-NEXT:    # kill: def $ymm0 killed $ymm0 def $zmm0
+; WIDEN_KNL-NEXT:    vcvttpd2udq %zmm0, %ymm0
+; WIDEN_KNL-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
+; WIDEN_KNL-NEXT:    vzeroupper
+; WIDEN_KNL-NEXT:    retq
   %cvt = fptoui <4 x double> %a to <4 x i32>
   ret <4 x i32> %cvt
 }
@@ -851,6 +1007,11 @@ define <2 x i32> @fptosi_2f32_to_2i32(<2 x float> %a) {
 ; AVX-NEXT:    vcvttps2dq %xmm0, %xmm0
 ; AVX-NEXT:    vpmovzxdq {{.*#+}} xmm0 = xmm0[0],zero,xmm0[1],zero
 ; AVX-NEXT:    retq
+;
+; WIDEN-LABEL: fptosi_2f32_to_2i32:
+; WIDEN:       # %bb.0:
+; WIDEN-NEXT:    vcvttps2dq %xmm0, %xmm0
+; WIDEN-NEXT:    retq
   %cvt = fptosi <2 x float> %a to <2 x i32>
   ret <2 x i32> %cvt
 }
@@ -865,6 +1026,11 @@ define <4 x i32> @fptosi_4f32_to_4i32(<4 x float> %a) {
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vcvttps2dq %xmm0, %xmm0
 ; AVX-NEXT:    retq
+;
+; WIDEN-LABEL: fptosi_4f32_to_4i32:
+; WIDEN:       # %bb.0:
+; WIDEN-NEXT:    vcvttps2dq %xmm0, %xmm0
+; WIDEN-NEXT:    retq
   %cvt = fptosi <4 x float> %a to <4 x i32>
   ret <4 x i32> %cvt
 }
@@ -923,6 +1089,21 @@ define <2 x i64> @fptosi_2f32_to_2i64(<4 x float> %a) {
 ; AVX512VLDQ:       # %bb.0:
 ; AVX512VLDQ-NEXT:    vcvttps2qq %xmm0, %xmm0
 ; AVX512VLDQ-NEXT:    retq
+;
+; WIDEN_SKX-LABEL: fptosi_2f32_to_2i64:
+; WIDEN_SKX:       # %bb.0:
+; WIDEN_SKX-NEXT:    vcvttps2qq %xmm0, %xmm0
+; WIDEN_SKX-NEXT:    retq
+;
+; WIDEN_KNL-LABEL: fptosi_2f32_to_2i64:
+; WIDEN_KNL:       # %bb.0:
+; WIDEN_KNL-NEXT:    vcvttss2si %xmm0, %rax
+; WIDEN_KNL-NEXT:    vmovq %rax, %xmm1
+; WIDEN_KNL-NEXT:    vmovshdup {{.*#+}} xmm0 = xmm0[1,1,3,3]
+; WIDEN_KNL-NEXT:    vcvttss2si %xmm0, %rax
+; WIDEN_KNL-NEXT:    vmovq %rax, %xmm0
+; WIDEN_KNL-NEXT:    vpunpcklqdq {{.*#+}} xmm0 = xmm1[0],xmm0[0]
+; WIDEN_KNL-NEXT:    retq
   %shuf = shufflevector <4 x float> %a, <4 x float> undef, <2 x i32> <i32 0, i32 1>
   %cvt = fptosi <2 x float> %shuf to <2 x i64>
   ret <2 x i64> %cvt
@@ -984,6 +1165,23 @@ define <2 x i64> @fptosi_4f32_to_2i64(<4 x float> %a) {
 ; AVX512VLDQ-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
 ; AVX512VLDQ-NEXT:    vzeroupper
 ; AVX512VLDQ-NEXT:    retq
+;
+; WIDEN_SKX-LABEL: fptosi_4f32_to_2i64:
+; WIDEN_SKX:       # %bb.0:
+; WIDEN_SKX-NEXT:    vcvttps2qq %xmm0, %ymm0
+; WIDEN_SKX-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
+; WIDEN_SKX-NEXT:    vzeroupper
+; WIDEN_SKX-NEXT:    retq
+;
+; WIDEN_KNL-LABEL: fptosi_4f32_to_2i64:
+; WIDEN_KNL:       # %bb.0:
+; WIDEN_KNL-NEXT:    vmovshdup {{.*#+}} xmm1 = xmm0[1,1,3,3]
+; WIDEN_KNL-NEXT:    vcvttss2si %xmm1, %rax
+; WIDEN_KNL-NEXT:    vcvttss2si %xmm0, %rcx
+; WIDEN_KNL-NEXT:    vmovq %rcx, %xmm0
+; WIDEN_KNL-NEXT:    vmovq %rax, %xmm1
+; WIDEN_KNL-NEXT:    vpunpcklqdq {{.*#+}} xmm0 = xmm0[0],xmm1[0]
+; WIDEN_KNL-NEXT:    retq
   %cvt = fptosi <4 x float> %a to <4 x i64>
   %shuf = shufflevector <4 x i64> %cvt, <4 x i64> undef, <2 x i32> <i32 0, i32 1>
   ret <2 x i64> %shuf
@@ -1000,6 +1198,11 @@ define <8 x i32> @fptosi_8f32_to_8i32(<8 x float> %a) {
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vcvttps2dq %ymm0, %ymm0
 ; AVX-NEXT:    retq
+;
+; WIDEN-LABEL: fptosi_8f32_to_8i32:
+; WIDEN:       # %bb.0:
+; WIDEN-NEXT:    vcvttps2dq %ymm0, %ymm0
+; WIDEN-NEXT:    retq
   %cvt = fptosi <8 x float> %a to <8 x i32>
   ret <8 x i32> %cvt
 }
@@ -1107,6 +1310,29 @@ define <4 x i64> @fptosi_4f32_to_4i64(<8 x float> %a) {
 ; AVX512VLDQ:       # %bb.0:
 ; AVX512VLDQ-NEXT:    vcvttps2qq %xmm0, %ymm0
 ; AVX512VLDQ-NEXT:    retq
+;
+; WIDEN_SKX-LABEL: fptosi_4f32_to_4i64:
+; WIDEN_SKX:       # %bb.0:
+; WIDEN_SKX-NEXT:    vcvttps2qq %xmm0, %ymm0
+; WIDEN_SKX-NEXT:    retq
+;
+; WIDEN_KNL-LABEL: fptosi_4f32_to_4i64:
+; WIDEN_KNL:       # %bb.0:
+; WIDEN_KNL-NEXT:    vpermilps {{.*#+}} xmm1 = xmm0[3,1,2,3]
+; WIDEN_KNL-NEXT:    vcvttss2si %xmm1, %rax
+; WIDEN_KNL-NEXT:    vmovq %rax, %xmm1
+; WIDEN_KNL-NEXT:    vpermilpd {{.*#+}} xmm2 = xmm0[1,0]
+; WIDEN_KNL-NEXT:    vcvttss2si %xmm2, %rax
+; WIDEN_KNL-NEXT:    vmovq %rax, %xmm2
+; WIDEN_KNL-NEXT:    vpunpcklqdq {{.*#+}} xmm1 = xmm2[0],xmm1[0]
+; WIDEN_KNL-NEXT:    vcvttss2si %xmm0, %rax
+; WIDEN_KNL-NEXT:    vmovq %rax, %xmm2
+; WIDEN_KNL-NEXT:    vmovshdup {{.*#+}} xmm0 = xmm0[1,1,3,3]
+; WIDEN_KNL-NEXT:    vcvttss2si %xmm0, %rax
+; WIDEN_KNL-NEXT:    vmovq %rax, %xmm0
+; WIDEN_KNL-NEXT:    vpunpcklqdq {{.*#+}} xmm0 = xmm2[0],xmm0[0]
+; WIDEN_KNL-NEXT:    vinserti128 $1, %xmm1, %ymm0, %ymm0
+; WIDEN_KNL-NEXT:    retq
   %shuf = shufflevector <8 x float> %a, <8 x float> undef, <4 x i32> <i32 0, i32 1, i32 2, i32 3>
   %cvt = fptosi <4 x float> %shuf to <4 x i64>
   ret <4 x i64> %cvt
@@ -1216,6 +1442,30 @@ define <4 x i64> @fptosi_8f32_to_4i64(<8 x float> %a) {
 ; AVX512VLDQ-NEXT:    vcvttps2qq %ymm0, %zmm0
 ; AVX512VLDQ-NEXT:    # kill: def $ymm0 killed $ymm0 killed $zmm0
 ; AVX512VLDQ-NEXT:    retq
+;
+; WIDEN_SKX-LABEL: fptosi_8f32_to_4i64:
+; WIDEN_SKX:       # %bb.0:
+; WIDEN_SKX-NEXT:    vcvttps2qq %ymm0, %zmm0
+; WIDEN_SKX-NEXT:    # kill: def $ymm0 killed $ymm0 killed $zmm0
+; WIDEN_SKX-NEXT:    retq
+;
+; WIDEN_KNL-LABEL: fptosi_8f32_to_4i64:
+; WIDEN_KNL:       # %bb.0:
+; WIDEN_KNL-NEXT:    vmovshdup {{.*#+}} xmm1 = xmm0[1,1,3,3]
+; WIDEN_KNL-NEXT:    vcvttss2si %xmm1, %rax
+; WIDEN_KNL-NEXT:    vcvttss2si %xmm0, %rcx
+; WIDEN_KNL-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
+; WIDEN_KNL-NEXT:    vcvttss2si %xmm1, %rdx
+; WIDEN_KNL-NEXT:    vpermilps {{.*#+}} xmm0 = xmm0[3,1,2,3]
+; WIDEN_KNL-NEXT:    vcvttss2si %xmm0, %rsi
+; WIDEN_KNL-NEXT:    vmovq %rsi, %xmm0
+; WIDEN_KNL-NEXT:    vmovq %rdx, %xmm1
+; WIDEN_KNL-NEXT:    vpunpcklqdq {{.*#+}} xmm0 = xmm1[0],xmm0[0]
+; WIDEN_KNL-NEXT:    vmovq %rcx, %xmm1
+; WIDEN_KNL-NEXT:    vmovq %rax, %xmm2
+; WIDEN_KNL-NEXT:    vpunpcklqdq {{.*#+}} xmm1 = xmm1[0],xmm2[0]
+; WIDEN_KNL-NEXT:    vinserti128 $1, %xmm0, %ymm1, %ymm0
+; WIDEN_KNL-NEXT:    retq
   %cvt = fptosi <8 x float> %a to <8 x i64>
   %shuf = shufflevector <8 x i64> %cvt, <8 x i64> undef, <4 x i32> <i32 0, i32 1, i32 2, i32 3>
   ret <4 x i64> %shuf
@@ -1300,6 +1550,19 @@ define <2 x i32> @fptoui_2f32_to_2i32(<2 x float> %a) {
 ; AVX512VLDQ-NEXT:    vcvttps2udq %xmm0, %xmm0
 ; AVX512VLDQ-NEXT:    vpmovzxdq {{.*#+}} xmm0 = xmm0[0],zero,xmm0[1],zero
 ; AVX512VLDQ-NEXT:    retq
+;
+; WIDEN_SKX-LABEL: fptoui_2f32_to_2i32:
+; WIDEN_SKX:       # %bb.0:
+; WIDEN_SKX-NEXT:    vcvttps2udq %xmm0, %xmm0
+; WIDEN_SKX-NEXT:    retq
+;
+; WIDEN_KNL-LABEL: fptoui_2f32_to_2i32:
+; WIDEN_KNL:       # %bb.0:
+; WIDEN_KNL-NEXT:    # kill: def $xmm0 killed $xmm0 def $zmm0
+; WIDEN_KNL-NEXT:    vcvttps2udq %zmm0, %zmm0
+; WIDEN_KNL-NEXT:    # kill: def $xmm0 killed $xmm0 killed $zmm0
+; WIDEN_KNL-NEXT:    vzeroupper
+; WIDEN_KNL-NEXT:    retq
   %cvt = fptoui <2 x float> %a to <2 x i32>
   ret <2 x i32> %cvt
 }
@@ -1312,7 +1575,7 @@ define <4 x i32> @fptoui_4f32_to_4i32(<4 x float> %a) {
 ; SSE-NEXT:    cvttss2si %xmm1, %rax
 ; SSE-NEXT:    movd %eax, %xmm1
 ; SSE-NEXT:    movaps %xmm0, %xmm2
-; SSE-NEXT:    movhlps {{.*#+}} xmm2 = xmm0[1],xmm2[1]
+; SSE-NEXT:    unpckhpd {{.*#+}} xmm2 = xmm2[1],xmm0[1]
 ; SSE-NEXT:    cvttss2si %xmm2, %rax
 ; SSE-NEXT:    movd %eax, %xmm2
 ; SSE-NEXT:    punpckldq {{.*#+}} xmm2 = xmm2[0],xmm1[0],xmm2[1],xmm1[1]
@@ -1366,6 +1629,19 @@ define <4 x i32> @fptoui_4f32_to_4i32(<4 x float> %a) {
 ; AVX512VLDQ:       # %bb.0:
 ; AVX512VLDQ-NEXT:    vcvttps2udq %xmm0, %xmm0
 ; AVX512VLDQ-NEXT:    retq
+;
+; WIDEN_SKX-LABEL: fptoui_4f32_to_4i32:
+; WIDEN_SKX:       # %bb.0:
+; WIDEN_SKX-NEXT:    vcvttps2udq %xmm0, %xmm0
+; WIDEN_SKX-NEXT:    retq
+;
+; WIDEN_KNL-LABEL: fptoui_4f32_to_4i32:
+; WIDEN_KNL:       # %bb.0:
+; WIDEN_KNL-NEXT:    # kill: def $xmm0 killed $xmm0 def $zmm0
+; WIDEN_KNL-NEXT:    vcvttps2udq %zmm0, %zmm0
+; WIDEN_KNL-NEXT:    # kill: def $xmm0 killed $xmm0 killed $zmm0
+; WIDEN_KNL-NEXT:    vzeroupper
+; WIDEN_KNL-NEXT:    retq
   %cvt = fptoui <4 x float> %a to <4 x i32>
   ret <4 x i32> %cvt
 }
@@ -1450,6 +1726,21 @@ define <2 x i64> @fptoui_2f32_to_2i64(<4 x float> %a) {
 ; AVX512VLDQ:       # %bb.0:
 ; AVX512VLDQ-NEXT:    vcvttps2uqq %xmm0, %xmm0
 ; AVX512VLDQ-NEXT:    retq
+;
+; WIDEN_SKX-LABEL: fptoui_2f32_to_2i64:
+; WIDEN_SKX:       # %bb.0:
+; WIDEN_SKX-NEXT:    vcvttps2uqq %xmm0, %xmm0
+; WIDEN_SKX-NEXT:    retq
+;
+; WIDEN_KNL-LABEL: fptoui_2f32_to_2i64:
+; WIDEN_KNL:       # %bb.0:
+; WIDEN_KNL-NEXT:    vcvttss2usi %xmm0, %rax
+; WIDEN_KNL-NEXT:    vmovq %rax, %xmm1
+; WIDEN_KNL-NEXT:    vmovshdup {{.*#+}} xmm0 = xmm0[1,1,3,3]
+; WIDEN_KNL-NEXT:    vcvttss2usi %xmm0, %rax
+; WIDEN_KNL-NEXT:    vmovq %rax, %xmm0
+; WIDEN_KNL-NEXT:    vpunpcklqdq {{.*#+}} xmm0 = xmm1[0],xmm0[0]
+; WIDEN_KNL-NEXT:    retq
   %shuf = shufflevector <4 x float> %a, <4 x float> undef, <2 x i32> <i32 0, i32 1>
   %cvt = fptoui <2 x float> %shuf to <2 x i64>
   ret <2 x i64> %cvt
@@ -1537,6 +1828,23 @@ define <2 x i64> @fptoui_4f32_to_2i64(<4 x float> %a) {
 ; AVX512VLDQ-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
 ; AVX512VLDQ-NEXT:    vzeroupper
 ; AVX512VLDQ-NEXT:    retq
+;
+; WIDEN_SKX-LABEL: fptoui_4f32_to_2i64:
+; WIDEN_SKX:       # %bb.0:
+; WIDEN_SKX-NEXT:    vcvttps2uqq %xmm0, %ymm0
+; WIDEN_SKX-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
+; WIDEN_SKX-NEXT:    vzeroupper
+; WIDEN_SKX-NEXT:    retq
+;
+; WIDEN_KNL-LABEL: fptoui_4f32_to_2i64:
+; WIDEN_KNL:       # %bb.0:
+; WIDEN_KNL-NEXT:    vmovshdup {{.*#+}} xmm1 = xmm0[1,1,3,3]
+; WIDEN_KNL-NEXT:    vcvttss2usi %xmm1, %rax
+; WIDEN_KNL-NEXT:    vcvttss2usi %xmm0, %rcx
+; WIDEN_KNL-NEXT:    vmovq %rcx, %xmm0
+; WIDEN_KNL-NEXT:    vmovq %rax, %xmm1
+; WIDEN_KNL-NEXT:    vpunpcklqdq {{.*#+}} xmm0 = xmm0[0],xmm1[0]
+; WIDEN_KNL-NEXT:    retq
   %cvt = fptoui <4 x float> %a to <4 x i64>
   %shuf = shufflevector <4 x i64> %cvt, <4 x i64> undef, <2 x i32> <i32 0, i32 1>
   ret <2 x i64> %shuf
@@ -1550,7 +1858,7 @@ define <8 x i32> @fptoui_8f32_to_8i32(<8 x float> %a) {
 ; SSE-NEXT:    cvttss2si %xmm0, %rax
 ; SSE-NEXT:    movd %eax, %xmm0
 ; SSE-NEXT:    movaps %xmm2, %xmm3
-; SSE-NEXT:    movhlps {{.*#+}} xmm3 = xmm2[1],xmm3[1]
+; SSE-NEXT:    unpckhpd {{.*#+}} xmm3 = xmm3[1],xmm2[1]
 ; SSE-NEXT:    cvttss2si %xmm3, %rax
 ; SSE-NEXT:    movd %eax, %xmm3
 ; SSE-NEXT:    punpckldq {{.*#+}} xmm3 = xmm3[0],xmm0[0],xmm3[1],xmm0[1]
@@ -1566,7 +1874,7 @@ define <8 x i32> @fptoui_8f32_to_8i32(<8 x float> %a) {
 ; SSE-NEXT:    cvttss2si %xmm2, %rax
 ; SSE-NEXT:    movd %eax, %xmm2
 ; SSE-NEXT:    movaps %xmm1, %xmm3
-; SSE-NEXT:    movhlps {{.*#+}} xmm3 = xmm1[1],xmm3[1]
+; SSE-NEXT:    unpckhpd {{.*#+}} xmm3 = xmm3[1],xmm1[1]
 ; SSE-NEXT:    cvttss2si %xmm3, %rax
 ; SSE-NEXT:    movd %eax, %xmm3
 ; SSE-NEXT:    punpckldq {{.*#+}} xmm3 = xmm3[0],xmm2[0],xmm3[1],xmm2[1]
@@ -1659,6 +1967,18 @@ define <8 x i32> @fptoui_8f32_to_8i32(<8 x float> %a) {
 ; AVX512VLDQ:       # %bb.0:
 ; AVX512VLDQ-NEXT:    vcvttps2udq %ymm0, %ymm0
 ; AVX512VLDQ-NEXT:    retq
+;
+; WIDEN_SKX-LABEL: fptoui_8f32_to_8i32:
+; WIDEN_SKX:       # %bb.0:
+; WIDEN_SKX-NEXT:    vcvttps2udq %ymm0, %ymm0
+; WIDEN_SKX-NEXT:    retq
+;
+; WIDEN_KNL-LABEL: fptoui_8f32_to_8i32:
+; WIDEN_KNL:       # %bb.0:
+; WIDEN_KNL-NEXT:    # kill: def $ymm0 killed $ymm0 def $zmm0
+; WIDEN_KNL-NEXT:    vcvttps2udq %zmm0, %zmm0
+; WIDEN_KNL-NEXT:    # kill: def $ymm0 killed $ymm0 killed $zmm0
+; WIDEN_KNL-NEXT:    retq
   %cvt = fptoui <8 x float> %a to <8 x i32>
   ret <8 x i32> %cvt
 }
@@ -1836,6 +2156,29 @@ define <4 x i64> @fptoui_4f32_to_4i64(<8 x float> %a) {
 ; AVX512VLDQ:       # %bb.0:
 ; AVX512VLDQ-NEXT:    vcvttps2uqq %xmm0, %ymm0
 ; AVX512VLDQ-NEXT:    retq
+;
+; WIDEN_SKX-LABEL: fptoui_4f32_to_4i64:
+; WIDEN_SKX:       # %bb.0:
+; WIDEN_SKX-NEXT:    vcvttps2uqq %xmm0, %ymm0
+; WIDEN_SKX-NEXT:    retq
+;
+; WIDEN_KNL-LABEL: fptoui_4f32_to_4i64:
+; WIDEN_KNL:       # %bb.0:
+; WIDEN_KNL-NEXT:    vpermilps {{.*#+}} xmm1 = xmm0[3,1,2,3]
+; WIDEN_KNL-NEXT:    vcvttss2usi %xmm1, %rax
+; WIDEN_KNL-NEXT:    vmovq %rax, %xmm1
+; WIDEN_KNL-NEXT:    vpermilpd {{.*#+}} xmm2 = xmm0[1,0]
+; WIDEN_KNL-NEXT:    vcvttss2usi %xmm2, %rax
+; WIDEN_KNL-NEXT:    vmovq %rax, %xmm2
+; WIDEN_KNL-NEXT:    vpunpcklqdq {{.*#+}} xmm1 = xmm2[0],xmm1[0]
+; WIDEN_KNL-NEXT:    vcvttss2usi %xmm0, %rax
+; WIDEN_KNL-NEXT:    vmovq %rax, %xmm2
+; WIDEN_KNL-NEXT:    vmovshdup {{.*#+}} xmm0 = xmm0[1,1,3,3]
+; WIDEN_KNL-NEXT:    vcvttss2usi %xmm0, %rax
+; WIDEN_KNL-NEXT:    vmovq %rax, %xmm0
+; WIDEN_KNL-NEXT:    vpunpcklqdq {{.*#+}} xmm0 = xmm2[0],xmm0[0]
+; WIDEN_KNL-NEXT:    vinserti128 $1, %xmm1, %ymm0, %ymm0
+; WIDEN_KNL-NEXT:    retq
   %shuf = shufflevector <8 x float> %a, <8 x float> undef, <4 x i32> <i32 0, i32 1, i32 2, i32 3>
   %cvt = fptoui <4 x float> %shuf to <4 x i64>
   ret <4 x i64> %cvt
@@ -2015,6 +2358,30 @@ define <4 x i64> @fptoui_8f32_to_4i64(<8 x float> %a) {
 ; AVX512VLDQ-NEXT:    vcvttps2uqq %ymm0, %zmm0
 ; AVX512VLDQ-NEXT:    # kill: def $ymm0 killed $ymm0 killed $zmm0
 ; AVX512VLDQ-NEXT:    retq
+;
+; WIDEN_SKX-LABEL: fptoui_8f32_to_4i64:
+; WIDEN_SKX:       # %bb.0:
+; WIDEN_SKX-NEXT:    vcvttps2uqq %ymm0, %zmm0
+; WIDEN_SKX-NEXT:    # kill: def $ymm0 killed $ymm0 killed $zmm0
+; WIDEN_SKX-NEXT:    retq
+;
+; WIDEN_KNL-LABEL: fptoui_8f32_to_4i64:
+; WIDEN_KNL:       # %bb.0:
+; WIDEN_KNL-NEXT:    vmovshdup {{.*#+}} xmm1 = xmm0[1,1,3,3]
+; WIDEN_KNL-NEXT:    vcvttss2usi %xmm1, %rax
+; WIDEN_KNL-NEXT:    vcvttss2usi %xmm0, %rcx
+; WIDEN_KNL-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
+; WIDEN_KNL-NEXT:    vcvttss2usi %xmm1, %rdx
+; WIDEN_KNL-NEXT:    vpermilps {{.*#+}} xmm0 = xmm0[3,1,2,3]
+; WIDEN_KNL-NEXT:    vcvttss2usi %xmm0, %rsi
+; WIDEN_KNL-NEXT:    vmovq %rsi, %xmm0
+; WIDEN_KNL-NEXT:    vmovq %rdx, %xmm1
+; WIDEN_KNL-NEXT:    vpunpcklqdq {{.*#+}} xmm0 = xmm1[0],xmm0[0]
+; WIDEN_KNL-NEXT:    vmovq %rcx, %xmm1
+; WIDEN_KNL-NEXT:    vmovq %rax, %xmm2
+; WIDEN_KNL-NEXT:    vpunpcklqdq {{.*#+}} xmm1 = xmm1[0],xmm2[0]
+; WIDEN_KNL-NEXT:    vinserti128 $1, %xmm0, %ymm1, %ymm0
+; WIDEN_KNL-NEXT:    retq
   %cvt = fptoui <8 x float> %a to <8 x i64>
   %shuf = shufflevector <8 x i64> %cvt, <8 x i64> undef, <4 x i32> <i32 0, i32 1, i32 2, i32 3>
   ret <4 x i64> %shuf
@@ -2034,6 +2401,11 @@ define <2 x i64> @fptosi_2f64_to_2i64_const() {
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vmovaps {{.*#+}} xmm0 = [1,18446744073709551615]
 ; AVX-NEXT:    retq
+;
+; WIDEN-LABEL: fptosi_2f64_to_2i64_const:
+; WIDEN:       # %bb.0:
+; WIDEN-NEXT:    vmovaps {{.*#+}} xmm0 = [1,18446744073709551615]
+; WIDEN-NEXT:    retq
   %cvt = fptosi <2 x double> <double 1.0, double -1.0> to <2 x i64>
   ret <2 x i64> %cvt
 }
@@ -2048,6 +2420,11 @@ define <4 x i32> @fptosi_2f64_to_2i32_const() {
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vmovaps {{.*#+}} xmm0 = <4294967295,1,u,u>
 ; AVX-NEXT:    retq
+;
+; WIDEN-LABEL: fptosi_2f64_to_2i32_const:
+; WIDEN:       # %bb.0:
+; WIDEN-NEXT:    vmovaps {{.*#+}} xmm0 = <4294967295,1,u,u>
+; WIDEN-NEXT:    retq
   %cvt = fptosi <2 x double> <double -1.0, double 1.0> to <2 x i32>
   %ext = shufflevector <2 x i32> %cvt, <2 x i32> undef, <4 x i32> <i32 0, i32 1, i32 undef, i32 undef>
   ret <4 x i32> %ext
@@ -2064,6 +2441,11 @@ define <4 x i64> @fptosi_4f64_to_4i64_const() {
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vmovaps {{.*#+}} ymm0 = [1,18446744073709551615,2,18446744073709551613]
 ; AVX-NEXT:    retq
+;
+; WIDEN-LABEL: fptosi_4f64_to_4i64_const:
+; WIDEN:       # %bb.0:
+; WIDEN-NEXT:    vmovaps {{.*#+}} ymm0 = [1,18446744073709551615,2,18446744073709551613]
+; WIDEN-NEXT:    retq
   %cvt = fptosi <4 x double> <double 1.0, double -1.0, double 2.0, double -3.0> to <4 x i64>
   ret <4 x i64> %cvt
 }
@@ -2078,6 +2460,11 @@ define <4 x i32> @fptosi_4f64_to_4i32_const() {
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vmovaps {{.*#+}} xmm0 = [4294967295,1,4294967294,3]
 ; AVX-NEXT:    retq
+;
+; WIDEN-LABEL: fptosi_4f64_to_4i32_const:
+; WIDEN:       # %bb.0:
+; WIDEN-NEXT:    vmovaps {{.*#+}} xmm0 = [4294967295,1,4294967294,3]
+; WIDEN-NEXT:    retq
   %cvt = fptosi <4 x double> <double -1.0, double 1.0, double -2.0, double 3.0> to <4 x i32>
   ret <4 x i32> %cvt
 }
@@ -2092,6 +2479,11 @@ define <2 x i64> @fptoui_2f64_to_2i64_const() {
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vmovaps {{.*#+}} xmm0 = [2,4]
 ; AVX-NEXT:    retq
+;
+; WIDEN-LABEL: fptoui_2f64_to_2i64_const:
+; WIDEN:       # %bb.0:
+; WIDEN-NEXT:    vmovaps {{.*#+}} xmm0 = [2,4]
+; WIDEN-NEXT:    retq
   %cvt = fptoui <2 x double> <double 2.0, double 4.0> to <2 x i64>
   ret <2 x i64> %cvt
 }
@@ -2106,6 +2498,11 @@ define <4 x i32> @fptoui_2f64_to_2i32_const(<2 x double> %a) {
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vmovaps {{.*#+}} xmm0 = <2,4,u,u>
 ; AVX-NEXT:    retq
+;
+; WIDEN-LABEL: fptoui_2f64_to_2i32_const:
+; WIDEN:       # %bb.0:
+; WIDEN-NEXT:    vmovaps {{.*#+}} xmm0 = <2,4,u,u>
+; WIDEN-NEXT:    retq
   %cvt = fptoui <2 x double> <double 2.0, double 4.0> to <2 x i32>
   %ext = shufflevector <2 x i32> %cvt, <2 x i32> undef, <4 x i32> <i32 0, i32 1, i32 undef, i32 undef>
   ret <4 x i32> %ext
@@ -2122,6 +2519,11 @@ define <4 x i64> @fptoui_4f64_to_4i64_const(<4 x double> %a) {
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vmovaps {{.*#+}} ymm0 = [2,4,6,8]
 ; AVX-NEXT:    retq
+;
+; WIDEN-LABEL: fptoui_4f64_to_4i64_const:
+; WIDEN:       # %bb.0:
+; WIDEN-NEXT:    vmovaps {{.*#+}} ymm0 = [2,4,6,8]
+; WIDEN-NEXT:    retq
   %cvt = fptoui <4 x double> <double 2.0, double 4.0, double 6.0, double 8.0> to <4 x i64>
   ret <4 x i64> %cvt
 }
@@ -2136,6 +2538,11 @@ define <4 x i32> @fptoui_4f64_to_4i32_const(<4 x double> %a) {
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vmovaps {{.*#+}} xmm0 = [2,4,6,8]
 ; AVX-NEXT:    retq
+;
+; WIDEN-LABEL: fptoui_4f64_to_4i32_const:
+; WIDEN:       # %bb.0:
+; WIDEN-NEXT:    vmovaps {{.*#+}} xmm0 = [2,4,6,8]
+; WIDEN-NEXT:    retq
   %cvt = fptoui <4 x double> <double 2.0, double 4.0, double 6.0, double 8.0> to <4 x i32>
   ret <4 x i32> %cvt
 }
@@ -2150,6 +2557,11 @@ define <4 x i32> @fptosi_4f32_to_4i32_const() {
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vmovaps {{.*#+}} xmm0 = [1,4294967295,2,3]
 ; AVX-NEXT:    retq
+;
+; WIDEN-LABEL: fptosi_4f32_to_4i32_const:
+; WIDEN:       # %bb.0:
+; WIDEN-NEXT:    vmovaps {{.*#+}} xmm0 = [1,4294967295,2,3]
+; WIDEN-NEXT:    retq
   %cvt = fptosi <4 x float> <float 1.0, float -1.0, float 2.0, float 3.0> to <4 x i32>
   ret <4 x i32> %cvt
 }
@@ -2165,6 +2577,11 @@ define <4 x i64> @fptosi_4f32_to_4i64_const() {
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vmovaps {{.*#+}} ymm0 = [1,18446744073709551615,2,3]
 ; AVX-NEXT:    retq
+;
+; WIDEN-LABEL: fptosi_4f32_to_4i64_const:
+; WIDEN:       # %bb.0:
+; WIDEN-NEXT:    vmovaps {{.*#+}} ymm0 = [1,18446744073709551615,2,3]
+; WIDEN-NEXT:    retq
   %cvt = fptosi <4 x float> <float 1.0, float -1.0, float 2.0, float 3.0> to <4 x i64>
   ret <4 x i64> %cvt
 }
@@ -2180,6 +2597,11 @@ define <8 x i32> @fptosi_8f32_to_8i32_const(<8 x float> %a) {
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vmovaps {{.*#+}} ymm0 = [1,4294967295,2,3,6,4294967288,2,4294967295]
 ; AVX-NEXT:    retq
+;
+; WIDEN-LABEL: fptosi_8f32_to_8i32_const:
+; WIDEN:       # %bb.0:
+; WIDEN-NEXT:    vmovaps {{.*#+}} ymm0 = [1,4294967295,2,3,6,4294967288,2,4294967295]
+; WIDEN-NEXT:    retq
   %cvt = fptosi <8 x float> <float 1.0, float -1.0, float 2.0, float 3.0, float 6.0, float -8.0, float 2.0, float -1.0> to <8 x i32>
   ret <8 x i32> %cvt
 }
@@ -2194,6 +2616,11 @@ define <4 x i32> @fptoui_4f32_to_4i32_const(<4 x float> %a) {
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vmovaps {{.*#+}} xmm0 = [1,2,4,6]
 ; AVX-NEXT:    retq
+;
+; WIDEN-LABEL: fptoui_4f32_to_4i32_const:
+; WIDEN:       # %bb.0:
+; WIDEN-NEXT:    vmovaps {{.*#+}} xmm0 = [1,2,4,6]
+; WIDEN-NEXT:    retq
   %cvt = fptoui <4 x float> <float 1.0, float 2.0, float 4.0, float 6.0> to <4 x i32>
   ret <4 x i32> %cvt
 }
@@ -2209,6 +2636,11 @@ define <4 x i64> @fptoui_4f32_to_4i64_const() {
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vmovaps {{.*#+}} ymm0 = [1,2,4,8]
 ; AVX-NEXT:    retq
+;
+; WIDEN-LABEL: fptoui_4f32_to_4i64_const:
+; WIDEN:       # %bb.0:
+; WIDEN-NEXT:    vmovaps {{.*#+}} ymm0 = [1,2,4,8]
+; WIDEN-NEXT:    retq
   %cvt = fptoui <4 x float> <float 1.0, float 2.0, float 4.0, float 8.0> to <4 x i64>
   ret <4 x i64> %cvt
 }
@@ -2224,6 +2656,11 @@ define <8 x i32> @fptoui_8f32_to_8i32_const(<8 x float> %a) {
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vmovaps {{.*#+}} ymm0 = [1,2,4,6,8,6,4,1]
 ; AVX-NEXT:    retq
+;
+; WIDEN-LABEL: fptoui_8f32_to_8i32_const:
+; WIDEN:       # %bb.0:
+; WIDEN-NEXT:    vmovaps {{.*#+}} ymm0 = [1,2,4,6,8,6,4,1]
+; WIDEN-NEXT:    retq
   %cvt = fptoui <8 x float> <float 1.0, float 2.0, float 4.0, float 6.0, float 8.0, float 6.0, float 4.0, float 1.0> to <8 x i32>
   ret <8 x i32> %cvt
 }
@@ -2291,6 +2728,20 @@ define <4 x i32> @fptosi_2f16_to_4i32(<2 x half> %a) nounwind {
 ; AVX512-NEXT:    vpunpcklqdq {{.*#+}} xmm0 = xmm0[0],xmm1[0]
 ; AVX512-NEXT:    vinsertps {{.*#+}} xmm0 = xmm0[0,2],zero,zero
 ; AVX512-NEXT:    retq
+;
+; WIDEN-LABEL: fptosi_2f16_to_4i32:
+; WIDEN:       # %bb.0:
+; WIDEN-NEXT:    vcvtps2ph $4, %xmm1, %xmm1
+; WIDEN-NEXT:    vcvtph2ps %xmm1, %xmm1
+; WIDEN-NEXT:    vcvtps2ph $4, %xmm0, %xmm0
+; WIDEN-NEXT:    vcvtph2ps %xmm0, %xmm0
+; WIDEN-NEXT:    vcvttss2si %xmm0, %eax
+; WIDEN-NEXT:    vcvttss2si %xmm1, %ecx
+; WIDEN-NEXT:    vmovd %ecx, %xmm0
+; WIDEN-NEXT:    vmovd %eax, %xmm1
+; WIDEN-NEXT:    vpunpckldq {{.*#+}} xmm0 = xmm1[0],xmm0[0],xmm1[1],xmm0[1]
+; WIDEN-NEXT:    vmovq {{.*#+}} xmm0 = xmm0[0],zero
+; WIDEN-NEXT:    retq
   %cvt = fptosi <2 x half> %a to <2 x i32>
   %ext = shufflevector <2 x i32> %cvt, <2 x i32> zeroinitializer, <4 x i32> <i32 0, i32 1, i32 2, i32 3>
   ret <4 x i32> %ext
@@ -2333,6 +2784,18 @@ define <4 x i32> @fptosi_2f80_to_4i32(<2 x x86_fp80> %a) nounwind {
 ; AVX-NEXT:    vmovlhps {{.*#+}} xmm0 = xmm1[0],xmm0[0]
 ; AVX-NEXT:    vinsertps {{.*#+}} xmm0 = xmm0[0,2],zero,zero
 ; AVX-NEXT:    retq
+;
+; WIDEN-LABEL: fptosi_2f80_to_4i32:
+; WIDEN:       # %bb.0:
+; WIDEN-NEXT:    fldt {{[0-9]+}}(%rsp)
+; WIDEN-NEXT:    fldt {{[0-9]+}}(%rsp)
+; WIDEN-NEXT:    fisttpl -{{[0-9]+}}(%rsp)
+; WIDEN-NEXT:    fisttpl -{{[0-9]+}}(%rsp)
+; WIDEN-NEXT:    vmovd {{.*#+}} xmm0 = mem[0],zero,zero,zero
+; WIDEN-NEXT:    vmovd {{.*#+}} xmm1 = mem[0],zero,zero,zero
+; WIDEN-NEXT:    vpunpckldq {{.*#+}} xmm0 = xmm1[0],xmm0[0],xmm1[1],xmm0[1]
+; WIDEN-NEXT:    vmovq {{.*#+}} xmm0 = xmm0[0],zero
+; WIDEN-NEXT:    retq
   %cvt = fptosi <2 x x86_fp80> %a to <2 x i32>
   %ext = shufflevector <2 x i32> %cvt, <2 x i32> zeroinitializer, <4 x i32> <i32 0, i32 1, i32 2, i32 3>
   ret <4 x i32> %ext
@@ -2387,6 +2850,27 @@ define <4 x i32> @fptosi_2f128_to_4i32(<2 x fp128> %a) nounwind {
 ; AVX-NEXT:    popq %rbx
 ; AVX-NEXT:    popq %r14
 ; AVX-NEXT:    retq
+;
+; WIDEN-LABEL: fptosi_2f128_to_4i32:
+; WIDEN:       # %bb.0:
+; WIDEN-NEXT:    pushq %rbp
+; WIDEN-NEXT:    pushq %r14
+; WIDEN-NEXT:    pushq %rbx
+; WIDEN-NEXT:    movq %rcx, %r14
+; WIDEN-NEXT:    movq %rdx, %rbx
+; WIDEN-NEXT:    callq __fixtfsi
+; WIDEN-NEXT:    movl %eax, %ebp
+; WIDEN-NEXT:    movq %rbx, %rdi
+; WIDEN-NEXT:    movq %r14, %rsi
+; WIDEN-NEXT:    callq __fixtfsi
+; WIDEN-NEXT:    vmovd %eax, %xmm0
+; WIDEN-NEXT:    vmovd %ebp, %xmm1
+; WIDEN-NEXT:    vpunpckldq {{.*#+}} xmm0 = xmm1[0],xmm0[0],xmm1[1],xmm0[1]
+; WIDEN-NEXT:    vmovq {{.*#+}} xmm0 = xmm0[0],zero
+; WIDEN-NEXT:    popq %rbx
+; WIDEN-NEXT:    popq %r14
+; WIDEN-NEXT:    popq %rbp
+; WIDEN-NEXT:    retq
   %cvt = fptosi <2 x fp128> %a to <2 x i32>
   %ext = shufflevector <2 x i32> %cvt, <2 x i32> zeroinitializer, <4 x i32> <i32 0, i32 1, i32 2, i32 3>
   ret <4 x i32> %ext

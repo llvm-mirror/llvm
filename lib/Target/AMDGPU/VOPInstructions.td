@@ -420,10 +420,10 @@ class VOP_SDWA_Pseudo <string opName, VOPProfile P, list<dag> pattern=[]> :
   let SDWA = 1;
   let Uses = [EXEC];
 
-  let SubtargetPredicate = !if(P.HasExt, HasSDWA, DisableInst);
-  let AssemblerPredicate = !if(P.HasExt, HasSDWA, DisableInst);
-  let AsmVariantName = !if(P.HasExt, AMDGPUAsmVariants.SDWA,
-                                     AMDGPUAsmVariants.Disable);
+  let SubtargetPredicate = !if(P.HasExtSDWA, HasSDWA, DisableInst);
+  let AssemblerPredicate = !if(P.HasExtSDWA, HasSDWA, DisableInst);
+  let AsmVariantName = !if(P.HasExtSDWA, AMDGPUAsmVariants.SDWA,
+                                         AMDGPUAsmVariants.Disable);
   let DecoderNamespace = "SDWA";
 
   VOPProfile Pfl = P;
@@ -471,10 +471,10 @@ class VOP_SDWA9_Real <VOP_SDWA_Pseudo ps> :
   let Constraints     = ps.Constraints;
   let DisableEncoding = ps.DisableEncoding;
 
-  let SubtargetPredicate = !if(ps.Pfl.HasSDWA9, HasSDWA9, DisableInst);
-  let AssemblerPredicate = !if(ps.Pfl.HasSDWA9, HasSDWA9, DisableInst);
-  let AsmVariantName = !if(ps.Pfl.HasSDWA9, AMDGPUAsmVariants.SDWA9,
-                                            AMDGPUAsmVariants.Disable);
+  let SubtargetPredicate = !if(ps.Pfl.HasExtSDWA9, HasSDWA9, DisableInst);
+  let AssemblerPredicate = !if(ps.Pfl.HasExtSDWA9, HasSDWA9, DisableInst);
+  let AsmVariantName = !if(ps.Pfl.HasExtSDWA9, AMDGPUAsmVariants.SDWA9,
+                                               AMDGPUAsmVariants.Disable);
   let DecoderNamespace = "SDWA9";
 
   // Copy relevant pseudo op flags
@@ -520,12 +520,56 @@ class VOP_DPP <string OpName, VOPProfile P> :
 
   let AsmMatchConverter = !if(!eq(P.HasModifiers,1), "cvtDPP", "");
   let SubtargetPredicate = HasDPP;
-  let AssemblerPredicate = !if(P.HasExt, HasDPP, DisableInst);
-  let AsmVariantName = !if(P.HasExt, AMDGPUAsmVariants.DPP,
-                                     AMDGPUAsmVariants.Disable);
+  let AssemblerPredicate = !if(P.HasExtDPP, HasDPP, DisableInst);
+  let AsmVariantName = !if(P.HasExtDPP, AMDGPUAsmVariants.DPP,
+                                        AMDGPUAsmVariants.Disable);
   let Constraints = !if(P.NumSrcArgs, "$old = $vdst", "");
   let DisableEncoding = !if(P.NumSrcArgs, "$old", "");
   let DecoderNamespace = "DPP";
+}
+
+class getNumNodeArgs<SDPatternOperator Op> {
+  SDNode N = !cast<SDNode>(Op);
+  SDTypeProfile TP = N.TypeProfile;
+  int ret = TP.NumOperands;
+}
+
+
+class getDivergentFrag<SDPatternOperator Op> {
+
+  int NumSrcArgs = getNumNodeArgs<Op>.ret;
+  PatFrag ret = PatFrag <
+    !if(!eq(NumSrcArgs, 1),
+             (ops node:$src0),
+             !if(!eq(NumSrcArgs, 2),
+               (ops node:$src0, node:$src1),
+               (ops node:$src0, node:$src1, node:$src2))),
+    !if(!eq(NumSrcArgs, 1),
+             (Op $src0),
+             !if(!eq(NumSrcArgs, 2),
+               (Op $src0, $src1),
+               (Op $src0, $src1, $src2))),
+    [{ return N->isDivergent(); }]
+  >;
+}
+
+class VOPPatGen<SDPatternOperator Op, VOPProfile P> {
+
+  PatFrag Operator = getDivergentFrag < Op >.ret;
+
+  dag Ins = !foreach(tmp, P.Ins32, !subst(ins, Operator,
+                                         !subst(P.Src0RC32, P.Src0VT,
+                                               !subst(P.Src1RC32, P.Src1VT, tmp))));
+
+
+  dag Outs = !foreach(tmp, P.Outs32, !subst(outs, set,
+                                           !subst(P.DstRC, P.DstVT, tmp)));
+
+  list<dag> ret =  [!con(Outs, (set Ins))];
+}
+
+class VOPPatOrNull<SDPatternOperator Op, VOPProfile P> {
+  list<dag> ret = !if(!ne(P.NeedPatGen,PatGenMode.NoPattern), VOPPatGen<Op, P>.ret, []);
 }
 
 include "VOPCInstructions.td"

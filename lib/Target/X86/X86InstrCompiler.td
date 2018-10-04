@@ -178,7 +178,7 @@ def EH_RETURN64   : I<0xC3, RawFrm, (outs), (ins GR64:$addr),
 }
 
 let isTerminator = 1, hasSideEffects = 1, isBarrier = 1, hasCtrlDep = 1,
-    isCodeGenOnly = 1, isReturn = 1 in {
+    isCodeGenOnly = 1, isReturn = 1, isEHScopeReturn = 1 in {
   def CLEANUPRET : I<0, Pseudo, (outs), (ins), "# CLEANUPRET", [(cleanupret)]>;
 
   // CATCHRET needs a custom inserter for SEH.
@@ -394,66 +394,89 @@ def : Pat<(sub GR64:$op, (i64 (X86setcc_c X86_COND_B, EFLAGS))),
 //
 let SchedRW = [WriteMicrocoded] in {
 let Defs = [ECX,EDI,ESI], Uses = [ECX,EDI,ESI], isCodeGenOnly = 1 in {
-def REP_MOVSB_32 : I<0xA4, RawFrm, (outs), (ins), "{rep;movsb|rep movsb}",
-                    [(X86rep_movs i8)]>, REP,
-                   Requires<[Not64BitMode]>;
-def REP_MOVSW_32 : I<0xA5, RawFrm, (outs), (ins), "{rep;movsw|rep movsw}",
-                    [(X86rep_movs i16)]>, REP, OpSize16,
-                   Requires<[Not64BitMode]>;
-def REP_MOVSD_32 : I<0xA5, RawFrm, (outs), (ins), "{rep;movsl|rep movsd}",
-                    [(X86rep_movs i32)]>, REP, OpSize32,
-                   Requires<[Not64BitMode]>;
+def REP_MOVSB_32 : I<0xA4, RawFrm, (outs), (ins),
+                    "{rep;movsb (%esi), %es:(%edi)|rep movsb es:[edi], [esi]}",
+                    [(X86rep_movs i8)]>, REP, AdSize32,
+                   Requires<[NotLP64]>;
+def REP_MOVSW_32 : I<0xA5, RawFrm, (outs), (ins),
+                    "{rep;movsw (%esi), %es:(%edi)|rep movsw es:[edi], [esi]}",
+                    [(X86rep_movs i16)]>, REP, AdSize32, OpSize16,
+                   Requires<[NotLP64]>;
+def REP_MOVSD_32 : I<0xA5, RawFrm, (outs), (ins),
+                    "{rep;movsl (%esi), %es:(%edi)|rep movsd es:[edi], [esi]}",
+                    [(X86rep_movs i32)]>, REP, AdSize32, OpSize32,
+                   Requires<[NotLP64]>;
+def REP_MOVSQ_32 : RI<0xA5, RawFrm, (outs), (ins),
+                    "{rep;movsq (%esi), %es:(%edi)|rep movsq es:[edi], [esi]}",
+                    [(X86rep_movs i64)]>, REP, AdSize32,
+                   Requires<[NotLP64, In64BitMode]>;
 }
 
 let Defs = [RCX,RDI,RSI], Uses = [RCX,RDI,RSI], isCodeGenOnly = 1 in {
-def REP_MOVSB_64 : I<0xA4, RawFrm, (outs), (ins), "{rep;movsb|rep movsb}",
-                    [(X86rep_movs i8)]>, REP,
-                   Requires<[In64BitMode]>;
-def REP_MOVSW_64 : I<0xA5, RawFrm, (outs), (ins), "{rep;movsw|rep movsw}",
-                    [(X86rep_movs i16)]>, REP, OpSize16,
-                   Requires<[In64BitMode]>;
-def REP_MOVSD_64 : I<0xA5, RawFrm, (outs), (ins), "{rep;movsl|rep movsd}",
-                    [(X86rep_movs i32)]>, REP, OpSize32,
-                   Requires<[In64BitMode]>;
-def REP_MOVSQ_64 : RI<0xA5, RawFrm, (outs), (ins), "{rep;movsq|rep movsq}",
-                    [(X86rep_movs i64)]>, REP,
-                   Requires<[In64BitMode]>;
+def REP_MOVSB_64 : I<0xA4, RawFrm, (outs), (ins),
+                    "{rep;movsb (%rsi), %es:(%rdi)|rep movsb es:[rdi], [rsi]}",
+                    [(X86rep_movs i8)]>, REP, AdSize64,
+                   Requires<[IsLP64]>;
+def REP_MOVSW_64 : I<0xA5, RawFrm, (outs), (ins),
+                    "{rep;movsw (%rsi), %es:(%rdi)|rep movsw es:[rdi], [rsi]}",
+                    [(X86rep_movs i16)]>, REP, AdSize64, OpSize16,
+                   Requires<[IsLP64]>;
+def REP_MOVSD_64 : I<0xA5, RawFrm, (outs), (ins),
+                    "{rep;movsl (%rsi), %es:(%rdi)|rep movsdi es:[rdi], [rsi]}",
+                    [(X86rep_movs i32)]>, REP, AdSize64, OpSize32,
+                   Requires<[IsLP64]>;
+def REP_MOVSQ_64 : RI<0xA5, RawFrm, (outs), (ins),
+                    "{rep;movsq (%rsi), %es:(%rdi)|rep movsq es:[rdi], [rsi]}",
+                    [(X86rep_movs i64)]>, REP, AdSize64,
+                   Requires<[IsLP64]>;
 }
 
 // FIXME: Should use "(X86rep_stos AL)" as the pattern.
 let Defs = [ECX,EDI], isCodeGenOnly = 1 in {
   let Uses = [AL,ECX,EDI] in
-  def REP_STOSB_32 : I<0xAA, RawFrm, (outs), (ins), "{rep;stosb|rep stosb}",
-                      [(X86rep_stos i8)]>, REP,
-                     Requires<[Not64BitMode]>;
+  def REP_STOSB_32 : I<0xAA, RawFrm, (outs), (ins),
+                       "{rep;stosb %al, %es:(%edi)|rep stosb es:[edi], al}",
+                      [(X86rep_stos i8)]>, REP, AdSize32,
+                     Requires<[NotLP64]>;
   let Uses = [AX,ECX,EDI] in
-  def REP_STOSW_32 : I<0xAB, RawFrm, (outs), (ins), "{rep;stosw|rep stosw}",
-                      [(X86rep_stos i16)]>, REP, OpSize16,
-                     Requires<[Not64BitMode]>;
+  def REP_STOSW_32 : I<0xAB, RawFrm, (outs), (ins),
+                      "{rep;stosw %ax, %es:(%edi)|rep stosw es:[edi], ax}",
+                      [(X86rep_stos i16)]>, REP, AdSize32, OpSize16,
+                     Requires<[NotLP64]>;
   let Uses = [EAX,ECX,EDI] in
-  def REP_STOSD_32 : I<0xAB, RawFrm, (outs), (ins), "{rep;stosl|rep stosd}",
-                      [(X86rep_stos i32)]>, REP, OpSize32,
-                     Requires<[Not64BitMode]>;
+  def REP_STOSD_32 : I<0xAB, RawFrm, (outs), (ins),
+                      "{rep;stosl %eax, %es:(%edi)|rep stosd es:[edi], eax}",
+                      [(X86rep_stos i32)]>, REP, AdSize32, OpSize32,
+                     Requires<[NotLP64]>;
+  let Uses = [RAX,RCX,RDI] in
+  def REP_STOSQ_32 : RI<0xAB, RawFrm, (outs), (ins),
+                        "{rep;stosq %rax, %es:(%edi)|rep stosq es:[edi], rax}",
+                        [(X86rep_stos i64)]>, REP, AdSize32,
+                        Requires<[NotLP64, In64BitMode]>;
 }
 
 let Defs = [RCX,RDI], isCodeGenOnly = 1 in {
   let Uses = [AL,RCX,RDI] in
-  def REP_STOSB_64 : I<0xAA, RawFrm, (outs), (ins), "{rep;stosb|rep stosb}",
-                       [(X86rep_stos i8)]>, REP,
-                       Requires<[In64BitMode]>;
+  def REP_STOSB_64 : I<0xAA, RawFrm, (outs), (ins),
+                       "{rep;stosb %al, %es:(%rdi)|rep stosb es:[rdi], al}",
+                       [(X86rep_stos i8)]>, REP, AdSize64,
+                       Requires<[IsLP64]>;
   let Uses = [AX,RCX,RDI] in
-  def REP_STOSW_64 : I<0xAB, RawFrm, (outs), (ins), "{rep;stosw|rep stosw}",
-                       [(X86rep_stos i16)]>, REP, OpSize16,
-                       Requires<[In64BitMode]>;
+  def REP_STOSW_64 : I<0xAB, RawFrm, (outs), (ins),
+                       "{rep;stosw %ax, %es:(%rdi)|rep stosw es:[rdi], ax}",
+                       [(X86rep_stos i16)]>, REP, AdSize64, OpSize16,
+                       Requires<[IsLP64]>;
   let Uses = [RAX,RCX,RDI] in
-  def REP_STOSD_64 : I<0xAB, RawFrm, (outs), (ins), "{rep;stosl|rep stosd}",
-                       [(X86rep_stos i32)]>, REP, OpSize32,
-                       Requires<[In64BitMode]>;
+  def REP_STOSD_64 : I<0xAB, RawFrm, (outs), (ins),
+                      "{rep;stosl %eax, %es:(%rdi)|rep stosd es:[rdi], eax}",
+                       [(X86rep_stos i32)]>, REP, AdSize64, OpSize32,
+                       Requires<[IsLP64]>;
 
   let Uses = [RAX,RCX,RDI] in
-  def REP_STOSQ_64 : RI<0xAB, RawFrm, (outs), (ins), "{rep;stosq|rep stosq}",
-                        [(X86rep_stos i64)]>, REP,
-                        Requires<[In64BitMode]>;
+  def REP_STOSQ_64 : RI<0xAB, RawFrm, (outs), (ins),
+                        "{rep;stosq %rax, %es:(%rdi)|rep stosq es:[rdi], rax}",
+                        [(X86rep_stos i64)]>, REP, AdSize64,
+                        Requires<[IsLP64]>;
 }
 } // SchedRW
 
@@ -1095,14 +1118,14 @@ def X86tcret_6regs : PatFrag<(ops node:$ptr, node:$off),
 
 def : Pat<(X86tcret ptr_rc_tailcall:$dst, imm:$off),
           (TCRETURNri ptr_rc_tailcall:$dst, imm:$off)>,
-          Requires<[Not64BitMode, NotUseRetpoline]>;
+          Requires<[Not64BitMode, NotUseRetpolineIndirectCalls]>;
 
 // FIXME: This is disabled for 32-bit PIC mode because the global base
 // register which is part of the address mode may be assigned a
 // callee-saved register.
 def : Pat<(X86tcret (load addr:$dst), imm:$off),
           (TCRETURNmi addr:$dst, imm:$off)>,
-          Requires<[Not64BitMode, IsNotPIC, NotUseRetpoline]>;
+          Requires<[Not64BitMode, IsNotPIC, NotUseRetpolineIndirectCalls]>;
 
 def : Pat<(X86tcret (i32 tglobaladdr:$dst), imm:$off),
           (TCRETURNdi tglobaladdr:$dst, imm:$off)>,
@@ -1114,21 +1137,21 @@ def : Pat<(X86tcret (i32 texternalsym:$dst), imm:$off),
 
 def : Pat<(X86tcret ptr_rc_tailcall:$dst, imm:$off),
           (TCRETURNri64 ptr_rc_tailcall:$dst, imm:$off)>,
-          Requires<[In64BitMode, NotUseRetpoline]>;
+          Requires<[In64BitMode, NotUseRetpolineIndirectCalls]>;
 
 // Don't fold loads into X86tcret requiring more than 6 regs.
 // There wouldn't be enough scratch registers for base+index.
 def : Pat<(X86tcret_6regs (load addr:$dst), imm:$off),
           (TCRETURNmi64 addr:$dst, imm:$off)>,
-          Requires<[In64BitMode, NotUseRetpoline]>;
+          Requires<[In64BitMode, NotUseRetpolineIndirectCalls]>;
 
 def : Pat<(X86tcret ptr_rc_tailcall:$dst, imm:$off),
           (RETPOLINE_TCRETURN64 ptr_rc_tailcall:$dst, imm:$off)>,
-          Requires<[In64BitMode, UseRetpoline]>;
+          Requires<[In64BitMode, UseRetpolineIndirectCalls]>;
 
 def : Pat<(X86tcret ptr_rc_tailcall:$dst, imm:$off),
           (RETPOLINE_TCRETURN32 ptr_rc_tailcall:$dst, imm:$off)>,
-          Requires<[Not64BitMode, UseRetpoline]>;
+          Requires<[Not64BitMode, UseRetpolineIndirectCalls]>;
 
 def : Pat<(X86tcret (i64 tglobaladdr:$dst), imm:$off),
           (TCRETURNdi64 tglobaladdr:$dst, imm:$off)>,

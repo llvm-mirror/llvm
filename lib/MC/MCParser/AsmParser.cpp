@@ -180,6 +180,9 @@ private:
   /// Did we already inform the user about inconsistent MD5 usage?
   bool ReportedInconsistentMD5 = false;
 
+  // Is alt macro mode enabled.
+  bool AltMacroMode = false;
+
 public:
   AsmParser(SourceMgr &SM, MCContext &Ctx, MCStreamer &Out,
             const MCAsmInfo &MAI, unsigned CB);
@@ -260,8 +263,6 @@ public:
   /// }
 
 private:
-  bool isAltmacroString(SMLoc &StrLoc, SMLoc &EndLoc);
-  void altMacroString(StringRef AltMacroStr, std::string &Res);
   bool parseStatement(ParseStatementInfo &Info,
                       MCAsmParserSemaCallback *SI);
   bool parseCurlyBlockScope(SmallVectorImpl<AsmRewrite>& AsmStrRewrites);
@@ -467,6 +468,7 @@ private:
     DK_CV_INLINE_LINETABLE,
     DK_CV_DEF_RANGE,
     DK_CV_STRINGTABLE,
+    DK_CV_STRING,
     DK_CV_FILECHECKSUMS,
     DK_CV_FILECHECKSUM_OFFSET,
     DK_CV_FPO_DATA,
@@ -538,7 +540,7 @@ private:
   bool parseDirectiveStabs();
 
   // ".cv_file", ".cv_func_id", ".cv_inline_site_id", ".cv_loc", ".cv_linetable",
-  // ".cv_inline_linetable", ".cv_def_range"
+  // ".cv_inline_linetable", ".cv_def_range", ".cv_string"
   bool parseDirectiveCVFile();
   bool parseDirectiveCVFuncId();
   bool parseDirectiveCVInlineSiteId();
@@ -546,6 +548,7 @@ private:
   bool parseDirectiveCVLinetable();
   bool parseDirectiveCVInlineLinetable();
   bool parseDirectiveCVDefRange();
+  bool parseDirectiveCVString();
   bool parseDirectiveCVStringTable();
   bool parseDirectiveCVFileChecksums();
   bool parseDirectiveCVFileChecksumOffset();
@@ -1123,7 +1126,7 @@ bool AsmParser::parsePrimaryExpr(const MCExpr *&Res, SMLoc &EndLoc) {
     // semantics in the face of reassignment.
     if (Sym->isVariable()) {
       auto V = Sym->getVariableValue(/*SetUsed*/ false);
-      bool DoInline = isa<MCConstantExpr>(V);
+      bool DoInline = isa<MCConstantExpr>(V) && !Variant;
       if (auto TV = dyn_cast<MCTargetExpr>(V))
         DoInline = TV->inlineAssignedExpr();
       if (DoInline) {
@@ -1321,11 +1324,12 @@ AsmParser::applyModifierToExpr(const MCExpr *E,
 /// the End argument will be filled with the last location pointed to the '>'
 /// character.
 
-/// There is a gap between the AltMacro's documentation and the single quote implementation.
-/// GCC does not fully support this feature and so we will not support it.
+/// There is a gap between the AltMacro's documentation and the single quote
+/// implementation. GCC does not fully support this feature and so we will not
+/// support it.
 /// TODO: Adding single quote as a string.
-bool AsmParser::isAltmacroString(SMLoc &StrLoc, SMLoc &EndLoc) {
-  assert((StrLoc.getPointer() != NULL) &&
+static bool isAltmacroString(SMLoc &StrLoc, SMLoc &EndLoc) {
+  assert((StrLoc.getPointer() != nullptr) &&
          "Argument to the function cannot be a NULL value");
   const char *CharPtr = StrLoc.getPointer();
   while ((*CharPtr != '>') && (*CharPtr != '\n') && (*CharPtr != '\r') &&
@@ -1342,12 +1346,14 @@ bool AsmParser::isAltmacroString(SMLoc &StrLoc, SMLoc &EndLoc) {
 }
 
 /// creating a string without the escape characters '!'.
-void AsmParser::altMacroString(StringRef AltMacroStr,std::string &Res) {
+static std::string altMacroString(StringRef AltMacroStr) {
+  std::string Res;
   for (size_t Pos = 0; Pos < AltMacroStr.size(); Pos++) {
     if (AltMacroStr[Pos] == '!')
       Pos++;
     Res += AltMacroStr[Pos];
   }
+  return Res;
 }
 
 /// Parse an expression and return it.
@@ -1806,6 +1812,8 @@ bool AsmParser::parseStatement(ParseStatementInfo &Info,
       Lex();
     }
 
+    getTargetParser().doBeforeLabelEmit(Sym);
+
     // Emit the label.
     if (!getTargetParser().isParsingInlineAsm())
       Out.EmitLabel(Sym, IDLoc);
@@ -1842,7 +1850,7 @@ bool AsmParser::parseStatement(ParseStatementInfo &Info,
   // Otherwise, we have a normal instruction or directive.
 
   // Directives start with "."
-  if (IDVal[0] == '.' && IDVal != ".") {
+  if (IDVal.startswith(".") && IDVal != ".") {
     // There are several entities interested in parsing directives:
     //
     // 1. The target-specific assembly parser. Some directives are target
@@ -2029,6 +2037,8 @@ bool AsmParser::parseStatement(ParseStatementInfo &Info,
       return parseDirectiveCVInlineLinetable();
     case DK_CV_DEF_RANGE:
       return parseDirectiveCVDefRange();
+    case DK_CV_STRING:
+      return parseDirectiveCVString();
     case DK_CV_STRINGTABLE:
       return parseDirectiveCVStringTable();
     case DK_CV_FILECHECKSUMS:
@@ -2431,21 +2441,20 @@ bool AsmParser::expandMacro(raw_svector_ostream &OS, StringRef Body,
           for (const AsmToken &Token : A[Index])
             // For altmacro mode, you can write '%expr'.
             // The prefix '%' evaluates the expression 'expr'
-            // and uses the result as a string (e.g. replace %(1+2) with the string "3").
+            // and uses the result as a string (e.g. replace %(1+2) with the
+            // string "3").
             // Here, we identify the integer token which is the result of the
-            // absolute expression evaluation and replace it with its string representation.
-            if ((Lexer.IsaAltMacroMode()) &&
-                 (*(Token.getString().begin()) == '%') && Token.is(AsmToken::Integer))
+            // absolute expression evaluation and replace it with its string
+            // representation.
+            if (AltMacroMode && Token.getString().front() == '%' &&
+                Token.is(AsmToken::Integer))
               // Emit an integer value to the buffer.
               OS << Token.getIntVal();
             // Only Token that was validated as a string and begins with '<'
             // is considered altMacroString!!!
-            else if ((Lexer.IsaAltMacroMode()) &&
-                     (*(Token.getString().begin()) == '<') &&
+            else if (AltMacroMode && Token.getString().front() == '<' &&
                      Token.is(AsmToken::String)) {
-              std::string Res;
-              altMacroString(Token.getStringContents(), Res);
-              OS << Res;
+              OS << altMacroString(Token.getStringContents());
             }
             // We expect no quotes around the string's contents when
             // parsing for varargs.
@@ -2627,31 +2636,33 @@ bool AsmParser::parseMacroArguments(const MCAsmMacro *M,
 
     SMLoc StrLoc = Lexer.getLoc();
     SMLoc EndLoc;
-    if (Lexer.IsaAltMacroMode() && Lexer.is(AsmToken::Percent)) {
-        const MCExpr *AbsoluteExp;
-        int64_t Value;
-        /// Eat '%'
-        Lex();
-        if (parseExpression(AbsoluteExp, EndLoc))
-          return false;
-        if (!AbsoluteExp->evaluateAsAbsolute(Value,
-                                             getStreamer().getAssemblerPtr()))
-          return Error(StrLoc, "expected absolute expression");
-        const char *StrChar = StrLoc.getPointer();
-        const char *EndChar = EndLoc.getPointer();
-        AsmToken newToken(AsmToken::Integer, StringRef(StrChar , EndChar - StrChar), Value);
-        FA.Value.push_back(newToken);
-    } else if (Lexer.IsaAltMacroMode() && Lexer.is(AsmToken::Less) &&
+    if (AltMacroMode && Lexer.is(AsmToken::Percent)) {
+      const MCExpr *AbsoluteExp;
+      int64_t Value;
+      /// Eat '%'
+      Lex();
+      if (parseExpression(AbsoluteExp, EndLoc))
+        return false;
+      if (!AbsoluteExp->evaluateAsAbsolute(Value,
+                                           getStreamer().getAssemblerPtr()))
+        return Error(StrLoc, "expected absolute expression");
+      const char *StrChar = StrLoc.getPointer();
+      const char *EndChar = EndLoc.getPointer();
+      AsmToken newToken(AsmToken::Integer,
+                        StringRef(StrChar, EndChar - StrChar), Value);
+      FA.Value.push_back(newToken);
+    } else if (AltMacroMode && Lexer.is(AsmToken::Less) &&
                isAltmacroString(StrLoc, EndLoc)) {
-        const char *StrChar = StrLoc.getPointer();
-        const char *EndChar = EndLoc.getPointer();
-        jumpToLoc(EndLoc, CurBuffer);
-        /// Eat from '<' to '>'
-        Lex();
-        AsmToken newToken(AsmToken::String, StringRef(StrChar, EndChar - StrChar));
-        FA.Value.push_back(newToken);
+      const char *StrChar = StrLoc.getPointer();
+      const char *EndChar = EndLoc.getPointer();
+      jumpToLoc(EndLoc, CurBuffer);
+      /// Eat from '<' to '>'
+      Lex();
+      AsmToken newToken(AsmToken::String,
+                        StringRef(StrChar, EndChar - StrChar));
+      FA.Value.push_back(newToken);
     } else if(parseMacroArgument(FA.Value, Vararg))
-        return true;
+      return true;
 
     unsigned PI = Parameter;
     if (!FA.Name.empty()) {
@@ -3348,17 +3359,17 @@ bool AsmParser::parseDirectiveFile(SMLoc DirectiveLoc) {
     }
   }
 
-  // In case there is a -g option as well as debug info from directive .file,
-  // we turn off the -g option, directly use the existing debug info instead.
-  // Also reset any implicit ".file 0" for the assembler source.
-  if (Ctx.getGenDwarfForAssembly()) {
-    Ctx.getMCDwarfLineTable(0).resetRootFile();
-    Ctx.setGenDwarfForAssembly(false);
-  }
-
   if (FileNumber == -1)
     getStreamer().EmitFileDirective(Filename);
   else {
+    // In case there is a -g option as well as debug info from directive .file,
+    // we turn off the -g option, directly use the existing debug info instead.
+    // Also reset any implicit ".file 0" for the assembler source.
+    if (Ctx.getGenDwarfForAssembly()) {
+      Ctx.getMCDwarfLineTable(0).resetRootFile();
+      Ctx.setGenDwarfForAssembly(false);
+    }
+
     MD5::MD5Result *CKMem = nullptr;
     if (HasMD5) {
       CKMem = (MD5::MD5Result *)Ctx.allocate(sizeof(MD5::MD5Result), 1);
@@ -3813,6 +3824,20 @@ bool AsmParser::parseDirectiveCVDefRange() {
   return false;
 }
 
+/// parseDirectiveCVString
+/// ::= .cv_stringtable "string"
+bool AsmParser::parseDirectiveCVString() {
+  std::string Data;
+  if (checkForValidSection() || parseEscapedString(Data))
+    return addErrorSuffix(" in '.cv_string' directive");
+
+  // Put the string in the table and emit the offset.
+  std::pair<StringRef, unsigned> Insertion =
+      getCVContext().addToStringTable(Data);
+  getStreamer().EmitIntValue(Insertion.second, 4);
+  return false;
+}
+
 /// parseDirectiveCVStringTable
 /// ::= .cv_stringtable
 bool AsmParser::parseDirectiveCVStringTable() {
@@ -4163,10 +4188,7 @@ bool AsmParser::parseDirectiveCFIUndefined(SMLoc DirectiveLoc) {
 bool AsmParser::parseDirectiveAltmacro(StringRef Directive) {
   if (getLexer().isNot(AsmToken::EndOfStatement))
     return TokError("unexpected token in '" + Directive + "' directive");
-  if (Directive == ".altmacro")
-    getLexer().SetAltMacroMode(true);
-  else
-    getLexer().SetAltMacroMode(false);
+  AltMacroMode = (Directive == ".altmacro");
   return false;
 }
 
@@ -5238,6 +5260,7 @@ void AsmParser::initializeDirectiveKindMap() {
   DirectiveKindMap[".cv_inline_linetable"] = DK_CV_INLINE_LINETABLE;
   DirectiveKindMap[".cv_inline_site_id"] = DK_CV_INLINE_SITE_ID;
   DirectiveKindMap[".cv_def_range"] = DK_CV_DEF_RANGE;
+  DirectiveKindMap[".cv_string"] = DK_CV_STRING;
   DirectiveKindMap[".cv_stringtable"] = DK_CV_STRINGTABLE;
   DirectiveKindMap[".cv_filechecksums"] = DK_CV_FILECHECKSUMS;
   DirectiveKindMap[".cv_filechecksumoffset"] = DK_CV_FILECHECKSUM_OFFSET;

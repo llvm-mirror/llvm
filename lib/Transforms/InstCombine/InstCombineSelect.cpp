@@ -56,19 +56,27 @@ static Value *createMinMax(InstCombiner::BuilderTy &Builder,
 
 /// Replace a select operand based on an equality comparison with the identity
 /// constant of a binop.
-static Instruction *foldSelectBinOpIdentity(SelectInst &Sel) {
+static Instruction *foldSelectBinOpIdentity(SelectInst &Sel,
+                                            const TargetLibraryInfo &TLI) {
   // The select condition must be an equality compare with a constant operand.
-  // TODO: Support FP compares.
   Value *X;
   Constant *C;
   CmpInst::Predicate Pred;
-  if (!match(Sel.getCondition(), m_ICmp(Pred, m_Value(X), m_Constant(C))) ||
-      !ICmpInst::isEquality(Pred))
+  if (!match(Sel.getCondition(), m_Cmp(Pred, m_Value(X), m_Constant(C))))
+    return nullptr;
+
+  bool IsEq;
+  if (ICmpInst::isEquality(Pred))
+    IsEq = Pred == ICmpInst::ICMP_EQ;
+  else if (Pred == FCmpInst::FCMP_OEQ)
+    IsEq = true;
+  else if (Pred == FCmpInst::FCMP_UNE)
+    IsEq = false;
+  else
     return nullptr;
 
   // A select operand must be a binop, and the compare constant must be the
   // identity constant for that binop.
-  bool IsEq = Pred == ICmpInst::ICMP_EQ;
   BinaryOperator *BO;
   if (!match(Sel.getOperand(IsEq ? 1 : 2), m_BinOp(BO)) ||
       ConstantExpr::getBinOpIdentity(BO->getOpcode(), BO->getType(), true) != C)
@@ -80,6 +88,12 @@ static Instruction *foldSelectBinOpIdentity(SelectInst &Sel) {
     return nullptr;
   if (!match(BO, m_c_BinOp(m_Value(Y), m_Specific(X))))
     return nullptr;
+
+  // +0.0 compares equal to -0.0, and so it does not behave as required for this
+  // transform. Bail out if we can not exclude that possibility.
+  if (isa<FPMathOperator>(BO))
+    if (!BO->hasNoSignedZeros() && !CannotBeNegativeZero(Y, &TLI))
+      return nullptr;
 
   // BO = binop Y, X
   // S = { select (cmp eq X, C), BO, ? } or { select (cmp ne X, C), ?, BO }
@@ -348,6 +362,14 @@ Instruction *InstCombiner::foldSelectOpOp(SelectInst &SI, Instruction *TI,
     return nullptr;
   }
 
+  // If the select condition is a vector, the operands of the original select's
+  // operands also must be vectors. This may not be the case for getelementptr
+  // for example.
+  if (SI.getCondition()->getType()->isVectorTy() &&
+      (!OtherOpT->getType()->isVectorTy() ||
+       !OtherOpF->getType()->isVectorTy()))
+    return nullptr;
+
   // If we reach here, they do have operations in common.
   Value *NewSI = Builder.CreateSelect(SI.getCondition(), OtherOpT, OtherOpF,
                                       SI.getName() + ".v", &SI);
@@ -355,7 +377,8 @@ Instruction *InstCombiner::foldSelectOpOp(SelectInst &SI, Instruction *TI,
   Value *Op1 = MatchIsOpZero ? NewSI : MatchOp;
   if (auto *BO = dyn_cast<BinaryOperator>(TI)) {
     BinaryOperator *NewBO = BinaryOperator::Create(BO->getOpcode(), Op0, Op1);
-    NewBO->copyIRFlags(BO);
+    NewBO->copyIRFlags(TI);
+    NewBO->andIRFlags(FI);
     return NewBO;
   }
   if (auto *TGEP = dyn_cast<GetElementPtrInst>(TI)) {
@@ -1061,11 +1084,13 @@ Instruction *InstCombiner::foldSPFofSPF(Instruction *Inner,
   if (C == A || C == B) {
     // MAX(MAX(A, B), B) -> MAX(A, B)
     // MIN(MIN(a, b), a) -> MIN(a, b)
+    // TODO: This could be done in instsimplify.
     if (SPF1 == SPF2 && SelectPatternResult::isMinOrMax(SPF1))
       return replaceInstUsesWith(Outer, Inner);
 
     // MAX(MIN(a, b), a) -> a
     // MIN(MAX(a, b), a) -> a
+    // TODO: This could be done in instsimplify.
     if ((SPF1 == SPF_SMIN && SPF2 == SPF_SMAX) ||
         (SPF1 == SPF_SMAX && SPF2 == SPF_SMIN) ||
         (SPF1 == SPF_UMIN && SPF2 == SPF_UMAX) ||
@@ -1078,6 +1103,7 @@ Instruction *InstCombiner::foldSPFofSPF(Instruction *Inner,
     if (match(B, m_APInt(CB)) && match(C, m_APInt(CC))) {
       // MIN(MIN(A, 23), 97) -> MIN(A, 23)
       // MAX(MAX(A, 97), 23) -> MAX(A, 97)
+      // TODO: This could be done in instsimplify.
       if ((SPF1 == SPF_UMIN && CB->ule(*CC)) ||
           (SPF1 == SPF_SMIN && CB->sle(*CC)) ||
           (SPF1 == SPF_UMAX && CB->uge(*CC)) ||
@@ -1098,6 +1124,7 @@ Instruction *InstCombiner::foldSPFofSPF(Instruction *Inner,
 
   // ABS(ABS(X)) -> ABS(X)
   // NABS(NABS(X)) -> NABS(X)
+  // TODO: This could be done in instsimplify.
   if (SPF1 == SPF2 && (SPF1 == SPF_ABS || SPF1 == SPF_NABS)) {
     return replaceInstUsesWith(Outer, Inner);
   }
@@ -1770,6 +1797,19 @@ Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
     Instruction::CastOps CastOp;
     SelectPatternResult SPR = matchSelectPattern(&SI, LHS, RHS, &CastOp);
     auto SPF = SPR.Flavor;
+    if (SPF) {
+      Value *LHS2, *RHS2;
+      if (SelectPatternFlavor SPF2 = matchSelectPattern(LHS, LHS2, RHS2).Flavor)
+        if (Instruction *R = foldSPFofSPF(cast<Instruction>(LHS), SPF2, LHS2,
+                                          RHS2, SI, SPF, RHS))
+          return R;
+      if (SelectPatternFlavor SPF2 = matchSelectPattern(RHS, LHS2, RHS2).Flavor)
+        if (Instruction *R = foldSPFofSPF(cast<Instruction>(RHS), SPF2, LHS2,
+                                          RHS2, SI, SPF, LHS))
+          return R;
+      // TODO.
+      // ABS(-X) -> ABS(X)
+    }
 
     if (SelectPatternResult::isMinOrMax(SPF)) {
       // Canonicalize so that
@@ -1804,40 +1844,47 @@ Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
       }
 
       // MAX(~a, ~b) -> ~MIN(a, b)
+      // MAX(~a, C)  -> ~MIN(a, ~C)
       // MIN(~a, ~b) -> ~MAX(a, b)
-      Value *A, *B;
-      if (match(LHS, m_Not(m_Value(A))) && match(RHS, m_Not(m_Value(B))) &&
-          (LHS->getNumUses() <= 2 || RHS->getNumUses() <= 2)) {
-        CmpInst::Predicate InvertedPred = getInverseMinMaxPred(SPF);
-        Value *InvertedCmp = Builder.CreateICmp(InvertedPred, A, B);
-        Value *NewSel = Builder.CreateSelect(InvertedCmp, A, B);
-        return BinaryOperator::CreateNot(NewSel);
-      }
+      // MIN(~a, C)  -> ~MAX(a, ~C)
+      auto moveNotAfterMinMax = [&](Value *X, Value *Y,
+                                    bool Swapped) -> Instruction * {
+        Value *A;
+        if (match(X, m_Not(m_Value(A))) && !X->hasNUsesOrMore(3) &&
+            !IsFreeToInvert(A, A->hasOneUse()) &&
+            // Passing false to only consider m_Not and constants.
+            IsFreeToInvert(Y, false)) {
+          Value *B = Builder.CreateNot(Y);
+          Value *NewMinMax = createMinMax(Builder, getInverseMinMaxFlavor(SPF),
+                                          A, B);
+          // Copy the profile metadata.
+          if (MDNode *MD = SI.getMetadata(LLVMContext::MD_prof)) {
+            cast<SelectInst>(NewMinMax)->setMetadata(LLVMContext::MD_prof, MD);
+            // Swap the metadata if the operands are swapped.
+            if (Swapped) {
+              assert(X == SI.getFalseValue() && Y == SI.getTrueValue() &&
+                     "Unexpected operands.");
+              cast<SelectInst>(NewMinMax)->swapProfMetadata();
+            } else {
+              assert(X == SI.getTrueValue() && Y == SI.getFalseValue() &&
+                     "Unexpected operands.");
+            }
+          }
+
+          return BinaryOperator::CreateNot(NewMinMax);
+        }
+
+        return nullptr;
+      };
+
+      if (Instruction *I = moveNotAfterMinMax(LHS, RHS, /*Swapped*/false))
+        return I;
+      if (Instruction *I = moveNotAfterMinMax(RHS, LHS, /*Swapped*/true))
+        return I;
 
       if (Instruction *I = factorizeMinMaxTree(SPF, LHS, RHS, Builder))
         return I;
     }
-
-    if (SPF) {
-      // MAX(MAX(a, b), a) -> MAX(a, b)
-      // MIN(MIN(a, b), a) -> MIN(a, b)
-      // MAX(MIN(a, b), a) -> a
-      // MIN(MAX(a, b), a) -> a
-      // ABS(ABS(a)) -> ABS(a)
-      // NABS(NABS(a)) -> NABS(a)
-      Value *LHS2, *RHS2;
-      if (SelectPatternFlavor SPF2 = matchSelectPattern(LHS, LHS2, RHS2).Flavor)
-        if (Instruction *R = foldSPFofSPF(cast<Instruction>(LHS),SPF2,LHS2,RHS2,
-                                          SI, SPF, RHS))
-          return R;
-      if (SelectPatternFlavor SPF2 = matchSelectPattern(RHS, LHS2, RHS2).Flavor)
-        if (Instruction *R = foldSPFofSPF(cast<Instruction>(RHS),SPF2,LHS2,RHS2,
-                                          SI, SPF, LHS))
-          return R;
-    }
-
-    // TODO.
-    // ABS(-X) -> ABS(X)
   }
 
   // See if we can fold the select into a phi node if the condition is a select.
@@ -1999,7 +2046,7 @@ Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
   if (Instruction *Select = foldSelectCmpXchg(SI))
     return Select;
 
-  if (Instruction *Select = foldSelectBinOpIdentity(SI))
+  if (Instruction *Select = foldSelectBinOpIdentity(SI, TLI))
     return Select;
 
   return nullptr;

@@ -843,6 +843,63 @@ LLVMContextRef LLVMGetModuleContext(LLVMModuleRef M);
 LLVMTypeRef LLVMGetTypeByName(LLVMModuleRef M, const char *Name);
 
 /**
+ * Obtain an iterator to the first NamedMDNode in a Module.
+ *
+ * @see llvm::Module::named_metadata_begin()
+ */
+LLVMNamedMDNodeRef LLVMGetFirstNamedMetadata(LLVMModuleRef M);
+
+/**
+ * Obtain an iterator to the last NamedMDNode in a Module.
+ *
+ * @see llvm::Module::named_metadata_end()
+ */
+LLVMNamedMDNodeRef LLVMGetLastNamedMetadata(LLVMModuleRef M);
+
+/**
+ * Advance a NamedMDNode iterator to the next NamedMDNode.
+ *
+ * Returns NULL if the iterator was already at the end and there are no more
+ * named metadata nodes.
+ */
+LLVMNamedMDNodeRef LLVMGetNextNamedMetadata(LLVMNamedMDNodeRef NamedMDNode);
+
+/**
+ * Decrement a NamedMDNode iterator to the previous NamedMDNode.
+ *
+ * Returns NULL if the iterator was already at the beginning and there are
+ * no previous named metadata nodes.
+ */
+LLVMNamedMDNodeRef LLVMGetPreviousNamedMetadata(LLVMNamedMDNodeRef NamedMDNode);
+
+/**
+ * Retrieve a NamedMDNode with the given name, returning NULL if no such
+ * node exists.
+ *
+ * @see llvm::Module::getNamedMetadata()
+ */
+LLVMNamedMDNodeRef LLVMGetNamedMetadata(LLVMModuleRef M,
+                                        const char *Name, size_t NameLen);
+
+/**
+ * Retrieve a NamedMDNode with the given name, creating a new node if no such
+ * node exists.
+ *
+ * @see llvm::Module::getOrInsertNamedMetadata()
+ */
+LLVMNamedMDNodeRef LLVMGetOrInsertNamedMetadata(LLVMModuleRef M,
+                                                const char *Name,
+                                                size_t NameLen);
+
+/**
+ * Retrieve the name of a NamedMDNode.
+ *
+ * @see llvm::NamedMDNode::getName()
+ */
+const char *LLVMGetNamedMetadataName(LLVMNamedMDNodeRef NamedMD,
+                                     size_t *NameLen);
+
+/**
  * Obtain the number of operands for named metadata in a module.
  *
  * @see llvm::Module::getNamedMetadata()
@@ -1222,6 +1279,13 @@ LLVMBool LLVMIsPackedStruct(LLVMTypeRef StructTy);
 LLVMBool LLVMIsOpaqueStruct(LLVMTypeRef StructTy);
 
 /**
+ * Determine whether a structure is literal.
+ *
+ * @see llvm::StructType::isLiteral()
+ */
+LLVMBool LLVMIsLiteralStruct(LLVMTypeRef StructTy);
+
+/**
  * @}
  */
 
@@ -1408,6 +1472,7 @@ LLVMTypeRef LLVMX86MMXType(void);
       macro(ConstantVector)                 \
       macro(GlobalValue)                    \
         macro(GlobalAlias)                  \
+        macro(GlobalIFunc)                  \
         macro(GlobalObject)                 \
           macro(Function)                   \
           macro(GlobalVariable)             \
@@ -2070,6 +2135,58 @@ unsigned LLVMGetAlignment(LLVMValueRef V);
 void LLVMSetAlignment(LLVMValueRef V, unsigned Bytes);
 
 /**
+ * Sets a metadata attachment, erasing the existing metadata attachment if
+ * it already exists for the given kind.
+ *
+ * @see llvm::GlobalObject::setMetadata()
+ */
+void LLVMGlobalSetMetadata(LLVMValueRef Global, unsigned Kind,
+                           LLVMMetadataRef MD);
+
+/**
+ * Erases a metadata attachment of the given kind if it exists.
+ *
+ * @see llvm::GlobalObject::eraseMetadata()
+ */
+void LLVMGlobalEraseMetadata(LLVMValueRef Global, unsigned Kind);
+
+/**
+ * Removes all metadata attachments from this value.
+ *
+ * @see llvm::GlobalObject::clearMetadata()
+ */
+void LLVMGlobalClearMetadata(LLVMValueRef Global);
+
+/**
+ * Retrieves an array of metadata entries representing the metadata attached to
+ * this value. The caller is responsible for freeing this array by calling
+ * \c LLVMDisposeValueMetadataEntries.
+ *
+ * @see llvm::GlobalObject::getAllMetadata()
+ */
+LLVMValueMetadataEntry *LLVMGlobalCopyAllMetadata(LLVMValueRef Value,
+                                                  size_t *NumEntries);
+
+/**
+ * Destroys value metadata entries.
+ */
+void LLVMDisposeValueMetadataEntries(LLVMValueMetadataEntry *Entries);
+
+/**
+ * Returns the kind of a value metadata entry at a specific index.
+ */
+unsigned LLVMValueMetadataEntriesGetKind(LLVMValueMetadataEntry *Entries,
+                                         unsigned Index);
+
+/**
+ * Returns the underlying metadata node of a value metadata entry at a
+ * specific index.
+ */
+LLVMMetadataRef
+LLVMValueMetadataEntriesGetMetadata(LLVMValueMetadataEntry *Entries,
+                                    unsigned Index);
+
+/**
  * @}
  */
 
@@ -2695,6 +2812,16 @@ LLVMValueRef LLVMGetMetadata(LLVMValueRef Val, unsigned KindID);
  * Set metadata associated with an instruction value.
  */
 void LLVMSetMetadata(LLVMValueRef Val, unsigned KindID, LLVMValueRef Node);
+
+/**
+ * Returns the metadata associated with an instruction value, but filters out
+ * all the debug locations.
+ *
+ * @see llvm::Instruction::getAllMetadataOtherThanDebugLoc()
+ */
+LLVMValueMetadataEntry *
+LLVMInstructionGetAllMetadataOtherThanDebugLoc(LLVMValueRef Instr,
+                                               size_t *NumEntries);
 
 /**
  * Obtain the basic block to which an instruction belongs.

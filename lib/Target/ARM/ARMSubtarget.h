@@ -68,7 +68,7 @@ protected:
     CortexR5,
     CortexR52,
     CortexR7,
-    ExynosM1,
+    Exynos,
     Krait,
     Kryo,
     Swift
@@ -106,6 +106,7 @@ protected:
     ARMv82a,
     ARMv83a,
     ARMv84a,
+    ARMv85a,
     ARMv8a,
     ARMv8mBaseline,
     ARMv8mMainline,
@@ -153,6 +154,7 @@ protected:
   bool HasV8_2aOps = false;
   bool HasV8_3aOps = false;
   bool HasV8_4aOps = false;
+  bool HasV8_5aOps = false;
   bool HasV8MBaselineOps = false;
   bool HasV8MMainlineOps = false;
 
@@ -414,6 +416,9 @@ protected:
   /// UseSjLjEH - If true, the target uses SjLj exception handling (e.g. iOS).
   bool UseSjLjEH = false;
 
+  /// Has speculation barrier
+  bool HasSpecCtrl = false;
+
   /// Implicitly convert an instruction to a different one if its immediates
   /// cannot be encoded. For example, ADD r0, r1, #FFFFFFFF -> SUB r0, r1, #1.
   bool NegativeImmediates = true;
@@ -437,6 +442,9 @@ protected:
   /// The adjustment that we need to apply to get the operand latency from the
   /// operand cycle returned by the itinerary data for pre-ISel operands.
   int PreISelOperandLatencyAdjustment = 2;
+
+  /// What alignment is preferred for loop bodies, in log2(bytes).
+  unsigned PrefLoopAlignment = 0;
 
   /// IsLittle - The target is Little Endian
   bool IsLittle;
@@ -535,6 +543,7 @@ public:
   bool hasV8_2aOps() const { return HasV8_2aOps; }
   bool hasV8_3aOps() const { return HasV8_3aOps; }
   bool hasV8_4aOps() const { return HasV8_4aOps; }
+  bool hasV8_5aOps() const { return HasV8_5aOps; }
   bool hasV8MBaselineOps() const { return HasV8MBaselineOps; }
   bool hasV8MMainlineOps() const { return HasV8MMainlineOps; }
 
@@ -619,6 +628,7 @@ public:
   bool hasDSP() const { return HasDSP; }
   bool useNaClTrap() const { return UseNaClTrap; }
   bool useSjLjEH() const { return UseSjLjEH; }
+  bool hasSpecCtrl() const { return HasSpecCtrl; }
   bool genLongCalls() const { return GenLongCalls; }
   bool genExecuteOnly() const { return GenExecuteOnly; }
 
@@ -803,6 +813,10 @@ public:
   /// ROPI does not use GOT.
   bool allowPositionIndependentMovt() const {
     return isROPI() || !isTargetELF();
+  }
+
+  unsigned getPrefLoopAlignment() const {
+    return PrefLoopAlignment;
   }
 };
 

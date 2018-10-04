@@ -62,48 +62,64 @@ llvm::ARMJITSymbolFlags::fromObjectSymbol(const object::SymbolRef &Symbol) {
 /// Performs lookup by, for each symbol, first calling
 ///        findSymbolInLogicalDylib and if that fails calling
 ///        findSymbol.
-Expected<JITSymbolResolver::LookupResult>
-LegacyJITSymbolResolver::lookup(const LookupSet &Symbols) {
+void LegacyJITSymbolResolver::lookup(const LookupSet &Symbols,
+                                     OnResolvedFunction OnResolved) {
   JITSymbolResolver::LookupResult Result;
   for (auto &Symbol : Symbols) {
     std::string SymName = Symbol.str();
     if (auto Sym = findSymbolInLogicalDylib(SymName)) {
       if (auto AddrOrErr = Sym.getAddress())
         Result[Symbol] = JITEvaluatedSymbol(*AddrOrErr, Sym.getFlags());
-      else
-        return AddrOrErr.takeError();
-    } else if (auto Err = Sym.takeError())
-      return std::move(Err);
-    else {
+      else {
+        OnResolved(AddrOrErr.takeError());
+        return;
+      }
+    } else if (auto Err = Sym.takeError()) {
+      OnResolved(std::move(Err));
+      return;
+    } else {
       // findSymbolInLogicalDylib failed. Lets try findSymbol.
       if (auto Sym = findSymbol(SymName)) {
         if (auto AddrOrErr = Sym.getAddress())
           Result[Symbol] = JITEvaluatedSymbol(*AddrOrErr, Sym.getFlags());
-        else
-          return AddrOrErr.takeError();
-      } else if (auto Err = Sym.takeError())
-        return std::move(Err);
-      else
-        return make_error<StringError>("Symbol not found: " + Symbol,
-                                       inconvertibleErrorCode());
+        else {
+          OnResolved(AddrOrErr.takeError());
+          return;
+        }
+      } else if (auto Err = Sym.takeError()) {
+        OnResolved(std::move(Err));
+        return;
+      } else {
+        OnResolved(make_error<StringError>("Symbol not found: " + Symbol,
+                                           inconvertibleErrorCode()));
+        return;
+      }
     }
   }
 
-  return std::move(Result);
+  OnResolved(std::move(Result));
 }
 
 /// Performs flags lookup by calling findSymbolInLogicalDylib and
 ///        returning the flags value for that symbol.
-Expected<JITSymbolResolver::LookupFlagsResult>
-LegacyJITSymbolResolver::lookupFlags(const LookupSet &Symbols) {
-  JITSymbolResolver::LookupFlagsResult Result;
+Expected<JITSymbolResolver::LookupSet>
+LegacyJITSymbolResolver::getResponsibilitySet(const LookupSet &Symbols) {
+  JITSymbolResolver::LookupSet Result;
 
   for (auto &Symbol : Symbols) {
     std::string SymName = Symbol.str();
-    if (auto Sym = findSymbolInLogicalDylib(SymName))
-      Result[Symbol] = Sym.getFlags();
-    else if (auto Err = Sym.takeError())
+    if (auto Sym = findSymbolInLogicalDylib(SymName)) {
+      // If there's an existing def but it is not strong, then the caller is
+      // responsible for it.
+      if (!Sym.getFlags().isStrong())
+        Result.insert(Symbol);
+    } else if (auto Err = Sym.takeError())
       return std::move(Err);
+    else {
+      // If there is no existing definition then the caller is responsible for
+      // it.
+      Result.insert(Symbol);
+    }
   }
 
   return std::move(Result);

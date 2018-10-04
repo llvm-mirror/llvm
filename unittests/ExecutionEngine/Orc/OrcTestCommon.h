@@ -46,9 +46,9 @@ namespace orc {
 //     linkage and non-hidden visibility.
 // (5) V -- A JITDylib associated with ES.
 class CoreAPIsBasedStandardTest : public testing::Test {
-public:
 protected:
-  ExecutionSession ES;
+  std::shared_ptr<SymbolStringPool> SSP = std::make_shared<SymbolStringPool>();
+  ExecutionSession ES{SSP};
   JITDylib &JD = ES.createJITDylib("JD");
   SymbolStringPtr Foo = ES.getSymbolStringPool().intern("foo");
   SymbolStringPtr Bar = ES.getSymbolStringPool().intern("bar");
@@ -83,6 +83,46 @@ public:
 
 private:
   static bool NativeTargetInitialized;
+};
+
+class SimpleMaterializationUnit : public orc::MaterializationUnit {
+public:
+  using MaterializeFunction =
+      std::function<void(orc::MaterializationResponsibility)>;
+  using DiscardFunction =
+      std::function<void(const orc::JITDylib &, orc::SymbolStringPtr)>;
+  using DestructorFunction = std::function<void()>;
+
+  SimpleMaterializationUnit(
+      orc::SymbolFlagsMap SymbolFlags, MaterializeFunction Materialize,
+      DiscardFunction Discard = DiscardFunction(),
+      DestructorFunction Destructor = DestructorFunction())
+      : MaterializationUnit(std::move(SymbolFlags)),
+        Materialize(std::move(Materialize)), Discard(std::move(Discard)),
+        Destructor(std::move(Destructor)) {}
+
+  ~SimpleMaterializationUnit() override {
+    if (Destructor)
+      Destructor();
+  }
+
+  StringRef getName() const override { return "<Simple>"; }
+
+  void materialize(orc::MaterializationResponsibility R) override {
+    Materialize(std::move(R));
+  }
+
+  void discard(const orc::JITDylib &JD, orc::SymbolStringPtr Name) override {
+    if (Discard)
+      Discard(JD, std::move(Name));
+    else
+      llvm_unreachable("Discard not supported");
+  }
+
+private:
+  MaterializeFunction Materialize;
+  DiscardFunction Discard;
+  DestructorFunction Destructor;
 };
 
 // Base class for Orc tests that will execute code.

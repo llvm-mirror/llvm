@@ -619,6 +619,68 @@ LegalizerHelper::widenScalar(MachineInstr &MI, unsigned TypeIdx, LLT WideTy) {
   switch (MI.getOpcode()) {
   default:
     return UnableToLegalize;
+  case TargetOpcode::G_UADDO:
+  case TargetOpcode::G_USUBO: {
+    if (TypeIdx == 1)
+      return UnableToLegalize; // TODO
+    auto LHSZext = MIRBuilder.buildInstr(TargetOpcode::G_ZEXT, WideTy,
+                                         MI.getOperand(2).getReg());
+    auto RHSZext = MIRBuilder.buildInstr(TargetOpcode::G_ZEXT, WideTy,
+                                         MI.getOperand(3).getReg());
+    unsigned Opcode = MI.getOpcode() == TargetOpcode::G_UADDO
+                          ? TargetOpcode::G_ADD
+                          : TargetOpcode::G_SUB;
+    // Do the arithmetic in the larger type.
+    auto NewOp = MIRBuilder.buildInstr(Opcode, WideTy, LHSZext, RHSZext);
+    LLT OrigTy = MRI.getType(MI.getOperand(0).getReg());
+    APInt Mask = APInt::getAllOnesValue(OrigTy.getSizeInBits());
+    auto AndOp = MIRBuilder.buildInstr(
+        TargetOpcode::G_AND, WideTy, NewOp,
+        MIRBuilder.buildConstant(WideTy, Mask.getZExtValue()));
+    // There is no overflow if the AndOp is the same as NewOp.
+    MIRBuilder.buildICmp(CmpInst::ICMP_NE, MI.getOperand(1).getReg(), NewOp,
+                         AndOp);
+    // Now trunc the NewOp to the original result.
+    MIRBuilder.buildTrunc(MI.getOperand(0).getReg(), NewOp);
+    MI.eraseFromParent();
+    return Legalized;
+  }
+  case TargetOpcode::G_CTTZ:
+  case TargetOpcode::G_CTTZ_ZERO_UNDEF:
+  case TargetOpcode::G_CTLZ:
+  case TargetOpcode::G_CTLZ_ZERO_UNDEF:
+  case TargetOpcode::G_CTPOP: {
+    // First ZEXT the input.
+    auto MIBSrc = MIRBuilder.buildZExt(WideTy, MI.getOperand(1).getReg());
+    LLT CurTy = MRI.getType(MI.getOperand(0).getReg());
+    if (MI.getOpcode() == TargetOpcode::G_CTTZ) {
+      // The count is the same in the larger type except if the original
+      // value was zero.  This can be handled by setting the bit just off
+      // the top of the original type.
+      auto TopBit =
+          APInt::getOneBitSet(WideTy.getSizeInBits(), CurTy.getSizeInBits());
+      MIBSrc = MIRBuilder.buildInstr(
+          TargetOpcode::G_OR, WideTy, MIBSrc,
+          MIRBuilder.buildConstant(WideTy, TopBit.getSExtValue()));
+    }
+    // Perform the operation at the larger size.
+    auto MIBNewOp = MIRBuilder.buildInstr(MI.getOpcode(), WideTy, MIBSrc);
+    // This is already the correct result for CTPOP and CTTZs
+    if (MI.getOpcode() == TargetOpcode::G_CTLZ ||
+        MI.getOpcode() == TargetOpcode::G_CTLZ_ZERO_UNDEF) {
+      // The correct result is NewOp - (Difference in widety and current ty).
+      unsigned SizeDiff = WideTy.getSizeInBits() - CurTy.getSizeInBits();
+      MIBNewOp =
+          MIRBuilder.buildInstr(TargetOpcode::G_SUB, WideTy, MIBNewOp,
+                                MIRBuilder.buildConstant(WideTy, SizeDiff));
+    }
+    auto &TII = *MI.getMF()->getSubtarget().getInstrInfo();
+    // Make the original instruction a trunc now, and update it's source.
+    MI.setDesc(TII.get(TargetOpcode::G_TRUNC));
+    MI.getOperand(1).setReg(MIBNewOp->getOperand(0).getReg());
+    MIRBuilder.recordInsertion(&MI);
+    return Legalized;
+  }
 
   case TargetOpcode::G_ADD:
   case TargetOpcode::G_AND:
@@ -1131,9 +1193,10 @@ LegalizerHelper::lowerBitCount(MachineInstr &MI, unsigned TypeIdx, LLT Ty) {
         MIRBuilder.buildInstr(TargetOpcode::G_ADD, Ty, SrcReg, MIBCstNeg1));
     if (!isLegalOrCustom({TargetOpcode::G_CTPOP, {Ty}}) &&
         isLegalOrCustom({TargetOpcode::G_CTLZ, {Ty}})) {
+      auto MIBCstLen = MIRBuilder.buildConstant(Ty, Len);
       MIRBuilder.buildInstr(
           TargetOpcode::G_SUB, MI.getOperand(0).getReg(),
-          MIRBuilder.buildConstant(Ty, Len),
+          MIBCstLen,
           MIRBuilder.buildInstr(TargetOpcode::G_CTLZ, Ty, MIBTmp));
       MI.eraseFromParent();
       return Legalized;

@@ -2,13 +2,6 @@
 
 cmake_minimum_required(VERSION 3.4.3)
 
-# CMake 3.1 and higher include generator expressions of the form
-# $<TARGETLIB:obj> in the SOURCES property.  These need to be
-# stripped everywhere that access the SOURCES property, so we just
-# defer to the OLD behavior of not including generator expressions
-# in the output for now.
-cmake_policy(SET CMP0051 OLD)
-
 if(POLICY CMP0068)
   cmake_policy(SET CMP0068 NEW)
   set(CMAKE_BUILD_WITH_INSTALL_NAME_DIR ON)
@@ -320,6 +313,8 @@ if(LLVM_ENABLE_CRASH_OVERRIDES)
   set(ENABLE_CRASH_OVERRIDES 1)
 endif()
 
+option(LLVM_ENABLE_CRASH_DUMPS "Turn on memory dumps on crashes. Currently only implemented on Windows." OFF)
+
 option(LLVM_ENABLE_FFI "Use libffi to call external functions from the interpreter" OFF)
 set(FFI_LIBRARY_DIR "" CACHE PATH "Additional directory, where CMake should search for libffi.so")
 set(FFI_INCLUDE_DIR "" CACHE PATH "Additional directory, where CMake should search for ffi.h or ffi/ffi.h")
@@ -497,6 +492,10 @@ option(LLVM_BUILD_TESTS
   "Build LLVM unit tests. If OFF, just generate build targets." OFF)
 option(LLVM_INCLUDE_TESTS "Generate build targets for the LLVM unit tests." ON)
 option(LLVM_INCLUDE_GO_TESTS "Include the Go bindings tests in test build targets." ON)
+
+option(LLVM_BUILD_BENCHMARKS "Add LLVM benchmark targets to the list of default
+targets. If OFF, benchmarks still could be built using Benchmarks target." OFF)
+option(LLVM_INCLUDE_BENCHMARKS "Generate benchmark targets. If OFF, benchmarks can't be built." ON)
 
 option (LLVM_BUILD_DOCS "Build the llvm documentation." OFF)
 option (LLVM_INCLUDE_DOCS "Generate build targets for llvm documentation." ON)
@@ -979,6 +978,27 @@ if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
                              DEPENDS llvm-headers
                              COMPONENT llvm-headers)
   endif()
+
+  # Custom target to install all libraries.
+  add_custom_target(llvm-libraries)
+  set_target_properties(llvm-libraries PROPERTIES FOLDER "Misc")
+
+  if (NOT CMAKE_CONFIGURATION_TYPES)
+    add_llvm_install_targets(install-llvm-libraries
+                             DEPENDS llvm-libraries
+                             COMPONENT llvm-libraries)
+  endif()
+
+  get_property(LLVM_LIBS GLOBAL PROPERTY LLVM_LIBS)
+  if(LLVM_LIBS)
+    list(REMOVE_DUPLICATES LLVM_LIBS)
+    foreach(lib ${LLVM_LIBS})
+      add_dependencies(llvm-libraries ${lib})
+      if (NOT CMAKE_CONFIGURATION_TYPES)
+        add_dependencies(install-llvm-libraries install-${lib})
+      endif()
+    endforeach()
+  endif()
 endif()
 
 # This must be at the end of the LLVM root CMakeLists file because it must run
@@ -1017,4 +1037,19 @@ endif()
 # This allows us to deploy the Universal CRT DLLs by passing -DCMAKE_INSTALL_UCRT_LIBRARIES=ON to CMake
 if (MSVC AND CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows" AND CMAKE_INSTALL_UCRT_LIBRARIES)
   include(InstallRequiredSystemLibraries)
+endif()
+
+if (LLVM_INCLUDE_BENCHMARKS)
+  # Override benchmark defaults so that when the library itself is updated these
+  # modifications are not lost.
+  set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "Disable benchmark testing" FORCE)
+  set(BENCHMARK_ENABLE_EXCEPTIONS OFF CACHE BOOL "Disable benchmark exceptions" FORCE)
+  set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "Don't install benchmark" FORCE)
+  set(BENCHMARK_DOWNLOAD_DEPENDENCIES OFF CACHE BOOL "Don't download dependencies" FORCE)
+  set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "Disable Google Test in benchmark" FORCE)
+  # Since LLVM requires C++11 it is safe to assume that std::regex is available.
+  set(HAVE_STD_REGEX ON CACHE BOOL "OK" FORCE)
+
+  add_subdirectory(utils/benchmark)
+  add_subdirectory(benchmarks)
 endif()

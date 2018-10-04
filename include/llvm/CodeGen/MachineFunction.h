@@ -294,7 +294,7 @@ class MachineFunction {
   bool HasInlineAsm = false;
 
   /// True if any WinCFI instruction have been emitted in this function.
-  Optional<bool> HasWinCFI;
+  bool HasWinCFI = false;
 
   /// Current high-level properties of the IR of the function (e.g. is in SSA
   /// form or whether registers have been allocated)
@@ -363,6 +363,25 @@ public:
                     int Slot, const DILocation *Loc)
         : Var(Var), Expr(Expr), Slot(Slot), Loc(Loc) {}
   };
+
+  class Delegate {
+    virtual void anchor();
+
+  public:
+    virtual ~Delegate() = default;
+    virtual void MF_HandleInsertion(const MachineInstr &MI) = 0;
+    virtual void MF_HandleRemoval(const MachineInstr &MI) = 0;
+  };
+
+private:
+  Delegate *TheDelegate = nullptr;
+
+  // Callbacks for insertion and removal.
+  void handleInsertion(const MachineInstr &MI);
+  void handleRemoval(const MachineInstr &MI);
+  friend struct ilist_traits<MachineInstr>;
+
+public:
   using VariableDbgInfoMapTy = SmallVector<VariableDbgInfo, 4>;
   VariableDbgInfoMapTy VariableDbgInfos;
 
@@ -377,6 +396,23 @@ public:
   void reset() {
     clear();
     init();
+  }
+
+  /// Reset the currently registered delegate - otherwise assert.
+  void resetDelegate(Delegate *delegate) {
+    assert(TheDelegate == delegate &&
+           "Only the current delegate can perform reset!");
+    TheDelegate = nullptr;
+  }
+
+  /// Set the delegate. resetDelegate must be called before attempting
+  /// to set.
+  void setDelegate(Delegate *delegate) {
+    assert(delegate && !TheDelegate &&
+           "Attempted to set delegate to null, or to change it without "
+           "first resetting it!");
+
+    TheDelegate = delegate;
   }
 
   MachineModuleInfo &getMMI() const { return MMI; }
@@ -484,8 +520,7 @@ public:
   }
 
   bool hasWinCFI() const {
-    assert(HasWinCFI.hasValue() && "HasWinCFI not set yet!");
-    return *HasWinCFI;
+    return HasWinCFI;
   }
   void setHasWinCFI(bool v) { HasWinCFI = v; }
 
@@ -617,6 +652,14 @@ public:
   template <typename Comp>
   void sort(Comp comp) {
     BasicBlocks.sort(comp);
+  }
+
+  /// Return the number of \p MachineInstrs in this \p MachineFunction.
+  unsigned getInstructionCount() const {
+    unsigned InstrCount = 0;
+    for (const MachineBasicBlock &MBB : BasicBlocks)
+      InstrCount += MBB.size();
+    return InstrCount;
   }
 
   //===--------------------------------------------------------------------===//
@@ -779,7 +822,9 @@ public:
   void addInvoke(MachineBasicBlock *LandingPad,
                  MCSymbol *BeginLabel, MCSymbol *EndLabel);
 
-  /// Add a new panding pad.  Returns the label ID for the landing pad entry.
+  /// Add a new panding pad, and extract the exception handling information from
+  /// the landingpad instruction. Returns the label ID for the landing pad
+  /// entry.
   MCSymbol *addLandingPad(MachineBasicBlock *LandingPad);
 
   /// Provide the catch typeinfo for a landing pad.
@@ -870,15 +915,6 @@ public:
     return VariableDbgInfos;
   }
 };
-
-/// \name Exception Handling
-/// \{
-
-/// Extract the exception handling information from the landingpad instruction
-/// and add them to the specified machine module info.
-void addLandingPadInfo(const LandingPadInst &I, MachineBasicBlock &MBB);
-
-/// \}
 
 //===--------------------------------------------------------------------===//
 // GraphTraits specializations for function basic block graphs (CFGs)

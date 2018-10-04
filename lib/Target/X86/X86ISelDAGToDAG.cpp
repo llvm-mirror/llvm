@@ -41,6 +41,10 @@ using namespace llvm;
 
 STATISTIC(NumLoadMoved, "Number of loads moved below TokenFactor");
 
+static cl::opt<bool> AndImmShrink("x86-and-imm-shrink", cl::init(true),
+    cl::desc("Enable setting constant bits to reduce size of mask immediates"),
+    cl::Hidden);
+
 //===----------------------------------------------------------------------===//
 //                      Pattern Matcher Implementation
 //===----------------------------------------------------------------------===//
@@ -456,6 +460,7 @@ namespace {
     bool matchBEXTRFromAnd(SDNode *Node);
     bool shrinkAndImmediate(SDNode *N);
     bool isMaskZeroExtended(SDNode *N) const;
+    bool tryShiftAmountMod(SDNode *N);
 
     MachineSDNode *emitPCMPISTR(unsigned ROpc, unsigned MOpc, bool MayFoldLoad,
                                 const SDLoc &dl, MVT VT, SDNode *Node);
@@ -517,7 +522,9 @@ X86DAGToDAGISel::IsProfitableToFold(SDValue N, SDNode *U, SDNode *Root) const {
     switch (U->getOpcode()) {
     default: break;
     case X86ISD::ADD:
+    case X86ISD::ADC:
     case X86ISD::SUB:
+    case X86ISD::SBB:
     case X86ISD::AND:
     case X86ISD::XOR:
     case X86ISD::OR:
@@ -724,7 +731,7 @@ void X86DAGToDAGISel::PreprocessISelDAG() {
     if (OptLevel != CodeGenOpt::None &&
         // Only do this when the target can fold the load into the call or
         // jmp.
-        !Subtarget->useRetpoline() &&
+        !Subtarget->useRetpolineIndirectCalls() &&
         ((N->getOpcode() == X86ISD::CALL && !Subtarget->slowTwoMemOps()) ||
          (N->getOpcode() == X86ISD::TC_RETURN &&
           (Subtarget->is64Bit() ||
@@ -2218,19 +2225,20 @@ static bool hasNoCarryFlagUses(SDNode *N) {
 /// the {load; op; store} to modify transformation.
 static bool isFusableLoadOpStorePattern(StoreSDNode *StoreNode,
                                         SDValue StoredVal, SelectionDAG *CurDAG,
+                                        unsigned LoadOpNo,
                                         LoadSDNode *&LoadNode,
                                         SDValue &InputChain) {
-  // is the stored value result 0 of the load?
+  // Is the stored value result 0 of the operation?
   if (StoredVal.getResNo() != 0) return false;
 
-  // are there other uses of the loaded value than the inc or dec?
+  // Are there other uses of the operation other than the store?
   if (!StoredVal.getNode()->hasNUsesOfValue(1, 0)) return false;
 
-  // is the store non-extending and non-indexed?
+  // Is the store non-extending and non-indexed?
   if (!ISD::isNormalStore(StoreNode) || StoreNode->isNonTemporal())
     return false;
 
-  SDValue Load = StoredVal->getOperand(0);
+  SDValue Load = StoredVal->getOperand(LoadOpNo);
   // Is the stored value a non-extending and non-indexed load?
   if (!ISD::isNormalLoad(Load.getNode())) return false;
 
@@ -2359,26 +2367,39 @@ bool X86DAGToDAGISel::foldLoadStoreIntoMemOperand(SDNode *Node) {
   if (MemVT != MVT::i64 && MemVT != MVT::i32 && MemVT != MVT::i16 &&
       MemVT != MVT::i8)
     return false;
+
+  bool IsCommutable = false;
   switch (Opc) {
   default:
     return false;
   case X86ISD::INC:
   case X86ISD::DEC:
-  case X86ISD::ADD:
-  case X86ISD::ADC:
   case X86ISD::SUB:
   case X86ISD::SBB:
+    break;
+  case X86ISD::ADD:
+  case X86ISD::ADC:
   case X86ISD::AND:
   case X86ISD::OR:
   case X86ISD::XOR:
+    IsCommutable = true;
     break;
   }
 
+  unsigned LoadOpNo = 0;
   LoadSDNode *LoadNode = nullptr;
   SDValue InputChain;
-  if (!isFusableLoadOpStorePattern(StoreNode, StoredVal, CurDAG, LoadNode,
-                                   InputChain))
-    return false;
+  if (!isFusableLoadOpStorePattern(StoreNode, StoredVal, CurDAG, LoadOpNo,
+                                   LoadNode, InputChain)) {
+    if (!IsCommutable)
+      return false;
+
+    // This operation is commutable, try the other operand.
+    LoadOpNo = 1;
+    if (!isFusableLoadOpStorePattern(StoreNode, StoredVal, CurDAG, LoadOpNo,
+                                     LoadNode, InputChain))
+      return false;
+  }
 
   SDValue Base, Scale, Index, Disp, Segment;
   if (!selectAddr(LoadNode, LoadNode->getBasePtr(), Base, Scale, Index, Disp,
@@ -2496,7 +2517,7 @@ bool X86DAGToDAGISel::foldLoadStoreIntoMemOperand(SDNode *Node) {
     };
 
     unsigned NewOpc = SelectRegOpcode(Opc);
-    SDValue Operand = StoredVal->getOperand(1);
+    SDValue Operand = StoredVal->getOperand(1-LoadOpNo);
 
     // See if the operand is a constant that we can fold into an immediate
     // operand.
@@ -2690,6 +2711,102 @@ MachineSDNode *X86DAGToDAGISel::emitPCMPESTR(unsigned ROpc, unsigned MOpc,
   return CNode;
 }
 
+bool X86DAGToDAGISel::tryShiftAmountMod(SDNode *N) {
+  EVT VT = N->getValueType(0);
+
+  // Only handle scalar shifts.
+  if (VT.isVector())
+    return false;
+
+  // Narrower shifts only mask to 5 bits in hardware.
+  unsigned Size = VT == MVT::i64 ? 64 : 32;
+
+  SDValue OrigShiftAmt = N->getOperand(1);
+  SDValue ShiftAmt = OrigShiftAmt;
+  SDLoc DL(N);
+
+  // Skip over a truncate of the shift amount.
+  if (ShiftAmt->getOpcode() == ISD::TRUNCATE)
+    ShiftAmt = ShiftAmt->getOperand(0);
+
+  // Special case to avoid messing up a BZHI pattern.
+  // Look for (srl (shl X, (size - y)), (size - y)
+  if (Subtarget->hasBMI2() && (VT == MVT::i32 || VT == MVT::i64) &&
+      N->getOpcode() == ISD::SRL && N->getOperand(0).getOpcode() == ISD::SHL &&
+      // Shift amounts the same?
+      N->getOperand(1) == N->getOperand(0).getOperand(1) &&
+      // Shift amounts size - y?
+      ShiftAmt.getOpcode() == ISD::SUB &&
+      isa<ConstantSDNode>(ShiftAmt.getOperand(0)) &&
+      cast<ConstantSDNode>(ShiftAmt.getOperand(0))->getZExtValue() == Size)
+    return false;
+
+  SDValue NewShiftAmt;
+  if (ShiftAmt->getOpcode() == ISD::ADD || ShiftAmt->getOpcode() == ISD::SUB) {
+    SDValue Add0 = ShiftAmt->getOperand(0);
+    SDValue Add1 = ShiftAmt->getOperand(1);
+    // If we are shifting by X+/-N where N == 0 mod Size, then just shift by X
+    // to avoid the ADD/SUB.
+    if (isa<ConstantSDNode>(Add1) &&
+        cast<ConstantSDNode>(Add1)->getZExtValue() % Size == 0) {
+      NewShiftAmt = Add0;
+    // If we are shifting by N-X where N == 0 mod Size, then just shift by -X to
+    // generate a NEG instead of a SUB of a constant.
+    } else if (ShiftAmt->getOpcode() == ISD::SUB &&
+               isa<ConstantSDNode>(Add0) &&
+               cast<ConstantSDNode>(Add0)->getZExtValue() != 0 &&
+               cast<ConstantSDNode>(Add0)->getZExtValue() % Size == 0) {
+      // Insert a negate op.
+      // TODO: This isn't guaranteed to replace the sub if there is a logic cone
+      // that uses it that's not a shift.
+      EVT SubVT = ShiftAmt.getValueType();
+      SDValue Zero = CurDAG->getConstant(0, DL, SubVT);
+      SDValue Neg = CurDAG->getNode(ISD::SUB, DL, SubVT, Zero, Add1);
+      NewShiftAmt = Neg;
+
+      // Insert these operands into a valid topological order so they can
+      // get selected independently.
+      insertDAGNode(*CurDAG, OrigShiftAmt, Zero);
+      insertDAGNode(*CurDAG, OrigShiftAmt, Neg);
+    } else
+      return false;
+  } else
+    return false;
+
+  if (NewShiftAmt.getValueType() != MVT::i8) {
+    // Need to truncate the shift amount.
+    NewShiftAmt = CurDAG->getNode(ISD::TRUNCATE, DL, MVT::i8, NewShiftAmt);
+    // Add to a correct topological ordering.
+    insertDAGNode(*CurDAG, OrigShiftAmt, NewShiftAmt);
+  }
+
+  // Insert a new mask to keep the shift amount legal. This should be removed
+  // by isel patterns.
+  NewShiftAmt = CurDAG->getNode(ISD::AND, DL, MVT::i8, NewShiftAmt,
+                                CurDAG->getConstant(Size - 1, DL, MVT::i8));
+  // Place in a correct topological ordering.
+  insertDAGNode(*CurDAG, OrigShiftAmt, NewShiftAmt);
+
+  SDNode *UpdatedNode = CurDAG->UpdateNodeOperands(N, N->getOperand(0),
+                                                   NewShiftAmt);
+  if (UpdatedNode != N) {
+    // If we found an existing node, we should replace ourselves with that node
+    // and wait for it to be selected after its other users.
+    ReplaceNode(N, UpdatedNode);
+    return true;
+  }
+
+  // If the original shift amount is now dead, delete it so that we don't run
+  // it through isel.
+  if (OrigShiftAmt.getNode()->use_empty())
+    CurDAG->RemoveDeadNode(OrigShiftAmt.getNode());
+
+  // Now that we've optimized the shift amount, defer to normal isel to get
+  // load folding and legacy vs BMI2 selection without repeating it here.
+  SelectCode(N);
+  return true;
+}
+
 /// If the high bits of an 'and' operand are known zero, try setting the
 /// high bits of an 'and' constant operand to produce a smaller encoding by
 /// creating a small, sign-extended negative immediate rather than a large
@@ -2820,10 +2937,17 @@ void X86DAGToDAGISel::Select(SDNode *Node) {
     return;
   }
 
+  case ISD::SRL:
+  case ISD::SRA:
+  case ISD::SHL:
+    if (tryShiftAmountMod(Node))
+      return;
+    break;
+
   case ISD::AND:
     if (matchBEXTRFromAnd(Node))
       return;
-    if (shrinkAndImmediate(Node))
+    if (AndImmShrink && shrinkAndImmediate(Node))
       return;
 
     LLVM_FALLTHROUGH;

@@ -11,10 +11,10 @@ set(LLVM_LINK_COMPONENTS
   )
 
 add_llvm_unittest(LLVMExegesisTests
-  BenchmarkResultTest.cpp
   BenchmarkRunnerTest.cpp
   ClusteringTest.cpp
   PerfHelperTest.cpp
+  RegisterValueTest.cpp
   )
 target_link_libraries(LLVMExegesisTests PRIVATE LLVMExegesis)
 

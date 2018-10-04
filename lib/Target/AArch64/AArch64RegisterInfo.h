@@ -31,6 +31,12 @@ public:
   AArch64RegisterInfo(const Triple &TT);
 
   bool isReservedReg(const MachineFunction &MF, unsigned Reg) const;
+  bool isAnyArgRegReserved(const MachineFunction &MF) const;
+  void emitReservedArgRegCallError(const MachineFunction &MF) const;
+
+  void UpdateCustomCalleeSavedRegs(MachineFunction &MF) const;
+  void UpdateCustomCallPreservedMask(MachineFunction &MF,
+                                     const uint32_t **Mask) const;
 
   /// Code Generation virtual methods...
   const MCPhysReg *getCalleeSavedRegs(const MachineFunction *MF) const override;
@@ -69,6 +75,8 @@ public:
   const uint32_t *getWindowsStackProbePreservedMask() const;
 
   BitVector getReservedRegs(const MachineFunction &MF) const override;
+  bool isAsmClobberable(const MachineFunction &MF,
+                       unsigned PhysReg) const override;
   bool isConstantPhysReg(unsigned PhysReg) const override;
   const TargetRegisterClass *
   getPointerRegClass(const MachineFunction &MF,

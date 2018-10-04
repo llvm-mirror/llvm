@@ -1027,6 +1027,18 @@ void ARMLoadStoreOpt::FormCandidates(const MemOpQueue &MemOps) {
     if (AssumeMisalignedLoadStores && !mayCombineMisaligned(*STI, *MI))
       CanMergeToLSMulti = CanMergeToLSDouble = false;
 
+    // vldm / vstm limit are 32 for S variants, 16 for D variants.
+    unsigned Limit;
+    switch (Opcode) {
+    default:
+      Limit = UINT_MAX;
+      break;
+    case ARM::VLDRD:
+    case ARM::VSTRD:
+      Limit = 16;
+      break;
+    }
+
     // Merge following instructions where possible.
     for (unsigned I = SIndex+1; I < EIndex; ++I, ++Count) {
       int NewOffset = MemOps[I].Offset;
@@ -1035,6 +1047,8 @@ void ARMLoadStoreOpt::FormCandidates(const MemOpQueue &MemOps) {
       const MachineOperand &MO = getLoadStoreRegOp(*MemOps[I].MI);
       unsigned Reg = MO.getReg();
       if (Reg == ARM::SP || Reg == ARM::PC)
+        break;
+      if (Count == Limit)
         break;
 
       // See if the current load/store may be part of a multi load/store.
@@ -1834,7 +1848,7 @@ bool ARMLoadStoreOpt::LoadStoreMultipleOpti(MachineBasicBlock &MBB) {
   auto LessThan = [](const MergeCandidate* M0, const MergeCandidate *M1) {
     return M0->InsertPos < M1->InsertPos;
   };
-  llvm::sort(Candidates.begin(), Candidates.end(), LessThan);
+  llvm::sort(Candidates, LessThan);
 
   // Go through list of candidates and merge.
   bool Changed = false;
@@ -2172,13 +2186,12 @@ bool ARMPreAllocLoadStoreOpt::RescheduleOps(MachineBasicBlock *MBB,
   bool RetVal = false;
 
   // Sort by offset (in reverse order).
-  llvm::sort(Ops.begin(), Ops.end(),
-             [](const MachineInstr *LHS, const MachineInstr *RHS) {
-               int LOffset = getMemoryOpOffset(*LHS);
-               int ROffset = getMemoryOpOffset(*RHS);
-               assert(LHS == RHS || LOffset != ROffset);
-               return LOffset > ROffset;
-             });
+  llvm::sort(Ops, [](const MachineInstr *LHS, const MachineInstr *RHS) {
+    int LOffset = getMemoryOpOffset(*LHS);
+    int ROffset = getMemoryOpOffset(*RHS);
+    assert(LHS == RHS || LOffset != ROffset);
+    return LOffset > ROffset;
+  });
 
   // The loads / stores of the same base are in order. Scan them from first to
   // last and check for the following:

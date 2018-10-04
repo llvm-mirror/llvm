@@ -955,8 +955,8 @@ def HasFastLZCNT : Predicate<"Subtarget->hasFastLZCNT()">;
 def HasFastSHLDRotate : Predicate<"Subtarget->hasFastSHLDRotate()">;
 def HasERMSB : Predicate<"Subtarget->hasERMSB()">;
 def HasMFence    : Predicate<"Subtarget->hasMFence()">;
-def UseRetpoline : Predicate<"Subtarget->useRetpoline()">;
-def NotUseRetpoline : Predicate<"!Subtarget->useRetpoline()">;
+def UseRetpolineIndirectCalls : Predicate<"Subtarget->useRetpolineIndirectCalls()">;
+def NotUseRetpolineIndirectCalls : Predicate<"!Subtarget->useRetpolineIndirectCalls()">;
 
 //===----------------------------------------------------------------------===//
 // X86 Instruction Format Definitions.
@@ -1818,7 +1818,7 @@ def BT64mi8 : RIi8<0xBA, MRM4m, (outs), (ins i64mem:$src1, i64i8imm:$src2),
 } // SchedRW
 
 let hasSideEffects = 0 in {
-let SchedRW = [WriteBitTest], Constraints = "$src1 = $dst" in {
+let SchedRW = [WriteBitTestSet], Constraints = "$src1 = $dst" in {
 def BTC16rr : I<0xBB, MRMDestReg, (outs GR16:$dst), (ins GR16:$src1, GR16:$src2),
                 "btc{w}\t{$src2, $src1|$src1, $src2}", []>,
                 OpSize16, TB, NotMemoryFoldable;
@@ -1842,7 +1842,7 @@ def BTC64mr : RI<0xBB, MRMDestMem, (outs), (ins i64mem:$src1, GR64:$src2),
                  NotMemoryFoldable;
 }
 
-let SchedRW = [WriteBitTest], Constraints = "$src1 = $dst" in {
+let SchedRW = [WriteBitTestSet], Constraints = "$src1 = $dst" in {
 def BTC16ri8 : Ii8<0xBA, MRM7r, (outs GR16:$dst), (ins GR16:$src1, i16i8imm:$src2),
                     "btc{w}\t{$src2, $src1|$src1, $src2}", []>, OpSize16, TB;
 def BTC32ri8 : Ii8<0xBA, MRM7r, (outs GR32:$dst), (ins GR32:$src1, i32i8imm:$src2),
@@ -1861,7 +1861,7 @@ def BTC64mi8 : RIi8<0xBA, MRM7m, (outs), (ins i64mem:$src1, i64i8imm:$src2),
                     Requires<[In64BitMode]>;
 }
 
-let SchedRW = [WriteBitTest], Constraints = "$src1 = $dst" in {
+let SchedRW = [WriteBitTestSet], Constraints = "$src1 = $dst" in {
 def BTR16rr : I<0xB3, MRMDestReg, (outs GR16:$dst), (ins GR16:$src1, GR16:$src2),
                 "btr{w}\t{$src2, $src1|$src1, $src2}", []>,
                 OpSize16, TB, NotMemoryFoldable;
@@ -1885,7 +1885,7 @@ def BTR64mr : RI<0xB3, MRMDestMem, (outs), (ins i64mem:$src1, GR64:$src2),
                  NotMemoryFoldable;
 }
 
-let SchedRW = [WriteBitTest], Constraints = "$src1 = $dst" in {
+let SchedRW = [WriteBitTestSet], Constraints = "$src1 = $dst" in {
 def BTR16ri8 : Ii8<0xBA, MRM6r, (outs GR16:$dst), (ins GR16:$src1, i16i8imm:$src2),
                     "btr{w}\t{$src2, $src1|$src1, $src2}", []>,
                     OpSize16, TB;
@@ -1908,7 +1908,7 @@ def BTR64mi8 : RIi8<0xBA, MRM6m, (outs), (ins i64mem:$src1, i64i8imm:$src2),
                     Requires<[In64BitMode]>;
 }
 
-let SchedRW = [WriteBitTest], Constraints = "$src1 = $dst" in {
+let SchedRW = [WriteBitTestSet], Constraints = "$src1 = $dst" in {
 def BTS16rr : I<0xAB, MRMDestReg, (outs GR16:$dst), (ins GR16:$src1, GR16:$src2),
                 "bts{w}\t{$src2, $src1|$src1, $src2}", []>,
                 OpSize16, TB, NotMemoryFoldable;
@@ -1932,7 +1932,7 @@ def BTS64mr : RI<0xAB, MRMDestMem, (outs), (ins i64mem:$src1, GR64:$src2),
                  NotMemoryFoldable;
 }
 
-let SchedRW = [WriteBitTest], Constraints = "$src1 = $dst" in {
+let SchedRW = [WriteBitTestSet], Constraints = "$src1 = $dst" in {
 def BTS16ri8 : Ii8<0xBA, MRM5r, (outs GR16:$dst), (ins GR16:$src1, i16i8imm:$src2),
                     "bts{w}\t{$src2, $src1|$src1, $src2}", []>, OpSize16, TB;
 def BTS32ri8 : Ii8<0xBA, MRM5r, (outs GR32:$dst), (ins GR32:$src1, i32i8imm:$src2),
@@ -2061,7 +2061,7 @@ def XADD64rm  : RI<0xC1, MRMSrcMem, (outs GR64:$dst),
 
 }
 
-let SchedRW = [WriteALU], hasSideEffects = 0 in {
+let SchedRW = [WriteCMPXCHG], hasSideEffects = 0 in {
 let Defs = [AL, EFLAGS], Uses = [AL] in
 def CMPXCHG8rr : I<0xB0, MRMDestReg, (outs GR8:$dst), (ins GR8:$src),
                    "cmpxchg{b}\t{$src, $dst|$dst, $src}", []>, TB,
@@ -2080,7 +2080,7 @@ def CMPXCHG64rr  : RI<0xB1, MRMDestReg, (outs GR64:$dst), (ins GR64:$src),
                       NotMemoryFoldable;
 } // SchedRW, hasSideEffects
 
-let SchedRW = [WriteALULd, WriteRMW], mayLoad = 1, mayStore = 1,
+let SchedRW = [WriteCMPXCHGRMW], mayLoad = 1, mayStore = 1,
     hasSideEffects = 0 in {
 let Defs = [AL, EFLAGS], Uses = [AL] in
 def CMPXCHG8rm   : I<0xB0, MRMDestMem, (outs), (ins i8mem:$dst, GR8:$src),
@@ -2368,11 +2368,11 @@ multiclass bmi_bls<string mnemonic, Format RegMRM, Format MemMRM,
 let hasSideEffects = 0 in {
   def rr : I<0xF3, RegMRM, (outs RC:$dst), (ins RC:$src),
              !strconcat(mnemonic, "\t{$src, $dst|$dst, $src}"), []>,
-             T8PS, VEX_4V, Sched<[WriteALU]>;
+             T8PS, VEX_4V, Sched<[WriteBLS]>;
   let mayLoad = 1 in
   def rm : I<0xF3, MemMRM, (outs RC:$dst), (ins x86memop:$src),
              !strconcat(mnemonic, "\t{$src, $dst|$dst, $src}"), []>,
-             T8PS, VEX_4V, Sched<[WriteALULd]>;
+             T8PS, VEX_4V, Sched<[WriteBLS.Folded]>;
 }
 }
 

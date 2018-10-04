@@ -833,6 +833,8 @@ namespace llvm {
       return VTIsOk(XVT) && VTIsOk(KeptBitsVT);
     }
 
+    bool shouldSplatInsEltVarIndex(EVT VT) const override;
+
     bool convertSetCCLogicToBitwiseLogic(EVT VT) const override {
       return VT.isScalarInteger();
     }
@@ -865,6 +867,13 @@ namespace llvm {
                                              const APInt &DemandedElts,
                                              const SelectionDAG &DAG,
                                              unsigned Depth) const override;
+
+    bool SimplifyDemandedVectorEltsForTargetNode(SDValue Op,
+                                                 const APInt &DemandedElts,
+                                                 APInt &KnownUndef,
+                                                 APInt &KnownZero,
+                                                 TargetLoweringOpt &TLO,
+                                                 unsigned Depth) const override;
 
     SDValue unwrapAddress(SDValue N) const override;
 
@@ -1031,6 +1040,8 @@ namespace llvm {
                                            Type *Ty) const override;
 
     bool convertSelectOfConstantsToMath(EVT VT) const override;
+
+    bool decomposeMulByConstant(EVT VT, SDValue C) const override;
 
     /// Return true if EXTRACT_SUBVECTOR is cheap for this result type
     /// with this index.
@@ -1407,9 +1418,9 @@ namespace llvm {
                          MachineMemOperand *MMO)
       : MemSDNode(Opcode, Order, dl, VTs, MemVT, MMO) {}
 
-    const SDValue &getBasePtr() const { return getOperand(1); }
-    const SDValue &getMask()    const { return getOperand(2); }
-    const SDValue &getValue()   const { return getOperand(3); }
+    const SDValue &getValue()   const { return getOperand(1); }
+    const SDValue &getBasePtr() const { return getOperand(2); }
+    const SDValue &getMask()    const { return getOperand(3); }
 
     static bool classof(const SDNode *N) {
       return N->getOpcode() == X86ISD::VMTRUNCSTORES ||

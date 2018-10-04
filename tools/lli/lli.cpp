@@ -97,6 +97,17 @@ namespace {
                                            "orc-lazy",
                                            "Orc-based lazy JIT.")));
 
+  cl::opt<unsigned>
+  LazyJITCompileThreads("compile-threads",
+                        cl::desc("Choose the number of compile threads "
+                                 "(jit-kind=orc-lazy only)"),
+                        cl::init(0));
+
+  cl::list<std::string>
+  ThreadEntryPoints("thread-entry",
+                    cl::desc("calls the given entry-point on a new thread "
+                             "(jit-kind=orc-lazy only)"));
+
   // The MCJIT supports building for a target address space separate from
   // the JIT compilation process. Use a forked process and a copying
   // memory manager with IPC to execute using this functionality.
@@ -337,8 +348,7 @@ static void reportError(SMDiagnostic Err, const char *ProgName) {
   exit(1);
 }
 
-int runOrcLazyJIT(LLVMContext &Ctx, std::vector<std::unique_ptr<Module>> Ms,
-                  const std::vector<std::string> &Args);
+int runOrcLazyJIT(const char *ProgName);
 
 //===----------------------------------------------------------------------===//
 // main Driver function
@@ -362,6 +372,22 @@ int main(int argc, char **argv, char * const *envp) {
   if (DisableCoreFiles)
     sys::Process::PreventCoreFiles();
 
+  if (UseJITKind == JITKind::OrcLazy)
+    return runOrcLazyJIT(argv[0]);
+  else {
+    // Make sure nobody used an orc-lazy specific option accidentally.
+
+    if (LazyJITCompileThreads != 0) {
+      errs() << "-compile-threads requires -jit-kind=orc-lazy\n";
+      exit(1);
+    }
+
+    if (!ThreadEntryPoints.empty()) {
+      errs() << "-thread-entry requires -jit-kind=orc-lazy\n";
+      exit(1);
+    }
+  }
+
   LLVMContext Context;
 
   // Load the bitcode...
@@ -370,21 +396,6 @@ int main(int argc, char **argv, char * const *envp) {
   Module *Mod = Owner.get();
   if (!Mod)
     reportError(Err, argv[0]);
-
-  if (UseJITKind == JITKind::OrcLazy) {
-    std::vector<std::unique_ptr<Module>> Ms;
-    Ms.push_back(std::move(Owner));
-    for (auto &ExtraMod : ExtraModules) {
-      Ms.push_back(parseIRFile(ExtraMod, Err, Context));
-      if (!Ms.back())
-        reportError(Err, argv[0]);
-    }
-    std::vector<std::string> Args;
-    Args.push_back(InputFile);
-    for (auto &Arg : InputArgv)
-      Args.push_back(Arg);
-    return runOrcLazyJIT(Context, std::move(Ms), Args);
-  }
 
   if (EnableCacheManager) {
     std::string CacheName("file:");
@@ -691,13 +702,13 @@ int main(int argc, char **argv, char * const *envp) {
 static orc::IRTransformLayer2::TransformFunction createDebugDumper() {
   switch (OrcDumpKind) {
   case DumpKind::NoDump:
-    return [](std::unique_ptr<Module> M) { return M; };
+    return [](orc::ThreadSafeModule TSM) { return TSM; };
 
   case DumpKind::DumpFuncsToStdOut:
-    return [](std::unique_ptr<Module> M) {
+    return [](orc::ThreadSafeModule TSM) {
       printf("[ ");
 
-      for (const auto &F : *M) {
+      for (const auto &F : *TSM.getModule()) {
         if (F.isDeclaration())
           continue;
 
@@ -709,40 +720,38 @@ static orc::IRTransformLayer2::TransformFunction createDebugDumper() {
       }
 
       printf("]\n");
-      return M;
+      return TSM;
     };
 
   case DumpKind::DumpModsToStdOut:
-    return [](std::unique_ptr<Module> M) {
+    return [](orc::ThreadSafeModule TSM) {
       outs() << "----- Module Start -----\n"
-             << *M << "----- Module End -----\n";
+             << *TSM.getModule() << "----- Module End -----\n";
 
-      return M;
+      return TSM;
     };
 
   case DumpKind::DumpModsToDisk:
-    return [](std::unique_ptr<Module> M) {
+    return [](orc::ThreadSafeModule TSM) {
       std::error_code EC;
-      raw_fd_ostream Out(M->getModuleIdentifier() + ".ll", EC, sys::fs::F_Text);
+      raw_fd_ostream Out(TSM.getModule()->getModuleIdentifier() + ".ll", EC,
+                         sys::fs::F_Text);
       if (EC) {
-        errs() << "Couldn't open " << M->getModuleIdentifier()
+        errs() << "Couldn't open " << TSM.getModule()->getModuleIdentifier()
                << " for dumping.\nError:" << EC.message() << "\n";
         exit(1);
       }
-      Out << *M;
-      return M;
+      Out << *TSM.getModule();
+      return TSM;
     };
   }
   llvm_unreachable("Unknown DumpKind");
 }
 
-int runOrcLazyJIT(LLVMContext &Ctx, std::vector<std::unique_ptr<Module>> Ms,
-                  const std::vector<std::string> &Args) {
-  // Bail out early if no modules loaded.
-  if (Ms.empty())
-    return 0;
+int runOrcLazyJIT(const char *ProgName) {
+  // Start setting up the JIT environment.
 
-  // Add lli's symbols into the JIT's search space.
+  // First add lli's symbols into the JIT's search space.
   std::string ErrMsg;
   sys::DynamicLibrary LibLLI =
       sys::DynamicLibrary::getPermanentLibrary(nullptr, &ErrMsg);
@@ -751,12 +760,20 @@ int runOrcLazyJIT(LLVMContext &Ctx, std::vector<std::unique_ptr<Module>> Ms,
     return 1;
   }
 
-  const auto &TT = Ms.front()->getTargetTriple();
-  orc::JITTargetMachineBuilder TMD =
+  // Parse the main module.
+  orc::ThreadSafeContext TSCtx(llvm::make_unique<LLVMContext>());
+  SMDiagnostic Err;
+  auto MainModule = orc::ThreadSafeModule(
+      parseIRFile(InputFile, Err, *TSCtx.getContext()), TSCtx);
+  if (!MainModule)
+    reportError(Err, ProgName);
+
+  const auto &TT = MainModule.getModule()->getTargetTriple();
+  orc::JITTargetMachineBuilder JTMB =
       TT.empty() ? ExitOnErr(orc::JITTargetMachineBuilder::detectHost())
                  : orc::JITTargetMachineBuilder(Triple(TT));
 
-  TMD.setArch(MArch)
+  JTMB.setArch(MArch)
       .setCPU(getCPUStr())
       .addFeatures(getFeatureList())
       .setRelocationModel(RelocModel.getNumOccurrences()
@@ -765,22 +782,23 @@ int runOrcLazyJIT(LLVMContext &Ctx, std::vector<std::unique_ptr<Module>> Ms,
       .setCodeModel(CMModel.getNumOccurrences()
                         ? Optional<CodeModel::Model>(CMModel)
                         : None);
-  auto TM = ExitOnErr(TMD.createTargetMachine());
-  auto DL = TM->createDataLayout();
-  auto ES = llvm::make_unique<orc::ExecutionSession>();
-  auto J =
-      ExitOnErr(orc::LLLazyJIT::Create(std::move(ES), std::move(TM), DL, Ctx));
+  DataLayout DL("");
+  {
+    // Create a throwaway TargetMachine to get the data layout.
+    auto TM = ExitOnErr(JTMB.createTargetMachine());
+    DL = TM->createDataLayout();
+  }
+  auto J = ExitOnErr(orc::LLLazyJIT::Create(std::move(JTMB), DL, LazyJITCompileThreads));
 
   auto Dump = createDebugDumper();
 
-  J->setLazyCompileTransform(
-    [&](std::unique_ptr<Module> M) {
-      if (verifyModule(*M, &dbgs())) {
-        dbgs() << "Bad module: " << *M << "\n";
-        exit(1);
-      }
-      return Dump(std::move(M));
-    });
+  J->setLazyCompileTransform([&](orc::ThreadSafeModule TSM) {
+    if (verifyModule(*TSM.getModule(), &dbgs())) {
+      dbgs() << "Bad module: " << *TSM.getModule() << "\n";
+      exit(1);
+    }
+    return Dump(std::move(TSM));
+  });
   J->getMainJITDylib().setFallbackDefinitionGenerator(
       orc::DynamicLibraryFallbackGenerator(
           std::move(LibLLI), DL, [](orc::SymbolStringPtr) { return true; }));
@@ -789,24 +807,62 @@ int runOrcLazyJIT(LLVMContext &Ctx, std::vector<std::unique_ptr<Module>> Ms,
   orc::LocalCXXRuntimeOverrides2 CXXRuntimeOverrides;
   ExitOnErr(CXXRuntimeOverrides.enable(J->getMainJITDylib(), Mangle));
 
-  for (auto &M : Ms) {
-    orc::makeAllSymbolsExternallyAccessible(*M);
-    ExitOnErr(J->addLazyIRModule(std::move(M)));
+  // Add the main module.
+  ExitOnErr(J->addLazyIRModule(std::move(MainModule)));
+
+  // Add any extra modules.
+  for (auto &ModulePath : ExtraModules) {
+    auto M = parseIRFile(ModulePath, Err, *TSCtx.getContext());
+    if (!M)
+      reportError(Err, ProgName);
+
+    ExitOnErr(J->addLazyIRModule(orc::ThreadSafeModule(std::move(M), TSCtx)));
   }
 
+  // Add the objects.
+  for (auto &ObjPath : ExtraObjects) {
+    auto Obj = ExitOnErr(errorOrToExpected(MemoryBuffer::getFile(ObjPath)));
+    ExitOnErr(J->addObjectFile(std::move(Obj)));
+  }
+
+  // Generate a argument string.
+  std::vector<std::string> Args;
+  Args.push_back(InputFile);
+  for (auto &Arg : InputArgv)
+    Args.push_back(Arg);
+
+  // Run any static constructors.
   ExitOnErr(J->runConstructors());
 
+  // Run any -thread-entry points.
+  std::vector<std::thread> AltEntryThreads;
+  for (auto &ThreadEntryPoint : ThreadEntryPoints) {
+    auto EntryPointSym = ExitOnErr(J->lookup(ThreadEntryPoint));
+    typedef void (*EntryPointPtr)();
+    auto EntryPoint =
+      reinterpret_cast<EntryPointPtr>(static_cast<uintptr_t>(EntryPointSym.getAddress()));
+    AltEntryThreads.push_back(std::thread([EntryPoint]() { EntryPoint(); }));
+  }
+
+  // Run main.
   auto MainSym = ExitOnErr(J->lookup("main"));
   typedef int (*MainFnPtr)(int, const char *[]);
   std::vector<const char *> ArgV;
   for (auto &Arg : Args)
     ArgV.push_back(Arg.c_str());
+  ArgV.push_back(nullptr);
+
+  int ArgC = ArgV.size() - 1;
   auto Main =
       reinterpret_cast<MainFnPtr>(static_cast<uintptr_t>(MainSym.getAddress()));
-  auto Result = Main(ArgV.size(), (const char **)ArgV.data());
+  auto Result = Main(ArgC, (const char **)ArgV.data());
 
+  // Wait for -entry-point threads.
+  for (auto &AltEntryThread : AltEntryThreads)
+    AltEntryThread.join();
+
+  // Run destructors.
   ExitOnErr(J->runDestructors());
-
   CXXRuntimeOverrides.runDestructors();
 
   return Result;

@@ -40,6 +40,11 @@ AARCH64_ARCH("armv8.4-a", ARMV8_4A, "8.4-A", "v8.4a",
              (AArch64::AEK_CRC | AArch64::AEK_CRYPTO | AArch64::AEK_FP |
               AArch64::AEK_SIMD | AArch64::AEK_RAS | AArch64::AEK_LSE |
               AArch64::AEK_RDM | AArch64::AEK_RCPC | AArch64::AEK_DOTPROD))
+AARCH64_ARCH("armv8.5-a", ARMV8_5A, "8.5-A", "v8.5a",
+             ARMBuildAttrs::CPUArch::v8_A, FK_CRYPTO_NEON_FP_ARMV8,
+             (AArch64::AEK_CRC | AArch64::AEK_CRYPTO | AArch64::AEK_FP |
+              AArch64::AEK_SIMD | AArch64::AEK_RAS | AArch64::AEK_LSE |
+              AArch64::AEK_RDM | AArch64::AEK_RCPC | AArch64::AEK_DOTPROD))
 #undef AARCH64_ARCH
 
 #ifndef AARCH64_ARCH_EXT_NAME
@@ -65,6 +70,7 @@ AARCH64_ARCH_EXT_NAME("profile",  AArch64::AEK_PROFILE,  "+spe",  "-spe")
 AARCH64_ARCH_EXT_NAME("ras",      AArch64::AEK_RAS,      "+ras",  "-ras")
 AARCH64_ARCH_EXT_NAME("sve",      AArch64::AEK_SVE,      "+sve",  "-sve")
 AARCH64_ARCH_EXT_NAME("rcpc",     AArch64::AEK_RCPC,     "+rcpc", "-rcpc")
+AARCH64_ARCH_EXT_NAME("rng",      AArch64::AEK_RAND,     "+rand",  "-rand")
 #undef AARCH64_ARCH_EXT_NAME
 
 #ifndef AARCH64_CPU_NAME

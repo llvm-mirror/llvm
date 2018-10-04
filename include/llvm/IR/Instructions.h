@@ -2456,12 +2456,22 @@ public:
   }
 
   /// Return true if this shuffle returns a vector with a different number of
-  /// elements than its source elements.
-  /// Example: shufflevector <4 x n> A, <4 x n> B, <1,2>
+  /// elements than its source vectors.
+  /// Examples: shufflevector <4 x n> A, <4 x n> B, <1,2,3>
+  ///           shufflevector <4 x n> A, <4 x n> B, <1,2,3,4,5>
   bool changesLength() const {
     unsigned NumSourceElts = Op<0>()->getType()->getVectorNumElements();
     unsigned NumMaskElts = getMask()->getType()->getVectorNumElements();
     return NumSourceElts != NumMaskElts;
+  }
+
+  /// Return true if this shuffle returns a vector with a greater number of
+  /// elements than its source vectors.
+  /// Example: shufflevector <2 x n> A, <2 x n> B, <1,2,3>
+  bool increasesLength() const {
+    unsigned NumSourceElts = Op<0>()->getType()->getVectorNumElements();
+    unsigned NumMaskElts = getMask()->getType()->getVectorNumElements();
+    return NumSourceElts < NumMaskElts;
   }
 
   /// Return true if this shuffle mask chooses elements from exactly one source
@@ -2497,14 +2507,26 @@ public:
     return isIdentityMask(MaskAsInts);
   }
 
-  /// Return true if this shuffle mask chooses elements from exactly one source
+  /// Return true if this shuffle chooses elements from exactly one source
   /// vector without lane crossings and does not change the number of elements
   /// from its input vectors.
   /// Example: shufflevector <4 x n> A, <4 x n> B, <4,undef,6,undef>
-  /// TODO: Optionally allow length-changing shuffles.
   bool isIdentity() const {
     return !changesLength() && isIdentityMask(getShuffleMask());
   }
+
+  /// Return true if this shuffle lengthens exactly one source vector with
+  /// undefs in the high elements.
+  bool isIdentityWithPadding() const;
+
+  /// Return true if this shuffle extracts the first N elements of exactly one
+  /// source vector.
+  bool isIdentityWithExtract() const;
+
+  /// Return true if this shuffle concatenates its 2 source vectors. This
+  /// returns false if either input is undefined. In that case, the shuffle is
+  /// is better classified as an identity with padding operation.
+  bool isConcat() const;
 
   /// Return true if this shuffle mask chooses elements from its source vectors
   /// without lane crossings. A shuffle using this mask would be
@@ -3354,6 +3376,33 @@ protected:
   BranchInst *cloneImpl() const;
 
 public:
+  /// Iterator type that casts an operand to a basic block.
+  ///
+  /// This only makes sense because the successors are stored as adjacent
+  /// operands for branch instructions.
+  struct succ_op_iterator
+      : iterator_adaptor_base<succ_op_iterator, value_op_iterator,
+                              std::random_access_iterator_tag, BasicBlock *,
+                              ptrdiff_t, BasicBlock *, BasicBlock *> {
+    explicit succ_op_iterator(value_op_iterator I) : iterator_adaptor_base(I) {}
+
+    BasicBlock *operator*() const { return cast<BasicBlock>(*I); }
+    BasicBlock *operator->() const { return operator*(); }
+  };
+
+  /// The const version of `succ_op_iterator`.
+  struct const_succ_op_iterator
+      : iterator_adaptor_base<const_succ_op_iterator, const_value_op_iterator,
+                              std::random_access_iterator_tag,
+                              const BasicBlock *, ptrdiff_t, const BasicBlock *,
+                              const BasicBlock *> {
+    explicit const_succ_op_iterator(const_value_op_iterator I)
+        : iterator_adaptor_base(I) {}
+
+    const BasicBlock *operator*() const { return cast<BasicBlock>(*I); }
+    const BasicBlock *operator->() const { return operator*(); }
+  };
+
   static BranchInst *Create(BasicBlock *IfTrue,
                             Instruction *InsertBefore = nullptr) {
     return new(1) BranchInst(IfTrue, InsertBefore);
@@ -3407,6 +3456,18 @@ public:
   /// branch weight metadata associated with the instruction so that it
   /// continues to map correctly to each operand.
   void swapSuccessors();
+
+  iterator_range<succ_op_iterator> successors() {
+    return make_range(
+        succ_op_iterator(std::next(value_op_begin(), isConditional() ? 1 : 0)),
+        succ_op_iterator(value_op_end()));
+  }
+
+  iterator_range<const_succ_op_iterator> successors() const {
+    return make_range(const_succ_op_iterator(
+                          std::next(value_op_begin(), isConditional() ? 1 : 0)),
+                      const_succ_op_iterator(value_op_end()));
+  }
 
   // Methods for support type inquiry through isa, cast, and dyn_cast:
   static bool classof(const Instruction *I) {
@@ -3821,6 +3882,33 @@ protected:
   IndirectBrInst *cloneImpl() const;
 
 public:
+  /// Iterator type that casts an operand to a basic block.
+  ///
+  /// This only makes sense because the successors are stored as adjacent
+  /// operands for indirectbr instructions.
+  struct succ_op_iterator
+      : iterator_adaptor_base<succ_op_iterator, value_op_iterator,
+                              std::random_access_iterator_tag, BasicBlock *,
+                              ptrdiff_t, BasicBlock *, BasicBlock *> {
+    explicit succ_op_iterator(value_op_iterator I) : iterator_adaptor_base(I) {}
+
+    BasicBlock *operator*() const { return cast<BasicBlock>(*I); }
+    BasicBlock *operator->() const { return operator*(); }
+  };
+
+  /// The const version of `succ_op_iterator`.
+  struct const_succ_op_iterator
+      : iterator_adaptor_base<const_succ_op_iterator, const_value_op_iterator,
+                              std::random_access_iterator_tag,
+                              const BasicBlock *, ptrdiff_t, const BasicBlock *,
+                              const BasicBlock *> {
+    explicit const_succ_op_iterator(const_value_op_iterator I)
+        : iterator_adaptor_base(I) {}
+
+    const BasicBlock *operator*() const { return cast<BasicBlock>(*I); }
+    const BasicBlock *operator->() const { return operator*(); }
+  };
+
   static IndirectBrInst *Create(Value *Address, unsigned NumDests,
                                 Instruction *InsertBefore = nullptr) {
     return new IndirectBrInst(Address, NumDests, InsertBefore);
@@ -3861,6 +3949,16 @@ public:
   }
   void setSuccessor(unsigned i, BasicBlock *NewSucc) {
     setOperand(i + 1, NewSucc);
+  }
+
+  iterator_range<succ_op_iterator> successors() {
+    return make_range(succ_op_iterator(std::next(value_op_begin())),
+                      succ_op_iterator(value_op_end()));
+  }
+
+  iterator_range<const_succ_op_iterator> successors() const {
+    return make_range(const_succ_op_iterator(std::next(value_op_begin())),
+                      const_succ_op_iterator(value_op_end()));
   }
 
   // Methods for support type inquiry through isa, cast, and dyn_cast:
@@ -5246,6 +5344,25 @@ inline Value *getPointerOperand(Value *V) {
   if (auto *Gep = dyn_cast<GetElementPtrInst>(V))
     return Gep->getPointerOperand();
   return nullptr;
+}
+
+/// A helper function that returns the alignment of load or store instruction.
+inline unsigned getLoadStoreAlignment(Value *I) {
+  assert((isa<LoadInst>(I) || isa<StoreInst>(I)) &&
+         "Expected Load or Store instruction");
+  if (auto *LI = dyn_cast<LoadInst>(I))
+    return LI->getAlignment();
+  return cast<StoreInst>(I)->getAlignment();
+}
+
+/// A helper function that returns the address space of the pointer operand of
+/// load or store instruction.
+inline unsigned getLoadStoreAddressSpace(Value *I) {
+  assert((isa<LoadInst>(I) || isa<StoreInst>(I)) &&
+         "Expected Load or Store instruction");
+  if (auto *LI = dyn_cast<LoadInst>(I))
+    return LI->getPointerAddressSpace();
+  return cast<StoreInst>(I)->getPointerAddressSpace();
 }
 
 } // end namespace llvm

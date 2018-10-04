@@ -47,7 +47,7 @@ public:
   using NotifyEmittedFunction = std::function<void(VModuleKey)>;
 
   using GetMemoryManagerFunction =
-      std::function<std::shared_ptr<RuntimeDyld::MemoryManager>(VModuleKey)>;
+      std::function<std::unique_ptr<RuntimeDyld::MemoryManager>(VModuleKey)>;
 
   /// Construct an ObjectLinkingLayer with the given NotifyLoaded,
   ///        and NotifyEmitted functors.
@@ -60,28 +60,64 @@ public:
   void emit(MaterializationResponsibility R, VModuleKey K,
             std::unique_ptr<MemoryBuffer> O) override;
 
-  /// Map section addresses for the object associated with the
-  ///        VModuleKey K.
-  void mapSectionAddress(VModuleKey K, const void *LocalAddress,
-                         JITTargetAddress TargetAddr) const;
-
   /// Set the 'ProcessAllSections' flag.
   ///
   /// If set to true, all sections in each object file will be allocated using
   /// the memory manager, rather than just the sections required for execution.
   ///
   /// This is kludgy, and may be removed in the future.
-  void setProcessAllSections(bool ProcessAllSections) {
+  RTDyldObjectLinkingLayer2 &setProcessAllSections(bool ProcessAllSections) {
     this->ProcessAllSections = ProcessAllSections;
+    return *this;
+  }
+
+  /// Instructs this RTDyldLinkingLayer2 instance to override the symbol flags
+  /// returned by RuntimeDyld for any given object file with the flags supplied
+  /// by the MaterializationResponsibility instance. This is a workaround to
+  /// support symbol visibility in COFF, which does not use the libObject's
+  /// SF_Exported flag. Use only when generating / adding COFF object files.
+  ///
+  /// FIXME: We should be able to remove this if/when COFF properly tracks
+  /// exported symbols.
+  RTDyldObjectLinkingLayer2 &
+  setOverrideObjectFlagsWithResponsibilityFlags(bool OverrideObjectFlags) {
+    this->OverrideObjectFlags = OverrideObjectFlags;
+    return *this;
+  }
+
+  /// If set, this RTDyldObjectLinkingLayer2 instance will claim responsibility
+  /// for any symbols provided by a given object file that were not already in
+  /// the MaterializationResponsibility instance. Setting this flag allows
+  /// higher-level program representations (e.g. LLVM IR) to be added based on
+  /// only a subset of the symbols they provide, without having to write
+  /// intervening layers to scan and add the additional symbols. This trades
+  /// diagnostic quality for convenience however: If all symbols are enumerated
+  /// up-front then clashes can be detected and reported early (and usually
+  /// deterministically). If this option is set, clashes for the additional
+  /// symbols may not be detected until late, and detection may depend on
+  /// the flow of control through JIT'd code. Use with care.
+  RTDyldObjectLinkingLayer2 &
+  setAutoClaimResponsibilityForObjectSymbols(bool AutoClaimObjectSymbols) {
+    this->AutoClaimObjectSymbols = AutoClaimObjectSymbols;
+    return *this;
   }
 
 private:
+  Error onObjLoad(VModuleKey K, MaterializationResponsibility &R,
+                  object::ObjectFile &Obj,
+                  std::unique_ptr<RuntimeDyld::LoadedObjectInfo> LoadedObjInfo,
+                  std::map<StringRef, JITEvaluatedSymbol> Resolved,
+                  std::set<StringRef> &InternalSymbols);
+
+  void onObjEmit(VModuleKey K, MaterializationResponsibility &R, Error Err);
+
   mutable std::mutex RTDyldLayerMutex;
   GetMemoryManagerFunction GetMemoryManager;
   NotifyLoadedFunction NotifyLoaded;
   NotifyEmittedFunction NotifyEmitted;
-  bool ProcessAllSections;
-  std::map<VModuleKey, RuntimeDyld *> ActiveRTDylds;
+  bool ProcessAllSections = false;
+  bool OverrideObjectFlags = false;
+  bool AutoClaimObjectSymbols = false;
   std::map<VModuleKey, std::shared_ptr<RuntimeDyld::MemoryManager>> MemMgrs;
 };
 
@@ -175,7 +211,7 @@ private:
     }
 
     ~ConcreteLinkedObject() override {
-      if (this->Parent.NotifyFreed)
+      if (this->Parent.NotifyFreed && ObjForNotify.getBinary())
         this->Parent.NotifyFreed(K, *ObjForNotify.getBinary());
 
       MemMgr->deregisterEHFrames();

@@ -30,6 +30,17 @@
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 
+// This disables the removal of registers when lowering into MC, as required
+// by some current tests.
+static cl::opt<bool>
+    WasmKeepRegisters("wasm-keep-registers", cl::Hidden,
+                      cl::desc("WebAssembly: output stack registers in"
+                               " instruction output for test purposes only."),
+                      cl::init(false));
+
+static unsigned regInstructionToStackInstruction(unsigned OpCode);
+static void removeRegisterOperands(const MachineInstr *MI, MCInst &OutMI);
+
 MCSymbol *
 WebAssemblyMCInstLower::GetGlobalAddressSymbol(const MachineOperand &MO) const {
   const GlobalValue *Global = MO.getGlobal();
@@ -43,10 +54,9 @@ WebAssemblyMCInstLower::GetGlobalAddressSymbol(const MachineOperand &MO) const {
     SmallVector<wasm::ValType, 4> Returns;
     SmallVector<wasm::ValType, 4> Params;
 
-    wasm::ValType iPTR =
-        MF.getSubtarget<WebAssemblySubtarget>().hasAddr64() ?
-        wasm::ValType::I64 :
-        wasm::ValType::I32;
+    wasm::ValType iPTR = MF.getSubtarget<WebAssemblySubtarget>().hasAddr64()
+                             ? wasm::ValType::I64
+                             : wasm::ValType::I32;
 
     SmallVector<MVT, 4> ResultMVTs;
     ComputeLegalValueVTs(CurrentFunc, TM, FuncTy->getReturnType(), ResultMVTs);
@@ -97,7 +107,7 @@ MCSymbol *WebAssemblyMCInstLower::GetExternalSymbolSymbol(
 
   SmallVector<wasm::ValType, 4> Returns;
   SmallVector<wasm::ValType, 4> Params;
-  GetSignature(Subtarget, Name, Returns, Params);
+  GetLibcallSignature(Subtarget, Name, Returns, Params);
 
   WasmSym->setReturns(std::move(Returns));
   WasmSym->setParams(std::move(Params));
@@ -111,9 +121,9 @@ MCOperand WebAssemblyMCInstLower::LowerSymbolOperand(MCSymbol *Sym,
                                                      bool IsFunc,
                                                      bool IsGlob) const {
   MCSymbolRefExpr::VariantKind VK =
-      IsFunc ? MCSymbolRefExpr::VK_WebAssembly_FUNCTION :
-      IsGlob ? MCSymbolRefExpr::VK_WebAssembly_GLOBAL
-             : MCSymbolRefExpr::VK_None;
+      IsFunc ? MCSymbolRefExpr::VK_WebAssembly_FUNCTION
+             : IsGlob ? MCSymbolRefExpr::VK_WebAssembly_GLOBAL
+                      : MCSymbolRefExpr::VK_None;
 
   const MCExpr *Expr = MCSymbolRefExpr::create(Sym, VK, Ctx);
 
@@ -139,6 +149,8 @@ static wasm::ValType getType(const TargetRegisterClass *RC) {
     return wasm::ValType::F32;
   if (RC == &WebAssembly::F64RegClass)
     return wasm::ValType::F64;
+  if (RC == &WebAssembly::V128RegClass)
+    return wasm::ValType::V128;
   llvm_unreachable("Unexpected register class");
 }
 
@@ -227,12 +239,65 @@ void WebAssemblyMCInstLower::Lower(const MachineInstr *MI,
       // variable or a function.
       assert((MO.getTargetFlags() & ~WebAssemblyII::MO_SYMBOL_MASK) == 0 &&
              "WebAssembly uses only symbol flags on ExternalSymbols");
-      MCOp = LowerSymbolOperand(GetExternalSymbolSymbol(MO), /*Offset=*/0,
+      MCOp = LowerSymbolOperand(
+          GetExternalSymbolSymbol(MO), /*Offset=*/0,
           (MO.getTargetFlags() & WebAssemblyII::MO_SYMBOL_FUNCTION) != 0,
           (MO.getTargetFlags() & WebAssemblyII::MO_SYMBOL_GLOBAL) != 0);
       break;
     }
 
     OutMI.addOperand(MCOp);
+  }
+
+  if (!WasmKeepRegisters)
+    removeRegisterOperands(MI, OutMI);
+}
+
+static void removeRegisterOperands(const MachineInstr *MI, MCInst &OutMI) {
+  // Remove all uses of stackified registers to bring the instruction format
+  // into its final stack form used thruout MC, and transition opcodes to
+  // their _S variant.
+  // We do this seperate from the above code that still may need these
+  // registers for e.g. call_indirect signatures.
+  // See comments in lib/Target/WebAssembly/WebAssemblyInstrFormats.td for
+  // details.
+  // TODO: the code above creates new registers which are then removed here.
+  // That code could be slightly simplified by not doing that, though maybe
+  // it is simpler conceptually to keep the code above in "register mode"
+  // until this transition point.
+  // FIXME: we are not processing inline assembly, which contains register
+  // operands, because it is used by later target generic code.
+  if (MI->isDebugInstr() || MI->isLabel() || MI->isInlineAsm())
+    return;
+
+  // Transform to _S instruction.
+  auto RegOpcode = OutMI.getOpcode();
+  auto StackOpcode = regInstructionToStackInstruction(RegOpcode);
+  OutMI.setOpcode(StackOpcode);
+
+  // Remove register operands.
+  for (auto I = OutMI.getNumOperands(); I; --I) {
+    auto &MO = OutMI.getOperand(I - 1);
+    if (MO.isReg()) {
+      OutMI.erase(&MO);
+    }
+  }
+}
+
+static unsigned regInstructionToStackInstruction(unsigned OpCode) {
+  // For most opcodes, this function could have been implemented as "return
+  // OpCode + 1", but since table-gen alphabetically sorts them, this cannot be
+  // guaranteed (see e.g. BR and BR_IF). Instead we use a giant switch statement
+  // generated by a custom TableGen backend (WebAssemblyStackifierEmitter.cpp)
+  // that emits switch cases of the form
+  //
+  //   case WebAssembly::RegisterInstr: return WebAssembly::StackInstr;
+  //
+  // for every pair of equivalent register and stack instructions.
+  switch (OpCode) {
+  default:
+    llvm_unreachable(
+        "unknown WebAssembly instruction in WebAssemblyMCInstLower pass");
+#include "WebAssemblyGenStackifier.inc"
   }
 }

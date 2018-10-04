@@ -9,6 +9,9 @@
 
 #include "llvm/ExecutionEngine/Orc/Layer.h"
 #include "llvm/Object/ObjectFile.h"
+#include "llvm/Support/Debug.h"
+
+#define DEBUG_TYPE "orc"
 
 namespace llvm {
 namespace orc {
@@ -16,17 +19,19 @@ namespace orc {
 IRLayer::IRLayer(ExecutionSession &ES) : ES(ES) {}
 IRLayer::~IRLayer() {}
 
-Error IRLayer::add(JITDylib &JD, VModuleKey K, std::unique_ptr<Module> M) {
+Error IRLayer::add(JITDylib &JD, VModuleKey K, ThreadSafeModule TSM) {
   return JD.define(llvm::make_unique<BasicIRLayerMaterializationUnit>(
-      *this, std::move(K), std::move(M)));
+      *this, std::move(K), std::move(TSM)));
 }
 
 IRMaterializationUnit::IRMaterializationUnit(ExecutionSession &ES,
-                                             std::unique_ptr<Module> M)
-  : MaterializationUnit(SymbolFlagsMap()), M(std::move(M)) {
+                                             ThreadSafeModule TSM)
+    : MaterializationUnit(SymbolFlagsMap()), TSM(std::move(TSM)) {
 
-  MangleAndInterner Mangle(ES, this->M->getDataLayout());
-  for (auto &G : this->M->global_values()) {
+  assert(this->TSM && "Module must not be null");
+
+  MangleAndInterner Mangle(ES, this->TSM.getModule()->getDataLayout());
+  for (auto &G : this->TSM.getModule()->global_values()) {
     if (G.hasName() && !G.isDeclaration() && !G.hasLocalLinkage() &&
         !G.hasAvailableExternallyLinkage() && !G.hasAppendingLinkage()) {
       auto MangledName = Mangle(G.getName());
@@ -37,12 +42,23 @@ IRMaterializationUnit::IRMaterializationUnit(ExecutionSession &ES,
 }
 
 IRMaterializationUnit::IRMaterializationUnit(
-    std::unique_ptr<Module> M, SymbolFlagsMap SymbolFlags,
+    ThreadSafeModule TSM, SymbolFlagsMap SymbolFlags,
     SymbolNameToDefinitionMap SymbolToDefinition)
-    : MaterializationUnit(std::move(SymbolFlags)), M(std::move(M)),
+    : MaterializationUnit(std::move(SymbolFlags)), TSM(std::move(TSM)),
       SymbolToDefinition(std::move(SymbolToDefinition)) {}
 
+StringRef IRMaterializationUnit::getName() const {
+  if (TSM.getModule())
+    return TSM.getModule()->getModuleIdentifier();
+  return "<null module>";
+}
+
 void IRMaterializationUnit::discard(const JITDylib &JD, SymbolStringPtr Name) {
+  LLVM_DEBUG(JD.getExecutionSession().runSessionLocked([&]() {
+    dbgs() << "In " << JD.getName() << " discarding " << *Name << " from MU@"
+           << this << " (" << getName() << ")\n";
+  }););
+
   auto I = SymbolToDefinition.find(Name);
   assert(I != SymbolToDefinition.end() &&
          "Symbol not provided by this MU, or previously discarded");
@@ -53,13 +69,30 @@ void IRMaterializationUnit::discard(const JITDylib &JD, SymbolStringPtr Name) {
 }
 
 BasicIRLayerMaterializationUnit::BasicIRLayerMaterializationUnit(
-    IRLayer &L, VModuleKey K, std::unique_ptr<Module> M)
-  : IRMaterializationUnit(L.getExecutionSession(), std::move(M)),
-      L(L), K(std::move(K)) {}
+    IRLayer &L, VModuleKey K, ThreadSafeModule TSM)
+    : IRMaterializationUnit(L.getExecutionSession(), std::move(TSM)), L(L),
+      K(std::move(K)) {}
 
 void BasicIRLayerMaterializationUnit::materialize(
     MaterializationResponsibility R) {
-  L.emit(std::move(R), std::move(K), std::move(M));
+
+  if (L.getCloneToNewContextOnEmit())
+    TSM = cloneToNewContext(TSM);
+
+#ifndef NDEBUG
+  auto &ES = R.getTargetJITDylib().getExecutionSession();
+#endif // NDEBUG
+
+  auto Lock = TSM.getContextLock();
+  LLVM_DEBUG(ES.runSessionLocked([&]() {
+    dbgs() << "Emitting, for " << R.getTargetJITDylib().getName() << ", "
+           << *this << "\n";
+  }););
+  L.emit(std::move(R), std::move(K), std::move(TSM));
+  LLVM_DEBUG(ES.runSessionLocked([&]() {
+    dbgs() << "Finished emitting, for " << R.getTargetJITDylib().getName()
+           << ", " << *this << "\n";
+  }););
 }
 
 ObjectLayer::ObjectLayer(ExecutionSession &ES) : ES(ES) {}
@@ -95,6 +128,12 @@ BasicObjectLayerMaterializationUnit::BasicObjectLayerMaterializationUnit(
     : MaterializationUnit(std::move(SymbolFlags)), L(L), K(std::move(K)),
       O(std::move(O)) {}
 
+StringRef BasicObjectLayerMaterializationUnit::getName() const {
+  if (O)
+    return O->getBufferIdentifier();
+  return "<null object>";
+}
+
 void BasicObjectLayerMaterializationUnit::materialize(
     MaterializationResponsibility R) {
   L.emit(std::move(R), std::move(K), std::move(O));
@@ -115,17 +154,22 @@ Expected<SymbolFlagsMap> getObjectSymbolFlags(ExecutionSession &ES,
 
   SymbolFlagsMap SymbolFlags;
   for (auto &Sym : (*Obj)->symbols()) {
-    if (!(Sym.getFlags() & object::BasicSymbolRef::SF_Undefined) &&
-        (Sym.getFlags() & object::BasicSymbolRef::SF_Exported)) {
-      auto Name = Sym.getName();
-      if (!Name)
-        return Name.takeError();
-      auto InternedName = ES.getSymbolStringPool().intern(*Name);
-      auto SymFlags = JITSymbolFlags::fromObjectSymbol(Sym);
-      if (!SymFlags)
-        return SymFlags.takeError();
-      SymbolFlags[InternedName] = std::move(*SymFlags);
-    }
+    // Skip symbols not defined in this object file.
+    if (Sym.getFlags() & object::BasicSymbolRef::SF_Undefined)
+      continue;
+
+    // Skip symbols that are not global.
+    if (!(Sym.getFlags() & object::BasicSymbolRef::SF_Global))
+      continue;
+
+    auto Name = Sym.getName();
+    if (!Name)
+      return Name.takeError();
+    auto InternedName = ES.getSymbolStringPool().intern(*Name);
+    auto SymFlags = JITSymbolFlags::fromObjectSymbol(Sym);
+    if (!SymFlags)
+      return SymFlags.takeError();
+    SymbolFlags[InternedName] = std::move(*SymFlags);
   }
 
   return SymbolFlags;

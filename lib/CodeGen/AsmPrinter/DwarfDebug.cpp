@@ -241,7 +241,7 @@ ArrayRef<DbgVariable::FrameIndexExpr> DbgVariable::getFrameIndexExprs() const {
                         return A.Expr->isFragment();
                       }) &&
          "multiple FI expressions without DW_OP_LLVM_fragment");
-  llvm::sort(FrameIndexExprs.begin(), FrameIndexExprs.end(),
+  llvm::sort(FrameIndexExprs,
              [](const FrameIndexExpr &A, const FrameIndexExpr &B) -> bool {
                return A.Expr->getFragmentInfo()->OffsetInBits <
                       B.Expr->getFragmentInfo()->OffsetInBits;
@@ -612,22 +612,21 @@ void DwarfDebug::constructAndAddImportedEntityDIE(DwarfCompileUnit &TheCU,
 /// Sort and unique GVEs by comparing their fragment offset.
 static SmallVectorImpl<DwarfCompileUnit::GlobalExpr> &
 sortGlobalExprs(SmallVectorImpl<DwarfCompileUnit::GlobalExpr> &GVEs) {
-  llvm::sort(GVEs.begin(), GVEs.end(),
-             [](DwarfCompileUnit::GlobalExpr A,
-                DwarfCompileUnit::GlobalExpr B) {
-               // Sort order: first null exprs, then exprs without fragment
-               // info, then sort by fragment offset in bits.
-               // FIXME: Come up with a more comprehensive comparator so
-               // the sorting isn't non-deterministic, and so the following
-               // std::unique call works correctly.
-               if (!A.Expr || !B.Expr)
-                 return !!B.Expr;
-               auto FragmentA = A.Expr->getFragmentInfo();
-               auto FragmentB = B.Expr->getFragmentInfo();
-               if (!FragmentA || !FragmentB)
-                 return !!FragmentB;
-               return FragmentA->OffsetInBits < FragmentB->OffsetInBits;
-             });
+  llvm::sort(
+      GVEs, [](DwarfCompileUnit::GlobalExpr A, DwarfCompileUnit::GlobalExpr B) {
+        // Sort order: first null exprs, then exprs without fragment
+        // info, then sort by fragment offset in bits.
+        // FIXME: Come up with a more comprehensive comparator so
+        // the sorting isn't non-deterministic, and so the following
+        // std::unique call works correctly.
+        if (!A.Expr || !B.Expr)
+          return !!B.Expr;
+        auto FragmentA = A.Expr->getFragmentInfo();
+        auto FragmentB = B.Expr->getFragmentInfo();
+        if (!FragmentA || !FragmentB)
+          return !!FragmentB;
+        return FragmentA->OffsetInBits < FragmentB->OffsetInBits;
+      });
   GVEs.erase(std::unique(GVEs.begin(), GVEs.end(),
                          [](DwarfCompileUnit::GlobalExpr A,
                             DwarfCompileUnit::GlobalExpr B) {
@@ -674,6 +673,10 @@ void DwarfDebug::beginModule() {
   if (getDwarfVersion() >= 5)
     (useSplitDwarf() ? SkeletonHolder : InfoHolder)
         .setRnglistsTableBaseSym(Asm->createTempSymbol("rnglists_table_base"));
+
+  // Create the symbol that points to the first entry following the debug
+  // address table (.debug_addr) header.
+  AddrPool.setLabel(Asm->createTempSymbol("addr_table_base"));
 
   for (DICompileUnit *CUNode : M->debug_compile_units()) {
     // FIXME: Move local imported entities into a list attached to the
@@ -792,11 +795,9 @@ void DwarfDebug::finalizeModuleInfo() {
       }
       // We don't keep track of which addresses are used in which CU so this
       // is a bit pessimistic under LTO.
-      if (!AddrPool.isEmpty()) {
-        const MCSymbol *Sym = TLOF.getDwarfAddrSection()->getBeginSymbol();
-        SkCU->addSectionLabel(SkCU->getUnitDie(), dwarf::DW_AT_GNU_addr_base,
-                              Sym, Sym);
-      }
+      if (!AddrPool.isEmpty())
+        SkCU->addAddrTableBase();
+
       if (getDwarfVersion() < 5 && !SkCU->getRangeLists().empty()) {
         const MCSymbol *Sym = TLOF.getDwarfRangesSection()->getBeginSymbol();
         SkCU->addSectionLabel(SkCU->getUnitDie(), dwarf::DW_AT_GNU_ranges_base,
@@ -938,15 +939,15 @@ void DwarfDebug::ensureAbstractEntityIsCreatedIfScoped(DwarfCompileUnit &CU,
 
 // Collect variable information from side table maintained by MF.
 void DwarfDebug::collectVariableInfoFromMFTable(
-    DwarfCompileUnit &TheCU, DenseSet<InlinedVariable> &Processed) {
-  SmallDenseMap<InlinedVariable, DbgVariable *> MFVars;
+    DwarfCompileUnit &TheCU, DenseSet<InlinedEntity> &Processed) {
+  SmallDenseMap<InlinedEntity, DbgVariable *> MFVars;
   for (const auto &VI : Asm->MF->getVariableDbgInfo()) {
     if (!VI.Var)
       continue;
     assert(VI.Var->isValidLocationForIntrinsic(VI.Loc) &&
            "Expected inlined-at fields to agree");
 
-    InlinedVariable Var(VI.Var, VI.Loc->getInlinedAt());
+    InlinedEntity Var(VI.Var, VI.Loc->getInlinedAt());
     Processed.insert(Var);
     LexicalScope *Scope = LScopes.findLexicalScope(VI.Loc);
 
@@ -955,7 +956,8 @@ void DwarfDebug::collectVariableInfoFromMFTable(
       continue;
 
     ensureAbstractEntityIsCreatedIfScoped(TheCU, Var.first, Scope->getScopeNode());
-    auto RegVar = llvm::make_unique<DbgVariable>(Var.first, Var.second);
+    auto RegVar = llvm::make_unique<DbgVariable>(
+                    cast<DILocalVariable>(Var.first), Var.second);
     RegVar->initializeMMI(VI.Expr, VI.Slot);
     if (DbgVariable *DbgVar = MFVars.lookup(Var))
       DbgVar->addMMIEntry(*RegVar);
@@ -1209,12 +1211,12 @@ static bool validThroughout(LexicalScopes &LScopes,
 // Find variables for each lexical scope.
 void DwarfDebug::collectEntityInfo(DwarfCompileUnit &TheCU,
                                    const DISubprogram *SP,
-                                   DenseSet<InlinedVariable> &Processed) {
+                                   DenseSet<InlinedEntity> &Processed) {
   // Grab the variable info that was squirreled away in the MMI side-table.
   collectVariableInfoFromMFTable(TheCU, Processed);
 
   for (const auto &I : DbgValues) {
-    InlinedVariable IV = I.first;
+    InlinedEntity IV = I.first;
     if (Processed.count(IV))
       continue;
 
@@ -1224,17 +1226,18 @@ void DwarfDebug::collectEntityInfo(DwarfCompileUnit &TheCU,
       continue;
 
     LexicalScope *Scope = nullptr;
+    const DILocalVariable *LocalVar = cast<DILocalVariable>(IV.first);
     if (const DILocation *IA = IV.second)
-      Scope = LScopes.findInlinedScope(IV.first->getScope(), IA);
+      Scope = LScopes.findInlinedScope(LocalVar->getScope(), IA);
     else
-      Scope = LScopes.findLexicalScope(IV.first->getScope());
+      Scope = LScopes.findLexicalScope(LocalVar->getScope());
     // If variable scope is not found then skip this variable.
     if (!Scope)
       continue;
 
     Processed.insert(IV);
     DbgVariable *RegVar = cast<DbgVariable>(createConcreteEntity(TheCU,
-                                            *Scope, IV.first, IV.second));
+                                            *Scope, LocalVar, IV.second));
 
     const MachineInstr *MInsn = Ranges.front().first;
     assert(MInsn->isDebugValue() && "History must begin with debug value");
@@ -1260,44 +1263,46 @@ void DwarfDebug::collectEntityInfo(DwarfCompileUnit &TheCU,
     // unique identifiers, so don't bother resolving the type with the
     // identifier map.
     const DIBasicType *BT = dyn_cast<DIBasicType>(
-        static_cast<const Metadata *>(IV.first->getType()));
+        static_cast<const Metadata *>(LocalVar->getType()));
 
     // Finalize the entry by lowering it into a DWARF bytestream.
     for (auto &Entry : Entries)
       Entry.finalize(*Asm, List, BT);
   }
 
-  // For each InlinedLabel collected from DBG_LABEL instructions, convert to
+  // For each InlinedEntity collected from DBG_LABEL instructions, convert to
   // DWARF-related DbgLabel.
   for (const auto &I : DbgLabels) {
-    InlinedLabel IL = I.first;
+    InlinedEntity IL = I.first;
     const MachineInstr *MI = I.second;
     if (MI == nullptr)
       continue;
 
     LexicalScope *Scope = nullptr;
+    const DILabel *Label = cast<DILabel>(IL.first);
     // Get inlined DILocation if it is inlined label.
     if (const DILocation *IA = IL.second)
-      Scope = LScopes.findInlinedScope(IL.first->getScope(), IA);
+      Scope = LScopes.findInlinedScope(Label->getScope(), IA);
     else
-      Scope = LScopes.findLexicalScope(IL.first->getScope());
+      Scope = LScopes.findLexicalScope(Label->getScope());
     // If label scope is not found then skip this label.
     if (!Scope)
       continue;
 
+    Processed.insert(IL);
     /// At this point, the temporary label is created.
     /// Save the temporary label to DbgLabel entity to get the
     /// actually address when generating Dwarf DIE.
     MCSymbol *Sym = getLabelBeforeInsn(MI);
-    createConcreteEntity(TheCU, *Scope, IL.first, IL.second, Sym);
+    createConcreteEntity(TheCU, *Scope, Label, IL.second, Sym);
   }
 
   // Collect info for variables/labels that were optimized out.
   for (const DINode *DN : SP->getRetainedNodes()) {
+    if (!Processed.insert(InlinedEntity(DN, nullptr)).second)
+      continue;
     LexicalScope *Scope = nullptr;
     if (auto *DV = dyn_cast<DILocalVariable>(DN)) {
-      if (!Processed.insert(InlinedVariable(DV, nullptr)).second)
-        continue;
       Scope = LScopes.findLexicalScope(DV->getScope());
     } else if (auto *DL = dyn_cast<DILabel>(DN)) {
       Scope = LScopes.findLexicalScope(DL->getScope());
@@ -1466,8 +1471,8 @@ void DwarfDebug::endFunctionImpl(const MachineFunction *MF) {
     return;
   }
 
-  DenseSet<InlinedVariable> ProcessedVars;
-  collectEntityInfo(TheCU, SP, ProcessedVars);
+  DenseSet<InlinedEntity> Processed;
+  collectEntityInfo(TheCU, SP, Processed);
 
   // Add the range of this function to the list of ranges for the CU.
   TheCU.addRange(RangeSpan(Asm->getFunctionBegin(), Asm->getFunctionEnd()));
@@ -1491,16 +1496,21 @@ void DwarfDebug::endFunctionImpl(const MachineFunction *MF) {
   for (LexicalScope *AScope : LScopes.getAbstractScopesList()) {
     auto *SP = cast<DISubprogram>(AScope->getScopeNode());
     for (const DINode *DN : SP->getRetainedNodes()) {
-      if (auto *DV = dyn_cast<DILocalVariable>(DN)) {
-        // Collect info for variables that were optimized out.
-        if (!ProcessedVars.insert(InlinedVariable(DV, nullptr)).second)
-          continue;
-        ensureAbstractEntityIsCreated(TheCU, DV, DV->getScope());
-        assert(LScopes.getAbstractScopesList().size() == NumAbstractScopes
-               && "ensureAbstractEntityIsCreated inserted abstract scopes");
-      } else if (auto *DL = dyn_cast<DILabel>(DN)) {
-        ensureAbstractEntityIsCreated(TheCU, DL, DL->getScope());
-      }
+      if (!Processed.insert(InlinedEntity(DN, nullptr)).second)
+        continue;
+
+      const MDNode *Scope = nullptr;
+      if (auto *DV = dyn_cast<DILocalVariable>(DN))
+        Scope = DV->getScope();
+      else if (auto *DL = dyn_cast<DILabel>(DN))
+        Scope = DL->getScope();
+      else
+        llvm_unreachable("Unexpected DI type!");
+
+      // Collect info for variables/labels that were optimized out.
+      ensureAbstractEntityIsCreated(TheCU, DN, Scope);
+      assert(LScopes.getAbstractScopesList().size() == NumAbstractScopes
+             && "ensureAbstractEntityIsCreated inserted abstract scopes");
     }
     constructAbstractSubprogramScopeDIE(TheCU, AScope);
   }
@@ -1989,10 +1999,9 @@ void DwarfDebug::emitDebugARanges() {
   }
 
   // Sort the CU list (again, to ensure consistent output order).
-  llvm::sort(CUs.begin(), CUs.end(),
-             [](const DwarfCompileUnit *A, const DwarfCompileUnit *B) {
-               return A->getUniqueID() < B->getUniqueID();
-             });
+  llvm::sort(CUs, [](const DwarfCompileUnit *A, const DwarfCompileUnit *B) {
+    return A->getUniqueID() < B->getUniqueID();
+  });
 
   // Emit an arange table for each CU we used.
   for (DwarfCompileUnit *CU : CUs) {
@@ -2177,7 +2186,7 @@ void DwarfDebug::emitDebugRanges() {
 
   auto NoRangesPresent = [this]() {
     return llvm::all_of(
-        CUMap, [](const decltype(CUMap)::const_iterator::value_type &Pair) {
+        CUMap, [](const decltype(CUMap)::value_type &Pair) {
           return Pair.second->getRangeLists().empty();
         });
   };

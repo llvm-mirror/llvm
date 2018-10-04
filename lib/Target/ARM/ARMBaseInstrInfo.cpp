@@ -935,9 +935,9 @@ void ARMBaseInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     Mov->addRegisterKilled(SrcReg, TRI);
 }
 
-bool ARMBaseInstrInfo::isCopyInstr(const MachineInstr &MI,
-                                   const MachineOperand *&Src,
-                                   const MachineOperand *&Dest) const {
+bool ARMBaseInstrInfo::isCopyInstrImpl(const MachineInstr &MI,
+                                       const MachineOperand *&Src,
+                                       const MachineOperand *&Dest) const {
   // VMOVRRD is also a copy instruction but it requires
   // special way of handling. It is more complex copy version
   // and since that we are not considering it. For recognition
@@ -1172,8 +1172,14 @@ unsigned ARMBaseInstrInfo::isStoreToStackSlot(const MachineInstr &MI,
 
 unsigned ARMBaseInstrInfo::isStoreToStackSlotPostFE(const MachineInstr &MI,
                                                     int &FrameIndex) const {
-  const MachineMemOperand *Dummy;
-  return MI.mayStore() && hasStoreToStackSlot(MI, Dummy, FrameIndex);
+  SmallVector<const MachineMemOperand *, 1> Accesses;
+  if (MI.mayStore() && hasStoreToStackSlot(MI, Accesses)) {
+    FrameIndex =
+        cast<FixedStackPseudoSourceValue>(Accesses.front()->getPseudoValue())
+            ->getFrameIndex();
+    return true;
+  }
+  return false;
 }
 
 void ARMBaseInstrInfo::
@@ -1386,8 +1392,14 @@ unsigned ARMBaseInstrInfo::isLoadFromStackSlot(const MachineInstr &MI,
 
 unsigned ARMBaseInstrInfo::isLoadFromStackSlotPostFE(const MachineInstr &MI,
                                                      int &FrameIndex) const {
-  const MachineMemOperand *Dummy;
-  return MI.mayLoad() && hasLoadFromStackSlot(MI, Dummy, FrameIndex);
+  SmallVector<const MachineMemOperand *, 1> Accesses;
+  if (MI.mayLoad() && hasLoadFromStackSlot(MI, Accesses)) {
+    FrameIndex =
+        cast<FixedStackPseudoSourceValue>(Accesses.front()->getPseudoValue())
+            ->getFrameIndex();
+    return true;
+  }
+  return false;
 }
 
 /// Expands MEMCPY to either LDMIA/STMIA or LDMIA_UPD/STMID_UPD
@@ -1432,9 +1444,8 @@ void ARMBaseInstrInfo::expandMEMCPY(MachineBasicBlock::iterator MI) const {
   SmallVector<unsigned, 6> ScratchRegs;
   for(unsigned I = 5; I < MI->getNumOperands(); ++I)
     ScratchRegs.push_back(MI->getOperand(I).getReg());
-  llvm::sort(ScratchRegs.begin(), ScratchRegs.end(),
-             [&TRI](const unsigned &Reg1,
-                    const unsigned &Reg2) -> bool {
+  llvm::sort(ScratchRegs,
+             [&TRI](const unsigned &Reg1, const unsigned &Reg2) -> bool {
                return TRI.getEncodingValue(Reg1) <
                       TRI.getEncodingValue(Reg2);
              });
@@ -5059,4 +5070,33 @@ bool ARMBaseInstrInfo::getInsertSubregLikeInputs(
     return true;
   }
   llvm_unreachable("Target dependent opcode missing");
+}
+
+std::pair<unsigned, unsigned>
+ARMBaseInstrInfo::decomposeMachineOperandsTargetFlags(unsigned TF) const {
+  const unsigned Mask = ARMII::MO_OPTION_MASK;
+  return std::make_pair(TF & Mask, TF & ~Mask);
+}
+
+ArrayRef<std::pair<unsigned, const char *>>
+ARMBaseInstrInfo::getSerializableDirectMachineOperandTargetFlags() const {
+  using namespace ARMII;
+
+  static const std::pair<unsigned, const char *> TargetFlags[] = {
+      {MO_LO16, "arm-lo16"}, {MO_HI16, "arm-hi16"}};
+  return makeArrayRef(TargetFlags);
+}
+
+ArrayRef<std::pair<unsigned, const char *>>
+ARMBaseInstrInfo::getSerializableBitmaskMachineOperandTargetFlags() const {
+  using namespace ARMII;
+
+  static const std::pair<unsigned, const char *> TargetFlags[] = {
+      {MO_COFFSTUB, "arm-coffstub"},
+      {MO_GOT, "arm-got"},
+      {MO_SBREL, "arm-sbrel"},
+      {MO_DLLIMPORT, "arm-dllimport"},
+      {MO_SECREL, "arm-secrel"},
+      {MO_NONLAZY, "arm-nonlazy"}};
+  return makeArrayRef(TargetFlags);
 }

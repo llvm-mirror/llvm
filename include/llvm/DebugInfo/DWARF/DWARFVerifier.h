@@ -101,6 +101,7 @@ private:
   raw_ostream &error() const;
   raw_ostream &warn() const;
   raw_ostream &note() const;
+  raw_ostream &dump(const DWARFDie &Die, unsigned indent = 0) const;
 
   /// Verifies the abbreviations section.
   ///
@@ -149,11 +150,9 @@ private:
   ///  - The DIE ranges.
   ///
   /// \param Unit      The DWARF Unit to verify.
-  /// \param UnitType  An optional unit type which will be used to verify the
-  ///                  type of the unit DIE.
   ///
   /// \returns The number of errors that occurred during verification.
-  unsigned verifyUnitContents(DWARFUnit &Unit, uint8_t UnitType = 0);
+  unsigned verifyUnitContents(DWARFUnit &Unit);
 
   /// Verifies the unit headers and contents in a .debug_info or .debug_types
   /// section.

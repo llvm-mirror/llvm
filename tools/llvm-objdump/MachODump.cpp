@@ -6922,7 +6922,7 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
                         BaseSegmentAddress);
 
   // Sort the symbols by address, just in case they didn't come in that way.
-  llvm::sort(Symbols.begin(), Symbols.end(), SymbolSorter());
+  llvm::sort(Symbols, SymbolSorter());
 
   // Build a data in code table that is sorted on by the address of each entry.
   uint64_t BaseAddress = 0;
@@ -6947,6 +6947,7 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
 
   std::unique_ptr<DIContext> diContext;
   ObjectFile *DbgObj = MachOOF;
+  std::unique_ptr<MemoryBuffer> DSYMBuf;
   // Try to find debug info and set up the DIContext for it.
   if (UseDbg) {
     // A separate DSym file path was specified, parse it as a macho file,
@@ -6964,6 +6965,8 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
       if (DbgObjCheck.takeError())
         report_error(MachOOF->getFileName(), DbgObjCheck.takeError());
       DbgObj = DbgObjCheck.get().release();
+      // We need to keep the file alive, because we're replacing DbgObj with it.
+      DSYMBuf = std::move(BufOrErr.get());
     }
 
     // Setup the DIContext

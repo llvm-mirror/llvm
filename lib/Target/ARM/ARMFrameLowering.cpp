@@ -526,6 +526,8 @@ void ARMFrameLowering::emitPrologue(MachineFunction &MF,
         .setMIFlags(MachineInstr::FrameSetup);
 
     switch (TM.getCodeModel()) {
+    case CodeModel::Tiny:
+      llvm_unreachable("Tiny code model not available on ARM.");
     case CodeModel::Small:
     case CodeModel::Medium:
     case CodeModel::Kernel:
@@ -1006,8 +1008,7 @@ void ARMFrameLowering::emitPushInst(MachineBasicBlock &MBB,
     if (Regs.empty())
       continue;
 
-    llvm::sort(Regs.begin(), Regs.end(), [&](const RegAndKill &LHS,
-                                             const RegAndKill &RHS) {
+    llvm::sort(Regs, [&](const RegAndKill &LHS, const RegAndKill &RHS) {
       return TRI.getEncodingValue(LHS.first) < TRI.getEncodingValue(RHS.first);
     });
 
@@ -1103,7 +1104,7 @@ void ARMFrameLowering::emitPopInst(MachineBasicBlock &MBB,
     if (Regs.empty())
       continue;
 
-    llvm::sort(Regs.begin(), Regs.end(), [&](unsigned LHS, unsigned RHS) {
+    llvm::sort(Regs, [&](unsigned LHS, unsigned RHS) {
       return TRI.getEncodingValue(LHS) < TRI.getEncodingValue(RHS);
     });
 
@@ -1514,6 +1515,7 @@ static unsigned estimateRSStackSizeLimit(MachineFunction &MF,
           break;
         case ARMII::AddrMode5:
         case ARMII::AddrModeT2_i8s4:
+        case ARMII::AddrModeT2_ldrex:
           Limit = std::min(Limit, ((1U << 8) - 1) * 4);
           break;
         case ARMII::AddrModeT2_i12:

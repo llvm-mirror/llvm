@@ -80,6 +80,36 @@ TEST_F(ImmutableListTest, OneElemIntListTest) {
   EXPECT_FALSE(L2.contains(2));
 }
 
+// We'll store references to objects of this type.
+struct Unmodifiable {
+  Unmodifiable() = default;
+
+  // We'll delete all of these special member functions to make sure no copy or
+  // move happens during insertation.
+  Unmodifiable(const Unmodifiable &) = delete;
+  Unmodifiable(const Unmodifiable &&) = delete;
+  Unmodifiable &operator=(const Unmodifiable &) = delete;
+  Unmodifiable &operator=(const Unmodifiable &&) = delete;
+
+  void doNothing() const {}
+
+  void Profile(FoldingSetNodeID &ID) const { ID.AddPointer(this); }
+};
+
+// Mostly just a check whether ImmutableList::iterator can be instantiated
+// with a reference type as a template argument.
+TEST_F(ImmutableListTest, ReferenceStoringTest) {
+  ImmutableList<const Unmodifiable &>::Factory f;
+
+  Unmodifiable N;
+  ImmutableList<const Unmodifiable &> L = f.create(N);
+  for (ImmutableList<const Unmodifiable &>::iterator It = L.begin(),
+                                                     E = L.end();
+       It != E; ++It) {
+    It->doNothing();
+  }
+}
+
 TEST_F(ImmutableListTest, CreatingIntListTest) {
   ImmutableList<Wrapper<int>>::Factory f;
 
@@ -148,6 +178,49 @@ TEST_F(ImmutableListTest, MultiElemIntListTest) {
 
   EXPECT_TRUE(L5.isEqual(L4));
   EXPECT_TRUE(L5.isEqual(L5));
+}
+
+template <typename Fundamental>
+struct ExplicitCtorWrapper : public Wrapper<Fundamental> {
+  explicit ExplicitCtorWrapper(Fundamental F) : Wrapper<Fundamental>(F) {}
+  ExplicitCtorWrapper(const ExplicitCtorWrapper &) = delete;
+  ExplicitCtorWrapper(ExplicitCtorWrapper &&) = default;
+  ExplicitCtorWrapper &operator=(const ExplicitCtorWrapper &) = delete;
+  ExplicitCtorWrapper &operator=(ExplicitCtorWrapper &&) = default;
+};
+
+TEST_F(ImmutableListTest, EmplaceIntListTest) {
+  ImmutableList<ExplicitCtorWrapper<int>>::Factory f;
+
+  ImmutableList<ExplicitCtorWrapper<int>> L = f.getEmptyList();
+  ImmutableList<ExplicitCtorWrapper<int>> L2 = f.emplace(L, 3);
+
+  ImmutableList<ExplicitCtorWrapper<int>> L3 =
+      f.add(ExplicitCtorWrapper<int>(2), L2);
+
+  ImmutableList<ExplicitCtorWrapper<int>> L4 =
+      f.emplace(L3, ExplicitCtorWrapper<int>(1));
+
+  ImmutableList<ExplicitCtorWrapper<int>> L5 =
+      f.add(ExplicitCtorWrapper<int>(1), L3);
+
+  EXPECT_FALSE(L2.isEmpty());
+  EXPECT_TRUE(L2.getTail().isEmpty());
+  EXPECT_EQ(3, L2.getHead());
+  EXPECT_TRUE(L.isEqual(L2.getTail()));
+  EXPECT_TRUE(L2.getTail().isEqual(L));
+
+  EXPECT_FALSE(L3.isEmpty());
+  EXPECT_FALSE(L2 == L3);
+  EXPECT_EQ(2, L3.getHead());
+  EXPECT_TRUE(L2 == L3.getTail());
+
+  EXPECT_FALSE(L4.isEmpty());
+  EXPECT_EQ(1, L4.getHead());
+  EXPECT_TRUE(L3 == L4.getTail());
+
+  EXPECT_TRUE(L4 == L5);
+  EXPECT_TRUE(L3 == L5.getTail());
 }
 
 TEST_F(ImmutableListTest, CharListOrderingTest) {

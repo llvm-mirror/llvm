@@ -16,7 +16,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "MCTargetDesc/WebAssemblyMCTargetDesc.h"
-#include "WebAssembly.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDisassembler/MCDisassembler.h"
 #include "llvm/MC/MCFixedLenDisassembler.h"
@@ -92,14 +91,18 @@ static bool parseLEBImmediate(MCInst &MI, uint64_t &Size,
 }
 
 template <typename T>
-bool parseFPImmediate(MCInst &MI, uint64_t &Size, ArrayRef<uint8_t> Bytes) {
+bool parseImmediate(MCInst &MI, uint64_t &Size, ArrayRef<uint8_t> Bytes) {
   if (Size + sizeof(T) > Bytes.size())
     return false;
   T Val;
   memcpy(&Val, Bytes.data() + Size, sizeof(T));
   support::endian::byte_swap<T, support::endianness::little>(Val);
   Size += sizeof(T);
-  MI.addOperand(MCOperand::createFPImm(static_cast<double>(Val)));
+  if (std::is_floating_point<T>::value) {
+    MI.addOperand(MCOperand::createFPImm(static_cast<double>(Val)));
+  } else {
+    MI.addOperand(MCOperand::createImm(static_cast<int64_t>(Val)));
+  }
   return true;
 }
 
@@ -136,7 +139,7 @@ MCDisassembler::DecodeStatus WebAssemblyDisassembler::getInstruction(
   MI.setOpcode(WasmInst->Opcode);
   // Parse any operands.
   for (uint8_t OPI = 0; OPI < WasmInst->NumOperands; OPI++) {
-    switch (WasmInst->Operands[OPI]) {
+    switch (OperandTable[WasmInst->OperandStart + OPI]) {
     // ULEB operands:
     case WebAssembly::OPERAND_BASIC_BLOCK:
     case WebAssembly::OPERAND_LOCAL:
@@ -160,24 +163,42 @@ MCDisassembler::DecodeStatus WebAssemblyDisassembler::getInstruction(
     }
     // FP operands.
     case WebAssembly::OPERAND_F32IMM: {
-      if (!parseFPImmediate<float>(MI, Size, Bytes))
+      if (!parseImmediate<float>(MI, Size, Bytes))
         return MCDisassembler::Fail;
       break;
     }
     case WebAssembly::OPERAND_F64IMM: {
-      if (!parseFPImmediate<double>(MI, Size, Bytes))
+      if (!parseImmediate<double>(MI, Size, Bytes))
         return MCDisassembler::Fail;
       break;
     }
-    case MCOI::OPERAND_REGISTER: {
-      // These are NOT actually in the instruction stream, but MC is going to
-      // expect operands to be present for them!
-      // FIXME: can MC re-generate register assignments or do we have to
-      // do this? Since this function decodes a single instruction, we don't
-      // have the proper context for tracking an operand stack here.
-      MI.addOperand(MCOperand::createReg(0));
+    // Vector lane operands (not LEB encoded).
+    case WebAssembly::OPERAND_VEC_I8IMM: {
+      if (!parseImmediate<uint8_t>(MI, Size, Bytes))
+        return MCDisassembler::Fail;
       break;
     }
+    case WebAssembly::OPERAND_VEC_I16IMM: {
+      if (!parseImmediate<uint16_t>(MI, Size, Bytes))
+        return MCDisassembler::Fail;
+      break;
+    }
+    case WebAssembly::OPERAND_VEC_I32IMM: {
+      if (!parseImmediate<uint32_t>(MI, Size, Bytes))
+        return MCDisassembler::Fail;
+      break;
+    }
+    case WebAssembly::OPERAND_VEC_I64IMM: {
+      if (!parseImmediate<uint64_t>(MI, Size, Bytes))
+        return MCDisassembler::Fail;
+      break;
+    }
+    case MCOI::OPERAND_REGISTER:
+      // The tablegen header currently does not have any register operands since
+      // we use only the stack (_S) instructions.
+      // If you hit this that probably means a bad instruction definition in
+      // tablegen.
+      llvm_unreachable("Register operand in WebAssemblyDisassembler");
     default:
       llvm_unreachable("Unknown operand type in WebAssemblyDisassembler");
     }

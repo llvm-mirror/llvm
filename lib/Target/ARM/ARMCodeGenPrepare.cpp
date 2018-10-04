@@ -175,7 +175,6 @@ static bool generateSignBits(Value *V) {
 /// dealing with icmps but allow any other integer that is <= 16 bits. Void
 /// types are accepted so we can handle switches.
 static bool isSupportedType(Value *V) {
-  LLVM_DEBUG(dbgs() << "ARM CGP: isSupportedType: " << *V << "\n");
   Type *Ty = V->getType();
 
   // Allow voids and pointers, these won't be promoted.
@@ -186,10 +185,8 @@ static bool isSupportedType(Value *V) {
     Ty = cast<PointerType>(Ld->getPointerOperandType())->getElementType();
 
   const IntegerType *IntTy = dyn_cast<IntegerType>(Ty);
-  if (!IntTy) {
-    LLVM_DEBUG(dbgs() << "ARM CGP: No, not an integer.\n");
+  if (!IntTy)
     return false;
-  }
 
   return IntTy->getBitWidth() == ARMCodeGenPrepare::TypeSize;
 }
@@ -204,13 +201,17 @@ static bool isSupportedType(Value *V) {
 static bool isSource(Value *V) {
   if (!isa<IntegerType>(V->getType()))
     return false;
-  // TODO Allow truncs and zext to be sources.
+  // TODO Allow zext to be sources.
   if (isa<Argument>(V))
     return true;
   else if (isa<LoadInst>(V))
     return true;
+  else if (isa<BitCastInst>(V))
+    return true;
   else if (auto *Call = dyn_cast<CallInst>(V))
     return Call->hasRetAttr(Attribute::AttrKind::ZExt);
+  else if (auto *Trunc = dyn_cast<TruncInst>(V))
+    return isSupportedType(Trunc);
   return false;
 }
 
@@ -246,44 +247,119 @@ static bool isSafeOverflow(Instruction *I) {
   if (isa<OverflowingBinaryOperator>(I) && I->hasNoUnsignedWrap())
     return true;
 
+  // We can support a, potentially, overflowing instruction (I) if:
+  // - It is only used by an unsigned icmp.
+  // - The icmp uses a constant.
+  // - The overflowing value (I) is decreasing, i.e would underflow - wrapping
+  //   around zero to become a larger number than before.
+  // - The underflowing instruction (I) also uses a constant.
+  //
+  // We can then use the two constants to calculate whether the result would
+  // wrap in respect to itself in the original bitwidth. If it doesn't wrap,
+  // just underflows the range, the icmp would give the same result whether the
+  // result has been truncated or not. We calculate this by:
+  // - Zero extending both constants, if needed, to 32-bits.
+  // - Take the absolute value of I's constant, adding this to the icmp const.
+  // - Check that this value is not out of range for small type. If it is, it
+  //   means that it has underflowed enough to wrap around the icmp constant.
+  //
+  // For example:
+  //
+  // %sub = sub i8 %a, 2
+  // %cmp = icmp ule i8 %sub, 254
+  //
+  // If %a = 0, %sub = -2 == FE == 254
+  // But if this is evalulated as a i32
+  // %sub = -2 == FF FF FF FE == 4294967294
+  // So the unsigned compares (i8 and i32) would not yield the same result.
+  //
+  // Another way to look at it is:
+  // %a - 2 <= 254
+  // %a + 2 <= 254 + 2
+  // %a <= 256
+  // And we can't represent 256 in the i8 format, so we don't support it.
+  //
+  // Whereas:
+  //
+  // %sub i8 %a, 1
+  // %cmp = icmp ule i8 %sub, 254
+  //
+  // If %a = 0, %sub = -1 == FF == 255
+  // As i32:
+  // %sub = -1 == FF FF FF FF == 4294967295
+  //
+  // In this case, the unsigned compare results would be the same and this
+  // would also be true for ult, uge and ugt:
+  // - (255 < 254) == (0xFFFFFFFF < 254) == false
+  // - (255 <= 254) == (0xFFFFFFFF <= 254) == false
+  // - (255 > 254) == (0xFFFFFFFF > 254) == true
+  // - (255 >= 254) == (0xFFFFFFFF >= 254) == true
+  //
+  // To demonstrate why we can't handle increasing values:
+  // 
+  // %add = add i8 %a, 2
+  // %cmp = icmp ult i8 %add, 127
+  //
+  // If %a = 254, %add = 256 == (i8 1)
+  // As i32:
+  // %add = 256
+  //
+  // (1 < 127) != (256 < 127)
+
   unsigned Opc = I->getOpcode();
-  if (Opc == Instruction::Add || Opc == Instruction::Sub) {
-    // We don't care if the add or sub could wrap if the value is decreasing
-    // and is only being used by an unsigned compare.
-    if (!I->hasOneUse() ||
-        !isa<ICmpInst>(*I->user_begin()) ||
-        !isa<ConstantInt>(I->getOperand(1)))
+  if (Opc != Instruction::Add && Opc != Instruction::Sub)
+    return false;
+
+  if (!I->hasOneUse() ||
+      !isa<ICmpInst>(*I->user_begin()) ||
+      !isa<ConstantInt>(I->getOperand(1)))
+    return false;
+
+  ConstantInt *OverflowConst = cast<ConstantInt>(I->getOperand(1));
+  bool NegImm = OverflowConst->isNegative();
+  bool IsDecreasing = ((Opc == Instruction::Sub) && !NegImm) ||
+                       ((Opc == Instruction::Add) && NegImm);
+  if (!IsDecreasing)
+    return false;
+
+  // Don't support an icmp that deals with sign bits.
+  auto *CI = cast<ICmpInst>(*I->user_begin());
+  if (CI->isSigned() || CI->isEquality())
+    return false;
+
+  ConstantInt *ICmpConst = nullptr;
+  if (auto *Const = dyn_cast<ConstantInt>(CI->getOperand(0)))
+    ICmpConst = Const;
+  else if (auto *Const = dyn_cast<ConstantInt>(CI->getOperand(1)))
+    ICmpConst = Const;
+  else
+    return false;
+
+  // Now check that the result can't wrap on itself.
+  APInt Total = ICmpConst->getValue().getBitWidth() < 32 ?
+    ICmpConst->getValue().zext(32) : ICmpConst->getValue();
+
+  Total += OverflowConst->getValue().getBitWidth() < 32 ?
+    OverflowConst->getValue().abs().zext(32) : OverflowConst->getValue().abs();
+
+  APInt Max = APInt::getAllOnesValue(ARMCodeGenPrepare::TypeSize);
+
+  if (Total.getBitWidth() > Max.getBitWidth()) {
+    if (Total.ugt(Max.zext(Total.getBitWidth())))
       return false;
-
-    auto *CI = cast<ICmpInst>(*I->user_begin());
-    if (CI->isSigned())
+  } else if (Max.getBitWidth() > Total.getBitWidth()) {
+    if (Total.zext(Max.getBitWidth()).ugt(Max))
       return false;
+  } else if (Total.ugt(Max))
+    return false;
 
-    bool NegImm = cast<ConstantInt>(I->getOperand(1))->isNegative();
-    bool IsDecreasing = ((Opc == Instruction::Sub) && !NegImm) ||
-                        ((Opc == Instruction::Add) && NegImm);
-    if (!IsDecreasing)
-      return false;
-
-    LLVM_DEBUG(dbgs() << "ARM CGP: Allowing safe overflow for " << *I << "\n");
-    return true;
-  }
-
-  // Otherwise, if an instruction is using a negative immediate we will need
-  // to fix it up during the promotion.
-  for (auto &Op : I->operands()) {
-    if (auto *Const = dyn_cast<ConstantInt>(Op))
-      if (Const->isNegative())
-        return false;
-  }
-  return false;
+  LLVM_DEBUG(dbgs() << "ARM CGP: Allowing safe overflow for " << *I << "\n");
+  return true;
 }
 
 static bool shouldPromote(Value *V) {
-  if (!isa<IntegerType>(V->getType()) || isSink(V)) {
-    LLVM_DEBUG(dbgs() << "ARM CGP: Don't need to promote: " << *V << "\n");
+  if (!isa<IntegerType>(V->getType()) || isSink(V))
     return false;
-  }
 
   if (isSource(V))
     return true;
@@ -363,24 +439,14 @@ void IRPromoter::Mutate(Type *OrigTy,
       Users.push_back(User);
     }
 
-    for (auto &U : Users)
+    for (auto *U : Users)
       U->replaceUsesOfWith(From, To);
   };
 
   auto FixConst = [&](ConstantInt *Const, Instruction *I) {
-    Constant *NewConst = nullptr;
-    if (isSafeOverflow(I)) {
-      NewConst = (Const->isNegative()) ?
-        ConstantExpr::getSExt(Const, ExtTy) :
-        ConstantExpr::getZExt(Const, ExtTy);
-    } else {
-      uint64_t NewVal = *Const->getValue().getRawData();
-      if (Const->getType() == Type::getInt16Ty(Ctx))
-        NewVal &= 0xFFFF;
-      else
-        NewVal &= 0xFF;
-      NewConst = ConstantInt::get(ExtTy, NewVal);
-    }
+    Constant *NewConst = isSafeOverflow(I) && Const->isNegative() ?
+      ConstantExpr::getSExt(Const, ExtTy) :
+      ConstantExpr::getZExt(Const, ExtTy);
     I->replaceUsesOfWith(Const, NewConst);
   };
 
@@ -466,6 +532,8 @@ void IRPromoter::Mutate(Type *OrigTy,
     if (!shouldPromote(V) || isPromotedResultSafe(V))
       continue;
 
+    assert(EnableDSP && "DSP intrinisc insertion not enabled!");
+
     // Replace unsafe instructions with appropriate intrinsic calls.
     InsertDSPIntrinsic(cast<Instruction>(V));
   }
@@ -517,6 +585,15 @@ void IRPromoter::Mutate(Type *OrigTy,
     }
   }
   LLVM_DEBUG(dbgs() << "ARM CGP: Mutation complete:\n");
+  LLVM_DEBUG(dbgs();
+             for (auto *V : Sources)
+               V->dump();
+             for (auto *I : NewInsts)
+               I->dump();
+             for (auto *V : Visited) {
+               if (!Sources.count(V))
+                 V->dump();
+              });
 }
 
 /// We accept most instructions, as well as Arguments and ConstantInsts. We
@@ -524,8 +601,6 @@ void IRPromoter::Mutate(Type *OrigTy,
 /// return value is zeroext. We don't allow opcodes that can introduce sign
 /// bits.
 bool ARMCodeGenPrepare::isSupportedValue(Value *V) {
-  LLVM_DEBUG(dbgs() << "ARM CGP: Is " << *V << " supported?\n");
-
   if (isa<ICmpInst>(V))
     return true;
 
@@ -545,11 +620,12 @@ bool ARMCodeGenPrepare::isSupportedValue(Value *V) {
       isa<LoadInst>(V))
     return isSupportedType(V);
 
+  // Truncs can be either sources or sinks.
   if (auto *Trunc = dyn_cast<TruncInst>(V))
-    return isSupportedType(Trunc->getOperand(0));
+    return isSupportedType(Trunc) || isSupportedType(Trunc->getOperand(0));
 
-  if (auto *ZExt = dyn_cast<ZExtInst>(V))
-    return isSupportedType(ZExt->getOperand(0));
+  if (isa<CastInst>(V) && !isa<SExtInst>(V))
+    return isSupportedType(cast<CastInst>(V)->getOperand(0));
 
   // Special cases for calls as we need to check for zeroext
   // TODO We should accept calls even if they don't have zeroext, as they can
@@ -558,10 +634,9 @@ bool ARMCodeGenPrepare::isSupportedValue(Value *V) {
     return isSupportedType(Call) &&
            Call->hasRetAttr(Attribute::AttrKind::ZExt);
 
-  if (!isa<BinaryOperator>(V)) {
-    LLVM_DEBUG(dbgs() << "ARM CGP: No, not a binary operator.\n");
+  if (!isa<BinaryOperator>(V))
     return false;
-  }
+
   if (!isSupportedType(V))
     return false;
 
@@ -663,10 +738,8 @@ bool ARMCodeGenPrepare::TryToPromote(Value *V) {
     // the tree has already been explored.
     // TODO: This could limit the transform, ie if we try to promote something
     // from an i8 and fail first, before trying an i16.
-    if (AllVisited.count(V)) {
-      LLVM_DEBUG(dbgs() << "ARM CGP: Already visited this: " << *V << "\n");
+    if (AllVisited.count(V))
       return false;
-    }
 
     CurrentVisited.insert(V);
     AllVisited.insert(V);
@@ -746,7 +819,6 @@ bool ARMCodeGenPrepare::runOnFunction(Function &F) {
         if (CI.isSigned() || !isa<IntegerType>(CI.getOperand(0)->getType()))
           continue;
 
-        LLVM_DEBUG(dbgs() << "ARM CGP: Searching from: " << CI << "\n");
         for (auto &Op : CI.operands()) {
           if (auto *I = dyn_cast<Instruction>(Op))
             MadeChange |= TryToPromote(I);

@@ -1837,6 +1837,12 @@ public:
   static bool classof(const InstructionPredicateMatcher *P) {
     return P->getKind() == IPM_GenericPredicate;
   }
+  bool isIdentical(const PredicateMatcher &B) const override {
+    return InstructionPredicateMatcher::isIdentical(B) &&
+           Predicate ==
+               static_cast<const GenericInstructionPredicateMatcher &>(B)
+                   .Predicate;
+  }
   void emitPredicateOpcodes(MatchTable &Table,
                             RuleMatcher &Rule) const override {
     Table << MatchTable::Opcode("GIM_CheckCxxInsnPredicate")
@@ -2607,7 +2613,7 @@ public:
       std::vector<unsigned> MergeInsnIDs;
       for (const auto &IDMatcherPair : Rule.defined_insn_vars())
         MergeInsnIDs.push_back(IDMatcherPair.second);
-      llvm::sort(MergeInsnIDs.begin(), MergeInsnIDs.end());
+      llvm::sort(MergeInsnIDs);
       for (const auto &MergeInsnID : MergeInsnIDs)
         Table << MatchTable::IntValue(MergeInsnID);
       Table << MatchTable::NamedValue("GIU_MergeMemOperands_EndOfList")
@@ -2806,7 +2812,7 @@ void RuleMatcher::emit(MatchTable &Table) {
 
       InsnIDs.push_back(Pair.second);
     }
-    llvm::sort(InsnIDs.begin(), InsnIDs.end());
+    llvm::sort(InsnIDs);
 
     for (const auto &InsnID : InsnIDs) {
       // Reject the difficult cases until we have a more accurate check.
@@ -4282,11 +4288,11 @@ void GlobalISelEmitter::run(raw_ostream &OS) {
 
   std::vector<Record *> ComplexPredicates =
       RK.getAllDerivedDefinitions("GIComplexOperandMatcher");
-  llvm::sort(ComplexPredicates.begin(), ComplexPredicates.end(), orderByName);
+  llvm::sort(ComplexPredicates, orderByName);
 
   std::vector<Record *> CustomRendererFns =
       RK.getAllDerivedDefinitions("GICustomOperandRenderer");
-  llvm::sort(CustomRendererFns.begin(), CustomRendererFns.end(), orderByName);
+  llvm::sort(CustomRendererFns, orderByName);
 
   unsigned MaxTemporaries = 0;
   for (const auto &Rule : Rules)
@@ -4365,7 +4371,7 @@ void GlobalISelEmitter::run(raw_ostream &OS) {
   std::vector<LLTCodeGen> TypeObjects;
   for (const auto &Ty : KnownTypes)
     TypeObjects.push_back(Ty);
-  llvm::sort(TypeObjects.begin(), TypeObjects.end());
+  llvm::sort(TypeObjects);
   OS << "// LLT Objects.\n"
      << "enum {\n";
   for (const auto &TypeObject : TypeObjects) {
