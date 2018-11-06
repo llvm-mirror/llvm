@@ -6,7 +6,9 @@ Much stuff is still in working in progress.
 
 Installation
 ------------
+
 To install stream-specialized LLVM compilation tool chain
+
 ````sh
 $ git clone --recursive [this repo]
 $ cd /path/to/this/repo; mkdir build; cd build
