@@ -3,6 +3,7 @@ add_llvm_library(LLVMInstrumentation
   BoundsChecking.cpp
   CGProfile.cpp
   DataFlowSanitizer.cpp
+  Memoro.cpp
   GCOVProfiling.cpp
   MemorySanitizer.cpp
   IndirectCallPromotion.cpp
