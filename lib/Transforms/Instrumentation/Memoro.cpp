@@ -71,23 +71,14 @@ static const char *const MemoroExitName = "__memoro_exit";
 
 // We need to specify the tool to the runtime earlier than
 // the ctor is called in some cases, so we set a global variable.
-// TODO memoro is a single tool, get rid of this
-static const char *const MemoroWhichToolName = "__memoro_which_tool";
 
 namespace {
-
-static MemoroOptions OverrideOptionsFromCL(MemoroOptions Options) {
-
-  // no options ... yet
-
-  return Options;
-}
 
 /// Memoro: instrument each module to find performance issues.
 class Memoro : public ModulePass {
 public:
-  Memoro(const MemoroOptions &Opts = MemoroOptions())
-      : ModulePass(ID), Options(OverrideOptionsFromCL(Opts)) {}
+  Memoro()
+      : ModulePass(ID) {}
   ~Memoro() = default;
   StringRef getPassName() const override;
   void getAnalysisUsage(AnalysisUsage &AU) const override;
@@ -97,8 +88,7 @@ public:
 private:
   bool initOnModule(Module &M);
   void initializeCallbacks(Module &M);
-  Constant *createMemoroInitToolInfoArg(Module &M, const DataLayout &DL);
-  void createDestructor(Module &M, Constant *ToolInfoArg);
+  void createDestructor(Module &M);
   bool runOnFunction(Function &F, Module &M, raw_fd_ostream &type_file);
   bool instrumentLoadOrStore(Instruction *I, const DataLayout &DL);
   bool instrumentMemIntrinsic(MemIntrinsic *MI);
@@ -108,7 +98,6 @@ private:
   void inferMallocNewType(CallInst *CI, StringRef const &name,
                           raw_fd_ostream &type_file);
 
-  MemoroOptions Options;
   LLVMContext *Ctx;
   Type *IntptrTy;
   // Our slowpath involves callouts to the runtime library.
@@ -142,8 +131,8 @@ void Memoro::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequired<TargetLibraryInfoWrapperPass>();
 }
 
-ModulePass *llvm::createMemoroPass(const MemoroOptions &Options) {
-  return new Memoro(Options);
+ModulePass *llvm::createMemoroPass() {
+  return new Memoro();
 }
 
 void Memoro::initializeCallbacks(Module &M) {
@@ -189,34 +178,16 @@ void Memoro::initializeCallbacks(Module &M) {
                             IRB.getInt32Ty(), IntptrTy));
 }
 
-// Create the tool-specific argument passed to MemoroInit and MemoroExit.
-// TODO get rid of this, memoro does not need
-Constant *Memoro::createMemoroInitToolInfoArg(Module &M, const DataLayout &DL) {
-  // This structure contains tool-specific information about each compilation
-  // unit (module) and is passed to the runtime library.
-  GlobalVariable *ToolInfoGV = nullptr;
-
-  auto *Int8PtrTy = Type::getInt8PtrTy(*Ctx);
-
-  if (ToolInfoGV != nullptr)
-    return ConstantExpr::getPointerCast(ToolInfoGV, Int8PtrTy);
-
-  // Create the null pointer if no tool-specific variable created.
-  return ConstantPointerNull::get(Int8PtrTy);
-}
-
-void Memoro::createDestructor(Module &M, Constant *ToolInfoArg) {
-  PointerType *Int8PtrTy = Type::getInt8PtrTy(*Ctx);
+void Memoro::createDestructor(Module &M) {
   MemoroDtorFunction =
       Function::Create(FunctionType::get(Type::getVoidTy(*Ctx), false),
                        GlobalValue::InternalLinkage, MemoroModuleDtorName, &M);
   ReturnInst::Create(*Ctx, BasicBlock::Create(*Ctx, "", MemoroDtorFunction));
   IRBuilder<> IRB_Dtor(MemoroDtorFunction->getEntryBlock().getTerminator());
   Function *MemoroExit = checkSanitizerInterfaceFunction(
-      M.getOrInsertFunction(MemoroExitName, IRB_Dtor.getVoidTy(), Int8PtrTy));
-  // TODO get rid of the tool info stuff
+      M.getOrInsertFunction(MemoroExitName, IRB_Dtor.getVoidTy()));
   MemoroExit->setLinkage(Function::ExternalLinkage);
-  IRB_Dtor.CreateCall(MemoroExit, {ToolInfoArg});
+  IRB_Dtor.CreateCall(MemoroExit);
   appendToGlobalDtors(M, MemoroDtorFunction, MemoroCtorAndDtorPriority);
 }
 
@@ -224,30 +195,15 @@ bool Memoro::initOnModule(Module &M) {
 
   Ctx = &M.getContext();
   const DataLayout &DL = M.getDataLayout();
-  IRBuilder<> IRB(M.getContext());
-  IntegerType *OrdTy = IRB.getInt32Ty();
-  PointerType *Int8PtrTy = Type::getInt8PtrTy(*Ctx);
   IntptrTy = DL.getIntPtrType(M.getContext());
-  // Create the variable passed to MemoroInit and MemoroExit.
-  Constant *ToolInfoArg = createMemoroInitToolInfoArg(M, DL);
   // Constructor
-  // We specify the tool type both in the MemoroWhichToolName global
-  // and as an arg to the init routine as a sanity check.
-  // TODO memoro does not need the ToolInfo stuff, get rid of it
   std::tie(MemoroCtorFunction, std::ignore) =
       createSanitizerCtorAndInitFunctions(
           M, MemoroModuleCtorName, MemoroInitName,
-          /*InitArgTypes=*/{OrdTy, Int8PtrTy},
-          /*InitArgs=*/
-          {ConstantInt::get(OrdTy, static_cast<int>(Options.test_op)),
-           ToolInfoArg});
+          /*InitArgTypes=*/{}, {});
   appendToGlobalCtors(M, MemoroCtorFunction, MemoroCtorAndDtorPriority);
 
-  createDestructor(M, ToolInfoArg);
-
-  new GlobalVariable(M, OrdTy, true, GlobalValue::WeakAnyLinkage,
-                     ConstantInt::get(OrdTy, static_cast<int>(Options.test_op)),
-                     MemoroWhichToolName);
+  createDestructor(M);
 
   return true;
 }
@@ -346,7 +302,7 @@ void Memoro::inferMallocNewType(CallInst *CI, StringRef const &name,
 void Memoro::maybeInferMallocNewType(CallInst *CI, raw_fd_ostream &type_file) {
   // detect if the function is a memory allocation call
   // currently doing this by comparing names, but this is inefficient and feels
-  // somewhat brittle.
+  // somewhat brittle and likely doesn't catch all alloc funcs. Open to suggestions
   Function *F = CI->getCalledFunction();
   if (!F || F->getName().empty()) {
     return;
@@ -354,15 +310,11 @@ void Memoro::maybeInferMallocNewType(CallInst *CI, raw_fd_ostream &type_file) {
   int status;
   char *realname;
   realname = abi::__cxa_demangle(F->getName().str().c_str(), 0, 0, &status);
-  // errs() << "memoro found function named " << F->getName() << " with
-  // demangled name " << realname << "\n";
   if (F->getName().compare("malloc") == 0 ||
       F->getName().compare("realloc") == 0 ||
       F->getName().compare("calloc") == 0 ||
       (realname && strcmp(realname, "operator new[](unsigned long)") == 0) ||
       (realname && strcmp(realname, "operator new(unsigned long)") == 0)) {
-    // errs() << "memoro found function named " << F->getName() << " with
-    // demangled name " << realname << "\n";
     if (realname) {
       StringRef name(realname);
       inferMallocNewType(CI, name, type_file);
@@ -376,7 +328,6 @@ void Memoro::maybeInferMallocNewType(CallInst *CI, raw_fd_ostream &type_file) {
 bool Memoro::runOnFunction(Function &F, Module &M, raw_fd_ostream &type_file) {
   // This is required to prevent instrumenting the call to __memoro_init from
   // within the module constructor.
-  // errs() << "running memoro instrumenter on function!\n";
   if (&F == MemoroCtorFunction)
     return false;
   SmallVector<Instruction *, 8> LoadsAndStores;

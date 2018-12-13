@@ -159,15 +159,8 @@ struct EfficiencySanitizerOptions {
 ModulePass *createEfficiencySanitizerPass(
     const EfficiencySanitizerOptions &Options = EfficiencySanitizerOptions());
 
-// Options for Memoro sub-tools.
-struct MemoroOptions {
-    int test_op = 0;
-    MemoroOptions() = default;
-};
-
 // Insert Memoro instrumentation.
-ModulePass *createMemoroPass(
-        const MemoroOptions &Options = MemoroOptions());
+ModulePass *createMemoroPass();
 
 // Options for sanitizer coverage instrumentation.
 struct SanitizerCoverageOptions {
