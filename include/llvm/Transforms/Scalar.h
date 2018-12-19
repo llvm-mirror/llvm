@@ -26,7 +26,6 @@ class ModulePass;
 class Pass;
 class GetElementPtrInst;
 class PassInfo;
-class TerminatorInst;
 class TargetLowering;
 class TargetMachine;
 
@@ -394,12 +393,6 @@ FunctionPass *createPartiallyInlineLibCallsPass();
 
 //===----------------------------------------------------------------------===//
 //
-// ScalarizerPass - Converts vector operations into scalar operations
-//
-FunctionPass *createScalarizerPass();
-
-//===----------------------------------------------------------------------===//
-//
 // SeparateConstOffsetFromGEP - Split GEPs for better CSE
 //
 FunctionPass *createSeparateConstOffsetFromGEPPass(bool LowerGEP = false);
@@ -491,6 +484,13 @@ FunctionPass *createLibCallsShrinkWrapPass();
 // primarily to help other loop passes.
 //
 Pass *createLoopSimplifyCFGPass();
+
+//===----------------------------------------------------------------------===//
+//
+// WarnMissedTransformations - This pass emits warnings for leftover forced
+// transformations.
+//
+Pass *createWarnMissedTransformationsPass();
 } // End llvm namespace
 
 #endif

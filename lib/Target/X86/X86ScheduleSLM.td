@@ -49,6 +49,9 @@ def SLMFPDivider    : ProcResource<1>;
 // Loads are 3 cycles, so ReadAfterLd registers needn't be available until 3
 // cycles after the memory operand.
 def : ReadAdvance<ReadAfterLd, 3>;
+def : ReadAdvance<ReadAfterVecLd, 3>;
+def : ReadAdvance<ReadAfterVecXLd, 3>;
+def : ReadAdvance<ReadAfterVecYLd, 3>;
 
 // Many SchedWrites are defined in pairs with and without a folded load.
 // Instructions with folded loads are usually micro-fused, so they only appear
@@ -134,9 +137,13 @@ def  : WriteRes<WriteSETCCStore, [SLM_IEC_RSV01, SLM_MEC_RSV]> {
   // FIXME Latency and NumMicrOps?
   let ResourceCycles = [2,1];
 }
-def  : WriteRes<WriteLAHFSAHF,   [SLM_IEC_RSV01]>;
-def  : WriteRes<WriteBitTest,    [SLM_IEC_RSV01]>;
-def  : WriteRes<WriteBitTestSet, [SLM_IEC_RSV01]>;
+defm : X86WriteRes<WriteLAHFSAHF,        [SLM_IEC_RSV01], 1, [1], 1>;
+defm : X86WriteRes<WriteBitTest,         [SLM_IEC_RSV01], 1, [1], 1>;
+defm : X86WriteRes<WriteBitTestImmLd,    [SLM_IEC_RSV01, SLM_MEC_RSV], 4, [1,1], 1>;
+defm : X86WriteRes<WriteBitTestRegLd,    [SLM_IEC_RSV01, SLM_MEC_RSV], 4, [1,1], 1>;
+defm : X86WriteRes<WriteBitTestSet,      [SLM_IEC_RSV01], 1, [1], 1>;
+defm : X86WriteRes<WriteBitTestSetImmLd, [SLM_IEC_RSV01, SLM_MEC_RSV], 3, [1,1], 1>;
+defm : X86WriteRes<WriteBitTestSetRegLd, [SLM_IEC_RSV01, SLM_MEC_RSV], 3, [1,1], 1>;
 
 // This is for simple LEAs with one or two input operands.
 // The complex ones can only execute on port 1, and they require two cycles on

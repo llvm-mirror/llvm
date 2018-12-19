@@ -22,6 +22,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/MC/MCSchedule.h"
 
+namespace llvm {
 namespace mca {
 
 class SchedulerStrategy {
@@ -84,7 +85,7 @@ public:
 /// transition (i.e. from state IS_READY, to state IS_EXECUTING). An Instruction
 /// leaves the IssuedSet when it reaches the write-back stage.
 class Scheduler : public HardwareUnit {
-  LSUnit *LSU;
+  LSUnit &LSU;
 
   // Instruction selection strategy for this Scheduler.
   std::unique_ptr<SchedulerStrategy> Strategy;
@@ -104,28 +105,27 @@ class Scheduler : public HardwareUnit {
   /// Issue an instruction without updating the ready queue.
   void issueInstructionImpl(
       InstRef &IR,
-      llvm::SmallVectorImpl<std::pair<ResourceRef, ResourceCycles>> &Pipes);
+      SmallVectorImpl<std::pair<ResourceRef, ResourceCycles>> &Pipes);
 
   // Identify instructions that have finished executing, and remove them from
   // the IssuedSet. References to executed instructions are added to input
   // vector 'Executed'.
-  void updateIssuedSet(llvm::SmallVectorImpl<InstRef> &Executed);
+  void updateIssuedSet(SmallVectorImpl<InstRef> &Executed);
 
   // Try to promote instructions from WaitSet to ReadySet.
   // Add promoted instructions to the 'Ready' vector in input.
-  void promoteToReadySet(llvm::SmallVectorImpl<InstRef> &Ready);
+  void promoteToReadySet(SmallVectorImpl<InstRef> &Ready);
 
 public:
-  Scheduler(const llvm::MCSchedModel &Model, LSUnit *Lsu)
-      : LSU(Lsu), Resources(llvm::make_unique<ResourceManager>(Model)) {
-    initializeStrategy(nullptr);
-  }
-  Scheduler(const llvm::MCSchedModel &Model, LSUnit *Lsu,
+  Scheduler(const MCSchedModel &Model, LSUnit &Lsu)
+      : Scheduler(Model, Lsu, nullptr) {}
+
+  Scheduler(const MCSchedModel &Model, LSUnit &Lsu,
             std::unique_ptr<SchedulerStrategy> SelectStrategy)
-      : LSU(Lsu), Resources(llvm::make_unique<ResourceManager>(Model)) {
-    initializeStrategy(std::move(SelectStrategy));
-  }
-  Scheduler(std::unique_ptr<ResourceManager> RM, LSUnit *Lsu,
+      : Scheduler(make_unique<ResourceManager>(Model), Lsu,
+                  std::move(SelectStrategy)) {}
+
+  Scheduler(std::unique_ptr<ResourceManager> RM, LSUnit &Lsu,
             std::unique_ptr<SchedulerStrategy> SelectStrategy)
       : LSU(Lsu), Resources(std::move(RM)) {
     initializeStrategy(std::move(SelectStrategy));
@@ -167,8 +167,8 @@ public:
   /// result of this event.
   void issueInstruction(
       InstRef &IR,
-      llvm::SmallVectorImpl<std::pair<ResourceRef, ResourceCycles>> &Used,
-      llvm::SmallVectorImpl<InstRef> &Ready);
+      SmallVectorImpl<std::pair<ResourceRef, ResourceCycles>> &Used,
+      SmallVectorImpl<InstRef> &Ready);
 
   /// Returns true if IR has to be issued immediately, or if IR is a zero
   /// latency instruction.
@@ -181,9 +181,9 @@ public:
   /// have changed in state, and that are now available to new instructions.
   /// Instructions executed are added to vector Executed, while vector Ready is
   /// populated with instructions that have become ready in this new cycle.
-  void cycleEvent(llvm::SmallVectorImpl<ResourceRef> &Freed,
-                  llvm::SmallVectorImpl<InstRef> &Ready,
-                  llvm::SmallVectorImpl<InstRef> &Executed);
+  void cycleEvent(SmallVectorImpl<ResourceRef> &Freed,
+                  SmallVectorImpl<InstRef> &Ready,
+                  SmallVectorImpl<InstRef> &Executed);
 
   /// Convert a resource mask into a valid llvm processor resource identifier.
   unsigned getResourceID(uint64_t Mask) const {
@@ -202,12 +202,13 @@ public:
   // This routine performs a sanity check.  This routine should only be called
   // when we know that 'IR' is not in the scheduler's instruction queues.
   void sanityCheck(const InstRef &IR) const {
-    assert(llvm::find(WaitSet, IR) == WaitSet.end());
-    assert(llvm::find(ReadySet, IR) == ReadySet.end());
-    assert(llvm::find(IssuedSet, IR) == IssuedSet.end());
+    assert(find(WaitSet, IR) == WaitSet.end() && "Already in the wait set!");
+    assert(find(ReadySet, IR) == ReadySet.end() && "Already in the ready set!");
+    assert(find(IssuedSet, IR) == IssuedSet.end() && "Already executing!");
   }
 #endif // !NDEBUG
 };
 } // namespace mca
+} // namespace llvm
 
 #endif // LLVM_TOOLS_LLVM_MCA_SCHEDULER_H

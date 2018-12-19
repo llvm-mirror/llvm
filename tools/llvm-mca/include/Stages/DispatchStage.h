@@ -27,6 +27,7 @@
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 
+namespace llvm {
 namespace mca {
 
 // Implements the hardware dispatch logic.
@@ -52,30 +53,25 @@ class DispatchStage final : public Stage {
   unsigned AvailableEntries;
   unsigned CarryOver;
   InstRef CarriedOver;
-  const llvm::MCSubtargetInfo &STI;
+  const MCSubtargetInfo &STI;
   RetireControlUnit &RCU;
   RegisterFile &PRF;
 
   bool checkRCU(const InstRef &IR) const;
   bool checkPRF(const InstRef &IR) const;
   bool canDispatch(const InstRef &IR) const;
-  llvm::Error dispatch(InstRef IR);
+  Error dispatch(InstRef IR);
 
-  void updateRAWDependencies(ReadState &RS, const llvm::MCSubtargetInfo &STI);
+  void updateRAWDependencies(ReadState &RS, const MCSubtargetInfo &STI);
 
   void notifyInstructionDispatched(const InstRef &IR,
-                                   llvm::ArrayRef<unsigned> UsedPhysRegs,
-                                   unsigned uOps);
-
-  void collectWrites(llvm::SmallVectorImpl<WriteRef> &Vec,
-                     unsigned RegID) const {
-    return PRF.collectWrites(Vec, RegID);
-  }
+                                   ArrayRef<unsigned> UsedPhysRegs,
+                                   unsigned uOps) const;
 
 public:
-  DispatchStage(const llvm::MCSubtargetInfo &Subtarget,
-                const llvm::MCRegisterInfo &MRI, unsigned MaxDispatchWidth,
-                RetireControlUnit &R, RegisterFile &F)
+  DispatchStage(const MCSubtargetInfo &Subtarget, const MCRegisterInfo &MRI,
+                unsigned MaxDispatchWidth, RetireControlUnit &R,
+                RegisterFile &F)
       : DispatchWidth(MaxDispatchWidth), AvailableEntries(MaxDispatchWidth),
         CarryOver(0U), CarriedOver(), STI(Subtarget), RCU(R), PRF(F) {}
 
@@ -84,13 +80,14 @@ public:
   // The dispatch logic internally doesn't buffer instructions. So there is
   // never work to do at the beginning of every cycle.
   bool hasWorkToComplete() const override { return false; }
-  llvm::Error cycleStart() override;
-  llvm::Error execute(InstRef &IR) override;
+  Error cycleStart() override;
+  Error execute(InstRef &IR) override;
 
 #ifndef NDEBUG
   void dump() const;
 #endif
 };
 } // namespace mca
+} // namespace llvm
 
 #endif // LLVM_TOOLS_LLVM_MCA_DISPATCH_STAGE_H

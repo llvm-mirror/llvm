@@ -1,10 +1,14 @@
-# RUN: llvm-mc -triple=wasm32-unknown-unknown -mattr=+sign_ext,+simd128 < %s | FileCheck %s
+# RUN: llvm-mc -triple=wasm32-unknown-unknown -mattr=+simd128,+nontrapping-fptoint,+exception-handling < %s | FileCheck %s
+# this one is just here to see if it converts to .o without errors, but doesn't check any output:
+# RUN: llvm-mc -triple=wasm32-unknown-unknown -filetype=obj -mattr=+simd128,+nontrapping-fptoint,+exception-handling < %s
 
     .text
+    .section .text.main,"",@
     .type    test0,@function
 test0:
     # Test all types:
-    .param      i32, i64
+    .functype   test0 (i32, i64) -> (i32)
+    .eventtype  __cpp_exception i32
     .local      f32, f64, v128, v128
     # Explicit getlocal/setlocal:
     get_local   2
@@ -42,12 +46,28 @@ test0:
     get_local   4
     get_local   5
     f32x4.add
+    # Test correct parsing of instructions with / and : in them:
+    # TODO: enable once instruction has been added.
+    #i32x4.trunc_s/f32x4:sat
+    i32.trunc_s/f32
+    try
+.LBB0_3:
+    i32.catch   0
+.LBB0_4:
+    catch_all
+.LBB0_5:
+    end_try
+    #i32.trunc_s:sat/f32
+    get_global  __stack_pointer@GLOBAL
     end_function
-
+.Lfunc_end0:
+	.size	test0, .Lfunc_end0-test0
+    .globaltype	__stack_pointer, i32
 
 # CHECK:           .text
 # CHECK-LABEL: test0:
-# CHECK-NEXT:      .param      i32, i64
+# CHECK-NEXT:      .functype test0 (i32, i64) -> (i32)
+# CHECK-NEXT:      .eventtype  __cpp_exception i32
 # CHECK-NEXT:      .local      f32, f64
 # CHECK-NEXT:      get_local   2
 # CHECK-NEXT:      set_local   2
@@ -81,4 +101,15 @@ test0:
 # CHECK-NEXT:      get_local   4
 # CHECK-NEXT:      get_local   5
 # CHECK-NEXT:      f32x4.add
+# CHECK-NEXT:      i32.trunc_s/f32
+# CHECK-NEXT:      try
+# CHECK-NEXT:  .LBB0_3:
+# CHECK-NEXT:      i32.catch   0
+# CHECK-NEXT:  .LBB0_4:
+# CHECK-NEXT:      catch_all
+# CHECK-NEXT:  .LBB0_5:
+# CHECK-NEXT:      end_try
+# CHECK-NEXT:      get_global  __stack_pointer@GLOBAL
 # CHECK-NEXT:      end_function
+
+# CHECK:           .globaltype	__stack_pointer, i32

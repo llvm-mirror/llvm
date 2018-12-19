@@ -16,6 +16,7 @@
 #define LLVM_BINARYFORMAT_WASM_H
 
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/SmallVector.h"
 
 namespace llvm {
 namespace wasm {
@@ -34,9 +35,12 @@ struct WasmObjectHeader {
   uint32_t Version;
 };
 
-struct WasmSignature {
-  std::vector<uint8_t> ParamTypes;
-  uint8_t ReturnType;
+struct WasmDylinkInfo {
+  uint32_t MemorySize; // Memory size in bytes
+  uint32_t MemoryAlignment;  // P2 alignment of memory
+  uint32_t TableSize;  // Table size in elements
+  uint32_t TableAlignment;  // P2 alignment of table
+  std::vector<StringRef> Needed; // Shared library depenedencies
 };
 
 struct WasmExport {
@@ -79,6 +83,18 @@ struct WasmGlobal {
   StringRef SymbolName; // from the "linking" section
 };
 
+struct WasmEventType {
+  // Kind of event. Currently only WASM_EVENT_ATTRIBUTE_EXCEPTION is possible.
+  uint32_t Attribute;
+  uint32_t SigIndex;
+};
+
+struct WasmEvent {
+  uint32_t Index;
+  WasmEventType Type;
+  StringRef SymbolName; // from the "linking" section
+};
+
 struct WasmImport {
   StringRef Module;
   StringRef Field;
@@ -88,6 +104,7 @@ struct WasmImport {
     WasmGlobalType Global;
     WasmTable Table;
     WasmLimits Memory;
+    WasmEventType Event;
   };
 };
 
@@ -182,7 +199,8 @@ enum : unsigned {
   WASM_SEC_START = 8,    // Start function declaration
   WASM_SEC_ELEM = 9,     // Elements section
   WASM_SEC_CODE = 10,    // Function bodies (code)
-  WASM_SEC_DATA = 11     // Data segments
+  WASM_SEC_DATA = 11,    // Data segments
+  WASM_SEC_EVENT = 13    // Event declarations
 };
 
 // Type immediate encodings used in various contexts.
@@ -204,6 +222,7 @@ enum : unsigned {
   WASM_EXTERNAL_TABLE = 0x1,
   WASM_EXTERNAL_MEMORY = 0x2,
   WASM_EXTERNAL_GLOBAL = 0x3,
+  WASM_EXTERNAL_EVENT = 0x4,
 };
 
 // Opcodes used in initializer expressions.
@@ -218,16 +237,7 @@ enum : unsigned {
 
 enum : unsigned {
   WASM_LIMITS_FLAG_HAS_MAX = 0x1,
-};
-
-// Subset of types that a value can have
-enum class ValType {
-  I32 = WASM_TYPE_I32,
-  I64 = WASM_TYPE_I64,
-  F32 = WASM_TYPE_F32,
-  F64 = WASM_TYPE_F64,
-  V128 = WASM_TYPE_V128,
-  EXCEPT_REF = WASM_TYPE_EXCEPT_REF,
+  WASM_LIMITS_FLAG_IS_SHARED = 0x2,
 };
 
 // Kind codes used in the custom "name" section
@@ -256,6 +266,12 @@ enum WasmSymbolType : unsigned {
   WASM_SYMBOL_TYPE_DATA = 0x1,
   WASM_SYMBOL_TYPE_GLOBAL = 0x2,
   WASM_SYMBOL_TYPE_SECTION = 0x3,
+  WASM_SYMBOL_TYPE_EVENT = 0x4,
+};
+
+// Kinds of event attributes.
+enum WasmEventAttribute : unsigned {
+  WASM_EVENT_ATTRIBUTE_EXCEPTION = 0x0,
 };
 
 const unsigned WASM_SYMBOL_BINDING_MASK = 0x3;
@@ -276,9 +292,32 @@ enum : unsigned {
 
 #undef WASM_RELOC
 
+// Subset of types that a value can have
+enum class ValType {
+  I32 = WASM_TYPE_I32,
+  I64 = WASM_TYPE_I64,
+  F32 = WASM_TYPE_F32,
+  F64 = WASM_TYPE_F64,
+  V128 = WASM_TYPE_V128,
+  EXCEPT_REF = WASM_TYPE_EXCEPT_REF,
+};
+
+struct WasmSignature {
+  SmallVector<wasm::ValType, 1> Returns;
+  SmallVector<wasm::ValType, 4> Params;
+  // Support empty and tombstone instances, needed by DenseMap.
+  enum { Plain, Empty, Tombstone } State = Plain;
+
+  WasmSignature(SmallVector<wasm::ValType, 1> &&InReturns,
+                SmallVector<wasm::ValType, 4> &&InParams)
+      : Returns(InReturns), Params(InParams) {}
+  WasmSignature() = default;
+};
+
 // Useful comparison operators
 inline bool operator==(const WasmSignature &LHS, const WasmSignature &RHS) {
-  return LHS.ReturnType == RHS.ReturnType && LHS.ParamTypes == RHS.ParamTypes;
+  return LHS.State == RHS.State && LHS.Returns == RHS.Returns &&
+         LHS.Params == RHS.Params;
 }
 
 inline bool operator!=(const WasmSignature &LHS, const WasmSignature &RHS) {

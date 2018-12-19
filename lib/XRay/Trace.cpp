@@ -247,6 +247,17 @@ Error loadNaiveFormatLog(StringRef Data, bool IsLittleEndian,
 /// ThreadBuffer: BufferExtents NewBuffer WallClockTime Pid NewCPUId
 ///               FunctionSequence
 /// EOB: *deprecated*
+///
+/// In Version 4, we make the following changes:
+///
+/// CustomEventRecord now includes the CPU data.
+///
+/// In Version 5, we make the following changes:
+///
+/// CustomEventRecord and TypedEventRecord now use TSC delta encoding similar to
+/// what FunctionRecord instances use, and we no longer need to include the CPU
+/// id in the CustomEventRecord.
+///
 Error loadFDRLog(StringRef Data, bool IsLittleEndian,
                  XRayFileHeader &FileHeader, std::vector<XRayRecord> &Records) {
 
@@ -310,12 +321,11 @@ Error loadFDRLog(StringRef Data, bool IsLittleEndian,
   {
     for (auto &PTB : Index) {
       auto &Blocks = PTB.second;
-      llvm::sort(
-          Blocks.begin(), Blocks.end(),
-          [](const BlockIndexer::Block &L, const BlockIndexer::Block &R) {
-            return (L.WallclockTime->seconds() < R.WallclockTime->seconds() &&
-                    L.WallclockTime->nanos() < R.WallclockTime->nanos());
-          });
+      llvm::sort(Blocks, [](const BlockIndexer::Block &L,
+                            const BlockIndexer::Block &R) {
+        return (L.WallclockTime->seconds() < R.WallclockTime->seconds() &&
+                L.WallclockTime->nanos() < R.WallclockTime->nanos());
+      });
       auto Adder = [&](const XRayRecord &R) { Records.push_back(R); };
       TraceExpander Expander(Adder, FileHeader.Version);
       for (auto &B : Blocks) {
@@ -353,8 +363,9 @@ Error loadYAMLLog(StringRef Data, XRayFileHeader &FileHeader,
   Records.clear();
   std::transform(Trace.Records.begin(), Trace.Records.end(),
                  std::back_inserter(Records), [&](const YAMLXRayRecord &R) {
-                   return XRayRecord{R.RecordType, R.CPU, R.Type, R.FuncId,
-                                     R.TSC,        R.TId, R.PId,  R.CallArgs};
+                   return XRayRecord{R.RecordType, R.CPU,      R.Type,
+                                     R.FuncId,     R.TSC,      R.TId,
+                                     R.PId,        R.CallArgs, R.Data};
                  });
   return Error::success();
 }
@@ -435,7 +446,7 @@ Expected<Trace> llvm::xray::loadTrace(const DataExtractor &DE, bool Sort) {
     }
     break;
   case FLIGHT_DATA_RECORDER_FORMAT:
-    if (Version == 1 || Version == 2 || Version == 3) {
+    if (Version >= 1 && Version <= 5) {
       if (auto E = loadFDRLog(DE.getData(), DE.isLittleEndian(), T.FileHeader,
                               T.Records))
         return std::move(E);

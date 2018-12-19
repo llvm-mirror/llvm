@@ -308,6 +308,7 @@ bool DWARFFormValue::extractValue(const DWARFDataExtractor &Data,
       break;
     case DW_FORM_GNU_addr_index:
     case DW_FORM_GNU_str_index:
+    case DW_FORM_addrx:
     case DW_FORM_strx:
       Value.uval = Data.getULEB128(OffsetPtr);
       break;
@@ -340,13 +341,17 @@ void DWARFFormValue::dump(raw_ostream &OS, DIDumpOptions DumpOpts) const {
   case DW_FORM_addr:
     AddrOS << format("0x%016" PRIx64, UValue);
     break;
+  case DW_FORM_addrx:
+  case DW_FORM_addrx1:
+  case DW_FORM_addrx2:
+  case DW_FORM_addrx3:
+  case DW_FORM_addrx4:
   case DW_FORM_GNU_addr_index: {
     AddrOS << format(" indexed (%8.8x) address = ", (uint32_t)UValue);
-    uint64_t Address;
     if (U == nullptr)
       OS << "<invalid dwarf unit>";
-    else if (U->getAddrOffsetSectionItem(UValue, Address))
-      AddrOS << format("0x%016" PRIx64, Address);
+    else if (Optional<SectionedAddress> A = U->getAddrOffsetSectionItem(UValue))
+      AddrOS << format("0x%016" PRIx64, A->Address);
     else
       OS << "<no .debug_addr section>";
     break;
@@ -537,10 +542,12 @@ Optional<const char *> DWARFFormValue::getAsCString() const {
   if (Form == DW_FORM_GNU_str_index || Form == DW_FORM_strx ||
       Form == DW_FORM_strx1 || Form == DW_FORM_strx2 || Form == DW_FORM_strx3 ||
       Form == DW_FORM_strx4) {
-    uint64_t StrOffset;
-    if (!U || !U->getStringOffsetSectionItem(Offset, StrOffset))
+    if (!U)
       return None;
-    Offset = StrOffset;
+    Optional<uint64_t> StrOffset = U->getStringOffsetSectionItem(Offset);
+    if (!StrOffset)
+      return None;
+    Offset = *StrOffset;
   }
   // Prefer the Unit's string extractor, because for .dwo it will point to
   // .debug_str.dwo, while the Context's extractor always uses .debug_str.
@@ -555,16 +562,23 @@ Optional<const char *> DWARFFormValue::getAsCString() const {
 }
 
 Optional<uint64_t> DWARFFormValue::getAsAddress() const {
+  if (auto SA = getAsSectionedAddress())
+    return SA->Address;
+  return None;
+}
+Optional<SectionedAddress> DWARFFormValue::getAsSectionedAddress() const {
   if (!isFormClass(FC_Address))
     return None;
-  if (Form == DW_FORM_GNU_addr_index) {
+  if (Form == DW_FORM_GNU_addr_index || Form == DW_FORM_addrx) {
     uint32_t Index = Value.uval;
-    uint64_t Result;
-    if (!U || !U->getAddrOffsetSectionItem(Index, Result))
+    if (!U)
       return None;
-    return Result;
+    Optional<SectionedAddress> SA = U->getAddrOffsetSectionItem(Index);
+    if (!SA)
+      return None;
+    return SA;
   }
-  return Value.uval;
+  return {{Value.uval, Value.SectionIndex}};
 }
 
 Optional<uint64_t> DWARFFormValue::getAsReference() const {

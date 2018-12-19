@@ -59,6 +59,7 @@
 #include "llvm/Support/StringSaver.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
+#include "llvm/Support/WithColor.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <cctype>
@@ -106,7 +107,11 @@ DisassembleFunctions("df",
 static StringSet<> DisasmFuncsSet;
 
 cl::opt<bool>
-llvm::Relocations("r", cl::desc("Display the relocation entries in the file"));
+llvm::Relocations("reloc",
+                  cl::desc("Display the relocation entries in the file"));
+static cl::alias RelocationsShort("r", cl::desc("Alias for --reloc"),
+                                  cl::NotHidden,
+                                  cl::aliasopt(llvm::Relocations));
 
 cl::opt<bool>
 llvm::DynamicRelocations("dynamic-reloc",
@@ -116,10 +121,16 @@ DynamicRelocationsd("R", cl::desc("Alias for --dynamic-reloc"),
              cl::aliasopt(DynamicRelocations));
 
 cl::opt<bool>
-llvm::SectionContents("s", cl::desc("Display the content of each section"));
+    llvm::SectionContents("full-contents",
+                          cl::desc("Display the content of each section"));
+static cl::alias SectionContentsShort("s",
+                                      cl::desc("Alias for --full-contents"),
+                                      cl::aliasopt(SectionContents));
 
-cl::opt<bool>
-llvm::SymbolTable("t", cl::desc("Display the symbol table"));
+cl::opt<bool> llvm::SymbolTable("syms", cl::desc("Display the symbol table"));
+static cl::alias SymbolTableShort("t", cl::desc("Alias for --syms"),
+                                  cl::NotHidden,
+                                  cl::aliasopt(llvm::SymbolTable));
 
 cl::opt<bool>
 llvm::ExportsTrie("exports-trie", cl::desc("Display mach-o exported symbols"));
@@ -327,33 +338,35 @@ SectionFilter ToolSectionFilter(llvm::object::ObjectFile const &O) {
 void llvm::error(std::error_code EC) {
   if (!EC)
     return;
-
-  errs() << ToolName << ": error reading file: " << EC.message() << ".\n";
+  WithColor::error(errs(), ToolName)
+      << "reading file: " << EC.message() << ".\n";
   errs().flush();
   exit(1);
 }
 
 LLVM_ATTRIBUTE_NORETURN void llvm::error(Twine Message) {
-  errs() << ToolName << ": " << Message << ".\n";
+  WithColor::error(errs(), ToolName) << Message << ".\n";
   errs().flush();
   exit(1);
 }
 
 void llvm::warn(StringRef Message) {
-  errs() << ToolName << ": warning: " << Message << ".\n";
+  WithColor::warning(errs(), ToolName) << Message << ".\n";
   errs().flush();
 }
 
 LLVM_ATTRIBUTE_NORETURN void llvm::report_error(StringRef File,
                                                 Twine Message) {
-  errs() << ToolName << ": '" << File << "': " << Message << ".\n";
+  WithColor::error(errs(), ToolName)
+      << "'" << File << "': " << Message << ".\n";
   exit(1);
 }
 
 LLVM_ATTRIBUTE_NORETURN void llvm::report_error(StringRef File,
                                                 std::error_code EC) {
   assert(EC);
-  errs() << ToolName << ": '" << File << "': " << EC.message() << ".\n";
+  WithColor::error(errs(), ToolName)
+      << "'" << File << "': " << EC.message() << ".\n";
   exit(1);
 }
 
@@ -362,9 +375,9 @@ LLVM_ATTRIBUTE_NORETURN void llvm::report_error(StringRef File,
   assert(E);
   std::string Buf;
   raw_string_ostream OS(Buf);
-  logAllUnhandledErrors(std::move(E), OS, "");
+  logAllUnhandledErrors(std::move(E), OS);
   OS.flush();
-  errs() << ToolName << ": '" << File << "': " << Buf;
+  WithColor::error(errs(), ToolName) << "'" << File << "': " << Buf;
   exit(1);
 }
 
@@ -373,7 +386,7 @@ LLVM_ATTRIBUTE_NORETURN void llvm::report_error(StringRef ArchiveName,
                                                 llvm::Error E,
                                                 StringRef ArchitectureName) {
   assert(E);
-  errs() << ToolName << ": ";
+  WithColor::error(errs(), ToolName);
   if (ArchiveName != "")
     errs() << ArchiveName << "(" << FileName << ")";
   else
@@ -382,7 +395,7 @@ LLVM_ATTRIBUTE_NORETURN void llvm::report_error(StringRef ArchiveName,
     errs() << " (for architecture " << ArchitectureName << ")";
   std::string Buf;
   raw_string_ostream OS(Buf);
-  logAllUnhandledErrors(std::move(E), OS, "");
+  logAllUnhandledErrors(std::move(E), OS);
   OS.flush();
   errs() << ": " << Buf;
   exit(1);
@@ -1901,6 +1914,7 @@ void llvm::PrintSectionHeaders(const ObjectFile *Obj) {
                      (unsigned)Section.getIndex(), Name.str().c_str(), Size,
                      Address, Type.c_str());
   }
+  outs() << "\n";
 }
 
 void llvm::PrintSectionContents(const ObjectFile *Obj) {
@@ -2004,6 +2018,8 @@ void llvm::PrintSymbolTable(const ObjectFile *o, StringRef ArchiveName,
       FileFunc = 'f';
     else if (Type == SymbolRef::ST_Function)
       FileFunc = 'F';
+    else if (Type == SymbolRef::ST_Data)
+      FileFunc = 'O';
 
     const char *Fmt = o->getBytesInAddress() > 4 ? "%016" PRIx64 :
                                                    "%08" PRIx64;
@@ -2059,8 +2075,9 @@ static void PrintUnwindInfo(const ObjectFile *o) {
     printMachOUnwindInfo(MachO);
   else {
     // TODO: Extract DWARF dump tool to objdump.
-    errs() << "This operation is only currently supported "
-              "for COFF and MachO object files.\n";
+    WithColor::error(errs(), ToolName)
+        << "This operation is only currently supported "
+           "for COFF and MachO object files.\n";
     return;
   }
 }
@@ -2070,8 +2087,9 @@ void llvm::printExportsTrie(const ObjectFile *o) {
   if (const MachOObjectFile *MachO = dyn_cast<MachOObjectFile>(o))
     printMachOExportsTrie(MachO);
   else {
-    errs() << "This operation is only currently supported "
-              "for Mach-O executable files.\n";
+    WithColor::error(errs(), ToolName)
+        << "This operation is only currently supported "
+           "for Mach-O executable files.\n";
     return;
   }
 }
@@ -2081,8 +2099,9 @@ void llvm::printRebaseTable(ObjectFile *o) {
   if (MachOObjectFile *MachO = dyn_cast<MachOObjectFile>(o))
     printMachORebaseTable(MachO);
   else {
-    errs() << "This operation is only currently supported "
-              "for Mach-O executable files.\n";
+    WithColor::error(errs(), ToolName)
+        << "This operation is only currently supported "
+           "for Mach-O executable files.\n";
     return;
   }
 }
@@ -2092,8 +2111,9 @@ void llvm::printBindTable(ObjectFile *o) {
   if (MachOObjectFile *MachO = dyn_cast<MachOObjectFile>(o))
     printMachOBindTable(MachO);
   else {
-    errs() << "This operation is only currently supported "
-              "for Mach-O executable files.\n";
+    WithColor::error(errs(), ToolName)
+        << "This operation is only currently supported "
+           "for Mach-O executable files.\n";
     return;
   }
 }
@@ -2103,8 +2123,9 @@ void llvm::printLazyBindTable(ObjectFile *o) {
   if (MachOObjectFile *MachO = dyn_cast<MachOObjectFile>(o))
     printMachOLazyBindTable(MachO);
   else {
-    errs() << "This operation is only currently supported "
-              "for Mach-O executable files.\n";
+    WithColor::error(errs(), ToolName)
+        << "This operation is only currently supported "
+           "for Mach-O executable files.\n";
     return;
   }
 }
@@ -2114,8 +2135,9 @@ void llvm::printWeakBindTable(ObjectFile *o) {
   if (MachOObjectFile *MachO = dyn_cast<MachOObjectFile>(o))
     printMachOWeakBindTable(MachO);
   else {
-    errs() << "This operation is only currently supported "
-              "for Mach-O executable files.\n";
+    WithColor::error(errs(), ToolName)
+        << "This operation is only currently supported "
+           "for Mach-O executable files.\n";
     return;
   }
 }
@@ -2124,10 +2146,11 @@ void llvm::printWeakBindTable(ObjectFile *o) {
 /// into llvm-bcanalyzer.
 void llvm::printRawClangAST(const ObjectFile *Obj) {
   if (outs().is_displayed()) {
-    errs() << "The -raw-clang-ast option will dump the raw binary contents of "
-              "the clang ast section.\n"
-              "Please redirect the output to a file or another program such as "
-              "llvm-bcanalyzer.\n";
+    WithColor::error(errs(), ToolName)
+        << "The -raw-clang-ast option will dump the raw binary contents of "
+           "the clang ast section.\n"
+           "Please redirect the output to a file or another program such as "
+           "llvm-bcanalyzer.\n";
     return;
   }
 
@@ -2161,8 +2184,9 @@ static void printFaultMaps(const ObjectFile *Obj) {
   } else if (isa<MachOObjectFile>(Obj)) {
     FaultMapSectionName = "__llvm_faultmaps";
   } else {
-    errs() << "This operation is only currently supported "
-              "for ELF and Mach-O executable files.\n";
+    WithColor::error(errs(), ToolName)
+        << "This operation is only currently supported "
+           "for ELF and Mach-O executable files.\n";
     return;
   }
 
@@ -2220,15 +2244,18 @@ static void printFileHeaders(const ObjectFile *o) {
   Expected<uint64_t> StartAddrOrErr = o->getStartAddress();
   if (!StartAddrOrErr)
     report_error(o->getFileName(), StartAddrOrErr.takeError());
+
+  StringRef Fmt = o->getBytesInAddress() > 4 ? "%016" PRIx64 : "%08" PRIx64;
+  uint64_t Address = StartAddrOrErr.get();
   outs() << "start address: "
-         << format("0x%0*x", o->getBytesInAddress(), StartAddrOrErr.get())
+         << "0x" << format(Fmt.data(), Address)
          << "\n";
 }
 
 static void printArchiveChild(StringRef Filename, const Archive::Child &C) {
   Expected<sys::fs::perms> ModeOrErr = C.getAccessMode();
   if (!ModeOrErr) {
-    errs() << "ill-formed archive entry.\n";
+    WithColor::error(errs(), ToolName) << "ill-formed archive entry.\n";
     consumeError(ModeOrErr.takeError());
     return;
   }
@@ -2302,8 +2329,8 @@ static void DumpObject(ObjectFile *o, const Archive *a = nullptr,
     outs() << ":\tfile format " << o->getFileFormatName() << "\n\n";
   }
 
-  if (ArchiveHeaders && !MachOOpt)
-    printArchiveChild(a->getFileName(), *c);
+  if (ArchiveHeaders && !MachOOpt && c)
+    printArchiveChild(ArchiveName, *c);
   if (Disassemble)
     DisassembleObject(o, Relocations);
   if (Relocations && !Disassemble)
@@ -2356,8 +2383,8 @@ static void DumpObject(const COFFImportFile *I, const Archive *A,
            << ":\tfile format COFF-import-file"
            << "\n\n";
 
-  if (ArchiveHeaders && !MachOOpt)
-    printArchiveChild(A->getFileName(), *C);
+  if (ArchiveHeaders && !MachOOpt && C)
+    printArchiveChild(ArchiveName, *C);
   if (SymbolTable)
     printCOFFSymbolTable(I);
 }

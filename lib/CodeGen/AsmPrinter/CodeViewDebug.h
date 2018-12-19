@@ -54,6 +54,12 @@ class LLVM_LIBRARY_VISIBILITY CodeViewDebug : public DebugHandlerBase {
   BumpPtrAllocator Allocator;
   codeview::GlobalTypeTableBuilder TypeTable;
 
+  /// Whether to emit type record hashes into .debug$H.
+  bool EmitDebugGlobalHashes = false;
+
+  /// The codeview CPU type used by the translation unit.
+  codeview::CPUType TheCPU;
+
   /// Represents the most general definition range.
   struct LocalVarDefRange {
     /// Indicates that variable data is stored in memory relative to the
@@ -140,6 +146,33 @@ class LLVM_LIBRARY_VISIBILITY CodeViewDebug : public DebugHandlerBase {
     const MCSymbol *End = nullptr;
     unsigned FuncId = 0;
     unsigned LastFileId = 0;
+
+    /// Number of bytes allocated in the prologue for all local stack objects.
+    unsigned FrameSize = 0;
+
+    /// Number of bytes of parameters on the stack.
+    unsigned ParamSize = 0;
+
+    /// Number of bytes pushed to save CSRs.
+    unsigned CSRSize = 0;
+
+    /// Adjustment to apply on x86 when using the VFRAME frame pointer.
+    int OffsetAdjustment = 0;
+
+    /// Two-bit value indicating which register is the designated frame pointer
+    /// register for local variables. Included in S_FRAMEPROC.
+    codeview::EncodedFramePtrReg EncodedLocalFramePtrReg =
+        codeview::EncodedFramePtrReg::None;
+
+    /// Two-bit value indicating which register is the designated frame pointer
+    /// register for stack parameters. Included in S_FRAMEPROC.
+    codeview::EncodedFramePtrReg EncodedParamFramePtrReg =
+        codeview::EncodedFramePtrReg::None;
+
+    codeview::FrameProcedureOptions FrameProcOpts;
+
+    bool HasStackRealignment = false;
+
     bool HaveLineInfo = false;
   };
   FunctionInfo *CurFn = nullptr;
@@ -245,6 +278,8 @@ class LLVM_LIBRARY_VISIBILITY CodeViewDebug : public DebugHandlerBase {
 
   void emitCompilerInformation();
 
+  void emitBuildInfo();
+
   void emitInlineeLinesSubsection();
 
   void emitDebugInfoForThunk(const Function *GV,
@@ -293,10 +328,11 @@ class LLVM_LIBRARY_VISIBILITY CodeViewDebug : public DebugHandlerBase {
   void recordLocalVariable(LocalVariable &&Var, const LexicalScope *LS);
 
   /// Emits local variables in the appropriate order.
-  void emitLocalVariableList(ArrayRef<LocalVariable> Locals);
+  void emitLocalVariableList(const FunctionInfo &FI,
+                             ArrayRef<LocalVariable> Locals);
 
   /// Emits an S_LOCAL record and its associated defined ranges.
-  void emitLocalVariable(const LocalVariable &Var);
+  void emitLocalVariable(const FunctionInfo &FI, const LocalVariable &Var);
 
   /// Emits a sequence of lexical block scopes and their children.
   void emitLexicalBlockList(ArrayRef<LexicalBlock *> Blocks,
@@ -309,6 +345,10 @@ class LLVM_LIBRARY_VISIBILITY CodeViewDebug : public DebugHandlerBase {
   /// for it.
   codeview::TypeIndex getTypeIndex(DITypeRef TypeRef,
                                    DITypeRef ClassTyRef = DITypeRef());
+
+  codeview::TypeIndex
+  getTypeIndexForThisPtr(DITypeRef TypeRef,
+                         const DISubroutineType *SubroutineTy);
 
   codeview::TypeIndex getTypeIndexForReferenceTo(DITypeRef TypeRef);
 
@@ -336,10 +376,10 @@ class LLVM_LIBRARY_VISIBILITY CodeViewDebug : public DebugHandlerBase {
   codeview::TypeIndex lowerTypeModifier(const DIDerivedType *Ty);
   codeview::TypeIndex lowerTypeFunction(const DISubroutineType *Ty);
   codeview::TypeIndex lowerTypeVFTableShape(const DIDerivedType *Ty);
-  codeview::TypeIndex lowerTypeMemberFunction(const DISubroutineType *Ty,
-                                              const DIType *ClassTy,
-                                              int ThisAdjustment,
-                                              bool IsStaticMethod);
+  codeview::TypeIndex lowerTypeMemberFunction(
+      const DISubroutineType *Ty, const DIType *ClassTy, int ThisAdjustment,
+      bool IsStaticMethod,
+      codeview::FunctionOptions FO = codeview::FunctionOptions::None);
   codeview::TypeIndex lowerTypeEnum(const DICompositeType *Ty);
   codeview::TypeIndex lowerTypeClass(const DICompositeType *Ty);
   codeview::TypeIndex lowerTypeUnion(const DICompositeType *Ty);

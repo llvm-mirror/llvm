@@ -43,6 +43,8 @@ AArch64RegisterInfo::AArch64RegisterInfo(const Triple &TT)
 const MCPhysReg *
 AArch64RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   assert(MF && "Invalid MachineFunction pointer.");
+  if (MF->getSubtarget<AArch64Subtarget>().isTargetWindows())
+    return CSR_Win_AArch64_AAPCS_SaveList;
   if (MF->getFunction().getCallingConv() == CallingConv::GHC)
     // GHC set of callee saved regs is empty as all those regs are
     // used for passing STG regs around
@@ -159,6 +161,10 @@ void AArch64RegisterInfo::UpdateCustomCallPreservedMask(MachineFunction &MF,
   *Mask = UpdatedMask;
 }
 
+const uint32_t *AArch64RegisterInfo::getNoPreservedMask() const {
+  return CSR_AArch64_NoRegs_RegMask;
+}
+
 const uint32_t *
 AArch64RegisterInfo::getThisReturnPreservedMask(const MachineFunction &MF,
                                                 CallingConv::ID CC) const {
@@ -249,14 +255,15 @@ unsigned AArch64RegisterInfo::getBaseRegister() const { return AArch64::X19; }
 bool AArch64RegisterInfo::hasBasePointer(const MachineFunction &MF) const {
   const MachineFrameInfo &MFI = MF.getFrameInfo();
 
-  // In the presence of variable sized objects, if the fixed stack size is
-  // large enough that referencing from the FP won't result in things being
-  // in range relatively often, we can use a base pointer to allow access
+  // In the presence of variable sized objects or funclets, if the fixed stack
+  // size is large enough that referencing from the FP won't result in things
+  // being in range relatively often, we can use a base pointer to allow access
   // from the other direction like the SP normally works.
+  //
   // Furthermore, if both variable sized objects are present, and the
   // stack needs to be dynamically re-aligned, the base pointer is the only
   // reliable way to reference the locals.
-  if (MFI.hasVarSizedObjects()) {
+  if (MFI.hasVarSizedObjects() || MF.hasEHFunclets()) {
     if (needsStackRealignment(MF))
       return true;
     // Conservatively estimate whether the negative offset from the frame

@@ -933,9 +933,7 @@ int MachineInstr::findRegisterUseOperandIdx(
     unsigned MOReg = MO.getReg();
     if (!MOReg)
       continue;
-    if (MOReg == Reg || (TRI && TargetRegisterInfo::isPhysicalRegister(MOReg) &&
-                         TargetRegisterInfo::isPhysicalRegister(Reg) &&
-                         TRI->isSubRegister(MOReg, Reg)))
+    if (MOReg == Reg || (TRI && Reg && MOReg && TRI->regsOverlap(MOReg, Reg)))
       if (!isKill || MO.isKill())
         return i;
   }
@@ -2091,4 +2089,14 @@ void MachineInstr::collectDebugValues(
         DI->getOperand(0).getReg() == MI.getOperand(0).getReg())
       DbgValues.push_back(&*DI);
   }
+}
+
+void MachineInstr::changeDebugValuesDefReg(unsigned Reg) {
+  // Collect matching debug values.
+  SmallVector<MachineInstr *, 2> DbgValues;
+  collectDebugValues(DbgValues);
+
+  // Propagate Reg to debug value instructions.
+  for (auto *DBI : DbgValues)
+    DBI->getOperand(0).setReg(Reg);
 }

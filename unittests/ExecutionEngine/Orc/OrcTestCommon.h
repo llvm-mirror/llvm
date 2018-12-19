@@ -50,10 +50,10 @@ protected:
   std::shared_ptr<SymbolStringPool> SSP = std::make_shared<SymbolStringPool>();
   ExecutionSession ES{SSP};
   JITDylib &JD = ES.createJITDylib("JD");
-  SymbolStringPtr Foo = ES.getSymbolStringPool().intern("foo");
-  SymbolStringPtr Bar = ES.getSymbolStringPool().intern("bar");
-  SymbolStringPtr Baz = ES.getSymbolStringPool().intern("baz");
-  SymbolStringPtr Qux = ES.getSymbolStringPool().intern("qux");
+  SymbolStringPtr Foo = ES.intern("foo");
+  SymbolStringPtr Bar = ES.intern("bar");
+  SymbolStringPtr Baz = ES.intern("baz");
+  SymbolStringPtr Qux = ES.intern("qux");
   static const JITTargetAddress FooAddr = 1U;
   static const JITTargetAddress BarAddr = 2U;
   static const JITTargetAddress BazAddr = 3U;
@@ -97,7 +97,7 @@ public:
       orc::SymbolFlagsMap SymbolFlags, MaterializeFunction Materialize,
       DiscardFunction Discard = DiscardFunction(),
       DestructorFunction Destructor = DestructorFunction())
-      : MaterializationUnit(std::move(SymbolFlags)),
+      : MaterializationUnit(std::move(SymbolFlags), orc::VModuleKey()),
         Materialize(std::move(Materialize)), Discard(std::move(Discard)),
         Destructor(std::move(Destructor)) {}
 
@@ -112,7 +112,8 @@ public:
     Materialize(std::move(R));
   }
 
-  void discard(const orc::JITDylib &JD, orc::SymbolStringPtr Name) override {
+  void discard(const orc::JITDylib &JD,
+               const orc::SymbolStringPtr &Name) override {
     if (Discard)
       Discard(JD, std::move(Name));
     else

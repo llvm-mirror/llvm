@@ -109,6 +109,7 @@ namespace {
     using RegMap = DenseMap<unsigned, const MachineInstr *>;
     using BlockSet = SmallPtrSet<const MachineBasicBlock *, 8>;
 
+    const MachineInstr *FirstNonPHI;
     const MachineInstr *FirstTerminator;
     BlockSet FunctionBlocks;
 
@@ -364,6 +365,13 @@ unsigned MachineVerifier::verify(MachineFunction &MF) {
 
   const bool isFunctionFailedISel = MF.getProperties().hasProperty(
       MachineFunctionProperties::Property::FailedISel);
+
+  // If we're mid-GlobalISel and we already triggered the fallback path then
+  // it's expected that the MIR is somewhat broken but that's ok since we'll
+  // reset it and clear the FailedISel attribute in ResetMachineFunctions.
+  if (isFunctionFailedISel)
+    return foundErrors;
+
   isFunctionRegBankSelected =
       !isFunctionFailedISel &&
       MF.getProperties().hasProperty(
@@ -601,6 +609,7 @@ static bool matchPair(MachineBasicBlock::const_succ_iterator i,
 void
 MachineVerifier::visitMachineBasicBlockBefore(const MachineBasicBlock *MBB) {
   FirstTerminator = nullptr;
+  FirstNonPHI = nullptr;
 
   if (!MF->getProperties().hasProperty(
       MachineFunctionProperties::Property::NoPHIs) && MRI->tracksLiveness()) {
@@ -769,7 +778,7 @@ MachineVerifier::visitMachineBasicBlockBefore(const MachineBasicBlock *MBB) {
                "isn't a terminator instruction!", MBB);
       }
       if (Cond.empty()) {
-        report("MBB exits via conditinal branch/branch but there's no "
+        report("MBB exits via conditional branch/branch but there's no "
                "condition!", MBB);
       }
     } else {
@@ -882,9 +891,15 @@ void MachineVerifier::visitMachineInstrBefore(const MachineInstr *MI) {
            << MI->getNumOperands() << " given.\n";
   }
 
-  if (MI->isPHI() && MF->getProperties().hasProperty(
-                         MachineFunctionProperties::Property::NoPHIs))
-    report("Found PHI instruction with NoPHIs property set", MI);
+  if (MI->isPHI()) {
+    if (MF->getProperties().hasProperty(
+            MachineFunctionProperties::Property::NoPHIs))
+      report("Found PHI instruction with NoPHIs property set", MI);
+
+    if (FirstNonPHI)
+      report("Found PHI instruction after non-PHI", MI);
+  } else if (FirstNonPHI == nullptr)
+    FirstNonPHI = MI;
 
   // Check the tied operands.
   if (MI->isInlineAsm())
@@ -1038,6 +1053,89 @@ void MachineVerifier::visitMachineInstrBefore(const MachineInstr *MI) {
                MI);
       break;
     }
+    break;
+  }
+  case TargetOpcode::G_MERGE_VALUES: {
+    // G_MERGE_VALUES should only be used to merge scalars into a larger scalar,
+    // e.g. s2N = MERGE sN, sN
+    // Merging multiple scalars into a vector is not allowed, should use
+    // G_BUILD_VECTOR for that.
+    LLT DstTy = MRI->getType(MI->getOperand(0).getReg());
+    LLT SrcTy = MRI->getType(MI->getOperand(1).getReg());
+    if (DstTy.isVector() || SrcTy.isVector())
+      report("G_MERGE_VALUES cannot operate on vectors", MI);
+    break;
+  }
+  case TargetOpcode::G_UNMERGE_VALUES: {
+    LLT DstTy = MRI->getType(MI->getOperand(0).getReg());
+    LLT SrcTy = MRI->getType(MI->getOperand(MI->getNumOperands()-1).getReg());
+    // For now G_UNMERGE can split vectors.
+    for (unsigned i = 0; i < MI->getNumOperands()-1; ++i) {
+      if (MRI->getType(MI->getOperand(i).getReg()) != DstTy)
+        report("G_UNMERGE_VALUES destination types do not match", MI);
+    }
+    if (SrcTy.getSizeInBits() !=
+        (DstTy.getSizeInBits() * (MI->getNumOperands() - 1))) {
+      report("G_UNMERGE_VALUES source operand does not cover dest operands",
+             MI);
+    }
+    break;
+  }
+  case TargetOpcode::G_BUILD_VECTOR: {
+    // Source types must be scalars, dest type a vector. Total size of scalars
+    // must match the dest vector size.
+    LLT DstTy = MRI->getType(MI->getOperand(0).getReg());
+    LLT SrcEltTy = MRI->getType(MI->getOperand(1).getReg());
+    if (!DstTy.isVector() || SrcEltTy.isVector())
+      report("G_BUILD_VECTOR must produce a vector from scalar operands", MI);
+    for (unsigned i = 2; i < MI->getNumOperands(); ++i) {
+      if (MRI->getType(MI->getOperand(1).getReg()) !=
+          MRI->getType(MI->getOperand(i).getReg()))
+        report("G_BUILD_VECTOR source operand types are not homogeneous", MI);
+    }
+    if (DstTy.getSizeInBits() !=
+        SrcEltTy.getSizeInBits() * (MI->getNumOperands() - 1))
+      report("G_BUILD_VECTOR src operands total size don't match dest "
+             "size.",
+             MI);
+    break;
+  }
+  case TargetOpcode::G_BUILD_VECTOR_TRUNC: {
+    // Source types must be scalars, dest type a vector. Scalar types must be
+    // larger than the dest vector elt type, as this is a truncating operation.
+    LLT DstTy = MRI->getType(MI->getOperand(0).getReg());
+    LLT SrcEltTy = MRI->getType(MI->getOperand(1).getReg());
+    if (!DstTy.isVector() || SrcEltTy.isVector())
+      report("G_BUILD_VECTOR_TRUNC must produce a vector from scalar operands",
+             MI);
+    for (unsigned i = 2; i < MI->getNumOperands(); ++i) {
+      if (MRI->getType(MI->getOperand(1).getReg()) !=
+          MRI->getType(MI->getOperand(i).getReg()))
+        report("G_BUILD_VECTOR_TRUNC source operand types are not homogeneous",
+               MI);
+    }
+    if (SrcEltTy.getSizeInBits() <= DstTy.getElementType().getSizeInBits())
+      report("G_BUILD_VECTOR_TRUNC source operand types are not larger than "
+             "dest elt type",
+             MI);
+    break;
+  }
+  case TargetOpcode::G_CONCAT_VECTORS: {
+    // Source types should be vectors, and total size should match the dest
+    // vector size.
+    LLT DstTy = MRI->getType(MI->getOperand(0).getReg());
+    LLT SrcTy = MRI->getType(MI->getOperand(1).getReg());
+    if (!DstTy.isVector() || !SrcTy.isVector())
+      report("G_CONCAT_VECTOR requires vector source and destination operands",
+             MI);
+    for (unsigned i = 2; i < MI->getNumOperands(); ++i) {
+      if (MRI->getType(MI->getOperand(1).getReg()) !=
+          MRI->getType(MI->getOperand(i).getReg()))
+        report("G_CONCAT_VECTOR source operand types are not homogeneous", MI);
+    }
+    if (DstTy.getNumElements() !=
+        SrcTy.getNumElements() * (MI->getNumOperands() - 1))
+      report("G_CONCAT_VECTOR num dest and source elements should match", MI);
     break;
   }
   case TargetOpcode::COPY: {

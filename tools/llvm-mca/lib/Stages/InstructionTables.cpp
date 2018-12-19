@@ -17,12 +17,10 @@
 
 #include "Stages/InstructionTables.h"
 
+namespace llvm {
 namespace mca {
 
-using namespace llvm;
-
 Error InstructionTables::execute(InstRef &IR) {
-  ArrayRef<uint64_t> Masks = IB.getProcResourceMasks();
   const InstrDesc &Desc = IR.getInstruction()->getDesc();
   UsedResources.clear();
 
@@ -68,3 +66,4 @@ Error InstructionTables::execute(InstRef &IR) {
 }
 
 } // namespace mca
+} // namespace llvm

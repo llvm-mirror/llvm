@@ -52,8 +52,8 @@ LazyCallThroughManager::callThroughToSymbol(JITTargetAddress TrampolineAddr) {
     SymbolName = I->second.second;
   }
 
-  auto LookupResult =
-      ES.lookup({SourceJD}, {SymbolName}, NoDependenciesToRegister);
+  auto LookupResult = ES.lookup(JITDylibSearchList({{SourceJD, true}}),
+                                {SymbolName}, NoDependenciesToRegister, true);
 
   if (!LookupResult) {
     ES.reportError(LookupResult.takeError());
@@ -125,8 +125,8 @@ createLocalLazyCallThroughManager(const Triple &T, ExecutionSession &ES,
 
 LazyReexportsMaterializationUnit::LazyReexportsMaterializationUnit(
     LazyCallThroughManager &LCTManager, IndirectStubsManager &ISManager,
-    JITDylib &SourceJD, SymbolAliasMap CallableAliases)
-    : MaterializationUnit(extractFlags(CallableAliases)),
+    JITDylib &SourceJD, SymbolAliasMap CallableAliases, VModuleKey K)
+    : MaterializationUnit(extractFlags(CallableAliases), std::move(K)),
       LCTManager(LCTManager), ISManager(ISManager), SourceJD(SourceJD),
       CallableAliases(std::move(CallableAliases)),
       NotifyResolved(LazyCallThroughManager::createNotifyResolvedFunction(
@@ -187,7 +187,7 @@ void LazyReexportsMaterializationUnit::materialize(
 }
 
 void LazyReexportsMaterializationUnit::discard(const JITDylib &JD,
-                                               SymbolStringPtr Name) {
+                                               const SymbolStringPtr &Name) {
   assert(CallableAliases.count(Name) &&
          "Symbol not covered by this MaterializationUnit");
   CallableAliases.erase(Name);

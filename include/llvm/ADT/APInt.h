@@ -1105,6 +1105,12 @@ public:
   APInt sshl_ov(const APInt &Amt, bool &Overflow) const;
   APInt ushl_ov(const APInt &Amt, bool &Overflow) const;
 
+  // Operations that saturate
+  APInt sadd_sat(const APInt &RHS) const;
+  APInt uadd_sat(const APInt &RHS) const;
+  APInt ssub_sat(const APInt &RHS) const;
+  APInt usub_sat(const APInt &RHS) const;
+
   /// Array-indexing support.
   ///
   /// \returns the bit value at bitPosition
@@ -1395,7 +1401,7 @@ public:
   ///
   /// Set the given bit to 1 whose position is given as "bitPosition".
   void setBit(unsigned BitPosition) {
-    assert(BitPosition <= BitWidth && "BitPosition out of range");
+    assert(BitPosition < BitWidth && "BitPosition out of range");
     WordType Mask = maskBit(BitPosition);
     if (isSingleWord())
       U.VAL |= Mask;
@@ -1454,7 +1460,7 @@ public:
   ///
   /// Set the given bit to 0 whose position is given as "bitPosition".
   void clearBit(unsigned BitPosition) {
-    assert(BitPosition <= BitWidth && "BitPosition out of range");
+    assert(BitPosition < BitWidth && "BitPosition out of range");
     WordType Mask = ~maskBit(BitPosition);
     if (isSingleWord())
       U.VAL &= Mask;

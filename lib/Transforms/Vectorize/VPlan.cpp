@@ -303,6 +303,13 @@ void VPInstruction::generateInstruction(VPTransformState &State,
     State.set(this, V, Part);
     break;
   }
+  case VPInstruction::ICmpULE: {
+    Value *IV = State.get(getOperand(0), Part);
+    Value *TC = State.get(getOperand(1), Part);
+    Value *V = Builder.CreateICmpULE(IV, TC);
+    State.set(this, V, Part);
+    break;
+  }
   default:
     llvm_unreachable("Unsupported opcode for instruction");
   }
@@ -328,6 +335,15 @@ void VPInstruction::print(raw_ostream &O) const {
   case VPInstruction::Not:
     O << "not";
     break;
+  case VPInstruction::ICmpULE:
+    O << "icmp ule";
+    break;
+  case VPInstruction::SLPLoad:
+    O << "combined load";
+    break;
+  case VPInstruction::SLPStore:
+    O << "combined store";
+    break;
   default:
     O << Instruction::getOpcodeName(getOpcode());
   }
@@ -342,6 +358,15 @@ void VPInstruction::print(raw_ostream &O) const {
 /// LoopVectorBody basic-block was created for this. Introduce additional
 /// basic-blocks as needed, and fill them all.
 void VPlan::execute(VPTransformState *State) {
+  // -1. Check if the backedge taken count is needed, and if so build it.
+  if (BackedgeTakenCount && BackedgeTakenCount->getNumUsers()) {
+    Value *TC = State->TripCount;
+    IRBuilder<> Builder(State->CFG.PrevBB->getTerminator());
+    auto *TCMO = Builder.CreateSub(TC, ConstantInt::get(TC->getType(), 1),
+                                   "trip.count.minus.1");
+    Value2VPValue[TCMO] = BackedgeTakenCount;
+  }
+
   // 0. Set the reverse mapping from VPValues to Values for code generation.
   for (auto &Entry : Value2VPValue)
     State->VPValue2Value[Entry.second] = Entry.first;
@@ -443,7 +468,7 @@ void VPlan::updateDominatorTree(DominatorTree *DT, BasicBlock *LoopPreHeaderBB,
            "One successor of a basic block does not lead to the other.");
     assert(InterimSucc->getSinglePredecessor() &&
            "Interim successor has more than one predecessor.");
-    assert(pred_size(PostDomSucc) == 2 &&
+    assert(PostDomSucc->hasNPredecessors(2) &&
            "PostDom successor has more than two predecessors.");
     DT->addNewBlock(InterimSucc, BB);
     DT->addNewBlock(PostDomSucc, BB);
@@ -469,8 +494,11 @@ void VPlanPrinter::dump() {
   OS << "graph [labelloc=t, fontsize=30; label=\"Vectorization Plan";
   if (!Plan.getName().empty())
     OS << "\\n" << DOT::EscapeString(Plan.getName());
-  if (!Plan.Value2VPValue.empty()) {
+  if (!Plan.Value2VPValue.empty() || Plan.BackedgeTakenCount) {
     OS << ", where:";
+    if (Plan.BackedgeTakenCount)
+      OS << "\\n"
+         << *Plan.getOrCreateBackedgeTakenCount() << " := BackedgeTakenCount";
     for (auto Entry : Plan.Value2VPValue) {
       OS << "\\n" << *Entry.second;
       OS << DOT::EscapeString(" := ");
@@ -543,8 +571,10 @@ void VPlanPrinter::dumpBasicBlock(const VPBasicBlock *BasicBlock) {
     if (const VPInstruction *CBI = dyn_cast<VPInstruction>(CBV)) {
       CBI->printAsOperand(OS);
       OS << " (" << DOT::EscapeString(CBI->getParent()->getName()) << ")\\l\"";
-    } else
+    } else {
       CBV->printAsOperand(OS);
+      OS << "\"";
+    }
   }
 
   bumpIndent(-2);
@@ -656,3 +686,55 @@ void VPWidenMemoryInstructionRecipe::print(raw_ostream &O,
 }
 
 template void DomTreeBuilder::Calculate<VPDominatorTree>(VPDominatorTree &DT);
+
+void VPValue::replaceAllUsesWith(VPValue *New) {
+  for (VPUser *User : users())
+    for (unsigned I = 0, E = User->getNumOperands(); I < E; ++I)
+      if (User->getOperand(I) == this)
+        User->setOperand(I, New);
+}
+
+void VPInterleavedAccessInfo::visitRegion(VPRegionBlock *Region,
+                                          Old2NewTy &Old2New,
+                                          InterleavedAccessInfo &IAI) {
+  ReversePostOrderTraversal<VPBlockBase *> RPOT(Region->getEntry());
+  for (VPBlockBase *Base : RPOT) {
+    visitBlock(Base, Old2New, IAI);
+  }
+}
+
+void VPInterleavedAccessInfo::visitBlock(VPBlockBase *Block, Old2NewTy &Old2New,
+                                         InterleavedAccessInfo &IAI) {
+  if (VPBasicBlock *VPBB = dyn_cast<VPBasicBlock>(Block)) {
+    for (VPRecipeBase &VPI : *VPBB) {
+      assert(isa<VPInstruction>(&VPI) && "Can only handle VPInstructions");
+      auto *VPInst = cast<VPInstruction>(&VPI);
+      auto *Inst = cast<Instruction>(VPInst->getUnderlyingValue());
+      auto *IG = IAI.getInterleaveGroup(Inst);
+      if (!IG)
+        continue;
+
+      auto NewIGIter = Old2New.find(IG);
+      if (NewIGIter == Old2New.end())
+        Old2New[IG] = new InterleaveGroup<VPInstruction>(
+            IG->getFactor(), IG->isReverse(), IG->getAlignment());
+
+      if (Inst == IG->getInsertPos())
+        Old2New[IG]->setInsertPos(VPInst);
+
+      InterleaveGroupMap[VPInst] = Old2New[IG];
+      InterleaveGroupMap[VPInst]->insertMember(
+          VPInst, IG->getIndex(Inst),
+          IG->isReverse() ? (-1) * int(IG->getFactor()) : IG->getFactor());
+    }
+  } else if (VPRegionBlock *Region = dyn_cast<VPRegionBlock>(Block))
+    visitRegion(Region, Old2New, IAI);
+  else
+    llvm_unreachable("Unsupported kind of VPBlock.");
+}
+
+VPInterleavedAccessInfo::VPInterleavedAccessInfo(VPlan &Plan,
+                                                 InterleavedAccessInfo &IAI) {
+  Old2NewTy Old2New;
+  visitRegion(cast<VPRegionBlock>(Plan.getEntry()), Old2New, IAI);
+}

@@ -20,27 +20,75 @@ void PredicateExpander::expandTrue(raw_ostream &OS) { OS << "true"; }
 void PredicateExpander::expandFalse(raw_ostream &OS) { OS << "false"; }
 
 void PredicateExpander::expandCheckImmOperand(raw_ostream &OS, int OpIndex,
-                                              int ImmVal) {
+                                              int ImmVal,
+                                              StringRef FunctionMapper) {
+  if (!FunctionMapper.empty())
+    OS << FunctionMapper << "(";
   OS << "MI" << (isByRef() ? "." : "->") << "getOperand(" << OpIndex
-     << ").getImm() " << (shouldNegate() ? "!= " : "== ") << ImmVal;
+     << ").getImm()";
+  if (!FunctionMapper.empty())
+    OS << ")";
+  OS << (shouldNegate() ? " != " : " == ") << ImmVal;
 }
 
 void PredicateExpander::expandCheckImmOperand(raw_ostream &OS, int OpIndex,
-                                              StringRef ImmVal) {
+                                              StringRef ImmVal,
+                                              StringRef FunctionMapper) {
+  if (ImmVal.empty())
+    expandCheckImmOperandSimple(OS, OpIndex, FunctionMapper);
+
+  if (!FunctionMapper.empty())
+    OS << FunctionMapper << "(";
   OS << "MI" << (isByRef() ? "." : "->") << "getOperand(" << OpIndex
-     << ").getImm() " << (shouldNegate() ? "!= " : "== ") << ImmVal;
+     << ").getImm()";
+  if (!FunctionMapper.empty())
+    OS << ")";
+  OS << (shouldNegate() ? " != " : " == ") << ImmVal;
+}
+
+void PredicateExpander::expandCheckImmOperandSimple(raw_ostream &OS,
+                                                    int OpIndex,
+                                                    StringRef FunctionMapper) {
+  if (shouldNegate())
+    OS << "!";
+  if (!FunctionMapper.empty())
+    OS << FunctionMapper << "(";
+  OS << "MI" << (isByRef() ? "." : "->") << "getOperand(" << OpIndex
+     << ").getImm()";
+  if (!FunctionMapper.empty())
+    OS << ")";
 }
 
 void PredicateExpander::expandCheckRegOperand(raw_ostream &OS, int OpIndex,
-                                              const Record *Reg) {
+                                              const Record *Reg,
+                                              StringRef FunctionMapper) {
   assert(Reg->isSubClassOf("Register") && "Expected a register Record!");
 
+  if (!FunctionMapper.empty())
+    OS << FunctionMapper << "(";
   OS << "MI" << (isByRef() ? "." : "->") << "getOperand(" << OpIndex
-     << ").getReg() " << (shouldNegate() ? "!= " : "== ");
+     << ").getReg()";
+  if (!FunctionMapper.empty())
+    OS << ")";
+  OS << (shouldNegate() ? " != " : " == ");
   const StringRef Str = Reg->getValueAsString("Namespace");
   if (!Str.empty())
     OS << Str << "::";
   OS << Reg->getName();
+}
+
+
+void PredicateExpander::expandCheckRegOperandSimple(raw_ostream &OS,
+                                                    int OpIndex,
+                                                    StringRef FunctionMapper) {
+  if (shouldNegate())
+    OS << "!";
+  if (!FunctionMapper.empty())
+    OS << FunctionMapper << "(";
+  OS << "MI" << (isByRef() ? "." : "->") << "getOperand(" << OpIndex
+     << ").getReg()";
+  if (!FunctionMapper.empty())
+    OS << ")";
 }
 
 void PredicateExpander::expandCheckInvalidRegOperand(raw_ostream &OS,
@@ -137,7 +185,7 @@ void PredicateExpander::expandPredicateSequence(raw_ostream &OS,
 void PredicateExpander::expandTIIFunctionCall(raw_ostream &OS,
                                               StringRef MethodName) {
   OS << (shouldNegate() ? "!" : "");
-  OS << TargetName << (shouldExpandForMC() ? "_MC::" : "GenInstrInfo::");
+  OS << TargetName << (shouldExpandForMC() ? "_MC::" : "InstrInfo::");
   OS << MethodName << (isByRef() ? "(MI)" : "(*MI)");
 }
 
@@ -184,7 +232,7 @@ void PredicateExpander::expandOpcodeSwitchCase(raw_ostream &OS,
   for (const Record *Opcode : Opcodes) {
     OS.indent(getIndentLevel() * 2);
     OS << "case " << Opcode->getValueAsString("Namespace")
-       << "::" << Opcode->getName() << " :\n";
+       << "::" << Opcode->getName() << ":\n";
   }
 
   increaseIndentLevel();
@@ -207,7 +255,7 @@ void PredicateExpander::expandOpcodeSwitchStatement(raw_ostream &OS,
 
   // Expand the default case.
   SS.indent(getIndentLevel() * 2);
-  SS << "default :\n";
+  SS << "default:\n";
 
   increaseIndentLevel();
   SS.indent(getIndentLevel() * 2);
@@ -266,18 +314,29 @@ void PredicateExpander::expandPredicate(raw_ostream &OS, const Record *Rec) {
 
   if (Rec->isSubClassOf("CheckRegOperand"))
     return expandCheckRegOperand(OS, Rec->getValueAsInt("OpIndex"),
-                                 Rec->getValueAsDef("Reg"));
+                                 Rec->getValueAsDef("Reg"),
+                                 Rec->getValueAsString("FunctionMapper"));
+
+  if (Rec->isSubClassOf("CheckRegOperandSimple"))
+    return expandCheckRegOperandSimple(OS, Rec->getValueAsInt("OpIndex"),
+                                       Rec->getValueAsString("FunctionMapper"));
 
   if (Rec->isSubClassOf("CheckInvalidRegOperand"))
     return expandCheckInvalidRegOperand(OS, Rec->getValueAsInt("OpIndex"));
 
   if (Rec->isSubClassOf("CheckImmOperand"))
     return expandCheckImmOperand(OS, Rec->getValueAsInt("OpIndex"),
-                                 Rec->getValueAsInt("ImmVal"));
+                                 Rec->getValueAsInt("ImmVal"),
+                                 Rec->getValueAsString("FunctionMapper"));
 
   if (Rec->isSubClassOf("CheckImmOperand_s"))
     return expandCheckImmOperand(OS, Rec->getValueAsInt("OpIndex"),
-                                 Rec->getValueAsString("ImmVal"));
+                                 Rec->getValueAsString("ImmVal"),
+                                 Rec->getValueAsString("FunctionMapper"));
+
+  if (Rec->isSubClassOf("CheckImmOperandSimple"))
+    return expandCheckImmOperandSimple(OS, Rec->getValueAsInt("OpIndex"),
+                                       Rec->getValueAsString("FunctionMapper"));
 
   if (Rec->isSubClassOf("CheckSameRegOperand"))
     return expandCheckSameRegOperand(OS, Rec->getValueAsInt("FirstIndex"),

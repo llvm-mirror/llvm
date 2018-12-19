@@ -54,9 +54,12 @@ public:
   bool isTruncateFree(Type *SrcTy, Type *DstTy) const override;
   bool isTruncateFree(EVT SrcVT, EVT DstVT) const override;
   bool isZExtFree(SDValue Val, EVT VT2) const override;
+  bool isSExtCheaperThanZExt(EVT SrcVT, EVT DstVT) const override;
 
   // Provide custom lowering hooks for some operations.
   SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
+
+  SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const override;
 
   // This method returns the name of a target specific DAG node.
   const char *getTargetNodeName(unsigned Opcode) const override;
@@ -112,8 +115,8 @@ private:
   SDValue lowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerSELECT(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerVASTART(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerRETURNADDR(SDValue Op, SelectionDAG &DAG) const;
+  SDValue lowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const;
+  SDValue lowerRETURNADDR(SDValue Op, SelectionDAG &DAG) const;
 
   bool IsEligibleForTailCallOptimization(CCState &CCInfo,
     CallLoweringInfo &CLI, MachineFunction &MF,
@@ -124,6 +127,13 @@ private:
   virtual Value *emitMaskedAtomicRMWIntrinsic(
       IRBuilder<> &Builder, AtomicRMWInst *AI, Value *AlignedAddr, Value *Incr,
       Value *Mask, Value *ShiftAmt, AtomicOrdering Ord) const override;
+  TargetLowering::AtomicExpansionKind
+  shouldExpandAtomicCmpXchgInIR(AtomicCmpXchgInst *CI) const override;
+  virtual Value *
+  emitMaskedAtomicCmpXchgIntrinsic(IRBuilder<> &Builder, AtomicCmpXchgInst *CI,
+                                   Value *AlignedAddr, Value *CmpVal,
+                                   Value *NewVal, Value *Mask,
+                                   AtomicOrdering Ord) const override;
 };
 }
 

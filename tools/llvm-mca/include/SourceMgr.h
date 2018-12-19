@@ -16,49 +16,42 @@
 #ifndef LLVM_TOOLS_LLVM_MCA_SOURCEMGR_H
 #define LLVM_TOOLS_LLVM_MCA_SOURCEMGR_H
 
-#include "llvm/MC/MCInst.h"
-#include <vector>
+#include "llvm/ADT/ArrayRef.h"
 
+namespace llvm {
 namespace mca {
 
-typedef std::pair<unsigned, const llvm::MCInst *> SourceRef;
+class Instruction;
+
+typedef std::pair<unsigned, const Instruction &> SourceRef;
 
 class SourceMgr {
-  using InstVec = std::vector<std::unique_ptr<const llvm::MCInst>>;
-  const InstVec &Sequence;
+  using UniqueInst = std::unique_ptr<Instruction>;
+  ArrayRef<UniqueInst> Sequence;
   unsigned Current;
-  unsigned Iterations;
+  const unsigned Iterations;
   static const unsigned DefaultIterations = 100;
 
 public:
-  SourceMgr(const InstVec &MCInstSequence, unsigned NumIterations)
-      : Sequence(MCInstSequence), Current(0),
-        Iterations(NumIterations ? NumIterations : DefaultIterations) {}
+  SourceMgr(ArrayRef<UniqueInst> S, unsigned Iter)
+      : Sequence(S), Current(0), Iterations(Iter ? Iter : DefaultIterations) {}
 
-  unsigned getCurrentIteration() const { return Current / Sequence.size(); }
   unsigned getNumIterations() const { return Iterations; }
   unsigned size() const { return Sequence.size(); }
-  const InstVec &getSequence() const { return Sequence; }
+  bool hasNext() const { return Current < (Iterations * Sequence.size()); }
+  void updateNext() { ++Current; }
 
-  bool hasNext() const { return Current < (Iterations * size()); }
-  void updateNext() { Current++; }
-
-  const SourceRef peekNext() const {
+  SourceRef peekNext() const {
     assert(hasNext() && "Already at end of sequence!");
-    unsigned Index = getCurrentInstructionIndex();
-    return SourceRef(Current, Sequence[Index].get());
+    return SourceRef(Current, *Sequence[Current % Sequence.size()]);
   }
 
-  unsigned getCurrentInstructionIndex() const {
-    return Current % Sequence.size();
-  }
-
-  const llvm::MCInst &getMCInstFromIndex(unsigned Index) const {
-    return *Sequence[Index % size()];
-  }
-
-  bool isEmpty() const { return size() == 0; }
+  using const_iterator = ArrayRef<UniqueInst>::const_iterator;
+  const_iterator begin() const { return Sequence.begin(); }
+  const_iterator end() const { return Sequence.end(); }
 };
+
 } // namespace mca
+} // namespace llvm
 
 #endif

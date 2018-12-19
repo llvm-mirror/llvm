@@ -196,6 +196,7 @@ void MIRPrinter::print(const MachineFunction &MF) {
   YamlMF.Name = MF.getName();
   YamlMF.Alignment = MF.getAlignment();
   YamlMF.ExposesReturnsTwice = MF.exposesReturnsTwice();
+  YamlMF.HasWinCFI = MF.hasWinCFI();
 
   YamlMF.Legalized = MF.getProperties().hasProperty(
       MachineFunctionProperties::Property::Legalized);
@@ -328,6 +329,8 @@ void MIRPrinter::convert(ModuleSlotTracker &MST,
   YamlMFI.HasCalls = MFI.hasCalls();
   YamlMFI.MaxCallFrameSize = MFI.isMaxCallFrameSizeComputed()
     ? MFI.getMaxCallFrameSize() : ~0u;
+  YamlMFI.CVBytesOfCalleeSavedRegisters =
+      MFI.getCVBytesOfCalleeSavedRegisters();
   YamlMFI.HasOpaqueSPAdjustment = MFI.hasOpaqueSPAdjustment();
   YamlMFI.HasVAStart = MFI.hasVAStart();
   YamlMFI.HasMustTailInVarArgFunc = MFI.hasMustTailInVarArgFunc();
@@ -398,18 +401,20 @@ void MIRPrinter::convertStackObjects(yaml::MachineFunction &YMF,
   for (const auto &CSInfo : MFI.getCalleeSavedInfo()) {
     yaml::StringValue Reg;
     printRegMIR(CSInfo.getReg(), Reg, TRI);
-    auto StackObjectInfo = StackObjectOperandMapping.find(CSInfo.getFrameIdx());
-    assert(StackObjectInfo != StackObjectOperandMapping.end() &&
-           "Invalid stack object index");
-    const FrameIndexOperand &StackObject = StackObjectInfo->second;
-    if (StackObject.IsFixed) {
-      YMF.FixedStackObjects[StackObject.ID].CalleeSavedRegister = Reg;
-      YMF.FixedStackObjects[StackObject.ID].CalleeSavedRestored =
-        CSInfo.isRestored();
-    } else {
-      YMF.StackObjects[StackObject.ID].CalleeSavedRegister = Reg;
-      YMF.StackObjects[StackObject.ID].CalleeSavedRestored =
-        CSInfo.isRestored();
+    if (!CSInfo.isSpilledToReg()) {
+      auto StackObjectInfo = StackObjectOperandMapping.find(CSInfo.getFrameIdx());
+      assert(StackObjectInfo != StackObjectOperandMapping.end() &&
+             "Invalid stack object index");
+      const FrameIndexOperand &StackObject = StackObjectInfo->second;
+      if (StackObject.IsFixed) {
+        YMF.FixedStackObjects[StackObject.ID].CalleeSavedRegister = Reg;
+        YMF.FixedStackObjects[StackObject.ID].CalleeSavedRestored =
+          CSInfo.isRestored();
+      } else {
+        YMF.StackObjects[StackObject.ID].CalleeSavedRegister = Reg;
+        YMF.StackObjects[StackObject.ID].CalleeSavedRestored =
+          CSInfo.isRestored();
+      }
     }
   }
   for (unsigned I = 0, E = MFI.getLocalFrameObjectCount(); I < E; ++I) {

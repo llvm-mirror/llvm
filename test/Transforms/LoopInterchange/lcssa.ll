@@ -1,5 +1,5 @@
-; RUN: opt < %s -basicaa -loop-interchange -pass-remarks-missed='loop-interchange' -verify-loop-lcssa -pass-remarks-output=%t
-; RUN: cat %t |  FileCheck --check-prefix REMARK %s
+; RUN: opt < %s -basicaa -loop-interchange -pass-remarks-missed='loop-interchange' -verify-loop-lcssa -pass-remarks-output=%t -S
+; RUN: FileCheck --input-file %t --check-prefix REMARK %s
 
 target datalayout = "e-m:e-i64:64-f80:128-n8:16:32:64-S128"
 target triple = "x86_64-unknown-linux-gnu"
@@ -246,7 +246,6 @@ for.body3:                                        ; preds = %for.body3, %outer.h
 
 outer.inc:                                        ; preds = %for.body3, %outer.header
   %sv = phi i64 [ 0, %outer.header ], [ 1, %for.body3 ]
-  store i64 %sv, i64* %ptr
   %iv.outer.next = add nsw i64 %iv.outer, 1
   %cmp = icmp eq i64 %iv.outer.next, 100
   br i1 %cmp, label %outer.header, label %for.exit

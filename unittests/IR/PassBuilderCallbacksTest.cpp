@@ -7,6 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/Testing/Support/Error.h"
 #include <functional>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -166,6 +167,11 @@ struct MockPassHandle<Loop>
   MOCK_METHOD4(run,
                PreservedAnalyses(Loop &, LoopAnalysisManager &,
                                  LoopStandardAnalysisResults &, LPMUpdater &));
+  static void invalidateLoop(Loop &L, LoopAnalysisManager &,
+                             LoopStandardAnalysisResults &,
+                             LPMUpdater &Updater) {
+    Updater.markLoopAsDeleted(L, L.getName());
+  }
   MockPassHandle() { setDefaults(); }
 };
 
@@ -185,6 +191,11 @@ struct MockPassHandle<LazyCallGraph::SCC>
   MOCK_METHOD4(run,
                PreservedAnalyses(LazyCallGraph::SCC &, CGSCCAnalysisManager &,
                                  LazyCallGraph &G, CGSCCUpdateResult &UR));
+
+  static void invalidateSCC(LazyCallGraph::SCC &C, CGSCCAnalysisManager &,
+                            LazyCallGraph &, CGSCCUpdateResult &UR) {
+    UR.InvalidatedSCCs.insert(&C);
+  }
 
   MockPassHandle() { setDefaults(); }
 };
@@ -309,6 +320,7 @@ struct MockPassInstrumentationCallbacks {
   }
   MOCK_METHOD2(runBeforePass, bool(StringRef PassID, llvm::Any));
   MOCK_METHOD2(runAfterPass, void(StringRef PassID, llvm::Any));
+  MOCK_METHOD1(runAfterPassInvalidated, void(StringRef PassID));
   MOCK_METHOD2(runBeforeAnalysis, void(StringRef PassID, llvm::Any));
   MOCK_METHOD2(runAfterAnalysis, void(StringRef PassID, llvm::Any));
 
@@ -318,6 +330,8 @@ struct MockPassInstrumentationCallbacks {
     });
     Callbacks.registerAfterPassCallback(
         [this](StringRef P, llvm::Any IR) { this->runAfterPass(P, IR); });
+    Callbacks.registerAfterPassInvalidatedCallback(
+        [this](StringRef P) { this->runAfterPassInvalidated(P); });
     Callbacks.registerBeforeAnalysisCallback([this](StringRef P, llvm::Any IR) {
       return this->runBeforeAnalysis(P, IR);
     });
@@ -460,7 +474,7 @@ TEST_F(ModuleCallbacksTest, Passes) {
       .WillOnce(Invoke(getAnalysisResult));
 
   StringRef PipelineText = "test-transform";
-  ASSERT_TRUE(PB.parsePassPipeline(PM, PipelineText, true))
+  ASSERT_THAT_ERROR(PB.parsePassPipeline(PM, PipelineText, true), Succeeded())
       << "Pipeline was: " << PipelineText;
 
   PM.run(*M, AM);
@@ -494,7 +508,7 @@ TEST_F(ModuleCallbacksTest, InstrumentedPasses) {
       .InSequence(PISequence);
 
   StringRef PipelineText = "test-transform";
-  ASSERT_TRUE(PB.parsePassPipeline(PM, PipelineText, true))
+  ASSERT_THAT_ERROR(PB.parsePassPipeline(PM, PipelineText, true), Succeeded())
       << "Pipeline was: " << PipelineText;
 
   PM.run(*M, AM);
@@ -525,7 +539,7 @@ TEST_F(ModuleCallbacksTest, InstrumentedSkippedPasses) {
       .Times(0);
 
   StringRef PipelineText = "test-transform";
-  ASSERT_TRUE(PB.parsePassPipeline(PM, PipelineText, true))
+  ASSERT_THAT_ERROR(PB.parsePassPipeline(PM, PipelineText, true), Succeeded())
       << "Pipeline was: " << PipelineText;
 
   PM.run(*M, AM);
@@ -537,7 +551,7 @@ TEST_F(FunctionCallbacksTest, Passes) {
       .WillOnce(Invoke(getAnalysisResult));
 
   StringRef PipelineText = "test-transform";
-  ASSERT_TRUE(PB.parsePassPipeline(PM, PipelineText, true))
+  ASSERT_THAT_ERROR(PB.parsePassPipeline(PM, PipelineText, true), Succeeded())
       << "Pipeline was: " << PipelineText;
   PM.run(*M, AM);
 }
@@ -570,8 +584,13 @@ TEST_F(FunctionCallbacksTest, InstrumentedPasses) {
               runAfterPass(HasNameRegex("MockPassHandle"), HasName("foo")))
       .InSequence(PISequence);
 
+  // Our mock pass does not invalidate IR.
+  EXPECT_CALL(CallbacksHandle,
+              runAfterPassInvalidated(HasNameRegex("MockPassHandle")))
+      .Times(0);
+
   StringRef PipelineText = "test-transform";
-  ASSERT_TRUE(PB.parsePassPipeline(PM, PipelineText, true))
+  ASSERT_THAT_ERROR(PB.parsePassPipeline(PM, PipelineText, true), Succeeded())
       << "Pipeline was: " << PipelineText;
   PM.run(*M, AM);
 }
@@ -594,6 +613,9 @@ TEST_F(FunctionCallbacksTest, InstrumentedSkippedPasses) {
   // as well.
   EXPECT_CALL(CallbacksHandle, runAfterPass(HasNameRegex("MockPassHandle"), _))
       .Times(0);
+  EXPECT_CALL(CallbacksHandle,
+              runAfterPassInvalidated(HasNameRegex("MockPassHandle")))
+      .Times(0);
   EXPECT_CALL(CallbacksHandle, runAfterPass(HasNameRegex("MockPassHandle"), _))
       .Times(0);
   EXPECT_CALL(CallbacksHandle,
@@ -604,7 +626,7 @@ TEST_F(FunctionCallbacksTest, InstrumentedSkippedPasses) {
       .Times(0);
 
   StringRef PipelineText = "test-transform";
-  ASSERT_TRUE(PB.parsePassPipeline(PM, PipelineText, true))
+  ASSERT_THAT_ERROR(PB.parsePassPipeline(PM, PipelineText, true), Succeeded())
       << "Pipeline was: " << PipelineText;
   PM.run(*M, AM);
 }
@@ -615,7 +637,7 @@ TEST_F(LoopCallbacksTest, Passes) {
       .WillOnce(WithArgs<0, 1, 2>(Invoke(getAnalysisResult)));
 
   StringRef PipelineText = "test-transform";
-  ASSERT_TRUE(PB.parsePassPipeline(PM, PipelineText, true))
+  ASSERT_THAT_ERROR(PB.parsePassPipeline(PM, PipelineText, true), Succeeded())
       << "Pipeline was: " << PipelineText;
   PM.run(*M, AM);
 }
@@ -649,8 +671,57 @@ TEST_F(LoopCallbacksTest, InstrumentedPasses) {
               runAfterPass(HasNameRegex("MockPassHandle"), HasName("loop")))
       .InSequence(PISequence);
 
+  // Our mock pass does not invalidate IR.
+  EXPECT_CALL(CallbacksHandle,
+              runAfterPassInvalidated(HasNameRegex("MockPassHandle")))
+      .Times(0);
+
   StringRef PipelineText = "test-transform";
-  ASSERT_TRUE(PB.parsePassPipeline(PM, PipelineText, true))
+  ASSERT_THAT_ERROR(PB.parsePassPipeline(PM, PipelineText, true), Succeeded())
+      << "Pipeline was: " << PipelineText;
+  PM.run(*M, AM);
+}
+
+TEST_F(LoopCallbacksTest, InstrumentedInvalidatingPasses) {
+  CallbacksHandle.registerPassInstrumentation();
+  // Non-mock instrumentation not specifically mentioned below can be ignored.
+  CallbacksHandle.ignoreNonMockPassInstrumentation("<string>");
+  CallbacksHandle.ignoreNonMockPassInstrumentation("foo");
+  CallbacksHandle.ignoreNonMockPassInstrumentation("loop");
+
+  EXPECT_CALL(AnalysisHandle, run(HasName("loop"), _, _));
+  EXPECT_CALL(PassHandle, run(HasName("loop"), _, _, _))
+      .WillOnce(DoAll(WithArgs<0, 1, 2, 3>(Invoke(PassHandle.invalidateLoop)),
+                      WithArgs<0, 1, 2>(Invoke(getAnalysisResult))));
+
+  // PassInstrumentation calls should happen in-sequence, in the same order
+  // as passes/analyses are scheduled.
+  ::testing::Sequence PISequence;
+  EXPECT_CALL(CallbacksHandle,
+              runBeforePass(HasNameRegex("MockPassHandle"), HasName("loop")))
+      .InSequence(PISequence);
+  EXPECT_CALL(
+      CallbacksHandle,
+      runBeforeAnalysis(HasNameRegex("MockAnalysisHandle"), HasName("loop")))
+      .InSequence(PISequence);
+  EXPECT_CALL(
+      CallbacksHandle,
+      runAfterAnalysis(HasNameRegex("MockAnalysisHandle"), HasName("loop")))
+      .InSequence(PISequence);
+  EXPECT_CALL(CallbacksHandle,
+              runAfterPassInvalidated(HasNameRegex("MockPassHandle")))
+      .InSequence(PISequence);
+  EXPECT_CALL(CallbacksHandle,
+              runAfterPassInvalidated(HasNameRegex("^PassManager")))
+      .InSequence(PISequence);
+
+  // Our mock pass invalidates IR, thus normal runAfterPass is never called.
+  EXPECT_CALL(CallbacksHandle,
+              runAfterPass(HasNameRegex("MockPassHandle"), HasName("loop")))
+      .Times(0);
+
+  StringRef PipelineText = "test-transform";
+  ASSERT_THAT_ERROR(PB.parsePassPipeline(PM, PipelineText, true), Succeeded())
       << "Pipeline was: " << PipelineText;
   PM.run(*M, AM);
 }
@@ -675,6 +746,9 @@ TEST_F(LoopCallbacksTest, InstrumentedSkippedPasses) {
   EXPECT_CALL(CallbacksHandle, runAfterPass(HasNameRegex("MockPassHandle"), _))
       .Times(0);
   EXPECT_CALL(CallbacksHandle,
+              runAfterPassInvalidated(HasNameRegex("MockPassHandle")))
+      .Times(0);
+  EXPECT_CALL(CallbacksHandle,
               runBeforeAnalysis(HasNameRegex("MockAnalysisHandle"), _))
       .Times(0);
   EXPECT_CALL(CallbacksHandle,
@@ -682,7 +756,7 @@ TEST_F(LoopCallbacksTest, InstrumentedSkippedPasses) {
       .Times(0);
 
   StringRef PipelineText = "test-transform";
-  ASSERT_TRUE(PB.parsePassPipeline(PM, PipelineText, true))
+  ASSERT_THAT_ERROR(PB.parsePassPipeline(PM, PipelineText, true), Succeeded())
       << "Pipeline was: " << PipelineText;
   PM.run(*M, AM);
 }
@@ -693,7 +767,7 @@ TEST_F(CGSCCCallbacksTest, Passes) {
       .WillOnce(WithArgs<0, 1, 2>(Invoke(getAnalysisResult)));
 
   StringRef PipelineText = "test-transform";
-  ASSERT_TRUE(PB.parsePassPipeline(PM, PipelineText, true))
+  ASSERT_THAT_ERROR(PB.parsePassPipeline(PM, PipelineText, true), Succeeded())
       << "Pipeline was: " << PipelineText;
   PM.run(*M, AM);
 }
@@ -726,8 +800,56 @@ TEST_F(CGSCCCallbacksTest, InstrumentedPasses) {
               runAfterPass(HasNameRegex("MockPassHandle"), HasName("(foo)")))
       .InSequence(PISequence);
 
+  // Our mock pass does not invalidate IR.
+  EXPECT_CALL(CallbacksHandle,
+              runAfterPassInvalidated(HasNameRegex("MockPassHandle")))
+      .Times(0);
+
   StringRef PipelineText = "test-transform";
-  ASSERT_TRUE(PB.parsePassPipeline(PM, PipelineText, true))
+  ASSERT_THAT_ERROR(PB.parsePassPipeline(PM, PipelineText, true), Succeeded())
+      << "Pipeline was: " << PipelineText;
+  PM.run(*M, AM);
+}
+
+TEST_F(CGSCCCallbacksTest, InstrumentedInvalidatingPasses) {
+  CallbacksHandle.registerPassInstrumentation();
+  // Non-mock instrumentation not specifically mentioned below can be ignored.
+  CallbacksHandle.ignoreNonMockPassInstrumentation("<string>");
+  CallbacksHandle.ignoreNonMockPassInstrumentation("(foo)");
+
+  EXPECT_CALL(AnalysisHandle, run(HasName("(foo)"), _, _));
+  EXPECT_CALL(PassHandle, run(HasName("(foo)"), _, _, _))
+      .WillOnce(DoAll(WithArgs<0, 1, 2, 3>(Invoke(PassHandle.invalidateSCC)),
+                      WithArgs<0, 1, 2>(Invoke(getAnalysisResult))));
+
+  // PassInstrumentation calls should happen in-sequence, in the same order
+  // as passes/analyses are scheduled.
+  ::testing::Sequence PISequence;
+  EXPECT_CALL(CallbacksHandle,
+              runBeforePass(HasNameRegex("MockPassHandle"), HasName("(foo)")))
+      .InSequence(PISequence);
+  EXPECT_CALL(
+      CallbacksHandle,
+      runBeforeAnalysis(HasNameRegex("MockAnalysisHandle"), HasName("(foo)")))
+      .InSequence(PISequence);
+  EXPECT_CALL(
+      CallbacksHandle,
+      runAfterAnalysis(HasNameRegex("MockAnalysisHandle"), HasName("(foo)")))
+      .InSequence(PISequence);
+  EXPECT_CALL(CallbacksHandle,
+              runAfterPassInvalidated(HasNameRegex("MockPassHandle")))
+      .InSequence(PISequence);
+  EXPECT_CALL(CallbacksHandle,
+              runAfterPassInvalidated(HasNameRegex("^PassManager")))
+      .InSequence(PISequence);
+
+  // Our mock pass does invalidate IR, thus normal runAfterPass is never called.
+  EXPECT_CALL(CallbacksHandle,
+              runAfterPass(HasNameRegex("MockPassHandle"), HasName("(foo)")))
+      .Times(0);
+
+  StringRef PipelineText = "test-transform";
+  ASSERT_THAT_ERROR(PB.parsePassPipeline(PM, PipelineText, true), Succeeded())
       << "Pipeline was: " << PipelineText;
   PM.run(*M, AM);
 }
@@ -752,6 +874,9 @@ TEST_F(CGSCCCallbacksTest, InstrumentedSkippedPasses) {
   EXPECT_CALL(CallbacksHandle, runAfterPass(HasNameRegex("MockPassHandle"), _))
       .Times(0);
   EXPECT_CALL(CallbacksHandle,
+              runAfterPassInvalidated(HasNameRegex("MockPassHandle")))
+      .Times(0);
+  EXPECT_CALL(CallbacksHandle,
               runBeforeAnalysis(HasNameRegex("MockAnalysisHandle"), _))
       .Times(0);
   EXPECT_CALL(CallbacksHandle,
@@ -759,7 +884,7 @@ TEST_F(CGSCCCallbacksTest, InstrumentedSkippedPasses) {
       .Times(0);
 
   StringRef PipelineText = "test-transform";
-  ASSERT_TRUE(PB.parsePassPipeline(PM, PipelineText, true))
+  ASSERT_THAT_ERROR(PB.parsePassPipeline(PM, PipelineText, true), Succeeded())
       << "Pipeline was: " << PipelineText;
   PM.run(*M, AM);
 }
@@ -774,7 +899,7 @@ TEST_F(ModuleCallbacksTest, AnalysisUtilities) {
   EXPECT_CALL(AnalysisHandle, invalidate(HasName("<string>"), _, _));
 
   StringRef PipelineText = "require<test-analysis>,invalidate<test-analysis>";
-  ASSERT_TRUE(PB.parsePassPipeline(PM, PipelineText, true))
+  ASSERT_THAT_ERROR(PB.parsePassPipeline(PM, PipelineText, true), Succeeded())
       << "Pipeline was: " << PipelineText;
   PM.run(*M, AM);
 }
@@ -784,7 +909,7 @@ TEST_F(CGSCCCallbacksTest, PassUtilities) {
   EXPECT_CALL(AnalysisHandle, invalidate(HasName("(foo)"), _, _));
 
   StringRef PipelineText = "require<test-analysis>,invalidate<test-analysis>";
-  ASSERT_TRUE(PB.parsePassPipeline(PM, PipelineText, true))
+  ASSERT_THAT_ERROR(PB.parsePassPipeline(PM, PipelineText, true), Succeeded())
       << "Pipeline was: " << PipelineText;
   PM.run(*M, AM);
 }
@@ -794,7 +919,7 @@ TEST_F(FunctionCallbacksTest, AnalysisUtilities) {
   EXPECT_CALL(AnalysisHandle, invalidate(HasName("foo"), _, _));
 
   StringRef PipelineText = "require<test-analysis>,invalidate<test-analysis>";
-  ASSERT_TRUE(PB.parsePassPipeline(PM, PipelineText, true))
+  ASSERT_THAT_ERROR(PB.parsePassPipeline(PM, PipelineText, true), Succeeded())
       << "Pipeline was: " << PipelineText;
   PM.run(*M, AM);
 }
@@ -805,7 +930,7 @@ TEST_F(LoopCallbacksTest, PassUtilities) {
 
   StringRef PipelineText = "require<test-analysis>,invalidate<test-analysis>";
 
-  ASSERT_TRUE(PB.parsePassPipeline(PM, PipelineText, true))
+  ASSERT_THAT_ERROR(PB.parsePassPipeline(PM, PipelineText, true), Succeeded())
       << "Pipeline was: " << PipelineText;
   PM.run(*M, AM);
 }
@@ -845,13 +970,13 @@ TEST_F(ModuleCallbacksTest, ParseTopLevelPipeline) {
 
   StringRef PipelineText =
       "another-pipeline(test-transform,invalidate<test-analysis>)";
-  ASSERT_TRUE(PB.parsePassPipeline(PM, PipelineText, true))
+  ASSERT_THAT_ERROR(PB.parsePassPipeline(PM, PipelineText, true), Succeeded())
       << "Pipeline was: " << PipelineText;
   PM.run(*M, AM);
 
   /// Test the negative case
   PipelineText = "another-pipeline(instcombine)";
-  ASSERT_FALSE(PB.parsePassPipeline(PM, PipelineText, true))
+  ASSERT_THAT_ERROR(PB.parsePassPipeline(PM, PipelineText, true), Failed())
       << "Pipeline was: " << PipelineText;
 }
 } // end anonymous namespace

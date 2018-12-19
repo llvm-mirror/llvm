@@ -155,13 +155,14 @@ static void runNewPMPasses(Config &Conf, Module &Mod, TargetMachine *TM,
                            const ModuleSummaryIndex *ImportSummary) {
   Optional<PGOOptions> PGOOpt;
   if (!Conf.SampleProfile.empty())
-    PGOOpt = PGOOptions("", "", Conf.SampleProfile, false, true);
+    PGOOpt = PGOOptions("", "", Conf.SampleProfile, Conf.ProfileRemapping,
+                        false, true);
 
   PassBuilder PB(TM, PGOOpt);
   AAManager AA;
 
   // Parse a custom AA pipeline if asked to.
-  if (!PB.parseAAPipeline(AA, "default"))
+  if (auto Err = PB.parseAAPipeline(AA, "default"))
     report_fatal_error("Error parsing default AA pipeline");
 
   LoopAnalysisManager LAM(Conf.DebugPassManager);
@@ -220,9 +221,9 @@ static void runNewPMCustomPasses(Module &Mod, TargetMachine *TM,
 
   // Parse a custom AA pipeline if asked to.
   if (!AAPipelineDesc.empty())
-    if (!PB.parseAAPipeline(AA, AAPipelineDesc))
-      report_fatal_error("unable to parse AA pipeline description: " +
-                         AAPipelineDesc);
+    if (auto Err = PB.parseAAPipeline(AA, AAPipelineDesc))
+      report_fatal_error("unable to parse AA pipeline description '" +
+                         AAPipelineDesc + "': " + toString(std::move(Err)));
 
   LoopAnalysisManager LAM;
   FunctionAnalysisManager FAM;
@@ -245,9 +246,9 @@ static void runNewPMCustomPasses(Module &Mod, TargetMachine *TM,
   MPM.addPass(VerifierPass());
 
   // Now, add all the passes we've been requested to.
-  if (!PB.parsePassPipeline(MPM, PipelineDesc))
-    report_fatal_error("unable to parse pass pipeline description: " +
-                       PipelineDesc);
+  if (auto Err = PB.parsePassPipeline(MPM, PipelineDesc))
+    report_fatal_error("unable to parse pass pipeline description '" +
+                       PipelineDesc + "': " + toString(std::move(Err)));
 
   if (!DisableVerify)
     MPM.addPass(VerifierPass());
@@ -489,7 +490,7 @@ Error lto::thinBackend(Config &Conf, unsigned Task, AddStreamFn AddStream,
 
   dropDeadSymbols(Mod, DefinedGlobals, CombinedIndex);
 
-  thinLTOResolveWeakForLinkerModule(Mod, DefinedGlobals);
+  thinLTOResolvePrevailingInModule(Mod, DefinedGlobals);
 
   if (Conf.PostPromoteModuleHook && !Conf.PostPromoteModuleHook(Task, Mod))
     return finalizeOptimizationRemarks(std::move(DiagnosticOutputFile));

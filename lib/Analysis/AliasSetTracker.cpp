@@ -114,10 +114,9 @@ void AliasSetTracker::removeAliasSet(AliasSet *AS) {
   if (AliasSet *Fwd = AS->Forward) {
     Fwd->dropRef(*this);
     AS->Forward = nullptr;
-  }
-
-  if (AS->Alias == AliasSet::SetMayAlias)
-    TotalMayAliasSetSize -= AS->size();
+  } else // Update TotalMayAliasSetSize only if not forwarding.
+      if (AS->Alias == AliasSet::SetMayAlias)
+        TotalMayAliasSetSize -= AS->size();
 
   AliasSets.erase(AS);
 }
@@ -232,8 +231,8 @@ bool AliasSet::aliasesUnknownInst(const Instruction *Inst,
   if (AliasAny)
     return true;
 
-  if (!Inst->mayReadOrWriteMemory())
-    return false;
+  assert(Inst->mayReadOrWriteMemory() &&
+         "Instruction must either read or write memory.");
 
   for (unsigned i = 0, e = UnknownInsts.size(); i != e; ++i) {
     if (auto *UnknownInst = getUnknownInst(i)) {
@@ -311,13 +310,6 @@ AliasSet *AliasSetTracker::mergeAliasSetsForPointer(const Value *Ptr,
   return FoundSet;
 }
 
-bool AliasSetTracker::containsUnknown(const Instruction *Inst) const {
-  for (const AliasSet &AS : *this)
-    if (!AS.Forward && AS.aliasesUnknownInst(Inst, AA))
-      return true;
-  return false;
-}
-
 AliasSet *AliasSetTracker::findAliasSetForUnknownInst(Instruction *Inst) {
   AliasSet *FoundSet = nullptr;
   for (iterator I = begin(), E = end(); I != E;) {
@@ -326,7 +318,7 @@ AliasSet *AliasSetTracker::findAliasSetForUnknownInst(Instruction *Inst) {
       continue;
     if (!FoundSet)            // If this is the first alias set ptr can go into.
       FoundSet = &*Cur;       // Remember it.
-    else if (!Cur->Forward)   // Otherwise, we must merge the sets.
+    else   // Otherwise, we must merge the sets.
       FoundSet->mergeSetIn(*Cur, *this);     // Merge in contents.
   }
   return FoundSet;
@@ -383,7 +375,7 @@ AliasSet &AliasSetTracker::getAliasSetFor(const MemoryLocation &MemLoc) {
 
 void AliasSetTracker::add(Value *Ptr, LocationSize Size,
                           const AAMDNodes &AAInfo) {
-  addPointer(Ptr, Size, AAInfo, AliasSet::NoAccess);
+  addPointer(MemoryLocation(Ptr, Size, AAInfo), AliasSet::NoAccess);
 }
 
 void AliasSetTracker::add(LoadInst *LI) {
@@ -518,8 +510,9 @@ void AliasSetTracker::add(const AliasSetTracker &AST) {
 
     // Loop over all of the pointers in this alias set.
     for (AliasSet::iterator ASI = AS.begin(), E = AS.end(); ASI != E; ++ASI)
-      addPointer(ASI.getPointer(), ASI.getSize(), ASI.getAAInfo(),
-                 (AliasSet::AccessLattice)AS.Access);
+      addPointer(
+          MemoryLocation(ASI.getPointer(), ASI.getSize(), ASI.getAAInfo()),
+          (AliasSet::AccessLattice)AS.Access);
   }
 }
 
@@ -612,10 +605,9 @@ AliasSet &AliasSetTracker::mergeAllAliasSets() {
   return *AliasAnyAS;
 }
 
-AliasSet &AliasSetTracker::addPointer(Value *P, LocationSize Size,
-                                      const AAMDNodes &AAInfo,
+AliasSet &AliasSetTracker::addPointer(MemoryLocation Loc,
                                       AliasSet::AccessLattice E) {
-  AliasSet &AS = getAliasSetFor(MemoryLocation(P, Size, AAInfo));
+  AliasSet &AS = getAliasSetFor(Loc);
   AS.Access |= E;
 
   if (!AliasAnyAS && (TotalMayAliasSetSize > SaturationThreshold)) {
@@ -649,7 +641,7 @@ void AliasSet::print(raw_ostream &OS) const {
     for (iterator I = begin(), E = end(); I != E; ++I) {
       if (I != begin()) OS << ", ";
       I.getPointer()->printAsOperand(OS << "(");
-      if (I.getSize() == MemoryLocation::UnknownSize)
+      if (I.getSize() == LocationSize::unknown())
         OS << ", unknown)";
       else 
         OS << ", " << I.getSize() << ")";

@@ -14,13 +14,13 @@
 #include "AArch64Subtarget.h"
 
 #include "AArch64.h"
-#include "AArch64InstrInfo.h"
-#include "AArch64PBQPRegAlloc.h"
-#include "AArch64TargetMachine.h"
-
 #include "AArch64CallLowering.h"
+#include "AArch64InstrInfo.h"
 #include "AArch64LegalizerInfo.h"
+#include "AArch64PBQPRegAlloc.h"
 #include "AArch64RegisterBankInfo.h"
+#include "AArch64TargetMachine.h"
+#include "MCTargetDesc/AArch64AddressingModes.h"
 #include "llvm/CodeGen/GlobalISel/InstructionSelect.h"
 #include "llvm/CodeGen/MachineScheduler.h"
 #include "llvm/IR/GlobalValue.h"
@@ -67,15 +67,29 @@ void AArch64Subtarget::initializeProperties() {
   // this in the future so we can specify it together with the subtarget
   // features.
   switch (ARMProcFamily) {
+  case Others:
+    break;
+  case CortexA35:
+    break;
+  case CortexA53:
+    PrefFunctionAlignment = 3;
+    break;
+  case CortexA55:
+    break;
+  case CortexA57:
+    MaxInterleaveFactor = 4;
+    PrefFunctionAlignment = 4;
+    break;
+  case CortexA72:
+  case CortexA73:
+  case CortexA75:
+    PrefFunctionAlignment = 4;
+    break;
   case Cyclone:
     CacheLineSize = 64;
     PrefetchDistance = 280;
     MinPrefetchStride = 2048;
     MaxPrefetchIterationsAhead = 3;
-    break;
-  case CortexA57:
-    MaxInterleaveFactor = 4;
-    PrefFunctionAlignment = 4;
     break;
   case ExynosM1:
     MaxInterleaveFactor = 4;
@@ -98,11 +112,6 @@ void AArch64Subtarget::initializeProperties() {
     MinPrefetchStride = 2048;
     MaxPrefetchIterationsAhead = 8;
     break;
-  case Saphira:
-    MaxInterleaveFactor = 4;
-    // FIXME: remove this to enable 64-bit SLP if performance looks good.
-    MinVectorRegisterBitWidth = 128;
-    break;
   case Kryo:
     MaxInterleaveFactor = 4;
     VectorInsertExtractBaseCost = 2;
@@ -110,6 +119,11 @@ void AArch64Subtarget::initializeProperties() {
     PrefetchDistance = 740;
     MinPrefetchStride = 1024;
     MaxPrefetchIterationsAhead = 11;
+    // FIXME: remove this to enable 64-bit SLP if performance looks good.
+    MinVectorRegisterBitWidth = 128;
+    break;
+  case Saphira:
+    MaxInterleaveFactor = 4;
     // FIXME: remove this to enable 64-bit SLP if performance looks good.
     MinVectorRegisterBitWidth = 128;
     break;
@@ -134,17 +148,11 @@ void AArch64Subtarget::initializeProperties() {
     // FIXME: remove this to enable 64-bit SLP if performance looks good.
     MinVectorRegisterBitWidth = 128;
     break;
-  case CortexA35: break;
-  case CortexA53:
-    PrefFunctionAlignment = 3;
-    break;
-  case CortexA55: break;
-  case CortexA72:
-  case CortexA73:
-  case CortexA75:
+  case TSV110:
+    CacheLineSize = 64;
     PrefFunctionAlignment = 4;
+    PrefLoopAlignment = 2;
     break;
-  case Others: break;
   }
 }
 

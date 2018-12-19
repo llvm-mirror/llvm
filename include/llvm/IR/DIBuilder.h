@@ -145,7 +145,8 @@ namespace llvm {
                       uint64_t DWOId = 0, bool SplitDebugInlining = true,
                       bool DebugInfoForProfiling = false,
                       DICompileUnit::DebugNameTableKind NameTableKind =
-                          DICompileUnit::DebugNameTableKind::Default);
+                          DICompileUnit::DebugNameTableKind::Default,
+                      bool RangesBaseAddress = false);
 
     /// Create a file descriptor to hold debugging information for a file.
     /// \param Filename  File name.
@@ -583,14 +584,14 @@ namespace llvm {
         DIScope *Context, StringRef Name, StringRef LinkageName, DIFile *File,
         unsigned LineNo, DIType *Ty, bool isLocalToUnit,
         DIExpression *Expr = nullptr, MDNode *Decl = nullptr,
-        uint32_t AlignInBits = 0);
+        MDTuple *templateParams = nullptr, uint32_t AlignInBits = 0);
 
     /// Identical to createGlobalVariable
     /// except that the resulting DbgNode is temporary and meant to be RAUWed.
     DIGlobalVariable *createTempGlobalVariableFwdDecl(
         DIScope *Context, StringRef Name, StringRef LinkageName, DIFile *File,
         unsigned LineNo, DIType *Ty, bool isLocalToUnit, MDNode *Decl = nullptr,
-        uint32_t AlignInBits = 0);
+        MDTuple *templateParams = nullptr, uint32_t AlignInBits = 0);
 
     /// Create a new descriptor for an auto variable.  This is a local variable
     /// that is not a subprogram parameter.
@@ -652,29 +653,28 @@ namespace llvm {
     /// \param File          File where this variable is defined.
     /// \param LineNo        Line number.
     /// \param Ty            Function type.
-    /// \param isLocalToUnit True if this function is not externally visible.
-    /// \param isDefinition  True if this is a function definition.
     /// \param ScopeLine     Set to the beginning of the scope this starts
     /// \param Flags         e.g. is this function prototyped or not.
     ///                      These flags are used to emit dwarf attributes.
-    /// \param isOptimized   True if optimization is ON.
+    /// \param SPFlags       Additional flags specific to subprograms.
     /// \param TParams       Function template parameters.
     /// \param ThrownTypes   Exception types this function may throw.
-    DISubprogram *createFunction(
-        DIScope *Scope, StringRef Name, StringRef LinkageName, DIFile *File,
-        unsigned LineNo, DISubroutineType *Ty, bool isLocalToUnit,
-        bool isDefinition, unsigned ScopeLine,
-        DINode::DIFlags Flags = DINode::FlagZero, bool isOptimized = false,
-        DITemplateParameterArray TParams = nullptr,
-        DISubprogram *Decl = nullptr, DITypeArray ThrownTypes = nullptr);
+    DISubprogram *
+    createFunction(DIScope *Scope, StringRef Name, StringRef LinkageName,
+                   DIFile *File, unsigned LineNo, DISubroutineType *Ty,
+                   unsigned ScopeLine, DINode::DIFlags Flags = DINode::FlagZero,
+                   DISubprogram::DISPFlags SPFlags = DISubprogram::SPFlagZero,
+                   DITemplateParameterArray TParams = nullptr,
+                   DISubprogram *Decl = nullptr,
+                   DITypeArray ThrownTypes = nullptr);
 
     /// Identical to createFunction,
     /// except that the resulting DbgNode is meant to be RAUWed.
     DISubprogram *createTempFunctionFwdDecl(
         DIScope *Scope, StringRef Name, StringRef LinkageName, DIFile *File,
-        unsigned LineNo, DISubroutineType *Ty, bool isLocalToUnit,
-        bool isDefinition, unsigned ScopeLine,
-        DINode::DIFlags Flags = DINode::FlagZero, bool isOptimized = false,
+        unsigned LineNo, DISubroutineType *Ty, unsigned ScopeLine,
+        DINode::DIFlags Flags = DINode::FlagZero,
+        DISubprogram::DISPFlags SPFlags = DISubprogram::SPFlagZero,
         DITemplateParameterArray TParams = nullptr,
         DISubprogram *Decl = nullptr, DITypeArray ThrownTypes = nullptr);
 
@@ -686,10 +686,6 @@ namespace llvm {
     /// \param File          File where this variable is defined.
     /// \param LineNo        Line number.
     /// \param Ty            Function type.
-    /// \param isLocalToUnit True if this function is not externally visible..
-    /// \param isDefinition  True if this is a function definition.
-    /// \param Virtuality    Attributes describing virtualness. e.g. pure
-    ///                      virtual function.
     /// \param VTableIndex   Index no of this method in virtual table, or -1u if
     ///                      unrepresentable.
     /// \param ThisAdjustment
@@ -698,17 +694,18 @@ namespace llvm {
     /// \param VTableHolder  Type that holds vtable.
     /// \param Flags         e.g. is this function prototyped or not.
     ///                      This flags are used to emit dwarf attributes.
-    /// \param isOptimized   True if optimization is ON.
+    /// \param SPFlags       Additional flags specific to subprograms.
     /// \param TParams       Function template parameters.
     /// \param ThrownTypes   Exception types this function may throw.
-    DISubprogram *createMethod(
-        DIScope *Scope, StringRef Name, StringRef LinkageName, DIFile *File,
-        unsigned LineNo, DISubroutineType *Ty, bool isLocalToUnit,
-        bool isDefinition, unsigned Virtuality = 0, unsigned VTableIndex = 0,
-        int ThisAdjustment = 0, DIType *VTableHolder = nullptr,
-        DINode::DIFlags Flags = DINode::FlagZero, bool isOptimized = false,
-        DITemplateParameterArray TParams = nullptr,
-        DITypeArray ThrownTypes = nullptr);
+    DISubprogram *
+    createMethod(DIScope *Scope, StringRef Name, StringRef LinkageName,
+                 DIFile *File, unsigned LineNo, DISubroutineType *Ty,
+                 unsigned VTableIndex = 0, int ThisAdjustment = 0,
+                 DIType *VTableHolder = nullptr,
+                 DINode::DIFlags Flags = DINode::FlagZero,
+                 DISubprogram::DISPFlags SPFlags = DISubprogram::SPFlagZero,
+                 DITemplateParameterArray TParams = nullptr,
+                 DITypeArray ThrownTypes = nullptr);
 
     /// This creates new descriptor for a namespace with the specified
     /// parent scope.

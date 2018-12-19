@@ -506,6 +506,30 @@ static const MCSymbolELF *getAssociatedSymbol(const GlobalObject *GO,
   return OtherGO ? dyn_cast<MCSymbolELF>(TM.getSymbol(OtherGO)) : nullptr;
 }
 
+static unsigned getEntrySizeForKind(SectionKind Kind) {
+  if (Kind.isMergeable1ByteCString())
+    return 1;
+  else if (Kind.isMergeable2ByteCString())
+    return 2;
+  else if (Kind.isMergeable4ByteCString())
+    return 4;
+  else if (Kind.isMergeableConst4())
+    return 4;
+  else if (Kind.isMergeableConst8())
+    return 8;
+  else if (Kind.isMergeableConst16())
+    return 16;
+  else if (Kind.isMergeableConst32())
+    return 32;
+  else {
+    // We shouldn't have mergeable C strings or mergeable constants that we
+    // didn't handle above.
+    assert(!Kind.isMergeableCString() && "unknown string width");
+    assert(!Kind.isMergeableConst() && "unknown data width");
+    return 0;
+  }
+}
+
 MCSection *TargetLoweringObjectFileELF::getExplicitSectionGlobal(
     const GlobalObject *GO, SectionKind Kind, const TargetMachine &TM) const {
   StringRef SectionName = GO->getSection();
@@ -550,7 +574,7 @@ MCSection *TargetLoweringObjectFileELF::getExplicitSectionGlobal(
 
   MCSectionELF *Section = getContext().getELFSection(
       SectionName, getELFSectionType(SectionName, Kind), Flags,
-      /*EntrySize=*/0, Group, UniqueID, AssociatedSymbol);
+      getEntrySizeForKind(Kind), Group, UniqueID, AssociatedSymbol);
   // Make sure that we did not get some other section with incompatible sh_link.
   // This should not be possible due to UniqueID code above.
   assert(Section->getAssociatedSymbol() == AssociatedSymbol &&
@@ -575,30 +599,6 @@ static StringRef getSectionPrefixForGlobal(SectionKind Kind) {
     return ".data";
   assert(Kind.isReadOnlyWithRel() && "Unknown section kind");
   return ".data.rel.ro";
-}
-
-static unsigned getEntrySizeForKind(SectionKind Kind) {
-  if (Kind.isMergeable1ByteCString())
-    return 1;
-  else if (Kind.isMergeable2ByteCString())
-    return 2;
-  else if (Kind.isMergeable4ByteCString())
-    return 4;
-  else if (Kind.isMergeableConst4())
-    return 4;
-  else if (Kind.isMergeableConst8())
-    return 8;
-  else if (Kind.isMergeableConst16())
-    return 16;
-  else if (Kind.isMergeableConst32())
-    return 32;
-  else {
-    // We shouldn't have mergeable C strings or mergeable constants that we
-    // didn't handle above.
-    assert(!Kind.isMergeableCString() && "unknown string width");
-    assert(!Kind.isMergeableConst() && "unknown data width");
-    return 0;
-  }
 }
 
 static MCSectionELF *selectELFSectionForGlobal(
@@ -793,6 +793,14 @@ const MCExpr *TargetLoweringObjectFileELF::lowerRelativeReference(
       MCSymbolRefExpr::create(TM.getSymbol(LHS), PLTRelativeVariantKind,
                               getContext()),
       MCSymbolRefExpr::create(TM.getSymbol(RHS), getContext()), getContext());
+}
+
+MCSection *TargetLoweringObjectFileELF::getSectionForCommandLines() const {
+  // Use ".GCC.command.line" since this feature is to support clang's
+  // -frecord-gcc-switches which in turn attempts to mimic GCC's switch of the
+  // same name.
+  return getContext().getELFSection(".GCC.command.line", ELF::SHT_PROGBITS,
+                                    ELF::SHF_MERGE | ELF::SHF_STRINGS, 1, "");
 }
 
 void
@@ -1100,6 +1108,22 @@ const MCExpr *TargetLoweringObjectFileMachO::getIndirectSymViaGOTPCRel(
   //       .indirect_symbol        _extfoo
   //       .long   0
   //
+  // The indirect symbol table (and sections of non_lazy_symbol_pointers type)
+  // may point to both local (same translation unit) and global (other
+  // translation units) symbols. Example:
+  //
+  // .section __DATA,__pointers,non_lazy_symbol_pointers
+  // L1:
+  //    .indirect_symbol _myGlobal
+  //    .long 0
+  // L2:
+  //    .indirect_symbol _myLocal
+  //    .long _myLocal
+  //
+  // If the symbol is local, instead of the symbol's index, the assembler
+  // places the constant INDIRECT_SYMBOL_LOCAL into the indirect symbol table.
+  // Then the linker will notice the constant in the table and will look at the
+  // content of the symbol.
   MachineModuleInfoMachO &MachOMMI =
     MMI->getObjFileInfo<MachineModuleInfoMachO>();
   MCContext &Ctx = getContext();
@@ -1119,9 +1143,12 @@ const MCExpr *TargetLoweringObjectFileMachO::getIndirectSymViaGOTPCRel(
   MCSymbol *Stub = Ctx.getOrCreateSymbol(Name);
 
   MachineModuleInfoImpl::StubValueTy &StubSym = MachOMMI.getGVStubEntry(Stub);
-  if (!StubSym.getPointer())
-    StubSym = MachineModuleInfoImpl::
-      StubValueTy(const_cast<MCSymbol *>(Sym), true /* access indirectly */);
+  if (!StubSym.getPointer()) {
+    bool IsIndirectLocal = Sym->isDefined() && !Sym->isExternal();
+    // With the assumption that IsIndirectLocal == GV->hasLocalLinkage().
+    StubSym = MachineModuleInfoImpl::StubValueTy(const_cast<MCSymbol *>(Sym),
+                                                 !IsIndirectLocal);
+  }
 
   const MCExpr *BSymExpr =
     MCSymbolRefExpr::create(BaseSym, MCSymbolRefExpr::VK_None, Ctx);
@@ -1317,10 +1344,11 @@ MCSection *TargetLoweringObjectFileCOFF::SelectSectionForGlobal(
       MCSymbol *Sym = TM.getSymbol(ComdatGV);
       StringRef COMDATSymName = Sym->getName();
 
-      // Append "$symbol" to the section name when targetting mingw. The ld.bfd
+      // Append "$symbol" to the section name *before* IR-level mangling is
+      // applied when targetting mingw. This is what GCC does, and the ld.bfd
       // COFF linker will not properly handle comdats otherwise.
       if (getTargetTriple().isWindowsGNUEnvironment())
-        raw_svector_ostream(Name) << '$' << COMDATSymName;
+        raw_svector_ostream(Name) << '$' << ComdatGV->getName();
 
       return getContext().getCOFFSection(Name, Characteristics, Kind,
                                          COMDATSymName, Selection, UniqueID);
@@ -1748,6 +1776,10 @@ const MCExpr *TargetLoweringObjectFileWasm::lowerRelativeReference(
 void TargetLoweringObjectFileWasm::InitializeWasm() {
   StaticCtorSection =
       getContext().getWasmSection(".init_array", SectionKind::getData());
+
+  // We don't use PersonalityEncoding and LSDAEncoding because we don't emit
+  // .cfi directives. We use TTypeEncoding to encode typeinfo global variables.
+  TTypeEncoding = dwarf::DW_EH_PE_absptr;
 }
 
 MCSection *TargetLoweringObjectFileWasm::getStaticCtorSection(

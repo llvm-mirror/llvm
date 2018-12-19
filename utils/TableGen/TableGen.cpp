@@ -53,7 +53,7 @@ enum ActionType {
   GenX86EVEX2VEXTables,
   GenX86FoldTables,
   GenRegisterBank,
-  GenWebAssemblyStackifier,
+  GenExegesis,
 };
 
 namespace {
@@ -119,8 +119,8 @@ namespace {
                                "Generate X86 fold tables"),
                     clEnumValN(GenRegisterBank, "gen-register-bank",
                                "Generate registers bank descriptions"),
-                    clEnumValN(GenWebAssemblyStackifier, "gen-wasm-stackifier",
-                               "Generate WebAssembly stackification cases")));
+                    clEnumValN(GenExegesis, "gen-exegesis",
+                               "Generate llvm-exegesis tables")));
 
   cl::OptionCategory PrintEnumsCat("Options for -print-enums");
   cl::opt<std::string>
@@ -234,8 +234,8 @@ bool LLVMTableGenMain(raw_ostream &OS, RecordKeeper &Records) {
   case GenX86FoldTables:
     EmitX86FoldTables(Records, OS);
     break;
-  case GenWebAssemblyStackifier:
-    EmitWebAssemblyStackifier(Records, OS);
+  case GenExegesis:
+    EmitExegesis(Records, OS);
     break;
   }
 

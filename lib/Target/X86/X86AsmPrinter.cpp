@@ -88,19 +88,19 @@ bool X86AsmPrinter::runOnMachineFunction(MachineFunction &MF) {
 
 void X86AsmPrinter::EmitFunctionBodyStart() {
   if (EmitFPOData) {
-    X86TargetStreamer *XTS =
-        static_cast<X86TargetStreamer *>(OutStreamer->getTargetStreamer());
-    unsigned ParamsSize =
-        MF->getInfo<X86MachineFunctionInfo>()->getArgumentStackSize();
-    XTS->emitFPOProc(CurrentFnSym, ParamsSize);
+    if (auto *XTS =
+        static_cast<X86TargetStreamer *>(OutStreamer->getTargetStreamer()))
+      XTS->emitFPOProc(
+          CurrentFnSym,
+          MF->getInfo<X86MachineFunctionInfo>()->getArgumentStackSize());
   }
 }
 
 void X86AsmPrinter::EmitFunctionBodyEnd() {
   if (EmitFPOData) {
-    X86TargetStreamer *XTS =
-        static_cast<X86TargetStreamer *>(OutStreamer->getTargetStreamer());
-    XTS->emitFPOEndProc();
+    if (auto *XTS =
+            static_cast<X86TargetStreamer *>(OutStreamer->getTargetStreamer()))
+      XTS->emitFPOEndProc();
   }
 }
 
@@ -674,7 +674,7 @@ void X86AsmPrinter::EmitEndOfAsmFile(Module &M) {
     emitNonLazyStubs(MMI, *OutStreamer);
 
     // Emit stack and fault map information.
-    SM.serializeToStackMapSection();
+    emitStackMaps(SM);
     FM.serializeToFaultMapSection();
 
     // This flag tells the linker that no global symbols contain code that fall
@@ -695,12 +695,12 @@ void X86AsmPrinter::EmitEndOfAsmFile(Module &M) {
   }
 
   if (TT.isOSBinFormatCOFF()) {
-    SM.serializeToStackMapSection();
+    emitStackMaps(SM);
     return;
   }
 
   if (TT.isOSBinFormatELF()) {
-    SM.serializeToStackMapSection();
+    emitStackMaps(SM);
     FM.serializeToFaultMapSection();
     return;
   }

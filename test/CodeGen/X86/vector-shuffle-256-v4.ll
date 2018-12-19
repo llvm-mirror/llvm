@@ -91,9 +91,8 @@ define <4 x double> @shuffle_v4f64_0300(<4 x double> %a, <4 x double> %b) {
 define <4 x double> @shuffle_v4f64_1000(<4 x double> %a, <4 x double> %b) {
 ; AVX1-LABEL: shuffle_v4f64_1000:
 ; AVX1:       # %bb.0:
-; AVX1-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX1-NEXT:    vmovddup {{.*#+}} xmm0 = xmm0[0,0]
-; AVX1-NEXT:    vinsertf128 $1, %xmm0, %ymm1, %ymm0
+; AVX1-NEXT:    vinsertf128 $1, %xmm0, %ymm0, %ymm0
+; AVX1-NEXT:    vpermilpd {{.*#+}} ymm0 = ymm0[1,0,2,2]
 ; AVX1-NEXT:    retq
 ;
 ; AVX2-LABEL: shuffle_v4f64_1000:
@@ -168,6 +167,26 @@ define <4 x double> @shuffle_v4f64_2222_bc(<4 x i64> %a, <4 x i64> %b) {
   %tmp0 = bitcast <4 x i64> %a to <4 x double>
   %tmp1 = bitcast <4 x i64> %b to <4 x double>
   %shuffle = shufflevector <4 x double> %tmp0, <4 x double> %tmp1, <4 x i32> <i32 2, i32 2, i32 2, i32 2>
+  ret <4 x double> %shuffle
+}
+
+define <4 x double> @shuffle_v4f64_2233(<4 x double> %a, <4 x double> %b) {
+; AVX1-LABEL: shuffle_v4f64_2233:
+; AVX1:       # %bb.0:
+; AVX1-NEXT:    vperm2f128 {{.*#+}} ymm0 = ymm0[2,3,2,3]
+; AVX1-NEXT:    vpermilpd {{.*#+}} ymm0 = ymm0[0,0,3,3]
+; AVX1-NEXT:    retq
+;
+; AVX2-LABEL: shuffle_v4f64_2233:
+; AVX2:       # %bb.0:
+; AVX2-NEXT:    vpermpd {{.*#+}} ymm0 = ymm0[2,2,3,3]
+; AVX2-NEXT:    retq
+;
+; AVX512VL-LABEL: shuffle_v4f64_2233:
+; AVX512VL:       # %bb.0:
+; AVX512VL-NEXT:    vpermpd {{.*#+}} ymm0 = ymm0[2,2,3,3]
+; AVX512VL-NEXT:    retq
+  %shuffle = shufflevector <4 x double> %a, <4 x double> %b, <4 x i32> <i32 2, i32 2, i32 3, i32 3>
   ret <4 x double> %shuffle
 }
 
@@ -744,9 +763,8 @@ define <4 x i64> @shuffle_v4i64_0300(<4 x i64> %a, <4 x i64> %b) {
 define <4 x i64> @shuffle_v4i64_1000(<4 x i64> %a, <4 x i64> %b) {
 ; AVX1-LABEL: shuffle_v4i64_1000:
 ; AVX1:       # %bb.0:
-; AVX1-NEXT:    vpermilps {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; AVX1-NEXT:    vpermilps {{.*#+}} xmm0 = xmm0[0,1,0,1]
-; AVX1-NEXT:    vinsertf128 $1, %xmm0, %ymm1, %ymm0
+; AVX1-NEXT:    vinsertf128 $1, %xmm0, %ymm0, %ymm0
+; AVX1-NEXT:    vpermilpd {{.*#+}} ymm0 = ymm0[1,0,2,2]
 ; AVX1-NEXT:    retq
 ;
 ; AVX2-LABEL: shuffle_v4i64_1000:
@@ -915,19 +933,11 @@ define <4 x i64> @shuffle_v4i64_0412(<4 x i64> %a, <4 x i64> %b) {
 ; AVX2-NEXT:    vpblendd {{.*#+}} ymm0 = ymm0[0,1],ymm1[2,3],ymm0[4,5,6,7]
 ; AVX2-NEXT:    retq
 ;
-; AVX512VL-SLOW-LABEL: shuffle_v4i64_0412:
-; AVX512VL-SLOW:       # %bb.0:
-; AVX512VL-SLOW-NEXT:    vpbroadcastq %xmm1, %xmm1
-; AVX512VL-SLOW-NEXT:    vpermq {{.*#+}} ymm0 = ymm0[0,1,1,2]
-; AVX512VL-SLOW-NEXT:    vpblendd {{.*#+}} ymm0 = ymm0[0,1],ymm1[2,3],ymm0[4,5,6,7]
-; AVX512VL-SLOW-NEXT:    retq
-;
-; AVX512VL-FAST-LABEL: shuffle_v4i64_0412:
-; AVX512VL-FAST:       # %bb.0:
-; AVX512VL-FAST-NEXT:    vpbroadcastq %xmm1, %xmm1
-; AVX512VL-FAST-NEXT:    vmovdqa {{.*#+}} ymm2 = [0,5,1,2]
-; AVX512VL-FAST-NEXT:    vpermt2q %ymm1, %ymm2, %ymm0
-; AVX512VL-FAST-NEXT:    retq
+; AVX512VL-LABEL: shuffle_v4i64_0412:
+; AVX512VL:       # %bb.0:
+; AVX512VL-NEXT:    vmovdqa {{.*#+}} ymm2 = [0,4,1,2]
+; AVX512VL-NEXT:    vpermt2q %ymm1, %ymm2, %ymm0
+; AVX512VL-NEXT:    retq
   %shuffle = shufflevector <4 x i64> %a, <4 x i64> %b, <4 x i32> <i32 0, i32 4, i32 1, i32 2>
   ret <4 x i64> %shuffle
 }

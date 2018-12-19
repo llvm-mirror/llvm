@@ -134,7 +134,7 @@ public:
     // Top-down walk of the dominator tree
     ReversePostOrderTraversal<const Function *> RPOT(&F);
     for (const BasicBlock *BB : RPOT) {
-      const TerminatorInst *TI = BB->getTerminator();
+      const Instruction *TI = BB->getTerminator();
       assert(TI && "blocks must be well formed");
 
       // For conditional branches, we can perform simple conditional propagation on
@@ -257,8 +257,7 @@ static bool containsGCPtrType(Type *Ty) {
   if (ArrayType *AT = dyn_cast<ArrayType>(Ty))
     return containsGCPtrType(AT->getElementType());
   if (StructType *ST = dyn_cast<StructType>(Ty))
-    return std::any_of(ST->subtypes().begin(), ST->subtypes().end(),
-                       containsGCPtrType);
+    return llvm::any_of(ST->subtypes(), containsGCPtrType);
   return false;
 }
 

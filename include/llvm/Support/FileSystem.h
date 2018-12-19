@@ -160,6 +160,8 @@ protected:
   #if defined(LLVM_ON_UNIX)
   time_t fs_st_atime = 0;
   time_t fs_st_mtime = 0;
+  uint32_t fs_st_atime_nsec = 0;
+  uint32_t fs_st_mtime_nsec = 0;
   uid_t fs_st_uid = 0;
   gid_t fs_st_gid = 0;
   off_t fs_st_size = 0;
@@ -180,9 +182,12 @@ public:
   explicit basic_file_status(file_type Type) : Type(Type) {}
 
   #if defined(LLVM_ON_UNIX)
-  basic_file_status(file_type Type, perms Perms, time_t ATime, time_t MTime,
+  basic_file_status(file_type Type, perms Perms, time_t ATime,
+                    uint32_t ATimeNSec, time_t MTime, uint32_t MTimeNSec,
                     uid_t UID, gid_t GID, off_t Size)
-      : fs_st_atime(ATime), fs_st_mtime(MTime), fs_st_uid(UID), fs_st_gid(GID),
+      : fs_st_atime(ATime), fs_st_mtime(MTime),
+        fs_st_atime_nsec(ATimeNSec), fs_st_mtime_nsec(MTimeNSec),
+        fs_st_uid(UID), fs_st_gid(GID),
         fs_st_size(Size), Type(Type), Perms(Perms) {}
 #elif defined(_WIN32)
   basic_file_status(file_type Type, perms Perms, uint32_t LastAccessTimeHigh,
@@ -199,7 +204,20 @@ public:
   // getters
   file_type type() const { return Type; }
   perms permissions() const { return Perms; }
+
+  /// The file access time as reported from the underlying file system.
+  ///
+  /// Also see comments on \c getLastModificationTime() related to the precision
+  /// of the returned value.
   TimePoint<> getLastAccessedTime() const;
+
+  /// The file modification time as reported from the underlying file system.
+  ///
+  /// The returned value allows for nanosecond precision but the actual
+  /// resolution is an implementation detail of the underlying file system.
+  /// There is no guarantee for what kind of resolution you can expect, the
+  /// resolution can differ across platforms and even across mountpoints on the
+  /// same machine.
   TimePoint<> getLastModificationTime() const;
 
   #if defined(LLVM_ON_UNIX)
@@ -247,8 +265,11 @@ public:
 
   #if defined(LLVM_ON_UNIX)
   file_status(file_type Type, perms Perms, dev_t Dev, nlink_t Links, ino_t Ino,
-              time_t ATime, time_t MTime, uid_t UID, gid_t GID, off_t Size)
-      : basic_file_status(Type, Perms, ATime, MTime, UID, GID, Size),
+              time_t ATime, uint32_t ATimeNSec,
+              time_t MTime, uint32_t MTimeNSec,
+              uid_t UID, gid_t GID, off_t Size)
+      : basic_file_status(Type, Perms, ATime, ATimeNSec, MTime, MTimeNSec,
+                          UID, GID, Size),
         fs_st_dev(Dev), fs_st_nlinks(Links), fs_st_ino(Ino) {}
   #elif defined(_WIN32)
   file_status(file_type Type, perms Perms, uint32_t LinkCount,
@@ -348,6 +369,12 @@ std::error_code create_hard_link(const Twine &to, const Twine &from);
 ///                     directory.
 std::error_code real_path(const Twine &path, SmallVectorImpl<char> &output,
                           bool expand_tilde = false);
+
+/// Expands ~ expressions to the user's home directory. On Unix ~user
+/// directories are resolved as well.
+///
+/// @param path The path to resolve.
+void expand_tilde(const Twine &path, SmallVectorImpl<char> &output);
 
 /// Get the current path.
 ///
@@ -1182,7 +1209,6 @@ public:
     SmallString<128> path_storage;
     ec = detail::directory_iterator_construct(
         *State, path.toStringRef(path_storage), FollowSymlinks);
-    update_error_code_for_current_entry(ec);
   }
 
   explicit directory_iterator(const directory_entry &de, std::error_code &ec,
@@ -1191,7 +1217,6 @@ public:
     State = std::make_shared<detail::DirIterState>();
     ec = detail::directory_iterator_construct(
         *State, de.path(), FollowSymlinks);
-    update_error_code_for_current_entry(ec);
   }
 
   /// Construct end iterator.
@@ -1200,7 +1225,6 @@ public:
   // No operator++ because we need error_code.
   directory_iterator &increment(std::error_code &ec) {
     ec = directory_iterator_increment(*State);
-    update_error_code_for_current_entry(ec);
     return *this;
   }
 
@@ -1219,26 +1243,6 @@ public:
 
   bool operator!=(const directory_iterator &RHS) const {
     return !(*this == RHS);
-  }
-  // Other members as required by
-  // C++ Std, 24.1.1 Input iterators [input.iterators]
-
-private:
-  // Checks if current entry is valid and populates error code. For example,
-  // current entry may not exist due to broken symbol links.
-  void update_error_code_for_current_entry(std::error_code &ec) {
-    // Bail out if error has already occured earlier to avoid overwriting it.
-    if (ec)
-      return;
-
-    // Empty directory entry is used to mark the end of an interation, it's not
-    // an error.
-    if (State->CurrentEntry == directory_entry())
-      return;
-
-    ErrorOr<basic_file_status> status = State->CurrentEntry.status();
-    if (!status)
-      ec = status.getError();
   }
 };
 
@@ -1277,8 +1281,15 @@ public:
     if (State->HasNoPushRequest)
       State->HasNoPushRequest = false;
     else {
-      ErrorOr<basic_file_status> status = State->Stack.top()->status();
-      if (status && is_directory(*status)) {
+      file_type type = State->Stack.top()->type();
+      if (type == file_type::symlink_file && Follow) {
+        // Resolve the symlink: is it a directory to recurse into?
+        ErrorOr<basic_file_status> status = State->Stack.top()->status();
+        if (status)
+          type = status->type();
+        // Otherwise broken symlink, and we'll continue.
+      }
+      if (type == file_type::directory_file) {
         State->Stack.push(directory_iterator(*State->Stack.top(), ec, Follow));
         if (State->Stack.top() != end_itr) {
           ++State->Level;
@@ -1342,8 +1353,6 @@ public:
   bool operator!=(const recursive_directory_iterator &RHS) const {
     return !(*this == RHS);
   }
-  // Other members as required by
-  // C++ Std, 24.1.1 Input iterators [input.iterators]
 };
 
 /// @}

@@ -71,19 +71,19 @@ struct SystemZAddressingMode {
   // True if the address can (and must) include ADJDYNALLOC.
   bool isDynAlloc() { return Form == FormBDXDynAlloc; }
 
-  void dump() {
+  void dump(const llvm::SelectionDAG *DAG) {
     errs() << "SystemZAddressingMode " << this << '\n';
 
     errs() << " Base ";
     if (Base.getNode())
-      Base.getNode()->dump();
+      Base.getNode()->dump(DAG);
     else
       errs() << "null\n";
 
     if (hasIndexField()) {
       errs() << " Index ";
       if (Index.getNode())
-        Index.getNode()->dump();
+        Index.getNode()->dump(DAG);
       else
         errs() << "null\n";
     }
@@ -589,7 +589,7 @@ bool SystemZDAGToDAGISel::selectAddress(SDValue Addr,
   if (AM.isDynAlloc() && !AM.IncludesDynAlloc)
     return false;
 
-  LLVM_DEBUG(AM.dump());
+  LLVM_DEBUG(AM.dump(CurDAG));
   return true;
 }
 
@@ -1308,7 +1308,7 @@ bool SystemZDAGToDAGISel::tryFoldLoadStoreIntoMemOperand(SDNode *Node) {
     return false;
   case SystemZISD::SSUBO:
     NegateOperand = true;
-    /* fall through */
+    LLVM_FALLTHROUGH;
   case SystemZISD::SADDO:
     if (MemVT == MVT::i32)
       NewOpc = SystemZ::ASI;
@@ -1319,7 +1319,7 @@ bool SystemZDAGToDAGISel::tryFoldLoadStoreIntoMemOperand(SDNode *Node) {
     break;
   case SystemZISD::USUBO:
     NegateOperand = true;
-    /* fall through */
+    LLVM_FALLTHROUGH;
   case SystemZISD::UADDO:
     if (MemVT == MVT::i32)
       NewOpc = SystemZ::ALSI;

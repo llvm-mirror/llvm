@@ -130,7 +130,8 @@ static inline unsigned getFnStackAlignment(const TargetSubtargetInfo *STI,
   return STI->getFrameLowering()->getStackAlignment();
 }
 
-MachineFunction::MachineFunction(const Function &F, const TargetMachine &Target,
+MachineFunction::MachineFunction(const Function &F,
+                                 const LLVMTargetMachine &Target,
                                  const TargetSubtargetInfo &STI,
                                  unsigned FunctionNum, MachineModuleInfo &mmi)
     : F(F), Target(Target), STI(&STI), Ctx(mmi.getContext()), MMI(mmi) {
@@ -245,6 +246,11 @@ void MachineFunction::clear() {
   if (WinEHInfo) {
     WinEHInfo->~WinEHFuncInfo();
     Allocator.Deallocate(WinEHInfo);
+  }
+
+  if (WasmEHInfo) {
+    WasmEHInfo->~WasmEHFuncInfo();
+    Allocator.Deallocate(WasmEHInfo);
   }
 }
 
@@ -429,7 +435,7 @@ MachineFunction::createMIExtraInfo(ArrayRef<MachineMemOperand *> MMOs,
 
 const char *MachineFunction::createExternalSymbolName(StringRef Name) {
   char *Dest = Allocator.Allocate<char>(Name.size() + 1);
-  std::copy(Name.begin(), Name.end(), Dest);
+  llvm::copy(Name, Dest);
   Dest[Name.size()] = 0;
   return Dest;
 }
@@ -637,9 +643,8 @@ MCSymbol *MachineFunction::addLandingPad(MachineBasicBlock *LandingPad) {
       addCleanup(LandingPad);
 
     // FIXME: New EH - Add the clauses in reverse order. This isn't 100%
-    // correct,
-    //        but we need to do it this way because of how the DWARF EH emitter
-    //        processes the clauses.
+    //        correct, but we need to do it this way because of how the DWARF EH
+    //        emitter processes the clauses.
     for (unsigned I = LPI->getNumClauses(); I != 0; --I) {
       Value *Val = LPI->getClause(I - 1);
       if (LPI->isCatch(I - 1)) {
@@ -657,8 +662,11 @@ MCSymbol *MachineFunction::addLandingPad(MachineBasicBlock *LandingPad) {
       }
     }
 
-  } else if (isa<CatchPadInst>(FirstI)) {
-    // TODO
+  } else if (const auto *CPI = dyn_cast<CatchPadInst>(FirstI)) {
+    for (unsigned I = CPI->getNumArgOperands(); I != 0; --I) {
+      Value *TypeInfo = CPI->getArgOperand(I - 1)->stripPointerCasts();
+      addCatchTypeInfo(LandingPad, dyn_cast<GlobalValue>(TypeInfo));
+    }
 
   } else {
     assert(isa<CleanupPadInst>(FirstI) && "Invalid landingpad!");
@@ -683,7 +691,8 @@ void MachineFunction::addFilterTypeInfo(MachineBasicBlock *LandingPad,
   LP.TypeIds.push_back(getFilterIDFor(IdsInFilter));
 }
 
-void MachineFunction::tidyLandingPads(DenseMap<MCSymbol*, uintptr_t> *LPMap) {
+void MachineFunction::tidyLandingPads(DenseMap<MCSymbol *, uintptr_t> *LPMap,
+                                      bool TidyIfNoBeginLabels) {
   for (unsigned i = 0; i != LandingPads.size(); ) {
     LandingPadInfo &LandingPad = LandingPads[i];
     if (LandingPad.LandingPadLabel &&
@@ -698,24 +707,25 @@ void MachineFunction::tidyLandingPads(DenseMap<MCSymbol*, uintptr_t> *LPMap) {
       continue;
     }
 
-    for (unsigned j = 0, e = LandingPads[i].BeginLabels.size(); j != e; ++j) {
-      MCSymbol *BeginLabel = LandingPad.BeginLabels[j];
-      MCSymbol *EndLabel = LandingPad.EndLabels[j];
-      if ((BeginLabel->isDefined() ||
-           (LPMap && (*LPMap)[BeginLabel] != 0)) &&
-          (EndLabel->isDefined() ||
-           (LPMap && (*LPMap)[EndLabel] != 0))) continue;
+    if (TidyIfNoBeginLabels) {
+      for (unsigned j = 0, e = LandingPads[i].BeginLabels.size(); j != e; ++j) {
+        MCSymbol *BeginLabel = LandingPad.BeginLabels[j];
+        MCSymbol *EndLabel = LandingPad.EndLabels[j];
+        if ((BeginLabel->isDefined() || (LPMap && (*LPMap)[BeginLabel] != 0)) &&
+            (EndLabel->isDefined() || (LPMap && (*LPMap)[EndLabel] != 0)))
+          continue;
 
-      LandingPad.BeginLabels.erase(LandingPad.BeginLabels.begin() + j);
-      LandingPad.EndLabels.erase(LandingPad.EndLabels.begin() + j);
-      --j;
-      --e;
-    }
+        LandingPad.BeginLabels.erase(LandingPad.BeginLabels.begin() + j);
+        LandingPad.EndLabels.erase(LandingPad.EndLabels.begin() + j);
+        --j;
+        --e;
+      }
 
-    // Remove landing pads with no try-ranges.
-    if (LandingPads[i].BeginLabels.empty()) {
-      LandingPads.erase(LandingPads.begin() + i);
-      continue;
+      // Remove landing pads with no try-ranges.
+      if (LandingPads[i].BeginLabels.empty()) {
+        LandingPads.erase(LandingPads.begin() + i);
+        continue;
+      }
     }
 
     // If there is no landing pad, ensure that the list of typeids is empty.

@@ -25,6 +25,8 @@ define <4 x i32> @add_op1_constant(i32* %p) nounwind {
   ret <4 x i32> %r
 }
 
+; Code and data size may increase by using more vector ops, so the transform is disabled here.
+
 define <4 x i32> @add_op1_constant_optsize(i32* %p) nounwind optsize {
 ; SSE-LABEL: add_op1_constant_optsize:
 ; SSE:       # %bb.0:
@@ -516,33 +518,29 @@ define <2 x i64> @urem_op0_constant(i64* %p) nounwind {
 define <16 x i8> @urem_op1_constant(i8* %p) nounwind {
 ; SSE-LABEL: urem_op1_constant:
 ; SSE:       # %bb.0:
-; SSE-NEXT:    movb (%rdi), %cl
-; SSE-NEXT:    movl %ecx, %eax
-; SSE-NEXT:    shrb %al
+; SSE-NEXT:    movb (%rdi), %al
+; SSE-NEXT:    movl %eax, %ecx
+; SSE-NEXT:    shrb %cl
+; SSE-NEXT:    movzbl %cl, %ecx
+; SSE-NEXT:    imull $49, %ecx, %ecx
+; SSE-NEXT:    shrl $10, %ecx
+; SSE-NEXT:    imull $42, %ecx, %ecx
+; SSE-NEXT:    subb %cl, %al
 ; SSE-NEXT:    movzbl %al, %eax
-; SSE-NEXT:    imull $49, %eax, %eax
-; SSE-NEXT:    shrl $10, %eax
-; SSE-NEXT:    movb $42, %dl
-; SSE-NEXT:    # kill: def $al killed $al killed $eax
-; SSE-NEXT:    mulb %dl
-; SSE-NEXT:    subb %al, %cl
-; SSE-NEXT:    movzbl %cl, %eax
 ; SSE-NEXT:    movd %eax, %xmm0
 ; SSE-NEXT:    retq
 ;
 ; AVX-LABEL: urem_op1_constant:
 ; AVX:       # %bb.0:
-; AVX-NEXT:    movb (%rdi), %cl
-; AVX-NEXT:    movl %ecx, %eax
-; AVX-NEXT:    shrb %al
+; AVX-NEXT:    movb (%rdi), %al
+; AVX-NEXT:    movl %eax, %ecx
+; AVX-NEXT:    shrb %cl
+; AVX-NEXT:    movzbl %cl, %ecx
+; AVX-NEXT:    imull $49, %ecx, %ecx
+; AVX-NEXT:    shrl $10, %ecx
+; AVX-NEXT:    imull $42, %ecx, %ecx
+; AVX-NEXT:    subb %cl, %al
 ; AVX-NEXT:    movzbl %al, %eax
-; AVX-NEXT:    imull $49, %eax, %eax
-; AVX-NEXT:    shrl $10, %eax
-; AVX-NEXT:    movb $42, %dl
-; AVX-NEXT:    # kill: def $al killed $al killed $eax
-; AVX-NEXT:    mulb %dl
-; AVX-NEXT:    subb %al, %cl
-; AVX-NEXT:    movzbl %cl, %eax
 ; AVX-NEXT:    vmovd %eax, %xmm0
 ; AVX-NEXT:    retq
   %x = load i8, i8* %p
@@ -705,5 +703,165 @@ define <2 x double> @frem_op0_constant(double* %p) nounwind {
   %b = frem double 42.0, %x
   %r = insertelement <2 x double> undef, double %b, i32 0
   ret <2 x double> %r
+}
+
+; Try again with 256-bit types.
+
+define <8 x i32> @add_op1_constant_v8i32(i32* %p) nounwind {
+; SSE-LABEL: add_op1_constant_v8i32:
+; SSE:       # %bb.0:
+; SSE-NEXT:    movl (%rdi), %eax
+; SSE-NEXT:    addl $42, %eax
+; SSE-NEXT:    movd %eax, %xmm0
+; SSE-NEXT:    retq
+;
+; AVX-LABEL: add_op1_constant_v8i32:
+; AVX:       # %bb.0:
+; AVX-NEXT:    movl (%rdi), %eax
+; AVX-NEXT:    addl $42, %eax
+; AVX-NEXT:    vmovd %eax, %xmm0
+; AVX-NEXT:    retq
+  %x = load i32, i32* %p
+  %b = add i32 %x, 42
+  %r = insertelement <8 x i32> undef, i32 %b, i32 0
+  ret <8 x i32> %r
+}
+
+define <4 x i64> @sub_op0_constant_v4i64(i64* %p) nounwind {
+; SSE-LABEL: sub_op0_constant_v4i64:
+; SSE:       # %bb.0:
+; SSE-NEXT:    movl $42, %eax
+; SSE-NEXT:    subq (%rdi), %rax
+; SSE-NEXT:    movq %rax, %xmm0
+; SSE-NEXT:    retq
+;
+; AVX-LABEL: sub_op0_constant_v4i64:
+; AVX:       # %bb.0:
+; AVX-NEXT:    movl $42, %eax
+; AVX-NEXT:    subq (%rdi), %rax
+; AVX-NEXT:    vmovq %rax, %xmm0
+; AVX-NEXT:    retq
+  %x = load i64, i64* %p
+  %b = sub i64 42, %x
+  %r = insertelement <4 x i64> undef, i64 %b, i32 0
+  ret <4 x i64> %r
+}
+
+define <8 x i32> @mul_op1_constant_v8i32(i32* %p) nounwind {
+; SSE-LABEL: mul_op1_constant_v8i32:
+; SSE:       # %bb.0:
+; SSE-NEXT:    imull $42, (%rdi), %eax
+; SSE-NEXT:    movd %eax, %xmm0
+; SSE-NEXT:    retq
+;
+; AVX-LABEL: mul_op1_constant_v8i32:
+; AVX:       # %bb.0:
+; AVX-NEXT:    imull $42, (%rdi), %eax
+; AVX-NEXT:    vmovd %eax, %xmm0
+; AVX-NEXT:    retq
+  %x = load i32, i32* %p
+  %b = mul i32 %x, 42
+  %r = insertelement <8 x i32> undef, i32 %b, i32 0
+  ret <8 x i32> %r
+}
+
+define <4 x i64> @or_op1_constant_v4i64(i64* %p) nounwind {
+; SSE-LABEL: or_op1_constant_v4i64:
+; SSE:       # %bb.0:
+; SSE-NEXT:    movq (%rdi), %rax
+; SSE-NEXT:    orq $42, %rax
+; SSE-NEXT:    movq %rax, %xmm0
+; SSE-NEXT:    retq
+;
+; AVX-LABEL: or_op1_constant_v4i64:
+; AVX:       # %bb.0:
+; AVX-NEXT:    movq (%rdi), %rax
+; AVX-NEXT:    orq $42, %rax
+; AVX-NEXT:    vmovq %rax, %xmm0
+; AVX-NEXT:    retq
+  %x = load i64, i64* %p
+  %b = or i64 %x, 42
+  %r = insertelement <4 x i64> undef, i64 %b, i32 0
+  ret <4 x i64> %r
+}
+
+; Try again with 512-bit types.
+
+define <16 x i32> @add_op1_constant_v16i32(i32* %p) nounwind {
+; SSE-LABEL: add_op1_constant_v16i32:
+; SSE:       # %bb.0:
+; SSE-NEXT:    movl (%rdi), %eax
+; SSE-NEXT:    addl $42, %eax
+; SSE-NEXT:    movd %eax, %xmm0
+; SSE-NEXT:    retq
+;
+; AVX-LABEL: add_op1_constant_v16i32:
+; AVX:       # %bb.0:
+; AVX-NEXT:    movl (%rdi), %eax
+; AVX-NEXT:    addl $42, %eax
+; AVX-NEXT:    vmovd %eax, %xmm0
+; AVX-NEXT:    retq
+  %x = load i32, i32* %p
+  %b = add i32 %x, 42
+  %r = insertelement <16 x i32> undef, i32 %b, i32 0
+  ret <16 x i32> %r
+}
+
+define <8 x i64> @sub_op0_constant_v8i64(i64* %p) nounwind {
+; SSE-LABEL: sub_op0_constant_v8i64:
+; SSE:       # %bb.0:
+; SSE-NEXT:    movl $42, %eax
+; SSE-NEXT:    subq (%rdi), %rax
+; SSE-NEXT:    movq %rax, %xmm0
+; SSE-NEXT:    retq
+;
+; AVX-LABEL: sub_op0_constant_v8i64:
+; AVX:       # %bb.0:
+; AVX-NEXT:    movl $42, %eax
+; AVX-NEXT:    subq (%rdi), %rax
+; AVX-NEXT:    vmovq %rax, %xmm0
+; AVX-NEXT:    retq
+  %x = load i64, i64* %p
+  %b = sub i64 42, %x
+  %r = insertelement <8 x i64> undef, i64 %b, i32 0
+  ret <8 x i64> %r
+}
+
+define <16 x i32> @mul_op1_constant_v16i32(i32* %p) nounwind {
+; SSE-LABEL: mul_op1_constant_v16i32:
+; SSE:       # %bb.0:
+; SSE-NEXT:    imull $42, (%rdi), %eax
+; SSE-NEXT:    movd %eax, %xmm0
+; SSE-NEXT:    retq
+;
+; AVX-LABEL: mul_op1_constant_v16i32:
+; AVX:       # %bb.0:
+; AVX-NEXT:    imull $42, (%rdi), %eax
+; AVX-NEXT:    vmovd %eax, %xmm0
+; AVX-NEXT:    retq
+  %x = load i32, i32* %p
+  %b = mul i32 %x, 42
+  %r = insertelement <16 x i32> undef, i32 %b, i32 0
+  ret <16 x i32> %r
+}
+
+define <8 x i64> @or_op1_constant_v8i64(i64* %p) nounwind {
+; SSE-LABEL: or_op1_constant_v8i64:
+; SSE:       # %bb.0:
+; SSE-NEXT:    movq (%rdi), %rax
+; SSE-NEXT:    orq $42, %rax
+; SSE-NEXT:    movq %rax, %xmm0
+; SSE-NEXT:    retq
+;
+; AVX-LABEL: or_op1_constant_v8i64:
+; AVX:       # %bb.0:
+; AVX-NEXT:    movq (%rdi), %rax
+; AVX-NEXT:    orq $42, %rax
+; AVX-NEXT:    vmovq %rax, %xmm0
+; AVX-NEXT:    retq
+  %x = load i64, i64* %p
+  %b = or i64 %x, 42
+  %r = insertelement <8 x i64> undef, i64 %b, i32 0
+  ret <8 x i64> %r
 }
 

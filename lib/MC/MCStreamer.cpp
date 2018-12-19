@@ -72,6 +72,18 @@ void MCTargetStreamer::emitValue(const MCExpr *Value) {
   Streamer.EmitRawText(OS.str());
 }
 
+void MCTargetStreamer::emitRawBytes(StringRef Data) {
+  const MCAsmInfo *MAI = Streamer.getContext().getAsmInfo();
+  const char *Directive = MAI->getData8bitsDirective();
+  for (const unsigned char C : Data.bytes()) {
+    SmallString<128> Str;
+    raw_svector_ostream OS(Str);
+
+    OS << Directive << (unsigned)C;
+    Streamer.EmitRawText(OS.str());
+  }
+}
+
 void MCTargetStreamer::emitAssignment(MCSymbol *Symbol, const MCExpr *Value) {}
 
 MCStreamer::MCStreamer(MCContext &Ctx)
@@ -347,10 +359,10 @@ void MCStreamer::EmitCFISections(bool EH, bool Debug) {
   assert(EH || Debug);
 }
 
-void MCStreamer::EmitCFIStartProc(bool IsSimple) {
+void MCStreamer::EmitCFIStartProc(bool IsSimple, SMLoc Loc) {
   if (hasUnfinishedDwarfFrameInfo())
-    getContext().reportError(
-        SMLoc(), "starting new .cfi frame before finishing the previous one");
+    return getContext().reportError(
+        Loc, "starting new .cfi frame before finishing the previous one");
 
   MCDwarfFrameInfo Frame;
   Frame.IsSimple = IsSimple;
@@ -613,6 +625,17 @@ void MCStreamer::EmitWinCFIEndProc(SMLoc Loc) {
 
   MCSymbol *Label = EmitCFILabel();
   CurFrame->End = Label;
+}
+
+void MCStreamer::EmitWinCFIFuncletOrFuncEnd(SMLoc Loc) {
+  WinEH::FrameInfo *CurFrame = EnsureValidWinFrameInfo(Loc);
+  if (!CurFrame)
+    return;
+  if (CurFrame->ChainedParent)
+    getContext().reportError(Loc, "Not all chained regions terminated!");
+
+  MCSymbol *Label = EmitCFILabel();
+  CurFrame->FuncletOrFuncEnd = Label;
 }
 
 void MCStreamer::EmitWinCFIStartChained(SMLoc Loc) {
@@ -1022,7 +1045,8 @@ MCSymbol *MCStreamer::endSection(MCSection *Section) {
   return Sym;
 }
 
-void MCStreamer::EmitVersionForTarget(const Triple &Target) {
+void MCStreamer::EmitVersionForTarget(const Triple &Target,
+                                      const VersionTuple &SDKVersion) {
   if (!Target.isOSBinFormatMachO() || !Target.isOSDarwin())
     return;
   // Do we even know the version?
@@ -1048,5 +1072,5 @@ void MCStreamer::EmitVersionForTarget(const Triple &Target) {
     Target.getiOSVersion(Major, Minor, Update);
   }
   if (Major != 0)
-    EmitVersionMin(VersionType, Major, Minor, Update);
+    EmitVersionMin(VersionType, Major, Minor, Update, SDKVersion);
 }

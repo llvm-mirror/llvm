@@ -1429,17 +1429,15 @@ bool PPCInstrInfo::PredicateInstruction(MachineInstr &MI,
                                       : (isPPC64 ? PPC::BDZLR8 : PPC::BDZLR)));
     } else if (Pred[0].getImm() == PPC::PRED_BIT_SET) {
       MI.setDesc(get(PPC::BCLR));
-      MachineInstrBuilder(*MI.getParent()->getParent(), MI)
-          .addReg(Pred[1].getReg());
+      MachineInstrBuilder(*MI.getParent()->getParent(), MI).add(Pred[1]);
     } else if (Pred[0].getImm() == PPC::PRED_BIT_UNSET) {
       MI.setDesc(get(PPC::BCLRn));
-      MachineInstrBuilder(*MI.getParent()->getParent(), MI)
-          .addReg(Pred[1].getReg());
+      MachineInstrBuilder(*MI.getParent()->getParent(), MI).add(Pred[1]);
     } else {
       MI.setDesc(get(PPC::BCCLR));
       MachineInstrBuilder(*MI.getParent()->getParent(), MI)
           .addImm(Pred[0].getImm())
-          .addReg(Pred[1].getReg());
+          .add(Pred[1]);
     }
 
     return true;
@@ -1454,7 +1452,7 @@ bool PPCInstrInfo::PredicateInstruction(MachineInstr &MI,
 
       MI.setDesc(get(PPC::BC));
       MachineInstrBuilder(*MI.getParent()->getParent(), MI)
-          .addReg(Pred[1].getReg())
+          .add(Pred[1])
           .addMBB(MBB);
     } else if (Pred[0].getImm() == PPC::PRED_BIT_UNSET) {
       MachineBasicBlock *MBB = MI.getOperand(0).getMBB();
@@ -1462,7 +1460,7 @@ bool PPCInstrInfo::PredicateInstruction(MachineInstr &MI,
 
       MI.setDesc(get(PPC::BCn));
       MachineInstrBuilder(*MI.getParent()->getParent(), MI)
-          .addReg(Pred[1].getReg())
+          .add(Pred[1])
           .addMBB(MBB);
     } else {
       MachineBasicBlock *MBB = MI.getOperand(0).getMBB();
@@ -1471,13 +1469,13 @@ bool PPCInstrInfo::PredicateInstruction(MachineInstr &MI,
       MI.setDesc(get(PPC::BCC));
       MachineInstrBuilder(*MI.getParent()->getParent(), MI)
           .addImm(Pred[0].getImm())
-          .addReg(Pred[1].getReg())
+          .add(Pred[1])
           .addMBB(MBB);
     }
 
     return true;
-  } else if (OpC == PPC::BCTR  || OpC == PPC::BCTR8 ||
-             OpC == PPC::BCTRL || OpC == PPC::BCTRL8) {
+  } else if (OpC == PPC::BCTR || OpC == PPC::BCTR8 || OpC == PPC::BCTRL ||
+             OpC == PPC::BCTRL8) {
     if (Pred[1].getReg() == PPC::CTR8 || Pred[1].getReg() == PPC::CTR)
       llvm_unreachable("Cannot predicate bctr[l] on the ctr register");
 
@@ -1487,14 +1485,12 @@ bool PPCInstrInfo::PredicateInstruction(MachineInstr &MI,
     if (Pred[0].getImm() == PPC::PRED_BIT_SET) {
       MI.setDesc(get(isPPC64 ? (setLR ? PPC::BCCTRL8 : PPC::BCCTR8)
                              : (setLR ? PPC::BCCTRL : PPC::BCCTR)));
-      MachineInstrBuilder(*MI.getParent()->getParent(), MI)
-          .addReg(Pred[1].getReg());
+      MachineInstrBuilder(*MI.getParent()->getParent(), MI).add(Pred[1]);
       return true;
     } else if (Pred[0].getImm() == PPC::PRED_BIT_UNSET) {
       MI.setDesc(get(isPPC64 ? (setLR ? PPC::BCCTRL8n : PPC::BCCTR8n)
                              : (setLR ? PPC::BCCTRLn : PPC::BCCTRn)));
-      MachineInstrBuilder(*MI.getParent()->getParent(), MI)
-          .addReg(Pred[1].getReg());
+      MachineInstrBuilder(*MI.getParent()->getParent(), MI).add(Pred[1]);
       return true;
     }
 
@@ -1502,7 +1498,7 @@ bool PPCInstrInfo::PredicateInstruction(MachineInstr &MI,
                            : (setLR ? PPC::BCCCTRL : PPC::BCCCTR)));
     MachineInstrBuilder(*MI.getParent()->getParent(), MI)
         .addImm(Pred[0].getImm())
-        .addReg(Pred[1].getReg());
+        .add(Pred[1]);
     return true;
   }
 
@@ -2319,7 +2315,7 @@ MachineInstr *PPCInstrInfo::getForwardingDefMI(
       Opc == PPC::RLDICL_32 || Opc == PPC::RLDICL_32_64 ||
       Opc == PPC::RLWINM || Opc == PPC::RLWINMo ||
       Opc == PPC::RLWINM8 || Opc == PPC::RLWINM8o;
-    if (!instrHasImmForm(MI, III) && !ConvertibleImmForm)
+    if (!instrHasImmForm(MI, III, true) && !ConvertibleImmForm)
       return nullptr;
 
     // Don't convert or %X, %Y, %Y since that's just a register move.
@@ -2421,7 +2417,7 @@ bool PPCInstrInfo::convertToImmediateForm(MachineInstr &MI,
     *KilledDef = DefMI;
 
   ImmInstrInfo III;
-  bool HasImmForm = instrHasImmForm(MI, III);
+  bool HasImmForm = instrHasImmForm(MI, III, PostRA);
   // If this is a reg+reg instruction that has a reg+imm form,
   // and one of the operands is produced by an add-immediate,
   // try to convert it.
@@ -2644,8 +2640,12 @@ bool PPCInstrInfo::convertToImmediateForm(MachineInstr &MI,
   return false;
 }
 
+static bool isVFReg(unsigned Reg) {
+  return PPC::VFRCRegClass.contains(Reg);
+}
+
 bool PPCInstrInfo::instrHasImmForm(const MachineInstr &MI,
-                                   ImmInstrInfo &III) const {
+                                   ImmInstrInfo &III, bool PostRA) const {
   unsigned Opc = MI.getOpcode();
   // The vast majority of the instructions would need their operand 2 replaced
   // with an immediate when switching to the reg+imm form. A marked exception
@@ -2946,13 +2946,20 @@ bool PPCInstrInfo::instrHasImmForm(const MachineInstr &MI,
     case PPC::STFDUX: III.ImmOpcode = PPC::STFDU; break;
     }
     break;
-  // Power9 only.
+  // Power9 and up only. For some of these, the X-Form version has access to all
+  // 64 VSR's whereas the D-Form only has access to the VR's. We replace those
+  // with pseudo-ops pre-ra and for post-ra, we check that the register loaded
+  // into or stored from is one of the VR registers.
   case PPC::LXVX:
   case PPC::LXSSPX:
   case PPC::LXSDX:
   case PPC::STXVX:
   case PPC::STXSSPX:
   case PPC::STXSDX:
+  case PPC::XFLOADf32:
+  case PPC::XFLOADf64:
+  case PPC::XFSTOREf32:
+  case PPC::XFSTOREf64:
     if (!Subtarget.hasP9Vector())
       return false;
     III.SignedImm = true;
@@ -2962,6 +2969,7 @@ bool PPCInstrInfo::instrHasImmForm(const MachineInstr &MI,
     III.IsSummingOperands = true;
     III.ImmOpNo = 1;
     III.OpNoForForwarding = 2;
+    III.ImmMustBeMultipleOf = 4;
     switch(Opc) {
     default: llvm_unreachable("Unknown opcode");
     case PPC::LXVX:
@@ -2969,24 +2977,64 @@ bool PPCInstrInfo::instrHasImmForm(const MachineInstr &MI,
       III.ImmMustBeMultipleOf = 16;
       break;
     case PPC::LXSSPX:
-      III.ImmOpcode = PPC::LXSSP;
-      III.ImmMustBeMultipleOf = 4;
+      if (PostRA) {
+        if (isVFReg(MI.getOperand(0).getReg()))
+          III.ImmOpcode = PPC::LXSSP;
+        else {
+          III.ImmOpcode = PPC::LFS;
+          III.ImmMustBeMultipleOf = 1;
+        }
+        break;
+      }
+      LLVM_FALLTHROUGH;
+    case PPC::XFLOADf32:
+      III.ImmOpcode = PPC::DFLOADf32;
       break;
     case PPC::LXSDX:
-      III.ImmOpcode = PPC::LXSD;
-      III.ImmMustBeMultipleOf = 4;
+      if (PostRA) {
+        if (isVFReg(MI.getOperand(0).getReg()))
+          III.ImmOpcode = PPC::LXSD;
+        else {
+          III.ImmOpcode = PPC::LFD;
+          III.ImmMustBeMultipleOf = 1;
+        }
+        break;
+      }
+      LLVM_FALLTHROUGH;
+    case PPC::XFLOADf64:
+      III.ImmOpcode = PPC::DFLOADf64;
       break;
     case PPC::STXVX:
       III.ImmOpcode = PPC::STXV;
       III.ImmMustBeMultipleOf = 16;
       break;
     case PPC::STXSSPX:
-      III.ImmOpcode = PPC::STXSSP;
-      III.ImmMustBeMultipleOf = 4;
+      if (PostRA) {
+        if (isVFReg(MI.getOperand(0).getReg()))
+          III.ImmOpcode = PPC::STXSSP;
+        else {
+          III.ImmOpcode = PPC::STFS;
+          III.ImmMustBeMultipleOf = 1;
+        }
+        break;
+      }
+      LLVM_FALLTHROUGH;
+    case PPC::XFSTOREf32:
+      III.ImmOpcode = PPC::DFSTOREf32;
       break;
     case PPC::STXSDX:
-      III.ImmOpcode = PPC::STXSD;
-      III.ImmMustBeMultipleOf = 4;
+      if (PostRA) {
+        if (isVFReg(MI.getOperand(0).getReg()))
+          III.ImmOpcode = PPC::STXSD;
+        else {
+          III.ImmOpcode = PPC::STFD;
+          III.ImmMustBeMultipleOf = 1;
+        }
+        break;
+      }
+      LLVM_FALLTHROUGH;
+    case PPC::XFSTOREf64:
+      III.ImmOpcode = PPC::DFSTOREf64;
       break;
     }
     break;
@@ -3148,6 +3196,14 @@ bool PPCInstrInfo::isImmElgibleForForwarding(const MachineOperand &ImmMO,
     // Check if the instruction met the requirement.
     if (III.ImmMustBeMultipleOf > 4 ||
        III.TruncateImmTo || III.ImmWidth != 16)
+      return false;
+
+    // Going from XForm to DForm loads means that the displacement needs to be
+    // not just an immediate but also a multiple of 4, or 16 depending on the
+    // load. A DForm load cannot be represented if it is a multiple of say 2.
+    // XForm loads do not have this restriction.
+    if (ImmMO.isGlobal() &&
+        ImmMO.getGlobal()->getAlignment() < III.ImmMustBeMultipleOf)
       return false;
 
     return true;

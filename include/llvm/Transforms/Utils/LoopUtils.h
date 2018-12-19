@@ -109,7 +109,7 @@ bool formLCSSARecursively(Loop &L, DominatorTree &DT, LoopInfo *LI,
 /// arguments. Diagnostics is emitted via \p ORE. It returns changed status.
 bool sinkRegion(DomTreeNode *, AliasAnalysis *, LoopInfo *, DominatorTree *,
                 TargetLibraryInfo *, TargetTransformInfo *, Loop *,
-                AliasSetTracker *, LoopSafetyInfo *,
+                AliasSetTracker *, ICFLoopSafetyInfo *,
                 OptimizationRemarkEmitter *ORE);
 
 /// Walk the specified region of the CFG (defined by all blocks
@@ -122,7 +122,7 @@ bool sinkRegion(DomTreeNode *, AliasAnalysis *, LoopInfo *, DominatorTree *,
 /// ORE. It returns changed status.
 bool hoistRegion(DomTreeNode *, AliasAnalysis *, LoopInfo *, DominatorTree *,
                  TargetLibraryInfo *, Loop *, AliasSetTracker *,
-                 LoopSafetyInfo *, OptimizationRemarkEmitter *ORE);
+                 ICFLoopSafetyInfo *, OptimizationRemarkEmitter *ORE);
 
 /// This function deletes dead loops. The caller of this function needs to
 /// guarantee that the loop is infact dead.
@@ -151,7 +151,8 @@ bool promoteLoopAccessesToScalars(const SmallSetVector<Value *, 8> &,
                                   SmallVectorImpl<Instruction *> &,
                                   PredIteratorCache &, LoopInfo *,
                                   DominatorTree *, const TargetLibraryInfo *,
-                                  Loop *, AliasSetTracker *, LoopSafetyInfo *,
+                                  Loop *, AliasSetTracker *,
+                                  ICFLoopSafetyInfo *,
                                   OptimizationRemarkEmitter *);
 
 /// Does a BFS from a given node to all of its children inside a given loop.
@@ -169,6 +170,77 @@ SmallVector<Instruction *, 8> findDefsUsedOutsideOfLoop(Loop *L);
 /// Optional's not-a-value.
 Optional<const MDOperand *> findStringMetadataForLoop(Loop *TheLoop,
                                                       StringRef Name);
+
+/// Find named metadata for a loop with an integer value.
+llvm::Optional<int> getOptionalIntLoopAttribute(Loop *TheLoop, StringRef Name);
+
+/// Create a new loop identifier for a loop created from a loop transformation.
+///
+/// @param OrigLoopID The loop ID of the loop before the transformation.
+/// @param FollowupAttrs List of attribute names that contain attributes to be
+///                      added to the new loop ID.
+/// @param InheritOptionsAttrsPrefix Selects which attributes should be inherited
+///                                  from the original loop. The following values
+///                                  are considered:
+///        nullptr   : Inherit all attributes from @p OrigLoopID.
+///        ""        : Do not inherit any attribute from @p OrigLoopID; only use
+///                    those specified by a followup attribute.
+///        "<prefix>": Inherit all attributes except those which start with
+///                    <prefix>; commonly used to remove metadata for the
+///                    applied transformation.
+/// @param AlwaysNew If true, do not try to reuse OrigLoopID and never return
+///                  None.
+///
+/// @return The loop ID for the after-transformation loop. The following values
+///         can be returned:
+///         None         : No followup attribute was found; it is up to the
+///                        transformation to choose attributes that make sense.
+///         @p OrigLoopID: The original identifier can be reused.
+///         nullptr      : The new loop has no attributes.
+///         MDNode*      : A new unique loop identifier.
+Optional<MDNode *>
+makeFollowupLoopID(MDNode *OrigLoopID, ArrayRef<StringRef> FollowupAttrs,
+                   const char *InheritOptionsAttrsPrefix = "",
+                   bool AlwaysNew = false);
+
+/// Look for the loop attribute that disables all transformation heuristic.
+bool hasDisableAllTransformsHint(const Loop *L);
+
+/// The mode sets how eager a transformation should be applied.
+enum TransformationMode {
+  /// The pass can use heuristics to determine whether a transformation should
+  /// be applied.
+  TM_Unspecified,
+
+  /// The transformation should be applied without considering a cost model.
+  TM_Enable,
+
+  /// The transformation should not be applied.
+  TM_Disable,
+
+  /// Force is a flag and should not be used alone.
+  TM_Force = 0x04,
+
+  /// The transformation was directed by the user, e.g. by a #pragma in
+  /// the source code. If the transformation could not be applied, a
+  /// warning should be emitted.
+  TM_ForcedByUser = TM_Enable | TM_Force,
+
+  /// The transformation must not be applied. For instance, `#pragma clang loop
+  /// unroll(disable)` explicitly forbids any unrolling to take place. Unlike
+  /// general loop metadata, it must not be dropped. Most passes should not
+  /// behave differently under TM_Disable and TM_SuppressedByUser.
+  TM_SuppressedByUser = TM_Disable | TM_Force
+};
+
+/// @{
+/// Get the mode for LLVM's supported loop transformations.
+TransformationMode hasUnrollTransformation(Loop *L);
+TransformationMode hasUnrollAndJamTransformation(Loop *L);
+TransformationMode hasVectorizeTransformation(Loop *L);
+TransformationMode hasDistributeTransformation(Loop *L);
+TransformationMode hasLICMVersioningTransformation(Loop *L);
+/// @}
 
 /// Set input string into loop metadata by keeping other values intact.
 void addStringMetadataToLoop(Loop *TheLoop, const char *MDString,

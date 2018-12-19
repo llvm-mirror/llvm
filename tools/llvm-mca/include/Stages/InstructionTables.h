@@ -18,25 +18,28 @@
 #define LLVM_TOOLS_LLVM_MCA_INSTRUCTIONTABLES_H
 
 #include "HardwareUnits/Scheduler.h"
-#include "InstrBuilder.h"
 #include "Stages/Stage.h"
+#include "Support.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/MC/MCSchedule.h"
 
+namespace llvm {
 namespace mca {
 
 class InstructionTables final : public Stage {
-  const llvm::MCSchedModel &SM;
-  InstrBuilder &IB;
-  llvm::SmallVector<std::pair<ResourceRef, ResourceCycles>, 4> UsedResources;
+  const MCSchedModel &SM;
+  SmallVector<std::pair<ResourceRef, ResourceCycles>, 4> UsedResources;
+  SmallVector<uint64_t, 8> Masks;
 
 public:
-  InstructionTables(const llvm::MCSchedModel &Model, InstrBuilder &Builder)
-      : Stage(), SM(Model), IB(Builder) {}
+  InstructionTables(const MCSchedModel &Model) : Stage(), SM(Model) {
+    computeProcResourceMasks(Model, Masks);
+  }
 
   bool hasWorkToComplete() const override { return false; }
-  llvm::Error execute(InstRef &IR) override;
+  Error execute(InstRef &IR) override;
 };
 } // namespace mca
+} // namespace llvm
 
 #endif

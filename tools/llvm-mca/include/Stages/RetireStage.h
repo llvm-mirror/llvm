@@ -21,6 +21,7 @@
 #include "HardwareUnits/RetireControlUnit.h"
 #include "Stages/Stage.h"
 
+namespace llvm {
 namespace mca {
 
 class RetireStage final : public Stage {
@@ -36,11 +37,12 @@ public:
       : Stage(), RCU(R), PRF(F) {}
 
   bool hasWorkToComplete() const override { return !RCU.isEmpty(); }
-  llvm::Error cycleStart() override;
-  llvm::Error execute(InstRef &IR) override;
-  void notifyInstructionRetired(const InstRef &IR);
+  Error cycleStart() override;
+  Error execute(InstRef &IR) override;
+  void notifyInstructionRetired(const InstRef &IR) const;
 };
 
 } // namespace mca
+} // namespace llvm
 
 #endif // LLVM_TOOLS_LLVM_MCA_RETIRE_STAGE_H

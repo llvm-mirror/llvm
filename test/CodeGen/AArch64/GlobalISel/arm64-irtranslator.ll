@@ -1396,6 +1396,16 @@ define float @test_log2_intrin(float %a) {
   ret float %res
 }
 
+declare float @llvm.log10.f32(float)
+define float @test_log10_intrin(float %a) {
+; CHECK-LABEL: name: test_log10_intrin
+; CHECK: [[A:%[0-9]+]]:_(s32) = COPY $s0
+; CHECK: [[RES:%[0-9]+]]:_(s32) = G_FLOG10 [[A]]
+; CHECK: $s0 = COPY [[RES]]
+  %res = call float @llvm.log10.f32(float %a)
+  ret float %res
+}
+
 declare float @llvm.fabs.f32(float)
 define float @test_fabs_intrin(float %a) {
 ; CHECK-LABEL: name: test_fabs_intrin
@@ -1530,9 +1540,20 @@ define i32 @test_extractelement(<2 x i32> %vec, i32 %idx) {
 ; CHECK-LABEL: name: test_extractelement
 ; CHECK: [[VEC:%[0-9]+]]:_(<2 x s32>) = COPY $d0
 ; CHECK: [[IDX:%[0-9]+]]:_(s32) = COPY $w0
-; CHECK: [[RES:%[0-9]+]]:_(s32) = G_EXTRACT_VECTOR_ELT [[VEC]](<2 x s32>), [[IDX]](s32)
+; CHECK: [[IDXEXT:%[0-9]+]]:_(s64) = G_SEXT [[IDX]]
+; CHECK: [[RES:%[0-9]+]]:_(s32) = G_EXTRACT_VECTOR_ELT [[VEC]](<2 x s32>), [[IDXEXT]](s64)
 ; CHECK: $w0 = COPY [[RES]](s32)
   %res = extractelement <2 x i32> %vec, i32 %idx
+  ret i32 %res
+}
+
+define i32 @test_extractelement_const_idx(<2 x i32> %vec) {
+; CHECK-LABEL: name: test_extractelement
+; CHECK: [[VEC:%[0-9]+]]:_(<2 x s32>) = COPY $d0
+; CHECK: [[IDX:%[0-9]+]]:_(s64) = G_CONSTANT i64 1
+; CHECK: [[RES:%[0-9]+]]:_(s32) = G_EXTRACT_VECTOR_ELT [[VEC]](<2 x s32>), [[IDX]](s64)
+; CHECK: $w0 = COPY [[RES]](s32)
+  %res = extractelement <2 x i32> %vec, i32 1
   ret i32 %res
 }
 
@@ -1550,7 +1571,7 @@ define i32 @test_singleelementvector(i32 %elt){
 define <2 x i32> @test_constantaggzerovector_v2i32() {
 ; CHECK-LABEL: name: test_constantaggzerovector_v2i32
 ; CHECK: [[ZERO:%[0-9]+]]:_(s32) = G_CONSTANT i32 0
-; CHECK: [[VEC:%[0-9]+]]:_(<2 x s32>) = G_MERGE_VALUES [[ZERO]](s32), [[ZERO]](s32)
+; CHECK: [[VEC:%[0-9]+]]:_(<2 x s32>) = G_BUILD_VECTOR [[ZERO]](s32), [[ZERO]](s32)
 ; CHECK: $d0 = COPY [[VEC]](<2 x s32>)
   ret <2 x i32> zeroinitializer
 }
@@ -1558,7 +1579,7 @@ define <2 x i32> @test_constantaggzerovector_v2i32() {
 define <2 x float> @test_constantaggzerovector_v2f32() {
 ; CHECK-LABEL: name: test_constantaggzerovector_v2f32
 ; CHECK: [[ZERO:%[0-9]+]]:_(s32) = G_FCONSTANT float 0.000000e+00
-; CHECK: [[VEC:%[0-9]+]]:_(<2 x s32>) = G_MERGE_VALUES [[ZERO]](s32), [[ZERO]](s32)
+; CHECK: [[VEC:%[0-9]+]]:_(<2 x s32>) = G_BUILD_VECTOR [[ZERO]](s32), [[ZERO]](s32)
 ; CHECK: $d0 = COPY [[VEC]](<2 x s32>)
   ret <2 x float> zeroinitializer
 }
@@ -1566,7 +1587,7 @@ define <2 x float> @test_constantaggzerovector_v2f32() {
 define i32 @test_constantaggzerovector_v3i32() {
 ; CHECK-LABEL: name: test_constantaggzerovector_v3i32
 ; CHECK: [[ZERO:%[0-9]+]]:_(s32) = G_CONSTANT i32 0
-; CHECK: [[VEC:%[0-9]+]]:_(<3 x s32>) = G_MERGE_VALUES [[ZERO]](s32), [[ZERO]](s32), [[ZERO]](s32)
+; CHECK: [[VEC:%[0-9]+]]:_(<3 x s32>) = G_BUILD_VECTOR [[ZERO]](s32), [[ZERO]](s32), [[ZERO]](s32)
 ; CHECK: G_EXTRACT_VECTOR_ELT [[VEC]](<3 x s32>)
   %elt = extractelement <3 x i32> zeroinitializer, i32 1
   ret i32 %elt
@@ -1576,7 +1597,7 @@ define <2 x i32> @test_constantdatavector_v2i32() {
 ; CHECK-LABEL: name: test_constantdatavector_v2i32
 ; CHECK: [[C1:%[0-9]+]]:_(s32) = G_CONSTANT i32 1
 ; CHECK: [[C2:%[0-9]+]]:_(s32) = G_CONSTANT i32 2
-; CHECK: [[VEC:%[0-9]+]]:_(<2 x s32>) = G_MERGE_VALUES [[C1]](s32), [[C2]](s32)
+; CHECK: [[VEC:%[0-9]+]]:_(<2 x s32>) = G_BUILD_VECTOR [[C1]](s32), [[C2]](s32)
 ; CHECK: $d0 = COPY [[VEC]](<2 x s32>)
   ret <2 x i32> <i32 1, i32 2>
 }
@@ -1586,7 +1607,7 @@ define i32 @test_constantdatavector_v3i32() {
 ; CHECK: [[C1:%[0-9]+]]:_(s32) = G_CONSTANT i32 1
 ; CHECK: [[C2:%[0-9]+]]:_(s32) = G_CONSTANT i32 2
 ; CHECK: [[C3:%[0-9]+]]:_(s32) = G_CONSTANT i32 3
-; CHECK: [[VEC:%[0-9]+]]:_(<3 x s32>) = G_MERGE_VALUES [[C1]](s32), [[C2]](s32), [[C3]](s32)
+; CHECK: [[VEC:%[0-9]+]]:_(<3 x s32>) = G_BUILD_VECTOR [[C1]](s32), [[C2]](s32), [[C3]](s32)
 ; CHECK: G_EXTRACT_VECTOR_ELT [[VEC]](<3 x s32>)
   %elt = extractelement <3 x i32> <i32 1, i32 2, i32 3>, i32 1
   ret i32 %elt
@@ -1598,7 +1619,7 @@ define <4 x i32> @test_constantdatavector_v4i32() {
 ; CHECK: [[C2:%[0-9]+]]:_(s32) = G_CONSTANT i32 2
 ; CHECK: [[C3:%[0-9]+]]:_(s32) = G_CONSTANT i32 3
 ; CHECK: [[C4:%[0-9]+]]:_(s32) = G_CONSTANT i32 4
-; CHECK: [[VEC:%[0-9]+]]:_(<4 x s32>) = G_MERGE_VALUES [[C1]](s32), [[C2]](s32), [[C3]](s32), [[C4]](s32)
+; CHECK: [[VEC:%[0-9]+]]:_(<4 x s32>) = G_BUILD_VECTOR [[C1]](s32), [[C2]](s32), [[C3]](s32), [[C4]](s32)
 ; CHECK: $q0 = COPY [[VEC]](<4 x s32>)
   ret <4 x i32> <i32 1, i32 2, i32 3, i32 4>
 }
@@ -1607,7 +1628,7 @@ define <2 x double> @test_constantdatavector_v2f64() {
 ; CHECK-LABEL: name: test_constantdatavector_v2f64
 ; CHECK: [[FC1:%[0-9]+]]:_(s64) = G_FCONSTANT double 1.000000e+00
 ; CHECK: [[FC2:%[0-9]+]]:_(s64) = G_FCONSTANT double 2.000000e+00
-; CHECK: [[VEC:%[0-9]+]]:_(<2 x s64>) = G_MERGE_VALUES [[FC1]](s64), [[FC2]](s64)
+; CHECK: [[VEC:%[0-9]+]]:_(<2 x s64>) = G_BUILD_VECTOR [[FC1]](s64), [[FC2]](s64)
 ; CHECK: $q0 = COPY [[VEC]](<2 x s64>)
   ret <2 x double> <double 1.0, double 2.0>
 }
@@ -1651,7 +1672,7 @@ define <2 x i32> @test_shufflevector_s32_v2s32(i32 %arg) {
 ; CHECK: [[ARG:%[0-9]+]]:_(s32) = COPY $w0
 ; CHECK-DAG: [[UNDEF:%[0-9]+]]:_(s32) = G_IMPLICIT_DEF
 ; CHECK-DAG: [[C0:%[0-9]+]]:_(s32) = G_CONSTANT i32 0
-; CHECK-DAG: [[MASK:%[0-9]+]]:_(<2 x s32>) = G_MERGE_VALUES [[C0]](s32), [[C0]](s32)
+; CHECK-DAG: [[MASK:%[0-9]+]]:_(<2 x s32>) = G_BUILD_VECTOR [[C0]](s32), [[C0]](s32)
 ; CHECK: [[VEC:%[0-9]+]]:_(<2 x s32>) = G_SHUFFLE_VECTOR [[ARG]](s32), [[UNDEF]], [[MASK]](<2 x s32>)
 ; CHECK: $d0 = COPY [[VEC]](<2 x s32>)
   %vec = insertelement <1 x i32> undef, i32 %arg, i32 0
@@ -1677,7 +1698,7 @@ define <2 x i32> @test_shufflevector_v2s32_v2s32(<2 x i32> %arg) {
 ; CHECK-DAG: [[UNDEF:%[0-9]+]]:_(<2 x s32>) = G_IMPLICIT_DEF
 ; CHECK-DAG: [[C1:%[0-9]+]]:_(s32) = G_CONSTANT i32 1
 ; CHECK-DAG: [[C0:%[0-9]+]]:_(s32) = G_CONSTANT i32 0
-; CHECK-DAG: [[MASK:%[0-9]+]]:_(<2 x s32>) = G_MERGE_VALUES [[C1]](s32), [[C0]](s32)
+; CHECK-DAG: [[MASK:%[0-9]+]]:_(<2 x s32>) = G_BUILD_VECTOR [[C1]](s32), [[C0]](s32)
 ; CHECK: [[VEC:%[0-9]+]]:_(<2 x s32>) = G_SHUFFLE_VECTOR [[ARG]](<2 x s32>), [[UNDEF]], [[MASK]](<2 x s32>)
 ; CHECK: $d0 = COPY [[VEC]](<2 x s32>)
   %res = shufflevector <2 x i32> %arg, <2 x i32> undef, <2 x i32> <i32 1, i32 0>
@@ -1690,7 +1711,7 @@ define i32 @test_shufflevector_v2s32_v3s32(<2 x i32> %arg) {
 ; CHECK-DAG: [[UNDEF:%[0-9]+]]:_(<2 x s32>) = G_IMPLICIT_DEF
 ; CHECK-DAG: [[C1:%[0-9]+]]:_(s32) = G_CONSTANT i32 1
 ; CHECK-DAG: [[C0:%[0-9]+]]:_(s32) = G_CONSTANT i32 0
-; CHECK-DAG: [[MASK:%[0-9]+]]:_(<3 x s32>) = G_MERGE_VALUES [[C1]](s32), [[C0]](s32), [[C1]](s32)
+; CHECK-DAG: [[MASK:%[0-9]+]]:_(<3 x s32>) = G_BUILD_VECTOR [[C1]](s32), [[C0]](s32), [[C1]](s32)
 ; CHECK: [[VEC:%[0-9]+]]:_(<3 x s32>) = G_SHUFFLE_VECTOR [[ARG]](<2 x s32>), [[UNDEF]], [[MASK]](<3 x s32>)
 ; CHECK: G_EXTRACT_VECTOR_ELT [[VEC]](<3 x s32>)
   %vec = shufflevector <2 x i32> %arg, <2 x i32> undef, <3 x i32> <i32 1, i32 0, i32 1>
@@ -1706,7 +1727,7 @@ define <4 x i32> @test_shufflevector_v2s32_v4s32(<2 x i32> %arg1, <2 x i32> %arg
 ; CHECK: [[C1:%[0-9]+]]:_(s32) = G_CONSTANT i32 1
 ; CHECK: [[C2:%[0-9]+]]:_(s32) = G_CONSTANT i32 2
 ; CHECK: [[C3:%[0-9]+]]:_(s32) = G_CONSTANT i32 3
-; CHECK: [[MASK:%[0-9]+]]:_(<4 x s32>) = G_MERGE_VALUES [[C0]](s32), [[C1]](s32), [[C2]](s32), [[C3]](s32)
+; CHECK: [[MASK:%[0-9]+]]:_(<4 x s32>) = G_BUILD_VECTOR [[C0]](s32), [[C1]](s32), [[C2]](s32), [[C3]](s32)
 ; CHECK: [[VEC:%[0-9]+]]:_(<4 x s32>) = G_SHUFFLE_VECTOR [[ARG1]](<2 x s32>), [[ARG2]], [[MASK]](<4 x s32>)
 ; CHECK: $q0 = COPY [[VEC]](<4 x s32>)
   %res = shufflevector <2 x i32> %arg1, <2 x i32> %arg2, <4 x i32> <i32 0, i32 1, i32 2, i32 3>
@@ -1719,7 +1740,7 @@ define <2 x i32> @test_shufflevector_v4s32_v2s32(<4 x i32> %arg) {
 ; CHECK-DAG: [[UNDEF:%[0-9]+]]:_(<4 x s32>) = G_IMPLICIT_DEF
 ; CHECK-DAG: [[C1:%[0-9]+]]:_(s32) = G_CONSTANT i32 1
 ; CHECK-DAG: [[C3:%[0-9]+]]:_(s32) = G_CONSTANT i32 3
-; CHECK-DAG: [[MASK:%[0-9]+]]:_(<2 x s32>) = G_MERGE_VALUES [[C1]](s32), [[C3]](s32)
+; CHECK-DAG: [[MASK:%[0-9]+]]:_(<2 x s32>) = G_BUILD_VECTOR [[C1]](s32), [[C3]](s32)
 ; CHECK: [[VEC:%[0-9]+]]:_(<2 x s32>) = G_SHUFFLE_VECTOR [[ARG]](<4 x s32>), [[UNDEF]], [[MASK]](<2 x s32>)
 ; CHECK: $d0 = COPY [[VEC]](<2 x s32>)
   %res = shufflevector <4 x i32> %arg, <4 x i32> undef, <2 x i32> <i32 1, i32 3>
@@ -1747,7 +1768,7 @@ define <16 x i8> @test_shufflevector_v8s8_v16s8(<8 x i8> %arg1, <8 x i8> %arg2) 
 ; CHECK: [[C14:%[0-9]+]]:_(s32) = G_CONSTANT i32 14
 ; CHECK: [[C7:%[0-9]+]]:_(s32) = G_CONSTANT i32 7
 ; CHECK: [[C15:%[0-9]+]]:_(s32) = G_CONSTANT i32 15
-; CHECK: [[MASK:%[0-9]+]]:_(<16 x s32>) = G_MERGE_VALUES [[C0]](s32), [[C8]](s32), [[C1]](s32), [[C9]](s32), [[C2]](s32), [[C10]](s32), [[C3]](s32), [[C11]](s32), [[C4]](s32), [[C12]](s32), [[C5]](s32), [[C13]](s32), [[C6]](s32), [[C14]](s32), [[C7]](s32), [[C15]](s32)
+; CHECK: [[MASK:%[0-9]+]]:_(<16 x s32>) = G_BUILD_VECTOR [[C0]](s32), [[C8]](s32), [[C1]](s32), [[C9]](s32), [[C2]](s32), [[C10]](s32), [[C3]](s32), [[C11]](s32), [[C4]](s32), [[C12]](s32), [[C5]](s32), [[C13]](s32), [[C6]](s32), [[C14]](s32), [[C7]](s32), [[C15]](s32)
 ; CHECK: [[VEC:%[0-9]+]]:_(<16 x s8>) = G_SHUFFLE_VECTOR [[ARG1]](<8 x s8>), [[ARG2]], [[MASK]](<16 x s32>)
 ; CHECK: $q0 = COPY [[VEC]](<16 x s8>)
   %res = shufflevector <8 x i8> %arg1, <8 x i8> %arg2, <16 x i32> <i32 0, i32 8, i32 1, i32 9, i32 2, i32 10, i32 3, i32 11, i32 4, i32 12, i32 5, i32 13, i32 6, i32 14, i32 7, i32 15>
@@ -1757,7 +1778,7 @@ define <16 x i8> @test_shufflevector_v8s8_v16s8(<8 x i8> %arg1, <8 x i8> %arg2) 
 ; CHECK-LABEL: test_constant_vector
 ; CHECK: [[UNDEF:%[0-9]+]]:_(s16) = G_IMPLICIT_DEF
 ; CHECK: [[F:%[0-9]+]]:_(s16) = G_FCONSTANT half 0xH3C00
-; CHECK: [[M:%[0-9]+]]:_(<4 x s16>) = G_MERGE_VALUES [[UNDEF]](s16), [[UNDEF]](s16), [[UNDEF]](s16), [[F]](s16)
+; CHECK: [[M:%[0-9]+]]:_(<4 x s16>) = G_BUILD_VECTOR [[UNDEF]](s16), [[UNDEF]](s16), [[UNDEF]](s16), [[F]](s16)
 ; CHECK: $d0 = COPY [[M]](<4 x s16>)
 define <4 x half> @test_constant_vector() {
   ret <4 x half> <half undef, half undef, half undef, half 0xH3C00>
@@ -2205,5 +2226,19 @@ define void @test_blockaddress() {
   store i8* blockaddress(@test_blockaddress, %block), i8** @addr
   indirectbr i8* blockaddress(@test_blockaddress, %block), [label %block]
 block:
+  ret void
+}
+
+%t = type { i32 }
+declare {}* @llvm.invariant.start.p0i8(i64, i8* nocapture) readonly nounwind
+declare void @llvm.invariant.end.p0i8({}*, i64, i8* nocapture) nounwind
+define void @test_invariant_intrin() {
+; CHECK-LABEL: name: test_invariant_intrin
+; CHECK: %{{[0-9]+}}:_(s64) = G_IMPLICIT_DEF
+; CHECK-NEXT: RET_ReallyLR
+  %x = alloca %t
+  %y = bitcast %t* %x to i8*
+  %inv = call {}* @llvm.invariant.start.p0i8(i64 8, i8* %y)
+  call void @llvm.invariant.end.p0i8({}* %inv, i64 8, i8* %y)
   ret void
 }

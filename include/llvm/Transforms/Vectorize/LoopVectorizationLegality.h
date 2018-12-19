@@ -113,7 +113,12 @@ public:
   unsigned getWidth() const { return Width.Value; }
   unsigned getInterleave() const { return Interleave.Value; }
   unsigned getIsVectorized() const { return IsVectorized.Value; }
-  enum ForceKind getForce() const { return (ForceKind)Force.Value; }
+  enum ForceKind getForce() const {
+    if ((ForceKind)Force.Value == FK_Undefined &&
+        hasDisableAllTransformsHint(TheLoop))
+      return FK_Disabled;
+    return (ForceKind)Force.Value;
+  }
 
   /// If hints are provided that force vectorization, use the AlwaysPrint
   /// pass name to force the frontend to print the diagnostic.
@@ -240,6 +245,10 @@ public:
   /// (should be functional for inner loop vectorization) based on VPlan.
   /// If false, good old LV code.
   bool canVectorize(bool UseVPlanNativePath);
+
+  /// Return true if we can vectorize this loop while folding its tail by
+  /// masking.
+  bool canFoldTailByMasking();
 
   /// Returns the primary induction variable.
   PHINode *getPrimaryInduction() { return PrimaryInduction; }

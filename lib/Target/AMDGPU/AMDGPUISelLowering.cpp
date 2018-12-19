@@ -552,6 +552,8 @@ static bool fnegFoldsIntoOp(unsigned Opc) {
   case ISD::FMAD:
   case ISD::FMINNUM:
   case ISD::FMAXNUM:
+  case ISD::FMINNUM_IEEE:
+  case ISD::FMAXNUM_IEEE:
   case ISD::FSIN:
   case ISD::FTRUNC:
   case ISD::FRINT:
@@ -653,8 +655,11 @@ bool AMDGPUTargetLowering::ShouldShrinkFPConstant(EVT VT) const {
 }
 
 bool AMDGPUTargetLowering::shouldReduceLoadWidth(SDNode *N,
-                                                 ISD::LoadExtType,
+                                                 ISD::LoadExtType ExtTy,
                                                  EVT NewVT) const {
+  // TODO: This may be worth removing. Check regression tests for diffs.
+  if (!TargetLoweringBase::shouldReduceLoadWidth(N, ExtTy, NewVT))
+    return false;
 
   unsigned NewSize = NewVT.getStoreSizeInBits();
 
@@ -664,6 +669,18 @@ bool AMDGPUTargetLowering::shouldReduceLoadWidth(SDNode *N,
 
   EVT OldVT = N->getValueType(0);
   unsigned OldSize = OldVT.getStoreSizeInBits();
+
+  MemSDNode *MN = cast<MemSDNode>(N);
+  unsigned AS = MN->getAddressSpace();
+  // Do not shrink an aligned scalar load to sub-dword.
+  // Scalar engine cannot do sub-dword loads.
+  if (OldSize >= 32 && NewSize < 32 && MN->getAlignment() >= 4 &&
+      (AS == AMDGPUAS::CONSTANT_ADDRESS ||
+       AS == AMDGPUAS::CONSTANT_ADDRESS_32BIT ||
+       (isa<LoadSDNode>(N) &&
+        AS == AMDGPUAS::GLOBAL_ADDRESS && MN->isInvariant())) &&
+      AMDGPUInstrInfo::isUniformMMO(MN->getMemOperand()))
+    return false;
 
   // Don't produce extloads from sub 32-bit types. SI doesn't have scalar
   // extloads, so doing one requires using a buffer_load. In cases where we
@@ -3512,6 +3529,10 @@ static unsigned inverseMinMax(unsigned Opc) {
     return ISD::FMINNUM;
   case ISD::FMINNUM:
     return ISD::FMAXNUM;
+  case ISD::FMAXNUM_IEEE:
+    return ISD::FMINNUM_IEEE;
+  case ISD::FMINNUM_IEEE:
+    return ISD::FMAXNUM_IEEE;
   case AMDGPUISD::FMAX_LEGACY:
     return AMDGPUISD::FMIN_LEGACY;
   case AMDGPUISD::FMIN_LEGACY:
@@ -3617,6 +3638,8 @@ SDValue AMDGPUTargetLowering::performFNegCombine(SDNode *N,
   }
   case ISD::FMAXNUM:
   case ISD::FMINNUM:
+  case ISD::FMAXNUM_IEEE:
+  case ISD::FMINNUM_IEEE:
   case AMDGPUISD::FMAX_LEGACY:
   case AMDGPUISD::FMIN_LEGACY: {
     // fneg (fmaxnum x, y) -> fminnum (fneg x), (fneg y)
@@ -3797,9 +3820,10 @@ SDValue AMDGPUTargetLowering::PerformDAGCombine(SDNode *N,
       if (Src.getValueType() == MVT::i64) {
         SDLoc SL(N);
         uint64_t CVal = C->getZExtValue();
-        return DAG.getNode(ISD::BUILD_VECTOR, SL, DestVT,
-                           DAG.getConstant(Lo_32(CVal), SL, MVT::i32),
-                           DAG.getConstant(Hi_32(CVal), SL, MVT::i32));
+        SDValue BV = DAG.getNode(ISD::BUILD_VECTOR, SL, MVT::v2i32,
+                                 DAG.getConstant(Lo_32(CVal), SL, MVT::i32),
+                                 DAG.getConstant(Hi_32(CVal), SL, MVT::i32));
+        return DAG.getNode(ISD::BITCAST, SL, DestVT, BV);
       }
     }
 
@@ -4476,4 +4500,11 @@ bool AMDGPUTargetLowering::isKnownNeverNaNForTargetNode(SDValue Op,
   default:
     return false;
   }
+}
+
+TargetLowering::AtomicExpansionKind
+AMDGPUTargetLowering::shouldExpandAtomicRMWInIR(AtomicRMWInst *RMW) const {
+  if (RMW->getOperation() == AtomicRMWInst::Nand)
+    return AtomicExpansionKind::CmpXChg;
+  return AtomicExpansionKind::None;
 }

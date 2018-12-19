@@ -17,11 +17,10 @@
 #include "HWEventListener.h"
 #include "llvm/Support/Debug.h"
 
+namespace llvm {
 namespace mca {
 
 #define DEBUG_TYPE "llvm-mca"
-
-using namespace llvm;
 
 void Pipeline::addEventListener(HWEventListener *Listener) {
   if (Listener)
@@ -36,17 +35,18 @@ bool Pipeline::hasWorkToProcess() {
   });
 }
 
-Error Pipeline::run() {
+Expected<unsigned> Pipeline::run() {
   assert(!Stages.empty() && "Unexpected empty pipeline found!");
 
-  while (hasWorkToProcess()) {
+  do {
     notifyCycleBegin();
     if (Error Err = runCycle())
-      return Err;
+      return std::move(Err);
     notifyCycleEnd();
     ++Cycles;
-  }
-  return ErrorSuccess();
+  } while (hasWorkToProcess());
+
+  return Cycles;
 }
 
 Error Pipeline::runCycle() {
@@ -94,3 +94,4 @@ void Pipeline::notifyCycleEnd() {
     Listener->onCycleEnd();
 }
 } // namespace mca.
+} // namespace llvm

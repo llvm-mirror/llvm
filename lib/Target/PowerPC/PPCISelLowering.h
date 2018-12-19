@@ -569,7 +569,7 @@ namespace llvm {
     /// of v4i8's and shuffle them. This will turn into a mess of 8 extending
     /// loads, moves back into VSR's (or memory ops if we don't have moves) and
     /// then the VPERM for the shuffle. All in all a very slow sequence.
-    TargetLoweringBase::LegalizeTypeAction getPreferredVectorAction(EVT VT)
+    TargetLoweringBase::LegalizeTypeAction getPreferredVectorAction(MVT VT)
       const override {
       if (VT.getScalarSizeInBits() % 8 == 0)
         return TypeWidenVector;
@@ -789,6 +789,9 @@ namespace llvm {
       return true;
     }
 
+    // Returns true if the address of the global is stored in TOC entry.
+    bool isAccessedAsGotIndirect(SDValue N) const;
+
     bool isOffsetFoldingLegal(const GlobalAddressSDNode *GA) const override;
 
     bool getTgtMemIntrinsic(IntrinsicInfo &Info,
@@ -926,6 +929,9 @@ namespace llvm {
     bool directMoveIsProfitable(const SDValue &Op) const;
     SDValue LowerINT_TO_FPDirectMove(SDValue Op, SelectionDAG &DAG,
                                      const SDLoc &dl) const;
+
+    SDValue LowerINT_TO_FPVector(SDValue Op, SelectionDAG &DAG,
+                                 const SDLoc &dl) const;
 
     SDValue getFramePointerFrameIndex(SelectionDAG & DAG) const;
     SDValue getReturnAddrFrameIndex(SelectionDAG & DAG) const;
@@ -1093,6 +1099,8 @@ namespace llvm {
     SDValue combineSRA(SDNode *N, DAGCombinerInfo &DCI) const;
     SDValue combineSRL(SDNode *N, DAGCombinerInfo &DCI) const;
     SDValue combineADD(SDNode *N, DAGCombinerInfo &DCI) const;
+    SDValue combineTRUNCATE(SDNode *N, DAGCombinerInfo &DCI) const;
+    SDValue combineSetCC(SDNode *N, DAGCombinerInfo &DCI) const;
 
     /// ConvertSETCCToSubtract - looks at SETCC that compares ints. It replaces
     /// SETCC with integer subtraction when (1) there is a legal way of doing it
@@ -1127,6 +1135,7 @@ namespace llvm {
     // tail call. This will cause the optimizers to attempt to move, or
     // duplicate return instructions to help enable tail call optimizations.
     bool mayBeEmittedAsTailCall(const CallInst *CI) const override;
+    bool hasBitPreservingFPLogic(EVT VT) const override;
     bool isMaskAndCmp0FoldingBeneficial(const Instruction &AndI) const override;
   }; // end class PPCTargetLowering
 

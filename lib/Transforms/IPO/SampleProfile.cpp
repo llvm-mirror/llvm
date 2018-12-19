@@ -96,6 +96,13 @@ static cl::opt<std::string> SampleProfileFile(
     "sample-profile-file", cl::init(""), cl::value_desc("filename"),
     cl::desc("Profile file loaded by -sample-profile"), cl::Hidden);
 
+// The named file contains a set of transformations that may have been applied
+// to the symbol names between the program from which the sample data was
+// collected and the current program's symbols.
+static cl::opt<std::string> SampleProfileRemappingFile(
+    "sample-profile-remapping-file", cl::init(""), cl::value_desc("filename"),
+    cl::desc("Profile remapping file loaded by -sample-profile"), cl::Hidden);
+
 static cl::opt<unsigned> SampleProfileMaxPropagateIterations(
     "sample-profile-max-propagate-iterations", cl::init(100),
     cl::desc("Maximum number of iterations to go through when propagating "
@@ -115,6 +122,12 @@ static cl::opt<bool> NoWarnSampleUnused(
     "no-warn-sample-unused", cl::init(false), cl::Hidden,
     cl::desc("Use this option to turn off/on warnings about function with "
              "samples but without debug information to use those samples. "));
+
+static cl::opt<bool> ProfileSampleAccurate(
+    "profile-sample-accurate", cl::Hidden, cl::init(false),
+    cl::desc("If the sample profile is accurate, we will mark all un-sampled "
+             "callsite and function as having 0 samples. Otherwise, treat "
+             "un-sampled callsites and functions conservatively as unknown. "));
 
 namespace {
 
@@ -183,12 +196,12 @@ private:
 class SampleProfileLoader {
 public:
   SampleProfileLoader(
-      StringRef Name, bool IsThinLTOPreLink,
+      StringRef Name, StringRef RemapName, bool IsThinLTOPreLink,
       std::function<AssumptionCache &(Function &)> GetAssumptionCache,
       std::function<TargetTransformInfo &(Function &)> GetTargetTransformInfo)
       : GetAC(std::move(GetAssumptionCache)),
         GetTTI(std::move(GetTargetTransformInfo)), Filename(Name),
-        IsThinLTOPreLink(IsThinLTOPreLink) {}
+        RemappingFilename(RemapName), IsThinLTOPreLink(IsThinLTOPreLink) {}
 
   bool doInitialization(Module &M);
   bool runOnModule(Module &M, ModuleAnalysisManager *AM,
@@ -282,6 +295,9 @@ protected:
   /// Name of the profile file to load.
   std::string Filename;
 
+  /// Name of the profile remapping file to load.
+  std::string RemappingFilename;
+
   /// Flag indicating whether the profile input loaded successfully.
   bool ProfileIsValid = false;
 
@@ -311,13 +327,14 @@ public:
 
   SampleProfileLoaderLegacyPass(StringRef Name = SampleProfileFile,
                                 bool IsThinLTOPreLink = false)
-      : ModulePass(ID), SampleLoader(Name, IsThinLTOPreLink,
-                                     [&](Function &F) -> AssumptionCache & {
-                                       return ACT->getAssumptionCache(F);
-                                     },
-                                     [&](Function &F) -> TargetTransformInfo & {
-                                       return TTIWP->getTTI(F);
-                                     }) {
+      : ModulePass(ID),
+        SampleLoader(Name, SampleProfileRemappingFile, IsThinLTOPreLink,
+                     [&](Function &F) -> AssumptionCache & {
+                       return ACT->getAssumptionCache(F);
+                     },
+                     [&](Function &F) -> TargetTransformInfo & {
+                       return TTIWP->getTTI(F);
+                     }) {
     initializeSampleProfileLoaderLegacyPassPass(
         *PassRegistry::getPassRegistry());
   }
@@ -1286,7 +1303,7 @@ void SampleProfileLoader::propagateWeights(Function &F) {
         }
       }
     }
-    TerminatorInst *TI = BB->getTerminator();
+    Instruction *TI = BB->getTerminator();
     if (TI->getNumSuccessors() == 1)
       continue;
     if (!isa<BranchInst>(TI) && !isa<SwitchInst>(TI))
@@ -1515,11 +1532,26 @@ bool SampleProfileLoader::doInitialization(Module &M) {
   Reader = std::move(ReaderOrErr.get());
   Reader->collectFuncsToUse(M);
   ProfileIsValid = (Reader->read() == sampleprof_error::success);
+
+  if (!RemappingFilename.empty()) {
+    // Apply profile remappings to the loaded profile data if requested.
+    // For now, we only support remapping symbols encoded using the Itanium
+    // C++ ABI's name mangling scheme.
+    ReaderOrErr = SampleProfileReaderItaniumRemapper::create(
+        RemappingFilename, Ctx, std::move(Reader));
+    if (std::error_code EC = ReaderOrErr.getError()) {
+      std::string Msg = "Could not open profile remapping file: " + EC.message();
+      Ctx.diagnose(DiagnosticInfoSampleProfile(Filename, Msg));
+      return false;
+    }
+    Reader = std::move(ReaderOrErr.get());
+    ProfileIsValid = (Reader->read() == sampleprof_error::success);
+  }
   return true;
 }
 
 ModulePass *llvm::createSampleProfileLoaderPass() {
-  return new SampleProfileLoaderLegacyPass(SampleProfileFile);
+  return new SampleProfileLoaderLegacyPass();
 }
 
 ModulePass *llvm::createSampleProfileLoaderPass(StringRef Name) {
@@ -1573,15 +1605,23 @@ bool SampleProfileLoaderLegacyPass::runOnModule(Module &M) {
   ACT = &getAnalysis<AssumptionCacheTracker>();
   TTIWP = &getAnalysis<TargetTransformInfoWrapperPass>();
   ProfileSummaryInfo *PSI =
-      getAnalysis<ProfileSummaryInfoWrapperPass>().getPSI();
+      &getAnalysis<ProfileSummaryInfoWrapperPass>().getPSI();
   return SampleLoader.runOnModule(M, nullptr, PSI);
 }
 
 bool SampleProfileLoader::runOnFunction(Function &F, ModuleAnalysisManager *AM) {
-  // Initialize the entry count to -1, which will be treated conservatively
-  // by getEntryCount as the same as unknown (None). If we have samples this
-  // will be overwritten in emitAnnotations.
-  F.setEntryCount(ProfileCount(-1, Function::PCT_Real));
+  // By default the entry count is initialized to -1, which will be treated
+  // conservatively by getEntryCount as the same as unknown (None). This is
+  // to avoid newly added code to be treated as cold. If we have samples
+  // this will be overwritten in emitAnnotations.
+  // If ProfileSampleAccurate is true or F has profile-sample-accurate
+  // attribute, initialize the entry count to 0 so callsites or functions
+  // unsampled will be treated as cold.
+  uint64_t initialEntryCount =
+      (ProfileSampleAccurate || F.hasFnAttribute("profile-sample-accurate"))
+          ? 0
+          : -1;
+  F.setEntryCount(ProfileCount(initialEntryCount, Function::PCT_Real));
   std::unique_ptr<OptimizationRemarkEmitter> OwnedORE;
   if (AM) {
     auto &FAM =
@@ -1612,6 +1652,8 @@ PreservedAnalyses SampleProfileLoaderPass::run(Module &M,
 
   SampleProfileLoader SampleLoader(
       ProfileFileName.empty() ? SampleProfileFile : ProfileFileName,
+      ProfileRemappingFileName.empty() ? SampleProfileRemappingFile
+                                       : ProfileRemappingFileName,
       IsThinLTOPreLink, GetAssumptionCache, GetTTI);
 
   SampleLoader.doInitialization(M);

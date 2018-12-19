@@ -16,9 +16,8 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
+namespace llvm {
 namespace mca {
-
-using namespace llvm;
 
 void ReadState::writeStartEvent(unsigned Cycles) {
   assert(DependentWrites);
@@ -50,6 +49,10 @@ void WriteState::onInstructionIssued() {
     unsigned ReadCycles = std::max(0, CyclesLeft - User.second);
     RS->writeStartEvent(ReadCycles);
   }
+
+  // Notify any writes that are in a false dependency with this write.
+  if (PartialWrite)
+    PartialWrite->writeStartEvent(CyclesLeft);
 }
 
 void WriteState::addUser(ReadState *User, int ReadAdvance) {
@@ -62,8 +65,22 @@ void WriteState::addUser(ReadState *User, int ReadAdvance) {
     return;
   }
 
-  std::pair<ReadState *, int> NewPair(User, ReadAdvance);
-  Users.insert(NewPair);
+  if (llvm::find_if(Users, [&User](const std::pair<ReadState *, int> &Use) {
+        return Use.first == User;
+      }) == Users.end()) {
+    Users.emplace_back(User, ReadAdvance);
+  }
+}
+
+void WriteState::addUser(WriteState *User) {
+  if (CyclesLeft != UNKNOWN_CYCLES) {
+    User->writeStartEvent(std::max(0, CyclesLeft));
+    return;
+  }
+
+  assert(!PartialWrite && "PartialWrite already set!");
+  PartialWrite = User;
+  User->setDependentWrite(this);
 }
 
 void WriteState::cycleEvent() {
@@ -72,6 +89,9 @@ void WriteState::cycleEvent() {
   // specify a negative ReadAdvance.
   if (CyclesLeft != UNKNOWN_CYCLES)
     CyclesLeft--;
+
+  if (DependentWriteCyclesLeft)
+    DependentWriteCyclesLeft--;
 }
 
 void ReadState::cycleEvent() {
@@ -93,7 +113,7 @@ void ReadState::cycleEvent() {
 
 #ifndef NDEBUG
 void WriteState::dump() const {
-  dbgs() << "{ OpIdx=" << WD.OpIndex << ", Lat=" << getLatency() << ", RegID "
+  dbgs() << "{ OpIdx=" << WD->OpIndex << ", Lat=" << getLatency() << ", RegID "
          << getRegisterID() << ", Cycles Left=" << getCyclesLeft() << " }";
 }
 
@@ -120,34 +140,38 @@ void Instruction::execute() {
   Stage = IS_EXECUTING;
 
   // Set the cycles left before the write-back stage.
-  CyclesLeft = Desc.MaxLatency;
+  CyclesLeft = getLatency();
 
-  for (UniqueDef &Def : Defs)
-    Def->onInstructionIssued();
+  for (WriteState &WS : getDefs())
+    WS.onInstructionIssued();
 
   // Transition to the "executed" stage if this is a zero-latency instruction.
   if (!CyclesLeft)
     Stage = IS_EXECUTED;
 }
 
+void Instruction::forceExecuted() {
+  assert(Stage == IS_READY && "Invalid internal state!");
+  CyclesLeft = 0;
+  Stage = IS_EXECUTED;
+}
+
 void Instruction::update() {
   assert(isDispatched() && "Unexpected instruction stage found!");
 
-  if (!all_of(Uses, [](const UniqueUse &Use) { return Use->isReady(); }))
+  if (!all_of(getUses(), [](const ReadState &Use) { return Use.isReady(); }))
     return;
 
   // A partial register write cannot complete before a dependent write.
-  auto IsDefReady = [&](const UniqueDef &Def) {
-    if (const WriteState *Write = Def->getDependentWrite()) {
-      int WriteLatency = Write->getCyclesLeft();
-      if (WriteLatency == UNKNOWN_CYCLES)
-        return false;
-      return static_cast<unsigned>(WriteLatency) < Desc.MaxLatency;
+  auto IsDefReady = [&](const WriteState &Def) {
+    if (!Def.getDependentWrite()) {
+      unsigned CyclesLeft = Def.getDependentWriteCyclesLeft();
+      return !CyclesLeft || CyclesLeft < getLatency();
     }
-    return true;
+    return false;
   };
 
-  if (all_of(Defs, IsDefReady))
+  if (all_of(getDefs(), IsDefReady))
     Stage = IS_READY;
 }
 
@@ -156,8 +180,11 @@ void Instruction::cycleEvent() {
     return;
 
   if (isDispatched()) {
-    for (UniqueUse &Use : Uses)
-      Use->cycleEvent();
+    for (ReadState &Use : getUses())
+      Use.cycleEvent();
+
+    for (WriteState &Def : getDefs())
+      Def.cycleEvent();
 
     update();
     return;
@@ -165,8 +192,8 @@ void Instruction::cycleEvent() {
 
   assert(isExecuting() && "Instruction not in-flight?");
   assert(CyclesLeft && "Instruction already executed?");
-  for (UniqueDef &Def : Defs)
-    Def->cycleEvent();
+  for (WriteState &Def : getDefs())
+    Def.cycleEvent();
   CyclesLeft--;
   if (!CyclesLeft)
     Stage = IS_EXECUTED;
@@ -175,3 +202,4 @@ void Instruction::cycleEvent() {
 const unsigned WriteRef::INVALID_IID = std::numeric_limits<unsigned>::max();
 
 } // namespace mca
+} // namespace llvm

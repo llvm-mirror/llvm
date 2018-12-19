@@ -37,10 +37,12 @@ FunctionPass *createAMDGPUCFGStructurizerPass();
 FunctionPass *createR600ISelDag(TargetMachine *TM, CodeGenOpt::Level OptLevel);
 
 // SI Passes
+FunctionPass *createGCNDPPCombinePass();
 FunctionPass *createSIAnnotateControlFlowPass();
 FunctionPass *createSIFoldOperandsPass();
 FunctionPass *createSIPeepholeSDWAPass();
 FunctionPass *createSILowerI1CopiesPass();
+FunctionPass *createSIFixupVectorISelPass();
 FunctionPass *createSIShrinkInstructionsPass();
 FunctionPass *createSILoadStoreOptimizerPass();
 FunctionPass *createSIWholeQuadModePass();
@@ -57,6 +59,7 @@ FunctionPass *createAMDGPUUseNativeCallsPass();
 FunctionPass *createAMDGPUCodeGenPreparePass();
 FunctionPass *createAMDGPUMachineCFGStructurizerPass();
 FunctionPass *createAMDGPURewriteOutArgumentsPass();
+FunctionPass *createSIModeRegisterPass();
 
 void initializeAMDGPUDAGToDAGISelPass(PassRegistry&);
 
@@ -69,9 +72,17 @@ Pass *createAMDGPUAnnotateKernelFeaturesPass();
 void initializeAMDGPUAnnotateKernelFeaturesPass(PassRegistry &);
 extern char &AMDGPUAnnotateKernelFeaturesID;
 
+FunctionPass *createAMDGPUAtomicOptimizerPass();
+void initializeAMDGPUAtomicOptimizerPass(PassRegistry &);
+extern char &AMDGPUAtomicOptimizerID;
+
 ModulePass *createAMDGPULowerIntrinsicsPass();
 void initializeAMDGPULowerIntrinsicsPass(PassRegistry &);
 extern char &AMDGPULowerIntrinsicsID;
+
+ModulePass *createAMDGPUFixFunctionBitcastsPass();
+void initializeAMDGPUFixFunctionBitcastsPass(PassRegistry &);
+extern char &AMDGPUFixFunctionBitcastsID;
 
 FunctionPass *createAMDGPULowerKernelArgumentsPass();
 void initializeAMDGPULowerKernelArgumentsPass(PassRegistry &);
@@ -83,6 +94,9 @@ extern char &AMDGPULowerKernelAttributesID;
 
 void initializeAMDGPURewriteOutArgumentsPass(PassRegistry &);
 extern char &AMDGPURewriteOutArgumentsID;
+
+void initializeGCNDPPCombinePass(PassRegistry &);
+extern char &GCNDPPCombineID;
 
 void initializeR600ClauseMergePassPass(PassRegistry &);
 extern char &R600ClauseMergePassID;
@@ -113,6 +127,9 @@ extern char &SIFixSGPRCopiesID;
 
 void initializeSIFixVGPRCopiesPass(PassRegistry &);
 extern char &SIFixVGPRCopiesID;
+
+void initializeSIFixupVectorISelPass(PassRegistry &);
+extern char &SIFixupVectorISelID;
 
 void initializeSILowerI1CopiesPass(PassRegistry &);
 extern char &SILowerI1CopiesID;
@@ -179,6 +196,9 @@ extern char &SIMemoryLegalizerID;
 void initializeSIDebuggerInsertNopsPass(PassRegistry&);
 extern char &SIDebuggerInsertNopsID;
 
+void initializeSIModeRegisterPass(PassRegistry&);
+extern char &SIModeRegisterID;
+
 void initializeSIInsertWaitcntsPass(PassRegistry&);
 extern char &SIInsertWaitcntsID;
 
@@ -190,6 +210,8 @@ extern char &AMDGPUUnifyDivergentExitNodesID;
 
 ImmutablePass *createAMDGPUAAWrapperPass();
 void initializeAMDGPUAAWrapperPassPass(PassRegistry&);
+ImmutablePass *createAMDGPUExternalAAWrapperPass();
+void initializeAMDGPUExternalAAWrapperPass(PassRegistry&);
 
 void initializeAMDGPUArgumentUsageInfoPass(PassRegistry &);
 

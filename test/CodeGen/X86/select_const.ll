@@ -468,10 +468,10 @@ define <2 x double> @sel_constants_fmul_constant_vec(i1 %cond) {
 ; CHECK-NEXT:    testb $1, %dil
 ; CHECK-NEXT:    jne .LBB37_1
 ; CHECK-NEXT:  # %bb.2:
-; CHECK-NEXT:    movaps {{.*#+}} xmm0 = [1.188300e+02,3.454000e+01]
+; CHECK-NEXT:    movaps {{.*#+}} xmm0 = [1.1883E+2,3.4539999999999999E+1]
 ; CHECK-NEXT:    retq
 ; CHECK-NEXT:  .LBB37_1:
-; CHECK-NEXT:    movaps {{.*#+}} xmm0 = [-2.040000e+01,3.768000e+01]
+; CHECK-NEXT:    movaps {{.*#+}} xmm0 = [-2.0399999999999999E+1,3.768E+1]
 ; CHECK-NEXT:    retq
   %sel = select i1 %cond, <2 x double> <double -4.0, double 12.0>, <2 x double> <double 23.3, double 11.0>
   %bo = fmul <2 x double> %sel, <double 5.1, double 3.14>
@@ -501,5 +501,14 @@ define i64 @opaque_constant(i1 %cond, i64 %x) {
   %sext = sext i1 %cmp to i64
   %add = add i64 %bo, %sext
   ret i64 %add
+}
+
+define float @select_undef_fp(float %x) {
+; CHECK-LABEL: select_undef_fp:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    movss {{.*#+}} xmm0 = mem[0],zero,zero,zero
+; CHECK-NEXT:    retq
+  %f = select i1 undef, float 4.0, float %x
+  ret float %f
 }
 

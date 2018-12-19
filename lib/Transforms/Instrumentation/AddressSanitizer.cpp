@@ -344,10 +344,14 @@ static cl::opt<uint32_t> ClForceExperiment(
     cl::init(0));
 
 static cl::opt<bool>
-    ClUsePrivateAliasForGlobals("asan-use-private-alias",
-                                cl::desc("Use private aliases for global"
-                                         " variables"),
-                                cl::Hidden, cl::init(false));
+    ClUsePrivateAlias("asan-use-private-alias",
+                      cl::desc("Use private aliases for global variables"),
+                      cl::Hidden, cl::init(false));
+
+static cl::opt<bool>
+    ClUseOdrIndicator("asan-use-odr-indicator",
+                      cl::desc("Use odr indicators to improve ODR reporting"),
+                      cl::Hidden, cl::init(false));
 
 static cl::opt<bool>
     ClUseGlobalsGC("asan-globals-live-support",
@@ -731,9 +735,12 @@ public:
 
   explicit AddressSanitizerModule(bool CompileKernel = false,
                                   bool Recover = false,
-                                  bool UseGlobalsGC = true)
-      : ModulePass(ID),
-        UseGlobalsGC(UseGlobalsGC && ClUseGlobalsGC),
+                                  bool UseGlobalsGC = true,
+                                  bool UseOdrIndicator = false)
+      : ModulePass(ID), UseGlobalsGC(UseGlobalsGC && ClUseGlobalsGC),
+        // Enable aliases as they should have no downside with ODR indicators.
+        UsePrivateAlias(UseOdrIndicator || ClUsePrivateAlias),
+        UseOdrIndicator(UseOdrIndicator || ClUseOdrIndicator),
         // Not a typo: ClWithComdat is almost completely pointless without
         // ClUseGlobalsGC (because then it only works on modules without
         // globals, which are rare); it is a prerequisite for ClUseGlobalsGC;
@@ -742,11 +749,10 @@ public:
         // ClWithComdat and ClUseGlobalsGC unless the frontend says it's ok to
         // do globals-gc.
         UseCtorComdat(UseGlobalsGC && ClWithComdat) {
-          this->Recover = ClRecover.getNumOccurrences() > 0 ?
-              ClRecover : Recover;
-          this->CompileKernel = ClEnableKasan.getNumOccurrences() > 0 ?
-              ClEnableKasan : CompileKernel;
-	}
+    this->Recover = ClRecover.getNumOccurrences() > 0 ? ClRecover : Recover;
+    this->CompileKernel =
+        ClEnableKasan.getNumOccurrences() > 0 ? ClEnableKasan : CompileKernel;
+  }
 
   bool runOnModule(Module &M) override;
   StringRef getPassName() const override { return "AddressSanitizerModule"; }
@@ -790,6 +796,8 @@ private:
   bool CompileKernel;
   bool Recover;
   bool UseGlobalsGC;
+  bool UsePrivateAlias;
+  bool UseOdrIndicator;
   bool UseCtorComdat;
   Type *IntptrTy;
   LLVMContext *C;
@@ -1089,9 +1097,11 @@ INITIALIZE_PASS(
 
 ModulePass *llvm::createAddressSanitizerModulePass(bool CompileKernel,
                                                    bool Recover,
-                                                   bool UseGlobalsGC) {
+                                                   bool UseGlobalsGC,
+                                                   bool UseOdrIndicator) {
   assert(!CompileKernel || Recover);
-  return new AddressSanitizerModule(CompileKernel, Recover, UseGlobalsGC);
+  return new AddressSanitizerModule(CompileKernel, Recover, UseGlobalsGC,
+                                    UseOdrIndicator);
 }
 
 static size_t TypeSizeToSizeIndex(uint32_t TypeSize) {
@@ -1100,25 +1110,11 @@ static size_t TypeSizeToSizeIndex(uint32_t TypeSize) {
   return Res;
 }
 
-// Create a constant for Str so that we can pass it to the run-time lib.
-static GlobalVariable *createPrivateGlobalForString(Module &M, StringRef Str,
-                                                    bool AllowMerging) {
-  Constant *StrConst = ConstantDataArray::getString(M.getContext(), Str);
-  // We use private linkage for module-local strings. If they can be merged
-  // with another one, we set the unnamed_addr attribute.
-  GlobalVariable *GV =
-      new GlobalVariable(M, StrConst->getType(), true,
-                         GlobalValue::PrivateLinkage, StrConst, kAsanGenPrefix);
-  if (AllowMerging) GV->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
-  GV->setAlignment(1);  // Strings may not be merged w/o setting align 1.
-  return GV;
-}
-
 /// Create a global describing a source location.
 static GlobalVariable *createPrivateGlobalForSourceLoc(Module &M,
                                                        LocationMetadata MD) {
   Constant *LocData[] = {
-      createPrivateGlobalForString(M, MD.Filename, true),
+      createPrivateGlobalForString(M, MD.Filename, true, kAsanGenPrefix),
       ConstantInt::get(Type::getInt32Ty(M.getContext()), MD.LineNo),
       ConstantInt::get(Type::getInt32Ty(M.getContext()), MD.ColumnNo),
   };
@@ -1383,7 +1379,7 @@ static void instrumentMaskedLoadOrStore(AddressSanitizer *Pass,
     } else {
       IRBuilder<> IRB(I);
       Value *MaskElem = IRB.CreateExtractElement(Mask, Idx);
-      TerminatorInst *ThenTerm = SplitBlockAndInsertIfThen(MaskElem, I, false);
+      Instruction *ThenTerm = SplitBlockAndInsertIfThen(MaskElem, I, false);
       InsertBefore = ThenTerm;
     }
 
@@ -1536,8 +1532,9 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns,
     Value *TagCheck =
         IRB.CreateICmpEQ(Tag, ConstantInt::get(IntptrTy, kMyriadDDRTag));
 
-    TerminatorInst *TagCheckTerm = SplitBlockAndInsertIfThen(
-        TagCheck, InsertBefore, false, MDBuilder(*C).createBranchWeights(1, 100000));
+    Instruction *TagCheckTerm =
+        SplitBlockAndInsertIfThen(TagCheck, InsertBefore, false,
+                                  MDBuilder(*C).createBranchWeights(1, 100000));
     assert(cast<BranchInst>(TagCheckTerm)->isUnconditional());
     IRB.SetInsertPoint(TagCheckTerm);
     InsertBefore = TagCheckTerm;
@@ -1553,12 +1550,12 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns,
 
   Value *Cmp = IRB.CreateICmpNE(ShadowValue, CmpVal);
   size_t Granularity = 1ULL << Mapping.Scale;
-  TerminatorInst *CrashTerm = nullptr;
+  Instruction *CrashTerm = nullptr;
 
   if (ClAlwaysSlowPath || (TypeSize < 8 * Granularity)) {
     // We use branch weights for the slow path check, to indicate that the slow
     // path is rarely taken. This seems to be the case for SPEC benchmarks.
-    TerminatorInst *CheckTerm = SplitBlockAndInsertIfThen(
+    Instruction *CheckTerm = SplitBlockAndInsertIfThen(
         Cmp, InsertBefore, false, MDBuilder(*C).createBranchWeights(1, 100000));
     assert(cast<BranchInst>(CheckTerm)->isUnconditional());
     BasicBlock *NextBB = CheckTerm->getSuccessor(0);
@@ -2105,7 +2102,7 @@ bool AddressSanitizerModule::InstrumentGlobals(IRBuilder<> &IRB, Module &M, bool
   // We shouldn't merge same module names, as this string serves as unique
   // module ID in runtime.
   GlobalVariable *ModuleName = createPrivateGlobalForString(
-      M, M.getModuleIdentifier(), /*AllowMerging*/ false);
+      M, M.getModuleIdentifier(), /*AllowMerging*/ false, kAsanGenPrefix);
 
   for (size_t i = 0; i < n; i++) {
     static const uint64_t kMaxGlobalRedzone = 1 << 18;
@@ -2117,7 +2114,7 @@ bool AddressSanitizerModule::InstrumentGlobals(IRBuilder<> &IRB, Module &M, bool
     // if it's available, otherwise just write the name of global variable).
     GlobalVariable *Name = createPrivateGlobalForString(
         M, MD.Name.empty() ? NameForGlobal : MD.Name,
-        /*AllowMerging*/ true);
+        /*AllowMerging*/ true, kAsanGenPrefix);
 
     Type *Ty = G->getValueType();
     uint64_t SizeInBytes = DL.getTypeAllocSize(Ty);
@@ -2186,12 +2183,20 @@ bool AddressSanitizerModule::InstrumentGlobals(IRBuilder<> &IRB, Module &M, bool
     bool CanUsePrivateAliases =
         TargetTriple.isOSBinFormatELF() || TargetTriple.isOSBinFormatMachO() ||
         TargetTriple.isOSBinFormatWasm();
-    if (CanUsePrivateAliases && ClUsePrivateAliasForGlobals) {
+    if (CanUsePrivateAliases && UsePrivateAlias) {
       // Create local alias for NewGlobal to avoid crash on ODR between
       // instrumented and non-instrumented libraries.
-      auto *GA = GlobalAlias::create(GlobalValue::InternalLinkage,
-                                     NameForGlobal + M.getName(), NewGlobal);
+      InstrumentedGlobal =
+          GlobalAlias::create(GlobalValue::PrivateLinkage, "", NewGlobal);
+    }
 
+    // ODR check is not useful for the following, but we see false reports
+    // caused by linker optimizations.
+    if (NewGlobal->hasLocalLinkage() || NewGlobal->hasGlobalUnnamedAddr() ||
+        NewGlobal->hasLinkOnceODRLinkage() || NewGlobal->hasWeakODRLinkage()) {
+      ODRIndicator = ConstantExpr::getIntToPtr(ConstantInt::get(IntptrTy, -1),
+                                               IRB.getInt8PtrTy());
+    } else if (UseOdrIndicator) {
       // With local aliases, we need to provide another externally visible
       // symbol __odr_asan_XXX to detect ODR violation.
       auto *ODRIndicatorSym =
@@ -2205,7 +2210,6 @@ bool AddressSanitizerModule::InstrumentGlobals(IRBuilder<> &IRB, Module &M, bool
       ODRIndicatorSym->setDLLStorageClass(NewGlobal->getDLLStorageClass());
       ODRIndicatorSym->setAlignment(1);
       ODRIndicator = ODRIndicatorSym;
-      InstrumentedGlobal = GA;
     }
 
     Constant *Initializer = ConstantStruct::get(
@@ -3020,7 +3024,7 @@ void FunctionStackPoisoner::processStaticAllocas() {
       IntptrPtrTy);
   GlobalVariable *StackDescriptionGlobal =
       createPrivateGlobalForString(*F.getParent(), DescriptionString,
-                                   /*AllowMerging*/ true);
+                                   /*AllowMerging*/ true, kAsanGenPrefix);
   Value *Description = IRB.CreatePointerCast(StackDescriptionGlobal, IntptrTy);
   IRB.CreateStore(Description, BasePlus1);
   // Write the PC to redzone[2].
@@ -3078,7 +3082,7 @@ void FunctionStackPoisoner::processStaticAllocas() {
       //     <This is not a fake stack; unpoison the redzones>
       Value *Cmp =
           IRBRet.CreateICmpNE(FakeStack, Constant::getNullValue(IntptrTy));
-      TerminatorInst *ThenTerm, *ElseTerm;
+      Instruction *ThenTerm, *ElseTerm;
       SplitBlockAndInsertIfThenElse(Cmp, Ret, &ThenTerm, &ElseTerm);
 
       IRBuilder<> IRBPoison(ThenTerm);

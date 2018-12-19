@@ -574,19 +574,17 @@ static Constant *getKnownConstant(Value *Val, ConstantPreference Preference) {
 /// BB in the result vector.
 ///
 /// This returns true if there were any known values.
-bool JumpThreadingPass::ComputeValueKnownInPredecessors(
+bool JumpThreadingPass::ComputeValueKnownInPredecessorsImpl(
     Value *V, BasicBlock *BB, PredValueInfo &Result,
-    ConstantPreference Preference, Instruction *CxtI) {
+    ConstantPreference Preference,
+    DenseSet<std::pair<Value *, BasicBlock *>> &RecursionSet,
+    Instruction *CxtI) {
   // This method walks up use-def chains recursively.  Because of this, we could
   // get into an infinite loop going around loops in the use-def chain.  To
   // prevent this, keep track of what (value, block) pairs we've already visited
   // and terminate the search if we loop back to them
   if (!RecursionSet.insert(std::make_pair(V, BB)).second)
     return false;
-
-  // An RAII help to remove this pair from the recursion set once the recursion
-  // stack pops back out again.
-  RecursionSetRemover remover(RecursionSet, std::make_pair(V, BB));
 
   // If V is a constant, then it is known in all predecessors.
   if (Constant *KC = getKnownConstant(V, Preference)) {
@@ -657,7 +655,8 @@ bool JumpThreadingPass::ComputeValueKnownInPredecessors(
     Value *Source = CI->getOperand(0);
     if (!isa<PHINode>(Source) && !isa<CmpInst>(Source))
       return false;
-    ComputeValueKnownInPredecessors(Source, BB, Result, Preference, CxtI);
+    ComputeValueKnownInPredecessorsImpl(Source, BB, Result, Preference,
+                                        RecursionSet, CxtI);
     if (Result.empty())
       return false;
 
@@ -677,10 +676,10 @@ bool JumpThreadingPass::ComputeValueKnownInPredecessors(
         I->getOpcode() == Instruction::And) {
       PredValueInfoTy LHSVals, RHSVals;
 
-      ComputeValueKnownInPredecessors(I->getOperand(0), BB, LHSVals,
-                                      WantInteger, CxtI);
-      ComputeValueKnownInPredecessors(I->getOperand(1), BB, RHSVals,
-                                      WantInteger, CxtI);
+      ComputeValueKnownInPredecessorsImpl(I->getOperand(0), BB, LHSVals,
+                                      WantInteger, RecursionSet, CxtI);
+      ComputeValueKnownInPredecessorsImpl(I->getOperand(1), BB, RHSVals,
+                                          WantInteger, RecursionSet, CxtI);
 
       if (LHSVals.empty() && RHSVals.empty())
         return false;
@@ -715,8 +714,8 @@ bool JumpThreadingPass::ComputeValueKnownInPredecessors(
     if (I->getOpcode() == Instruction::Xor &&
         isa<ConstantInt>(I->getOperand(1)) &&
         cast<ConstantInt>(I->getOperand(1))->isOne()) {
-      ComputeValueKnownInPredecessors(I->getOperand(0), BB, Result,
-                                      WantInteger, CxtI);
+      ComputeValueKnownInPredecessorsImpl(I->getOperand(0), BB, Result,
+                                          WantInteger, RecursionSet, CxtI);
       if (Result.empty())
         return false;
 
@@ -733,8 +732,8 @@ bool JumpThreadingPass::ComputeValueKnownInPredecessors(
             && "A binary operator creating a block address?");
     if (ConstantInt *CI = dyn_cast<ConstantInt>(BO->getOperand(1))) {
       PredValueInfoTy LHSVals;
-      ComputeValueKnownInPredecessors(BO->getOperand(0), BB, LHSVals,
-                                      WantInteger, CxtI);
+      ComputeValueKnownInPredecessorsImpl(BO->getOperand(0), BB, LHSVals,
+                                          WantInteger, RecursionSet, CxtI);
 
       // Try to use constant folding to simplify the binary operator.
       for (const auto &LHSVal : LHSVals) {
@@ -879,8 +878,8 @@ bool JumpThreadingPass::ComputeValueKnownInPredecessors(
       // Try to find a constant value for the LHS of a comparison,
       // and evaluate it statically if we can.
       PredValueInfoTy LHSVals;
-      ComputeValueKnownInPredecessors(I->getOperand(0), BB, LHSVals,
-                                      WantInteger, CxtI);
+      ComputeValueKnownInPredecessorsImpl(I->getOperand(0), BB, LHSVals,
+                                          WantInteger, RecursionSet, CxtI);
 
       for (const auto &LHSVal : LHSVals) {
         Constant *V = LHSVal.first;
@@ -900,8 +899,8 @@ bool JumpThreadingPass::ComputeValueKnownInPredecessors(
     Constant *FalseVal = getKnownConstant(SI->getFalseValue(), Preference);
     PredValueInfoTy Conds;
     if ((TrueVal || FalseVal) &&
-        ComputeValueKnownInPredecessors(SI->getCondition(), BB, Conds,
-                                        WantInteger, CxtI)) {
+        ComputeValueKnownInPredecessorsImpl(SI->getCondition(), BB, Conds,
+                                            WantInteger, RecursionSet, CxtI)) {
       for (auto &C : Conds) {
         Constant *Cond = C.first;
 
@@ -947,7 +946,7 @@ bool JumpThreadingPass::ComputeValueKnownInPredecessors(
 /// Since we can pick an arbitrary destination, we pick the successor with the
 /// fewest predecessors.  This should reduce the in-degree of the others.
 static unsigned GetBestDestForJumpOnUndef(BasicBlock *BB) {
-  TerminatorInst *BBTerm = BB->getTerminator();
+  Instruction *BBTerm = BB->getTerminator();
   unsigned MinSucc = 0;
   BasicBlock *TestBB = BBTerm->getSuccessor(MinSucc);
   // Compute the successor with the minimum number of predecessors.
@@ -988,7 +987,7 @@ bool JumpThreadingPass::ProcessBlock(BasicBlock *BB) {
   // because now the condition in this block can be threaded through
   // predecessors of our predecessor block.
   if (BasicBlock *SinglePred = BB->getSinglePredecessor()) {
-    const TerminatorInst *TI = SinglePred->getTerminator();
+    const Instruction *TI = SinglePred->getTerminator();
     if (!TI->isExceptionalTerminator() && TI->getNumSuccessors() == 1 &&
         SinglePred != BB && !hasAddressTakenAndUsed(BB)) {
       // If SinglePred was a loop header, BB becomes one.
@@ -1080,7 +1079,7 @@ bool JumpThreadingPass::ProcessBlock(BasicBlock *BB) {
     std::vector<DominatorTree::UpdateType> Updates;
 
     // Fold the branch/switch.
-    TerminatorInst *BBTerm = BB->getTerminator();
+    Instruction *BBTerm = BB->getTerminator();
     Updates.reserve(BBTerm->getNumSuccessors());
     for (unsigned i = 0, e = BBTerm->getNumSuccessors(); i != e; ++i) {
       if (i == BestSucc) continue;
@@ -1549,7 +1548,7 @@ FindMostPopularDest(BasicBlock *BB,
   // successor list.
   if (!SamePopularity.empty()) {
     SamePopularity.push_back(MostPopularDest);
-    TerminatorInst *TI = BB->getTerminator();
+    Instruction *TI = BB->getTerminator();
     for (unsigned i = 0; ; ++i) {
       assert(i != TI->getNumSuccessors() && "Didn't find any successor!");
 
@@ -1669,7 +1668,7 @@ bool JumpThreadingPass::ProcessThreadableEdges(Value *Cond, BasicBlock *BB,
       }
 
       // Finally update the terminator.
-      TerminatorInst *Term = BB->getTerminator();
+      Instruction *Term = BB->getTerminator();
       BranchInst::Create(OnlyDest, Term);
       Term->eraseFromParent();
       DTU->applyUpdates(Updates);
@@ -2006,7 +2005,7 @@ bool JumpThreadingPass::ThreadEdge(BasicBlock *BB,
   // Update the terminator of PredBB to jump to NewBB instead of BB.  This
   // eliminates predecessors from BB, which requires us to simplify any PHI
   // nodes in BB.
-  TerminatorInst *PredTerm = PredBB->getTerminator();
+  Instruction *PredTerm = PredBB->getTerminator();
   for (unsigned i = 0, e = PredTerm->getNumSuccessors(); i != e; ++i)
     if (PredTerm->getSuccessor(i) == BB) {
       BB->removePredecessor(PredBB, true);
@@ -2115,7 +2114,7 @@ BasicBlock *JumpThreadingPass::SplitBlockPreds(BasicBlock *BB,
 }
 
 bool JumpThreadingPass::doesBlockHaveProfileData(BasicBlock *BB) {
-  const TerminatorInst *TI = BB->getTerminator();
+  const Instruction *TI = BB->getTerminator();
   assert(TI->getNumSuccessors() > 1 && "not a split");
 
   MDNode *WeightsNode = TI->getMetadata(LLVMContext::MD_prof);
@@ -2538,7 +2537,7 @@ bool JumpThreadingPass::TryToUnfoldSelectInCurrBB(BasicBlock *BB) {
     if (!SI)
       continue;
     // Expand the select.
-    TerminatorInst *Term =
+    Instruction *Term =
         SplitBlockAndInsertIfThen(SI->getCondition(), SI, false);
     BasicBlock *SplitBB = SI->getParent();
     BasicBlock *NewBB = Term->getParent();
@@ -2655,28 +2654,16 @@ bool JumpThreadingPass::ThreadGuard(BasicBlock *BB, IntrinsicInst *Guard,
   // Duplicate all instructions before the guard and the guard itself to the
   // branch where implication is not proved.
   BasicBlock *GuardedBlock = DuplicateInstructionsInSplitBetween(
-      BB, PredGuardedBlock, AfterGuard, GuardedMapping);
+      BB, PredGuardedBlock, AfterGuard, GuardedMapping, *DTU);
   assert(GuardedBlock && "Could not create the guarded block?");
   // Duplicate all instructions before the guard in the unguarded branch.
   // Since we have successfully duplicated the guarded block and this block
   // has fewer instructions, we expect it to succeed.
   BasicBlock *UnguardedBlock = DuplicateInstructionsInSplitBetween(
-      BB, PredUnguardedBlock, Guard, UnguardedMapping);
+      BB, PredUnguardedBlock, Guard, UnguardedMapping, *DTU);
   assert(UnguardedBlock && "Could not create the unguarded block?");
   LLVM_DEBUG(dbgs() << "Moved guard " << *Guard << " to block "
                     << GuardedBlock->getName() << "\n");
-  // DuplicateInstructionsInSplitBetween inserts a new block "BB.split" between
-  // PredBB and BB. We need to perform two inserts and one delete for each of
-  // the above calls to update Dominators.
-  DTU->applyUpdates(
-      {// Guarded block split.
-       {DominatorTree::Delete, PredGuardedBlock, BB},
-       {DominatorTree::Insert, PredGuardedBlock, GuardedBlock},
-       {DominatorTree::Insert, GuardedBlock, BB},
-       // Unguarded block split.
-       {DominatorTree::Delete, PredUnguardedBlock, BB},
-       {DominatorTree::Insert, PredUnguardedBlock, UnguardedBlock},
-       {DominatorTree::Insert, UnguardedBlock, BB}});
   // Some instructions before the guard may still have uses. For them, we need
   // to create Phi nodes merging their copies in both guarded and unguarded
   // branches. Those instructions that have no uses can be just removed.

@@ -179,6 +179,7 @@ declare double @llvm.powi.f64(double,i32)
 declare float @llvm.exp.f32(float)
 declare float @llvm.minnum.f32(float, float)
 declare float @llvm.maxnum.f32(float, float)
+declare float @llvm.maximum.f32(float, float)
 declare double @llvm.exp2.f64(double)
 declare float @llvm.fma.f32(float,float,float)
 
@@ -233,13 +234,148 @@ define i1 @orderedLessZeroPowi(double,double) {
   ret i1 %olt
 }
 
-define i1 @orderedLessZeroUIToFP(i32) {
-; CHECK-LABEL: @orderedLessZeroUIToFP(
+define i1 @UIToFP_is_nan_or_positive_or_zero(i32 %x) {
+; CHECK-LABEL: @UIToFP_is_nan_or_positive_or_zero(
 ; CHECK-NEXT:    ret i1 true
 ;
-  %a = uitofp i32 %0 to float
-  %uge = fcmp uge float %a, 0.000000e+00
-  ret i1 %uge
+  %a = uitofp i32 %x to float
+  %r = fcmp uge float %a, 0.000000e+00
+  ret i1 %r
+}
+
+define <2 x i1> @UIToFP_is_nan_or_positive_or_zero_vec(<2 x i32> %x) {
+; CHECK-LABEL: @UIToFP_is_nan_or_positive_or_zero_vec(
+; CHECK-NEXT:    ret <2 x i1> <i1 true, i1 true>
+;
+  %a = uitofp <2 x i32> %x to <2 x float>
+  %r = fcmp uge <2 x float> %a, zeroinitializer
+  ret <2 x i1> %r
+}
+
+define i1 @UIToFP_nnan_is_positive_or_zero(i32 %x) {
+; CHECK-LABEL: @UIToFP_nnan_is_positive_or_zero(
+; CHECK-NEXT:    ret i1 true
+;
+  %a = uitofp i32 %x to float
+  %r = fcmp nnan oge float %a, 0.000000e+00
+  ret i1 %r
+}
+
+define <2 x i1> @UIToFP_nnan_is_positive_or_zero_vec(<2 x i32> %x) {
+; CHECK-LABEL: @UIToFP_nnan_is_positive_or_zero_vec(
+; CHECK-NEXT:    ret <2 x i1> <i1 true, i1 true>
+;
+  %a = uitofp <2 x i32> %x to <2 x float>
+  %r = fcmp nnan oge <2 x float> %a, zeroinitializer
+  ret <2 x i1> %r
+}
+
+define i1 @UIToFP_is_not_negative(i32 %x) {
+; CHECK-LABEL: @UIToFP_is_not_negative(
+; CHECK-NEXT:    ret i1 false
+;
+  %a = uitofp i32 %x to float
+  %r = fcmp olt float %a, 0.000000e+00
+  ret i1 %r
+}
+
+define <2 x i1> @UIToFP_is_not_negative_vec(<2 x i32> %x) {
+; CHECK-LABEL: @UIToFP_is_not_negative_vec(
+; CHECK-NEXT:    ret <2 x i1> zeroinitializer
+;
+  %a = uitofp <2 x i32> %x to <2 x float>
+  %r = fcmp olt <2 x float> %a, zeroinitializer
+  ret <2 x i1> %r
+}
+
+define i1 @UIToFP_nnan_is_not_negative(i32 %x) {
+; CHECK-LABEL: @UIToFP_nnan_is_not_negative(
+; CHECK-NEXT:    ret i1 false
+;
+  %a = uitofp i32 %x to float
+  %r = fcmp nnan ult float %a, 0.000000e+00
+  ret i1 %r
+}
+
+define <2 x i1> @UIToFP_nnan_is_not_negative_vec(<2 x i32> %x) {
+; CHECK-LABEL: @UIToFP_nnan_is_not_negative_vec(
+; CHECK-NEXT:    ret <2 x i1> zeroinitializer
+;
+  %a = uitofp <2 x i32> %x to <2 x float>
+  %r = fcmp nnan ult <2 x float> %a, zeroinitializer
+  ret <2 x i1> %r
+}
+
+define i1 @fabs_is_nan_or_positive_or_zero(double %x) {
+; CHECK-LABEL: @fabs_is_nan_or_positive_or_zero(
+; CHECK-NEXT:    ret i1 true
+;
+  %fabs = tail call double @llvm.fabs.f64(double %x)
+  %cmp = fcmp uge double %fabs, 0.0
+  ret i1 %cmp
+}
+
+define <2 x i1> @fabs_is_nan_or_positive_or_zero_vec(<2 x double> %x) {
+; CHECK-LABEL: @fabs_is_nan_or_positive_or_zero_vec(
+; CHECK-NEXT:    ret <2 x i1> <i1 true, i1 true>
+;
+  %fabs = tail call <2 x double> @llvm.fabs.v2f64(<2 x double> %x)
+  %cmp = fcmp uge <2 x double> %fabs, zeroinitializer
+  ret <2 x i1> %cmp
+}
+
+define i1 @fabs_nnan_is_positive_or_zero(double %x) {
+; CHECK-LABEL: @fabs_nnan_is_positive_or_zero(
+; CHECK-NEXT:    ret i1 true
+;
+  %fabs = tail call double @llvm.fabs.f64(double %x)
+  %cmp = fcmp nnan oge double %fabs, 0.0
+  ret i1 %cmp
+}
+
+define <2 x i1> @fabs_nnan_is_positive_or_zero_vec(<2 x double> %x) {
+; CHECK-LABEL: @fabs_nnan_is_positive_or_zero_vec(
+; CHECK-NEXT:    ret <2 x i1> <i1 true, i1 true>
+;
+  %fabs = tail call <2 x double> @llvm.fabs.v2f64(<2 x double> %x)
+  %cmp = fcmp nnan oge <2 x double> %fabs, zeroinitializer
+  ret <2 x i1> %cmp
+}
+
+define i1 @fabs_is_not_negative(double %x) {
+; CHECK-LABEL: @fabs_is_not_negative(
+; CHECK-NEXT:    ret i1 false
+;
+  %fabs = tail call double @llvm.fabs.f64(double %x)
+  %cmp = fcmp olt double %fabs, 0.0
+  ret i1 %cmp
+}
+
+define <2 x i1> @fabs_is_not_negative_vec(<2 x double> %x) {
+; CHECK-LABEL: @fabs_is_not_negative_vec(
+; CHECK-NEXT:    ret <2 x i1> zeroinitializer
+;
+  %fabs = tail call <2 x double> @llvm.fabs.v2f64(<2 x double> %x)
+  %cmp = fcmp olt <2 x double> %fabs, zeroinitializer
+  ret <2 x i1> %cmp
+}
+
+define i1 @fabs_nnan_is_not_negative(double %x) {
+; CHECK-LABEL: @fabs_nnan_is_not_negative(
+; CHECK-NEXT:    ret i1 false
+;
+  %fabs = tail call double @llvm.fabs.f64(double %x)
+  %cmp = fcmp nnan ult double %fabs, 0.0
+  ret i1 %cmp
+}
+
+define <2 x i1> @fabs_nnan_is_not_negative_vec(<2 x double> %x) {
+; CHECK-LABEL: @fabs_nnan_is_not_negative_vec(
+; CHECK-NEXT:    ret <2 x i1> zeroinitializer
+;
+  %fabs = tail call <2 x double> @llvm.fabs.v2f64(<2 x double> %x)
+  %cmp = fcmp nnan ult <2 x double> %fabs, zeroinitializer
+  ret <2 x i1> %cmp
 }
 
 define i1 @orderedLessZeroSelect(float, float) {
@@ -278,6 +414,18 @@ define i1 @orderedLessZeroMaxNum(float, float) {
 ;
   %a = call float @llvm.exp.f32(float %0)
   %b = call float @llvm.maxnum.f32(float %a, float %1)
+  %uge = fcmp uge float %b, 0.000000e+00
+  ret i1 %uge
+}
+
+; But using maximum, we can simplify, since the NaN would be propagated
+
+define i1 @orderedLessZeroMaximum(float, float) {
+; CHECK-LABEL: @orderedLessZeroMaximum(
+; CHECK-NEXT:    ret i1 true
+;
+  %a = call float @llvm.exp.f32(float %0)
+  %b = call float @llvm.maximum.f32(float %a, float %1)
   %uge = fcmp uge float %b, 0.000000e+00
   ret i1 %uge
 }
@@ -375,4 +523,3 @@ define <2 x i1> @unorderedCompareWithNaNVector_undef_elt(<2 x double> %A) {
   %cmp = fcmp ult <2 x double> %A, <double undef, double 0xFFFFFFFFFFFFFFFF>
   ret <2 x i1> %cmp
 }
-

@@ -320,7 +320,7 @@ bool LoopIdiomRecognize::runOnCountableLoop() {
 
   // The following transforms hoist stores/memsets into the loop pre-header.
   // Give up if the loop has instructions may throw.
-  LoopSafetyInfo SafetyInfo;
+  SimpleLoopSafetyInfo SafetyInfo;
   SafetyInfo.computeLoopSafetyInfo(CurLoop);
   if (SafetyInfo.anyBlockMayThrow())
     return MadeChange;
@@ -928,10 +928,11 @@ bool LoopIdiomRecognize::processLoopStridedStore(
     Type *Int8PtrTy = DestInt8PtrTy;
 
     Module *M = TheStore->getModule();
+    StringRef FuncName = "memset_pattern16";
     Value *MSP =
-        M->getOrInsertFunction("memset_pattern16", Builder.getVoidTy(),
+        M->getOrInsertFunction(FuncName, Builder.getVoidTy(),
                                Int8PtrTy, Int8PtrTy, IntPtr);
-    inferLibFuncAttributes(*M->getFunction("memset_pattern16"), *TLI);
+    inferLibFuncAttributes(M, FuncName, *TLI);
 
     // Otherwise we should form a memset_pattern16.  PatternValue is known to be
     // an constant array of 16-bytes.  Plop the value into a mergable global.

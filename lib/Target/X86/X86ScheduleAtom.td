@@ -43,6 +43,9 @@ def AtomPort01 : ProcResGroup<[AtomPort0, AtomPort1]>;
 // Loads are 3 cycles, so ReadAfterLd registers needn't be available until 3
 // cycles after the memory operand.
 def : ReadAdvance<ReadAfterLd, 3>;
+def : ReadAdvance<ReadAfterVecLd, 3>;
+def : ReadAdvance<ReadAfterVecXLd, 3>;
+def : ReadAdvance<ReadAfterVecYLd, 3>;
 
 // Many SchedWrites are defined in pairs with and without a folded load.
 // Instructions with folded loads are usually micro-fused, so they only appear
@@ -121,8 +124,12 @@ def  : WriteRes<WriteLAHFSAHF, [AtomPort01]> {
   let Latency = 2;
   let ResourceCycles = [2];
 }
-defm : X86WriteRes<WriteBitTest,    [AtomPort1], 1, [1], 1>;
-defm : X86WriteRes<WriteBitTestSet, [AtomPort1], 1, [1], 1>;
+defm : X86WriteRes<WriteBitTest,         [AtomPort1],  1, [1], 1>;
+defm : X86WriteRes<WriteBitTestImmLd,    [AtomPort0],  1, [1], 1>;
+defm : X86WriteRes<WriteBitTestRegLd,    [AtomPort01], 9, [9], 1>;
+defm : X86WriteRes<WriteBitTestSet,      [AtomPort1],  1, [1], 1>;
+//defm : X86WriteRes<WriteBitTestSetImmLd, [AtomPort1],  1, [1], 1>;
+//defm : X86WriteRes<WriteBitTestSetRegLd, [AtomPort1],  1, [1], 1>;
 
 // This is for simple LEAs with one or two input operands.
 def : WriteRes<WriteLEA, [AtomPort1]>;
@@ -553,14 +560,14 @@ def : InstRW<[AtomWrite01_2], (instrs LEAVE, LEAVE64, POP16r,
                                       PUSH16rmm, PUSH32rmm, PUSH64rmm,
                                       LODSB, LODSL, LODSQ, LODSW,
                                       SCASB, SCASL, SCASQ, SCASW)>;
-def : InstRW<[AtomWrite01_2], (instregex "BT(C|R|S)(16|32|64)mi8",
-                                         "PUSH(CS|DS|ES|FS|GS|SS)(16|32|64)",
+def : InstRW<[AtomWrite01_2], (instregex "PUSH(CS|DS|ES|FS|GS|SS)(16|32|64)",
                                          "(ST|ISTT)_F(P)?(16|32|64)?(m|rr)",
                                          "MMX_P(ADD|SUB)Qirr",
                                          "MOV(S|Z)X16rr8",
                                          "MOV(UPS|UPD|DQU)mr",
                                          "MASKMOVDQU(64)?",
                                          "P(ADD|SUB)Qrr")>;
+def : SchedAlias<WriteBitTestSetImmRMW, AtomWrite01_2>;
 
 def AtomWrite01_3 : SchedWriteRes<[AtomPort01]> {
   let Latency = 3;
@@ -626,8 +633,7 @@ def AtomWrite01_9 : SchedWriteRes<[AtomPort01]> {
   let Latency = 9;
   let ResourceCycles = [9];
 }
-def : InstRW<[AtomWrite01_9], (instrs BT16mr, BT32mr, BT64mr,
-                                      POPA16, POPA32,
+def : InstRW<[AtomWrite01_9], (instrs POPA16, POPA32,
                                       PUSHF16, PUSHF32, PUSHF64,
                                       SHLD64mrCL, SHRD64mrCL,
                                       SHLD64mri8, SHRD64mri8,
@@ -650,7 +656,7 @@ def AtomWrite01_11 : SchedWriteRes<[AtomPort01]> {
   let ResourceCycles = [11];
 }
 def : InstRW<[AtomWrite01_11], (instrs BOUNDS16rm, BOUNDS32rm)>;
-def : InstRW<[AtomWrite01_11], (instregex "BT(C|R|S)(16|32|64)mr")>;
+def : SchedAlias<WriteBitTestSetRegRMW, AtomWrite01_11>;
 
 def AtomWrite01_13 : SchedWriteRes<[AtomPort01]> {
   let Latency = 13;

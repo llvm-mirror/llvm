@@ -2,22 +2,34 @@
 ; RUN: llc < %s -mtriple=x86_64-unknown-unknown -mattr=+sse2 | FileCheck %s --check-prefix=SSE2
 ; RUN: llc < %s -mtriple=x86_64-unknown-unknown -mattr=+avx | FileCheck %s  --check-prefix=AVX --check-prefix=AVX1
 ; RUN: llc < %s -mtriple=x86_64-unknown-unknown -mattr=+avx2 | FileCheck %s  --check-prefix=AVX --check-prefix=AVX2
+; RUN: llc < %s -mtriple=x86_64-unknown-unknown -mattr=+avx512f | FileCheck %s  --check-prefix=KNL
 ; RUN: llc < %s -mtriple=x86_64-unknown-unknown -mattr=+avx512vl,+avx512dq,+avx512bw | FileCheck %s  --check-prefix=SKX
 
 define i1 @allones_v16i8_sign(<16 x i8> %arg) {
 ; SSE2-LABEL: allones_v16i8_sign:
 ; SSE2:       # %bb.0:
 ; SSE2-NEXT:    pmovmskb %xmm0, %eax
-; SSE2-NEXT:    cmpl $65535, %eax # imm = 0xFFFF
+; SSE2-NEXT:    cmpw $-1, %ax
 ; SSE2-NEXT:    sete %al
 ; SSE2-NEXT:    retq
 ;
 ; AVX-LABEL: allones_v16i8_sign:
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vpmovmskb %xmm0, %eax
-; AVX-NEXT:    cmpl $65535, %eax # imm = 0xFFFF
+; AVX-NEXT:    cmpw $-1, %ax
 ; AVX-NEXT:    sete %al
 ; AVX-NEXT:    retq
+;
+; KNL-LABEL: allones_v16i8_sign:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; KNL-NEXT:    vpcmpgtb %xmm0, %xmm1, %xmm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kortestw %k0, %k0
+; KNL-NEXT:    setb %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
 ;
 ; SKX-LABEL: allones_v16i8_sign:
 ; SKX:       # %bb.0:
@@ -45,6 +57,17 @@ define i1 @allzeros_v16i8_sign(<16 x i8> %arg) {
 ; AVX-NEXT:    testw %ax, %ax
 ; AVX-NEXT:    sete %al
 ; AVX-NEXT:    retq
+;
+; KNL-LABEL: allzeros_v16i8_sign:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; KNL-NEXT:    vpcmpgtb %xmm0, %xmm1, %xmm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kortestw %k0, %k0
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
 ;
 ; SKX-LABEL: allzeros_v16i8_sign:
 ; SKX:       # %bb.0:
@@ -92,6 +115,24 @@ define i1 @allones_v32i8_sign(<32 x i8> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allones_v32i8_sign:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; KNL-NEXT:    vpcmpgtb %ymm0, %ymm1, %ymm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm1
+; KNL-NEXT:    vptestmd %zmm1, %zmm1, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    vextracti128 $1, %ymm0, %xmm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %ecx
+; KNL-NEXT:    shll $16, %ecx
+; KNL-NEXT:    orl %eax, %ecx
+; KNL-NEXT:    cmpl $-1, %ecx
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allones_v32i8_sign:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vpmovb2m %ymm0, %k0
@@ -136,6 +177,23 @@ define i1 @allzeros_v32i8_sign(<32 x i8> %arg) {
 ; AVX2-NEXT:    sete %al
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
+;
+; KNL-LABEL: allzeros_v32i8_sign:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; KNL-NEXT:    vpcmpgtb %ymm0, %ymm1, %ymm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm1
+; KNL-NEXT:    vptestmd %zmm1, %zmm1, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    vextracti128 $1, %ymm0, %xmm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %ecx
+; KNL-NEXT:    shll $16, %ecx
+; KNL-NEXT:    orl %eax, %ecx
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
 ;
 ; SKX-LABEL: allzeros_v32i8_sign:
 ; SKX:       # %bb.0:
@@ -202,6 +260,36 @@ define i1 @allones_v64i8_sign(<64 x i8> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allones_v64i8_sign:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vpxor %xmm2, %xmm2, %xmm2
+; KNL-NEXT:    vpcmpgtb %ymm0, %ymm2, %ymm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm3
+; KNL-NEXT:    vptestmd %zmm3, %zmm3, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    vextracti128 $1, %ymm0, %xmm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %ecx
+; KNL-NEXT:    shll $16, %ecx
+; KNL-NEXT:    orl %eax, %ecx
+; KNL-NEXT:    vpcmpgtb %ymm1, %ymm2, %ymm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm1
+; KNL-NEXT:    vptestmd %zmm1, %zmm1, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    vextracti128 $1, %ymm0, %xmm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %edx
+; KNL-NEXT:    shll $16, %edx
+; KNL-NEXT:    orl %eax, %edx
+; KNL-NEXT:    shlq $32, %rdx
+; KNL-NEXT:    orq %rcx, %rdx
+; KNL-NEXT:    cmpq $-1, %rdx
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allones_v64i8_sign:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vpmovb2m %zmm0, %k0
@@ -264,6 +352,35 @@ define i1 @allzeros_v64i8_sign(<64 x i8> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allzeros_v64i8_sign:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vpxor %xmm2, %xmm2, %xmm2
+; KNL-NEXT:    vpcmpgtb %ymm0, %ymm2, %ymm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm3
+; KNL-NEXT:    vptestmd %zmm3, %zmm3, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    vextracti128 $1, %ymm0, %xmm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %ecx
+; KNL-NEXT:    shll $16, %ecx
+; KNL-NEXT:    orl %eax, %ecx
+; KNL-NEXT:    vpcmpgtb %ymm1, %ymm2, %ymm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm1
+; KNL-NEXT:    vptestmd %zmm1, %zmm1, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    vextracti128 $1, %ymm0, %xmm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %edx
+; KNL-NEXT:    shll $16, %edx
+; KNL-NEXT:    orl %eax, %edx
+; KNL-NEXT:    shlq $32, %rdx
+; KNL-NEXT:    orq %rcx, %rdx
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allzeros_v64i8_sign:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vpmovb2m %zmm0, %k0
@@ -298,6 +415,18 @@ define i1 @allones_v8i16_sign(<8 x i16> %arg) {
 ; AVX-NEXT:    sete %al
 ; AVX-NEXT:    retq
 ;
+; KNL-LABEL: allones_v8i16_sign:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; KNL-NEXT:    vpcmpgtw %xmm0, %xmm1, %xmm0
+; KNL-NEXT:    vpmovsxwq %xmm0, %zmm0
+; KNL-NEXT:    vptestmq %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    cmpb $-1, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allones_v8i16_sign:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vpmovw2m %xmm0, %k0
@@ -331,6 +460,18 @@ define i1 @allzeros_v8i16_sign(<8 x i16> %arg) {
 ; AVX-NEXT:    sete %al
 ; AVX-NEXT:    retq
 ;
+; KNL-LABEL: allzeros_v8i16_sign:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; KNL-NEXT:    vpcmpgtw %xmm0, %xmm1, %xmm0
+; KNL-NEXT:    vpmovsxwq %xmm0, %zmm0
+; KNL-NEXT:    vptestmq %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    testb %al, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allzeros_v8i16_sign:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vpmovw2m %xmm0, %k0
@@ -352,7 +493,7 @@ define i1 @allones_v16i16_sign(<16 x i16> %arg) {
 ; SSE2-NEXT:    pcmpgtw %xmm0, %xmm2
 ; SSE2-NEXT:    packsswb %xmm3, %xmm2
 ; SSE2-NEXT:    pmovmskb %xmm2, %eax
-; SSE2-NEXT:    cmpl $65535, %eax # imm = 0xFFFF
+; SSE2-NEXT:    cmpw $-1, %ax
 ; SSE2-NEXT:    sete %al
 ; SSE2-NEXT:    retq
 ;
@@ -364,7 +505,7 @@ define i1 @allones_v16i16_sign(<16 x i16> %arg) {
 ; AVX1-NEXT:    vpcmpgtw %xmm0, %xmm2, %xmm0
 ; AVX1-NEXT:    vpacksswb %xmm1, %xmm0, %xmm0
 ; AVX1-NEXT:    vpmovmskb %xmm0, %eax
-; AVX1-NEXT:    cmpl $65535, %eax # imm = 0xFFFF
+; AVX1-NEXT:    cmpw $-1, %ax
 ; AVX1-NEXT:    sete %al
 ; AVX1-NEXT:    vzeroupper
 ; AVX1-NEXT:    retq
@@ -376,10 +517,21 @@ define i1 @allones_v16i16_sign(<16 x i16> %arg) {
 ; AVX2-NEXT:    vextracti128 $1, %ymm0, %xmm1
 ; AVX2-NEXT:    vpacksswb %xmm1, %xmm0, %xmm0
 ; AVX2-NEXT:    vpmovmskb %xmm0, %eax
-; AVX2-NEXT:    cmpl $65535, %eax # imm = 0xFFFF
+; AVX2-NEXT:    cmpw $-1, %ax
 ; AVX2-NEXT:    sete %al
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
+;
+; KNL-LABEL: allones_v16i16_sign:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; KNL-NEXT:    vpcmpgtw %ymm0, %ymm1, %ymm0
+; KNL-NEXT:    vpmovsxwd %ymm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kortestw %k0, %k0
+; KNL-NEXT:    setb %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
 ;
 ; SKX-LABEL: allones_v16i16_sign:
 ; SKX:       # %bb.0:
@@ -431,6 +583,17 @@ define i1 @allzeros_v16i16_sign(<16 x i16> %arg) {
 ; AVX2-NEXT:    sete %al
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
+;
+; KNL-LABEL: allzeros_v16i16_sign:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; KNL-NEXT:    vpcmpgtw %ymm0, %ymm1, %ymm0
+; KNL-NEXT:    vpmovsxwd %ymm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kortestw %k0, %k0
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
 ;
 ; SKX-LABEL: allzeros_v16i16_sign:
 ; SKX:       # %bb.0:
@@ -499,6 +662,24 @@ define i1 @allones_v32i16_sign(<32 x i16> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allones_v32i16_sign:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vpxor %xmm2, %xmm2, %xmm2
+; KNL-NEXT:    vpcmpgtw %ymm0, %ymm2, %ymm0
+; KNL-NEXT:    vpmovsxwd %ymm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    vpcmpgtw %ymm1, %ymm2, %ymm0
+; KNL-NEXT:    vpmovsxwd %ymm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %ecx
+; KNL-NEXT:    shll $16, %ecx
+; KNL-NEXT:    orl %eax, %ecx
+; KNL-NEXT:    cmpl $-1, %ecx
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allones_v32i16_sign:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vpmovw2m %zmm0, %k0
@@ -564,6 +745,23 @@ define i1 @allzeros_v32i16_sign(<32 x i16> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allzeros_v32i16_sign:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vpxor %xmm2, %xmm2, %xmm2
+; KNL-NEXT:    vpcmpgtw %ymm0, %ymm2, %ymm0
+; KNL-NEXT:    vpmovsxwd %ymm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    vpcmpgtw %ymm1, %ymm2, %ymm0
+; KNL-NEXT:    vpmovsxwd %ymm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %ecx
+; KNL-NEXT:    shll $16, %ecx
+; KNL-NEXT:    orl %eax, %ecx
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allzeros_v32i16_sign:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vpmovw2m %zmm0, %k0
@@ -591,6 +789,18 @@ define i1 @allones_v4i32_sign(<4 x i32> %arg) {
 ; AVX-NEXT:    cmpb $15, %al
 ; AVX-NEXT:    sete %al
 ; AVX-NEXT:    retq
+;
+; KNL-LABEL: allones_v4i32_sign:
+; KNL:       # %bb.0:
+; KNL-NEXT:    # kill: def $xmm0 killed $xmm0 def $zmm0
+; KNL-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; KNL-NEXT:    vpcmpgtd %zmm0, %zmm1, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    andb $15, %al
+; KNL-NEXT:    cmpb $15, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
 ;
 ; SKX-LABEL: allones_v4i32_sign:
 ; SKX:       # %bb.0:
@@ -620,6 +830,17 @@ define i1 @allzeros_v4i32_sign(<4 x i32> %arg) {
 ; AVX-NEXT:    testb %al, %al
 ; AVX-NEXT:    sete %al
 ; AVX-NEXT:    retq
+;
+; KNL-LABEL: allzeros_v4i32_sign:
+; KNL:       # %bb.0:
+; KNL-NEXT:    # kill: def $xmm0 killed $xmm0 def $zmm0
+; KNL-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; KNL-NEXT:    vpcmpgtd %zmm0, %zmm1, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    testb $15, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
 ;
 ; SKX-LABEL: allzeros_v4i32_sign:
 ; SKX:       # %bb.0:
@@ -656,6 +877,17 @@ define i1 @allones_v8i32_sign(<8 x i32> %arg) {
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
 ;
+; KNL-LABEL: allones_v8i32_sign:
+; KNL:       # %bb.0:
+; KNL-NEXT:    # kill: def $ymm0 killed $ymm0 def $zmm0
+; KNL-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; KNL-NEXT:    vpcmpgtd %zmm0, %zmm1, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    cmpb $-1, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allones_v8i32_sign:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vpmovd2m %ymm0, %k0
@@ -691,6 +923,17 @@ define i1 @allzeros_v8i32_sign(<8 x i32> %arg) {
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
 ;
+; KNL-LABEL: allzeros_v8i32_sign:
+; KNL:       # %bb.0:
+; KNL-NEXT:    # kill: def $ymm0 killed $ymm0 def $zmm0
+; KNL-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; KNL-NEXT:    vpcmpgtd %zmm0, %zmm1, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    testb %al, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allzeros_v8i32_sign:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vpmovd2m %ymm0, %k0
@@ -719,7 +962,7 @@ define i1 @allones_v16i32_sign(<16 x i32> %arg) {
 ; SSE2-NEXT:    packssdw %xmm2, %xmm4
 ; SSE2-NEXT:    packsswb %xmm3, %xmm4
 ; SSE2-NEXT:    pmovmskb %xmm4, %eax
-; SSE2-NEXT:    cmpl $65535, %eax # imm = 0xFFFF
+; SSE2-NEXT:    cmpw $-1, %ax
 ; SSE2-NEXT:    sete %al
 ; SSE2-NEXT:    retq
 ;
@@ -736,7 +979,7 @@ define i1 @allones_v16i32_sign(<16 x i32> %arg) {
 ; AVX1-NEXT:    vpackssdw %xmm2, %xmm0, %xmm0
 ; AVX1-NEXT:    vpacksswb %xmm1, %xmm0, %xmm0
 ; AVX1-NEXT:    vpmovmskb %xmm0, %eax
-; AVX1-NEXT:    cmpl $65535, %eax # imm = 0xFFFF
+; AVX1-NEXT:    cmpw $-1, %ax
 ; AVX1-NEXT:    sete %al
 ; AVX1-NEXT:    vzeroupper
 ; AVX1-NEXT:    retq
@@ -751,10 +994,19 @@ define i1 @allones_v16i32_sign(<16 x i32> %arg) {
 ; AVX2-NEXT:    vextracti128 $1, %ymm0, %xmm1
 ; AVX2-NEXT:    vpacksswb %xmm1, %xmm0, %xmm0
 ; AVX2-NEXT:    vpmovmskb %xmm0, %eax
-; AVX2-NEXT:    cmpl $65535, %eax # imm = 0xFFFF
+; AVX2-NEXT:    cmpw $-1, %ax
 ; AVX2-NEXT:    sete %al
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
+;
+; KNL-LABEL: allones_v16i32_sign:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; KNL-NEXT:    vpcmpgtd %zmm0, %zmm1, %k0
+; KNL-NEXT:    kortestw %k0, %k0
+; KNL-NEXT:    setb %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
 ;
 ; SKX-LABEL: allones_v16i32_sign:
 ; SKX:       # %bb.0:
@@ -821,6 +1073,15 @@ define i1 @allzeros_v16i32_sign(<16 x i32> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allzeros_v16i32_sign:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; KNL-NEXT:    vpcmpgtd %zmm0, %zmm1, %k0
+; KNL-NEXT:    kortestw %k0, %k0
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allzeros_v16i32_sign:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vpmovd2m %zmm0, %k0
@@ -837,7 +1098,7 @@ define i1 @allzeros_v16i32_sign(<16 x i32> %arg) {
 define i1 @allones_v4i64_sign(<4 x i64> %arg) {
 ; SSE2-LABEL: allones_v4i64_sign:
 ; SSE2:       # %bb.0:
-; SSE2-NEXT:    movdqa {{.*#+}} xmm2 = [2147483648,0,2147483648,0]
+; SSE2-NEXT:    movdqa {{.*#+}} xmm2 = [2147483648,2147483648]
 ; SSE2-NEXT:    pxor %xmm2, %xmm1
 ; SSE2-NEXT:    movdqa %xmm2, %xmm3
 ; SSE2-NEXT:    pcmpgtd %xmm1, %xmm3
@@ -870,6 +1131,18 @@ define i1 @allones_v4i64_sign(<4 x i64> %arg) {
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
 ;
+; KNL-LABEL: allones_v4i64_sign:
+; KNL:       # %bb.0:
+; KNL-NEXT:    # kill: def $ymm0 killed $ymm0 def $zmm0
+; KNL-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; KNL-NEXT:    vpcmpgtq %zmm0, %zmm1, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    andb $15, %al
+; KNL-NEXT:    cmpb $15, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allones_v4i64_sign:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vpmovq2m %ymm0, %k0
@@ -888,7 +1161,7 @@ define i1 @allones_v4i64_sign(<4 x i64> %arg) {
 define i1 @allzeros_v4i64_sign(<4 x i64> %arg) {
 ; SSE2-LABEL: allzeros_v4i64_sign:
 ; SSE2:       # %bb.0:
-; SSE2-NEXT:    movdqa {{.*#+}} xmm2 = [2147483648,0,2147483648,0]
+; SSE2-NEXT:    movdqa {{.*#+}} xmm2 = [2147483648,2147483648]
 ; SSE2-NEXT:    pxor %xmm2, %xmm1
 ; SSE2-NEXT:    movdqa %xmm2, %xmm3
 ; SSE2-NEXT:    pcmpgtd %xmm1, %xmm3
@@ -921,6 +1194,17 @@ define i1 @allzeros_v4i64_sign(<4 x i64> %arg) {
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
 ;
+; KNL-LABEL: allzeros_v4i64_sign:
+; KNL:       # %bb.0:
+; KNL-NEXT:    # kill: def $ymm0 killed $ymm0 def $zmm0
+; KNL-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; KNL-NEXT:    vpcmpgtq %zmm0, %zmm1, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    testb $15, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allzeros_v4i64_sign:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vpmovq2m %ymm0, %k0
@@ -938,7 +1222,7 @@ define i1 @allzeros_v4i64_sign(<4 x i64> %arg) {
 define i1 @allones_v8i64_sign(<8 x i64> %arg) {
 ; SSE2-LABEL: allones_v8i64_sign:
 ; SSE2:       # %bb.0:
-; SSE2-NEXT:    movdqa {{.*#+}} xmm4 = [2147483648,0,2147483648,0]
+; SSE2-NEXT:    movdqa {{.*#+}} xmm4 = [2147483648,2147483648]
 ; SSE2-NEXT:    pxor %xmm4, %xmm3
 ; SSE2-NEXT:    movdqa %xmm4, %xmm5
 ; SSE2-NEXT:    pcmpgtd %xmm3, %xmm5
@@ -1015,6 +1299,16 @@ define i1 @allones_v8i64_sign(<8 x i64> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allones_v8i64_sign:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; KNL-NEXT:    vpcmpgtq %zmm0, %zmm1, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    cmpb $-1, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allones_v8i64_sign:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vpmovq2m %zmm0, %k0
@@ -1031,7 +1325,7 @@ define i1 @allones_v8i64_sign(<8 x i64> %arg) {
 define i1 @allzeros_v8i64_sign(<8 x i64> %arg) {
 ; SSE2-LABEL: allzeros_v8i64_sign:
 ; SSE2:       # %bb.0:
-; SSE2-NEXT:    movdqa {{.*#+}} xmm4 = [2147483648,0,2147483648,0]
+; SSE2-NEXT:    movdqa {{.*#+}} xmm4 = [2147483648,2147483648]
 ; SSE2-NEXT:    pxor %xmm4, %xmm3
 ; SSE2-NEXT:    movdqa %xmm4, %xmm5
 ; SSE2-NEXT:    pcmpgtd %xmm3, %xmm5
@@ -1108,6 +1402,16 @@ define i1 @allzeros_v8i64_sign(<8 x i64> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allzeros_v8i64_sign:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; KNL-NEXT:    vpcmpgtq %zmm0, %zmm1, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    testb %al, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allzeros_v8i64_sign:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vpmovq2m %zmm0, %k0
@@ -1126,7 +1430,7 @@ define i1 @allones_v16i8_and1(<16 x i8> %arg) {
 ; SSE2:       # %bb.0:
 ; SSE2-NEXT:    psllw $7, %xmm0
 ; SSE2-NEXT:    pmovmskb %xmm0, %eax
-; SSE2-NEXT:    cmpl $65535, %eax # imm = 0xFFFF
+; SSE2-NEXT:    cmpw $-1, %ax
 ; SSE2-NEXT:    sete %al
 ; SSE2-NEXT:    retq
 ;
@@ -1134,9 +1438,21 @@ define i1 @allones_v16i8_and1(<16 x i8> %arg) {
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vpsllw $7, %xmm0, %xmm0
 ; AVX-NEXT:    vpmovmskb %xmm0, %eax
-; AVX-NEXT:    cmpl $65535, %eax # imm = 0xFFFF
+; AVX-NEXT:    cmpw $-1, %ax
 ; AVX-NEXT:    sete %al
 ; AVX-NEXT:    retq
+;
+; KNL-LABEL: allones_v16i8_and1:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vmovdqa {{.*#+}} xmm1 = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+; KNL-NEXT:    vpand %xmm1, %xmm0, %xmm0
+; KNL-NEXT:    vpcmpeqb %xmm1, %xmm0, %xmm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kortestw %k0, %k0
+; KNL-NEXT:    setb %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
 ;
 ; SKX-LABEL: allones_v16i8_and1:
 ; SKX:       # %bb.0:
@@ -1167,6 +1483,18 @@ define i1 @allzeros_v16i8_and1(<16 x i8> %arg) {
 ; AVX-NEXT:    testw %ax, %ax
 ; AVX-NEXT:    sete %al
 ; AVX-NEXT:    retq
+;
+; KNL-LABEL: allzeros_v16i8_and1:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vmovdqa {{.*#+}} xmm1 = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+; KNL-NEXT:    vpand %xmm1, %xmm0, %xmm0
+; KNL-NEXT:    vpcmpeqb %xmm1, %xmm0, %xmm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kortestw %k0, %k0
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
 ;
 ; SKX-LABEL: allzeros_v16i8_and1:
 ; SKX:       # %bb.0:
@@ -1222,6 +1550,25 @@ define i1 @allones_v32i8_and1(<32 x i8> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allones_v32i8_and1:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vmovdqa {{.*#+}} ymm1 = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+; KNL-NEXT:    vpand %ymm1, %ymm0, %ymm0
+; KNL-NEXT:    vpcmpeqb %ymm1, %ymm0, %ymm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm1
+; KNL-NEXT:    vptestmd %zmm1, %zmm1, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    vextracti128 $1, %ymm0, %xmm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %ecx
+; KNL-NEXT:    shll $16, %ecx
+; KNL-NEXT:    orl %eax, %ecx
+; KNL-NEXT:    cmpl $-1, %ecx
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allones_v32i8_and1:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vptestmb {{.*}}(%rip), %ymm0, %k0
@@ -1274,6 +1621,24 @@ define i1 @allzeros_v32i8_and1(<32 x i8> %arg) {
 ; AVX2-NEXT:    sete %al
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
+;
+; KNL-LABEL: allzeros_v32i8_and1:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vmovdqa {{.*#+}} ymm1 = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+; KNL-NEXT:    vpand %ymm1, %ymm0, %ymm0
+; KNL-NEXT:    vpcmpeqb %ymm1, %ymm0, %ymm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm1
+; KNL-NEXT:    vptestmd %zmm1, %zmm1, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    vextracti128 $1, %ymm0, %xmm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %ecx
+; KNL-NEXT:    shll $16, %ecx
+; KNL-NEXT:    orl %eax, %ecx
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
 ;
 ; SKX-LABEL: allzeros_v32i8_and1:
 ; SKX:       # %bb.0:
@@ -1355,6 +1720,38 @@ define i1 @allones_v64i8_and1(<64 x i8> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allones_v64i8_and1:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vmovdqa {{.*#+}} ymm2 = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+; KNL-NEXT:    vpand %ymm2, %ymm1, %ymm1
+; KNL-NEXT:    vpand %ymm2, %ymm0, %ymm0
+; KNL-NEXT:    vpcmpeqb %ymm2, %ymm0, %ymm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm3
+; KNL-NEXT:    vptestmd %zmm3, %zmm3, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    vextracti128 $1, %ymm0, %xmm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %ecx
+; KNL-NEXT:    shll $16, %ecx
+; KNL-NEXT:    orl %eax, %ecx
+; KNL-NEXT:    vpcmpeqb %ymm2, %ymm1, %ymm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm1
+; KNL-NEXT:    vptestmd %zmm1, %zmm1, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    vextracti128 $1, %ymm0, %xmm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %edx
+; KNL-NEXT:    shll $16, %edx
+; KNL-NEXT:    orl %eax, %edx
+; KNL-NEXT:    shlq $32, %rdx
+; KNL-NEXT:    orq %rcx, %rdx
+; KNL-NEXT:    cmpq $-1, %rdx
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allones_v64i8_and1:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vptestmb {{.*}}(%rip), %zmm0, %k0
@@ -1432,6 +1829,37 @@ define i1 @allzeros_v64i8_and1(<64 x i8> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allzeros_v64i8_and1:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vmovdqa {{.*#+}} ymm2 = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+; KNL-NEXT:    vpand %ymm2, %ymm1, %ymm1
+; KNL-NEXT:    vpand %ymm2, %ymm0, %ymm0
+; KNL-NEXT:    vpcmpeqb %ymm2, %ymm0, %ymm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm3
+; KNL-NEXT:    vptestmd %zmm3, %zmm3, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    vextracti128 $1, %ymm0, %xmm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %ecx
+; KNL-NEXT:    shll $16, %ecx
+; KNL-NEXT:    orl %eax, %ecx
+; KNL-NEXT:    vpcmpeqb %ymm2, %ymm1, %ymm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm1
+; KNL-NEXT:    vptestmd %zmm1, %zmm1, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    vextracti128 $1, %ymm0, %xmm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %edx
+; KNL-NEXT:    shll $16, %edx
+; KNL-NEXT:    orl %eax, %edx
+; KNL-NEXT:    shlq $32, %rdx
+; KNL-NEXT:    orq %rcx, %rdx
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allzeros_v64i8_and1:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vptestmb {{.*}}(%rip), %zmm0, %k0
@@ -1469,6 +1897,19 @@ define i1 @allones_v8i16_and1(<8 x i16> %arg) {
 ; AVX-NEXT:    sete %al
 ; AVX-NEXT:    retq
 ;
+; KNL-LABEL: allones_v8i16_and1:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vmovdqa {{.*#+}} xmm1 = [1,1,1,1,1,1,1,1]
+; KNL-NEXT:    vpand %xmm1, %xmm0, %xmm0
+; KNL-NEXT:    vpcmpeqw %xmm1, %xmm0, %xmm0
+; KNL-NEXT:    vpmovsxwq %xmm0, %zmm0
+; KNL-NEXT:    vptestmq %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    cmpb $-1, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allones_v8i16_and1:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vptestmw {{.*}}(%rip), %xmm0, %k0
@@ -1505,6 +1946,19 @@ define i1 @allzeros_v8i16_and1(<8 x i16> %arg) {
 ; AVX-NEXT:    sete %al
 ; AVX-NEXT:    retq
 ;
+; KNL-LABEL: allzeros_v8i16_and1:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vmovdqa {{.*#+}} xmm1 = [1,1,1,1,1,1,1,1]
+; KNL-NEXT:    vpand %xmm1, %xmm0, %xmm0
+; KNL-NEXT:    vpcmpeqw %xmm1, %xmm0, %xmm0
+; KNL-NEXT:    vpmovsxwq %xmm0, %zmm0
+; KNL-NEXT:    vptestmq %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    testb %al, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allzeros_v8i16_and1:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vptestmw {{.*}}(%rip), %xmm0, %k0
@@ -1528,7 +1982,7 @@ define i1 @allones_v16i16_and1(<16 x i16> %arg) {
 ; SSE2-NEXT:    pcmpeqw %xmm2, %xmm0
 ; SSE2-NEXT:    packsswb %xmm1, %xmm0
 ; SSE2-NEXT:    pmovmskb %xmm0, %eax
-; SSE2-NEXT:    cmpl $65535, %eax # imm = 0xFFFF
+; SSE2-NEXT:    cmpw $-1, %ax
 ; SSE2-NEXT:    sete %al
 ; SSE2-NEXT:    retq
 ;
@@ -1544,7 +1998,7 @@ define i1 @allones_v16i16_and1(<16 x i16> %arg) {
 ; AVX1-NEXT:    vpxor %xmm3, %xmm0, %xmm0
 ; AVX1-NEXT:    vpacksswb %xmm1, %xmm0, %xmm0
 ; AVX1-NEXT:    vpmovmskb %xmm0, %eax
-; AVX1-NEXT:    cmpl $65535, %eax # imm = 0xFFFF
+; AVX1-NEXT:    cmpw $-1, %ax
 ; AVX1-NEXT:    sete %al
 ; AVX1-NEXT:    vzeroupper
 ; AVX1-NEXT:    retq
@@ -1557,10 +2011,22 @@ define i1 @allones_v16i16_and1(<16 x i16> %arg) {
 ; AVX2-NEXT:    vextracti128 $1, %ymm0, %xmm1
 ; AVX2-NEXT:    vpacksswb %xmm1, %xmm0, %xmm0
 ; AVX2-NEXT:    vpmovmskb %xmm0, %eax
-; AVX2-NEXT:    cmpl $65535, %eax # imm = 0xFFFF
+; AVX2-NEXT:    cmpw $-1, %ax
 ; AVX2-NEXT:    sete %al
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
+;
+; KNL-LABEL: allones_v16i16_and1:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vmovdqa {{.*#+}} ymm1 = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+; KNL-NEXT:    vpand %ymm1, %ymm0, %ymm0
+; KNL-NEXT:    vpcmpeqw %ymm1, %ymm0, %ymm0
+; KNL-NEXT:    vpmovsxwd %ymm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kortestw %k0, %k0
+; KNL-NEXT:    setb %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
 ;
 ; SKX-LABEL: allones_v16i16_and1:
 ; SKX:       # %bb.0:
@@ -1641,6 +2107,26 @@ define i1 @allones_v32i16_and1(<32 x i16> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allones_v32i16_and1:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vmovdqa {{.*#+}} ymm2 = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+; KNL-NEXT:    vpand %ymm2, %ymm1, %ymm1
+; KNL-NEXT:    vpand %ymm2, %ymm0, %ymm0
+; KNL-NEXT:    vpcmpeqw %ymm2, %ymm0, %ymm0
+; KNL-NEXT:    vpmovsxwd %ymm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    vpcmpeqw %ymm2, %ymm1, %ymm0
+; KNL-NEXT:    vpmovsxwd %ymm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %ecx
+; KNL-NEXT:    shll $16, %ecx
+; KNL-NEXT:    orl %eax, %ecx
+; KNL-NEXT:    cmpl $-1, %ecx
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allones_v32i16_and1:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vptestmw {{.*}}(%rip), %zmm0, %k0
@@ -1718,6 +2204,25 @@ define i1 @allzeros_v32i16_and1(<32 x i16> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allzeros_v32i16_and1:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vmovdqa {{.*#+}} ymm2 = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+; KNL-NEXT:    vpand %ymm2, %ymm1, %ymm1
+; KNL-NEXT:    vpand %ymm2, %ymm0, %ymm0
+; KNL-NEXT:    vpcmpeqw %ymm2, %ymm0, %ymm0
+; KNL-NEXT:    vpmovsxwd %ymm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    vpcmpeqw %ymm2, %ymm1, %ymm0
+; KNL-NEXT:    vpmovsxwd %ymm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %ecx
+; KNL-NEXT:    shll $16, %ecx
+; KNL-NEXT:    orl %eax, %ecx
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allzeros_v32i16_and1:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vptestmw {{.*}}(%rip), %zmm0, %k0
@@ -1776,6 +2281,18 @@ define i1 @allzeros_v16i16_and1(<16 x i16> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allzeros_v16i16_and1:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vmovdqa {{.*#+}} ymm1 = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+; KNL-NEXT:    vpand %ymm1, %ymm0, %ymm0
+; KNL-NEXT:    vpcmpeqw %ymm1, %ymm0, %ymm0
+; KNL-NEXT:    vpmovsxwd %ymm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kortestw %k0, %k0
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allzeros_v16i16_and1:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vptestmw {{.*}}(%rip), %ymm0, %k0
@@ -1807,10 +2324,21 @@ define i1 @allones_v4i32_and1(<4 x i32> %arg) {
 ; AVX-NEXT:    sete %al
 ; AVX-NEXT:    retq
 ;
+; KNL-LABEL: allones_v4i32_and1:
+; KNL:       # %bb.0:
+; KNL-NEXT:    # kill: def $xmm0 killed $xmm0 def $zmm0
+; KNL-NEXT:    vpbroadcastd {{.*#+}} xmm1 = [1,1,1,1]
+; KNL-NEXT:    vptestmd %zmm1, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    andb $15, %al
+; KNL-NEXT:    cmpb $15, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allones_v4i32_and1:
 ; SKX:       # %bb.0:
-; SKX-NEXT:    vpbroadcastd {{.*#+}} xmm1 = [1,1,1,1]
-; SKX-NEXT:    vptestmd %xmm1, %xmm0, %k0
+; SKX-NEXT:    vptestmd {{.*}}(%rip){1to4}, %xmm0, %k0
 ; SKX-NEXT:    kmovd %k0, %eax
 ; SKX-NEXT:    andb $15, %al
 ; SKX-NEXT:    cmpb $15, %al
@@ -1840,10 +2368,20 @@ define i1 @allzeros_v4i32_and1(<4 x i32> %arg) {
 ; AVX-NEXT:    sete %al
 ; AVX-NEXT:    retq
 ;
+; KNL-LABEL: allzeros_v4i32_and1:
+; KNL:       # %bb.0:
+; KNL-NEXT:    # kill: def $xmm0 killed $xmm0 def $zmm0
+; KNL-NEXT:    vpbroadcastd {{.*#+}} xmm1 = [1,1,1,1]
+; KNL-NEXT:    vptestmd %zmm1, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    testb $15, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allzeros_v4i32_and1:
 ; SKX:       # %bb.0:
-; SKX-NEXT:    vpbroadcastd {{.*#+}} xmm1 = [1,1,1,1]
-; SKX-NEXT:    vptestmd %xmm1, %xmm0, %k0
+; SKX-NEXT:    vptestmd {{.*}}(%rip){1to4}, %xmm0, %k0
 ; SKX-NEXT:    kmovd %k0, %eax
 ; SKX-NEXT:    testb $15, %al
 ; SKX-NEXT:    sete %al
@@ -1891,10 +2429,20 @@ define i1 @allones_v8i32_and1(<8 x i32> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allones_v8i32_and1:
+; KNL:       # %bb.0:
+; KNL-NEXT:    # kill: def $ymm0 killed $ymm0 def $zmm0
+; KNL-NEXT:    vpbroadcastd {{.*#+}} ymm1 = [1,1,1,1,1,1,1,1]
+; KNL-NEXT:    vptestmd %zmm1, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    cmpb $-1, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allones_v8i32_and1:
 ; SKX:       # %bb.0:
-; SKX-NEXT:    vpbroadcastd {{.*#+}} ymm1 = [1,1,1,1,1,1,1,1]
-; SKX-NEXT:    vptestmd %ymm1, %ymm0, %k0
+; SKX-NEXT:    vptestmd {{.*}}(%rip){1to8}, %ymm0, %k0
 ; SKX-NEXT:    kortestb %k0, %k0
 ; SKX-NEXT:    setb %al
 ; SKX-NEXT:    vzeroupper
@@ -1942,10 +2490,20 @@ define i1 @allzeros_v8i32_and1(<8 x i32> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allzeros_v8i32_and1:
+; KNL:       # %bb.0:
+; KNL-NEXT:    # kill: def $ymm0 killed $ymm0 def $zmm0
+; KNL-NEXT:    vpbroadcastd {{.*#+}} ymm1 = [1,1,1,1,1,1,1,1]
+; KNL-NEXT:    vptestmd %zmm1, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    testb %al, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allzeros_v8i32_and1:
 ; SKX:       # %bb.0:
-; SKX-NEXT:    vpbroadcastd {{.*#+}} ymm1 = [1,1,1,1,1,1,1,1]
-; SKX-NEXT:    vptestmd %ymm1, %ymm0, %k0
+; SKX-NEXT:    vptestmd {{.*}}(%rip){1to8}, %ymm0, %k0
 ; SKX-NEXT:    kortestb %k0, %k0
 ; SKX-NEXT:    sete %al
 ; SKX-NEXT:    vzeroupper
@@ -1973,7 +2531,7 @@ define i1 @allones_v16i32_and1(<16 x i32> %arg) {
 ; SSE2-NEXT:    packssdw %xmm1, %xmm0
 ; SSE2-NEXT:    packsswb %xmm2, %xmm0
 ; SSE2-NEXT:    pmovmskb %xmm0, %eax
-; SSE2-NEXT:    cmpl $65535, %eax # imm = 0xFFFF
+; SSE2-NEXT:    cmpw $-1, %ax
 ; SSE2-NEXT:    sete %al
 ; SSE2-NEXT:    retq
 ;
@@ -1998,7 +2556,7 @@ define i1 @allones_v16i32_and1(<16 x i32> %arg) {
 ; AVX1-NEXT:    vpackssdw %xmm2, %xmm0, %xmm0
 ; AVX1-NEXT:    vpacksswb %xmm1, %xmm0, %xmm0
 ; AVX1-NEXT:    vpmovmskb %xmm0, %eax
-; AVX1-NEXT:    cmpl $65535, %eax # imm = 0xFFFF
+; AVX1-NEXT:    cmpw $-1, %ax
 ; AVX1-NEXT:    sete %al
 ; AVX1-NEXT:    vzeroupper
 ; AVX1-NEXT:    retq
@@ -2015,15 +2573,22 @@ define i1 @allones_v16i32_and1(<16 x i32> %arg) {
 ; AVX2-NEXT:    vextracti128 $1, %ymm0, %xmm1
 ; AVX2-NEXT:    vpacksswb %xmm1, %xmm0, %xmm0
 ; AVX2-NEXT:    vpmovmskb %xmm0, %eax
-; AVX2-NEXT:    cmpl $65535, %eax # imm = 0xFFFF
+; AVX2-NEXT:    cmpw $-1, %ax
 ; AVX2-NEXT:    sete %al
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allones_v16i32_and1:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vptestmd {{.*}}(%rip){1to16}, %zmm0, %k0
+; KNL-NEXT:    kortestw %k0, %k0
+; KNL-NEXT:    setb %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allones_v16i32_and1:
 ; SKX:       # %bb.0:
-; SKX-NEXT:    vpbroadcastd {{.*#+}} zmm1 = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
-; SKX-NEXT:    vptestmd %zmm1, %zmm0, %k0
+; SKX-NEXT:    vptestmd {{.*}}(%rip){1to16}, %zmm0, %k0
 ; SKX-NEXT:    kortestw %k0, %k0
 ; SKX-NEXT:    setb %al
 ; SKX-NEXT:    vzeroupper
@@ -2098,10 +2663,17 @@ define i1 @allzeros_v16i32_and1(<16 x i32> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allzeros_v16i32_and1:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vptestmd {{.*}}(%rip){1to16}, %zmm0, %k0
+; KNL-NEXT:    kortestw %k0, %k0
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allzeros_v16i32_and1:
 ; SKX:       # %bb.0:
-; SKX-NEXT:    vpbroadcastd {{.*#+}} zmm1 = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
-; SKX-NEXT:    vptestmd %zmm1, %zmm0, %k0
+; SKX-NEXT:    vptestmd {{.*}}(%rip){1to16}, %zmm0, %k0
 ; SKX-NEXT:    kortestw %k0, %k0
 ; SKX-NEXT:    sete %al
 ; SKX-NEXT:    vzeroupper
@@ -2129,6 +2701,18 @@ define i1 @allones_v2i64_and1(<2 x i64> %arg) {
 ; AVX-NEXT:    cmpb $3, %al
 ; AVX-NEXT:    sete %al
 ; AVX-NEXT:    retq
+;
+; KNL-LABEL: allones_v2i64_and1:
+; KNL:       # %bb.0:
+; KNL-NEXT:    # kill: def $xmm0 killed $xmm0 def $zmm0
+; KNL-NEXT:    vmovdqa {{.*#+}} xmm1 = [1,1]
+; KNL-NEXT:    vptestmq %zmm1, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    andb $3, %al
+; KNL-NEXT:    cmpb $3, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
 ;
 ; SKX-LABEL: allones_v2i64_and1:
 ; SKX:       # %bb.0:
@@ -2161,6 +2745,17 @@ define i1 @allzeros_v2i64_and1(<2 x i64> %arg) {
 ; AVX-NEXT:    testb %al, %al
 ; AVX-NEXT:    sete %al
 ; AVX-NEXT:    retq
+;
+; KNL-LABEL: allzeros_v2i64_and1:
+; KNL:       # %bb.0:
+; KNL-NEXT:    # kill: def $xmm0 killed $xmm0 def $zmm0
+; KNL-NEXT:    vmovdqa {{.*#+}} xmm1 = [1,1]
+; KNL-NEXT:    vptestmq %zmm1, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    testb $3, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
 ;
 ; SKX-LABEL: allzeros_v2i64_and1:
 ; SKX:       # %bb.0:
@@ -2214,6 +2809,18 @@ define i1 @allones_v4i64_and1(<4 x i64> %arg) {
 ; AVX2-NEXT:    sete %al
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
+;
+; KNL-LABEL: allones_v4i64_and1:
+; KNL:       # %bb.0:
+; KNL-NEXT:    # kill: def $ymm0 killed $ymm0 def $zmm0
+; KNL-NEXT:    vpbroadcastq {{.*#+}} ymm1 = [1,1,1,1]
+; KNL-NEXT:    vptestmq %zmm1, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    andb $15, %al
+; KNL-NEXT:    cmpb $15, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
 ;
 ; SKX-LABEL: allones_v4i64_and1:
 ; SKX:       # %bb.0:
@@ -2269,6 +2876,17 @@ define i1 @allzeros_v4i64_and1(<4 x i64> %arg) {
 ; AVX2-NEXT:    sete %al
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
+;
+; KNL-LABEL: allzeros_v4i64_and1:
+; KNL:       # %bb.0:
+; KNL-NEXT:    # kill: def $ymm0 killed $ymm0 def $zmm0
+; KNL-NEXT:    vpbroadcastq {{.*#+}} ymm1 = [1,1,1,1]
+; KNL-NEXT:    vptestmq %zmm1, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    testb $15, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
 ;
 ; SKX-LABEL: allzeros_v4i64_and1:
 ; SKX:       # %bb.0:
@@ -2355,6 +2973,15 @@ define i1 @allones_v8i64_and1(<8 x i64> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allones_v8i64_and1:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vptestmq {{.*}}(%rip){1to8}, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    cmpb $-1, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allones_v8i64_and1:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vptestmq {{.*}}(%rip){1to8}, %zmm0, %k0
@@ -2439,6 +3066,15 @@ define i1 @allzeros_v8i64_and1(<8 x i64> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allzeros_v8i64_and1:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vptestmq {{.*}}(%rip){1to8}, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    testb %al, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allzeros_v8i64_and1:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vptestmq {{.*}}(%rip){1to8}, %zmm0, %k0
@@ -2458,7 +3094,7 @@ define i1 @allones_v16i8_and4(<16 x i8> %arg) {
 ; SSE2:       # %bb.0:
 ; SSE2-NEXT:    psllw $5, %xmm0
 ; SSE2-NEXT:    pmovmskb %xmm0, %eax
-; SSE2-NEXT:    cmpl $65535, %eax # imm = 0xFFFF
+; SSE2-NEXT:    cmpw $-1, %ax
 ; SSE2-NEXT:    sete %al
 ; SSE2-NEXT:    retq
 ;
@@ -2466,9 +3102,21 @@ define i1 @allones_v16i8_and4(<16 x i8> %arg) {
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vpsllw $5, %xmm0, %xmm0
 ; AVX-NEXT:    vpmovmskb %xmm0, %eax
-; AVX-NEXT:    cmpl $65535, %eax # imm = 0xFFFF
+; AVX-NEXT:    cmpw $-1, %ax
 ; AVX-NEXT:    sete %al
 ; AVX-NEXT:    retq
+;
+; KNL-LABEL: allones_v16i8_and4:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vmovdqa {{.*#+}} xmm1 = [4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]
+; KNL-NEXT:    vpand %xmm1, %xmm0, %xmm0
+; KNL-NEXT:    vpcmpeqb %xmm1, %xmm0, %xmm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kortestw %k0, %k0
+; KNL-NEXT:    setb %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
 ;
 ; SKX-LABEL: allones_v16i8_and4:
 ; SKX:       # %bb.0:
@@ -2499,6 +3147,18 @@ define i1 @allzeros_v16i8_and4(<16 x i8> %arg) {
 ; AVX-NEXT:    testw %ax, %ax
 ; AVX-NEXT:    sete %al
 ; AVX-NEXT:    retq
+;
+; KNL-LABEL: allzeros_v16i8_and4:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vmovdqa {{.*#+}} xmm1 = [4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]
+; KNL-NEXT:    vpand %xmm1, %xmm0, %xmm0
+; KNL-NEXT:    vpcmpeqb %xmm1, %xmm0, %xmm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kortestw %k0, %k0
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
 ;
 ; SKX-LABEL: allzeros_v16i8_and4:
 ; SKX:       # %bb.0:
@@ -2554,6 +3214,25 @@ define i1 @allones_v32i8_and4(<32 x i8> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allones_v32i8_and4:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vmovdqa {{.*#+}} ymm1 = [4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]
+; KNL-NEXT:    vpand %ymm1, %ymm0, %ymm0
+; KNL-NEXT:    vpcmpeqb %ymm1, %ymm0, %ymm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm1
+; KNL-NEXT:    vptestmd %zmm1, %zmm1, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    vextracti128 $1, %ymm0, %xmm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %ecx
+; KNL-NEXT:    shll $16, %ecx
+; KNL-NEXT:    orl %eax, %ecx
+; KNL-NEXT:    cmpl $-1, %ecx
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allones_v32i8_and4:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vptestmb {{.*}}(%rip), %ymm0, %k0
@@ -2606,6 +3285,24 @@ define i1 @allzeros_v32i8_and4(<32 x i8> %arg) {
 ; AVX2-NEXT:    sete %al
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
+;
+; KNL-LABEL: allzeros_v32i8_and4:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vmovdqa {{.*#+}} ymm1 = [4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]
+; KNL-NEXT:    vpand %ymm1, %ymm0, %ymm0
+; KNL-NEXT:    vpcmpeqb %ymm1, %ymm0, %ymm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm1
+; KNL-NEXT:    vptestmd %zmm1, %zmm1, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    vextracti128 $1, %ymm0, %xmm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %ecx
+; KNL-NEXT:    shll $16, %ecx
+; KNL-NEXT:    orl %eax, %ecx
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
 ;
 ; SKX-LABEL: allzeros_v32i8_and4:
 ; SKX:       # %bb.0:
@@ -2687,6 +3384,38 @@ define i1 @allones_v64i8_and4(<64 x i8> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allones_v64i8_and4:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vmovdqa {{.*#+}} ymm2 = [4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]
+; KNL-NEXT:    vpand %ymm2, %ymm1, %ymm1
+; KNL-NEXT:    vpand %ymm2, %ymm0, %ymm0
+; KNL-NEXT:    vpcmpeqb %ymm2, %ymm0, %ymm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm3
+; KNL-NEXT:    vptestmd %zmm3, %zmm3, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    vextracti128 $1, %ymm0, %xmm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %ecx
+; KNL-NEXT:    shll $16, %ecx
+; KNL-NEXT:    orl %eax, %ecx
+; KNL-NEXT:    vpcmpeqb %ymm2, %ymm1, %ymm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm1
+; KNL-NEXT:    vptestmd %zmm1, %zmm1, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    vextracti128 $1, %ymm0, %xmm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %edx
+; KNL-NEXT:    shll $16, %edx
+; KNL-NEXT:    orl %eax, %edx
+; KNL-NEXT:    shlq $32, %rdx
+; KNL-NEXT:    orq %rcx, %rdx
+; KNL-NEXT:    cmpq $-1, %rdx
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allones_v64i8_and4:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vptestmb {{.*}}(%rip), %zmm0, %k0
@@ -2764,6 +3493,37 @@ define i1 @allzeros_v64i8_and4(<64 x i8> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allzeros_v64i8_and4:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vmovdqa {{.*#+}} ymm2 = [4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]
+; KNL-NEXT:    vpand %ymm2, %ymm1, %ymm1
+; KNL-NEXT:    vpand %ymm2, %ymm0, %ymm0
+; KNL-NEXT:    vpcmpeqb %ymm2, %ymm0, %ymm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm3
+; KNL-NEXT:    vptestmd %zmm3, %zmm3, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    vextracti128 $1, %ymm0, %xmm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %ecx
+; KNL-NEXT:    shll $16, %ecx
+; KNL-NEXT:    orl %eax, %ecx
+; KNL-NEXT:    vpcmpeqb %ymm2, %ymm1, %ymm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm1
+; KNL-NEXT:    vptestmd %zmm1, %zmm1, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    vextracti128 $1, %ymm0, %xmm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %edx
+; KNL-NEXT:    shll $16, %edx
+; KNL-NEXT:    orl %eax, %edx
+; KNL-NEXT:    shlq $32, %rdx
+; KNL-NEXT:    orq %rcx, %rdx
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allzeros_v64i8_and4:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vptestmb {{.*}}(%rip), %zmm0, %k0
@@ -2801,6 +3561,19 @@ define i1 @allones_v8i16_and4(<8 x i16> %arg) {
 ; AVX-NEXT:    sete %al
 ; AVX-NEXT:    retq
 ;
+; KNL-LABEL: allones_v8i16_and4:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vmovdqa {{.*#+}} xmm1 = [4,4,4,4,4,4,4,4]
+; KNL-NEXT:    vpand %xmm1, %xmm0, %xmm0
+; KNL-NEXT:    vpcmpeqw %xmm1, %xmm0, %xmm0
+; KNL-NEXT:    vpmovsxwq %xmm0, %zmm0
+; KNL-NEXT:    vptestmq %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    cmpb $-1, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allones_v8i16_and4:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vptestmw {{.*}}(%rip), %xmm0, %k0
@@ -2837,6 +3610,19 @@ define i1 @allzeros_v8i16_and4(<8 x i16> %arg) {
 ; AVX-NEXT:    sete %al
 ; AVX-NEXT:    retq
 ;
+; KNL-LABEL: allzeros_v8i16_and4:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vmovdqa {{.*#+}} xmm1 = [4,4,4,4,4,4,4,4]
+; KNL-NEXT:    vpand %xmm1, %xmm0, %xmm0
+; KNL-NEXT:    vpcmpeqw %xmm1, %xmm0, %xmm0
+; KNL-NEXT:    vpmovsxwq %xmm0, %zmm0
+; KNL-NEXT:    vptestmq %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    testb %al, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allzeros_v8i16_and4:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vptestmw {{.*}}(%rip), %xmm0, %k0
@@ -2860,7 +3646,7 @@ define i1 @allones_v16i16_and4(<16 x i16> %arg) {
 ; SSE2-NEXT:    pcmpeqw %xmm2, %xmm0
 ; SSE2-NEXT:    packsswb %xmm1, %xmm0
 ; SSE2-NEXT:    pmovmskb %xmm0, %eax
-; SSE2-NEXT:    cmpl $65535, %eax # imm = 0xFFFF
+; SSE2-NEXT:    cmpw $-1, %ax
 ; SSE2-NEXT:    sete %al
 ; SSE2-NEXT:    retq
 ;
@@ -2876,7 +3662,7 @@ define i1 @allones_v16i16_and4(<16 x i16> %arg) {
 ; AVX1-NEXT:    vpxor %xmm3, %xmm0, %xmm0
 ; AVX1-NEXT:    vpacksswb %xmm1, %xmm0, %xmm0
 ; AVX1-NEXT:    vpmovmskb %xmm0, %eax
-; AVX1-NEXT:    cmpl $65535, %eax # imm = 0xFFFF
+; AVX1-NEXT:    cmpw $-1, %ax
 ; AVX1-NEXT:    sete %al
 ; AVX1-NEXT:    vzeroupper
 ; AVX1-NEXT:    retq
@@ -2889,10 +3675,22 @@ define i1 @allones_v16i16_and4(<16 x i16> %arg) {
 ; AVX2-NEXT:    vextracti128 $1, %ymm0, %xmm1
 ; AVX2-NEXT:    vpacksswb %xmm1, %xmm0, %xmm0
 ; AVX2-NEXT:    vpmovmskb %xmm0, %eax
-; AVX2-NEXT:    cmpl $65535, %eax # imm = 0xFFFF
+; AVX2-NEXT:    cmpw $-1, %ax
 ; AVX2-NEXT:    sete %al
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
+;
+; KNL-LABEL: allones_v16i16_and4:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vmovdqa {{.*#+}} ymm1 = [4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]
+; KNL-NEXT:    vpand %ymm1, %ymm0, %ymm0
+; KNL-NEXT:    vpcmpeqw %ymm1, %ymm0, %ymm0
+; KNL-NEXT:    vpmovsxwd %ymm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kortestw %k0, %k0
+; KNL-NEXT:    setb %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
 ;
 ; SKX-LABEL: allones_v16i16_and4:
 ; SKX:       # %bb.0:
@@ -2973,6 +3771,26 @@ define i1 @allones_v32i16_and4(<32 x i16> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allones_v32i16_and4:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vmovdqa {{.*#+}} ymm2 = [4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]
+; KNL-NEXT:    vpand %ymm2, %ymm1, %ymm1
+; KNL-NEXT:    vpand %ymm2, %ymm0, %ymm0
+; KNL-NEXT:    vpcmpeqw %ymm2, %ymm0, %ymm0
+; KNL-NEXT:    vpmovsxwd %ymm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    vpcmpeqw %ymm2, %ymm1, %ymm0
+; KNL-NEXT:    vpmovsxwd %ymm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %ecx
+; KNL-NEXT:    shll $16, %ecx
+; KNL-NEXT:    orl %eax, %ecx
+; KNL-NEXT:    cmpl $-1, %ecx
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allones_v32i16_and4:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vptestmw {{.*}}(%rip), %zmm0, %k0
@@ -3050,6 +3868,25 @@ define i1 @allzeros_v32i16_and4(<32 x i16> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allzeros_v32i16_and4:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vmovdqa {{.*#+}} ymm2 = [4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]
+; KNL-NEXT:    vpand %ymm2, %ymm1, %ymm1
+; KNL-NEXT:    vpand %ymm2, %ymm0, %ymm0
+; KNL-NEXT:    vpcmpeqw %ymm2, %ymm0, %ymm0
+; KNL-NEXT:    vpmovsxwd %ymm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    vpcmpeqw %ymm2, %ymm1, %ymm0
+; KNL-NEXT:    vpmovsxwd %ymm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %ecx
+; KNL-NEXT:    shll $16, %ecx
+; KNL-NEXT:    orl %eax, %ecx
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allzeros_v32i16_and4:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vptestmw {{.*}}(%rip), %zmm0, %k0
@@ -3108,6 +3945,18 @@ define i1 @allzeros_v16i16_and4(<16 x i16> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allzeros_v16i16_and4:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vmovdqa {{.*#+}} ymm1 = [4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]
+; KNL-NEXT:    vpand %ymm1, %ymm0, %ymm0
+; KNL-NEXT:    vpcmpeqw %ymm1, %ymm0, %ymm0
+; KNL-NEXT:    vpmovsxwd %ymm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kortestw %k0, %k0
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allzeros_v16i16_and4:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vptestmw {{.*}}(%rip), %ymm0, %k0
@@ -3139,10 +3988,21 @@ define i1 @allones_v4i32_and4(<4 x i32> %arg) {
 ; AVX-NEXT:    sete %al
 ; AVX-NEXT:    retq
 ;
+; KNL-LABEL: allones_v4i32_and4:
+; KNL:       # %bb.0:
+; KNL-NEXT:    # kill: def $xmm0 killed $xmm0 def $zmm0
+; KNL-NEXT:    vpbroadcastd {{.*#+}} xmm1 = [4,4,4,4]
+; KNL-NEXT:    vptestmd %zmm1, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    andb $15, %al
+; KNL-NEXT:    cmpb $15, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allones_v4i32_and4:
 ; SKX:       # %bb.0:
-; SKX-NEXT:    vpbroadcastd {{.*#+}} xmm1 = [4,4,4,4]
-; SKX-NEXT:    vptestmd %xmm1, %xmm0, %k0
+; SKX-NEXT:    vptestmd {{.*}}(%rip){1to4}, %xmm0, %k0
 ; SKX-NEXT:    kmovd %k0, %eax
 ; SKX-NEXT:    andb $15, %al
 ; SKX-NEXT:    cmpb $15, %al
@@ -3172,10 +4032,20 @@ define i1 @allzeros_v4i32_and4(<4 x i32> %arg) {
 ; AVX-NEXT:    sete %al
 ; AVX-NEXT:    retq
 ;
+; KNL-LABEL: allzeros_v4i32_and4:
+; KNL:       # %bb.0:
+; KNL-NEXT:    # kill: def $xmm0 killed $xmm0 def $zmm0
+; KNL-NEXT:    vpbroadcastd {{.*#+}} xmm1 = [4,4,4,4]
+; KNL-NEXT:    vptestmd %zmm1, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    testb $15, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allzeros_v4i32_and4:
 ; SKX:       # %bb.0:
-; SKX-NEXT:    vpbroadcastd {{.*#+}} xmm1 = [4,4,4,4]
-; SKX-NEXT:    vptestmd %xmm1, %xmm0, %k0
+; SKX-NEXT:    vptestmd {{.*}}(%rip){1to4}, %xmm0, %k0
 ; SKX-NEXT:    kmovd %k0, %eax
 ; SKX-NEXT:    testb $15, %al
 ; SKX-NEXT:    sete %al
@@ -3223,10 +4093,20 @@ define i1 @allones_v8i32_and4(<8 x i32> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allones_v8i32_and4:
+; KNL:       # %bb.0:
+; KNL-NEXT:    # kill: def $ymm0 killed $ymm0 def $zmm0
+; KNL-NEXT:    vpbroadcastd {{.*#+}} ymm1 = [4,4,4,4,4,4,4,4]
+; KNL-NEXT:    vptestmd %zmm1, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    cmpb $-1, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allones_v8i32_and4:
 ; SKX:       # %bb.0:
-; SKX-NEXT:    vpbroadcastd {{.*#+}} ymm1 = [4,4,4,4,4,4,4,4]
-; SKX-NEXT:    vptestmd %ymm1, %ymm0, %k0
+; SKX-NEXT:    vptestmd {{.*}}(%rip){1to8}, %ymm0, %k0
 ; SKX-NEXT:    kortestb %k0, %k0
 ; SKX-NEXT:    setb %al
 ; SKX-NEXT:    vzeroupper
@@ -3274,10 +4154,20 @@ define i1 @allzeros_v8i32_and4(<8 x i32> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allzeros_v8i32_and4:
+; KNL:       # %bb.0:
+; KNL-NEXT:    # kill: def $ymm0 killed $ymm0 def $zmm0
+; KNL-NEXT:    vpbroadcastd {{.*#+}} ymm1 = [4,4,4,4,4,4,4,4]
+; KNL-NEXT:    vptestmd %zmm1, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    testb %al, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allzeros_v8i32_and4:
 ; SKX:       # %bb.0:
-; SKX-NEXT:    vpbroadcastd {{.*#+}} ymm1 = [4,4,4,4,4,4,4,4]
-; SKX-NEXT:    vptestmd %ymm1, %ymm0, %k0
+; SKX-NEXT:    vptestmd {{.*}}(%rip){1to8}, %ymm0, %k0
 ; SKX-NEXT:    kortestb %k0, %k0
 ; SKX-NEXT:    sete %al
 ; SKX-NEXT:    vzeroupper
@@ -3305,7 +4195,7 @@ define i1 @allones_v16i32_and4(<16 x i32> %arg) {
 ; SSE2-NEXT:    packssdw %xmm1, %xmm0
 ; SSE2-NEXT:    packsswb %xmm2, %xmm0
 ; SSE2-NEXT:    pmovmskb %xmm0, %eax
-; SSE2-NEXT:    cmpl $65535, %eax # imm = 0xFFFF
+; SSE2-NEXT:    cmpw $-1, %ax
 ; SSE2-NEXT:    sete %al
 ; SSE2-NEXT:    retq
 ;
@@ -3330,7 +4220,7 @@ define i1 @allones_v16i32_and4(<16 x i32> %arg) {
 ; AVX1-NEXT:    vpackssdw %xmm2, %xmm0, %xmm0
 ; AVX1-NEXT:    vpacksswb %xmm1, %xmm0, %xmm0
 ; AVX1-NEXT:    vpmovmskb %xmm0, %eax
-; AVX1-NEXT:    cmpl $65535, %eax # imm = 0xFFFF
+; AVX1-NEXT:    cmpw $-1, %ax
 ; AVX1-NEXT:    sete %al
 ; AVX1-NEXT:    vzeroupper
 ; AVX1-NEXT:    retq
@@ -3347,15 +4237,22 @@ define i1 @allones_v16i32_and4(<16 x i32> %arg) {
 ; AVX2-NEXT:    vextracti128 $1, %ymm0, %xmm1
 ; AVX2-NEXT:    vpacksswb %xmm1, %xmm0, %xmm0
 ; AVX2-NEXT:    vpmovmskb %xmm0, %eax
-; AVX2-NEXT:    cmpl $65535, %eax # imm = 0xFFFF
+; AVX2-NEXT:    cmpw $-1, %ax
 ; AVX2-NEXT:    sete %al
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allones_v16i32_and4:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vptestmd {{.*}}(%rip){1to16}, %zmm0, %k0
+; KNL-NEXT:    kortestw %k0, %k0
+; KNL-NEXT:    setb %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allones_v16i32_and4:
 ; SKX:       # %bb.0:
-; SKX-NEXT:    vpbroadcastd {{.*#+}} zmm1 = [4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]
-; SKX-NEXT:    vptestmd %zmm1, %zmm0, %k0
+; SKX-NEXT:    vptestmd {{.*}}(%rip){1to16}, %zmm0, %k0
 ; SKX-NEXT:    kortestw %k0, %k0
 ; SKX-NEXT:    setb %al
 ; SKX-NEXT:    vzeroupper
@@ -3430,10 +4327,17 @@ define i1 @allzeros_v16i32_and4(<16 x i32> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allzeros_v16i32_and4:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vptestmd {{.*}}(%rip){1to16}, %zmm0, %k0
+; KNL-NEXT:    kortestw %k0, %k0
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allzeros_v16i32_and4:
 ; SKX:       # %bb.0:
-; SKX-NEXT:    vpbroadcastd {{.*#+}} zmm1 = [4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]
-; SKX-NEXT:    vptestmd %zmm1, %zmm0, %k0
+; SKX-NEXT:    vptestmd {{.*}}(%rip){1to16}, %zmm0, %k0
 ; SKX-NEXT:    kortestw %k0, %k0
 ; SKX-NEXT:    sete %al
 ; SKX-NEXT:    vzeroupper
@@ -3461,6 +4365,18 @@ define i1 @allones_v2i64_and4(<2 x i64> %arg) {
 ; AVX-NEXT:    cmpb $3, %al
 ; AVX-NEXT:    sete %al
 ; AVX-NEXT:    retq
+;
+; KNL-LABEL: allones_v2i64_and4:
+; KNL:       # %bb.0:
+; KNL-NEXT:    # kill: def $xmm0 killed $xmm0 def $zmm0
+; KNL-NEXT:    vmovdqa {{.*#+}} xmm1 = [4,4]
+; KNL-NEXT:    vptestmq %zmm1, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    andb $3, %al
+; KNL-NEXT:    cmpb $3, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
 ;
 ; SKX-LABEL: allones_v2i64_and4:
 ; SKX:       # %bb.0:
@@ -3493,6 +4409,17 @@ define i1 @allzeros_v2i64_and4(<2 x i64> %arg) {
 ; AVX-NEXT:    testb %al, %al
 ; AVX-NEXT:    sete %al
 ; AVX-NEXT:    retq
+;
+; KNL-LABEL: allzeros_v2i64_and4:
+; KNL:       # %bb.0:
+; KNL-NEXT:    # kill: def $xmm0 killed $xmm0 def $zmm0
+; KNL-NEXT:    vmovdqa {{.*#+}} xmm1 = [4,4]
+; KNL-NEXT:    vptestmq %zmm1, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    testb $3, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
 ;
 ; SKX-LABEL: allzeros_v2i64_and4:
 ; SKX:       # %bb.0:
@@ -3546,6 +4473,18 @@ define i1 @allones_v4i64_and4(<4 x i64> %arg) {
 ; AVX2-NEXT:    sete %al
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
+;
+; KNL-LABEL: allones_v4i64_and4:
+; KNL:       # %bb.0:
+; KNL-NEXT:    # kill: def $ymm0 killed $ymm0 def $zmm0
+; KNL-NEXT:    vpbroadcastq {{.*#+}} ymm1 = [4,4,4,4]
+; KNL-NEXT:    vptestmq %zmm1, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    andb $15, %al
+; KNL-NEXT:    cmpb $15, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
 ;
 ; SKX-LABEL: allones_v4i64_and4:
 ; SKX:       # %bb.0:
@@ -3601,6 +4540,17 @@ define i1 @allzeros_v4i64_and4(<4 x i64> %arg) {
 ; AVX2-NEXT:    sete %al
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
+;
+; KNL-LABEL: allzeros_v4i64_and4:
+; KNL:       # %bb.0:
+; KNL-NEXT:    # kill: def $ymm0 killed $ymm0 def $zmm0
+; KNL-NEXT:    vpbroadcastq {{.*#+}} ymm1 = [4,4,4,4]
+; KNL-NEXT:    vptestmq %zmm1, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    testb $15, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
 ;
 ; SKX-LABEL: allzeros_v4i64_and4:
 ; SKX:       # %bb.0:
@@ -3687,6 +4637,15 @@ define i1 @allones_v8i64_and4(<8 x i64> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allones_v8i64_and4:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vptestmq {{.*}}(%rip){1to8}, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    cmpb $-1, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allones_v8i64_and4:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vptestmq {{.*}}(%rip){1to8}, %zmm0, %k0
@@ -3771,6 +4730,15 @@ define i1 @allzeros_v8i64_and4(<8 x i64> %arg) {
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
 ;
+; KNL-LABEL: allzeros_v8i64_and4:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vptestmq {{.*}}(%rip){1to8}, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    testb %al, %al
+; KNL-NEXT:    sete %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: allzeros_v8i64_and4:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vptestmq {{.*}}(%rip){1to8}, %zmm0, %k0
@@ -3799,6 +4767,16 @@ define i32 @movmskpd(<2 x double> %x) {
 ; AVX-NEXT:    vmovmskpd %xmm0, %eax
 ; AVX-NEXT:    retq
 ;
+; KNL-LABEL: movmskpd:
+; KNL:       # %bb.0:
+; KNL-NEXT:    # kill: def $xmm0 killed $xmm0 def $zmm0
+; KNL-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; KNL-NEXT:    vpcmpgtq %zmm0, %zmm1, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    andl $3, %eax
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: movmskpd:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vpmovq2m %xmm0, %k0
@@ -3823,6 +4801,16 @@ define i32 @movmskps(<4 x float> %x) {
 ; AVX-NEXT:    vmovmskps %xmm0, %eax
 ; AVX-NEXT:    retq
 ;
+; KNL-LABEL: movmskps:
+; KNL:       # %bb.0:
+; KNL-NEXT:    # kill: def $xmm0 killed $xmm0 def $zmm0
+; KNL-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; KNL-NEXT:    vpcmpgtd %zmm0, %zmm1, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    andl $15, %eax
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: movmskps:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vpmovd2m %xmm0, %k0
@@ -3839,7 +4827,7 @@ define i32 @movmskps(<4 x float> %x) {
 define i32 @movmskpd256(<4 x double> %x) {
 ; SSE2-LABEL: movmskpd256:
 ; SSE2:       # %bb.0:
-; SSE2-NEXT:    movdqa {{.*#+}} xmm2 = [2147483648,0,2147483648,0]
+; SSE2-NEXT:    movdqa {{.*#+}} xmm2 = [2147483648,2147483648]
 ; SSE2-NEXT:    pxor %xmm2, %xmm1
 ; SSE2-NEXT:    movdqa %xmm2, %xmm3
 ; SSE2-NEXT:    pcmpgtd %xmm1, %xmm3
@@ -3867,6 +4855,16 @@ define i32 @movmskpd256(<4 x double> %x) {
 ; AVX-NEXT:    vmovmskpd %ymm0, %eax
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
+;
+; KNL-LABEL: movmskpd256:
+; KNL:       # %bb.0:
+; KNL-NEXT:    # kill: def $ymm0 killed $ymm0 def $zmm0
+; KNL-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; KNL-NEXT:    vpcmpgtq %zmm0, %zmm1, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    andl $15, %eax
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
 ;
 ; SKX-LABEL: movmskpd256:
 ; SKX:       # %bb.0:
@@ -3901,6 +4899,16 @@ define i32 @movmskps256(<8 x float> %x) {
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
 ;
+; KNL-LABEL: movmskps256:
+; KNL:       # %bb.0:
+; KNL-NEXT:    # kill: def $ymm0 killed $ymm0 def $zmm0
+; KNL-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; KNL-NEXT:    vpcmpgtd %zmm0, %zmm1, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    movzbl %al, %eax
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
 ; SKX-LABEL: movmskps256:
 ; SKX:       # %bb.0:
 ; SKX-NEXT:    vpmovd2m %ymm0, %k0
@@ -3924,6 +4932,16 @@ define i32 @movmskb(<16 x i8> %x) {
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vpmovmskb %xmm0, %eax
 ; AVX-NEXT:    retq
+;
+; KNL-LABEL: movmskb:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; KNL-NEXT:    vpcmpgtb %xmm0, %xmm1, %xmm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
 ;
 ; SKX-LABEL: movmskb:
 ; SKX:       # %bb.0:
@@ -3963,6 +4981,22 @@ define i32 @movmskb256(<32 x i8> %x) {
 ; AVX2-NEXT:    vpmovmskb %ymm0, %eax
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
+;
+; KNL-LABEL: movmskb256:
+; KNL:       # %bb.0:
+; KNL-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; KNL-NEXT:    vpcmpgtb %ymm0, %ymm1, %ymm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm1
+; KNL-NEXT:    vptestmd %zmm1, %zmm1, %k0
+; KNL-NEXT:    kmovw %k0, %ecx
+; KNL-NEXT:    vextracti128 $1, %ymm0, %xmm0
+; KNL-NEXT:    vpmovsxbd %xmm0, %zmm0
+; KNL-NEXT:    vptestmd %zmm0, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    shll $16, %eax
+; KNL-NEXT:    orl %ecx, %eax
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
 ;
 ; SKX-LABEL: movmskb256:
 ; SKX:       # %bb.0:

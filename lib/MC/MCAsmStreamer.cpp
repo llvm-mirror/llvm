@@ -147,9 +147,9 @@ public:
   void EmitLinkerOptions(ArrayRef<std::string> Options) override;
   void EmitDataRegion(MCDataRegionType Kind) override;
   void EmitVersionMin(MCVersionMinType Kind, unsigned Major, unsigned Minor,
-                      unsigned Update) override;
+                      unsigned Update, VersionTuple SDKVersion) override;
   void EmitBuildVersion(unsigned Platform, unsigned Major, unsigned Minor,
-                        unsigned Update) override;
+                        unsigned Update, VersionTuple SDKVersion) override;
   void EmitThumbFunc(MCSymbol *Func) override;
 
   void EmitAssignment(MCSymbol *Symbol, const MCExpr *Value) override;
@@ -289,6 +289,7 @@ public:
 
   void EmitWinCFIStartProc(const MCSymbol *Symbol, SMLoc Loc) override;
   void EmitWinCFIEndProc(SMLoc Loc) override;
+  void EmitWinCFIFuncletOrFuncEnd(SMLoc Loc) override;
   void EmitWinCFIStartChained(SMLoc Loc) override;
   void EmitWinCFIEndChained(SMLoc Loc) override;
   void EmitWinCFIPushReg(unsigned Register, SMLoc Loc) override;
@@ -513,11 +514,26 @@ static const char *getVersionMinDirective(MCVersionMinType Type) {
   llvm_unreachable("Invalid MC version min type");
 }
 
+static void EmitSDKVersionSuffix(raw_ostream &OS,
+                                 const VersionTuple &SDKVersion) {
+  if (SDKVersion.empty())
+    return;
+  OS << '\t' << "sdk_version " << SDKVersion.getMajor();
+  if (auto Minor = SDKVersion.getMinor()) {
+    OS << ", " << *Minor;
+    if (auto Subminor = SDKVersion.getSubminor()) {
+      OS << ", " << *Subminor;
+    }
+  }
+}
+
 void MCAsmStreamer::EmitVersionMin(MCVersionMinType Type, unsigned Major,
-                                   unsigned Minor, unsigned Update) {
+                                   unsigned Minor, unsigned Update,
+                                   VersionTuple SDKVersion) {
   OS << '\t' << getVersionMinDirective(Type) << ' ' << Major << ", " << Minor;
   if (Update)
     OS << ", " << Update;
+  EmitSDKVersionSuffix(OS, SDKVersion);
   EmitEOL();
 }
 
@@ -533,11 +549,13 @@ static const char *getPlatformName(MachO::PlatformType Type) {
 }
 
 void MCAsmStreamer::EmitBuildVersion(unsigned Platform, unsigned Major,
-                                     unsigned Minor, unsigned Update) {
+                                     unsigned Minor, unsigned Update,
+                                     VersionTuple SDKVersion) {
   const char *PlatformName = getPlatformName((MachO::PlatformType)Platform);
   OS << "\t.build_version " << PlatformName << ", " << Major << ", " << Minor;
   if (Update)
     OS << ", " << Update;
+  EmitSDKVersionSuffix(OS, SDKVersion);
   EmitEOL();
 }
 
@@ -858,10 +876,14 @@ void MCAsmStreamer::EmitBytes(StringRef Data) {
   // supported, emit as vector of 8bits data.
   if (Data.size() == 1 ||
       !(MAI->getAscizDirective() || MAI->getAsciiDirective())) {
-    const char *Directive = MAI->getData8bitsDirective();
-    for (const unsigned char C : Data.bytes()) {
-      OS << Directive << (unsigned)C;
-      EmitEOL();
+    if (MCTargetStreamer *TS = getTargetStreamer()) {
+      TS->emitRawBytes(Data);
+    } else {
+      const char *Directive = MAI->getData8bitsDirective();
+      for (const unsigned char C : Data.bytes()) {
+        OS << Directive << (unsigned)C;
+        EmitEOL();
+      }
     }
     return;
   }
@@ -1583,6 +1605,10 @@ void MCAsmStreamer::EmitWinCFIEndProc(SMLoc Loc) {
 
   OS << "\t.seh_endproc";
   EmitEOL();
+}
+
+// TODO: Implement
+void MCAsmStreamer::EmitWinCFIFuncletOrFuncEnd(SMLoc Loc) {
 }
 
 void MCAsmStreamer::EmitWinCFIStartChained(SMLoc Loc) {

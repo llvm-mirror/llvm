@@ -42,12 +42,19 @@
 #include "llvm/MC/MCSubtargetInfo.h"
 #include <map>
 
+namespace llvm {
 namespace mca {
 
 class SchedulerStatistics final : public View {
   const llvm::MCSchedModel &SM;
+  unsigned LQResourceID;
+  unsigned SQResourceID;
+
   unsigned NumIssued;
   unsigned NumCycles;
+
+  unsigned MostRecentLoadDispatched;
+  unsigned MostRecentStoreDispatched;
 
   // Tracks the usage of a scheduler's queue.
   struct BufferUsage {
@@ -64,15 +71,9 @@ class SchedulerStatistics final : public View {
   void printSchedulerUsage(llvm::raw_ostream &OS) const;
 
 public:
-  SchedulerStatistics(const llvm::MCSubtargetInfo &STI)
-      : SM(STI.getSchedModel()), NumIssued(0), NumCycles(0),
-        IssuedPerCycle(STI.getSchedModel().NumProcResourceKinds, 0),
-        Usage(STI.getSchedModel().NumProcResourceKinds, {0, 0, 0}) {}
-
+  SchedulerStatistics(const llvm::MCSubtargetInfo &STI);
   void onEvent(const HWInstructionEvent &Event) override;
-
   void onCycleBegin() override { NumCycles++; }
-
   void onCycleEnd() override { updateHistograms(); }
 
   // Increases the number of used scheduler queue slots of every buffered
@@ -88,5 +89,6 @@ public:
   void printView(llvm::raw_ostream &OS) const override;
 };
 } // namespace mca
+} // namespace llvm
 
 #endif

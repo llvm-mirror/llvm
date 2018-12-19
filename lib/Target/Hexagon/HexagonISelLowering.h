@@ -141,7 +141,7 @@ namespace HexagonISD {
         unsigned DefinedValues) const override;
 
     bool isShuffleMaskLegal(ArrayRef<int> Mask, EVT VT) const override;
-    TargetLoweringBase::LegalizeTypeAction getPreferredVectorAction(EVT VT)
+    TargetLoweringBase::LegalizeTypeAction getPreferredVectorAction(MVT VT)
         const override;
 
     SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
@@ -303,6 +303,9 @@ namespace HexagonISD {
     /// Returns relocation base for the given PIC jumptable.
     SDValue getPICJumpTableRelocBase(SDValue Table, SelectionDAG &DAG)
                                      const override;
+
+    bool shouldReduceLoadWidth(SDNode *Load, ISD::LoadExtType ExtTy,
+                               EVT NewVT) const override;
 
     // Handling of atomic RMW instructions.
     Value *emitLoadLinked(IRBuilder<> &Builder, Value *Addr,

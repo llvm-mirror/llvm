@@ -7,6 +7,10 @@ if(POLICY CMP0068)
   set(CMAKE_BUILD_WITH_INSTALL_NAME_DIR ON)
 endif()
 
+if(POLICY CMP0075)
+  cmake_policy(SET CMP0075 NEW)
+endif()
+
 if(NOT DEFINED LLVM_VERSION_MAJOR)
   set(LLVM_VERSION_MAJOR 8)
 endif()
@@ -183,6 +187,11 @@ option(LLVM_INSTALL_UTILS "Include utility binaries in the 'install' target." OF
 
 option(LLVM_INSTALL_TOOLCHAIN_ONLY "Only include toolchain files in the 'install' target." OFF)
 
+# Unfortunatly Clang is too eager to search directories for module maps, which can cause the
+# installed version of the maps to be found when building LLVM from source. Therefore we turn off
+# the installation by default. See llvm.org/PR31905.
+option(LLVM_INSTALL_MODULEMAPS "Install the modulemap files in the 'install' target." OFF)
+
 option(LLVM_USE_FOLDERS "Enable solution folders in Visual Studio. Disable for Express versions." ON)
 if ( LLVM_USE_FOLDERS )
   set_property(GLOBAL PROPERTY USE_FOLDERS ON)
@@ -287,6 +296,7 @@ set(LLVM_ALL_TARGETS
   PowerPC
   Sparc
   SystemZ
+  WebAssembly
   X86
   XCore
   )
@@ -394,8 +404,8 @@ option(LLVM_USE_OPROFILE
 option(LLVM_EXTERNALIZE_DEBUGINFO
   "Generate dSYM files and strip executables and libraries (Darwin Only)" OFF)
 
-option(LLVM_CODESIGNING_IDENTITY
-  "Sign executables and dylibs with the given identity (Darwin Only)" OFF)
+set(LLVM_CODESIGNING_IDENTITY "" CACHE STRING
+  "Sign executables and dylibs with the given identity or skip if empty (Darwin Only)")
 
 # If enabled, verify we are on a platform that supports oprofile.
 if( LLVM_USE_OPROFILE )
@@ -854,7 +864,7 @@ if( LLVM_INCLUDE_UTILS )
 else()
   if ( LLVM_INCLUDE_TESTS )
     message(FATAL_ERROR "Including tests when not building utils will not work.
-    Either set LLVM_INCLUDE_UTILS to On, or set LLVM_INCLDE_TESTS to Off.")
+    Either set LLVM_INCLUDE_UTILS to On, or set LLVM_INCLUDE_TESTS to Off.")
   endif()
 endif()
 
@@ -968,12 +978,26 @@ if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
     PATTERN ".svn" EXCLUDE
     )
 
+  if (LLVM_INSTALL_MODULEMAPS)
+    install(DIRECTORY include/llvm include/llvm-c
+            DESTINATION include
+            COMPONENT llvm-headers
+            FILES_MATCHING
+            PATTERN "module.modulemap"
+            )
+    install(FILES include/llvm/module.install.modulemap
+            DESTINATION include/llvm
+            COMPONENT llvm-headers
+            RENAME "module.extern.modulemap"
+            )
+  endif(LLVM_INSTALL_MODULEMAPS)
+
   # Installing the headers needs to depend on generating any public
   # tablegen'd headers.
   add_custom_target(llvm-headers DEPENDS intrinsics_gen)
   set_target_properties(llvm-headers PROPERTIES FOLDER "Misc")
 
-  if (NOT CMAKE_CONFIGURATION_TYPES)
+  if (NOT LLVM_ENABLE_IDE)
     add_llvm_install_targets(install-llvm-headers
                              DEPENDS llvm-headers
                              COMPONENT llvm-headers)
@@ -983,7 +1007,7 @@ if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
   add_custom_target(llvm-libraries)
   set_target_properties(llvm-libraries PROPERTIES FOLDER "Misc")
 
-  if (NOT CMAKE_CONFIGURATION_TYPES)
+  if (NOT LLVM_ENABLE_IDE)
     add_llvm_install_targets(install-llvm-libraries
                              DEPENDS llvm-libraries
                              COMPONENT llvm-libraries)
@@ -994,7 +1018,7 @@ if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
     list(REMOVE_DUPLICATES LLVM_LIBS)
     foreach(lib ${LLVM_LIBS})
       add_dependencies(llvm-libraries ${lib})
-      if (NOT CMAKE_CONFIGURATION_TYPES)
+      if (NOT LLVM_ENABLE_IDE)
         add_dependencies(install-llvm-libraries install-${lib})
       endif()
     endforeach()
@@ -1004,7 +1028,7 @@ endif()
 # This must be at the end of the LLVM root CMakeLists file because it must run
 # after all targets are created.
 if(LLVM_DISTRIBUTION_COMPONENTS)
-  if(CMAKE_CONFIGURATION_TYPES)
+  if(LLVM_ENABLE_IDE)
     message(FATAL_ERROR "LLVM_DISTRIBUTION_COMPONENTS cannot be specified with multi-configuration generators (i.e. Xcode or Visual Studio)")
   endif()
 

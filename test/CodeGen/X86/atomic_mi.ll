@@ -93,11 +93,11 @@ define void @store_atomic_imm_64(i64* %p) {
 ; X32-NEXT:    movl {{[0-9]+}}(%esp), %esi
 ; X32-NEXT:    movl (%esi), %eax
 ; X32-NEXT:    movl 4(%esi), %edx
+; X32-NEXT:    xorl %ecx, %ecx
+; X32-NEXT:    movl $42, %ebx
 ; X32-NEXT:    .p2align 4, 0x90
 ; X32-NEXT:  .LBB3_1: # %atomicrmw.start
 ; X32-NEXT:    # =>This Inner Loop Header: Depth=1
-; X32-NEXT:    xorl %ecx, %ecx
-; X32-NEXT:    movl $42, %ebx
 ; X32-NEXT:    lock cmpxchg8b (%esi)
 ; X32-NEXT:    jne .LBB3_1
 ; X32-NEXT:  # %bb.2: # %atomicrmw.end
@@ -132,11 +132,11 @@ define void @store_atomic_imm_64_big(i64* %p) {
 ; X32-NEXT:    movl {{[0-9]+}}(%esp), %esi
 ; X32-NEXT:    movl (%esi), %eax
 ; X32-NEXT:    movl 4(%esi), %edx
+; X32-NEXT:    movl $23, %ecx
+; X32-NEXT:    movl $1215752192, %ebx # imm = 0x4876E800
 ; X32-NEXT:    .p2align 4, 0x90
 ; X32-NEXT:  .LBB4_1: # %atomicrmw.start
 ; X32-NEXT:    # =>This Inner Loop Header: Depth=1
-; X32-NEXT:    movl $23, %ecx
-; X32-NEXT:    movl $1215752192, %ebx # imm = 0x4876E800
 ; X32-NEXT:    lock cmpxchg8b (%esi)
 ; X32-NEXT:    jne .LBB4_1
 ; X32-NEXT:  # %bb.2: # %atomicrmw.end
@@ -753,10 +753,10 @@ define void @and_64i(i64* %p) {
 ; X32-NEXT:    andl $2, %ebx
 ; X32-NEXT:    movl (%esi), %eax
 ; X32-NEXT:    movl 4(%esi), %edx
+; X32-NEXT:    xorl %ecx, %ecx
 ; X32-NEXT:    .p2align 4, 0x90
 ; X32-NEXT:  .LBB31_1: # %atomicrmw.start
 ; X32-NEXT:    # =>This Inner Loop Header: Depth=1
-; X32-NEXT:    xorl %ecx, %ecx
 ; X32-NEXT:    lock cmpxchg8b (%esi)
 ; X32-NEXT:    jne .LBB31_1
 ; X32-NEXT:  # %bb.2: # %atomicrmw.end
@@ -2245,11 +2245,11 @@ define void @fadd_array(i64* %arg, double %arg1, i64 %arg2) {
 ; X32-NEXT:    .cfi_offset %edi, -16
 ; X32-NEXT:    .cfi_offset %ebx, -12
 ; X32-NEXT:    movl 20(%ebp), %esi
+; X32-NEXT:    movl 8(%ebp), %edi
 ; X32-NEXT:    xorl %eax, %eax
 ; X32-NEXT:    xorl %edx, %edx
 ; X32-NEXT:    xorl %ecx, %ecx
 ; X32-NEXT:    xorl %ebx, %ebx
-; X32-NEXT:    movl 8(%ebp), %edi
 ; X32-NEXT:    lock cmpxchg8b (%edi,%esi,8)
 ; X32-NEXT:    movl %edx, {{[0-9]+}}(%esp)
 ; X32-NEXT:    movl %eax, {{[0-9]+}}(%esp)

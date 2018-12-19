@@ -12,8 +12,6 @@
 ///
 //===----------------------------------------------------------------------===//
 
-let Defs = [ARGUMENTS] in {
-
 let isBranch = 1, isTerminator = 1, hasCtrlDep = 1 in {
 // The condition operand is a boolean value which WebAssembly represents as i32.
 defm BR_IF : I<(outs), (ins bb_op:$dst, I32:$cond),
@@ -30,14 +28,10 @@ defm BR   : NRI<(outs), (ins bb_op:$dst),
 } // isBarrier = 1
 } // isBranch = 1, isTerminator = 1, hasCtrlDep = 1
 
-} // Defs = [ARGUMENTS]
-
 def : Pat<(brcond (i32 (setne I32:$cond, 0)), bb:$dst),
           (BR_IF bb_op:$dst, I32:$cond)>;
 def : Pat<(brcond (i32 (seteq I32:$cond, 0)), bb:$dst),
           (BR_UNLESS bb_op:$dst, I32:$cond)>;
-
-let Defs = [ARGUMENTS] in {
 
 // TODO: SelectionDAG's lowering insists on using a pointer as the index for
 // jump tables, so in practice we don't ever use BR_TABLE_I64 in wasm32 mode
@@ -49,27 +43,29 @@ let Defs = [ARGUMENTS] in {
 let isTerminator = 1, hasCtrlDep = 1, isBarrier = 1 in {
 let isCodeGenOnly = 1 in
 def BR_TABLE_I32 : NI<(outs), (ins I32:$index, variable_ops),
-                      [(WebAssemblybr_table I32:$index)], 0,
+                      [(WebAssemblybr_table I32:$index)], "false",
                       "br_table \t$index", 0x0e> {
   let TSFlags{0} = 1;
   let TSFlags{1} = 1;
 }
+let BaseName = "BR_TABLE_I32" in
 def BR_TABLE_I32_S : NI<(outs), (ins variable_ops),
-                        [], 1,
-                        "br_table", 0x0e> {
+                        [], "true",
+                        "br_table \t", 0x0e> {
   let TSFlags{0} = 1;
   let TSFlags{1} = 1;
 }
 let isCodeGenOnly = 1 in
 def BR_TABLE_I64 : NI<(outs), (ins I64:$index, variable_ops),
-                      [(WebAssemblybr_table I64:$index)], 0,
+                      [(WebAssemblybr_table I64:$index)], "false",
                       "br_table \t$index"> {
   let TSFlags{0} = 1;
   let TSFlags{1} = 1;
 }
+let BaseName = "BR_TABLE_I64" in
 def BR_TABLE_I64_S : NI<(outs), (ins variable_ops),
-                        [], 1,
-                        "br_table"> {
+                        [], "true",
+                        "br_table \t"> {
   let TSFlags{0} = 1;
   let TSFlags{1} = 1;
 }
@@ -150,14 +146,16 @@ let Predicates = [HasExceptionHandling] in {
 
 // Throwing an exception: throw / rethrow
 let isTerminator = 1, hasCtrlDep = 1, isBarrier = 1 in {
-defm THROW_I32 : I<(outs), (ins i32imm:$tag, I32:$val),
-                   (outs), (ins i32imm:$tag),
-                   [(int_wasm_throw imm:$tag, I32:$val)],
+defm THROW_I32 : I<(outs), (ins event_op:$tag, I32:$val),
+                   (outs), (ins event_op:$tag),
+                   [(WebAssemblythrow (WebAssemblywrapper texternalsym:$tag),
+                                      I32:$val)],
                    "throw   \t$tag, $val", "throw   \t$tag",
                    0x08>;
-defm THROW_I64 : I<(outs), (ins i32imm:$tag, I64:$val),
-                   (outs), (ins i32imm:$tag),
-                   [(int_wasm_throw imm:$tag, I64:$val)],
+defm THROW_I64 : I<(outs), (ins event_op:$tag, I64:$val),
+                   (outs), (ins event_op:$tag),
+                   [(WebAssemblythrow (WebAssemblywrapper texternalsym:$tag),
+                                      I64:$val)],
                    "throw   \t$tag, $val", "throw   \t$tag",
                    0x08>;
 defm RETHROW : NRI<(outs), (ins bb_op:$dst), [], "rethrow \t$dst", 0x09>;
@@ -194,5 +192,3 @@ let isTerminator = 1, hasSideEffects = 1, isBarrier = 1, hasCtrlDep = 1,
                    [(catchret bb:$dst, bb:$from)], "", 0>;
 }
 }
-
-} // Defs = [ARGUMENTS]

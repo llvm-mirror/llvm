@@ -18,8 +18,29 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/MC/MCSchedule.h"
+#include "llvm/Support/Error.h"
 
+namespace llvm {
 namespace mca {
+
+template <typename T>
+class InstructionError : public ErrorInfo<InstructionError<T>> {
+public:
+  static char ID;
+  std::string Message;
+  const T &Inst;
+
+  InstructionError(std::string M, const T &MCI)
+      : Message(std::move(M)), Inst(MCI) {}
+
+  void log(raw_ostream &OS) const override { OS << Message; }
+
+  std::error_code convertToErrorCode() const override {
+    return inconvertibleErrorCode();
+  }
+};
+
+template <typename T> char InstructionError<T>::ID;
 
 /// This class represents the number of cycles per resource (fractions of
 /// cycles).  That quantity is managed here as a ratio, and accessed via the
@@ -49,8 +70,7 @@ public:
     else {
       // Create a common denominator for LHS and RHS by calculating the least
       // common multiple from the GCD.
-      unsigned GCD =
-          llvm::GreatestCommonDivisor64(Denominator, RHS.Denominator);
+      unsigned GCD = GreatestCommonDivisor64(Denominator, RHS.Denominator);
       unsigned LCM = (Denominator * RHS.Denominator) / GCD;
       unsigned LHSNumerator = Numerator * (LCM / Denominator);
       unsigned RHSNumerator = RHS.Numerator * (LCM / RHS.Denominator);
@@ -83,16 +103,17 @@ public:
 ///
 /// Resource masks are used by the ResourceManager to solve set membership
 /// problems with simple bit manipulation operations.
-void computeProcResourceMasks(const llvm::MCSchedModel &SM,
-                              llvm::SmallVectorImpl<uint64_t> &Masks);
+void computeProcResourceMasks(const MCSchedModel &SM,
+                              SmallVectorImpl<uint64_t> &Masks);
 
 /// Compute the reciprocal block throughput from a set of processor resource
 /// cycles. The reciprocal block throughput is computed as the MAX between:
 ///  - NumMicroOps / DispatchWidth
 ///  - ProcResourceCycles / #ProcResourceUnits  (for every consumed resource).
-double computeBlockRThroughput(const llvm::MCSchedModel &SM,
-                               unsigned DispatchWidth, unsigned NumMicroOps,
-                               llvm::ArrayRef<unsigned> ProcResourceUsage);
+double computeBlockRThroughput(const MCSchedModel &SM, unsigned DispatchWidth,
+                               unsigned NumMicroOps,
+                               ArrayRef<unsigned> ProcResourceUsage);
 } // namespace mca
+} // namespace llvm
 
 #endif

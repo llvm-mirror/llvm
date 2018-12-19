@@ -67,10 +67,10 @@ define <2 x i64> @var_shift_v2i64(<2 x i64> %a, <2 x i64> %b) nounwind {
 ; AVX2-LABEL: var_shift_v2i64:
 ; AVX2:       # %bb.0:
 ; AVX2-NEXT:    vmovdqa {{.*#+}} xmm2 = [9223372036854775808,9223372036854775808]
-; AVX2-NEXT:    vpsrlvq %xmm1, %xmm2, %xmm3
-; AVX2-NEXT:    vpxor %xmm2, %xmm0, %xmm0
+; AVX2-NEXT:    vpsrlvq %xmm1, %xmm2, %xmm2
 ; AVX2-NEXT:    vpsrlvq %xmm1, %xmm0, %xmm0
-; AVX2-NEXT:    vpsubq %xmm3, %xmm0, %xmm0
+; AVX2-NEXT:    vpxor %xmm2, %xmm0, %xmm0
+; AVX2-NEXT:    vpsubq %xmm2, %xmm0, %xmm0
 ; AVX2-NEXT:    retq
 ;
 ; XOP-LABEL: var_shift_v2i64:
@@ -990,15 +990,11 @@ define <2 x i64> @constant_shift_v2i64(<2 x i64> %a) nounwind {
 ;
 ; X32-SSE-LABEL: constant_shift_v2i64:
 ; X32-SSE:       # %bb.0:
-; X32-SSE-NEXT:    movdqa {{.*#+}} xmm1 = [0,2147483648,0,2147483648]
-; X32-SSE-NEXT:    movdqa %xmm1, %xmm2
-; X32-SSE-NEXT:    psrlq $1, %xmm2
-; X32-SSE-NEXT:    psrlq $7, %xmm1
-; X32-SSE-NEXT:    movsd {{.*#+}} xmm1 = xmm2[0],xmm1[1]
-; X32-SSE-NEXT:    movdqa %xmm0, %xmm2
-; X32-SSE-NEXT:    psrlq $1, %xmm2
+; X32-SSE-NEXT:    movdqa %xmm0, %xmm1
+; X32-SSE-NEXT:    psrlq $1, %xmm1
 ; X32-SSE-NEXT:    psrlq $7, %xmm0
-; X32-SSE-NEXT:    movsd {{.*#+}} xmm0 = xmm2[0],xmm0[1]
+; X32-SSE-NEXT:    movsd {{.*#+}} xmm0 = xmm1[0],xmm0[1]
+; X32-SSE-NEXT:    movapd {{.*#+}} xmm1 = [2.0E+0,7.2911220195563975E-304]
 ; X32-SSE-NEXT:    xorpd %xmm1, %xmm0
 ; X32-SSE-NEXT:    psubq %xmm1, %xmm0
 ; X32-SSE-NEXT:    retl

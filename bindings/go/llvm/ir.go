@@ -739,7 +739,6 @@ func (v Value) IsAPHINode() (rv Value)             { rv.C = C.LLVMIsAPHINode(v.C
 func (v Value) IsASelectInst() (rv Value)          { rv.C = C.LLVMIsASelectInst(v.C); return }
 func (v Value) IsAShuffleVectorInst() (rv Value)   { rv.C = C.LLVMIsAShuffleVectorInst(v.C); return }
 func (v Value) IsAStoreInst() (rv Value)           { rv.C = C.LLVMIsAStoreInst(v.C); return }
-func (v Value) IsATerminatorInst() (rv Value)      { rv.C = C.LLVMIsATerminatorInst(v.C); return }
 func (v Value) IsABranchInst() (rv Value)          { rv.C = C.LLVMIsABranchInst(v.C); return }
 func (v Value) IsAInvokeInst() (rv Value)          { rv.C = C.LLVMIsAInvokeInst(v.C); return }
 func (v Value) IsAReturnInst() (rv Value)          { rv.C = C.LLVMIsAReturnInst(v.C); return }
@@ -1257,6 +1256,19 @@ func InlineAsm(t Type, asmString, constraints string, hasSideEffects, isAlignSta
 	defer C.free(unsafe.Pointer(cconstraints))
 	rv.C = C.LLVMGetInlineAsm(t.C, casm, C.size_t(len(asmString)), cconstraints, C.size_t(len(constraints)), boolToLLVMBool(hasSideEffects), boolToLLVMBool(isAlignStack), C.LLVMInlineAsmDialect(dialect))
 	return
+}
+
+// Operations on aggregates
+func (v Value) Indices() []uint32 {
+	num := C.LLVMGetNumIndices(v.C)
+	indicesPtr := C.LLVMGetIndices(v.C)
+	// https://github.com/golang/go/wiki/cgo#turning-c-arrays-into-go-slices
+	rawIndices := (*[1 << 30]C.uint)(unsafe.Pointer(indicesPtr))[:num:num]
+	indices := make([]uint32, num)
+	for i := range indices {
+		indices[i] = uint32(rawIndices[i])
+	}
+	return indices
 }
 
 //-------------------------------------------------------------------------

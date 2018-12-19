@@ -1,3 +1,12 @@
+//===-- TargetTest.cpp -----------------------------------------*- C++ -*-===//
+//
+//                     The LLVM Compiler Infrastructure
+//
+// This file is distributed under the University of Illinois Open Source
+// License. See LICENSE.TXT for details.
+//
+//===----------------------------------------------------------------------===//
+
 #include "Target.h"
 
 #include <cassert>
@@ -35,6 +44,7 @@ bool operator==(const MCInst &a, const MCInst &b) {
 
 } // namespace llvm
 
+namespace llvm {
 namespace exegesis {
 
 void InitializeX86ExegesisTarget();
@@ -103,14 +113,7 @@ constexpr const char kTriple[] = "x86_64-unknown-linux";
 
 class X86TargetTest : public ::testing::Test {
 protected:
-  X86TargetTest(const char *Features)
-      : ExegesisTarget_(ExegesisTarget::lookup(llvm::Triple(kTriple))) {
-    EXPECT_THAT(ExegesisTarget_, NotNull());
-    std::string error;
-    Target_ = llvm::TargetRegistry::lookupTarget(kTriple, error);
-    EXPECT_THAT(Target_, NotNull());
-    STI_.reset(Target_->createMCSubtargetInfo(kTriple, "core2", Features));
-  }
+  X86TargetTest(const char *Features) : State(kTriple, "core2", Features) {}
 
   static void SetUpTestCase() {
     LLVMInitializeX86TargetInfo();
@@ -120,12 +123,11 @@ protected:
   }
 
   std::vector<MCInst> setRegTo(unsigned Reg, const APInt &Value) {
-    return ExegesisTarget_->setRegTo(*STI_, Reg, Value);
+    return State.getExegesisTarget().setRegTo(State.getSubtargetInfo(), Reg,
+                                              Value);
   }
 
-  const llvm::Target *Target_;
-  const ExegesisTarget *const ExegesisTarget_;
-  std::unique_ptr<llvm::MCSubtargetInfo> STI_;
+  LLVMState State;
 };
 
 class Core2TargetTest : public X86TargetTest {
@@ -296,12 +298,17 @@ TEST_F(Core2Avx512TargetTest, SetRegToVR512Value) {
            IsStackDeallocate(64)}));
 }
 
+// Note: We always put 80 bits on the stack independently of the size of the
+// value. This uses a bit more space but makes the code simpler.
+
 TEST_F(Core2TargetTest, SetRegToST0_32Bits) {
   EXPECT_THAT(
       setRegTo(llvm::X86::ST0, APInt(32, 0x11112222ULL)),
-      ElementsAre(IsStackAllocate(4),
+      ElementsAre(IsStackAllocate(10),
                   IsMovValueToStack(llvm::X86::MOV32mi, 0x11112222UL, 0),
-                  OpcodeIs(llvm::X86::LD_F32m), IsStackDeallocate(4)));
+                  IsMovValueToStack(llvm::X86::MOV32mi, 0x00000000UL, 4),
+                  IsMovValueToStack(llvm::X86::MOV16mi, 0x0000UL, 8),
+                  OpcodeIs(llvm::X86::LD_F80m), IsStackDeallocate(10)));
 }
 
 TEST_F(Core2TargetTest, SetRegToST1_32Bits) {
@@ -309,19 +316,22 @@ TEST_F(Core2TargetTest, SetRegToST1_32Bits) {
       llvm::MCInstBuilder(llvm::X86::ST_Frr).addReg(llvm::X86::ST1);
   EXPECT_THAT(
       setRegTo(llvm::X86::ST1, APInt(32, 0x11112222ULL)),
-      ElementsAre(IsStackAllocate(4),
+      ElementsAre(IsStackAllocate(10),
                   IsMovValueToStack(llvm::X86::MOV32mi, 0x11112222UL, 0),
-                  OpcodeIs(llvm::X86::LD_F32m), CopySt0ToSt1,
-                  IsStackDeallocate(4)));
+                  IsMovValueToStack(llvm::X86::MOV32mi, 0x00000000UL, 4),
+                  IsMovValueToStack(llvm::X86::MOV16mi, 0x0000UL, 8),
+                  OpcodeIs(llvm::X86::LD_F80m), CopySt0ToSt1,
+                  IsStackDeallocate(10)));
 }
 
 TEST_F(Core2TargetTest, SetRegToST0_64Bits) {
   EXPECT_THAT(
       setRegTo(llvm::X86::ST0, APInt(64, 0x1111222233334444ULL)),
-      ElementsAre(IsStackAllocate(8),
+      ElementsAre(IsStackAllocate(10),
                   IsMovValueToStack(llvm::X86::MOV32mi, 0x33334444UL, 0),
                   IsMovValueToStack(llvm::X86::MOV32mi, 0x11112222UL, 4),
-                  OpcodeIs(llvm::X86::LD_F64m), IsStackDeallocate(8)));
+                  IsMovValueToStack(llvm::X86::MOV16mi, 0x0000UL, 8),
+                  OpcodeIs(llvm::X86::LD_F80m), IsStackDeallocate(10)));
 }
 
 TEST_F(Core2TargetTest, SetRegToST0_80Bits) {
@@ -334,5 +344,62 @@ TEST_F(Core2TargetTest, SetRegToST0_80Bits) {
                   OpcodeIs(llvm::X86::LD_F80m), IsStackDeallocate(10)));
 }
 
+TEST_F(Core2TargetTest, SetRegToFP0_80Bits) {
+  EXPECT_THAT(
+      setRegTo(llvm::X86::FP0, APInt(80, "11112222333344445555", 16)),
+      ElementsAre(IsStackAllocate(10),
+                  IsMovValueToStack(llvm::X86::MOV32mi, 0x44445555UL, 0),
+                  IsMovValueToStack(llvm::X86::MOV32mi, 0x22223333UL, 4),
+                  IsMovValueToStack(llvm::X86::MOV16mi, 0x1111UL, 8),
+                  OpcodeIs(llvm::X86::LD_Fp80m), IsStackDeallocate(10)));
+}
+
+TEST_F(Core2TargetTest, SetRegToFP1_32Bits) {
+  EXPECT_THAT(
+      setRegTo(llvm::X86::FP1, APInt(32, 0x11112222ULL)),
+      ElementsAre(IsStackAllocate(10),
+                  IsMovValueToStack(llvm::X86::MOV32mi, 0x11112222UL, 0),
+                  IsMovValueToStack(llvm::X86::MOV32mi, 0x00000000UL, 4),
+                  IsMovValueToStack(llvm::X86::MOV16mi, 0x0000UL, 8),
+                  OpcodeIs(llvm::X86::LD_Fp80m), IsStackDeallocate(10)));
+}
+
+TEST_F(Core2TargetTest, SetRegToFP1_4Bits) {
+  EXPECT_THAT(
+      setRegTo(llvm::X86::FP1, APInt(4, 0x1ULL)),
+      ElementsAre(IsStackAllocate(10),
+                  IsMovValueToStack(llvm::X86::MOV32mi, 0x00000001UL, 0),
+                  IsMovValueToStack(llvm::X86::MOV32mi, 0x00000000UL, 4),
+                  IsMovValueToStack(llvm::X86::MOV16mi, 0x0000UL, 8),
+                  OpcodeIs(llvm::X86::LD_Fp80m), IsStackDeallocate(10)));
+}
+
+TEST_F(Core2Avx512TargetTest, FillMemoryOperands_ADD64rm) {
+  Instruction I(State.getInstrInfo(), State.getRATC(), X86::ADD64rm);
+  InstructionTemplate IT(I);
+  constexpr const int kOffset = 42;
+  State.getExegesisTarget().fillMemoryOperands(IT, X86::RDI, kOffset);
+  // Memory is operands 2-6.
+  EXPECT_THAT(IT.getValueFor(I.Operands[2]), IsReg(X86::RDI));
+  EXPECT_THAT(IT.getValueFor(I.Operands[3]), IsImm(1));
+  EXPECT_THAT(IT.getValueFor(I.Operands[4]), IsReg(0));
+  EXPECT_THAT(IT.getValueFor(I.Operands[5]), IsImm(kOffset));
+  EXPECT_THAT(IT.getValueFor(I.Operands[6]), IsReg(0));
+}
+
+TEST_F(Core2Avx512TargetTest, FillMemoryOperands_VGATHERDPSZ128rm) {
+  Instruction I(State.getInstrInfo(), State.getRATC(), X86::VGATHERDPSZ128rm);
+  InstructionTemplate IT(I);
+  constexpr const int kOffset = 42;
+  State.getExegesisTarget().fillMemoryOperands(IT, X86::RDI, kOffset);
+  // Memory is operands 4-8.
+  EXPECT_THAT(IT.getValueFor(I.Operands[4]), IsReg(X86::RDI));
+  EXPECT_THAT(IT.getValueFor(I.Operands[5]), IsImm(1));
+  EXPECT_THAT(IT.getValueFor(I.Operands[6]), IsReg(0));
+  EXPECT_THAT(IT.getValueFor(I.Operands[7]), IsImm(kOffset));
+  EXPECT_THAT(IT.getValueFor(I.Operands[8]), IsReg(0));
+}
+
 } // namespace
 } // namespace exegesis
+} // namespace llvm

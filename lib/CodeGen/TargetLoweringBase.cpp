@@ -600,14 +600,23 @@ void TargetLoweringBase::initActions() {
     setOperationAction(ISD::CONCAT_VECTORS, VT, Expand);
     setOperationAction(ISD::FMINNUM, VT, Expand);
     setOperationAction(ISD::FMAXNUM, VT, Expand);
-    setOperationAction(ISD::FMINNAN, VT, Expand);
-    setOperationAction(ISD::FMAXNAN, VT, Expand);
+    setOperationAction(ISD::FMINNUM_IEEE, VT, Expand);
+    setOperationAction(ISD::FMAXNUM_IEEE, VT, Expand);
+    setOperationAction(ISD::FMINIMUM, VT, Expand);
+    setOperationAction(ISD::FMAXIMUM, VT, Expand);
     setOperationAction(ISD::FMAD, VT, Expand);
     setOperationAction(ISD::SMIN, VT, Expand);
     setOperationAction(ISD::SMAX, VT, Expand);
     setOperationAction(ISD::UMIN, VT, Expand);
     setOperationAction(ISD::UMAX, VT, Expand);
     setOperationAction(ISD::ABS, VT, Expand);
+    setOperationAction(ISD::FSHL, VT, Expand);
+    setOperationAction(ISD::FSHR, VT, Expand);
+    setOperationAction(ISD::SADDSAT, VT, Expand);
+    setOperationAction(ISD::UADDSAT, VT, Expand);
+    setOperationAction(ISD::SSUBSAT, VT, Expand);
+    setOperationAction(ISD::USUBSAT, VT, Expand);
+    setOperationAction(ISD::SMULFIX, VT, Expand);
 
     // Overflow operations default to expand
     setOperationAction(ISD::SADDO, VT, Expand);
@@ -1098,7 +1107,7 @@ void TargetLoweringBase::computeRegisterProperties(
       LegalIntReg = IntReg;
     } else {
       RegisterTypeForVT[IntReg] = TransformToType[IntReg] =
-        (const MVT::SimpleValueType)LegalIntReg;
+        (MVT::SimpleValueType)LegalIntReg;
       ValueTypeActions.setTypeAction(IVT, TypePromoteInteger);
     }
   }
@@ -1445,6 +1454,7 @@ int TargetLoweringBase::InstructionOpcodeToISD(unsigned Opcode) const {
   case CatchPad:       return 0;
   case CatchSwitch:    return 0;
   case CleanupPad:     return 0;
+  case FNeg:           return ISD::FNEG;
   case Add:            return ISD::ADD;
   case FAdd:           return ISD::FADD;
   case Sub:            return ISD::SUB;

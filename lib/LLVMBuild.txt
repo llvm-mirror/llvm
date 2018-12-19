@@ -35,10 +35,12 @@ subdirectories =
  BinaryFormat
  ObjectYAML
  Option
+ OptRemarks
  Passes
  ProfileData
  Support
  TableGen
+ TextAPI
  Target
  Testing
  ToolDrivers

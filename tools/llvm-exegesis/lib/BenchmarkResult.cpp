@@ -10,6 +10,7 @@
 #include "BenchmarkResult.h"
 #include "BenchmarkRunner.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/bit.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ObjectYAML/YAML.h"
 #include "llvm/Support/FileOutputBuffer.h"
@@ -17,9 +18,13 @@
 #include "llvm/Support/Format.h"
 #include "llvm/Support/raw_ostream.h"
 
-static constexpr const char kIntegerFormat[] = "i_0x%" PRId64 "x";
-static constexpr const char kDoubleFormat[] = "f_%la";
+static constexpr const char kIntegerPrefix[] = "i_0x";
+static constexpr const char kDoublePrefix[] = "f_";
 static constexpr const char kInvalidOperand[] = "INVALID";
+
+namespace llvm {
+
+namespace {
 
 // A mutable struct holding an LLVMState that can be passed through the
 // serialization process to encode/decode registers and instructions.
@@ -73,14 +78,37 @@ struct YamlContext {
   }
 
 private:
+  void serializeIntegerOperand(llvm::raw_ostream &OS, int64_t Value) {
+    OS << kIntegerPrefix;
+    OS.write_hex(llvm::bit_cast<uint64_t>(Value));
+  }
+
+  bool tryDeserializeIntegerOperand(llvm::StringRef String, int64_t &Value) {
+    if (!String.consume_front(kIntegerPrefix))
+      return false;
+    return !String.consumeInteger(16, Value);
+  }
+
+  void serializeFPOperand(llvm::raw_ostream &OS, double Value) {
+    OS << kDoublePrefix << llvm::format("%la", Value);
+  }
+
+  bool tryDeserializeFPOperand(llvm::StringRef String, double &Value) {
+    if (!String.consume_front(kDoublePrefix))
+      return false;
+    char *EndPointer = nullptr;
+    Value = strtod(String.begin(), &EndPointer);
+    return EndPointer == String.end();
+  }
+
   void serializeMCOperand(const llvm::MCOperand &MCOperand,
                           llvm::raw_ostream &OS) {
     if (MCOperand.isReg()) {
       OS << getRegName(MCOperand.getReg());
     } else if (MCOperand.isImm()) {
-      OS << llvm::format(kIntegerFormat, MCOperand.getImm());
+      serializeIntegerOperand(OS, MCOperand.getImm());
     } else if (MCOperand.isFPImm()) {
-      OS << llvm::format(kDoubleFormat, MCOperand.getFPImm());
+      serializeFPOperand(OS, MCOperand.getFPImm());
     } else {
       OS << kInvalidOperand;
     }
@@ -90,9 +118,9 @@ private:
     assert(!String.empty());
     int64_t IntValue = 0;
     double DoubleValue = 0;
-    if (sscanf(String.data(), kIntegerFormat, &IntValue) == 1)
+    if (tryDeserializeIntegerOperand(String, IntValue))
       return llvm::MCOperand::createImm(IntValue);
-    if (sscanf(String.data(), kDoubleFormat, &DoubleValue) == 1)
+    if (tryDeserializeFPOperand(String, DoubleValue))
       return llvm::MCOperand::createFPImm(DoubleValue);
     if (unsigned RegNo = getRegNo(String))
       return llvm::MCOperand::createReg(RegNo);
@@ -117,13 +145,13 @@ private:
     return 0;
   }
 
-  const exegesis::LLVMState *State;
+  const llvm::exegesis::LLVMState *State;
   std::string LastError;
   llvm::raw_string_ostream ErrorStream;
 };
+} // namespace
 
 // Defining YAML traits for IO.
-namespace llvm {
 namespace yaml {
 
 static YamlContext &getTypedContext(void *Ctx) {
@@ -270,7 +298,6 @@ struct MappingContextTraits<exegesis::InstructionBenchmark, YamlContext> {
 };
 
 } // namespace yaml
-} // namespace llvm
 
 namespace exegesis {
 
@@ -317,7 +344,7 @@ InstructionBenchmark::readYamls(const LLVMState &State,
 
 void InstructionBenchmark::writeYamlTo(const LLVMState &State,
                                        llvm::raw_ostream &OS) {
-  llvm::yaml::Output Yout(OS);
+  llvm::yaml::Output Yout(OS, nullptr /*Ctx*/, 200 /*WrapColumn*/);
   YamlContext Context(State);
   Yout.beginDocuments();
   llvm::yaml::yamlize(Yout, *this, /*unused*/ true, Context);
@@ -360,3 +387,4 @@ void PerInstructionStats::push(const BenchmarkMeasure &BM) {
 }
 
 } // namespace exegesis
+} // namespace llvm

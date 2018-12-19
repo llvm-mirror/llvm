@@ -18,10 +18,9 @@
 #include "Instruction.h"
 #include "llvm/Support/Debug.h"
 
-using namespace llvm;
-
 #define DEBUG_TYPE "llvm-mca"
 
+namespace llvm {
 namespace mca {
 
 RegisterFile::RegisterFile(const MCSchedModel &SM, const MCRegisterInfo &mri,
@@ -37,7 +36,7 @@ void RegisterFile::initialize(const MCSchedModel &SM, unsigned NumRegs) {
   // declared by the target. The number of physical registers in the default
   // register file is set equal to `NumRegs`. A value of zero for `NumRegs`
   // means: this register file has an unbounded number of physical registers.
-  addRegisterFile({} /* all registers */, NumRegs);
+  RegisterFiles.emplace_back(NumRegs);
   if (!SM.hasExtraProcessorInfo())
     return;
 
@@ -45,30 +44,36 @@ void RegisterFile::initialize(const MCSchedModel &SM, unsigned NumRegs) {
   // object. The size of every register file, as well as the mapping between
   // register files and register classes is specified via tablegen.
   const MCExtraProcessorInfo &Info = SM.getExtraProcessorInfo();
-  for (unsigned I = 0, E = Info.NumRegisterFiles; I < E; ++I) {
+
+  // Skip invalid register file at index 0.
+  for (unsigned I = 1, E = Info.NumRegisterFiles; I < E; ++I) {
     const MCRegisterFileDesc &RF = Info.RegisterFiles[I];
-    // Skip invalid register files with zero physical registers.
-    unsigned Length = RF.NumRegisterCostEntries;
-    if (!RF.NumPhysRegs)
-      continue;
+    assert(RF.NumPhysRegs && "Invalid PRF with zero physical registers!");
+
     // The cost of a register definition is equivalent to the number of
     // physical registers that are allocated at register renaming stage.
+    unsigned Length = RF.NumRegisterCostEntries;
     const MCRegisterCostEntry *FirstElt =
         &Info.RegisterCostTable[RF.RegisterCostEntryIdx];
-    addRegisterFile(ArrayRef<MCRegisterCostEntry>(FirstElt, Length),
-                    RF.NumPhysRegs);
+    addRegisterFile(RF, ArrayRef<MCRegisterCostEntry>(FirstElt, Length));
   }
 }
 
-void RegisterFile::addRegisterFile(ArrayRef<MCRegisterCostEntry> Entries,
-                                   unsigned NumPhysRegs) {
+void RegisterFile::cycleStart() {
+  for (RegisterMappingTracker &RMT : RegisterFiles)
+    RMT.NumMoveEliminated = 0;
+}
+
+void RegisterFile::addRegisterFile(const MCRegisterFileDesc &RF,
+                                   ArrayRef<MCRegisterCostEntry> Entries) {
   // A default register file is always allocated at index #0. That register file
   // is mainly used to count the total number of mappings created by all
   // register files at runtime. Users can limit the number of available physical
   // registers in register file #0 through the command line flag
   // `-register-file-size`.
   unsigned RegisterFileIndex = RegisterFiles.size();
-  RegisterFiles.emplace_back(NumPhysRegs);
+  RegisterFiles.emplace_back(RF.NumPhysRegs, RF.MaxMovesEliminatedPerCycle,
+                             RF.AllowZeroMoveEliminationOnly);
 
   // Special case where there is no register class identifier in the set.
   // An empty set of register classes means: this register file contains all
@@ -94,6 +99,7 @@ void RegisterFile::addRegisterFile(ArrayRef<MCRegisterCostEntry> Entries,
       }
       IPC = std::make_pair(RegisterFileIndex, RCE.Cost);
       Entry.RenameAs = Reg;
+      Entry.AllowMoveElimination = RCE.AllowMoveElimination;
 
       // Assume the same cost for each sub-register.
       for (MCSubRegIterator I(Reg, &MRI); I.isValid(); ++I) {
@@ -164,8 +170,10 @@ void RegisterFile::addRegisterWrite(WriteRef Write,
   // implicitly clears the upper portion of the underlying register.
   // If a write clears its super-registers, then it is renamed as `RenameAs`.
   bool IsWriteZero = WS.isWriteZero();
-  bool ShouldAllocatePhysRegs = !IsWriteZero;
+  bool IsEliminated = WS.isEliminated();
+  bool ShouldAllocatePhysRegs = !IsWriteZero && !IsEliminated;
   const RegisterRenamingInfo &RRI = RegisterMappings[RegID].second;
+  WS.setPRF(RRI.IndexPlusCost.first);
 
   if (RRI.RenameAs && RRI.RenameAs != RegID) {
     RegID = RRI.RenameAs;
@@ -177,10 +185,11 @@ void RegisterFile::addRegisterWrite(WriteRef Write,
       // register is allocated.
       ShouldAllocatePhysRegs = false;
 
-      if (OtherWrite.getWriteState() &&
-          (OtherWrite.getSourceIndex() != Write.getSourceIndex())) {
+      WriteState *OtherWS = OtherWrite.getWriteState();
+      if (OtherWS && (OtherWrite.getSourceIndex() != Write.getSourceIndex())) {
         // This partial write has a false dependency on RenameAs.
-        WS.setDependentWrite(OtherWrite.getWriteState());
+        assert(!IsEliminated && "Unexpected partial update!");
+        OtherWS->addUser(&WS);
       }
     }
   }
@@ -198,22 +207,33 @@ void RegisterFile::addRegisterWrite(WriteRef Write,
       ZeroRegisters.clearBit(*I);
   }
 
-  // Update the mapping for register RegID including its sub-registers.
-  RegisterMappings[RegID].first = Write;
-  for (MCSubRegIterator I(RegID, &MRI); I.isValid(); ++I)
-    RegisterMappings[*I].first = Write;
+  // If this is move has been eliminated, then the call to tryEliminateMove
+  // should have already updated all the register mappings.
+  if (!IsEliminated) {
+    // Update the mapping for register RegID including its sub-registers.
+    RegisterMappings[RegID].first = Write;
+    RegisterMappings[RegID].second.AliasRegID = 0U;
+    for (MCSubRegIterator I(RegID, &MRI); I.isValid(); ++I) {
+      RegisterMappings[*I].first = Write;
+      RegisterMappings[*I].second.AliasRegID = 0U;
+    }
 
-  // No physical registers are allocated for instructions that are optimized in
-  // hardware. For example, zero-latency data-dependency breaking instructions
-  // don't consume physical registers.
-  if (ShouldAllocatePhysRegs)
-    allocatePhysRegs(RegisterMappings[RegID].second, UsedPhysRegs);
+    // No physical registers are allocated for instructions that are optimized
+    // in hardware. For example, zero-latency data-dependency breaking
+    // instructions don't consume physical registers.
+    if (ShouldAllocatePhysRegs)
+      allocatePhysRegs(RegisterMappings[RegID].second, UsedPhysRegs);
+  }
 
   if (!WS.clearsSuperRegisters())
     return;
 
   for (MCSuperRegIterator I(RegID, &MRI); I.isValid(); ++I) {
-    RegisterMappings[*I].first = Write;
+    if (!IsEliminated) {
+      RegisterMappings[*I].first = Write;
+      RegisterMappings[*I].second.AliasRegID = 0U;
+    }
+
     if (IsWriteZero)
       ZeroRegisters.setBit(*I);
     else
@@ -223,6 +243,11 @@ void RegisterFile::addRegisterWrite(WriteRef Write,
 
 void RegisterFile::removeRegisterWrite(
     const WriteState &WS, MutableArrayRef<unsigned> FreedPhysRegs) {
+  // Early exit if this write was eliminated. A write eliminated at register
+  // renaming stage generates an alias, and it is not added to the PRF.
+  if (WS.isEliminated())
+    return;
+
   unsigned RegID = WS.getRegisterID();
 
   assert(RegID != 0 && "Invalidating an already invalid register?");
@@ -264,11 +289,88 @@ void RegisterFile::removeRegisterWrite(
   }
 }
 
-void RegisterFile::collectWrites(SmallVectorImpl<WriteRef> &Writes,
-                                 unsigned RegID) const {
+bool RegisterFile::tryEliminateMove(WriteState &WS, ReadState &RS) {
+  const RegisterMapping &RMFrom = RegisterMappings[RS.getRegisterID()];
+  const RegisterMapping &RMTo = RegisterMappings[WS.getRegisterID()];
+
+  // From and To must be owned by the same PRF.
+  const RegisterRenamingInfo &RRIFrom = RMFrom.second;
+  const RegisterRenamingInfo &RRITo = RMTo.second;
+  unsigned RegisterFileIndex = RRIFrom.IndexPlusCost.first;
+  if (RegisterFileIndex != RRITo.IndexPlusCost.first)
+    return false;
+
+  // We only allow move elimination for writes that update a full physical
+  // register. On X86, move elimination is possible with 32-bit general purpose
+  // registers because writes to those registers are not partial writes.  If a
+  // register move is a partial write, then we conservatively assume that move
+  // elimination fails, since it would either trigger a partial update, or the
+  // issue of a merge opcode.
+  //
+  // Note that this constraint may be lifted in future.  For example, we could
+  // make this model more flexible, and let users customize the set of registers
+  // (i.e. register classes) that allow move elimination.
+  //
+  // For now, we assume that there is a strong correlation between registers
+  // that allow move elimination, and how those same registers are renamed in
+  // hardware.
+  if (RRITo.RenameAs && RRITo.RenameAs != WS.getRegisterID()) {
+    // Early exit if the PRF doesn't support move elimination for this register.
+    if (!RegisterMappings[RRITo.RenameAs].second.AllowMoveElimination)
+      return false;
+    if (!WS.clearsSuperRegisters())
+      return false;
+  }
+
+  RegisterMappingTracker &RMT = RegisterFiles[RegisterFileIndex];
+  if (RMT.MaxMoveEliminatedPerCycle &&
+      RMT.NumMoveEliminated == RMT.MaxMoveEliminatedPerCycle)
+    return false;
+
+  bool IsZeroMove = ZeroRegisters[RS.getRegisterID()];
+  if (RMT.AllowZeroMoveEliminationOnly && !IsZeroMove)
+    return false;
+
+  MCPhysReg FromReg = RS.getRegisterID();
+  MCPhysReg ToReg = WS.getRegisterID();
+
+  // Construct an alias.
+  MCPhysReg AliasReg = FromReg;
+  if (RRIFrom.RenameAs)
+    AliasReg = RRIFrom.RenameAs;
+
+  const RegisterRenamingInfo &RMAlias = RegisterMappings[AliasReg].second;
+  if (RMAlias.AliasRegID)
+    AliasReg = RMAlias.AliasRegID;
+
+  if (AliasReg != ToReg) {
+    RegisterMappings[ToReg].second.AliasRegID = AliasReg;
+    for (MCSubRegIterator I(ToReg, &MRI); I.isValid(); ++I)
+      RegisterMappings[*I].second.AliasRegID = AliasReg;
+  }
+
+  RMT.NumMoveEliminated++;
+  if (IsZeroMove) {
+    WS.setWriteZero();
+    RS.setReadZero();
+  }
+  WS.setEliminated();
+
+  return true;
+}
+
+void RegisterFile::collectWrites(const ReadState &RS,
+                                 SmallVectorImpl<WriteRef> &Writes) const {
+  unsigned RegID = RS.getRegisterID();
   assert(RegID && RegID < RegisterMappings.size());
   LLVM_DEBUG(dbgs() << "RegisterFile: collecting writes for register "
                     << MRI.getName(RegID) << '\n');
+
+  // Check if this is an alias.
+  const RegisterRenamingInfo &RRI = RegisterMappings[RegID].second;
+  if (RRI.AliasRegID)
+    RegID = RRI.AliasRegID;
+
   const WriteRef &WR = RegisterMappings[RegID].first;
   if (WR.isValid())
     Writes.push_back(WR);
@@ -281,11 +383,13 @@ void RegisterFile::collectWrites(SmallVectorImpl<WriteRef> &Writes,
   }
 
   // Remove duplicate entries and resize the input vector.
-  sort(Writes, [](const WriteRef &Lhs, const WriteRef &Rhs) {
-    return Lhs.getWriteState() < Rhs.getWriteState();
-  });
-  auto It = std::unique(Writes.begin(), Writes.end());
-  Writes.resize(std::distance(Writes.begin(), It));
+  if (Writes.size() > 1) {
+    sort(Writes, [](const WriteRef &Lhs, const WriteRef &Rhs) {
+      return Lhs.getWriteState() < Rhs.getWriteState();
+    });
+    auto It = std::unique(Writes.begin(), Writes.end());
+    Writes.resize(std::distance(Writes.begin(), It));
+  }
 
   LLVM_DEBUG({
     for (const WriteRef &WR : Writes) {
@@ -295,6 +399,20 @@ void RegisterFile::collectWrites(SmallVectorImpl<WriteRef> &Writes,
              << WR.getSourceIndex() << ")\n";
     }
   });
+}
+
+void RegisterFile::addRegisterRead(ReadState &RS,
+                                   SmallVectorImpl<WriteRef> &Defs) const {
+  unsigned RegID = RS.getRegisterID();
+  const RegisterRenamingInfo &RRI = RegisterMappings[RegID].second;
+  RS.setPRF(RRI.IndexPlusCost.first);
+  if (RS.isIndependentFromDef())
+    return;
+
+  if (ZeroRegisters[RS.getRegisterID()])
+    RS.setReadZero();
+  collectWrites(RS, Defs);
+  RS.setDependentWrites(Defs.size());
 }
 
 unsigned RegisterFile::isAvailable(ArrayRef<unsigned> Regs) const {
@@ -370,3 +488,4 @@ void RegisterFile::dump() const {
 #endif
 
 } // namespace mca
+} // namespace llvm

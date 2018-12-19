@@ -26,6 +26,10 @@
 ; RUN: opt -disable-verify -debug-pass-manager -new-pm-debug-info-for-profiling \
 ; RUN:     -passes='thinlto-pre-link<O2>,name-anon-globals' -S  %s 2>&1 \
 ; RUN:     | FileCheck %s --check-prefixes=CHECK-DIS,CHECK-O,CHECK-O2,CHECK-PRELINK-O,CHECK-PRELINK-O2
+; Enabling the hot-cold-split pass should not affect the ThinLTO pre-link
+; RUN: opt -disable-verify -debug-pass-manager \
+; RUN:     -passes='thinlto-pre-link<O2>,name-anon-globals' -hot-cold-split -S  %s 2>&1 \
+; RUN:     | FileCheck %s --check-prefixes=CHECK-O,CHECK-O2,CHECK-PRELINK-O,CHECK-PRELINK-O-NODIS,CHECK-PRELINK-O2
 ;
 ; Postlink pipelines:
 ; RUN: opt -disable-verify -debug-pass-manager \
@@ -110,10 +114,6 @@
 ; CHECK-O-NEXT: Running pass: SROA
 ; CHECK-O-NEXT: Running pass: EarlyCSEPass
 ; CHECK-O-NEXT: Running analysis: MemorySSAAnalysis
-; CHECK-O-NEXT: Running pass: GVNHoistPass on foo
-; CHECK-O-NEXT: Running analysis: PostDominatorTreeAnalysis on foo
-; CHECK-O-NEXT: Running analysis: MemoryDependenceAnalysis on foo
-; CHECK-O-NEXT: Running analysis: PhiValuesAnalysis on foo
 ; CHECK-O-NEXT: Running pass: SpeculativeExecutionPass
 ; CHECK-O-NEXT: Running pass: JumpThreadingPass
 ; CHECK-O-NEXT: Running analysis: LazyValueAnalysis
@@ -160,13 +160,23 @@
 ; CHECK-O-NEXT: Finished Loop pass manager run.
 ; CHECK-Os-NEXT: Running pass: MergedLoadStoreMotionPass
 ; CHECK-Os-NEXT: Running pass: GVN
+; CHECK-Os-NEXT: Running analysis: MemoryDependenceAnalysis
+; CHECK-Os-NEXT: Running analysis: PhiValuesAnalysis
 ; CHECK-Oz-NEXT: Running pass: MergedLoadStoreMotionPass
 ; CHECK-Oz-NEXT: Running pass: GVN
+; CHECK-Oz-NEXT: Running analysis: MemoryDependenceAnalysis
+; CHECK-Oz-NEXT: Running analysis: PhiValuesAnalysis
 ; CHECK-O2-NEXT: Running pass: MergedLoadStoreMotionPass
 ; CHECK-O2-NEXT: Running pass: GVN
+; CHECK-O2-NEXT: Running analysis: MemoryDependenceAnalysis
+; CHECK-O2-NEXT: Running analysis: PhiValuesAnalysis
 ; CHECK-O3-NEXT: Running pass: MergedLoadStoreMotionPass
 ; CHECK-O3-NEXT: Running pass: GVN
+; CHECK-O3-NEXT: Running analysis: MemoryDependenceAnalysis
+; CHECK-O3-NEXT: Running analysis: PhiValuesAnalysis
 ; CHECK-O-NEXT: Running pass: MemCpyOptPass
+; CHECK-O1-NEXT: Running analysis: MemoryDependenceAnalysis
+; CHECK-O1-NEXT: Running analysis: PhiValuesAnalysis
 ; CHECK-O-NEXT: Running pass: SCCPPass
 ; CHECK-O-NEXT: Running pass: BDCEPass
 ; CHECK-O-NEXT: Running analysis: DemandedBitsAnalysis
@@ -180,6 +190,7 @@
 ; CHECK-O-NEXT: Running pass: LCSSAPass
 ; CHECK-O-NEXT: Finished llvm::Function pass manager run
 ; CHECK-O-NEXT: Running pass: ADCEPass
+; CHECK-O-NEXT: Running analysis: PostDominatorTreeAnalysis
 ; CHECK-O-NEXT: Running pass: SimplifyCFGPass
 ; CHECK-O-NEXT: Running pass: InstCombinePass
 ; CHECK-O-NEXT: Finished llvm::Function pass manager run.
@@ -213,6 +224,7 @@
 ; CHECK-POSTLINK-O-NEXT: Running pass: InstCombinePass
 ; CHECK-POSTLINK-O-NEXT: Running pass: LoopUnrollPass
 ; CHECK-POSTLINK-O-NEXT: Running analysis: OuterAnalysisManagerProxy
+; CHECK-POSTLINK-O-NEXT: Running pass: WarnMissedTransformationsPass
 ; CHECK-POSTLINK-O-NEXT: Running pass: InstCombinePass
 ; CHECK-POSTLINK-O-NEXT: Running pass: RequireAnalysisPass<{{.*}}OptimizationRemarkEmitterAnalysis
 ; CHECK-POSTLINK-O-NEXT: Running pass: FunctionToLoopPassAdaptor<{{.*}}LICMPass

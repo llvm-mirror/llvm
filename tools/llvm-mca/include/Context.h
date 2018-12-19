@@ -22,10 +22,10 @@
 #include "Pipeline.h"
 #include "SourceMgr.h"
 #include "llvm/MC/MCRegisterInfo.h"
-#include "llvm/MC/MCSchedule.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include <memory>
 
+namespace llvm {
 namespace mca {
 
 /// This is a convenience struct to hold the parameters necessary for creating
@@ -43,13 +43,12 @@ struct PipelineOptions {
 };
 
 class Context {
-  llvm::SmallVector<std::unique_ptr<HardwareUnit>, 4> Hardware;
-  const llvm::MCRegisterInfo &MRI;
-  const llvm::MCSubtargetInfo &STI;
+  SmallVector<std::unique_ptr<HardwareUnit>, 4> Hardware;
+  const MCRegisterInfo &MRI;
+  const MCSubtargetInfo &STI;
 
 public:
-  Context(const llvm::MCRegisterInfo &R, const llvm::MCSubtargetInfo &S)
-      : MRI(R), STI(S) {}
+  Context(const MCRegisterInfo &R, const MCSubtargetInfo &S) : MRI(R), STI(S) {}
   Context(const Context &C) = delete;
   Context &operator=(const Context &C) = delete;
 
@@ -65,4 +64,5 @@ public:
 };
 
 } // namespace mca
+} // namespace llvm
 #endif // LLVM_TOOLS_LLVM_MCA_CONTEXT_H

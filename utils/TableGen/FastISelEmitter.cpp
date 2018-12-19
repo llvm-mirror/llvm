@@ -210,13 +210,13 @@ struct OperandsSignature {
       // Handle imm operands specially.
       if (!Op->isLeaf() && Op->getOperator()->getName() == "imm") {
         unsigned PredNo = 0;
-        if (!Op->getPredicateFns().empty()) {
-          TreePredicateFn PredFn = Op->getPredicateFns()[0];
+        if (!Op->getPredicateCalls().empty()) {
+          TreePredicateFn PredFn = Op->getPredicateCalls()[0].Fn;
           // If there is more than one predicate weighing in on this operand
           // then we don't handle it.  This doesn't typically happen for
           // immediates anyway.
-          if (Op->getPredicateFns().size() > 1 ||
-              !PredFn.isImmediatePattern())
+          if (Op->getPredicateCalls().size() > 1 ||
+              !PredFn.isImmediatePattern() || PredFn.usesOperands())
             return false;
           // Ignore any instruction with 'FastIselShouldIgnore', these are
           // not needed and just bloat the fast instruction selector.  For
@@ -236,7 +236,7 @@ struct OperandsSignature {
 
       // For now, filter out any operand with a predicate.
       // For now, filter out any operand with multiple values.
-      if (!Op->getPredicateFns().empty() || Op->getNumTypes() != 1)
+      if (!Op->getPredicateCalls().empty() || Op->getNumTypes() != 1)
         return false;
 
       if (!Op->isLeaf()) {
@@ -529,7 +529,7 @@ void FastISelMap::collectPatterns(CodeGenDAGPatterns &CGP) {
     }
 
     // For now, filter out any instructions with predicates.
-    if (!InstPatNode->getPredicateFns().empty())
+    if (!InstPatNode->getPredicateCalls().empty())
       continue;
 
     // Check all the operands.
@@ -829,7 +829,7 @@ void FastISelMap::printFunctionDefinitions(raw_ostream &OS) {
       = SignaturesWithConstantForms.find(Operands);
     if (MI != SignaturesWithConstantForms.end()) {
       // Unique any duplicates out of the list.
-      llvm::sort(MI->second.begin(), MI->second.end());
+      llvm::sort(MI->second);
       MI->second.erase(std::unique(MI->second.begin(), MI->second.end()),
                        MI->second.end());
 

@@ -280,7 +280,7 @@ bool DebugInfoFinder::addScope(DIScope *Scope) {
 }
 
 static MDNode *stripDebugLocFromLoopID(MDNode *N) {
-  assert(N->op_begin() != N->op_end() && "Missing self reference?");
+  assert(!empty(N->operands()) && "Missing self reference?");
 
   // if there is no debug location, we do not have to rewrite this MDNode.
   if (std::none_of(N->op_begin() + 1, N->op_end(), [](const MDOperand &Op) {
@@ -438,11 +438,10 @@ private:
     auto distinctMDSubprogram = [&]() {
       return DISubprogram::getDistinct(
           MDS->getContext(), FileAndScope, MDS->getName(), LinkageName,
-          FileAndScope, MDS->getLine(), Type, MDS->isLocalToUnit(),
-          MDS->isDefinition(), MDS->getScopeLine(), ContainingType,
-          MDS->getVirtuality(), MDS->getVirtualIndex(),
-          MDS->getThisAdjustment(), MDS->getFlags(), MDS->isOptimized(), Unit,
-          TemplateParams, Declaration, Variables);
+          FileAndScope, MDS->getLine(), Type, MDS->getScopeLine(),
+          ContainingType, MDS->getVirtualIndex(), MDS->getThisAdjustment(),
+          MDS->getFlags(), MDS->getSPFlags(), Unit, TemplateParams, Declaration,
+          Variables);
     };
 
     if (MDS->isDistinct())
@@ -450,11 +449,9 @@ private:
 
     auto *NewMDS = DISubprogram::get(
         MDS->getContext(), FileAndScope, MDS->getName(), LinkageName,
-        FileAndScope, MDS->getLine(), Type, MDS->isLocalToUnit(),
-        MDS->isDefinition(), MDS->getScopeLine(), ContainingType,
-        MDS->getVirtuality(), MDS->getVirtualIndex(), MDS->getThisAdjustment(),
-        MDS->getFlags(), MDS->isOptimized(), Unit, TemplateParams, Declaration,
-        Variables);
+        FileAndScope, MDS->getLine(), Type, MDS->getScopeLine(), ContainingType,
+        MDS->getVirtualIndex(), MDS->getThisAdjustment(), MDS->getFlags(),
+        MDS->getSPFlags(), Unit, TemplateParams, Declaration, Variables);
 
     StringRef OldLinkageName = MDS->getLinkageName();
 
@@ -491,7 +488,8 @@ private:
         CU->getSplitDebugFilename(), DICompileUnit::LineTablesOnly, EnumTypes,
         RetainedTypes, GlobalVariables, ImportedEntities, CU->getMacros(),
         CU->getDWOId(), CU->getSplitDebugInlining(),
-        CU->getDebugInfoForProfiling(), CU->getNameTableKind());
+        CU->getDebugInfoForProfiling(), CU->getNameTableKind(),
+        CU->getRangesBaseAddress());
   }
 
   DILocation *getReplacementMDLocation(DILocation *MLD) {
@@ -719,6 +717,11 @@ static LLVMDIFlags map_to_llvmDIFlags(DINode::DIFlags Flags) {
   return static_cast<LLVMDIFlags>(Flags);
 }
 
+static DISubprogram::DISPFlags
+pack_into_DISPFlags(bool IsLocalToUnit, bool IsDefinition, bool IsOptimized) {
+  return DISubprogram::toSPFlags(IsLocalToUnit, IsDefinition, IsOptimized);
+}
+
 unsigned LLVMDebugMetadataVersion() {
   return DEBUG_METADATA_VERSION;
 }
@@ -802,9 +805,10 @@ LLVMMetadataRef LLVMDIBuilderCreateFunction(
     unsigned ScopeLine, LLVMDIFlags Flags, LLVMBool IsOptimized) {
   return wrap(unwrap(Builder)->createFunction(
       unwrapDI<DIScope>(Scope), {Name, NameLen}, {LinkageName, LinkageNameLen},
-      unwrapDI<DIFile>(File), LineNo, unwrapDI<DISubroutineType>(Ty),
-      IsLocalToUnit, IsDefinition, ScopeLine, map_from_llvmDIFlags(Flags),
-      IsOptimized, nullptr, nullptr, nullptr));
+      unwrapDI<DIFile>(File), LineNo, unwrapDI<DISubroutineType>(Ty), ScopeLine,
+      map_from_llvmDIFlags(Flags),
+      pack_into_DISPFlags(IsLocalToUnit, IsDefinition, IsOptimized), nullptr,
+      nullptr, nullptr));
 }
 
 
@@ -1220,23 +1224,16 @@ LLVMDIBuilderCreateConstantValueExpression(LLVMDIBuilderRef Builder,
   return wrap(unwrap(Builder)->createConstantValueExpression(Value));
 }
 
-LLVMMetadataRef
-LLVMDIBuilderCreateGlobalVariableExpression(LLVMDIBuilderRef Builder,
-                                            LLVMMetadataRef Scope,
-                                            const char *Name, size_t NameLen,
-                                            const char *Linkage, size_t LinkLen,
-                                            LLVMMetadataRef File,
-                                            unsigned LineNo,
-                                            LLVMMetadataRef Ty,
-                                            LLVMBool LocalToUnit,
-                                            LLVMMetadataRef Expr,
-                                            LLVMMetadataRef Decl,
-                                            uint32_t AlignInBits) {
+LLVMMetadataRef LLVMDIBuilderCreateGlobalVariableExpression(
+    LLVMDIBuilderRef Builder, LLVMMetadataRef Scope, const char *Name,
+    size_t NameLen, const char *Linkage, size_t LinkLen, LLVMMetadataRef File,
+    unsigned LineNo, LLVMMetadataRef Ty, LLVMBool LocalToUnit,
+    LLVMMetadataRef Expr, LLVMMetadataRef Decl, uint32_t AlignInBits) {
   return wrap(unwrap(Builder)->createGlobalVariableExpression(
-                  unwrapDI<DIScope>(Scope), {Name, NameLen}, {Linkage, LinkLen},
-                  unwrapDI<DIFile>(File), LineNo, unwrapDI<DIType>(Ty),
-                  LocalToUnit, unwrap<DIExpression>(Expr),
-                  unwrapDI<MDNode>(Decl), AlignInBits));
+      unwrapDI<DIScope>(Scope), {Name, NameLen}, {Linkage, LinkLen},
+      unwrapDI<DIFile>(File), LineNo, unwrapDI<DIType>(Ty), LocalToUnit,
+      unwrap<DIExpression>(Expr), unwrapDI<MDNode>(Decl),
+      nullptr, AlignInBits));
 }
 
 LLVMMetadataRef LLVMTemporaryMDNode(LLVMContextRef Ctx, LLVMMetadataRef *Data,
@@ -1256,26 +1253,21 @@ void LLVMMetadataReplaceAllUsesWith(LLVMMetadataRef TargetMetadata,
   MDNode::deleteTemporary(Node);
 }
 
-LLVMMetadataRef
-LLVMDIBuilderCreateTempGlobalVariableFwdDecl(LLVMDIBuilderRef Builder,
-                                             LLVMMetadataRef Scope,
-                                             const char *Name, size_t NameLen,
-                                             const char *Linkage, size_t LnkLen,
-                                             LLVMMetadataRef File,
-                                             unsigned LineNo,
-                                             LLVMMetadataRef Ty,
-                                             LLVMBool LocalToUnit,
-                                             LLVMMetadataRef Decl,
-                                             uint32_t AlignInBits) {
+LLVMMetadataRef LLVMDIBuilderCreateTempGlobalVariableFwdDecl(
+    LLVMDIBuilderRef Builder, LLVMMetadataRef Scope, const char *Name,
+    size_t NameLen, const char *Linkage, size_t LnkLen, LLVMMetadataRef File,
+    unsigned LineNo, LLVMMetadataRef Ty, LLVMBool LocalToUnit,
+    LLVMMetadataRef Decl, uint32_t AlignInBits) {
   return wrap(unwrap(Builder)->createTempGlobalVariableFwdDecl(
-                  unwrapDI<DIScope>(Scope), {Name, NameLen}, {Linkage, LnkLen},
-                  unwrapDI<DIFile>(File), LineNo, unwrapDI<DIType>(Ty),
-                  LocalToUnit, unwrapDI<MDNode>(Decl), AlignInBits));
+      unwrapDI<DIScope>(Scope), {Name, NameLen}, {Linkage, LnkLen},
+      unwrapDI<DIFile>(File), LineNo, unwrapDI<DIType>(Ty), LocalToUnit,
+      unwrapDI<MDNode>(Decl), nullptr, AlignInBits));
 }
 
-LLVMValueRef LLVMDIBuilderInsertDeclareBefore(
-  LLVMDIBuilderRef Builder, LLVMValueRef Storage, LLVMMetadataRef VarInfo,
-  LLVMMetadataRef Expr, LLVMMetadataRef DL, LLVMValueRef Instr) {
+LLVMValueRef
+LLVMDIBuilderInsertDeclareBefore(LLVMDIBuilderRef Builder, LLVMValueRef Storage,
+                                 LLVMMetadataRef VarInfo, LLVMMetadataRef Expr,
+                                 LLVMMetadataRef DL, LLVMValueRef Instr) {
   return wrap(unwrap(Builder)->insertDeclare(
                   unwrap(Storage), unwrap<DILocalVariable>(VarInfo),
                   unwrap<DIExpression>(Expr), unwrap<DILocation>(DL),
@@ -1353,4 +1345,15 @@ LLVMMetadataRef LLVMGetSubprogram(LLVMValueRef Func) {
 
 void LLVMSetSubprogram(LLVMValueRef Func, LLVMMetadataRef SP) {
   unwrap<Function>(Func)->setSubprogram(unwrap<DISubprogram>(SP));
+}
+
+LLVMMetadataKind LLVMGetMetadataKind(LLVMMetadataRef Metadata) {
+  switch(unwrap(Metadata)->getMetadataID()) {
+#define HANDLE_METADATA_LEAF(CLASS) \
+  case Metadata::CLASS##Kind: \
+    return (LLVMMetadataKind)LLVM##CLASS##MetadataKind;
+#include "llvm/IR/Metadata.def"
+  default:
+    return (LLVMMetadataKind)LLVMGenericDINodeMetadataKind;
+  }
 }

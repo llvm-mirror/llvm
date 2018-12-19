@@ -242,12 +242,12 @@ protected:
 
 }  // end anonymous namespace
 
-INITIALIZE_PASS_BEGIN(AMDGPUDAGToDAGISel, "isel",
+INITIALIZE_PASS_BEGIN(AMDGPUDAGToDAGISel, "amdgpu-isel",
                       "AMDGPU DAG->DAG Pattern Instruction Selection", false, false)
 INITIALIZE_PASS_DEPENDENCY(AMDGPUArgumentUsageInfo)
 INITIALIZE_PASS_DEPENDENCY(AMDGPUPerfHintAnalysis)
 INITIALIZE_PASS_DEPENDENCY(LegacyDivergenceAnalysis)
-INITIALIZE_PASS_END(AMDGPUDAGToDAGISel, "isel",
+INITIALIZE_PASS_END(AMDGPUDAGToDAGISel, "amdgpu-isel",
                     "AMDGPU DAG->DAG Pattern Instruction Selection", false, false)
 
 /// This pass converts a legalized DAG into a AMDGPU-specific
@@ -978,8 +978,6 @@ bool AMDGPUDAGToDAGISel::SelectDS64Bit4ByteAligned(SDValue Addr, SDValue &Base,
 
   // default case
 
-  // FIXME: This is broken on SI where we still need to check if the base
-  // pointer is positive here.
   Base = Addr;
   Offset0 = CurDAG->getTargetConstant(0, DL, MVT::i8);
   Offset1 = CurDAG->getTargetConstant(1, DL, MVT::i8);

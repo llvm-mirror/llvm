@@ -159,13 +159,14 @@ public:
   LazyReexportsMaterializationUnit(LazyCallThroughManager &LCTManager,
                                    IndirectStubsManager &ISManager,
                                    JITDylib &SourceJD,
-                                   SymbolAliasMap CallableAliases);
+                                   SymbolAliasMap CallableAliases,
+                                   VModuleKey K);
 
   StringRef getName() const override;
 
 private:
   void materialize(MaterializationResponsibility R) override;
-  void discard(const JITDylib &JD, SymbolStringPtr Name) override;
+  void discard(const JITDylib &JD, const SymbolStringPtr &Name) override;
   static SymbolFlagsMap extractFlags(const SymbolAliasMap &Aliases);
 
   LazyCallThroughManager &LCTManager;
@@ -182,9 +183,10 @@ private:
 inline std::unique_ptr<LazyReexportsMaterializationUnit>
 lazyReexports(LazyCallThroughManager &LCTManager,
               IndirectStubsManager &ISManager, JITDylib &SourceJD,
-              SymbolAliasMap CallableAliases) {
+              SymbolAliasMap CallableAliases, VModuleKey K = VModuleKey()) {
   return llvm::make_unique<LazyReexportsMaterializationUnit>(
-      LCTManager, ISManager, SourceJD, std::move(CallableAliases));
+      LCTManager, ISManager, SourceJD, std::move(CallableAliases),
+      std::move(K));
 }
 
 } // End namespace orc

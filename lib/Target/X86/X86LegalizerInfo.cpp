@@ -133,7 +133,8 @@ void X86LegalizerInfo::setLegalizerInfo32bit() {
     getActionDefinitionsBuilder(G_INTTOPTR).legalFor({{p0, s32}});
 
     // Shifts and SDIV
-    getActionDefinitionsBuilder({G_SHL, G_LSHR, G_ASHR, G_SDIV})
+    getActionDefinitionsBuilder(
+        {G_SHL, G_LSHR, G_ASHR, G_SDIV, G_SREM, G_UDIV, G_UREM})
         .legalFor({s8, s16, s32})
         .clampScalar(0, s8, s32);
   }
@@ -236,9 +237,10 @@ void X86LegalizerInfo::setLegalizerInfo64bit() {
       .widenScalarToNextPow2(1);
 
   // Shifts and SDIV
-  getActionDefinitionsBuilder({G_SHL, G_LSHR, G_ASHR, G_SDIV})
-    .legalFor({s8, s16, s32, s64})
-    .clampScalar(0, s8, s64);
+  getActionDefinitionsBuilder(
+      {G_SHL, G_LSHR, G_ASHR, G_SDIV, G_SREM, G_UDIV, G_UREM})
+      .legalFor({s8, s16, s32, s64})
+      .clampScalar(0, s8, s64);
 
   // Merge/Unmerge
   setAction({G_MERGE_VALUES, s128}, Legal);
@@ -269,7 +271,7 @@ void X86LegalizerInfo::setLegalizerInfoSSE1() {
 
   // Merge/Unmerge
   for (const auto &Ty : {v4s32, v2s64}) {
-    setAction({G_MERGE_VALUES, Ty}, Legal);
+    setAction({G_CONCAT_VECTORS, Ty}, Legal);
     setAction({G_UNMERGE_VALUES, 1, Ty}, Legal);
   }
   setAction({G_MERGE_VALUES, 1, s64}, Legal);
@@ -314,11 +316,11 @@ void X86LegalizerInfo::setLegalizerInfoSSE2() {
   // Merge/Unmerge
   for (const auto &Ty :
        {v16s8, v32s8, v8s16, v16s16, v4s32, v8s32, v2s64, v4s64}) {
-    setAction({G_MERGE_VALUES, Ty}, Legal);
+    setAction({G_CONCAT_VECTORS, Ty}, Legal);
     setAction({G_UNMERGE_VALUES, 1, Ty}, Legal);
   }
   for (const auto &Ty : {v16s8, v8s16, v4s32, v2s64}) {
-    setAction({G_MERGE_VALUES, 1, Ty}, Legal);
+    setAction({G_CONCAT_VECTORS, 1, Ty}, Legal);
     setAction({G_UNMERGE_VALUES, Ty}, Legal);
   }
 }
@@ -365,12 +367,12 @@ void X86LegalizerInfo::setLegalizerInfoAVX() {
   // Merge/Unmerge
   for (const auto &Ty :
        {v32s8, v64s8, v16s16, v32s16, v8s32, v16s32, v4s64, v8s64}) {
-    setAction({G_MERGE_VALUES, Ty}, Legal);
+    setAction({G_CONCAT_VECTORS, Ty}, Legal);
     setAction({G_UNMERGE_VALUES, 1, Ty}, Legal);
   }
   for (const auto &Ty :
        {v16s8, v32s8, v8s16, v16s16, v4s32, v8s32, v2s64, v4s64}) {
-    setAction({G_MERGE_VALUES, 1, Ty}, Legal);
+    setAction({G_CONCAT_VECTORS, 1, Ty}, Legal);
     setAction({G_UNMERGE_VALUES, Ty}, Legal);
   }
 }
@@ -398,11 +400,11 @@ void X86LegalizerInfo::setLegalizerInfoAVX2() {
 
   // Merge/Unmerge
   for (const auto &Ty : {v64s8, v32s16, v16s32, v8s64}) {
-    setAction({G_MERGE_VALUES, Ty}, Legal);
+    setAction({G_CONCAT_VECTORS, Ty}, Legal);
     setAction({G_UNMERGE_VALUES, 1, Ty}, Legal);
   }
   for (const auto &Ty : {v32s8, v16s16, v8s32, v4s64}) {
-    setAction({G_MERGE_VALUES, 1, Ty}, Legal);
+    setAction({G_CONCAT_VECTORS, 1, Ty}, Legal);
     setAction({G_UNMERGE_VALUES, Ty}, Legal);
   }
 }

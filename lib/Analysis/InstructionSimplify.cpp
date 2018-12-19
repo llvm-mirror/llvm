@@ -2996,6 +2996,44 @@ static Value *simplifyICmpWithBinOp(CmpInst::Predicate Pred, Value *LHS,
   return nullptr;
 }
 
+static Value *simplifyICmpWithAbsNabs(CmpInst::Predicate Pred, Value *Op0,
+                                      Value *Op1) {
+  // We need a comparison with a constant.
+  const APInt *C;
+  if (!match(Op1, m_APInt(C)))
+    return nullptr;
+
+  // matchSelectPattern returns the negation part of an abs pattern in SP1.
+  // If the negate has an NSW flag, abs(INT_MIN) is undefined. Without that
+  // constraint, we can't make a contiguous range for the result of abs.
+  ICmpInst::Predicate AbsPred = ICmpInst::BAD_ICMP_PREDICATE;
+  Value *SP0, *SP1;
+  SelectPatternFlavor SPF = matchSelectPattern(Op0, SP0, SP1).Flavor;
+  if (SPF == SelectPatternFlavor::SPF_ABS &&
+      cast<Instruction>(SP1)->hasNoSignedWrap())
+    // The result of abs(X) is >= 0 (with nsw).
+    AbsPred = ICmpInst::ICMP_SGE;
+  if (SPF == SelectPatternFlavor::SPF_NABS)
+    // The result of -abs(X) is <= 0.
+    AbsPred = ICmpInst::ICMP_SLE;
+
+  if (AbsPred == ICmpInst::BAD_ICMP_PREDICATE)
+    return nullptr;
+
+  // If there is no intersection between abs/nabs and the range of this icmp,
+  // the icmp must be false. If the abs/nabs range is a subset of the icmp
+  // range, the icmp must be true.
+  APInt Zero = APInt::getNullValue(C->getBitWidth());
+  ConstantRange AbsRange = ConstantRange::makeExactICmpRegion(AbsPred, Zero);
+  ConstantRange CmpRange = ConstantRange::makeExactICmpRegion(Pred, *C);
+  if (AbsRange.intersectWith(CmpRange).isEmptySet())
+    return getFalse(GetCompareTy(Op0));
+  if (CmpRange.contains(AbsRange))
+    return getTrue(GetCompareTy(Op0));
+
+  return nullptr;
+}
+
 /// Simplify integer comparisons where at least one operand of the compare
 /// matches an integer min/max idiom.
 static Value *simplifyICmpWithMinMax(CmpInst::Predicate Pred, Value *LHS,
@@ -3427,6 +3465,9 @@ static Value *SimplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
   if (Value *V = simplifyICmpWithMinMax(Pred, LHS, RHS, Q, MaxRecurse))
     return V;
 
+  if (Value *V = simplifyICmpWithAbsNabs(Pred, LHS, RHS))
+    return V;
+
   // Simplify comparisons of related pointers using a powerful, recursive
   // GEP-walk when we have target data available..
   if (LHS->getType()->isPointerTy())
@@ -3570,12 +3611,19 @@ static Value *SimplifyFCmpInst(unsigned Predicate, Value *LHS, Value *RHS,
     }
     if (C->isZero()) {
       switch (Pred) {
+      case FCmpInst::FCMP_OGE:
+        if (FMF.noNaNs() && CannotBeOrderedLessThanZero(LHS, Q.TLI))
+          return getTrue(RetTy);
+        break;
       case FCmpInst::FCMP_UGE:
         if (CannotBeOrderedLessThanZero(LHS, Q.TLI))
           return getTrue(RetTy);
         break;
+      case FCmpInst::FCMP_ULT:
+        if (FMF.noNaNs() && CannotBeOrderedLessThanZero(LHS, Q.TLI))
+          return getFalse(RetTy);
+        break;
       case FCmpInst::FCMP_OLT:
-        // X < 0
         if (CannotBeOrderedLessThanZero(LHS, Q.TLI))
           return getFalse(RetTy);
         break;
@@ -3789,6 +3837,28 @@ static Value *simplifySelectWithICmpCond(Value *CondVal, Value *TrueVal,
       if (Value *V = simplifySelectBitTest(TrueVal, FalseVal, X, Y,
                                            Pred == ICmpInst::ICMP_EQ))
         return V;
+
+    // Test for zero-shift-guard-ops around funnel shifts. These are used to
+    // avoid UB from oversized shifts in raw IR rotate patterns, but the
+    // intrinsics do not have that problem.
+    Value *ShAmt;
+    auto isFsh = m_CombineOr(m_Intrinsic<Intrinsic::fshl>(m_Value(X), m_Value(),
+                                                          m_Value(ShAmt)),
+                             m_Intrinsic<Intrinsic::fshr>(m_Value(), m_Value(X),
+                                                          m_Value(ShAmt)));
+    // (ShAmt != 0) ? fshl(X, *, ShAmt) : X --> fshl(X, *, ShAmt)
+    // (ShAmt != 0) ? fshr(*, X, ShAmt) : X --> fshr(*, X, ShAmt)
+    // (ShAmt == 0) ? fshl(X, *, ShAmt) : X --> X
+    // (ShAmt == 0) ? fshr(*, X, ShAmt) : X --> X
+    if (match(TrueVal, isFsh) && FalseVal == X && CmpLHS == ShAmt)
+      return Pred == ICmpInst::ICMP_NE ? TrueVal : X;
+
+    // (ShAmt == 0) ? X : fshl(X, *, ShAmt) --> fshl(X, *, ShAmt)
+    // (ShAmt == 0) ? X : fshr(*, X, ShAmt) --> fshr(*, X, ShAmt)
+    // (ShAmt != 0) ? X : fshl(X, *, ShAmt) --> X
+    // (ShAmt != 0) ? X : fshr(*, X, ShAmt) --> X
+    if (match(FalseVal, isFsh) && TrueVal == X && CmpLHS == ShAmt)
+      return Pred == ICmpInst::ICMP_EQ ? FalseVal : X;
   }
 
   // Check for other compares that behave like bit test.
@@ -3821,6 +3891,34 @@ static Value *simplifySelectWithICmpCond(Value *CondVal, Value *TrueVal,
         SimplifyWithOpReplaced(FalseVal, CmpRHS, CmpLHS, Q, MaxRecurse) ==
             TrueVal)
       return TrueVal;
+  }
+
+  return nullptr;
+}
+
+/// Try to simplify a select instruction when its condition operand is a
+/// floating-point comparison.
+static Value *simplifySelectWithFCmp(Value *Cond, Value *T, Value *F) {
+  FCmpInst::Predicate Pred;
+  if (!match(Cond, m_FCmp(Pred, m_Specific(T), m_Specific(F))) &&
+      !match(Cond, m_FCmp(Pred, m_Specific(F), m_Specific(T))))
+    return nullptr;
+
+  // TODO: The transform may not be valid with -0.0. An incomplete way of
+  // testing for that possibility is to check if at least one operand is a
+  // non-zero constant.
+  const APFloat *C;
+  if ((match(T, m_APFloat(C)) && C->isNonZero()) ||
+      (match(F, m_APFloat(C)) && C->isNonZero())) {
+    // (T == F) ? T : F --> F
+    // (F == T) ? T : F --> F
+    if (Pred == FCmpInst::FCMP_OEQ)
+      return F;
+
+    // (T != F) ? T : F --> T
+    // (F != T) ? T : F --> T
+    if (Pred == FCmpInst::FCMP_UNE)
+      return T;
   }
 
   return nullptr;
@@ -3862,8 +3960,15 @@ static Value *SimplifySelectInst(Value *Cond, Value *TrueVal, Value *FalseVal,
           simplifySelectWithICmpCond(Cond, TrueVal, FalseVal, Q, MaxRecurse))
     return V;
 
+  if (Value *V = simplifySelectWithFCmp(Cond, TrueVal, FalseVal))
+    return V;
+
   if (Value *V = foldSelectWithBinaryOp(Cond, TrueVal, FalseVal))
     return V;
+
+  Optional<bool> Imp = isImpliedByDomCondition(Cond, Q.CxtI, Q.DL);
+  if (Imp)
+    return *Imp ? TrueVal : FalseVal;
 
   return nullptr;
 }
@@ -4508,10 +4613,8 @@ static Value *SimplifyFDivInst(Value *Op0, Value *Op1, FastMathFlags FMF,
     // -X /  X -> -1.0 and
     //  X / -X -> -1.0 are legal when NaNs are ignored.
     // We can ignore signed zeros because +-0.0/+-0.0 is NaN and ignored.
-    if ((BinaryOperator::isFNeg(Op0, /*IgnoreZeroSign=*/true) &&
-         BinaryOperator::getFNegArgument(Op0) == Op1) ||
-        (BinaryOperator::isFNeg(Op1, /*IgnoreZeroSign=*/true) &&
-         BinaryOperator::getFNegArgument(Op1) == Op0))
+    if (match(Op0, m_FNegNSZ(m_Specific(Op1))) ||
+        match(Op1, m_FNegNSZ(m_Specific(Op0))))
       return ConstantFP::get(Op0->getType(), -1.0);
   }
 
@@ -4813,6 +4916,40 @@ static Value *simplifyBinaryIntrinsic(Function *F, Value *Op0, Value *Op1,
     if (match(Op0, m_Undef()) || match(Op1, m_Undef()))
       return Constant::getNullValue(ReturnType);
     break;
+  case Intrinsic::uadd_sat:
+    // sat(MAX + X) -> MAX
+    // sat(X + MAX) -> MAX
+    if (match(Op0, m_AllOnes()) || match(Op1, m_AllOnes()))
+      return Constant::getAllOnesValue(ReturnType);
+    LLVM_FALLTHROUGH;
+  case Intrinsic::sadd_sat:
+    // sat(X + undef) -> -1
+    // sat(undef + X) -> -1
+    // For unsigned: Assume undef is MAX, thus we saturate to MAX (-1).
+    // For signed: Assume undef is ~X, in which case X + ~X = -1.
+    if (match(Op0, m_Undef()) || match(Op1, m_Undef()))
+      return Constant::getAllOnesValue(ReturnType);
+
+    // X + 0 -> X
+    if (match(Op1, m_Zero()))
+      return Op0;
+    // 0 + X -> X
+    if (match(Op0, m_Zero()))
+      return Op1;
+    break;
+  case Intrinsic::usub_sat:
+    // sat(0 - X) -> 0, sat(X - MAX) -> 0
+    if (match(Op0, m_Zero()) || match(Op1, m_AllOnes()))
+      return Constant::getNullValue(ReturnType);
+    LLVM_FALLTHROUGH;
+  case Intrinsic::ssub_sat:
+    // X - X -> 0, X - undef -> 0, undef - X -> 0
+    if (Op0 == Op1 || match(Op0, m_Undef()) || match(Op1, m_Undef()))
+      return Constant::getNullValue(ReturnType);
+    // X - 0 -> X
+    if (match(Op1, m_Zero()))
+      return Op0;
+    break;
   case Intrinsic::load_relative:
     if (auto *C0 = dyn_cast<Constant>(Op0))
       if (auto *C1 = dyn_cast<Constant>(Op1))
@@ -4829,13 +4966,24 @@ static Value *simplifyBinaryIntrinsic(Function *F, Value *Op0, Value *Op1,
     }
     break;
   case Intrinsic::maxnum:
-  case Intrinsic::minnum: {
+  case Intrinsic::minnum:
+  case Intrinsic::maximum:
+  case Intrinsic::minimum: {
     // If the arguments are the same, this is a no-op.
     if (Op0 == Op1) return Op0;
 
-    // If one argument is NaN or undef, return the other argument.
-    if (match(Op0, m_CombineOr(m_NaN(), m_Undef()))) return Op1;
-    if (match(Op1, m_CombineOr(m_NaN(), m_Undef()))) return Op0;
+    // If one argument is undef, return the other argument.
+    if (match(Op0, m_Undef()))
+      return Op1;
+    if (match(Op1, m_Undef()))
+      return Op0;
+
+    // If one argument is NaN, return other or NaN appropriately.
+    bool PropagateNaN = IID == Intrinsic::minimum || IID == Intrinsic::maximum;
+    if (match(Op0, m_NaN()))
+      return PropagateNaN ? Op0 : Op1;
+    if (match(Op1, m_NaN()))
+      return PropagateNaN ? Op1 : Op0;
 
     // Min/max of the same operation with common operand:
     // m(m(X, Y)), X --> m(X, Y) (4 commuted variants)
@@ -4848,9 +4996,9 @@ static Value *simplifyBinaryIntrinsic(Function *F, Value *Op0, Value *Op1,
           (M1->getOperand(0) == Op0 || M1->getOperand(1) == Op0))
         return Op1;
 
-    // minnum(X, -Inf) --> -Inf (and commuted variant)
-    // maxnum(X, +Inf) --> +Inf (and commuted variant)
-    bool UseNegInf = IID == Intrinsic::minnum;
+    // min(X, -Inf) --> -Inf (and commuted variant)
+    // max(X, +Inf) --> +Inf (and commuted variant)
+    bool UseNegInf = IID == Intrinsic::minnum || IID == Intrinsic::minimum;
     const APFloat *C;
     if ((match(Op0, m_APFloat(C)) && C->isInfinity() &&
          C->isNegative() == UseNegInf) ||
@@ -4898,7 +5046,16 @@ static Value *simplifyIntrinsic(Function *F, IterTy ArgBegin, IterTy ArgEnd,
   }
   case Intrinsic::fshl:
   case Intrinsic::fshr: {
-    Value *ShAmtArg = ArgBegin[2];
+    Value *Op0 = ArgBegin[0], *Op1 = ArgBegin[1], *ShAmtArg = ArgBegin[2];
+
+    // If both operands are undef, the result is undef.
+    if (match(Op0, m_Undef()) && match(Op1, m_Undef()))
+      return UndefValue::get(F->getReturnType());
+
+    // If shift amount is undef, assume it is zero.
+    if (match(ShAmtArg, m_Undef()))
+      return ArgBegin[IID == Intrinsic::fshl ? 0 : 1];
+
     const APInt *ShAmtC;
     if (match(ShAmtArg, m_APInt(ShAmtC))) {
       // If there's effectively no shift, return the 1st arg or 2nd arg.

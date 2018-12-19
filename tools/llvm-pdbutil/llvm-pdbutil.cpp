@@ -13,7 +13,6 @@
 
 #include "llvm-pdbutil.h"
 
-#include "Analyze.h"
 #include "BytesOutputStyle.h"
 #include "DumpOutputStyle.h"
 #include "ExplainOutputStyle.h"
@@ -117,10 +116,6 @@ cl::SubCommand
     PdbToYamlSubcommand("pdb2yaml",
                         "Generate a detailed YAML description of a PDB File");
 
-cl::SubCommand
-    AnalyzeSubcommand("analyze",
-                      "Analyze various aspects of a PDB's structure");
-
 cl::SubCommand MergeSubcommand("merge",
                                "Merge multiple PDBs into a single PDB");
 
@@ -193,6 +188,12 @@ static cl::opt<bool> Compilands("compilands",
 static cl::opt<bool> Funcsigs("funcsigs",
                               cl::desc("Dump function signature information"),
                               cl::sub(DiaDumpSubcommand));
+static cl::opt<bool> Arrays("arrays", cl::desc("Dump array types"),
+                            cl::sub(DiaDumpSubcommand));
+static cl::opt<bool> VTShapes("vtshapes", cl::desc("Dump virtual table shapes"),
+                              cl::sub(DiaDumpSubcommand));
+static cl::opt<bool> Typedefs("typedefs", cl::desc("Dump typedefs"),
+                              cl::sub(DiaDumpSubcommand));
 } // namespace diadump
 
 namespace pretty {
@@ -243,6 +244,13 @@ cl::opt<bool> Typedefs("typedefs", cl::desc("Display typedef types"),
                        cl::cat(TypeCategory), cl::sub(PrettySubcommand));
 cl::opt<bool> Funcsigs("funcsigs", cl::desc("Display function signatures"),
                        cl::cat(TypeCategory), cl::sub(PrettySubcommand));
+cl::opt<bool> Pointers("pointers", cl::desc("Display pointer types"),
+                       cl::cat(TypeCategory), cl::sub(PrettySubcommand));
+cl::opt<bool> Arrays("arrays", cl::desc("Display arrays"),
+                     cl::cat(TypeCategory), cl::sub(PrettySubcommand));
+cl::opt<bool> VTShapes("vtshapes", cl::desc("Display vftable shapes"),
+                       cl::cat(TypeCategory), cl::sub(PrettySubcommand));
+
 cl::opt<SymbolSortMode> SymbolOrder(
     "symbol-order", cl::desc("symbol sort order"),
     cl::init(SymbolSortMode::None),
@@ -513,6 +521,11 @@ cl::opt<bool> DumpGlobals("globals", cl::desc("dump Globals symbol records"),
                           cl::cat(SymbolOptions), cl::sub(DumpSubcommand));
 cl::opt<bool> DumpGlobalExtras("global-extras", cl::desc("dump Globals hashes"),
                                cl::cat(SymbolOptions), cl::sub(DumpSubcommand));
+cl::list<std::string> DumpGlobalNames(
+    "global-name",
+    cl::desc(
+        "With -globals, only dump globals whose name matches the given value"),
+    cl::cat(SymbolOptions), cl::sub(DumpSubcommand), cl::ZeroOrMore);
 cl::opt<bool> DumpPublics("publics", cl::desc("dump Publics stream data"),
                           cl::cat(SymbolOptions), cl::sub(DumpSubcommand));
 cl::opt<bool> DumpPublicExtras("public-extras",
@@ -645,6 +658,10 @@ cl::opt<bool> IpiStream("ipi-stream",
                         cl::desc("Dump the IPI Stream (Stream 5)"),
                         cl::sub(PdbToYamlSubcommand), cl::init(false));
 
+cl::opt<bool> PublicsStream("publics-stream",
+                            cl::desc("Dump the Publics Stream"),
+                            cl::sub(PdbToYamlSubcommand), cl::init(false));
+
 // MODULE & FILE OPTIONS
 cl::opt<bool> DumpModules("modules", cl::desc("dump compiland information"),
                           cl::cat(FileOptions), cl::sub(PdbToYamlSubcommand));
@@ -663,14 +680,6 @@ cl::list<std::string> InputFilename(cl::Positional,
                                     cl::desc("<input PDB file>"), cl::Required,
                                     cl::sub(PdbToYamlSubcommand));
 } // namespace pdb2yaml
-
-namespace analyze {
-cl::opt<bool> StringTable("hash-collisions", cl::desc("Find hash collisions"),
-                          cl::sub(AnalyzeSubcommand), cl::init(false));
-cl::list<std::string> InputFilename(cl::Positional,
-                                    cl::desc("<input PDB file>"), cl::Required,
-                                    cl::sub(AnalyzeSubcommand));
-}
 
 namespace merge {
 cl::list<std::string> InputFilenames(cl::Positional,
@@ -869,14 +878,6 @@ static void dumpBytes(StringRef Path) {
   ExitOnErr(O->dump());
 }
 
-static void dumpAnalysis(StringRef Path) {
-  std::unique_ptr<IPDBSession> Session;
-  auto &File = loadPDB(Path, Session);
-  auto O = llvm::make_unique<AnalysisStyle>(File);
-
-  ExitOnErr(O->dump());
-}
-
 bool opts::pretty::shouldDumpSymLevel(SymLevel Search) {
   if (SymTypes.empty())
     return true;
@@ -1012,9 +1013,15 @@ static void dumpDia(StringRef Path) {
     SymTypes.push_back(PDB_SymType::UDT);
   if (opts::diadump::Funcsigs)
     SymTypes.push_back(PDB_SymType::FunctionSig);
-
+  if (opts::diadump::Arrays)
+    SymTypes.push_back(PDB_SymType::ArrayType);
+  if (opts::diadump::VTShapes)
+    SymTypes.push_back(PDB_SymType::VTableShape);
+  if (opts::diadump::Typedefs)
+    SymTypes.push_back(PDB_SymType::Typedef);
   PdbSymbolIdField Ids = opts::diadump::NoSymIndexIds ? PdbSymbolIdField::None
                                                       : PdbSymbolIdField::All;
+
   PdbSymbolIdField Recurse = PdbSymbolIdField::None;
   if (opts::diadump::Recurse)
     Recurse = PdbSymbolIdField::All;
@@ -1179,7 +1186,8 @@ static void dumpPretty(StringRef Path) {
   }
 
   if (opts::pretty::Classes || opts::pretty::Enums || opts::pretty::Typedefs ||
-      opts::pretty::Funcsigs) {
+      opts::pretty::Funcsigs || opts::pretty::Pointers ||
+      opts::pretty::Arrays || opts::pretty::VTShapes) {
     Printer.NewLine();
     WithColor(Printer, PDB_ColorItem::SectionHeader).get() << "---TYPES---";
     Printer.Indent();
@@ -1272,6 +1280,7 @@ static void dumpPretty(StringRef Path) {
       dumpInjectedSources(Printer, *Session);
   }
 
+  Printer.NewLine();
   outs().flush();
 }
 
@@ -1469,6 +1478,7 @@ int main(int Argc, const char **Argv) {
       opts::pdb2yaml::DbiStream = true;
       opts::pdb2yaml::TpiStream = true;
       opts::pdb2yaml::IpiStream = true;
+      opts::pdb2yaml::PublicsStream = true;
       opts::pdb2yaml::DumpModules = true;
       opts::pdb2yaml::DumpModuleFiles = true;
       opts::pdb2yaml::DumpModuleSyms = true;
@@ -1495,8 +1505,6 @@ int main(int Argc, const char **Argv) {
       opts::yaml2pdb::YamlPdbOutputFile = OutputFilename.str();
     }
     yamlToPdb(opts::yaml2pdb::InputFilename);
-  } else if (opts::AnalyzeSubcommand) {
-    dumpAnalysis(opts::analyze::InputFilename.front());
   } else if (opts::DiaDumpSubcommand) {
     llvm::for_each(opts::diadump::InputFilenames, dumpDia);
   } else if (opts::PrettySubcommand) {
@@ -1516,6 +1524,8 @@ int main(int Argc, const char **Argv) {
       opts::pretty::Classes = true;
       opts::pretty::Typedefs = true;
       opts::pretty::Enums = true;
+      opts::pretty::Pointers = true;
+      opts::pretty::Funcsigs = true;
     }
 
     // When adding filters for excluded compilands and types, we need to

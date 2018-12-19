@@ -20,13 +20,12 @@
 #include "HardwareUnits/RetireControlUnit.h"
 #include "HardwareUnits/Scheduler.h"
 #include "Stages/DispatchStage.h"
+#include "Stages/EntryStage.h"
 #include "Stages/ExecuteStage.h"
-#include "Stages/FetchStage.h"
 #include "Stages/RetireStage.h"
 
+namespace llvm {
 namespace mca {
-
-using namespace llvm;
 
 std::unique_ptr<Pipeline>
 Context::createDefaultPipeline(const PipelineOptions &Opts, InstrBuilder &IB,
@@ -36,12 +35,12 @@ Context::createDefaultPipeline(const PipelineOptions &Opts, InstrBuilder &IB,
   // Create the hardware units defining the backend.
   auto RCU = llvm::make_unique<RetireControlUnit>(SM);
   auto PRF = llvm::make_unique<RegisterFile>(SM, MRI, Opts.RegisterFileSize);
-  auto LSU = llvm::make_unique<LSUnit>(Opts.LoadQueueSize, Opts.StoreQueueSize,
-                                       Opts.AssumeNoAlias);
-  auto HWS = llvm::make_unique<Scheduler>(SM, LSU.get());
+  auto LSU = llvm::make_unique<LSUnit>(SM, Opts.LoadQueueSize,
+                                       Opts.StoreQueueSize, Opts.AssumeNoAlias);
+  auto HWS = llvm::make_unique<Scheduler>(SM, *LSU);
 
   // Create the pipeline stages.
-  auto Fetch = llvm::make_unique<FetchStage>(IB, SrcMgr);
+  auto Fetch = llvm::make_unique<EntryStage>(SrcMgr);
   auto Dispatch = llvm::make_unique<DispatchStage>(STI, MRI, Opts.DispatchWidth,
                                                    *RCU, *PRF);
   auto Execute = llvm::make_unique<ExecuteStage>(*HWS);
@@ -63,3 +62,4 @@ Context::createDefaultPipeline(const PipelineOptions &Opts, InstrBuilder &IB,
 }
 
 } // namespace mca
+} // namespace llvm

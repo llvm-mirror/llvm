@@ -112,14 +112,20 @@ struct DumpVisitor {
     printStr("}");
     --Depth;
   }
+
   // Overload used when T is exactly 'bool', not merely convertible to 'bool'.
-  template<typename T, T * = (bool*)nullptr>
-  void print(T B) {
-    printStr(B ? "true" : "false");
+  void print(bool B) { printStr(B ? "true" : "false"); }
+
+  template <class T>
+  typename std::enable_if<std::is_unsigned<T>::value>::type print(T N) {
+    fprintf(stderr, "%llu", (unsigned long long)N);
   }
-  void print(size_t N) {
-    fprintf(stderr, "%zu", N);
+
+  template <class T>
+  typename std::enable_if<std::is_signed<T>::value>::type print(T N) {
+    fprintf(stderr, "%lld", (long long)N);
   }
+
   void print(ReferenceKind RK) {
     switch (RK) {
     case ReferenceKind::LValue:
@@ -316,7 +322,7 @@ public:
 // Code beyond this point should not be synchronized with libc++abi.
 //===----------------------------------------------------------------------===//
 
-using Demangler = itanium_demangle::Db<DefaultAllocator>;
+using Demangler = itanium_demangle::ManglingParser<DefaultAllocator>;
 
 char *llvm::itaniumDemangle(const char *MangledName, char *Buf,
                             size_t *N, int *Status) {
@@ -334,7 +340,7 @@ char *llvm::itaniumDemangle(const char *MangledName, char *Buf,
 
   if (AST == nullptr)
     InternalStatus = demangle_invalid_mangled_name;
-  else if (initializeOutputStream(Buf, N, S, 1024))
+  else if (!initializeOutputStream(Buf, N, S, 1024))
     InternalStatus = demangle_memory_alloc_failure;
   else {
     assert(Parser.ForwardTemplateRefs.empty());
@@ -348,15 +354,6 @@ char *llvm::itaniumDemangle(const char *MangledName, char *Buf,
   if (Status)
     *Status = InternalStatus;
   return InternalStatus == demangle_success ? Buf : nullptr;
-}
-
-bool llvm::itaniumFindTypesInMangledName(const char *MangledName, void *Ctx,
-                                         void (*Callback)(void *,
-                                                          const char *)) {
-  Demangler Parser(MangledName, MangledName + std::strlen(MangledName));
-  Parser.TypeCallback = Callback;
-  Parser.TypeCallbackContext = Ctx;
-  return Parser.parse() == nullptr;
 }
 
 ItaniumPartialDemangler::ItaniumPartialDemangler()
@@ -390,7 +387,7 @@ bool ItaniumPartialDemangler::partialDemangle(const char *MangledName) {
 
 static char *printNode(const Node *RootNode, char *Buf, size_t *N) {
   OutputStream S;
-  if (initializeOutputStream(Buf, N, S, 128))
+  if (!initializeOutputStream(Buf, N, S, 128))
     return nullptr;
   RootNode->print(S);
   S += '\0';
@@ -435,7 +432,7 @@ char *ItaniumPartialDemangler::getFunctionDeclContextName(char *Buf,
   const Node *Name = static_cast<const FunctionEncoding *>(RootNode)->getName();
 
   OutputStream S;
-  if (initializeOutputStream(Buf, N, S, 128))
+  if (!initializeOutputStream(Buf, N, S, 128))
     return nullptr;
 
  KeepGoingLocalFunction:
@@ -488,7 +485,7 @@ char *ItaniumPartialDemangler::getFunctionParameters(char *Buf,
   NodeArray Params = static_cast<FunctionEncoding *>(RootNode)->getParams();
 
   OutputStream S;
-  if (initializeOutputStream(Buf, N, S, 128))
+  if (!initializeOutputStream(Buf, N, S, 128))
     return nullptr;
 
   S += '(';
@@ -506,7 +503,7 @@ char *ItaniumPartialDemangler::getFunctionReturnType(
     return nullptr;
 
   OutputStream S;
-  if (initializeOutputStream(Buf, N, S, 128))
+  if (!initializeOutputStream(Buf, N, S, 128))
     return nullptr;
 
   if (const Node *Ret =

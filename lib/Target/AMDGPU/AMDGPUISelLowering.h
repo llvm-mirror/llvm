@@ -307,6 +307,8 @@ public:
   MVT getFenceOperandTy(const DataLayout &DL) const override {
     return MVT::i32;
   }
+
+  AtomicExpansionKind shouldExpandAtomicRMWInIR(AtomicRMWInst *) const override;
 };
 
 namespace AMDGPUISD {
@@ -358,6 +360,7 @@ enum NodeType : unsigned {
   SIN_HW,
   FMAX_LEGACY,
   FMIN_LEGACY,
+
   FMAX3,
   SMAX3,
   UMAX3,

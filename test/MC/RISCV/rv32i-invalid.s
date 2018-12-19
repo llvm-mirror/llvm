@@ -6,6 +6,7 @@ fence iorw, iore # CHECK: :[[@LINE]]:13: error: operand must be formed of letter
 fence wr, wr # CHECK: :[[@LINE]]:7: error: operand must be formed of letters selected in-order from 'iorw'
 fence rw, rr # CHECK: :[[@LINE]]:11: error: operand must be formed of letters selected in-order from 'iorw'
 fence 1, rw # CHECK: :[[@LINE]]:7: error: operand must be formed of letters selected in-order from 'iorw'
+fence unknown, unknown # CHECK: :[[@LINE]]:7: error: operand must be formed of letters selected in-order from 'iorw'
 
 ## uimm5
 slli a0, a0, 32 # CHECK: :[[@LINE]]:14: error: immediate must be an integer in the range [0, 31]
@@ -81,6 +82,16 @@ csrrwi a0, %pcrel_hi(3), 0 # CHECK: :[[@LINE]]:12: error: immediate must be an i
 csrrsi a0, %pcrel_hi(c), a0 # CHECK: :[[@LINE]]:12: error: immediate must be an integer in the range [0, 4095]
 csrrwi a0, %pcrel_lo(4), 0 # CHECK: :[[@LINE]]:12: error: immediate must be an integer in the range [0, 4095]
 csrrsi a0, %pcrel_lo(d), a0 # CHECK: :[[@LINE]]:12: error: immediate must be an integer in the range [0, 4095]
+
+## named csr in place of uimm12
+csrrw a0, foos, a0 # CHECK: :[[@LINE]]:11: error: operand must be a valid system register name or an integer in the range [0, 4095]
+csrrs a0, mstatusx, a0 # CHECK: :[[@LINE]]:11: error: operand must be a valid system register name or an integer in the range [0, 4095]
+csrrs a0, xmstatus, a0 # CHECK: :[[@LINE]]:11: error: operand must be a valid system register name or an integer in the range [0, 4095]
+csrrc a0, m12status, a0 # CHECK: :[[@LINE]]:11: error: operand must be a valid system register name or an integer in the range [0, 4095]
+csrrwi a0, mstatus12, 0 # CHECK: :[[@LINE]]:12: error: operand must be a valid system register name or an integer in the range [0, 4095]
+csrrsi a0, mhpm12counter, a0 # CHECK: :[[@LINE]]:12: error: operand must be a valid system register name or an integer in the range [0, 4095]
+csrrwi a0, mhpmcounter32, 0 # CHECK: :[[@LINE]]:12: error: operand must be a valid system register name or an integer in the range [0, 4095]
+csrrsi a0, A, a0 # CHECK: :[[@LINE]]:12: error: operand must be a valid system register name or an integer in the range [0, 4095]
 
 ## simm13_lsb0
 beq t0, t1, %lo(1) # CHECK: :[[@LINE]]:13: error: immediate must be a multiple of 2 bytes in the range [-4096, 4094]

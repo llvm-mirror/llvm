@@ -119,12 +119,6 @@ static cl::opt<bool> HardenIndirectCallsAndJumps(
              "mitigate Spectre v1.2 style attacks."),
     cl::init(true), cl::Hidden);
 
-namespace llvm {
-
-void initializeX86SpeculativeLoadHardeningPassPass(PassRegistry &);
-
-} // end namespace llvm
-
 namespace {
 
 class X86SpeculativeLoadHardeningPass : public MachineFunctionPass {
@@ -1147,7 +1141,9 @@ X86SpeculativeLoadHardeningPass::tracePredStateThroughIndirectBranches(
     unsigned TargetReg = TargetAddrSSA.GetValueInMiddleOfBlock(&MBB);
 
     // Insert a comparison of the incoming target register with this block's
-    // address.
+    // address. This also requires us to mark the block as having its address
+    // taken explicitly.
+    MBB.setHasAddressTaken();
     auto InsertPt = MBB.SkipPHIsLabelsAndDebug(MBB.begin());
     if (MF.getTarget().getCodeModel() == CodeModel::Small &&
         !Subtarget->isPositionIndependent()) {

@@ -174,6 +174,12 @@ bool RecursivelyDeleteDeadPHINode(PHINode *PN,
 bool SimplifyInstructionsInBlock(BasicBlock *BB,
                                  const TargetLibraryInfo *TLI = nullptr);
 
+/// Replace all the uses of an SSA value in @llvm.dbg intrinsics with
+/// undef. This is useful for signaling that a variable, e.g. has been
+/// found dead and hence it's unavailable at a given program point.
+/// Returns true if the dbg values have been changed.
+bool replaceDbgUsesWithUndef(Instruction *I);
+
 //===----------------------------------------------------------------------===//
 //  Control Flow Graph Restructuring.
 //
@@ -445,6 +451,15 @@ void copyRangeMetadata(const DataLayout &DL, const LoadInst &OldLI, MDNode *N,
 
 /// Remove the debug intrinsic instructions for the given instruction.
 void dropDebugUsers(Instruction &I);
+
+/// Hoist all of the instructions in the \p IfBlock to the dominant block
+/// \p DomBlock, by moving its instructions to the insertion point \p InsertPt.
+///
+/// The moved instructions receive the insertion point debug location values
+/// (DILocations) and their debug intrinsic instructions (dbg.values) are
+/// removed.
+void hoistAllInstructionsInto(BasicBlock *DomBlock, Instruction *InsertPt,
+                              BasicBlock *BB);
 
 //===----------------------------------------------------------------------===//
 //  Intrinsic pattern matching

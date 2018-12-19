@@ -19,45 +19,6 @@
 namespace llvm {
 namespace orc {
 
-JITTargetMachineBuilder::JITTargetMachineBuilder(Triple TT)
-    : TT(std::move(TT)) {}
-
-Expected<JITTargetMachineBuilder> JITTargetMachineBuilder::detectHost() {
-  return JITTargetMachineBuilder(Triple(sys::getProcessTriple()));
-}
-
-Expected<std::unique_ptr<TargetMachine>>
-JITTargetMachineBuilder::createTargetMachine() {
-  if (!Arch.empty()) {
-    Triple::ArchType Type = Triple::getArchTypeForLLVMName(Arch);
-
-    if (Type == Triple::UnknownArch)
-      return make_error<StringError>(std::string("Unknown arch: ") + Arch,
-                                     inconvertibleErrorCode());
-  }
-
-  std::string ErrMsg;
-  auto *TheTarget = TargetRegistry::lookupTarget(TT.getTriple(), ErrMsg);
-  if (!TheTarget)
-    return make_error<StringError>(std::move(ErrMsg), inconvertibleErrorCode());
-
-  auto *TM =
-      TheTarget->createTargetMachine(TT.getTriple(), CPU, Features.getString(),
-                                     Options, RM, CM, OptLevel, /*JIT*/ true);
-  if (!TM)
-    return make_error<StringError>("Could not allocate target machine",
-                                   inconvertibleErrorCode());
-
-  return std::unique_ptr<TargetMachine>(TM);
-}
-
-JITTargetMachineBuilder &JITTargetMachineBuilder::addFeatures(
-    const std::vector<std::string> &FeatureVec) {
-  for (const auto &F : FeatureVec)
-    Features.AddFeature(F);
-  return *this;
-}
-
 CtorDtorIterator::CtorDtorIterator(const GlobalVariable *GV, bool End)
   : InitList(
       GV ? dyn_cast_or_null<ConstantArray>(GV->getInitializer()) : nullptr),
@@ -126,8 +87,8 @@ iterator_range<CtorDtorIterator> getDestructors(const Module &M) {
                     CtorDtorIterator(DtorsList, true));
 }
 
-void CtorDtorRunner2::add(iterator_range<CtorDtorIterator> CtorDtors) {
-  if (CtorDtors.begin() == CtorDtors.end())
+void CtorDtorRunner::add(iterator_range<CtorDtorIterator> CtorDtors) {
+  if (empty(CtorDtors))
     return;
 
   MangleAndInterner Mangle(
@@ -137,6 +98,12 @@ void CtorDtorRunner2::add(iterator_range<CtorDtorIterator> CtorDtors) {
   for (const auto &CtorDtor : CtorDtors) {
     assert(CtorDtor.Func && CtorDtor.Func->hasName() &&
            "Ctor/Dtor function must be named to be runnable under the JIT");
+
+    // FIXME: Maybe use a symbol promoter here instead.
+    if (CtorDtor.Func->hasLocalLinkage()) {
+      CtorDtor.Func->setLinkage(GlobalValue::ExternalLinkage);
+      CtorDtor.Func->setVisibility(GlobalValue::HiddenVisibility);
+    }
 
     if (CtorDtor.Data && cast<GlobalValue>(CtorDtor.Data)->isDeclaration()) {
       dbgs() << "  Skipping because why now?\n";
@@ -148,7 +115,7 @@ void CtorDtorRunner2::add(iterator_range<CtorDtorIterator> CtorDtors) {
   }
 }
 
-Error CtorDtorRunner2::run() {
+Error CtorDtorRunner::run() {
   using CtorDtorTy = void (*)();
 
   SymbolNameSet Names;
@@ -161,7 +128,10 @@ Error CtorDtorRunner2::run() {
     }
   }
 
-  if (auto CtorDtorMap = lookup({&JD}, std::move(Names))) {
+  auto &ES = JD.getExecutionSession();
+  if (auto CtorDtorMap =
+          ES.lookup(JITDylibSearchList({{&JD, true}}), std::move(Names),
+                    NoDependenciesToRegister, true)) {
     for (auto &KV : CtorDtorsByPriority) {
       for (auto &Name : KV.second) {
         assert(CtorDtorMap->count(Name) && "No entry for Name");
@@ -195,25 +165,35 @@ int LocalCXXRuntimeOverridesBase::CXAAtExitOverride(DestructorPtr Destructor,
   return 0;
 }
 
-Error LocalCXXRuntimeOverrides2::enable(JITDylib &JD,
+Error LocalCXXRuntimeOverrides::enable(JITDylib &JD,
                                         MangleAndInterner &Mangle) {
-  SymbolMap RuntimeInterposes(
-      {{Mangle("__dso_handle"),
-        JITEvaluatedSymbol(toTargetAddress(&DSOHandleOverride),
-                           JITSymbolFlags::Exported)},
-       {Mangle("__cxa_atexit"),
-        JITEvaluatedSymbol(toTargetAddress(&CXAAtExitOverride),
-                           JITSymbolFlags::Exported)}});
+  SymbolMap RuntimeInterposes;
+  RuntimeInterposes[Mangle("__dso_handle")] =
+    JITEvaluatedSymbol(toTargetAddress(&DSOHandleOverride),
+                       JITSymbolFlags::Exported);
+  RuntimeInterposes[Mangle("__cxa_atexit")] =
+    JITEvaluatedSymbol(toTargetAddress(&CXAAtExitOverride),
+                       JITSymbolFlags::Exported);
 
   return JD.define(absoluteSymbols(std::move(RuntimeInterposes)));
 }
 
-DynamicLibraryFallbackGenerator::DynamicLibraryFallbackGenerator(
+DynamicLibrarySearchGenerator::DynamicLibrarySearchGenerator(
     sys::DynamicLibrary Dylib, const DataLayout &DL, SymbolPredicate Allow)
     : Dylib(std::move(Dylib)), Allow(std::move(Allow)),
       GlobalPrefix(DL.getGlobalPrefix()) {}
 
-SymbolNameSet DynamicLibraryFallbackGenerator::
+Expected<DynamicLibrarySearchGenerator>
+DynamicLibrarySearchGenerator::Load(const char *FileName, const DataLayout &DL,
+                                    SymbolPredicate Allow) {
+  std::string ErrMsg;
+  auto Lib = sys::DynamicLibrary::getPermanentLibrary(FileName, &ErrMsg);
+  if (!Lib.isValid())
+    return make_error<StringError>(std::move(ErrMsg), inconvertibleErrorCode());
+  return DynamicLibrarySearchGenerator(std::move(Lib), DL, std::move(Allow));
+}
+
+SymbolNameSet DynamicLibrarySearchGenerator::
 operator()(JITDylib &JD, const SymbolNameSet &Names) {
   orc::SymbolNameSet Added;
   orc::SymbolMap NewSymbols;
@@ -221,7 +201,10 @@ operator()(JITDylib &JD, const SymbolNameSet &Names) {
   bool HasGlobalPrefix = (GlobalPrefix != '\0');
 
   for (auto &Name : Names) {
-    if (!Allow(Name) || (*Name).empty())
+    if ((*Name).empty())
+      continue;
+
+    if (Allow && !Allow(Name))
       continue;
 
     if (HasGlobalPrefix && (*Name).front() != GlobalPrefix)
@@ -236,8 +219,8 @@ operator()(JITDylib &JD, const SymbolNameSet &Names) {
     }
   }
 
-  // Add any new symbols to JD. Since the fallback generator is only called for
-  // symbols that are not already defined, this will never trigger a duplicate
+  // Add any new symbols to JD. Since the generator is only called for symbols
+  // that are not already defined, this will never trigger a duplicate
   // definition error, so we can wrap this call in a 'cantFail'.
   if (!NewSymbols.empty())
     cantFail(JD.define(absoluteSymbols(std::move(NewSymbols))));

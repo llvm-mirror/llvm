@@ -20,6 +20,7 @@
 
 #define DEBUG_TYPE "llvm-mca"
 
+namespace llvm {
 namespace mca {
 
 llvm::Error RetireStage::cycleStart() {
@@ -47,14 +48,15 @@ llvm::Error RetireStage::execute(InstRef &IR) {
   return llvm::ErrorSuccess();
 }
 
-void RetireStage::notifyInstructionRetired(const InstRef &IR) {
+void RetireStage::notifyInstructionRetired(const InstRef &IR) const {
   LLVM_DEBUG(llvm::dbgs() << "[E] Instruction Retired: #" << IR << '\n');
   llvm::SmallVector<unsigned, 4> FreedRegs(PRF.getNumRegisterFiles());
   const Instruction &Inst = *IR.getInstruction();
 
-  for (const std::unique_ptr<WriteState> &WS : Inst.getDefs())
-    PRF.removeRegisterWrite(*WS.get(), FreedRegs);
+  for (const WriteState &WS : Inst.getDefs())
+    PRF.removeRegisterWrite(WS, FreedRegs);
   notifyEvent<HWInstructionEvent>(HWInstructionRetiredEvent(IR, FreedRegs));
 }
 
 } // namespace mca
+} // namespace llvm

@@ -72,9 +72,15 @@ def BWDivider : ProcResource<1>;
 // FP division and sqrt on port 0.
 def BWFPDivider : ProcResource<1>;
 
-// Loads are 5 cycles, so ReadAfterLd registers needn't be available until 5
+// Integer loads are 5 cycles, so ReadAfterLd registers needn't be available until 5
 // cycles after the memory operand.
 def : ReadAdvance<ReadAfterLd, 5>;
+
+// Vector loads are 5/5/6 cycles, so ReadAfterVec*Ld registers needn't be available
+// until 5/5/6 cycles after the memory operand.
+def : ReadAdvance<ReadAfterVecLd, 5>;
+def : ReadAdvance<ReadAfterVecXLd, 5>;
+def : ReadAdvance<ReadAfterVecYLd, 6>;
 
 // Many SchedWrites are defined in pairs with and without a folded load.
 // Instructions with folded loads are usually micro-fused, so they only appear
@@ -161,9 +167,14 @@ def  : WriteRes<WriteSETCCStore, [BWPort06,BWPort4,BWPort237]> {
   let Latency = 2;
   let NumMicroOps = 3;
 }
-def  : WriteRes<WriteLAHFSAHF,   [BWPort06]>;
-def  : WriteRes<WriteBitTest,    [BWPort06]>; // Bit Test instrs
-def  : WriteRes<WriteBitTestSet, [BWPort06]>; // Bit Test + Set instrs
+
+defm : X86WriteRes<WriteLAHFSAHF,        [BWPort06], 1, [1], 1>;
+defm : X86WriteRes<WriteBitTest,         [BWPort06], 1, [1], 1>; // Bit Test instrs
+defm : X86WriteRes<WriteBitTestImmLd,    [BWPort06,BWPort23], 6, [1,1], 2>;
+defm : X86WriteRes<WriteBitTestRegLd,    [BWPort0156,BWPort23], 6, [1,1], 2>;
+defm : X86WriteRes<WriteBitTestSet,      [BWPort06], 1, [1], 1>; // Bit Test + Set instrs
+defm : X86WriteRes<WriteBitTestSetImmLd, [BWPort06,BWPort23], 5, [1,1], 3>;
+defm : X86WriteRes<WriteBitTestSetRegLd, [BWPort0156,BWPort23], 5, [1,1], 2>;
 
 // Bit counts.
 defm : BWWriteResPair<WriteBSF, [BWPort1], 3>;
@@ -867,10 +878,10 @@ def BWWriteResGroup45 : SchedWriteRes<[BWPort0156]> {
 }
 def: InstRW<[BWWriteResGroup45], (instrs FNCLEX)>;
 
-def BWWriteResGroup46 : SchedWriteRes<[BWPort015,BWPort0156]> {
-  let Latency = 4;
+def BWWriteResGroup46 : SchedWriteRes<[]> {
+  let Latency = 0;
   let NumMicroOps = 4;
-  let ResourceCycles = [1,3];
+  let ResourceCycles = [];
 }
 def: InstRW<[BWWriteResGroup46], (instrs VZEROUPPER)>;
 
@@ -975,13 +986,6 @@ def BWWriteResGroup62 : SchedWriteRes<[BWPort6,BWPort23]> {
 def: InstRW<[BWWriteResGroup62], (instrs FARJMP64)>;
 def: InstRW<[BWWriteResGroup62], (instregex "JMP(16|32|64)m")>;
 
-def BWWriteResGroup63 : SchedWriteRes<[BWPort23,BWPort06]> {
-  let Latency = 6;
-  let NumMicroOps = 2;
-  let ResourceCycles = [1,1];
-}
-def: InstRW<[BWWriteResGroup63], (instregex "BT(16|32|64)mi8")>;
-
 def BWWriteResGroup64 : SchedWriteRes<[BWPort23,BWPort15]> {
   let Latency = 6;
   let NumMicroOps = 2;
@@ -1019,10 +1023,7 @@ def BWWriteResGroup69 : SchedWriteRes<[BWPort4,BWPort23,BWPort237,BWPort06]> {
   let NumMicroOps = 4;
   let ResourceCycles = [1,1,1,1];
 }
-def: InstRW<[BWWriteResGroup69], (instregex "BTC(16|32|64)mi8",
-                                            "BTR(16|32|64)mi8",
-                                            "BTS(16|32|64)mi8",
-                                            "SAR(8|16|32|64)m(1|i)",
+def: InstRW<[BWWriteResGroup69], (instregex "SAR(8|16|32|64)m(1|i)",
                                             "SHL(8|16|32|64)m(1|i)",
                                             "SHR(8|16|32|64)m(1|i)")>;
 
@@ -1228,7 +1229,7 @@ def BWWriteResGroup112 : SchedWriteRes<[BWPort23,BWPort06,BWPort0156]> {
   let NumMicroOps = 5;
   let ResourceCycles = [1,1,3];
 }
-def: InstRW<[BWWriteResGroup112], (instregex "RDRAND(16|32|64)r")>;
+def: InstRW<[BWWriteResGroup112], (instrs RDRAND16r, RDRAND32r, RDRAND64r)>;
 
 def BWWriteResGroup113 : SchedWriteRes<[BWPort1,BWPort6,BWPort23,BWPort0156]> {
   let Latency = 9;
@@ -1374,10 +1375,10 @@ def BWWriteResGroup153 : SchedWriteRes<[BWPort4,BWPort23,BWPort237,BWPort06,BWPo
 }
 def: InstRW<[BWWriteResGroup153], (instrs CMPXCHG8B)>;
 
-def BWWriteResGroup154 : SchedWriteRes<[BWPort5]> {
-  let Latency = 16;
-  let NumMicroOps = 16;
-  let ResourceCycles = [16];
+def BWWriteResGroup154 : SchedWriteRes<[BWPort5,BWPort6]> {
+  let Latency = 8;
+  let NumMicroOps = 20;
+  let ResourceCycles = [1,1];
 }
 def: InstRW<[BWWriteResGroup154], (instrs VZEROALL)>;
 

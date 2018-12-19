@@ -37,13 +37,19 @@ static cl::opt<unsigned> MaxInterleaveGroupFactor(
     cl::desc("Maximum factor for an interleaved access group (default = 8)"),
     cl::init(8));
 
-/// Identify if the intrinsic is trivially vectorizable.
-/// This method returns true if the intrinsic's argument types are all
-/// scalars for the scalar form of the intrinsic and all vectors for
-/// the vector form of the intrinsic.
+/// Return true if all of the intrinsic's arguments and return type are scalars
+/// for the scalar form of the intrinsic and vectors for the vector form of the
+/// intrinsic.
 bool llvm::isTriviallyVectorizable(Intrinsic::ID ID) {
   switch (ID) {
-  case Intrinsic::sqrt:
+  case Intrinsic::bswap: // Begin integer bit-manipulation.
+  case Intrinsic::bitreverse:
+  case Intrinsic::ctpop:
+  case Intrinsic::ctlz:
+  case Intrinsic::cttz:
+  case Intrinsic::fshl:
+  case Intrinsic::fshr:
+  case Intrinsic::sqrt: // Begin floating-point.
   case Intrinsic::sin:
   case Intrinsic::cos:
   case Intrinsic::exp:
@@ -54,6 +60,8 @@ bool llvm::isTriviallyVectorizable(Intrinsic::ID ID) {
   case Intrinsic::fabs:
   case Intrinsic::minnum:
   case Intrinsic::maxnum:
+  case Intrinsic::minimum:
+  case Intrinsic::maximum:
   case Intrinsic::copysign:
   case Intrinsic::floor:
   case Intrinsic::ceil:
@@ -61,14 +69,9 @@ bool llvm::isTriviallyVectorizable(Intrinsic::ID ID) {
   case Intrinsic::rint:
   case Intrinsic::nearbyint:
   case Intrinsic::round:
-  case Intrinsic::bswap:
-  case Intrinsic::bitreverse:
-  case Intrinsic::ctpop:
   case Intrinsic::pow:
   case Intrinsic::fma:
   case Intrinsic::fmuladd:
-  case Intrinsic::ctlz:
-  case Intrinsic::cttz:
   case Intrinsic::powi:
   case Intrinsic::canonicalize:
     return true;
@@ -502,6 +505,36 @@ Instruction *llvm::propagateMetadata(Instruction *Inst, ArrayRef<Value *> VL) {
   return Inst;
 }
 
+Constant *
+llvm::createBitMaskForGaps(IRBuilder<> &Builder, unsigned VF,
+                           const InterleaveGroup<Instruction> &Group) {
+  // All 1's means mask is not needed.
+  if (Group.getNumMembers() == Group.getFactor())
+    return nullptr;
+
+  // TODO: support reversed access.
+  assert(!Group.isReverse() && "Reversed group not supported.");
+
+  SmallVector<Constant *, 16> Mask;
+  for (unsigned i = 0; i < VF; i++)
+    for (unsigned j = 0; j < Group.getFactor(); ++j) {
+      unsigned HasMember = Group.getMember(j) ? 1 : 0;
+      Mask.push_back(Builder.getInt1(HasMember));
+    }
+
+  return ConstantVector::get(Mask);
+}
+
+Constant *llvm::createReplicatedMask(IRBuilder<> &Builder, 
+                                     unsigned ReplicationFactor, unsigned VF) {
+  SmallVector<Constant *, 16> MaskVec;
+  for (unsigned i = 0; i < VF; i++)
+    for (unsigned j = 0; j < ReplicationFactor; j++)
+      MaskVec.push_back(Builder.getInt32(i));
+
+  return ConstantVector::get(MaskVec);
+}
+
 Constant *llvm::createInterleaveMask(IRBuilder<> &Builder, unsigned VF,
                                      unsigned NumVecs) {
   SmallVector<Constant *, 16> Mask;
@@ -672,7 +705,8 @@ void InterleavedAccessInfo::collectConstStrideAccesses(
 // this group because it and (2) are dependent. However, (1) can be grouped
 // with other accesses that may precede it in program order. Note that a
 // bottom-up order does not imply that WAW dependences should not be checked.
-void InterleavedAccessInfo::analyzeInterleaving() {
+void InterleavedAccessInfo::analyzeInterleaving(
+                                 bool EnablePredicatedInterleavedMemAccesses) {
   LLVM_DEBUG(dbgs() << "LV: Analyzing interleaved accesses...\n");
   const ValueToValueMap &Strides = LAI->getSymbolicStrides();
 
@@ -687,9 +721,9 @@ void InterleavedAccessInfo::analyzeInterleaving() {
   collectDependences();
 
   // Holds all interleaved store groups temporarily.
-  SmallSetVector<InterleaveGroup *, 4> StoreGroups;
+  SmallSetVector<InterleaveGroup<Instruction> *, 4> StoreGroups;
   // Holds all interleaved load groups temporarily.
-  SmallSetVector<InterleaveGroup *, 4> LoadGroups;
+  SmallSetVector<InterleaveGroup<Instruction> *, 4> LoadGroups;
 
   // Search in bottom-up program order for pairs of accesses (A and B) that can
   // form interleaved load or store groups. In the algorithm below, access A
@@ -711,8 +745,9 @@ void InterleavedAccessInfo::analyzeInterleaving() {
     // Initialize a group for B if it has an allowable stride. Even if we don't
     // create a group for B, we continue with the bottom-up algorithm to ensure
     // we don't break any of B's dependences.
-    InterleaveGroup *Group = nullptr;
-    if (isStrided(DesB.Stride)) {
+    InterleaveGroup<Instruction> *Group = nullptr;
+    if (isStrided(DesB.Stride) && 
+        (!isPredicated(B->getParent()) || EnablePredicatedInterleavedMemAccesses)) {
       Group = getInterleaveGroup(B);
       if (!Group) {
         LLVM_DEBUG(dbgs() << "LV: Creating an interleave group with:" << *B
@@ -755,7 +790,7 @@ void InterleavedAccessInfo::analyzeInterleaving() {
         // illegal code motion. A will then be free to form another group with
         // instructions that precede it.
         if (isInterleaved(A)) {
-          InterleaveGroup *StoreGroup = getInterleaveGroup(A);
+          InterleaveGroup<Instruction> *StoreGroup = getInterleaveGroup(A);
           StoreGroups.remove(StoreGroup);
           releaseGroup(StoreGroup);
         }
@@ -806,11 +841,12 @@ void InterleavedAccessInfo::analyzeInterleaving() {
       if (DistanceToB % static_cast<int64_t>(DesB.Size))
         continue;
 
-      // Ignore A if either A or B is in a predicated block. Although we
-      // currently prevent group formation for predicated accesses, we may be
-      // able to relax this limitation in the future once we handle more
-      // complicated blocks.
-      if (isPredicated(A->getParent()) || isPredicated(B->getParent()))
+      // All members of a predicated interleave-group must have the same predicate,
+      // and currently must reside in the same BB.
+      BasicBlock *BlockA = A->getParent();  
+      BasicBlock *BlockB = B->getParent();  
+      if ((isPredicated(BlockA) || isPredicated(BlockB)) &&
+          (!EnablePredicatedInterleavedMemAccesses || BlockA != BlockB))
         continue;
 
       // The index of A is the index of B plus A's distance to B in multiples
@@ -833,7 +869,7 @@ void InterleavedAccessInfo::analyzeInterleaving() {
   }   // Iteration over B accesses.
 
   // Remove interleaved store groups with gaps.
-  for (InterleaveGroup *Group : StoreGroups)
+  for (auto *Group : StoreGroups)
     if (Group->getNumMembers() != Group->getFactor()) {
       LLVM_DEBUG(
           dbgs() << "LV: Invalidate candidate interleaved store group due "
@@ -854,7 +890,7 @@ void InterleavedAccessInfo::analyzeInterleaving() {
   // This means that we can forcefully peel the loop in order to only have to
   // check the first pointer for no-wrap. When we'll change to use Assume=true
   // we'll only need at most one runtime check per interleaved group.
-  for (InterleaveGroup *Group : LoadGroups) {
+  for (auto *Group : LoadGroups) {
     // Case 1: A full group. Can Skip the checks; For full groups, if the wide
     // load would wrap around the address space we would do a memory access at
     // nullptr even without the transformation.
@@ -903,4 +939,44 @@ void InterleavedAccessInfo::analyzeInterleaving() {
       RequiresScalarEpilogue = true;
     }
   }
+}
+
+void InterleavedAccessInfo::invalidateGroupsRequiringScalarEpilogue() {
+  // If no group had triggered the requirement to create an epilogue loop,
+  // there is nothing to do.
+  if (!requiresScalarEpilogue())
+    return;
+
+  // Avoid releasing a Group twice.
+  SmallPtrSet<InterleaveGroup<Instruction> *, 4> DelSet;
+  for (auto &I : InterleaveGroupMap) {
+    InterleaveGroup<Instruction> *Group = I.second;
+    if (Group->requiresScalarEpilogue())
+      DelSet.insert(Group);
+  }
+  for (auto *Ptr : DelSet) {
+    LLVM_DEBUG(
+        dbgs()
+        << "LV: Invalidate candidate interleaved group due to gaps that "
+           "require a scalar epilogue (not allowed under optsize) and cannot "
+           "be masked (not enabled). \n");
+    releaseGroup(Ptr);
+  }
+
+  RequiresScalarEpilogue = false;
+}
+
+template <typename InstT>
+void InterleaveGroup<InstT>::addMetadata(InstT *NewInst) const {
+  llvm_unreachable("addMetadata can only be used for Instruction");
+}
+
+namespace llvm {
+template <>
+void InterleaveGroup<Instruction>::addMetadata(Instruction *NewInst) const {
+  SmallVector<Value *, 4> VL;
+  std::transform(Members.begin(), Members.end(), std::back_inserter(VL),
+                 [](std::pair<int, Instruction *> p) { return p.second; });
+  propagateMetadata(NewInst, VL);
+}
 }

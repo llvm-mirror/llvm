@@ -350,7 +350,7 @@ processSTIPredicate(STIPredicateFunction &Fn,
         unsigned OpcodeIdx = Opcode2Index[Opcode];
         if (OpcodeMasks[OpcodeIdx].first[ProcIndex]) {
           std::string Message =
-              "Opcode " + Opcode->getName().str() + 
+              "Opcode " + Opcode->getName().str() +
               " used by multiple InstructionEquivalenceClass definitions.";
           PrintFatalError(EC->getLoc(), Message);
         }
@@ -479,6 +479,35 @@ void CodeGenSchedModels::collectRetireControlUnits() {
   }
 }
 
+void CodeGenSchedModels::collectLoadStoreQueueInfo() {
+  RecVec Queues = Records.getAllDerivedDefinitions("MemoryQueue");
+
+  for (Record *Queue : Queues) {
+    CodeGenProcModel &PM = getProcModel(Queue->getValueAsDef("SchedModel"));
+    if (Queue->isSubClassOf("LoadQueue")) {
+      if (PM.LoadQueue) {
+        PrintError(Queue->getLoc(),
+                   "Expected a single LoadQueue definition");
+        PrintNote(PM.LoadQueue->getLoc(),
+                  "Previous definition of LoadQueue was here");
+      }
+
+      PM.LoadQueue = Queue;
+    }
+
+    if (Queue->isSubClassOf("StoreQueue")) {
+      if (PM.StoreQueue) {
+        PrintError(Queue->getLoc(),
+                   "Expected a single StoreQueue definition");
+        PrintNote(PM.LoadQueue->getLoc(),
+                  "Previous definition of StoreQueue was here");
+      }
+
+      PM.StoreQueue = Queue;
+    }
+  }
+}
+
 /// Collect optional processor information.
 void CodeGenSchedModels::collectOptionalProcessorInfo() {
   // Find register file definitions for each processor.
@@ -487,8 +516,8 @@ void CodeGenSchedModels::collectOptionalProcessorInfo() {
   // Collect processor RetireControlUnit descriptors if available.
   collectRetireControlUnits();
 
-  // Find pfm counter definitions for each processor.
-  collectPfmCounters();
+  // Collect information about load/store queues.
+  collectLoadStoreQueueInfo();
 
   checkCompleteness();
 }
@@ -1759,42 +1788,33 @@ void CodeGenSchedModels::collectRegisterFiles() {
     CodeGenProcModel &PM = getProcModel(RF->getValueAsDef("SchedModel"));
     PM.RegisterFiles.emplace_back(CodeGenRegisterFile(RF->getName(),RF));
     CodeGenRegisterFile &CGRF = PM.RegisterFiles.back();
+    CGRF.MaxMovesEliminatedPerCycle =
+        RF->getValueAsInt("MaxMovesEliminatedPerCycle");
+    CGRF.AllowZeroMoveEliminationOnly =
+        RF->getValueAsBit("AllowZeroMoveEliminationOnly");
 
     // Now set the number of physical registers as well as the cost of registers
     // in each register class.
     CGRF.NumPhysRegs = RF->getValueAsInt("NumPhysRegs");
+    if (!CGRF.NumPhysRegs) {
+      PrintFatalError(RF->getLoc(),
+                      "Invalid RegisterFile with zero physical registers");
+    }
+
     RecVec RegisterClasses = RF->getValueAsListOfDefs("RegClasses");
     std::vector<int64_t> RegisterCosts = RF->getValueAsListOfInts("RegCosts");
+    ListInit *MoveElimInfo = RF->getValueAsListInit("AllowMoveElimination");
     for (unsigned I = 0, E = RegisterClasses.size(); I < E; ++I) {
       int Cost = RegisterCosts.size() > I ? RegisterCosts[I] : 1;
-      CGRF.Costs.emplace_back(RegisterClasses[I], Cost);
-    }
-  }
-}
 
-// Collect all the RegisterFile definitions available in this target.
-void CodeGenSchedModels::collectPfmCounters() {
-  for (Record *Def : Records.getAllDerivedDefinitions("PfmIssueCounter")) {
-    CodeGenProcModel &PM = getProcModel(Def->getValueAsDef("SchedModel"));
-    PM.PfmIssueCounterDefs.emplace_back(Def);
-  }
-  for (Record *Def : Records.getAllDerivedDefinitions("PfmCycleCounter")) {
-    CodeGenProcModel &PM = getProcModel(Def->getValueAsDef("SchedModel"));
-    if (PM.PfmCycleCounterDef) {
-      PrintFatalError(Def->getLoc(),
-                      "multiple cycle counters for " +
-                          Def->getValueAsDef("SchedModel")->getName());
+      bool AllowMoveElim = false;
+      if (MoveElimInfo->size() > I) {
+        BitInit *Val = cast<BitInit>(MoveElimInfo->getElement(I));
+        AllowMoveElim = Val->getValue();
+      }
+
+      CGRF.Costs.emplace_back(RegisterClasses[I], Cost, AllowMoveElim);
     }
-    PM.PfmCycleCounterDef = Def;
-  }
-  for (Record *Def : Records.getAllDerivedDefinitions("PfmUopsCounter")) {
-    CodeGenProcModel &PM = getProcModel(Def->getValueAsDef("SchedModel"));
-    if (PM.PfmUopsCounterDef) {
-      PrintFatalError(Def->getLoc(),
-                      "multiple uops counters for " +
-                          Def->getValueAsDef("SchedModel")->getName());
-    }
-    PM.PfmUopsCounterDef = Def;
   }
 }
 
@@ -1868,12 +1888,9 @@ void CodeGenSchedModels::collectProcResources() {
   }
   // Finalize each ProcModel by sorting the record arrays.
   for (CodeGenProcModel &PM : ProcModels) {
-    llvm::sort(PM.WriteResDefs.begin(), PM.WriteResDefs.end(),
-               LessRecord());
-    llvm::sort(PM.ReadAdvanceDefs.begin(), PM.ReadAdvanceDefs.end(),
-               LessRecord());
-    llvm::sort(PM.ProcResourceDefs.begin(), PM.ProcResourceDefs.end(),
-               LessRecord());
+    llvm::sort(PM.WriteResDefs, LessRecord());
+    llvm::sort(PM.ReadAdvanceDefs, LessRecord());
+    llvm::sort(PM.ProcResourceDefs, LessRecord());
     LLVM_DEBUG(
         PM.dump();
         dbgs() << "WriteResDefs: "; for (RecIter RI = PM.WriteResDefs.begin(),

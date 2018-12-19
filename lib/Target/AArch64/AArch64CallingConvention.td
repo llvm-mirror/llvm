@@ -123,7 +123,7 @@ def RetCC_AArch64_AAPCS : CallingConv<[
 
 // Vararg functions on windows pass floats in integer registers
 def CC_AArch64_Win64_VarArg : CallingConv<[
-  CCIfType<[f16, f32],    CCPromoteToType<f64>>,
+  CCIfType<[f16, f32], CCPromoteToType<f64>>,
   CCIfType<[f64], CCBitConvertToType<i64>>,
   CCDelegateTo<CC_AArch64_AAPCS>
 ]>;
@@ -287,6 +287,14 @@ def CSR_AArch64_AAPCS : CalleeSavedRegs<(add LR, FP, X19, X20, X21, X22,
                                            X23, X24, X25, X26, X27, X28,
                                            D8,  D9,  D10, D11,
                                            D12, D13, D14, D15)>;
+
+// Win64 has unwinding codes for an (FP,LR) pair, save_fplr and save_fplr_x.
+// We put FP before LR, so that frame lowering logic generates (FP,LR) pairs,
+// and not (LR,FP) pairs.
+def CSR_Win_AArch64_AAPCS : CalleeSavedRegs<(add FP, LR, X19, X20, X21, X22,
+                                               X23, X24, X25, X26, X27, X28,
+                                               D8, D9, D10, D11,
+                                               D12, D13, D14, D15)>;
 
 // AArch64 PCS for vector functions (VPCS)
 // must (additionally) preserve full Q8-Q23 registers

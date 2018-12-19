@@ -352,6 +352,7 @@ namespace llvm {
     bool ParseVariableSummary(std::string Name, GlobalValue::GUID, unsigned ID);
     bool ParseAliasSummary(std::string Name, GlobalValue::GUID, unsigned ID);
     bool ParseGVFlags(GlobalValueSummary::GVFlags &GVFlags);
+    bool ParseGVarFlags(GlobalVarSummary::GVarFlags &GVarFlags);
     bool ParseOptionalFFlags(FunctionSummary::FFlags &FFlags);
     bool ParseOptionalCalls(std::vector<FunctionSummary::EdgeTy> &Calls);
     bool ParseHotness(CalleeInfo::HotnessType &Hotness);
@@ -571,6 +572,8 @@ namespace llvm {
     bool ParseCatchPad(Instruction *&Inst, PerFunctionState &PFS);
     bool ParseCleanupPad(Instruction *&Inst, PerFunctionState &PFS);
 
+    bool ParseUnaryOp(Instruction *&Inst, PerFunctionState &PFS, unsigned Opc,
+                      unsigned OperandType);
     bool ParseArithmetic(Instruction *&Inst, PerFunctionState &PFS, unsigned Opc,
                          unsigned OperandType);
     bool ParseLogical(Instruction *&Inst, PerFunctionState &PFS, unsigned Opc);

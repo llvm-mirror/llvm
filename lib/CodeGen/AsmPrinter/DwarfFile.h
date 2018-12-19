@@ -32,6 +32,36 @@ class DwarfUnit;
 class LexicalScope;
 class MCSection;
 
+// Data structure to hold a range for range lists.
+class RangeSpan {
+public:
+  RangeSpan(MCSymbol *S, MCSymbol *E) : Start(S), End(E) {}
+  const MCSymbol *getStart() const { return Start; }
+  const MCSymbol *getEnd() const { return End; }
+  void setEnd(const MCSymbol *E) { End = E; }
+
+private:
+  const MCSymbol *Start, *End;
+};
+
+class RangeSpanList {
+private:
+  // Index for locating within the debug_range section this particular span.
+  MCSymbol *RangeSym;
+  const DwarfCompileUnit *CU;
+  // List of ranges.
+  SmallVector<RangeSpan, 2> Ranges;
+
+public:
+  RangeSpanList(MCSymbol *Sym, const DwarfCompileUnit &CU,
+                SmallVector<RangeSpan, 2> Ranges)
+      : RangeSym(Sym), CU(&CU), Ranges(std::move(Ranges)) {}
+  MCSymbol *getSym() const { return RangeSym; }
+  const DwarfCompileUnit &getCU() const { return *CU; }
+  const SmallVectorImpl<RangeSpan> &getRanges() const { return Ranges; }
+  void addRange(RangeSpan Range) { Ranges.push_back(Range); }
+};
+
 class DwarfFile {
   // Target of Dwarf emission, used for sizing of abbreviations.
   AsmPrinter *Asm;
@@ -46,6 +76,10 @@ class DwarfFile {
 
   DwarfStringPool StrPool;
 
+  // List of range lists for a given compile unit, separate from the ranges for
+  // the CU itself.
+  SmallVector<RangeSpanList, 1> CURangeLists;
+
   /// DWARF v5: The symbol that designates the start of the contribution to
   /// the string offsets table. The contribution is shared by all units.
   MCSymbol *StringOffsetsStartSym = nullptr;
@@ -53,6 +87,10 @@ class DwarfFile {
   /// DWARF v5: The symbol that designates the base of the range list table.
   /// The table is shared by all units.
   MCSymbol *RnglistsTableBaseSym = nullptr;
+
+  /// DWARF v5: The symbol that designates the base of the locations list table.
+  /// The table is shared by all units.
+  MCSymbol *LoclistsTableBaseSym = nullptr;
 
   /// The variables of a lexical scope.
   struct ScopeVars {
@@ -82,6 +120,14 @@ public:
 
   const SmallVectorImpl<std::unique_ptr<DwarfCompileUnit>> &getUnits() {
     return CUs;
+  }
+
+  std::pair<uint32_t, RangeSpanList *> addRange(const DwarfCompileUnit &CU,
+                                                SmallVector<RangeSpan, 2> R);
+
+  /// getRangeLists - Get the vector of range lists.
+  const SmallVectorImpl<RangeSpanList> &getRangeLists() const {
+    return CURangeLists;
   }
 
   /// Compute the size and offset of a DIE given an incoming Offset.
@@ -118,12 +164,13 @@ public:
   DwarfStringPool &getStringPool() { return StrPool; }
 
   MCSymbol *getStringOffsetsStartSym() const { return StringOffsetsStartSym; }
-
   void setStringOffsetsStartSym(MCSymbol *Sym) { StringOffsetsStartSym = Sym; }
 
   MCSymbol *getRnglistsTableBaseSym() const { return RnglistsTableBaseSym; }
-
   void setRnglistsTableBaseSym(MCSymbol *Sym) { RnglistsTableBaseSym = Sym; }
+
+  MCSymbol *getLoclistsTableBaseSym() const { return LoclistsTableBaseSym; }
+  void setLoclistsTableBaseSym(MCSymbol *Sym) { LoclistsTableBaseSym = Sym; }
 
   /// \returns false if the variable was merged with a previous one.
   bool addScopeVariable(LexicalScope *LS, DbgVariable *Var);

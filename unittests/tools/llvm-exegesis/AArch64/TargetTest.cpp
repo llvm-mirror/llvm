@@ -1,3 +1,12 @@
+//===-- TargetTest.cpp ------------------------------------------*- C++ -*-===//
+//
+//                     The LLVM Compiler Infrastructure
+//
+// This file is distributed under the University of Illinois Open Source
+// License. See LICENSE.TXT for details.
+//
+//===----------------------------------------------------------------------===//
+
 #include "Target.h"
 
 #include <cassert>
@@ -9,6 +18,7 @@
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
+namespace llvm {
 namespace exegesis {
 
 void InitializeAArch64ExegesisTarget();
@@ -58,5 +68,13 @@ TEST_F(AArch64TargetTest, SetRegToConstant) {
   EXPECT_THAT(Insts, Not(IsEmpty()));
 }
 
+TEST_F(AArch64TargetTest, DefaultPfmCounters) {
+  const std::string Expected = "CPU_CYCLES";
+  EXPECT_EQ(ExegesisTarget_->getPfmCounters("").CycleCounter, Expected);
+  EXPECT_EQ(ExegesisTarget_->getPfmCounters("unknown_cpu").CycleCounter,
+            Expected);
+}
+
 } // namespace
 } // namespace exegesis
+} // namespace llvm

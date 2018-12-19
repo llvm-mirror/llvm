@@ -76,7 +76,7 @@ class DWARFContext : public DIContext {
 
   DWARFUnitVector DWOUnits;
   std::unique_ptr<DWARFDebugAbbrev> AbbrevDWO;
-  std::unique_ptr<DWARFDebugLocDWO> LocDWO;
+  std::unique_ptr<DWARFDebugLoclists> LocDWO;
 
   /// The maximum DWARF version of all units.
   unsigned MaxVersion = 0;
@@ -231,7 +231,17 @@ public:
   /// Get a DIE given an exact offset.
   DWARFDie getDIEForOffset(uint32_t Offset);
 
-  unsigned getMaxVersion() const { return MaxVersion; }
+  unsigned getMaxVersion() {
+    // Ensure info units have been parsed to discover MaxVersion
+    info_section_units();
+    return MaxVersion;
+  }
+
+  unsigned getMaxDWOVersion() {
+    // Ensure DWO info units have been parsed to discover MaxVersion
+    dwo_info_section_units();
+    return MaxVersion;
+  }
 
   void setMaxVersionIfGreater(unsigned Version) {
     if (Version > MaxVersion)
@@ -252,7 +262,7 @@ public:
   const DWARFDebugAbbrev *getDebugAbbrevDWO();
 
   /// Get a pointer to the parsed DebugLoc object.
-  const DWARFDebugLocDWO *getDebugLocDWO();
+  const DWARFDebugLoclists *getDebugLocDWO();
 
   /// Get a pointer to the parsed DebugAranges object.
   const DWARFDebugAranges *getDebugAranges();

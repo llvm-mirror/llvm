@@ -57,7 +57,6 @@
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/TargetFolder.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
@@ -97,6 +96,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/InstCombine/InstCombine.h"
 #include "llvm/Transforms/InstCombine/InstCombineWorklist.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -118,6 +118,10 @@ STATISTIC(NumFactor   , "Number of factorizations");
 STATISTIC(NumReassoc  , "Number of reassociations");
 DEBUG_COUNTER(VisitCounter, "instcombine-visit",
               "Controls which instructions are visited");
+
+static cl::opt<bool>
+EnableCodeSinking("instcombine-code-sinking", cl::desc("Enable code sinking"),
+                                              cl::init(true));
 
 static cl::opt<bool>
 EnableExpensiveCombines("expensive-combines",
@@ -747,8 +751,9 @@ Value *InstCombiner::SimplifySelectsFeedingBinaryOp(BinaryOperator &I,
 /// Given a 'sub' instruction, return the RHS of the instruction if the LHS is a
 /// constant zero (which is the 'negate' form).
 Value *InstCombiner::dyn_castNegVal(Value *V) const {
-  if (BinaryOperator::isNeg(V))
-    return BinaryOperator::getNegArgument(V);
+  Value *NegV;
+  if (match(V, m_Neg(m_Value(NegV))))
+    return NegV;
 
   // Constants can be considered to be negated values if they can be folded.
   if (ConstantInt *C = dyn_cast<ConstantInt>(V))
@@ -1351,13 +1356,14 @@ Value *InstCombiner::Descale(Value *Val, APInt Scale, bool &NoSignedWrap) {
   } while (true);
 }
 
-Instruction *InstCombiner::foldShuffledBinop(BinaryOperator &Inst) {
+Instruction *InstCombiner::foldVectorBinop(BinaryOperator &Inst) {
   if (!Inst.getType()->isVectorTy()) return nullptr;
 
-  unsigned VWidth = cast<VectorType>(Inst.getType())->getNumElements();
+  BinaryOperator::BinaryOps Opcode = Inst.getOpcode();
+  unsigned NumElts = cast<VectorType>(Inst.getType())->getNumElements();
   Value *LHS = Inst.getOperand(0), *RHS = Inst.getOperand(1);
-  assert(cast<VectorType>(LHS->getType())->getNumElements() == VWidth);
-  assert(cast<VectorType>(RHS->getType())->getNumElements() == VWidth);
+  assert(cast<VectorType>(LHS->getType())->getNumElements() == NumElts);
+  assert(cast<VectorType>(RHS->getType())->getNumElements() == NumElts);
 
   // If both operands of the binop are vector concatenations, then perform the
   // narrow binop on each pair of the source operands followed by concatenation
@@ -1373,10 +1379,10 @@ Instruction *InstCombiner::foldShuffledBinop(BinaryOperator &Inst) {
     // operating on exactly the same elements as the existing binop.
     // TODO: We could ease the mask requirement to allow different undef lanes,
     //       but that requires an analysis of the binop-with-undef output value.
-    Value *NewBO0 = Builder.CreateBinOp(Inst.getOpcode(), L0, R0);
+    Value *NewBO0 = Builder.CreateBinOp(Opcode, L0, R0);
     if (auto *BO = dyn_cast<BinaryOperator>(NewBO0))
       BO->copyIRFlags(&Inst);
-    Value *NewBO1 = Builder.CreateBinOp(Inst.getOpcode(), L1, R1);
+    Value *NewBO1 = Builder.CreateBinOp(Opcode, L1, R1);
     if (auto *BO = dyn_cast<BinaryOperator>(NewBO1))
       BO->copyIRFlags(&Inst);
     return new ShuffleVectorInst(NewBO0, NewBO1, Mask);
@@ -1389,7 +1395,7 @@ Instruction *InstCombiner::foldShuffledBinop(BinaryOperator &Inst) {
     return nullptr;
 
   auto createBinOpShuffle = [&](Value *X, Value *Y, Constant *M) {
-    Value *XY = Builder.CreateBinOp(Inst.getOpcode(), X, Y);
+    Value *XY = Builder.CreateBinOp(Opcode, X, Y);
     if (auto *BO = dyn_cast<BinaryOperator>(XY))
       BO->copyIRFlags(&Inst);
     return new ShuffleVectorInst(XY, UndefValue::get(XY->getType()), M);
@@ -1415,24 +1421,26 @@ Instruction *InstCombiner::foldShuffledBinop(BinaryOperator &Inst) {
   if (match(&Inst, m_c_BinOp(
           m_OneUse(m_ShuffleVector(m_Value(V1), m_Undef(), m_Constant(Mask))),
           m_Constant(C))) &&
-      V1->getType()->getVectorNumElements() <= VWidth) {
+      V1->getType()->getVectorNumElements() <= NumElts) {
     assert(Inst.getType()->getScalarType() == V1->getType()->getScalarType() &&
            "Shuffle should not change scalar type");
-    unsigned V1Width = V1->getType()->getVectorNumElements();
+
     // Find constant NewC that has property:
     //   shuffle(NewC, ShMask) = C
     // If such constant does not exist (example: ShMask=<0,0> and C=<1,2>)
     // reorder is not possible. A 1-to-1 mapping is not required. Example:
     // ShMask = <1,1,2,2> and C = <5,5,6,6> --> NewC = <undef,5,6,undef>
+    bool ConstOp1 = isa<Constant>(RHS);
     SmallVector<int, 16> ShMask;
     ShuffleVectorInst::getShuffleMask(Mask, ShMask);
-    SmallVector<Constant *, 16>
-        NewVecC(V1Width, UndefValue::get(C->getType()->getScalarType()));
+    unsigned SrcVecNumElts = V1->getType()->getVectorNumElements();
+    UndefValue *UndefScalar = UndefValue::get(C->getType()->getScalarType());
+    SmallVector<Constant *, 16> NewVecC(SrcVecNumElts, UndefScalar);
     bool MayChange = true;
-    for (unsigned I = 0; I < VWidth; ++I) {
+    for (unsigned I = 0; I < NumElts; ++I) {
+      Constant *CElt = C->getAggregateElement(I);
       if (ShMask[I] >= 0) {
-        assert(ShMask[I] < (int)VWidth && "Not expecting narrowing shuffle");
-        Constant *CElt = C->getAggregateElement(I);
+        assert(ShMask[I] < (int)NumElts && "Not expecting narrowing shuffle");
         Constant *NewCElt = NewVecC[ShMask[I]];
         // Bail out if:
         // 1. The constant vector contains a constant expression.
@@ -1441,11 +1449,27 @@ Instruction *InstCombiner::foldShuffledBinop(BinaryOperator &Inst) {
         // 3. This is a widening shuffle that copies elements of V1 into the
         //    extended elements (extending with undef is allowed).
         if (!CElt || (!isa<UndefValue>(NewCElt) && NewCElt != CElt) ||
-            I >= V1Width) {
+            I >= SrcVecNumElts) {
           MayChange = false;
           break;
         }
         NewVecC[ShMask[I]] = CElt;
+      }
+      // If this is a widening shuffle, we must be able to extend with undef
+      // elements. If the original binop does not produce an undef in the high
+      // lanes, then this transform is not safe.
+      // TODO: We could shuffle those non-undef constant values into the
+      //       result by using a constant vector (rather than an undef vector)
+      //       as operand 1 of the new binop, but that might be too aggressive
+      //       for target-independent shuffle creation.
+      if (I >= SrcVecNumElts) {
+        Constant *MaybeUndef =
+            ConstOp1 ? ConstantExpr::get(Opcode, UndefScalar, CElt)
+                     : ConstantExpr::get(Opcode, CElt, UndefScalar);
+        if (!isa<UndefValue>(MaybeUndef)) {
+          MayChange = false;
+          break;
+        }
       }
     }
     if (MayChange) {
@@ -1453,14 +1477,13 @@ Instruction *InstCombiner::foldShuffledBinop(BinaryOperator &Inst) {
       // It may not be safe to execute a binop on a vector with undef elements
       // because the entire instruction can be folded to undef or create poison
       // that did not exist in the original code.
-      bool ConstOp1 = isa<Constant>(Inst.getOperand(1));
       if (Inst.isIntDivRem() || (Inst.isShift() && ConstOp1))
-        NewC = getSafeVectorConstantForBinop(Inst.getOpcode(), NewC, ConstOp1);
+        NewC = getSafeVectorConstantForBinop(Opcode, NewC, ConstOp1);
 
       // Op(shuffle(V1, Mask), C) -> shuffle(Op(V1, NewC), Mask)
       // Op(C, shuffle(V1, Mask)) -> shuffle(Op(NewC, V1), Mask)
-      Value *NewLHS = isa<Constant>(LHS) ? NewC : V1;
-      Value *NewRHS = isa<Constant>(LHS) ? V1 : NewC;
+      Value *NewLHS = ConstOp1 ? V1 : NewC;
+      Value *NewRHS = ConstOp1 ? NewC : V1;
       return createBinOpShuffle(NewLHS, NewRHS, Mask);
     }
   }
@@ -2051,9 +2074,22 @@ Instruction *InstCombiner::visitGetElementPtrInst(GetElementPtrInst &GEP) {
           areMatchingArrayAndVecTypes(GEPEltType, SrcEltType)) ||
          (GEPEltType->isVectorTy() && SrcEltType->isArrayTy() &&
           areMatchingArrayAndVecTypes(SrcEltType, GEPEltType)))) {
-      GEP.setOperand(0, SrcOp);
-      GEP.setSourceElementType(SrcEltType);
-      return &GEP;
+
+      // Create a new GEP here, as using `setOperand()` followed by
+      // `setSourceElementType()` won't actually update the type of the
+      // existing GEP Value. Causing issues if this Value is accessed when
+      // constructing an AddrSpaceCastInst
+      Value *NGEP =
+          GEP.isInBounds()
+              ? Builder.CreateInBoundsGEP(nullptr, SrcOp, {Ops[1], Ops[2]})
+              : Builder.CreateGEP(nullptr, SrcOp, {Ops[1], Ops[2]});
+      NGEP->takeName(&GEP);
+
+      // Preserve GEP address space to satisfy users
+      if (NGEP->getType()->getPointerAddressSpace() != GEP.getAddressSpace())
+        return new AddrSpaceCastInst(NGEP, GEPType);
+
+      return replaceInstUsesWith(GEP, NGEP);
     }
 
     // See if we can simplify:
@@ -2225,9 +2261,16 @@ static bool isAllocSiteRemovable(Instruction *AI,
 }
 
 Instruction *InstCombiner::visitAllocSite(Instruction &MI) {
-  // If we have a malloc call which is only used in any amount of comparisons
-  // to null and free calls, delete the calls and replace the comparisons with
-  // true or false as appropriate.
+  // If we have a malloc call which is only used in any amount of comparisons to
+  // null and free calls, delete the calls and replace the comparisons with true
+  // or false as appropriate.
+
+  // This is based on the principle that we can substitute our own allocation
+  // function (which will never return null) rather than knowledge of the
+  // specific function being called. In some sense this can change the permitted
+  // outputs of a program (when we convert a malloc to an alloca, the fact that
+  // the allocation is now on the stack is potentially visible, for example),
+  // but we believe in a permissible manner.
   SmallVector<WeakTrackingVH, 64> Users;
 
   // If we are removing an alloca with a dbg.declare, insert dbg.value calls
@@ -2303,14 +2346,14 @@ Instruction *InstCombiner::visitAllocSite(Instruction &MI) {
 /// The move is performed only if the block containing the call to free
 /// will be removed, i.e.:
 /// 1. it has only one predecessor P, and P has two successors
-/// 2. it contains the call and an unconditional branch
+/// 2. it contains the call, noops, and an unconditional branch
 /// 3. its successor is the same as its predecessor's successor
 ///
 /// The profitability is out-of concern here and this function should
 /// be called only if the caller knows this transformation would be
 /// profitable (e.g., for code size).
-static Instruction *
-tryToMoveFreeBeforeNullTest(CallInst &FI) {
+static Instruction *tryToMoveFreeBeforeNullTest(CallInst &FI,
+                                                const DataLayout &DL) {
   Value *Op = FI.getArgOperand(0);
   BasicBlock *FreeInstrBB = FI.getParent();
   BasicBlock *PredBB = FreeInstrBB->getSinglePredecessor();
@@ -2323,20 +2366,34 @@ tryToMoveFreeBeforeNullTest(CallInst &FI) {
     return nullptr;
 
   // Validate constraint #2: Does this block contains only the call to
-  //                         free and an unconditional branch?
-  // FIXME: We could check if we can speculate everything in the
-  //        predecessor block
-  if (FreeInstrBB->size() != 2)
-    return nullptr;
+  //                         free, noops, and an unconditional branch?
   BasicBlock *SuccBB;
-  if (!match(FreeInstrBB->getTerminator(), m_UnconditionalBr(SuccBB)))
+  Instruction *FreeInstrBBTerminator = FreeInstrBB->getTerminator();
+  if (!match(FreeInstrBBTerminator, m_UnconditionalBr(SuccBB)))
     return nullptr;
 
+  // If there are only 2 instructions in the block, at this point,
+  // this is the call to free and unconditional.
+  // If there are more than 2 instructions, check that they are noops
+  // i.e., they won't hurt the performance of the generated code.
+  if (FreeInstrBB->size() != 2) {
+    for (const Instruction &Inst : *FreeInstrBB) {
+      if (&Inst == &FI || &Inst == FreeInstrBBTerminator)
+        continue;
+      auto *Cast = dyn_cast<CastInst>(&Inst);
+      if (!Cast || !Cast->isNoopCast(DL))
+        return nullptr;
+    }
+  }
   // Validate the rest of constraint #1 by matching on the pred branch.
-  TerminatorInst *TI = PredBB->getTerminator();
+  Instruction *TI = PredBB->getTerminator();
   BasicBlock *TrueBB, *FalseBB;
   ICmpInst::Predicate Pred;
-  if (!match(TI, m_Br(m_ICmp(Pred, m_Specific(Op), m_Zero()), TrueBB, FalseBB)))
+  if (!match(TI, m_Br(m_ICmp(Pred,
+                             m_CombineOr(m_Specific(Op),
+                                         m_Specific(Op->stripPointerCasts())),
+                             m_Zero()),
+                      TrueBB, FalseBB)))
     return nullptr;
   if (Pred != ICmpInst::ICMP_EQ && Pred != ICmpInst::ICMP_NE)
     return nullptr;
@@ -2347,7 +2404,17 @@ tryToMoveFreeBeforeNullTest(CallInst &FI) {
   assert(FreeInstrBB == (Pred == ICmpInst::ICMP_EQ ? FalseBB : TrueBB) &&
          "Broken CFG: missing edge from predecessor to successor");
 
-  FI.moveBefore(TI);
+  // At this point, we know that everything in FreeInstrBB can be moved
+  // before TI.
+  for (BasicBlock::iterator It = FreeInstrBB->begin(), End = FreeInstrBB->end();
+       It != End;) {
+    Instruction &Instr = *It++;
+    if (&Instr == FreeInstrBBTerminator)
+      break;
+    Instr.moveBefore(TI);
+  }
+  assert(FreeInstrBB->size() == 1 &&
+         "Only the branch instruction should remain");
   return &FI;
 }
 
@@ -2374,7 +2441,7 @@ Instruction *InstCombiner::visitFree(CallInst &FI) {
   // into
   // free(foo);
   if (MinimizeSize)
-    if (Instruction *I = tryToMoveFreeBeforeNullTest(FI))
+    if (Instruction *I = tryToMoveFreeBeforeNullTest(FI, DL))
       return I;
 
   return nullptr;
@@ -2467,9 +2534,11 @@ Instruction *InstCombiner::visitSwitchInst(SwitchInst &SI) {
   unsigned NewWidth = Known.getBitWidth() - std::max(LeadingKnownZeros, LeadingKnownOnes);
 
   // Shrink the condition operand if the new type is smaller than the old type.
-  // This may produce a non-standard type for the switch, but that's ok because
-  // the backend should extend back to a legal type for the target.
-  if (NewWidth > 0 && NewWidth < Known.getBitWidth()) {
+  // But do not shrink to a non-standard type, because backend can't generate 
+  // good code for that yet.
+  // TODO: We can make it aggressive again after fixing PR39569.
+  if (NewWidth > 0 && NewWidth < Known.getBitWidth() &&
+      shouldChangeType(Known.getBitWidth(), NewWidth)) {
     IntegerType *Ty = IntegerType::get(SI.getContext(), NewWidth);
     Builder.SetInsertPoint(&SI);
     Value *NewCond = Builder.CreateTrunc(Cond, Ty, "trunc");
@@ -3088,7 +3157,7 @@ bool InstCombiner::run() {
     }
 
     // See if we can trivially sink this instruction to a successor basic block.
-    if (I->hasOneUse()) {
+    if (EnableCodeSinking && I->hasOneUse()) {
       BasicBlock *BB = I->getParent();
       Instruction *UserInst = cast<Instruction>(*I->user_begin());
       BasicBlock *UserParent;
@@ -3271,7 +3340,7 @@ static bool AddReachableCodeToWorklist(BasicBlock *BB, const DataLayout &DL,
 
     // Recursively visit successors.  If this is a branch or switch on a
     // constant, only visit the reachable successor.
-    TerminatorInst *TI = BB->getTerminator();
+    Instruction *TI = BB->getTerminator();
     if (BranchInst *BI = dyn_cast<BranchInst>(TI)) {
       if (BI->isConditional() && isa<ConstantInt>(BI->getCondition())) {
         bool CondVal = cast<ConstantInt>(BI->getCondition())->getZExtValue();

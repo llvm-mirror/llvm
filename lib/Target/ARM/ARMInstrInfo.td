@@ -144,6 +144,7 @@ def ARMintretflag    : SDNode<"ARMISD::INTRET_FLAG", SDT_ARMcall,
                               [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 def ARMcmov          : SDNode<"ARMISD::CMOV", SDT_ARMCMov,
                               [SDNPInGlue]>;
+def ARMsubs          : SDNode<"ARMISD::SUBS", SDTIntBinOp, [SDNPOutGlue]>;
 
 def ARMssatnoshift   : SDNode<"ARMISD::SSAT", SDTIntSatNoShOp, []>;
 
@@ -221,6 +222,7 @@ def HasV4T           : Predicate<"Subtarget->hasV4TOps()">,
 def NoV4T            : Predicate<"!Subtarget->hasV4TOps()">;
 def HasV5T           : Predicate<"Subtarget->hasV5TOps()">,
                                  AssemblerPredicate<"HasV5TOps", "armv5t">;
+def NoV5T            : Predicate<"!Subtarget->hasV5TOps()">;
 def HasV5TE          : Predicate<"Subtarget->hasV5TEOps()">,
                                  AssemblerPredicate<"HasV5TEOps", "armv5te">;
 def HasV6            : Predicate<"Subtarget->hasV6Ops()">,
@@ -357,21 +359,22 @@ let RecomputePerFunction = 1 in {
   def DontUseMovt      : Predicate<"!Subtarget->useMovt(*MF)">;
   def UseMovtInPic     : Predicate<"Subtarget->useMovt(*MF) && Subtarget->allowPositionIndependentMovt()">;
   def DontUseMovtInPic : Predicate<"!Subtarget->useMovt(*MF) || !Subtarget->allowPositionIndependentMovt()">;
-  def UseFPVMLx        : Predicate<"Subtarget->useFPVMLx() || MF->getFunction().optForMinSize()">;
+
+  def UseFPVMLx: Predicate<"((Subtarget->useFPVMLx() &&"
+                           "  TM.Options.AllowFPOpFusion != FPOpFusion::Fast) ||"
+                           "MF->getFunction().optForMinSize())">;
 }
 def UseMulOps        : Predicate<"Subtarget->useMulOps()">;
 
 // Prefer fused MAC for fp mul + add over fp VMLA / VMLS if they are available.
-// But only select them if more precision in FP computation is allowed.
+// But only select them if more precision in FP computation is allowed, and when
+// they are not slower than a mul + add sequence.
 // Do not use them for Darwin platforms.
 def UseFusedMAC      : Predicate<"(TM.Options.AllowFPOpFusion =="
                                  " FPOpFusion::Fast && "
                                  " Subtarget->hasVFP4()) && "
-                                 "!Subtarget->isTargetDarwin()">;
-def DontUseFusedMAC  : Predicate<"!(TM.Options.AllowFPOpFusion =="
-                                 " FPOpFusion::Fast &&"
-                                 " Subtarget->hasVFP4()) || "
-                                 "Subtarget->isTargetDarwin()">;
+                                 "!Subtarget->isTargetDarwin() &&"
+                                 "Subtarget->useFPVMLx()">;
 
 def HasFastVGETLNi32 : Predicate<"!Subtarget->hasSlowVGETLNi32()">;
 def HasSlowVGETLNi32 : Predicate<"Subtarget->hasSlowVGETLNi32()">;
@@ -2199,6 +2202,9 @@ def TRAP : AXI<(outs), (ins), MiscFrm, NoItinerary,
   let Inst = 0xe7ffdefe;
 }
 
+def : Pat<(debugtrap), (BKPT 0)>, Requires<[IsARM, HasV5T]>;
+def : Pat<(debugtrap), (UDF 254)>, Requires<[IsARM, NoV5T]>;
+
 // Address computation and loads and stores in PIC mode.
 let isNotDuplicable = 1 in {
 def PICADD  : ARMPseudoInst<(outs GPR:$dst), (ins GPR:$a, pclabel:$cp, pred:$p),
@@ -3329,7 +3335,7 @@ multiclass arm_ldst_mult<string asm, string sfx, bit L_bit, bit P_bit, Format f,
 
 let hasSideEffects = 0 in {
 
-let mayLoad = 1, hasExtraDefRegAllocReq = 1 in
+let mayLoad = 1, hasExtraDefRegAllocReq = 1, variadicOpsAreDefs = 1 in
 defm LDM : arm_ldst_mult<"ldm", "", 1, 0, LdStMulFrm, IIC_iLoad_m,
                          IIC_iLoad_mu>, ComplexDeprecationPredicate<"ARMLoad">;
 
@@ -3635,6 +3641,14 @@ defm SUB  : AsI1_bin_irs<0b0010, "sub",
 let isAdd = 1 in
 defm ADDS : AsI1_bin_s_irs<IIC_iALUi, IIC_iALUr, IIC_iALUsr, ARMaddc, 1>;
 defm SUBS : AsI1_bin_s_irs<IIC_iALUi, IIC_iALUr, IIC_iALUsr, ARMsubc>;
+
+def : ARMPat<(ARMsubs GPR:$Rn, mod_imm:$imm), (SUBSri $Rn, mod_imm:$imm)>;
+def : ARMPat<(ARMsubs GPR:$Rn, GPR:$Rm), (SUBSrr $Rn, $Rm)>;
+def : ARMPat<(ARMsubs GPR:$Rn, so_reg_imm:$shift),
+             (SUBSrsi $Rn, so_reg_imm:$shift)>;
+def : ARMPat<(ARMsubs GPR:$Rn, so_reg_reg:$shift),
+             (SUBSrsr $Rn, so_reg_reg:$shift)>;
+
 
 let isAdd = 1 in
 defm ADC : AI1_adde_sube_irs<0b0101, "adc", ARMadde, 1>;

@@ -49,17 +49,11 @@ public:
 
   /// Adds a MaterializationUnit representing the given IR to the given
   /// JITDylib.
-  virtual Error add(JITDylib &JD, VModuleKey K, ThreadSafeModule TSM);
-
-  /// Adds a MaterializationUnit representing the given IR to the main
-  /// JITDylib.
-  Error add(VModuleKey K, ThreadSafeModule TSM) {
-    return add(ES.getMainJITDylib(), K, std::move(TSM));
-  }
+  virtual Error add(JITDylib &JD, ThreadSafeModule TSM,
+                    VModuleKey K = VModuleKey());
 
   /// Emit should materialize the given IR.
-  virtual void emit(MaterializationResponsibility R, VModuleKey K,
-                    ThreadSafeModule TSM) = 0;
+  virtual void emit(MaterializationResponsibility R, ThreadSafeModule TSM) = 0;
 
 private:
   bool CloneToNewContextOnEmit = false;
@@ -76,25 +70,29 @@ public:
 
   /// Create an IRMaterializationLayer. Scans the module to build the
   /// SymbolFlags and SymbolToDefinition maps.
-  IRMaterializationUnit(ExecutionSession &ES, ThreadSafeModule TSM);
+  IRMaterializationUnit(ExecutionSession &ES, ThreadSafeModule TSM,
+                        VModuleKey K);
 
   /// Create an IRMaterializationLayer from a module, and pre-existing
   /// SymbolFlags and SymbolToDefinition maps. The maps must provide
   /// entries for each definition in M.
   /// This constructor is useful for delegating work from one
   /// IRMaterializationUnit to another.
-  IRMaterializationUnit(ThreadSafeModule TSM, SymbolFlagsMap SymbolFlags,
+  IRMaterializationUnit(ThreadSafeModule TSM, VModuleKey K,
+                        SymbolFlagsMap SymbolFlags,
                         SymbolNameToDefinitionMap SymbolToDefinition);
 
   /// Return the ModuleIdentifier as the name for this MaterializationUnit.
   StringRef getName() const override;
+
+  const ThreadSafeModule &getModule() const { return TSM; }
 
 protected:
   ThreadSafeModule TSM;
   SymbolNameToDefinitionMap SymbolToDefinition;
 
 private:
-  void discard(const JITDylib &JD, SymbolStringPtr Name) override;
+  void discard(const JITDylib &JD, const SymbolStringPtr &Name) override;
 };
 
 /// MaterializationUnit that materializes modules by calling the 'emit' method
@@ -123,16 +121,11 @@ public:
 
   /// Adds a MaterializationUnit representing the given IR to the given
   /// JITDylib.
-  virtual Error add(JITDylib &JD, VModuleKey K, std::unique_ptr<MemoryBuffer> O);
-
-  /// Adds a MaterializationUnit representing the given object to the main
-  /// JITDylib.
-  Error add(VModuleKey K, std::unique_ptr<MemoryBuffer> O) {
-    return add(ES.getMainJITDylib(), K, std::move(O));
-  }
+  virtual Error add(JITDylib &JD, std::unique_ptr<MemoryBuffer> O,
+                    VModuleKey K = VModuleKey());
 
   /// Emit should materialize the given IR.
-  virtual void emit(MaterializationResponsibility R, VModuleKey K,
+  virtual void emit(MaterializationResponsibility R,
                     std::unique_ptr<MemoryBuffer> O) = 0;
 
 private:
@@ -156,10 +149,9 @@ public:
 private:
 
   void materialize(MaterializationResponsibility R) override;
-  void discard(const JITDylib &JD, SymbolStringPtr Name) override;
+  void discard(const JITDylib &JD, const SymbolStringPtr &Name) override;
 
   ObjectLayer &L;
-  VModuleKey K;
   std::unique_ptr<MemoryBuffer> O;
 };
 

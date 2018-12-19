@@ -522,11 +522,9 @@ static Value *evaluateGEPOffsetExpression(User *GEP, InstCombiner &IC,
   }
 
   // Otherwise, there is an index.  The computation we will do will be modulo
-  // the pointer size, so get it.
-  uint64_t PtrSizeMask = ~0ULL >> (64-IntPtrWidth);
-
-  Offset &= PtrSizeMask;
-  VariableScale &= PtrSizeMask;
+  // the pointer size.
+  Offset = SignExtend64(Offset, IntPtrWidth);
+  VariableScale = SignExtend64(VariableScale, IntPtrWidth);
 
   // To do this transformation, any constant index must be a multiple of the
   // variable scale factor.  For example, we can evaluate "12 + 4*i" as "3 + i",
@@ -909,7 +907,8 @@ Instruction *InstCombiner::foldGEPICmp(GEPOperator *GEPLHS, Value *RHS,
           }
 
       // If all indices are the same, just compare the base pointers.
-      if (IndicesTheSame)
+      Type *BaseType = GEPLHS->getOperand(0)->getType();
+      if (IndicesTheSame && CmpInst::makeCmpResultType(BaseType) == I.getType())
         return new ICmpInst(Cond, GEPLHS->getOperand(0), GEPRHS->getOperand(0));
 
       // If we're comparing GEPs with two base pointers that only differ in type
@@ -1334,17 +1333,12 @@ Instruction *InstCombiner::foldICmpWithZero(ICmpInst &Cmp) {
   return nullptr;
 }
 
-// Fold icmp Pred X, C.
+/// Fold icmp Pred X, C.
+/// TODO: This code structure does not make sense. The saturating add fold
+/// should be moved to some other helper and extended as noted below (it is also
+/// possible that code has been made unnecessary - do we canonicalize IR to
+/// overflow/saturating intrinsics or not?).
 Instruction *InstCombiner::foldICmpWithConstant(ICmpInst &Cmp) {
-  CmpInst::Predicate Pred = Cmp.getPredicate();
-  Value *X = Cmp.getOperand(0);
-
-  const APInt *C;
-  if (!match(Cmp.getOperand(1), m_APInt(C)))
-    return nullptr;
-
-  Value *A = nullptr, *B = nullptr;
-
   // Match the following pattern, which is a common idiom when writing
   // overflow-safe integer arithmetic functions. The source performs an addition
   // in wider type and explicitly checks for overflow using comparisons against
@@ -1356,37 +1350,62 @@ Instruction *InstCombiner::foldICmpWithConstant(ICmpInst &Cmp) {
   //
   // sum = a + b
   // if (sum+128 >u 255)  ...  -> llvm.sadd.with.overflow.i8
-  {
-    ConstantInt *CI2; // I = icmp ugt (add (add A, B), CI2), CI
-    if (Pred == ICmpInst::ICMP_UGT &&
-        match(X, m_Add(m_Add(m_Value(A), m_Value(B)), m_ConstantInt(CI2))))
-      if (Instruction *Res = processUGT_ADDCST_ADD(
-              Cmp, A, B, CI2, cast<ConstantInt>(Cmp.getOperand(1)), *this))
-        return Res;
-  }
+  CmpInst::Predicate Pred = Cmp.getPredicate();
+  Value *Op0 = Cmp.getOperand(0), *Op1 = Cmp.getOperand(1);
+  Value *A, *B;
+  ConstantInt *CI, *CI2; // I = icmp ugt (add (add A, B), CI2), CI
+  if (Pred == ICmpInst::ICMP_UGT && match(Op1, m_ConstantInt(CI)) &&
+      match(Op0, m_Add(m_Add(m_Value(A), m_Value(B)), m_ConstantInt(CI2))))
+    if (Instruction *Res = processUGT_ADDCST_ADD(Cmp, A, B, CI2, CI, *this))
+      return Res;
 
-  // FIXME: Use m_APInt to allow folds for splat constants.
-  ConstantInt *CI = dyn_cast<ConstantInt>(Cmp.getOperand(1));
-  if (!CI)
+  return nullptr;
+}
+
+/// Canonicalize icmp instructions based on dominating conditions.
+Instruction *InstCombiner::foldICmpWithDominatingICmp(ICmpInst &Cmp) {
+  // This is a cheap/incomplete check for dominance - just match a single
+  // predecessor with a conditional branch.
+  BasicBlock *CmpBB = Cmp.getParent();
+  BasicBlock *DomBB = CmpBB->getSinglePredecessor();
+  if (!DomBB)
     return nullptr;
 
-  // Canonicalize icmp instructions based on dominating conditions.
-  BasicBlock *Parent = Cmp.getParent();
-  BasicBlock *Dom = Parent->getSinglePredecessor();
-  auto *BI = Dom ? dyn_cast<BranchInst>(Dom->getTerminator()) : nullptr;
-  ICmpInst::Predicate Pred2;
+  Value *DomCond;
   BasicBlock *TrueBB, *FalseBB;
-  ConstantInt *CI2;
-  if (BI && match(BI, m_Br(m_ICmp(Pred2, m_Specific(X), m_ConstantInt(CI2)),
-                           TrueBB, FalseBB)) &&
-      TrueBB != FalseBB) {
-    ConstantRange CR =
-        ConstantRange::makeAllowedICmpRegion(Pred, CI->getValue());
+  if (!match(DomBB->getTerminator(), m_Br(m_Value(DomCond), TrueBB, FalseBB)))
+    return nullptr;
+
+  assert((TrueBB == CmpBB || FalseBB == CmpBB) &&
+         "Predecessor block does not point to successor?");
+
+  // The branch should get simplified. Don't bother simplifying this condition.
+  if (TrueBB == FalseBB)
+    return nullptr;
+
+  // Try to simplify this compare to T/F based on the dominating condition.
+  Optional<bool> Imp = isImpliedCondition(DomCond, &Cmp, DL, TrueBB == CmpBB);
+  if (Imp)
+    return replaceInstUsesWith(Cmp, ConstantInt::get(Cmp.getType(), *Imp));
+
+  CmpInst::Predicate Pred = Cmp.getPredicate();
+  Value *X = Cmp.getOperand(0), *Y = Cmp.getOperand(1);
+  ICmpInst::Predicate DomPred;
+  const APInt *C, *DomC;
+  if (match(DomCond, m_ICmp(DomPred, m_Specific(X), m_APInt(DomC))) &&
+      match(Y, m_APInt(C))) {
+    // We have 2 compares of a variable with constants. Calculate the constant
+    // ranges of those compares to see if we can transform the 2nd compare:
+    // DomBB:
+    //   DomCond = icmp DomPred X, DomC
+    //   br DomCond, CmpBB, FalseBB
+    // CmpBB:
+    //   Cmp = icmp Pred X, C
+    ConstantRange CR = ConstantRange::makeAllowedICmpRegion(Pred, *C);
     ConstantRange DominatingCR =
-        (Parent == TrueBB)
-            ? ConstantRange::makeExactICmpRegion(Pred2, CI2->getValue())
-            : ConstantRange::makeExactICmpRegion(
-                  CmpInst::getInversePredicate(Pred2), CI2->getValue());
+        (CmpBB == TrueBB) ? ConstantRange::makeExactICmpRegion(DomPred, *DomC)
+                          : ConstantRange::makeExactICmpRegion(
+                                CmpInst::getInversePredicate(DomPred), *DomC);
     ConstantRange Intersection = DominatingCR.intersectWith(CR);
     ConstantRange Difference = DominatingCR.difference(CR);
     if (Intersection.isEmptySet())
@@ -1394,23 +1413,20 @@ Instruction *InstCombiner::foldICmpWithConstant(ICmpInst &Cmp) {
     if (Difference.isEmptySet())
       return replaceInstUsesWith(Cmp, Builder.getTrue());
 
-    // If this is a normal comparison, it demands all bits. If it is a sign
-    // bit comparison, it only demands the sign bit.
-    bool UnusedBit;
-    bool IsSignBit = isSignBitCheck(Pred, CI->getValue(), UnusedBit);
-
     // Canonicalizing a sign bit comparison that gets used in a branch,
     // pessimizes codegen by generating branch on zero instruction instead
     // of a test and branch. So we avoid canonicalizing in such situations
     // because test and branch instruction has better branch displacement
     // than compare and branch instruction.
+    bool UnusedBit;
+    bool IsSignBit = isSignBitCheck(Pred, *C, UnusedBit);
     if (Cmp.isEquality() || (IsSignBit && hasBranchUse(Cmp)))
       return nullptr;
 
-    if (auto *AI = Intersection.getSingleElement())
-      return new ICmpInst(ICmpInst::ICMP_EQ, X, Builder.getInt(*AI));
-    if (auto *AD = Difference.getSingleElement())
-      return new ICmpInst(ICmpInst::ICMP_NE, X, Builder.getInt(*AD));
+    if (const APInt *EqC = Intersection.getSingleElement())
+      return new ICmpInst(ICmpInst::ICMP_EQ, X, Builder.getInt(*EqC));
+    if (const APInt *NeC = Difference.getSingleElement())
+      return new ICmpInst(ICmpInst::ICMP_NE, X, Builder.getInt(*NeC));
   }
 
   return nullptr;
@@ -1608,6 +1624,13 @@ Instruction *InstCombiner::foldICmpAndShift(ICmpInst &Cmp, BinaryOperator *And,
 Instruction *InstCombiner::foldICmpAndConstConst(ICmpInst &Cmp,
                                                  BinaryOperator *And,
                                                  const APInt &C1) {
+  // For vectors: icmp ne (and X, 1), 0 --> trunc X to N x i1
+  // TODO: We canonicalize to the longer form for scalars because we have
+  // better analysis/folds for icmp, and codegen may be better with icmp.
+  if (Cmp.getPredicate() == CmpInst::ICMP_NE && Cmp.getType()->isVectorTy() &&
+      C1.isNullValue() && match(And->getOperand(1), m_One()))
+    return new TruncInst(And->getOperand(0), Cmp.getType());
+
   const APInt *C2;
   if (!match(And->getOperand(1), m_APInt(C2)))
     return nullptr;
@@ -2947,12 +2970,20 @@ static Value *foldICmpWithLowBitMaskedVal(ICmpInst &I,
     //  x & (-1 >> y) s>= x    ->    x s<= (-1 >> y)
     if (X != I.getOperand(1)) // X must be on RHS of comparison!
       return nullptr;         // Ignore the other case.
+    if (!match(M, m_Constant())) // Can not do this fold with non-constant.
+      return nullptr;
+    if (!match(M, m_NonNegative())) // Must not have any -1 vector elements.
+      return nullptr;
     DstPred = ICmpInst::Predicate::ICMP_SLE;
     break;
   case ICmpInst::Predicate::ICMP_SLT:
     //  x & (-1 >> y) s< x    ->    x s> (-1 >> y)
     if (X != I.getOperand(1)) // X must be on RHS of comparison!
       return nullptr;         // Ignore the other case.
+    if (!match(M, m_Constant())) // Can not do this fold with non-constant.
+      return nullptr;
+    if (!match(M, m_NonNegative())) // Must not have any -1 vector elements.
+      return nullptr;
     DstPred = ICmpInst::Predicate::ICMP_SGT;
     break;
   case ICmpInst::Predicate::ICMP_SLE:
@@ -4757,6 +4788,9 @@ Instruction *InstCombiner::visitICmpInst(ICmpInst &I) {
   if (Instruction *Res = foldICmpWithConstant(I))
     return Res;
 
+  if (Instruction *Res = foldICmpWithDominatingICmp(I))
+    return Res;
+
   if (Instruction *Res = foldICmpUsingKnownBits(I))
     return Res;
 
@@ -5273,11 +5307,71 @@ static Instruction *foldFCmpReciprocalAndZero(FCmpInst &I, Instruction *LHSI,
   if (C->isNegative())
     Pred = I.getSwappedPredicate();
 
-  // Finally emit the new fcmp.
-  Value *X = LHSI->getOperand(1);
-  FCmpInst *NewFCI = new FCmpInst(Pred, X, RHSC);
-  NewFCI->setFastMathFlags(I.getFastMathFlags());
-  return NewFCI;
+  return new FCmpInst(Pred, LHSI->getOperand(1), RHSC, "", &I);
+}
+
+/// Optimize fabs(X) compared with zero.
+static Instruction *foldFabsWithFcmpZero(FCmpInst &I) {
+  Value *X;
+  if (!match(I.getOperand(0), m_Intrinsic<Intrinsic::fabs>(m_Value(X))) ||
+      !match(I.getOperand(1), m_PosZeroFP()))
+    return nullptr;
+
+  auto replacePredAndOp0 = [](FCmpInst *I, FCmpInst::Predicate P, Value *X) {
+    I->setPredicate(P);
+    I->setOperand(0, X);
+    return I;
+  };
+
+  switch (I.getPredicate()) {
+  case FCmpInst::FCMP_UGE:
+  case FCmpInst::FCMP_OLT:
+    // fabs(X) >= 0.0 --> true
+    // fabs(X) <  0.0 --> false
+    llvm_unreachable("fcmp should have simplified");
+
+  case FCmpInst::FCMP_OGT:
+    // fabs(X) > 0.0 --> X != 0.0
+    return replacePredAndOp0(&I, FCmpInst::FCMP_ONE, X);
+
+  case FCmpInst::FCMP_UGT:
+    // fabs(X) u> 0.0 --> X u!= 0.0
+    return replacePredAndOp0(&I, FCmpInst::FCMP_UNE, X);
+
+  case FCmpInst::FCMP_OLE:
+    // fabs(X) <= 0.0 --> X == 0.0
+    return replacePredAndOp0(&I, FCmpInst::FCMP_OEQ, X);
+
+  case FCmpInst::FCMP_ULE:
+    // fabs(X) u<= 0.0 --> X u== 0.0
+    return replacePredAndOp0(&I, FCmpInst::FCMP_UEQ, X);
+
+  case FCmpInst::FCMP_OGE:
+    // fabs(X) >= 0.0 --> !isnan(X)
+    assert(!I.hasNoNaNs() && "fcmp should have simplified");
+    return replacePredAndOp0(&I, FCmpInst::FCMP_ORD, X);
+
+  case FCmpInst::FCMP_ULT:
+    // fabs(X) u< 0.0 --> isnan(X)
+    assert(!I.hasNoNaNs() && "fcmp should have simplified");
+    return replacePredAndOp0(&I, FCmpInst::FCMP_UNO, X);
+
+  case FCmpInst::FCMP_OEQ:
+  case FCmpInst::FCMP_UEQ:
+  case FCmpInst::FCMP_ONE:
+  case FCmpInst::FCMP_UNE:
+  case FCmpInst::FCMP_ORD:
+  case FCmpInst::FCMP_UNO:
+    // Look through the fabs() because it doesn't change anything but the sign.
+    // fabs(X) == 0.0 --> X == 0.0,
+    // fabs(X) != 0.0 --> X != 0.0
+    // isnan(fabs(X)) --> isnan(X)
+    // !isnan(fabs(X) --> !isnan(X)
+    return replacePredAndOp0(&I, I.getPredicate(), X);
+
+  default:
+    return nullptr;
+  }
 }
 
 Instruction *InstCombiner::visitFCmpInst(FCmpInst &I) {
@@ -5349,132 +5443,89 @@ Instruction *InstCombiner::visitFCmpInst(FCmpInst &I) {
         return nullptr;
     }
 
-  // Handle fcmp with constant RHS
-  if (Constant *RHSC = dyn_cast<Constant>(Op1)) {
-    if (Instruction *LHSI = dyn_cast<Instruction>(Op0))
-      switch (LHSI->getOpcode()) {
-      case Instruction::FPExt: {
-        // fcmp (fpext x), C -> fcmp x, (fptrunc C) if fptrunc is lossless
-        FPExtInst *LHSExt = cast<FPExtInst>(LHSI);
-        ConstantFP *RHSF = dyn_cast<ConstantFP>(RHSC);
-        if (!RHSF)
-          break;
-
-        const fltSemantics *Sem;
-        // FIXME: This shouldn't be here.
-        if (LHSExt->getSrcTy()->isHalfTy())
-          Sem = &APFloat::IEEEhalf();
-        else if (LHSExt->getSrcTy()->isFloatTy())
-          Sem = &APFloat::IEEEsingle();
-        else if (LHSExt->getSrcTy()->isDoubleTy())
-          Sem = &APFloat::IEEEdouble();
-        else if (LHSExt->getSrcTy()->isFP128Ty())
-          Sem = &APFloat::IEEEquad();
-        else if (LHSExt->getSrcTy()->isX86_FP80Ty())
-          Sem = &APFloat::x87DoubleExtended();
-        else if (LHSExt->getSrcTy()->isPPC_FP128Ty())
-          Sem = &APFloat::PPCDoubleDouble();
-        else
-          break;
-
-        bool Lossy;
-        APFloat F = RHSF->getValueAPF();
-        F.convert(*Sem, APFloat::rmNearestTiesToEven, &Lossy);
-
-        // Avoid lossy conversions and denormals. Zero is a special case
-        // that's OK to convert.
-        APFloat Fabs = F;
-        Fabs.clearSign();
-        if (!Lossy &&
-            ((Fabs.compare(APFloat::getSmallestNormalized(*Sem)) !=
-                 APFloat::cmpLessThan) || Fabs.isZero()))
-
-          return new FCmpInst(Pred, LHSExt->getOperand(0),
-                              ConstantFP::get(RHSC->getContext(), F));
-        break;
-      }
-      case Instruction::PHI:
-        // Only fold fcmp into the PHI if the phi and fcmp are in the same
-        // block.  If in the same block, we're encouraging jump threading.  If
-        // not, we are just pessimizing the code by making an i1 phi.
-        if (LHSI->getParent() == I.getParent())
-          if (Instruction *NV = foldOpIntoPhi(I, cast<PHINode>(LHSI)))
-            return NV;
-        break;
-      case Instruction::SIToFP:
-      case Instruction::UIToFP:
-        if (Instruction *NV = foldFCmpIntToFPConst(I, LHSI, RHSC))
-          return NV;
-        break;
-      case Instruction::FSub: {
-        // fcmp pred (fneg x), C -> fcmp swap(pred) x, -C
-        Value *Op;
-        if (match(LHSI, m_FNeg(m_Value(Op))))
-          return new FCmpInst(I.getSwappedPredicate(), Op,
-                              ConstantExpr::getFNeg(RHSC));
-        break;
-      }
-      case Instruction::FDiv:
-        if (Instruction *NV = foldFCmpReciprocalAndZero(I, LHSI, RHSC))
-          return NV;
-        break;
-      case Instruction::Load:
-        if (GetElementPtrInst *GEP =
-            dyn_cast<GetElementPtrInst>(LHSI->getOperand(0))) {
-          if (GlobalVariable *GV = dyn_cast<GlobalVariable>(GEP->getOperand(0)))
-            if (GV->isConstant() && GV->hasDefinitiveInitializer() &&
-                !cast<LoadInst>(LHSI)->isVolatile())
-              if (Instruction *Res = foldCmpLoadFromIndexedGlobal(GEP, GV, I))
-                return Res;
-        }
-        break;
-      case Instruction::Call: {
-        if (!RHSC->isNullValue())
-          break;
-
-        CallInst *CI = cast<CallInst>(LHSI);
-        Intrinsic::ID IID = getIntrinsicForCallSite(CI, &TLI);
-        if (IID != Intrinsic::fabs)
-          break;
-
-        // Various optimization for fabs compared with zero.
-        switch (Pred) {
-        default:
-          break;
-        // fabs(x) < 0 --> false
-        case FCmpInst::FCMP_OLT:
-          llvm_unreachable("handled by SimplifyFCmpInst");
-        // fabs(x) > 0 --> x != 0
-        case FCmpInst::FCMP_OGT:
-          return new FCmpInst(FCmpInst::FCMP_ONE, CI->getArgOperand(0), RHSC);
-        // fabs(x) <= 0 --> x == 0
-        case FCmpInst::FCMP_OLE:
-          return new FCmpInst(FCmpInst::FCMP_OEQ, CI->getArgOperand(0), RHSC);
-        // fabs(x) >= 0 --> !isnan(x)
-        case FCmpInst::FCMP_OGE:
-          return new FCmpInst(FCmpInst::FCMP_ORD, CI->getArgOperand(0), RHSC);
-        // fabs(x) == 0 --> x == 0
-        // fabs(x) != 0 --> x != 0
-        case FCmpInst::FCMP_OEQ:
-        case FCmpInst::FCMP_UEQ:
-        case FCmpInst::FCMP_ONE:
-        case FCmpInst::FCMP_UNE:
-          return new FCmpInst(Pred, CI->getArgOperand(0), RHSC);
-        }
-      }
-      }
+  // The sign of 0.0 is ignored by fcmp, so canonicalize to +0.0:
+  // fcmp Pred X, -0.0 --> fcmp Pred X, 0.0
+  if (match(Op1, m_AnyZeroFP()) && !match(Op1, m_PosZeroFP())) {
+    I.setOperand(1, ConstantFP::getNullValue(Op1->getType()));
+    return &I;
   }
 
-  // fcmp pred (fneg x), (fneg y) -> fcmp swap(pred) x, y
-  Value *X, *Y;
-  if (match(Op0, m_FNeg(m_Value(X))) && match(Op1, m_FNeg(m_Value(Y))))
-    return new FCmpInst(I.getSwappedPredicate(), X, Y);
+  // Handle fcmp with instruction LHS and constant RHS.
+  Instruction *LHSI;
+  Constant *RHSC;
+  if (match(Op0, m_Instruction(LHSI)) && match(Op1, m_Constant(RHSC))) {
+    switch (LHSI->getOpcode()) {
+    case Instruction::PHI:
+      // Only fold fcmp into the PHI if the phi and fcmp are in the same
+      // block.  If in the same block, we're encouraging jump threading.  If
+      // not, we are just pessimizing the code by making an i1 phi.
+      if (LHSI->getParent() == I.getParent())
+        if (Instruction *NV = foldOpIntoPhi(I, cast<PHINode>(LHSI)))
+          return NV;
+      break;
+    case Instruction::SIToFP:
+    case Instruction::UIToFP:
+      if (Instruction *NV = foldFCmpIntToFPConst(I, LHSI, RHSC))
+        return NV;
+      break;
+    case Instruction::FDiv:
+      if (Instruction *NV = foldFCmpReciprocalAndZero(I, LHSI, RHSC))
+        return NV;
+      break;
+    case Instruction::Load:
+      if (auto *GEP = dyn_cast<GetElementPtrInst>(LHSI->getOperand(0)))
+        if (auto *GV = dyn_cast<GlobalVariable>(GEP->getOperand(0)))
+          if (GV->isConstant() && GV->hasDefinitiveInitializer() &&
+              !cast<LoadInst>(LHSI)->isVolatile())
+            if (Instruction *Res = foldCmpLoadFromIndexedGlobal(GEP, GV, I))
+              return Res;
+      break;
+  }
+  }
 
-  // fcmp (fpext x), (fpext y) -> fcmp x, y
-  if (FPExtInst *LHSExt = dyn_cast<FPExtInst>(Op0))
-    if (FPExtInst *RHSExt = dyn_cast<FPExtInst>(Op1))
-      if (LHSExt->getSrcTy() == RHSExt->getSrcTy())
-        return new FCmpInst(Pred, LHSExt->getOperand(0), RHSExt->getOperand(0));
+  if (Instruction *R = foldFabsWithFcmpZero(I))
+    return R;
+
+  Value *X, *Y;
+  if (match(Op0, m_FNeg(m_Value(X)))) {
+    // fcmp pred (fneg X), (fneg Y) -> fcmp swap(pred) X, Y
+    if (match(Op1, m_FNeg(m_Value(Y))))
+      return new FCmpInst(I.getSwappedPredicate(), X, Y, "", &I);
+
+    // fcmp pred (fneg X), C --> fcmp swap(pred) X, -C
+    Constant *C;
+    if (match(Op1, m_Constant(C))) {
+      Constant *NegC = ConstantExpr::getFNeg(C);
+      return new FCmpInst(I.getSwappedPredicate(), X, NegC, "", &I);
+    }
+  }
+
+  if (match(Op0, m_FPExt(m_Value(X)))) {
+    // fcmp (fpext X), (fpext Y) -> fcmp X, Y
+    if (match(Op1, m_FPExt(m_Value(Y))) && X->getType() == Y->getType())
+      return new FCmpInst(Pred, X, Y, "", &I);
+
+    // fcmp (fpext X), C -> fcmp X, (fptrunc C) if fptrunc is lossless
+    const APFloat *C;
+    if (match(Op1, m_APFloat(C))) {
+      const fltSemantics &FPSem =
+          X->getType()->getScalarType()->getFltSemantics();
+      bool Lossy;
+      APFloat TruncC = *C;
+      TruncC.convert(FPSem, APFloat::rmNearestTiesToEven, &Lossy);
+
+      // Avoid lossy conversions and denormals.
+      // Zero is a special case that's OK to convert.
+      APFloat Fabs = TruncC;
+      Fabs.clearSign();
+      if (!Lossy &&
+          ((Fabs.compare(APFloat::getSmallestNormalized(FPSem)) !=
+            APFloat::cmpLessThan) || Fabs.isZero())) {
+        Constant *NewC = ConstantFP::get(X->getType(), TruncC);
+        return new FCmpInst(Pred, X, NewC, "", &I);
+      }
+    }
+  }
 
   if (I.getType()->isVectorTy())
     if (Instruction *Res = foldVectorCmp(I, Builder))

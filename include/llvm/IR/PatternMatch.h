@@ -215,6 +215,7 @@ template <typename Predicate> struct cst_pred_ty : public Predicate {
         // Non-splat vector constant: check each element for a match.
         unsigned NumElts = V->getType()->getVectorNumElements();
         assert(NumElts != 0 && "Constant vector with no elements?");
+        bool HasNonUndefElements = false;
         for (unsigned i = 0; i != NumElts; ++i) {
           Constant *Elt = C->getAggregateElement(i);
           if (!Elt)
@@ -224,8 +225,9 @@ template <typename Predicate> struct cst_pred_ty : public Predicate {
           auto *CI = dyn_cast<ConstantInt>(Elt);
           if (!CI || !this->isValue(CI->getValue()))
             return false;
+          HasNonUndefElements = true;
         }
-        return true;
+        return HasNonUndefElements;
       }
     }
     return false;
@@ -272,6 +274,7 @@ template <typename Predicate> struct cstfp_pred_ty : public Predicate {
         // Non-splat vector constant: check each element for a match.
         unsigned NumElts = V->getType()->getVectorNumElements();
         assert(NumElts != 0 && "Constant vector with no elements?");
+        bool HasNonUndefElements = false;
         for (unsigned i = 0; i != NumElts; ++i) {
           Constant *Elt = C->getAggregateElement(i);
           if (!Elt)
@@ -281,8 +284,9 @@ template <typename Predicate> struct cstfp_pred_ty : public Predicate {
           auto *CF = dyn_cast<ConstantFP>(Elt);
           if (!CF || !this->isValue(CF->getValueAPF()))
             return false;
+          HasNonUndefElements = true;
         }
-        return true;
+        return HasNonUndefElements;
       }
     }
     return false;
@@ -659,11 +663,39 @@ inline BinaryOp_match<LHS, RHS, Instruction::FSub> m_FSub(const LHS &L,
   return BinaryOp_match<LHS, RHS, Instruction::FSub>(L, R);
 }
 
+template <typename Op_t> struct FNeg_match {
+  Op_t X;
+
+  FNeg_match(const Op_t &Op) : X(Op) {}
+  template <typename OpTy> bool match(OpTy *V) {
+    auto *FPMO = dyn_cast<FPMathOperator>(V);
+    if (!FPMO || FPMO->getOpcode() != Instruction::FSub)
+      return false;
+    if (FPMO->hasNoSignedZeros()) {
+      // With 'nsz', any zero goes.
+      if (!cstfp_pred_ty<is_any_zero_fp>().match(FPMO->getOperand(0)))
+        return false;
+    } else {
+      // Without 'nsz', we need fsub -0.0, X exactly.
+      if (!cstfp_pred_ty<is_neg_zero_fp>().match(FPMO->getOperand(0)))
+        return false;
+    }
+    return X.match(FPMO->getOperand(1));
+  }
+};
+
 /// Match 'fneg X' as 'fsub -0.0, X'.
+template <typename OpTy>
+inline FNeg_match<OpTy>
+m_FNeg(const OpTy &X) {
+  return FNeg_match<OpTy>(X);
+}
+
+/// Match 'fneg X' as 'fsub +-0.0, X'.
 template <typename RHS>
-inline BinaryOp_match<cstfp_pred_ty<is_neg_zero_fp>, RHS, Instruction::FSub>
-m_FNeg(const RHS &X) {
-  return m_FSub(m_NegZeroFP(), X);
+inline BinaryOp_match<cstfp_pred_ty<is_any_zero_fp>, RHS, Instruction::FSub>
+m_FNegNSZ(const RHS &X) {
+  return m_FSub(m_AnyZeroFP(), X);
 }
 
 template <typename LHS, typename RHS>

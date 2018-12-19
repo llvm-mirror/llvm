@@ -27,8 +27,9 @@ public:
   using CompileFunction = JITCompileCallbackManager::CompileFunction;
 
   CompileCallbackMaterializationUnit(SymbolStringPtr Name,
-                                     CompileFunction Compile)
-      : MaterializationUnit(SymbolFlagsMap({{Name, JITSymbolFlags::Exported}})),
+                                     CompileFunction Compile, VModuleKey K)
+      : MaterializationUnit(SymbolFlagsMap({{Name, JITSymbolFlags::Exported}}),
+                            std::move(K)),
         Name(std::move(Name)), Compile(std::move(Compile)) {}
 
   StringRef getName() const override { return "<Compile Callbacks>"; }
@@ -41,7 +42,7 @@ private:
     R.emit();
   }
 
-  void discard(const JITDylib &JD, SymbolStringPtr Name) override {
+  void discard(const JITDylib &JD, const SymbolStringPtr &Name) override {
     llvm_unreachable("Discard should never occur on a LMU?");
   }
 
@@ -60,14 +61,15 @@ void TrampolinePool::anchor() {}
 Expected<JITTargetAddress>
 JITCompileCallbackManager::getCompileCallback(CompileFunction Compile) {
   if (auto TrampolineAddr = TP->getTrampoline()) {
-    auto CallbackName = ES.getSymbolStringPool().intern(
-        std::string("cc") + std::to_string(++NextCallbackId));
+    auto CallbackName =
+        ES.intern(std::string("cc") + std::to_string(++NextCallbackId));
 
     std::lock_guard<std::mutex> Lock(CCMgrMutex);
     AddrToSymbol[*TrampolineAddr] = CallbackName;
     cantFail(CallbacksJD.define(
         llvm::make_unique<CompileCallbackMaterializationUnit>(
-            std::move(CallbackName), std::move(Compile))));
+            std::move(CallbackName), std::move(Compile),
+            ES.allocateVModule())));
     return *TrampolineAddr;
   } else
     return TrampolineAddr.takeError();
@@ -90,7 +92,7 @@ JITTargetAddress JITCompileCallbackManager::executeCompileCallback(
       {
         raw_string_ostream ErrMsgStream(ErrMsg);
         ErrMsgStream << "No compile callback for trampoline at "
-                     << format("0x%016x", TrampolineAddr);
+                     << format("0x%016" PRIx64, TrampolineAddr);
       }
       ES.reportError(
           make_error<StringError>(std::move(ErrMsg), inconvertibleErrorCode()));
@@ -99,9 +101,10 @@ JITTargetAddress JITCompileCallbackManager::executeCompileCallback(
       Name = I->second;
   }
 
-  if (auto Sym = lookup({&CallbacksJD}, Name))
+  if (auto Sym = ES.lookup(JITDylibSearchList({{&CallbacksJD, true}}), Name))
     return Sym->getAddress();
   else {
+    llvm::dbgs() << "Didn't find callback.\n";
     // If anything goes wrong materializing Sym then report it to the session
     // and return the ErrorHandlerAddress;
     ES.reportError(Sym.takeError());
@@ -248,8 +251,11 @@ void makeStub(Function &F, Value &ImplPointer) {
     Builder.CreateRet(Call);
 }
 
-void SymbolLinkagePromoter::operator()(Module &M) {
+std::vector<GlobalValue *> SymbolLinkagePromoter::operator()(Module &M) {
+  std::vector<GlobalValue *> PromotedGlobals;
+
   for (auto &GV : M.global_values()) {
+    bool Promoted = true;
 
     // Rename if necessary.
     if (!GV.hasName())
@@ -258,13 +264,21 @@ void SymbolLinkagePromoter::operator()(Module &M) {
       GV.setName("__" + GV.getName().substr(1) + "." + Twine(NextId++));
     else if (GV.hasLocalLinkage())
       GV.setName("__orc_lcl." + GV.getName() + "." + Twine(NextId++));
+    else
+      Promoted = false;
 
     if (GV.hasLocalLinkage()) {
       GV.setLinkage(GlobalValue::ExternalLinkage);
       GV.setVisibility(GlobalValue::HiddenVisibility);
+      Promoted = true;
     }
     GV.setUnnamedAddr(GlobalValue::UnnamedAddr::None);
+
+    if (Promoted)
+      PromotedGlobals.push_back(&GV);
   }
+
+  return PromotedGlobals;
 }
 
 Function* cloneFunctionDecl(Module &Dst, const Function &F,

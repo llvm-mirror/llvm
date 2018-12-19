@@ -17,6 +17,7 @@
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/DiagnosticPrinter.h"
@@ -1189,6 +1190,78 @@ void LLVMAddNamedMetadataOperand(LLVMModuleRef M, const char *Name,
   N->addOperand(extractMDNode(unwrap<MetadataAsValue>(Val)));
 }
 
+const char *LLVMGetDebugLocDirectory(LLVMValueRef Val, unsigned *Length) {
+  if (!Length) return nullptr;
+  StringRef S;
+  if (const auto *I = unwrap<Instruction>(Val)) {
+    S = I->getDebugLoc()->getDirectory();
+  } else if (const auto *GV = unwrap<GlobalVariable>(Val)) {
+    SmallVector<DIGlobalVariableExpression *, 1> GVEs;
+    GV->getDebugInfo(GVEs);
+    if (GVEs.size())
+      if (const DIGlobalVariable *DGV = GVEs[0]->getVariable())
+        S = DGV->getDirectory();
+  } else if (const auto *F = unwrap<Function>(Val)) {
+    if (const DISubprogram *DSP = F->getSubprogram())
+      S = DSP->getDirectory();
+  } else {
+    assert(0 && "Expected Instruction, GlobalVariable or Function");
+    return nullptr;
+  }
+  *Length = S.size();
+  return S.data();
+}
+
+const char *LLVMGetDebugLocFilename(LLVMValueRef Val, unsigned *Length) {
+  if (!Length) return nullptr;
+  StringRef S;
+  if (const auto *I = unwrap<Instruction>(Val)) {
+    S = I->getDebugLoc()->getFilename();
+  } else if (const auto *GV = unwrap<GlobalVariable>(Val)) {
+    SmallVector<DIGlobalVariableExpression *, 1> GVEs;
+    GV->getDebugInfo(GVEs);
+    if (GVEs.size())
+      if (const DIGlobalVariable *DGV = GVEs[0]->getVariable())
+        S = DGV->getFilename();
+  } else if (const auto *F = unwrap<Function>(Val)) {
+    if (const DISubprogram *DSP = F->getSubprogram())
+      S = DSP->getFilename();
+  } else {
+    assert(0 && "Expected Instruction, GlobalVariable or Function");
+    return nullptr;
+  }
+  *Length = S.size();
+  return S.data();
+}
+
+unsigned LLVMGetDebugLocLine(LLVMValueRef Val) {
+  unsigned L = 0;
+  if (const auto *I = unwrap<Instruction>(Val)) {
+    L = I->getDebugLoc()->getLine();
+  } else if (const auto *GV = unwrap<GlobalVariable>(Val)) {
+    SmallVector<DIGlobalVariableExpression *, 1> GVEs;
+    GV->getDebugInfo(GVEs);
+    if (GVEs.size())
+      if (const DIGlobalVariable *DGV = GVEs[0]->getVariable())
+        L = DGV->getLine();
+  } else if (const auto *F = unwrap<Function>(Val)) {
+    if (const DISubprogram *DSP = F->getSubprogram())
+      L = DSP->getLine();
+  } else {
+    assert(0 && "Expected Instruction, GlobalVariable or Function");
+    return -1;
+  }
+  return L;
+}
+
+unsigned LLVMGetDebugLocColumn(LLVMValueRef Val) {
+  unsigned C = 0;
+  if (const auto *I = unwrap<Instruction>(Val))
+    if (const auto &L = I->getDebugLoc())
+      C = L->getColumn();
+  return C;
+}
+
 /*--.. Operations on scalar constants ......................................--*/
 
 LLVMValueRef LLVMConstInt(LLVMTypeRef IntTy, unsigned long long N,
@@ -1876,6 +1949,10 @@ void LLVMSetUnnamedAddr(LLVMValueRef Global, LLVMBool HasUnnamedAddr) {
                      : GlobalValue::UnnamedAddr::None);
 }
 
+LLVMTypeRef LLVMGlobalGetValueType(LLVMValueRef Global) {
+  return wrap(unwrap<GlobalValue>(Global)->getValueType());
+}
+
 /*--.. Operations on global variables, load and store instructions .........--*/
 
 unsigned LLVMGetAlignment(LLVMValueRef V) {
@@ -2203,6 +2280,50 @@ unsigned LLVMGetIntrinsicID(LLVMValueRef Fn) {
   return 0;
 }
 
+static Intrinsic::ID llvm_map_to_intrinsic_id(unsigned ID) {
+  assert(ID < llvm::Intrinsic::num_intrinsics && "Intrinsic ID out of range");
+  return llvm::Intrinsic::ID(ID);
+}
+
+LLVMValueRef LLVMGetIntrinsicDeclaration(LLVMModuleRef Mod,
+                                         unsigned ID,
+                                         LLVMTypeRef *ParamTypes,
+                                         size_t ParamCount) {
+  ArrayRef<Type*> Tys(unwrap(ParamTypes), ParamCount);
+  auto IID = llvm_map_to_intrinsic_id(ID);
+  return wrap(llvm::Intrinsic::getDeclaration(unwrap(Mod), IID, Tys));
+}
+
+const char *LLVMIntrinsicGetName(unsigned ID, size_t *NameLength) {
+  auto IID = llvm_map_to_intrinsic_id(ID);
+  auto Str = llvm::Intrinsic::getName(IID);
+  *NameLength = Str.size();
+  return Str.data();
+}
+
+LLVMTypeRef LLVMIntrinsicGetType(LLVMContextRef Ctx, unsigned ID,
+                                 LLVMTypeRef *ParamTypes, size_t ParamCount) {
+  auto IID = llvm_map_to_intrinsic_id(ID);
+  ArrayRef<Type*> Tys(unwrap(ParamTypes), ParamCount);
+  return wrap(llvm::Intrinsic::getType(*unwrap(Ctx), IID, Tys));
+}
+
+const char *LLVMIntrinsicCopyOverloadedName(unsigned ID,
+                                            LLVMTypeRef *ParamTypes,
+                                            size_t ParamCount,
+                                            size_t *NameLength) {
+  auto IID = llvm_map_to_intrinsic_id(ID);
+  ArrayRef<Type*> Tys(unwrap(ParamTypes), ParamCount);
+  auto Str = llvm::Intrinsic::getName(IID, Tys);
+  *NameLength = Str.length();
+  return strdup(Str.c_str());
+}
+
+LLVMBool LLVMIntrinsicIsOverloaded(unsigned ID) {
+  auto IID = llvm_map_to_intrinsic_id(ID);
+  return llvm::Intrinsic::isOverloaded(IID);
+}
+
 unsigned LLVMGetFunctionCallConv(LLVMValueRef Fn) {
   return unwrap<Function>(Fn)->getCallingConv();
 }
@@ -2518,6 +2639,11 @@ LLVMValueRef LLVMInstructionClone(LLVMValueRef Inst) {
   return nullptr;
 }
 
+LLVMValueRef LLVMIsATerminatorInst(LLVMValueRef Inst) {
+  Instruction *I = dyn_cast<Instruction>(unwrap(Inst));
+  return (I && I->isTerminator()) ? wrap(I) : nullptr;
+}
+
 unsigned LLVMGetNumArgOperands(LLVMValueRef Instr) {
   if (FuncletPadInst *FPI = dyn_cast<FuncletPadInst>(unwrap(Instr))) {
     return FPI->getNumArgOperands();
@@ -2633,15 +2759,15 @@ void LLVMSetUnwindDest(LLVMValueRef Invoke, LLVMBasicBlockRef B) {
 /*--.. Operations on terminators ...........................................--*/
 
 unsigned LLVMGetNumSuccessors(LLVMValueRef Term) {
-  return unwrap<TerminatorInst>(Term)->getNumSuccessors();
+  return unwrap<Instruction>(Term)->getNumSuccessors();
 }
 
 LLVMBasicBlockRef LLVMGetSuccessor(LLVMValueRef Term, unsigned i) {
-  return wrap(unwrap<TerminatorInst>(Term)->getSuccessor(i));
+  return wrap(unwrap<Instruction>(Term)->getSuccessor(i));
 }
 
 void LLVMSetSuccessor(LLVMValueRef Term, unsigned i, LLVMBasicBlockRef block) {
-  return unwrap<TerminatorInst>(Term)->setSuccessor(i,unwrap(block));
+  return unwrap<Instruction>(Term)->setSuccessor(i, unwrap(block));
 }
 
 /*--.. Operations on branch instructions (only) ............................--*/
@@ -3150,6 +3276,30 @@ LLVMValueRef LLVMBuildArrayMalloc(LLVMBuilderRef B, LLVMTypeRef Ty,
                                                ITy, unwrap(Ty), AllocSize,
                                                unwrap(Val), nullptr, "");
   return wrap(unwrap(B)->Insert(Malloc, Twine(Name)));
+}
+
+LLVMValueRef LLVMBuildMemSet(LLVMBuilderRef B, LLVMValueRef Ptr, 
+                             LLVMValueRef Val, LLVMValueRef Len,
+                             unsigned Align) {
+  return wrap(unwrap(B)->CreateMemSet(unwrap(Ptr), unwrap(Val), unwrap(Len), Align));
+}
+
+LLVMValueRef LLVMBuildMemCpy(LLVMBuilderRef B, 
+                             LLVMValueRef Dst, unsigned DstAlign,
+                             LLVMValueRef Src, unsigned SrcAlign,
+                             LLVMValueRef Size) {
+  return wrap(unwrap(B)->CreateMemCpy(unwrap(Dst), DstAlign,
+                                      unwrap(Src), SrcAlign,
+                                      unwrap(Size)));
+}
+
+LLVMValueRef LLVMBuildMemMove(LLVMBuilderRef B,
+                              LLVMValueRef Dst, unsigned DstAlign,
+                              LLVMValueRef Src, unsigned SrcAlign,
+                              LLVMValueRef Size) {
+  return wrap(unwrap(B)->CreateMemMove(unwrap(Dst), DstAlign,
+                                       unwrap(Src), SrcAlign,
+                                       unwrap(Size)));
 }
 
 LLVMValueRef LLVMBuildAlloca(LLVMBuilderRef B, LLVMTypeRef Ty,

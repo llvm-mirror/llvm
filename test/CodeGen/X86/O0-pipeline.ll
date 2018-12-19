@@ -1,4 +1,7 @@
-; RUN: llc -mtriple=x86_64-- -O0 -debug-pass=Structure < %s -o /dev/null 2>&1 | FileCheck %s
+; When EXPENSIVE_CHECKS are enabled, the machine verifier appears between each
+; pass. Ignore it with 'grep -v'.
+; RUN: llc -mtriple=x86_64-- -O0 -debug-pass=Structure < %s -o /dev/null 2>&1 \
+; RUN:   | grep -v 'Verify generated machine code' | FileCheck %s
 
 ; REQUIRES: asserts
 
@@ -55,6 +58,8 @@
 ; CHECK-NEXT:       Shadow Call Stack
 ; CHECK-NEXT:       X86 Indirect Branch Tracking
 ; CHECK-NEXT:       X86 vzeroupper inserter
+; CHECK-NEXT:       X86 Discriminate Memory Operands
+; CHECK-NEXT:       X86 Insert Cache Prefetches
 ; CHECK-NEXT:       Contiguously Lay Out Funclets
 ; CHECK-NEXT:       StackMap Liveness Analysis
 ; CHECK-NEXT:       Live DEBUG_VALUE analysis

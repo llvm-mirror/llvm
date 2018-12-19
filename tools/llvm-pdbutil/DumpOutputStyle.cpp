@@ -250,7 +250,7 @@ Error DumpOutputStyle::dumpFileSummary() {
 static StatCollection getSymbolStats(const SymbolGroup &SG,
                                      StatCollection &CumulativeStats) {
   StatCollection Stats;
-  if (SG.getFile().isPdb()) {
+  if (SG.getFile().isPdb() && SG.hasDebugStream()) {
     // For PDB files, all symbols are packed into one stream.
     for (const auto &S : SG.getPdbModuleStream().symbols(nullptr)) {
       Stats.update(S.kind(), S.length());
@@ -1420,19 +1420,21 @@ Error DumpOutputStyle::dumpTpiStream(uint32_t StreamIdx) {
       P.formatLine("TI: {0}, Offset: {1}", IO.Type, fmtle(IO.Offset));
     }
 
-    P.NewLine();
-    P.formatLine("Hash Adjusters:");
-    auto &Adjusters = Stream.getHashAdjusters();
-    auto &Strings = Err(getPdb().getStringTable());
-    for (const auto &A : Adjusters) {
-      AutoIndent Indent2(P);
-      auto ExpectedStr = Strings.getStringForID(A.first);
-      TypeIndex TI(A.second);
-      if (ExpectedStr)
-        P.formatLine("`{0}` -> {1}", *ExpectedStr, TI);
-      else {
-        P.formatLine("unknown str id ({0}) -> {1}", A.first, TI);
-        consumeError(ExpectedStr.takeError());
+    if (getPdb().hasPDBStringTable()) {
+      P.NewLine();
+      P.formatLine("Hash Adjusters:");
+      auto &Adjusters = Stream.getHashAdjusters();
+      auto &Strings = Err(getPdb().getStringTable());
+      for (const auto &A : Adjusters) {
+        AutoIndent Indent2(P);
+        auto ExpectedStr = Strings.getStringForID(A.first);
+        TypeIndex TI(A.second);
+        if (ExpectedStr)
+          P.formatLine("`{0}` -> {1}", *ExpectedStr, TI);
+        else {
+          P.formatLine("unknown str id ({0}) -> {1}", A.first, TI);
+          consumeError(ExpectedStr.takeError());
+        }
       }
     }
   }
@@ -1572,8 +1574,40 @@ Error DumpOutputStyle::dumpGlobals() {
   ExitOnError Err("Error dumping globals stream: ");
   auto &Globals = Err(getPdb().getPDBGlobalsStream());
 
-  const GSIHashTable &Table = Globals.getGlobalsTable();
-  Err(dumpSymbolsFromGSI(Table, opts::dump::DumpGlobalExtras));
+  if (opts::dump::DumpGlobalNames.empty()) {
+    const GSIHashTable &Table = Globals.getGlobalsTable();
+    Err(dumpSymbolsFromGSI(Table, opts::dump::DumpGlobalExtras));
+  } else {
+    SymbolStream &SymRecords = cantFail(getPdb().getPDBSymbolStream());
+    auto &Types = File.types();
+    auto &Ids = File.ids();
+
+    SymbolVisitorCallbackPipeline Pipeline;
+    SymbolDeserializer Deserializer(nullptr, CodeViewContainer::Pdb);
+    MinimalSymbolDumper Dumper(P, opts::dump::DumpSymRecordBytes, Ids, Types);
+
+    Pipeline.addCallbackToPipeline(Deserializer);
+    Pipeline.addCallbackToPipeline(Dumper);
+    CVSymbolVisitor Visitor(Pipeline);
+
+    using ResultEntryType = std::pair<uint32_t, CVSymbol>;
+    for (StringRef Name : opts::dump::DumpGlobalNames) {
+      AutoIndent Indent(P);
+      P.formatLine("Global Name `{0}`", Name);
+      std::vector<ResultEntryType> Results =
+          Globals.findRecordsByName(Name, SymRecords);
+      if (Results.empty()) {
+        AutoIndent Indent(P);
+        P.printLine("(no matching records found)");
+        continue;
+      }
+
+      for (ResultEntryType Result : Results) {
+        if (auto E = Visitor.visitSymbolRecord(Result.second, Result.first))
+          return E;
+      }
+    }
+  }
   return Error::success();
 }
 
@@ -1676,8 +1710,6 @@ Error DumpOutputStyle::dumpSymbolsFromGSI(const GSIHashTable &Table,
 
   // Return early if we aren't dumping public hash table and address map info.
   if (HashExtras) {
-    P.formatBinary("Hash Bitmap", Table.HashBitmap, 0);
-
     P.formatLine("Hash Entries");
     {
       AutoIndent Indent2(P);

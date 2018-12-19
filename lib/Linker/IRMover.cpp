@@ -1062,10 +1062,15 @@ void IRLinker::prepareCompileUnitsForImport() {
     ValueMap.MD()[CU->getRawEnumTypes()].reset(nullptr);
     ValueMap.MD()[CU->getRawMacros()].reset(nullptr);
     ValueMap.MD()[CU->getRawRetainedTypes()].reset(nullptr);
-    // We import global variables only temporarily in order for instcombine
-    // and globalopt to perform constant folding and static constructor
-    // evaluation. After that elim-avail-extern will covert imported globals
-    // back to declarations, so we don't need debug info for them.
+    // The original definition (or at least its debug info - if the variable is
+    // internalized an optimized away) will remain in the source module, so
+    // there's no need to import them.
+    // If LLVM ever does more advanced optimizations on global variables
+    // (removing/localizing write operations, for instance) that can track
+    // through debug info, this decision may need to be revisited - but do so
+    // with care when it comes to debug info size. Emitting small CUs containing
+    // only a few imported entities into every destination module may be very
+    // size inefficient.
     ValueMap.MD()[CU->getRawGlobalVariables()].reset(nullptr);
 
     // Imported entities only need to be mapped in if they have local
@@ -1230,8 +1235,14 @@ Error IRLinker::linkModuleFlagsMetadata() {
     case Module::Warning: {
       // Emit a warning if the values differ.
       if (SrcOp->getOperand(2) != DstOp->getOperand(2)) {
-        emitWarning("linking module flags '" + ID->getString() +
-                    "': IDs have conflicting values");
+        std::string str;
+        raw_string_ostream(str)
+            << "linking module flags '" << ID->getString()
+            << "': IDs have conflicting values ('" << *SrcOp->getOperand(2)
+            << "' from " << SrcM->getModuleIdentifier() << " with '"
+            << *DstOp->getOperand(2) << "' from " << DstM.getModuleIdentifier()
+            << ')';
+        emitWarning(str);
       }
       continue;
     }

@@ -133,7 +133,7 @@ Instruction *InstCombiner::visitMul(BinaryOperator &I) {
   if (SimplifyAssociativeOrCommutative(I))
     return &I;
 
-  if (Instruction *X = foldShuffledBinop(I))
+  if (Instruction *X = foldVectorBinop(I))
     return X;
 
   if (Value *V = SimplifyUsingDistributiveLaws(I))
@@ -348,7 +348,7 @@ Instruction *InstCombiner::visitFMul(BinaryOperator &I) {
   if (SimplifyAssociativeOrCommutative(I))
     return &I;
 
-  if (Instruction *X = foldShuffledBinop(I))
+  if (Instruction *X = foldVectorBinop(I))
     return X;
 
   if (Instruction *FoldedMul = foldBinOpIntoSelectOrPhi(I))
@@ -433,7 +433,7 @@ Instruction *InstCombiner::visitFMul(BinaryOperator &I) {
         match(Op0, m_OneUse(m_Intrinsic<Intrinsic::sqrt>(m_Value(X)))) &&
         match(Op1, m_OneUse(m_Intrinsic<Intrinsic::sqrt>(m_Value(Y))))) {
       Value *XY = Builder.CreateFMulFMF(X, Y, &I);
-      Value *Sqrt = Builder.CreateIntrinsic(Intrinsic::sqrt, { XY }, &I);
+      Value *Sqrt = Builder.CreateUnaryIntrinsic(Intrinsic::sqrt, XY, &I);
       return replaceInstUsesWith(I, Sqrt);
     }
 
@@ -863,7 +863,7 @@ Instruction *InstCombiner::visitUDiv(BinaryOperator &I) {
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
 
-  if (Instruction *X = foldShuffledBinop(I))
+  if (Instruction *X = foldVectorBinop(I))
     return X;
 
   // Handle the integer div common cases
@@ -957,7 +957,7 @@ Instruction *InstCombiner::visitSDiv(BinaryOperator &I) {
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
 
-  if (Instruction *X = foldShuffledBinop(I))
+  if (Instruction *X = foldVectorBinop(I))
     return X;
 
   // Handle the integer div common cases
@@ -1105,7 +1105,7 @@ Instruction *InstCombiner::visitFDiv(BinaryOperator &I) {
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
 
-  if (Instruction *X = foldShuffledBinop(I))
+  if (Instruction *X = foldVectorBinop(I))
     return X;
 
   if (Instruction *R = foldFDivConstantDivisor(I))
@@ -1157,7 +1157,8 @@ Instruction *InstCombiner::visitFDiv(BinaryOperator &I) {
       IRBuilder<>::FastMathFlagGuard FMFGuard(B);
       B.setFastMathFlags(I.getFastMathFlags());
       AttributeList Attrs = CallSite(Op0).getCalledFunction()->getAttributes();
-      Value *Res = emitUnaryFloatFnCall(X, TLI.getName(LibFunc_tan), B, Attrs);
+      Value *Res = emitUnaryFloatFnCall(X, &TLI, LibFunc_tan, LibFunc_tanf,
+                                        LibFunc_tanl, B, Attrs);
       if (IsCot)
         Res = B.CreateFDiv(ConstantFP::get(I.getType(), 1.0), Res);
       return replaceInstUsesWith(I, Res);
@@ -1234,7 +1235,7 @@ Instruction *InstCombiner::visitURem(BinaryOperator &I) {
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
 
-  if (Instruction *X = foldShuffledBinop(I))
+  if (Instruction *X = foldVectorBinop(I))
     return X;
 
   if (Instruction *common = commonIRemTransforms(I))
@@ -1281,7 +1282,7 @@ Instruction *InstCombiner::visitSRem(BinaryOperator &I) {
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
 
-  if (Instruction *X = foldShuffledBinop(I))
+  if (Instruction *X = foldVectorBinop(I))
     return X;
 
   // Handle the integer rem common cases
@@ -1355,7 +1356,7 @@ Instruction *InstCombiner::visitFRem(BinaryOperator &I) {
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
 
-  if (Instruction *X = foldShuffledBinop(I))
+  if (Instruction *X = foldVectorBinop(I))
     return X;
 
   return nullptr;

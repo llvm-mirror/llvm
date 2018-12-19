@@ -45,6 +45,8 @@ if (MSVC)
 endif()
 
 add_llvm_library(LLVMSupport
+  AArch64TargetParser.cpp
+  ARMTargetParser.cpp
   AMDGPUMetadata.cpp
   APFloat.cpp
   APInt.cpp
@@ -59,6 +61,7 @@ add_llvm_library(LLVMSupport
   BinaryStreamWriter.cpp
   BlockFrequency.cpp
   BranchProbability.cpp
+  BuryPointer.cpp
   CachePruning.cpp
   circular_raw_ostream.cpp
   Chrono.cpp
@@ -135,6 +138,7 @@ add_llvm_library(LLVMSupport
   Unicode.cpp
   UnicodeCaseFold.cpp
   VersionTuple.cpp
+  VirtualFileSystem.cpp
   WithColor.cpp
   YAMLParser.cpp
   YAMLTraits.cpp

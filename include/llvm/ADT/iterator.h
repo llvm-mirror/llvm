@@ -202,9 +202,7 @@ template <
     typename ReferenceT = typename std::conditional<
         std::is_same<T, typename std::iterator_traits<
                             WrappedIteratorT>::value_type>::value,
-        typename std::iterator_traits<WrappedIteratorT>::reference, T &>::type,
-    // Don't provide these, they are mostly to act as aliases below.
-    typename WrappedTraitsT = std::iterator_traits<WrappedIteratorT>>
+        typename std::iterator_traits<WrappedIteratorT>::reference, T &>::type>
 class iterator_adaptor_base
     : public iterator_facade_base<DerivedT, IteratorCategoryT, T,
                                   DifferenceTypeT, PointerT, ReferenceT> {
@@ -311,8 +309,10 @@ make_pointee_range(RangeT &&Range) {
 template <typename WrappedIteratorT,
           typename T = decltype(&*std::declval<WrappedIteratorT>())>
 class pointer_iterator
-    : public iterator_adaptor_base<pointer_iterator<WrappedIteratorT, T>,
-                                   WrappedIteratorT, T> {
+    : public iterator_adaptor_base<
+          pointer_iterator<WrappedIteratorT, T>, WrappedIteratorT,
+          typename std::iterator_traits<WrappedIteratorT>::iterator_category,
+          T> {
   mutable T Ptr;
 
 public:

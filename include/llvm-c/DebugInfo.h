@@ -127,6 +127,44 @@ typedef enum {
 } LLVMDWARFEmissionKind;
 
 /**
+ * The kind of metadata nodes.
+ */
+enum {
+  LLVMMDStringMetadataKind,
+  LLVMConstantAsMetadataMetadataKind,
+  LLVMLocalAsMetadataMetadataKind,
+  LLVMDistinctMDOperandPlaceholderMetadataKind,
+  LLVMMDTupleMetadataKind,
+  LLVMDILocationMetadataKind,
+  LLVMDIExpressionMetadataKind,
+  LLVMDIGlobalVariableExpressionMetadataKind,
+  LLVMGenericDINodeMetadataKind,
+  LLVMDISubrangeMetadataKind,
+  LLVMDIEnumeratorMetadataKind,
+  LLVMDIBasicTypeMetadataKind,
+  LLVMDIDerivedTypeMetadataKind,
+  LLVMDICompositeTypeMetadataKind,
+  LLVMDISubroutineTypeMetadataKind,
+  LLVMDIFileMetadataKind,
+  LLVMDICompileUnitMetadataKind,
+  LLVMDISubprogramMetadataKind,
+  LLVMDILexicalBlockMetadataKind,
+  LLVMDILexicalBlockFileMetadataKind,
+  LLVMDINamespaceMetadataKind,
+  LLVMDIModuleMetadataKind,
+  LLVMDITemplateTypeParameterMetadataKind,
+  LLVMDITemplateValueParameterMetadataKind,
+  LLVMDIGlobalVariableMetadataKind,
+  LLVMDILocalVariableMetadataKind,
+  LLVMDILabelMetadataKind,
+  LLVMDIObjCPropertyMetadataKind,
+  LLVMDIImportedEntityMetadataKind,
+  LLVMDIMacroMetadataKind,
+  LLVMDIMacroFileMetadataKind
+};
+typedef unsigned LLVMMetadataKind;
+
+/**
  * An LLVM DWARF type encoding.
  */
 typedef unsigned LLVMDWARFTypeEncoding;
@@ -969,21 +1007,15 @@ LLVMDIBuilderCreateConstantValueExpression(LLVMDIBuilderRef Builder,
  * \param Expr        The location of the global relative to the attached
  *                    GlobalVariable.
  * \param Decl        Reference to the corresponding declaration.
+ *                    variables.
  * \param AlignInBits Variable alignment(or 0 if no alignment attr was
  *                    specified)
  */
-LLVMMetadataRef
-LLVMDIBuilderCreateGlobalVariableExpression(LLVMDIBuilderRef Builder,
-                                            LLVMMetadataRef Scope,
-                                            const char *Name, size_t NameLen,
-                                            const char *Linkage, size_t LinkLen,
-                                            LLVMMetadataRef File,
-                                            unsigned LineNo,
-                                            LLVMMetadataRef Ty,
-                                            LLVMBool LocalToUnit,
-                                            LLVMMetadataRef Expr,
-                                            LLVMMetadataRef Decl,
-                                            uint32_t AlignInBits);
+LLVMMetadataRef LLVMDIBuilderCreateGlobalVariableExpression(
+    LLVMDIBuilderRef Builder, LLVMMetadataRef Scope, const char *Name,
+    size_t NameLen, const char *Linkage, size_t LinkLen, LLVMMetadataRef File,
+    unsigned LineNo, LLVMMetadataRef Ty, LLVMBool LocalToUnit,
+    LLVMMetadataRef Expr, LLVMMetadataRef Decl, uint32_t AlignInBits);
 /**
  * Create a new temporary \c MDNode.  Suitable for use in constructing cyclic
  * \c MDNode structures. A temporary \c MDNode is not uniqued, may be RAUW'd,
@@ -1029,17 +1061,11 @@ void LLVMMetadataReplaceAllUsesWith(LLVMMetadataRef TempTargetMetadata,
  * \param AlignInBits Variable alignment(or 0 if no alignment attr was
  *                    specified)
  */
-LLVMMetadataRef
-LLVMDIBuilderCreateTempGlobalVariableFwdDecl(LLVMDIBuilderRef Builder,
-                                             LLVMMetadataRef Scope,
-                                             const char *Name, size_t NameLen,
-                                             const char *Linkage, size_t LnkLen,
-                                             LLVMMetadataRef File,
-                                             unsigned LineNo,
-                                             LLVMMetadataRef Ty,
-                                             LLVMBool LocalToUnit,
-                                             LLVMMetadataRef Decl,
-                                             uint32_t AlignInBits);
+LLVMMetadataRef LLVMDIBuilderCreateTempGlobalVariableFwdDecl(
+    LLVMDIBuilderRef Builder, LLVMMetadataRef Scope, const char *Name,
+    size_t NameLen, const char *Linkage, size_t LnkLen, LLVMMetadataRef File,
+    unsigned LineNo, LLVMMetadataRef Ty, LLVMBool LocalToUnit,
+    LLVMMetadataRef Decl, uint32_t AlignInBits);
 
 /**
  * Insert a new llvm.dbg.declare intrinsic call before the given instruction.
@@ -1152,6 +1178,13 @@ LLVMMetadataRef LLVMGetSubprogram(LLVMValueRef Func);
  * @see llvm::Function::setSubprogram()
  */
 void LLVMSetSubprogram(LLVMValueRef Func, LLVMMetadataRef SP);
+
+/**
+ * Obtain the enumerated type of a Metadata instance.
+ *
+ * @see llvm::Metadata::getMetadataID()
+ */
+LLVMMetadataKind LLVMGetMetadataKind(LLVMMetadataRef Metadata);
 
 #ifdef __cplusplus
 } /* end extern "C" */

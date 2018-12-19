@@ -420,7 +420,7 @@ void RuntimePointerChecking::groupChecks(
 
     // We've computed the grouped checks for this partition.
     // Save the results and continue with the next one.
-    std::copy(Groups.begin(), Groups.end(), std::back_inserter(CheckingGroups));
+    llvm::copy(Groups, std::back_inserter(CheckingGroups));
   }
 }
 
@@ -509,7 +509,7 @@ public:
   /// Register a load  and whether it is only read from.
   void addLoad(MemoryLocation &Loc, bool IsReadOnly) {
     Value *Ptr = const_cast<Value*>(Loc.Ptr);
-    AST.add(Ptr, MemoryLocation::UnknownSize, Loc.AATags);
+    AST.add(Ptr, LocationSize::unknown(), Loc.AATags);
     Accesses.insert(MemAccessInfo(Ptr, false));
     if (IsReadOnly)
       ReadOnlyPtr.insert(Ptr);
@@ -518,7 +518,7 @@ public:
   /// Register a store.
   void addStore(MemoryLocation &Loc) {
     Value *Ptr = const_cast<Value*>(Loc.Ptr);
-    AST.add(Ptr, MemoryLocation::UnknownSize, Loc.AATags);
+    AST.add(Ptr, LocationSize::unknown(), Loc.AATags);
     Accesses.insert(MemAccessInfo(Ptr, true));
   }
 
@@ -1869,13 +1869,9 @@ void LoopAccessInfo::analyzeLoop(AliasAnalysis *AA, LoopInfo *LI,
   for (StoreInst *ST : Stores) {
     Value *Ptr = ST->getPointerOperand();
 
-    if (isUniform(Ptr)) {
-      // Consider multiple stores to the same uniform address as a store of a
-      // variant value.
-      bool MultipleStoresToUniformPtr = !UniformStores.insert(Ptr).second;
-      HasVariantStoreToLoopInvariantAddress |=
-          (!isUniform(ST->getValueOperand()) || MultipleStoresToUniformPtr);
-    }
+    if (isUniform(Ptr))
+      HasDependenceInvolvingLoopInvariantAddress |=
+          !UniformStores.insert(Ptr).second;
 
     // If we did *not* see this pointer before, insert it to  the read-write
     // list. At this phase it is only a 'write' list.
@@ -1916,6 +1912,14 @@ void LoopAccessInfo::analyzeLoop(AliasAnalysis *AA, LoopInfo *LI,
         !getPtrStride(*PSE, Ptr, TheLoop, SymbolicStrides)) {
       ++NumReads;
       IsReadOnlyPtr = true;
+    }
+
+    // See if there is an unsafe dependency between a load to a uniform address and
+    // store to the same uniform address.
+    if (UniformStores.count(Ptr)) {
+      LLVM_DEBUG(dbgs() << "LAA: Found an unsafe dependency between a uniform "
+                           "load and uniform store to the same address!\n");
+      HasDependenceInvolvingLoopInvariantAddress = true;
     }
 
     MemoryLocation Loc = MemoryLocation::get(LD);
@@ -2276,7 +2280,7 @@ LoopAccessInfo::LoopAccessInfo(Loop *L, ScalarEvolution *SE,
       PtrRtChecking(llvm::make_unique<RuntimePointerChecking>(SE)),
       DepChecker(llvm::make_unique<MemoryDepChecker>(*PSE, L)), TheLoop(L),
       NumLoads(0), NumStores(0), MaxSafeDepDistBytes(-1), CanVecMem(false),
-      HasVariantStoreToLoopInvariantAddress(false) {
+      HasDependenceInvolvingLoopInvariantAddress(false) {
   if (canAnalyzeLoop())
     analyzeLoop(AA, LI, TLI, DT);
 }
@@ -2308,8 +2312,8 @@ void LoopAccessInfo::print(raw_ostream &OS, unsigned Depth) const {
   PtrRtChecking->print(OS, Depth);
   OS << "\n";
 
-  OS.indent(Depth) << "Variant Store to invariant address was "
-                   << (HasVariantStoreToLoopInvariantAddress ? "" : "not ")
+  OS.indent(Depth) << "Non vectorizable stores to invariant address were "
+                   << (HasDependenceInvolvingLoopInvariantAddress ? "" : "not ")
                    << "found in loop.\n";
 
   OS.indent(Depth) << "SCEV assumptions:\n";

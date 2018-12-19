@@ -78,12 +78,11 @@ class WebAssemblyCFGStackify final : public MachineFunctionPass {
   // <LOOP|TRY marker, Loop/exception bottom BB> map
   DenseMap<const MachineInstr *, MachineBasicBlock *> BeginToBottom;
 
-  // Helper functions to register / unregister scope information created by
-  // marker instructions.
+  // Helper functions to register scope information created by marker
+  // instructions.
   void registerScope(MachineInstr *Begin, MachineInstr *End);
   void registerTryScope(MachineInstr *Begin, MachineInstr *End,
                         MachineBasicBlock *EHPad);
-  void unregisterScope(MachineInstr *Begin);
 
   MachineBasicBlock *getBottom(const MachineInstr *Begin);
 
@@ -180,23 +179,6 @@ void WebAssemblyCFGStackify::registerTryScope(MachineInstr *Begin,
   registerScope(Begin, End);
   TryToEHPad[Begin] = EHPad;
   EHPadToTry[EHPad] = Begin;
-}
-
-void WebAssemblyCFGStackify::unregisterScope(MachineInstr *Begin) {
-  assert(BeginToEnd.count(Begin));
-  MachineInstr *End = BeginToEnd[Begin];
-  assert(EndToBegin.count(End));
-  BeginToEnd.erase(Begin);
-  EndToBegin.erase(End);
-  MachineBasicBlock *EHPad = TryToEHPad.lookup(Begin);
-  if (EHPad) {
-    assert(EHPadToTry.count(EHPad));
-    TryToEHPad.erase(Begin);
-    EHPadToTry.erase(EHPad);
-  }
-  MachineBasicBlock *Bottom = BeginToBottom.lookup(Begin);
-  if (Bottom)
-    BeginToBottom.erase(Begin);
 }
 
 // Given a LOOP/TRY marker, returns its bottom BB. Use cached information if any
@@ -309,6 +291,8 @@ void WebAssemblyCFGStackify::placeBlockMarker(MachineBasicBlock &MBB) {
   // Local expression tree should go after the BLOCK.
   for (auto I = Header->getFirstTerminator(), E = Header->begin(); I != E;
        --I) {
+    if (std::prev(I)->isDebugInstr() || std::prev(I)->isPosition())
+      continue;
     if (WebAssembly::isChild(*std::prev(I), MFI))
       AfterSet.insert(&*std::prev(I));
     else
@@ -531,6 +515,8 @@ void WebAssemblyCFGStackify::placeTryMarker(MachineBasicBlock &MBB) {
   // Local expression tree should go after the TRY.
   for (auto I = Header->getFirstTerminator(), E = Header->begin(); I != E;
        --I) {
+    if (std::prev(I)->isDebugInstr() || std::prev(I)->isPosition())
+      continue;
     if (WebAssembly::isChild(*std::prev(I), MFI))
       AfterSet.insert(&*std::prev(I));
     else
@@ -735,7 +721,20 @@ void WebAssemblyCFGStackify::rewriteDepthImmediates(MachineFunction &MF) {
       case WebAssembly::CATCH_I32:
       case WebAssembly::CATCH_I64:
       case WebAssembly::CATCH_ALL:
-        EHPadStack.push_back(&MBB);
+        // Currently the only case there are more than one catch for a try is
+        // for catch terminate pad, in the form of
+        //   try
+        //   catch
+        //     call @__clang_call_terminate
+        //     unreachable
+        //   catch_all
+        //     call @std::terminate
+        //     unreachable
+        //   end
+        // So we shouldn't push the current BB for the second catch_all block
+        // here.
+        if (!WebAssembly::isCatchAllTerminatePad(MBB))
+          EHPadStack.push_back(&MBB);
         break;
 
       case WebAssembly::LOOP:
@@ -763,7 +762,7 @@ void WebAssemblyCFGStackify::rewriteDepthImmediates(MachineFunction &MF) {
       case WebAssembly::RETHROW_TO_CALLER: {
         MachineInstr *Rethrow =
             BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(WebAssembly::RETHROW))
-                .addImm(Stack.size());
+                .addImm(EHPadStack.size());
         MI.eraseFromParent();
         I = MachineBasicBlock::reverse_iterator(Rethrow);
         break;

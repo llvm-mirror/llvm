@@ -78,24 +78,45 @@ WebAssemblyTargetStreamer *WebAssemblyAsmPrinter::getTargetStreamer() {
 //===----------------------------------------------------------------------===//
 
 void WebAssemblyAsmPrinter::EmitEndOfAsmFile(Module &M) {
+  for (auto &It : OutContext.getSymbols()) {
+    // Emit a .globaltype and .eventtype declaration.
+    auto Sym = cast<MCSymbolWasm>(It.getValue());
+    if (Sym->getType() == wasm::WASM_SYMBOL_TYPE_GLOBAL)
+      getTargetStreamer()->emitGlobalType(Sym);
+    else if (Sym->getType() == wasm::WASM_SYMBOL_TYPE_EVENT)
+      getTargetStreamer()->emitEventType(Sym);
+  }
+
   for (const auto &F : M) {
     // Emit function type info for all undefined functions
     if (F.isDeclarationForLinker() && !F.isIntrinsic()) {
       SmallVector<MVT, 4> Results;
       SmallVector<MVT, 4> Params;
-      ComputeSignatureVTs(F, TM, Params, Results);
-      MCSymbol *Sym = getSymbol(&F);
-      getTargetStreamer()->emitIndirectFunctionType(Sym, Params, Results);
+      ComputeSignatureVTs(F.getFunctionType(), F, TM, Params, Results);
+      auto *Sym = cast<MCSymbolWasm>(getSymbol(&F));
+      Sym->setType(wasm::WASM_SYMBOL_TYPE_FUNCTION);
+      if (!Sym->getSignature()) {
+        auto Signature = SignatureFromMVTs(Results, Params);
+        Sym->setSignature(Signature.get());
+        addSignature(std::move(Signature));
+      }
+      // FIXME: this was originally intended for post-linking and was only used
+      // for imports that were only called indirectly (i.e. s2wasm could not
+      // infer the type from a call). With object files it applies to all
+      // imports. so fix the names and the tests, or rethink how import
+      // delcarations work in asm files.
+      getTargetStreamer()->emitFunctionType(Sym);
 
       if (TM.getTargetTriple().isOSBinFormatWasm() &&
           F.hasFnAttribute("wasm-import-module")) {
-        MCSymbolWasm *WasmSym = cast<MCSymbolWasm>(Sym);
         StringRef Name =
             F.getFnAttribute("wasm-import-module").getValueAsString();
-        getTargetStreamer()->emitImportModule(WasmSym, Name);
+        Sym->setModuleName(Name);
+        getTargetStreamer()->emitImportModule(Sym, Name);
       }
     }
   }
+
   for (const auto &G : M.globals()) {
     if (!G.hasInitializer() && G.hasExternalLinkage()) {
       if (G.getValueType()->isSized()) {
@@ -137,10 +158,18 @@ void WebAssemblyAsmPrinter::EmitJumpTableInfo() {
 }
 
 void WebAssemblyAsmPrinter::EmitFunctionBodyStart() {
-  getTargetStreamer()->emitParam(CurrentFnSym, MFI->getParams());
-
-  SmallVector<MVT, 4> ResultVTs;
   const Function &F = MF->getFunction();
+  SmallVector<MVT, 1> ResultVTs;
+  SmallVector<MVT, 4> ParamVTs;
+  ComputeSignatureVTs(F.getFunctionType(), F, TM, ParamVTs, ResultVTs);
+  auto Signature = SignatureFromMVTs(ResultVTs, ParamVTs);
+  auto *WasmSym = cast<MCSymbolWasm>(CurrentFnSym);
+  WasmSym->setSignature(Signature.get());
+  addSignature(std::move(Signature));
+  WasmSym->setType(wasm::WASM_SYMBOL_TYPE_FUNCTION);
+
+  // FIXME: clean up how params and results are emitted (use signatures)
+  getTargetStreamer()->emitFunctionType(WasmSym);
 
   // Emit the function index.
   if (MDNode *Idx = F.getMetadata("wasm.index")) {
@@ -150,16 +179,9 @@ void WebAssemblyAsmPrinter::EmitFunctionBodyStart() {
         cast<ConstantAsMetadata>(Idx->getOperand(0))->getValue()));
   }
 
-  ComputeLegalValueVTs(F, TM, F.getReturnType(), ResultVTs);
-
-  // If the return type needs to be legalized it will get converted into
-  // passing a pointer.
-  if (ResultVTs.size() == 1)
-    getTargetStreamer()->emitResult(CurrentFnSym, ResultVTs);
-  else
-    getTargetStreamer()->emitResult(CurrentFnSym, ArrayRef<MVT>());
-
-  getTargetStreamer()->emitLocal(MFI->getLocals());
+  SmallVector<wasm::ValType, 16> Locals;
+  ValTypesFromMVTs(MFI->getLocals(), Locals);
+  getTargetStreamer()->emitLocal(Locals);
 
   AsmPrinter::EmitFunctionBodyStart();
 }
@@ -168,14 +190,14 @@ void WebAssemblyAsmPrinter::EmitInstruction(const MachineInstr *MI) {
   LLVM_DEBUG(dbgs() << "EmitInstruction: " << *MI << '\n');
 
   switch (MI->getOpcode()) {
-  case WebAssembly::ARGUMENT_I32:
-  case WebAssembly::ARGUMENT_I32_S:
-  case WebAssembly::ARGUMENT_I64:
-  case WebAssembly::ARGUMENT_I64_S:
-  case WebAssembly::ARGUMENT_F32:
-  case WebAssembly::ARGUMENT_F32_S:
-  case WebAssembly::ARGUMENT_F64:
-  case WebAssembly::ARGUMENT_F64_S:
+  case WebAssembly::ARGUMENT_i32:
+  case WebAssembly::ARGUMENT_i32_S:
+  case WebAssembly::ARGUMENT_i64:
+  case WebAssembly::ARGUMENT_i64_S:
+  case WebAssembly::ARGUMENT_f32:
+  case WebAssembly::ARGUMENT_f32_S:
+  case WebAssembly::ARGUMENT_f64:
+  case WebAssembly::ARGUMENT_f64_S:
   case WebAssembly::ARGUMENT_v16i8:
   case WebAssembly::ARGUMENT_v16i8_S:
   case WebAssembly::ARGUMENT_v8i16:

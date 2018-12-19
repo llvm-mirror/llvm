@@ -80,11 +80,14 @@ public:
   int getShuffleCost(TTI::ShuffleKind Kind, Type *Tp, int Index, Type *SubTp);
   unsigned getVectorTruncCost(Type *SrcTy, Type *DstTy);
   unsigned getVectorBitmaskConversionCost(Type *SrcTy, Type *DstTy);
+  unsigned getBoolVecToIntConversionCost(unsigned Opcode, Type *Dst,
+                                         const Instruction *I);
   int getCastInstrCost(unsigned Opcode, Type *Dst, Type *Src,
                        const Instruction *I = nullptr);
   int getCmpSelInstrCost(unsigned Opcode, Type *ValTy, Type *CondTy,
                          const Instruction *I = nullptr);
   int getVectorInstrCost(unsigned Opcode, Type *Val, unsigned Index);
+  bool isFoldableLoad(const LoadInst *Ld, const Instruction *&FoldedValue);
   int getMemoryOpCost(unsigned Opcode, Type *Src, unsigned Alignment,
                       unsigned AddressSpace, const Instruction *I = nullptr);
 
@@ -92,7 +95,16 @@ public:
                                  unsigned Factor,
                                  ArrayRef<unsigned> Indices,
                                  unsigned Alignment,
-                                 unsigned AddressSpace);
+                                 unsigned AddressSpace,
+                                 bool UseMaskForCond = false,
+                                 bool UseMaskForGaps = false);
+
+  int getIntrinsicInstrCost(Intrinsic::ID ID, Type *RetTy,
+                            ArrayRef<Value *> Args, FastMathFlags FMF,
+                            unsigned VF = 1);
+  int getIntrinsicInstrCost(Intrinsic::ID ID, Type *RetTy,
+                            ArrayRef<Type *> Tys, FastMathFlags FMF,
+                            unsigned ScalarizationCostPassed = UINT_MAX);
   /// @}
 };
 

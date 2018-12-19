@@ -160,6 +160,7 @@ public:
     case Intrinsic::invariant_end:
     case Intrinsic::launder_invariant_group:
     case Intrinsic::strip_invariant_group:
+    case Intrinsic::is_constant:
     case Intrinsic::lifetime_start:
     case Intrinsic::lifetime_end:
     case Intrinsic::objectsize:
@@ -313,6 +314,8 @@ public:
 
   bool enableInterleavedAccessVectorization() { return false; }
 
+  bool enableMaskedInterleavedAccessVectorization() { return false; }
+
   bool isFPVectorizationPotentiallyUnsafe() { return false; }
 
   bool allowsMisalignedMemoryAccesses(LLVMContext &Context,
@@ -450,8 +453,9 @@ public:
   unsigned getInterleavedMemoryOpCost(unsigned Opcode, Type *VecTy,
                                       unsigned Factor,
                                       ArrayRef<unsigned> Indices,
-                                      unsigned Alignment,
-                                      unsigned AddressSpace) {
+                                      unsigned Alignment, unsigned AddressSpace,
+                                      bool UseMaskForCond = false,
+                                      bool UseMaskForGaps = false) {
     return 1;
   }
 

@@ -347,9 +347,20 @@ Constant *llvm::ConstantFoldLoadThroughBitcast(Constant *C, Type *DestTy,
 
     // We're simulating a load through a pointer that was bitcast to point to
     // a different type, so we can try to walk down through the initial
-    // elements of an aggregate to see if some part of th e aggregate is
+    // elements of an aggregate to see if some part of the aggregate is
     // castable to implement the "load" semantic model.
-    C = C->getAggregateElement(0u);
+    if (SrcTy->isStructTy()) {
+      // Struct types might have leading zero-length elements like [0 x i32],
+      // which are certainly not what we are looking for, so skip them.
+      unsigned Elem = 0;
+      Constant *ElemC;
+      do {
+        ElemC = C->getAggregateElement(Elem++);
+      } while (ElemC && DL.getTypeSizeInBits(ElemC->getType()) == 0);
+      C = ElemC;
+    } else {
+      C = C->getAggregateElement(0u);
+    }
   } while (C);
 
   return nullptr;
@@ -1363,6 +1374,8 @@ bool llvm::canConstantFoldCallTo(ImmutableCallSite CS, const Function *F) {
   case Intrinsic::fabs:
   case Intrinsic::minnum:
   case Intrinsic::maxnum:
+  case Intrinsic::minimum:
+  case Intrinsic::maximum:
   case Intrinsic::log:
   case Intrinsic::log2:
   case Intrinsic::log10:
@@ -1397,6 +1410,10 @@ bool llvm::canConstantFoldCallTo(ImmutableCallSite CS, const Function *F) {
   case Intrinsic::usub_with_overflow:
   case Intrinsic::smul_with_overflow:
   case Intrinsic::umul_with_overflow:
+  case Intrinsic::sadd_sat:
+  case Intrinsic::uadd_sat:
+  case Intrinsic::ssub_sat:
+  case Intrinsic::usub_sat:
   case Intrinsic::convert_from_fp16:
   case Intrinsic::convert_to_fp16:
   case Intrinsic::bitreverse:
@@ -1424,6 +1441,7 @@ bool llvm::canConstantFoldCallTo(ImmutableCallSite CS, const Function *F) {
   case Intrinsic::x86_avx512_vcvtsd2usi64:
   case Intrinsic::x86_avx512_cvttsd2usi:
   case Intrinsic::x86_avx512_cvttsd2usi64:
+  case Intrinsic::is_constant:
     return true;
   default:
     return false;
@@ -1598,11 +1616,32 @@ double getValueAsDouble(ConstantFP *Op) {
   return APF.convertToDouble();
 }
 
+static bool isManifestConstant(const Constant *c) {
+  if (isa<ConstantData>(c)) {
+    return true;
+  } else if (isa<ConstantAggregate>(c) || isa<ConstantExpr>(c)) {
+    for (const Value *subc : c->operand_values()) {
+      if (!isManifestConstant(cast<Constant>(subc)))
+        return false;
+    }
+    return true;
+  }
+  return false;
+}
+
 Constant *ConstantFoldScalarCall(StringRef Name, unsigned IntrinsicID, Type *Ty,
                                  ArrayRef<Constant *> Operands,
                                  const TargetLibraryInfo *TLI,
                                  ImmutableCallSite CS) {
   if (Operands.size() == 1) {
+    if (IntrinsicID == Intrinsic::is_constant) {
+      // We know we have a "Constant" argument. But we want to only
+      // return true for manifest constants, not those that depend on
+      // constants with unknowable values, e.g. GlobalValue or BlockAddress.
+      if (isManifestConstant(Operands[0]))
+        return ConstantInt::getTrue(Ty->getContext());
+      return nullptr;
+    }
     if (isa<UndefValue>(Operands[0])) {
       // cosine(arg) is between -1 and 1. cosine(invalid arg) is NaN
       if (IntrinsicID == Intrinsic::cos)
@@ -1912,6 +1951,18 @@ Constant *ConstantFoldScalarCall(StringRef Name, unsigned IntrinsicID, Type *Ty,
           return ConstantFP::get(Ty->getContext(), maxnum(C1, C2));
         }
 
+        if (IntrinsicID == Intrinsic::minimum) {
+          const APFloat &C1 = Op1->getValueAPF();
+          const APFloat &C2 = Op2->getValueAPF();
+          return ConstantFP::get(Ty->getContext(), minimum(C1, C2));
+        }
+
+        if (IntrinsicID == Intrinsic::maximum) {
+          const APFloat &C1 = Op1->getValueAPF();
+          const APFloat &C2 = Op2->getValueAPF();
+          return ConstantFP::get(Ty->getContext(), maximum(C1, C2));
+        }
+
         if (!TLI)
           return nullptr;
         if ((Name == "pow" && TLI->has(LibFunc_pow)) ||
@@ -1983,6 +2034,14 @@ Constant *ConstantFoldScalarCall(StringRef Name, unsigned IntrinsicID, Type *Ty,
           };
           return ConstantStruct::get(cast<StructType>(Ty), Ops);
         }
+        case Intrinsic::uadd_sat:
+          return ConstantInt::get(Ty, Op1->getValue().uadd_sat(Op2->getValue()));
+        case Intrinsic::sadd_sat:
+          return ConstantInt::get(Ty, Op1->getValue().sadd_sat(Op2->getValue()));
+        case Intrinsic::usub_sat:
+          return ConstantInt::get(Ty, Op1->getValue().usub_sat(Op2->getValue()));
+        case Intrinsic::ssub_sat:
+          return ConstantInt::get(Ty, Op1->getValue().ssub_sat(Op2->getValue()));
         case Intrinsic::cttz:
           if (Op2->isOne() && Op1->isZero()) // cttz(0, 1) is undef.
             return UndefValue::get(Ty);

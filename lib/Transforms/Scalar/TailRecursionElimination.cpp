@@ -127,6 +127,12 @@ struct AllocaDerivedValueTracker {
       case Instruction::Call:
       case Instruction::Invoke: {
         CallSite CS(I);
+        // If the alloca-derived argument is passed byval it is not an escape
+        // point, or a use of an alloca. Calling with byval copies the contents
+        // of the alloca into argument registers or stack slots, which exist
+        // beyond the lifetime of the current frame.
+        if (CS.isArgOperand(U) && CS.isByValArgument(CS.getArgumentNo(U)))
+          continue;
         bool IsNocapture =
             CS.isDataOperand(U) && CS.doesNotCapture(CS.getDataOperandNo(U));
         callUsesLocalStack(CS, IsNocapture);
@@ -696,7 +702,7 @@ static bool foldReturnAndProcessPred(
   SmallVector<BranchInst*, 8> UncondBranchPreds;
   for (pred_iterator PI = pred_begin(BB), E = pred_end(BB); PI != E; ++PI) {
     BasicBlock *Pred = *PI;
-    TerminatorInst *PTI = Pred->getTerminator();
+    Instruction *PTI = Pred->getTerminator();
     if (BranchInst *BI = dyn_cast<BranchInst>(PTI))
       if (BI->isUnconditional())
         UncondBranchPreds.push_back(BI);

@@ -67,9 +67,15 @@ def SBDivider : ProcResource<1>;
 // FP division and sqrt on port 0.
 def SBFPDivider : ProcResource<1>;
 
-// Loads are 5 cycles, so ReadAfterLd registers needn't be available until 5
+// Integer loads are 5 cycles, so ReadAfterLd registers needn't be available until 5
 // cycles after the memory operand.
 def : ReadAdvance<ReadAfterLd, 5>;
+
+// Vector loads are 5/6/7 cycles, so ReadAfterVec*Ld registers needn't be available
+// until 5/6/7 cycles after the memory operand.
+def : ReadAdvance<ReadAfterVecLd, 5>;
+def : ReadAdvance<ReadAfterVecXLd, 6>;
+def : ReadAdvance<ReadAfterVecYLd, 7>;
 
 // Many SchedWrites are defined in pairs with and without a folded load.
 // Instructions with folded loads are usually micro-fused, so they only appear
@@ -160,9 +166,14 @@ def  : WriteRes<WriteSETCCStore, [SBPort05,SBPort4,SBPort23]> {
   let Latency = 2;
   let NumMicroOps = 3;
 }
-def  : WriteRes<WriteLAHFSAHF,   [SBPort05]>;
-def  : WriteRes<WriteBitTest,    [SBPort05]>;
-def  : WriteRes<WriteBitTestSet, [SBPort05]>;
+
+defm : X86WriteRes<WriteLAHFSAHF,        [SBPort05], 1, [1], 1>;
+defm : X86WriteRes<WriteBitTest,         [SBPort05], 1, [1], 1>;
+defm : X86WriteRes<WriteBitTestImmLd,    [SBPort05,SBPort23], 6, [1,1], 2>;
+//defm : X86WriteRes<WriteBitTestRegLd,    [SBPort05,SBPort23], 6, [1,1], 2>;
+defm : X86WriteRes<WriteBitTestSet,      [SBPort05], 1, [1], 1>;
+defm : X86WriteRes<WriteBitTestSetImmLd, [SBPort05,SBPort23], 6, [1,1], 3>;
+defm : X86WriteRes<WriteBitTestSetRegLd, [SBPort05,SBPort23,SBPort5,SBPort015], 8, [1,1,1,1], 5>;
 
 // This is for simple LEAs with one or two input operands.
 // The complex ones can only execute on port 1, and they require two cycles on
@@ -814,13 +825,6 @@ def SBWriteResGroup49 : SchedWriteRes<[SBPort5,SBPort23]> {
 }
 def: InstRW<[SBWriteResGroup49], (instrs MOV16sm)>;
 
-def SBWriteResGroup50 : SchedWriteRes<[SBPort23,SBPort05]> {
-  let Latency = 6;
-  let NumMicroOps = 2;
-  let ResourceCycles = [1,1];
-}
-def: InstRW<[SBWriteResGroup50], (instregex "BT(16|32|64)mi8")>;
-
 def SBWriteResGroup51 : SchedWriteRes<[SBPort23,SBPort15]> {
   let Latency = 6;
   let NumMicroOps = 2;
@@ -923,10 +927,7 @@ def SBWriteResGroup69 : SchedWriteRes<[SBPort4,SBPort23,SBPort05]> {
   let NumMicroOps = 4;
   let ResourceCycles = [1,2,1];
 }
-def: InstRW<[SBWriteResGroup69], (instregex "BTC(16|32|64)mi8",
-                                            "BTR(16|32|64)mi8",
-                                            "BTS(16|32|64)mi8",
-                                            "SAR(8|16|32|64)m(1|i)",
+def: InstRW<[SBWriteResGroup69], (instregex "SAR(8|16|32|64)m(1|i)",
                                             "SHL(8|16|32|64)m(1|i)",
                                             "SHR(8|16|32|64)m(1|i)")>;
 
@@ -1037,7 +1038,7 @@ def SBWriteResGroup100 : SchedWriteRes<[SBPort4,SBPort5,SBPort23,SBPort05,SBPort
   let NumMicroOps = 6;
   let ResourceCycles = [1,1,2,1,1];
 }
-def: InstRW<[SBWriteResGroup100], (instregex "BT(C|R|S)?(16|32|64)mr")>;
+def : SchedAlias<WriteBitTestRegLd, SBWriteResGroup100>; // TODO - this is incorrect - no RMW
 
 def SBWriteResGroup101 : SchedWriteRes<[SBPort1,SBPort23]> {
   let Latency = 10;
@@ -1103,6 +1104,20 @@ def SBWriteResGroup131 : SchedWriteRes<[SBPort0,SBPort1,SBPort23]> {
   let ResourceCycles = [1,1,1];
 }
 def: InstRW<[SBWriteResGroup131], (instregex "DIV(R?)_FI(16|32)m")>;
+
+def SBWriteResGroupVzeroall : SchedWriteRes<[SBPort5]> {
+  let Latency = 9;
+  let NumMicroOps = 20;
+  let ResourceCycles = [2];
+}
+def: InstRW<[SBWriteResGroupVzeroall], (instrs VZEROALL)>;
+
+def SBWriteResGroupVzeroupper : SchedWriteRes<[]> {
+  let Latency = 1;
+  let NumMicroOps = 4;
+  let ResourceCycles = [];
+}
+def: InstRW<[SBWriteResGroupVzeroupper], (instrs VZEROUPPER)>;
 
 def: InstRW<[WriteZero], (instrs CLC)>;
 

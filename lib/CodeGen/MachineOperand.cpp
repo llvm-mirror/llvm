@@ -461,7 +461,8 @@ static void printIRValueReference(raw_ostream &OS, const Value &V,
     printLLVMNameWithoutPrefix(OS, V.getName());
     return;
   }
-  MachineOperand::printIRSlotNumber(OS, MST.getLocalSlot(&V));
+  int Slot = MST.getCurrentFunction() ? MST.getLocalSlot(&V) : -1;
+  MachineOperand::printIRSlotNumber(OS, Slot);
 }
 
 static void printSyncScope(raw_ostream &OS, const LLVMContext &Context,
@@ -743,10 +744,10 @@ void MachineOperand::print(raw_ostream &OS, ModuleSlotTracker &MST,
       OS << "undef ";
     if (isEarlyClobber())
       OS << "early-clobber ";
-    if (isDebug())
-      OS << "debug-use ";
     if (TargetRegisterInfo::isPhysicalRegister(getReg()) && isRenamable())
       OS << "renamable ";
+    // isDebug() is exactly true for register operands of a DBG_VALUE. So we
+    // simply infer it when parsing and do not need to print it.
 
     const MachineRegisterInfo *MRI = nullptr;
     if (TargetRegisterInfo::isVirtualRegister(Reg)) {

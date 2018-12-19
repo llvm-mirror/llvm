@@ -18,6 +18,7 @@
 
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/InitLLVM.h"
+#include "llvm/Support/Process.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/FileCheck.h"
 using namespace llvm;
@@ -108,8 +109,13 @@ static void DumpCommandLine(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
+  // Enable use of ANSI color codes because FileCheck is using them to
+  // highlight text.
+  llvm::sys::Process::UseANSIEscapeCodes(true);
+
   InitLLVM X(argc, argv);
-  cl::ParseCommandLineOptions(argc, argv);
+  cl::ParseCommandLineOptions(argc, argv, /*Overview*/ "", /*Errs*/ nullptr,
+                              "FILECHECK_OPTS");
 
   FileCheckRequest Req;
   for (auto Prefix : CheckPrefixes)

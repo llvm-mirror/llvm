@@ -21,9 +21,8 @@
 
 #define DEBUG_TYPE "llvm-mca"
 
+namespace llvm {
 namespace mca {
-
-using namespace llvm;
 
 HWStallEvent::GenericEventType toHWStallEventType(Scheduler::Status Status) {
   switch (Status) {
@@ -73,7 +72,7 @@ Error ExecuteStage::issueInstruction(InstRef &IR) {
 
 Error ExecuteStage::issueReadyInstructions() {
   InstRef IR = HWS.select();
-  while (IR.isValid()) {
+  while (IR) {
     if (Error Err = issueInstruction(IR))
       return Err;
 
@@ -107,6 +106,30 @@ Error ExecuteStage::cycleStart() {
   return issueReadyInstructions();
 }
 
+#ifndef NDEBUG
+static void verifyInstructionEliminated(const InstRef &IR) {
+  const Instruction &Inst = *IR.getInstruction();
+  assert(Inst.isEliminated() && "Instruction was not eliminated!");
+  assert(Inst.isReady() && "Instruction in an inconsistent state!");
+
+  // Ensure that instructions eliminated at register renaming stage are in a
+  // consistent state.
+  const InstrDesc &Desc = Inst.getDesc();
+  assert(!Desc.MayLoad && !Desc.MayStore && "Cannot eliminate a memory op!");
+}
+#endif
+
+Error ExecuteStage::handleInstructionEliminated(InstRef &IR) {
+#ifndef NDEBUG
+  verifyInstructionEliminated(IR);
+#endif
+  notifyInstructionReady(IR);
+  notifyInstructionIssued(IR, {});
+  IR.getInstruction()->forceExecuted();
+  notifyInstructionExecuted(IR);
+  return moveToTheNextStage(IR);
+}
+
 // Schedule the instruction for execution on the hardware.
 Error ExecuteStage::execute(InstRef &IR) {
   assert(isAvailable(IR) && "Scheduler is not available!");
@@ -115,6 +138,10 @@ Error ExecuteStage::execute(InstRef &IR) {
   // Ensure that the HWS has not stored this instruction in its queues.
   HWS.sanityCheck(IR);
 #endif
+
+  if (IR.getInstruction()->isEliminated())
+    return handleInstructionEliminated(IR);
+
   // Reserve a slot in each buffered resource. Also, mark units with
   // BufferSize=0 as reserved. Resources with a buffer size of zero will only
   // be released after MCIS is issued, and all the ResourceCycles for those
@@ -136,19 +163,19 @@ Error ExecuteStage::execute(InstRef &IR) {
   return issueInstruction(IR);
 }
 
-void ExecuteStage::notifyInstructionExecuted(const InstRef &IR) {
+void ExecuteStage::notifyInstructionExecuted(const InstRef &IR) const {
   LLVM_DEBUG(dbgs() << "[E] Instruction Executed: #" << IR << '\n');
   notifyEvent<HWInstructionEvent>(
       HWInstructionEvent(HWInstructionEvent::Executed, IR));
 }
 
-void ExecuteStage::notifyInstructionReady(const InstRef &IR) {
+void ExecuteStage::notifyInstructionReady(const InstRef &IR) const {
   LLVM_DEBUG(dbgs() << "[E] Instruction Ready: #" << IR << '\n');
   notifyEvent<HWInstructionEvent>(
       HWInstructionEvent(HWInstructionEvent::Ready, IR));
 }
 
-void ExecuteStage::notifyResourceAvailable(const ResourceRef &RR) {
+void ExecuteStage::notifyResourceAvailable(const ResourceRef &RR) const {
   LLVM_DEBUG(dbgs() << "[E] Resource Available: [" << RR.first << '.'
                     << RR.second << "]\n");
   for (HWEventListener *Listener : getListeners())
@@ -156,7 +183,8 @@ void ExecuteStage::notifyResourceAvailable(const ResourceRef &RR) {
 }
 
 void ExecuteStage::notifyInstructionIssued(
-    const InstRef &IR, ArrayRef<std::pair<ResourceRef, ResourceCycles>> Used) {
+    const InstRef &IR,
+    ArrayRef<std::pair<ResourceRef, ResourceCycles>> Used) const {
   LLVM_DEBUG({
     dbgs() << "[E] Instruction Issued: #" << IR << '\n';
     for (const std::pair<ResourceRef, ResourceCycles> &Resource : Used) {
@@ -169,7 +197,7 @@ void ExecuteStage::notifyInstructionIssued(
 }
 
 void ExecuteStage::notifyReservedOrReleasedBuffers(const InstRef &IR,
-                                                   bool Reserved) {
+                                                   bool Reserved) const {
   const InstrDesc &Desc = IR.getInstruction()->getDesc();
   if (Desc.Buffers.empty())
     return;
@@ -188,3 +216,4 @@ void ExecuteStage::notifyReservedOrReleasedBuffers(const InstRef &IR,
 }
 
 } // namespace mca
+} // namespace llvm

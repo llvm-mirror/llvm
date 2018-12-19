@@ -302,9 +302,9 @@ define i32 @test_call_setjmp(i32 *%ptr) nounwind {
 ; X64-NOPIC-NEXT:    cmpq $.Lslh_ret_addr4, %rbp
 ; X64-NOPIC-NEXT:    cmovneq %r15, %rax
 ; X64-NOPIC-NEXT:    movl (%rbx), %ebp
-; X64-NOPIC-NEXT:    movl $42, %esi
 ; X64-NOPIC-NEXT:    shlq $47, %rax
 ; X64-NOPIC-NEXT:    movq %r14, %rdi
+; X64-NOPIC-NEXT:    movl $42, %esi
 ; X64-NOPIC-NEXT:    orq %rax, %rsp
 ; X64-NOPIC-NEXT:    movq $.Lslh_ret_addr5, %r12
 ; X64-NOPIC-NEXT:    callq sigsetjmp
@@ -314,10 +314,10 @@ define i32 @test_call_setjmp(i32 *%ptr) nounwind {
 ; X64-NOPIC-NEXT:    cmpq $.Lslh_ret_addr5, %r12
 ; X64-NOPIC-NEXT:    cmovneq %r15, %rax
 ; X64-NOPIC-NEXT:    addl (%rbx), %ebp
-; X64-NOPIC-NEXT:    movl $42, %edx
 ; X64-NOPIC-NEXT:    shlq $47, %rax
 ; X64-NOPIC-NEXT:    movq %r14, %rdi
 ; X64-NOPIC-NEXT:    movq %r14, %rsi
+; X64-NOPIC-NEXT:    movl $42, %edx
 ; X64-NOPIC-NEXT:    orq %rax, %rsp
 ; X64-NOPIC-NEXT:    movq $.Lslh_ret_addr6, %r14
 ; X64-NOPIC-NEXT:    callq __sigsetjmp
@@ -364,9 +364,9 @@ define i32 @test_call_setjmp(i32 *%ptr) nounwind {
 ; X64-NOPIC-MCM-NEXT:    cmpq %rcx, %rbp
 ; X64-NOPIC-MCM-NEXT:    cmovneq %r15, %rax
 ; X64-NOPIC-MCM-NEXT:    movl (%rbx), %ebp
-; X64-NOPIC-MCM-NEXT:    movl $42, %esi
 ; X64-NOPIC-MCM-NEXT:    shlq $47, %rax
 ; X64-NOPIC-MCM-NEXT:    movq %r14, %rdi
+; X64-NOPIC-MCM-NEXT:    movl $42, %esi
 ; X64-NOPIC-MCM-NEXT:    orq %rax, %rsp
 ; X64-NOPIC-MCM-NEXT:    leaq .Lslh_ret_addr5(%rip), %r12
 ; X64-NOPIC-MCM-NEXT:    callq sigsetjmp
@@ -377,10 +377,10 @@ define i32 @test_call_setjmp(i32 *%ptr) nounwind {
 ; X64-NOPIC-MCM-NEXT:    cmpq %rcx, %r12
 ; X64-NOPIC-MCM-NEXT:    cmovneq %r15, %rax
 ; X64-NOPIC-MCM-NEXT:    addl (%rbx), %ebp
-; X64-NOPIC-MCM-NEXT:    movl $42, %edx
 ; X64-NOPIC-MCM-NEXT:    shlq $47, %rax
 ; X64-NOPIC-MCM-NEXT:    movq %r14, %rdi
 ; X64-NOPIC-MCM-NEXT:    movq %r14, %rsi
+; X64-NOPIC-MCM-NEXT:    movl $42, %edx
 ; X64-NOPIC-MCM-NEXT:    orq %rax, %rsp
 ; X64-NOPIC-MCM-NEXT:    leaq .Lslh_ret_addr6(%rip), %r14
 ; X64-NOPIC-MCM-NEXT:    callq __sigsetjmp
@@ -428,9 +428,9 @@ define i32 @test_call_setjmp(i32 *%ptr) nounwind {
 ; X64-PIC-NEXT:    cmpq %rcx, %rbp
 ; X64-PIC-NEXT:    cmovneq %r15, %rax
 ; X64-PIC-NEXT:    movl (%rbx), %ebp
-; X64-PIC-NEXT:    movl $42, %esi
 ; X64-PIC-NEXT:    shlq $47, %rax
 ; X64-PIC-NEXT:    movq %r14, %rdi
+; X64-PIC-NEXT:    movl $42, %esi
 ; X64-PIC-NEXT:    orq %rax, %rsp
 ; X64-PIC-NEXT:    leaq .Lslh_ret_addr5(%rip), %r12
 ; X64-PIC-NEXT:    callq sigsetjmp@PLT
@@ -441,10 +441,10 @@ define i32 @test_call_setjmp(i32 *%ptr) nounwind {
 ; X64-PIC-NEXT:    cmpq %rcx, %r12
 ; X64-PIC-NEXT:    cmovneq %r15, %rax
 ; X64-PIC-NEXT:    addl (%rbx), %ebp
-; X64-PIC-NEXT:    movl $42, %edx
 ; X64-PIC-NEXT:    shlq $47, %rax
 ; X64-PIC-NEXT:    movq %r14, %rdi
 ; X64-PIC-NEXT:    movq %r14, %rsi
+; X64-PIC-NEXT:    movl $42, %edx
 ; X64-PIC-NEXT:    orq %rax, %rsp
 ; X64-PIC-NEXT:    leaq .Lslh_ret_addr6(%rip), %r14
 ; X64-PIC-NEXT:    callq __sigsetjmp@PLT

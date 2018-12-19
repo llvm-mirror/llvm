@@ -1241,24 +1241,6 @@ static void WriteAsOperandInternal(raw_ostream &Out, const Metadata *MD,
                                    SlotTracker *Machine, const Module *Context,
                                    bool FromValue = false);
 
-static void writeAtomicRMWOperation(raw_ostream &Out,
-                                    AtomicRMWInst::BinOp Op) {
-  switch (Op) {
-  default: Out << " <unknown operation " << Op << ">"; break;
-  case AtomicRMWInst::Xchg: Out << " xchg"; break;
-  case AtomicRMWInst::Add:  Out << " add"; break;
-  case AtomicRMWInst::Sub:  Out << " sub"; break;
-  case AtomicRMWInst::And:  Out << " and"; break;
-  case AtomicRMWInst::Nand: Out << " nand"; break;
-  case AtomicRMWInst::Or:   Out << " or"; break;
-  case AtomicRMWInst::Xor:  Out << " xor"; break;
-  case AtomicRMWInst::Max:  Out << " max"; break;
-  case AtomicRMWInst::Min:  Out << " min"; break;
-  case AtomicRMWInst::UMax: Out << " umax"; break;
-  case AtomicRMWInst::UMin: Out << " umin"; break;
-  }
-}
-
 static void WriteOptimizationInfo(raw_ostream &Out, const User *U) {
   if (const FPMathOperator *FPO = dyn_cast<const FPMathOperator>(U)) {
     // 'Fast' is an abbreviation for all fast-math-flags.
@@ -1625,6 +1607,7 @@ struct MDFieldPrinter {
   void printInt(StringRef Name, IntTy Int, bool ShouldSkipZero = true);
   void printBool(StringRef Name, bool Value, Optional<bool> Default = None);
   void printDIFlags(StringRef Name, DINode::DIFlags Flags);
+  void printDISPFlags(StringRef Name, DISubprogram::DISPFlags Flags);
   template <class IntTy, class Stringifier>
   void printDwarfEnum(StringRef Name, IntTy Value, Stringifier toString,
                       bool ShouldSkipZero = true);
@@ -1716,6 +1699,30 @@ void MDFieldPrinter::printDIFlags(StringRef Name, DINode::DIFlags Flags) {
   FieldSeparator FlagsFS(" | ");
   for (auto F : SplitFlags) {
     auto StringF = DINode::getFlagString(F);
+    assert(!StringF.empty() && "Expected valid flag");
+    Out << FlagsFS << StringF;
+  }
+  if (Extra || SplitFlags.empty())
+    Out << FlagsFS << Extra;
+}
+
+void MDFieldPrinter::printDISPFlags(StringRef Name,
+                                    DISubprogram::DISPFlags Flags) {
+  // Always print this field, because no flags in the IR at all will be
+  // interpreted as old-style isDefinition: true.
+  Out << FS << Name << ": ";
+
+  if (!Flags) {
+    Out << 0;
+    return;
+  }
+
+  SmallVector<DISubprogram::DISPFlags, 8> SplitFlags;
+  auto Extra = DISubprogram::splitFlags(Flags, SplitFlags);
+
+  FieldSeparator FlagsFS(" | ");
+  for (auto F : SplitFlags) {
+    auto StringF = DISubprogram::getFlagString(F);
     assert(!StringF.empty() && "Expected valid flag");
     Out << FlagsFS << StringF;
   }
@@ -1928,6 +1935,7 @@ static void writeDICompileUnit(raw_ostream &Out, const DICompileUnit *N,
   Printer.printBool("debugInfoForProfiling", N->getDebugInfoForProfiling(),
                     false);
   Printer.printNameTableKind("nameTableKind", N->getNameTableKind());
+  Printer.printBool("rangesBaseAddress", N->getRangesBaseAddress(), false);
   Out << ")";
 }
 
@@ -1942,18 +1950,14 @@ static void writeDISubprogram(raw_ostream &Out, const DISubprogram *N,
   Printer.printMetadata("file", N->getRawFile());
   Printer.printInt("line", N->getLine());
   Printer.printMetadata("type", N->getRawType());
-  Printer.printBool("isLocal", N->isLocalToUnit());
-  Printer.printBool("isDefinition", N->isDefinition());
   Printer.printInt("scopeLine", N->getScopeLine());
   Printer.printMetadata("containingType", N->getRawContainingType());
-  Printer.printDwarfEnum("virtuality", N->getVirtuality(),
-                         dwarf::VirtualityString);
   if (N->getVirtuality() != dwarf::DW_VIRTUALITY_none ||
       N->getVirtualIndex() != 0)
     Printer.printInt("virtualIndex", N->getVirtualIndex(), false);
   Printer.printInt("thisAdjustment", N->getThisAdjustment());
   Printer.printDIFlags("flags", N->getFlags());
-  Printer.printBool("isOptimized", N->isOptimized());
+  Printer.printDISPFlags("spFlags", N->getSPFlags());
   Printer.printMetadata("unit", N->getRawUnit());
   Printer.printMetadata("templateParams", N->getRawTemplateParams());
   Printer.printMetadata("declaration", N->getRawDeclaration());
@@ -2077,6 +2081,7 @@ static void writeDIGlobalVariable(raw_ostream &Out, const DIGlobalVariable *N,
   Printer.printBool("isLocal", N->isLocalToUnit());
   Printer.printBool("isDefinition", N->isDefinition());
   Printer.printMetadata("declaration", N->getRawStaticDataMemberDeclaration());
+  Printer.printMetadata("templateParams", N->getRawTemplateParams());
   Printer.printInt("align", N->getAlignInBits());
   Out << ")";
 }
@@ -2289,11 +2294,15 @@ static void WriteAsOperandInternal(raw_ostream &Out, const Metadata *MD,
       Machine = MachineStorage.get();
     }
     int Slot = Machine->getMetadataSlot(N);
-    if (Slot == -1)
+    if (Slot == -1) {
+      if (const DILocation *Loc = dyn_cast<DILocation>(N)) {
+        writeDILocation(Out, Loc, TypePrinter, Machine, Context);
+        return;
+      }
       // Give the pointer value instead of "badref", since this comes up all
       // the time when debugging.
       Out << "<" << N << ">";
-    else
+    } else
       Out << '!' << Slot;
     return;
   }
@@ -2837,7 +2846,7 @@ void AssemblyWriter::printAliasSummary(const AliasSummary *AS) {
 }
 
 void AssemblyWriter::printGlobalVarSummary(const GlobalVarSummary *GS) {
-  // Nothing for now
+  Out << ", varFlags: (readonly: " << GS->VarFlags.ReadOnly << ")";
 }
 
 static std::string getLinkageName(GlobalValue::LinkageTypes LT) {
@@ -2888,6 +2897,7 @@ void AssemblyWriter::printFunctionSummary(const FunctionSummary *FS) {
     Out << ", readOnly: " << FFlags.ReadOnly;
     Out << ", noRecurse: " << FFlags.NoRecurse;
     Out << ", returnDoesNotAlias: " << FFlags.ReturnDoesNotAlias;
+    Out << ", noInline: " << FFlags.NoInline;
     Out << ")";
   }
   if (!FS->calls().empty()) {
@@ -3030,6 +3040,8 @@ void AssemblyWriter::printSummary(const GlobalValueSummary &Summary) {
     FieldSeparator FS;
     for (auto &Ref : RefList) {
       Out << FS;
+      if (Ref.isReadOnly())
+        Out << "readonly ";
       Out << "^" << Machine.getGUIDSlot(Ref.getGUID());
     }
     Out << ")";
@@ -3612,7 +3624,7 @@ void AssemblyWriter::printInstruction(const Instruction &I) {
 
   // Print out the atomicrmw operation
   if (const AtomicRMWInst *RMWI = dyn_cast<AtomicRMWInst>(&I))
-    writeAtomicRMWOperation(Out, RMWI->getOperation());
+    Out << ' ' << AtomicRMWInst::getOperationName(RMWI->getOperation());
 
   // Print out the type of the operands...
   const Value *Operand = I.getNumOperands() ? I.getOperand(0) : nullptr;

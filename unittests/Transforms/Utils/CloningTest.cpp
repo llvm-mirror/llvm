@@ -14,6 +14,7 @@
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/DIBuilder.h"
 #include "llvm/IR/DebugInfo.h"
+#include "llvm/IR/DomTreeUpdater.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstIterator.h"
@@ -224,9 +225,11 @@ TEST_F(CloneInstruction, DuplicateInstructionsToSplit) {
   Instruction *SubInst = cast<Instruction>(Builder2.CreateSub(MulInst, V));
   Builder2.CreateRetVoid();
 
+  // Dummy DTU.
   ValueToValueMapTy Mapping;
-
-  auto Split = DuplicateInstructionsInSplitBetween(BB2, BB1, SubInst, Mapping);
+  DomTreeUpdater DTU(DomTreeUpdater::UpdateStrategy::Lazy);
+  auto Split =
+      DuplicateInstructionsInSplitBetween(BB2, BB1, SubInst, Mapping, DTU);
 
   EXPECT_TRUE(Split);
   EXPECT_EQ(Mapping.size(), 2u);
@@ -271,9 +274,11 @@ TEST_F(CloneInstruction, DuplicateInstructionsToSplitBlocksEq1) {
   Instruction *SubInst = cast<Instruction>(Builder2.CreateSub(MulInst, V));
   Builder2.CreateBr(BB2);
 
+  // Dummy DTU.
+  DomTreeUpdater DTU(DomTreeUpdater::UpdateStrategy::Lazy);
   ValueToValueMapTy Mapping;
-
-  auto Split = DuplicateInstructionsInSplitBetween(BB2, BB2, BB2->getTerminator(), Mapping);
+  auto Split = DuplicateInstructionsInSplitBetween(
+      BB2, BB2, BB2->getTerminator(), Mapping, DTU);
 
   EXPECT_TRUE(Split);
   EXPECT_EQ(Mapping.size(), 3u);
@@ -322,9 +327,11 @@ TEST_F(CloneInstruction, DuplicateInstructionsToSplitBlocksEq2) {
   Instruction *SubInst = cast<Instruction>(Builder2.CreateSub(MulInst, V));
   Builder2.CreateBr(BB2);
 
+  // Dummy DTU.
+  DomTreeUpdater DTU(DomTreeUpdater::UpdateStrategy::Lazy);
   ValueToValueMapTy Mapping;
-
-  auto Split = DuplicateInstructionsInSplitBetween(BB2, BB2, SubInst, Mapping);
+  auto Split =
+      DuplicateInstructionsInSplitBetween(BB2, BB2, SubInst, Mapping, DTU);
 
   EXPECT_TRUE(Split);
   EXPECT_EQ(Mapping.size(), 2u);
@@ -384,9 +391,9 @@ protected:
                                                               "/file/dir"),
                                           "CloneFunc", false, "", 0);
 
-    auto *Subprogram =
-        DBuilder.createFunction(CU, "f", "f", File, 4, FuncType, true, true, 3,
-                                DINode::FlagZero, false);
+    auto *Subprogram = DBuilder.createFunction(
+        CU, "f", "f", File, 4, FuncType, 3, DINode::FlagZero,
+        DISubprogram::SPFlagLocalToUnit | DISubprogram::SPFlagDefinition);
     OldFunc->setSubprogram(Subprogram);
 
     // Function body
@@ -414,9 +421,9 @@ protected:
     auto *StructType = DICompositeType::getDistinct(
         C, dwarf::DW_TAG_structure_type, "some_struct", nullptr, 0, nullptr,
         nullptr, 32, 32, 0, DINode::FlagZero, nullptr, 0, nullptr, nullptr);
-    auto *InlinedSP =
-        DBuilder.createFunction(CU, "inlined", "inlined", File, 8, FuncType,
-                                true, true, 9, DINode::FlagZero, false);
+    auto *InlinedSP = DBuilder.createFunction(
+        CU, "inlined", "inlined", File, 8, FuncType, 9, DINode::FlagZero,
+        DISubprogram::SPFlagLocalToUnit | DISubprogram::SPFlagDefinition);
     auto *InlinedVar =
         DBuilder.createAutoVariable(InlinedSP, "inlined", File, 5, StructType, true);
     auto *Scope = DBuilder.createLexicalBlock(
@@ -599,9 +606,9 @@ protected:
                                                               "/file/dir"),
                                           "CloneModule", false, "", 0);
     // Function DI
-    auto *Subprogram =
-        DBuilder.createFunction(CU, "f", "f", File, 4, DFuncType, true, true, 3,
-                                DINode::FlagZero, false);
+    auto *Subprogram = DBuilder.createFunction(
+        CU, "f", "f", File, 4, DFuncType, 3, DINode::FlagZero,
+        DISubprogram::SPFlagLocalToUnit | DISubprogram::SPFlagDefinition);
     F->setSubprogram(Subprogram);
 
     // Create and assign DIGlobalVariableExpression to gv

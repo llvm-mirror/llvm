@@ -2427,14 +2427,29 @@ define i1 @icmp_and_or_lshr(i32 %x, i32 %y) {
 
 define <2 x i1> @icmp_and_or_lshr_vec(<2 x i32> %x, <2 x i32> %y) {
 ; CHECK-LABEL: @icmp_and_or_lshr_vec(
-; CHECK-NEXT:    [[SHF1:%.*]] = shl nuw <2 x i32> <i32 1, i32 1>, %y
-; CHECK-NEXT:    [[OR2:%.*]] = or <2 x i32> [[SHF1]], <i32 1, i32 1>
-; CHECK-NEXT:    [[AND3:%.*]] = and <2 x i32> [[OR2]], %x
-; CHECK-NEXT:    [[RET:%.*]] = icmp ne <2 x i32> [[AND3]], zeroinitializer
+; CHECK-NEXT:    [[SHF:%.*]] = lshr <2 x i32> [[X:%.*]], [[Y:%.*]]
+; CHECK-NEXT:    [[OR:%.*]] = or <2 x i32> [[SHF]], [[X]]
+; CHECK-NEXT:    [[RET:%.*]] = trunc <2 x i32> [[OR]] to <2 x i1>
 ; CHECK-NEXT:    ret <2 x i1> [[RET]]
 ;
   %shf = lshr <2 x i32> %x, %y
   %or = or <2 x i32> %shf, %x
+  %and = and <2 x i32> %or, <i32 1, i32 1>
+  %ret = icmp ne <2 x i32> %and, zeroinitializer
+  ret <2 x i1> %ret
+}
+
+define <2 x i1> @icmp_and_or_lshr_vec_commute(<2 x i32> %xp, <2 x i32> %y) {
+; CHECK-LABEL: @icmp_and_or_lshr_vec_commute(
+; CHECK-NEXT:    [[X:%.*]] = srem <2 x i32> [[XP:%.*]], <i32 42, i32 42>
+; CHECK-NEXT:    [[SHF:%.*]] = lshr <2 x i32> [[X]], [[Y:%.*]]
+; CHECK-NEXT:    [[OR:%.*]] = or <2 x i32> [[X]], [[SHF]]
+; CHECK-NEXT:    [[RET:%.*]] = trunc <2 x i32> [[OR]] to <2 x i1>
+; CHECK-NEXT:    ret <2 x i1> [[RET]]
+;
+  %x = srem <2 x i32> %xp, <i32 42, i32 -42> ; prevent complexity-based canonicalization
+  %shf = lshr <2 x i32> %x, %y
+  %or = or <2 x i32> %x, %shf
   %and = and <2 x i32> %or, <i32 1, i32 1>
   %ret = icmp ne <2 x i32> %and, zeroinitializer
   ret <2 x i1> %ret
@@ -2455,12 +2470,27 @@ define i1 @icmp_and_or_lshr_cst(i32 %x) {
 
 define <2 x i1> @icmp_and_or_lshr_cst_vec(<2 x i32> %x) {
 ; CHECK-LABEL: @icmp_and_or_lshr_cst_vec(
-; CHECK-NEXT:    [[AND1:%.*]] = and <2 x i32> %x, <i32 3, i32 3>
-; CHECK-NEXT:    [[RET:%.*]] = icmp ne <2 x i32> [[AND1]], zeroinitializer
+; CHECK-NEXT:    [[TMP1:%.*]] = and <2 x i32> [[X:%.*]], <i32 3, i32 3>
+; CHECK-NEXT:    [[RET:%.*]] = icmp ne <2 x i32> [[TMP1]], zeroinitializer
 ; CHECK-NEXT:    ret <2 x i1> [[RET]]
 ;
   %shf = lshr <2 x i32> %x, <i32 1, i32 1>
   %or = or <2 x i32> %shf, %x
+  %and = and <2 x i32> %or, <i32 1, i32 1>
+  %ret = icmp ne <2 x i32> %and, zeroinitializer
+  ret <2 x i1> %ret
+}
+
+define <2 x i1> @icmp_and_or_lshr_cst_vec_commute(<2 x i32> %xp) {
+; CHECK-LABEL: @icmp_and_or_lshr_cst_vec_commute(
+; CHECK-NEXT:    [[X:%.*]] = srem <2 x i32> [[XP:%.*]], <i32 42, i32 42>
+; CHECK-NEXT:    [[TMP1:%.*]] = and <2 x i32> [[X]], <i32 3, i32 3>
+; CHECK-NEXT:    [[RET:%.*]] = icmp ne <2 x i32> [[TMP1]], zeroinitializer
+; CHECK-NEXT:    ret <2 x i1> [[RET]]
+;
+  %x = srem <2 x i32> %xp, <i32 42, i32 -42> ; prevent complexity-based canonicalization
+  %shf = lshr <2 x i32> %x, <i32 1, i32 1>
+  %or = or <2 x i32> %x, %shf
   %and = and <2 x i32> %or, <i32 1, i32 1>
   %ret = icmp ne <2 x i32> %and, zeroinitializer
   ret <2 x i1> %ret
@@ -2843,125 +2873,6 @@ define i1 @cmp_inverse_mask_bits_set_ne(i32 %x) {
   %or = or i32 %x, 42
   %cmp = icmp ne i32 %or, -1
   ret i1 %cmp
-}
-
-; CHECK-LABEL: @idom_sign_bit_check_edge_dominates
-define void @idom_sign_bit_check_edge_dominates(i64 %a) {
-entry:
-  %cmp = icmp slt i64 %a, 0
-  br i1 %cmp, label %land.lhs.true, label %lor.rhs
-
-land.lhs.true:                                    ; preds = %entry
-  br label %lor.end
-
-; CHECK-LABEL: lor.rhs:
-; CHECK-NOT: icmp sgt i64 %a, 0
-; CHECK: icmp eq i64 %a, 0
-lor.rhs:                                          ; preds = %entry
-  %cmp2 = icmp sgt i64 %a, 0
-  br i1 %cmp2, label %land.rhs, label %lor.end
-
-land.rhs:                                         ; preds = %lor.rhs
-  br label %lor.end
-
-lor.end:                                          ; preds = %land.rhs, %lor.rhs, %land.lhs.true
-  ret void
-}
-
-; CHECK-LABEL: @idom_sign_bit_check_edge_not_dominates
-define void @idom_sign_bit_check_edge_not_dominates(i64 %a) {
-entry:
-  %cmp = icmp slt i64 %a, 0
-  br i1 %cmp, label %land.lhs.true, label %lor.rhs
-
-land.lhs.true:                                    ; preds = %entry
-  br i1 undef, label %lor.end, label %lor.rhs
-
-; CHECK-LABEL: lor.rhs:
-; CHECK: icmp sgt i64 %a, 0
-; CHECK-NOT: icmp eq i64 %a, 0
-lor.rhs:                                          ; preds = %land.lhs.true, %entry
-  %cmp2 = icmp sgt i64 %a, 0
-  br i1 %cmp2, label %land.rhs, label %lor.end
-
-land.rhs:                                         ; preds = %lor.rhs
-  br label %lor.end
-
-lor.end:                                          ; preds = %land.rhs, %lor.rhs, %land.lhs.true
-  ret void
-}
-
-; CHECK-LABEL: @idom_sign_bit_check_edge_dominates_select
-define void @idom_sign_bit_check_edge_dominates_select(i64 %a, i64 %b) {
-entry:
-  %cmp = icmp slt i64 %a, 5
-  br i1 %cmp, label %land.lhs.true, label %lor.rhs
-
-land.lhs.true:                                    ; preds = %entry
-  br label %lor.end
-
-; CHECK-LABEL: lor.rhs:
-; CHECK-NOT: [[B:%.*]] = icmp sgt i64 %a, 5
-; CHECK: [[C:%.*]] = icmp eq i64 %a, %b
-; CHECK-NOT: [[D:%.*]] = select i1 [[B]], i64 %a, i64 5
-; CHECK-NOT: icmp ne i64 [[D]], %b
-; CHECK-NEXT: br i1 [[C]], label %lor.end, label %land.rhs
-lor.rhs:                                          ; preds = %entry
-  %cmp2 = icmp sgt i64 %a, 5
-  %select = select i1 %cmp2, i64 %a, i64 5
-  %cmp3 = icmp ne i64 %select, %b
-  br i1 %cmp3, label %land.rhs, label %lor.end
-
-land.rhs:                                         ; preds = %lor.rhs
-  br label %lor.end
-
-lor.end:                                          ; preds = %land.rhs, %lor.rhs, %land.lhs.true
-  ret void
-}
-
-; CHECK-LABEL: @idom_zbranch
-define void @idom_zbranch(i64 %a) {
-entry:
-  %cmp = icmp sgt i64 %a, 0
-  br i1 %cmp, label %lor.end, label %lor.rhs
-
-; CHECK-LABEL: lor.rhs:
-; CHECK: icmp slt i64 %a, 0
-; CHECK-NOT: icmp eq i64 %a, 0
-lor.rhs:                                          ; preds = %entry
-  %cmp2 = icmp slt i64 %a, 0
-  br i1 %cmp2, label %land.rhs, label %lor.end
-
-land.rhs:                                         ; preds = %lor.rhs
-  br label %lor.end
-
-lor.end:                                          ; preds = %land.rhs, %lor.rhs
-  ret void
-}
-
-; CHECK-LABEL: @idom_not_zbranch
-define void @idom_not_zbranch(i32 %a, i32 %b) {
-entry:
-  %cmp = icmp sgt i32 %a, 0
-  br i1 %cmp, label %return, label %if.end
-
-; CHECK-LABEL: if.end:
-; CHECK-NOT: [[B:%.*]] = icmp slt i32 %a, 0
-; CHECK: [[C:%.*]] = icmp eq i32 %a, %b
-; CHECK-NOT: [[D:%.*]] = select i1 [[B]], i32 %a, i32 0
-; CHECK-NOT: icmp ne i32 [[D]], %b
-; CHECK-NEXT: br i1 [[C]], label %return, label %if.then3
-if.end:                                           ; preds = %entry
-  %cmp1 = icmp slt i32 %a, 0
-  %a. = select i1 %cmp1, i32 %a, i32 0
-  %cmp2 = icmp ne i32 %a., %b
-  br i1 %cmp2, label %if.then3, label %return
-
-if.then3:                                         ; preds = %if.end
-  br label %return
-
-return:                                           ; preds = %if.end, %entry, %if.then3
-  ret void
 }
 
 ; When canonicalizing to 'gt/lt', make sure the constant is correct.

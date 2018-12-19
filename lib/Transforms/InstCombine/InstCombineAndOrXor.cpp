@@ -53,11 +53,11 @@ static unsigned getFCmpCode(FCmpInst::Predicate CC) {
 /// operands into either a constant true or false, or a brand new ICmp
 /// instruction. The sign is passed in to determine which kind of predicate to
 /// use in the new icmp instruction.
-static Value *getNewICmpValue(bool Sign, unsigned Code, Value *LHS, Value *RHS,
+static Value *getNewICmpValue(unsigned Code, bool Sign, Value *LHS, Value *RHS,
                               InstCombiner::BuilderTy &Builder) {
   ICmpInst::Predicate NewPred;
-  if (Value *NewConstant = getICmpValue(Sign, Code, LHS, RHS, NewPred))
-    return NewConstant;
+  if (Constant *TorF = getPredForICmpCode(Code, Sign, LHS->getType(), NewPred))
+    return TorF;
   return Builder.CreateICmp(NewPred, LHS, RHS);
 }
 
@@ -1033,7 +1033,7 @@ Value *InstCombiner::foldAndOfICmps(ICmpInst *LHS, ICmpInst *RHS,
   ICmpInst::Predicate PredL = LHS->getPredicate(), PredR = RHS->getPredicate();
 
   // (icmp1 A, B) & (icmp2 A, B) --> (icmp3 A, B)
-  if (PredicatesFoldable(PredL, PredR)) {
+  if (predicatesFoldable(PredL, PredR)) {
     if (LHS->getOperand(0) == RHS->getOperand(1) &&
         LHS->getOperand(1) == RHS->getOperand(0))
       LHS->swapOperands();
@@ -1041,8 +1041,8 @@ Value *InstCombiner::foldAndOfICmps(ICmpInst *LHS, ICmpInst *RHS,
         LHS->getOperand(1) == RHS->getOperand(1)) {
       Value *Op0 = LHS->getOperand(0), *Op1 = LHS->getOperand(1);
       unsigned Code = getICmpCode(LHS) & getICmpCode(RHS);
-      bool isSigned = LHS->isSigned() || RHS->isSigned();
-      return getNewICmpValue(isSigned, Code, Op0, Op1, Builder);
+      bool IsSigned = LHS->isSigned() || RHS->isSigned();
+      return getNewICmpValue(Code, IsSigned, Op0, Op1, Builder);
     }
   }
 
@@ -1131,7 +1131,7 @@ Value *InstCombiner::foldAndOfICmps(ICmpInst *LHS, ICmpInst *RHS,
     return nullptr;
 
   // We can't fold (ugt x, C) & (sgt x, C2).
-  if (!PredicatesFoldable(PredL, PredR))
+  if (!predicatesFoldable(PredL, PredR))
     return nullptr;
 
   // Ensure that the larger constant is on the RHS.
@@ -1535,7 +1535,7 @@ Instruction *InstCombiner::visitAnd(BinaryOperator &I) {
   if (SimplifyAssociativeOrCommutative(I))
     return &I;
 
-  if (Instruction *X = foldShuffledBinop(I))
+  if (Instruction *X = foldVectorBinop(I))
     return X;
 
   // See if we can simplify any instructions used by the instruction whose sole
@@ -1762,10 +1762,9 @@ Instruction *InstCombiner::visitAnd(BinaryOperator &I) {
   return nullptr;
 }
 
-/// Given an OR instruction, check to see if this is a bswap idiom. If so,
-/// insert the new intrinsic and return it.
-Instruction *InstCombiner::MatchBSwap(BinaryOperator &I) {
-  Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
+Instruction *InstCombiner::matchBSwap(BinaryOperator &Or) {
+  assert(Or.getOpcode() == Instruction::Or && "bswap requires an 'or'");
+  Value *Op0 = Or.getOperand(0), *Op1 = Or.getOperand(1);
 
   // Look through zero extends.
   if (Instruction *Ext = dyn_cast<ZExtInst>(Op0))
@@ -1801,7 +1800,7 @@ Instruction *InstCombiner::MatchBSwap(BinaryOperator &I) {
     return nullptr;
 
   SmallVector<Instruction*, 4> Insts;
-  if (!recognizeBSwapOrBitReverseIdiom(&I, true, false, Insts))
+  if (!recognizeBSwapOrBitReverseIdiom(&Or, true, false, Insts))
     return nullptr;
   Instruction *LastInst = Insts.pop_back_val();
   LastInst->removeFromParent();
@@ -1831,14 +1830,33 @@ static bool areInverseVectorBitmasks(Constant *C1, Constant *C2) {
 /// We have an expression of the form (A & C) | (B & D). If A is a scalar or
 /// vector composed of all-zeros or all-ones values and is the bitwise 'not' of
 /// B, it can be used as the condition operand of a select instruction.
-static Value *getSelectCondition(Value *A, Value *B,
-                                 InstCombiner::BuilderTy &Builder) {
-  // If these are scalars or vectors of i1, A can be used directly.
+Value *InstCombiner::getSelectCondition(Value *A, Value *B) {
+  // Step 1: We may have peeked through bitcasts in the caller.
+  // Exit immediately if we don't have (vector) integer types.
   Type *Ty = A->getType();
-  if (match(A, m_Not(m_Specific(B))) && Ty->isIntOrIntVectorTy(1))
-    return A;
+  if (!Ty->isIntOrIntVectorTy() || !B->getType()->isIntOrIntVectorTy())
+    return nullptr;
 
-  // If A and B are sign-extended, look through the sexts to find the booleans.
+  // Step 2: We need 0 or all-1's bitmasks.
+  if (ComputeNumSignBits(A) != Ty->getScalarSizeInBits())
+    return nullptr;
+
+  // Step 3: If B is the 'not' value of A, we have our answer.
+  if (match(A, m_Not(m_Specific(B)))) {
+    // If these are scalars or vectors of i1, A can be used directly.
+    if (Ty->isIntOrIntVectorTy(1))
+      return A;
+    return Builder.CreateTrunc(A, CmpInst::makeCmpResultType(Ty));
+  }
+
+  // If both operands are constants, see if the constants are inverse bitmasks.
+  Constant *AConst, *BConst;
+  if (match(A, m_Constant(AConst)) && match(B, m_Constant(BConst)))
+    if (AConst == ConstantExpr::getNot(BConst))
+      return Builder.CreateZExtOrTrunc(A, CmpInst::makeCmpResultType(Ty));
+
+  // Look for more complex patterns. The 'not' op may be hidden behind various
+  // casts. Look through sexts and bitcasts to find the booleans.
   Value *Cond;
   Value *NotB;
   if (match(A, m_SExt(m_Value(Cond))) &&
@@ -1854,36 +1872,29 @@ static Value *getSelectCondition(Value *A, Value *B,
   if (!Ty->isVectorTy())
     return nullptr;
 
-  // If both operands are constants, see if the constants are inverse bitmasks.
-  Constant *AC, *BC;
-  if (match(A, m_Constant(AC)) && match(B, m_Constant(BC)) &&
-      areInverseVectorBitmasks(AC, BC)) {
-    return Builder.CreateZExtOrTrunc(AC, CmpInst::makeCmpResultType(Ty));
-  }
-
   // If both operands are xor'd with constants using the same sexted boolean
   // operand, see if the constants are inverse bitmasks.
-  if (match(A, (m_Xor(m_SExt(m_Value(Cond)), m_Constant(AC)))) &&
-      match(B, (m_Xor(m_SExt(m_Specific(Cond)), m_Constant(BC)))) &&
+  // TODO: Use ConstantExpr::getNot()?
+  if (match(A, (m_Xor(m_SExt(m_Value(Cond)), m_Constant(AConst)))) &&
+      match(B, (m_Xor(m_SExt(m_Specific(Cond)), m_Constant(BConst)))) &&
       Cond->getType()->isIntOrIntVectorTy(1) &&
-      areInverseVectorBitmasks(AC, BC)) {
-    AC = ConstantExpr::getTrunc(AC, CmpInst::makeCmpResultType(Ty));
-    return Builder.CreateXor(Cond, AC);
+      areInverseVectorBitmasks(AConst, BConst)) {
+    AConst = ConstantExpr::getTrunc(AConst, CmpInst::makeCmpResultType(Ty));
+    return Builder.CreateXor(Cond, AConst);
   }
   return nullptr;
 }
 
 /// We have an expression of the form (A & C) | (B & D). Try to simplify this
 /// to "A' ? C : D", where A' is a boolean or vector of booleans.
-static Value *matchSelectFromAndOr(Value *A, Value *C, Value *B, Value *D,
-                                   InstCombiner::BuilderTy &Builder) {
+Value *InstCombiner::matchSelectFromAndOr(Value *A, Value *C, Value *B,
+                                          Value *D) {
   // The potential condition of the select may be bitcasted. In that case, look
   // through its bitcast and the corresponding bitcast of the 'not' condition.
   Type *OrigType = A->getType();
   A = peekThroughBitcast(A, true);
   B = peekThroughBitcast(B, true);
-
-  if (Value *Cond = getSelectCondition(A, B, Builder)) {
+  if (Value *Cond = getSelectCondition(A, B)) {
     // ((bc Cond) & C) | ((bc ~Cond) & D) --> bc (select Cond, (bc C), (bc D))
     // The bitcasts will either all exist or all not exist. The builder will
     // not create unnecessary casts if the types already match.
@@ -1965,7 +1976,7 @@ Value *InstCombiner::foldOrOfICmps(ICmpInst *LHS, ICmpInst *RHS,
   }
 
   // (icmp1 A, B) | (icmp2 A, B) --> (icmp3 A, B)
-  if (PredicatesFoldable(PredL, PredR)) {
+  if (predicatesFoldable(PredL, PredR)) {
     if (LHS->getOperand(0) == RHS->getOperand(1) &&
         LHS->getOperand(1) == RHS->getOperand(0))
       LHS->swapOperands();
@@ -1973,8 +1984,8 @@ Value *InstCombiner::foldOrOfICmps(ICmpInst *LHS, ICmpInst *RHS,
         LHS->getOperand(1) == RHS->getOperand(1)) {
       Value *Op0 = LHS->getOperand(0), *Op1 = LHS->getOperand(1);
       unsigned Code = getICmpCode(LHS) | getICmpCode(RHS);
-      bool isSigned = LHS->isSigned() || RHS->isSigned();
-      return getNewICmpValue(isSigned, Code, Op0, Op1, Builder);
+      bool IsSigned = LHS->isSigned() || RHS->isSigned();
+      return getNewICmpValue(Code, IsSigned, Op0, Op1, Builder);
     }
   }
 
@@ -2055,7 +2066,7 @@ Value *InstCombiner::foldOrOfICmps(ICmpInst *LHS, ICmpInst *RHS,
     return nullptr;
 
   // We can't fold (ugt x, C) | (sgt x, C2).
-  if (!PredicatesFoldable(PredL, PredR))
+  if (!predicatesFoldable(PredL, PredR))
     return nullptr;
 
   // Ensure that the larger constant is on the RHS.
@@ -2134,7 +2145,7 @@ Instruction *InstCombiner::visitOr(BinaryOperator &I) {
   if (SimplifyAssociativeOrCommutative(I))
     return &I;
 
-  if (Instruction *X = foldShuffledBinop(I))
+  if (Instruction *X = foldVectorBinop(I))
     return X;
 
   // See if we can simplify any instructions used by the instruction whose sole
@@ -2156,7 +2167,7 @@ Instruction *InstCombiner::visitOr(BinaryOperator &I) {
   if (Instruction *FoldedLogic = foldBinOpIntoSelectOrPhi(I))
     return FoldedLogic;
 
-  if (Instruction *BSwap = MatchBSwap(I))
+  if (Instruction *BSwap = matchBSwap(I))
     return BSwap;
 
   Value *X, *Y;
@@ -2234,21 +2245,21 @@ Instruction *InstCombiner::visitOr(BinaryOperator &I) {
     // 'or' that it is replacing.
     if (Op0->hasOneUse() || Op1->hasOneUse()) {
       // (Cond & C) | (~Cond & D) -> Cond ? C : D, and commuted variants.
-      if (Value *V = matchSelectFromAndOr(A, C, B, D, Builder))
+      if (Value *V = matchSelectFromAndOr(A, C, B, D))
         return replaceInstUsesWith(I, V);
-      if (Value *V = matchSelectFromAndOr(A, C, D, B, Builder))
+      if (Value *V = matchSelectFromAndOr(A, C, D, B))
         return replaceInstUsesWith(I, V);
-      if (Value *V = matchSelectFromAndOr(C, A, B, D, Builder))
+      if (Value *V = matchSelectFromAndOr(C, A, B, D))
         return replaceInstUsesWith(I, V);
-      if (Value *V = matchSelectFromAndOr(C, A, D, B, Builder))
+      if (Value *V = matchSelectFromAndOr(C, A, D, B))
         return replaceInstUsesWith(I, V);
-      if (Value *V = matchSelectFromAndOr(B, D, A, C, Builder))
+      if (Value *V = matchSelectFromAndOr(B, D, A, C))
         return replaceInstUsesWith(I, V);
-      if (Value *V = matchSelectFromAndOr(B, D, C, A, Builder))
+      if (Value *V = matchSelectFromAndOr(B, D, C, A))
         return replaceInstUsesWith(I, V);
-      if (Value *V = matchSelectFromAndOr(D, B, A, C, Builder))
+      if (Value *V = matchSelectFromAndOr(D, B, A, C))
         return replaceInstUsesWith(I, V);
-      if (Value *V = matchSelectFromAndOr(D, B, C, A, Builder))
+      if (Value *V = matchSelectFromAndOr(D, B, C, A))
         return replaceInstUsesWith(I, V);
     }
   }
@@ -2451,7 +2462,7 @@ static Instruction *foldXorToXor(BinaryOperator &I,
 }
 
 Value *InstCombiner::foldXorOfICmps(ICmpInst *LHS, ICmpInst *RHS) {
-  if (PredicatesFoldable(LHS->getPredicate(), RHS->getPredicate())) {
+  if (predicatesFoldable(LHS->getPredicate(), RHS->getPredicate())) {
     if (LHS->getOperand(0) == RHS->getOperand(1) &&
         LHS->getOperand(1) == RHS->getOperand(0))
       LHS->swapOperands();
@@ -2460,8 +2471,8 @@ Value *InstCombiner::foldXorOfICmps(ICmpInst *LHS, ICmpInst *RHS) {
       // (icmp1 A, B) ^ (icmp2 A, B) --> (icmp3 A, B)
       Value *Op0 = LHS->getOperand(0), *Op1 = LHS->getOperand(1);
       unsigned Code = getICmpCode(LHS) ^ getICmpCode(RHS);
-      bool isSigned = LHS->isSigned() || RHS->isSigned();
-      return getNewICmpValue(isSigned, Code, Op0, Op1, Builder);
+      bool IsSigned = LHS->isSigned() || RHS->isSigned();
+      return getNewICmpValue(Code, IsSigned, Op0, Op1, Builder);
     }
   }
 
@@ -2602,7 +2613,7 @@ Instruction *InstCombiner::visitXor(BinaryOperator &I) {
   if (SimplifyAssociativeOrCommutative(I))
     return &I;
 
-  if (Instruction *X = foldShuffledBinop(I))
+  if (Instruction *X = foldVectorBinop(I))
     return X;
 
   if (Instruction *NewXor = foldXorToXor(I, Builder))

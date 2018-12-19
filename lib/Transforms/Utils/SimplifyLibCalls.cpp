@@ -923,8 +923,7 @@ Value *LibCallSimplifier::optimizeMemMove(CallInst *CI, IRBuilder<> &B) {
 }
 
 /// Fold memset[_chk](malloc(n), 0, n) --> calloc(1, n).
-static Value *foldMallocMemset(CallInst *Memset, IRBuilder<> &B,
-                               const TargetLibraryInfo &TLI) {
+Value *LibCallSimplifier::foldMallocMemset(CallInst *Memset, IRBuilder<> &B) {
   // This has to be a memset of zeros (bzero).
   auto *FillValue = dyn_cast<ConstantInt>(Memset->getArgOperand(1));
   if (!FillValue || FillValue->getZExtValue() != 0)
@@ -944,7 +943,7 @@ static Value *foldMallocMemset(CallInst *Memset, IRBuilder<> &B,
     return nullptr;
 
   LibFunc Func;
-  if (!TLI.getLibFunc(*InnerCallee, Func) || !TLI.has(Func) ||
+  if (!TLI->getLibFunc(*InnerCallee, Func) || !TLI->has(Func) ||
       Func != LibFunc_malloc)
     return nullptr;
 
@@ -959,18 +958,18 @@ static Value *foldMallocMemset(CallInst *Memset, IRBuilder<> &B,
   IntegerType *SizeType = DL.getIntPtrType(B.GetInsertBlock()->getContext());
   Value *Calloc = emitCalloc(ConstantInt::get(SizeType, 1),
                              Malloc->getArgOperand(0), Malloc->getAttributes(),
-                             B, TLI);
+                             B, *TLI);
   if (!Calloc)
     return nullptr;
 
   Malloc->replaceAllUsesWith(Calloc);
-  Malloc->eraseFromParent();
+  eraseFromParent(Malloc);
 
   return Calloc;
 }
 
 Value *LibCallSimplifier::optimizeMemSet(CallInst *CI, IRBuilder<> &B) {
-  if (auto *Calloc = foldMallocMemset(CI, B, *TLI))
+  if (auto *Calloc = foldMallocMemset(CI, B))
     return Calloc;
 
   // memset(p, v, n) -> llvm.memset(align 1 p, v, n)
@@ -1220,6 +1219,9 @@ Value *LibCallSimplifier::replacePowWithExp(CallInst *Pow, IRBuilder<> &B) {
       StringRef ExpName;
       Intrinsic::ID ID;
       Value *ExpFn;
+      LibFunc LibFnFloat;
+      LibFunc LibFnDouble;
+      LibFunc LibFnLongDouble;
 
       switch (LibFn) {
       default:
@@ -1227,10 +1229,16 @@ Value *LibCallSimplifier::replacePowWithExp(CallInst *Pow, IRBuilder<> &B) {
       case LibFunc_expf:  case LibFunc_exp:  case LibFunc_expl:
         ExpName = TLI->getName(LibFunc_exp);
         ID = Intrinsic::exp;
+        LibFnFloat = LibFunc_expf;
+        LibFnDouble = LibFunc_exp;
+        LibFnLongDouble = LibFunc_expl;
         break;
       case LibFunc_exp2f: case LibFunc_exp2: case LibFunc_exp2l:
         ExpName = TLI->getName(LibFunc_exp2);
         ID = Intrinsic::exp2;
+        LibFnFloat = LibFunc_exp2f;
+        LibFnDouble = LibFunc_exp2;
+        LibFnLongDouble = LibFunc_exp2l;
         break;
       }
 
@@ -1239,14 +1247,16 @@ Value *LibCallSimplifier::replacePowWithExp(CallInst *Pow, IRBuilder<> &B) {
       ExpFn = BaseFn->doesNotAccessMemory()
               ? B.CreateCall(Intrinsic::getDeclaration(Mod, ID, Ty),
                              FMul, ExpName)
-              : emitUnaryFloatFnCall(FMul, ExpName, B, BaseFn->getAttributes());
+              : emitUnaryFloatFnCall(FMul, TLI, LibFnDouble, LibFnFloat,
+                                     LibFnLongDouble, B,
+                                     BaseFn->getAttributes());
 
       // Since the new exp{,2}() is different from the original one, dead code
       // elimination cannot be trusted to remove it, since it may have side
       // effects (e.g., errno).  When the only consumer for the original
       // exp{,2}() is pow(), then it has to be explicitly erased.
       BaseFn->replaceAllUsesWith(ExpFn);
-      BaseFn->eraseFromParent();
+      eraseFromParent(BaseFn);
 
       return ExpFn;
     }
@@ -1276,7 +1286,8 @@ Value *LibCallSimplifier::replacePowWithExp(CallInst *Pow, IRBuilder<> &B) {
         return B.CreateCall(Intrinsic::getDeclaration(Mod, Intrinsic::exp2, Ty),
                             FMul, "exp2");
       else
-        return emitUnaryFloatFnCall(FMul, TLI->getName(LibFunc_exp2), B, Attrs);
+        return emitUnaryFloatFnCall(FMul, TLI, LibFunc_exp2, LibFunc_exp2f,
+                                    LibFunc_exp2l, B, Attrs);
     }
   }
 
@@ -1284,7 +1295,8 @@ Value *LibCallSimplifier::replacePowWithExp(CallInst *Pow, IRBuilder<> &B) {
   // TODO: There is no exp10() intrinsic yet, but some day there shall be one.
   if (match(Base, m_SpecificFP(10.0)) &&
       hasUnaryFloatFn(TLI, Ty, LibFunc_exp10, LibFunc_exp10f, LibFunc_exp10l))
-    return emitUnaryFloatFnCall(Expo, TLI->getName(LibFunc_exp10), B, Attrs);
+    return emitUnaryFloatFnCall(Expo, TLI, LibFunc_exp10, LibFunc_exp10f,
+                                LibFunc_exp10l, B, Attrs);
 
   return nullptr;
 }
@@ -1305,7 +1317,8 @@ static Value *getSqrtCall(Value *V, AttributeList Attrs, bool NoErrno,
     // TODO: We also should check that the target can in fact lower the sqrt()
     // libcall. We currently have no way to ask this question, so we ask if
     // the target has a sqrt() libcall, which is not exactly the same.
-    return emitUnaryFloatFnCall(V, TLI->getName(LibFunc_sqrt), B, Attrs);
+    return emitUnaryFloatFnCall(V, TLI, LibFunc_sqrt, LibFunc_sqrtf,
+                                LibFunc_sqrtl, B, Attrs);
 
   return nullptr;
 }
@@ -2591,7 +2604,7 @@ Value *LibCallSimplifier::optimizeCall(CallInst *CI) {
       if (Value *V = optimizeStringMemoryLibCall(SimplifiedCI, TmpBuilder)) {
         // If we were able to further simplify, remove the now redundant call.
         SimplifiedCI->replaceAllUsesWith(V);
-        SimplifiedCI->eraseFromParent();
+        eraseFromParent(SimplifiedCI);
         return V;
       }
     }
@@ -2670,13 +2683,18 @@ Value *LibCallSimplifier::optimizeCall(CallInst *CI) {
 LibCallSimplifier::LibCallSimplifier(
     const DataLayout &DL, const TargetLibraryInfo *TLI,
     OptimizationRemarkEmitter &ORE,
-    function_ref<void(Instruction *, Value *)> Replacer)
+    function_ref<void(Instruction *, Value *)> Replacer,
+    function_ref<void(Instruction *)> Eraser)
     : FortifiedSimplifier(TLI), DL(DL), TLI(TLI), ORE(ORE),
-      UnsafeFPShrink(false), Replacer(Replacer) {}
+      UnsafeFPShrink(false), Replacer(Replacer), Eraser(Eraser) {}
 
 void LibCallSimplifier::replaceAllUsesWith(Instruction *I, Value *With) {
   // Indirect through the replacer used in this instance.
   Replacer(I, With);
+}
+
+void LibCallSimplifier::eraseFromParent(Instruction *I) {
+  Eraser(I);
 }
 
 // TODO:

@@ -1,5 +1,11 @@
 cmake_minimum_required (VERSION 2.8.12)
 
+# Tell cmake 3.0+ that it's safe to clear the PROJECT_VERSION variable in the
+# call to project() below.
+if(POLICY CMP0048)
+  cmake_policy(SET CMP0048 NEW)
+endif()
+
 project (benchmark)
 
 foreach(p
@@ -99,6 +105,7 @@ if (MSVC)
   if (NOT BENCHMARK_ENABLE_EXCEPTIONS)
     add_cxx_compiler_flag(-EHs-)
     add_cxx_compiler_flag(-EHa-)
+    add_definitions(-D_HAS_EXCEPTIONS=0)
   endif()
   # Link time optimisation
   if (BENCHMARK_ENABLE_LTO)

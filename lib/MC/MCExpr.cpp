@@ -306,6 +306,7 @@ StringRef MCSymbolRefExpr::getVariantKindName(VariantKind Kind) {
   case VK_WebAssembly_FUNCTION: return "FUNCTION";
   case VK_WebAssembly_GLOBAL: return "GLOBAL";
   case VK_WebAssembly_TYPEINDEX: return "TYPEINDEX";
+  case VK_WebAssembly_EVENT: return "EVENT";
   case VK_AMDGPU_GOTPCREL32_LO: return "gotpcrel32@lo";
   case VK_AMDGPU_GOTPCREL32_HI: return "gotpcrel32@hi";
   case VK_AMDGPU_REL32_LO: return "rel32@lo";
@@ -419,7 +420,9 @@ MCSymbolRefExpr::getVariantKindForName(StringRef Name) {
     .Case("hi8", VK_AVR_HI8)
     .Case("hlo8", VK_AVR_HLO8)
     .Case("function", VK_WebAssembly_FUNCTION)
+    .Case("global", VK_WebAssembly_GLOBAL)
     .Case("typeindex", VK_WebAssembly_TYPEINDEX)
+    .Case("event", VK_WebAssembly_EVENT)
     .Case("gotpcrel32@lo", VK_AMDGPU_GOTPCREL32_LO)
     .Case("gotpcrel32@hi", VK_AMDGPU_GOTPCREL32_HI)
     .Case("rel32@lo", VK_AMDGPU_REL32_LO)
@@ -523,6 +526,11 @@ static void AttemptToFoldSymbolOffsetDifference(
     // Pointers to Thumb symbols need to have their low-bit set to allow
     // for interworking.
     if (Asm->isThumbFunc(&SA))
+      Addend |= 1;
+
+    // If symbol is labeled as micromips, we set low-bit to ensure
+    // correct offset in .gcc_except_table
+    if (Asm->getBackend().isMicroMips(&SA))
       Addend |= 1;
 
     // Clear the symbol expr pointers to indicate we have folded these

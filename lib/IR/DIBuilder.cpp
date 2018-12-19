@@ -140,7 +140,7 @@ DICompileUnit *DIBuilder::createCompileUnit(
     StringRef Flags, unsigned RunTimeVer, StringRef SplitName,
     DICompileUnit::DebugEmissionKind Kind, uint64_t DWOId,
     bool SplitDebugInlining, bool DebugInfoForProfiling,
-    DICompileUnit::DebugNameTableKind NameTableKind) {
+    DICompileUnit::DebugNameTableKind NameTableKind, bool RangesBaseAddress) {
 
   assert(((Lang <= dwarf::DW_LANG_Fortran08 && Lang >= dwarf::DW_LANG_C89) ||
           (Lang <= dwarf::DW_LANG_hi_user && Lang >= dwarf::DW_LANG_lo_user)) &&
@@ -150,7 +150,8 @@ DICompileUnit *DIBuilder::createCompileUnit(
   CUNode = DICompileUnit::getDistinct(
       VMContext, Lang, File, Producer, isOptimized, Flags, RunTimeVer,
       SplitName, Kind, nullptr, nullptr, nullptr, nullptr, nullptr, DWOId,
-      SplitDebugInlining, DebugInfoForProfiling, NameTableKind);
+      SplitDebugInlining, DebugInfoForProfiling, NameTableKind,
+      RangesBaseAddress);
 
   // Create a named metadata so that it is easier to find cu in a module.
   NamedMDNode *NMD = M.getOrInsertNamedMetadata("llvm.dbg.cu");
@@ -639,13 +640,13 @@ static void checkGlobalVariableScope(DIScope *Context) {
 DIGlobalVariableExpression *DIBuilder::createGlobalVariableExpression(
     DIScope *Context, StringRef Name, StringRef LinkageName, DIFile *F,
     unsigned LineNumber, DIType *Ty, bool isLocalToUnit, DIExpression *Expr,
-    MDNode *Decl, uint32_t AlignInBits) {
+    MDNode *Decl, MDTuple *templateParams, uint32_t AlignInBits) {
   checkGlobalVariableScope(Context);
 
   auto *GV = DIGlobalVariable::getDistinct(
       VMContext, cast_or_null<DIScope>(Context), Name, LinkageName, F,
       LineNumber, Ty, isLocalToUnit, true, cast_or_null<DIDerivedType>(Decl),
-      AlignInBits);
+      templateParams, AlignInBits);
   if (!Expr)
     Expr = createExpression();
   auto *N = DIGlobalVariableExpression::get(VMContext, GV, Expr);
@@ -656,13 +657,13 @@ DIGlobalVariableExpression *DIBuilder::createGlobalVariableExpression(
 DIGlobalVariable *DIBuilder::createTempGlobalVariableFwdDecl(
     DIScope *Context, StringRef Name, StringRef LinkageName, DIFile *F,
     unsigned LineNumber, DIType *Ty, bool isLocalToUnit, MDNode *Decl,
-    uint32_t AlignInBits) {
+    MDTuple *templateParams, uint32_t AlignInBits) {
   checkGlobalVariableScope(Context);
 
   return DIGlobalVariable::getTemporary(
              VMContext, cast_or_null<DIScope>(Context), Name, LinkageName, F,
              LineNumber, Ty, isLocalToUnit, false,
-             cast_or_null<DIDerivedType>(Decl), AlignInBits)
+             cast_or_null<DIDerivedType>(Decl), templateParams, AlignInBits)
       .release();
 }
 
@@ -750,18 +751,18 @@ static DISubprogram *getSubprogram(bool IsDistinct, Ts &&... Args) {
 
 DISubprogram *DIBuilder::createFunction(
     DIScope *Context, StringRef Name, StringRef LinkageName, DIFile *File,
-    unsigned LineNo, DISubroutineType *Ty, bool isLocalToUnit,
-    bool isDefinition, unsigned ScopeLine, DINode::DIFlags Flags,
-    bool isOptimized, DITemplateParameterArray TParams, DISubprogram *Decl,
+    unsigned LineNo, DISubroutineType *Ty, unsigned ScopeLine,
+    DINode::DIFlags Flags, DISubprogram::DISPFlags SPFlags,
+    DITemplateParameterArray TParams, DISubprogram *Decl,
     DITypeArray ThrownTypes) {
+  bool IsDefinition = SPFlags & DISubprogram::SPFlagDefinition;
   auto *Node = getSubprogram(
-      /* IsDistinct = */ isDefinition, VMContext,
-      getNonCompileUnitScope(Context), Name, LinkageName, File, LineNo, Ty,
-      isLocalToUnit, isDefinition, ScopeLine, nullptr, 0, 0, 0, Flags,
-      isOptimized, isDefinition ? CUNode : nullptr, TParams, Decl,
+      /*IsDistinct=*/IsDefinition, VMContext, getNonCompileUnitScope(Context),
+      Name, LinkageName, File, LineNo, Ty, ScopeLine, nullptr, 0, 0, Flags,
+      SPFlags, IsDefinition ? CUNode : nullptr, TParams, Decl,
       MDTuple::getTemporary(VMContext, None).release(), ThrownTypes);
 
-  if (isDefinition)
+  if (IsDefinition)
     AllSubprograms.push_back(Node);
   trackIfUnresolved(Node);
   return Node;
@@ -769,35 +770,37 @@ DISubprogram *DIBuilder::createFunction(
 
 DISubprogram *DIBuilder::createTempFunctionFwdDecl(
     DIScope *Context, StringRef Name, StringRef LinkageName, DIFile *File,
-    unsigned LineNo, DISubroutineType *Ty, bool isLocalToUnit,
-    bool isDefinition, unsigned ScopeLine, DINode::DIFlags Flags,
-    bool isOptimized, DITemplateParameterArray TParams, DISubprogram *Decl,
+    unsigned LineNo, DISubroutineType *Ty, unsigned ScopeLine,
+    DINode::DIFlags Flags, DISubprogram::DISPFlags SPFlags,
+    DITemplateParameterArray TParams, DISubprogram *Decl,
     DITypeArray ThrownTypes) {
-  return DISubprogram::getTemporary(
-             VMContext, getNonCompileUnitScope(Context), Name, LinkageName,
-             File, LineNo, Ty, isLocalToUnit, isDefinition, ScopeLine, nullptr,
-             0, 0, 0, Flags, isOptimized, isDefinition ? CUNode : nullptr,
-             TParams, Decl, nullptr, ThrownTypes)
+  bool IsDefinition = SPFlags & DISubprogram::SPFlagDefinition;
+  return DISubprogram::getTemporary(VMContext, getNonCompileUnitScope(Context),
+                                    Name, LinkageName, File, LineNo, Ty,
+                                    ScopeLine, nullptr, 0, 0, Flags, SPFlags,
+                                    IsDefinition ? CUNode : nullptr, TParams,
+                                    Decl, nullptr, ThrownTypes)
       .release();
 }
 
 DISubprogram *DIBuilder::createMethod(
     DIScope *Context, StringRef Name, StringRef LinkageName, DIFile *F,
-    unsigned LineNo, DISubroutineType *Ty, bool isLocalToUnit,
-    bool isDefinition, unsigned VK, unsigned VIndex, int ThisAdjustment,
-    DIType *VTableHolder, DINode::DIFlags Flags, bool isOptimized,
-    DITemplateParameterArray TParams, DITypeArray ThrownTypes) {
+    unsigned LineNo, DISubroutineType *Ty, unsigned VIndex, int ThisAdjustment,
+    DIType *VTableHolder, DINode::DIFlags Flags,
+    DISubprogram::DISPFlags SPFlags, DITemplateParameterArray TParams,
+    DITypeArray ThrownTypes) {
   assert(getNonCompileUnitScope(Context) &&
          "Methods should have both a Context and a context that isn't "
          "the compile unit.");
   // FIXME: Do we want to use different scope/lines?
+  bool IsDefinition = SPFlags & DISubprogram::SPFlagDefinition;
   auto *SP = getSubprogram(
-      /* IsDistinct = */ isDefinition, VMContext, cast<DIScope>(Context), Name,
-      LinkageName, F, LineNo, Ty, isLocalToUnit, isDefinition, LineNo,
-      VTableHolder, VK, VIndex, ThisAdjustment, Flags, isOptimized,
-      isDefinition ? CUNode : nullptr, TParams, nullptr, nullptr, ThrownTypes);
+      /*IsDistinct=*/IsDefinition, VMContext, cast<DIScope>(Context), Name,
+      LinkageName, F, LineNo, Ty, LineNo, VTableHolder, VIndex, ThisAdjustment,
+      Flags, SPFlags, IsDefinition ? CUNode : nullptr, TParams, nullptr,
+      nullptr, ThrownTypes);
 
-  if (isDefinition)
+  if (IsDefinition)
     AllSubprograms.push_back(SP);
   trackIfUnresolved(SP);
   return SP;

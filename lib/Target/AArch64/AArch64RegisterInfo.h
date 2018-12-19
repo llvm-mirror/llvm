@@ -30,6 +30,11 @@ class AArch64RegisterInfo final : public AArch64GenRegisterInfo {
 public:
   AArch64RegisterInfo(const Triple &TT);
 
+  // FIXME: This should be tablegen'd like getDwarfRegNum is
+  int getSEHRegNum(unsigned i) const {
+    return getEncodingValue(i);
+  }
+
   bool isReservedReg(const MachineFunction &MF, unsigned Reg) const;
   bool isAnyArgRegReserved(const MachineFunction &MF) const;
   void emitReservedArgRegCallError(const MachineFunction &MF) const;
@@ -60,6 +65,9 @@ public:
   // normal calls, so they need a different mask to represent this.
   const uint32_t *getTLSCallPreservedMask() const;
 
+  // Funclets on ARM64 Windows don't preserve any registers.
+  const uint32_t *getNoPreservedMask() const override;
+
   /// getThisReturnPreservedMask - Returns a call preserved mask specific to the
   /// case that 'returned' is on an i64 first argument if the calling convention
   /// is one that can (partially) model this attribute with a preserved mask
@@ -83,8 +91,6 @@ public:
                      unsigned Kind = 0) const override;
   const TargetRegisterClass *
   getCrossCopyRegClass(const TargetRegisterClass *RC) const override;
-
-  bool enableMultipleCopyHints() const override { return true; }
 
   bool requiresRegisterScavenging(const MachineFunction &MF) const override;
   bool useFPForScavengingIndex(const MachineFunction &MF) const override;

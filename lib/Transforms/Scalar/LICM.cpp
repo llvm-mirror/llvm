@@ -31,6 +31,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/Scalar/LICM.h"
+#include "llvm/ADT/SetOperations.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/AliasSetTracker.h"
@@ -41,6 +42,7 @@
 #include "llvm/Analysis/GuardUtils.h"
 #include "llvm/Analysis/Loads.h"
 #include "llvm/Analysis/LoopInfo.h"
+#include "llvm/Analysis/LoopIterator.h"
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/Analysis/MemorySSA.h"
@@ -75,6 +77,8 @@ using namespace llvm;
 
 #define DEBUG_TYPE "licm"
 
+STATISTIC(NumCreatedBlocks, "Number of blocks created");
+STATISTIC(NumClonedBranches, "Number of branches cloned");
 STATISTIC(NumSunk, "Number of instructions sunk out of loop");
 STATISTIC(NumHoisted, "Number of instructions hoisted out of loop");
 STATISTIC(NumMovedLoads, "Number of load insts hoisted or sunk");
@@ -85,6 +89,10 @@ STATISTIC(NumPromoted, "Number of memory locations promoted to registers");
 static cl::opt<bool>
     DisablePromotion("disable-licm-promotion", cl::Hidden, cl::init(false),
                      cl::desc("Disable memory promotion in LICM pass"));
+
+static cl::opt<bool> ControlFlowHoisting(
+    "licm-control-flow-hoisting", cl::Hidden, cl::init(false),
+    cl::desc("Enable control flow (and PHI) hoisting in LICM"));
 
 static cl::opt<uint32_t> MaxNumUsesTraversed(
     "licm-max-num-uses-traversed", cl::Hidden, cl::init(8),
@@ -103,10 +111,10 @@ static bool isNotUsedOrFreeInLoop(const Instruction &I, const Loop *CurLoop,
                                   const LoopSafetyInfo *SafetyInfo,
                                   TargetTransformInfo *TTI, bool &FreeInLoop);
 static void hoist(Instruction &I, const DominatorTree *DT, const Loop *CurLoop,
-                  LoopSafetyInfo *SafetyInfo,
+                  BasicBlock *Dest, ICFLoopSafetyInfo *SafetyInfo,
                   OptimizationRemarkEmitter *ORE);
 static bool sink(Instruction &I, LoopInfo *LI, DominatorTree *DT,
-                 const Loop *CurLoop, LoopSafetyInfo *SafetyInfo,
+                 const Loop *CurLoop, ICFLoopSafetyInfo *SafetyInfo,
                  OptimizationRemarkEmitter *ORE, bool FreeInLoop);
 static bool isSafeToExecuteUnconditionally(Instruction &Inst,
                                            const DominatorTree *DT,
@@ -122,6 +130,12 @@ static Instruction *
 CloneInstructionInExitBlock(Instruction &I, BasicBlock &ExitBlock, PHINode &PN,
                             const LoopInfo *LI,
                             const LoopSafetyInfo *SafetyInfo);
+
+static void eraseInstruction(Instruction &I, ICFLoopSafetyInfo &SafetyInfo,
+                             AliasSetTracker *AST);
+
+static void moveInstructionBefore(Instruction &I, Instruction &Dest,
+                                  ICFLoopSafetyInfo &SafetyInfo);
 
 namespace {
 struct LoopInvariantCodeMotion {
@@ -267,7 +281,7 @@ bool LoopInvariantCodeMotion::runOnLoop(
   BasicBlock *Preheader = L->getLoopPreheader();
 
   // Compute loop safety information.
-  LoopSafetyInfo SafetyInfo;
+  ICFLoopSafetyInfo SafetyInfo(DT);
   SafetyInfo.computeLoopSafetyInfo(L);
 
   // We want to visit all of the instructions in this loop... that are not parts
@@ -374,7 +388,7 @@ bool LoopInvariantCodeMotion::runOnLoop(
 bool llvm::sinkRegion(DomTreeNode *N, AliasAnalysis *AA, LoopInfo *LI,
                       DominatorTree *DT, TargetLibraryInfo *TLI,
                       TargetTransformInfo *TTI, Loop *CurLoop,
-                      AliasSetTracker *CurAST, LoopSafetyInfo *SafetyInfo,
+                      AliasSetTracker *CurAST, ICFLoopSafetyInfo *SafetyInfo,
                       OptimizationRemarkEmitter *ORE) {
 
   // Verify inputs.
@@ -404,8 +418,7 @@ bool llvm::sinkRegion(DomTreeNode *N, AliasAnalysis *AA, LoopInfo *LI,
         LLVM_DEBUG(dbgs() << "LICM deleting dead inst: " << I << '\n');
         salvageDebugInfo(I);
         ++II;
-        CurAST->deleteValue(&I);
-        I.eraseFromParent();
+        eraseInstruction(I, *SafetyInfo, CurAST);
         Changed = true;
         continue;
       }
@@ -422,8 +435,7 @@ bool llvm::sinkRegion(DomTreeNode *N, AliasAnalysis *AA, LoopInfo *LI,
         if (sink(I, LI, DT, CurLoop, SafetyInfo, ORE, FreeInLoop)) {
           if (!FreeInLoop) {
             ++II;
-            CurAST->deleteValue(&I);
-            I.eraseFromParent();
+            eraseInstruction(I, *SafetyInfo, CurAST);
           }
           Changed = true;
         }
@@ -433,6 +445,228 @@ bool llvm::sinkRegion(DomTreeNode *N, AliasAnalysis *AA, LoopInfo *LI,
   return Changed;
 }
 
+// This is a helper class for hoistRegion to make it able to hoist control flow
+// in order to be able to hoist phis. The way this works is that we initially
+// start hoisting to the loop preheader, and when we see a loop invariant branch
+// we make note of this. When we then come to hoist an instruction that's
+// conditional on such a branch we duplicate the branch and the relevant control
+// flow, then hoist the instruction into the block corresponding to its original
+// block in the duplicated control flow.
+class ControlFlowHoister {
+private:
+  // Information about the loop we are hoisting from
+  LoopInfo *LI;
+  DominatorTree *DT;
+  Loop *CurLoop;
+
+  // A map of blocks in the loop to the block their instructions will be hoisted
+  // to.
+  DenseMap<BasicBlock *, BasicBlock *> HoistDestinationMap;
+
+  // The branches that we can hoist, mapped to the block that marks a
+  // convergence point of their control flow.
+  DenseMap<BranchInst *, BasicBlock *> HoistableBranches;
+
+public:
+  ControlFlowHoister(LoopInfo *LI, DominatorTree *DT, Loop *CurLoop)
+      : LI(LI), DT(DT), CurLoop(CurLoop) {}
+
+  void registerPossiblyHoistableBranch(BranchInst *BI) {
+    // We can only hoist conditional branches with loop invariant operands.
+    if (!ControlFlowHoisting || !BI->isConditional() ||
+        !CurLoop->hasLoopInvariantOperands(BI))
+      return;
+
+    // The branch destinations need to be in the loop, and we don't gain
+    // anything by duplicating conditional branches with duplicate successors,
+    // as it's essentially the same as an unconditional branch.
+    BasicBlock *TrueDest = BI->getSuccessor(0);
+    BasicBlock *FalseDest = BI->getSuccessor(1);
+    if (!CurLoop->contains(TrueDest) || !CurLoop->contains(FalseDest) ||
+        TrueDest == FalseDest)
+      return;
+
+    // We can hoist BI if one branch destination is the successor of the other,
+    // or both have common successor which we check by seeing if the
+    // intersection of their successors is non-empty.
+    // TODO: This could be expanded to allowing branches where both ends
+    // eventually converge to a single block.
+    SmallPtrSet<BasicBlock *, 4> TrueDestSucc, FalseDestSucc;
+    TrueDestSucc.insert(succ_begin(TrueDest), succ_end(TrueDest));
+    FalseDestSucc.insert(succ_begin(FalseDest), succ_end(FalseDest));
+    BasicBlock *CommonSucc = nullptr;
+    if (TrueDestSucc.count(FalseDest)) {
+      CommonSucc = FalseDest;
+    } else if (FalseDestSucc.count(TrueDest)) {
+      CommonSucc = TrueDest;
+    } else {
+      set_intersect(TrueDestSucc, FalseDestSucc);
+      // If there's one common successor use that.
+      if (TrueDestSucc.size() == 1)
+        CommonSucc = *TrueDestSucc.begin();
+      // If there's more than one pick whichever appears first in the block list
+      // (we can't use the value returned by TrueDestSucc.begin() as it's
+      // unpredicatable which element gets returned).
+      else if (!TrueDestSucc.empty()) {
+        Function *F = TrueDest->getParent();
+        auto IsSucc = [&](BasicBlock &BB) { return TrueDestSucc.count(&BB); };
+        auto It = std::find_if(F->begin(), F->end(), IsSucc);
+        assert(It != F->end() && "Could not find successor in function");
+        CommonSucc = &*It;
+      }
+    }
+    // The common successor has to be dominated by the branch, as otherwise
+    // there will be some other path to the successor that will not be
+    // controlled by this branch so any phi we hoist would be controlled by the
+    // wrong condition. This also takes care of avoiding hoisting of loop back
+    // edges.
+    // TODO: In some cases this could be relaxed if the successor is dominated
+    // by another block that's been hoisted and we can guarantee that the
+    // control flow has been replicated exactly.
+    if (CommonSucc && DT->dominates(BI, CommonSucc))
+      HoistableBranches[BI] = CommonSucc;
+  }
+
+  bool canHoistPHI(PHINode *PN) {
+    // The phi must have loop invariant operands.
+    if (!ControlFlowHoisting || !CurLoop->hasLoopInvariantOperands(PN))
+      return false;
+    // We can hoist phis if the block they are in is the target of hoistable
+    // branches which cover all of the predecessors of the block.
+    SmallPtrSet<BasicBlock *, 8> PredecessorBlocks;
+    BasicBlock *BB = PN->getParent();
+    for (BasicBlock *PredBB : predecessors(BB))
+      PredecessorBlocks.insert(PredBB);
+    // If we have less predecessor blocks than predecessors then the phi will
+    // have more than one incoming value for the same block which we can't
+    // handle.
+    // TODO: This could be handled be erasing some of the duplicate incoming
+    // values.
+    if (PredecessorBlocks.size() != pred_size(BB))
+      return false;
+    for (auto &Pair : HoistableBranches) {
+      if (Pair.second == BB) {
+        // Which blocks are predecessors via this branch depends on if the
+        // branch is triangle-like or diamond-like.
+        if (Pair.first->getSuccessor(0) == BB) {
+          PredecessorBlocks.erase(Pair.first->getParent());
+          PredecessorBlocks.erase(Pair.first->getSuccessor(1));
+        } else if (Pair.first->getSuccessor(1) == BB) {
+          PredecessorBlocks.erase(Pair.first->getParent());
+          PredecessorBlocks.erase(Pair.first->getSuccessor(0));
+        } else {
+          PredecessorBlocks.erase(Pair.first->getSuccessor(0));
+          PredecessorBlocks.erase(Pair.first->getSuccessor(1));
+        }
+      }
+    }
+    // PredecessorBlocks will now be empty if for every predecessor of BB we
+    // found a hoistable branch source.
+    return PredecessorBlocks.empty();
+  }
+
+  BasicBlock *getOrCreateHoistedBlock(BasicBlock *BB) {
+    if (!ControlFlowHoisting)
+      return CurLoop->getLoopPreheader();
+    // If BB has already been hoisted, return that
+    if (HoistDestinationMap.count(BB))
+      return HoistDestinationMap[BB];
+
+    // Check if this block is conditional based on a pending branch
+    auto HasBBAsSuccessor =
+        [&](DenseMap<BranchInst *, BasicBlock *>::value_type &Pair) {
+          return BB != Pair.second && (Pair.first->getSuccessor(0) == BB ||
+                                       Pair.first->getSuccessor(1) == BB);
+        };
+    auto It = std::find_if(HoistableBranches.begin(), HoistableBranches.end(),
+                           HasBBAsSuccessor);
+
+    // If not involved in a pending branch, hoist to preheader
+    BasicBlock *InitialPreheader = CurLoop->getLoopPreheader();
+    if (It == HoistableBranches.end()) {
+      LLVM_DEBUG(dbgs() << "LICM using " << InitialPreheader->getName()
+                        << " as hoist destination for " << BB->getName()
+                        << "\n");
+      HoistDestinationMap[BB] = InitialPreheader;
+      return InitialPreheader;
+    }
+    BranchInst *BI = It->first;
+    assert(std::find_if(++It, HoistableBranches.end(), HasBBAsSuccessor) ==
+               HoistableBranches.end() &&
+           "BB is expected to be the target of at most one branch");
+
+    LLVMContext &C = BB->getContext();
+    BasicBlock *TrueDest = BI->getSuccessor(0);
+    BasicBlock *FalseDest = BI->getSuccessor(1);
+    BasicBlock *CommonSucc = HoistableBranches[BI];
+    BasicBlock *HoistTarget = getOrCreateHoistedBlock(BI->getParent());
+
+    // Create hoisted versions of blocks that currently don't have them
+    auto CreateHoistedBlock = [&](BasicBlock *Orig) {
+      if (HoistDestinationMap.count(Orig))
+        return HoistDestinationMap[Orig];
+      BasicBlock *New =
+          BasicBlock::Create(C, Orig->getName() + ".licm", Orig->getParent());
+      HoistDestinationMap[Orig] = New;
+      DT->addNewBlock(New, HoistTarget);
+      if (CurLoop->getParentLoop())
+        CurLoop->getParentLoop()->addBasicBlockToLoop(New, *LI);
+      ++NumCreatedBlocks;
+      LLVM_DEBUG(dbgs() << "LICM created " << New->getName()
+                        << " as hoist destination for " << Orig->getName()
+                        << "\n");
+      return New;
+    };
+    BasicBlock *HoistTrueDest = CreateHoistedBlock(TrueDest);
+    BasicBlock *HoistFalseDest = CreateHoistedBlock(FalseDest);
+    BasicBlock *HoistCommonSucc = CreateHoistedBlock(CommonSucc);
+
+    // Link up these blocks with branches.
+    if (!HoistCommonSucc->getTerminator()) {
+      // The new common successor we've generated will branch to whatever that
+      // hoist target branched to.
+      BasicBlock *TargetSucc = HoistTarget->getSingleSuccessor();
+      assert(TargetSucc && "Expected hoist target to have a single successor");
+      HoistCommonSucc->moveBefore(TargetSucc);
+      BranchInst::Create(TargetSucc, HoistCommonSucc);
+    }
+    if (!HoistTrueDest->getTerminator()) {
+      HoistTrueDest->moveBefore(HoistCommonSucc);
+      BranchInst::Create(HoistCommonSucc, HoistTrueDest);
+    }
+    if (!HoistFalseDest->getTerminator()) {
+      HoistFalseDest->moveBefore(HoistCommonSucc);
+      BranchInst::Create(HoistCommonSucc, HoistFalseDest);
+    }
+
+    // If BI is being cloned to what was originally the preheader then
+    // HoistCommonSucc will now be the new preheader.
+    if (HoistTarget == InitialPreheader) {
+      // Phis in the loop header now need to use the new preheader.
+      InitialPreheader->replaceSuccessorsPhiUsesWith(HoistCommonSucc);
+      // The new preheader dominates the loop header.
+      DomTreeNode *PreheaderNode = DT->getNode(HoistCommonSucc);
+      DomTreeNode *HeaderNode = DT->getNode(CurLoop->getHeader());
+      DT->changeImmediateDominator(HeaderNode, PreheaderNode);
+      // The preheader hoist destination is now the new preheader, with the
+      // exception of the hoist destination of this branch.
+      for (auto &Pair : HoistDestinationMap)
+        if (Pair.second == InitialPreheader && Pair.first != BI->getParent())
+          Pair.second = HoistCommonSucc;
+    }
+
+    // Now finally clone BI.
+    ReplaceInstWithInst(
+        HoistTarget->getTerminator(),
+        BranchInst::Create(HoistTrueDest, HoistFalseDest, BI->getCondition()));
+    ++NumClonedBranches;
+
+    assert(CurLoop->getLoopPreheader() &&
+           "Hoisting blocks should not have destroyed preheader");
+    return HoistDestinationMap[BB];
+  }
+};
+
 /// Walk the specified region of the CFG (defined by all blocks dominated by
 /// the specified block, and that are in the current loop) in depth first
 /// order w.r.t the DominatorTree.  This allows us to visit definitions before
@@ -440,34 +674,30 @@ bool llvm::sinkRegion(DomTreeNode *N, AliasAnalysis *AA, LoopInfo *LI,
 ///
 bool llvm::hoistRegion(DomTreeNode *N, AliasAnalysis *AA, LoopInfo *LI,
                        DominatorTree *DT, TargetLibraryInfo *TLI, Loop *CurLoop,
-                       AliasSetTracker *CurAST, LoopSafetyInfo *SafetyInfo,
+                       AliasSetTracker *CurAST, ICFLoopSafetyInfo *SafetyInfo,
                        OptimizationRemarkEmitter *ORE) {
   // Verify inputs.
   assert(N != nullptr && AA != nullptr && LI != nullptr && DT != nullptr &&
          CurLoop != nullptr && CurAST != nullptr && SafetyInfo != nullptr &&
          "Unexpected input to hoistRegion");
 
-  // We want to visit parents before children. We will enque all the parents
-  // before their children in the worklist and process the worklist in order.
-  SmallVector<DomTreeNode *, 16> Worklist = collectChildrenInLoop(N, CurLoop);
+  ControlFlowHoister CFH(LI, DT, CurLoop);
 
+  // Keep track of instructions that have been hoisted, as they may need to be
+  // re-hoisted if they end up not dominating all of their uses.
+  SmallVector<Instruction *, 16> HoistedInstructions;
+
+  // For PHI hoisting to work we need to hoist blocks before their successors.
+  // We can do this by iterating through the blocks in the loop in reverse
+  // post-order.
+  LoopBlocksRPO Worklist(CurLoop);
+  Worklist.perform(LI);
   bool Changed = false;
-  for (DomTreeNode *DTN : Worklist) {
-    BasicBlock *BB = DTN->getBlock();
+  for (BasicBlock *BB : Worklist) {
     // Only need to process the contents of this block if it is not part of a
     // subloop (which would already have been processed).
     if (inSubLoop(BB, CurLoop, LI))
       continue;
-
-    // Keep track of whether the prefix of instructions visited so far are such
-    // that the next instruction visited is guaranteed to execute if the loop
-    // is entered.
-    bool IsMustExecute = CurLoop->getHeader() == BB;
-    // Keep track of whether the prefix instructions could have written memory.
-    // TODO: This and IsMustExecute may be done smarter if we keep track of all
-    // throwing and mem-writing operations in every block, e.g. using something
-    // similar to isGuaranteedToExecute.
-    bool IsMemoryNotModified = CurLoop->getHeader() == BB;
 
     for (BasicBlock::iterator II = BB->begin(), E = BB->end(); II != E;) {
       Instruction &I = *II++;
@@ -480,10 +710,8 @@ bool llvm::hoistRegion(DomTreeNode *N, AliasAnalysis *AA, LoopInfo *LI,
                           << '\n');
         CurAST->copyValue(&I, C);
         I.replaceAllUsesWith(C);
-        if (isInstructionTriviallyDead(&I, TLI)) {
-          CurAST->deleteValue(&I);
-          I.eraseFromParent();
-        }
+        if (isInstructionTriviallyDead(&I, TLI))
+          eraseInstruction(I, *SafetyInfo, CurAST);
         Changed = true;
         continue;
       }
@@ -491,14 +719,16 @@ bool llvm::hoistRegion(DomTreeNode *N, AliasAnalysis *AA, LoopInfo *LI,
       // Try hoisting the instruction out to the preheader.  We can only do
       // this if all of the operands of the instruction are loop invariant and
       // if it is safe to hoist the instruction.
-      //
+      // TODO: It may be safe to hoist if we are hoisting to a conditional block
+      // and we have accurately duplicated the control flow from the loop header
+      // to that block.
       if (CurLoop->hasLoopInvariantOperands(&I) &&
           canSinkOrHoistInst(I, AA, DT, CurLoop, CurAST, true, ORE) &&
-          (IsMustExecute ||
-           isSafeToExecuteUnconditionally(
-               I, DT, CurLoop, SafetyInfo, ORE,
-               CurLoop->getLoopPreheader()->getTerminator()))) {
-        hoist(I, DT, CurLoop, SafetyInfo, ORE);
+          isSafeToExecuteUnconditionally(
+              I, DT, CurLoop, SafetyInfo, ORE,
+              CurLoop->getLoopPreheader()->getTerminator())) {
+        hoist(I, DT, CurLoop, CFH.getOrCreateHoistedBlock(BB), SafetyInfo, ORE);
+        HoistedInstructions.push_back(&I);
         Changed = true;
         continue;
       }
@@ -512,16 +742,20 @@ bool llvm::hoistRegion(DomTreeNode *N, AliasAnalysis *AA, LoopInfo *LI,
         auto One = llvm::ConstantFP::get(Divisor->getType(), 1.0);
         auto ReciprocalDivisor = BinaryOperator::CreateFDiv(One, Divisor);
         ReciprocalDivisor->setFastMathFlags(I.getFastMathFlags());
+        SafetyInfo->insertInstructionTo(I.getParent());
         ReciprocalDivisor->insertBefore(&I);
 
         auto Product =
             BinaryOperator::CreateFMul(I.getOperand(0), ReciprocalDivisor);
         Product->setFastMathFlags(I.getFastMathFlags());
+        SafetyInfo->insertInstructionTo(I.getParent());
         Product->insertAfter(&I);
         I.replaceAllUsesWith(Product);
-        I.eraseFromParent();
+        eraseInstruction(I, *SafetyInfo, CurAST);
 
-        hoist(*ReciprocalDivisor, DT, CurLoop, SafetyInfo, ORE);
+        hoist(*ReciprocalDivisor, DT, CurLoop, CFH.getOrCreateHoistedBlock(BB),
+              SafetyInfo, ORE);
+        HoistedInstructions.push_back(ReciprocalDivisor);
         Changed = true;
         continue;
       }
@@ -530,19 +764,74 @@ bool llvm::hoistRegion(DomTreeNode *N, AliasAnalysis *AA, LoopInfo *LI,
       if (((I.use_empty() &&
             match(&I, m_Intrinsic<Intrinsic::invariant_start>())) ||
            isGuard(&I)) &&
-          IsMustExecute && IsMemoryNotModified &&
-          CurLoop->hasLoopInvariantOperands(&I)) {
-        hoist(I, DT, CurLoop, SafetyInfo, ORE);
+          CurLoop->hasLoopInvariantOperands(&I) &&
+          SafetyInfo->isGuaranteedToExecute(I, DT, CurLoop) &&
+          SafetyInfo->doesNotWriteMemoryBefore(I, CurLoop)) {
+        hoist(I, DT, CurLoop, CFH.getOrCreateHoistedBlock(BB), SafetyInfo, ORE);
+        HoistedInstructions.push_back(&I);
         Changed = true;
         continue;
       }
 
-      if (IsMustExecute)
-        IsMustExecute = isGuaranteedToTransferExecutionToSuccessor(&I);
-      if (IsMemoryNotModified)
-        IsMemoryNotModified = !I.mayWriteToMemory();
+      if (PHINode *PN = dyn_cast<PHINode>(&I)) {
+        if (CFH.canHoistPHI(PN)) {
+          // Redirect incoming blocks first to ensure that we create hoisted
+          // versions of those blocks before we hoist the phi.
+          for (unsigned int i = 0; i < PN->getNumIncomingValues(); ++i)
+            PN->setIncomingBlock(
+                i, CFH.getOrCreateHoistedBlock(PN->getIncomingBlock(i)));
+          hoist(*PN, DT, CurLoop, CFH.getOrCreateHoistedBlock(BB), SafetyInfo,
+                ORE);
+          assert(DT->dominates(PN, BB) && "Conditional PHIs not expected");
+          Changed = true;
+          continue;
+        }
+      }
+
+      // Remember possibly hoistable branches so we can actually hoist them
+      // later if needed.
+      if (BranchInst *BI = dyn_cast<BranchInst>(&I))
+        CFH.registerPossiblyHoistableBranch(BI);
     }
   }
+
+  // If we hoisted instructions to a conditional block they may not dominate
+  // their uses that weren't hoisted (such as phis where some operands are not
+  // loop invariant). If so make them unconditional by moving them to their
+  // immediate dominator. We iterate through the instructions in reverse order
+  // which ensures that when we rehoist an instruction we rehoist its operands,
+  // and also keep track of where in the block we are rehoisting to to make sure
+  // that we rehoist instructions before the instructions that use them.
+  Instruction *HoistPoint = nullptr;
+  if (ControlFlowHoisting) {
+    for (Instruction *I : reverse(HoistedInstructions)) {
+      if (!llvm::all_of(I->uses(),
+                        [&](Use &U) { return DT->dominates(I, U); })) {
+        BasicBlock *Dominator =
+            DT->getNode(I->getParent())->getIDom()->getBlock();
+        LLVM_DEBUG(dbgs() << "LICM rehoisting to " << Dominator->getName()
+                          << ": " << *I << "\n");
+        if (!HoistPoint || HoistPoint->getParent() != Dominator) {
+          if (HoistPoint)
+            assert(DT->dominates(Dominator, HoistPoint->getParent()) &&
+                   "New hoist point expected to dominate old hoist point");
+          HoistPoint = Dominator->getTerminator();
+        }
+        moveInstructionBefore(*I, *HoistPoint, *SafetyInfo);
+        HoistPoint = I;
+        Changed = true;
+      }
+    }
+  }
+
+  // Now that we've finished hoisting make sure that LI and DT are still valid.
+#ifndef NDEBUG
+  if (Changed) {
+    assert(DT->verify(DominatorTree::VerificationLevel::Fast) &&
+           "Dominator tree verification failed");
+    LI->verify(*DT);
+  }
+#endif
 
   return Changed;
 }
@@ -693,7 +982,7 @@ bool llvm::canSinkOrHoistInst(Instruction &I, AAResults *AA, DominatorTree *DT,
         for (Value *Op : CI->arg_operands())
           if (Op->getType()->isPointerTy() &&
               pointerInvalidatedByLoop(
-                  MemoryLocation(Op, MemoryLocation::UnknownSize, AAMDNodes()),
+                  MemoryLocation(Op, LocationSize::unknown(), AAMDNodes()),
                   CurAST, CurLoop, AA))
             return false;
         return true;
@@ -798,7 +1087,7 @@ static bool isFreeInLoop(const Instruction &I, const Loop *CurLoop,
 static bool isNotUsedOrFreeInLoop(const Instruction &I, const Loop *CurLoop,
                                   const LoopSafetyInfo *SafetyInfo,
                                   TargetTransformInfo *TTI, bool &FreeInLoop) {
-  const auto &BlockColors = SafetyInfo->BlockColors;
+  const auto &BlockColors = SafetyInfo->getBlockColors();
   bool IsFree = isFreeInLoop(I, CurLoop, TTI);
   for (const User *U : I.users()) {
     const Instruction *UI = cast<Instruction>(U);
@@ -833,7 +1122,7 @@ CloneInstructionInExitBlock(Instruction &I, BasicBlock &ExitBlock, PHINode &PN,
                             const LoopSafetyInfo *SafetyInfo) {
   Instruction *New;
   if (auto *CI = dyn_cast<CallInst>(&I)) {
-    const auto &BlockColors = SafetyInfo->BlockColors;
+    const auto &BlockColors = SafetyInfo->getBlockColors();
 
     // Sinking call-sites need to be handled differently from other
     // instructions.  The cloned call-site needs a funclet bundle operand
@@ -888,6 +1177,21 @@ CloneInstructionInExitBlock(Instruction &I, BasicBlock &ExitBlock, PHINode &PN,
   return New;
 }
 
+static void eraseInstruction(Instruction &I, ICFLoopSafetyInfo &SafetyInfo,
+                             AliasSetTracker *AST) {
+  if (AST)
+    AST->deleteValue(&I);
+  SafetyInfo.removeInstruction(&I);
+  I.eraseFromParent();
+}
+
+static void moveInstructionBefore(Instruction &I, Instruction &Dest,
+                                  ICFLoopSafetyInfo &SafetyInfo) {
+  SafetyInfo.removeInstruction(&I);
+  SafetyInfo.insertInstructionTo(Dest.getParent());
+  I.moveBefore(&Dest);
+}
+
 static Instruction *sinkThroughTriviallyReplaceablePHI(
     PHINode *TPN, Instruction *I, LoopInfo *LI,
     SmallDenseMap<BasicBlock *, Instruction *, 32> &SunkCopies,
@@ -913,7 +1217,7 @@ static bool canSplitPredecessors(PHINode *PN, LoopSafetyInfo *SafetyInfo) {
   // it require updating BlockColors for all offspring blocks accordingly. By
   // skipping such corner case, we can make updating BlockColors after splitting
   // predecessor fairly simple.
-  if (!SafetyInfo->BlockColors.empty() && BB->getFirstNonPHI()->isEHPad())
+  if (!SafetyInfo->getBlockColors().empty() && BB->getFirstNonPHI()->isEHPad())
     return false;
   for (pred_iterator PI = pred_begin(BB), E = pred_end(BB); PI != E; ++PI) {
     BasicBlock *BBPred = *PI;
@@ -967,7 +1271,7 @@ static void splitPredecessorsOfLoopExit(PHINode *PN, DominatorTree *DT,
   // LE:
   //   %p = phi [%p1, %LE.split], [%p2, %LE.split2]
   //
-  auto &BlockColors = SafetyInfo->BlockColors;
+  const auto &BlockColors = SafetyInfo->getBlockColors();
   SmallSetVector<BasicBlock *, 8> PredBBs(pred_begin(ExitBB), pred_end(ExitBB));
   while (!PredBBs.empty()) {
     BasicBlock *PredBB = *PredBBs.begin();
@@ -979,14 +1283,11 @@ static void splitPredecessorsOfLoopExit(PHINode *PN, DominatorTree *DT,
       // Since we do not allow splitting EH-block with BlockColors in
       // canSplitPredecessors(), we can simply assign predecessor's color to
       // the new block.
-      if (!BlockColors.empty()) {
+      if (!BlockColors.empty())
         // Grab a reference to the ColorVector to be inserted before getting the
         // reference to the vector we are copying because inserting the new
         // element in BlockColors might cause the map to be reallocated.
-        ColorVector &ColorsForNewBlock = BlockColors[NewPred];
-        ColorVector &ColorsForOldBlock = BlockColors[PredBB];
-        ColorsForNewBlock = ColorsForOldBlock;
-      }
+        SafetyInfo->copyColors(NewPred, PredBB);
     }
     PredBBs.remove(PredBB);
   }
@@ -998,7 +1299,7 @@ static void splitPredecessorsOfLoopExit(PHINode *PN, DominatorTree *DT,
 /// position, and may either delete it or move it to outside of the loop.
 ///
 static bool sink(Instruction &I, LoopInfo *LI, DominatorTree *DT,
-                 const Loop *CurLoop, LoopSafetyInfo *SafetyInfo,
+                 const Loop *CurLoop, ICFLoopSafetyInfo *SafetyInfo,
                  OptimizationRemarkEmitter *ORE, bool FreeInLoop) {
   LLVM_DEBUG(dbgs() << "LICM sinking instruction: " << I << "\n");
   ORE->emit([&]() {
@@ -1089,7 +1390,7 @@ static bool sink(Instruction &I, LoopInfo *LI, DominatorTree *DT,
     Instruction *New = sinkThroughTriviallyReplaceablePHI(PN, &I, LI, SunkCopies,
                                                           SafetyInfo, CurLoop);
     PN->replaceAllUsesWith(New);
-    PN->eraseFromParent();
+    eraseInstruction(*PN, *SafetyInfo, nullptr);
     Changed = true;
   }
   return Changed;
@@ -1099,9 +1400,9 @@ static bool sink(Instruction &I, LoopInfo *LI, DominatorTree *DT,
 /// is safe to hoist, this instruction is called to do the dirty work.
 ///
 static void hoist(Instruction &I, const DominatorTree *DT, const Loop *CurLoop,
-                  LoopSafetyInfo *SafetyInfo, OptimizationRemarkEmitter *ORE) {
-  auto *Preheader = CurLoop->getLoopPreheader();
-  LLVM_DEBUG(dbgs() << "LICM hoisting to " << Preheader->getName() << ": " << I
+                  BasicBlock *Dest, ICFLoopSafetyInfo *SafetyInfo,
+                  OptimizationRemarkEmitter *ORE) {
+  LLVM_DEBUG(dbgs() << "LICM hoisting to " << Dest->getName() << ": " << I
                     << "\n");
   ORE->emit([&]() {
     return OptimizationRemark(DEBUG_TYPE, "Hoisted", &I) << "hoisting "
@@ -1116,11 +1417,15 @@ static void hoist(Instruction &I, const DominatorTree *DT, const Loop *CurLoop,
       // The check on hasMetadataOtherThanDebugLoc is to prevent us from burning
       // time in isGuaranteedToExecute if we don't actually have anything to
       // drop.  It is a compile time optimization, not required for correctness.
-      !isGuaranteedToExecute(I, DT, CurLoop, SafetyInfo))
+      !SafetyInfo->isGuaranteedToExecute(I, DT, CurLoop))
     I.dropUnknownNonDebugMetadata();
 
-  // Move the new node to the Preheader, before its terminator.
-  I.moveBefore(Preheader->getTerminator());
+  if (isa<PHINode>(I))
+    // Move the new node to the end of the phi list in the destination block.
+    moveInstructionBefore(I, *Dest->getFirstNonPHI(), *SafetyInfo);
+  else
+    // Move the new node to the destination block, before its terminator.
+    moveInstructionBefore(I, *Dest->getTerminator(), *SafetyInfo);
 
   // Do not retain debug locations when we are moving instructions to different
   // basic blocks, because we want to avoid jumpy line tables. Calls, however,
@@ -1150,7 +1455,7 @@ static bool isSafeToExecuteUnconditionally(Instruction &Inst,
     return true;
 
   bool GuaranteedToExecute =
-      isGuaranteedToExecute(Inst, DT, CurLoop, SafetyInfo);
+      SafetyInfo->isGuaranteedToExecute(Inst, DT, CurLoop);
 
   if (!GuaranteedToExecute) {
     auto *LI = dyn_cast<LoadInst>(&Inst);
@@ -1179,6 +1484,7 @@ class LoopPromoter : public LoadAndStorePromoter {
   int Alignment;
   bool UnorderedAtomic;
   AAMDNodes AATags;
+  ICFLoopSafetyInfo &SafetyInfo;
 
   Value *maybeInsertLCSSAPHI(Value *V, BasicBlock *BB) const {
     if (Instruction *I = dyn_cast<Instruction>(V))
@@ -1201,11 +1507,13 @@ public:
                SmallVectorImpl<BasicBlock *> &LEB,
                SmallVectorImpl<Instruction *> &LIP, PredIteratorCache &PIC,
                AliasSetTracker &ast, LoopInfo &li, DebugLoc dl, int alignment,
-               bool UnorderedAtomic, const AAMDNodes &AATags)
+               bool UnorderedAtomic, const AAMDNodes &AATags,
+               ICFLoopSafetyInfo &SafetyInfo)
       : LoadAndStorePromoter(Insts, S), SomePtr(SP), PointerMustAliases(PMA),
         LoopExitBlocks(LEB), LoopInsertPts(LIP), PredCache(PIC), AST(ast),
         LI(li), DL(std::move(dl)), Alignment(alignment),
-        UnorderedAtomic(UnorderedAtomic), AATags(AATags) {}
+        UnorderedAtomic(UnorderedAtomic), AATags(AATags), SafetyInfo(SafetyInfo)
+      {}
 
   bool isInstInList(Instruction *I,
                     const SmallVectorImpl<Instruction *> &) const override {
@@ -1242,7 +1550,10 @@ public:
     // Update alias analysis.
     AST.copyValue(LI, V);
   }
-  void instructionDeleted(Instruction *I) const override { AST.deleteValue(I); }
+  void instructionDeleted(Instruction *I) const override {
+    SafetyInfo.removeInstruction(I);
+    AST.deleteValue(I);
+  }
 };
 
 
@@ -1280,7 +1591,7 @@ bool llvm::promoteLoopAccessesToScalars(
     SmallVectorImpl<BasicBlock *> &ExitBlocks,
     SmallVectorImpl<Instruction *> &InsertPts, PredIteratorCache &PIC,
     LoopInfo *LI, DominatorTree *DT, const TargetLibraryInfo *TLI,
-    Loop *CurLoop, AliasSetTracker *CurAST, LoopSafetyInfo *SafetyInfo,
+    Loop *CurLoop, AliasSetTracker *CurAST, ICFLoopSafetyInfo *SafetyInfo,
     OptimizationRemarkEmitter *ORE) {
   // Verify inputs.
   assert(LI != nullptr && DT != nullptr && CurLoop != nullptr &&
@@ -1408,7 +1719,7 @@ bool llvm::promoteLoopAccessesToScalars(
 
         if (!DereferenceableInPH || !SafeToInsertStore ||
             (InstAlignment > Alignment)) {
-          if (isGuaranteedToExecute(*UI, DT, CurLoop, SafetyInfo)) {
+          if (SafetyInfo->isGuaranteedToExecute(*UI, DT, CurLoop)) {
             DereferenceableInPH = true;
             SafeToInsertStore = true;
             Alignment = std::max(Alignment, InstAlignment);
@@ -1499,7 +1810,7 @@ bool llvm::promoteLoopAccessesToScalars(
   SSAUpdater SSA(&NewPHIs);
   LoopPromoter Promoter(SomePtr, LoopUses, SSA, PointerMustAliases, ExitBlocks,
                         InsertPts, PIC, *CurAST, *LI, DL, Alignment,
-                        SawUnorderedAtomic, AATags);
+                        SawUnorderedAtomic, AATags, *SafetyInfo);
 
   // Set up the preheader to have a definition of the value.  It is the live-out
   // value from the preheader that uses in the loop will use.
@@ -1519,7 +1830,7 @@ bool llvm::promoteLoopAccessesToScalars(
 
   // If the SSAUpdater didn't use the load in the preheader, just zap it now.
   if (PreheaderLoad->use_empty())
-    PreheaderLoad->eraseFromParent();
+    eraseInstruction(*PreheaderLoad, *SafetyInfo, CurAST);
 
   return true;
 }

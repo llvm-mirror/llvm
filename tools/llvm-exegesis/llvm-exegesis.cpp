@@ -38,72 +38,81 @@
 #include <algorithm>
 #include <string>
 
-static llvm::cl::opt<unsigned>
-    OpcodeIndex("opcode-index", llvm::cl::desc("opcode to measure, by index"),
-                llvm::cl::init(0));
-
-static llvm::cl::opt<std::string>
-    OpcodeName("opcode-name", llvm::cl::desc("opcode to measure, by name"),
-               llvm::cl::init(""));
-
-static llvm::cl::opt<std::string>
-    SnippetsFile("snippets-file", llvm::cl::desc("code snippets to measure"),
-                 llvm::cl::init(""));
-
-static llvm::cl::opt<std::string>
-    BenchmarkFile("benchmarks-file", llvm::cl::desc(""), llvm::cl::init(""));
-
-static llvm::cl::opt<exegesis::InstructionBenchmark::ModeE> BenchmarkMode(
-    "mode", llvm::cl::desc("the mode to run"),
-    llvm::cl::values(clEnumValN(exegesis::InstructionBenchmark::Latency,
-                                "latency", "Instruction Latency"),
-                     clEnumValN(exegesis::InstructionBenchmark::Uops, "uops",
-                                "Uop Decomposition"),
-                     // When not asking for a specific benchmark mode, we'll
-                     // analyse the results.
-                     clEnumValN(exegesis::InstructionBenchmark::Unknown,
-                                "analysis", "Analysis")));
-
-static llvm::cl::opt<unsigned>
-    NumRepetitions("num-repetitions",
-                   llvm::cl::desc("number of time to repeat the asm snippet"),
-                   llvm::cl::init(10000));
-
-static llvm::cl::opt<bool> IgnoreInvalidSchedClass(
-    "ignore-invalid-sched-class",
-    llvm::cl::desc("ignore instructions that do not define a sched class"),
-    llvm::cl::init(false));
-
-static llvm::cl::opt<unsigned> AnalysisNumPoints(
-    "analysis-numpoints",
-    llvm::cl::desc("minimum number of points in an analysis cluster"),
-    llvm::cl::init(3));
-
-static llvm::cl::opt<float>
-    AnalysisEpsilon("analysis-epsilon",
-                    llvm::cl::desc("dbscan epsilon for analysis clustering"),
-                    llvm::cl::init(0.1));
-
-static llvm::cl::opt<std::string>
-    AnalysisClustersOutputFile("analysis-clusters-output-file",
-                               llvm::cl::desc(""), llvm::cl::init("-"));
-static llvm::cl::opt<std::string>
-    AnalysisInconsistenciesOutputFile("analysis-inconsistencies-output-file",
-                                      llvm::cl::desc(""), llvm::cl::init("-"));
-
+namespace llvm {
 namespace exegesis {
 
-static llvm::ExitOnError ExitOnErr;
+static cl::opt<int> OpcodeIndex("opcode-index",
+                                cl::desc("opcode to measure, by index"),
+                                cl::init(0));
+
+static cl::opt<std::string>
+    OpcodeNames("opcode-name",
+                cl::desc("comma-separated list of opcodes to measure, by name"),
+                cl::init(""));
+
+static cl::opt<std::string> SnippetsFile("snippets-file",
+                                         cl::desc("code snippets to measure"),
+                                         cl::init(""));
+
+static cl::opt<std::string> BenchmarkFile("benchmarks-file", cl::desc(""),
+                                          cl::init(""));
+
+static cl::opt<exegesis::InstructionBenchmark::ModeE>
+    BenchmarkMode("mode", cl::desc("the mode to run"),
+                  cl::values(clEnumValN(exegesis::InstructionBenchmark::Latency,
+                                        "latency", "Instruction Latency"),
+                             clEnumValN(exegesis::InstructionBenchmark::Uops,
+                                        "uops", "Uop Decomposition"),
+                             // When not asking for a specific benchmark mode,
+                             // we'll analyse the results.
+                             clEnumValN(exegesis::InstructionBenchmark::Unknown,
+                                        "analysis", "Analysis")));
+
+static cl::opt<unsigned>
+    NumRepetitions("num-repetitions",
+                   cl::desc("number of time to repeat the asm snippet"),
+                   cl::init(10000));
+
+static cl::opt<bool> IgnoreInvalidSchedClass(
+    "ignore-invalid-sched-class",
+    cl::desc("ignore instructions that do not define a sched class"),
+    cl::init(false));
+
+static cl::opt<unsigned> AnalysisNumPoints(
+    "analysis-numpoints",
+    cl::desc("minimum number of points in an analysis cluster"), cl::init(3));
+
+static cl::opt<float>
+    AnalysisEpsilon("analysis-epsilon",
+                    cl::desc("dbscan epsilon for analysis clustering"),
+                    cl::init(0.1));
+
+static cl::opt<std::string>
+    AnalysisClustersOutputFile("analysis-clusters-output-file", cl::desc(""),
+                               cl::init("-"));
+static cl::opt<std::string>
+    AnalysisInconsistenciesOutputFile("analysis-inconsistencies-output-file",
+                                      cl::desc(""), cl::init("-"));
+
+static cl::opt<std::string>
+    CpuName("mcpu",
+            cl::desc(
+                "cpu name to use for pfm counters, leave empty to autodetect"),
+            cl::init(""));
+
+
+static ExitOnError ExitOnErr;
 
 #ifdef LLVM_EXEGESIS_INITIALIZE_NATIVE_TARGET
 void LLVM_EXEGESIS_INITIALIZE_NATIVE_TARGET();
 #endif
 
-// Checks that only one of OpcodeName, OpcodeIndex or SnippetsFile is provided,
-// and returns the opcode index or 0 if snippets should be read from
+// Checks that only one of OpcodeNames, OpcodeIndex or SnippetsFile is provided,
+// and returns the opcode indices or {} if snippets should be read from
 // `SnippetsFile`.
-static unsigned getOpcodeOrDie(const llvm::MCInstrInfo &MCInstrInfo) {
-  const size_t NumSetFlags = (OpcodeName.empty() ? 0 : 1) +
+static std::vector<unsigned>
+getOpcodesOrDie(const llvm::MCInstrInfo &MCInstrInfo) {
+  const size_t NumSetFlags = (OpcodeNames.empty() ? 0 : 1) +
                              (OpcodeIndex == 0 ? 0 : 1) +
                              (SnippetsFile.empty() ? 0 : 1);
   if (NumSetFlags != 1)
@@ -111,25 +120,42 @@ static unsigned getOpcodeOrDie(const llvm::MCInstrInfo &MCInstrInfo) {
         "please provide one and only one of 'opcode-index', 'opcode-name' or "
         "'snippets-file'");
   if (!SnippetsFile.empty())
-    return 0;
+    return {};
   if (OpcodeIndex > 0)
-    return OpcodeIndex;
+    return {static_cast<unsigned>(OpcodeIndex)};
+  if (OpcodeIndex < 0) {
+    std::vector<unsigned> Result;
+    for (unsigned I = 1, E = MCInstrInfo.getNumOpcodes(); I < E; ++I)
+      Result.push_back(I);
+    return Result;
+  }
   // Resolve opcode name -> opcode.
-  for (unsigned I = 0, E = MCInstrInfo.getNumOpcodes(); I < E; ++I)
-    if (MCInstrInfo.getName(I) == OpcodeName)
-      return I;
-  llvm::report_fatal_error(llvm::Twine("unknown opcode ").concat(OpcodeName));
+  const auto ResolveName =
+      [&MCInstrInfo](llvm::StringRef OpcodeName) -> unsigned {
+    for (unsigned I = 1, E = MCInstrInfo.getNumOpcodes(); I < E; ++I)
+      if (MCInstrInfo.getName(I) == OpcodeName)
+        return I;
+    return 0u;
+  };
+  llvm::SmallVector<llvm::StringRef, 2> Pieces;
+  llvm::StringRef(OpcodeNames.getValue())
+      .split(Pieces, ",", /* MaxSplit */ -1, /* KeepEmpty */ false);
+  std::vector<unsigned> Result;
+  for (const llvm::StringRef OpcodeName : Pieces) {
+    if (unsigned Opcode = ResolveName(OpcodeName))
+      Result.push_back(Opcode);
+    else
+      llvm::report_fatal_error(
+          llvm::Twine("unknown opcode ").concat(OpcodeName));
+  }
+  return Result;
 }
 
 // Generates code snippets for opcode `Opcode`.
 static llvm::Expected<std::vector<BenchmarkCode>>
 generateSnippets(const LLVMState &State, unsigned Opcode) {
-  const std::unique_ptr<SnippetGenerator> Generator =
-      State.getExegesisTarget().createSnippetGenerator(BenchmarkMode, State);
-  if (!Generator)
-    llvm::report_fatal_error("cannot create snippet generator");
-
-  const llvm::MCInstrDesc &InstrDesc = State.getInstrInfo().get(Opcode);
+  const Instruction &Instr = State.getIC().getInstr(Opcode);
+  const llvm::MCInstrDesc &InstrDesc = *Instr.Description;
   // Ignore instructions that we cannot run.
   if (InstrDesc.isPseudo())
     return llvm::make_error<BenchmarkFailure>("Unsupported opcode: isPseudo");
@@ -140,7 +166,11 @@ generateSnippets(const LLVMState &State, unsigned Opcode) {
     return llvm::make_error<BenchmarkFailure>(
         "Unsupported opcode: isCall/isReturn");
 
-  return Generator->generateConfigurations(Opcode);
+  const std::unique_ptr<SnippetGenerator> Generator =
+      State.getExegesisTarget().createSnippetGenerator(BenchmarkMode, State);
+  if (!Generator)
+    llvm::report_fatal_error("cannot create snippet generator");
+  return Generator->generateConfigurations(Instr);
 }
 
 namespace {
@@ -298,19 +328,30 @@ void benchmarkMain() {
   LLVM_EXEGESIS_INITIALIZE_NATIVE_TARGET();
 #endif
 
-  const LLVMState State;
-  const auto Opcode = getOpcodeOrDie(State.getInstrInfo());
+  const LLVMState State(CpuName);
+  const auto Opcodes = getOpcodesOrDie(State.getInstrInfo());
 
   std::vector<BenchmarkCode> Configurations;
-  if (Opcode > 0) {
-    // Ignore instructions without a sched class if -ignore-invalid-sched-class
-    // is passed.
-    if (IgnoreInvalidSchedClass &&
-        State.getInstrInfo().get(Opcode).getSchedClass() == 0) {
-      llvm::errs() << "ignoring instruction without sched class\n";
-      return;
+  if (!Opcodes.empty()) {
+    for (const unsigned Opcode : Opcodes) {
+      // Ignore instructions without a sched class if
+      // -ignore-invalid-sched-class is passed.
+      if (IgnoreInvalidSchedClass &&
+          State.getInstrInfo().get(Opcode).getSchedClass() == 0) {
+        llvm::errs() << State.getInstrInfo().getName(Opcode)
+                     << ": ignoring instruction without sched class\n";
+        continue;
+      }
+      auto ConfigsForInstr = generateSnippets(State, Opcode);
+      if (!ConfigsForInstr) {
+        llvm::logAllUnhandledErrors(
+            ConfigsForInstr.takeError(), llvm::errs(),
+            llvm::Twine(State.getInstrInfo().getName(Opcode)).concat(": "));
+        continue;
+      }
+      std::move(ConfigsForInstr->begin(), ConfigsForInstr->end(),
+                std::back_inserter(Configurations));
     }
-    Configurations = ExitOnErr(generateSnippets(State, Opcode));
   } else {
     Configurations = ExitOnErr(readSnippets(State, SnippetsFile));
   }
@@ -365,7 +406,7 @@ static void analysisMain() {
   llvm::InitializeNativeTargetAsmPrinter();
   llvm::InitializeNativeTargetDisassembler();
   // Read benchmarks.
-  const LLVMState State;
+  const LLVMState State("");
   const std::vector<InstructionBenchmark> Points =
       ExitOnErr(InstructionBenchmark::readYamls(State, BenchmarkFile));
   llvm::outs() << "Parsed " << Points.size() << " benchmark points\n";
@@ -396,9 +437,11 @@ static void analysisMain() {
 }
 
 } // namespace exegesis
+} // namespace llvm
 
 int main(int Argc, char **Argv) {
-  llvm::cl::ParseCommandLineOptions(Argc, Argv, "");
+  using namespace llvm;
+  cl::ParseCommandLineOptions(Argc, Argv, "");
 
   exegesis::ExitOnErr.setExitCodeMapper([](const llvm::Error &Err) {
     if (Err.isA<llvm::StringError>())
@@ -406,7 +449,7 @@ int main(int Argc, char **Argv) {
     return EXIT_FAILURE;
   });
 
-  if (BenchmarkMode == exegesis::InstructionBenchmark::Unknown) {
+  if (exegesis::BenchmarkMode == exegesis::InstructionBenchmark::Unknown) {
     exegesis::analysisMain();
   } else {
     exegesis::benchmarkMain();

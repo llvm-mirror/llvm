@@ -58,13 +58,14 @@
 #ifndef LLVM_TOOLS_LLVM_MCA_RESOURCEPRESSUREVIEW_H
 #define LLVM_TOOLS_LLVM_MCA_RESOURCEPRESSUREVIEW_H
 
-#include "SourceMgr.h"
 #include "Views/View.h"
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstPrinter.h"
 #include "llvm/MC/MCSubtargetInfo.h"
-#include <map>
 
+namespace llvm {
 namespace mca {
 
 /// This class collects resource pressure statistics and it is able to print
@@ -72,7 +73,8 @@ namespace mca {
 class ResourcePressureView : public View {
   const llvm::MCSubtargetInfo &STI;
   llvm::MCInstPrinter &MCIP;
-  const SourceMgr &Source;
+  llvm::ArrayRef<llvm::MCInst> Source;
+  unsigned LastInstructionIdx;
 
   // Map to quickly obtain the ResourceUsage column index from a processor
   // resource ID.
@@ -82,28 +84,21 @@ class ResourcePressureView : public View {
   std::vector<ResourceCycles> ResourceUsage;
   unsigned NumResourceUnits;
 
-  const llvm::MCInst &GetMCInstFromIndex(unsigned Index) const;
-  void printResourcePressurePerIteration(llvm::raw_ostream &OS,
-                                         unsigned Executions) const;
-  void printResourcePressurePerInstruction(llvm::raw_ostream &OS,
-                                           unsigned Executions) const;
-  void initialize();
+  void printResourcePressurePerIter(llvm::raw_ostream &OS) const;
+  void printResourcePressurePerInst(llvm::raw_ostream &OS) const;
 
 public:
   ResourcePressureView(const llvm::MCSubtargetInfo &sti,
-                       llvm::MCInstPrinter &Printer, const SourceMgr &SM)
-      : STI(sti), MCIP(Printer), Source(SM) {
-    initialize();
-  }
+                       llvm::MCInstPrinter &Printer,
+                       llvm::ArrayRef<llvm::MCInst> S);
 
   void onEvent(const HWInstructionEvent &Event) override;
-
   void printView(llvm::raw_ostream &OS) const override {
-    unsigned Executions = Source.getNumIterations();
-    printResourcePressurePerIteration(OS, Executions);
-    printResourcePressurePerInstruction(OS, Executions);
+    printResourcePressurePerIter(OS);
+    printResourcePressurePerInst(OS);
   }
 };
 } // namespace mca
+} // namespace llvm
 
 #endif

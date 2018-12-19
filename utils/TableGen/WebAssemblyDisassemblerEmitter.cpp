@@ -19,6 +19,8 @@
 
 namespace llvm {
 
+static constexpr int WebAssemblyInstructionTableSize = 256;
+
 void emitWebAssemblyDisassemblerTables(
     raw_ostream &OS,
     const ArrayRef<const CodeGenInstruction *> &NumberedInstructions) {
@@ -42,12 +44,13 @@ void emitWebAssemblyDisassemblerTables(
     auto Prefix = Opc >> 8;
     Opc = Opc & 0xFF;
     auto &CGIP = OpcodeTable[Prefix][Opc];
-    // All wasm instructions have a StackBased fieldof type bit, we only want
-    // the instructions for which this is 1.
-    auto Bit = Def.getValue("StackBased")->getValue()->
-                 getCastTo(BitRecTy::get());
-    auto IsStackBased = Bit && reinterpret_cast<const BitInit *>(Bit)
-                                 ->getValue();
+    // All wasm instructions have a StackBased field of type string, we only
+    // want the instructions for which this is "true".
+    auto StackString =
+        Def.getValue("StackBased")->getValue()->getCastTo(StringRecTy::get());
+    auto IsStackBased =
+        StackString &&
+        reinterpret_cast<const StringInit *>(StackString)->getValue() == "true";
     if (IsStackBased && !CGIP.second) {
       // this picks the first of many typed variants, which is
       // currently the except_ref one, though this shouldn't matter for
@@ -58,6 +61,8 @@ void emitWebAssemblyDisassemblerTables(
   OS << "#include \"MCTargetDesc/WebAssemblyMCTargetDesc.h\"\n";
   OS << "\n";
   OS << "namespace llvm {\n\n";
+  OS << "static constexpr int WebAssemblyInstructionTableSize = ";
+  OS << WebAssemblyInstructionTableSize << ";\n\n";
   OS << "enum EntryType : uint8_t { ";
   OS << "ET_Unused, ET_Prefix, ET_Instruction };\n\n";
   OS << "struct WebAssemblyInstruction {\n";
@@ -73,7 +78,7 @@ void emitWebAssemblyDisassemblerTables(
       continue;
     OS << "WebAssemblyInstruction InstructionTable" << PrefixPair.first;
     OS << "[] = {\n";
-    for (unsigned I = 0; I <= 0xFF; I++) {
+    for (unsigned I = 0; I < WebAssemblyInstructionTableSize; I++) {
       auto InstIt = PrefixPair.second.find(I);
       if (InstIt != PrefixPair.second.end()) {
         // Regular instruction.

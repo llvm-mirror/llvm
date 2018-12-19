@@ -327,6 +327,8 @@ class DwarfDebug : public DebugHandlerBase {
   /// used to keep track of which types we have emitted type units for.
   DenseMap<const MDNode *, uint64_t> TypeSignatures;
 
+  DenseMap<const MCSection *, const MCSymbol *> SectionLabels;
+
   SmallVector<
       std::pair<std::unique_ptr<DwarfTypeUnit>, const DICompositeType *>, 1>
       TypeUnitsUnderConstruction;
@@ -424,6 +426,10 @@ class DwarfDebug : public DebugHandlerBase {
   /// Construct a DIE for this abstract scope.
   void constructAbstractSubprogramScopeDIE(DwarfCompileUnit &SrcCU, LexicalScope *Scope);
 
+  /// Construct DIEs for call site entries describing the calls in \p MF.
+  void constructCallSiteEntryDIEs(const DISubprogram &SP, DwarfCompileUnit &CU,
+                                  DIE &ScopeDIE, const MachineFunction &MF);
+
   template <typename DataT>
   void addAccelNameImpl(const DICompileUnit &CU, AccelTable<DataT> &AppleAccel,
                         StringRef Name, const DIE &Die);
@@ -486,9 +492,7 @@ class DwarfDebug : public DebugHandlerBase {
 
   /// Emit address ranges into a debug ranges section.
   void emitDebugRanges();
-
-  /// Emit range lists into a DWARF v5 debug rnglists section.
-  void emitDebugRnglists();
+  void emitDebugRangesDWO();
 
   /// Emit macros into a debug macinfo section.
   void emitDebugMacinfo();
@@ -719,6 +723,9 @@ public:
   bool tuneForLLDB() const { return DebuggerTuning == DebuggerKind::LLDB; }
   bool tuneForSCE() const { return DebuggerTuning == DebuggerKind::SCE; }
   /// @}
+
+  void addSectionLabel(const MCSymbol *Sym);
+  const MCSymbol *getSectionLabel(const MCSection *S);
 };
 
 } // end namespace llvm

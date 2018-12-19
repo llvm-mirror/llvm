@@ -621,9 +621,10 @@ static BranchProbability getCHRBiasThreshold() {
 // CHRBiasThreshold, put Key into TrueSet and return true. If FalseProb >=
 // CHRBiasThreshold, put Key into FalseSet and return true. Otherwise, return
 // false.
-template<typename K, typename S, typename M>
-bool checkBias(K *Key, BranchProbability TrueProb, BranchProbability FalseProb,
-               S &TrueSet, S &FalseSet, M &BiasMap) {
+template <typename K, typename S, typename M>
+static bool checkBias(K *Key, BranchProbability TrueProb,
+                      BranchProbability FalseProb, S &TrueSet, S &FalseSet,
+                      M &BiasMap) {
   BranchProbability Threshold = getCHRBiasThreshold();
   if (TrueProb >= Threshold) {
     TrueSet.insert(Key);
@@ -1415,7 +1416,7 @@ bool CHRScopeSorter(CHRScope *Scope1, CHRScope *Scope2) {
 void CHR::sortScopes(SmallVectorImpl<CHRScope *> &Input,
                      SmallVectorImpl<CHRScope *> &Output) {
   Output.resize(Input.size());
-  std::copy(Input.begin(), Input.end(), Output.begin());
+  llvm::copy(Input, Output.begin());
   std::stable_sort(Output.begin(), Output.end(), CHRScopeSorter);
 }
 
@@ -2039,7 +2040,7 @@ bool ControlHeightReductionLegacyPass::runOnFunction(Function &F) {
       getAnalysis<BlockFrequencyInfoWrapperPass>().getBFI();
   DominatorTree &DT = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
   ProfileSummaryInfo &PSI =
-      *getAnalysis<ProfileSummaryInfoWrapperPass>().getPSI();
+      getAnalysis<ProfileSummaryInfoWrapperPass>().getPSI();
   RegionInfo &RI = getAnalysis<RegionInfoPass>().getRegionInfo();
   std::unique_ptr<OptimizationRemarkEmitter> OwnedORE =
       llvm::make_unique<OptimizationRemarkEmitter>(&F);

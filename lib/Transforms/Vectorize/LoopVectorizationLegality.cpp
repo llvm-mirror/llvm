@@ -817,14 +817,14 @@ bool LoopVectorizationLegality::canVectorizeMemory() {
   if (!LAI->canVectorizeMemory())
     return false;
 
-  if (LAI->hasVariantStoreToLoopInvariantAddress()) {
+  if (LAI->hasDependenceInvolvingLoopInvariantAddress()) {
     ORE->emit(createMissedAnalysis("CantVectorizeStoreToLoopInvariantAddress")
-              << "write of variant value to a loop invariant address could not "
+              << "write to a loop invariant address could not "
                  "be vectorized");
-    LLVM_DEBUG(dbgs() << "LV: We don't allow storing to uniform addresses\n");
+    LLVM_DEBUG(
+        dbgs() << "LV: Non vectorizable stores to a uniform address\n");
     return false;
   }
-
   Requirements->addRuntimePointerChecks(LAI->getNumRuntimePointerChecks());
   PSE.addPredicate(LAI->getPSE().getUnionPredicate());
 
@@ -1131,6 +1131,61 @@ bool LoopVectorizationLegality::canVectorize(bool UseVPlanNativePath) {
   // which may limit our maximum vectorization factor, so just return true with
   // no restrictions.
   return Result;
+}
+
+bool LoopVectorizationLegality::canFoldTailByMasking() {
+
+  LLVM_DEBUG(dbgs() << "LV: checking if tail can be folded by masking.\n");
+
+  if (!PrimaryInduction) {
+    ORE->emit(createMissedAnalysis("NoPrimaryInduction")
+              << "Missing a primary induction variable in the loop, which is "
+              << "needed in order to fold tail by masking as required.");
+    LLVM_DEBUG(dbgs() << "LV: No primary induction, cannot fold tail by "
+                      << "masking.\n");
+    return false;
+  }
+
+  // TODO: handle reductions when tail is folded by masking.
+  if (!Reductions.empty()) {
+    ORE->emit(createMissedAnalysis("ReductionFoldingTailByMasking")
+              << "Cannot fold tail by masking in the presence of reductions.");
+    LLVM_DEBUG(dbgs() << "LV: Loop has reductions, cannot fold tail by "
+                      << "masking.\n");
+    return false;
+  }
+
+  // TODO: handle outside users when tail is folded by masking.
+  for (auto *AE : AllowedExit) {
+    // Check that all users of allowed exit values are inside the loop.
+    for (User *U : AE->users()) {
+      Instruction *UI = cast<Instruction>(U);
+      if (TheLoop->contains(UI))
+        continue;
+      ORE->emit(createMissedAnalysis("LiveOutFoldingTailByMasking")
+                << "Cannot fold tail by masking in the presence of live outs.");
+      LLVM_DEBUG(dbgs() << "LV: Cannot fold tail by masking, loop has an "
+                        << "outside user for : " << *UI << '\n');
+      return false;
+    }
+  }
+
+  // The list of pointers that we can safely read and write to remains empty.
+  SmallPtrSet<Value *, 8> SafePointers;
+
+  // Check and mark all blocks for predication, including those that ordinarily
+  // do not need predication such as the header block.
+  for (BasicBlock *BB : TheLoop->blocks()) {
+    if (!blockCanBePredicated(BB, SafePointers)) {
+      ORE->emit(createMissedAnalysis("NoCFGForSelect", BB->getTerminator())
+                << "control flow cannot be substituted for a select");
+      LLVM_DEBUG(dbgs() << "LV: Cannot fold tail by masking as required.\n");
+      return false;
+    }
+  }
+
+  LLVM_DEBUG(dbgs() << "LV: can fold tail by masking.\n");
+  return true;
 }
 
 } // namespace llvm

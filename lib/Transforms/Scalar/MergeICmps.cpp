@@ -98,7 +98,7 @@ BCEAtom visitICmpLoadOperand(Value *const Val) {
     Value *const Addr = LoadI->getOperand(0);
     if (auto *const GEP = dyn_cast<GetElementPtrInst>(Addr)) {
       LLVM_DEBUG(dbgs() << "GEP\n");
-      if (LoadI->isUsedOutsideOfBlock(LoadI->getParent())) {
+      if (GEP->isUsedOutsideOfBlock(LoadI->getParent())) {
         LLVM_DEBUG(dbgs() << "used outside of block\n");
         return {};
       }
@@ -283,8 +283,9 @@ BCECmpBlock visitICmp(const ICmpInst *const CmpI,
     if (!Lhs.Base()) return {};
     auto Rhs = visitICmpLoadOperand(CmpI->getOperand(1));
     if (!Rhs.Base()) return {};
+    const auto &DL = CmpI->getModule()->getDataLayout();
     return BCECmpBlock(std::move(Lhs), std::move(Rhs),
-                       CmpI->getOperand(0)->getType()->getScalarSizeInBits());
+                       DL.getTypeSizeInBits(CmpI->getOperand(0)->getType()));
   }
   return {};
 }

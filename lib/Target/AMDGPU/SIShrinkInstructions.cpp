@@ -212,6 +212,245 @@ static void shrinkScalarCompare(const SIInstrInfo *TII, MachineInstr &MI) {
   }
 }
 
+/// Attempt to shink AND/OR/XOR operations requiring non-inlineable literals.
+/// For AND or OR, try using S_BITSET{0,1} to clear or set bits.
+/// If the inverse of the immediate is legal, use ANDN2, ORN2 or
+/// XNOR (as a ^ b == ~(a ^ ~b)).
+/// \returns true if the caller should continue the machine function iterator
+static bool shrinkScalarLogicOp(const GCNSubtarget &ST,
+                                MachineRegisterInfo &MRI,
+                                const SIInstrInfo *TII,
+                                MachineInstr &MI) {
+  unsigned Opc = MI.getOpcode();
+  const MachineOperand *Dest = &MI.getOperand(0);
+  MachineOperand *Src0 = &MI.getOperand(1);
+  MachineOperand *Src1 = &MI.getOperand(2);
+  MachineOperand *SrcReg = Src0;
+  MachineOperand *SrcImm = Src1;
+
+  if (SrcImm->isImm() &&
+      !AMDGPU::isInlinableLiteral32(SrcImm->getImm(), ST.hasInv2PiInlineImm())) {
+    uint32_t Imm = static_cast<uint32_t>(SrcImm->getImm());
+    uint32_t NewImm = 0;
+
+    if (Opc == AMDGPU::S_AND_B32) {
+      if (isPowerOf2_32(~Imm)) {
+        NewImm = countTrailingOnes(Imm);
+        Opc = AMDGPU::S_BITSET0_B32;
+      } else if (AMDGPU::isInlinableLiteral32(~Imm, ST.hasInv2PiInlineImm())) {
+        NewImm = ~Imm;
+        Opc = AMDGPU::S_ANDN2_B32;
+      }
+    } else if (Opc == AMDGPU::S_OR_B32) {
+      if (isPowerOf2_32(Imm)) {
+        NewImm = countTrailingZeros(Imm);
+        Opc = AMDGPU::S_BITSET1_B32;
+      } else if (AMDGPU::isInlinableLiteral32(~Imm, ST.hasInv2PiInlineImm())) {
+        NewImm = ~Imm;
+        Opc = AMDGPU::S_ORN2_B32;
+      }
+    } else if (Opc == AMDGPU::S_XOR_B32) {
+      if (AMDGPU::isInlinableLiteral32(~Imm, ST.hasInv2PiInlineImm())) {
+        NewImm = ~Imm;
+        Opc = AMDGPU::S_XNOR_B32;
+      }
+    } else {
+      llvm_unreachable("unexpected opcode");
+    }
+
+    if ((Opc == AMDGPU::S_ANDN2_B32 || Opc == AMDGPU::S_ORN2_B32) &&
+        SrcImm == Src0) {
+      if (!TII->commuteInstruction(MI, false, 1, 2))
+        NewImm = 0;
+    }
+
+    if (NewImm != 0) {
+      if (TargetRegisterInfo::isVirtualRegister(Dest->getReg()) &&
+        SrcReg->isReg()) {
+        MRI.setRegAllocationHint(Dest->getReg(), 0, SrcReg->getReg());
+        MRI.setRegAllocationHint(SrcReg->getReg(), 0, Dest->getReg());
+        return true;
+      }
+
+      if (SrcReg->isReg() && SrcReg->getReg() == Dest->getReg()) {
+        MI.setDesc(TII->get(Opc));
+        if (Opc == AMDGPU::S_BITSET0_B32 ||
+            Opc == AMDGPU::S_BITSET1_B32) {
+          Src0->ChangeToImmediate(NewImm);
+          MI.RemoveOperand(2);
+        } else {
+          SrcImm->setImm(NewImm);
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+// This is the same as MachineInstr::readsRegister/modifiesRegister except
+// it takes subregs into account.
+static bool instAccessReg(iterator_range<MachineInstr::const_mop_iterator> &&R,
+                          unsigned Reg, unsigned SubReg,
+                          const SIRegisterInfo &TRI) {
+  for (const MachineOperand &MO : R) {
+    if (!MO.isReg())
+      continue;
+
+    if (TargetRegisterInfo::isPhysicalRegister(Reg) &&
+        TargetRegisterInfo::isPhysicalRegister(MO.getReg())) {
+      if (TRI.regsOverlap(Reg, MO.getReg()))
+        return true;
+    } else if (MO.getReg() == Reg &&
+               TargetRegisterInfo::isVirtualRegister(Reg)) {
+      LaneBitmask Overlap = TRI.getSubRegIndexLaneMask(SubReg) &
+                            TRI.getSubRegIndexLaneMask(MO.getSubReg());
+      if (Overlap.any())
+        return true;
+    }
+  }
+  return false;
+}
+
+static bool instReadsReg(const MachineInstr *MI,
+                         unsigned Reg, unsigned SubReg,
+                         const SIRegisterInfo &TRI) {
+  return instAccessReg(MI->uses(), Reg, SubReg, TRI);
+}
+
+static bool instModifiesReg(const MachineInstr *MI,
+                            unsigned Reg, unsigned SubReg,
+                            const SIRegisterInfo &TRI) {
+  return instAccessReg(MI->defs(), Reg, SubReg, TRI);
+}
+
+static TargetInstrInfo::RegSubRegPair
+getSubRegForIndex(unsigned Reg, unsigned Sub, unsigned I,
+                  const SIRegisterInfo &TRI, const MachineRegisterInfo &MRI) {
+  if (TRI.getRegSizeInBits(Reg, MRI) != 32) {
+    if (TargetRegisterInfo::isPhysicalRegister(Reg)) {
+      Reg = TRI.getSubReg(Reg, TRI.getSubRegFromChannel(I));
+    } else {
+      LaneBitmask LM = TRI.getSubRegIndexLaneMask(Sub);
+      Sub = TRI.getSubRegFromChannel(I + countTrailingZeros(LM.getAsInteger()));
+    }
+  }
+  return TargetInstrInfo::RegSubRegPair(Reg, Sub);
+}
+
+// Match:
+// mov t, x
+// mov x, y
+// mov y, t
+//
+// =>
+//
+// mov t, x (t is potentially dead and move eliminated)
+// v_swap_b32 x, y
+//
+// Returns next valid instruction pointer if was able to create v_swap_b32.
+//
+// This shall not be done too early not to prevent possible folding which may
+// remove matched moves, and this should prefereably be done before RA to
+// release saved registers and also possibly after RA which can insert copies
+// too.
+//
+// This is really just a generic peephole that is not a canocical shrinking,
+// although requirements match the pass placement and it reduces code size too.
+static MachineInstr* matchSwap(MachineInstr &MovT, MachineRegisterInfo &MRI,
+                               const SIInstrInfo *TII) {
+  assert(MovT.getOpcode() == AMDGPU::V_MOV_B32_e32 ||
+         MovT.getOpcode() == AMDGPU::COPY);
+
+  unsigned T = MovT.getOperand(0).getReg();
+  unsigned Tsub = MovT.getOperand(0).getSubReg();
+  MachineOperand &Xop = MovT.getOperand(1);
+
+  if (!Xop.isReg())
+    return nullptr;
+  unsigned X = Xop.getReg();
+  unsigned Xsub = Xop.getSubReg();
+
+  unsigned Size = TII->getOpSize(MovT, 0) / 4;
+
+  const SIRegisterInfo &TRI = TII->getRegisterInfo();
+  if (!TRI.isVGPR(MRI, X))
+    return nullptr;
+
+  for (MachineOperand &YTop : MRI.use_nodbg_operands(T)) {
+    if (YTop.getSubReg() != Tsub)
+      continue;
+
+    MachineInstr &MovY = *YTop.getParent();
+    if ((MovY.getOpcode() != AMDGPU::V_MOV_B32_e32 &&
+         MovY.getOpcode() != AMDGPU::COPY) ||
+        MovY.getOperand(1).getSubReg() != Tsub)
+      continue;
+
+    unsigned Y = MovY.getOperand(0).getReg();
+    unsigned Ysub = MovY.getOperand(0).getSubReg();
+
+    if (!TRI.isVGPR(MRI, Y) || MovT.getParent() != MovY.getParent())
+      continue;
+
+    MachineInstr *MovX = nullptr;
+    auto I = std::next(MovT.getIterator()), E = MovT.getParent()->instr_end();
+    for (auto IY = MovY.getIterator(); I != E && I != IY; ++I) {
+      if (instReadsReg(&*I, X, Xsub, TRI) ||
+          instModifiesReg(&*I, Y, Ysub, TRI) ||
+          instModifiesReg(&*I, T, Tsub, TRI) ||
+          (MovX && instModifiesReg(&*I, X, Xsub, TRI))) {
+        MovX = nullptr;
+        break;
+      }
+      if (!instReadsReg(&*I, Y, Ysub, TRI)) {
+        if (!MovX && instModifiesReg(&*I, X, Xsub, TRI)) {
+          MovX = nullptr;
+          break;
+        }
+        continue;
+      }
+      if (MovX ||
+          (I->getOpcode() != AMDGPU::V_MOV_B32_e32 &&
+           I->getOpcode() != AMDGPU::COPY) ||
+          I->getOperand(0).getReg() != X ||
+          I->getOperand(0).getSubReg() != Xsub) {
+        MovX = nullptr;
+        break;
+      }
+      MovX = &*I;
+    }
+
+    if (!MovX || I == E)
+      continue;
+
+    LLVM_DEBUG(dbgs() << "Matched v_swap_b32:\n" << MovT << *MovX << MovY);
+
+    for (unsigned I = 0; I < Size; ++I) {
+      TargetInstrInfo::RegSubRegPair X1, Y1;
+      X1 = getSubRegForIndex(X, Xsub, I, TRI, MRI);
+      Y1 = getSubRegForIndex(Y, Ysub, I, TRI, MRI);
+      BuildMI(*MovT.getParent(), MovX->getIterator(), MovT.getDebugLoc(),
+                TII->get(AMDGPU::V_SWAP_B32))
+        .addDef(X1.Reg, 0, X1.SubReg)
+        .addDef(Y1.Reg, 0, Y1.SubReg)
+        .addReg(Y1.Reg, 0, Y1.SubReg)
+        .addReg(X1.Reg, 0, X1.SubReg).getInstr();
+    }
+    MovX->eraseFromParent();
+    MovY.eraseFromParent();
+    MachineInstr *Next = &*std::next(MovT.getIterator());
+    if (MRI.use_nodbg_empty(T))
+      MovT.eraseFromParent();
+    else
+      Xop.setIsKill(false);
+
+    return Next;
+  }
+
+  return nullptr;
+}
+
 bool SIShrinkInstructions::runOnMachineFunction(MachineFunction &MF) {
   if (skipFunction(MF.getFunction()))
     return false;
@@ -249,6 +488,14 @@ bool SIShrinkInstructions::runOnMachineFunction(MachineFunction &MF) {
             Src.setImm(ReverseImm);
             continue;
           }
+        }
+      }
+
+      if (ST.hasSwap() && (MI.getOpcode() == AMDGPU::V_MOV_B32_e32 ||
+                           MI.getOpcode() == AMDGPU::COPY)) {
+        if (auto *NextMI = matchSwap(MI, MRI, TII)) {
+          Next = NextMI->getIterator();
+          continue;
         }
       }
 
@@ -339,6 +586,14 @@ bool SIShrinkInstructions::runOnMachineFunction(MachineFunction &MF) {
         }
 
         continue;
+      }
+
+      // Shrink scalar logic operations.
+      if (MI.getOpcode() == AMDGPU::S_AND_B32 ||
+          MI.getOpcode() == AMDGPU::S_OR_B32 ||
+          MI.getOpcode() == AMDGPU::S_XOR_B32) {
+        if (shrinkScalarLogicOp(ST, MRI, TII, MI))
+          continue;
       }
 
       if (!TII->hasVALU32BitEncoding(MI.getOpcode()))

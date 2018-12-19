@@ -19,6 +19,7 @@
 #include "llvm/ExecutionEngine/Orc/ExecutionUtils.h"
 #include "llvm/ExecutionEngine/Orc/IRCompileLayer.h"
 #include "llvm/ExecutionEngine/Orc/IRTransformLayer.h"
+#include "llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h"
 #include "llvm/ExecutionEngine/Orc/ObjectTransformLayer.h"
 #include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
 #include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
@@ -48,8 +49,15 @@ public:
   /// Returns a reference to the JITDylib representing the JIT'd main program.
   JITDylib &getMainJITDylib() { return Main; }
 
+  /// Create a new JITDylib with the given name and return a reference to it.
+  JITDylib &createJITDylib(std::string Name) {
+    return ES->createJITDylib(std::move(Name));
+  }
+
   /// Convenience method for defining an absolute symbol.
   Error defineAbsolute(StringRef Name, JITEvaluatedSymbol Address);
+
+  /// Convenience method for defining an
 
   /// Adds an IR module to the given JITDylib.
   Error addIRModule(JITDylib &JD, ThreadSafeModule TSM);
@@ -96,7 +104,7 @@ public:
   Error runDestructors() { return DtorRunner.run(); }
 
   /// Returns a reference to the ObjLinkingLayer
-  RTDyldObjectLinkingLayer2 &getObjLinkingLayer() { return ObjLinkingLayer; }
+  RTDyldObjectLinkingLayer &getObjLinkingLayer() { return ObjLinkingLayer; }
 
 protected:
 
@@ -107,8 +115,6 @@ protected:
   /// Create an LLJIT instance with multiple compile threads.
   LLJIT(std::unique_ptr<ExecutionSession> ES, JITTargetMachineBuilder JTMB,
         DataLayout DL, unsigned NumCompileThreads);
-
-  std::unique_ptr<RuntimeDyld::MemoryManager> getMemoryManager(VModuleKey K);
 
   std::string mangle(StringRef UnmangledName);
 
@@ -122,10 +128,10 @@ protected:
   DataLayout DL;
   std::unique_ptr<ThreadPool> CompileThreads;
 
-  RTDyldObjectLinkingLayer2 ObjLinkingLayer;
-  IRCompileLayer2 CompileLayer;
+  RTDyldObjectLinkingLayer ObjLinkingLayer;
+  IRCompileLayer CompileLayer;
 
-  CtorDtorRunner2 CtorRunner, DtorRunner;
+  CtorDtorRunner CtorRunner, DtorRunner;
 };
 
 /// An extended version of LLJIT that supports lazy function-at-a-time
@@ -138,12 +144,18 @@ public:
   /// LLLazyJIT with the given number of compile threads.
   static Expected<std::unique_ptr<LLLazyJIT>>
   Create(JITTargetMachineBuilder JTMB, DataLayout DL,
-         unsigned NumCompileThreads = 0);
+         JITTargetAddress ErrorAddr, unsigned NumCompileThreads = 0);
 
   /// Set an IR transform (e.g. pass manager pipeline) to run on each function
   /// when it is compiled.
-  void setLazyCompileTransform(IRTransformLayer2::TransformFunction Transform) {
+  void setLazyCompileTransform(IRTransformLayer::TransformFunction Transform) {
     TransformLayer.setTransform(std::move(Transform));
+  }
+
+  /// Sets the partition function.
+  void
+  setPartitionFunction(CompileOnDemandLayer::PartitionFunction Partition) {
+    CODLayer.setPartitionFunction(std::move(Partition));
   }
 
   /// Add a module to be lazily compiled to JITDylib JD.
@@ -171,9 +183,8 @@ private:
   std::unique_ptr<LazyCallThroughManager> LCTMgr;
   std::function<std::unique_ptr<IndirectStubsManager>()> ISMBuilder;
 
-  IRTransformLayer2 TransformLayer;
-  CompileOnDemandLayer2 CODLayer;
-  SymbolLinkagePromoter PromoteSymbols;
+  IRTransformLayer TransformLayer;
+  CompileOnDemandLayer CODLayer;
 };
 
 } // End namespace orc

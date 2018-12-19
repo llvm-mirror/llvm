@@ -1,4 +1,5 @@
-//===- LegacyDivergenceAnalysis.cpp --------- Legacy Divergence Analysis Implementation -==//
+//===- LegacyDivergenceAnalysis.cpp --------- Legacy Divergence Analysis
+//Implementation -==//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -64,6 +65,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ADT/PostOrderIterator.h"
+#include "llvm/Analysis/CFG.h"
+#include "llvm/Analysis/DivergenceAnalysis.h"
 #include "llvm/Analysis/LegacyDivergenceAnalysis.h"
 #include "llvm/Analysis/Passes.h"
 #include "llvm/Analysis/PostDominators.h"
@@ -79,6 +83,12 @@ using namespace llvm;
 
 #define DEBUG_TYPE "divergence"
 
+// transparently use the GPUDivergenceAnalysis
+static cl::opt<bool> UseGPUDA("use-gpu-divergence-analysis", cl::init(false),
+                              cl::Hidden,
+                              cl::desc("turn the LegacyDivergenceAnalysis into "
+                                       "a wrapper for GPUDivergenceAnalysis"));
+
 namespace {
 
 class DivergencePropagator {
@@ -93,7 +103,7 @@ private:
   // A helper function that explores data dependents of V.
   void exploreDataDependency(Value *V);
   // A helper function that explores sync dependents of TI.
-  void exploreSyncDependency(TerminatorInst *TI);
+  void exploreSyncDependency(Instruction *TI);
   // Computes the influence region from Start to End. This region includes all
   // basic blocks on any simple path from Start to End.
   void computeInfluenceRegion(BasicBlock *Start, BasicBlock *End,
@@ -128,7 +138,7 @@ void DivergencePropagator::populateWithSourcesOfDivergence() {
   }
 }
 
-void DivergencePropagator::exploreSyncDependency(TerminatorInst *TI) {
+void DivergencePropagator::exploreSyncDependency(Instruction *TI) {
   // Propagation rule 1: if branch TI is divergent, all PHINodes in TI's
   // immediate post dominator are divergent. This rule handles if-then-else
   // patterns. For example,
@@ -252,26 +262,27 @@ void DivergencePropagator::propagate() {
   while (!Worklist.empty()) {
     Value *V = Worklist.back();
     Worklist.pop_back();
-    if (TerminatorInst *TI = dyn_cast<TerminatorInst>(V)) {
+    if (Instruction *I = dyn_cast<Instruction>(V)) {
       // Terminators with less than two successors won't introduce sync
       // dependency. Ignore them.
-      if (TI->getNumSuccessors() > 1)
-        exploreSyncDependency(TI);
+      if (I->isTerminator() && I->getNumSuccessors() > 1)
+        exploreSyncDependency(I);
     }
     exploreDataDependency(V);
   }
 }
 
-} /// end namespace anonymous
+} // namespace
 
 // Register this pass.
 char LegacyDivergenceAnalysis::ID = 0;
-INITIALIZE_PASS_BEGIN(LegacyDivergenceAnalysis, "divergence", "Legacy Divergence Analysis",
-                      false, true)
+INITIALIZE_PASS_BEGIN(LegacyDivergenceAnalysis, "divergence",
+                      "Legacy Divergence Analysis", false, true)
 INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(PostDominatorTreeWrapperPass)
-INITIALIZE_PASS_END(LegacyDivergenceAnalysis, "divergence", "Legacy Divergence Analysis",
-                    false, true)
+INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
+INITIALIZE_PASS_END(LegacyDivergenceAnalysis, "divergence",
+                    "Legacy Divergence Analysis", false, true)
 
 FunctionPass *llvm::createLegacyDivergenceAnalysisPass() {
   return new LegacyDivergenceAnalysis();
@@ -280,7 +291,22 @@ FunctionPass *llvm::createLegacyDivergenceAnalysisPass() {
 void LegacyDivergenceAnalysis::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequired<DominatorTreeWrapperPass>();
   AU.addRequired<PostDominatorTreeWrapperPass>();
+  if (UseGPUDA)
+    AU.addRequired<LoopInfoWrapperPass>();
   AU.setPreservesAll();
+}
+
+bool LegacyDivergenceAnalysis::shouldUseGPUDivergenceAnalysis(
+    const Function &F) const {
+  if (!UseGPUDA)
+    return false;
+
+  // GPUDivergenceAnalysis requires a reducible CFG.
+  auto &LI = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
+  using RPOTraversal = ReversePostOrderTraversal<const Function *>;
+  RPOTraversal FuncRPOT(&F);
+  return !containsIrreducibleCFG<const BasicBlock *, const RPOTraversal,
+                                 const LoopInfo>(FuncRPOT, LI);
 }
 
 bool LegacyDivergenceAnalysis::runOnFunction(Function &F) {
@@ -295,36 +321,61 @@ bool LegacyDivergenceAnalysis::runOnFunction(Function &F) {
     return false;
 
   DivergentValues.clear();
+  gpuDA = nullptr;
+
+  auto &DT = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
   auto &PDT = getAnalysis<PostDominatorTreeWrapperPass>().getPostDomTree();
-  DivergencePropagator DP(F, TTI,
-                          getAnalysis<DominatorTreeWrapperPass>().getDomTree(),
-                          PDT, DivergentValues);
-  DP.populateWithSourcesOfDivergence();
-  DP.propagate();
-  LLVM_DEBUG(
-    dbgs() << "\nAfter divergence analysis on " << F.getName() << ":\n";
-    print(dbgs(), F.getParent())
-  );
+
+  if (shouldUseGPUDivergenceAnalysis(F)) {
+    // run the new GPU divergence analysis
+    auto &LI = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
+    gpuDA = llvm::make_unique<GPUDivergenceAnalysis>(F, DT, PDT, LI, TTI);
+
+  } else {
+    // run LLVM's existing DivergenceAnalysis
+    DivergencePropagator DP(F, TTI, DT, PDT, DivergentValues);
+    DP.populateWithSourcesOfDivergence();
+    DP.propagate();
+  }
+
+  LLVM_DEBUG(dbgs() << "\nAfter divergence analysis on " << F.getName()
+                    << ":\n";
+             print(dbgs(), F.getParent()));
+
   return false;
 }
 
-void LegacyDivergenceAnalysis::print(raw_ostream &OS, const Module *) const {
-  if (DivergentValues.empty())
-    return;
-  const Value *FirstDivergentValue = *DivergentValues.begin();
-  const Function *F;
-  if (const Argument *Arg = dyn_cast<Argument>(FirstDivergentValue)) {
-    F = Arg->getParent();
-  } else if (const Instruction *I =
-                 dyn_cast<Instruction>(FirstDivergentValue)) {
-    F = I->getParent()->getParent();
-  } else {
-    llvm_unreachable("Only arguments and instructions can be divergent");
+bool LegacyDivergenceAnalysis::isDivergent(const Value *V) const {
+  if (gpuDA) {
+    return gpuDA->isDivergent(*V);
   }
+  return DivergentValues.count(V);
+}
+
+void LegacyDivergenceAnalysis::print(raw_ostream &OS, const Module *) const {
+  if ((!gpuDA || !gpuDA->hasDivergence()) && DivergentValues.empty())
+    return;
+
+  const Function *F = nullptr;
+  if (!DivergentValues.empty()) {
+    const Value *FirstDivergentValue = *DivergentValues.begin();
+    if (const Argument *Arg = dyn_cast<Argument>(FirstDivergentValue)) {
+      F = Arg->getParent();
+    } else if (const Instruction *I =
+                   dyn_cast<Instruction>(FirstDivergentValue)) {
+      F = I->getParent()->getParent();
+    } else {
+      llvm_unreachable("Only arguments and instructions can be divergent");
+    }
+  } else if (gpuDA) {
+    F = &gpuDA->getFunction();
+  }
+  if (!F)
+    return;
 
   // Dumps all divergent values in F, arguments and then instructions.
   for (auto &Arg : F->args()) {
-    OS << (DivergentValues.count(&Arg) ? "DIVERGENT: " : "           ");
+    OS << (isDivergent(&Arg) ? "DIVERGENT: " : "           ");
     OS << Arg << "\n";
   }
   // Iterate instructions using instructions() to ensure a deterministic order.
@@ -332,7 +383,7 @@ void LegacyDivergenceAnalysis::print(raw_ostream &OS, const Module *) const {
     auto &BB = *BI;
     OS << "\n           " << BB.getName() << ":\n";
     for (auto &I : BB.instructionsWithoutDebug()) {
-      OS << (DivergentValues.count(&I) ? "DIVERGENT:     " : "               ");
+      OS << (isDivergent(&I) ? "DIVERGENT:     " : "               ");
       OS << I << "\n";
     }
   }

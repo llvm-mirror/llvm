@@ -202,6 +202,13 @@ static bool sinkInstruction(Loop &L, Instruction &I,
   if (BBsToSinkInto.empty())
     return false;
 
+  // Return if any of the candidate blocks to sink into is non-cold.
+  if (BBsToSinkInto.size() > 1) {
+    for (auto *BB : BBsToSinkInto)
+      if (!LoopBlockNumber.count(BB))
+        return false;
+  }
+
   // Copy the final BBs into a vector and sort them using the total ordering
   // of the loop block numbers as iterating the set doesn't give a useful
   // order. No need to stable sort as the block numbers are a total ordering.
@@ -273,6 +280,7 @@ static bool sinkLoopInvariantInstructions(Loop &L, AAResults &AA, LoopInfo &LI,
   // Compute alias set.
   for (BasicBlock *BB : L.blocks())
     CurAST.add(*BB);
+  CurAST.add(*Preheader);
 
   // Sort loop's basic blocks by frequency
   SmallVector<BasicBlock *, 10> ColdLoopBBs;

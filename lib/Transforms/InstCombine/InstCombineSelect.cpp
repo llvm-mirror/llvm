@@ -75,12 +75,21 @@ static Instruction *foldSelectBinOpIdentity(SelectInst &Sel,
   else
     return nullptr;
 
-  // A select operand must be a binop, and the compare constant must be the
-  // identity constant for that binop.
+  // A select operand must be a binop.
   BinaryOperator *BO;
-  if (!match(Sel.getOperand(IsEq ? 1 : 2), m_BinOp(BO)) ||
-      ConstantExpr::getBinOpIdentity(BO->getOpcode(), BO->getType(), true) != C)
+  if (!match(Sel.getOperand(IsEq ? 1 : 2), m_BinOp(BO)))
     return nullptr;
+
+  // The compare constant must be the identity constant for that binop.
+  // If this a floating-point compare with 0.0, any zero constant will do.
+  Type *Ty = BO->getType();
+  Constant *IdC = ConstantExpr::getBinOpIdentity(BO->getOpcode(), Ty, true);
+  if (IdC != C) {
+    if (!IdC || !CmpInst::isFPPredicate(Pred))
+      return nullptr;
+    if (!match(IdC, m_AnyZeroFP()) || !match(C, m_AnyZeroFP()))
+      return nullptr;
+  }
 
   // Last, match the compare variable operand with a binop operand.
   Value *Y;
@@ -1537,6 +1546,66 @@ static Instruction *factorizeMinMaxTree(SelectPatternFlavor SPF, Value *LHS,
   return SelectInst::Create(CmpABC, MinMaxOp, ThirdOp);
 }
 
+/// Try to reduce a rotate pattern that includes a compare and select into a
+/// sequence of ALU ops only. Example:
+/// rotl32(a, b) --> (b == 0 ? a : ((a >> (32 - b)) | (a << b)))
+///              --> (a >> (-b & 31)) | (a << (b & 31))
+static Instruction *foldSelectRotate(SelectInst &Sel,
+                                     InstCombiner::BuilderTy &Builder) {
+  // The false value of the select must be a rotate of the true value.
+  Value *Or0, *Or1;
+  if (!match(Sel.getFalseValue(), m_OneUse(m_Or(m_Value(Or0), m_Value(Or1)))))
+    return nullptr;
+
+  Value *TVal = Sel.getTrueValue();
+  Value *SA0, *SA1;
+  if (!match(Or0, m_OneUse(m_LogicalShift(m_Specific(TVal), m_Value(SA0)))) ||
+      !match(Or1, m_OneUse(m_LogicalShift(m_Specific(TVal), m_Value(SA1)))))
+    return nullptr;
+
+  auto ShiftOpcode0 = cast<BinaryOperator>(Or0)->getOpcode();
+  auto ShiftOpcode1 = cast<BinaryOperator>(Or1)->getOpcode();
+  if (ShiftOpcode0 == ShiftOpcode1)
+    return nullptr;
+
+  // We have one of these patterns so far:
+  // select ?, TVal, (or (lshr TVal, SA0), (shl TVal, SA1))
+  // select ?, TVal, (or (shl TVal, SA0), (lshr TVal, SA1))
+  // This must be a power-of-2 rotate for a bitmasking transform to be valid.
+  unsigned Width = Sel.getType()->getScalarSizeInBits();
+  if (!isPowerOf2_32(Width))
+    return nullptr;
+
+  // Check the shift amounts to see if they are an opposite pair.
+  Value *ShAmt;
+  if (match(SA1, m_OneUse(m_Sub(m_SpecificInt(Width), m_Specific(SA0)))))
+    ShAmt = SA0;
+  else if (match(SA0, m_OneUse(m_Sub(m_SpecificInt(Width), m_Specific(SA1)))))
+    ShAmt = SA1;
+  else
+    return nullptr;
+
+  // Finally, see if the select is filtering out a shift-by-zero.
+  Value *Cond = Sel.getCondition();
+  ICmpInst::Predicate Pred;
+  if (!match(Cond, m_OneUse(m_ICmp(Pred, m_Specific(ShAmt), m_ZeroInt()))) ||
+      Pred != ICmpInst::ICMP_EQ)
+    return nullptr;
+
+  // This is a rotate that avoids shift-by-bitwidth UB in a suboptimal way.
+  // Convert to safely bitmasked shifts.
+  // TODO: When we can canonicalize to funnel shift intrinsics without risk of
+  // performance regressions, replace this sequence with that call.
+  Value *NegShAmt = Builder.CreateNeg(ShAmt);
+  Value *MaskedShAmt = Builder.CreateAnd(ShAmt, Width - 1);
+  Value *MaskedNegShAmt = Builder.CreateAnd(NegShAmt, Width - 1);
+  Value *NewSA0 = ShAmt == SA0 ? MaskedShAmt : MaskedNegShAmt;
+  Value *NewSA1 = ShAmt == SA1 ? MaskedShAmt : MaskedNegShAmt;
+  Value *NewSh0 = Builder.CreateBinOp(ShiftOpcode0, TVal, NewSA0);
+  Value *NewSh1 = Builder.CreateBinOp(ShiftOpcode1, TVal, NewSA1);
+  return BinaryOperator::CreateOr(NewSh0, NewSh1);
+}
+
 Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
   Value *CondVal = SI.getCondition();
   Value *TrueVal = SI.getTrueValue();
@@ -1651,31 +1720,6 @@ Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
   // See if we are selecting two values based on a comparison of the two values.
   if (FCmpInst *FCI = dyn_cast<FCmpInst>(CondVal)) {
     if (FCI->getOperand(0) == TrueVal && FCI->getOperand(1) == FalseVal) {
-      // Transform (X == Y) ? X : Y  -> Y
-      if (FCI->getPredicate() == FCmpInst::FCMP_OEQ) {
-        // This is not safe in general for floating point:
-        // consider X== -0, Y== +0.
-        // It becomes safe if either operand is a nonzero constant.
-        ConstantFP *CFPt, *CFPf;
-        if (((CFPt = dyn_cast<ConstantFP>(TrueVal)) &&
-              !CFPt->getValueAPF().isZero()) ||
-            ((CFPf = dyn_cast<ConstantFP>(FalseVal)) &&
-             !CFPf->getValueAPF().isZero()))
-        return replaceInstUsesWith(SI, FalseVal);
-      }
-      // Transform (X une Y) ? X : Y  -> X
-      if (FCI->getPredicate() == FCmpInst::FCMP_UNE) {
-        // This is not safe in general for floating point:
-        // consider X== -0, Y== +0.
-        // It becomes safe if either operand is a nonzero constant.
-        ConstantFP *CFPt, *CFPf;
-        if (((CFPt = dyn_cast<ConstantFP>(TrueVal)) &&
-              !CFPt->getValueAPF().isZero()) ||
-            ((CFPf = dyn_cast<ConstantFP>(FalseVal)) &&
-             !CFPf->getValueAPF().isZero()))
-        return replaceInstUsesWith(SI, TrueVal);
-      }
-
       // Canonicalize to use ordered comparisons by swapping the select
       // operands.
       //
@@ -1694,31 +1738,6 @@ Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
 
       // NOTE: if we wanted to, this is where to detect MIN/MAX
     } else if (FCI->getOperand(0) == FalseVal && FCI->getOperand(1) == TrueVal){
-      // Transform (X == Y) ? Y : X  -> X
-      if (FCI->getPredicate() == FCmpInst::FCMP_OEQ) {
-        // This is not safe in general for floating point:
-        // consider X== -0, Y== +0.
-        // It becomes safe if either operand is a nonzero constant.
-        ConstantFP *CFPt, *CFPf;
-        if (((CFPt = dyn_cast<ConstantFP>(TrueVal)) &&
-              !CFPt->getValueAPF().isZero()) ||
-            ((CFPf = dyn_cast<ConstantFP>(FalseVal)) &&
-             !CFPf->getValueAPF().isZero()))
-          return replaceInstUsesWith(SI, FalseVal);
-      }
-      // Transform (X une Y) ? Y : X  -> Y
-      if (FCI->getPredicate() == FCmpInst::FCMP_UNE) {
-        // This is not safe in general for floating point:
-        // consider X== -0, Y== +0.
-        // It becomes safe if either operand is a nonzero constant.
-        ConstantFP *CFPt, *CFPf;
-        if (((CFPt = dyn_cast<ConstantFP>(TrueVal)) &&
-              !CFPt->getValueAPF().isZero()) ||
-            ((CFPf = dyn_cast<ConstantFP>(FalseVal)) &&
-             !CFPf->getValueAPF().isZero()))
-          return replaceInstUsesWith(SI, TrueVal);
-      }
-
       // Canonicalize to use ordered comparisons by swapping the select
       // operands.
       //
@@ -1751,7 +1770,7 @@ Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
            match(TrueVal, m_FSub(m_PosZeroFP(), m_Specific(X)))) ||
           (X == TrueVal && Pred == FCmpInst::FCMP_OGT &&
            match(FalseVal, m_FSub(m_PosZeroFP(), m_Specific(X))))) {
-        Value *Fabs = Builder.CreateIntrinsic(Intrinsic::fabs, { X }, FCI);
+        Value *Fabs = Builder.CreateUnaryIntrinsic(Intrinsic::fabs, X, FCI);
         return replaceInstUsesWith(SI, Fabs);
       }
       // With nsz:
@@ -1764,7 +1783,7 @@ Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
             (Pred == FCmpInst::FCMP_OLT || Pred == FCmpInst::FCMP_OLE)) ||
            (X == TrueVal && match(FalseVal, m_FNeg(m_Specific(X))) &&
             (Pred == FCmpInst::FCMP_OGT || Pred == FCmpInst::FCMP_OGE)))) {
-        Value *Fabs = Builder.CreateIntrinsic(Intrinsic::fabs, { X }, FCI);
+        Value *Fabs = Builder.CreateUnaryIntrinsic(Intrinsic::fabs, X, FCI);
         return replaceInstUsesWith(SI, Fabs);
       }
     }
@@ -1847,8 +1866,7 @@ Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
       // MAX(~a, C)  -> ~MIN(a, ~C)
       // MIN(~a, ~b) -> ~MAX(a, b)
       // MIN(~a, C)  -> ~MAX(a, ~C)
-      auto moveNotAfterMinMax = [&](Value *X, Value *Y,
-                                    bool Swapped) -> Instruction * {
+      auto moveNotAfterMinMax = [&](Value *X, Value *Y) -> Instruction * {
         Value *A;
         if (match(X, m_Not(m_Value(A))) && !X->hasNUsesOrMore(3) &&
             !IsFreeToInvert(A, A->hasOneUse()) &&
@@ -1861,14 +1879,8 @@ Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
           if (MDNode *MD = SI.getMetadata(LLVMContext::MD_prof)) {
             cast<SelectInst>(NewMinMax)->setMetadata(LLVMContext::MD_prof, MD);
             // Swap the metadata if the operands are swapped.
-            if (Swapped) {
-              assert(X == SI.getFalseValue() && Y == SI.getTrueValue() &&
-                     "Unexpected operands.");
+            if (X == SI.getFalseValue() && Y == SI.getTrueValue())
               cast<SelectInst>(NewMinMax)->swapProfMetadata();
-            } else {
-              assert(X == SI.getTrueValue() && Y == SI.getFalseValue() &&
-                     "Unexpected operands.");
-            }
           }
 
           return BinaryOperator::CreateNot(NewMinMax);
@@ -1877,9 +1889,9 @@ Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
         return nullptr;
       };
 
-      if (Instruction *I = moveNotAfterMinMax(LHS, RHS, /*Swapped*/false))
+      if (Instruction *I = moveNotAfterMinMax(LHS, RHS))
         return I;
-      if (Instruction *I = moveNotAfterMinMax(RHS, LHS, /*Swapped*/true))
+      if (Instruction *I = moveNotAfterMinMax(RHS, LHS))
         return I;
 
       if (Instruction *I = factorizeMinMaxTree(SPF, LHS, RHS, Builder))
@@ -1989,10 +2001,12 @@ Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
     }
   }
 
-  if (BinaryOperator::isNot(CondVal)) {
-    SI.setOperand(0, BinaryOperator::getNotArgument(CondVal));
+  Value *NotCond;
+  if (match(CondVal, m_Not(m_Value(NotCond)))) {
+    SI.setOperand(0, NotCond);
     SI.setOperand(1, FalseVal);
     SI.setOperand(2, TrueVal);
+    SI.swapProfMetadata();
     return &SI;
   }
 
@@ -2004,24 +2018,6 @@ Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
       if (V != &SI)
         return replaceInstUsesWith(SI, V);
       return &SI;
-    }
-  }
-
-  // See if we can determine the result of this select based on a dominating
-  // condition.
-  BasicBlock *Parent = SI.getParent();
-  if (BasicBlock *Dom = Parent->getSinglePredecessor()) {
-    auto *PBI = dyn_cast_or_null<BranchInst>(Dom->getTerminator());
-    if (PBI && PBI->isConditional() &&
-        PBI->getSuccessor(0) != PBI->getSuccessor(1) &&
-        (PBI->getSuccessor(0) == Parent || PBI->getSuccessor(1) == Parent)) {
-      bool CondIsTrue = PBI->getSuccessor(0) == Parent;
-      Optional<bool> Implication = isImpliedCondition(
-          PBI->getCondition(), SI.getCondition(), DL, CondIsTrue);
-      if (Implication) {
-        Value *V = *Implication ? TrueVal : FalseVal;
-        return replaceInstUsesWith(SI, V);
-      }
     }
   }
 
@@ -2048,6 +2044,9 @@ Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
 
   if (Instruction *Select = foldSelectBinOpIdentity(SI, TLI))
     return Select;
+
+  if (Instruction *Rot = foldSelectRotate(SI, Builder))
+    return Rot;
 
   return nullptr;
 }

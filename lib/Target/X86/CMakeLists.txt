@@ -13,6 +13,7 @@ tablegen(LLVM X86GenInstrInfo.inc -gen-instr-info)
 tablegen(LLVM X86GenRegisterBank.inc -gen-register-bank)
 tablegen(LLVM X86GenRegisterInfo.inc -gen-register-info)
 tablegen(LLVM X86GenSubtargetInfo.inc -gen-subtarget)
+tablegen(LLVM X86GenExegesis.inc -gen-exegesis)
 
 if (X86_GEN_FOLD_TABLES)
   tablegen(LLVM X86GenFoldTables.inc -gen-x86-fold-tables)
@@ -27,7 +28,9 @@ set(sources
   X86CallingConv.cpp
   X86CallLowering.cpp
   X86CmovConversion.cpp
+  X86CondBrFolding.cpp
   X86DomainReassignment.cpp
+  X86DiscriminateMemOps.cpp
   X86ExpandPseudo.cpp
   X86FastISel.cpp
   X86FixupBWInsts.cpp
@@ -42,6 +45,7 @@ set(sources
   X86ISelLowering.cpp
   X86IndirectBranchTracking.cpp
   X86InterleavedAccess.cpp
+  X86InsertPrefetch.cpp
   X86InstrFMA3Info.cpp
   X86InstrFoldTables.cpp
   X86InstrInfo.cpp
