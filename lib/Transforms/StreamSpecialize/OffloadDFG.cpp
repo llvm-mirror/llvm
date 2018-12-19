@@ -98,8 +98,52 @@ static int getDedicatedUnroll(MDNode *Loop, StringRef Str) {
   return -1;
 }
 
-static int isMemoryOp(unsigned int Op) {
-  return Op >= Instruction::MemoryOpsBegin && Op < Instruction::MemoryOpsEnd;
+static bool analyzeLoopAndOffloadDFGs(
+  ScalarEvolution *SE,
+  Loop *Current,
+  int Factor
+) {
+  // Get the loop nest
+  SmallVector<Loop*, 4> Loops;
+  bool FoundStream = false;
+  while (true) {
+    Loops.push_back(Current);
+    auto ID = Current->getLoopID();
+    for (size_t i = 0; i < ID->getNumOperands(); ++i) {
+      auto Node = dyn_cast<MDNode>(ID->getOperand(i));
+      assert(Node);
+      auto Str = dyn_cast<MDString>(Node->getOperand(0));
+      if (Str && Str->getString() == "llvm.loop.ss.stream") {
+        FoundStream = true;
+        break;
+      }
+    }
+    if (FoundStream)
+      break;
+    Current = Current->getParentLoop();
+    assert(Current && "A 'stream end' level is required!");
+  }
+  // Analyze the scalar-loop evolution
+  auto Blocks = Loops[0]->getBlocks();
+  llvm::errs() << Blocks.size() << "\n";
+  for (auto Block : Blocks) {
+    for (auto &Inst : *Block) {
+      if (auto *Store = dyn_cast<StoreInst>(&Inst)) {
+        Store->dump();
+        Store->getPointerOperand()->dump();
+        Store->getValueOperand()->dump();
+
+        auto SCEV = SE->getSCEV(Store->getPointerOperand());
+        assert(SCEV);
+        if (auto SCEVAdd = dyn_cast<SCEVAddRecExpr>(SCEV)) {
+          SCEVAdd->getStart()->dump();
+          SCEVAdd->getStepRecurrence(*SE)->dump();
+        }
+        SCEV->dump();
+      }
+    }
+  }
+  return true;
 }
 
 }
@@ -111,29 +155,14 @@ namespace {
 
     bool runOnFunction(Function &F) override {
       auto *LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
+      auto *SE = &getAnalysis<ScalarEvolutionWrapperPass>().getSE();
+
       LI->begin();
-      llvm::errs() << "# " << F.getName() << "\n";
 
       for (auto Loop : *LI) {
-        llvm::errs() << "# " << Loop->getName() << "\n";
         auto ID = Loop->getLoopID();
         auto Factor = getDedicatedUnroll(ID, "llvm.loop.ss.dedicated");
-        if (Factor != -1) {
-          assert(Loop->getNumBlocks() == 1 && "So far, only perfect loop supported");
-          auto Block = Loop->getBlocks()[0];
-
-          for (auto &Inst : *Block) {
-            if (Inst.getOpcode() == Instruction::Store) {
-            }
-            if (!isMemoryOp(Inst.getOpcode())) {
-              Inst.dump();
-              for (auto User : Inst.users()) {
-                User->dump();
-              }
-              llvm::errs() << "\n";
-            }
-          }
-        }
+        analyzeLoopAndOffloadDFGs(SE, Loop, Factor);
       }
       return false;
     }
