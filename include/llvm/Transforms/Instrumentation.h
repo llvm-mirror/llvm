@@ -178,6 +178,9 @@ struct EfficiencySanitizerOptions {
 ModulePass *createEfficiencySanitizerPass(
     const EfficiencySanitizerOptions &Options = EfficiencySanitizerOptions());
 
+// Insert Memoro instrumentation.
+ModulePass *createMemoroPass();
+
 // Options for sanitizer coverage instrumentation.
 struct SanitizerCoverageOptions {
   enum Type {
