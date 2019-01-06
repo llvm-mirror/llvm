@@ -48,14 +48,12 @@ using namespace llvm;
 
 #define DEBUG_TYPE "memoro"
 
-
 static cl::opt<bool> ClInstrumentLoadsAndStores(
     "memoro-instrument-loads-and-stores", cl::init(true),
     cl::desc("Instrument loads and stores"), cl::Hidden);
 static cl::opt<bool> ClInstrumentMemIntrinsics(
     "memoro-instrument-memintrinsics", cl::init(true),
     cl::desc("Instrument memintrinsics (memset/memcpy/memmove)"), cl::Hidden);
-
 
 STATISTIC(NumInstrumentedLoads, "Number of instrumented loads");
 STATISTIC(NumInstrumentedStores, "Number of instrumented stores");
@@ -77,8 +75,7 @@ namespace {
 /// Memoro: instrument each module to find performance issues.
 class Memoro : public ModulePass {
 public:
-  Memoro()
-      : ModulePass(ID) {}
+  Memoro() : ModulePass(ID) {}
   ~Memoro() = default;
   StringRef getPassName() const override;
   void getAnalysisUsage(AnalysisUsage &AU) const override;
@@ -131,9 +128,7 @@ void Memoro::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequired<TargetLibraryInfoWrapperPass>();
 }
 
-ModulePass *llvm::createMemoroPass() {
-  return new Memoro();
-}
+ModulePass *llvm::createMemoroPass() { return new Memoro(); }
 
 void Memoro::initializeCallbacks(Module &M) {
   IRBuilder<> IRB(M.getContext());
@@ -198,9 +193,9 @@ bool Memoro::initOnModule(Module &M) {
   IntptrTy = DL.getIntPtrType(M.getContext());
   // Constructor
   std::tie(MemoroCtorFunction, std::ignore) =
-      createSanitizerCtorAndInitFunctions(
-          M, MemoroModuleCtorName, MemoroInitName,
-          /*InitArgTypes=*/{}, {});
+      createSanitizerCtorAndInitFunctions(M, MemoroModuleCtorName,
+                                          MemoroInitName,
+                                          /*InitArgTypes=*/{}, {});
   appendToGlobalCtors(M, MemoroCtorFunction, MemoroCtorAndDtorPriority);
 
   createDestructor(M);
@@ -302,7 +297,8 @@ void Memoro::inferMallocNewType(CallInst *CI, StringRef const &name,
 void Memoro::maybeInferMallocNewType(CallInst *CI, raw_fd_ostream &type_file) {
   // detect if the function is a memory allocation call
   // currently doing this by comparing names, but this is inefficient and feels
-  // somewhat brittle and likely doesn't catch all alloc funcs. Open to suggestions
+  // somewhat brittle and likely doesn't catch all alloc funcs.
+  // Open to suggestions
   Function *F = CI->getCalledFunction();
   if (!F || F->getName().empty()) {
     return;
