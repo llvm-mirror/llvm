@@ -1,0 +1,6 @@
+[submodule "tools/polly"]
+	path = tools/polly
+	url = git@github.com:PolyArch/ss-polly.git
+[submodule "tools/clang"]
+	path = tools/clang
+	url = git@github.com:PolyArch/ss-clang.git
