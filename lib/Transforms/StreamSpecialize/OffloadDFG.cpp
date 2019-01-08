@@ -1,5 +1,6 @@
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/BreadthFirstIterator.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseMapInfo.h"
 #include "llvm/ADT/Hashing.h"
@@ -89,9 +90,7 @@ static int getDedicatedUnroll(MDNode *Loop, StringRef Str) {
       if (!Str)
         continue;
       if (Str->getString() == "llvm.loop.ss.dedicated") {
-        llvm::errs() << Node->getNumOperands() << "\n";
         assert(Node->getNumOperands() == 2);
-        Node->getOperand(1)->dump();
         auto Factor = dyn_cast<ConstantAsMetadata>(Node->getOperand(1));
         assert(Factor);
         return (int) Factor->getValue()->getUniqueInteger().getSExtValue();
@@ -101,13 +100,19 @@ static int getDedicatedUnroll(MDNode *Loop, StringRef Str) {
   return -1;
 }
 
+Instruction* DSUGetRepresentitive(std::map<Instruction*, Instruction*> &DSU, Instruction *Inst) {
+  assert(DSU.find(Inst) != DSU.end());
+  return DSU[Inst] == Inst ? Inst : DSU[Inst] = DSUGetRepresentitive(DSU, DSU[Inst]);
+}
+
+
 static bool analyzeLoopAndOffloadDFGs(
   ScalarEvolution *SE,
   Loop *Current,
   int Factor
 ) {
   // Get the loop nest
-  SmallVector<Loop*, 4> Loops;
+  SmallVector<Loop*, 0> Loops;
   bool FoundStream = false;
   while (true) {
     Loops.push_back(Current);
@@ -123,46 +128,62 @@ static bool analyzeLoopAndOffloadDFGs(
     }
     if (FoundStream)
       break;
+    assert(Current->getParentLoop());
     Current = Current->getParentLoop();
     assert(Current && "A 'stream end' level is required!");
   }
   // Analyze the scalar-loop evolution
   auto Blocks = Loops[0]->getBlocks();
-  llvm::errs() << Blocks.size() << "\n";
+
+  std::map<Instruction*, Instruction*> DSU;
+
   for (auto Block : Blocks) {
     for (auto &Inst : *Block) {
-      if (auto *Store = dyn_cast<StoreInst>(&Inst)) {
-        llvm::errs() << "Store:\n";
-        Store->getPointerOperand()->dump();
-        Store->getValueOperand()->dump();
-        Store->dump();
 
-        auto SCEV = SE->getSCEV(Store->getPointerOperand());
-        assert(SCEV);
-        if (auto SCEVAdd = dyn_cast<SCEVAddRecExpr>(SCEV)) {
-          SCEVAdd->getStart()->dump();
-          SCEVAdd->getStepRecurrence(*SE)->dump();
-        }
-        SCEV->dump();
-        llvm::errs() << "\n";
-      } else if (auto *Load = dyn_cast<LoadInst>(&Inst)) {
-        llvm::errs() << "Load:\n";
-        if (auto Ptr = dyn_cast<GetElementPtrInst>(Load->getPointerOperand())) {
-          Ptr->dump();
-        }
-        Load->dump();
+      if (!LoadInst::classof(&Inst) && DSU.find(&Inst) == DSU.end()) 
+        continue;
 
-        auto SCEV = SE->getSCEV(Load->getPointerOperand());
-        assert(SCEV);
-        if (auto SCEVAdd = dyn_cast<SCEVAddRecExpr>(SCEV)) {
-          SCEVAdd->getStart()->dump();
-          SCEVAdd->getStepRecurrence(*SE)->dump();
+      if (LoadInst::classof(&Inst)) {
+        DSU[&Inst] = &Inst;
+      }
+
+      assert(Instruction::classof(&Inst));
+      for (auto user: (dyn_cast<Instruction>(&Inst))->users()) {
+        if (Instruction::classof(user)) {
+          auto UserInst = dyn_cast<Instruction>(user);
+          if (DSU.find(UserInst) == DSU.end()) {
+            DSU[UserInst] = UserInst;
+          }
+          DSU[DSUGetRepresentitive(DSU, UserInst)] = DSUGetRepresentitive(DSU, &Inst);
         }
-        SCEV->dump();
-        llvm::errs() << "\n";
+      }
+
+
+    }
+
+  }
+
+  for (auto Block : Blocks) {
+    for (auto &Outer : *Block) {
+      if (DSU.find(&Outer) != DSU.end()) {
+        std::vector<Instruction*> DFG;
+        auto Master = DSUGetRepresentitive(DSU, &Outer);
+        for (auto &Inner : *Block) {
+          if (DSU.find(&Inner) != DSU.end() && DSUGetRepresentitive(DSU, &Inner) == Master) {
+            DFG.push_back(&Inner);
+          }
+        }
+        llvm::outs() << "========A DFG=======\n";
+        for (auto &Inst : DFG) {
+          Inst->dump();
+          DSU.erase(Inst);
+        }
+        llvm::outs() << "====================\n";
       }
     }
   }
+
+
   return true;
 }
 
@@ -179,13 +200,9 @@ struct OffloadDFG : public FunctionPass {
     auto *LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
     auto *SE = &getAnalysis<ScalarEvolutionWrapperPass>().getSE();
 
-    LI->begin();
-
     for (auto Loop : *LI) {
-      Loop->dump();
       if (auto ID = Loop->getLoopID()) {
         auto Factor = getDedicatedUnroll(ID, "llvm.loop.ss.dedicated");
-        llvm::errs() << Factor << "\n";
         analyzeLoopAndOffloadDFGs(SE, Loop, Factor);
       }
     }
@@ -211,7 +228,6 @@ struct OffloadDFG : public FunctionPass {
 
 };
 
-
 struct POCAssemble : public FunctionPass {
 
   static char ID;
@@ -222,7 +238,12 @@ struct POCAssemble : public FunctionPass {
       for (auto &inst: bb) {
         if (auto Call = dyn_cast<CallInst>(&inst)) {
           if (Call->isInlineAsm()) {
-            auto Asm = dyn_cast<InlineAsm>(Call);
+            Call->dump();
+            auto Asm = dyn_cast<InlineAsm>(Call->getCalledOperand());
+            llvm::outs() << "Asm: "; Asm->dump();
+            for (int i = 0, e = Call->getNumOperands(); i < e; ++i) {
+              llvm::outs() << i << ": "; Call->getOperand(i)->dump();
+            }
             llvm::outs() << "PtrType: "; Asm->getType()->dump();
             llvm::outs() << "FuncType: "; Asm->getFunctionType()->dump();
             llvm::outs() << Asm->getAsmString() << "\n"

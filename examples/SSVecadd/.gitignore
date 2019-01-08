@@ -1,0 +1,11 @@
+*.s
+*.o
+*.exe
+
+*.bc
+*.ll
+
+*.dfg.h
+sched/*
+verif/*
+viz/*

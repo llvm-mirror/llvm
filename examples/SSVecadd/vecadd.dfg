@@ -1,0 +1,6 @@
+Input: a
+Input: b
+
+c = FAdd64(a, b)
+
+Output: c
