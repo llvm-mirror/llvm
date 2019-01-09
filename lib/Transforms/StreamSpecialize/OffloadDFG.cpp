@@ -76,6 +76,12 @@
 #include "llvm/Transforms/Utils/LoopSimplify.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
 #include "llvm/Transforms/Utils/LoopVersioning.h"
+#include "llvm/Transforms/Utils/UnrollLoop.h"
+
+#include <cstdlib>
+#include <sstream>
+#include <fstream>
+
 
 using namespace llvm;
 
@@ -83,51 +89,203 @@ using namespace llvm;
 
 namespace {
 
-static int getDedicatedUnroll(MDNode *Loop, StringRef Str) {
-  for (size_t i = 0; i < Loop->getNumOperands(); ++i) {
-    if (auto Node = dyn_cast<MDNode>(Loop->getOperand(i))) {
-      auto Str = dyn_cast<MDString>(Node->getOperand(0));
-      if (!Str)
-        continue;
-      if (Str->getString() == "llvm.loop.ss.dedicated") {
-        assert(Node->getNumOperands() == 2);
-        auto Factor = dyn_cast<ConstantAsMetadata>(Node->getOperand(1));
-        assert(Factor);
-        return (int) Factor->getValue()->getUniqueInteger().getSExtValue();
-      }
-    }
-  }
-  return -1;
-}
-
-Instruction* DSUGetRepresentitive(std::map<Instruction*, Instruction*> &DSU, Instruction *Inst) {
+Instruction* DSUGetRepresentitive(
+  std::map<Instruction*, Instruction*> &DSU,
+  Instruction *Inst
+) {
   assert(DSU.find(Inst) != DSU.end());
   return DSU[Inst] == Inst ? Inst : DSU[Inst] = DSUGetRepresentitive(DSU, DSU[Inst]);
 }
 
+std::string getInstructionOperand(
+  const std::map<Instruction*, int> &Table,
+  Value *Val
+) {
+  if (auto Inst = dyn_cast<Instruction>(Val)) {
+    auto Iter = Table.find(Inst);
+    assert(Iter != Table.end());
+    return "v" + std::to_string(Iter->second);
+  } else if (auto Const = dyn_cast<Constant>(Val)) {
+    //FIXME: I do not know how to do Constant yet, write a POC!
+    return Const->getName();
+  } else {
+    assert(0 && "Besides Inst and Const, not supported yet!");
+  }
+}
 
-static bool analyzeLoopAndOffloadDFGs(
+std::string getOperationStr(Type *Ty, const std::string &Name) {
+
+  int Bitwidth = -1;
+
+  switch (Ty->getTypeID()) {
+  case Type::FloatTyID:
+    Bitwidth = 32;
+    break;
+  case Type::DoubleTyID:
+    Bitwidth = 64;
+    break;
+  case Type::IntegerTyID:
+    Bitwidth = cast<IntegerType>(Ty)->getBitWidth();
+    break;
+  default:
+    assert(0 && "Not supported!");
+  }
+
+  auto OpStr(Name);
+
+  for (int i = 0, e = OpStr[0] == 'f' ? 2 : 1; i < e; ++i) {
+    OpStr[i] -= 'a';
+    OpStr[i] += 'A';
+  }
+
+  return OpStr + std::to_string(Bitwidth);
+}
+
+
+/// The information of a schedule we can extract from a .dfg.h file
+struct ScheduleInfo {
+  /// Key: v_x's x in the generated .dfg file
+  /// Value: the corresponding port in this schedule
+  std::map<int, int> IOPort;
+  /// The size of the configuration array
+  int ConfigSize;
+  /// The values in the configuration array
+  std::string ConfigString;
+
+  ScheduleInfo() {}
+
+  ScheduleInfo(const std::map<int, int> &IOPort, int ConfigSize, const std::string ConfigString) :
+    IOPort(IOPort), ConfigSize(ConfigSize), ConfigString(ConfigString) {}
+};
+
+/// Parse the generated .dfg.h file, the filename should be xxx.dfg
+ScheduleInfo ParseSchedule(const std::string &FileName) {
+  std::map<int, int> IOPort;
+  int ConfigSize = 0;
+  std::string ConfigString;
+
+  std::ifstream ifs(FileName + ".h");
+
+  std::string Stripped(FileName);
+  while (Stripped.back() != '.') {
+    Stripped.pop_back();
+  }
+  Stripped.pop_back();
+
+  std::string Line;
+  std::string PortPrefix("P_" + Stripped + "_");
+  while (std::getline(ifs, Line)) {
+    std::istringstream iss(Line);
+    std::string Token;
+    iss >> Token;
+    // #define xxx
+    if (Token == "#define") {
+      iss >> Token;
+      // #define P_dfgx_vy
+      if (Token.find(PortPrefix) == 0) {
+        int IO = atoi(Token.substr(PortPrefix.size() + 1, Token.size()).c_str());
+        int Port;
+        iss >> Port;
+        IOPort[IO] = Port;
+        llvm::outs() << "v" << IO << " -> " << Port << "\n";
+      // #define dfgx_size size
+      } else if (Token.find(Stripped + "_") == 0) {
+        iss >> ConfigSize;
+      }
+    // char dfgx_config[size] = "filename:dfgx.sched";
+    } else if (Token == "char") {
+      // dfgx_config[size]
+      iss >> Token;
+      // =
+      iss >> Token;
+      // "filename:dfgx.sched";
+      iss >> Token;
+      ConfigString = Token.substr(1, Token.size() - 3);
+      while ((int)ConfigString.size() < ConfigSize)
+        ConfigString.push_back('\0');
+    }
+  }
+
+  llvm::outs() << "[Config] " << ConfigSize << ": " << ConfigString << "\n";
+  return ScheduleInfo(IOPort, ConfigSize, ConfigString);
+}
+
+
+/// Emit DFG to .dfg text format and schedule it.
+/// Factor: The unroll factor of the loop body.
+/// ID: The ID of the DFG to be scheduled.
+/// DFG: The instructions in the DFG.
+/// Return the map from instruction to the value id.
+std::map<Instruction*, int> ScheduleDFG(int Factor, int ID, const std::vector<Instruction*> &DFG) {
+
+  std::error_code EC;
+  std::string FileName = "dfg" + std::to_string(ID) + ".dfg";
+  raw_fd_ostream TempDFG(FileName, EC);
+
+  std::vector<bool>(DFG.size(), false);
+  std::map<Instruction*, int> Alias;
+
+  for (auto &Inst : DFG) {
+    if (auto Load = dyn_cast<LoadInst>(Inst)) {
+      Alias[Load] = Alias.size();
+      TempDFG << "Input: v" << Alias[Load] << "\n";
+    }
+  }
+
+  for (auto &Inst : DFG) {
+    if (Inst->isBinaryOp()) {
+      Alias[Inst] = Alias.size();
+
+      std::string OpStr = getOperationStr(Inst->getType(), Inst->getOpcodeName());
+      auto Op0 = getInstructionOperand(Alias, Inst->getOperand(0));
+      auto Op1 = getInstructionOperand(Alias, Inst->getOperand(1));
+
+      TempDFG << "v" << Alias[Inst] << " = " << OpStr << "(" << Op0 << ", " << Op1 << ")\n";
+    }
+  }
+
+  int StoreCnt = 0;
+  for (auto &Inst : DFG) {
+    if (auto Store = dyn_cast<StoreInst>(Inst)) {
+      auto Val = dyn_cast<Instruction>(Store->getValueOperand());
+      assert(Alias.find(Val) != Alias.end());
+      TempDFG << "Output: v" << Alias[Val] << "\n";
+      ++StoreCnt;
+    }
+  }
+  assert(Alias.size() + StoreCnt == DFG.size() && "Any ignored instructions?");
+
+  TempDFG.close();
+
+  llvm::outs() << "========== Generated DFG" << ID << " Textformat ==========\n";
+  system(("cat " + FileName).c_str());
+  llvm::outs() << "\n";
+  // TODO: Support different fifo depth for DSE.
+  assert(getenv("SSCONFIG") && "Please specify $SSCONFIG to schedule the DFG!");
+  // Generate the schedule command.
+  std::ostringstream oss;
+  oss << "ss_sched --verbose -a sa ";
+  oss << getenv("SSCONFIG");
+  oss << " " << FileName;
+  if (system(oss.str().c_str()) == 0) {
+    llvm::outs() << "\nSuccessfully scheduled! Parse the generated file...\n";
+  }
+}
+
+
+/// Offload DFG and analyze data flow access pattern
+bool AnalyzeLoopAndOffloadDFGs(
   ScalarEvolution *SE,
   Loop *Current,
   int Factor
 ) {
   // Get the loop nest
   SmallVector<Loop*, 0> Loops;
-  bool FoundStream = false;
   while (true) {
     Loops.push_back(Current);
-    auto ID = Current->getLoopID();
-    for (size_t i = 0; i < ID->getNumOperands(); ++i) {
-      auto Node = dyn_cast<MDNode>(ID->getOperand(i));
-      assert(Node);
-      auto Str = dyn_cast<MDString>(Node->getOperand(0));
-      if (Str && Str->getString() == "llvm.loop.ss.stream") {
-        FoundStream = true;
-        break;
-      }
-    }
-    if (FoundStream)
+    if (GetUnrollMetadata(Current->getLoopID(), "llvm.loop.ss.stream")) {
       break;
+    }
     assert(Current->getParentLoop());
     Current = Current->getParentLoop();
     assert(Current && "A 'stream end' level is required!");
@@ -149,37 +307,44 @@ static bool analyzeLoopAndOffloadDFGs(
 
       assert(Instruction::classof(&Inst));
       for (auto user: (dyn_cast<Instruction>(&Inst))->users()) {
-        if (Instruction::classof(user)) {
-          auto UserInst = dyn_cast<Instruction>(user);
-          if (DSU.find(UserInst) == DSU.end()) {
-            DSU[UserInst] = UserInst;
-          }
-          DSU[DSUGetRepresentitive(DSU, UserInst)] = DSUGetRepresentitive(DSU, &Inst);
-        }
-      }
+        if (!Instruction::classof(user))
+          continue;
 
+        auto UserInst = dyn_cast<Instruction>(user);
+        if (DSU.find(UserInst) == DSU.end())
+          DSU[UserInst] = UserInst;
+        DSU[DSUGetRepresentitive(DSU, UserInst)] = DSUGetRepresentitive(DSU, &Inst);
+      }
 
     }
 
   }
 
+  static int TotalDfgs = 0;
+
   for (auto Block : Blocks) {
     for (auto &Outer : *Block) {
-      if (DSU.find(&Outer) != DSU.end()) {
-        std::vector<Instruction*> DFG;
-        auto Master = DSUGetRepresentitive(DSU, &Outer);
-        for (auto &Inner : *Block) {
-          if (DSU.find(&Inner) != DSU.end() && DSUGetRepresentitive(DSU, &Inner) == Master) {
-            DFG.push_back(&Inner);
-          }
-        }
-        llvm::outs() << "========A DFG=======\n";
-        for (auto &Inst : DFG) {
-          Inst->dump();
-          DSU.erase(Inst);
-        }
-        llvm::outs() << "====================\n";
+
+      if (DSU.find(&Outer) == DSU.end())
+        continue;
+
+      std::vector<Instruction*> DFG;
+      /// Get the instructions in the same disjoint union
+      auto Master = DSUGetRepresentitive(DSU, &Outer);
+      for (auto &Inner : *Block)
+        if (DSU.find(&Inner) != DSU.end() && DSUGetRepresentitive(DSU, &Inner) == Master)
+          DFG.push_back(&Inner);
+
+      /// Dump the DFG for debugging
+      llvm::outs() << "========== Extracted DFG" << TotalDfgs << "==========\n";
+      for (auto &Inst : DFG) {
+        Inst->dump();
+        DSU.erase(Inst);
       }
+      llvm::outs() << "\n";
+
+      ScheduleDFG(Factor, TotalDfgs, DFG);
+      ++TotalDfgs;
     }
   }
 
@@ -191,19 +356,23 @@ static bool analyzeLoopAndOffloadDFGs(
 
 namespace {
 
-struct OffloadDFG : public FunctionPass {
+struct StreamSpecialize : public FunctionPass {
 
   static char ID;
-  OffloadDFG() : FunctionPass(ID) {}
+  StreamSpecialize() : FunctionPass(ID) {}
 
   bool runOnFunction(Function &F) override {
     auto *LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
     auto *SE = &getAnalysis<ScalarEvolutionWrapperPass>().getSE();
 
     for (auto Loop : *LI) {
-      if (auto ID = Loop->getLoopID()) {
-        auto Factor = getDedicatedUnroll(ID, "llvm.loop.ss.dedicated");
-        analyzeLoopAndOffloadDFGs(SE, Loop, Factor);
+      MDNode *MD = GetUnrollMetadata(Loop->getLoopID(), "llvm.loop.ss.dedicated");
+      if (MD) {
+        assert(MD->getNumOperands() == 2);
+        auto MDFactor = dyn_cast<ConstantAsMetadata>(MD->getOperand(1));
+        assert(MDFactor);
+        int Factor =(int) MDFactor->getValue()->getUniqueInteger().getSExtValue();
+        AnalyzeLoopAndOffloadDFGs(SE, Loop, Factor);
       }
     }
     return false;
@@ -276,7 +445,7 @@ struct POCAssemble : public FunctionPass {
 
 }
 
-char OffloadDFG::ID = 0;
+char StreamSpecialize::ID = 0;
 char POCAssemble::ID = 1;
-static RegisterPass<::OffloadDFG> X("offload-dfg", "Offload Dataflow Graph Pass", false, true);
+static RegisterPass<::StreamSpecialize> X("stream-specialize", "Stream specialize the program...", false, true);
 static RegisterPass<::POCAssemble> Y("poc-assemble", "Assemble Call POC", false, true);

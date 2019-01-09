@@ -5,6 +5,7 @@
 *.bc
 *.ll
 
+dfg*.dfg
 *.dfg.h
 sched/*
 verif/*

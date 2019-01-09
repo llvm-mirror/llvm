@@ -3,8 +3,8 @@ LLC = llc
 RV_ROOT = $(SS_TOOLS)/riscv64-unknown-elf
 INCLUDE = -I $(SS_TOOLS)/include
 
-ifndef SBCONFIG
-$(warning SBCONFIG is undefined, using default)
+ifndef SSCONFIG
+$(warning SSCONFIG is undefined, using default)
 SSCONFIG=$(SS)"/ss-scheduler/configs/revel-1x1.sbmodel"
 endif
 
@@ -21,4 +21,4 @@ main.s: main.bc
 	$(LLC) $<
 
 clean:
-	rm -f *.bc *.ll *.o *.exe *.s
+	rm -f *.bc *.ll *.o *.exe *.s *.dfg.h
