@@ -21,4 +21,4 @@ main.s: main.bc
 	$(LLC) $<
 
 clean:
-	rm -f *.bc *.ll *.o *.exe *.s *.dfg.h
+	rm -f *.bc *.ll *.o *.exe *.s *.dfg.h dfg*.dfg
