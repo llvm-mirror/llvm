@@ -1176,7 +1176,7 @@ uint64_t WasmObjectWriter::writeObject(MCAssembler &Asm,
   TableImport.Module = TableSym->getModuleName();
   TableImport.Field = TableSym->getName();
   TableImport.Kind = wasm::WASM_EXTERNAL_TABLE;
-  TableImport.Table.ElemType = wasm::WASM_TYPE_ANYFUNC;
+  TableImport.Table.ElemType = wasm::WASM_TYPE_FUNCREF;
   Imports.push_back(TableImport);
 
   // Populate SignatureIndices, and Imports and WasmIndices for undefined
@@ -1256,7 +1256,7 @@ uint64_t WasmObjectWriter::writeObject(MCAssembler &Asm,
       Segment.Offset = DataSize;
       Segment.Section = &Section;
       addData(Segment.Data, Section);
-      Segment.Alignment = Section.getAlignment();
+      Segment.Alignment = Log2_32(Section.getAlignment());
       Segment.Flags = 0;
       DataSize += Segment.Data.size();
       Section.setSegmentIndex(SegmentIndex);

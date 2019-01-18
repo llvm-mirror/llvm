@@ -759,8 +759,15 @@ void InnerLoopVectorizer::setDebugLocFromInst(IRBuilder<> &B, const Value *Ptr) 
   if (const Instruction *Inst = dyn_cast_or_null<Instruction>(Ptr)) {
     const DILocation *DIL = Inst->getDebugLoc();
     if (DIL && Inst->getFunction()->isDebugInfoForProfiling() &&
-        !isa<DbgInfoIntrinsic>(Inst))
-      B.SetCurrentDebugLocation(DIL->cloneWithDuplicationFactor(UF * VF));
+        !isa<DbgInfoIntrinsic>(Inst)) {
+      auto NewDIL = DIL->cloneWithDuplicationFactor(UF * VF);
+      if (NewDIL)
+        B.SetCurrentDebugLocation(NewDIL.getValue());
+      else
+        LLVM_DEBUG(dbgs()
+                   << "Failed to create new discriminator: "
+                   << DIL->getFilename() << " Line: " << DIL->getLine());
+    }
     else
       B.SetCurrentDebugLocation(DIL);
   } else
@@ -1359,7 +1366,8 @@ static bool isExplicitVecOuterLoop(Loop *OuterLp,
     return false;
 
   Function *Fn = OuterLp->getHeader()->getParent();
-  if (!Hints.allowVectorization(Fn, OuterLp, false /*AlwaysVectorize*/)) {
+  if (!Hints.allowVectorization(Fn, OuterLp,
+                                true /*VectorizeOnlyWhenForced*/)) {
     LLVM_DEBUG(dbgs() << "LV: Loop hints prevent outer loop vectorization.\n");
     return false;
   }
@@ -1415,10 +1423,11 @@ struct LoopVectorize : public FunctionPass {
 
   LoopVectorizePass Impl;
 
-  explicit LoopVectorize(bool NoUnrolling = false, bool AlwaysVectorize = true)
+  explicit LoopVectorize(bool InterleaveOnlyWhenForced = false,
+                         bool VectorizeOnlyWhenForced = false)
       : FunctionPass(ID) {
-    Impl.DisableUnrolling = NoUnrolling;
-    Impl.AlwaysVectorize = AlwaysVectorize;
+    Impl.InterleaveOnlyWhenForced = InterleaveOnlyWhenForced;
+    Impl.VectorizeOnlyWhenForced = VectorizeOnlyWhenForced;
     initializeLoopVectorizePass(*PassRegistry::getPassRegistry());
   }
 
@@ -6022,8 +6031,9 @@ INITIALIZE_PASS_END(LoopVectorize, LV_NAME, lv_name, false, false)
 
 namespace llvm {
 
-Pass *createLoopVectorizePass(bool NoUnrolling, bool AlwaysVectorize) {
-  return new LoopVectorize(NoUnrolling, AlwaysVectorize);
+Pass *createLoopVectorizePass(bool InterleaveOnlyWhenForced,
+                              bool VectorizeOnlyWhenForced) {
+  return new LoopVectorize(InterleaveOnlyWhenForced, VectorizeOnlyWhenForced);
 }
 
 } // end namespace llvm
@@ -7141,7 +7151,7 @@ bool LoopVectorizePass::processLoop(Loop *L) {
                     << L->getHeader()->getParent()->getName() << "\" from "
                     << DebugLocStr << "\n");
 
-  LoopVectorizeHints Hints(L, DisableUnrolling, *ORE);
+  LoopVectorizeHints Hints(L, InterleaveOnlyWhenForced, *ORE);
 
   LLVM_DEBUG(
       dbgs() << "LV: Loop hints:"
@@ -7165,7 +7175,7 @@ bool LoopVectorizePass::processLoop(Loop *L) {
   // less verbose reporting vectorized loops and unvectorized loops that may
   // benefit from vectorization, respectively.
 
-  if (!Hints.allowVectorization(F, L, AlwaysVectorize)) {
+  if (!Hints.allowVectorization(F, L, VectorizeOnlyWhenForced)) {
     LLVM_DEBUG(dbgs() << "LV: Loop hints prevent vectorization.\n");
     return false;
   }

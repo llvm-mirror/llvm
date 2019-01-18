@@ -583,6 +583,11 @@ def : Pat <
 
   // TODO: we could add more variants for other types of conditionals
 
+def : Pat <
+  (int_amdgcn_icmp i1:$src, (i1 0), (i32 33)),
+  (COPY $src) // Return the SGPRs representing i1 src
+>;
+
 //===----------------------------------------------------------------------===//
 // VOP1 Patterns
 //===----------------------------------------------------------------------===//
@@ -852,6 +857,8 @@ def : BitConvert <f64, v2f32, VReg_64>;
 def : BitConvert <v2f32, f64, VReg_64>;
 def : BitConvert <f64, v2i32, VReg_64>;
 def : BitConvert <v2i32, f64, VReg_64>;
+def : BitConvert <v4i16, v4f16, VReg_64>;
+def : BitConvert <v4f16, v4i16, VReg_64>;
 
 // FIXME: Make SGPR
 def : BitConvert <v2i32, v4f16, VReg_64>;

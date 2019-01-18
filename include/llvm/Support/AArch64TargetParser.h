@@ -48,6 +48,8 @@ enum ArchExtKind : unsigned {
   AEK_RAND =        1 << 18,
   AEK_MTE =         1 << 19,
   AEK_SSBS =        1 << 20,
+  AEK_SB =          1 << 21,
+  AEK_PREDRES =     1 << 22,
 };
 
 enum class ArchKind {

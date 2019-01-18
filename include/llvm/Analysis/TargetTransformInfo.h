@@ -581,13 +581,17 @@ public:
   struct MemCmpExpansionOptions {
     // The list of available load sizes (in bytes), sorted in decreasing order.
     SmallVector<unsigned, 8> LoadSizes;
+    // Set to true to allow overlapping loads. For example, 7-byte compares can
+    // be done with two 4-byte compares instead of 4+2+1-byte compares. This
+    // requires all loads in LoadSizes to be doable in an unaligned way.
+    bool AllowOverlappingLoads = false;
   };
   const MemCmpExpansionOptions *enableMemCmpExpansion(bool IsZeroCmp) const;
 
   /// Enable matching of interleaved access groups.
   bool enableInterleavedAccessVectorization() const;
 
-  /// Enable matching of interleaved access groups that contain predicated 
+  /// Enable matching of interleaved access groups that contain predicated
   /// accesses or gaps and therefore vectorized using masked
   /// vector loads/stores.
   bool enableMaskedInterleavedAccessVectorization() const;
@@ -772,7 +776,7 @@ public:
   /// \return The cost of a shuffle instruction of kind Kind and of type Tp.
   /// The index and subtype parameters are used by the subvector insertion and
   /// extraction shuffle kinds to show the insert/extract point and the type of
-  /// the subvector being inserted/extracted. 
+  /// the subvector being inserted/extracted.
   /// NOTE: For subvector extractions Tp represents the source type.
   int getShuffleCost(ShuffleKind Kind, Type *Tp, int Index = 0,
                      Type *SubTp = nullptr) const;
@@ -929,6 +933,14 @@ public:
   /// purposes.
   bool areInlineCompatible(const Function *Caller,
                            const Function *Callee) const;
+
+  /// \returns True if the caller and callee agree on how \p Args will be passed
+  /// to the callee.
+  /// \param[out] Args The list of compatible arguments.  The implementation may
+  /// filter out any incompatible args from this list.
+  bool areFunctionArgsABICompatible(const Function *Caller,
+                                    const Function *Callee,
+                                    SmallPtrSetImpl<Argument *> &Args) const;
 
   /// The type of load/store indexing.
   enum MemIndexedMode {
@@ -1175,6 +1187,9 @@ public:
       unsigned RemainingBytes, unsigned SrcAlign, unsigned DestAlign) const = 0;
   virtual bool areInlineCompatible(const Function *Caller,
                                    const Function *Callee) const = 0;
+  virtual bool
+  areFunctionArgsABICompatible(const Function *Caller, const Function *Callee,
+                               SmallPtrSetImpl<Argument *> &Args) const = 0;
   virtual bool isIndexedLoadLegal(MemIndexedMode Mode, Type *Ty) const = 0;
   virtual bool isIndexedStoreLegal(MemIndexedMode Mode,Type *Ty) const = 0;
   virtual unsigned getLoadStoreVecRegBitWidth(unsigned AddrSpace) const = 0;
@@ -1552,6 +1567,11 @@ public:
   bool areInlineCompatible(const Function *Caller,
                            const Function *Callee) const override {
     return Impl.areInlineCompatible(Caller, Callee);
+  }
+  bool areFunctionArgsABICompatible(
+      const Function *Caller, const Function *Callee,
+      SmallPtrSetImpl<Argument *> &Args) const override {
+    return Impl.areFunctionArgsABICompatible(Caller, Callee, Args);
   }
   bool isIndexedLoadLegal(MemIndexedMode Mode, Type *Ty) const override {
     return Impl.isIndexedLoadLegal(Mode, Ty, getDataLayout());

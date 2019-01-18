@@ -266,6 +266,7 @@ public:
   void EmitCVFPOData(const MCSymbol *ProcSym, SMLoc L) override;
 
   void EmitIdent(StringRef IdentString) override;
+  void EmitCFIBKeyFrame() override;
   void EmitCFISections(bool EH, bool Debug) override;
   void EmitCFIDefCfa(int64_t Register, int64_t Offset) override;
   void EmitCFIDefCfaOffset(int64_t Offset) override;
@@ -285,6 +286,7 @@ public:
   void EmitCFIUndefined(int64_t Register) override;
   void EmitCFIRegister(int64_t Register1, int64_t Register2) override;
   void EmitCFIWindowSave() override;
+  void EmitCFINegateRAState() override;
   void EmitCFIReturnColumn(int64_t Register) override;
 
   void EmitWinCFIStartProc(const MCSymbol *Symbol, SMLoc Loc) override;
@@ -539,11 +541,14 @@ void MCAsmStreamer::EmitVersionMin(MCVersionMinType Type, unsigned Major,
 
 static const char *getPlatformName(MachO::PlatformType Type) {
   switch (Type) {
-  case MachO::PLATFORM_MACOS:    return "macos";
-  case MachO::PLATFORM_IOS:      return "ios";
-  case MachO::PLATFORM_TVOS:     return "tvos";
-  case MachO::PLATFORM_WATCHOS:  return "watchos";
-  case MachO::PLATFORM_BRIDGEOS: return "bridgeos";
+  case MachO::PLATFORM_MACOS:            return "macos";
+  case MachO::PLATFORM_IOS:              return "ios";
+  case MachO::PLATFORM_TVOS:             return "tvos";
+  case MachO::PLATFORM_WATCHOS:          return "watchos";
+  case MachO::PLATFORM_BRIDGEOS:         return "bridgeos";
+  case MachO::PLATFORM_IOSSIMULATOR:     return "iossimulator";
+  case MachO::PLATFORM_TVOSSIMULATOR:    return "tvossimulator";
+  case MachO::PLATFORM_WATCHOSSIMULATOR: return "watchossimulator";
   }
   llvm_unreachable("Invalid Mach-O platform type");
 }
@@ -1586,9 +1591,21 @@ void MCAsmStreamer::EmitCFIWindowSave() {
   EmitEOL();
 }
 
+void MCAsmStreamer::EmitCFINegateRAState() {
+  MCStreamer::EmitCFINegateRAState();
+  OS << "\t.cfi_negate_ra_state";
+  EmitEOL();
+}
+
 void MCAsmStreamer::EmitCFIReturnColumn(int64_t Register) {
   MCStreamer::EmitCFIReturnColumn(Register);
   OS << "\t.cfi_return_column " << Register;
+  EmitEOL();
+}
+
+void MCAsmStreamer::EmitCFIBKeyFrame() {
+  MCStreamer::EmitCFIBKeyFrame();
+  OS << "\t.cfi_b_key_frame";
   EmitEOL();
 }
 

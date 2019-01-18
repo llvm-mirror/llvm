@@ -971,6 +971,9 @@ public:
       return nullptr;
     return reinterpret_cast<const dos_header *>(base());
   }
+  std::error_code getCOFFHeader(const coff_file_header *&Res) const;
+  std::error_code
+  getCOFFBigObjHeader(const coff_bigobj_file_header *&Res) const;
   std::error_code getPE32Header(const pe32_header *&Res) const;
   std::error_code getPE32PlusHeader(const pe32plus_header *&Res) const;
   std::error_code getDataDirectory(uint32_t index,
@@ -1018,6 +1021,8 @@ public:
                                 StringRef &Res) const;
 
   ArrayRef<uint8_t> getSymbolAuxData(COFFSymbolRef Symbol) const;
+
+  uint32_t getSymbolIndex(COFFSymbolRef Symbol) const;
 
   size_t getSymbolTableEntrySize() const {
     if (COFFHeader)

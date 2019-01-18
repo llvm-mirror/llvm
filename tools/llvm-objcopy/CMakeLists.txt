@@ -17,6 +17,10 @@ add_llvm_tool(llvm-objcopy
   Buffer.cpp
   CopyConfig.cpp
   llvm-objcopy.cpp
+  COFF/COFFObjcopy.cpp
+  COFF/Object.cpp
+  COFF/Reader.cpp
+  COFF/Writer.cpp
   ELF/ELFObjcopy.cpp
   ELF/Object.cpp
   DEPENDS

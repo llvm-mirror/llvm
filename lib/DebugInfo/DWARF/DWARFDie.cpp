@@ -71,15 +71,7 @@ static void dumpRanges(const DWARFObject &Obj, raw_ostream &OS,
     OS.indent(Indent);
     R.dump(OS, AddressSize);
 
-    if (SectionNames.empty() || R.SectionIndex == -1ULL)
-      continue;
-
-    StringRef Name = SectionNames[R.SectionIndex].Name;
-    OS << " \"" << Name << '\"';
-
-    // Print section index if name is not unique.
-    if (!SectionNames[R.SectionIndex].IsNameUnique)
-      OS << format(" [%" PRIu64 "]", R.SectionIndex);
+    DWARFFormValue::dumpAddressSection(Obj, OS, DumpOpts, R.SectionIndex);
   }
 }
 
@@ -154,6 +146,52 @@ static void dumpTypeTagName(raw_ostream &OS, dwarf::Tag T) {
   OS << TagStr.substr(7, TagStr.size() - 12) << " ";
 }
 
+static void dumpArrayType(raw_ostream &OS, const DWARFDie &D) {
+  Optional<uint64_t> Bound;
+  for (const DWARFDie &C : D.children())
+    if (C.getTag() == DW_TAG_subrange_type) {
+      Optional<uint64_t> LB;
+      Optional<uint64_t> Count;
+      Optional<uint64_t> UB;
+      Optional<unsigned> DefaultLB;
+      if (Optional<DWARFFormValue> L = C.find(DW_AT_lower_bound))
+        LB = L->getAsUnsignedConstant();
+      if (Optional<DWARFFormValue> CountV = C.find(DW_AT_count))
+        Count = CountV->getAsUnsignedConstant();
+      if (Optional<DWARFFormValue> UpperV = C.find(DW_AT_upper_bound))
+        UB = UpperV->getAsUnsignedConstant();
+      if (Optional<DWARFFormValue> LV =
+              D.getDwarfUnit()->getUnitDIE().find(DW_AT_language))
+        if (Optional<uint64_t> LC = LV->getAsUnsignedConstant())
+          if ((DefaultLB =
+                   LanguageLowerBound(static_cast<dwarf::SourceLanguage>(*LC))))
+            if (LB && *LB == *DefaultLB)
+              LB = None;
+      if (!LB && !Count && !UB)
+        OS << "[]";
+      else if (!LB && (Count || UB) && DefaultLB)
+        OS << '[' << (Count ? *Count : *UB - *DefaultLB + 1) << ']';
+      else {
+        OS << "[[";
+        if (LB)
+          OS << *LB;
+        else
+          OS << '?';
+        OS << ", ";
+        if (Count)
+          if (LB)
+            OS << *LB + *Count;
+          else
+            OS << "? + " << *Count;
+        else if (UB)
+          OS << *UB + 1;
+        else
+          OS << '?';
+        OS << ")]";
+      }
+    }
+}
+
 /// Recursively dump the DIE type name when applicable.
 static void dumpTypeName(raw_ostream &OS, const DWARFDie &D) {
   if (!D.isValid())
@@ -201,24 +239,7 @@ static void dumpTypeName(raw_ostream &OS, const DWARFDie &D) {
     break;
   }
   case DW_TAG_array_type: {
-    Optional<uint64_t> Bound;
-    for (const DWARFDie &C : D.children())
-      if (C.getTag() == DW_TAG_subrange_type) {
-        OS << '[';
-        uint64_t LowerBound = 0;
-        if (Optional<DWARFFormValue> L = C.find(DW_AT_lower_bound))
-          if (Optional<uint64_t> LB = L->getAsUnsignedConstant()) {
-            LowerBound = *LB;
-            OS << LowerBound << '-';
-          }
-        if (Optional<DWARFFormValue> CountV = C.find(DW_AT_count)) {
-          if (Optional<uint64_t> C = CountV->getAsUnsignedConstant())
-            OS << (*C + LowerBound);
-        } else if (Optional<DWARFFormValue> UpperV = C.find(DW_AT_upper_bound))
-          if (Optional<uint64_t> U = UpperV->getAsUnsignedConstant())
-            OS << *U;
-        OS << ']';
-      }
+    dumpArrayType(OS, D);
     break;
   }
   case DW_TAG_pointer_type:
@@ -324,10 +345,9 @@ static void dumpAttribute(raw_ostream &OS, const DWARFDie &Die,
     const DWARFObject &Obj = Die.getDwarfUnit()->getContext().getDWARFObj();
     // For DW_FORM_rnglistx we need to dump the offset separately, since
     // we have only dumped the index so far.
-    Optional<DWARFFormValue> Value = Die.find(DW_AT_ranges);
-    if (Value && Value->getForm() == DW_FORM_rnglistx)
+    if (formValue.getForm() == DW_FORM_rnglistx)
       if (auto RangeListOffset =
-              U->getRnglistOffset(*Value->getAsSectionOffset())) {
+              U->getRnglistOffset(*formValue.getAsSectionOffset())) {
         DWARFFormValue FV(dwarf::DW_FORM_sec_offset);
         FV.setUValue(*RangeListOffset);
         FV.dump(OS, DumpOpts);
@@ -446,13 +466,13 @@ Optional<uint64_t> DWARFDie::getHighPC(uint64_t LowPC) const {
 bool DWARFDie::getLowAndHighPC(uint64_t &LowPC, uint64_t &HighPC,
                                uint64_t &SectionIndex) const {
   auto F = find(DW_AT_low_pc);
-  auto LowPcAddr = toAddress(F);
+  auto LowPcAddr = toSectionedAddress(F);
   if (!LowPcAddr)
     return false;
-  if (auto HighPcAddr = getHighPC(*LowPcAddr)) {
-    LowPC = *LowPcAddr;
+  if (auto HighPcAddr = getHighPC(LowPcAddr->Address)) {
+    LowPC = LowPcAddr->Address;
     HighPC = *HighPcAddr;
-    SectionIndex = F->getSectionIndex();
+    SectionIndex = LowPcAddr->SectionIndex;
     return true;
   }
   return false;

@@ -94,7 +94,8 @@ def : StorePatExternSymOffOnly<vec_t, store, !cast<NI>("STORE_"#vec_t)>;
 
 // Constant: v128.const
 multiclass ConstVec<ValueType vec_t, dag ops, dag pat, string args> {
-  let isMoveImm = 1, isReMaterializable = 1 in
+  let isMoveImm = 1, isReMaterializable = 1,
+    Predicates = [HasSIMD128, HasUnimplementedSIMD128] in
   defm CONST_V128_#vec_t : SIMD_I<(outs V128:$dst), ops, (outs), ops,
                                   [(set V128:$dst, (vec_t pat))],
                                   "v128.const\t$dst, "#args,
@@ -276,17 +277,19 @@ multiclass ExtractLaneExtended<string sign, bits<32> baseInst> {
 }
 
 defm "" : ExtractLaneExtended<"_s", 5>;
+let Predicates = [HasSIMD128, HasUnimplementedSIMD128] in
 defm "" : ExtractLaneExtended<"_u", 6>;
 defm "" : ExtractLane<v4i32, "i32x4", LaneIdx4, I32, 13>;
 defm "" : ExtractLane<v2i64, "i64x2", LaneIdx2, I64, 16>;
 defm "" : ExtractLane<v4f32, "f32x4", LaneIdx4, F32, 19>;
 defm "" : ExtractLane<v2f64, "f64x2", LaneIdx2, F64, 22>;
 
-// Follow convention of making implicit expansions unsigned
+// It would be more conventional to use unsigned extracts, but v8
+// doesn't implement them yet
 def : Pat<(i32 (vector_extract (v16i8 V128:$vec), (i32 LaneIdx16:$idx))),
-          (EXTRACT_LANE_v16i8_u V128:$vec, (i32 LaneIdx16:$idx))>;
+          (EXTRACT_LANE_v16i8_s V128:$vec, (i32 LaneIdx16:$idx))>;
 def : Pat<(i32 (vector_extract (v8i16 V128:$vec), (i32 LaneIdx8:$idx))),
-          (EXTRACT_LANE_v8i16_u V128:$vec, (i32 LaneIdx8:$idx))>;
+          (EXTRACT_LANE_v8i16_s V128:$vec, (i32 LaneIdx8:$idx))>;
 
 // Lower undef lane indices to zero
 def : Pat<(and (i32 (vector_extract (v16i8 V128:$vec), undef)), (i32 0xff)),
@@ -576,7 +579,7 @@ foreach vec_t = [v16i8, v8i16, v4i32, v2i64, v4f32, v2f64] in
     SIMD_I<(outs V128:$dst), (ins V128:$v1, V128:$v2, V128:$c), (outs), (ins),
            [(set (vec_t V128:$dst),
              (vec_t (int_wasm_bitselect
-               (vec_t V128:$c), (vec_t V128:$v1), (vec_t V128:$v2)
+               (vec_t V128:$v1), (vec_t V128:$v2), (vec_t V128:$c)
              ))
            )],
            "v128.bitselect\t$dst, $v1, $v2, $c", "v128.bitselect", 80>;
@@ -725,6 +728,7 @@ defm ABS : SIMDUnaryFP<fabs, "abs", 149>;
 defm NEG : SIMDUnaryFP<fneg, "neg", 150>;
 
 // Square root: sqrt
+let Predicates = [HasSIMD128, HasUnimplementedSIMD128] in
 defm SQRT : SIMDUnaryFP<fsqrt, "sqrt", 151>;
 
 //===----------------------------------------------------------------------===//
@@ -748,6 +752,7 @@ let isCommutable = 1 in
 defm MUL : SIMDBinaryFP<fmul, "mul", 156>;
 
 // Division: div
+let Predicates = [HasSIMD128, HasUnimplementedSIMD128] in
 defm DIV : SIMDBinaryFP<fdiv, "div", 157>;
 
 // NaN-propagating minimum: min
@@ -768,17 +773,17 @@ multiclass SIMDConvert<ValueType vec_t, ValueType arg_t, SDNode op,
            name#"\t$dst, $vec", name, simdop>;
 }
 
-// Integer to floating point: convert_s / convert_u
-defm "" : SIMDConvert<v4f32, v4i32, sint_to_fp, "f32x4.convert_s/i32x4", 175>;
-defm "" : SIMDConvert<v4f32, v4i32, uint_to_fp, "f32x4.convert_u/i32x4", 176>;
-defm "" : SIMDConvert<v2f64, v2i64, sint_to_fp, "f64x2.convert_s/i64x2", 177>;
-defm "" : SIMDConvert<v2f64, v2i64, uint_to_fp, "f64x2.convert_u/i64x2", 178>;
+// Integer to floating point: convert
+defm "" : SIMDConvert<v4f32, v4i32, sint_to_fp, "f32x4.convert_i32x4_s", 175>;
+defm "" : SIMDConvert<v4f32, v4i32, uint_to_fp, "f32x4.convert_i32x4_u", 176>;
+defm "" : SIMDConvert<v2f64, v2i64, sint_to_fp, "f64x2.convert_i64x2_s", 177>;
+defm "" : SIMDConvert<v2f64, v2i64, uint_to_fp, "f64x2.convert_i64x2_u", 178>;
 
-// Floating point to integer with saturation: trunc_sat_s / trunc_sat_u
-defm "" : SIMDConvert<v4i32, v4f32, fp_to_sint, "i32x4.trunc_sat_s/f32x4", 171>;
-defm "" : SIMDConvert<v4i32, v4f32, fp_to_uint, "i32x4.trunc_sat_u/f32x4", 172>;
-defm "" : SIMDConvert<v2i64, v2f64, fp_to_sint, "i64x2.trunc_sat_s/f64x2", 173>;
-defm "" : SIMDConvert<v2i64, v2f64, fp_to_uint, "i64x2.trunc_sat_u/f64x2", 174>;
+// Floating point to integer with saturation: trunc_sat
+defm "" : SIMDConvert<v4i32, v4f32, fp_to_sint, "i32x4.trunc_sat_f32x4_s", 171>;
+defm "" : SIMDConvert<v4i32, v4f32, fp_to_uint, "i32x4.trunc_sat_f32x4_u", 172>;
+defm "" : SIMDConvert<v2i64, v2f64, fp_to_sint, "i64x2.trunc_sat_f64x2_s", 173>;
+defm "" : SIMDConvert<v2i64, v2f64, fp_to_uint, "i64x2.trunc_sat_f64x2_u", 174>;
 
 // Lower llvm.wasm.trunc.saturate.* to saturating instructions
 def : Pat<(v4i32 (int_wasm_trunc_saturate_signed (v4f32 V128:$src))),

@@ -41,6 +41,7 @@ class BasicBlock;
 class DataLayout;
 class Loop;
 class LoopInfo;
+class MemorySSAUpdater;
 class OptimizationRemarkEmitter;
 class PredicatedScalarEvolution;
 class PredIteratorCache;
@@ -109,7 +110,7 @@ bool formLCSSARecursively(Loop &L, DominatorTree &DT, LoopInfo *LI,
 /// arguments. Diagnostics is emitted via \p ORE. It returns changed status.
 bool sinkRegion(DomTreeNode *, AliasAnalysis *, LoopInfo *, DominatorTree *,
                 TargetLibraryInfo *, TargetTransformInfo *, Loop *,
-                AliasSetTracker *, ICFLoopSafetyInfo *,
+                AliasSetTracker *, MemorySSAUpdater *, ICFLoopSafetyInfo *,
                 OptimizationRemarkEmitter *ORE);
 
 /// Walk the specified region of the CFG (defined by all blocks
@@ -122,7 +123,8 @@ bool sinkRegion(DomTreeNode *, AliasAnalysis *, LoopInfo *, DominatorTree *,
 /// ORE. It returns changed status.
 bool hoistRegion(DomTreeNode *, AliasAnalysis *, LoopInfo *, DominatorTree *,
                  TargetLibraryInfo *, Loop *, AliasSetTracker *,
-                 ICFLoopSafetyInfo *, OptimizationRemarkEmitter *ORE);
+                 MemorySSAUpdater *, ICFLoopSafetyInfo *,
+                 OptimizationRemarkEmitter *ORE);
 
 /// This function deletes dead loops. The caller of this function needs to
 /// guarantee that the loop is infact dead.
@@ -168,7 +170,7 @@ SmallVector<Instruction *, 8> findDefsUsedOutsideOfLoop(Loop *L);
 /// If it has a value (e.g. {"llvm.distribute", 1} return the value as an
 /// operand or null otherwise.  If the string metadata is not found return
 /// Optional's not-a-value.
-Optional<const MDOperand *> findStringMetadataForLoop(Loop *TheLoop,
+Optional<const MDOperand *> findStringMetadataForLoop(const Loop *TheLoop,
                                                       StringRef Name);
 
 /// Find named metadata for a loop with an integer value.
@@ -274,7 +276,7 @@ void getLoopAnalysisUsage(AnalysisUsage &AU);
 /// If \p ORE is set use it to emit optimization remarks.
 bool canSinkOrHoistInst(Instruction &I, AAResults *AA, DominatorTree *DT,
                         Loop *CurLoop, AliasSetTracker *CurAST,
-                        bool TargetExecutesOncePerLoop,
+                        MemorySSAUpdater *MSSAU, bool TargetExecutesOncePerLoop,
                         OptimizationRemarkEmitter *ORE = nullptr);
 
 /// Returns a Min/Max operation corresponding to MinMaxRecurrenceKind.
@@ -320,6 +322,23 @@ Value *createTargetReduction(IRBuilder<> &B, const TargetTransformInfo *TTI,
 /// when intersecting.
 /// Flag set: NSW, NUW, exact, and all of fast-math.
 void propagateIRFlags(Value *I, ArrayRef<Value *> VL, Value *OpValue = nullptr);
+
+/// Returns true if we can prove that \p S is defined and always negative in
+/// loop \p L.
+bool isKnownNegativeInLoop(const SCEV *S, const Loop *L, ScalarEvolution &SE);
+
+/// Returns true if we can prove that \p S is defined and always non-negative in
+/// loop \p L.
+bool isKnownNonNegativeInLoop(const SCEV *S, const Loop *L,
+                              ScalarEvolution &SE);
+
+/// Returns true if \p S is defined and never is equal to signed/unsigned max.
+bool cannotBeMaxInLoop(const SCEV *S, const Loop *L, ScalarEvolution &SE,
+                       bool Signed);
+
+/// Returns true if \p S is defined and never is equal to signed/unsigned min.
+bool cannotBeMinInLoop(const SCEV *S, const Loop *L, ScalarEvolution &SE,
+                       bool Signed);
 
 } // end namespace llvm
 

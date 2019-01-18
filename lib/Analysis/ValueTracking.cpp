@@ -2023,10 +2023,10 @@ bool isKnownNonZero(const Value *V, unsigned Depth, const Query &Q) {
       if (Q.IIQ.getMetadata(LI, LLVMContext::MD_nonnull))
         return true;
 
-    if (auto CS = ImmutableCallSite(V)) {
-      if (CS.isReturnNonNull())
+    if (const auto *Call = dyn_cast<CallBase>(V)) {
+      if (Call->isReturnNonNull())
         return true;
-      if (const auto *RP = getArgumentAliasingToReturnedPointer(CS))
+      if (const auto *RP = getArgumentAliasingToReturnedPointer(Call))
         return isKnownNonZero(RP, Depth, Q);
     }
   }
@@ -3389,7 +3389,14 @@ Value *llvm::GetPointerBaseWithConstantOffset(Value *Ptr, int64_t &Offset,
       if (!GEP->accumulateConstantOffset(DL, GEPOffset))
         break;
 
-      ByteOffset += GEPOffset.getSExtValue();
+      APInt OrigByteOffset(ByteOffset);
+      ByteOffset += GEPOffset.sextOrTrunc(ByteOffset.getBitWidth());
+      if (ByteOffset.getMinSignedBits() > 64) {
+        // Stop traversal if the pointer offset wouldn't fit into int64_t
+        // (this should be removed if Offset is updated to an APInt)
+        ByteOffset = OrigByteOffset;
+        break;
+      }
 
       Ptr = GEP->getPointerOperand();
     } else if (Operator::getOpcode(Ptr) == Instruction::BitCast ||
@@ -3617,21 +3624,21 @@ uint64_t llvm::GetStringLength(const Value *V, unsigned CharSize) {
   return Len == ~0ULL ? 1 : Len;
 }
 
-const Value *llvm::getArgumentAliasingToReturnedPointer(ImmutableCallSite CS) {
-  assert(CS &&
-         "getArgumentAliasingToReturnedPointer only works on nonnull CallSite");
-  if (const Value *RV = CS.getReturnedArgOperand())
+const Value *llvm::getArgumentAliasingToReturnedPointer(const CallBase *Call) {
+  assert(Call &&
+         "getArgumentAliasingToReturnedPointer only works on nonnull calls");
+  if (const Value *RV = Call->getReturnedArgOperand())
     return RV;
   // This can be used only as a aliasing property.
-  if (isIntrinsicReturningPointerAliasingArgumentWithoutCapturing(CS))
-    return CS.getArgOperand(0);
+  if (isIntrinsicReturningPointerAliasingArgumentWithoutCapturing(Call))
+    return Call->getArgOperand(0);
   return nullptr;
 }
 
 bool llvm::isIntrinsicReturningPointerAliasingArgumentWithoutCapturing(
-    ImmutableCallSite CS) {
-  return CS.getIntrinsicID() == Intrinsic::launder_invariant_group ||
-         CS.getIntrinsicID() == Intrinsic::strip_invariant_group;
+    const CallBase *Call) {
+  return Call->getIntrinsicID() == Intrinsic::launder_invariant_group ||
+         Call->getIntrinsicID() == Intrinsic::strip_invariant_group;
 }
 
 /// \p PN defines a loop-variant pointer to an object.  Check if the
@@ -3679,7 +3686,7 @@ Value *llvm::GetUnderlyingObject(Value *V, const DataLayout &DL,
       // An alloca can't be further simplified.
       return V;
     } else {
-      if (auto CS = CallSite(V)) {
+      if (auto *Call = dyn_cast<CallBase>(V)) {
         // CaptureTracking can know about special capturing properties of some
         // intrinsics like launder.invariant.group, that can't be expressed with
         // the attributes, but have properties like returning aliasing pointer.
@@ -3689,7 +3696,7 @@ Value *llvm::GetUnderlyingObject(Value *V, const DataLayout &DL,
         // because it should be in sync with CaptureTracking. Not using it may
         // cause weird miscompilations where 2 aliasing pointers are assumed to
         // noalias.
-        if (auto *RP = getArgumentAliasingToReturnedPointer(CS)) {
+        if (auto *RP = getArgumentAliasingToReturnedPointer(Call)) {
           V = RP;
           continue;
         }
@@ -3822,8 +3829,7 @@ bool llvm::onlyUsedByLifetimeMarkers(const Value *V) {
     const IntrinsicInst *II = dyn_cast<IntrinsicInst>(U);
     if (!II) return false;
 
-    if (II->getIntrinsicID() != Intrinsic::lifetime_start &&
-        II->getIntrinsicID() != Intrinsic::lifetime_end)
+    if (!II->isLifetimeStartOrEnd())
       return false;
   }
   return true;
@@ -5236,21 +5242,16 @@ static bool isMatchingOps(const Value *ALHS, const Value *ARHS,
   return IsMatchingOps || IsSwappedOps;
 }
 
-/// Return true if "icmp1 APred ALHS ARHS" implies "icmp2 BPred BLHS BRHS" is
-/// true.  Return false if "icmp1 APred ALHS ARHS" implies "icmp2 BPred BLHS
-/// BRHS" is false.  Otherwise, return None if we can't infer anything.
+/// Return true if "icmp1 APred X, Y" implies "icmp2 BPred X, Y" is true.
+/// Return false if "icmp1 APred X, Y" implies "icmp2 BPred X, Y" is false.
+/// Otherwise, return None if we can't infer anything.
 static Optional<bool> isImpliedCondMatchingOperands(CmpInst::Predicate APred,
-                                                    const Value *ALHS,
-                                                    const Value *ARHS,
                                                     CmpInst::Predicate BPred,
-                                                    const Value *BLHS,
-                                                    const Value *BRHS,
-                                                    bool IsSwappedOps) {
-  // Canonicalize the operands so they're matching.
-  if (IsSwappedOps) {
-    std::swap(BLHS, BRHS);
+                                                    bool AreSwappedOps) {
+  // Canonicalize the predicate as if the operands were not commuted.
+  if (AreSwappedOps)
     BPred = ICmpInst::getSwappedPredicate(BPred);
-  }
+
   if (CmpInst::isImpliedTrueByMatchingCmp(APred, BPred))
     return true;
   if (CmpInst::isImpliedFalseByMatchingCmp(APred, BPred))
@@ -5259,15 +5260,14 @@ static Optional<bool> isImpliedCondMatchingOperands(CmpInst::Predicate APred,
   return None;
 }
 
-/// Return true if "icmp1 APred ALHS C1" implies "icmp2 BPred BLHS C2" is
-/// true.  Return false if "icmp1 APred ALHS C1" implies "icmp2 BPred BLHS
-/// C2" is false.  Otherwise, return None if we can't infer anything.
+/// Return true if "icmp APred X, C1" implies "icmp BPred X, C2" is true.
+/// Return false if "icmp APred X, C1" implies "icmp BPred X, C2" is false.
+/// Otherwise, return None if we can't infer anything.
 static Optional<bool>
-isImpliedCondMatchingImmOperands(CmpInst::Predicate APred, const Value *ALHS,
+isImpliedCondMatchingImmOperands(CmpInst::Predicate APred,
                                  const ConstantInt *C1,
                                  CmpInst::Predicate BPred,
-                                 const Value *BLHS, const ConstantInt *C2) {
-  assert(ALHS == BLHS && "LHS operands must match.");
+                                 const ConstantInt *C2) {
   ConstantRange DomCR =
       ConstantRange::makeExactICmpRegion(APred, C1->getValue());
   ConstantRange CR =
@@ -5299,10 +5299,10 @@ static Optional<bool> isImpliedCondICmps(const ICmpInst *LHS,
   ICmpInst::Predicate BPred = RHS->getPredicate();
 
   // Can we infer anything when the two compares have matching operands?
-  bool IsSwappedOps;
-  if (isMatchingOps(ALHS, ARHS, BLHS, BRHS, IsSwappedOps)) {
+  bool AreSwappedOps;
+  if (isMatchingOps(ALHS, ARHS, BLHS, BRHS, AreSwappedOps)) {
     if (Optional<bool> Implication = isImpliedCondMatchingOperands(
-            APred, ALHS, ARHS, BPred, BLHS, BRHS, IsSwappedOps))
+            APred, BPred, AreSwappedOps))
       return Implication;
     // No amount of additional analysis will infer the second condition, so
     // early exit.
@@ -5313,8 +5313,7 @@ static Optional<bool> isImpliedCondICmps(const ICmpInst *LHS,
   // constants (not necessarily matching)?
   if (ALHS == BLHS && isa<ConstantInt>(ARHS) && isa<ConstantInt>(BRHS)) {
     if (Optional<bool> Implication = isImpliedCondMatchingImmOperands(
-            APred, ALHS, cast<ConstantInt>(ARHS), BPred, BLHS,
-            cast<ConstantInt>(BRHS)))
+            APred, cast<ConstantInt>(ARHS), BPred, cast<ConstantInt>(BRHS)))
       return Implication;
     // No amount of additional analysis will infer the second condition, so
     // early exit.

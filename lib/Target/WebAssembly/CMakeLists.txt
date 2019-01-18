@@ -19,6 +19,7 @@ add_llvm_target(WebAssemblyCodeGen
   WebAssemblyCallIndirectFixup.cpp
   WebAssemblyCFGStackify.cpp
   WebAssemblyCFGSort.cpp
+  WebAssemblyDebugValueManager.cpp
   WebAssemblyLateEHPrepare.cpp
   WebAssemblyEHRestoreStackPointer.cpp
   WebAssemblyExceptionInfo.cpp
@@ -47,7 +48,7 @@ add_llvm_target(WebAssemblyCodeGen
   WebAssemblyRuntimeLibcallSignatures.cpp
   WebAssemblySelectionDAGInfo.cpp
   WebAssemblySetP2AlignOperands.cpp
-  WebAssemblyStoreResults.cpp
+  WebAssemblyMemIntrinsicResults.cpp
   WebAssemblySubtarget.cpp
   WebAssemblyTargetMachine.cpp
   WebAssemblyTargetObjectFile.cpp

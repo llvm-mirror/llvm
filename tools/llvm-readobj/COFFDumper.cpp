@@ -1248,9 +1248,9 @@ void COFFDumper::mergeCodeViewTypes(MergingTypeTableBuilder &CVIDs,
         error(object_error::parse_failed);
       }
       SmallVector<TypeIndex, 128> SourceToDest;
-      Optional<EndPrecompRecord> EndPrecomp;
+      Optional<uint32_t> PCHSignature;
       if (auto EC = mergeTypeAndIdRecords(CVIDs, CVTypes, SourceToDest, Types,
-                                          EndPrecomp))
+                                          PCHSignature))
         return error(std::move(EC));
     }
   }
@@ -1365,10 +1365,12 @@ void COFFDumper::printRelocation(const SectionRef &Section,
   StringRef SymbolName;
   Reloc.getTypeName(RelocName);
   symbol_iterator Symbol = Reloc.getSymbol();
+  int64_t SymbolIndex = -1;
   if (Symbol != Obj->symbol_end()) {
     Expected<StringRef> SymbolNameOrErr = Symbol->getName();
     error(errorToErrorCode(SymbolNameOrErr.takeError()));
     SymbolName = *SymbolNameOrErr;
+    SymbolIndex = Obj->getSymbolIndex(Obj->getCOFFSymbol(*Symbol));
   }
 
   if (opts::ExpandRelocs) {
@@ -1376,11 +1378,13 @@ void COFFDumper::printRelocation(const SectionRef &Section,
     W.printHex("Offset", Offset);
     W.printNumber("Type", RelocName, RelocType);
     W.printString("Symbol", SymbolName.empty() ? "-" : SymbolName);
+    W.printNumber("SymbolIndex", SymbolIndex);
   } else {
     raw_ostream& OS = W.startLine();
     OS << W.hex(Offset)
        << " " << RelocName
        << " " << (SymbolName.empty() ? "-" : SymbolName)
+       << " (" << SymbolIndex << ")"
        << "\n";
   }
 }

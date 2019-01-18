@@ -832,6 +832,12 @@ int X86TTIImpl::getArithmeticInstrCost(
     { ISD::FDIV, MVT::v4f32,      39 }, // Pentium IV from http://www.agner.org/
     { ISD::FDIV, MVT::f64,        38 }, // Pentium IV from http://www.agner.org/
     { ISD::FDIV, MVT::v2f64,      69 }, // Pentium IV from http://www.agner.org/
+
+    { ISD::FADD, MVT::f32,         2 }, // Pentium IV from http://www.agner.org/
+    { ISD::FADD, MVT::f64,         2 }, // Pentium IV from http://www.agner.org/
+
+    { ISD::FSUB, MVT::f32,         2 }, // Pentium IV from http://www.agner.org/
+    { ISD::FSUB, MVT::f64,         2 }, // Pentium IV from http://www.agner.org/
   };
 
   if (ST->hasSSE2())
@@ -841,6 +847,20 @@ int X86TTIImpl::getArithmeticInstrCost(
   static const CostTblEntry SSE1CostTable[] = {
     { ISD::FDIV, MVT::f32,   17 }, // Pentium III from http://www.agner.org/
     { ISD::FDIV, MVT::v4f32, 34 }, // Pentium III from http://www.agner.org/
+
+    { ISD::FADD, MVT::f32,    1 }, // Pentium III from http://www.agner.org/
+    { ISD::FADD, MVT::v4f32,  2 }, // Pentium III from http://www.agner.org/
+
+    { ISD::FSUB, MVT::f32,    1 }, // Pentium III from http://www.agner.org/
+    { ISD::FSUB, MVT::v4f32,  2 }, // Pentium III from http://www.agner.org/
+
+    { ISD::ADD, MVT::i8,      1 }, // Pentium III from http://www.agner.org/
+    { ISD::ADD, MVT::i16,     1 }, // Pentium III from http://www.agner.org/
+    { ISD::ADD, MVT::i32,     1 }, // Pentium III from http://www.agner.org/
+
+    { ISD::SUB, MVT::i8,      1 }, // Pentium III from http://www.agner.org/
+    { ISD::SUB, MVT::i16,     1 }, // Pentium III from http://www.agner.org/
+    { ISD::SUB, MVT::i32,     1 }, // Pentium III from http://www.agner.org/
   };
 
   if (ST->hasSSE1())
@@ -1742,6 +1762,14 @@ int X86TTIImpl::getIntrinsicInstrCost(Intrinsic::ID IID, Type *RetTy,
     { ISD::CTTZ,       MVT::v16i32, 14 },
     { ISD::CTTZ,       MVT::v32i16, 12 },
     { ISD::CTTZ,       MVT::v64i8,   9 },
+    { ISD::SADDSAT,    MVT::v32i16,  1 },
+    { ISD::SADDSAT,    MVT::v64i8,   1 },
+    { ISD::SSUBSAT,    MVT::v32i16,  1 },
+    { ISD::SSUBSAT,    MVT::v64i8,   1 },
+    { ISD::UADDSAT,    MVT::v32i16,  1 },
+    { ISD::UADDSAT,    MVT::v64i8,   1 },
+    { ISD::USUBSAT,    MVT::v32i16,  1 },
+    { ISD::USUBSAT,    MVT::v64i8,   1 },
   };
   static const CostTblEntry AVX512CostTbl[] = {
     { ISD::BITREVERSE, MVT::v8i64,  36 },
@@ -1752,6 +1780,10 @@ int X86TTIImpl::getIntrinsicInstrCost(Intrinsic::ID IID, Type *RetTy,
     { ISD::CTPOP,      MVT::v16i32, 24 },
     { ISD::CTTZ,       MVT::v8i64,  20 },
     { ISD::CTTZ,       MVT::v16i32, 28 },
+    { ISD::USUBSAT,    MVT::v16i32,  2 }, // pmaxud + psubd
+    { ISD::USUBSAT,    MVT::v2i64,   2 }, // pmaxuq + psubq
+    { ISD::USUBSAT,    MVT::v4i64,   2 }, // pmaxuq + psubq
+    { ISD::USUBSAT,    MVT::v8i64,   2 }, // pmaxuq + psubq
   };
   static const CostTblEntry XOPCostTbl[] = {
     { ISD::BITREVERSE, MVT::v4i64,   4 },
@@ -1787,6 +1819,15 @@ int X86TTIImpl::getIntrinsicInstrCost(Intrinsic::ID IID, Type *RetTy,
     { ISD::CTTZ,       MVT::v8i32,  14 },
     { ISD::CTTZ,       MVT::v16i16, 12 },
     { ISD::CTTZ,       MVT::v32i8,   9 },
+    { ISD::SADDSAT,    MVT::v16i16,  1 },
+    { ISD::SADDSAT,    MVT::v32i8,   1 },
+    { ISD::SSUBSAT,    MVT::v16i16,  1 },
+    { ISD::SSUBSAT,    MVT::v32i8,   1 },
+    { ISD::UADDSAT,    MVT::v16i16,  1 },
+    { ISD::UADDSAT,    MVT::v32i8,   1 },
+    { ISD::USUBSAT,    MVT::v16i16,  1 },
+    { ISD::USUBSAT,    MVT::v32i8,   1 },
+    { ISD::USUBSAT,    MVT::v8i32,   2 }, // pmaxud + psubd
     { ISD::FSQRT,      MVT::f32,     7 }, // Haswell from http://www.agner.org/
     { ISD::FSQRT,      MVT::v4f32,   7 }, // Haswell from http://www.agner.org/
     { ISD::FSQRT,      MVT::v8f32,  14 }, // Haswell from http://www.agner.org/
@@ -1814,6 +1855,15 @@ int X86TTIImpl::getIntrinsicInstrCost(Intrinsic::ID IID, Type *RetTy,
     { ISD::CTTZ,       MVT::v8i32,  30 }, // 2 x 128-bit Op + extract/insert
     { ISD::CTTZ,       MVT::v16i16, 26 }, // 2 x 128-bit Op + extract/insert
     { ISD::CTTZ,       MVT::v32i8,  20 }, // 2 x 128-bit Op + extract/insert
+    { ISD::SADDSAT,    MVT::v16i16,  4 }, // 2 x 128-bit Op + extract/insert
+    { ISD::SADDSAT,    MVT::v32i8,   4 }, // 2 x 128-bit Op + extract/insert
+    { ISD::SSUBSAT,    MVT::v16i16,  4 }, // 2 x 128-bit Op + extract/insert
+    { ISD::SSUBSAT,    MVT::v32i8,   4 }, // 2 x 128-bit Op + extract/insert
+    { ISD::UADDSAT,    MVT::v16i16,  4 }, // 2 x 128-bit Op + extract/insert
+    { ISD::UADDSAT,    MVT::v32i8,   4 }, // 2 x 128-bit Op + extract/insert
+    { ISD::USUBSAT,    MVT::v16i16,  4 }, // 2 x 128-bit Op + extract/insert
+    { ISD::USUBSAT,    MVT::v32i8,   4 }, // 2 x 128-bit Op + extract/insert
+    { ISD::USUBSAT,    MVT::v8i32,   6 }, // 2 x 128-bit Op + extract/insert
     { ISD::FSQRT,      MVT::f32,    14 }, // SNB from http://www.agner.org/
     { ISD::FSQRT,      MVT::v4f32,  14 }, // SNB from http://www.agner.org/
     { ISD::FSQRT,      MVT::v8f32,  28 }, // SNB from http://www.agner.org/
@@ -1834,6 +1884,7 @@ int X86TTIImpl::getIntrinsicInstrCost(Intrinsic::ID IID, Type *RetTy,
     { ISD::FSQRT, MVT::v2f64, 70 }, // sqrtpd
   };
   static const CostTblEntry SSE42CostTbl[] = {
+    { ISD::USUBSAT,    MVT::v4i32,   2 }, // pmaxud + psubd
     { ISD::FSQRT,      MVT::f32,    18 }, // Nehalem from http://www.agner.org/
     { ISD::FSQRT,      MVT::v4f32,  18 }, // Nehalem from http://www.agner.org/
   };
@@ -1878,6 +1929,14 @@ int X86TTIImpl::getIntrinsicInstrCost(Intrinsic::ID IID, Type *RetTy,
     { ISD::CTTZ,       MVT::v4i32,  18 },
     { ISD::CTTZ,       MVT::v8i16,  16 },
     { ISD::CTTZ,       MVT::v16i8,  13 },
+    { ISD::SADDSAT,    MVT::v8i16,   1 },
+    { ISD::SADDSAT,    MVT::v16i8,   1 },
+    { ISD::SSUBSAT,    MVT::v8i16,   1 },
+    { ISD::SSUBSAT,    MVT::v16i8,   1 },
+    { ISD::UADDSAT,    MVT::v8i16,   1 },
+    { ISD::UADDSAT,    MVT::v16i8,   1 },
+    { ISD::USUBSAT,    MVT::v8i16,   1 },
+    { ISD::USUBSAT,    MVT::v16i8,   1 },
     { ISD::FSQRT,      MVT::f64,    32 }, // Nehalem from http://www.agner.org/
     { ISD::FSQRT,      MVT::v2f64,  32 }, // Nehalem from http://www.agner.org/
   };
@@ -1886,7 +1945,7 @@ int X86TTIImpl::getIntrinsicInstrCost(Intrinsic::ID IID, Type *RetTy,
     { ISD::FSQRT,      MVT::v4f32,  56 }, // Pentium III from http://www.agner.org/
   };
   static const CostTblEntry X64CostTbl[] = { // 64-bit targets
-    { ISD::BITREVERSE, MVT::i64,    14 } 
+    { ISD::BITREVERSE, MVT::i64,    14 }
   };
   static const CostTblEntry X86CostTbl[] = { // 32 or 64-bit targets
     { ISD::BITREVERSE, MVT::i32,    14 },
@@ -1912,6 +1971,18 @@ int X86TTIImpl::getIntrinsicInstrCost(Intrinsic::ID IID, Type *RetTy,
     break;
   case Intrinsic::cttz:
     ISD = ISD::CTTZ;
+    break;
+  case Intrinsic::sadd_sat:
+    ISD = ISD::SADDSAT;
+    break;
+  case Intrinsic::ssub_sat:
+    ISD = ISD::SSUBSAT;
+    break;
+  case Intrinsic::uadd_sat:
+    ISD = ISD::UADDSAT;
+    break;
+  case Intrinsic::usub_sat:
+    ISD = ISD::USUBSAT;
     break;
   case Intrinsic::sqrt:
     ISD = ISD::FSQRT;
@@ -2899,6 +2970,9 @@ X86TTIImpl::enableMemCmpExpansion(bool IsZeroCmp) const {
     Options.LoadSizes.push_back(4);
     Options.LoadSizes.push_back(2);
     Options.LoadSizes.push_back(1);
+    // All GPR and vector loads can be unaligned. SIMD compare requires integer
+    // vectors (SSE2/AVX2).
+    Options.AllowOverlappingLoads = true;
     return Options;
   }();
   return IsZeroCmp ? &EqZeroOptions : &ThreeWayOptions;

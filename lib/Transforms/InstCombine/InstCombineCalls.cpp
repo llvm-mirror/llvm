@@ -136,6 +136,14 @@ Instruction *InstCombiner::SimplifyAnyMemTransfer(AnyMemTransferInst *MI) {
   if (Size > 8 || (Size&(Size-1)))
     return nullptr;  // If not 1/2/4/8 bytes, exit.
 
+  // If it is an atomic and alignment is less than the size then we will
+  // introduce the unaligned memory access which will be later transformed
+  // into libcall in CodeGen. This is not evident performance gain so disable
+  // it now.
+  if (isa<AtomicMemTransferInst>(MI))
+    if (CopyDstAlign < Size || CopySrcAlign < Size)
+      return nullptr;
+
   // Use an integer load+store unless we can find something better.
   unsigned SrcAddrSp =
     cast<PointerType>(MI->getArgOperand(1)->getType())->getAddressSpace();
@@ -174,6 +182,9 @@ Instruction *InstCombiner::SimplifyAnyMemTransfer(AnyMemTransferInst *MI) {
     MI->getMetadata(LLVMContext::MD_mem_parallel_loop_access);
   if (LoopMemParallelMD)
     L->setMetadata(LLVMContext::MD_mem_parallel_loop_access, LoopMemParallelMD);
+  MDNode *AccessGroupMD = MI->getMetadata(LLVMContext::MD_access_group);
+  if (AccessGroupMD)
+    L->setMetadata(LLVMContext::MD_access_group, AccessGroupMD);
 
   StoreInst *S = Builder.CreateStore(L, Dest);
   // Alignment from the mem intrinsic will be better, so use it.
@@ -182,6 +193,8 @@ Instruction *InstCombiner::SimplifyAnyMemTransfer(AnyMemTransferInst *MI) {
     S->setMetadata(LLVMContext::MD_tbaa, CopyMD);
   if (LoopMemParallelMD)
     S->setMetadata(LLVMContext::MD_mem_parallel_loop_access, LoopMemParallelMD);
+  if (AccessGroupMD)
+    S->setMetadata(LLVMContext::MD_access_group, AccessGroupMD);
 
   if (auto *MT = dyn_cast<MemTransferInst>(MI)) {
     // non-atomics can be volatile
@@ -215,6 +228,18 @@ Instruction *InstCombiner::SimplifyAnyMemSet(AnyMemSetInst *MI) {
   Alignment = MI->getDestAlignment();
   assert(Len && "0-sized memory setting should be removed already.");
 
+  // Alignment 0 is identity for alignment 1 for memset, but not store.
+  if (Alignment == 0)
+    Alignment = 1;
+
+  // If it is an atomic and alignment is less than the size then we will
+  // introduce the unaligned memory access which will be later transformed
+  // into libcall in CodeGen. This is not evident performance gain so disable
+  // it now.
+  if (isa<AtomicMemSetInst>(MI))
+    if (Alignment < Len)
+      return nullptr;
+
   // memset(s,c,n) -> store s, c (for n=1,2,4,8)
   if (Len <= 8 && isPowerOf2_32((uint32_t)Len)) {
     Type *ITy = IntegerType::get(MI->getContext(), Len*8);  // n=1 -> i8.
@@ -223,9 +248,6 @@ Instruction *InstCombiner::SimplifyAnyMemSet(AnyMemSetInst *MI) {
     unsigned DstAddrSp = cast<PointerType>(Dest->getType())->getAddressSpace();
     Type *NewDstPtrTy = PointerType::get(ITy, DstAddrSp);
     Dest = Builder.CreateBitCast(Dest, NewDstPtrTy);
-
-    // Alignment 0 is identity for alignment 1 for memset, but not store.
-    if (Alignment == 0) Alignment = 1;
 
     // Extract the fill value and store.
     uint64_t Fill = FillC->getZExtValue()*0x0101010101010101ULL;
@@ -241,67 +263,6 @@ Instruction *InstCombiner::SimplifyAnyMemSet(AnyMemSetInst *MI) {
   }
 
   return nullptr;
-}
-
-static Value *simplifyX86AddsSubs(const IntrinsicInst &II,
-                                  InstCombiner::BuilderTy &Builder) {
-  bool IsAddition;
-
-  switch (II.getIntrinsicID()) {
-  default: llvm_unreachable("Unexpected intrinsic!");
-  case Intrinsic::x86_sse2_padds_b:
-  case Intrinsic::x86_sse2_padds_w:
-  case Intrinsic::x86_avx2_padds_b:
-  case Intrinsic::x86_avx2_padds_w:
-  case Intrinsic::x86_avx512_padds_b_512:
-  case Intrinsic::x86_avx512_padds_w_512:
-    IsAddition = true;
-    break;
-  case Intrinsic::x86_sse2_psubs_b:
-  case Intrinsic::x86_sse2_psubs_w:
-  case Intrinsic::x86_avx2_psubs_b:
-  case Intrinsic::x86_avx2_psubs_w:
-  case Intrinsic::x86_avx512_psubs_b_512:
-  case Intrinsic::x86_avx512_psubs_w_512:
-    IsAddition = false;
-    break;
-  }
-
-  auto *Arg0 = dyn_cast<Constant>(II.getOperand(0));
-  auto *Arg1 = dyn_cast<Constant>(II.getOperand(1));
-  auto VT = cast<VectorType>(II.getType());
-  auto SVT = VT->getElementType();
-  unsigned NumElems = VT->getNumElements();
-
-  if (!Arg0 || !Arg1)
-    return nullptr;
-
-  SmallVector<Constant *, 64> Result;
-
-  APInt MaxValue = APInt::getSignedMaxValue(SVT->getIntegerBitWidth());
-  APInt MinValue = APInt::getSignedMinValue(SVT->getIntegerBitWidth());
-  for (unsigned i = 0; i < NumElems; ++i) {
-    auto *Elt0 = Arg0->getAggregateElement(i);
-    auto *Elt1 = Arg1->getAggregateElement(i);
-    if (isa<UndefValue>(Elt0) || isa<UndefValue>(Elt1)) {
-      Result.push_back(UndefValue::get(SVT));
-      continue;
-    }
-
-    if (!isa<ConstantInt>(Elt0) || !isa<ConstantInt>(Elt1))
-      return nullptr;
-
-    const APInt &Val0 = cast<ConstantInt>(Elt0)->getValue();
-    const APInt &Val1 = cast<ConstantInt>(Elt1)->getValue();
-    bool Overflow = false;
-    APInt ResultElem = IsAddition ? Val0.sadd_ov(Val1, Overflow)
-                                  : Val0.ssub_ov(Val1, Overflow);
-    if (Overflow)
-      ResultElem = Val0.isNegative() ? MinValue : MaxValue;
-    Result.push_back(Constant::getIntegerValue(SVT, ResultElem));
-  }
-
-  return ConstantVector::get(Result);
 }
 
 static Value *simplifyX86immShift(const IntrinsicInst &II,
@@ -2784,23 +2745,6 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
     break;
   }
 
-  // Constant fold add/sub with saturation intrinsics.
-  case Intrinsic::x86_sse2_padds_b:
-  case Intrinsic::x86_sse2_padds_w:
-  case Intrinsic::x86_sse2_psubs_b:
-  case Intrinsic::x86_sse2_psubs_w:
-  case Intrinsic::x86_avx2_padds_b:
-  case Intrinsic::x86_avx2_padds_w:
-  case Intrinsic::x86_avx2_psubs_b:
-  case Intrinsic::x86_avx2_psubs_w:
-  case Intrinsic::x86_avx512_padds_b_512:
-  case Intrinsic::x86_avx512_padds_w_512:
-  case Intrinsic::x86_avx512_psubs_b_512:
-  case Intrinsic::x86_avx512_psubs_w_512:
-    if (Value *V = simplifyX86AddsSubs(*II, Builder))
-      return replaceInstUsesWith(*II, V);
-    break;
-
   // Constant fold ashr( <A x Bi>, Ci ).
   // Constant fold lshr( <A x Bi>, Ci ).
   // Constant fold shl( <A x Bi>, Ci ).
@@ -3833,6 +3777,11 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
         // Promote to next legal integer type.
         unsigned Width = CmpType->getBitWidth();
         unsigned NewWidth = Width;
+
+        // Don't do anything for i1 comparisons.
+        if (Width == 1)
+          break;
+
         if (Width <= 16)
           NewWidth = 16;
         else if (Width <= 32)

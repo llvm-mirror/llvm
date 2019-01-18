@@ -474,7 +474,7 @@ void MergeFunctions::replaceDirectCallers(Function *Old, Function *New) {
                                           NewPAL.getRetAttributes(),
                                           NewArgAttrs));
 
-      remove(CS.getInstruction()->getParent()->getParent());
+      remove(CS.getInstruction()->getFunction());
       U->set(BitcastNew);
     }
   }
@@ -693,8 +693,8 @@ void MergeFunctions::writeThunk(Function *F, Function *G) {
     GEntryBlock->getTerminator()->eraseFromParent();
     BB = GEntryBlock;
   } else {
-    NewG = Function::Create(G->getFunctionType(), G->getLinkage(), "",
-                            G->getParent());
+    NewG = Function::Create(G->getFunctionType(), G->getLinkage(),
+                            G->getAddressSpace(), "", G->getParent());
     BB = BasicBlock::Create(F->getContext(), "", NewG);
   }
 
@@ -807,8 +807,8 @@ void MergeFunctions::mergeTwoFunctions(Function *F, Function *G) {
     }
 
     // Make them both thunks to the same internal function.
-    Function *NewF = Function::Create(F->getFunctionType(), F->getLinkage(), "",
-                                      F->getParent());
+    Function *NewF = Function::Create(F->getFunctionType(), F->getLinkage(),
+                                      F->getAddressSpace(), "", F->getParent());
     NewF->copyAttributesFrom(F);
     NewF->takeName(F);
     removeUsers(F);
@@ -845,7 +845,7 @@ void MergeFunctions::mergeTwoFunctions(Function *F, Function *G) {
     // If G was internal then we may have replaced all uses of G with F. If so,
     // stop here and delete G. There's no need for a thunk. (See note on
     // MergeFunctionsPDI above).
-    if (G->hasLocalLinkage() && G->use_empty() && !MergeFunctionsPDI) {
+    if (G->isDiscardableIfUnused() && G->use_empty() && !MergeFunctionsPDI) {
       G->eraseFromParent();
       ++NumFunctionsMerged;
       return;
@@ -954,7 +954,7 @@ void MergeFunctions::removeUsers(Value *V) {
 
     for (User *U : V->users()) {
       if (Instruction *I = dyn_cast<Instruction>(U)) {
-        remove(I->getParent()->getParent());
+        remove(I->getFunction());
       } else if (isa<GlobalValue>(U)) {
         // do nothing
       } else if (Constant *C = dyn_cast<Constant>(U)) {

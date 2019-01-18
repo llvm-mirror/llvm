@@ -160,7 +160,7 @@ private:
   bool OptimizeAgain;
 
   static bool offsetsCanBeCombined(CombineInfo &CI);
-  static bool widthsFit(const CombineInfo &CI);
+  static bool widthsFit(const GCNSubtarget &STM, const CombineInfo &CI);
   static unsigned getNewOpcode(const CombineInfo &CI);
   static std::pair<unsigned, unsigned> getSubRegIdxs(const CombineInfo &CI);
   const TargetRegisterClass *getTargetRegisterClass(const CombineInfo &CI);
@@ -367,11 +367,12 @@ bool SILoadStoreOptimizer::offsetsCanBeCombined(CombineInfo &CI) {
   return false;
 }
 
-bool SILoadStoreOptimizer::widthsFit(const CombineInfo &CI) {
+bool SILoadStoreOptimizer::widthsFit(const GCNSubtarget &STM,
+                                     const CombineInfo &CI) {
   const unsigned Width = (CI.Width0 + CI.Width1);
   switch (CI.InstClass) {
   default:
-    return Width <= 4;
+    return (Width <= 4) && (STM.hasDwordx3LoadStores() || (Width != 3));
   case S_BUFFER_LOAD_IMM:
     switch (Width) {
     default:
@@ -645,7 +646,7 @@ bool SILoadStoreOptimizer::findMatchingInst(CombineInfo &CI) {
       // We also need to go through the list of instructions that we plan to
       // move and make sure they are all safe to move down past the merged
       // instruction.
-      if (widthsFit(CI) && offsetsCanBeCombined(CI))
+      if (widthsFit(*STM, CI) && offsetsCanBeCombined(CI))
         if (canMoveInstsAcrossMemOp(*MBBI, CI.InstsToMove, TII, AA))
           return true;
     }
@@ -1112,6 +1113,7 @@ SILoadStoreOptimizer::createRegOrImm(int32_t Val, MachineInstr &MI) {
   BuildMI(*MI.getParent(), MI.getIterator(), MI.getDebugLoc(),
           TII->get(AMDGPU::S_MOV_B32), Reg)
     .addImm(Val);
+  (void)Mov;
   LLVM_DEBUG(dbgs() << "    "; Mov->dump());
   return MachineOperand::CreateReg(Reg, false);
 }
@@ -1146,6 +1148,7 @@ unsigned SILoadStoreOptimizer::computeBase(MachineInstr &MI,
       .addReg(CarryReg, RegState::Define)
       .addReg(Addr.Base.LoReg, 0, Addr.Base.LoSubReg)
     .add(OffsetLo);
+  (void)LoHalf;
   LLVM_DEBUG(dbgs() << "    "; LoHalf->dump(););
 
   MachineInstr *HiHalf =
@@ -1154,6 +1157,7 @@ unsigned SILoadStoreOptimizer::computeBase(MachineInstr &MI,
     .addReg(Addr.Base.HiReg, 0, Addr.Base.HiSubReg)
     .add(OffsetHi)
     .addReg(CarryReg, RegState::Kill);
+  (void)HiHalf;
   LLVM_DEBUG(dbgs() << "    "; HiHalf->dump(););
 
   unsigned FullDestReg = MRI->createVirtualRegister(&AMDGPU::VReg_64RegClass);
@@ -1163,6 +1167,7 @@ unsigned SILoadStoreOptimizer::computeBase(MachineInstr &MI,
       .addImm(AMDGPU::sub0)
       .addReg(DestSub1)
       .addImm(AMDGPU::sub1);
+  (void)FullBase;
   LLVM_DEBUG(dbgs() << "    "; FullBase->dump(); dbgs() << "\n";);
 
   return FullDestReg;
@@ -1245,8 +1250,6 @@ void SILoadStoreOptimizer::processBaseWithConstOffset(const MachineOperand &Base
   if (!Src1->isImm())
     return;
 
-  assert(isInt<32>(*Offset0P) && isInt<32>(Src1->getImm())
-         && "Expected 32bit immediate!!!");
   uint64_t Offset1 = Src1->getImm();
   BaseHi = *Src0;
 
@@ -1366,8 +1369,8 @@ bool SILoadStoreOptimizer::promoteConstantOffsetToImm(
     AM.HasBaseReg = true;
     AM.BaseOffs = Dist;
     if (TLI->isLegalGlobalAddressingMode(AM) &&
-        (uint32_t)abs(Dist) > MaxDist) {
-      MaxDist = abs(Dist);
+        (uint32_t)std::abs(Dist) > MaxDist) {
+      MaxDist = std::abs(Dist);
 
       AnchorAddr = MAddrNext;
       AnchorInst = &MINext;

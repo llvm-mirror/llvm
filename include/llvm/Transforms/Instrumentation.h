@@ -152,16 +152,8 @@ ModulePass *createAddressSanitizerModulePass(bool CompileKernel = false,
                                              bool UseGlobalsGC = true,
                                              bool UseOdrIndicator = true);
 
-// Insert MemorySanitizer instrumentation (detection of uninitialized reads)
-FunctionPass *createMemorySanitizerPass(int TrackOrigins = 0,
-                                        bool Recover = false,
-                                        bool EnableKmsan = false);
-
 FunctionPass *createHWAddressSanitizerPass(bool CompileKernel = false,
                                            bool Recover = false);
-
-// Insert ThreadSanitizer (race detection) instrumentation
-FunctionPass *createThreadSanitizerPass();
 
 // Insert DataFlowSanitizer (dynamic data flow analysis) instrumentation
 ModulePass *createDataFlowSanitizerPass(
@@ -230,7 +222,6 @@ static inline uint32_t scaleBranchCount(uint64_t Count, uint64_t Scale) {
   assert(Scaled <= std::numeric_limits<uint32_t>::max() && "overflow 32-bits");
   return Scaled;
 }
-
 } // end namespace llvm
 
 #endif // LLVM_TRANSFORMS_INSTRUMENTATION_H

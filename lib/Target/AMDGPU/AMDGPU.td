@@ -267,7 +267,13 @@ def FeatureUnpackedD16VMem : SubtargetFeature<"unpacked-d16-vmem",
 def FeatureDLInsts : SubtargetFeature<"dl-insts",
   "HasDLInsts",
   "true",
-  "Has deep learning instructions"
+  "Has v_fmac_f32 and v_xnor_b32 instructions"
+>;
+
+def FeatureDotInsts : SubtargetFeature<"dot-insts",
+  "HasDotInsts",
+  "true",
+  "Has v_dot* instructions"
 >;
 
 def FeatureSRAMECC : SubtargetFeature<"sram-ecc",
@@ -369,6 +375,16 @@ def FeatureEnableDS128 : SubtargetFeature<"enable-ds128",
   "EnableDS128",
   "true",
   "Use ds_{read|write}_b128"
+>;
+
+// Sparse texture support requires that all result registers are zeroed when
+// PRTStrictNull is set to true. This feature is turned on for all architectures
+// but is enabled as a feature in case there are situations where PRTStrictNull
+// is disabled by the driver.
+def FeatureEnablePRTStrictNull : SubtargetFeature<"enable-prt-strict-null",
+  "EnablePRTStrictNull",
+  "true",
+  "Enable zeroing of result registers for sparse texture fetches"
 >;
 
 // Unless +-flat-for-global is specified, turn on FlatForGlobal for
@@ -558,6 +574,7 @@ def FeatureISAVersion9_0_6 : SubtargetFeatureISAVersion <9,0,6,
    FeatureFmaMixInsts,
    FeatureLDSBankCount32,
    FeatureDLInsts,
+   FeatureDotInsts,
    FeatureSRAMECC,
    FeatureCodeObjectV3]>;
 
@@ -755,6 +772,9 @@ def HasFmaMixInsts : Predicate<"Subtarget->hasFmaMixInsts()">,
 
 def HasDLInsts : Predicate<"Subtarget->hasDLInsts()">,
   AssemblerPredicate<"FeatureDLInsts">;
+
+def HasDotInsts : Predicate<"Subtarget->hasDotInsts()">,
+  AssemblerPredicate<"FeatureDotInsts">;
 
 
 def EnableLateCFGStructurize : Predicate<

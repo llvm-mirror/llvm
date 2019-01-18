@@ -1412,7 +1412,7 @@ static void DumpSectionContents(StringRef Filename, MachOObjectFile *O,
     std::pair<StringRef, StringRef> DumpSegSectName;
     DumpSegSectName = DumpSection.split(',');
     StringRef DumpSegName, DumpSectName;
-    if (DumpSegSectName.second.size()) {
+    if (!DumpSegSectName.second.empty()) {
       DumpSegName = DumpSegSectName.first;
       DumpSectName = DumpSegSectName.second;
     } else {
@@ -1582,7 +1582,7 @@ static void ProcessMachO(StringRef Name, MachOObjectFile *MachOOF,
   if (Disassemble || Relocations || PrivateHeaders || ExportsTrie || Rebase ||
       Bind || SymbolTable || LazyBind || WeakBind || IndirectSymbols ||
       DataInCode || LinkOptHints || DylibsUsed || DylibId || ObjcMetaData ||
-      (FilterSections.size() != 0)) {
+      (!FilterSections.empty())) {
     if (!NoLeadingHeaders) {
       outs() << Name;
       if (!ArchiveMemberName.empty())
@@ -1607,12 +1607,22 @@ static void ProcessMachO(StringRef Name, MachOObjectFile *MachOOF,
   // If we need the symbol table to do the operation then check it here to
   // produce a good error message as to where the Mach-O file comes from in
   // the error message.
-  if (Disassemble || IndirectSymbols || FilterSections.size() != 0 ||
-      UnwindInfo)
+  if (Disassemble || IndirectSymbols || !FilterSections.empty() || UnwindInfo)
     if (Error Err = MachOOF->checkSymbolTable())
       report_error(ArchiveName, FileName, std::move(Err), ArchitectureName);
-
-  if (Disassemble) {
+  
+  if (DisassembleAll) {
+    for (const SectionRef &Section : MachOOF->sections()) {
+      StringRef SectName;
+      Section.getName(SectName);
+      if (SectName.equals("__text")) {
+        DataRefImpl Ref = Section.getRawDataRefImpl();
+        StringRef SegName = MachOOF->getSectionFinalSegmentName(Ref);
+        DisassembleMachO(FileName, MachOOF, SegName, SectName);
+      }
+    }
+  }
+  else if (Disassemble) {
     if (MachOOF->getHeader().filetype == MachO::MH_KEXT_BUNDLE &&
         MachOOF->getHeader().cputype == MachO::CPU_TYPE_ARM64)
       DisassembleMachO(FileName, MachOOF, "__TEXT_EXEC", "__text");
@@ -1628,10 +1638,10 @@ static void ProcessMachO(StringRef Name, MachOObjectFile *MachOOF,
   if (Relocations)
     PrintRelocations(MachOOF, !NonVerbose);
   if (SectionHeaders)
-    PrintSectionHeaders(MachOOF);
+    printSectionHeaders(MachOOF);
   if (SectionContents)
-    PrintSectionContents(MachOOF);
-  if (FilterSections.size() != 0)
+    printSectionContents(MachOOF);
+  if (!FilterSections.empty())
     DumpSectionContents(FileName, MachOOF, !NonVerbose);
   if (InfoPlist)
     DumpInfoPlistSectionContents(FileName, MachOOF);
@@ -1640,7 +1650,7 @@ static void ProcessMachO(StringRef Name, MachOObjectFile *MachOOF,
   if (DylibId)
     PrintDylibs(MachOOF, true);
   if (SymbolTable)
-    PrintSymbolTable(MachOOF, ArchiveName, ArchitectureName);
+    printSymbolTable(MachOOF, ArchiveName, ArchitectureName);
   if (UnwindInfo)
     printMachOUnwindInfo(MachOOF);
   if (PrivateHeaders) {
@@ -1960,7 +1970,7 @@ static bool ValidateArchFlags() {
 // -arch flags selecting just those slices as specified by them and also parses
 // archive files.  Then for each individual Mach-O file ProcessMachO() is
 // called to process the file based on the command line options.
-void llvm::ParseInputMachO(StringRef Filename) {
+void llvm::parseInputMachO(StringRef Filename) {
   if (!ValidateArchFlags())
     return;
 
@@ -1999,7 +2009,7 @@ void llvm::ParseInputMachO(StringRef Filename) {
     return;
   }
   if (MachOUniversalBinary *UB = dyn_cast<MachOUniversalBinary>(&Bin)) {
-    ParseInputMachO(UB);
+    parseInputMachO(UB);
     return;
   }
   if (ObjectFile *O = dyn_cast<ObjectFile>(&Bin)) {
@@ -2016,7 +2026,7 @@ void llvm::ParseInputMachO(StringRef Filename) {
   llvm_unreachable("Input object can't be invalid at this point");
 }
 
-void llvm::ParseInputMachO(MachOUniversalBinary *UB) {
+void llvm::parseInputMachO(MachOUniversalBinary *UB) {
   if (!ValidateArchFlags())
     return;
 
@@ -2026,7 +2036,7 @@ void llvm::ParseInputMachO(MachOUniversalBinary *UB) {
     printMachOUniversalHeaders(UB, !NonVerbose);
 
   // If we have a list of architecture flags specified dump only those.
-  if (!ArchAll && ArchFlags.size() != 0) {
+  if (!ArchAll && !ArchFlags.empty()) {
     // Look for a slice in the universal binary that matches each ArchFlag.
     bool ArchFound;
     for (unsigned i = 0; i < ArchFlags.size(); ++i) {
@@ -6831,7 +6841,7 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
 
   // Package up features to be passed to target/subtarget
   std::string FeaturesStr;
-  if (MAttrs.size()) {
+  if (!MAttrs.empty()) {
     SubtargetFeatures Features;
     for (unsigned i = 0; i != MAttrs.size(); ++i)
       Features.AddFeature(MAttrs[i]);
@@ -6971,15 +6981,18 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
       ErrorOr<std::unique_ptr<MemoryBuffer>> BufOrErr =
           MemoryBuffer::getFileOrSTDIN(DSYMFile);
       if (std::error_code EC = BufOrErr.getError()) {
-        WithColor::error(errs(), "llvm-objdump")
-            << Filename << ": " << EC.message() << '\n';
+        report_error(DSYMFile, errorCodeToError(EC));
         return;
       }
+
       Expected<std::unique_ptr<MachOObjectFile>> DbgObjCheck =
           ObjectFile::createMachOObjectFile(BufOrErr.get()->getMemBufferRef());
 
-      if (DbgObjCheck.takeError())
-        report_error(MachOOF->getFileName(), DbgObjCheck.takeError());
+      if (Error E = DbgObjCheck.takeError()) {
+        report_error(DSYMFile, std::move(E));
+        return;
+      }
+
       DbgObj = DbgObjCheck.get().release();
       // We need to keep the file alive, because we're replacing DbgObj with it.
       DSYMBuf = std::move(BufOrErr.get());
@@ -6989,7 +7002,7 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
     diContext = DWARFContext::create(*DbgObj);
   }
 
-  if (FilterSections.size() == 0)
+  if (FilterSections.empty())
     outs() << "(" << DisSegName << "," << DisSectName << ") section\n";
 
   for (unsigned SectIdx = 0; SectIdx != Sections.size(); SectIdx++) {
@@ -7052,7 +7065,7 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
     unsigned int Arch = MachOOF->getArch();
 
     // Skip all symbols if this is a stubs file.
-    if (Bytes.size() == 0)
+    if (Bytes.empty())
       return;
 
     // If the section has symbols but no symbol at the start of the section

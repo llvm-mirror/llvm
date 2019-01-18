@@ -117,6 +117,12 @@ class VectorLegalizer {
   /// the remaining lanes, finally bitcasting to the proper type.
   SDValue ExpandZERO_EXTEND_VECTOR_INREG(SDValue Op);
 
+  /// Implement expand-based legalization of ABS vector operations.
+  /// If following expanding is legal/custom then do it:
+  /// (ABS x) --> (XOR (ADD x, (SRA x, sizeof(x)-1)), (SRA x, sizeof(x)-1))
+  /// else unroll the operation.
+  SDValue ExpandABS(SDValue Op);
+
   /// Expand bswap of vectors into a shuffle if legal.
   SDValue ExpandBSWAP(SDValue Op);
 
@@ -135,6 +141,7 @@ class VectorLegalizer {
   SDValue ExpandFunnelShift(SDValue Op);
   SDValue ExpandROT(SDValue Op);
   SDValue ExpandFMINNUM_FMAXNUM(SDValue Op);
+  SDValue ExpandAddSubSat(SDValue Op);
   SDValue ExpandStrictFPOp(SDValue Op);
 
   /// Implements vector promotion.
@@ -351,8 +358,11 @@ SDValue VectorLegalizer::LegalizeOp(SDValue Op) {
   case ISD::SHL:
   case ISD::SRA:
   case ISD::SRL:
+  case ISD::FSHL:
+  case ISD::FSHR:
   case ISD::ROTL:
   case ISD::ROTR:
+  case ISD::ABS:
   case ISD::BSWAP:
   case ISD::BITREVERSE:
   case ISD::CTLZ:
@@ -747,6 +757,8 @@ SDValue VectorLegalizer::Expand(SDValue Op) {
     return ExpandFSUB(Op);
   case ISD::SETCC:
     return UnrollVSETCC(Op);
+  case ISD::ABS:
+    return ExpandABS(Op);
   case ISD::BITREVERSE:
     return ExpandBITREVERSE(Op);
   case ISD::CTPOP:
@@ -766,6 +778,11 @@ SDValue VectorLegalizer::Expand(SDValue Op) {
   case ISD::FMINNUM:
   case ISD::FMAXNUM:
     return ExpandFMINNUM_FMAXNUM(Op);
+  case ISD::USUBSAT:
+  case ISD::SSUBSAT:
+  case ISD::UADDSAT:
+  case ISD::SADDSAT:
+    return ExpandAddSubSat(Op);
   case ISD::STRICT_FADD:
   case ISD::STRICT_FSUB:
   case ISD::STRICT_FMUL:
@@ -1062,6 +1079,16 @@ SDValue VectorLegalizer::ExpandVSELECT(SDValue Op) {
   return DAG.getNode(ISD::BITCAST, DL, Op.getValueType(), Val);
 }
 
+SDValue VectorLegalizer::ExpandABS(SDValue Op) {
+  // Attempt to expand using TargetLowering.
+  SDValue Result;
+  if (TLI.expandABS(Op.getNode(), Result, DAG))
+    return Result;
+
+  // Otherwise go ahead and unroll.
+  return DAG.UnrollVectorOp(Op.getNode());
+}
+
 SDValue VectorLegalizer::ExpandFP_TO_UINT(SDValue Op) {
   // Attempt to expand using TargetLowering.
   SDValue Result;
@@ -1181,6 +1208,12 @@ SDValue VectorLegalizer::ExpandROT(SDValue Op) {
 
 SDValue VectorLegalizer::ExpandFMINNUM_FMAXNUM(SDValue Op) {
   if (SDValue Expanded = TLI.expandFMINNUM_FMAXNUM(Op.getNode(), DAG))
+    return Expanded;
+  return DAG.UnrollVectorOp(Op.getNode());
+}
+
+SDValue VectorLegalizer::ExpandAddSubSat(SDValue Op) {
+  if (SDValue Expanded = TLI.expandAddSubSat(Op.getNode(), DAG))
     return Expanded;
   return DAG.UnrollVectorOp(Op.getNode());
 }

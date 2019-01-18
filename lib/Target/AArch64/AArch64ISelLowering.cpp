@@ -333,36 +333,38 @@ AArch64TargetLowering::AArch64TargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::FCOPYSIGN, MVT::f16, Promote);
 
   setOperationAction(ISD::FREM,    MVT::f16,   Promote);
-  setOperationAction(ISD::FREM,    MVT::v4f16, Promote);
-  setOperationAction(ISD::FREM,    MVT::v8f16, Promote);
+  setOperationAction(ISD::FREM,    MVT::v4f16, Expand);
+  setOperationAction(ISD::FREM,    MVT::v8f16, Expand);
   setOperationAction(ISD::FPOW,    MVT::f16,   Promote);
-  setOperationAction(ISD::FPOW,    MVT::v4f16, Promote);
-  setOperationAction(ISD::FPOW,    MVT::v8f16, Promote);
+  setOperationAction(ISD::FPOW,    MVT::v4f16, Expand);
+  setOperationAction(ISD::FPOW,    MVT::v8f16, Expand);
   setOperationAction(ISD::FPOWI,   MVT::f16,   Promote);
+  setOperationAction(ISD::FPOWI,   MVT::v4f16, Expand);
+  setOperationAction(ISD::FPOWI,   MVT::v8f16, Expand);
   setOperationAction(ISD::FCOS,    MVT::f16,   Promote);
-  setOperationAction(ISD::FCOS,    MVT::v4f16, Promote);
-  setOperationAction(ISD::FCOS,    MVT::v8f16, Promote);
+  setOperationAction(ISD::FCOS,    MVT::v4f16, Expand);
+  setOperationAction(ISD::FCOS,    MVT::v8f16, Expand);
   setOperationAction(ISD::FSIN,    MVT::f16,   Promote);
-  setOperationAction(ISD::FSIN,    MVT::v4f16, Promote);
-  setOperationAction(ISD::FSIN,    MVT::v8f16, Promote);
+  setOperationAction(ISD::FSIN,    MVT::v4f16, Expand);
+  setOperationAction(ISD::FSIN,    MVT::v8f16, Expand);
   setOperationAction(ISD::FSINCOS, MVT::f16,   Promote);
-  setOperationAction(ISD::FSINCOS, MVT::v4f16, Promote);
-  setOperationAction(ISD::FSINCOS, MVT::v8f16, Promote);
+  setOperationAction(ISD::FSINCOS, MVT::v4f16, Expand);
+  setOperationAction(ISD::FSINCOS, MVT::v8f16, Expand);
   setOperationAction(ISD::FEXP,    MVT::f16,   Promote);
-  setOperationAction(ISD::FEXP,    MVT::v4f16, Promote);
-  setOperationAction(ISD::FEXP,    MVT::v8f16, Promote);
+  setOperationAction(ISD::FEXP,    MVT::v4f16, Expand);
+  setOperationAction(ISD::FEXP,    MVT::v8f16, Expand);
   setOperationAction(ISD::FEXP2,   MVT::f16,   Promote);
-  setOperationAction(ISD::FEXP2,   MVT::v4f16, Promote);
-  setOperationAction(ISD::FEXP2,   MVT::v8f16, Promote);
+  setOperationAction(ISD::FEXP2,   MVT::v4f16, Expand);
+  setOperationAction(ISD::FEXP2,   MVT::v8f16, Expand);
   setOperationAction(ISD::FLOG,    MVT::f16,   Promote);
-  setOperationAction(ISD::FLOG,    MVT::v4f16, Promote);
-  setOperationAction(ISD::FLOG,    MVT::v8f16, Promote);
+  setOperationAction(ISD::FLOG,    MVT::v4f16, Expand);
+  setOperationAction(ISD::FLOG,    MVT::v8f16, Expand);
   setOperationAction(ISD::FLOG2,   MVT::f16,   Promote);
-  setOperationAction(ISD::FLOG2,   MVT::v4f16, Promote);
-  setOperationAction(ISD::FLOG2,   MVT::v8f16, Promote);
+  setOperationAction(ISD::FLOG2,   MVT::v4f16, Expand);
+  setOperationAction(ISD::FLOG2,   MVT::v8f16, Expand);
   setOperationAction(ISD::FLOG10,  MVT::f16,   Promote);
-  setOperationAction(ISD::FLOG10,  MVT::v4f16, Promote);
-  setOperationAction(ISD::FLOG10,  MVT::v8f16, Promote);
+  setOperationAction(ISD::FLOG10,  MVT::v4f16, Expand);
+  setOperationAction(ISD::FLOG10,  MVT::v8f16, Expand);
 
   if (!Subtarget->hasFullFP16()) {
     setOperationAction(ISD::SELECT,      MVT::f16,  Promote);
@@ -993,8 +995,8 @@ void AArch64TargetLowering::computeKnownBitsForTargetNode(
     break;
   case AArch64ISD::CSEL: {
     KnownBits Known2;
-    DAG.computeKnownBits(Op->getOperand(0), Known, Depth + 1);
-    DAG.computeKnownBits(Op->getOperand(1), Known2, Depth + 1);
+    Known = DAG.computeKnownBits(Op->getOperand(0), Depth + 1);
+    Known2 = DAG.computeKnownBits(Op->getOperand(1), Depth + 1);
     Known.Zero &= Known2.Zero;
     Known.One &= Known2.One;
     break;
@@ -2716,9 +2718,19 @@ SDValue AArch64TargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op,
     EVT PtrVT = getPointerTy(DAG.getDataLayout());
     return DAG.getNode(AArch64ISD::THREAD_POINTER, dl, PtrVT);
   }
-  case Intrinsic::aarch64_neon_abs:
-    return DAG.getNode(ISD::ABS, dl, Op.getValueType(),
-                       Op.getOperand(1));
+  case Intrinsic::aarch64_neon_abs: {
+    EVT Ty = Op.getValueType();
+    if (Ty == MVT::i64) {
+      SDValue Result = DAG.getNode(ISD::BITCAST, dl, MVT::v1i64,
+                                   Op.getOperand(1));
+      Result = DAG.getNode(ISD::ABS, dl, MVT::v1i64, Result);
+      return DAG.getNode(ISD::BITCAST, dl, MVT::i64, Result);
+    } else if (Ty.isVector() && Ty.isInteger() && isTypeLegal(Ty)) {
+      return DAG.getNode(ISD::ABS, dl, Ty, Op.getOperand(1));
+    } else {
+      report_fatal_error("Unexpected type for AArch64 NEON intrinic");
+    }
+  }
   case Intrinsic::aarch64_neon_smax:
     return DAG.getNode(ISD::SMAX, dl, Op.getValueType(),
                        Op.getOperand(1), Op.getOperand(2));
@@ -4343,6 +4355,13 @@ SDValue AArch64TargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
   SDValue Dest = Op.getOperand(4);
   SDLoc dl(Op);
 
+  MachineFunction &MF = DAG.getMachineFunction();
+  // Speculation tracking/SLH assumes that optimized TB(N)Z/CB(N)Z instructions
+  // will not be produced, as they are conditional branch instructions that do
+  // not set flags.
+  bool ProduceNonFlagSettingCondBr =
+      !MF.getFunction().hasFnAttribute(Attribute::SpeculativeLoadHardening);
+
   // Handle f128 first, since lowering it will result in comparing the return
   // value of a libcall against zero, which is just what the rest of LowerBR_CC
   // is expecting to deal with.
@@ -4385,7 +4404,7 @@ SDValue AArch64TargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
     // If the RHS of the comparison is zero, we can potentially fold this
     // to a specialized branch.
     const ConstantSDNode *RHSC = dyn_cast<ConstantSDNode>(RHS);
-    if (RHSC && RHSC->getZExtValue() == 0) {
+    if (RHSC && RHSC->getZExtValue() == 0 && ProduceNonFlagSettingCondBr) {
       if (CC == ISD::SETEQ) {
         // See if we can use a TBZ to fold in an AND as well.
         // TBZ has a smaller branch displacement than CBZ.  If the offset is
@@ -4428,7 +4447,7 @@ SDValue AArch64TargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
       }
     }
     if (RHSC && RHSC->getSExtValue() == -1 && CC == ISD::SETGT &&
-        LHS.getOpcode() != ISD::AND) {
+        LHS.getOpcode() != ISD::AND && ProduceNonFlagSettingCondBr) {
       // Don't combine AND since emitComparison converts the AND to an ANDS
       // (a.k.a. TST) and the test in the test bit and branch instruction
       // becomes redundant.  This would also increase register pressure.
@@ -10046,6 +10065,7 @@ static SDValue performExtendCombine(SDNode *N,
 
 static SDValue splitStoreSplat(SelectionDAG &DAG, StoreSDNode &St,
                                SDValue SplatVal, unsigned NumVecElts) {
+  assert(!St.isTruncatingStore() && "cannot split truncating vector store");
   unsigned OrigAlignment = St.getAlignment();
   unsigned EltOffset = SplatVal.getValueType().getSizeInBits() / 8;
 
@@ -10120,6 +10140,11 @@ static SDValue replaceZeroVectorStore(SelectionDAG &DAG, StoreSDNode &St) {
   if (!StVal.hasOneUse())
     return SDValue();
 
+  // If the store is truncating then it's going down to i16 or smaller, which
+  // means it can be implemented in a single store anyway.
+  if (St.isTruncatingStore())
+    return SDValue();
+
   // If the immediate offset of the address operand is too large for the stp
   // instruction, then bail out.
   if (DAG.isBaseWithConstantOffset(St.getBasePtr())) {
@@ -10168,6 +10193,11 @@ static SDValue replaceSplatVectorStore(SelectionDAG &DAG, StoreSDNode &St) {
   // We can express a splat as store pair(s) for 2 or 4 elements.
   unsigned NumVecElts = VT.getVectorNumElements();
   if (NumVecElts != 4 && NumVecElts != 2)
+    return SDValue();
+
+  // If the store is truncating then it's going down to i16 or smaller, which
+  // means it can be implemented in a single store anyway.
+  if (St.isTruncatingStore())
     return SDValue();
 
   // Check that this is a splat.
@@ -10807,6 +10837,13 @@ SDValue performCONDCombine(SDNode *N,
 static SDValue performBRCONDCombine(SDNode *N,
                                     TargetLowering::DAGCombinerInfo &DCI,
                                     SelectionDAG &DAG) {
+  MachineFunction &MF = DAG.getMachineFunction();
+  // Speculation tracking/SLH assumes that optimized TB(N)Z/CB(N)Z instructions
+  // will not be produced, as they are conditional branch instructions that do
+  // not set flags.
+  if (MF.getFunction().hasFnAttribute(Attribute::SpeculativeLoadHardening))
+    return SDValue();
+
   if (SDValue NV = performCONDCombine(N, DCI, DAG, 2, 3))
     N = NV.getNode();
   SDValue Chain = N->getOperand(0);

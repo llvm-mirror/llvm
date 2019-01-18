@@ -62,44 +62,44 @@
 ; }
 ; }
 
-; CHECK-LABEL: S_GPROC32_ID [size = 50] `use_alloca`
-; CHECK: S_FRAMEPROC [size = 30]
+; CHECK-LABEL: S_GPROC32_ID [size = 52] `use_alloca`
+; CHECK: S_FRAMEPROC [size = 32]
 ; CHECK:   local fp reg = VFRAME, param fp reg = EBP
 ; CHECK:   flags = has alloca | secure checks | opt speed
-; CHECK-LABEL: S_GPROC32_ID [size = 51] `call_setjmp`
-; CHECK: S_FRAMEPROC [size = 30]
+; CHECK-LABEL: S_GPROC32_ID [size = 52] `call_setjmp`
+; CHECK: S_FRAMEPROC [size = 32]
 ; CHECK:   local fp reg = NONE, param fp reg = NONE
 ; CHECK:   flags = has setjmp | opt speed
-; CHECK-LABEL: S_GPROC32_ID [size = 53] `use_inlineasm`
-; CHECK: S_FRAMEPROC [size = 30]
+; CHECK-LABEL: S_GPROC32_ID [size = 56] `use_inlineasm`
+; CHECK: S_FRAMEPROC [size = 32]
 ; CHECK:   local fp reg = NONE, param fp reg = NONE
 ; CHECK:   flags = has inline asm | opt speed
-; CHECK-LABEL: S_GPROC32_ID [size = 46] `cpp_eh`
-; CHECK: S_FRAMEPROC [size = 30]
+; CHECK-LABEL: S_GPROC32_ID [size = 48] `cpp_eh`
+; CHECK: S_FRAMEPROC [size = 32]
 ; CHECK:   local fp reg = EBP, param fp reg = EBP
 ; CHECK:   flags = has eh | opt speed
-; CHECK-LABEL: S_GPROC32_ID [size = 50] `use_inline`
-; CHECK: S_FRAMEPROC [size = 30]
+; CHECK-LABEL: S_GPROC32_ID [size = 52] `use_inline`
+; CHECK: S_FRAMEPROC [size = 32]
 ; CHECK:   local fp reg = NONE, param fp reg = NONE
 ; CHECK:   flags = opt speed
 ; CHECK-LABEL: S_LPROC32_ID [size = 56] `is_marked_inline`
-; CHECK: S_FRAMEPROC [size = 30]
+; CHECK: S_FRAMEPROC [size = 32]
 ; CHECK:   local fp reg = NONE, param fp reg = NONE
 ; CHECK:   flags = marked inline | opt speed
-; CHECK-LABEL: S_GPROC32_ID [size = 43] `seh`
-; CHECK: S_FRAMEPROC [size = 30]
+; CHECK-LABEL: S_GPROC32_ID [size = 44] `seh`
+; CHECK: S_FRAMEPROC [size = 32]
 ; CHECK:   local fp reg = EBP, param fp reg = EBP
 ; CHECK:   flags = has seh | opt speed
-; CHECK-LABEL: S_LPROC32_ID [size = 55] `?filt$0@0@seh@@`
-; CHECK: S_FRAMEPROC [size = 30]
+; CHECK-LABEL: S_LPROC32_ID [size = 56] `?filt$0@0@seh@@`
+; CHECK: S_FRAMEPROC [size = 32]
 ; CHECK:   local fp reg = EBP, param fp reg = EBP
 ; CHECK:   flags = opt speed
-; CHECK-LABEL: S_GPROC32_ID [size = 49] `use_naked`
-; CHECK: S_FRAMEPROC [size = 30]
+; CHECK-LABEL: S_GPROC32_ID [size = 52] `use_naked`
+; CHECK: S_FRAMEPROC [size = 32]
 ; CHECK:   local fp reg = NONE, param fp reg = NONE
 ; CHECK:   flags = has inline asm | naked | opt speed
-; CHECK-LABEL: S_GPROC32_ID [size = 51] `stack_guard`
-; CHECK: S_FRAMEPROC [size = 30]
+; CHECK-LABEL: S_GPROC32_ID [size = 52] `stack_guard`
+; CHECK: S_FRAMEPROC [size = 32]
 ; CHECK:   local fp reg = VFRAME, param fp reg = EBP
 ; CHECK:   flags = secure checks | opt speed
 
@@ -216,7 +216,7 @@ __try.cont:                                       ; preds = %entry, %__except.re
 define internal i32 @"?filt$0@0@seh@@"() #8 !dbg !74 {
 entry:
   %0 = tail call i8* @llvm.frameaddress(i32 1)
-  %1 = tail call i8* @llvm.x86.seh.recoverfp(i8* bitcast (void ()* @seh to i8*), i8* %0)
+  %1 = tail call i8* @llvm.eh.recoverfp(i8* bitcast (void ()* @seh to i8*), i8* %0)
   %2 = tail call i8* @llvm.localrecover(i8* bitcast (void ()* @seh to i8*), i8* %1, i32 0)
   %__exception_code = bitcast i8* %2 to i32*
   %3 = getelementptr inbounds i8, i8* %0, i32 -20, !dbg !76
@@ -233,7 +233,7 @@ entry:
 declare i8* @llvm.frameaddress(i32) #9
 
 ; Function Attrs: nounwind readnone
-declare i8* @llvm.x86.seh.recoverfp(i8*, i8*) #9
+declare i8* @llvm.eh.recoverfp(i8*, i8*) #9
 
 ; Function Attrs: nounwind readnone
 declare i8* @llvm.localrecover(i8*, i8*, i32) #9

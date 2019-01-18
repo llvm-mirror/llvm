@@ -173,6 +173,8 @@ static void splitDWOToFile(const CopyConfig &Config, const Reader &Reader,
   auto DWOFile = Reader.create();
   DWOFile->removeSections(
       [&](const SectionBase &Sec) { return onlyKeepDWOPred(*DWOFile, Sec); });
+  if (Config.OutputArch)
+    DWOFile->Machine = Config.OutputArch.getValue().EMachine;
   FileBuffer FB(File);
   auto Writer = createWriter(Config, *DWOFile, FB, OutputElfType);
   Writer->finalize();
@@ -183,7 +185,7 @@ static Error dumpSectionToFile(StringRef SecName, StringRef Filename,
                                Object &Obj) {
   for (auto &Sec : Obj.sections()) {
     if (Sec.Name == SecName) {
-      if (Sec.OriginalData.size() == 0)
+      if (Sec.OriginalData.empty())
         return make_error<StringError>("Can't dump section \"" + SecName +
                                            "\": it has no contents",
                                        object_error::parse_failed);
@@ -261,6 +263,8 @@ static void handleArgs(const CopyConfig &Config, Object &Obj,
   if (!Config.SplitDWO.empty()) {
     splitDWOToFile(Config, Reader, Config.SplitDWO, OutputElfType);
   }
+  if (Config.OutputArch)
+    Obj.Machine = Config.OutputArch.getValue().EMachine;
 
   // TODO: update or remove symbols only if there is an option that affects
   // them.
@@ -495,17 +499,21 @@ static void handleArgs(const CopyConfig &Config, Object &Obj,
 
   if (!Config.AddSection.empty()) {
     for (const auto &Flag : Config.AddSection) {
-      auto SecPair = Flag.split("=");
-      auto SecName = SecPair.first;
-      auto File = SecPair.second;
-      auto BufOrErr = MemoryBuffer::getFile(File);
+      std::pair<StringRef, StringRef> SecPair = Flag.split("=");
+      StringRef SecName = SecPair.first;
+      StringRef File = SecPair.second;
+      ErrorOr<std::unique_ptr<MemoryBuffer>> BufOrErr =
+          MemoryBuffer::getFile(File);
       if (!BufOrErr)
         reportError(File, BufOrErr.getError());
-      auto Buf = std::move(*BufOrErr);
-      auto BufPtr = reinterpret_cast<const uint8_t *>(Buf->getBufferStart());
-      auto BufSize = Buf->getBufferSize();
-      Obj.addSection<OwnedDataSection>(SecName,
-                                       ArrayRef<uint8_t>(BufPtr, BufSize));
+      std::unique_ptr<MemoryBuffer> Buf = std::move(*BufOrErr);
+      ArrayRef<uint8_t> Data(
+          reinterpret_cast<const uint8_t *>(Buf->getBufferStart()),
+          Buf->getBufferSize());
+      OwnedDataSection &NewSection =
+          Obj.addSection<OwnedDataSection>(SecName, Data);
+      if (SecName.startswith(".note") && SecName != ".note.GNU-stack")
+        NewSection.Type = SHT_NOTE;
     }
   }
 
@@ -528,7 +536,10 @@ void executeObjcopyOnRawBinary(const CopyConfig &Config, MemoryBuffer &In,
   BinaryReader Reader(Config.BinaryArch, &In);
   std::unique_ptr<Object> Obj = Reader.create();
 
-  const ElfType OutputElfType = getOutputElfType(Config.BinaryArch);
+  // Prefer OutputArch (-O<format>) if set, otherwise fallback to BinaryArch
+  // (-B<arch>).
+  const ElfType OutputElfType = getOutputElfType(
+      Config.OutputArch ? Config.OutputArch.getValue() : Config.BinaryArch);
   handleArgs(Config, *Obj, Reader, OutputElfType);
   std::unique_ptr<Writer> Writer =
       createWriter(Config, *Obj, Out, OutputElfType);
@@ -540,7 +551,10 @@ void executeObjcopyOnBinary(const CopyConfig &Config,
                             object::ELFObjectFileBase &In, Buffer &Out) {
   ELFReader Reader(&In);
   std::unique_ptr<Object> Obj = Reader.create();
-  const ElfType OutputElfType = getOutputElfType(In);
+  // Prefer OutputArch (-O<format>) if set, otherwise infer it from the input.
+  const ElfType OutputElfType =
+      Config.OutputArch ? getOutputElfType(Config.OutputArch.getValue())
+                        : getOutputElfType(In);
   ArrayRef<uint8_t> BuildIdBytes;
 
   if (!Config.BuildIdLinkDir.empty()) {

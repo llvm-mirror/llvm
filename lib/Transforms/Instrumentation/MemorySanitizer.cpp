@@ -99,9 +99,8 @@
 /// also possible that the arguments only indicate the offset for a base taken
 /// from a segment register, so it's dangerous to treat any asm() arguments as
 /// pointers. We take a conservative approach generating calls to
-///   __msan_instrument_asm_load(ptr, size) and
 ///   __msan_instrument_asm_store(ptr, size)
-/// , which defer the memory checking/unpoisoning to the runtime library.
+/// , which defer the memory unpoisoning to the runtime library.
 /// The latter can perform more complex address checks to figure out whether
 /// it's safe to touch the shadow memory.
 /// Like with atomic operations, we call __msan_instrument_asm_store() before
@@ -141,6 +140,7 @@
 ///
 //===----------------------------------------------------------------------===//
 
+#include "llvm/Transforms/Instrumentation/MemorySanitizer.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DepthFirstIterator.h"
@@ -150,7 +150,6 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/BasicBlock.h"
@@ -188,6 +187,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Instrumentation.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
 #include <algorithm>
 #include <cassert>
@@ -321,7 +321,6 @@ static cl::opt<unsigned long long> ClOriginBase("msan-origin-base",
        cl::desc("Define custom MSan OriginBase"),
        cl::Hidden, cl::init(0));
 
-static const char *const kMsanModuleCtorName = "msan.module_ctor";
 static const char *const kMsanInitName = "__msan_init";
 
 namespace {
@@ -447,19 +446,16 @@ static const PlatformMemoryMapParams NetBSD_X86_MemoryMapParams = {
 
 namespace {
 
-/// An instrumentation pass implementing detection of uninitialized
-/// reads.
+/// Instrument functions of a module to detect uninitialized reads.
 ///
-/// MemorySanitizer: instrument the code in module to find
-/// uninitialized reads.
-class MemorySanitizer : public FunctionPass {
+/// Instantiating MemorySanitizer inserts the msan runtime library API function
+/// declarations into the module if they don't exist already. Instantiating
+/// ensures the __msan_init function is in the list of global constructors for
+/// the module.
+class MemorySanitizer {
 public:
-  // Pass identification, replacement for typeid.
-  static char ID;
-
-  MemorySanitizer(int TrackOrigins = 0, bool Recover = false,
-                  bool EnableKmsan = false)
-      : FunctionPass(ID) {
+  MemorySanitizer(Module &M, int TrackOrigins = 0, bool Recover = false,
+                  bool EnableKmsan = false) {
     this->CompileKernel =
         ClEnableKmsan.getNumOccurrences() > 0 ? ClEnableKmsan : EnableKmsan;
     if (ClTrackOrigins.getNumOccurrences() > 0)
@@ -469,15 +465,16 @@ public:
     this->Recover = ClKeepGoing.getNumOccurrences() > 0
                         ? ClKeepGoing
                         : (this->CompileKernel | Recover);
-  }
-  StringRef getPassName() const override { return "MemorySanitizer"; }
-
-  void getAnalysisUsage(AnalysisUsage &AU) const override {
-    AU.addRequired<TargetLibraryInfoWrapperPass>();
+    initializeModule(M);
   }
 
-  bool runOnFunction(Function &F) override;
-  bool doInitialization(Module &M) override;
+  // MSan cannot be moved or copied because of MapParams.
+  MemorySanitizer(MemorySanitizer &&) = delete;
+  MemorySanitizer &operator=(MemorySanitizer &&) = delete;
+  MemorySanitizer(const MemorySanitizer &) = delete;
+  MemorySanitizer &operator=(const MemorySanitizer &) = delete;
+
+  bool sanitizeFunction(Function &F, TargetLibraryInfo &TLI);
 
 private:
   friend struct MemorySanitizerVisitor;
@@ -486,13 +483,13 @@ private:
   friend struct VarArgAArch64Helper;
   friend struct VarArgPowerPC64Helper;
 
+  void initializeModule(Module &M);
   void initializeCallbacks(Module &M);
   void createKernelApi(Module &M);
   void createUserspaceApi(Module &M);
 
   /// True if we're compiling the Linux kernel.
   bool CompileKernel;
-
   /// Track origins (allocation points) of uninitialized values.
   int TrackOrigins;
   bool Recover;
@@ -570,7 +567,7 @@ private:
   Value *MsanMetadataPtrForLoadN, *MsanMetadataPtrForStoreN;
   Value *MsanMetadataPtrForLoad_1_8[4];
   Value *MsanMetadataPtrForStore_1_8[4];
-  Value *MsanInstrumentAsmStoreFn, *MsanInstrumentAsmLoadFn;
+  Value *MsanInstrumentAsmStoreFn;
 
   /// Helper to choose between different MsanMetadataPtrXxx().
   Value *getKmsanShadowOriginAccessFn(bool isStore, int size);
@@ -589,25 +586,61 @@ private:
 
   /// An empty volatile inline asm that prevents callback merge.
   InlineAsm *EmptyAsm;
+};
 
-  Function *MsanCtorFunction;
+/// A legacy function pass for msan instrumentation.
+///
+/// Instruments functions to detect unitialized reads.
+struct MemorySanitizerLegacyPass : public FunctionPass {
+  // Pass identification, replacement for typeid.
+  static char ID;
+
+  MemorySanitizerLegacyPass(int TrackOrigins = 0, bool Recover = false,
+                            bool EnableKmsan = false)
+      : FunctionPass(ID), TrackOrigins(TrackOrigins), Recover(Recover),
+        EnableKmsan(EnableKmsan) {}
+  StringRef getPassName() const override { return "MemorySanitizerLegacyPass"; }
+
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
+    AU.addRequired<TargetLibraryInfoWrapperPass>();
+  }
+
+  bool runOnFunction(Function &F) override {
+    return MSan->sanitizeFunction(
+        F, getAnalysis<TargetLibraryInfoWrapperPass>().getTLI());
+  }
+  bool doInitialization(Module &M) override;
+
+  Optional<MemorySanitizer> MSan;
+  int TrackOrigins;
+  bool Recover;
+  bool EnableKmsan;
 };
 
 } // end anonymous namespace
 
-char MemorySanitizer::ID = 0;
+PreservedAnalyses MemorySanitizerPass::run(Function &F,
+                                           FunctionAnalysisManager &FAM) {
+  MemorySanitizer Msan(*F.getParent(), TrackOrigins, Recover, EnableKmsan);
+  if (Msan.sanitizeFunction(F, FAM.getResult<TargetLibraryAnalysis>(F)))
+    return PreservedAnalyses::none();
+  return PreservedAnalyses::all();
+}
 
-INITIALIZE_PASS_BEGIN(
-    MemorySanitizer, "msan",
-    "MemorySanitizer: detects uninitialized reads.", false, false)
+char MemorySanitizerLegacyPass::ID = 0;
+
+INITIALIZE_PASS_BEGIN(MemorySanitizerLegacyPass, "msan",
+                      "MemorySanitizer: detects uninitialized reads.", false,
+                      false)
 INITIALIZE_PASS_DEPENDENCY(TargetLibraryInfoWrapperPass)
-INITIALIZE_PASS_END(
-    MemorySanitizer, "msan",
-    "MemorySanitizer: detects uninitialized reads.", false, false)
+INITIALIZE_PASS_END(MemorySanitizerLegacyPass, "msan",
+                    "MemorySanitizer: detects uninitialized reads.", false,
+                    false)
 
-FunctionPass *llvm::createMemorySanitizerPass(int TrackOrigins, bool Recover,
-                                              bool CompileKernel) {
-  return new MemorySanitizer(TrackOrigins, Recover, CompileKernel);
+FunctionPass *llvm::createMemorySanitizerLegacyPassPass(int TrackOrigins,
+                                                        bool Recover,
+                                                        bool CompileKernel) {
+  return new MemorySanitizerLegacyPass(TrackOrigins, Recover, CompileKernel);
 }
 
 /// Create a non-const global initialized with the given string.
@@ -684,6 +717,14 @@ void MemorySanitizer::createKernelApi(Module &M) {
       "__msan_unpoison_alloca", IRB.getVoidTy(), IRB.getInt8PtrTy(), IntptrTy);
 }
 
+static Constant *getOrInsertGlobal(Module &M, StringRef Name, Type *Ty) {
+  return M.getOrInsertGlobal(Name, Ty, [&] {
+    return new GlobalVariable(M, Ty, false, GlobalVariable::ExternalLinkage,
+                              nullptr, Name, nullptr,
+                              GlobalVariable::InitialExecTLSModel);
+  });
+}
+
 /// Insert declarations for userspace-specific functions and globals.
 void MemorySanitizer::createUserspaceApi(Module &M) {
   IRBuilder<> IRB(*C);
@@ -695,42 +736,31 @@ void MemorySanitizer::createUserspaceApi(Module &M) {
   WarningFn = M.getOrInsertFunction(WarningFnName, IRB.getVoidTy());
 
   // Create the global TLS variables.
-  RetvalTLS = new GlobalVariable(
-      M, ArrayType::get(IRB.getInt64Ty(), kRetvalTLSSize / 8), false,
-      GlobalVariable::ExternalLinkage, nullptr, "__msan_retval_tls", nullptr,
-      GlobalVariable::InitialExecTLSModel);
+  RetvalTLS =
+      getOrInsertGlobal(M, "__msan_retval_tls",
+                        ArrayType::get(IRB.getInt64Ty(), kRetvalTLSSize / 8));
 
-  RetvalOriginTLS = new GlobalVariable(
-      M, OriginTy, false, GlobalVariable::ExternalLinkage, nullptr,
-      "__msan_retval_origin_tls", nullptr, GlobalVariable::InitialExecTLSModel);
+  RetvalOriginTLS = getOrInsertGlobal(M, "__msan_retval_origin_tls", OriginTy);
 
-  ParamTLS = new GlobalVariable(
-      M, ArrayType::get(IRB.getInt64Ty(), kParamTLSSize / 8), false,
-      GlobalVariable::ExternalLinkage, nullptr, "__msan_param_tls", nullptr,
-      GlobalVariable::InitialExecTLSModel);
+  ParamTLS =
+      getOrInsertGlobal(M, "__msan_param_tls",
+                        ArrayType::get(IRB.getInt64Ty(), kParamTLSSize / 8));
 
-  ParamOriginTLS = new GlobalVariable(
-      M, ArrayType::get(OriginTy, kParamTLSSize / 4), false,
-      GlobalVariable::ExternalLinkage, nullptr, "__msan_param_origin_tls",
-      nullptr, GlobalVariable::InitialExecTLSModel);
+  ParamOriginTLS =
+      getOrInsertGlobal(M, "__msan_param_origin_tls",
+                        ArrayType::get(OriginTy, kParamTLSSize / 4));
 
-  VAArgTLS = new GlobalVariable(
-      M, ArrayType::get(IRB.getInt64Ty(), kParamTLSSize / 8), false,
-      GlobalVariable::ExternalLinkage, nullptr, "__msan_va_arg_tls", nullptr,
-      GlobalVariable::InitialExecTLSModel);
+  VAArgTLS =
+      getOrInsertGlobal(M, "__msan_va_arg_tls",
+                        ArrayType::get(IRB.getInt64Ty(), kParamTLSSize / 8));
 
-  VAArgOriginTLS = new GlobalVariable(
-      M, ArrayType::get(OriginTy, kParamTLSSize / 4), false,
-      GlobalVariable::ExternalLinkage, nullptr, "__msan_va_arg_origin_tls",
-      nullptr, GlobalVariable::InitialExecTLSModel);
+  VAArgOriginTLS =
+      getOrInsertGlobal(M, "__msan_va_arg_origin_tls",
+                        ArrayType::get(OriginTy, kParamTLSSize / 4));
 
-  VAArgOverflowSizeTLS = new GlobalVariable(
-      M, IRB.getInt64Ty(), false, GlobalVariable::ExternalLinkage, nullptr,
-      "__msan_va_arg_overflow_size_tls", nullptr,
-      GlobalVariable::InitialExecTLSModel);
-  OriginTLS = new GlobalVariable(
-      M, IRB.getInt32Ty(), false, GlobalVariable::ExternalLinkage, nullptr,
-      "__msan_origin_tls", nullptr, GlobalVariable::InitialExecTLSModel);
+  VAArgOverflowSizeTLS =
+      getOrInsertGlobal(M, "__msan_va_arg_overflow_size_tls", IRB.getInt64Ty());
+  OriginTLS = getOrInsertGlobal(M, "__msan_origin_tls", IRB.getInt32Ty());
 
   for (size_t AccessSizeIndex = 0; AccessSizeIndex < kNumberOfAccessSizes;
        AccessSizeIndex++) {
@@ -779,9 +809,6 @@ void MemorySanitizer::initializeCallbacks(Module &M) {
                             StringRef(""), StringRef(""),
                             /*hasSideEffects=*/true);
 
-  MsanInstrumentAsmLoadFn =
-      M.getOrInsertFunction("__msan_instrument_asm_load", IRB.getVoidTy(),
-                            PointerType::get(IRB.getInt8Ty(), 0), IntptrTy);
   MsanInstrumentAsmStoreFn =
       M.getOrInsertFunction("__msan_instrument_asm_store", IRB.getVoidTy(),
                             PointerType::get(IRB.getInt8Ty(), 0), IntptrTy);
@@ -812,9 +839,7 @@ Value *MemorySanitizer::getKmsanShadowOriginAccessFn(bool isStore, int size) {
 }
 
 /// Module-level initialization.
-///
-/// inserts a call to __msan_init to the module's constructor list.
-bool MemorySanitizer::doInitialization(Module &M) {
+void MemorySanitizer::initializeModule(Module &M) {
   auto &DL = M.getDataLayout();
 
   bool ShadowPassed = ClShadowBase.getNumOccurrences() > 0;
@@ -888,27 +913,26 @@ bool MemorySanitizer::doInitialization(Module &M) {
   OriginStoreWeights = MDBuilder(*C).createBranchWeights(1, 1000);
 
   if (!CompileKernel) {
-    std::tie(MsanCtorFunction, std::ignore) =
-        createSanitizerCtorAndInitFunctions(M, kMsanModuleCtorName,
-                                            kMsanInitName,
-                                            /*InitArgTypes=*/{},
-                                            /*InitArgs=*/{});
-    if (ClWithComdat) {
-      Comdat *MsanCtorComdat = M.getOrInsertComdat(kMsanModuleCtorName);
-      MsanCtorFunction->setComdat(MsanCtorComdat);
-      appendToGlobalCtors(M, MsanCtorFunction, 0, MsanCtorFunction);
-    } else {
-      appendToGlobalCtors(M, MsanCtorFunction, 0);
-    }
+    getOrCreateInitFunction(M, kMsanInitName);
 
     if (TrackOrigins)
-      new GlobalVariable(M, IRB.getInt32Ty(), true, GlobalValue::WeakODRLinkage,
-                         IRB.getInt32(TrackOrigins), "__msan_track_origins");
+      M.getOrInsertGlobal("__msan_track_origins", IRB.getInt32Ty(), [&] {
+        return new GlobalVariable(
+            M, IRB.getInt32Ty(), true, GlobalValue::WeakODRLinkage,
+            IRB.getInt32(TrackOrigins), "__msan_track_origins");
+      });
 
     if (Recover)
-      new GlobalVariable(M, IRB.getInt32Ty(), true, GlobalValue::WeakODRLinkage,
-                         IRB.getInt32(Recover), "__msan_keep_going");
-  }
+      M.getOrInsertGlobal("__msan_keep_going", IRB.getInt32Ty(), [&] {
+        return new GlobalVariable(M, IRB.getInt32Ty(), true,
+                                  GlobalValue::WeakODRLinkage,
+                                  IRB.getInt32(Recover), "__msan_keep_going");
+      });
+}
+}
+
+bool MemorySanitizerLegacyPass::doInitialization(Module &M) {
+  MSan.emplace(M, TrackOrigins, Recover, EnableKmsan);
   return true;
 }
 
@@ -989,8 +1013,9 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
   SmallVector<ShadowOriginAndInsertPoint, 16> InstrumentationList;
   SmallVector<StoreInst *, 16> StoreList;
 
-  MemorySanitizerVisitor(Function &F, MemorySanitizer &MS)
-      : F(F), MS(MS), VAHelper(CreateVarArgHelper(F, MS, *this)) {
+  MemorySanitizerVisitor(Function &F, MemorySanitizer &MS,
+                         const TargetLibraryInfo &TLI)
+      : F(F), MS(MS), VAHelper(CreateVarArgHelper(F, MS, *this)), TLI(&TLI) {
     bool SanitizeFunction = F.hasFnAttribute(Attribute::SanitizeMemory);
     InsertChecks = SanitizeFunction;
     PropagateShadow = SanitizeFunction;
@@ -999,7 +1024,6 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
     // FIXME: Consider using SpecialCaseList to specify a list of functions that
     // must always return fully initialized values. For now, we hardcode "main".
     CheckReturnValue = SanitizeFunction && (F.getName() == "main");
-    TLI = &MS.getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
 
     MS.initializeCallbacks(*F.getParent());
     if (MS.CompileKernel)
@@ -3103,6 +3127,12 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
       handleVectorComparePackedIntrinsic(I);
       break;
 
+    case Intrinsic::is_constant:
+      // The result of llvm.is.constant() is always defined.
+      setShadow(&I, getCleanShadow(&I));
+      setOrigin(&I, getCleanOrigin());
+      break;
+
     default:
       if (!handleUnknownIntrinsic(I))
         visitInstruction(I);
@@ -3200,8 +3230,7 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
     }
     LLVM_DEBUG(dbgs() << "  done with call args\n");
 
-    FunctionType *FT =
-      cast<FunctionType>(CS.getCalledValue()->getType()->getContainedType(0));
+    FunctionType *FT = CS.getFunctionType();
     if (FT->isVarArg()) {
       VAHelper->visitCallSite(CS, IRB);
     }
@@ -3482,19 +3511,17 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
     Type *OpType = Operand->getType();
     // Check the operand value itself.
     insertShadowCheck(Operand, &I);
-    if (!OpType->isPointerTy()) {
+    if (!OpType->isPointerTy() || !isOutput) {
       assert(!isOutput);
       return;
     }
-    Value *Hook =
-        isOutput ? MS.MsanInstrumentAsmStoreFn : MS.MsanInstrumentAsmLoadFn;
     Type *ElType = OpType->getPointerElementType();
     if (!ElType->isSized())
       return;
     int Size = DL.getTypeStoreSize(ElType);
     Value *Ptr = IRB.CreatePointerCast(Operand, IRB.getInt8PtrTy());
     Value *SizeVal = ConstantInt::get(MS.IntptrTy, Size);
-    IRB.CreateCall(Hook, {Ptr, SizeVal});
+    IRB.CreateCall(MS.MsanInstrumentAsmStoreFn, {Ptr, SizeVal});
   }
 
   /// Get the number of output arguments returned by pointers.
@@ -4430,10 +4457,8 @@ static VarArgHelper *CreateVarArgHelper(Function &Func, MemorySanitizer &Msan,
     return new VarArgNoOpHelper(Func, Msan, Visitor);
 }
 
-bool MemorySanitizer::runOnFunction(Function &F) {
-  if (!CompileKernel && (&F == MsanCtorFunction))
-    return false;
-  MemorySanitizerVisitor Visitor(F, *this);
+bool MemorySanitizer::sanitizeFunction(Function &F, TargetLibraryInfo &TLI) {
+  MemorySanitizerVisitor Visitor(F, *this, TLI);
 
   // Clear out readonly/readnone attributes.
   AttrBuilder B;

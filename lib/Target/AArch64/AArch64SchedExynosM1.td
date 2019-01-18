@@ -78,9 +78,8 @@ def M1WriteAC : SchedWriteRes<[M1UnitALU,
 def M1WriteAD : SchedWriteRes<[M1UnitALU,
                                M1UnitC]>   { let Latency = 2;
                                              let NumMicroOps = 2; }
-def M1WriteAX : SchedWriteVariant<[SchedVar<ExynosExtPred, [M1WriteA1]>,
-                                   SchedVar<NoSchedPred,   [M1WriteAA]>]>;
-def M1WriteAY : SchedWriteVariant<[SchedVar<ExynosShiftPred, [M1WriteA1]>,
+def M1WriteAX : SchedWriteVariant<[SchedVar<ExynosArithPred, [M1WriteA1]>,
+                                   SchedVar<ExynosLogicPred, [M1WriteA1]>,
                                    SchedVar<NoSchedPred,     [M1WriteAA]>]>;
 def M1WriteC1 : SchedWriteRes<[M1UnitC]>   { let Latency = 1; }
 def M1WriteC2 : SchedWriteRes<[M1UnitC]>   { let Latency = 2; }
@@ -430,7 +429,7 @@ def : InstRW<[M1WriteAD], (instregex "^TBN?Z[WX]")>;
 
 // Arithmetic and logical integer instructions.
 def : InstRW<[M1WriteAX], (instregex ".+rx(64)?$")>;
-def : InstRW<[M1WriteAY], (instregex ".+rs$")>;
+def : InstRW<[M1WriteAX], (instregex ".+rs$")>;
 
 // Move instructions.
 def : InstRW<[M1WriteCOPY], (instrs COPY)>;
@@ -440,13 +439,13 @@ def : InstRW<[M1WriteCOPY], (instrs COPY)>;
 // Miscellaneous instructions.
 
 // Load instructions.
-def : InstRW<[M1WriteLC,
-              ReadAdrBase], (instregex "^LDR(BB|HH|SBW|SBX|SHW|SWX|SW|W|X)roW")>;
-def : InstRW<[M1WriteL5,
-              ReadAdrBase], (instregex "^LDR(BB|HH|SBW|SBX|SHW|SWX|SW|W|X)roX")>;
 def : InstRW<[M1WriteLB,
               WriteLDHi,
               WriteAdr],    (instregex "^LDP(SW|W|X)(post|pre)")>;
+def : InstRW<[M1WriteLC,
+              ReadAdrBase], (instregex "^LDR(BB|SBW|SBX|HH|SHW|SHX|SW|W|X)roW")>;
+def : InstRW<[M1WriteL5,
+              ReadAdrBase], (instregex "^LDR(BB|SBW|SBX|HH|SHW|SHX|SW|W|X)roX")>;
 def : InstRW<[M1WriteLC,
               ReadAdrBase], (instrs PRFMroW)>;
 def : InstRW<[M1WriteL5,

@@ -151,10 +151,8 @@ define i8 @select05_mem(<8 x i1>* %a.0, <8 x i1>* %m) {
 ; X86:       # %bb.0:
 ; X86-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; X86-NEXT:    movl {{[0-9]+}}(%esp), %ecx
-; X86-NEXT:    movzbl (%ecx), %ecx
-; X86-NEXT:    kmovw %ecx, %k0
-; X86-NEXT:    movzbl (%eax), %eax
-; X86-NEXT:    kmovw %eax, %k1
+; X86-NEXT:    kmovw (%ecx), %k0
+; X86-NEXT:    kmovw (%eax), %k1
 ; X86-NEXT:    korw %k1, %k0, %k0
 ; X86-NEXT:    kmovw %k0, %eax
 ; X86-NEXT:    # kill: def $al killed $al killed $eax
@@ -162,10 +160,8 @@ define i8 @select05_mem(<8 x i1>* %a.0, <8 x i1>* %m) {
 ;
 ; X64-LABEL: select05_mem:
 ; X64:       # %bb.0:
-; X64-NEXT:    movzbl (%rsi), %eax
-; X64-NEXT:    kmovw %eax, %k0
-; X64-NEXT:    movzbl (%rdi), %eax
-; X64-NEXT:    kmovw %eax, %k1
+; X64-NEXT:    kmovw (%rsi), %k0
+; X64-NEXT:    kmovw (%rdi), %k1
 ; X64-NEXT:    korw %k1, %k0, %k0
 ; X64-NEXT:    kmovw %k0, %eax
 ; X64-NEXT:    # kill: def $al killed $al killed $eax
@@ -202,10 +198,8 @@ define i8 @select06_mem(<8 x i1>* %a.0, <8 x i1>* %m) {
 ; X86:       # %bb.0:
 ; X86-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; X86-NEXT:    movl {{[0-9]+}}(%esp), %ecx
-; X86-NEXT:    movzbl (%ecx), %ecx
-; X86-NEXT:    kmovw %ecx, %k0
-; X86-NEXT:    movzbl (%eax), %eax
-; X86-NEXT:    kmovw %eax, %k1
+; X86-NEXT:    kmovw (%ecx), %k0
+; X86-NEXT:    kmovw (%eax), %k1
 ; X86-NEXT:    kandw %k1, %k0, %k0
 ; X86-NEXT:    kmovw %k0, %eax
 ; X86-NEXT:    # kill: def $al killed $al killed $eax
@@ -213,10 +207,8 @@ define i8 @select06_mem(<8 x i1>* %a.0, <8 x i1>* %m) {
 ;
 ; X64-LABEL: select06_mem:
 ; X64:       # %bb.0:
-; X64-NEXT:    movzbl (%rsi), %eax
-; X64-NEXT:    kmovw %eax, %k0
-; X64-NEXT:    movzbl (%rdi), %eax
-; X64-NEXT:    kmovw %eax, %k1
+; X64-NEXT:    kmovw (%rsi), %k0
+; X64-NEXT:    kmovw (%rdi), %k1
 ; X64-NEXT:    kandw %k1, %k0, %k0
 ; X64-NEXT:    kmovw %k0, %eax
 ; X64-NEXT:    # kill: def $al killed $al killed $eax
@@ -318,27 +310,19 @@ define float @pr30561_f32(float %b, float %a, i1 %c) {
 define <16 x i16> @pr31515(<16 x i1> %a, <16 x i1> %b, <16 x i16> %c) nounwind {
 ; X86-LABEL: pr31515:
 ; X86:       # %bb.0:
-; X86-NEXT:    vpmovzxbd {{.*#+}} zmm1 = xmm1[0],zero,zero,zero,xmm1[1],zero,zero,zero,xmm1[2],zero,zero,zero,xmm1[3],zero,zero,zero,xmm1[4],zero,zero,zero,xmm1[5],zero,zero,zero,xmm1[6],zero,zero,zero,xmm1[7],zero,zero,zero,xmm1[8],zero,zero,zero,xmm1[9],zero,zero,zero,xmm1[10],zero,zero,zero,xmm1[11],zero,zero,zero,xmm1[12],zero,zero,zero,xmm1[13],zero,zero,zero,xmm1[14],zero,zero,zero,xmm1[15],zero,zero,zero
-; X86-NEXT:    vpslld $31, %zmm1, %zmm1
-; X86-NEXT:    vpmovzxbd {{.*#+}} zmm0 = xmm0[0],zero,zero,zero,xmm0[1],zero,zero,zero,xmm0[2],zero,zero,zero,xmm0[3],zero,zero,zero,xmm0[4],zero,zero,zero,xmm0[5],zero,zero,zero,xmm0[6],zero,zero,zero,xmm0[7],zero,zero,zero,xmm0[8],zero,zero,zero,xmm0[9],zero,zero,zero,xmm0[10],zero,zero,zero,xmm0[11],zero,zero,zero,xmm0[12],zero,zero,zero,xmm0[13],zero,zero,zero,xmm0[14],zero,zero,zero,xmm0[15],zero,zero,zero
-; X86-NEXT:    vpslld $31, %zmm0, %zmm0
-; X86-NEXT:    vptestmd %zmm0, %zmm0, %k1
-; X86-NEXT:    vptestmd %zmm1, %zmm1, %k1 {%k1}
-; X86-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k1} {z}
-; X86-NEXT:    vpmovdw %zmm0, %ymm0
+; X86-NEXT:    vpand %xmm1, %xmm0, %xmm0
+; X86-NEXT:    vpmovzxbw {{.*#+}} ymm0 = xmm0[0],zero,xmm0[1],zero,xmm0[2],zero,xmm0[3],zero,xmm0[4],zero,xmm0[5],zero,xmm0[6],zero,xmm0[7],zero,xmm0[8],zero,xmm0[9],zero,xmm0[10],zero,xmm0[11],zero,xmm0[12],zero,xmm0[13],zero,xmm0[14],zero,xmm0[15],zero
+; X86-NEXT:    vpsllw $15, %ymm0, %ymm0
+; X86-NEXT:    vpsraw $15, %ymm0, %ymm0
 ; X86-NEXT:    vpandn %ymm2, %ymm0, %ymm0
 ; X86-NEXT:    retl
 ;
 ; X64-LABEL: pr31515:
 ; X64:       # %bb.0:
-; X64-NEXT:    vpmovzxbd {{.*#+}} zmm1 = xmm1[0],zero,zero,zero,xmm1[1],zero,zero,zero,xmm1[2],zero,zero,zero,xmm1[3],zero,zero,zero,xmm1[4],zero,zero,zero,xmm1[5],zero,zero,zero,xmm1[6],zero,zero,zero,xmm1[7],zero,zero,zero,xmm1[8],zero,zero,zero,xmm1[9],zero,zero,zero,xmm1[10],zero,zero,zero,xmm1[11],zero,zero,zero,xmm1[12],zero,zero,zero,xmm1[13],zero,zero,zero,xmm1[14],zero,zero,zero,xmm1[15],zero,zero,zero
-; X64-NEXT:    vpslld $31, %zmm1, %zmm1
-; X64-NEXT:    vpmovzxbd {{.*#+}} zmm0 = xmm0[0],zero,zero,zero,xmm0[1],zero,zero,zero,xmm0[2],zero,zero,zero,xmm0[3],zero,zero,zero,xmm0[4],zero,zero,zero,xmm0[5],zero,zero,zero,xmm0[6],zero,zero,zero,xmm0[7],zero,zero,zero,xmm0[8],zero,zero,zero,xmm0[9],zero,zero,zero,xmm0[10],zero,zero,zero,xmm0[11],zero,zero,zero,xmm0[12],zero,zero,zero,xmm0[13],zero,zero,zero,xmm0[14],zero,zero,zero,xmm0[15],zero,zero,zero
-; X64-NEXT:    vpslld $31, %zmm0, %zmm0
-; X64-NEXT:    vptestmd %zmm0, %zmm0, %k1
-; X64-NEXT:    vptestmd %zmm1, %zmm1, %k1 {%k1}
-; X64-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0 {%k1} {z}
-; X64-NEXT:    vpmovdw %zmm0, %ymm0
+; X64-NEXT:    vpand %xmm1, %xmm0, %xmm0
+; X64-NEXT:    vpmovzxbw {{.*#+}} ymm0 = xmm0[0],zero,xmm0[1],zero,xmm0[2],zero,xmm0[3],zero,xmm0[4],zero,xmm0[5],zero,xmm0[6],zero,xmm0[7],zero,xmm0[8],zero,xmm0[9],zero,xmm0[10],zero,xmm0[11],zero,xmm0[12],zero,xmm0[13],zero,xmm0[14],zero,xmm0[15],zero
+; X64-NEXT:    vpsllw $15, %ymm0, %ymm0
+; X64-NEXT:    vpsraw $15, %ymm0, %ymm0
 ; X64-NEXT:    vpandn %ymm2, %ymm0, %ymm0
 ; X64-NEXT:    retq
   %mask = and <16 x i1> %a, %b

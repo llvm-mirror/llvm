@@ -38,7 +38,7 @@ namespace {
 /// WebAssemblyOperand - Instances of this class represent the operands in a
 /// parsed WASM machine instruction.
 struct WebAssemblyOperand : public MCParsedAsmOperand {
-  enum KindTy { Token, Integer, Float, Symbol } Kind;
+  enum KindTy { Token, Integer, Float, Symbol, BrList } Kind;
 
   SMLoc StartLoc, EndLoc;
 
@@ -58,11 +58,16 @@ struct WebAssemblyOperand : public MCParsedAsmOperand {
     const MCExpr *Exp;
   };
 
+  struct BrLOp {
+    std::vector<unsigned> List;
+  };
+
   union {
     struct TokOp Tok;
     struct IntOp Int;
     struct FltOp Flt;
     struct SymOp Sym;
+    struct BrLOp BrL;
   };
 
   WebAssemblyOperand(KindTy K, SMLoc Start, SMLoc End, TokOp T)
@@ -73,6 +78,13 @@ struct WebAssemblyOperand : public MCParsedAsmOperand {
       : Kind(K), StartLoc(Start), EndLoc(End), Flt(F) {}
   WebAssemblyOperand(KindTy K, SMLoc Start, SMLoc End, SymOp S)
       : Kind(K), StartLoc(Start), EndLoc(End), Sym(S) {}
+  WebAssemblyOperand(KindTy K, SMLoc Start, SMLoc End)
+      : Kind(K), StartLoc(Start), EndLoc(End), BrL() {}
+
+  ~WebAssemblyOperand() {
+    if (isBrList())
+      BrL.~BrLOp();
+  }
 
   bool isToken() const override { return Kind == Token; }
   bool isImm() const override {
@@ -80,6 +92,7 @@ struct WebAssemblyOperand : public MCParsedAsmOperand {
   }
   bool isMem() const override { return false; }
   bool isReg() const override { return false; }
+  bool isBrList() const { return Kind == BrList; }
 
   unsigned getReg() const override {
     llvm_unreachable("Assembly inspects a register operand");
@@ -111,6 +124,12 @@ struct WebAssemblyOperand : public MCParsedAsmOperand {
       llvm_unreachable("Should be immediate or symbol!");
   }
 
+  void addBrListOperands(MCInst &Inst, unsigned N) const {
+    assert(N == 1 && isBrList() && "Invalid BrList!");
+    for (auto Br : BrL.List)
+      Inst.addOperand(MCOperand::createImm(Br));
+  }
+
   void print(raw_ostream &OS) const override {
     switch (Kind) {
     case Token:
@@ -124,6 +143,9 @@ struct WebAssemblyOperand : public MCParsedAsmOperand {
       break;
     case Symbol:
       OS << "Sym:" << Sym.Exp;
+      break;
+    case BrList:
+      OS << "BrList:" << BrL.List.size();
       break;
     }
   }
@@ -150,6 +172,18 @@ class WebAssemblyAsmParser final : public MCTargetAsmParser {
     Instructions,
   } CurrentState = FileStart;
 
+  // For ensuring blocks are properly nested.
+  enum NestingType {
+    Function,
+    Block,
+    Loop,
+    Try,
+    If,
+    Else,
+    Undefined,
+  };
+  std::vector<NestingType> NestingStack;
+
   // We track this to see if a .functype following a label is the same,
   // as this is how we recognize the start of a function.
   MCSymbol *LastLabel = nullptr;
@@ -162,10 +196,6 @@ public:
     setAvailableFeatures(ComputeAvailableFeatures(STI.getFeatureBits()));
   }
 
-  void addSignature(std::unique_ptr<wasm::WasmSignature> &&Sig) {
-    Signatures.push_back(std::move(Sig));
-  }
-
 #define GET_ASSEMBLER_HEADER
 #include "WebAssemblyGenAsmMatcher.inc"
 
@@ -175,8 +205,58 @@ public:
     llvm_unreachable("ParseRegister is not implemented.");
   }
 
-  bool error(const StringRef &Msg, const AsmToken &Tok) {
+  bool error(const Twine &Msg, const AsmToken &Tok) {
     return Parser.Error(Tok.getLoc(), Msg + Tok.getString());
+  }
+
+  bool error(const Twine &Msg) {
+    return Parser.Error(Lexer.getTok().getLoc(), Msg);
+  }
+
+  void addSignature(std::unique_ptr<wasm::WasmSignature> &&Sig) {
+    Signatures.push_back(std::move(Sig));
+  }
+
+  std::pair<StringRef, StringRef> nestingString(NestingType NT) {
+    switch (NT) {
+    case Function:
+      return {"function", "end_function"};
+    case Block:
+      return {"block", "end_block"};
+    case Loop:
+      return {"loop", "end_loop"};
+    case Try:
+      return {"try", "end_try"};
+    case If:
+      return {"if", "end_if"};
+    case Else:
+      return {"else", "end_if"};
+    default:
+      llvm_unreachable("unknown NestingType");
+    }
+  }
+
+  void push(NestingType NT) { NestingStack.push_back(NT); }
+
+  bool pop(StringRef Ins, NestingType NT1, NestingType NT2 = Undefined) {
+    if (NestingStack.empty())
+      return error(Twine("End of block construct with no start: ") + Ins);
+    auto Top = NestingStack.back();
+    if (Top != NT1 && Top != NT2)
+      return error(Twine("Block construct type mismatch, expected: ") +
+                   nestingString(Top).second + ", instead got: " + Ins);
+    NestingStack.pop_back();
+    return false;
+  }
+
+  bool ensureEmptyNestingStack() {
+    auto err = !NestingStack.empty();
+    while (!NestingStack.empty()) {
+      error(Twine("Unmatched block construct(s) at function end: ") +
+            nestingString(NestingStack.back()).first);
+      NestingStack.pop_back();
+    }
+    return err;
   }
 
   bool isNext(AsmToken::TokenKind Kind) {
@@ -219,6 +299,18 @@ public:
         Type == "f64x2")
       return wasm::ValType::V128;
     return Optional<wasm::ValType>();
+  }
+
+  WebAssembly::ExprType parseBlockType(StringRef ID) {
+    return StringSwitch<WebAssembly::ExprType>(ID)
+        .Case("i32", WebAssembly::ExprType::I32)
+        .Case("i64", WebAssembly::ExprType::I64)
+        .Case("f32", WebAssembly::ExprType::F32)
+        .Case("f64", WebAssembly::ExprType::F64)
+        .Case("v128", WebAssembly::ExprType::V128)
+        .Case("except_ref", WebAssembly::ExprType::ExceptRef)
+        .Case("void", WebAssembly::ExprType::Void)
+        .Default(WebAssembly::ExprType::Invalid);
   }
 
   bool parseRegTypeList(SmallVectorImpl<wasm::ValType> &Types) {
@@ -271,6 +363,13 @@ public:
     return false;
   }
 
+  void addBlockTypeOperand(OperandVector &Operands, SMLoc NameLoc,
+                           WebAssembly::ExprType BT) {
+    Operands.push_back(make_unique<WebAssemblyOperand>(
+        WebAssemblyOperand::Integer, NameLoc, NameLoc,
+        WebAssemblyOperand::IntOp{static_cast<int64_t>(BT)}));
+  }
+
   bool ParseInstruction(ParseInstructionInfo & /*Info*/, StringRef Name,
                         SMLoc NameLoc, OperandVector &Operands) override {
     // Note: Name does NOT point into the sourcecode, but to a local, so
@@ -305,18 +404,72 @@ public:
     // If no '.', there is no type prefix.
     auto BaseName = NamePair.second.empty() ? NamePair.first : NamePair.second;
 
+    // If this instruction is part of a control flow structure, ensure
+    // proper nesting.
+    bool ExpectBlockType = false;
+    if (BaseName == "block") {
+      push(Block);
+      ExpectBlockType = true;
+    } else if (BaseName == "loop") {
+      push(Loop);
+      ExpectBlockType = true;
+    } else if (BaseName == "try") {
+      push(Try);
+      ExpectBlockType = true;
+    } else if (BaseName == "if") {
+      push(If);
+      ExpectBlockType = true;
+    } else if (BaseName == "else") {
+      if (pop(BaseName, If))
+        return true;
+      push(Else);
+    } else if (BaseName == "catch") {
+      if (pop(BaseName, Try))
+        return true;
+      push(Try);
+    } else if (BaseName == "catch_all") {
+      if (pop(BaseName, Try))
+        return true;
+      push(Try);
+    } else if (BaseName == "end_if") {
+      if (pop(BaseName, If, Else))
+        return true;
+    } else if (BaseName == "end_try") {
+      if (pop(BaseName, Try))
+        return true;
+    } else if (BaseName == "end_loop") {
+      if (pop(BaseName, Loop))
+        return true;
+    } else if (BaseName == "end_block") {
+      if (pop(BaseName, Block))
+        return true;
+    } else if (BaseName == "end_function") {
+      if (pop(BaseName, Function) || ensureEmptyNestingStack())
+        return true;
+    }
+
     while (Lexer.isNot(AsmToken::EndOfStatement)) {
       auto &Tok = Lexer.getTok();
       switch (Tok.getKind()) {
       case AsmToken::Identifier: {
         auto &Id = Lexer.getTok();
-        const MCExpr *Val;
-        SMLoc End;
-        if (Parser.parsePrimaryExpr(Val, End))
-          return error("Cannot parse symbol: ", Lexer.getTok());
-        Operands.push_back(make_unique<WebAssemblyOperand>(
-            WebAssemblyOperand::Symbol, Id.getLoc(), Id.getEndLoc(),
-            WebAssemblyOperand::SymOp{Val}));
+        if (ExpectBlockType) {
+          // Assume this identifier is a block_type.
+          auto BT = parseBlockType(Id.getString());
+          if (BT == WebAssembly::ExprType::Invalid)
+            return error("Unknown block type: ", Id);
+          addBlockTypeOperand(Operands, NameLoc, BT);
+          Parser.Lex();
+        } else {
+          // Assume this identifier is a label.
+          const MCExpr *Val;
+          SMLoc End;
+          if (Parser.parsePrimaryExpr(Val, End))
+            return error("Cannot parse symbol: ", Lexer.getTok());
+          Operands.push_back(make_unique<WebAssemblyOperand>(
+              WebAssemblyOperand::Symbol, Id.getLoc(), Id.getEndLoc(),
+              WebAssemblyOperand::SymOp{Val}));
+        }
         break;
       }
       case AsmToken::Minus:
@@ -340,6 +493,21 @@ public:
         Parser.Lex();
         break;
       }
+      case AsmToken::LCurly: {
+        Parser.Lex();
+        auto Op = make_unique<WebAssemblyOperand>(
+            WebAssemblyOperand::BrList, Tok.getLoc(), Tok.getEndLoc());
+        if (!Lexer.is(AsmToken::RCurly))
+          for (;;) {
+            Op->BrL.List.push_back(Lexer.getTok().getIntVal());
+            expect(AsmToken::Integer, "integer");
+            if (!isNext(AsmToken::Comma))
+              break;
+          }
+        expect(AsmToken::RCurly, "}");
+        Operands.push_back(std::move(Op));
+        break;
+      }
       default:
         return error("Unexpected token in operand: ", Tok);
       }
@@ -348,17 +516,11 @@ public:
           return true;
       }
     }
-    Parser.Lex();
-
-    // Block instructions require a signature index, but these are missing in
-    // assembly, so we add a dummy one explicitly (since we have no control
-    // over signature tables here, we assume these will be regenerated when
-    // the wasm module is generated).
-    if (BaseName == "block" || BaseName == "loop" || BaseName == "try") {
-      Operands.push_back(make_unique<WebAssemblyOperand>(
-          WebAssemblyOperand::Integer, NameLoc, NameLoc,
-          WebAssemblyOperand::IntOp{-1}));
+    if (ExpectBlockType && Operands.size() == 1) {
+      // Support blocks with no operands as default to void.
+      addBlockTypeOperand(Operands, NameLoc, WebAssembly::ExprType::Void);
     }
+    Parser.Lex();
     return false;
   }
 
@@ -439,7 +601,10 @@ public:
           TOut.getStreamer().getContext().getOrCreateSymbol(SymName));
       if (CurrentState == Label && WasmSym == LastLabel) {
         // This .functype indicates a start of a function.
+        if (ensureEmptyNestingStack())
+          return true;
         CurrentState = FunctionStart;
+        push(Function);
       }
       auto Signature = make_unique<wasm::WasmSignature>();
       if (parseSignature(Signature.get()))
@@ -528,6 +693,8 @@ public:
     }
     llvm_unreachable("Implement any new match types added!");
   }
+
+  void onEndOfFile() override { ensureEmptyNestingStack(); }
 };
 } // end anonymous namespace
 

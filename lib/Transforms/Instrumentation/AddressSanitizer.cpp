@@ -109,6 +109,7 @@ static const uint64_t kFreeBSD_ShadowOffset32 = 1ULL << 30;
 static const uint64_t kFreeBSD_ShadowOffset64 = 1ULL << 46;
 static const uint64_t kNetBSD_ShadowOffset32 = 1ULL << 30;
 static const uint64_t kNetBSD_ShadowOffset64 = 1ULL << 46;
+static const uint64_t kNetBSDKasan_ShadowOffset64 = 0xdfff900000000000;
 static const uint64_t kPS4CPU_ShadowOffset64 = 1ULL << 40;
 static const uint64_t kWindowsShadowOffset32 = 3ULL << 28;
 
@@ -440,8 +441,11 @@ public:
     for (auto MDN : Globals->operands()) {
       // Metadata node contains the global and the fields of "Entry".
       assert(MDN->getNumOperands() == 5);
-      auto *GV = mdconst::extract_or_null<GlobalVariable>(MDN->getOperand(0));
+      auto *V = mdconst::extract_or_null<Constant>(MDN->getOperand(0));
       // The optimizer may optimize away a global entirely.
+      if (!V) continue;
+      auto *StrippedV = V->stripPointerCasts();
+      auto *GV = dyn_cast<GlobalVariable>(StrippedV);
       if (!GV) continue;
       // We can already have an entry for GV if it was merged with another
       // global.
@@ -544,9 +548,12 @@ static ShadowMapping getShadowMapping(Triple &TargetTriple, int LongSize,
       Mapping.Offset = kSystemZ_ShadowOffset64;
     else if (IsFreeBSD && !IsMIPS64)
       Mapping.Offset = kFreeBSD_ShadowOffset64;
-    else if (IsNetBSD)
-      Mapping.Offset = kNetBSD_ShadowOffset64;
-    else if (IsPS4CPU)
+    else if (IsNetBSD) {
+      if (IsKasan)
+        Mapping.Offset = kNetBSDKasan_ShadowOffset64;
+      else
+        Mapping.Offset = kNetBSD_ShadowOffset64;
+    } else if (IsPS4CPU)
       Mapping.Offset = kPS4CPU_ShadowOffset64;
     else if (IsLinux && IsX86_64) {
       if (IsKasan)
@@ -998,7 +1005,7 @@ struct FunctionStackPoisoner : public InstVisitor<FunctionStackPoisoner> {
     if (ID == Intrinsic::localescape) LocalEscapeCall = &II;
     if (!ASan.UseAfterScope)
       return;
-    if (ID != Intrinsic::lifetime_start && ID != Intrinsic::lifetime_end)
+    if (!II.isLifetimeStartOrEnd())
       return;
     // Found lifetime intrinsic, add ASan instrumentation if necessary.
     ConstantInt *Size = dyn_cast<ConstantInt>(II.getArgOperand(0));
@@ -2143,6 +2150,10 @@ bool AddressSanitizerModule::InstrumentGlobals(IRBuilder<> &IRB, Module &M, bool
     NewGlobal->copyAttributesFrom(G);
     NewGlobal->setComdat(G->getComdat());
     NewGlobal->setAlignment(MinRZ);
+    // Don't fold globals with redzones. ODR violation detector and redzone
+    // poisoning implicitly creates a dependence on the global's address, so it
+    // is no longer valid for it to be marked unnamed_addr.
+    NewGlobal->setUnnamedAddr(GlobalValue::UnnamedAddr::None);
 
     // Move null-terminated C strings to "__asan_cstring" section on Darwin.
     if (TargetTriple.isOSBinFormatMachO() && !G->hasSection() &&
@@ -2190,10 +2201,8 @@ bool AddressSanitizerModule::InstrumentGlobals(IRBuilder<> &IRB, Module &M, bool
           GlobalAlias::create(GlobalValue::PrivateLinkage, "", NewGlobal);
     }
 
-    // ODR check is not useful for the following, but we see false reports
-    // caused by linker optimizations.
-    if (NewGlobal->hasLocalLinkage() || NewGlobal->hasGlobalUnnamedAddr() ||
-        NewGlobal->hasLinkOnceODRLinkage() || NewGlobal->hasWeakODRLinkage()) {
+    // ODR should not happen for local linkage.
+    if (NewGlobal->hasLocalLinkage()) {
       ODRIndicator = ConstantExpr::getIntToPtr(ConstantInt::get(IntptrTy, -1),
                                                IRB.getInt8PtrTy());
     } else if (UseOdrIndicator) {

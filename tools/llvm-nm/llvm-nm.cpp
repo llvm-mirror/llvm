@@ -91,6 +91,8 @@ cl::opt<bool> BSDFormat("B", cl::desc("Alias for --format=bsd"),
                         cl::Grouping);
 cl::opt<bool> POSIXFormat("P", cl::desc("Alias for --format=posix"),
                           cl::Grouping);
+cl::alias Portability("portability", cl::desc("Alias for --format=posix"),
+                      cl::aliasopt(POSIXFormat), cl::NotHidden);
 cl::opt<bool> DarwinFormat("m", cl::desc("Alias for --format=darwin"),
                            cl::Grouping);
 
@@ -677,7 +679,7 @@ static void darwinPrintStab(MachOObjectFile *MachO, SymbolListT::iterator I) {
 }
 
 static Optional<std::string> demangle(StringRef Name, bool StripUnderscore) {
-  if (StripUnderscore && Name.size() > 0 && Name[0] == '_')
+  if (StripUnderscore && !Name.empty() && Name[0] == '_')
     Name = Name.substr(1);
 
   if (!Name.startswith("_Z"))
@@ -1163,7 +1165,7 @@ dumpSymbolNamesFromObject(SymbolicFile &Obj, bool printName,
   // file get the section number for that section in this object file.
   unsigned int Nsect = 0;
   MachOObjectFile *MachO = dyn_cast<MachOObjectFile>(&Obj);
-  if (SegSect.size() != 0 && MachO) {
+  if (!SegSect.empty() && MachO) {
     Nsect = getNsectForSegSect(MachO);
     // If this section is not in the object file no symbols are printed.
     if (Nsect == 0)
@@ -1800,7 +1802,7 @@ static void dumpSymbolNamesFromFile(std::string &Filename) {
   }
   if (MachOUniversalBinary *UB = dyn_cast<MachOUniversalBinary>(&Bin)) {
     // If we have a list of architecture flags specified dump only those.
-    if (!ArchAll && ArchFlags.size() != 0) {
+    if (!ArchAll && !ArchFlags.empty()) {
       // Look for a slice in the universal binary that matches each ArchFlag.
       bool ArchFound;
       for (unsigned i = 0; i < ArchFlags.size(); ++i) {
@@ -2071,7 +2073,7 @@ int main(int argc, char **argv) {
     }
   }
 
-  if (SegSect.size() != 0 && SegSect.size() != 2)
+  if (!SegSect.empty() && SegSect.size() != 2)
     error("bad number of arguments (must be two arguments)",
           "for the -s option");
 

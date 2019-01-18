@@ -492,7 +492,7 @@ static Instruction *foldVecTruncToExtElt(TruncInst &Trunc, InstCombiner &IC) {
 }
 
 /// Rotate left/right may occur in a wider type than necessary because of type
-/// promotion rules. Try to narrow all of the component instructions.
+/// promotion rules. Try to narrow the inputs and convert to funnel shift.
 Instruction *InstCombiner::narrowRotate(TruncInst &Trunc) {
   assert((isa<VectorType>(Trunc.getSrcTy()) ||
           shouldChangeType(Trunc.getSrcTy(), Trunc.getType())) &&
@@ -563,23 +563,15 @@ Instruction *InstCombiner::narrowRotate(TruncInst &Trunc) {
 
   // We have an unnecessarily wide rotate!
   // trunc (or (lshr ShVal, ShAmt), (shl ShVal, BitWidth - ShAmt))
-  // Narrow it down to eliminate the zext/trunc:
-  // or (lshr trunc(ShVal), ShAmt0'), (shl trunc(ShVal), ShAmt1')
+  // Narrow the inputs and convert to funnel shift intrinsic:
+  // llvm.fshl.i8(trunc(ShVal), trunc(ShVal), trunc(ShAmt))
   Value *NarrowShAmt = Builder.CreateTrunc(ShAmt, DestTy);
-  Value *NegShAmt = Builder.CreateNeg(NarrowShAmt);
-
-  // Mask both shift amounts to ensure there's no UB from oversized shifts.
-  Constant *MaskC = ConstantInt::get(DestTy, NarrowWidth - 1);
-  Value *MaskedShAmt = Builder.CreateAnd(NarrowShAmt, MaskC);
-  Value *MaskedNegShAmt = Builder.CreateAnd(NegShAmt, MaskC);
-
-  // Truncate the original value and use narrow ops.
   Value *X = Builder.CreateTrunc(ShVal, DestTy);
-  Value *NarrowShAmt0 = SubIsOnLHS ? MaskedNegShAmt : MaskedShAmt;
-  Value *NarrowShAmt1 = SubIsOnLHS ? MaskedShAmt : MaskedNegShAmt;
-  Value *NarrowSh0 = Builder.CreateBinOp(ShiftOpcode0, X, NarrowShAmt0);
-  Value *NarrowSh1 = Builder.CreateBinOp(ShiftOpcode1, X, NarrowShAmt1);
-  return BinaryOperator::CreateOr(NarrowSh0, NarrowSh1);
+  bool IsFshl = (!SubIsOnLHS && ShiftOpcode0 == BinaryOperator::Shl) ||
+                (SubIsOnLHS && ShiftOpcode1 == BinaryOperator::Shl);
+  Intrinsic::ID IID = IsFshl ? Intrinsic::fshl : Intrinsic::fshr;
+  Function *F = Intrinsic::getDeclaration(Trunc.getModule(), IID, DestTy);
+  return IntrinsicInst::Create(F, { X, X, NarrowShAmt });
 }
 
 /// Try to narrow the width of math or bitwise logic instructions by pulling a
@@ -1107,12 +1099,9 @@ Instruction *InstCombiner::visitZExt(ZExtInst &CI) {
   Value *Src = CI.getOperand(0);
   Type *SrcTy = Src->getType(), *DestTy = CI.getType();
 
-  // Attempt to extend the entire input expression tree to the destination
-  // type.   Only do this if the dest type is a simple type, don't convert the
-  // expression tree to something weird like i93 unless the source is also
-  // strange.
+  // Try to extend the entire expression tree to the wide destination type.
   unsigned BitsToClear;
-  if ((DestTy->isVectorTy() || shouldChangeType(SrcTy, DestTy)) &&
+  if (shouldChangeType(SrcTy, DestTy) &&
       canEvaluateZExtd(Src, DestTy, BitsToClear, *this, &CI)) {
     assert(BitsToClear <= SrcTy->getScalarSizeInBits() &&
            "Can't clear more bits than in SrcTy");
@@ -1389,12 +1378,8 @@ Instruction *InstCombiner::visitSExt(SExtInst &CI) {
     return replaceInstUsesWith(CI, ZExt);
   }
 
-  // Attempt to extend the entire input expression tree to the destination
-  // type.   Only do this if the dest type is a simple type, don't convert the
-  // expression tree to something weird like i93 unless the source is also
-  // strange.
-  if ((DestTy->isVectorTy() || shouldChangeType(SrcTy, DestTy)) &&
-      canEvaluateSExtd(Src, DestTy)) {
+  // Try to extend the entire expression tree to the wide destination type.
+  if (shouldChangeType(SrcTy, DestTy) && canEvaluateSExtd(Src, DestTy)) {
     // Okay, we can transform this!  Insert the new expression now.
     LLVM_DEBUG(
         dbgs() << "ICE: EvaluateInDifferentType converting expression type"

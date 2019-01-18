@@ -1359,6 +1359,11 @@ HexagonTargetLowering::HexagonTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::BSWAP, MVT::i32, Legal);
   setOperationAction(ISD::BSWAP, MVT::i64, Legal);
 
+  setOperationAction(ISD::FSHL, MVT::i32, Legal);
+  setOperationAction(ISD::FSHL, MVT::i64, Legal);
+  setOperationAction(ISD::FSHR, MVT::i32, Legal);
+  setOperationAction(ISD::FSHR, MVT::i64, Legal);
+
   for (unsigned IntExpOp :
        {ISD::SDIV,      ISD::UDIV,      ISD::SREM,      ISD::UREM,
         ISD::SDIVREM,   ISD::UDIVREM,   ISD::ROTL,      ISD::ROTR,
@@ -1538,8 +1543,10 @@ HexagonTargetLowering::HexagonTargetLowering(const TargetMachine &TM,
   // Subtarget-specific operation actions.
   //
   if (Subtarget.hasV60Ops()) {
-    setOperationAction(ISD::ROTL, MVT::i32, Custom);
-    setOperationAction(ISD::ROTL, MVT::i64, Custom);
+    setOperationAction(ISD::ROTL, MVT::i32, Legal);
+    setOperationAction(ISD::ROTL, MVT::i64, Legal);
+    setOperationAction(ISD::ROTR, MVT::i32, Legal);
+    setOperationAction(ISD::ROTR, MVT::i64, Legal);
   }
   if (Subtarget.hasV66Ops()) {
     setOperationAction(ISD::FADD, MVT::f64, Legal);
@@ -1768,11 +1775,8 @@ bool HexagonTargetLowering::getTgtMemIntrinsic(IntrinsicInfo &Info,
     // The intrinsic function call is of the form { ElTy, i8* }
     // @llvm.hexagon.L2.loadXX.pbr(i8*, i32). The pointer and memory access type
     // should be derived from ElTy.
-    PointerType *PtrTy = I.getCalledFunction()
-                             ->getReturnType()
-                             ->getContainedType(0)
-                             ->getPointerTo();
-    Info.memVT = MVT::getVT(PtrTy->getElementType());
+    Type *ElTy = I.getCalledFunction()->getReturnType()->getStructElementType(0);
+    Info.memVT = MVT::getVT(ElTy);
     llvm::Value *BasePtrVal = I.getOperand(0);
     Info.ptrVal = getUnderLyingObjectForBrevLdIntr(BasePtrVal);
     // The offset value comes through Modifier register. For now, assume the

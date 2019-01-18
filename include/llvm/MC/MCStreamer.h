@@ -806,6 +806,8 @@ public:
                                        Optional<StringRef> Source,
                                        unsigned CUID = 0);
 
+  virtual void EmitCFIBKeyFrame();
+
   /// This implements the DWARF2 '.loc fileno lineno ...' assembler
   /// directive.
   virtual void EmitDwarfLocDirective(unsigned FileNo, unsigned Line,
@@ -900,6 +902,7 @@ public:
   virtual void EmitCFIUndefined(int64_t Register);
   virtual void EmitCFIRegister(int64_t Register1, int64_t Register2);
   virtual void EmitCFIWindowSave();
+  virtual void EmitCFINegateRAState();
 
   virtual void EmitWinCFIStartProc(const MCSymbol *Symbol, SMLoc Loc = SMLoc());
   virtual void EmitWinCFIEndProc(SMLoc Loc = SMLoc());

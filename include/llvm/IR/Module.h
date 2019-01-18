@@ -367,6 +367,11 @@ public:
     return getOrInsertFunction(Name, AttributeList{}, RetTy, Args...);
   }
 
+  // Avoid an incorrect ordering that'd otherwise compile incorrectly.
+  template <typename... ArgsTy>
+  Constant *getOrInsertFunction(StringRef Name, AttributeList AttributeList,
+                                FunctionType *Invalid, ArgsTy... Args) = delete;
+
   /// Look up the specified function in the module symbol table. If it does not
   /// exist, return null.
   Function *getFunction(StringRef Name) const;
@@ -403,11 +408,15 @@ public:
   }
 
   /// Look up the specified global in the module symbol table.
-  ///   1. If it does not exist, add a declaration of the global and return it.
-  ///   2. Else, the global exists but has the wrong type: return the function
-  ///      with a constantexpr cast to the right type.
-  ///   3. Finally, if the existing global is the correct declaration, return
-  ///      the existing global.
+  /// If it does not exist, invoke a callback to create a declaration of the
+  /// global and return it. The global is constantexpr casted to the expected
+  /// type if necessary.
+  Constant *
+  getOrInsertGlobal(StringRef Name, Type *Ty,
+                    function_ref<GlobalVariable *()> CreateGlobalCallback);
+
+  /// Look up the specified global in the module symbol table. If required, this
+  /// overload constructs the global variable using its constructor's defaults.
   Constant *getOrInsertGlobal(StringRef Name, Type *Ty);
 
 /// @}

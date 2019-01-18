@@ -2155,6 +2155,8 @@ public:
     case ISD::UADDO:
     case ISD::ADDC:
     case ISD::ADDE:
+    case ISD::SADDSAT:
+    case ISD::UADDSAT:
     case ISD::FMINNUM:
     case ISD::FMAXNUM:
     case ISD::FMINIMUM:
@@ -2404,6 +2406,12 @@ public:
   /// the first element, and only the target knows which lowering is cheap.
   virtual bool isExtractSubvectorCheap(EVT ResVT, EVT SrcVT,
                                        unsigned Index) const {
+    return false;
+  }
+
+  /// Try to convert an extract element of a vector binary operation into an
+  /// extract element followed by a scalar operation.
+  virtual bool shouldScalarizeBinop(SDValue VecOp) const {
     return false;
   }
 
@@ -2889,32 +2897,28 @@ public:
   bool ShrinkDemandedOp(SDValue Op, unsigned BitWidth, const APInt &Demanded,
                         TargetLoweringOpt &TLO) const;
 
-  /// Helper for SimplifyDemandedBits that can simplify an operation with
-  /// multiple uses.  This function simplifies operand \p OpIdx of \p User and
-  /// then updates \p User with the simplified version. No other uses of
-  /// \p OpIdx are updated. If \p User is the only user of \p OpIdx, this
-  /// function behaves exactly like function SimplifyDemandedBits declared
-  /// below except that it also updates the DAG by calling
-  /// DCI.CommitTargetLoweringOpt.
-  bool SimplifyDemandedBits(SDNode *User, unsigned OpIdx, const APInt &Demanded,
-                            DAGCombinerInfo &DCI, TargetLoweringOpt &TLO) const;
-
-  /// Look at Op.  At this point, we know that only the DemandedMask bits of the
+  /// Look at Op.  At this point, we know that only the DemandedBits bits of the
   /// result of Op are ever used downstream.  If we can use this information to
   /// simplify Op, create a new simplified DAG node and return true, returning
   /// the original and new nodes in Old and New.  Otherwise, analyze the
   /// expression and return a mask of KnownOne and KnownZero bits for the
   /// expression (used to simplify the caller).  The KnownZero/One bits may only
-  /// be accurate for those bits in the DemandedMask.
+  /// be accurate for those bits in the Demanded masks.
   /// \p AssumeSingleUse When this parameter is true, this function will
   ///    attempt to simplify \p Op even if there are multiple uses.
   ///    Callers are responsible for correctly updating the DAG based on the
   ///    results of this function, because simply replacing replacing TLO.Old
   ///    with TLO.New will be incorrect when this parameter is true and TLO.Old
   ///    has multiple uses.
-  bool SimplifyDemandedBits(SDValue Op, const APInt &DemandedMask,
-                            KnownBits &Known,
-                            TargetLoweringOpt &TLO,
+  bool SimplifyDemandedBits(SDValue Op, const APInt &DemandedBits,
+                            const APInt &DemandedElts, KnownBits &Known,
+                            TargetLoweringOpt &TLO, unsigned Depth = 0,
+                            bool AssumeSingleUse = false) const;
+
+  /// Helper wrapper around SimplifyDemandedBits, demanding all elements.
+  /// Adds Op back to the worklist upon success.
+  bool SimplifyDemandedBits(SDValue Op, const APInt &DemandedBits,
+                            KnownBits &Known, TargetLoweringOpt &TLO,
                             unsigned Depth = 0,
                             bool AssumeSingleUse = false) const;
 
@@ -2985,13 +2989,14 @@ public:
       SDValue Op, const APInt &DemandedElts, APInt &KnownUndef,
       APInt &KnownZero, TargetLoweringOpt &TLO, unsigned Depth = 0) const;
 
-  /// Attempt to simplify any target nodes based on the demanded bits,
+  /// Attempt to simplify any target nodes based on the demanded bits/elts,
   /// returning true on success. Otherwise, analyze the
   /// expression and return a mask of KnownOne and KnownZero bits for the
   /// expression (used to simplify the caller).  The KnownZero/One bits may only
-  /// be accurate for those bits in the DemandedMask.
+  /// be accurate for those bits in the Demanded masks.
   virtual bool SimplifyDemandedBitsForTargetNode(SDValue Op,
                                                  const APInt &DemandedBits,
+                                                 const APInt &DemandedElts,
                                                  KnownBits &Known,
                                                  TargetLoweringOpt &TLO,
                                                  unsigned Depth = 0) const;
@@ -3080,6 +3085,15 @@ public:
   /// @param Level the current DAGCombine legalization level.
   virtual bool isDesirableToCommuteWithShift(const SDNode *N,
                                              CombineLevel Level) const {
+    return true;
+  }
+
+  /// Return true if it is profitable to fold a pair of shifts into a mask.
+  /// This is usually true on most targets. But some targets, like Thumb1,
+  /// have immediate shift instructions, but no immediate "and" instruction;
+  /// this makes the fold unprofitable.
+  virtual bool shouldFoldShiftPairToMask(const SDNode *N,
+                                         CombineLevel Level) const {
     return true;
   }
 
@@ -3775,6 +3789,14 @@ public:
   /// \returns True, if the expansion was successful, false otherwise
   bool expandCTTZ(SDNode *N, SDValue &Result, SelectionDAG &DAG) const;
 
+  /// Expand ABS nodes. Expands vector/scalar ABS nodes,
+  /// vector nodes can only succeed if all operations are legal/custom.
+  /// (ABS x) -> (XOR (ADD x, (SRA x, type_size)), (SRA x, type_size))
+  /// \param N Node to expand
+  /// \param Result output after conversion
+  /// \returns True, if the expansion was successful, false otherwise
+  bool expandABS(SDNode *N, SDValue &Result, SelectionDAG &DAG) const;
+
   /// Turn load of vector type into a load of the individual elements.
   /// \param LD load to expand
   /// \returns MERGE_VALUEs of the scalar loads with their chains.
@@ -3814,8 +3836,7 @@ public:
 
   /// Method for building the DAG expansion of ISD::[US][ADD|SUB]SAT. This
   /// method accepts integers as its arguments.
-  SDValue getExpandedSaturationAdditionSubtraction(SDNode *Node,
-                                                   SelectionDAG &DAG) const;
+  SDValue expandAddSubSat(SDNode *Node, SelectionDAG &DAG) const;
 
   /// Method for building the DAG expansion of ISD::SMULFIX. This method accepts
   /// integers as its arguments.

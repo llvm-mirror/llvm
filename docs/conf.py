@@ -9,6 +9,7 @@
 #
 # All configuration values have a default; values that are commented out
 # serve to show the default.
+from __future__ import print_function
 
 import sys, os
 from datetime import date
@@ -219,7 +220,7 @@ man_pages = []
 # Automatically derive the list of man pages from the contents of the command
 # guide subdirectory.
 basedir = os.path.dirname(__file__)
-man_page_authors = "Maintained by The LLVM Team (http://llvm.org/)."
+man_page_authors = "Maintained by the LLVM Team (https://llvm.org/)."
 command_guide_subpath = 'CommandGuide'
 command_guide_path = os.path.join(basedir, command_guide_subpath)
 for name in os.listdir(command_guide_path):
@@ -234,14 +235,14 @@ for name in os.listdir(command_guide_path):
         header = f.readline().rstrip('\n')
 
         if len(header) != len(title):
-            print >>sys.stderr, (
+            print((
                 "error: invalid header in %r (does not match title)" % (
-                    file_subpath,))
+                    file_subpath,)), file=sys.stderr)
         if ' - ' not in title:
-            print >>sys.stderr, (
+            print((
                 ("error: invalid title in %r "
                  "(expected '<name> - <description>')") % (
-                    file_subpath,))
+                    file_subpath,)), file=sys.stderr)
 
         # Split the name out of the title.
         name,description = title.split(' - ', 1)

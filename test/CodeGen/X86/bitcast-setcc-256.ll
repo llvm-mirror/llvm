@@ -184,15 +184,7 @@ define i32 @v32i8(<32 x i8> %a, <32 x i8> %b) {
 ; AVX512F-LABEL: v32i8:
 ; AVX512F:       # %bb.0:
 ; AVX512F-NEXT:    vpcmpgtb %ymm1, %ymm0, %ymm0
-; AVX512F-NEXT:    vpmovsxbd %xmm0, %zmm1
-; AVX512F-NEXT:    vptestmd %zmm1, %zmm1, %k0
-; AVX512F-NEXT:    kmovw %k0, %ecx
-; AVX512F-NEXT:    vextracti128 $1, %ymm0, %xmm0
-; AVX512F-NEXT:    vpmovsxbd %xmm0, %zmm0
-; AVX512F-NEXT:    vptestmd %zmm0, %zmm0, %k0
-; AVX512F-NEXT:    kmovw %k0, %eax
-; AVX512F-NEXT:    shll $16, %eax
-; AVX512F-NEXT:    orl %ecx, %eax
+; AVX512F-NEXT:    vpmovmskb %ymm0, %eax
 ; AVX512F-NEXT:    vzeroupper
 ; AVX512F-NEXT:    retq
 ;
@@ -214,25 +206,21 @@ define i4 @v4i64(<4 x i64> %a, <4 x i64> %b) {
 ; SSE2-SSSE3-NEXT:    pxor %xmm4, %xmm3
 ; SSE2-SSSE3-NEXT:    pxor %xmm4, %xmm1
 ; SSE2-SSSE3-NEXT:    movdqa %xmm1, %xmm5
-; SSE2-SSSE3-NEXT:    pcmpgtd %xmm3, %xmm5
-; SSE2-SSSE3-NEXT:    pshufd {{.*#+}} xmm6 = xmm5[0,0,2,2]
-; SSE2-SSSE3-NEXT:    pcmpeqd %xmm3, %xmm1
-; SSE2-SSSE3-NEXT:    pshufd {{.*#+}} xmm1 = xmm1[1,1,3,3]
-; SSE2-SSSE3-NEXT:    pand %xmm6, %xmm1
-; SSE2-SSSE3-NEXT:    pshufd {{.*#+}} xmm3 = xmm5[1,1,3,3]
+; SSE2-SSSE3-NEXT:    pcmpeqd %xmm3, %xmm5
+; SSE2-SSSE3-NEXT:    pcmpgtd %xmm3, %xmm1
+; SSE2-SSSE3-NEXT:    pshufd {{.*#+}} xmm3 = xmm1[0,0,2,2]
+; SSE2-SSSE3-NEXT:    pand %xmm5, %xmm3
 ; SSE2-SSSE3-NEXT:    por %xmm1, %xmm3
 ; SSE2-SSSE3-NEXT:    pxor %xmm4, %xmm2
 ; SSE2-SSSE3-NEXT:    pxor %xmm4, %xmm0
 ; SSE2-SSSE3-NEXT:    movdqa %xmm0, %xmm1
-; SSE2-SSSE3-NEXT:    pcmpgtd %xmm2, %xmm1
-; SSE2-SSSE3-NEXT:    pshufd {{.*#+}} xmm4 = xmm1[0,0,2,2]
-; SSE2-SSSE3-NEXT:    pcmpeqd %xmm2, %xmm0
-; SSE2-SSSE3-NEXT:    pshufd {{.*#+}} xmm0 = xmm0[1,1,3,3]
-; SSE2-SSSE3-NEXT:    pand %xmm4, %xmm0
-; SSE2-SSSE3-NEXT:    pshufd {{.*#+}} xmm1 = xmm1[1,1,3,3]
-; SSE2-SSSE3-NEXT:    por %xmm0, %xmm1
-; SSE2-SSSE3-NEXT:    packssdw %xmm3, %xmm1
-; SSE2-SSSE3-NEXT:    movmskps %xmm1, %eax
+; SSE2-SSSE3-NEXT:    pcmpeqd %xmm2, %xmm1
+; SSE2-SSSE3-NEXT:    pcmpgtd %xmm2, %xmm0
+; SSE2-SSSE3-NEXT:    pshufd {{.*#+}} xmm2 = xmm0[0,0,2,2]
+; SSE2-SSSE3-NEXT:    pand %xmm1, %xmm2
+; SSE2-SSSE3-NEXT:    por %xmm0, %xmm2
+; SSE2-SSSE3-NEXT:    packssdw %xmm3, %xmm2
+; SSE2-SSSE3-NEXT:    movmskps %xmm2, %eax
 ; SSE2-SSSE3-NEXT:    # kill: def $al killed $al killed $eax
 ; SSE2-SSSE3-NEXT:    retq
 ;
@@ -477,24 +465,21 @@ define void @bitcast_4i64_store(i4* %p, <4 x i64> %a0) {
 ; SSE2-SSSE3-NEXT:    movdqa {{.*#+}} xmm2 = [2147483648,2147483648]
 ; SSE2-SSSE3-NEXT:    pxor %xmm2, %xmm1
 ; SSE2-SSSE3-NEXT:    movdqa %xmm2, %xmm3
-; SSE2-SSSE3-NEXT:    pcmpgtd %xmm1, %xmm3
-; SSE2-SSSE3-NEXT:    pshufd {{.*#+}} xmm4 = xmm3[0,0,2,2]
-; SSE2-SSSE3-NEXT:    pcmpeqd %xmm2, %xmm1
-; SSE2-SSSE3-NEXT:    pshufd {{.*#+}} xmm1 = xmm1[1,1,3,3]
-; SSE2-SSSE3-NEXT:    pand %xmm4, %xmm1
-; SSE2-SSSE3-NEXT:    pshufd {{.*#+}} xmm3 = xmm3[1,1,3,3]
-; SSE2-SSSE3-NEXT:    por %xmm1, %xmm3
+; SSE2-SSSE3-NEXT:    pcmpeqd %xmm1, %xmm3
+; SSE2-SSSE3-NEXT:    movdqa %xmm2, %xmm4
+; SSE2-SSSE3-NEXT:    pcmpgtd %xmm1, %xmm4
+; SSE2-SSSE3-NEXT:    pshufd {{.*#+}} xmm1 = xmm4[0,0,2,2]
+; SSE2-SSSE3-NEXT:    pand %xmm3, %xmm1
+; SSE2-SSSE3-NEXT:    por %xmm4, %xmm1
 ; SSE2-SSSE3-NEXT:    pxor %xmm2, %xmm0
-; SSE2-SSSE3-NEXT:    movdqa %xmm2, %xmm1
-; SSE2-SSSE3-NEXT:    pcmpgtd %xmm0, %xmm1
-; SSE2-SSSE3-NEXT:    pshufd {{.*#+}} xmm4 = xmm1[0,0,2,2]
-; SSE2-SSSE3-NEXT:    pcmpeqd %xmm2, %xmm0
-; SSE2-SSSE3-NEXT:    pshufd {{.*#+}} xmm0 = xmm0[1,1,3,3]
-; SSE2-SSSE3-NEXT:    pand %xmm4, %xmm0
-; SSE2-SSSE3-NEXT:    pshufd {{.*#+}} xmm1 = xmm1[1,1,3,3]
-; SSE2-SSSE3-NEXT:    por %xmm0, %xmm1
-; SSE2-SSSE3-NEXT:    packssdw %xmm3, %xmm1
-; SSE2-SSSE3-NEXT:    movmskps %xmm1, %eax
+; SSE2-SSSE3-NEXT:    movdqa %xmm2, %xmm3
+; SSE2-SSSE3-NEXT:    pcmpeqd %xmm0, %xmm3
+; SSE2-SSSE3-NEXT:    pcmpgtd %xmm0, %xmm2
+; SSE2-SSSE3-NEXT:    pshufd {{.*#+}} xmm0 = xmm2[0,0,2,2]
+; SSE2-SSSE3-NEXT:    pand %xmm3, %xmm0
+; SSE2-SSSE3-NEXT:    por %xmm2, %xmm0
+; SSE2-SSSE3-NEXT:    packssdw %xmm1, %xmm0
+; SSE2-SSSE3-NEXT:    movmskps %xmm0, %eax
 ; SSE2-SSSE3-NEXT:    movb %al, (%rdi)
 ; SSE2-SSSE3-NEXT:    retq
 ;

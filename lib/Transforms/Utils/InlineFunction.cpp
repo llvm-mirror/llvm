@@ -31,6 +31,7 @@
 #include "llvm/Analysis/ProfileSummaryInfo.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Analysis/ValueTracking.h"
+#include "llvm/Analysis/VectorUtils.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
@@ -770,14 +771,16 @@ static void HandleInlinedEHPad(InvokeInst *II, BasicBlock *FirstNewBlock,
   UnwindDest->removePredecessor(InvokeBB);
 }
 
-/// When inlining a call site that has !llvm.mem.parallel_loop_access metadata,
-/// that metadata should be propagated to all memory-accessing cloned
-/// instructions.
+/// When inlining a call site that has !llvm.mem.parallel_loop_access or
+/// llvm.access.group metadata, that metadata should be propagated to all
+/// memory-accessing cloned instructions.
 static void PropagateParallelLoopAccessMetadata(CallSite CS,
                                                 ValueToValueMapTy &VMap) {
   MDNode *M =
     CS.getInstruction()->getMetadata(LLVMContext::MD_mem_parallel_loop_access);
-  if (!M)
+  MDNode *CallAccessGroup =
+      CS.getInstruction()->getMetadata(LLVMContext::MD_access_group);
+  if (!M && !CallAccessGroup)
     return;
 
   for (ValueToValueMapTy::iterator VMI = VMap.begin(), VMIE = VMap.end();
@@ -789,11 +792,20 @@ static void PropagateParallelLoopAccessMetadata(CallSite CS,
     if (!NI)
       continue;
 
-    if (MDNode *PM = NI->getMetadata(LLVMContext::MD_mem_parallel_loop_access)) {
+    if (M) {
+      if (MDNode *PM =
+              NI->getMetadata(LLVMContext::MD_mem_parallel_loop_access)) {
         M = MDNode::concatenate(PM, M);
       NI->setMetadata(LLVMContext::MD_mem_parallel_loop_access, M);
-    } else if (NI->mayReadOrWriteMemory()) {
-      NI->setMetadata(LLVMContext::MD_mem_parallel_loop_access, M);
+      } else if (NI->mayReadOrWriteMemory()) {
+        NI->setMetadata(LLVMContext::MD_mem_parallel_loop_access, M);
+      }
+    }
+
+    if (NI->mayReadOrWriteMemory()) {
+      MDNode *UnitedAccGroups = uniteAccessGroups(
+          NI->getMetadata(LLVMContext::MD_access_group), CallAccessGroup);
+      NI->setMetadata(LLVMContext::MD_access_group, UnitedAccGroups);
     }
   }
 }
@@ -987,22 +999,22 @@ static void AddAliasScopeMetadata(CallSite CS, ValueToValueMapTy &VMap,
         PtrArgs.push_back(CXI->getPointerOperand());
       else if (const AtomicRMWInst *RMWI = dyn_cast<AtomicRMWInst>(I))
         PtrArgs.push_back(RMWI->getPointerOperand());
-      else if (ImmutableCallSite ICS = ImmutableCallSite(I)) {
+      else if (const auto *Call = dyn_cast<CallBase>(I)) {
         // If we know that the call does not access memory, then we'll still
         // know that about the inlined clone of this call site, and we don't
         // need to add metadata.
-        if (ICS.doesNotAccessMemory())
+        if (Call->doesNotAccessMemory())
           continue;
 
         IsFuncCall = true;
         if (CalleeAAR) {
-          FunctionModRefBehavior MRB = CalleeAAR->getModRefBehavior(ICS);
+          FunctionModRefBehavior MRB = CalleeAAR->getModRefBehavior(Call);
           if (MRB == FMRB_OnlyAccessesArgumentPointees ||
               MRB == FMRB_OnlyReadsArgumentPointees)
             IsArgMemOnlyCall = true;
         }
 
-        for (Value *Arg : ICS.args()) {
+        for (Value *Arg : Call->args()) {
           // We need to check the underlying objects of all arguments, not just
           // the pointer arguments, because we might be passing pointers as
           // integers, etc.
@@ -1308,16 +1320,10 @@ static Value *HandleByValArgument(Value *Arg, Instruction *TheCall,
 
 // Check whether this Value is used by a lifetime intrinsic.
 static bool isUsedByLifetimeMarker(Value *V) {
-  for (User *U : V->users()) {
-    if (IntrinsicInst *II = dyn_cast<IntrinsicInst>(U)) {
-      switch (II->getIntrinsicID()) {
-      default: break;
-      case Intrinsic::lifetime_start:
-      case Intrinsic::lifetime_end:
+  for (User *U : V->users())
+    if (IntrinsicInst *II = dyn_cast<IntrinsicInst>(U))
+      if (II->isLifetimeStartOrEnd())
         return true;
-      }
-    }
-  }
   return false;
 }
 

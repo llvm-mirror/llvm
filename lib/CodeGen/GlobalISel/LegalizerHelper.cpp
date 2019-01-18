@@ -31,16 +31,18 @@ using namespace llvm;
 using namespace LegalizeActions;
 
 LegalizerHelper::LegalizerHelper(MachineFunction &MF,
-                                 GISelChangeObserver &Observer)
-    : MRI(MF.getRegInfo()), LI(*MF.getSubtarget().getLegalizerInfo()),
-      Observer(Observer) {
+                                 GISelChangeObserver &Observer,
+                                 MachineIRBuilder &Builder)
+    : MIRBuilder(Builder), MRI(MF.getRegInfo()),
+      LI(*MF.getSubtarget().getLegalizerInfo()), Observer(Observer) {
   MIRBuilder.setMF(MF);
   MIRBuilder.setChangeObserver(Observer);
 }
 
 LegalizerHelper::LegalizerHelper(MachineFunction &MF, const LegalizerInfo &LI,
-                                 GISelChangeObserver &Observer)
-    : MRI(MF.getRegInfo()), LI(LI), Observer(Observer) {
+                                 GISelChangeObserver &Observer,
+                                 MachineIRBuilder &B)
+    : MIRBuilder(B), MRI(MF.getRegInfo()), LI(LI), Observer(Observer) {
   MIRBuilder.setMF(MF);
   MIRBuilder.setChangeObserver(Observer);
 }
@@ -88,17 +90,17 @@ void LegalizerHelper::extractParts(unsigned Reg, LLT Ty, int NumParts,
 static RTLIB::Libcall getRTLibDesc(unsigned Opcode, unsigned Size) {
   switch (Opcode) {
   case TargetOpcode::G_SDIV:
-    assert(Size == 32 && "Unsupported size");
-    return RTLIB::SDIV_I32;
+    assert((Size == 32 || Size == 64) && "Unsupported size");
+    return Size == 64 ? RTLIB::SDIV_I64 : RTLIB::SDIV_I32;
   case TargetOpcode::G_UDIV:
-    assert(Size == 32 && "Unsupported size");
-    return RTLIB::UDIV_I32;
+    assert((Size == 32 || Size == 64) && "Unsupported size");
+    return Size == 64 ? RTLIB::UDIV_I64 : RTLIB::UDIV_I32;
   case TargetOpcode::G_SREM:
-    assert(Size == 32 && "Unsupported size");
-    return RTLIB::SREM_I32;
+    assert((Size == 32 || Size == 64) && "Unsupported size");
+    return Size == 64 ? RTLIB::SREM_I64 : RTLIB::SREM_I32;
   case TargetOpcode::G_UREM:
-    assert(Size == 32 && "Unsupported size");
-    return RTLIB::UREM_I32;
+    assert((Size == 32 || Size == 64) && "Unsupported size");
+    return Size == 64 ? RTLIB::UREM_I64 : RTLIB::UREM_I32;
   case TargetOpcode::G_CTLZ_ZERO_UNDEF:
     assert(Size == 32 && "Unsupported size");
     return RTLIB::CTLZ_I32;
@@ -200,7 +202,7 @@ LegalizerHelper::libcall(MachineInstr &MI) {
   case TargetOpcode::G_SREM:
   case TargetOpcode::G_UREM:
   case TargetOpcode::G_CTLZ_ZERO_UNDEF: {
-    Type *HLTy = Type::getInt32Ty(Ctx);
+    Type *HLTy = IntegerType::get(Ctx, Size);
     auto Status = simpleLibcall(MI, MIRBuilder, Size, HLTy);
     if (Status != Legalized)
       return Status;
@@ -578,7 +580,9 @@ LegalizerHelper::LegalizeResult LegalizerHelper::narrowScalar(MachineInstr &MI,
     MI.eraseFromParent();
     return Legalized;
   }
-  case TargetOpcode::G_OR: {
+  case TargetOpcode::G_AND:
+  case TargetOpcode::G_OR:
+  case TargetOpcode::G_XOR: {
     // Legalize bitwise operation:
     // A = BinOp<Ty> B, C
     // into:
@@ -617,7 +621,8 @@ LegalizerHelper::LegalizeResult LegalizerHelper::narrowScalar(MachineInstr &MI,
 
     // Do the operation on each small part.
     for (int i = 0; i < NumParts; ++i)
-      MIRBuilder.buildOr(DstRegs[i], SrcsReg1[i], SrcsReg2[i]);
+      MIRBuilder.buildInstr(MI.getOpcode(), {DstRegs[i]},
+                            {SrcsReg1[i], SrcsReg2[i]});
 
     // Gather the destination registers into the final destination.
     unsigned DstReg = MI.getOperand(0).getReg();
@@ -774,15 +779,18 @@ LegalizerHelper::widenScalar(MachineInstr &MI, unsigned TypeIdx, LLT WideTy) {
     return Legalized;
 
   case TargetOpcode::G_SELECT:
-    if (TypeIdx != 0)
-      return UnableToLegalize;
-    // Perform operation at larger width (any extension is fine here, high bits
-    // don't affect the result) and then truncate the result back to the
-    // original type.
     Observer.changingInstr(MI);
-    widenScalarSrc(MI, WideTy, 2, TargetOpcode::G_ANYEXT);
-    widenScalarSrc(MI, WideTy, 3, TargetOpcode::G_ANYEXT);
-    widenScalarDst(MI, WideTy);
+    if (TypeIdx == 0) {
+      // Perform operation at larger width (any extension is fine here, high
+      // bits don't affect the result) and then truncate the result back to the
+      // original type.
+      widenScalarSrc(MI, WideTy, 2, TargetOpcode::G_ANYEXT);
+      widenScalarSrc(MI, WideTy, 3, TargetOpcode::G_ANYEXT);
+      widenScalarDst(MI, WideTy);
+    } else {
+      // Explicit extension is required here since high bits affect the result.
+      widenScalarSrc(MI, WideTy, 1, TargetOpcode::G_ZEXT);
+    }
     Observer.changedInstr(MI);
     return Legalized;
 
@@ -878,6 +886,12 @@ LegalizerHelper::widenScalar(MachineInstr &MI, unsigned TypeIdx, LLT WideTy) {
     Observer.changedInstr(MI);
     return Legalized;
   }
+  case TargetOpcode::G_IMPLICIT_DEF: {
+    Observer.changingInstr(MI);
+    widenScalarDst(MI, WideTy);
+    Observer.changedInstr(MI);
+    return Legalized;
+  }
   case TargetOpcode::G_BRCOND:
     Observer.changingInstr(MI);
     widenScalarSrc(MI, WideTy, 0, TargetOpcode::G_ANYEXT);
@@ -938,6 +952,15 @@ LegalizerHelper::widenScalar(MachineInstr &MI, unsigned TypeIdx, LLT WideTy) {
       return UnableToLegalize;
     Observer.changingInstr(MI);
     widenScalarSrc(MI, WideTy, 2, TargetOpcode::G_SEXT);
+    Observer.changedInstr(MI);
+    return Legalized;
+
+  case TargetOpcode::G_FCEIL:
+    if (TypeIdx != 0)
+      return UnableToLegalize;
+    Observer.changingInstr(MI);
+    widenScalarSrc(MI, WideTy, 1, TargetOpcode::G_FPEXT);
+    widenScalarDst(MI, WideTy, 0, TargetOpcode::G_FPTRUNC);
     Observer.changedInstr(MI);
     return Legalized;
   }
@@ -1119,6 +1142,24 @@ LegalizerHelper::lower(MachineInstr &MI, unsigned TypeIdx, LLT Ty) {
   case TargetOpcode::G_CTTZ:
   case TargetOpcode::G_CTPOP:
     return lowerBitCount(MI, TypeIdx, Ty);
+  case G_UADDE: {
+    unsigned Res = MI.getOperand(0).getReg();
+    unsigned CarryOut = MI.getOperand(1).getReg();
+    unsigned LHS = MI.getOperand(2).getReg();
+    unsigned RHS = MI.getOperand(3).getReg();
+    unsigned CarryIn = MI.getOperand(4).getReg();
+
+    unsigned TmpRes = MRI.createGenericVirtualRegister(Ty);
+    unsigned ZExtCarryIn = MRI.createGenericVirtualRegister(Ty);
+
+    MIRBuilder.buildAdd(TmpRes, LHS, RHS);
+    MIRBuilder.buildZExt(ZExtCarryIn, CarryIn);
+    MIRBuilder.buildAdd(Res, TmpRes, ZExtCarryIn);
+    MIRBuilder.buildICmp(CmpInst::ICMP_ULT, CarryOut, Res, LHS);
+
+    MI.eraseFromParent();
+    return Legalized;
+  }
   }
 }
 
@@ -1133,6 +1174,32 @@ LegalizerHelper::fewerElementsVector(MachineInstr &MI, unsigned TypeIdx,
   switch (MI.getOpcode()) {
   default:
     return UnableToLegalize;
+  case TargetOpcode::G_IMPLICIT_DEF: {
+    SmallVector<unsigned, 2> DstRegs;
+
+    unsigned NarrowSize = NarrowTy.getSizeInBits();
+    unsigned DstReg = MI.getOperand(0).getReg();
+    unsigned Size = MRI.getType(DstReg).getSizeInBits();
+    int NumParts = Size / NarrowSize;
+    // FIXME: Don't know how to handle the situation where the small vectors
+    // aren't all the same size yet.
+    if (Size % NarrowSize != 0)
+      return UnableToLegalize;
+
+    for (int i = 0; i < NumParts; ++i) {
+      unsigned TmpReg = MRI.createGenericVirtualRegister(NarrowTy);
+      MIRBuilder.buildUndef(TmpReg);
+      DstRegs.push_back(TmpReg);
+    }
+
+    if (NarrowTy.isVector())
+      MIRBuilder.buildConcatVectors(DstReg, DstRegs);
+    else
+      MIRBuilder.buildBuildVector(DstReg, DstRegs);
+
+    MI.eraseFromParent();
+    return Legalized;
+  }
   case TargetOpcode::G_ADD: {
     unsigned NarrowSize = NarrowTy.getSizeInBits();
     unsigned DstReg = MI.getOperand(0).getReg();

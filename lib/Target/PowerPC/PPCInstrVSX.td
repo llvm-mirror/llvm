@@ -67,6 +67,10 @@ def SDT_PPCxxswapd : SDTypeProfile<1, 1, [
 def SDTVecConv : SDTypeProfile<1, 2, [
   SDTCisVec<0>, SDTCisVec<1>, SDTCisPtrTy<2>
 ]>;
+def SDTVabsd : SDTypeProfile<1, 3, [
+  SDTCisVec<0>, SDTCisSameAs<0, 1>, SDTCisSameAs<0, 2>, SDTCisVT<3, i32>
+]>;
+
 
 def PPClxvd2x  : SDNode<"PPCISD::LXVD2X", SDT_PPClxvd2x,
                         [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
@@ -79,6 +83,7 @@ def PPCmtvsrz : SDNode<"PPCISD::MTVSRZ", SDTUnaryOp, []>;
 def PPCsvec2fp : SDNode<"PPCISD::SINT_VEC_TO_FP", SDTVecConv, []>;
 def PPCuvec2fp: SDNode<"PPCISD::UINT_VEC_TO_FP", SDTVecConv, []>;
 def PPCswapNoChain : SDNode<"PPCISD::SWAP_NO_CHAIN", SDT_PPCxxswapd>;
+def PPCvabsd : SDNode<"PPCISD::VABSD", SDTVabsd, []>;
 
 multiclass XX3Form_Rcr<bits<6> opcode, bits<7> xo, string asmbase,
                     string asmstr, InstrItinClass itin, Intrinsic Int,
@@ -1212,6 +1217,27 @@ def ScalarLoads {
   dag Li32 = (i32 (load xoaddr:$src));
 }
 
+def DWToSPExtractConv {
+  dag El0US1 = (f32 (PPCfcfidus
+                    (f64 (PPCmtvsra (i64 (vector_extract v2i64:$S1, 0))))));
+  dag El1US1 = (f32 (PPCfcfidus
+                    (f64 (PPCmtvsra (i64 (vector_extract v2i64:$S1, 1))))));
+  dag El0US2 = (f32 (PPCfcfidus
+                    (f64 (PPCmtvsra (i64 (vector_extract v2i64:$S2, 0))))));
+  dag El1US2 = (f32 (PPCfcfidus
+                    (f64 (PPCmtvsra (i64 (vector_extract v2i64:$S2, 1))))));
+  dag El0SS1 = (f32 (PPCfcfids
+                    (f64 (PPCmtvsra (i64 (vector_extract v2i64:$S1, 0))))));
+  dag El1SS1 = (f32 (PPCfcfids
+                    (f64 (PPCmtvsra (i64 (vector_extract v2i64:$S1, 1))))));
+  dag El0SS2 = (f32 (PPCfcfids
+                    (f64 (PPCmtvsra (i64 (vector_extract v2i64:$S2, 0))))));
+  dag El1SS2 = (f32 (PPCfcfids
+                    (f64 (PPCmtvsra (i64 (vector_extract v2i64:$S2, 1))))));
+  dag BVU = (v4f32 (build_vector El0US1, El1US1, El0US2, El1US2));
+  dag BVS = (v4f32 (build_vector El0SS1, El1SS1, El0SS2, El1SS2));
+}
+
 // The following VSX instructions were introduced in Power ISA 2.07
 /* FIXME: if the operands are v2i64, these patterns will not match.
    we should define new patterns or otherwise match the same patterns
@@ -1447,35 +1473,27 @@ let AddedComplexity = 400 in { // Prefer VSX patterns over non-VSX patterns.
   } // UseVSXReg = 1
 
   let Predicates = [IsLittleEndian] in {
-  def : Pat<(f32 (PPCfcfids
-                   (f64 (PPCmtvsra (i64 (vector_extract v2i64:$S, 0)))))),
-            (f32 (XSCVSXDSP (COPY_TO_REGCLASS (XXPERMDI $S, $S, 2), VSFRC)))>;
-  def : Pat<(f32 (PPCfcfids
-                   (f64 (PPCmtvsra (i64 (vector_extract v2i64:$S, 1)))))),
+  def : Pat<DWToSPExtractConv.El0SS1,
+            (f32 (XSCVSXDSP (COPY_TO_REGCLASS (XXPERMDI $S1, $S1, 2), VSFRC)))>;
+  def : Pat<DWToSPExtractConv.El1SS1,
             (f32 (XSCVSXDSP (COPY_TO_REGCLASS
-                              (f64 (COPY_TO_REGCLASS $S, VSRC)), VSFRC)))>;
-  def : Pat<(f32 (PPCfcfidus
-                   (f64 (PPCmtvsra (i64 (vector_extract v2i64:$S, 0)))))),
-            (f32 (XSCVUXDSP (COPY_TO_REGCLASS (XXPERMDI $S, $S, 2), VSFRC)))>;
-  def : Pat<(f32 (PPCfcfidus
-                   (f64 (PPCmtvsra (i64 (vector_extract v2i64:$S, 1)))))),
+                              (f64 (COPY_TO_REGCLASS $S1, VSRC)), VSFRC)))>;
+  def : Pat<DWToSPExtractConv.El0US1,
+            (f32 (XSCVUXDSP (COPY_TO_REGCLASS (XXPERMDI $S1, $S1, 2), VSFRC)))>;
+  def : Pat<DWToSPExtractConv.El1US1,
             (f32 (XSCVUXDSP (COPY_TO_REGCLASS
-                              (f64 (COPY_TO_REGCLASS $S, VSRC)), VSFRC)))>;
+                              (f64 (COPY_TO_REGCLASS $S1, VSRC)), VSFRC)))>;
   }
 
   let Predicates = [IsBigEndian] in {
-  def : Pat<(f32 (PPCfcfids
-                   (f64 (PPCmtvsra (i64 (vector_extract v2i64:$S, 0)))))),
-            (f32 (XSCVSXDSP (COPY_TO_REGCLASS $S, VSFRC)))>;
-  def : Pat<(f32 (PPCfcfids
-                   (f64 (PPCmtvsra (i64 (vector_extract v2i64:$S, 1)))))),
-            (f32 (XSCVSXDSP (COPY_TO_REGCLASS (XXPERMDI $S, $S, 2), VSFRC)))>;
-  def : Pat<(f32 (PPCfcfidus
-                   (f64 (PPCmtvsra (i64 (vector_extract v2i64:$S, 0)))))),
-            (f32 (XSCVUXDSP (COPY_TO_REGCLASS $S, VSFRC)))>;
-  def : Pat<(f32 (PPCfcfidus
-                   (f64 (PPCmtvsra (i64 (vector_extract v2i64:$S, 1)))))),
-            (f32 (XSCVUXDSP (COPY_TO_REGCLASS (XXPERMDI $S, $S, 2), VSFRC)))>;
+  def : Pat<DWToSPExtractConv.El0SS1,
+            (f32 (XSCVSXDSP (COPY_TO_REGCLASS $S1, VSFRC)))>;
+  def : Pat<DWToSPExtractConv.El1SS1,
+            (f32 (XSCVSXDSP (COPY_TO_REGCLASS (XXPERMDI $S1, $S1, 2), VSFRC)))>;
+  def : Pat<DWToSPExtractConv.El0US1,
+            (f32 (XSCVUXDSP (COPY_TO_REGCLASS $S1, VSFRC)))>;
+  def : Pat<DWToSPExtractConv.El1US1,
+            (f32 (XSCVUXDSP (COPY_TO_REGCLASS (XXPERMDI $S1, $S1, 2), VSFRC)))>;
   }
 
   // Instructions for converting float to i64 feeding a store.
@@ -3809,6 +3827,15 @@ let AddedComplexity = 400 in {
                                               (XFLOADf32 xoaddr:$A), VSFRC)), 0))>;
   }
 
+  let Predicates = [IsBigEndian, HasP8Vector] in {
+    def : Pat<DWToSPExtractConv.BVU,
+              (v4f32 (VPKUDUM (XXSLDWI (XVCVUXDSP $S1), (XVCVUXDSP $S1), 3),
+                              (XXSLDWI (XVCVUXDSP $S2), (XVCVUXDSP $S2), 3)))>;
+    def : Pat<DWToSPExtractConv.BVS,
+              (v4f32 (VPKUDUM (XXSLDWI (XVCVSXDSP $S1), (XVCVSXDSP $S1), 3),
+                              (XXSLDWI (XVCVSXDSP $S2), (XVCVSXDSP $S2), 3)))>;
+  }
+
   // Big endian, available on all targets with VSX
   let Predicates = [IsBigEndian, HasVSX] in {
     def : Pat<(v2f64 (build_vector f64:$A, f64:$B)),
@@ -3835,6 +3862,15 @@ let AddedComplexity = 400 in {
     def : Pat<(v4i32 (build_vector ExtDbl.A0U, ExtDbl.A1U,
                                    ExtDbl.B0U, ExtDbl.B1U)),
               (v4i32 (VMRGEW MrgWords.CVA0B0U, MrgWords.CVA1B1U))>;
+  }
+
+  let Predicates = [IsLittleEndian, HasP8Vector] in {
+    def : Pat<DWToSPExtractConv.BVU,
+              (v4f32 (VPKUDUM (XXSLDWI (XVCVUXDSP $S2), (XVCVUXDSP $S2), 3),
+                              (XXSLDWI (XVCVUXDSP $S1), (XVCVUXDSP $S1), 3)))>;
+    def : Pat<DWToSPExtractConv.BVS,
+              (v4f32 (VPKUDUM (XXSLDWI (XVCVSXDSP $S2), (XVCVSXDSP $S2), 3),
+                              (XXSLDWI (XVCVSXDSP $S1), (XVCVSXDSP $S1), 3)))>;
   }
 
   let Predicates = [IsLittleEndian, HasVSX] in {
@@ -4017,3 +4053,21 @@ let AddedComplexity = 400 in {
   }
 }
 
+// Put this P9Altivec related definition here since it's possible to be 
+// selected to VSX instruction xvnegsp, avoid possible undef.
+let Predicates = [HasP9Altivec] in {
+
+  def : Pat<(v4i32 (PPCvabsd v4i32:$A, v4i32:$B, (i32 0))),
+            (v4i32 (VABSDUW $A, $B))>;
+
+  def : Pat<(v8i16 (PPCvabsd v8i16:$A, v8i16:$B, (i32 0))),
+            (v8i16 (VABSDUH $A, $B))>;
+
+  def : Pat<(v16i8 (PPCvabsd v16i8:$A, v16i8:$B, (i32 0))),
+            (v16i8 (VABSDUB $A, $B))>;
+
+  // As PPCVABSD description, the last operand indicates whether do the
+  // sign bit flip.
+  def : Pat<(v4i32 (PPCvabsd v4i32:$A, v4i32:$B, (i32 1))),
+            (v4i32 (VABSDUW (XVNEGSP $A), (XVNEGSP $B)))>;
+}

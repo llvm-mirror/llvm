@@ -114,10 +114,10 @@ def HasAltNZCV       : Predicate<"Subtarget->hasAlternativeNZCV()">,
                        AssemblerPredicate<"FeatureAltFPCmp", "altnzcv">;
 def HasFRInt3264     : Predicate<"Subtarget->hasFRInt3264()">,
                        AssemblerPredicate<"FeatureFRInt3264", "frint3264">;
-def HasSpecCtrl      : Predicate<"Subtarget->hasSpecCtrl()">,
-                       AssemblerPredicate<"FeatureSpecCtrl", "specctrl">;
-def HasPredCtrl      : Predicate<"Subtarget->hasPredCtrl()">,
-                       AssemblerPredicate<"FeaturePredCtrl", "predctrl">;
+def HasSB            : Predicate<"Subtarget->hasSB()">,
+                       AssemblerPredicate<"FeatureSB", "sb">;
+def HasPredRes      : Predicate<"Subtarget->hasPredRes()">,
+                       AssemblerPredicate<"FeaturePredRes", "predres">;
 def HasCCDP          : Predicate<"Subtarget->hasCCDP()">,
                        AssemblerPredicate<"FeatureCacheDeepPersist", "ccdp">;
 def HasBTI           : Predicate<"Subtarget->hasBTI()">,
@@ -520,6 +520,14 @@ def SPACE : Pseudo<(outs GPR64:$Rd), (ins i32imm:$size, GPR64:$Rn),
                    [(set GPR64:$Rd, (int_aarch64_space imm:$size, GPR64:$Rn))]>,
             Sched<[]>;
 
+let hasSideEffects = 1, isCodeGenOnly = 1 in {
+  def SpeculationSafeValueX
+      : Pseudo<(outs GPR64:$dst), (ins GPR64:$src), []>, Sched<[]>;
+  def SpeculationSafeValueW
+      : Pseudo<(outs GPR32:$dst), (ins GPR32:$src), []>, Sched<[]>;
+}
+
+
 //===----------------------------------------------------------------------===//
 // System instructions.
 //===----------------------------------------------------------------------===//
@@ -733,7 +741,7 @@ def AXFLAG : PstateWriteSimple<(ins), "axflag", "">, Sched<[WriteSys]> {
 def SB : SimpleSystemI<0, (ins), "sb", "">, Sched<[]> {
   let Inst{20-5} = 0b0001100110000111;
   let Unpredictable{11-8} = 0b1111;
-  let Predicates = [HasSpecCtrl];
+  let Predicates = [HasSB];
   let hasSideEffects = 1;
 }
 
@@ -1618,6 +1626,10 @@ let hasSideEffects = 1 in
 def TLSDESCCALL : Pseudo<(outs), (ins i64imm:$sym), []>, Sched<[]> {
   let AsmString = ".tlsdesccall $sym";
 }
+
+// Pseudo instruction to tell the streamer to emit a 'B' character into the
+// augmentation string.
+def EMITBKEY : Pseudo<(outs), (ins), []>, Sched<[]> {}
 
 // FIXME: maybe the scratch register used shouldn't be fixed to X1?
 // FIXME: can "hasSideEffects be dropped?

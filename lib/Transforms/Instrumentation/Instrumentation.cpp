@@ -111,9 +111,9 @@ void llvm::initializeInstrumentation(PassRegistry &Registry) {
   initializePGOIndirectCallPromotionLegacyPassPass(Registry);
   initializePGOMemOPSizeOptLegacyPassPass(Registry);
   initializeInstrProfilingLegacyPassPass(Registry);
-  initializeMemorySanitizerPass(Registry);
+  initializeMemorySanitizerLegacyPassPass(Registry);
   initializeHWAddressSanitizerPass(Registry);
-  initializeThreadSanitizerPass(Registry);
+  initializeThreadSanitizerLegacyPassPass(Registry);
   initializeSanitizerCoverageModulePass(Registry);
   initializeDataFlowSanitizerPass(Registry);
   initializeEfficiencySanitizerPass(Registry);

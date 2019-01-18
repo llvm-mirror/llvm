@@ -37,12 +37,6 @@ using namespace llvm;
 
 #define DEBUG_TYPE "wasm-lower"
 
-// Emit proposed instructions that may not have been implemented in engines
-cl::opt<bool> EnableUnimplementedWasmSIMDInstrs(
-    "wasm-enable-unimplemented-simd",
-    cl::desc("Emit potentially-unimplemented WebAssembly SIMD instructions"),
-    cl::init(false));
-
 WebAssemblyTargetLowering::WebAssemblyTargetLowering(
     const TargetMachine &TM, const WebAssemblySubtarget &STI)
     : TargetLowering(TM), Subtarget(&STI) {
@@ -70,7 +64,7 @@ WebAssemblyTargetLowering::WebAssemblyTargetLowering(
     addRegisterClass(MVT::v8i16, &WebAssembly::V128RegClass);
     addRegisterClass(MVT::v4i32, &WebAssembly::V128RegClass);
     addRegisterClass(MVT::v4f32, &WebAssembly::V128RegClass);
-    if (EnableUnimplementedWasmSIMDInstrs) {
+    if (Subtarget->hasUnimplementedSIMD128()) {
       addRegisterClass(MVT::v2i64, &WebAssembly::V128RegClass);
       addRegisterClass(MVT::v2f64, &WebAssembly::V128RegClass);
     }
@@ -135,7 +129,7 @@ WebAssemblyTargetLowering::WebAssemblyTargetLowering(
       for (auto T : {MVT::v16i8, MVT::v8i16, MVT::v4i32}) {
         setOperationAction(Op, T, Expand);
       }
-      if (EnableUnimplementedWasmSIMDInstrs) {
+      if (Subtarget->hasUnimplementedSIMD128()) {
         setOperationAction(Op, MVT::v2i64, Expand);
       }
     }
@@ -149,7 +143,7 @@ WebAssemblyTargetLowering::WebAssemblyTargetLowering(
     for (auto T : {MVT::v16i8, MVT::v8i16, MVT::v4i32, MVT::v4f32}) {
       setOperationAction(ISD::VECTOR_SHUFFLE, T, Custom);
     }
-    if (EnableUnimplementedWasmSIMDInstrs) {
+    if (Subtarget->hasUnimplementedSIMD128()) {
       setOperationAction(ISD::VECTOR_SHUFFLE, MVT::v2i64, Custom);
       setOperationAction(ISD::VECTOR_SHUFFLE, MVT::v2f64, Custom);
     }
@@ -160,7 +154,7 @@ WebAssemblyTargetLowering::WebAssemblyTargetLowering(
     for (auto T : {MVT::v16i8, MVT::v8i16, MVT::v4i32})
       for (auto Op : {ISD::SHL, ISD::SRA, ISD::SRL})
         setOperationAction(Op, T, Custom);
-    if (EnableUnimplementedWasmSIMDInstrs)
+    if (Subtarget->hasUnimplementedSIMD128())
       for (auto Op : {ISD::SHL, ISD::SRA, ISD::SRL})
         setOperationAction(Op, MVT::v2i64, Custom);
   }
@@ -170,7 +164,7 @@ WebAssemblyTargetLowering::WebAssemblyTargetLowering(
     for (auto Op : {ISD::VSELECT, ISD::SELECT_CC, ISD::SELECT}) {
       for (auto T : {MVT::v16i8, MVT::v8i16, MVT::v4i32, MVT::v4f32})
         setOperationAction(Op, T, Expand);
-      if (EnableUnimplementedWasmSIMDInstrs)
+      if (Subtarget->hasUnimplementedSIMD128())
         for (auto T : {MVT::v2i64, MVT::v2f64})
           setOperationAction(Op, T, Expand);
     }
@@ -179,8 +173,10 @@ WebAssemblyTargetLowering::WebAssemblyTargetLowering(
   // sign-extend from.
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1, Expand);
   if (!Subtarget->hasSignExt()) {
+    // Sign extends are legal only when extending a vector extract
+    auto Action = Subtarget->hasSIMD128() ? Custom : Expand;
     for (auto T : {MVT::i8, MVT::i16, MVT::i32})
-      setOperationAction(ISD::SIGN_EXTEND_INREG, T, Expand);
+      setOperationAction(ISD::SIGN_EXTEND_INREG, T, Action);
   }
   for (auto T : MVT::integer_vector_valuetypes())
     setOperationAction(ISD::SIGN_EXTEND_INREG, T, Expand);
@@ -224,13 +220,19 @@ WebAssemblyTargetLowering::WebAssemblyTargetLowering(
     }
   }
 
+  // Expand additional SIMD ops that V8 hasn't implemented yet
+  if (Subtarget->hasSIMD128() && !Subtarget->hasUnimplementedSIMD128()) {
+    setOperationAction(ISD::FSQRT, MVT::v4f32, Expand);
+    setOperationAction(ISD::FDIV, MVT::v4f32, Expand);
+  }
+
   // Custom lower lane accesses to expand out variable indices
   if (Subtarget->hasSIMD128()) {
     for (auto T : {MVT::v16i8, MVT::v8i16, MVT::v4i32, MVT::v4f32}) {
       setOperationAction(ISD::EXTRACT_VECTOR_ELT, T, Custom);
       setOperationAction(ISD::INSERT_VECTOR_ELT, T, Custom);
     }
-    if (EnableUnimplementedWasmSIMDInstrs) {
+    if (Subtarget->hasUnimplementedSIMD128()) {
       for (auto T : {MVT::v2i64, MVT::v2f64}) {
         setOperationAction(ISD::EXTRACT_VECTOR_ELT, T, Custom);
         setOperationAction(ISD::INSERT_VECTOR_ELT, T, Custom);
@@ -894,6 +896,8 @@ SDValue WebAssemblyTargetLowering::LowerOperation(SDValue Op,
     return LowerAccessVectorElement(Op, DAG);
   case ISD::INTRINSIC_VOID:
     return LowerINTRINSIC_VOID(Op, DAG);
+  case ISD::SIGN_EXTEND_INREG:
+    return LowerSIGN_EXTEND_INREG(Op, DAG);
   case ISD::VECTOR_SHUFFLE:
     return LowerVECTOR_SHUFFLE(Op, DAG);
   case ISD::SHL:
@@ -911,7 +915,7 @@ SDValue WebAssemblyTargetLowering::LowerCopyToReg(SDValue Op,
     // the FI to some LEA-like instruction, but since we don't have that, we
     // need to insert some kind of instruction that can take an FI operand and
     // produces a value usable by CopyToReg (i.e. in a vreg). So insert a dummy
-    // copy_local between Op and its FI operand.
+    // local.copy between Op and its FI operand.
     SDValue Chain = Op.getOperand(0);
     SDLoc DL(Op);
     unsigned Reg = cast<RegisterSDNode>(Op.getOperand(1))->getReg();
@@ -1096,6 +1100,22 @@ WebAssemblyTargetLowering::LowerINTRINSIC_VOID(SDValue Op,
 }
 
 SDValue
+WebAssemblyTargetLowering::LowerSIGN_EXTEND_INREG(SDValue Op,
+                                                  SelectionDAG &DAG) const {
+  // If sign extension operations are disabled, allow sext_inreg only if operand
+  // is a vector extract. SIMD does not depend on sign extension operations, but
+  // allowing sext_inreg in this context lets us have simple patterns to select
+  // extract_lane_s instructions. Expanding sext_inreg everywhere would be
+  // simpler in this file, but would necessitate large and brittle patterns to
+  // undo the expansion and select extract_lane_s instructions.
+  assert(!Subtarget->hasSignExt() && Subtarget->hasSIMD128());
+  if (Op.getOperand(0).getOpcode() == ISD::EXTRACT_VECTOR_ELT)
+    return Op;
+  // Otherwise expand
+  return SDValue();
+}
+
+SDValue
 WebAssemblyTargetLowering::LowerVECTOR_SHUFFLE(SDValue Op,
                                                SelectionDAG &DAG) const {
   SDLoc DL(Op);
@@ -1135,6 +1155,31 @@ WebAssemblyTargetLowering::LowerAccessVectorElement(SDValue Op,
     return SDValue();
 }
 
+static SDValue UnrollVectorShift(SDValue Op, SelectionDAG &DAG) {
+  EVT LaneT = Op.getSimpleValueType().getVectorElementType();
+  // 32-bit and 64-bit unrolled shifts will have proper semantics
+  if (LaneT.bitsGE(MVT::i32))
+    return DAG.UnrollVectorOp(Op.getNode());
+  // Otherwise mask the shift value to get proper semantics from 32-bit shift
+  SDLoc DL(Op);
+  SDValue ShiftVal = Op.getOperand(1);
+  uint64_t MaskVal = LaneT.getSizeInBits() - 1;
+  SDValue MaskedShiftVal = DAG.getNode(
+      ISD::AND,                    // mask opcode
+      DL, ShiftVal.getValueType(), // masked value type
+      ShiftVal,                    // original shift value operand
+      DAG.getConstant(MaskVal, DL, ShiftVal.getValueType()) // mask operand
+  );
+
+  return DAG.UnrollVectorOp(
+      DAG.getNode(Op.getOpcode(),        // original shift opcode
+                  DL, Op.getValueType(), // original return type
+                  Op.getOperand(0),      // original vector operand,
+                  MaskedShiftVal         // new masked shift value operand
+                  )
+          .getNode());
+}
+
 SDValue WebAssemblyTargetLowering::LowerShift(SDValue Op,
                                               SelectionDAG &DAG) const {
   SDLoc DL(Op);
@@ -1142,12 +1187,17 @@ SDValue WebAssemblyTargetLowering::LowerShift(SDValue Op,
   // Only manually lower vector shifts
   assert(Op.getSimpleValueType().isVector());
 
+  // Expand all vector shifts until V8 fixes its implementation
+  // TODO: remove this once V8 is fixed
+  if (!Subtarget->hasUnimplementedSIMD128())
+    return UnrollVectorShift(Op, DAG);
+
   // Unroll non-splat vector shifts
   BuildVectorSDNode *ShiftVec;
   SDValue SplatVal;
   if (!(ShiftVec = dyn_cast<BuildVectorSDNode>(Op.getOperand(1).getNode())) ||
       !(SplatVal = ShiftVec->getSplatValue()))
-    return DAG.UnrollVectorOp(Op.getNode());
+    return UnrollVectorShift(Op, DAG);
 
   // All splats except i64x2 const splats are handled by patterns
   ConstantSDNode *SplatConst = dyn_cast<ConstantSDNode>(SplatVal);

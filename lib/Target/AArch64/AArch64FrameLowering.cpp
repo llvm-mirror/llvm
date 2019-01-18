@@ -816,10 +816,21 @@ void AArch64FrameLowering::emitPrologue(MachineFunction &MF,
   DebugLoc DL;
 
   if (ShouldSignReturnAddress(MF)) {
-    BuildMI(
-        MBB, MBBI, DL,
-        TII->get(ShouldSignWithAKey(MF) ? AArch64::PACIASP : AArch64::PACIBSP))
-        .setMIFlag(MachineInstr::FrameSetup);
+    if (ShouldSignWithAKey(MF))
+      BuildMI(MBB, MBBI, DL, TII->get(AArch64::PACIASP))
+          .setMIFlag(MachineInstr::FrameSetup);
+    else {
+      BuildMI(MBB, MBBI, DL, TII->get(AArch64::EMITBKEY))
+          .setMIFlag(MachineInstr::FrameSetup);
+      BuildMI(MBB, MBBI, DL, TII->get(AArch64::PACIBSP))
+          .setMIFlag(MachineInstr::FrameSetup);
+    }
+
+    unsigned CFIIndex =
+        MF.addFrameInst(MCCFIInstruction::createNegateRAState(nullptr));
+    BuildMI(MBB, MBBI, DL, TII->get(TargetOpcode::CFI_INSTRUCTION))
+        .addCFIIndex(CFIIndex)
+        .setMIFlags(MachineInstr::FrameSetup);
   }
 
   // All calls are tail calls in GHC calling conv, and functions have no

@@ -537,7 +537,8 @@ Error OrcI386::emitIndirectStubsBlock(IndirectStubsInfo &StubsInfo,
   return Error::success();
 }
 
-void OrcMips32_Base::writeResolverCode(uint8_t *ResolverMem, JITReentryFn ReentryFn,
+void OrcMips32_Base::writeResolverCode(uint8_t *ResolverMem,
+                                       JITReentryFn ReentryFn,
                                        void *CallbackMgr, bool isBigEndian) {
 
   const uint32_t ResolverCode[] = {
@@ -604,51 +605,42 @@ void OrcMips32_Base::writeResolverCode(uint8_t *ResolverMem, JITReentryFn Reentr
       0x8fb1001c,                    // 0xd4: lw $s1,28($sp)
       0x8fb00018,                    // 0xd8: lw $s0,24($sp)
       0x8fa70014,                    // 0xdc: lw $a3,20($sp)
-      0x8fa70014,                    // 0xe0: lw $a3,20($sp)
-      0x8fa60010,                    // 0xe4: lw $a2,16($sp)
-      0x8fa5000c,                    // 0xe8: lw $a1,12($sp)
-      0x8fa40008,                    // 0xec: lw $a0,8($sp)
-      0x27bd0068,                    // 0xf4: addiu $sp,$sp,104
-      0x0300f825,                    // 0xf8: move $ra, $t8
-      0x00000000                     // 0xfc: jr $v0/v1
+      0x8fa60010,                    // 0xe0: lw $a2,16($sp)
+      0x8fa5000c,                    // 0xe4: lw $a1,12($sp)
+      0x8fa40008,                    // 0xe8: lw $a0,8($sp)
+      0x27bd0068,                    // 0xec: addiu $sp,$sp,104
+      0x0300f825,                    // 0xf0: move $ra, $t8
+      0x03200008,                    // 0xf4: jr $t9
+      0x00000000,                    // 0xf8: move $t9, $v0/v1
   };
 
-
-  const unsigned ReentryFnAddrOffset = 0x7c;  // JIT re-entry fn addr lui
+  const unsigned ReentryFnAddrOffset = 0x7c;   // JIT re-entry fn addr lui
   const unsigned CallbackMgrAddrOffset = 0x6c; // Callback manager addr lui
-  const unsigned offsett = 0xfc;
+  const unsigned Offsett = 0xf8;
 
   memcpy(ResolverMem, ResolverCode, sizeof(ResolverCode));
 
-  //Depending on endian return value will be in v0 or v1.
-  uint32_t JumpV0 = 0x00400008;
-  uint32_t JumpV1 = 0x00600008;
-
-  if(isBigEndian == true)
-     memcpy(ResolverMem + offsett, &JumpV1,
-         sizeof(JumpV1));
-  else
-     memcpy(ResolverMem + offsett, &JumpV0,
-         sizeof(JumpV0));
+  // Depending on endian return value will be in v0 or v1.
+  uint32_t MoveVxT9 = isBigEndian ? 0x0060c825 : 0x0040c825;
+  memcpy(ResolverMem + Offsett, &MoveVxT9, sizeof(MoveVxT9));
 
   uint64_t CallMgrAddr = reinterpret_cast<uint64_t>(CallbackMgr);
   uint32_t CallMgrLUi = 0x3c040000 | (((CallMgrAddr + 0x8000) >> 16) & 0xFFFF);
   uint32_t CallMgrADDiu = 0x24840000 | ((CallMgrAddr) & 0xFFFF);
-  memcpy(ResolverMem + CallbackMgrAddrOffset, &CallMgrLUi,
-         sizeof(CallMgrLUi));
-  memcpy(ResolverMem + (CallbackMgrAddrOffset + 4), &CallMgrADDiu,
+  memcpy(ResolverMem + CallbackMgrAddrOffset, &CallMgrLUi, sizeof(CallMgrLUi));
+  memcpy(ResolverMem + CallbackMgrAddrOffset + 4, &CallMgrADDiu,
          sizeof(CallMgrADDiu));
 
   uint64_t ReentryAddr = reinterpret_cast<uint64_t>(ReentryFn);
   uint32_t ReentryLUi = 0x3c190000 | (((ReentryAddr + 0x8000) >> 16) & 0xFFFF);
   uint32_t ReentryADDiu = 0x27390000 | ((ReentryAddr) & 0xFFFF);
-  memcpy(ResolverMem + ReentryFnAddrOffset, &ReentryLUi,
-         sizeof(ReentryLUi));
-  memcpy(ResolverMem + (ReentryFnAddrOffset + 4), &ReentryADDiu,
+  memcpy(ResolverMem + ReentryFnAddrOffset, &ReentryLUi, sizeof(ReentryLUi));
+  memcpy(ResolverMem + ReentryFnAddrOffset + 4, &ReentryADDiu,
          sizeof(ReentryADDiu));
 }
 
-void OrcMips32_Base::writeTrampolines(uint8_t *TrampolineMem, void *ResolverAddr,
+void OrcMips32_Base::writeTrampolines(uint8_t *TrampolineMem,
+                                      void *ResolverAddr,
                                       unsigned NumTrampolines) {
 
   uint32_t *Trampolines = reinterpret_cast<uint32_t *>(TrampolineMem);
@@ -662,7 +654,6 @@ void OrcMips32_Base::writeTrampolines(uint8_t *TrampolineMem, void *ResolverAddr
     Trampolines[5 * I + 3] = 0x0320f809;                           // jalr $t9
     Trampolines[5 * I + 4] = 0x00000000;                           // nop
   }
-
 }
 
 Error OrcMips32_Base::emitIndirectStubsBlock(IndirectStubsInfo &StubsInfo,
@@ -769,7 +760,7 @@ void OrcMips64::writeResolverCode(uint8_t *ResolverMem, JITReentryFn ReentryFn,
       0xffb700a8,                     // 0x58: sd s7,168(sp)
       0xffb800b0,                     // 0x5c: sd t8,176(sp)
       0xffb900b8,                     // 0x60: sd t9,184(sp)
-      0xffbe00c0,                     // 0x64: sd s8,192(sp)
+      0xffbe00c0,                     // 0x64: sd fp,192(sp)
       0xffbf00c8,                     // 0x68: sd ra,200(sp)
 
       // Callback manager addr.
@@ -793,7 +784,7 @@ void OrcMips64::writeResolverCode(uint8_t *ResolverMem, JITReentryFn ReentryFn,
       0x0320f809,                     // 0xa4: jalr $t9
       0x00000000,                     // 0xa8: nop
       0xdfbf00c8,                     // 0xac: ld ra, 200(sp)
-      0xdfbe00c0,                     // 0xb0: ld s8, 192(sp)
+      0xdfbe00c0,                     // 0xb0: ld fp, 192(sp)
       0xdfb900b8,                     // 0xb4: ld t9, 184(sp)
       0xdfb800b0,                     // 0xb8: ld t8, 176(sp)
       0xdfb700a8,                     // 0xbc: ld s7, 168(sp)
@@ -819,7 +810,8 @@ void OrcMips64::writeResolverCode(uint8_t *ResolverMem, JITReentryFn ReentryFn,
       0xdfa30008,                     // 0x10c: ld v1, 8(sp)
       0x67bd00d0,                     // 0x110: daddiu $sp,$sp,208
       0x0300f825,                     // 0x114: move $ra, $t8
-      0x00400008                      // 0x118: jr $v0
+      0x03200008,                     // 0x118: jr $t9
+      0x0040c825,                     // 0x11c: move $t9, $v0
   };
 
   const unsigned ReentryFnAddrOffset = 0x8c;   // JIT re-entry fn addr lui
@@ -827,21 +819,19 @@ void OrcMips64::writeResolverCode(uint8_t *ResolverMem, JITReentryFn ReentryFn,
 
   memcpy(ResolverMem, ResolverCode, sizeof(ResolverCode));
 
-
   uint64_t CallMgrAddr = reinterpret_cast<uint64_t>(CallbackMgr);
 
   uint32_t CallMgrLUi =
       0x3c040000 | (((CallMgrAddr + 0x800080008000) >> 48) & 0xFFFF);
   uint32_t CallMgrDADDiu =
-      0x64840000 | (((CallMgrAddr + 0x80008000)  >> 32) & 0xFFFF);
+      0x64840000 | (((CallMgrAddr + 0x80008000) >> 32) & 0xFFFF);
   uint32_t CallMgrDSLL = 0x00042438;
   uint32_t CallMgrDADDiu2 =
       0x64840000 | ((((CallMgrAddr + 0x8000) >> 16) & 0xFFFF));
   uint32_t CallMgrDSLL2 = 0x00042438;
-  uint32_t CallMgrDADDiu3 = 0x64840000 | ((CallMgrAddr) & 0xFFFF);
+  uint32_t CallMgrDADDiu3 = 0x64840000 | ((CallMgrAddr)&0xFFFF);
 
-  memcpy(ResolverMem + CallbackMgrAddrOffset, &CallMgrLUi,
-         sizeof(CallMgrLUi));
+  memcpy(ResolverMem + CallbackMgrAddrOffset, &CallMgrLUi, sizeof(CallMgrLUi));
   memcpy(ResolverMem + (CallbackMgrAddrOffset + 4), &CallMgrDADDiu,
          sizeof(CallMgrDADDiu));
   memcpy(ResolverMem + (CallbackMgrAddrOffset + 8), &CallMgrDSLL,
@@ -868,10 +858,9 @@ void OrcMips64::writeResolverCode(uint8_t *ResolverMem, JITReentryFn ReentryFn,
 
   uint32_t ReentryDSLL2 = 0x0019cc38;
 
-  uint32_t ReentryDADDiu3 = 0x67390000 | ((ReentryAddr) & 0xFFFF);
+  uint32_t ReentryDADDiu3 = 0x67390000 | ((ReentryAddr)&0xFFFF);
 
-  memcpy(ResolverMem + ReentryFnAddrOffset, &ReentryLUi,
-         sizeof(ReentryLUi));
+  memcpy(ResolverMem + ReentryFnAddrOffset, &ReentryLUi, sizeof(ReentryLUi));
   memcpy(ResolverMem + (ReentryFnAddrOffset + 4), &ReentryDADDiu,
          sizeof(ReentryDADDiu));
   memcpy(ResolverMem + (ReentryFnAddrOffset + 8), &ReentryDSLL,
@@ -906,7 +895,6 @@ void OrcMips64::writeTrampolines(uint8_t *TrampolineMem, void *ResolverAddr,
     Trampolines[10 * I + 8] = 0x00000000;                            // nop
     Trampolines[10 * I + 9] = 0x00000000;                            // nop
   }
-
 }
 
 Error OrcMips64::emitIndirectStubsBlock(IndirectStubsInfo &StubsInfo,

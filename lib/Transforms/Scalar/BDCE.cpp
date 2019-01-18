@@ -96,30 +96,41 @@ static bool bitTrackingDCE(Function &F, DemandedBits &DB) {
     if (I.mayHaveSideEffects() && I.use_empty())
       continue;
 
-    if (I.getType()->isIntOrIntVectorTy() &&
-        !DB.getDemandedBits(&I).getBoolValue()) {
-      // For live instructions that have all dead bits, first make them dead by
-      // replacing all uses with something else. Then, if they don't need to
-      // remain live (because they have side effects, etc.) we can remove them.
-      LLVM_DEBUG(dbgs() << "BDCE: Trivializing: " << I << " (all bits dead)\n");
+    // Remove instructions that are dead, either because they were not reached
+    // during analysis or have no demanded bits.
+    if (DB.isInstructionDead(&I) ||
+        (I.getType()->isIntOrIntVectorTy() &&
+         DB.getDemandedBits(&I).isNullValue() &&
+         wouldInstructionBeTriviallyDead(&I))) {
+      salvageDebugInfo(I);
+      Worklist.push_back(&I);
+      I.dropAllReferences();
+      Changed = true;
+      continue;
+    }
+
+    for (Use &U : I.operands()) {
+      // DemandedBits only detects dead integer uses.
+      if (!U->getType()->isIntOrIntVectorTy())
+        continue;
+
+      if (!isa<Instruction>(U) && !isa<Argument>(U))
+        continue;
+
+      if (!DB.isUseDead(&U))
+        continue;
+
+      LLVM_DEBUG(dbgs() << "BDCE: Trivializing: " << U << " (all bits dead)\n");
 
       clearAssumptionsOfUsers(&I, DB);
 
       // FIXME: In theory we could substitute undef here instead of zero.
       // This should be reconsidered once we settle on the semantics of
       // undef, poison, etc.
-      Value *Zero = ConstantInt::get(I.getType(), 0);
+      U.set(ConstantInt::get(U->getType(), 0));
       ++NumSimplified;
-      I.replaceNonMetadataUsesWith(Zero);
       Changed = true;
     }
-    if (!DB.isInstructionDead(&I))
-      continue;
-
-    salvageDebugInfo(I);
-    Worklist.push_back(&I);
-    I.dropAllReferences();
-    Changed = true;
   }
 
   for (Instruction *&I : Worklist) {
